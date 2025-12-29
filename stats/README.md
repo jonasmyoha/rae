@@ -8,7 +8,7 @@ Current files:
 
 ## Updating metrics
 
-Run the stats tool from the repo root before each commit (after builds/tests) to append a fresh data point:
+Run the stats tool from the repo root before each commit (after builds/tests) to append a fresh data point (it only writes when file/line counts change):
 
 ```bash
 ./tools/stats/update_metrics.sh
