@@ -7,6 +7,7 @@ export type RaeDevtoolsConfig = {
   testCommand: string;
   cleanCommand: string;
   port: number;
+  testsPath?: string;
 };
 
 const DEFAULT_CONFIG: RaeDevtoolsConfig = {
@@ -14,7 +15,8 @@ const DEFAULT_CONFIG: RaeDevtoolsConfig = {
   buildCommand: "make",
   testCommand: "make test",
   cleanCommand: "make clean",
-  port: 3000
+  port: 3000,
+  testsPath: "compiler/tests"
 };
 
 const PROJECT_ROOT = path.resolve(process.cwd());
@@ -46,4 +48,12 @@ export async function loadConfig(customPath?: string): Promise<RaeDevtoolsConfig
 
 export function getProjectRoot(): string {
   return PROJECT_ROOT;
+}
+
+export function resolveCompilerPath(config: RaeDevtoolsConfig, ...segments: string[]): string {
+  return path.resolve(process.cwd(), config.compilerPath, ...segments);
+}
+
+export function getTestsRoot(config: RaeDevtoolsConfig): string {
+  return resolveCompilerPath(config, config.testsPath ?? "tests");
 }

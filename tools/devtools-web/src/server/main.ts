@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { Buffer } from "node:buffer";
-import { loadConfig } from "./config";
+import { getTestsRoot, loadConfig } from "./config";
 import type { ClientEvent, ServerEvent } from "../shared/types";
 import { TestRunner } from "./tests";
 import { BuildRunner } from "./build";
 import { StatsStore } from "./stats";
+import { readTestTree, readTestFile } from "./testFiles";
 
 type SocketData = {
   id: string;
@@ -20,6 +21,7 @@ const BUILD_VERSION = randomUUID();
 const statsStore = new StatsStore();
 const testRunner = new TestRunner(CONFIG, broadcastEvent, statsStore);
 const buildRunner = new BuildRunner(CONFIG, broadcastEvent, statsStore);
+const testsRoot = getTestsRoot(CONFIG);
 
 const server = Bun.serve<SocketData>({
   port: CONFIG.port,
@@ -60,6 +62,32 @@ const server = Bun.serve<SocketData>({
       return new Response(JSON.stringify({ metric, data }), {
         headers: { "Content-Type": "application/json" }
       });
+    }
+
+    if (url.pathname === "/api/tests/files" && req.method === "GET") {
+      const tree = await readTestTree(testsRoot, 4);
+      return new Response(JSON.stringify({ root: CONFIG.testsPath ?? "tests", tree }), {
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    if (url.pathname === "/api/tests/source" && req.method === "GET") {
+      const relativePath = url.searchParams.get("path");
+      if (!relativePath) {
+        return new Response(JSON.stringify({ error: "Missing path" }), { status: 400 });
+      }
+      try {
+        const contents = await readTestFile(testsRoot, relativePath);
+        return new Response(
+          JSON.stringify({
+            path: relativePath,
+            contents
+          }),
+          { headers: { "Content-Type": "application/json" } }
+        );
+      } catch (error) {
+        return new Response(JSON.stringify({ error: "Unable to read file" }), { status: 400 });
+      }
     }
 
     return serveStaticFile(url);

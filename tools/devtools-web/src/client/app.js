@@ -1,3 +1,5 @@
+import { loadRaeSyntax } from "./raeSyntax";
+
 const statusFeed = document.getElementById("status-feed");
 const connectionStatus = document.getElementById("connection-status");
 const heartbeatStatus = document.getElementById("heartbeat-status");
@@ -18,6 +20,10 @@ const testDetail = document.getElementById("test-detail");
 const statsMetricSelect = document.getElementById("stats-metric-select");
 const statsRefreshBtn = document.getElementById("stats-refresh-btn");
 const statsList = document.getElementById("stats-list");
+const testFileTree = document.getElementById("test-file-tree");
+const testSourceTitle = document.getElementById("test-source-title");
+const testSourceCode = document.getElementById("test-source-code");
+const copyTestSourceBtn = document.getElementById("copy-test-source-btn");
 const buildBtn = document.getElementById("build-btn");
 const cleanBtn = document.getElementById("clean-btn");
 const rebuildBtn = document.getElementById("rebuild-btn");
@@ -32,6 +38,10 @@ let testCases = new Map();
 let summaryCounts = { passed: 0, failed: 0 };
 let selectedTestName = null;
 let currentStatsMetric = statsMetricSelect?.value ?? "tests.duration_ms";
+let testFilesTree = [];
+let selectedTestFile = null;
+let selectedTestSource = "";
+let raeSyntax = null;
 
 const HEARTBEAT_STALE_MS = 60000;
 
@@ -200,6 +210,14 @@ statsMetricSelect?.addEventListener("change", () => {
 });
 
 refreshStats();
+loadRaeSyntax("/rae_syntax.json")
+  .then((syntax) => {
+    raeSyntax = syntax;
+  })
+  .catch((error) => {
+    console.warn("Failed to load Rae syntax summary", error);
+  })
+  .finally(() => loadTestFileTree());
 
 function requestTestRun(mode = "all") {
   if (!socket || socket.readyState !== WebSocket.OPEN) {
@@ -396,6 +414,8 @@ setupCopyButton(copyNextStepsBtn, () => {
     .map((item, index) => `${index + 1}. ${item.textContent?.trim() ?? ""}`)
     .join("\n");
 });
+
+setupCopyButton(copyTestSourceBtn, () => selectedTestSource || "No test source selected.");
 
 function setupCopyButton(button, getText) {
   if (!button) return;
@@ -661,6 +681,137 @@ function formatMetricStatus(metadata = {}) {
     return metadata.success ? "Success" : "Failed";
   }
   return "Recorded";
+}
+
+async function loadTestFileTree() {
+  if (!testFileTree) return;
+  testFileTree.innerHTML = `<p class="test-list-empty">Loading test files…</p>`;
+  try {
+    const response = await fetch("/api/tests/files");
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    testFilesTree = data.tree ?? [];
+    renderTestFileTree();
+  } catch (error) {
+    console.error("Failed to load test files", error);
+    testFileTree.innerHTML = `<p class="test-list-empty">Unable to load test files.</p>`;
+  }
+}
+
+function renderTestFileTree() {
+  if (!testFileTree) return;
+  if (!testFilesTree.length) {
+    testFileTree.innerHTML = `<p class="test-list-empty">No test files found.</p>`;
+    return;
+  }
+
+  const list = document.createElement("ul");
+  testFilesTree.forEach((node) => {
+    list.appendChild(renderTreeNode(node));
+  });
+  testFileTree.innerHTML = "";
+  testFileTree.appendChild(list);
+}
+
+function renderTreeNode(node) {
+  const li = document.createElement("li");
+  if (node.type === "directory" && node.children?.length) {
+    const label = document.createElement("div");
+    label.textContent = node.name;
+    label.className = "source-tree-label";
+    li.appendChild(label);
+    const ul = document.createElement("ul");
+    node.children.forEach((child) => {
+      ul.appendChild(renderTreeNode(child));
+    });
+    li.appendChild(ul);
+  } else if (node.type === "file") {
+    const button = document.createElement("button");
+    button.textContent = node.name;
+    if (selectedTestFile === node.path) {
+      button.classList.add("is-active");
+    }
+    button.addEventListener("click", () => {
+      selectedTestFile = node.path;
+      renderTestFileTree();
+      loadTestSource(node.path);
+    });
+    li.appendChild(button);
+  }
+  return li;
+}
+
+async function loadTestSource(path) {
+  if (!testSourceCode) return;
+  testSourceTitle.textContent = path;
+  testSourceCode.innerHTML = "<code>Loading source…</code>";
+  try {
+    const response = await fetch(`/api/tests/source?path=${encodeURIComponent(path)}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    selectedTestSource = data.contents ?? "";
+    renderTestSource();
+  } catch (error) {
+    console.error("Failed to load test source", error);
+    selectedTestSource = "";
+    testSourceCode.innerHTML = "<code>Failed to load file.</code>";
+  }
+}
+
+function renderTestSource() {
+  if (!testSourceCode) return;
+  if (!selectedTestSource) {
+    testSourceCode.innerHTML = "<code>No file selected.</code>";
+    return;
+  }
+  const highlighted = highlightRae(selectedTestSource);
+  testSourceCode.innerHTML = `<code>${highlighted}</code>`;
+}
+
+function escapeHtml(text) {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function highlightRae(code) {
+  const escaped = escapeHtml(code);
+  if (!raeSyntax) {
+    return escaped;
+  }
+  const keywords = raeSyntax.keywords?.join("|") ?? "";
+  const keywordRegex = new RegExp(`\\b(${keywords})\\b`, "g");
+  const commentLine = raeSyntax.comments?.line
+    ? new RegExp(`${escapeRegex(raeSyntax.comments.line)}.*`, "gm")
+    : /#.*$/gm;
+  const commentBlock =
+    raeSyntax.comments?.block_start && raeSyntax.comments?.block_end
+      ? new RegExp(
+          `${escapeRegex(raeSyntax.comments.block_start)}[\\s\\S]*?${escapeRegex(
+            raeSyntax.comments.block_end
+          )}`,
+          "gm"
+        )
+      : null;
+
+  let result = escaped.replace(commentLine, '<span class="tok-comment">$&</span>');
+  if (commentBlock) {
+    result = result.replace(commentBlock, '<span class="tok-comment">$&</span>');
+  }
+
+  result = result
+    .replace(/("(?:\\.|[^"])*")/g, '<span class="tok-string">$1</span>')
+    .replace(/'(?:\\.|[^'])*'/g, "<span class=\"tok-string\">$&</span>")
+    .replace(/\b(\d+(\.\d+)?)/g, '<span class="tok-number">$1</span>')
+    .replace(keywordRegex, '<span class="tok-keyword">$1</span>');
+
+  return result;
+}
+
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 function setBuildStatus(label, modifierClass) {
   buildStatusChip.textContent = label;
