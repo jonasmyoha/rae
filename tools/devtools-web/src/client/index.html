@@ -15,6 +15,20 @@
       <div class="status-group">
         <div class="status-pill connection-indicator" id="connection-status">Connecting…</div>
         <div class="status-pill heartbeat-indicator" id="heartbeat-status">Heartbeat: waiting…</div>
+        <button
+          class="error-indicator"
+          id="error-indicator"
+          type="button"
+          title="Open error log"
+          aria-label="Open error log"
+        >
+          <svg aria-hidden="true" viewBox="0 0 24 24" role="img">
+            <path
+              d="M12 2a1 1 0 0 1 .88.53l9 16A1 1 0 0 1 21 20H3a1 1 0 0 1-.88-1.47l9-16A1 1 0 0 1 12 2zm0 3.46L4.74 18h14.52zM11 9h2v5h-2zm0 6h2v2h-2z"
+            ></path>
+          </svg>
+          <span class="error-indicator__count" id="error-count">0</span>
+        </button>
       </div>
     </header>
     <main class="app-main">
@@ -203,6 +217,23 @@
         </div>
       </section>
     </main>
+
+    <div class="error-modal" id="error-log-modal" aria-hidden="true">
+      <div class="error-modal__backdrop" id="error-log-backdrop"></div>
+      <div class="error-modal__panel" role="dialog" aria-labelledby="error-log-title">
+        <header class="error-modal__header">
+          <div>
+            <h3 id="error-log-title">Error log</h3>
+            <p class="error-modal__subtitle">Recent issues captured in the dashboard</p>
+          </div>
+          <button id="error-log-close" class="error-modal__close" type="button" aria-label="Close error log">
+            Close
+          </button>
+        </header>
+        <ul class="error-log-list" id="error-log-list"></ul>
+        <p class="error-log-empty" id="error-log-empty">No errors recorded.</p>
+      </div>
+    </div>
 
     <script type="module" src="./app.js"></script>
     <link rel="preload" href="/rae_syntax.json" as="fetch" type="application/json" crossorigin="anonymous" />
