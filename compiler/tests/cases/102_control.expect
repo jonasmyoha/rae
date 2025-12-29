@@ -1,0 +1,15 @@
+MODULE
+  func classify
+    param n: Int
+    return result: String
+    body
+      if (n < 0)
+        then
+          ret result: "negative"
+        else
+          match n
+            case 0
+              ret result: "zero"
+            case _
+              expr (spawn heavyWork(id: n))
+              ret result: "positive"

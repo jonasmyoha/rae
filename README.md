@@ -1,2 +1,28 @@
-# rae
-A programming language focused on explicit ownership and natural syntax
+# Rae Programming Language
+
+A programming language focused on explicit ownership semantics and natural syntax.
+
+## Project Structure
+
+- `compiler/` - The Rae compiler (C11 implementation)
+- `spec/` - Language specification
+- `examples/` - Example Rae programs
+- `docs/` - Documentation
+
+## Quick Start
+
+```bash
+cd compiler
+make build
+make test
+```
+
+## Status
+
+**Phase 1 (MVP):** Lexer, parser, AST, pretty-printer ✅ In Progress
+
+See `spec/rae.md` for language details.
+
+## License
+
+MIT
