@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Rae DevTools Dashboard</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <h1>Rae Compiler DevTools</h1>
+        <p class="tagline">Early preview – wiring up server, tests, and stats</p>
+      </div>
+      <div class="status-group">
+        <div class="status-pill connection-indicator" id="connection-status">Connecting…</div>
+        <div class="status-pill heartbeat-indicator" id="heartbeat-status">Heartbeat: waiting…</div>
+      </div>
+    </header>
+    <main class="app-main">
+      <section class="panel">
+        <header>
+          <h2>Status Stream</h2>
+          <p class="panel-subtitle">Live events from the Bun server</p>
+        </header>
+        <div id="status-feed" class="status-feed" aria-live="polite"></div>
+      </section>
+      <section class="panel instructions">
+        <header>
+          <h2>Next Steps</h2>
+        </header>
+        <ol>
+          <li>Implement this dashboard's compiler test runner and stream individual test events.</li>
+          <li>Hook up dashboard build controls (build, clean, rebuild).</li>
+          <li>Persist dashboard stats into <code>data/devtools.db</code> via SQLite.</li>
+        </ol>
+        <p class="hint">
+          Keyboard shortcuts, diff viewer, and Codex integration will land after the core
+          build/test flows are operational.
+        </p>
+      </section>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
