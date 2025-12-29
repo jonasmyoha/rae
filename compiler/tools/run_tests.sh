@@ -51,6 +51,26 @@ for TEST_FILE in $TEST_FILES; do
   EXPECTED_OUTPUT=$(cat "$EXPECT_FILE")
   
   if [ "$ACTUAL_OUTPUT" = "$EXPECTED_OUTPUT" ]; then
+    if [ "$CMD" = "format" ]; then
+      IDEMP_OUTPUT=$("$BIN" "$CMD" "$EXPECT_FILE" 2>&1 || true)
+      if [ "$IDEMP_OUTPUT" != "$EXPECTED_OUTPUT" ]; then
+        echo "FAIL: $TEST_NAME (format not idempotent)"
+        echo "  Expected canonical output to remain unchanged when formatting .expect file"
+        ((FAILED++))
+        continue
+      fi
+      AST_ORIG=$("$BIN" parse "$TEST_FILE" 2>&1 || true)
+      AST_FORMATTED=$("$BIN" parse "$EXPECT_FILE" 2>&1 || true)
+      if [ "$AST_ORIG" != "$AST_FORMATTED" ]; then
+        echo "FAIL: $TEST_NAME (AST mismatch after formatting)"
+        echo "  Original AST:"
+        echo "$AST_ORIG" | sed 's/^/    /'
+        echo "  Formatted AST:"
+        echo "$AST_FORMATTED" | sed 's/^/    /'
+        ((FAILED++))
+        continue
+      fi
+    fi
     echo "PASS: $TEST_NAME"
     ((PASSED++))
   else
