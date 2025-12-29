@@ -29,14 +29,60 @@ if [ "$FILE_COUNT" -eq 0 ]; then
   exit 1
 fi
 
+CURRENT_COMMIT="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || echo "none")"
+
+DECISION="$(NEW_FILE_COUNT=$FILE_COUNT NEW_LINE_COUNT=$LINE_COUNT CURRENT_COMMIT="$CURRENT_COMMIT" METRICS_FILE="$METRICS_FILE" python3 - <<'PY'
+import json, os, sys
+path = os.environ["METRICS_FILE"]
+new_files = int(os.environ["NEW_FILE_COUNT"])
+new_lines = int(os.environ["NEW_LINE_COUNT"])
+new_commit = os.environ["CURRENT_COMMIT"]
+try:
+    with open(path, "r", encoding="utf-8") as fh:
+        lines = [line.strip() for line in fh if line.strip()]
+except FileNotFoundError:
+    print("append")
+    sys.exit(0)
+if not lines:
+    print("append")
+    sys.exit(0)
+try:
+    data = json.loads(lines[-1])
+except json.JSONDecodeError:
+    print("append")
+    sys.exit(0)
+if data.get("src_file_count") == new_files and data.get("src_line_count") == new_lines:
+    last_commit = data.get("commit", "")
+    if last_commit and last_commit == new_commit:
+        message = f"Compiler metrics unchanged for commit {new_commit}; skipping update."
+    else:
+        message = "Compiler metrics unchanged; skipping update."
+    print("skip")
+    print(message)
+else:
+    print("append")
+PY
+)"
+
+IFS=$'\n' read -r DECISION_CODE DECISION_MSG <<<"$DECISION"
+if [ "$DECISION_CODE" = "skip" ]; then
+  if [ -n "$DECISION_MSG" ]; then
+    echo "$DECISION_MSG"
+  else
+    echo "Compiler metrics unchanged; skipping update."
+  fi
+  exit 0
+fi
+
 TIMESTAMP="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 mkdir -p "$STATS_DIR"
-JSON_ENTRY=$(printf '{"timestamp":"%s","src_file_count":%d,"src_line_count":%d}' "$TIMESTAMP" "$FILE_COUNT" "$LINE_COUNT")
+JSON_ENTRY=$(printf '{"timestamp":"%s","commit":"%s","src_file_count":%d,"src_line_count":%d}' "$TIMESTAMP" "$CURRENT_COMMIT" "$FILE_COUNT" "$LINE_COUNT")
 echo "$JSON_ENTRY" >> "$METRICS_FILE"
 
 cat > "$LATEST_FILE" <<NOTE
 Rae compiler metrics
 Timestamp: $TIMESTAMP
+Commit: $CURRENT_COMMIT
 Source directory: $SRC_DIR
 Source files (.c/.h): $FILE_COUNT
 Total lines: $LINE_COUNT
