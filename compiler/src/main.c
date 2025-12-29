@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdbool.h>
+#include <errno.h>
 #include "arena.h"
 #include "str.h"
 #include "diag.h"
@@ -10,6 +12,56 @@
 #include "parser.h"
 #include "ast.h"
 #include "pretty.h"
+
+typedef struct {
+  const char* input_path;
+  const char* output_path;
+  bool write_in_place;
+} FormatOptions;
+
+static void format_options_init(FormatOptions* opts) {
+  opts->input_path = NULL;
+  opts->output_path = NULL;
+  opts->write_in_place = false;
+}
+
+static bool parse_format_args(int argc, char** argv, FormatOptions* opts) {
+  format_options_init(opts);
+  int i = 0;
+  while (i < argc) {
+    const char* arg = argv[i];
+    if (strcmp(arg, "--write") == 0 || strcmp(arg, "-w") == 0) {
+      opts->write_in_place = true;
+      i += 1;
+    } else if (strcmp(arg, "-o") == 0 || strcmp(arg, "--output") == 0) {
+      if (i + 1 >= argc) {
+        fprintf(stderr, "error: %s expects a file path\n", arg);
+        return false;
+      }
+      opts->output_path = argv[i + 1];
+      i += 2;
+    } else if (arg[0] == '-') {
+      fprintf(stderr, "error: unknown format option '%s'\n", arg);
+      return false;
+    } else {
+      if (opts->input_path) {
+        fprintf(stderr, "error: multiple input files provided ('%s' and '%s')\n", opts->input_path, arg);
+        return false;
+      }
+      opts->input_path = arg;
+      i += 1;
+    }
+  }
+  if (!opts->input_path) {
+    fprintf(stderr, "error: format command requires a file argument\n");
+    return false;
+  }
+  if (opts->write_in_place && opts->output_path) {
+    fprintf(stderr, "error: --write and --output cannot be used together\n");
+    return false;
+  }
+  return true;
+}
 
 static void print_usage(const char* prog) {
   fprintf(stderr, "Usage: %s <command> <file>\n", prog);
@@ -29,39 +81,65 @@ static void dump_tokens(const TokenList* tokens) {
   }
 }
 
-static int run_command(const char* cmd, const char* file_path) {
+static int run_command(const char* cmd, int argc, char** argv) {
   size_t file_size = 0;
-  char* source = read_file(file_path, &file_size);
-  if (!source) {
-    fprintf(stderr, "error: could not read file '%s'\n", file_path);
-    return 1;
-  }
+  char* source = NULL;
+  Arena* arena = NULL;
 
-  Arena* arena = arena_create(1024 * 1024);
-  if (!arena) {
-    free(source);
-    diag_fatal("could not allocate arena");
-  }
+  if (strcmp(cmd, "lex") == 0 || strcmp(cmd, "parse") == 0 || strcmp(cmd, "format") == 0) {
+    if (argc < 1) {
+      fprintf(stderr, "error: %s command requires a file argument\n", cmd);
+      print_usage(argv[-1]);
+      return 1;
+    }
+    const char* file_path = argv[0];
+    source = read_file(file_path, &file_size);
+    if (!source) {
+      fprintf(stderr, "error: could not read file '%s'\n", file_path);
+      return 1;
+    }
+    arena = arena_create(1024 * 1024);
+    if (!arena) {
+      free(source);
+      diag_fatal("could not allocate arena");
+    }
+    TokenList tokens = lexer_tokenize(arena, file_path, source, file_size);
 
-  TokenList tokens = lexer_tokenize(arena, file_path, source, file_size);
-
-  if (strcmp(cmd, "lex") == 0) {
-    dump_tokens(&tokens);
-  } else if (strcmp(cmd, "parse") == 0) {
-    AstModule* module = parse_module(arena, file_path, tokens);
-    ast_dump_module(module, stdout);
-  } else if (strcmp(cmd, "format") == 0) {
-    AstModule* module = parse_module(arena, file_path, tokens);
-    pretty_print_module(module, stdout);
-  } else {
-    fprintf(stderr, "error: unknown command '%s'\n", cmd);
+    if (strcmp(cmd, "lex") == 0) {
+      dump_tokens(&tokens);
+    } else if (strcmp(cmd, "parse") == 0) {
+      AstModule* module = parse_module(arena, file_path, tokens);
+      ast_dump_module(module, stdout);
+    } else if (strcmp(cmd, "format") == 0) {
+      FormatOptions opts;
+      if (!parse_format_args(argc, argv, &opts)) {
+        arena_destroy(arena);
+        free(source);
+        return 1;
+      }
+      AstModule* module = parse_module(arena, opts.input_path, tokens);
+      if (opts.write_in_place || opts.output_path) {
+        const char* output_path = opts.write_in_place ? opts.input_path : opts.output_path;
+        FILE* out = fopen(output_path, "w");
+        if (!out) {
+          fprintf(stderr, "error: could not open '%s' for writing: %s\n", output_path, strerror(errno));
+          arena_destroy(arena);
+          free(source);
+          return 1;
+        }
+        pretty_print_module(module, out);
+        fclose(out);
+      } else {
+        pretty_print_module(module, stdout);
+      }
+    }
     arena_destroy(arena);
     free(source);
+  } else {
+    fprintf(stderr, "error: unknown command '%s'\n", cmd);
+    print_usage(argv[-1]);
     return 1;
   }
-
-  arena_destroy(arena);
-  free(source);
   return 0;
 }
 
@@ -73,12 +151,7 @@ int main(int argc, char** argv) {
 
   const char* cmd = argv[1];
   if ((strcmp(cmd, "lex") == 0 || strcmp(cmd, "parse") == 0 || strcmp(cmd, "format") == 0)) {
-    if (argc < 3) {
-      fprintf(stderr, "error: %s command requires a file argument\n", cmd);
-      print_usage(argv[0]);
-      return 1;
-    }
-    return run_command(cmd, argv[2]);
+    return run_command(cmd, argc - 2, argv + 2);
   }
 
   fprintf(stderr, "error: unknown command '%s'\n", cmd);
