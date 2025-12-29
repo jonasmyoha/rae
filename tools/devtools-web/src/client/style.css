@@ -105,6 +105,25 @@ body {
   gap: 1rem;
 }
 
+.panel--full {
+  grid-column: 1 / -1;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .panel-subtitle {
   color: var(--text-muted);
   font-size: 0.9rem;
@@ -116,6 +135,161 @@ body {
   gap: 0.75rem;
   max-height: 420px;
   overflow-y: auto;
+}
+
+.test-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.test-controls button {
+  padding: 0.6rem 1rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--border);
+  background: rgba(125, 211, 252, 0.08);
+  color: var(--text);
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.2s, border 0.2s;
+}
+
+.test-controls button:hover:not(:disabled) {
+  background: rgba(125, 211, 252, 0.2);
+  transform: translateY(-1px);
+}
+
+.test-controls button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.test-controls .secondary {
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.copy-icon-btn {
+  position: absolute;
+  bottom: 0.75rem;
+  left: 0.75rem;
+}
+
+.test-status {
+  padding: 0.4rem 0.9rem;
+  border-radius: 999px;
+  border: 1px dashed var(--border);
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.test-status.is-running {
+  border-style: solid;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.test-status.is-success {
+  border-style: solid;
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.test-status.is-failure {
+  border-style: solid;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.terminal {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  background: #050607;
+  border-radius: 0.8rem;
+  border: 1px solid #0f1115;
+  padding: 1rem;
+  min-height: 220px;
+  max-height: 360px;
+  overflow-y: auto;
+  color: #d0d5e1;
+}
+
+.terminal-wrapper {
+  position: relative;
+  padding-bottom: 2rem;
+}
+
+.terminal-wrapper .copy-icon-btn {
+  bottom: -1.5rem;
+  left: 0;
+}
+
+.instructions {
+  position: relative;
+  padding-bottom: 3rem;
+}
+
+.copy-icon-btn {
+  position: absolute;
+  bottom: 0.5rem;
+  left: 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 0.6rem;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.2s, border 0.2s, transform 0.2s;
+  font-size: 0.9rem;
+}
+
+.copy-icon-btn::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: 120%;
+  left: 0;
+  background: rgba(15, 17, 23, 0.95);
+  color: var(--text);
+  padding: 0.2rem 0.5rem;
+  border-radius: 0.5rem;
+  font-size: 0.75rem;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(4px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.copy-icon-btn:hover::after,
+.copy-icon-btn.is-copied::after {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.copy-icon-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.copy-icon-btn.is-copied {
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.terminal-line {
+  white-space: pre-wrap;
+  margin-bottom: 0.25rem;
+}
+
+.terminal-line.stdout {
+  color: #c8d9ff;
+}
+
+.terminal-line.stderr {
+  color: #fca5a5;
 }
 
 .status-event {
@@ -160,8 +334,31 @@ body {
   }
 }
 
+.copy-anchor {
+  position: relative;
+  min-height: 32px;
+  margin-top: 1rem;
+  padding-left: 0.25rem;
+}
+
+.copy-anchor .copy-icon-btn {
+  position: relative;
+  left: 0;
+  bottom: 0;
+}
+
 @media (max-width: 960px) {
   .app-main {
     grid-template-columns: 1fr;
   }
+}
+.copy-icon-btn svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+.copy-icon-btn svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
 }

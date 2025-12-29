@@ -9,7 +9,7 @@
   <body>
     <header class="app-header">
       <div>
-        <h1>Rae Compiler DevTools</h1>
+        <h1>Rae compiler devtools</h1>
         <p class="tagline">Early preview – wiring up server, tests, and stats</p>
       </div>
       <div class="status-group">
@@ -18,19 +18,59 @@
       </div>
     </header>
     <main class="app-main">
+      <section class="panel panel--full" id="tests-panel">
+        <header class="panel-header">
+          <div>
+            <h2>Test runner</h2>
+            <p class="panel-subtitle">Run the Rae compiler test suite via this dashboard</p>
+          </div>
+          <div class="panel-actions">
+            <div class="test-status" id="test-status-chip">Idle</div>
+          </div>
+        </header>
+        <div class="test-controls">
+          <button id="run-tests-btn">Run all tests (Ctrl+T)</button>
+          <button id="run-failed-btn" class="secondary" disabled>Run failed (coming soon)</button>
+        </div>
+        <div class="terminal-wrapper">
+          <div class="terminal" id="test-log" aria-live="polite">
+            <div class="terminal-line">Waiting for first test run…</div>
+          </div>
+          <button
+            class="copy-icon-btn"
+            id="copy-test-log-btn"
+            type="button"
+            title="Copy test output"
+            aria-label="Copy test output"
+          >
+            <svg aria-hidden="true" viewBox="0 0 24 24" role="img">
+              <path
+                d="M16 1H4a3 3 0 0 0-3 3v12h2V4a1 1 0 0 1 1-1h12z"
+              ></path>
+              <path
+                d="M20 5H8a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3zm1 15a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1z"
+              ></path>
+            </svg>
+          </button>
+        </div>
+      </section>
       <section class="panel">
         <header>
-          <h2>Status Stream</h2>
+          <h2>Status stream</h2>
           <p class="panel-subtitle">Live events from the Bun server</p>
         </header>
         <div id="status-feed" class="status-feed" aria-live="polite"></div>
       </section>
-      <section class="panel instructions">
+      <section class="panel instructions" id="next-steps-panel">
         <header>
-          <h2>Next Steps</h2>
+          <div class="panel-header">
+            <div>
+              <h2>Next steps</h2>
+            </div>
+          </div>
         </header>
         <ol>
-          <li>Implement this dashboard's compiler test runner and stream individual test events.</li>
+          <li>Parse Rae test hierarchy for per-test status + diff views.</li>
           <li>Hook up dashboard build controls (build, clean, rebuild).</li>
           <li>Persist dashboard stats into <code>data/devtools.db</code> via SQLite.</li>
         </ol>
@@ -38,6 +78,24 @@
           Keyboard shortcuts, diff viewer, and Codex integration will land after the core
           build/test flows are operational.
         </p>
+        <div class="copy-anchor">
+          <button
+            class="copy-icon-btn"
+            id="copy-next-steps-btn"
+            type="button"
+            title="Copy next steps"
+            aria-label="Copy next steps"
+          >
+            <svg aria-hidden="true" viewBox="0 0 24 24" role="img">
+              <path
+                d="M16 1H4a3 3 0 0 0-3 3v12h2V4a1 1 0 0 1 1-1h12z"
+              ></path>
+              <path
+                d="M20 5H8a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3zm1 15a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1z"
+              ></path>
+            </svg>
+          </button>
+        </div>
       </section>
     </main>
 

@@ -41,7 +41,7 @@ Copy `config.example.json` to `config.json` at the repo root (or set equivalent 
 {
   "compilerPath": "../rae",
   "buildCommand": "make",
-  "testCommand": "make test",
+  "testCommand": "cd compiler && make test",
   "cleanCommand": "make clean",
   "port": 3000
 }
@@ -50,14 +50,21 @@ Copy `config.example.json` to `config.json` at the repo root (or set equivalent 
 ### Run the Dashboard
 
 ```bash
-# Development build with live reload
+# Development server with auto-restart + client reload
 bun run dev
 
 # Production build (if/when a bundle step exists)
 bun run start
 ```
 
-The server exposes both HTTP and WebSocket endpoints; open `http://localhost:3000` in a browser.
+`bun run dev` launches a small watcher that restarts the Bun server whenever files under `src/`, `config.json`, or `package.json` change. The browser auto-reloads after each restart, so you rarely need to refresh manually. The server exposes both HTTP and WebSocket endpoints; open `http://localhost:3000` in a browser.
+
+### Use the Inline Test Runner
+
+- Click **Run all tests** (or press `Ctrl+T`/`Cmd+T`) inside the dashboard to execute the configured test command from `config.json`. Be sure to set `testCommand` to a real script (current default assumes `cd compiler && make test`; adjust if your workflow differs).
+- Live stdout/stderr output appears in the terminal panel; the run status chip flips to **Passed**/**Failed** when complete.
+- "Run Failed" is stubbed today and will be wired up once we can parse per-test metadata from the Rae suite.
+- The browser auto-reloads whenever the Bun dev server restarts, so you rarely need to manually refresh during local development.
 
 ## Core Features
 
