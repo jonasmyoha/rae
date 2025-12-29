@@ -40,7 +40,7 @@ Copy `config.example.json` to `config.json` at the repo root (or set equivalent 
 ```json
 {
   "compilerPath": "../rae",
-  "buildCommand": "make",
+  "buildCommand": "cd compiler && make",
   "testCommand": "cd compiler && make test",
   "cleanCommand": "make clean",
   "port": 3000
@@ -63,8 +63,20 @@ bun run start
 
 - Click **Run all tests** (or press `Ctrl+T`/`Cmd+T`) inside the dashboard to execute the configured test command from `config.json`. Be sure to set `testCommand` to a real script (current default assumes `cd compiler && make test`; adjust if your workflow differs).
 - Live stdout/stderr output appears in the terminal panel; the run status chip flips to **Passed**/**Failed** when complete.
-- "Run Failed" is stubbed today and will be wired up once we can parse per-test metadata from the Rae suite.
+- Real-time per-test updates populate the suite summary and the test list so you can see which specific files passed/failed.
 - The browser auto-reloads whenever the Bun dev server restarts, so you rarely need to manually refresh during local development.
+
+### Use the Build Controls
+
+- Buttons for **Build**, **Clean**, and **Rebuild** run whichever commands you defined in `config.json` (current defaults assume the Rae compiler Makefile lives under `../rae/compiler`; adjust if yours differs); `Ctrl+T/Cmd+T` still triggers tests, while `Ctrl+B/Cmd+B` triggers Build.
+- Build stdout/stderr streams into its own terminal panel with copy button and status indicator.
+- Rebuild executes the clean command followed by the build command (via `clean && build`) so you can reset the compiler tree before building again.
+
+### Track Stats
+
+- Every test/build command stores metrics (durations, pass/fail counts) in `data/devtools.db` via SQLite.
+- The **Stats preview** panel pulls recent entries from the database (default metrics: `tests.duration_ms`, `builds.duration_ms`) so you can see trends without leaving the dashboard.
+- Data can be exported later for Chart.js visualizations; each entry carries metadata (`success`, run id, etc.).
 
 ## Core Features
 

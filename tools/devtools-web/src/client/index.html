@@ -18,6 +18,41 @@
       </div>
     </header>
     <main class="app-main">
+      <section class="panel panel--full" id="build-panel">
+        <header class="panel-header">
+          <div>
+            <h2>Build controls</h2>
+            <p class="panel-subtitle">Trigger compiler build/clean tasks</p>
+          </div>
+          <div class="panel-actions">
+            <div class="test-status" id="build-status-chip">Idle</div>
+          </div>
+        </header>
+        <div class="build-controls">
+          <button id="build-btn">Build (Ctrl+B)</button>
+          <button id="clean-btn" class="secondary">Clean</button>
+          <button id="rebuild-btn" class="secondary">Rebuild</button>
+        </div>
+        <div class="terminal-wrapper">
+          <div class="terminal" id="build-log" aria-live="polite">
+            <div class="terminal-line">Waiting for first build command…</div>
+          </div>
+          <button
+            class="copy-icon-btn"
+            id="copy-build-log-btn"
+            type="button"
+            title="Copy build output"
+            aria-label="Copy build output"
+          >
+            <svg aria-hidden="true" viewBox="0 0 24 24" role="img">
+              <path d="M16 1H4a3 3 0 0 0-3 3v12h2V4a1 1 0 0 1 1-1h12z"></path>
+              <path
+                d="M20 5H8a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3zm1 15a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1z"
+              ></path>
+            </svg>
+          </button>
+        </div>
+      </section>
       <section class="panel panel--full" id="tests-panel">
         <header class="panel-header">
           <div>
@@ -53,6 +88,24 @@
             </svg>
           </button>
         </div>
+        <div class="test-panel">
+          <div class="test-summary-card">
+            <div>
+              <p class="summary-title">Suite summary</p>
+              <p class="summary-stats" id="test-summary-text">Not run yet</p>
+            </div>
+            <div class="summary-counts">
+              <span class="pill pill--pass" id="summary-pass-count">0</span>
+              <span class="pill pill--fail" id="summary-fail-count">0</span>
+            </div>
+          </div>
+          <div class="test-list" id="test-list" aria-live="polite">
+            <p class="test-list-empty">Run tests to see per-test status.</p>
+          </div>
+          <div class="test-detail" id="test-detail" aria-live="polite">
+            <p class="detail-placeholder">Select a test to see details.</p>
+          </div>
+        </div>
       </section>
       <section class="panel">
         <header>
@@ -60,6 +113,23 @@
           <p class="panel-subtitle">Live events from the Bun server</p>
         </header>
         <div id="status-feed" class="status-feed" aria-live="polite"></div>
+      </section>
+      <section class="panel" id="stats-panel">
+        <header>
+          <h2>Stats preview</h2>
+          <p class="panel-subtitle">Recent run metrics recorded in SQLite</p>
+        </header>
+        <div class="stats-controls">
+          <label class="sr-only" for="stats-metric-select">Metric</label>
+          <select id="stats-metric-select">
+            <option value="tests.duration_ms">Test duration (ms)</option>
+            <option value="builds.duration_ms">Build duration (ms)</option>
+          </select>
+          <button id="stats-refresh-btn" type="button">Refresh</button>
+        </div>
+        <ul class="stats-list" id="stats-list">
+          <li class="stats-empty">No stats recorded yet.</li>
+        </ul>
       </section>
       <section class="panel instructions" id="next-steps-panel">
         <header>
