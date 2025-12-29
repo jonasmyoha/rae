@@ -7,9 +7,13 @@ import type {
   TestRunCompletedMessage,
   TestRunErrorMessage,
   TestRunOutputMessage,
-  TestRunStartedMessage
+  TestRunStartedMessage,
+  TestRunCaseMessage,
+  TestRunSummaryMessage
 } from "../shared/types";
 import type { RaeDevtoolsConfig } from "./config";
+import { parseTestLine } from "./parsers/testsParser";
+import type { StatsStore } from "./stats";
 
 type BroadcastFn = (event: ServerEvent) => void;
 
@@ -19,12 +23,17 @@ type ActiveRun = {
   mode: TestRunMode;
   process: ReturnType<typeof spawn>;
   buffers: Record<"stdout" | "stderr", string>;
+  summary?: { passed: number; failed: number };
 };
 
 export class TestRunner {
   private activeRun: ActiveRun | null = null;
 
-  constructor(private config: RaeDevtoolsConfig, private broadcast: BroadcastFn) {}
+  constructor(
+    private config: RaeDevtoolsConfig,
+    private broadcast: BroadcastFn,
+    private stats?: StatsStore
+  ) {}
 
   runTests(mode: TestRunMode = "all") {
     if (this.activeRun) {
@@ -97,6 +106,9 @@ export class TestRunner {
         timestamp: new Date().toISOString()
       };
       this.broadcast(message);
+      if (stream === "stdout") {
+        this.handleParsedLine(line);
+      }
     }
   }
 
@@ -113,6 +125,9 @@ export class TestRunner {
           timestamp: new Date().toISOString()
         };
         this.broadcast(message);
+        if (stream === "stdout") {
+          this.handleParsedLine(leftover);
+        }
       }
       this.activeRun.buffers[stream] = "";
     }
@@ -129,6 +144,14 @@ export class TestRunner {
       timestamp: new Date().toISOString()
     };
     this.broadcast(payload);
+    const summary = this.activeRun?.summary ?? { passed: 0, failed: 0 };
+    this.stats?.recordTestRun({
+      runId,
+      durationMs: endedAt - startedAt,
+      success: exitCode === 0,
+      passed: summary.passed,
+      failed: summary.failed
+    });
   }
 
   private broadcastRunError(runId: string, error: unknown) {
@@ -143,6 +166,37 @@ export class TestRunner {
 
   private cleanupActiveRun() {
     this.activeRun = null;
+  }
+
+  private handleParsedLine(line: string) {
+    if (!this.activeRun) return;
+    const parsed = parseTestLine(line.trim());
+    if (!parsed) return;
+
+    if (parsed.type === "summary") {
+      const summary: TestRunSummaryMessage = {
+        type: "test-summary",
+        runId: this.activeRun.id,
+        passed: parsed.passed,
+        failed: parsed.failed,
+        timestamp: new Date().toISOString()
+      };
+      this.activeRun.summary = { passed: parsed.passed, failed: parsed.failed };
+      this.broadcast(summary);
+      return;
+    }
+
+    const caseMessage: TestRunCaseMessage = {
+      type: "test-case",
+      runId: this.activeRun.id,
+      case: {
+        name: parsed.name,
+        status: parsed.type === "test-pass" ? "pass" : parsed.type === "test-fail" ? "fail" : "error",
+        details: parsed.details
+      },
+      timestamp: new Date().toISOString()
+    };
+    this.broadcast(caseMessage);
   }
 }
 

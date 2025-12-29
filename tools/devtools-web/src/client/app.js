@@ -4,15 +4,34 @@ const heartbeatStatus = document.getElementById("heartbeat-status");
 const runTestsBtn = document.getElementById("run-tests-btn");
 const testStatusChip = document.getElementById("test-status-chip");
 const testLog = document.getElementById("test-log");
+const buildStatusChip = document.getElementById("build-status-chip");
+const buildLog = document.getElementById("build-log");
 const copyTestLogBtn = document.getElementById("copy-test-log-btn");
 const copyNextStepsBtn = document.getElementById("copy-next-steps-btn");
+const copyBuildLogBtn = document.getElementById("copy-build-log-btn");
 const nextStepsList = document.querySelector("#next-steps-panel ol");
+const testList = document.getElementById("test-list");
+const testSummaryText = document.getElementById("test-summary-text");
+const summaryPassCount = document.getElementById("summary-pass-count");
+const summaryFailCount = document.getElementById("summary-fail-count");
+const testDetail = document.getElementById("test-detail");
+const statsMetricSelect = document.getElementById("stats-metric-select");
+const statsRefreshBtn = document.getElementById("stats-refresh-btn");
+const statsList = document.getElementById("stats-list");
+const buildBtn = document.getElementById("build-btn");
+const cleanBtn = document.getElementById("clean-btn");
+const rebuildBtn = document.getElementById("rebuild-btn");
 
 let socket;
 let reconnectTimer;
 let heartbeatTimer;
 let latestRunId = null;
+let latestBuildRunId = null;
 let currentBuildVersion = null;
+let testCases = new Map();
+let summaryCounts = { passed: 0, failed: 0 };
+let selectedTestName = null;
+let currentStatsMetric = statsMetricSelect?.value ?? "tests.duration_ms";
 
 const HEARTBEAT_STALE_MS = 60000;
 
@@ -106,6 +125,24 @@ function handleServerEvent(payload) {
     case "test-run-error":
       handleTestRunError(payload);
       break;
+    case "test-case":
+      handleTestCase(payload);
+      break;
+    case "test-summary":
+      handleTestSummary(payload);
+      break;
+    case "build-run-started":
+      handleBuildRunStarted(payload);
+      break;
+    case "build-run-output":
+      handleBuildRunOutput(payload);
+      break;
+    case "build-run-completed":
+      handleBuildRunCompleted(payload);
+      break;
+    case "build-run-error":
+      handleBuildRunError(payload);
+      break;
     default:
       console.warn("Unknown payload", payload);
   }
@@ -135,6 +172,7 @@ function pushStatusItem(message, timestamp = new Date().toISOString()) {
 pushStatusItem("Waiting for server heartbeat…");
 setHeartbeatWaiting();
 connect();
+updateSummaryText();
 
 runTestsBtn?.addEventListener("click", () => requestTestRun("all"));
 document.addEventListener("keydown", (event) => {
@@ -143,6 +181,25 @@ document.addEventListener("keydown", (event) => {
     requestTestRun("all");
   }
 });
+
+buildBtn?.addEventListener("click", () => requestBuildCommand("build"));
+cleanBtn?.addEventListener("click", () => requestBuildCommand("clean"));
+rebuildBtn?.addEventListener("click", () => requestBuildCommand("rebuild"));
+
+document.addEventListener("keydown", (event) => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "b") {
+    event.preventDefault();
+    requestBuildCommand("build");
+  }
+});
+
+statsRefreshBtn?.addEventListener("click", () => refreshStats());
+statsMetricSelect?.addEventListener("change", () => {
+  currentStatsMetric = statsMetricSelect.value;
+  refreshStats();
+});
+
+refreshStats();
 
 function requestTestRun(mode = "all") {
   if (!socket || socket.readyState !== WebSocket.OPEN) {
@@ -158,17 +215,45 @@ function requestTestRun(mode = "all") {
   );
 }
 
+function requestBuildCommand(command = "build") {
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    pushStatusItem("Cannot run build command: socket disconnected.");
+    return;
+  }
+
+  socket.send(
+    JSON.stringify({
+      type: "run-build",
+      command
+    })
+  );
+}
+
 function handleTestRunStarted(event) {
   latestRunId = event.runId;
   setTestStatus(`Running (${event.mode})`, "is-running");
   setTestButtonsDisabled(true);
   clearTestLog();
   appendTestLine(`▶ ${event.command}`, "stdout");
+  resetTestCases();
+}
+
+function handleBuildRunStarted(event) {
+  latestBuildRunId = event.runId;
+  setBuildStatus(`Running ${event.command}`, "is-running");
+  setBuildButtonsDisabled(true);
+  clearBuildLog();
+  appendBuildLine(`▶ ${event.command} command started`, "stdout");
 }
 
 function handleTestRunOutput(event) {
   if (!latestRunId || event.runId !== latestRunId) return;
   appendTestLine(event.line, event.stream);
+}
+
+function handleBuildRunOutput(event) {
+  if (!latestBuildRunId || event.runId !== latestBuildRunId) return;
+  appendBuildLine(event.line, event.stream);
 }
 
 function handleTestRunCompleted(event) {
@@ -182,6 +267,20 @@ function handleTestRunCompleted(event) {
   );
   setTestButtonsDisabled(false);
   latestRunId = null;
+  updateSummaryText(event.success ? "Suite passed" : "Suite has failures");
+}
+
+function handleBuildRunCompleted(event) {
+  if (!latestBuildRunId || event.runId !== latestBuildRunId) return;
+  const duration = (event.durationMs / 1000).toFixed(1);
+  const status = event.success ? "Success" : "Failed";
+  setBuildStatus(`${status} in ${duration}s`, event.success ? "is-success" : "is-failure");
+  appendBuildLine(
+    `● ${event.command} finished (exit ${event.exitCode ?? "unknown"}) in ${duration}s`,
+    event.success ? "stdout" : "stderr"
+  );
+  setBuildButtonsDisabled(false);
+  latestBuildRunId = null;
 }
 
 function handleTestRunError(event) {
@@ -189,6 +288,13 @@ function handleTestRunError(event) {
   appendTestLine(`⚠ ${event.message}`, "stderr");
   setTestButtonsDisabled(false);
   latestRunId = null;
+}
+
+function handleBuildRunError(event) {
+  setBuildStatus("Error", "is-failure");
+  appendBuildLine(`⚠ ${event.message}`, "stderr");
+  setBuildButtonsDisabled(false);
+  latestBuildRunId = null;
 }
 
 function setTestStatus(label, modifierClass) {
@@ -204,6 +310,11 @@ function clearTestLog() {
   testLog.innerHTML = "";
 }
 
+function clearBuildLog() {
+  if (!buildLog) return;
+  buildLog.innerHTML = "";
+}
+
 function appendTestLine(text, stream = "stdout") {
   if (!testLog) return;
   const lineEl = document.createElement("div");
@@ -213,8 +324,23 @@ function appendTestLine(text, stream = "stdout") {
   testLog.scrollTop = testLog.scrollHeight;
 }
 
+function appendBuildLine(text, stream = "stdout") {
+  if (!buildLog) return;
+  const lineEl = document.createElement("div");
+  lineEl.className = `terminal-line ${stream}`;
+  lineEl.textContent = text;
+  buildLog.appendChild(lineEl);
+  buildLog.scrollTop = buildLog.scrollHeight;
+}
+
 function setTestButtonsDisabled(disabled) {
   runTestsBtn.disabled = disabled;
+}
+
+function setBuildButtonsDisabled(disabled) {
+  buildBtn.disabled = disabled;
+  cleanBtn.disabled = disabled;
+  rebuildBtn.disabled = disabled;
 }
 
 function handleServerInfo(event) {
@@ -226,11 +352,42 @@ function handleServerInfo(event) {
   currentBuildVersion = event.version;
 }
 
+function handleTestCase(event) {
+  if (!latestRunId || event.runId !== latestRunId) return;
+  testCases.set(event.case.name, { ...event.case, timestamp: event.timestamp });
+  recomputeSummaryCounts();
+  renderTestList();
+  renderTestDetail();
+  updateSummaryText();
+}
+
+function handleTestSummary(event) {
+  if (!latestRunId || event.runId !== latestRunId) return;
+  summaryCounts = { passed: event.passed, failed: event.failed };
+  updateSummaryText("Final summary");
+}
+
+function resetTestCases() {
+  testCases = new Map();
+  summaryCounts = { passed: 0, failed: 0 };
+  selectedTestName = null;
+  updateSummaryText("Running…");
+  renderTestList();
+  renderTestDetail();
+}
+
 setupCopyButton(copyTestLogBtn, () => {
   const lines = Array.from(testLog?.querySelectorAll(".terminal-line") ?? []).map((line) =>
     line.textContent?.trimEnd() ?? ""
   );
   return lines.join("\n").trim() || "No test output yet.";
+});
+
+setupCopyButton(copyBuildLogBtn, () => {
+  const lines = Array.from(buildLog?.querySelectorAll(".terminal-line") ?? []).map((line) =>
+    line.textContent?.trimEnd() ?? ""
+  );
+  return lines.join("\n").trim() || "No build output yet.";
 });
 
 setupCopyButton(copyNextStepsBtn, () => {
@@ -282,4 +439,233 @@ function flashCopyState(button, tooltip, copied = true) {
   if (tooltip) button.setAttribute("data-tooltip", tooltip);
   else button.removeAttribute("data-tooltip");
   button.classList.toggle("is-copied", copied);
+}
+
+function renderTestList() {
+  if (!testList) return;
+  testList.innerHTML = "";
+  const entries = Array.from(testCases.values());
+  if (!entries.length) {
+    const empty = document.createElement("p");
+    empty.className = "test-list-empty";
+    empty.textContent = "Run tests to see per-test status.";
+    testList.appendChild(empty);
+    return;
+  }
+
+  const groups = groupTestCases(entries);
+  for (const group of groups) {
+    const section = document.createElement("section");
+    section.className = "test-group";
+
+    const heading = document.createElement("h3");
+    heading.textContent = group.label;
+    section.appendChild(heading);
+
+    const body = document.createElement("div");
+    body.className = "test-group-body";
+
+    for (const testCase of group.tests) {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "test-row";
+      if (selectedTestName === testCase.name) {
+        row.classList.add("selected");
+      }
+      row.addEventListener("click", () => {
+        selectedTestName = testCase.name;
+        renderTestList();
+        renderTestDetail();
+      });
+
+      const name = document.createElement("span");
+      name.className = "name";
+      name.textContent = testCase.name;
+
+      const badge = document.createElement("span");
+      badge.className = `badge ${testCase.status}`;
+      badge.textContent = testCase.status;
+
+      row.appendChild(name);
+      row.appendChild(badge);
+      body.appendChild(row);
+    }
+
+    section.appendChild(body);
+    testList.appendChild(section);
+  }
+}
+
+function updateSummaryText(prefix) {
+  if (summaryPassCount) summaryPassCount.textContent = String(summaryCounts.passed);
+  if (summaryFailCount) summaryFailCount.textContent = String(summaryCounts.failed);
+  if (testSummaryText) {
+    const total = summaryCounts.passed + summaryCounts.failed;
+    if (total === 0) {
+      testSummaryText.textContent = prefix || "Not run yet";
+    } else {
+      testSummaryText.textContent = `${prefix ? `${prefix} · ` : ""}${summaryCounts.passed} passed, ${summaryCounts.failed} failed`;
+    }
+  }
+}
+
+function renderTestDetail() {
+  if (!testDetail) return;
+  testDetail.innerHTML = "";
+  if (!selectedTestName) {
+    const placeholder = document.createElement("p");
+    placeholder.className = "detail-placeholder";
+    placeholder.textContent = "Select a test to see details.";
+    testDetail.appendChild(placeholder);
+    return;
+  }
+
+  const testCase = testCases.get(selectedTestName);
+  if (!testCase) {
+    const missing = document.createElement("p");
+    missing.className = "detail-placeholder";
+    missing.textContent = "No details available for this test yet.";
+    testDetail.appendChild(missing);
+    return;
+  }
+
+  const header = document.createElement("header");
+  const title = document.createElement("span");
+  title.className = "detail-name";
+  title.textContent = testCase.name;
+
+  const badge = document.createElement("span");
+  badge.className = `detail-badge ${testCase.status}`;
+  badge.textContent = testCase.status;
+
+  header.appendChild(title);
+  header.appendChild(badge);
+
+  const meta = document.createElement("p");
+  meta.className = "detail-meta";
+  if (testCase.timestamp) {
+    meta.textContent = `Updated ${new Date(testCase.timestamp).toLocaleTimeString()}`;
+  } else {
+    meta.textContent = "Waiting for more info…";
+  }
+
+  const body = document.createElement("div");
+  body.className = "detail-body";
+  body.textContent =
+    testCase.details ||
+    "No additional output provided. Diff viewer will appear here for future failures.";
+
+  testDetail.appendChild(header);
+  testDetail.appendChild(meta);
+  testDetail.appendChild(body);
+}
+
+function groupTestCases(entries) {
+  const map = new Map();
+  for (const testCase of entries) {
+    const { key, label } = deriveGroupKey(testCase.name);
+    if (!map.has(key)) {
+      map.set(key, { label, tests: [] });
+    }
+    map.get(key).tests.push(testCase);
+  }
+
+  return Array.from(map.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([, value]) => {
+      value.tests.sort((a, b) => a.name.localeCompare(b.name));
+      return value;
+    });
+}
+
+function deriveGroupKey(name) {
+  if (name.includes("/")) {
+    const segment = name.split("/")[0];
+    return { key: segment, label: segment };
+  }
+  const [prefix, ...rest] = name.split("_");
+  if (!rest.length) {
+    return { key: prefix ?? "misc", label: prefix ?? "Misc" };
+  }
+  return { key: prefix ?? "group", label: `${prefix ?? "Group"}_*` };
+}
+
+function recomputeSummaryCounts() {
+  const counts = { passed: 0, failed: 0 };
+  for (const testCase of testCases.values()) {
+    if (testCase.status === "pass") counts.passed += 1;
+    else counts.failed += 1;
+  }
+  summaryCounts = counts;
+}
+
+async function refreshStats() {
+  if (!statsList) return;
+  statsList.innerHTML = `<li class="stats-empty">Loading…</li>`;
+  try {
+    const response = await fetch(
+      `/api/stats/recent?metric=${encodeURIComponent(currentStatsMetric)}`
+    );
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const payload = await response.json();
+    renderStatsList(payload.data ?? []);
+  } catch (error) {
+    console.error("Failed to load stats", error);
+    statsList.innerHTML = `<li class="stats-empty">Failed to load stats.</li>`;
+  }
+}
+
+function renderStatsList(entries) {
+  if (!statsList) return;
+  statsList.innerHTML = "";
+  if (!entries.length) {
+    const empty = document.createElement("li");
+    empty.className = "stats-empty";
+    empty.textContent = "No stats recorded yet.";
+    statsList.appendChild(empty);
+    return;
+  }
+
+  for (const entry of entries) {
+    const item = document.createElement("li");
+    item.className = "stats-item";
+
+    const value = document.createElement("div");
+    value.textContent = formatMetricValue(currentStatsMetric, entry.value);
+
+    const meta = document.createElement("div");
+    meta.innerHTML = `<strong>${formatMetricStatus(entry.metadata)}</strong><br/>
+      <time>${new Date(entry.timestamp).toLocaleString()}</time>`;
+    meta.style.textAlign = "right";
+
+    item.appendChild(value);
+    item.appendChild(meta);
+    statsList.appendChild(item);
+  }
+}
+
+function formatMetricValue(metric, value) {
+  if (typeof value === "number") {
+    if (metric.includes("duration")) {
+      return `${value.toFixed(1)} ms`;
+    }
+    return value.toFixed(2);
+  }
+  return String(value ?? "");
+}
+
+function formatMetricStatus(metadata = {}) {
+  if (metadata && typeof metadata.success === "boolean") {
+    return metadata.success ? "Success" : "Failed";
+  }
+  return "Recorded";
+}
+function setBuildStatus(label, modifierClass) {
+  buildStatusChip.textContent = label;
+  buildStatusChip.classList.remove("is-running", "is-success", "is-failure");
+  if (modifierClass) {
+    buildStatusChip.classList.add(modifierClass);
+  }
 }

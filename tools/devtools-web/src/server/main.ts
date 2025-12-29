@@ -4,6 +4,8 @@ import { Buffer } from "node:buffer";
 import { loadConfig } from "./config";
 import type { ClientEvent, ServerEvent } from "../shared/types";
 import { TestRunner } from "./tests";
+import { BuildRunner } from "./build";
+import { StatsStore } from "./stats";
 
 type SocketData = {
   id: string;
@@ -15,11 +17,13 @@ const CHANNEL = "rae-devtools-events";
 const HEARTBEAT_INTERVAL_MS = 30000;
 const SERVER_START = new Date();
 const BUILD_VERSION = randomUUID();
-const testRunner = new TestRunner(CONFIG, broadcastEvent);
+const statsStore = new StatsStore();
+const testRunner = new TestRunner(CONFIG, broadcastEvent, statsStore);
+const buildRunner = new BuildRunner(CONFIG, broadcastEvent, statsStore);
 
 const server = Bun.serve<SocketData>({
   port: CONFIG.port,
-  fetch(req, serverInstance) {
+  async fetch(req, serverInstance) {
     const url = new URL(req.url);
     if (url.pathname === "/ws") {
       const success = serverInstance.upgrade(req, {
@@ -36,6 +40,24 @@ const server = Bun.serve<SocketData>({
     if (url.pathname === "/api/tests/run" && req.method === "POST") {
       testRunner.runTests("all");
       return new Response(JSON.stringify({ ok: true }), {
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    if (url.pathname === "/api/build/run" && req.method === "POST") {
+      const payload = await safeJson(req);
+      const command = payload.command ?? "build";
+      buildRunner.run(command);
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    if (url.pathname === "/api/stats/recent" && req.method === "GET") {
+      const metric = url.searchParams.get("metric") ?? "tests.duration_ms";
+      const limit = Math.min(Number(url.searchParams.get("limit") ?? 20), 100);
+      const data = statsStore.listRecentMetrics(metric, Number.isFinite(limit) ? limit : 20);
+      return new Response(JSON.stringify({ metric, data }), {
         headers: { "Content-Type": "application/json" }
       });
     }
@@ -79,6 +101,10 @@ function handleClientEvent(event: ClientEvent) {
   if (event.type === "run-tests") {
     const mode = event.mode ?? "all";
     testRunner.runTests(mode);
+  }
+
+  if (event.type === "run-build") {
+    buildRunner.run(event.command);
   }
 }
 
@@ -166,4 +192,12 @@ function getContentType(filePath: string): string {
   if (filePath.endsWith(".json")) return "application/json; charset=utf-8";
   if (filePath.endsWith(".svg")) return "image/svg+xml";
   return "application/octet-stream";
+}
+
+async function safeJson(req: Request): Promise<Record<string, any>> {
+  try {
+    return await req.json();
+  } catch {
+    return {};
+  }
 }
