@@ -74,7 +74,7 @@ if [ "$DECISION_CODE" = "skip" ]; then
   exit 0
 fi
 
-TIMESTAMP="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+TIMESTAMP="$(date +"%Y-%m-%d %H:%M:%S %z")"
 mkdir -p "$STATS_DIR"
 JSON_ENTRY=$(printf '{"timestamp":"%s","commit":"%s","src_file_count":%d,"src_line_count":%d}' "$TIMESTAMP" "$CURRENT_COMMIT" "$FILE_COUNT" "$LINE_COUNT")
 echo "$JSON_ENTRY" >> "$METRICS_FILE"
