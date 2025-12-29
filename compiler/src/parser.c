@@ -300,6 +300,19 @@ static AstStmt* append_stmt(AstStmt* head, AstStmt* node) {
   return head;
 }
 
+static AstDestructureBinding* append_destructure_binding(AstDestructureBinding* head,
+                                                         AstDestructureBinding* node) {
+  if (!head) {
+    return node;
+  }
+  AstDestructureBinding* tail = head;
+  while (tail->next) {
+    tail = tail->next;
+  }
+  tail->next = node;
+  return head;
+}
+
 static AstExpr* parse_expression(Parser* parser);
 static AstBlock* parse_block(Parser* parser);
 static AstStmt* parse_statement(Parser* parser);
@@ -562,6 +575,81 @@ static AstStmt* parse_return_statement(Parser* parser, const Token* ret_token) {
   return stmt;
 }
 
+static bool looks_like_destructure(Parser* parser) {
+  size_t i = parser->index;
+  if (i >= parser->count || parser->tokens[i].kind != TOK_IDENT) {
+    return false;
+  }
+  i++;
+  if (i >= parser->count || parser->tokens[i].kind != TOK_COLON) {
+    return false;
+  }
+  i++;
+  if (i >= parser->count || parser->tokens[i].kind != TOK_IDENT) {
+    return false;
+  }
+  i++;
+  while (i < parser->count) {
+    TokenKind kind = parser->tokens[i].kind;
+    if (kind == TOK_COMMA) {
+      if (i + 1 < parser->count && parser->tokens[i + 1].kind == TOK_KW_DEF) {
+        return true;
+      }
+      return false;
+    }
+    if (kind == TOK_ASSIGN || kind == TOK_ARROW || kind == TOK_EOF || kind == TOK_RBRACE) {
+      return false;
+    }
+    i++;
+  }
+  return false;
+}
+
+static bool expr_is_call_like(const AstExpr* expr) {
+  if (!expr) {
+    return false;
+  }
+  if (expr->kind == AST_EXPR_CALL) {
+    return true;
+  }
+  if (expr->kind == AST_EXPR_UNARY && expr->as.unary.op == AST_UNARY_SPAWN) {
+    return expr_is_call_like(expr->as.unary.operand);
+  }
+  return false;
+}
+
+static AstStmt* parse_destructure_statement(Parser* parser, const Token* def_token) {
+  AstStmt* stmt = new_stmt(parser, AST_STMT_DESTRUCT, def_token);
+  AstDestructureBinding* bindings = NULL;
+  size_t binding_count = 0;
+  for (;;) {
+    const Token* local = parser_consume(parser, TOK_IDENT, "expected local name in destructuring binding");
+    parser_consume(parser, TOK_COLON, "expected ':' after local name in destructuring binding");
+    const Token* label = parser_consume(parser, TOK_IDENT, "expected return label in destructuring binding");
+    AstDestructureBinding* binding = parser_alloc(parser, sizeof(AstDestructureBinding));
+    binding->local_name = local->lexeme;
+    binding->return_label = label->lexeme;
+    bindings = append_destructure_binding(bindings, binding);
+    binding_count++;
+    if (parser_match(parser, TOK_COMMA)) {
+      parser_consume(parser, TOK_KW_DEF, "expected 'def' before next destructuring binding");
+      continue;
+    }
+    break;
+  }
+  if (binding_count < 2) {
+    parser_error(parser, def_token, "destructuring assignments require at least two bindings");
+  }
+  parser_consume(parser, TOK_ASSIGN, "destructuring assignments require '='");
+  AstExpr* rhs = parse_expression(parser);
+  if (!expr_is_call_like(rhs)) {
+    parser_error(parser, def_token, "destructuring assignments require a call expression on the right-hand side");
+  }
+  stmt->as.destruct_stmt.bindings = bindings;
+  stmt->as.destruct_stmt.call = rhs;
+  return stmt;
+}
+
 static AstStmt* parse_if_statement(Parser* parser, const Token* if_token) {
   AstStmt* stmt = new_stmt(parser, AST_STMT_IF, if_token);
   stmt->as.if_stmt.condition = parse_expression(parser);
@@ -606,7 +694,11 @@ static AstStmt* parse_match_statement(Parser* parser, const Token* match_token) 
 
 static AstStmt* parse_statement(Parser* parser) {
   if (parser_match(parser, TOK_KW_DEF)) {
-    return parse_def_statement(parser, parser_previous(parser));
+    const Token* def_token = parser_previous(parser);
+    if (looks_like_destructure(parser)) {
+      return parse_destructure_statement(parser, def_token);
+    }
+    return parse_def_statement(parser, def_token);
   }
   if (parser_match(parser, TOK_KW_RET)) {
     return parse_return_statement(parser, parser_previous(parser));

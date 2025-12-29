@@ -60,6 +60,12 @@ typedef struct AstObjectField {
   struct AstObjectField* next;
 } AstObjectField;
 
+typedef struct AstDestructureBinding {
+  Str local_name;
+  Str return_label;
+  struct AstDestructureBinding* next;
+} AstDestructureBinding;
+
 typedef enum {
   AST_BIN_ADD,
   AST_BIN_SUB,
@@ -133,6 +139,7 @@ typedef struct AstReturnArg {
 
 typedef enum {
   AST_STMT_DEF,
+  AST_STMT_DESTRUCT,
   AST_STMT_EXPR,
   AST_STMT_RET,
   AST_STMT_IF,
@@ -157,6 +164,10 @@ struct AstStmt {
       bool is_move;
       AstExpr* value;
     } def_stmt;
+    struct {
+      AstDestructureBinding* bindings;
+      AstExpr* call;
+    } destruct_stmt;
     AstExpr* expr_stmt;
     struct {
       AstReturnArg* values;
