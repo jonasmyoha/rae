@@ -1,4 +1,4 @@
-import { loadRaeSyntax } from "./raeSyntax";
+import { loadRaeSyntax } from "./raeSyntax.js";
 
 const statusFeed = document.getElementById("status-feed");
 const connectionStatus = document.getElementById("connection-status");
@@ -20,6 +20,13 @@ const testDetail = document.getElementById("test-detail");
 const statsMetricSelect = document.getElementById("stats-metric-select");
 const statsRefreshBtn = document.getElementById("stats-refresh-btn");
 const statsList = document.getElementById("stats-list");
+const errorIndicator = document.getElementById("error-indicator");
+const errorCount = document.getElementById("error-count");
+const errorModal = document.getElementById("error-log-modal");
+const errorLogList = document.getElementById("error-log-list");
+const errorLogEmpty = document.getElementById("error-log-empty");
+const errorLogClose = document.getElementById("error-log-close");
+const errorLogBackdrop = document.getElementById("error-log-backdrop");
 const testFileTree = document.getElementById("test-file-tree");
 const testSourceTitle = document.getElementById("test-source-title");
 const testSourceCode = document.getElementById("test-source-code");
@@ -42,6 +49,7 @@ let testFilesTree = [];
 let selectedTestFile = null;
 let selectedTestSource = "";
 let raeSyntax = null;
+const errorEntries = [];
 
 const HEARTBEAT_STALE_MS = 60000;
 
@@ -65,6 +73,7 @@ function connect() {
       handleServerEvent(payload);
     } catch (error) {
       console.error("[client] Failed to parse server message", error);
+      recordError("WebSocket", `Malformed message: ${getErrorMessage(error)}`);
     }
   });
 
@@ -76,6 +85,7 @@ function connect() {
 
   socket.addEventListener("error", (error) => {
     console.error("[client] WebSocket error", error);
+    recordError("WebSocket", getErrorMessage(error));
     socket.close();
   });
 }
@@ -215,9 +225,19 @@ loadRaeSyntax("/rae_syntax.json")
     raeSyntax = syntax;
   })
   .catch((error) => {
-    console.warn("Failed to load Rae syntax summary", error);
+    recordError("Syntax summary", getErrorMessage(error));
   })
   .finally(() => loadTestFileTree());
+
+errorIndicator?.addEventListener("click", () => toggleErrorModal(true));
+errorLogClose?.addEventListener("click", () => toggleErrorModal(false));
+errorLogBackdrop?.addEventListener("click", () => toggleErrorModal(false));
+window.addEventListener("error", (event) => {
+  recordError("Runtime", event.message ?? "Unknown error");
+});
+window.addEventListener("unhandledrejection", (event) => {
+  recordError("Promise", getErrorMessage(event.reason));
+});
 
 function requestTestRun(mode = "all") {
   if (!socket || socket.readyState !== WebSocket.OPEN) {
@@ -430,6 +450,7 @@ function setupCopyButton(button, getText) {
       flashCopyState(button, "Copied");
     } catch (error) {
       console.error("Failed to copy", error);
+      recordError("Clipboard", getErrorMessage(error));
       flashCopyState(button, "Copy failed");
     } finally {
       setTimeout(() => {
@@ -633,6 +654,7 @@ async function refreshStats() {
     renderStatsList(payload.data ?? []);
   } catch (error) {
     console.error("Failed to load stats", error);
+    recordError("Stats", getErrorMessage(error));
     statsList.innerHTML = `<li class="stats-empty">Failed to load stats.</li>`;
   }
 }
@@ -693,7 +715,7 @@ async function loadTestFileTree() {
     testFilesTree = data.tree ?? [];
     renderTestFileTree();
   } catch (error) {
-    console.error("Failed to load test files", error);
+    recordError("Test files", getErrorMessage(error));
     testFileTree.innerHTML = `<p class="test-list-empty">Unable to load test files.</p>`;
   }
 }
@@ -753,6 +775,7 @@ async function loadTestSource(path) {
     renderTestSource();
   } catch (error) {
     console.error("Failed to load test source", error);
+    recordError("Test source", getErrorMessage(error));
     selectedTestSource = "";
     testSourceCode.innerHTML = "<code>Failed to load file.</code>";
   }
@@ -766,14 +789,6 @@ function renderTestSource() {
   }
   const highlighted = highlightRae(selectedTestSource);
   testSourceCode.innerHTML = `<code>${highlighted}</code>`;
-}
-
-function escapeHtml(text) {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }
 
 function highlightRae(code) {
@@ -812,6 +827,92 @@ function highlightRae(code) {
 
 function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function recordError(source, message) {
+  const entry = {
+    source,
+    message,
+    timestamp: new Date().toISOString()
+  };
+  errorEntries.unshift(entry);
+  if (errorEntries.length > 50) {
+    errorEntries.pop();
+  }
+  updateErrorIndicator();
+  renderErrorLog();
+}
+
+function updateErrorIndicator() {
+  if (!errorIndicator || !errorCount) return;
+  const count = errorEntries.length;
+  errorCount.textContent = count > 0 ? count.toString() : "";
+  if (count > 0) {
+    errorIndicator.classList.add("has-errors");
+    errorIndicator.setAttribute("title", `Open error log (${count})`);
+  } else {
+    errorIndicator.classList.remove("has-errors");
+    errorIndicator.setAttribute("title", "No errors");
+  }
+}
+
+function renderErrorLog() {
+  if (!errorLogList || !errorLogEmpty) return;
+  errorLogList.innerHTML = "";
+  if (!errorEntries.length) {
+    errorLogEmpty.style.display = "block";
+    return;
+  }
+  errorLogEmpty.style.display = "none";
+
+  errorEntries.forEach((entry) => {
+    const item = document.createElement("li");
+    item.className = "error-log-entry";
+
+    const header = document.createElement("header");
+    const source = document.createElement("strong");
+    source.textContent = entry.source;
+    const time = document.createElement("time");
+    time.dateTime = entry.timestamp;
+    time.textContent = new Date(entry.timestamp).toLocaleTimeString();
+    header.appendChild(source);
+    header.appendChild(time);
+
+    const body = document.createElement("p");
+    body.textContent = entry.message;
+
+    item.appendChild(header);
+    item.appendChild(body);
+    errorLogList.appendChild(item);
+  });
+}
+
+function toggleErrorModal(show) {
+  if (!errorModal) return;
+  if (show) {
+    if (!errorEntries.length) return;
+    errorModal.classList.add("is-visible");
+    errorModal.setAttribute("aria-hidden", "false");
+  } else {
+    errorModal.classList.remove("is-visible");
+    errorModal.setAttribute("aria-hidden", "true");
+  }
+}
+
+function getErrorMessage(error) {
+  if (!error) return "Unknown error";
+  if (typeof error === "string") return error;
+  if (error instanceof Error) return error.message;
+  if (typeof error === "object" && "message" in error) return String(error.message);
+  return JSON.stringify(error);
+}
+
+function escapeHtml(text) {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 function setBuildStatus(label, modifierClass) {
   buildStatusChip.textContent = label;

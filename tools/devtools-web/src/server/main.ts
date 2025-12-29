@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { Buffer } from "node:buffer";
-import { getTestsRoot, loadConfig } from "./config";
+import { getSyntaxSummaryPath, getTestsRoot, loadConfig } from "./config";
 import type { ClientEvent, ServerEvent } from "../shared/types";
 import { TestRunner } from "./tests";
 import { BuildRunner } from "./build";
@@ -22,6 +22,7 @@ const statsStore = new StatsStore();
 const testRunner = new TestRunner(CONFIG, broadcastEvent, statsStore);
 const buildRunner = new BuildRunner(CONFIG, broadcastEvent, statsStore);
 const testsRoot = getTestsRoot(CONFIG);
+const syntaxSummaryPath = getSyntaxSummaryPath(CONFIG);
 
 const server = Bun.serve<SocketData>({
   port: CONFIG.port,
@@ -37,6 +38,12 @@ const server = Bun.serve<SocketData>({
       }
 
       return new Response("WebSocket upgrade failed", { status: 500 });
+    }
+
+    if (url.pathname === "/rae_syntax.json" && req.method === "GET") {
+      return new Response(Bun.file(syntaxSummaryPath), {
+        headers: { "Content-Type": "application/json" }
+      });
     }
 
     if (url.pathname === "/api/tests/run" && req.method === "POST") {

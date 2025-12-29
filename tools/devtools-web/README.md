@@ -82,7 +82,12 @@ bun run start
 
 - The **Test sources** panel lists files from `testsPath` (default `compiler/tests`) and renders them with a lightweight Rae syntax highlighter.
 - Select a file to see its contents; use the corner copy icon to grab the code for editor reproduction or bug reports.
-- The highlighter loads `../rae/docs/rae_syntax.json` for authoritative tokens—keep that file up to date as the language evolves.
+- The highlighter loads `syntaxSummaryPath` (default `../rae/docs/rae_syntax.json`) for authoritative tokens—keep that file up to date as the language evolves.
+
+### Error Log
+
+- A warning icon in the header lights up when the dashboard encounters fetch/WebSocket/runtime errors; click it to open the error log for details.
+- Use the log to capture errors (e.g., missing syntax file) before reporting issues—entries include timestamps and sources.
 
 ## Core Features
 
