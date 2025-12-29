@@ -23,6 +23,16 @@ make test
 
 See `spec/rae.md` for language details.
 
+## Repository statistics
+
+Run the metrics tool before committing to log compiler code size over time:
+
+```bash
+./tools/stats/update_metrics.sh
+```
+
+Outputs land in `stats/` as JSON lines and can be graphed later.
+
 ## License
 
 MIT
