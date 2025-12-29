@@ -1,0 +1,45 @@
+# Rae Compiler Makefile
+
+CC = gcc
+CFLAGS = -std=c11 -Wall -Wextra -Wpedantic -O2 -g
+LDFLAGS =
+
+SRC_DIR = src
+BUILD_DIR = build
+BIN_DIR = bin
+TEST_DIR = tests
+
+SRCS = $(SRC_DIR)/main.c \
+       $(SRC_DIR)/arena.c \
+       $(SRC_DIR)/str.c \
+       $(SRC_DIR)/diag.c \
+       $(SRC_DIR)/lexer.c \
+       $(SRC_DIR)/ast.c \
+       $(SRC_DIR)/parser.c
+
+OBJS = $(SRCS:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)
+TARGET = $(BIN_DIR)/rae
+TEST_RUNNER = tools/run_tests.sh
+
+.PHONY: all build test clean
+
+all: build
+
+build: $(TARGET)
+
+$(TARGET): $(OBJS)
+	@mkdir -p $(dir $@)
+	$(CC) $(LDFLAGS) -o $@ $^
+	@echo "Built: $(TARGET)"
+
+$(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+test: build
+	@chmod +x $(TEST_RUNNER)
+	@$(TEST_RUNNER)
+
+clean:
+	rm -rf $(BUILD_DIR) $(BIN_DIR)
+	@echo "Cleaned build artifacts"
