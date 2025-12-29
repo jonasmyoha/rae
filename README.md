@@ -33,6 +33,14 @@ Run the metrics tool before committing to log compiler code size over time:
 
 Outputs land in `stats/` as JSON lines and can be graphed later.
 
+## CLI commands
+
+```bash
+bin/rae lex <file>     # tokenize Rae source
+bin/rae parse <file>   # dump AST structure
+bin/rae format <file>  # pretty-print canonical Rae
+```
+
 ## License
 
 MIT

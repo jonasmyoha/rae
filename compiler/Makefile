@@ -15,7 +15,8 @@ SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/diag.c \
        $(SRC_DIR)/lexer.c \
        $(SRC_DIR)/ast.c \
-       $(SRC_DIR)/parser.c
+       $(SRC_DIR)/parser.c \
+       $(SRC_DIR)/pretty.c
 
 OBJS = $(SRCS:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)
 TARGET = $(BIN_DIR)/rae

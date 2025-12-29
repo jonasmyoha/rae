@@ -9,12 +9,14 @@
 #include "lexer.h"
 #include "parser.h"
 #include "ast.h"
+#include "pretty.h"
 
 static void print_usage(const char* prog) {
   fprintf(stderr, "Usage: %s <command> <file>\n", prog);
   fprintf(stderr, "\nCommands:\n");
   fprintf(stderr, "  lex <file>      Tokenize Rae source file\n");
   fprintf(stderr, "  parse <file>    Parse Rae source file and dump AST\n");
+  fprintf(stderr, "  format <file>   Parse Rae source file and pretty-print it\n");
 }
 
 static void dump_tokens(const TokenList* tokens) {
@@ -48,6 +50,9 @@ static int run_command(const char* cmd, const char* file_path) {
   } else if (strcmp(cmd, "parse") == 0) {
     AstModule* module = parse_module(arena, file_path, tokens);
     ast_dump_module(module, stdout);
+  } else if (strcmp(cmd, "format") == 0) {
+    AstModule* module = parse_module(arena, file_path, tokens);
+    pretty_print_module(module, stdout);
   } else {
     fprintf(stderr, "error: unknown command '%s'\n", cmd);
     arena_destroy(arena);
@@ -67,7 +72,7 @@ int main(int argc, char** argv) {
   }
 
   const char* cmd = argv[1];
-  if ((strcmp(cmd, "lex") == 0 || strcmp(cmd, "parse") == 0)) {
+  if ((strcmp(cmd, "lex") == 0 || strcmp(cmd, "parse") == 0 || strcmp(cmd, "format") == 0)) {
     if (argc < 3) {
       fprintf(stderr, "error: %s command requires a file argument\n", cmd);
       print_usage(argv[0]);

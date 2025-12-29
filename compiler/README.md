@@ -17,7 +17,9 @@ make test
 ## Usage
 
 ```bash
-bin/rae parse <file>
+bin/rae lex <file>     # tokenize
+bin/rae parse <file>   # parse + dump AST
+bin/rae format <file>  # pretty-print canonical Rae
 ```
 
 See `../spec/rae.md` for language specification.
