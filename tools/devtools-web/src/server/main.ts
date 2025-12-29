@@ -3,6 +3,7 @@ import path from "node:path";
 import { Buffer } from "node:buffer";
 import { loadConfig } from "./config";
 import type { ClientEvent, ServerEvent } from "../shared/types";
+import { TestRunner } from "./tests";
 
 type SocketData = {
   id: string;
@@ -12,6 +13,9 @@ const CONFIG = await loadConfig();
 const STATIC_ROOT = path.join(process.cwd(), "src", "client");
 const CHANNEL = "rae-devtools-events";
 const HEARTBEAT_INTERVAL_MS = 30000;
+const SERVER_START = new Date();
+const BUILD_VERSION = randomUUID();
+const testRunner = new TestRunner(CONFIG, broadcastEvent);
 
 const server = Bun.serve<SocketData>({
   port: CONFIG.port,
@@ -29,11 +33,19 @@ const server = Bun.serve<SocketData>({
       return new Response("WebSocket upgrade failed", { status: 500 });
     }
 
+    if (url.pathname === "/api/tests/run" && req.method === "POST") {
+      testRunner.runTests("all");
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
     return serveStaticFile(url);
   },
   websocket: {
     open(ws) {
       ws.subscribe(CHANNEL);
+      ws.send(JSON.stringify(createServerInfoMessage()));
       ws.send(JSON.stringify(createStatusMessage("Connected to Rae DevTools server.")));
     },
     message(ws, message) {
@@ -63,19 +75,35 @@ function handleClientEvent(event: ClientEvent) {
     console.log(`[ws] Client connected with version ${event.version}`);
     broadcastStatus(`Client connected (v${event.version})`);
   }
+
+  if (event.type === "run-tests") {
+    const mode = event.mode ?? "all";
+    testRunner.runTests(mode);
+  }
 }
 
 function broadcastStatus(message: string) {
-  const payload = JSON.stringify(createStatusMessage(message));
-  server.publish(CHANNEL, payload);
+  broadcastEvent(createStatusMessage(message));
 }
 
 function broadcastHeartbeat() {
-  const payload = JSON.stringify({
+  broadcastEvent({
     type: "server-heartbeat",
     timestamp: new Date().toISOString()
   } satisfies ServerEvent);
+}
+
+function broadcastEvent(event: ServerEvent) {
+  const payload = JSON.stringify(event);
   server.publish(CHANNEL, payload);
+}
+
+function createServerInfoMessage(): ServerEvent {
+  return {
+    type: "server-info",
+    version: BUILD_VERSION,
+    startedAt: SERVER_START.toISOString()
+  };
 }
 
 function createStatusMessage(message: string): ServerEvent {
