@@ -195,6 +195,25 @@ static void dump_def_stmt(const AstStmt* stmt, FILE* out, int indent) {
   fputc('\n', out);
 }
 
+static void dump_destructure_stmt(const AstStmt* stmt, FILE* out, int indent) {
+  print_indent(out, indent);
+  fputs("destructure\n", out);
+  const AstDestructureBinding* binding = stmt->as.destruct_stmt.bindings;
+  while (binding) {
+    print_indent(out, indent + 1);
+    fputs("binding ", out);
+    print_str(out, binding->local_name);
+    fputs(" <- ", out);
+    print_str(out, binding->return_label);
+    fputc('\n', out);
+    binding = binding->next;
+  }
+  print_indent(out, indent + 1);
+  fputs("call ", out);
+  dump_expr(stmt->as.destruct_stmt.call, out);
+  fputc('\n', out);
+}
+
 static void dump_expr_stmt(const AstStmt* stmt, FILE* out, int indent) {
   print_indent(out, indent);
   fputs("expr ", out);
@@ -266,6 +285,9 @@ static void dump_block(const AstBlock* block, FILE* out, int indent) {
     switch (stmt->kind) {
       case AST_STMT_DEF:
         dump_def_stmt(stmt, out, indent);
+        break;
+      case AST_STMT_DESTRUCT:
+        dump_destructure_stmt(stmt, out, indent);
         break;
       case AST_STMT_EXPR:
         dump_expr_stmt(stmt, out, indent);
