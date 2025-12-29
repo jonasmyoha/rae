@@ -1,0 +1,21 @@
+MODULE
+  func divide
+    param a: Int
+    param b: Int
+    return result: Int
+    return error: opt Error
+    body
+      if (b is 0)
+        then
+          ret error: "divide by zero"
+      ret result: (a / b)
+  func useDivide
+    param a: Int
+    param b: Int
+    return result: Int
+    body
+      destructure
+        binding sum <- result
+        binding err <- error
+        call divide(a: a, b: b)
+      ret sum
