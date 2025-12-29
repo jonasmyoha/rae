@@ -1,0 +1,364 @@
+/* ast.c - AST helper utilities */
+
+#include "ast.h"
+
+#include <stdio.h>
+
+static void print_indent(FILE* out, int level) {
+  for (int i = 0; i < level; ++i) {
+    fputs("  ", out);
+  }
+}
+
+static void print_str(FILE* out, Str s) {
+  if (!s.data || s.len == 0) {
+    return;
+  }
+  fprintf(out, "%.*s", (int)s.len, s.data);
+}
+
+static void dump_type_ref(const AstTypeRef* type, FILE* out) {
+  if (!type || !type->parts) {
+    fputs("<type?>", out);
+    return;
+  }
+  const AstIdentifierPart* part = type->parts;
+  bool first = true;
+  while (part) {
+    if (!first) {
+      fputc(' ', out);
+    }
+    print_str(out, part->text);
+    first = false;
+    part = part->next;
+  }
+}
+
+static const char* binary_op_name(AstBinaryOp op) {
+  switch (op) {
+    case AST_BIN_ADD:
+      return "+";
+    case AST_BIN_SUB:
+      return "-";
+    case AST_BIN_MUL:
+      return "*";
+    case AST_BIN_DIV:
+      return "/";
+    case AST_BIN_MOD:
+      return "%";
+    case AST_BIN_LT:
+      return "<";
+    case AST_BIN_GT:
+      return ">";
+    case AST_BIN_LE:
+      return "<=";
+    case AST_BIN_GE:
+      return ">=";
+    case AST_BIN_IS:
+      return "is";
+    case AST_BIN_AND:
+      return "and";
+    case AST_BIN_OR:
+      return "or";
+  }
+  return "?";
+}
+
+static const char* unary_op_name(AstUnaryOp op) {
+  switch (op) {
+    case AST_UNARY_NEG:
+      return "-";
+    case AST_UNARY_NOT:
+      return "not";
+    case AST_UNARY_SPAWN:
+      return "spawn";
+  }
+  return "?";
+}
+
+static void dump_expr(const AstExpr* expr, FILE* out);
+
+static void dump_call_args(const AstCallArg* arg, FILE* out) {
+  const AstCallArg* current = arg;
+  bool first = true;
+  while (current) {
+    if (!first) {
+      fputs(", ", out);
+    }
+    print_str(out, current->name);
+    fputs(": ", out);
+    dump_expr(current->value, out);
+    first = false;
+    current = current->next;
+  }
+}
+
+static void dump_object_fields(const AstObjectField* field, FILE* out) {
+  const AstObjectField* current = field;
+  bool first = true;
+  while (current) {
+    if (!first) {
+      fputs(", ", out);
+    }
+    print_str(out, current->name);
+    fputs(": ", out);
+    dump_expr(current->value, out);
+    first = false;
+    current = current->next;
+  }
+}
+
+static void dump_expr(const AstExpr* expr, FILE* out) {
+  if (!expr) {
+    fputs("<expr?>", out);
+    return;
+  }
+  switch (expr->kind) {
+    case AST_EXPR_IDENT:
+      print_str(out, expr->as.ident);
+      break;
+    case AST_EXPR_INTEGER:
+      print_str(out, expr->as.integer);
+      break;
+    case AST_EXPR_STRING:
+      print_str(out, expr->as.string_lit);
+      break;
+    case AST_EXPR_BOOL:
+      fputs(expr->as.boolean ? "true" : "false", out);
+      break;
+    case AST_EXPR_NONE:
+      fputs("none", out);
+      break;
+    case AST_EXPR_BINARY:
+      fputc('(', out);
+      dump_expr(expr->as.binary.lhs, out);
+      fputc(' ', out);
+      fputs(binary_op_name(expr->as.binary.op), out);
+      fputc(' ', out);
+      dump_expr(expr->as.binary.rhs, out);
+      fputc(')', out);
+      break;
+    case AST_EXPR_UNARY:
+      fputc('(', out);
+      fputs(unary_op_name(expr->as.unary.op), out);
+      fputc(' ', out);
+      dump_expr(expr->as.unary.operand, out);
+      fputc(')', out);
+      break;
+    case AST_EXPR_CALL:
+      dump_expr(expr->as.call.callee, out);
+      fputc('(', out);
+      dump_call_args(expr->as.call.args, out);
+      fputc(')', out);
+      break;
+    case AST_EXPR_MEMBER:
+      dump_expr(expr->as.member.object, out);
+      fputc('.', out);
+      print_str(out, expr->as.member.member);
+      break;
+    case AST_EXPR_OBJECT:
+      fputc('(', out);
+      dump_object_fields(expr->as.object, out);
+      fputc(')', out);
+      break;
+  }
+}
+
+static void dump_properties(const AstProperty* prop, FILE* out) {
+  if (!prop) {
+    return;
+  }
+  fputs(" props(", out);
+  const AstProperty* current = prop;
+  bool first = true;
+  while (current) {
+    if (!first) {
+      fputs(", ", out);
+    }
+    print_str(out, current->name);
+    first = false;
+    current = current->next;
+  }
+  fputc(')', out);
+}
+
+static void dump_block(const AstBlock* block, FILE* out, int indent);
+
+static void dump_def_stmt(const AstStmt* stmt, FILE* out, int indent) {
+  print_indent(out, indent);
+  fputs("def ", out);
+  print_str(out, stmt->as.def_stmt.name);
+  fputs(": ", out);
+  dump_type_ref(stmt->as.def_stmt.type, out);
+  fputs(stmt->as.def_stmt.is_move ? " => " : " = ", out);
+  dump_expr(stmt->as.def_stmt.value, out);
+  fputc('\n', out);
+}
+
+static void dump_expr_stmt(const AstStmt* stmt, FILE* out, int indent) {
+  print_indent(out, indent);
+  fputs("expr ", out);
+  dump_expr(stmt->as.expr_stmt, out);
+  fputc('\n', out);
+}
+
+static void dump_ret_stmt(const AstStmt* stmt, FILE* out, int indent) {
+  print_indent(out, indent);
+  fputs("ret", out);
+  AstReturnArg* arg = stmt->as.ret_stmt.values;
+  bool first = true;
+  while (arg) {
+    if (first) {
+      fputc(' ', out);
+    } else {
+      fputs(", ", out);
+    }
+    if (arg->has_label) {
+      print_str(out, arg->label);
+      fputs(": ", out);
+    }
+    dump_expr(arg->value, out);
+    first = false;
+    arg = arg->next;
+  }
+  fputc('\n', out);
+}
+
+static void dump_if_stmt(const AstStmt* stmt, FILE* out, int indent) {
+  print_indent(out, indent);
+  fputs("if ", out);
+  dump_expr(stmt->as.if_stmt.condition, out);
+  fputc('\n', out);
+  print_indent(out, indent + 1);
+  fputs("then\n", out);
+  dump_block(stmt->as.if_stmt.then_block, out, indent + 2);
+  if (stmt->as.if_stmt.else_block) {
+    print_indent(out, indent + 1);
+    fputs("else\n", out);
+    dump_block(stmt->as.if_stmt.else_block, out, indent + 2);
+  }
+}
+
+static void dump_match_stmt(const AstStmt* stmt, FILE* out, int indent) {
+  print_indent(out, indent);
+  fputs("match ", out);
+  dump_expr(stmt->as.match_stmt.subject, out);
+  fputc('\n', out);
+  AstMatchCase* cases = stmt->as.match_stmt.cases;
+  while (cases) {
+    print_indent(out, indent + 1);
+    fputs("case ", out);
+    dump_expr(cases->pattern, out);
+    fputc('\n', out);
+    dump_block(cases->block, out, indent + 2);
+    cases = cases->next;
+  }
+}
+
+static void dump_block(const AstBlock* block, FILE* out, int indent) {
+  if (!block || !block->first) {
+    print_indent(out, indent);
+    fputs("<empty>\n", out);
+    return;
+  }
+  const AstStmt* stmt = block->first;
+  while (stmt) {
+    switch (stmt->kind) {
+      case AST_STMT_DEF:
+        dump_def_stmt(stmt, out, indent);
+        break;
+      case AST_STMT_EXPR:
+        dump_expr_stmt(stmt, out, indent);
+        break;
+      case AST_STMT_RET:
+        dump_ret_stmt(stmt, out, indent);
+        break;
+      case AST_STMT_IF:
+        dump_if_stmt(stmt, out, indent);
+        break;
+      case AST_STMT_MATCH:
+        dump_match_stmt(stmt, out, indent);
+        break;
+    }
+    stmt = stmt->next;
+  }
+}
+
+static void dump_type_decl(const AstDecl* decl, FILE* out, int indent) {
+  print_indent(out, indent);
+  fputs("type ", out);
+  print_str(out, decl->as.type_decl.name);
+  dump_properties(decl->as.type_decl.properties, out);
+  fputc('\n', out);
+  AstTypeField* field = decl->as.type_decl.fields;
+  while (field) {
+    print_indent(out, indent + 1);
+    fputs("field ", out);
+    print_str(out, field->name);
+    fputs(": ", out);
+    dump_type_ref(field->type, out);
+    fputc('\n', out);
+    field = field->next;
+  }
+}
+
+static void dump_return_items(const AstReturnItem* returns, FILE* out, int indent) {
+  const AstReturnItem* current = returns;
+  while (current) {
+    print_indent(out, indent);
+    fputs("return ", out);
+    if (current->has_name) {
+      print_str(out, current->name);
+      fputs(": ", out);
+    }
+    dump_type_ref(current->type, out);
+    fputc('\n', out);
+    current = current->next;
+  }
+}
+
+static void dump_params(const AstParam* params, FILE* out, int indent) {
+  const AstParam* current = params;
+  while (current) {
+    print_indent(out, indent);
+    fputs("param ", out);
+    print_str(out, current->name);
+    fputs(": ", out);
+    dump_type_ref(current->type, out);
+    fputc('\n', out);
+    current = current->next;
+  }
+}
+
+static void dump_func_decl(const AstDecl* decl, FILE* out, int indent) {
+  print_indent(out, indent);
+  fputs("func ", out);
+  print_str(out, decl->as.func_decl.name);
+  dump_properties(decl->as.func_decl.properties, out);
+  fputc('\n', out);
+  dump_params(decl->as.func_decl.params, out, indent + 1);
+  dump_return_items(decl->as.func_decl.returns, out, indent + 1);
+  print_indent(out, indent + 1);
+  fputs("body\n", out);
+  dump_block(decl->as.func_decl.body, out, indent + 2);
+}
+
+void ast_dump_module(const AstModule* module, FILE* out) {
+  if (!module) {
+    fputs("<null module>\n", out);
+    return;
+  }
+  fputs("MODULE\n", out);
+  const AstDecl* decl = module->decls;
+  while (decl) {
+    switch (decl->kind) {
+      case AST_DECL_TYPE:
+        dump_type_decl(decl, out, 1);
+        break;
+      case AST_DECL_FUNC:
+        dump_func_decl(decl, out, 1);
+        break;
+    }
+    decl = decl->next;
+  }
+}
