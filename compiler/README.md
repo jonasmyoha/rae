@@ -20,6 +20,7 @@ make test
 bin/rae lex <file>     # tokenize
 bin/rae parse <file>   # parse + dump AST
 bin/rae format <file>  # pretty-print canonical Rae (stdout by default)
+bin/rae run <file>     # execute Rae source via the bytecode VM (hot reload path)
 ```
 
 Formatting options:
