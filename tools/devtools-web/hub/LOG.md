@@ -12,3 +12,5 @@
 - Completed T005 (Document hub workflow in devtools README)
 - Started T006 (Devtools: list all compiler tests)
 - Completed T006 (Devtools: list all compiler tests) — attempted `bun run lint` (tsc exited without diagnostics)
+- Started T007 (Devtools: unify test run + code viewer UI)
+- Completed T007 (Devtools: unify test run + code viewer UI) — attempted `bun run lint` (tsc exited without diagnostics)

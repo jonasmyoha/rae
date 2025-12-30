@@ -7,16 +7,6 @@
 
 ## Tasks
 
-### T007 - Devtools: unify test run + code viewer UI
-- Repo: rae-devtools-web
-- Summary:
-  - When selecting a test in the UI, open both its latest results and source code in a shared view (tabs or split pane)
-  - Provide quick navigation between test output, source, and metadata (command, expectations)
-  - Ensure the interaction works for tests that have not run yet (display placeholder state)
-- Acceptance:
-  - Selecting any test shows an integrated view combining run status/output and code without needing separate panels
-  - Works in `bun run dev`, and basic keyboard/mouse navigation behaves as expected
-
 ### T008 - Compiler: plan multifile build support
 - Repo: rae
 - Summary:
