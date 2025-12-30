@@ -45,3 +45,11 @@
 - This document in `docs/vm-plan.md`.
 - Hub tasks T011–T014 queued (done).
 - Approval to begin implementation (starting with T011).
+
+## Hot-Reload Notes (T012)
+- The CLI now exposes `bin/rae run --watch <file>` which recompiles the module whenever the source file changes and reruns it without restarting the process.
+- `VmRegistry` keeps compiled chunks alive so embedders can replace or execute modules at will:
+  - Load via `vm_registry_load(&registry, path, chunk)`
+  - Swap with `vm_registry_reload` after recompiling
+  - Execute by passing the stored `Chunk` to `vm_run`
+- Embedding guidance: link against the VM library, call `vm_compile_module` + registry helpers to load scripts at runtime, and trigger reloads from your watcher or network layer.

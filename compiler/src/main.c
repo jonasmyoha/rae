@@ -5,6 +5,9 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <errno.h>
+#include <sys/stat.h>
+#include <time.h>
+#include <unistd.h>
 #include "arena.h"
 #include "str.h"
 #include "diag.h"
@@ -14,12 +17,22 @@
 #include "pretty.h"
 #include "vm.h"
 #include "vm_compiler.h"
+#include "vm_registry.h"
 
 typedef struct {
   const char* input_path;
   const char* output_path;
   bool write_in_place;
 } FormatOptions;
+
+typedef struct {
+  const char* input_path;
+  bool watch;
+} RunOptions;
+
+static bool compile_file_chunk(const char* file_path, Chunk* chunk);
+static int run_vm_file(const char* file_path);
+static int run_vm_watch(const char* file_path);
 
 static void format_options_init(FormatOptions* opts) {
   opts->input_path = NULL;
@@ -65,6 +78,37 @@ static bool parse_format_args(int argc, char** argv, FormatOptions* opts) {
   return true;
 }
 
+static bool parse_run_args(int argc, char** argv, RunOptions* opts) {
+  opts->watch = false;
+  opts->input_path = NULL;
+
+  int i = 0;
+  while (i < argc) {
+    const char* arg = argv[i];
+    if (strcmp(arg, "--watch") == 0 || strcmp(arg, "-w") == 0) {
+      opts->watch = true;
+      i += 1;
+      continue;
+    }
+    if (arg[0] == '-') {
+      fprintf(stderr, "error: unknown run option '%s'\n", arg);
+      return false;
+    }
+    if (opts->input_path) {
+      fprintf(stderr, "error: multiple input files provided ('%s' and '%s')\n", opts->input_path, arg);
+      return false;
+    }
+    opts->input_path = arg;
+    i += 1;
+  }
+
+  if (!opts->input_path) {
+    fprintf(stderr, "error: run command requires a file argument\n");
+    return false;
+  }
+  return true;
+}
+
 static void print_usage(const char* prog) {
   fprintf(stderr, "Usage: %s <command> <file>\n", prog);
   fprintf(stderr, "\nCommands:\n");
@@ -84,12 +128,12 @@ static void dump_tokens(const TokenList* tokens) {
   }
 }
 
-static int run_vm_file(const char* file_path) {
+static bool compile_file_chunk(const char* file_path, Chunk* chunk) {
   size_t file_size = 0;
   char* source = read_file(file_path, &file_size);
   if (!source) {
     fprintf(stderr, "error: could not read file '%s'\n", file_path);
-    return 1;
+    return false;
   }
 
   Arena* arena = arena_create(1024 * 1024);
@@ -103,13 +147,18 @@ static int run_vm_file(const char* file_path) {
   if (!module) {
     arena_destroy(arena);
     free(source);
-    return 1;
+    return false;
   }
 
+  bool ok = vm_compile_module(module, chunk, file_path);
+  arena_destroy(arena);
+  free(source);
+  return ok;
+}
+
+static int run_vm_file(const char* file_path) {
   Chunk chunk;
-  if (!vm_compile_module(module, &chunk, file_path)) {
-    arena_destroy(arena);
-    free(source);
+  if (!compile_file_chunk(file_path, &chunk)) {
     return 1;
   }
 
@@ -117,8 +166,6 @@ static int run_vm_file(const char* file_path) {
   vm_init(&vm);
   VMResult result = vm_run(&vm, &chunk);
   chunk_free(&chunk);
-  arena_destroy(arena);
-  free(source);
   return result == VM_RUNTIME_OK ? 0 : 1;
 }
 
@@ -144,12 +191,12 @@ static int run_command(const char* cmd, int argc, char** argv) {
     }
     file_path = argv[0];
   } else if (is_run) {
-    if (argc < 1) {
-      fprintf(stderr, "error: run command requires a file argument\n");
+    RunOptions run_opts;
+    if (!parse_run_args(argc, argv, &run_opts)) {
       print_usage(argv[-1]);
       return 1;
     }
-    return run_vm_file(argv[0]);
+    return run_opts.watch ? run_vm_watch(run_opts.input_path) : run_vm_file(run_opts.input_path);
   } else {
     fprintf(stderr, "error: unknown command '%s'\n", cmd);
     print_usage(argv[-1]);
@@ -211,4 +258,61 @@ int main(int argc, char** argv) {
   fprintf(stderr, "error: unknown command '%s'\n", cmd);
   print_usage(argv[0]);
   return 1;
+}
+static time_t file_last_modified(const char* path) {
+  struct stat info;
+  if (stat(path, &info) != 0) {
+    return (time_t)-1;
+  }
+  return info.st_mtime;
+}
+
+static time_t wait_for_change(const char* path, time_t last_mtime) {
+  for (;;) {
+    sleep(1);
+    time_t current = file_last_modified(path);
+    if (current == (time_t)-1) {
+      continue;
+    }
+    if (current != last_mtime) {
+      return current;
+    }
+  }
+}
+
+static int run_vm_watch(const char* file_path) {
+  printf("Watching '%s' for changes (Ctrl+C to exit)\n", file_path);
+  fflush(stdout);
+
+  VmRegistry registry;
+  vm_registry_init(&registry);
+  int exit_code = 0;
+
+  for (;;) {
+    Chunk chunk;
+    if (!compile_file_chunk(file_path, &chunk)) {
+      fprintf(stderr, "[watch] compile failed. Waiting for changes...\n");
+    } else {
+      vm_registry_reload(&registry, file_path, chunk);
+      VmModule* module = vm_registry_find(&registry, file_path);
+      if (module) {
+        VM vm;
+        vm_init(&vm);
+        printf("[watch] running latest version...\n");
+        fflush(stdout);
+        VMResult result = vm_run(&vm, &module->chunk);
+        if (result != VM_RUNTIME_OK) {
+          exit_code = 1;
+        }
+      }
+    }
+
+    time_t last = file_last_modified(file_path);
+    last = wait_for_change(file_path, last);
+    printf("[watch] change detected. Recompiling...\n");
+    fflush(stdout);
+  }
+
+  vm_registry_free(&registry);
+  return exit_code;
 }
