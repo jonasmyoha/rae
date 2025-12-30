@@ -43,7 +43,8 @@ export class ExampleRunner {
     const runId = randomUUID();
     const startedAt = Date.now();
     const cwd = resolveCompilerPath(this.config);
-    const cmd = `bin/rae run ${entry}`;
+    const entryPath = path.join(this.config.examplesPath ?? "examples", entry);
+    const cmd = `bin/rae run ${entryPath}`;
 
     const child = spawn(cmd, {
       cwd,
