@@ -6,3 +6,29 @@
 - Results go to hub/RESULTS/T###.md
 
 ## Tasks
+### T003 - Document compiler test runner .cmd features
+- Repo: rae
+- Summary:
+  - Add documentation near `compiler/tests/` explaining `.cmd` files, multi-word commands, and the `{{TMP_OUTPUT}}` placeholder
+  - Include guidance for adding new format/output cases and stdout expectations
+- Acceptance:
+  - Doc exists and covers `.cmd` syntax and placeholder behavior
+  - `make test` passes without behavior changes
+
+### T004 - Add regression test for `rae format --write`
+- Repo: rae
+- Summary:
+  - Create a new test case ensuring `rae format --write` writes canonical output to a temp file without stdout
+  - Use existing test runner mechanics to clean temp files
+- Acceptance:
+  - `make test` includes the new case and passes
+  - Failure output clearly indicates stdout/file mismatches if behavior regresses
+
+### T005 - Document hub workflow in devtools README
+- Repo: rae-devtools-web
+- Summary:
+  - Add a section to `README.md` describing the hub workflow (QUEUE → INPROGRESS → RESULTS, branch naming, acceptance logs)
+  - Cross-link to hub files and clarify single-agent expectations
+- Acceptance:
+  - README section accurately reflects the current process with working links
+  - No build/test changes required
