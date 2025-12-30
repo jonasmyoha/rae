@@ -85,61 +85,65 @@ static int run_command(const char* cmd, int argc, char** argv) {
   size_t file_size = 0;
   char* source = NULL;
   Arena* arena = NULL;
+  const char* file_path = NULL;
+  FormatOptions format_opts;
+  bool is_format = (strcmp(cmd, "format") == 0);
 
-  if (strcmp(cmd, "lex") == 0 || strcmp(cmd, "parse") == 0 || strcmp(cmd, "format") == 0) {
+  if (is_format) {
+    if (!parse_format_args(argc, argv, &format_opts)) {
+      return 1;
+    }
+    file_path = format_opts.input_path;
+  } else if (strcmp(cmd, "lex") == 0 || strcmp(cmd, "parse") == 0) {
     if (argc < 1) {
       fprintf(stderr, "error: %s command requires a file argument\n", cmd);
       print_usage(argv[-1]);
       return 1;
     }
-    const char* file_path = argv[0];
-    source = read_file(file_path, &file_size);
-    if (!source) {
-      fprintf(stderr, "error: could not read file '%s'\n", file_path);
-      return 1;
-    }
-    arena = arena_create(1024 * 1024);
-    if (!arena) {
-      free(source);
-      diag_fatal("could not allocate arena");
-    }
-    TokenList tokens = lexer_tokenize(arena, file_path, source, file_size);
-
-    if (strcmp(cmd, "lex") == 0) {
-      dump_tokens(&tokens);
-    } else if (strcmp(cmd, "parse") == 0) {
-      AstModule* module = parse_module(arena, file_path, tokens);
-      ast_dump_module(module, stdout);
-    } else if (strcmp(cmd, "format") == 0) {
-      FormatOptions opts;
-      if (!parse_format_args(argc, argv, &opts)) {
-        arena_destroy(arena);
-        free(source);
-        return 1;
-      }
-      AstModule* module = parse_module(arena, opts.input_path, tokens);
-      if (opts.write_in_place || opts.output_path) {
-        const char* output_path = opts.write_in_place ? opts.input_path : opts.output_path;
-        FILE* out = fopen(output_path, "w");
-        if (!out) {
-          fprintf(stderr, "error: could not open '%s' for writing: %s\n", output_path, strerror(errno));
-          arena_destroy(arena);
-          free(source);
-          return 1;
-        }
-        pretty_print_module(module, out);
-        fclose(out);
-      } else {
-        pretty_print_module(module, stdout);
-      }
-    }
-    arena_destroy(arena);
-    free(source);
+    file_path = argv[0];
   } else {
     fprintf(stderr, "error: unknown command '%s'\n", cmd);
     print_usage(argv[-1]);
     return 1;
   }
+
+  source = read_file(file_path, &file_size);
+  if (!source) {
+    fprintf(stderr, "error: could not read file '%s'\n", file_path);
+    return 1;
+  }
+  arena = arena_create(1024 * 1024);
+  if (!arena) {
+    free(source);
+    diag_fatal("could not allocate arena");
+  }
+  TokenList tokens = lexer_tokenize(arena, file_path, source, file_size);
+
+  if (strcmp(cmd, "lex") == 0) {
+    dump_tokens(&tokens);
+  } else if (strcmp(cmd, "parse") == 0) {
+    AstModule* module = parse_module(arena, file_path, tokens);
+    ast_dump_module(module, stdout);
+  } else if (is_format) {
+    AstModule* module = parse_module(arena, format_opts.input_path, tokens);
+    if (format_opts.write_in_place || format_opts.output_path) {
+      const char* output_path = format_opts.write_in_place ? format_opts.input_path : format_opts.output_path;
+      FILE* out = fopen(output_path, "w");
+      if (!out) {
+        fprintf(stderr, "error: could not open '%s' for writing: %s\n", output_path, strerror(errno));
+        arena_destroy(arena);
+        free(source);
+        return 1;
+      }
+      pretty_print_module(module, out);
+      fclose(out);
+    } else {
+      pretty_print_module(module, stdout);
+    }
+  }
+
+  arena_destroy(arena);
+  free(source);
   return 0;
 }
 
