@@ -1,47 +1,42 @@
 # Rae Compiler Test Suite
 
-Each test in `tests/cases/` is powered by the Bash runner in
-`tools/run_tests.sh` and consists of up to three files sharing the same stem:
+Each test in `tests/cases/` is powered by `tools/run_tests.sh` and may include
+up to three files sharing the same stem:
 
-- `NNN_name.rae` – Rae source that is passed to the compiler CLI
-- `NNN_name.expect` – canonical stdout/stderr expected from the command
-- `NNN_name.cmd` (optional) – overrides the CLI invocation used for the test
+- `NNN_name.rae` – Rae source fed to the CLI
+- `NNN_name.expect` – Expected stdout/stderr or formatted code
+- `NNN_name.cmd` – Optional override for the CLI command/arguments
 
-## `.cmd` files
+## `.cmd` overrides
 
-A `.cmd` file contains a single command line that replaces the default
-`parse` invocation. The line is split just like a normal shell command, so you
-can specify multi-word invocations:
+The `.cmd` file contains a single line that replaces the default `parse`
+invocation. The runner splits the line into arguments before executing
+`bin/rae`, so multi-word commands are supported:
 
 ```
-format             # default parse replacement
+format
 format --output {{TMP_OUTPUT}}
-lex --some-flag
+format --write {{TMP_INPUT}}
 ```
 
-The runner automatically appends the `.rae` path to the end of the argument
-list. If the file is empty (or missing entirely) the test falls back to
-`rae parse`.
+`{{TMP_OUTPUT}}` and `{{TMP_INPUT}}` are placeholders handled by the runner:
 
-## Temporary output placeholder
+- `{{TMP_OUTPUT}}` tells the runner to create a temp file, substitute its path
+  into the command, and then compare the file contents to `.expect` (while also
+  asserting the formatter produced no stdout/stderr).
+- `{{TMP_INPUT}}` copies the `.rae` source to a temp file, substitutes that path
+  into the command, and skips auto-appending the original `.rae`. After the run
+  the modified temp file must match `.expect`, again with no stdout/stderr.
 
-When the command line includes the literal token `{{TMP_OUTPUT}}` the runner
-creates a temporary file, replaces the placeholder with that file path and,
-after the command finishes, compares the contents of the temp file against the
-`.expect` file. This is how format tests assert that `--output`/`--write` write
-the canonical program without producing stdout.
+All temporary files are removed after each test, and placeholder-powered runs
+must not emit stdout/stderr; any output fails the test so format regressions
+surface quickly.
 
-Rules enforced for placeholder runs:
+## Writing new tests
 
-1. The command must not print anything to stdout/stderr. Any output causes the
-   test to fail with a helpful message so format regressions surface quickly.
-2. Temporary files are deleted after each test so the suite remains hermetic.
+1. Create a new `.rae`/`.expect` pair under `tests/cases/`.
+2. Add a `.cmd` if the test needs a special invocation (e.g., `format --write`).
+3. Run `make test` from `compiler/` to execute the suite.
 
-## Adding new tests
-
-1. Drop a new `.rae` and `.expect` pair into `tests/cases/`.
-2. Add a `.cmd` if you need specialized invocation (e.g., `format --write`).
-3. Run `make test` from `compiler/` to execute the full suite.
-
-The runner also performs extra checks for plain `format` tests (idempotence and
-AST comparisons) so leaning on these helpers is encouraged.
+Pure `format` tests automatically run the extra idempotence + AST checks baked
+into the runner, so prefer `format` wherever possible.
