@@ -7,16 +7,6 @@
 
 ## Tasks
 
-### T008 - Compiler: plan multifile build support
-- Repo: rae
-- Summary:
-  - Document the concrete steps required to compile and link a simple multi-file Rae program (module boundaries, build graph, CLI flags)
-  - Identify parser/AST/runtime gaps blocking multi-file compilation and propose minimal changes
-  - Outline a small demo program that would validate the feature once implemented
-- Acceptance:
-  - Design/plan document checked into `docs/` (or `spec/`) describing the technical approach and milestones
-  - Actionable list of follow-up engineering tasks with rough effort estimates
-
 ### T009 - Compiler: research minimal C graphics library for game example
 - Repo: rae
 - Summary:

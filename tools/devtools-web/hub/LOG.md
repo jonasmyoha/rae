@@ -14,3 +14,5 @@
 - Completed T006 (Devtools: list all compiler tests) — attempted `bun run lint` (tsc exited without diagnostics)
 - Started T007 (Devtools: unify test run + code viewer UI)
 - Completed T007 (Devtools: unify test run + code viewer UI) — attempted `bun run lint` (tsc exited without diagnostics)
+- Started T008 (Compiler: plan multifile build support)
+- Completed T008 (Compiler: plan multifile build support) — `cd rae/compiler && make test`
