@@ -10,3 +10,5 @@
 - Completed T004 (Add regression test for `rae format --write`) — `cd rae/compiler && make test`
 - Started T005 (Document hub workflow in devtools README)
 - Completed T005 (Document hub workflow in devtools README)
+- Started T006 (Devtools: list all compiler tests)
+- Completed T006 (Devtools: list all compiler tests) — attempted `bun run lint` (tsc exited without diagnostics)
