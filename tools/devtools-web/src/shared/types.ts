@@ -15,6 +15,18 @@ export type ServerInfoMessage = {
   startedAt: string;
 };
 
+export type ExampleFileDescriptor = {
+  path: string;
+  name: string;
+};
+
+export type ExampleDescriptor = {
+  id: string;
+  name: string;
+  entry: string;
+  files: ExampleFileDescriptor[];
+};
+
 export type TestRunMode = "all" | "failed";
 export type BuildCommandType = "build" | "clean" | "rebuild";
 
@@ -89,6 +101,40 @@ export type BuildRunErrorMessage = {
   timestamp: string;
 };
 
+export type ExampleRunStartedMessage = {
+  type: "example-run-started";
+  runId: string;
+  entry: string;
+  timestamp: string;
+};
+
+export type ExampleRunOutputMessage = {
+  type: "example-run-output";
+  runId: string;
+  entry: string;
+  stream: "stdout" | "stderr";
+  line: string;
+  timestamp: string;
+};
+
+export type ExampleRunCompletedMessage = {
+  type: "example-run-completed";
+  runId: string;
+  entry: string;
+  exitCode: number | null;
+  success: boolean;
+  durationMs: number;
+  timestamp: string;
+};
+
+export type ExampleRunErrorMessage = {
+  type: "example-run-error";
+  runId: string;
+  entry: string;
+  message: string;
+  timestamp: string;
+};
+
 export type TestRunCompletedMessage = {
   type: "test-run-completed";
   runId: string;
@@ -118,7 +164,11 @@ export type ServerEvent =
   | BuildRunStartedMessage
   | BuildRunOutputMessage
   | BuildRunCompletedMessage
-  | BuildRunErrorMessage;
+  | BuildRunErrorMessage
+  | ExampleRunStartedMessage
+  | ExampleRunOutputMessage
+  | ExampleRunCompletedMessage
+  | ExampleRunErrorMessage;
 
 export type ClientHelloMessage = {
   type: "client-hello";
@@ -135,4 +185,13 @@ export type ClientRunBuildMessage = {
   command: BuildCommandType;
 };
 
-export type ClientEvent = ClientHelloMessage | ClientRunTestsMessage | ClientRunBuildMessage;
+export type ClientRunExampleMessage = {
+  type: "run-example";
+  entry: string;
+};
+
+export type ClientEvent =
+  | ClientHelloMessage
+  | ClientRunTestsMessage
+  | ClientRunBuildMessage
+  | ClientRunExampleMessage;

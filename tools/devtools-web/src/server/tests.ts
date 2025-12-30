@@ -186,13 +186,14 @@ export class TestRunner {
       return;
     }
 
+    const details = "details" in parsed ? parsed.details : undefined;
     const caseMessage: TestRunCaseMessage = {
       type: "test-case",
       runId: this.activeRun.id,
       case: {
         name: parsed.name,
         status: parsed.type === "test-pass" ? "pass" : parsed.type === "test-fail" ? "fail" : "error",
-        details: parsed.details
+        details
       },
       timestamp: new Date().toISOString()
     };

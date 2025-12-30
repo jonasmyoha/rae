@@ -23,3 +23,4 @@
 - Started T011 (Implement minimal Rae bytecode VM)
 - Completed T011 (Implement minimal Rae bytecode VM) — `cd rae/compiler && make test`, `rae/compiler/bin/rae run examples/hello.rae`
 - Started T014 (Devtools example runner)
+- Completed T014 (Devtools example runner) — `bun run lint`, `cd rae/compiler && make test`

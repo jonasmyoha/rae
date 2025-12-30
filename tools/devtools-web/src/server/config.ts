@@ -9,6 +9,7 @@ export type RaeDevtoolsConfig = {
   port: number;
   testsPath?: string;
   syntaxSummaryPath?: string;
+  examplesPath?: string;
 };
 
 const DEFAULT_CONFIG: RaeDevtoolsConfig = {
@@ -18,7 +19,8 @@ const DEFAULT_CONFIG: RaeDevtoolsConfig = {
   cleanCommand: "make clean",
   port: 3000,
   testsPath: "compiler/tests",
-  syntaxSummaryPath: "docs/rae_syntax.json"
+  syntaxSummaryPath: "docs/rae_syntax.json",
+  examplesPath: "examples"
 };
 
 const PROJECT_ROOT = path.resolve(process.cwd());
@@ -62,4 +64,8 @@ export function getTestsRoot(config: RaeDevtoolsConfig): string {
 
 export function getSyntaxSummaryPath(config: RaeDevtoolsConfig): string {
   return resolveCompilerPath(config, config.syntaxSummaryPath ?? "docs/rae_syntax.json");
+}
+
+export function getExamplesRoot(config: RaeDevtoolsConfig): string {
+  return resolveCompilerPath(config, config.examplesPath ?? "examples");
 }

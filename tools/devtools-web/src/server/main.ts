@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { Buffer } from "node:buffer";
-import { getSyntaxSummaryPath, getTestsRoot, loadConfig } from "./config";
+import { getExamplesRoot, getSyntaxSummaryPath, getTestsRoot, loadConfig } from "./config";
 import type { ClientEvent, ServerEvent } from "../shared/types";
 import { TestRunner } from "./tests";
 import { BuildRunner } from "./build";
 import { StatsStore } from "./stats";
 import { readTestTree, readTestFile } from "./testFiles";
+import { listExamples, readExampleFile } from "./examples";
+import { ExampleRunner } from "./exampleRunner";
 
 type SocketData = {
   id: string;
@@ -21,8 +23,10 @@ const BUILD_VERSION = randomUUID();
 const statsStore = new StatsStore();
 const testRunner = new TestRunner(CONFIG, broadcastEvent, statsStore);
 const buildRunner = new BuildRunner(CONFIG, broadcastEvent, statsStore);
+const exampleRunner = new ExampleRunner(CONFIG, broadcastEvent);
 const testsRoot = getTestsRoot(CONFIG);
 const syntaxSummaryPath = getSyntaxSummaryPath(CONFIG);
+const examplesRoot = getExamplesRoot(CONFIG);
 
 const server = Bun.serve<SocketData>({
   port: CONFIG.port,
@@ -97,6 +101,46 @@ const server = Bun.serve<SocketData>({
       }
     }
 
+    if (url.pathname === "/api/examples" && req.method === "GET") {
+      const examples = await listExamples(examplesRoot);
+      return new Response(JSON.stringify({ examples }), {
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    if (url.pathname === "/api/examples/source" && req.method === "GET") {
+      const relativePath = url.searchParams.get("path");
+      if (!relativePath) {
+        return new Response(JSON.stringify({ error: "Missing path" }), { status: 400 });
+      }
+      try {
+        const contents = await readExampleFile(examplesRoot, relativePath);
+        return new Response(
+          JSON.stringify({
+            path: relativePath,
+            contents
+          }),
+          { headers: { "Content-Type": "application/json" } }
+        );
+      } catch (error) {
+        return new Response(JSON.stringify({ error: "Unable to read example file" }), {
+          status: 400
+        });
+      }
+    }
+
+    if (url.pathname === "/api/examples/run" && req.method === "POST") {
+      const payload = await safeJson(req);
+      const entry = typeof payload.entry === "string" ? payload.entry : null;
+      if (!entry) {
+        return new Response(JSON.stringify({ error: "Missing entry path" }), { status: 400 });
+      }
+      exampleRunner.run(entry);
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
     return serveStaticFile(url);
   },
   websocket: {
@@ -140,6 +184,10 @@ function handleClientEvent(event: ClientEvent) {
 
   if (event.type === "run-build") {
     buildRunner.run(event.command);
+  }
+
+  if (event.type === "run-example") {
+    exampleRunner.run(event.entry);
   }
 }
 
