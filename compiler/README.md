@@ -23,6 +23,12 @@ bin/rae format <file>  # pretty-print canonical Rae (stdout by default)
 bin/rae run <file>     # execute Rae source via the bytecode VM (hot reload path)
 ```
 
+Pass `--watch` to keep the VM alive and reload the file whenever it changes:
+
+```bash
+bin/rae run --watch examples/hello.rae
+```
+
 Formatting options:
 
 ```bash
