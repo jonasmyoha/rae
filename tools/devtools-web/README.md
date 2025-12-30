@@ -79,6 +79,7 @@ bun run start
 - Selecting an example reveals its file list and enables the **Run example** button, which calls `bin/rae run <entry>` via the new bytecode VM.
 - Output streams into a terminal next to the file tree; click any file button to view the highlighted source without leaving the dashboard.
 - The data model already supports multi-file projects—if a folder contains a `main.rae`, it becomes the default entry; otherwise the first `.rae` file is used.
+- Toggle **Watch** to run `bin/rae run --watch` so code changes (e.g., the `hot_reload.rae` sample) automatically recompile and stream logs. Use the inline editor + Save button to update the active file without leaving the dashboard.
 
 ### Track Stats
 

@@ -4,6 +4,7 @@ import path from "node:path";
 import type {
   ExampleRunCompletedMessage,
   ExampleRunErrorMessage,
+  ExampleRunMode,
   ExampleRunOutputMessage,
   ExampleRunStartedMessage,
   ServerEvent,
@@ -16,9 +17,14 @@ type BroadcastFn = (event: ServerEvent) => void;
 type ActiveRun = {
   id: string;
   entry: string;
+  mode: ExampleRunMode;
   startedAt: number;
   process: ReturnType<typeof spawn>;
   buffers: Record<"stdout" | "stderr", string>;
+};
+
+export type ExampleRunOptions = {
+  watch?: boolean;
 };
 
 export class ExampleRunner {
@@ -29,23 +35,21 @@ export class ExampleRunner {
     private broadcast: BroadcastFn
   ) {}
 
-  run(entry: string) {
+  run(entry: string, options: ExampleRunOptions = {}) {
     if (!entry) {
       this.broadcastStatus("Example entry path missing.");
       return;
     }
 
-    if (this.activeRun) {
-      this.broadcastStatus("Example run already in progress. Please wait.");
-      return;
-    }
+    this.stop();
 
     const runId = randomUUID();
     const startedAt = Date.now();
     const cwd = resolveCompilerPath(this.config);
     const entryPath = path.join(this.config.examplesPath ?? "examples", entry);
     const binPath = path.join("compiler", "bin", "rae");
-    const cmd = `./${binPath} run ${entryPath}`;
+    const mode: ExampleRunMode = options.watch ? "watch" : "run";
+    const cmd = `./${binPath} run ${options.watch ? "--watch " : ""}${entryPath}`;
 
     const child = spawn(cmd, {
       cwd,
@@ -56,6 +60,7 @@ export class ExampleRunner {
     this.activeRun = {
       id: runId,
       entry,
+      mode,
       startedAt,
       process: child,
       buffers: { stdout: "", stderr: "" },
@@ -65,6 +70,7 @@ export class ExampleRunner {
       type: "example-run-started",
       runId,
       entry,
+      mode,
       timestamp: new Date().toISOString(),
     } satisfies ExampleRunStartedMessage);
 
@@ -85,6 +91,7 @@ export class ExampleRunner {
         type: "example-run-completed",
         runId,
         entry,
+        mode,
         exitCode: code ?? null,
         success: code === 0,
         durationMs: Date.now() - startedAt,
@@ -106,6 +113,7 @@ export class ExampleRunner {
         type: "example-run-output",
         runId: this.activeRun.id,
         entry: this.activeRun.entry,
+        mode: this.activeRun.mode,
         stream,
         line,
         timestamp: new Date().toISOString(),
@@ -122,6 +130,7 @@ export class ExampleRunner {
           type: "example-run-output",
           runId: this.activeRun.id,
           entry: this.activeRun.entry,
+          mode: this.activeRun.mode,
           stream,
           line: leftover,
           timestamp: new Date().toISOString(),
@@ -137,6 +146,7 @@ export class ExampleRunner {
       type: "example-run-error",
       runId: this.activeRun.id,
       entry: this.activeRun.entry,
+      mode: this.activeRun.mode,
       message: error instanceof Error ? error.message : String(error),
       timestamp: new Date().toISOString(),
     } satisfies ExampleRunErrorMessage);
@@ -151,6 +161,16 @@ export class ExampleRunner {
   }
 
   private cleanup() {
+    this.activeRun = null;
+  }
+
+  stop() {
+    if (!this.activeRun) return;
+    try {
+      this.activeRun.process.kill();
+    } catch (error) {
+      console.warn("[examples] Failed to kill process", error);
+    }
     this.activeRun = null;
   }
 }

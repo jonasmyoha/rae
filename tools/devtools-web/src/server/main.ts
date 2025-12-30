@@ -7,7 +7,7 @@ import { TestRunner } from "./tests";
 import { BuildRunner } from "./build";
 import { StatsStore } from "./stats";
 import { readTestTree, readTestFile } from "./testFiles";
-import { listExamples, readExampleFile } from "./examples";
+import { listExamples, readExampleFile, writeExampleFile } from "./examples";
 import { ExampleRunner } from "./exampleRunner";
 
 type SocketData = {
@@ -135,10 +135,36 @@ const server = Bun.serve<SocketData>({
       if (!entry) {
         return new Response(JSON.stringify({ error: "Missing entry path" }), { status: 400 });
       }
-      exampleRunner.run(entry);
+      exampleRunner.run(entry, { watch: Boolean(payload.watch) });
       return new Response(JSON.stringify({ ok: true }), {
         headers: { "Content-Type": "application/json" }
       });
+    }
+
+    if (url.pathname === "/api/examples/stop" && req.method === "POST") {
+      exampleRunner.stop();
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    if (url.pathname === "/api/examples/save" && req.method === "POST") {
+      const payload = await safeJson(req);
+      const relativePath = typeof payload.path === "string" ? payload.path : null;
+      const contents = typeof payload.contents === "string" ? payload.contents : null;
+      if (!relativePath || contents === null) {
+        return new Response(JSON.stringify({ error: "Missing path or contents" }), { status: 400 });
+      }
+      try {
+        await writeExampleFile(examplesRoot, relativePath, contents);
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { "Content-Type": "application/json" }
+        });
+      } catch (error) {
+        return new Response(JSON.stringify({ error: "Unable to write example file" }), {
+          status: 400
+        });
+      }
     }
 
     return serveStaticFile(url);
