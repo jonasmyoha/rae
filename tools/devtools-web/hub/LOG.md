@@ -2,3 +2,5 @@
 
 - Started T001 (Format CLI options work under tests)
 - Completed T001 (Format CLI options work under tests) — `cd rae/compiler && make test`, `rae/compiler/bin/rae format --write ...`, `rae/compiler/bin/rae format --output ...`
+- Started T002 (Document Rae format output workflows)
+- Completed T002 (Document Rae format output workflows) — `cd rae/compiler && make test`
