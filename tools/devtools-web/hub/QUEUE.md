@@ -7,16 +7,6 @@
 
 ## Tasks
 
-### T012 - Hot-reload + dev runtime support
-- Repo: rae
-- Summary:
-  - Extend the VM with a chunk registry so functions/modules can be swapped without restarting the process
-  - Expose CLI/server hook to reload a file on change (watch mode) and document the runtime API for embedding (e.g., `rae_vm_reload(path)`)
-  - Prepare for release builds by ensuring bytecode compiler is available as a library
-- Acceptance:
-  - Manual demo showing a running VM session reloading a modified file
-  - Docs describe embedding APIs and shipped runtime expectations
-
 ### T013 - Compiler C backend plan & bootstrap
 - Repo: rae
 - Summary:
