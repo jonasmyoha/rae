@@ -16,3 +16,5 @@
 - Completed T007 (Devtools: unify test run + code viewer UI) — attempted `bun run lint` (tsc exited without diagnostics)
 - Started T008 (Compiler: plan multifile build support)
 - Completed T008 (Compiler: plan multifile build support) — `cd rae/compiler && make test`
+- Started T009 (Compiler: research minimal C graphics library for game example)
+- Completed T009 (Compiler: research minimal C graphics library for game example) — `cd rae/compiler && make test`
