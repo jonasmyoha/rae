@@ -209,6 +209,23 @@ rae-devtools/
 4. Commit meaningful increments frequently (aim for 1–10 commits per day) and push once changes build/run cleanly.
 5. Open PRs with screenshots or terminal captures so reviewers can visualize the UI.
 
+## Hub Workflow
+
+The lightweight hub under [`hub/`](hub/) coordinates all Rae work (compiler and
+devtools) via numbered tasks:
+
+1. Queue a task in [`hub/QUEUE.md`](hub/QUEUE.md) with a short summary and
+   acceptance checks. Every task uses the `T### - title` format.
+2. Move the task to [`hub/INPROGRESS.md`](hub/INPROGRESS.md) once you start
+   working. Create a branch named `agent/<repo>/T###-slug` in the relevant repo.
+3. Log starts, completions, and verification commands in
+   [`hub/LOG.md`](hub/LOG.md) so the UI (and humans) can track progress.
+4. When finished, record the outcome in `hub/RESULTS/T###.md` (summary + tests),
+   run the acceptance checks, and remove the task from the queue.
+
+The single-agent setup simply repeats these steps task-by-task, ensuring the
+devtools dashboard and the CLI stay in sync with the latest automation work.
+
 ## License
 
 Apache 2.0 (see `LICENSE` file).
