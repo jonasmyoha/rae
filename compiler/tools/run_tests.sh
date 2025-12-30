@@ -52,22 +52,39 @@ for TEST_FILE in $TEST_FILES; do
   fi
 
   TMP_OUTPUT_FILE=""
+  TMP_INPUT_FILE=""
+  APPEND_TEST_FILE=1
   for idx in "${!CMD_ARGS[@]}"; do
     if [ "${CMD_ARGS[$idx]}" = "{{TMP_OUTPUT}}" ]; then
       if [ -z "$TMP_OUTPUT_FILE" ]; then
         TMP_OUTPUT_FILE=$(mktemp)
       fi
       CMD_ARGS[$idx]="$TMP_OUTPUT_FILE"
+    elif [ "${CMD_ARGS[$idx]}" = "{{TMP_INPUT}}" ]; then
+      if [ -z "$TMP_INPUT_FILE" ]; then
+        TMP_INPUT_FILE=$(mktemp)
+        cp "$TEST_FILE" "$TMP_INPUT_FILE"
+      fi
+      CMD_ARGS[$idx]="$TMP_INPUT_FILE"
+      APPEND_TEST_FILE=0
     fi
   done
 
-  CMD_STDOUT=$("$BIN" "${CMD_ARGS[@]}" "$TEST_FILE" 2>&1 || true)
+  CMD_RUN_ARGS=("${CMD_ARGS[@]}")
+  if [ $APPEND_TEST_FILE -eq 1 ]; then
+    CMD_RUN_ARGS+=("$TEST_FILE")
+  fi
+
+  CMD_STDOUT=$("$BIN" "${CMD_RUN_ARGS[@]}" 2>&1 || true)
   ACTUAL_OUTPUT="$CMD_STDOUT"
   if [ -n "$TMP_OUTPUT_FILE" ]; then
     if [ ! -f "$TMP_OUTPUT_FILE" ]; then
       echo "FAIL: $TEST_NAME (expected formatter output file '$TMP_OUTPUT_FILE')"
       ((FAILED++))
       rm -f "$TMP_OUTPUT_FILE"
+      if [ -n "$TMP_INPUT_FILE" ]; then
+        rm -f "$TMP_INPUT_FILE"
+      fi
       continue
     fi
     if [ -n "$CMD_STDOUT" ]; then
@@ -76,10 +93,27 @@ for TEST_FILE in $TEST_FILES; do
       echo "$CMD_STDOUT" | sed 's/^/    /'
       ((FAILED++))
       rm -f "$TMP_OUTPUT_FILE"
+      if [ -n "$TMP_INPUT_FILE" ]; then
+        rm -f "$TMP_INPUT_FILE"
+      fi
       continue
     fi
     ACTUAL_OUTPUT=$(cat "$TMP_OUTPUT_FILE")
     rm -f "$TMP_OUTPUT_FILE"
+    if [ -n "$TMP_INPUT_FILE" ]; then
+      rm -f "$TMP_INPUT_FILE"
+    fi
+  elif [ -n "$TMP_INPUT_FILE" ]; then
+    if [ -n "$CMD_STDOUT" ]; then
+      echo "FAIL: $TEST_NAME (expected no stdout when rewriting input copy)"
+      echo "  Stdout:"
+      echo "$CMD_STDOUT" | sed 's/^/    /'
+      ((FAILED++))
+      rm -f "$TMP_INPUT_FILE"
+      continue
+    fi
+    ACTUAL_OUTPUT=$(cat "$TMP_INPUT_FILE")
+    rm -f "$TMP_INPUT_FILE"
   fi
 
   EXPECTED_OUTPUT=$(cat "$EXPECT_FILE")
