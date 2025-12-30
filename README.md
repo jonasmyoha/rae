@@ -42,6 +42,9 @@ bin/rae format <file>  # pretty-print canonical Rae (stdout by default)
 bin/rae run <file>     # execute via the interpreter/VM (hot reload ready)
 ```
 
+Use `bin/rae run --watch <file>` to keep the VM running and recompile whenever the file
+changes—great for experimenting with the new interpreted workflow.
+
 `rae format` prints to stdout unless you pass either `--write/-w` to rewrite the
 input file in place or `--output <path>` to emit to a different file. The two
 flags are mutually exclusive so you can safely script them:

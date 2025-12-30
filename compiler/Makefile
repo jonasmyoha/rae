@@ -20,7 +20,8 @@ SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/vm_chunk.c \
        $(SRC_DIR)/vm_value.c \
        $(SRC_DIR)/vm.c \
-       $(SRC_DIR)/vm_compiler.c
+       $(SRC_DIR)/vm_compiler.c \
+       $(SRC_DIR)/vm_registry.c
 
 OBJS = $(SRCS:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)
 TARGET = $(BIN_DIR)/rae
