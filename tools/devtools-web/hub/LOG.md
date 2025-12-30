@@ -6,3 +6,5 @@
 - Completed T002 (Document Rae format output workflows) — `cd rae/compiler && make test`
 - Started T003 (Document compiler test runner .cmd features)
 - Completed T003 (Document compiler test runner .cmd features) — `cd rae/compiler && make test`
+- Started T004 (Add regression test for `rae format --write`)
+- Completed T004 (Add regression test for `rae format --write`) — `cd rae/compiler && make test`
