@@ -50,8 +50,11 @@ let selectedTestFile = null;
 let selectedTestSource = "";
 let raeSyntax = null;
 const errorEntries = [];
+const TEST_TREE_REFRESH_MS = 60000;
 
 const HEARTBEAT_STALE_MS = 60000;
+let testTreeRefreshTimer = null;
+let knownTests = new Map();
 
 function connect() {
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
@@ -306,6 +309,7 @@ function handleTestRunCompleted(event) {
   setTestButtonsDisabled(false);
   latestRunId = null;
   updateSummaryText(event.success ? "Suite passed" : "Suite has failures");
+  loadTestFileTree({ silent: true });
 }
 
 function handleBuildRunCompleted(event) {
@@ -485,11 +489,11 @@ function flashCopyState(button, tooltip, copied = true) {
 function renderTestList() {
   if (!testList) return;
   testList.innerHTML = "";
-  const entries = Array.from(testCases.values());
+  const entries = buildRenderableTests();
   if (!entries.length) {
     const empty = document.createElement("p");
     empty.className = "test-list-empty";
-    empty.textContent = "Run tests to see per-test status.";
+    empty.textContent = "No test files discovered.";
     testList.appendChild(empty);
     return;
   }
@@ -525,7 +529,7 @@ function renderTestList() {
 
       const badge = document.createElement("span");
       badge.className = `badge ${testCase.status}`;
-      badge.textContent = testCase.status;
+      badge.textContent = testCase.status === "pending" ? "pending" : testCase.status;
 
       row.appendChild(name);
       row.appendChild(badge);
@@ -535,6 +539,26 @@ function renderTestList() {
     section.appendChild(body);
     testList.appendChild(section);
   }
+}
+
+function buildRenderableTests() {
+  const entries = [];
+  for (const [name, info] of knownTests.entries()) {
+    const testCase = testCases.get(name);
+    entries.push({
+      name,
+      status: testCase?.status ?? "pending",
+      details: testCase?.details,
+      timestamp: testCase?.timestamp,
+      path: info.path
+    });
+  }
+  for (const [name, testCase] of testCases.entries()) {
+    if (!knownTests.has(name)) {
+      entries.push({ ...testCase });
+    }
+  }
+  return entries;
 }
 
 function updateSummaryText(prefix) {
@@ -565,7 +589,11 @@ function renderTestDetail() {
   if (!testCase) {
     const missing = document.createElement("p");
     missing.className = "detail-placeholder";
-    missing.textContent = "No details available for this test yet.";
+    if (knownTests.has(selectedTestName)) {
+      missing.textContent = "No run data for this test yet. Run the suite to populate results.";
+    } else {
+      missing.textContent = "No details available for this test yet.";
+    }
     testDetail.appendChild(missing);
     return;
   }
@@ -577,7 +605,7 @@ function renderTestDetail() {
 
   const badge = document.createElement("span");
   badge.className = `detail-badge ${testCase.status}`;
-  badge.textContent = testCase.status;
+  badge.textContent = testCase.status === "pending" ? "pending" : testCase.status;
 
   header.appendChild(title);
   header.appendChild(badge);
@@ -705,19 +733,31 @@ function formatMetricStatus(metadata = {}) {
   return "Recorded";
 }
 
-async function loadTestFileTree() {
+async function loadTestFileTree(options = {}) {
   if (!testFileTree) return;
-  testFileTree.innerHTML = `<p class="test-list-empty">Loading test files…</p>`;
+  if (!options.silent) {
+    testFileTree.innerHTML = `<p class="test-list-empty">Loading test files…</p>`;
+  }
   try {
     const response = await fetch("/api/tests/files");
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
     testFilesTree = data.tree ?? [];
+    updateKnownTests(testFilesTree);
     renderTestFileTree();
   } catch (error) {
     recordError("Test files", getErrorMessage(error));
-    testFileTree.innerHTML = `<p class="test-list-empty">Unable to load test files.</p>`;
+    if (!options.silent) {
+      testFileTree.innerHTML = `<p class="test-list-empty">Unable to load test files.</p>`;
+    }
+  } finally {
+    scheduleTestTreeRefresh();
   }
+}
+
+function scheduleTestTreeRefresh() {
+  if (testTreeRefreshTimer) clearTimeout(testTreeRefreshTimer);
+  testTreeRefreshTimer = setTimeout(() => loadTestFileTree({ silent: true }), TEST_TREE_REFRESH_MS);
 }
 
 function renderTestFileTree() {
@@ -761,6 +801,36 @@ function renderTreeNode(node) {
     li.appendChild(button);
   }
   return li;
+}
+
+function updateKnownTests(nodes) {
+  const flattened = flattenTestNodes(nodes);
+  knownTests = new Map(flattened.map((node) => [node.name, node]));
+  if (selectedTestName && !knownTests.has(selectedTestName) && !testCases.has(selectedTestName)) {
+    selectedTestName = null;
+  }
+  renderTestList();
+}
+
+function flattenTestNodes(nodes = [], prefix = "") {
+  const files = [];
+  nodes.forEach((node) => {
+    if (node.type === "file") {
+      if (node.name.endsWith(".rae")) {
+        files.push({
+          name: deriveTestName(node.name),
+          path: node.path
+        });
+      }
+    } else if (node.children?.length) {
+      files.push(...flattenTestNodes(node.children, `${prefix}${node.name}/`));
+    }
+  });
+  return files;
+}
+
+function deriveTestName(filename) {
+  return filename.replace(/\.[^.]+$/, "");
 }
 
 async function loadTestSource(path) {
