@@ -226,9 +226,16 @@ body {
 }
 
 .test-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.test-panel-body {
   display: grid;
   grid-template-columns: minmax(320px, 0.4fr) 1fr;
   gap: 1rem;
+  align-items: flex-start;
 }
 
 .test-summary-card {
@@ -457,56 +464,65 @@ body {
   min-width: 0;
 }
 
-.source-panel {
-  display: grid;
-  grid-template-columns: minmax(280px, 0.3fr) 1fr;
-  gap: 1rem;
-  min-height: 360px;
-}
-
-.source-tree {
+.test-inspector {
   border: 1px solid var(--border);
   border-radius: 1rem;
-  padding: 0.75rem;
-  overflow-y: auto;
-  max-height: 500px;
-}
-
-.source-tree ul {
-  list-style: none;
-  padding-left: 1rem;
-}
-
-.source-tree-label {
-  font-weight: 600;
-  color: var(--text-muted);
-  margin-bottom: 0.25rem;
-}
-
-.source-tree button {
-  background: none;
-  border: none;
-  color: var(--text);
-  cursor: pointer;
-  width: 100%;
-  text-align: left;
-  padding: 0.2rem 0.4rem;
-  border-radius: 0.4rem;
-}
-
-.source-tree button:hover,
-.source-tree button.is-active {
-  background: rgba(125, 211, 252, 0.1);
-}
-
-.source-viewer {
-  border: 1px solid var(--border);
-  border-radius: 1rem;
-  padding: 0.75rem 1rem;
   background: rgba(5, 6, 7, 0.8);
   display: flex;
   flex-direction: column;
+  gap: 0.5rem;
+  min-height: 360px;
+}
+
+.test-inspector-tabs {
+  display: inline-flex;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem 0 1rem;
+}
+
+.test-inspector-tabs button {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+
+.test-inspector-tabs button.is-active {
+  background: rgba(125, 211, 252, 0.15);
+  color: var(--text);
+  border-color: rgba(125, 211, 252, 0.4);
+}
+
+.inspect-panel {
+  padding: 0 1.25rem 1.25rem 1.25rem;
+  flex: 1;
+}
+
+.inspect-panel.is-hidden {
+  display: none;
+}
+
+.test-source-view {
+  display: flex;
+  flex-direction: column;
   gap: 0.75rem;
+}
+
+.source-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding-bottom: 0.5rem;
+}
+
+.source-header h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--text);
 }
 
 .source-code {
@@ -877,11 +893,7 @@ body {
     grid-template-columns: 1fr;
   }
 
-  .test-panel {
-    grid-template-columns: 1fr;
-  }
-
-  .source-panel {
+  .test-panel-body {
     grid-template-columns: 1fr;
   }
 }

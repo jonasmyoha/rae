@@ -27,13 +27,13 @@ const errorLogList = document.getElementById("error-log-list");
 const errorLogEmpty = document.getElementById("error-log-empty");
 const errorLogClose = document.getElementById("error-log-close");
 const errorLogBackdrop = document.getElementById("error-log-backdrop");
-const testFileTree = document.getElementById("test-file-tree");
 const testSourceTitle = document.getElementById("test-source-title");
 const testSourceCode = document.getElementById("test-source-code");
 const copyTestSourceBtn = document.getElementById("copy-test-source-btn");
 const buildBtn = document.getElementById("build-btn");
 const cleanBtn = document.getElementById("clean-btn");
 const rebuildBtn = document.getElementById("rebuild-btn");
+const inspectorTabs = document.querySelectorAll("[data-inspector-tab]");
 
 let socket;
 let reconnectTimer;
@@ -413,9 +413,11 @@ function resetTestCases() {
   testCases = new Map();
   summaryCounts = { passed: 0, failed: 0 };
   selectedTestName = null;
+  selectedTestFile = null;
   updateSummaryText("Running…");
   renderTestList();
   renderTestDetail();
+  loadSelectedTestSource();
 }
 
 setupCopyButton(copyTestLogBtn, () => {
@@ -440,6 +442,15 @@ setupCopyButton(copyNextStepsBtn, () => {
 });
 
 setupCopyButton(copyTestSourceBtn, () => selectedTestSource || "No test source selected.");
+inspectorTabs.forEach((tab) => {
+  tab.addEventListener("click", () => {
+    const tabName = tab.getAttribute("data-inspector-tab");
+    if (tabName) {
+      setInspectorTab(tabName);
+    }
+  });
+});
+setInspectorTab("result");
 
 function setupCopyButton(button, getText) {
   if (!button) return;
@@ -519,8 +530,10 @@ function renderTestList() {
       }
       row.addEventListener("click", () => {
         selectedTestName = testCase.name;
+        selectedTestFile = knownTests.get(testCase.name)?.path ?? null;
         renderTestList();
         renderTestDetail();
+        loadSelectedTestSource();
       });
 
       const name = document.createElement("span");
@@ -734,22 +747,14 @@ function formatMetricStatus(metadata = {}) {
 }
 
 async function loadTestFileTree(options = {}) {
-  if (!testFileTree) return;
-  if (!options.silent) {
-    testFileTree.innerHTML = `<p class="test-list-empty">Loading test files…</p>`;
-  }
   try {
     const response = await fetch("/api/tests/files");
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
     testFilesTree = data.tree ?? [];
     updateKnownTests(testFilesTree);
-    renderTestFileTree();
   } catch (error) {
     recordError("Test files", getErrorMessage(error));
-    if (!options.silent) {
-      testFileTree.innerHTML = `<p class="test-list-empty">Unable to load test files.</p>`;
-    }
   } finally {
     scheduleTestTreeRefresh();
   }
@@ -760,56 +765,17 @@ function scheduleTestTreeRefresh() {
   testTreeRefreshTimer = setTimeout(() => loadTestFileTree({ silent: true }), TEST_TREE_REFRESH_MS);
 }
 
-function renderTestFileTree() {
-  if (!testFileTree) return;
-  if (!testFilesTree.length) {
-    testFileTree.innerHTML = `<p class="test-list-empty">No test files found.</p>`;
-    return;
-  }
-
-  const list = document.createElement("ul");
-  testFilesTree.forEach((node) => {
-    list.appendChild(renderTreeNode(node));
-  });
-  testFileTree.innerHTML = "";
-  testFileTree.appendChild(list);
-}
-
-function renderTreeNode(node) {
-  const li = document.createElement("li");
-  if (node.type === "directory" && node.children?.length) {
-    const label = document.createElement("div");
-    label.textContent = node.name;
-    label.className = "source-tree-label";
-    li.appendChild(label);
-    const ul = document.createElement("ul");
-    node.children.forEach((child) => {
-      ul.appendChild(renderTreeNode(child));
-    });
-    li.appendChild(ul);
-  } else if (node.type === "file") {
-    const button = document.createElement("button");
-    button.textContent = node.name;
-    if (selectedTestFile === node.path) {
-      button.classList.add("is-active");
-    }
-    button.addEventListener("click", () => {
-      selectedTestFile = node.path;
-      renderTestFileTree();
-      loadTestSource(node.path);
-    });
-    li.appendChild(button);
-  }
-  return li;
-}
-
 function updateKnownTests(nodes) {
   const flattened = flattenTestNodes(nodes);
   knownTests = new Map(flattened.map((node) => [node.name, node]));
   if (selectedTestName && !knownTests.has(selectedTestName) && !testCases.has(selectedTestName)) {
     selectedTestName = null;
+    selectedTestFile = null;
+  } else if (selectedTestName && knownTests.has(selectedTestName)) {
+    selectedTestFile = knownTests.get(selectedTestName)?.path ?? null;
   }
   renderTestList();
+  loadSelectedTestSource();
 }
 
 function flattenTestNodes(nodes = [], prefix = "") {
@@ -835,6 +801,7 @@ function deriveTestName(filename) {
 
 async function loadTestSource(path) {
   if (!testSourceCode) return;
+  selectedTestFile = path;
   testSourceTitle.textContent = path;
   testSourceCode.innerHTML = "<code>Loading source…</code>";
   try {
@@ -859,6 +826,24 @@ function renderTestSource() {
   }
   const highlighted = highlightRae(selectedTestSource);
   testSourceCode.innerHTML = `<code>${highlighted}</code>`;
+}
+
+function loadSelectedTestSource() {
+  if (!testSourceCode || !testSourceTitle) return;
+  if (!selectedTestName) {
+    selectedTestSource = "";
+    selectedTestFile = null;
+    testSourceTitle.textContent = "Select a test";
+    testSourceCode.innerHTML = "<code>No file selected.</code>";
+    return;
+  }
+  if (!selectedTestFile) {
+    selectedTestSource = "";
+    testSourceTitle.textContent = `${selectedTestName}.rae`;
+    testSourceCode.innerHTML = "<code>Source file not found yet.</code>";
+    return;
+  }
+  loadTestSource(selectedTestFile);
 }
 
 function highlightRae(code) {
@@ -893,6 +878,25 @@ function highlightRae(code) {
     .replace(keywordRegex, '<span class="tok-keyword">$1</span>');
 
   return result;
+}
+
+function setInspectorTab(tab) {
+  inspectorTabs.forEach((button) => {
+    const current = button.getAttribute("data-inspector-tab");
+    if (current === tab) {
+      button.classList.add("is-active");
+    } else {
+      button.classList.remove("is-active");
+    }
+  });
+  document.querySelectorAll("[data-inspector-panel]").forEach((panel) => {
+    const panelName = panel.getAttribute("data-inspector-panel");
+    if (panelName === tab) {
+      panel.classList.remove("is-hidden");
+    } else {
+      panel.classList.add("is-hidden");
+    }
+  });
 }
 
 function escapeRegex(str) {

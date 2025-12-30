@@ -113,11 +113,48 @@
               <span class="pill pill--fail" id="summary-fail-count">0</span>
             </div>
           </div>
-          <div class="test-list" id="test-list" aria-live="polite">
-            <p class="test-list-empty">Run tests to see per-test status.</p>
-          </div>
-          <div class="test-detail" id="test-detail" aria-live="polite">
-            <p class="detail-placeholder">Select a test to see details.</p>
+          <div class="test-panel-body">
+            <div class="test-list" id="test-list" aria-live="polite">
+              <p class="test-list-empty">Run tests to see per-test status.</p>
+            </div>
+            <div class="test-inspector" id="test-inspector">
+              <div class="test-inspector-tabs" role="tablist">
+                <button type="button" class="is-active" data-inspector-tab="result">Result</button>
+                <button type="button" data-inspector-tab="source">Source</button>
+              </div>
+              <section
+                class="inspect-panel test-detail"
+                id="test-detail"
+                data-inspector-panel="result"
+                aria-live="polite"
+              >
+                <p class="detail-placeholder">Select a test to see details.</p>
+              </section>
+              <section
+                class="inspect-panel test-source-view is-hidden"
+                data-inspector-panel="source"
+                aria-live="polite"
+              >
+                <div class="source-header">
+                  <h3 id="test-source-title">Select a test</h3>
+                  <button
+                    class="copy-icon-btn"
+                    id="copy-test-source-btn"
+                    type="button"
+                    title="Copy test source"
+                    aria-label="Copy test source"
+                  >
+                    <svg aria-hidden="true" viewBox="0 0 24 24" role="img">
+                      <path d="M16 1H4a3 3 0 0 0-3 3v12h2V4a1 1 0 0 1 1-1h12z"></path>
+                      <path
+                        d="M20 5H8a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3zm1 15a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1z"
+                      ></path>
+                    </svg>
+                  </button>
+                </div>
+                <pre class="source-code" id="test-source-code"><code>No file selected.</code></pre>
+              </section>
+            </div>
           </div>
         </div>
       </section>
@@ -144,41 +181,6 @@
         <ul class="stats-list" id="stats-list">
           <li class="stats-empty">No stats recorded yet.</li>
         </ul>
-      </section>
-      <section class="panel panel--full" id="test-source-panel">
-        <header class="panel-header">
-          <div>
-            <h2>Test sources</h2>
-            <p class="panel-subtitle">Browse Rae test files with syntax highlighting</p>
-          </div>
-          <div class="panel-actions">
-            <button
-              class="copy-icon-btn"
-              id="copy-test-source-btn"
-              type="button"
-              title="Copy test source"
-              aria-label="Copy test source"
-            >
-              <svg aria-hidden="true" viewBox="0 0 24 24" role="img">
-                <path d="M16 1H4a3 3 0 0 0-3 3v12h2V4a1 1 0 0 1 1-1h12z"></path>
-                <path
-                  d="M20 5H8a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3zm1 15a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1z"
-                ></path>
-              </svg>
-            </button>
-          </div>
-        </header>
-        <div class="source-panel">
-          <aside class="source-tree" id="test-file-tree">
-            <p class="test-list-empty">Loading test files…</p>
-          </aside>
-          <article class="source-viewer">
-            <header>
-              <h3 id="test-source-title">Select a file</h3>
-            </header>
-            <pre class="source-code" id="test-source-code"><code>No file selected.</code></pre>
-          </article>
-        </div>
       </section>
       <section class="panel instructions" id="next-steps-panel">
         <header>
