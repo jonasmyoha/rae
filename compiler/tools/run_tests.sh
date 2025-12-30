@@ -38,21 +38,60 @@ for TEST_FILE in $TEST_FILES; do
   fi
   
   CMD_FILE="${TEST_FILE%.rae}.cmd"
-  CMD="parse"
+  CMD_ARGS=("parse")
+  CMD_LINE=""
   if [ -f "$CMD_FILE" ]; then
-    CMD=$(head -n 1 "$CMD_FILE" | tr -d '\r')
-    CMD=$(echo "$CMD" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-    if [ -z "$CMD" ]; then
-      CMD="parse"
+    CMD_LINE=$(head -n 1 "$CMD_FILE" | tr -d '\r')
+    CMD_LINE=$(echo "$CMD_LINE" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    if [ -n "$CMD_LINE" ]; then
+      read -r -a CMD_ARGS <<< "$CMD_LINE"
     fi
   fi
+  if [ ${#CMD_ARGS[@]} -eq 0 ]; then
+    CMD_ARGS=("parse")
+  fi
 
-  ACTUAL_OUTPUT=$("$BIN" "$CMD" "$TEST_FILE" 2>&1 || true)
+  TMP_OUTPUT_FILE=""
+  for idx in "${!CMD_ARGS[@]}"; do
+    if [ "${CMD_ARGS[$idx]}" = "{{TMP_OUTPUT}}" ]; then
+      if [ -z "$TMP_OUTPUT_FILE" ]; then
+        TMP_OUTPUT_FILE=$(mktemp)
+      fi
+      CMD_ARGS[$idx]="$TMP_OUTPUT_FILE"
+    fi
+  done
+
+  CMD_STDOUT=$("$BIN" "${CMD_ARGS[@]}" "$TEST_FILE" 2>&1 || true)
+  ACTUAL_OUTPUT="$CMD_STDOUT"
+  if [ -n "$TMP_OUTPUT_FILE" ]; then
+    if [ ! -f "$TMP_OUTPUT_FILE" ]; then
+      echo "FAIL: $TEST_NAME (expected formatter output file '$TMP_OUTPUT_FILE')"
+      ((FAILED++))
+      rm -f "$TMP_OUTPUT_FILE"
+      continue
+    fi
+    if [ -n "$CMD_STDOUT" ]; then
+      echo "FAIL: $TEST_NAME (expected no stdout when capturing formatted output)"
+      echo "  Stdout:"
+      echo "$CMD_STDOUT" | sed 's/^/    /'
+      ((FAILED++))
+      rm -f "$TMP_OUTPUT_FILE"
+      continue
+    fi
+    ACTUAL_OUTPUT=$(cat "$TMP_OUTPUT_FILE")
+    rm -f "$TMP_OUTPUT_FILE"
+  fi
+
   EXPECTED_OUTPUT=$(cat "$EXPECT_FILE")
+  CMD_NAME="${CMD_ARGS[0]}"
+  SIMPLE_FORMAT=0
+  if [ "$CMD_NAME" = "format" ] && [ ${#CMD_ARGS[@]} -eq 1 ]; then
+    SIMPLE_FORMAT=1
+  fi
   
   if [ "$ACTUAL_OUTPUT" = "$EXPECTED_OUTPUT" ]; then
-    if [ "$CMD" = "format" ]; then
-      IDEMP_OUTPUT=$("$BIN" "$CMD" "$EXPECT_FILE" 2>&1 || true)
+    if [ $SIMPLE_FORMAT -eq 1 ]; then
+      IDEMP_OUTPUT=$("$BIN" format "$EXPECT_FILE" 2>&1 || true)
       if [ "$IDEMP_OUTPUT" != "$EXPECTED_OUTPUT" ]; then
         echo "FAIL: $TEST_NAME (format not idempotent)"
         echo "  Expected canonical output to remain unchanged when formatting .expect file"
