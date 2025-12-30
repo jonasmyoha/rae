@@ -377,7 +377,7 @@ function handleExampleRunStarted(event) {
   activeExampleRunId = event.runId;
   setExampleStatus("Running", "is-running");
   clearExampleOutput();
-  appendExampleOutput(`▶ rae run ${event.entry}`, "stdout");
+  appendExampleOutput(`▶ bin/rae run ${event.entry}`, "stdout");
   setRunExampleDisabled(true);
 }
 

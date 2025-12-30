@@ -44,7 +44,7 @@ export class ExampleRunner {
     const startedAt = Date.now();
     const cwd = resolveCompilerPath(this.config);
     const entryPath = path.join(this.config.examplesPath ?? "examples", entry);
-    const cmd = `bin/rae run ${entryPath}`;
+    const cmd = `./bin/rae run ${entryPath}`;
 
     const child = spawn(cmd, {
       cwd,
