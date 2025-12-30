@@ -214,3 +214,13 @@ spawn heavyWork(id: 2)
 ---
 
 **End of Rae Specification**
+
+---
+
+## Tooling: Formatter CLI
+
+The Phase 1 toolchain ships `rae format` to pretty-print canonical Rae code. By
+default the command writes to stdout so you can inspect or pipe the result. Use
+`--write` (or `-w`) to rewrite the original file in place, or `--output
+<path>` to send the formatted code to a specific destination. The two flags are
+mutually exclusive so scripts cannot accidentally clobber multiple files.
