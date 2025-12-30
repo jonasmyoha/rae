@@ -20,3 +20,5 @@
 - Completed T009 (Compiler: research minimal C graphics library for game example) — `cd rae/compiler && make test`
 - Started T010 (Design interpreter + bytecode pipeline)
 - Completed T010 (Design interpreter + bytecode pipeline)
+- Started T011 (Implement minimal Rae bytecode VM)
+- Completed T011 (Implement minimal Rae bytecode VM) — `cd rae/compiler && make test`, `rae/compiler/bin/rae run examples/hello.rae`
