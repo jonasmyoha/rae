@@ -38,7 +38,17 @@ Outputs land in `stats/` as JSON lines and can be graphed later.
 ```bash
 bin/rae lex <file>     # tokenize Rae source
 bin/rae parse <file>   # dump AST structure
-bin/rae format <file>  # pretty-print canonical Rae
+bin/rae format <file>  # pretty-print canonical Rae (stdout by default)
+```
+
+`rae format` prints to stdout unless you pass either `--write/-w` to rewrite the
+input file in place or `--output <path>` to emit to a different file. The two
+flags are mutually exclusive so you can safely script them:
+
+```bash
+bin/rae format my_app.rae > my_app.pretty.rae            # stdout pipeline
+bin/rae format --write my_app.rae                        # overwrite source
+bin/rae format --output build/pretty/app.rae my_app.rae  # write to custom file
 ```
 
 ## License
