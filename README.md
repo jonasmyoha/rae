@@ -39,6 +39,7 @@ Outputs land in `stats/` as JSON lines and can be graphed later.
 bin/rae lex <file>     # tokenize Rae source
 bin/rae parse <file>   # dump AST structure
 bin/rae format <file>  # pretty-print canonical Rae (stdout by default)
+bin/rae run <file>     # execute via the interpreter/VM (hot reload ready)
 ```
 
 `rae format` prints to stdout unless you pass either `--write/-w` to rewrite the

@@ -12,6 +12,8 @@
 #include "parser.h"
 #include "ast.h"
 #include "pretty.h"
+#include "vm.h"
+#include "vm_compiler.h"
 
 typedef struct {
   const char* input_path;
@@ -69,6 +71,7 @@ static void print_usage(const char* prog) {
   fprintf(stderr, "  lex <file>      Tokenize Rae source file\n");
   fprintf(stderr, "  parse <file>    Parse Rae source file and dump AST\n");
   fprintf(stderr, "  format <file>   Parse Rae source file and pretty-print it\n");
+  fprintf(stderr, "  run <file>      Execute Rae source via the bytecode VM\n");
 }
 
 static void dump_tokens(const TokenList* tokens) {
@@ -81,6 +84,44 @@ static void dump_tokens(const TokenList* tokens) {
   }
 }
 
+static int run_vm_file(const char* file_path) {
+  size_t file_size = 0;
+  char* source = read_file(file_path, &file_size);
+  if (!source) {
+    fprintf(stderr, "error: could not read file '%s'\n", file_path);
+    return 1;
+  }
+
+  Arena* arena = arena_create(1024 * 1024);
+  if (!arena) {
+    free(source);
+    diag_fatal("could not allocate arena");
+  }
+
+  TokenList tokens = lexer_tokenize(arena, file_path, source, file_size);
+  AstModule* module = parse_module(arena, file_path, tokens);
+  if (!module) {
+    arena_destroy(arena);
+    free(source);
+    return 1;
+  }
+
+  Chunk chunk;
+  if (!vm_compile_module(module, &chunk, file_path)) {
+    arena_destroy(arena);
+    free(source);
+    return 1;
+  }
+
+  VM vm;
+  vm_init(&vm);
+  VMResult result = vm_run(&vm, &chunk);
+  chunk_free(&chunk);
+  arena_destroy(arena);
+  free(source);
+  return result == VM_RUNTIME_OK ? 0 : 1;
+}
+
 static int run_command(const char* cmd, int argc, char** argv) {
   size_t file_size = 0;
   char* source = NULL;
@@ -88,6 +129,7 @@ static int run_command(const char* cmd, int argc, char** argv) {
   const char* file_path = NULL;
   FormatOptions format_opts;
   bool is_format = (strcmp(cmd, "format") == 0);
+  bool is_run = (strcmp(cmd, "run") == 0);
 
   if (is_format) {
     if (!parse_format_args(argc, argv, &format_opts)) {
@@ -101,6 +143,13 @@ static int run_command(const char* cmd, int argc, char** argv) {
       return 1;
     }
     file_path = argv[0];
+  } else if (is_run) {
+    if (argc < 1) {
+      fprintf(stderr, "error: run command requires a file argument\n");
+      print_usage(argv[-1]);
+      return 1;
+    }
+    return run_vm_file(argv[0]);
   } else {
     fprintf(stderr, "error: unknown command '%s'\n", cmd);
     print_usage(argv[-1]);
@@ -154,7 +203,8 @@ int main(int argc, char** argv) {
   }
 
   const char* cmd = argv[1];
-  if ((strcmp(cmd, "lex") == 0 || strcmp(cmd, "parse") == 0 || strcmp(cmd, "format") == 0)) {
+  if ((strcmp(cmd, "lex") == 0 || strcmp(cmd, "parse") == 0 || strcmp(cmd, "format") == 0 ||
+       strcmp(cmd, "run") == 0)) {
     return run_command(cmd, argc - 2, argv + 2);
   }
 
