@@ -6,15 +6,6 @@
 - Results go to hub/RESULTS/T###.md
 
 ## Tasks
-### T003 - Document compiler test runner .cmd features
-- Repo: rae
-- Summary:
-  - Add documentation near `compiler/tests/` explaining `.cmd` files, multi-word commands, and the `{{TMP_OUTPUT}}` placeholder
-  - Include guidance for adding new format/output cases and stdout expectations
-- Acceptance:
-  - Doc exists and covers `.cmd` syntax and placeholder behavior
-  - `make test` passes without behavior changes
-
 ### T004 - Add regression test for `rae format --write`
 - Repo: rae
 - Summary:
