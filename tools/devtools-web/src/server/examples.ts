@@ -1,5 +1,6 @@
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
+import { writeFile } from "node:fs/promises";
 import type { ExampleDescriptor, ExampleFileDescriptor } from "../shared/types";
 
 export async function listExamples(root: string): Promise<ExampleDescriptor[]> {
@@ -88,6 +89,11 @@ async function safeReadDir(dir: string) {
 export async function readExampleFile(root: string, relativePath: string): Promise<string> {
   const safePath = sanitizePath(root, relativePath);
   return readFile(safePath, "utf8");
+}
+
+export async function writeExampleFile(root: string, relativePath: string, contents: string) {
+  const safePath = sanitizePath(root, relativePath);
+  await writeFile(safePath, contents, "utf8");
 }
 
 function sanitizePath(root: string, relativePath: string): string {

@@ -27,6 +27,8 @@ export type ExampleDescriptor = {
   files: ExampleFileDescriptor[];
 };
 
+export type ExampleRunMode = "run" | "watch";
+
 export type TestRunMode = "all" | "failed";
 export type BuildCommandType = "build" | "clean" | "rebuild";
 
@@ -105,6 +107,7 @@ export type ExampleRunStartedMessage = {
   type: "example-run-started";
   runId: string;
   entry: string;
+  mode: ExampleRunMode;
   timestamp: string;
 };
 
@@ -112,6 +115,7 @@ export type ExampleRunOutputMessage = {
   type: "example-run-output";
   runId: string;
   entry: string;
+  mode: ExampleRunMode;
   stream: "stdout" | "stderr";
   line: string;
   timestamp: string;
@@ -121,6 +125,7 @@ export type ExampleRunCompletedMessage = {
   type: "example-run-completed";
   runId: string;
   entry: string;
+  mode: ExampleRunMode;
   exitCode: number | null;
   success: boolean;
   durationMs: number;
@@ -131,6 +136,7 @@ export type ExampleRunErrorMessage = {
   type: "example-run-error";
   runId: string;
   entry: string;
+  mode: ExampleRunMode;
   message: string;
   timestamp: string;
 };

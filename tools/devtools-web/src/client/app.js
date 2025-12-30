@@ -38,12 +38,17 @@ const inspectorTabs = document.querySelectorAll("[data-inspector-tab]");
 const exampleListEl = document.getElementById("example-list");
 const exampleStatusChip = document.getElementById("example-status-chip");
 const runExampleBtn = document.getElementById("run-example-btn");
+const watchExampleBtn = document.getElementById("watch-example-btn");
+const stopExampleBtn = document.getElementById("stop-example-btn");
+const toggleEditExampleBtn = document.getElementById("toggle-edit-example-btn");
+const saveExampleBtn = document.getElementById("save-example-btn");
 const exampleOutput = document.getElementById("example-output");
 const exampleTitle = document.getElementById("example-title");
 const exampleEntryLabel = document.getElementById("example-entry");
 const exampleFilesList = document.getElementById("example-files");
 const exampleSourceTitle = document.getElementById("example-source-title");
 const exampleSourceCode = document.getElementById("example-source-code");
+const exampleEditor = document.getElementById("example-editor");
 
 let socket;
 let reconnectTimer;
@@ -69,6 +74,9 @@ let examples = [];
 let selectedExampleId = null;
 let selectedExampleFile = null;
 let activeExampleRunId = null;
+let exampleWatchActive = false;
+let exampleEditMode = false;
+let exampleEditorDirty = false;
 
 function connect() {
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
@@ -243,6 +251,16 @@ document.addEventListener("keydown", (event) => {
 });
 
 runExampleBtn?.addEventListener("click", () => triggerExampleRun());
+watchExampleBtn?.addEventListener("click", () => triggerExampleRun(true));
+stopExampleBtn?.addEventListener("click", () => stopExampleRun());
+toggleEditExampleBtn?.addEventListener("click", () => toggleExampleEdit());
+saveExampleBtn?.addEventListener("click", () => saveExampleSource());
+exampleEditor?.addEventListener("input", () => {
+  exampleEditorDirty = true;
+  if (saveExampleBtn) {
+    saveExampleBtn.disabled = false;
+  }
+});
 
 statsRefreshBtn?.addEventListener("click", () => refreshStats());
 statsMetricSelect?.addEventListener("change", () => {
@@ -375,10 +393,16 @@ function handleExampleRunStarted(event) {
     return;
   }
   activeExampleRunId = event.runId;
-  setExampleStatus("Running", "is-running");
+  exampleWatchActive = event.mode === "watch";
+  setExampleStatus(exampleWatchActive ? "Watching" : "Running", "is-running");
   clearExampleOutput();
-  appendExampleOutput(`▶ compiler/bin/rae run ${event.entry}`, "stdout");
-  setRunExampleDisabled(true);
+  appendExampleOutput(
+    exampleWatchActive
+      ? `▶ compiler/bin/rae run --watch ${event.entry}`
+      : `▶ compiler/bin/rae run ${event.entry}`,
+    "stdout"
+  );
+  updateExampleButtons();
 }
 
 function handleExampleRunOutput(event) {
@@ -394,11 +418,14 @@ function handleExampleRunCompleted(event) {
   }
   const duration = (event.durationMs / 1000).toFixed(1);
   appendExampleOutput(
-    `● Run finished (exit ${event.exitCode ?? "unknown"}) in ${duration}s`,
+    `● ${event.mode === "watch" ? "Watch" : "Run"} finished (exit ${
+      event.exitCode ?? "unknown"
+    }) in ${duration}s`,
     event.success ? "stdout" : "stderr"
   );
   setExampleStatus(event.success ? "Passed" : "Failed", event.success ? "is-success" : "is-failure");
-  setRunExampleDisabled(false);
+  exampleWatchActive = false;
+  updateExampleButtons();
   activeExampleRunId = null;
 }
 
@@ -408,7 +435,8 @@ function handleExampleRunError(event) {
   }
   setExampleStatus("Error", "is-failure");
   appendExampleOutput(`⚠ ${event.message}`, "stderr");
-  setRunExampleDisabled(false);
+  exampleWatchActive = false;
+  updateExampleButtons();
   activeExampleRunId = null;
 }
 
@@ -723,16 +751,17 @@ async function loadExamples() {
       throw new Error(`HTTP ${response.status}`);
     }
     const data = await response.json();
-    examples = data.examples ?? [];
-    if (!selectedExampleId && examples.length) {
-      selectedExampleId = examples[0].id;
-      selectedExampleFile = examples[0].files[0]?.path ?? null;
-      if (selectedExampleFile) {
-        loadExampleSource(selectedExampleFile);
-      }
+  examples = data.examples ?? [];
+  if (!selectedExampleId && examples.length) {
+    selectedExampleId = examples[0].id;
+    selectedExampleFile = examples[0].files[0]?.path ?? null;
+    if (selectedExampleFile) {
+      loadExampleSource(selectedExampleFile);
     }
-    renderExampleList();
-    renderExampleDetail();
+  }
+  renderExampleList();
+  renderExampleDetail();
+  updateExampleButtons();
   } catch (error) {
     recordError("Examples", getErrorMessage(error));
     if (exampleListEl) {
@@ -757,6 +786,9 @@ function renderExampleList() {
       example.files.length === 1 ? "" : "s"
     }</p>`;
     button.addEventListener("click", () => {
+      if (exampleWatchActive) {
+        stopExampleRun();
+      }
       selectedExampleId = example.id;
       selectedExampleFile = example.files[0]?.path ?? null;
       renderExampleList();
@@ -779,7 +811,8 @@ function renderExampleDetail() {
   if (!example) {
     exampleTitle.textContent = "Select an example";
     exampleEntryLabel.textContent = "";
-    setRunExampleDisabled(true);
+    exampleWatchActive = false;
+    updateExampleButtons();
     exampleFilesList.innerHTML = `<p class="test-list-empty">Select an example to view files.</p>`;
     exampleSourceTitle.textContent = "Select a file";
     exampleSourceCode.innerHTML = "<code>No file selected.</code>";
@@ -790,7 +823,7 @@ function renderExampleDetail() {
 
   exampleTitle.textContent = example.name;
   exampleEntryLabel.textContent = `Entry: ${example.entry}`;
-  setRunExampleDisabled(false);
+  updateExampleButtons();
   renderExampleFiles(example);
 
   if (!selectedExampleFile && example.files.length) {
@@ -801,6 +834,11 @@ function renderExampleDetail() {
   } else {
     exampleSourceTitle.textContent = "Select a file";
     exampleSourceCode.innerHTML = "<code>No file selected.</code>";
+  }
+  if (exampleEditMode && selectedExampleFile) {
+    loadExampleSource(selectedExampleFile);
+  } else {
+    updateExampleEditorView();
   }
 }
 
@@ -856,22 +894,81 @@ function appendExampleOutput(text, stream = "stdout") {
   exampleOutput.scrollTop = exampleOutput.scrollHeight;
 }
 
-function setRunExampleDisabled(disabled) {
+function updateExampleButtons() {
+  const hasSelection = !!getSelectedExample();
   if (runExampleBtn) {
-    runExampleBtn.disabled = disabled;
+    runExampleBtn.disabled = exampleWatchActive || !hasSelection;
+  }
+  if (watchExampleBtn) {
+    watchExampleBtn.disabled = exampleWatchActive || !hasSelection;
+  }
+  if (stopExampleBtn) {
+    stopExampleBtn.disabled = !exampleWatchActive;
   }
 }
 
-async function triggerExampleRun() {
+function updateExampleEditorView() {
+  if (!exampleEditor || !exampleSourceCode) return;
+  if (exampleEditMode) {
+    exampleEditor.hidden = false;
+    exampleSourceCode.style.display = "none";
+    exampleEditor.value = "";
+  } else {
+    exampleEditor.hidden = true;
+    exampleSourceCode.style.display = "";
+  }
+}
+
+function toggleExampleEdit() {
+  exampleEditMode = !exampleEditMode;
+  exampleEditorDirty = false;
+  if (toggleEditExampleBtn) {
+    toggleEditExampleBtn.textContent = exampleEditMode ? "Cancel edit" : "Edit";
+  }
+  if (saveExampleBtn) {
+    saveExampleBtn.disabled = true;
+  }
+  updateExampleEditorView();
+  if (exampleEditMode && selectedExampleFile) {
+    loadExampleSource(selectedExampleFile);
+  }
+}
+
+async function saveExampleSource() {
+  if (!exampleEditMode || !selectedExampleFile || !exampleEditor) {
+    return;
+  }
+  const contents = exampleEditor.value;
+  try {
+    const response = await fetch("/api/examples/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: selectedExampleFile, contents })
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    exampleEditorDirty = false;
+    if (saveExampleBtn) {
+      saveExampleBtn.disabled = true;
+    }
+    loadExampleSource(selectedExampleFile);
+  } catch (error) {
+    recordError("Example save", getErrorMessage(error));
+  }
+}
+
+async function triggerExampleRun(watch = false) {
   const example = getSelectedExample();
   if (!example) return;
-  setExampleStatus("Starting…", "is-running");
-  setRunExampleDisabled(true);
+  exampleWatchActive = watch;
+  setExampleStatus(watch ? "Starting watch…" : "Starting…", "is-running");
+  updateExampleButtons();
   try {
     const response = await fetch("/api/examples/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ entry: example.entry })
+      body: JSON.stringify({ entry: example.entry, watch })
     });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
@@ -879,7 +976,19 @@ async function triggerExampleRun() {
   } catch (error) {
     recordError("Example run", getErrorMessage(error));
     setExampleStatus("Error", "is-failure");
-    setRunExampleDisabled(false);
+    exampleWatchActive = false;
+    updateExampleButtons();
+  }
+}
+
+async function stopExampleRun() {
+  try {
+    await fetch("/api/examples/stop", { method: "POST" });
+  } catch (error) {
+    recordError("Example run", getErrorMessage(error));
+  } finally {
+    exampleWatchActive = false;
+    updateExampleButtons();
   }
 }
 
@@ -896,6 +1005,13 @@ async function loadExampleSource(path) {
     const contents = data.contents ?? "";
     const highlighted = highlightRae(contents);
     exampleSourceCode.innerHTML = `<code>${highlighted}</code>`;
+    if (exampleEditMode && exampleEditor) {
+      exampleEditor.value = contents;
+      exampleEditorDirty = false;
+      if (saveExampleBtn) {
+        saveExampleBtn.disabled = true;
+      }
+    }
   } catch (error) {
     recordError("Example source", getErrorMessage(error));
     exampleSourceCode.innerHTML = "<code>Failed to load file.</code>";
