@@ -18,3 +18,5 @@
 - Completed T008 (Compiler: plan multifile build support) — `cd rae/compiler && make test`
 - Started T009 (Compiler: research minimal C graphics library for game example)
 - Completed T009 (Compiler: research minimal C graphics library for game example) — `cd rae/compiler && make test`
+- Started T010 (Design interpreter + bytecode pipeline)
+- Completed T010 (Design interpreter + bytecode pipeline)
