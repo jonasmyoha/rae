@@ -27,6 +27,7 @@ const errorLogList = document.getElementById("error-log-list");
 const errorLogEmpty = document.getElementById("error-log-empty");
 const errorLogClose = document.getElementById("error-log-close");
 const errorLogBackdrop = document.getElementById("error-log-backdrop");
+const testFileTree = document.getElementById("test-file-tree");
 const testSourceTitle = document.getElementById("test-source-title");
 const testSourceCode = document.getElementById("test-source-code");
 const copyTestSourceBtn = document.getElementById("copy-test-source-btn");
@@ -34,6 +35,15 @@ const buildBtn = document.getElementById("build-btn");
 const cleanBtn = document.getElementById("clean-btn");
 const rebuildBtn = document.getElementById("rebuild-btn");
 const inspectorTabs = document.querySelectorAll("[data-inspector-tab]");
+const exampleListEl = document.getElementById("example-list");
+const exampleStatusChip = document.getElementById("example-status-chip");
+const runExampleBtn = document.getElementById("run-example-btn");
+const exampleOutput = document.getElementById("example-output");
+const exampleTitle = document.getElementById("example-title");
+const exampleEntryLabel = document.getElementById("example-entry");
+const exampleFilesList = document.getElementById("example-files");
+const exampleSourceTitle = document.getElementById("example-source-title");
+const exampleSourceCode = document.getElementById("example-source-code");
 
 let socket;
 let reconnectTimer;
@@ -55,6 +65,10 @@ const TEST_TREE_REFRESH_MS = 60000;
 const HEARTBEAT_STALE_MS = 60000;
 let testTreeRefreshTimer = null;
 let knownTests = new Map();
+let examples = [];
+let selectedExampleId = null;
+let selectedExampleFile = null;
+let activeExampleRunId = null;
 
 function connect() {
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
@@ -166,6 +180,18 @@ function handleServerEvent(payload) {
     case "build-run-error":
       handleBuildRunError(payload);
       break;
+    case "example-run-started":
+      handleExampleRunStarted(payload);
+      break;
+    case "example-run-output":
+      handleExampleRunOutput(payload);
+      break;
+    case "example-run-completed":
+      handleExampleRunCompleted(payload);
+      break;
+    case "example-run-error":
+      handleExampleRunError(payload);
+      break;
     default:
       console.warn("Unknown payload", payload);
   }
@@ -216,6 +242,8 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
+runExampleBtn?.addEventListener("click", () => triggerExampleRun());
+
 statsRefreshBtn?.addEventListener("click", () => refreshStats());
 statsMetricSelect?.addEventListener("change", () => {
   currentStatsMetric = statsMetricSelect.value;
@@ -230,7 +258,10 @@ loadRaeSyntax("/rae_syntax.json")
   .catch((error) => {
     recordError("Syntax summary", getErrorMessage(error));
   })
-  .finally(() => loadTestFileTree());
+  .finally(() => {
+    loadTestFileTree();
+    loadExamples();
+  });
 
 errorIndicator?.addEventListener("click", () => toggleErrorModal(true));
 errorLogClose?.addEventListener("click", () => toggleErrorModal(false));
@@ -337,6 +368,48 @@ function handleBuildRunError(event) {
   appendBuildLine(`⚠ ${event.message}`, "stderr");
   setBuildButtonsDisabled(false);
   latestBuildRunId = null;
+}
+
+function handleExampleRunStarted(event) {
+  if (!isExampleEntrySelected(event.entry)) {
+    return;
+  }
+  activeExampleRunId = event.runId;
+  setExampleStatus("Running", "is-running");
+  clearExampleOutput();
+  appendExampleOutput(`▶ rae run ${event.entry}`, "stdout");
+  setRunExampleDisabled(true);
+}
+
+function handleExampleRunOutput(event) {
+  if (event.runId !== activeExampleRunId || !isExampleEntrySelected(event.entry)) {
+    return;
+  }
+  appendExampleOutput(event.line, event.stream);
+}
+
+function handleExampleRunCompleted(event) {
+  if (event.runId !== activeExampleRunId || !isExampleEntrySelected(event.entry)) {
+    return;
+  }
+  const duration = (event.durationMs / 1000).toFixed(1);
+  appendExampleOutput(
+    `● Run finished (exit ${event.exitCode ?? "unknown"}) in ${duration}s`,
+    event.success ? "stdout" : "stderr"
+  );
+  setExampleStatus(event.success ? "Passed" : "Failed", event.success ? "is-success" : "is-failure");
+  setRunExampleDisabled(false);
+  activeExampleRunId = null;
+}
+
+function handleExampleRunError(event) {
+  if (!isExampleEntrySelected(event.entry)) {
+    return;
+  }
+  setExampleStatus("Error", "is-failure");
+  appendExampleOutput(`⚠ ${event.message}`, "stderr");
+  setRunExampleDisabled(false);
+  activeExampleRunId = null;
 }
 
 function setTestStatus(label, modifierClass) {
@@ -640,6 +713,198 @@ function renderTestDetail() {
   testDetail.appendChild(header);
   testDetail.appendChild(meta);
   testDetail.appendChild(body);
+}
+
+async function loadExamples() {
+  if (!exampleListEl) return;
+  try {
+    const response = await fetch("/api/examples");
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const data = await response.json();
+    examples = data.examples ?? [];
+    if (!selectedExampleId && examples.length) {
+      selectedExampleId = examples[0].id;
+      selectedExampleFile = examples[0].files[0]?.path ?? null;
+      if (selectedExampleFile) {
+        loadExampleSource(selectedExampleFile);
+      }
+    }
+    renderExampleList();
+    renderExampleDetail();
+  } catch (error) {
+    recordError("Examples", getErrorMessage(error));
+    if (exampleListEl) {
+      exampleListEl.innerHTML = `<p class="test-list-empty">Unable to load examples.</p>`;
+    }
+  }
+}
+
+function renderExampleList() {
+  if (!exampleListEl) return;
+  exampleListEl.innerHTML = "";
+  if (!examples.length) {
+    exampleListEl.innerHTML = `<p class="test-list-empty">No examples found.</p>`;
+    return;
+  }
+  const fragment = document.createDocumentFragment();
+  examples.forEach((example) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `example-card${selectedExampleId === example.id ? " is-active" : ""}`;
+    button.innerHTML = `<h4>${example.name}</h4><p>${example.files.length} file${
+      example.files.length === 1 ? "" : "s"
+    }</p>`;
+    button.addEventListener("click", () => {
+      selectedExampleId = example.id;
+      selectedExampleFile = example.files[0]?.path ?? null;
+      renderExampleList();
+      renderExampleDetail();
+      if (selectedExampleFile) {
+        loadExampleSource(selectedExampleFile);
+      } else {
+        exampleSourceTitle.textContent = "Select a file";
+        exampleSourceCode.innerHTML = "<code>No file selected.</code>";
+      }
+    });
+    fragment.appendChild(button);
+  });
+  exampleListEl.appendChild(fragment);
+}
+
+function renderExampleDetail() {
+  if (!exampleTitle || !runExampleBtn || !exampleEntryLabel || !exampleFilesList) return;
+  const example = getSelectedExample();
+  if (!example) {
+    exampleTitle.textContent = "Select an example";
+    exampleEntryLabel.textContent = "";
+    setRunExampleDisabled(true);
+    exampleFilesList.innerHTML = `<p class="test-list-empty">Select an example to view files.</p>`;
+    exampleSourceTitle.textContent = "Select a file";
+    exampleSourceCode.innerHTML = "<code>No file selected.</code>";
+    clearExampleOutput();
+    setExampleStatus("Idle");
+    return;
+  }
+
+  exampleTitle.textContent = example.name;
+  exampleEntryLabel.textContent = `Entry: ${example.entry}`;
+  setRunExampleDisabled(false);
+  renderExampleFiles(example);
+
+  if (!selectedExampleFile && example.files.length) {
+    selectedExampleFile = example.files[0].path;
+    loadExampleSource(selectedExampleFile);
+  } else if (selectedExampleFile) {
+    exampleSourceTitle.textContent = selectedExampleFile;
+  } else {
+    exampleSourceTitle.textContent = "Select a file";
+    exampleSourceCode.innerHTML = "<code>No file selected.</code>";
+  }
+}
+
+function renderExampleFiles(example) {
+  if (!exampleFilesList) return;
+  exampleFilesList.innerHTML = "";
+  if (!example.files.length) {
+    exampleFilesList.innerHTML = `<p class="test-list-empty">No files in this example yet.</p>`;
+    return;
+  }
+  const fragment = document.createDocumentFragment();
+  example.files.forEach((file) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `example-file-btn${
+      selectedExampleFile === file.path ? " is-active" : ""
+    }`;
+    button.textContent = file.name;
+    button.addEventListener("click", () => {
+      selectedExampleFile = file.path;
+      renderExampleFiles(example);
+      loadExampleSource(file.path);
+    });
+    fragment.appendChild(button);
+  });
+  exampleFilesList.appendChild(fragment);
+}
+
+function getSelectedExample() {
+  return examples.find((ex) => ex.id === selectedExampleId) ?? null;
+}
+
+function setExampleStatus(label, modifierClass) {
+  if (!exampleStatusChip) return;
+  exampleStatusChip.textContent = label;
+  exampleStatusChip.classList.remove("is-running", "is-success", "is-failure");
+  if (modifierClass) {
+    exampleStatusChip.classList.add(modifierClass);
+  }
+}
+
+function clearExampleOutput() {
+  if (!exampleOutput) return;
+  exampleOutput.innerHTML = `<div class="terminal-line">Run an example to see output.</div>`;
+}
+
+function appendExampleOutput(text, stream = "stdout") {
+  if (!exampleOutput) return;
+  const lineEl = document.createElement("div");
+  lineEl.className = `terminal-line ${stream}`;
+  lineEl.textContent = text;
+  exampleOutput.appendChild(lineEl);
+  exampleOutput.scrollTop = exampleOutput.scrollHeight;
+}
+
+function setRunExampleDisabled(disabled) {
+  if (runExampleBtn) {
+    runExampleBtn.disabled = disabled;
+  }
+}
+
+async function triggerExampleRun() {
+  const example = getSelectedExample();
+  if (!example) return;
+  setExampleStatus("Starting…", "is-running");
+  setRunExampleDisabled(true);
+  try {
+    const response = await fetch("/api/examples/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ entry: example.entry })
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+  } catch (error) {
+    recordError("Example run", getErrorMessage(error));
+    setExampleStatus("Error", "is-failure");
+    setRunExampleDisabled(false);
+  }
+}
+
+async function loadExampleSource(path) {
+  if (!exampleSourceCode || !path) return;
+  exampleSourceTitle.textContent = path;
+  exampleSourceCode.innerHTML = "<code>Loading source…</code>";
+  try {
+    const response = await fetch(`/api/examples/source?path=${encodeURIComponent(path)}`);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const data = await response.json();
+    const contents = data.contents ?? "";
+    const highlighted = highlightRae(contents);
+    exampleSourceCode.innerHTML = `<code>${highlighted}</code>`;
+  } catch (error) {
+    recordError("Example source", getErrorMessage(error));
+    exampleSourceCode.innerHTML = "<code>Failed to load file.</code>";
+  }
+}
+
+function isExampleEntrySelected(entry) {
+  const example = getSelectedExample();
+  return !!example && example.entry === entry;
 }
 
 function groupTestCases(entries) {

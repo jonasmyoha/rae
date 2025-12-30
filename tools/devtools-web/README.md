@@ -43,7 +43,8 @@ Copy `config.example.json` to `config.json` at the repo root (or set equivalent 
   "buildCommand": "cd compiler && make",
   "testCommand": "cd compiler && make test",
   "cleanCommand": "make clean",
-  "port": 3000
+  "port": 3000,
+  "examplesPath": "examples"
 }
 ```
 
@@ -71,6 +72,13 @@ bun run start
 - Buttons for **Build**, **Clean**, and **Rebuild** run whichever commands you defined in `config.json` (current defaults assume the Rae compiler Makefile lives under `../rae/compiler`; adjust if yours differs); `Ctrl+T/Cmd+T` still triggers tests, while `Ctrl+B/Cmd+B` triggers Build.
 - Build stdout/stderr streams into its own terminal panel with copy button and status indicator.
 - Rebuild executes the clean command followed by the build command (via `clean && build`) so you can reset the compiler tree before building again.
+
+### Run the Examples
+
+- The **Examples** panel scans the configured `examplesPath` (defaults to `../rae/examples`) and lists every `.rae` demo project.
+- Selecting an example reveals its file list and enables the **Run example** button, which calls `bin/rae run <entry>` via the new bytecode VM.
+- Output streams into a terminal next to the file tree; click any file button to view the highlighted source without leaving the dashboard.
+- The data model already supports multi-file projects—if a folder contains a `main.rae`, it becomes the default entry; otherwise the first `.rae` file is used.
 
 ### Track Stats
 
