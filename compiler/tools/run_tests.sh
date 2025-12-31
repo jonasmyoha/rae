@@ -29,6 +29,11 @@ if [ -z "$TEST_FILES" ]; then
 fi
 
 for TEST_FILE in $TEST_FILES; do
+  case "$TEST_FILE" in
+    */helpers/*)
+      continue
+      ;;
+  esac
   TEST_NAME=$(basename "$TEST_FILE" .rae)
   EXPECT_FILE="${TEST_FILE%.rae}.expect"
   

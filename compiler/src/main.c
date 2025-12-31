@@ -9,6 +9,9 @@
 #include <time.h>
 #include <unistd.h>
 #include <stdint.h>
+#include <ctype.h>
+#include <limits.h>
+#include <dirent.h>
 #include "arena.h"
 #include "str.h"
 #include "diag.h"
@@ -31,6 +34,32 @@ typedef struct {
   bool watch;
 } RunOptions;
 
+typedef struct {
+  const char* entry_path;
+  const char* out_path;
+  bool emit_c;
+} BuildOptions;
+
+typedef struct ModuleNode {
+  char* module_path;
+  char* file_path;
+  AstModule* module;
+  struct ModuleNode* next;
+} ModuleNode;
+
+typedef struct {
+  ModuleNode* head;
+  ModuleNode* tail;
+  char* root_path;
+  Arena* arena;
+} ModuleGraph;
+
+typedef struct ModuleStack {
+  const char* module_path;
+  struct ModuleStack* next;
+} ModuleStack;
+
+static uint64_t hash_bytes(const char* data, size_t length);
 static bool compile_file_chunk(const char* file_path, Chunk* chunk, uint64_t* out_hash);
 static int run_vm_file(const char* file_path);
 static int run_vm_watch(const char* file_path);
@@ -110,6 +139,682 @@ static bool parse_run_args(int argc, char** argv, RunOptions* opts) {
   return true;
 }
 
+static bool parse_build_args(int argc, char** argv, BuildOptions* opts) {
+  opts->entry_path = NULL;
+  opts->out_path = "build/out.c";
+  opts->emit_c = false;
+
+  int i = 0;
+  while (i < argc) {
+    const char* arg = argv[i];
+    if (strcmp(arg, "--emit-c") == 0) {
+      opts->emit_c = true;
+      i += 1;
+      continue;
+    }
+    if (strcmp(arg, "--out") == 0 || strcmp(arg, "--output") == 0) {
+      if (i + 1 >= argc) {
+        fprintf(stderr, "error: %s expects a file path\n", arg);
+        return false;
+      }
+      opts->out_path = argv[i + 1];
+      i += 2;
+      continue;
+    }
+    if (arg[0] == '-') {
+      fprintf(stderr, "error: unknown build option '%s'\n", arg);
+      return false;
+    }
+    if (opts->entry_path) {
+      fprintf(stderr, "error: multiple entry files provided ('%s' and '%s')\n", opts->entry_path, arg);
+      return false;
+    }
+    opts->entry_path = arg;
+    i += 1;
+  }
+
+  if (!opts->entry_path) {
+    fprintf(stderr, "error: build command requires an entry file argument\n");
+    return false;
+  }
+  return true;
+}
+
+static bool file_exists(const char* path) {
+  if (!path) return false;
+  struct stat st;
+  return stat(path, &st) == 0;
+}
+
+static bool module_graph_has_module(const ModuleGraph* graph, const char* module_path) {
+  for (ModuleNode* node = graph->head; node; node = node->next) {
+    if (strcmp(node->module_path, module_path) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool module_graph_append(ModuleGraph* graph,
+                                const char* module_path,
+                                const char* file_path,
+                                AstModule* module) {
+  ModuleNode* node = calloc(1, sizeof(ModuleNode));
+  if (!node) {
+    fprintf(stderr, "error: out of memory while building module graph\n");
+    return false;
+  }
+  node->module_path = strdup(module_path);
+  node->file_path = strdup(file_path);
+  node->module = module;
+  if (!node->module_path || !node->file_path) {
+    fprintf(stderr, "error: out of memory while duplicating module paths\n");
+    free(node->module_path);
+    free(node->file_path);
+    // Temporarily retain source_text buffers (freed with arena lifetime).
+    free(node);
+    return false;
+  }
+  if (!graph->head) {
+    graph->head = graph->tail = node;
+  } else {
+    graph->tail->next = node;
+    graph->tail = node;
+  }
+  return true;
+}
+
+static ModuleNode* module_graph_find(const ModuleGraph* graph, const char* module_path) {
+  for (ModuleNode* node = graph->head; node; node = node->next) {
+    if (strcmp(node->module_path, module_path) == 0) {
+      return node;
+    }
+  }
+  return NULL;
+}
+
+static bool module_stack_contains(const ModuleStack* stack, const char* module_path) {
+  while (stack) {
+    if (strcmp(stack->module_path, module_path) == 0) {
+      return true;
+    }
+    stack = stack->next;
+  }
+  return false;
+}
+
+typedef struct {
+  char** items;
+  size_t count;
+  size_t capacity;
+} SegmentBuffer;
+
+static void segment_buffer_free(SegmentBuffer* buf) {
+  for (size_t i = 0; i < buf->count; ++i) {
+    free(buf->items[i]);
+  }
+  free(buf->items);
+  buf->items = NULL;
+  buf->count = buf->capacity = 0;
+}
+
+static bool segment_buffer_push_copy(SegmentBuffer* buf, const char* start, size_t len) {
+  if (len == 0) return true;
+  if (buf->count == buf->capacity) {
+    size_t new_capacity = buf->capacity ? buf->capacity * 2 : 8;
+    char** new_items = realloc(buf->items, new_capacity * sizeof(char*));
+    if (!new_items) {
+      return false;
+    }
+    buf->items = new_items;
+    buf->capacity = new_capacity;
+  }
+  char* copy = malloc(len + 1);
+  if (!copy) {
+    return false;
+  }
+  memcpy(copy, start, len);
+  copy[len] = '\0';
+  buf->items[buf->count++] = copy;
+  return true;
+}
+
+static bool segment_buffer_pop(SegmentBuffer* buf) {
+  if (buf->count == 0) {
+    return false;
+  }
+  free(buf->items[buf->count - 1]);
+  buf->count -= 1;
+  return true;
+}
+
+static char* segment_buffer_join(const SegmentBuffer* buf) {
+  if (buf->count == 0) return NULL;
+  size_t total = 0;
+  for (size_t i = 0; i < buf->count; ++i) {
+    total += strlen(buf->items[i]);
+  }
+  total += buf->count - 1;
+  char* result = malloc(total + 1);
+  if (!result) {
+    return NULL;
+  }
+  size_t offset = 0;
+  for (size_t i = 0; i < buf->count; ++i) {
+    size_t len = strlen(buf->items[i]);
+    memcpy(result + offset, buf->items[i], len);
+    offset += len;
+    if (i + 1 < buf->count) {
+      result[offset++] = '/';
+    }
+  }
+  result[offset] = '\0';
+  return result;
+}
+
+static bool segment_buffer_append_path(SegmentBuffer* buf, const char* path, bool include_last) {
+  if (!path || !*path) return true;
+  size_t len = strlen(path);
+  size_t limit = len;
+  if (!include_last) {
+    const char* last = strrchr(path, '/');
+    if (!last) {
+      return true;
+    }
+    limit = (size_t)(last - path);
+  }
+  size_t i = 0;
+  while (i < limit) {
+    while (i < limit && path[i] == '/') i++;
+    size_t start = i;
+    while (i < limit && path[i] != '/') i++;
+    size_t part_len = i - start;
+    if (part_len > 0) {
+      if (!segment_buffer_push_copy(buf, path + start, part_len)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+static char* sanitize_import_spec(const char* spec) {
+  size_t len = strlen(spec);
+  size_t start = 0;
+  while (start < len && isspace((unsigned char)spec[start])) {
+    start += 1;
+  }
+  size_t end = len;
+  while (end > start && isspace((unsigned char)spec[end - 1])) {
+    end -= 1;
+  }
+  size_t out_len = end - start;
+  char* copy = malloc(out_len + 1);
+  if (!copy) {
+    return NULL;
+  }
+  for (size_t i = 0; i < out_len; ++i) {
+    char c = spec[start + i];
+    if (c == '\\') c = '/';
+    copy[i] = c;
+  }
+  copy[out_len] = '\0';
+  return copy;
+}
+
+static bool is_relative_spec(const char* spec) {
+  if (!spec || !spec[0]) return false;
+  if (spec[0] == '/') return false;
+  if (spec[0] == '.') return true;
+  return strncmp(spec, "./", 2) == 0 || strncmp(spec, "../", 3) == 0;
+}
+
+static char* normalize_import_path(const char* current_module_path, const char* spec) {
+  char* sanitized = sanitize_import_spec(spec);
+  if (!sanitized) {
+    fprintf(stderr, "error: out of memory while normalizing module path\n");
+    return NULL;
+  }
+  if (sanitized[0] == '\0') {
+    fprintf(stderr, "error: empty module path is not allowed\n");
+    free(sanitized);
+    return NULL;
+  }
+
+  SegmentBuffer segments = {0};
+  const char* cursor = sanitized;
+  bool treat_as_relative = false;
+  if (cursor[0] == '/') {
+    while (*cursor == '/') cursor++;
+  } else {
+    treat_as_relative = is_relative_spec(cursor);
+  }
+
+  if (treat_as_relative) {
+    if (!current_module_path) {
+      fprintf(stderr, "error: relative import '%s' is invalid here\n", spec);
+      segment_buffer_free(&segments);
+      free(sanitized);
+      return NULL;
+    }
+    if (!segment_buffer_append_path(&segments, current_module_path, false)) {
+      segment_buffer_free(&segments);
+      free(sanitized);
+      fprintf(stderr, "error: out of memory while normalizing module path\n");
+      return NULL;
+    }
+  }
+
+  while (*cursor) {
+    while (*cursor == '/') cursor++;
+    if (!*cursor) break;
+    const char* start = cursor;
+    while (*cursor && *cursor != '/') cursor++;
+    size_t part_len = cursor - start;
+    if (part_len == 0 || (part_len == 1 && start[0] == '.')) {
+      continue;
+    }
+    if (part_len == 2 && start[0] == '.' && start[1] == '.') {
+      if (!segment_buffer_pop(&segments)) {
+        fprintf(stderr, "error: module path '%s' escapes project root\n", spec);
+        segment_buffer_free(&segments);
+        free(sanitized);
+        return NULL;
+      }
+      continue;
+    }
+    if (!segment_buffer_push_copy(&segments, start, part_len)) {
+      segment_buffer_free(&segments);
+      free(sanitized);
+      fprintf(stderr, "error: out of memory while normalizing module path\n");
+      return NULL;
+    }
+  }
+
+  if (segments.count == 0) {
+    fprintf(stderr, "error: module path '%s' resolves to nothing\n", spec);
+    segment_buffer_free(&segments);
+    free(sanitized);
+    return NULL;
+  }
+
+  char* last = segments.items[segments.count - 1];
+  size_t last_len = strlen(last);
+  if (last_len > 4 && strcmp(last + last_len - 4, ".rae") == 0) {
+    last[last_len - 4] = '\0';
+    last_len -= 4;
+    if (last_len == 0) {
+      fprintf(stderr, "error: module path '%s' is invalid\n", spec);
+      segment_buffer_free(&segments);
+      free(sanitized);
+      return NULL;
+    }
+  }
+
+  char* joined = segment_buffer_join(&segments);
+  if (!joined) {
+    fprintf(stderr, "error: out of memory while normalizing module path\n");
+  }
+  segment_buffer_free(&segments);
+  free(sanitized);
+  return joined;
+}
+
+static char* resolve_module_file(const char* root, const char* module_path) {
+  size_t root_len = strlen(root);
+  size_t mod_len = strlen(module_path);
+  size_t total = root_len + mod_len + 6;
+  char* buffer = malloc(total);
+  if (!buffer) {
+    return NULL;
+  }
+  if (root_len > 0 && (root[root_len - 1] == '/' || root[root_len - 1] == '\\')) {
+    root_len -= 1;
+  }
+  snprintf(buffer, total, "%.*s/%s.rae", (int)root_len, root, module_path);
+  return buffer;
+}
+
+static char* derive_module_path(const char* root, const char* file_path) {
+  size_t root_len = strlen(root);
+  if (root_len > 0 && (root[root_len - 1] == '/' || root[root_len - 1] == '\\')) {
+    root_len -= 1;
+  }
+  if (strncmp(file_path, root, root_len) != 0) {
+    fprintf(stderr, "error: file '%s' is outside project root '%s'\n", file_path, root);
+    return NULL;
+  }
+  const char* relative = file_path + root_len;
+  if (*relative == '/' || *relative == '\\') {
+    relative += 1;
+  }
+  if (*relative == '\0') {
+    fprintf(stderr, "error: unable to derive module path for '%s'\n", file_path);
+    return NULL;
+  }
+  char* normalized = normalize_import_path(NULL, relative);
+  return normalized;
+}
+
+
+static bool module_graph_init(ModuleGraph* graph, Arena* arena) {
+  memset(graph, 0, sizeof(*graph));
+  graph->arena = arena;
+  char cwd[PATH_MAX];
+  if (!getcwd(cwd, sizeof(cwd))) {
+    perror("getcwd");
+    return false;
+  }
+  char* resolved = realpath(cwd, NULL);
+  graph->root_path = resolved ? resolved : strdup(cwd);
+  if (!graph->root_path) {
+    fprintf(stderr, "error: failed to allocate project root path\n");
+    return false;
+  }
+  size_t len = strlen(graph->root_path);
+  while (len > 1 && (graph->root_path[len - 1] == '/' || graph->root_path[len - 1] == '\\')) {
+    graph->root_path[len - 1] = '\0';
+    len -= 1;
+  }
+  const char* last_sep = strrchr(graph->root_path, '/');
+#ifdef _WIN32
+  const char* last_sep_win = strrchr(graph->root_path, '\\');
+  if (!last_sep || (last_sep_win && last_sep_win > last_sep)) {
+    last_sep = last_sep_win;
+  }
+#endif
+  if (last_sep) {
+    const char* last_component = last_sep + 1;
+    if (strcmp(last_component, "compiler") == 0 && last_sep != graph->root_path) {
+      graph->root_path[last_sep - graph->root_path] = '\0';
+    }
+  }
+  return true;
+}
+
+static void module_graph_free(ModuleGraph* graph) {
+  ModuleNode* node = graph->head;
+  while (node) {
+    ModuleNode* next = node->next;
+    free(node->module_path);
+    free(node->file_path);
+    free(node);
+    node = next;
+  }
+  graph->head = graph->tail = NULL;
+  free(graph->root_path);
+  graph->root_path = NULL;
+}
+
+static bool module_graph_load_module(ModuleGraph* graph,
+                                     const char* module_path,
+                                     const char* file_path,
+                                     ModuleStack* stack,
+                                     uint64_t* hash_out) {
+  if (module_graph_has_module(graph, module_path)) {
+    return true;
+  }
+  if (module_stack_contains(stack, module_path)) {
+    fprintf(stderr, "error: cyclic import detected involving '%s'\n", module_path);
+    return false;
+  }
+  size_t file_size = 0;
+  char* source = read_file(file_path, &file_size);
+  if (!source) {
+    fprintf(stderr, "error: could not read module file '%s'\n", file_path);
+    return false;
+  }
+  if (hash_out) {
+    uint64_t module_hash = hash_bytes(source, file_size);
+    *hash_out ^= module_hash + 0x9e3779b97f4a7c15ull + (*hash_out << 6) + (*hash_out >> 2);
+  }
+  TokenList tokens = lexer_tokenize(graph->arena, file_path, source, file_size);
+  AstModule* module = parse_module(graph->arena, file_path, tokens);
+  if (!module) {
+    free(source);
+    return false;
+  }
+  ModuleStack frame = {.module_path = module_path, .next = stack};
+  for (AstImport* import = module->imports; import; import = import->next) {
+    char* raw = str_to_cstr(import->module_path);
+    if (!raw) {
+      fprintf(stderr, "error: out of memory while reading import path\n");
+      return false;
+    }
+    char* normalized = normalize_import_path(module_path, raw);
+    free(raw);
+    if (!normalized) {
+      return false;
+    }
+    char* child_file = resolve_module_file(graph->root_path, normalized);
+    if (!child_file || !file_exists(child_file)) {
+      fprintf(stderr, "error: imported module '%s' (%s) not found\n", normalized, child_file ? child_file : "unknown");
+      free(normalized);
+      free(child_file);
+      return false;
+    }
+    if (!module_graph_load_module(graph, normalized, child_file, &frame, hash_out)) {
+      free(normalized);
+      free(child_file);
+      return false;
+    }
+    free(normalized);
+    free(child_file);
+  }
+  if (!module_graph_append(graph, module_path, file_path, module)) {
+    free(source);
+    return false;
+  }
+  free(source);
+  return true;
+}
+
+static bool scan_directory_for_modules(ModuleGraph* graph,
+                                       const char* dir_path,
+                                       const char* skip_file,
+                                       uint64_t* hash_out) {
+  DIR* dir = opendir(dir_path);
+  if (!dir) {
+    return true;
+  }
+  struct dirent* entry;
+  while ((entry = readdir(dir))) {
+    if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+      continue;
+    }
+    char child_path[PATH_MAX];
+    int written = snprintf(child_path, sizeof(child_path), "%s/%s", dir_path, entry->d_name);
+    if (written <= 0 || (size_t)written >= sizeof(child_path)) {
+      continue;
+    }
+    struct stat st;
+    if (stat(child_path, &st) != 0) {
+      continue;
+    }
+    if (S_ISDIR(st.st_mode)) {
+      if (!scan_directory_for_modules(graph, child_path, skip_file, hash_out)) {
+        closedir(dir);
+        return false;
+      }
+      continue;
+    }
+    if (!S_ISREG(st.st_mode)) {
+      continue;
+    }
+    size_t len = strlen(child_path);
+    if (len < 4 || strcmp(child_path + len - 4, ".rae") != 0) {
+      continue;
+    }
+    if (skip_file && strcmp(child_path, skip_file) == 0) {
+      continue;
+    }
+    char* module_path = derive_module_path(graph->root_path, child_path);
+    if (!module_path) {
+      closedir(dir);
+      return false;
+    }
+    if (!module_graph_has_module(graph, module_path)) {
+      if (!module_graph_load_module(graph, module_path, child_path, NULL, hash_out)) {
+        free(module_path);
+        closedir(dir);
+        return false;
+      }
+    }
+    free(module_path);
+  }
+  closedir(dir);
+  return true;
+}
+
+static bool auto_import_directory(ModuleGraph* graph, const char* entry_file_path, uint64_t* hash_out) {
+  char* dir_copy = strdup(entry_file_path);
+  if (!dir_copy) {
+    fprintf(stderr, "error: out of memory while scanning project directory\n");
+    return false;
+  }
+  char* slash = strrchr(dir_copy, '/');
+  if (!slash) {
+    free(dir_copy);
+    return true;
+  }
+  *slash = '\0';
+  bool ok = scan_directory_for_modules(graph, dir_copy, entry_file_path, hash_out);
+  free(dir_copy);
+  return ok;
+}
+
+static bool directory_has_raepack(const char* dir_path) {
+  DIR* dir = opendir(dir_path);
+  if (!dir) return false;
+  struct dirent* entry;
+  while ((entry = readdir(dir))) {
+    if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
+    char file_path[PATH_MAX];
+    int written = snprintf(file_path, sizeof(file_path), "%s/%s", dir_path, entry->d_name);
+    if (written <= 0 || (size_t)written >= sizeof(file_path)) continue;
+    struct stat st;
+    if (stat(file_path, &st) != 0) continue;
+    if (!S_ISREG(st.st_mode)) continue;
+    size_t len = strlen(entry->d_name);
+    if (len > 8 && strcmp(entry->d_name + len - 8, ".raepack") == 0) {
+      closedir(dir);
+      return true;
+    }
+  }
+  closedir(dir);
+  return false;
+}
+
+static bool directory_has_only_entry_file(const char* dir_path, const char* entry_file_path) {
+  DIR* dir = opendir(dir_path);
+  if (!dir) return false;
+  size_t rae_count = 0;
+  struct dirent* entry;
+  while ((entry = readdir(dir))) {
+    if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
+    char file_path[PATH_MAX];
+    int written = snprintf(file_path, sizeof(file_path), "%s/%s", dir_path, entry->d_name);
+    if (written <= 0 || (size_t)written >= sizeof(file_path)) continue;
+    struct stat st;
+    if (stat(file_path, &st) != 0) continue;
+    if (!S_ISREG(st.st_mode)) continue;
+    size_t len = strlen(file_path);
+    if (len < 4 || strcmp(file_path + len - 4, ".rae") != 0) continue;
+    rae_count += 1;
+    if (rae_count > 1) break;
+  }
+  closedir(dir);
+  if (rae_count == 0) return false;
+  if (rae_count == 1) return true;
+  DIR* dir2 = opendir(dir_path);
+  if (!dir2) return false;
+  size_t other_count = 0;
+  struct dirent* entry2;
+  while ((entry2 = readdir(dir2))) {
+    if (strcmp(entry2->d_name, ".") == 0 || strcmp(entry2->d_name, "..") == 0) continue;
+    char file_path[PATH_MAX];
+    int written = snprintf(file_path, sizeof(file_path), "%s/%s", dir_path, entry2->d_name);
+    if (written <= 0 || (size_t)written >= sizeof(file_path)) continue;
+    struct stat st;
+    if (stat(file_path, &st) != 0) continue;
+    if (!S_ISREG(st.st_mode)) continue;
+    size_t len = strlen(file_path);
+    if (len < 4 || strcmp(file_path + len - 4, ".rae") != 0) continue;
+    if (strcmp(file_path, entry_file_path) == 0) continue;
+    other_count += 1;
+    if (other_count > 0) break;
+  }
+  closedir(dir2);
+  return other_count == 0;
+}
+
+static bool should_auto_import(const char* entry_file_path) {
+  char* dir_copy = strdup(entry_file_path);
+  if (!dir_copy) {
+    return false;
+  }
+  char* slash = strrchr(dir_copy, '/');
+  if (!slash) {
+    free(dir_copy);
+    return false;
+  }
+  *slash = '\0';
+  bool has_pack = directory_has_raepack(dir_copy);
+  bool single_file = directory_has_only_entry_file(dir_copy, entry_file_path);
+  free(dir_copy);
+  return has_pack || single_file;
+}
+
+static bool module_graph_build(ModuleGraph* graph, const char* entry_file, uint64_t* hash_out) {
+  char* resolved_entry = realpath(entry_file, NULL);
+  if (!resolved_entry) {
+    fprintf(stderr, "error: unable to resolve entry file '%s'\n", entry_file);
+    return false;
+  }
+  char* module_path = derive_module_path(graph->root_path, resolved_entry);
+  if (!module_path) {
+    free(resolved_entry);
+    return false;
+  }
+  bool ok = module_graph_load_module(graph, module_path, resolved_entry, NULL, hash_out);
+  if (!ok) {
+    free(module_path);
+    free(resolved_entry);
+    return false;
+  }
+  ModuleNode* entry_node = module_graph_find(graph, module_path);
+  if (entry_node && entry_node->module && !entry_node->module->imports &&
+      should_auto_import(entry_node->file_path)) {
+    if (!auto_import_directory(graph, entry_node->file_path, hash_out)) {
+      free(module_path);
+      free(resolved_entry);
+      return false;
+    }
+  }
+  free(module_path);
+  free(resolved_entry);
+  return true;
+}
+
+static AstModule merge_module_graph(const ModuleGraph* graph) {
+  AstModule merged = {.imports = NULL, .decls = NULL};
+  AstDecl* tail = NULL;
+  for (ModuleNode* node = graph->head; node; node = node->next) {
+    AstDecl* decls = node->module ? node->module->decls : NULL;
+    if (!decls) continue;
+    if (!merged.decls) {
+      merged.decls = decls;
+    } else {
+      tail->next = decls;
+    }
+    while (decls->next) {
+      decls = decls->next;
+    }
+    tail = decls;
+  }
+  return merged;
+}
+
 static uint64_t hash_bytes(const char* data, size_t length) {
   const uint64_t fnv_offset = 1469598103934665603ull;
   const uint64_t fnv_prime = 1099511628211ull;
@@ -128,6 +833,7 @@ static void print_usage(const char* prog) {
   fprintf(stderr, "  parse <file>    Parse Rae source file and dump AST\n");
   fprintf(stderr, "  format <file>   Parse Rae source file and pretty-print it\n");
   fprintf(stderr, "  run <file>      Execute Rae source via the bytecode VM\n");
+  fprintf(stderr, "  build <file>    Build Rae source (use --emit-c)\n");
 }
 
 static void dump_tokens(const TokenList* tokens) {
@@ -141,34 +847,29 @@ static void dump_tokens(const TokenList* tokens) {
 }
 
 static bool compile_file_chunk(const char* file_path, Chunk* chunk, uint64_t* out_hash) {
-  size_t file_size = 0;
-  char* source = read_file(file_path, &file_size);
-  if (!source) {
-    fprintf(stderr, "error: could not read file '%s'\n", file_path);
-    return false;
-  }
-
   Arena* arena = arena_create(1024 * 1024);
   if (!arena) {
-    free(source);
     diag_fatal("could not allocate arena");
   }
-
-  TokenList tokens = lexer_tokenize(arena, file_path, source, file_size);
-  AstModule* module = parse_module(arena, file_path, tokens);
-  if (!module) {
+  ModuleGraph graph;
+  if (!module_graph_init(&graph, arena)) {
     arena_destroy(arena);
-    free(source);
     return false;
   }
-
-  if (out_hash) {
-    *out_hash = hash_bytes(source, file_size);
+  uint64_t combined_hash = 0;
+  uint64_t* hash_target = out_hash ? &combined_hash : NULL;
+  if (!module_graph_build(&graph, file_path, hash_target)) {
+    module_graph_free(&graph);
+    arena_destroy(arena);
+    return false;
   }
-
-  bool ok = vm_compile_module(module, chunk, file_path);
+  AstModule merged = merge_module_graph(&graph);
+  bool ok = vm_compile_module(&merged, chunk, file_path);
+  module_graph_free(&graph);
   arena_destroy(arena);
-  free(source);
+  if (ok && out_hash) {
+    *out_hash = combined_hash;
+  }
   return ok;
 }
 
@@ -193,6 +894,7 @@ static int run_command(const char* cmd, int argc, char** argv) {
   FormatOptions format_opts;
   bool is_format = (strcmp(cmd, "format") == 0);
   bool is_run = (strcmp(cmd, "run") == 0);
+  bool is_build = (strcmp(cmd, "build") == 0);
 
   if (is_format) {
     if (!parse_format_args(argc, argv, &format_opts)) {
@@ -213,6 +915,22 @@ static int run_command(const char* cmd, int argc, char** argv) {
       return 1;
     }
     return run_opts.watch ? run_vm_watch(run_opts.input_path) : run_vm_file(run_opts.input_path);
+  } else if (is_build) {
+    BuildOptions build_opts;
+    if (!parse_build_args(argc, argv, &build_opts)) {
+      print_usage(argv[-1]);
+      return 1;
+    }
+    if (!build_opts.emit_c) {
+      fprintf(stderr, "error: build currently requires --emit-c\n");
+      return 1;
+    }
+    if (!file_exists(build_opts.entry_path)) {
+      fprintf(stderr, "error: entry file '%s' not found\n", build_opts.entry_path);
+      return 1;
+    }
+    printf("[build] C backend not implemented yet. Would emit C for '%s' to '%s'.\n", build_opts.entry_path, build_opts.out_path);
+    return 0;
   } else {
     fprintf(stderr, "error: unknown command '%s'\n", cmd);
     print_usage(argv[-1]);
@@ -267,7 +985,7 @@ int main(int argc, char** argv) {
 
   const char* cmd = argv[1];
   if ((strcmp(cmd, "lex") == 0 || strcmp(cmd, "parse") == 0 || strcmp(cmd, "format") == 0 ||
-       strcmp(cmd, "run") == 0)) {
+       strcmp(cmd, "run") == 0 || strcmp(cmd, "build") == 0)) {
     return run_command(cmd, argc - 2, argv + 2);
   }
 

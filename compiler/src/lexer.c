@@ -33,13 +33,13 @@ typedef struct {
 
 static const Keyword KEYWORDS[] = {
     {"and", TOK_KW_AND},     {"case", TOK_KW_CASE},   {"def", TOK_KW_DEF},
-    {"else", TOK_KW_ELSE},   {"false", TOK_KW_FALSE}, {"func", TOK_KW_FUNC},
-    {"if", TOK_KW_IF},       {"is", TOK_KW_IS},       {"match", TOK_KW_MATCH},
-    {"mod", TOK_KW_MOD},     {"none", TOK_KW_NONE},   {"not", TOK_KW_NOT},
-    {"opt", TOK_KW_OPT},     {"or", TOK_KW_OR},       {"own", TOK_KW_OWN},
-    {"priv", TOK_KW_PRIV},   {"pub", TOK_KW_PUB},     {"ret", TOK_KW_RET},
-    {"spawn", TOK_KW_SPAWN}, {"true", TOK_KW_TRUE},   {"type", TOK_KW_TYPE},
-    {"view", TOK_KW_VIEW}};
+    {"else", TOK_KW_ELSE},   {"export", TOK_KW_EXPORT}, {"false", TOK_KW_FALSE},
+    {"func", TOK_KW_FUNC},   {"if", TOK_KW_IF},       {"import", TOK_KW_IMPORT},
+    {"is", TOK_KW_IS},       {"match", TOK_KW_MATCH}, {"mod", TOK_KW_MOD},
+    {"none", TOK_KW_NONE},   {"not", TOK_KW_NOT},     {"opt", TOK_KW_OPT},
+    {"or", TOK_KW_OR},       {"own", TOK_KW_OWN},     {"priv", TOK_KW_PRIV},
+    {"pub", TOK_KW_PUB},     {"ret", TOK_KW_RET},     {"spawn", TOK_KW_SPAWN},
+    {"true", TOK_KW_TRUE},   {"type", TOK_KW_TYPE},   {"view", TOK_KW_VIEW}};
 
 static const char* const TOKEN_KIND_NAMES[] = {
     [TOK_EOF] = "TOK_EOF",
@@ -60,6 +60,8 @@ static const char* const TOKEN_KIND_NAMES[] = {
     [TOK_KW_ELSE] = "TOK_ELSE",
     [TOK_KW_MATCH] = "TOK_MATCH",
     [TOK_KW_CASE] = "TOK_CASE",
+    [TOK_KW_IMPORT] = "TOK_IMPORT",
+    [TOK_KW_EXPORT] = "TOK_EXPORT",
     [TOK_KW_TRUE] = "TOK_TRUE",
     [TOK_KW_FALSE] = "TOK_FALSE",
     [TOK_KW_NONE] = "TOK_NONE",

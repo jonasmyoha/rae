@@ -94,6 +94,16 @@ static void* parser_alloc(Parser* parser, size_t size) {
   return result;
 }
 
+static Str parser_copy_str(Parser* parser, Str value) {
+  if (value.len == 0) {
+    return value;
+  }
+  char* buffer = parser_alloc(parser, value.len + 1);
+  memcpy(buffer, value.data, value.len);
+  buffer[value.len] = '\0';
+  return (Str){.data = buffer, .len = value.len};
+}
+
 static AstExpr* new_expr(Parser* parser, AstExprKind kind, const Token* token) {
   AstExpr* expr = parser_alloc(parser, sizeof(AstExpr));
   expr->kind = kind;
@@ -116,7 +126,7 @@ static AstStmt* new_stmt(Parser* parser, AstStmtKind kind, const Token* token) {
 
 static AstIdentifierPart* make_identifier_part(Parser* parser, Str text) {
   AstIdentifierPart* part = parser_alloc(parser, sizeof(AstIdentifierPart));
-  part->text = text;
+  part->text = parser_copy_str(parser, text);
   return part;
 }
 
@@ -177,8 +187,50 @@ static AstProperty* append_property(AstProperty* head, AstProperty* node) {
 
 static AstProperty* make_property(Parser* parser, Str name) {
   AstProperty* prop = parser_alloc(parser, sizeof(AstProperty));
-  prop->name = name;
+  prop->name = parser_copy_str(parser, name);
   return prop;
+}
+
+static Str parse_string_literal_value(Parser* parser, const Token* token, const char* context) {
+  if (!token || token->kind != TOK_STRING || token->lexeme.len < 2) {
+    parser_error(parser, token, "expected string literal for %s", context);
+    return str_from_buf("", 0);
+  }
+  size_t capacity = token->lexeme.len > 1 ? token->lexeme.len - 1 : 1;
+  char* buffer = parser_alloc(parser, capacity + 1);
+  size_t out_len = 0;
+  const char* data = token->lexeme.data;
+  size_t len = token->lexeme.len;
+  for (size_t i = 1; i + 1 < len; ++i) {
+    char c = data[i];
+    if (c == '\\' && i + 1 < len - 1) {
+      i += 1;
+      char esc = data[i];
+      switch (esc) {
+        case 'n':
+          c = '\n';
+          break;
+        case 't':
+          c = '\t';
+          break;
+        case '\\':
+          c = '\\';
+          break;
+        case '"':
+          c = '"';
+          break;
+        default:
+          c = esc;
+          break;
+      }
+    }
+    buffer[out_len++] = c;
+  }
+  buffer[out_len] = '\0';
+  if (out_len == 0) {
+    parser_error(parser, token, "empty string literal is invalid for %s", context);
+  }
+  return (Str){.data = buffer, .len = out_len};
 }
 
 static AstProperty* parse_type_properties(Parser* parser) {
@@ -199,6 +251,33 @@ static AstProperty* parse_func_properties(Parser* parser) {
   return head;
 }
 
+static AstImport* append_import(AstImport* head, AstImport* node) {
+  if (!node) {
+    return head;
+  }
+  if (!head) {
+    return node;
+  }
+  AstImport* tail = head;
+  while (tail->next) {
+    tail = tail->next;
+  }
+  tail->next = node;
+  return head;
+}
+
+static AstImport* parse_import_clause(Parser* parser, bool is_export) {
+  const Token* path_token = parser_consume(parser, TOK_STRING, "expected module path string");
+  if (!path_token) {
+    return NULL;
+  }
+  Str literal = parse_string_literal_value(parser, path_token, "module path");
+  AstImport* clause = parser_alloc(parser, sizeof(AstImport));
+  clause->is_export = is_export;
+  clause->module_path = literal;
+  return clause;
+}
+
 static AstParam* append_param(AstParam* head, AstParam* node) {
   if (!head) {
     return node;
@@ -215,7 +294,7 @@ static AstParam* parse_param(Parser* parser) {
   const Token* name = parser_consume(parser, TOK_IDENT, "expected parameter name");
   parser_consume(parser, TOK_COLON, "expected ':' after parameter name");
   AstParam* param = parser_alloc(parser, sizeof(AstParam));
-  param->name = name->lexeme;
+  param->name = parser_copy_str(parser, name->lexeme);
   param->type = parse_type_ref(parser);
   return param;
 }
@@ -256,7 +335,7 @@ static AstReturnItem* parse_return_clause(Parser* parser) {
       const Token* label = parser_advance(parser);
       parser_consume(parser, TOK_COLON, "expected ':' after return label");
       item->has_name = true;
-      item->name = label->lexeme;
+      item->name = parser_copy_str(parser, label->lexeme);
     }
     item->type = parse_type_ref(parser);
     head = append_return_item(head, item);
@@ -365,7 +444,7 @@ static AstExpr* finish_call(Parser* parser, AstExpr* callee, const Token* start_
     const Token* name = parser_consume(parser, TOK_IDENT, "expected argument name");
     parser_consume(parser, TOK_COLON, "expected ':' after argument name");
     AstCallArg* arg = parser_alloc(parser, sizeof(AstCallArg));
-    arg->name = name->lexeme;
+    arg->name = parser_copy_str(parser, name->lexeme);
     arg->value = parse_expression(parser);
     args = append_call_arg(args, arg);
   } while (parser_match(parser, TOK_COMMA));
@@ -385,7 +464,7 @@ static AstExpr* parse_object_literal(Parser* parser, const Token* start_token) {
     const Token* name = parser_consume(parser, TOK_IDENT, "expected field name in object literal");
     parser_consume(parser, TOK_COLON, "expected ':' after field name");
     AstObjectField* field = parser_alloc(parser, sizeof(AstObjectField));
-    field->name = name->lexeme;
+    field->name = parser_copy_str(parser, name->lexeme);
     field->value = parse_expression(parser);
     fields = append_object_field(fields, field);
   } while (parser_match(parser, TOK_COMMA));
@@ -422,7 +501,7 @@ static AstExpr* parse_postfix(Parser* parser) {
       const Token* name = parser_consume(parser, TOK_IDENT, "expected member name after '.'");
       AstExpr* member = new_expr(parser, AST_EXPR_MEMBER, parser_previous(parser));
       member->as.member.object = expr;
-      member->as.member.member = name->lexeme;
+      member->as.member.member = parser_copy_str(parser, name->lexeme);
       expr = member;
       continue;
     }
@@ -484,19 +563,19 @@ static AstExpr* parse_primary(Parser* parser) {
     case TOK_IDENT: {
       parser_advance(parser);
       AstExpr* expr = new_expr(parser, AST_EXPR_IDENT, token);
-      expr->as.ident = token->lexeme;
+      expr->as.ident = parser_copy_str(parser, token->lexeme);
       return expr;
     }
     case TOK_INTEGER: {
       parser_advance(parser);
       AstExpr* expr = new_expr(parser, AST_EXPR_INTEGER, token);
-      expr->as.integer = token->lexeme;
+      expr->as.integer = parser_copy_str(parser, token->lexeme);
       return expr;
     }
     case TOK_STRING: {
       parser_advance(parser);
       AstExpr* expr = new_expr(parser, AST_EXPR_STRING, token);
-      expr->as.string_lit = token->lexeme;
+      expr->as.string_lit = parser_copy_str(parser, token->lexeme);
       return expr;
     }
     case TOK_KW_TRUE:
@@ -540,7 +619,7 @@ static AstReturnArg* parse_return_values(Parser* parser) {
       const Token* label = parser_advance(parser);
       parser_consume(parser, TOK_COLON, "expected ':' after return label");
       arg->has_label = true;
-      arg->label = label->lexeme;
+      arg->label = parser_copy_str(parser, label->lexeme);
     }
     arg->value = parse_expression(parser);
     head = append_return_arg(head, arg);
@@ -552,7 +631,7 @@ static AstStmt* parse_def_statement(Parser* parser, const Token* def_token) {
   const Token* name = parser_consume(parser, TOK_IDENT, "expected identifier after 'def'");
   parser_consume(parser, TOK_COLON, "expected ':' after local name");
   AstStmt* stmt = new_stmt(parser, AST_STMT_DEF, def_token);
-  stmt->as.def_stmt.name = name->lexeme;
+  stmt->as.def_stmt.name = parser_copy_str(parser, name->lexeme);
   stmt->as.def_stmt.type = parse_type_ref(parser);
   if (parser_match(parser, TOK_ASSIGN)) {
     stmt->as.def_stmt.is_move = false;
@@ -627,8 +706,8 @@ static AstStmt* parse_destructure_statement(Parser* parser, const Token* def_tok
     parser_consume(parser, TOK_COLON, "expected ':' after local name in destructuring binding");
     const Token* label = parser_consume(parser, TOK_IDENT, "expected return label in destructuring binding");
     AstDestructureBinding* binding = parser_alloc(parser, sizeof(AstDestructureBinding));
-    binding->local_name = local->lexeme;
-    binding->return_label = label->lexeme;
+    binding->local_name = parser_copy_str(parser, local->lexeme);
+    binding->return_label = parser_copy_str(parser, label->lexeme);
     bindings = append_destructure_binding(bindings, binding);
     binding_count++;
     if (parser_match(parser, TOK_COMMA)) {
@@ -745,7 +824,7 @@ static AstTypeField* parse_type_fields(Parser* parser) {
     const Token* field_name = parser_consume(parser, TOK_IDENT, "expected field name");
     parser_consume(parser, TOK_COLON, "expected ':' after field name");
     AstTypeField* field = parser_alloc(parser, sizeof(AstTypeField));
-    field->name = field_name->lexeme;
+    field->name = parser_copy_str(parser, field_name->lexeme);
     field->type = parse_type_ref(parser);
     head = append_field(head, field);
   }
@@ -759,7 +838,7 @@ static AstDecl* parse_type_declaration(Parser* parser) {
   decl->kind = AST_DECL_TYPE;
   decl->line = type_token->line;
   decl->column = type_token->column;
-  decl->as.type_decl.name = name->lexeme;
+  decl->as.type_decl.name = parser_copy_str(parser, name->lexeme);
   if (parser_match(parser, TOK_COLON)) {
     decl->as.type_decl.properties = parse_type_properties(parser);
   }
@@ -776,7 +855,7 @@ static AstDecl* parse_func_declaration(Parser* parser) {
   decl->kind = AST_DECL_FUNC;
   decl->line = func_token->line;
   decl->column = func_token->column;
-  decl->as.func_decl.name = name->lexeme;
+  decl->as.func_decl.name = parser_copy_str(parser, name->lexeme);
   decl->as.func_decl.params = parse_param_list(parser);
   if (parser_match(parser, TOK_COLON)) {
     decl->as.func_decl.properties = parse_func_properties(parser);
@@ -827,11 +906,19 @@ AstModule* parse_module(Arena* arena, const char* file_path, TokenList tokens) {
   };
 
   AstModule* module = parser_alloc(&parser, sizeof(AstModule));
+  AstImport* imports = NULL;
+  while (parser_match(&parser, TOK_KW_IMPORT) || parser_match(&parser, TOK_KW_EXPORT)) {
+    const Token* prev = parser_previous(&parser);
+    bool is_export = prev && prev->kind == TOK_KW_EXPORT;
+    AstImport* clause = parse_import_clause(&parser, is_export);
+    imports = append_import(imports, clause);
+  }
   AstDecl* head = NULL;
   while (!parser_check(&parser, TOK_EOF)) {
     AstDecl* decl = parse_declaration(&parser);
     head = append_decl(head, decl);
   }
+  module->imports = imports;
   module->decls = head;
   return module;
 }
