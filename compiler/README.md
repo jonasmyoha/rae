@@ -21,6 +21,7 @@ bin/rae lex <file>     # tokenize
 bin/rae parse <file>   # parse + dump AST
 bin/rae format <file>  # pretty-print canonical Rae (stdout by default)
 bin/rae run <file>     # execute Rae source via the bytecode VM (hot reload path)
+bin/rae build --emit-c --out out.c <file>  # transpile tiny Rae programs to C
 ```
 
 Pass `--watch` to keep the VM alive and reload the file whenever it changes:
@@ -34,6 +35,12 @@ the auto-import demo to see helper files reloaded without explicit imports:
 
 ```bash
 bin/rae run --watch examples/auto_import_demo/main.rae
+```
+
+Early C backend support can turn simple `log`-centric programs into compilable C:
+
+```bash
+bin/rae build --emit-c --out build/demo.c examples/c_backend_demo.rae
 ```
 
 Formatting options:
