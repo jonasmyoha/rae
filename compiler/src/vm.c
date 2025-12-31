@@ -18,11 +18,13 @@ void vm_init(VM* vm) {
   if (!vm) return;
   vm->chunk = NULL;
   vm_reset_stack(vm);
+  vm->call_stack_top = 0;
 }
 
 void vm_reset_stack(VM* vm) {
   if (!vm) return;
   vm->stack_top = vm->stack;
+  vm->call_stack_top = 0;
 }
 
 static uint16_t read_short(VM* vm) {
@@ -57,8 +59,26 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         fflush(stdout);
         break;
       }
+      case OP_CALL: {
+        uint16_t target = read_short(vm);
+        if (vm->call_stack_top >= sizeof(vm->call_stack) / sizeof(vm->call_stack[0])) {
+          diag_error(NULL, 0, 0, "call stack overflow");
+          return VM_RUNTIME_ERROR;
+        }
+        vm->call_stack[vm->call_stack_top++] = vm->ip;
+        if (target >= vm->chunk->code_count) {
+          diag_error(NULL, 0, 0, "invalid function address");
+          return VM_RUNTIME_ERROR;
+        }
+        vm->ip = vm->chunk->code + target;
+        break;
+      }
       case OP_RETURN:
-        return VM_RUNTIME_OK;
+        if (vm->call_stack_top == 0) {
+          return VM_RUNTIME_OK;
+        }
+        vm->ip = vm->call_stack[--vm->call_stack_top];
+        break;
       default:
         diag_error(NULL, 0, 0, "unknown opcode encountered in VM");
         return VM_RUNTIME_ERROR;
