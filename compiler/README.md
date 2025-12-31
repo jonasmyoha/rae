@@ -29,6 +29,13 @@ Pass `--watch` to keep the VM alive and reload the file whenever it changes:
 bin/rae run --watch examples/hello.rae
 ```
 
+Watch mode now monitors every module pulled in via imports or auto-import folders. Try it on
+the auto-import demo to see helper files reloaded without explicit imports:
+
+```bash
+bin/rae run --watch examples/auto_import_demo/main.rae
+```
+
 Formatting options:
 
 ```bash
