@@ -37,7 +37,9 @@ the auto-import demo to see helper files reloaded without explicit imports:
 bin/rae run --watch examples/auto_import_demo/main.rae
 ```
 
-Early C backend support can turn simple `log`-centric programs into compilable C:
+Early C backend support can turn simple `log`-centric, arithmetic-only programs into compilable C.
+Right now every parameter is treated as an `int64_t`, returns are not yet supported, and `log` only
+accepts string literals, but it is handy for tiny demos:
 
 ```bash
 bin/rae build --emit-c --out build/demo.c examples/c_backend_demo.rae
