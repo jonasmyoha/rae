@@ -10,6 +10,7 @@
 typedef struct {
   Str name;
   uint16_t offset;
+  uint16_t param_count;
   uint16_t* patches;
   size_t patch_count;
   size_t patch_capacity;
@@ -26,19 +27,29 @@ typedef struct {
   const char* file_path;
   bool had_error;
   FunctionTable functions;
+  const AstFuncDecl* current_function;
+  struct {
+    Str name;
+    uint16_t slot;
+  } locals[256];
+  uint16_t local_count;
 } BytecodeCompiler;
 
 #define INVALID_OFFSET UINT16_MAX
 
 static void free_function_table(FunctionTable* table);
 static FunctionEntry* function_table_find(FunctionTable* table, Str name);
-static bool function_table_add(FunctionTable* table, Str name);
+static bool function_table_add(FunctionTable* table, Str name, uint16_t param_count);
 static bool function_entry_add_patch(FunctionEntry* entry, uint16_t patch_offset);
 static bool patch_function_calls(FunctionTable* table, Chunk* chunk, const char* file_path);
 static bool collect_function_entries(const AstModule* module, FunctionTable* table);
 static bool compile_function(BytecodeCompiler* compiler, const AstDecl* decl);
 static bool emit_function_call(BytecodeCompiler* compiler, FunctionEntry* entry, int line,
-                               int column);
+                               int column, uint8_t arg_count);
+static bool emit_return(BytecodeCompiler* compiler, bool has_value, int line);
+static bool compiler_add_local(BytecodeCompiler* compiler, Str name);
+static int compiler_find_local(BytecodeCompiler* compiler, Str name);
+static void compiler_reset_locals(BytecodeCompiler* compiler);
 
 static void emit_byte(BytecodeCompiler* compiler, uint8_t byte, int line) {
   chunk_write(compiler->chunk, byte, line);
@@ -80,8 +91,10 @@ static FunctionEntry* function_table_find(FunctionTable* table, Str name) {
   return NULL;
 }
 
-static bool function_table_add(FunctionTable* table, Str name) {
-  if (function_table_find(table, name)) {
+static bool function_table_add(FunctionTable* table, Str name, uint16_t param_count) {
+  FunctionEntry* existing = function_table_find(table, name);
+  if (existing) {
+    existing->param_count = param_count;
     return true;
   }
   if (table->count + 1 > table->capacity) {
@@ -97,6 +110,7 @@ static bool function_table_add(FunctionTable* table, Str name) {
   FunctionEntry* entry = &table->entries[table->count++];
   entry->name = name;
   entry->offset = INVALID_OFFSET;
+  entry->param_count = param_count;
   entry->patches = NULL;
   entry->patch_count = 0;
   entry->patch_capacity = 0;
@@ -135,11 +149,24 @@ static bool patch_function_calls(FunctionTable* table, Chunk* chunk, const char*
   return true;
 }
 
+static uint16_t count_params(const AstParam* param) {
+  uint16_t count = 0;
+  while (param) {
+    if (count == UINT16_MAX) {
+      return UINT16_MAX;
+    }
+    count += 1;
+    param = param->next;
+  }
+  return count;
+}
+
 static bool collect_function_entries(const AstModule* module, FunctionTable* table) {
   const AstDecl* decl = module->decls;
   while (decl) {
     if (decl->kind == AST_DECL_FUNC) {
-      if (!function_table_add(table, decl->as.func_decl.name)) {
+      uint16_t param_count = count_params(decl->as.func_decl.params);
+      if (!function_table_add(table, decl->as.func_decl.name, param_count)) {
         return false;
       }
     }
@@ -162,8 +189,33 @@ static void free_function_table(FunctionTable* table) {
   table->capacity = 0;
 }
 
+static void compiler_reset_locals(BytecodeCompiler* compiler) {
+  compiler->local_count = 0;
+}
+
+static bool compiler_add_local(BytecodeCompiler* compiler, Str name) {
+  if (compiler->local_count >= sizeof(compiler->locals) / sizeof(compiler->locals[0])) {
+    diag_error(compiler->file_path, 0, 0, "VM compiler local limit exceeded");
+    compiler->had_error = true;
+    return false;
+  }
+  compiler->locals[compiler->local_count].name = name;
+  compiler->locals[compiler->local_count].slot = compiler->local_count;
+  compiler->local_count += 1;
+  return true;
+}
+
+static int compiler_find_local(BytecodeCompiler* compiler, Str name) {
+  for (int i = (int)compiler->local_count - 1; i >= 0; --i) {
+    if (str_matches(compiler->locals[i].name, name)) {
+      return compiler->locals[i].slot;
+    }
+  }
+  return -1;
+}
+
 static bool emit_function_call(BytecodeCompiler* compiler, FunctionEntry* entry, int line,
-                               int column) {
+                               int column, uint8_t arg_count) {
   if (!entry) return false;
   emit_op(compiler, OP_CALL, line);
   if (compiler->chunk->code_count > UINT16_MAX) {
@@ -173,11 +225,18 @@ static bool emit_function_call(BytecodeCompiler* compiler, FunctionEntry* entry,
   }
   uint16_t patch_offset = (uint16_t)compiler->chunk->code_count;
   emit_short(compiler, 0, line);
+  emit_byte(compiler, arg_count, line);
   if (!function_entry_add_patch(entry, patch_offset)) {
     diag_error(compiler->file_path, line, column, "failed to record function call patch");
     compiler->had_error = true;
     return false;
   }
+  return true;
+}
+
+static bool emit_return(BytecodeCompiler* compiler, bool has_value, int line) {
+  emit_op(compiler, OP_RETURN, line);
+  emit_byte(compiler, has_value ? 1 : 0, line);
   return true;
 }
 
@@ -245,13 +304,6 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
     return true;
   }
 
-  if (expr->as.call.args) {
-    diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
-               "VM function calls currently do not accept arguments");
-    compiler->had_error = true;
-    return false;
-  }
-
   FunctionEntry* entry = function_table_find(&compiler->functions, name);
   if (!entry) {
     char buffer[128];
@@ -261,12 +313,57 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
     compiler->had_error = true;
     return false;
   }
-  return emit_function_call(compiler, entry, (int)expr->line, (int)expr->column);
+
+  uint16_t arg_count = 0;
+  const AstCallArg* arg = expr->as.call.args;
+  while (arg) {
+    arg_count += 1;
+    arg = arg->next;
+  }
+  if (arg_count != entry->param_count) {
+    char buffer[160];
+    snprintf(buffer, sizeof(buffer),
+             "function '%.*s' expects %u argument(s) but call has %u",
+             (int)name.len, name.data, entry->param_count, arg_count);
+    diag_error(compiler->file_path, (int)expr->line, (int)expr->column, buffer);
+    compiler->had_error = true;
+    return false;
+  }
+  if (arg_count > UINT8_MAX) {
+    diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
+               "VM call argument count exceeds supported limit");
+    compiler->had_error = true;
+    return false;
+  }
+
+  arg = expr->as.call.args;
+  while (arg) {
+    if (!compile_expr(compiler, arg->value)) {
+      return false;
+    }
+    arg = arg->next;
+  }
+  return emit_function_call(compiler, entry, (int)expr->line, (int)expr->column,
+                            (uint8_t)arg_count);
 }
 
 static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
   if (!expr) return false;
   switch (expr->kind) {
+    case AST_EXPR_IDENT: {
+      int slot = compiler_find_local(compiler, expr->as.ident);
+      if (slot < 0) {
+        char buffer[128];
+        snprintf(buffer, sizeof(buffer), "unknown identifier '%.*s' in VM mode",
+                 (int)expr->as.ident.len, expr->as.ident.data);
+        diag_error(compiler->file_path, (int)expr->line, (int)expr->column, buffer);
+        compiler->had_error = true;
+        return false;
+      }
+      emit_op(compiler, OP_GET_LOCAL, (int)expr->line);
+      emit_short(compiler, (uint16_t)slot, (int)expr->line);
+      return true;
+    }
     case AST_EXPR_STRING: {
       Value string_value = make_string_value(expr->as.string_lit);
       emit_constant(compiler, string_value, (int)expr->line);
@@ -283,6 +380,46 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
     }
     case AST_EXPR_CALL:
       return compile_call(compiler, expr);
+    case AST_EXPR_BINARY: {
+      if (!compile_expr(compiler, expr->as.binary.lhs)) {
+        return false;
+      }
+      if (!compile_expr(compiler, expr->as.binary.rhs)) {
+        return false;
+      }
+      switch (expr->as.binary.op) {
+        case AST_BIN_ADD:
+          emit_op(compiler, OP_ADD, (int)expr->line);
+          return true;
+        case AST_BIN_SUB:
+          emit_op(compiler, OP_SUB, (int)expr->line);
+          return true;
+        case AST_BIN_MUL:
+          emit_op(compiler, OP_MUL, (int)expr->line);
+          return true;
+        case AST_BIN_DIV:
+          emit_op(compiler, OP_DIV, (int)expr->line);
+          return true;
+        default:
+          diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
+                     "binary operator not supported in VM yet");
+          compiler->had_error = true;
+          return false;
+      }
+    }
+    case AST_EXPR_UNARY: {
+      if (!compile_expr(compiler, expr->as.unary.operand)) {
+        return false;
+      }
+      if (expr->as.unary.op == AST_UNARY_NEG) {
+        emit_op(compiler, OP_NEG, (int)expr->line);
+        return true;
+      }
+      diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
+                 "unary operator not supported in VM yet");
+      compiler->had_error = true;
+      return false;
+    }
     default:
       diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
                  "expression not supported in VM yet");
@@ -295,6 +432,28 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
   switch (stmt->kind) {
     case AST_STMT_EXPR:
       return compile_expr(compiler, stmt->as.expr_stmt);
+    case AST_STMT_RET: {
+      const AstReturnArg* arg = stmt->as.ret_stmt.values;
+      if (!arg) {
+        return emit_return(compiler, false, (int)stmt->line);
+      }
+      if (arg->next) {
+        diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column,
+                   "multiple return values not supported in VM yet");
+        compiler->had_error = true;
+        return false;
+      }
+      if (arg->has_label) {
+        diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column,
+                   "labeled returns not supported in VM yet");
+        compiler->had_error = true;
+        return false;
+      }
+      if (!compile_expr(compiler, arg->value)) {
+        return false;
+      }
+      return emit_return(compiler, true, (int)stmt->line);
+    }
     default:
       diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column,
                  "statement not supported in VM yet");
@@ -335,14 +494,27 @@ static bool compile_function(BytecodeCompiler* compiler, const AstDecl* decl) {
   }
   entry->offset = (uint16_t)compiler->chunk->code_count;
 
+  compiler->current_function = func;
+  compiler_reset_locals(compiler);
+  const AstParam* param = func->params;
+  while (param) {
+    if (!compiler_add_local(compiler, param->name)) {
+      compiler->current_function = NULL;
+      return false;
+    }
+    param = param->next;
+  }
+
   const AstStmt* stmt = func->body->first;
   while (stmt) {
     if (!compile_stmt(compiler, stmt)) {
+      compiler->current_function = NULL;
       return false;
     }
     stmt = stmt->next;
   }
-  emit_op(compiler, OP_RETURN, (int)decl->line);
+  emit_return(compiler, false, (int)decl->line);
+  compiler->current_function = NULL;
   return true;
 }
 
@@ -353,6 +525,8 @@ bool vm_compile_module(const AstModule* module, Chunk* chunk, const char* file_p
       .chunk = chunk,
       .file_path = file_path,
       .had_error = false,
+      .current_function = NULL,
+      .local_count = 0,
   };
 
   if (!collect_function_entries(module, &compiler.functions)) {
@@ -368,10 +542,10 @@ bool vm_compile_module(const AstModule* module, Chunk* chunk, const char* file_p
   }
 
   if (!compiler.had_error) {
-    if (!emit_function_call(&compiler, main_entry, 0, 0)) {
+    if (!emit_function_call(&compiler, main_entry, 0, 0, 0)) {
       compiler.had_error = true;
     } else {
-      emit_op(&compiler, OP_RETURN, 0);
+      emit_return(&compiler, false, 0);
     }
   }
 

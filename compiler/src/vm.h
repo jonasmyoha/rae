@@ -8,7 +8,13 @@ typedef enum {
   OP_LOG = 0x02,
   OP_LOG_S = 0x03,
   OP_CALL = 0x04,
-  OP_RETURN = 0xFF
+  OP_RETURN = 0x05,
+  OP_GET_LOCAL = 0x06,
+  OP_ADD = 0x10,
+  OP_SUB = 0x11,
+  OP_MUL = 0x12,
+  OP_DIV = 0x13,
+  OP_NEG = 0x14
 } OpCode;
 
 typedef enum {
@@ -17,11 +23,17 @@ typedef enum {
 } VMResult;
 
 typedef struct {
+  uint8_t* return_ip;
+  Value* slots;
+  uint16_t slot_count;
+} CallFrame;
+
+typedef struct {
   Chunk* chunk;
   uint8_t* ip;
   Value stack[256];
   Value* stack_top;
-  uint8_t* call_stack[256];
+  CallFrame call_stack[256];
   size_t call_stack_top;
 } VM;
 

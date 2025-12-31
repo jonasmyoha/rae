@@ -5,6 +5,11 @@
 #include "diag.h"
 
 static Value vm_pop(VM* vm) {
+  if (vm->stack_top == vm->stack) {
+    diag_error(NULL, 0, 0, "VM stack underflow");
+    Value zero = value_int(0);
+    return zero;
+  }
   vm->stack_top -= 1;
   return *vm->stack_top;
 }
@@ -31,6 +36,13 @@ static uint16_t read_short(VM* vm) {
   uint16_t value = (uint16_t)(vm->ip[0] << 8 | vm->ip[1]);
   vm->ip += 2;
   return value;
+}
+
+static CallFrame* vm_current_frame(VM* vm) {
+  if (vm->call_stack_top == 0) {
+    return NULL;
+  }
+  return &vm->call_stack[vm->call_stack_top - 1];
 }
 
 VMResult vm_run(VM* vm, Chunk* chunk) {
@@ -61,11 +73,19 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
       }
       case OP_CALL: {
         uint16_t target = read_short(vm);
+        uint8_t arg_count = *vm->ip++;
+        if (vm->stack_top - vm->stack < arg_count) {
+          diag_error(NULL, 0, 0, "not enough arguments on stack for call");
+          return VM_RUNTIME_ERROR;
+        }
         if (vm->call_stack_top >= sizeof(vm->call_stack) / sizeof(vm->call_stack[0])) {
           diag_error(NULL, 0, 0, "call stack overflow");
           return VM_RUNTIME_ERROR;
         }
-        vm->call_stack[vm->call_stack_top++] = vm->ip;
+        CallFrame* frame = &vm->call_stack[vm->call_stack_top++];
+        frame->return_ip = vm->ip;
+        frame->slots = vm->stack_top - arg_count;
+        frame->slot_count = arg_count;
         if (target >= vm->chunk->code_count) {
           diag_error(NULL, 0, 0, "invalid function address");
           return VM_RUNTIME_ERROR;
@@ -73,12 +93,82 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         vm->ip = vm->chunk->code + target;
         break;
       }
-      case OP_RETURN:
+      case OP_GET_LOCAL: {
+        uint16_t slot = read_short(vm);
+        CallFrame* frame = vm_current_frame(vm);
+        if (!frame) {
+          diag_error(NULL, 0, 0, "VM local access outside of function");
+          return VM_RUNTIME_ERROR;
+        }
+        if (slot >= frame->slot_count) {
+          diag_error(NULL, 0, 0, "VM local slot out of range");
+          return VM_RUNTIME_ERROR;
+        }
+        vm_push(vm, frame->slots[slot]);
+        break;
+      }
+      case OP_ADD:
+      case OP_SUB:
+      case OP_MUL:
+      case OP_DIV: {
+        Value rhs = vm_pop(vm);
+        Value lhs = vm_pop(vm);
+        if (lhs.type != VAL_INT || rhs.type != VAL_INT) {
+          diag_error(NULL, 0, 0, "arithmetic operands must be integers");
+          return VM_RUNTIME_ERROR;
+        }
+        int64_t result = 0;
+        switch (instruction) {
+          case OP_ADD:
+            result = lhs.as.int_value + rhs.as.int_value;
+            break;
+          case OP_SUB:
+            result = lhs.as.int_value - rhs.as.int_value;
+            break;
+          case OP_MUL:
+            result = lhs.as.int_value * rhs.as.int_value;
+            break;
+          case OP_DIV:
+            if (rhs.as.int_value == 0) {
+              diag_error(NULL, 0, 0, "division by zero");
+              return VM_RUNTIME_ERROR;
+            }
+            result = lhs.as.int_value / rhs.as.int_value;
+            break;
+          default:
+            break;
+        }
+        vm_push(vm, value_int(result));
+        break;
+      }
+      case OP_NEG: {
+        Value operand = vm_pop(vm);
+        if (operand.type != VAL_INT) {
+          diag_error(NULL, 0, 0, "negation expects integer operand");
+          return VM_RUNTIME_ERROR;
+        }
+        vm_push(vm, value_int(-operand.as.int_value));
+        break;
+      }
+      case OP_RETURN: {
+        uint8_t has_value = *vm->ip++;
+        Value result;
+        bool push_result = false;
+        if (has_value) {
+          result = vm_pop(vm);
+          push_result = true;
+        }
         if (vm->call_stack_top == 0) {
           return VM_RUNTIME_OK;
         }
-        vm->ip = vm->call_stack[--vm->call_stack_top];
+        CallFrame* frame = &vm->call_stack[--vm->call_stack_top];
+        vm->ip = frame->return_ip;
+        vm->stack_top = frame->slots;
+        if (push_result) {
+          vm_push(vm, result);
+        }
         break;
+      }
       default:
         diag_error(NULL, 0, 0, "unknown opcode encountered in VM");
         return VM_RUNTIME_ERROR;
