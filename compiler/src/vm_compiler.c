@@ -33,6 +33,7 @@ typedef struct {
     uint16_t slot;
   } locals[256];
   uint16_t local_count;
+  uint16_t allocated_locals;
 } BytecodeCompiler;
 
 #define INVALID_OFFSET UINT16_MAX
@@ -47,9 +48,11 @@ static bool compile_function(BytecodeCompiler* compiler, const AstDecl* decl);
 static bool emit_function_call(BytecodeCompiler* compiler, FunctionEntry* entry, int line,
                                int column, uint8_t arg_count);
 static bool emit_return(BytecodeCompiler* compiler, bool has_value, int line);
-static bool compiler_add_local(BytecodeCompiler* compiler, Str name);
+static int compiler_add_local(BytecodeCompiler* compiler, Str name);
 static int compiler_find_local(BytecodeCompiler* compiler, Str name);
 static void compiler_reset_locals(BytecodeCompiler* compiler);
+static bool compiler_ensure_local_capacity(BytecodeCompiler* compiler, uint16_t required,
+                                           int line);
 
 static void emit_byte(BytecodeCompiler* compiler, uint8_t byte, int line) {
   chunk_write(compiler->chunk, byte, line);
@@ -191,18 +194,19 @@ static void free_function_table(FunctionTable* table) {
 
 static void compiler_reset_locals(BytecodeCompiler* compiler) {
   compiler->local_count = 0;
+  compiler->allocated_locals = 0;
 }
 
-static bool compiler_add_local(BytecodeCompiler* compiler, Str name) {
+static int compiler_add_local(BytecodeCompiler* compiler, Str name) {
   if (compiler->local_count >= sizeof(compiler->locals) / sizeof(compiler->locals[0])) {
     diag_error(compiler->file_path, 0, 0, "VM compiler local limit exceeded");
     compiler->had_error = true;
-    return false;
+    return -1;
   }
   compiler->locals[compiler->local_count].name = name;
   compiler->locals[compiler->local_count].slot = compiler->local_count;
   compiler->local_count += 1;
-  return true;
+  return (int)(compiler->local_count - 1);
 }
 
 static int compiler_find_local(BytecodeCompiler* compiler, Str name) {
@@ -212,6 +216,18 @@ static int compiler_find_local(BytecodeCompiler* compiler, Str name) {
     }
   }
   return -1;
+}
+
+static bool compiler_ensure_local_capacity(BytecodeCompiler* compiler, uint16_t required,
+                                           int line) {
+  if (required <= compiler->allocated_locals) {
+    return true;
+  }
+  uint16_t delta = required - compiler->allocated_locals;
+  emit_op(compiler, OP_ALLOC_LOCAL, line);
+  emit_short(compiler, delta, line);
+  compiler->allocated_locals = required;
+  return true;
 }
 
 static bool emit_function_call(BytecodeCompiler* compiler, FunctionEntry* entry, int line,
@@ -430,6 +446,27 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
 
 static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
   switch (stmt->kind) {
+    case AST_STMT_DEF: {
+      if (!stmt->as.def_stmt.value) {
+        diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column,
+                   "VM def statements currently require an initializer");
+        compiler->had_error = true;
+        return false;
+      }
+      int slot = compiler_add_local(compiler, stmt->as.def_stmt.name);
+      if (slot < 0) {
+        return false;
+      }
+      if (!compiler_ensure_local_capacity(compiler, compiler->local_count, (int)stmt->line)) {
+        return false;
+      }
+      if (!compile_expr(compiler, stmt->as.def_stmt.value)) {
+        return false;
+      }
+      emit_op(compiler, OP_SET_LOCAL, (int)stmt->line);
+      emit_short(compiler, (uint16_t)slot, (int)stmt->line);
+      return true;
+    }
     case AST_STMT_EXPR:
       return compile_expr(compiler, stmt->as.expr_stmt);
     case AST_STMT_RET: {
@@ -498,12 +535,13 @@ static bool compile_function(BytecodeCompiler* compiler, const AstDecl* decl) {
   compiler_reset_locals(compiler);
   const AstParam* param = func->params;
   while (param) {
-    if (!compiler_add_local(compiler, param->name)) {
+    if (compiler_add_local(compiler, param->name) < 0) {
       compiler->current_function = NULL;
       return false;
     }
     param = param->next;
   }
+  compiler->allocated_locals = compiler->local_count;
 
   const AstStmt* stmt = func->body->first;
   while (stmt) {
@@ -527,6 +565,7 @@ bool vm_compile_module(const AstModule* module, Chunk* chunk, const char* file_p
       .had_error = false,
       .current_function = NULL,
       .local_count = 0,
+      .allocated_locals = 0,
   };
 
   if (!collect_function_entries(module, &compiler.functions)) {

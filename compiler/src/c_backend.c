@@ -7,13 +7,16 @@
 
 typedef struct {
   const AstParam* params;
+  Str locals[256];
+  size_t local_count;
+  bool returns_value;
 } CFuncContext;
 
 static bool emit_expr(const CFuncContext* ctx, const AstExpr* expr, FILE* out);
 static bool emit_function(const AstFuncDecl* func, FILE* out);
-static bool emit_stmt(const CFuncContext* ctx, const AstStmt* stmt, FILE* out);
-static bool emit_call(const CFuncContext* ctx, const AstExpr* expr, FILE* out);
-static bool emit_log_call(const AstExpr* expr, FILE* out, bool newline);
+static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
+static bool emit_call(CFuncContext* ctx, const AstExpr* expr, FILE* out);
+static bool emit_log_call(const CFuncContext* ctx, const AstExpr* expr, FILE* out, bool newline);
 static bool emit_string_literal(FILE* out, Str literal);
 static bool emit_param_list(const AstParam* params, FILE* out);
 
@@ -41,36 +44,38 @@ static bool emit_param_list(const AstParam* params, FILE* out) {
   return true;
 }
 
-static bool emit_log_arg(FILE* out, const AstExpr* arg, bool newline) {
-  if (arg->kind != AST_EXPR_STRING) {
-    fprintf(stderr,
-            "error: C backend currently only supports log/logS with string literals (got "
-            "non-string argument)\n");
-    return false;
-  }
-  if (newline) {
-    if (fprintf(out, "  puts(") < 0) return false;
-    if (!emit_string_literal(out, arg->as.string_lit)) return false;
-    if (fprintf(out, ");\n") < 0) return false;
-  } else {
-    if (fprintf(out, "  fputs(") < 0) return false;
-    if (!emit_string_literal(out, arg->as.string_lit)) return false;
-    if (fprintf(out, ", stdout);\n") < 0) return false;
-  }
-  if (fprintf(out, "  fflush(stdout);\n") < 0) return false;
-  return true;
-}
-
-static bool emit_log_call(const AstExpr* expr, FILE* out, bool newline) {
+static bool emit_log_call(const CFuncContext* ctx, const AstExpr* expr, FILE* out, bool newline) {
   const AstCallArg* arg = expr->as.call.args;
   if (!arg || arg->next) {
     fprintf(stderr,
             "error: C backend expects exactly one argument for log/logS during codegen\n");
     return false;
   }
-  if (!emit_log_arg(out, arg->value, newline)) {
+  const AstExpr* value = arg->value;
+  if (value->kind == AST_EXPR_STRING) {
+    if (newline) {
+      if (fprintf(out, "  puts(") < 0) return false;
+      if (!emit_string_literal(out, value->as.string_lit)) return false;
+      if (fprintf(out, ");\n") < 0) return false;
+    } else {
+      if (fprintf(out, "  fputs(") < 0) return false;
+      if (!emit_string_literal(out, value->as.string_lit)) return false;
+      if (fprintf(out, ", stdout);\n") < 0) return false;
+    }
+    if (fprintf(out, "  fflush(stdout);\n") < 0) return false;
+    return true;
+  }
+  const char* suffix = newline ? "\\n" : "";
+  if (fprintf(out, "  printf(\"%%lld%s\", (long long)(", suffix) < 0) {
     return false;
   }
+  if (!emit_expr(ctx, value, out)) {
+    return false;
+  }
+  if (fprintf(out, "));\n") < 0) {
+    return false;
+  }
+  if (fprintf(out, "  fflush(stdout);\n") < 0) return false;
   return true;
 }
 
@@ -89,8 +94,14 @@ static bool emit_expr(const CFuncContext* ctx, const AstExpr* expr, FILE* out) {
           return fprintf(out, "%.*s", (int)expr->as.ident.len, expr->as.ident.data) >= 0;
         }
       }
+      for (size_t i = 0; i < ctx->local_count; ++i) {
+        if (str_eq(ctx->locals[i], expr->as.ident)) {
+          return fprintf(out, "%.*s", (int)expr->as.ident.len, expr->as.ident.data) >= 0;
+        }
+      }
       fprintf(stderr,
-              "error: C backend currently only supports referencing function parameters (%.*s)\n",
+              "error: C backend currently only supports referencing parameters or prior locals "
+              "(%.*s)\n",
               (int)expr->as.ident.len, expr->as.ident.data);
       return false;
     }
@@ -133,7 +144,7 @@ static bool emit_expr(const CFuncContext* ctx, const AstExpr* expr, FILE* out) {
   }
 }
 
-static bool emit_call(const CFuncContext* ctx, const AstExpr* expr, FILE* out) {
+static bool emit_call(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
   if (expr->kind != AST_EXPR_CALL || !expr->as.call.callee ||
       expr->as.call.callee->kind != AST_EXPR_IDENT) {
     fprintf(stderr, "error: unsupported expression in C backend (only direct calls allowed)\n");
@@ -141,10 +152,10 @@ static bool emit_call(const CFuncContext* ctx, const AstExpr* expr, FILE* out) {
   }
   Str name = expr->as.call.callee->as.ident;
   if (str_eq_cstr(name, "log")) {
-    return emit_log_call(expr, out, true);
+    return emit_log_call(ctx, expr, out, true);
   }
   if (str_eq_cstr(name, "logS")) {
-    return emit_log_call(expr, out, false);
+    return emit_log_call(ctx, expr, out, false);
   }
   const AstCallArg* arg = expr->as.call.args;
   if (fprintf(out, "  %.*s(", (int)name.len, name.data) < 0) {
@@ -167,13 +178,61 @@ static bool emit_call(const CFuncContext* ctx, const AstExpr* expr, FILE* out) {
   return true;
 }
 
-static bool emit_stmt(const CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
+static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
   if (!stmt) return true;
   switch (stmt->kind) {
+    case AST_STMT_RET: {
+      const AstReturnArg* arg = stmt->as.ret_stmt.values;
+      if (!arg) {
+        if (ctx->returns_value) {
+          fprintf(stderr, "error: return without value in function expecting a value\n");
+          return false;
+        }
+        return fprintf(out, "  return;\n") >= 0;
+      }
+      if (arg->next) {
+        fprintf(stderr, "error: C backend only supports single return values\n");
+        return false;
+      }
+      if (!ctx->returns_value) {
+        fprintf(stderr, "error: return with value in non-returning function\n");
+        return false;
+      }
+      if (fprintf(out, "  return ") < 0) {
+        return false;
+      }
+      if (!emit_expr(ctx, arg->value, out)) {
+        return false;
+      }
+      return fprintf(out, ";\n") >= 0;
+    }
+    case AST_STMT_DEF: {
+      if (!stmt->as.def_stmt.value) {
+        fprintf(stderr, "error: C backend def statements require an initializer\n");
+        return false;
+      }
+      if (ctx->local_count >= sizeof(ctx->locals) / sizeof(ctx->locals[0])) {
+        fprintf(stderr, "error: C backend local limit exceeded\n");
+        return false;
+      }
+      if (fprintf(out, "  int64_t %.*s = ", (int)stmt->as.def_stmt.name.len,
+                  stmt->as.def_stmt.name.data) < 0) {
+        return false;
+      }
+      if (!emit_expr(ctx, stmt->as.def_stmt.value, out)) {
+        return false;
+      }
+      if (fprintf(out, ";\n") < 0) {
+        return false;
+      }
+      ctx->locals[ctx->local_count++] = stmt->as.def_stmt.name;
+      return true;
+    }
     case AST_STMT_EXPR:
       return emit_call(ctx, stmt->as.expr_stmt, out);
     default:
-      fprintf(stderr, "error: C backend does not yet support this statement kind\n");
+      fprintf(stderr, "error: C backend does not yet support this statement kind (%d)\n",
+              (int)stmt->kind);
       return false;
   }
 }
@@ -184,13 +243,18 @@ static bool emit_function(const AstFuncDecl* func, FILE* out) {
     return false;
   }
   bool is_main = str_eq_cstr(func->name, "main");
+  bool returns_value = func->returns != NULL;
+  if (func->returns && func->returns->next) {
+    fprintf(stderr, "error: C backend only supports single return values per function\n");
+    return false;
+  }
   char* name = str_to_cstr(func->name);
   if (!name) return false;
   bool ok = true;
   if (is_main) {
     ok = fprintf(out, "int main(") >= 0;
   } else {
-    ok = fprintf(out, "static void %s(", name) >= 0;
+    ok = fprintf(out, "static %s %s(", returns_value ? "int64_t" : "void", name) >= 0;
   }
   if (ok) {
     ok = emit_param_list(func->params, out);
@@ -202,7 +266,7 @@ static bool emit_function(const AstFuncDecl* func, FILE* out) {
     free(name);
     return false;
   }
-  CFuncContext ctx = {.params = func->params};
+  CFuncContext ctx = {.params = func->params, .local_count = 0, .returns_value = returns_value};
   const AstStmt* stmt = func->body->first;
   while (stmt && ok) {
     ok = emit_stmt(&ctx, stmt, out);
@@ -262,7 +326,14 @@ bool c_backend_emit(const AstModule* module, const char* out_path) {
         ok = false;
         break;
       }
-      if (fprintf(out, "static void %s(", proto) < 0) {
+      bool returns_value = funcs[i]->returns != NULL;
+      if (funcs[i]->returns && funcs[i]->returns->next) {
+        fprintf(stderr, "error: C backend only supports single return values per function\n");
+        free(proto);
+        ok = false;
+        break;
+      }
+      if (fprintf(out, "static %s %s(", returns_value ? "int64_t" : "void", proto) < 0) {
         free(proto);
         ok = false;
         break;
