@@ -107,6 +107,43 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         vm_push(vm, frame->slots[slot]);
         break;
       }
+      case OP_SET_LOCAL: {
+        uint16_t slot = read_short(vm);
+        CallFrame* frame = vm_current_frame(vm);
+        if (!frame) {
+          diag_error(NULL, 0, 0, "VM local access outside of function");
+          return VM_RUNTIME_ERROR;
+        }
+        if (slot >= frame->slot_count) {
+          diag_error(NULL, 0, 0, "VM local slot out of range");
+          return VM_RUNTIME_ERROR;
+        }
+        Value value = vm_pop(vm);
+        frame->slots[slot] = value;
+        break;
+      }
+      case OP_ALLOC_LOCAL: {
+        uint16_t count = read_short(vm);
+        CallFrame* frame = vm_current_frame(vm);
+        if (!frame) {
+          diag_error(NULL, 0, 0, "VM local allocation outside of function");
+          return VM_RUNTIME_ERROR;
+        }
+        if ((frame->slots - vm->stack) + frame->slot_count + count >
+            (int)(sizeof(vm->stack) / sizeof(vm->stack[0]))) {
+          diag_error(NULL, 0, 0, "VM local storage overflow");
+          return VM_RUNTIME_ERROR;
+        }
+        for (uint16_t i = 0; i < count; ++i) {
+          frame->slots[frame->slot_count + i] = value_int(0);
+        }
+        frame->slot_count += count;
+        vm->stack_top = frame->slots + frame->slot_count;
+        break;
+      }
+      case OP_POP:
+        vm_pop(vm);
+        break;
       case OP_ADD:
       case OP_SUB:
       case OP_MUL:
