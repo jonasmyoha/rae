@@ -32,9 +32,9 @@
 
 ## Task Breakdown
 1. **T011 – Bytecode compiler + VM**
-   - Implement `Chunk`/`Value` structs, emit instructions for literals, arithmetic, `def`, and `print`.
+   - Implement `Chunk`/`Value` structs, emit instructions for literals, arithmetic, `def`, and `log`/`logS`.
    - VM executes a single module via `bin/rae run <file>`.
-   - Add `examples/hello.rae` that prints “Hello, Rae!”.
+   - Add `examples/hello.rae` that logs “Hello, Rae!”.
 2. **T012 – Hot-reload + runtime API**
    - Add registry + watcher-friendly reload API, ensure CLI can run in watch mode.
    - Document embedding functions for shipped builds (bytecode compiler + VM available as a library).
