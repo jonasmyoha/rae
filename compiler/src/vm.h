@@ -5,7 +5,8 @@
 
 typedef enum {
   OP_CONSTANT = 0x01,
-  OP_PRINT = 0x02,
+  OP_LOG = 0x02,
+  OP_LOG_S = 0x03,
   OP_RETURN = 0xFF
 } OpCode;
 

@@ -75,7 +75,9 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
     return false;
   }
   Str name = expr->as.call.callee->as.ident;
-  if (!str_eq_cstr(name, "print")) {
+  bool is_log = str_eq_cstr(name, "log");
+  bool is_log_s = str_eq_cstr(name, "logS");
+  if (!is_log && !is_log_s) {
     char buffer[128];
     snprintf(buffer, sizeof(buffer), "unsupported call '%.*s' in VM mode",
              (int)name.len, name.data);
@@ -87,14 +89,14 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
   const AstCallArg* arg = expr->as.call.args;
   if (!arg || arg->next) {
     diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
-               "print currently expects exactly one argument");
+               "log/logS currently expect exactly one argument");
     compiler->had_error = true;
     return false;
   }
   if (!compile_expr(compiler, arg->value)) {
     return false;
   }
-  emit_op(compiler, OP_PRINT, (int)expr->line);
+  emit_op(compiler, is_log ? OP_LOG : OP_LOG_S, (int)expr->line);
   return true;
 }
 

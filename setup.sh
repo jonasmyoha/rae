@@ -708,7 +708,7 @@ cat > examples/hello.rae << 'EOF'
 # Hello world example
 
 func main(): pub {
-  print("Hello, Rae!")
+  log(value: "Hello, Rae!")
 }
 EOF
 

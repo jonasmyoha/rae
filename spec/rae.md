@@ -201,6 +201,18 @@ add(a: p, b: q)
 spawn heavyWork(id: 2)
 ```
 
+### 8.4 Logging Built-ins
+
+Rae ships two lightweight logging helpers:
+
+```
+log(value: Any)   # prints the value followed by a newline (like println)
+logS(value: Any)  # stream log without a newline (like printf)
+```
+
+Both variants flush stdout immediately, so console output appears in the order
+you invoke them even under watch mode or long-running examples.
+
 ---
 
 ## 9. Constraints
