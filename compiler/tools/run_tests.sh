@@ -34,6 +34,10 @@ for TEST_FILE in $TEST_FILES; do
       continue
       ;;
   esac
+  TEST_DIRNAME=$(dirname "$TEST_FILE")
+  if [ -f "$TEST_DIRNAME/.raetesthelper" ]; then
+    continue
+  fi
   TEST_NAME=$(basename "$TEST_FILE" .rae)
   EXPECT_FILE="${TEST_FILE%.rae}.expect"
   
