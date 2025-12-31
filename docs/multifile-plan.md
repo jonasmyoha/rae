@@ -1,5 +1,7 @@
 # Rae Multifile Build Plan (T008)
 
+> **Status:** `bin/rae run` now resolves both absolute (`"compiler/modules/foo"`) and relative (`"./ui/header"`, `"../shared/time"`) imports, and when a file contains no explicit imports the CLI automatically scans its directory tree for `.rae` files and includes them. The remaining tasks below focus on richer semantics and the `rae build` pipeline.
+
 ## Goals
 - Compile and bundle a Rae application that spans multiple `.rae` files without requiring manual concatenation.
 - Keep Phase 1 constraints (lex/parse/pretty) but sketch the hand-off to future semantic passes so the plan stays valid.
@@ -17,13 +19,14 @@
 - Adopt a simple layout now to minimize future churn:
   ```
   app/
-    Rae.toml            # optional metadata (name, entry file list)
+    app.raepack         # optional metadata (name, auto folders, targets)
     src/
       main.rae
       render/ui.rae
       state/store.rae
   ```
-- In absence of `Rae.toml`, default to `src/*.rae` with `main.rae` as the entry module.
+- `.raepack` files are first-class Rae syntax documents. They live at the project root and can describe branding (display name, bundle identifier), `auto_folders`, dependencies, and build targets. Code may reference `package.name`, `package.brand.name`, etc., so renames happen in one place.
+- If no `.raepack` is present and the folder only contains a single `.rae` entry point, the CLI assumes the entire folder (and subdirectories) form the package automatically. This keeps the learn-to-code experience zero-config, while larger apps drop in a `.raepack`.
 - Document conventions (module path mirrors relative file path, `.` vs `/` mapping) in `docs/` + `spec/rae.md`.
 
 ### 2. Module graph loader

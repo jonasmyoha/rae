@@ -213,6 +213,50 @@ logS(value: Any)  # stream log without a newline (like printf)
 Both variants flush stdout immediately, so console output appears in the order
 you invoke them even under watch mode or long-running examples.
 
+### 8.5 Modules & Imports
+
+- Each `.rae` file automatically becomes a module whose name equals its project-root-relative path without the `.rae` suffix (e.g., `examples/multifile_report/ui/header`).
+- Import paths use `/` separators. Absolute imports start at the project root (no leading `./` or drive prefixes). Relative imports may begin with `./` or `../` and are resolved against the current file’s directory.
+
+```rae
+import "examples/multifile_report/ui/header"
+import "./ui/footer"
+import "../shared/time"
+export "examples/shared/ui/theme"
+```
+
+- Imported modules are compiled before the current file, so their declarations are globally visible.
+- `export` re-exports a module for downstream consumers (future semantic passes will surface these in module metadata).
+- When a file does not declare any explicit imports and either a `.raepack` file enables auto folders or the folder contains only one `.rae` entry point, the CLI automatically scans that directory (and subdirectories) for `.rae` files and includes them. This keeps tiny apps ergonomic—drop `main.rae` plus helpers in a folder, or add a `.raepack`, and run `rae run path/to/main.rae` without bookkeeping.
+
+### 8.6 Package Descriptor (`.raepack`)
+
+- Packages (apps, libraries, tool bundles) are described by an optional `*.raepack` file that uses Rae syntax. Example:
+
+```rae
+package MyCoolApp {
+  brand {
+    name: "My Cool App"
+    identifier: "com.example.cool"
+  }
+  auto_folders: ["./src", "./ui"]
+  targets {
+    desktop {
+      main: "src/main.rae"
+    }
+  }
+}
+```
+
+- Key ideas:
+  - **`package <Name>`** defines the canonical package name. This value can be referenced from source code later (e.g., `import package.name`) so renaming happens in one place.
+  - **`brand` block** stores marketing metadata (display name, identifiers, icons) so UI code can reference `package.brand.name`.
+  - **`auto_folders`** lists directories that should behave as implicit import roots. If omitted, the CLI falls back to the single-file heuristic (one `.rae` entry point) so tutorial projects still Just Work™.
+  - **`targets`** describe build outputs (desktop, mobile, web). Each target can set its own `main`, build flags, and bundling directives.
+  - Additional sections (dependencies, assets, versioning, release/debug profiles) will live here as the package manager evolves.
+
+- **Defaults:** If no `.raepack` is present, and the compiler is run in a directory containing only one `.rae` file (e.g., `main.rae`), that directory is treated as the package root and auto-imports are enabled implicitly. As soon as multiple entry points or more structure is needed, creators add a `.raepack` to explicitly describe the package.
+
 ---
 
 ## 9. Constraints
