@@ -8,10 +8,37 @@
 #include "vm.h"
 
 typedef struct {
+  Str name;
+  uint16_t offset;
+  uint16_t* patches;
+  size_t patch_count;
+  size_t patch_capacity;
+} FunctionEntry;
+
+typedef struct {
+  FunctionEntry* entries;
+  size_t count;
+  size_t capacity;
+} FunctionTable;
+
+typedef struct {
   Chunk* chunk;
   const char* file_path;
   bool had_error;
+  FunctionTable functions;
 } BytecodeCompiler;
+
+#define INVALID_OFFSET UINT16_MAX
+
+static void free_function_table(FunctionTable* table);
+static FunctionEntry* function_table_find(FunctionTable* table, Str name);
+static bool function_table_add(FunctionTable* table, Str name);
+static bool function_entry_add_patch(FunctionEntry* entry, uint16_t patch_offset);
+static bool patch_function_calls(FunctionTable* table, Chunk* chunk, const char* file_path);
+static bool collect_function_entries(const AstModule* module, FunctionTable* table);
+static bool compile_function(BytecodeCompiler* compiler, const AstDecl* decl);
+static bool emit_function_call(BytecodeCompiler* compiler, FunctionEntry* entry, int line,
+                               int column);
 
 static void emit_byte(BytecodeCompiler* compiler, uint8_t byte, int line) {
   chunk_write(compiler->chunk, byte, line);
@@ -26,6 +53,132 @@ static void emit_constant(BytecodeCompiler* compiler, Value value, int line) {
   emit_op(compiler, OP_CONSTANT, line);
   emit_byte(compiler, (uint8_t)((index >> 8) & 0xFF), line);
   emit_byte(compiler, (uint8_t)(index & 0xFF), line);
+}
+
+static void emit_short(BytecodeCompiler* compiler, uint16_t value, int line) {
+  emit_byte(compiler, (uint8_t)((value >> 8) & 0xFF), line);
+  emit_byte(compiler, (uint8_t)(value & 0xFF), line);
+}
+
+static void write_short_at(Chunk* chunk, uint16_t offset, uint16_t value) {
+  if (offset + 1 >= chunk->code_count) return;
+  chunk->code[offset] = (uint8_t)((value >> 8) & 0xFF);
+  chunk->code[offset + 1] = (uint8_t)(value & 0xFF);
+}
+
+static bool str_matches(Str a, Str b) {
+  return a.len == b.len && strncmp(a.data, b.data, a.len) == 0;
+}
+
+static FunctionEntry* function_table_find(FunctionTable* table, Str name) {
+  if (!table) return NULL;
+  for (size_t i = 0; i < table->count; ++i) {
+    if (str_matches(table->entries[i].name, name)) {
+      return &table->entries[i];
+    }
+  }
+  return NULL;
+}
+
+static bool function_table_add(FunctionTable* table, Str name) {
+  if (function_table_find(table, name)) {
+    return true;
+  }
+  if (table->count + 1 > table->capacity) {
+    size_t old_cap = table->capacity;
+    size_t new_cap = old_cap < 8 ? 8 : old_cap * 2;
+    FunctionEntry* resized = realloc(table->entries, new_cap * sizeof(FunctionEntry));
+    if (!resized) {
+      return false;
+    }
+    table->entries = resized;
+    table->capacity = new_cap;
+  }
+  FunctionEntry* entry = &table->entries[table->count++];
+  entry->name = name;
+  entry->offset = INVALID_OFFSET;
+  entry->patches = NULL;
+  entry->patch_count = 0;
+  entry->patch_capacity = 0;
+  return true;
+}
+
+static bool function_entry_add_patch(FunctionEntry* entry, uint16_t patch_offset) {
+  if (entry->patch_count + 1 > entry->patch_capacity) {
+    size_t old_cap = entry->patch_capacity;
+    size_t new_cap = old_cap < 4 ? 4 : old_cap * 2;
+    uint16_t* resized = realloc(entry->patches, new_cap * sizeof(uint16_t));
+    if (!resized) {
+      return false;
+    }
+    entry->patches = resized;
+    entry->patch_capacity = new_cap;
+  }
+  entry->patches[entry->patch_count++] = patch_offset;
+  return true;
+}
+
+static bool patch_function_calls(FunctionTable* table, Chunk* chunk, const char* file_path) {
+  for (size_t i = 0; i < table->count; ++i) {
+    FunctionEntry* entry = &table->entries[i];
+    if (entry->offset == INVALID_OFFSET) {
+      char buffer[128];
+      snprintf(buffer, sizeof(buffer), "function '%.*s' missing implementation",
+               (int)entry->name.len, entry->name.data);
+      diag_error(file_path, 0, 0, buffer);
+      return false;
+    }
+    for (size_t j = 0; j < entry->patch_count; ++j) {
+      write_short_at(chunk, entry->patches[j], entry->offset);
+    }
+  }
+  return true;
+}
+
+static bool collect_function_entries(const AstModule* module, FunctionTable* table) {
+  const AstDecl* decl = module->decls;
+  while (decl) {
+    if (decl->kind == AST_DECL_FUNC) {
+      if (!function_table_add(table, decl->as.func_decl.name)) {
+        return false;
+      }
+    }
+    decl = decl->next;
+  }
+  return true;
+}
+
+static void free_function_table(FunctionTable* table) {
+  if (!table) return;
+  for (size_t i = 0; i < table->count; ++i) {
+    free(table->entries[i].patches);
+    table->entries[i].patches = NULL;
+    table->entries[i].patch_capacity = 0;
+    table->entries[i].patch_count = 0;
+  }
+  free(table->entries);
+  table->entries = NULL;
+  table->count = 0;
+  table->capacity = 0;
+}
+
+static bool emit_function_call(BytecodeCompiler* compiler, FunctionEntry* entry, int line,
+                               int column) {
+  if (!entry) return false;
+  emit_op(compiler, OP_CALL, line);
+  if (compiler->chunk->code_count > UINT16_MAX) {
+    diag_error(compiler->file_path, line, column, "VM bytecode exceeds 64KB limit");
+    compiler->had_error = true;
+    return false;
+  }
+  uint16_t patch_offset = (uint16_t)compiler->chunk->code_count;
+  emit_short(compiler, 0, line);
+  if (!function_entry_add_patch(entry, patch_offset)) {
+    diag_error(compiler->file_path, line, column, "failed to record function call patch");
+    compiler->had_error = true;
+    return false;
+  }
+  return true;
 }
 
 static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr);
@@ -77,27 +230,38 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
   Str name = expr->as.call.callee->as.ident;
   bool is_log = str_eq_cstr(name, "log");
   bool is_log_s = str_eq_cstr(name, "logS");
-  if (!is_log && !is_log_s) {
-    char buffer[128];
-    snprintf(buffer, sizeof(buffer), "unsupported call '%.*s' in VM mode",
-             (int)name.len, name.data);
-    diag_error(compiler->file_path, (int)expr->line, (int)expr->column, buffer);
+  if (is_log || is_log_s) {
+    const AstCallArg* arg = expr->as.call.args;
+    if (!arg || arg->next) {
+      diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
+                 "log/logS currently expect exactly one argument");
+      compiler->had_error = true;
+      return false;
+    }
+    if (!compile_expr(compiler, arg->value)) {
+      return false;
+    }
+    emit_op(compiler, is_log ? OP_LOG : OP_LOG_S, (int)expr->line);
+    return true;
+  }
+
+  if (expr->as.call.args) {
+    diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
+               "VM function calls currently do not accept arguments");
     compiler->had_error = true;
     return false;
   }
 
-  const AstCallArg* arg = expr->as.call.args;
-  if (!arg || arg->next) {
-    diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
-               "log/logS currently expect exactly one argument");
+  FunctionEntry* entry = function_table_find(&compiler->functions, name);
+  if (!entry) {
+    char buffer[128];
+    snprintf(buffer, sizeof(buffer), "unknown function '%.*s' for VM call", (int)name.len,
+             name.data);
+    diag_error(compiler->file_path, (int)expr->line, (int)expr->column, buffer);
     compiler->had_error = true;
     return false;
   }
-  if (!compile_expr(compiler, arg->value)) {
-    return false;
-  }
-  emit_op(compiler, is_log ? OP_LOG : OP_LOG_S, (int)expr->line);
-  return true;
+  return emit_function_call(compiler, entry, (int)expr->line, (int)expr->column);
 }
 
 static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
@@ -139,6 +303,49 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
   }
 }
 
+static bool compile_function(BytecodeCompiler* compiler, const AstDecl* decl) {
+  if (!decl || decl->kind != AST_DECL_FUNC) {
+    return false;
+  }
+  const AstFuncDecl* func = &decl->as.func_decl;
+  FunctionEntry* entry = function_table_find(&compiler->functions, func->name);
+  if (!entry) {
+    diag_error(compiler->file_path, (int)decl->line, (int)decl->column,
+               "function table entry missing during VM compilation");
+    compiler->had_error = true;
+    return false;
+  }
+  if (entry->offset != INVALID_OFFSET) {
+    diag_error(compiler->file_path, (int)decl->line, (int)decl->column,
+               "duplicate function definition in VM compiler");
+    compiler->had_error = true;
+    return false;
+  }
+  if (!func->body) {
+    diag_error(compiler->file_path, (int)decl->line, (int)decl->column,
+               "functions without a body are not supported in VM yet");
+    compiler->had_error = true;
+    return false;
+  }
+  if (compiler->chunk->code_count > UINT16_MAX) {
+    diag_error(compiler->file_path, (int)decl->line, (int)decl->column,
+               "VM bytecode exceeds 64KB limit");
+    compiler->had_error = true;
+    return false;
+  }
+  entry->offset = (uint16_t)compiler->chunk->code_count;
+
+  const AstStmt* stmt = func->body->first;
+  while (stmt) {
+    if (!compile_stmt(compiler, stmt)) {
+      return false;
+    }
+    stmt = stmt->next;
+  }
+  emit_op(compiler, OP_RETURN, (int)decl->line);
+  return true;
+}
+
 bool vm_compile_module(const AstModule* module, Chunk* chunk, const char* file_path) {
   if (!module || !chunk) return false;
   chunk_init(chunk);
@@ -148,33 +355,45 @@ bool vm_compile_module(const AstModule* module, Chunk* chunk, const char* file_p
       .had_error = false,
   };
 
+  if (!collect_function_entries(module, &compiler.functions)) {
+    diag_error(file_path, 0, 0, "failed to prepare VM function table");
+    compiler.had_error = true;
+  }
+
+  Str main_name = str_from_cstr("main");
+  FunctionEntry* main_entry = function_table_find(&compiler.functions, main_name);
+  if (!main_entry) {
+    diag_error(file_path, 0, 0, "no `func main` found for VM execution");
+    compiler.had_error = true;
+  }
+
+  if (!compiler.had_error) {
+    if (!emit_function_call(&compiler, main_entry, 0, 0)) {
+      compiler.had_error = true;
+    } else {
+      emit_op(&compiler, OP_RETURN, 0);
+    }
+  }
+
   const AstDecl* decl = module->decls;
-  const AstDecl* main_decl = NULL;
-  while (decl) {
-    if (decl->kind == AST_DECL_FUNC && str_eq_cstr(decl->as.func_decl.name, "main")) {
-      main_decl = decl;
-      break;
+  while (!compiler.had_error && decl) {
+    if (decl->kind == AST_DECL_FUNC) {
+      if (!compile_function(&compiler, decl)) {
+        break;
+      }
     }
     decl = decl->next;
   }
 
-  if (!main_decl) {
-    diag_error(file_path, 0, 0, "no `func main` found for VM execution");
-    return false;
-  }
-
-  const AstFuncDecl* main_func = &main_decl->as.func_decl;
-  const AstStmt* stmt = main_func->body ? main_func->body->first : NULL;
-  while (stmt) {
-    if (!compile_stmt(&compiler, stmt)) {
-      break;
+  if (!compiler.had_error) {
+    if (!patch_function_calls(&compiler.functions, chunk, file_path)) {
+      compiler.had_error = true;
     }
-    stmt = stmt->next;
   }
 
-  emit_op(&compiler, OP_RETURN, (int)(main_decl->line));
   if (compiler.had_error) {
     chunk_free(chunk);
   }
+  free_function_table(&compiler.functions);
   return !compiler.had_error;
 }

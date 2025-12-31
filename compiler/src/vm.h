@@ -7,6 +7,7 @@ typedef enum {
   OP_CONSTANT = 0x01,
   OP_LOG = 0x02,
   OP_LOG_S = 0x03,
+  OP_CALL = 0x04,
   OP_RETURN = 0xFF
 } OpCode;
 
@@ -20,6 +21,8 @@ typedef struct {
   uint8_t* ip;
   Value stack[256];
   Value* stack_top;
+  uint8_t* call_stack[256];
+  size_t call_stack_top;
 } VM;
 
 void vm_init(VM* vm);
