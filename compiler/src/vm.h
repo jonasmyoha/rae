@@ -13,11 +13,20 @@ typedef enum {
   OP_SET_LOCAL = 0x07,
   OP_ALLOC_LOCAL = 0x08,
   OP_POP = 0x09,
+  OP_JUMP = 0x0A,
+  OP_JUMP_IF_FALSE = 0x0B,
   OP_ADD = 0x10,
   OP_SUB = 0x11,
   OP_MUL = 0x12,
   OP_DIV = 0x13,
-  OP_NEG = 0x14
+  OP_NEG = 0x14,
+  OP_LT = 0x15,
+  OP_LE = 0x16,
+  OP_GT = 0x17,
+  OP_GE = 0x18,
+  OP_EQ = 0x19,
+  OP_NE = 0x1A,
+  OP_NOT = 0x1B
 } OpCode;
 
 typedef enum {
@@ -29,6 +38,7 @@ typedef struct {
   uint8_t* return_ip;
   Value* slots;
   uint16_t slot_count;
+  Value* locals_base;
 } CallFrame;
 
 typedef struct {

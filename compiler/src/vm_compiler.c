@@ -53,6 +53,9 @@ static int compiler_find_local(BytecodeCompiler* compiler, Str name);
 static void compiler_reset_locals(BytecodeCompiler* compiler);
 static bool compiler_ensure_local_capacity(BytecodeCompiler* compiler, uint16_t required,
                                            int line);
+static uint16_t emit_jump(BytecodeCompiler* compiler, OpCode op, int line);
+static void patch_jump(BytecodeCompiler* compiler, uint16_t offset);
+static bool compile_block(BytecodeCompiler* compiler, const AstBlock* block);
 
 static void emit_byte(BytecodeCompiler* compiler, uint8_t byte, int line) {
   chunk_write(compiler->chunk, byte, line);
@@ -78,6 +81,24 @@ static void write_short_at(Chunk* chunk, uint16_t offset, uint16_t value) {
   if (offset + 1 >= chunk->code_count) return;
   chunk->code[offset] = (uint8_t)((value >> 8) & 0xFF);
   chunk->code[offset + 1] = (uint8_t)(value & 0xFF);
+}
+
+static uint16_t emit_jump(BytecodeCompiler* compiler, OpCode op, int line) {
+  emit_op(compiler, op, line);
+  if (compiler->chunk->code_count + 2 > UINT16_MAX) {
+    diag_error(compiler->file_path, line, 0, "VM bytecode exceeds 64KB limit");
+    compiler->had_error = true;
+    return 0;
+  }
+  uint16_t offset = (uint16_t)compiler->chunk->code_count;
+  emit_byte(compiler, 0xFF, line);
+  emit_byte(compiler, 0xFF, line);
+  return offset;
+}
+
+static void patch_jump(BytecodeCompiler* compiler, uint16_t offset) {
+  uint16_t target = (uint16_t)compiler->chunk->code_count;
+  write_short_at(compiler->chunk, offset, target);
 }
 
 static bool str_matches(Str a, Str b) {
@@ -397,30 +418,74 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
     case AST_EXPR_CALL:
       return compile_call(compiler, expr);
     case AST_EXPR_BINARY: {
-      if (!compile_expr(compiler, expr->as.binary.lhs)) {
-        return false;
-      }
-      if (!compile_expr(compiler, expr->as.binary.rhs)) {
-        return false;
-      }
       switch (expr->as.binary.op) {
-        case AST_BIN_ADD:
-          emit_op(compiler, OP_ADD, (int)expr->line);
+        case AST_BIN_AND: {
+          if (!compile_expr(compiler, expr->as.binary.lhs)) {
+            return false;
+          }
+          uint16_t end_jump = emit_jump(compiler, OP_JUMP_IF_FALSE, (int)expr->line);
+          emit_op(compiler, OP_POP, (int)expr->line);
+          if (!compile_expr(compiler, expr->as.binary.rhs)) {
+            return false;
+          }
+          patch_jump(compiler, end_jump);
           return true;
-        case AST_BIN_SUB:
-          emit_op(compiler, OP_SUB, (int)expr->line);
+        }
+        case AST_BIN_OR: {
+          if (!compile_expr(compiler, expr->as.binary.lhs)) {
+            return false;
+          }
+          uint16_t false_jump = emit_jump(compiler, OP_JUMP_IF_FALSE, (int)expr->line);
+          uint16_t end_jump = emit_jump(compiler, OP_JUMP, (int)expr->line);
+          patch_jump(compiler, false_jump);
+          emit_op(compiler, OP_POP, (int)expr->line);
+          if (!compile_expr(compiler, expr->as.binary.rhs)) {
+            return false;
+          }
+          patch_jump(compiler, end_jump);
           return true;
-        case AST_BIN_MUL:
-          emit_op(compiler, OP_MUL, (int)expr->line);
-          return true;
-        case AST_BIN_DIV:
-          emit_op(compiler, OP_DIV, (int)expr->line);
-          return true;
+        }
         default:
-          diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
-                     "binary operator not supported in VM yet");
-          compiler->had_error = true;
-          return false;
+          if (!compile_expr(compiler, expr->as.binary.lhs)) {
+            return false;
+          }
+          if (!compile_expr(compiler, expr->as.binary.rhs)) {
+            return false;
+          }
+          switch (expr->as.binary.op) {
+            case AST_BIN_ADD:
+              emit_op(compiler, OP_ADD, (int)expr->line);
+              return true;
+            case AST_BIN_SUB:
+              emit_op(compiler, OP_SUB, (int)expr->line);
+              return true;
+            case AST_BIN_MUL:
+              emit_op(compiler, OP_MUL, (int)expr->line);
+              return true;
+            case AST_BIN_DIV:
+              emit_op(compiler, OP_DIV, (int)expr->line);
+              return true;
+            case AST_BIN_LT:
+              emit_op(compiler, OP_LT, (int)expr->line);
+              return true;
+            case AST_BIN_GT:
+              emit_op(compiler, OP_GT, (int)expr->line);
+              return true;
+            case AST_BIN_LE:
+              emit_op(compiler, OP_LE, (int)expr->line);
+              return true;
+            case AST_BIN_GE:
+              emit_op(compiler, OP_GE, (int)expr->line);
+              return true;
+            case AST_BIN_IS:
+              emit_op(compiler, OP_EQ, (int)expr->line);
+              return true;
+            default:
+              diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
+                         "binary operator not supported in VM yet");
+              compiler->had_error = true;
+              return false;
+          }
       }
     }
     case AST_EXPR_UNARY: {
@@ -429,6 +494,9 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       }
       if (expr->as.unary.op == AST_UNARY_NEG) {
         emit_op(compiler, OP_NEG, (int)expr->line);
+        return true;
+      } else if (expr->as.unary.op == AST_UNARY_NOT) {
+        emit_op(compiler, OP_NOT, (int)expr->line);
         return true;
       }
       diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
@@ -491,12 +559,52 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
       }
       return emit_return(compiler, true, (int)stmt->line);
     }
+    case AST_STMT_IF: {
+      if (!stmt->as.if_stmt.condition || !stmt->as.if_stmt.then_block) {
+        diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column,
+                   "if statement missing condition or then block");
+        compiler->had_error = true;
+        return false;
+      }
+      if (!compile_expr(compiler, stmt->as.if_stmt.condition)) {
+        return false;
+      }
+      uint16_t else_jump = emit_jump(compiler, OP_JUMP_IF_FALSE, (int)stmt->line);
+      emit_op(compiler, OP_POP, (int)stmt->line);
+      if (!compile_block(compiler, stmt->as.if_stmt.then_block)) {
+        return false;
+      }
+      uint16_t end_jump = UINT16_MAX;
+      if (stmt->as.if_stmt.else_block) {
+        end_jump = emit_jump(compiler, OP_JUMP, (int)stmt->line);
+      }
+      patch_jump(compiler, else_jump);
+      emit_op(compiler, OP_POP, (int)stmt->line);
+      if (stmt->as.if_stmt.else_block) {
+        if (!compile_block(compiler, stmt->as.if_stmt.else_block)) {
+          return false;
+        }
+        patch_jump(compiler, end_jump);
+      }
+      return true;
+    }
     default:
       diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column,
                  "statement not supported in VM yet");
       compiler->had_error = true;
       return false;
   }
+}
+
+static bool compile_block(BytecodeCompiler* compiler, const AstBlock* block) {
+  const AstStmt* stmt = block ? block->first : NULL;
+  while (stmt) {
+    if (!compile_stmt(compiler, stmt)) {
+      return false;
+    }
+    stmt = stmt->next;
+  }
+  return true;
 }
 
 static bool compile_function(BytecodeCompiler* compiler, const AstDecl* decl) {
