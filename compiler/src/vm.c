@@ -1,6 +1,7 @@
 #include "vm.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #include "diag.h"
 
@@ -17,6 +18,40 @@ static Value vm_pop(VM* vm) {
 static void vm_push(VM* vm, Value value) {
   *vm->stack_top = value;
   vm->stack_top += 1;
+}
+
+static Value* vm_peek(VM* vm, size_t distance) {
+  return vm->stack_top - 1 - distance;
+}
+
+static bool value_is_truthy(const Value* value) {
+  switch (value->type) {
+    case VAL_BOOL:
+      return value->as.bool_value;
+    case VAL_INT:
+      return value->as.int_value != 0;
+    case VAL_STRING:
+      return value->as.string_value.length > 0;
+  }
+  return false;
+}
+
+static bool values_equal(const Value* a, const Value* b) {
+  if (a->type != b->type) {
+    return false;
+  }
+  switch (a->type) {
+    case VAL_BOOL:
+      return a->as.bool_value == b->as.bool_value;
+    case VAL_INT:
+      return a->as.int_value == b->as.int_value;
+    case VAL_STRING:
+      if (!a->as.string_value.chars || !b->as.string_value.chars) return false;
+      if (a->as.string_value.length != b->as.string_value.length) return false;
+      return memcmp(a->as.string_value.chars, b->as.string_value.chars,
+                    a->as.string_value.length) == 0;
+  }
+  return false;
 }
 
 void vm_init(VM* vm) {
@@ -71,6 +106,19 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         fflush(stdout);
         break;
       }
+      case OP_JUMP: {
+        uint16_t target = read_short(vm);
+        vm->ip = vm->chunk->code + target;
+        break;
+      }
+      case OP_JUMP_IF_FALSE: {
+        uint16_t target = read_short(vm);
+        Value* condition = vm_peek(vm, 0);
+        if (!value_is_truthy(condition)) {
+          vm->ip = vm->chunk->code + target;
+        }
+        break;
+      }
       case OP_CALL: {
         uint16_t target = read_short(vm);
         uint8_t arg_count = *vm->ip++;
@@ -85,6 +133,7 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         CallFrame* frame = &vm->call_stack[vm->call_stack_top++];
         frame->return_ip = vm->ip;
         frame->slots = vm->stack_top - arg_count;
+        frame->locals_base = frame->slots;
         frame->slot_count = arg_count;
         if (target >= vm->chunk->code_count) {
           diag_error(NULL, 0, 0, "invalid function address");
@@ -129,14 +178,12 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
           diag_error(NULL, 0, 0, "VM local allocation outside of function");
           return VM_RUNTIME_ERROR;
         }
-        if ((frame->slots - vm->stack) + frame->slot_count + count >
+        if ((frame->locals_base - vm->stack) + frame->slot_count + count >
             (int)(sizeof(vm->stack) / sizeof(vm->stack[0]))) {
           diag_error(NULL, 0, 0, "VM local storage overflow");
           return VM_RUNTIME_ERROR;
         }
-        for (uint16_t i = 0; i < count; ++i) {
-          frame->slots[frame->slot_count + i] = value_int(0);
-        }
+        frame->slots = frame->locals_base;
         frame->slot_count += count;
         vm->stack_top = frame->slots + frame->slot_count;
         break;
@@ -185,6 +232,52 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
           return VM_RUNTIME_ERROR;
         }
         vm_push(vm, value_int(-operand.as.int_value));
+        break;
+      }
+      case OP_LT:
+      case OP_LE:
+      case OP_GT:
+      case OP_GE: {
+        Value rhs = vm_pop(vm);
+        Value lhs = vm_pop(vm);
+        if (lhs.type != VAL_INT || rhs.type != VAL_INT) {
+          diag_error(NULL, 0, 0, "comparison operands must be integers");
+          return VM_RUNTIME_ERROR;
+        }
+        bool result = false;
+        switch (instruction) {
+          case OP_LT:
+            result = lhs.as.int_value < rhs.as.int_value;
+            break;
+          case OP_LE:
+            result = lhs.as.int_value <= rhs.as.int_value;
+            break;
+          case OP_GT:
+            result = lhs.as.int_value > rhs.as.int_value;
+            break;
+          case OP_GE:
+            result = lhs.as.int_value >= rhs.as.int_value;
+            break;
+          default:
+            break;
+        }
+        vm_push(vm, value_bool(result));
+        break;
+      }
+      case OP_EQ:
+      case OP_NE: {
+        Value rhs = vm_pop(vm);
+        Value lhs = vm_pop(vm);
+        bool equal = values_equal(&lhs, &rhs);
+        if (instruction == OP_NE) {
+          equal = !equal;
+        }
+        vm_push(vm, value_bool(equal));
+        break;
+      }
+      case OP_NOT: {
+        Value operand = vm_pop(vm);
+        vm_push(vm, value_bool(!value_is_truthy(&operand)));
         break;
       }
       case OP_RETURN: {

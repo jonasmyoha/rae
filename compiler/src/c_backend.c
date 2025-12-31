@@ -19,6 +19,7 @@ static bool emit_call(CFuncContext* ctx, const AstExpr* expr, FILE* out);
 static bool emit_log_call(const CFuncContext* ctx, const AstExpr* expr, FILE* out, bool newline);
 static bool emit_string_literal(FILE* out, Str literal);
 static bool emit_param_list(const AstParam* params, FILE* out);
+static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 
 static bool emit_string_literal(FILE* out, Str literal) {
   if (!literal.data) return false;
@@ -120,6 +121,30 @@ static bool emit_expr(const CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         case AST_BIN_DIV:
           op = "/";
           break;
+        case AST_BIN_MOD:
+          op = "%";
+          break;
+        case AST_BIN_LT:
+          op = "<";
+          break;
+        case AST_BIN_GT:
+          op = ">";
+          break;
+        case AST_BIN_LE:
+          op = "<=";
+          break;
+        case AST_BIN_GE:
+          op = ">=";
+          break;
+        case AST_BIN_IS:
+          op = "==";
+          break;
+        case AST_BIN_AND:
+          op = "&&";
+          break;
+        case AST_BIN_OR:
+          op = "||";
+          break;
         default:
           fprintf(stderr, "error: C backend does not support this binary operator yet\n");
           return false;
@@ -133,6 +158,10 @@ static bool emit_expr(const CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     case AST_EXPR_UNARY:
       if (expr->as.unary.op == AST_UNARY_NEG) {
         if (fprintf(out, "(-") < 0) return false;
+        if (!emit_expr(ctx, expr->as.unary.operand, out)) return false;
+        return fprintf(out, ")") >= 0;
+      } else if (expr->as.unary.op == AST_UNARY_NOT) {
+        if (fprintf(out, "(!") < 0) return false;
         if (!emit_expr(ctx, expr->as.unary.operand, out)) return false;
         return fprintf(out, ")") >= 0;
       }
@@ -194,6 +223,8 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
         fprintf(stderr, "error: C backend only supports single return values\n");
         return false;
       }
+    case AST_STMT_IF:
+      return emit_if(ctx, stmt, out);
       if (!ctx->returns_value) {
         fprintf(stderr, "error: return with value in non-returning function\n");
         return false;
@@ -366,4 +397,48 @@ bool c_backend_emit(const AstModule* module, const char* out_path) {
   free(funcs);
   fclose(out);
   return ok;
+}
+static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
+  if (!stmt->as.if_stmt.condition || !stmt->as.if_stmt.then_block) {
+    fprintf(stderr, "error: C backend requires complete if statements\n");
+    return false;
+  }
+  if (fprintf(out, "  if (") < 0) {
+    return false;
+  }
+  if (!emit_expr(ctx, stmt->as.if_stmt.condition, out)) {
+    return false;
+  }
+  if (fprintf(out, ") {\n") < 0) {
+    return false;
+  }
+  const AstStmt* inner = stmt->as.if_stmt.then_block->first;
+  while (inner) {
+    if (!emit_stmt(ctx, inner, out)) {
+      return false;
+    }
+    inner = inner->next;
+  }
+  if (fprintf(out, "  }") < 0) {
+    return false;
+  }
+  if (stmt->as.if_stmt.else_block) {
+    if (fprintf(out, " else {\n") < 0) {
+      return false;
+    }
+    const AstStmt* else_stmt = stmt->as.if_stmt.else_block->first;
+    while (else_stmt) {
+      if (!emit_stmt(ctx, else_stmt, out)) {
+        return false;
+      }
+      else_stmt = else_stmt->next;
+    }
+    if (fprintf(out, "  }") < 0) {
+      return false;
+    }
+  }
+  if (fprintf(out, "\n") < 0) {
+    return false;
+  }
+  return true;
 }
