@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+#include <stdint.h>
 #include "arena.h"
 #include "str.h"
 #include "diag.h"
@@ -30,7 +31,7 @@ typedef struct {
   bool watch;
 } RunOptions;
 
-static bool compile_file_chunk(const char* file_path, Chunk* chunk);
+static bool compile_file_chunk(const char* file_path, Chunk* chunk, uint64_t* out_hash);
 static int run_vm_file(const char* file_path);
 static int run_vm_watch(const char* file_path);
 
@@ -109,6 +110,17 @@ static bool parse_run_args(int argc, char** argv, RunOptions* opts) {
   return true;
 }
 
+static uint64_t hash_bytes(const char* data, size_t length) {
+  const uint64_t fnv_offset = 1469598103934665603ull;
+  const uint64_t fnv_prime = 1099511628211ull;
+  uint64_t hash = fnv_offset;
+  for (size_t i = 0; i < length; ++i) {
+    hash ^= (uint64_t)(uint8_t)data[i];
+    hash *= fnv_prime;
+  }
+  return hash;
+}
+
 static void print_usage(const char* prog) {
   fprintf(stderr, "Usage: %s <command> <file>\n", prog);
   fprintf(stderr, "\nCommands:\n");
@@ -128,7 +140,7 @@ static void dump_tokens(const TokenList* tokens) {
   }
 }
 
-static bool compile_file_chunk(const char* file_path, Chunk* chunk) {
+static bool compile_file_chunk(const char* file_path, Chunk* chunk, uint64_t* out_hash) {
   size_t file_size = 0;
   char* source = read_file(file_path, &file_size);
   if (!source) {
@@ -150,6 +162,10 @@ static bool compile_file_chunk(const char* file_path, Chunk* chunk) {
     return false;
   }
 
+  if (out_hash) {
+    *out_hash = hash_bytes(source, file_size);
+  }
+
   bool ok = vm_compile_module(module, chunk, file_path);
   arena_destroy(arena);
   free(source);
@@ -158,7 +174,7 @@ static bool compile_file_chunk(const char* file_path, Chunk* chunk) {
 
 static int run_vm_file(const char* file_path) {
   Chunk chunk;
-  if (!compile_file_chunk(file_path, &chunk)) {
+  if (!compile_file_chunk(file_path, &chunk, NULL)) {
     return 1;
   }
 
@@ -271,11 +287,26 @@ static time_t wait_for_change(const char* path, time_t last_mtime) {
   for (;;) {
     sleep(1);
     time_t current = file_last_modified(path);
-    if (current == (time_t)-1) {
+    if (current == (time_t)-1 || current == last_mtime) {
       continue;
     }
-    if (current != last_mtime) {
-      return current;
+
+    // Debounce: ensure the timestamp remains stable for ~0.6s
+    int stable_checks = 0;
+    time_t verify = current;
+    while (stable_checks < 3) {
+      usleep(200000);
+      verify = file_last_modified(path);
+      if (verify != current) {
+        current = verify;
+        stable_checks = 0;
+        continue;
+      }
+      stable_checks += 1;
+    }
+
+    if (verify != (time_t)-1) {
+      return verify;
     }
   }
 }
@@ -287,28 +318,44 @@ static int run_vm_watch(const char* file_path) {
   VmRegistry registry;
   vm_registry_init(&registry);
   int exit_code = 0;
+  int reload_count = 0;
+  bool has_hash = false;
+  uint64_t last_hash = 0;
+  time_t last_mtime = file_last_modified(file_path);
+  if (last_mtime == (time_t)-1) {
+    last_mtime = 0;
+  }
 
   for (;;) {
+    uint64_t file_hash = 0;
     Chunk chunk;
-    if (!compile_file_chunk(file_path, &chunk)) {
+    if (!compile_file_chunk(file_path, &chunk, &file_hash)) {
       fprintf(stderr, "[watch] compile failed. Waiting for changes...\n");
     } else {
-      vm_registry_reload(&registry, file_path, chunk);
-      VmModule* module = vm_registry_find(&registry, file_path);
-      if (module) {
-        VM vm;
-        vm_init(&vm);
-        printf("[watch] running latest version...\n");
+      if (has_hash && file_hash == last_hash) {
+        chunk_free(&chunk);
+        printf("[watch] no code changes detected.\n");
         fflush(stdout);
-        VMResult result = vm_run(&vm, &module->chunk);
-        if (result != VM_RUNTIME_OK) {
-          exit_code = 1;
+      } else {
+        has_hash = true;
+        last_hash = file_hash;
+        vm_registry_reload(&registry, file_path, chunk);
+        VmModule* module = vm_registry_find(&registry, file_path);
+        if (module) {
+          VM vm;
+          vm_init(&vm);
+          reload_count += 1;
+          printf("[watch] running latest version... (reload #%d)\n", reload_count);
+          fflush(stdout);
+          VMResult result = vm_run(&vm, &module->chunk);
+          if (result != VM_RUNTIME_OK) {
+            exit_code = 1;
+          }
         }
       }
     }
 
-    time_t last = file_last_modified(file_path);
-    last = wait_for_change(file_path, last);
+    last_mtime = wait_for_change(file_path, last_mtime);
     printf("[watch] change detected. Recompiling...\n");
     fflush(stdout);
   }
