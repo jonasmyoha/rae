@@ -47,10 +47,14 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         vm_push(vm, chunk->constants[index]);
         break;
       }
-      case OP_PRINT: {
+      case OP_LOG:
+      case OP_LOG_S: {
         Value value = vm_pop(vm);
         value_print(&value);
-        printf("\n");
+        if (instruction == OP_LOG) {
+          printf("\n");
+        }
+        fflush(stdout);
         break;
       }
       case OP_RETURN:
