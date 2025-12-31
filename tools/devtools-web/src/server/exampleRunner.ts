@@ -21,6 +21,7 @@ type ActiveRun = {
   startedAt: number;
   process: ReturnType<typeof spawn>;
   buffers: Record<"stdout" | "stderr", string>;
+  stopRequested: boolean;
 };
 
 export type ExampleRunOptions = {
@@ -63,7 +64,8 @@ export class ExampleRunner {
       mode,
       startedAt,
       process: child,
-      buffers: { stdout: "", stderr: "" }
+      buffers: { stdout: "", stderr: "" },
+      stopRequested: false
     };
 
     this.broadcast({
@@ -87,13 +89,16 @@ export class ExampleRunner {
 
     child.on("close", (code) => {
       this.flushRemainingBuffers();
+      const stopRequested = this.activeRun?.stopRequested ?? false;
+      const exitCode = stopRequested ? 0 : code ?? null;
+      const success = stopRequested ? true : code === 0;
       this.broadcast({
         type: "example-run-completed",
         runId,
         entry,
         mode,
-        exitCode: code ?? null,
-        success: code === 0,
+        exitCode,
+        success,
         durationMs: Date.now() - startedAt,
         timestamp: new Date().toISOString()
       } satisfies ExampleRunCompletedMessage);
@@ -166,11 +171,12 @@ export class ExampleRunner {
 
   stop() {
     if (!this.activeRun) return;
+    this.activeRun.stopRequested = true;
     try {
-      this.activeRun.process.kill();
+      this.activeRun.process.kill("SIGINT");
     } catch (error) {
       console.warn("[examples] Failed to kill process", error);
+      this.activeRun.stopRequested = false;
     }
-    this.activeRun = null;
   }
 }
