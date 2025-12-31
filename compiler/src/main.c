@@ -19,6 +19,7 @@
 #include "parser.h"
 #include "ast.h"
 #include "pretty.h"
+#include "c_backend.h"
 #include "vm.h"
 #include "vm_compiler.h"
 #include "vm_registry.h"
@@ -59,6 +60,25 @@ typedef struct ModuleStack {
   struct ModuleStack* next;
 } ModuleStack;
 
+static void module_stack_print_chain(const ModuleStack* stack) {
+  if (!stack) return;
+  module_stack_print_chain(stack->next);
+  if (stack->module_path) {
+    fprintf(stderr, "    -> %s\n", stack->module_path);
+  }
+}
+
+static void module_stack_print_trace(const ModuleStack* stack, const char* leaf_module) {
+  if (!stack && !leaf_module) {
+    return;
+  }
+  fprintf(stderr, "  import trace:\n");
+  module_stack_print_chain(stack);
+  if (leaf_module) {
+    fprintf(stderr, "    -> %s\n", leaf_module);
+  }
+}
+
 typedef struct {
   char** files;
   size_t file_count;
@@ -78,6 +98,7 @@ static bool compile_file_chunk(const char* file_path,
                                Chunk* chunk,
                                uint64_t* out_hash,
                                WatchSources* watch_sources);
+static bool build_c_backend_output(const char* entry_file, const char* out_path);
 typedef struct {
   WatchSources sources;
   time_t* file_mtimes;
@@ -699,12 +720,14 @@ static bool module_graph_load_module(ModuleGraph* graph,
   }
   if (module_stack_contains(stack, module_path)) {
     fprintf(stderr, "error: cyclic import detected involving '%s'\n", module_path);
+    module_stack_print_trace(stack, module_path);
     return false;
   }
   size_t file_size = 0;
   char* source = read_file(file_path, &file_size);
   if (!source) {
     fprintf(stderr, "error: could not read module file '%s'\n", file_path);
+    module_stack_print_trace(stack, module_path);
     return false;
   }
   if (hash_out) {
@@ -731,7 +754,9 @@ static bool module_graph_load_module(ModuleGraph* graph,
     }
     char* child_file = resolve_module_file(graph->root_path, normalized);
     if (!child_file || !file_exists(child_file)) {
-      fprintf(stderr, "error: imported module '%s' (%s) not found\n", normalized, child_file ? child_file : "unknown");
+      fprintf(stderr, "error: imported module '%s' not found (required by '%s')\n", normalized,
+              module_path ? module_path : "<entry>");
+      module_stack_print_trace(&frame, normalized);
       free(normalized);
       free(child_file);
       return false;
@@ -1034,6 +1059,29 @@ static bool compile_file_chunk(const char* file_path,
   return ok;
 }
 
+static bool build_c_backend_output(const char* entry_file, const char* out_path) {
+  Arena* arena = arena_create(1024 * 1024);
+  if (!arena) {
+    diag_fatal("could not allocate arena");
+  }
+  ModuleGraph graph;
+  if (!module_graph_init(&graph, arena)) {
+    arena_destroy(arena);
+    return false;
+  }
+  bool ok = module_graph_build(&graph, entry_file, NULL);
+  if (!ok) {
+    module_graph_free(&graph);
+    arena_destroy(arena);
+    return false;
+  }
+  AstModule merged = merge_module_graph(&graph);
+  ok = c_backend_emit(&merged, out_path);
+  module_graph_free(&graph);
+  arena_destroy(arena);
+  return ok;
+}
+
 static int run_vm_file(const char* file_path) {
   Chunk chunk;
   if (!compile_file_chunk(file_path, &chunk, NULL, NULL)) {
@@ -1090,8 +1138,7 @@ static int run_command(const char* cmd, int argc, char** argv) {
       fprintf(stderr, "error: entry file '%s' not found\n", build_opts.entry_path);
       return 1;
     }
-    printf("[build] C backend not implemented yet. Would emit C for '%s' to '%s'.\n", build_opts.entry_path, build_opts.out_path);
-    return 0;
+    return build_c_backend_output(build_opts.entry_path, build_opts.out_path) ? 0 : 1;
   } else {
     fprintf(stderr, "error: unknown command '%s'\n", cmd);
     print_usage(argv[-1]);
