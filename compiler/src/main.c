@@ -59,8 +59,36 @@ typedef struct ModuleStack {
   struct ModuleStack* next;
 } ModuleStack;
 
+typedef struct {
+  char** files;
+  size_t file_count;
+  size_t file_capacity;
+  char** dirs;
+  size_t dir_count;
+  size_t dir_capacity;
+} WatchSources;
+
 static uint64_t hash_bytes(const char* data, size_t length);
-static bool compile_file_chunk(const char* file_path, Chunk* chunk, uint64_t* out_hash);
+static void watch_sources_init(WatchSources* sources);
+static void watch_sources_clear(WatchSources* sources);
+static void watch_sources_move(WatchSources* dest, WatchSources* src);
+static bool watch_sources_add_file(WatchSources* sources, const char* path);
+static bool module_graph_collect_watch_sources(const ModuleGraph* graph, WatchSources* sources);
+static bool compile_file_chunk(const char* file_path,
+                               Chunk* chunk,
+                               uint64_t* out_hash,
+                               WatchSources* watch_sources);
+typedef struct {
+  WatchSources sources;
+  time_t* file_mtimes;
+  time_t* dir_mtimes;
+  const char* fallback_path;
+  time_t fallback_mtime;
+} WatchState;
+static void watch_state_init(WatchState* state, const char* fallback_path);
+static void watch_state_free(WatchState* state);
+static bool watch_state_apply_sources(WatchState* state, WatchSources* new_sources);
+static const char* watch_state_wait_for_change(WatchState* state);
 static int run_vm_file(const char* file_path);
 static int run_vm_watch(const char* file_path);
 
@@ -546,6 +574,121 @@ static void module_graph_free(ModuleGraph* graph) {
   graph->root_path = NULL;
 }
 
+static void watch_sources_init(WatchSources* sources) {
+  sources->files = NULL;
+  sources->file_count = 0;
+  sources->file_capacity = 0;
+  sources->dirs = NULL;
+  sources->dir_count = 0;
+  sources->dir_capacity = 0;
+}
+
+static void watch_sources_clear(WatchSources* sources) {
+  if (!sources) return;
+  for (size_t i = 0; i < sources->file_count; ++i) {
+    free(sources->files[i]);
+  }
+  for (size_t i = 0; i < sources->dir_count; ++i) {
+    free(sources->dirs[i]);
+  }
+  free(sources->files);
+  free(sources->dirs);
+  watch_sources_init(sources);
+}
+
+static void watch_sources_move(WatchSources* dest, WatchSources* src) {
+  watch_sources_clear(dest);
+  *dest = *src;
+  watch_sources_init(src);
+}
+
+static bool string_list_contains(char** list, size_t count, const char* path) {
+  for (size_t i = 0; i < count; ++i) {
+    if (strcmp(list[i], path) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool watch_sources_ensure_capacity(char*** list, size_t* capacity, size_t required) {
+  if (required <= *capacity) {
+    return true;
+  }
+  size_t new_cap = *capacity == 0 ? 8 : (*capacity * 2);
+  while (new_cap < required) {
+    new_cap *= 2;
+  }
+  char** resized = realloc(*list, new_cap * sizeof(char*));
+  if (!resized) {
+    return false;
+  }
+  *list = resized;
+  *capacity = new_cap;
+  return true;
+}
+
+static bool watch_sources_add_dir(WatchSources* sources, const char* dir_path) {
+  if (string_list_contains(sources->dirs, sources->dir_count, dir_path)) {
+    return true;
+  }
+  if (!watch_sources_ensure_capacity(&sources->dirs, &sources->dir_capacity,
+                                     sources->dir_count + 1)) {
+    return false;
+  }
+  sources->dirs[sources->dir_count] = strdup(dir_path);
+  if (!sources->dirs[sources->dir_count]) {
+    return false;
+  }
+  sources->dir_count += 1;
+  return true;
+}
+
+static bool watch_sources_add_file(WatchSources* sources, const char* path) {
+  if (string_list_contains(sources->files, sources->file_count, path)) {
+    return true;
+  }
+  if (!watch_sources_ensure_capacity(&sources->files, &sources->file_capacity,
+                                     sources->file_count + 1)) {
+    return false;
+  }
+  sources->files[sources->file_count] = strdup(path);
+  if (!sources->files[sources->file_count]) {
+    return false;
+  }
+  sources->file_count += 1;
+
+  char dir_buffer[PATH_MAX];
+  strncpy(dir_buffer, path, sizeof(dir_buffer) - 1);
+  dir_buffer[sizeof(dir_buffer) - 1] = '\0';
+  char* slash = strrchr(dir_buffer, '/');
+#ifdef _WIN32
+  char* win_slash = strrchr(dir_buffer, '\\');
+  if (!slash || (win_slash && win_slash > slash)) {
+    slash = win_slash;
+  }
+#endif
+  if (slash) {
+    if (slash == dir_buffer) {
+      slash[1] = '\0';
+    } else {
+      *slash = '\0';
+    }
+  } else {
+    strcpy(dir_buffer, ".");
+  }
+  return watch_sources_add_dir(sources, dir_buffer);
+}
+
+static bool module_graph_collect_watch_sources(const ModuleGraph* graph, WatchSources* sources) {
+  for (ModuleNode* node = graph->head; node; node = node->next) {
+    if (!watch_sources_add_file(sources, node->file_path)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 static bool module_graph_load_module(ModuleGraph* graph,
                                      const char* module_path,
                                      const char* file_path,
@@ -846,7 +989,10 @@ static void dump_tokens(const TokenList* tokens) {
   }
 }
 
-static bool compile_file_chunk(const char* file_path, Chunk* chunk, uint64_t* out_hash) {
+static bool compile_file_chunk(const char* file_path,
+                               Chunk* chunk,
+                               uint64_t* out_hash,
+                               WatchSources* watch_sources) {
   Arena* arena = arena_create(1024 * 1024);
   if (!arena) {
     diag_fatal("could not allocate arena");
@@ -856,12 +1002,23 @@ static bool compile_file_chunk(const char* file_path, Chunk* chunk, uint64_t* ou
     arena_destroy(arena);
     return false;
   }
+  WatchSources built_sources;
+  watch_sources_init(&built_sources);
   uint64_t combined_hash = 0;
   uint64_t* hash_target = out_hash ? &combined_hash : NULL;
   if (!module_graph_build(&graph, file_path, hash_target)) {
+    watch_sources_clear(&built_sources);
     module_graph_free(&graph);
     arena_destroy(arena);
     return false;
+  }
+  if (watch_sources) {
+    if (!module_graph_collect_watch_sources(&graph, &built_sources)) {
+      watch_sources_clear(&built_sources);
+      module_graph_free(&graph);
+      arena_destroy(arena);
+      return false;
+    }
   }
   AstModule merged = merge_module_graph(&graph);
   bool ok = vm_compile_module(&merged, chunk, file_path);
@@ -870,12 +1027,16 @@ static bool compile_file_chunk(const char* file_path, Chunk* chunk, uint64_t* ou
   if (ok && out_hash) {
     *out_hash = combined_hash;
   }
+  if (ok && watch_sources) {
+    watch_sources_move(watch_sources, &built_sources);
+  }
+  watch_sources_clear(&built_sources);
   return ok;
 }
 
 static int run_vm_file(const char* file_path) {
   Chunk chunk;
-  if (!compile_file_chunk(file_path, &chunk, NULL)) {
+  if (!compile_file_chunk(file_path, &chunk, NULL, NULL)) {
     return 1;
   }
 
@@ -1001,30 +1162,121 @@ static time_t file_last_modified(const char* path) {
   return info.st_mtime;
 }
 
-static time_t wait_for_change(const char* path, time_t last_mtime) {
-  for (;;) {
-    sleep(1);
-    time_t current = file_last_modified(path);
-    if (current == (time_t)-1 || current == last_mtime) {
+static void watch_state_init(WatchState* state, const char* fallback_path) {
+  watch_sources_init(&state->sources);
+  state->file_mtimes = NULL;
+  state->dir_mtimes = NULL;
+  state->fallback_path = fallback_path;
+  time_t fallback_time = file_last_modified(fallback_path);
+  if (fallback_time == (time_t)-1) {
+    fallback_time = 0;
+  }
+  state->fallback_mtime = fallback_time;
+}
+
+static void watch_state_free(WatchState* state) {
+  watch_sources_clear(&state->sources);
+  free(state->file_mtimes);
+  free(state->dir_mtimes);
+  state->file_mtimes = NULL;
+  state->dir_mtimes = NULL;
+}
+
+static bool allocate_time_array(time_t** array, size_t count) {
+  if (count == 0) {
+    free(*array);
+    *array = NULL;
+    return true;
+  }
+  time_t* resized = realloc(*array, count * sizeof(time_t));
+  if (!resized) {
+    return false;
+  }
+  *array = resized;
+  return true;
+}
+
+static bool watch_state_apply_sources(WatchState* state, WatchSources* new_sources) {
+  if (!allocate_time_array(&state->file_mtimes, new_sources->file_count)) {
+    return false;
+  }
+  if (!allocate_time_array(&state->dir_mtimes, new_sources->dir_count)) {
+    return false;
+  }
+  for (size_t i = 0; i < new_sources->file_count; ++i) {
+    time_t modified = file_last_modified(new_sources->files[i]);
+    state->file_mtimes[i] = (modified == (time_t)-1) ? 0 : modified;
+  }
+  for (size_t i = 0; i < new_sources->dir_count; ++i) {
+    time_t modified = file_last_modified(new_sources->dirs[i]);
+    state->dir_mtimes[i] = (modified == (time_t)-1) ? 0 : modified;
+  }
+  watch_sources_move(&state->sources, new_sources);
+  time_t fallback_time = file_last_modified(state->fallback_path);
+  if (fallback_time == (time_t)-1) {
+    fallback_time = 0;
+  }
+  state->fallback_mtime = fallback_time;
+  return true;
+}
+
+static time_t wait_for_stable_timestamp(const char* path, time_t initial) {
+  if (initial == (time_t)-1) {
+    return initial;
+  }
+  time_t current = initial;
+  int stable_checks = 0;
+  while (stable_checks < 3) {
+    usleep(200000);
+    time_t verify = file_last_modified(path);
+    if (verify != current) {
+      current = verify;
+      stable_checks = 0;
       continue;
     }
+    stable_checks += 1;
+  }
+  return current;
+}
 
-    // Debounce: ensure the timestamp remains stable for ~0.6s
-    int stable_checks = 0;
-    time_t verify = current;
-    while (stable_checks < 3) {
-      usleep(200000);
-      verify = file_last_modified(path);
-      if (verify != current) {
-        current = verify;
-        stable_checks = 0;
-        continue;
-      }
-      stable_checks += 1;
+static const char* watch_state_poll_change(WatchState* state) {
+  for (size_t i = 0; i < state->sources.file_count; ++i) {
+    const char* path = state->sources.files[i];
+    time_t current = file_last_modified(path);
+    if (current == state->file_mtimes[i]) {
+      continue;
     }
+    time_t confirmed = wait_for_stable_timestamp(path, current);
+    state->file_mtimes[i] = confirmed;
+    return path;
+  }
+  for (size_t i = 0; i < state->sources.dir_count; ++i) {
+    const char* path = state->sources.dirs[i];
+    time_t current = file_last_modified(path);
+    if (current == state->dir_mtimes[i]) {
+      continue;
+    }
+    time_t confirmed = wait_for_stable_timestamp(path, current);
+    state->dir_mtimes[i] = confirmed;
+    return path;
+  }
+  if (state->fallback_path) {
+    time_t current = file_last_modified(state->fallback_path);
+    if (current != state->fallback_mtime) {
+      time_t confirmed = wait_for_stable_timestamp(state->fallback_path, current);
+      state->fallback_mtime = confirmed;
+      return state->fallback_path;
+    }
+  }
+  return NULL;
+}
 
-    if (verify != (time_t)-1) {
-      return verify;
+static const char* watch_state_wait_for_change(WatchState* state) {
+  for (;;) {
+    sleep(1);
+    const char* changed = watch_state_poll_change(state);
+    if (changed) {
+      return changed;
     }
   }
 }
@@ -1039,17 +1291,22 @@ static int run_vm_watch(const char* file_path) {
   int reload_count = 0;
   bool has_hash = false;
   uint64_t last_hash = 0;
-  time_t last_mtime = file_last_modified(file_path);
-  if (last_mtime == (time_t)-1) {
-    last_mtime = 0;
-  }
+  WatchState watch_state;
+  watch_state_init(&watch_state, file_path);
 
   for (;;) {
     uint64_t file_hash = 0;
     Chunk chunk;
-    if (!compile_file_chunk(file_path, &chunk, &file_hash)) {
+    WatchSources new_sources;
+    watch_sources_init(&new_sources);
+    if (!compile_file_chunk(file_path, &chunk, &file_hash, &new_sources)) {
       fprintf(stderr, "[watch] compile failed. Waiting for changes...\n");
     } else {
+      if (!watch_state_apply_sources(&watch_state, &new_sources)) {
+        fprintf(stderr,
+                "[watch] warning: failed to update watch list; changes in helper files may be "
+                "missed until the next successful run.\n");
+      }
       if (has_hash && file_hash == last_hash) {
         chunk_free(&chunk);
         printf("[watch] no code changes detected.\n");
@@ -1072,12 +1329,17 @@ static int run_vm_watch(const char* file_path) {
         }
       }
     }
+    watch_sources_clear(&new_sources);
 
-    last_mtime = wait_for_change(file_path, last_mtime);
-    printf("[watch] change detected. Recompiling...\n");
+    const char* changed_path = watch_state_wait_for_change(&watch_state);
+    if (!changed_path) {
+      changed_path = file_path;
+    }
+    printf("[watch] change detected in %s. Recompiling...\n", changed_path);
     fflush(stdout);
   }
 
   vm_registry_free(&registry);
+  watch_state_free(&watch_state);
   return exit_code;
 }
