@@ -17,7 +17,7 @@ export async function readTestTree(
   const entries = await safeReadDir(currentDir);
   const nodes: TestFileNode[] = [];
   for (const entry of entries) {
-    if (entry.name.startsWith(".")) continue;
+    if (entry.name.startsWith(".") || entry.name.startsWith("_")) continue;
     const relativePath = relativeBase ? path.join(relativeBase, entry.name) : entry.name;
     if (entry.isDirectory()) {
       const children =
@@ -64,5 +64,11 @@ async function safeReadDir(dir: string) {
 }
 
 function isTestFile(filename: string): boolean {
-  return filename.endsWith(".rae") || filename.endsWith(".txt") || filename.endsWith(".out");
+  return (
+    filename.endsWith(".rae") ||
+    filename.endsWith(".txt") ||
+    filename.endsWith(".out") ||
+    filename.endsWith(".expect") ||
+    filename.endsWith(".raepack")
+  );
 }

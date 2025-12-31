@@ -31,6 +31,7 @@ const testFileTree = document.getElementById("test-file-tree");
 const testSourceTitle = document.getElementById("test-source-title");
 const testSourceCode = document.getElementById("test-source-code");
 const copyTestSourceBtn = document.getElementById("copy-test-source-btn");
+const testFilesList = document.getElementById("test-files-list");
 const buildBtn = document.getElementById("build-btn");
 const cleanBtn = document.getElementById("clean-btn");
 const rebuildBtn = document.getElementById("rebuild-btn");
@@ -64,6 +65,7 @@ let testFilesTree = [];
 let selectedTestFile = null;
 let selectedTestSource = "";
 let raeSyntax = null;
+let testDirectoryMap = new Map();
 const errorEntries = [];
 const TEST_TREE_REFRESH_MS = 60000;
 
@@ -634,6 +636,7 @@ function renderTestList() {
         selectedTestFile = knownTests.get(testCase.name)?.path ?? null;
         renderTestList();
         renderTestDetail();
+        renderTestFilesList();
         loadSelectedTestSource();
       });
 
@@ -1149,6 +1152,7 @@ function scheduleTestTreeRefresh() {
 function updateKnownTests(nodes) {
   const flattened = flattenTestNodes(nodes);
   knownTests = new Map(flattened.map((node) => [node.name, node]));
+  buildTestDirectoryIndex(nodes);
   if (selectedTestName && !knownTests.has(selectedTestName) && !testCases.has(selectedTestName)) {
     selectedTestName = null;
     selectedTestFile = null;
@@ -1156,6 +1160,7 @@ function updateKnownTests(nodes) {
     selectedTestFile = knownTests.get(selectedTestName)?.path ?? null;
   }
   renderTestList();
+  renderTestFilesList();
   loadSelectedTestSource();
 }
 
@@ -1178,6 +1183,31 @@ function flattenTestNodes(nodes = [], prefix = "") {
 
 function deriveTestName(filename) {
   return filename.replace(/\.[^.]+$/, "");
+}
+
+function buildTestDirectoryIndex(nodes = []) {
+  testDirectoryMap = new Map();
+  testDirectoryMap.set("", { type: "directory", path: "", children: nodes });
+  indexTestDirectories(nodes);
+}
+
+function indexTestDirectories(nodes = []) {
+  nodes.forEach((node) => {
+    if (node.type === "directory") {
+      testDirectoryMap.set(node.path, node);
+      if (node.children?.length) {
+        indexTestDirectories(node.children);
+      }
+    }
+  });
+}
+
+function listFilesInDirectoryForPath(filePath) {
+  const directoryPath =
+    filePath && filePath.includes("/") ? filePath.slice(0, filePath.lastIndexOf("/")) : "";
+  const directoryNode = testDirectoryMap.get(directoryPath);
+  if (!directoryNode) return [];
+  return directoryNode.children?.filter((child) => child.type === "file") ?? [];
 }
 
 async function loadTestSource(path) {
@@ -1218,6 +1248,8 @@ function loadSelectedTestSource() {
     testSourceCode.innerHTML = "<code>No file selected.</code>";
     return;
   }
+  ensureSelectedTestFile();
+  renderTestFilesList();
   if (!selectedTestFile) {
     selectedTestSource = "";
     testSourceTitle.textContent = `${selectedTestName}.rae`;
@@ -1225,6 +1257,66 @@ function loadSelectedTestSource() {
     return;
   }
   loadTestSource(selectedTestFile);
+}
+
+function ensureSelectedTestFile() {
+  if (!selectedTestName) {
+    selectedTestFile = null;
+    return;
+  }
+  if (!selectedTestFile) {
+    selectedTestFile = knownTests.get(selectedTestName)?.path ?? null;
+  }
+  if (!selectedTestFile) return;
+  const files = listFilesInDirectoryForPath(selectedTestFile);
+  if (!files.length) {
+    return;
+  }
+  if (!files.some((file) => file.path === selectedTestFile)) {
+    const preferred = files.find((file) => file.name.endsWith(".rae")) ?? files[0];
+    selectedTestFile = preferred?.path ?? selectedTestFile;
+  }
+}
+
+function renderTestFilesList() {
+  if (!testFilesList) return;
+  testFilesList.innerHTML = "";
+  if (!selectedTestName) {
+    const placeholder = document.createElement("p");
+    placeholder.className = "test-list-empty";
+    placeholder.textContent = "Select a test to see files.";
+    testFilesList.appendChild(placeholder);
+    return;
+  }
+  ensureSelectedTestFile();
+  if (!selectedTestFile) {
+    const empty = document.createElement("p");
+    empty.className = "test-list-empty";
+    empty.textContent = "No source files found.";
+    testFilesList.appendChild(empty);
+    return;
+  }
+  const files = listFilesInDirectoryForPath(selectedTestFile);
+  if (!files.length) {
+    const empty = document.createElement("p");
+    empty.className = "test-list-empty";
+    empty.textContent = "No source files found.";
+    testFilesList.appendChild(empty);
+    return;
+  }
+  files.forEach((file) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `test-file-btn${file.path === selectedTestFile ? " is-active" : ""}`;
+    button.textContent = file.name;
+    button.addEventListener("click", () => {
+      if (selectedTestFile === file.path) return;
+      selectedTestFile = file.path;
+      loadTestSource(selectedTestFile);
+      renderTestFilesList();
+    });
+    testFilesList.appendChild(button);
+  });
 }
 
 function highlightRae(code) {

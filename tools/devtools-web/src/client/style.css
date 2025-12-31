@@ -324,23 +324,44 @@ body {
   min-height: 140px;
 }
 
+.example-content {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.3fr) 1fr;
+  gap: 1rem;
+}
+
+@media (max-width: 900px) {
+  .example-content {
+    grid-template-columns: 1fr;
+  }
+}
+
 .example-files {
   border: 1px solid var(--border);
   border-radius: 0.9rem;
   padding: 0.75rem;
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
+  flex-direction: column;
+  gap: 0.45rem;
+  min-height: 200px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.example-files .test-list-empty {
+  text-align: left;
 }
 
 .example-file-btn {
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  border-radius: 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 0.55rem;
   background: transparent;
   color: var(--text);
-  padding: 0.3rem 0.6rem;
+  padding: 0.35rem 0.55rem;
   cursor: pointer;
   font-size: 0.85rem;
+  text-align: left;
+  transition: border 0.2s, background 0.2s;
 }
 
 .example-file-btn.is-active {
@@ -642,6 +663,61 @@ body {
 }
 
 .test-source-view {
+  display: block;
+}
+
+.test-source-layout {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.3fr) 1fr;
+  gap: 1rem;
+}
+
+@media (max-width: 900px) {
+  .test-source-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.test-files {
+  border: 1px solid var(--border);
+  border-radius: 0.85rem;
+  padding: 0.75rem;
+  background: rgba(255, 255, 255, 0.02);
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-height: 200px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.test-files .test-list-empty {
+  text-align: left;
+  margin: 0;
+}
+
+.test-file-btn {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--text);
+  padding: 0.35rem 0.5rem;
+  text-align: left;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: border 0.2s, background 0.2s;
+}
+
+.test-file-btn.is-active {
+  border-color: var(--accent);
+  background: rgba(125, 211, 252, 0.1);
+}
+
+.test-source-panel {
+  border: 1px solid var(--border);
+  border-radius: 0.9rem;
+  padding: 0.75rem 1rem 1rem 1rem;
+  background: rgba(5, 6, 7, 0.8);
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
