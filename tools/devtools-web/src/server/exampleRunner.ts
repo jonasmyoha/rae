@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import type {
   ExampleRunCompletedMessage,
@@ -7,12 +8,12 @@ import type {
   ExampleRunMode,
   ExampleRunOutputMessage,
   ExampleRunStartedMessage,
-  ServerEvent,
+  ServerEvent
 } from "../shared/types";
 import type { RaeDevtoolsConfig } from "./config";
-import { resolveCompilerPath } from "./config";
 
 type BroadcastFn = (event: ServerEvent) => void;
+type RunOptions = { watch?: boolean };
 
 type ActiveRun = {
   id: string;
@@ -21,58 +22,64 @@ type ActiveRun = {
   startedAt: number;
   process: ReturnType<typeof spawn>;
   buffers: Record<"stdout" | "stderr", string>;
-};
-
-export type ExampleRunOptions = {
-  watch?: boolean;
+  stopRequested: boolean;
 };
 
 export class ExampleRunner {
   private activeRun: ActiveRun | null = null;
 
-  constructor(
-    private config: RaeDevtoolsConfig,
-    private broadcast: BroadcastFn
-  ) {}
+  constructor(private config: RaeDevtoolsConfig, private broadcast: BroadcastFn) {}
 
-  run(entry: string, options: ExampleRunOptions = {}) {
-    if (!entry) {
-      this.broadcastStatus("Example entry path missing.");
+  run(entry: string, options: RunOptions = {}) {
+    if (this.activeRun) {
+      this.broadcastStatus("An example run is already in progress. Stop it before starting another.");
       return;
     }
 
-    this.stop();
-
     const runId = randomUUID();
-    const startedAt = Date.now();
-    const cwd = resolveCompilerPath(this.config);
-    const entryPath = path.join(this.config.examplesPath ?? "examples", entry);
-    const binPath = path.join("compiler", "bin", "rae");
     const mode: ExampleRunMode = options.watch ? "watch" : "run";
-    const cmd = `./${binPath} run ${options.watch ? "--watch " : ""}${entryPath}`;
 
-    const child = spawn(cmd, {
-      cwd,
-      shell: true,
-      env: process.env,
+    let normalizedEntry: string;
+    try {
+      normalizedEntry = this.normalizeEntry(entry);
+    } catch (error) {
+      this.broadcastRunError(runId, entry, mode, error);
+      return;
+    }
+
+    let targetFile: string;
+    try {
+      targetFile = this.resolveEntryPath(normalizedEntry);
+    } catch (error) {
+      this.broadcastRunError(runId, normalizedEntry, mode, error);
+      return;
+    }
+
+    const startedAt = Date.now();
+    const binary = this.resolveRaeBinary();
+    const compilerRoot = this.resolveCompilerRoot();
+    const args = ["run"];
+    if (mode === "watch") {
+      args.push("--watch");
+    }
+    args.push(targetFile);
+
+    const child = spawn(binary, args, {
+      cwd: compilerRoot,
+      env: process.env
     });
 
     this.activeRun = {
       id: runId,
-      entry,
+      entry: normalizedEntry,
       mode,
       startedAt,
       process: child,
       buffers: { stdout: "", stderr: "" },
+      stopRequested: false
     };
 
-    this.broadcast({
-      type: "example-run-started",
-      runId,
-      entry,
-      mode,
-      timestamp: new Date().toISOString(),
-    } satisfies ExampleRunStartedMessage);
+    this.broadcastRunStarted(runId, normalizedEntry, mode);
 
     child.stdout?.setEncoding("utf8");
     child.stderr?.setEncoding("utf8");
@@ -81,24 +88,23 @@ export class ExampleRunner {
     child.stderr?.on("data", (chunk: string) => this.flushLines(chunk, "stderr"));
 
     child.on("error", (error) => {
-      this.broadcastError(error);
+      this.broadcastRunError(runId, normalizedEntry, mode, error);
       this.cleanup();
     });
 
-    child.on("close", (code) => {
+    child.on("close", (code, signal) => {
       this.flushRemainingBuffers();
-      this.broadcast({
-        type: "example-run-completed",
-        runId,
-        entry,
-        mode,
-        exitCode: code ?? null,
-        success: code === 0,
-        durationMs: Date.now() - startedAt,
-        timestamp: new Date().toISOString(),
-      } satisfies ExampleRunCompletedMessage);
+      this.broadcastRunCompleted(runId, normalizedEntry, mode, startedAt, code, signal);
       this.cleanup();
     });
+  }
+
+  stop() {
+    if (!this.activeRun) {
+      return;
+    }
+    this.activeRun.stopRequested = true;
+    this.activeRun.process.kill("SIGINT");
   }
 
   private flushLines(chunk: string, stream: "stdout" | "stderr") {
@@ -109,15 +115,16 @@ export class ExampleRunner {
 
     for (const line of lines) {
       if (!line.trim() && stream === "stdout") continue;
-      this.broadcast({
+      const payload: ExampleRunOutputMessage = {
         type: "example-run-output",
         runId: this.activeRun.id,
         entry: this.activeRun.entry,
         mode: this.activeRun.mode,
         stream,
         line,
-        timestamp: new Date().toISOString(),
-      } satisfies ExampleRunOutputMessage);
+        timestamp: new Date().toISOString()
+      };
+      this.broadcast(payload);
     }
   }
 
@@ -126,37 +133,79 @@ export class ExampleRunner {
     for (const stream of ["stdout", "stderr"] as const) {
       const leftover = this.activeRun.buffers[stream];
       if (leftover) {
-        this.broadcast({
+        const payload: ExampleRunOutputMessage = {
           type: "example-run-output",
           runId: this.activeRun.id,
           entry: this.activeRun.entry,
           mode: this.activeRun.mode,
           stream,
           line: leftover,
-          timestamp: new Date().toISOString(),
-        } satisfies ExampleRunOutputMessage);
+          timestamp: new Date().toISOString()
+        };
+        this.broadcast(payload);
       }
       this.activeRun.buffers[stream] = "";
     }
   }
 
-  private broadcastError(error: unknown) {
-    if (!this.activeRun) return;
-    this.broadcast({
+  private broadcastRunStarted(runId: string, entry: string, mode: ExampleRunMode) {
+    const payload: ExampleRunStartedMessage = {
+      type: "example-run-started",
+      runId,
+      entry,
+      mode,
+      timestamp: new Date().toISOString()
+    };
+    this.broadcast(payload);
+  }
+
+  private broadcastRunCompleted(
+    runId: string,
+    entry: string,
+    mode: ExampleRunMode,
+    startedAt: number,
+    exitCode: number | null,
+    signal: NodeJS.Signals | null
+  ) {
+    const durationMs = Date.now() - startedAt;
+    const stopRequested = this.activeRun?.stopRequested ?? false;
+    const success = exitCode === 0 || (stopRequested && signal === "SIGINT");
+    const normalizedExit = exitCode ?? (stopRequested && signal === "SIGINT" ? 0 : null);
+    const payload: ExampleRunCompletedMessage = {
+      type: "example-run-completed",
+      runId,
+      entry,
+      mode,
+      exitCode: normalizedExit,
+      success,
+      durationMs,
+      timestamp: new Date().toISOString()
+    };
+    this.broadcast(payload);
+  }
+
+  private broadcastRunError(
+    runId: string,
+    entry: string,
+    mode: ExampleRunMode,
+    error: unknown
+  ) {
+    const payload: ExampleRunErrorMessage = {
       type: "example-run-error",
-      runId: this.activeRun.id,
-      entry: this.activeRun.entry,
-      mode: this.activeRun.mode,
+      runId,
+      entry,
+      mode,
       message: error instanceof Error ? error.message : String(error),
-      timestamp: new Date().toISOString(),
-    } satisfies ExampleRunErrorMessage);
+      timestamp: new Date().toISOString()
+    };
+    this.broadcast(payload);
   }
 
   private broadcastStatus(message: string) {
     this.broadcast({
       type: "server-status",
       message,
-      timestamp: new Date().toISOString(),
+      timestamp: new Date().toISOString()
     });
   }
 
@@ -164,13 +213,42 @@ export class ExampleRunner {
     this.activeRun = null;
   }
 
-  stop() {
-    if (!this.activeRun) return;
-    try {
-      this.activeRun.process.kill();
-    } catch (error) {
-      console.warn("[examples] Failed to kill process", error);
+  private resolveCompilerRoot(): string {
+    return path.resolve(process.cwd(), this.config.compilerPath);
+  }
+
+  private resolveEntryPath(entry: string): string {
+    const examplesRoot = path.resolve(
+      this.resolveCompilerRoot(),
+      this.config.examplesPath ?? "examples"
+    );
+    const resolved = path.resolve(examplesRoot, entry);
+    if (!resolved.startsWith(examplesRoot)) {
+      throw new Error("Invalid example entry path.");
     }
-    this.activeRun = null;
+    return resolved;
+  }
+
+  private resolveRaeBinary(): string {
+    const compilerRoot = this.resolveCompilerRoot();
+    const directBin = path.join(compilerRoot, "bin", "rae");
+    const nestedBin = path.join(compilerRoot, "compiler", "bin", "rae");
+    if (existsSync(directBin)) {
+      return directBin;
+    }
+    return nestedBin;
+  }
+
+  private normalizeEntry(entry: string): string {
+    const trimmed = entry.trim();
+    if (!trimmed) {
+      throw new Error("Example entry path is required.");
+    }
+    const forwardSlashes = trimmed.replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+/g, "/");
+    const segments = forwardSlashes.split("/");
+    if (segments.some((segment) => segment === "..")) {
+      throw new Error("Example entry path may not traverse directories.");
+    }
+    return forwardSlashes;
   }
 }
