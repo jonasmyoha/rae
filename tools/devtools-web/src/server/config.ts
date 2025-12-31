@@ -14,7 +14,7 @@ export type RaeDevtoolsConfig = {
 
 const DEFAULT_CONFIG: RaeDevtoolsConfig = {
   compilerPath: "../rae",
-  buildCommand: "make",
+  buildCommand: "make clean && make",
   testCommand: "make test",
   cleanCommand: "make clean",
   port: 3000,

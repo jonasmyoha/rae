@@ -40,7 +40,7 @@ Copy `config.example.json` to `config.json` at the repo root (or set equivalent 
 ```json
 {
   "compilerPath": "../rae",
-  "buildCommand": "cd compiler && make",
+  "buildCommand": "cd compiler && make clean && make",
   "testCommand": "cd compiler && make test",
   "cleanCommand": "make clean",
   "port": 3000,
