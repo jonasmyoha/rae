@@ -14,6 +14,7 @@ typedef struct AstBlock AstBlock;
 typedef struct AstStmt AstStmt;
 typedef struct AstExpr AstExpr;
 typedef struct AstTypeRef AstTypeRef;
+typedef struct AstImport AstImport;
 
 typedef struct AstIdentifierPart {
   Str text;
@@ -218,7 +219,14 @@ struct AstDecl {
   } as;
 };
 
+struct AstImport {
+  bool is_export;
+  Str module_path;
+  AstImport* next;
+};
+
 typedef struct {
+  AstImport* imports;
   AstDecl* decls;
 } AstModule;
 
