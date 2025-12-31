@@ -81,7 +81,11 @@ export class BuildRunner {
       case "clean":
         return this.config.cleanCommand;
       case "rebuild":
-        return `${this.config.cleanCommand} && ${this.config.buildCommand}`;
+        if (this.config.rebuildCommand) {
+          return this.config.rebuildCommand;
+        }
+        // Run clean/build inside subshells so each command can manage its own cwd safely.
+        return `(${this.config.cleanCommand}) && (${this.config.buildCommand})`;
       case "build":
       default:
         return this.config.buildCommand;
