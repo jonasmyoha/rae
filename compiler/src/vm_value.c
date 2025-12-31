@@ -63,4 +63,5 @@ void value_print(const Value* value) {
       }
       break;
   }
+  fflush(stdout);
 }
