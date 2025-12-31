@@ -43,6 +43,7 @@ Copy `config.example.json` to `config.json` at the repo root (or set equivalent 
   "buildCommand": "cd compiler && make",
   "testCommand": "cd compiler && make test",
   "cleanCommand": "cd compiler && make clean",
+  "rebuildCommand": "cd compiler && make clean && make",
   "port": 3000,
   "examplesPath": "examples"
 }
