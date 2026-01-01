@@ -161,6 +161,28 @@ static void dump_expr(const AstExpr* expr, FILE* out) {
       dump_object_fields(expr->as.object, out);
       fputc(')', out);
       break;
+    case AST_EXPR_MATCH: {
+      fputs("match ", out);
+      dump_expr(expr->as.match_expr.subject, out);
+      fputs(" { ", out);
+      AstMatchArm* arm = expr->as.match_expr.arms;
+      while (arm) {
+        fputs("case ", out);
+        if (arm->pattern) {
+          dump_expr(arm->pattern, out);
+        } else {
+          fputs("_", out);
+        }
+        fputs(" => ", out);
+        dump_expr(arm->value, out);
+        if (arm->next) {
+          fputs(", ", out);
+        }
+        arm = arm->next;
+      }
+      fputs(" }", out);
+      break;
+    }
   }
 }
 
