@@ -56,6 +56,9 @@ static bool compiler_ensure_local_capacity(BytecodeCompiler* compiler, uint16_t 
 static uint16_t emit_jump(BytecodeCompiler* compiler, OpCode op, int line);
 static void patch_jump(BytecodeCompiler* compiler, uint16_t offset);
 static bool compile_block(BytecodeCompiler* compiler, const AstBlock* block);
+static uint16_t emit_jump(BytecodeCompiler* compiler, OpCode op, int line);
+static void patch_jump(BytecodeCompiler* compiler, uint16_t offset);
+static bool compile_block(BytecodeCompiler* compiler, const AstBlock* block);
 
 static void emit_byte(BytecodeCompiler* compiler, uint8_t byte, int line) {
   chunk_write(compiler->chunk, byte, line);
@@ -608,6 +611,75 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
       emit_short(compiler, loop_start, (int)stmt->line);
       patch_jump(compiler, exit_jump);
       emit_op(compiler, OP_POP, (int)stmt->line);
+      return true;
+    }
+    case AST_STMT_MATCH: {
+      if (!stmt->as.match_stmt.subject || !stmt->as.match_stmt.cases) {
+        diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column,
+                   "match statement requires a subject and at least one case");
+        compiler->had_error = true;
+        return false;
+      }
+      int subject_slot = compiler_add_local(compiler, str_from_cstr("$match"));
+      if (subject_slot < 0) {
+        return false;
+      }
+      if (!compiler_ensure_local_capacity(compiler, compiler->local_count, (int)stmt->line)) {
+        return false;
+      }
+      if (!compile_expr(compiler, stmt->as.match_stmt.subject)) {
+        return false;
+      }
+      emit_op(compiler, OP_SET_LOCAL, (int)stmt->line);
+      emit_short(compiler, (uint16_t)subject_slot, (int)stmt->line);
+
+      uint16_t end_jumps[256];
+      size_t end_count = 0;
+      bool had_default = false;
+
+      const AstMatchCase* match_case = stmt->as.match_stmt.cases;
+      while (match_case) {
+        bool is_default = match_case->pattern &&
+                          match_case->pattern->kind == AST_EXPR_IDENT &&
+                          str_eq_cstr(match_case->pattern->as.ident, "_");
+        if (is_default) {
+          if (had_default) {
+            diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column,
+                       "multiple default '_' cases in match");
+            compiler->had_error = true;
+            return false;
+          }
+          had_default = true;
+          if (!compile_block(compiler, match_case->block)) {
+            return false;
+          }
+          if (end_count < sizeof(end_jumps) / sizeof(end_jumps[0])) {
+            end_jumps[end_count++] = emit_jump(compiler, OP_JUMP, (int)stmt->line);
+          }
+        } else {
+          emit_op(compiler, OP_GET_LOCAL, (int)stmt->line);
+          emit_short(compiler, (uint16_t)subject_slot, (int)stmt->line);
+          if (!compile_expr(compiler, match_case->pattern)) {
+            return false;
+          }
+          emit_op(compiler, OP_EQ, (int)stmt->line);
+          uint16_t skip = emit_jump(compiler, OP_JUMP_IF_FALSE, (int)stmt->line);
+          emit_op(compiler, OP_POP, (int)stmt->line);
+          if (!compile_block(compiler, match_case->block)) {
+            return false;
+          }
+          if (end_count < sizeof(end_jumps) / sizeof(end_jumps[0])) {
+            end_jumps[end_count++] = emit_jump(compiler, OP_JUMP, (int)stmt->line);
+          }
+          patch_jump(compiler, skip);
+          emit_op(compiler, OP_POP, (int)stmt->line);
+        }
+        match_case = match_case->next;
+      }
+
+      for (size_t i = 0; i < end_count; ++i) {
+        patch_jump(compiler, end_jumps[i]);
+      }
       return true;
     }
     default:

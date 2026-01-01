@@ -10,6 +10,7 @@ typedef struct {
   Str locals[256];
   size_t local_count;
   bool returns_value;
+  size_t temp_counter;
 } CFuncContext;
 
 static bool emit_expr(const CFuncContext* ctx, const AstExpr* expr, FILE* out);
@@ -21,6 +22,8 @@ static bool emit_string_literal(FILE* out, Str literal);
 static bool emit_param_list(const AstParam* params, FILE* out);
 static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static bool emit_while(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
+static bool emit_match(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
+static bool is_wildcard_pattern(const AstExpr* expr);
 
 static bool emit_string_literal(FILE* out, Str literal) {
   if (!literal.data) return false;
@@ -264,6 +267,8 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
       return emit_if(ctx, stmt, out);
     case AST_STMT_WHILE:
       return emit_while(ctx, stmt, out);
+    case AST_STMT_MATCH:
+      return emit_match(ctx, stmt, out);
     default:
       fprintf(stderr, "error: C backend does not yet support this statement kind (%d)\n",
               (int)stmt->kind);
@@ -300,7 +305,10 @@ static bool emit_function(const AstFuncDecl* func, FILE* out) {
     free(name);
     return false;
   }
-  CFuncContext ctx = {.params = func->params, .local_count = 0, .returns_value = returns_value};
+  CFuncContext ctx = {.params = func->params,
+                      .local_count = 0,
+                      .returns_value = returns_value,
+                      .temp_counter = 0};
   const AstStmt* stmt = func->body->first;
   while (stmt && ok) {
     ok = emit_stmt(&ctx, stmt, out);
@@ -401,6 +409,11 @@ bool c_backend_emit(const AstModule* module, const char* out_path) {
   fclose(out);
   return ok;
 }
+static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
+static bool emit_while(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
+static bool emit_match(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
+static bool is_wildcard_pattern(const AstExpr* expr);
+
 static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
   if (!stmt->as.if_stmt.condition || !stmt->as.if_stmt.then_block) {
     fprintf(stderr, "error: C backend requires complete if statements\n");
@@ -469,6 +482,99 @@ static bool emit_while(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
   }
   if (fprintf(out, "  }\n") < 0) {
     return false;
+  }
+  return true;
+}
+
+static bool is_wildcard_pattern(const AstExpr* expr) {
+  return expr && expr->kind == AST_EXPR_IDENT && str_eq_cstr(expr->as.ident, "_");
+}
+
+static bool emit_match(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
+  if (!stmt->as.match_stmt.subject || !stmt->as.match_stmt.cases) {
+    fprintf(stderr, "error: C backend requires match subject and at least one case\n");
+    return false;
+  }
+  size_t temp_id = ctx->temp_counter++;
+  if (fprintf(out, "  int64_t __match%zu = ", temp_id) < 0) {
+    return false;
+  }
+  if (!emit_expr(ctx, stmt->as.match_stmt.subject, out)) {
+    return false;
+  }
+  if (fprintf(out, ";\n") < 0) {
+    return false;
+  }
+  const AstMatchCase* current = stmt->as.match_stmt.cases;
+  const AstMatchCase* default_case = NULL;
+  int case_index = 0;
+
+  while (current) {
+    if (is_wildcard_pattern(current->pattern)) {
+      if (default_case) {
+        fprintf(stderr, "error: multiple '_' default cases in match\n");
+        return false;
+      }
+      default_case = current;
+      current = current->next;
+      continue;
+    }
+    if (case_index > 0) {
+      if (fprintf(out, " else if (__match%zu == ", temp_id) < 0) {
+        return false;
+      }
+    } else {
+      if (fprintf(out, "  if (__match%zu == ", temp_id) < 0) {
+        return false;
+      }
+    }
+    if (!emit_expr(ctx, current->pattern, out)) {
+      return false;
+    }
+    if (fprintf(out, ") {\n") < 0) {
+      return false;
+    }
+    const AstStmt* inner = current->block ? current->block->first : NULL;
+    while (inner) {
+      if (!emit_stmt(ctx, inner, out)) {
+        return false;
+      }
+      inner = inner->next;
+    }
+    if (fprintf(out, "  }") < 0) {
+      return false;
+    }
+    case_index += 1;
+    current = current->next;
+  }
+  if (default_case) {
+    const AstStmt* inner = default_case->block ? default_case->block->first : NULL;
+    if (case_index > 0) {
+      if (fprintf(out, " else {\n") < 0) {
+        return false;
+      }
+      while (inner) {
+        if (!emit_stmt(ctx, inner, out)) {
+          return false;
+        }
+        inner = inner->next;
+      }
+      if (fprintf(out, "  }") < 0) {
+        return false;
+      }
+    } else {
+      while (inner) {
+        if (!emit_stmt(ctx, inner, out)) {
+          return false;
+        }
+        inner = inner->next;
+      }
+    }
+  }
+  if (case_index > 0) {
+    if (fprintf(out, "\n") < 0) {
+      return false;
+    }
   }
   return true;
 }
