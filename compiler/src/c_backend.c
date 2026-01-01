@@ -13,11 +13,11 @@ typedef struct {
   size_t temp_counter;
 } CFuncContext;
 
-static bool emit_expr(const CFuncContext* ctx, const AstExpr* expr, FILE* out);
+static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out);
 static bool emit_function(const AstFuncDecl* func, FILE* out);
 static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static bool emit_call(CFuncContext* ctx, const AstExpr* expr, FILE* out);
-static bool emit_log_call(const CFuncContext* ctx, const AstExpr* expr, FILE* out, bool newline);
+static bool emit_log_call(CFuncContext* ctx, const AstExpr* expr, FILE* out, bool newline);
 static bool emit_string_literal(FILE* out, Str literal);
 static bool emit_param_list(const AstParam* params, FILE* out);
 static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
@@ -49,7 +49,7 @@ static bool emit_param_list(const AstParam* params, FILE* out) {
   return true;
 }
 
-static bool emit_log_call(const CFuncContext* ctx, const AstExpr* expr, FILE* out, bool newline) {
+static bool emit_log_call(CFuncContext* ctx, const AstExpr* expr, FILE* out, bool newline) {
   const AstCallArg* arg = expr->as.call.args;
   if (!arg || arg->next) {
     fprintf(stderr,
@@ -84,7 +84,7 @@ static bool emit_log_call(const CFuncContext* ctx, const AstExpr* expr, FILE* ou
   return true;
 }
 
-static bool emit_expr(const CFuncContext* ctx, const AstExpr* expr, FILE* out) {
+static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
   if (!expr) return false;
   switch (expr->kind) {
     case AST_EXPR_STRING:
@@ -171,6 +171,68 @@ static bool emit_expr(const CFuncContext* ctx, const AstExpr* expr, FILE* out) {
       }
       fprintf(stderr, "error: C backend unsupported unary operator\n");
       return false;
+    case AST_EXPR_MATCH: {
+      size_t temp_id = ctx->temp_counter++;
+      if (fprintf(out, "({ int64_t __match%zu = ", temp_id) < 0) {
+        return false;
+      }
+      if (!emit_expr(ctx, expr->as.match_expr.subject, out)) {
+        return false;
+      }
+      if (fprintf(out, "; int64_t __result%zu; ", temp_id) < 0) {
+        return false;
+      }
+      const AstMatchArm* arm = expr->as.match_expr.arms;
+      bool has_default = false;
+      while (arm) {
+        if (!arm->pattern) {
+          has_default = true;
+          break;
+        }
+        arm = arm->next;
+      }
+      if (!has_default) {
+        fprintf(stderr, "error: match expression requires '_' default arm\n");
+        return false;
+      }
+      arm = expr->as.match_expr.arms;
+      bool first = true;
+      while (arm) {
+        if (!arm->pattern) {
+      if (fprintf(out, "%s{ __result%zu = ", first ? "" : " else ", temp_id) < 0) {
+            return false;
+          }
+          if (!emit_expr(ctx, arm->value, out)) {
+            return false;
+          }
+          if (fprintf(out, "; } ") < 0) {
+            return false;
+          }
+        } else {
+          if (fprintf(out, "%sif (__match%zu == ", first ? "" : " else ", temp_id) < 0) {
+            return false;
+          }
+          if (!emit_expr(ctx, arm->pattern, out)) {
+            return false;
+          }
+          if (fprintf(out, ") { __result%zu = ", temp_id) < 0) {
+            return false;
+          }
+          if (!emit_expr(ctx, arm->value, out)) {
+            return false;
+          }
+          if (fprintf(out, "; } ") < 0) {
+            return false;
+          }
+        }
+        first = false;
+        arm = arm->next;
+      }
+      if (fprintf(out, "__result%zu; })", temp_id) < 0) {
+        return false;
+      }
+      return true;
+    }
     default:
       fprintf(stderr, "error: unsupported expression kind in C backend\n");
       return false;
@@ -495,7 +557,7 @@ static bool emit_match(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     fprintf(stderr, "error: C backend requires match subject and at least one case\n");
     return false;
   }
-  size_t temp_id = ctx->temp_counter++;
+      size_t temp_id = ctx->temp_counter++;
   if (fprintf(out, "  int64_t __match%zu = ", temp_id) < 0) {
     return false;
   }
