@@ -3,13 +3,13 @@ func classify(  n:Int): ret result:Int{
  ret result:"negative"
  } else{
  match n {
-  case 0 {
-   ret result:"zero"
-  }
-  case _{
-   spawn  heavyWork(id:n)
-   ret result:"positive"
-  }
+ case 0 {
+  ret result:"zero"
  }
+  default{
+  spawn  heavyWork(id:n)
+  ret result:"positive"
+ }
+}
  }
 }
