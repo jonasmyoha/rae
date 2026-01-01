@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "diag.h"
+#include "str.h"
 #include "vm.h"
 
 typedef struct {
@@ -506,6 +507,79 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
                  "unary operator not supported in VM yet");
       compiler->had_error = true;
       return false;
+    }
+    case AST_EXPR_MATCH: {
+      int subject_slot = compiler_add_local(compiler, str_from_cstr("$match_subject"));
+      if (subject_slot < 0) {
+        return false;
+      }
+      if (!compiler_ensure_local_capacity(compiler, compiler->local_count, (int)expr->line)) {
+        return false;
+      }
+      if (!compile_expr(compiler, expr->as.match_expr.subject)) {
+        return false;
+      }
+      emit_op(compiler, OP_SET_LOCAL, (int)expr->line);
+      emit_short(compiler, (uint16_t)subject_slot, (int)expr->line);
+
+      int result_slot = compiler_add_local(compiler, str_from_cstr("$match_value"));
+      if (result_slot < 0) {
+        return false;
+      }
+      if (!compiler_ensure_local_capacity(compiler, compiler->local_count, (int)expr->line)) {
+        return false;
+      }
+
+      uint16_t end_jumps[256];
+      size_t end_count = 0;
+      bool has_default = false;
+      AstMatchArm* arm = expr->as.match_expr.arms;
+      while (arm) {
+        bool is_default = arm->pattern == NULL;
+        if (is_default) {
+          has_default = true;
+          if (!compile_expr(compiler, arm->value)) {
+            return false;
+          }
+          emit_op(compiler, OP_SET_LOCAL, (int)expr->line);
+          emit_short(compiler, (uint16_t)result_slot, (int)expr->line);
+          if (end_count < sizeof(end_jumps) / sizeof(end_jumps[0])) {
+            end_jumps[end_count++] = emit_jump(compiler, OP_JUMP, (int)expr->line);
+          }
+        } else {
+          emit_op(compiler, OP_GET_LOCAL, (int)expr->line);
+          emit_short(compiler, (uint16_t)subject_slot, (int)expr->line);
+          if (!compile_expr(compiler, arm->pattern)) {
+            return false;
+          }
+          emit_op(compiler, OP_EQ, (int)expr->line);
+          uint16_t skip = emit_jump(compiler, OP_JUMP_IF_FALSE, (int)expr->line);
+          emit_op(compiler, OP_POP, (int)expr->line);
+          if (!compile_expr(compiler, arm->value)) {
+            return false;
+          }
+          emit_op(compiler, OP_SET_LOCAL, (int)expr->line);
+          emit_short(compiler, (uint16_t)result_slot, (int)expr->line);
+          if (end_count < sizeof(end_jumps) / sizeof(end_jumps[0])) {
+            end_jumps[end_count++] = emit_jump(compiler, OP_JUMP, (int)expr->line);
+          }
+          patch_jump(compiler, skip);
+          emit_op(compiler, OP_POP, (int)expr->line);
+        }
+        arm = arm->next;
+      }
+      if (!has_default) {
+        diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
+                   "match expression requires a default '_' case");
+        compiler->had_error = true;
+        return false;
+      }
+      for (size_t i = 0; i < end_count; ++i) {
+        patch_jump(compiler, end_jumps[i]);
+      }
+      emit_op(compiler, OP_GET_LOCAL, (int)expr->line);
+      emit_short(compiler, (uint16_t)result_slot, (int)expr->line);
+      return true;
     }
     default:
       diag_error(compiler->file_path, (int)expr->line, (int)expr->column,

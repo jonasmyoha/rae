@@ -395,6 +395,14 @@ static AstDestructureBinding* append_destructure_binding(AstDestructureBinding* 
 static AstExpr* parse_expression(Parser* parser);
 static AstBlock* parse_block(Parser* parser);
 static AstStmt* parse_statement(Parser* parser);
+static AstExpr* parse_match_expression(Parser* parser, const Token* match_token);
+
+static bool token_is_ident(const Token* token, const char* text) {
+  if (!token || token->kind != TOK_IDENT) return false;
+  size_t len = strlen(text);
+  if (token->lexeme.len != len) return false;
+  return strncmp(token->lexeme.data, text, len) == 0;
+}
 
 static bool is_unary_operator(TokenKind kind) {
   return kind == TOK_MINUS || kind == TOK_KW_NOT || kind == TOK_KW_SPAWN;
@@ -593,6 +601,10 @@ static AstExpr* parse_primary(Parser* parser) {
     case TOK_LPAREN:
       parser_advance(parser);
       return parse_group_or_object(parser);
+    case TOK_KW_MATCH: {
+      const Token* match_token = parser_advance(parser);
+      return parse_match_expression(parser, match_token);
+    }
     default:
       parser_error(parser, token, "unexpected token in expression");
       return NULL;
@@ -758,6 +770,18 @@ static AstMatchCase* append_match_case(AstMatchCase* head, AstMatchCase* node) {
   return head;
 }
 
+static AstMatchArm* append_match_arm(AstMatchArm* head, AstMatchArm* node) {
+  if (!head) {
+    return node;
+  }
+  AstMatchArm* tail = head;
+  while (tail->next) {
+    tail = tail->next;
+  }
+  tail->next = node;
+  return head;
+}
+
 static AstStmt* parse_match_statement(Parser* parser, const Token* match_token) {
   AstStmt* stmt = new_stmt(parser, AST_STMT_MATCH, match_token);
   stmt->as.match_stmt.subject = parse_expression(parser);
@@ -776,6 +800,38 @@ static AstStmt* parse_match_statement(Parser* parser, const Token* match_token) 
   parser_consume(parser, TOK_RBRACE, "expected '}' after match cases");
   stmt->as.match_stmt.cases = cases;
   return stmt;
+}
+
+static AstExpr* parse_match_expression(Parser* parser, const Token* match_token) {
+  AstExpr* expr = new_expr(parser, AST_EXPR_MATCH, match_token);
+  expr->as.match_expr.subject = parse_expression(parser);
+  parser_consume(parser, TOK_LBRACE, "expected '{' after match subject");
+  AstMatchArm* arms = NULL;
+  bool saw_default = false;
+  while (!parser_check(parser, TOK_RBRACE) && !parser_check(parser, TOK_EOF)) {
+    parser_consume(parser, TOK_KW_CASE, "expected 'case' in match expression");
+    bool is_default = token_is_ident(parser_peek(parser), "_");
+    AstExpr* pattern = NULL;
+    if (is_default) {
+      if (saw_default) {
+        parser_error(parser, parser_peek(parser), "match already has a default '_'");
+      }
+      saw_default = true;
+      parser_advance(parser);
+    } else {
+      pattern = parse_expression(parser);
+    }
+    parser_consume(parser, TOK_ARROW, "expected '=>' after match pattern");
+    AstExpr* value = parse_expression(parser);
+    AstMatchArm* arm = parser_alloc(parser, sizeof(AstMatchArm));
+    arm->pattern = pattern;
+    arm->value = value;
+    arm->next = NULL;
+    arms = append_match_arm(arms, arm);
+  }
+  parser_consume(parser, TOK_RBRACE, "expected '}' after match expression");
+  expr->as.match_expr.arms = arms;
+  return expr;
 }
 
 static AstStmt* parse_statement(Parser* parser) {
