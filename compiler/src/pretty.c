@@ -232,6 +232,28 @@ static void pp_expr_prec(PrettyPrinter* pp, const AstExpr* expr, int parent_prec
       pp_object_fields(pp, expr->as.object);
       pp_write_char(pp, ')');
       break;
+    case AST_EXPR_MATCH: {
+      pp_write(pp, "match ");
+      pp_expr_prec(pp, expr->as.match_expr.subject, PREC_LOWEST);
+      pp_write(pp, " { ");
+      AstMatchArm* arm = expr->as.match_expr.arms;
+      while (arm) {
+        pp_write(pp, "case ");
+        if (arm->pattern) {
+          pp_expr_prec(pp, arm->pattern, PREC_LOWEST);
+        } else {
+          pp_write(pp, "_");
+        }
+        pp_write(pp, " => ");
+        pp_expr_prec(pp, arm->value, PREC_LOWEST);
+        if (arm->next) {
+          pp_write(pp, ", ");
+        }
+        arm = arm->next;
+      }
+      pp_write(pp, " }");
+      break;
+    }
     case AST_EXPR_MEMBER: {
       int prec = PREC_CALL;
       int need_paren = prec < parent_prec;

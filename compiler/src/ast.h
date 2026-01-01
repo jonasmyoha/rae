@@ -15,6 +15,7 @@ typedef struct AstStmt AstStmt;
 typedef struct AstExpr AstExpr;
 typedef struct AstTypeRef AstTypeRef;
 typedef struct AstImport AstImport;
+typedef struct AstMatchArm AstMatchArm;
 
 typedef struct AstIdentifierPart {
   Str text;
@@ -98,7 +99,8 @@ typedef enum {
   AST_EXPR_UNARY,
   AST_EXPR_CALL,
   AST_EXPR_MEMBER,
-  AST_EXPR_OBJECT
+  AST_EXPR_OBJECT,
+  AST_EXPR_MATCH
 } AstExprKind;
 
 struct AstExpr {
@@ -128,6 +130,10 @@ struct AstExpr {
       Str member;
     } member;
     AstObjectField* object;
+    struct {
+      AstExpr* subject;
+      AstMatchArm* arms;
+    } match_expr;
   } as;
 };
 
@@ -153,6 +159,12 @@ typedef struct AstMatchCase {
   AstBlock* block;
   struct AstMatchCase* next;
 } AstMatchCase;
+
+typedef struct AstMatchArm {
+  AstExpr* pattern;
+  AstExpr* value;
+  struct AstMatchArm* next;
+} AstMatchArm;
 
 struct AstStmt {
   AstStmtKind kind;
