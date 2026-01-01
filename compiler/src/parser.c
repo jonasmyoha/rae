@@ -788,11 +788,19 @@ static AstStmt* parse_match_statement(Parser* parser, const Token* match_token) 
   parser_consume(parser, TOK_LBRACE, "expected '{' after match subject");
   AstMatchCase* cases = NULL;
   while (!parser_check(parser, TOK_RBRACE) && !parser_check(parser, TOK_EOF)) {
-    parser_consume(parser, TOK_KW_CASE, "expected 'case' inside match");
-    AstMatchCase* match_case = parser_alloc(parser, sizeof(AstMatchCase));
-    match_case->pattern = parse_expression(parser);
-    match_case->block = parse_block(parser);
-    cases = append_match_case(cases, match_case);
+    if (parser_match(parser, TOK_KW_CASE)) {
+      AstMatchCase* match_case = parser_alloc(parser, sizeof(AstMatchCase));
+      match_case->pattern = parse_expression(parser);
+      match_case->block = parse_block(parser);
+      cases = append_match_case(cases, match_case);
+    } else if (parser_match(parser, TOK_KW_DEFAULT)) {
+      AstMatchCase* match_case = parser_alloc(parser, sizeof(AstMatchCase));
+      match_case->pattern = NULL;
+      match_case->block = parse_block(parser);
+      cases = append_match_case(cases, match_case);
+    } else {
+      parser_error(parser, parser_peek(parser), "expected 'case' or 'default' inside match");
+    }
   }
   if (!cases) {
     parser_error(parser, parser_peek(parser), "match must have at least one case");
@@ -810,16 +818,20 @@ static AstExpr* parse_match_expression(Parser* parser, const Token* match_token)
   bool saw_default = false;
   while (!parser_check(parser, TOK_RBRACE) && !parser_check(parser, TOK_EOF)) {
     parser_consume(parser, TOK_KW_CASE, "expected 'case' in match expression");
-    bool is_default = token_is_ident(parser_peek(parser), "_");
+    bool is_default = false;
     AstExpr* pattern = NULL;
-    if (is_default) {
-      if (saw_default) {
-        parser_error(parser, parser_peek(parser), "match already has a default '_'");
-      }
-      saw_default = true;
-      parser_advance(parser);
+    if (parser_match(parser, TOK_KW_DEFAULT)) {
+      is_default = true;
+    } else if (token_is_ident(parser_peek(parser), "_")) {
+      parser_error(parser, parser_peek(parser), "use 'default' instead of '_' in match expressions");
     } else {
       pattern = parse_expression(parser);
+    }
+    if (is_default) {
+      if (saw_default) {
+        parser_error(parser, parser_peek(parser), "match already has a default arm");
+      }
+      saw_default = true;
     }
     parser_consume(parser, TOK_ARROW, "expected '=>' after match pattern");
     AstExpr* value = parse_expression(parser);
