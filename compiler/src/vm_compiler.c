@@ -570,7 +570,7 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       }
       if (!has_default) {
         diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
-                   "match expression requires a default '_' case");
+                   "match expression requires a 'default' arm");
         compiler->had_error = true;
         return false;
       }
@@ -716,14 +716,14 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
         bool is_default = match_case->pattern &&
                           match_case->pattern->kind == AST_EXPR_IDENT &&
                           str_eq_cstr(match_case->pattern->as.ident, "_");
-        if (is_default) {
-          if (had_default) {
-            diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column,
-                       "multiple default '_' cases in match");
-            compiler->had_error = true;
-            return false;
-          }
-          had_default = true;
+      if (is_default) {
+        if (had_default) {
+          diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column,
+                     "multiple 'default' cases in match");
+          compiler->had_error = true;
+          return false;
+        }
+        had_default = true;
           if (!compile_block(compiler, match_case->block)) {
             return false;
           }

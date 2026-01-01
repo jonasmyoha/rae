@@ -172,7 +172,7 @@ match value {
   case 0 {
     log("zero")
   }
-  case _ {
+  default {
     log("other")
   }
 }
