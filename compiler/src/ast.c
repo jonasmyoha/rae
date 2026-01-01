@@ -258,6 +258,14 @@ static void dump_if_stmt(const AstStmt* stmt, FILE* out, int indent) {
   }
 }
 
+static void dump_while_stmt(const AstStmt* stmt, FILE* out, int indent) {
+  print_indent(out, indent);
+  fputs("while ", out);
+  dump_expr(stmt->as.while_stmt.condition, out);
+  fputc('\n', out);
+  dump_block(stmt->as.while_stmt.body, out, indent + 1);
+}
+
 static void dump_match_stmt(const AstStmt* stmt, FILE* out, int indent) {
   print_indent(out, indent);
   fputs("match ", out);
@@ -297,6 +305,9 @@ static void dump_block(const AstBlock* block, FILE* out, int indent) {
         break;
       case AST_STMT_IF:
         dump_if_stmt(stmt, out, indent);
+        break;
+      case AST_STMT_WHILE:
+        dump_while_stmt(stmt, out, indent);
         break;
       case AST_STMT_MATCH:
         dump_match_stmt(stmt, out, indent);

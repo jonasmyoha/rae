@@ -588,6 +588,28 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
       }
       return true;
     }
+    case AST_STMT_WHILE: {
+      if (!stmt->as.while_stmt.condition || !stmt->as.while_stmt.body) {
+        diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column,
+                   "while statement missing condition or body");
+        compiler->had_error = true;
+        return false;
+      }
+      uint16_t loop_start = (uint16_t)compiler->chunk->code_count;
+      if (!compile_expr(compiler, stmt->as.while_stmt.condition)) {
+        return false;
+      }
+      uint16_t exit_jump = emit_jump(compiler, OP_JUMP_IF_FALSE, (int)stmt->line);
+      emit_op(compiler, OP_POP, (int)stmt->line);
+      if (!compile_block(compiler, stmt->as.while_stmt.body)) {
+        return false;
+      }
+      emit_op(compiler, OP_JUMP, (int)stmt->line);
+      emit_short(compiler, loop_start, (int)stmt->line);
+      patch_jump(compiler, exit_jump);
+      emit_op(compiler, OP_POP, (int)stmt->line);
+      return true;
+    }
     default:
       diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column,
                  "statement not supported in VM yet");
