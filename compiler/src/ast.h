@@ -144,6 +144,7 @@ typedef enum {
   AST_STMT_EXPR,
   AST_STMT_RET,
   AST_STMT_IF,
+  AST_STMT_WHILE,
   AST_STMT_MATCH
 } AstStmtKind;
 
@@ -178,6 +179,10 @@ struct AstStmt {
       AstBlock* then_block;
       AstBlock* else_block;
     } if_stmt;
+    struct {
+      AstExpr* condition;
+      AstBlock* body;
+    } while_stmt;
     struct {
       AstExpr* subject;
       AstMatchCase* cases;

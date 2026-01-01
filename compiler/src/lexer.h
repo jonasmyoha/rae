@@ -27,6 +27,7 @@ typedef enum {
   TOK_KW_OPT,
   TOK_KW_IF,
   TOK_KW_ELSE,
+  TOK_KW_WHILE,
   TOK_KW_MATCH,
   TOK_KW_CASE,
   TOK_KW_IMPORT,

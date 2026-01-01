@@ -402,6 +402,16 @@ static void pp_print_match_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
   pp_newline(pp);
 }
 
+static void pp_print_while_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
+  pp_write(pp, "while ");
+  pp_expr(pp, stmt->as.while_stmt.condition);
+  pp_space(pp);
+  pp_begin_block(pp);
+  pp_print_block_body(pp, stmt->as.while_stmt.body);
+  pp_end_block(pp);
+  pp_newline(pp);
+}
+
 static void pp_print_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
   switch (stmt->kind) {
     case AST_STMT_DEF:
@@ -419,6 +429,9 @@ static void pp_print_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
       break;
     case AST_STMT_IF:
       pp_print_if_stmt(pp, stmt);
+      break;
+    case AST_STMT_WHILE:
+      pp_print_while_stmt(pp, stmt);
       break;
     case AST_STMT_MATCH:
       pp_print_match_stmt(pp, stmt);
