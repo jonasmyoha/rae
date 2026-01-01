@@ -739,6 +739,13 @@ static AstStmt* parse_if_statement(Parser* parser, const Token* if_token) {
   return stmt;
 }
 
+static AstStmt* parse_while_statement(Parser* parser, const Token* while_token) {
+  AstStmt* stmt = new_stmt(parser, AST_STMT_WHILE, while_token);
+  stmt->as.while_stmt.condition = parse_expression(parser);
+  stmt->as.while_stmt.body = parse_block(parser);
+  return stmt;
+}
+
 static AstMatchCase* append_match_case(AstMatchCase* head, AstMatchCase* node) {
   if (!head) {
     return node;
@@ -784,6 +791,9 @@ static AstStmt* parse_statement(Parser* parser) {
   }
   if (parser_match(parser, TOK_KW_IF)) {
     return parse_if_statement(parser, parser_previous(parser));
+  }
+  if (parser_match(parser, TOK_KW_WHILE)) {
+    return parse_while_statement(parser, parser_previous(parser));
   }
   if (parser_match(parser, TOK_KW_MATCH)) {
     return parse_match_statement(parser, parser_previous(parser));

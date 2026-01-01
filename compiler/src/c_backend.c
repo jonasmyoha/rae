@@ -20,6 +20,7 @@ static bool emit_log_call(const CFuncContext* ctx, const AstExpr* expr, FILE* ou
 static bool emit_string_literal(FILE* out, Str literal);
 static bool emit_param_list(const AstParam* params, FILE* out);
 static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
+static bool emit_while(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 
 static bool emit_string_literal(FILE* out, Str literal) {
   if (!literal.data) return false;
@@ -223,8 +224,6 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
         fprintf(stderr, "error: C backend only supports single return values\n");
         return false;
       }
-    case AST_STMT_IF:
-      return emit_if(ctx, stmt, out);
       if (!ctx->returns_value) {
         fprintf(stderr, "error: return with value in non-returning function\n");
         return false;
@@ -261,6 +260,10 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     }
     case AST_STMT_EXPR:
       return emit_call(ctx, stmt->as.expr_stmt, out);
+    case AST_STMT_IF:
+      return emit_if(ctx, stmt, out);
+    case AST_STMT_WHILE:
+      return emit_while(ctx, stmt, out);
     default:
       fprintf(stderr, "error: C backend does not yet support this statement kind (%d)\n",
               (int)stmt->kind);
@@ -438,6 +441,33 @@ static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     }
   }
   if (fprintf(out, "\n") < 0) {
+    return false;
+  }
+  return true;
+}
+
+static bool emit_while(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
+  if (!stmt->as.while_stmt.condition || !stmt->as.while_stmt.body) {
+    fprintf(stderr, "error: C backend requires while condition and body\n");
+    return false;
+  }
+  if (fprintf(out, "  while (") < 0) {
+    return false;
+  }
+  if (!emit_expr(ctx, stmt->as.while_stmt.condition, out)) {
+    return false;
+  }
+  if (fprintf(out, ") {\n") < 0) {
+    return false;
+  }
+  const AstStmt* inner = stmt->as.while_stmt.body->first;
+  while (inner) {
+    if (!emit_stmt(ctx, inner, out)) {
+      return false;
+    }
+    inner = inner->next;
+  }
+  if (fprintf(out, "  }\n") < 0) {
     return false;
   }
   return true;
