@@ -8,11 +8,12 @@
   </head>
   <body>
     <header class="app-header">
-      <div>
+      <div class="app-header__top">
+        <div>
         <h1>Rae compiler devtools</h1>
         <p class="tagline">Early preview – wiring up server, tests, and stats</p>
-      </div>
-      <div class="status-group">
+        </div>
+        <div class="status-group">
         <div class="status-pill connection-indicator" id="connection-status">Connecting…</div>
         <div class="status-pill heartbeat-indicator" id="heartbeat-status">Heartbeat: waiting…</div>
         <button
@@ -29,10 +30,20 @@
           </svg>
           <span class="error-indicator__count" id="error-count">0</span>
         </button>
+        </div>
       </div>
+      <nav class="app-nav" role="tablist" aria-label="Primary views">
+      <button class="app-nav__item is-active" type="button" role="tab" aria-selected="true" data-view-target="compiler">
+        Compiler
+      </button>
+      <button class="app-nav__item" type="button" role="tab" aria-selected="false" data-view-target="statistics">
+        Statistics
+      </button>
+    </nav>
     </header>
     <main class="app-main">
-      <section class="panel panel--full" id="build-panel">
+      <div class="app-view is-active" data-view="compiler">
+        <section class="panel panel--full" id="build-panel">
         <header class="panel-header">
           <div>
             <h2>Build controls</h2>
@@ -66,8 +77,8 @@
             </svg>
           </button>
         </div>
-      </section>
-      <section class="panel panel--full" id="tests-panel">
+        </section>
+        <section class="panel panel--full" id="tests-panel">
         <header class="panel-header">
           <div>
             <h2>Test runner</h2>
@@ -164,8 +175,8 @@
             </div>
           </div>
         </div>
-      </section>
-      <section class="panel panel--full" id="examples-panel">
+        </section>
+        <section class="panel panel--full" id="examples-panel">
         <header class="panel-header">
           <div>
             <h2>Examples</h2>
@@ -210,32 +221,15 @@
             </div>
           </div>
         </div>
-      </section>
-      <section class="panel">
+        </section>
+        <section class="panel">
         <header>
           <h2>Status stream</h2>
           <p class="panel-subtitle">Live events from the Bun server</p>
         </header>
         <div id="status-feed" class="status-feed" aria-live="polite"></div>
-      </section>
-      <section class="panel" id="stats-panel">
-        <header>
-          <h2>Stats preview</h2>
-          <p class="panel-subtitle">Recent run metrics recorded in SQLite</p>
-        </header>
-        <div class="stats-controls">
-          <label class="sr-only" for="stats-metric-select">Metric</label>
-          <select id="stats-metric-select">
-            <option value="tests.duration_ms">Test duration (ms)</option>
-            <option value="builds.duration_ms">Build duration (ms)</option>
-          </select>
-          <button id="stats-refresh-btn" type="button">Refresh</button>
-        </div>
-        <ul class="stats-list" id="stats-list">
-          <li class="stats-empty">No stats recorded yet.</li>
-        </ul>
-      </section>
-      <section class="panel instructions" id="next-steps-panel">
+        </section>
+        <section class="panel instructions" id="next-steps-panel">
         <header>
           <div class="panel-header">
             <div>
@@ -270,7 +264,51 @@
             </svg>
           </button>
         </div>
-      </section>
+        </section>
+      </div>
+      <div class="app-view app-view--stats" data-view="statistics">
+        <section class="panel panel--full stats-intro">
+          <div class="panel-header">
+            <div>
+              <h2>Statistics</h2>
+              <p class="panel-subtitle">Recent compiler health metrics collected from builds, tests, and tooling</p>
+            </div>
+            <button id="stats-view-refresh" type="button">Refresh</button>
+          </div>
+        </section>
+        <section class="panel stats-card" id="stats-tests-panel">
+          <header>
+            <h3>Test duration</h3>
+            <p class="panel-subtitle">Latest Rae compiler test suite runs</p>
+          </header>
+          <ul class="stats-list" id="stats-tests-list">
+            <li class="stats-empty">Open the Statistics view to load data.</li>
+          </ul>
+        </section>
+        <section class="panel stats-card" id="stats-builds-panel">
+          <header>
+            <h3>Build duration</h3>
+            <p class="panel-subtitle">Recent compiler build timings</p>
+          </header>
+          <ul class="stats-list" id="stats-builds-list">
+            <li class="stats-empty">Open the Statistics view to load data.</li>
+          </ul>
+        </section>
+        <section class="panel panel--full stats-card" id="stats-linecount-panel">
+          <header>
+            <h3>Compiler line count</h3>
+            <p class="panel-subtitle">Snapshots collected from <code>tools/stats/update_metrics.sh</code></p>
+          </header>
+          <div class="line-chart-container">
+            <canvas id="line-count-chart" aria-label="Compiler line count chart"></canvas>
+            <p class="line-chart-empty" id="line-count-empty">Run the metrics script to record compiler line counts.</p>
+          </div>
+          <p class="line-chart-summary" id="line-count-summary"></p>
+          <ul class="stats-list stats-list--compact" id="line-count-history">
+            <li class="stats-empty">No snapshots recorded yet.</li>
+          </ul>
+        </section>
+      </div>
     </main>
 
     <div class="error-modal" id="error-log-modal" aria-hidden="true">

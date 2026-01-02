@@ -14,6 +14,13 @@ type SocketData = {
   id: string;
 };
 
+type CompilerMetricEntry = {
+  timestamp: string | null;
+  commit: string | null;
+  files: number | null;
+  lines: number;
+};
+
 const CONFIG = await loadConfig();
 const STATIC_ROOT = path.join(process.cwd(), "src", "client");
 const CHANNEL = "rae-devtools-events";
@@ -27,6 +34,12 @@ const exampleRunner = new ExampleRunner(CONFIG, broadcastEvent);
 const testsRoot = getTestsRoot(CONFIG);
 const syntaxSummaryPath = getSyntaxSummaryPath(CONFIG);
 const examplesRoot = getExamplesRoot(CONFIG);
+const compilerMetricsPath = path.resolve(
+  process.cwd(),
+  CONFIG.compilerPath,
+  "stats",
+  "compiler_metrics.jsonl"
+);
 
 const server = Bun.serve<SocketData>({
   port: CONFIG.port,
@@ -71,6 +84,15 @@ const server = Bun.serve<SocketData>({
       const limit = Math.min(Number(url.searchParams.get("limit") ?? 20), 100);
       const data = statsStore.listRecentMetrics(metric, Number.isFinite(limit) ? limit : 20);
       return new Response(JSON.stringify({ metric, data }), {
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    if (url.pathname === "/api/stats/compiler-metrics" && req.method === "GET") {
+      const limitParam = Number(url.searchParams.get("limit") ?? 60);
+      const limit = Number.isFinite(limitParam) ? Math.max(1, Math.min(limitParam, 200)) : 60;
+      const data = await readCompilerMetrics(limit);
+      return new Response(JSON.stringify({ data }), {
         headers: { "Content-Type": "application/json" }
       });
     }
@@ -247,6 +269,36 @@ function createStatusMessage(message: string): ServerEvent {
     message,
     timestamp: new Date().toISOString()
   };
+}
+
+async function readCompilerMetrics(limit: number): Promise<CompilerMetricEntry[]> {
+  try {
+    const file = Bun.file(compilerMetricsPath);
+    if (!(await file.exists())) {
+      return [];
+    }
+    const text = await file.text();
+    const lines = text.split(/\r?\n/).filter(Boolean);
+    const entries: CompilerMetricEntry[] = [];
+    for (const line of lines) {
+      try {
+        const parsed = JSON.parse(line);
+        if (typeof parsed.src_line_count !== "number") continue;
+        entries.push({
+          timestamp: typeof parsed.timestamp === "string" ? parsed.timestamp : null,
+          commit: typeof parsed.commit === "string" ? parsed.commit : null,
+          files: typeof parsed.src_file_count === "number" ? parsed.src_file_count : null,
+          lines: parsed.src_line_count
+        });
+      } catch {
+        continue;
+      }
+    }
+    return entries.slice(-limit);
+  } catch (error) {
+    console.warn("[stats] Unable to read compiler metrics", error);
+    return [];
+  }
 }
 
 async function serveStaticFile(url: URL): Promise<Response> {

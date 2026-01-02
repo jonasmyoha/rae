@@ -17,9 +17,16 @@ const testSummaryText = document.getElementById("test-summary-text");
 const summaryPassCount = document.getElementById("summary-pass-count");
 const summaryFailCount = document.getElementById("summary-fail-count");
 const testDetail = document.getElementById("test-detail");
-const statsMetricSelect = document.getElementById("stats-metric-select");
-const statsRefreshBtn = document.getElementById("stats-refresh-btn");
-const statsList = document.getElementById("stats-list");
+const viewToggleButtons = document.querySelectorAll("[data-view-target]");
+const appViews = document.querySelectorAll("[data-view]");
+const statsViewContainer = document.querySelector('[data-view="statistics"]');
+const statsViewRefreshBtn = document.getElementById("stats-view-refresh");
+const statsTestsList = document.getElementById("stats-tests-list");
+const statsBuildsList = document.getElementById("stats-builds-list");
+const lineCountCanvas = document.getElementById("line-count-chart");
+const lineCountSummary = document.getElementById("line-count-summary");
+const lineCountEmpty = document.getElementById("line-count-empty");
+const lineCountHistory = document.getElementById("line-count-history");
 const errorIndicator = document.getElementById("error-indicator");
 const errorCount = document.getElementById("error-count");
 const errorModal = document.getElementById("error-log-modal");
@@ -60,7 +67,6 @@ let currentBuildVersion = null;
 let testCases = new Map();
 let summaryCounts = { passed: 0, failed: 0 };
 let selectedTestName = null;
-let currentStatsMetric = statsMetricSelect?.value ?? "tests.duration_ms";
 let testFilesTree = [];
 let selectedTestFile = null;
 let selectedTestSource = "";
@@ -79,6 +85,10 @@ let activeExampleRunId = null;
 let exampleWatchActive = false;
 let exampleEditMode = false;
 let exampleEditorDirty = false;
+let statsViewLoaded = false;
+let compilerLineMetrics = [];
+let lineChartFrame = null;
+const numberFormatter = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
 
 function connect() {
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
@@ -232,6 +242,9 @@ pushStatusItem("Waiting for server heartbeat…");
 setHeartbeatWaiting();
 connect();
 updateSummaryText();
+const defaultView =
+  document.querySelector("[data-view-target].is-active")?.dataset.viewTarget ?? "compiler";
+setActiveView(defaultView);
 
 runTestsBtn?.addEventListener("click", () => requestTestRun("all"));
 document.addEventListener("keydown", (event) => {
@@ -264,13 +277,20 @@ exampleEditor?.addEventListener("input", () => {
   }
 });
 
-statsRefreshBtn?.addEventListener("click", () => refreshStats());
-statsMetricSelect?.addEventListener("change", () => {
-  currentStatsMetric = statsMetricSelect.value;
-  refreshStats();
+viewToggleButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    const target = button.dataset.viewTarget ?? "compiler";
+    setActiveView(target);
+  });
 });
 
-refreshStats();
+statsViewRefreshBtn?.addEventListener("click", () => {
+  statsViewLoaded = true;
+  refreshStatisticsPanels();
+});
+
+window.addEventListener("resize", () => scheduleLineChartRender());
+
 loadRaeSyntax("/rae_syntax.json")
   .then((syntax) => {
     raeSyntax = syntax;
@@ -1065,57 +1085,108 @@ function recomputeSummaryCounts() {
   summaryCounts = counts;
 }
 
-async function refreshStats() {
-  if (!statsList) return;
-  statsList.innerHTML = `<li class="stats-empty">Loading…</li>`;
+async function refreshStatisticsPanels() {
+  if (statsTestsList) setStatsListPlaceholder(statsTestsList, "Loading test metrics…");
+  if (statsBuildsList) setStatsListPlaceholder(statsBuildsList, "Loading build metrics…");
+  if (lineCountHistory) setStatsListPlaceholder(lineCountHistory, "Loading snapshots…");
+  if (lineCountEmpty) {
+    lineCountEmpty.hidden = false;
+    lineCountEmpty.textContent = "Loading line counts…";
+  }
   try {
-    const response = await fetch(
-      `/api/stats/recent?metric=${encodeURIComponent(currentStatsMetric)}`
-    );
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+    const [testsResult, buildsResult, compilerResult] = await Promise.allSettled([
+      fetchMetricSeries("tests.duration_ms"),
+      fetchMetricSeries("builds.duration_ms"),
+      fetchCompilerLineMetrics()
+    ]);
+    if (testsResult.status === "fulfilled") {
+      renderMetricList(statsTestsList, testsResult.value, "tests.duration_ms");
+    } else {
+      setStatsListPlaceholder(statsTestsList, "Failed to load test stats.");
+      recordError("Stats", getErrorMessage(testsResult.reason));
     }
-    const payload = await response.json();
-    renderStatsList(payload.data ?? []);
+    if (buildsResult.status === "fulfilled") {
+      renderMetricList(statsBuildsList, buildsResult.value, "builds.duration_ms");
+    } else {
+      setStatsListPlaceholder(statsBuildsList, "Failed to load build stats.");
+      recordError("Stats", getErrorMessage(buildsResult.reason));
+    }
+    if (compilerResult.status === "fulfilled") {
+      compilerLineMetrics = compilerResult.value;
+      renderLineCountDetails(compilerLineMetrics);
+      scheduleLineChartRender();
+    } else {
+      compilerLineMetrics = [];
+      if (lineCountEmpty) {
+        lineCountEmpty.hidden = false;
+        lineCountEmpty.textContent = "Failed to load compiler metrics.";
+      }
+      if (lineCountSummary) lineCountSummary.textContent = "";
+      setStatsListPlaceholder(lineCountHistory, "No snapshots available.");
+      recordError("Stats", getErrorMessage(compilerResult.reason));
+    }
   } catch (error) {
-    console.error("Failed to load stats", error);
     recordError("Stats", getErrorMessage(error));
-    statsList.innerHTML = `<li class="stats-empty">Failed to load stats.</li>`;
   }
 }
 
-function renderStatsList(entries) {
-  if (!statsList) return;
-  statsList.innerHTML = "";
+async function fetchMetricSeries(metric, limit = 15) {
+  const response = await fetch(
+    `/api/stats/recent?metric=${encodeURIComponent(metric)}&limit=${limit}`
+  );
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  const payload = await response.json();
+  return Array.isArray(payload.data) ? payload.data : [];
+}
+
+async function fetchCompilerLineMetrics(limit = 60) {
+  const response = await fetch(`/api/stats/compiler-metrics?limit=${limit}`);
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  const payload = await response.json();
+  return Array.isArray(payload.data) ? payload.data : [];
+}
+
+function renderMetricList(listEl, entries, metricName) {
+  if (!listEl) return;
+  listEl.innerHTML = "";
   if (!entries.length) {
-    const empty = document.createElement("li");
-    empty.className = "stats-empty";
-    empty.textContent = "No stats recorded yet.";
-    statsList.appendChild(empty);
+    setStatsListPlaceholder(listEl, "No stats recorded yet.");
     return;
   }
-
   for (const entry of entries) {
     const item = document.createElement("li");
     item.className = "stats-item";
 
     const value = document.createElement("div");
-    value.textContent = formatMetricValue(currentStatsMetric, entry.value);
+    value.textContent = formatMetricValue(metricName, entry.value);
 
     const meta = document.createElement("div");
-    meta.innerHTML = `<strong>${formatMetricStatus(entry.metadata)}</strong><br/>
-      <time>${new Date(entry.timestamp).toLocaleString()}</time>`;
+    const timestamp = entry.timestamp ? new Date(entry.timestamp).toLocaleString() : "Unknown time";
+    meta.innerHTML = `<strong>${formatMetricStatus(entry.metadata)}</strong><br/><time>${timestamp}</time>`;
     meta.style.textAlign = "right";
 
     item.appendChild(value);
     item.appendChild(meta);
-    statsList.appendChild(item);
+    listEl.appendChild(item);
   }
+}
+
+function setStatsListPlaceholder(listEl, message) {
+  if (!listEl) return;
+  listEl.innerHTML = "";
+  const empty = document.createElement("li");
+  empty.className = "stats-empty";
+  empty.textContent = message;
+  listEl.appendChild(empty);
 }
 
 function formatMetricValue(metric, value) {
   if (typeof value === "number") {
-    if (metric.includes("duration")) {
+    if (metric?.includes("duration")) {
       return `${value.toFixed(1)} ms`;
     }
     return value.toFixed(2);
@@ -1128,6 +1199,153 @@ function formatMetricStatus(metadata = {}) {
     return metadata.success ? "Success" : "Failed";
   }
   return "Recorded";
+}
+
+function renderLineCountDetails(entries) {
+  if (lineCountSummary) {
+    if (!entries.length) {
+      lineCountSummary.textContent = "";
+    } else {
+      const latest = entries[entries.length - 1];
+      const lineLabel = numberFormatter.format(latest.lines ?? 0);
+      const fileLabel =
+        typeof latest.files === "number" ? `${latest.files} files` : "unknown files";
+      const timestamp = latest.timestamp ? new Date(latest.timestamp).toLocaleString() : "Unknown time";
+      lineCountSummary.textContent = `Latest snapshot: ${lineLabel} lines across ${fileLabel} (${timestamp})`;
+    }
+  }
+  if (!entries.length && lineCountEmpty) {
+    lineCountEmpty.hidden = false;
+    lineCountEmpty.textContent = "Run the metrics script to record compiler line counts.";
+  }
+  renderLineCountHistory(entries);
+}
+
+function renderLineCountHistory(entries) {
+  if (!lineCountHistory) return;
+  lineCountHistory.innerHTML = "";
+  if (!entries.length) {
+    setStatsListPlaceholder(lineCountHistory, "No snapshots recorded yet.");
+    return;
+  }
+  const rows = entries.slice(-6).reverse();
+  for (const entry of rows) {
+    const item = document.createElement("li");
+    item.className = "stats-item";
+    const lineValue = document.createElement("div");
+    lineValue.textContent = `${numberFormatter.format(entry.lines ?? 0)} lines`;
+    const meta = document.createElement("div");
+    const filesLabel =
+      typeof entry.files === "number" ? `${entry.files} files` : "unknown files";
+    const timestamp = entry.timestamp ? new Date(entry.timestamp).toLocaleString() : "Unknown time";
+    meta.innerHTML = `<strong>${filesLabel}</strong><br/><time>${timestamp}</time>`;
+    meta.style.textAlign = "right";
+    item.appendChild(lineValue);
+    item.appendChild(meta);
+    lineCountHistory.appendChild(item);
+  }
+}
+
+function scheduleLineChartRender() {
+  if (!lineCountCanvas || !compilerLineMetrics.length) return;
+  if (!statsViewContainer || !statsViewContainer.classList.contains("is-active")) return;
+  if (lineChartFrame) cancelAnimationFrame(lineChartFrame);
+  lineChartFrame = requestAnimationFrame(() => {
+    drawLineCountChart(compilerLineMetrics);
+    lineChartFrame = null;
+  });
+}
+
+function drawLineCountChart(entries) {
+  if (!lineCountCanvas) return;
+  const ctx = lineCountCanvas.getContext("2d");
+  if (!ctx) return;
+  if (!entries.length) {
+    ctx.clearRect(0, 0, lineCountCanvas.width, lineCountCanvas.height);
+    return;
+  }
+  if (lineCountEmpty) {
+    lineCountEmpty.hidden = true;
+  }
+  const width = lineCountCanvas.clientWidth || 600;
+  const height = lineCountCanvas.clientHeight || 260;
+  const dpr = window.devicePixelRatio || 1;
+  lineCountCanvas.width = width * dpr;
+  lineCountCanvas.height = height * dpr;
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, width, height);
+  const padding = 24;
+  const chartWidth = width - padding * 2;
+  const chartHeight = height - padding * 2;
+  const values = entries.map((entry) => entry.lines ?? 0);
+  const minValue = Math.min(...values);
+  const maxValue = Math.max(...values);
+  const range = Math.max(maxValue - minValue, 1);
+  const spacing = entries.length > 1 ? chartWidth / (entries.length - 1) : 0;
+  const points = entries.map((entry, index) => {
+    const x = entries.length > 1 ? padding + index * spacing : padding + chartWidth / 2;
+    const normalized = (entry.lines - minValue) / range;
+    const y = padding + chartHeight - normalized * chartHeight;
+    return { x, y };
+  });
+  ctx.strokeStyle = "rgba(154, 161, 185, 0.2)";
+  ctx.lineWidth = 1;
+  const gridLines = 4;
+  for (let i = 0; i <= gridLines; i++) {
+    const y = padding + (chartHeight / gridLines) * i;
+    ctx.beginPath();
+    ctx.moveTo(padding, y);
+    ctx.lineTo(width - padding, y);
+    ctx.stroke();
+  }
+  ctx.beginPath();
+  points.forEach((point, index) => {
+    if (index === 0) ctx.moveTo(point.x, point.y);
+    else ctx.lineTo(point.x, point.y);
+  });
+  const strokeGradient = ctx.createLinearGradient(0, padding, 0, height - padding);
+  strokeGradient.addColorStop(0, "rgba(125, 211, 252, 0.9)");
+  strokeGradient.addColorStop(1, "rgba(125, 211, 252, 0.4)");
+  ctx.lineWidth = 2;
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.strokeStyle = strokeGradient;
+  ctx.stroke();
+  ctx.lineTo(points[points.length - 1].x, height - padding);
+  ctx.lineTo(points[0].x, height - padding);
+  ctx.closePath();
+  const fillGradient = ctx.createLinearGradient(0, padding, 0, height - padding);
+  fillGradient.addColorStop(0, "rgba(125, 211, 252, 0.2)");
+  fillGradient.addColorStop(1, "rgba(125, 211, 252, 0)");
+  ctx.fillStyle = fillGradient;
+  ctx.fill();
+  ctx.fillStyle = "#7dd3fc";
+  for (const point of points) {
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function setActiveView(targetView) {
+  const resolvedView = targetView ?? "compiler";
+  viewToggleButtons.forEach((button) => {
+    const isActive = button.dataset.viewTarget === resolvedView;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-selected", String(isActive));
+  });
+  appViews.forEach((viewEl) => {
+    const isActive = viewEl.dataset.view === resolvedView;
+    viewEl.classList.toggle("is-active", isActive);
+  });
+  if (resolvedView === "statistics") {
+    if (!statsViewLoaded) {
+      statsViewLoaded = true;
+      refreshStatisticsPanels();
+    } else {
+      scheduleLineChartRender();
+    }
+  }
 }
 
 async function loadTestFileTree(options = {}) {
