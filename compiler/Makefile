@@ -8,6 +8,9 @@ SRC_DIR = src
 BUILD_DIR = build
 BIN_DIR = bin
 TEST_DIR = tests
+RUNTIME_DIR = $(abspath runtime)
+
+CFLAGS += -DRAE_RUNTIME_SOURCE_DIR=\"$(RUNTIME_DIR)\"
 
 SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/arena.c \
