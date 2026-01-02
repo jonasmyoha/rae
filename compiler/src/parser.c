@@ -441,19 +441,36 @@ static BinaryInfo get_binary_info(TokenKind kind) {
 
 static AstExpr* parse_primary(Parser* parser);
 
+static bool callee_allows_value_shorthand(const AstExpr* callee) {
+  if (!callee || callee->kind != AST_EXPR_IDENT) return false;
+  return str_eq_cstr(callee->as.ident, "log") || str_eq_cstr(callee->as.ident, "logS");
+}
+
 static AstExpr* finish_call(Parser* parser, AstExpr* callee, const Token* start_token) {
   AstExpr* expr = new_expr(parser, AST_EXPR_CALL, start_token);
   expr->as.call.callee = callee;
   if (parser_match(parser, TOK_RPAREN)) {
     return expr;
   }
+  bool allow_shorthand = callee_allows_value_shorthand(callee);
+  bool used_shorthand = false;
   AstCallArg* args = NULL;
   do {
-    const Token* name = parser_consume(parser, TOK_IDENT, "expected argument name");
-    parser_consume(parser, TOK_COLON, "expected ':' after argument name");
     AstCallArg* arg = parser_alloc(parser, sizeof(AstCallArg));
-    arg->name = parser_copy_str(parser, name->lexeme);
-    arg->value = parse_expression(parser);
+    if (parser_check(parser, TOK_IDENT) && parser_peek_at(parser, 1)->kind == TOK_COLON) {
+      const Token* name = parser_advance(parser);
+      parser_consume(parser, TOK_COLON, "expected ':' after argument name");
+      arg->name = parser_copy_str(parser, name->lexeme);
+      arg->value = parse_expression(parser);
+    } else if (allow_shorthand && !used_shorthand) {
+      arg->name = str_from_cstr("value");
+      arg->value = parse_expression(parser);
+      used_shorthand = true;
+    } else {
+      parser_error(parser, parser_peek(parser), "expected argument name");
+      arg->name = str_from_cstr("<error>");
+      arg->value = parse_expression(parser);
+    }
     args = append_call_arg(args, arg);
   } while (parser_match(parser, TOK_COMMA));
   parser_consume(parser, TOK_RPAREN, "expected ')' after arguments");
@@ -787,20 +804,23 @@ static AstStmt* parse_match_statement(Parser* parser, const Token* match_token) 
   stmt->as.match_stmt.subject = parse_expression(parser);
   parser_consume(parser, TOK_LBRACE, "expected '{' after match subject");
   AstMatchCase* cases = NULL;
+  bool saw_default = false;
   while (!parser_check(parser, TOK_RBRACE) && !parser_check(parser, TOK_EOF)) {
+    AstMatchCase* match_case = parser_alloc(parser, sizeof(AstMatchCase));
     if (parser_match(parser, TOK_KW_CASE)) {
-      AstMatchCase* match_case = parser_alloc(parser, sizeof(AstMatchCase));
       match_case->pattern = parse_expression(parser);
-      match_case->block = parse_block(parser);
-      cases = append_match_case(cases, match_case);
     } else if (parser_match(parser, TOK_KW_DEFAULT)) {
-      AstMatchCase* match_case = parser_alloc(parser, sizeof(AstMatchCase));
+      if (saw_default) {
+        parser_error(parser, parser_peek(parser), "match already has a default arm");
+      }
+      saw_default = true;
       match_case->pattern = NULL;
-      match_case->block = parse_block(parser);
-      cases = append_match_case(cases, match_case);
     } else {
       parser_error(parser, parser_peek(parser), "expected 'case' or 'default' inside match");
+      match_case->pattern = NULL;
     }
+    match_case->block = parse_block(parser);
+    cases = append_match_case(cases, match_case);
   }
   if (!cases) {
     parser_error(parser, parser_peek(parser), "match must have at least one case");
@@ -817,15 +837,16 @@ static AstExpr* parse_match_expression(Parser* parser, const Token* match_token)
   AstMatchArm* arms = NULL;
   bool saw_default = false;
   while (!parser_check(parser, TOK_RBRACE) && !parser_check(parser, TOK_EOF)) {
-    parser_consume(parser, TOK_KW_CASE, "expected 'case' in match expression");
     bool is_default = false;
     AstExpr* pattern = NULL;
     if (parser_match(parser, TOK_KW_DEFAULT)) {
       is_default = true;
+    } else if (parser_match(parser, TOK_KW_CASE)) {
+      pattern = parse_expression(parser);
     } else if (token_is_ident(parser_peek(parser), "_")) {
       parser_error(parser, parser_peek(parser), "use 'default' instead of '_' in match expressions");
     } else {
-      pattern = parse_expression(parser);
+      parser_error(parser, parser_peek(parser), "expected 'case' or 'default' in match expression");
     }
     if (is_default) {
       if (saw_default) {

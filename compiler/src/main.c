@@ -38,6 +38,7 @@ typedef struct {
 typedef struct {
   const char* entry_path;
   const char* out_path;
+  const char* project_path;
   bool emit_c;
 } BuildOptions;
 
@@ -98,7 +99,11 @@ static bool compile_file_chunk(const char* file_path,
                                Chunk* chunk,
                                uint64_t* out_hash,
                                WatchSources* watch_sources);
-static bool build_c_backend_output(const char* entry_file, const char* out_path);
+static bool build_c_backend_output(const char* entry_file,
+                                   const char* project_root,
+                                   const char* out_path);
+static bool ensure_directory_tree(const char* dir_path);
+static bool ensure_parent_directory(const char* file_path);
 typedef struct {
   WatchSources sources;
   time_t* file_mtimes;
@@ -191,7 +196,11 @@ static bool parse_run_args(int argc, char** argv, RunOptions* opts) {
 static bool parse_build_args(int argc, char** argv, BuildOptions* opts) {
   opts->entry_path = NULL;
   opts->out_path = "build/out.c";
+  opts->project_path = NULL;
   opts->emit_c = false;
+
+  const char* entry_from_flag = NULL;
+  const char* entry_positional = NULL;
 
   int i = 0;
   while (i < argc) {
@@ -210,18 +219,47 @@ static bool parse_build_args(int argc, char** argv, BuildOptions* opts) {
       i += 2;
       continue;
     }
+    if (strcmp(arg, "--project") == 0 || strcmp(arg, "-p") == 0) {
+      if (i + 1 >= argc) {
+        fprintf(stderr, "error: %s expects a directory\n", arg);
+        return false;
+      }
+      opts->project_path = argv[i + 1];
+      i += 2;
+      continue;
+    }
+    if (strcmp(arg, "--entry") == 0 || strcmp(arg, "-e") == 0) {
+      if (i + 1 >= argc) {
+        fprintf(stderr, "error: %s expects a file path\n", arg);
+        return false;
+      }
+      if (entry_from_flag) {
+        fprintf(stderr, "error: --entry specified multiple times ('%s' and '%s')\n",
+                entry_from_flag, argv[i + 1]);
+        return false;
+      }
+      entry_from_flag = argv[i + 1];
+      i += 2;
+      continue;
+    }
     if (arg[0] == '-') {
       fprintf(stderr, "error: unknown build option '%s'\n", arg);
       return false;
     }
-    if (opts->entry_path) {
-      fprintf(stderr, "error: multiple entry files provided ('%s' and '%s')\n", opts->entry_path, arg);
+    if (entry_positional) {
+      fprintf(stderr, "error: multiple entry files provided ('%s' and '%s')\n", entry_positional,
+              arg);
       return false;
     }
-    opts->entry_path = arg;
+    entry_positional = arg;
     i += 1;
   }
 
+  if (entry_from_flag && entry_positional) {
+    fprintf(stderr, "error: specify entry file either positionally or via --entry, not both\n");
+    return false;
+  }
+  opts->entry_path = entry_from_flag ? entry_from_flag : entry_positional;
   if (!opts->entry_path) {
     fprintf(stderr, "error: build command requires an entry file argument\n");
     return false;
@@ -233,6 +271,84 @@ static bool file_exists(const char* path) {
   if (!path) return false;
   struct stat st;
   return stat(path, &st) == 0;
+}
+
+static bool directory_exists(const char* path) {
+  if (!path) return false;
+  struct stat st;
+  if (stat(path, &st) != 0) {
+    return false;
+  }
+  return S_ISDIR(st.st_mode);
+}
+
+static bool ensure_directory_component(const char* path) {
+  if (!path || path[0] == '\0' || strcmp(path, ".") == 0 || strcmp(path, "..") == 0) {
+    return true;
+  }
+  struct stat st;
+  if (stat(path, &st) == 0) {
+    if (S_ISDIR(st.st_mode)) {
+      return true;
+    }
+    fprintf(stderr, "error: '%s' exists but is not a directory\n", path);
+    return false;
+  }
+  if (mkdir(path, 0755) == 0) {
+    return true;
+  }
+  if (errno == EEXIST) {
+    if (stat(path, &st) == 0 && S_ISDIR(st.st_mode)) {
+      return true;
+    }
+  }
+  fprintf(stderr, "error: could not create directory '%s': %s\n", path, strerror(errno));
+  return false;
+}
+
+static bool ensure_directory_tree(const char* dir_path) {
+  if (!dir_path || dir_path[0] == '\0') {
+    return true;
+  }
+  char path_copy[PATH_MAX];
+  size_t len = strlen(dir_path);
+  if (len >= sizeof(path_copy)) {
+    fprintf(stderr, "error: directory path too long\n");
+    return false;
+  }
+  memcpy(path_copy, dir_path, len + 1);
+  for (char* cursor = path_copy + 1; *cursor; ++cursor) {
+    if (*cursor == '/') {
+      *cursor = '\0';
+      if (!ensure_directory_component(path_copy)) {
+        return false;
+      }
+      *cursor = '/';
+    }
+  }
+  return ensure_directory_component(path_copy);
+}
+
+static bool ensure_parent_directory(const char* file_path) {
+  if (!file_path || file_path[0] == '\0') {
+    return false;
+  }
+  const char* slash = strrchr(file_path, '/');
+  if (!slash) {
+    return true;
+  }
+  size_t dir_len = (size_t)(slash - file_path);
+  if (dir_len == 0) {
+    return true;
+  }
+  char dir_path[PATH_MAX];
+  if (dir_len >= sizeof(dir_path)) {
+    fprintf(stderr, "error: output path too long\n");
+    return false;
+  }
+  memcpy(dir_path, file_path, dir_len);
+  dir_path[dir_len] = '\0';
+  return ensure_directory_tree(dir_path);
 }
 
 static bool module_graph_has_module(const ModuleGraph* graph, const char* module_path) {
@@ -546,16 +662,29 @@ static char* derive_module_path(const char* root, const char* file_path) {
 }
 
 
-static bool module_graph_init(ModuleGraph* graph, Arena* arena) {
+static bool module_graph_init(ModuleGraph* graph, Arena* arena, const char* project_root) {
   memset(graph, 0, sizeof(*graph));
   graph->arena = arena;
-  char cwd[PATH_MAX];
-  if (!getcwd(cwd, sizeof(cwd))) {
-    perror("getcwd");
-    return false;
+  char* resolved = NULL;
+  bool root_from_cwd = (project_root == NULL || project_root[0] == '\0');
+  if (!root_from_cwd) {
+    resolved = realpath(project_root, NULL);
+    if (!resolved) {
+      fprintf(stderr, "error: unable to resolve project path '%s'\n", project_root);
+      return false;
+    }
+  } else {
+    char cwd[PATH_MAX];
+    if (!getcwd(cwd, sizeof(cwd))) {
+      perror("getcwd");
+      return false;
+    }
+    resolved = realpath(cwd, NULL);
+    if (!resolved) {
+      resolved = strdup(cwd);
+    }
   }
-  char* resolved = realpath(cwd, NULL);
-  graph->root_path = resolved ? resolved : strdup(cwd);
+  graph->root_path = resolved;
   if (!graph->root_path) {
     fprintf(stderr, "error: failed to allocate project root path\n");
     return false;
@@ -572,7 +701,7 @@ static bool module_graph_init(ModuleGraph* graph, Arena* arena) {
     last_sep = last_sep_win;
   }
 #endif
-  if (last_sep) {
+  if (root_from_cwd && last_sep) {
     const char* last_component = last_sep + 1;
     if (strcmp(last_component, "compiler") == 0 && last_sep != graph->root_path) {
       graph->root_path[last_sep - graph->root_path] = '\0';
@@ -1001,7 +1130,8 @@ static void print_usage(const char* prog) {
   fprintf(stderr, "  parse <file>    Parse Rae source file and dump AST\n");
   fprintf(stderr, "  format <file>   Parse Rae source file and pretty-print it\n");
   fprintf(stderr, "  run <file>      Execute Rae source via the bytecode VM\n");
-  fprintf(stderr, "  build <file>    Build Rae source (use --emit-c)\n");
+  fprintf(stderr, "  build [opts]    Build Rae source (--emit-c required)\n");
+  fprintf(stderr, "                  Options: --entry <file>, --project <dir>, --out <file>\n");
 }
 
 static void dump_tokens(const TokenList* tokens) {
@@ -1023,7 +1153,7 @@ static bool compile_file_chunk(const char* file_path,
     diag_fatal("could not allocate arena");
   }
   ModuleGraph graph;
-  if (!module_graph_init(&graph, arena)) {
+  if (!module_graph_init(&graph, arena, NULL)) {
     arena_destroy(arena);
     return false;
   }
@@ -1059,13 +1189,22 @@ static bool compile_file_chunk(const char* file_path,
   return ok;
 }
 
-static bool build_c_backend_output(const char* entry_file, const char* out_path) {
+static bool build_c_backend_output(const char* entry_file,
+                                   const char* project_root,
+                                   const char* out_path) {
+  if (!out_path || out_path[0] == '\0') {
+    fprintf(stderr, "error: build requires a valid output path\n");
+    return false;
+  }
+  if (!ensure_parent_directory(out_path)) {
+    return false;
+  }
   Arena* arena = arena_create(1024 * 1024);
   if (!arena) {
     diag_fatal("could not allocate arena");
   }
   ModuleGraph graph;
-  if (!module_graph_init(&graph, arena)) {
+  if (!module_graph_init(&graph, arena, project_root)) {
     arena_destroy(arena);
     return false;
   }
@@ -1138,7 +1277,16 @@ static int run_command(const char* cmd, int argc, char** argv) {
       fprintf(stderr, "error: entry file '%s' not found\n", build_opts.entry_path);
       return 1;
     }
-    return build_c_backend_output(build_opts.entry_path, build_opts.out_path) ? 0 : 1;
+    if (build_opts.project_path && !directory_exists(build_opts.project_path)) {
+      fprintf(stderr, "error: project path '%s' not found or not a directory\n",
+              build_opts.project_path);
+      return 1;
+    }
+    return build_c_backend_output(build_opts.entry_path,
+                                  build_opts.project_path,
+                                  build_opts.out_path) ?
+               0 :
+               1;
   } else {
     fprintf(stderr, "error: unknown command '%s'\n", cmd);
     print_usage(argv[-1]);
