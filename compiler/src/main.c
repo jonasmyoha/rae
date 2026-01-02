@@ -12,6 +12,9 @@
 #include <ctype.h>
 #include <limits.h>
 #include <dirent.h>
+#ifndef RAE_RUNTIME_SOURCE_DIR
+#define RAE_RUNTIME_SOURCE_DIR "runtime"
+#endif
 #include "arena.h"
 #include "str.h"
 #include "diag.h"
@@ -104,6 +107,7 @@ static bool build_c_backend_output(const char* entry_file,
                                    const char* out_path);
 static bool ensure_directory_tree(const char* dir_path);
 static bool ensure_parent_directory(const char* file_path);
+static bool copy_runtime_assets(const char* dest_dir);
 typedef struct {
   WatchSources sources;
   time_t* file_mtimes;
@@ -349,6 +353,69 @@ static bool ensure_parent_directory(const char* file_path) {
   memcpy(dir_path, file_path, dir_len);
   dir_path[dir_len] = '\0';
   return ensure_directory_tree(dir_path);
+}
+
+static bool copy_stream(FILE* src, FILE* dest) {
+  char buffer[4096];
+  while (!feof(src)) {
+    size_t read_bytes = fread(buffer, 1, sizeof(buffer), src);
+    if (read_bytes > 0) {
+      if (fwrite(buffer, 1, read_bytes, dest) != read_bytes) {
+        return false;
+      }
+    }
+    if (ferror(src)) {
+      return false;
+    }
+  }
+  return fflush(dest) == 0;
+}
+
+static bool copy_file_to(const char* src_path, const char* dest_path) {
+  FILE* src = fopen(src_path, "rb");
+  if (!src) {
+    fprintf(stderr, "error: could not open runtime source '%s': %s\n", src_path, strerror(errno));
+    return false;
+  }
+  FILE* dest = fopen(dest_path, "wb");
+  if (!dest) {
+    fprintf(stderr, "error: could not open '%s' for writing: %s\n", dest_path, strerror(errno));
+    fclose(src);
+    return false;
+  }
+  bool ok = copy_stream(src, dest);
+  fclose(src);
+  fclose(dest);
+  return ok;
+}
+
+static bool copy_runtime_file(const char* dest_dir, const char* file_name) {
+  char src_path[PATH_MAX];
+  char dest_path[PATH_MAX];
+  if (snprintf(src_path, sizeof(src_path), "%s/%s", RAE_RUNTIME_SOURCE_DIR, file_name) >=
+      (int)sizeof(src_path)) {
+    fprintf(stderr, "error: runtime source path too long\n");
+    return false;
+  }
+  if (snprintf(dest_path, sizeof(dest_path), "%s/%s", dest_dir, file_name) >=
+      (int)sizeof(dest_path)) {
+    fprintf(stderr, "error: runtime destination path too long\n");
+    return false;
+  }
+  return copy_file_to(src_path, dest_path);
+}
+
+static bool copy_runtime_assets(const char* dest_dir) {
+  if (!dest_dir || dest_dir[0] == '\0') {
+    dest_dir = ".";
+  }
+  if (!copy_runtime_file(dest_dir, "rae_runtime.h")) {
+    return false;
+  }
+  if (!copy_runtime_file(dest_dir, "rae_runtime.c")) {
+    return false;
+  }
+  return true;
 }
 
 static bool module_graph_has_module(const ModuleGraph* graph, const char* module_path) {
@@ -1199,6 +1266,25 @@ static bool build_c_backend_output(const char* entry_file,
   if (!ensure_parent_directory(out_path)) {
     return false;
   }
+  char out_dir[PATH_MAX];
+  const char* slash = strrchr(out_path, '/');
+  if (!slash) {
+    strncpy(out_dir, ".", sizeof(out_dir));
+    out_dir[sizeof(out_dir) - 1] = '\0';
+  } else {
+    size_t dir_len = (size_t)(slash - out_path);
+    if (dir_len == 0) {
+      strncpy(out_dir, "/", sizeof(out_dir));
+      out_dir[sizeof(out_dir) - 1] = '\0';
+    } else {
+      if (dir_len >= sizeof(out_dir)) {
+        fprintf(stderr, "error: output directory path too long\n");
+        return false;
+      }
+      memcpy(out_dir, out_path, dir_len);
+      out_dir[dir_len] = '\0';
+    }
+  }
   Arena* arena = arena_create(1024 * 1024);
   if (!arena) {
     diag_fatal("could not allocate arena");
@@ -1216,6 +1302,9 @@ static bool build_c_backend_output(const char* entry_file,
   }
   AstModule merged = merge_module_graph(&graph);
   ok = c_backend_emit(&merged, out_path);
+  if (ok) {
+    ok = copy_runtime_assets(out_dir);
+  }
   module_graph_free(&graph);
   arena_destroy(arena);
   return ok;
