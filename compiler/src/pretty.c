@@ -411,8 +411,12 @@ static void pp_print_match_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
   pp_begin_block(pp);
   AstMatchCase* current = stmt->as.match_stmt.cases;
   while (current) {
-    pp_write(pp, "case ");
-    pp_expr(pp, current->pattern);
+    if (current->pattern) {
+      pp_write(pp, "case ");
+      pp_expr(pp, current->pattern);
+    } else {
+      pp_write(pp, "default");
+    }
     pp_space(pp);
     pp_begin_block(pp);
     pp_print_block_body(pp, current->block);
