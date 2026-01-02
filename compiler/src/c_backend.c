@@ -579,7 +579,7 @@ static bool match_cases_use_string(const AstMatchCase* cases, bool* out_use_stri
   bool saw_string = false;
   bool saw_other = false;
   while (cases) {
-    if (cases->pattern && !is_wildcard_pattern(cases->pattern)) {
+    if (cases->pattern) {
       if (is_string_literal(cases->pattern)) {
         saw_string = true;
       } else {
@@ -600,7 +600,7 @@ static bool match_arms_use_string(const AstMatchArm* arms, bool* out_use_string)
   bool saw_string = false;
   bool saw_other = false;
   while (arms) {
-    if (arms->pattern && !is_wildcard_pattern(arms->pattern)) {
+    if (arms->pattern) {
       if (is_string_literal(arms->pattern)) {
         saw_string = true;
       } else {
@@ -643,9 +643,9 @@ static bool emit_match(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
   int case_index = 0;
 
   while (current) {
-    if (is_wildcard_pattern(current->pattern)) {
+    if (!current->pattern || is_wildcard_pattern(current->pattern)) {
       if (default_case) {
-        fprintf(stderr, "error: multiple '_' default cases in match\n");
+        fprintf(stderr, "error: multiple default cases in match\n");
         return false;
       }
       default_case = current;

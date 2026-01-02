@@ -713,9 +713,9 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
 
       const AstMatchCase* match_case = stmt->as.match_stmt.cases;
       while (match_case) {
-        bool is_default = match_case->pattern &&
-                          match_case->pattern->kind == AST_EXPR_IDENT &&
-                          str_eq_cstr(match_case->pattern->as.ident, "_");
+        bool is_default = match_case->pattern == NULL ||
+                          (match_case->pattern && match_case->pattern->kind == AST_EXPR_IDENT &&
+                           str_eq_cstr(match_case->pattern->as.ident, "_"));
       if (is_default) {
         if (had_default) {
           diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column,

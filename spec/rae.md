@@ -206,7 +206,7 @@ spawn heavyWork(id: 2)
 Rae ships two lightweight logging helpers:
 
 ```
-log(value: Any)   # prints the value followed by a newline (like println)
+log(Any)   # prints the value followed by a newline (like println)
 logS(value: Any)  # stream log without a newline (like printf)
 ```
 

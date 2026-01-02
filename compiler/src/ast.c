@@ -296,8 +296,12 @@ static void dump_match_stmt(const AstStmt* stmt, FILE* out, int indent) {
   AstMatchCase* cases = stmt->as.match_stmt.cases;
   while (cases) {
     print_indent(out, indent + 1);
-    fputs("case ", out);
-    dump_expr(cases->pattern, out);
+    if (cases->pattern) {
+      fputs("case ", out);
+      dump_expr(cases->pattern, out);
+    } else {
+      fputs("default", out);
+    }
     fputc('\n', out);
     dump_block(cases->block, out, indent + 2);
     cases = cases->next;
