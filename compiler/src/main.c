@@ -121,6 +121,7 @@ static bool build_c_backend_output(const char* entry_file,
 static bool ensure_directory_tree(const char* dir_path);
 static bool ensure_parent_directory(const char* file_path);
 static bool copy_runtime_assets(const char* dest_dir);
+static bool write_function_manifest(const AstModule* module, const char* out_c_path);
 typedef struct {
   WatchSources sources;
   time_t* file_mtimes;
@@ -466,6 +467,121 @@ static bool copy_runtime_assets(const char* dest_dir) {
   if (!copy_runtime_file(dest_dir, "rae_runtime.c")) {
     return false;
   }
+  return true;
+}
+
+static char* type_ref_to_cstr(const AstTypeRef* type) {
+  if (!type || !type->parts) {
+    return strdup("Any");
+  }
+  size_t total = 0;
+  size_t segments = 0;
+  const AstIdentifierPart* part = type->parts;
+  while (part) {
+    total += part->text.len;
+    segments += 1;
+    part = part->next;
+  }
+  size_t len = total + (segments > 1 ? segments - 1 : 0);
+  char* result = malloc(len + 1);
+  if (!result) {
+    return NULL;
+  }
+  size_t offset = 0;
+  part = type->parts;
+  while (part) {
+    memcpy(result + offset, part->text.data, part->text.len);
+    offset += part->text.len;
+    if (part->next) {
+      result[offset++] = '.';
+    }
+    part = part->next;
+  }
+  result[offset] = '\0';
+  return result;
+}
+
+static char* derive_manifest_path(const char* out_path) {
+  if (!out_path) return NULL;
+  size_t len = strlen(out_path);
+  const char* dot = strrchr(out_path, '.');
+  size_t base_len = dot ? (size_t)(dot - out_path) : len;
+  const char* suffix = ".manifest.json";
+  size_t suffix_len = strlen(suffix);
+  char* path = malloc(base_len + suffix_len + 1);
+  if (!path) return NULL;
+  memcpy(path, out_path, base_len);
+  memcpy(path + base_len, suffix, suffix_len + 1);
+  return path;
+}
+
+static bool write_function_manifest(const AstModule* module, const char* out_c_path) {
+  if (!module || !out_c_path) {
+    return false;
+  }
+  char* manifest_path = derive_manifest_path(out_c_path);
+  if (!manifest_path) {
+    fprintf(stderr, "error: unable to derive manifest path for '%s'\n", out_c_path);
+    return false;
+  }
+  FILE* out = fopen(manifest_path, "w");
+  if (!out) {
+    fprintf(stderr, "error: unable to open manifest '%s'\n", manifest_path);
+    free(manifest_path);
+    return false;
+  }
+  fprintf(out, "{\n  \"functions\": [\n");
+  const AstDecl* decl = module->decls;
+  int first = 1;
+  while (decl) {
+    if (decl->kind == AST_DECL_FUNC) {
+      const AstFuncDecl* fn = &decl->as.func_decl;
+      if (!first) {
+        fprintf(out, ",\n");
+      }
+      first = 0;
+      char* name = str_to_cstr(fn->name);
+      const char* kind = fn->is_extern ? "extern" : "rae";
+      fprintf(out, "    {\n      \"name\": \"%s\",\n      \"kind\": \"%s\",\n      \"params\": [",
+              name ? name : "",
+              kind);
+      const AstParam* param = fn->params;
+      int first_param = 1;
+      while (param) {
+        if (!first_param) {
+          fprintf(out, ", ");
+        }
+        char* param_name = str_to_cstr(param->name);
+        char* type_str = type_ref_to_cstr(param->type);
+        fprintf(out, "{\"name\": \"%s\", \"type\": \"%s\"}",
+                param_name ? param_name : "",
+                type_str ? type_str : "Any");
+        free(param_name);
+        free(type_str);
+        first_param = 0;
+        param = param->next;
+      }
+      fprintf(out, "],\n      \"returns\": [");
+      const AstReturnItem* ret = fn->returns;
+      int first_ret = 1;
+      while (ret) {
+        if (!first_ret) {
+          fprintf(out, ", ");
+        }
+        char* type_str = type_ref_to_cstr(ret->type);
+        fprintf(out, "\"%s\"", type_str ? type_str : "Any");
+        free(type_str);
+        first_ret = 0;
+        ret = ret->next;
+      }
+      fprintf(out, "]\n    }");
+      free(name);
+    }
+    decl = decl->next;
+  }
+  fprintf(out, "\n  ]\n}\n");
+  fclose(out);
+  free(manifest_path);
   return true;
 }
 
@@ -1359,6 +1475,9 @@ static bool build_c_backend_output(const char* entry_file,
   ok = c_backend_emit(&merged, out_path);
   if (ok) {
     ok = copy_runtime_assets(out_dir);
+  }
+  if (ok) {
+    ok = write_function_manifest(&merged, out_path);
   }
   module_graph_free(&graph);
   arena_destroy(arena);
