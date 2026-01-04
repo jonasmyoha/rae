@@ -391,15 +391,23 @@ static void dump_params(const AstParam* params, FILE* out, int indent) {
 
 static void dump_func_decl(const AstDecl* decl, FILE* out, int indent) {
   print_indent(out, indent);
+  if (decl->as.func_decl.is_extern) {
+    fputs("extern ", out);
+  }
   fputs("func ", out);
   print_str(out, decl->as.func_decl.name);
   dump_properties(decl->as.func_decl.properties, out);
   fputc('\n', out);
   dump_params(decl->as.func_decl.params, out, indent + 1);
   dump_return_items(decl->as.func_decl.returns, out, indent + 1);
-  print_indent(out, indent + 1);
-  fputs("body\n", out);
-  dump_block(decl->as.func_decl.body, out, indent + 2);
+  if (decl->as.func_decl.body) {
+    print_indent(out, indent + 1);
+    fputs("body\n", out);
+    dump_block(decl->as.func_decl.body, out, indent + 2);
+  } else {
+    print_indent(out, indent + 1);
+    fputs("extern body (none)\n", out);
+  }
 }
 
 void ast_dump_module(const AstModule* module, FILE* out) {
