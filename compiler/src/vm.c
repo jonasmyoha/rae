@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "diag.h"
+#include "vm_registry.h"
 
 static Value vm_pop(VM* vm) {
   if (vm->stack_top == vm->stack) {
@@ -59,12 +60,18 @@ void vm_init(VM* vm) {
   vm->chunk = NULL;
   vm_reset_stack(vm);
   vm->call_stack_top = 0;
+  vm->registry = NULL;
 }
 
 void vm_reset_stack(VM* vm) {
   if (!vm) return;
   vm->stack_top = vm->stack;
   vm->call_stack_top = 0;
+}
+
+void vm_set_registry(VM* vm, VmRegistry* registry) {
+  if (!vm) return;
+  vm->registry = registry;
 }
 
 static uint16_t read_short(VM* vm) {
@@ -140,6 +147,43 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
           return VM_RUNTIME_ERROR;
         }
         vm->ip = vm->chunk->code + target;
+        break;
+      }
+      case OP_NATIVE_CALL: {
+        uint16_t const_index = read_short(vm);
+        uint8_t arg_count = *vm->ip++;
+        if (!vm->registry) {
+          diag_error(NULL, 0, 0, "native call attempted without registry");
+          return VM_RUNTIME_ERROR;
+        }
+        if (const_index >= vm->chunk->constants_count) {
+          diag_error(NULL, 0, 0, "native symbol index OOB");
+          return VM_RUNTIME_ERROR;
+        }
+        Value symbol = vm->chunk->constants[const_index];
+        if (symbol.type != VAL_STRING || !symbol.as.string_value.chars) {
+          diag_error(NULL, 0, 0, "native symbol constant must be string");
+          return VM_RUNTIME_ERROR;
+        }
+        if ((size_t)(vm->stack_top - vm->stack) < arg_count) {
+          diag_error(NULL, 0, 0, "not enough arguments on stack for native call");
+          return VM_RUNTIME_ERROR;
+        }
+        const VmNativeEntry* entry = vm_registry_find_native(vm->registry, symbol.as.string_value.chars);
+        if (!entry || !entry->callback) {
+          diag_error(NULL, 0, 0, "native function not registered");
+          return VM_RUNTIME_ERROR;
+        }
+        const Value* args = vm->stack_top - arg_count;
+        VmNativeResult result = {.has_value = false};
+        if (!entry->callback(vm, &result, args, arg_count, entry->user_data)) {
+          diag_error(NULL, 0, 0, "native function reported failure");
+          return VM_RUNTIME_ERROR;
+        }
+        vm->stack_top -= arg_count;
+        if (result.has_value) {
+          vm_push(vm, result.value);
+        }
         break;
       }
       case OP_GET_LOCAL: {

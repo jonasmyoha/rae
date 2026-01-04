@@ -1492,7 +1492,11 @@ static int run_vm_file(const char* file_path) {
 
   VM vm;
   vm_init(&vm);
+  VmRegistry registry;
+  vm_registry_init(&registry);
+  vm_set_registry(&vm, &registry);
   VMResult result = vm_run(&vm, &chunk);
+  vm_registry_free(&registry);
   chunk_free(&chunk);
   return result == VM_RUNTIME_OK ? 0 : 1;
 }
@@ -1782,6 +1786,7 @@ static int run_vm_watch(const char* file_path) {
         if (module) {
           VM vm;
           vm_init(&vm);
+          vm_set_registry(&vm, &registry);
           reload_count += 1;
           printf("[watch] running latest version... (reload #%d)\n", reload_count);
           fflush(stdout);
