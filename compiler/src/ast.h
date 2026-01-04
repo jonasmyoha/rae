@@ -222,6 +222,7 @@ typedef struct {
   AstParam* params;
   AstProperty* properties;
   AstReturnItem* returns;
+  bool is_extern;
   AstBlock* body;
 } AstFuncDecl;
 
