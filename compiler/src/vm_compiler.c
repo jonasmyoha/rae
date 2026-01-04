@@ -15,6 +15,7 @@ typedef struct {
   uint16_t* patches;
   size_t patch_count;
   size_t patch_capacity;
+  bool is_extern;
 } FunctionEntry;
 
 typedef struct {
@@ -41,7 +42,7 @@ typedef struct {
 
 static void free_function_table(FunctionTable* table);
 static FunctionEntry* function_table_find(FunctionTable* table, Str name);
-static bool function_table_add(FunctionTable* table, Str name, uint16_t param_count);
+static bool function_table_add(FunctionTable* table, Str name, uint16_t param_count, bool is_extern);
 static bool function_entry_add_patch(FunctionEntry* entry, uint16_t patch_offset);
 static bool patch_function_calls(FunctionTable* table, Chunk* chunk, const char* file_path);
 static bool collect_function_entries(const AstModule* module, FunctionTable* table);
@@ -57,6 +58,8 @@ static bool compiler_ensure_local_capacity(BytecodeCompiler* compiler, uint16_t 
 static uint16_t emit_jump(BytecodeCompiler* compiler, OpCode op, int line);
 static void patch_jump(BytecodeCompiler* compiler, uint16_t offset);
 static bool compile_block(BytecodeCompiler* compiler, const AstBlock* block);
+static bool emit_native_call(BytecodeCompiler* compiler, Str name, uint8_t arg_count, int line,
+                             int column);
 static uint16_t emit_jump(BytecodeCompiler* compiler, OpCode op, int line);
 static void patch_jump(BytecodeCompiler* compiler, uint16_t offset);
 static bool compile_block(BytecodeCompiler* compiler, const AstBlock* block);
@@ -119,10 +122,11 @@ static FunctionEntry* function_table_find(FunctionTable* table, Str name) {
   return NULL;
 }
 
-static bool function_table_add(FunctionTable* table, Str name, uint16_t param_count) {
+static bool function_table_add(FunctionTable* table, Str name, uint16_t param_count, bool is_extern) {
   FunctionEntry* existing = function_table_find(table, name);
   if (existing) {
     existing->param_count = param_count;
+    existing->is_extern = is_extern;
     return true;
   }
   if (table->count + 1 > table->capacity) {
@@ -142,6 +146,7 @@ static bool function_table_add(FunctionTable* table, Str name, uint16_t param_co
   entry->patches = NULL;
   entry->patch_count = 0;
   entry->patch_capacity = 0;
+  entry->is_extern = is_extern;
   return true;
 }
 
@@ -163,6 +168,9 @@ static bool function_entry_add_patch(FunctionEntry* entry, uint16_t patch_offset
 static bool patch_function_calls(FunctionTable* table, Chunk* chunk, const char* file_path) {
   for (size_t i = 0; i < table->count; ++i) {
     FunctionEntry* entry = &table->entries[i];
+    if (entry->is_extern) {
+      continue;
+    }
     if (entry->offset == INVALID_OFFSET) {
       char buffer[128];
       snprintf(buffer, sizeof(buffer), "function '%.*s' missing implementation",
@@ -194,7 +202,7 @@ static bool collect_function_entries(const AstModule* module, FunctionTable* tab
   while (decl) {
     if (decl->kind == AST_DECL_FUNC) {
       uint16_t param_count = count_params(decl->as.func_decl.params);
-      if (!function_table_add(table, decl->as.func_decl.name, param_count)) {
+      if (!function_table_add(table, decl->as.func_decl.name, param_count, decl->as.func_decl.is_extern)) {
         return false;
       }
     }
@@ -258,6 +266,9 @@ static bool compiler_ensure_local_capacity(BytecodeCompiler* compiler, uint16_t 
 static bool emit_function_call(BytecodeCompiler* compiler, FunctionEntry* entry, int line,
                                int column, uint8_t arg_count) {
   if (!entry) return false;
+  if (entry->is_extern) {
+    return emit_native_call(compiler, entry->name, arg_count, line, column);
+  }
   emit_op(compiler, OP_CALL, line);
   if (compiler->chunk->code_count > UINT16_MAX) {
     diag_error(compiler->file_path, line, column, "VM bytecode exceeds 64KB limit");
@@ -272,6 +283,23 @@ static bool emit_function_call(BytecodeCompiler* compiler, FunctionEntry* entry,
     compiler->had_error = true;
     return false;
   }
+  return true;
+}
+
+static bool emit_native_call(BytecodeCompiler* compiler, Str name, uint8_t arg_count, int line,
+                             int column) {
+  emit_op(compiler, OP_NATIVE_CALL, line);
+  char* symbol = str_to_cstr(name);
+  if (!symbol) {
+    diag_error(compiler->file_path, line, column, "could not allocate native symbol name");
+    compiler->had_error = true;
+    return false;
+  }
+  Value sym_value = value_string_copy(symbol, strlen(symbol));
+  free(symbol);
+  uint16_t index = chunk_add_constant(compiler->chunk, sym_value);
+  emit_short(compiler, index, line);
+  emit_byte(compiler, arg_count, line);
   return true;
 }
 
@@ -792,6 +820,9 @@ static bool compile_function(BytecodeCompiler* compiler, const AstDecl* decl) {
                "duplicate function definition in VM compiler");
     compiler->had_error = true;
     return false;
+  }
+  if (func->is_extern) {
+    return true;
   }
   if (!func->body) {
     diag_error(compiler->file_path, (int)decl->line, (int)decl->column,

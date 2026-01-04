@@ -12,8 +12,13 @@ typedef struct {
 
 struct VM;
 
+typedef struct {
+  bool has_value;
+  Value value;
+} VmNativeResult;
+
 typedef bool (*VmNativeCallback)(struct VM* vm,
-                                 Value* out_value,
+                                 VmNativeResult* out_result,
                                  const Value* args,
                                  size_t arg_count,
                                  void* user_data);
@@ -24,7 +29,7 @@ typedef struct {
   void* user_data;
 } VmNativeEntry;
 
-typedef struct {
+typedef struct VmRegistry {
   VmModule* modules;
   size_t count;
   size_t capacity;
