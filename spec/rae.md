@@ -25,7 +25,7 @@ own view mod opt
 if else match case
 true false none
 and or not is
-pub priv
+pub priv extern
 ```
 
 ### 1.4 Literals
@@ -117,6 +117,20 @@ func divide(a: Int, b: Int): pub ret result: Int, error: opt Error {
 ### 4.3 Implicit `this`
 
 * In any function, **`this` refers to the first parameter**
+
+### 4.4 External Functions
+
+```rae
+extern func tinyexpr_eval(expr: String): ret Int
+```
+
+* `extern` declarations have **no body**; they describe functions implemented outside the current Rae module (typically in C).
+* The signature follows the regular `func` rules (parameters, optional properties, and `ret` clause).
+* Only a single return value is supported. At present, the C backend maps:
+  * `Int` → `int64_t`
+  * `String` → `const char*` (returning `String` is only allowed on `extern` functions)
+* Calls to `extern` functions look like normal calls; it is the builder’s responsibility to link the generated C with the external definition.
+* The compiler does **not** validate that an implementation exists—if you forget to link one, the native linker will report an undefined symbol.
 
 ---
 

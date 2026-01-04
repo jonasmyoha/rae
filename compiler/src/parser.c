@@ -947,7 +947,7 @@ static AstDecl* parse_type_declaration(Parser* parser) {
   return decl;
 }
 
-static AstDecl* parse_func_declaration(Parser* parser) {
+static AstDecl* parse_func_declaration(Parser* parser, bool is_extern) {
   const Token* func_token = parser_previous(parser);
   const Token* name = parser_consume(parser, TOK_IDENT, "expected function name");
   AstDecl* decl = parser_alloc(parser, sizeof(AstDecl));
@@ -955,6 +955,7 @@ static AstDecl* parse_func_declaration(Parser* parser) {
   decl->line = func_token->line;
   decl->column = func_token->column;
   decl->as.func_decl.name = parser_copy_str(parser, name->lexeme);
+  decl->as.func_decl.is_extern = is_extern;
   decl->as.func_decl.params = parse_param_list(parser);
   if (parser_match(parser, TOK_COLON)) {
     decl->as.func_decl.properties = parse_func_properties(parser);
@@ -962,16 +963,30 @@ static AstDecl* parse_func_declaration(Parser* parser) {
       decl->as.func_decl.returns = parse_return_clause(parser);
     }
   }
+  if (is_extern) {
+    if (parser_check(parser, TOK_LBRACE)) {
+      parser_error(parser, parser_peek(parser), "extern functions cannot have a body");
+    }
+    decl->as.func_decl.body = NULL;
+    return decl;
+  }
   decl->as.func_decl.body = parse_block(parser);
   return decl;
 }
 
 static AstDecl* parse_declaration(Parser* parser) {
+  bool saw_extern = parser_match(parser, TOK_KW_EXTERN);
   if (parser_match(parser, TOK_KW_TYPE)) {
+    if (saw_extern) {
+      parser_error(parser, parser_previous(parser), "extern is only valid before func");
+    }
     return parse_type_declaration(parser);
   }
   if (parser_match(parser, TOK_KW_FUNC)) {
-    return parse_func_declaration(parser);
+    return parse_func_declaration(parser, saw_extern);
+  }
+  if (saw_extern) {
+    parser_error(parser, parser_previous(parser), "extern must be followed by func");
   }
   parser_error(parser, parser_peek(parser), "expected 'type' or 'func'");
   return NULL;
