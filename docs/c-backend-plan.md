@@ -1,9 +1,9 @@
 # Rae Compiler C Backend Plan (T013)
 
 ## Objectives
-- Deliver a concrete roadmap for the first native code backend that lowers Rae programs into portable C.
-- Ensure the new backend reuses the existing front-end (lexer/parser/AST) so interpreter + compiler stay in sync.
-- Provide a CLI surface area (`rae build --emit-c`) that eventually emits runnable C artifacts, even if the first milestone is a stub.
+- Deliver a concrete roadmap for the first Compiled code backend that lowers Rae programs into portable C.
+- Ensure the new backend reuses the existing front-end (lexer/parser/AST) so Live + Compiled stay in sync.
+- Provide a CLI surface area (`rae build --target compiled --emit-c`) that eventually emits runnable C artifacts, even if the first milestone is a stub.
 
 ## Current Baseline
 1. `bin/rae` supports `lex|parse|format|run` only; there is no `build` command or notion of targets.
