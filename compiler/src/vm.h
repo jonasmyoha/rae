@@ -2,6 +2,7 @@
 #define VM_H
 
 #include "vm_chunk.h"
+#include "vm_registry.h"
 
 typedef enum {
   OP_CONSTANT = 0x01,
@@ -26,7 +27,8 @@ typedef enum {
   OP_GE = 0x18,
   OP_EQ = 0x19,
   OP_NE = 0x1A,
-  OP_NOT = 0x1B
+  OP_NOT = 0x1B,
+  OP_NATIVE_CALL = 0x1C
 } OpCode;
 
 typedef enum {
@@ -41,17 +43,19 @@ typedef struct {
   Value* locals_base;
 } CallFrame;
 
-typedef struct {
+typedef struct VM {
   Chunk* chunk;
   uint8_t* ip;
   Value stack[256];
   Value* stack_top;
   CallFrame call_stack[256];
   size_t call_stack_top;
+  VmRegistry* registry;
 } VM;
 
 void vm_init(VM* vm);
 VMResult vm_run(VM* vm, Chunk* chunk);
 void vm_reset_stack(VM* vm);
+void vm_set_registry(VM* vm, VmRegistry* registry);
 
 #endif /* VM_H */
