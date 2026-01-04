@@ -12,8 +12,10 @@ These instructions define **how Codex should work**, communicate progress, and i
 Rae is a **language designed for both humans and AI agents**.
 
 It is intended to work in **two complementary modes**:
-- **Compiled**: for performance, distribution, and production use
-- **Interpreted / evaluated**: for rapid iteration, tooling, analysis, and AI-driven workflows
+- **Live (bytecode VM)**: for rapid iteration, tooling, analysis, hot-reload, and AI-driven workflows
+- **Compiled (C backend)**: for performance, distribution, and production use
+
+Use these names consistently. “Live/Compiled/Hybrid” are the official short labels for CLI flags, docs, UI, and marketing copy. When extra clarity is needed, append the descriptive form (“Live (bytecode VM)”, “Compiled (C backend)”, “Hybrid Dev/Hybrid Release”). Avoid introducing new labels like “native” or “interpreted” unless a sentence specifically contrasts implementation details.
 
 The language prioritizes:
 - Clear, readable syntax that is easy to reason about
@@ -70,6 +72,11 @@ If the task turns out to be larger than expected, split it and explain.
 - Avoid premature optimization
 - Do not refactor unrelated code “while here”
 - Keep commits logically scoped
+
+### Git operations
+
+- Do **not** run `git add`, `git commit`, or `git push` from Codex. Ask the user to run them in their terminal when work is ready.
+- If any command fails with “Not privileged to set domain environment”, stop immediately and hand off to the user.
 
 Compiler code should favor:
 - Explicit data structures
@@ -173,4 +180,3 @@ SAY: Lexer refactor complete and all tests pass.
 ---
 
 End of instructions.
-
