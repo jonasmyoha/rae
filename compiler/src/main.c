@@ -43,7 +43,20 @@ typedef struct {
   const char* out_path;
   const char* project_path;
   bool emit_c;
+  int target;
+  int profile;
 } BuildOptions;
+
+typedef enum {
+  BUILD_TARGET_NATIVE = 0,
+  BUILD_TARGET_VM,
+  BUILD_TARGET_HYBRID
+} BuildTarget;
+
+typedef enum {
+  BUILD_PROFILE_RELEASE = 0,
+  BUILD_PROFILE_DEV
+} BuildProfile;
 
 typedef struct ModuleNode {
   char* module_path;
@@ -202,6 +215,8 @@ static bool parse_build_args(int argc, char** argv, BuildOptions* opts) {
   opts->out_path = "build/out.c";
   opts->project_path = NULL;
   opts->emit_c = false;
+  opts->target = BUILD_TARGET_NATIVE;
+  opts->profile = BUILD_PROFILE_RELEASE;
 
   const char* entry_from_flag = NULL;
   const char* entry_positional = NULL;
@@ -212,6 +227,42 @@ static bool parse_build_args(int argc, char** argv, BuildOptions* opts) {
     if (strcmp(arg, "--emit-c") == 0) {
       opts->emit_c = true;
       i += 1;
+      continue;
+    }
+    if (strcmp(arg, "--target") == 0) {
+      if (i + 1 >= argc) {
+        fprintf(stderr, "error: --target expects one of vm|native|hybrid\n");
+        return false;
+      }
+      const char* value = argv[i + 1];
+      if (strcmp(value, "native") == 0) {
+        opts->target = BUILD_TARGET_NATIVE;
+      } else if (strcmp(value, "vm") == 0) {
+        opts->target = BUILD_TARGET_VM;
+      } else if (strcmp(value, "hybrid") == 0) {
+        opts->target = BUILD_TARGET_HYBRID;
+      } else {
+        fprintf(stderr, "error: unknown target '%s' (expected vm|native|hybrid)\n", value);
+        return false;
+      }
+      i += 2;
+      continue;
+    }
+    if (strcmp(arg, "--profile") == 0) {
+      if (i + 1 >= argc) {
+        fprintf(stderr, "error: --profile expects dev or release\n");
+        return false;
+      }
+      const char* value = argv[i + 1];
+      if (strcmp(value, "dev") == 0) {
+        opts->profile = BUILD_PROFILE_DEV;
+      } else if (strcmp(value, "release") == 0) {
+        opts->profile = BUILD_PROFILE_RELEASE;
+      } else {
+        fprintf(stderr, "error: unknown profile '%s' (expected dev|release)\n", value);
+        return false;
+      }
+      i += 2;
       continue;
     }
     if (strcmp(arg, "--out") == 0 || strcmp(arg, "--output") == 0) {
@@ -1197,8 +1248,12 @@ static void print_usage(const char* prog) {
   fprintf(stderr, "  parse <file>    Parse Rae source file and dump AST\n");
   fprintf(stderr, "  format <file>   Parse Rae source file and pretty-print it\n");
   fprintf(stderr, "  run <file>      Execute Rae source via the bytecode VM\n");
-  fprintf(stderr, "  build [opts]    Build Rae source (--emit-c required)\n");
-  fprintf(stderr, "                  Options: --entry <file>, --project <dir>, --out <file>\n");
+  fprintf(stderr,
+          "  build [opts]    Build Rae source (--emit-c required for now)\n");
+  fprintf(stderr,
+          "                  Options: --entry <file>, --project <dir>, --out <file>\n");
+  fprintf(stderr,
+          "                           --target <vm|native|hybrid>, --profile <dev|release>\n");
 }
 
 static void dump_tokens(const TokenList* tokens) {
@@ -1356,6 +1411,11 @@ static int run_command(const char* cmd, int argc, char** argv) {
     BuildOptions build_opts;
     if (!parse_build_args(argc, argv, &build_opts)) {
       print_usage(argv[-1]);
+      return 1;
+    }
+    if (build_opts.target != BUILD_TARGET_NATIVE) {
+      fprintf(stderr, "error: --target %s not supported yet (native only)\n",
+              build_opts.target == BUILD_TARGET_VM ? "vm" : "hybrid");
       return 1;
     }
     if (!build_opts.emit_c) {
