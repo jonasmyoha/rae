@@ -40,7 +40,7 @@
    - `tinyexpr_test.rae` – asserts `eval("2+3*4") == 14`.
 
 ## Build Flow
-1. `bin/rae build --emit-c examples/tinyexpr-demo/main.rae --out build/tinyexpr-demo.c`
+1. `bin/rae build --target compiled --emit-c examples/tinyexpr-demo/main.rae --out build/tinyexpr-demo.c`
    - Alternatively, run `make -C examples/tinyexpr-demo demo` to emit C, copy the runtime, and invoke `cc`.
 2. Compile+link with the wrapper + library:
    ```bash
@@ -54,7 +54,7 @@
 
 ## Test Strategy
 - Add a Rae unit-test file (`examples/tinyexpr-demo/tests.rae`) that exercises a handful of expressions.
-- Mirror the same inputs in a native C test (optional) to ensure wrapper parity.
+- Mirror the same inputs in a compiled C test (optional) to ensure wrapper parity.
 - Add a regression test under `compiler/tests/cases/406_build_extern.*` that asserts the generated C includes `extern` prototypes and string parameters.
 - Hook into CI later by compiling the example with `make tinyexpr-demo`.
 
