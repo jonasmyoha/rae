@@ -125,6 +125,7 @@ static bool ensure_directory_tree(const char* dir_path);
 static bool ensure_parent_directory(const char* file_path);
 static bool copy_runtime_assets(const char* dest_dir);
 static bool write_function_manifest(const AstModule* module, const char* out_c_path);
+static bool write_c_backend_stub(const AstModule* module, const char* out_path);
 static char* derive_entry_stem(const char* entry_file);
 typedef struct {
   WatchSources sources;
@@ -1623,12 +1624,85 @@ static bool build_c_backend_output(const char* entry_file,
   ok = c_backend_emit(&merged, out_path);
   if (ok) {
     ok = copy_runtime_assets(out_dir);
+  } else {
+    fprintf(stderr,
+            "note: Rae C backend is not finished, writing stub C output to '%s'.\n"
+            "note: See docs/c-backend-plan.md for the roadmap.\n",
+            out_path);
+    ok = write_c_backend_stub(&merged, out_path);
   }
   if (ok) {
     ok = write_function_manifest(&merged, out_path);
   }
   module_graph_free(&graph);
   arena_destroy(arena);
+  return ok;
+}
+
+static bool write_c_backend_stub(const AstModule* module, const char* out_path) {
+  if (!module || !out_path) {
+    return false;
+  }
+  FILE* out = fopen(out_path, "w");
+  if (!out) {
+    fprintf(stderr, "error: unable to open '%s' for stub C output\n", out_path);
+    return false;
+  }
+  bool ok = true;
+  if (fprintf(out,
+              "/* Rae C backend stub output */\n"
+              "/* See docs/c-backend-plan.md for the roadmap. */\n"
+              "#include <stdio.h>\n\n") < 0) {
+    ok = false;
+  }
+  size_t func_count = 0;
+  for (const AstDecl* decl = module->decls; decl; decl = decl->next) {
+    if (decl->kind == AST_DECL_FUNC) {
+      func_count += 1;
+    }
+  }
+  if (ok) {
+    if (func_count == 0) {
+      if (fprintf(out, "/* No functions discovered in entry module. */\n") < 0) {
+        ok = false;
+      }
+    } else {
+      if (fprintf(out, "/* Rae functions discovered by the frontend: */\n") < 0) {
+        ok = false;
+      }
+      for (const AstDecl* decl = module->decls; decl && ok; decl = decl->next) {
+        if (decl->kind != AST_DECL_FUNC) {
+          continue;
+        }
+        char* name = str_to_cstr(decl->as.func_decl.name);
+        if (!name) {
+          ok = false;
+          break;
+        }
+        if (fprintf(out, "/*   - func %s */\n", name) < 0) {
+          ok = false;
+        }
+        free(name);
+      }
+    }
+  }
+  if (ok) {
+    if (fprintf(out,
+                "\nint main(void) {\n"
+                "  fprintf(stderr, \"Rae C backend stub: see docs/c-backend-plan.md.\\\\n\");\n"
+                "  fprintf(stderr, \"Parsed %zu Rae function(s); codegen not ready yet.\\\\n\");\n"
+                "  return 1;\n"
+                "}\n",
+                func_count) < 0) {
+      ok = false;
+    }
+  }
+  if (fclose(out) != 0) {
+    ok = false;
+  }
+  if (!ok) {
+    remove(out_path);
+  }
   return ok;
 }
 
