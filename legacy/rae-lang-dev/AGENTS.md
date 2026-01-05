@@ -73,11 +73,6 @@ If the task turns out to be larger than expected, split it and explain.
 - Do not refactor unrelated code “while here”
 - Keep commits logically scoped
 
-### Git operations
-
-- Do **not** run `git add`, `git commit`, or `git push` from Codex. Ask the user to run them in their terminal when work is ready.
-- If any command fails with “Not privileged to set domain environment”, stop immediately and hand off to the user.
-
 Compiler code should favor:
 - Explicit data structures
 - Predictable control flow
