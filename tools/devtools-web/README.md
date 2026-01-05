@@ -85,6 +85,9 @@ bun install
 # Development server with auto-restart + client reload
 bun run dev
 
+# Stop the dev server (kills the listener on the configured port)
+make stop
+
 # Production build (if/when a bundle step exists)
 bun run start
 ```

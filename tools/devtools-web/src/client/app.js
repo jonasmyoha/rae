@@ -85,6 +85,7 @@ let raeSyntax = null;
 let testDirectoryMap = new Map();
 const errorEntries = [];
 const TEST_TREE_REFRESH_MS = 60000;
+const MAX_EXAMPLE_OUTPUT_LINES = 500;
 
 const HEARTBEAT_STALE_MS = 60000;
 let testTreeRefreshTimer = null;
@@ -1076,6 +1077,9 @@ function appendExampleOutput(text, stream = "stdout") {
   lineEl.className = `terminal-line ${stream}`;
   lineEl.textContent = text;
   exampleOutput.appendChild(lineEl);
+  while (exampleOutput.childElementCount > MAX_EXAMPLE_OUTPUT_LINES) {
+    exampleOutput.removeChild(exampleOutput.firstElementChild);
+  }
   exampleOutput.scrollTop = exampleOutput.scrollHeight;
 }
 
