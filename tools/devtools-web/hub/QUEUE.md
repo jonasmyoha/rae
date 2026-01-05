@@ -23,4 +23,5 @@
 - Summary:
   - Multi-target (Live/Compiled/Hybrid) config + UI landed; example runner now captures hybrid artifacts with hashes.
   - Added `examples/hybrid_hot_reload` plus `devtools.json` metadata to drive the hybrid-only example card.
-  - Remaining items for next session: hook up “simulate downloaded bundle” helper + finalize dedicated compiled/hybrid test subsets.
+  - Simulate-download helper buttons now call the script with version folders (`version1/2/3`) to stage `.vmchunk` files under `.simulated_downloads/<profile>/<version>/`, compiled/hybrid dashboard test targets run the slim regression subsets via `TARGET=compiled|hybrid`, and the Examples panel lists the staged bundles + hashes under “Staged downloads.”
+  - Remaining items for next session: tie staged downloads into a future “simulate host reload” indicator and continue filling any hybrid tooling gaps discovered during user testing.

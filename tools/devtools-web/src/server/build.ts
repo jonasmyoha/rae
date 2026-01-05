@@ -51,6 +51,12 @@ export class BuildRunner {
     const runId = randomUUID();
     const startedAt = Date.now();
     const cwd = path.resolve(process.cwd(), this.config.compilerPath);
+    this.broadcastStatus(`[debug] Build target: ${target.id}`);
+    this.broadcastStatus(`[debug] Build command (${command}): ${cmd}`);
+    this.broadcastStatus(`[debug] Build cwd: ${cwd}`);
+    if (cmd.includes("TARGET=")) {
+      this.broadcastStatus("[debug] WARNING: build command includes TARGET= and will override the compiler binary name.");
+    }
 
     const child = spawn(cmd, {
       cwd,

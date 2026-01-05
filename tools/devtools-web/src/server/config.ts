@@ -22,6 +22,7 @@ export type RaeDevtoolsConfig = {
   examplesPath?: string;
   targets: TargetConfig[];
   defaultTarget: string;
+  configSource?: string;
 };
 
 type LegacyCommandConfig = {
@@ -39,10 +40,10 @@ const DEFAULT_TARGETS: TargetConfig[] = [
     id: "live",
     label: "Live (bytecode VM)",
     description: "Hot-reload friendly bytecode VM build",
-    testCommand: "cd compiler && make test TARGET=live",
-    buildCommand: "cd compiler && make TARGET=live",
+    testCommand: "cd compiler && TEST_TARGET=live make test",
+    buildCommand: "cd compiler && make",
     cleanCommand: "cd compiler && make clean",
-    rebuildCommand: "cd compiler && make clean && make TARGET=live",
+    rebuildCommand: "cd compiler && make clean && make",
     exampleRunCommand: "./compiler/bin/rae run {{ENTRY}}",
     exampleWatchCommand: "./compiler/bin/rae run --watch {{ENTRY}}",
     exampleBuildCommand: "./compiler/bin/rae build --target live --out {{OUTDIR}} {{ENTRY}}"
@@ -51,10 +52,10 @@ const DEFAULT_TARGETS: TargetConfig[] = [
     id: "compiled",
     label: "Compiled (C backend)",
     description: "Generates C code for native builds",
-    testCommand: "cd compiler && make test TARGET=compiled",
-    buildCommand: "cd compiler && make TARGET=compiled",
+    testCommand: "cd compiler && TEST_TARGET=compiled make test",
+    buildCommand: "cd compiler && make",
     cleanCommand: "cd compiler && make clean",
-    rebuildCommand: "cd compiler && make clean && make TARGET=compiled",
+    rebuildCommand: "cd compiler && make clean && make",
     exampleRunCommand: "./compiler/bin/rae build --target compiled --out {{OUTDIR}} {{ENTRY}}",
     exampleBuildCommand: "./compiler/bin/rae build --target compiled --out {{OUTDIR}} {{ENTRY}}"
   },
@@ -62,10 +63,10 @@ const DEFAULT_TARGETS: TargetConfig[] = [
     id: "hybrid",
     label: "Hybrid Dev",
     description: "Compiled host plus Live bundle packaging",
-    testCommand: "cd compiler && make test TARGET=hybrid",
-    buildCommand: "cd compiler && make TARGET=hybrid",
+    testCommand: "cd compiler && TEST_TARGET=hybrid make test",
+    buildCommand: "cd compiler && make",
     cleanCommand: "cd compiler && make clean",
-    rebuildCommand: "cd compiler && make clean && make TARGET=hybrid",
+    rebuildCommand: "cd compiler && make clean && make",
     exampleRunCommand: "./compiler/bin/rae build --target hybrid --out {{OUTDIR}} {{ENTRY}}",
     exampleBuildCommand: "./compiler/bin/rae build --target hybrid --out {{OUTDIR}} {{ENTRY}}"
   }
@@ -90,19 +91,36 @@ export async function loadConfig(customPath?: string): Promise<RaeDevtoolsConfig
   try {
     const contents = await readFile(filePath, "utf8");
     const parsed = JSON.parse(contents) as PartialConfig;
-    return normalizeConfig(parsed);
+    const config = normalizeConfig(parsed);
+    config.configSource = filePath;
+    logConfigSummary(config);
+    return config;
   } catch (error) {
     const nodeError = error as NodeJS.ErrnoException;
     if (nodeError.code === "ENOENT") {
       console.warn(
         `[config] Missing config.json at ${filePath}. Falling back to defaults (copy config.example.json to configure).`
       );
-      return DEFAULT_CONFIG;
+      const config = { ...DEFAULT_CONFIG, configSource: "defaults" };
+      logConfigSummary(config);
+      return config;
     }
 
     console.error(`[config] Failed to parse config at ${filePath}`);
     throw error;
   }
+}
+
+function logConfigSummary(config: RaeDevtoolsConfig) {
+  const source = config.configSource ?? "unknown";
+  console.log(`[config] Loaded config (${source})`);
+  console.log(`[config] CWD: ${process.cwd()}`);
+  console.log(`[config] Compiler path: ${config.compilerPath}`);
+  config.targets.forEach((target) => {
+    console.log(
+      `[config] Target ${target.id}: test="${target.testCommand ?? "-"}" build="${target.buildCommand ?? "-"}"`
+    );
+  });
 }
 
 function normalizeConfig(parsed: PartialConfig = {}): RaeDevtoolsConfig {

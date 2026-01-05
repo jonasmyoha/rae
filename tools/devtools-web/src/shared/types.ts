@@ -33,6 +33,13 @@ export type ExampleFileDescriptor = {
   name: string;
 };
 
+export type ExampleActionDescriptor = {
+  id: string;
+  label: string;
+  description?: string;
+  targetId?: string;
+};
+
 export type ExampleDescriptor = {
   id: string;
   name: string;
@@ -41,9 +48,10 @@ export type ExampleDescriptor = {
   description?: string;
   supportedTargets?: string[];
   defaultTargetId?: string;
+  actions?: ExampleActionDescriptor[];
 };
 
-export type ExampleRunMode = "run" | "watch" | "build";
+export type ExampleRunMode = "run" | "watch" | "build" | "action";
 
 export type TestRunMode = "all" | "failed";
 export type BuildCommandType = "build" | "clean" | "rebuild";
@@ -130,20 +138,26 @@ export type BuildRunErrorMessage = {
 export type ExampleRunStartedMessage = {
   type: "example-run-started";
   runId: string;
+  exampleId?: string;
   entry: string;
   mode: ExampleRunMode;
   targetId: string;
   targetLabel: string;
+  actionId?: string;
+  actionLabel?: string;
   timestamp: string;
 };
 
 export type ExampleRunOutputMessage = {
   type: "example-run-output";
   runId: string;
+  exampleId?: string;
   entry: string;
   mode: ExampleRunMode;
   targetId: string;
   targetLabel: string;
+  actionId?: string;
+  actionLabel?: string;
   stream: "stdout" | "stderr";
   line: string;
   timestamp: string;
@@ -152,6 +166,7 @@ export type ExampleRunOutputMessage = {
 export type ExampleRunCompletedMessage = {
   type: "example-run-completed";
   runId: string;
+  exampleId?: string;
   entry: string;
   mode: ExampleRunMode;
   exitCode: number | null;
@@ -159,16 +174,21 @@ export type ExampleRunCompletedMessage = {
   durationMs: number;
   targetId: string;
   targetLabel: string;
+  actionId?: string;
+  actionLabel?: string;
   timestamp: string;
 };
 
 export type ExampleRunErrorMessage = {
   type: "example-run-error";
   runId: string;
+  exampleId?: string;
   entry: string;
   mode: ExampleRunMode;
   targetId: string;
   targetLabel: string;
+  actionId?: string;
+  actionLabel?: string;
   message: string;
   timestamp: string;
 };
@@ -176,10 +196,13 @@ export type ExampleRunErrorMessage = {
 export type ExampleRunArtifactsMessage = {
   type: "example-run-artifacts";
   runId: string;
+  exampleId?: string;
   entry: string;
   mode: ExampleRunMode;
   targetId: string;
   targetLabel: string;
+  actionId?: string;
+  actionLabel?: string;
   files: Array<{ path: string; size: number; hash: string }>;
   timestamp: string;
 };
@@ -243,10 +266,12 @@ export type ClientRunBuildMessage = {
 
 export type ClientRunExampleMessage = {
   type: "run-example";
+  exampleId?: string;
   entry: string;
   targetId?: string;
   mode?: ExampleRunMode;
   watch?: boolean;
+  actionId?: string;
 };
 
 export type ClientEvent =
