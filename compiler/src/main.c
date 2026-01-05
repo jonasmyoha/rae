@@ -48,8 +48,8 @@ typedef struct {
 } BuildOptions;
 
 typedef enum {
-  BUILD_TARGET_NATIVE = 0,
-  BUILD_TARGET_VM,
+  BUILD_TARGET_COMPILED = 0,
+  BUILD_TARGET_LIVE,
   BUILD_TARGET_HYBRID
 } BuildTarget;
 
@@ -118,10 +118,14 @@ static bool compile_file_chunk(const char* file_path,
 static bool build_c_backend_output(const char* entry_file,
                                    const char* project_root,
                                    const char* out_path);
+static bool build_vm_output(const char* entry_file,
+                            const char* project_root,
+                            const char* out_path);
 static bool ensure_directory_tree(const char* dir_path);
 static bool ensure_parent_directory(const char* file_path);
 static bool copy_runtime_assets(const char* dest_dir);
 static bool write_function_manifest(const AstModule* module, const char* out_c_path);
+static char* derive_entry_stem(const char* entry_file);
 typedef struct {
   WatchSources sources;
   time_t* file_mtimes;
@@ -213,10 +217,10 @@ static bool parse_run_args(int argc, char** argv, RunOptions* opts) {
 
 static bool parse_build_args(int argc, char** argv, BuildOptions* opts) {
   opts->entry_path = NULL;
-  opts->out_path = "build/out.c";
+  opts->out_path = NULL;
   opts->project_path = NULL;
   opts->emit_c = false;
-  opts->target = BUILD_TARGET_NATIVE;
+  opts->target = BUILD_TARGET_COMPILED;
   opts->profile = BUILD_PROFILE_RELEASE;
 
   const char* entry_from_flag = NULL;
@@ -232,18 +236,20 @@ static bool parse_build_args(int argc, char** argv, BuildOptions* opts) {
     }
     if (strcmp(arg, "--target") == 0) {
       if (i + 1 >= argc) {
-        fprintf(stderr, "error: --target expects one of vm|native|hybrid\n");
+        fprintf(stderr, "error: --target expects one of live|compiled|hybrid\n");
         return false;
       }
       const char* value = argv[i + 1];
-      if (strcmp(value, "native") == 0) {
-        opts->target = BUILD_TARGET_NATIVE;
-      } else if (strcmp(value, "vm") == 0) {
-        opts->target = BUILD_TARGET_VM;
+      if (strcmp(value, "live") == 0) {
+        opts->target = BUILD_TARGET_LIVE;
+      } else if (strcmp(value, "compiled") == 0) {
+        opts->target = BUILD_TARGET_COMPILED;
       } else if (strcmp(value, "hybrid") == 0) {
         opts->target = BUILD_TARGET_HYBRID;
       } else {
-        fprintf(stderr, "error: unknown target '%s' (expected vm|native|hybrid)\n", value);
+        fprintf(stderr,
+                "error: unknown target '%s' (expected live|compiled|hybrid)\n",
+                value);
         return false;
       }
       i += 2;
@@ -319,6 +325,20 @@ static bool parse_build_args(int argc, char** argv, BuildOptions* opts) {
   if (!opts->entry_path) {
     fprintf(stderr, "error: build command requires an entry file argument\n");
     return false;
+  }
+  if (!opts->out_path) {
+    switch (opts->target) {
+      case BUILD_TARGET_LIVE:
+        opts->out_path = "build/out.vmchunk";
+        break;
+      case BUILD_TARGET_HYBRID:
+        opts->out_path = "build/out.hybrid";
+        break;
+      case BUILD_TARGET_COMPILED:
+      default:
+        opts->out_path = "build/out.c";
+        break;
+    }
   }
   return true;
 }
@@ -407,6 +427,34 @@ static bool ensure_parent_directory(const char* file_path) {
   return ensure_directory_tree(dir_path);
 }
 
+static char* derive_entry_stem(const char* entry_file) {
+  if (!entry_file) {
+    return NULL;
+  }
+  const char* slash = strrchr(entry_file, '/');
+#ifdef _WIN32
+  const char* slash_win = strrchr(entry_file, '\\');
+  if (!slash || (slash_win && slash_win > slash)) {
+    slash = slash_win;
+  }
+#endif
+  const char* name = slash ? slash + 1 : entry_file;
+  size_t len = strlen(name);
+  if (len > 4 && strcmp(name + len - 4, ".rae") == 0) {
+    len -= 4;
+  }
+  if (len == 0) {
+    len = strlen(name);
+  }
+  char* stem = malloc(len + 1);
+  if (!stem) {
+    return NULL;
+  }
+  memcpy(stem, name, len);
+  stem[len] = '\0';
+  return stem;
+}
+
 static bool copy_stream(FILE* src, FILE* dest) {
   char buffer[4096];
   while (!feof(src)) {
@@ -468,6 +516,106 @@ static bool copy_runtime_assets(const char* dest_dir) {
     return false;
   }
   return true;
+}
+
+static bool write_bytes(FILE* out, const void* data, size_t size) {
+  if (!out || !data || size == 0) {
+    return size == 0;
+  }
+  return fwrite(data, 1, size, out) == size;
+}
+
+static bool write_u32(FILE* out, uint32_t value) {
+  uint8_t bytes[4];
+  bytes[0] = (uint8_t)(value & 0xFF);
+  bytes[1] = (uint8_t)((value >> 8) & 0xFF);
+  bytes[2] = (uint8_t)((value >> 16) & 0xFF);
+  bytes[3] = (uint8_t)((value >> 24) & 0xFF);
+  return write_bytes(out, bytes, sizeof(bytes));
+}
+
+static bool write_u8(FILE* out, uint8_t value) {
+  return write_bytes(out, &value, sizeof(value));
+}
+
+static bool write_i64(FILE* out, int64_t value) {
+  uint8_t bytes[8];
+  for (size_t i = 0; i < sizeof(bytes); ++i) {
+    bytes[i] = (uint8_t)((value >> (i * 8)) & 0xFF);
+  }
+  return write_bytes(out, bytes, sizeof(bytes));
+}
+
+static bool write_vm_chunk_file(const Chunk* chunk, const char* out_path) {
+  if (!chunk || !out_path) {
+    return false;
+  }
+  if (chunk->code_count > UINT32_MAX || chunk->constants_count > UINT32_MAX) {
+    fprintf(stderr, "error: VM chunk too large to serialize\n");
+    return false;
+  }
+  FILE* out = fopen(out_path, "wb");
+  if (!out) {
+    fprintf(stderr, "error: could not open '%s' for writing: %s\n", out_path, strerror(errno));
+    return false;
+  }
+  bool ok = true;
+  const uint8_t magic[4] = {'R', 'V', 'M', '1'};
+  ok = ok && write_bytes(out, magic, sizeof(magic));
+  ok = ok && write_u32(out, 1);  // format version
+  uint32_t constant_count = (uint32_t)chunk->constants_count;
+  ok = ok && write_u32(out, constant_count);
+  for (size_t i = 0; ok && i < chunk->constants_count; ++i) {
+    const Value* value = &chunk->constants[i];
+    ok = ok && write_u8(out, (uint8_t)value->type);
+    switch (value->type) {
+      case VAL_INT:
+        ok = ok && write_i64(out, value->as.int_value);
+        break;
+      case VAL_BOOL:
+        ok = ok && write_u8(out, value->as.bool_value ? 1 : 0);
+        break;
+      case VAL_STRING: {
+        size_t len = value->as.string_value.length;
+        if (len > UINT32_MAX) {
+          fprintf(stderr, "error: string constant too long for VM chunk\n");
+          ok = false;
+          break;
+        }
+        const char* data = value->as.string_value.chars ? value->as.string_value.chars : "";
+        ok = ok && write_u32(out, (uint32_t)len);
+        if (len > 0) {
+          ok = ok && write_bytes(out, data, len);
+        }
+        break;
+      }
+      default:
+        fprintf(stderr, "error: unknown VM constant type\n");
+        ok = false;
+        break;
+    }
+  }
+  uint32_t code_size = (uint32_t)chunk->code_count;
+  ok = ok && write_u32(out, code_size);
+  if (code_size > 0) {
+    ok = ok && write_bytes(out, chunk->code, chunk->code_count);
+  }
+  uint32_t line_count = chunk->lines ? (uint32_t)chunk->code_count : 0;
+  ok = ok && write_u32(out, line_count);
+  if (chunk->lines) {
+    for (size_t i = 0; ok && i < chunk->code_count; ++i) {
+      int line = chunk->lines[i];
+      uint32_t line_value = line < 0 ? 0u : (uint32_t)line;
+      ok = ok && write_u32(out, line_value);
+    }
+  }
+  if (fclose(out) != 0) {
+    ok = false;
+  }
+  if (!ok) {
+    fprintf(stderr, "error: failed to write VM bytecode to '%s'\n", out_path);
+  }
+  return ok;
 }
 
 static char* type_ref_to_cstr(const AstTypeRef* type) {
@@ -1369,7 +1517,7 @@ static void print_usage(const char* prog) {
   fprintf(stderr,
           "                  Options: --entry <file>, --project <dir>, --out <file>\n");
   fprintf(stderr,
-          "                           --target <vm|native|hybrid>, --profile <dev|release>\n");
+          "                           --target <live|compiled|hybrid>, --profile <dev|release>\n");
 }
 
 static void dump_tokens(const TokenList* tokens) {
@@ -1484,6 +1632,131 @@ static bool build_c_backend_output(const char* entry_file,
   return ok;
 }
 
+static bool build_vm_output(const char* entry_file,
+                            const char* project_root,
+                            const char* out_path) {
+  if (!out_path || out_path[0] == '\0') {
+    fprintf(stderr, "error: build requires a valid output path\n");
+    return false;
+  }
+  if (!ensure_parent_directory(out_path)) {
+    return false;
+  }
+  Arena* arena = arena_create(1024 * 1024);
+  if (!arena) {
+    diag_fatal("could not allocate arena");
+  }
+  ModuleGraph graph;
+  if (!module_graph_init(&graph, arena, project_root)) {
+    arena_destroy(arena);
+    return false;
+  }
+  bool ok = module_graph_build(&graph, entry_file, NULL);
+  if (!ok) {
+    module_graph_free(&graph);
+    arena_destroy(arena);
+    return false;
+  }
+  AstModule merged = merge_module_graph(&graph);
+  Chunk chunk;
+  chunk_init(&chunk);
+  ok = vm_compile_module(&merged, &chunk, entry_file);
+  if (ok) {
+    ok = write_vm_chunk_file(&chunk, out_path);
+  }
+  if (ok) {
+    ok = write_function_manifest(&merged, out_path);
+  }
+  chunk_free(&chunk);
+  module_graph_free(&graph);
+  arena_destroy(arena);
+  return ok;
+}
+
+static bool build_hybrid_output(const char* entry_file,
+                                const char* project_root,
+                                const char* out_path) {
+  if (!out_path || out_path[0] == '\0') {
+    fprintf(stderr, "error: build requires a valid output path\n");
+    return false;
+  }
+  if (!ensure_directory_tree(out_path)) {
+    return false;
+  }
+  char vm_dir[PATH_MAX];
+  char compiled_dir[PATH_MAX];
+  if (snprintf(vm_dir, sizeof(vm_dir), "%s/vm", out_path) >= (int)sizeof(vm_dir)) {
+    fprintf(stderr, "error: hybrid vm directory path too long\n");
+    return false;
+  }
+  if (snprintf(compiled_dir, sizeof(compiled_dir), "%s/compiled", out_path) >=
+      (int)sizeof(compiled_dir)) {
+    fprintf(stderr, "error: hybrid compiled directory path too long\n");
+    return false;
+  }
+  if (!ensure_directory_tree(vm_dir) || !ensure_directory_tree(compiled_dir)) {
+    return false;
+  }
+  char* entry_stem = derive_entry_stem(entry_file);
+  if (!entry_stem) {
+    fprintf(stderr, "error: unable to derive entry stem for hybrid build\n");
+    return false;
+  }
+  char chunk_path[PATH_MAX];
+  char c_path[PATH_MAX];
+  if (snprintf(chunk_path, sizeof(chunk_path), "%s/%s.vmchunk", vm_dir, entry_stem) >=
+      (int)sizeof(chunk_path)) {
+    fprintf(stderr, "error: hybrid VM chunk path too long\n");
+    free(entry_stem);
+    return false;
+  }
+  if (snprintf(c_path, sizeof(c_path), "%s/%s.c", compiled_dir, entry_stem) >=
+      (int)sizeof(c_path)) {
+    fprintf(stderr, "error: hybrid C output path too long\n");
+    free(entry_stem);
+    return false;
+  }
+  free(entry_stem);
+
+  Arena* arena = arena_create(1024 * 1024);
+  if (!arena) {
+    diag_fatal("could not allocate arena");
+  }
+  ModuleGraph graph;
+  if (!module_graph_init(&graph, arena, project_root)) {
+    arena_destroy(arena);
+    return false;
+  }
+  bool ok = module_graph_build(&graph, entry_file, NULL);
+  if (!ok) {
+    module_graph_free(&graph);
+    arena_destroy(arena);
+    return false;
+  }
+  AstModule merged = merge_module_graph(&graph);
+
+  Chunk chunk;
+  chunk_init(&chunk);
+  ok = vm_compile_module(&merged, &chunk, entry_file);
+  if (ok) {
+    ok = write_vm_chunk_file(&chunk, chunk_path);
+  }
+  if (ok) {
+    ok = write_function_manifest(&merged, chunk_path);
+  }
+  if (ok) {
+    ok = c_backend_emit(&merged, c_path);
+  }
+  if (ok) {
+    ok = copy_runtime_assets(compiled_dir);
+  }
+
+  chunk_free(&chunk);
+  module_graph_free(&graph);
+  arena_destroy(arena);
+  return ok;
+}
+
 static int run_vm_file(const char* file_path) {
   Chunk chunk;
   if (!compile_file_chunk(file_path, &chunk, NULL, NULL)) {
@@ -1536,15 +1809,6 @@ static int run_command(const char* cmd, int argc, char** argv) {
       print_usage(argv[-1]);
       return 1;
     }
-    if (build_opts.target != BUILD_TARGET_NATIVE) {
-      fprintf(stderr, "error: --target %s not supported yet (native only)\n",
-              build_opts.target == BUILD_TARGET_VM ? "vm" : "hybrid");
-      return 1;
-    }
-    if (!build_opts.emit_c) {
-      fprintf(stderr, "error: build currently requires --emit-c\n");
-      return 1;
-    }
     if (!file_exists(build_opts.entry_path)) {
       fprintf(stderr, "error: entry file '%s' not found\n", build_opts.entry_path);
       return 1;
@@ -1554,11 +1818,33 @@ static int run_command(const char* cmd, int argc, char** argv) {
               build_opts.project_path);
       return 1;
     }
-    return build_c_backend_output(build_opts.entry_path,
-                                  build_opts.project_path,
-                                  build_opts.out_path) ?
-               0 :
-               1;
+    switch (build_opts.target) {
+      case BUILD_TARGET_LIVE:
+        return build_vm_output(build_opts.entry_path,
+                               build_opts.project_path,
+                               build_opts.out_path) ?
+                   0 :
+                   1;
+      case BUILD_TARGET_COMPILED:
+        if (!build_opts.emit_c) {
+          fprintf(stderr, "error: --emit-c is required for compiled builds\n");
+          return 1;
+        }
+        return build_c_backend_output(build_opts.entry_path,
+                                      build_opts.project_path,
+                                      build_opts.out_path) ?
+                   0 :
+                   1;
+      case BUILD_TARGET_HYBRID:
+        return build_hybrid_output(build_opts.entry_path,
+                                   build_opts.project_path,
+                                   build_opts.out_path) ?
+                   0 :
+                   1;
+      default:
+        fprintf(stderr, "error: unsupported build target\n");
+        return 1;
+    }
   } else {
     fprintf(stderr, "error: unknown command '%s'\n", cmd);
     print_usage(argv[-1]);
