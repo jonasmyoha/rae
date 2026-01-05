@@ -40,7 +40,9 @@ bin/rae lex <file>     # tokenize Rae source
 bin/rae parse <file>   # dump AST structure
 bin/rae format <file>  # pretty-print canonical Rae (stdout by default)
 bin/rae run <file>     # execute via the interpreter/VM (hot reload ready)
-bin/rae build <file>   # upcoming C backend (use --emit-c stub for now)
+bin/rae build --target hybrid <file>   # emit hybrid bundles (Live chunk + C runtime)
+bin/rae build --target live <file>     # emit Live (bytecode VM) packages (.vmchunk + manifest)
+bin/rae build --target compiled --emit-c <file>  # transpile to experimental C backend
 ```
 
 Use `bin/rae run --watch <file>` to keep the VM running and recompile whenever the file

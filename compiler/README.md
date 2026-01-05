@@ -21,6 +21,8 @@ bin/rae lex <file>     # tokenize
 bin/rae parse <file>   # parse + dump AST
 bin/rae format <file>  # pretty-print canonical Rae (stdout by default)
 bin/rae run <file>     # execute Rae source via the bytecode VM (hot reload path)
+bin/rae build --target hybrid --out out.hybrid <file>  # emit bundled Live+Compiled assets (.raepkg-style dir)
+bin/rae build --target live --out out.vmchunk <file>   # emit Live (bytecode VM) artifact + function manifest
 bin/rae build --emit-c --out out.c <file>  # transpile tiny Rae programs to C
 ```
 
@@ -43,6 +45,24 @@ accepts string literals, but it is handy for tiny demos:
 
 ```bash
 bin/rae build --emit-c --out build/demo.c examples/c_backend_demo.rae
+```
+
+`rae build --target live` walks the same module graph but emits a portable `.vmchunk` file alongside
+`*.manifest.json`, giving tooling and hosts a consumable artifact without going through the C
+transpiler:
+
+```bash
+bin/rae build --target live --out build/demo.vmchunk examples/hello.rae
+```
+
+`rae build --target hybrid` packages both outputs (Live bytecode + Compiled C/runtime) under a single
+directory (named with `.hybrid` by convention) so devtools can drop-in load VM code while the native
+side embeds the transpiled files without rebuilding on demand:
+
+```bash
+bin/rae build --target hybrid --out build/demo.hybrid examples/hello.rae
+ls build/demo.hybrid
+# vm/bytecode.vmchunk, vm/bytecode.manifest.json, compiled/<entry>.c, compiled/rae_runtime.{c,h}
 ```
 
 Formatting options:
