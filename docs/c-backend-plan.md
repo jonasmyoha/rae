@@ -23,6 +23,13 @@
 - Interpreter + compiler share this loader; interpreter still merges modules into one AST while the compiler emits per-module units.
 - Auto-import logic (single-file scripts) lives in the graph so both execution modes infer the same implicit imports.
 
+#### Front-End Parity Implementation
+1. `module_graph_build()` becomes the single choke point for both `rae run` and `rae build`. Each call hashes file contents so hot reload + multi-target builds share cache keys.
+2. The interpreter immediately merges the graph (`merge_module_graph`) while the compiled path keeps both the merged tree (for manifests) and the raw module list for per-file emission.
+3. The ModuleGraph stores the resolved entry module path, so diagnostics in compiled mode can still reference logical names even when emitting multiple `.c` files.
+4. Watch lists (`watch_sources_collect`) already fuel `rae run --watch`; the same API feeds `rae build --emit-c --watch` later without teaching two components how to traverse the filesystem.
+5. Any new semantic analysis pass must live above ModuleGraph so both runtimes run exactly the same validation steps before codegen.
+
 ### 2. Intermediate Representation
 - Stage 1: operate directly on AST nodes (expression statements only). Emit inline C for literals, string constants, and `log`/`logS`.
 - Stage 2: add a normalized IR (SSA-lite) to support control flow, locals, and ownership checks before codegen.
@@ -44,10 +51,16 @@
   4. Generate a driver `main.c` that calls `rae_mod_main()` inside `int main()`.
   5. Emit a manifest JSON alongside the artifacts so future toolchains (devtools web) can pick them up without re-parsing the CLI output.
 
+### 3a. Stub Output While Codegen Matures
+- Phase 0 still writes a `.c` file so downstream scripts can inspect something tangible even though the backend is unfinished.
+- The stub lists every parsed Rae function, emits a `main` that prints a roadmap pointer, and returns non-zero so CI remembers it is not production ready.
+- The CLI still writes the manifest JSON based on the merged AST, which lets devtools confirm the frontend path is wired correctly without executing the emitted C.
+- Copying runtime headers is skipped for the stub to avoid confusing users into thinking full codegen happened; the minute real emission succeeds, runtime assets and manifests mirror the final layout.
+
 ### 4. Milestones
 | Milestone | Description | Deliverable |
 |-----------|-------------|-------------|
-| M1 | CLI plumbing + scaffolding | `rae build --emit-c <file>` prints “Not implemented” but parses options and validates input, touching ModuleGraph to guarantee the frontend path. |
+| M1 | CLI plumbing + scaffolding | `rae build --emit-c <file>` validates args via ModuleGraph, then writes the stub `.c` output + manifest so downstream tooling can smoke-test the flow. |
 | M2 | Single-module emitter | Produce `build/out.c` with literals, `log`/`logS`, and `func main`. Includes runtime header. |
 | M3 | Multi-module support | Leverage ModuleGraph to emit multiple C files + driver. |
 | M4 | Runtime polish | Flesh out `rae_runtime.[ch]` (string helpers, memory API, platform shims). |
@@ -74,12 +87,14 @@ BuildOptions {
 - Require `--emit-c` for now to avoid ambiguous behavior.
 - Default `out_path` to `build/out.c`.
 - Validate that `entry_path` (positional arg) exists before continuing.
+- When the actual emitter is not ready, drop a stub file that references `docs/c-backend-plan.md` so humans + automation get a deterministic artifact instead of a missing file error.
 
 ## Shared Runtime Considerations
 - Logging: wrap `fprintf(stdout, ...)` + `fflush` to match VM behavior.
 - Strings: maintain a small struct with pointer + length so future Unicode work has a home.
 - Memory: expose `rae_alloc/rae_free` hooks so embedders can override allocation.
 - Hot reload: keep runtime stateless; devtools can rebuild/relink without holding global state.
+- Stub mode skips copying the runtime to keep its intent obvious, but the manifest file is still emitted from the merged AST so tooling can verify which functions were parsed.
 
 ## Acceptance Criteria for T013
 1. This plan checked into `docs/c-backend-plan.md`.
