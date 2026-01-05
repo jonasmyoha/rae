@@ -58,6 +58,41 @@ typedef enum {
   BUILD_PROFILE_DEV
 } BuildProfile;
 
+typedef struct {
+  int64_t next;
+} TickCounter;
+
+static bool native_next_tick(struct VM* vm,
+                             VmNativeResult* out_result,
+                             const Value* args,
+                             size_t arg_count,
+                             void* user_data) {
+  (void)vm;
+  (void)args;
+  if (!out_result || !user_data) {
+    diag_error(NULL, 0, 0, "nextTick native state missing");
+    return false;
+  }
+  if (arg_count != 0) {
+    diag_error(NULL, 0, 0, "nextTick expects no arguments");
+    return false;
+  }
+  TickCounter* counter = (TickCounter*)user_data;
+  counter->next += 1;
+  out_result->has_value = true;
+  out_result->value = value_int(counter->next);
+  return true;
+}
+
+static bool register_default_natives(VmRegistry* registry, TickCounter* tick_counter) {
+  if (!registry) return false;
+  bool ok = true;
+  if (tick_counter) {
+    ok = vm_registry_register_native(registry, "nextTick", native_next_tick, tick_counter) && ok;
+  }
+  return ok;
+}
+
 typedef struct ModuleNode {
   char* module_path;
   char* file_path;
@@ -1841,6 +1876,13 @@ static int run_vm_file(const char* file_path) {
   vm_init(&vm);
   VmRegistry registry;
   vm_registry_init(&registry);
+  TickCounter tick_counter = {.next = 0};
+  if (!register_default_natives(&registry, &tick_counter)) {
+    fprintf(stderr, "error: failed to register VM native functions\n");
+    vm_registry_free(&registry);
+    chunk_free(&chunk);
+    return 1;
+  }
   vm_set_registry(&vm, &registry);
   VMResult result = vm_run(&vm, &chunk);
   vm_registry_free(&registry);
@@ -2114,6 +2156,12 @@ static int run_vm_watch(const char* file_path) {
 
   VmRegistry registry;
   vm_registry_init(&registry);
+  TickCounter tick_counter = {.next = 0};
+  if (!register_default_natives(&registry, &tick_counter)) {
+    fprintf(stderr, "error: failed to register VM native functions\n");
+    vm_registry_free(&registry);
+    return 1;
+  }
   int exit_code = 0;
   int reload_count = 0;
   bool has_hash = false;
@@ -2150,6 +2198,7 @@ static int run_vm_watch(const char* file_path) {
           reload_count += 1;
           printf("[watch] running latest version... (reload #%d)\n", reload_count);
           fflush(stdout);
+          tick_counter.next = 0;
           VMResult result = vm_run(&vm, &module->chunk);
           if (result != VM_RUNTIME_OK) {
             exit_code = 1;
