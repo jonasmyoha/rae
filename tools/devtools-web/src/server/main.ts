@@ -2,12 +2,19 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { Buffer } from "node:buffer";
 import { getExamplesRoot, getSyntaxSummaryPath, getTestsRoot, loadConfig } from "./config";
+import type { RaeDevtoolsConfig } from "./config";
 import type { ClientEvent, ExampleRunMode, ServerEvent } from "../shared/types";
 import { TestRunner } from "./tests";
 import { BuildRunner } from "./build";
 import { StatsStore } from "./stats";
 import { readTestTree, readTestFile } from "./testFiles";
-import { listExamples, readExampleFile, writeExampleFile } from "./examples";
+import {
+  listExamples,
+  listSimulatedDownloads,
+  readExampleFile,
+  resolveExampleAction,
+  writeExampleFile
+} from "./examples";
 import { ExampleRunner } from "./exampleRunner";
 
 type SocketData = {
@@ -22,6 +29,7 @@ type CompilerMetricEntry = {
 };
 
 const CONFIG = await loadConfig();
+const CONFIG_DEBUG_LINES = buildConfigDebugLines(CONFIG);
 const STATIC_ROOT = path.join(process.cwd(), "src", "client");
 const CHANNEL = "rae-devtools-events";
 const HEARTBEAT_INTERVAL_MS = 30000;
@@ -55,6 +63,17 @@ const server = Bun.serve<SocketData>({
       }
 
       return new Response("WebSocket upgrade failed", { status: 500 });
+    }
+
+    if (url.pathname === "/api/examples/downloads" && req.method === "GET") {
+      const exampleId = url.searchParams.get("example");
+      if (!exampleId) {
+        return new Response(JSON.stringify({ error: "Missing example id" }), { status: 400 });
+      }
+      const downloads = await listSimulatedDownloads(examplesRoot, exampleId);
+      return new Response(JSON.stringify({ downloads }), {
+        headers: { "Content-Type": "application/json" }
+      });
     }
 
     if (url.pathname === "/rae_syntax.json" && req.method === "GET") {
@@ -160,9 +179,34 @@ const server = Bun.serve<SocketData>({
       if (!entry) {
         return new Response(JSON.stringify({ error: "Missing entry path" }), { status: 400 });
       }
+      const exampleId = typeof payload.exampleId === "string" ? payload.exampleId : undefined;
+      const actionId = typeof payload.actionId === "string" ? payload.actionId : undefined;
+      let action: ReturnType<typeof resolveExampleAction> | null = null;
+      if (actionId) {
+        if (!exampleId) {
+          return new Response(JSON.stringify({ error: "Missing example id for action" }), {
+            status: 400
+          });
+        }
+        action = resolveExampleAction(exampleId, actionId);
+        if (!action) {
+          return new Response(JSON.stringify({ error: "Unknown example action" }), {
+            status: 400
+          });
+        }
+      }
       const mode = resolveExampleMode(payload);
-      const targetId = typeof payload.targetId === "string" ? payload.targetId : undefined;
-      exampleRunner.run(entry, { mode, targetId, watch: Boolean(payload.watch) });
+      const rawTargetId = typeof payload.targetId === "string" ? payload.targetId : undefined;
+      const targetId = rawTargetId ?? action?.targetId ?? undefined;
+      exampleRunner.run(entry, {
+        mode,
+        targetId,
+        watch: Boolean(payload.watch),
+        exampleId,
+        action: action
+          ? { id: action.id!, label: action.label ?? action.id!, command: action.command! }
+          : undefined
+      });
       return new Response(JSON.stringify({ ok: true }), {
         headers: { "Content-Type": "application/json" }
       });
@@ -201,6 +245,9 @@ const server = Bun.serve<SocketData>({
       ws.subscribe(CHANNEL);
       ws.send(JSON.stringify(createServerInfoMessage()));
       ws.send(JSON.stringify(createStatusMessage("Connected to Rae DevTools server.")));
+      CONFIG_DEBUG_LINES.forEach((line) => {
+        ws.send(JSON.stringify(createStatusMessage(`[debug] ${line}`)));
+      });
     },
     message(ws, message) {
       const text = typeof message === "string" ? message : Buffer.from(message).toString("utf8");
@@ -241,7 +288,30 @@ function handleClientEvent(event: ClientEvent) {
 
   if (event.type === "run-example") {
     const mode = resolveExampleMode(event);
-    exampleRunner.run(event.entry, { mode, targetId: event.targetId, watch: event.watch });
+    const actionId = event.actionId;
+    const exampleId = event.exampleId;
+    let actionMeta: ReturnType<typeof resolveExampleAction> | null = null;
+    if (actionId) {
+      if (!exampleId) {
+        broadcastStatus("Example actions require an example id.");
+        return;
+      }
+      actionMeta = resolveExampleAction(exampleId, actionId);
+      if (!actionMeta) {
+        broadcastStatus(`Unknown example action "${actionId}".`);
+        return;
+      }
+    }
+    const targetId = event.targetId ?? actionMeta?.targetId;
+    exampleRunner.run(event.entry, {
+      mode,
+      targetId,
+      watch: event.watch,
+      exampleId,
+      action: actionMeta
+        ? { id: actionMeta.id!, label: actionMeta.label ?? actionMeta.id!, command: actionMeta.command! }
+        : undefined
+    });
   }
 }
 
@@ -385,8 +455,27 @@ function describeTargets() {
 }
 
 function resolveExampleMode(payload: { mode?: string; watch?: boolean } | null): ExampleRunMode {
-  if (payload?.mode === "watch" || payload?.mode === "build" || payload?.mode === "run") {
+  if (
+    payload?.mode === "watch" ||
+    payload?.mode === "build" ||
+    payload?.mode === "run" ||
+    payload?.mode === "action"
+  ) {
     return payload.mode;
   }
   return payload?.watch ? "watch" : "run";
+}
+
+function buildConfigDebugLines(config: RaeDevtoolsConfig): string[] {
+  const lines = [];
+  lines.push(`Config source: ${config.configSource ?? "unknown"}`);
+  lines.push(`Config cwd: ${process.cwd()}`);
+  const compilerPath = path.resolve(process.cwd(), config.compilerPath);
+  lines.push(`Compiler path: ${compilerPath}`);
+  config.targets.forEach((target) => {
+    lines.push(
+      `Target ${target.id}: test="${target.testCommand ?? "-"}" build="${target.buildCommand ?? "-"}"`
+    );
+  });
+  return lines;
 }

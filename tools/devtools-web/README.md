@@ -47,10 +47,10 @@ Copy `config.example.json` to `config.json` at the repo root (or set equivalent 
     {
       "id": "live",
       "label": "Live (bytecode VM)",
-      "testCommand": "cd compiler && make test TARGET=live",
-      "buildCommand": "cd compiler && make TARGET=live",
+      "testCommand": "cd compiler && TEST_TARGET=live make test",
+      "buildCommand": "cd compiler && make",
       "cleanCommand": "cd compiler && make clean",
-      "rebuildCommand": "cd compiler && make clean && make TARGET=live",
+      "rebuildCommand": "cd compiler && make clean && make",
       "exampleRunCommand": "./compiler/bin/rae run {{ENTRY}}",
       "exampleWatchCommand": "./compiler/bin/rae run --watch {{ENTRY}}",
       "exampleBuildCommand": "./compiler/bin/rae build --target live --out {{OUTDIR}} {{ENTRY}}"
@@ -58,20 +58,20 @@ Copy `config.example.json` to `config.json` at the repo root (or set equivalent 
     {
       "id": "compiled",
       "label": "Compiled (C backend)",
-      "testCommand": "cd compiler && make test TARGET=compiled",
-      "buildCommand": "cd compiler && make TARGET=compiled",
+      "testCommand": "cd compiler && TEST_TARGET=compiled make test",
+      "buildCommand": "cd compiler && make",
       "cleanCommand": "cd compiler && make clean",
-      "rebuildCommand": "cd compiler && make clean && make TARGET=compiled",
+      "rebuildCommand": "cd compiler && make clean && make",
       "exampleRunCommand": "./compiler/bin/rae build --target compiled --out {{OUTDIR}} {{ENTRY}}",
       "exampleBuildCommand": "./compiler/bin/rae build --target compiled --out {{OUTDIR}} {{ENTRY}}"
     },
     {
       "id": "hybrid",
       "label": "Hybrid Dev",
-      "testCommand": "cd compiler && make test TARGET=hybrid",
-      "buildCommand": "cd compiler && make TARGET=hybrid",
+      "testCommand": "cd compiler && TEST_TARGET=hybrid make test",
+      "buildCommand": "cd compiler && make",
       "cleanCommand": "cd compiler && make clean",
-      "rebuildCommand": "cd compiler && make clean && make TARGET=hybrid",
+      "rebuildCommand": "cd compiler && make clean && make",
       "exampleRunCommand": "./compiler/bin/rae build --target hybrid --out {{OUTDIR}} {{ENTRY}}",
       "exampleBuildCommand": "./compiler/bin/rae build --target hybrid --out {{OUTDIR}} {{ENTRY}}"
     }
@@ -98,6 +98,7 @@ bun run start
 - Live stdout/stderr output appears in the terminal panel; the run status chip flips to **Passed**/**Failed** when complete.
 - Real-time per-test updates populate the suite summary and the test list so you can see which specific files passed/failed.
 - The browser auto-reloads whenever the Bun dev server restarts, so you rarely need to manually refresh during local development.
+- Compiled and Hybrid targets use the slim build suites (`make test TARGET=compiled|hybrid`), so dashboard-triggered runs stay fast while still exercising the new codegen and packaging flows.
 
 ### Use the Build Controls
 
@@ -109,13 +110,15 @@ bun run start
 
 - The **Examples** panel scans the configured `examplesPath` (defaults to `../rae/examples`) and lists every `.rae` demo project, including metadata from optional `devtools.json` files (name, target restrictions, etc.).
 - Select an example and pick a target via the dropdown in the panel header. Examples can opt into specific targets (e.g., the new **Hybrid hot reload demo** only exposes the Hybrid profile).
-- Use **Run once**, **Watch**, or **Build artifacts**:
-  - **Run once** executes the configured per-target command (Live uses `rae run`, Hybrid/Compiled run `rae build` with a temp output dir).
-  - **Watch** is only enabled for targets that define `exampleWatchCommand` (typically Live).
+- Use **Run**, **Live watch**, or **Build artifacts**:
+  - **Run** executes the configured per-target command (Live uses `rae run`, Hybrid/Compiled run `rae build` with a temp output dir).
+  - **Live watch** is only enabled for targets that define `exampleWatchCommand` (typically Live).
   - **Build artifacts** runs the target’s `exampleBuildCommand` and lists the emitted files + hashes so you can inspect Hybrid/Compiled bundles without leaving the browser.
 - Output streams into a terminal next to the file tree; click any file button to view the highlighted source without leaving the dashboard.
 - The inline editor still lets you tweak files in place. Save changes and rerun/watch as needed to simulate hot reload workflows.
 - The `examples/hybrid_hot_reload` sample demonstrates the Hybrid packaging pipeline: build it via the dashboard to see both the compiled host stubs and VM chunks listed in the artifacts panel.
+- The hybrid demo now exposes versioned **Dev download v1/v2/v3** and **Release download v1/v2/v3** buttons; each one runs the helper script, stages the generated `.vmchunk` + manifest under `.simulated_downloads/<profile>/<version>/`, and streams the resulting hashes back into the terminal so you can mimic “downloaded code” events without leaving the UI.
+- Staged bundles appear in the **Staged downloads** card right below Build artifacts so you can verify which profiles, versions, and timestamps are available for the host to reload.
 
 ### Track Stats
 

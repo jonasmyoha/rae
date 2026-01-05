@@ -61,6 +61,10 @@ const exampleEditor = document.getElementById("example-editor");
 const exampleArtifactsList = document.getElementById("example-artifacts-list");
 const exampleArtifactsTitle = document.getElementById("example-artifacts-title");
 const exampleArtifactsHint = document.getElementById("example-artifacts-hint");
+const exampleCustomActions = document.getElementById("example-custom-actions");
+const exampleDownloadsSection = document.getElementById("example-downloads");
+const exampleDownloadsList = document.getElementById("example-downloads-list");
+const exampleDownloadsHint = document.getElementById("example-downloads-hint");
 const buildTargetSelect = document.getElementById("build-target-select");
 const testTargetSelect = document.getElementById("test-target-select");
 const exampleTargetSelect = document.getElementById("example-target-select");
@@ -90,6 +94,7 @@ let selectedExampleId = null;
 let selectedExampleFile = null;
 let activeExampleRunId = null;
 let exampleWatchActive = false;
+let activeExampleActionId = null;
 let exampleEditMode = false;
 let exampleEditorDirty = false;
 let statsViewLoaded = false;
@@ -106,6 +111,8 @@ let lastBuildTargetLabel = "";
 let lastExampleTargetLabel = "";
 let currentExampleArtifacts = [];
 let currentExampleArtifactsTarget = "";
+let currentExampleDownloads = [];
+const downloadSelections = new Map();
 const numberFormatter = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
 
 function connect() {
@@ -451,14 +458,21 @@ function handleBuildRunError(event) {
 }
 
 function handleExampleRunStarted(event) {
-  if (!isExampleEntrySelected(event.entry)) {
+  if (!isExampleEventRelevant(event.exampleId, event.entry)) {
     return;
   }
   activeExampleRunId = event.runId;
   exampleWatchActive = event.mode === "watch";
+  activeExampleActionId = event.actionId ?? null;
   lastExampleTargetLabel = event.targetLabel;
   const label =
-    event.mode === "watch" ? "Watching" : event.mode === "build" ? "Building" : "Running";
+    event.mode === "watch"
+      ? "Watching"
+      : event.mode === "build"
+        ? "Building"
+        : event.mode === "action"
+          ? event.actionLabel ?? "Running action"
+          : "Running";
   setExampleStatus(label, "is-running", event.targetLabel);
   clearExampleOutput();
   appendExampleOutput(
@@ -472,14 +486,14 @@ function handleExampleRunStarted(event) {
 }
 
 function handleExampleRunOutput(event) {
-  if (event.runId !== activeExampleRunId || !isExampleEntrySelected(event.entry)) {
+  if (event.runId !== activeExampleRunId || !isExampleEventRelevant(event.exampleId, event.entry)) {
     return;
   }
   appendExampleOutput(event.line, event.stream);
 }
 
 function handleExampleRunCompleted(event) {
-  if (event.runId !== activeExampleRunId || !isExampleEntrySelected(event.entry)) {
+  if (event.runId !== activeExampleRunId || !isExampleEventRelevant(event.exampleId, event.entry)) {
     return;
   }
   const duration = (event.durationMs / 1000).toFixed(1);
@@ -499,23 +513,36 @@ function handleExampleRunCompleted(event) {
         ? event.success
           ? "Build complete"
           : "Build failed"
-        : event.success
-          ? "Passed"
-          : "Failed";
+        : event.mode === "action"
+          ? event.success
+            ? event.actionLabel ?? "Action complete"
+            : `${event.actionLabel ?? "Action"} failed`
+          : event.success
+            ? "Passed"
+            : "Failed";
   setExampleStatus(label, event.success ? "is-success" : "is-failure", event.targetLabel);
   exampleWatchActive = false;
+  activeExampleActionId = null;
+  if (event.mode === "action" && event.success) {
+    const exampleId = event.exampleId ?? getSelectedExample()?.id ?? null;
+    if (exampleId) {
+      markExampleDownloadSelection(exampleId, event.actionId);
+    }
+    loadExampleDownloads(event.exampleId ?? getSelectedExample()?.id ?? null);
+  }
   updateExampleButtons();
   activeExampleRunId = null;
 }
 
 function handleExampleRunError(event) {
-  if (!isExampleEntrySelected(event.entry)) {
+  if (!isExampleEventRelevant(event.exampleId, event.entry)) {
     return;
   }
   lastExampleTargetLabel = event.targetLabel;
   setExampleStatus("Error", "is-failure", event.targetLabel);
   appendExampleOutput(`⚠ [${event.targetLabel}] ${event.message}`, "stderr");
   exampleWatchActive = false;
+  activeExampleActionId = null;
   updateExampleButtons();
   activeExampleRunId = null;
 }
@@ -908,6 +935,10 @@ function renderExampleDetail() {
     exampleTitle.textContent = "Select an example";
     exampleEntryLabel.textContent = "";
     exampleWatchActive = false;
+    if (exampleCustomActions) {
+      exampleCustomActions.innerHTML = "";
+      exampleCustomActions.hidden = true;
+    }
     updateExampleButtons();
     exampleFilesList.innerHTML = `<p class="test-list-empty">Select an example to view files.</p>`;
     exampleSourceTitle.textContent = "Select a file";
@@ -915,6 +946,7 @@ function renderExampleDetail() {
     clearExampleOutput();
     setExampleStatus("Idle");
     resetExampleArtifacts();
+    resetExampleDownloads(undefined, true);
     return;
   }
 
@@ -928,7 +960,9 @@ function renderExampleDetail() {
   }
   exampleEntryLabel.textContent = details.join(" · ");
   updateExampleButtons();
+  renderExampleActions(example);
   renderExampleFiles(example);
+  loadExampleDownloads(example.id);
 
   if (!selectedExampleFile && example.files.length) {
     selectedExampleFile = example.files[0].path;
@@ -971,6 +1005,48 @@ function renderExampleFiles(example) {
   exampleFilesList.appendChild(fragment);
 }
 
+function renderExampleActions(example) {
+  if (!exampleCustomActions) return;
+  exampleCustomActions.innerHTML = "";
+  if (!example || !Array.isArray(example.actions) || !example.actions.length) {
+    exampleCustomActions.hidden = true;
+    return;
+  }
+  exampleCustomActions.hidden = false;
+  const selection = getExampleDownloadSelection(example.id);
+  const fragment = document.createDocumentFragment();
+  const selectedTargetId = getSelectedTargetId();
+  example.actions.forEach((action) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "secondary";
+    button.textContent = action.label;
+    if (isSelectedDownloadAction(action.id, selection)) {
+      button.classList.add("is-selected");
+    }
+    const hints = [];
+    if (action.description) {
+      hints.push(action.description);
+    }
+    const requiresTarget = action.targetId;
+    if (requiresTarget && requiresTarget !== selectedTargetId) {
+      button.disabled = true;
+      hints.push(`Requires target: ${requiresTarget}`);
+    }
+    if (exampleWatchActive || Boolean(activeExampleActionId)) {
+      button.disabled = true;
+    }
+    if (hints.length) {
+      button.title = hints.join("\n");
+    }
+    button.dataset.actionId = action.id;
+    button.addEventListener("click", () => triggerExampleRun("action", action.id));
+    fragment.appendChild(button);
+  });
+  exampleCustomActions.innerHTML = "";
+  exampleCustomActions.appendChild(fragment);
+}
+
 function getSelectedExample() {
   return examples.find((ex) => ex.id === selectedExampleId) ?? null;
 }
@@ -999,7 +1075,7 @@ function appendExampleOutput(text, stream = "stdout") {
 }
 
 function handleExampleArtifacts(event) {
-  if (!isExampleEntrySelected(event.entry)) {
+  if (!isExampleEventRelevant(event.exampleId, event.entry)) {
     return;
   }
   currentExampleArtifacts = Array.isArray(event.files) ? event.files : [];
@@ -1059,9 +1135,131 @@ function setExampleArtifactsPending(targetLabel) {
   }
 }
 
+function parseDownloadActionId(actionId) {
+  if (!actionId) return null;
+  const match = /^simulate-(dev|release)-v(\d+)$/.exec(actionId);
+  if (!match) return null;
+  return { profile: match[1], version: `version${match[2]}` };
+}
+
+function getExampleDownloadSelection(exampleId) {
+  if (!exampleId) return null;
+  let selection = downloadSelections.get(exampleId);
+  if (!selection) {
+    selection = { dev: null, release: null };
+    downloadSelections.set(exampleId, selection);
+  }
+  return selection;
+}
+
+function markExampleDownloadSelection(exampleId, actionId) {
+  const parsed = parseDownloadActionId(actionId);
+  if (!parsed) return;
+  const selection = getExampleDownloadSelection(exampleId);
+  if (!selection) return;
+  selection[parsed.profile] = parsed.version;
+}
+
+function isSelectedDownloadAction(actionId, selection) {
+  const parsed = parseDownloadActionId(actionId);
+  if (!parsed || !selection) return false;
+  return selection[parsed.profile] === parsed.version;
+}
+
+function resetExampleDownloads(
+  message = "Use the hybrid helper buttons to stage VM chunks for download.",
+  hide = false
+) {
+  currentExampleDownloads = [];
+  if (exampleDownloadsSection) {
+    exampleDownloadsSection.hidden = hide;
+  }
+  if (exampleDownloadsList) {
+    exampleDownloadsList.innerHTML = `<li class="example-downloads-empty">${message}</li>`;
+  }
+  if (exampleDownloadsHint) {
+    exampleDownloadsHint.textContent =
+      "Simulated downloads will appear here after running the helper scripts.";
+  }
+}
+
+function renderExampleDownloads() {
+  if (!exampleDownloadsSection || !exampleDownloadsList) return;
+  if (!currentExampleDownloads.length) {
+    exampleDownloadsSection.hidden = false;
+    exampleDownloadsList.innerHTML =
+      '<li class="example-downloads-empty">No staged downloads yet.</li>';
+    return;
+  }
+  exampleDownloadsSection.hidden = false;
+  const selection = getExampleDownloadSelection(selectedExampleId);
+  const fragment = document.createDocumentFragment();
+  currentExampleDownloads.forEach((profile) => {
+    if (!Array.isArray(profile.builds) || !profile.builds.length) {
+      return;
+    }
+    const isCurrent = selection && selection[profile.profile] === profile.version;
+    profile.builds.forEach((build) => {
+      const item = document.createElement("li");
+      item.className = "example-downloads-item";
+      if (isCurrent) {
+        item.classList.add("is-current");
+      }
+      const heading = document.createElement("div");
+      heading.className = "example-downloads-build-heading";
+      const title = document.createElement("span");
+      title.textContent = `${profile.profile} · ${profile.version} · ${build.name}`;
+      heading.appendChild(title);
+      if (isCurrent) {
+        const badge = document.createElement("span");
+        badge.className = "example-downloads-badge";
+        badge.textContent = "Current";
+        heading.appendChild(badge);
+      }
+      item.appendChild(heading);
+      const fileList = document.createElement("div");
+      fileList.className = "example-downloads-files";
+      build.files.forEach((file) => {
+        const row = document.createElement("div");
+        row.textContent = `${file.name} — ${formatBytes(file.size)} — ${file.hash.slice(0, 12)}…`;
+        fileList.appendChild(row);
+      });
+      item.appendChild(fileList);
+      fragment.appendChild(item);
+    });
+  });
+  exampleDownloadsList.innerHTML = "";
+  exampleDownloadsList.appendChild(fragment);
+}
+
+async function loadExampleDownloads(exampleId) {
+  if (!exampleId) {
+    resetExampleDownloads(undefined, true);
+    return;
+  }
+  if (!exampleDownloadsSection || !exampleDownloadsList) {
+    return;
+  }
+  try {
+    const response = await fetch(
+      `/api/examples/downloads?example=${encodeURIComponent(exampleId)}`
+    );
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const data = await response.json();
+    currentExampleDownloads = Array.isArray(data.downloads) ? data.downloads : [];
+    renderExampleDownloads();
+  } catch (error) {
+    recordError("Example downloads", getErrorMessage(error));
+    resetExampleDownloads("Failed to load staged downloads.", false);
+  }
+}
+
 function updateExampleButtons() {
   const example = getSelectedExample();
   const target = getSelectedTarget();
+  const shortTargetLabel = target ? formatTargetShortLabel(target) : "";
   const targetId = target?.id ?? "";
   const exampleSupportsTarget =
     !example?.supportedTargets?.length || example.supportedTargets.includes(targetId);
@@ -1070,6 +1268,7 @@ function updateExampleButtons() {
   const canWatch = hasSelection && Boolean(target?.supportsExampleWatch);
   const canBuild = hasSelection && Boolean(target?.supportsExampleBuild);
   if (runExampleBtn) {
+    runExampleBtn.textContent = shortTargetLabel ? `Run ${shortTargetLabel}` : "Run";
     runExampleBtn.disabled = exampleWatchActive || !canRun;
     if (!exampleSupportsTarget && example?.supportedTargets?.length) {
       runExampleBtn.title = `Supports: ${example.supportedTargets.join(", ")}`;
@@ -1096,6 +1295,7 @@ function updateExampleButtons() {
   if (stopExampleBtn) {
     stopExampleBtn.disabled = !exampleWatchActive;
   }
+  renderExampleActions(example);
 }
 
 function updateExampleEditorView() {
@@ -1149,7 +1349,7 @@ async function saveExampleSource() {
   }
 }
 
-async function triggerExampleRun(mode = "run") {
+async function triggerExampleRun(mode = "run", actionId = null) {
   const example = getSelectedExample();
   if (!example) return;
   const target = getSelectedTarget();
@@ -1176,8 +1376,36 @@ async function triggerExampleRun(mode = "run") {
     return;
   }
   exampleWatchActive = mode === "watch";
+  const isAction = Boolean(actionId);
+  if (Array.isArray(example.supportedTargets) && example.supportedTargets.length && !isAction) {
+    if (!example.supportedTargets.includes(target.id)) {
+      setExampleStatus("Example unavailable for target", "is-failure", target.label);
+      return;
+    }
+  }
+  if (!isAction) {
+    if (mode === "run" && !target.supportsExampleRun) {
+      setExampleStatus("Target missing run command", "is-failure", target.label);
+      return;
+    }
+    if (mode === "watch" && !target.supportsExampleWatch) {
+      setExampleStatus("Target cannot watch examples", "is-failure", target.label);
+      return;
+    }
+    if (mode === "build" && !target.supportsExampleBuild) {
+      setExampleStatus("Target missing build command", "is-failure", target.label);
+      return;
+    }
+  }
+  exampleWatchActive = mode === "watch";
   const label =
-    mode === "watch" ? "Starting watch…" : mode === "build" ? "Building…" : "Starting…";
+    mode === "watch"
+      ? "Starting watch…"
+      : mode === "build"
+        ? "Building…"
+        : isAction
+          ? "Running action…"
+          : "Starting…";
   setExampleStatus(label, "is-running", target.label);
   updateExampleButtons();
   if (mode === "build") {
@@ -1188,10 +1416,12 @@ async function triggerExampleRun(mode = "run") {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        exampleId: example.id,
         entry: example.entry,
         mode,
         targetId: target.id,
-        watch: mode === "watch"
+        watch: mode === "watch",
+        actionId: actionId ?? undefined
       })
     });
     if (!response.ok) {
@@ -1242,9 +1472,27 @@ async function loadExampleSource(path) {
   }
 }
 
-function isExampleEntrySelected(entry) {
+function isExampleEventRelevant(exampleId, entry) {
   const example = getSelectedExample();
-  return !!example && example.entry === entry;
+  if (!example || !entry) {
+    return false;
+  }
+  if (exampleId && example.id !== exampleId) {
+    return false;
+  }
+  return example.entry === entry;
+}
+
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes)) return `${bytes}`;
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value.toFixed(value >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
 function groupTestCases(entries) {
@@ -1943,6 +2191,11 @@ function getSelectedTarget() {
 
 function getSelectedTargetId() {
   return getSelectedTarget()?.id;
+}
+
+function formatTargetShortLabel(target) {
+  if (!target?.id) return "";
+  return target.id.charAt(0).toUpperCase() + target.id.slice(1);
 }
 
 function loadStoredTargetId() {

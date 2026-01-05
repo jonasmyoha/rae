@@ -18,9 +18,16 @@ import { resolveCompilerPath, resolveTarget } from "./config";
 
 type BroadcastFn = (event: ServerEvent) => void;
 
+type ExampleActionRequest = {
+  id: string;
+  label: string;
+  command: string;
+};
+
 type ActiveRun = {
   id: string;
   entry: string;
+  exampleId?: string;
   mode: ExampleRunMode;
   startedAt: number;
   process: ReturnType<typeof spawn>;
@@ -28,12 +35,15 @@ type ActiveRun = {
   stopRequested: boolean;
   target: TargetConfig;
   tempOutputDir?: string;
+  action?: ExampleActionRequest;
 };
 
 export type ExampleRunOptions = {
   watch?: boolean;
   mode?: ExampleRunMode;
   targetId?: string;
+  exampleId?: string;
+  action?: ExampleActionRequest;
 };
 
 export class ExampleRunner {
@@ -53,8 +63,10 @@ export class ExampleRunner {
     this.stop();
 
     const target = resolveTarget(this.config, options.targetId);
-    const mode: ExampleRunMode = options.mode ?? (options.watch ? "watch" : "run");
-    const prepared = this.prepareCommand(target, entry, mode);
+    const action = options.action;
+    const mode: ExampleRunMode =
+      action?.id ? "action" : options.mode ?? (options.watch ? "watch" : "run");
+    const prepared = this.prepareCommand(target, entry, mode, action);
     if (!prepared) {
       return;
     }
@@ -72,22 +84,27 @@ export class ExampleRunner {
     this.activeRun = {
       id: runId,
       entry,
+      exampleId: options.exampleId,
       mode,
       startedAt,
       process: child,
       buffers: { stdout: "", stderr: "" },
       stopRequested: false,
       target,
-      tempOutputDir: prepared.tempDir
+      tempOutputDir: prepared.tempDir,
+      action
     };
 
     this.broadcast({
       type: "example-run-started",
       runId,
+      exampleId: options.exampleId,
       entry,
       mode,
       targetId: target.id,
       targetLabel: target.label,
+      actionId: action?.id,
+      actionLabel: action?.label,
       timestamp: new Date().toISOString()
     } satisfies ExampleRunStartedMessage);
 
@@ -122,12 +139,15 @@ export class ExampleRunner {
       this.broadcast({
         type: "example-run-completed",
         runId,
+        exampleId: options.exampleId,
         entry,
         mode,
         exitCode,
         success,
         targetId: target.id,
         targetLabel: target.label,
+        actionId: action?.id,
+        actionLabel: action?.label,
         durationMs: Date.now() - startedAt,
         timestamp: new Date().toISOString()
       } satisfies ExampleRunCompletedMessage);
@@ -146,10 +166,13 @@ export class ExampleRunner {
       this.broadcast({
         type: "example-run-output",
         runId: this.activeRun.id,
+        exampleId: this.activeRun.exampleId,
         entry: this.activeRun.entry,
         mode: this.activeRun.mode,
         targetId: this.activeRun.target.id,
         targetLabel: this.activeRun.target.label,
+        actionId: this.activeRun.action?.id,
+        actionLabel: this.activeRun.action?.label,
         stream,
         line,
         timestamp: new Date().toISOString()
@@ -165,10 +188,13 @@ export class ExampleRunner {
         this.broadcast({
           type: "example-run-output",
           runId: this.activeRun.id,
+          exampleId: this.activeRun.exampleId,
           entry: this.activeRun.entry,
           mode: this.activeRun.mode,
           targetId: this.activeRun.target.id,
           targetLabel: this.activeRun.target.label,
+          actionId: this.activeRun.action?.id,
+          actionLabel: this.activeRun.action?.label,
           stream,
           line: leftover,
           timestamp: new Date().toISOString()
@@ -183,10 +209,13 @@ export class ExampleRunner {
     this.broadcast({
       type: "example-run-error",
       runId: this.activeRun.id,
+      exampleId: this.activeRun.exampleId,
       entry: this.activeRun.entry,
       mode: this.activeRun.mode,
       targetId: this.activeRun.target.id,
       targetLabel: this.activeRun.target.label,
+      actionId: this.activeRun.action?.id,
+      actionLabel: this.activeRun.action?.label,
       message: error instanceof Error ? error.message : String(error),
       timestamp: new Date().toISOString()
     } satisfies ExampleRunErrorMessage);
@@ -215,16 +244,23 @@ export class ExampleRunner {
     }
   }
 
-  private prepareCommand(target: TargetConfig, entry: string, mode: ExampleRunMode) {
-    const runTemplate =
-      mode === "watch"
+  private prepareCommand(
+    target: TargetConfig,
+    entry: string,
+    mode: ExampleRunMode,
+    action?: ExampleActionRequest
+  ) {
+    const runTemplate = action?.command
+      ? action.command
+      : mode === "watch"
         ? target.exampleWatchCommand
         : mode === "build"
           ? target.exampleBuildCommand
           : target.exampleRunCommand;
     if (!runTemplate) {
+      const label = action?.label ?? mode;
       this.broadcastStatus(
-        `Target "${target.label}" does not define an example command for mode "${mode}".`
+        `Target "${target.label}" does not define an example command for "${label}".`
       );
       return null;
     }
@@ -232,7 +268,11 @@ export class ExampleRunner {
     const entryPath = path.join(this.config.examplesPath ?? "examples", entry);
     const needsOutDir = runTemplate.includes("{{OUTDIR}}");
     const context: Record<string, string> = {
-      ENTRY: entryPath
+      ENTRY: entryPath,
+      ENTRY_DIR: path.dirname(entryPath),
+      EXAMPLE_DIR: path.dirname(entryPath),
+      TARGET_ID: target.id,
+      TARGET_LABEL: target.label
     };
     let tempDir: string | undefined;
     if (needsOutDir) {
@@ -287,10 +327,13 @@ export class ExampleRunner {
     const payload: ExampleRunArtifactsMessage = {
       type: "example-run-artifacts",
       runId,
+      exampleId: this.activeRun?.exampleId,
       entry,
       mode,
       targetId: target.id,
       targetLabel: target.label,
+      actionId: this.activeRun?.action?.id,
+      actionLabel: this.activeRun?.action?.label,
       files,
       timestamp: new Date().toISOString()
     };

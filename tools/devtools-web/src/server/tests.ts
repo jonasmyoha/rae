@@ -57,9 +57,16 @@ export class TestRunner {
       return;
     }
 
+    const cwd = path.resolve(process.cwd(), this.config.compilerPath);
+    this.broadcastStatus(`[debug] Test target: ${target.id}`);
+    this.broadcastStatus(`[debug] Test command: ${target.testCommand}`);
+    this.broadcastStatus(`[debug] Test cwd: ${cwd}`);
+    if (target.testCommand.includes("TARGET=")) {
+      this.broadcastStatus("[debug] WARNING: testCommand includes TARGET= and will override the compiler binary name.");
+    }
+
     const runId = randomUUID();
     const startedAt = Date.now();
-    const cwd = path.resolve(process.cwd(), this.config.compilerPath);
     const child = spawn(target.testCommand, {
       cwd,
       shell: true,
@@ -186,6 +193,14 @@ export class TestRunner {
       timestamp: new Date().toISOString()
     };
     this.broadcast(message);
+  }
+
+  private broadcastStatus(message: string) {
+    this.broadcast({
+      type: "server-status",
+      message,
+      timestamp: new Date().toISOString()
+    });
   }
 
   private cleanupActiveRun() {
