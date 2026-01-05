@@ -1,8 +1,8 @@
-import { watch } from "node:fs";
+import { existsSync, watch } from "node:fs";
 import path from "node:path";
 
 const SERVER_ENTRY = "src/server/main.ts";
-const WATCH_TARGETS = ["src", "config.json", "package.json"];
+const WATCH_TARGETS = ["src", "config.json", "config.local.json", "package.json"];
 const RESTART_DEBOUNCE_MS = 200;
 
 let currentProcess: Bun.Subprocess | null = null;
@@ -34,14 +34,25 @@ function setupWatchers() {
   for (const target of WATCH_TARGETS) {
     const absolute = path.resolve(process.cwd(), target);
     const recursive = target === "src";
-    watch(
-      absolute,
-      { recursive },
-      (event, filename) => {
-        if (!filename && target !== "src") return;
-        queueRestart(`${target}/${filename ?? ""} (${event})`);
+    if (!recursive && !existsSync(absolute)) {
+      continue;
+    }
+    try {
+      watch(
+        absolute,
+        { recursive },
+        (event, filename) => {
+          if (!filename && target !== "src") return;
+          queueRestart(`${target}/${filename ?? ""} (${event})`);
+        }
+      );
+    } catch (error) {
+      const nodeError = error as NodeJS.ErrnoException;
+      if (nodeError.code === "ENOENT") {
+        continue;
       }
-    );
+      throw error;
+    }
   }
 }
 

@@ -93,6 +93,7 @@ let examples = [];
 let selectedExampleId = null;
 let selectedExampleFile = null;
 let activeExampleRunId = null;
+let exampleRunActive = false;
 let exampleWatchActive = false;
 let activeExampleActionId = null;
 let exampleEditMode = false;
@@ -462,6 +463,7 @@ function handleExampleRunStarted(event) {
     return;
   }
   activeExampleRunId = event.runId;
+  exampleRunActive = true;
   exampleWatchActive = event.mode === "watch";
   activeExampleActionId = event.actionId ?? null;
   lastExampleTargetLabel = event.targetLabel;
@@ -521,6 +523,7 @@ function handleExampleRunCompleted(event) {
             ? "Passed"
             : "Failed";
   setExampleStatus(label, event.success ? "is-success" : "is-failure", event.targetLabel);
+  exampleRunActive = false;
   exampleWatchActive = false;
   activeExampleActionId = null;
   if (event.mode === "action" && event.success) {
@@ -541,6 +544,7 @@ function handleExampleRunError(event) {
   lastExampleTargetLabel = event.targetLabel;
   setExampleStatus("Error", "is-failure", event.targetLabel);
   appendExampleOutput(`⚠ [${event.targetLabel}] ${event.message}`, "stderr");
+  exampleRunActive = false;
   exampleWatchActive = false;
   activeExampleActionId = null;
   updateExampleButtons();
@@ -904,7 +908,7 @@ function renderExampleList() {
       button.appendChild(desc);
     }
     button.addEventListener("click", () => {
-      if (exampleWatchActive) {
+      if (exampleRunActive) {
         stopExampleRun();
       }
       const previousId = selectedExampleId;
@@ -934,6 +938,7 @@ function renderExampleDetail() {
   if (!example) {
     exampleTitle.textContent = "Select an example";
     exampleEntryLabel.textContent = "";
+    exampleRunActive = false;
     exampleWatchActive = false;
     if (exampleCustomActions) {
       exampleCustomActions.innerHTML = "";
@@ -1033,7 +1038,7 @@ function renderExampleActions(example) {
       button.disabled = true;
       hints.push(`Requires target: ${requiresTarget}`);
     }
-    if (exampleWatchActive || Boolean(activeExampleActionId)) {
+    if (exampleRunActive) {
       button.disabled = true;
     }
     if (hints.length) {
@@ -1269,7 +1274,7 @@ function updateExampleButtons() {
   const canBuild = hasSelection && Boolean(target?.supportsExampleBuild);
   if (runExampleBtn) {
     runExampleBtn.textContent = shortTargetLabel ? `Run ${shortTargetLabel}` : "Run";
-    runExampleBtn.disabled = exampleWatchActive || !canRun;
+    runExampleBtn.disabled = exampleRunActive || !canRun;
     if (!exampleSupportsTarget && example?.supportedTargets?.length) {
       runExampleBtn.title = `Supports: ${example.supportedTargets.join(", ")}`;
     } else {
@@ -1277,7 +1282,7 @@ function updateExampleButtons() {
     }
   }
   if (watchExampleBtn) {
-    watchExampleBtn.disabled = exampleWatchActive || !canWatch;
+    watchExampleBtn.disabled = exampleRunActive || !canWatch;
     if (!exampleSupportsTarget && example?.supportedTargets?.length) {
       watchExampleBtn.title = `Supports: ${example.supportedTargets.join(", ")}`;
     } else {
@@ -1285,7 +1290,7 @@ function updateExampleButtons() {
     }
   }
   if (buildExampleBtn) {
-    buildExampleBtn.disabled = exampleWatchActive || !canBuild;
+    buildExampleBtn.disabled = exampleRunActive || !canBuild;
     if (!exampleSupportsTarget && example?.supportedTargets?.length) {
       buildExampleBtn.title = `Supports: ${example.supportedTargets.join(", ")}`;
     } else {
@@ -1293,7 +1298,7 @@ function updateExampleButtons() {
     }
   }
   if (stopExampleBtn) {
-    stopExampleBtn.disabled = !exampleWatchActive;
+    stopExampleBtn.disabled = !exampleRunActive;
   }
   renderExampleActions(example);
 }
@@ -1375,7 +1380,6 @@ async function triggerExampleRun(mode = "run", actionId = null) {
     setExampleStatus("Target missing build command", "is-failure", target.label);
     return;
   }
-  exampleWatchActive = mode === "watch";
   const isAction = Boolean(actionId);
   if (Array.isArray(example.supportedTargets) && example.supportedTargets.length && !isAction) {
     if (!example.supportedTargets.includes(target.id)) {
@@ -1397,6 +1401,7 @@ async function triggerExampleRun(mode = "run", actionId = null) {
       return;
     }
   }
+  exampleRunActive = true;
   exampleWatchActive = mode === "watch";
   const label =
     mode === "watch"
@@ -1430,6 +1435,7 @@ async function triggerExampleRun(mode = "run", actionId = null) {
   } catch (error) {
     recordError("Example run", getErrorMessage(error));
     setExampleStatus("Error", "is-failure", target.label);
+    exampleRunActive = false;
     exampleWatchActive = false;
     updateExampleButtons();
   }
@@ -1441,6 +1447,7 @@ async function stopExampleRun() {
   } catch (error) {
     recordError("Example run", getErrorMessage(error));
   } finally {
+    exampleRunActive = false;
     exampleWatchActive = false;
     updateExampleButtons();
   }

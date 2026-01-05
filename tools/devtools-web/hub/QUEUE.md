@@ -18,6 +18,42 @@
   - Plan checked into `docs/` with milestones
   - CLI stub (`rae build --emit-c`) exists even if output is minimal
 
+### T014 - Main loop test (short-run)
+- Repo: rae
+- Summary:
+  - Add a deterministic main loop test that runs 5 ticks and prints tick output.
+  - Keep output stable for regression comparisons.
+- Acceptance:
+  - New test case under `compiler/tests/cases/` runs for 5 ticks.
+  - `.expect` output is deterministic and checks tick numbering.
+
+### T015 - Main loop example (indefinite, stop button)
+- Repo: rae + rae-devtools-web
+- Summary:
+  - Add/adjust a main loop example that runs indefinitely and logs tick numbers.
+  - Ensure the devtools "Stop" button can terminate the running loop.
+- Acceptance:
+  - Example runs indefinitely in devtools and stops cleanly via "Stop".
+  - Example logs ticks in a readable, consistent format.
+
+### T016 - Hybrid hot-reload main loop example (dev profile)
+- Repo: rae + rae-devtools-web
+- Summary:
+  - Extend the hybrid hot-reload demo with a main loop that calls Live bytecode.
+  - Demonstrate hot-reload of Live code while the compiled host keeps running.
+- Acceptance:
+  - Example shows a running loop, and hot-reloaded Live functions visibly change behavior.
+  - Devtools UI exposes a clear action to trigger the hot-reload flow.
+
+### T017 - Hybrid hot-reload example (release-style downloads)
+- Repo: rae + rae-devtools-web
+- Summary:
+  - Simulate downloaded versioned bundles and swap Live code at runtime.
+  - Use the versioned folders to show code replacement behavior.
+- Acceptance:
+  - Example uses versioned downloads (`version1/2/3`) and hot-reloads them.
+  - Devtools UI lists staged downloads and signals reload events.
+
 ### Status note — Hybrid devtools work in progress
 - Repo: `rae-devtools-web` / `rae`
 - Summary:

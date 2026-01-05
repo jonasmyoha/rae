@@ -35,7 +35,7 @@ bun install
 
 ### Configuration
 
-Copy `config.example.json` to `config.json` at the repo root (or set equivalent env vars) and tweak the commands/paths as needed. Example:
+`config.json` ships with the repo and should work out of the box. If you need local overrides (different paths/ports/commands), create a `config.local.json` file with the same shape. Any keys in `config.local.json` override `config.json` (and `config.local.json` is git-ignored). `config.example.json` mirrors the default config for reference.
 
 ```json
 {
@@ -89,7 +89,7 @@ bun run dev
 bun run start
 ```
 
-`bun run dev` launches a small watcher that restarts the Bun server whenever files under `src/`, `config.json`, or `package.json` change. The browser auto-reloads after each restart, so you rarely need to refresh manually. The server exposes both HTTP and WebSocket endpoints; open `http://localhost:3000` in a browser.
+`bun run dev` launches a small watcher that restarts the Bun server whenever files under `src/`, `config.json`, `config.local.json`, or `package.json` change. The browser auto-reloads after each restart, so you rarely need to refresh manually. The server exposes both HTTP and WebSocket endpoints; open `http://localhost:3000` in a browser.
 
 ### Use the Inline Test Runner
 
