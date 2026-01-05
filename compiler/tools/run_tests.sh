@@ -60,8 +60,9 @@ for TEST_FILE in $TEST_FILES; do
     CMD_ARGS=("parse")
   fi
 
-  TMP_OUTPUT_FILE=""
-  TMP_INPUT_FILE=""
+TMP_OUTPUT_FILE=""
+TMP_INPUT_FILE=""
+TMP_OUTPUT_DIR=""
   APPEND_TEST_FILE=1
   for idx in "${!CMD_ARGS[@]}"; do
     if [ "${CMD_ARGS[$idx]}" = "{{TMP_OUTPUT}}" ]; then
@@ -76,6 +77,11 @@ for TEST_FILE in $TEST_FILES; do
       fi
       CMD_ARGS[$idx]="$TMP_INPUT_FILE"
       APPEND_TEST_FILE=0
+    elif [ "${CMD_ARGS[$idx]}" = "{{TMP_OUTDIR}}" ]; then
+      if [ -z "$TMP_OUTPUT_DIR" ]; then
+        TMP_OUTPUT_DIR=$(mktemp -d)
+      fi
+      CMD_ARGS[$idx]="$TMP_OUTPUT_DIR"
     fi
   done
 
@@ -86,6 +92,8 @@ for TEST_FILE in $TEST_FILES; do
 
   CMD_STDOUT=$("$BIN" "${CMD_RUN_ARGS[@]}" 2>&1 || true)
   ACTUAL_OUTPUT="$CMD_STDOUT"
+  COMPARE_MODE="stdout"
+  OUTPUT_COMPARE_FILE=""
   if [ -n "$TMP_OUTPUT_FILE" ]; then
     if [ ! -f "$TMP_OUTPUT_FILE" ]; then
       echo "FAIL: $TEST_NAME (expected formatter output file '$TMP_OUTPUT_FILE')"
@@ -107,10 +115,11 @@ for TEST_FILE in $TEST_FILES; do
       fi
       continue
     fi
-    ACTUAL_OUTPUT=$(cat "$TMP_OUTPUT_FILE")
-    rm -f "$TMP_OUTPUT_FILE"
+    COMPARE_MODE="file"
+    OUTPUT_COMPARE_FILE="$TMP_OUTPUT_FILE"
     if [ -n "$TMP_INPUT_FILE" ]; then
       rm -f "$TMP_INPUT_FILE"
+      TMP_INPUT_FILE=""
     fi
   elif [ -n "$TMP_INPUT_FILE" ]; then
     if [ -n "$CMD_STDOUT" ]; then
@@ -125,13 +134,72 @@ for TEST_FILE in $TEST_FILES; do
     rm -f "$TMP_INPUT_FILE"
   fi
 
-  EXPECTED_OUTPUT=$(cat "$EXPECT_FILE")
+  if [ -n "$TMP_OUTPUT_DIR" ]; then
+    if [ -n "$CMD_STDOUT" ]; then
+      echo "FAIL: $TEST_NAME (expected no stdout when capturing hybrid package summary)"
+      echo "  Stdout:"
+      echo "$CMD_STDOUT" | sed 's/^/    /'
+      ((FAILED++))
+      rm -rf "$TMP_OUTPUT_DIR"
+      TMP_OUTPUT_DIR=""
+      continue
+    fi
+    ACTUAL_OUTPUT=$(python3 - "$TMP_OUTPUT_DIR" <<'PY'
+import hashlib
+import os
+import sys
+from pathlib import Path
+
+base = Path(sys.argv[1]).resolve()
+entries = []
+for path in sorted(base.rglob("*")):
+    if path.is_file():
+        rel = path.relative_to(base).as_posix()
+        data = path.read_bytes()
+        digest = hashlib.sha256(data).hexdigest()
+        entries.append(f"{rel} {len(data)} {digest}")
+print("\n".join(entries))
+PY
+)
+    rm -rf "$TMP_OUTPUT_DIR"
+    TMP_OUTPUT_DIR=""
+  fi
+
   CMD_NAME="${CMD_ARGS[0]}"
   SIMPLE_FORMAT=0
   if [ "$CMD_NAME" = "format" ] && [ ${#CMD_ARGS[@]} -eq 1 ]; then
     SIMPLE_FORMAT=1
   fi
-  
+
+  if [ "$COMPARE_MODE" = "file" ]; then
+    if python3 - "$EXPECT_FILE" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+data = path.read_bytes()
+sys.exit(0 if b"\0" in data else 1)
+PY
+    then
+      TMP_DIFF=$(mktemp)
+      if diff -u "$EXPECT_FILE" "$OUTPUT_COMPARE_FILE" >"$TMP_DIFF"; then
+        echo "PASS: $TEST_NAME"
+        ((PASSED++))
+      else
+        echo "FAIL: $TEST_NAME"
+        echo "  Output file mismatch:"
+        sed 's/^/    /' "$TMP_DIFF"
+        ((FAILED++))
+      fi
+      rm -f "$TMP_DIFF"
+      rm -f "$OUTPUT_COMPARE_FILE"
+      continue
+    else
+      ACTUAL_OUTPUT=$(cat "$OUTPUT_COMPARE_FILE")
+      rm -f "$OUTPUT_COMPARE_FILE"
+      COMPARE_MODE="stdout"
+    fi
+  fi
+
+  EXPECTED_OUTPUT=$(cat "$EXPECT_FILE")
   if [ "$ACTUAL_OUTPUT" = "$EXPECTED_OUTPUT" ]; then
     if [ $SIMPLE_FORMAT -eq 1 ]; then
       IDEMP_OUTPUT=$("$BIN" format "$EXPECT_FILE" 2>&1 || true)
