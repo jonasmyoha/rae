@@ -7,6 +7,7 @@ BIN="bin/rae"
 TEST_DIR="tests/cases"
 PASSED=0
 FAILED=0
+TARGET_FILTER=$(printf "%s" "${TEST_TARGET:-${TARGET:-}}" | tr '[:upper:]' '[:lower:]')
 
 echo "Running Rae tests..."
 echo
@@ -28,6 +29,35 @@ if [ -z "$TEST_FILES" ]; then
   exit 0
 fi
 
+if [ -n "$TARGET_FILTER" ]; then
+  echo "Target filter: $TARGET_FILTER"
+  echo
+fi
+
+should_run_test() {
+  local name="$1"
+  case "$TARGET_FILTER" in
+    compiled)
+      case "$name" in
+        400_*|401_*|402_*|403_*|404_*|405_*|406_*) return 0 ;;
+        *) return 1 ;;
+      esac
+      ;;
+    hybrid)
+      case "$name" in
+        407_*|408_*) return 0 ;;
+        *) return 1 ;;
+      esac
+      ;;
+    ""|live)
+      return 0
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
 for TEST_FILE in $TEST_FILES; do
   case "$TEST_FILE" in
     */helpers/*)
@@ -39,6 +69,9 @@ for TEST_FILE in $TEST_FILES; do
     continue
   fi
   TEST_NAME=$(basename "$TEST_FILE" .rae)
+  if ! should_run_test "$TEST_NAME"; then
+    continue
+  fi
   EXPECT_FILE="${TEST_FILE%.rae}.expect"
   
   if [ ! -f "$EXPECT_FILE" ]; then
