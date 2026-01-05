@@ -48,6 +48,7 @@ const exampleStatusChip = document.getElementById("example-status-chip");
 const runExampleBtn = document.getElementById("run-example-btn");
 const watchExampleBtn = document.getElementById("watch-example-btn");
 const stopExampleBtn = document.getElementById("stop-example-btn");
+const buildExampleBtn = document.getElementById("build-example-btn");
 const toggleEditExampleBtn = document.getElementById("toggle-edit-example-btn");
 const saveExampleBtn = document.getElementById("save-example-btn");
 const exampleOutput = document.getElementById("example-output");
@@ -57,6 +58,12 @@ const exampleFilesList = document.getElementById("example-files");
 const exampleSourceTitle = document.getElementById("example-source-title");
 const exampleSourceCode = document.getElementById("example-source-code");
 const exampleEditor = document.getElementById("example-editor");
+const exampleArtifactsList = document.getElementById("example-artifacts-list");
+const exampleArtifactsTitle = document.getElementById("example-artifacts-title");
+const exampleArtifactsHint = document.getElementById("example-artifacts-hint");
+const buildTargetSelect = document.getElementById("build-target-select");
+const testTargetSelect = document.getElementById("test-target-select");
+const exampleTargetSelect = document.getElementById("example-target-select");
 
 let socket;
 let reconnectTimer;
@@ -88,6 +95,17 @@ let exampleEditorDirty = false;
 let statsViewLoaded = false;
 let compilerLineMetrics = [];
 let lineChartFrame = null;
+const targetSelectElements = [buildTargetSelect, testTargetSelect, exampleTargetSelect].filter(
+  Boolean
+);
+const TARGET_STORAGE_KEY = "rae-devtools.target";
+let availableTargets = [];
+let selectedTargetId = null;
+let lastTestTargetLabel = "";
+let lastBuildTargetLabel = "";
+let lastExampleTargetLabel = "";
+let currentExampleArtifacts = [];
+let currentExampleArtifactsTarget = "";
 const numberFormatter = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
 
 function connect() {
@@ -212,6 +230,9 @@ function handleServerEvent(payload) {
     case "example-run-error":
       handleExampleRunError(payload);
       break;
+    case "example-run-artifacts":
+      handleExampleArtifacts(payload);
+      break;
     default:
       console.warn("Unknown payload", payload);
   }
@@ -246,6 +267,16 @@ const defaultView =
   document.querySelector("[data-view-target].is-active")?.dataset.viewTarget ?? "compiler";
 setActiveView(defaultView);
 
+targetSelectElements.forEach((select) => {
+  select.disabled = true;
+  select.addEventListener("change", (event) => {
+    const value = typeof event.target.value === "string" ? event.target.value : "";
+    if (value) {
+      setSelectedTarget(value);
+    }
+  });
+});
+
 runTestsBtn?.addEventListener("click", () => requestTestRun("all"));
 document.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "t") {
@@ -265,8 +296,9 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-runExampleBtn?.addEventListener("click", () => triggerExampleRun());
-watchExampleBtn?.addEventListener("click", () => triggerExampleRun(true));
+runExampleBtn?.addEventListener("click", () => triggerExampleRun("run"));
+watchExampleBtn?.addEventListener("click", () => triggerExampleRun("watch"));
+buildExampleBtn?.addEventListener("click", () => triggerExampleRun("build"));
 stopExampleBtn?.addEventListener("click", () => stopExampleRun());
 toggleEditExampleBtn?.addEventListener("click", () => toggleExampleEdit());
 saveExampleBtn?.addEventListener("click", () => saveExampleSource());
@@ -322,7 +354,8 @@ function requestTestRun(mode = "all") {
   socket.send(
     JSON.stringify({
       type: "run-tests",
-      mode
+      mode,
+      targetId: getSelectedTargetId()
     })
   );
 }
@@ -336,26 +369,29 @@ function requestBuildCommand(command = "build") {
   socket.send(
     JSON.stringify({
       type: "run-build",
-      command
+      command,
+      targetId: getSelectedTargetId()
     })
   );
 }
 
 function handleTestRunStarted(event) {
   latestRunId = event.runId;
-  setTestStatus(`Running (${event.mode})`, "is-running");
+  lastTestTargetLabel = event.targetLabel;
+  setTestStatus(`Running (${event.mode})`, "is-running", event.targetLabel);
   setTestButtonsDisabled(true);
   clearTestLog();
-  appendTestLine(`▶ ${event.command}`, "stdout");
+  appendTestLine(`▶ [${event.targetLabel}] ${event.command}`, "stdout");
   resetTestCases();
 }
 
 function handleBuildRunStarted(event) {
   latestBuildRunId = event.runId;
-  setBuildStatus(`Running ${event.command}`, "is-running");
+  lastBuildTargetLabel = event.targetLabel;
+  setBuildStatus(`Running ${event.command}`, "is-running", event.targetLabel);
   setBuildButtonsDisabled(true);
   clearBuildLog();
-  appendBuildLine(`▶ ${event.command} command started`, "stdout");
+  appendBuildLine(`▶ [${event.targetLabel}] ${event.command} command started`, "stdout");
 }
 
 function handleTestRunOutput(event) {
@@ -372,9 +408,10 @@ function handleTestRunCompleted(event) {
   if (!latestRunId || event.runId !== latestRunId) return;
   const duration = (event.durationMs / 1000).toFixed(1);
   const status = event.success ? "Passed" : "Failed";
-  setTestStatus(`${status} in ${duration}s`, event.success ? "is-success" : "is-failure");
+  lastTestTargetLabel = event.targetLabel;
+  setTestStatus(`${status} in ${duration}s`, event.success ? "is-success" : "is-failure", event.targetLabel);
   appendTestLine(
-    `● Test run finished (exit ${event.exitCode ?? "unknown"}) in ${duration}s`,
+    `● [${event.targetLabel}] Test run finished (exit ${event.exitCode ?? "unknown"}) in ${duration}s`,
     event.success ? "stdout" : "stderr"
   );
   setTestButtonsDisabled(false);
@@ -387,9 +424,10 @@ function handleBuildRunCompleted(event) {
   if (!latestBuildRunId || event.runId !== latestBuildRunId) return;
   const duration = (event.durationMs / 1000).toFixed(1);
   const status = event.success ? "Success" : "Failed";
-  setBuildStatus(`${status} in ${duration}s`, event.success ? "is-success" : "is-failure");
+  lastBuildTargetLabel = event.targetLabel;
+  setBuildStatus(`${status} in ${duration}s`, event.success ? "is-success" : "is-failure", event.targetLabel);
   appendBuildLine(
-    `● ${event.command} finished (exit ${event.exitCode ?? "unknown"}) in ${duration}s`,
+    `● [${event.targetLabel}] ${event.command} finished (exit ${event.exitCode ?? "unknown"}) in ${duration}s`,
     event.success ? "stdout" : "stderr"
   );
   setBuildButtonsDisabled(false);
@@ -397,15 +435,17 @@ function handleBuildRunCompleted(event) {
 }
 
 function handleTestRunError(event) {
-  setTestStatus("Error", "is-failure");
-  appendTestLine(`⚠ ${event.message}`, "stderr");
+  lastTestTargetLabel = event.targetLabel;
+  setTestStatus("Error", "is-failure", event.targetLabel);
+  appendTestLine(`⚠ [${event.targetLabel}] ${event.message}`, "stderr");
   setTestButtonsDisabled(false);
   latestRunId = null;
 }
 
 function handleBuildRunError(event) {
-  setBuildStatus("Error", "is-failure");
-  appendBuildLine(`⚠ ${event.message}`, "stderr");
+  lastBuildTargetLabel = event.targetLabel;
+  setBuildStatus("Error", "is-failure", event.targetLabel);
+  appendBuildLine(`⚠ [${event.targetLabel}] ${event.message}`, "stderr");
   setBuildButtonsDisabled(false);
   latestBuildRunId = null;
 }
@@ -416,14 +456,18 @@ function handleExampleRunStarted(event) {
   }
   activeExampleRunId = event.runId;
   exampleWatchActive = event.mode === "watch";
-  setExampleStatus(exampleWatchActive ? "Watching" : "Running", "is-running");
+  lastExampleTargetLabel = event.targetLabel;
+  const label =
+    event.mode === "watch" ? "Watching" : event.mode === "build" ? "Building" : "Running";
+  setExampleStatus(label, "is-running", event.targetLabel);
   clearExampleOutput();
   appendExampleOutput(
-    exampleWatchActive
-      ? `▶ compiler/bin/rae run --watch ${event.entry}`
-      : `▶ compiler/bin/rae run ${event.entry}`,
+    `▶ [${event.targetLabel}] ${label} ${event.entry}`,
     "stdout"
   );
+  if (event.mode === "build") {
+    setExampleArtifactsPending(event.targetLabel);
+  }
   updateExampleButtons();
 }
 
@@ -439,13 +483,26 @@ function handleExampleRunCompleted(event) {
     return;
   }
   const duration = (event.durationMs / 1000).toFixed(1);
+  lastExampleTargetLabel = event.targetLabel;
   appendExampleOutput(
-    `● ${event.mode === "watch" ? "Watch" : "Run"} finished (exit ${
+    `● [${event.targetLabel}] ${event.mode === "watch" ? "Watch" : event.mode === "build" ? "Build" : "Run"} finished (exit ${
       event.exitCode ?? "unknown"
     }) in ${duration}s`,
     event.success ? "stdout" : "stderr"
   );
-  setExampleStatus(event.success ? "Passed" : "Failed", event.success ? "is-success" : "is-failure");
+  const label =
+    event.mode === "watch"
+      ? event.success
+        ? "Watch stopped"
+        : "Watch failed"
+      : event.mode === "build"
+        ? event.success
+          ? "Build complete"
+          : "Build failed"
+        : event.success
+          ? "Passed"
+          : "Failed";
+  setExampleStatus(label, event.success ? "is-success" : "is-failure", event.targetLabel);
   exampleWatchActive = false;
   updateExampleButtons();
   activeExampleRunId = null;
@@ -455,15 +512,16 @@ function handleExampleRunError(event) {
   if (!isExampleEntrySelected(event.entry)) {
     return;
   }
-  setExampleStatus("Error", "is-failure");
-  appendExampleOutput(`⚠ ${event.message}`, "stderr");
+  lastExampleTargetLabel = event.targetLabel;
+  setExampleStatus("Error", "is-failure", event.targetLabel);
+  appendExampleOutput(`⚠ [${event.targetLabel}] ${event.message}`, "stderr");
   exampleWatchActive = false;
   updateExampleButtons();
   activeExampleRunId = null;
 }
 
-function setTestStatus(label, modifierClass) {
-  testStatusChip.textContent = label;
+function setTestStatus(label, modifierClass, targetLabel) {
+  testStatusChip.textContent = targetLabel ? `${label} · ${targetLabel}` : label;
   testStatusChip.classList.remove("is-running", "is-success", "is-failure");
   if (modifierClass) {
     testStatusChip.classList.add(modifierClass);
@@ -515,6 +573,7 @@ function handleServerInfo(event) {
   }
 
   currentBuildVersion = event.version;
+  initializeTargets(event.targets ?? [], event.defaultTargetId);
 }
 
 function handleTestCase(event) {
@@ -781,6 +840,8 @@ async function loadExamples() {
     if (selectedExampleFile) {
       loadExampleSource(selectedExampleFile);
     }
+    resetExampleArtifacts();
+    applyExampleDefaultTarget(examples[0]);
   }
   renderExampleList();
   renderExampleDetail();
@@ -805,15 +866,27 @@ function renderExampleList() {
     const button = document.createElement("button");
     button.type = "button";
     button.className = `example-card${selectedExampleId === example.id ? " is-active" : ""}`;
+    const targetSummary = describeExampleTargets(example);
     button.innerHTML = `<h4>${example.name}</h4><p>${example.files.length} file${
       example.files.length === 1 ? "" : "s"
-    }</p>`;
+    } · ${targetSummary}</p>`;
+    if (example.description) {
+      const desc = document.createElement("p");
+      desc.className = "example-card-desc";
+      desc.textContent = example.description;
+      button.appendChild(desc);
+    }
     button.addEventListener("click", () => {
       if (exampleWatchActive) {
         stopExampleRun();
       }
+      const previousId = selectedExampleId;
       selectedExampleId = example.id;
+      if (previousId !== selectedExampleId) {
+        resetExampleArtifacts();
+      }
       selectedExampleFile = example.files[0]?.path ?? null;
+      applyExampleDefaultTarget(example);
       renderExampleList();
       renderExampleDetail();
       if (selectedExampleFile) {
@@ -841,11 +914,19 @@ function renderExampleDetail() {
     exampleSourceCode.innerHTML = "<code>No file selected.</code>";
     clearExampleOutput();
     setExampleStatus("Idle");
+    resetExampleArtifacts();
     return;
   }
 
   exampleTitle.textContent = example.name;
-  exampleEntryLabel.textContent = `Entry: ${example.entry}`;
+  const details = [`Entry: ${example.entry}`];
+  if (Array.isArray(example.supportedTargets) && example.supportedTargets.length) {
+    details.push(`Targets: ${example.supportedTargets.join(", ")}`);
+  }
+  if (example.description) {
+    details.push(example.description);
+  }
+  exampleEntryLabel.textContent = details.join(" · ");
   updateExampleButtons();
   renderExampleFiles(example);
 
@@ -894,9 +975,9 @@ function getSelectedExample() {
   return examples.find((ex) => ex.id === selectedExampleId) ?? null;
 }
 
-function setExampleStatus(label, modifierClass) {
+function setExampleStatus(label, modifierClass, targetLabel) {
   if (!exampleStatusChip) return;
-  exampleStatusChip.textContent = label;
+  exampleStatusChip.textContent = targetLabel ? `${label} · ${targetLabel}` : label;
   exampleStatusChip.classList.remove("is-running", "is-success", "is-failure");
   if (modifierClass) {
     exampleStatusChip.classList.add(modifierClass);
@@ -917,13 +998,100 @@ function appendExampleOutput(text, stream = "stdout") {
   exampleOutput.scrollTop = exampleOutput.scrollHeight;
 }
 
+function handleExampleArtifacts(event) {
+  if (!isExampleEntrySelected(event.entry)) {
+    return;
+  }
+  currentExampleArtifacts = Array.isArray(event.files) ? event.files : [];
+  currentExampleArtifactsTarget = event.targetLabel ?? "";
+  renderExampleArtifacts();
+}
+
+function renderExampleArtifacts() {
+  if (!exampleArtifactsList) return;
+  if (!currentExampleArtifacts.length) {
+    exampleArtifactsList.innerHTML =
+      '<li class="example-artifacts-empty">No files produced for this build.</li>';
+  } else {
+    exampleArtifactsList.innerHTML = "";
+    const fragment = document.createDocumentFragment();
+    currentExampleArtifacts.forEach((file) => {
+      const item = document.createElement("li");
+      item.className = "example-artifacts-item";
+      const name = document.createElement("span");
+      name.textContent = file.path;
+      const meta = document.createElement("span");
+      meta.textContent = `${file.size} B · ${file.hash}`;
+      item.appendChild(name);
+      item.appendChild(meta);
+      fragment.appendChild(item);
+    });
+    exampleArtifactsList.appendChild(fragment);
+  }
+  if (exampleArtifactsHint) {
+    exampleArtifactsHint.textContent = currentExampleArtifactsTarget
+      ? `Generated for ${currentExampleArtifactsTarget}.`
+      : "Hybrid or compiled builds will list their files here.";
+  }
+}
+
+function resetExampleArtifacts(
+  message = "Build an example to inspect bundle contents for each target."
+) {
+  currentExampleArtifacts = [];
+  currentExampleArtifactsTarget = "";
+  if (exampleArtifactsList) {
+    exampleArtifactsList.innerHTML = `<li class="example-artifacts-empty">${message}</li>`;
+  }
+  if (exampleArtifactsHint) {
+    exampleArtifactsHint.textContent = "Hybrid or compiled builds will list their files here.";
+  }
+}
+
+function setExampleArtifactsPending(targetLabel) {
+  currentExampleArtifacts = [];
+  currentExampleArtifactsTarget = targetLabel ?? "";
+  if (exampleArtifactsList) {
+    exampleArtifactsList.innerHTML = `<li class="example-artifacts-empty">Building ${targetLabel ?? "selected"} bundle…</li>`;
+  }
+  if (exampleArtifactsHint) {
+    exampleArtifactsHint.textContent = "Collecting build outputs…";
+  }
+}
+
 function updateExampleButtons() {
-  const hasSelection = !!getSelectedExample();
+  const example = getSelectedExample();
+  const target = getSelectedTarget();
+  const targetId = target?.id ?? "";
+  const exampleSupportsTarget =
+    !example?.supportedTargets?.length || example.supportedTargets.includes(targetId);
+  const hasSelection = Boolean(example && target && exampleSupportsTarget);
+  const canRun = hasSelection && Boolean(target?.supportsExampleRun);
+  const canWatch = hasSelection && Boolean(target?.supportsExampleWatch);
+  const canBuild = hasSelection && Boolean(target?.supportsExampleBuild);
   if (runExampleBtn) {
-    runExampleBtn.disabled = exampleWatchActive || !hasSelection;
+    runExampleBtn.disabled = exampleWatchActive || !canRun;
+    if (!exampleSupportsTarget && example?.supportedTargets?.length) {
+      runExampleBtn.title = `Supports: ${example.supportedTargets.join(", ")}`;
+    } else {
+      runExampleBtn.removeAttribute("title");
+    }
   }
   if (watchExampleBtn) {
-    watchExampleBtn.disabled = exampleWatchActive || !hasSelection;
+    watchExampleBtn.disabled = exampleWatchActive || !canWatch;
+    if (!exampleSupportsTarget && example?.supportedTargets?.length) {
+      watchExampleBtn.title = `Supports: ${example.supportedTargets.join(", ")}`;
+    } else {
+      watchExampleBtn.removeAttribute("title");
+    }
+  }
+  if (buildExampleBtn) {
+    buildExampleBtn.disabled = exampleWatchActive || !canBuild;
+    if (!exampleSupportsTarget && example?.supportedTargets?.length) {
+      buildExampleBtn.title = `Supports: ${example.supportedTargets.join(", ")}`;
+    } else {
+      buildExampleBtn.removeAttribute("title");
+    }
   }
   if (stopExampleBtn) {
     stopExampleBtn.disabled = !exampleWatchActive;
@@ -981,24 +1149,57 @@ async function saveExampleSource() {
   }
 }
 
-async function triggerExampleRun(watch = false) {
+async function triggerExampleRun(mode = "run") {
   const example = getSelectedExample();
   if (!example) return;
-  exampleWatchActive = watch;
-  setExampleStatus(watch ? "Starting watch…" : "Starting…", "is-running");
+  const target = getSelectedTarget();
+  if (!target) {
+    setExampleStatus("No targets configured", "is-failure");
+    return;
+  }
+  if (Array.isArray(example.supportedTargets) && example.supportedTargets.length) {
+    if (!example.supportedTargets.includes(target.id)) {
+      setExampleStatus("Example unavailable for target", "is-failure", target.label);
+      return;
+    }
+  }
+  if (mode === "run" && !target.supportsExampleRun) {
+    setExampleStatus("Target missing run command", "is-failure", target.label);
+    return;
+  }
+  if (mode === "watch" && !target.supportsExampleWatch) {
+    setExampleStatus("Target cannot watch examples", "is-failure", target.label);
+    return;
+  }
+  if (mode === "build" && !target.supportsExampleBuild) {
+    setExampleStatus("Target missing build command", "is-failure", target.label);
+    return;
+  }
+  exampleWatchActive = mode === "watch";
+  const label =
+    mode === "watch" ? "Starting watch…" : mode === "build" ? "Building…" : "Starting…";
+  setExampleStatus(label, "is-running", target.label);
   updateExampleButtons();
+  if (mode === "build") {
+    setExampleArtifactsPending(target.label);
+  }
   try {
     const response = await fetch("/api/examples/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ entry: example.entry, watch })
+      body: JSON.stringify({
+        entry: example.entry,
+        mode,
+        targetId: target.id,
+        watch: mode === "watch"
+      })
     });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
   } catch (error) {
     recordError("Example run", getErrorMessage(error));
-    setExampleStatus("Error", "is-failure");
+    setExampleStatus("Error", "is-failure", target.label);
     exampleWatchActive = false;
     updateExampleButtons();
   }
@@ -1195,10 +1396,19 @@ function formatMetricValue(metric, value) {
 }
 
 function formatMetricStatus(metadata = {}) {
-  if (metadata && typeof metadata.success === "boolean") {
-    return metadata.success ? "Success" : "Failed";
-  }
-  return "Recorded";
+  const status =
+    metadata && typeof metadata.success === "boolean"
+      ? metadata.success
+        ? "Success"
+        : "Failed"
+      : "Recorded";
+  const targetLabel =
+    metadata && typeof metadata.targetLabel === "string"
+      ? metadata.targetLabel
+      : metadata && typeof metadata.targetId === "string"
+        ? metadata.targetId
+        : "";
+  return targetLabel ? `${status} · ${targetLabel}` : status;
 }
 
 function renderLineCountDetails(entries) {
@@ -1679,8 +1889,93 @@ function escapeHtml(text) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 }
-function setBuildStatus(label, modifierClass) {
-  buildStatusChip.textContent = label;
+
+function initializeTargets(targets, defaultTargetId) {
+  availableTargets = Array.isArray(targets) ? targets : [];
+  const hasTargets = availableTargets.length > 0;
+  targetSelectElements.forEach((select) => {
+    if (!select) return;
+    if (!hasTargets) {
+      select.innerHTML = '<option value="">No targets configured</option>';
+      select.disabled = true;
+      return;
+    }
+    select.disabled = false;
+    select.innerHTML = availableTargets
+      .map((target) => `<option value="${target.id}">${target.label}</option>`)
+      .join("");
+  });
+  const stored = loadStoredTargetId();
+  if (stored && availableTargets.some((target) => target.id === stored)) {
+    selectedTargetId = stored;
+  } else if (defaultTargetId && availableTargets.some((target) => target.id === defaultTargetId)) {
+    selectedTargetId = defaultTargetId;
+  } else {
+    selectedTargetId = availableTargets[0]?.id ?? null;
+  }
+  persistSelectedTarget(selectedTargetId);
+  syncTargetSelectors();
+  updateExampleButtons();
+}
+
+function setSelectedTarget(targetId) {
+  if (!availableTargets.some((target) => target.id === targetId)) return;
+  if (selectedTargetId === targetId) return;
+  selectedTargetId = targetId;
+  persistSelectedTarget(targetId);
+  syncTargetSelectors();
+  updateExampleButtons();
+}
+
+function syncTargetSelectors() {
+  targetSelectElements.forEach((select) => {
+    if (!select) return;
+    const desired = selectedTargetId ?? availableTargets[0]?.id ?? "";
+    select.value = desired;
+  });
+}
+
+function getSelectedTarget() {
+  if (!availableTargets.length) return null;
+  const desired = selectedTargetId ?? availableTargets[0].id;
+  return availableTargets.find((target) => target.id === desired) ?? null;
+}
+
+function getSelectedTargetId() {
+  return getSelectedTarget()?.id;
+}
+
+function loadStoredTargetId() {
+  try {
+    return localStorage.getItem(TARGET_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function persistSelectedTarget(targetId) {
+  if (!targetId) return;
+  try {
+    localStorage.setItem(TARGET_STORAGE_KEY, targetId);
+  } catch {
+    // Ignore storage failures in non-browser contexts.
+  }
+}
+
+function describeExampleTargets(example) {
+  if (Array.isArray(example?.supportedTargets) && example.supportedTargets.length) {
+    return example.supportedTargets.join(", ");
+  }
+  return "All targets";
+}
+
+function applyExampleDefaultTarget(example) {
+  if (!example?.defaultTargetId) return;
+  if (!availableTargets.some((target) => target.id === example.defaultTargetId)) return;
+  setSelectedTarget(example.defaultTargetId);
+}
+function setBuildStatus(label, modifierClass, targetLabel) {
+  buildStatusChip.textContent = targetLabel ? `${label} · ${targetLabel}` : label;
   buildStatusChip.classList.remove("is-running", "is-success", "is-failure");
   if (modifierClass) {
     buildStatusChip.classList.add(modifierClass);

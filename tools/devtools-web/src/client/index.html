@@ -50,6 +50,12 @@
             <p class="panel-subtitle">Trigger compiler build/clean tasks</p>
           </div>
           <div class="panel-actions">
+            <label class="target-selector">
+              <span>Target</span>
+              <select id="build-target-select" data-target-select>
+                <option value="">Loading…</option>
+              </select>
+            </label>
             <div class="test-status" id="build-status-chip">Idle</div>
           </div>
         </header>
@@ -85,6 +91,12 @@
             <p class="panel-subtitle">Run the Rae compiler test suite via this dashboard</p>
           </div>
           <div class="panel-actions">
+            <label class="target-selector">
+              <span>Target</span>
+              <select id="test-target-select" data-target-select>
+                <option value="">Loading…</option>
+              </select>
+            </label>
             <div class="test-status" id="test-status-chip">Idle</div>
           </div>
         </header>
@@ -183,6 +195,12 @@
             <p class="panel-subtitle">Run Rae examples (VM mode) and inspect their source</p>
           </div>
           <div class="panel-actions">
+            <label class="target-selector">
+              <span>Target</span>
+              <select id="example-target-select" data-target-select>
+                <option value="">Loading…</option>
+              </select>
+            </label>
             <div class="test-status" id="example-status-chip">Idle</div>
           </div>
         </header>
@@ -199,6 +217,7 @@
               <div class="example-actions">
                 <button id="run-example-btn" type="button">Run once</button>
                 <button id="watch-example-btn" type="button" class="secondary">Watch</button>
+                <button id="build-example-btn" type="button" class="secondary">Build artifacts</button>
                 <button id="stop-example-btn" type="button" class="secondary" disabled>Stop</button>
                 <button id="toggle-edit-example-btn" type="button" class="secondary">Edit</button>
                 <button id="save-example-btn" type="button" class="secondary" disabled>Save</button>
@@ -206,6 +225,15 @@
             </div>
             <div class="terminal example-terminal" id="example-output" aria-live="polite">
               <div class="terminal-line">Run an example to see output.</div>
+            </div>
+            <div class="example-artifacts" id="example-artifacts">
+              <div>
+                <h4 id="example-artifacts-title">Build artifacts</h4>
+                <p id="example-artifacts-hint">Hybrid or compiled builds will list their files here.</p>
+              </div>
+              <ul class="example-artifacts-list" id="example-artifacts-list">
+                <li class="example-artifacts-empty">Build an example to inspect bundle contents.</li>
+              </ul>
             </div>
             <div class="example-content">
               <div class="example-files" id="example-files">

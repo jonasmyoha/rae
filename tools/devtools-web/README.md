@@ -40,12 +40,42 @@ Copy `config.example.json` to `config.json` at the repo root (or set equivalent 
 ```json
 {
   "compilerPath": "../rae",
-  "buildCommand": "cd compiler && make",
-  "testCommand": "cd compiler && make test",
-  "cleanCommand": "cd compiler && make clean",
-  "rebuildCommand": "cd compiler && make clean && make",
   "port": 3000,
-  "examplesPath": "examples"
+  "examplesPath": "examples",
+  "defaultTarget": "live",
+  "targets": [
+    {
+      "id": "live",
+      "label": "Live (bytecode VM)",
+      "testCommand": "cd compiler && make test TARGET=live",
+      "buildCommand": "cd compiler && make TARGET=live",
+      "cleanCommand": "cd compiler && make clean",
+      "rebuildCommand": "cd compiler && make clean && make TARGET=live",
+      "exampleRunCommand": "./compiler/bin/rae run {{ENTRY}}",
+      "exampleWatchCommand": "./compiler/bin/rae run --watch {{ENTRY}}",
+      "exampleBuildCommand": "./compiler/bin/rae build --target live --out {{OUTDIR}} {{ENTRY}}"
+    },
+    {
+      "id": "compiled",
+      "label": "Compiled (C backend)",
+      "testCommand": "cd compiler && make test TARGET=compiled",
+      "buildCommand": "cd compiler && make TARGET=compiled",
+      "cleanCommand": "cd compiler && make clean",
+      "rebuildCommand": "cd compiler && make clean && make TARGET=compiled",
+      "exampleRunCommand": "./compiler/bin/rae build --target compiled --out {{OUTDIR}} {{ENTRY}}",
+      "exampleBuildCommand": "./compiler/bin/rae build --target compiled --out {{OUTDIR}} {{ENTRY}}"
+    },
+    {
+      "id": "hybrid",
+      "label": "Hybrid Dev",
+      "testCommand": "cd compiler && make test TARGET=hybrid",
+      "buildCommand": "cd compiler && make TARGET=hybrid",
+      "cleanCommand": "cd compiler && make clean",
+      "rebuildCommand": "cd compiler && make clean && make TARGET=hybrid",
+      "exampleRunCommand": "./compiler/bin/rae build --target hybrid --out {{OUTDIR}} {{ENTRY}}",
+      "exampleBuildCommand": "./compiler/bin/rae build --target hybrid --out {{OUTDIR}} {{ENTRY}}"
+    }
+  ]
 }
 ```
 
@@ -63,24 +93,29 @@ bun run start
 
 ### Use the Inline Test Runner
 
-- Click **Run all tests** (or press `Ctrl+T`/`Cmd+T`) inside the dashboard to execute the configured test command from `config.json`. Be sure to set `testCommand` to a real script (current default assumes `cd compiler && make test`; adjust if your workflow differs).
+- Use the **Target** dropdown (Live / Compiled / Hybrid) in the panel header to pick which compiler mode to exercise. The default comes from `defaultTarget`, but you can switch at any time.
+- Click **Run all tests** (or press `Ctrl+T`/`Cmd+T`) inside the dashboard to execute the command mapped to the selected target. Each target can point at a different script/Make target in `config.json`.
 - Live stdout/stderr output appears in the terminal panel; the run status chip flips to **Passed**/**Failed** when complete.
 - Real-time per-test updates populate the suite summary and the test list so you can see which specific files passed/failed.
 - The browser auto-reloads whenever the Bun dev server restarts, so you rarely need to manually refresh during local development.
 
 ### Use the Build Controls
 
-- Buttons for **Build**, **Clean**, and **Rebuild** run whichever commands you defined in `config.json` (current defaults assume the Rae compiler Makefile lives under `../rae/compiler`; adjust if yours differs); `Ctrl+T/Cmd+T` still triggers tests, while `Ctrl+B/Cmd+B` triggers Build.
+- Buttons for **Build**, **Clean**, and **Rebuild** run whichever commands you defined for the currently selected target. `Ctrl+T/Cmd+T` still triggers tests, while `Ctrl+B/Cmd+B` triggers Build.
 - Build stdout/stderr streams into its own terminal panel with copy button and status indicator.
 - Rebuild executes the clean command followed by the build command (via `clean && build`) so you can reset the compiler tree before building again.
 
 ### Run the Examples
 
-- The **Examples** panel scans the configured `examplesPath` (defaults to `../rae/examples`) and lists every `.rae` demo project.
-- Selecting an example reveals its file list and enables the **Run example** button, which calls `bin/rae run <entry>` via the new bytecode VM.
+- The **Examples** panel scans the configured `examplesPath` (defaults to `../rae/examples`) and lists every `.rae` demo project, including metadata from optional `devtools.json` files (name, target restrictions, etc.).
+- Select an example and pick a target via the dropdown in the panel header. Examples can opt into specific targets (e.g., the new **Hybrid hot reload demo** only exposes the Hybrid profile).
+- Use **Run once**, **Watch**, or **Build artifacts**:
+  - **Run once** executes the configured per-target command (Live uses `rae run`, Hybrid/Compiled run `rae build` with a temp output dir).
+  - **Watch** is only enabled for targets that define `exampleWatchCommand` (typically Live).
+  - **Build artifacts** runs the target’s `exampleBuildCommand` and lists the emitted files + hashes so you can inspect Hybrid/Compiled bundles without leaving the browser.
 - Output streams into a terminal next to the file tree; click any file button to view the highlighted source without leaving the dashboard.
-- The data model already supports multi-file projects—if a folder contains a `main.rae`, it becomes the default entry; otherwise the first `.rae` file is used.
-- Toggle **Watch** to run `bin/rae run --watch` so code changes (e.g., the `hot_reload.rae` sample) automatically recompile and stream logs. Use the inline editor + Save button to update the active file without leaving the dashboard.
+- The inline editor still lets you tweak files in place. Save changes and rerun/watch as needed to simulate hot reload workflows.
+- The `examples/hybrid_hot_reload` sample demonstrates the Hybrid packaging pipeline: build it via the dashboard to see both the compiled host stubs and VM chunks listed in the artifacts panel.
 
 ### Track Stats
 

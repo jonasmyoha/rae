@@ -7,6 +7,12 @@
 
 These additions build on the current dashboard features described in `README.md` (Run all tests, Build controls, and Example runner) by layering target-aware commands and surfacing hybrid-specific flows.
 
+## Status
+- Target-aware commands now exist end-to-end. `config.json` exposes a `targets` array, the server broadcasts target metadata in every Test/Build/Example event, and the client renders synchronized selectors (persisted via `localStorage`).
+- Example runs support Live/Compiled/Hybrid commands, including a dedicated **Build artifacts** action that dumps file sizes + hashes (mirroring the hybrid regression tests).
+- `devtools.json` metadata lets examples describe supported targets + default recommendations. The new `examples/hybrid_hot_reload` package ships with metadata and serves as the first hybrid-specific demo inside the dashboard.
+- Remaining work: automation for “downloaded code” simulations and additional short-running Compiled/Hybrid test suites to expose in the target dropdown.
+
 ## Current Baseline
 - `config.json` stores single `buildCommand` / `testCommand` values, so the UI can only run one configuration at a time.
 - The Examples panel shells out to `bin/rae run <entry>` (optionally `--watch`), which implies Live-only execution.

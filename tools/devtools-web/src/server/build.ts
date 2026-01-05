@@ -9,7 +9,8 @@ import type {
   BuildRunStartedMessage,
   ServerEvent
 } from "../shared/types";
-import type { RaeDevtoolsConfig } from "./config";
+import type { RaeDevtoolsConfig, TargetConfig } from "./config";
+import { resolveTarget } from "./config";
 import type { StatsStore } from "./stats";
 
 type BroadcastFn = (event: ServerEvent) => void;
@@ -20,6 +21,7 @@ type ActiveRun = {
   startedAt: number;
   process: ReturnType<typeof spawn>;
   buffers: Record<"stdout" | "stderr", string>;
+  target: TargetConfig;
 };
 
 export class BuildRunner {
@@ -31,16 +33,24 @@ export class BuildRunner {
     private stats?: StatsStore
   ) {}
 
-  run(command: BuildCommandType) {
+  run(command: BuildCommandType, targetId?: string) {
     if (this.activeRun) {
       this.broadcastStatus("Build command already running. Please wait.");
+      return;
+    }
+
+    const target = resolveTarget(this.config, targetId);
+    const cmd = this.getCommandForType(command, target);
+    if (!cmd) {
+      this.broadcastStatus(
+        `Target "${target.label}" does not define a ${command} command. Update config.json to add one.`
+      );
       return;
     }
 
     const runId = randomUUID();
     const startedAt = Date.now();
     const cwd = path.resolve(process.cwd(), this.config.compilerPath);
-    const cmd = this.getCommandForType(command);
 
     const child = spawn(cmd, {
       cwd,
@@ -52,11 +62,12 @@ export class BuildRunner {
       id: runId,
       command,
       startedAt,
+      target,
       process: child,
       buffers: { stdout: "", stderr: "" }
     };
 
-    this.broadcastRunStarted(runId, command);
+    this.broadcastRunStarted(runId, command, target);
 
     child.stdout?.setEncoding("utf8");
     child.stderr?.setEncoding("utf8");
@@ -76,19 +87,22 @@ export class BuildRunner {
     });
   }
 
-  private getCommandForType(command: BuildCommandType): string {
+  private getCommandForType(command: BuildCommandType, target: TargetConfig): string | null {
     switch (command) {
       case "clean":
-        return this.config.cleanCommand;
+        return target.cleanCommand ?? null;
       case "rebuild":
-        if (this.config.rebuildCommand) {
-          return this.config.rebuildCommand;
+        if (target.rebuildCommand) {
+          return target.rebuildCommand;
         }
         // Run clean/build inside subshells so each command can manage its own cwd safely.
-        return `(${this.config.cleanCommand}) && (${this.config.buildCommand})`;
+        if (target.cleanCommand && target.buildCommand) {
+          return `(${target.cleanCommand}) && (${target.buildCommand})`;
+        }
+        return target.buildCommand ?? null;
       case "build":
       default:
-        return this.config.buildCommand;
+        return target.buildCommand ?? null;
     }
   }
 
@@ -127,11 +141,13 @@ export class BuildRunner {
     }
   }
 
-  private broadcastRunStarted(runId: string, command: BuildCommandType) {
+  private broadcastRunStarted(runId: string, command: BuildCommandType, target: TargetConfig) {
     const payload: BuildRunStartedMessage = {
       type: "build-run-started",
       runId,
       command,
+      targetId: target.id,
+      targetLabel: target.label,
       timestamp: new Date().toISOString()
     };
     this.broadcast(payload);
@@ -144,6 +160,7 @@ export class BuildRunner {
     exitCode: number | null
   ) {
     const durationMs = Date.now() - startedAt;
+    const target = this.activeRun?.target;
     const payload: BuildRunCompletedMessage = {
       type: "build-run-completed",
       runId,
@@ -151,6 +168,8 @@ export class BuildRunner {
       exitCode,
       success: exitCode === 0,
       durationMs,
+      targetId: target?.id ?? "unknown",
+      targetLabel: target?.label ?? "Unknown target",
       timestamp: new Date().toISOString()
     };
     this.broadcast(payload);
@@ -158,15 +177,20 @@ export class BuildRunner {
       runId,
       command,
       durationMs,
-      success: exitCode === 0
+      success: exitCode === 0,
+      targetId: target?.id ?? "unknown",
+      targetLabel: target?.label ?? "Unknown target"
     });
   }
 
   private broadcastRunError(runId: string, command: BuildCommandType, error: unknown) {
+    const target = this.activeRun?.target;
     const payload: BuildRunErrorMessage = {
       type: "build-run-error",
       runId,
       command,
+      targetId: target?.id ?? "unknown",
+      targetLabel: target?.label ?? "Unknown target",
       message: error instanceof Error ? error.message : String(error),
       timestamp: new Date().toISOString()
     };

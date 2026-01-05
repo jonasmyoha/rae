@@ -10,6 +10,8 @@ export type TestRunStats = {
   success: boolean;
   passed: number;
   failed: number;
+  targetId: string;
+  targetLabel: string;
 };
 
 export type BuildRunStats = {
@@ -17,6 +19,8 @@ export type BuildRunStats = {
   durationMs: number;
   success: boolean;
   command: string;
+  targetId: string;
+  targetLabel: string;
 };
 
 export class StatsStore {
@@ -47,7 +51,9 @@ export class StatsStore {
       runId: data.runId,
       success: data.success,
       passed: data.passed,
-      failed: data.failed
+      failed: data.failed,
+      targetId: data.targetId,
+      targetLabel: data.targetLabel
     };
     this.record("tests.duration_ms", data.durationMs, metadata);
     this.record("tests.failed", data.failed, metadata);
@@ -58,7 +64,9 @@ export class StatsStore {
     const metadata = {
       runId: data.runId,
       success: data.success,
-      command: data.command
+      command: data.command,
+      targetId: data.targetId,
+      targetLabel: data.targetLabel
     };
     this.record("builds.duration_ms", data.durationMs, metadata);
     this.record("builds.success", data.success ? 1 : 0, metadata);
