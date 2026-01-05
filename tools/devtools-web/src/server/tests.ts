@@ -11,7 +11,8 @@ import type {
   TestRunCaseMessage,
   TestRunSummaryMessage
 } from "../shared/types";
-import type { RaeDevtoolsConfig } from "./config";
+import type { RaeDevtoolsConfig, TargetConfig } from "./config";
+import { resolveTarget } from "./config";
 import { parseTestLine } from "./parsers/testsParser";
 import type { StatsStore } from "./stats";
 
@@ -24,6 +25,7 @@ type ActiveRun = {
   process: ReturnType<typeof spawn>;
   buffers: Record<"stdout" | "stderr", string>;
   summary?: { passed: number; failed: number };
+  target: TargetConfig;
 };
 
 export class TestRunner {
@@ -35,7 +37,7 @@ export class TestRunner {
     private stats?: StatsStore
   ) {}
 
-  runTests(mode: TestRunMode = "all") {
+  runTests(mode: TestRunMode = "all", targetId?: string) {
     if (this.activeRun) {
       this.broadcast({
         type: "server-status",
@@ -45,10 +47,20 @@ export class TestRunner {
       return;
     }
 
+    const target = resolveTarget(this.config, targetId);
+    if (!target.testCommand) {
+      this.broadcast({
+        type: "server-status",
+        timestamp: new Date().toISOString(),
+        message: `Target "${target.label}" is missing a testCommand. Update config.json to enable test runs.`
+      });
+      return;
+    }
+
     const runId = randomUUID();
     const startedAt = Date.now();
     const cwd = path.resolve(process.cwd(), this.config.compilerPath);
-    const child = spawn(this.config.testCommand, {
+    const child = spawn(target.testCommand, {
       cwd,
       shell: true,
       env: process.env
@@ -58,11 +70,12 @@ export class TestRunner {
       id: runId,
       startedAt,
       mode,
+      target,
       process: child,
       buffers: { stdout: "", stderr: "" }
     };
 
-    this.broadcast(createRunStartedMessage(runId, mode, this.config.testCommand, cwd));
+    this.broadcast(createRunStartedMessage(runId, mode, target, cwd));
 
     child.stdout?.setEncoding("utf8");
     child.stderr?.setEncoding("utf8");
@@ -75,13 +88,13 @@ export class TestRunner {
     });
 
     child.on("error", (error) => {
-      this.broadcastRunError(runId, error);
+      this.broadcastRunError(runId, target, error);
       this.cleanupActiveRun();
     });
 
     child.on("close", (code) => {
       this.flushRemainingBuffers();
-      this.broadcastRunCompleted(runId, code, startedAt);
+      this.broadcastRunCompleted(runId, target, code, startedAt);
       this.cleanupActiveRun();
     });
   }
@@ -133,7 +146,12 @@ export class TestRunner {
     }
   }
 
-  private broadcastRunCompleted(runId: string, exitCode: number | null, startedAt: number) {
+  private broadcastRunCompleted(
+    runId: string,
+    target: TargetConfig,
+    exitCode: number | null,
+    startedAt: number
+  ) {
     const endedAt = Date.now();
     const payload: TestRunCompletedMessage = {
       type: "test-run-completed",
@@ -141,6 +159,8 @@ export class TestRunner {
       exitCode,
       success: exitCode === 0,
       durationMs: endedAt - startedAt,
+      targetId: target.id,
+      targetLabel: target.label,
       timestamp: new Date().toISOString()
     };
     this.broadcast(payload);
@@ -150,14 +170,18 @@ export class TestRunner {
       durationMs: endedAt - startedAt,
       success: exitCode === 0,
       passed: summary.passed,
-      failed: summary.failed
+      failed: summary.failed,
+      targetId: target.id,
+      targetLabel: target.label
     });
   }
 
-  private broadcastRunError(runId: string, error: unknown) {
+  private broadcastRunError(runId: string, target: TargetConfig, error: unknown) {
     const message: TestRunErrorMessage = {
       type: "test-run-error",
       runId,
+      targetId: target.id,
+      targetLabel: target.label,
       message: error instanceof Error ? error.message : String(error),
       timestamp: new Date().toISOString()
     };
@@ -204,14 +228,16 @@ export class TestRunner {
 function createRunStartedMessage(
   runId: string,
   mode: TestRunMode,
-  command: string,
+  target: TargetConfig,
   cwd: string
 ): TestRunStartedMessage {
   return {
     type: "test-run-started",
     runId,
     mode,
-    command,
+    command: target.testCommand ?? "unknown",
+    targetId: target.id,
+    targetLabel: target.label,
     cwd,
     timestamp: new Date().toISOString()
   };

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { Buffer } from "node:buffer";
 import { getExamplesRoot, getSyntaxSummaryPath, getTestsRoot, loadConfig } from "./config";
-import type { ClientEvent, ServerEvent } from "../shared/types";
+import type { ClientEvent, ExampleRunMode, ServerEvent } from "../shared/types";
 import { TestRunner } from "./tests";
 import { BuildRunner } from "./build";
 import { StatsStore } from "./stats";
@@ -64,7 +64,9 @@ const server = Bun.serve<SocketData>({
     }
 
     if (url.pathname === "/api/tests/run" && req.method === "POST") {
-      testRunner.runTests("all");
+      const payload = await safeJson(req);
+      const targetId = typeof payload.targetId === "string" ? payload.targetId : undefined;
+      testRunner.runTests("all", targetId);
       return new Response(JSON.stringify({ ok: true }), {
         headers: { "Content-Type": "application/json" }
       });
@@ -73,7 +75,8 @@ const server = Bun.serve<SocketData>({
     if (url.pathname === "/api/build/run" && req.method === "POST") {
       const payload = await safeJson(req);
       const command = payload.command ?? "build";
-      buildRunner.run(command);
+      const targetId = typeof payload.targetId === "string" ? payload.targetId : undefined;
+      buildRunner.run(command, targetId);
       return new Response(JSON.stringify({ ok: true }), {
         headers: { "Content-Type": "application/json" }
       });
@@ -157,7 +160,9 @@ const server = Bun.serve<SocketData>({
       if (!entry) {
         return new Response(JSON.stringify({ error: "Missing entry path" }), { status: 400 });
       }
-      exampleRunner.run(entry, { watch: Boolean(payload.watch) });
+      const mode = resolveExampleMode(payload);
+      const targetId = typeof payload.targetId === "string" ? payload.targetId : undefined;
+      exampleRunner.run(entry, { mode, targetId, watch: Boolean(payload.watch) });
       return new Response(JSON.stringify({ ok: true }), {
         headers: { "Content-Type": "application/json" }
       });
@@ -227,15 +232,16 @@ function handleClientEvent(event: ClientEvent) {
 
   if (event.type === "run-tests") {
     const mode = event.mode ?? "all";
-    testRunner.runTests(mode);
+    testRunner.runTests(mode, event.targetId);
   }
 
   if (event.type === "run-build") {
-    buildRunner.run(event.command);
+    buildRunner.run(event.command, event.targetId);
   }
 
   if (event.type === "run-example") {
-    exampleRunner.run(event.entry);
+    const mode = resolveExampleMode(event);
+    exampleRunner.run(event.entry, { mode, targetId: event.targetId, watch: event.watch });
   }
 }
 
@@ -259,7 +265,9 @@ function createServerInfoMessage(): ServerEvent {
   return {
     type: "server-info",
     version: BUILD_VERSION,
-    startedAt: SERVER_START.toISOString()
+    startedAt: SERVER_START.toISOString(),
+    targets: describeTargets(),
+    defaultTargetId: CONFIG.defaultTarget
   };
 }
 
@@ -361,4 +369,24 @@ async function safeJson(req: Request): Promise<Record<string, any>> {
   } catch {
     return {};
   }
+}
+
+function describeTargets() {
+  return CONFIG.targets.map((target) => ({
+    id: target.id,
+    label: target.label,
+    description: target.description,
+    supportsTests: Boolean(target.testCommand),
+    supportsBuilds: Boolean(target.buildCommand || target.cleanCommand || target.rebuildCommand),
+    supportsExampleRun: Boolean(target.exampleRunCommand),
+    supportsExampleWatch: Boolean(target.exampleWatchCommand),
+    supportsExampleBuild: Boolean(target.exampleBuildCommand)
+  }));
+}
+
+function resolveExampleMode(payload: { mode?: string; watch?: boolean } | null): ExampleRunMode {
+  if (payload?.mode === "watch" || payload?.mode === "build" || payload?.mode === "run") {
+    return payload.mode;
+  }
+  return payload?.watch ? "watch" : "run";
 }

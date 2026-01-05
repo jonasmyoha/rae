@@ -1,28 +1,84 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
+export type TargetConfig = {
+  id: string;
+  label: string;
+  description?: string;
+  testCommand?: string;
+  buildCommand?: string;
+  cleanCommand?: string;
+  rebuildCommand?: string;
+  exampleRunCommand?: string;
+  exampleWatchCommand?: string;
+  exampleBuildCommand?: string;
+};
+
 export type RaeDevtoolsConfig = {
   compilerPath: string;
-  buildCommand: string;
-  testCommand: string;
-  rebuildCommand?: string;
-  cleanCommand: string;
   port: number;
   testsPath?: string;
   syntaxSummaryPath?: string;
   examplesPath?: string;
+  targets: TargetConfig[];
+  defaultTarget: string;
 };
+
+type LegacyCommandConfig = {
+  buildCommand?: string;
+  testCommand?: string;
+  cleanCommand?: string;
+  rebuildCommand?: string;
+};
+
+type PartialConfig = Partial<Omit<RaeDevtoolsConfig, "targets" | "defaultTarget">> &
+  LegacyCommandConfig & { targets?: TargetConfig[]; defaultTarget?: string };
+
+const DEFAULT_TARGETS: TargetConfig[] = [
+  {
+    id: "live",
+    label: "Live (bytecode VM)",
+    description: "Hot-reload friendly bytecode VM build",
+    testCommand: "cd compiler && make test TARGET=live",
+    buildCommand: "cd compiler && make TARGET=live",
+    cleanCommand: "cd compiler && make clean",
+    rebuildCommand: "cd compiler && make clean && make TARGET=live",
+    exampleRunCommand: "./compiler/bin/rae run {{ENTRY}}",
+    exampleWatchCommand: "./compiler/bin/rae run --watch {{ENTRY}}",
+    exampleBuildCommand: "./compiler/bin/rae build --target live --out {{OUTDIR}} {{ENTRY}}"
+  },
+  {
+    id: "compiled",
+    label: "Compiled (C backend)",
+    description: "Generates C code for native builds",
+    testCommand: "cd compiler && make test TARGET=compiled",
+    buildCommand: "cd compiler && make TARGET=compiled",
+    cleanCommand: "cd compiler && make clean",
+    rebuildCommand: "cd compiler && make clean && make TARGET=compiled",
+    exampleRunCommand: "./compiler/bin/rae build --target compiled --out {{OUTDIR}} {{ENTRY}}",
+    exampleBuildCommand: "./compiler/bin/rae build --target compiled --out {{OUTDIR}} {{ENTRY}}"
+  },
+  {
+    id: "hybrid",
+    label: "Hybrid Dev",
+    description: "Compiled host plus Live bundle packaging",
+    testCommand: "cd compiler && make test TARGET=hybrid",
+    buildCommand: "cd compiler && make TARGET=hybrid",
+    cleanCommand: "cd compiler && make clean",
+    rebuildCommand: "cd compiler && make clean && make TARGET=hybrid",
+    exampleRunCommand: "./compiler/bin/rae build --target hybrid --out {{OUTDIR}} {{ENTRY}}",
+    exampleBuildCommand: "./compiler/bin/rae build --target hybrid --out {{OUTDIR}} {{ENTRY}}"
+  }
+];
 
 const DEFAULT_CONFIG: RaeDevtoolsConfig = {
   compilerPath: "../rae",
-  buildCommand: "cd compiler && make",
-  testCommand: "cd compiler && make test",
-  rebuildCommand: "cd compiler && make clean && make",
-  cleanCommand: "cd compiler && make clean",
   port: 3000,
   testsPath: "compiler/tests",
   syntaxSummaryPath: "docs/rae_syntax.json",
-  examplesPath: "examples"
+  examplesPath: "examples",
+  targets: DEFAULT_TARGETS,
+  defaultTarget: DEFAULT_TARGETS[0]!.id
 };
 
 const PROJECT_ROOT = path.resolve(process.cwd());
@@ -33,11 +89,8 @@ export async function loadConfig(customPath?: string): Promise<RaeDevtoolsConfig
 
   try {
     const contents = await readFile(filePath, "utf8");
-    const parsed = JSON.parse(contents) as Partial<RaeDevtoolsConfig>;
-    return {
-      ...DEFAULT_CONFIG,
-      ...parsed
-    };
+    const parsed = JSON.parse(contents) as PartialConfig;
+    return normalizeConfig(parsed);
   } catch (error) {
     const nodeError = error as NodeJS.ErrnoException;
     if (nodeError.code === "ENOENT") {
@@ -50,6 +103,74 @@ export async function loadConfig(customPath?: string): Promise<RaeDevtoolsConfig
     console.error(`[config] Failed to parse config at ${filePath}`);
     throw error;
   }
+}
+
+function normalizeConfig(parsed: PartialConfig = {}): RaeDevtoolsConfig {
+  const base: RaeDevtoolsConfig = {
+    compilerPath: parsed.compilerPath ?? DEFAULT_CONFIG.compilerPath,
+    port: parsed.port ?? DEFAULT_CONFIG.port,
+    testsPath: parsed.testsPath ?? DEFAULT_CONFIG.testsPath,
+    syntaxSummaryPath: parsed.syntaxSummaryPath ?? DEFAULT_CONFIG.syntaxSummaryPath,
+    examplesPath: parsed.examplesPath ?? DEFAULT_CONFIG.examplesPath,
+    targets: [],
+    defaultTarget: parsed.defaultTarget ?? DEFAULT_CONFIG.defaultTarget
+  };
+
+  const resolvedTargets = deriveTargets(parsed);
+  const defaultTarget = resolvedTargets.find((target) => target.id === base.defaultTarget)?.id
+    ?? resolvedTargets[0]?.id
+    ?? DEFAULT_CONFIG.defaultTarget;
+
+  return {
+    ...base,
+    targets: resolvedTargets.length ? resolvedTargets : DEFAULT_TARGETS,
+    defaultTarget
+  };
+}
+
+function deriveTargets(parsed: PartialConfig): TargetConfig[] {
+  if (Array.isArray(parsed.targets) && parsed.targets.length) {
+    return parsed.targets
+      .map((target, index) => normalizeTarget(target, index))
+      .filter((target): target is TargetConfig => Boolean(target));
+  }
+
+  const legacyTarget = buildLegacyTarget(parsed);
+  return legacyTarget ? [legacyTarget] : [];
+}
+
+function normalizeTarget(target: TargetConfig | undefined, index: number): TargetConfig | null {
+  if (!target || !target.id) {
+    console.warn(
+      `[config] Ignoring target entry at index ${index} because it is missing an id property.`
+    );
+    return null;
+  }
+  return {
+    ...target,
+    label: target.label || target.id
+  };
+}
+
+function buildLegacyTarget(parsed: LegacyCommandConfig): TargetConfig | null {
+  if (
+    !parsed.buildCommand &&
+    !parsed.cleanCommand &&
+    !parsed.rebuildCommand &&
+    !parsed.testCommand
+  ) {
+    return null;
+  }
+
+  return {
+    ...DEFAULT_TARGETS[0],
+    id: "live",
+    label: "Live (bytecode VM)",
+    testCommand: parsed.testCommand ?? DEFAULT_TARGETS[0]!.testCommand,
+    buildCommand: parsed.buildCommand ?? DEFAULT_TARGETS[0]!.buildCommand,
+    cleanCommand: parsed.cleanCommand ?? DEFAULT_TARGETS[0]!.cleanCommand,
+    rebuildCommand: parsed.rebuildCommand ?? DEFAULT_TARGETS[0]!.rebuildCommand
+  };
 }
 
 export function getProjectRoot(): string {
@@ -70,4 +191,15 @@ export function getSyntaxSummaryPath(config: RaeDevtoolsConfig): string {
 
 export function getExamplesRoot(config: RaeDevtoolsConfig): string {
   return resolveCompilerPath(config, config.examplesPath ?? "examples");
+}
+
+export function resolveTarget(config: RaeDevtoolsConfig, targetId?: string): TargetConfig {
+  if (targetId) {
+    const match = config.targets.find((target) => target.id === targetId);
+    if (match) return match;
+    console.warn(`[config] Requested target "${targetId}" not found. Falling back to default.`);
+  }
+  return (
+    config.targets.find((target) => target.id === config.defaultTarget) ?? config.targets[0]!
+  );
 }

@@ -1,7 +1,14 @@
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { writeFile } from "node:fs/promises";
 import type { ExampleDescriptor, ExampleFileDescriptor } from "../shared/types";
+
+type ExampleMetadata = {
+  name?: string;
+  entry?: string;
+  description?: string;
+  supportedTargets?: string[];
+  defaultTargetId?: string;
+};
 
 export async function listExamples(root: string): Promise<ExampleDescriptor[]> {
   const entries = await safeReadDir(root);
@@ -18,11 +25,13 @@ export async function listExamples(root: string): Promise<ExampleDescriptor[]> {
     }
 
     if (entry.isDirectory()) {
+      const metadata = await readExampleMetadata(fullPath);
       const files = await collectRaeFiles(fullPath, relativePath);
       if (!files.length) continue;
-      const entryFile =
-        files.find((file) => file.path.endsWith("main.rae"))?.path ?? files[0].path;
-      examples.push(makeMultiFileExample(relativePath, entryFile, files));
+      const entryFile = resolveEntryFile(files, metadata?.entry, relativePath);
+      examples.push(
+        makeMultiFileExample(relativePath, entryFile, files, metadata)
+      );
     }
   }
 
@@ -41,13 +50,20 @@ function makeSingleFileExample(relativePath: string): ExampleDescriptor {
 function makeMultiFileExample(
   id: string,
   entry: string,
-  files: ExampleFileDescriptor[]
+  files: ExampleFileDescriptor[],
+  metadata: ExampleMetadata | null
 ): ExampleDescriptor {
+  const supportedTargets = Array.isArray(metadata?.supportedTargets)
+    ? metadata!.supportedTargets.filter((value): value is string => typeof value === "string")
+    : undefined;
   return {
     id,
-    name: id,
+    name: metadata?.name ?? id,
     entry,
-    files
+    files,
+    description: metadata?.description,
+    supportedTargets: supportedTargets?.length ? supportedTargets : undefined,
+    defaultTargetId: typeof metadata?.defaultTargetId === "string" ? metadata.defaultTargetId : undefined
   };
 }
 
@@ -103,4 +119,41 @@ function sanitizePath(root: string, relativePath: string): string {
     throw new Error("Invalid example path");
   }
   return resolved;
+}
+
+async function readExampleMetadata(dir: string): Promise<ExampleMetadata | null> {
+  const metadataPath = path.join(dir, "devtools.json");
+  try {
+    const contents = await readFile(metadataPath, "utf8");
+    const parsed = JSON.parse(contents);
+    if (parsed && typeof parsed === "object") {
+      return parsed as ExampleMetadata;
+    }
+    return null;
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (nodeError.code !== "ENOENT") {
+      console.warn(`[examples] Failed to read metadata for ${dir}`, error);
+    }
+    return null;
+  }
+}
+
+function resolveEntryFile(
+  files: ExampleFileDescriptor[],
+  metadataEntry: string | undefined,
+  relativeBase: string
+) {
+  if (typeof metadataEntry === "string" && metadataEntry.trim().length > 0) {
+    const normalized = path
+      .join(relativeBase, metadataEntry)
+      .split(path.sep)
+      .join(path.posix.sep);
+    const match = files.find((file) => file.path === normalized);
+    if (match) return match.path;
+    console.warn(
+      `[examples] Metadata entry "${metadataEntry}" not found for ${relativeBase}, falling back to default entry.`
+    );
+  }
+  return files.find((file) => file.path.endsWith("main.rae"))?.path ?? files[0].path;
 }

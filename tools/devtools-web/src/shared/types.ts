@@ -9,10 +9,23 @@ export type ServerHeartbeatMessage = {
   timestamp: string;
 };
 
+export type TargetInfoMessage = {
+  id: string;
+  label: string;
+  description?: string;
+  supportsTests: boolean;
+  supportsBuilds: boolean;
+  supportsExampleRun: boolean;
+  supportsExampleWatch: boolean;
+  supportsExampleBuild: boolean;
+};
+
 export type ServerInfoMessage = {
   type: "server-info";
   version: string;
   startedAt: string;
+  targets: TargetInfoMessage[];
+  defaultTargetId: string;
 };
 
 export type ExampleFileDescriptor = {
@@ -25,9 +38,12 @@ export type ExampleDescriptor = {
   name: string;
   entry: string;
   files: ExampleFileDescriptor[];
+  description?: string;
+  supportedTargets?: string[];
+  defaultTargetId?: string;
 };
 
-export type ExampleRunMode = "run" | "watch";
+export type ExampleRunMode = "run" | "watch" | "build";
 
 export type TestRunMode = "all" | "failed";
 export type BuildCommandType = "build" | "clean" | "rebuild";
@@ -38,6 +54,8 @@ export type TestRunStartedMessage = {
   mode: TestRunMode;
   command: string;
   cwd: string;
+  targetId: string;
+  targetLabel: string;
   timestamp: string;
 };
 
@@ -74,6 +92,8 @@ export type BuildRunStartedMessage = {
   type: "build-run-started";
   runId: string;
   command: BuildCommandType;
+  targetId: string;
+  targetLabel: string;
   timestamp: string;
 };
 
@@ -92,6 +112,8 @@ export type BuildRunCompletedMessage = {
   exitCode: number | null;
   success: boolean;
   durationMs: number;
+  targetId: string;
+  targetLabel: string;
   timestamp: string;
 };
 
@@ -99,6 +121,8 @@ export type BuildRunErrorMessage = {
   type: "build-run-error";
   runId: string;
   command: BuildCommandType;
+  targetId: string;
+  targetLabel: string;
   message: string;
   timestamp: string;
 };
@@ -108,6 +132,8 @@ export type ExampleRunStartedMessage = {
   runId: string;
   entry: string;
   mode: ExampleRunMode;
+  targetId: string;
+  targetLabel: string;
   timestamp: string;
 };
 
@@ -116,6 +142,8 @@ export type ExampleRunOutputMessage = {
   runId: string;
   entry: string;
   mode: ExampleRunMode;
+  targetId: string;
+  targetLabel: string;
   stream: "stdout" | "stderr";
   line: string;
   timestamp: string;
@@ -129,6 +157,8 @@ export type ExampleRunCompletedMessage = {
   exitCode: number | null;
   success: boolean;
   durationMs: number;
+  targetId: string;
+  targetLabel: string;
   timestamp: string;
 };
 
@@ -137,7 +167,20 @@ export type ExampleRunErrorMessage = {
   runId: string;
   entry: string;
   mode: ExampleRunMode;
+  targetId: string;
+  targetLabel: string;
   message: string;
+  timestamp: string;
+};
+
+export type ExampleRunArtifactsMessage = {
+  type: "example-run-artifacts";
+  runId: string;
+  entry: string;
+  mode: ExampleRunMode;
+  targetId: string;
+  targetLabel: string;
+  files: Array<{ path: string; size: number; hash: string }>;
   timestamp: string;
 };
 
@@ -147,12 +190,16 @@ export type TestRunCompletedMessage = {
   exitCode: number | null;
   success: boolean;
   durationMs: number;
+  targetId: string;
+  targetLabel: string;
   timestamp: string;
 };
 
 export type TestRunErrorMessage = {
   type: "test-run-error";
   runId: string;
+  targetId: string;
+  targetLabel: string;
   message: string;
   timestamp: string;
 };
@@ -174,7 +221,8 @@ export type ServerEvent =
   | ExampleRunStartedMessage
   | ExampleRunOutputMessage
   | ExampleRunCompletedMessage
-  | ExampleRunErrorMessage;
+  | ExampleRunErrorMessage
+  | ExampleRunArtifactsMessage;
 
 export type ClientHelloMessage = {
   type: "client-hello";
@@ -184,16 +232,21 @@ export type ClientHelloMessage = {
 export type ClientRunTestsMessage = {
   type: "run-tests";
   mode?: TestRunMode;
+  targetId?: string;
 };
 
 export type ClientRunBuildMessage = {
   type: "run-build";
   command: BuildCommandType;
+  targetId?: string;
 };
 
 export type ClientRunExampleMessage = {
   type: "run-example";
   entry: string;
+  targetId?: string;
+  mode?: ExampleRunMode;
+  watch?: boolean;
 };
 
 export type ClientEvent =
