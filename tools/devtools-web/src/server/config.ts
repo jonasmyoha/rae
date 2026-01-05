@@ -84,31 +84,34 @@ const DEFAULT_CONFIG: RaeDevtoolsConfig = {
 
 const PROJECT_ROOT = path.resolve(process.cwd());
 const CONFIG_PATH = path.join(PROJECT_ROOT, "config.json");
+const LOCAL_CONFIG_PATH = path.join(PROJECT_ROOT, "config.local.json");
 
 export async function loadConfig(customPath?: string): Promise<RaeDevtoolsConfig> {
   const filePath = customPath ?? CONFIG_PATH;
+  const baseConfig = await readConfigFile(filePath);
+  const localConfig = await readConfigFile(LOCAL_CONFIG_PATH);
 
-  try {
-    const contents = await readFile(filePath, "utf8");
-    const parsed = JSON.parse(contents) as PartialConfig;
-    const config = normalizeConfig(parsed);
-    config.configSource = filePath;
-    logConfigSummary(config);
-    return config;
-  } catch (error) {
-    const nodeError = error as NodeJS.ErrnoException;
-    if (nodeError.code === "ENOENT") {
-      console.warn(
-        `[config] Missing config.json at ${filePath}. Falling back to defaults (copy config.example.json to configure).`
-      );
-      const config = { ...DEFAULT_CONFIG, configSource: "defaults" };
-      logConfigSummary(config);
-      return config;
-    }
-
-    console.error(`[config] Failed to parse config at ${filePath}`);
-    throw error;
+  if (!baseConfig) {
+    console.warn(
+      `[config] Missing config at ${filePath}. Using defaults${
+        localConfig ? " with config.local.json overrides" : ""
+      }.`
+    );
   }
+
+  let merged: PartialConfig = baseConfig ?? {};
+  if (localConfig) {
+    merged = mergePartialConfigs(merged, localConfig);
+  }
+
+  const config = normalizeConfig(merged);
+  const sourceParts = [
+    baseConfig ? path.basename(filePath) : "defaults",
+    localConfig ? path.basename(LOCAL_CONFIG_PATH) : null
+  ].filter((part): part is string => Boolean(part));
+  config.configSource = sourceParts.join(" + ");
+  logConfigSummary(config);
+  return config;
 }
 
 function logConfigSummary(config: RaeDevtoolsConfig) {
@@ -121,6 +124,30 @@ function logConfigSummary(config: RaeDevtoolsConfig) {
       `[config] Target ${target.id}: test="${target.testCommand ?? "-"}" build="${target.buildCommand ?? "-"}"`
     );
   });
+}
+
+async function readConfigFile(filePath: string): Promise<PartialConfig | null> {
+  try {
+    const contents = await readFile(filePath, "utf8");
+    const parsed = JSON.parse(contents) as PartialConfig;
+    return parsed ?? {};
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (nodeError.code === "ENOENT") {
+      return null;
+    }
+    console.error(`[config] Failed to parse config at ${filePath}`);
+    throw error;
+  }
+}
+
+function mergePartialConfigs(base: PartialConfig, override: PartialConfig): PartialConfig {
+  return {
+    ...base,
+    ...override,
+    targets: override.targets ?? base.targets,
+    defaultTarget: override.defaultTarget ?? base.defaultTarget
+  };
 }
 
 function normalizeConfig(parsed: PartialConfig = {}): RaeDevtoolsConfig {
