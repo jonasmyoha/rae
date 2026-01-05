@@ -1,83 +1,90 @@
 # Rae Programming Language
 
-A programming language focused on explicit ownership semantics and natural syntax.
+[![XKCD 927: Standards](https://imgs.xkcd.com/comics/standards.png)](https://xkcd.com/927/)
 
-## Project Structure
+## WIP: EARLY STAGE
 
-- `compiler/` - The Rae compiler (C11 implementation)
-- `spec/` - Language specification
-- `examples/` - Example Rae programs
-- `docs/` - Documentation
+Rae is in early development. Many promised features are not built yet.
+Treat everything below as direction, not a guarantee.
 
-## Quick Start
+## Why Rae?
 
-```bash
-cd compiler
-make build
-make test
-```
+Rae is a language and toolchain designed for humans and AI agents to share the same codebase.
+It focuses on clarity, explicit semantics, and tooling that works the same in Live and Compiled workflows.
 
-## Status
+What makes Rae different:
+- One language, two runtimes: Live (bytecode VM) for fast iteration and Compiled (C backend) for production builds.
+- Hybrid mode bridges them, so a compiled host can load Live code bundles.
+- Hot reload is a first-class workflow, not an afterthought.
+- Ownership is explicit: no hidden aliasing, no surprise copies.
+- Syntax aims to be structured and machine-friendly, without clever ambiguity.
 
-**Phase 1 (MVP):** Lexer, parser, AST, pretty-printer ✅ In Progress
+## Execution Modes
 
-See `spec/rae.md` for language details.
+Live (bytecode VM)
+- Fast iteration and hot reload during development.
+- Ideal for tooling, scripted behavior, and rapid feedback loops.
 
-## Repository statistics
+Compiled (C backend)
+- Targets performance and distribution by emitting C.
+- The backend is still incomplete, but the pipeline is in progress.
 
-Run the metrics tool before committing to log compiler code size over time:
+Hybrid
+- A compiled host can package and load Live code bundles.
+- Designed for shipped apps that download new behavior and reload without restarting.
 
-```bash
-./tools/stats/update_metrics.sh
-```
+## Hot Reload
 
-Outputs land in `stats/` as JSON lines and can be graphed later.
+Development hot reload
+- Live mode supports watch-based reload for quick iteration.
 
-## CLI commands
+Shipped hot reload (planned)
+- Hybrid mode is intended to allow downloading code updates at runtime.
+- Current demos are early and focus on packaging and staging, not full production behavior.
 
-```bash
-bin/rae lex <file>     # tokenize Rae source
-bin/rae parse <file>   # dump AST structure
-bin/rae format <file>  # pretty-print canonical Rae (stdout by default)
-bin/rae run <file>     # execute via the interpreter/VM (hot reload ready)
-bin/rae build --target hybrid <file>   # emit hybrid bundles (Live chunk + C runtime)
-bin/rae build --target live <file>     # emit Live (bytecode VM) packages (.vmchunk + manifest)
-bin/rae build --target compiled --emit-c <file>  # transpile to experimental C backend
-```
+## Memory Model
 
-Use `bin/rae run --watch <file>` to keep the VM running and recompile whenever the file
-changes—great for experimenting with the new interpreted workflow.
+Rae uses explicit ownership qualifiers:
+- own T: owning reference
+- view T: read-only borrow
+- mod T: mutable borrow
+- opt T: optional wrapper
 
-`rae format` prints to stdout unless you pass either `--write/-w` to rewrite the
-input file in place or `--output <path>` to emit to a different file. The two
-flags are mutually exclusive so you can safely script them:
+There is no general-purpose garbage collector today.
+The Live VM uses simple managed allocations, and future work will add better tracking,
+especially to support hot reload and long-running sessions.
 
-```bash
-bin/rae format my_app.rae > my_app.pretty.rae            # stdout pipeline
-bin/rae format --write my_app.rae                        # overwrite source
-bin/rae format --output build/pretty/app.rae my_app.rae  # write to custom file
-```
+## Current State
 
-See `docs/c-backend-plan.md` for the full roadmap that the `rae build` command will follow as the C backend comes online.
+Done or usable today:
+- [x] Lexer, parser, AST, and formatter
+- [x] Live (bytecode VM) execution for examples
+- [x] File watching for Live hot reload
+- [x] Basic module loading and imports
+- [x] Hybrid packaging outputs (experimental)
 
-### Modules, Packages & Imports
+In progress or planned:
+- [ ] Ownership and type checking
+- [ ] Robust C backend with full codegen
+- [ ] Stable runtime host API for shipped hot reload
+- [ ] Debugger and editor tooling
+- [ ] Performance profiling and optimization passes
 
-- Every `.rae` file becomes a module whose path mirrors its location relative to the project root (e.g., `examples/todo/ui/list`).
-- Import paths always use `/`. Absolute imports start from the repo root (`import "compiler/modules/greetings/banner"`). Relative imports use `./` or `../` to walk from the current file (`import "../shared/time"`).
-- When a file omits imports altogether and either a `.raepack` file declares `auto_folders` or the folder contains a single `.rae` entry point, `bin/rae run` automatically pulls in every `.rae` file under that directory tree. This keeps tiny prototypes ergonomic: drop `main.rae` plus helpers in a folder (or add a simple `.raepack`), and run `bin/rae run path/to/main.rae`.
-- `.raepack` files use Rae syntax to describe packages (name, branding, auto folders, targets). If they’re missing, the compiler falls back to the single-file heuristic so onboarding stays zero-config.
+## Planned Use Cases
 
-## Modules & Imports
+Rae is being built for:
+- Games and gameplay scripting
+- Apps with live-updated logic
+- UI tooling and dynamic workflows
 
-- Place modules anywhere under the repo root; their canonical name equals the path (without `.rae`), e.g. `examples/multifile_report/ui/header`.
-- Import using absolute, Dart-style strings (no `..` segments):
+These are targets, not finished products.
+Expect sharp edges while the language and toolchain mature.
 
-```rae
-import "examples/multifile_report/ui/header"
-import "compiler/modules/greetings/body"
-```
+## Learn More
 
-See `spec/rae.md#modules--imports` for the syntax and rules.
+- Language spec: spec/rae.md
+- Design notes and plans: docs/
+- Example programs: examples/
 
 ## License
 
