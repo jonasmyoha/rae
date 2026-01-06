@@ -151,7 +151,8 @@ typedef enum {
   AST_STMT_RET,
   AST_STMT_IF,
   AST_STMT_WHILE,
-  AST_STMT_MATCH
+  AST_STMT_MATCH,
+  AST_STMT_ASSIGN
 } AstStmtKind;
 
 typedef struct AstMatchCase {
@@ -199,6 +200,11 @@ struct AstStmt {
       AstExpr* subject;
       AstMatchCase* cases;
     } match_stmt;
+    struct {
+      AstExpr* target;
+      AstExpr* value;
+      bool is_move;
+    } assign_stmt;
   } as;
 };
 
