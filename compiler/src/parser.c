@@ -940,6 +940,9 @@ static AstDecl* parse_type_declaration(Parser* parser) {
   decl->as.type_decl.name = parser_copy_str(parser, name->lexeme);
   if (parser_match(parser, TOK_COLON)) {
     decl->as.type_decl.properties = parse_type_properties(parser);
+    if (!decl->as.type_decl.properties) {
+      parser_error(parser, parser_peek(parser), "expected property after ':' in type declaration");
+    }
   }
   parser_consume(parser, TOK_LBRACE, "expected '{' to start type body");
   decl->as.type_decl.fields = parse_type_fields(parser);

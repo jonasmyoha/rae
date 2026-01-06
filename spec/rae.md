@@ -25,7 +25,7 @@ own view mod opt
 if else match case
 true false none
 and or not is
-pub priv extern
+pub priv extern pack
 ```
 
 ### 1.4 Literals
@@ -67,10 +67,21 @@ pub priv extern
 
 ### 3.1 Type Definition
 
+A colon (`:`) after the type name is used to introduce properties (like `priv`). If a type has no properties, the colon should be omitted.
+
+With properties:
 ```rae
-type Point: pub {
+type Point: priv {
   x: Int
   y: Int
+}
+```
+
+Without properties:
+```rae
+type Vector {
+  x: Float
+  y: Float
 }
 ```
 
@@ -92,21 +103,27 @@ opt own Texture
 ### 4.1 Function Definition
 
 ```rae
-func add(a: view Point, b: view Point): pub ret Point {
+# Functions are public by default
+func add(a: view Point, b: view Point): ret Point {
   ret (x: a.x + b.x, y: a.y + b.y)
+}
+
+# A private function
+func internalHelper(a: Int): priv ret Int {
+    ret a * 2
 }
 ```
 
 Rules:
 * Parameters use `name: Type`
 * `def` is **not allowed** in parameters
-* Function properties (pub, spawn) come **after the parameter list**, space-separated
-* Return declaration (`ret`) comes last
+* Function properties (like `priv` or `spawn`) come **after the parameter list**, space-separated.
+* Return declaration (`ret`) comes last.
 
 ### 4.2 Multiple Return Values
 
 ```rae
-func divide(a: Int, b: Int): pub ret result: Int, error: opt Error {
+func divide(a: Int, b: Int): ret result: Int, error: opt Error {
   if b is 0 {
     ret error: Error(message: "divide by zero")
   }
@@ -241,35 +258,39 @@ export "examples/shared/ui/theme"
 
 - Imported modules are compiled before the current file, so their declarations are globally visible.
 - `export` re-exports a module for downstream consumers (future semantic passes will surface these in module metadata).
-- When a file does not declare any explicit imports and either a `.raepack` file enables auto folders or the folder contains only one `.rae` entry point, the CLI automatically scans that directory (and subdirectories) for `.rae` files and includes them. This keeps tiny apps ergonomic—drop `main.rae` plus helpers in a folder, or add a `.raepack`, and run `rae run path/to/main.rae` without bookkeeping.
 
 ### 8.6 Package Descriptor (`.raepack`)
 
-- Packages (apps, libraries, tool bundles) are described by an optional `*.raepack` file that uses Rae syntax. Example:
+- Packages (apps, libraries, tool bundles) are described by an optional `*.raepack` file that uses Rae syntax. A colon after the pack name is optional. Example:
 
 ```rae
-package MyCoolApp {
-  brand {
-    name: "My Cool App"
-    identifier: "com.example.cool"
-  }
-  auto_folders: ["./src", "./ui"]
-  targets {
-    desktop {
-      main: "src/main.rae"
+pack MyCoolApp {
+  format: "raepack"
+  version: 1
+  defaultTarget: desktop
+
+  targets: {
+    target desktop: {
+      label: "Desktop App"
+      entry: "src/main.rae"
+      sources: {
+        source: { path: "src/", emit: both }
+      }
     }
   }
 }
 ```
 
 - Key ideas:
-  - **`package <Name>`** defines the canonical package name. This value can be referenced from source code later (e.g., `import package.name`) so renaming happens in one place.
-  - **`brand` block** stores marketing metadata (display name, identifiers, icons) so UI code can reference `package.brand.name`.
-  - **`auto_folders`** lists directories that should behave as implicit import roots. If omitted, the CLI falls back to the single-file heuristic (one `.rae` entry point) so tutorial projects still Just Work™.
-  - **`targets`** describe build outputs (desktop, mobile, web). Each target can set its own `main`, build flags, and bundling directives.
-  - Additional sections (dependencies, assets, versioning, release/debug profiles) will live here as the package manager evolves.
+  - **`pack <Name>`** defines the canonical package name.
+  - **`targets`** describe build outputs (e.g., desktop, mobile, web). Each target is introduced by `target <id>:` and has its own block of properties.
+    - `label`: A human-readable name for the target.
+    - `entry`: The path to the main `.rae` file for this target.
+    - `sources`: A block defining which files or directories are included in the build. Each `source` has a `path` and an `emit` property (`live`, `compiled`, or `both`).
+  - Other metadata like `format` and `version` define the package itself.
+  - Additional sections (dependencies, assets, release/debug profiles) will live here as the package manager evolves.
 
-- **Defaults:** If no `.raepack` is present, and the compiler is run in a directory containing only one `.rae` file (e.g., `main.rae`), that directory is treated as the package root and auto-imports are enabled implicitly. As soon as multiple entry points or more structure is needed, creators add a `.raepack` to explicitly describe the package.
+- **Defaults:** If no `.raepack` is present, and the compiler is run in a directory containing only one `.rae` file (e.g., `main.rae`), that directory is treated as the package root. As soon as multiple entry points or more structure is needed, creators add a `.raepack` to explicitly describe the package.
 
 ---
 
