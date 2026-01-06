@@ -398,6 +398,13 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
       return emit_while(ctx, stmt, out);
     case AST_STMT_MATCH:
       return emit_match(ctx, stmt, out);
+    case AST_STMT_ASSIGN: {
+      if (fprintf(out, "  ") < 0) return false;
+      if (!emit_expr(ctx, stmt->as.assign_stmt.target, out)) return false;
+      if (fprintf(out, " = ") < 0) return false;
+      if (!emit_expr(ctx, stmt->as.assign_stmt.value, out)) return false;
+      return fprintf(out, ";\n") >= 0;
+    }
     default:
       fprintf(stderr, "error: C backend does not yet support this statement kind (%d)\n",
               (int)stmt->kind);

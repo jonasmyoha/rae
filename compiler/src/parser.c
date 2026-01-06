@@ -887,8 +887,25 @@ static AstStmt* parse_statement(Parser* parser) {
   if (parser_match(parser, TOK_KW_MATCH)) {
     return parse_match_statement(parser, parser_previous(parser));
   }
+  
+  AstExpr* expr = parse_expression(parser);
+  if (parser_match(parser, TOK_ASSIGN)) {
+    AstStmt* stmt = new_stmt(parser, AST_STMT_ASSIGN, parser_previous(parser));
+    stmt->as.assign_stmt.target = expr;
+    stmt->as.assign_stmt.value = parse_expression(parser);
+    stmt->as.assign_stmt.is_move = false;
+    return stmt;
+  }
+  if (parser_match(parser, TOK_ARROW)) {
+    AstStmt* stmt = new_stmt(parser, AST_STMT_ASSIGN, parser_previous(parser));
+    stmt->as.assign_stmt.target = expr;
+    stmt->as.assign_stmt.value = parse_expression(parser);
+    stmt->as.assign_stmt.is_move = true;
+    return stmt;
+  }
+
   AstStmt* stmt = new_stmt(parser, AST_STMT_EXPR, parser_peek(parser));
-  stmt->as.expr_stmt = parse_expression(parser);
+  stmt->as.expr_stmt = expr;
   return stmt;
 }
 
