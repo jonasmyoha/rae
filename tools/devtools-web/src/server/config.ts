@@ -56,8 +56,8 @@ const DEFAULT_TARGETS: TargetConfig[] = [
     buildCommand: "cd compiler && make",
     cleanCommand: "cd compiler && make clean",
     rebuildCommand: "cd compiler && make clean && make",
-    exampleRunCommand: "./compiler/bin/rae build --target compiled --out {{OUTDIR}} {{ENTRY}}",
-    exampleBuildCommand: "./compiler/bin/rae build --target compiled --out {{OUTDIR}} {{ENTRY}}"
+    exampleRunCommand: "./compiler/bin/rae build --target compiled --emit-c --out {{OUTDIR}}/out.c {{ENTRY}} && gcc -O2 -o {{OUTDIR}}/app {{OUTDIR}}/out.c {{OUTDIR}}/rae_runtime.c third_party/raylib/rae_raylib.c -I{{OUTDIR}} -Ithird_party/raylib -I/opt/homebrew/include -L/opt/homebrew/lib -lraylib -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL && {{OUTDIR}}/app",
+    exampleBuildCommand: "./compiler/bin/rae build --target compiled --emit-c --out {{OUTDIR}} {{ENTRY}}"
   },
   {
     id: "hybrid",
@@ -67,10 +67,12 @@ const DEFAULT_TARGETS: TargetConfig[] = [
     buildCommand: "cd compiler && make",
     cleanCommand: "cd compiler && make clean",
     rebuildCommand: "cd compiler && make clean && make",
-    exampleRunCommand: "./compiler/bin/rae build --target hybrid --out {{OUTDIR}} {{ENTRY}}",
-    exampleBuildCommand: "./compiler/bin/rae build --target hybrid --out {{OUTDIR}} {{ENTRY}}"
+    exampleRunCommand: "./compiler/bin/rae build --target hybrid --emit-c --out {{OUTDIR}} {{ENTRY}}",
+    exampleBuildCommand: "./compiler/bin/rae build --target hybrid --emit-c --out {{OUTDIR}} {{ENTRY}}"
   }
 ];
+
+const DEFAULT_COMPILER_TARGET_IDS = ["live", "compiled"];
 
 const DEFAULT_CONFIG: RaeDevtoolsConfig = {
   compilerPath: "../rae",
@@ -247,4 +249,25 @@ export function resolveTarget(config: RaeDevtoolsConfig, targetId?: string): Tar
   return (
     config.targets.find((target) => target.id === config.defaultTarget) ?? config.targets[0]!
   );
+}
+
+export function resolveTargetList(
+  config: RaeDevtoolsConfig,
+  targetIds?: string[]
+): TargetConfig[] {
+  const resolved: TargetConfig[] = [];
+  const appendTarget = (targetId: string) => {
+    const match = config.targets.find((target) => target.id === targetId);
+    if (match && !resolved.includes(match)) {
+      resolved.push(match);
+    }
+  };
+
+  if (Array.isArray(targetIds) && targetIds.length) {
+    targetIds.forEach(appendTarget);
+    return resolved.length ? resolved : [resolveTarget(config)];
+  }
+
+  DEFAULT_COMPILER_TARGET_IDS.forEach(appendTarget);
+  return resolved.length ? resolved : [...config.targets];
 }
