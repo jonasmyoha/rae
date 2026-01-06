@@ -33,14 +33,15 @@ typedef struct {
 
 static const Keyword KEYWORDS[] = {
     {"and", TOK_KW_AND},     {"case", TOK_KW_CASE},    {"def", TOK_KW_DEF},
-    {"else", TOK_KW_ELSE},   {"export", TOK_KW_EXPORT},{"extern", TOK_KW_EXTERN},
-    {"false", TOK_KW_FALSE}, {"func", TOK_KW_FUNC},    {"if", TOK_KW_IF},
-    {"import", TOK_KW_IMPORT},{"while", TOK_KW_WHILE}, {"default", TOK_KW_DEFAULT},
-    {"is", TOK_KW_IS},       {"match", TOK_KW_MATCH},  {"mod", TOK_KW_MOD},
-    {"none", TOK_KW_NONE},   {"not", TOK_KW_NOT},      {"opt", TOK_KW_OPT},
-    {"or", TOK_KW_OR},       {"own", TOK_KW_OWN},      {"priv", TOK_KW_PRIV},
-    {"pub", TOK_KW_PUB},     {"ret", TOK_KW_RET},      {"spawn", TOK_KW_SPAWN},
-    {"true", TOK_KW_TRUE},   {"type", TOK_KW_TYPE},    {"view", TOK_KW_VIEW}};
+    {"default", TOK_KW_DEFAULT},{"else", TOK_KW_ELSE},   {"export", TOK_KW_EXPORT},
+    {"extern", TOK_KW_EXTERN},{"false", TOK_KW_FALSE}, {"func", TOK_KW_FUNC},
+    {"if", TOK_KW_IF},       {"import", TOK_KW_IMPORT},{"is", TOK_KW_IS},
+    {"match", TOK_KW_MATCH}, {"mod", TOK_KW_MOD},     {"none", TOK_KW_NONE},
+    {"not", TOK_KW_NOT},     {"opt", TOK_KW_OPT},     {"or", TOK_KW_OR},
+    {"own", TOK_KW_OWN},     {"pack", TOK_KW_PACK},   {"priv", TOK_KW_PRIV},
+    {"pub", TOK_KW_PUB},     {"ret", TOK_KW_RET},     {"spawn", TOK_KW_SPAWN},
+    {"true", TOK_KW_TRUE},   {"type", TOK_KW_TYPE},   {"view", TOK_KW_VIEW},
+    {"while", TOK_KW_WHILE}};
 
 static const char* const TOKEN_KIND_NAMES[] = {
     [TOK_EOF] = "TOK_EOF",
@@ -74,6 +75,7 @@ static const char* const TOKEN_KIND_NAMES[] = {
     [TOK_KW_NOT] = "TOK_NOT",
     [TOK_KW_IS] = "TOK_IS",
     [TOK_KW_PUB] = "TOK_PUB",
+    [TOK_KW_PACK] = "TOK_KW_PACK",
     [TOK_KW_PRIV] = "TOK_PRIV",
     [TOK_ASSIGN] = "TOK_ASSIGN",
     [TOK_ARROW] = "TOK_ARROW",
@@ -205,14 +207,11 @@ static void lexer_skip_block_comment(Lexer* lexer, size_t start_line, size_t sta
 static void lexer_skip_whitespace_and_comments(Lexer* lexer) {
   for (;;) {
     char c = lexer_peek(lexer);
-    if (c == ' ' || c == '\t' || c == '\v' || c == '\f') {
+    if (c == ' ' || c == '\t' || c == '\v' || c == '\f' || c == '\n' || c == '\r') {
       lexer_advance(lexer);
       continue;
     }
-    if (c == '\n' || c == '\r') {
-      lexer_advance(lexer);
-      continue;
-    }
+
     if (c == '#') {
       size_t comment_line = lexer->line;
       size_t comment_col = lexer->column;

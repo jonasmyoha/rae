@@ -21,6 +21,9 @@ bin/rae lex <file>     # tokenize
 bin/rae parse <file>   # parse + dump AST
 bin/rae format <file>  # pretty-print canonical Rae (stdout by default)
 bin/rae run <file>     # execute Rae source via the bytecode VM (hot reload path)
+bin/rae pack <file>    # validate and summarize a .raepack file
+bin/rae pack --json <file>  # emit machine-friendly JSON
+bin/rae pack --target live --json <file>  # validate + select a target
 bin/rae build --target hybrid --out out.hybrid <file>  # emit bundled Live+Compiled assets (.raepkg-style dir)
 bin/rae build --target live --out out.vmchunk <file>   # emit Live (bytecode VM) artifact + function manifest
 bin/rae build --emit-c --out out.c <file>  # transpile tiny Rae programs to C
