@@ -45,10 +45,7 @@ const rebuildBtn = document.getElementById("rebuild-btn");
 const inspectorTabs = document.querySelectorAll("[data-inspector-tab]");
 const exampleListEl = document.getElementById("example-list");
 const exampleStatusChip = document.getElementById("example-status-chip");
-const runExampleBtn = document.getElementById("run-example-btn");
-const watchExampleBtn = document.getElementById("watch-example-btn");
 const stopExampleBtn = document.getElementById("stop-example-btn");
-const buildExampleBtn = document.getElementById("build-example-btn");
 const toggleEditExampleBtn = document.getElementById("toggle-edit-example-btn");
 const saveExampleBtn = document.getElementById("save-example-btn");
 const exampleOutput = document.getElementById("example-output");
@@ -61,13 +58,11 @@ const exampleEditor = document.getElementById("example-editor");
 const exampleArtifactsList = document.getElementById("example-artifacts-list");
 const exampleArtifactsTitle = document.getElementById("example-artifacts-title");
 const exampleArtifactsHint = document.getElementById("example-artifacts-hint");
+const exampleTargetActions = document.getElementById("example-target-actions");
 const exampleCustomActions = document.getElementById("example-custom-actions");
 const exampleDownloadsSection = document.getElementById("example-downloads");
 const exampleDownloadsList = document.getElementById("example-downloads-list");
 const exampleDownloadsHint = document.getElementById("example-downloads-hint");
-const buildTargetSelect = document.getElementById("build-target-select");
-const testTargetSelect = document.getElementById("test-target-select");
-const exampleTargetSelect = document.getElementById("example-target-select");
 
 let socket;
 let reconnectTimer;
@@ -102,12 +97,7 @@ let exampleEditorDirty = false;
 let statsViewLoaded = false;
 let compilerLineMetrics = [];
 let lineChartFrame = null;
-const targetSelectElements = [buildTargetSelect, testTargetSelect, exampleTargetSelect].filter(
-  Boolean
-);
-const TARGET_STORAGE_KEY = "rae-devtools.target";
 let availableTargets = [];
-let selectedTargetId = null;
 let lastTestTargetLabel = "";
 let lastBuildTargetLabel = "";
 let lastExampleTargetLabel = "";
@@ -276,16 +266,6 @@ const defaultView =
   document.querySelector("[data-view-target].is-active")?.dataset.viewTarget ?? "compiler";
 setActiveView(defaultView);
 
-targetSelectElements.forEach((select) => {
-  select.disabled = true;
-  select.addEventListener("change", (event) => {
-    const value = typeof event.target.value === "string" ? event.target.value : "";
-    if (value) {
-      setSelectedTarget(value);
-    }
-  });
-});
-
 runTestsBtn?.addEventListener("click", () => requestTestRun("all"));
 document.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "t") {
@@ -305,9 +285,6 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-runExampleBtn?.addEventListener("click", () => triggerExampleRun("run"));
-watchExampleBtn?.addEventListener("click", () => triggerExampleRun("watch"));
-buildExampleBtn?.addEventListener("click", () => triggerExampleRun("build"));
 stopExampleBtn?.addEventListener("click", () => stopExampleRun());
 toggleEditExampleBtn?.addEventListener("click", () => toggleExampleEdit());
 saveExampleBtn?.addEventListener("click", () => saveExampleSource());
@@ -363,8 +340,7 @@ function requestTestRun(mode = "all") {
   socket.send(
     JSON.stringify({
       type: "run-tests",
-      mode,
-      targetId: getSelectedTargetId()
+      mode
     })
   );
 }
@@ -378,8 +354,7 @@ function requestBuildCommand(command = "build") {
   socket.send(
     JSON.stringify({
       type: "run-build",
-      command,
-      targetId: getSelectedTargetId()
+      command
     })
   );
 }
@@ -390,7 +365,7 @@ function handleTestRunStarted(event) {
   setTestStatus(`Running (${event.mode})`, "is-running", event.targetLabel);
   setTestButtonsDisabled(true);
   clearTestLog();
-  appendTestLine(`▶ [${event.targetLabel}] ${event.command}`, "stdout");
+  appendTestLine(`▶ [${event.targetLabel}] Running tests (${event.mode})`, "stdout");
   resetTestCases();
 }
 
@@ -400,7 +375,7 @@ function handleBuildRunStarted(event) {
   setBuildStatus(`Running ${event.command}`, "is-running", event.targetLabel);
   setBuildButtonsDisabled(true);
   clearBuildLog();
-  appendBuildLine(`▶ [${event.targetLabel}] ${event.command} command started`, "stdout");
+  appendBuildLine(`▶ [${event.targetLabel}] ${event.command} started`, "stdout");
 }
 
 function handleTestRunOutput(event) {
@@ -605,7 +580,7 @@ function handleServerInfo(event) {
   }
 
   currentBuildVersion = event.version;
-  initializeTargets(event.targets ?? [], event.defaultTargetId);
+  initializeTargets(event.targets ?? []);
 }
 
 function handleTestCase(event) {
@@ -873,7 +848,6 @@ async function loadExamples() {
       loadExampleSource(selectedExampleFile);
     }
     resetExampleArtifacts();
-    applyExampleDefaultTarget(examples[0]);
   }
   renderExampleList();
   renderExampleDetail();
@@ -918,7 +892,6 @@ function renderExampleList() {
         resetExampleArtifacts();
       }
       selectedExampleFile = example.files[0]?.path ?? null;
-      applyExampleDefaultTarget(example);
       renderExampleList();
       renderExampleDetail();
       if (selectedExampleFile) {
@@ -934,7 +907,7 @@ function renderExampleList() {
 }
 
 function renderExampleDetail() {
-  if (!exampleTitle || !runExampleBtn || !exampleEntryLabel || !exampleFilesList) return;
+  if (!exampleTitle || !exampleEntryLabel || !exampleFilesList) return;
   const example = getSelectedExample();
   if (!example) {
     exampleTitle.textContent = "Select an example";
@@ -958,15 +931,15 @@ function renderExampleDetail() {
 
   exampleTitle.textContent = example.name;
   const details = [`Entry: ${example.entry}`];
-  if (Array.isArray(example.supportedTargets) && example.supportedTargets.length) {
-    details.push(`Targets: ${example.supportedTargets.join(", ")}`);
+  const targetSummary = describeExampleTargets(example);
+  if (targetSummary) {
+    details.push(`Targets: ${targetSummary}`);
   }
   if (example.description) {
     details.push(example.description);
   }
   exampleEntryLabel.textContent = details.join(" · ");
   updateExampleButtons();
-  renderExampleActions(example);
   renderExampleFiles(example);
   loadExampleDownloads(example.id);
 
@@ -1011,6 +984,51 @@ function renderExampleFiles(example) {
   exampleFilesList.appendChild(fragment);
 }
 
+function renderExampleTargetButtons(example) {
+  if (!exampleTargetActions) return;
+  exampleTargetActions.innerHTML = "";
+  if (!example) {
+    exampleTargetActions.hidden = true;
+    return;
+  }
+
+  const targets = getExampleTargets(example);
+  if (!targets.length) {
+    exampleTargetActions.hidden = true;
+    return;
+  }
+  exampleTargetActions.hidden = false;
+
+  const fragment = document.createDocumentFragment();
+  targets.forEach((target) => {
+    const shortLabel = formatTargetShortLabel(target);
+    const actions = [
+      { mode: "run", label: "Run", enabled: target.supportsExampleRun, secondary: false },
+      { mode: "watch", label: "Watch", enabled: target.supportsExampleWatch, secondary: true },
+      { mode: "build", label: "Build", enabled: target.supportsExampleBuild, secondary: true }
+    ];
+    actions.forEach((action) => {
+      if (!action.enabled) return;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = shortLabel ? `${action.label} ${shortLabel}` : action.label;
+      if (action.secondary) {
+        button.classList.add("secondary");
+      }
+      button.disabled = exampleRunActive;
+      button.title = target.label;
+      button.addEventListener("click", () => triggerExampleRun(action.mode, target.id));
+      fragment.appendChild(button);
+    });
+  });
+
+  if (!fragment.childNodes.length) {
+    exampleTargetActions.hidden = true;
+    return;
+  }
+  exampleTargetActions.appendChild(fragment);
+}
+
 function renderExampleActions(example) {
   if (!exampleCustomActions) return;
   exampleCustomActions.innerHTML = "";
@@ -1021,7 +1039,6 @@ function renderExampleActions(example) {
   exampleCustomActions.hidden = false;
   const selection = getExampleDownloadSelection(example.id);
   const fragment = document.createDocumentFragment();
-  const selectedTargetId = getSelectedTargetId();
   example.actions.forEach((action) => {
     const button = document.createElement("button");
     button.type = "button";
@@ -1035,9 +1052,21 @@ function renderExampleActions(example) {
       hints.push(action.description);
     }
     const requiresTarget = action.targetId;
-    if (requiresTarget && requiresTarget !== selectedTargetId) {
+    const resolvedTargetId = resolveExampleTargetId(example, requiresTarget);
+    if (!resolvedTargetId) {
       button.disabled = true;
-      hints.push(`Requires target: ${requiresTarget}`);
+      hints.push("No targets available");
+    }
+    if (requiresTarget) {
+      const hasTarget = Boolean(getTargetById(requiresTarget));
+      if (!hasTarget) {
+        button.disabled = true;
+        hints.push(`Requires target: ${requiresTarget}`);
+      }
+      if (example.supportedTargets?.length && !example.supportedTargets.includes(requiresTarget)) {
+        button.disabled = true;
+        hints.push(`Unavailable for target: ${requiresTarget}`);
+      }
     }
     if (exampleRunActive) {
       button.disabled = true;
@@ -1046,7 +1075,7 @@ function renderExampleActions(example) {
       button.title = hints.join("\n");
     }
     button.dataset.actionId = action.id;
-    button.addEventListener("click", () => triggerExampleRun("action", action.id));
+    button.addEventListener("click", () => triggerExampleRun("action", resolvedTargetId, action.id));
     fragment.appendChild(button);
   });
   exampleCustomActions.innerHTML = "";
@@ -1055,6 +1084,69 @@ function renderExampleActions(example) {
 
 function getSelectedExample() {
   return examples.find((ex) => ex.id === selectedExampleId) ?? null;
+}
+
+function getTargetById(targetId) {
+  if (!targetId) return null;
+  return availableTargets.find((target) => target.id === targetId) ?? null;
+}
+
+function getDefaultCompilerTargetIds() {
+  const defaults = ["live", "compiled"].filter((id) =>
+    availableTargets.some((target) => target.id === id)
+  );
+  if (defaults.length) return defaults;
+  return availableTargets.map((target) => target.id);
+}
+
+function getExampleTargetIds(example) {
+  if (!example) return [];
+  const supported = Array.isArray(example.supportedTargets) ? example.supportedTargets : null;
+  const available = new Set(availableTargets.map((target) => target.id));
+  if (supported && supported.length) {
+    const filtered = supported.filter((id) => available.has(id));
+    if (!filtered.length) {
+      return [];
+    }
+    if (example.defaultTargetId && available.has(example.defaultTargetId)) {
+      if (!filtered.includes(example.defaultTargetId)) {
+        return [example.defaultTargetId, ...filtered];
+      }
+    }
+    return filtered;
+  }
+  let base = getDefaultCompilerTargetIds();
+  if (example.defaultTargetId && available.has(example.defaultTargetId)) {
+    if (!base.includes(example.defaultTargetId)) {
+      base = [example.defaultTargetId, ...base];
+    }
+  }
+  return base;
+}
+
+function getExampleTargets(example) {
+  return getExampleTargetIds(example)
+    .map((id) => getTargetById(id))
+    .filter(Boolean);
+}
+
+function resolveExampleTargetId(example, preferredTargetId) {
+  const candidates = getExampleTargetIds(example);
+  if (preferredTargetId && candidates.includes(preferredTargetId)) {
+    return preferredTargetId;
+  }
+  if (example?.defaultTargetId && candidates.includes(example.defaultTargetId)) {
+    return example.defaultTargetId;
+  }
+  return candidates[0] ?? null;
+}
+
+function resolveExampleEntry(example, targetId) {
+  if (!example) return "";
+  if (example.targetEntries && targetId && example.targetEntries[targetId]) {
+    return example.targetEntries[targetId];
+  }
+  return example.entry;
 }
 
 function setExampleStatus(label, modifierClass, targetLabel) {
@@ -1267,40 +1359,7 @@ async function loadExampleDownloads(exampleId) {
 
 function updateExampleButtons() {
   const example = getSelectedExample();
-  const target = getSelectedTarget();
-  const shortTargetLabel = target ? formatTargetShortLabel(target) : "";
-  const targetId = target?.id ?? "";
-  const exampleSupportsTarget =
-    !example?.supportedTargets?.length || example.supportedTargets.includes(targetId);
-  const hasSelection = Boolean(example && target && exampleSupportsTarget);
-  const canRun = hasSelection && Boolean(target?.supportsExampleRun);
-  const canWatch = hasSelection && Boolean(target?.supportsExampleWatch);
-  const canBuild = hasSelection && Boolean(target?.supportsExampleBuild);
-  if (runExampleBtn) {
-    runExampleBtn.textContent = shortTargetLabel ? `Run ${shortTargetLabel}` : "Run";
-    runExampleBtn.disabled = exampleRunActive || !canRun;
-    if (!exampleSupportsTarget && example?.supportedTargets?.length) {
-      runExampleBtn.title = `Supports: ${example.supportedTargets.join(", ")}`;
-    } else {
-      runExampleBtn.removeAttribute("title");
-    }
-  }
-  if (watchExampleBtn) {
-    watchExampleBtn.disabled = exampleRunActive || !canWatch;
-    if (!exampleSupportsTarget && example?.supportedTargets?.length) {
-      watchExampleBtn.title = `Supports: ${example.supportedTargets.join(", ")}`;
-    } else {
-      watchExampleBtn.removeAttribute("title");
-    }
-  }
-  if (buildExampleBtn) {
-    buildExampleBtn.disabled = exampleRunActive || !canBuild;
-    if (!exampleSupportsTarget && example?.supportedTargets?.length) {
-      buildExampleBtn.title = `Supports: ${example.supportedTargets.join(", ")}`;
-    } else {
-      buildExampleBtn.removeAttribute("title");
-    }
-  }
+  renderExampleTargetButtons(example);
   if (stopExampleBtn) {
     stopExampleBtn.disabled = !exampleRunActive;
   }
@@ -1358,10 +1417,11 @@ async function saveExampleSource() {
   }
 }
 
-async function triggerExampleRun(mode = "run", actionId = null) {
+async function triggerExampleRun(mode = "run", targetId = null, actionId = null) {
   const example = getSelectedExample();
   if (!example) return;
-  const target = getSelectedTarget();
+  const resolvedTargetId = resolveExampleTargetId(example, targetId);
+  const target = resolvedTargetId ? getTargetById(resolvedTargetId) : null;
   if (!target) {
     setExampleStatus("No targets configured", "is-failure");
     return;
@@ -1384,27 +1444,6 @@ async function triggerExampleRun(mode = "run", actionId = null) {
     setExampleStatus("Target missing build command", "is-failure", target.label);
     return;
   }
-  const isAction = Boolean(actionId);
-  if (Array.isArray(example.supportedTargets) && example.supportedTargets.length && !isAction) {
-    if (!example.supportedTargets.includes(target.id)) {
-      setExampleStatus("Example unavailable for target", "is-failure", target.label);
-      return;
-    }
-  }
-  if (!isAction) {
-    if (mode === "run" && !target.supportsExampleRun) {
-      setExampleStatus("Target missing run command", "is-failure", target.label);
-      return;
-    }
-    if (mode === "watch" && !target.supportsExampleWatch) {
-      setExampleStatus("Target cannot watch examples", "is-failure", target.label);
-      return;
-    }
-    if (mode === "build" && !target.supportsExampleBuild) {
-      setExampleStatus("Target missing build command", "is-failure", target.label);
-      return;
-    }
-  }
   exampleRunActive = true;
   exampleWatchActive = mode === "watch";
   const label =
@@ -1412,7 +1451,7 @@ async function triggerExampleRun(mode = "run", actionId = null) {
       ? "Starting watch…"
       : mode === "build"
         ? "Building…"
-        : isAction
+        : mode === "action"
           ? "Running action…"
           : "Starting…";
   setExampleStatus(label, "is-running", target.label);
@@ -1421,12 +1460,16 @@ async function triggerExampleRun(mode = "run", actionId = null) {
     setExampleArtifactsPending(target.label);
   }
   try {
+    const entry = resolveExampleEntry(example, target.id);
+    if (!entry) {
+      throw new Error("Example entry path missing for selected target.");
+    }
     const response = await fetch("/api/examples/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         exampleId: example.id,
-        entry: example.entry,
+        entry,
         mode,
         targetId: target.id,
         watch: mode === "watch",
@@ -1491,7 +1534,13 @@ function isExampleEventRelevant(exampleId, entry) {
   if (exampleId && example.id !== exampleId) {
     return false;
   }
-  return example.entry === entry;
+  if (example.entry === entry) {
+    return true;
+  }
+  if (example.targetEntries) {
+    return Object.values(example.targetEntries).includes(entry);
+  }
+  return false;
 }
 
 function formatBytes(bytes) {
@@ -2149,59 +2198,11 @@ function escapeHtml(text) {
     .replace(/"/g, "&quot;");
 }
 
-function initializeTargets(targets, defaultTargetId) {
+function initializeTargets(targets) {
   availableTargets = Array.isArray(targets) ? targets : [];
-  const hasTargets = availableTargets.length > 0;
-  targetSelectElements.forEach((select) => {
-    if (!select) return;
-    if (!hasTargets) {
-      select.innerHTML = '<option value="">No targets configured</option>';
-      select.disabled = true;
-      return;
-    }
-    select.disabled = false;
-    select.innerHTML = availableTargets
-      .map((target) => `<option value="${target.id}">${target.label}</option>`)
-      .join("");
-  });
-  const stored = loadStoredTargetId();
-  if (stored && availableTargets.some((target) => target.id === stored)) {
-    selectedTargetId = stored;
-  } else if (defaultTargetId && availableTargets.some((target) => target.id === defaultTargetId)) {
-    selectedTargetId = defaultTargetId;
-  } else {
-    selectedTargetId = availableTargets[0]?.id ?? null;
-  }
-  persistSelectedTarget(selectedTargetId);
-  syncTargetSelectors();
+  renderExampleList();
+  renderExampleDetail();
   updateExampleButtons();
-}
-
-function setSelectedTarget(targetId) {
-  if (!availableTargets.some((target) => target.id === targetId)) return;
-  if (selectedTargetId === targetId) return;
-  selectedTargetId = targetId;
-  persistSelectedTarget(targetId);
-  syncTargetSelectors();
-  updateExampleButtons();
-}
-
-function syncTargetSelectors() {
-  targetSelectElements.forEach((select) => {
-    if (!select) return;
-    const desired = selectedTargetId ?? availableTargets[0]?.id ?? "";
-    select.value = desired;
-  });
-}
-
-function getSelectedTarget() {
-  if (!availableTargets.length) return null;
-  const desired = selectedTargetId ?? availableTargets[0].id;
-  return availableTargets.find((target) => target.id === desired) ?? null;
-}
-
-function getSelectedTargetId() {
-  return getSelectedTarget()?.id;
 }
 
 function formatTargetShortLabel(target) {
@@ -2209,34 +2210,10 @@ function formatTargetShortLabel(target) {
   return target.id.charAt(0).toUpperCase() + target.id.slice(1);
 }
 
-function loadStoredTargetId() {
-  try {
-    return localStorage.getItem(TARGET_STORAGE_KEY);
-  } catch {
-    return null;
-  }
-}
-
-function persistSelectedTarget(targetId) {
-  if (!targetId) return;
-  try {
-    localStorage.setItem(TARGET_STORAGE_KEY, targetId);
-  } catch {
-    // Ignore storage failures in non-browser contexts.
-  }
-}
-
 function describeExampleTargets(example) {
-  if (Array.isArray(example?.supportedTargets) && example.supportedTargets.length) {
-    return example.supportedTargets.join(", ");
-  }
-  return "All targets";
-}
-
-function applyExampleDefaultTarget(example) {
-  if (!example?.defaultTargetId) return;
-  if (!availableTargets.some((target) => target.id === example.defaultTargetId)) return;
-  setSelectedTarget(example.defaultTargetId);
+  const targets = getExampleTargetIds(example);
+  if (!targets.length) return "No targets";
+  return targets.join(", ");
 }
 function setBuildStatus(label, modifierClass, targetLabel) {
   buildStatusChip.textContent = targetLabel ? `${label} · ${targetLabel}` : label;
