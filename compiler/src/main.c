@@ -23,6 +23,7 @@
 #include "ast.h"
 #include "pretty.h"
 #include "c_backend.h"
+#include "raepack.h"
 #include "vm.h"
 #include "vm_compiler.h"
 #include "vm_registry.h"
@@ -46,6 +47,12 @@ typedef struct {
   int target;
   int profile;
 } BuildOptions;
+
+typedef struct {
+  const char* file_path;
+  const char* target_id;
+  bool json;
+} PackOptions;
 
 typedef enum {
   BUILD_TARGET_COMPILED = 0,
@@ -404,6 +411,49 @@ static bool parse_build_args(int argc, char** argv, BuildOptions* opts) {
         opts->out_path = "build/out.c";
         break;
     }
+  }
+  return true;
+}
+
+static bool parse_pack_args(int argc, char** argv, PackOptions* opts) {
+  opts->file_path = NULL;
+  opts->target_id = NULL;
+  opts->json = false;
+
+  int i = 0;
+  while (i < argc) {
+    const char* arg = argv[i];
+    if (strcmp(arg, "--json") == 0) {
+      opts->json = true;
+      i += 1;
+      continue;
+    }
+    if (strcmp(arg, "--target") == 0) {
+      if (i + 1 >= argc) {
+        fprintf(stderr, "error: --target expects a target id\n");
+        return false;
+      }
+      opts->target_id = argv[i + 1];
+      i += 2;
+      continue;
+    }
+    if (arg[0] == '-') {
+      fprintf(stderr, "error: unknown pack option '%s'\n", arg);
+      return false;
+    }
+    if (opts->file_path) {
+      fprintf(stderr, "error: multiple pack files provided ('%s' and '%s')\n",
+              opts->file_path,
+              arg);
+      return false;
+    }
+    opts->file_path = arg;
+    i += 1;
+  }
+
+  if (!opts->file_path) {
+    fprintf(stderr, "error: pack command requires a file argument\n");
+    return false;
   }
   return true;
 }
@@ -1577,6 +1627,8 @@ static void print_usage(const char* prog) {
   fprintf(stderr, "  parse <file>    Parse Rae source file and dump AST\n");
   fprintf(stderr, "  format <file>   Parse Rae source file and pretty-print it\n");
   fprintf(stderr, "  run <file>      Execute Rae source via the bytecode VM\n");
+  fprintf(stderr, "  pack <file>     Validate and summarize a .raepack file\n");
+  fprintf(stderr, "                 (options: --json, --target <id>)\n");
   fprintf(stderr,
           "  build [opts]    Build Rae source (--emit-c required for now)\n");
   fprintf(stderr,
@@ -1593,6 +1645,144 @@ static void dump_tokens(const TokenList* tokens) {
     fwrite(tok->lexeme.data, 1, tok->lexeme.len, stdout);
     printf("\" at %zu:%zu\n", tok->line, tok->column);
   }
+}
+
+static void print_str(Str value) {
+  if (value.len == 0 || !value.data) return;
+  fwrite(value.data, 1, value.len, stdout);
+}
+
+static void print_json_string(Str value) {
+  putchar('"');
+  for (size_t i = 0; i < value.len; ++i) {
+    unsigned char c = (unsigned char)value.data[i];
+    switch (c) {
+      case '"':
+        fputs("\\\"", stdout);
+        break;
+      case '\\':
+        fputs("\\\\", stdout);
+        break;
+      case '\n':
+        fputs("\\n", stdout);
+        break;
+      case '\r':
+        fputs("\\r", stdout);
+        break;
+      case '\t':
+        fputs("\\t", stdout);
+        break;
+      default:
+        if (c < 0x20) {
+          printf("\\u%04x", c);
+        } else {
+          putchar(c);
+        }
+        break;
+    }
+  }
+  putchar('"');
+}
+
+static void dump_raepack(const RaePack* pack) {
+  if (!pack) return;
+  printf("Pack ");
+  print_str(pack->name);
+  printf("\n");
+  printf("Format: ");
+  print_str(pack->format);
+  printf("\n");
+  printf("Version: %lld\n", (long long)pack->version);
+  printf("Default target: ");
+  print_str(pack->default_target);
+  printf("\n");
+  printf("Targets:\n");
+  for (const RaePackTarget* target = pack->targets; target; target = target->next) {
+    printf("- ");
+    print_str(target->id);
+    printf(" (");
+    print_str(target->label);
+    printf(")\n");
+    printf("  entry: ");
+    print_str(target->entry);
+    printf("\n");
+    printf("  sources:\n");
+    for (const RaePackSource* source = target->sources; source; source = source->next) {
+      printf("    - ");
+      print_str(source->path);
+      printf(" [%s]\n", raepack_emit_name(source->emit));
+    }
+  }
+}
+
+static void dump_raepack_json(const RaePack* pack, const RaePackTarget* selected_target) {
+  if (!pack) return;
+  printf("{\n");
+  printf("  \"name\": ");
+  print_json_string(pack->name);
+  printf(",\n");
+  printf("  \"format\": ");
+  print_json_string(pack->format);
+  printf(",\n");
+  printf("  \"version\": %lld,\n", (long long)pack->version);
+  printf("  \"defaultTarget\": ");
+  print_json_string(pack->default_target);
+  printf(",\n");
+  printf("  \"targets\": [\n");
+  for (const RaePackTarget* target = pack->targets; target; target = target->next) {
+    printf("    {\n");
+    printf("      \"id\": ");
+    print_json_string(target->id);
+    printf(",\n");
+    printf("      \"label\": ");
+    print_json_string(target->label);
+    printf(",\n");
+    printf("      \"entry\": ");
+    print_json_string(target->entry);
+    printf(",\n");
+    printf("      \"sources\": [\n");
+    for (const RaePackSource* source = target->sources; source; source = source->next) {
+      printf("        {\"path\": ");
+      print_json_string(source->path);
+      printf(", \"emit\": ");
+      print_json_string(str_from_cstr(raepack_emit_name(source->emit)));
+      printf("}%s\n", source->next ? "," : "");
+    }
+    printf("      ]\n");
+    printf("    }%s\n", target->next ? "," : "");
+  }
+  printf("  ]");
+  if (selected_target) {
+    printf(",\n  \"selectedTarget\": ");
+    print_json_string(selected_target->id);
+  }
+  printf("\n}\n");
+}
+
+static int run_raepack_file(const PackOptions* opts) {
+  if (!opts || !opts->file_path) return 1;
+  RaePack pack;
+  if (!raepack_parse_file(opts->file_path, &pack)) {
+    return 1;
+  }
+  const RaePackTarget* selected = NULL;
+  if (opts->target_id && opts->target_id[0] != '\0') {
+    selected = raepack_find_target(&pack, str_from_cstr(opts->target_id));
+    if (!selected) {
+      fprintf(stderr, "error: target '%s' not found in '%s'\n",
+              opts->target_id,
+              opts->file_path);
+      raepack_free(&pack);
+      return 1;
+    }
+  }
+  if (opts->json) {
+    dump_raepack_json(&pack, selected);
+  } else {
+    dump_raepack(&pack);
+  }
+  raepack_free(&pack);
+  return 0;
 }
 
 static bool compile_file_chunk(const char* file_path,
@@ -1928,6 +2118,7 @@ static int run_command(const char* cmd, int argc, char** argv) {
   bool is_format = (strcmp(cmd, "format") == 0);
   bool is_run = (strcmp(cmd, "run") == 0);
   bool is_build = (strcmp(cmd, "build") == 0);
+  bool is_pack = (strcmp(cmd, "pack") == 0);
 
   if (is_format) {
     if (!parse_format_args(argc, argv, &format_opts)) {
@@ -1948,6 +2139,13 @@ static int run_command(const char* cmd, int argc, char** argv) {
       return 1;
     }
     return run_opts.watch ? run_vm_watch(run_opts.input_path) : run_vm_file(run_opts.input_path);
+  } else if (is_pack) {
+    PackOptions pack_opts;
+    if (!parse_pack_args(argc, argv, &pack_opts)) {
+      print_usage(argv[-1]);
+      return 1;
+    }
+    return run_raepack_file(&pack_opts);
   } else if (is_build) {
     BuildOptions build_opts;
     if (!parse_build_args(argc, argv, &build_opts)) {
@@ -2044,7 +2242,7 @@ int main(int argc, char** argv) {
 
   const char* cmd = argv[1];
   if ((strcmp(cmd, "lex") == 0 || strcmp(cmd, "parse") == 0 || strcmp(cmd, "format") == 0 ||
-       strcmp(cmd, "run") == 0 || strcmp(cmd, "build") == 0)) {
+       strcmp(cmd, "run") == 0 || strcmp(cmd, "pack") == 0 || strcmp(cmd, "build") == 0)) {
     return run_command(cmd, argc - 2, argv + 2);
   }
 

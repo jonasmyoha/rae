@@ -42,6 +42,7 @@ typedef enum {
   TOK_KW_NOT,
   TOK_KW_IS,
   TOK_KW_PUB,
+  TOK_KW_PACK,
   TOK_KW_PRIV,
 
   /* Operators */
