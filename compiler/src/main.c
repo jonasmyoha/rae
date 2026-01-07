@@ -706,6 +706,9 @@ static bool write_vm_chunk_file(const Chunk* chunk, const char* out_path) {
         }
         break;
       }
+      case VAL_NONE:
+        // No extra data for VAL_NONE
+        break;
       default:
         fprintf(stderr, "error: unknown VM constant type\n");
         ok = false;
