@@ -8,7 +8,8 @@
 typedef enum {
   VAL_INT,
   VAL_BOOL,
-  VAL_STRING
+  VAL_STRING,
+  VAL_NONE
 } ValueType;
 
 typedef struct {
@@ -29,6 +30,7 @@ Value value_int(int64_t v);
 Value value_bool(bool v);
 Value value_string_copy(const char* data, size_t length);
 Value value_string_take(char* data, size_t length);
+Value value_none(void);
 void value_free(Value* value);
 void value_print(const Value* value);
 

@@ -37,6 +37,11 @@ Value value_string_take(char* data, size_t length) {
   return value;
 }
 
+Value value_none(void) {
+  Value value = {.type = VAL_NONE};
+  return value;
+}
+
 void value_free(Value* value) {
   if (!value) return;
   if (value->type == VAL_STRING && value->as.string_value.chars) {
@@ -61,6 +66,9 @@ void value_print(const Value* value) {
       if (value->as.string_value.chars) {
         fwrite(value->as.string_value.chars, 1, value->as.string_value.length, stdout);
       }
+      break;
+    case VAL_NONE:
+      printf("none");
       break;
   }
 }

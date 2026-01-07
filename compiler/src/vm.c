@@ -33,6 +33,8 @@ static bool value_is_truthy(const Value* value) {
       return value->as.int_value != 0;
     case VAL_STRING:
       return value->as.string_value.length > 0;
+    case VAL_NONE:
+      return false;
   }
   return false;
 }
@@ -51,6 +53,8 @@ static bool values_equal(const Value* a, const Value* b) {
       if (a->as.string_value.length != b->as.string_value.length) return false;
       return memcmp(a->as.string_value.chars, b->as.string_value.chars,
                     a->as.string_value.length) == 0;
+    case VAL_NONE:
+      return true;
   }
   return false;
 }
@@ -183,6 +187,8 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         vm->stack_top -= arg_count;
         if (result.has_value) {
           vm_push(vm, result.value);
+        } else {
+          vm_push(vm, value_none());
         }
         break;
       }
@@ -293,6 +299,11 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         Value rhs = vm_pop(vm);
         Value lhs = vm_pop(vm);
         if (lhs.type != VAL_INT || rhs.type != VAL_INT) {
+          fprintf(stderr, "error: comparison expects integers, got: ");
+          value_print(&lhs);
+          fprintf(stderr, " and ");
+          value_print(&rhs);
+          fprintf(stderr, "\n");
           diag_error(NULL, 0, 0, "comparison operands must be integers");
           return VM_RUNTIME_ERROR;
         }
@@ -348,6 +359,8 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         vm->stack_top = frame->slots;
         if (push_result) {
           vm_push(vm, result);
+        } else {
+          vm_push(vm, value_none());
         }
         break;
       }
