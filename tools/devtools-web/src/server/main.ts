@@ -1,7 +1,13 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { Buffer } from "node:buffer";
-import { getExamplesRoot, getSyntaxSummaryPath, getTestsRoot, loadConfig } from "./config";
+import {
+  getExamplesRoot,
+  getSyntaxSummaryPath,
+  getTestsRoot,
+  loadConfig,
+  resolveCompilerPath
+} from "./config";
 import type { RaeDevtoolsConfig } from "./config";
 import type { ClientEvent, ExampleRunMode, ServerEvent } from "../shared/types";
 import { TestRunner } from "./tests";
@@ -42,6 +48,7 @@ const exampleRunner = new ExampleRunner(CONFIG, broadcastEvent);
 const testsRoot = getTestsRoot(CONFIG);
 const syntaxSummaryPath = getSyntaxSummaryPath(CONFIG);
 const examplesRoot = getExamplesRoot(CONFIG);
+const compilerBinPath = resolveCompilerPath(CONFIG, "compiler/bin/rae");
 const compilerMetricsPath = path.resolve(
   process.cwd(),
   CONFIG.compilerPath,
@@ -146,7 +153,7 @@ const server = Bun.serve<SocketData>({
     }
 
     if (url.pathname === "/api/examples" && req.method === "GET") {
-      const examples = await listExamples(examplesRoot);
+      const examples = await listExamples(examplesRoot, compilerBinPath);
       return new Response(JSON.stringify({ examples }), {
         headers: { "Content-Type": "application/json" }
       });

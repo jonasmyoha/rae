@@ -1,4 +1,5 @@
-import { readdir, readFile, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import type {
@@ -24,6 +25,33 @@ type ExampleActionMetadata = {
   targetId?: string;
 };
 
+type RaePackSource = {
+  path: string;
+  emit: string;
+};
+
+type RaePackTarget = {
+  id: string;
+  label: string;
+  entry: string;
+  sources: RaePackSource[];
+};
+
+type RaePackJson = {
+  name: string;
+  format: string;
+  version: number;
+  defaultTarget: string;
+  targets: RaePackTarget[];
+};
+
+type ExamplePackInfo = {
+  entry?: string;
+  supportedTargets?: string[];
+  defaultTargetId?: string;
+  targetEntries?: Record<string, string>;
+};
+
 const ACTION_REGISTRY = new Map<string, ExampleActionMetadata[]>();
 type ExampleDownloads = Array<{
   profile: string;
@@ -45,10 +73,14 @@ const EXAMPLE_ORDER: Record<string, number> = {
   auto_import_demo: 7,
   multifile_report: 8,
   "tinyexpr-demo": 9,
-  hybrid_hot_reload: 10
+  hybrid_hot_reload: 10,
+  raepack_demo: 11
 };
 
-export async function listExamples(root: string): Promise<ExampleDescriptor[]> {
+export async function listExamples(
+  root: string,
+  compilerBinPath: string
+): Promise<ExampleDescriptor[]> {
   const entries = await safeReadDir(root);
   const examples: ExampleDescriptor[] = [];
   ACTION_REGISTRY.clear();
@@ -67,12 +99,20 @@ export async function listExamples(root: string): Promise<ExampleDescriptor[]> {
       const metadata = await readExampleMetadata(fullPath);
       const files = await collectRaeFiles(fullPath, relativePath);
       if (!files.length) continue;
-      const entryFile = resolveEntryFile(files, metadata?.entry, relativePath);
+      const packInfo = await readExamplePack(fullPath, relativePath, compilerBinPath);
+      const entryFile =
+        packInfo?.entry ?? resolveEntryFile(files, metadata?.entry, relativePath);
       const normalizedActions = normalizeExampleActions(relativePath, metadata?.actions);
       if (normalizedActions.length) {
         ACTION_REGISTRY.set(relativePath, normalizedActions);
       }
-      const descriptor = makeMultiFileExample(relativePath, entryFile, files, metadata);
+      const descriptor = makeMultiFileExample(
+        relativePath,
+        entryFile,
+        files,
+        metadata,
+        packInfo
+      );
       if (normalizedActions.length) {
         descriptor.actions = normalizedActions.map((action) => ({
           id: action.id!,
@@ -101,11 +141,16 @@ function makeMultiFileExample(
   id: string,
   entry: string,
   files: ExampleFileDescriptor[],
-  metadata: ExampleMetadata | null
+  metadata: ExampleMetadata | null,
+  packInfo: ExamplePackInfo | null
 ): ExampleDescriptor {
-  const supportedTargets = Array.isArray(metadata?.supportedTargets)
-    ? metadata!.supportedTargets.filter((value): value is string => typeof value === "string")
-    : undefined;
+  const supportedTargets = packInfo?.supportedTargets
+    ?? (Array.isArray(metadata?.supportedTargets)
+      ? metadata!.supportedTargets.filter((value): value is string => typeof value === "string")
+      : undefined);
+  const defaultTargetId =
+    packInfo?.defaultTargetId
+    ?? (typeof metadata?.defaultTargetId === "string" ? metadata.defaultTargetId : undefined);
   const descriptor: ExampleDescriptor = {
     id,
     name: metadata?.name ?? id,
@@ -113,7 +158,8 @@ function makeMultiFileExample(
     files,
     description: metadata?.description,
     supportedTargets: supportedTargets?.length ? supportedTargets : undefined,
-    defaultTargetId: typeof metadata?.defaultTargetId === "string" ? metadata.defaultTargetId : undefined
+    defaultTargetId,
+    targetEntries: packInfo?.targetEntries
   };
   return descriptor;
 }
@@ -229,6 +275,113 @@ function resolveEntryFile(
     );
   }
   return files.find((file) => file.path.endsWith("main.rae"))?.path ?? files[0].path;
+}
+
+async function readExamplePack(
+  dir: string,
+  exampleId: string,
+  compilerBinPath: string
+): Promise<ExamplePackInfo | null> {
+  const packPath = await findRaePackFile(dir);
+  if (!packPath) return null;
+  const pack = await readRaePack(compilerBinPath, packPath);
+  if (!pack || !Array.isArray(pack.targets)) return null;
+
+  const targetEntries: Record<string, string> = {};
+  const supportedTargets: string[] = [];
+  pack.targets.forEach((target) => {
+    if (!target || typeof target.id !== "string" || typeof target.entry !== "string") {
+      return;
+    }
+    const entry = normalizePackEntry(target.entry);
+    const entryPath = path.posix.join(exampleId, entry.replace(/^\/+/, ""));
+    targetEntries[target.id] = entryPath;
+    supportedTargets.push(target.id);
+  });
+  const defaultTargetId =
+    typeof pack.defaultTarget === "string" && targetEntries[pack.defaultTarget]
+      ? pack.defaultTarget
+      : undefined;
+  const entry =
+    (defaultTargetId && targetEntries[defaultTargetId]) ||
+    targetEntries[supportedTargets[0] ?? ""] ||
+    undefined;
+
+  return {
+    entry,
+    supportedTargets: supportedTargets.length ? supportedTargets : undefined,
+    defaultTargetId,
+    targetEntries: Object.keys(targetEntries).length ? targetEntries : undefined
+  };
+}
+
+async function findRaePackFile(dir: string): Promise<string | null> {
+  const entries = await safeReadDir(dir);
+  const packs = entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".raepack"))
+    .map((entry) => entry.name)
+    .sort();
+  if (!packs.length) {
+    return null;
+  }
+  if (packs.length > 1) {
+    console.warn(`[examples] Multiple .raepack files found in ${dir}. Using ${packs[0]}.`);
+  }
+  return path.join(dir, packs[0]);
+}
+
+async function readRaePack(
+  compilerBinPath: string,
+  packPath: string
+): Promise<RaePackJson | null> {
+  try {
+    await stat(compilerBinPath);
+  } catch {
+    console.warn(`[examples] Compiler binary missing at ${compilerBinPath}.`);
+    return null;
+  }
+
+  return await new Promise((resolve) => {
+    const child = spawn(compilerBinPath, ["pack", "--json", packPath], {
+      cwd: path.dirname(compilerBinPath),
+      env: process.env
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr?.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.on("error", (error) => {
+      console.warn(`[examples] Failed to run rae pack: ${error}`);
+      resolve(null);
+    });
+    child.on("close", (code) => {
+      if (code !== 0) {
+        const message = stderr.trim() || `rae pack exited with ${code}`;
+        console.warn(`[examples] Failed to parse ${packPath}: ${message}`);
+        resolve(null);
+        return;
+      }
+      try {
+        const parsed = JSON.parse(stdout) as RaePackJson;
+        resolve(parsed);
+      } catch (error) {
+        console.warn(`[examples] Invalid raepack JSON for ${packPath}`, error);
+        resolve(null);
+      }
+    });
+  });
+}
+
+function normalizePackEntry(entry: string): string {
+  const normalized = entry.replace(/\\/g, "/");
+  const cleaned = normalized.replace(/^\.\//, "");
+  return path.posix.normalize(cleaned);
 }
 
 function normalizeExampleActions(

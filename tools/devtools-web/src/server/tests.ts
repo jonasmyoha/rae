@@ -12,7 +12,7 @@ import type {
   TestRunSummaryMessage
 } from "../shared/types";
 import type { RaeDevtoolsConfig, TargetConfig } from "./config";
-import { resolveTarget } from "./config";
+import { resolveTargetList } from "./config";
 import { parseTestLine } from "./parsers/testsParser";
 import type { StatsStore } from "./stats";
 
@@ -22,10 +22,15 @@ type ActiveRun = {
   id: string;
   startedAt: number;
   mode: TestRunMode;
-  process: ReturnType<typeof spawn>;
+  process: ReturnType<typeof spawn> | null;
   buffers: Record<"stdout" | "stderr", string>;
   summary?: { passed: number; failed: number };
   target: TargetConfig;
+  targets: TargetConfig[];
+  targetIndex: number;
+  overallSuccess: boolean;
+  batchLabel: string;
+  summaryTotals: { passed: number; failed: number };
 };
 
 export class TestRunner {
@@ -47,16 +52,55 @@ export class TestRunner {
       return;
     }
 
-    const target = resolveTarget(this.config, targetId);
-    if (!target.testCommand) {
+    const targets = resolveTargetList(this.config, targetId ? [targetId] : undefined);
+    const runnableTargets = targets.filter((candidate) => Boolean(candidate.testCommand));
+    const skippedTargets = targets.filter((candidate) => !candidate.testCommand);
+    skippedTargets.forEach((candidate) => {
       this.broadcast({
         type: "server-status",
         timestamp: new Date().toISOString(),
-        message: `Target "${target.label}" is missing a testCommand. Update config.json to enable test runs.`
+        message: `Target "${candidate.label}" is missing a testCommand. Skipping.`
+      });
+    });
+    if (!runnableTargets.length) {
+      this.broadcast({
+        type: "server-status",
+        timestamp: new Date().toISOString(),
+        message: "No targets available for tests. Update config.json to enable test runs."
       });
       return;
     }
 
+    const runId = randomUUID();
+    const startedAt = Date.now();
+    const batchLabel = runnableTargets.map((target) => target.label).join(" + ");
+
+    const cwd = path.resolve(process.cwd(), this.config.compilerPath);
+    this.activeRun = {
+      id: runId,
+      startedAt,
+      mode,
+      target: runnableTargets[0],
+      process: null,
+      buffers: { stdout: "", stderr: "" },
+      targets: runnableTargets,
+      targetIndex: 0,
+      overallSuccess: true,
+      batchLabel,
+      summaryTotals: { passed: 0, failed: 0 }
+    };
+
+    this.broadcast(createRunStartedMessage(runId, mode, batchLabel, cwd));
+    this.startNextTarget();
+  }
+
+  private startNextTarget() {
+    if (!this.activeRun) return;
+    const target = this.activeRun.targets[this.activeRun.targetIndex];
+    if (!target || !target.testCommand) {
+      this.finishBatch();
+      return;
+    }
     const cwd = path.resolve(process.cwd(), this.config.compilerPath);
     this.broadcastStatus(`[debug] Test target: ${target.id}`);
     this.broadcastStatus(`[debug] Test command: ${target.testCommand}`);
@@ -65,24 +109,23 @@ export class TestRunner {
       this.broadcastStatus("[debug] WARNING: testCommand includes TARGET= and will override the compiler binary name.");
     }
 
-    const runId = randomUUID();
-    const startedAt = Date.now();
+    this.broadcast({
+      type: "test-run-output",
+      runId: this.activeRun.id,
+      stream: "stdout",
+      line: `▶ [${target.label}] Test run started`,
+      timestamp: new Date().toISOString()
+    } satisfies TestRunOutputMessage);
+
     const child = spawn(target.testCommand, {
       cwd,
       shell: true,
       env: process.env
     });
 
-    this.activeRun = {
-      id: runId,
-      startedAt,
-      mode,
-      target,
-      process: child,
-      buffers: { stdout: "", stderr: "" }
-    };
-
-    this.broadcast(createRunStartedMessage(runId, mode, target, cwd));
+    this.activeRun.target = target;
+    this.activeRun.process = child;
+    this.activeRun.buffers = { stdout: "", stderr: "" };
 
     child.stdout?.setEncoding("utf8");
     child.stderr?.setEncoding("utf8");
@@ -95,14 +138,32 @@ export class TestRunner {
     });
 
     child.on("error", (error) => {
-      this.broadcastRunError(runId, target, error);
+      this.broadcastRunError(this.activeRun?.id ?? "", target, error);
       this.cleanupActiveRun();
     });
 
     child.on("close", (code) => {
+      if (!this.activeRun) return;
       this.flushRemainingBuffers();
-      this.broadcastRunCompleted(runId, target, code, startedAt);
-      this.cleanupActiveRun();
+      const success = code === 0;
+      if (!success) {
+        this.activeRun.overallSuccess = false;
+      }
+      const exitLabel = code ?? "unknown";
+      this.broadcast({
+        type: "test-run-output",
+        runId: this.activeRun.id,
+        stream: success ? "stdout" : "stderr",
+        line: `● [${target.label}] Test run finished (exit ${exitLabel})`,
+        timestamp: new Date().toISOString()
+      } satisfies TestRunOutputMessage);
+
+      this.activeRun.targetIndex += 1;
+      if (this.activeRun.targetIndex < this.activeRun.targets.length) {
+        this.startNextTarget();
+      } else {
+        this.finishBatch();
+      }
     });
   }
 
@@ -153,34 +214,32 @@ export class TestRunner {
     }
   }
 
-  private broadcastRunCompleted(
-    runId: string,
-    target: TargetConfig,
-    exitCode: number | null,
-    startedAt: number
-  ) {
+  private finishBatch() {
+    if (!this.activeRun) return;
     const endedAt = Date.now();
+    const success = this.activeRun.overallSuccess;
     const payload: TestRunCompletedMessage = {
       type: "test-run-completed",
-      runId,
-      exitCode,
-      success: exitCode === 0,
-      durationMs: endedAt - startedAt,
-      targetId: target.id,
-      targetLabel: target.label,
+      runId: this.activeRun.id,
+      exitCode: success ? 0 : 1,
+      success,
+      durationMs: endedAt - this.activeRun.startedAt,
+      targetId: "all",
+      targetLabel: this.activeRun.batchLabel,
       timestamp: new Date().toISOString()
     };
     this.broadcast(payload);
-    const summary = this.activeRun?.summary ?? { passed: 0, failed: 0 };
+    const summary = this.activeRun.summary ?? { passed: 0, failed: 0 };
     this.stats?.recordTestRun({
-      runId,
-      durationMs: endedAt - startedAt,
-      success: exitCode === 0,
+      runId: this.activeRun.id,
+      durationMs: endedAt - this.activeRun.startedAt,
+      success,
       passed: summary.passed,
       failed: summary.failed,
-      targetId: target.id,
-      targetLabel: target.label
+      targetId: "all",
+      targetLabel: this.activeRun.batchLabel
     });
+    this.cleanupActiveRun();
   }
 
   private broadcastRunError(runId: string, target: TargetConfig, error: unknown) {
@@ -213,14 +272,19 @@ export class TestRunner {
     if (!parsed) return;
 
     if (parsed.type === "summary") {
+      this.activeRun.summaryTotals.passed += parsed.passed;
+      this.activeRun.summaryTotals.failed += parsed.failed;
       const summary: TestRunSummaryMessage = {
         type: "test-summary",
         runId: this.activeRun.id,
-        passed: parsed.passed,
-        failed: parsed.failed,
+        passed: this.activeRun.summaryTotals.passed,
+        failed: this.activeRun.summaryTotals.failed,
         timestamp: new Date().toISOString()
       };
-      this.activeRun.summary = { passed: parsed.passed, failed: parsed.failed };
+      this.activeRun.summary = {
+        passed: this.activeRun.summaryTotals.passed,
+        failed: this.activeRun.summaryTotals.failed
+      };
       this.broadcast(summary);
       return;
     }
@@ -243,16 +307,16 @@ export class TestRunner {
 function createRunStartedMessage(
   runId: string,
   mode: TestRunMode,
-  target: TargetConfig,
+  targetLabel: string,
   cwd: string
 ): TestRunStartedMessage {
   return {
     type: "test-run-started",
     runId,
     mode,
-    command: target.testCommand ?? "unknown",
-    targetId: target.id,
-    targetLabel: target.label,
+    command: "batch",
+    targetId: "all",
+    targetLabel,
     cwd,
     timestamp: new Date().toISOString()
   };

@@ -54,6 +54,42 @@
   - Example uses versioned downloads (`version1/2/3`) and hot-reloads them.
   - Devtools UI lists staged downloads and signals reload events.
 
+### T018 - .raepack parser tests (error cases)
+- Repo: rae
+- Summary:
+  - Add negative tests for missing fields, invalid emit, bad entry, and trailing tokens.
+  - Keep error output deterministic.
+- Acceptance:
+  - New `.expect` files cover error output for each case.
+  - Tests fail with a single diagnostic line per case.
+
+### T019 - .raepack CLI target resolution (stub)
+- Repo: rae
+- Summary:
+  - Wire `.raepack` parsing into CLI surface so targets can be inspected and validated.
+  - Add a machine-friendly `rae pack` output for devtools.
+- Acceptance:
+  - `rae pack` validates `.raepack` and can emit JSON.
+  - Errors are clear for unknown targets or invalid packs.
+
+### T020 - .raepack example scaffold
+- Repo: rae
+- Summary:
+  - Add a minimal example package that ships a `.raepack` and entry file.
+  - Document the targets in a short README.
+- Acceptance:
+  - Example passes `rae pack` validation.
+  - Devtools can surface it as an example.
+
+### T021 - Devtools multi-target buttons (no dropdown)
+- Repo: rae-devtools-web
+- Summary:
+  - Remove the global target dropdown.
+  - Render per-target buttons per example/test based on `.raepack` (fallback to live/compiled).
+- Acceptance:
+  - Run tests executes Live then Compiled sequentially.
+  - Examples show separate Run buttons for each supported target.
+
 ### Status note — Hybrid devtools work in progress
 - Repo: `rae-devtools-web` / `rae`
 - Summary:
