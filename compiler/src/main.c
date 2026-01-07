@@ -1336,6 +1336,26 @@ static bool module_graph_collect_watch_sources(const ModuleGraph* graph, WatchSo
   return true;
 }
 
+static char* try_resolve_lib_module(const char* root, const char* normalized) {
+  // Check root/lib/normalized.rae
+  size_t root_len = strlen(root);
+  size_t mod_len = strlen(normalized);
+  size_t total = root_len + mod_len + 10; // /lib/ .rae
+  char* buffer = malloc(total);
+  if (!buffer) return NULL;
+  
+  if (root_len > 0 && (root[root_len - 1] == '/' || root[root_len - 1] == '\\')) {
+    root_len -= 1;
+  }
+  snprintf(buffer, total, "%.*s/lib/%s.rae", (int)root_len, root, normalized);
+  
+  if (file_exists(buffer)) {
+    return buffer;
+  }
+  free(buffer);
+  return NULL;
+}
+
 static bool module_graph_load_module(ModuleGraph* graph,
                                      const char* module_path,
                                      const char* file_path,
@@ -1380,12 +1400,18 @@ static bool module_graph_load_module(ModuleGraph* graph,
     }
     char* child_file = resolve_module_file(graph->root_path, normalized);
     if (!child_file || !file_exists(child_file)) {
-      fprintf(stderr, "error: imported module '%s' not found (required by '%s')\n", normalized,
-              module_path ? module_path : "<entry>");
-      module_stack_print_trace(&frame, normalized);
-      free(normalized);
-      free(child_file);
-      return false;
+      char* lib_file = try_resolve_lib_module(graph->root_path, normalized);
+      if (lib_file) {
+        free(child_file);
+        child_file = lib_file;
+      } else {
+        fprintf(stderr, "error: imported module '%s' not found (required by '%s')\n", normalized,
+                module_path ? module_path : "<entry>");
+        module_stack_print_trace(&frame, normalized);
+        free(normalized);
+        free(child_file);
+        return false;
+      }
     }
     if (!module_graph_load_module(graph, normalized, child_file, &frame, hash_out)) {
       free(normalized);
