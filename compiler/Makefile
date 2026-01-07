@@ -2,7 +2,8 @@
 
 CC = gcc
 CFLAGS = -std=c11 -Wall -Wextra -Wpedantic -Werror -O2 -g
-LDFLAGS =
+LDFLAGS = -lraylib -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL -L/opt/homebrew/lib
+CFLAGS += -I/opt/homebrew/include
 
 SRC_DIR = src
 BUILD_DIR = build
@@ -26,7 +27,8 @@ SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/vm_value.c \
        $(SRC_DIR)/vm.c \
        $(SRC_DIR)/vm_compiler.c \
-       $(SRC_DIR)/vm_registry.c
+       $(SRC_DIR)/vm_registry.c \
+       $(SRC_DIR)/vm_raylib.c
 
 OBJS = $(SRCS:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)
 TARGET = $(BIN_DIR)/rae
