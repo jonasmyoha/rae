@@ -2101,7 +2101,7 @@ function highlightRae(code, isPack = false) {
   // 2. Highlight keywords and numbers in the remaining text
   let keywordsList = [...(raeSyntax.keywords ?? [])];
   if (isPack) {
-    keywordsList.push("live", "compiled", "both");
+    keywordsList.push("live", "compiled", "hybrid");
   }
   const keywords = keywordsList.join("|");
   const keywordRegex = new RegExp(`\\b(${keywords})\\b`, "g");
