@@ -71,7 +71,7 @@ const EXAMPLE_ORDER: Record<string, number> = {
   hot_reload: 7,
   auto_import_demo: 8,
   multifile_report: 9,
-  "tinyexpr-demo": 10,
+  external_c_library: 10,
   hybrid_hot_reload: 11,
   raepack_demo: 14,
   raylib_basic: 12,
