@@ -24,8 +24,8 @@
       "buildCommand": "cd compiler && make",
       "cleanCommand": "cd compiler && make clean",
       "rebuildCommand": "cd compiler && make clean && make",
-      "exampleRunCommand": "./compiler/bin/rae build --target compiled --out {{OUTDIR}} {{ENTRY}}",
-      "exampleBuildCommand": "./compiler/bin/rae build --target compiled --out {{OUTDIR}} {{ENTRY}}"
+      "exampleRunCommand": "./compiler/bin/rae build --target compiled --emit-c --out {{OUTDIR}}/out.c {{ENTRY}} && gcc -O2 -o {{OUTDIR}}/app {{OUTDIR}}/out.c {{OUTDIR}}/rae_runtime.c third_party/raylib/rae_raylib.c -I{{OUTDIR}} -Ithird_party/raylib -I/opt/homebrew/include -L/opt/homebrew/lib -lraylib -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL && {{OUTDIR}}/app",
+      "exampleBuildCommand": "./compiler/bin/rae build --target compiled --emit-c --out {{OUTDIR}} {{ENTRY}}"
     },
     {
       "id": "hybrid",
@@ -34,8 +34,8 @@
       "buildCommand": "cd compiler && make",
       "cleanCommand": "cd compiler && make clean",
       "rebuildCommand": "cd compiler && make clean && make",
-      "exampleRunCommand": "./compiler/bin/rae build --target hybrid --out {{OUTDIR}} {{ENTRY}}",
-      "exampleBuildCommand": "./compiler/bin/rae build --target hybrid --out {{OUTDIR}} {{ENTRY}}"
+      "exampleRunCommand": "./compiler/bin/rae build --target hybrid --emit-c --out {{OUTDIR}}/out.c {{ENTRY}} && gcc -O2 -o {{OUTDIR}}/app {{OUTDIR}}/out.c {{OUTDIR}}/rae_runtime.c third_party/raylib/rae_raylib.c -I{{OUTDIR}} -Ithird_party/raylib -I/opt/homebrew/include -L/opt/homebrew/lib -lraylib -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL && {{OUTDIR}}/app",
+      "exampleBuildCommand": "./compiler/bin/rae build --target hybrid --emit-c --out {{OUTDIR}} {{ENTRY}}"
     }
   ]
 }

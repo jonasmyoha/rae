@@ -10,7 +10,7 @@ import type {
   ServerEvent
 } from "../shared/types";
 import type { RaeDevtoolsConfig, TargetConfig } from "./config";
-import { resolveTarget } from "./config";
+import { resolveTargetList } from "./config";
 import type { StatsStore } from "./stats";
 
 type BroadcastFn = (event: ServerEvent) => void;
@@ -19,9 +19,13 @@ type ActiveRun = {
   id: string;
   command: BuildCommandType;
   startedAt: number;
-  process: ReturnType<typeof spawn>;
+  process: ReturnType<typeof spawn> | null;
   buffers: Record<"stdout" | "stderr", string>;
   target: TargetConfig;
+  targets: TargetConfig[];
+  targetIndex: number;
+  overallSuccess: boolean;
+  batchLabel: string;
 };
 
 export class BuildRunner {
@@ -39,24 +43,70 @@ export class BuildRunner {
       return;
     }
 
-    const target = resolveTarget(this.config, targetId);
-    const cmd = this.getCommandForType(command, target);
-    if (!cmd) {
+    const targets = resolveTargetList(this.config, targetId ? [targetId] : undefined);
+    const runnableTargets = targets.filter((candidate) => Boolean(this.getCommandForType(command, candidate)));
+    const skippedTargets = targets.filter((candidate) => !this.getCommandForType(command, candidate));
+    skippedTargets.forEach((candidate) => {
       this.broadcastStatus(
-        `Target "${target.label}" does not define a ${command} command. Update config.json to add one.`
+        `Target "${candidate.label}" does not define a ${command} command. Skipping.`
+      );
+    });
+    if (!runnableTargets.length) {
+      this.broadcastStatus(
+        `No targets available for ${command}. Update config.json to add commands.`
       );
       return;
     }
 
     const runId = randomUUID();
     const startedAt = Date.now();
+    const batchLabel = runnableTargets.map((target) => target.label).join(" + ");
+
+    this.activeRun = {
+      id: runId,
+      command,
+      startedAt,
+      target: runnableTargets[0],
+      process: null,
+      buffers: { stdout: "", stderr: "" },
+      targets: runnableTargets,
+      targetIndex: 0,
+      overallSuccess: true,
+      batchLabel
+    };
+
+    this.broadcastRunStarted(runId, command, batchLabel);
+    this.startNextTarget();
+  }
+
+  private startNextTarget() {
+    if (!this.activeRun) return;
+    const target = this.activeRun.targets[this.activeRun.targetIndex];
+    if (!target) {
+      this.finishBatch();
+      return;
+    }
+    const cmd = this.getCommandForType(this.activeRun.command, target);
+    if (!cmd) {
+      this.activeRun.targetIndex += 1;
+      this.startNextTarget();
+      return;
+    }
     const cwd = path.resolve(process.cwd(), this.config.compilerPath);
     this.broadcastStatus(`[debug] Build target: ${target.id}`);
-    this.broadcastStatus(`[debug] Build command (${command}): ${cmd}`);
+    this.broadcastStatus(`[debug] Build command (${this.activeRun.command}): ${cmd}`);
     this.broadcastStatus(`[debug] Build cwd: ${cwd}`);
     if (cmd.includes("TARGET=")) {
       this.broadcastStatus("[debug] WARNING: build command includes TARGET= and will override the compiler binary name.");
     }
+
+    this.broadcast({
+      type: "build-run-output",
+      runId: this.activeRun.id,
+      stream: "stdout",
+      line: `▶ [${target.label}] ${this.activeRun.command} command started`,
+      timestamp: new Date().toISOString()
+    } satisfies BuildRunOutputMessage);
 
     const child = spawn(cmd, {
       cwd,
@@ -64,16 +114,9 @@ export class BuildRunner {
       env: process.env
     });
 
-    this.activeRun = {
-      id: runId,
-      command,
-      startedAt,
-      target,
-      process: child,
-      buffers: { stdout: "", stderr: "" }
-    };
-
-    this.broadcastRunStarted(runId, command, target);
+    this.activeRun.target = target;
+    this.activeRun.process = child;
+    this.activeRun.buffers = { stdout: "", stderr: "" };
 
     child.stdout?.setEncoding("utf8");
     child.stderr?.setEncoding("utf8");
@@ -82,14 +125,32 @@ export class BuildRunner {
     child.stderr?.on("data", (chunk: string) => this.flushLines(chunk, "stderr"));
 
     child.on("error", (error) => {
-      this.broadcastRunError(runId, command, error);
+      this.broadcastRunError(this.activeRun?.id ?? "", this.activeRun?.command ?? "build", error);
       this.cleanup();
     });
 
     child.on("close", (code) => {
+      if (!this.activeRun) return;
       this.flushRemainingBuffers();
-      this.broadcastRunCompleted(runId, command, startedAt, code);
-      this.cleanup();
+      const success = code === 0;
+      if (!success) {
+        this.activeRun.overallSuccess = false;
+      }
+      const exitLabel = code ?? "unknown";
+      this.broadcast({
+        type: "build-run-output",
+        runId: this.activeRun.id,
+        stream: success ? "stdout" : "stderr",
+        line: `● [${target.label}] ${this.activeRun.command} finished (exit ${exitLabel})`,
+        timestamp: new Date().toISOString()
+      } satisfies BuildRunOutputMessage);
+
+      this.activeRun.targetIndex += 1;
+      if (this.activeRun.targetIndex < this.activeRun.targets.length) {
+        this.startNextTarget();
+      } else {
+        this.finishBatch();
+      }
     });
   }
 
@@ -147,46 +208,43 @@ export class BuildRunner {
     }
   }
 
-  private broadcastRunStarted(runId: string, command: BuildCommandType, target: TargetConfig) {
+  private broadcastRunStarted(runId: string, command: BuildCommandType, targetLabel: string) {
     const payload: BuildRunStartedMessage = {
       type: "build-run-started",
       runId,
       command,
-      targetId: target.id,
-      targetLabel: target.label,
+      targetId: "all",
+      targetLabel,
       timestamp: new Date().toISOString()
     };
     this.broadcast(payload);
   }
 
-  private broadcastRunCompleted(
-    runId: string,
-    command: BuildCommandType,
-    startedAt: number,
-    exitCode: number | null
-  ) {
-    const durationMs = Date.now() - startedAt;
-    const target = this.activeRun?.target;
+  private finishBatch() {
+    if (!this.activeRun) return;
+    const durationMs = Date.now() - this.activeRun.startedAt;
+    const success = this.activeRun.overallSuccess;
     const payload: BuildRunCompletedMessage = {
       type: "build-run-completed",
-      runId,
-      command,
-      exitCode,
-      success: exitCode === 0,
+      runId: this.activeRun.id,
+      command: this.activeRun.command,
+      exitCode: success ? 0 : 1,
+      success,
       durationMs,
-      targetId: target?.id ?? "unknown",
-      targetLabel: target?.label ?? "Unknown target",
+      targetId: "all",
+      targetLabel: this.activeRun.batchLabel,
       timestamp: new Date().toISOString()
     };
     this.broadcast(payload);
     this.stats?.recordBuildRun({
-      runId,
-      command,
+      runId: this.activeRun.id,
+      command: this.activeRun.command,
       durationMs,
-      success: exitCode === 0,
-      targetId: target?.id ?? "unknown",
-      targetLabel: target?.label ?? "Unknown target"
+      success,
+      targetId: "all",
+      targetLabel: this.activeRun.batchLabel
     });
+    this.cleanup();
   }
 
   private broadcastRunError(runId: string, command: BuildCommandType, error: unknown) {

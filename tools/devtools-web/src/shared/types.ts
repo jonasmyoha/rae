@@ -48,6 +48,7 @@ export type ExampleDescriptor = {
   description?: string;
   supportedTargets?: string[];
   defaultTargetId?: string;
+  targetEntries?: Record<string, string>;
   actions?: ExampleActionDescriptor[];
 };
 
