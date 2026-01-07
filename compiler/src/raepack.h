@@ -10,7 +10,7 @@
 typedef enum {
   RAEPACK_EMIT_LIVE = 0,
   RAEPACK_EMIT_COMPILED,
-  RAEPACK_EMIT_BOTH
+  RAEPACK_EMIT_HYBRID
 } RaePackEmit;
 
 typedef struct RaePackSource {
