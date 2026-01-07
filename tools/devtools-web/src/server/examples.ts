@@ -65,16 +65,17 @@ type ExampleDownloads = Array<{
 
 const EXAMPLE_ORDER: Record<string, number> = {
   hello: 1,
-  main_loop: 2,
-  hot_reload: 3,
+  c_backend_demo: 2,
+  vm_math: 3,
   vm_call: 4,
-  vm_math: 5,
-  c_backend_demo: 6,
-  auto_import_demo: 7,
-  multifile_report: 8,
-  "tinyexpr-demo": 9,
-  hybrid_hot_reload: 10,
-  raepack_demo: 11
+  hot_reload: 7,
+  auto_import_demo: 8,
+  multifile_report: 9,
+  "tinyexpr-demo": 10,
+  hybrid_hot_reload: 11,
+  raepack_demo: 14,
+  raylib_basic: 12,
+  pong: 13
 };
 
 export async function listExamples(
