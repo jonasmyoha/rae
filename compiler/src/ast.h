@@ -86,7 +86,9 @@ typedef enum {
 typedef enum {
   AST_UNARY_NEG,
   AST_UNARY_NOT,
-  AST_UNARY_SPAWN
+  AST_UNARY_SPAWN,
+  AST_UNARY_PRE_INC,
+  AST_UNARY_PRE_DEC
 } AstUnaryOp;
 
 typedef enum {
@@ -150,7 +152,7 @@ typedef enum {
   AST_STMT_EXPR,
   AST_STMT_RET,
   AST_STMT_IF,
-  AST_STMT_WHILE,
+  AST_STMT_LOOP,
   AST_STMT_MATCH,
   AST_STMT_ASSIGN
 } AstStmtKind;
@@ -193,9 +195,12 @@ struct AstStmt {
       AstBlock* else_block;
     } if_stmt;
     struct {
+      AstStmt* init;
       AstExpr* condition;
+      AstExpr* increment;
       AstBlock* body;
-    } while_stmt;
+      bool is_range;
+    } loop_stmt;
     struct {
       AstExpr* subject;
       AstMatchCase* cases;

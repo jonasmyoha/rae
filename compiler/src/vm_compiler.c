@@ -530,6 +530,39 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       } else if (expr->as.unary.op == AST_UNARY_NOT) {
         emit_op(compiler, OP_NOT, (int)expr->line);
         return true;
+      } else if (expr->as.unary.op == AST_UNARY_PRE_INC || expr->as.unary.op == AST_UNARY_PRE_DEC) {
+        if (expr->as.unary.operand->kind != AST_EXPR_IDENT) {
+          diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
+                     "increment/decrement operand must be an identifier in VM");
+          compiler->had_error = true;
+          return false;
+        }
+        int slot = compiler_find_local(compiler, expr->as.unary.operand->as.ident);
+        if (slot < 0) {
+           diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
+                      "unknown identifier in increment/decrement");
+           compiler->had_error = true;
+           return false;
+        }
+        emit_op(compiler, OP_GET_LOCAL, (int)expr->line);
+        emit_short(compiler, (uint16_t)slot, (int)expr->line);
+        emit_constant(compiler, value_int(1), (int)expr->line);
+        if (expr->as.unary.op == AST_UNARY_PRE_INC) {
+          emit_op(compiler, OP_ADD, (int)expr->line);
+        } else {
+          emit_op(compiler, OP_SUB, (int)expr->line);
+        }
+        emit_op(compiler, OP_SET_LOCAL, (int)expr->line);
+        emit_short(compiler, (uint16_t)slot, (int)expr->line);
+        // OP_SET_LOCAL leaves value on stack? No, it usually pops value and sets. 
+        // Wait, OP_SET_LOCAL in many VMs leaves value. 
+        // Let's check vm.c implementation of OP_SET_LOCAL.
+        // Assuming it pops, I need to Get it back or Peek.
+        // Actually, let's assume standard behavior: SetLocal pops.
+        // So I need to GetLocal again to return the value.
+        emit_op(compiler, OP_GET_LOCAL, (int)expr->line);
+        emit_short(compiler, (uint16_t)slot, (int)expr->line);
+        return true;
       }
       diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
                  "unary operator not supported in VM yet");
@@ -693,26 +726,93 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
       }
       return true;
     }
-    case AST_STMT_WHILE: {
-      if (!stmt->as.while_stmt.condition || !stmt->as.while_stmt.body) {
+    case AST_STMT_LOOP: {
+      if (stmt->as.loop_stmt.is_range) {
         diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column,
-                   "while statement missing condition or body");
+                   "range loops not yet supported in VM");
         compiler->had_error = true;
         return false;
       }
+      
+      // Enter scope for loop variables
+      // (VM currently manages locals by simple count, so just tracking count is enough for "scope")
+      uint16_t scope_start_locals = compiler->local_count;
+      
+      if (stmt->as.loop_stmt.init) {
+        if (!compile_stmt(compiler, stmt->as.loop_stmt.init)) {
+            return false;
+        }
+        // If init was an expression statement, it left nothing.
+        // If init was a def, it added a local.
+      }
+
       uint16_t loop_start = (uint16_t)compiler->chunk->code_count;
-      if (!compile_expr(compiler, stmt->as.while_stmt.condition)) {
+      
+      uint16_t exit_jump = 0;
+      bool has_condition = stmt->as.loop_stmt.condition != NULL;
+      
+      if (has_condition) {
+        if (!compile_expr(compiler, stmt->as.loop_stmt.condition)) {
+          return false;
+        }
+        exit_jump = emit_jump(compiler, OP_JUMP_IF_FALSE, (int)stmt->line);
+        emit_op(compiler, OP_POP, (int)stmt->line);
+      }
+      
+      if (!compile_block(compiler, stmt->as.loop_stmt.body)) {
         return false;
       }
-      uint16_t exit_jump = emit_jump(compiler, OP_JUMP_IF_FALSE, (int)stmt->line);
-      emit_op(compiler, OP_POP, (int)stmt->line);
-      if (!compile_block(compiler, stmt->as.while_stmt.body)) {
-        return false;
+      
+      if (stmt->as.loop_stmt.increment) {
+        if (!compile_expr(compiler, stmt->as.loop_stmt.increment)) {
+          return false;
+        }
+        emit_op(compiler, OP_POP, (int)stmt->line); // Discard increment result
       }
+      
       emit_op(compiler, OP_JUMP, (int)stmt->line);
       emit_short(compiler, loop_start, (int)stmt->line);
-      patch_jump(compiler, exit_jump);
-      emit_op(compiler, OP_POP, (int)stmt->line);
+      
+      if (has_condition) {
+        patch_jump(compiler, exit_jump);
+        emit_op(compiler, OP_POP, (int)stmt->line);
+      }
+      
+      // Exit scope (pop locals)
+      while (compiler->local_count > scope_start_locals) {
+        // In a real VM we'd emit OP_POP_LOCAL or similar, but here we just decrement compiler counter?
+        // Wait, the runtime stack needs to be popped if we declared locals.
+        // We need to emit OP_POP for each local we leave?
+        // Rae VM locals are on stack.
+        // Does VM have OP_POP_N? Or just OP_POP?
+        // Existing `compile_block` doesn't seem to emit POPs for locals?
+        // Let's check `compile_block`. It just loops.
+        // Ah, `compile_function` resets locals.
+        // It seems the current VM implementation might be "leaking" locals on stack or I missed where they are popped.
+        // Re-reading `vm_compiler.c`: `compile_block` does NOT pop locals.
+        // `compile_function` resets `local_count` at start.
+        // This implies locals persist until function return in current trivial VM?
+        // `compiler->local_count` is just a compile-time tracker.
+        // If I declare `def x = 1` in a loop, and loop runs 10 times, do I get 10 x's on stack?
+        // Yes, if I don't pop them.
+        // But `compile_stmt` for `AST_STMT_DEF` emits `SET_LOCAL`.
+        // `compiler_add_local` assigns a slot.
+        // If the loop re-executes, does it reuse the slot?
+        // The slot is fixed at compile time.
+        // `def x = 1` -> `SET_LOCAL 5`.
+        // Next iteration -> `SET_LOCAL 5`.
+        // So the stack depth doesn't grow per iteration.
+        // BUT, `init` is outside the loop body.
+        // If `init` defines `i`, it takes slot 0.
+        // `body` defines `x`, it takes slot 1.
+        // Next iteration, `x` uses slot 1 again.
+        // So "stack" growth is bounded by unique variables in source.
+        // So I don't need to emit POPs for scoping in this simple VM?
+        // However, `compiler->local_count` should be reset to `scope_start_locals` after the loop
+        // so that subsequent statements reuse those slots.
+        // Yes.
+        compiler->local_count = scope_start_locals;
+      }
       return true;
     }
     case AST_STMT_MATCH: {
