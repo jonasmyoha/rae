@@ -318,6 +318,15 @@ static void dump_loop_stmt(const AstStmt* stmt, FILE* out, int indent) {
   dump_block(stmt->as.loop_stmt.body, out, indent + 1);
 }
 
+static void dump_assign_stmt(const AstStmt* stmt, FILE* out, int indent) {
+  print_indent(out, indent);
+  fputs("assign ", out);
+  dump_expr(stmt->as.assign_stmt.target, out);
+  fputs(stmt->as.assign_stmt.is_move ? " => " : " = ", out);
+  dump_expr(stmt->as.assign_stmt.value, out);
+  fputc('\n', out);
+}
+
 static void dump_match_stmt(const AstStmt* stmt, FILE* out, int indent) {
   print_indent(out, indent);
   fputs("match ", out);
@@ -367,6 +376,9 @@ static void dump_block(const AstBlock* block, FILE* out, int indent) {
         break;
       case AST_STMT_MATCH:
         dump_match_stmt(stmt, out, indent);
+        break;
+      case AST_STMT_ASSIGN:
+        dump_assign_stmt(stmt, out, indent);
         break;
     }
     stmt = stmt->next;

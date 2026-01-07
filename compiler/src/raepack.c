@@ -66,11 +66,6 @@ static const Token* parser_advance(RaePackParser* parser) {
   return &parser->tokens[parser->index++];
 }
 
-static bool parser_check(const RaePackParser* parser, TokenKind kind) {
-  const Token* token = parser_peek(parser);
-  return token && token->kind == kind;
-}
-
 static void parser_error(RaePackParser* parser, const Token* token, const char* message) {
   if (!parser) return;
   if (!token) {

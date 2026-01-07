@@ -319,6 +319,15 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     }
     case AST_EXPR_CALL:
       return emit_call_expr(ctx, expr, out);
+    case AST_EXPR_NONE:
+      fprintf(stderr, "error: C backend does not support 'none' yet\n");
+      return false;
+    case AST_EXPR_MEMBER:
+      fprintf(stderr, "error: C backend does not support member access yet\n");
+      return false;
+    case AST_EXPR_OBJECT:
+      fprintf(stderr, "error: C backend does not support object literals yet\n");
+      return false;
   }
   fprintf(stderr, "error: unsupported expression kind in C backend\n");
   return false;
