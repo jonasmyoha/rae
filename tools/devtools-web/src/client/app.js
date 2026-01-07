@@ -1511,7 +1511,8 @@ async function loadExampleSource(path) {
     }
     const data = await response.json();
     const contents = data.contents ?? "";
-    const highlighted = highlightRae(contents);
+    const isRae = path.toLowerCase().endsWith(".rae");
+    const highlighted = isRae ? highlightRae(contents) : escapeHtml(contents);
     exampleSourceCode.innerHTML = `<code>${highlighted}</code>`;
     if (exampleEditMode && exampleEditor) {
       exampleEditor.value = contents;
@@ -1971,7 +1972,8 @@ function renderTestSource() {
     testSourceCode.innerHTML = "<code>No file selected.</code>";
     return;
   }
-  const highlighted = highlightRae(selectedTestSource);
+  const isRae = selectedTestFile?.toLowerCase().endsWith(".rae");
+  const highlighted = isRae ? highlightRae(selectedTestSource) : escapeHtml(selectedTestSource);
   testSourceCode.innerHTML = `<code>${highlighted}</code>`;
 }
 
