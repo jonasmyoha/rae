@@ -468,6 +468,17 @@ static void pp_print_loop_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
   pp_newline(pp);
 }
 
+static void pp_print_assign_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
+  pp_expr(pp, stmt->as.assign_stmt.target);
+  if (stmt->as.assign_stmt.is_move) {
+    pp_write(pp, " => ");
+  } else {
+    pp_write(pp, " = ");
+  }
+  pp_expr(pp, stmt->as.assign_stmt.value);
+  pp_newline(pp);
+}
+
 static void pp_print_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
   switch (stmt->kind) {
     case AST_STMT_DEF:
@@ -491,6 +502,9 @@ static void pp_print_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
       break;
     case AST_STMT_MATCH:
       pp_print_match_stmt(pp, stmt);
+      break;
+    case AST_STMT_ASSIGN:
+      pp_print_assign_stmt(pp, stmt);
       break;
   }
 }
