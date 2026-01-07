@@ -2060,12 +2060,20 @@ function highlightRae(code) {
   if (!raeSyntax) {
     return escaped;
   }
-  const keywords = raeSyntax.keywords?.join("|") ?? "";
-  const keywordRegex = new RegExp(`\\b(${keywords})\\b`, "g");
-  const commentLine = raeSyntax.comments?.line
+
+  // 1. Extract strings and comments, replacing them with placeholders
+  const placeholders = [];
+  const addPlaceholder = (match, type) => {
+    const id = `__PH_${placeholders.length}__`;
+    placeholders.push({ id, text: match, type });
+    return id;
+  };
+
+  const commentLineRegex = raeSyntax.comments?.line
     ? new RegExp(`${escapeRegex(raeSyntax.comments.line)}.*`, "gm")
     : /#.*$/gm;
-  const commentBlock =
+  
+  const commentBlockRegex =
     raeSyntax.comments?.block_start && raeSyntax.comments?.block_end
       ? new RegExp(
           `${escapeRegex(raeSyntax.comments.block_start)}[\\s\\S]*?${escapeRegex(
@@ -2075,17 +2083,95 @@ function highlightRae(code) {
         )
       : null;
 
-  // Apply highlights in safe order: keywords -> numbers -> strings -> comments
-  let result = escaped
-    .replace(keywordRegex, '<span class="tok-keyword">$1</span>')
-    .replace(/\b(\d+(\.\d+)?)/g, '<span class="tok-number">$1</span>')
-    .replace(/("(?:\\.|[^"])*")/g, '<span class="tok-string">$1</span>')
-    .replace(/'(?:\\.|[^'])*'/g, '<span class="tok-string">$&</span>');
+  // We must handle strings and comments carefully.
+  // Generally, strings inside comments are comments.
+  // Comments inside strings are strings.
+  // To do this perfectly requires a tokenizer.
+  // For regex approximation, we can try to match both and pick the earliest?
+  // Or just prioritize strings first (usual in C-like langs)?
+  // But # starts a comment in Rae. " can be inside.
+  // Let's do: Strings first, then comments.
+  // (Assuming comments don't contain unclosed quotes that break rest of file).
+  // Actually, if we just replace strings first, then comments.
+  
+  let result = escaped;
+  
+  // Strings
+  result = result.replace(/("(?:\\.|[^"])*")/g, (match) => addPlaceholder(match, "tok-string"));
+  result = result.replace(/'(?:\\.|[^'])*'/g, (match) => addPlaceholder(match, "tok-string"));
 
-  if (commentBlock) {
-    result = result.replace(commentBlock, '<span class="tok-comment">$&</span>');
+  // Comments (after strings, so strings inside comments are NOT extracted, wait)
+  // If I have # "foo", and I extract "foo" first.
+  // Then # __PH_0__ remains.
+  // Then comment regex matches # __PH_0__.
+  // Wraps in comment span.
+  // When restoring: <span class="tok-comment"># <span class="tok-string">"foo"</span></span>
+  // This is nested highlighting (strings inside comments). This is acceptable and often desired.
+  // BUT, if I have "foo # bar", string extraction handles it.
+  // Then comment extraction sees nothing.
+  // This works.
+  
+  if (commentBlockRegex) {
+    result = result.replace(commentBlockRegex, (match) => addPlaceholder(match, "tok-comment"));
   }
-  result = result.replace(commentLine, '<span class="tok-comment">$&</span>');
+  result = result.replace(commentLineRegex, (match) => addPlaceholder(match, "tok-comment"));
+
+  // 2. Highlight keywords and numbers in the remaining text
+  const keywords = raeSyntax.keywords?.join("|") ?? "";
+  const keywordRegex = new RegExp(`\\b(${keywords})\\b`, "g");
+  
+  result = result
+    .replace(keywordRegex, '<span class="tok-keyword">$1</span>')
+    .replace(/\b(\d+(\.\d+)?)/g, '<span class="tok-number">$1</span>');
+
+  // 3. Restore placeholders
+  // We must restore in reverse order if they matched nested?
+  // But regex replace consumes. Placeholders are unique.
+  // The only nesting is if we extracted string, then extracted comment containing string placeholder.
+  // Then we restore comment. It contains string placeholder.
+  // Then we restore string.
+  // So standard iteration over placeholders works?
+  // No, we need to replace the placeholders in the current result.
+  // Since comment placeholder might contain string placeholder inside its text.
+  
+  // Actually, standard iteration works if we replace all occurrences?
+  // No, `addPlaceholder` returns unique ID.
+  // But wait, if we replaced string first.
+  // Text: # "str"
+  // 1. String -> # __PH_0__
+  // 2. Comment -> __PH_1__ (where __PH_1__ text is "# __PH_0__")
+  // 3. Highlight keywords -> __PH_1__ (no change)
+  // 4. Restore:
+  //    __PH_0__ -> <span class="tok-string">"str"</span>
+  //    __PH_1__ -> <span class="tok-comment"># __PH_0__</span>
+  //    Wait. If we restore PH_0 first?
+  //    Result contains __PH_1__.
+  //    Replacing PH_0 does nothing (it's inside PH_1 text which is in the array, not in result string).
+  //    Replacing PH_1 puts "# __PH_0__" into result.
+  //    Then we need to run another pass?
+  //    Recursive restoration?
+  //    Or restore in LIFO order?
+  //    PH_1 was added last. It wraps PH_0.
+  //    If we restore PH_1 first: result has "# __PH_0__".
+  //    Then we restore PH_0: result has "# <span...>...</span>".
+  //    So LIFO (reverse order of addition) seems correct for nesting?
+  //    Actually, simple iteration works if we just do:
+  //    result = result.replace(id, wrappedText);
+  //    If wrappedText contains another ID, it will be replaced when we get to that ID.
+  //    So order doesn't matter provided we check all IDs?
+  //    No, if we iterate 0..N.
+  //    We replace PH_0. It's hidden inside PH_1.
+  //    So we replace nothing.
+  //    Then we replace PH_1. It reveals PH_0.
+  //    But we already passed PH_0 loop.
+  //    So we must restore from Last to First (LIFO).
+  
+  for (let i = placeholders.length - 1; i >= 0; i--) {
+    const p = placeholders[i];
+    const replacement = `<span class="${p.type}">${p.text}</span>`;
+    // We use a global replace just in case, but IDs are unique
+    result = result.split(p.id).join(replacement);
+  }
 
   return result;
 }
