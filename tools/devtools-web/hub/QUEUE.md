@@ -90,6 +90,49 @@
   - Run tests executes Live then Compiled sequentially.
   - Examples show separate Run buttons for each supported target.
 
+### T022 - Fix devtools comment syntax highlighting
+- Repo: rae-devtools-web
+- Summary:
+  - Investigate and fix the issue where comments starting with `#` display a partial `tok-comment">` tag in the syntax highlighter.
+  - Ensure comments are correctly highlighted without rendering HTML tags.
+- Acceptance:
+  - Comments in code viewer appear correctly highlighted.
+  - No stray HTML tags visible in source view.
+
+### T023 - Refactor Raylib C wrappers to PascalCase
+- Repo: rae
+- Summary:
+  - Rename C wrapper functions in `rae/third_party/raylib/rae_raylib.c` from `snake_case` (e.g., `rae_raylib_init_window`) to `PascalCase` (e.g., `InitWindow`).
+  - Keep the prefix in C to avoid collisions but allow clean mapping if possible, or decide on a consistent naming strategy that allows `InitWindow` in Rae.
+  - For now, since we wrap them, we can name the C wrappers `Rae_InitWindow` or similar, but the goal is to expose `InitWindow` to Rae.
+  - Wait, if we use `extern func InitWindow` in Rae, the C backend emits `InitWindow`. This conflicts with Raylib's `InitWindow`.
+  - So we MUST use a prefix in C backend output or in the wrapper.
+  - Strategy: Rename wrappers to `Rae_InitWindow`. In `raylib.rae` (T024), we will bind `extern "Rae_InitWindow" func InitWindow` if alias is supported, OR we just use `func InitWindow(...) { return Rae_InitWindow(...) }` wrapper in Rae.
+  - Actually, let's just rename the C functions to `Rae_InitWindow` (PascalCase with prefix) to match Raylib style better, or just `InitWindow` if we can avoid linking issues (we can't).
+  - Let's stick to: C wrappers named `Rae_InitWindow`.
+- Acceptance:
+  - `rae_raylib.c` uses `PascalCase` for function names (with prefix).
+  - Wrapper logic remains correct.
+
+### T024 - Centralize Raylib wrapper in raylib.rae
+- Repo: rae
+- Summary:
+  - Create `rae/lib/raylib.rae` (or similar) containing `extern func` definitions for Raylib.
+  - expose clean `InitWindow`, `BeginDrawing` names to user code.
+  - Update `pong.rae` and `raylib_basic.rae` to import this file and use clean names.
+- Acceptance:
+  - `rae/lib/raylib.rae` exists.
+  - Examples import it and use `InitWindow` etc.
+  - `pong` and `raylib_basic` compile and run.
+
+### T025 - Reorder examples
+- Repo: rae-devtools-web
+- Summary:
+  - Change example ordering in `src/server/examples.ts`.
+  - `raylib_basic` -> 12, `pong` -> 13.
+- Acceptance:
+  - Devtools list shows `raylib_basic` before `pong`.
+
 ### Status note — Hybrid devtools work in progress
 - Repo: `rae-devtools-web` / `rae`
 - Summary:
