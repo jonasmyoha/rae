@@ -315,15 +315,15 @@ static RaePackEmit emit_from_ident(RaePackParser* parser, const RaePackField* fi
   if (str_eq_cstr(ident, "compiled")) {
     return RAEPACK_EMIT_COMPILED;
   }
-  if (str_eq_cstr(ident, "both")) {
-    return RAEPACK_EMIT_BOTH;
+  if (str_eq_cstr(ident, "hybrid")) {
+    return RAEPACK_EMIT_HYBRID;
   }
   if (ok) *ok = false;
   if (field) {
     diag_error(parser->file_path, (int)field->line, (int)field->column,
-               "emit must be one of: live | compiled | both");
+               "emit must be one of: live | compiled | hybrid");
   } else {
-    diag_error(parser->file_path, 0, 0, "emit must be one of: live | compiled | both");
+    diag_error(parser->file_path, 0, 0, "emit must be one of: live | compiled | hybrid");
   }
   return RAEPACK_EMIT_LIVE;
 }
@@ -786,8 +786,8 @@ const char* raepack_emit_name(RaePackEmit emit) {
       return "live";
     case RAEPACK_EMIT_COMPILED:
       return "compiled";
-    case RAEPACK_EMIT_BOTH:
-      return "both";
+    case RAEPACK_EMIT_HYBRID:
+      return "hybrid";
   }
   return "unknown";
 }
