@@ -20,15 +20,16 @@ typedef enum {
   OP_SUB = 0x11,
   OP_MUL = 0x12,
   OP_DIV = 0x13,
-  OP_NEG = 0x14,
-  OP_LT = 0x15,
-  OP_LE = 0x16,
-  OP_GT = 0x17,
-  OP_GE = 0x18,
-  OP_EQ = 0x19,
-  OP_NE = 0x1A,
-  OP_NOT = 0x1B,
-  OP_NATIVE_CALL = 0x1C
+  OP_MOD = 0x14,
+  OP_NEG = 0x15,
+  OP_LT = 0x16,
+  OP_LE = 0x17,
+  OP_GT = 0x18,
+  OP_GE = 0x19,
+  OP_EQ = 0x1A,
+  OP_NE = 0x1B,
+  OP_NOT = 0x1C,
+  OP_NATIVE_CALL = 0x1D
 } OpCode;
 
 typedef enum {

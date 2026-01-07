@@ -238,7 +238,8 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
       case OP_ADD:
       case OP_SUB:
       case OP_MUL:
-      case OP_DIV: {
+      case OP_DIV:
+      case OP_MOD: {
         Value rhs = vm_pop(vm);
         Value lhs = vm_pop(vm);
         if (lhs.type != VAL_INT || rhs.type != VAL_INT) {
@@ -262,6 +263,13 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
               return VM_RUNTIME_ERROR;
             }
             result = lhs.as.int_value / rhs.as.int_value;
+            break;
+          case OP_MOD:
+            if (rhs.as.int_value == 0) {
+              diag_error(NULL, 0, 0, "modulo by zero");
+              return VM_RUNTIME_ERROR;
+            }
+            result = lhs.as.int_value % rhs.as.int_value;
             break;
           default:
             break;
