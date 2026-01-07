@@ -1,9 +1,22 @@
 #include "rae_runtime.h"
 
 #include <stdio.h>
+#include <unistd.h>
 
 static void rae_flush_stdout(void) {
   fflush(stdout);
+}
+
+static int64_t g_tick_counter = 0;
+
+int64_t nextTick(void) {
+  return ++g_tick_counter;
+}
+
+void sleepMs(int64_t ms) {
+  if (ms > 0) {
+    usleep((useconds_t)ms * 1000);
+  }
 }
 
 void rae_log_cstr(const char* text) {
