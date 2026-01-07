@@ -98,7 +98,7 @@ export async function listExamples(
 
     if (entry.isDirectory()) {
       const metadata = await readExampleMetadata(fullPath);
-      const files = await collectRaeFiles(fullPath, relativePath);
+      const files = await collectExampleFiles(fullPath, relativePath);
       if (!files.length) continue;
       const packInfo = await readExamplePack(fullPath, relativePath, compilerBinPath);
       const entryFile =
@@ -187,26 +187,33 @@ function stripOrderPrefix(name: string): string {
   return name.replace(/^\d+\.\s+/, "");
 }
 
-async function collectRaeFiles(
+async function collectExampleFiles(
   root: string,
   relativeBase: string
 ): Promise<ExampleFileDescriptor[]> {
   const entries = await safeReadDir(root);
   const files: ExampleFileDescriptor[] = [];
 
+  const ALLOWED_EXTENSIONS = [".rae", ".md", ".raepack", ".json", ".txt"];
+
   for (const entry of entries) {
     if (entry.name.startsWith(".")) continue;
+    if (entry.name === "devtools.json") continue;
+    
     const relativePath = path.join(relativeBase, entry.name);
     const fullPath = path.join(root, entry.name);
 
     if (entry.isDirectory()) {
-      const nested = await collectRaeFiles(fullPath, relativePath);
+      const nested = await collectExampleFiles(fullPath, relativePath);
       files.push(...nested);
       continue;
     }
 
-    if (entry.isFile() && entry.name.endsWith(".rae")) {
-      files.push({ path: relativePath, name: entry.name });
+    if (entry.isFile()) {
+      const ext = path.extname(entry.name).toLowerCase();
+      if (ALLOWED_EXTENSIONS.includes(ext)) {
+        files.push({ path: relativePath, name: entry.name });
+      }
     }
   }
 
