@@ -1,7 +1,7 @@
 # Rae Compiler Makefile
 
 CC = gcc
-CFLAGS = -std=c11 -Wall -Wextra -Wpedantic -O2 -g
+CFLAGS = -std=c11 -Wall -Wextra -Wpedantic -Werror -O2 -g
 LDFLAGS =
 
 SRC_DIR = src
