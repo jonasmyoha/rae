@@ -405,7 +405,7 @@ static bool token_is_ident(const Token* token, const char* text) {
 }
 
 static bool is_unary_operator(TokenKind kind) {
-  return kind == TOK_MINUS || kind == TOK_KW_NOT || kind == TOK_KW_SPAWN;
+  return kind == TOK_MINUS || kind == TOK_KW_NOT || kind == TOK_KW_SPAWN || kind == TOK_INC || kind == TOK_DEC;
 }
 
 static BinaryInfo get_binary_info(TokenKind kind) {
@@ -550,6 +550,12 @@ static AstExpr* parse_unary(Parser* parser) {
         break;
       case TOK_KW_SPAWN:
         expr->as.unary.op = AST_UNARY_SPAWN;
+        break;
+      case TOK_INC:
+        expr->as.unary.op = AST_UNARY_PRE_INC;
+        break;
+      case TOK_DEC:
+        expr->as.unary.op = AST_UNARY_PRE_DEC;
         break;
       default:
         parser_error(parser, op_token, "unsupported unary operator");
@@ -768,10 +774,81 @@ static AstStmt* parse_if_statement(Parser* parser, const Token* if_token) {
   return stmt;
 }
 
-static AstStmt* parse_while_statement(Parser* parser, const Token* while_token) {
-  AstStmt* stmt = new_stmt(parser, AST_STMT_WHILE, while_token);
-  stmt->as.while_stmt.condition = parse_expression(parser);
-  stmt->as.while_stmt.body = parse_block(parser);
+static AstStmt* parse_loop_statement(Parser* parser, const Token* loop_token) {
+  AstStmt* stmt = new_stmt(parser, AST_STMT_LOOP, loop_token);
+  stmt->as.loop_stmt.is_range = false;
+
+  if (parser_check(parser, TOK_IDENT) && parser_peek_at(parser, 1)->kind == TOK_COLON) {
+    const Token* name = parser_advance(parser);
+    parser_consume(parser, TOK_COLON, "expected ':' after identifier");
+    AstTypeRef* type = parse_type_ref(parser);
+
+    if (parser_match(parser, TOK_KW_IN)) {
+      stmt->as.loop_stmt.is_range = true;
+      AstStmt* init = new_stmt(parser, AST_STMT_DEF, name);
+      init->as.def_stmt.name = parser_copy_str(parser, name->lexeme);
+      init->as.def_stmt.type = type;
+      init->as.def_stmt.value = NULL;
+      init->as.def_stmt.is_move = false;
+
+      stmt->as.loop_stmt.init = init;
+      stmt->as.loop_stmt.condition = parse_expression(parser);
+      stmt->as.loop_stmt.increment = NULL;
+    } else {
+      bool is_move = false;
+      if (parser_match(parser, TOK_ASSIGN)) {
+        is_move = false;
+      } else if (parser_match(parser, TOK_ARROW)) {
+        is_move = true;
+      } else {
+        parser_error(parser, parser_peek(parser), "expected '=' or 'in' in loop declaration");
+      }
+
+      AstStmt* init = new_stmt(parser, AST_STMT_DEF, name);
+      init->as.def_stmt.name = parser_copy_str(parser, name->lexeme);
+      init->as.def_stmt.type = type;
+      init->as.def_stmt.value = parse_expression(parser);
+      init->as.def_stmt.is_move = is_move;
+
+      stmt->as.loop_stmt.init = init;
+      parser_consume(parser, TOK_COMMA, "expected ',' after loop init");
+      stmt->as.loop_stmt.condition = parse_expression(parser);
+      parser_consume(parser, TOK_COMMA, "expected ',' after loop condition");
+      stmt->as.loop_stmt.increment = parse_expression(parser);
+    }
+  } else {
+    AstExpr* expr = parse_expression(parser);
+
+    if (parser_match(parser, TOK_KW_IN)) {
+      if (expr->kind != AST_EXPR_IDENT) {
+        parser_error(parser, NULL, "range loop variable must be an identifier");
+      }
+      stmt->as.loop_stmt.is_range = true;
+      AstStmt* init = new_stmt(parser, AST_STMT_DEF, NULL);
+      init->as.def_stmt.name = parser_copy_str(parser, expr->as.ident);
+      init->as.def_stmt.type = NULL;
+      init->as.def_stmt.value = NULL;
+      init->as.def_stmt.is_move = false;
+
+      stmt->as.loop_stmt.init = init;
+      stmt->as.loop_stmt.condition = parse_expression(parser);
+      stmt->as.loop_stmt.increment = NULL;
+    } else if (parser_match(parser, TOK_COMMA)) {
+      AstStmt* init = new_stmt(parser, AST_STMT_EXPR, NULL);
+      init->as.expr_stmt = expr;
+
+      stmt->as.loop_stmt.init = init;
+      stmt->as.loop_stmt.condition = parse_expression(parser);
+      parser_consume(parser, TOK_COMMA, "expected ',' after loop condition");
+      stmt->as.loop_stmt.increment = parse_expression(parser);
+    } else {
+      stmt->as.loop_stmt.init = NULL;
+      stmt->as.loop_stmt.condition = expr;
+      stmt->as.loop_stmt.increment = NULL;
+    }
+  }
+
+  stmt->as.loop_stmt.body = parse_block(parser);
   return stmt;
 }
 
@@ -881,8 +958,8 @@ static AstStmt* parse_statement(Parser* parser) {
   if (parser_match(parser, TOK_KW_IF)) {
     return parse_if_statement(parser, parser_previous(parser));
   }
-  if (parser_match(parser, TOK_KW_WHILE)) {
-    return parse_while_statement(parser, parser_previous(parser));
+  if (parser_match(parser, TOK_KW_LOOP)) {
+    return parse_loop_statement(parser, parser_previous(parser));
   }
   if (parser_match(parser, TOK_KW_MATCH)) {
     return parse_match_statement(parser, parser_previous(parser));

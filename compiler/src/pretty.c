@@ -169,6 +169,10 @@ static const char* unary_op_text(AstUnaryOp op) {
       return "not";
     case AST_UNARY_SPAWN:
       return "spawn";
+    case AST_UNARY_PRE_INC:
+      return "++";
+    case AST_UNARY_PRE_DEC:
+      return "--";
   }
   return "?";
 }
@@ -428,12 +432,38 @@ static void pp_print_match_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
   pp_newline(pp);
 }
 
-static void pp_print_while_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
-  pp_write(pp, "while ");
-  pp_expr(pp, stmt->as.while_stmt.condition);
+static void pp_print_loop_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
+  pp_write(pp, "loop ");
+  if (stmt->as.loop_stmt.init) {
+    if (stmt->as.loop_stmt.init->kind == AST_STMT_DEF) {
+         pp_write_str(pp, stmt->as.loop_stmt.init->as.def_stmt.name);
+         pp_write(pp, ": ");
+         pp_write_type(pp, stmt->as.loop_stmt.init->as.def_stmt.type);
+         if (stmt->as.loop_stmt.is_range) {
+             pp_write(pp, " in ");
+         } else {
+             pp_write(pp, " = ");
+             pp_expr(pp, stmt->as.loop_stmt.init->as.def_stmt.value);
+             pp_write(pp, ", ");
+         }
+    } else if (stmt->as.loop_stmt.init->kind == AST_STMT_EXPR) {
+         pp_expr(pp, stmt->as.loop_stmt.init->as.expr_stmt);
+         pp_write(pp, ", ");
+    }
+  }
+
+  if (stmt->as.loop_stmt.condition) {
+    pp_expr(pp, stmt->as.loop_stmt.condition);
+  }
+
+  if (stmt->as.loop_stmt.increment) {
+    pp_write(pp, ", ");
+    pp_expr(pp, stmt->as.loop_stmt.increment);
+  }
+
   pp_space(pp);
   pp_begin_block(pp);
-  pp_print_block_body(pp, stmt->as.while_stmt.body);
+  pp_print_block_body(pp, stmt->as.loop_stmt.body);
   pp_end_block(pp);
   pp_newline(pp);
 }
@@ -456,8 +486,8 @@ static void pp_print_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
     case AST_STMT_IF:
       pp_print_if_stmt(pp, stmt);
       break;
-    case AST_STMT_WHILE:
-      pp_print_while_stmt(pp, stmt);
+    case AST_STMT_LOOP:
+      pp_print_loop_stmt(pp, stmt);
       break;
     case AST_STMT_MATCH:
       pp_print_match_stmt(pp, stmt);
