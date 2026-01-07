@@ -65,22 +65,38 @@ static bool emit_param_list(const AstParam* params, FILE* out) {
   return true;
 }
 
+static bool func_has_return_value(const AstFuncDecl* func) {
+  if (func->returns) return true;
+  if (!func->body) return false;
+  const AstStmt* stmt = func->body->first;
+  while (stmt) {
+    if (stmt->kind == AST_STMT_RET && stmt->as.ret_stmt.values) return true;
+    stmt = stmt->next;
+  }
+  return false;
+}
+
 static const char* c_return_type(const AstFuncDecl* func) {
-  if (!func->returns) {
-    return "void";
-  }
-  if (func->returns->next) {
-    fprintf(stderr, "error: C backend only supports single return values per function\n");
-    return NULL;
-  }
-  if (type_is_string(func->returns->type)) {
-    if (!func->is_extern) {
-      fprintf(stderr, "error: only extern functions may return String currently\n");
+  if (func->returns) {
+    if (func->returns->next) {
+      fprintf(stderr, "error: C backend only supports single return values per function\n");
       return NULL;
     }
-    return "const char*";
+    if (type_is_string(func->returns->type)) {
+      if (!func->is_extern) {
+        fprintf(stderr, "error: only extern functions may return String currently\n");
+        return NULL;
+      }
+      return "const char*";
+    }
+    return "int64_t";
   }
-  return "int64_t";
+  
+  if (func_has_return_value(func)) {
+      return "int64_t";
+  }
+  
+  return "void";
 }
 
 static bool emit_log_call(CFuncContext* ctx, const AstExpr* expr, FILE* out, bool newline) {
