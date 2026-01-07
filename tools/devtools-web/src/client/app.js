@@ -2075,16 +2075,17 @@ function highlightRae(code) {
         )
       : null;
 
-  let result = escaped.replace(commentLine, '<span class="tok-comment">$&</span>');
+  // Apply highlights in safe order: keywords -> numbers -> strings -> comments
+  let result = escaped
+    .replace(keywordRegex, '<span class="tok-keyword">$1</span>')
+    .replace(/\b(\d+(\.\d+)?)/g, '<span class="tok-number">$1</span>')
+    .replace(/("(?:\\.|[^"])*")/g, '<span class="tok-string">$1</span>')
+    .replace(/'(?:\\.|[^'])*'/g, '<span class="tok-string">$&</span>');
+
   if (commentBlock) {
     result = result.replace(commentBlock, '<span class="tok-comment">$&</span>');
   }
-
-  result = result
-    .replace(/("(?:\\.|[^"])*")/g, '<span class="tok-string">$1</span>')
-    .replace(/'(?:\\.|[^'])*'/g, "<span class=\"tok-string\">$&</span>")
-    .replace(/\b(\d+(\.\d+)?)/g, '<span class="tok-number">$1</span>')
-    .replace(keywordRegex, '<span class="tok-keyword">$1</span>');
+  result = result.replace(commentLine, '<span class="tok-comment">$&</span>');
 
   return result;
 }
