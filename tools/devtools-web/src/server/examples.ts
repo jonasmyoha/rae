@@ -65,9 +65,9 @@ type ExampleDownloads = Array<{
 
 const EXAMPLE_ORDER: Record<string, number> = {
   hello: 1,
-  c_backend_demo: 2,
-  vm_math: 3,
-  vm_call: 4,
+  hello_compiled: 2,
+  math: 3,
+  call_stack: 4,
   hot_reload: 7,
   auto_import_demo: 8,
   multifile_report: 9,
