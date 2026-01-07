@@ -1100,6 +1100,23 @@ static AstDecl* parse_func_declaration(Parser* parser, bool is_extern) {
 }
 
 static AstDecl* parse_declaration(Parser* parser) {
+  if (parser_match(parser, TOK_KW_PUB) || parser_match(parser, TOK_KW_PRIV)) {
+    const Token* token = parser_previous(parser);
+    Str text = token->lexeme;
+    if (parser_check(parser, TOK_KW_FUNC)) {
+      parser_error(parser, token, "Function property '%.*s' cannot be defined before function. It must be put into the properties section after the function parameters like this: 'func name(): %.*s'",
+                   (int)text.len, text.data, (int)text.len, text.data);
+      return NULL;
+    }
+    if (parser_check(parser, TOK_KW_TYPE)) {
+        parser_error(parser, token, "Type property '%.*s' cannot be defined before type. It must be put into the properties section like this: 'type Name: %.*s'",
+                     (int)text.len, text.data, (int)text.len, text.data);
+        return NULL;
+    }
+    parser_error(parser, token, "unexpected property '%.*s' at top level", (int)text.len, text.data);
+    return NULL;
+  }
+
   bool saw_extern = parser_match(parser, TOK_KW_EXTERN);
   if (parser_match(parser, TOK_KW_TYPE)) {
     if (saw_extern) {
