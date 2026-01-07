@@ -35,13 +35,13 @@ static const Keyword KEYWORDS[] = {
     {"and", TOK_KW_AND},     {"case", TOK_KW_CASE},    {"def", TOK_KW_DEF},
     {"default", TOK_KW_DEFAULT},{"else", TOK_KW_ELSE},   {"export", TOK_KW_EXPORT},
     {"extern", TOK_KW_EXTERN},{"false", TOK_KW_FALSE}, {"func", TOK_KW_FUNC},
-    {"if", TOK_KW_IF},       {"import", TOK_KW_IMPORT},{"is", TOK_KW_IS},
-    {"match", TOK_KW_MATCH}, {"mod", TOK_KW_MOD},     {"none", TOK_KW_NONE},
-    {"not", TOK_KW_NOT},     {"opt", TOK_KW_OPT},     {"or", TOK_KW_OR},
-    {"own", TOK_KW_OWN},     {"pack", TOK_KW_PACK},   {"priv", TOK_KW_PRIV},
-    {"pub", TOK_KW_PUB},     {"ret", TOK_KW_RET},     {"spawn", TOK_KW_SPAWN},
-    {"true", TOK_KW_TRUE},   {"type", TOK_KW_TYPE},   {"view", TOK_KW_VIEW},
-    {"while", TOK_KW_WHILE}};
+    {"if", TOK_KW_IF},       {"import", TOK_KW_IMPORT},{"in", TOK_KW_IN},
+    {"is", TOK_KW_IS},       {"loop", TOK_KW_LOOP},    {"match", TOK_KW_MATCH},
+    {"mod", TOK_KW_MOD},     {"none", TOK_KW_NONE},    {"not", TOK_KW_NOT},
+    {"opt", TOK_KW_OPT},     {"or", TOK_KW_OR},        {"own", TOK_KW_OWN},
+    {"pack", TOK_KW_PACK},   {"priv", TOK_KW_PRIV},    {"pub", TOK_KW_PUB},
+    {"ret", TOK_KW_RET},     {"spawn", TOK_KW_SPAWN},  {"true", TOK_KW_TRUE},
+    {"type", TOK_KW_TYPE},   {"view", TOK_KW_VIEW}};
 
 static const char* const TOKEN_KIND_NAMES[] = {
     [TOK_EOF] = "TOK_EOF",
@@ -60,7 +60,8 @@ static const char* const TOKEN_KIND_NAMES[] = {
     [TOK_KW_OPT] = "TOK_OPT",
     [TOK_KW_IF] = "TOK_IF",
     [TOK_KW_ELSE] = "TOK_ELSE",
-    [TOK_KW_WHILE] = "TOK_WHILE",
+    [TOK_KW_LOOP] = "TOK_LOOP",
+    [TOK_KW_IN] = "TOK_IN",
     [TOK_KW_MATCH] = "TOK_MATCH",
     [TOK_KW_CASE] = "TOK_CASE",
     [TOK_KW_DEFAULT] = "TOK_DEFAULT",
@@ -84,6 +85,8 @@ static const char* const TOKEN_KIND_NAMES[] = {
     [TOK_STAR] = "TOK_STAR",
     [TOK_SLASH] = "TOK_SLASH",
     [TOK_PERCENT] = "TOK_PERCENT",
+    [TOK_INC] = "TOK_INC",
+    [TOK_DEC] = "TOK_DEC",
     [TOK_LESS] = "TOK_LESS",
     [TOK_GREATER] = "TOK_GREATER",
     [TOK_LESS_EQUAL] = "TOK_LESS_EQUAL",
@@ -353,10 +356,20 @@ TokenList lexer_tokenize(Arena* arena,
         emit_token(&lexer, &buffer, TOK_DOT, start_index, token_line, token_column);
         break;
       case '+':
-        emit_token(&lexer, &buffer, TOK_PLUS, start_index, token_line, token_column);
+        if (lexer_peek(&lexer) == '+') {
+          lexer_advance(&lexer);
+          emit_token(&lexer, &buffer, TOK_INC, start_index, token_line, token_column);
+        } else {
+          emit_token(&lexer, &buffer, TOK_PLUS, start_index, token_line, token_column);
+        }
         break;
       case '-':
-        emit_token(&lexer, &buffer, TOK_MINUS, start_index, token_line, token_column);
+        if (lexer_peek(&lexer) == '-') {
+          lexer_advance(&lexer);
+          emit_token(&lexer, &buffer, TOK_DEC, start_index, token_line, token_column);
+        } else {
+          emit_token(&lexer, &buffer, TOK_MINUS, start_index, token_line, token_column);
+        }
         break;
       case '*':
         emit_token(&lexer, &buffer, TOK_STAR, start_index, token_line, token_column);

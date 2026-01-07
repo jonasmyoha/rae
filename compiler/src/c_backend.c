@@ -22,9 +22,8 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out);
 static bool emit_string_literal(FILE* out, Str literal);
 static bool emit_param_list(const AstParam* params, FILE* out);
 static bool type_is_string(const AstTypeRef* type);
-static const char* c_return_type(const AstFuncDecl* func);
 static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
-static bool emit_while(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
+static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static bool emit_match(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static bool is_wildcard_pattern(const AstExpr* expr);
 static bool is_string_literal(const AstExpr* expr);
@@ -229,6 +228,14 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         if (fprintf(out, "(!") < 0) return false;
         if (!emit_expr(ctx, expr->as.unary.operand, out)) return false;
         return fprintf(out, ")") >= 0;
+      } else if (expr->as.unary.op == AST_UNARY_PRE_INC) {
+        if (fprintf(out, "(++") < 0) return false;
+        if (!emit_expr(ctx, expr->as.unary.operand, out)) return false;
+        return fprintf(out, ")") >= 0;
+      } else if (expr->as.unary.op == AST_UNARY_PRE_DEC) {
+        if (fprintf(out, "(--") < 0) return false;
+        if (!emit_expr(ctx, expr->as.unary.operand, out)) return false;
+        return fprintf(out, ")") >= 0;
       }
       fprintf(stderr, "error: C backend unsupported unary operator\n");
       return false;
@@ -394,8 +401,8 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
       return emit_call(ctx, stmt->as.expr_stmt, out);
     case AST_STMT_IF:
       return emit_if(ctx, stmt, out);
-    case AST_STMT_WHILE:
-      return emit_while(ctx, stmt, out);
+    case AST_STMT_LOOP:
+      return emit_loop(ctx, stmt, out);
     case AST_STMT_MATCH:
       return emit_match(ctx, stmt, out);
     case AST_STMT_ASSIGN: {
@@ -557,7 +564,6 @@ bool c_backend_emit(const AstModule* module, const char* out_path) {
   return ok;
 }
 static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
-static bool emit_while(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static bool emit_match(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static bool is_wildcard_pattern(const AstExpr* expr);
 
@@ -606,30 +612,45 @@ static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
   return true;
 }
 
-static bool emit_while(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
-  if (!stmt->as.while_stmt.condition || !stmt->as.while_stmt.body) {
-    fprintf(stderr, "error: C backend requires while condition and body\n");
-    return false;
+static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
+  if (stmt->as.loop_stmt.is_range) {
+    fprintf(stderr, "warning: range loops not yet supported in C backend (skipping body)\n");
+    return fprintf(out, "  /* range loop skipped */\n") >= 0;
   }
-  if (fprintf(out, "  while (") < 0) {
-    return false;
+
+  // Wrap in scope to handle init variable lifetime
+  if (fprintf(out, "  {\n") < 0) return false;
+
+  if (stmt->as.loop_stmt.init) {
+    if (!emit_stmt(ctx, stmt->as.loop_stmt.init, out)) {
+      return false;
+    }
   }
-  if (!emit_expr(ctx, stmt->as.while_stmt.condition, out)) {
-    return false;
+
+  if (fprintf(out, "  while (") < 0) return false;
+  if (stmt->as.loop_stmt.condition) {
+    if (!emit_expr(ctx, stmt->as.loop_stmt.condition, out)) return false;
+  } else {
+    if (fprintf(out, "1") < 0) return false;
   }
-  if (fprintf(out, ") {\n") < 0) {
-    return false;
-  }
-  const AstStmt* inner = stmt->as.while_stmt.body->first;
+  if (fprintf(out, ") {\n") < 0) return false;
+
+  const AstStmt* inner = stmt->as.loop_stmt.body->first;
   while (inner) {
     if (!emit_stmt(ctx, inner, out)) {
       return false;
     }
     inner = inner->next;
   }
-  if (fprintf(out, "  }\n") < 0) {
-    return false;
+
+  if (stmt->as.loop_stmt.increment) {
+    if (fprintf(out, "  ") < 0) return false;
+    if (!emit_expr(ctx, stmt->as.loop_stmt.increment, out)) return false;
+    if (fprintf(out, ";\n") < 0) return false;
   }
+
+  if (fprintf(out, "  }\n") < 0) return false;
+  if (fprintf(out, "  }\n") < 0) return false;
   return true;
 }
 

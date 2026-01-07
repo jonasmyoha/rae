@@ -72,6 +72,10 @@ static const char* unary_op_name(AstUnaryOp op) {
       return "not";
     case AST_UNARY_SPAWN:
       return "spawn";
+    case AST_UNARY_PRE_INC:
+      return "++";
+    case AST_UNARY_PRE_DEC:
+      return "--";
   }
   return "?";
 }
@@ -280,12 +284,38 @@ static void dump_if_stmt(const AstStmt* stmt, FILE* out, int indent) {
   }
 }
 
-static void dump_while_stmt(const AstStmt* stmt, FILE* out, int indent) {
+static void dump_loop_stmt(const AstStmt* stmt, FILE* out, int indent) {
   print_indent(out, indent);
-  fputs("while ", out);
-  dump_expr(stmt->as.while_stmt.condition, out);
+  fputs("loop ", out);
+  if (stmt->as.loop_stmt.init) {
+    if (stmt->as.loop_stmt.init->kind == AST_STMT_DEF) {
+        print_str(out, stmt->as.loop_stmt.init->as.def_stmt.name);
+        fputs(": ", out);
+        dump_type_ref(stmt->as.loop_stmt.init->as.def_stmt.type, out);
+        if (stmt->as.loop_stmt.is_range) {
+            fputs(" in ", out);
+        } else {
+             fputs(" = ", out);
+             dump_expr(stmt->as.loop_stmt.init->as.def_stmt.value, out);
+             fputs(", ", out);
+        }
+    } else if (stmt->as.loop_stmt.init->kind == AST_STMT_EXPR) {
+        dump_expr(stmt->as.loop_stmt.init->as.expr_stmt, out);
+        fputs(", ", out);
+    }
+  }
+  
+  if (stmt->as.loop_stmt.condition) {
+    dump_expr(stmt->as.loop_stmt.condition, out);
+  }
+  
+  if (stmt->as.loop_stmt.increment) {
+    fputs(", ", out);
+    dump_expr(stmt->as.loop_stmt.increment, out);
+  }
+
   fputc('\n', out);
-  dump_block(stmt->as.while_stmt.body, out, indent + 1);
+  dump_block(stmt->as.loop_stmt.body, out, indent + 1);
 }
 
 static void dump_match_stmt(const AstStmt* stmt, FILE* out, int indent) {
@@ -332,8 +362,8 @@ static void dump_block(const AstBlock* block, FILE* out, int indent) {
       case AST_STMT_IF:
         dump_if_stmt(stmt, out, indent);
         break;
-      case AST_STMT_WHILE:
-        dump_while_stmt(stmt, out, indent);
+      case AST_STMT_LOOP:
+        dump_loop_stmt(stmt, out, indent);
         break;
       case AST_STMT_MATCH:
         dump_match_stmt(stmt, out, indent);
