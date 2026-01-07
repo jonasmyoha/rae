@@ -3,7 +3,7 @@
 CC = gcc
 CFLAGS = -std=c11 -Wall -Wextra -Wpedantic -Werror -O2 -g
 LDFLAGS = -lraylib -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL -L/opt/homebrew/lib
-CFLAGS += -I/opt/homebrew/include
+CFLAGS += -I/opt/homebrew/include -I../third_party/tinyexpr
 
 SRC_DIR = src
 BUILD_DIR = build
@@ -28,9 +28,14 @@ SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/vm.c \
        $(SRC_DIR)/vm_compiler.c \
        $(SRC_DIR)/vm_registry.c \
-       $(SRC_DIR)/vm_raylib.c
+       $(SRC_DIR)/vm_raylib.c \
+       $(SRC_DIR)/vm_tinyexpr.c
+
+EXT_SRCS = ../third_party/tinyexpr/rae_tinyexpr.c
 
 OBJS = $(SRCS:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)
+OBJS += $(BUILD_DIR)/rae_tinyexpr.o
+
 TARGET = $(BIN_DIR)/rae
 TEST_RUNNER = tools/run_tests.sh
 
@@ -42,12 +47,16 @@ build: $(TARGET)
 
 $(TARGET): $(OBJS)
 	@mkdir -p $(dir $@)
-	$(CC) $(LDFLAGS) -o $@ $^
+	$(CC) -o $@ $^ $(LDFLAGS)
 	@echo "Built: $(TARGET)"
 
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BUILD_DIR)/rae_tinyexpr.o: ../third_party/tinyexpr/rae_tinyexpr.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -Wno-error -Wno-pedantic -Wno-gnu-zero-variadic-macro-arguments -c -o $@ $<
 
 test: build
 	@chmod +x $(TEST_RUNNER)
