@@ -1,27 +1,18 @@
-extern func rae_raylib_init_window(width: Int, height: Int, title: String)
-extern func rae_raylib_window_should_close(): ret Int
-extern func rae_raylib_close_window()
-extern func rae_raylib_begin_drawing()
-extern func rae_raylib_end_drawing()
-extern func rae_raylib_clear_background(r: Int, g: Int, b: Int, a: Int)
-extern func rae_raylib_set_target_fps(fps: Int)
-
-func main() {
-    log("Starting Raylib basic example...")
-    rae_raylib_init_window(width: 800, height: 450, title: "Rae Raylib Basic")
-    rae_raylib_set_target_fps(fps: 60)
-
-    game_frame()
-
-    rae_raylib_close_window()
-    log("Raylib basic example finished.")
-}
+import "lib/raylib.rae"
 
 func game_frame() {
-    if rae_raylib_window_should_close() is 0 {
-        rae_raylib_begin_drawing()
-        rae_raylib_clear_background(r: 245, g: 245, b: 245, a: 255) # Raywhite
-        rae_raylib_end_drawing()
+    BeginDrawing()
+    ClearBackground(r: 255, g: 255, b: 255, a: 255)
+    DrawText(text: "Hello from Rae + Raylib!", x: 190, y: 200, fontSize: 20, r: 200, g: 200, b: 200, a: 255)
+    EndDrawing()
+}
+
+func main() {
+    InitWindow(width: 800, height: 450, title: "Rae Raylib Basic")
+    
+    loop WindowShouldClose() is 0 {
         game_frame()
     }
+    
+    CloseWindow()
 }

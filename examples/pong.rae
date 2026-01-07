@@ -1,17 +1,8 @@
-extern func rae_raylib_init_window(width: Int, height: Int, title: String)
-extern func rae_raylib_window_should_close(): ret Int
-extern func rae_raylib_close_window()
-extern func rae_raylib_begin_drawing()
-extern func rae_raylib_end_drawing()
-extern func rae_raylib_clear_background(r: Int, g: Int, b: Int, a: Int)
-extern func rae_raylib_draw_rectangle(x: Int, y: Int, width: Int, height: Int, r: Int, g: Int, b: Int, a: Int)
-extern func rae_raylib_draw_circle(x: Int, y: Int, radius: Int, r: Int, g: Int, b: Int, a: Int)
-extern func rae_raylib_set_target_fps(fps: Int)
-extern func rae_raylib_is_key_down(key: Int): ret Int
+import "lib/raylib.rae"
 
 func main() {
-    rae_raylib_init_window(width: 800, height: 450, title: "Rae Pong")
-    rae_raylib_set_target_fps(fps: 60)
+    InitWindow(width: 800, height: 450, title: "Rae Pong")
+    SetTargetFPS(fps: 60)
     
     def p1Y: Int = 175
     def p2Y: Int = 175
@@ -20,20 +11,20 @@ func main() {
     def bDX: Int = 4
     def bDY: Int = 4
     
-    loop rae_raylib_window_should_close() is 0 {
-        rae_raylib_begin_drawing()
-        rae_raylib_clear_background(r: 20, g: 20, b: 20, a: 255)
+    loop WindowShouldClose() is 0 {
+        BeginDrawing()
+        ClearBackground(r: 20, g: 20, b: 20, a: 255)
         
         # Draw paddles
-        rae_raylib_draw_rectangle(x: 20, y: p1Y, width: 20, height: 100, r: 255, g: 255, b: 255, a: 255)
-        rae_raylib_draw_rectangle(x: 760, y: p2Y, width: 20, height: 100, r: 255, g: 255, b: 255, a: 255)
+        DrawRectangle(x: 20, y: p1Y, width: 20, height: 100, r: 255, g: 255, b: 255, a: 255)
+        DrawRectangle(x: 760, y: p2Y, width: 20, height: 100, r: 255, g: 255, b: 255, a: 255)
         
         # Draw ball
-        rae_raylib_draw_circle(x: bX, y: bY, radius: 10, r: 255, g: 255, b: 255, a: 255)
+        DrawCircle(x: bX, y: bY, radius: 10, r: 255, g: 255, b: 255, a: 255)
         
         # Input (W: 87, S: 83)
-        if rae_raylib_is_key_down(key: 87) is 1 { p1Y = p1Y - 5 }
-        if rae_raylib_is_key_down(key: 83) is 1 { p1Y = p1Y + 5 }
+        if IsKeyDown(key: 87) is 1 { p1Y = p1Y - 5 }
+        if IsKeyDown(key: 83) is 1 { p1Y = p1Y + 5 }
         
         # Simple AI
         if bY < (p2Y + 50) { p2Y = p2Y - 4 }
@@ -75,9 +66,9 @@ func main() {
             bDX = -4 
         }
         
-        rae_raylib_end_drawing()
+        EndDrawing()
     }
     
-    rae_raylib_close_window()
+    CloseWindow()
 }
 
