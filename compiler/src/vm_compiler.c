@@ -370,6 +370,9 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
       return false;
     }
     emit_op(compiler, is_log ? OP_LOG : OP_LOG_S, (int)expr->line);
+    // log currently doesn't return a value, but compile_expr is expected to +1
+    // Push a dummy value for now to satisfy stack balance
+    emit_constant(compiler, value_none(), (int)expr->line);
     return true;
   }
 
@@ -691,7 +694,11 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
       return true;
     }
     case AST_STMT_EXPR:
-      return compile_expr(compiler, stmt->as.expr_stmt);
+      if (!compile_expr(compiler, stmt->as.expr_stmt)) {
+        return false;
+      }
+      emit_op(compiler, OP_POP, (int)stmt->line);
+      return true;
     case AST_STMT_RET: {
       const AstReturnArg* arg = stmt->as.ret_stmt.values;
       if (!arg) {
@@ -729,18 +736,17 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
       if (!compile_block(compiler, stmt->as.if_stmt.then_block)) {
         return false;
       }
-      uint16_t end_jump = UINT16_MAX;
-      if (stmt->as.if_stmt.else_block) {
-        end_jump = emit_jump(compiler, OP_JUMP, (int)stmt->line);
-      }
+      
+      uint16_t end_jump = emit_jump(compiler, OP_JUMP, (int)stmt->line);
+      
       patch_jump(compiler, else_jump);
       emit_op(compiler, OP_POP, (int)stmt->line);
       if (stmt->as.if_stmt.else_block) {
         if (!compile_block(compiler, stmt->as.if_stmt.else_block)) {
           return false;
         }
-        patch_jump(compiler, end_jump);
       }
+      patch_jump(compiler, end_jump);
       return true;
     }
     case AST_STMT_LOOP: {
@@ -1037,6 +1043,7 @@ bool vm_compile_module(const AstModule* module, Chunk* chunk, const char* file_p
     if (!emit_function_call(&compiler, main_entry, 0, 0, 0)) {
       compiler.had_error = true;
     } else {
+      emit_op(&compiler, OP_POP, 0); // Pop return value of main
       emit_return(&compiler, false, 0);
     }
   }
