@@ -650,6 +650,20 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
   }
 }
 
+static const char* stmt_kind_name(AstStmtKind kind) {
+  switch (kind) {
+    case AST_STMT_DEF: return "def";
+    case AST_STMT_DESTRUCT: return "destructure";
+    case AST_STMT_EXPR: return "expression";
+    case AST_STMT_RET: return "ret";
+    case AST_STMT_IF: return "if";
+    case AST_STMT_LOOP: return "loop";
+    case AST_STMT_MATCH: return "match";
+    case AST_STMT_ASSIGN: return "assignment";
+  }
+  return "unknown";
+}
+
 static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
   switch (stmt->kind) {
     case AST_STMT_DEF: {
@@ -884,11 +898,18 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
       }
       return true;
     }
-    default:
+    case AST_STMT_ASSIGN:
       diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column,
-                 "statement not supported in VM yet");
+                 "assignment statement not supported in VM yet");
       compiler->had_error = true;
       return false;
+    default: {
+      char buffer[128];
+      snprintf(buffer, sizeof(buffer), "%s statement not supported in VM yet", stmt_kind_name(stmt->kind));
+      diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, buffer);
+      compiler->had_error = true;
+      return false;
+    }
   }
 }
 
