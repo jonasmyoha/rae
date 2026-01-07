@@ -497,6 +497,9 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
             case AST_BIN_DIV:
               emit_op(compiler, OP_DIV, (int)expr->line);
               return true;
+            case AST_BIN_MOD:
+              emit_op(compiler, OP_MOD, (int)expr->line);
+              return true;
             case AST_BIN_LT:
               emit_op(compiler, OP_LT, (int)expr->line);
               return true;
@@ -898,11 +901,33 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
       }
       return true;
     }
-    case AST_STMT_ASSIGN:
-      diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column,
-                 "assignment statement not supported in VM yet");
-      compiler->had_error = true;
-      return false;
+    case AST_STMT_ASSIGN: {
+      const AstExpr* target = stmt->as.assign_stmt.target;
+      if (target->kind != AST_EXPR_IDENT) {
+        diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column,
+                   "VM currently only supports assignment to identifiers");
+        compiler->had_error = true;
+        return false;
+      }
+
+      if (!compile_expr(compiler, stmt->as.assign_stmt.value)) {
+        return false;
+      }
+
+      int slot = compiler_find_local(compiler, target->as.ident);
+      if (slot < 0) {
+        char buffer[128];
+        snprintf(buffer, sizeof(buffer), "unknown identifier '%.*s' in assignment",
+                 (int)target->as.ident.len, target->as.ident.data);
+        diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, buffer);
+        compiler->had_error = true;
+        return false;
+      }
+
+      emit_op(compiler, OP_SET_LOCAL, (int)stmt->line);
+      emit_short(compiler, (uint16_t)slot, (int)stmt->line);
+      return true;
+    }
     default: {
       char buffer[128];
       snprintf(buffer, sizeof(buffer), "%s statement not supported in VM yet", stmt_kind_name(stmt->kind));
