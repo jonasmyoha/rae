@@ -3,6 +3,6 @@
 
 #include <stdint.h>
 
-int64_t tinyexpr_eval(const char* expr);
+int64_t tinyExprEval(const char* expr);
 
 #endif /* RAE_TINYEXPR_H */
