@@ -28,6 +28,7 @@
 #include "vm_compiler.h"
 #include "vm_registry.h"
 #include "vm_raylib.h"
+#include "vm_tinyexpr.h"
 
 typedef struct {
   const char* input_path;
@@ -128,6 +129,7 @@ static bool register_default_natives(VmRegistry* registry, TickCounter* tick_cou
   }
   ok = vm_registry_register_native(registry, "sleepMs", native_sleep_ms, NULL) && ok;
   ok = vm_registry_register_raylib(registry) && ok;
+  ok = vm_registry_register_tinyexpr(registry) && ok;
   return ok;
 }
 
