@@ -1,8 +1,8 @@
-import "lib/raylib.rae"
+import raylib
 
 func main() {
-    InitWindow(width: 800, height: 450, title: "Rae Pong")
-    SetTargetFPS(fps: 60)
+    initWindow(width: 800, height: 450, title: "Rae Pong")
+    setTargetFPS(fps: 60)
     
     def p1Y: Int = 175
     def p2Y: Int = 175
@@ -11,20 +11,20 @@ func main() {
     def bDX: Int = 4
     def bDY: Int = 4
     
-    loop WindowShouldClose() is 0 {
-        BeginDrawing()
-        ClearBackground(r: 20, g: 20, b: 20, a: 255)
+    loop windowShouldClose() is 0 {
+        beginDrawing()
+        clearBackground(r: 20, g: 20, b: 20, a: 255)
         
         # Draw paddles
-        DrawRectangle(x: 20, y: p1Y, width: 20, height: 100, r: 255, g: 255, b: 255, a: 255)
-        DrawRectangle(x: 760, y: p2Y, width: 20, height: 100, r: 255, g: 255, b: 255, a: 255)
+        drawRectangle(x: 20, y: p1Y, width: 20, height: 100, r: 255, g: 255, b: 255, a: 255)
+        drawRectangle(x: 760, y: p2Y, width: 20, height: 100, r: 255, g: 255, b: 255, a: 255)
         
         # Draw ball
-        DrawCircle(x: bX, y: bY, radius: 10, r: 255, g: 255, b: 255, a: 255)
+        drawCircle(x: bX, y: bY, radius: 10, r: 255, g: 255, b: 255, a: 255)
         
         # Input (W: 87, S: 83)
-        if IsKeyDown(key: 87) is 1 { p1Y = p1Y - 5 }
-        if IsKeyDown(key: 83) is 1 { p1Y = p1Y + 5 }
+        if isKeyDown(key: 87) is 1 { p1Y = p1Y - 5 }
+        if isKeyDown(key: 83) is 1 { p1Y = p1Y + 5 }
         
         # Simple AI
         if bY < (p2Y + 50) { p2Y = p2Y - 4 }
@@ -66,9 +66,9 @@ func main() {
             bDX = -4 
         }
         
-        EndDrawing()
+        endDrawing()
     }
     
-    CloseWindow()
+    closeWindow()
 }
 

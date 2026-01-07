@@ -191,48 +191,6 @@ static AstProperty* make_property(Parser* parser, Str name) {
   return prop;
 }
 
-static Str parse_string_literal_value(Parser* parser, const Token* token, const char* context) {
-  if (!token || token->kind != TOK_STRING || token->lexeme.len < 2) {
-    parser_error(parser, token, "expected string literal for %s", context);
-    return str_from_buf("", 0);
-  }
-  size_t capacity = token->lexeme.len > 1 ? token->lexeme.len - 1 : 1;
-  char* buffer = parser_alloc(parser, capacity + 1);
-  size_t out_len = 0;
-  const char* data = token->lexeme.data;
-  size_t len = token->lexeme.len;
-  for (size_t i = 1; i + 1 < len; ++i) {
-    char c = data[i];
-    if (c == '\\' && i + 1 < len - 1) {
-      i += 1;
-      char esc = data[i];
-      switch (esc) {
-        case 'n':
-          c = '\n';
-          break;
-        case 't':
-          c = '\t';
-          break;
-        case '\\':
-          c = '\\';
-          break;
-        case '"':
-          c = '"';
-          break;
-        default:
-          c = esc;
-          break;
-      }
-    }
-    buffer[out_len++] = c;
-  }
-  buffer[out_len] = '\0';
-  if (out_len == 0) {
-    parser_error(parser, token, "empty string literal is invalid for %s", context);
-  }
-  return (Str){.data = buffer, .len = out_len};
-}
-
 static AstProperty* parse_type_properties(Parser* parser) {
   AstProperty* head = NULL;
   while (parser_check(parser, TOK_KW_PUB) || parser_check(parser, TOK_KW_PRIV)) {
@@ -266,15 +224,71 @@ static AstImport* append_import(AstImport* head, AstImport* node) {
   return head;
 }
 
+static Str parse_import_path_spec(Parser* parser) {
+  size_t len = 0;
+  size_t tokens_to_consume = 0;
+  
+  while (true) {
+    const Token* t = parser_peek_at(parser, tokens_to_consume);
+    if (!t || t->kind == TOK_EOF) break;
+    
+    bool is_path_char = false;
+    if (t->kind == TOK_IDENT || t->kind == TOK_INTEGER) is_path_char = true;
+    else if (t->kind == TOK_DOT || t->kind == TOK_SLASH) is_path_char = true;
+    else if (t->kind == TOK_MINUS || t->kind == TOK_PLUS) is_path_char = true;
+    
+    // Stop at keywords that start a new declaration, unless part of a path (preceded by separator)
+    if (t->kind == TOK_KW_FUNC || t->kind == TOK_KW_TYPE || 
+        t->kind == TOK_KW_IMPORT || t->kind == TOK_KW_EXPORT ||
+        t->kind == TOK_KW_PUB || t->kind == TOK_KW_PRIV || 
+        t->kind == TOK_KW_EXTERN) {
+        if (tokens_to_consume > 0) {
+            const Token* prev = parser_peek_at(parser, tokens_to_consume - 1);
+            bool prev_sep = (prev->kind == TOK_SLASH || prev->kind == TOK_DOT);
+            if (!prev_sep) break;
+        } else {
+            break;
+        }
+        is_path_char = true; // Keyword accepted as path component
+    }
+    
+    if (!is_path_char) break;
+    
+    if (tokens_to_consume > 0) {
+        const Token* prev = parser_peek_at(parser, tokens_to_consume - 1);
+        bool prev_ident = (prev->kind == TOK_IDENT || prev->kind == TOK_INTEGER);
+        bool curr_ident = (t->kind == TOK_IDENT || t->kind == TOK_INTEGER);
+        if (prev_ident && curr_ident) break;
+    }
+    
+    len += t->lexeme.len;
+    tokens_to_consume++;
+  }
+  
+  if (tokens_to_consume == 0) {
+    parser_error(parser, parser_peek(parser), "expected module path");
+    return (Str){.data="", .len=0};
+  }
+  
+  char* buffer = parser_alloc(parser, len + 1);
+  char* cursor = buffer;
+  for (size_t i = 0; i < tokens_to_consume; ++i) {
+    const Token* t = parser_advance(parser);
+    memcpy(cursor, t->lexeme.data, t->lexeme.len);
+    cursor += t->lexeme.len;
+  }
+  *cursor = '\0';
+  return (Str){.data = buffer, .len = len};
+}
+
 static AstImport* parse_import_clause(Parser* parser, bool is_export) {
-  const Token* path_token = parser_consume(parser, TOK_STRING, "expected module path string");
-  if (!path_token) {
+  Str path = parse_import_path_spec(parser);
+  if (path.len == 0) {
     return NULL;
   }
-  Str literal = parse_string_literal_value(parser, path_token, "module path");
   AstImport* clause = parser_alloc(parser, sizeof(AstImport));
   clause->is_export = is_export;
-  clause->module_path = literal;
+  clause->module_path = path;
   return clause;
 }
 
@@ -662,8 +676,19 @@ static AstReturnArg* parse_return_values(Parser* parser) {
   return head;
 }
 
+static void check_camel_case(Parser* parser, const Token* token, const char* context) {
+  if (token && token->lexeme.len > 0) {
+    char first = token->lexeme.data[0];
+    if (first >= 'A' && first <= 'Z') {
+      parser_error(parser, token, "%s name '%.*s' should be camelCase (start with lowercase)",
+                   context, (int)token->lexeme.len, token->lexeme.data);
+    }
+  }
+}
+
 static AstStmt* parse_def_statement(Parser* parser, const Token* def_token) {
   const Token* name = parser_consume(parser, TOK_IDENT, "expected identifier after 'def'");
+  check_camel_case(parser, name, "variable");
   parser_consume(parser, TOK_COLON, "expected ':' after local name");
   AstStmt* stmt = new_stmt(parser, AST_STMT_DEF, def_token);
   stmt->as.def_stmt.name = parser_copy_str(parser, name->lexeme);
@@ -1047,6 +1072,9 @@ static AstDecl* parse_type_declaration(Parser* parser) {
 static AstDecl* parse_func_declaration(Parser* parser, bool is_extern) {
   const Token* func_token = parser_previous(parser);
   const Token* name = parser_consume(parser, TOK_IDENT, "expected function name");
+  if (!is_extern) { // Externs might need C names which can be PascalCase (e.g. Raylib, Windows API)
+      check_camel_case(parser, name, "function");
+  }
   AstDecl* decl = parser_alloc(parser, sizeof(AstDecl));
   decl->kind = AST_DECL_FUNC;
   decl->line = func_token->line;
