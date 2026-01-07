@@ -1512,7 +1512,8 @@ async function loadExampleSource(path) {
     const data = await response.json();
     const contents = data.contents ?? "";
     const isRae = path.toLowerCase().endsWith(".rae");
-    const highlighted = isRae ? highlightRae(contents) : escapeHtml(contents);
+    const isPack = path.toLowerCase().endsWith(".raepack");
+    const highlighted = (isRae || isPack) ? highlightRae(contents, isPack) : escapeHtml(contents);
     exampleSourceCode.innerHTML = `<code>${highlighted}</code>`;
     if (exampleEditMode && exampleEditor) {
       exampleEditor.value = contents;
@@ -1973,7 +1974,8 @@ function renderTestSource() {
     return;
   }
   const isRae = selectedTestFile?.toLowerCase().endsWith(".rae");
-  const highlighted = isRae ? highlightRae(selectedTestSource) : escapeHtml(selectedTestSource);
+  const isPack = selectedTestFile?.toLowerCase().endsWith(".raepack");
+  const highlighted = (isRae || isPack) ? highlightRae(selectedTestSource, isPack) : escapeHtml(selectedTestSource);
   testSourceCode.innerHTML = `<code>${highlighted}</code>`;
 }
 
@@ -2157,22 +2159,65 @@ function highlightRae(code) {
   //    If we restore PH_1 first: result has "# __PH_0__".
   //    Then we restore PH_0: result has "# <span...>...</span>".
   //    So LIFO (reverse order of addition) seems correct for nesting?
-  //    Actually, simple iteration works if we just do:
-  //    result = result.replace(id, wrappedText);
-  //    If wrappedText contains another ID, it will be replaced when we get to that ID.
-  //    So order doesn't matter provided we check all IDs?
-  //    No, if we iterate 0..N.
-  //    We replace PH_0. It's hidden inside PH_1.
-  //    So we replace nothing.
-  //    Then we replace PH_1. It reveals PH_0.
-  //    But we already passed PH_0 loop.
-  //    So we must restore from Last to First (LIFO).
+  function highlightRae(code, isPack = false) {
+    const escaped = escapeHtml(code);
+    if (!raeSyntax) {
+      return escaped;
+    }
   
-  for (let i = placeholders.length - 1; i >= 0; i--) {
-    const p = placeholders[i];
-    const replacement = `<span class="${p.type}">${p.text}</span>`;
-    // We use a global replace just in case, but IDs are unique
-    result = result.split(p.id).join(replacement);
+    // 1. Extract strings and comments, replacing them with placeholders
+    const placeholders = [];
+    const addPlaceholder = (match, type) => {
+      const id = `__PH_${placeholders.length}__`;
+      placeholders.push({ id, text: match, type });
+      return id;
+    };
+  
+    const commentLineRegex = raeSyntax.comments?.line
+      ? new RegExp(`${escapeRegex(raeSyntax.comments.line)}.*`, "gm")
+      : /#.*$/gm;
+    
+    const commentBlockRegex =
+      raeSyntax.comments?.block_start && raeSyntax.comments?.block_end
+        ? new RegExp(
+            `${escapeRegex(raeSyntax.comments.block_start)}[\s\S]*?${escapeRegex(
+              raeSyntax.comments.block_end
+            )}`,
+            "gm"
+          )
+        : null;
+  
+    let result = escaped;
+    
+    // Strings
+    result = result.replace(/("(?:\\.|[^"])*")/g, (match) => addPlaceholder(match, "tok-string"));
+    result = result.replace(/'(?:\\.|[^'])*'/g, (match) => addPlaceholder(match, "tok-string"));
+  
+    if (commentBlockRegex) {
+      result = result.replace(commentBlockRegex, (match) => addPlaceholder(match, "tok-comment"));
+    }
+    result = result.replace(commentLineRegex, (match) => addPlaceholder(match, "tok-comment"));
+  
+    // 2. Highlight keywords and numbers in the remaining text
+    let keywordsList = [...(raeSyntax.keywords ?? [])];
+    if (isPack) {
+      keywordsList.push("live", "compiled", "both");
+    }
+    const keywords = keywordsList.join("|");
+    const keywordRegex = new RegExp(`\\b(${keywords})\\b`, "g");
+    
+    result = result
+      .replace(keywordRegex, '<span class="tok-keyword">  </span>')
+      .replace(/\\b(\\d+(\\.\\d+)?)/g, '<span class="tok-number">  </span>');
+  
+    // 3. Restore placeholders
+    for (let i = placeholders.length - 1; i >= 0; i--) {
+      const p = placeholders[i];
+      const replacement = `<span class="${p.type}">${p.text}</span>`;
+      result = result.split(p.id).join(replacement);
+    }
+  
+    return result;
   }
 
   return result;
