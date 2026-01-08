@@ -9,25 +9,14 @@
 
 ## Tasks
 
-### T026 - Implement Char Literals
-- Repo: rae
-- Summary:
-  - Add `TOK_CHAR` to lexer for single-quoted literals `'x'`, `'\n'`, `'\u{...}'`.
-  - Add `AST_EXPR_CHAR` and `VAL_CHAR` (distinct type from String).
-  - Update Parser, C Backend, VM, and Pretty Printer.
-- Acceptance:
-  - `def c: Char = 'x'` compiles and runs.
-  - `def c: Char = '\n'` works.
-  - `def c: Char = 'ab'` errors (unless unicode escape scalar).
-  - Tests covering valid/invalid cases.
-
 ### T027 - Implement Cooked String Interpolation
 - Repo: rae
 - Summary:
   - Update lexer to handle `"foo {expr} bar"`.
   - Update parser to handle interpolated strings (likely as concatenation expression).
   - Enforce `{}` is error.
-  - Handle escapes `\{`, `\}`, `\"`, `\\`.
+  - Handle escapes `\\{`, `\\}`, `\\"`, `\\\\
+`.
 - Acceptance:
   - `"{x}"` works.
   - `"Val: {x + 1}"` works.
@@ -54,3 +43,14 @@
 - Acceptance:
   - Code inside `off/on` block is not reformatted.
   - Formatter still processes surrounding code.
+
+### T030 - Enhance Advanced Pong
+- Repo: rae
+- Summary:
+  - Add scoring system to `advanced_pong`.
+  - Add `UISystem` to draw scores at center top (e.g. `4 - 4`).
+  - Increase ball speed on paddle hit in both `pong` and `advanced_pong`.
+- Acceptance:
+  - `advanced_pong` displays score.
+  - Ball gets faster after hits in both examples.
+  - Game is winnable (or at least gets harder).
