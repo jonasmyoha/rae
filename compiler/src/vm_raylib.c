@@ -7,7 +7,13 @@ static bool native_initWindow(struct VM* vm, VmNativeResult* out, const Value* a
     if (count != 3) return false;
     int w = (args[0].type == VAL_FLOAT) ? (int)args[0].as.float_value : (int)args[0].as.int_value;
     int h = (args[1].type == VAL_FLOAT) ? (int)args[1].as.float_value : (int)args[1].as.int_value;
-    InitWindow(w, h, args[2].as.string_value.chars);
+    const char* title = "Rae Window";
+    if (args[2].type == VAL_STRING && args[2].as.string_value.chars) {
+        title = args[2].as.string_value.chars;
+    } else {
+        fprintf(stderr, "error: initWindow expects string for title, got type %d\n", args[2].type);
+    }
+    InitWindow(w, h, title);
     out->has_value = false;
     return true;
 }
