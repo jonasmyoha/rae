@@ -23,24 +23,24 @@ func bounceSystem(pos: view Transform, vel: mod Velocity, radius: Float, height:
     if pos.y < radius { 
         vel.dy = 4.0 
     }
-    if pos.y > (height - radius) { 
+    if pos.y > height - radius { 
         vel.dy = -4.0 
     }
 }
 
 func paddleCollisionSystem(bPos: view Transform, bVel: mod Velocity, pPos: view Transform, pWidth: Float, pHeight: Float, isLeft: Int) {
     if isLeft is 1 {
-        if bPos.x < (pPos.x + pWidth) {
+        if bPos.x - 10.0 < pPos.x + pWidth {
             if bPos.y > pPos.y {
-                if bPos.y < (pPos.y + pHeight) {
+                if bPos.y < pPos.y + pHeight {
                     bVel.dx = 4.0
                 }
             }
         }
     } else {
-        if bPos.x > (pPos.x) {
+        if bPos.x + 10.0 > pPos.x {
             if bPos.y > pPos.y {
-                if bPos.y < (pPos.y + pHeight) {
+                if bPos.y < pPos.y + pHeight {
                     bVel.dx = -4.0
                 }
             }
@@ -59,7 +59,7 @@ func paddleInputSystem(pos: mod Transform, speed: Float, height: Float, pHeight:
 
     # Bounds check
     if pos.y < 0.0 { pos.y = 0.0 }
-    if pos.y > (height - pHeight) { pos.y = (height - pHeight) }
+    if pos.y > (height - pHeight) { pos.y = height - pHeight }
 }
 
 func renderSystem(pos: view Transform, color: Int) {
@@ -85,8 +85,8 @@ func main() {
 
         # 2. Update Phase
         # AI System
-        if bPos.y < (p2Pos.y + 50.0) { p2Pos.y = p2Pos.y - 4.0 }
-        if bPos.y > (p2Pos.y + 50.0) { p2Pos.y = p2Pos.y + 4.0 }
+        if bPos.y < p2Pos.y + 50.0 { p2Pos.y = p2Pos.y - 4.0 }
+        if bPos.y > p2Pos.y + 50.0 { p2Pos.y = p2Pos.y + 4.0 }
         if p2Pos.y < 0.0 { p2Pos.y = 0.0 }
         if p2Pos.y > 350.0 { p2Pos.y = 350.0 }
 
@@ -113,11 +113,11 @@ func main() {
         clearBackground(r: 20, g: 20, b: 20, a: 255)
         
         # Draw paddles
-        drawRectangle(x: 20, y: (p1Pos.y), width: 20, height: 100, r: 255, g: 255, b: 255, a: 255)
-        drawRectangle(x: 760, y: (p2Pos.y), width: 20, height: 100, r: 255, g: 255, b: 255, a: 255)
+        drawRectangle(x: 20, y: p1Pos.y, width: 20, height: 100, r: 255, g: 255, b: 255, a: 255)
+        drawRectangle(x: 760, y: p2Pos.y, width: 20, height: 100, r: 255, g: 255, b: 255, a: 255)
         
         # Draw ball
-        drawCircle(x: (bPos.x), y: (bPos.y), radius: 10, r: 255, g: 255, b: 255, a: 255)
+        drawCircle(x: bPos.x, y: bPos.y, radius: 10, r: 255, g: 255, b: 255, a: 255)
         
         endDrawing()
     }
