@@ -79,5 +79,3 @@ const char* rae_str_cstr(const char* s) {
   // If s is result of concat (allocated), it's fine.
   return s;
 }
-
-int64_t nextTick(void) {
