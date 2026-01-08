@@ -7,6 +7,11 @@
 
 ## 1. Lexical Structure
 
+### 1.0 Source Files
+
+*   **Encoding:** Rae source files (`.rae`) must be encoded in **UTF-8**.
+*   **Indentation:** Rae uses **2 spaces** for indentation. Tabs are prohibited for indentation.
+
 ### 1.1 Comments
 
 * **Line comment:** `# comment until newline`

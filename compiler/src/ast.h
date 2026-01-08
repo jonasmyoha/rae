@@ -7,7 +7,9 @@
 #include <stdbool.h>
 #include <stdio.h>
 
+#include "arena.h"
 #include "str.h"
+#include "lexer.h"
 
 typedef struct AstDecl AstDecl;
 typedef struct AstBlock AstBlock;
@@ -252,13 +254,17 @@ struct AstDecl {
 
 struct AstImport {
   bool is_export;
-  Str module_path;
+  Str path;
+  size_t line;
+  size_t column;
   AstImport* next;
 };
 
 typedef struct {
   AstImport* imports;
   AstDecl* decls;
+  Token* comments;
+  size_t comment_count;
 } AstModule;
 
 void ast_dump_module(const AstModule* module, FILE* out);

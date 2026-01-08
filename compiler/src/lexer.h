@@ -15,6 +15,8 @@ typedef enum {
   TOK_INTEGER,
   TOK_FLOAT,
   TOK_STRING,
+  TOK_COMMENT,
+  TOK_BLOCK_COMMENT,
 
   /* Keywords */
   TOK_KW_TYPE,
