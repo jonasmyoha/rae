@@ -39,6 +39,7 @@ typedef struct {
 typedef struct {
   const char* input_path;
   bool watch;
+  int timeout;
 } RunOptions;
 
 typedef struct {
@@ -213,8 +214,8 @@ static void watch_state_init(WatchState* state, const char* fallback_path);
 static void watch_state_free(WatchState* state);
 static bool watch_state_apply_sources(WatchState* state, WatchSources* new_sources);
 static const char* watch_state_wait_for_change(WatchState* state);
-static int run_vm_file(const char* file_path);
-static int run_vm_watch(const char* file_path);
+static int run_vm_file(const RunOptions* run_opts);
+static int run_vm_watch(const RunOptions* run_opts);
 
 static void format_options_init(FormatOptions* opts) {
   opts->input_path = NULL;
@@ -263,6 +264,7 @@ static bool parse_format_args(int argc, char** argv, FormatOptions* opts) {
 static bool parse_run_args(int argc, char** argv, RunOptions* opts) {
   opts->watch = false;
   opts->input_path = NULL;
+  opts->timeout = 0;
 
   int i = 0;
   while (i < argc) {
@@ -270,6 +272,15 @@ static bool parse_run_args(int argc, char** argv, RunOptions* opts) {
     if (strcmp(arg, "--watch") == 0 || strcmp(arg, "-w") == 0) {
       opts->watch = true;
       i += 1;
+      continue;
+    }
+    if (strcmp(arg, "--timeout") == 0) {
+      if (i + 1 >= argc) {
+        fprintf(stderr, "error: --timeout expects an integer value in seconds\n");
+        return false;
+      }
+      opts->timeout = atoi(argv[i+1]);
+      i += 2;
       continue;
     }
     if (arg[0] == '-') {
@@ -2118,7 +2129,8 @@ static bool build_hybrid_output(const char* entry_file,
   return ok;
 }
 
-static int run_vm_file(const char* file_path) {
+static int run_vm_file(const RunOptions* run_opts) {
+  const char* file_path = run_opts->input_path;
   Chunk chunk;
   if (!compile_file_chunk(file_path, &chunk, NULL, NULL)) {
     return 1;
@@ -2126,6 +2138,8 @@ static int run_vm_file(const char* file_path) {
 
   VM vm;
   vm_init(&vm);
+  vm.timeout_seconds = run_opts->timeout;
+  
   VmRegistry registry;
   vm_registry_init(&registry);
   TickCounter tick_counter = {.next = 0};
@@ -2137,9 +2151,12 @@ static int run_vm_file(const char* file_path) {
   }
   vm_set_registry(&vm, &registry);
   VMResult result = vm_run(&vm, &chunk);
+  if (result == VM_RUNTIME_TIMEOUT) {
+      fprintf(stderr, "info: execution timed out after %d seconds\n", run_opts->timeout);
+  }
   vm_registry_free(&registry);
   chunk_free(&chunk);
-  return result == VM_RUNTIME_OK ? 0 : 1;
+  return (result == VM_RUNTIME_OK || result == VM_RUNTIME_TIMEOUT) ? 0 : 1;
 }
 
 static int run_command(const char* cmd, int argc, char** argv) {
@@ -2171,7 +2188,7 @@ static int run_command(const char* cmd, int argc, char** argv) {
       print_usage(argv[-1]);
       return 1;
     }
-    return run_opts.watch ? run_vm_watch(run_opts.input_path) : run_vm_file(run_opts.input_path);
+    return run_opts.watch ? run_vm_watch(&run_opts) : run_vm_file(&run_opts);
   } else if (is_pack) {
     PackOptions pack_opts;
     if (!parse_pack_args(argc, argv, &pack_opts)) {
@@ -2410,7 +2427,8 @@ static const char* watch_state_wait_for_change(WatchState* state) {
   }
 }
 
-static int run_vm_watch(const char* file_path) {
+static int run_vm_watch(const RunOptions* run_opts) {
+  const char* file_path = run_opts->input_path;
   printf("Watching '%s' for changes (Ctrl+C to exit)\n", file_path);
   fflush(stdout);
 
@@ -2454,13 +2472,16 @@ static int run_vm_watch(const char* file_path) {
         if (module) {
           VM vm;
           vm_init(&vm);
+          vm.timeout_seconds = run_opts->timeout;
           vm_set_registry(&vm, &registry);
           reload_count += 1;
           printf("[watch] running latest version... (reload #%d)\n", reload_count);
           fflush(stdout);
           tick_counter.next = 0;
           VMResult result = vm_run(&vm, &module->chunk);
-          if (result != VM_RUNTIME_OK) {
+          if (result == VM_RUNTIME_TIMEOUT) {
+              fprintf(stderr, "info: [watch] execution timed out after %d seconds\n", run_opts->timeout);
+          } else if (result != VM_RUNTIME_OK) {
             exit_code = 1;
           }
         }

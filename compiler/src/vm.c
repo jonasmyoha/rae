@@ -74,6 +74,8 @@ void vm_init(VM* vm) {
   vm_reset_stack(vm);
   vm->call_stack_top = 0;
   vm->registry = NULL;
+  vm->timeout_seconds = 0;
+  vm->start_time = 0;
 }
 
 void vm_reset_stack(VM* vm) {
@@ -104,8 +106,14 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
   if (!vm || !chunk) return VM_RUNTIME_ERROR;
   vm->chunk = chunk;
   vm->ip = chunk->code;
+  vm->start_time = time(NULL);
 
   for (;;) {
+    if (vm->timeout_seconds > 0) {
+        if (time(NULL) - vm->start_time >= vm->timeout_seconds) {
+            return VM_RUNTIME_TIMEOUT;
+        }
+    }
     uint8_t instruction = *vm->ip++;
     switch (instruction) {
       case OP_CONSTANT: {
