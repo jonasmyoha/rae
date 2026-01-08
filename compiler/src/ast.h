@@ -98,6 +98,7 @@ typedef enum {
   AST_EXPR_INTEGER,
   AST_EXPR_FLOAT,
   AST_EXPR_STRING,
+  AST_EXPR_CHAR,
   AST_EXPR_BOOL,
   AST_EXPR_NONE,
   AST_EXPR_BINARY,
@@ -118,6 +119,8 @@ struct AstExpr {
     Str integer;
     Str floating;
     Str string_lit;
+    Str char_lit;
+    int64_t char_value;
     bool boolean;
     struct {
       AstExpr* lhs;
