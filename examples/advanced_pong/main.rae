@@ -1,126 +1,201 @@
 import raylib
-
 # -- Components (Plain Data Types) --
-
 type Transform {
-    x: Float
-    y: Float
+  x: Float
+  y: Float
 }
 
 type Velocity {
-    dx: Float
-    dy: Float
+  dx: Float
+  dy: Float
 }
 
 # -- Systems (Functions acting on Components) --
-
 func movementSystem(pos: mod Transform, vel: view Velocity) {
-    pos.x = pos.x + vel.dx
-    pos.y = pos.y + vel.dy
+  pos.x = pos.x + vel.dx
+  pos.y = pos.y + vel.dy
 }
 
-func bounceSystem(pos: view Transform, vel: mod Velocity, radius: Float, height: Float) {
-    if pos.y < radius { 
-        vel.dy = 4.0 
-    }
-    if pos.y > height - radius { 
-        vel.dy = -4.0 
-    }
+func bounceSystem(
+  pos: view Transform,
+  vel: mod Velocity,
+  radius: Float,
+  height: Float,
+) {
+  if pos.y < radius {
+    vel.dy = 4.0
+  }
+  if pos.y > height - radius {
+    vel.dy = -4.0
+  }
 }
 
-func paddleCollisionSystem(bPos: view Transform, bVel: mod Velocity, pPos: view Transform, pWidth: Float, pHeight: Float, isLeft: Int) {
-    if isLeft is 1 {
-        if bPos.x - 10.0 < pPos.x + pWidth {
-            if bPos.y > pPos.y {
-                if bPos.y < pPos.y + pHeight {
-                    bVel.dx = 4.0
-                }
-            }
+func paddleCollisionSystem(
+  bPos: view Transform,
+  bVel: mod Velocity,
+  pPos: view Transform,
+  pWidth: Float,
+  pHeight: Float,
+  isLeft: Int,
+) {
+  if isLeft is 1 {
+    if bPos.x - 10.0 < pPos.x + pWidth {
+      if bPos.y > pPos.y {
+        if bPos.y < pPos.y + pHeight {
+          bVel.dx = 4.0
         }
-    } else {
-        if bPos.x + 10.0 > pPos.x {
-            if bPos.y > pPos.y {
-                if bPos.y < pPos.y + pHeight {
-                    bVel.dx = -4.0
-                }
-            }
-        }
+      }
     }
+  } else {
+    if bPos.x + 10.0 > pPos.x {
+      if bPos.y > pPos.y {
+        if bPos.y < pPos.y + pHeight {
+          bVel.dx = -4.0
+        }
+      }
+    }
+  }
 }
 
-func paddleInputSystem(pos: mod Transform, speed: Float, height: Float, pHeight: Float) {
-    # W (87) / Up (265)
-    if isKeyDown(key: 87) is 1 { pos.y = pos.y - speed }
-    if isKeyDown(key: 265) is 1 { pos.y = pos.y - speed }
-    
-    # S (83) / Down (264)
-    if isKeyDown(key: 83) is 1 { pos.y = pos.y + speed }
-    if isKeyDown(key: 264) is 1 { pos.y = pos.y + speed }
-
-    # Bounds check
-    if pos.y < 0.0 { pos.y = 0.0 }
-    if pos.y > (height - pHeight) { pos.y = height - pHeight }
+func paddleInputSystem(
+  pos: mod Transform,
+  speed: Float,
+  height: Float,
+  pHeight: Float,
+) {
+  # W (87) / Up (265)
+  if isKeyDown(key: 87) is 1 {
+    pos.y = pos.y - speed
+  }
+  if isKeyDown(key: 265) is 1 {
+    pos.y = pos.y - speed
+  }
+  # S (83) / Down (264)
+  if isKeyDown(key: 83) is 1 {
+    pos.y = pos.y + speed
+  }
+  if isKeyDown(key: 264) is 1 {
+    pos.y = pos.y + speed
+  }
+  # Bounds check
+  if pos.y < 0.0 {
+    pos.y = 0.0
+  }
+  if pos.y > height - pHeight {
+    pos.y = height - pHeight
+  }
 }
 
 func renderSystem(pos: view Transform, color: Int) {
-    # Simple dispatcher for different "entities"
-    # In a full ECS, this would use a 'Sprite' or 'Shape' component
 }
 
+# Simple dispatcher for different "entities"
+# In a full ECS, this would use a 'Sprite' or 'Shape' component
 # -- Main Entry --
-
 func main() {
-    initWindow(width: 800, height: 450, title: "Rae Advanced Pong (ECS)")
-    setTargetFPS(fps: 60)
-
-    # Initializing Entities (as local component instances)
-    def p1Pos: Transform = (x: 20.0, y: 175.0)
-    def p2Pos: Transform = (x: 760.0, y: 175.0)
-    def bPos: Transform = (x: 400.0, y: 225.0)
-    def bVel: Velocity = (dx: 4.0, dy: 4.0)
-
-    loop windowShouldClose() is 0 {
-        # 1. Input Phase
-        paddleInputSystem(pos: p1Pos, speed: 5.0, height: 450.0, pHeight: 100.0)
-
-        # 2. Update Phase
-        # AI System
-        if bPos.y < p2Pos.y + 50.0 { p2Pos.y = p2Pos.y - 4.0 }
-        if bPos.y > p2Pos.y + 50.0 { p2Pos.y = p2Pos.y + 4.0 }
-        if p2Pos.y < 0.0 { p2Pos.y = 0.0 }
-        if p2Pos.y > 350.0 { p2Pos.y = 350.0 }
-
-        movementSystem(pos: bPos, vel: bVel)
-        bounceSystem(pos: bPos, vel: bVel, radius: 10.0, height: 450.0)
-        
-        paddleCollisionSystem(bPos: bPos, bVel: bVel, pPos: p1Pos, pWidth: 20.0, pHeight: 100.0, isLeft: 1)
-        paddleCollisionSystem(bPos: bPos, bVel: bVel, pPos: p2Pos, pWidth: 20.0, pHeight: 100.0, isLeft: 0)
-
-        # Reset if out of bounds
-        if bPos.x < 0.0 { 
-            bPos.x = 400.0
-            bPos.y = 225.0
-            bVel.dx = 4.0 
-        }
-        if bPos.x > 800.0 { 
-            bPos.x = 400.0
-            bPos.y = 225.0
-            bVel.dx = -4.0 
-        }
-
-        # 3. Render Phase
-        beginDrawing()
-        clearBackground(r: 20, g: 20, b: 20, a: 255)
-        
-        # Draw paddles
-        drawRectangle(x: 20, y: p1Pos.y, width: 20, height: 100, r: 255, g: 255, b: 255, a: 255)
-        drawRectangle(x: 760, y: p2Pos.y, width: 20, height: 100, r: 255, g: 255, b: 255, a: 255)
-        
-        # Draw ball
-        drawCircle(x: bPos.x, y: bPos.y, radius: 10, r: 255, g: 255, b: 255, a: 255)
-        
-        endDrawing()
+  # Initializing Entities (as local component instances)
+  initWindow(width: 800, height: 450, title: "Rae Advanced Pong (ECS)")
+  setTargetFPS(fps: 60)
+  def p1Pos: Transform = (x: 20.0, y: 175.0)
+  def p2Pos: Transform = (x: 760.0, y: 175.0)
+  def bPos: Transform = (x: 400.0, y: 225.0)
+  def bVel: Velocity = (dx: 4.0, dy: 4.0)
+  loop windowShouldClose() is 0 {
+    # 1. Input Phase
+    # 2. Update Phase
+    # AI System
+    paddleInputSystem(
+      pos: p1Pos,
+      speed: 5.0,
+      height: 450.0,
+      pHeight: 100.0,
+    )
+    if bPos.y < p2Pos.y + 50.0 {
+      p2Pos.y = p2Pos.y - 4.0
     }
-
-    closeWindow()
+    if bPos.y > p2Pos.y + 50.0 {
+      p2Pos.y = p2Pos.y + 4.0
+    }
+    if p2Pos.y < 0.0 {
+      p2Pos.y = 0.0
+    }
+    if p2Pos.y > 350.0 {
+      p2Pos.y = 350.0
+    }
+    movementSystem(pos: bPos, vel: bVel)
+    bounceSystem(
+      pos: bPos,
+      vel: bVel,
+      radius: 10.0,
+      height: 450.0,
+    )
+    # Reset if out of bounds
+    paddleCollisionSystem(
+      bPos: bPos,
+      bVel: bVel,
+      pPos: p1Pos,
+      pWidth: 20.0,
+      pHeight: 100.0,
+      isLeft: 1,
+    )
+    paddleCollisionSystem(
+      bPos: bPos,
+      bVel: bVel,
+      pPos: p2Pos,
+      pWidth: 20.0,
+      pHeight: 100.0,
+      isLeft: 0,
+    )
+    if bPos.x < 0.0 {
+      bPos.x = 400.0
+      bPos.y = 225.0
+      bVel.dx = 4.0
+    }
+    if bPos.x > 800.0 {
+      bPos.x = 400.0
+      bPos.y = 225.0
+      bVel.dx = -4.0
+    }
+    # 3. Render Phase
+    # Draw paddles
+    beginDrawing()
+    clearBackground(
+      r: 20,
+      g: 20,
+      b: 20,
+      a: 255,
+    )
+    # Draw ball
+    drawRectangle(
+      x: 20,
+      y: p1Pos.y,
+      width: 20,
+      height: 100,
+      r: 255,
+      g: 255,
+      b: 255,
+      a: 255,
+    )
+    drawRectangle(
+      x: 760,
+      y: p2Pos.y,
+      width: 20,
+      height: 100,
+      r: 255,
+      g: 255,
+      b: 255,
+      a: 255,
+    )
+    drawCircle(
+      x: bPos.x,
+      y: bPos.y,
+      radius: 10,
+      r: 255,
+      g: 255,
+      b: 255,
+      a: 255,
+    )
+    endDrawing()
+  }
+  closeWindow()
 }
