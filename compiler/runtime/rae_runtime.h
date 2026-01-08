@@ -22,6 +22,10 @@ const char* rae_str_cstr(const char* s);
     const char*: rae_str_cstr \
 )(X)
 
+void rae_seed(int64_t seed);
+double rae_random(void);
+int64_t rae_random_int(int64_t min, int64_t max);
+
 int64_t nextTick(void);
 void sleepMs(int64_t ms);
 
