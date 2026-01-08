@@ -49,6 +49,7 @@ const stopExampleBtn = document.getElementById("stop-example-btn");
 const toggleEditExampleBtn = document.getElementById("toggle-edit-example-btn");
 const saveExampleBtn = document.getElementById("save-example-btn");
 const exampleOutput = document.getElementById("example-output");
+const copyExampleOutputBtn = document.getElementById("copy-example-output-btn");
 const exampleTitle = document.getElementById("example-title");
 const exampleEntryLabel = document.getElementById("example-entry");
 const exampleFilesList = document.getElementById("example-files");
@@ -621,6 +622,13 @@ setupCopyButton(copyBuildLogBtn, () => {
     line.textContent?.trimEnd() ?? ""
   );
   return lines.join("\n").trim() || "No build output yet.";
+});
+
+setupCopyButton(copyExampleOutputBtn, () => {
+  const lines = Array.from(exampleOutput?.querySelectorAll(".terminal-line") ?? []).map((line) =>
+    line.textContent?.trimEnd() ?? ""
+  );
+  return lines.join("\n").trim() || "No example output yet.";
 });
 
 setupCopyButton(copyNextStepsBtn, () => {
