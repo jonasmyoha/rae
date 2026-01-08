@@ -180,7 +180,7 @@ static void emit_token(Lexer* lexer,
   token_buffer_push(buffer, token);
 }
 
-static TokenKind lookup_keyword(Str lexeme) {
+TokenKind lookup_keyword(Str lexeme) {
   for (size_t i = 0; i < sizeof(KEYWORDS) / sizeof(KEYWORDS[0]); ++i) {
     if (str_eq_cstr(lexeme, KEYWORDS[i].text)) {
       return KEYWORDS[i].kind;

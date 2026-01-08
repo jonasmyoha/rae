@@ -91,6 +91,8 @@ TokenList lexer_tokenize(Arena* arena,
                          const char* source,
                          size_t length);
 
+TokenKind lookup_keyword(Str lexeme);
+
 const char* token_kind_name(TokenKind kind);
 
 #endif /* LEXER_H */
