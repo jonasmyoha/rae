@@ -76,7 +76,8 @@ const EXAMPLE_ORDER: Record<string, number> = {
   raylib_basic: 12,
   pong: 13,
   advanced_pong: 14,
-  raepack_demo: 15
+  raw_strings: 15,
+  raepack_demo: 16
 };
 
 export async function listExamples(
