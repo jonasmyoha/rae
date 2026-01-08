@@ -128,18 +128,49 @@ static bool emit_log_call(CFuncContext* ctx, const AstExpr* expr, FILE* out, boo
     return false;
   }
   const AstExpr* value = arg->value;
+  bool is_string = false;
+  
   if (value->kind == AST_EXPR_STRING) {
+    is_string = true;
+  } else if (value->kind == AST_EXPR_IDENT) {
+    Str name = value->as.ident;
+    // Check params
+    for (const AstParam* p = ctx->params; p; p = p->next) {
+      if (str_eq(p->name, name)) {
+        if (p->type && p->type->parts && str_eq_cstr(p->type->parts->text, "String")) {
+          is_string = true;
+        }
+        break;
+      }
+    }
+    // Check locals
+    if (!is_string) {
+      for (size_t i = 0; i < ctx->local_count; ++i) {
+        if (str_eq(ctx->locals[i], name)) {
+          if (str_eq_cstr(ctx->local_types[i], "String")) {
+            is_string = true;
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  if (is_string) {
     if (fprintf(out, "  %s(", newline ? "rae_log_cstr" : "rae_log_stream_cstr") < 0) {
       return false;
     }
-    if (!emit_string_literal(out, value->as.string_lit)) {
-      return false;
+    if (value->kind == AST_EXPR_STRING) {
+        if (!emit_string_literal(out, value->as.string_lit)) return false;
+    } else {
+        if (!emit_expr(ctx, value, out)) return false;
     }
     if (fprintf(out, ");\n") < 0) {
       return false;
     }
     return true;
   }
+  
   if (fprintf(out, "  %s(", newline ? "rae_log_i64" : "rae_log_stream_i64") < 0) {
     return false;
   }
