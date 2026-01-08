@@ -18,6 +18,7 @@ typedef struct {
   size_t index;
   size_t line;
   size_t column;
+  int interpolation_depth;
 } Lexer;
 
 typedef struct {
@@ -50,6 +51,9 @@ static const char* const TOKEN_KIND_NAMES[] = {
     [TOK_INTEGER] = "TOK_INTEGER",
     [TOK_FLOAT] = "TOK_FLOAT",
     [TOK_STRING] = "TOK_STRING",
+    [TOK_STRING_START] = "TOK_STRING_START",
+    [TOK_STRING_MID] = "TOK_STRING_MID",
+    [TOK_STRING_END] = "TOK_STRING_END",
     [TOK_RAW_STRING] = "TOK_RAW_STRING",
     [TOK_CHAR] = "TOK_CHAR",
     [TOK_COMMENT] = "TOK_COMMENT",
@@ -279,34 +283,72 @@ static void scan_string(Lexer* lexer,
                         TokenBuffer* buffer,
                         size_t start_index,
                         size_t line,
-                        size_t column) {
-  bool terminated = false;
+                        size_t column,
+                        bool is_continuation) {
   while (!lexer_is_at_end(lexer)) {
-    char c = lexer_advance(lexer);
+    char c = lexer_peek(lexer);
+    
     if (c == '"') {
-      terminated = true;
-      break;
+      lexer_advance(lexer);
+      TokenKind kind = is_continuation ? TOK_STRING_END : TOK_STRING;
+      emit_token(lexer, buffer, kind, start_index, line, column);
+      return;
     }
+    
+    if (c == '{') {
+      // Interpolation start
+      TokenKind kind = is_continuation ? TOK_STRING_MID : TOK_STRING_START;
+      emit_token(lexer, buffer, kind, start_index, line, column);
+      lexer->interpolation_depth++;
+      return; // Return to main loop to handle '{' as LBRACE
+    }
+
     if (c == '\\') {
-      if (lexer_is_at_end(lexer)) {
+      if (lexer->index + 1 >= lexer->length) {
         lexer_error(lexer, line, column, "unterminated string literal");
+        return;
       }
-      char esc = lexer_advance(lexer);
-      if (esc != 'n' && esc != 't' && esc != '\\' && esc != '"') {
-        lexer_error(lexer, lexer->line, lexer->column - 1, "invalid escape sequence '\\%c'", esc);
+      lexer_advance(lexer); // consume backslash
+      char next = lexer_peek(lexer);
+      if (next == '{' || next == '}' || next == '\\' || next == '"' || 
+          next == 'n' || next == 'r' || next == 't' || next == '0') {
+        lexer_advance(lexer);
+        continue;
+      } else if (next == 'u') {
+        lexer_advance(lexer); // u
+        if (lexer_peek(lexer) != '{') {
+          lexer_error(lexer, line, column, "expected '{' after \\u");
+        } else {
+          lexer_advance(lexer); // {
+          while (!lexer_is_at_end(lexer) && lexer_peek(lexer) != '}') {
+            char h = lexer_advance(lexer);
+            if (!isxdigit((unsigned char)h)) {
+               // lexer_error(lexer, ...); 
+            }
+          }
+          if (lexer_peek(lexer) == '}') {
+            lexer_advance(lexer); // }
+          } else {
+            lexer_error(lexer, line, column, "unterminated unicode escape");
+          }
+        }
+        continue;
+      } else {
+        lexer_error(lexer, lexer->line, lexer->column, "invalid escape sequence '\\%c'", next);
+        lexer_advance(lexer);
+        continue;
       }
-      continue;
     }
+    
     if (c == '\n' || c == '\r') {
-      lexer_error(lexer, line, column, "unterminated string literal");
+       lexer_error(lexer, line, column, "unterminated string literal");
+       return;
     }
+    
+    lexer_advance(lexer);
   }
 
-  if (!terminated) {
-    lexer_error(lexer, line, column, "unterminated string literal");
-  }
-
-  emit_token(lexer, buffer, TOK_STRING, start_index, line, column);
+  lexer_error(lexer, line, column, "unterminated string literal");
 }
 
 static void scan_raw_string(Lexer* lexer, TokenBuffer* buffer, size_t start_index, size_t line, size_t col) {
@@ -397,6 +439,7 @@ TokenList lexer_tokenize(Arena* arena,
       .index = 0,
       .line = 1,
       .column = 1,
+      .interpolation_depth = 0,
   };
 
   TokenBuffer buffer = {0};
@@ -435,6 +478,10 @@ TokenList lexer_tokenize(Arena* arena,
         break;
       case '}':
         emit_token(&lexer, &buffer, TOK_RBRACE, start_index, token_line, token_column);
+        if (lexer.interpolation_depth > 0) {
+            lexer.interpolation_depth--;
+            scan_string(&lexer, &buffer, lexer.index, lexer.line, lexer.column, true);
+        }
         break;
       case '[':
         emit_token(&lexer, &buffer, TOK_LBRACKET, start_index, token_line, token_column);
@@ -501,7 +548,7 @@ TokenList lexer_tokenize(Arena* arena,
         }
         break;
       case '"':
-        scan_string(&lexer, &buffer, start_index, token_line, token_column);
+        scan_string(&lexer, &buffer, start_index, token_line, token_column, false);
         break;
       case '\'':
         scan_char_literal(&lexer, &buffer, start_index, token_line, token_column);
