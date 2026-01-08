@@ -535,7 +535,12 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       return true;
     }
     case AST_EXPR_STRING: {
-      Value string_value = make_string_value(expr->as.string_lit);
+      Value string_value;
+      if (expr->is_raw) {
+        string_value = value_string_copy(expr->as.string_lit.data, expr->as.string_lit.len);
+      } else {
+        string_value = make_string_value(expr->as.string_lit);
+      }
       emit_constant(compiler, string_value, (int)expr->line);
       return true;
     }

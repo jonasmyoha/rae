@@ -264,6 +264,30 @@ static void pp_object_fields(PrettyPrinter* pp, const AstObjectField* fields) {
   }
 }
 
+static int count_required_hashes(Str s) {
+  int n = 0;
+  while (1) {
+    bool found = false;
+    const char* data = s.data;
+    for (size_t i = 0; i < s.len; i++) {
+      if (data[i] == '"') {
+        int hashes = 0;
+        size_t j = i + 1;
+        while (j < s.len && data[j] == '#') {
+          hashes++;
+          j++;
+        }
+        if (hashes == n) {
+          found = true;
+          break;
+        }
+      }
+    }
+    if (!found) return n;
+    n++;
+  }
+}
+
 static void pp_expr_prec(PrettyPrinter* pp, const AstExpr* expr, int parent_prec) {
   if (!expr) {
     pp_write(pp, "<expr>");
@@ -281,7 +305,17 @@ static void pp_expr_prec(PrettyPrinter* pp, const AstExpr* expr, int parent_prec
       pp_write_str(pp, expr->as.floating);
       break;
     case AST_EXPR_STRING:
-      pp_write_str(pp, expr->as.string_lit);
+      if (expr->is_raw) {
+        int hashes = count_required_hashes(expr->as.string_lit);
+        pp_write(pp, "r");
+        for (int i = 0; i < hashes; i++) pp_write(pp, "#");
+        pp_write(pp, "\"");
+        pp_write_str(pp, expr->as.string_lit);
+        pp_write(pp, "\"");
+        for (int i = 0; i < hashes; i++) pp_write(pp, "#");
+      } else {
+        pp_write_str(pp, expr->as.string_lit);
+      }
       break;
     case AST_EXPR_BOOL:
       pp_write(pp, expr->as.boolean ? "true" : "false");
