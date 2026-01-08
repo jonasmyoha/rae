@@ -1,6 +1,7 @@
 import raylib
 
-# Components
+# -- Components (Plain Data Types) --
+
 type Transform {
     x: Float
     y: Float
@@ -11,46 +12,70 @@ type Velocity {
     dy: Float
 }
 
-# Configuration
-func screenWidth(): ret Float { ret 800.0 }
-func screenHeight(): ret Float { ret 450.0 }
-func paddleWidth(): ret Float { ret 20.0 }
-func paddleHeight(): ret Float { ret 100.0 }
-func ballRadius(): ret Float { ret 10.0 }
+# -- Systems (Functions acting on Components) --
+
+func movementSystem(pos: mod Transform, vel: view Velocity) {
+    pos.x = pos.x + vel.dx
+    pos.y = pos.y + vel.dy
+}
+
+func bounceSystem(pos: view Transform, vel: mod Velocity, radius: Float, height: Float) {
+    if pos.y < radius { 
+        vel.dy = 4.0 
+    }
+    if pos.y > (height - radius) { 
+        vel.dy = -4.0 
+    }
+}
+
+func paddleInputSystem(pos: mod Transform, speed: Float, height: Float, pHeight: Float) {
+    # W (87) / Up (265)
+    if isKeyDown(key: 87) is 1 { pos.y = pos.y - speed }
+    if isKeyDown(key: 265) is 1 { pos.y = pos.y - speed }
+    
+    # S (83) / Down (264)
+    if isKeyDown(key: 83) is 1 { pos.y = pos.y + speed }
+    if isKeyDown(key: 264) is 1 { pos.y = pos.y + speed }
+
+    # Bounds check
+    if pos.y < 0.0 { pos.y = 0.0 }
+    if pos.y > (height - pHeight) { pos.y = (height - pHeight) }
+}
+
+func renderSystem(pos: view Transform, color: Int) {
+    # Simple dispatcher for different "entities"
+    # In a full ECS, this would use a 'Sprite' or 'Shape' component
+}
+
+# -- Main Entry --
 
 func main() {
     initWindow(width: 800, height: 450, title: "Rae Advanced Pong (ECS)")
     setTargetFPS(fps: 60)
 
-    # Initializing "Entities" (manual for now without full ECS runtime)
+    # Initializing Entities (as local component instances)
     def p1Pos: Transform = (x: 20.0, y: 175.0)
     def p2Pos: Transform = (x: 760.0, y: 175.0)
     def bPos: Transform = (x: 400.0, y: 225.0)
     def bVel: Velocity = (dx: 4.0, dy: 4.0)
 
     loop windowShouldClose() is 0 {
-        # Input System
-        if isKeyDown(key: 87) is 1 { p1Pos.y = p1Pos.y - 5.0 }
-        if isKeyDown(key: 83) is 1 { p1Pos.y = p1Pos.y + 5.0 }
+        # 1. Input Phase
+        paddleInputSystem(pos: p1Pos, speed: 5.0, height: 450.0, pHeight: 100.0)
 
-        # AI System
-        if bPos.y < (p2Pos.y + (paddleHeight() / 2.0)) { p2Pos.y = p2Pos.y - 4.0 }
-        if bPos.y > (p2Pos.y + (paddleHeight() / 2.0)) { p2Pos.y = p2Pos.y + 4.0 }
+        # 2. Update Phase
+        movementSystem(pos: bPos, vel: bVel)
+        bounceSystem(pos: bPos, vel: bVel, radius: 10.0, height: 450.0)
 
-        # Movement System
-        bPos.x = bPos.x + bVel.dx
-        bPos.y = bPos.y + bVel.dy
-
-        # Collision System (Bounds)
-        if bPos.y < ballRadius() { bVel.dy = 4.0 }
-        if bPos.y > (screenHeight() - ballRadius()) { bVel.dy = -4.0 }
-
-        # Rendering System
+        # 3. Render Phase
         beginDrawing()
         clearBackground(r: 20, g: 20, b: 20, a: 255)
         
+        # Draw paddles
         drawRectangle(x: 20, y: (p1Pos.y), width: 20, height: 100, r: 255, g: 255, b: 255, a: 255)
         drawRectangle(x: 760, y: (p2Pos.y), width: 20, height: 100, r: 255, g: 255, b: 255, a: 255)
+        
+        # Draw ball
         drawCircle(x: (bPos.x), y: (bPos.y), radius: 10, r: 255, g: 255, b: 255, a: 255)
         
         endDrawing()
