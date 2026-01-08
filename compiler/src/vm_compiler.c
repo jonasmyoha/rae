@@ -67,6 +67,21 @@ static bool emit_return(BytecodeCompiler* compiler, bool has_value, int line);
 static int compiler_add_local(BytecodeCompiler* compiler, Str name, Str type_name);
 static int compiler_find_local(BytecodeCompiler* compiler, Str name);
 static void compiler_reset_locals(BytecodeCompiler* compiler);
+
+static Str get_base_type_name(const AstTypeRef* type) {
+  if (!type || !type->parts) return (Str){0};
+  AstIdentifierPart* part = type->parts;
+  while (part) {
+    if (str_eq_cstr(part->text, "mod") || str_eq_cstr(part->text, "view") ||
+        str_eq_cstr(part->text, "own") || str_eq_cstr(part->text, "opt")) {
+      part = part->next;
+      continue;
+    }
+    return part->text;
+  }
+  return (Str){0};
+}
+
 static bool compiler_ensure_local_capacity(BytecodeCompiler* compiler, uint16_t required,
                                            int line);
 static uint16_t emit_jump(BytecodeCompiler* compiler, OpCode op, int line);
@@ -823,10 +838,7 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
         return false;
       }
       
-      Str type_name = (Str){0};
-      if (stmt->as.def_stmt.type && stmt->as.def_stmt.type->parts) {
-          type_name = stmt->as.def_stmt.type->parts->text;
-      }
+      Str type_name = get_base_type_name(stmt->as.def_stmt.type);
 
       int slot = compiler_add_local(compiler, stmt->as.def_stmt.name, type_name);
       if (slot < 0) {
@@ -1094,7 +1106,9 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
         }
         TypeEntry* type = type_table_find(&compiler->types, type_name);
         if (!type) {
-          diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, "unknown type");
+          char buffer[128];
+          snprintf(buffer, sizeof(buffer), "unknown type '%.*s' for member assignment", (int)type_name.len, type_name.data);
+          diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, buffer);
           compiler->had_error = true;
           return false;
         }
@@ -1179,10 +1193,7 @@ static bool compile_function(BytecodeCompiler* compiler, const AstDecl* decl) {
   compiler_reset_locals(compiler);
   const AstParam* param = func->params;
   while (param) {
-    Str type_name = (Str){0};
-    if (param->type && param->type->parts) {
-        type_name = param->type->parts->text;
-    }
+    Str type_name = get_base_type_name(param->type);
     if (compiler_add_local(compiler, param->name, type_name) < 0) {
       compiler->current_function = NULL;
       return false;

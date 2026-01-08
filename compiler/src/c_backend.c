@@ -45,6 +45,14 @@ static bool type_is_string(const AstTypeRef* type) {
   return str_eq_cstr(type->parts->text, "String");
 }
 
+static const char* map_rae_type_to_c(Str type_name) {
+  if (str_eq_cstr(type_name, "Int")) return "int64_t";
+  if (str_eq_cstr(type_name, "Float")) return "double";
+  if (str_eq_cstr(type_name, "Bool")) return "int8_t";
+  if (str_eq_cstr(type_name, "String")) return "const char*";
+  return str_to_cstr(type_name); // HACK: leaking
+}
+
 static bool emit_param_list(const AstParam* params, FILE* out) {
   size_t index = 0;
   const AstParam* param = params;
@@ -55,7 +63,19 @@ static bool emit_param_list(const AstParam* params, FILE* out) {
     if (index > 0) {
       if (fprintf(out, ", ") < 0) return false;
     }
-    const char* c_type = type_is_string(param->type) ? "const char*" : "int64_t";
+    const char* c_type = "int64_t";
+    if (param->type && param->type->parts) {
+        Str base_type = param->type->parts->text;
+        if (str_eq_cstr(base_type, "mod") || 
+            str_eq_cstr(base_type, "view") ||
+            str_eq_cstr(base_type, "own")) {
+            if (param->type->parts->next) {
+                c_type = map_rae_type_to_c(param->type->parts->next->text);
+            }
+        } else {
+            c_type = map_rae_type_to_c(base_type);
+        }
+    }
     if (fprintf(out, "%s %.*s", c_type, (int)param->name.len, param->name.data) < 0) {
       return false;
     }
@@ -158,6 +178,18 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     arg_index += 1;
   }
   return fprintf(out, ")") >= 0;
+}
+
+static bool is_pointer_type(CFuncContext* ctx, Str name) {
+  for (const AstParam* param = ctx->params; param; param = param->next) {
+    if (str_eq(param->name, name)) {
+        if (param->type && param->type->parts) {
+            Str mod = param->type->parts->text;
+            if (str_eq_cstr(mod, "mod") || str_eq_cstr(mod, "view") || str_eq_cstr(mod, "own")) return true;
+        }
+    }
+  }
+  return false;
 }
 
 static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
@@ -338,14 +370,30 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     case AST_EXPR_CALL:
       return emit_call_expr(ctx, expr, out);
     case AST_EXPR_NONE:
-      fprintf(stderr, "error: C backend does not support 'none' yet\n");
-      return false;
-    case AST_EXPR_MEMBER:
-      fprintf(stderr, "error: C backend does not support member access yet\n");
-      return false;
-    case AST_EXPR_OBJECT:
-      fprintf(stderr, "error: C backend does not support object literals yet\n");
-      return false;
+      return fprintf(out, "0") >= 0; // none as 0 for now
+    case AST_EXPR_MEMBER: {
+      const char* sep = ".";
+      if (expr->as.member.object->kind == AST_EXPR_IDENT) {
+          if (is_pointer_type(ctx, expr->as.member.object->as.ident)) {
+              sep = "->";
+          }
+      }
+      if (!emit_expr(ctx, expr->as.member.object, out)) return false;
+      return fprintf(out, "%s%.*s", sep, (int)expr->as.member.member.len, expr->as.member.member.data) >= 0;
+    }
+    case AST_EXPR_OBJECT: {
+      if (fprintf(out, "{ ") < 0) return false;
+      const AstObjectField* field = expr->as.object;
+      while (field) {
+        if (fprintf(out, ".%.*s = ", (int)field->name.len, field->name.data) < 0) return false;
+        if (!emit_expr(ctx, field->value, out)) return false;
+        field = field->next;
+        if (field) {
+          if (fprintf(out, ", ") < 0) return false;
+        }
+      }
+      return fprintf(out, " }") >= 0;
+    }
   }
   fprintf(stderr, "error: unsupported expression kind in C backend\n");
   return false;
@@ -411,7 +459,22 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
         fprintf(stderr, "error: C backend local limit exceeded\n");
         return false;
       }
-      if (fprintf(out, "  int64_t %.*s = ", (int)stmt->as.def_stmt.name.len,
+      
+      const char* c_type = "int64_t";
+      if (stmt->as.def_stmt.type && stmt->as.def_stmt.type->parts) {
+          Str type_name = stmt->as.def_stmt.type->parts->text;
+          if (str_eq_cstr(type_name, "mod") || 
+              str_eq_cstr(type_name, "view") ||
+              str_eq_cstr(type_name, "own")) {
+              if (stmt->as.def_stmt.type->parts->next) {
+                  c_type = map_rae_type_to_c(stmt->as.def_stmt.type->parts->next->text);
+              }
+          } else {
+              c_type = map_rae_type_to_c(type_name);
+          }
+      }
+
+      if (fprintf(out, "  %s %.*s = ", c_type, (int)stmt->as.def_stmt.name.len,
                   stmt->as.def_stmt.name.data) < 0) {
         return false;
       }
@@ -501,6 +564,29 @@ static bool emit_function(const AstFuncDecl* func, FILE* out) {
   return ok;
 }
 
+static bool emit_struct_defs(const AstModule* module, FILE* out) {
+  for (const AstDecl* decl = module->decls; decl; decl = decl->next) {
+    if (decl->kind == AST_DECL_TYPE) {
+      char* name = str_to_cstr(decl->as.type_decl.name);
+      if (fprintf(out, "typedef struct {\n") < 0) { free(name); return false; }
+      const AstTypeField* field = decl->as.type_decl.fields;
+      while (field) {
+        const char* c_type = type_is_string(field->type) ? "const char*" : "int64_t";
+        if (str_eq(field->type->parts->text, str_from_cstr("Float"))) {
+            c_type = "double";
+        }
+        if (fprintf(out, "  %s %.*s;\n", c_type, (int)field->name.len, field->name.data) < 0) {
+          free(name); return false;
+        }
+        field = field->next;
+      }
+      if (fprintf(out, "} %s;\n\n", name) < 0) { free(name); return false; }
+      free(name);
+    }
+  }
+  return true;
+}
+
 bool c_backend_emit(const AstModule* module, const char* out_path) {
   if (!module || !out_path) return false;
   FILE* out = fopen(out_path, "w");
@@ -515,6 +601,12 @@ bool c_backend_emit(const AstModule* module, const char* out_path) {
     fclose(out);
     return false;
   }
+
+  if (!emit_struct_defs(module, out)) {
+    fclose(out);
+    return false;
+  }
+
   size_t func_count = 0;
   for (const AstDecl* decl = module->decls; decl; decl = decl->next) {
     if (decl->kind == AST_DECL_FUNC) {
@@ -583,7 +675,7 @@ bool c_backend_emit(const AstModule* module, const char* out_path) {
     ok = emit_function(funcs[i], out);
   }
   if (ok && !has_main) {
-    fprintf(stderr, "error: C backend could not find `func main`\n");
+    fprintf(stderr, "error: C backend could find `func main`\n");
     ok = false;
   }
   free(funcs);

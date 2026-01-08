@@ -1,6 +1,7 @@
 #ifndef VM_H
 #define VM_H
 
+#include <time.h>
 #include "vm_chunk.h"
 #include "vm_registry.h"
 
@@ -37,7 +38,8 @@ typedef enum {
 
 typedef enum {
   VM_RUNTIME_OK = 0,
-  VM_RUNTIME_ERROR
+  VM_RUNTIME_ERROR,
+  VM_RUNTIME_TIMEOUT
 } VMResult;
 
 typedef struct {
@@ -55,6 +57,8 @@ typedef struct VM {
   CallFrame call_stack[256];
   size_t call_stack_top;
   VmRegistry* registry;
+  int timeout_seconds;
+  time_t start_time;
 } VM;
 
 void vm_init(VM* vm);
