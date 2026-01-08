@@ -50,6 +50,7 @@ static const char* const TOKEN_KIND_NAMES[] = {
     [TOK_INTEGER] = "TOK_INTEGER",
     [TOK_FLOAT] = "TOK_FLOAT",
     [TOK_STRING] = "TOK_STRING",
+    [TOK_RAW_STRING] = "TOK_RAW_STRING",
     [TOK_COMMENT] = "TOK_COMMENT",
     [TOK_BLOCK_COMMENT] = "TOK_BLOCK_COMMENT",
     [TOK_KW_TYPE] = "TOK_TYPE",
@@ -307,6 +308,36 @@ static void scan_string(Lexer* lexer,
   emit_token(lexer, buffer, TOK_STRING, start_index, line, column);
 }
 
+static void scan_raw_string(Lexer* lexer, TokenBuffer* buffer, size_t start_index, size_t line, size_t col) {
+  int hash_count = 0;
+  while (lexer_peek(lexer) == '#') {
+    lexer_advance(lexer);
+    hash_count++;
+  }
+  
+  if (lexer_advance(lexer) != '"') {
+    lexer_error(lexer, line, col, "expected '\"' after 'r' and optional '#' in raw string");
+    return;
+  }
+  
+  while (!lexer_is_at_end(lexer)) {
+    if (lexer_advance(lexer) == '"') {
+      int current_hashes = 0;
+      while (lexer_peek(lexer) == '#' && current_hashes < hash_count) {
+        lexer_advance(lexer);
+        current_hashes++;
+      }
+      if (current_hashes == hash_count) {
+        // Terminator found
+        emit_token(lexer, buffer, TOK_RAW_STRING, start_index, line, col);
+        return;
+      }
+    }
+  }
+  
+  lexer_error(lexer, line, col, "unterminated raw string");
+}
+
 TokenList lexer_tokenize(Arena* arena,
                          const char* file_path,
                          const char* source,
@@ -423,6 +454,13 @@ TokenList lexer_tokenize(Arena* arena,
         break;
       case '"':
         scan_string(&lexer, &buffer, start_index, token_line, token_column);
+        break;
+      case 'r':
+        if (lexer_peek(&lexer) == '"' || lexer_peek(&lexer) == '#') {
+          scan_raw_string(&lexer, &buffer, start_index, token_line, token_column);
+        } else {
+          scan_identifier(&lexer, &buffer, start_index, token_line, token_column);
+        }
         break;
       default:
         if (isdigit((unsigned char)c)) {

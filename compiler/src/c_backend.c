@@ -229,6 +229,22 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
   if (!expr) return false;
   switch (expr->kind) {
     case AST_EXPR_STRING:
+      if (expr->is_raw) {
+          fprintf(out, "\"");
+          for (size_t i = 0; i < expr->as.string_lit.len; i++) {
+              char c = expr->as.string_lit.data[i];
+              switch (c) {
+                  case '\"': fprintf(out, "\\\""); break;
+                  case '\\': fprintf(out, "\\\\"); break;
+                  case '\n': fprintf(out, "\\n"); break;
+                  case '\r': fprintf(out, "\\r"); break;
+                  case '\t': fprintf(out, "\\t"); break;
+                  default: fputc(c, out); break;
+              }
+          }
+          fprintf(out, "\"");
+          return true;
+      }
       return emit_string_literal(out, expr->as.string_lit);
     case AST_EXPR_INTEGER:
       return fprintf(out, "%.*s", (int)expr->as.integer.len, expr->as.integer.data) >= 0;
