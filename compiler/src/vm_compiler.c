@@ -410,42 +410,6 @@ static bool emit_return(BytecodeCompiler* compiler, bool has_value, int line) {
 static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr);
 static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt);
 
-static Value make_string_value(Str literal) {
-  size_t out_capacity = literal.len > 2 ? literal.len - 2 : 0;
-  char* buffer = malloc(out_capacity + 1);
-  if (!buffer) {
-    return value_string_copy("", 0);
-  }
-  size_t out_len = 0;
-  for (size_t i = 1; i + 1 < literal.len; ++i) {
-    char c = literal.data[i];
-    if (c == '\\' && i + 1 < literal.len - 1) {
-      i += 1;
-      char esc = literal.data[i];
-      switch (esc) {
-        case 'n':
-          c = '\n';
-          break;
-        case 't':
-          c = '\t';
-          break;
-        case '\\':
-          c = '\\';
-          break;
-        case '"':
-          c = '"';
-          break;
-        default:
-          c = esc;
-          break;
-      }
-    }
-    buffer[out_len++] = c;
-  }
-  buffer[out_len] = '\0';
-  return value_string_take(buffer, out_len);
-}
-
 static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
   if (expr->as.call.callee->kind != AST_EXPR_IDENT) {
     diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
@@ -472,6 +436,19 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
     // Push a dummy value for now to satisfy stack balance
     emit_constant(compiler, value_none(), (int)expr->line);
     return true;
+  }
+
+  bool is_rae_str = str_eq_cstr(name, "rae_str");
+  bool is_rae_concat = str_eq_cstr(name, "rae_str_concat");
+  if (is_rae_str || is_rae_concat) {
+    uint16_t arg_count = 0;
+    const AstCallArg* arg = expr->as.call.args;
+    while (arg) {
+      if (!compile_expr(compiler, arg->value)) return false;
+      arg_count++;
+      arg = arg->next;
+    }
+    return emit_native_call(compiler, name, (uint8_t)arg_count, (int)expr->line, (int)expr->column);
   }
 
   FunctionEntry* entry = function_table_find(&compiler->functions, name);
@@ -536,12 +513,7 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       return false;
     }
     case AST_EXPR_STRING: {
-      Value string_value;
-      if (expr->is_raw) {
-        string_value = value_string_copy(expr->as.string_lit.data, expr->as.string_lit.len);
-      } else {
-        string_value = make_string_value(expr->as.string_lit);
-      }
+      Value string_value = value_string_copy(expr->as.string_lit.data, expr->as.string_lit.len);
       emit_constant(compiler, string_value, (int)expr->line);
       return true;
     }
