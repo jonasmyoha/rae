@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #include "arena.h"
 #include "str.h"
@@ -43,6 +44,7 @@ typedef struct {
 } RaePack;
 
 bool raepack_parse_file(const char* file_path, RaePack* out_pack);
+void raepack_pretty_print(const RaePack* pack, FILE* out);
 void raepack_free(RaePack* pack);
 const RaePackTarget* raepack_find_target(const RaePack* pack, Str id);
 const char* raepack_emit_name(RaePackEmit emit);
