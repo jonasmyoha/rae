@@ -16,6 +16,7 @@ typedef enum {
   TOK_FLOAT,
   TOK_STRING,
   TOK_RAW_STRING,
+  TOK_CHAR,
   TOK_COMMENT,
   TOK_BLOCK_COMMENT,
 

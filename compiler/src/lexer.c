@@ -51,6 +51,7 @@ static const char* const TOKEN_KIND_NAMES[] = {
     [TOK_FLOAT] = "TOK_FLOAT",
     [TOK_STRING] = "TOK_STRING",
     [TOK_RAW_STRING] = "TOK_RAW_STRING",
+    [TOK_CHAR] = "TOK_CHAR",
     [TOK_COMMENT] = "TOK_COMMENT",
     [TOK_BLOCK_COMMENT] = "TOK_BLOCK_COMMENT",
     [TOK_KW_TYPE] = "TOK_TYPE",
@@ -338,6 +339,53 @@ static void scan_raw_string(Lexer* lexer, TokenBuffer* buffer, size_t start_inde
   lexer_error(lexer, line, col, "unterminated raw string");
 }
 
+static void scan_char_literal(Lexer* lexer, TokenBuffer* buffer, size_t start_index, size_t line, size_t col) {
+  if (lexer_peek(lexer) == '\'') {
+    lexer_error(lexer, line, col, "empty char literal");
+    lexer_advance(lexer);
+    return;
+  }
+
+  char c = lexer_advance(lexer);
+  if (c == '\\') {
+    if (lexer_is_at_end(lexer)) {
+      lexer_error(lexer, line, col, "unterminated char literal");
+      return;
+    }
+    char esc = lexer_advance(lexer);
+    if (esc == 'u') {
+      if (lexer_peek(lexer) != '{') {
+        lexer_error(lexer, line, col, "expected '{' after \\u");
+      } else {
+        lexer_advance(lexer); // {
+        while (!lexer_is_at_end(lexer) && lexer_peek(lexer) != '}') {
+          char h = lexer_advance(lexer);
+          if (!isxdigit((unsigned char)h)) {
+             // lexer_error(lexer, ...); // Optional: strict hex check
+          }
+        }
+        if (lexer_peek(lexer) == '}') {
+          lexer_advance(lexer); // }
+        } else {
+          lexer_error(lexer, line, col, "unterminated unicode escape");
+        }
+      }
+    }
+  }
+
+  if (lexer_peek(lexer) != '\'') {
+    lexer_error(lexer, line, col, "char literal must contain exactly one character");
+    while (!lexer_is_at_end(lexer) && lexer_peek(lexer) != '\'') lexer_advance(lexer);
+  }
+  
+  if (!lexer_is_at_end(lexer) && lexer_peek(lexer) == '\'') {
+    lexer_advance(lexer); // '
+    emit_token(lexer, buffer, TOK_CHAR, start_index, line, col);
+  } else {
+    lexer_error(lexer, line, col, "unterminated char literal");
+  }
+}
+
 TokenList lexer_tokenize(Arena* arena,
                          const char* file_path,
                          const char* source,
@@ -454,6 +502,9 @@ TokenList lexer_tokenize(Arena* arena,
         break;
       case '"':
         scan_string(&lexer, &buffer, start_index, token_line, token_column);
+        break;
+      case '\'':
+        scan_char_literal(&lexer, &buffer, start_index, token_line, token_column);
         break;
       case 'r':
         if (lexer_peek(&lexer) == '"' || lexer_peek(&lexer) == '#') {

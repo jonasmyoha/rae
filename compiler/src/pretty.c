@@ -317,6 +317,11 @@ static void pp_expr_prec(PrettyPrinter* pp, const AstExpr* expr, int parent_prec
         pp_write_str(pp, expr->as.string_lit);
       }
       break;
+    case AST_EXPR_CHAR:
+      pp_write_char(pp, '\'');
+      pp_write_str(pp, expr->as.char_lit);
+      pp_write_char(pp, '\'');
+      break;
     case AST_EXPR_BOOL:
       pp_write(pp, expr->as.boolean ? "true" : "false");
       break;

@@ -130,6 +130,11 @@ static void dump_expr(const AstExpr* expr, FILE* out) {
     case AST_EXPR_STRING:
       print_str(out, expr->as.string_lit);
       break;
+    case AST_EXPR_CHAR:
+      fputc('\'', out);
+      print_str(out, expr->as.char_lit);
+      fputc('\'', out);
+      break;
     case AST_EXPR_BOOL:
       fputs(expr->as.boolean ? "true" : "false", out);
       break;

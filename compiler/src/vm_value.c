@@ -22,6 +22,12 @@ Value value_bool(bool v) {
   return value;
 }
 
+Value value_char(int64_t v) {
+  Value value = {.type = VAL_CHAR};
+  value.as.char_value = v;
+  return value;
+}
+
 Value value_string_copy(const char* data, size_t length) {
   Value value = {.type = VAL_STRING};
   value.as.string_value.length = length;
@@ -85,6 +91,19 @@ void value_print(const Value* value) {
     case VAL_BOOL:
       printf("%s", value->as.bool_value ? "true" : "false");
       break;
+    case VAL_CHAR: {
+      int64_t c = value->as.char_value;
+      if (c < 0x80) {
+        printf("%c", (char)c);
+      } else if (c < 0x800) {
+        printf("%c%c", (char)(0xC0 | (c >> 6)), (char)(0x80 | (c & 0x3F)));
+      } else if (c < 0x10000) {
+        printf("%c%c%c", (char)(0xE0 | (c >> 12)), (char)(0x80 | ((c >> 6) & 0x3F)), (char)(0x80 | (c & 0x3F)));
+      } else {
+        printf("%c%c%c%c", (char)(0xF0 | (c >> 18)), (char)(0x80 | ((c >> 12) & 0x3F)), (char)(0x80 | ((c >> 6) & 0x3F)), (char)(0x80 | (c & 0x3F)));
+      }
+      break;
+    }
     case VAL_STRING:
       if (value->as.string_value.chars) {
         fwrite(value->as.string_value.chars, 1, value->as.string_value.length, stdout);

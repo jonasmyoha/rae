@@ -518,21 +518,22 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
 }
 
 static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
-  if (!expr) return false;
+  if (!expr) {
+    return false;
+  }
+  // printf("DEBUG: compile_expr kind=%d line=%zu\n", expr->kind, expr->line);
   switch (expr->kind) {
     case AST_EXPR_IDENT: {
-      int slot = compiler_find_local(compiler, expr->as.ident);
-      if (slot < 0) {
-        char buffer[128];
-        snprintf(buffer, sizeof(buffer), "unknown identifier '%.*s' in VM mode",
-                 (int)expr->as.ident.len, expr->as.ident.data);
-        diag_error(compiler->file_path, (int)expr->line, (int)expr->column, buffer);
-        compiler->had_error = true;
-        return false;
+      int local = compiler_find_local(compiler, expr->as.ident);
+      if (local != -1) {
+        emit_op(compiler, OP_GET_LOCAL, (int)expr->line);
+        emit_short(compiler, (uint16_t)local, (int)expr->line);
+        return true;
       }
-      emit_op(compiler, OP_GET_LOCAL, (int)expr->line);
-      emit_short(compiler, (uint16_t)slot, (int)expr->line);
-      return true;
+      diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
+                 "unknown identifier in VM");
+      compiler->had_error = true;
+      return false;
     }
     case AST_EXPR_STRING: {
       Value string_value;
@@ -542,6 +543,10 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
         string_value = make_string_value(expr->as.string_lit);
       }
       emit_constant(compiler, string_value, (int)expr->line);
+      return true;
+    }
+    case AST_EXPR_CHAR: {
+      emit_constant(compiler, value_char(expr->as.char_value), (int)expr->line);
       return true;
     }
     case AST_EXPR_INTEGER: {
