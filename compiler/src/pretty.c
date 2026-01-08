@@ -210,57 +210,83 @@ static void pp_call_args(PrettyPrinter* pp, const AstCallArg* args) {
   if (!args) return;
   const AstCallArg* current = args;
   
-  // Decide if we should wrap based on count or estimated length
   bool wrap = false;
   int count = 0;
   int estimated_len = pp->current_col;
   while (current) { 
-      count++; 
-      estimated_len += (int)current->name.len + 2 + 20; // name + ": " + rough value len
-      current = current->next; 
+    count++; 
+    estimated_len += (int)current->name.len + 2 + 20; 
+    current = current->next; 
   }
   if (count > 3 || estimated_len > 120) wrap = true;
   
   current = args;
   if (wrap) {
+    pp_newline(pp);
+    pp->indent++;
+    while (current) {
+      pp_write_str(pp, current->name);
+      pp_write(pp, ": ");
+      pp_expr_prec(pp, current->value, PREC_LOWEST);
+      pp_write(pp, ",");
       pp_newline(pp);
-      pp->indent++;
-      while (current) {
-          pp_write_str(pp, current->name);
-          pp_write(pp, ": ");
-          pp_expr_prec(pp, current->value, PREC_LOWEST);
-          pp_write(pp, ",");
-          pp_newline(pp);
-          current = current->next;
-      }
-      pp->indent--;
-      pp_write_indent(pp);
-      pp->start_of_line = 0;
+      current = current->next;
+    }
+    pp->indent--;
+    pp_write_indent(pp);
+    pp->start_of_line = 0;
   } else {
-      int first = 1;
-      while (current) {
-        if (!first) { pp_write(pp, ", "); } 
-        pp_write_str(pp, current->name);
-        pp_write(pp, ": ");
-        pp_expr_prec(pp, current->value, PREC_LOWEST);
-        first = 0;
-        current = current->next;
-      }
+    int first = 1;
+    while (current) {
+      if (!first) { pp_write(pp, ", "); } 
+      pp_write_str(pp, current->name);
+      pp_write(pp, ": ");
+      pp_expr_prec(pp, current->value, PREC_LOWEST);
+      first = 0;
+      current = current->next;
+    }
   }
 }
 
 static void pp_object_fields(PrettyPrinter* pp, const AstObjectField* fields) {
+  if (!fields) return;
   const AstObjectField* current = fields;
-  int first = 1;
+  
+  bool wrap = false;
+  int count = 0;
+  int estimated_len = pp->current_col;
   while (current) {
-    if (!first) {
-      pp_write(pp, ", ");
-    }
-    pp_write_str(pp, current->name);
-    pp_write(pp, ": ");
-    pp_expr_prec(pp, current->value, PREC_LOWEST);
-    first = 0;
+    count++;
+    estimated_len += (int)current->name.len + 2 + 20;
     current = current->next;
+  }
+  if (count > 3 || estimated_len > 100) wrap = true;
+
+  current = fields;
+  if (wrap) {
+    pp_newline(pp);
+    pp->indent++;
+    while (current) {
+      pp_write_str(pp, current->name);
+      pp_write(pp, ": ");
+      pp_expr_prec(pp, current->value, PREC_LOWEST);
+      pp_write(pp, ",");
+      pp_newline(pp);
+      current = current->next;
+    }
+    pp->indent--;
+    pp_write_indent(pp);
+    pp->start_of_line = 0;
+  } else {
+    int first = 1;
+    while (current) {
+      if (!first) { pp_write(pp, ", "); }
+      pp_write_str(pp, current->name);
+      pp_write(pp, ": ");
+      pp_expr_prec(pp, current->value, PREC_LOWEST);
+      first = 0;
+      current = current->next;
+    }
   }
 }
 
@@ -471,21 +497,52 @@ static void pp_print_return_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
   pp_check_comments(pp, stmt->line);
   pp_write(pp, "ret");
   AstReturnArg* arg = stmt->as.ret_stmt.values;
-  if (arg) {
-    pp_space(pp);
-    int first = 1;
-    while (arg) {
-      if (!first) { pp_write(pp, ", "); } 
-      if (arg->has_label) {
-        pp_write_str(pp, arg->label);
+  if (!arg) {
+    pp_newline(pp);
+    return;
+  }
+
+  bool wrap = false;
+  int count = 0;
+  int estimated_len = pp->current_col;
+  AstReturnArg* current = arg;
+  while (current) {
+    count++;
+    estimated_len += (current->has_label ? (int)current->label.len + 2 : 0) + 20;
+    current = current->next;
+  }
+  if (count > 3 || estimated_len > 100) wrap = true;
+
+  current = arg;
+  if (wrap) {
+    pp_newline(pp);
+    pp->indent++;
+    while (current) {
+      if (current->has_label) {
+        pp_write_str(pp, current->label);
         pp_write(pp, ": ");
       }
-      pp_expr(pp, arg->value);
-      first = 0;
-      arg = arg->next;
+      pp_expr(pp, current->value);
+      pp_write(pp, ",");
+      pp_newline(pp);
+      current = current->next;
     }
+    pp->indent--;
+  } else {
+    pp_space(pp);
+    int first = 1;
+    while (current) {
+      if (!first) { pp_write(pp, ", "); } 
+      if (current->has_label) {
+        pp_write_str(pp, current->label);
+        pp_write(pp, ": ");
+      }
+      pp_expr(pp, current->value);
+      first = 0;
+      current = current->next;
+    }
+    pp_newline(pp);
   }
-  pp_newline(pp);
 }
 
 static void pp_print_if_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
@@ -626,52 +683,83 @@ static void pp_print_params(PrettyPrinter* pp, const AstParam* param) {
   int count = 0;
   int estimated_len = pp->current_col;
   while (current) {
-      count++;
-      estimated_len += (int)current->name.len + 2 + 15; // name + ": " + type
-      current = current->next;
+    count++;
+    estimated_len += (int)current->name.len + 2 + 15;
+    current = current->next;
   }
-  if (count > 4 || estimated_len > 100) wrap = true; // More aggressive for params
+  if (count > 4 || estimated_len > 100) wrap = true;
 
   current = param;
   if (wrap) {
+    pp_newline(pp);
+    pp->indent++;
+    while (current) {
+      pp_write_str(pp, current->name);
+      pp_write(pp, ": ");
+      pp_write_type(pp, current->type);
+      pp_write(pp, ",");
       pp_newline(pp);
-      pp->indent++;
-      while (current) {
-          pp_write_str(pp, current->name);
-          pp_write(pp, ": ");
-          pp_write_type(pp, current->type);
-          pp_write(pp, ",");
-          pp_newline(pp);
-          current = current->next;
-      }
-      pp->indent--;
-      pp_write_indent(pp);
-      pp->start_of_line = 0;
+      current = current->next;
+    }
+    pp->indent--;
+    pp_write_indent(pp);
+    pp->start_of_line = 0;
   } else {
-      int first = 1;
-      while (current) {
-        if (!first) { pp_write(pp, ", "); } 
-        pp_write_str(pp, current->name);
-        pp_write(pp, ": ");
-        pp_write_type(pp, current->type);
-        first = 0;
-        current = current->next;
-      }
+    int first = 1;
+    while (current) {
+      if (!first) { pp_write(pp, ", "); } 
+      pp_write_str(pp, current->name);
+      pp_write(pp, ": ");
+      pp_write_type(pp, current->type);
+      first = 0;
+      current = current->next;
+    }
   }
 }
 
 static void pp_print_return_items(PrettyPrinter* pp, const AstReturnItem* item) {
+  if (!item) return;
   const AstReturnItem* current = item;
-  int first = 1;
+  
+  bool wrap = false;
+  int count = 0;
+  int estimated_len = pp->current_col;
   while (current) {
-    if (!first) { pp_write(pp, ", "); } 
-    if (current->has_name) {
-      pp_write_str(pp, current->name);
-      pp_write(pp, ": ");
-    }
-    pp_write_type(pp, current->type);
-    first = 0;
+    count++;
+    estimated_len += (current->has_name ? (int)current->name.len + 2 : 0) + 15;
     current = current->next;
+  }
+  if (count > 3 || estimated_len > 100) wrap = true;
+
+  current = item;
+  if (wrap) {
+    pp_newline(pp);
+    pp->indent++;
+    while (current) {
+      if (current->has_name) {
+        pp_write_str(pp, current->name);
+        pp_write(pp, ": ");
+      }
+      pp_write_type(pp, current->type);
+      pp_write(pp, ",");
+      pp_newline(pp);
+      current = current->next;
+    }
+    pp->indent--;
+    pp_write_indent(pp);
+    pp->start_of_line = 0;
+  } else {
+    int first = 1;
+    while (current) {
+      if (!first) { pp_write(pp, ", "); } 
+      if (current->has_name) {
+        pp_write_str(pp, current->name);
+        pp_write(pp, ": ");
+      }
+      pp_write_type(pp, current->type);
+      first = 0;
+      current = current->next;
+    }
   }
 }
 
