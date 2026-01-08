@@ -28,6 +28,26 @@ func bounceSystem(pos: view Transform, vel: mod Velocity, radius: Float, height:
     }
 }
 
+func paddleCollisionSystem(bPos: view Transform, bVel: mod Velocity, pPos: view Transform, pWidth: Float, pHeight: Float, isLeft: Int) {
+    if isLeft is 1 {
+        if bPos.x < (pPos.x + pWidth) {
+            if bPos.y > pPos.y {
+                if bPos.y < (pPos.y + pHeight) {
+                    bVel.dx = 4.0
+                }
+            }
+        }
+    } else {
+        if bPos.x > (pPos.x) {
+            if bPos.y > pPos.y {
+                if bPos.y < (pPos.y + pHeight) {
+                    bVel.dx = -4.0
+                }
+            }
+        }
+    }
+}
+
 func paddleInputSystem(pos: mod Transform, speed: Float, height: Float, pHeight: Float) {
     # W (87) / Up (265)
     if isKeyDown(key: 87) is 1 { pos.y = pos.y - speed }
@@ -64,8 +84,29 @@ func main() {
         paddleInputSystem(pos: p1Pos, speed: 5.0, height: 450.0, pHeight: 100.0)
 
         # 2. Update Phase
+        # AI System
+        if bPos.y < (p2Pos.y + 50.0) { p2Pos.y = p2Pos.y - 4.0 }
+        if bPos.y > (p2Pos.y + 50.0) { p2Pos.y = p2Pos.y + 4.0 }
+        if p2Pos.y < 0.0 { p2Pos.y = 0.0 }
+        if p2Pos.y > 350.0 { p2Pos.y = 350.0 }
+
         movementSystem(pos: bPos, vel: bVel)
         bounceSystem(pos: bPos, vel: bVel, radius: 10.0, height: 450.0)
+        
+        paddleCollisionSystem(bPos: bPos, bVel: bVel, pPos: p1Pos, pWidth: 20.0, pHeight: 100.0, isLeft: 1)
+        paddleCollisionSystem(bPos: bPos, bVel: bVel, pPos: p2Pos, pWidth: 20.0, pHeight: 100.0, isLeft: 0)
+
+        # Reset if out of bounds
+        if bPos.x < 0.0 { 
+            bPos.x = 400.0
+            bPos.y = 225.0
+            bVel.dx = 4.0 
+        }
+        if bPos.x > 800.0 { 
+            bPos.x = 400.0
+            bPos.y = 225.0
+            bVel.dx = -4.0 
+        }
 
         # 3. Render Phase
         beginDrawing()

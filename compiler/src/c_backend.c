@@ -5,9 +5,12 @@
 #include <string.h>
 #include <stdint.h>
 
+#include "lexer.h"
+
 typedef struct {
   const AstParam* params;
   Str locals[256];
+  Str local_types[256];
   size_t local_count;
   bool returns_value;
   size_t temp_counter;
@@ -21,7 +24,7 @@ static bool emit_log_call(CFuncContext* ctx, const AstExpr* expr, FILE* out, boo
 static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out);
 static bool emit_string_literal(FILE* out, Str literal);
 static bool emit_param_list(const AstParam* params, FILE* out);
-static bool type_is_string(const AstTypeRef* type);
+static bool is_pointer_type(CFuncContext* ctx, Str name);
 static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static bool emit_match(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
@@ -35,22 +38,13 @@ static bool emit_string_literal(FILE* out, Str literal) {
   return fprintf(out, "%.*s", (int)literal.len, literal.data) >= 0;
 }
 
-static bool type_is_string(const AstTypeRef* type) {
-  if (!type || !type->parts) {
-    return false;
-  }
-  if (type->parts->next) {
-    return false;
-  }
-  return str_eq_cstr(type->parts->text, "String");
-}
-
 static const char* map_rae_type_to_c(Str type_name) {
   if (str_eq_cstr(type_name, "Int")) return "int64_t";
   if (str_eq_cstr(type_name, "Float")) return "double";
   if (str_eq_cstr(type_name, "Bool")) return "int8_t";
   if (str_eq_cstr(type_name, "String")) return "const char*";
-  return str_to_cstr(type_name); // HACK: leaking
+  // For user types, return name. Caller might need to str_to_cstr.
+  return NULL; 
 }
 
 static bool emit_param_list(const AstParam* params, FILE* out) {
@@ -63,22 +57,34 @@ static bool emit_param_list(const AstParam* params, FILE* out) {
     if (index > 0) {
       if (fprintf(out, ", ") < 0) return false;
     }
-    const char* c_type = "int64_t";
+    
+    const char* c_type_base = "int64_t";
+    bool is_ptr = false;
+    char* free_me = NULL;
+
     if (param->type && param->type->parts) {
-        Str base_type = param->type->parts->text;
-        if (str_eq_cstr(base_type, "mod") || 
-            str_eq_cstr(base_type, "view") ||
-            str_eq_cstr(base_type, "own")) {
+        Str first = param->type->parts->text;
+        TokenKind mod = lookup_keyword(first);
+        if (mod == TOK_KW_MOD || mod == TOK_KW_VIEW || mod == TOK_KW_OWN) {
+            is_ptr = true;
             if (param->type->parts->next) {
-                c_type = map_rae_type_to_c(param->type->parts->next->text);
+                Str next = param->type->parts->next->text;
+                const char* mapped = map_rae_type_to_c(next);
+                if (mapped) c_type_base = mapped;
+                else c_type_base = free_me = str_to_cstr(next);
             }
         } else {
-            c_type = map_rae_type_to_c(base_type);
+            const char* mapped = map_rae_type_to_c(first);
+            if (mapped) c_type_base = mapped;
+            else c_type_base = free_me = str_to_cstr(first);
         }
     }
-    if (fprintf(out, "%s %.*s", c_type, (int)param->name.len, param->name.data) < 0) {
+
+    if (fprintf(out, "%s%s %.*s", c_type_base, is_ptr ? "*" : "", (int)param->name.len, param->name.data) < 0) {
+      if (free_me) free(free_me);
       return false;
     }
+    if (free_me) free(free_me);
     param = param->next;
     index += 1;
   }
@@ -102,14 +108,9 @@ static const char* c_return_type(const AstFuncDecl* func) {
       fprintf(stderr, "error: C backend only supports single return values per function\n");
       return NULL;
     }
-    if (type_is_string(func->returns->type)) {
-      if (!func->is_extern) {
-        fprintf(stderr, "error: only extern functions may return String currently\n");
-        return NULL;
-      }
-      return "const char*";
-    }
-    return "int64_t";
+    const char* mapped = map_rae_type_to_c(func->returns->type->parts->text);
+    if (mapped) return mapped;
+    return str_to_cstr(func->returns->type->parts->text); // leak
   }
   
   if (func_has_return_value(func)) {
@@ -151,6 +152,13 @@ static bool emit_log_call(CFuncContext* ctx, const AstExpr* expr, FILE* out, boo
   return true;
 }
 
+static bool is_primitive_type(Str type_name) {
+  return str_eq_cstr(type_name, "Int") || 
+         str_eq_cstr(type_name, "Float") || 
+         str_eq_cstr(type_name, "Bool") || 
+         str_eq_cstr(type_name, "String");
+}
+
 static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
   if (!expr || expr->kind != AST_EXPR_CALL || !expr->as.call.callee ||
       expr->as.call.callee->kind != AST_EXPR_IDENT) {
@@ -171,6 +179,30 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     if (arg_index > 0) {
       if (fprintf(out, ", ") < 0) return false;
     }
+    
+    // HACK: If the argument is a local struct variable, we might need to pass it by address
+    // if the target function expects a pointer. Since we don't have type info for the target
+    // here easily, we'll try a heuristic: if it's a local struct, pass by address.
+    bool needs_addr = false;
+    if (arg->value->kind == AST_EXPR_IDENT) {
+        for (size_t i = 0; i < ctx->local_count; i++) {
+            if (str_eq(ctx->locals[i], arg->value->as.ident)) {
+                // It's a local. Is it a struct?
+                if (!is_primitive_type(ctx->local_types[i])) {
+                    needs_addr = true;
+                }
+                break;
+            }
+        }
+        if (needs_addr && is_pointer_type(ctx, arg->value->as.ident)) {
+            needs_addr = false;
+        }
+    }
+
+    if (needs_addr) {
+        if (fprintf(out, "&") < 0) return false;
+    }
+
     if (!emit_expr(ctx, arg->value, out)) {
       return false;
     }
@@ -184,8 +216,9 @@ static bool is_pointer_type(CFuncContext* ctx, Str name) {
   for (const AstParam* param = ctx->params; param; param = param->next) {
     if (str_eq(param->name, name)) {
         if (param->type && param->type->parts) {
-            Str mod = param->type->parts->text;
-            if (str_eq_cstr(mod, "mod") || str_eq_cstr(mod, "view") || str_eq_cstr(mod, "own")) return true;
+            Str first = param->type->parts->text;
+            TokenKind mod = lookup_keyword(first);
+            if (mod == TOK_KW_MOD || mod == TOK_KW_VIEW || mod == TOK_KW_OWN) return true;
         }
     }
   }
@@ -263,29 +296,29 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
           fprintf(stderr, "error: C backend does not support this binary operator yet\n");
           return false;
       }
-      if (fprintf(out, "(") < 0) return false;
+      if (fprintf(out, "") < 0) return false;
       if (!emit_expr(ctx, expr->as.binary.lhs, out)) return false;
       if (fprintf(out, " %s ", op) < 0) return false;
       if (!emit_expr(ctx, expr->as.binary.rhs, out)) return false;
-      return fprintf(out, ")") >= 0;
+      return true;
     }
     case AST_EXPR_UNARY:
       if (expr->as.unary.op == AST_UNARY_NEG) {
-        if (fprintf(out, "(-") < 0) return false;
+        if (fprintf(out, "-") < 0) return false;
         if (!emit_expr(ctx, expr->as.unary.operand, out)) return false;
-        return fprintf(out, ")") >= 0;
+        return true;
       } else if (expr->as.unary.op == AST_UNARY_NOT) {
-        if (fprintf(out, "(!") < 0) return false;
+        if (fprintf(out, "!") < 0) return false;
         if (!emit_expr(ctx, expr->as.unary.operand, out)) return false;
-        return fprintf(out, ")") >= 0;
+        return true;
       } else if (expr->as.unary.op == AST_UNARY_PRE_INC) {
-        if (fprintf(out, "(++") < 0) return false;
+        if (fprintf(out, "++") < 0) return false;
         if (!emit_expr(ctx, expr->as.unary.operand, out)) return false;
-        return fprintf(out, ")") >= 0;
+        return true;
       } else if (expr->as.unary.op == AST_UNARY_PRE_DEC) {
-        if (fprintf(out, "(--") < 0) return false;
+        if (fprintf(out, "--") < 0) return false;
         if (!emit_expr(ctx, expr->as.unary.operand, out)) return false;
-        return fprintf(out, ")") >= 0;
+        return true;
       }
       fprintf(stderr, "error: C backend unsupported unary operator\n");
       return false;
@@ -461,30 +494,53 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
       }
       
       const char* c_type = "int64_t";
+      char* free_me = NULL;
       if (stmt->as.def_stmt.type && stmt->as.def_stmt.type->parts) {
           Str type_name = stmt->as.def_stmt.type->parts->text;
-          if (str_eq_cstr(type_name, "mod") || 
-              str_eq_cstr(type_name, "view") ||
-              str_eq_cstr(type_name, "own")) {
+          TokenKind mod = lookup_keyword(type_name);
+          if (mod == TOK_KW_MOD || mod == TOK_KW_VIEW || mod == TOK_KW_OWN) {
               if (stmt->as.def_stmt.type->parts->next) {
-                  c_type = map_rae_type_to_c(stmt->as.def_stmt.type->parts->next->text);
+                  Str next = stmt->as.def_stmt.type->parts->next->text;
+                  const char* mapped = map_rae_type_to_c(next);
+                  if (mapped) c_type = mapped;
+                  else c_type = free_me = str_to_cstr(next);
               }
           } else {
-              c_type = map_rae_type_to_c(type_name);
+              const char* mapped = map_rae_type_to_c(type_name);
+              if (mapped) c_type = mapped;
+              else c_type = free_me = str_to_cstr(type_name);
           }
       }
 
       if (fprintf(out, "  %s %.*s = ", c_type, (int)stmt->as.def_stmt.name.len,
                   stmt->as.def_stmt.name.data) < 0) {
+        if (free_me) free(free_me);
         return false;
       }
       if (!emit_expr(ctx, stmt->as.def_stmt.value, out)) {
+        if (free_me) free(free_me);
         return false;
       }
       if (fprintf(out, ";\n") < 0) {
+        if (free_me) free(free_me);
         return false;
       }
-      ctx->locals[ctx->local_count++] = stmt->as.def_stmt.name;
+      if (free_me) free(free_me);
+      
+      Str base_type_name = str_from_cstr("Int");
+      if (stmt->as.def_stmt.type && stmt->as.def_stmt.type->parts) {
+          AstIdentifierPart* p = stmt->as.def_stmt.type->parts;
+          TokenKind mod = lookup_keyword(p->text);
+          if ((mod == TOK_KW_MOD || mod == TOK_KW_VIEW || mod == TOK_KW_OWN) && p->next) {
+              base_type_name = p->next->text;
+          } else {
+              base_type_name = p->text;
+          }
+      }
+
+      ctx->locals[ctx->local_count] = stmt->as.def_stmt.name;
+      ctx->local_types[ctx->local_count] = base_type_name;
+      ctx->local_count++;
       return true;
     }
     case AST_STMT_EXPR:
@@ -571,9 +627,11 @@ static bool emit_struct_defs(const AstModule* module, FILE* out) {
       if (fprintf(out, "typedef struct {\n") < 0) { free(name); return false; }
       const AstTypeField* field = decl->as.type_decl.fields;
       while (field) {
-        const char* c_type = type_is_string(field->type) ? "const char*" : "int64_t";
-        if (str_eq(field->type->parts->text, str_from_cstr("Float"))) {
-            c_type = "double";
+        const char* c_type = "int64_t";
+        if (field->type && field->type->parts) {
+            const char* mapped = map_rae_type_to_c(field->type->parts->text);
+            if (mapped) c_type = mapped;
+            else c_type = str_to_cstr(field->type->parts->text); // leak
         }
         if (fprintf(out, "  %s %.*s;\n", c_type, (int)field->name.len, field->name.data) < 0) {
           free(name); return false;
