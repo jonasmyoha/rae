@@ -167,6 +167,8 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
       return emit_string_literal(out, expr->as.string_lit);
     case AST_EXPR_INTEGER:
       return fprintf(out, "%.*s", (int)expr->as.integer.len, expr->as.integer.data) >= 0;
+    case AST_EXPR_FLOAT:
+      return fprintf(out, "%.*s", (int)expr->as.floating.len, expr->as.floating.data) >= 0;
     case AST_EXPR_BOOL:
       return fprintf(out, "%d", expr->as.boolean ? 1 : 0) >= 0;
     case AST_EXPR_IDENT: {

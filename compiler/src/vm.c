@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 #include "diag.h"
 #include "vm_registry.h"
@@ -31,6 +32,8 @@ static bool value_is_truthy(const Value* value) {
       return value->as.bool_value;
     case VAL_INT:
       return value->as.int_value != 0;
+    case VAL_FLOAT:
+      return value->as.float_value != 0.0;
     case VAL_STRING:
       return value->as.string_value.length > 0;
     case VAL_NONE:
@@ -48,6 +51,8 @@ static bool values_equal(const Value* a, const Value* b) {
       return a->as.bool_value == b->as.bool_value;
     case VAL_INT:
       return a->as.int_value == b->as.int_value;
+    case VAL_FLOAT:
+      return a->as.float_value == b->as.float_value;
     case VAL_STRING:
       if (!a->as.string_value.chars || !b->as.string_value.chars) return false;
       if (a->as.string_value.length != b->as.string_value.length) return false;
@@ -248,48 +253,53 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
       case OP_MOD: {
         Value rhs = vm_pop(vm);
         Value lhs = vm_pop(vm);
-        if (lhs.type != VAL_INT || rhs.type != VAL_INT) {
-          diag_error(NULL, 0, 0, "arithmetic operands must be integers");
+        
+        if ((lhs.type == VAL_INT || lhs.type == VAL_FLOAT) && (rhs.type == VAL_INT || rhs.type == VAL_FLOAT)) {
+            if (lhs.type == VAL_FLOAT || rhs.type == VAL_FLOAT) {
+                double l = (lhs.type == VAL_FLOAT) ? lhs.as.float_value : (double)lhs.as.int_value;
+                double r = (rhs.type == VAL_FLOAT) ? rhs.as.float_value : (double)rhs.as.int_value;
+                double res = 0;
+                switch (instruction) {
+                    case OP_ADD: res = l + r; break;
+                    case OP_SUB: res = l - r; break;
+                    case OP_MUL: res = l * r; break;
+                    case OP_DIV: res = l / r; break;
+                    case OP_MOD: res = fmod(l, r); break;
+                }
+                vm_push(vm, value_float(res));
+            } else {
+                int64_t l = lhs.as.int_value;
+                int64_t r = rhs.as.int_value;
+                int64_t res = 0;
+                switch (instruction) {
+                    case OP_ADD: res = l + r; break;
+                    case OP_SUB: res = l - r; break;
+                    case OP_MUL: res = l * r; break;
+                    case OP_DIV: 
+                        if (r == 0) { diag_error(NULL, 0, 0, "division by zero"); return VM_RUNTIME_ERROR; }
+                        res = l / r; break;
+                    case OP_MOD:
+                        if (r == 0) { diag_error(NULL, 0, 0, "modulo by zero"); return VM_RUNTIME_ERROR; }
+                        res = l % r; break;
+                }
+                vm_push(vm, value_int(res));
+            }
+        } else {
+          diag_error(NULL, 0, 0, "arithmetic operands must be numbers");
           return VM_RUNTIME_ERROR;
         }
-        int64_t result = 0;
-        switch (instruction) {
-          case OP_ADD:
-            result = lhs.as.int_value + rhs.as.int_value;
-            break;
-          case OP_SUB:
-            result = lhs.as.int_value - rhs.as.int_value;
-            break;
-          case OP_MUL:
-            result = lhs.as.int_value * rhs.as.int_value;
-            break;
-          case OP_DIV:
-            if (rhs.as.int_value == 0) {
-              diag_error(NULL, 0, 0, "division by zero");
-              return VM_RUNTIME_ERROR;
-            }
-            result = lhs.as.int_value / rhs.as.int_value;
-            break;
-          case OP_MOD:
-            if (rhs.as.int_value == 0) {
-              diag_error(NULL, 0, 0, "modulo by zero");
-              return VM_RUNTIME_ERROR;
-            }
-            result = lhs.as.int_value % rhs.as.int_value;
-            break;
-          default:
-            break;
-        }
-        vm_push(vm, value_int(result));
         break;
       }
       case OP_NEG: {
         Value operand = vm_pop(vm);
-        if (operand.type != VAL_INT) {
-          diag_error(NULL, 0, 0, "negation expects integer operand");
+        if (operand.type == VAL_INT) {
+          vm_push(vm, value_int(-operand.as.int_value));
+        } else if (operand.type == VAL_FLOAT) {
+          vm_push(vm, value_float(-operand.as.float_value));
+        } else {
+          diag_error(NULL, 0, 0, "negation expects numeric operand");
           return VM_RUNTIME_ERROR;
         }
-        vm_push(vm, value_int(-operand.as.int_value));
         break;
       }
       case OP_LT:
@@ -298,33 +308,26 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
       case OP_GE: {
         Value rhs = vm_pop(vm);
         Value lhs = vm_pop(vm);
-        if (lhs.type != VAL_INT || rhs.type != VAL_INT) {
-          fprintf(stderr, "error: comparison expects integers, got: ");
+        if ((lhs.type == VAL_INT || lhs.type == VAL_FLOAT) && (rhs.type == VAL_INT || rhs.type == VAL_FLOAT)) {
+          double l = (lhs.type == VAL_FLOAT) ? lhs.as.float_value : (double)lhs.as.int_value;
+          double r = (rhs.type == VAL_FLOAT) ? rhs.as.float_value : (double)rhs.as.int_value;
+          bool result = false;
+          switch (instruction) {
+            case OP_LT: result = l < r; break;
+            case OP_LE: result = l <= r; break;
+            case OP_GT: result = l > r; break;
+            case OP_GE: result = l >= r; break;
+          }
+          vm_push(vm, value_bool(result));
+        } else {
+          fprintf(stderr, "error: comparison expects numbers, got: ");
           value_print(&lhs);
           fprintf(stderr, " and ");
           value_print(&rhs);
           fprintf(stderr, "\n");
-          diag_error(NULL, 0, 0, "comparison operands must be integers");
+          diag_error(NULL, 0, 0, "comparison operands must be numbers");
           return VM_RUNTIME_ERROR;
         }
-        bool result = false;
-        switch (instruction) {
-          case OP_LT:
-            result = lhs.as.int_value < rhs.as.int_value;
-            break;
-          case OP_LE:
-            result = lhs.as.int_value <= rhs.as.int_value;
-            break;
-          case OP_GT:
-            result = lhs.as.int_value > rhs.as.int_value;
-            break;
-          case OP_GE:
-            result = lhs.as.int_value >= rhs.as.int_value;
-            break;
-          default:
-            break;
-        }
-        vm_push(vm, value_bool(result));
         break;
       }
       case OP_EQ:

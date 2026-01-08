@@ -48,6 +48,7 @@ static const char* const TOKEN_KIND_NAMES[] = {
     [TOK_ERROR] = "TOK_ERROR",
     [TOK_IDENT] = "TOK_IDENT",
     [TOK_INTEGER] = "TOK_INTEGER",
+    [TOK_FLOAT] = "TOK_FLOAT",
     [TOK_STRING] = "TOK_STRING",
     [TOK_KW_TYPE] = "TOK_TYPE",
     [TOK_KW_FUNC] = "TOK_FUNC",
@@ -245,7 +246,20 @@ static void scan_number(Lexer* lexer,
   while (isdigit((unsigned char)lexer_peek(lexer))) {
     lexer_advance(lexer);
   }
-  emit_token(lexer, buffer, TOK_INTEGER, start_index, line, column);
+
+  bool is_float = false;
+  if (lexer_peek(lexer) == '.') {
+    // Look ahead to see if there is a digit after the dot
+    if (lexer->index + 1 < lexer->length && isdigit((unsigned char)lexer->input[lexer->index + 1])) {
+      is_float = true;
+      lexer_advance(lexer); // .
+      while (isdigit((unsigned char)lexer_peek(lexer))) {
+        lexer_advance(lexer);
+      }
+    }
+  }
+
+  emit_token(lexer, buffer, is_float ? TOK_FLOAT : TOK_INTEGER, start_index, line, column);
 }
 
 static void scan_identifier(Lexer* lexer,

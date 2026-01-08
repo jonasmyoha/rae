@@ -94,6 +94,7 @@ typedef enum {
 typedef enum {
   AST_EXPR_IDENT,
   AST_EXPR_INTEGER,
+  AST_EXPR_FLOAT,
   AST_EXPR_STRING,
   AST_EXPR_BOOL,
   AST_EXPR_NONE,
@@ -112,6 +113,7 @@ struct AstExpr {
   union {
     Str ident;
     Str integer;
+    Str floating;
     Str string_lit;
     bool boolean;
     struct {

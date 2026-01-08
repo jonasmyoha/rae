@@ -124,6 +124,9 @@ static void dump_expr(const AstExpr* expr, FILE* out) {
     case AST_EXPR_INTEGER:
       print_str(out, expr->as.integer);
       break;
+    case AST_EXPR_FLOAT:
+      print_str(out, expr->as.floating);
+      break;
     case AST_EXPR_STRING:
       print_str(out, expr->as.string_lit);
       break;

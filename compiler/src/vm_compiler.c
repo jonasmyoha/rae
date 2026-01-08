@@ -446,8 +446,17 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       emit_constant(compiler, value_int(parsed), (int)expr->line);
       return true;
     }
+    case AST_EXPR_FLOAT: {
+      double parsed = strtod(expr->as.floating.data, NULL);
+      emit_constant(compiler, value_float(parsed), (int)expr->line);
+      return true;
+    }
     case AST_EXPR_BOOL: {
       emit_constant(compiler, value_bool(expr->as.boolean), (int)expr->line);
+      return true;
+    }
+    case AST_EXPR_NONE: {
+      emit_constant(compiler, value_none(), (int)expr->line);
       return true;
     }
     case AST_EXPR_CALL:
