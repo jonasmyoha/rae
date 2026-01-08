@@ -206,6 +206,60 @@ static bool native_rae_str_concat(struct VM* vm,
   return true;
 }
 
+static uint64_t g_vm_random_state = 0x123456789ABCDEF0ULL;
+
+static bool native_rae_seed(struct VM* vm,
+                            VmNativeResult* out_result,
+                            const Value* args,
+                            size_t arg_count,
+                            void* user_data) {
+  (void)vm;
+  (void)user_data;
+  if (arg_count != 1 || args[0].type != VAL_INT) return false;
+  g_vm_random_state = (uint64_t)args[0].as.int_value;
+  out_result->has_value = false;
+  return true;
+}
+
+static uint32_t vm_next_u32(void) {
+  g_vm_random_state = g_vm_random_state * 6364136223846793005ULL + 1;
+  return (uint32_t)(g_vm_random_state >> 32);
+}
+
+static bool native_rae_random(struct VM* vm,
+                              VmNativeResult* out_result,
+                              const Value* args,
+                              size_t arg_count,
+                              void* user_data) {
+  (void)vm;
+  (void)args;
+  (void)user_data;
+  if (arg_count != 0) return false;
+  out_result->has_value = true;
+  out_result->value = value_float((double)vm_next_u32() / 4294967295.0);
+  return true;
+}
+
+static bool native_rae_random_int(struct VM* vm,
+                                  VmNativeResult* out_result,
+                                  const Value* args,
+                                  size_t arg_count,
+                                  void* user_data) {
+  (void)vm;
+  (void)user_data;
+  if (arg_count != 2 || args[0].type != VAL_INT || args[1].type != VAL_INT) return false;
+  int64_t min = args[0].as.int_value;
+  int64_t max = args[1].as.int_value;
+  out_result->has_value = true;
+  if (min >= max) {
+    out_result->value = value_int(min);
+  } else {
+    uint64_t range = (uint64_t)(max - min + 1);
+    out_result->value = value_int(min + (int64_t)(vm_next_u32() % range));
+  }
+  return true;
+}
+
 static bool register_default_natives(VmRegistry* registry, TickCounter* tick_counter) {
   if (!registry) return false;
   bool ok = true;
@@ -215,6 +269,9 @@ static bool register_default_natives(VmRegistry* registry, TickCounter* tick_cou
   ok = vm_registry_register_native(registry, "sleepMs", native_sleep_ms, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_str", native_rae_str, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_str_concat", native_rae_str_concat, NULL) && ok;
+  ok = vm_registry_register_native(registry, "seed", native_rae_seed, NULL) && ok;
+  ok = vm_registry_register_native(registry, "random", native_rae_random, NULL) && ok;
+  ok = vm_registry_register_native(registry, "randomInt", native_rae_random_int, NULL) && ok;
   ok = vm_registry_register_raylib(registry) && ok;
   ok = vm_registry_register_tinyexpr(registry) && ok;
   return ok;
@@ -1494,11 +1551,35 @@ static bool module_graph_load_module(ModuleGraph* graph,
     return false;
   }
   ModuleStack frame = {.module_path = module_path, .next = stack};
+
+  bool use_stdlib = true;
+  for (AstImport* import = module->imports; import; import = import->next) {
+    if (str_eq_cstr(import->path, "nostdlib")) {
+      use_stdlib = false;
+      break;
+    }
+  }
+
+  if (use_stdlib && (!module_path || strcmp(module_path, "core") != 0)) {
+    char* core_file = try_resolve_lib_module(graph->root_path, "core");
+    if (core_file) {
+      if (!module_graph_load_module(graph, "core", core_file, &frame, hash_out)) {
+        free(core_file);
+        return false;
+      }
+      free(core_file);
+    }
+  }
+
   for (AstImport* import = module->imports; import; import = import->next) {
     char* raw = str_to_cstr(import->path);
     if (!raw) {
       fprintf(stderr, "error: out of memory while reading import path\n");
       return false;
+    }
+    if (strcmp(raw, "nostdlib") == 0) {
+      free(raw);
+      continue;
     }
     char* normalized = normalize_import_path(module_path, raw);
     free(raw);
