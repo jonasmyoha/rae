@@ -2386,10 +2386,10 @@ static int run_command(const char* cmd, int argc, char** argv) {
           free(source);
           return 1;
         }
-        pretty_print_module(module, out);
+        pretty_print_module(module, source, out);
         fclose(out);
       } else {
-        pretty_print_module(module, stdout);
+        pretty_print_module(module, source, stdout);
       }
     }
   }

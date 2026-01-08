@@ -5,8 +5,14 @@
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
+#include <stdlib.h>
 
 #include "lexer.h"
+
+typedef struct {
+  size_t start_line;
+  size_t end_line;
+} VerbatimRange;
 
 typedef struct {
   FILE* out;
@@ -16,6 +22,9 @@ typedef struct {
   const Token* comments;
   size_t comment_count;
   size_t next_comment_idx;
+  const char* source;
+  VerbatimRange verbatim_ranges[64];
+  size_t verbatim_count;
 } PrettyPrinter;
 
 static void pp_write_indent(PrettyPrinter* pp) {
@@ -70,22 +79,70 @@ static void pp_end_block(PrettyPrinter* pp) {
   pp_write_char(pp, '}');
 }
 
+static void pp_write_string_literal(PrettyPrinter* pp, Str s) {
+  pp_write_char(pp, '"');
+  for (size_t i = 0; i < s.len; i++) {
+    char c = s.data[i];
+    switch (c) {
+      case '"': pp_write(pp, "\""); break;
+      case '\\': pp_write(pp, "\\\\"); break;
+      case '\n': pp_write(pp, "\\n"); break;
+      case '\r': pp_write(pp, "\\r"); break;
+      case '\t': pp_write(pp, "\\t"); break;
+      default: pp_write_char(pp, c); break;
+    }
+  }
+  pp_write_char(pp, '"');
+}
+
+static const char* get_line_ptr(const char* source, size_t line) {
+  if (!source) return NULL;
+  const char* p = source;
+  size_t current = 1;
+  while (current < line && *p) {
+    if (*p == '\n') current++;
+    p++;
+  }
+  return p;
+}
+
+static void pp_print_verbatim_range(PrettyPrinter* pp, size_t start_line, size_t end_line) {
+  const char* start = get_line_ptr(pp->source, start_line);
+  const char* end = get_line_ptr(pp->source, end_line + 1);
+  if (start && end && end > start) {
+    fwrite(start, 1, end - start, pp->out);
+    pp->start_of_line = 1;
+    pp->current_col = 0;
+  }
+}
+
+static VerbatimRange* find_range_for_line(PrettyPrinter* pp, size_t line) {
+  for (size_t i = 0; i < pp->verbatim_count; i++) {
+    if (line >= pp->verbatim_ranges[i].start_line && line <= pp->verbatim_ranges[i].end_line) {
+      return &pp->verbatim_ranges[i];
+    }
+  }
+  return NULL;
+}
+
 static void pp_check_comments(PrettyPrinter* pp, size_t line) {
   while (pp->next_comment_idx < pp->comment_count &&
          pp->comments[pp->next_comment_idx].line <= line) {
     const Token* comment = &pp->comments[pp->next_comment_idx++];
+    
+    if (find_range_for_line(pp, comment->line)) {
+        continue; 
+    }
+
     if (!pp->start_of_line) {
         pp_newline(pp);
     }
     
-    // Split long comments (120 chars)
     if (comment->kind == TOK_COMMENT) {
         const char* text = comment->lexeme.data;
         size_t len = comment->lexeme.len;
-        // Skip leading #
         if (len > 0 && text[0] == '#') { text++; len--; } 
         
-        // Simple wrapping
         size_t pos = 0;
         while (pos < len) {
             pp_write(pp, "#");
@@ -93,7 +150,6 @@ static void pp_check_comments(PrettyPrinter* pp, size_t line) {
             size_t to_write = remaining;
             if (pp->indent * 2 + 1 + remaining > 120) {
                 to_write = 120 - (pp->indent * 2 + 1);
-                // Find last space
                 size_t last_space = to_write;
                 while (last_space > 0 && !isspace((unsigned char)text[pos + last_space])) {
                     last_space--;
@@ -106,8 +162,6 @@ static void pp_check_comments(PrettyPrinter* pp, size_t line) {
             while (pos < len && isspace((unsigned char)text[pos])) pos++;
         }
     } else {
-        // Block comment - just write it but maybe handle 120 limit?
-        // User said: "no # need to be added inside block comments, when moving to a new line"
         pp_write_str(pp, comment->lexeme);
         pp_newline(pp);
     }
@@ -312,22 +366,6 @@ static int count_required_hashes(Str s) {
     if (!found) return n;
     n++;
   }
-}
-
-static void pp_write_string_literal(PrettyPrinter* pp, Str s) {
-  pp_write_char(pp, '"');
-  for (size_t i = 0; i < s.len; i++) {
-    char c = s.data[i];
-    switch (c) {
-      case '"': pp_write(pp, "\\\""); break;
-      case '\\': pp_write(pp, "\\\\"); break;
-      case '\n': pp_write(pp, "\\n"); break;
-      case '\r': pp_write(pp, "\\r"); break;
-      case '\t': pp_write(pp, "\\t"); break;
-      default: pp_write_char(pp, c); break;
-    }
-  }
-  pp_write_char(pp, '"');
 }
 
 static void pp_expr_prec(PrettyPrinter* pp, const AstExpr* expr, int parent_prec) {
@@ -801,7 +839,7 @@ static void pp_print_decl(PrettyPrinter* pp, const AstDecl* decl) {
   }
 }
 
-void pretty_print_module(const AstModule* module, FILE* out) {
+void pretty_print_module(const AstModule* module, const char* source, FILE* out) {
   PrettyPrinter pp = {
       .out = out,
       .indent = 0,
@@ -810,28 +848,75 @@ void pretty_print_module(const AstModule* module, FILE* out) {
       .comments = module->comments,
       .comment_count = module->comment_count,
       .next_comment_idx = 0,
+      .source = source,
+      .verbatim_count = 0,
   };
 
   if (!module) return;
 
+  size_t off_line = 0;
+  for (size_t i = 0; i < module->comment_count; i++) {
+    const Token* c = &module->comments[i];
+    if (c->kind == TOK_COMMENT) {
+      if (strstr(c->lexeme.data, "raefmt: off")) {
+        if (off_line == 0) off_line = c->line;
+      } else if (strstr(c->lexeme.data, "raefmt: on")) {
+        if (off_line != 0) {
+          if (pp.verbatim_count < 64) {
+            pp.verbatim_ranges[pp.verbatim_count++] = (VerbatimRange){off_line, c->line};
+          }
+          off_line = 0;
+        }
+      }
+    }
+  }
+  if (off_line != 0) {
+    if (pp.verbatim_count < 64) {
+      pp.verbatim_ranges[pp.verbatim_count++] = (VerbatimRange){off_line, (size_t)-1};
+    }
+  }
+
   const AstImport* imp = module->imports;
+  size_t last_verbatim_end = 0;
+
   while (imp) {
-      pp_check_comments(&pp, imp->line);
-      pp_write(&pp, imp->is_export ? "export " : "import ");
-      pp_write_str(&pp, imp->path);
-      pp_newline(&pp);
-      imp = imp->next;
+    VerbatimRange* r = find_range_for_line(&pp, imp->line);
+    if (r) {
+      if (r->end_line > last_verbatim_end) {
+        pp_print_verbatim_range(&pp, r->start_line, r->end_line);
+        last_verbatim_end = r->end_line;
+      }
+      while (imp && imp->line <= r->end_line) imp = imp->next;
+      continue;
+    }
+
+    pp_check_comments(&pp, imp->line);
+    pp_write(&pp, imp->is_export ? "export " : "import ");
+    pp_write_str(&pp, imp->path);
+    pp_newline(&pp);
+    imp = imp->next;
   }
 
   const AstDecl* decl = module->decls;
   int first = 1;
   while (decl) {
+    VerbatimRange* r = find_range_for_line(&pp, decl->line);
+    if (r) {
+      if (r->end_line > last_verbatim_end) {
+        if (!first) pp_newline(&pp);
+        pp_print_verbatim_range(&pp, r->start_line, r->end_line);
+        last_verbatim_end = r->end_line;
+        first = 0;
+      }
+      while (decl && decl->line <= r->end_line) decl = decl->next;
+      continue;
+    }
+
     if (!first) pp_newline(&pp);
     pp_print_decl(&pp, decl);
     first = 0;
     decl = decl->next;
   }
   
-  // Print remaining comments
   pp_check_comments(&pp, (size_t)-1);
 }
