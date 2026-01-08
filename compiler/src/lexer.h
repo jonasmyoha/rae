@@ -13,6 +13,7 @@ typedef enum {
 
   TOK_IDENT,
   TOK_INTEGER,
+  TOK_FLOAT,
   TOK_STRING,
 
   /* Keywords */

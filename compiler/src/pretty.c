@@ -222,6 +222,9 @@ static void pp_expr_prec(PrettyPrinter* pp, const AstExpr* expr, int parent_prec
     case AST_EXPR_INTEGER:
       pp_write_str(pp, expr->as.integer);
       break;
+    case AST_EXPR_FLOAT:
+      pp_write_str(pp, expr->as.floating);
+      break;
     case AST_EXPR_STRING:
       pp_write_str(pp, expr->as.string_lit);
       break;

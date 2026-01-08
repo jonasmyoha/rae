@@ -10,6 +10,12 @@ Value value_int(int64_t v) {
   return value;
 }
 
+Value value_float(double v) {
+  Value value = {.type = VAL_FLOAT};
+  value.as.float_value = v;
+  return value;
+}
+
 Value value_bool(bool v) {
   Value value = {.type = VAL_BOOL};
   value.as.bool_value = v;
@@ -58,6 +64,9 @@ void value_print(const Value* value) {
   switch (value->type) {
     case VAL_INT:
       printf("%lld", (long long)value->as.int_value);
+      break;
+    case VAL_FLOAT:
+      printf("%g", value->as.float_value);
       break;
     case VAL_BOOL:
       printf("%s", value->as.bool_value ? "true" : "false");

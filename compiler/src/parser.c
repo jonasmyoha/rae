@@ -617,6 +617,12 @@ static AstExpr* parse_primary(Parser* parser) {
       expr->as.integer = parser_copy_str(parser, token->lexeme);
       return expr;
     }
+    case TOK_FLOAT: {
+      parser_advance(parser);
+      AstExpr* expr = new_expr(parser, AST_EXPR_FLOAT, token);
+      expr->as.floating = parser_copy_str(parser, token->lexeme);
+      return expr;
+    }
     case TOK_STRING: {
       parser_advance(parser);
       AstExpr* expr = new_expr(parser, AST_EXPR_STRING, token);
