@@ -25,14 +25,28 @@ typedef struct {
 } FunctionTable;
 
 typedef struct {
+  Str name;
+  Str* field_names;
+  size_t field_count;
+} TypeEntry;
+
+typedef struct {
+  TypeEntry* entries;
+  size_t count;
+  size_t capacity;
+} TypeTable;
+
+typedef struct {
   Chunk* chunk;
   const char* file_path;
   bool had_error;
   FunctionTable functions;
+  TypeTable types;
   const AstFuncDecl* current_function;
   struct {
     Str name;
     uint16_t slot;
+    Str type_name; // Store type name for locals
   } locals[256];
   uint16_t local_count;
   uint16_t allocated_locals;
@@ -41,16 +55,16 @@ typedef struct {
 #define INVALID_OFFSET UINT16_MAX
 
 static void free_function_table(FunctionTable* table);
+static void free_type_table(TypeTable* table);
 static FunctionEntry* function_table_find(FunctionTable* table, Str name);
-static bool function_table_add(FunctionTable* table, Str name, uint16_t param_count, bool is_extern);
-static bool function_entry_add_patch(FunctionEntry* entry, uint16_t patch_offset);
-static bool patch_function_calls(FunctionTable* table, Chunk* chunk, const char* file_path);
-static bool collect_function_entries(const AstModule* module, FunctionTable* table);
-static bool compile_function(BytecodeCompiler* compiler, const AstDecl* decl);
+static TypeEntry* type_table_find(TypeTable* table, Str name);
+static bool type_table_add(TypeTable* table, Str name, Str* fields, size_t field_count);
+static int type_entry_find_field(const TypeEntry* entry, Str name);
+static bool collect_metadata(const AstModule* module, FunctionTable* funcs, TypeTable* types);
 static bool emit_function_call(BytecodeCompiler* compiler, FunctionEntry* entry, int line,
                                int column, uint8_t arg_count);
 static bool emit_return(BytecodeCompiler* compiler, bool has_value, int line);
-static int compiler_add_local(BytecodeCompiler* compiler, Str name);
+static int compiler_add_local(BytecodeCompiler* compiler, Str name, Str type_name);
 static int compiler_find_local(BytecodeCompiler* compiler, Str name);
 static void compiler_reset_locals(BytecodeCompiler* compiler);
 static bool compiler_ensure_local_capacity(BytecodeCompiler* compiler, uint16_t required,
@@ -197,18 +211,77 @@ static uint16_t count_params(const AstParam* param) {
   return count;
 }
 
-static bool collect_function_entries(const AstModule* module, FunctionTable* table) {
+static TypeEntry* type_table_find(TypeTable* table, Str name) {
+  if (!table) return NULL;
+  for (size_t i = 0; i < table->count; ++i) {
+    if (str_matches(table->entries[i].name, name)) {
+      return &table->entries[i];
+    }
+  }
+  return NULL;
+}
+
+static bool type_table_add(TypeTable* table, Str name, Str* fields, size_t field_count) {
+  if (type_table_find(table, name)) return true;
+  if (table->count + 1 > table->capacity) {
+    size_t new_cap = table->capacity < 4 ? 4 : table->capacity * 2;
+    TypeEntry* resized = realloc(table->entries, new_cap * sizeof(TypeEntry));
+    if (!resized) return false;
+    table->entries = resized;
+    table->capacity = new_cap;
+  }
+  TypeEntry* entry = &table->entries[table->count++];
+  entry->name = name;
+  entry->field_names = fields;
+  entry->field_count = field_count;
+  return true;
+}
+
+static int type_entry_find_field(const TypeEntry* entry, Str name) {
+  for (size_t i = 0; i < entry->field_count; i++) {
+    if (str_matches(entry->field_names[i], name)) return (int)i;
+  }
+  return -1;
+}
+
+static bool collect_metadata(const AstModule* module, FunctionTable* funcs, TypeTable* types) {
   const AstDecl* decl = module->decls;
   while (decl) {
     if (decl->kind == AST_DECL_FUNC) {
       uint16_t param_count = count_params(decl->as.func_decl.params);
-      if (!function_table_add(table, decl->as.func_decl.name, param_count, decl->as.func_decl.is_extern)) {
+      if (!function_table_add(funcs, decl->as.func_decl.name, param_count, decl->as.func_decl.is_extern)) {
+        return false;
+      }
+    } else if (decl->kind == AST_DECL_TYPE) {
+      size_t field_count = 0;
+      const AstTypeField* f = decl->as.type_decl.fields;
+      while (f) { field_count++; f = f->next; }
+      
+      Str* fields = malloc(field_count * sizeof(Str));
+      f = decl->as.type_decl.fields;
+      for (size_t i = 0; i < field_count; i++) {
+        fields[i] = f->name;
+        f = f->next;
+      }
+      if (!type_table_add(types, decl->as.type_decl.name, fields, field_count)) {
+        free(fields);
         return false;
       }
     }
     decl = decl->next;
   }
   return true;
+}
+
+static void free_type_table(TypeTable* table) {
+  if (!table) return;
+  for (size_t i = 0; i < table->count; i++) {
+    free(table->entries[i].field_names);
+  }
+  free(table->entries);
+  table->entries = NULL;
+  table->count = 0;
+  table->capacity = 0;
 }
 
 static void free_function_table(FunctionTable* table) {
@@ -230,7 +303,7 @@ static void compiler_reset_locals(BytecodeCompiler* compiler) {
   compiler->allocated_locals = 0;
 }
 
-static int compiler_add_local(BytecodeCompiler* compiler, Str name) {
+static int compiler_add_local(BytecodeCompiler* compiler, Str name, Str type_name) {
   if (compiler->local_count >= sizeof(compiler->locals) / sizeof(compiler->locals[0])) {
     diag_error(compiler->file_path, 0, 0, "VM compiler local limit exceeded");
     compiler->had_error = true;
@@ -238,8 +311,18 @@ static int compiler_add_local(BytecodeCompiler* compiler, Str name) {
   }
   compiler->locals[compiler->local_count].name = name;
   compiler->locals[compiler->local_count].slot = compiler->local_count;
+  compiler->locals[compiler->local_count].type_name = type_name;
   compiler->local_count += 1;
   return (int)(compiler->local_count - 1);
+}
+
+static Str get_local_type_name(BytecodeCompiler* compiler, Str name) {
+  for (int i = (int)compiler->local_count - 1; i >= 0; --i) {
+    if (str_matches(compiler->locals[i].name, name)) {
+      return compiler->locals[i].type_name;
+    }
+  }
+  return (Str){0};
 }
 
 static int compiler_find_local(BytecodeCompiler* compiler, Str name) {
@@ -461,6 +544,45 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
     }
     case AST_EXPR_CALL:
       return compile_call(compiler, expr);
+    case AST_EXPR_MEMBER: {
+      if (expr->as.member.object->kind != AST_EXPR_IDENT) {
+        diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
+                   "VM currently only supports member access on identifiers");
+        compiler->had_error = true;
+        return false;
+      }
+      Str obj_name = expr->as.member.object->as.ident;
+      Str type_name = get_local_type_name(compiler, obj_name);
+      if (type_name.len == 0) {
+        diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
+                   "could not determine type of object for member access");
+        compiler->had_error = true;
+        return false;
+      }
+      TypeEntry* type = type_table_find(&compiler->types, type_name);
+      if (!type) {
+        char buffer[128];
+        snprintf(buffer, sizeof(buffer), "unknown type '%.*s'", (int)type_name.len, type_name.data);
+        diag_error(compiler->file_path, (int)expr->line, (int)expr->column, buffer);
+        compiler->had_error = true;
+        return false;
+      }
+      int field_index = type_entry_find_field(type, expr->as.member.member);
+      if (field_index < 0) {
+        char buffer[128];
+        snprintf(buffer, sizeof(buffer), "type '%.*s' has no field '%.*s'", 
+                 (int)type_name.len, type_name.data,
+                 (int)expr->as.member.member.len, expr->as.member.member.data);
+        diag_error(compiler->file_path, (int)expr->line, (int)expr->column, buffer);
+        compiler->had_error = true;
+        return false;
+      }
+      
+      if (!compile_expr(compiler, expr->as.member.object)) return false;
+      emit_op(compiler, OP_GET_FIELD, (int)expr->line);
+      emit_short(compiler, (uint16_t)field_index, (int)expr->line);
+      return true;
+    }
     case AST_EXPR_BINARY: {
       switch (expr->as.binary.op) {
         case AST_BIN_AND: {
@@ -584,8 +706,20 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       compiler->had_error = true;
       return false;
     }
+    case AST_EXPR_OBJECT: {
+      uint16_t count = 0;
+      const AstObjectField* f = expr->as.object;
+      while (f) {
+        if (!compile_expr(compiler, f->value)) return false;
+        count++;
+        f = f->next;
+      }
+      emit_op(compiler, OP_CONSTRUCT, (int)expr->line);
+      emit_short(compiler, count, (int)expr->line);
+      return true;
+    }
     case AST_EXPR_MATCH: {
-      int subject_slot = compiler_add_local(compiler, str_from_cstr("$match_subject"));
+      int subject_slot = compiler_add_local(compiler, str_from_cstr("$match_subject"), (Str){0});
       if (subject_slot < 0) {
         return false;
       }
@@ -598,7 +732,7 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       emit_op(compiler, OP_SET_LOCAL, (int)expr->line);
       emit_short(compiler, (uint16_t)subject_slot, (int)expr->line);
 
-      int result_slot = compiler_add_local(compiler, str_from_cstr("$match_value"));
+      int result_slot = compiler_add_local(compiler, str_from_cstr("$match_value"), (Str){0});
       if (result_slot < 0) {
         return false;
       }
@@ -688,7 +822,13 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
         compiler->had_error = true;
         return false;
       }
-      int slot = compiler_add_local(compiler, stmt->as.def_stmt.name);
+      
+      Str type_name = (Str){0};
+      if (stmt->as.def_stmt.type && stmt->as.def_stmt.type->parts) {
+          type_name = stmt->as.def_stmt.type->parts->text;
+      }
+
+      int slot = compiler_add_local(compiler, stmt->as.def_stmt.name, type_name);
       if (slot < 0) {
         return false;
       }
@@ -854,7 +994,7 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
         compiler->had_error = true;
         return false;
       }
-      int subject_slot = compiler_add_local(compiler, str_from_cstr("$match"));
+      int subject_slot = compiler_add_local(compiler, str_from_cstr("$match"), (Str){0});
       if (subject_slot < 0) {
         return false;
       }
@@ -918,30 +1058,66 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
     }
     case AST_STMT_ASSIGN: {
       const AstExpr* target = stmt->as.assign_stmt.target;
-      if (target->kind != AST_EXPR_IDENT) {
+      if (target->kind == AST_EXPR_IDENT) {
+        if (!compile_expr(compiler, stmt->as.assign_stmt.value)) {
+          return false;
+        }
+
+        int slot = compiler_find_local(compiler, target->as.ident);
+        if (slot < 0) {
+          char buffer[128];
+          snprintf(buffer, sizeof(buffer), "unknown identifier '%.*s' in assignment",
+                   (int)target->as.ident.len, target->as.ident.data);
+          diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, buffer);
+          compiler->had_error = true;
+          return false;
+        }
+
+        emit_op(compiler, OP_SET_LOCAL, (int)stmt->line);
+        emit_short(compiler, (uint16_t)slot, (int)stmt->line);
+        emit_op(compiler, OP_POP, (int)stmt->line); // assigned value
+        return true;
+      } else if (target->kind == AST_EXPR_MEMBER) {
+        if (target->as.member.object->kind != AST_EXPR_IDENT) {
+          diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column,
+                     "VM currently only supports member assignment on identifiers");
+          compiler->had_error = true;
+          return false;
+        }
+        Str obj_name = target->as.member.object->as.ident;
+        Str type_name = get_local_type_name(compiler, obj_name);
+        if (type_name.len == 0) {
+          diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column,
+                     "could not determine type of object for member assignment");
+          compiler->had_error = true;
+          return false;
+        }
+        TypeEntry* type = type_table_find(&compiler->types, type_name);
+        if (!type) {
+          diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, "unknown type");
+          compiler->had_error = true;
+          return false;
+        }
+        int field_index = type_entry_find_field(type, target->as.member.member);
+        if (field_index < 0) {
+          diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, "unknown field");
+          compiler->had_error = true;
+          return false;
+        }
+
+        if (!compile_expr(compiler, target->as.member.object)) return false;
+        if (!compile_expr(compiler, stmt->as.assign_stmt.value)) return false;
+        
+        emit_op(compiler, OP_SET_FIELD, (int)stmt->line);
+        emit_short(compiler, (uint16_t)field_index, (int)stmt->line);
+        emit_op(compiler, OP_POP, (int)stmt->line); // assigned value
+        return true;
+      } else {
         diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column,
-                   "VM currently only supports assignment to identifiers");
+                   "VM currently only supports assignment to identifiers or members");
         compiler->had_error = true;
         return false;
       }
-
-      if (!compile_expr(compiler, stmt->as.assign_stmt.value)) {
-        return false;
-      }
-
-      int slot = compiler_find_local(compiler, target->as.ident);
-      if (slot < 0) {
-        char buffer[128];
-        snprintf(buffer, sizeof(buffer), "unknown identifier '%.*s' in assignment",
-                 (int)target->as.ident.len, target->as.ident.data);
-        diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, buffer);
-        compiler->had_error = true;
-        return false;
-      }
-
-      emit_op(compiler, OP_SET_LOCAL, (int)stmt->line);
-      emit_short(compiler, (uint16_t)slot, (int)stmt->line);
-      return true;
     }
     default: {
       char buffer[128];
@@ -1003,7 +1179,11 @@ static bool compile_function(BytecodeCompiler* compiler, const AstDecl* decl) {
   compiler_reset_locals(compiler);
   const AstParam* param = func->params;
   while (param) {
-    if (compiler_add_local(compiler, param->name) < 0) {
+    Str type_name = (Str){0};
+    if (param->type && param->type->parts) {
+        type_name = param->type->parts->text;
+    }
+    if (compiler_add_local(compiler, param->name, type_name) < 0) {
       compiler->current_function = NULL;
       return false;
     }
@@ -1035,9 +1215,11 @@ bool vm_compile_module(const AstModule* module, Chunk* chunk, const char* file_p
       .local_count = 0,
       .allocated_locals = 0,
   };
+  memset(&compiler.functions, 0, sizeof(FunctionTable));
+  memset(&compiler.types, 0, sizeof(TypeTable));
 
-  if (!collect_function_entries(module, &compiler.functions)) {
-    diag_error(file_path, 0, 0, "failed to prepare VM function table");
+  if (!collect_metadata(module, &compiler.functions, &compiler.types)) {
+    diag_error(file_path, 0, 0, "failed to prepare VM metadata");
     compiler.had_error = true;
   }
 
@@ -1077,5 +1259,6 @@ bool vm_compile_module(const AstModule* module, Chunk* chunk, const char* file_p
     chunk_free(chunk);
   }
   free_function_table(&compiler.functions);
+  free_type_table(&compiler.types);
   return !compiler.had_error;
 }

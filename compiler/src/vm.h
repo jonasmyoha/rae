@@ -29,7 +29,10 @@ typedef enum {
   OP_EQ = 0x1A,
   OP_NE = 0x1B,
   OP_NOT = 0x1C,
-  OP_NATIVE_CALL = 0x1D
+  OP_NATIVE_CALL = 0x1D,
+  OP_GET_FIELD = 0x1E,
+  OP_SET_FIELD = 0x1F,
+  OP_CONSTRUCT = 0x20
 } OpCode;
 
 typedef enum {

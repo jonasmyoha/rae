@@ -1,0 +1,60 @@
+import raylib
+
+# Components
+type Transform {
+    x: Float
+    y: Float
+}
+
+type Velocity {
+    dx: Float
+    dy: Float
+}
+
+# Configuration
+func screenWidth(): ret Float { ret 800.0 }
+func screenHeight(): ret Float { ret 450.0 }
+func paddleWidth(): ret Float { ret 20.0 }
+func paddleHeight(): ret Float { ret 100.0 }
+func ballRadius(): ret Float { ret 10.0 }
+
+func main() {
+    initWindow(width: 800, height: 450, title: "Rae Advanced Pong (ECS)")
+    setTargetFPS(fps: 60)
+
+    # Initializing "Entities" (manual for now without full ECS runtime)
+    def p1Pos: Transform = (x: 20.0, y: 175.0)
+    def p2Pos: Transform = (x: 760.0, y: 175.0)
+    def bPos: Transform = (x: 400.0, y: 225.0)
+    def bVel: Velocity = (dx: 4.0, dy: 4.0)
+
+    loop windowShouldClose() is 0 {
+        # Input System
+        if isKeyDown(key: 87) is 1 { p1Pos.y = p1Pos.y - 5.0 }
+        if isKeyDown(key: 83) is 1 { p1Pos.y = p1Pos.y + 5.0 }
+
+        # AI System
+        if bPos.y < (p2Pos.y + (paddleHeight() / 2.0)) { p2Pos.y = p2Pos.y - 4.0 }
+        if bPos.y > (p2Pos.y + (paddleHeight() / 2.0)) { p2Pos.y = p2Pos.y + 4.0 }
+
+        # Movement System
+        bPos.x = bPos.x + bVel.dx
+        bPos.y = bPos.y + bVel.dy
+
+        # Collision System (Bounds)
+        if bPos.y < ballRadius() { bVel.dy = 4.0 }
+        if bPos.y > (screenHeight() - ballRadius()) { bVel.dy = -4.0 }
+
+        # Rendering System
+        beginDrawing()
+        clearBackground(r: 20, g: 20, b: 20, a: 255)
+        
+        drawRectangle(x: 20, y: (p1Pos.y), width: 20, height: 100, r: 255, g: 255, b: 255, a: 255)
+        drawRectangle(x: 760, y: (p2Pos.y), width: 20, height: 100, r: 255, g: 255, b: 255, a: 255)
+        drawCircle(x: (bPos.x), y: (bPos.y), radius: 10, r: 255, g: 255, b: 255, a: 255)
+        
+        endDrawing()
+    }
+
+    closeWindow()
+}

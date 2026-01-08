@@ -10,7 +10,8 @@ typedef enum {
   VAL_FLOAT,
   VAL_BOOL,
   VAL_STRING,
-  VAL_NONE
+  VAL_NONE,
+  VAL_OBJECT
 } ValueType;
 
 typedef struct {
@@ -18,13 +19,21 @@ typedef struct {
   size_t length;
 } OwnedString;
 
+struct Value;
+
 typedef struct {
+  struct Value* fields;
+  size_t field_count;
+} Object;
+
+typedef struct Value {
   ValueType type;
   union {
     int64_t int_value;
     double float_value;
     bool bool_value;
     OwnedString string_value;
+    Object object_value;
   } as;
 } Value;
 
@@ -34,6 +43,7 @@ Value value_bool(bool v);
 Value value_string_copy(const char* data, size_t length);
 Value value_string_take(char* data, size_t length);
 Value value_none(void);
+Value value_object(size_t field_count);
 void value_free(Value* value);
 void value_print(const Value* value);
 

@@ -38,6 +38,8 @@ static bool value_is_truthy(const Value* value) {
       return value->as.string_value.length > 0;
     case VAL_NONE:
       return false;
+    case VAL_OBJECT:
+      return true;
   }
   return false;
 }
@@ -60,6 +62,8 @@ static bool values_equal(const Value* a, const Value* b) {
                     a->as.string_value.length) == 0;
     case VAL_NONE:
       return true;
+    case VAL_OBJECT:
+      return a->as.object_value.fields == b->as.object_value.fields;
   }
   return false;
 }
@@ -222,7 +226,7 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
           diag_error(NULL, 0, 0, "VM local slot out of range");
           return VM_RUNTIME_ERROR;
         }
-        Value value = vm_pop(vm);
+        Value value = *vm_peek(vm, 0);
         frame->slots[slot] = value;
         break;
       }
@@ -344,6 +348,45 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
       case OP_NOT: {
         Value operand = vm_pop(vm);
         vm_push(vm, value_bool(!value_is_truthy(&operand)));
+        break;
+      }
+      case OP_GET_FIELD: {
+        uint16_t index = read_short(vm);
+        Value obj = vm_pop(vm);
+        if (obj.type != VAL_OBJECT) {
+          diag_error(NULL, 0, 0, "GET_FIELD on non-object");
+          return VM_RUNTIME_ERROR;
+        }
+        if (index >= obj.as.object_value.field_count) {
+          diag_error(NULL, 0, 0, "GET_FIELD index out of range");
+          return VM_RUNTIME_ERROR;
+        }
+        vm_push(vm, obj.as.object_value.fields[index]);
+        break;
+      }
+      case OP_SET_FIELD: {
+        uint16_t index = read_short(vm);
+        Value value = vm_pop(vm);
+        Value obj = vm_pop(vm);
+        if (obj.type != VAL_OBJECT) {
+          diag_error(NULL, 0, 0, "SET_FIELD on non-object");
+          return VM_RUNTIME_ERROR;
+        }
+        if (index >= obj.as.object_value.field_count) {
+          diag_error(NULL, 0, 0, "SET_FIELD index out of range");
+          return VM_RUNTIME_ERROR;
+        }
+        obj.as.object_value.fields[index] = value;
+        vm_push(vm, value); // Return the assigned value
+        break;
+      }
+      case OP_CONSTRUCT: {
+        uint16_t count = read_short(vm);
+        Value obj = value_object(count);
+        for (int i = count - 1; i >= 0; i--) {
+          obj.as.object_value.fields[i] = vm_pop(vm);
+        }
+        vm_push(vm, obj);
         break;
       }
       case OP_RETURN: {
