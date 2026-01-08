@@ -68,14 +68,14 @@ const EXAMPLE_ORDER: Record<string, number> = {
   hello_compiled: 2,
   math: 3,
   call_stack: 4,
-  hot_reload: 7,
-  auto_import_demo: 8,
-  multifile_report: 9,
-  external_c_library: 10,
-  hybrid_hot_reload: 11,
-  raepack_demo: 14,
+  hot_reload: 5,
+  auto_import_demo: 6,
+  multifile_report: 7,
+  external_c_library: 8,
+  hybrid_hot_reload: 9,
   raylib_basic: 12,
-  pong: 13
+  pong: 13,
+  raepack_demo: 14
 };
 
 export async function listExamples(
