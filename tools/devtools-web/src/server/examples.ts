@@ -75,7 +75,8 @@ const EXAMPLE_ORDER: Record<string, number> = {
   hybrid_hot_reload: 9,
   raylib_basic: 12,
   pong: 13,
-  raepack_demo: 14
+  advanced_pong: 14,
+  raepack_demo: 15
 };
 
 export async function listExamples(
