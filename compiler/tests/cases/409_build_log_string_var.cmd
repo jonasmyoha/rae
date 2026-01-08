@@ -1,0 +1,1 @@
+build --target compiled --emit-c --out {{TMP_OUTPUT}}
