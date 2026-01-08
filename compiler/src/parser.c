@@ -282,13 +282,16 @@ static Str parse_import_path_spec(Parser* parser) {
 }
 
 static AstImport* parse_import_clause(Parser* parser, bool is_export) {
+  const Token* start = parser_previous(parser);
   Str path = parse_import_path_spec(parser);
   if (path.len == 0) {
     return NULL;
   }
   AstImport* clause = parser_alloc(parser, sizeof(AstImport));
   clause->is_export = is_export;
-  clause->module_path = path;
+  clause->path = path;
+  clause->line = start->line;
+  clause->column = start->column;
   return clause;
 }
 
@@ -325,6 +328,9 @@ static AstParam* parse_param_list(Parser* parser) {
       break;
     }
     parser_consume(parser, TOK_COMMA, "expected ',' between parameters");
+    if (parser_match(parser, TOK_RPAREN)) {
+      break;
+    }
   }
   return head;
 }
@@ -353,6 +359,9 @@ static AstReturnItem* parse_return_clause(Parser* parser) {
     }
     item->type = parse_type_ref(parser);
     head = append_return_item(head, item);
+    if (parser_check(parser, TOK_LBRACE) || parser_check(parser, TOK_EOF)) break;
+    // Also check for next top level decl or end of return clause markers if any
+    // Actually, return clause is usually followed by a { or newline.
   } while (parser_match(parser, TOK_COMMA));
   return head;
 }
@@ -486,6 +495,7 @@ static AstExpr* finish_call(Parser* parser, AstExpr* callee, const Token* start_
       arg->value = parse_expression(parser);
     }
     args = append_call_arg(args, arg);
+    if (parser_check(parser, TOK_RPAREN)) break;
   } while (parser_match(parser, TOK_COMMA));
   parser_consume(parser, TOK_RPAREN, "expected ')' after arguments");
   expr->as.call.args = args;
@@ -506,6 +516,7 @@ static AstExpr* parse_object_literal(Parser* parser, const Token* start_token) {
     field->name = parser_copy_str(parser, name->lexeme);
     field->value = parse_expression(parser);
     fields = append_object_field(fields, field);
+    if (parser_check(parser, TOK_RPAREN)) break;
   } while (parser_match(parser, TOK_COMMA));
   parser_consume(parser, TOK_RPAREN, "expected ')' after object literal");
   expr->as.object = fields;
@@ -1159,15 +1170,32 @@ AstModule* parse_module(Arena* arena, const char* file_path, TokenList tokens) {
   if (!tokens.count) {
     return NULL;
   }
+
+  // Filter out comments into their own list
+  Token* filtered_tokens = arena_alloc(arena, tokens.count * sizeof(Token));
+  Token* comments = arena_alloc(arena, tokens.count * sizeof(Token));
+  size_t filtered_count = 0;
+  size_t comment_count = 0;
+
+  for (size_t i = 0; i < tokens.count; i++) {
+    if (tokens.data[i].kind == TOK_COMMENT || tokens.data[i].kind == TOK_BLOCK_COMMENT) {
+      comments[comment_count++] = tokens.data[i];
+    } else {
+      filtered_tokens[filtered_count++] = tokens.data[i];
+    }
+  }
+
   Parser parser = {
       .arena = arena,
       .file_path = file_path,
-      .tokens = tokens.data,
-      .count = tokens.count,
+      .tokens = filtered_tokens,
+      .count = filtered_count,
       .index = 0,
   };
 
   AstModule* module = parser_alloc(&parser, sizeof(AstModule));
+  module->comments = comments;
+  module->comment_count = comment_count;
   AstImport* imports = NULL;
   while (parser_match(&parser, TOK_KW_IMPORT) || parser_match(&parser, TOK_KW_EXPORT)) {
     const Token* prev = parser_previous(&parser);
