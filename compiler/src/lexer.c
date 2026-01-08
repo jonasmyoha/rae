@@ -50,6 +50,8 @@ static const char* const TOKEN_KIND_NAMES[] = {
     [TOK_INTEGER] = "TOK_INTEGER",
     [TOK_FLOAT] = "TOK_FLOAT",
     [TOK_STRING] = "TOK_STRING",
+    [TOK_COMMENT] = "TOK_COMMENT",
+    [TOK_BLOCK_COMMENT] = "TOK_BLOCK_COMMENT",
     [TOK_KW_TYPE] = "TOK_TYPE",
     [TOK_KW_FUNC] = "TOK_FUNC",
     [TOK_KW_DEF] = "TOK_DEF",
@@ -189,49 +191,42 @@ TokenKind lookup_keyword(Str lexeme) {
   return TOK_IDENT;
 }
 
-static void lexer_skip_block_comment(Lexer* lexer, size_t start_line, size_t start_column) {
-  size_t depth = 1;
-
-  while (depth > 0) {
-    if (lexer_is_at_end(lexer)) {
-      lexer_error(lexer, start_line, start_column, "unterminated block comment");
-    }
-
-    char c = lexer_advance(lexer);
-    if (c == '#' && lexer_peek(lexer) == '[') {
-      lexer_advance(lexer);
-      depth += 1;
-    } else if (c == ']' && lexer_peek(lexer) == '#') {
-      lexer_advance(lexer);
-      depth -= 1;
-    }
-  }
-}
-
-static void lexer_skip_whitespace_and_comments(Lexer* lexer) {
+static void lexer_skip_whitespace(Lexer* lexer) {
   for (;;) {
     char c = lexer_peek(lexer);
     if (c == ' ' || c == '\t' || c == '\v' || c == '\f' || c == '\n' || c == '\r') {
       lexer_advance(lexer);
       continue;
     }
-
-    if (c == '#') {
-      size_t comment_line = lexer->line;
-      size_t comment_col = lexer->column;
-      lexer_advance(lexer);
-      if (lexer_peek(lexer) == '[') {
-        lexer_advance(lexer);
-        lexer_skip_block_comment(lexer, comment_line, comment_col);
-        continue;
-      }
-      while (!lexer_is_at_end(lexer) && lexer_peek(lexer) != '\n' && lexer_peek(lexer) != '\r') {
-        lexer_advance(lexer);
-      }
-      continue;
-    }
     break;
   }
+}
+
+static void scan_block_comment(Lexer* lexer, TokenBuffer* buffer, size_t start_index, size_t line, size_t col) {
+  int depth = 1;
+  while (depth > 0 && !lexer_is_at_end(lexer)) {
+    char c = lexer_advance(lexer);
+    if (c == '#' && lexer_peek(lexer) == '[') {
+      lexer_advance(lexer);
+      depth++;
+    } else if (c == ']' && lexer_peek(lexer) == '#') {
+      lexer_advance(lexer);
+      depth--;
+    }
+  }
+  
+  if (depth > 0) {
+    lexer_error(lexer, line, col, "unterminated block comment");
+  }
+  
+  emit_token(lexer, buffer, TOK_BLOCK_COMMENT, start_index, line, col);
+}
+
+static void scan_line_comment(Lexer* lexer, TokenBuffer* buffer, size_t start_index, size_t line, size_t col) {
+  while (!lexer_is_at_end(lexer) && lexer_peek(lexer) != '\n' && lexer_peek(lexer) != '\r') {
+    lexer_advance(lexer);
+  }
+  emit_token(lexer, buffer, TOK_COMMENT, start_index, line, col);
 }
 
 static void scan_number(Lexer* lexer,
@@ -328,7 +323,7 @@ TokenList lexer_tokenize(Arena* arena,
   TokenBuffer buffer = {0};
 
   for (;;) {
-    lexer_skip_whitespace_and_comments(&lexer);
+    lexer_skip_whitespace(&lexer);
     if (lexer_is_at_end(&lexer)) {
       Str lexeme = str_from_buf(source + lexer.index, 0);
       Token eof_token = {.kind = TOK_EOF, .lexeme = lexeme, .line = lexer.line, .column = lexer.column};
@@ -342,6 +337,14 @@ TokenList lexer_tokenize(Arena* arena,
     char c = lexer_advance(&lexer);
 
     switch (c) {
+      case '#':
+        if (lexer_peek(&lexer) == '[') {
+          lexer_advance(&lexer);
+          scan_block_comment(&lexer, &buffer, start_index, token_line, token_column);
+        } else {
+          scan_line_comment(&lexer, &buffer, start_index, token_line, token_column);
+        }
+        break;
       case '(':
         emit_token(&lexer, &buffer, TOK_LPAREN, start_index, token_line, token_column);
         break;

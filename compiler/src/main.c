@@ -1406,7 +1406,7 @@ static bool module_graph_load_module(ModuleGraph* graph,
   }
   ModuleStack frame = {.module_path = module_path, .next = stack};
   for (AstImport* import = module->imports; import; import = import->next) {
-    char* raw = str_to_cstr(import->module_path);
+    char* raw = str_to_cstr(import->path);
     if (!raw) {
       fprintf(stderr, "error: out of memory while reading import path\n");
       return false;
