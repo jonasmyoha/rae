@@ -79,3 +79,24 @@ const char* rae_str_cstr(const char* s) {
   // If s is result of concat (allocated), it's fine.
   return s;
 }
+
+static uint64_t g_rae_random_state = 0x123456789ABCDEF0ULL;
+
+void rae_seed(int64_t seed) {
+  g_rae_random_state = (uint64_t)seed;
+}
+
+static uint32_t rae_next_u32(void) {
+  g_rae_random_state = g_rae_random_state * 6364136223846793005ULL + 1;
+  return (uint32_t)(g_rae_random_state >> 32);
+}
+
+double rae_random(void) {
+  return (double)rae_next_u32() / (double)4294967295.0;
+}
+
+int64_t rae_random_int(int64_t min, int64_t max) {
+  if (min >= max) return min;
+  uint64_t range = (uint64_t)(max - min + 1);
+  return min + (int64_t)(rae_next_u32() % range);
+}
