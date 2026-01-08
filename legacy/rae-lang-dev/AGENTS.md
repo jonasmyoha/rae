@@ -72,6 +72,7 @@ If the task turns out to be larger than expected, split it and explain.
 - Avoid premature optimization
 - Do not refactor unrelated code “while here”
 - Keep commits logically scoped
+- **Rule of thumb for packages**: If an app or example doesn't strictly need a `.raepack` file (or isn't specifically demonstrating `.raepack` features), do NOT include one. Default compiler behavior should be preferred whenever possible.
 
 Compiler code should favor:
 - Explicit data structures
