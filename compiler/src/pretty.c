@@ -288,6 +288,22 @@ static int count_required_hashes(Str s) {
   }
 }
 
+static void pp_write_string_literal(PrettyPrinter* pp, Str s) {
+  pp_write_char(pp, '"');
+  for (size_t i = 0; i < s.len; i++) {
+    char c = s.data[i];
+    switch (c) {
+      case '"': pp_write(pp, "\\\""); break;
+      case '\\': pp_write(pp, "\\\\"); break;
+      case '\n': pp_write(pp, "\\n"); break;
+      case '\r': pp_write(pp, "\\r"); break;
+      case '\t': pp_write(pp, "\\t"); break;
+      default: pp_write_char(pp, c); break;
+    }
+  }
+  pp_write_char(pp, '"');
+}
+
 static void pp_expr_prec(PrettyPrinter* pp, const AstExpr* expr, int parent_prec) {
   if (!expr) {
     pp_write(pp, "<expr>");
@@ -314,7 +330,7 @@ static void pp_expr_prec(PrettyPrinter* pp, const AstExpr* expr, int parent_prec
         pp_write(pp, "\"");
         for (int i = 0; i < hashes; i++) pp_write(pp, "#");
       } else {
-        pp_write_str(pp, expr->as.string_lit);
+        pp_write_string_literal(pp, expr->as.string_lit);
       }
       break;
     case AST_EXPR_CHAR:

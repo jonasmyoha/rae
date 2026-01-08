@@ -128,7 +128,9 @@ static void dump_expr(const AstExpr* expr, FILE* out) {
       print_str(out, expr->as.floating);
       break;
     case AST_EXPR_STRING:
+      fputc('"', out);
       print_str(out, expr->as.string_lit);
+      fputc('"', out);
       break;
     case AST_EXPR_CHAR:
       fputc('\'', out);

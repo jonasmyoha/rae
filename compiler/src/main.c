@@ -122,6 +122,90 @@ static bool native_sleep_ms(struct VM* vm,
   return true;
 }
 
+static bool native_rae_str(struct VM* vm,
+                           VmNativeResult* out_result,
+                           const Value* args,
+                           size_t arg_count,
+                           void* user_data) {
+  (void)vm;
+  (void)user_data;
+  if (arg_count != 1) return false;
+  out_result->has_value = true;
+  switch (args[0].type) {
+    case VAL_INT: {
+      char buf[32];
+      sprintf(buf, "%lld", (long long)args[0].as.int_value);
+      out_result->value = value_string_copy(buf, strlen(buf));
+      break;
+    }
+    case VAL_FLOAT: {
+      char buf[32];
+      sprintf(buf, "%g", args[0].as.float_value);
+      out_result->value = value_string_copy(buf, strlen(buf));
+      break;
+    }
+    case VAL_BOOL: {
+      const char* s = args[0].as.bool_value ? "true" : "false";
+      out_result->value = value_string_copy(s, strlen(s));
+      break;
+    }
+    case VAL_STRING:
+      out_result->value =
+          value_string_copy(args[0].as.string_value.chars, args[0].as.string_value.length);
+      break;
+    case VAL_CHAR: {
+      int64_t c = args[0].as.char_value;
+      char buf[5] = {0};
+      if (c < 0x80) {
+        buf[0] = (char)c;
+      } else if (c < 0x800) {
+        buf[0] = (char)(0xC0 | (c >> 6));
+        buf[1] = (char)(0x80 | (c & 0x3F));
+      } else if (c < 0x10000) {
+        buf[0] = (char)(0xE0 | (c >> 12));
+        buf[1] = (char)(0x80 | ((c >> 6) & 0x3F));
+        buf[2] = (char)(0x80 | (c & 0x3F));
+      } else {
+        buf[0] = (char)(0xF0 | (c >> 18));
+        buf[1] = (char)(0x80 | ((c >> 12) & 0x3F));
+        buf[2] = (char)(0x80 | ((c >> 6) & 0x3F));
+        buf[3] = (char)(0x80 | (c & 0x3F));
+      }
+      out_result->value = value_string_copy(buf, strlen(buf));
+      break;
+    }
+    case VAL_NONE:
+      out_result->value = value_string_copy("none", 4);
+      break;
+    case VAL_OBJECT:
+      out_result->value = value_string_copy("<object>", 8);
+      break;
+  }
+  return true;
+}
+
+static bool native_rae_str_concat(struct VM* vm,
+                                  VmNativeResult* out_result,
+                                  const Value* args,
+                                  size_t arg_count,
+                                  void* user_data) {
+  (void)vm;
+  (void)user_data;
+  if (arg_count != 2) return false;
+  if (args[0].type != VAL_STRING || args[1].type != VAL_STRING) return false;
+  size_t len1 = args[0].as.string_value.length;
+  size_t len2 = args[1].as.string_value.length;
+  char* res = malloc(len1 + len2 + 1);
+  if (res) {
+    memcpy(res, args[0].as.string_value.chars, len1);
+    memcpy(res + len1, args[1].as.string_value.chars, len2);
+    res[len1 + len2] = '\0';
+  }
+  out_result->has_value = true;
+  out_result->value = value_string_take(res, len1 + len2);
+  return true;
+}
+
 static bool register_default_natives(VmRegistry* registry, TickCounter* tick_counter) {
   if (!registry) return false;
   bool ok = true;
@@ -129,6 +213,8 @@ static bool register_default_natives(VmRegistry* registry, TickCounter* tick_cou
     ok = vm_registry_register_native(registry, "nextTick", native_next_tick, tick_counter) && ok;
   }
   ok = vm_registry_register_native(registry, "sleepMs", native_sleep_ms, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_str", native_rae_str, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_str_concat", native_rae_str_concat, NULL) && ok;
   ok = vm_registry_register_raylib(registry) && ok;
   ok = vm_registry_register_tinyexpr(registry) && ok;
   return ok;

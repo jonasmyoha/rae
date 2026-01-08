@@ -34,8 +34,19 @@ static bool match_cases_use_string(const AstMatchCase* cases, bool* out_use_stri
 static bool match_arms_use_string(const AstMatchArm* arms, bool* out_use_string);
 
 static bool emit_string_literal(FILE* out, Str literal) {
-  if (!literal.data) return false;
-  return fprintf(out, "%.*s", (int)literal.len, literal.data) >= 0;
+  if (fprintf(out, "\"") < 0) return false;
+  for (size_t i = 0; i < literal.len; i++) {
+    char c = literal.data[i];
+    switch (c) {
+      case '\"': fprintf(out, "\\\""); break;
+      case '\\': fprintf(out, "\\\\"); break;
+      case '\n': fprintf(out, "\\n"); break;
+      case '\r': fprintf(out, "\\r"); break;
+      case '\t': fprintf(out, "\\t"); break;
+      default: fputc(c, out); break;
+    }
+  }
+  return fprintf(out, "\"") >= 0;
 }
 
 static const char* map_rae_type_to_c(Str type_name) {
@@ -260,22 +271,6 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
   if (!expr) return false;
   switch (expr->kind) {
     case AST_EXPR_STRING:
-      if (expr->is_raw) {
-          fprintf(out, "\"");
-          for (size_t i = 0; i < expr->as.string_lit.len; i++) {
-              char c = expr->as.string_lit.data[i];
-              switch (c) {
-                  case '\"': fprintf(out, "\\\""); break;
-                  case '\\': fprintf(out, "\\\\"); break;
-                  case '\n': fprintf(out, "\\n"); break;
-                  case '\r': fprintf(out, "\\r"); break;
-                  case '\t': fprintf(out, "\\t"); break;
-                  default: fputc(c, out); break;
-              }
-          }
-          fprintf(out, "\"");
-          return true;
-      }
       return emit_string_literal(out, expr->as.string_lit);
     case AST_EXPR_CHAR:
       return fprintf(out, "%lld", (long long)expr->as.char_value) >= 0;
