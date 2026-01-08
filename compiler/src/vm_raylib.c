@@ -5,7 +5,9 @@
 static bool native_initWindow(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
     if (count != 3) return false;
-    InitWindow((int)args[0].as.int_value, (int)args[1].as.int_value, args[2].as.string_value.chars);
+    int w = (args[0].type == VAL_FLOAT) ? (int)args[0].as.float_value : (int)args[0].as.int_value;
+    int h = (args[1].type == VAL_FLOAT) ? (int)args[1].as.float_value : (int)args[1].as.int_value;
+    InitWindow(w, h, args[2].as.string_value.chars);
     out->has_value = false;
     return true;
 }
@@ -45,7 +47,11 @@ static bool native_endDrawing(struct VM* vm, VmNativeResult* out, const Value* a
 static bool native_clearBackground(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
     if (count != 4) return false;
-    ClearBackground((Color){(unsigned char)args[0].as.int_value, (unsigned char)args[1].as.int_value, (unsigned char)args[2].as.int_value, (unsigned char)args[3].as.int_value});
+    unsigned char r = (args[0].type == VAL_FLOAT) ? (unsigned char)args[0].as.float_value : (unsigned char)args[0].as.int_value;
+    unsigned char g = (args[1].type == VAL_FLOAT) ? (unsigned char)args[1].as.float_value : (unsigned char)args[1].as.int_value;
+    unsigned char b = (args[2].type == VAL_FLOAT) ? (unsigned char)args[2].as.float_value : (unsigned char)args[2].as.int_value;
+    unsigned char a = (args[3].type == VAL_FLOAT) ? (unsigned char)args[3].as.float_value : (unsigned char)args[3].as.int_value;
+    ClearBackground((Color){r, g, b, a});
     out->has_value = false;
     return true;
 }
@@ -53,8 +59,15 @@ static bool native_clearBackground(struct VM* vm, VmNativeResult* out, const Val
 static bool native_drawRectangle(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
     if (count != 8) return false;
-    DrawRectangle((int)args[0].as.int_value, (int)args[1].as.int_value, (int)args[2].as.int_value, (int)args[3].as.int_value,
-                  (Color){(unsigned char)args[4].as.int_value, (unsigned char)args[5].as.int_value, (unsigned char)args[6].as.int_value, (unsigned char)args[7].as.int_value});
+    int x = (args[0].type == VAL_FLOAT) ? (int)args[0].as.float_value : (int)args[0].as.int_value;
+    int y = (args[1].type == VAL_FLOAT) ? (int)args[1].as.float_value : (int)args[1].as.int_value;
+    int w = (args[2].type == VAL_FLOAT) ? (int)args[2].as.float_value : (int)args[2].as.int_value;
+    int h = (args[3].type == VAL_FLOAT) ? (int)args[3].as.float_value : (int)args[3].as.int_value;
+    unsigned char r = (args[4].type == VAL_FLOAT) ? (unsigned char)args[4].as.float_value : (unsigned char)args[4].as.int_value;
+    unsigned char g = (args[5].type == VAL_FLOAT) ? (unsigned char)args[5].as.float_value : (unsigned char)args[5].as.int_value;
+    unsigned char b = (args[6].type == VAL_FLOAT) ? (unsigned char)args[6].as.float_value : (unsigned char)args[6].as.int_value;
+    unsigned char a = (args[7].type == VAL_FLOAT) ? (unsigned char)args[7].as.float_value : (unsigned char)args[7].as.int_value;
+    DrawRectangle(x, y, w, h, (Color){r, g, b, a});
     out->has_value = false;
     return true;
 }
@@ -62,8 +75,14 @@ static bool native_drawRectangle(struct VM* vm, VmNativeResult* out, const Value
 static bool native_drawCircle(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
     if (count != 7) return false;
-    DrawCircle((int)args[0].as.int_value, (int)args[1].as.int_value, (float)args[2].as.int_value,
-               (Color){(unsigned char)args[3].as.int_value, (unsigned char)args[4].as.int_value, (unsigned char)args[5].as.int_value, (unsigned char)args[6].as.int_value});
+    int x = (args[0].type == VAL_FLOAT) ? (int)args[0].as.float_value : (int)args[0].as.int_value;
+    int y = (args[1].type == VAL_FLOAT) ? (int)args[1].as.float_value : (int)args[1].as.int_value;
+    float rad = (args[2].type == VAL_FLOAT) ? (float)args[2].as.float_value : (float)args[2].as.int_value;
+    unsigned char r = (args[3].type == VAL_FLOAT) ? (unsigned char)args[3].as.float_value : (unsigned char)args[3].as.int_value;
+    unsigned char g = (args[4].type == VAL_FLOAT) ? (unsigned char)args[4].as.float_value : (unsigned char)args[4].as.int_value;
+    unsigned char b = (args[5].type == VAL_FLOAT) ? (unsigned char)args[5].as.float_value : (unsigned char)args[5].as.int_value;
+    unsigned char a = (args[6].type == VAL_FLOAT) ? (unsigned char)args[6].as.float_value : (unsigned char)args[6].as.int_value;
+    DrawCircle(x, y, rad, (Color){r, g, b, a});
     out->has_value = false;
     return true;
 }
@@ -71,8 +90,15 @@ static bool native_drawCircle(struct VM* vm, VmNativeResult* out, const Value* a
 static bool native_drawText(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
     if (count != 8) return false;
-    DrawText(args[0].as.string_value.chars, (int)args[1].as.int_value, (int)args[2].as.int_value, (int)args[3].as.int_value,
-             (Color){(unsigned char)args[4].as.int_value, (unsigned char)args[5].as.int_value, (unsigned char)args[6].as.int_value, (unsigned char)args[7].as.int_value});
+    const char* text = args[0].as.string_value.chars;
+    int x = (args[1].type == VAL_FLOAT) ? (int)args[1].as.float_value : (int)args[1].as.int_value;
+    int y = (args[2].type == VAL_FLOAT) ? (int)args[2].as.float_value : (int)args[2].as.int_value;
+    int size = (args[3].type == VAL_FLOAT) ? (int)args[3].as.float_value : (int)args[3].as.int_value;
+    unsigned char r = (args[4].type == VAL_FLOAT) ? (unsigned char)args[4].as.float_value : (unsigned char)args[4].as.int_value;
+    unsigned char g = (args[5].type == VAL_FLOAT) ? (unsigned char)args[5].as.float_value : (unsigned char)args[5].as.int_value;
+    unsigned char b = (args[6].type == VAL_FLOAT) ? (unsigned char)args[6].as.float_value : (unsigned char)args[6].as.int_value;
+    unsigned char a = (args[7].type == VAL_FLOAT) ? (unsigned char)args[7].as.float_value : (unsigned char)args[7].as.int_value;
+    DrawText(text, x, y, size, (Color){r, g, b, a});
     out->has_value = false;
     return true;
 }
@@ -80,7 +106,8 @@ static bool native_drawText(struct VM* vm, VmNativeResult* out, const Value* arg
 static bool native_setTargetFPS(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
     if (count != 1) return false;
-    SetTargetFPS((int)args[0].as.int_value);
+    int fps = (args[0].type == VAL_FLOAT) ? (int)args[0].as.float_value : (int)args[0].as.int_value;
+    SetTargetFPS(fps);
     out->has_value = false;
     return true;
 }
@@ -88,8 +115,9 @@ static bool native_setTargetFPS(struct VM* vm, VmNativeResult* out, const Value*
 static bool native_isKeyDown(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
     if (count != 1) return false;
+    int key = (args[0].type == VAL_FLOAT) ? (int)args[0].as.float_value : (int)args[0].as.int_value;
     out->has_value = true;
-    out->value = value_int(IsKeyDown((int)args[0].as.int_value) ? 1 : 0);
+    out->value = value_int(IsKeyDown(key) ? 1 : 0);
     return true;
 }
 

@@ -48,12 +48,26 @@ Value value_none(void) {
   return value;
 }
 
+Value value_object(size_t field_count) {
+  Value value = {.type = VAL_OBJECT};
+  value.as.object_value.field_count = field_count;
+  value.as.object_value.fields = calloc(field_count, sizeof(Value));
+  return value;
+}
+
 void value_free(Value* value) {
   if (!value) return;
   if (value->type == VAL_STRING && value->as.string_value.chars) {
     free(value->as.string_value.chars);
     value->as.string_value.chars = NULL;
     value->as.string_value.length = 0;
+  } else if (value->type == VAL_OBJECT && value->as.object_value.fields) {
+    for (size_t i = 0; i < value->as.object_value.field_count; ++i) {
+      value_free(&value->as.object_value.fields[i]);
+    }
+    free(value->as.object_value.fields);
+    value->as.object_value.fields = NULL;
+    value->as.object_value.field_count = 0;
   }
   value->type = VAL_INT;
   value->as.int_value = 0;
@@ -78,6 +92,14 @@ void value_print(const Value* value) {
       break;
     case VAL_NONE:
       printf("none");
+      break;
+    case VAL_OBJECT:
+      printf("{ ");
+      for (size_t i = 0; i < value->as.object_value.field_count; i++) {
+        if (i > 0) printf(", ");
+        value_print(&value->as.object_value.fields[i]);
+      }
+      printf(" }");
       break;
   }
 }
