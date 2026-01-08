@@ -17,8 +17,12 @@ func clamp(val: Int, min: Int, max: Int): ret Int {
 
 func handleInput(y: Int): ret Int {
     def newY: Int = y
+    # W or Up arrow
     if isKeyDown(key: 87) is 1 { newY = y - paddleSpeed() }
+    if isKeyDown(key: 265) is 1 { newY = y - paddleSpeed() }
+    # S or Down arrow
     if isKeyDown(key: 83) is 1 { newY = y + paddleSpeed() }
+    if isKeyDown(key: 264) is 1 { newY = y + paddleSpeed() }
     
     ret clamp(val: newY, min: 0, max: screenHeight() - paddleHeight())
 }
