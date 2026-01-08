@@ -2262,20 +2262,46 @@ static int run_command(const char* cmd, int argc, char** argv) {
     AstModule* module = parse_module(arena, file_path, tokens);
     ast_dump_module(module, stdout);
   } else if (is_format) {
-    AstModule* module = parse_module(arena, format_opts.input_path, tokens);
-    if (format_opts.write_in_place || format_opts.output_path) {
-      const char* output_path = format_opts.write_in_place ? format_opts.input_path : format_opts.output_path;
-      FILE* out = fopen(output_path, "w");
-      if (!out) {
-        fprintf(stderr, "error: could not open '%s' for writing: %s\n", output_path, strerror(errno));
-        arena_destroy(arena);
+    bool is_raepack = strstr(format_opts.input_path, ".raepack") != NULL;
+    if (is_raepack) {
+      RaePack pack;
+      if (!raepack_parse_file(format_opts.input_path, &pack)) {
         free(source);
+        arena_destroy(arena);
         return 1;
       }
-      pretty_print_module(module, out);
-      fclose(out);
+      const char* output_path = format_opts.write_in_place ? format_opts.input_path : format_opts.output_path;
+      if (output_path) {
+        FILE* out = fopen(output_path, "w");
+        if (!out) {
+          fprintf(stderr, "error: could not open '%s' for writing: %s\n", output_path, strerror(errno));
+          raepack_free(&pack);
+          free(source);
+          arena_destroy(arena);
+          return 1;
+        }
+        raepack_pretty_print(&pack, out);
+        fclose(out);
+      } else {
+        raepack_pretty_print(&pack, stdout);
+      }
+      raepack_free(&pack);
     } else {
-      pretty_print_module(module, stdout);
+      AstModule* module = parse_module(arena, format_opts.input_path, tokens);
+      if (format_opts.write_in_place || format_opts.output_path) {
+        const char* output_path = format_opts.write_in_place ? format_opts.input_path : format_opts.output_path;
+        FILE* out = fopen(output_path, "w");
+        if (!out) {
+          fprintf(stderr, "error: could not open '%s' for writing: %s\n", output_path, strerror(errno));
+          arena_destroy(arena);
+          free(source);
+          return 1;
+        }
+        pretty_print_module(module, out);
+        fclose(out);
+      } else {
+        pretty_print_module(module, stdout);
+      }
     }
   }
 

@@ -762,6 +762,52 @@ bool raepack_parse_file(const char* file_path, RaePack* out_pack) {
   return true;
 }
 
+static void pp_indent(FILE* out, int level) {
+  for (int i = 0; i < level; i++) fputs("  ", out);
+}
+
+static void pp_value(const RaePackValue* value, FILE* out, int indent);
+
+static void pp_block(const RaePackBlock* block, FILE* out, int indent) {
+  fprintf(out, "{\n");
+  for (const RaePackField* field = block->fields; field; field = field->next) {
+    pp_indent(out, indent + 1);
+    fprintf(out, "%.*s", (int)field->key.len, field->key.data);
+    if (field->tag.len > 0) {
+      fprintf(out, " %.*s", (int)field->tag.len, field->tag.data);
+    }
+    fprintf(out, ": ");
+    pp_value(&field->value, out, indent + 1);
+    fprintf(out, "\n");
+  }
+  pp_indent(out, indent);
+  fprintf(out, "}");
+}
+
+static void pp_value(const RaePackValue* value, FILE* out, int indent) {
+  switch (value->kind) {
+    case RAEPACK_VALUE_STRING:
+      fprintf(out, "\"%.*s\"", (int)value->as.string.len, value->as.string.data);
+      break;
+    case RAEPACK_VALUE_INT:
+      fprintf(out, "%lld", (long long)value->as.integer);
+      break;
+    case RAEPACK_VALUE_IDENT:
+      fprintf(out, "%.*s", (int)value->as.ident.len, value->as.ident.data);
+      break;
+    case RAEPACK_VALUE_BLOCK:
+      pp_block(value->as.block, out, indent);
+      break;
+  }
+}
+
+void raepack_pretty_print(const RaePack* pack, FILE* out) {
+  if (!pack) return;
+  fprintf(out, "pack %.*s ", (int)pack->name.len, pack->name.data);
+  pp_block(pack->raw, out, 0);
+  fprintf(out, "\n");
+}
+
 void raepack_free(RaePack* pack) {
   if (!pack) return;
   if (pack->arena) {

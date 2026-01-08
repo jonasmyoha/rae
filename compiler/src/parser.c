@@ -496,7 +496,9 @@ static AstExpr* finish_call(Parser* parser, AstExpr* callee, const Token* start_
     }
     args = append_call_arg(args, arg);
     if (parser_check(parser, TOK_RPAREN)) break;
-  } while (parser_match(parser, TOK_COMMA));
+    parser_consume(parser, TOK_COMMA, "expected ',' between arguments");
+    if (parser_check(parser, TOK_RPAREN)) break;
+  } while (true);
   parser_consume(parser, TOK_RPAREN, "expected ')' after arguments");
   expr->as.call.args = args;
   return expr;
@@ -517,7 +519,9 @@ static AstExpr* parse_object_literal(Parser* parser, const Token* start_token) {
     field->value = parse_expression(parser);
     fields = append_object_field(fields, field);
     if (parser_check(parser, TOK_RPAREN)) break;
-  } while (parser_match(parser, TOK_COMMA));
+    parser_consume(parser, TOK_COMMA, "expected ',' between fields");
+    if (parser_check(parser, TOK_RPAREN)) break;
+  } while (true);
   parser_consume(parser, TOK_RPAREN, "expected ')' after object literal");
   expr->as.object = fields;
   return expr;
@@ -980,6 +984,8 @@ static AstExpr* parse_match_expression(Parser* parser, const Token* match_token)
     arm->value = value;
     arm->next = NULL;
     arms = append_match_arm(arms, arm);
+    if (parser_check(parser, TOK_RBRACE)) break;
+    parser_match(parser, TOK_COMMA);
   }
   parser_consume(parser, TOK_RBRACE, "expected '}' after match expression");
   expr->as.match_expr.arms = arms;
@@ -1062,6 +1068,11 @@ static AstTypeField* parse_type_fields(Parser* parser) {
     field->name = parser_copy_str(parser, field_name->lexeme);
     field->type = parse_type_ref(parser);
     head = append_field(head, field);
+    
+    if (parser_check(parser, TOK_RBRACE)) break;
+    if (parser_match(parser, TOK_COMMA)) {
+        if (parser_check(parser, TOK_RBRACE)) break;
+    }
   }
   return head;
 }

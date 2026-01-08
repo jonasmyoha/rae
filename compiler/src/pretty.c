@@ -207,13 +207,19 @@ static const char* unary_op_text(AstUnaryOp op) {
 static void pp_expr_prec(PrettyPrinter* pp, const AstExpr* expr, int parent_prec);
 
 static void pp_call_args(PrettyPrinter* pp, const AstCallArg* args) {
+  if (!args) return;
   const AstCallArg* current = args;
   
-  // Decide if we should wrap
+  // Decide if we should wrap based on count or estimated length
   bool wrap = false;
   int count = 0;
-  while (current) { count++; current = current->next; }
-  if (count > 3) wrap = true; // Heuristic
+  int estimated_len = pp->current_col;
+  while (current) { 
+      count++; 
+      estimated_len += (int)current->name.len + 2 + 20; // name + ": " + rough value len
+      current = current->next; 
+  }
+  if (count > 3 || estimated_len > 120) wrap = true;
   
   current = args;
   if (wrap) {
@@ -228,7 +234,7 @@ static void pp_call_args(PrettyPrinter* pp, const AstCallArg* args) {
           current = current->next;
       }
       pp->indent--;
-      pp_write_indent(pp); // Manually write indent for closing paren
+      pp_write_indent(pp);
       pp->start_of_line = 0;
   } else {
       int first = 1;
@@ -294,11 +300,11 @@ static void pp_expr_prec(PrettyPrinter* pp, const AstExpr* expr, int parent_prec
       pp_write(pp, " { ");
       AstMatchArm* arm = expr->as.match_expr.arms;
       while (arm) {
-        pp_write(pp, "case ");
         if (arm->pattern) {
+          pp_write(pp, "case ");
           pp_expr_prec(pp, arm->pattern, PREC_LOWEST);
         } else {
-          pp_write(pp, "_");
+          pp_write(pp, "default");
         }
         pp_write(pp, " => ");
         pp_expr_prec(pp, arm->value, PREC_LOWEST);
@@ -558,15 +564,44 @@ static void pp_print_type_decl(PrettyPrinter* pp, const AstDecl* decl) {
 }
 
 static void pp_print_params(PrettyPrinter* pp, const AstParam* param) {
+  if (!param) return;
   const AstParam* current = param;
-  int first = 1;
+  
+  bool wrap = false;
+  int count = 0;
+  int estimated_len = pp->current_col;
   while (current) {
-    if (!first) { pp_write(pp, ", "); } 
-    pp_write_str(pp, current->name);
-    pp_write(pp, ": ");
-    pp_write_type(pp, current->type);
-    first = 0;
-    current = current->next;
+      count++;
+      estimated_len += (int)current->name.len + 2 + 15; // name + ": " + type
+      current = current->next;
+  }
+  if (count > 4 || estimated_len > 100) wrap = true; // More aggressive for params
+
+  current = param;
+  if (wrap) {
+      pp_newline(pp);
+      pp->indent++;
+      while (current) {
+          pp_write_str(pp, current->name);
+          pp_write(pp, ": ");
+          pp_write_type(pp, current->type);
+          pp_write(pp, ",");
+          pp_newline(pp);
+          current = current->next;
+      }
+      pp->indent--;
+      pp_write_indent(pp);
+      pp->start_of_line = 0;
+  } else {
+      int first = 1;
+      while (current) {
+        if (!first) { pp_write(pp, ", "); } 
+        pp_write_str(pp, current->name);
+        pp_write(pp, ": ");
+        pp_write_type(pp, current->type);
+        first = 0;
+        current = current->next;
+      }
   }
 }
 
@@ -587,6 +622,9 @@ static void pp_print_return_items(PrettyPrinter* pp, const AstReturnItem* item) 
 
 static void pp_print_func_decl(PrettyPrinter* pp, const AstDecl* decl) {
   pp_check_comments(pp, decl->line);
+  if (decl->as.func_decl.is_extern) {
+    pp_write(pp, "extern ");
+  }
   pp_write(pp, "func ");
   pp_write_str(pp, decl->as.func_decl.name);
   pp_write(pp, "(");
