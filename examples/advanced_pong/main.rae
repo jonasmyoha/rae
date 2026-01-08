@@ -1,4 +1,5 @@
 import raylib
+
 # -- Components (Plain Data Types) --
 type Transform {
   x: Float
@@ -16,12 +17,7 @@ func movementSystem(pos: mod Transform, vel: view Velocity) {
   pos.y = pos.y + vel.dy
 }
 
-func bounceSystem(
-  pos: view Transform,
-  vel: mod Velocity,
-  radius: Float,
-  height: Float,
-) {
+func bounceSystem(pos: view Transform, vel: mod Velocity, radius: Float, height: Float) {
   if pos.y < radius {
     vel.dy = 4.0
   }
@@ -42,7 +38,10 @@ func paddleCollisionSystem(
     if bPos.x - 10.0 < pPos.x + pWidth {
       if bPos.y > pPos.y {
         if bPos.y < pPos.y + pHeight {
-          bVel.dx = 4.0
+          if bVel.dx < 0.0 {
+            # Bounce and speed up
+            bVel.dx = -bVel.dx + 0.5
+          }
         }
       }
     }
@@ -50,19 +49,17 @@ func paddleCollisionSystem(
     if bPos.x + 10.0 > pPos.x {
       if bPos.y > pPos.y {
         if bPos.y < pPos.y + pHeight {
-          bVel.dx = -4.0
+          if bVel.dx > 0.0 {
+            # Bounce and speed up
+            bVel.dx = -bVel.dx - 0.5
+          }
         }
       }
     }
   }
 }
 
-func paddleInputSystem(
-  pos: mod Transform,
-  speed: Float,
-  height: Float,
-  pHeight: Float,
-) {
+func paddleInputSystem(pos: mod Transform, speed: Float, height: Float, pHeight: Float) {
   # W (87) / Up (265)
   if isKeyDown(key: 87) is 1 {
     pos.y = pos.y - speed
@@ -86,11 +83,19 @@ func paddleInputSystem(
   }
 }
 
-func renderSystem(pos: view Transform, color: Int) {
+func drawUISystem(p1Score: Int, p2Score: Int) {
+  drawText(
+    text: "{p1Score} - {p2Score}",
+    x: 350.0,
+    y: 20.0,
+    fontSize: 40.0,
+    r: 255,
+    g: 255,
+    b: 255,
+    a: 255,
+  )
 }
 
-# Simple dispatcher for different "entities"
-# In a full ECS, this would use a 'Sprite' or 'Shape' component
 # -- Main Entry --
 func main() {
   # Initializing Entities (as local component instances)
@@ -100,16 +105,20 @@ func main() {
   def p2Pos: Transform = (x: 760.0, y: 175.0)
   def bPos: Transform = (x: 400.0, y: 225.0)
   def bVel: Velocity = (dx: 4.0, dy: 4.0)
+  def p1Score: Int = 0
+  def p2Score: Int = 0
+
   loop windowShouldClose() is 0 {
     # 1. Input Phase
-    # 2. Update Phase
-    # AI System
     paddleInputSystem(
       pos: p1Pos,
       speed: 5.0,
       height: 450.0,
       pHeight: 100.0,
     )
+
+    # 2. Update Phase
+    # AI System
     if bPos.y < p2Pos.y + 50.0 {
       p2Pos.y = p2Pos.y - 4.0
     }
@@ -122,6 +131,7 @@ func main() {
     if p2Pos.y > 350.0 {
       p2Pos.y = 350.0
     }
+
     movementSystem(pos: bPos, vel: bVel)
     bounceSystem(
       pos: bPos,
@@ -129,7 +139,7 @@ func main() {
       radius: 10.0,
       height: 450.0,
     )
-    # Reset if out of bounds
+
     paddleCollisionSystem(
       bPos: bPos,
       bVel: bVel,
@@ -146,18 +156,22 @@ func main() {
       pHeight: 100.0,
       isLeft: 0,
     )
+
+    # Reset if out of bounds and increment score
     if bPos.x < 0.0 {
+      p2Score = p2Score + 1
       bPos.x = 400.0
       bPos.y = 225.0
       bVel.dx = 4.0
     }
     if bPos.x > 800.0 {
+      p1Score = p1Score + 1
       bPos.x = 400.0
       bPos.y = 225.0
       bVel.dx = -4.0
     }
+
     # 3. Render Phase
-    # Draw paddles
     beginDrawing()
     clearBackground(
       r: 20,
@@ -165,7 +179,8 @@ func main() {
       b: 20,
       a: 255,
     )
-    # Draw ball
+    drawUISystem(p1Score: p1Score, p2Score: p2Score)
+    # Draw paddles
     drawRectangle(
       x: 20,
       y: p1Pos.y,
@@ -186,6 +201,7 @@ func main() {
       b: 255,
       a: 255,
     )
+    # Draw ball
     drawCircle(
       x: bPos.x,
       y: bPos.y,
