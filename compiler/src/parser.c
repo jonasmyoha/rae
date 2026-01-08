@@ -284,6 +284,15 @@ static Str parse_import_path_spec(Parser* parser) {
 
 static AstImport* parse_import_clause(Parser* parser, bool is_export) {
   const Token* start = parser_previous(parser);
+  if (parser_check(parser, TOK_IDENT) && str_eq_cstr(parser_peek(parser)->lexeme, "nostdlib")) {
+    const Token* t = parser_advance(parser);
+    AstImport* clause = parser_alloc(parser, sizeof(AstImport));
+    clause->is_export = is_export;
+    clause->path = parser_copy_str(parser, t->lexeme);
+    clause->line = start->line;
+    clause->column = start->column;
+    return clause;
+  }
   Str path = parse_import_path_spec(parser);
   if (path.len == 0) {
     return NULL;
