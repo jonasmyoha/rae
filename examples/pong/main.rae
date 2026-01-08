@@ -25,7 +25,7 @@ func paddleSpeed(): ret Int {
   ret 5
 }
 
-func initialBallSpeed(): ret Int {
+func ballSpeed(): ret Int {
   ret 4
 }
 
@@ -58,15 +58,57 @@ func handleInput(y: Int): ret Int {
   ret clamp(val: newY, min: 0, max: screenHeight() - paddleHeight())
 }
 
-func updateAi(y: Int, ballY: Int, speed: Int): ret Int {
+func updateAi(y: Int, ballY: Int): ret Int {
   def newY: Int = y
   if ballY < y + paddleHeight() / 2 {
-    newY = y - speed
+    newY = y - ballSpeed()
   }
   if ballY > y + paddleHeight() / 2 {
-    newY = y + speed
+    newY = y + ballSpeed()
   }
   ret clamp(val: newY, min: 0, max: screenHeight() - paddleHeight())
+}
+
+func drawGame(p1Y: Int, p2Y: Int, bX: Int, bY: Int) {
+  # Draw paddles
+  beginDrawing()
+  clearBackground(
+    r: 20,
+    g: 20,
+    b: 20,
+    a: 255,
+  )
+  # Draw ball
+  drawRectangle(
+    x: 20,
+    y: p1Y,
+    width: paddleWidth(),
+    height: paddleHeight(),
+    r: 255,
+    g: 255,
+    b: 255,
+    a: 255,
+  )
+  drawRectangle(
+    x: screenWidth() - 40,
+    y: p2Y,
+    width: paddleWidth(),
+    height: paddleHeight(),
+    r: 255,
+    g: 255,
+    b: 255,
+    a: 255,
+  )
+  drawCircle(
+    x: bX,
+    y: bY,
+    radius: ballRadius(),
+    r: 255,
+    g: 255,
+    b: 255,
+    a: 255,
+  )
+  endDrawing()
 }
 
 func main() {
@@ -76,120 +118,55 @@ func main() {
   def p2Y: Int = 175
   def bX: Int = 400
   def bY: Int = 225
-  def bDX: Int = initialBallSpeed()
-  def bDY: Int = initialBallSpeed()
-  def p1Score: Int = 0
-  def p2Score: Int = 0
-
+  def bDX: Int = ballSpeed()
+  def bDY: Int = ballSpeed()
   loop windowShouldClose() is 0 {
     # Update paddles
     p1Y = handleInput(y: p1Y)
-    p2Y = updateAi(y: p2Y, ballY: bY, speed: initialBallSpeed())
-
+    p2Y = updateAi(y: p2Y, ballY: bY)
     # Ball movement
     bX = bX + bDX
     bY = bY + bDY
-
     # Collision Top/Bottom
     if bY < ballRadius() {
-      if bDY < 0 {
-        bDY = -bDY
-      }
+      bDY = ballSpeed()
     }
     if bY > screenHeight() - ballRadius() {
-      if bDY > 0 {
-        bDY = -bDY
-      }
+      bDY = -ballSpeed()
     }
-
     # Collision Paddles
     if bX < 20 + paddleWidth() {
       if bY > p1Y {
         if bY < p1Y + paddleHeight() {
-          if bDX < 0 {
-            # Bounce and speed up
-            bDX = -bDX + 1
-          }
+          bDX = ballSpeed()
         }
       }
     }
     if bX > screenWidth() - 40 {
       if bY > p2Y {
         if bY < p2Y + paddleHeight() {
-          if bDX > 0 {
-            # Bounce and speed up
-            bDX = -bDX - 1
-          }
+          bDX = -ballSpeed()
         }
       }
     }
-
     # Reset if out of bounds
     if bX < 0 {
-      p2Score = p2Score + 1
       bX = screenWidth() / 2
       bY = screenHeight() / 2
-      bDX = initialBallSpeed()
-      bDY = initialBallSpeed()
+      bDX = ballSpeed()
     }
     if bX > screenWidth() {
-      p1Score = p1Score + 1
       bX = screenWidth() / 2
       bY = screenHeight() / 2
-      bDX = -initialBallSpeed()
-      bDY = initialBallSpeed()
+      bDX = -ballSpeed()
     }
-
     # Rendering
-    beginDrawing()
-    clearBackground(
-      r: 20,
-      g: 20,
-      b: 20,
-      a: 255,
+    drawGame(
+      p1Y: p1Y,
+      p2Y: p2Y,
+      bX: bX,
+      bY: bY,
     )
-    drawText(
-      text: "{p1Score} - {p2Score}",
-      x: 350,
-      y: 20,
-      fontSize: 40,
-      r: 255,
-      g: 255,
-      b: 255,
-      a: 255,
-    )
-    # Draw paddles
-    drawRectangle(
-      x: 20,
-      y: p1Y,
-      width: paddleWidth(),
-      height: paddleHeight(),
-      r: 255,
-      g: 255,
-      b: 255,
-      a: 255,
-    )
-    drawRectangle(
-      x: screenWidth() - 40,
-      y: p2Y,
-      width: paddleWidth(),
-      height: paddleHeight(),
-      r: 255,
-      g: 255,
-      b: 255,
-      a: 255,
-    )
-    # Draw ball
-    drawCircle(
-      x: bX,
-      y: bY,
-      radius: ballRadius(),
-      r: 255,
-      g: 255,
-      b: 255,
-      a: 255,
-    )
-    endDrawing()
   }
   closeWindow()
 }

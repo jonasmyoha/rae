@@ -33,18 +33,18 @@ func bounceSystem(pos: view Transform, vel: mod Velocity, radius: Float, height:
 
 func paddleAiSystem(ai: mod AIState, ball: view Transform, paddle: mod Transform) {
   ai.reactionTimer = ai.reactionTimer + 1
-  # Update target every 15 frames (~0.25s) to simulate human reaction delay
-  if ai.reactionTimer > 15 {
+  # Update target every 8 frames (~0.13s) to simulate human reaction delay
+  if ai.reactionTimer > 8 {
     ai.targetY = ball.y
     ai.reactionTimer = 0
   }
 
   # Move towards target
   if ai.targetY < paddle.y + 50.0 {
-    paddle.y = paddle.y - 3.5
+    paddle.y = paddle.y - 4.5
   }
   if ai.targetY > paddle.y + 50.0 {
-    paddle.y = paddle.y + 3.5
+    paddle.y = paddle.y + 4.5
   }
 
   # Bounds check
