@@ -269,9 +269,9 @@ static bool register_default_natives(VmRegistry* registry, TickCounter* tick_cou
   ok = vm_registry_register_native(registry, "sleepMs", native_sleep_ms, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_str", native_rae_str, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_str_concat", native_rae_str_concat, NULL) && ok;
-  ok = vm_registry_register_native(registry, "seed", native_rae_seed, NULL) && ok;
-  ok = vm_registry_register_native(registry, "random", native_rae_random, NULL) && ok;
-  ok = vm_registry_register_native(registry, "randomInt", native_rae_random_int, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_seed", native_rae_seed, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_random", native_rae_random, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_random_int", native_rae_random_int, NULL) && ok;
   ok = vm_registry_register_raylib(registry) && ok;
   ok = vm_registry_register_tinyexpr(registry) && ok;
   return ok;
@@ -1544,23 +1544,40 @@ static bool module_graph_load_module(ModuleGraph* graph,
     uint64_t module_hash = hash_bytes(source, file_size);
     *hash_out ^= module_hash + 0x9e3779b97f4a7c15ull + (*hash_out << 6) + (*hash_out >> 2);
   }
-  TokenList tokens = lexer_tokenize(graph->arena, file_path, source, file_size);
-  AstModule* module = parse_module(graph->arena, file_path, tokens);
-  if (!module) {
-    free(source);
-    return false;
-  }
-  ModuleStack frame = {.module_path = module_path, .next = stack};
 
+  // Pre-scan for nostdlib
   bool use_stdlib = true;
-  for (AstImport* import = module->imports; import; import = import->next) {
-    if (str_eq_cstr(import->path, "nostdlib")) {
-      use_stdlib = false;
-      break;
+  {
+    TokenList tokens = lexer_tokenize(graph->arena, file_path, source, file_size);
+    for (size_t i = 0; i < tokens.count; i++) {
+        if (tokens.data[i].kind == TOK_KW_IMPORT || tokens.data[i].kind == TOK_KW_EXPORT) {
+            if (i + 1 < tokens.count) {
+                Token* t = &tokens.data[i+1];
+                if (t->kind == TOK_IDENT && str_eq_cstr(t->lexeme, "nostdlib")) {
+                    use_stdlib = false;
+                    break;
+                }
+                if (t->kind == TOK_STRING || t->kind == TOK_STRING_START || t->kind == TOK_RAW_STRING) {
+                    Str s = t->lexeme;
+                    if (t->kind == TOK_STRING || t->kind == TOK_STRING_START) {
+                        if (s.len >= 10 && strncmp(s.data + 1, "nostdlib", 8) == 0 && (s.data[9] == '"' || s.data[9] == ' ' || s.data[9] == '\0' || s.data[9] == '}')) {
+                            use_stdlib = false;
+                            break;
+                        }
+                    } else {
+                        if (s.len == 8 && strncmp(s.data, "nostdlib", 8) == 0) {
+                            use_stdlib = false;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
     }
   }
 
-  if (use_stdlib && (!module_path || strcmp(module_path, "core") != 0)) {
+  ModuleStack frame = {.module_path = module_path, .next = stack};
+  if (use_stdlib && (!module_path || (strcmp(module_path, "core") != 0 && strcmp(module_path, "math") != 0))) {
     char* core_file = try_resolve_lib_module(graph->root_path, "core");
     if (core_file) {
       if (!module_graph_load_module(graph, "core", core_file, &frame, hash_out)) {
@@ -1569,6 +1586,21 @@ static bool module_graph_load_module(ModuleGraph* graph,
       }
       free(core_file);
     }
+    char* math_file = try_resolve_lib_module(graph->root_path, "math");
+    if (math_file) {
+      if (!module_graph_load_module(graph, "math", math_file, &frame, hash_out)) {
+        free(math_file);
+        return false;
+      }
+      free(math_file);
+    }
+  }
+
+  TokenList tokens = lexer_tokenize(graph->arena, file_path, source, file_size);
+  AstModule* module = parse_module(graph->arena, file_path, tokens);
+  if (!module) {
+    free(source);
+    return false;
   }
 
   for (AstImport* import = module->imports; import; import = import->next) {

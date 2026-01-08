@@ -12,6 +12,8 @@ void rae_log_cstr(const char* text);
 void rae_log_stream_cstr(const char* text);
 void rae_log_i64(int64_t value);
 void rae_log_stream_i64(int64_t value);
+void rae_log_float(double value);
+void rae_log_stream_float(double value);
 
 const char* rae_str_concat(const char* a, const char* b);
 const char* rae_str_i64(int64_t v);
