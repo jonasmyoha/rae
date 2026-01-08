@@ -7,6 +7,7 @@
 
 typedef enum {
   VAL_INT,
+  VAL_FLOAT,
   VAL_BOOL,
   VAL_STRING,
   VAL_NONE
@@ -21,12 +22,14 @@ typedef struct {
   ValueType type;
   union {
     int64_t int_value;
+    double float_value;
     bool bool_value;
     OwnedString string_value;
   } as;
 } Value;
 
 Value value_int(int64_t v);
+Value value_float(double v);
 Value value_bool(bool v);
 Value value_string_copy(const char* data, size_t length);
 Value value_string_take(char* data, size_t length);
