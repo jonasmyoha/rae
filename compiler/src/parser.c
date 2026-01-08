@@ -618,6 +618,46 @@ static AstExpr* parse_expression(Parser* parser) {
   return parse_binary(parser, 0);
 }
 
+static int64_t parse_char_value(Str text) {
+  if (text.len == 0) return 0;
+  if (text.data[0] == '\\') {
+    if (text.len < 2) return 0;
+    char esc = text.data[1];
+    if (esc == 'n') return '\n';
+    if (esc == 'r') return '\r';
+    if (esc == 't') return '\t';
+    if (esc == '\\') return '\\';
+    if (esc == '\'') return '\'';
+    if (esc == '"') return '"';
+    if (esc == '0') return '\0';
+    if (esc == 'u') {
+        if (text.len < 4) return 0;
+        // Skip \u{
+        // We can't easily use strtol because the string might not be null terminated at the right place
+        // But Str usually points to lexeme which is part of source.
+        // And lexer validated it ends with }.
+        // Let's manually parse hex.
+        int64_t val = 0;
+        for (size_t i = 3; i < text.len; i++) {
+            char h = text.data[i];
+            if (h == '}') break;
+            val <<= 4;
+            if (h >= '0' && h <= '9') val |= (h - '0');
+            else if (h >= 'a' && h <= 'f') val |= (h - 'a' + 10);
+            else if (h >= 'A' && h <= 'F') val |= (h - 'A' + 10);
+        }
+        return val;
+    }
+    return esc;
+  }
+  unsigned char c = (unsigned char)text.data[0];
+  if (c < 0x80) return c;
+  if ((c & 0xE0) == 0xC0) return ((c & 0x1F) << 6) | (text.data[1] & 0x3F);
+  if ((c & 0xF0) == 0xE0) return ((c & 0x0F) << 12) | ((text.data[1] & 0x3F) << 6) | (text.data[2] & 0x3F);
+  if ((c & 0xF8) == 0xF0) return ((c & 0x07) << 18) | ((text.data[1] & 0x3F) << 12) | ((text.data[2] & 0x3F) << 6) | (text.data[3] & 0x3F);
+  return c;
+}
+
 static AstExpr* parse_primary(Parser* parser) {
   const Token* token = parser_peek(parser);
   switch (token->kind) {
@@ -643,6 +683,18 @@ static AstExpr* parse_primary(Parser* parser) {
       parser_advance(parser);
       AstExpr* expr = new_expr(parser, AST_EXPR_STRING, token);
       expr->as.string_lit = parser_copy_str(parser, token->lexeme);
+      return expr;
+    }
+    case TOK_CHAR: {
+      parser_advance(parser);
+      AstExpr* expr = new_expr(parser, AST_EXPR_CHAR, token);
+      Str content = token->lexeme;
+      if (content.len >= 2) {
+          content.data += 1;
+          content.len -= 2;
+      }
+      expr->as.char_lit = parser_copy_str(parser, content);
+      expr->as.char_value = parse_char_value(content);
       return expr;
     }
     case TOK_RAW_STRING: {

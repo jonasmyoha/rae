@@ -702,6 +702,9 @@ static bool write_vm_chunk_file(const Chunk* chunk, const char* out_path) {
       case VAL_INT:
         ok = ok && write_i64(out, value->as.int_value);
         break;
+      case VAL_CHAR:
+        ok = ok && write_i64(out, value->as.char_value);
+        break;
       case VAL_BOOL:
         ok = ok && write_u8(out, value->as.bool_value ? 1 : 0);
         break;
