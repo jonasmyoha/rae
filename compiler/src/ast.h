@@ -112,6 +112,7 @@ struct AstExpr {
   AstExprKind kind;
   size_t line;
   size_t column;
+  bool is_raw;
   union {
     Str ident;
     Str integer;

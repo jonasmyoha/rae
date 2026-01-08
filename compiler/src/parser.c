@@ -107,6 +107,7 @@ static Str parser_copy_str(Parser* parser, Str value) {
 static AstExpr* new_expr(Parser* parser, AstExprKind kind, const Token* token) {
   AstExpr* expr = parser_alloc(parser, sizeof(AstExpr));
   expr->kind = kind;
+  expr->is_raw = false;
   if (token) {
     expr->line = token->line;
     expr->column = token->column;
@@ -642,6 +643,23 @@ static AstExpr* parse_primary(Parser* parser) {
       parser_advance(parser);
       AstExpr* expr = new_expr(parser, AST_EXPR_STRING, token);
       expr->as.string_lit = parser_copy_str(parser, token->lexeme);
+      return expr;
+    }
+    case TOK_RAW_STRING: {
+      parser_advance(parser);
+      AstExpr* expr = new_expr(parser, AST_EXPR_STRING, token);
+      expr->is_raw = true;
+      
+      const char* data = token->lexeme.data;
+      size_t len = token->lexeme.len;
+      size_t start = 1; // skip 'r'
+      size_t hashes = 0;
+      while (start + hashes < len && data[start + hashes] == '#') hashes++;
+      start += hashes + 1; // skip hashes and '"'
+      
+      size_t content_len = len - start - hashes - 1; // -1 for closing '"'
+      Str content = {.data = data + start, .len = content_len};
+      expr->as.string_lit = parser_copy_str(parser, content);
       return expr;
     }
     case TOK_KW_TRUE:
