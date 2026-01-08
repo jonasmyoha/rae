@@ -50,6 +50,16 @@ void rae_log_stream_i64(int64_t value) {
   rae_flush_stdout();
 }
 
+void rae_log_float(double value) {
+  printf("%g\n", value);
+  rae_flush_stdout();
+}
+
+void rae_log_stream_float(double value) {
+  printf("%g", value);
+  rae_flush_stdout();
+}
+
 const char* rae_str_concat(const char* a, const char* b) {
   if (!a) a = "";
   if (!b) b = "";

@@ -181,6 +181,46 @@ static bool emit_log_call(CFuncContext* ctx, const AstExpr* expr, FILE* out, boo
     }
     return true;
   }
+
+  bool is_float = false;
+  if (value->kind == AST_EXPR_FLOAT) {
+    is_float = true;
+  } else if (value->kind == AST_EXPR_IDENT) {
+    Str name = value->as.ident;
+    for (const AstParam* p = ctx->params; p; p = p->next) {
+      if (str_eq(p->name, name)) {
+        if (p->type && p->type->parts && str_eq_cstr(p->type->parts->text, "Float")) {
+          is_float = true;
+        }
+        break;
+      }
+    }
+    if (!is_float) {
+      for (size_t i = 0; i < ctx->local_count; ++i) {
+        if (str_eq(ctx->locals[i], name)) {
+          if (str_eq_cstr(ctx->local_types[i], "Float")) {
+            is_float = true;
+          }
+          break;
+        }
+      }
+    }
+  } else if (value->kind == AST_EXPR_CALL) {
+      // HACK: assume some calls return float? No type info here easily.
+      // But random() is a call.
+      if (value->as.call.callee->kind == AST_EXPR_IDENT && str_eq_cstr(value->as.call.callee->as.ident, "random")) {
+          is_float = true;
+      }
+  }
+
+  if (is_float) {
+    if (fprintf(out, "  %s(", newline ? "rae_log_float" : "rae_log_stream_float") < 0) {
+      return false;
+    }
+    if (!emit_expr(ctx, value, out)) return false;
+    if (fprintf(out, ");\n") < 0) return false;
+    return true;
+  }
   
   if (fprintf(out, "  %s(", newline ? "rae_log_i64" : "rae_log_stream_i64") < 0) {
     return false;
