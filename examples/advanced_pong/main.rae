@@ -11,6 +11,11 @@ type Velocity {
   dy: Float
 }
 
+type AIState {
+  targetY: Float
+  reactionTimer: Int
+}
+
 # -- Systems (Functions acting on Components) --
 func movementSystem(pos: mod Transform, vel: view Velocity) {
   pos.x = pos.x + vel.dx
@@ -23,6 +28,31 @@ func bounceSystem(pos: view Transform, vel: mod Velocity, radius: Float, height:
   }
   if pos.y > height - radius {
     vel.dy = -4.0
+  }
+}
+
+func paddleAiSystem(ai: mod AIState, ball: view Transform, paddle: mod Transform) {
+  ai.reactionTimer = ai.reactionTimer + 1
+  # Update target every 15 frames (~0.25s) to simulate human reaction delay
+  if ai.reactionTimer > 15 {
+    ai.targetY = ball.y
+    ai.reactionTimer = 0
+  }
+
+  # Move towards target
+  if ai.targetY < paddle.y + 50.0 {
+    paddle.y = paddle.y - 3.5
+  }
+  if ai.targetY > paddle.y + 50.0 {
+    paddle.y = paddle.y + 3.5
+  }
+
+  # Bounds check
+  if paddle.y < 0.0 {
+    paddle.y = 0.0
+  }
+  if paddle.y > 350.0 {
+    paddle.y = 350.0
   }
 }
 
@@ -105,6 +135,7 @@ func main() {
   def p2Pos: Transform = (x: 760.0, y: 175.0)
   def bPos: Transform = (x: 400.0, y: 225.0)
   def bVel: Velocity = (dx: 4.0, dy: 4.0)
+  def ai: AIState = (targetY: 225.0, reactionTimer: 0)
   def p1Score: Int = 0
   def p2Score: Int = 0
 
@@ -119,18 +150,7 @@ func main() {
 
     # 2. Update Phase
     # AI System
-    if bPos.y < p2Pos.y + 50.0 {
-      p2Pos.y = p2Pos.y - 4.0
-    }
-    if bPos.y > p2Pos.y + 50.0 {
-      p2Pos.y = p2Pos.y + 4.0
-    }
-    if p2Pos.y < 0.0 {
-      p2Pos.y = 0.0
-    }
-    if p2Pos.y > 350.0 {
-      p2Pos.y = 350.0
-    }
+    paddleAiSystem(ai: ai, ball: bPos, paddle: p2Pos)
 
     movementSystem(pos: bPos, vel: bVel)
     bounceSystem(
