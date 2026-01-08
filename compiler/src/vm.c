@@ -36,6 +36,8 @@ static bool value_is_truthy(const Value* value) {
       return value->as.float_value != 0.0;
     case VAL_STRING:
       return value->as.string_value.length > 0;
+    case VAL_CHAR:
+      return value->as.char_value != 0;
     case VAL_NONE:
       return false;
     case VAL_OBJECT:
@@ -60,6 +62,8 @@ static bool values_equal(const Value* a, const Value* b) {
       if (a->as.string_value.length != b->as.string_value.length) return false;
       return memcmp(a->as.string_value.chars, b->as.string_value.chars,
                     a->as.string_value.length) == 0;
+    case VAL_CHAR:
+      return a->as.char_value == b->as.char_value;
     case VAL_NONE:
       return true;
     case VAL_OBJECT:
