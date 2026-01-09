@@ -24,9 +24,12 @@ typedef struct AstIdentifierPart {
   struct AstIdentifierPart* next;
 } AstIdentifierPart;
 
-struct AstTypeRef {
+typedef struct AstTypeRef {
   AstIdentifierPart* parts;
-};
+  struct AstTypeRef* generic_args; // Head of a linked list of AstTypeRef for generic arguments
+  struct AstTypeRef* next; // For linking AstTypeRef nodes in a list (e.g., generic_args list)
+} AstTypeRef;
+
 
 typedef struct AstProperty {
   Str name;
@@ -105,9 +108,34 @@ typedef enum {
   AST_EXPR_UNARY,
   AST_EXPR_CALL,
   AST_EXPR_MEMBER,
-  AST_EXPR_OBJECT,
-  AST_EXPR_MATCH
+  AST_EXPR_OBJECT, // This now maps to AstObjectLiteral
+  AST_EXPR_MATCH,
+  AST_EXPR_LIST,
+  AST_EXPR_INDEX,
+  AST_EXPR_METHOD_CALL,
+  AST_EXPR_COLLECTION_LITERAL
 } AstExprKind;
+
+typedef struct AstExprList {
+  AstExpr* value;
+  struct AstExprList* next;
+} AstExprList;
+
+typedef struct AstCollectionElement {
+  Str* key; // Null if it's a list element
+  AstExpr* value;
+  struct AstCollectionElement* next;
+} AstCollectionElement;
+
+typedef struct AstCollectionLiteral {
+  AstCollectionElement* elements;
+} AstCollectionLiteral;
+
+// New struct definition (moved outside AstExpr)
+typedef struct AstObjectLiteral {
+  AstTypeRef* type; // Optional: The type of the object literal (e.g., "Point")
+  AstObjectField* fields;
+} AstObjectLiteral;
 
 struct AstExpr {
   AstExprKind kind;
@@ -139,11 +167,22 @@ struct AstExpr {
       AstExpr* object;
       Str member;
     } member;
-    AstObjectField* object;
+    AstObjectLiteral object_literal; // Updated to use the new struct
     struct {
       AstExpr* subject;
       AstMatchArm* arms;
     } match_expr;
+    AstExprList* list;
+    struct {
+      AstExpr* target;
+      AstExpr* index;
+    } index;
+    struct {
+      AstExpr* object;
+      Str method_name;
+      AstCallArg* args;
+    } method_call;
+    AstCollectionLiteral collection;
   } as;
 };
 
@@ -233,12 +272,14 @@ typedef enum {
 typedef struct {
   Str name;
   AstProperty* properties;
+  AstIdentifierPart* generic_params; // Linked list of type parameter names (e.g. T, K, V)
   AstTypeField* fields;
 } AstTypeDecl;
 
 typedef struct {
   Str name;
   AstParam* params;
+  AstIdentifierPart* generic_params; // Linked list of type parameter names (e.g. T, K, V)
   AstProperty* properties;
   AstReturnItem* returns;
   bool is_extern;

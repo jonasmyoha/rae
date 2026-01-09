@@ -174,14 +174,28 @@ static void pp_write_type(PrettyPrinter* pp, const AstTypeRef* type) {
     return;
   }
   const AstIdentifierPart* part = type->parts;
-  int first = 1;
+  int is_first_part = 1;
   while (part) {
-    if (!first) {
+    if (!is_first_part) {
       pp_space(pp);
     }
     pp_write_str(pp, part->text);
-    first = 0;
+    is_first_part = 0;
     part = part->next;
+  }
+  if (type->generic_args) {
+    pp_write_char(pp, '[');
+    AstTypeRef* generic_param = type->generic_args;
+    int is_first_generic_param = 1;
+    while (generic_param) {
+      if (!is_first_generic_param) {
+        pp_write(pp, ", ");
+      }
+      pp_write_type(pp, generic_param);
+      is_first_generic_param = 0;
+      generic_param = generic_param->next;
+    }
+    pp_write_char(pp, ']');
   }
 }
 
@@ -208,7 +222,7 @@ typedef enum {
   PREC_MUL = 6,
   PREC_UNARY = 7,
   PREC_CALL = 8,
-  PREC_PRIMARY = 9
+  PREC_ATOMIC = 9
 } Precedence;
 
 static int binary_precedence(AstBinaryOp op) {
@@ -409,9 +423,13 @@ static void pp_expr_prec(PrettyPrinter* pp, const AstExpr* expr, int parent_prec
       pp_write(pp, "none");
       break;
     case AST_EXPR_OBJECT:
-      pp_write_char(pp, '(');
-      pp_object_fields(pp, expr->as.object);
-      pp_write_char(pp, ')');
+      if (expr->as.object_literal.type) { // If there's a specified type
+        pp_write_type(pp, expr->as.object_literal.type);
+        pp_space(pp);
+      }
+      pp_write_char(pp, '{'); // Object literals now use curly braces
+      pp_object_fields(pp, expr->as.object_literal.fields); // Pass the fields
+      pp_write_char(pp, '}');
       break;
     case AST_EXPR_MATCH: {
       pp_write(pp, "match ");
@@ -481,6 +499,65 @@ static void pp_expr_prec(PrettyPrinter* pp, const AstExpr* expr, int parent_prec
       if (need_paren) pp_write_char(pp, ')');
       break;
     }
+    case AST_EXPR_METHOD_CALL: {
+      int prec = PREC_CALL;
+      int need_paren = prec < parent_prec;
+      if (need_paren) pp_write_char(pp, '(');
+      pp_expr_prec(pp, expr->as.method_call.object, PREC_CALL);
+      pp_write_char(pp, '.');
+      pp_write_str(pp, expr->as.method_call.method_name);
+      pp_write_char(pp, '(');
+      pp_call_args(pp, expr->as.method_call.args);
+      pp_write_char(pp, ')');
+      if (need_paren) pp_write_char(pp, ')');
+      break;
+    }
+    case AST_EXPR_COLLECTION_LITERAL: {
+      pp_write_char(pp, '{');
+      AstCollectionElement* current = expr->as.collection.elements;
+      if (current) {
+        pp_space(pp);
+        int first = 1;
+        while (current) {
+          if (!first) {
+            pp_write(pp, ", ");
+          }
+          if (current->key) { // If it's a keyed element, it's a Map/Object literal
+            pp_write_str(pp, *current->key);
+            pp_write(pp, ": ");
+          }
+          pp_expr_prec(pp, current->value, PREC_LOWEST);
+          first = 0;
+          current = current->next;
+        }
+        pp_space(pp);
+      }
+      pp_write_char(pp, '}');
+      break;
+    }
+    case AST_EXPR_LIST: {
+      pp_write(pp, "[");
+      AstExprList* current = expr->as.list;
+      while (current) {
+        pp_expr_prec(pp, current->value, PREC_LOWEST);
+        if (current->next) {
+          pp_write(pp, ", ");
+        }
+        current = current->next;
+      }
+      pp_write(pp, "]");
+      break;
+    }
+    case AST_EXPR_INDEX: {
+      pp_expr_prec(pp, expr->as.index.target, PREC_ATOMIC);
+      pp_write(pp, "[");
+      pp_expr_prec(pp, expr->as.index.index, PREC_LOWEST);
+      pp_write(pp, "]");
+      break;
+    }
+    default:
+      pp_write(pp, "<expr>"); // Placeholder for unhandled expression types
+      break;
   }
 }
 
@@ -695,6 +772,20 @@ static void pp_print_type_decl(PrettyPrinter* pp, const AstDecl* decl) {
   pp_check_comments(pp, decl->line);
   pp_write(pp, "type ");
   pp_write_str(pp, decl->as.type_decl.name);
+  if (decl->as.type_decl.generic_params) {
+    pp_write_char(pp, '[');
+    AstIdentifierPart* current = decl->as.type_decl.generic_params;
+    int first = 1;
+    while (current) {
+      if (!first) {
+        pp_write(pp, ", ");
+      }
+      pp_write_str(pp, current->text);
+      first = 0;
+      current = current->next;
+    }
+    pp_write_char(pp, ']');
+  }
   if (decl->as.type_decl.properties) {
     pp_write(pp, ": ");
     pp_write_properties(pp, decl->as.type_decl.properties);
@@ -808,6 +899,20 @@ static void pp_print_func_decl(PrettyPrinter* pp, const AstDecl* decl) {
   }
   pp_write(pp, "func ");
   pp_write_str(pp, decl->as.func_decl.name);
+  if (decl->as.func_decl.generic_params) {
+    pp_write_char(pp, '[');
+    AstIdentifierPart* current = decl->as.func_decl.generic_params;
+    int first = 1;
+    while (current) {
+      if (!first) {
+        pp_write(pp, ", ");
+      }
+      pp_write_str(pp, current->text);
+      first = 0;
+      current = current->next;
+    }
+    pp_write_char(pp, ']');
+  }
   pp_write(pp, "(");
   pp_print_params(pp, decl->as.func_decl.params);
   pp_write(pp, ")");
