@@ -354,9 +354,8 @@ static bool compiler_ensure_local_capacity(BytecodeCompiler* compiler, uint16_t 
   if (required <= compiler->allocated_locals) {
     return true;
   }
-  uint16_t delta = required - compiler->allocated_locals;
   emit_op(compiler, OP_ALLOC_LOCAL, line);
-  emit_short(compiler, delta, line);
+  emit_short(compiler, required, line);
   compiler->allocated_locals = required;
   return true;
 }
@@ -728,6 +727,7 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       }
       emit_op(compiler, OP_SET_LOCAL, (int)expr->line);
       emit_short(compiler, (uint16_t)subject_slot, (int)expr->line);
+      emit_op(compiler, OP_POP, (int)expr->line);
 
       int result_slot = compiler_add_local(compiler, str_from_cstr("$match_value"), (Str){0});
       if (result_slot < 0) {
@@ -750,6 +750,7 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
           }
           emit_op(compiler, OP_SET_LOCAL, (int)expr->line);
           emit_short(compiler, (uint16_t)result_slot, (int)expr->line);
+          emit_op(compiler, OP_POP, (int)expr->line);
           if (end_count < sizeof(end_jumps) / sizeof(end_jumps[0])) {
             end_jumps[end_count++] = emit_jump(compiler, OP_JUMP, (int)expr->line);
           }
@@ -767,6 +768,7 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
           }
           emit_op(compiler, OP_SET_LOCAL, (int)expr->line);
           emit_short(compiler, (uint16_t)result_slot, (int)expr->line);
+          emit_op(compiler, OP_POP, (int)expr->line);
           if (end_count < sizeof(end_jumps) / sizeof(end_jumps[0])) {
             end_jumps[end_count++] = emit_jump(compiler, OP_JUMP, (int)expr->line);
           }
@@ -834,6 +836,7 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
       }
       emit_op(compiler, OP_SET_LOCAL, (int)stmt->line);
       emit_short(compiler, (uint16_t)slot, (int)stmt->line);
+      emit_op(compiler, OP_POP, (int)stmt->line);
       return true;
     }
     case AST_STMT_EXPR:
@@ -1000,6 +1003,7 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
       }
       emit_op(compiler, OP_SET_LOCAL, (int)stmt->line);
       emit_short(compiler, (uint16_t)subject_slot, (int)stmt->line);
+      emit_op(compiler, OP_POP, (int)stmt->line);
 
       uint16_t end_jumps[256];
       size_t end_count = 0;

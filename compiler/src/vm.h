@@ -52,9 +52,9 @@ typedef struct {
 typedef struct VM {
   Chunk* chunk;
   uint8_t* ip;
-  Value stack[256];
+  Value stack[1024];
   Value* stack_top;
-  CallFrame call_stack[256];
+  CallFrame call_stack[1024];
   size_t call_stack_top;
   VmRegistry* registry;
   int timeout_seconds;
