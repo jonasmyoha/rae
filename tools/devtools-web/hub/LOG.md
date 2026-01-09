@@ -26,3 +26,13 @@
 - Completed T014 (Devtools example runner) — `bun run lint`, `cd rae/compiler && make test`
 - Started T012 (Hot-reload VM support)
 - Completed T012 (Hot-reload VM support) — `cd rae/compiler && make test`, `bin/rae run --watch examples/hello.rae`
+- Started T034 (VM research and fixing it with smaller steps)
+- Completed T034 (VM research and fixing it with smaller steps) — `cd rae/compiler && make test`, fixed stack leaks in def/match and made OP_ALLOC_LOCAL idempotent.
+- Started T035 (Implement basic List in stdlib)
+- Completed T035 (Implement basic List in stdlib) — implemented `RaeList` in runtime and VM natives.
+- Started T036 (Implement static Array in stdlib)
+- Completed T036 (Implement static Array in stdlib) — implemented `RaeArray` in runtime and VM natives.
+- Started T037 (Update random_advanced example)
+- Completed T037 (Update random_advanced example) — updated example to use `List` and added `rae_str_concat` and arithmetic fixes.
+- Started T038 (Add tests and documentation for List and Array)
+- Completed T038 (Add tests and documentation for List and Array) — added regression tests 322, 323, 324.
