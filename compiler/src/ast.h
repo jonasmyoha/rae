@@ -128,6 +128,7 @@ typedef struct AstCollectionElement {
 } AstCollectionElement;
 
 typedef struct AstCollectionLiteral {
+  AstTypeRef* type; // Optional type hint (e.g. List[Int])
   AstCollectionElement* elements;
 } AstCollectionLiteral;
 
