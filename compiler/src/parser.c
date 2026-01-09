@@ -131,6 +131,14 @@ static AstIdentifierPart* make_identifier_part(Parser* parser, Str text) {
   return part;
 }
 
+static AstTypeRef* parse_type_ref_from_ident(Parser* parser, const Token* ident_token) {
+  AstTypeRef* type = parser_alloc(parser, sizeof(AstTypeRef));
+  type->parts = make_identifier_part(parser, ident_token->lexeme);
+  type->generic_args = NULL; // For now, no generic args from simple ident
+  type->next = NULL;
+  return type;
+}
+
 static bool is_type_modifier(TokenKind kind) {
   return kind == TOK_KW_OWN || kind == TOK_KW_VIEW || kind == TOK_KW_MOD || kind == TOK_KW_OPT;
 }
@@ -367,7 +375,7 @@ static AstParam* parse_param_list(Parser* parser) {
       break;
     }
     parser_consume(parser, TOK_COMMA, "expected ',' between parameters");
-    if (parser_match(parser, TOK_RPAREN)) {
+    if (parser_check(parser, TOK_RPAREN)) {
       break;
     }
   }
@@ -431,8 +439,7 @@ static AstStmt* append_stmt(AstStmt* head, AstStmt* node) {
   return head;
 }
 
-static AstDestructureBinding* append_destructure_binding(AstDestructureBinding* head,
-                                                         AstDestructureBinding* node) {
+static AstDestructureBinding* append_destructure_binding(AstDestructureBinding* head, AstDestructureBinding* node) {
   if (!head) {
     return node;
   }
@@ -444,14 +451,24 @@ static AstDestructureBinding* append_destructure_binding(AstDestructureBinding* 
   return head;
 }
 
+// Forward declarations for parsing expressions and statements
 static AstExpr* parse_expression(Parser* parser);
 static AstBlock* parse_block(Parser* parser);
 static AstStmt* parse_statement(Parser* parser);
 static AstExpr* parse_match_expression(Parser* parser, const Token* match_token);
 static AstExpr* parse_list_literal(Parser* parser, const Token* start_token);
-static AstExpr* parse_collection_literal(Parser* parser, const Token* start_token, AstTypeRef* type_hint);
+static AstExpr* parse_collection_literal(Parser* parser, const Token* start_token);
+static AstExpr* parse_typed_object_literal(Parser* parser, const Token* start_token, AstTypeRef* type_hint);
 static AstCallArg* make_arg(Parser* parser, const char* name, AstExpr* value);
+static AstTypeRef* parse_type_ref_from_ident(Parser* parser, const Token* ident_token);
+static bool callee_allows_value_shorthand(const AstExpr* callee);
+static AstExpr* finish_call(Parser* parser, AstExpr* callee, const Token* start_token);
+static AstExpr* parse_primary(Parser* parser);
+static AstExpr* parse_postfix(Parser* parser);
+static AstExpr* parse_unary(Parser* parser);
+static AstExpr* parse_binary(Parser* parser, int min_prec);
 
+// Helper functions for parsing tokens and their properties
 static bool token_is_ident(const Token* token, const char* text) {
   if (!token || token->kind != TOK_IDENT) return false;
   size_t len = strlen(text);
@@ -494,7 +511,130 @@ static BinaryInfo get_binary_info(TokenKind kind) {
   }
 }
 
-static AstExpr* parse_primary(Parser* parser);
+// Helper functions for parsing literal values
+static int64_t parse_char_value(Str text) {
+  if (text.len == 0) return 0;
+  if (text.data[0] == '\\') {
+    if (text.len < 2) return 0;
+    char esc = text.data[1];
+    if (esc == 'n') return '\n';
+    if (esc == 'r') return '\r';
+    if (esc == 't') return '\t';
+    if (esc == '0') return '\0';
+    if (esc == '\\') return '\\';
+    if (esc == '\'') return '\'';
+    if (esc == '"') return '"';
+    if (esc == 'u') {
+        if (text.len < 4) return 0;
+        // Skip \u{
+        // We can't easily use strtol because the string might not be null terminated at the right place
+        // But Str usually points to lexeme which is part of source.
+        // And lexer validated it ends with }.
+        // Let's manually parse hex.
+        int64_t val = 0;
+        for (size_t i = 3; i < text.len; i++) {
+            char h = text.data[i];
+            if (h == '}') break;
+            val <<= 4;
+            if (h >= '0' && h <= '9') val |= (h - '0');
+            else if (h >= 'a' && h <= 'f') val |= (h - 'a' + 10);
+            else if (h >= 'A' && h <= 'F') val |= (h - 'A' + 10);
+        }
+        return val;
+    }
+    return esc;
+  }
+  unsigned char c = (unsigned char)text.data[0];
+  if (c < 0x80) return c;
+  if ((c & 0xE0) == 0xC0) return ((c & 0x1F) << 6) | (text.data[1] & 0x3F);
+  if ((c & 0xF0) == 0xE0) return ((c & 0x0F) << 12) | ((text.data[1] & 0x3F) << 6) | (text.data[2] & 0x3F);
+  if ((c & 0xF8) == 0xF0) return ((c & 0x07) << 18) | ((text.data[1] & 0x3F) << 12) | ((text.data[2] & 0x3F) << 6) | (text.data[3] & 0x3F);
+  return c;
+}
+
+static AstExpr* make_call_expr(Parser* parser, const char* func_name, AstCallArg* args, const Token* token) {
+  AstExpr* callee = new_expr(parser, AST_EXPR_IDENT, token);
+  callee->as.ident = parser_copy_str(parser, str_from_cstr(func_name));
+  AstExpr* call = new_expr(parser, AST_EXPR_CALL, token);
+  call->as.call.callee = callee;
+  call->as.call.args = args;
+  return call;
+}
+
+static AstCallArg* make_arg(Parser* parser, const char* name, AstExpr* value) {
+  AstCallArg* arg = parser_alloc(parser, sizeof(AstCallArg));
+  arg->name = parser_copy_str(parser, str_from_cstr(name));
+  arg->value = value;
+  arg->next = NULL;
+  return arg;
+}
+
+static Str unescape_string(Parser* parser, Str lit, bool strip_start, bool strip_end) {
+  if (lit.len == 0) return lit;
+  size_t start = strip_start ? 1 : 0;
+  size_t end = strip_end ? lit.len - 1 : lit.len;
+  if (end < start) return (Str){0};
+  
+  size_t len = end - start;
+  char* buffer = parser_alloc(parser, len + 1);
+  size_t out_len = 0;
+  
+  for (size_t i = start; i < end; i++) {
+    char c = lit.data[i];
+    if (c == '\\' && i + 1 < end) {
+      i++;
+      char esc = lit.data[i];
+      switch (esc) {
+        case 'n': buffer[out_len++] = '\n'; break;
+        case 'r': buffer[out_len++] = '\r'; break;
+        case 't': buffer[out_len++] = '\t'; break;
+        case '0': buffer[out_len++] = '\0'; break;
+        case '\\': buffer[out_len++] = '\\'; break;
+        case '"': buffer[out_len++] = '"'; break;
+        case '\'': buffer[out_len++] = '\''; break;
+        case '{': buffer[out_len++] = '{'; break;
+        case '}': buffer[out_len++] = '}'; break;
+        case 'u': {
+          if (i + 1 < end && lit.data[i+1] == '{') {
+            i += 2; // skip u{
+            int64_t val = 0;
+            while (i < end && lit.data[i] != '}') {
+              char h = lit.data[i++];
+              val <<= 4;
+              if (h >= '0' && h <= '9') val |= (h - '0');
+              else if (h >= 'a' && h <= 'f') val |= (h - 'a' + 10);
+              else if (h >= 'A' && h <= 'F') val |= (h - 'A' + 10);
+            }
+            // Encode val as UTF-8 into buffer
+            if (val < 0x80) {
+              buffer[out_len++] = (char)val;
+            } else if (val < 0x800) {
+              buffer[out_len++] = (char)(0xC0 | (val >> 6));
+              buffer[out_len++] = (char)(0x80 | (val & 0x3F));
+            } else if (val < 0x10000) {
+              buffer[out_len++] = (char)(0xE0 | (val >> 12));
+              buffer[out_len++] = (char)(0x80 | ((val >> 6) & 0x3F));
+              buffer[out_len++] = (char)(0x80 | (val & 0x3F));
+            } else {
+              buffer[out_len++] = (char)(0xF0 | (val >> 18));
+              buffer[out_len++] = (char)(0x80 | ((val >> 12) & 0x3F));
+              buffer[out_len++] = (char)(0x80 | ((val >> 6) & 0x3F));
+              buffer[out_len++] = (char)(0x80 | (val & 0x3F));
+            }
+          } else {
+            buffer[out_len++] = 'u'; // fallback
+          }
+          break;
+        }
+        default: buffer[out_len++] = esc; break;
+      }
+    } else {
+      buffer[out_len++] = c;
+    }
+  }
+  buffer[out_len] = '\0';
+  return (Str){.data = buffer, .len = out_len};
+}
 
 static bool callee_allows_value_shorthand(const AstExpr* callee) {
   if (!callee || callee->kind != AST_EXPR_IDENT) return false;
@@ -529,16 +669,304 @@ static AstExpr* finish_call(Parser* parser, AstExpr* callee, const Token* start_
     args = append_call_arg(args, arg);
     if (parser_check(parser, TOK_RPAREN)) break;
     parser_consume(parser, TOK_COMMA, "expected ',' between arguments");
-    if (parser_check(parser, TOK_RPAREN)) break;
+    if (parser_check(parser, TOK_RPAREN)) {
+      break;
+    }
   } while (true);
   parser_consume(parser, TOK_RPAREN, "expected ')' after arguments");
   expr->as.call.args = args;
   return expr;
 }
 
+AstCollectionElement* append_collection_element(AstCollectionElement* head, AstCollectionElement* node) {
+  if (!head) return node;
+  AstCollectionElement* tail = head;
+  while (tail->next) {
+    tail = tail->next;
+  }
+  tail->next = node;
+  return head;
+}
 
+static AstExpr* parse_collection_literal(Parser* parser, const Token* start_token) {
+  AstExpr* expr = new_expr(parser, AST_EXPR_COLLECTION_LITERAL, start_token);
+  AstCollectionElement* head = NULL;
+  AstCollectionElement* tail = NULL;
+  bool is_map = false;
 
+  if (parser_match(parser, TOK_RBRACE)) { // Empty collection literal {}
+    expr->as.collection.elements = NULL;
+    return expr;
+  }
 
+  do {
+    AstCollectionElement* element = parser_alloc(parser, sizeof(AstCollectionElement));
+    element->key = NULL;
+    
+    // Check for key: value pair (implies map/object literal)
+    if ((parser_check(parser, TOK_IDENT) || parser_check(parser, TOK_STRING)) && parser_peek_at(parser, 1)->kind == TOK_COLON) {
+      if (head && !is_map) { // First element defines type
+        parser_error(parser, parser_peek(parser), "mixing keyed and unkeyed elements in collection literal is not allowed");
+        return NULL;
+      }
+      is_map = true; // Mark as map/object
+
+      const Token* key_token = parser_advance(parser);
+      Str key_str;
+      if (key_token->kind == TOK_STRING) {
+        key_str = unescape_string(parser, key_token->lexeme, true, true);
+      } else { // TOK_IDENT
+        key_str = parser_copy_str(parser, key_token->lexeme);
+      }
+
+      element->key = parser_alloc(parser, sizeof(Str));
+      *element->key = key_str;
+      parser_consume(parser, TOK_COLON, "expected ':' after key in collection literal");
+
+      element->value = parse_expression(parser);
+    } else { // Unkeyed element (implies list literal)
+      if (head && is_map) { // First element defines type
+        parser_error(parser, parser_peek(parser), "mixing keyed and unkeyed elements in collection literal is not allowed");
+        return NULL;
+      }
+      element->value = parse_expression(parser);
+    }
+
+    if (!head) {
+      head = tail = element;
+    } else {
+      tail->next = element;
+      tail = element;
+    }
+    
+    // Check for closing brace or comma
+    if (parser_check(parser, TOK_RBRACE)) break; // Break if closing brace found
+    parser_consume(parser, TOK_COMMA, "expected ',' or '}' in collection literal");
+    if (parser_check(parser, TOK_RBRACE)) { // Allow trailing comma
+      break;
+    }
+  } while (true);
+  
+  parser_consume(parser, TOK_RBRACE, "expected '}' after collection literal");
+  expr->as.collection.elements = head;
+  return expr;
+}
+
+static AstExpr* parse_list_literal(Parser* parser, const Token* start_token) {
+  AstExpr* expr = new_expr(parser, AST_EXPR_LIST, start_token);
+  AstExprList* head = NULL;
+  AstExprList* tail = NULL;
+  if (parser_match(parser, TOK_RBRACKET)) {
+    expr->as.list = NULL;
+    return expr;
+  }
+  do {
+    AstExprList* node = parser_alloc(parser, sizeof(AstExprList));
+    node->value = parse_expression(parser);
+    node->next = NULL;
+    if (!head) {
+      head = tail = node;
+    } else {
+      tail->next = node;
+      tail = node;
+    }
+    if (parser_check(parser, TOK_RBRACKET)) break;
+    parser_consume(parser, TOK_COMMA, "expected ',' between list elements");
+    if (parser_check(parser, TOK_RBRACKET)) break;
+  } while (true);
+  parser_consume(parser, TOK_RBRACKET, "expected ']' after list literal");
+  expr->as.list = head;
+  return expr;
+}
+
+static AstExpr* parse_typed_object_literal(Parser* parser, const Token* start_token, AstTypeRef* type_hint) {
+  AstExpr* expr = new_expr(parser, AST_EXPR_OBJECT, start_token);
+  expr->as.object_literal.type = type_hint;
+  AstObjectField* head = NULL;
+  AstObjectField* tail = NULL;
+
+  if (parser_match(parser, TOK_RBRACE)) { // Empty object literal {}
+    expr->as.object_literal.fields = NULL;
+    return expr;
+  }
+
+  do {
+    AstObjectField* field = parser_alloc(parser, sizeof(AstObjectField));
+    const Token* key_token = parser_consume(parser, TOK_IDENT, "expected field name in object literal");
+    field->name = parser_copy_str(parser, key_token->lexeme);
+    parser_consume(parser, TOK_COLON, "expected ':' after field name");
+    field->value = parse_expression(parser);
+
+    if (!head) {
+      head = tail = field;
+    } else {
+      tail->next = field;
+      tail = field;
+    }
+    
+    if (parser_check(parser, TOK_RBRACE)) break;
+    parser_consume(parser, TOK_COMMA, "expected ',' or '}' in object literal");
+    if (parser_check(parser, TOK_RBRACE)) {
+      break;
+    }
+  } while (true);
+  
+  parser_consume(parser, TOK_RBRACE, "expected '}' after object literal");
+  expr->as.object_literal.fields = head;
+  return expr;
+}
+
+static AstExpr* parse_primary(Parser* parser) {
+  const Token* token = parser_peek(parser);
+
+  // Check for typed object literal first
+  if (token->kind == TOK_IDENT && parser_peek_at(parser, 1)->kind == TOK_LBRACE) {
+    const Token* ident_token = parser_advance(parser); // Consume the identifier
+    AstTypeRef* type_ref = parse_type_ref_from_ident(parser, ident_token); // Create AstTypeRef from this ident_token
+    const Token* start_token = parser_advance(parser); // Consume LBRACE
+    return parse_typed_object_literal(parser, start_token, type_ref);
+  }
+
+  // If not a typed object literal, proceed with other primary expressions
+  switch (token->kind) {
+    case TOK_IDENT: {
+      parser_advance(parser); // Already peeked and confirmed not a typed object literal
+      AstExpr* expr = new_expr(parser, AST_EXPR_IDENT, token);
+      expr->as.ident = parser_copy_str(parser, token->lexeme);
+      return expr;
+    }
+    case TOK_INTEGER: {
+      parser_advance(parser);
+      AstExpr* expr = new_expr(parser, AST_EXPR_INTEGER, token);
+      expr->as.integer = parser_copy_str(parser, token->lexeme);
+      return expr;
+    }
+    case TOK_FLOAT: {
+      parser_advance(parser);
+      AstExpr* expr = new_expr(parser, AST_EXPR_FLOAT, token);
+      expr->as.floating = parser_copy_str(parser, token->lexeme);
+      return expr;
+    }
+    case TOK_STRING: {
+      parser_advance(parser);
+      AstExpr* expr = new_expr(parser, AST_EXPR_STRING, token);
+      expr->as.string_lit = unescape_string(parser, token->lexeme, true, true);
+      return expr;
+    }
+    case TOK_STRING_START: {
+      const Token* start_token = token;
+      parser_advance(parser);
+      
+      AstExpr* lhs = new_expr(parser, AST_EXPR_STRING, start_token);
+      lhs->as.string_lit = unescape_string(parser, start_token->lexeme, true, false);
+      
+      while (true) {
+        parser_consume(parser, TOK_LBRACE, "expected '{' in interpolated string");
+        AstExpr* val = parse_expression(parser);
+        parser_consume(parser, TOK_RBRACE, "expected '}' in interpolated string");
+        
+        // Wrap val in rae_str(val)
+        AstCallArg* str_arg = make_arg(parser, "v", val);
+        AstExpr* str_call = make_call_expr(parser, "rae_str", str_arg, start_token);
+        
+        // lhs = rae_str_concat(lhs, str_call)
+        AstCallArg* arg2 = make_arg(parser, "b", str_call);
+        AstCallArg* arg1 = make_arg(parser, "a", lhs);
+        arg1->next = arg2;
+        lhs = make_call_expr(parser, "rae_str_concat", arg1, start_token);
+        
+        const Token* next = parser_peek(parser);
+        if (next->kind == TOK_STRING_MID) {
+            parser_advance(parser);
+            AstExpr* mid = new_expr(parser, AST_EXPR_STRING, next);
+            mid->as.string_lit = unescape_string(parser, next->lexeme, false, false);
+            
+            // lhs = rae_str_concat(lhs, mid)
+            arg2 = make_arg(parser, "b", mid);
+            arg1 = make_arg(parser, "a", lhs);
+            arg1->next = arg2;
+            lhs = make_call_expr(parser, "rae_str_concat", arg1, next);
+        } else if (next->kind == TOK_STRING_END) {
+            parser_advance(parser);
+            AstExpr* end = new_expr(parser, AST_EXPR_STRING, next);
+            end->as.string_lit = unescape_string(parser, next->lexeme, false, true);
+            
+            // lhs = rae_str_concat(lhs, end)
+            arg2 = make_arg(parser, "b", end);
+            arg1 = make_arg(parser, "a", lhs);
+            arg1->next = arg2;
+            lhs = make_call_expr(parser, "rae_str_concat", arg1, next);
+            break;
+        } else {
+            parser_error(parser, next, "expected string continuation");
+            break;
+        }
+      }
+      return lhs;
+    }
+    case TOK_CHAR: {
+      parser_advance(parser);
+      AstExpr* expr = new_expr(parser, AST_EXPR_CHAR, token);
+      Str content = token->lexeme;
+      if (content.len >= 2) {
+          content.data += 1;
+          content.len -= 2;
+      }
+      expr->as.char_lit = parser_copy_str(parser, content);
+      expr->as.char_value = parse_char_value(content);
+      return expr;
+    }
+    case TOK_RAW_STRING: {
+      parser_advance(parser);
+      AstExpr* expr = new_expr(parser, AST_EXPR_STRING, token);
+      expr->is_raw = true;
+      
+      const char* data = token->lexeme.data;
+      size_t len = token->lexeme.len;
+      size_t start = 1; // skip 'r'
+      size_t hashes = 0;
+      while (start + hashes < len && data[start + hashes] == '#') hashes++;
+      start += hashes + 1; // skip hashes and '"'
+      
+      size_t content_len = len - start - hashes - 1; // -1 for closing '"'
+      Str content = {.data = data + start, .len = content_len};
+      expr->as.string_lit = parser_copy_str(parser, content);
+      return expr;
+    }
+    case TOK_KW_TRUE:
+    case TOK_KW_FALSE: {
+      parser_advance(parser);
+      AstExpr* expr = new_expr(parser, AST_EXPR_BOOL, token);
+      expr->as.boolean = (token->kind == TOK_KW_TRUE);
+      return expr;
+    }
+    case TOK_KW_NONE: {
+      parser_advance(parser);
+      AstExpr* expr = new_expr(parser, AST_EXPR_NONE, token);
+      return expr;
+    }
+    case TOK_LPAREN:
+      parser_advance(parser);
+      AstExpr* inner = parse_expression(parser);
+      parser_consume(parser, TOK_RPAREN, "expected ')' after expression");
+      return inner;
+    case TOK_LBRACKET: { // Handle list literal
+      const Token* start = parser_advance(parser);
+      return parse_list_literal(parser, start);
+    }
+    case TOK_LBRACE: { // Handle untyped collection literal (map or set)
+      const Token* start = parser_advance(parser);
+      return parse_collection_literal(parser, start);
+    }
+    case TOK_KW_MATCH: {
+      const Token* match_token = parser_advance(parser);
+      return parse_match_expression(parser, match_token);
+    }
+    default:
+      parser_error(parser, token, "unexpected token in expression");
+      return NULL;
+  }
+}
 
 static AstExpr* parse_postfix(Parser* parser) {
 
@@ -676,353 +1104,6 @@ static AstExpr* parse_expression(Parser* parser) {
   return parse_binary(parser, 0);
 }
 
-static int64_t parse_char_value(Str text) {
-  if (text.len == 0) return 0;
-  if (text.data[0] == '\\') {
-    if (text.len < 2) return 0;
-    char esc = text.data[1];
-    if (esc == 'n') return '\n';
-    if (esc == 'r') return '\r';
-    if (esc == 't') return '\t';
-    if (esc == '\\') return '\\';
-    if (esc == '\'') return '\'';
-    if (esc == '"') return '"';
-    if (esc == '0') return '\0';
-    if (esc == 'u') {
-        if (text.len < 4) return 0;
-        // Skip \u{
-        // We can't easily use strtol because the string might not be null terminated at the right place
-        // But Str usually points to lexeme which is part of source.
-        // And lexer validated it ends with }.
-        // Let's manually parse hex.
-        int64_t val = 0;
-        for (size_t i = 3; i < text.len; i++) {
-            char h = text.data[i];
-            if (h == '}') break;
-            val <<= 4;
-            if (h >= '0' && h <= '9') val |= (h - '0');
-            else if (h >= 'a' && h <= 'f') val |= (h - 'a' + 10);
-            else if (h >= 'A' && h <= 'F') val |= (h - 'A' + 10);
-        }
-        return val;
-    }
-    return esc;
-  }
-  unsigned char c = (unsigned char)text.data[0];
-  if (c < 0x80) return c;
-  if ((c & 0xE0) == 0xC0) return ((c & 0x1F) << 6) | (text.data[1] & 0x3F);
-  if ((c & 0xF0) == 0xE0) return ((c & 0x0F) << 12) | ((text.data[1] & 0x3F) << 6) | (text.data[2] & 0x3F);
-  if ((c & 0xF8) == 0xF0) return ((c & 0x07) << 18) | ((text.data[1] & 0x3F) << 12) | ((text.data[2] & 0x3F) << 6) | (text.data[3] & 0x3F);
-  return c;
-}
-
-static AstExpr* make_call_expr(Parser* parser, const char* func_name, AstCallArg* args, const Token* token) {
-  AstExpr* callee = new_expr(parser, AST_EXPR_IDENT, token);
-  callee->as.ident = parser_copy_str(parser, str_from_cstr(func_name));
-  AstExpr* call = new_expr(parser, AST_EXPR_CALL, token);
-  call->as.call.callee = callee;
-  call->as.call.args = args;
-  return call;
-}
-
-static AstCallArg* make_arg(Parser* parser, const char* name, AstExpr* value) {
-  AstCallArg* arg = parser_alloc(parser, sizeof(AstCallArg));
-  arg->name = parser_copy_str(parser, str_from_cstr(name));
-  arg->value = value;
-  arg->next = NULL;
-  return arg;
-}
-
-static Str unescape_string(Parser* parser, Str lit, bool strip_start, bool strip_end) {
-  if (lit.len == 0) return lit;
-  size_t start = strip_start ? 1 : 0;
-  size_t end = strip_end ? lit.len - 1 : lit.len;
-  if (end < start) return (Str){0};
-  
-  size_t len = end - start;
-  char* buffer = parser_alloc(parser, len + 1);
-  size_t out_len = 0;
-  
-  for (size_t i = start; i < end; i++) {
-    char c = lit.data[i];
-    if (c == '\\' && i + 1 < end) {
-      i++;
-      char esc = lit.data[i];
-      switch (esc) {
-        case 'n': buffer[out_len++] = '\n'; break;
-        case 'r': buffer[out_len++] = '\r'; break;
-        case 't': buffer[out_len++] = '\t'; break;
-        case '0': buffer[out_len++] = '\0'; break;
-        case '\\': buffer[out_len++] = '\\'; break;
-        case '"': buffer[out_len++] = '"'; break;
-        case '\'': buffer[out_len++] = '\''; break;
-        case '{': buffer[out_len++] = '{'; break;
-        case '}': buffer[out_len++] = '}'; break;
-        case 'u': {
-          if (i + 1 < end && lit.data[i+1] == '{') {
-            i += 2; // skip u{
-            int64_t val = 0;
-            while (i < end && lit.data[i] != '}') {
-              char h = lit.data[i++];
-              val <<= 4;
-              if (h >= '0' && h <= '9') val |= (h - '0');
-              else if (h >= 'a' && h <= 'f') val |= (h - 'a' + 10);
-              else if (h >= 'A' && h <= 'F') val |= (h - 'A' + 10);
-            }
-            // Encode val as UTF-8 into buffer
-            if (val < 0x80) {
-              buffer[out_len++] = (char)val;
-            } else if (val < 0x800) {
-              buffer[out_len++] = (char)(0xC0 | (val >> 6));
-              buffer[out_len++] = (char)(0x80 | (val & 0x3F));
-            } else if (val < 0x10000) {
-              buffer[out_len++] = (char)(0xE0 | (val >> 12));
-              buffer[out_len++] = (char)(0x80 | ((val >> 6) & 0x3F));
-              buffer[out_len++] = (char)(0x80 | (val & 0x3F));
-            } else {
-              buffer[out_len++] = (char)(0xF0 | (val >> 18));
-              buffer[out_len++] = (char)(0x80 | ((val >> 12) & 0x3F));
-              buffer[out_len++] = (char)(0x80 | ((val >> 6) & 0x3F));
-              buffer[out_len++] = (char)(0x80 | (val & 0x3F));
-            }
-          } else {
-            buffer[out_len++] = 'u'; // fallback
-          }
-          break;
-        }
-        default: buffer[out_len++] = esc; break;
-      }
-    } else {
-      buffer[out_len++] = c;
-    }
-  }
-  buffer[out_len] = '\0';
-  return (Str){.data = buffer, .len = out_len};
-}
-
-AstCollectionElement* append_collection_element(AstCollectionElement* head, AstCollectionElement* node) {
-  if (!head) return node;
-  AstCollectionElement* tail = head;
-  while (tail->next) {
-    tail = tail->next;
-  }
-  tail->next = node;
-  return head;
-}
-
-static AstExpr* parse_collection_literal(Parser* parser, const Token* start_token, AstTypeRef* type_hint) {
-  AstExpr* expr = new_expr(parser, AST_EXPR_OBJECT, start_token); // Always create as object for now
-  expr->as.object_literal.type = type_hint; // Store the optional type hint
-  AstObjectField* head = NULL; // Use AstObjectField for fields
-  AstObjectField* tail = NULL;
-
-  if (parser_match(parser, TOK_RBRACE)) { // Empty collection literal {}
-    expr->as.object_literal.fields = NULL;
-    return expr;
-  }
-
-  do {
-    AstObjectField* field = parser_alloc(parser, sizeof(AstObjectField));
-    // Check for key: value pair
-    const Token* key_token = parser_consume(parser, TOK_IDENT, "expected field name in object literal");
-    field->name = parser_copy_str(parser, key_token->lexeme);
-    parser_consume(parser, TOK_COLON, "expected ':' after field name");
-    field->value = parse_expression(parser);
-
-    if (!head) {
-      head = tail = field;
-    } else {
-      tail->next = field;
-      tail = field;
-    }
-    
-    // Check for closing brace or comma
-    if (parser_check(parser, TOK_RBRACE)) break; // Break if closing brace found
-    parser_consume(parser, TOK_COMMA, "expected ',' or '}' in object literal");
-    if (parser_check(parser, TOK_RBRACE)) { // Allow trailing comma
-      break;
-    }
-  } while (true);
-  
-  parser_consume(parser, TOK_RBRACE, "expected '}' after object literal");
-  expr->as.object_literal.fields = head;
-  return expr;
-}
-
-static AstExpr* parse_list_literal(Parser* parser, const Token* start_token) {
-  AstExpr* expr = new_expr(parser, AST_EXPR_LIST, start_token);
-  AstExprList* head = NULL;
-  AstExprList* tail = NULL;
-  if (parser_match(parser, TOK_RBRACKET)) {
-    expr->as.list = NULL;
-    return expr;
-  }
-  do {
-    AstExprList* node = parser_alloc(parser, sizeof(AstExprList));
-    node->value = parse_expression(parser);
-    node->next = NULL;
-    if (!head) {
-      head = tail = node;
-    } else {
-      tail->next = node;
-      tail = node;
-    }
-    if (parser_check(parser, TOK_RBRACKET)) break;
-    parser_consume(parser, TOK_COMMA, "expected ',' between list elements");
-    if (parser_check(parser, TOK_RBRACKET)) break;
-  } while (true);
-  parser_consume(parser, TOK_RBRACKET, "expected ']' after list literal");
-  expr->as.list = head;
-  return expr;
-}
-
-static AstExpr* parse_primary(Parser* parser) {
-  const Token* token = parser_peek(parser);
-  switch (token->kind) {
-    case TOK_IDENT: {
-      parser_advance(parser);
-      AstExpr* expr = new_expr(parser, AST_EXPR_IDENT, token);
-      expr->as.ident = parser_copy_str(parser, token->lexeme);
-      return expr;
-    }
-    case TOK_INTEGER: {
-      parser_advance(parser);
-      AstExpr* expr = new_expr(parser, AST_EXPR_INTEGER, token);
-      expr->as.integer = parser_copy_str(parser, token->lexeme);
-      return expr;
-    }
-    case TOK_FLOAT: {
-      parser_advance(parser);
-      AstExpr* expr = new_expr(parser, AST_EXPR_FLOAT, token);
-      expr->as.floating = parser_copy_str(parser, token->lexeme);
-      return expr;
-    }
-    case TOK_STRING: {
-      parser_advance(parser);
-      AstExpr* expr = new_expr(parser, AST_EXPR_STRING, token);
-      expr->as.string_lit = unescape_string(parser, token->lexeme, true, true);
-      return expr;
-    }
-    case TOK_STRING_START: {
-      const Token* start_token = token;
-      parser_advance(parser);
-      
-      AstExpr* lhs = new_expr(parser, AST_EXPR_STRING, start_token);
-      lhs->as.string_lit = unescape_string(parser, start_token->lexeme, true, false);
-      
-      while (true) {
-        parser_consume(parser, TOK_LBRACE, "expected '{' in interpolated string");
-        AstExpr* val = parse_expression(parser);
-        parser_consume(parser, TOK_RBRACE, "expected '}' in interpolated string");
-        
-        // Wrap val in rae_str(val)
-        AstCallArg* str_arg = make_arg(parser, "v", val);
-        AstExpr* str_call = make_call_expr(parser, "rae_str", str_arg, start_token);
-        
-        // lhs = rae_str_concat(lhs, str_call)
-        AstCallArg* arg2 = make_arg(parser, "b", str_call);
-        AstCallArg* arg1 = make_arg(parser, "a", lhs);
-        arg1->next = arg2;
-        lhs = make_call_expr(parser, "rae_str_concat", arg1, start_token);
-        
-        const Token* next = parser_peek(parser);
-        if (next->kind == TOK_STRING_MID) {
-            parser_advance(parser);
-            AstExpr* mid = new_expr(parser, AST_EXPR_STRING, next);
-            mid->as.string_lit = unescape_string(parser, next->lexeme, false, false);
-            
-            // lhs = rae_str_concat(lhs, mid)
-            arg2 = make_arg(parser, "b", mid);
-            arg1 = make_arg(parser, "a", lhs);
-            arg1->next = arg2;
-            lhs = make_call_expr(parser, "rae_str_concat", arg1, next);
-        } else if (next->kind == TOK_STRING_END) {
-            parser_advance(parser);
-            AstExpr* end = new_expr(parser, AST_EXPR_STRING, next);
-            end->as.string_lit = unescape_string(parser, next->lexeme, false, true);
-            
-            // lhs = rae_str_concat(lhs, end)
-            arg2 = make_arg(parser, "b", end);
-            arg1 = make_arg(parser, "a", lhs);
-            arg1->next = arg2;
-            lhs = make_call_expr(parser, "rae_str_concat", arg1, next);
-            break;
-        } else {
-            parser_error(parser, next, "expected string continuation");
-            break;
-        }
-      }
-      return lhs;
-    }
-    case TOK_CHAR: {
-      parser_advance(parser);
-      AstExpr* expr = new_expr(parser, AST_EXPR_CHAR, token);
-      Str content = token->lexeme;
-      if (content.len >= 2) {
-          content.data += 1;
-          content.len -= 2;
-      }
-      expr->as.char_lit = parser_copy_str(parser, content);
-      expr->as.char_value = parse_char_value(content);
-      return expr;
-    }
-    case TOK_RAW_STRING: {
-      parser_advance(parser);
-      AstExpr* expr = new_expr(parser, AST_EXPR_STRING, token);
-      expr->is_raw = true;
-      
-      const char* data = token->lexeme.data;
-      size_t len = token->lexeme.len;
-      size_t start = 1; // skip 'r'
-      size_t hashes = 0;
-      while (start + hashes < len && data[start + hashes] == '#') hashes++;
-      start += hashes + 1; // skip hashes and '"'
-      
-      size_t content_len = len - start - hashes - 1; // -1 for closing '"'
-      Str content = {.data = data + start, .len = content_len};
-      expr->as.string_lit = parser_copy_str(parser, content);
-      return expr;
-    }
-    case TOK_KW_TRUE:
-    case TOK_KW_FALSE: {
-      parser_advance(parser);
-      AstExpr* expr = new_expr(parser, AST_EXPR_BOOL, token);
-      expr->as.boolean = (token->kind == TOK_KW_TRUE);
-      return expr;
-    }
-    case TOK_KW_NONE: {
-      parser_advance(parser);
-      AstExpr* expr = new_expr(parser, AST_EXPR_NONE, token);
-      return expr;
-    }
-    case TOK_LPAREN:
-      parser_advance(parser);
-      AstExpr* inner = parse_expression(parser);
-      parser_consume(parser, TOK_RPAREN, "expected ')' after expression");
-      return inner;
-    case TOK_LBRACKET: {
-      const Token* start = parser_advance(parser);
-      return parse_list_literal(parser, start);
-    }
-    case TOK_LBRACE: { // Handle collection literal (either untyped or typed object literal)
-      AstTypeRef* type_ref = NULL;
-      // Check if there's a type identifier before the LBRACE
-      if (parser_check(parser, TOK_IDENT) && parser_peek_at(parser, 1)->kind == TOK_LBRACE) {
-        type_ref = parse_type_ref(parser); // Parse the type identifier (e.g., "Point")
-      }
-      const Token* start = parser_advance(parser); // Advance past LBRACE
-      return parse_collection_literal(parser, start, type_ref);
-    }
-    case TOK_KW_MATCH: {
-      const Token* match_token = parser_advance(parser);
-      return parse_match_expression(parser, match_token);
-    }
-    default:
-      parser_error(parser, token, "unexpected token in expression");
-      return NULL;
-  }
-}
-
 static AstReturnArg* append_return_arg(AstReturnArg* head, AstReturnArg* node) {
   if (!head) {
     return node;
@@ -1154,7 +1235,7 @@ static AstStmt* parse_destructure_statement(Parser* parser, const Token* def_tok
   if (binding_count < 2) {
     parser_error(parser, def_token, "destructuring assignments require at least two bindings");
   }
-  parser_consume(parser, TOK_ASSIGN, "destructuring assignments require '='");
+  parser_consume(parser, TOK_ASSIGN, "destructuring assignments require '=' ");
   AstExpr* rhs = parse_expression(parser);
   if (!expr_is_call_like(rhs)) {
     parser_error(parser, def_token, "destructuring assignments require a call expression on the right-hand side");

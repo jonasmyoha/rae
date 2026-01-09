@@ -16,6 +16,7 @@ typedef struct {
   size_t temp_counter;
 } CFuncContext;
 
+// Forward declarations
 static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out);
 static bool emit_function(const AstFuncDecl* func, FILE* out);
 static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
@@ -24,21 +25,27 @@ static bool emit_log_call(CFuncContext* ctx, const AstExpr* expr, FILE* out, boo
 static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out);
 static bool emit_string_literal(FILE* out, Str literal);
 static bool emit_param_list(const AstParam* params, FILE* out);
+static const char* map_rae_type_to_c(Str type_name);
+static bool is_primitive_type(Str type_name);
 static bool is_pointer_type(CFuncContext* ctx, Str name);
+static bool emit_type_ref_as_c_type(const AstTypeRef* type, FILE* out);
 static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static bool emit_match(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static bool is_wildcard_pattern(const AstExpr* expr);
-static bool is_string_literal(const AstExpr* expr);
+static bool is_string_literal_expr(const AstExpr* expr);
 static bool match_cases_use_string(const AstMatchCase* cases, bool* out_use_string);
 static bool match_arms_use_string(const AstMatchArm* arms, bool* out_use_string);
+static bool func_has_return_value(const AstFuncDecl* func);
+static const char* c_return_type(const AstFuncDecl* func);
 
+// Helper functions for emitting literals
 static bool emit_string_literal(FILE* out, Str literal) {
   if (fprintf(out, "\"") < 0) return false;
   for (size_t i = 0; i < literal.len; i++) {
     char c = literal.data[i];
     switch (c) {
-      case '\"': fprintf(out, "\\\""); break;
+      case '"': fprintf(out, "\\\""); break;
       case '\\': fprintf(out, "\\\\"); break;
       case '\n': fprintf(out, "\\n"); break;
       case '\r': fprintf(out, "\\r"); break;
@@ -56,6 +63,47 @@ static const char* map_rae_type_to_c(Str type_name) {
   if (str_eq_cstr(type_name, "String")) return "const char*";
   // For user types, return name. Caller might need to str_to_cstr.
   return NULL; 
+}
+
+static bool emit_type_ref_as_c_type(const AstTypeRef* type, FILE* out) {
+  if (!type || !type->parts) return fprintf(out, "int64_t") >= 0; // Default to int64_t for unknown types
+
+  const AstIdentifierPart* current = type->parts;
+  bool is_ptr = false;
+  // Handle modifiers
+  if (current) {
+      TokenKind mod = lookup_keyword(current->text);
+      if (mod == TOK_KW_MOD || mod == TOK_KW_VIEW || mod == TOK_KW_OWN) {
+          is_ptr = true;
+          current = current->next; // Move past modifier
+      }
+  }
+
+  if (!current) return fprintf(out, "%s", is_ptr ? "void*" : "int64_t") >= 0; // Default if only modifier was present
+
+  const char* c_type_str = map_rae_type_to_c(current->text);
+  if (c_type_str) {
+      if (fprintf(out, "%s", c_type_str) < 0) return false;
+  } else {
+      if (fprintf(out, "(%.*s)", (int)current->text.len, current->text.data) < 0) return false;
+  }
+  
+  while (current->next) { // Handle multi-part identifiers (e.g., Module.Type)
+      current = current->next;
+      if (fprintf(out, "_(%.*s)", (int)current->text.len, current->text.data) < 0) return false; // Concatenate with underscore
+  }
+
+  if (is_ptr) {
+      if (fprintf(out, "*") < 0) return false;
+  }
+
+  if (type->generic_args) {
+      // C backend doesn't currently support generic types directly in type names
+      // For now, we'll just ignore them or emit a warning if needed
+      // fprintf(stderr, "warning: C backend does not yet fully support generic type arguments\n");
+  }
+
+  return true;
 }
 
 static bool emit_param_list(const AstParam* params, FILE* out) {
@@ -252,7 +300,7 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     fprintf(stderr, "error: log/logS cannot be used as expressions\n");
     return false;
   }
-  if (fprintf(out, "%.*s(", (int)name.len, name.data) < 0) {
+  if (fprintf(out, "(%.*s(", (int)name.len, name.data) < 0) {
     return false;
   }
   const AstCallArg* arg = expr->as.call.args;
@@ -291,7 +339,7 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     arg = arg->next;
     arg_index += 1;
   }
-  return fprintf(out, ")") >= 0;
+  return fprintf(out, "))") >= 0;
 }
 
 static bool is_pointer_type(CFuncContext* ctx, Str name) {
@@ -315,20 +363,20 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     case AST_EXPR_CHAR:
       return fprintf(out, "%lld", (long long)expr->as.char_value) >= 0;
     case AST_EXPR_INTEGER:
-      return fprintf(out, "%.*s", (int)expr->as.integer.len, expr->as.integer.data) >= 0;
+      return fprintf(out, "(%.*s)", (int)expr->as.integer.len, expr->as.integer.data) >= 0;
     case AST_EXPR_FLOAT:
-      return fprintf(out, "%.*s", (int)expr->as.floating.len, expr->as.floating.data) >= 0;
+      return fprintf(out, "(%.*s)", (int)expr->as.floating.len, expr->as.floating.data) >= 0;
     case AST_EXPR_BOOL:
       return fprintf(out, "%d", expr->as.boolean ? 1 : 0) >= 0;
     case AST_EXPR_IDENT: {
       for (const AstParam* param = ctx->params; param; param = param->next) {
         if (str_eq(param->name, expr->as.ident)) {
-          return fprintf(out, "%.*s", (int)expr->as.ident.len, expr->as.ident.data) >= 0;
+          return fprintf(out, "(%.*s)", (int)expr->as.ident.len, expr->as.ident.data) >= 0;
         }
       }
       for (size_t i = 0; i < ctx->local_count; ++i) {
         if (str_eq(ctx->locals[i], expr->as.ident)) {
-          return fprintf(out, "%.*s", (int)expr->as.ident.len, expr->as.ident.data) >= 0;
+          return fprintf(out, "(%.*s)", (int)expr->as.ident.len, expr->as.ident.data) >= 0;
         }
       }
       fprintf(stderr,
@@ -380,15 +428,15 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
           fprintf(stderr, "error: C backend does not support this binary operator yet\n");
           return false;
       }
-      if (fprintf(out, "") < 0) return false;
+      if (fprintf(out, "(") < 0) return false;
       if (!emit_expr(ctx, expr->as.binary.lhs, out)) return false;
       if (fprintf(out, " %s ", op) < 0) return false;
       if (!emit_expr(ctx, expr->as.binary.rhs, out)) return false;
-      return true;
+      return fprintf(out, ")") >= 0;
     }
     case AST_EXPR_UNARY:
       if (expr->as.unary.op == AST_UNARY_NEG) {
-        if (fprintf(out, "-") < 0) return false;
+        if (fprintf(out, "(-") < 0) return false;
         if (!emit_expr(ctx, expr->as.unary.operand, out)) return false;
         return true;
       } else if (expr->as.unary.op == AST_UNARY_NOT) {
@@ -499,8 +547,12 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
       return fprintf(out, "%s%.*s", sep, (int)expr->as.member.member.len, expr->as.member.member.data) >= 0;
     }
     case AST_EXPR_OBJECT: {
+      if (expr->as.object_literal.type) {
+        if (!emit_type_ref_as_c_type(expr->as.object_literal.type, out)) return false;
+        if (fprintf(out, " ") < 0) return false;
+      }
       if (fprintf(out, "{ ") < 0) return false;
-      const AstObjectField* field = expr->as.object;
+      const AstObjectField* field = expr->as.object_literal.fields;
       while (field) {
         if (fprintf(out, ".%.*s = ", (int)field->name.len, field->name.data) < 0) return false;
         if (!emit_expr(ctx, field->value, out)) return false;
@@ -510,6 +562,22 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         }
       }
       return fprintf(out, " }") >= 0;
+    }
+    case AST_EXPR_LIST: {
+      fprintf(stderr, "warning: C backend does not yet support list literals\n");
+      return fprintf(out, "NULL /* List literal */") >= 0;
+    }
+    case AST_EXPR_INDEX: {
+      fprintf(stderr, "warning: C backend does not yet support indexed expressions\n");
+      return fprintf(out, "NULL /* Indexed expression */") >= 0;
+    }
+    case AST_EXPR_METHOD_CALL: {
+      fprintf(stderr, "warning: C backend does not yet support method calls\n");
+      return fprintf(out, "NULL /* Method call */") >= 0;
+    }
+    case AST_EXPR_COLLECTION_LITERAL: {
+      fprintf(stderr, "warning: C backend does not yet support collection literals\n");
+      return fprintf(out, "NULL /* Collection literal */") >= 0;
     }
   }
   fprintf(stderr, "error: unsupported expression kind in C backend\n");
@@ -825,8 +893,10 @@ bool c_backend_emit(const AstModule* module, const char* out_path) {
   return ok;
 }
 static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
+static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static bool emit_match(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static bool is_wildcard_pattern(const AstExpr* expr);
+static bool is_string_literal_expr(const AstExpr* expr);
 
 static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
   if (!stmt->as.if_stmt.condition || !stmt->as.if_stmt.then_block) {
@@ -919,7 +989,7 @@ static bool is_wildcard_pattern(const AstExpr* expr) {
   return expr && expr->kind == AST_EXPR_IDENT && str_eq_cstr(expr->as.ident, "_");
 }
 
-static bool is_string_literal(const AstExpr* expr) {
+static bool is_string_literal_expr(const AstExpr* expr) {
   return expr && expr->kind == AST_EXPR_STRING;
 }
 
@@ -928,7 +998,7 @@ static bool match_cases_use_string(const AstMatchCase* cases, bool* out_use_stri
   bool saw_other = false;
   while (cases) {
     if (cases->pattern) {
-      if (is_string_literal(cases->pattern)) {
+      if (is_string_literal_expr(cases->pattern)) {
         saw_string = true;
       } else {
         saw_other = true;
@@ -949,7 +1019,7 @@ static bool match_arms_use_string(const AstMatchArm* arms, bool* out_use_string)
   bool saw_other = false;
   while (arms) {
     if (arms->pattern) {
-      if (is_string_literal(arms->pattern)) {
+      if (is_string_literal_expr(arms->pattern)) {
         saw_string = true;
       } else {
         saw_other = true;
