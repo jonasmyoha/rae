@@ -300,7 +300,7 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     fprintf(stderr, "error: log/logS cannot be used as expressions\n");
     return false;
   }
-  if (fprintf(out, "(%.*s(", (int)name.len, name.data) < 0) {
+  if (fprintf(out, "%.*s(", (int)name.len, name.data) < 0) {
     return false;
   }
   const AstCallArg* arg = expr->as.call.args;
@@ -339,7 +339,7 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     arg = arg->next;
     arg_index += 1;
   }
-  return fprintf(out, "))") >= 0;
+  return fprintf(out, ")") >= 0;
 }
 
 static bool is_pointer_type(CFuncContext* ctx, Str name) {
@@ -363,20 +363,20 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     case AST_EXPR_CHAR:
       return fprintf(out, "%lld", (long long)expr->as.char_value) >= 0;
     case AST_EXPR_INTEGER:
-      return fprintf(out, "(%.*s)", (int)expr->as.integer.len, expr->as.integer.data) >= 0;
+      return fprintf(out, "%.*s", (int)expr->as.integer.len, expr->as.integer.data) >= 0;
     case AST_EXPR_FLOAT:
-      return fprintf(out, "(%.*s)", (int)expr->as.floating.len, expr->as.floating.data) >= 0;
+      return fprintf(out, "%.*s", (int)expr->as.floating.len, expr->as.floating.data) >= 0;
     case AST_EXPR_BOOL:
       return fprintf(out, "%d", expr->as.boolean ? 1 : 0) >= 0;
     case AST_EXPR_IDENT: {
       for (const AstParam* param = ctx->params; param; param = param->next) {
         if (str_eq(param->name, expr->as.ident)) {
-          return fprintf(out, "(%.*s)", (int)expr->as.ident.len, expr->as.ident.data) >= 0;
+          return fprintf(out, "%.*s", (int)expr->as.ident.len, expr->as.ident.data) >= 0;
         }
       }
       for (size_t i = 0; i < ctx->local_count; ++i) {
         if (str_eq(ctx->locals[i], expr->as.ident)) {
-          return fprintf(out, "(%.*s)", (int)expr->as.ident.len, expr->as.ident.data) >= 0;
+          return fprintf(out, "%.*s", (int)expr->as.ident.len, expr->as.ident.data) >= 0;
         }
       }
       fprintf(stderr,
@@ -428,11 +428,11 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
           fprintf(stderr, "error: C backend does not support this binary operator yet\n");
           return false;
       }
-      if (fprintf(out, "(") < 0) return false;
+      if (fprintf(out, "") < 0) return false;
       if (!emit_expr(ctx, expr->as.binary.lhs, out)) return false;
       if (fprintf(out, " %s ", op) < 0) return false;
       if (!emit_expr(ctx, expr->as.binary.rhs, out)) return false;
-      return fprintf(out, ")") >= 0;
+      return true;
     }
     case AST_EXPR_UNARY:
       if (expr->as.unary.op == AST_UNARY_NEG) {
