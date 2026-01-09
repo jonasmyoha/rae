@@ -58,6 +58,11 @@ Do not introduce features that increase expressive power at the cost of clarity,
   3. Update tests if applicable
   4. Stop and wait for confirmation before starting unrelated work
 
+- **Git operations**:
+  - Suggest committing and/or pushing when there is meaningful work and a good state to push, but do not push unless explicitly told.
+  - When asked to push, commit and push first, then continue with the next task without pushing at the end.
+  - **Do not commit large temporary or log files**: Files exceeding 10,000 lines of text (e.g., debug logs, trace outputs) must not be committed to the repository. If such a file is generated, stop, re-evaluate its necessity, and consult with a human for approval before proceeding.
+
 If the task reveals a **design ambiguity**, stop and ask instead of guessing.
 
 If the task turns out to be larger than expected, split it and explain.
