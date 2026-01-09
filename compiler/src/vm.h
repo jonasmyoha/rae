@@ -33,7 +33,8 @@ typedef enum {
   OP_NATIVE_CALL = 0x1D,
   OP_GET_FIELD = 0x1E,
   OP_SET_FIELD = 0x1F,
-  OP_CONSTRUCT = 0x20
+  OP_CONSTRUCT = 0x20,
+  OP_LIST = 0x21
 } OpCode;
 
 typedef enum {

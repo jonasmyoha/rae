@@ -180,6 +180,12 @@ static bool native_rae_str(struct VM* vm,
     case VAL_OBJECT:
       out_result->value = value_string_copy("<object>", 8);
       break;
+    case VAL_LIST:
+      out_result->value = value_string_copy("<list>", 6);
+      break;
+    case VAL_ARRAY:
+      out_result->value = value_string_copy("<array>", 7);
+      break;
   }
   return true;
 }
