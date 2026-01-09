@@ -1,11 +1,13 @@
 #include "vm.h"
 
 #include <stdio.h>
+#include <stdlib.h> // For malloc and free
 #include <string.h>
 #include <math.h>
 
 #include "diag.h"
 #include "vm_registry.h"
+#include "vm_value.h" // For Value, value_list, value_list_add
 
 static Value vm_pop(VM* vm) {
   if (vm->stack_top == vm->stack) {
@@ -41,6 +43,8 @@ static bool value_is_truthy(const Value* value) {
     case VAL_NONE:
       return false;
     case VAL_OBJECT:
+    case VAL_LIST:
+    case VAL_ARRAY:
       return true;
   }
   return false;
@@ -68,6 +72,10 @@ static bool values_equal(const Value* a, const Value* b) {
       return true;
     case VAL_OBJECT:
       return a->as.object_value.fields == b->as.object_value.fields;
+    case VAL_LIST:
+      return a->as.list_value == b->as.list_value;
+    case VAL_ARRAY:
+      return a->as.array_value == b->as.array_value;
   }
   return false;
 }
@@ -400,6 +408,25 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
           obj.as.object_value.fields[i] = vm_pop(vm);
         }
         vm_push(vm, obj);
+        break;
+      }
+      case OP_LIST: {
+        uint16_t count = read_short(vm);
+        Value list = value_list();
+        // Pop elements in reverse order and add them to the list
+        Value* temp_elements = malloc(count * sizeof(Value));
+        if (!temp_elements) {
+            diag_error(NULL, 0, 0, "VM out of memory for list literal");
+            return VM_RUNTIME_ERROR;
+        }
+        for (int i = count - 1; i >= 0; --i) {
+            temp_elements[i] = vm_pop(vm);
+        }
+        for (int i = 0; i < count; ++i) {
+            value_list_add(&list, temp_elements[i]);
+        }
+        free(temp_elements);
+        vm_push(vm, list);
         break;
       }
       case OP_RETURN: {

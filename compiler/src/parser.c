@@ -375,7 +375,7 @@ static AstParam* parse_param_list(Parser* parser) {
       break;
     }
     parser_consume(parser, TOK_COMMA, "expected ',' between parameters");
-    if (parser_check(parser, TOK_RPAREN)) {
+    if (parser_match(parser, TOK_RPAREN)) {
       break;
     }
   }
@@ -816,15 +816,23 @@ static AstExpr* parse_typed_object_literal(Parser* parser, const Token* start_to
   return expr;
 }
 
+static bool is_type_name(Str name) {
+  if (name.len == 0) return false;
+  char c = name.data[0];
+  return c >= 'A' && c <= 'Z';
+}
+
 static AstExpr* parse_primary(Parser* parser) {
   const Token* token = parser_peek(parser);
 
   // Check for typed object literal first
   if (token->kind == TOK_IDENT && parser_peek_at(parser, 1)->kind == TOK_LBRACE) {
-    const Token* ident_token = parser_advance(parser); // Consume the identifier
-    AstTypeRef* type_ref = parse_type_ref_from_ident(parser, ident_token); // Create AstTypeRef from this ident_token
-    const Token* start_token = parser_advance(parser); // Consume LBRACE
-    return parse_typed_object_literal(parser, start_token, type_ref);
+    if (is_type_name(token->lexeme)) {
+      const Token* ident_token = parser_advance(parser); // Consume the identifier
+      AstTypeRef* type_ref = parse_type_ref_from_ident(parser, ident_token); // Create AstTypeRef from this ident_token
+      const Token* start_token = parser_advance(parser); // Consume LBRACE
+      return parse_typed_object_literal(parser, start_token, type_ref);
+    }
   }
 
   // If not a typed object literal, proceed with other primary expressions

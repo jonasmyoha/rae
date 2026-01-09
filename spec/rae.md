@@ -20,6 +20,9 @@
 ### 1.2 Identifiers
 
 * Pattern: `[a-zA-Z_][a-zA-Z0-9_]*`
+* **Naming Conventions:**
+  * Function names MUST be `camelCase` (e.g. `add`, `removeLast`)
+  * Type names MUST be `PascalCase` (e.g. `List`, `Map`, `Ptr`)
 * Case-sensitive
 
 ### 1.3 Keywords
@@ -72,7 +75,7 @@ pub priv extern pack
 
 ### 3.1 Type Definition
 
-A colon (`:`) after the type name is used to introduce properties (like `priv`). If a type has no properties, the colon should be omitted.
+A colon (`:`) after the type name is used to introduce properties (like `priv`). If a type has no properties, the colon should be omitted. Type names MUST follow the `PascalCase` convention.
 
 With properties:
 ```rae
@@ -106,6 +109,8 @@ opt own Texture
 ## 4. Functions
 
 ### 4.1 Function Definition
+
+Function names MUST follow the `camelCase` convention.
 
 ```rae
 # Functions are public by default

@@ -8,65 +8,6 @@
 #include "str.h"
 #include "vm.h"
 
-typedef struct {
-  Str name;
-  uint16_t offset;
-  uint16_t param_count;
-  uint16_t* patches;
-  size_t patch_count;
-  size_t patch_capacity;
-  bool is_extern;
-} FunctionEntry;
-
-typedef struct {
-  FunctionEntry* entries;
-  size_t count;
-  size_t capacity;
-} FunctionTable;
-
-typedef struct {
-  Str name;
-  Str* field_names;
-  size_t field_count;
-} TypeEntry;
-
-typedef struct {
-  TypeEntry* entries;
-  size_t count;
-  size_t capacity;
-} TypeTable;
-
-typedef struct {
-  Chunk* chunk;
-  const char* file_path;
-  bool had_error;
-  FunctionTable functions;
-  TypeTable types;
-  const AstFuncDecl* current_function;
-  struct {
-    Str name;
-    uint16_t slot;
-    Str type_name; // Store type name for locals
-  } locals[256];
-  uint16_t local_count;
-  uint16_t allocated_locals;
-} BytecodeCompiler;
-
-#define INVALID_OFFSET UINT16_MAX
-
-static void free_function_table(FunctionTable* table);
-static void free_type_table(TypeTable* table);
-static FunctionEntry* function_table_find(FunctionTable* table, Str name);
-static TypeEntry* type_table_find(TypeTable* table, Str name);
-static bool type_table_add(TypeTable* table, Str name, Str* fields, size_t field_count);
-static int type_entry_find_field(const TypeEntry* entry, Str name);
-static bool collect_metadata(const AstModule* module, FunctionTable* funcs, TypeTable* types);
-static bool emit_function_call(BytecodeCompiler* compiler, FunctionEntry* entry, int line,
-                               int column, uint8_t arg_count);
-static bool emit_return(BytecodeCompiler* compiler, bool has_value, int line);
-static int compiler_add_local(BytecodeCompiler* compiler, Str name, Str type_name);
-static int compiler_find_local(BytecodeCompiler* compiler, Str name);
-static void compiler_reset_locals(BytecodeCompiler* compiler);
 
 static Str get_base_type_name(const AstTypeRef* type) {
   if (!type || !type->parts) return (Str){0};
@@ -82,16 +23,13 @@ static Str get_base_type_name(const AstTypeRef* type) {
   return (Str){0};
 }
 
-static bool compiler_ensure_local_capacity(BytecodeCompiler* compiler, uint16_t required,
+bool compiler_ensure_local_capacity(BytecodeCompiler* compiler, uint16_t required,
                                            int line);
 static uint16_t emit_jump(BytecodeCompiler* compiler, OpCode op, int line);
 static void patch_jump(BytecodeCompiler* compiler, uint16_t offset);
 static bool compile_block(BytecodeCompiler* compiler, const AstBlock* block);
 static bool emit_native_call(BytecodeCompiler* compiler, Str name, uint8_t arg_count, int line,
                              int column);
-static uint16_t emit_jump(BytecodeCompiler* compiler, OpCode op, int line);
-static void patch_jump(BytecodeCompiler* compiler, uint16_t offset);
-static bool compile_block(BytecodeCompiler* compiler, const AstBlock* block);
 
 static void emit_byte(BytecodeCompiler* compiler, uint8_t byte, int line) {
   chunk_write(compiler->chunk, byte, line);
@@ -141,7 +79,7 @@ static bool str_matches(Str a, Str b) {
   return a.len == b.len && strncmp(a.data, b.data, a.len) == 0;
 }
 
-static FunctionEntry* function_table_find(FunctionTable* table, Str name) {
+FunctionEntry* function_table_find(FunctionTable* table, Str name) {
   if (!table) return NULL;
   for (size_t i = 0; i < table->count; ++i) {
     if (str_matches(table->entries[i].name, name)) {
@@ -226,7 +164,7 @@ static uint16_t count_params(const AstParam* param) {
   return count;
 }
 
-static TypeEntry* type_table_find(TypeTable* table, Str name) {
+TypeEntry* type_table_find(TypeTable* table, Str name) {
   if (!table) return NULL;
   for (size_t i = 0; i < table->count; ++i) {
     if (str_matches(table->entries[i].name, name)) {
@@ -236,7 +174,7 @@ static TypeEntry* type_table_find(TypeTable* table, Str name) {
   return NULL;
 }
 
-static bool type_table_add(TypeTable* table, Str name, Str* fields, size_t field_count) {
+bool type_table_add(TypeTable* table, Str name, Str* fields, size_t field_count) {
   if (type_table_find(table, name)) return true;
   if (table->count + 1 > table->capacity) {
     size_t new_cap = table->capacity < 4 ? 4 : table->capacity * 2;
@@ -252,14 +190,16 @@ static bool type_table_add(TypeTable* table, Str name, Str* fields, size_t field
   return true;
 }
 
-static int type_entry_find_field(const TypeEntry* entry, Str name) {
+int type_entry_find_field(const TypeEntry* entry, Str name) {
   for (size_t i = 0; i < entry->field_count; i++) {
     if (str_matches(entry->field_names[i], name)) return (int)i;
   }
   return -1;
 }
 
-static bool collect_metadata(const AstModule* module, FunctionTable* funcs, TypeTable* types) {
+bool collect_metadata(const AstModule* module, FunctionTable* funcs, TypeTable* types /* GEMINI: MethodTable* methods parameter removed to fix build */) {
+  // GEMINI: This function is not fully implemented yet, only a partial implementation.
+  // The method table is not yet populated.
   const AstDecl* decl = module->decls;
   while (decl) {
     if (decl->kind == AST_DECL_FUNC) {
@@ -288,7 +228,7 @@ static bool collect_metadata(const AstModule* module, FunctionTable* funcs, Type
   return true;
 }
 
-static void free_type_table(TypeTable* table) {
+void free_type_table(TypeTable* table) {
   if (!table) return;
   for (size_t i = 0; i < table->count; i++) {
     free(table->entries[i].field_names);
@@ -299,7 +239,7 @@ static void free_type_table(TypeTable* table) {
   table->capacity = 0;
 }
 
-static void free_function_table(FunctionTable* table) {
+void free_function_table(FunctionTable* table) {
   if (!table) return;
   for (size_t i = 0; i < table->count; ++i) {
     free(table->entries[i].patches);
@@ -313,12 +253,12 @@ static void free_function_table(FunctionTable* table) {
   table->capacity = 0;
 }
 
-static void compiler_reset_locals(BytecodeCompiler* compiler) {
+void compiler_reset_locals(BytecodeCompiler* compiler) {
   compiler->local_count = 0;
   compiler->allocated_locals = 0;
 }
 
-static int compiler_add_local(BytecodeCompiler* compiler, Str name, Str type_name) {
+int compiler_add_local(BytecodeCompiler* compiler, Str name, Str type_name) {
   if (compiler->local_count >= sizeof(compiler->locals) / sizeof(compiler->locals[0])) {
     diag_error(compiler->file_path, 0, 0, "VM compiler local limit exceeded");
     compiler->had_error = true;
@@ -340,7 +280,7 @@ static Str get_local_type_name(BytecodeCompiler* compiler, Str name) {
   return (Str){0};
 }
 
-static int compiler_find_local(BytecodeCompiler* compiler, Str name) {
+int compiler_find_local(BytecodeCompiler* compiler, Str name) {
   for (int i = (int)compiler->local_count - 1; i >= 0; --i) {
     if (str_matches(compiler->locals[i].name, name)) {
       return compiler->locals[i].slot;
@@ -349,7 +289,7 @@ static int compiler_find_local(BytecodeCompiler* compiler, Str name) {
   return -1;
 }
 
-static bool compiler_ensure_local_capacity(BytecodeCompiler* compiler, uint16_t required,
+bool compiler_ensure_local_capacity(BytecodeCompiler* compiler, uint16_t required,
                                            int line) {
   if (required <= compiler->allocated_locals) {
     return true;
@@ -360,7 +300,7 @@ static bool compiler_ensure_local_capacity(BytecodeCompiler* compiler, uint16_t 
   return true;
 }
 
-static bool emit_function_call(BytecodeCompiler* compiler, FunctionEntry* entry, int line,
+bool emit_function_call(BytecodeCompiler* compiler, FunctionEntry* entry, int line,
                                int column, uint8_t arg_count) {
   if (!entry) return false;
   if (entry->is_extern) {
@@ -400,7 +340,7 @@ static bool emit_native_call(BytecodeCompiler* compiler, Str name, uint8_t arg_c
   return true;
 }
 
-static bool emit_return(BytecodeCompiler* compiler, bool has_value, int line) {
+bool emit_return(BytecodeCompiler* compiler, bool has_value, int line) {
   emit_op(compiler, OP_RETURN, line);
   emit_byte(compiler, has_value ? 1 : 0, line);
   return true;
@@ -411,6 +351,7 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt);
 
 static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
   if (expr->as.call.callee->kind != AST_EXPR_IDENT) {
+  
     diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
                "VM currently only supports direct function calls");
     compiler->had_error = true;
@@ -704,7 +645,7 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
     }
     case AST_EXPR_OBJECT: {
       uint16_t count = 0;
-      const AstObjectField* f = expr->as.object;
+      const AstObjectField* f = expr->as.object_literal.fields;
       while (f) {
         if (!compile_expr(compiler, f->value)) return false;
         count++;
@@ -788,6 +729,101 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       }
       emit_op(compiler, OP_GET_LOCAL, (int)expr->line);
       emit_short(compiler, (uint16_t)result_slot, (int)expr->line);
+      return true;
+    }
+    case AST_EXPR_METHOD_CALL: {
+      Str method_name = expr->as.method_call.method_name;
+      FunctionEntry* entry = NULL;
+      uint16_t explicit_args_count = 0; // Args in Rae code, excluding implicit 'this'
+
+
+
+      // First, compile the 'this' object and push it onto the stack
+      if (!compile_expr(compiler, expr->as.method_call.object)) return false;
+
+
+      // Compile explicit arguments and push them onto the stack
+      const AstCallArg* current_arg = expr->as.method_call.args; // Includes 'this' which we already handled
+      if (current_arg && str_eq_cstr(current_arg->name, "this")) { // Skip the implicit 'this' argument from AST
+          current_arg = current_arg->next;
+      }
+      while (current_arg) {
+        if (!compile_expr(compiler, current_arg->value)) return false;
+        explicit_args_count++;
+        current_arg = current_arg->next;
+      }
+
+      
+      uint16_t total_arg_count = 1 + explicit_args_count; // 'this' + explicit args
+
+      // Special case for List/Array methods
+      if (str_eq_cstr(method_name, "add")) {
+        entry = function_table_find(&compiler->functions, str_from_cstr("rae_list_add"));
+      } else if (str_eq_cstr(method_name, "len")) {
+        entry = function_table_find(&compiler->functions, str_from_cstr("rae_list_len")); // Works for List and Array for now
+      } else if (str_eq_cstr(method_name, "get")) {
+        entry = function_table_find(&compiler->functions, str_from_cstr("rae_list_get"));
+      } else if (str_eq_cstr(method_name, "set")) {
+        entry = function_table_find(&compiler->functions, str_from_cstr("rae_array_set")); // Only Array supports set for now
+      } else {
+        // Fallback to searching for a global function with the method name
+        entry = function_table_find(&compiler->functions, method_name);
+      }
+
+      if (!entry) {
+        char buffer[128];
+        snprintf(buffer, sizeof(buffer), "unknown method '%.*s' for VM call", (int)method_name.len,
+                 method_name.data);
+        diag_error(compiler->file_path, (int)expr->line, (int)expr->column, buffer);
+        compiler->had_error = true;
+        return false;
+      }
+
+
+
+      return emit_function_call(compiler, entry, (int)expr->line, (int)expr->column, total_arg_count);
+    }
+    case AST_EXPR_COLLECTION_LITERAL: {
+      uint16_t element_count = 0;
+      AstCollectionElement* current = expr->as.collection.elements;
+      bool is_map = false;
+      if (current && current->key) { // Check if the first element has a key to infer map
+        is_map = true;
+      }
+
+      // Compile all elements and push them onto the stack
+      while (current) {
+        if (is_map && !current->key) {
+          diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "mixed keyed and unkeyed elements in map literal");
+          compiler->had_error = true;
+          return false;
+        }
+        if (!is_map && current->key) {
+          diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "keyed elements in list literal");
+          compiler->had_error = true;
+          return false;
+        }
+
+        if (current->key) { // Push key then value for map
+          Value key_value = value_string_copy(current->key->data, current->key->len);
+          emit_constant(compiler, key_value, (int)expr->line);
+        }
+        if (!compile_expr(compiler, current->value)) return false;
+        element_count++;
+        current = current->next;
+      }
+
+      if (is_map) {
+        // For now, map literals are not fully supported natively, treat as object
+        emit_op(compiler, OP_CONSTRUCT, (int)expr->line);
+        emit_short(compiler, element_count / 2, (int)expr->line); // num_fields
+        diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "Map literals (keyed collections) are not fully supported in VM yet. Treating as generic object.");
+        compiler->had_error = true; // Still error out for now
+        return false;
+      } else {
+        emit_op(compiler, OP_LIST, (int)expr->line);
+        emit_short(compiler, element_count, (int)expr->line);
+      }
       return true;
     }
     default:
@@ -1214,8 +1250,9 @@ bool vm_compile_module(const AstModule* module, Chunk* chunk, const char* file_p
   };
   memset(&compiler.functions, 0, sizeof(FunctionTable));
   memset(&compiler.types, 0, sizeof(TypeTable));
+  memset(&compiler.methods, 0, sizeof(MethodTable)); // GEMINI: MethodTable initialization added to fix build.
 
-  if (!collect_metadata(module, &compiler.functions, &compiler.types)) {
+  if (!collect_metadata(module, &compiler.functions, &compiler.types /* GEMINI: methods param removed to fix build */)) {
     diag_error(file_path, 0, 0, "failed to prepare VM metadata");
     compiler.had_error = true;
   }

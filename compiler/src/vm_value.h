@@ -12,7 +12,9 @@ typedef enum {
   VAL_STRING,
   VAL_CHAR,
   VAL_NONE,
-  VAL_OBJECT
+  VAL_OBJECT,
+  VAL_LIST,
+  VAL_ARRAY
 } ValueType;
 
 typedef struct {
@@ -21,6 +23,17 @@ typedef struct {
 } OwnedString;
 
 struct Value;
+
+typedef struct {
+  struct Value* items;
+  size_t count;
+  size_t capacity;
+} ValueList;
+
+typedef struct {
+  struct Value* items;
+  size_t count;
+} ValueArray;
 
 typedef struct {
   struct Value* fields;
@@ -36,6 +49,8 @@ typedef struct Value {
     int64_t char_value;
     OwnedString string_value;
     Object object_value;
+    ValueList* list_value;
+    ValueArray* array_value;
   } as;
 } Value;
 
@@ -47,6 +62,9 @@ Value value_string_copy(const char* data, size_t length);
 Value value_string_take(char* data, size_t length);
 Value value_none(void);
 Value value_object(size_t field_count);
+Value value_list(void);
+void value_list_add(Value* list, Value item);
+Value value_array(size_t count);
 void value_free(Value* value);
 void value_print(const Value* value);
 
