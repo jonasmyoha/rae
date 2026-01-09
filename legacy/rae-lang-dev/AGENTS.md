@@ -7,6 +7,15 @@ These instructions define **how Codex should work**, communicate progress, and i
 
 ---
 
+## Global Language Rules (MUST BE ENFORCED)
+
+### Naming conventions (language-wide, normative):
+- Function names MUST be `camelCase` (e.g. `add`, `removeLast`, `ensureCapacity`)
+- Type names MUST be `PascalCase` (e.g. `List`, `Map`, `HashMap`, `Ptr`)
+- Violations MUST produce a compiler diagnostic
+
+---
+
 ## Project overview
 
 Rae is a **language designed for both humans and AI agents**.
