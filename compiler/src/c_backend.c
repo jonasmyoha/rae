@@ -438,7 +438,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
       if (expr->as.unary.op == AST_UNARY_NEG) {
         if (fprintf(out, "(-") < 0) return false;
         if (!emit_expr(ctx, expr->as.unary.operand, out)) return false;
-        return true;
+        return fprintf(out, ")") >= 0;
       } else if (expr->as.unary.op == AST_UNARY_NOT) {
         if (fprintf(out, "!") < 0) return false;
         if (!emit_expr(ctx, expr->as.unary.operand, out)) return false;
@@ -1135,3 +1135,4 @@ static bool emit_match(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
   }
   return true;
 }
+
