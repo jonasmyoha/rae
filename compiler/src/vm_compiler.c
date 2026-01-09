@@ -783,6 +783,12 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
 
       return emit_function_call(compiler, entry, (int)expr->line, (int)expr->column, total_arg_count);
     }
+    case AST_EXPR_INDEX: {
+      if (!compile_expr(compiler, expr->as.index.target)) return false;
+      if (!compile_expr(compiler, expr->as.index.index)) return false;
+      // For index, we fallback to rae_list_get for now as it's the most common indexable
+      return emit_native_call(compiler, str_from_cstr("rae_list_get"), 2, (int)expr->line, (int)expr->column);
+    }
     case AST_EXPR_COLLECTION_LITERAL: {
       uint16_t element_count = 0;
       AstCollectionElement* current = expr->as.collection.elements;
@@ -814,12 +820,11 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       }
 
       if (is_map) {
-        // For now, map literals are not fully supported natively, treat as object
+        // Map literals (keyed collections) are not fully supported natively
+        // We'll treat them as generic objects for now
         emit_op(compiler, OP_CONSTRUCT, (int)expr->line);
-        emit_short(compiler, element_count / 2, (int)expr->line); // num_fields
-        diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "Map literals (keyed collections) are not fully supported in VM yet. Treating as generic object.");
-        compiler->had_error = true; // Still error out for now
-        return false;
+        emit_short(compiler, element_count, (int)expr->line);
+        return true;
       } else {
         emit_op(compiler, OP_LIST, (int)expr->line);
         emit_short(compiler, element_count, (int)expr->line);
