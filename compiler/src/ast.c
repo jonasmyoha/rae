@@ -32,6 +32,20 @@ static void dump_type_ref(const AstTypeRef* type, FILE* out) {
     first = false;
     part = part->next;
   }
+  if (type->generic_args) {
+    fputc('[', out);
+    AstTypeRef* generic_param = type->generic_args;
+    bool first_generic_param = true;
+    while (generic_param) {
+      if (!first_generic_param) {
+        fputs(", ", out);
+      }
+      dump_type_ref(generic_param, out);
+      first_generic_param = false;
+      generic_param = generic_param->next;
+    }
+    fputc(']', out);
+  }
 }
 
 static const char* binary_op_name(AstBinaryOp op) {
@@ -171,9 +185,13 @@ static void dump_expr(const AstExpr* expr, FILE* out) {
       print_str(out, expr->as.member.member);
       break;
     case AST_EXPR_OBJECT:
-      fputc('(', out);
-      dump_object_fields(expr->as.object, out);
-      fputc(')', out);
+      if (expr->as.object_literal.type) {
+        dump_type_ref(expr->as.object_literal.type, out);
+        fputc(' ', out);
+      }
+      fputc('{', out);
+      dump_object_fields(expr->as.object_literal.fields, out);
+      fputc('}', out);
       break;
     case AST_EXPR_MATCH: {
       fputs("match ", out);
@@ -195,6 +213,37 @@ static void dump_expr(const AstExpr* expr, FILE* out) {
         arm = arm->next;
       }
       fputs(" }", out);
+      break;
+    }
+    case AST_EXPR_COLLECTION_LITERAL: {
+      fputc('{', out);
+      AstCollectionElement* current = expr->as.collection.elements;
+      bool first = true;
+      while (current) {
+        if (!first) {
+          fputs(", ", out);
+        }
+        if (current->key) {
+          print_str(out, *current->key);
+          fputs(": ", out);
+        }
+        dump_expr(current->value, out);
+        first = false;
+        current = current->next;
+      }
+      fputc('}', out);
+      break;
+    }
+    case AST_EXPR_LIST: {
+      fputs("(List)", out);
+      break;
+    }
+    case AST_EXPR_INDEX: {
+      fputs("(Index)", out);
+      break;
+    }
+    case AST_EXPR_METHOD_CALL: {
+      fputs("(MethodCall)", out);
       break;
     }
   }
@@ -399,6 +448,20 @@ static void dump_type_decl(const AstDecl* decl, FILE* out, int indent) {
   print_indent(out, indent);
   fputs("type ", out);
   print_str(out, decl->as.type_decl.name);
+  if (decl->as.type_decl.generic_params) {
+    fputc('[', out);
+    AstIdentifierPart* current = decl->as.type_decl.generic_params;
+    bool first = true;
+    while (current) {
+      if (!first) {
+        fputs(", ", out);
+      }
+      print_str(out, current->text);
+      first = false;
+      current = current->next;
+    }
+    fputc(']', out);
+  }
   dump_properties(decl->as.type_decl.properties, out);
   fputc('\n', out);
   AstTypeField* field = decl->as.type_decl.fields;
@@ -448,6 +511,20 @@ static void dump_func_decl(const AstDecl* decl, FILE* out, int indent) {
   }
   fputs("func ", out);
   print_str(out, decl->as.func_decl.name);
+  if (decl->as.func_decl.generic_params) {
+    fputc('[', out);
+    AstIdentifierPart* current = decl->as.func_decl.generic_params;
+    bool first = true;
+    while (current) {
+      if (!first) {
+        fputs(", ", out);
+      }
+      print_str(out, current->text);
+      first = false;
+      current = current->next;
+    }
+    fputc(']', out);
+  }
   dump_properties(decl->as.func_decl.properties, out);
   fputc('\n', out);
   dump_params(decl->as.func_decl.params, out, indent + 1);
