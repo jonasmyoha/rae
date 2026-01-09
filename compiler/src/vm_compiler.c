@@ -826,6 +826,18 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       }
       return true;
     }
+    case AST_EXPR_LIST: {
+      uint16_t element_count = 0;
+      AstExprList* current = expr->as.list;
+      while (current) {
+        if (!compile_expr(compiler, current->value)) return false;
+        element_count++;
+        current = current->next;
+      }
+      emit_op(compiler, OP_LIST, (int)expr->line);
+      emit_short(compiler, element_count, (int)expr->line);
+      return true;
+    }
     default:
       diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
                  "expression not supported in VM yet");
