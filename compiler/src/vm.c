@@ -243,19 +243,20 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         break;
       }
       case OP_ALLOC_LOCAL: {
-        uint16_t count = read_short(vm);
+        uint16_t required = read_short(vm);
         CallFrame* frame = vm_current_frame(vm);
         if (!frame) {
           diag_error(NULL, 0, 0, "VM local allocation outside of function");
           return VM_RUNTIME_ERROR;
         }
-        if ((frame->locals_base - vm->stack) + frame->slot_count + count >
-            (int)(sizeof(vm->stack) / sizeof(vm->stack[0]))) {
-          diag_error(NULL, 0, 0, "VM local storage overflow");
-          return VM_RUNTIME_ERROR;
+        if (required > frame->slot_count) {
+          if ((frame->locals_base - vm->stack) + required >
+              (int)(sizeof(vm->stack) / sizeof(vm->stack[0]))) {
+            diag_error(NULL, 0, 0, "VM local storage overflow");
+            return VM_RUNTIME_ERROR;
+          }
+          frame->slot_count = required;
         }
-        frame->slots = frame->locals_base;
-        frame->slot_count += count;
         vm->stack_top = frame->slots + frame->slot_count;
         break;
       }
