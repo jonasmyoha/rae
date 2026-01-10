@@ -8,12 +8,25 @@ typedef struct {
   uint64_t len;
 } RaeString;
 
+typedef struct {
+  int64_t* items;
+  int64_t len;
+  int64_t cap;
+} RaeList;
+
+RaeList* rae_list_create(int64_t cap);
+void rae_list_add(RaeList* list, int64_t item);
+int64_t rae_list_get(RaeList* list, int64_t index);
+int64_t rae_list_length(RaeList* list);
+
 void rae_log_cstr(const char* text);
 void rae_log_stream_cstr(const char* text);
 void rae_log_i64(int64_t value);
 void rae_log_stream_i64(int64_t value);
 void rae_log_float(double value);
 void rae_log_stream_float(double value);
+void rae_log_list(RaeList* list);
+void rae_log_stream_list(RaeList* list);
 
 const char* rae_str_concat(const char* a, const char* b);
 const char* rae_str_i64(int64_t v);
