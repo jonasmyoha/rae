@@ -22,17 +22,13 @@ This is a summary of the current state of the Rae language as per the
    * Keywords:
       type, func, def, ret, spawn, own, view, mod, opt, if, else, match, case,
   true, false, none, and, or, not, is, pub, priv, extern, pack, default.
-   * Memory / Ownership Model:
-       * Types have stacked properties in canonical order: opt -> {view, mod}
-         -> own -> T.
-       * Value Types: T, opt T. Allowed everywhere (locals, params, returns,
-         fields).
-       * Borrow Types: view T (read-only), mod T (mutable). Allowed in locals
-         and params.
-       * Return Rules: Borrows can be returned only if derived from input
-         params or this.
-       * Field Restrictions: Struct fields cannot store borrows (view/mod) in
-         the current version.
+*   **References (`view`/`mod`)**: Aliasing-friendly (like C++ references), but with mandatory lifetime safety.
+    *   `view T`: Read-only reference.
+    *   `mod T`: Modifiable reference.
+    *   Cannot escape local scope (must not outlive storage).
+*   **Binding (`=>`)**: Aliases storage (does not copy). Works with `view`, `mod`, `opt`.
+*   **Member-Call Sugar**: `p.x()` desugars to `x(p)`. Allows extension-method style calls.
+*   **Positional first arg**: `getX(p)` is OK if unambiguous.
    * Conventions:
        * Functions are camelCase, Types are PascalCase.
        * All call arguments must be named: log(value: "hi").
@@ -108,7 +104,7 @@ This is a summary of the current state of the Rae language as per the
    * Assumptions:
        * DO NOT assume Rust-style move semantics; Rae copies by default.
        * DO NOT assume implicit returns.
-       * DO NOT assume struct fields can hold borrows.
+       * DO NOT assume struct fields can hold references.
    * Language Comparisons:
        * Rae is NOT Rust: Borrows are explicit via => and properties, not
          sigils.

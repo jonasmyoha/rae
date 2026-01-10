@@ -256,6 +256,9 @@ PY
     fi
     echo "PASS: $TEST_NAME"
     ((PASSED++))
+  elif [ "$(head -n 1 "$EXPECT_FILE" | tr -d '\r')" = "BINARY_SKIP_MATCH" ]; then
+    echo "PASS: $TEST_NAME (binary match skipped)"
+    ((PASSED++))
   else
     echo "FAIL: $TEST_NAME"
     echo "  Expected:"

@@ -15,7 +15,7 @@ typedef enum {
   VAL_OBJECT,
   VAL_LIST,
   VAL_ARRAY,
-  VAL_BORROW,
+  VAL_REF,
   VAL_ID,
   VAL_KEY
 } ValueType;
@@ -28,14 +28,14 @@ typedef struct {
 struct Value;
 
 typedef enum {
-  BORROW_VIEW,
-  BORROW_MOD
-} BorrowKind;
+  REF_VIEW,
+  REF_MOD
+} ReferenceKind;
 
 typedef struct {
   struct Value* target;
-  BorrowKind kind;
-} Borrow;
+  ReferenceKind kind;
+} Reference;
 
 typedef struct {
   struct Value* items;
@@ -64,7 +64,7 @@ typedef struct Value {
     Object object_value;
     ValueList* list_value;
     ValueArray* array_value;
-    Borrow borrow_value;
+    Reference ref_value;
     int64_t id_value;
     OwnedString key_value;
   } as;
@@ -81,7 +81,7 @@ Value value_object(size_t field_count);
 Value value_list(void);
 void value_list_add(Value* list, Value item);
 Value value_array(size_t count);
-Value value_borrow(Value* target, BorrowKind kind);
+Value value_ref(Value* target, ReferenceKind kind);
 Value value_id(int64_t v);
 Value value_key_copy(const char* data, size_t length);
 Value value_copy(const Value* value);

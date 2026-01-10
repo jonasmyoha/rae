@@ -111,10 +111,10 @@ Value value_array(size_t count) {
   return value;
 }
 
-Value value_borrow(Value* target, BorrowKind kind) {
-  Value value = {.type = VAL_BORROW};
-  value.as.borrow_value.target = target;
-  value.as.borrow_value.kind = kind;
+Value value_ref(Value* target, ReferenceKind kind) {
+  Value value = {.type = VAL_REF};
+  value.as.ref_value.target = target;
+  value.as.ref_value.kind = kind;
   return value;
 }
 
@@ -183,8 +183,8 @@ Value value_copy(const Value* value) {
         }
       }
       break;
-    case VAL_BORROW:
-      // Borrows themselves are copied (pointing to the same target)
+    case VAL_REF:
+      // References themselves are copied (pointing to the same target)
       break;
     default:
       break;
@@ -225,9 +225,9 @@ void value_free(Value* value) {
     free(va->items);
     free(va);
     value->as.array_value = NULL;
-  } else if (value->type == VAL_BORROW) {
-    // Nothing to free for the borrow itself, it's a weak reference
-    value->as.borrow_value.target = NULL;
+  } else if (value->type == VAL_REF) {
+    // Nothing to free for the reference itself, it's a weak pointer
+    value->as.ref_value.target = NULL;
   }
   value->type = VAL_NONE;
 }
@@ -293,9 +293,9 @@ void value_print(const Value* value) {
       }
       printf(")");
       break;
-    case VAL_BORROW:
-      printf(value->as.borrow_value.kind == BORROW_VIEW ? "view " : "mod ");
-      value_print(value->as.borrow_value.target);
+    case VAL_REF:
+      printf(value->as.ref_value.kind == REF_VIEW ? "view " : "mod ");
+      value_print(value->as.ref_value.target);
       break;
     case VAL_ID:
       printf("Id(%lld)", (long long)value->as.id_value);
