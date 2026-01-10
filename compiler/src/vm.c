@@ -46,7 +46,7 @@ static bool value_is_truthy(const Value* value) {
     case VAL_OBJECT:
     case VAL_LIST:
     case VAL_ARRAY:
-    case VAL_BORROW:
+    case VAL_REF:
     case VAL_ID:
     case VAL_KEY:
       return true;
@@ -57,8 +57,8 @@ static bool value_is_truthy(const Value* value) {
 static bool values_equal(const Value* a, const Value* b) {
   const Value* lhs = a;
   const Value* rhs = b;
-  if (lhs->type == VAL_BORROW) lhs = lhs->as.borrow_value.target;
-  if (rhs->type == VAL_BORROW) rhs = rhs->as.borrow_value.target;
+  if (lhs->type == VAL_REF) lhs = lhs->as.ref_value.target;
+  if (rhs->type == VAL_REF) rhs = rhs->as.ref_value.target;
   
   
   if (lhs->type != rhs->type) {
@@ -97,9 +97,9 @@ static bool values_equal(const Value* a, const Value* b) {
       return lhs->as.array_value == rhs->as.array_value;
     case VAL_ID:
       return lhs->as.id_value == rhs->as.id_value;
-    case VAL_BORROW:
-      // Should be unreachable due to unwrapping above
-      return lhs->as.borrow_value.target == rhs->as.borrow_value.target;
+    case VAL_REF:
+      // References are equal if they point to the same storage
+      return lhs->as.ref_value.target == rhs->as.ref_value.target;
   }
   return false;
 }
@@ -202,7 +202,7 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         // Copy arguments to stable locals storage
         for (int i = 0; i < arg_count; i++) {
           // DON'T value_copy here, just assign.
-          // Arguments are already prepared by the caller (either a new copy or a borrow).
+          // Arguments are already prepared by the caller (either a new copy or a reference).
           frame->locals[i] = frame->slots[i];
         }
         if (target >= vm->chunk->code_count) {
@@ -277,14 +277,14 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
           return VM_RUNTIME_ERROR;
         }
         Value value = value_copy(vm_peek(vm, 0));
-        if (frame->locals[slot].type == VAL_BORROW) {
-          if (frame->locals[slot].as.borrow_value.kind == BORROW_VIEW) {
-            diag_error(NULL, 0, 0, "cannot assign to a read-only 'view' borrow");
+        if (frame->locals[slot].type == VAL_REF) {
+          if (frame->locals[slot].as.ref_value.kind == REF_VIEW) {
+            diag_error(NULL, 0, 0, "cannot assign to a read-only 'view' reference");
             value_free(&value);
             return VM_RUNTIME_ERROR;
           }
-          value_free(frame->locals[slot].as.borrow_value.target);
-          *frame->locals[slot].as.borrow_value.target = value_copy(&value);
+          value_free(frame->locals[slot].as.ref_value.target);
+          *frame->locals[slot].as.ref_value.target = value_copy(&value);
         } else {
           value_free(&frame->locals[slot]);
           frame->locals[slot] = value_copy(&value);
@@ -433,8 +433,8 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         uint16_t index = read_short(vm);
         Value obj_val = vm_pop(vm);
         Value* target = &obj_val;
-        if (obj_val.type == VAL_BORROW) {
-          target = obj_val.as.borrow_value.target;
+        if (obj_val.type == VAL_REF) {
+          target = obj_val.as.ref_value.target;
         }
         
         if (target->type != VAL_OBJECT) {
@@ -453,18 +453,17 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
       }
       case OP_SET_FIELD: {
         uint16_t index = read_short(vm);
-        Value val = vm_pop(vm);
         Value obj_val = vm_pop(vm);
+        Value val = vm_pop(vm);
         Value* target = &obj_val;
-        
-        if (obj_val.type == VAL_BORROW) {
-          if (obj_val.as.borrow_value.kind == BORROW_VIEW) {
-            diag_error(NULL, 0, 0, "cannot assign to field of a read-only 'view' borrow");
-            value_free(&val);
+        if (obj_val.type == VAL_REF) {
+          if (obj_val.as.ref_value.kind == REF_VIEW) {
+            diag_error(NULL, 0, 0, "cannot assign to field of a read-only 'view' reference");
             value_free(&obj_val);
+            value_free(&val);
             return VM_RUNTIME_ERROR;
           }
-          target = obj_val.as.borrow_value.target;
+          target = obj_val.as.ref_value.target;
         }
         
         if (target->type != VAL_OBJECT) {
@@ -494,8 +493,8 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         if (!frame) return VM_RUNTIME_ERROR;
         
         Value* target = &frame->locals[slot];
-        if (target->type == VAL_BORROW) {
-          target = target->as.borrow_value.target;
+        if (target->type == VAL_REF) {
+          target = target->as.ref_value.target;
         }
         
         if (target->type != VAL_OBJECT) {
@@ -518,12 +517,12 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
       }
       case OP_BIND_FIELD: {
         uint16_t index = read_short(vm);
-        Value value = vm_pop(vm); // The borrow to bind
+        Value value = vm_pop(vm); // The reference to bind
         Value* obj_ptr = vm_peek(vm, 0); // Pointer to target object on stack
         
         Value obj = *obj_ptr;
-        if (obj.type == VAL_BORROW) {
-          obj_ptr = obj.as.borrow_value.target;
+        if (obj.type == VAL_REF) {
+          obj_ptr = obj.as.ref_value.target;
           obj = *obj_ptr;
         }
         
@@ -541,21 +540,22 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         // value remains on stack as result of bind? typically yes for assign
         break;
       }
-      case OP_BORROW_VIEW: {
+      case OP_REF_VIEW: {
         Value* target = vm_peek(vm, 0);
         if (target->type == VAL_NONE) {
           // Already none, so opt view T => none is none
         } else {
-          *target = value_borrow(target, BORROW_VIEW);
+          // Dangerous: points to stack. Handled by compiler only for safe cases.
+          *target = value_ref(target, REF_VIEW);
         }
         break;
       }
-      case OP_BORROW_MOD: {
+      case OP_REF_MOD: {
         Value* target = vm_peek(vm, 0);
         if (target->type == VAL_NONE) {
           // Already none
         } else {
-          *target = value_borrow(target, BORROW_MOD);
+          *target = value_ref(target, REF_MOD);
         }
         break;
       }
@@ -569,11 +569,11 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         if (target->type == VAL_NONE) {
           vm_push(vm, value_none());
         } else {
-          // Resolve pointer chain: if slot already holds a borrow, point to its target.
-          while (target->type == VAL_BORROW) {
-            target = target->as.borrow_value.target;
+          // Resolve pointer chain: if slot already holds a reference, point to its target.
+          while (target->type == VAL_REF) {
+            target = target->as.ref_value.target;
           }
-          vm_push(vm, value_borrow(target, instruction == OP_MOD_LOCAL ? BORROW_MOD : BORROW_VIEW));
+          vm_push(vm, value_ref(target, instruction == OP_MOD_LOCAL ? REF_MOD : REF_VIEW));
         }
         break;
       }
@@ -581,15 +581,15 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
       case OP_MOD_FIELD: {
         uint16_t index = read_short(vm);
         Value obj = vm_pop(vm);
-        if (obj.type == VAL_BORROW) {
-          obj = *obj.as.borrow_value.target;
+        if (obj.type == VAL_REF) {
+          obj = *obj.as.ref_value.target;
         }
         if (obj.type != VAL_OBJECT) return VM_RUNTIME_ERROR;
         Value* target = &obj.as.object_value.fields[index];
         if (target->type == VAL_NONE) {
           vm_push(vm, value_none());
         } else {
-          vm_push(vm, value_borrow(target, instruction == OP_MOD_FIELD ? BORROW_MOD : BORROW_VIEW));
+          vm_push(vm, value_ref(target, instruction == OP_MOD_FIELD ? REF_MOD : REF_VIEW));
         }
         break;
       }

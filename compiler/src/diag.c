@@ -35,11 +35,15 @@ static void print_source_line(const char* file, int line, int col) {
 }
 
 void diag_error(const char* file, int line, int col, const char* message) {
+  diag_report(file, line, col, message);
+  exit(1);
+}
+
+void diag_report(const char* file, int line, int col, const char* message) {
   fprintf(stderr, "%s:%d:%d: %s\n", file ? file : "<unknown>", line, col, message);
   if (file && line > 0) {
     print_source_line(file, line, col);
   }
-  exit(1);
 }
 
 void diag_fatal(const char* message) {

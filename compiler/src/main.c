@@ -186,8 +186,8 @@ static bool native_rae_str(struct VM* vm,
     case VAL_ARRAY:
       out_result->value = value_string_copy("<array>", 7);
       break;
-    case VAL_BORROW: {
-      const char* prefix = args[0].as.borrow_value.kind == BORROW_VIEW ? "view " : "mod ";
+    case VAL_REF: {
+      const char* prefix = args[0].as.ref_value.kind == REF_VIEW ? "view " : "mod ";
       out_result->value = value_string_copy(prefix, strlen(prefix));
       break;
     }
@@ -255,9 +255,16 @@ static bool native_rae_list_add(struct VM* vm,
                                 void* user_data) {
   (void)vm;
   (void)user_data;
-  if (arg_count != 2 || args[0].type != VAL_LIST) return false;
-  Value list = args[0];
-  value_list_add(&list, args[1]);
+  if (arg_count != 2) return false;
+  
+  Value list_val = args[0];
+  if (list_val.type == VAL_REF) {
+    list_val = *list_val.as.ref_value.target;
+  }
+  
+  if (list_val.type != VAL_LIST) return false;
+  
+  value_list_add(&list_val, args[1]);
   out_result->has_value = false;
   return true;
 }
@@ -269,8 +276,16 @@ static bool native_rae_list_get(struct VM* vm,
                                 void* user_data) {
   (void)vm;
   (void)user_data;
-  if (arg_count != 2 || args[0].type != VAL_LIST || args[1].type != VAL_INT) return false;
-  ValueList* vl = args[0].as.list_value;
+  if (arg_count != 2 || args[1].type != VAL_INT) return false;
+  
+  Value list_val = args[0];
+  if (list_val.type == VAL_REF) {
+    list_val = *list_val.as.ref_value.target;
+  }
+  
+  if (list_val.type != VAL_LIST) return false;
+  
+  ValueList* vl = list_val.as.list_value;
   int64_t index = args[1].as.int_value;
   if (!vl || index < 0 || (size_t)index >= vl->count) {
     out_result->has_value = true;
@@ -278,7 +293,7 @@ static bool native_rae_list_get(struct VM* vm,
     return true;
   }
   out_result->has_value = true;
-  out_result->value = vl->items[index];
+  out_result->value = value_copy(&vl->items[index]);
   return true;
 }
 
@@ -289,8 +304,16 @@ static bool native_rae_list_length(struct VM* vm,
                                    void* user_data) {
   (void)vm;
   (void)user_data;
-  if (arg_count != 1 || args[0].type != VAL_LIST) return false;
-  ValueList* vl = args[0].as.list_value;
+  if (arg_count != 1) return false;
+  
+  Value list_val = args[0];
+  if (list_val.type == VAL_REF) {
+    list_val = *list_val.as.ref_value.target;
+  }
+  
+  if (list_val.type != VAL_LIST) return false;
+  
+  ValueList* vl = list_val.as.list_value;
   out_result->has_value = true;
   out_result->value = value_int(vl ? (int64_t)vl->count : 0);
   return true;

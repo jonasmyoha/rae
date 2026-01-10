@@ -62,6 +62,10 @@ static bool parser_check(Parser* parser, TokenKind kind) {
   return parser_peek(parser)->kind == kind;
 }
 
+static bool parser_check_at(Parser* parser, size_t offset, TokenKind kind) {
+  return parser_peek_at(parser, offset)->kind == kind;
+}
+
 static const Token* parser_advance(Parser* parser) {
   if (parser->index < parser->count) {
     parser->index += 1;
@@ -653,13 +657,25 @@ static AstExpr* finish_call(Parser* parser, AstExpr* callee, const Token* start_
     return expr;
   }
   AstCallArg* args = NULL;
+  size_t arg_idx = 0;
   do {
     AstCallArg* arg = parser_alloc(parser, sizeof(AstCallArg));
-    const Token* name = parser_consume_ident(parser, "expected argument name (all arguments must be named)");
-    parser_consume(parser, TOK_COLON, "expected ':' after argument name");
-    arg->name = parser_copy_str(parser, name->lexeme);
-    arg->value = parse_expression(parser);
+    if (arg_idx == 0 && parser_check(parser, TOK_IDENT) && !parser_check_at(parser, 1, TOK_COLON)) {
+        // Positional first argument
+        arg->name = (Str){0};
+        arg->value = parse_expression(parser);
+    } else if (arg_idx == 0 && !parser_check(parser, TOK_IDENT)) {
+        // Positional first argument (literal or complex expr)
+        arg->name = (Str){0};
+        arg->value = parse_expression(parser);
+    } else {
+        const Token* name = parser_consume_ident(parser, "expected argument name (subsequent arguments must be named)");
+        parser_consume(parser, TOK_COLON, "expected ':' after argument name");
+        arg->name = parser_copy_str(parser, name->lexeme);
+        arg->value = parse_expression(parser);
+    }
     args = append_call_arg(args, arg);
+    arg_idx++;
     if (parser_check(parser, TOK_RPAREN)) break;
     parser_consume(parser, TOK_COMMA, "expected ',' between arguments");
     if (parser_check(parser, TOK_RPAREN)) {
@@ -1015,19 +1031,29 @@ static AstExpr* parse_postfix(Parser* parser) {
         AstExpr* method_call = new_expr(parser, AST_EXPR_METHOD_CALL, parser_previous(parser));
         method_call->as.method_call.object = expr;
         method_call->as.method_call.method_name = parser_copy_str(parser, name->lexeme);
-        // Parse arguments, implicitly adding 'this'
+        // Parse arguments, implicitly adding 'this' (receiver)
         AstCallArg* args = NULL;
-        AstCallArg* this_arg = make_arg(parser, "this", expr);
-        args = append_call_arg(args, this_arg);
-
+        // NOTE: We don't add 'this' as a named arg here in the parser anymore, 
+        // the VM compiler will handle the receiver.
+        
         if (!parser_match(parser, TOK_RPAREN)) {
+          size_t arg_idx = 0;
           do {
             AstCallArg* arg = parser_alloc(parser, sizeof(AstCallArg));
-            const Token* arg_name = parser_consume_ident(parser, "expected argument name (all arguments must be named)");
-            parser_consume(parser, TOK_COLON, "expected ':' after argument name");
-            arg->name = parser_copy_str(parser, arg_name->lexeme);
-            arg->value = parse_expression(parser);
+            if (arg_idx == 0 && parser_check(parser, TOK_IDENT) && !parser_check_at(parser, 1, TOK_COLON)) {
+                arg->name = (Str){0};
+                arg->value = parse_expression(parser);
+            } else if (arg_idx == 0 && !parser_check(parser, TOK_IDENT)) {
+                arg->name = (Str){0};
+                arg->value = parse_expression(parser);
+            } else {
+                const Token* arg_name = parser_consume_ident(parser, "expected argument name (subsequent arguments must be named)");
+                parser_consume(parser, TOK_COLON, "expected ':' after argument name");
+                arg->name = parser_copy_str(parser, arg_name->lexeme);
+                arg->value = parse_expression(parser);
+            }
             args = append_call_arg(args, arg);
+            arg_idx++;
             if (parser_check(parser, TOK_RPAREN)) break;
             parser_consume(parser, TOK_COMMA, "expected ',' between arguments");
             if (parser_check(parser, TOK_RPAREN)) {
