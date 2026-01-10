@@ -475,9 +475,9 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         if (!emit_expr(ctx, expr->as.unary.operand, out)) return false;
         return fprintf(out, ")") >= 0;
       } else if (expr->as.unary.op == AST_UNARY_NOT) {
-        if (fprintf(out, "!") < 0) return false;
+        if (fprintf(out, "(!(") < 0) return false;
         if (!emit_expr(ctx, expr->as.unary.operand, out)) return false;
-        return true;
+        return fprintf(out, "))") >= 0;
       } else if (expr->as.unary.op == AST_UNARY_PRE_INC) {
         if (fprintf(out, "++") < 0) return false;
         if (!emit_expr(ctx, expr->as.unary.operand, out)) return false;
@@ -583,8 +583,9 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     }
     case AST_EXPR_OBJECT: {
       if (expr->as.object_literal.type) {
+        fprintf(out, "(");
         if (!emit_type_ref_as_c_type(expr->as.object_literal.type, out)) return false;
-        if (fprintf(out, " ") < 0) return false;
+        fprintf(out, ")");
       }
       if (fprintf(out, "{ ") < 0) return false;
       const AstObjectField* field = expr->as.object_literal.fields;
@@ -649,6 +650,28 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
       uint16_t element_count = 0;
       const AstCollectionElement* current = expr->as.collection.elements;
       while (current) { element_count++; current = current->next; }
+      
+      bool is_object = (expr->as.collection.elements && expr->as.collection.elements->key != NULL);
+      
+      if (is_object) {
+        if (expr->as.collection.type) {
+          fprintf(out, "(");
+          if (!emit_type_ref_as_c_type(expr->as.collection.type, out)) return false;
+          fprintf(out, ")");
+        }
+        fprintf(out, "{ ");
+        current = expr->as.collection.elements;
+        while (current) {
+          if (current->key) {
+            fprintf(out, ".%.*s = ", (int)current->key->len, current->key->data);
+          }
+          if (!emit_expr(ctx, current->value, out)) return false;
+          if (current->next) fprintf(out, ", ");
+          current = current->next;
+        }
+        fprintf(out, " }");
+        return true;
+      }
       
       fprintf(out, "({ RaeList* _l = rae_list_create(%u); ", element_count);
       current = expr->as.collection.elements;
