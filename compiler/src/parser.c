@@ -195,16 +195,16 @@ static AstTypeRef* parse_type_ref(Parser* parser) {
   }
   type->parts = parts_head;
 
-  if (parser_match(parser, TOK_LBRACKET)) {
+  if (parser_match(parser, TOK_LPAREN)) {
     AstTypeRef* generic_params_head = NULL;
     do {
       AstTypeRef* generic_param = parse_type_ref(parser); // Recursive call for nested generics
       generic_params_head = append_type_ref_list(generic_params_head, generic_param);
-      if (parser_check(parser, TOK_RBRACKET)) break;
-      parser_consume(parser, TOK_COMMA, "expected ',' or ']' in generic type list");
-      if (parser_check(parser, TOK_RBRACKET)) break;
+      if (parser_check(parser, TOK_RPAREN)) break;
+      parser_consume(parser, TOK_COMMA, "expected ',' or ')' in generic type list");
+      if (parser_check(parser, TOK_RPAREN)) break;
     } while (true);
-    parser_consume(parser, TOK_RBRACKET, "expected ']' after generic type list");
+    parser_consume(parser, TOK_RPAREN, "expected ')' after generic type list");
     type->generic_args = generic_params_head;
   }
 
@@ -261,6 +261,8 @@ static AstImport* append_import(AstImport* head, AstImport* node) {
   tail->next = node;
   return head;
 }
+
+static Str unescape_string(Parser* parser, Str lit, bool strip_start, bool strip_end);
 
 static Str parse_import_path_spec(Parser* parser) {
   size_t len = 0;
@@ -321,7 +323,11 @@ static Str parse_import_path_spec(Parser* parser) {
 
 static AstImport* parse_import_clause(Parser* parser, bool is_export) {
   const Token* start = parser_previous(parser);
-  if (parser_check(parser, TOK_IDENT) && str_eq_cstr(parser_peek(parser)->lexeme, "nostdlib")) {
+  Str path;
+  if (parser_check(parser, TOK_STRING)) {
+      const Token* t = parser_advance(parser);
+      path = unescape_string(parser, t->lexeme, true, true);
+  } else if (parser_check(parser, TOK_IDENT) && str_eq_cstr(parser_peek(parser)->lexeme, "nostdlib")) {
     const Token* t = parser_advance(parser);
     AstImport* clause = parser_alloc(parser, sizeof(AstImport));
     clause->is_export = is_export;
@@ -329,8 +335,10 @@ static AstImport* parse_import_clause(Parser* parser, bool is_export) {
     clause->line = start->line;
     clause->column = start->column;
     return clause;
+  } else {
+    path = parse_import_path_spec(parser);
   }
-  Str path = parse_import_path_spec(parser);
+  
   if (path.len == 0) {
     return NULL;
   }
@@ -456,11 +464,11 @@ static AstExpr* parse_expression(Parser* parser);
 static AstBlock* parse_block(Parser* parser);
 static AstStmt* parse_statement(Parser* parser);
 static AstExpr* parse_match_expression(Parser* parser, const Token* match_token);
-static AstExpr* parse_list_literal(Parser* parser, const Token* start_token);
 static AstExpr* parse_collection_literal(Parser* parser, const Token* start_token);
 static AstExpr* parse_typed_literal(Parser* parser, const Token* start_token, AstTypeRef* type_hint);
 static AstCallArg* make_arg(Parser* parser, const char* name, AstExpr* value);
 static AstTypeRef* parse_type_ref_from_ident(Parser* parser, const Token* ident_token);
+static AstExpr* finish_call(Parser* parser, AstExpr* callee, const Token* start_token);
 
 static bool token_is_ident(const Token* token, const char* text) {
   if (!token || token->kind != TOK_IDENT) return false;
@@ -504,7 +512,7 @@ static BinaryInfo get_binary_info(TokenKind kind) {
   }
 }
 
-// Helper functions for parsing literal values
+// Helper functions for parsing literal values (MOVED UP)
 static int64_t parse_char_value(Str text) {
   if (text.len == 0) return 0;
   if (text.data[0] == '\\') {
@@ -624,36 +632,19 @@ static Str unescape_string(Parser* parser, Str lit, bool strip_start, bool strip
   return (Str){.data = buffer, .len = out_len};
 }
 
-static bool callee_allows_value_shorthand(const AstExpr* callee) {
-  if (!callee || callee->kind != AST_EXPR_IDENT) return false;
-  return str_eq_cstr(callee->as.ident, "log") || str_eq_cstr(callee->as.ident, "logS");
-}
-
 static AstExpr* finish_call(Parser* parser, AstExpr* callee, const Token* start_token) {
   AstExpr* expr = new_expr(parser, AST_EXPR_CALL, start_token);
   expr->as.call.callee = callee;
   if (parser_match(parser, TOK_RPAREN)) {
     return expr;
   }
-  bool allow_shorthand = callee_allows_value_shorthand(callee);
-  bool used_shorthand = false;
   AstCallArg* args = NULL;
   do {
     AstCallArg* arg = parser_alloc(parser, sizeof(AstCallArg));
-    if (parser_check(parser, TOK_IDENT) && parser_peek_at(parser, 1)->kind == TOK_COLON) {
-      const Token* name = parser_advance(parser);
-      parser_consume(parser, TOK_COLON, "expected ':' after argument name");
-      arg->name = parser_copy_str(parser, name->lexeme);
-      arg->value = parse_expression(parser);
-    } else if (allow_shorthand && !used_shorthand) {
-      arg->name = str_from_cstr("value");
-      arg->value = parse_expression(parser);
-      used_shorthand = true;
-    } else {
-      parser_error(parser, parser_peek(parser), "expected argument name");
-      arg->name = str_from_cstr("<error>");
-      arg->value = parse_expression(parser);
-    }
+    const Token* name = parser_consume(parser, TOK_IDENT, "expected argument name (all arguments must be named)");
+    parser_consume(parser, TOK_COLON, "expected ':' after argument name");
+    arg->name = parser_copy_str(parser, name->lexeme);
+    arg->value = parse_expression(parser);
     args = append_call_arg(args, arg);
     if (parser_check(parser, TOK_RPAREN)) break;
     parser_consume(parser, TOK_COMMA, "expected ',' between arguments");
@@ -737,33 +728,6 @@ static AstExpr* parse_collection_literal(Parser* parser, const Token* start_toke
   
   parser_consume(parser, TOK_RBRACE, "expected '}' after collection literal");
   expr->as.collection.elements = head;
-  return expr;
-}
-
-static AstExpr* parse_list_literal(Parser* parser, const Token* start_token) {
-  AstExpr* expr = new_expr(parser, AST_EXPR_LIST, start_token);
-  AstExprList* head = NULL;
-  AstExprList* tail = NULL;
-  if (parser_match(parser, TOK_RBRACKET)) {
-    expr->as.list = NULL;
-    return expr;
-  }
-  do {
-    AstExprList* node = parser_alloc(parser, sizeof(AstExprList));
-    node->value = parse_expression(parser);
-    node->next = NULL;
-    if (!head) {
-      head = tail = node;
-    } else {
-      tail->next = node;
-      tail = node;
-    }
-    if (parser_check(parser, TOK_RBRACKET)) break;
-    parser_consume(parser, TOK_COMMA, "expected ',' between list elements");
-    if (parser_check(parser, TOK_RBRACKET)) break;
-  } while (true);
-  parser_consume(parser, TOK_RBRACKET, "expected ']' after list literal");
-  expr->as.list = head;
   return expr;
 }
 
@@ -861,14 +825,14 @@ static AstExpr* parse_primary(Parser* parser) {
       const Token* start_token = parser_advance(parser); // Consume LBRACE
       return parse_typed_literal(parser, start_token, type_ref);
     }
-    if (parser_peek_at(parser, 1)->kind == TOK_LBRACKET) {
-       // Search matching ] followed by {
+    if (parser_peek_at(parser, 1)->kind == TOK_LPAREN) {
+       // Look ahead for matching ) followed by {
        size_t i = 2;
        int depth = 1;
        while (i < parser->count - parser->index && depth > 0) {
            TokenKind k = parser_peek_at(parser, i)->kind;
-           if (k == TOK_LBRACKET) depth++;
-           else if (k == TOK_RBRACKET) depth--;
+           if (k == TOK_LPAREN) depth++;
+           else if (k == TOK_RPAREN) depth--;
            else if (k == TOK_EOF) break;
            i++;
        }
@@ -1003,10 +967,6 @@ static AstExpr* parse_primary(Parser* parser) {
       AstExpr* inner = parse_expression(parser);
       parser_consume(parser, TOK_RPAREN, "expected ')' after expression");
       return inner;
-    case TOK_LBRACKET: { // Handle list literal
-      const Token* start = parser_advance(parser);
-      return parse_list_literal(parser, start);
-    }
     case TOK_LBRACE: { // Handle untyped collection literal (map or set)
       const Token* start = parser_advance(parser);
       return parse_collection_literal(parser, start);
@@ -1047,29 +1007,18 @@ static AstExpr* parse_postfix(Parser* parser) {
         args = append_call_arg(args, this_arg);
 
         if (!parser_match(parser, TOK_RPAREN)) {
-          // Add remaining arguments from Rae code
-          bool allow_shorthand = callee_allows_value_shorthand(expr); // Re-use for now, though conceptually different
-          bool used_shorthand = false;
           do {
             AstCallArg* arg = parser_alloc(parser, sizeof(AstCallArg));
-            if (parser_check(parser, TOK_IDENT) && parser_peek_at(parser, 1)->kind == TOK_COLON) {
-              const Token* arg_name = parser_advance(parser);
-              parser_consume(parser, TOK_COLON, "expected ':' after argument name");
-              arg->name = parser_copy_str(parser, arg_name->lexeme);
-              arg->value = parse_expression(parser);
-            } else if (allow_shorthand && !used_shorthand) {
-              arg->name = str_from_cstr("value");
-              arg->value = parse_expression(parser);
-              used_shorthand = true;
-            } else {
-              parser_error(parser, parser_peek(parser), "expected argument name");
-              arg->name = str_from_cstr("<error>"); // placeholder
-              arg->value = parse_expression(parser);
-            }
+            const Token* arg_name = parser_consume(parser, TOK_IDENT, "expected argument name (all arguments must be named)");
+            parser_consume(parser, TOK_COLON, "expected ':' after argument name");
+            arg->name = parser_copy_str(parser, arg_name->lexeme);
+            arg->value = parse_expression(parser);
             args = append_call_arg(args, arg);
             if (parser_check(parser, TOK_RPAREN)) break;
             parser_consume(parser, TOK_COMMA, "expected ',' between arguments");
-            if (parser_check(parser, TOK_RPAREN)) break;
+            if (parser_check(parser, TOK_RPAREN)) {
+              break;
+            }
           } while (true);
           parser_consume(parser, TOK_RPAREN, "expected ')' after arguments");
         }
@@ -1186,9 +1135,15 @@ static AstReturnArg* parse_return_values(Parser* parser) {
 }
 
 static AstIdentifierPart* parse_generic_params(Parser* parser) {
-  if (!parser_match(parser, TOK_LBRACKET)) {
-    return NULL;
+  if (!parser_check(parser, TOK_LPAREN)) return NULL;
+  
+  if (parser_peek_at(parser, 1)->kind == TOK_RPAREN) return NULL; // () is params
+  
+  if (parser_peek_at(parser, 1)->kind == TOK_IDENT && parser_peek_at(parser, 2)->kind == TOK_COLON) { // (a: T) is params
+      return NULL;
   }
+
+  parser_advance(parser); // Consume (
   AstIdentifierPart* head = NULL;
   AstIdentifierPart* tail = NULL;
   do {
@@ -1200,11 +1155,11 @@ static AstIdentifierPart* parse_generic_params(Parser* parser) {
       tail->next = node;
       tail = node;
     }
-    if (parser_check(parser, TOK_RBRACKET)) break;
-    parser_consume(parser, TOK_COMMA, "expected ',' or ']' in generic parameter list");
-    if (parser_check(parser, TOK_RBRACKET)) break;
+    if (parser_check(parser, TOK_RPAREN)) break;
+    parser_consume(parser, TOK_COMMA, "expected ',' or ')' in generic parameter list");
+    if (parser_check(parser, TOK_RPAREN)) break;
   } while (true);
-  parser_consume(parser, TOK_RBRACKET, "expected ']' after generic parameter list");
+  parser_consume(parser, TOK_RPAREN, "expected ')' after generic parameter list");
   return head;
 }
 
@@ -1721,11 +1676,13 @@ AstModule* parse_module(Arena* arena, const char* file_path, TokenList tokens) {
   module->comments = comments;
   module->comment_count = comment_count;
   AstImport* imports = NULL;
-  while (parser_match(&parser, TOK_KW_IMPORT) || parser_match(&parser, TOK_KW_EXPORT)) {
-    const Token* prev = parser_previous(&parser);
-    bool is_export = prev && prev->kind == TOK_KW_EXPORT;
-    AstImport* clause = parse_import_clause(&parser, is_export);
-    imports = append_import(imports, clause);
+  while (parser_check(&parser, TOK_KW_IMPORT) || (parser_check(&parser, TOK_KW_EXPORT) && parser_peek_at(&parser, 1)->kind == TOK_STRING)) {
+    if (parser_match(&parser, TOK_KW_IMPORT)) {
+        imports = append_import(imports, parse_import_clause(&parser, false));
+    } else {
+        parser_advance(&parser); // consume export
+        imports = append_import(imports, parse_import_clause(&parser, true));
+    }
   }
   AstDecl* head = NULL;
   while (!parser_check(&parser, TOK_EOF)) {
@@ -1736,3 +1693,4 @@ AstModule* parse_module(Arena* arena, const char* file_path, TokenList tokens) {
   module->decls = head;
   return module;
 }
+
