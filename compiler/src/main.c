@@ -936,6 +936,16 @@ static bool write_i64(FILE* out, int64_t value) {
   return write_bytes(out, bytes, sizeof(bytes));
 }
 
+static bool write_f64(FILE* out, double value) {
+  uint64_t bits;
+  memcpy(&bits, &value, sizeof(bits));
+  uint8_t bytes[8];
+  for (size_t i = 0; i < sizeof(bytes); ++i) {
+    bytes[i] = (uint8_t)((bits >> (i * 8)) & 0xFF);
+  }
+  return write_bytes(out, bytes, sizeof(bytes));
+}
+
 static bool write_vm_chunk_file(const Chunk* chunk, const char* out_path) {
   if (!chunk || !out_path) {
     return false;
@@ -961,6 +971,9 @@ static bool write_vm_chunk_file(const Chunk* chunk, const char* out_path) {
     switch (value->type) {
       case VAL_INT:
         ok = ok && write_i64(out, value->as.int_value);
+        break;
+      case VAL_FLOAT:
+        ok = ok && write_f64(out, value->as.float_value);
         break;
       case VAL_CHAR:
         ok = ok && write_i64(out, value->as.char_value);
