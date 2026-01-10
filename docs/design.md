@@ -10,8 +10,8 @@
 ## Ownership System
 
 - `own T` - Exclusive ownership
-- `view T` - Read-only borrow
-- `mod T` - Mutable borrow
+- `view T` - Read-only reference
+- `mod T` - Mutable reference
 - `opt T` - Optional wrapper
 
 ## Assignment Semantics

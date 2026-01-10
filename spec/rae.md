@@ -175,14 +175,14 @@ import "path/to/module"
 export "path/to/shared"
 ```
 
-## 5. Values, Borrows, Optionality, Identity (id/key), and Lifetimes
+## 5. Values, References, Optionality, Identity (id/key), and Lifetimes
 
-Rae uses a strict memory model designed for performance and safety, prioritizing explicit semantics over implicit magic.
+Rae uses a strict reference model designed for performance and safety, prioritizing explicit semantics over implicit magic. Rae's model is aliasing-friendly (multiple references to the same storage are allowed) but enforces lifetime safety.
 
 ### 5.1 Assignment vs. Binding
 
 *   **Assignment (`=`)**: **Always copies**. Observable semantics are deep copy. No implicit moves or sharing.
-*   **Binding (`=>`)**: **Never copies**. Binds or rebinds a reference-like slot (alias) to a storage location. Only works with bindable slot types (borrows or optionals).
+*   **Binding (`=>`)**: **Never copies**. Binds or rebinds a reference-like slot (alias) to a storage location. Only works with bindable slot types (references or optionals).
 
 ### 5.2 Canonical Type Properties
 
@@ -190,17 +190,17 @@ Type properties stack in a single canonical order:
 `opt` → `{view, mod, id, key}` → `T`
 
 #### 5.2.1 Value Types
-*   **`T`**: Self-contained value. Stored inline.
+*   **`T`**: Self-contained value (value semantics). Stored inline.
 *   **`opt T`**: Optional value. Self-contained (none/some).
 *   **`id T`**: Typed identity token. Underlying representation is `Int`. Copyable value.
 *   **`key T`**: Typed identity token. Underlying representation is `String`. Copyable value.
 *   **`opt id T` / `opt key T`**: Optional identity handles.
 
-#### 5.2.2 Borrow Types (Aliases)
-*   **`view T`**: Read-only borrow.
-*   **`mod T`**: Mutable borrow.
-*   **`opt view T`**: Optional read-only borrow.
-*   **`opt mod T`**: Optional mutable borrow.
+#### 5.2.2 Reference Types (Aliases)
+*   **`view T`**: Read-only reference.
+*   **`mod T`**: Modifiable reference.
+*   **`opt view T`**: Optional read-only reference.
+*   **`opt mod T`**: Optional modifiable reference.
 
 ### 5.3 Composition Matrix
 
@@ -218,20 +218,25 @@ Type properties stack in a single canonical order:
 Identity types are opaque handles to objects, typically managed by a `Store` or `Pool`.
 *   `id T` is for fast local gameplay/UI handles.
 *   `key T` is for stable external identifiers (URLs, DB keys).
-*   Conversion between `id` and `key` must be done through a Store (e.g., `store.idOf(key: k)`), never via `toString()`.
 
 ### 5.5 Lifetime and Escape Rules
 
-Borrows are zero-overhead but must be safe.
-1.  **Scope**: A borrow must not outlive the storage it points to.
-2.  **No Escaping**: Borrows (`view`/`mod`) **MUST NOT** be stored in long-lived containers (e.g., `List(view T)` is illegal) or struct fields.
-3.  **Return Restriction**: A function can only return a borrow if it is derived from an input parameter or `this`.
+References are zero-overhead but must be safe.
+1.  **Scope**: A reference must not outlive the storage it points to.
+2.  **No Escaping**: References (`view`/`mod`) **MUST NOT** be stored in long-lived containers (e.g., `List(view T)` is illegal) or struct fields.
+3.  **Return Restriction**: A function can only return a reference if it is derived from an input parameter. Returning a reference to a local variable or a temporary is prohibited.
 
-### 5.6 Concurrency (Short Note)
+### 5.6 Member-Call Syntax Sugar
 
-Rae uses `spawn` for concurrency.
-*   `mod` borrows are exclusive.
-*   Cross-thread mutation requires explicit synchronization or exclusive access to the owning Store.
+Any function whose first parameter matches a type `T` can be called using member syntax on an expression of type `T`:
+*   `p.x()` desugars to `x(p)`.
+*   Resolution is based on the receiver type. Ambiguous matches result in a compile-time error.
+
+### 5.7 Call Syntax: Positional First Arguments
+
+The first argument of a function call can be passed positionally if it is unambiguous.
+*   `getX(p)` is equivalent to `getX(p: p)`.
+*   Subsequent arguments must be named.
 
 ---
 

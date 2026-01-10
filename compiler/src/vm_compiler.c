@@ -89,7 +89,7 @@ FunctionEntry* function_table_find(FunctionTable* table, Str name) {
   return NULL;
 }
 
-static bool function_table_add(FunctionTable* table, Str name, uint16_t param_count, bool is_extern) {
+static bool function_table_add(FunctionTable* table, Str name, uint16_t param_count, bool is_extern, bool returns_ref) {
   FunctionEntry* existing = function_table_find(table, name);
   if (existing) {
     existing->param_count = param_count;
@@ -114,6 +114,7 @@ static bool function_table_add(FunctionTable* table, Str name, uint16_t param_co
   entry->patch_count = 0;
   entry->patch_capacity = 0;
   entry->is_extern = is_extern;
+  entry->returns_ref = returns_ref;
   return true;
 }
 
@@ -204,7 +205,14 @@ bool collect_metadata(const char* file_path, const AstModule* module, FunctionTa
   while (decl) {
     if (decl->kind == AST_DECL_FUNC) {
       uint16_t param_count = count_params(decl->as.func_decl.params);
-      if (!function_table_add(funcs, decl->as.func_decl.name, param_count, decl->as.func_decl.is_extern)) {
+      bool returns_ref = false;
+      if (decl->as.func_decl.returns) {
+        // Multi-returns are not fully supported in VM, but we can check the first one
+        if (decl->as.func_decl.returns->type) {
+            returns_ref = decl->as.func_decl.returns->type->is_view || decl->as.func_decl.returns->type->is_mod;
+        }
+      }
+      if (!function_table_add(funcs, decl->as.func_decl.name, param_count, decl->as.func_decl.is_extern, returns_ref)) {
         return false;
       }
     } else if (decl->kind == AST_DECL_TYPE) {
@@ -427,13 +435,44 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
   }
 
   arg = expr->as.call.args;
+  uint16_t current_arg_idx = 0;
   while (arg) {
-    bool explicitly_borrowed = (arg->value->kind == AST_EXPR_UNARY && 
+    bool explicitly_referenced = (arg->value->kind == AST_EXPR_UNARY && 
                                 (arg->value->as.unary.op == AST_UNARY_VIEW || 
                                  arg->value->as.unary.op == AST_UNARY_MOD));
     
-    if (!explicitly_borrowed && arg->value->kind == AST_EXPR_IDENT) {
-        // HACK: for now, assume any ident passed to a call might need borrowing
+    // Support positional first argument
+    if (current_arg_idx == 0 && arg->name.len == 0) {
+        // Unnamed first argument is allowed
+    } else if (arg->name.len == 0) {
+        diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
+                   "only the first argument can be passed positionally");
+        compiler->had_error = true;
+        return false;
+    }
+
+    if (explicitly_referenced) {
+        const AstExpr* operand = arg->value->as.unary.operand;
+        if (operand->kind == AST_EXPR_COLLECTION_LITERAL || operand->kind == AST_EXPR_OBJECT ||
+            operand->kind == AST_EXPR_INTEGER || operand->kind == AST_EXPR_FLOAT ||
+            operand->kind == AST_EXPR_STRING || operand->kind == AST_EXPR_BOOL) {
+            diag_report(compiler->file_path, (int)arg->value->line, (int)arg->value->column, "cannot take reference to a temporary literal");
+            compiler->had_error = true;
+        }
+    } else {
+        // Even if not explicitly prefixed with view/mod, the parameter might be a reference.
+        // For now, in our simple VM compiler, we check if the argument itself is a literal
+        // being passed to what we expect might be a reference parameter.
+        // HACK: for simplicity, let's just check if it's a literal being passed to a non-extern call.
+        if (!entry->is_extern && (arg->value->kind == AST_EXPR_COLLECTION_LITERAL || arg->value->kind == AST_EXPR_OBJECT)) {
+             // In Rae, {x: 1} is a temporary.
+             diag_report(compiler->file_path, (int)arg->value->line, (int)arg->value->column, "cannot take reference to a temporary literal");
+             compiler->had_error = true;
+        }
+    }
+
+    if (!entry->is_extern && !explicitly_referenced && arg->value->kind == AST_EXPR_IDENT) {
+        // HACK: for now, assume any ident passed to a call might need referencing
         // if we don't have full type info. 
         // This is safer than copying for the 335 test case.
         int slot = compiler_find_local(compiler, arg->value->as.ident);
@@ -448,10 +487,11 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
           return false;
         }
     }
+    current_arg_idx++;
     arg = arg->next;
   }
   return emit_function_call(compiler, entry, (int)expr->line, (int)expr->column,
-                            (uint8_t)arg_count);
+                            (uint8_t)arg_count) && !compiler->had_error;
 }
 
 static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
@@ -645,9 +685,9 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
           emit_short(compiler, (uint16_t)field_index, (int)expr->line);
           return true;
         } else {
-          if (!compile_expr(compiler, operand)) return false;
-          emit_op(compiler, is_mod ? OP_BORROW_MOD : OP_BORROW_VIEW, (int)expr->line);
-          return true;
+          diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "view/mod can only be applied to lvalues (identifiers or members)");
+          compiler->had_error = true;
+          return false;
         }
       } else if (expr->as.unary.op == AST_UNARY_PRE_INC || expr->as.unary.op == AST_UNARY_PRE_DEC) {
         if (expr->as.unary.operand->kind != AST_EXPR_IDENT) {
@@ -779,52 +819,59 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
     case AST_EXPR_METHOD_CALL: {
       Str method_name = expr->as.method_call.method_name;
       FunctionEntry* entry = NULL;
-      uint16_t explicit_args_count = 0; // Args in Rae code, excluding implicit 'this'
+      uint16_t explicit_args_count = 0;
 
+      // Desugar: p.method(args) -> method(p, args)
+      
+      // Compile the receiver ('this')
+      const AstExpr* receiver = expr->as.method_call.object;
+      
+      // We need to decide whether to pass the receiver as a reference or a value.
+      // For now, in the VM, we often prefer mod reference for potential mutation
+      // unless it's a primitive.
+      if (receiver->kind == AST_EXPR_IDENT) {
+          int slot = compiler_find_local(compiler, receiver->as.ident);
+          if (slot >= 0) {
+              // Try to find if the function expects a reference or value.
+              // For sugar, we'll try searching for "method" first.
+              entry = function_table_find(&compiler->functions, method_name);
+              
+              // If not found, try common list methods
+              if (!entry) {
+                if (str_eq_cstr(method_name, "add")) entry = function_table_find(&compiler->functions, str_from_cstr("rae_list_add"));
+                else if (str_eq_cstr(method_name, "length")) entry = function_table_find(&compiler->functions, str_from_cstr("rae_list_length"));
+                else if (str_eq_cstr(method_name, "get")) entry = function_table_find(&compiler->functions, str_from_cstr("rae_list_get"));
+              }
 
-
-      // First, compile the 'this' object and push it onto the stack
-      if (!compile_expr(compiler, expr->as.method_call.object)) return false;
-
-
-      // Compile explicit arguments and push them onto the stack
-      const AstCallArg* current_arg = expr->as.method_call.args; // Includes 'this' which we already handled
-      if (current_arg && str_eq_cstr(current_arg->name, "this")) { // Skip the implicit 'this' argument from AST
-          current_arg = current_arg->next;
+              // Decide how to push receiver
+              emit_op(compiler, OP_MOD_LOCAL, (int)expr->line);
+              emit_short(compiler, (uint16_t)slot, (int)expr->line);
+          } else {
+              if (!compile_expr(compiler, receiver)) return false;
+          }
+      } else {
+          if (!compile_expr(compiler, receiver)) return false;
+          // If receiver is an rvalue, we might still need to wrap it if the func expects a ref
+          // but for now let's just push it.
       }
+
+      // Compile remaining arguments
+      const AstCallArg* current_arg = expr->as.method_call.args;
       while (current_arg) {
         if (!compile_expr(compiler, current_arg->value)) return false;
         explicit_args_count++;
         current_arg = current_arg->next;
       }
-
       
-      uint16_t total_arg_count = 1 + explicit_args_count; // 'this' + explicit args
-
-      // Special case for List/Array methods
-      if (str_eq_cstr(method_name, "add")) {
-        entry = function_table_find(&compiler->functions, str_from_cstr("rae_list_add"));
-      } else if (str_eq_cstr(method_name, "length")) {
-        entry = function_table_find(&compiler->functions, str_from_cstr("rae_list_length")); // Works for List and Array for now
-      } else if (str_eq_cstr(method_name, "get")) {
-        entry = function_table_find(&compiler->functions, str_from_cstr("rae_list_get"));
-      } else if (str_eq_cstr(method_name, "set")) {
-        entry = function_table_find(&compiler->functions, str_from_cstr("rae_array_set")); // Only Array supports set for now
-      } else {
-        // Fallback to searching for a global function with the method name
-        entry = function_table_find(&compiler->functions, method_name);
-      }
+      uint16_t total_arg_count = 1 + explicit_args_count;
 
       if (!entry) {
         char buffer[128];
-        snprintf(buffer, sizeof(buffer), "unknown method '%.*s' for VM call", (int)method_name.len,
-                 method_name.data);
+        snprintf(buffer, sizeof(buffer), "unknown method '%.*s'", (int)method_name.len, method_name.data);
         diag_error(compiler->file_path, (int)expr->line, (int)expr->column, buffer);
         compiler->had_error = true;
         return false;
       }
-
-
 
       return emit_function_call(compiler, entry, (int)expr->line, (int)expr->column, total_arg_count);
     }
@@ -945,10 +992,65 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
               int src_slot = compiler_find_local(compiler, stmt->as.def_stmt.value->as.ident);
               emit_op(compiler, stmt->as.def_stmt.type && stmt->as.def_stmt.type->is_view ? OP_VIEW_LOCAL : OP_MOD_LOCAL, (int)stmt->line);
               emit_short(compiler, (uint16_t)src_slot, (int)stmt->line);
+          } else if (stmt->as.def_stmt.value->kind == AST_EXPR_MEMBER) {
+              const AstExpr* member_expr = stmt->as.def_stmt.value;
+              if (member_expr->as.member.object->kind == AST_EXPR_IDENT) {
+                  Str obj_name = member_expr->as.member.object->as.ident;
+                  Str type_name = get_local_type_name(compiler, obj_name);
+                  TypeEntry* type = type_table_find(&compiler->types, type_name);
+                  if (type) {
+                      int field_index = type_entry_find_field(type, member_expr->as.member.member);
+                      if (field_index >= 0) {
+                          int obj_slot = compiler_find_local(compiler, obj_name);
+                          emit_op(compiler, stmt->as.def_stmt.type && stmt->as.def_stmt.type->is_view ? OP_VIEW_LOCAL : OP_MOD_LOCAL, (int)stmt->line);
+                          emit_short(compiler, (uint16_t)obj_slot, (int)stmt->line);
+                          emit_op(compiler, stmt->as.def_stmt.type && stmt->as.def_stmt.type->is_view ? OP_VIEW_FIELD : OP_MOD_FIELD, (int)stmt->line);
+                          emit_short(compiler, (uint16_t)field_index, (int)stmt->line);
+                      } else {
+                          diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, "cannot bind reference (=>) to a value");
+                          return false;
+                      }
+                  } else {
+                      diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, "cannot bind reference (=>) to a value");
+                      return false;
+                  }
+              } else {
+                  diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, "cannot bind reference (=>) to a value");
+                  return false;
+              }
           } else {
-              // Fallback: compile as value then borrow top of stack
+              // Fallback: compile as value
               if (!compile_expr(compiler, stmt->as.def_stmt.value)) return false;
-              emit_op(compiler, stmt->as.def_stmt.type && stmt->as.def_stmt.type->is_view ? OP_BORROW_VIEW : OP_BORROW_MOD, (int)stmt->line);
+              
+              bool already_ref = false;
+              if (stmt->as.def_stmt.value->kind == AST_EXPR_CALL) {
+                  const AstExpr* callee = stmt->as.def_stmt.value->as.call.callee;
+                  if (callee->kind == AST_EXPR_IDENT) {
+                      Str name = callee->as.ident;
+                      FunctionEntry* entry = function_table_find(&compiler->functions, name);
+                      if (entry && entry->returns_ref) {
+                          already_ref = true;
+                      }
+                  }
+              } else if (stmt->as.def_stmt.value->kind == AST_EXPR_METHOD_CALL) {
+                  Str method_name = stmt->as.def_stmt.value->as.method_call.method_name;
+                  FunctionEntry* entry = function_table_find(&compiler->functions, method_name);
+                  if (!entry) {
+                      // Try common list methods
+                      if (str_eq_cstr(method_name, "add")) entry = function_table_find(&compiler->functions, str_from_cstr("rae_list_add"));
+                      else if (str_eq_cstr(method_name, "get")) entry = function_table_find(&compiler->functions, str_from_cstr("rae_list_get"));
+                  }
+                  if (entry && entry->returns_ref) {
+                      already_ref = true;
+                  }
+              } else if (stmt->as.def_stmt.value->kind == AST_EXPR_NONE) {
+                  already_ref = true;
+              }
+              
+              if (!already_ref) {
+                  diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, "cannot bind reference (=>) to a value; RHS must be a reference or a function returning one");
+                  return false;
+              }
           }
           emit_op(compiler, OP_BIND_LOCAL, (int)stmt->line);
       } else {
@@ -984,6 +1086,34 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
         compiler->had_error = true;
         return false;
       }
+
+      // Lifetime check: can only return reference derived from params
+      if (arg->value->kind == AST_EXPR_UNARY && 
+          (arg->value->as.unary.op == AST_UNARY_VIEW || arg->value->as.unary.op == AST_UNARY_MOD)) {
+          const AstExpr* operand = arg->value->as.unary.operand;
+          const AstExpr* base_obj = operand;
+          while (base_obj->kind == AST_EXPR_MEMBER) {
+              base_obj = base_obj->as.member.object;
+          }
+          if (base_obj->kind == AST_EXPR_IDENT) {
+              int slot = compiler_find_local(compiler, base_obj->as.ident);
+              if (slot >= 0) {
+                  // In our simple VM compiler, parameters are the first N locals.
+                  // We need to check if 'slot' corresponds to a parameter.
+                  uint16_t param_count = 0;
+                  if (compiler->current_function) {
+                      const AstParam* p = compiler->current_function->params;
+                      while (p) { param_count++; p = p->next; }
+                  }
+                  if (slot >= param_count) {
+                      diag_report(compiler->file_path, (int)arg->value->line, (int)arg->value->column, "reference escapes local storage");
+                      compiler->had_error = true;
+                      // continue to compile to find more errors
+                  }
+              }
+          }
+      }
+
       if (!compile_expr(compiler, arg->value)) {
         return false;
       }
@@ -1206,9 +1336,62 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
                 int src_slot = compiler_find_local(compiler, stmt->as.assign_stmt.value->as.ident);
                 emit_op(compiler, OP_MOD_LOCAL, (int)stmt->line);
                 emit_short(compiler, (uint16_t)src_slot, (int)stmt->line);
+            } else if (stmt->as.assign_stmt.value->kind == AST_EXPR_MEMBER) {
+                const AstExpr* member_expr = stmt->as.assign_stmt.value;
+                if (member_expr->as.member.object->kind == AST_EXPR_IDENT) {
+                    Str obj_name = member_expr->as.member.object->as.ident;
+                    Str type_name = get_local_type_name(compiler, obj_name);
+                    TypeEntry* type = type_table_find(&compiler->types, type_name);
+                    if (type) {
+                        int field_index = type_entry_find_field(type, member_expr->as.member.member);
+                        if (field_index >= 0) {
+                            int obj_slot = compiler_find_local(compiler, obj_name);
+                            emit_op(compiler, OP_MOD_LOCAL, (int)stmt->line);
+                            emit_short(compiler, (uint16_t)obj_slot, (int)stmt->line);
+                            emit_op(compiler, OP_MOD_FIELD, (int)stmt->line);
+                            emit_short(compiler, (uint16_t)field_index, (int)stmt->line);
+                        } else {
+                            diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, "cannot bind reference (=>) to a value");
+                            return false;
+                        }
+                    } else {
+                        diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, "cannot bind reference (=>) to a value");
+                        return false;
+                    }
+                } else {
+                    diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, "cannot bind reference (=>) to a value");
+                    return false;
+                }
             } else {
                 if (!compile_expr(compiler, stmt->as.assign_stmt.value)) return false;
-                emit_op(compiler, OP_BORROW_MOD, (int)stmt->line);
+                
+                bool already_ref = false;
+                if (stmt->as.assign_stmt.value->kind == AST_EXPR_CALL) {
+                    const AstExpr* callee = stmt->as.assign_stmt.value->as.call.callee;
+                    if (callee->kind == AST_EXPR_IDENT) {
+                        Str name = callee->as.ident;
+                        FunctionEntry* entry = function_table_find(&compiler->functions, name);
+                        if (entry && entry->returns_ref) {
+                            already_ref = true;
+                        }
+                    }
+                } else if (stmt->as.assign_stmt.value->kind == AST_EXPR_METHOD_CALL) {
+                    Str method_name = stmt->as.assign_stmt.value->as.method_call.method_name;
+                    FunctionEntry* entry = function_table_find(&compiler->functions, method_name);
+                    if (!entry) {
+                        if (str_eq_cstr(method_name, "get")) entry = function_table_find(&compiler->functions, str_from_cstr("rae_list_get"));
+                    }
+                    if (entry && entry->returns_ref) {
+                        already_ref = true;
+                    }
+                } else if (stmt->as.assign_stmt.value->kind == AST_EXPR_NONE) {
+                    already_ref = true;
+                }
+                
+                if (!already_ref) {
+                    diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, "cannot bind reference (=>) to a value; RHS must be a reference or a function returning one");
+                    return false;
+                }
             }
             emit_op(compiler, OP_BIND_LOCAL, (int)stmt->line);
         } else {
@@ -1289,13 +1472,14 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
 
 static bool compile_block(BytecodeCompiler* compiler, const AstBlock* block) {
   const AstStmt* stmt = block ? block->first : NULL;
+  bool success = true;
   while (stmt) {
     if (!compile_stmt(compiler, stmt)) {
-      return false;
+      success = false;
     }
     stmt = stmt->next;
   }
-  return true;
+  return success;
 }
 
 static bool compile_function(BytecodeCompiler* compiler, const AstDecl* decl) {
@@ -1347,16 +1531,16 @@ static bool compile_function(BytecodeCompiler* compiler, const AstDecl* decl) {
   compiler->allocated_locals = compiler->local_count;
 
   const AstStmt* stmt = func->body->first;
+  bool success = true;
   while (stmt) {
     if (!compile_stmt(compiler, stmt)) {
-      compiler->current_function = NULL;
-      return false;
+      success = false;
     }
     stmt = stmt->next;
   }
   emit_return(compiler, false, (int)decl->line);
   compiler->current_function = NULL;
-  return true;
+  return success;
 }
 
 bool vm_compile_module(const AstModule* module, Chunk* chunk, const char* file_path) {
@@ -1396,10 +1580,10 @@ bool vm_compile_module(const AstModule* module, Chunk* chunk, const char* file_p
   }
 
   const AstDecl* decl = module->decls;
-  while (!compiler.had_error && decl) {
+  while (decl) {
     if (decl->kind == AST_DECL_FUNC) {
       if (!compile_function(&compiler, decl)) {
-        break;
+        compiler.had_error = true;
       }
     }
     decl = decl->next;

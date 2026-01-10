@@ -1,0 +1,15 @@
+type Point { x: Int }
+
+func badMod(): ret mod Int {
+  def p: Point = {x: 1}
+  ret mod p.x   # ERROR: reference escapes local storage
+}
+
+func badView(): ret view Int {
+  def p: Point = {x: 1}
+  ret view p.x  # ERROR: reference escapes local storage
+}
+
+func main() {
+  log(value: "should not run")
+}

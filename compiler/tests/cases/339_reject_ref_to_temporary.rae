@@ -1,0 +1,10 @@
+type Point { x: Int }
+
+func xMod(p: mod Point): ret mod Int { ret mod p.x }
+func xView(p: view Point): ret view Int { ret view p.x }
+
+func main() {
+  # ERROR: cannot take/return mod/view reference into a temporary literal
+  def a: mod Int  => xMod({x: 1})
+  def b: view Int => xView({x: 1})
+}
