@@ -3,29 +3,49 @@
 #include <string.h>
 #include "rae_runtime.h"
 
-static void doubleValue(int64_t value);
-static void helper(int64_t input);
-static void sumChain(int64_t a, int64_t b, int64_t c);
+extern int64_t nextTick(void);
+extern void sleepMs(int64_t ms);
+extern void rae_seed(int64_t n);
+extern double rae_random(void);
+extern int64_t rae_random_int(int64_t min, int64_t max);
+static void seed(int64_t n);
+static double random(void);
+static int64_t randomInt(int64_t min, int64_t max);
+static void helper(int64_t a, int64_t b);
+static int64_t sumChain(int64_t a, int64_t b);
 
-static void doubleValue(int64_t value) {
-  int64_t doubled = value * 2;
-  helper(doubled);
+static void seed(int64_t n) {
+  rae_seed(n);
 }
 
-static void helper(int64_t input) {
+static double random(void) {
+  return rae_random();
+}
+
+static int64_t randomInt(int64_t min, int64_t max) {
+  return rae_random_int(min, max);
+}
+
+static void helper(int64_t a, int64_t b) {
   rae_log_cstr("Helper ran");
 }
 
-static void sumChain(int64_t a, int64_t b, int64_t c) {
+static int64_t sumChain(int64_t a, int64_t b) {
   rae_log_cstr("sumChain start");
-  int64_t total = a + b + c;
-  doubleValue(total);
+  int64_t total = a + b;
+  if (total > 5) {
+  rae_log_cstr("total > 5");
+  } else {
+  rae_log_cstr("total <= 5");
+  }
   rae_log_cstr("sumChain done");
+  return total;
 }
 
 int main(void) {
   rae_log_cstr("C backend demo start");
-  sumChain(1, 2, 3);
+  helper(1, 2);
+  int64_t res = sumChain(3, 4);
   rae_log_cstr("C backend demo end");
   return 0;
 }

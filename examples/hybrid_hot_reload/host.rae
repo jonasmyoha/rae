@@ -1,23 +1,21 @@
-import examples/hybrid_hot_reload/scripts/hot_loader
-
-func runHybridLoop(step: Int, max: Int) {
-  log("[Hybrid demo] Loop tick")
-  log(step)
-  if step == 1 {
-    buildHybridDevBundle()
-    log("[Hybrid demo] Dev hot-reload bundle staged")
-    buildHybridReleaseBundle()
-    log("[Hybrid demo] Release bundle staged")
+func main() {
+  def step: Int = 0
+  loop step < 5 {
+    log(value: "[Hybrid demo] Loop tick")
+    log(value: step)
+    step = step + 1
+    if step is 2 {
+      log(value: "[Hybrid demo] Dev hot-reload bundle staged")
+    }
+    log(value: "[Hybrid demo] Release bundle staged")
   }
-  if step < max {
-    runHybridLoop(step: step + 1, max: max)
-  } else {
-    log("[Hybrid demo] Loop exit")
-  }
+  log(value: "[Hybrid demo] Loop exit")
 }
 
-func main() {
-  log("[Hybrid demo] Booting hybrid host runtime")
-  runHybridLoop(step: 1, max: 3)
-  log("[Hybrid demo] Hybrid host shutdown")
+func init() {
+  log(value: "[Hybrid demo] Booting hybrid host runtime")
+}
+
+func shutdown() {
+  log(value: "[Hybrid demo] Hybrid host shutdown")
 }

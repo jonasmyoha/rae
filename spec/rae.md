@@ -1,7 +1,7 @@
 # Rae Language Specification
 
-**Version:** 0.1 (WIP)
-**Scope:** Lexer, parser, AST, pretty-printer (no codegen, no typechecking)
+**Version:** 0.2 (Strict)
+**Scope:** Lexer, parser, AST, pretty-printer, VM, C backend
 
 ---
 
@@ -22,7 +22,7 @@
 * Pattern: `[a-zA-Z_][a-zA-Z0-9_]*`
 * **Naming Conventions:**
   * Function names MUST be `camelCase` (e.g. `add`, `removeLast`)
-  * Type names MUST be `PascalCase` (e.g. `List`, `Map`, `Ptr`)
+  * Type names MUST be `PascalCase` (e.g. `List`, `Map`, `Point`)
 * Case-sensitive
 
 ### 1.3 Keywords
@@ -33,13 +33,15 @@ own view mod opt
 if else match case
 true false none
 and or not is
-pub priv extern pack
+pub priv extern pack default
 ```
 
 ### 1.4 Literals
 
 * **Integer:** `0 | [1-9][0-9]*`
-* **String:** `"text"` (supports `\n \t \\ \"`)
+* **Float:** `[0-9]+\.[0-9]*`
+* **String:** `"text"` (supports `\n \t \\ \" {expression}`)
+* **Char:** `'c'`
 * **Boolean:** `true false`
 * **None literal:** `none`
 
@@ -47,276 +49,137 @@ pub priv extern pack
 
 ```
 =  =>  +  -  *  /  %
-<  >  <=  >=
+<  >  <=  >=  is
 ( )  { }  [ ]
 ,  :  .
 ```
 
 ---
 
-## 2. Core Concepts
+## 2. Core Language Rules
 
-### 2.1 Value vs Ownership
+### 2.1 Declarations
 
-* **Plain type (`T`)** → value, copied by `=`
-* **`own T`** → owning reference
-* **`view T`** → read-only borrowed view
-* **`mod T`** → mutable borrowed view
-* **`opt T`** → optional wrapper for any type
+* `def` is used exclusively for **bindings** (variables, constants, locals).
+* `func` is used exclusively for **functions**.
+* `def` is never used for functions.
 
-### 2.2 Assignment and Binding
+### 2.2 Functions
 
-* **`=`** Always performs a **value copy**, never aliases
-* **`=>`** Binds an owning reference (used only with `own`)
+* All function parameters are **named**.
+* There are **no positional arguments**.
+* Functions with a return type must use an explicit `ret` statement.
+* Nothing is implicitly returned.
 
----
-
-## 3. Types
-
-### 3.1 Type Definition
-
-A colon (`:`) after the type name is used to introduce properties (like `priv`). If a type has no properties, the colon should be omitted. Type names MUST follow the `PascalCase` convention.
-
-With properties:
+Example:
 ```rae
-type Point: priv {
-  x: Int
-  y: Int
+func add(a: Int, b: Int): ret Int {
+  ret a + b
 }
 ```
 
-Without properties:
+Usage:
 ```rae
-type Vector {
-  x: Float
-  y: Float
-}
+def sum: Int = add(a: 10, b: 20)
 ```
 
-Rules:
-* Fields use `name: Type`
-* `def` is **not allowed** in type fields
+### 2.3 Indexing
 
-### 3.2 Optional Types
+* `[]` is reserved **exclusively for indexing**.
+* `[]` is never used for generics or type application.
 
+Example:
 ```rae
-opt Int
-opt own Texture
+def x: Int = values[0]
 ```
 
----
+### 2.4 Type Application (Generics)
 
-## 4. Functions
+* Generic types use **parentheses** for type application.
+* Parentheses in type positions mean *type application*, not calls.
 
-### 4.1 Function Definition
-
-Function names MUST follow the `camelCase` convention.
-
+Examples:
 ```rae
-# Functions are public by default
-func add(a: view Point, b: view Point): ret Point {
-  ret (x: a.x + b.x, y: a.y + b.y)
-}
-
-# A private function
-func internalHelper(a: Int): priv ret Int {
-    ret a * 2
-}
+List(Int)
+Map(String, Int)
+List(List(Int))
 ```
 
-Rules:
-* Parameters use `name: Type`
-* `def` is **not allowed** in parameters
-* Function properties (like `priv` or `spawn`) come **after the parameter list**, space-separated.
-* Return declaration (`ret`) comes last.
+### 2.5 Object and List Literals
 
-### 4.2 Multiple Return Values
+* Typed literals use the form: `Type { ... }`
+* Untyped literals `{ ... }` are allowed **only** when the expected type is explicitly known from context (assignment or return).
 
+Examples:
 ```rae
-func divide(a: Int, b: Int): ret result: Int, error: opt Error {
-  if b is 0 {
-    ret error: Error(message: "divide by zero")
-  }
-  ret result: a / b
-}
+def v1: Point = Point { x: 1, y: 2 }
+def v2: Point = { x: 3, y: 4 } # OK: type known from annotation
+def values: List(Int) = { 1, 2, 3 } # OK: type known
 ```
 
-### 4.3 Implicit `this`
-
-* In any function, **`this` refers to the first parameter**
-
-### 4.4 External Functions
-
+Invalid:
 ```rae
-extern func tinyexpr_eval(expr: String): ret Int
+def bad = { x: 1, y: 2 } # ERROR: type required for `{}` literal
 ```
 
-* `extern` declarations have **no body**; they describe functions implemented outside the current Rae module (typically in C).
-* The signature follows the regular `func` rules (parameters, optional properties, and `ret` clause).
-* Only a single return value is supported. At present, the C backend maps:
-  * `Int` → `int64_t`
-  * `String` → `const char*` (returning `String` is only allowed on `extern` functions)
-* Calls to `extern` functions look like normal calls; it is the builder’s responsibility to link the generated C with the external definition.
-* The compiler does **not** validate that an implementation exists—if you forget to link one, the native linker will report an undefined symbol.
+### 2.6 No Constructors - Use Factory Functions
 
----
+* Rae does **not** have constructors.
+* Creation logic is expressed using normal functions.
 
-## 5. Concurrency
-
-### 5.1 Spawn Functions
-
+Example factory function:
 ```rae
-func heavyWork(id: Int): spawn {
-  log("working")
-}
-```
-
-* `spawn` is a **function property**
-
-### 5.2 Spawn Calls
-
-```rae
-spawn heavyWork(id: 1)
-```
-
----
-
-## 6. Local Bindings
-
-```rae
-def x: Int = 10
-def p: own Point => (x: 1, y: 2)
-```
-
-Rules:
-* `def` is used **only** for locals
-* Type annotation is required
-
----
-
-## 7. Control Flow
-
-### 7.1 If / Else
-
-```rae
-if x > 0 {
-  log("positive")
-} else {
-  log("negative")
-}
-```
-
-### 7.2 Match
-
-```rae
-match value {
-  case 0 {
-    log("zero")
-  }
-  default {
-    log("other")
-  }
+func createPoint(x: Int, y: Int): ret Point {
+  ret Point { x: x, y: y }
 }
 ```
 
 ---
 
-## 8. Expressions
+## 3. Symbol Meanings (Strict)
 
-### 8.1 Operators
+* `:` → type annotation, parameter typing, field assignment
+* `()` → application (type application in types, calls in values)
+* `{}` → literal (object or collection)
+* `[]` → indexing exclusively
+
+Each symbol has **exactly one meaning**. No lookahead-based ambiguity.
+
+---
+
+## 4. Expressions & Control Flow
+
+### 4.1 Operators
 
 * Arithmetic: `+ - * / %`
 * Comparison: `< > <= >= is`
 * Logical: `and or not`
 
-### 8.2 Member Access
+### 4.2 Control Flow
 
 ```rae
-point.x
-```
+if condition { ... } else { ... }
 
-### 8.3 Function Call
+loop def i: Int = 0, i < 10, ++i { ... }
 
-```rae
-add(a: p, b: q)
-spawn heavyWork(id: 2)
-```
-
-### 8.4 Logging Built-ins
-
-Rae ships two lightweight logging helpers:
-
-```
-log(Any)   # prints the value followed by a newline (like println)
-logS(value: Any)  # stream log without a newline (like printf)
-```
-
-Both variants flush stdout immediately, so console output appears in the order
-you invoke them even under watch mode or long-running examples.
-
-### 8.5 Modules & Imports
-
-- Each `.rae` file automatically becomes a module whose name equals its project-root-relative path without the `.rae` suffix (e.g., `examples/multifile_report/ui/header`).
-- Import paths use `/` separators. Absolute imports start at the project root (no leading `./` or drive prefixes). Relative imports may begin with `./` or `../` and are resolved against the current file’s directory.
-
-```rae
-import "examples/multifile_report/ui/header"
-import "./ui/footer"
-import "../shared/time"
-export "examples/shared/ui/theme"
-```
-
-- Imported modules are compiled before the current file, so their declarations are globally visible.
-- `export` re-exports a module for downstream consumers (future semantic passes will surface these in module metadata).
-
-### 8.6 Package Descriptor (`.raepack`)
-
-- Packages (apps, libraries, tool bundles) are described by an optional `*.raepack` file that uses Rae syntax. A colon after the pack name is optional. Example:
-
-```rae
-pack MyCoolApp {
-  format: "raepack"
-  version: 1
-  defaultTarget: desktop
-
-  targets: {
-    target desktop: {
-      label: "Desktop App"
-      entry: "src/main.rae"
-      sources: {
-        source: { path: "src/", emit: both }
-      }
-    }
-  }
+match value {
+  case 0 { ... }
+  default { ... }
 }
 ```
 
-- Key ideas:
-  - **`pack <Name>`** defines the canonical package name.
-  - **`targets`** describe build outputs (e.g., desktop, mobile, web). Each target is introduced by `target <id>:` and has its own block of properties.
-    - `label`: A human-readable name for the target.
-    - `entry`: The path to the main `.rae` file for this target.
-    - `sources`: A block defining which files or directories are included in the build. Each `source` has a `path` and an `emit` property (`live`, `compiled`, or `both`).
-  - Other metadata like `format` and `version` define the package itself.
-  - Additional sections (dependencies, assets, release/debug profiles) will live here as the package manager evolves.
+### 4.3 Modules & Imports
 
-- **Defaults:** If no `.raepack` is present, and the compiler is run in a directory containing only one `.rae` file (e.g., `main.rae`), that directory is treated as the package root. As soon as multiple entry points or more structure is needed, creators add a `.raepack` to explicitly describe the package.
+```rae
+import "path/to/module"
+export "path/to/shared"
+```
 
 ---
 
-## 9. Constraints
+**End of Rae Specification v0.2**
 
-1. `def` is **only** allowed for local bindings
-2. `=` always copies by value
-3. `=>` binds owning references
-4. No semicolons
-5. No implicit aliasing
-
----
-
-**End of Rae Specification**
-
----
+```
 
 ## Tooling: Formatter CLI
 
@@ -325,3 +188,5 @@ default the command writes to stdout so you can inspect or pipe the result. Use
 `--write` (or `-w`) to rewrite the original file in place, or `--output
 <path>` to send the formatted code to a specific destination. The two flags are
 mutually exclusive so scripts cannot accidentally clobber multiple files.
+
+```
