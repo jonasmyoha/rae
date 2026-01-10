@@ -169,19 +169,29 @@ static void pp_check_comments(PrettyPrinter* pp, size_t line) {
 }
 
 static void pp_write_type(PrettyPrinter* pp, const AstTypeRef* type) {
-  if (!type || !type->parts) {
+  if (!type) {
     pp_write(pp, "<type>");
     return;
   }
-  const AstIdentifierPart* part = type->parts;
-  int is_first_part = 1;
-  while (part) {
-    if (!is_first_part) {
-      pp_space(pp);
+  if (type->is_opt) pp_write(pp, "opt ");
+  if (type->is_view) pp_write(pp, "view ");
+  if (type->is_mod) pp_write(pp, "mod ");
+  if (type->is_id) pp_write(pp, "id ");
+  if (type->is_key) pp_write(pp, "key ");
+  
+  if (!type->parts) {
+    pp_write(pp, "<base>");
+  } else {
+    const AstIdentifierPart* part = type->parts;
+    int is_first_part = 1;
+    while (part) {
+      if (!is_first_part) {
+        pp_space(pp);
+      }
+      pp_write_str(pp, part->text);
+      is_first_part = 0;
+      part = part->next;
     }
-    pp_write_str(pp, part->text);
-    is_first_part = 0;
-    part = part->next;
   }
   if (type->generic_args) {
     pp_write_char(pp, '[');
@@ -268,6 +278,8 @@ static const char* unary_op_text(AstUnaryOp op) {
     case AST_UNARY_SPAWN: return "spawn";
     case AST_UNARY_PRE_INC: return "++";
     case AST_UNARY_PRE_DEC: return "--";
+    case AST_UNARY_VIEW: return "view ";
+    case AST_UNARY_MOD: return "mod ";
   }
   return "?";
 }
@@ -581,7 +593,7 @@ static void pp_print_def_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
   pp_write_str(pp, stmt->as.def_stmt.name);
   pp_write(pp, ": ");
   pp_write_type(pp, stmt->as.def_stmt.type);
-  if (stmt->as.def_stmt.is_move) {
+  if (stmt->as.def_stmt.is_bind) {
     pp_write(pp, " => ");
   } else {
     pp_write(pp, " = ");
@@ -742,7 +754,7 @@ static void pp_print_loop_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
 static void pp_print_assign_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
   pp_check_comments(pp, stmt->line);
   pp_expr(pp, stmt->as.assign_stmt.target);
-  if (stmt->as.assign_stmt.is_move) {
+  if (stmt->as.assign_stmt.is_bind) {
     pp_write(pp, " => ");
   } else {
     pp_write(pp, " = ");
