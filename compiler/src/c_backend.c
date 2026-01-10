@@ -61,6 +61,7 @@ static const char* map_rae_type_to_c(Str type_name) {
   if (str_eq_cstr(type_name, "Float")) return "double";
   if (str_eq_cstr(type_name, "Bool")) return "int8_t";
   if (str_eq_cstr(type_name, "String")) return "const char*";
+  if (str_eq_cstr(type_name, "List")) return "RaeList*";
   // For user types, return name. Caller might need to str_to_cstr.
   return NULL; 
 }
@@ -263,6 +264,40 @@ static bool emit_log_call(CFuncContext* ctx, const AstExpr* expr, FILE* out, boo
 
   if (is_float) {
     if (fprintf(out, "  %s(", newline ? "rae_log_float" : "rae_log_stream_float") < 0) {
+      return false;
+    }
+    if (!emit_expr(ctx, value, out)) return false;
+    if (fprintf(out, ");\n") < 0) return false;
+    return true;
+  }
+
+  bool is_list = false;
+  if (value->kind == AST_EXPR_IDENT) {
+    Str name = value->as.ident;
+    for (const AstParam* p = ctx->params; p; p = p->next) {
+      if (str_eq(p->name, name)) {
+        if (p->type && p->type->parts && str_eq_cstr(p->type->parts->text, "List")) {
+          is_list = true;
+        }
+        break;
+      }
+    }
+    if (!is_list) {
+      for (size_t i = 0; i < ctx->local_count; ++i) {
+        if (str_eq(ctx->locals[i], name)) {
+          if (str_eq_cstr(ctx->local_types[i], "List")) {
+            is_list = true;
+          }
+          break;
+        }
+      }
+    }
+  } else if (value->kind == AST_EXPR_COLLECTION_LITERAL || value->kind == AST_EXPR_LIST) {
+      is_list = true;
+  }
+
+  if (is_list) {
+    if (fprintf(out, "  %s(", newline ? "rae_log_list" : "rae_log_stream_list") < 0) {
       return false;
     }
     if (!emit_expr(ctx, value, out)) return false;
@@ -564,20 +599,67 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
       return fprintf(out, " }") >= 0;
     }
     case AST_EXPR_LIST: {
-      fprintf(stderr, "warning: C backend does not yet support list literals\n");
-      return fprintf(out, "NULL /* List literal */") >= 0;
+      uint16_t element_count = 0;
+      const AstExprList* current = expr->as.list;
+      while (current) { element_count++; current = current->next; }
+      
+      fprintf(out, "({ RaeList* _l = rae_list_create(%u); ", element_count);
+      current = expr->as.list;
+      while (current) {
+        fprintf(out, "rae_list_add(_l, ");
+        if (!emit_expr(ctx, current->value, out)) return false;
+        fprintf(out, "); ");
+        current = current->next;
+      }
+      fprintf(out, "_l; })");
+      return true;
     }
     case AST_EXPR_INDEX: {
-      fprintf(stderr, "warning: C backend does not yet support indexed expressions\n");
-      return fprintf(out, "NULL /* Indexed expression */") >= 0;
+      fprintf(out, "rae_list_get(");
+      if (!emit_expr(ctx, expr->as.index.target, out)) return false;
+      fprintf(out, ", ");
+      if (!emit_expr(ctx, expr->as.index.index, out)) return false;
+      fprintf(out, ")");
+      return true;
     }
     case AST_EXPR_METHOD_CALL: {
-      fprintf(stderr, "warning: C backend does not yet support method calls\n");
-      return fprintf(out, "NULL /* Method call */") >= 0;
+      Str method = expr->as.method_call.method_name;
+      const char* c_func = NULL;
+      if (str_eq_cstr(method, "length")) c_func = "rae_list_length";
+      else if (str_eq_cstr(method, "add")) c_func = "rae_list_add";
+      else if (str_eq_cstr(method, "get")) c_func = "rae_list_get";
+      
+      if (c_func) {
+        fprintf(out, "%s(", c_func);
+        const AstCallArg* arg = expr->as.method_call.args;
+        size_t idx = 0;
+        while (arg) {
+          if (idx > 0) fprintf(out, ", ");
+          if (!emit_expr(ctx, arg->value, out)) return false;
+          arg = arg->next;
+          idx++;
+        }
+        fprintf(out, ")");
+        return true;
+      }
+      fprintf(stderr, "warning: C backend fallback for method call '%.*s'\n", (int)method.len, method.data);
+      return fprintf(out, "NULL /* Unsupported method call */") >= 0;
     }
     case AST_EXPR_COLLECTION_LITERAL: {
-      fprintf(stderr, "warning: C backend does not yet support collection literals\n");
-      return fprintf(out, "NULL /* Collection literal */") >= 0;
+      uint16_t element_count = 0;
+      const AstCollectionElement* current = expr->as.collection.elements;
+      while (current) { element_count++; current = current->next; }
+      
+      fprintf(out, "({ RaeList* _l = rae_list_create(%u); ", element_count);
+      current = expr->as.collection.elements;
+      while (current) {
+        fprintf(out, "rae_list_add(_l, ");
+        if (!emit_expr(ctx, current->value, out)) return false;
+        fprintf(out, "); ");
+        current = current->next;
+      }
+      fprintf(out, "_l; })");
+      return true;
     }
   }
   fprintf(stderr, "error: unsupported expression kind in C backend\n");

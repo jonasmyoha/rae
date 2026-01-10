@@ -60,6 +60,24 @@ void rae_log_stream_float(double value) {
   rae_flush_stdout();
 }
 
+void rae_log_list(RaeList* list) {
+  rae_log_stream_list(list);
+  printf("\n");
+  rae_flush_stdout();
+}
+
+void rae_log_stream_list(RaeList* list) {
+  printf("[");
+  if (list) {
+    for (int64_t i = 0; i < list->len; i++) {
+      if (i > 0) printf(", ");
+      printf("%lld", (long long)list->items[i]);
+    }
+  }
+  printf("]");
+  rae_flush_stdout();
+}
+
 const char* rae_str_concat(const char* a, const char* b) {
   if (!a) a = "";
   if (!b) b = "";
@@ -109,4 +127,36 @@ int64_t rae_random_int(int64_t min, int64_t max) {
   if (min >= max) return min;
   uint64_t range = (uint64_t)(max - min + 1);
   return min + (int64_t)(rae_next_u32() % range);
+}
+
+RaeList* rae_list_create(int64_t cap) {
+  RaeList* list = malloc(sizeof(RaeList));
+  if (!list) return NULL;
+  list->len = 0;
+  list->cap = cap < 4 ? 4 : cap;
+  list->items = malloc(list->cap * sizeof(int64_t));
+  if (!list->items) {
+    free(list);
+    return NULL;
+  }
+  return list;
+}
+
+void rae_list_add(RaeList* list, int64_t item) {
+  if (!list) return;
+  if (list->len >= list->cap) {
+    list->cap *= 2;
+    list->items = realloc(list->items, list->cap * sizeof(int64_t));
+  }
+  list->items[list->len++] = item;
+}
+
+int64_t rae_list_get(RaeList* list, int64_t index) {
+  if (!list || index < 0 || index >= list->len) return 0;
+  return list->items[index];
+}
+
+int64_t rae_list_length(RaeList* list) {
+  if (!list) return 0;
+  return list->len;
 }
