@@ -212,6 +212,68 @@ static bool native_rae_str_concat(struct VM* vm,
   return true;
 }
 
+static bool native_rae_list_create(struct VM* vm,
+                                   VmNativeResult* out_result,
+                                   const Value* args,
+                                   size_t arg_count,
+                                   void* user_data) {
+  (void)vm;
+  (void)user_data;
+  if (arg_count != 1 || args[0].type != VAL_INT) return false;
+  out_result->has_value = true;
+  out_result->value = value_list();
+  // ignore cap for now
+  return true;
+}
+
+static bool native_rae_list_add(struct VM* vm,
+                                VmNativeResult* out_result,
+                                const Value* args,
+                                size_t arg_count,
+                                void* user_data) {
+  (void)vm;
+  (void)user_data;
+  if (arg_count != 2 || args[0].type != VAL_LIST) return false;
+  Value list = args[0];
+  value_list_add(&list, args[1]);
+  out_result->has_value = false;
+  return true;
+}
+
+static bool native_rae_list_get(struct VM* vm,
+                                VmNativeResult* out_result,
+                                const Value* args,
+                                size_t arg_count,
+                                void* user_data) {
+  (void)vm;
+  (void)user_data;
+  if (arg_count != 2 || args[0].type != VAL_LIST || args[1].type != VAL_INT) return false;
+  ValueList* vl = args[0].as.list_value;
+  int64_t index = args[1].as.int_value;
+  if (!vl || index < 0 || (size_t)index >= vl->count) {
+    out_result->has_value = true;
+    out_result->value = value_none();
+    return true;
+  }
+  out_result->has_value = true;
+  out_result->value = vl->items[index];
+  return true;
+}
+
+static bool native_rae_list_length(struct VM* vm,
+                                   VmNativeResult* out_result,
+                                   const Value* args,
+                                   size_t arg_count,
+                                   void* user_data) {
+  (void)vm;
+  (void)user_data;
+  if (arg_count != 1 || args[0].type != VAL_LIST) return false;
+  ValueList* vl = args[0].as.list_value;
+  out_result->has_value = true;
+  out_result->value = value_int(vl ? (int64_t)vl->count : 0);
+  return true;
+}
+
 static uint64_t g_vm_random_state = 0x123456789ABCDEF0ULL;
 
 static bool native_rae_seed(struct VM* vm,
@@ -278,6 +340,10 @@ static bool register_default_natives(VmRegistry* registry, TickCounter* tick_cou
   ok = vm_registry_register_native(registry, "rae_seed", native_rae_seed, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_random", native_rae_random, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_random_int", native_rae_random_int, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_list_create", native_rae_list_create, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_list_add", native_rae_list_add, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_list_get", native_rae_list_get, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_list_length", native_rae_list_length, NULL) && ok;
   ok = vm_registry_register_raylib(registry) && ok;
   ok = vm_registry_register_tinyexpr(registry) && ok;
   return ok;

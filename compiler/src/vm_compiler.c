@@ -759,8 +759,8 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       // Special case for List/Array methods
       if (str_eq_cstr(method_name, "add")) {
         entry = function_table_find(&compiler->functions, str_from_cstr("rae_list_add"));
-      } else if (str_eq_cstr(method_name, "len")) {
-        entry = function_table_find(&compiler->functions, str_from_cstr("rae_list_len")); // Works for List and Array for now
+      } else if (str_eq_cstr(method_name, "length")) {
+        entry = function_table_find(&compiler->functions, str_from_cstr("rae_list_length")); // Works for List and Array for now
       } else if (str_eq_cstr(method_name, "get")) {
         entry = function_table_find(&compiler->functions, str_from_cstr("rae_list_get"));
       } else if (str_eq_cstr(method_name, "set")) {
