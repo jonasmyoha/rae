@@ -660,12 +660,14 @@ static AstExpr* finish_call(Parser* parser, AstExpr* callee, const Token* start_
   size_t arg_idx = 0;
   do {
     AstCallArg* arg = parser_alloc(parser, sizeof(AstCallArg));
-    if (arg_idx == 0 && parser_check(parser, TOK_IDENT) && !parser_check_at(parser, 1, TOK_COLON)) {
+    
+    // Check if it looks like a named argument: Identifier (or keyword) followed by ':'
+    TokenKind k = parser_peek(parser)->kind;
+    bool is_ident_like = (k == TOK_IDENT || k == TOK_KW_ID || k == TOK_KW_KEY);
+    bool is_named_arg = is_ident_like && parser_check_at(parser, 1, TOK_COLON);
+
+    if (arg_idx == 0 && !is_named_arg) {
         // Positional first argument
-        arg->name = (Str){0};
-        arg->value = parse_expression(parser);
-    } else if (arg_idx == 0 && !parser_check(parser, TOK_IDENT)) {
-        // Positional first argument (literal or complex expr)
         arg->name = (Str){0};
         arg->value = parse_expression(parser);
     } else {
@@ -1040,10 +1042,14 @@ static AstExpr* parse_postfix(Parser* parser) {
           size_t arg_idx = 0;
           do {
             AstCallArg* arg = parser_alloc(parser, sizeof(AstCallArg));
-            if (arg_idx == 0 && parser_check(parser, TOK_IDENT) && !parser_check_at(parser, 1, TOK_COLON)) {
-                arg->name = (Str){0};
-                arg->value = parse_expression(parser);
-            } else if (arg_idx == 0 && !parser_check(parser, TOK_IDENT)) {
+            
+            // Check if it looks like a named argument: Identifier (or keyword) followed by ':'
+            TokenKind k = parser_peek(parser)->kind;
+            bool is_ident_like = (k == TOK_IDENT || k == TOK_KW_ID || k == TOK_KW_KEY);
+            bool is_named_arg = is_ident_like && parser_check_at(parser, 1, TOK_COLON);
+
+            if (arg_idx == 0 && !is_named_arg) {
+                // Positional first argument
                 arg->name = (Str){0};
                 arg->value = parse_expression(parser);
             } else {
@@ -1185,7 +1191,12 @@ static AstIdentifierPart* parse_generic_params(Parser* parser) {
   
   if (parser_peek_at(parser, 1)->kind == TOK_RPAREN) return NULL; // () is params
   
-  if (parser_peek_at(parser, 1)->kind == TOK_IDENT && parser_peek_at(parser, 2)->kind == TOK_COLON) { // (a: T) is params
+  // Check if it looks like a parameter list: (name: type)
+  // 'name' can be IDENT, or keywords like 'key', 'id' which are allowed as argument names.
+  TokenKind k = parser_peek_at(parser, 1)->kind;
+  bool is_ident = (k == TOK_IDENT || k == TOK_KW_ID || k == TOK_KW_KEY);
+  
+  if (is_ident && parser_peek_at(parser, 2)->kind == TOK_COLON) { 
       return NULL;
   }
 
