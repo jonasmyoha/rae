@@ -1,0 +1,17 @@
+type Velocity {
+  dx: Float
+  dy: Float
+}
+
+# Correct: Storing identity tokens (values) instead of borrows
+# def velocityIds: List(id Velocity) = {}
+
+func main() {
+  def v: Velocity = { dx: 1.0, dy: 1.0 }
+  def vid: id Velocity = 101 # Opaque handle from a store
+  
+  # Safe to store values
+  # velocityIds.add(item: vid)
+  
+  log(value: "Storing ID is safe because it is a value, not a borrow.")
+}

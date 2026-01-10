@@ -26,6 +26,13 @@ typedef struct AstIdentifierPart {
 
 typedef struct AstTypeRef {
   AstIdentifierPart* parts;
+  bool is_opt;
+  bool is_view;
+  bool is_mod;
+  bool is_id;
+  bool is_key;
+  size_t line;
+  size_t column;
   struct AstTypeRef* generic_args; // Head of a linked list of AstTypeRef for generic arguments
   struct AstTypeRef* next; // For linking AstTypeRef nodes in a list (e.g., generic_args list)
 } AstTypeRef;
@@ -93,7 +100,9 @@ typedef enum {
   AST_UNARY_NOT,
   AST_UNARY_SPAWN,
   AST_UNARY_PRE_INC,
-  AST_UNARY_PRE_DEC
+  AST_UNARY_PRE_DEC,
+  AST_UNARY_VIEW,
+  AST_UNARY_MOD
 } AstUnaryOp;
 
 typedef enum {
@@ -226,7 +235,7 @@ struct AstStmt {
     struct {
       Str name;
       AstTypeRef* type;
-      bool is_move;
+      bool is_bind;
       AstExpr* value;
     } def_stmt;
     struct {
@@ -256,7 +265,7 @@ struct AstStmt {
     struct {
       AstExpr* target;
       AstExpr* value;
-      bool is_move;
+      bool is_bind;
     } assign_stmt;
   } as;
 };

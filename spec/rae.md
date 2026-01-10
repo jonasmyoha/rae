@@ -29,7 +29,7 @@
 
 ```
 type func def ret spawn
-own view mod opt
+view mod opt
 if else match case
 true false none
 and or not is
@@ -174,6 +174,64 @@ match value {
 import "path/to/module"
 export "path/to/shared"
 ```
+
+## 5. Values, Borrows, Optionality, Identity (id/key), and Lifetimes
+
+Rae uses a strict memory model designed for performance and safety, prioritizing explicit semantics over implicit magic.
+
+### 5.1 Assignment vs. Binding
+
+*   **Assignment (`=`)**: **Always copies**. Observable semantics are deep copy. No implicit moves or sharing.
+*   **Binding (`=>`)**: **Never copies**. Binds or rebinds a reference-like slot (alias) to a storage location. Only works with bindable slot types (borrows or optionals).
+
+### 5.2 Canonical Type Properties
+
+Type properties stack in a single canonical order:
+`opt` → `{view, mod, id, key}` → `T`
+
+#### 5.2.1 Value Types
+*   **`T`**: Self-contained value. Stored inline.
+*   **`opt T`**: Optional value. Self-contained (none/some).
+*   **`id T`**: Typed identity token. Underlying representation is `Int`. Copyable value.
+*   **`key T`**: Typed identity token. Underlying representation is `String`. Copyable value.
+*   **`opt id T` / `opt key T`**: Optional identity handles.
+
+#### 5.2.2 Borrow Types (Aliases)
+*   **`view T`**: Read-only borrow.
+*   **`mod T`**: Mutable borrow.
+*   **`opt view T`**: Optional read-only borrow.
+*   **`opt mod T`**: Optional mutable borrow.
+
+### 5.3 Composition Matrix
+
+| Type | Storable in Fields | Copyable (`=`) | Bindable (`=>`) | Underline Type |
+| :--- | :---: | :---: | :---: | :--- |
+| `T` | Yes | Yes | No | Internal |
+| `opt T` | Yes | Yes | Yes | Internal |
+| `view T` | No | No | Yes | Pointer |
+| `mod T` | No | No | Yes | Pointer |
+| `id T` | Yes | Yes | No | `Int` |
+| `key T` | Yes | Yes | No | `String` |
+
+### 5.4 Identity: `id` and `key`
+
+Identity types are opaque handles to objects, typically managed by a `Store` or `Pool`.
+*   `id T` is for fast local gameplay/UI handles.
+*   `key T` is for stable external identifiers (URLs, DB keys).
+*   Conversion between `id` and `key` must be done through a Store (e.g., `store.idOf(key: k)`), never via `toString()`.
+
+### 5.5 Lifetime and Escape Rules
+
+Borrows are zero-overhead but must be safe.
+1.  **Scope**: A borrow must not outlive the storage it points to.
+2.  **No Escaping**: Borrows (`view`/`mod`) **MUST NOT** be stored in long-lived containers (e.g., `List(view T)` is illegal) or struct fields.
+3.  **Return Restriction**: A function can only return a borrow if it is derived from an input parameter or `this`.
+
+### 5.6 Concurrency (Short Note)
+
+Rae uses `spawn` for concurrency.
+*   `mod` borrows are exclusive.
+*   Cross-thread mutation requires explicit synchronization or exclusive access to the owning Store.
 
 ---
 

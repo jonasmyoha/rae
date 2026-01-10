@@ -34,7 +34,16 @@ typedef enum {
   OP_GET_FIELD = 0x1E,
   OP_SET_FIELD = 0x1F,
   OP_CONSTRUCT = 0x20,
-  OP_LIST = 0x21
+  OP_LIST = 0x21,
+  OP_BIND_LOCAL = 0x22,
+  OP_BIND_FIELD = 0x23,
+  OP_BORROW_VIEW = 0x24,
+  OP_BORROW_MOD = 0x25,
+  OP_VIEW_LOCAL = 0x26,
+  OP_MOD_LOCAL = 0x27,
+  OP_VIEW_FIELD = 0x28,
+  OP_MOD_FIELD = 0x29,
+  OP_SET_LOCAL_FIELD = 0x2A
 } OpCode;
 
 typedef enum {
@@ -48,14 +57,15 @@ typedef struct {
   Value* slots;
   uint16_t slot_count;
   Value* locals_base;
+  Value locals[256];
 } CallFrame;
 
 typedef struct VM {
   Chunk* chunk;
   uint8_t* ip;
-  Value stack[1024];
+  Value stack[256];
   Value* stack_top;
-  CallFrame call_stack[1024];
+  CallFrame call_stack[64];
   size_t call_stack_top;
   VmRegistry* registry;
   int timeout_seconds;

@@ -186,6 +186,28 @@ static bool native_rae_str(struct VM* vm,
     case VAL_ARRAY:
       out_result->value = value_string_copy("<array>", 7);
       break;
+    case VAL_BORROW: {
+      const char* prefix = args[0].as.borrow_value.kind == BORROW_VIEW ? "view " : "mod ";
+      out_result->value = value_string_copy(prefix, strlen(prefix));
+      break;
+    }
+    case VAL_ID: {
+      char buf[64];
+      sprintf(buf, "Id(%lld)", (long long)args[0].as.id_value);
+      out_result->value = value_string_copy(buf, strlen(buf));
+      break;
+    }
+    case VAL_KEY: {
+      size_t len = args[0].as.key_value.length;
+      char* buf = malloc(len + 8);
+      if (buf) {
+        strcpy(buf, "Key(\"");
+        memcpy(buf + 5, args[0].as.key_value.chars, len);
+        strcpy(buf + 5 + len, "\")");
+        out_result->value = value_string_take(buf, len + 7);
+      }
+      break;
+    }
   }
   return true;
 }
@@ -2410,9 +2432,14 @@ static int run_vm_file(const RunOptions* run_opts) {
     return 1;
   }
 
-  VM vm;
-  vm_init(&vm);
-  vm.timeout_seconds = run_opts->timeout;
+  VM* vm = malloc(sizeof(VM));
+  if (!vm) {
+    fprintf(stderr, "error: could not allocate VM\n");
+    chunk_free(&chunk);
+    return 1;
+  }
+  vm_init(vm);
+  vm->timeout_seconds = run_opts->timeout;
   
   VmRegistry registry;
   vm_registry_init(&registry);
@@ -2421,15 +2448,17 @@ static int run_vm_file(const RunOptions* run_opts) {
     fprintf(stderr, "error: failed to register VM native functions\n");
     vm_registry_free(&registry);
     chunk_free(&chunk);
+    free(vm);
     return 1;
   }
-  vm_set_registry(&vm, &registry);
-  VMResult result = vm_run(&vm, &chunk);
+  vm_set_registry(vm, &registry);
+  VMResult result = vm_run(vm, &chunk);
   if (result == VM_RUNTIME_TIMEOUT) {
       fprintf(stderr, "info: execution timed out after %d seconds\n", run_opts->timeout);
   }
   vm_registry_free(&registry);
   chunk_free(&chunk);
+  free(vm);
   return (result == VM_RUNTIME_OK || result == VM_RUNTIME_TIMEOUT) ? 0 : 1;
 }
 
@@ -2770,19 +2799,24 @@ static int run_vm_watch(const RunOptions* run_opts) {
         vm_registry_reload(&registry, file_path, chunk);
         VmModule* module = vm_registry_find(&registry, file_path);
         if (module) {
-          VM vm;
-          vm_init(&vm);
-          vm.timeout_seconds = run_opts->timeout;
-          vm_set_registry(&vm, &registry);
-          reload_count += 1;
-          printf("[watch] running latest version... (reload #%d)\n", reload_count);
-          fflush(stdout);
-          tick_counter.next = 0;
-          VMResult result = vm_run(&vm, &module->chunk);
-          if (result == VM_RUNTIME_TIMEOUT) {
-              fprintf(stderr, "info: [watch] execution timed out after %d seconds\n", run_opts->timeout);
-          } else if (result != VM_RUNTIME_OK) {
-            exit_code = 1;
+          VM* vm = malloc(sizeof(VM));
+          if (!vm) {
+            fprintf(stderr, "error: could not allocate VM\n");
+          } else {
+            vm_init(vm);
+            vm->timeout_seconds = run_opts->timeout;
+            vm_set_registry(vm, &registry);
+            reload_count += 1;
+            printf("[watch] running latest version... (reload #%d)\n", reload_count);
+            fflush(stdout);
+            tick_counter.next = 0;
+            VMResult result = vm_run(vm, &module->chunk);
+            if (result == VM_RUNTIME_TIMEOUT) {
+                fprintf(stderr, "info: [watch] execution timed out after %d seconds\n", run_opts->timeout);
+            } else if (result != VM_RUNTIME_OK) {
+              exit_code = 1;
+            }
+            free(vm);
           }
         }
       }

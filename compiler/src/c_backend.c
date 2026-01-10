@@ -74,7 +74,7 @@ static bool emit_type_ref_as_c_type(const AstTypeRef* type, FILE* out) {
   // Handle modifiers
   if (current) {
       TokenKind mod = lookup_keyword(current->text);
-      if (mod == TOK_KW_MOD || mod == TOK_KW_VIEW || mod == TOK_KW_OWN) {
+      if (mod == TOK_KW_MOD || mod == TOK_KW_VIEW) {
           is_ptr = true;
           current = current->next; // Move past modifier
       }
@@ -125,7 +125,7 @@ static bool emit_param_list(const AstParam* params, FILE* out) {
     if (param->type && param->type->parts) {
         Str first = param->type->parts->text;
         TokenKind mod = lookup_keyword(first);
-        if (mod == TOK_KW_MOD || mod == TOK_KW_VIEW || mod == TOK_KW_OWN) {
+        if (mod == TOK_KW_MOD || mod == TOK_KW_VIEW) {
             is_ptr = true;
             if (param->type->parts->next) {
                 Str next = param->type->parts->next->text;
@@ -383,7 +383,7 @@ static bool is_pointer_type(CFuncContext* ctx, Str name) {
         if (param->type && param->type->parts) {
             Str first = param->type->parts->text;
             TokenKind mod = lookup_keyword(first);
-            if (mod == TOK_KW_MOD || mod == TOK_KW_VIEW || mod == TOK_KW_OWN) return true;
+            if (mod == TOK_KW_MOD || mod == TOK_KW_VIEW) return true;
         }
     }
   }
@@ -732,7 +732,7 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
       if (stmt->as.def_stmt.type && stmt->as.def_stmt.type->parts) {
           Str type_name = stmt->as.def_stmt.type->parts->text;
           TokenKind mod = lookup_keyword(type_name);
-          if (mod == TOK_KW_MOD || mod == TOK_KW_VIEW || mod == TOK_KW_OWN) {
+          if (mod == TOK_KW_MOD || mod == TOK_KW_VIEW) {
               if (stmt->as.def_stmt.type->parts->next) {
                   Str next = stmt->as.def_stmt.type->parts->next->text;
                   const char* mapped = map_rae_type_to_c(next);
@@ -765,7 +765,7 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
       if (stmt->as.def_stmt.type && stmt->as.def_stmt.type->parts) {
           AstIdentifierPart* p = stmt->as.def_stmt.type->parts;
           TokenKind mod = lookup_keyword(p->text);
-          if ((mod == TOK_KW_MOD || mod == TOK_KW_VIEW || mod == TOK_KW_OWN) && p->next) {
+          if ((mod == TOK_KW_MOD || mod == TOK_KW_VIEW) && p->next) {
               base_type_name = p->next->text;
           } else {
               base_type_name = p->text;
