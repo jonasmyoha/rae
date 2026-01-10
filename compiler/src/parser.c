@@ -85,6 +85,15 @@ static const Token* parser_consume(Parser* parser, TokenKind kind, const char* m
   return NULL;
 }
 
+static const Token* parser_consume_ident(Parser* parser, const char* message) {
+  const Token* token = parser_peek(parser);
+  if (token->kind == TOK_IDENT || token->kind == TOK_KW_ID || token->kind == TOK_KW_KEY) {
+    return parser_advance(parser);
+  }
+  parser_error(parser, token, message);
+  return NULL;
+}
+
 static void* parser_alloc(Parser* parser, size_t size) {
   void* result = arena_alloc(parser->arena, size);
   if (!result) {
@@ -139,10 +148,6 @@ static AstTypeRef* parse_type_ref_from_ident(Parser* parser, const Token* ident_
   return type;
 }
 
-static bool is_type_modifier(TokenKind kind) {
-  return kind == TOK_KW_OWN || kind == TOK_KW_VIEW || kind == TOK_KW_MOD || kind == TOK_KW_OPT;
-}
-
 static AstTypeRef* append_type_ref_list(AstTypeRef* head, AstTypeRef* node) {
   if (!head) return node;
   AstTypeRef* tail = head;
@@ -154,23 +159,31 @@ static AstTypeRef* append_type_ref_list(AstTypeRef* head, AstTypeRef* node) {
 }
 
 static AstTypeRef* parse_type_ref(Parser* parser) {
+  const Token* start_token = parser_peek(parser);
   AstTypeRef* type = parser_alloc(parser, sizeof(AstTypeRef));
+  type->line = start_token->line;
+  type->column = start_token->column;
+  
+  if (parser_match(parser, TOK_KW_OPT)) {
+    type->is_opt = true;
+  }
+  
+  if (parser_match(parser, TOK_KW_VIEW)) {
+    type->is_view = true;
+  } else if (parser_match(parser, TOK_KW_MOD)) {
+    type->is_mod = true;
+  } else if (parser_match(parser, TOK_KW_ID)) {
+    type->is_id = true;
+  } else if (parser_match(parser, TOK_KW_KEY)) {
+    type->is_key = true;
+  }
+  
   AstIdentifierPart* parts_head = NULL;
   AstIdentifierPart* parts_tail = NULL;
   bool consumed_base = false;
+  
   while (true) {
     TokenKind kind = parser_peek(parser)->kind;
-    if (is_type_modifier(kind)) {
-      const Token* tok = parser_advance(parser);
-      AstIdentifierPart* part = make_identifier_part(parser, tok->lexeme);
-      if (!parts_head) {
-        parts_head = parts_tail = part;
-      } else {
-        parts_tail->next = part;
-        parts_tail = part;
-      }
-      continue;
-    }
     if (kind == TOK_IDENT) {
       const Token* tok = parser_advance(parser);
       AstIdentifierPart* part = make_identifier_part(parser, tok->lexeme);
@@ -190,6 +203,7 @@ static AstTypeRef* parse_type_ref(Parser* parser) {
     }
     break;
   }
+  
   if (!consumed_base) {
     parser_error(parser, parser_peek(parser), "expected type");
   }
@@ -363,7 +377,7 @@ static AstParam* append_param(AstParam* head, AstParam* node) {
 }
 
 static AstParam* parse_param(Parser* parser) {
-  const Token* name = parser_consume(parser, TOK_IDENT, "expected parameter name");
+  const Token* name = parser_consume_ident(parser, "expected parameter name");
   parser_consume(parser, TOK_COLON, "expected ':' after parameter name");
   AstParam* param = parser_alloc(parser, sizeof(AstParam));
   param->name = parser_copy_str(parser, name->lexeme);
@@ -478,7 +492,7 @@ static bool token_is_ident(const Token* token, const char* text) {
 }
 
 static bool is_unary_operator(TokenKind kind) {
-  return kind == TOK_MINUS || kind == TOK_KW_NOT || kind == TOK_KW_SPAWN || kind == TOK_INC || kind == TOK_DEC;
+  return kind == TOK_MINUS || kind == TOK_KW_NOT || kind == TOK_KW_SPAWN || kind == TOK_INC || kind == TOK_DEC || kind == TOK_KW_VIEW || kind == TOK_KW_MOD;
 }
 
 static BinaryInfo get_binary_info(TokenKind kind) {
@@ -641,7 +655,7 @@ static AstExpr* finish_call(Parser* parser, AstExpr* callee, const Token* start_
   AstCallArg* args = NULL;
   do {
     AstCallArg* arg = parser_alloc(parser, sizeof(AstCallArg));
-    const Token* name = parser_consume(parser, TOK_IDENT, "expected argument name (all arguments must be named)");
+    const Token* name = parser_consume_ident(parser, "expected argument name (all arguments must be named)");
     parser_consume(parser, TOK_COLON, "expected ':' after argument name");
     arg->name = parser_copy_str(parser, name->lexeme);
     arg->value = parse_expression(parser);
@@ -764,7 +778,7 @@ static AstExpr* parse_typed_literal(Parser* parser, const Token* start_token, As
 
       do {
         AstObjectField* field = parser_alloc(parser, sizeof(AstObjectField));
-        const Token* key_token = parser_consume(parser, TOK_IDENT, "expected field name in object literal");
+        const Token* key_token = parser_consume_ident(parser, "expected field name in object literal");
         field->name = parser_copy_str(parser, key_token->lexeme);
         parser_consume(parser, TOK_COLON, "expected ':' after field name");
         field->value = parse_expression(parser);
@@ -994,7 +1008,7 @@ static AstExpr* parse_postfix(Parser* parser) {
     }
     if (parser_match(parser, TOK_DOT)) {
   
-      const Token* name = parser_consume(parser, TOK_IDENT, "expected member name after '.'");
+      const Token* name = parser_consume_ident(parser, "expected member name after '.'");
       // Check if it's a method call
       if (parser_match(parser, TOK_LPAREN)) {
 
@@ -1009,7 +1023,7 @@ static AstExpr* parse_postfix(Parser* parser) {
         if (!parser_match(parser, TOK_RPAREN)) {
           do {
             AstCallArg* arg = parser_alloc(parser, sizeof(AstCallArg));
-            const Token* arg_name = parser_consume(parser, TOK_IDENT, "expected argument name (all arguments must be named)");
+            const Token* arg_name = parser_consume_ident(parser, "expected argument name (all arguments must be named)");
             parser_consume(parser, TOK_COLON, "expected ':' after argument name");
             arg->name = parser_copy_str(parser, arg_name->lexeme);
             arg->value = parse_expression(parser);
@@ -1074,6 +1088,12 @@ static AstExpr* parse_unary(Parser* parser) {
         break;
       case TOK_DEC:
         expr->as.unary.op = AST_UNARY_PRE_DEC;
+        break;
+      case TOK_KW_VIEW:
+        expr->as.unary.op = AST_UNARY_VIEW;
+        break;
+      case TOK_KW_MOD:
+        expr->as.unary.op = AST_UNARY_MOD;
         break;
       default:
         parser_error(parser, op_token, "unsupported unary operator");
@@ -1147,7 +1167,7 @@ static AstIdentifierPart* parse_generic_params(Parser* parser) {
   AstIdentifierPart* head = NULL;
   AstIdentifierPart* tail = NULL;
   do {
-    const Token* name = parser_consume(parser, TOK_IDENT, "expected generic type parameter name");
+    const Token* name = parser_consume_ident(parser, "expected generic type parameter name");
     AstIdentifierPart* node = make_identifier_part(parser, name->lexeme);
     if (!head) {
       head = tail = node;
@@ -1197,17 +1217,19 @@ static AstStmt* parse_match_statement(Parser* parser, const Token* match_token) 
     AstMatchCase* match_case = parser_alloc(parser, sizeof(AstMatchCase));
     if (parser_match(parser, TOK_KW_CASE)) {
       match_case->pattern = parse_expression(parser);
+      match_case->block = parse_block(parser);
     } else if (parser_match(parser, TOK_KW_DEFAULT)) {
       if (saw_default) {
         parser_error(parser, parser_peek(parser), "match already has a default arm");
       }
       saw_default = true;
       match_case->pattern = NULL;
+      match_case->block = parse_block(parser);
     } else {
       parser_error(parser, parser_peek(parser), "expected 'case' or 'default' inside match");
       match_case->pattern = NULL;
+      match_case->block = NULL;
     }
-    match_case->block = parse_block(parser);
     cases = append_match_case(cases, match_case);
   }
   if (!cases) {
@@ -1315,9 +1337,9 @@ static AstStmt* parse_destructure_statement(Parser* parser, const Token* def_tok
   AstDestructureBinding* bindings = NULL;
   size_t binding_count = 0;
   for (;;) {
-    const Token* local = parser_consume(parser, TOK_IDENT, "expected local name in destructuring binding");
+    const Token* local = parser_consume_ident(parser, "expected local name in destructuring binding");
     parser_consume(parser, TOK_COLON, "expected ':' after local name in destructuring binding");
-    const Token* label = parser_consume(parser, TOK_IDENT, "expected return label in destructuring binding");
+    const Token* label = parser_consume_ident(parser, "expected return label in destructuring binding");
     AstDestructureBinding* binding = parser_alloc(parser, sizeof(AstDestructureBinding));
     binding->local_name = parser_copy_str(parser, local->lexeme);
     binding->return_label = parser_copy_str(parser, label->lexeme);
@@ -1343,23 +1365,22 @@ static AstStmt* parse_destructure_statement(Parser* parser, const Token* def_tok
 }
 
 static AstStmt* parse_def_statement(Parser* parser, const Token* def_token) {
-  const Token* name = parser_consume(parser, TOK_IDENT, "expected identifier after 'def'");
+  const Token* name = parser_consume_ident(parser, "expected identifier after 'def'");
   check_camel_case(parser, name, "variable");
   parser_consume(parser, TOK_COLON, "expected ':' after local name");
   AstStmt* stmt = new_stmt(parser, AST_STMT_DEF, def_token);
   stmt->as.def_stmt.name = parser_copy_str(parser, name->lexeme);
   stmt->as.def_stmt.type = parse_type_ref(parser);
   if (parser_match(parser, TOK_ASSIGN)) {
-    stmt->as.def_stmt.is_move = false;
+    stmt->as.def_stmt.is_bind = false;
   } else if (parser_match(parser, TOK_ARROW)) {
-    stmt->as.def_stmt.is_move = true;
+    stmt->as.def_stmt.is_bind = true;
   } else {
     parser_error(parser, parser_peek(parser), "expected '=' or '=>' in definition");
   }
   stmt->as.def_stmt.value = parse_expression(parser);
   return stmt;
 }
-
 static AstStmt* parse_return_statement(Parser* parser, const Token* ret_token) {
   AstStmt* stmt = new_stmt(parser, AST_STMT_RET, ret_token);
   if (parser_check(parser, TOK_RBRACE) || parser_check(parser, TOK_KW_CASE) || parser_check(parser, TOK_EOF)) {
@@ -1395,17 +1416,17 @@ static AstStmt* parse_loop_statement(Parser* parser, const Token* loop_token) {
       init->as.def_stmt.name = parser_copy_str(parser, name->lexeme);
       init->as.def_stmt.type = type;
       init->as.def_stmt.value = NULL;
-      init->as.def_stmt.is_move = false;
+      init->as.def_stmt.is_bind = false;
 
       stmt->as.loop_stmt.init = init;
       stmt->as.loop_stmt.condition = parse_expression(parser);
       stmt->as.loop_stmt.increment = NULL;
     } else {
-      bool is_move = false;
+      bool is_bind = false;
       if (parser_match(parser, TOK_ASSIGN)) {
-        is_move = false;
+        is_bind = false;
       } else if (parser_match(parser, TOK_ARROW)) {
-        is_move = true;
+        is_bind = true;
       } else {
         parser_error(parser, parser_peek(parser), "expected '=' or 'in' in loop declaration");
       }
@@ -1414,7 +1435,7 @@ static AstStmt* parse_loop_statement(Parser* parser, const Token* loop_token) {
       init->as.def_stmt.name = parser_copy_str(parser, name->lexeme);
       init->as.def_stmt.type = type;
       init->as.def_stmt.value = parse_expression(parser);
-      init->as.def_stmt.is_move = is_move;
+      init->as.def_stmt.is_bind = is_bind;
 
       stmt->as.loop_stmt.init = init;
       parser_consume(parser, TOK_COMMA, "expected ',' after loop init");
@@ -1434,7 +1455,7 @@ static AstStmt* parse_loop_statement(Parser* parser, const Token* loop_token) {
       init->as.def_stmt.name = parser_copy_str(parser, expr->as.ident);
       init->as.def_stmt.type = NULL;
       init->as.def_stmt.value = NULL;
-      init->as.def_stmt.is_move = false;
+      init->as.def_stmt.is_bind = false;
 
       stmt->as.loop_stmt.init = init;
       stmt->as.loop_stmt.condition = parse_expression(parser);
@@ -1484,14 +1505,14 @@ static AstStmt* parse_statement(Parser* parser) {
     AstStmt* stmt = new_stmt(parser, AST_STMT_ASSIGN, parser_previous(parser));
     stmt->as.assign_stmt.target = expr;
     stmt->as.assign_stmt.value = parse_expression(parser);
-    stmt->as.assign_stmt.is_move = false;
+    stmt->as.assign_stmt.is_bind = false;
     return stmt;
   }
   if (parser_match(parser, TOK_ARROW)) {
     AstStmt* stmt = new_stmt(parser, AST_STMT_ASSIGN, parser_previous(parser));
     stmt->as.assign_stmt.target = expr;
     stmt->as.assign_stmt.value = parse_expression(parser);
-    stmt->as.assign_stmt.is_move = true;
+    stmt->as.assign_stmt.is_bind = true;
     return stmt;
   }
 
@@ -1528,7 +1549,7 @@ static AstTypeField* append_field(AstTypeField* head, AstTypeField* node) {
 static AstTypeField* parse_type_fields(Parser* parser) {
   AstTypeField* head = NULL;
   while (!parser_check(parser, TOK_RBRACE) && !parser_check(parser, TOK_EOF)) {
-    const Token* field_name = parser_consume(parser, TOK_IDENT, "expected field name");
+    const Token* field_name = parser_consume_ident(parser, "expected field name");
     parser_consume(parser, TOK_COLON, "expected ':' after field name");
     AstTypeField* field = parser_alloc(parser, sizeof(AstTypeField));
     field->name = parser_copy_str(parser, field_name->lexeme);
@@ -1545,7 +1566,7 @@ static AstTypeField* parse_type_fields(Parser* parser) {
 
 static AstDecl* parse_type_declaration(Parser* parser) {
   const Token* type_token = parser_previous(parser);
-  const Token* name = parser_consume(parser, TOK_IDENT, "expected type name");
+  const Token* name = parser_consume_ident(parser, "expected type name");
   AstDecl* decl = parser_alloc(parser, sizeof(AstDecl));
   decl->kind = AST_DECL_TYPE;
   decl->line = type_token->line;
@@ -1566,7 +1587,7 @@ static AstDecl* parse_type_declaration(Parser* parser) {
 
 static AstDecl* parse_func_declaration(Parser* parser, bool is_extern) {
   const Token* func_token = parser_previous(parser);
-  const Token* name = parser_consume(parser, TOK_IDENT, "expected function name");
+  const Token* name = parser_consume_ident(parser, "expected function name");
   if (!is_extern) { // Externs might need C names which can be PascalCase (e.g. Raylib, Windows API)
       check_camel_case(parser, name, "function");
   }

@@ -18,19 +18,29 @@ static void print_str(FILE* out, Str s) {
 }
 
 static void dump_type_ref(const AstTypeRef* type, FILE* out) {
-  if (!type || !type->parts) {
+  if (!type) {
     fputs("<type?>", out);
     return;
   }
-  const AstIdentifierPart* part = type->parts;
-  bool first = true;
-  while (part) {
-    if (!first) {
-      fputc(' ', out);
+  if (type->is_opt) fputs("opt ", out);
+  if (type->is_view) fputs("view ", out);
+  if (type->is_mod) fputs("mod ", out);
+  if (type->is_id) fputs("id ", out);
+  if (type->is_key) fputs("key ", out);
+  
+  if (!type->parts) {
+    fputs("<base?>", out);
+  } else {
+    const AstIdentifierPart* part = type->parts;
+    bool first = true;
+    while (part) {
+      if (!first) {
+        fputc(' ', out);
+      }
+      print_str(out, part->text);
+      first = false;
+      part = part->next;
     }
-    print_str(out, part->text);
-    first = false;
-    part = part->next;
   }
   if (type->generic_args) {
     fputc('[', out);
@@ -90,6 +100,10 @@ static const char* unary_op_name(AstUnaryOp op) {
       return "++";
     case AST_UNARY_PRE_DEC:
       return "--";
+    case AST_UNARY_VIEW:
+      return "view";
+    case AST_UNARY_MOD:
+      return "mod";
   }
   return "?";
 }
@@ -275,7 +289,7 @@ static void dump_def_stmt(const AstStmt* stmt, FILE* out, int indent) {
   print_str(out, stmt->as.def_stmt.name);
   fputs(": ", out);
   dump_type_ref(stmt->as.def_stmt.type, out);
-  fputs(stmt->as.def_stmt.is_move ? " => " : " = ", out);
+  fputs(stmt->as.def_stmt.is_bind ? " => " : " = ", out);
   dump_expr(stmt->as.def_stmt.value, out);
   fputc('\n', out);
 }
@@ -381,7 +395,7 @@ static void dump_assign_stmt(const AstStmt* stmt, FILE* out, int indent) {
   print_indent(out, indent);
   fputs("assign ", out);
   dump_expr(stmt->as.assign_stmt.target, out);
-  fputs(stmt->as.assign_stmt.is_move ? " => " : " = ", out);
+  fputs(stmt->as.assign_stmt.is_bind ? " => " : " = ", out);
   dump_expr(stmt->as.assign_stmt.value, out);
   fputc('\n', out);
 }

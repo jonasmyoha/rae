@@ -76,7 +76,7 @@ FunctionEntry* function_table_find(FunctionTable* table, Str name);
 TypeEntry* type_table_find(TypeTable* table, Str name);
 bool type_table_add(TypeTable* table, Str name, Str* fields, size_t field_count);
 int type_entry_find_field(const TypeEntry* entry, Str name);
-bool collect_metadata(const AstModule* module, FunctionTable* funcs, TypeTable* types /* GEMINI: MethodTable* methods parameter removed to fix build */);
+bool collect_metadata(const char* file_path, const AstModule* module, FunctionTable* funcs, TypeTable* types /* GEMINI: MethodTable* methods parameter removed to fix build */);
 bool emit_function_call(BytecodeCompiler* compiler, FunctionEntry* entry, int line,
                                int column, uint8_t arg_count);
 bool emit_return(BytecodeCompiler* compiler, bool has_value, int line);
