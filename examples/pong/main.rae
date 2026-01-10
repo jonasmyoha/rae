@@ -1,172 +1,87 @@
-import raylib
+# Pong in Rae (Live mode)
 
-# Game configuration
-func screenWidth(): ret Int {
-  ret 800
+import "lib/raylib"
+
+type Ball {
+  x: Float
+  y: Float
+  dx: Float
+  dy: Float
+  radius: Float
 }
 
-func screenHeight(): ret Int {
-  ret 450
-}
-
-func paddleWidth(): ret Int {
-  ret 20
-}
-
-func paddleHeight(): ret Int {
-  ret 100
-}
-
-func ballRadius(): ret Int {
-  ret 10
-}
-
-func paddleSpeed(): ret Int {
-  ret 5
-}
-
-func ballSpeed(): ret Int {
-  ret 4
-}
-
-func clamp(val: Int, min: Int, max: Int): ret Int {
-  if val < min {
-    ret min
-  }
-  if val > max {
-    ret max
-  }
-  ret val
-}
-
-func handleInput(y: Int): ret Int {
-  def newY: Int = y
-  # W or Up arrow
-  if isKeyDown(key: 87) is 1 {
-    newY = y - paddleSpeed()
-  }
-  if isKeyDown(key: 265) is 1 {
-    newY = y - paddleSpeed()
-  }
-  # S or Down arrow
-  if isKeyDown(key: 83) is 1 {
-    newY = y + paddleSpeed()
-  }
-  if isKeyDown(key: 264) is 1 {
-    newY = y + paddleSpeed()
-  }
-  ret clamp(val: newY, min: 0, max: screenHeight() - paddleHeight())
-}
-
-func updateAi(y: Int, ballY: Int): ret Int {
-  def newY: Int = y
-  if ballY < y + paddleHeight() / 2 {
-    newY = y - ballSpeed()
-  }
-  if ballY > y + paddleHeight() / 2 {
-    newY = y + ballSpeed()
-  }
-  ret clamp(val: newY, min: 0, max: screenHeight() - paddleHeight())
-}
-
-func drawGame(p1Y: Int, p2Y: Int, bX: Int, bY: Int) {
-  # Draw paddles
-  beginDrawing()
-  clearBackground(
-    r: 20,
-    g: 20,
-    b: 20,
-    a: 255,
-  )
-  # Draw ball
-  drawRectangle(
-    x: 20,
-    y: p1Y,
-    width: paddleWidth(),
-    height: paddleHeight(),
-    r: 255,
-    g: 255,
-    b: 255,
-    a: 255,
-  )
-  drawRectangle(
-    x: screenWidth() - 40,
-    y: p2Y,
-    width: paddleWidth(),
-    height: paddleHeight(),
-    r: 255,
-    g: 255,
-    b: 255,
-    a: 255,
-  )
-  drawCircle(
-    x: bX,
-    y: bY,
-    radius: ballRadius(),
-    r: 255,
-    g: 255,
-    b: 255,
-    a: 255,
-  )
-  endDrawing()
+type Paddle {
+  x: Float
+  y: Float
+  w: Float
+  h: Float
+  score: Int
 }
 
 func main() {
-  initWindow(width: screenWidth(), height: screenHeight(), title: "Rae Pong")
+  initWindow(width: 800, height: 450, title: "Rae Pong")
   setTargetFPS(fps: 60)
-  def p1Y: Int = 175
-  def p2Y: Int = 175
-  def bX: Int = 400
-  def bY: Int = 225
-  def bDX: Int = ballSpeed()
-  def bDY: Int = ballSpeed()
-  loop windowShouldClose() is 0 {
-    # Update paddles
-    p1Y = handleInput(y: p1Y)
-    p2Y = updateAi(y: p2Y, ballY: bY)
-    # Ball movement
-    bX = bX + bDX
-    bY = bY + bDY
-    # Collision Top/Bottom
-    if bY < ballRadius() {
-      bDY = ballSpeed()
-    }
-    if bY > screenHeight() - ballRadius() {
-      bDY = -ballSpeed()
-    }
-    # Collision Paddles
-    if bX < 20 + paddleWidth() {
-      if bY > p1Y {
-        if bY < p1Y + paddleHeight() {
-          bDX = ballSpeed()
-        }
-      }
-    }
-    if bX > screenWidth() - 40 {
-      if bY > p2Y {
-        if bY < p2Y + paddleHeight() {
-          bDX = -ballSpeed()
-        }
-      }
-    }
-    # Reset if out of bounds
-    if bX < 0 {
-      bX = screenWidth() / 2
-      bY = screenHeight() / 2
-      bDX = ballSpeed()
-    }
-    if bX > screenWidth() {
-      bX = screenWidth() / 2
-      bY = screenHeight() / 2
-      bDX = -ballSpeed()
-    }
-    # Rendering
-    drawGame(
-      p1Y: p1Y,
-      p2Y: p2Y,
-      bX: bX,
-      bY: bY,
-    )
+
+  def ball: Ball = {
+    x: 400.0, 
+    y: 225.0, 
+    dx: 4.0, 
+    dy: 4.0, 
+    radius: 10.0,
   }
+
+  def p1: Paddle = { x: 20.0, y: 175.0, w: 10.0, h: 100.0, score: 0 }
+  def p2: Paddle = { x: 770.0, y: 175.0, w: 10.0, h: 100.0, score: 0 }
+
+  loop not (windowShouldClose() is 1) {
+    # Input
+    if isKeyDown(key: 87) is 1 { # W
+      p1.y = p1.y - 5.0
+    }
+    if isKeyDown(key: 83) is 1 { # S
+      p1.y = p1.y + 5.0
+    }
+    if isKeyDown(key: 265) is 1 { # Up
+      p2.y = p2.y - 5.0
+    }
+    if isKeyDown(key: 264) is 1 { # Down
+      p2.y = p2.y + 5.0
+    }
+
+    # Movement
+    ball.x = ball.x + ball.dx
+    ball.y = ball.y + ball.dy
+
+    # Bounce top/bottom
+    if ball.y <= 0.0 or ball.y >= 450.0 {
+      ball.dy = ball.dy * -1.0
+    }
+
+    # Score
+    if ball.x < 0.0 {
+      p2.score = p2.score + 1
+      ball.x = 400.0
+      ball.y = 225.0
+    }
+    if ball.x > 800.0 {
+      p1.score = p1.score + 1
+      ball.x = 400.0
+      ball.y = 225.0
+    }
+
+    # Drawing
+    beginDrawing()
+    clearBackground(r: 20, g: 20, b: 20, a: 255)
+    
+    drawCircle(x: ball.x, y: ball.y, radius: ball.radius, r: 255, g: 255, b: 255, a: 255)
+    drawRectangle(x: p1.x, y: p1.y, width: p1.w, height: p1.h, r: 255, g: 255, b: 255, a: 255)
+    drawRectangle(x: p2.x, y: p2.y, width: p2.w, height: p2.h, r: 255, g: 255, b: 255, a: 255)
+    
+    drawText(text: "{p1.score}", x: 200.0, y: 20.0, fontSize: 40.0, r: 255, g: 255, b: 255, a: 255)
+    drawText(text: "{p2.score}", x: 600.0, y: 20.0, fontSize: 40.0, r: 255, g: 255, b: 255, a: 255)
+    
+    endDrawing()
+  }
+
   closeWindow()
 }

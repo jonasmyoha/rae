@@ -3,15 +3,35 @@
 #include <string.h>
 #include "rae_runtime.h"
 
-extern int64_t c_eval(const char* expr);
+extern int64_t nextTick(void);
+extern void sleepMs(int64_t ms);
+extern void rae_seed(int64_t n);
+extern double rae_random(void);
+extern int64_t rae_random_int(int64_t min, int64_t max);
+static void seed(int64_t n);
+static double random(void);
+static int64_t randomInt(int64_t min, int64_t max);
+extern int64_t external_c_func(int64_t a, int64_t b);
 static int64_t helper(void);
 
+static void seed(int64_t n) {
+  rae_seed(n);
+}
+
+static double random(void) {
+  return rae_random();
+}
+
+static int64_t randomInt(int64_t min, int64_t max) {
+  return rae_random_int(min, max);
+}
+
 static int64_t helper(void) {
-  return c_eval("1+2");
+  return 42;
 }
 
 int main(void) {
-  int64_t result = c_eval("2+3");
+  int64_t result = external_c_func(10, 20);
   rae_log_i64(result);
   rae_log_i64(helper());
   return 0;

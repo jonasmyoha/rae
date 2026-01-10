@@ -3,8 +3,30 @@
 #include <string.h>
 #include "rae_runtime.h"
 
+extern int64_t nextTick(void);
+extern void sleepMs(int64_t ms);
+extern void rae_seed(int64_t n);
+extern double rae_random(void);
+extern int64_t rae_random_int(int64_t min, int64_t max);
+static void seed(int64_t n);
+static double random(void);
+static int64_t randomInt(int64_t min, int64_t max);
+
+static void seed(int64_t n) {
+  rae_seed(n);
+}
+
+static double random(void) {
+  return rae_random();
+}
+
+static int64_t randomInt(int64_t min, int64_t max) {
+  return rae_random_int(min, max);
+}
+
 int main(void) {
-  int64_t result = ({ const char* __match0 = "hi"; int64_t __result0; if (__match0 && strcmp(__match0, "hi") == 0) { __result0 = 11; }  else if (__match0 && strcmp(__match0, "hello") == 0) { __result0 = 22; }  else { __result0 = 33; } __result0; });
+  int64_t x = 1;
+  int64_t result = ({ int64_t __match0 = x; int64_t __result0; if (__match0 == 1) { __result0 = 10; }  else { __result0 = 20; } __result0; });
   rae_log_i64(result);
   return 0;
 }

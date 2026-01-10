@@ -1,15 +1,10 @@
-import core
-func runLoop() {
-  loop true {
-    def tick: Int = nextTick()
+import "lib/core"
+func main() {
+  log(value: "Main loop running (use Stop to exit)")
+  def tick: Int = 0
+  loop tick < 3 {
     logS(value: "tick ")
     log(value: tick)
-    if tick is 5 {
-      ret
-    }
+    tick = tick + 1
   }
-}
-
-func main() {
-  runLoop()
 }

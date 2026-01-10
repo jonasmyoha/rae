@@ -1,8 +1,10 @@
 func main() {
   def i: Int = 0
-  loop i < 5000 {
-    # This 'def' currently leaks one stack slot per iteration
-    def x: Int = i
+  loop i < 100 {
+    def x: Int = 10
+    if i < 50 {
+      def y: Int = 20
+    }
     i = i + 1
   }
   log(value: "Done")
