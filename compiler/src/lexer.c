@@ -19,6 +19,9 @@ typedef struct {
   size_t line;
   size_t column;
   int interpolation_depth;
+  bool inside_raw_string;
+  bool strict;
+  bool had_error;
 } Lexer;
 
 typedef struct {
@@ -113,6 +116,7 @@ static const char* const TOKEN_KIND_NAMES[] = {
     [TOK_DOT] = "TOK_DOT"};
 
 static void lexer_error(Lexer* lexer, size_t line, size_t column, const char* fmt, ...) {
+  lexer->had_error = true;
   char buffer[256];
 
   va_list args;
@@ -144,7 +148,15 @@ static char lexer_advance(Lexer* lexer) {
     lexer->line += 1;
     lexer->column = 1;
   } else if (c == '\r') {
-    if (!lexer_is_at_end(lexer) && lexer->input[lexer->index] == '\n') {
+    bool is_crlf = (!lexer_is_at_end(lexer) && lexer->input[lexer->index] == '\n');
+    if (!lexer->inside_raw_string) {
+        if (is_crlf) {
+            lexer_error(lexer, lexer->line, lexer->column, "Rae files must use LF (\\n) line endings. CRLF found. Run `rae format` to fix.");
+        } else {
+            lexer_error(lexer, lexer->line, lexer->column, "Rae files must use LF (\\n) line endings. CR (\\r) found. Run `rae format` to fix.");
+        }
+    }
+    if (is_crlf) {
       lexer->index += 1;
     }
     lexer->line += 1;
@@ -365,6 +377,7 @@ static void scan_raw_string(Lexer* lexer, TokenBuffer* buffer, size_t start_inde
     return;
   }
   
+  lexer->inside_raw_string = true;
   while (!lexer_is_at_end(lexer)) {
     if (lexer_advance(lexer) == '"') {
       int current_hashes = 0;
@@ -374,11 +387,13 @@ static void scan_raw_string(Lexer* lexer, TokenBuffer* buffer, size_t start_inde
       }
       if (current_hashes == hash_count) {
         // Terminator found
+        lexer->inside_raw_string = false;
         emit_token(lexer, buffer, TOK_RAW_STRING, start_index, line, col);
         return;
       }
     }
   }
+  lexer->inside_raw_string = false;
   
   lexer_error(lexer, line, col, "unterminated raw string");
 }
@@ -433,7 +448,8 @@ static void scan_char_literal(Lexer* lexer, TokenBuffer* buffer, size_t start_in
 TokenList lexer_tokenize(Arena* arena,
                          const char* file_path,
                          const char* source,
-                         size_t length) {
+                         size_t length,
+                         bool strict) {
   Lexer lexer = {
       .file_path = file_path,
       .input = source,
@@ -442,6 +458,9 @@ TokenList lexer_tokenize(Arena* arena,
       .line = 1,
       .column = 1,
       .interpolation_depth = 0,
+      .inside_raw_string = false,
+      .strict = strict,
+      .had_error = false,
   };
 
   TokenBuffer buffer = {0};
@@ -449,6 +468,9 @@ TokenList lexer_tokenize(Arena* arena,
   for (;;) {
     lexer_skip_whitespace(&lexer);
     if (lexer_is_at_end(&lexer)) {
+      if (length > 0 && source[length - 1] != '\n' && lexer.strict) {
+          lexer_error(&lexer, lexer.line, lexer.column, "Rae files must end with a newline (\\n). Missing final newline at end of file. Run `rae format` to fix.");
+      }
       Str lexeme = str_from_buf(source + lexer.index, 0);
       Token eof_token = {.kind = TOK_EOF, .lexeme = lexeme, .line = lexer.line, .column = lexer.column};
       token_buffer_push(&buffer, eof_token);
@@ -585,7 +607,7 @@ TokenList lexer_tokenize(Arena* arena,
   }
 
   free(buffer.data);
-  return (TokenList){.data = stored, .count = buffer.count};
+  return (TokenList){.data = stored, .count = buffer.count, .had_error = lexer.had_error};
 }
 
 const char* token_kind_name(TokenKind kind) {

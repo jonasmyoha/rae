@@ -710,9 +710,7 @@ static bool parse_required_fields(RaePackParser* parser, RaePack* pack) {
   return true;
 }
 
-bool raepack_parse_file(const char* file_path, RaePack* out_pack) {
-  if (!out_pack || !file_path) return false;
-  memset(out_pack, 0, sizeof(RaePack));
+bool raepack_parse_file(const char* file_path, RaePack* out, bool strict) {
   size_t file_size = 0;
   char* source = read_file(file_path, &file_size);
   if (!source) {
@@ -724,7 +722,13 @@ bool raepack_parse_file(const char* file_path, RaePack* out_pack) {
     free(source);
     diag_fatal("could not allocate arena");
   }
-  TokenList tokens = lexer_tokenize(arena, file_path, source, file_size);
+  TokenList tokens = lexer_tokenize(arena, file_path, source, file_size, strict);
+  if (tokens.had_error) {
+      free(source);
+      arena_destroy(arena);
+      memset(out, 0, sizeof(RaePack));
+      return false;
+  }
   RaePackParser parser = {
     .tokens = tokens.data,
     .count = tokens.count,
@@ -733,17 +737,11 @@ bool raepack_parse_file(const char* file_path, RaePack* out_pack) {
     .arena = arena,
     .had_error = false
   };
-  for (size_t i = 0; i < tokens.count; ++i) {
-    if (tokens.data[i].kind == TOK_ERROR) {
-      parser.had_error = true;
-      break;
-    }
-  }
   if (!parser.had_error) {
-    out_pack->arena = arena;
-    if (!parse_pack_header(&parser, out_pack)) {
+    out->arena = arena;
+    if (!parse_pack_header(&parser, out)) {
       parser.had_error = true;
-    } else if (!parse_required_fields(&parser, out_pack)) {
+    } else if (!parse_required_fields(&parser, out)) {
       parser.had_error = true;
     } else {
       const Token* trailing = parser_peek(&parser);
@@ -755,10 +753,10 @@ bool raepack_parse_file(const char* file_path, RaePack* out_pack) {
   free(source);
   if (parser.had_error) {
     arena_destroy(arena);
-    memset(out_pack, 0, sizeof(RaePack));
+    memset(out, 0, sizeof(RaePack));
     return false;
   }
-  out_pack->arena = arena;
+  out->arena = arena;
   return true;
 }
 

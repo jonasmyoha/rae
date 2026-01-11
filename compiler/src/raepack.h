@@ -43,7 +43,7 @@ typedef struct {
   Arena* arena;
 } RaePack;
 
-bool raepack_parse_file(const char* file_path, RaePack* out_pack);
+bool raepack_parse_file(const char* file_path, RaePack* out, bool strict);
 void raepack_pretty_print(const RaePack* pack, FILE* out);
 void raepack_free(RaePack* pack);
 const RaePackTarget* raepack_find_target(const RaePack* pack, Str id);
