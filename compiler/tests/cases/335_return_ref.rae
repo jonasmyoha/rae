@@ -3,12 +3,14 @@ type Point {
 }
 
 func getX(p: mod Point): ret mod Int {
-  ret mod p.x # OK: derived from param
+  # OK: derived from param
+  ret mod  p.x
 }
 
 func main() {
-  def p: Point = {x: 1}
+  def p: Point = { x: 1 }
   def rx: mod Int => getX(p: p)
   rx = 10
-  log(p.x) # expect 10
+  # expect 10
+  log(p.x)
 }

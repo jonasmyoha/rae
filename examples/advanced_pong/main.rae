@@ -1,5 +1,4 @@
 import raylib
-
 # -- Components (Plain Data Types) --
 type Transform {
   x: Float
@@ -23,7 +22,12 @@ func movementSystem(pos: mod Transform, vel: view Velocity) {
   pos.y = pos.y + vel.dy
 }
 
-func bounceSystem(pos: view Transform, vel: mod Velocity, radius: Float, height: Float) {
+func bounceSystem(
+  pos: view Transform,
+  vel: mod Velocity,
+  radius: Float,
+  height: Float,
+) {
   if pos.y < radius {
     vel.dy = 4.0
   }
@@ -37,19 +41,16 @@ func paddleAiSystem(ai: mod AIState, ball: view Transform, paddle: mod Transform
     ai.pauseTimer = ai.pauseTimer - 1
     ret
   }
-
   ai.reactionTimer = ai.reactionTimer + 1
   # Update target every 8 frames (~0.13s) to simulate human reaction delay
   if ai.reactionTimer > 8 {
     ai.targetY = ball.y
     ai.reactionTimer = 0
-    
     # Randomly decide to "think" (pause) for a bit
     if random() < 0.015 {
       ai.pauseTimer = randomInt(min: 10, max: 25)
     }
   }
-
   # Move towards target
   if ai.targetY < paddle.y + 50.0 {
     paddle.y = paddle.y - 4.5
@@ -57,7 +58,6 @@ func paddleAiSystem(ai: mod AIState, ball: view Transform, paddle: mod Transform
   if ai.targetY > paddle.y + 50.0 {
     paddle.y = paddle.y + 4.5
   }
-
   # Bounds check
   if paddle.y < 0.0 {
     paddle.y = 0.0
@@ -100,7 +100,12 @@ func paddleCollisionSystem(
   }
 }
 
-func paddleInputSystem(pos: mod Transform, speed: Float, height: Float, pHeight: Float) {
+func paddleInputSystem(
+  pos: mod Transform,
+  speed: Float,
+  height: Float,
+  pHeight: Float,
+) {
   # W (87) / Up (265)
   if isKeyDown(key: 87) is 1 {
     pos.y = pos.y - speed
@@ -142,27 +147,24 @@ func main() {
   # Initializing Entities (as local component instances)
   initWindow(width: 800, height: 450, title: "Rae Advanced Pong (ECS)")
   setTargetFPS(fps: 60)
-  def p1Pos: Transform = {x: 20.0, y: 175.0}
-  def p2Pos: Transform = {x: 760.0, y: 175.0}
-  def bPos: Transform = {x: 400.0, y: 225.0}
-  def bVel: Velocity = {dx: 4.0, dy: 4.0}
-  def ai: AIState = {targetY: 225.0, reactionTimer: 0, pauseTimer: 0}
+  def p1Pos: Transform = { x: 20.0, y: 175.0 }
+  def p2Pos: Transform = { x: 760.0, y: 175.0 }
+  def bPos: Transform = { x: 400.0, y: 225.0 }
+  def bVel: Velocity = { dx: 4.0, dy: 4.0 }
+  def ai: AIState = { targetY: 225.0, reactionTimer: 0, pauseTimer: 0 }
   def p1Score: Int = 0
   def p2Score: Int = 0
-
   loop windowShouldClose() is 0 {
     # 1. Input Phase
+    # 2. Update Phase
+    # AI System
     paddleInputSystem(
       pos: p1Pos,
       speed: 5.0,
       height: 450.0,
       pHeight: 100.0,
     )
-
-    # 2. Update Phase
-    # AI System
     paddleAiSystem(ai: ai, ball: bPos, paddle: p2Pos)
-
     movementSystem(pos: bPos, vel: bVel)
     bounceSystem(
       pos: bPos,
@@ -170,7 +172,6 @@ func main() {
       radius: 10.0,
       height: 450.0,
     )
-
     paddleCollisionSystem(
       bPos: bPos,
       bVel: bVel,
@@ -179,6 +180,7 @@ func main() {
       pHeight: 100.0,
       isLeft: 1,
     )
+    # Reset if out of bounds and increment score
     paddleCollisionSystem(
       bPos: bPos,
       bVel: bVel,
@@ -187,8 +189,6 @@ func main() {
       pHeight: 100.0,
       isLeft: 0,
     )
-
-    # Reset if out of bounds and increment score
     if bPos.x < 0.0 {
       p2Score = p2Score + 1
       bPos.x = 400.0
@@ -201,7 +201,6 @@ func main() {
       bPos.y = 225.0
       bVel.dx = -4.0
     }
-
     # 3. Render Phase
     beginDrawing()
     clearBackground(
@@ -210,8 +209,8 @@ func main() {
       b: 20,
       a: 255,
     )
-    drawUISystem(p1Score: p1Score, p2Score: p2Score)
     # Draw paddles
+    drawUISystem(p1Score: p1Score, p2Score: p2Score)
     drawRectangle(
       x: 20.0,
       y: p1Pos.y,
@@ -222,6 +221,7 @@ func main() {
       b: 255,
       a: 255,
     )
+    # Draw ball
     drawRectangle(
       x: 760.0,
       y: p2Pos.y,
@@ -232,7 +232,6 @@ func main() {
       b: 255,
       a: 255,
     )
-    # Draw ball
     drawCircle(
       x: bPos.x,
       y: bPos.y,

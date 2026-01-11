@@ -3,16 +3,15 @@ type Point {
 }
 
 func xMod(p: mod Point): ret mod Int {
-  ret mod p.x
+  ret mod  p.x
 }
 
 func main() {
-  def p: Point = {x: 1}
-
+  def p: Point = { x: 1 }
   # positional arg call is ok
   def rx: mod Int => xMod(p)
   rx = 10
-
   # aliasing-friendly: direct access while rx exists is OK in Rae
-  log(p.x) # expect 10
+  # expect 10
+  log(p.x)
 }

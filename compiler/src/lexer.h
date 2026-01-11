@@ -92,12 +92,14 @@ typedef struct {
 typedef struct {
   Token* data;
   size_t count;
+  bool had_error;
 } TokenList;
 
 TokenList lexer_tokenize(Arena* arena,
                          const char* file_path,
                          const char* source,
-                         size_t length);
+                         size_t length,
+                         bool strict);
 
 TokenKind lookup_keyword(Str lexeme);
 

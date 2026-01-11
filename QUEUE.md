@@ -76,3 +76,20 @@
 - [x] Enhance devtools syntax highlighter logic (types vs keywords, function names, calls).
 
 - [x] Update devtools theme to match Sublime Monokai (background `#272822`).
+
+
+
+## Priority 7: Strict File Formatting
+
+- [ ] Enforce LF-only line endings in Lexer (reject CRLF).
+
+- [ ] Support `\r` only inside raw string literals.
+
+- [ ] Enforce mandatory final newline at end-of-file.
+
+- [ ] Update Formatter to automatically fix line endings and EOF newline.
+
+- [ ] Add regression tests for line ending and EOF newline enforcement.
+
+## Priority 8: Raepack Refinements
+- [ ] Task: raepack does not contain a thing called "auto_folders". Check how the raepack format really defines folders and files. Fix all raepack files accordingly.

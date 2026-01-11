@@ -194,7 +194,7 @@ static void pp_write_type(PrettyPrinter* pp, const AstTypeRef* type) {
     }
   }
   if (type->generic_args) {
-    pp_write_char(pp, '[');
+    pp_write_char(pp, '(');
     AstTypeRef* generic_param = type->generic_args;
     int is_first_generic_param = 1;
     while (generic_param) {
@@ -205,7 +205,7 @@ static void pp_write_type(PrettyPrinter* pp, const AstTypeRef* type) {
       is_first_generic_param = 0;
       generic_param = generic_param->next;
     }
-    pp_write_char(pp, ']');
+    pp_write_char(pp, ')');
   }
 }
 
@@ -429,6 +429,22 @@ static void pp_expr_prec(PrettyPrinter* pp, const AstExpr* expr, int parent_prec
         pp_write_string_literal(pp, expr->as.string_lit);
       }
       break;
+    case AST_EXPR_INTERP: {
+      pp_write_char(pp, '"');
+      AstInterpPart* part = expr->as.interp.parts;
+      while (part) {
+          if (part->value->kind == AST_EXPR_STRING) {
+              pp_write_str(pp, part->value->as.string_lit);
+          } else {
+              pp_write_char(pp, '{');
+              pp_expr_prec(pp, part->value, PREC_LOWEST);
+              pp_write_char(pp, '}');
+          }
+          part = part->next;
+      }
+      pp_write_char(pp, '"');
+      break;
+    }
     case AST_EXPR_CHAR:
       pp_write_char(pp, '\'');
       pp_write_str(pp, expr->as.char_lit);
@@ -1054,4 +1070,8 @@ void pretty_print_module(const AstModule* module, const char* source, FILE* out)
   }
   
   pp_check_comments(&pp, (size_t)-1);
+
+  if (!pp.start_of_line) {
+    pp_newline(&pp);
+  }
 }

@@ -529,6 +529,43 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       emit_constant(compiler, string_value, (int)expr->line);
       return true;
     }
+    case AST_EXPR_INTERP: {
+      AstInterpPart* part = expr->as.interp.parts;
+      if (!part) {
+          emit_constant(compiler, value_string_copy("", 0), (int)expr->line);
+          return true;
+      }
+      
+      // Initial part (guaranteed to be a string based on parser)
+      if (!compile_expr(compiler, part->value)) return false;
+      part = part->next;
+      
+      while (part) {
+          // Push next value
+          if (!compile_expr(compiler, part->value)) return false;
+          
+          // If the next value isn't a string (it's the {expression} result), wrap it in rae_str
+          if (part->value->kind != AST_EXPR_STRING) {
+              emit_op(compiler, OP_NATIVE_CALL, (int)expr->line);
+              const char* native_name = "rae_str";
+              Str name_str = str_from_cstr(native_name);
+              uint16_t name_idx = chunk_add_constant(compiler->chunk, value_string_copy(name_str.data, name_str.len));
+              emit_short(compiler, name_idx, (int)expr->line);
+              emit_byte(compiler, 1, (int)expr->line); // 1 arg
+          }
+          
+          // Now stack has [lhs, rhs_str]. Call rae_str_concat
+          emit_op(compiler, OP_NATIVE_CALL, (int)expr->line);
+          const char* concat_name = "rae_str_concat";
+          Str concat_str = str_from_cstr(concat_name);
+          uint16_t concat_idx = chunk_add_constant(compiler->chunk, value_string_copy(concat_str.data, concat_str.len));
+          emit_short(compiler, concat_idx, (int)expr->line);
+          emit_byte(compiler, 2, (int)expr->line); // 2 args
+          
+          part = part->next;
+      }
+      return true;
+    }
     case AST_EXPR_CHAR: {
       emit_constant(compiler, value_char(expr->as.char_value), (int)expr->line);
       return true;
