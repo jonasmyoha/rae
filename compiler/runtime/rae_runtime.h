@@ -3,6 +3,12 @@
 
 #include <stdint.h>
 
+#ifdef __GNUC__
+#define RAE_UNUSED __attribute__((unused))
+#else
+#define RAE_UNUSED
+#endif
+
 typedef struct {
   const char* data;
   uint64_t len;
