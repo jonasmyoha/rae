@@ -28,11 +28,16 @@
 - Completed T012 (Hot-reload VM support) — `cd rae/compiler && make test`, `bin/rae run --watch examples/hello.rae`
 - Started T034 (VM research and fixing it with smaller steps)
 - Completed T034 (VM research and fixing it with smaller steps) — `cd rae/compiler && make test`, fixed stack leaks in def/match and made OP_ALLOC_LOCAL idempotent.
-- Started T035 (Implement basic List in stdlib)
-- Completed T035 (Implement basic List in stdlib) — implemented `RaeList` in runtime and VM natives.
-- Started T036 (Implement static Array in stdlib)
-- Completed T036 (Implement static Array in stdlib) — implemented `RaeArray` in runtime and VM natives.
-- Started T037 (Update random_advanced example)
-- Completed T037 (Update random_advanced example) — updated example to use `List` and added `rae_str_concat` and arithmetic fixes.
-- Started T038 (Add tests and documentation for List and Array)
-- Completed T038 (Add tests and documentation for List and Array) — added regression tests 322, 323, 324.
+- Started T047 (Update `AGENTS.md` and Rae Language Specification for Naming Conventions)
+- Completed T047 (Update `AGENTS.md` and Rae Language Specification for Naming Conventions) — added naming conventions to docs.
+- Started T048 (Lexer & Parser: Generic Type Syntax `List[T]`)
+- Completed T048 (Lexer & Parser: Generic Type Syntax `List[T]`) — implemented parsing and formatting for generic type references like `List[Int]`.
+- Started T049 (Parser: Generic Parameters on Type and Function Declarations)
+- Completed T049 (Parser: Generic Parameters on Type and Function Declarations) — implemented parsing and formatting for generic parameters on type and function declarations.
+- Started T050 (Parser: Collection Literal Parsing `List[T]{ ... }` and `{ ... }`)
+- Completed T050 (Parser: Collection Literal Parsing `List[T]{ ... }` and `{ ... }`) — implemented parsing and formatting for collection literals.
+- Started T051 (VM Compiler: Generate Code for Collection Literals)
+- Completed T051 (VM Compiler: Generate Code for Collection Literals) — implemented VM code generation for list literals.
+
+
+- Started T050 (Parser: Collection Literal Parsing `List[T]{ ... }` and `{ ... }`)

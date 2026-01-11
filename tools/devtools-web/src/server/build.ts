@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, exec } from "node:child_process";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type {
@@ -244,7 +244,34 @@ export class BuildRunner {
       targetId: "all",
       targetLabel: this.activeRun.batchLabel
     });
+
+    if (success) {
+      this.updateCompilerMetrics();
+    }
+
     this.cleanup();
+  }
+
+  private updateCompilerMetrics() {
+    const metricsScript = path.resolve(
+      process.cwd(),
+      this.config.compilerPath,
+      "tools/stats/update_metrics.sh"
+    );
+    const cwd = path.resolve(process.cwd(), this.config.compilerPath);
+
+    exec(metricsScript, { cwd }, (error, stdout, stderr) => {
+      if (error) {
+        console.error(`[metrics] Error updating metrics: ${error.message}`);
+        return;
+      }
+      if (stdout) {
+        console.log(`[metrics] ${stdout.trim()}`);
+      }
+      if (stderr) {
+        console.error(`[metrics] ${stderr.trim()}`);
+      }
+    });
   }
 
   private broadcastRunError(runId: string, command: BuildCommandType, error: unknown) {
