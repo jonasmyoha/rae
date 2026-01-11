@@ -176,7 +176,9 @@ static AstTypeRef* parse_type_ref(Parser* parser) {
     type->is_view = true;
   } else if (parser_match(parser, TOK_KW_MOD)) {
     type->is_mod = true;
-  } else if (parser_match(parser, TOK_KW_ID)) {
+  }
+  
+  if (parser_match(parser, TOK_KW_ID)) {
     type->is_id = true;
   } else if (parser_match(parser, TOK_KW_KEY)) {
     type->is_key = true;
@@ -217,6 +219,12 @@ static AstTypeRef* parse_type_ref(Parser* parser) {
     AstTypeRef* generic_params_head = NULL;
     do {
       AstTypeRef* generic_param = parse_type_ref(parser); // Recursive call for nested generics
+      
+      // Reject references in generic arguments
+      if (generic_param->is_view || generic_param->is_mod) {
+          parser_error(parser, start_token, "references (view/mod) cannot be used as generic type arguments");
+      }
+
       generic_params_head = append_type_ref_list(generic_params_head, generic_param);
       if (parser_check(parser, TOK_RPAREN)) break;
       parser_consume(parser, TOK_COMMA, "expected ',' or ')' in generic type list");
