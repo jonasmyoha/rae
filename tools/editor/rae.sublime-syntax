@@ -1,0 +1,109 @@
+%YAML 1.2
+---
+# http://www.sublimetext.com/docs/3/syntax.html
+name: Rae
+file_extensions: [rae, raepack]
+scope: source.rae
+
+contexts:
+  main:
+    - include: comments
+    - include: keywords
+    - include: strings
+    - include: constants
+    - include: storage
+    - include: function_declaration
+    - include: function_call
+    - include: variables
+    - include: operators
+    - include: punctuation
+
+  comments:
+    - match: '#\['
+      scope: punctuation.definition.comment.rae
+      push: block_comment
+    - match: '#.*$'
+      scope: comment.line.number-sign.rae
+      captures:
+        0: punctuation.definition.comment.rae
+
+  block_comment:
+    - meta_scope: comment.block.rae
+    - match: '\]#'
+      pop: true
+    - match: '#\['
+      push: block_comment
+
+  keywords:
+    - match: '\b(if|else|loop|in|match|case|default|ret|spawn|import|export|extern|is)\b'
+      scope: keyword.control.rae
+    - match: '\b(and|or|not)\b'
+      scope: keyword.operator.logical.rae
+
+  storage:
+    - match: '\b(type|func|def|pack)\b'
+      scope: keyword.declaration.rae
+    - match: '\b(Int|Float|Bool|String|Char|List|Array)\b'
+      scope: storage.type.rae
+    - match: '\b(view|mod|opt|own|pub|priv)\b'
+      scope: storage.modifier.rae
+
+  constants:
+    - match: '\b(true|false|none)\b'
+      scope: constant.language.rae
+    - match: '\b[0-9]+\.[0-9]+\b'
+      scope: constant.numeric.float.rae
+    - match: '\b[0-9]+\b'
+      scope: constant.numeric.integer.rae
+
+  strings:
+    - match: '"'
+      scope: punctuation.definition.string.begin.rae
+      push: double_quoted_string
+
+  double_quoted_string:
+    - meta_scope: string.quoted.double.rae
+    - match: '\\.'
+      scope: constant.character.escape.rae
+    - match: '\{'
+      scope: punctuation.section.interpolation.begin.rae
+      push: interpolation
+    - match: '"'
+      scope: punctuation.definition.string.end.rae
+      pop: true
+
+  interpolation:
+    - meta_scope: meta.interpolation.rae
+    - match: '\}'
+      scope: punctuation.section.interpolation.end.rae
+      pop: true
+    - include: main
+
+  function_declaration:
+    - match: '\b(func)\s+([a-zA-Z_][a-zA-Z0-9_]*)\b'
+      captures:
+        1: keyword.declaration.rae
+        2: entity.name.function.rae
+
+  function_call:
+    - match: '([a-zA-Z_][a-zA-Z0-9_]*)\s*(?=\()'
+      scope: variable.function.rae
+
+  variables:
+    # Argument labels: name: 
+    - match: '([a-zA-Z_][a-zA-Z0-9_]*)\s*(?=:)'
+      scope: variable.parameter.rae
+
+  operators:
+    - match: '=>|='
+      scope: keyword.operator.assignment.rae
+    - match: '\+\+|--|\+|\-|\*|/|%'
+      scope: keyword.operator.arithmetic.rae
+    - match: '<=|>=|<|>'
+      scope: keyword.operator.comparison.rae
+
+  punctuation:
+    - match: '\(|\)|\[|\]|\{|\}'
+      scope: punctuation.section.rae
+    - match: ',|:|.'
+      scope: punctuation.separator.rae
