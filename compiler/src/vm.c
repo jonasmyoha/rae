@@ -453,8 +453,8 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
       }
       case OP_SET_FIELD: {
         uint16_t index = read_short(vm);
-        Value obj_val = vm_pop(vm);
         Value val = vm_pop(vm);
+        Value obj_val = vm_pop(vm);
         Value* target = &obj_val;
         if (obj_val.type == VAL_REF) {
           if (obj_val.as.ref_value.kind == REF_VIEW) {
@@ -591,6 +591,10 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         } else {
           vm_push(vm, value_ref(target, instruction == OP_MOD_FIELD ? REF_MOD : REF_VIEW));
         }
+        break;
+      }
+      case OP_DUP: {
+        vm_push(vm, value_copy(vm_peek(vm, 0)));
         break;
       }
       case OP_CONSTRUCT: {
