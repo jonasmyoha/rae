@@ -702,39 +702,97 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
           compiler->had_error = true;
           return false;
         }
-      } else if (expr->as.unary.op == AST_UNARY_PRE_INC || expr->as.unary.op == AST_UNARY_PRE_DEC) {
-        if (expr->as.unary.operand->kind != AST_EXPR_IDENT) {
-          diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
-                     "increment/decrement operand must be an identifier in VM");
-          compiler->had_error = true;
-          return false;
+      } else if (expr->as.unary.op == AST_UNARY_PRE_INC || expr->as.unary.op == AST_UNARY_PRE_DEC ||
+                 expr->as.unary.op == AST_UNARY_POST_INC || expr->as.unary.op == AST_UNARY_POST_DEC) {
+        bool is_post = (expr->as.unary.op == AST_UNARY_POST_INC || expr->as.unary.op == AST_UNARY_POST_DEC);
+        bool is_inc = (expr->as.unary.op == AST_UNARY_PRE_INC || expr->as.unary.op == AST_UNARY_POST_INC);
+        const AstExpr* operand = expr->as.unary.operand;
+
+        if (operand->kind == AST_EXPR_IDENT) {
+            int slot = compiler_find_local(compiler, operand->as.ident);
+            if (slot < 0) {
+               diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
+                          "unknown identifier in increment/decrement");
+               compiler->had_error = true;
+               return false;
+            }
+            
+            emit_op(compiler, OP_GET_LOCAL, (int)expr->line);
+            emit_short(compiler, (uint16_t)slot, (int)expr->line);
+            
+            if (is_post) {
+                emit_op(compiler, OP_DUP, (int)expr->line);
+            }
+            
+            emit_constant(compiler, value_int(1), (int)expr->line);
+            emit_op(compiler, is_inc ? OP_ADD : OP_SUB, (int)expr->line);
+            
+            emit_op(compiler, OP_SET_LOCAL, (int)expr->line);
+            emit_short(compiler, (uint16_t)slot, (int)expr->line);
+            
+            if (is_post) {
+                emit_op(compiler, OP_POP, (int)expr->line); // remove new value, leave original
+            }
+            return true;
+        } else if (operand->kind == AST_EXPR_MEMBER) {
+            const AstExpr* obj_expr = operand->as.member.object;
+            Str type_name = {0};
+            if (obj_expr->kind == AST_EXPR_IDENT) {
+                type_name = get_local_type_name(compiler, obj_expr->as.ident);
+            }
+            if (type_name.len == 0) {
+                diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
+                           "could not determine type for member increment/decrement");
+                return false;
+            }
+            TypeEntry* type = type_table_find(&compiler->types, type_name);
+            int field_index = type_entry_find_field(type, operand->as.member.member);
+            if (field_index < 0) {
+                diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "unknown field");
+                return false;
+            }
+
+            if (obj_expr->kind == AST_EXPR_IDENT) {
+                int obj_slot = compiler_find_local(compiler, obj_expr->as.ident);
+                emit_op(compiler, OP_GET_LOCAL, (int)obj_expr->line);
+                emit_short(compiler, (uint16_t)obj_slot, (int)obj_expr->line);
+                
+                emit_op(compiler, OP_GET_FIELD, (int)expr->line);
+                emit_short(compiler, (uint16_t)field_index, (int)expr->line);
+                
+                if (is_post) emit_op(compiler, OP_DUP, (int)expr->line);
+                
+                emit_constant(compiler, value_int(1), (int)expr->line);
+                emit_op(compiler, is_inc ? OP_ADD : OP_SUB, (int)expr->line);
+                
+                emit_op(compiler, OP_SET_LOCAL_FIELD, (int)expr->line);
+                emit_short(compiler, (uint16_t)obj_slot, (int)expr->line);
+                emit_short(compiler, (uint16_t)field_index, (int)expr->line);
+                
+                if (is_post) emit_op(compiler, OP_POP, (int)expr->line);
+            } else {
+                if (!compile_expr(compiler, obj_expr)) return false;
+                emit_op(compiler, OP_DUP, (int)expr->line);
+                
+                emit_op(compiler, OP_GET_FIELD, (int)expr->line);
+                emit_short(compiler, (uint16_t)field_index, (int)expr->line);
+                
+                if (is_post) emit_op(compiler, OP_DUP, (int)expr->line);
+                
+                emit_constant(compiler, value_int(1), (int)expr->line);
+                emit_op(compiler, is_inc ? OP_ADD : OP_SUB, (int)expr->line);
+                
+                emit_op(compiler, OP_SET_FIELD, (int)expr->line);
+                emit_short(compiler, (uint16_t)field_index, (int)expr->line);
+                
+                if (is_post) emit_op(compiler, OP_POP, (int)expr->line);
+            }
+            return true;
         }
-        int slot = compiler_find_local(compiler, expr->as.unary.operand->as.ident);
-        if (slot < 0) {
-           diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
-                      "unknown identifier in increment/decrement");
-           compiler->had_error = true;
-           return false;
-        }
-        emit_op(compiler, OP_GET_LOCAL, (int)expr->line);
-        emit_short(compiler, (uint16_t)slot, (int)expr->line);
-        emit_constant(compiler, value_int(1), (int)expr->line);
-        if (expr->as.unary.op == AST_UNARY_PRE_INC) {
-          emit_op(compiler, OP_ADD, (int)expr->line);
-        } else {
-          emit_op(compiler, OP_SUB, (int)expr->line);
-        }
-        emit_op(compiler, OP_SET_LOCAL, (int)expr->line);
-        emit_short(compiler, (uint16_t)slot, (int)expr->line);
-        // OP_SET_LOCAL leaves value on stack? No, it usually pops value and sets. 
-        // Wait, OP_SET_LOCAL in many VMs leaves value. 
-        // Let's check vm.c implementation of OP_SET_LOCAL.
-        // Assuming it pops, I need to Get it back or Peek.
-        // Actually, let's assume standard behavior: SetLocal pops.
-        // So I need to GetLocal again to return the value.
-        emit_op(compiler, OP_GET_LOCAL, (int)expr->line);
-        emit_short(compiler, (uint16_t)slot, (int)expr->line);
-        return true;
+        diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
+                   "increment/decrement operand must be an identifier or member in VM");
+        compiler->had_error = true;
+        return false;
       }
       diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
                  "unary operator not supported in VM yet");

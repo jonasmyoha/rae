@@ -278,6 +278,8 @@ static const char* unary_op_text(AstUnaryOp op) {
     case AST_UNARY_SPAWN: return "spawn";
     case AST_UNARY_PRE_INC: return "++";
     case AST_UNARY_PRE_DEC: return "--";
+    case AST_UNARY_POST_INC: return "++";
+    case AST_UNARY_POST_DEC: return "--";
     case AST_UNARY_VIEW: return "view ";
     case AST_UNARY_MOD: return "mod ";
   }
@@ -490,12 +492,24 @@ static void pp_expr_prec(PrettyPrinter* pp, const AstExpr* expr, int parent_prec
       int prec = PREC_UNARY;
       int need_paren = prec < parent_prec;
       if (need_paren) pp_write_char(pp, '(');
+      
+      bool is_post = (expr->as.unary.op == AST_UNARY_POST_INC || expr->as.unary.op == AST_UNARY_POST_DEC);
       const char* op_text = unary_op_text(expr->as.unary.op);
-      pp_write(pp, op_text);
-      if (expr->as.unary.op == AST_UNARY_NOT || expr->as.unary.op == AST_UNARY_SPAWN) {
-        pp_space(pp);
+      
+      if (!is_post) {
+          pp_write(pp, op_text);
+          if (expr->as.unary.op == AST_UNARY_NOT || expr->as.unary.op == AST_UNARY_SPAWN ||
+              expr->as.unary.op == AST_UNARY_VIEW || expr->as.unary.op == AST_UNARY_MOD) {
+            pp_space(pp);
+          }
       }
+      
       pp_expr_prec(pp, expr->as.unary.operand, PREC_UNARY);
+      
+      if (is_post) {
+          pp_write(pp, op_text);
+      }
+      
       if (need_paren) pp_write_char(pp, ')');
       break;
     }

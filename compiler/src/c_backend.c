@@ -667,6 +667,12 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         if (fprintf(out, "--") < 0) return false;
         if (!emit_expr(ctx, expr->as.unary.operand, out)) return false;
         return true;
+      } else if (expr->as.unary.op == AST_UNARY_POST_INC) {
+        if (!emit_expr(ctx, expr->as.unary.operand, out)) return false;
+        return fprintf(out, "++") >= 0;
+      } else if (expr->as.unary.op == AST_UNARY_POST_DEC) {
+        if (!emit_expr(ctx, expr->as.unary.operand, out)) return false;
+        return fprintf(out, "--") >= 0;
       } else if (expr->as.unary.op == AST_UNARY_VIEW || expr->as.unary.op == AST_UNARY_MOD) {
         // In C backend, references are pointers. We take the address of the operand.
         if (fprintf(out, "(&(") < 0) return false;
@@ -921,20 +927,20 @@ static bool emit_call(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
       if (!emit_expr(ctx, expr, out)) return false;
       return fprintf(out, ";\n") >= 0;
   }
-  if (expr->kind != AST_EXPR_CALL || !expr->as.call.callee ||
-      expr->as.call.callee->kind != AST_EXPR_IDENT) {
-    fprintf(stderr, "error: unsupported expression in C backend (only direct calls allowed)\n");
-    return false;
+  
+  if (expr->kind == AST_EXPR_CALL && expr->as.call.callee && 
+      expr->as.call.callee->kind == AST_EXPR_IDENT) {
+      Str name = expr->as.call.callee->as.ident;
+      if (str_eq_cstr(name, "log")) {
+        return emit_log_call(ctx, expr, out, true);
+      }
+      if (str_eq_cstr(name, "logS")) {
+        return emit_log_call(ctx, expr, out, false);
+      }
   }
-  Str name = expr->as.call.callee->as.ident;
-  if (str_eq_cstr(name, "log")) {
-    return emit_log_call(ctx, expr, out, true);
-  }
-  if (str_eq_cstr(name, "logS")) {
-    return emit_log_call(ctx, expr, out, false);
-  }
+
   if (fprintf(out, "  ") < 0) return false;
-  if (!emit_call_expr(ctx, expr, out)) {
+  if (!emit_expr(ctx, expr, out)) {
     return false;
   }
   if (fprintf(out, ";\n") < 0) {
