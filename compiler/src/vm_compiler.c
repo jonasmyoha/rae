@@ -198,6 +198,13 @@ int type_entry_find_field(const TypeEntry* entry, Str name) {
   return -1;
 }
 
+static bool is_primitive_type(Str type_name) {
+  return str_eq_cstr(type_name, "Int") || 
+         str_eq_cstr(type_name, "Float") || 
+         str_eq_cstr(type_name, "Bool") || 
+         str_eq_cstr(type_name, "String");
+}
+
 bool collect_metadata(const char* file_path, const AstModule* module, FunctionTable* funcs, TypeTable* types /* GEMINI: MethodTable* methods parameter removed to fix build */) {
   // GEMINI: This function is not fully implemented yet, only a partial implementation.
   // The method table is not yet populated.
@@ -475,10 +482,16 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
         // HACK: for now, assume any ident passed to a call might need referencing
         // if we don't have full type info. 
         // This is safer than copying for the 335 test case.
-        int slot = compiler_find_local(compiler, arg->value->as.ident);
-        if (slot >= 0) {
-            emit_op(compiler, OP_MOD_LOCAL, (int)expr->line);
-            emit_short(compiler, (uint16_t)slot, (int)expr->line);
+        // BUT: skip primitives, they should always be copied.
+        Str type_name = get_local_type_name(compiler, arg->value->as.ident);
+        if (type_name.len > 0 && !is_primitive_type(type_name)) {
+            int slot = compiler_find_local(compiler, arg->value->as.ident);
+            if (slot >= 0) {
+                emit_op(compiler, OP_MOD_LOCAL, (int)expr->line);
+                emit_short(compiler, (uint16_t)slot, (int)expr->line);
+            } else {
+                if (!compile_expr(compiler, arg->value)) return false;
+            }
         } else {
             if (!compile_expr(compiler, arg->value)) return false;
         }
