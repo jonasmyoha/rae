@@ -50,6 +50,9 @@ const toggleEditExampleBtn = document.getElementById("toggle-edit-example-btn");
 const saveExampleBtn = document.getElementById("save-example-btn");
 const exampleOutput = document.getElementById("example-output");
 const copyExampleOutputBtn = document.getElementById("copy-example-output-btn");
+const testErrorsSummary = document.getElementById("test-errors-summary");
+const testErrorsLog = document.getElementById("test-errors-log");
+const copyTestErrorsBtn = document.getElementById("copy-test-errors-btn");
 const exampleTitle = document.getElementById("example-title");
 const exampleEntryLabel = document.getElementById("example-entry");
 const exampleFilesList = document.getElementById("example-files");
@@ -77,6 +80,7 @@ let selectedTestName = null;
 let testFilesTree = [];
 let selectedTestFile = null;
 let selectedTestSource = "";
+let allTestLogLines = [];
 let raeSyntax = null;
 let testDirectoryMap = new Map();
 const errorEntries = [];
@@ -366,6 +370,9 @@ function handleTestRunStarted(event) {
   setTestStatus(`Running (${event.mode})`, "is-running", event.targetLabel);
   setTestButtonsDisabled(true);
   clearTestLog();
+  allTestLogLines = [];
+  if (testErrorsSummary) testErrorsSummary.hidden = true;
+  if (copyTestErrorsBtn) copyTestErrorsBtn.hidden = true;
   appendTestLine(`▶ [${event.targetLabel}] Running tests (${event.mode})`, "stdout");
   resetTestCases();
 }
@@ -402,6 +409,7 @@ function handleTestRunCompleted(event) {
   setTestButtonsDisabled(false);
   latestRunId = null;
   updateSummaryText(event.success ? "Suite passed" : "Suite has failures");
+  updateTestErrorSummary();
   loadTestFileTree({ silent: true });
 }
 
@@ -425,6 +433,7 @@ function handleTestRunError(event) {
   appendTestLine(`⚠ [${event.targetLabel}] ${event.message}`, "stderr");
   setTestButtonsDisabled(false);
   latestRunId = null;
+  updateTestErrorSummary();
 }
 
 function handleBuildRunError(event) {
@@ -548,11 +557,72 @@ function clearBuildLog() {
 
 function appendTestLine(text, stream = "stdout") {
   if (!testLog) return;
+  allTestLogLines.push({ text, stream });
   const lineEl = document.createElement("div");
   lineEl.className = `terminal-line ${stream}`;
   lineEl.textContent = text;
   testLog.appendChild(lineEl);
   testLog.scrollTop = testLog.scrollHeight;
+}
+
+function updateTestErrorSummary() {
+  if (!testErrorsLog || !testErrorsSummary) return;
+  
+  const errorIndices = [];
+  const errorPatterns = [
+    /\bFAIL:/,
+    /\berror:/,
+    /\bwarning:/,
+    /\bActual:/,
+    /\bExpected:/,
+    /\.rae:\d+:\d+:/
+  ];
+
+  allTestLogLines.forEach((line, index) => {
+    if (line.stream === "stderr" || errorPatterns.some(p => p.test(line.text))) {
+      errorIndices.push(index);
+    }
+  });
+
+  if (errorIndices.length === 0) {
+    testErrorsSummary.hidden = true;
+    if (copyTestErrorsBtn) copyTestErrorsBtn.hidden = true;
+    return;
+  }
+
+  testErrorsSummary.hidden = false;
+  if (copyTestErrorsBtn) copyTestErrorsBtn.hidden = false;
+  testErrorsLog.innerHTML = "";
+  
+  const contextRange = 2;
+  const mergedIndices = new Set();
+  
+  errorIndices.forEach(idx => {
+    for (let i = Math.max(0, idx - contextRange); i <= Math.min(allTestLogLines.length - 1, idx + contextRange); i++) {
+      mergedIndices.add(i);
+    }
+  });
+
+  const sortedIndices = Array.from(mergedIndices).sort((a, b) => a - b);
+  let lastIdx = -1;
+
+  sortedIndices.forEach(idx => {
+    if (lastIdx !== -1 && idx > lastIdx + 1) {
+      const sep = document.createElement("div");
+      sep.className = "terminal-line terminal-line--sep";
+      sep.textContent = "---";
+      testErrorsLog.appendChild(sep);
+    }
+    
+    const line = allTestLogLines[idx];
+    const lineEl = document.createElement("div");
+    lineEl.className = `terminal-line ${line.stream}`;
+    lineEl.textContent = line.text;
+    testErrorsLog.appendChild(lineEl);
+    lastIdx = idx;
+  });
+
+  testErrorsLog.scrollTop = 0;
 }
 
 function appendBuildLine(text, stream = "stdout") {
@@ -615,6 +685,13 @@ setupCopyButton(copyTestLogBtn, () => {
     line.textContent?.trimEnd() ?? ""
   );
   return lines.join("\n").trim() || "No test output yet.";
+});
+
+setupCopyButton(copyTestErrorsBtn, () => {
+  const lines = Array.from(testErrorsLog?.querySelectorAll(".terminal-line") ?? []).map((line) =>
+    line.textContent?.trimEnd() ?? ""
+  );
+  return lines.join("\n").trim() || "No errors to copy.";
 });
 
 setupCopyButton(copyBuildLogBtn, () => {
