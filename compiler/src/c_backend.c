@@ -70,28 +70,18 @@ static bool emit_type_ref_as_c_type(const AstTypeRef* type, FILE* out) {
   if (!type || !type->parts) return fprintf(out, "int64_t") >= 0; // Default to int64_t for unknown types
 
   const AstIdentifierPart* current = type->parts;
-  bool is_ptr = false;
-  // Handle modifiers
-  if (current) {
-      TokenKind mod = lookup_keyword(current->text);
-      if (mod == TOK_KW_MOD || mod == TOK_KW_VIEW) {
-          is_ptr = true;
-          current = current->next; // Move past modifier
-      }
-  }
-
-  if (!current) return fprintf(out, "%s", is_ptr ? "void*" : "int64_t") >= 0; // Default if only modifier was present
+  bool is_ptr = type->is_view || type->is_mod;
 
   const char* c_type_str = map_rae_type_to_c(current->text);
   if (c_type_str) {
       if (fprintf(out, "%s", c_type_str) < 0) return false;
   } else {
-      if (fprintf(out, "(%.*s)", (int)current->text.len, current->text.data) < 0) return false;
+      if (fprintf(out, "%.*s", (int)current->text.len, current->text.data) < 0) return false;
   }
   
   while (current->next) { // Handle multi-part identifiers (e.g., Module.Type)
       current = current->next;
-      if (fprintf(out, "_(%.*s)", (int)current->text.len, current->text.data) < 0) return false; // Concatenate with underscore
+      if (fprintf(out, "_%.*s", (int)current->text.len, current->text.data) < 0) return false; // Concatenate with underscore
   }
 
   if (is_ptr) {
@@ -123,21 +113,11 @@ static bool emit_param_list(const AstParam* params, FILE* out) {
     char* free_me = NULL;
 
     if (param->type && param->type->parts) {
+        is_ptr = param->type->is_view || param->type->is_mod;
         Str first = param->type->parts->text;
-        TokenKind mod = lookup_keyword(first);
-        if (mod == TOK_KW_MOD || mod == TOK_KW_VIEW) {
-            is_ptr = true;
-            if (param->type->parts->next) {
-                Str next = param->type->parts->next->text;
-                const char* mapped = map_rae_type_to_c(next);
-                if (mapped) c_type_base = mapped;
-                else c_type_base = free_me = str_to_cstr(next);
-            }
-        } else {
-            const char* mapped = map_rae_type_to_c(first);
-            if (mapped) c_type_base = mapped;
-            else c_type_base = free_me = str_to_cstr(first);
-        }
+        const char* mapped = map_rae_type_to_c(first);
+        if (mapped) c_type_base = mapped;
+        else c_type_base = free_me = str_to_cstr(first);
     }
 
     if (fprintf(out, "%s%s %.*s", c_type_base, is_ptr ? "*" : "", (int)param->name.len, param->name.data) < 0) {
@@ -168,9 +148,26 @@ static const char* c_return_type(const AstFuncDecl* func) {
       fprintf(stderr, "error: C backend only supports single return values per function\n");
       return NULL;
     }
+    bool is_ptr = func->returns->type->is_view || func->returns->type->is_mod;
     const char* mapped = map_rae_type_to_c(func->returns->type->parts->text);
-    if (mapped) return mapped;
-    return str_to_cstr(func->returns->type->parts->text); // leak
+    if (mapped) {
+        if (is_ptr) {
+            // HACK: this will leak or produce weird results if mapped is "const char*"
+            // but for now it helps with "mod T" returns.
+            char* buf = malloc(strlen(mapped) + 2);
+            sprintf(buf, "%s*", mapped);
+            return buf; // leak
+        }
+        return mapped;
+    }
+    char* type_name = str_to_cstr(func->returns->type->parts->text);
+    if (is_ptr) {
+        char* buf = malloc(strlen(type_name) + 2);
+        sprintf(buf, "%s*", type_name);
+        free(type_name);
+        return buf; // leak
+    }
+    return type_name; // leak
   }
   
   if (func_has_return_value(func)) {
@@ -380,10 +377,8 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
 static bool is_pointer_type(CFuncContext* ctx, Str name) {
   for (const AstParam* param = ctx->params; param; param = param->next) {
     if (str_eq(param->name, name)) {
-        if (param->type && param->type->parts) {
-            Str first = param->type->parts->text;
-            TokenKind mod = lookup_keyword(first);
-            if (mod == TOK_KW_MOD || mod == TOK_KW_VIEW) return true;
+        if (param->type) {
+            return param->type->is_view || param->type->is_mod;
         }
     }
   }
