@@ -9,36 +9,41 @@ func main() {
   # but nextTick() will do for now to show we can seed.
   seed(n: 42)
 
-  loop windowShouldClose() is 0 {
-    beginDrawing()
-    
-    # Only clear occasionally or draw over? 
-    # Let's draw 10 random circles per frame without clearing
-    # to create a "painting" effect.
-    
-    # Or just a normal loop:
-    # clearBackground(r: 20, g: 20, b: 20, a: 255)
-    
-    def i: Int = 0
-    loop i < 5 {
-      def x: Float = random() * 800.0
-      def y: Float = random() * 450.0
-      def radius: Float = random() * 40.0 + 5.0
-      
-      def r: Int = randomInt(min: 50, max: 255)
-      def g: Int = randomInt(min: 50, max: 255)
-      def b: Int = randomInt(min: 50, max: 255)
-      
-      drawCircle(x: x, y: y, radius: radius, r: r, g: g, b: b, a: 150)
-      i = i + 1
-    }
-    
-    # Press Space to clear
-    if isKeyDown(key: 32) is 1 {
-      clearBackground(r: 20, g: 20, b: 20, a: 255)
-    }
+  def counter: Int = 0
 
-    endDrawing()
+  loop windowShouldClose() is 0 {
+    if counter % 60 is 0 {
+      beginDrawing()
+      
+      # Only clear occasionally or draw over? 
+      # Let's draw 10 random circles per frame without clearing
+      # to create a "painting" effect.
+      
+      # Or just a normal loop:
+      # clearBackground(r: 20, g: 20, b: 20, a: 255)
+      
+      def i: Int = 0
+      loop i < 5 {
+        def x: Float = random() * 800.0
+        def y: Float = random() * 450.0
+        def radius: Float = random() * 40.0 + 5.0
+        
+        def r: Int = randomInt(min: 50, max: 255)
+        def g: Int = randomInt(min: 50, max: 255)
+        def b: Int = randomInt(min: 50, max: 255)
+        
+        drawCircle(x: x, y: y, radius: radius, r: r, g: g, b: b, a: 150)
+        i = i + 1
+      }
+      
+      # Press Space to clear
+      if isKeyDown(key: 32) is 1 {
+        clearBackground(r: 20, g: 20, b: 20, a: 255)
+      }
+
+      endDrawing()
+    }
+    counter = counter + 1
   }
 
   closeWindow()
