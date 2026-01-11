@@ -51,6 +51,7 @@ const toggleEditExampleBtn = document.getElementById("toggle-edit-example-btn");
 const saveExampleBtn = document.getElementById("save-example-btn");
 const exampleOutput = document.getElementById("example-output");
 const copyExampleOutputBtn = document.getElementById("copy-example-output-btn");
+const copyExampleErrorsBtn = document.getElementById("copy-example-errors-btn");
 const testErrorsSummary = document.getElementById("test-errors-summary");
 const testErrorsLog = document.getElementById("test-errors-log");
 const copyTestErrorsBtn = document.getElementById("copy-test-errors-btn");
@@ -83,6 +84,7 @@ let selectedTestFile = null;
 let selectedTestSource = "";
 let allTestLogLines = [];
 let allBuildLogLines = [];
+let allExampleLogLines = [];
 let raeSyntax = null;
 let testDirectoryMap = new Map();
 const errorEntries = [];
@@ -474,6 +476,7 @@ function handleExampleRunStarted(event) {
           : "Running";
   setExampleStatus(label, "is-running", event.targetLabel);
   clearExampleOutput();
+  allExampleLogLines = [];
   appendExampleOutput(
     `▶ [${event.targetLabel}] ${label} ${event.entry}`,
     "stdout"
@@ -757,12 +760,53 @@ function getFilteredBuildLog() {
 
 setupCopyButton(copyBuildErrorsBtn, () => getFilteredBuildLog());
 
+function getFilteredExampleLog() {
+  const errorIndices = [];
+  const errorPatterns = [
+    /\berror:/,
+    /\bwarning:/,
+    /\.rae:\d+:\d+:/
+  ];
+
+  allExampleLogLines.forEach((line, index) => {
+    if (line.stream === "stderr" || errorPatterns.some(p => p.test(line.text))) {
+      errorIndices.push(index);
+    }
+  });
+
+  if (errorIndices.length === 0) return "No example errors or warnings found.";
+
+  const contextRange = 2;
+  const mergedIndices = new Set();
+  errorIndices.forEach(idx => {
+    for (let i = Math.max(0, idx - contextRange); i <= Math.min(allExampleLogLines.length - 1, idx + contextRange); i++) {
+      mergedIndices.add(i);
+    }
+  });
+
+  const sortedIndices = Array.from(mergedIndices).sort((a, b) => a - b);
+  let lastIdx = -1;
+  const result = [];
+
+  sortedIndices.forEach(idx => {
+    if (lastIdx !== -1 && idx > lastIdx + 1) {
+      result.push("---");
+    }
+    result.push(allExampleLogLines[idx].text);
+    lastIdx = idx;
+  });
+
+  return result.join("\n");
+}
+
 setupCopyButton(copyExampleOutputBtn, () => {
   const lines = Array.from(exampleOutput?.querySelectorAll(".terminal-line") ?? []).map((line) =>
     line.textContent?.trimEnd() ?? ""
   );
   return lines.join("\n").trim() || "No example output yet.";
 });
+
+setupCopyButton(copyExampleErrorsBtn, () => getFilteredExampleLog());
 
 setupCopyButton(copyNextStepsBtn, () => {
   if (!nextStepsList) return "No next steps available.";
@@ -1306,13 +1350,11 @@ function clearExampleOutput() {
 
 function appendExampleOutput(text, stream = "stdout") {
   if (!exampleOutput) return;
+  allExampleLogLines.push({ text, stream });
   const lineEl = document.createElement("div");
   lineEl.className = `terminal-line ${stream}`;
   lineEl.textContent = text;
   exampleOutput.appendChild(lineEl);
-  while (exampleOutput.childElementCount > MAX_EXAMPLE_OUTPUT_LINES) {
-    exampleOutput.removeChild(exampleOutput.firstElementChild);
-  }
   exampleOutput.scrollTop = exampleOutput.scrollHeight;
 }
 
