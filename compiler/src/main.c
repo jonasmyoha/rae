@@ -40,6 +40,7 @@ typedef struct {
   const char* input_path;
   bool watch;
   int timeout;
+  int target;
 } RunOptions;
 
 typedef struct {
@@ -475,6 +476,7 @@ static void watch_state_free(WatchState* state);
 static bool watch_state_apply_sources(WatchState* state, WatchSources* new_sources);
 static const char* watch_state_wait_for_change(WatchState* state);
 static int run_vm_file(const RunOptions* run_opts);
+static int run_compiled_file(const RunOptions* run_opts);
 static int run_vm_watch(const RunOptions* run_opts);
 
 static void format_options_init(FormatOptions* opts) {
@@ -525,6 +527,7 @@ static bool parse_run_args(int argc, char** argv, RunOptions* opts) {
   opts->watch = false;
   opts->input_path = NULL;
   opts->timeout = 0;
+  opts->target = BUILD_TARGET_LIVE;
 
   int i = 0;
   while (i < argc) {
@@ -540,6 +543,22 @@ static bool parse_run_args(int argc, char** argv, RunOptions* opts) {
         return false;
       }
       opts->timeout = atoi(argv[i+1]);
+      i += 2;
+      continue;
+    }
+    if (strcmp(arg, "--target") == 0) {
+      if (i + 1 >= argc) {
+        fprintf(stderr, "error: --target expects a target name (live|compiled)\n");
+        return false;
+      }
+      if (strcmp(argv[i+1], "live") == 0) {
+        opts->target = BUILD_TARGET_LIVE;
+      } else if (strcmp(argv[i+1], "compiled") == 0) {
+        opts->target = BUILD_TARGET_COMPILED;
+      } else {
+        fprintf(stderr, "error: unknown target '%s' for run command\n", argv[i+1]);
+        return false;
+      }
       i += 2;
       continue;
     }
@@ -2498,6 +2517,44 @@ static int run_vm_file(const RunOptions* run_opts) {
   return (result == VM_RUNTIME_OK || result == VM_RUNTIME_TIMEOUT) ? 0 : 1;
 }
 
+static int run_compiled_file(const RunOptions* run_opts) {
+  const char* file_path = run_opts->input_path;
+  char temp_c[PATH_MAX];
+  char temp_bin[PATH_MAX];
+  
+  const char* tmp_dir = getenv("TMPDIR");
+  if (!tmp_dir) tmp_dir = "/tmp";
+  
+  snprintf(temp_c, sizeof(temp_c), "%s/rae_compiled_%d.c", tmp_dir, getpid());
+  snprintf(temp_bin, sizeof(temp_bin), "%s/rae_compiled_%d.bin", tmp_dir, getpid());
+
+  if (!build_c_backend_output(file_path, NULL, temp_c)) {
+    return 1;
+  }
+
+  // Compile with GCC
+  char cmd[PATH_MAX * 4];
+  // Determine runtime directory
+  char runtime_dir[PATH_MAX];
+  snprintf(runtime_dir, sizeof(runtime_dir), "%s", RAE_RUNTIME_SOURCE_DIR);
+  
+  snprintf(cmd, sizeof(cmd), "gcc -std=c11 -O2 -I%s %s %s/rae_runtime.c -o %s", 
+           runtime_dir, temp_c, runtime_dir, temp_bin);
+  
+  if (system(cmd) != 0) {
+    fprintf(stderr, "error: failed to compile C output\n");
+    unlink(temp_c);
+    return 1;
+  }
+
+  int result = system(temp_bin);
+  
+  unlink(temp_c);
+  unlink(temp_bin);
+  
+  return (result == 0) ? 0 : 1;
+}
+
 static int run_command(const char* cmd, int argc, char** argv) {
   size_t file_size = 0;
   char* source = NULL;
@@ -2511,34 +2568,38 @@ static int run_command(const char* cmd, int argc, char** argv) {
 
   if (is_format) {
     if (!parse_format_args(argc, argv, &format_opts)) {
+      print_usage(cmd);
       return 1;
     }
     file_path = format_opts.input_path;
   } else if (strcmp(cmd, "lex") == 0 || strcmp(cmd, "parse") == 0) {
     if (argc < 1) {
       fprintf(stderr, "error: %s command requires a file argument\n", cmd);
-      print_usage(argv[-1]);
+      print_usage(cmd);
       return 1;
     }
     file_path = argv[0];
   } else if (is_run) {
     RunOptions run_opts;
     if (!parse_run_args(argc, argv, &run_opts)) {
-      print_usage(argv[-1]);
+      print_usage(cmd);
       return 1;
+    }
+    if (run_opts.target == BUILD_TARGET_COMPILED) {
+        return run_compiled_file(&run_opts);
     }
     return run_opts.watch ? run_vm_watch(&run_opts) : run_vm_file(&run_opts);
   } else if (is_pack) {
     PackOptions pack_opts;
     if (!parse_pack_args(argc, argv, &pack_opts)) {
-      print_usage(argv[-1]);
+      print_usage(cmd);
       return 1;
     }
     return run_raepack_file(&pack_opts);
   } else if (is_build) {
     BuildOptions build_opts;
     if (!parse_build_args(argc, argv, &build_opts)) {
-      print_usage(argv[-1]);
+      print_usage(cmd);
       return 1;
     }
     if (!file_exists(build_opts.entry_path)) {
@@ -2579,7 +2640,7 @@ static int run_command(const char* cmd, int argc, char** argv) {
     }
   } else {
     fprintf(stderr, "error: unknown command '%s'\n", cmd);
-    print_usage(argv[-1]);
+    print_usage(cmd);
     return 1;
   }
 
@@ -2658,7 +2719,7 @@ int main(int argc, char** argv) {
   const char* cmd = argv[1];
   if ((strcmp(cmd, "lex") == 0 || strcmp(cmd, "parse") == 0 || strcmp(cmd, "format") == 0 ||
        strcmp(cmd, "run") == 0 || strcmp(cmd, "pack") == 0 || strcmp(cmd, "build") == 0)) {
-    return run_command(cmd, argc - 2, argv + 2);
+    return run_command(argv[1], argc - 2, argv + 2);
   }
 
   fprintf(stderr, "error: unknown command '%s'\n", cmd);

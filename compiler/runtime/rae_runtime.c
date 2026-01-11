@@ -50,6 +50,55 @@ void rae_log_stream_i64(int64_t value) {
   rae_flush_stdout();
 }
 
+void rae_log_bool(int8_t value) {
+  printf("%s\n", value ? "true" : "false");
+  rae_flush_stdout();
+}
+
+void rae_log_stream_bool(int8_t value) {
+  printf("%s", value ? "true" : "false");
+  rae_flush_stdout();
+}
+
+void rae_log_char(int64_t value) {
+  rae_log_stream_char(value);
+  printf("\n");
+  rae_flush_stdout();
+}
+
+void rae_log_stream_char(int64_t value) {
+  if (value < 0x80) {
+    printf("%c", (char)value);
+  } else if (value < 0x800) {
+    printf("%c%c", (char)(0xC0 | (value >> 6)), (char)(0x80 | (value & 0x3F)));
+  } else if (value < 0x10000) {
+    printf("%c%c%c", (char)(0xE0 | (value >> 12)), (char)(0x80 | ((value >> 6) & 0x3F)), (char)(0x80 | (value & 0x3F)));
+  } else {
+    printf("%c%c%c%c", (char)(0xF0 | (value >> 18)), (char)(0x80 | ((value >> 12) & 0x3F)), (char)(0x80 | ((value >> 6) & 0x3F)), (char)(0x80 | (value & 0x3F)));
+  }
+  rae_flush_stdout();
+}
+
+void rae_log_id(int64_t value) {
+  printf("%lld\n", (long long)value);
+  rae_flush_stdout();
+}
+
+void rae_log_stream_id(int64_t value) {
+  printf("%lld", (long long)value);
+  rae_flush_stdout();
+}
+
+void rae_log_key(const char* value) {
+  printf("%s\n", value ? value : "(null)");
+  rae_flush_stdout();
+}
+
+void rae_log_stream_key(const char* value) {
+  printf("%s", value ? value : "(null)");
+  rae_flush_stdout();
+}
+
 void rae_log_float(double value) {
   printf("%g\n", value);
   rae_flush_stdout();
@@ -95,6 +144,44 @@ const char* rae_str_i64(int64_t v) {
   char* buffer = malloc(32);
   if (buffer) {
     sprintf(buffer, "%lld", (long long)v);
+  }
+  return buffer;
+}
+
+const char* rae_str_f64(double v) {
+  char* buffer = malloc(32);
+  if (buffer) {
+    sprintf(buffer, "%g", v);
+  }
+  return buffer;
+}
+
+const char* rae_str_bool(int8_t v) {
+  return v ? "true" : "false";
+}
+
+const char* rae_str_char(int64_t v) {
+  char* buffer = malloc(5);
+  if (buffer) {
+    if (v < 0x80) {
+      buffer[0] = (char)v;
+      buffer[1] = '\0';
+    } else if (v < 0x800) {
+      buffer[0] = (char)(0xC0 | (v >> 6));
+      buffer[1] = (char)(0x80 | (v & 0x3F));
+      buffer[2] = '\0';
+    } else if (v < 0x10000) {
+      buffer[0] = (char)(0xE0 | (v >> 12));
+      buffer[1] = (char)(0x80 | ((v >> 6) & 0x3F));
+      buffer[2] = (char)(0x80 | (v & 0x3F));
+      buffer[3] = '\0';
+    } else {
+      buffer[0] = (char)(0xF0 | (v >> 18));
+      buffer[1] = (char)(0x80 | ((v >> 12) & 0x3F));
+      buffer[2] = (char)(0x80 | ((v >> 6) & 0x3F));
+      buffer[3] = (char)(0x80 | (v & 0x3F));
+      buffer[4] = '\0';
+    }
   }
   return buffer;
 }
