@@ -14,6 +14,7 @@ type Velocity {
 type AIState {
   targetY: Float
   reactionTimer: Int
+  pauseTimer: Int
 }
 
 # -- Systems (Functions acting on Components) --
@@ -32,11 +33,21 @@ func bounceSystem(pos: view Transform, vel: mod Velocity, radius: Float, height:
 }
 
 func paddleAiSystem(ai: mod AIState, ball: view Transform, paddle: mod Transform) {
+  if ai.pauseTimer > 0 {
+    ai.pauseTimer = ai.pauseTimer - 1
+    ret
+  }
+
   ai.reactionTimer = ai.reactionTimer + 1
   # Update target every 8 frames (~0.13s) to simulate human reaction delay
   if ai.reactionTimer > 8 {
     ai.targetY = ball.y
     ai.reactionTimer = 0
+    
+    # Randomly decide to "think" (pause) for a bit
+    if random() < 0.05 {
+      ai.pauseTimer = randomInt(min: 20, max: 50)
+    }
   }
 
   # Move towards target
@@ -135,7 +146,7 @@ func main() {
   def p2Pos: Transform = {x: 760.0, y: 175.0}
   def bPos: Transform = {x: 400.0, y: 225.0}
   def bVel: Velocity = {dx: 4.0, dy: 4.0}
-  def ai: AIState = {targetY: 225.0, reactionTimer: 0}
+  def ai: AIState = {targetY: 225.0, reactionTimer: 0, pauseTimer: 0}
   def p1Score: Int = 0
   def p2Score: Int = 0
 
