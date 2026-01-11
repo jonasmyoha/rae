@@ -45,7 +45,7 @@ func paddleAiSystem(ai: mod AIState, ball: view Transform, paddle: mod Transform
     ai.reactionTimer = 0
     
     # Randomly decide to "think" (pause) for a bit
-    if random() < 0.03 {
+    if random() < 0.015 {
       ai.pauseTimer = randomInt(min: 10, max: 25)
     }
   }
@@ -81,7 +81,7 @@ func paddleCollisionSystem(
         if bPos.y < pPos.y + pHeight {
           if bVel.dx < 0.0 {
             # Bounce and speed up
-            bVel.dx = -bVel.dx + 0.8
+            bVel.dx = -bVel.dx + 1.2
           }
         }
       }
@@ -92,7 +92,7 @@ func paddleCollisionSystem(
         if bPos.y < pPos.y + pHeight {
           if bVel.dx > 0.0 {
             # Bounce and speed up
-            bVel.dx = -bVel.dx - 0.8
+            bVel.dx = -bVel.dx - 1.2
           }
         }
       }
