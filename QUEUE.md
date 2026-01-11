@@ -10,24 +10,55 @@
     - [x] Reject taking a reference to a temporary/rvalue.
 
 ## Priority 2: Parser & AST Refinements
+
 - [ ] Support type-property stacking in type grammar (`opt`, `view`, `mod`, `id`, `key` in canonical order).
+
 - [ ] Implement `=>` bind/rebind operator refinements.
+
 - [ ] Support `view`/`mod` prefixes in expression positions (for returning/passing references).
 
+
+
 ## Priority 3: Type Checker & Semantic Analysis
+
 - [ ] Implement position rules:
+
     - [ ] `T`, `opt T` allowed everywhere.
+
     - [ ] `view`/`mod` allowed in locals/params.
+
     - [ ] `id`/`key` allowed everywhere.
+
     - [ ] Reject `view`/`mod` in struct fields.
+
 - [ ] Implement reference return rules:
+
     - [ ] References can only be returned if derived from params/`this`.
+
 - [ ] Implement escape diagnostics:
+
     - [ ] Reject storing references in long-lived containers (`List`, `Map`).
 
+
+
 ## Priority 4: Runtime & Interpreter (VM)
+
 - [ ] Define `id T` as `int64_t` underlying.
+
 - [ ] Define `key T` as `String` underlying.
+
 - [ ] Implement "bindable slots" in the VM for `view`/`mod`.
+
 - [ ] Implement runtime lifetime validation (debug builds).
+
 - [ ] Update `=` to ensure deep/observable copy semantics.
+
+
+
+## Priority 5: Examples & Documentation
+
+- [x] Integrate example smoke-testing into `run_tests.sh`.
+
+- [ ] Add `.expect` files for non-interactive examples to enable full behavioral testing.
+
+- [ ] Fix any remaining documentation/example inconsistencies with v0.2 spec.
