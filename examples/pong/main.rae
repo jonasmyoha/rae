@@ -57,6 +57,24 @@ func main() {
       ball.dy = ball.dy * -1.0
     }
 
+    # Collision with Paddle 1 (Left)
+    if ball.x <= p1.x + p1.w {
+      if ball.y >= p1.y and ball.y <= p1.y + p1.h {
+        if ball.dx < 0.0 {
+          ball.dx = ball.dx * -1.0
+        }
+      }
+    }
+
+    # Collision with Paddle 2 (Right)
+    if ball.x >= p2.x - ball.radius {
+      if ball.y >= p2.y and ball.y <= p2.y + p2.h {
+        if ball.dx > 0.0 {
+          ball.dx = ball.dx * -1.0
+        }
+      }
+    }
+
     # Score
     if ball.x < 0.0 {
       p2.score = p2.score + 1
