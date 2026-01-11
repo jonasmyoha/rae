@@ -11,7 +11,7 @@
 
 ## Priority 2: Parser & AST Refinements
 
-- [ ] Support type-property stacking in type grammar (`opt`, `view`, `mod`, `id`, `key` in canonical order).
+- [x] Support type-property stacking in type grammar (`opt`, `view`, `mod`, `id`, `key` in canonical order).
 
 - [ ] Implement `=>` bind/rebind operator refinements.
 

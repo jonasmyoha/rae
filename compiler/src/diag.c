@@ -5,6 +5,22 @@
 #include <stdlib.h>
 
 #include <string.h>
+#include <unistd.h>
+
+static const char* simplify_path(const char* path) {
+  if (!path) return "<unknown>";
+  static char cwd[1024];
+  if (getcwd(cwd, sizeof(cwd)) == NULL) return path;
+  
+  size_t cwd_len = strlen(cwd);
+  if (strncmp(path, cwd, cwd_len) == 0) {
+    const char* rel = path + cwd_len;
+    if (*rel == '/' || *rel == '\\') return rel + 1;
+    if (*rel == '\0') return ".";
+    return rel;
+  }
+  return path;
+}
 
 static void print_source_line(const char* file, int line, int col) {
   if (!file || line <= 0) return;
@@ -40,7 +56,7 @@ void diag_error(const char* file, int line, int col, const char* message) {
 }
 
 void diag_report(const char* file, int line, int col, const char* message) {
-  fprintf(stderr, "%s:%d:%d: %s\n", file ? file : "<unknown>", line, col, message);
+  fprintf(stderr, "%s:%d:%d: %s\n", simplify_path(file), line, col, message);
   if (file && line > 0) {
     print_source_line(file, line, col);
   }
