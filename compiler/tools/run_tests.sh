@@ -278,3 +278,9 @@ echo "=========================================="
 if [ $FAILED -gt 0 ]; then
   exit 1
 fi
+
+# Also run example smoke tests if we are in 'live' or default mode
+if [ -z "$TARGET_FILTER" ] || [ "$TARGET_FILTER" = "live" ]; then
+  echo
+  ./tools/run_examples.sh
+fi
