@@ -373,9 +373,16 @@ function handleTestRunStarted(event) {
   setTestButtonsDisabled(true);
   clearTestLog();
   allTestLogLines = [];
-  if (testErrorsSummary) testErrorsSummary.hidden = true;
-  if (testErrorsLog) testErrorsLog.innerHTML = "";
+  
+  if (testErrorsSummary) {
+    testErrorsSummary.hidden = false;
+    testErrorsSummary.className = "test-errors-summary is-running";
+  }
+  if (testErrorsLog) {
+    testErrorsLog.innerHTML = '<div class="terminal-line">Running tests...</div>';
+  }
   if (copyTestErrorsBtn) copyTestErrorsBtn.hidden = true;
+  
   appendTestLine(`▶ [${event.targetLabel}] Running tests (${event.mode})`, "stdout");
   resetTestCases();
 }
@@ -589,12 +596,15 @@ function updateTestErrorSummary() {
   });
 
   if (errorIndices.length === 0) {
-    testErrorsSummary.hidden = true;
+    testErrorsSummary.hidden = false;
+    testErrorsSummary.className = "test-errors-summary is-success";
+    testErrorsLog.innerHTML = '<div class="terminal-line">All tests passing!</div>';
     if (copyTestErrorsBtn) copyTestErrorsBtn.hidden = true;
     return;
   }
 
   testErrorsSummary.hidden = false;
+  testErrorsSummary.className = "test-errors-summary is-failure";
   if (copyTestErrorsBtn) copyTestErrorsBtn.hidden = false;
   testErrorsLog.innerHTML = "";
   
