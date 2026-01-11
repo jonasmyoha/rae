@@ -492,7 +492,6 @@ static AstStmt* parse_statement(Parser* parser);
 static AstExpr* parse_match_expression(Parser* parser, const Token* match_token);
 static AstExpr* parse_collection_literal(Parser* parser, const Token* start_token);
 static AstExpr* parse_typed_literal(Parser* parser, const Token* start_token, AstTypeRef* type_hint);
-static AstCallArg* make_arg(Parser* parser, const char* name, AstExpr* value);
 static AstTypeRef* parse_type_ref_from_ident(Parser* parser, const Token* ident_token);
 static AstExpr* finish_call(Parser* parser, AstExpr* callee, const Token* start_token);
 
@@ -572,23 +571,6 @@ static int64_t parse_char_value(Str text) {
   if ((c & 0xF0) == 0xE0) return ((c & 0x0F) << 12) | ((text.data[1] & 0x3F) << 6) | (text.data[2] & 0x3F);
   if ((c & 0xF8) == 0xF0) return ((c & 0x07) << 18) | ((text.data[1] & 0x3F) << 12) | ((text.data[2] & 0x3F) << 6) | (text.data[3] & 0x3F);
   return c;
-}
-
-static AstExpr* make_call_expr(Parser* parser, const char* func_name, AstCallArg* args, const Token* token) {
-  AstExpr* callee = new_expr(parser, AST_EXPR_IDENT, token);
-  callee->as.ident = parser_copy_str(parser, str_from_cstr(func_name));
-  AstExpr* call = new_expr(parser, AST_EXPR_CALL, token);
-  call->as.call.callee = callee;
-  call->as.call.args = args;
-  return call;
-}
-
-static AstCallArg* make_arg(Parser* parser, const char* name, AstExpr* value) {
-  AstCallArg* arg = parser_alloc(parser, sizeof(AstCallArg));
-  arg->name = parser_copy_str(parser, str_from_cstr(name));
-  arg->value = value;
-  arg->next = NULL;
-  return arg;
 }
 
 static Str unescape_string(Parser* parser, Str lit, bool strip_start, bool strip_end) {
@@ -914,23 +896,32 @@ static AstExpr* parse_primary(Parser* parser) {
       const Token* start_token = token;
       parser_advance(parser);
       
-      AstExpr* lhs = new_expr(parser, AST_EXPR_STRING, start_token);
-      lhs->as.string_lit = unescape_string(parser, start_token->lexeme, true, false);
+      AstExpr* interp = new_expr(parser, AST_EXPR_INTERP, start_token);
+      AstInterpPart* head = NULL;
+      AstInterpPart* tail = NULL;
+
+      AstExpr* initial = new_expr(parser, AST_EXPR_STRING, start_token);
+      initial->as.string_lit = unescape_string(parser, start_token->lexeme, true, false);
+      
+      {
+          AstInterpPart* part = parser_alloc(parser, sizeof(AstInterpPart));
+          part->value = initial;
+          part->next = NULL;
+          head = tail = part;
+      }
       
       while (true) {
         parser_consume(parser, TOK_LBRACE, "expected '{' in interpolated string");
         AstExpr* val = parse_expression(parser);
         parser_consume(parser, TOK_RBRACE, "expected '}' in interpolated string");
         
-        // Wrap val in rae_str(val)
-        AstCallArg* str_arg = make_arg(parser, "v", val);
-        AstExpr* str_call = make_call_expr(parser, "rae_str", str_arg, start_token);
-        
-        // lhs = rae_str_concat(lhs, str_call)
-        AstCallArg* arg2 = make_arg(parser, "b", str_call);
-        AstCallArg* arg1 = make_arg(parser, "a", lhs);
-        arg1->next = arg2;
-        lhs = make_call_expr(parser, "rae_str_concat", arg1, start_token);
+        {
+            AstInterpPart* part = parser_alloc(parser, sizeof(AstInterpPart));
+            part->value = val;
+            part->next = NULL;
+            tail->next = part;
+            tail = part;
+        }
         
         const Token* next = parser_peek(parser);
         if (next->kind == TOK_STRING_MID) {
@@ -938,28 +929,29 @@ static AstExpr* parse_primary(Parser* parser) {
             AstExpr* mid = new_expr(parser, AST_EXPR_STRING, next);
             mid->as.string_lit = unescape_string(parser, next->lexeme, false, false);
             
-            // lhs = rae_str_concat(lhs, mid)
-            arg2 = make_arg(parser, "b", mid);
-            arg1 = make_arg(parser, "a", lhs);
-            arg1->next = arg2;
-            lhs = make_call_expr(parser, "rae_str_concat", arg1, next);
+            AstInterpPart* part = parser_alloc(parser, sizeof(AstInterpPart));
+            part->value = mid;
+            part->next = NULL;
+            tail->next = part;
+            tail = part;
         } else if (next->kind == TOK_STRING_END) {
             parser_advance(parser);
             AstExpr* end = new_expr(parser, AST_EXPR_STRING, next);
             end->as.string_lit = unescape_string(parser, next->lexeme, false, true);
             
-            // lhs = rae_str_concat(lhs, end)
-            arg2 = make_arg(parser, "b", end);
-            arg1 = make_arg(parser, "a", lhs);
-            arg1->next = arg2;
-            lhs = make_call_expr(parser, "rae_str_concat", arg1, next);
+            AstInterpPart* part = parser_alloc(parser, sizeof(AstInterpPart));
+            part->value = end;
+            part->next = NULL;
+            tail->next = part;
+            tail = part;
             break;
         } else {
             parser_error(parser, next, "expected string continuation");
             break;
         }
       }
-      return lhs;
+      interp->as.interp.parts = head;
+      return interp;
     }
     case TOK_CHAR: {
       parser_advance(parser);

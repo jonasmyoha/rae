@@ -235,6 +235,19 @@ static void dump_expr(const AstExpr* expr, FILE* out) {
       fputs(" }", out);
       break;
     }
+    case AST_EXPR_LIST: {
+      fputc('[', out);
+      AstExprList* current = expr->as.list;
+      while (current) {
+        dump_expr(current->value, out);
+        if (current->next) {
+          fputs(", ", out);
+        }
+        current = current->next;
+      }
+      fputc(']', out);
+      break;
+    }
     case AST_EXPR_COLLECTION_LITERAL: {
       fputc('{', out);
       AstCollectionElement* current = expr->as.collection.elements;
@@ -254,18 +267,36 @@ static void dump_expr(const AstExpr* expr, FILE* out) {
       fputc('}', out);
       break;
     }
-    case AST_EXPR_LIST: {
-      fputs("(List)", out);
+    case AST_EXPR_INTERP: {
+      fputc('"', out);
+      AstInterpPart* part = expr->as.interp.parts;
+      while (part) {
+        if (part->value->kind == AST_EXPR_STRING) {
+          print_str(out, part->value->as.string_lit);
+        } else {
+          fputs("{", out);
+          dump_expr(part->value, out);
+          fputs("}", out);
+        }
+        part = part->next;
+      }
+      fputc('"', out);
       break;
     }
-    case AST_EXPR_INDEX: {
-      fputs("(Index)", out);
+    case AST_EXPR_INDEX:
+      dump_expr(expr->as.index.target, out);
+      fputc('[', out);
+      dump_expr(expr->as.index.index, out);
+      fputc(']', out);
       break;
-    }
-    case AST_EXPR_METHOD_CALL: {
-      fputs("(MethodCall)", out);
+    case AST_EXPR_METHOD_CALL:
+      dump_expr(expr->as.method_call.object, out);
+      fputc('.', out);
+      print_str(out, expr->as.method_call.method_name);
+      fputc('(', out);
+      dump_call_args(expr->as.method_call.args, out);
+      fputc(')', out);
       break;
-    }
   }
 }
 

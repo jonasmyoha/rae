@@ -199,6 +199,23 @@ static const char* c_return_type(const AstFuncDecl* func) {
   return "void";
 }
 
+static bool is_string_expr(const AstExpr* expr) {
+  if (!expr) return false;
+  if (expr->kind == AST_EXPR_STRING || expr->kind == AST_EXPR_INTERP) return true;
+  if (expr->kind == AST_EXPR_CALL && expr->as.call.callee->kind == AST_EXPR_IDENT) {
+    Str name = expr->as.call.callee->as.ident;
+    if (str_eq_cstr(name, "rae_str") || str_eq_cstr(name, "rae_str_concat")) return true;
+    
+    // Recursive check for nested concats
+    const AstCallArg* arg = expr->as.call.args;
+    while (arg) {
+        if (is_string_expr(arg->value)) return true;
+        arg = arg->next;
+    }
+  }
+  return false;
+}
+
 static bool emit_log_call(CFuncContext* ctx, const AstExpr* expr, FILE* out, bool newline) {
   const AstCallArg* arg = expr->as.call.args;
   if (!arg || arg->next) {
@@ -209,7 +226,7 @@ static bool emit_log_call(CFuncContext* ctx, const AstExpr* expr, FILE* out, boo
   const AstExpr* value = arg->value;
   bool is_string = false;
   
-  if (value->kind == AST_EXPR_STRING) {
+  if (is_string_expr(value)) {
     is_string = true;
   } else if (value->kind == AST_EXPR_CALL && value->as.call.callee->kind == AST_EXPR_IDENT) {
     Str name = value->as.call.callee->as.ident;
@@ -559,6 +576,40 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
   switch (expr->kind) {
     case AST_EXPR_STRING:
       return emit_string_literal(out, expr->as.string_lit);
+    case AST_EXPR_INTERP: {
+      AstInterpPart* part = expr->as.interp.parts;
+      if (!part) {
+          return fprintf(out, "\"\"") >= 0;
+      }
+      
+      // We'll emit nested rae_str_concat calls
+      size_t count = 0;
+      AstInterpPart* curr = part;
+      while (curr) { count++; curr = curr->next; }
+      
+      // (count - 1) concats needed
+      for (size_t i = 0; i < count - 1; i++) {
+          fprintf(out, "rae_str_concat(");
+      }
+      
+      // Initial part
+      if (!emit_expr(ctx, part->value, out)) return false;
+      part = part->next;
+      
+      while (part) {
+          fprintf(out, ", ");
+          if (part->value->kind != AST_EXPR_STRING) {
+              fprintf(out, "rae_str(");
+              if (!emit_expr(ctx, part->value, out)) return false;
+              fprintf(out, ")");
+          } else {
+              if (!emit_expr(ctx, part->value, out)) return false;
+          }
+          fprintf(out, ")"); // close rae_str_concat
+          part = part->next;
+      }
+      return true;
+    }
     case AST_EXPR_CHAR: {
       int64_t c = expr->as.char_value;
       if (c >= 32 && c <= 126 && c != '\'' && c != '\\') {

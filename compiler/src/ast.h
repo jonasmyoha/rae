@@ -124,8 +124,14 @@ typedef enum {
   AST_EXPR_LIST,
   AST_EXPR_INDEX,
   AST_EXPR_METHOD_CALL,
-  AST_EXPR_COLLECTION_LITERAL
+  AST_EXPR_COLLECTION_LITERAL,
+  AST_EXPR_INTERP
 } AstExprKind;
+
+typedef struct AstInterpPart {
+  AstExpr* value; // STRING or any other expression
+  struct AstInterpPart* next;
+} AstInterpPart;
 
 typedef struct AstExprList {
   AstExpr* value;
@@ -195,6 +201,9 @@ struct AstExpr {
       AstCallArg* args;
     } method_call;
     AstCollectionLiteral collection;
+    struct {
+      AstInterpPart* parts;
+    } interp;
   } as;
 };
 

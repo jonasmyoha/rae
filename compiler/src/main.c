@@ -1697,7 +1697,11 @@ static bool module_graph_load_module(ModuleGraph* graph,
   // Pre-scan for nostdlib
   bool use_stdlib = true;
   {
-    TokenList tokens = lexer_tokenize(graph->arena, file_path, source, file_size);
+    TokenList tokens = lexer_tokenize(graph->arena, file_path, source, file_size, true);
+    if (tokens.had_error) {
+        free(source);
+        return false;
+    }
     for (size_t i = 0; i < tokens.count; i++) {
         if (tokens.data[i].kind == TOK_KW_IMPORT || tokens.data[i].kind == TOK_KW_EXPORT) {
             if (i + 1 < tokens.count) {
@@ -1745,7 +1749,11 @@ static bool module_graph_load_module(ModuleGraph* graph,
     }
   }
 
-  TokenList tokens = lexer_tokenize(graph->arena, file_path, source, file_size);
+  TokenList tokens = lexer_tokenize(graph->arena, file_path, source, file_size, true);
+  if (tokens.had_error) {
+      free(source);
+      return false;
+  }
   AstModule* module = parse_module(graph->arena, file_path, tokens);
   if (!module) {
     free(source);
@@ -2157,7 +2165,7 @@ static void dump_raepack_json(const RaePack* pack, const RaePackTarget* selected
 static int run_raepack_file(const PackOptions* opts) {
   if (!opts || !opts->file_path) return 1;
   RaePack pack;
-  if (!raepack_parse_file(opts->file_path, &pack)) {
+  if (!raepack_parse_file(opts->file_path, &pack, true)) {
     return 1;
   }
   const RaePackTarget* selected = NULL;
@@ -2654,7 +2662,10 @@ static int run_command(const char* cmd, int argc, char** argv) {
     free(source);
     diag_fatal("could not allocate arena");
   }
-  TokenList tokens = lexer_tokenize(arena, file_path, source, file_size);
+  TokenList tokens = lexer_tokenize(arena, file_path, source, file_size, !is_format);
+  if (tokens.had_error && !is_format) {
+      exit(1);
+  }
 
   if (strcmp(cmd, "lex") == 0) {
     dump_tokens(&tokens);
@@ -2665,7 +2676,7 @@ static int run_command(const char* cmd, int argc, char** argv) {
     bool is_raepack = strstr(format_opts.input_path, ".raepack") != NULL;
     if (is_raepack) {
       RaePack pack;
-      if (!raepack_parse_file(format_opts.input_path, &pack)) {
+      if (!raepack_parse_file(format_opts.input_path, &pack, false)) {
         free(source);
         arena_destroy(arena);
         return 1;
