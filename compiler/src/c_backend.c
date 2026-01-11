@@ -761,7 +761,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
       else if (is_ptr) match_type = "void*";
 
       size_t temp_id = ctx->temp_counter++;
-      if (fprintf(out, "({ %s __match%zu = ", match_type, temp_id) < 0) {
+      if (fprintf(out, "__extension__ ({ %s __match%zu = ", match_type, temp_id) < 0) {
         return false;
       }
       if (!emit_expr(ctx, expr->as.match_expr.subject, out)) {
@@ -871,7 +871,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
       const AstExprList* current = expr->as.list;
       while (current) { element_count++; current = current->next; }
       
-      fprintf(out, "({ RaeList* _l = rae_list_create(%u); ", element_count);
+      fprintf(out, "__extension__ ({ RaeList* _l = rae_list_create(%u); ", element_count);
       current = expr->as.list;
       while (current) {
         fprintf(out, "rae_list_add(_l, ");
@@ -956,7 +956,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         return true;
       }
       
-      fprintf(out, "({ RaeList* _l = rae_list_create(%u); ", element_count);
+      fprintf(out, "__extension__ ({ RaeList* _l = rae_list_create(%u); ", element_count);
       current = expr->as.collection.elements;
       while (current) {
         fprintf(out, "rae_list_add(_l, ");
@@ -1172,7 +1172,7 @@ static bool emit_function(const AstFuncDecl* func, FILE* out) {
   if (is_main) {
     ok = fprintf(out, "int main(") >= 0;
   } else {
-    ok = fprintf(out, "static %s %s(", return_type, name) >= 0;
+    ok = fprintf(out, "RAE_UNUSED static %s %s(", return_type, name) >= 0;
   }
   if (ok) {
     ok = emit_param_list(func->params, out);
@@ -1288,7 +1288,7 @@ bool c_backend_emit(const AstModule* module, const char* out_path) {
       ok = false;
       break;
     }
-    const char* qualifier = fn->is_extern ? "extern" : "static";
+    const char* qualifier = fn->is_extern ? "extern" : "RAE_UNUSED static";
     if (fprintf(out, "%s %s %s(", qualifier, return_type, proto) < 0) {
       free(proto);
       ok = false;

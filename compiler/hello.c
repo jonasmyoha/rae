@@ -29,11 +29,9 @@ RAE_UNUSED static int64_t randomInt(int64_t min, int64_t max) {
 }
 
 int main(void) {
-  int64_t x = 10;
-  if ((x > 3)) {
-  rae_log_cstr("value greater than three");
-  } else {
-  rae_log_cstr("value small");
-  }
+  rae_log_cstr("Hello, Rae!");
+  rae_log_stream_cstr("Streaming ");
+  rae_log_cstr("done");
   return 0;
 }
+

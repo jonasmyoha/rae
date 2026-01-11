@@ -15,6 +15,9 @@ extern int64_t rae_random_int(int64_t min, int64_t max);
 RAE_UNUSED static void seed(int64_t n);
 RAE_UNUSED static double random(void);
 RAE_UNUSED static int64_t randomInt(int64_t min, int64_t max);
+RAE_UNUSED static int64_t add(int64_t a, int64_t b);
+RAE_UNUSED static int64_t triple(int64_t value);
+RAE_UNUSED static int64_t chain(int64_t a, int64_t b, int64_t c);
 
 RAE_UNUSED static void seed(int64_t n) {
   rae_seed(n);
@@ -28,12 +31,24 @@ RAE_UNUSED static int64_t randomInt(int64_t min, int64_t max) {
   return rae_random_int(min, max);
 }
 
+RAE_UNUSED static int64_t add(int64_t a, int64_t b) {
+  return (a + b);
+}
+
+RAE_UNUSED static int64_t triple(int64_t value) {
+  return (value * 3);
+}
+
+RAE_UNUSED static int64_t chain(int64_t a, int64_t b, int64_t c) {
+  return (triple((a + b)) + c);
+}
+
 int main(void) {
-  int64_t x = 10;
-  if ((x > 3)) {
-  rae_log_cstr("value greater than three");
-  } else {
-  rae_log_cstr("value small");
-  }
+  rae_log_cstr("VM math demo start");
+  rae_log_i64(add(2, 5));
+  rae_log_i64(triple(4));
+  rae_log_i64(chain(1, 2, 3));
+  rae_log_cstr("VM math demo end");
   return 0;
 }
+
