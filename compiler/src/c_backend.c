@@ -72,6 +72,13 @@ static bool emit_type_ref_as_c_type(const AstTypeRef* type, FILE* out) {
   const AstIdentifierPart* current = type->parts;
   bool is_ptr = type->is_view || type->is_mod;
 
+  if (type->is_id) {
+      return fprintf(out, "int64_t") >= 0;
+  }
+  if (type->is_key) {
+      return fprintf(out, "const char*") >= 0;
+  }
+
   const char* c_type_str = map_rae_type_to_c(current->text);
   if (c_type_str) {
       if (fprintf(out, "%s", c_type_str) < 0) return false;
@@ -112,12 +119,18 @@ static bool emit_param_list(const AstParam* params, FILE* out) {
     bool is_ptr = false;
     char* free_me = NULL;
 
-    if (param->type && param->type->parts) {
-        is_ptr = param->type->is_view || param->type->is_mod;
-        Str first = param->type->parts->text;
-        const char* mapped = map_rae_type_to_c(first);
-        if (mapped) c_type_base = mapped;
-        else c_type_base = free_me = str_to_cstr(first);
+    if (param->type) {
+        if (param->type->is_id) {
+            c_type_base = "int64_t";
+        } else if (param->type->is_key) {
+            c_type_base = "const char*";
+        } else if (param->type->parts) {
+            is_ptr = param->type->is_view || param->type->is_mod;
+            Str first = param->type->parts->text;
+            const char* mapped = map_rae_type_to_c(first);
+            if (mapped) c_type_base = mapped;
+            else c_type_base = free_me = str_to_cstr(first);
+        }
     }
 
     if (fprintf(out, "%s%s %.*s", c_type_base, is_ptr ? "*" : "", (int)param->name.len, param->name.data) < 0) {
@@ -149,6 +162,10 @@ static const char* c_return_type(const AstFuncDecl* func) {
       return NULL;
     }
     bool is_ptr = func->returns->type->is_view || func->returns->type->is_mod;
+    
+    if (func->returns->type->is_id) return "int64_t";
+    if (func->returns->type->is_key) return "const char*";
+
     const char* mapped = map_rae_type_to_c(func->returns->type->parts->text);
     if (mapped) {
         if (is_ptr) {
@@ -217,14 +234,26 @@ static bool emit_log_call(CFuncContext* ctx, const AstExpr* expr, FILE* out, boo
     if (fprintf(out, "  %s(", newline ? "rae_log_cstr" : "rae_log_stream_cstr") < 0) {
       return false;
     }
-    if (value->kind == AST_EXPR_STRING) {
-        if (!emit_string_literal(out, value->as.string_lit)) return false;
-    } else {
-        if (!emit_expr(ctx, value, out)) return false;
-    }
-    if (fprintf(out, ");\n") < 0) {
-      return false;
-    }
+    if (!emit_expr(ctx, value, out)) return false;
+    if (fprintf(out, ");\n") < 0) return false;
+    return true;
+  }
+
+  // Handle Bool specifically for true/false output
+  bool is_bool = false;
+  if (value->kind == AST_EXPR_IDENT) {
+    Str type_name = get_local_type_name(ctx, value->as.ident);
+    if (str_eq_cstr(type_name, "Bool")) is_bool = true;
+  } else if (value->kind == AST_EXPR_BOOL) {
+    is_bool = true;
+  }
+
+  if (is_bool) {
+    if (fprintf(out, "  %s(", newline ? "rae_log_cstr" : "rae_log_stream_cstr") < 0) return false;
+    if (fprintf(out, "(") < 0) return false;
+    if (!emit_expr(ctx, value, out)) return false;
+    if (fprintf(out, " ? \"true\" : \"false\")") < 0) return false;
+    if (fprintf(out, ");\n") < 0) return false;
     return true;
   }
 
@@ -359,6 +388,9 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         if (needs_addr && is_pointer_type(ctx, arg->value->as.ident)) {
             needs_addr = false;
         }
+    } else if (arg->value->kind == AST_EXPR_UNARY && (arg->value->as.unary.op == AST_UNARY_VIEW || arg->value->as.unary.op == AST_UNARY_MOD)) {
+        // If it's explicitly view/mod, we don't need another &
+        needs_addr = false;
     }
 
     if (needs_addr) {
@@ -399,14 +431,21 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     case AST_EXPR_BOOL:
       return fprintf(out, "%d", expr->as.boolean ? 1 : 0) >= 0;
     case AST_EXPR_IDENT: {
+      bool is_ptr = is_pointer_type(ctx, expr->as.ident);
       for (const AstParam* param = ctx->params; param; param = param->next) {
         if (str_eq(param->name, expr->as.ident)) {
-          return fprintf(out, "%.*s", (int)expr->as.ident.len, expr->as.ident.data) >= 0;
+          if (is_ptr) fprintf(out, "(*");
+          fprintf(out, "%.*s", (int)expr->as.ident.len, expr->as.ident.data);
+          if (is_ptr) fprintf(out, ")");
+          return true;
         }
       }
       for (size_t i = 0; i < ctx->local_count; ++i) {
         if (str_eq(ctx->locals[i], expr->as.ident)) {
-          return fprintf(out, "%.*s", (int)expr->as.ident.len, expr->as.ident.data) >= 0;
+          if (is_ptr) fprintf(out, "(*");
+          fprintf(out, "%.*s", (int)expr->as.ident.len, expr->as.ident.data);
+          if (is_ptr) fprintf(out, ")");
+          return true;
         }
       }
       fprintf(stderr,
@@ -481,6 +520,11 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         if (fprintf(out, "--") < 0) return false;
         if (!emit_expr(ctx, expr->as.unary.operand, out)) return false;
         return true;
+      } else if (expr->as.unary.op == AST_UNARY_VIEW || expr->as.unary.op == AST_UNARY_MOD) {
+        // In C backend, references are pointers. We take the address of the operand.
+        if (fprintf(out, "(&(") < 0) return false;
+        if (!emit_expr(ctx, expr->as.unary.operand, out)) return false;
+        return fprintf(out, "))") >= 0;
       }
       fprintf(stderr, "error: C backend unsupported unary operator\n");
       return false;
@@ -568,12 +612,20 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
       return fprintf(out, "0") >= 0; // none as 0 for now
     case AST_EXPR_MEMBER: {
       const char* sep = ".";
+      bool is_ptr = false;
       if (expr->as.member.object->kind == AST_EXPR_IDENT) {
           if (is_pointer_type(ctx, expr->as.member.object->as.ident)) {
               sep = "->";
+              is_ptr = true;
           }
       }
-      if (!emit_expr(ctx, expr->as.member.object, out)) return false;
+      
+      if (!is_ptr) {
+          if (!emit_expr(ctx, expr->as.member.object, out)) return false;
+      } else {
+          // Emit the raw identifier without its own dereference, as we'll use ->
+          fprintf(out, "%.*s", (int)expr->as.member.object->as.ident.len, expr->as.member.object->as.ident.data);
+      }
       return fprintf(out, "%s%.*s", sep, (int)expr->as.member.member.len, expr->as.member.member.data) >= 0;
     }
     case AST_EXPR_OBJECT: {
@@ -805,7 +857,20 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
       return emit_match(ctx, stmt, out);
     case AST_STMT_ASSIGN: {
       if (fprintf(out, "  ") < 0) return false;
-      if (!emit_expr(ctx, stmt->as.assign_stmt.target, out)) return false;
+      
+      bool is_ptr = false;
+      if (stmt->as.assign_stmt.target->kind == AST_EXPR_IDENT) {
+          if (is_pointer_type(ctx, stmt->as.assign_stmt.target->as.ident)) {
+              is_ptr = true;
+          }
+      }
+      
+      if (is_ptr && !stmt->as.assign_stmt.is_bind) {
+          fprintf(out, "(*%.*s)", (int)stmt->as.assign_stmt.target->as.ident.len, stmt->as.assign_stmt.target->as.ident.data);
+      } else {
+          if (!emit_expr(ctx, stmt->as.assign_stmt.target, out)) return false;
+      }
+      
       if (fprintf(out, " = ") < 0) return false;
       if (!emit_expr(ctx, stmt->as.assign_stmt.value, out)) return false;
       return fprintf(out, ";\n") >= 0;
