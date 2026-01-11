@@ -62,3 +62,17 @@
 - [ ] Add `.expect` files for non-interactive examples to enable full behavioral testing.
 
 - [ ] Fix any remaining documentation/example inconsistencies with v0.2 spec.
+
+
+
+## Priority 6: Editor Support & Visual Polish
+
+- [x] Create `rae.sublime-syntax` for Sublime Text (Sublime Monokai compatible).
+
+- [x] Create `rae.tmLanguage.json` and VSCode extension manifest.
+
+- [x] Create `tools/editor/install.sh` to automate local installation.
+
+- [x] Enhance devtools syntax highlighter logic (types vs keywords, function names, calls).
+
+- [x] Update devtools theme to match Sublime Monokai (background `#272822`).
