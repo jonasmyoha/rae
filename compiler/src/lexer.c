@@ -149,7 +149,7 @@ static char lexer_advance(Lexer* lexer) {
     lexer->column = 1;
   } else if (c == '\r') {
     bool is_crlf = (!lexer_is_at_end(lexer) && lexer->input[lexer->index] == '\n');
-    if (!lexer->inside_raw_string) {
+    if (!lexer->inside_raw_string && lexer->strict) {
         if (is_crlf) {
             lexer_error(lexer, lexer->line, lexer->column, "Rae files must use LF (\\n) line endings. CRLF found. Run `rae format` to fix.");
         } else {

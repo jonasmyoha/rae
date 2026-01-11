@@ -711,6 +711,7 @@ static bool parse_required_fields(RaePackParser* parser, RaePack* pack) {
 }
 
 bool raepack_parse_file(const char* file_path, RaePack* out, bool strict) {
+  if (out) memset(out, 0, sizeof(RaePack));
   size_t file_size = 0;
   char* source = read_file(file_path, &file_size);
   if (!source) {
