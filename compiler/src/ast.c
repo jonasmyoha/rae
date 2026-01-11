@@ -121,8 +121,10 @@ static void dump_call_args(const AstCallArg* arg, FILE* out) {
     if (!first) {
       fputs(", ", out);
     }
-    print_str(out, current->name);
-    fputs(": ", out);
+    if (current->name.len > 0) {
+      print_str(out, current->name);
+      fputs(": ", out);
+    }
     dump_expr(current->value, out);
     first = false;
     current = current->next;

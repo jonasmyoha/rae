@@ -238,6 +238,10 @@ The first argument of a function call can be passed positionally if it is unambi
 *   `getX(p)` is equivalent to `getX(p: p)`.
 *   Subsequent arguments must be named.
 
+Standard functions like `log()` and `logS()` are typically called positionally:
+*   `log("Hello")` is the preferred style.
+*   `log(message: "Hello")` is technically allowed but discouraged.
+
 ---
 
 **End of Rae Specification v0.2**

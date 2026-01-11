@@ -307,8 +307,10 @@ static void pp_call_args(PrettyPrinter* pp, const AstCallArg* args) {
     pp_newline(pp);
     pp->indent++;
     while (current) {
-      pp_write_str(pp, current->name);
-      pp_write(pp, ": ");
+      if (current->name.len > 0) {
+        pp_write_str(pp, current->name);
+        pp_write(pp, ": ");
+      }
       pp_expr_prec(pp, current->value, PREC_LOWEST);
       pp_write(pp, ",");
       pp_newline(pp);
@@ -321,8 +323,10 @@ static void pp_call_args(PrettyPrinter* pp, const AstCallArg* args) {
     int first = 1;
     while (current) {
       if (!first) { pp_write(pp, ", "); } 
-      pp_write_str(pp, current->name);
-      pp_write(pp, ": ");
+      if (current->name.len > 0) {
+        pp_write_str(pp, current->name);
+        pp_write(pp, ": ");
+      }
       pp_expr_prec(pp, current->value, PREC_LOWEST);
       first = 0;
       current = current->next;

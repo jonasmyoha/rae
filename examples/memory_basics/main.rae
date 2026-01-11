@@ -8,23 +8,23 @@ func main() {
   def p1: Point = { x: 10, y: 20 }
   def p2: Point = p1 # Copy
   p2.x = 30
-  log(value: p1.x) # Prints 10
+  log(p1.x) # Prints 10
 
   # 2. Borrow Type
   def r: mod Point => p1
   r.y = 50
-  log(value: p1.y) # Prints 50
+  log(p1.y) # Prints 50
 
   # 3. Identity Types
   def pid: id Point = 1
   def pkey: key Point = "point_001"
-  log(value: pid)
-  log(value: pkey)
+  log(pid)
+  log(pkey)
 
   # 4. Optional Borrow
   def op: opt view Point => p1
   match op {
-    case none { log(value: "none") }
-    default { log(value: "has point") }
+    case none { log("none") }
+    default { log("has point") }
   }
 }
