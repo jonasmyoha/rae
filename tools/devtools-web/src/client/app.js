@@ -42,6 +42,7 @@ const testFilesList = document.getElementById("test-files-list");
 const buildBtn = document.getElementById("build-btn");
 const cleanBtn = document.getElementById("clean-btn");
 const rebuildBtn = document.getElementById("rebuild-btn");
+const copyBuildErrorsBtn = document.getElementById("copy-build-errors-btn");
 const inspectorTabs = document.querySelectorAll("[data-inspector-tab]");
 const exampleListEl = document.getElementById("example-list");
 const exampleStatusChip = document.getElementById("example-status-chip");
@@ -81,6 +82,7 @@ let testFilesTree = [];
 let selectedTestFile = null;
 let selectedTestSource = "";
 let allTestLogLines = [];
+let allBuildLogLines = [];
 let raeSyntax = null;
 let testDirectoryMap = new Map();
 const errorEntries = [];
@@ -372,6 +374,7 @@ function handleTestRunStarted(event) {
   clearTestLog();
   allTestLogLines = [];
   if (testErrorsSummary) testErrorsSummary.hidden = true;
+  if (testErrorsLog) testErrorsLog.innerHTML = "";
   if (copyTestErrorsBtn) copyTestErrorsBtn.hidden = true;
   appendTestLine(`▶ [${event.targetLabel}] Running tests (${event.mode})`, "stdout");
   resetTestCases();
@@ -383,6 +386,7 @@ function handleBuildRunStarted(event) {
   setBuildStatus(`Running ${event.command}`, "is-running", event.targetLabel);
   setBuildButtonsDisabled(true);
   clearBuildLog();
+  allBuildLogLines = [];
   appendBuildLine(`▶ [${event.targetLabel}] ${event.command} started`, "stdout");
 }
 
@@ -627,6 +631,7 @@ function updateTestErrorSummary() {
 
 function appendBuildLine(text, stream = "stdout") {
   if (!buildLog) return;
+  allBuildLogLines.push({ text, stream });
   const lineEl = document.createElement("div");
   lineEl.className = `terminal-line ${stream}`;
   lineEl.textContent = text;
@@ -700,6 +705,47 @@ setupCopyButton(copyBuildLogBtn, () => {
   );
   return lines.join("\n").trim() || "No build output yet.";
 });
+
+function getFilteredBuildLog() {
+  const errorIndices = [];
+  const errorPatterns = [
+    /\berror:/,
+    /\bwarning:/,
+    /\.rae:\d+:\d+:/
+  ];
+
+  allBuildLogLines.forEach((line, index) => {
+    if (line.stream === "stderr" || errorPatterns.some(p => p.test(line.text))) {
+      errorIndices.push(index);
+    }
+  });
+
+  if (errorIndices.length === 0) return "No build errors or warnings found.";
+
+  const contextRange = 2;
+  const mergedIndices = new Set();
+  errorIndices.forEach(idx => {
+    for (let i = Math.max(0, idx - contextRange); i <= Math.min(allBuildLogLines.length - 1, idx + contextRange); i++) {
+      mergedIndices.add(i);
+    }
+  });
+
+  const sortedIndices = Array.from(mergedIndices).sort((a, b) => a - b);
+  let lastIdx = -1;
+  const result = [];
+
+  sortedIndices.forEach(idx => {
+    if (lastIdx !== -1 && idx > lastIdx + 1) {
+      result.push("---");
+    }
+    result.push(allBuildLogLines[idx].text);
+    lastIdx = idx;
+  });
+
+  return result.join("\n");
+}
+
+setupCopyButton(copyBuildErrorsBtn, () => getFilteredBuildLog());
 
 setupCopyButton(copyExampleOutputBtn, () => {
   const lines = Array.from(exampleOutput?.querySelectorAll(".terminal-line") ?? []).map((line) =>
