@@ -9,11 +9,14 @@ func main() {
   # but nextTick() will do for now to show we can seed.
   seed(n: 42)
 
-  def counter: Int = 0
+  def frameCount: Int = -1
 
   loop windowShouldClose() is 0 {
-    if counter % 60 is 0 {
-      beginDrawing()
+    frameCount++
+    log("frame: {frameCount} Sleeping for 10ms...")
+    sleepMs(ms: 500)
+    
+    beginDrawing()
       
       # Only clear occasionally or draw over? 
       # Let's draw 10 random circles per frame without clearing
@@ -42,8 +45,6 @@ func main() {
       }
 
       endDrawing()
-    }
-    counter = counter + 1
   }
 
   closeWindow()

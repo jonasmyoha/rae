@@ -100,6 +100,10 @@ static const char* unary_op_name(AstUnaryOp op) {
       return "++";
     case AST_UNARY_PRE_DEC:
       return "--";
+    case AST_UNARY_POST_INC:
+      return "++";
+    case AST_UNARY_POST_DEC:
+      return "--";
     case AST_UNARY_VIEW:
       return "view";
     case AST_UNARY_MOD:

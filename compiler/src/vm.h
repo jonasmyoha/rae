@@ -43,7 +43,8 @@ typedef enum {
   OP_MOD_LOCAL = 0x27,
   OP_VIEW_FIELD = 0x28,
   OP_MOD_FIELD = 0x29,
-  OP_SET_LOCAL_FIELD = 0x2A
+  OP_SET_LOCAL_FIELD = 0x2A,
+  OP_DUP = 0x2B
 } OpCode;
 
 typedef enum {

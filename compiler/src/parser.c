@@ -1101,6 +1101,20 @@ static AstExpr* parse_postfix(Parser* parser) {
 
       continue;
     }
+    if (parser_match(parser, TOK_INC)) {
+      AstExpr* post = new_expr(parser, AST_EXPR_UNARY, parser_previous(parser));
+      post->as.unary.op = AST_UNARY_POST_INC;
+      post->as.unary.operand = expr;
+      expr = post;
+      continue;
+    }
+    if (parser_match(parser, TOK_DEC)) {
+      AstExpr* post = new_expr(parser, AST_EXPR_UNARY, parser_previous(parser));
+      post->as.unary.op = AST_UNARY_POST_DEC;
+      post->as.unary.operand = expr;
+      expr = post;
+      continue;
+    }
     break;
   }
 
