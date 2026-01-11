@@ -9,6 +9,9 @@ VSCODE_EXT_DIR="$HOME/.vscode/extensions/rae-lang"
 # Determine Sublime Text User Packages directory based on OS
 if [[ "$OSTYPE" == "darwin"* ]]; then
     SUBLIME_USER_DIR="$HOME/Library/Application Support/Sublime Text/Packages/User"
+    if [ ! -d "$(dirname "$SUBLIME_USER_DIR")" ]; then
+        SUBLIME_USER_DIR="$HOME/Library/Application Support/Sublime Text 3/Packages/User"
+    fi
 else
     # Linux paths
     SUBLIME_USER_DIR="$HOME/.config/sublime-text/Packages/User"
