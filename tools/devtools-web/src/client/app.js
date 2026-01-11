@@ -2073,14 +2073,17 @@ function highlightRae(code, isPack = false) {
     return escaped;
   }
 
-  // 1. Extract strings and comments, replacing them with placeholders
+  // 1. Extract tokens and replace them with placeholders
   const placeholders = [];
   const addPlaceholder = (match, type) => {
-    const id = `__PH_${placeholders.length}__`;
+    const id = `___PH_${placeholders.length}___`; // Use triple underscores to be extra unique
     placeholders.push({ id, text: match, type });
     return id;
   };
 
+  let result = escaped;
+
+  // A. Comments
   const commentLineRegex = raeSyntax.comments?.line
     ? new RegExp(`${escapeRegex(raeSyntax.comments.line)}.*`, "gm")
     : /#.*$/gm;
@@ -2095,54 +2098,54 @@ function highlightRae(code, isPack = false) {
         )
       : null;
 
-  let result = escaped;
-  
-  // Strings
-  result = result.replace(/("(?:\\.|[^"])*")/g, (match) => addPlaceholder(match, "tok-string"));
-  result = result.replace(/'(?:\\.|[^'])*'/g, (match) => addPlaceholder(match, "tok-string"));
-
   if (commentBlockRegex) {
     result = result.replace(commentBlockRegex, (match) => addPlaceholder(match, "tok-comment"));
   }
   result = result.replace(commentLineRegex, (match) => addPlaceholder(match, "tok-comment"));
 
-  // 2. Highlighting remaining text
-  
-  // A. Function Definitions (func name)
+  // B. Strings
+  result = result.replace(/("(?:\\.|[^"])*")/g, (match) => addPlaceholder(match, "tok-string"));
+  result = result.replace(/'(?:\\.|[^'])*'/g, (match) => addPlaceholder(match, "tok-string"));
+
+  // C. Function Definitions (func name)
+  // We match the whole thing but only placeholder the name and keyword separately to avoid eating spaces
   result = result.replace(/\b(func)\s+([a-zA-Z_]\w*)\b/g, (match, f, name) => {
-      return `<span class="tok-keyword">${f}</span> <span class="tok-func-name">${name}</span>`;
+      return `${addPlaceholder(f, "tok-keyword")} ${addPlaceholder(name, "tok-func-name")}`;
   });
 
-  // B. Function Calls (name() - lookahead)
-  result = result.replace(/\b([a-zA-Z_]\w*)(?=\s*\()/g, '<span class="tok-func-call">$1</span>');
+  // D. Function Calls (name() - lookahead)
+  result = result.replace(/\b([a-zA-Z_]\w*)(?=\s*\()/g, (match) => addPlaceholder(match, "tok-func-call"));
 
-  // C. Parameter/Argument labels (name:)
-  result = result.replace(/\b([a-zA-Z_]\w*)(?=:)/g, '<span class="tok-parameter">$1</span>');
+  // E. Parameter/Argument labels (name:)
+  result = result.replace(/\b([a-zA-Z_]\w*)(?=:)/g, (match) => addPlaceholder(match, "tok-parameter"));
 
-  // D. Keywords, Types, and Modifiers
+  // F. Keywords, Types, and Modifiers
   const controlKeywords = ["if", "else", "loop", "in", "match", "case", "default", "ret", "spawn", "import", "export", "extern", "is"];
   const typeKeywords = ["Int", "Float", "Bool", "String", "Char", "List", "Array"];
   const modifierKeywords = ["view", "mod", "opt", "own", "pub", "priv", "pack", "live", "compiled", "hybrid"];
-  const declarationKeywords = ["type", "func", "def", "pack"];
+  const declarationKeywords = ["type", "def"]; // 'func' handled in Rule C
   const literalKeywords = ["true", "false", "none"];
 
-  const buildRegex = (list) => new RegExp(`\\b(${list.join("|")})\\b`, "g");
+  const allWords = [...controlKeywords, ...typeKeywords, ...modifierKeywords, ...declarationKeywords, ...literalKeywords];
+  const wordRegex = new RegExp(`\\b(${allWords.join("|")})\\b`, "g");
+  
+  result = result.replace(wordRegex, (match) => {
+      let type = "tok-keyword";
+      if (typeKeywords.includes(match)) type = "tok-type";
+      else if (modifierKeywords.includes(match)) type = "tok-modifier";
+      else if (literalKeywords.includes(match)) type = "tok-number";
+      return addPlaceholder(match, type);
+  });
 
-  result = result
-    .replace(buildRegex(controlKeywords), '<span class="tok-keyword">$1</span>')
-    .replace(buildRegex(declarationKeywords), '<span class="tok-keyword">$1</span>')
-    .replace(buildRegex(typeKeywords), '<span class="tok-type">$1</span>')
-    .replace(buildRegex(modifierKeywords), '<span class="tok-modifier">$1</span>')
-    .replace(buildRegex(literalKeywords), '<span class="tok-number">$1</span>');
-
-  // E. Operators
+  // G. Operators
   const operatorRegex = /(=&gt;|=|\+\+|--|\+|-|\*|\/|%|&lt;=|&gt;=|&lt;|&gt;)/g;
-  result = result.replace(operatorRegex, '<span class="tok-operator">$1</span>');
+  result = result.replace(operatorRegex, (match) => addPlaceholder(match, "tok-operator"));
 
-  // F. Numbers
-  result = result.replace(/\b(\d+(\.\d+)?)/g, '<span class="tok-number">$1</span>');
+  // H. Numbers
+  result = result.replace(/\b(\d+(\.\d+)?)/g, (match) => addPlaceholder(match, "tok-number"));
 
-  // 3. Restore placeholders
+  // 2. Restore placeholders
+  // Important: replace in reverse order if they can be nested (not usually here but good practice)
   for (let i = placeholders.length - 1; i >= 0; i--) {
     const p = placeholders[i];
     const replacement = `<span class="${p.type}">${p.text}</span>`;
