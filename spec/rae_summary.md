@@ -28,10 +28,10 @@ This is a summary of the current state of the Rae language as per the
     *   Cannot escape local scope (must not outlive storage).
 *   **Binding (`=>`)**: Aliases storage (does not copy). Works with `view`, `mod`, `opt`.
 *   **Member-Call Sugar**: `p.x()` desugars to `x(p)`. Allows extension-method style calls.
-*   **Positional first arg**: `getX(p)` is OK if unambiguous.
+*   **Positional first arg**: `getX(p)` is OK if unambiguous. Standard calls like `log("Hi")` use this.
    * Conventions:
        * Functions are camelCase, Types are PascalCase.
-       * All call arguments must be named: log(value: "hi").
+       * All call arguments must be named (except the first): log("hi").
 
   2. Status of Language Rules
    * Confirmed:
