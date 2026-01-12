@@ -10,7 +10,7 @@ static int get_instruction_len(uint8_t op) {
         case OP_CONSTANT: return 3;
         case OP_LOG: return 1;
         case OP_LOG_S: return 1;
-        case OP_CALL: return 3;
+        case OP_CALL: return 4;
         case OP_RETURN: return 1;
         case OP_GET_LOCAL: return 3;
         case OP_SET_LOCAL: return 3;
@@ -31,7 +31,7 @@ static int get_instruction_len(uint8_t op) {
         case OP_EQ: return 1;
         case OP_NE: return 1;
         case OP_NOT: return 1;
-        case OP_NATIVE_CALL: return 3;
+        case OP_NATIVE_CALL: return 4;
         case OP_GET_FIELD: return 3;
         case OP_SET_FIELD: return 3;
         case OP_CONSTRUCT: return 3;
@@ -63,6 +63,12 @@ bool vm_hot_patch(VM* vm, Chunk* new_chunk) {
         return false;
     }
     
+    // Save IP offset
+    size_t ip_offset = 0;
+    if (vm->ip >= old_chunk->code && vm->ip < old_chunk->code + old_chunk->code_count) {
+        ip_offset = vm->ip - old_chunk->code;
+    }
+    
     // 2. Append constants
     for (size_t i = 0; i < new_chunk->constants_count; ++i) {
         chunk_add_constant(old_chunk, value_copy(&new_chunk->constants[i]));
@@ -71,6 +77,11 @@ bool vm_hot_patch(VM* vm, Chunk* new_chunk) {
     // 3. Append code (relocated)
     for (size_t i = 0; i < new_chunk->code_count; ++i) {
         chunk_write(old_chunk, new_chunk->code[i], new_chunk->lines[i]);
+    }
+    
+    // Restore IP (in case realloc moved it)
+    if (ip_offset > 0 || vm->ip == old_chunk->code) {
+        vm->ip = old_chunk->code + ip_offset;
     }
     
     // 4. Relocate instructions in the appended block
