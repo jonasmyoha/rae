@@ -451,7 +451,8 @@ static bool module_graph_collect_watch_sources(const ModuleGraph* graph, WatchSo
 static bool compile_file_chunk(const char* file_path,
                                Chunk* chunk,
                                uint64_t* out_hash,
-                               WatchSources* watch_sources);
+                               WatchSources* watch_sources,
+                               const char* project_root);
 static bool build_c_backend_output(const char* entry_file,
                                    const char* project_root,
                                    const char* out_path);
@@ -475,9 +476,9 @@ static void watch_state_init(WatchState* state, const char* fallback_path);
 static void watch_state_free(WatchState* state);
 static bool watch_state_apply_sources(WatchState* state, WatchSources* new_sources);
 static const char* watch_state_wait_for_change(WatchState* state);
-static int run_vm_file(const RunOptions* run_opts);
-static int run_compiled_file(const RunOptions* run_opts);
-static int run_vm_watch(const RunOptions* run_opts);
+static int run_vm_file(const RunOptions* run_opts, const char* project_root);
+static int run_compiled_file(const RunOptions* run_opts, const char* project_root);
+static int run_vm_watch(const RunOptions* run_opts, const char* project_root);
 
 static void format_options_init(FormatOptions* opts) {
   opts->input_path = NULL;
@@ -1436,6 +1437,14 @@ static char* normalize_import_path(const char* current_module_path, const char* 
 }
 
 static char* resolve_module_file(const char* root, const char* module_path) {
+  if (!root) {
+    size_t mod_len = strlen(module_path);
+    size_t total = mod_len + 5;
+    char* buffer = malloc(total);
+    if (!buffer) return NULL;
+    snprintf(buffer, total, "%s.rae", module_path);
+    return buffer;
+  }
   size_t root_len = strlen(root);
   size_t mod_len = strlen(module_path);
   size_t total = root_len + mod_len + 6;
@@ -1451,6 +1460,9 @@ static char* resolve_module_file(const char* root, const char* module_path) {
 }
 
 static char* derive_module_path(const char* root, const char* file_path) {
+  if (!root) {
+    return normalize_import_path(NULL, file_path);
+  }
   size_t root_len = strlen(root);
   if (root_len > 0 && (root[root_len - 1] == '/' || root[root_len - 1] == '\\')) {
     root_len -= 1;
@@ -1483,38 +1495,16 @@ static bool module_graph_init(ModuleGraph* graph, Arena* arena, const char* proj
       fprintf(stderr, "error: unable to resolve project path '%s'\n", project_root);
       return false;
     }
+    graph->root_path = resolved;
   } else {
-    char cwd[PATH_MAX];
-    if (!getcwd(cwd, sizeof(cwd))) {
-      perror("getcwd");
-      return false;
-    }
-    resolved = realpath(cwd, NULL);
-    if (!resolved) {
-      resolved = strdup(cwd);
-    }
+    graph->root_path = NULL; // No strict root for CWD-based runs
   }
-  graph->root_path = resolved;
-  if (!graph->root_path) {
-    fprintf(stderr, "error: failed to allocate project root path\n");
-    return false;
-  }
-  size_t len = strlen(graph->root_path);
-  while (len > 1 && (graph->root_path[len - 1] == '/' || graph->root_path[len - 1] == '\\')) {
-    graph->root_path[len - 1] = '\0';
-    len -= 1;
-  }
-  const char* last_sep = strrchr(graph->root_path, '/');
-#ifdef _WIN32
-  const char* last_sep_win = strrchr(graph->root_path, '\\');
-  if (!last_sep || (last_sep_win && last_sep_win > last_sep)) {
-    last_sep = last_sep_win;
-  }
-#endif
-  if (root_from_cwd && last_sep) {
-    const char* last_component = last_sep + 1;
-    if (strcmp(last_component, "compiler") == 0 && last_sep != graph->root_path) {
-      graph->root_path[last_sep - graph->root_path] = '\0';
+  
+  if (graph->root_path) {
+    size_t len = strlen(graph->root_path);
+    while (len > 1 && (graph->root_path[len - 1] == '/' || graph->root_path[len - 1] == '\\')) {
+      graph->root_path[len - 1] = '\0';
+      len -= 1;
     }
   }
   return true;
@@ -1651,21 +1641,37 @@ static bool module_graph_collect_watch_sources(const ModuleGraph* graph, WatchSo
 
 static char* try_resolve_lib_module(const char* root, const char* normalized) {
   // Check root/lib/normalized.rae
-  size_t root_len = strlen(root);
+  if (root) {
+    size_t root_len = strlen(root);
+    size_t mod_len = strlen(normalized);
+    size_t total = root_len + mod_len + 10; // /lib/ .rae
+    char* buffer = malloc(total);
+    if (buffer) {
+      if (root_len > 0 && (root[root_len - 1] == '/' || root[root_len - 1] == '\\')) {
+        root_len -= 1;
+      }
+      snprintf(buffer, total, "%.*s/lib/%s.rae", (int)root_len, root, normalized);
+      if (file_exists(buffer)) {
+        return buffer;
+      }
+      free(buffer);
+    }
+  }
+
+  // Fallback: Check relative to compiler location (e.g. from tests/ or bin/)
   size_t mod_len = strlen(normalized);
-  size_t total = root_len + mod_len + 10; // /lib/ .rae
-  char* buffer = malloc(total);
-  if (!buffer) return NULL;
-  
-  if (root_len > 0 && (root[root_len - 1] == '/' || root[root_len - 1] == '\\')) {
-    root_len -= 1;
+  size_t total_fallback = mod_len + 16;
+  char* b2 = malloc(total_fallback);
+  if (b2) {
+      snprintf(b2, total_fallback, "../lib/%s.rae", normalized);
+      if (file_exists(b2)) return b2;
+      
+      snprintf(b2, total_fallback, "lib/%s.rae", normalized);
+      if (file_exists(b2)) return b2;
+      
+      free(b2);
   }
-  snprintf(buffer, total, "%.*s/lib/%s.rae", (int)root_len, root, normalized);
-  
-  if (file_exists(buffer)) {
-    return buffer;
-  }
-  free(buffer);
+
   return NULL;
 }
 
@@ -2191,13 +2197,14 @@ static int run_raepack_file(const PackOptions* opts) {
 static bool compile_file_chunk(const char* file_path,
                                Chunk* chunk,
                                uint64_t* out_hash,
-                               WatchSources* watch_sources) {
+                               WatchSources* watch_sources,
+                               const char* project_root) {
   Arena* arena = arena_create(1024 * 1024);
   if (!arena) {
     diag_fatal("could not allocate arena");
   }
   ModuleGraph graph;
-  if (!module_graph_init(&graph, arena, NULL)) {
+  if (!module_graph_init(&graph, arena, project_root)) {
     arena_destroy(arena);
     return false;
   }
@@ -2488,10 +2495,10 @@ static bool build_hybrid_output(const char* entry_file,
   return ok;
 }
 
-static int run_vm_file(const RunOptions* run_opts) {
+static int run_vm_file(const RunOptions* run_opts, const char* project_root) {
   const char* file_path = run_opts->input_path;
   Chunk chunk;
-  if (!compile_file_chunk(file_path, &chunk, NULL, NULL)) {
+  if (!compile_file_chunk(file_path, &chunk, NULL, NULL, project_root)) {
     return 1;
   }
 
@@ -2525,7 +2532,7 @@ static int run_vm_file(const RunOptions* run_opts) {
   return (result == VM_RUNTIME_OK || result == VM_RUNTIME_TIMEOUT) ? 0 : 1;
 }
 
-static int run_compiled_file(const RunOptions* run_opts) {
+static int run_compiled_file(const RunOptions* run_opts, const char* project_root) {
   const char* file_path = run_opts->input_path;
   char temp_c[PATH_MAX];
   char temp_bin[PATH_MAX];
@@ -2536,7 +2543,7 @@ static int run_compiled_file(const RunOptions* run_opts) {
   snprintf(temp_c, sizeof(temp_c), "%s/rae_compiled_%d.c", tmp_dir, getpid());
   snprintf(temp_bin, sizeof(temp_bin), "%s/rae_compiled_%d.bin", tmp_dir, getpid());
 
-  if (!build_c_backend_output(file_path, NULL, temp_c)) {
+  if (!build_c_backend_output(file_path, project_root, temp_c)) {
     return 1;
   }
 
@@ -2587,18 +2594,65 @@ static int run_command(const char* cmd, int argc, char** argv) {
       return 1;
     }
     file_path = argv[0];
-  } else if (is_run) {
-    RunOptions run_opts;
-    if (!parse_run_args(argc, argv, &run_opts)) {
-      print_usage(cmd);
-      return 1;
-    }
-    if (run_opts.target == BUILD_TARGET_COMPILED) {
-        return run_compiled_file(&run_opts);
-    }
-    return run_opts.watch ? run_vm_watch(&run_opts) : run_vm_file(&run_opts);
-  } else if (is_pack) {
-    PackOptions pack_opts;
+          } else if (is_run) {
+            RunOptions run_opts;
+            if (!parse_run_args(argc, argv, &run_opts)) {
+              print_usage(cmd);
+              return 1;
+            }
+            
+            char abs_input[PATH_MAX];
+            if (!realpath(run_opts.input_path, abs_input)) {
+                fprintf(stderr, "error: unable to resolve input path '%s'\n", run_opts.input_path);
+                return 1;
+            }
+        
+            char project_path[PATH_MAX];
+            strncpy(project_path, abs_input, sizeof(project_path) - 1);
+            project_path[sizeof(project_path) - 1] = '\0';
+            char* slash = strrchr(project_path, '/');
+            if (slash) {
+                *slash = '\0';
+            } else {
+                strcpy(project_path, ".");
+            }
+        
+            // Smart discovery: search upwards for the 'lib' folder to find the repo root.
+            // This allows scripts in examples/ or tests/ to find standard library and neighboring files.
+            char repo_root[PATH_MAX];
+            strncpy(repo_root, project_path, sizeof(repo_root) - 1);
+            repo_root[sizeof(repo_root) - 1] = '\0';
+            
+            bool found_root = false;
+            for (int i = 0; i < 5; ++i) { // search up to 5 levels
+                char test_lib[PATH_MAX];
+                snprintf(test_lib, sizeof(test_lib), "%s/lib/core.rae", repo_root);
+                if (file_exists(test_lib)) {
+                    found_root = true;
+                    break;
+                }
+                char* parent = strrchr(repo_root, '/');
+                if (!parent || parent == repo_root) break;
+                *parent = '\0';
+            }
+        
+            const char* final_root = found_root ? repo_root : project_path;
+        
+                    RunOptions adjusted_opts = run_opts;
+        
+                    adjusted_opts.input_path = abs_input;
+        
+                
+        
+                    if (run_opts.target == BUILD_TARGET_COMPILED) {
+        
+                      return run_compiled_file(&adjusted_opts, final_root);
+        
+                    }
+        
+                
+        
+                    return run_opts.watch ? run_vm_watch(&adjusted_opts, final_root) : run_vm_file(&adjusted_opts, final_root);    } else if (is_pack) {    PackOptions pack_opts;
     if (!parse_pack_args(argc, argv, &pack_opts)) {
       print_usage(cmd);
       return 1;
@@ -2864,7 +2918,7 @@ static const char* watch_state_wait_for_change(WatchState* state) {
   }
 }
 
-static int run_vm_watch(const RunOptions* run_opts) {
+static int run_vm_watch(const RunOptions* run_opts, const char* project_root) {
   const char* file_path = run_opts->input_path;
   printf("Watching '%s' for changes (Ctrl+C to exit)\n", file_path);
   fflush(stdout);
@@ -2889,7 +2943,7 @@ static int run_vm_watch(const RunOptions* run_opts) {
     Chunk chunk;
     WatchSources new_sources;
     watch_sources_init(&new_sources);
-    if (!compile_file_chunk(file_path, &chunk, &file_hash, &new_sources)) {
+    if (!compile_file_chunk(file_path, &chunk, &file_hash, &new_sources, project_root)) {
       fprintf(stderr, "[watch] compile failed. Waiting for changes...\n");
     } else {
       if (!watch_state_apply_sources(&watch_state, &new_sources)) {

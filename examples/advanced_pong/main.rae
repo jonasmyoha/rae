@@ -1,4 +1,6 @@
 import raylib
+import ai
+
 # -- Components (Plain Data Types) --
 type Transform {
   x: Float
@@ -8,12 +10,6 @@ type Transform {
 type Velocity {
   dx: Float
   dy: Float
-}
-
-type AIState {
-  targetY: Float
-  reactionTimer: Int
-  pauseTimer: Int
 }
 
 # -- Systems (Functions acting on Components) --
@@ -33,37 +29,6 @@ func bounceSystem(
   }
   if pos.y > height - radius {
     vel.dy = -4.0
-  }
-}
-
-func paddleAiSystem(ai: mod AIState, ball: view Transform, paddle: mod Transform) {
-  if ai.pauseTimer > 0 {
-    ai.pauseTimer = ai.pauseTimer - 1
-    ret
-  }
-  ai.reactionTimer = ai.reactionTimer + 1
-  # Update target every 8 frames (~0.13s) to simulate human reaction delay
-  if ai.reactionTimer > 8 {
-    ai.targetY = ball.y
-    ai.reactionTimer = 0
-    # Randomly decide to "think" (pause) for a bit
-    if random() < 0.015 {
-      ai.pauseTimer = randomInt(min: 10, max: 25)
-    }
-  }
-  # Move towards target
-  if ai.targetY < paddle.y + 50.0 {
-    paddle.y = paddle.y - 4.5
-  }
-  if ai.targetY > paddle.y + 50.0 {
-    paddle.y = paddle.y + 4.5
-  }
-  # Bounds check
-  if paddle.y < 0.0 {
-    paddle.y = 0.0
-  }
-  if paddle.y > 350.0 {
-    paddle.y = 350.0
   }
 }
 
@@ -151,7 +116,7 @@ func main() {
   def p2Pos: Transform = { x: 760.0, y: 175.0 }
   def bPos: Transform = { x: 400.0, y: 225.0 }
   def bVel: Velocity = { dx: 4.0, dy: 4.0 }
-  def ai: AIState = { targetY: 225.0, reactionTimer: 0, pauseTimer: 0 }
+  def aiState: AIState = { targetY: 225.0, reactionTimer: 0, pauseTimer: 0 }
   def p1Score: Int = 0
   def p2Score: Int = 0
   loop windowShouldClose() is 0 {
@@ -164,7 +129,7 @@ func main() {
       height: 450.0,
       pHeight: 100.0,
     )
-    paddleAiSystem(ai: ai, ball: bPos, paddle: p2Pos)
+    p2Pos.y = paddleAiSystem(ai: aiState, ballY: bPos.y, paddleY: p2Pos.y)
     movementSystem(pos: bPos, vel: bVel)
     bounceSystem(
       pos: bPos,
