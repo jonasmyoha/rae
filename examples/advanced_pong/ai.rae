@@ -1,0 +1,44 @@
+# AI System for Advanced Pong
+
+type AIState {
+  targetY: Float
+  reactionTimer: Int
+  pauseTimer: Int
+}
+
+func paddleAiSystem(ai: mod AIState, ballY: Float, paddleY: Float): ret Float {
+  if ai.pauseTimer > 0 {
+    ai.pauseTimer = ai.pauseTimer - 1
+    ret paddleY
+  }
+  
+  ai.reactionTimer = ai.reactionTimer + 1
+  # Update target every 8 frames (~0.13s) to simulate human reaction delay
+  if ai.reactionTimer > 8 {
+    ai.targetY = ballY
+    ai.reactionTimer = 0
+    # Randomly decide to "think" (pause) for a bit
+    if random() < 0.015 {
+      ai.pauseTimer = randomInt(min: 10, max: 25)
+    }
+  }
+  
+  def newY: Float = paddleY
+  # Move towards target
+  if ai.targetY < paddleY + 50.0 {
+    newY = paddleY - 4.5
+  }
+  if ai.targetY > paddleY + 50.0 {
+    newY = paddleY + 4.5
+  }
+  
+  # Bounds check
+  if newY < 0.0 {
+    newY = 0.0
+  }
+  if newY > 350.0 {
+    newY = 350.0
+  }
+  
+  ret newY
+}

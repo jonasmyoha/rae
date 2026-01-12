@@ -21,11 +21,12 @@ EXAMPLE_FILES=$(find "$EXAMPLES_DIR" -name "main.rae" | sort)
 
 for EXAMPLE_FILE in $EXAMPLE_FILES; do
   EXAMPLE_NAME=$(basename "$(dirname "$EXAMPLE_FILE")")
+  PROJECT_DIR=$(dirname "$EXAMPLE_FILE")
 
   # 1. VM Compile Smoke Test
-  if "$BIN" build --target live "$EXAMPLE_FILE" > /dev/null 2>&1; then
+  if "$BIN" build --target live --project "$PROJECT_DIR" "$EXAMPLE_FILE" > /dev/null 2>&1; then
     # 2. C Backend Smoke Test
-    if "$BIN" build --target compiled --emit-c "$EXAMPLE_FILE" > /dev/null 2>&1; then
+    if "$BIN" build --target compiled --emit-c --project "$PROJECT_DIR" "$EXAMPLE_FILE" > /dev/null 2>&1; then
       echo "PASS: $EXAMPLE_NAME"
       ((PASSED++))
     else
