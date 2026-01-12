@@ -93,3 +93,10 @@
 
 ## Priority 8: Raepack Refinements
 - [ ] Task: raepack does not contain a thing called "auto_folders". Check how the raepack format really defines folders and files. Fix all raepack files accordingly.
+
+## Priority 9: Hot-Reloading (Hot-Code Swapping)
+- [ ] **Infrastructure**: Add threading support to the compiler to allow concurrent file watching.
+- [ ] **Watcher Thread**: Implement a background thread that monitors source files for changes and signals the VM.
+- [ ] **VM Interrupts**: Update the VM loop to check for a `reload_requested` flag at safe points (e.g., loop headers).
+- [ ] **Patching Mechanism**: Implement `vm_registry_patch` to overwrite existing function definitions with new bytecode from recompiled modules.
+- [ ] **State Preservation**: Ensure the global memory, stack, and heap remain intact during the patch process.

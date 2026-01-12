@@ -168,13 +168,7 @@ for TARGET in "${TARGETS[@]}"; do
     ACTUAL_OUTPUT="$CMD_STDOUT"
     
     if [ -n "$TMP_OUTPUT_FILE" ]; then
-      if [ -s "$TMP_OUTPUT_FILE" ]; then
-        ACTUAL_OUTPUT=$(cat "$TMP_OUTPUT_FILE")
-      else
-        ACTUAL_OUTPUT="<EMPTY OUTPUT FILE>
-STDERR/STDOUT:
-$CMD_STDOUT"
-      fi
+      ACTUAL_OUTPUT=$(cat "$TMP_OUTPUT_FILE")
       rm -f "$TMP_OUTPUT_FILE"
     elif [ -n "$TMP_INPUT_FILE" ]; then
       if [ "${CMD_ARGS[0]}" = "format" ]; then
