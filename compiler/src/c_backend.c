@@ -8,6 +8,32 @@
 #include "lexer.h"
 
 typedef struct {
+  int64_t next;
+} TickCounter;
+
+// Precedence levels for C expressions
+// Based on C operator precedence
+enum {
+  PREC_LOWEST = 0,
+  PREC_COMMA,
+  PREC_ASSIGN,
+  PREC_TERNARY,
+  PREC_LOGICAL_OR,
+  PREC_LOGICAL_AND,
+  PREC_BITWISE_OR,
+  PREC_BITWISE_XOR,
+  PREC_BITWISE_AND,
+  PREC_EQUALITY,    // == !=
+  PREC_RELATIONAL,  // < > <= >=
+  PREC_SHIFT,
+  PREC_ADD,         // + -
+  PREC_MUL,         // * / %
+  PREC_UNARY,       // ! - + * &
+  PREC_CALL,        // () [] . ->
+  PREC_ATOMIC
+};
+
+typedef struct {
   const AstParam* params;
   Str locals[256];
   Str local_types[256];
@@ -19,7 +45,7 @@ typedef struct {
 } CFuncContext;
 
 // Forward declarations
-static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out);
+static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_prec);
 static bool emit_function(const AstFuncDecl* func, FILE* out);
 static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static bool emit_call(CFuncContext* ctx, const AstExpr* expr, FILE* out);
@@ -42,6 +68,24 @@ static bool match_cases_use_string(const AstMatchCase* cases, bool* out_use_stri
 static bool match_arms_use_string(const AstMatchArm* arms, bool* out_use_string);
 static bool func_has_return_value(const AstFuncDecl* func);
 static const char* c_return_type(const AstFuncDecl* func);
+
+static int binary_op_precedence(AstBinaryOp op) {
+  switch (op) {
+    case AST_BIN_ADD: return PREC_ADD;
+    case AST_BIN_SUB: return PREC_ADD;
+    case AST_BIN_MUL: return PREC_MUL;
+    case AST_BIN_DIV: return PREC_MUL;
+    case AST_BIN_MOD: return PREC_MUL;
+    case AST_BIN_LT: return PREC_RELATIONAL;
+    case AST_BIN_GT: return PREC_RELATIONAL;
+    case AST_BIN_LE: return PREC_RELATIONAL;
+    case AST_BIN_GE: return PREC_RELATIONAL;
+    case AST_BIN_IS: return PREC_EQUALITY;
+    case AST_BIN_AND: return PREC_LOGICAL_AND;
+    case AST_BIN_OR: return PREC_LOGICAL_OR;
+  }
+  return PREC_LOWEST;
+}
 
 // Helper functions for emitting literals
 static bool emit_string_literal(FILE* out, Str literal) {
@@ -261,7 +305,7 @@ static bool emit_log_call(CFuncContext* ctx, const AstExpr* expr, FILE* out, boo
     if (fprintf(out, "  %s(", newline ? "rae_log_cstr" : "rae_log_stream_cstr") < 0) {
       return false;
     }
-    if (!emit_expr(ctx, value, out)) return false;
+    if (!emit_expr(ctx, value, out, PREC_LOWEST)) return false;
     if (fprintf(out, ");\n") < 0) return false;
     return true;
   }
@@ -292,7 +336,7 @@ static bool emit_log_call(CFuncContext* ctx, const AstExpr* expr, FILE* out, boo
     }
     if (fprintf(out, "  %s(", newline ? "rae_log_bool" : "rae_log_stream_bool") < 0) return false;
     if (val_is_ptr) fprintf(out, "(*");
-    if (!emit_expr(ctx, value, out)) return false;
+    if (!emit_expr(ctx, value, out, PREC_LOWEST)) return false;
     if (val_is_ptr) fprintf(out, ")");
     if (fprintf(out, ");\n") < 0) return false;
     return true;
@@ -314,7 +358,7 @@ static bool emit_log_call(CFuncContext* ctx, const AstExpr* expr, FILE* out, boo
     }
     if (fprintf(out, "  %s(", newline ? "rae_log_char" : "rae_log_stream_char") < 0) return false;
     if (val_is_ptr) fprintf(out, "(*");
-    if (!emit_expr(ctx, value, out)) return false;
+    if (!emit_expr(ctx, value, out, PREC_LOWEST)) return false;
     if (val_is_ptr) fprintf(out, ")");
     if (fprintf(out, ");\n") < 0) return false;
     return true;
@@ -350,13 +394,13 @@ static bool emit_log_call(CFuncContext* ctx, const AstExpr* expr, FILE* out, boo
 
   if (is_id) {
     if (fprintf(out, "  %s(", newline ? "rae_log_id" : "rae_log_stream_id") < 0) return false;
-    if (!emit_expr(ctx, value, out)) return false;
+    if (!emit_expr(ctx, value, out, PREC_LOWEST)) return false;
     if (fprintf(out, ");\n") < 0) return false;
     return true;
   }
   if (is_key) {
     if (fprintf(out, "  %s(", newline ? "rae_log_key" : "rae_log_stream_key") < 0) return false;
-    if (!emit_expr(ctx, value, out)) return false;
+    if (!emit_expr(ctx, value, out, PREC_LOWEST)) return false;
     if (fprintf(out, ");\n") < 0) return false;
     return true;
   }
@@ -401,7 +445,7 @@ static bool emit_log_call(CFuncContext* ctx, const AstExpr* expr, FILE* out, boo
       return false;
     }
     if (val_is_ptr) fprintf(out, "(*");
-    if (!emit_expr(ctx, value, out)) return false;
+    if (!emit_expr(ctx, value, out, PREC_LOWEST)) return false;
     if (val_is_ptr) fprintf(out, ")");
     if (fprintf(out, ");\n") < 0) return false;
     return true;
@@ -436,7 +480,7 @@ static bool emit_log_call(CFuncContext* ctx, const AstExpr* expr, FILE* out, boo
     if (fprintf(out, "  %s(", newline ? "rae_log_list" : "rae_log_stream_list") < 0) {
       return false;
     }
-    if (!emit_expr(ctx, value, out)) return false;
+    if (!emit_expr(ctx, value, out, PREC_LOWEST)) return false;
     if (fprintf(out, ");\n") < 0) return false;
     return true;
   }
@@ -449,7 +493,7 @@ static bool emit_log_call(CFuncContext* ctx, const AstExpr* expr, FILE* out, boo
     return false;
   }
   if (val_is_ptr) fprintf(out, "(*");
-  if (!emit_expr(ctx, value, out)) {
+  if (!emit_expr(ctx, value, out, PREC_LOWEST)) {
     return false;
   }
   if (val_is_ptr) fprintf(out, ")");
@@ -470,40 +514,27 @@ static bool is_primitive_type(Str type_name) {
 }
 
 static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
-  if (!expr || expr->kind != AST_EXPR_CALL || !expr->as.call.callee ||
-      expr->as.call.callee->kind != AST_EXPR_IDENT) {
-    fprintf(stderr, "error: only direct function calls are supported in expressions\n");
-    return false;
-  }
-  Str name = expr->as.call.callee->as.ident;
-  if (str_eq_cstr(name, "log") || str_eq_cstr(name, "logS")) {
-    fprintf(stderr, "error: log/logS cannot be used as expressions\n");
-    return false;
-  }
-  if (fprintf(out, "%.*s(", (int)name.len, name.data) < 0) {
-    return false;
-  }
+  const AstExpr* callee = expr->as.call.callee;
+  if (!emit_expr(ctx, callee, out, PREC_CALL)) return false;
+  
+  if (fprintf(out, "(") < 0) return false;
+  
   const AstCallArg* arg = expr->as.call.args;
-  size_t arg_index = 0;
+  bool first = true;
+  
   while (arg) {
-    if (arg_index > 0) {
+    if (!first) {
       if (fprintf(out, ", ") < 0) return false;
     }
+    first = false;
     
-    // HACK: If the argument is a local struct variable, we might need to pass it by address
-    // if the target function expects a pointer. Since we don't have type info for the target
-    // here easily, we'll try a heuristic: if it's a local struct, pass by address.
     bool needs_addr = false;
     if (arg->value->kind == AST_EXPR_IDENT) {
-        for (size_t i = 0; i < ctx->local_count; i++) {
-            if (str_eq(ctx->locals[i], arg->value->as.ident)) {
-                // It's a local. Is it a struct?
-                if (!is_primitive_type(ctx->local_types[i])) {
-                    needs_addr = true;
-                }
-                break;
-            }
+        Str type_name = get_local_type_name(ctx, arg->value->as.ident);
+        if (type_name.len > 0 && !is_primitive_type(type_name)) {
+            needs_addr = true;
         }
+        // If it's already a pointer in C (view/mod param or local), don't take addr
         if (needs_addr && is_pointer_type(ctx, arg->value->as.ident)) {
             needs_addr = false;
         }
@@ -516,11 +547,10 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         if (fprintf(out, "&") < 0) return false;
     }
 
-    if (!emit_expr(ctx, arg->value, out)) {
+    if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) {
       return false;
     }
     arg = arg->next;
-    arg_index += 1;
   }
   return fprintf(out, ")") >= 0;
 }
@@ -571,7 +601,7 @@ static Str get_local_type_name(CFuncContext* ctx, Str name) {
   return (Str){0};
 }
 
-static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
+static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_prec) {
   if (!expr) return false;
   switch (expr->kind) {
     case AST_EXPR_STRING:
@@ -593,17 +623,17 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
       }
       
       // Initial part
-      if (!emit_expr(ctx, part->value, out)) return false;
+      if (!emit_expr(ctx, part->value, out, PREC_LOWEST)) return false;
       part = part->next;
       
       while (part) {
           fprintf(out, ", ");
           if (part->value->kind != AST_EXPR_STRING) {
               fprintf(out, "rae_str(");
-              if (!emit_expr(ctx, part->value, out)) return false;
+              if (!emit_expr(ctx, part->value, out, PREC_LOWEST)) return false;
               fprintf(out, ")");
           } else {
-              if (!emit_expr(ctx, part->value, out)) return false;
+              if (!emit_expr(ctx, part->value, out, PREC_LOWEST)) return false;
           }
           fprintf(out, ")"); // close rae_str_concat
           part = part->next;
@@ -637,97 +667,75 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
           return true;
         }
       }
-      fprintf(stderr,
-              "error: C backend currently only supports referencing parameters or prior locals "
-              "(%.*s)\n",
-              (int)expr->as.ident.len, expr->as.ident.data);
-      return false;
+      // Fallback: assume it's a global function or extern
+      fprintf(out, "%.*s", (int)expr->as.ident.len, expr->as.ident.data);
+      return true;
     }
     case AST_EXPR_BINARY: {
+      int prec = binary_op_precedence(expr->as.binary.op);
+      bool need_paren = prec < parent_prec;
       const char* op = NULL;
       switch (expr->as.binary.op) {
-        case AST_BIN_ADD:
-          op = "+";
-          break;
-        case AST_BIN_SUB:
-          op = "-";
-          break;
-        case AST_BIN_MUL:
-          op = "*";
-          break;
-        case AST_BIN_DIV:
-          op = "/";
-          break;
-        case AST_BIN_MOD:
-          op = "%";
-          break;
-        case AST_BIN_LT:
-          op = "<";
-          break;
-        case AST_BIN_GT:
-          op = ">";
-          break;
-        case AST_BIN_LE:
-          op = "<=";
-          break;
-        case AST_BIN_GE:
-          op = ">=";
-          break;
-        case AST_BIN_IS:
-          op = "==";
-          break;
-        case AST_BIN_AND:
-          op = "&&";
-          break;
-        case AST_BIN_OR:
-          op = "||";
-          break;
+        case AST_BIN_ADD: op = "+"; break;
+        case AST_BIN_SUB: op = "-"; break;
+        case AST_BIN_MUL: op = "*"; break;
+        case AST_BIN_DIV: op = "/"; break;
+        case AST_BIN_MOD: op = "%"; break;
+        case AST_BIN_LT: op = "<"; break;
+        case AST_BIN_GT: op = ">"; break;
+        case AST_BIN_LE: op = "<="; break;
+        case AST_BIN_GE: op = ">="; break;
+        case AST_BIN_IS: op = "=="; break;
+        case AST_BIN_AND: op = "&&"; break;
+        case AST_BIN_OR: op = "||"; break;
         default:
           fprintf(stderr, "error: C backend does not support this binary operator yet\n");
           return false;
       }
-      if (fprintf(out, "(") < 0) return false;
+      if (need_paren && fprintf(out, "(") < 0) return false;
+      
       bool lhs_is_ptr = (expr->as.binary.lhs->kind == AST_EXPR_IDENT && is_pointer_type(ctx, expr->as.binary.lhs->as.ident));
       if (lhs_is_ptr) fprintf(out, "(*");
-      if (!emit_expr(ctx, expr->as.binary.lhs, out)) return false;
+      if (!emit_expr(ctx, expr->as.binary.lhs, out, prec)) return false;
       if (lhs_is_ptr) fprintf(out, ")");
       
       if (fprintf(out, " %s ", op) < 0) return false;
       
       bool rhs_is_ptr = (expr->as.binary.rhs->kind == AST_EXPR_IDENT && is_pointer_type(ctx, expr->as.binary.rhs->as.ident));
       if (rhs_is_ptr) fprintf(out, "(*");
-      if (!emit_expr(ctx, expr->as.binary.rhs, out)) return false;
+      if (!emit_expr(ctx, expr->as.binary.rhs, out, prec + 1)) return false;
       if (rhs_is_ptr) fprintf(out, ")");
-      if (fprintf(out, ")") < 0) return false;
+      
+      if (need_paren && fprintf(out, ")") < 0) return false;
       return true;
     }
     case AST_EXPR_UNARY:
       if (expr->as.unary.op == AST_UNARY_NEG) {
         if (fprintf(out, "(-") < 0) return false;
-        if (!emit_expr(ctx, expr->as.unary.operand, out)) return false;
+        if (!emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY)) return false;
         return fprintf(out, ")") >= 0;
       } else if (expr->as.unary.op == AST_UNARY_NOT) {
         if (fprintf(out, "(!(") < 0) return false;
-        if (!emit_expr(ctx, expr->as.unary.operand, out)) return false;
+        if (!emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY)) return false;
         return fprintf(out, "))") >= 0;
       } else if (expr->as.unary.op == AST_UNARY_PRE_INC) {
         if (fprintf(out, "++") < 0) return false;
-        if (!emit_expr(ctx, expr->as.unary.operand, out)) return false;
+        if (!emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY)) return false;
         return true;
       } else if (expr->as.unary.op == AST_UNARY_PRE_DEC) {
         if (fprintf(out, "--") < 0) return false;
-        if (!emit_expr(ctx, expr->as.unary.operand, out)) return false;
+        if (!emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY)) return false;
         return true;
       } else if (expr->as.unary.op == AST_UNARY_POST_INC) {
-        if (!emit_expr(ctx, expr->as.unary.operand, out)) return false;
+        if (!emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY)) return false;
         return fprintf(out, "++") >= 0;
       } else if (expr->as.unary.op == AST_UNARY_POST_DEC) {
-        if (!emit_expr(ctx, expr->as.unary.operand, out)) return false;
+        if (!emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY)) return false;
         return fprintf(out, "--") >= 0;
       } else if (expr->as.unary.op == AST_UNARY_VIEW || expr->as.unary.op == AST_UNARY_MOD) {
         // In C backend, references are pointers. We take the address of the operand.
         if (fprintf(out, "(&(") < 0) return false;
-        if (!emit_expr(ctx, expr->as.unary.operand, out)) return false;
+        if (!emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY)) return false;
         return fprintf(out, "))") >= 0;
       }
       fprintf(stderr, "error: C backend unsupported unary operator\n");
@@ -764,7 +772,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
       if (fprintf(out, "__extension__ ({ %s __match%zu = ", match_type, temp_id) < 0) {
         return false;
       }
-      if (!emit_expr(ctx, expr->as.match_expr.subject, out)) {
+      if (!emit_expr(ctx, expr->as.match_expr.subject, out, PREC_LOWEST)) {
         return false;
       }
       if (fprintf(out, "; %s __result%zu; ", res_type, temp_id) < 0) {
@@ -790,7 +798,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
           if (fprintf(out, "%s{ __result%zu = ", first ? "" : " else ", temp_id) < 0) {
             return false;
           }
-          if (!emit_expr(ctx, arm->value, out)) {
+          if (!emit_expr(ctx, arm->value, out, PREC_LOWEST)) {
             return false;
           }
           if (fprintf(out, "; } ") < 0) {
@@ -806,7 +814,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
               return false;
             }
           }
-          if (!emit_expr(ctx, arm->pattern, out)) {
+          if (!emit_expr(ctx, arm->pattern, out, PREC_LOWEST)) {
             return false;
           }
           if (use_string) {
@@ -818,7 +826,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
               return false;
             }
           }
-          if (!emit_expr(ctx, arm->value, out)) {
+          if (!emit_expr(ctx, arm->value, out, PREC_LOWEST)) {
             return false;
           }
           if (fprintf(out, "; } ") < 0) {
@@ -845,7 +853,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
           }
       }
       
-      if (!emit_expr(ctx, expr->as.member.object, out)) return false;
+      if (!emit_expr(ctx, expr->as.member.object, out, PREC_CALL)) return false;
       return fprintf(out, "%s%.*s", sep, (int)expr->as.member.member.len, expr->as.member.member.data) >= 0;
     }
     case AST_EXPR_OBJECT: {
@@ -858,7 +866,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
       const AstObjectField* field = expr->as.object_literal.fields;
       while (field) {
         if (fprintf(out, ".%.*s = ", (int)field->name.len, field->name.data) < 0) return false;
-        if (!emit_expr(ctx, field->value, out)) return false;
+        if (!emit_expr(ctx, field->value, out, PREC_LOWEST)) return false;
         field = field->next;
         if (field) {
           if (fprintf(out, ", ") < 0) return false;
@@ -875,7 +883,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
       current = expr->as.list;
       while (current) {
         fprintf(out, "rae_list_add(_l, ");
-        if (!emit_expr(ctx, current->value, out)) return false;
+        if (!emit_expr(ctx, current->value, out, PREC_LOWEST)) return false;
         fprintf(out, "); ");
         current = current->next;
       }
@@ -884,9 +892,9 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     }
     case AST_EXPR_INDEX: {
       fprintf(out, "rae_list_get(");
-      if (!emit_expr(ctx, expr->as.index.target, out)) return false;
+      if (!emit_expr(ctx, expr->as.index.target, out, PREC_LOWEST)) return false;
       fprintf(out, ", ");
-      if (!emit_expr(ctx, expr->as.index.index, out)) return false;
+      if (!emit_expr(ctx, expr->as.index.index, out, PREC_LOWEST)) return false;
       fprintf(out, ")");
       return true;
     }
@@ -913,21 +921,20 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         }
         
         if (needs_addr) fprintf(out, "&(");
-        if (!emit_expr(ctx, receiver, out)) { if(free_me) free(free_me); return false; }
+        if (!emit_expr(ctx, receiver, out, PREC_LOWEST)) { if(free_me) free(free_me); return false; }
         if (needs_addr) fprintf(out, ")");
 
         const AstCallArg* arg = expr->as.method_call.args;
         while (arg) {
           fprintf(out, ", ");
-          if (!emit_expr(ctx, arg->value, out)) { if(free_me) free(free_me); return false; }
+          if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) { if(free_me) free(free_me); return false; }
           arg = arg->next;
         }
         fprintf(out, ")");
         if (free_me) free(free_me);
         return true;
       }
-      fprintf(stderr, "warning: C backend fallback for method call '%.*s'\n", (int)method.len, method.data);
-      return fprintf(out, "NULL /* Unsupported method call */") >= 0;
+      return false;
     }
     case AST_EXPR_COLLECTION_LITERAL: {
       uint16_t element_count = 0;
@@ -948,7 +955,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
           if (current->key) {
             fprintf(out, ".%.*s = ", (int)current->key->len, current->key->data);
           }
-          if (!emit_expr(ctx, current->value, out)) return false;
+          if (!emit_expr(ctx, current->value, out, PREC_LOWEST)) return false;
           if (current->next) fprintf(out, ", ");
           current = current->next;
         }
@@ -960,7 +967,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
       current = expr->as.collection.elements;
       while (current) {
         fprintf(out, "rae_list_add(_l, ");
-        if (!emit_expr(ctx, current->value, out)) return false;
+        if (!emit_expr(ctx, current->value, out, PREC_LOWEST)) return false;
         fprintf(out, "); ");
         current = current->next;
       }
@@ -975,7 +982,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
 static bool emit_call(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
   if (expr->kind == AST_EXPR_METHOD_CALL) {
       if (fprintf(out, "  ") < 0) return false;
-      if (!emit_expr(ctx, expr, out)) return false;
+      if (!emit_expr(ctx, expr, out, PREC_LOWEST)) return false;
       return fprintf(out, ";\n") >= 0;
   }
   
@@ -991,7 +998,7 @@ static bool emit_call(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
   }
 
   if (fprintf(out, "  ") < 0) return false;
-  if (!emit_expr(ctx, expr, out)) {
+  if (!emit_expr(ctx, expr, out, PREC_LOWEST)) {
     return false;
   }
   if (fprintf(out, ";\n") < 0) {
@@ -1023,7 +1030,7 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
       if (fprintf(out, "  return ") < 0) {
         return false;
       }
-      if (!emit_expr(ctx, arg->value, out)) {
+      if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) {
         return false;
       }
       return fprintf(out, ";\n") >= 0;
@@ -1065,7 +1072,7 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                           if (fprintf(out, "&(") < 0) return false;
                       }
                 
-                      if (!emit_expr(ctx, stmt->as.def_stmt.value, out)) {
+                      if (!emit_expr(ctx, stmt->as.def_stmt.value, out, PREC_LOWEST)) {
                         return false;
                       }
                       
@@ -1115,7 +1122,7 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
       if (is_ptr && !stmt->as.assign_stmt.is_bind) {
           fprintf(out, "(*%.*s)", (int)stmt->as.assign_stmt.target->as.ident.len, stmt->as.assign_stmt.target->as.ident.data);
       } else {
-          if (!emit_expr(ctx, stmt->as.assign_stmt.target, out)) return false;
+          if (!emit_expr(ctx, stmt->as.assign_stmt.target, out, PREC_ASSIGN)) return false;
       }
       
       if (fprintf(out, " = ") < 0) return false;
@@ -1135,7 +1142,7 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
       if (val_needs_addr) {
           if (fprintf(out, "&(") < 0) return false;
       }
-      if (!emit_expr(ctx, stmt->as.assign_stmt.value, out)) return false;
+      if (!emit_expr(ctx, stmt->as.assign_stmt.value, out, PREC_LOWEST)) return false;
       if (val_needs_addr) {
           if (fprintf(out, ")") < 0) return false;
       }
@@ -1337,7 +1344,7 @@ static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
   if (fprintf(out, "  if (") < 0) {
     return false;
   }
-  if (!emit_expr(ctx, stmt->as.if_stmt.condition, out)) {
+  if (!emit_expr(ctx, stmt->as.if_stmt.condition, out, PREC_LOWEST)) {
     return false;
   }
   if (fprintf(out, ") {\n") < 0) {
@@ -1391,7 +1398,7 @@ static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
 
   if (fprintf(out, "  while (") < 0) return false;
   if (stmt->as.loop_stmt.condition) {
-    if (!emit_expr(ctx, stmt->as.loop_stmt.condition, out)) return false;
+    if (!emit_expr(ctx, stmt->as.loop_stmt.condition, out, PREC_LOWEST)) return false;
   } else {
     if (fprintf(out, "1") < 0) return false;
   }
@@ -1407,7 +1414,7 @@ static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
 
   if (stmt->as.loop_stmt.increment) {
     if (fprintf(out, "  ") < 0) return false;
-    if (!emit_expr(ctx, stmt->as.loop_stmt.increment, out)) return false;
+    if (!emit_expr(ctx, stmt->as.loop_stmt.increment, out, PREC_LOWEST)) return false;
     if (fprintf(out, ";\n") < 0) return false;
   }
 
@@ -1491,7 +1498,7 @@ static bool emit_match(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
   } else {
     if (fprintf(out, "  int64_t __match%zu = ", temp_id) < 0) return false;
   }
-  if (!emit_expr(ctx, stmt->as.match_stmt.subject, out)) {
+  if (!emit_expr(ctx, stmt->as.match_stmt.subject, out, PREC_LOWEST)) {
     return false;
   }
   if (fprintf(out, ";\n") < 0) {
@@ -1520,7 +1527,7 @@ static bool emit_match(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
         return false;
       }
     }
-    if (!emit_expr(ctx, current->pattern, out)) {
+    if (!emit_expr(ctx, current->pattern, out, PREC_LOWEST)) {
       return false;
     }
     if (use_string) {
