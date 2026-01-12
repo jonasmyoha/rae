@@ -140,9 +140,14 @@ static CallFrame* vm_current_frame(VM* vm) {
 
 VMResult vm_run(VM* vm, Chunk* chunk) {
   if (!vm || !chunk) return VM_RUNTIME_ERROR;
+  
+  bool is_resume = (vm->chunk == chunk && vm->ip >= chunk->code && vm->ip < chunk->code + chunk->code_count);
   vm->chunk = chunk;
-  vm->ip = chunk->code;
-  vm->start_time = time(NULL);
+  
+  if (!is_resume) {
+      vm->ip = chunk->code;
+      vm->start_time = time(NULL);
+  }
 
   for (;;) {
     if (vm->reload_requested) {
