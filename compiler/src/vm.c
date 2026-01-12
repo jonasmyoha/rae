@@ -145,6 +145,10 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
   vm->start_time = time(NULL);
 
   for (;;) {
+    if (vm->reload_requested) {
+        return VM_RUNTIME_RELOAD;
+    }
+    
     if (vm->timeout_seconds > 0) {
         if (time(NULL) - vm->start_time >= vm->timeout_seconds) {
             return VM_RUNTIME_TIMEOUT;

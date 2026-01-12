@@ -50,7 +50,8 @@ typedef enum {
 typedef enum {
   VM_RUNTIME_OK = 0,
   VM_RUNTIME_ERROR,
-  VM_RUNTIME_TIMEOUT
+  VM_RUNTIME_TIMEOUT,
+  VM_RUNTIME_RELOAD
 } VMResult;
 
 typedef struct {
@@ -71,11 +72,16 @@ typedef struct VM {
   VmRegistry* registry;
   int timeout_seconds;
   time_t start_time;
+  
+  // Hot-Reload State
+  volatile bool reload_requested;
+  char pending_reload_path[1024]; // Path of the changed file
 } VM;
 
 void vm_init(VM* vm);
 VMResult vm_run(VM* vm, Chunk* chunk);
 void vm_reset_stack(VM* vm);
 void vm_set_registry(VM* vm, VmRegistry* registry);
+bool vm_hot_patch(VM* vm, Chunk* new_chunk);
 
 #endif /* VM_H */

@@ -24,6 +24,9 @@ void chunk_init(Chunk* chunk) {
   chunk->constants = NULL;
   chunk->constants_count = 0;
   chunk->constants_capacity = 0;
+  chunk->functions = NULL;
+  chunk->functions_count = 0;
+  chunk->functions_capacity = 0;
 }
 
 void chunk_free(Chunk* chunk) {
@@ -31,9 +34,13 @@ void chunk_free(Chunk* chunk) {
   for (size_t i = 0; i < chunk->constants_count; ++i) {
     value_free(&chunk->constants[i]);
   }
+  for (size_t i = 0; i < chunk->functions_count; ++i) {
+    free(chunk->functions[i].name);
+  }
   free(chunk->code);
   free(chunk->lines);
   free(chunk->constants);
+  free(chunk->functions);
   chunk_init(chunk);
 }
 
@@ -63,4 +70,17 @@ uint16_t chunk_add_constant(Chunk* chunk, Value value) {
   chunk->constants[chunk->constants_count] = value;
   chunk->constants_count += 1;
   return (uint16_t)(chunk->constants_count - 1);
+}
+
+void chunk_add_function_info(Chunk* chunk, const char* name, size_t offset) {
+  if (!chunk || !name) return;
+  if (chunk->functions_count + 1 > chunk->functions_capacity) {
+    size_t old_capacity = chunk->functions_capacity;
+    size_t new_capacity = old_capacity < 8 ? 8 : old_capacity * 2;
+    chunk->functions = grow_array(chunk->functions, sizeof(FunctionDebugInfo), old_capacity, new_capacity);
+    chunk->functions_capacity = new_capacity;
+  }
+  chunk->functions[chunk->functions_count].name = strdup(name);
+  chunk->functions[chunk->functions_count].offset = offset;
+  chunk->functions_count += 1;
 }
