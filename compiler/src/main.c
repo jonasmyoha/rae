@@ -29,6 +29,8 @@
 #include "vm_registry.h"
 #include "vm_raylib.h"
 #include "vm_tinyexpr.h"
+#include "raepack.h"
+#include "sys_thread.h"
 
 typedef struct {
   const char* input_path;
@@ -475,7 +477,6 @@ typedef struct {
 static void watch_state_init(WatchState* state, const char* fallback_path);
 static void watch_state_free(WatchState* state);
 static bool watch_state_apply_sources(WatchState* state, WatchSources* new_sources);
-static const char* watch_state_wait_for_change(WatchState* state);
 static int run_vm_file(const RunOptions* run_opts, const char* project_root);
 static int run_compiled_file(const RunOptions* run_opts, const char* project_root);
 static int run_vm_watch(const RunOptions* run_opts, const char* project_root);
@@ -2908,14 +2909,37 @@ static const char* watch_state_poll_change(WatchState* state) {
   return NULL;
 }
 
-static const char* watch_state_wait_for_change(WatchState* state) {
-  for (;;) {
-    sleep(1);
-    const char* changed = watch_state_poll_change(state);
-    if (changed) {
-      return changed;
+typedef struct {
+    WatchState* state;
+    VM* vm;
+    sys_mutex_t mutex;
+    volatile bool running;
+    volatile bool change_detected;
+} WatcherContext;
+
+static void* watch_thread_func(void* arg) {
+    WatcherContext* ctx = (WatcherContext*)arg;
+    while (ctx->running) {
+        sys_sleep_ms(250); // Poll every 250ms
+        
+        sys_mutex_lock(&ctx->mutex);
+        if (ctx->change_detected) {
+            sys_mutex_unlock(&ctx->mutex);
+            continue; // Waiting for main thread to handle it
+        }
+        
+        const char* changed = watch_state_poll_change(ctx->state);
+        if (changed) {
+            printf("[watch] change detected in %s\n", changed);
+            ctx->change_detected = true;
+            if (ctx->vm) {
+                ctx->vm->reload_requested = true;
+                strncpy(ctx->vm->pending_reload_path, changed, sizeof(ctx->vm->pending_reload_path) - 1);
+            }
+        }
+        sys_mutex_unlock(&ctx->mutex);
     }
-  }
+    return NULL;
 }
 
 static int run_vm_watch(const RunOptions* run_opts, const char* project_root) {
@@ -2931,69 +2955,234 @@ static int run_vm_watch(const RunOptions* run_opts, const char* project_root) {
     vm_registry_free(&registry);
     return 1;
   }
-  int exit_code = 0;
-  int reload_count = 0;
-  bool has_hash = false;
-  uint64_t last_hash = 0;
+  
   WatchState watch_state;
   watch_state_init(&watch_state, file_path);
 
-  for (;;) {
-    uint64_t file_hash = 0;
-    Chunk chunk;
-    WatchSources new_sources;
-    watch_sources_init(&new_sources);
-    if (!compile_file_chunk(file_path, &chunk, &file_hash, &new_sources, project_root)) {
-      fprintf(stderr, "[watch] compile failed. Waiting for changes...\n");
-    } else {
-      if (!watch_state_apply_sources(&watch_state, &new_sources)) {
-        fprintf(stderr,
-                "[watch] warning: failed to update watch list; changes in helper files may be "
-                "missed until the next successful run.\n");
-      }
-      if (has_hash && file_hash == last_hash) {
-        chunk_free(&chunk);
-        printf("[watch] no code changes detected.\n");
-        fflush(stdout);
-      } else {
-        has_hash = true;
-        last_hash = file_hash;
-        vm_registry_reload(&registry, file_path, chunk);
-        VmModule* module = vm_registry_find(&registry, file_path);
-        if (module) {
-          VM* vm = malloc(sizeof(VM));
-          if (!vm) {
-            fprintf(stderr, "error: could not allocate VM\n");
-          } else {
-            vm_init(vm);
-            vm->timeout_seconds = run_opts->timeout;
-            vm_set_registry(vm, &registry);
-            reload_count += 1;
-            printf("[watch] running latest version... (reload #%d)\n", reload_count);
-            fflush(stdout);
-            tick_counter.next = 0;
-            VMResult result = vm_run(vm, &module->chunk);
-            if (result == VM_RUNTIME_TIMEOUT) {
-                fprintf(stderr, "info: [watch] execution timed out after %d seconds\n", run_opts->timeout);
-            } else if (result != VM_RUNTIME_OK) {
-              exit_code = 1;
-            }
-            free(vm);
-          }
-        }
-      }
-    }
-    watch_sources_clear(&new_sources);
 
-    const char* changed_path = watch_state_wait_for_change(&watch_state);
-    if (!changed_path) {
-      changed_path = file_path;
-    }
-    printf("[watch] change detected in %s. Recompiling...\n", changed_path);
-    fflush(stdout);
+
+  WatcherContext ctx;
+
+  ctx.state = &watch_state;
+
+  ctx.vm = NULL;
+
+  ctx.running = true;
+
+  ctx.change_detected = false;
+
+  sys_mutex_init(&ctx.mutex);
+
+
+
+  sys_thread_t watch_thread;
+
+  if (!sys_thread_create(&watch_thread, watch_thread_func, &ctx)) {
+
+      fprintf(stderr, "error: failed to create watcher thread\n");
+
+      return 1;
+
   }
 
+
+
+  // Initial compilation
+
+  Chunk chunk;
+
+  uint64_t file_hash = 0;
+
+  WatchSources sources;
+
+  watch_sources_init(&sources);
+
+  
+
+  if (!compile_file_chunk(file_path, &chunk, &file_hash, &sources, project_root)) {
+
+      fprintf(stderr, "error: initial compilation failed\n");
+
+      ctx.running = false;
+
+      sys_thread_join(watch_thread);
+
+      sys_mutex_destroy(&ctx.mutex);
+
+      return 1;
+
+  }
+
+  
+
+  watch_state_apply_sources(&watch_state, &sources);
+
+  vm_registry_load(&registry, file_path, chunk); // Takes ownership of chunk code
+
+  
+
+  VM* vm = malloc(sizeof(VM));
+
+  if (!vm) {
+
+      fprintf(stderr, "error: could not allocate VM\n");
+
+      return 1;
+
+  }
+
+  vm_init(vm);
+
+  vm->timeout_seconds = run_opts->timeout;
+
+  vm_set_registry(vm, &registry);
+
+  
+
+  // Link VM to watcher
+
+  sys_mutex_lock(&ctx.mutex);
+
+  ctx.vm = vm;
+
+  sys_mutex_unlock(&ctx.mutex);
+
+
+
+  printf("[watch] VM started. PID: %d\n", getpid());
+
+
+
+  int exit_code = 0;
+
+  for (;;) {
+
+      VmModule* module = vm_registry_find(&registry, file_path);
+
+      if (!module) break;
+
+
+
+      VMResult result = vm_run(vm, &module->chunk);
+
+      
+
+      if (result == VM_RUNTIME_RELOAD) {
+
+          printf("[watch] Hot-reload requested! Patching...\n");
+
+          
+
+          Chunk new_chunk;
+
+          chunk_init(&new_chunk);
+
+          uint64_t new_hash = 0;
+
+          WatchSources new_sources;
+
+          watch_sources_init(&new_sources);
+
+          
+
+          if (compile_file_chunk(file_path, &new_chunk, &new_hash, &new_sources, project_root)) {
+
+              sys_mutex_lock(&ctx.mutex);
+
+              bool patched = vm_hot_patch(vm, &new_chunk);
+
+              vm->reload_requested = false;
+
+              sys_mutex_unlock(&ctx.mutex);
+
+              
+
+              if (patched) {
+
+                  printf("[watch] Hot-patch successful.\n");
+
+                  chunk_free(&new_chunk); // Code copied to VM
+
+                  watch_state_apply_sources(&watch_state, &new_sources);
+
+                  
+
+                  // Clear change flag
+
+                  sys_mutex_lock(&ctx.mutex);
+
+                  ctx.change_detected = false;
+
+                  sys_mutex_unlock(&ctx.mutex);
+
+                  
+
+                  continue; // Resume VM
+
+              } else {
+
+                  printf("[watch] Hot-patch failed. Resuming old code.\n");
+
+                  chunk_free(&new_chunk);
+
+              }
+
+          } else {
+
+              printf("[watch] Recompilation failed. Resuming old code.\n");
+
+              vm->reload_requested = false;
+
+          }
+
+          watch_sources_clear(&new_sources);
+
+          
+
+          sys_mutex_lock(&ctx.mutex);
+
+          ctx.change_detected = false;
+
+          sys_mutex_unlock(&ctx.mutex);
+
+          
+
+      } else {
+
+          if (result == VM_RUNTIME_TIMEOUT) {
+
+             fprintf(stderr, "info: [watch] execution timed out\n");
+
+          } else if (result != VM_RUNTIME_OK) {
+
+             fprintf(stderr, "info: [watch] execution error\n");
+
+             exit_code = 1;
+
+          }
+
+          break; // Exit loop on normal exit or error
+
+      }
+
+  }
+
+
+
+  // Cleanup
+
+  ctx.running = false;
+
+  sys_thread_join(watch_thread);
+
+  sys_mutex_destroy(&ctx.mutex);
+
+  free(vm);
+
   vm_registry_free(&registry);
+
   watch_state_free(&watch_state);
+
   return exit_code;
+
 }

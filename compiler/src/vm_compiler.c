@@ -1624,6 +1624,12 @@ static bool compile_function(BytecodeCompiler* compiler, const AstDecl* decl) {
     return false;
   }
   entry->offset = (uint16_t)compiler->chunk->code_count;
+  
+  char* func_name = str_to_cstr(func->name);
+  if (func_name) {
+      chunk_add_function_info(compiler->chunk, func_name, (size_t)entry->offset);
+      free(func_name);
+  }
 
   compiler->current_function = func;
   compiler_reset_locals(compiler);
