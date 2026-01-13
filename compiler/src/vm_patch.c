@@ -11,7 +11,7 @@ static int get_instruction_len(uint8_t op) {
         case OP_LOG: return 1;
         case OP_LOG_S: return 1;
         case OP_CALL: return 4;
-        case OP_RETURN: return 1;
+        case OP_RETURN: return 2;
         case OP_GET_LOCAL: return 3;
         case OP_SET_LOCAL: return 3;
         case OP_ALLOC_LOCAL: return 3;
@@ -44,7 +44,7 @@ static int get_instruction_len(uint8_t op) {
         case OP_MOD_LOCAL: return 3;
         case OP_VIEW_FIELD: return 3;
         case OP_MOD_FIELD: return 3;
-        case OP_SET_LOCAL_FIELD: return 3;
+        case OP_SET_LOCAL_FIELD: return 5;
         case OP_DUP: return 1;
         default: return 1;
     }
@@ -89,6 +89,13 @@ bool vm_hot_patch(VM* vm, Chunk* new_chunk) {
     size_t cursor = 0;
     while (cursor < new_chunk->code_count) {
         uint8_t op = code_base[cursor];
+        int len = get_instruction_len(op);
+        
+        if (cursor + len > new_chunk->code_count) {
+            printf("[hot-patch] Error: Instruction relocation overflow at cursor %zu\n", cursor);
+            break;
+        }
+
         if (op == OP_CONSTANT) {
             uint16_t idx = (uint16_t)((code_base[cursor + 1] << 8) | code_base[cursor + 2]);
             idx += (uint16_t)const_offset;
@@ -100,7 +107,7 @@ bool vm_hot_patch(VM* vm, Chunk* new_chunk) {
             code_base[cursor + 1] = (target >> 8) & 0xFF;
             code_base[cursor + 2] = target & 0xFF;
         }
-        cursor += get_instruction_len(op);
+        cursor += len;
     }
     
     // 5. Install Trampolines
@@ -117,16 +124,11 @@ bool vm_hot_patch(VM* vm, Chunk* new_chunk) {
                 size_t new_addr = code_offset + new_fn->offset;
                 
                 // Write trampoline at old_fn->offset
-                // OP_JUMP (0x0A) + 2 byte target
-                // We assume function body has at least 3 bytes.
-                // If not, we overwrite next function? Dangerous.
-                // But minimal function is OP_RETURN (1 byte).
-                // Advanced Pong functions are large enough.
-                
                 old_chunk->code[old_fn->offset] = OP_JUMP;
                 old_chunk->code[old_fn->offset + 1] = (new_addr >> 8) & 0xFF;
                 old_chunk->code[old_fn->offset + 2] = new_addr & 0xFF;
                 
+                printf("[hot-patch] Patched function: %s -> offset %zu\n", old_fn->name, new_addr);
                 patched_count++;
                 break;
             }
