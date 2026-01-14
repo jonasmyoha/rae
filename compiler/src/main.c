@@ -2631,29 +2631,30 @@ static int run_command(const char* cmd, int argc, char** argv) {
                 strcpy(project_path, ".");
             }
         
-                        // Smart discovery: search upwards for the 'lib' folder to find the repo root.
-                        // This allows scripts in examples/ or tests/ to find standard library and neighboring files.
-                        char repo_root[PATH_MAX];
-                        strncpy(repo_root, project_path, sizeof(repo_root) - 1);
-                        repo_root[sizeof(repo_root) - 1] = '\0';
-                        
-                        bool found_root = false;
-                        for (int i = 0; i < 5; ++i) { // search up to 5 levels
-                            char test_lib[PATH_MAX];
-                            snprintf(test_lib, sizeof(test_lib), "%s/lib/core.rae", repo_root);
-                            if (file_exists(test_lib)) {
-                                found_root = true;
-                                break;
-                            }
-                            char* parent = strrchr(repo_root, '/');
-                            if (!parent || parent == repo_root) break;
-                            *parent = '\0';
-                        }
-                    
-                        const char* final_root = run_opts.project_path ? run_opts.project_path : (found_root ? repo_root : project_path);
-                    
-                        RunOptions adjusted_opts = run_opts;        
-                        // Use relative path for tests to match expectations
+                                    // Smart discovery: search upwards for the 'lib' folder to find the repo root.
+                                    // This allows scripts in examples/ or tests/ to find standard library and neighboring files.
+                                    char repo_root[PATH_MAX];
+                                    strncpy(repo_root, project_path, sizeof(repo_root) - 1);
+                                    repo_root[sizeof(repo_root) - 1] = '\0';
+                                    
+                                    bool found_root = false;
+                                    for (int i = 0; i < 5; ++i) { // search up to 5 levels
+                                        char test_lib[PATH_MAX];
+                                        snprintf(test_lib, sizeof(test_lib), "%s/lib/core.rae", repo_root);
+                                        if (file_exists(test_lib)) {
+                                            found_root = true;
+                                            break;
+                                        }
+                                        char* parent = strrchr(repo_root, '/');
+                                        if (!parent || parent == repo_root) break;
+                                        *parent = '\0';
+                                    }
+                                
+                                        const char* final_root = run_opts.project_path ? run_opts.project_path : (found_root ? repo_root : project_path);
+                                
+                                    
+                                
+                                        RunOptions adjusted_opts = run_opts;                        // Use relative path for tests to match expectations
         
                         adjusted_opts.input_path = run_opts.input_path;
         
