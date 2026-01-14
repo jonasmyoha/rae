@@ -246,6 +246,9 @@ static const char* c_return_type(const AstFuncDecl* func) {
 static bool is_string_expr(const AstExpr* expr) {
   if (!expr) return false;
   if (expr->kind == AST_EXPR_STRING || expr->kind == AST_EXPR_INTERP) return true;
+  if (expr->kind == AST_EXPR_MEMBER) {
+      if (str_eq_cstr(expr->as.member.member, "name")) return true;
+  }
   if (expr->kind == AST_EXPR_CALL && expr->as.call.callee->kind == AST_EXPR_IDENT) {
     Str name = expr->as.call.callee->as.ident;
     if (str_eq_cstr(name, "rae_str") || str_eq_cstr(name, "rae_str_concat")) return true;
@@ -692,6 +695,28 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
           fprintf(stderr, "error: C backend does not support this binary operator yet\n");
           return false;
       }
+      if (expr->as.binary.op == AST_BIN_IS) {
+          bool use_strcmp = is_string_expr(expr->as.binary.lhs) || is_string_expr(expr->as.binary.rhs);
+          if (!use_strcmp && expr->as.binary.lhs->kind == AST_EXPR_IDENT) {
+              Str type = get_local_type_name(ctx, expr->as.binary.lhs->as.ident);
+              if (str_eq_cstr(type, "String")) use_strcmp = true;
+          }
+          
+          if (use_strcmp) {
+              if (fprintf(out, "(strcmp(") < 0) return false;
+              if (fprintf(out, "(") < 0) return false;
+              if (!emit_expr(ctx, expr->as.binary.lhs, out, prec)) return false;
+              if (fprintf(out, " ? ") < 0) return false;
+              if (!emit_expr(ctx, expr->as.binary.lhs, out, prec)) return false;
+              if (fprintf(out, " : \"\"), (") < 0) return false;
+              if (!emit_expr(ctx, expr->as.binary.rhs, out, prec)) return false;
+              if (fprintf(out, " ? ") < 0) return false;
+              if (!emit_expr(ctx, expr->as.binary.rhs, out, prec)) return false;
+              if (fprintf(out, " : \"\")) == 0)") < 0) return false;
+              return true;
+          }
+      }
+
       if (need_paren && fprintf(out, "(") < 0) return false;
       
       bool lhs_is_ptr = (expr->as.binary.lhs->kind == AST_EXPR_IDENT && is_pointer_type(ctx, expr->as.binary.lhs->as.ident));
@@ -1036,10 +1061,6 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
       return fprintf(out, ";\n") >= 0;
     }
         case AST_STMT_DEF: {
-          if (!stmt->as.def_stmt.value) {
-            fprintf(stderr, "error: C backend def statements require an initializer\n");
-            return false;
-          }
           if (ctx->local_count >= sizeof(ctx->locals) / sizeof(ctx->locals[0])) {
             fprintf(stderr, "error: C backend local limit exceeded\n");
             return false;
@@ -1052,55 +1073,56 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
               fprintf(out, "int64_t");
           }
           
-                fprintf(out, " %.*s = ", (int)stmt->as.def_stmt.name.len, stmt->as.def_stmt.name.data);
+          fprintf(out, " %.*s", (int)stmt->as.def_stmt.name.len, stmt->as.def_stmt.name.data);
+
+          if (!stmt->as.def_stmt.value) {
+              fprintf(out, " = {0}");
+          } else {
+              fprintf(out, " = ");
+              bool val_needs_addr = stmt->as.def_stmt.is_bind;
+              if (val_needs_addr) {
+                  if (stmt->as.def_stmt.value->kind == AST_EXPR_CALL || stmt->as.def_stmt.value->kind == AST_EXPR_METHOD_CALL ||
+                      stmt->as.def_stmt.value->kind == AST_EXPR_NONE) {
+                      val_needs_addr = false;
+                  } else if (stmt->as.def_stmt.value->kind == AST_EXPR_IDENT) {
+                      if (is_pointer_type(ctx, stmt->as.def_stmt.value->as.ident)) {
+                          val_needs_addr = false;
+                      }
+                  }
+              }
+              if (val_needs_addr) {
+                  if (fprintf(out, "&(") < 0) return false;
+              }
+              if (!emit_expr(ctx, stmt->as.def_stmt.value, out, PREC_LOWEST)) {
+                return false;
+              }
+              if (val_needs_addr) {
+                  if (fprintf(out, ")") < 0) return false;
+              }
+          }
           
-                            bool val_needs_addr = stmt->as.def_stmt.is_bind;
-                            if (val_needs_addr) {
-                                // If RHS is a call, it already returns a pointer (reference)
-                                if (stmt->as.def_stmt.value->kind == AST_EXPR_CALL || stmt->as.def_stmt.value->kind == AST_EXPR_METHOD_CALL ||
-                                    stmt->as.def_stmt.value->kind == AST_EXPR_NONE) {
-                                    val_needs_addr = false;
-                                }
-                                // If RHS is an identifier that is already a pointer
-                                else if (stmt->as.def_stmt.value->kind == AST_EXPR_IDENT) {                              if (is_pointer_type(ctx, stmt->as.def_stmt.value->as.ident)) {
-                                  val_needs_addr = false;
-                              }
-                          }
-                      }
-                      
-                      if (val_needs_addr) {
-                          if (fprintf(out, "&(") < 0) return false;
-                      }
-                
-                      if (!emit_expr(ctx, stmt->as.def_stmt.value, out, PREC_LOWEST)) {
-                        return false;
-                      }
-                      
-                      if (val_needs_addr) {
-                          if (fprintf(out, ")") < 0) return false;
-                      }          
-                if (fprintf(out, ";\n") < 0) {
-                  return false;
-                }          
-                      Str base_type_name = str_from_cstr("Int");
-                      bool is_ptr = false;
-                      bool is_mod = false;
-                      if (stmt->as.def_stmt.type) {
-                          is_ptr = stmt->as.def_stmt.type->is_view || stmt->as.def_stmt.type->is_mod;
-                          is_mod = stmt->as.def_stmt.type->is_mod;
-                          if (stmt->as.def_stmt.type->is_id) {
-                              base_type_name = str_from_cstr("id");
-                          } else if (stmt->as.def_stmt.type->is_key) {
-                              base_type_name = str_from_cstr("key");
-                          } else if (stmt->as.def_stmt.type->parts) {
-                              base_type_name = stmt->as.def_stmt.type->parts->text;
-                          }
-                      }          
-                ctx->locals[ctx->local_count] = stmt->as.def_stmt.name;
-                ctx->local_types[ctx->local_count] = base_type_name;
-                ctx->local_is_ptr[ctx->local_count] = is_ptr;
-                ctx->local_is_mod[ctx->local_count] = is_mod;
-                ctx->local_count++;          return true;
+          if (fprintf(out, ";\n") < 0) return false;
+
+          Str base_type_name = str_from_cstr("Int");
+          bool is_ptr = false;
+          bool is_mod = false;
+          if (stmt->as.def_stmt.type) {
+              is_ptr = stmt->as.def_stmt.type->is_view || stmt->as.def_stmt.type->is_mod;
+              is_mod = stmt->as.def_stmt.type->is_mod;
+              if (stmt->as.def_stmt.type->is_id) {
+                  base_type_name = str_from_cstr("id");
+              } else if (stmt->as.def_stmt.type->is_key) {
+                  base_type_name = str_from_cstr("key");
+              } else if (stmt->as.def_stmt.type->parts) {
+                  base_type_name = stmt->as.def_stmt.type->parts->text;
+              }
+          }
+          ctx->locals[ctx->local_count] = stmt->as.def_stmt.name;
+          ctx->local_types[ctx->local_count] = base_type_name;
+          ctx->local_is_ptr[ctx->local_count] = is_ptr;
+          ctx->local_is_mod[ctx->local_count] = is_mod;
+          ctx->local_count++;
+          return true;
         }    case AST_STMT_EXPR:
       return emit_call(ctx, stmt->as.expr_stmt, out);
     case AST_STMT_IF:

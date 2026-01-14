@@ -175,7 +175,7 @@ TypeEntry* type_table_find(TypeTable* table, Str name) {
   return NULL;
 }
 
-bool type_table_add(TypeTable* table, Str name, Str* fields, size_t field_count) {
+bool type_table_add(TypeTable* table, Str name, Str* field_names, const AstTypeRef** field_types, size_t field_count) {
   if (type_table_find(table, name)) return true;
   if (table->count + 1 > table->capacity) {
     size_t new_cap = table->capacity < 4 ? 4 : table->capacity * 2;
@@ -186,7 +186,8 @@ bool type_table_add(TypeTable* table, Str name, Str* fields, size_t field_count)
   }
   TypeEntry* entry = &table->entries[table->count++];
   entry->name = name;
-  entry->field_names = fields;
+  entry->field_names = field_names;
+  entry->field_types = field_types;
   entry->field_count = field_count;
   return true;
 }
@@ -227,18 +228,23 @@ bool collect_metadata(const char* file_path, const AstModule* module, FunctionTa
       const AstTypeField* f = decl->as.type_decl.fields;
       while (f) { field_count++; f = f->next; }
       
-      Str* fields = malloc(field_count * sizeof(Str));
+      Str* field_names = malloc(field_count * sizeof(Str));
+      const AstTypeRef** field_types = malloc(field_count * sizeof(AstTypeRef*));
       f = decl->as.type_decl.fields;
       for (size_t i = 0; i < field_count; i++) {
         if (f->type->is_view || f->type->is_mod) {
           diag_error(file_path, (int)f->type->line, (int)f->type->column, "view/mod not allowed in struct fields");
+          free(field_names);
+          free(field_types);
           return false;
         }
-        fields[i] = f->name;
+        field_names[i] = f->name;
+        field_types[i] = f->type;
         f = f->next;
       }
-      if (!type_table_add(types, decl->as.type_decl.name, fields, field_count)) {
-        free(fields);
+      if (!type_table_add(types, decl->as.type_decl.name, field_names, field_types, field_count)) {
+        free(field_names);
+        free(field_types);
         return false;
       }
     }
@@ -251,6 +257,7 @@ void free_type_table(TypeTable* table) {
   if (!table) return;
   for (size_t i = 0; i < table->count; i++) {
     free(table->entries[i].field_names);
+    free(table->entries[i].field_types);
   }
   free(table->entries);
   table->entries = NULL;
@@ -1067,16 +1074,12 @@ static const char* stmt_kind_name(AstStmtKind kind) {
   return "unknown";
 }
 
+static bool emit_default_value(BytecodeCompiler* compiler, const AstTypeRef* type, int line);
+
 static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
+  if (!stmt) return true;
   switch (stmt->kind) {
     case AST_STMT_DEF: {
-      if (!stmt->as.def_stmt.value) {
-        diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column,
-                   "VM def statements currently require an initializer");
-        compiler->had_error = true;
-        return false;
-      }
-      
       Str type_name = get_base_type_name(stmt->as.def_stmt.type);
 
       int slot = compiler_add_local(compiler, stmt->as.def_stmt.name, type_name);
@@ -1086,7 +1089,14 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
       if (!compiler_ensure_local_capacity(compiler, compiler->local_count, (int)stmt->line)) {
         return false;
       }
-      if (stmt->as.def_stmt.is_bind) {
+
+      if (!stmt->as.def_stmt.value) {
+        // Automatically initialize to default value
+        if (!emit_default_value(compiler, stmt->as.def_stmt.type, (int)stmt->line)) {
+          return false;
+        }
+        emit_op(compiler, OP_SET_LOCAL, (int)stmt->line);
+      } else if (stmt->as.def_stmt.is_bind) {
           if (!stmt->as.def_stmt.type || 
               (!stmt->as.def_stmt.type->is_view && 
                !stmt->as.def_stmt.type->is_mod && 
@@ -1167,6 +1177,7 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
           }
           emit_op(compiler, OP_SET_LOCAL, (int)stmt->line);
       }
+      
       emit_short(compiler, (uint16_t)slot, (int)stmt->line);
       emit_op(compiler, OP_POP, (int)stmt->line);
       return true;
@@ -1688,7 +1699,7 @@ bool vm_compile_module(const AstModule* module, Chunk* chunk, const char* file_p
     if (!emit_function_call(&compiler, main_entry, 0, 0, 0)) {
       compiler.had_error = true;
     } else {
-      emit_op(&compiler, OP_POP, 0); // Pop return value of main
+      emit_op(&compiler, OP_POP, 0);
       emit_return(&compiler, false, 0);
     }
   }
@@ -1712,7 +1723,59 @@ bool vm_compile_module(const AstModule* module, Chunk* chunk, const char* file_p
   if (compiler.had_error) {
     chunk_free(chunk);
   }
+  
+  bool success = !compiler.had_error;
   free_function_table(&compiler.functions);
   free_type_table(&compiler.types);
-  return !compiler.had_error;
+  // Method table free not yet implemented but should be added when used.
+
+  return success;
+}
+
+static bool emit_default_value(BytecodeCompiler* compiler, const AstTypeRef* type, int line) {
+  if (!type || !type->parts) {
+    emit_constant(compiler, value_int(0), line);
+    return true;
+  }
+
+  Str type_name = type->parts->text;
+  if (type->is_view || type->is_mod) {
+    diag_error(compiler->file_path, line, 0, "references must be explicitly initialized");
+    return false;
+  }
+
+  if (str_eq_cstr(type_name, "Int")) {
+    emit_constant(compiler, value_int(0), line);
+  } else if (str_eq_cstr(type_name, "Float")) {
+    emit_constant(compiler, value_float(0.0), line);
+  } else if (str_eq_cstr(type_name, "Bool")) {
+    emit_constant(compiler, value_bool(false), line);
+  } else if (str_eq_cstr(type_name, "String")) {
+    emit_constant(compiler, value_string_copy("", 0), line);
+  } else if (str_eq_cstr(type_name, "Char")) {
+    emit_constant(compiler, value_int(0), line);
+  } else if (str_eq_cstr(type_name, "List") || str_eq_cstr(type_name, "Array")) {
+    emit_op(compiler, OP_NATIVE_CALL, line);
+    emit_short(compiler, chunk_add_constant(compiler->chunk, value_string_copy("rae_list_create", 15)), line);
+    emit_constant(compiler, value_int(0), line);
+    emit_byte(compiler, 1, line);
+  } else {
+    TypeEntry* entry = type_table_find(&compiler->types, type_name);
+    if (!entry) {
+      char buf[128];
+      snprintf(buf, sizeof(buf), "unknown type '%.*s' for default initialization", (int)type_name.len, type_name.data);
+      diag_error(compiler->file_path, line, 0, buf);
+      return false;
+    }
+
+    for (size_t i = 0; i < entry->field_count; i++) {
+      if (!emit_default_value(compiler, entry->field_types[i], line)) {
+        return false;
+      }
+    }
+    emit_op(compiler, OP_CONSTRUCT, line);
+    emit_short(compiler, (uint16_t)entry->field_count, line);
+  }
+
+  return true;
 }

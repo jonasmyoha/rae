@@ -177,6 +177,7 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
           printf("\n");
         }
         fflush(stdout);
+        value_free(&value);
         break;
       }
       case OP_JUMP: {
@@ -663,9 +664,12 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         }
         break;
       }
-      default:
-        diag_error(NULL, 0, 0, "unknown opcode encountered in VM");
+      default: {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "unknown opcode 0x%02X encountered in VM at offset %zu", instruction, (size_t)(vm->ip - vm->chunk->code - 1));
+        diag_error(NULL, 0, 0, buf);
         return VM_RUNTIME_ERROR;
+      }
     }
   }
 }
