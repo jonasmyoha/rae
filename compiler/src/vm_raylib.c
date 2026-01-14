@@ -96,7 +96,14 @@ static bool native_drawCircle(struct VM* vm, VmNativeResult* out, const Value* a
 static bool native_drawText(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
     if (count != 8) return false;
-    const char* text = args[0].as.string_value.chars;
+    
+    const char* text = "???";
+    if (args[0].type == VAL_STRING) {
+        text = args[0].as.string_value.chars;
+    } else {
+        fprintf(stderr, "error: drawText expects string, got type %d\n", args[0].type);
+    }
+
     int x = (args[1].type == VAL_FLOAT) ? (int)args[1].as.float_value : (int)args[1].as.int_value;
     int y = (args[2].type == VAL_FLOAT) ? (int)args[2].as.float_value : (int)args[2].as.int_value;
     int size = (args[3].type == VAL_FLOAT) ? (int)args[3].as.float_value : (int)args[3].as.int_value;
