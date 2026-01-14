@@ -1424,12 +1424,14 @@ static AstStmt* parse_def_statement(Parser* parser, const Token* def_token) {
   stmt->as.def_stmt.type = parse_type_ref(parser);
   if (parser_match(parser, TOK_ASSIGN)) {
     stmt->as.def_stmt.is_bind = false;
+    stmt->as.def_stmt.value = parse_expression(parser);
   } else if (parser_match(parser, TOK_ARROW)) {
     stmt->as.def_stmt.is_bind = true;
+    stmt->as.def_stmt.value = parse_expression(parser);
   } else {
-    parser_error(parser, parser_peek(parser), "expected '=' or '=>' in definition");
+    stmt->as.def_stmt.is_bind = false;
+    stmt->as.def_stmt.value = NULL;
   }
-  stmt->as.def_stmt.value = parse_expression(parser);
   return stmt;
 }
 static AstStmt* parse_return_statement(Parser* parser, const Token* ret_token) {
