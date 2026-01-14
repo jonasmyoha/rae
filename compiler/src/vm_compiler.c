@@ -933,6 +933,13 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
     }
     case AST_EXPR_METHOD_CALL: {
       Str method_name = expr->as.method_call.method_name;
+      
+      // Handle built-in toString() for all types
+      if (str_eq_cstr(method_name, "toString")) {
+          if (!compile_expr(compiler, expr->as.method_call.object)) return false;
+          return emit_native_call(compiler, str_from_cstr("rae_str"), 1, (int)expr->line, (int)expr->column);
+      }
+
       FunctionEntry* entry = NULL;
       uint16_t explicit_args_count = 0;
 
@@ -951,7 +958,7 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
               // For sugar, we'll try searching for "method" first.
               entry = function_table_find(&compiler->functions, method_name);
               
-              // If not found, try common list methods
+              // If not found, try common built-ins
               if (!entry) {
                 if (str_eq_cstr(method_name, "add")) entry = function_table_find(&compiler->functions, str_from_cstr("rae_list_add"));
                 else if (str_eq_cstr(method_name, "length")) entry = function_table_find(&compiler->functions, str_from_cstr("rae_list_length"));
