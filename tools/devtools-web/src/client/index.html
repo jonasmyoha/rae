@@ -9,11 +9,17 @@
   <body>
     <header class="app-header">
       <nav class="app-nav" role="tablist" aria-label="Primary views">
+        <button class="app-nav__item" type="button" role="tab" aria-selected="false" data-view-target="why">
+          Why?
+        </button>
         <button class="app-nav__item is-active" type="button" role="tab" aria-selected="true" data-view-target="compiler">
           Compiler
         </button>
         <button class="app-nav__item" type="button" role="tab" aria-selected="false" data-view-target="statistics">
           Statistics
+        </button>
+        <button class="app-nav__item" type="button" role="tab" aria-selected="false" data-view-target="showcase">
+          Showcase
         </button>
       </nav>
 
@@ -42,6 +48,55 @@
       </div>
     </header>
     <main class="app-main">
+      <div class="app-view" data-view="why">
+        <section class="panel panel--full why-view">
+          <div class="marketing-hero">
+            <h2 class="marketing-title">The <strong>Live</strong> Language for Creative Systems.</h2>
+            <p class="marketing-subtitle">Rae combines the safety of modern reference models with the raw performance of C, built from the ground up for hot-reloading and systems that never stop.</p>
+          </div>
+          
+          <div class="feature-grid">
+            <article class="feature-card feature-card--highlight">
+              <div class="feature-card__icon">⚡</div>
+              <h3>Instant Hot-Reload</h3>
+              <p>Patch logic, tweak UI values, and swap functions in a running process. The Rae VM preserves your application state so you can iterate at the speed of thought.</p>
+            </article>
+            <article class="feature-card">
+              <div class="feature-card__icon">🛡️</div>
+              <h3>Zero-Cost Safety</h3>
+              <p>Explicit <code>view</code> and <code>mod</code> references. No garbage collection, no hidden pointers. Compile-time lifetime checks ensure your aliases never escape their scope.</p>
+            </article>
+            <article class="feature-card">
+              <div class="feature-card__icon">⚙️</div>
+              <h3>Explicit Semantics</h3>
+              <p>No implicit moves or magic sharing. <code>=</code> always copies. <code>=></code> always binds. Predictable performance for systems where every microsecond counts.</p>
+            </article>
+            <article class="feature-card">
+              <div class="feature-card__icon">🏗️</div>
+              <h3>Native C Backend</h3>
+              <p>Rae compiles to clean, readable C11. Use existing C libraries effortlessly and deploy to any platform that has a C compiler.</p>
+            </article>
+          </div>
+
+          <div class="why-examples">
+            <div class="example-column">
+              <h3 class="marketing-label">Memory Control</h3>
+              <p class="example-desc">Fine-grained control over aliasing and copying without the boilerplate.</p>
+              <div class="code-box">
+                <pre class="source-code" id="why-example-references"><code></code></pre>
+              </div>
+            </div>
+            <div class="example-column">
+              <h3 class="marketing-label">Reactive Logic</h3>
+              <p class="example-desc">Perfect for ECS-based games and interactive simulations.</p>
+              <div class="code-box">
+                <pre class="source-code" id="why-example-logic"><code></code></pre>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
       <div class="app-view is-active" data-view="compiler">
         <section class="panel panel--full" id="build-panel">
         <header class="panel-header">
@@ -361,6 +416,45 @@
           <ul class="stats-list stats-list--compact" id="line-count-history">
             <li class="stats-empty">No snapshots recorded yet.</li>
           </ul>
+        </section>
+      </div>
+      <div class="app-view" data-view="showcase">
+        <section class="panel panel--full showcase-view">
+          <header class="showcase-header">
+            <div class="showcase-header__text">
+              <h2 class="marketing-title">Project <strong>Showcase</strong>.</h2>
+              <p class="marketing-subtitle">Explore complex Rae implementations and see the power of hot-reloading.</p>
+            </div>
+            <div class="showcase-header__actions">
+              <button id="showcase-watch-btn" class="btn-live">
+                <span class="btn-live__pulse"></span>
+                <svg aria-hidden="true" viewBox="0 0 24 24" role="img" class="icon">
+                  <path d="M8 5v14l11-7z"></path>
+                </svg>
+                Watch Live
+              </button>
+            </div>
+          </header>
+
+          <div class="project-browser">
+            <aside class="project-browser__sidebar">
+              <div class="sidebar-label">Advanced Pong</div>
+              <nav class="file-tree" id="showcase-file-list">
+                <!-- Populated via JS -->
+              </nav>
+            </aside>
+            <main class="project-browser__content">
+              <header class="file-header">
+                <div class="file-info">
+                  <span class="file-icon">📄</span>
+                  <h3 id="showcase-source-title">Select a file</h3>
+                </div>
+              </header>
+              <div class="source-viewport">
+                <pre class="source-code" id="showcase-source-code"><code># Select a file from the sidebar to view its logic</code></pre>
+              </div>
+            </main>
+          </div>
         </section>
       </div>
     </main>

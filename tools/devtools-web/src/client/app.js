@@ -70,6 +70,57 @@ const exampleDownloadsSection = document.getElementById("example-downloads");
 const exampleDownloadsList = document.getElementById("example-downloads-list");
 const exampleDownloadsHint = document.getElementById("example-downloads-hint");
 
+// New View Elements
+const whyExampleReferences = document.getElementById("why-example-references");
+const whyExampleLogic = document.getElementById("why-example-logic");
+const showcaseFileList = document.getElementById("showcase-file-list");
+const showcaseSourceTitle = document.getElementById("showcase-source-title");
+const showcaseSourceCode = document.getElementById("showcase-source-code");
+const showcaseWatchBtn = document.getElementById("showcase-watch-btn");
+
+const WHY_EXAMPLES = {
+  references: `# Explicit references and binding
+type Player {
+  name: String
+  pos: { x: Float, y: Float }
+}
+
+func updatePosition(p: mod Player, dx: Float, dy: Float) {
+  # mod Player is a modifiable reference
+  p.pos.x = p.pos.x + dx
+  p.pos.y = p.pos.y + dy
+}
+
+func main() {
+  def p: Player = { name: "Rae", pos: { x: 0.0, y: 0.0 } }
+  
+  # Binding (=>) creates an alias, no copy
+  def p_ref: mod Player => p
+  updatePosition(p: p_ref, dx: 10.0, dy: 5.0)
+  
+  # Assignment (=) always deep copies
+  def p_copy: Player = p
+}`,
+  logic: `# Clean ECS-style systems
+type Velocity {
+  dx: Float
+  dy: Float
+}
+
+func movementSystem(pos: mod Transform, vel: view Velocity) {
+  # High-performance inline updates
+  pos.x = pos.x + vel.dx
+  pos.y = pos.y + vel.dy
+}
+
+func bounceSystem(pos: view Transform, vel: mod Velocity) {
+  # Declarative logic with explicit side effects
+  if pos.y < 0.0 or pos.y > 450.0 {
+    vel.dy = -vel.dy
+  }
+}`
+};
+
 let socket;
 let reconnectTimer;
 let heartbeatTimer;
@@ -2048,8 +2099,86 @@ function setActiveView(targetView) {
     } else {
       scheduleLineChartRender();
     }
+  } else if (resolvedView === "why") {
+    renderWhyExamples();
+  } else if (resolvedView === "showcase") {
+    setupShowcase();
   }
 }
+
+function renderWhyExamples() {
+  if (whyExampleReferences) {
+    whyExampleReferences.innerHTML = `<code>${highlightRae(WHY_EXAMPLES.references)}</code>`;
+  }
+  if (whyExampleLogic) {
+    whyExampleLogic.innerHTML = `<code>${highlightRae(WHY_EXAMPLES.logic)}</code>`;
+  }
+}
+
+let showcaseLoaded = false;
+let showcaseFiles = [];
+let selectedShowcaseFile = null;
+
+async function setupShowcase() {
+  if (showcaseLoaded) return;
+  
+  if (!examples || !examples.length) {
+    await loadExamples();
+  }
+  
+  const pong = examples.find((ex) => ex.id === "advanced_pong");
+  if (!pong) {
+    if (showcaseSourceCode) showcaseSourceCode.innerHTML = "<code>Advanced Pong example not found.</code>";
+    return;
+  }
+
+  showcaseLoaded = true;
+  showcaseFiles = pong.files;
+  renderShowcaseFileList();
+
+  if (showcaseFiles.length > 0) {
+    selectShowcaseFile(showcaseFiles[0].path);
+  }
+}
+
+function renderShowcaseFileList() {
+  if (!showcaseFileList) return;
+  showcaseFileList.innerHTML = "";
+  showcaseFiles.forEach((file) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = `showcase-file-btn${selectedShowcaseFile === file.path ? " is-active" : ""}`;
+    btn.innerHTML = `<span>📄</span> ${file.name}`;
+    btn.onclick = () => selectShowcaseFile(file.path);
+    showcaseFileList.appendChild(btn);
+  });
+}
+
+async function selectShowcaseFile(path) {
+  selectedShowcaseFile = path;
+  if (showcaseSourceTitle) showcaseSourceTitle.textContent = path;
+  renderShowcaseFileList();
+
+  try {
+    const response = await fetch(`/api/examples/source?path=${encodeURIComponent(path)}`);
+    if (!response.ok) throw new Error("HTTP error");
+    const data = await response.json();
+    const contents = data.contents ?? "";
+    if (showcaseSourceCode) showcaseSourceCode.innerHTML = `<code>${highlightRae(contents)}</code>`;
+  } catch (err) {
+    if (showcaseSourceCode) showcaseSourceCode.innerHTML = "<code>Failed to load source.</code>";
+  }
+}
+
+showcaseWatchBtn?.addEventListener("click", () => {
+  const pong = examples.find((ex) => ex.id === "advanced_pong");
+  if (!pong) return;
+
+  selectedExampleId = pong.id;
+  selectedExampleFile = pong.entry;
+  setActiveView("compiler");
+  triggerExampleRun("watch", "live");
+});
 
 async function loadTestFileTree(options = {}) {
   try {
