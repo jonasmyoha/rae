@@ -44,9 +44,9 @@ const DEFAULT_TARGETS: TargetConfig[] = [
     buildCommand: "cd compiler && make",
     cleanCommand: "cd compiler && make clean",
     rebuildCommand: "cd compiler && make clean && make",
-    exampleRunCommand: "./compiler/bin/rae run {{ENTRY}}",
-    exampleWatchCommand: "./compiler/bin/rae run --watch {{ENTRY}}",
-    exampleBuildCommand: "./compiler/bin/rae build --target live --out {{OUTDIR}} {{ENTRY}}"
+    exampleRunCommand: "./compiler/bin/rae run --project {{ENTRY_DIR}} {{ENTRY}}",
+    exampleWatchCommand: "./compiler/bin/rae run --project {{ENTRY_DIR}} --watch {{ENTRY}}",
+    exampleBuildCommand: "./compiler/bin/rae build --target live --project {{ENTRY_DIR}} --out {{OUTDIR}} {{ENTRY}}"
   },
   {
     id: "compiled",
@@ -56,8 +56,8 @@ const DEFAULT_TARGETS: TargetConfig[] = [
     buildCommand: "cd compiler && make",
     cleanCommand: "cd compiler && make clean",
     rebuildCommand: "cd compiler && make clean && make",
-    exampleRunCommand: "./compiler/bin/rae build --target compiled --emit-c --out {{OUTDIR}}/out.c {{ENTRY}} && gcc -O2 -o {{OUTDIR}}/app {{OUTDIR}}/out.c {{OUTDIR}}/rae_runtime.c third_party/raylib/rae_raylib.c -I{{OUTDIR}} -Ithird_party/raylib -I/opt/homebrew/include -L/opt/homebrew/lib -lraylib -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL && {{OUTDIR}}/app",
-    exampleBuildCommand: "./compiler/bin/rae build --target compiled --emit-c --out {{OUTDIR}} {{ENTRY}}"
+    exampleRunCommand: "./compiler/bin/rae build --target compiled --project {{ENTRY_DIR}} --emit-c --out {{OUTDIR}}/out.c {{ENTRY}} && gcc -O2 -o {{OUTDIR}}/app {{OUTDIR}}/out.c {{OUTDIR}}/rae_runtime.c third_party/raylib/rae_raylib.c -I{{OUTDIR}} -Ithird_party/raylib -I/opt/homebrew/include -L/opt/homebrew/lib -lraylib -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL && {{OUTDIR}}/app",
+    exampleBuildCommand: "./compiler/bin/rae build --target compiled --project {{ENTRY_DIR}} --emit-c --out {{OUTDIR}} {{ENTRY}}"
   },
   {
     id: "hybrid",
@@ -67,8 +67,8 @@ const DEFAULT_TARGETS: TargetConfig[] = [
     buildCommand: "cd compiler && make",
     cleanCommand: "cd compiler && make clean",
     rebuildCommand: "cd compiler && make clean && make",
-    exampleRunCommand: "./compiler/bin/rae build --target hybrid --emit-c --out {{OUTDIR}} {{ENTRY}}",
-    exampleBuildCommand: "./compiler/bin/rae build --target hybrid --emit-c --out {{OUTDIR}} {{ENTRY}}"
+    exampleRunCommand: "./compiler/bin/rae build --target hybrid --project {{ENTRY_DIR}} --emit-c --out {{OUTDIR}} {{ENTRY}}",
+    exampleBuildCommand: "./compiler/bin/rae build --target hybrid --project {{ENTRY_DIR}} --emit-c --out {{OUTDIR}} {{ENTRY}}"
   }
 ];
 
