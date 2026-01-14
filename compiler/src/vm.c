@@ -208,6 +208,12 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         frame->slots = vm->stack_top - arg_count;
         frame->locals_base = frame->slots;
         frame->slot_count = arg_count;
+        
+        // Zero-initialize locals to prevent garbage values
+        for (int i = 0; i < 256; i++) {
+          frame->locals[i] = value_none();
+        }
+
         // Copy arguments to stable locals storage
         for (int i = 0; i < arg_count; i++) {
           // DON'T value_copy here, just assign.
