@@ -21,6 +21,7 @@ const viewToggleButtons = document.querySelectorAll("[data-view-target]");
 const appViews = document.querySelectorAll("[data-view]");
 const statsViewContainer = document.querySelector('[data-view="statistics"]');
 const statsViewRefreshBtn = document.getElementById("stats-view-refresh");
+const buildTestBtn = document.getElementById("build-test-btn");
 const statsTestsList = document.getElementById("stats-tests-list");
 const statsBuildsList = document.getElementById("stats-builds-list");
 const lineCountCanvas = document.getElementById("line-count-chart");
@@ -318,6 +319,8 @@ function pushStatusItem(message, timestamp = new Date().toISOString()) {
   }
 }
 
+let isBuildingAndTesting = false;
+
 pushStatusItem("Waiting for server heartbeat…");
 setHeartbeatWaiting();
 connect();
@@ -325,6 +328,11 @@ updateSummaryText();
 const defaultView =
   document.querySelector("[data-view-target].is-active")?.dataset.viewTarget ?? "compiler";
 setActiveView(defaultView);
+
+buildTestBtn?.addEventListener("click", () => {
+  isBuildingAndTesting = true;
+  requestBuildCommand("rebuild");
+});
 
 runTestsBtn?.addEventListener("click", () => requestTestRun("all"));
 document.addEventListener("keydown", (event) => {
@@ -489,6 +497,17 @@ function handleBuildRunCompleted(event) {
   );
   setBuildButtonsDisabled(false);
   latestBuildRunId = null;
+
+  if (isBuildingAndTesting) {
+    const success = event.success;
+    isBuildingAndTesting = false;
+    if (success) {
+      pushStatusItem("Build successful, starting tests…");
+      requestTestRun("all");
+    } else {
+      pushStatusItem("Build failed, skipping tests.");
+    }
+  }
 }
 
 function handleTestRunError(event) {
@@ -501,6 +520,7 @@ function handleTestRunError(event) {
 }
 
 function handleBuildRunError(event) {
+  isBuildingAndTesting = false;
   lastBuildTargetLabel = event.targetLabel;
   setBuildStatus("Error", "is-failure", event.targetLabel);
   appendBuildLine(`⚠ [${event.targetLabel}] ${event.message}`, "stderr");
@@ -711,6 +731,7 @@ function setBuildButtonsDisabled(disabled) {
   buildBtn.disabled = disabled;
   cleanBtn.disabled = disabled;
   rebuildBtn.disabled = disabled;
+  if (buildTestBtn) buildTestBtn.disabled = disabled;
 }
 
 function handleServerInfo(event) {
