@@ -94,17 +94,44 @@ func paddleInputSystem(
   }
 }
 
-func drawUISystem(p1Score: Int, p2Score: Int) {
+func drawUISystem(p1Score: Int, p2Score: Int, winner: Int) {
+  if winner <= 0 {
   drawText(
     text: "{p1Score} - {p2Score}",
     x: 350.0,
     y: 20.0,
     fontSize: 40.0,
     r: 255,
-    g: 0,
+    g: 145,
     b: 0,
     a: 255,
   )
+}
+
+  if winner is 1 {
+    drawText(
+      text: "YOU WIN",
+      x: 350.0,
+      y: 200.0,
+      fontSize: 40.0,
+      r: 255,
+      g: 145,
+      b: 0,
+      a: 255,
+    )
+  }
+  if winner is 2 {
+    drawText(
+      text: "CPU WINS",
+      x: 350.0,
+      y: 200.0,
+      fontSize: 40.0,
+      r: 255,
+      g: 145,
+      b: 0,
+      a: 255,
+    )
+  }
 }
 
 # -- Main Entry --
@@ -119,6 +146,10 @@ func main() {
   def aiState: AIState = { state: 0, timer: 0, targetY: 225.0, decision: 0 }
   def p1Score: Int = 0
   def p2Score: Int = 0
+
+  def scoreToWinMatch: Int = 3
+  def winner: Int = 0
+
   loop windowShouldClose() is 0 {
     # 1. Input Phase
     # 2. Update Phase
@@ -166,6 +197,13 @@ func main() {
       bPos.y = 225.0
       bVel.dx = -4.0
     }
+    # Check if somebody won
+    if p1Score is scoreToWinMatch {
+      winner = 1
+    }
+    if p2Score is scoreToWinMatch {
+      winner = 2
+    }
     # 3. Render Phase
     beginDrawing()
     clearBackground(
@@ -175,7 +213,7 @@ func main() {
       a: 255,
     )
     # Draw paddles
-    drawUISystem(p1Score: p1Score, p2Score: p2Score)
+    drawUISystem(p1Score: p1Score, p2Score: p2Score, winner: winner)
     drawRectangle(
       x: 20.0,
       y: p1Pos.y,
