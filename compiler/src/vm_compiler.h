@@ -28,6 +28,7 @@ typedef struct {
 typedef struct {
   Str name;
   Str* field_names;
+  const struct AstTypeRef** field_types;
   size_t field_count;
 } TypeEntry;
 
@@ -75,7 +76,7 @@ void free_function_table(FunctionTable* table);
 void free_type_table(TypeTable* table);
 FunctionEntry* function_table_find(FunctionTable* table, Str name);
 TypeEntry* type_table_find(TypeTable* table, Str name);
-bool type_table_add(TypeTable* table, Str name, Str* fields, size_t field_count);
+bool type_table_add(TypeTable* table, Str name, Str* field_names, const struct AstTypeRef** field_types, size_t field_count);
 int type_entry_find_field(const TypeEntry* entry, Str name);
 bool collect_metadata(const char* file_path, const AstModule* module, FunctionTable* funcs, TypeTable* types /* GEMINI: MethodTable* methods parameter removed to fix build */);
 bool emit_function_call(BytecodeCompiler* compiler, FunctionEntry* entry, int line,

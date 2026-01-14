@@ -56,7 +56,41 @@ pub priv extern pack default
 
 ---
 
-## 2. Core Language Rules
+## 2. Memory Safety and Initialization
+
+Rae guarantees that all memory is initialized before use. Every variable and type member is automatically assigned a default value based on its type if no explicit initializer is provided. This eliminates entire classes of bugs related to garbage values and uninitialized memory.
+
+### 2.1 Default Values
+
+| Type | Default Value |
+|------|---------------|
+| `Int` | `0` |
+| `Float` | `0.0` |
+| `Bool` | `false` |
+| `String` | `""` (empty string) |
+| `List T` | `[]` (empty list) |
+| `Char` | `'\0'` (null character) |
+| `mod T`, `view T` | Invalid without explicit binding |
+
+### 2.2 Type Initialization
+
+When a complex type (struct) is instantiated, all members are recursively initialized to their respective default values.
+
+```rae
+type State {
+  score: Int
+  active: Bool
+}
+
+func main() {
+  # score is 0, active is false
+  def s: State
+}
+```
+
+---
+
+## 3. Core Language Rules
 
 ### 2.1 Declarations
 
