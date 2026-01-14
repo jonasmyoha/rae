@@ -1,0 +1,79 @@
+# AI System for Advanced Pong
+# State: 0=Observing, 1=Deciding, 2=Acting, 3=Pausing
+type AIState {
+  state: Int
+  timer: Int
+  targetY: Float
+  decision: Int
+}
+
+# 0=None, 1=Up, 2=Down
+func paddleAiSystem(ai: mod AIState, ballY: Float, paddleY: Float): ret Float {
+  def newY: Float = paddleY
+  # 0: Observing (Reaction Delay)
+  if ai.state is 0 {
+    ai.timer = ai.timer + 1
+    # Reaction time ~0.2s (12 frames) plus random noise
+    if ai.timer > 12 + randomInt(min: 0, max: 6) {
+      ai.targetY = ballY
+      ai.timer = 0
+      ai.state = 1
+    }
+  }
+  # 1: Deciding
+  if ai.state is 1 {
+    # Simple logic: if ball is significantly above or below center of paddle
+    if ai.targetY < paddleY + 40.0 {
+      # Up
+      ai.decision = 1
+      # Press duration
+      ai.timer = randomInt(min: 50, max: 150)
+      ai.state = 2
+    } else {
+      if ai.targetY > paddleY + 60.0 {
+        # Down
+        ai.decision = 2
+        # Press duration
+        ai.timer = randomInt(min: 5, max: 15)
+        ai.state = 2
+      } else {
+        # Good enough, don't move
+        ai.decision = 0
+        # Pause duration
+        ai.timer = randomInt(min: 5, max: 10)
+        ai.state = 3
+      }
+    }
+  }
+  # 2: Acting (Key Press)
+  if ai.state is 2 {
+    if ai.decision is 1 {
+      newY = newY - 4.5
+    }
+    if ai.decision is 2 {
+      newY = newY + 4.5
+    }
+    ai.timer = ai.timer - 1
+    if ai.timer <= 0 {
+      ai.state = 3
+      # Pause after action
+      ai.timer = randomInt(min: 5, max: 10)
+    }
+  }
+  # 3: Pausing
+  if ai.state is 3 {
+    ai.timer = ai.timer - 1
+    if ai.timer <= 0 {
+      ai.state = 0
+      ai.timer = 0
+    }
+  }
+  # Bounds check
+  if newY < 0.0 {
+    newY = 0.0
+  }
+  if newY > 350.0 {
+    newY = 350.0
+  }
+  ret newY
+}
