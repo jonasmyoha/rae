@@ -40,6 +40,7 @@ typedef struct {
 
 typedef struct {
   const char* input_path;
+  const char* project_path;
   bool watch;
   int timeout;
   int target;
@@ -528,6 +529,7 @@ static bool parse_format_args(int argc, char** argv, FormatOptions* opts) {
 static bool parse_run_args(int argc, char** argv, RunOptions* opts) {
   opts->watch = false;
   opts->input_path = NULL;
+  opts->project_path = NULL;
   opts->timeout = 0;
   opts->target = BUILD_TARGET_LIVE;
 
@@ -537,6 +539,15 @@ static bool parse_run_args(int argc, char** argv, RunOptions* opts) {
     if (strcmp(arg, "--watch") == 0 || strcmp(arg, "-w") == 0) {
       opts->watch = true;
       i += 1;
+      continue;
+    }
+    if (strcmp(arg, "--project") == 0 || strcmp(arg, "-p") == 0) {
+      if (i + 1 >= argc) {
+        fprintf(stderr, "error: %s expects a directory\n", arg);
+        return false;
+      }
+      opts->project_path = argv[i + 1];
+      i += 2;
       continue;
     }
     if (strcmp(arg, "--timeout") == 0) {
@@ -2036,7 +2047,9 @@ static void print_usage(const char* prog) {
   fprintf(stderr, "  lex <file>      Tokenize Rae source file\n");
   fprintf(stderr, "  parse <file>    Parse Rae source file and dump AST\n");
   fprintf(stderr, "  format <file>   Parse Rae source file and pretty-print it\n");
-  fprintf(stderr, "  run <file>      Execute Rae source via the bytecode VM\n");
+  fprintf(stderr, "  run [opts] <file>\n");
+  fprintf(stderr, "                  Execute Rae source via the bytecode VM\n");
+  fprintf(stderr, "                  Options: --project <dir>, --watch\n");
   fprintf(stderr, "  pack <file>     Validate and summarize a .raepack file\n");
   fprintf(stderr, "                 (options: --json, --target <id>)\n");
   fprintf(stderr,
@@ -2618,42 +2631,43 @@ static int run_command(const char* cmd, int argc, char** argv) {
                 strcpy(project_path, ".");
             }
         
-            // Smart discovery: search upwards for the 'lib' folder to find the repo root.
-            // This allows scripts in examples/ or tests/ to find standard library and neighboring files.
-            char repo_root[PATH_MAX];
-            strncpy(repo_root, project_path, sizeof(repo_root) - 1);
-            repo_root[sizeof(repo_root) - 1] = '\0';
-            
-            bool found_root = false;
-            for (int i = 0; i < 5; ++i) { // search up to 5 levels
-                char test_lib[PATH_MAX];
-                snprintf(test_lib, sizeof(test_lib), "%s/lib/core.rae", repo_root);
-                if (file_exists(test_lib)) {
-                    found_root = true;
-                    break;
-                }
-                char* parent = strrchr(repo_root, '/');
-                if (!parent || parent == repo_root) break;
-                *parent = '\0';
-            }
+                        // Smart discovery: search upwards for the 'lib' folder to find the repo root.
+                        // This allows scripts in examples/ or tests/ to find standard library and neighboring files.
+                        char repo_root[PATH_MAX];
+                        strncpy(repo_root, project_path, sizeof(repo_root) - 1);
+                        repo_root[sizeof(repo_root) - 1] = '\0';
+                        
+                        bool found_root = false;
+                        for (int i = 0; i < 5; ++i) { // search up to 5 levels
+                            char test_lib[PATH_MAX];
+                            snprintf(test_lib, sizeof(test_lib), "%s/lib/core.rae", repo_root);
+                            if (file_exists(test_lib)) {
+                                found_root = true;
+                                break;
+                            }
+                            char* parent = strrchr(repo_root, '/');
+                            if (!parent || parent == repo_root) break;
+                            *parent = '\0';
+                        }
+                    
+                        const char* final_root = run_opts.project_path ? run_opts.project_path : (found_root ? repo_root : project_path);
+                    
+                        RunOptions adjusted_opts = run_opts;        
+                        // Use relative path for tests to match expectations
         
-            const char* final_root = found_root ? repo_root : project_path;
+                        adjusted_opts.input_path = run_opts.input_path;
         
-                    RunOptions adjusted_opts = run_opts;
+                    
         
-                    adjusted_opts.input_path = abs_input;
+                        if (run_opts.target == BUILD_TARGET_COMPILED) {
         
-                
+                          return run_compiled_file(&adjusted_opts, final_root);
         
-                    if (run_opts.target == BUILD_TARGET_COMPILED) {
+                        }
         
-                      return run_compiled_file(&adjusted_opts, final_root);
+                    
         
-                    }
-        
-                
-        
-                    return run_opts.watch ? run_vm_watch(&adjusted_opts, final_root) : run_vm_file(&adjusted_opts, final_root);    } else if (is_pack) {    PackOptions pack_opts;
+                        return run_opts.watch ? run_vm_watch(&adjusted_opts, final_root) : run_vm_file(&adjusted_opts, final_root);    } else if (is_pack) {    PackOptions pack_opts;
     if (!parse_pack_args(argc, argv, &pack_opts)) {
       print_usage(cmd);
       return 1;
