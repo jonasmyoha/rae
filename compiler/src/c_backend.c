@@ -930,6 +930,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
       if (str_eq_cstr(method, "length")) c_func = "rae_list_length";
       else if (str_eq_cstr(method, "add")) c_func = "rae_list_add";
       else if (str_eq_cstr(method, "get")) c_func = "rae_list_get";
+      else if (str_eq_cstr(method, "toString")) c_func = "rae_str";
       else c_func = free_me = str_to_cstr(method);
       
       if (c_func) {
