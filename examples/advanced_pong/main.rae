@@ -1,8 +1,8 @@
 import raylib
-import ./ai
+import ai
 
 # -- Components (Plain Data Types) --
-type Transform {
+type PaddleTransform {
   x: Float
   y: Float
 }
@@ -13,13 +13,13 @@ type Velocity {
 }
 
 # -- Systems (Functions acting on Components) --
-func movementSystem(pos: mod Transform, vel: view Velocity) {
+func movementSystem(pos: mod PaddleTransform, vel: view Velocity) {
   pos.x = pos.x + vel.dx
   pos.y = pos.y + vel.dy
 }
 
 func bounceSystem(
-  pos: view Transform,
+  pos: view PaddleTransform,
   vel: mod Velocity,
   radius: Float,
   height: Float,
@@ -33,9 +33,9 @@ func bounceSystem(
 }
 
 func paddleCollisionSystem(
-  bPos: view Transform,
+  bPos: view PaddleTransform,
   bVel: mod Velocity,
-  pPos: view Transform,
+  pPos: view PaddleTransform,
   pWidth: Float,
   pHeight: Float,
   isLeft: Int,
@@ -66,7 +66,7 @@ func paddleCollisionSystem(
 }
 
 func paddleInputSystem(
-  pos: mod Transform,
+  pos: mod PaddleTransform,
   speed: Float,
   height: Float,
   pHeight: Float,
@@ -139,9 +139,9 @@ func main() {
   # Initializing Entities (as local component instances)
   initWindow(width: 800, height: 450, title: "Rae Advanced Pong (ECS)")
   setTargetFPS(fps: 60)
-  def p1Pos: Transform = { x: 20.0, y: 175.0 }
-  def p2Pos: Transform = { x: 760.0, y: 175.0 }
-  def bPos: Transform = { x: 400.0, y: 225.0 }
+  def p1Pos: PaddleTransform = { x: 20.0, y: 175.0 }
+  def p2Pos: PaddleTransform = { x: 760.0, y: 175.0 }
+  def bPos: PaddleTransform = { x: 400.0, y: 225.0 }
   def bVel: Velocity = { dx: 4.0, dy: 4.0 }
   def aiState: AIState = { state: 0, timer: 0, targetY: 225.0, decision: 0 }
   def p1Score: Int = 0
