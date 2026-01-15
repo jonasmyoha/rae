@@ -5,6 +5,8 @@
 #include "vm_chunk.h"
 #include "vm_registry.h"
 
+#define STACK_MAX 2048
+
 typedef enum {
   OP_CONSTANT = 0x01,
   OP_LOG = 0x02,
@@ -65,7 +67,7 @@ typedef struct {
 typedef struct VM {
   Chunk* chunk;
   uint8_t* ip;
-  Value stack[256];
+  Value stack[STACK_MAX];
   Value* stack_top;
   CallFrame call_stack[64];
   size_t call_stack_top;
