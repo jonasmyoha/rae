@@ -20,8 +20,16 @@ typedef struct {
   int64_t cap;
 } RaeList;
 
+/* Buffer Ops */
+void* rae_buf_alloc(int64_t size);
+void rae_buf_free(void* buf);
+void* rae_buf_resize(void* buf, int64_t new_size);
+void rae_buf_copy(void* src, int64_t src_off, void* dst, int64_t dst_off, int64_t len);
+
+/* List Ops */
 RaeList* rae_list_create(int64_t cap);
 void rae_list_add(RaeList* list, int64_t item);
+void rae_list_remove(RaeList* list, int64_t index);
 int64_t rae_list_get(RaeList* list, int64_t index);
 int64_t rae_list_length(RaeList* list);
 

@@ -1,10 +1,96 @@
+# -- List2 Prototype (Int only) --
+type List2Int {
+  data: Buffer Int
+  length: Int
+  capacity: Int
+}
+
+func createList2Int(initialCap: Int): ret List2Int {
+  ret {
+    data: __buf_alloc(size: initialCap),
+    length: 0,
+    capacity: initialCap,
+  }
+}
+
+func add(this: mod List2Int, value: Int) {
+  if this.length is this.capacity {
+    # Simple grow strategy
+    def newCap: Int = this.capacity * 2
+    if newCap is 0 { newCap = 4 }
+    
+    def newData: Buffer Int = __buf_alloc(size: newCap)
+    __buf_copy(
+      src: this.data, src_off: 0,
+      dst: newData, dst_off: 0,
+      len: this.length
+    )
+    __buf_free(buf: this.data)
+    this.data = newData
+    this.capacity = newCap
+  }
+  
+  __buf_set(buf: this.data, index: this.length, value: value)
+  this.length = this.length + 1
+}
+
+func get(this: view List2Int, index: Int): ret Int {
+  if index < 0 or index >= this.length {
+    log("List2Int index out of bounds")
+    ret 0
+  }
+  ret __buf_get(buf: this.data, index: index)
+}
+
+func remove(this: mod List2Int, index: Int) {
+  if index < 0 or index >= this.length {
+    ret
+  }
+  
+  # Shift elements
+  if index < this.length - 1 {
+    __buf_copy(
+      src: this.data, src_off: index + 1,
+      dst: this.data, dst_off: index,
+      len: this.length - index - 1
+    )
+  }
+  
+  this.length = this.length - 1
+}
+
 func main() {
-  def numbers: List(Int) = { 10, 20, 30, 40, 50 }
-  log("Looping through list:")
+  log("List2Int Prototype Test")
+  def list: List2Int = createList2Int(initialCap: 2)
+  
+  add(this: list, value: 10)
+  add(this: list, value: 20)
+  add(this: list, value: 30) # Triggers grow
+  
+  log("Length after 3 adds (should be 3):")
+  log(list.length)
+  
+  log("Item at 0 (should be 10):")
+  log(get(list, index: 0))
+  log("Item at 1 (should be 20):")
+  log(get(list, index: 1))
+  log("Item at 2 (should be 30):")
+  log(get(list, index: 2))
+  
+  log("Removing item at 1...")
+  remove(this: list, index: 1)
+  
+  log("New length (should be 2):")
+  log(list.length)
+  log("Item at 1 (should be 30):")
+  log(get(list, index: 1))
+  
+  log("Iterating via loop:")
   def i: Int = 0
-  loop i < numbers.length() {
-    def val: Int = numbers[i]
-    log(val)
+  loop i < list.length {
+    log(get(list, index: i))
     i = i + 1
   }
+  
+  log("Done.")
 }

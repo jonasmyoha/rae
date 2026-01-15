@@ -192,6 +192,9 @@ static bool native_rae_str(struct VM* vm,
     case VAL_ARRAY:
       out_result->value = value_string_copy("<array>", 7);
       break;
+    case VAL_BUFFER:
+      out_result->value = value_string_copy("<buffer>", 8);
+      break;
     case VAL_REF: {
       const char* prefix = args[0].as.ref_value.kind == REF_VIEW ? "view " : "mod ";
       out_result->value = value_string_copy(prefix, strlen(prefix));
@@ -263,14 +266,14 @@ static bool native_rae_list_add(struct VM* vm,
   (void)user_data;
   if (arg_count != 2) return false;
   
-  Value list_val = args[0];
-  if (list_val.type == VAL_REF) {
-    list_val = *list_val.as.ref_value.target;
+  Value* list_ptr = (Value*)&args[0];
+  if (list_ptr->type == VAL_REF) {
+    list_ptr = list_ptr->as.ref_value.target;
   }
   
-  if (list_val.type != VAL_LIST) return false;
+  if (list_ptr->type != VAL_LIST) return false;
   
-  value_list_add(&list_val, args[1]);
+  value_list_add(list_ptr, args[1]);
   out_result->has_value = false;
   return true;
 }

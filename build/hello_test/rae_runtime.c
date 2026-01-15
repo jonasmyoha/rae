@@ -216,31 +216,6 @@ int64_t rae_random_int(int64_t min, int64_t max) {
   return min + (int64_t)(rae_next_u32() % range);
 }
 
-void* rae_buf_alloc(int64_t size) {
-  if (size <= 0) return NULL;
-  // In the C backend, we use 64-bit values for Buffer items by default (same as Int/Float)
-  // or pointers. We'll allocate as int64_t array for simplicity.
-  void* buf = calloc((size_t)size, sizeof(int64_t));
-  return buf;
-}
-
-void rae_buf_free(void* buf) {
-  if (buf) free(buf);
-}
-
-void* rae_buf_resize(void* buf, int64_t new_size) {
-  if (new_size <= 0) {
-    if (buf) free(buf);
-    return NULL;
-  }
-  return realloc(buf, (size_t)new_size * sizeof(int64_t));
-}
-
-void rae_buf_copy(void* src, int64_t src_off, void* dst, int64_t dst_off, int64_t len) {
-  if (!src || !dst || len <= 0) return;
-  memmove((int64_t*)dst + dst_off, (int64_t*)src + src_off, (size_t)len * sizeof(int64_t));
-}
-
 RaeList* rae_list_create(int64_t cap) {
   RaeList* list = malloc(sizeof(RaeList));
   if (!list) return NULL;
@@ -261,14 +236,6 @@ void rae_list_add(RaeList* list, int64_t item) {
     list->items = realloc(list->items, list->cap * sizeof(int64_t));
   }
   list->items[list->len++] = item;
-}
-
-void rae_list_remove(RaeList* list, int64_t index) {
-  if (!list || index < 0 || index >= list->len) return;
-  for (int64_t i = index; i < list->len - 1; i++) {
-    list->items[i] = list->items[i + 1];
-  }
-  list->len--;
 }
 
 int64_t rae_list_get(RaeList* list, int64_t index) {

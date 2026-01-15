@@ -111,6 +111,42 @@ Value value_array(size_t count) {
   return value;
 }
 
+Value value_buffer(size_t capacity) {
+  Value value = {.type = VAL_BUFFER};
+  value.as.buffer_value = malloc(sizeof(ValueBuffer));
+  if (value.as.buffer_value) {
+    value.as.buffer_value->capacity = capacity;
+    value.as.buffer_value->count = capacity; // Initially, buffer is fixed size
+    value.as.buffer_value->ref_count = 1;
+    value.as.buffer_value->items = malloc(capacity * sizeof(Value));
+    if (value.as.buffer_value->items) {
+      for (size_t i = 0; i < capacity; i++) {
+        value.as.buffer_value->items[i].type = VAL_NONE;
+      }
+    }
+  }
+  return value;
+}
+
+bool value_buffer_resize(Value* buffer, size_t new_capacity) {
+  if (!buffer || buffer->type != VAL_BUFFER || !buffer->as.buffer_value) return false;
+  ValueBuffer* vb = buffer->as.buffer_value;
+  size_t old_cap = vb->capacity;
+  Value* new_items = realloc(vb->items, new_capacity * sizeof(Value));
+  if (!new_items) return false;
+  
+  vb->items = new_items;
+  vb->capacity = new_capacity;
+  vb->count = new_capacity;
+  
+  if (new_capacity > old_cap) {
+    for (size_t i = old_cap; i < new_capacity; i++) {
+      vb->items[i].type = VAL_NONE;
+    }
+  }
+  return true;
+}
+
 Value value_ref(Value* target, ReferenceKind kind) {
   Value value = {.type = VAL_REF};
   value.as.ref_value.target = target;
@@ -183,6 +219,12 @@ Value value_copy(const Value* value) {
         }
       }
       break;
+    case VAL_BUFFER:
+      // Shallow copy for Buffer: share the same heap-allocated ValueBuffer
+      if (value->as.buffer_value) {
+        value->as.buffer_value->ref_count++;
+      }
+      break;
     case VAL_REF:
       // References themselves are copied (pointing to the same target)
       break;
@@ -225,6 +267,17 @@ void value_free(Value* value) {
     free(va->items);
     free(va);
     value->as.array_value = NULL;
+  } else if (value->type == VAL_BUFFER && value->as.buffer_value) {
+    ValueBuffer* vb = value->as.buffer_value;
+    vb->ref_count--;
+    if (vb->ref_count == 0) {
+      for (size_t i = 0; i < vb->count; i++) {
+        value_free(&vb->items[i]);
+      }
+      free(vb->items);
+      free(vb);
+    }
+    value->as.buffer_value = NULL;
   } else if (value->type == VAL_REF) {
     // Nothing to free for the reference itself, it's a weak pointer
     value->as.ref_value.target = NULL;
@@ -289,6 +342,16 @@ void value_print(const Value* value) {
         for (size_t i = 0; i < value->as.array_value->count; i++) {
           if (i > 0) printf(", ");
           value_print(&value->as.array_value->items[i]);
+        }
+      }
+      printf(")");
+      break;
+    case VAL_BUFFER:
+      printf("#(");
+      if (value->as.buffer_value) {
+        for (size_t i = 0; i < value->as.buffer_value->count; i++) {
+          if (i > 0) printf(", ");
+          value_print(&value->as.buffer_value->items[i]);
         }
       }
       printf(")");
