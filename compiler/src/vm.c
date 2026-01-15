@@ -50,6 +50,7 @@ static bool value_is_truthy(const Value* value) {
     case VAL_OBJECT:
     case VAL_LIST:
     case VAL_ARRAY:
+    case VAL_BUFFER:
     case VAL_REF:
     case VAL_ID:
     case VAL_KEY:
@@ -58,16 +59,8 @@ static bool value_is_truthy(const Value* value) {
   return false;
 }
 
-static bool values_equal(const Value* a, const Value* b) {
-  const Value* lhs = a;
-  const Value* rhs = b;
-  if (lhs->type == VAL_REF) lhs = lhs->as.ref_value.target;
-  if (rhs->type == VAL_REF) rhs = rhs->as.ref_value.target;
-  
-  
-  if (lhs->type != rhs->type) {
-    return false;
-  }
+static bool values_equal(const Value* lhs, const Value* rhs) {
+  if (lhs->type != rhs->type) return false;
   switch (lhs->type) {
     case VAL_BOOL:
       return lhs->as.bool_value == rhs->as.bool_value;
@@ -76,34 +69,31 @@ static bool values_equal(const Value* a, const Value* b) {
     case VAL_FLOAT:
       return lhs->as.float_value == rhs->as.float_value;
     case VAL_STRING:
-      if (!lhs->as.string_value.chars || !rhs->as.string_value.chars) return false;
       if (lhs->as.string_value.length != rhs->as.string_value.length) return false;
       return memcmp(lhs->as.string_value.chars, rhs->as.string_value.chars,
                     lhs->as.string_value.length) == 0;
-    case VAL_KEY:
-      if (!lhs->as.key_value.chars || !rhs->as.key_value.chars) return false;
-      if (lhs->as.key_value.length != rhs->as.key_value.length) return false;
-      return memcmp(lhs->as.key_value.chars, rhs->as.key_value.chars,
-                    lhs->as.key_value.length) == 0;
     case VAL_CHAR:
       return lhs->as.char_value == rhs->as.char_value;
     case VAL_NONE:
       return true;
     case VAL_OBJECT:
-      if (lhs->as.object_value.field_count != rhs->as.object_value.field_count) return false;
-      for (size_t i = 0; i < lhs->as.object_value.field_count; i++) {
-        if (!values_equal(&lhs->as.object_value.fields[i], &rhs->as.object_value.fields[i])) return false;
-      }
-      return true;
+      // Identity equality for objects
+      return lhs->as.object_value.fields == rhs->as.object_value.fields;
     case VAL_LIST:
       return lhs->as.list_value == rhs->as.list_value;
     case VAL_ARRAY:
       return lhs->as.array_value == rhs->as.array_value;
-    case VAL_ID:
-      return lhs->as.id_value == rhs->as.id_value;
+    case VAL_BUFFER:
+      return lhs->as.buffer_value == rhs->as.buffer_value;
     case VAL_REF:
       // References are equal if they point to the same storage
       return lhs->as.ref_value.target == rhs->as.ref_value.target;
+    case VAL_ID:
+      return lhs->as.id_value == rhs->as.id_value;
+    case VAL_KEY:
+      if (lhs->as.key_value.length != rhs->as.key_value.length) return false;
+      return memcmp(lhs->as.key_value.chars, rhs->as.key_value.chars,
+                    lhs->as.key_value.length) == 0;
   }
   return false;
 }
@@ -655,6 +645,122 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         }
         free(temp_elements);
         vm_push(vm, list);
+        break;
+      }
+      case OP_BUF_ALLOC: {
+        Value size_val = vm_pop(vm);
+        if (size_val.type != VAL_INT) {
+          diag_error(NULL, 0, 0, "OP_BUF_ALLOC expects integer size");
+          return VM_RUNTIME_ERROR;
+        }
+        int64_t size = size_val.as.int_value;
+        if (size < 0) {
+          diag_error(NULL, 0, 0, "OP_BUF_ALLOC size must be positive");
+          return VM_RUNTIME_ERROR;
+        }
+        vm_push(vm, value_buffer((size_t)size));
+        break;
+      }
+      case OP_BUF_FREE: {
+        Value buf = vm_pop(vm);
+        if (buf.type != VAL_BUFFER) {
+          diag_error(NULL, 0, 0, "OP_BUF_FREE expects buffer");
+          return VM_RUNTIME_ERROR;
+        }
+        value_free(&buf);
+        break;
+      }
+      case OP_BUF_GET: {
+        Value idx_val = vm_pop(vm);
+        Value buf_val = vm_pop(vm);
+        if (buf_val.type != VAL_BUFFER || idx_val.type != VAL_INT) {
+          diag_error(NULL, 0, 0, "OP_BUF_GET invalid arguments");
+          return VM_RUNTIME_ERROR;
+        }
+        ValueBuffer* vb = buf_val.as.buffer_value;
+        int64_t idx = idx_val.as.int_value;
+        if (idx < 0 || (size_t)idx >= vb->count) {
+          diag_error(NULL, 0, 0, "OP_BUF_GET out of bounds");
+          return VM_RUNTIME_ERROR;
+        }
+        Value res = value_copy(&vb->items[idx]);
+        // printf("[VM] BUF_GET: idx=%lld, type=%d\n", idx, res.type);
+        vm_push(vm, res);
+        break;
+      }
+      case OP_BUF_SET: {
+        Value val = vm_pop(vm);
+        Value idx_val = vm_pop(vm);
+        Value buf_val = vm_pop(vm);
+        if (buf_val.type != VAL_BUFFER || idx_val.type != VAL_INT) {
+          diag_error(NULL, 0, 0, "OP_BUF_SET invalid arguments");
+          return VM_RUNTIME_ERROR;
+        }
+        ValueBuffer* vb = buf_val.as.buffer_value;
+        int64_t idx = idx_val.as.int_value;
+        if (idx < 0 || (size_t)idx >= vb->count) {
+          diag_error(NULL, 0, 0, "OP_BUF_SET out of bounds");
+          return VM_RUNTIME_ERROR;
+        }
+        // printf("[VM] BUF_SET: idx=%lld, type=%d\n", idx, val.type);
+        value_free(&vb->items[idx]);
+        vb->items[idx] = value_copy(&val);
+        break;
+      }
+      case OP_BUF_LEN: {
+        Value buf_val = vm_pop(vm);
+        if (buf_val.type != VAL_BUFFER) {
+          diag_error(NULL, 0, 0, "OP_BUF_LEN expects buffer");
+          return VM_RUNTIME_ERROR;
+        }
+        vm_push(vm, value_int((int64_t)buf_val.as.buffer_value->count));
+        break;
+      }
+      case OP_BUF_RESIZE: {
+        Value size_val = vm_pop(vm);
+        Value* buf_val = vm_peek(vm, 0); // Modifies in place on stack
+        if (buf_val->type != VAL_BUFFER || size_val.type != VAL_INT) {
+          diag_error(NULL, 0, 0, "OP_BUF_RESIZE invalid arguments");
+          return VM_RUNTIME_ERROR;
+        }
+        if (!value_buffer_resize(buf_val, (size_t)size_val.as.int_value)) {
+          diag_error(NULL, 0, 0, "OP_BUF_RESIZE failed (out of memory)");
+          return VM_RUNTIME_ERROR;
+        }
+        break;
+      }
+      case OP_BUF_COPY: {
+        Value count_val = vm_pop(vm);
+        Value dst_off_val = vm_pop(vm);
+        Value dst_buf_val = vm_pop(vm);
+        Value src_off_val = vm_pop(vm);
+        Value src_buf_val = vm_pop(vm);
+        
+        if (src_buf_val.type != VAL_BUFFER || dst_buf_val.type != VAL_BUFFER ||
+            src_off_val.type != VAL_INT || dst_off_val.type != VAL_INT ||
+            count_val.type != VAL_INT) {
+          diag_error(NULL, 0, 0, "OP_BUF_COPY invalid arguments");
+          return VM_RUNTIME_ERROR;
+        }
+        
+        ValueBuffer* src = src_buf_val.as.buffer_value;
+        ValueBuffer* dst = dst_buf_val.as.buffer_value;
+        int64_t so = src_off_val.as.int_value;
+        int64_t doff = dst_off_val.as.int_value;
+        int64_t count = count_val.as.int_value;
+        
+        if (so < 0 || (size_t)so + count > src->count || 
+            doff < 0 || (size_t)doff + count > dst->count || count < 0) {
+          diag_error(NULL, 0, 0, "OP_BUF_COPY out of bounds");
+          return VM_RUNTIME_ERROR;
+        }
+        
+        memmove(dst->items + doff, src->items + so, count * sizeof(Value));
+        if (src != dst) {
+            for (int64_t i = 0; i < count; i++) {
+                dst->items[doff + i] = value_copy(&src->items[so + i]);
+            }
+        }
         break;
       }
       case OP_RETURN: {

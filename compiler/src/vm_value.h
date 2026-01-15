@@ -15,6 +15,7 @@ typedef enum {
   VAL_OBJECT,
   VAL_LIST,
   VAL_ARRAY,
+  VAL_BUFFER,
   VAL_REF,
   VAL_ID,
   VAL_KEY
@@ -46,6 +47,13 @@ typedef struct {
 typedef struct {
   struct Value* items;
   size_t count;
+  size_t capacity;
+  size_t ref_count;
+} ValueBuffer;
+
+typedef struct {
+  struct Value* items;
+  size_t count;
 } ValueArray;
 
 typedef struct {
@@ -63,6 +71,7 @@ typedef struct Value {
     OwnedString string_value;
     Object object_value;
     ValueList* list_value;
+    ValueBuffer* buffer_value;
     ValueArray* array_value;
     Reference ref_value;
     int64_t id_value;
@@ -81,6 +90,8 @@ Value value_object(size_t field_count);
 Value value_list(void);
 void value_list_add(Value* list, Value item);
 Value value_array(size_t count);
+Value value_buffer(size_t capacity);
+bool value_buffer_resize(Value* buffer, size_t new_capacity);
 Value value_ref(Value* target, ReferenceKind kind);
 Value value_id(int64_t v);
 Value value_key_copy(const char* data, size_t length);
