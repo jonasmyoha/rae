@@ -21,6 +21,10 @@ static Value vm_pop(VM* vm) {
 }
 
 static void vm_push(VM* vm, Value value) {
+  if (vm->stack_top >= vm->stack + STACK_MAX) {
+    diag_error(NULL, 0, 0, "VM stack overflow");
+    return;
+  }
   *vm->stack_top = value;
   vm->stack_top += 1;
 }
@@ -254,6 +258,14 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
           return VM_RUNTIME_ERROR;
         }
         const Value* args = vm->stack_top - arg_count;
+        
+        // DEBUG: Log native call
+        // printf("[VM] Calling native %s with %d args\n", symbol.as.string_value.chars, arg_count);
+        // printf("[VM] Stack info: base=%p, top=%p, args=%p\n", (void*)vm->stack, (void*)vm->stack_top, (void*)args);
+        // for (int i = 0; i < arg_count; i++) {
+        //    printf("  arg[%d] type: %d\n", i, args[i].type);
+        // }
+
         VmNativeResult result = {.has_value = false};
         if (!entry->callback(vm, &result, args, arg_count, entry->user_data)) {
           diag_error(NULL, 0, 0, "native function reported failure");
@@ -278,6 +290,7 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
           diag_error(NULL, 0, 0, "VM local slot out of range");
           return VM_RUNTIME_ERROR;
         }
+        // printf("[VM] GET_LOCAL slot %d (type %d)\n", slot, frame->locals[slot].type);
         vm_push(vm, value_copy(&frame->locals[slot]));
         break;
       }
@@ -293,6 +306,7 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
           return VM_RUNTIME_ERROR;
         }
         Value value = value_copy(vm_peek(vm, 0));
+        // printf("[VM] SET_LOCAL slot %d (new type %d)\n", slot, value.type);
         if (frame->locals[slot].type == VAL_REF) {
           if (frame->locals[slot].as.ref_value.kind == REF_VIEW) {
             diag_error(NULL, 0, 0, "cannot assign to a read-only 'view' reference");
