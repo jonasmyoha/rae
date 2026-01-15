@@ -1898,88 +1898,6 @@ static bool auto_import_directory(ModuleGraph* graph, const char* entry_file_pat
   return ok;
 }
 
-static bool directory_has_raepack(const char* dir_path) {
-  DIR* dir = opendir(dir_path);
-  if (!dir) return false;
-  struct dirent* entry;
-  while ((entry = readdir(dir))) {
-    if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
-    char file_path[PATH_MAX];
-    int written = snprintf(file_path, sizeof(file_path), "%s/%s", dir_path, entry->d_name);
-    if (written <= 0 || (size_t)written >= sizeof(file_path)) continue;
-    struct stat st;
-    if (stat(file_path, &st) != 0) continue;
-    if (!S_ISREG(st.st_mode)) continue;
-    size_t len = strlen(entry->d_name);
-    if (len > 8 && strcmp(entry->d_name + len - 8, ".raepack") == 0) {
-      closedir(dir);
-      return true;
-    }
-  }
-  closedir(dir);
-  return false;
-}
-
-static bool directory_has_only_entry_file(const char* dir_path, const char* entry_file_path) {
-  DIR* dir = opendir(dir_path);
-  if (!dir) return false;
-  size_t rae_count = 0;
-  struct dirent* entry;
-  while ((entry = readdir(dir))) {
-    if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
-    char file_path[PATH_MAX];
-    int written = snprintf(file_path, sizeof(file_path), "%s/%s", dir_path, entry->d_name);
-    if (written <= 0 || (size_t)written >= sizeof(file_path)) continue;
-    struct stat st;
-    if (stat(file_path, &st) != 0) continue;
-    if (!S_ISREG(st.st_mode)) continue;
-    size_t len = strlen(file_path);
-    if (len < 4 || strcmp(file_path + len - 4, ".rae") != 0) continue;
-    rae_count += 1;
-    if (rae_count > 1) break;
-  }
-  closedir(dir);
-  if (rae_count == 0) return false;
-  if (rae_count == 1) return true;
-  DIR* dir2 = opendir(dir_path);
-  if (!dir2) return false;
-  size_t other_count = 0;
-  struct dirent* entry2;
-  while ((entry2 = readdir(dir2))) {
-    if (strcmp(entry2->d_name, ".") == 0 || strcmp(entry2->d_name, "..") == 0) continue;
-    char file_path[PATH_MAX];
-    int written = snprintf(file_path, sizeof(file_path), "%s/%s", dir_path, entry2->d_name);
-    if (written <= 0 || (size_t)written >= sizeof(file_path)) continue;
-    struct stat st;
-    if (stat(file_path, &st) != 0) continue;
-    if (!S_ISREG(st.st_mode)) continue;
-    size_t len = strlen(file_path);
-    if (len < 4 || strcmp(file_path + len - 4, ".rae") != 0) continue;
-    if (strcmp(file_path, entry_file_path) == 0) continue;
-    other_count += 1;
-    if (other_count > 0) break;
-  }
-  closedir(dir2);
-  return other_count == 0;
-}
-
-static bool should_auto_import(const char* entry_file_path) {
-  char* dir_copy = strdup(entry_file_path);
-  if (!dir_copy) {
-    return false;
-  }
-  char* slash = strrchr(dir_copy, '/');
-  if (!slash) {
-    free(dir_copy);
-    return false;
-  }
-  *slash = '\0';
-  bool has_pack = directory_has_raepack(dir_copy);
-  bool single_file = directory_has_only_entry_file(dir_copy, entry_file_path);
-  free(dir_copy);
-  return has_pack || single_file;
-}
-
 static bool module_graph_build(ModuleGraph* graph, const char* entry_file, uint64_t* hash_out) {
   char* resolved_entry = realpath(entry_file, NULL);
   if (!resolved_entry) {
@@ -1998,8 +1916,8 @@ static bool module_graph_build(ModuleGraph* graph, const char* entry_file, uint6
     return false;
   }
   ModuleNode* entry_node = module_graph_find(graph, module_path);
-  if (entry_node && entry_node->module && !entry_node->module->imports &&
-      should_auto_import(entry_node->file_path)) {
+  // Implicitly import all .rae files in the project directory
+  if (entry_node) {
     if (!auto_import_directory(graph, entry_node->file_path, hash_out)) {
       free(module_path);
       free(resolved_entry);
