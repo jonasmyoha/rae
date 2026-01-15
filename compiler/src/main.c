@@ -2208,6 +2208,18 @@ static bool build_c_backend_output(const char* entry_file,
   }
   AstModule merged = merge_module_graph(&graph);
   bool ok = c_backend_emit(&merged, out_file);
+  if (ok) {
+    char out_dir[PATH_MAX];
+    strncpy(out_dir, out_file, sizeof(out_dir) - 1);
+    out_dir[sizeof(out_dir) - 1] = '\0';
+    char* last_slash = strrchr(out_dir, '/');
+    if (last_slash) {
+      *last_slash = '\0';
+      ok = copy_runtime_assets(out_dir);
+    } else {
+      ok = copy_runtime_assets(".");
+    }
+  }
   module_graph_free(&graph);
   arena_destroy(arena);
   return ok;
