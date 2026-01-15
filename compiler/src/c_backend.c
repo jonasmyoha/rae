@@ -34,6 +34,7 @@ enum {
 };
 
 typedef struct {
+  const AstModule* module;
   const AstParam* params;
   Str locals[256];
   Str local_types[256];
@@ -45,8 +46,9 @@ typedef struct {
 } CFuncContext;
 
 // Forward declarations
+static const char* find_raylib_mapping(Str name);
 static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_prec);
-static bool emit_function(const AstFuncDecl* func, FILE* out);
+static bool emit_function(const AstModule* module, const AstFuncDecl* func, FILE* out);
 static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static bool emit_call(CFuncContext* ctx, const AstExpr* expr, FILE* out);
 static bool emit_log_call(CFuncContext* ctx, const AstExpr* expr, FILE* out, bool newline);
@@ -520,9 +522,27 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
   const AstExpr* callee = expr->as.call.callee;
   if (!emit_expr(ctx, callee, out, PREC_CALL)) return false;
   
+  // Find function declaration if possible
+  const AstFuncDecl* func_decl = NULL;
+  bool is_raylib = false;
+  
+  if (callee->kind == AST_EXPR_IDENT) {
+      if (find_raylib_mapping(callee->as.ident)) {
+          is_raylib = true;
+      } else {
+          for (const AstDecl* d = ctx->module->decls; d; d = d->next) {
+              if (d->kind == AST_DECL_FUNC && str_eq(d->as.func_decl.name, callee->as.ident)) {
+                  func_decl = &d->as.func_decl;
+                  break;
+              }
+          }
+      }
+  }
+
   if (fprintf(out, "(") < 0) return false;
   
   const AstCallArg* arg = expr->as.call.args;
+  const AstParam* param = func_decl ? func_decl->params : NULL;
   bool first = true;
   
   while (arg) {
@@ -532,23 +552,58 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     first = false;
     
     bool needs_addr = false;
-    if (arg->value->kind == AST_EXPR_IDENT) {
-        Str type_name = get_local_type_name(ctx, arg->value->as.ident);
-        if (type_name.len > 0 && !is_primitive_type(type_name)) {
-            needs_addr = true;
+    
+    if (func_decl) {
+        // We have signature!
+        if (param) {
+             // If param expects ptr (view/mod), we need addr
+             if (param->type && (param->type->is_view || param->type->is_mod)) {
+                 needs_addr = true;
+             }
+             param = param->next;
         }
-        // If it's already a pointer in C (view/mod param or local), don't take addr
-        if (needs_addr && is_pointer_type(ctx, arg->value->as.ident)) {
-            needs_addr = false;
+    } else if (is_raylib) {
+        // Raylib functions mostly take values, except pointers are explicit in C
+        // For now assume values for structs unless we know better
+        needs_addr = false; 
+    } else {
+        // Fallback heuristic
+        if (arg->value->kind == AST_EXPR_IDENT) {
+            Str type_name = get_local_type_name(ctx, arg->value->as.ident);
+            if (type_name.len > 0 && !is_primitive_type(type_name)) {
+                needs_addr = true;
+            }
         }
-    } else if (arg->value->kind == AST_EXPR_UNARY && (arg->value->as.unary.op == AST_UNARY_VIEW || arg->value->as.unary.op == AST_UNARY_MOD)) {
-        // If it's explicitly view/mod, we don't need another &
-        needs_addr = false;
     }
 
-    if (needs_addr) {
-        if (fprintf(out, "&") < 0) return false;
+    // If it's already a pointer in C (view/mod param or local), we don't need another &
+    // But if we need value and have pointer, we might need dereference? 
+    // Wait, C backend represents "mod T" as "T*".
+    // If we have "mod T" local, and function expects "T", we need "*local".
+    // If we have "T" local, and function expects "mod T", we need "&local".
+    
+    // Check what we have
+    bool have_ptr = false;
+    if (arg->value->kind == AST_EXPR_IDENT) {
+        if (is_pointer_type(ctx, arg->value->as.ident)) {
+            have_ptr = true;
+        }
+    } else if (arg->value->kind == AST_EXPR_UNARY && (arg->value->as.unary.op == AST_UNARY_VIEW || arg->value->as.unary.op == AST_UNARY_MOD)) {
+        // Explicit reference
+        have_ptr = true; 
+        // Logic for unary view/mod handles the "&" emission inside emit_expr, so "have_ptr" here implies 
+        // the result of emit_expr is a pointer.
     }
+    
+    if (needs_addr && !have_ptr) {
+         if (fprintf(out, "&") < 0) return false;
+         // Special case: if expression is collection literal or object literal, we might need compound literal address?
+         // GCC supports &(Type){...}.
+    } else if (!needs_addr && have_ptr) {
+         if (fprintf(out, "*") < 0) return false;
+    }
+    // Note: If needs_addr and have_ptr, they cancel out (pass pointer as is).
+    // If !needs_addr and !have_ptr, pass value as is.
 
     if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) {
       return false;
@@ -1243,7 +1298,7 @@ static bool emit_raylib_wrapper(const AstFuncDecl* fn, const char* c_name, FILE*
     return true;
 }
 
-static bool emit_function(const AstFuncDecl* func, FILE* out) {
+static bool emit_function(const AstModule* module, const AstFuncDecl* func, FILE* out) {
   if (func->is_extern) {
     return true;
   }
@@ -1279,7 +1334,8 @@ static bool emit_function(const AstFuncDecl* func, FILE* out) {
     free(name);
     return false;
   }
-  CFuncContext ctx = {.params = func->params,
+  CFuncContext ctx = {.module = module,
+                      .params = func->params,
                       .local_count = 0,
                       .returns_value = returns_value,
                       .temp_counter = 0};
@@ -1298,26 +1354,78 @@ static bool emit_function(const AstFuncDecl* func, FILE* out) {
   return ok;
 }
 
+static const AstDecl* find_type_decl(const AstModule* module, Str name) {
+  for (const AstDecl* decl = module->decls; decl; decl = decl->next) {
+    if (decl->kind == AST_DECL_TYPE && str_eq(decl->as.type_decl.name, name)) {
+      return decl;
+    }
+  }
+  return NULL;
+}
+
+static bool emit_single_struct_def(const AstModule* module, const AstDecl* decl, FILE* out, 
+                                   Str* emitted_types, size_t* emitted_count) {
+  // Check if already emitted
+  for (size_t i = 0; i < *emitted_count; ++i) {
+    if (str_eq(emitted_types[i], decl->as.type_decl.name)) return true;
+  }
+
+  // Mark as emitted to prevent infinite recursion on cycles (though cycles require pointers in C)
+  // We'll add it to the list at the END, but for cycle detection in a robust compiler we'd need a "visiting" set.
+  // For now, valid C structs can't have value-cycles.
+  
+  // Emit dependencies first
+  const AstTypeField* field = decl->as.type_decl.fields;
+  while (field) {
+    if (field->type && field->type->parts && !field->type->is_view && !field->type->is_mod) {
+      // It's a value field. Check if it's a user type.
+      Str type_name = field->type->parts->text;
+      if (!is_primitive_type(type_name)) {
+        const AstDecl* dep = find_type_decl(module, type_name);
+        if (dep) {
+          if (!emit_single_struct_def(module, dep, out, emitted_types, emitted_count)) return false;
+        }
+      }
+    }
+    field = field->next;
+  }
+
+  // Now emit this struct
+  char* name = str_to_cstr(decl->as.type_decl.name);
+  if (fprintf(out, "typedef struct {\n") < 0) { free(name); return false; }
+  
+  field = decl->as.type_decl.fields;
+  while (field) {
+    const char* c_type = "int64_t";
+    if (field->type && field->type->parts) {
+        const char* mapped = map_rae_type_to_c(field->type->parts->text);
+        if (mapped) c_type = mapped;
+        else c_type = str_to_cstr(field->type->parts->text); // leak
+    }
+    
+    bool is_ptr = field->type && (field->type->is_view || field->type->is_mod);
+    
+    if (fprintf(out, "  %s%s %.*s;\n", c_type, is_ptr ? "*" : "", (int)field->name.len, field->name.data) < 0) {
+      free(name); return false;
+    }
+    field = field->next;
+  }
+  if (fprintf(out, "} %s;\n\n", name) < 0) { free(name); return false; }
+  free(name);
+
+  emitted_types[*emitted_count] = decl->as.type_decl.name;
+  (*emitted_count)++;
+  return true;
+}
+
 static bool emit_struct_defs(const AstModule* module, FILE* out) {
+  // Simple array to track emitted types
+  Str emitted_types[256]; // simplistic limit
+  size_t emitted_count = 0;
+
   for (const AstDecl* decl = module->decls; decl; decl = decl->next) {
     if (decl->kind == AST_DECL_TYPE) {
-      char* name = str_to_cstr(decl->as.type_decl.name);
-      if (fprintf(out, "typedef struct {\n") < 0) { free(name); return false; }
-      const AstTypeField* field = decl->as.type_decl.fields;
-      while (field) {
-        const char* c_type = "int64_t";
-        if (field->type && field->type->parts) {
-            const char* mapped = map_rae_type_to_c(field->type->parts->text);
-            if (mapped) c_type = mapped;
-            else c_type = str_to_cstr(field->type->parts->text); // leak
-        }
-        if (fprintf(out, "  %s %.*s;\n", c_type, (int)field->name.len, field->name.data) < 0) {
-          free(name); return false;
-        }
-        field = field->next;
-      }
-      if (fprintf(out, "} %s;\n\n", name) < 0) { free(name); return false; }
-      free(name);
+      if (!emit_single_struct_def(module, decl, out, emitted_types, &emitted_count)) return false;
     }
   }
   return true;
@@ -1455,7 +1563,7 @@ bool c_backend_emit(const AstModule* module, const char* out_path) {
     }
     if (body_emitted) continue;
 
-    ok = emit_function(funcs[i], out);
+    ok = emit_function(module, funcs[i], out);
   }
   if (ok && !has_main) {
     fprintf(stderr, "error: C backend could find `func main`\n");
