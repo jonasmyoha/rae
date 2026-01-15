@@ -54,6 +54,7 @@ bool vm_hot_patch(VM* vm, Chunk* new_chunk) {
     if (!vm || !new_chunk) return false;
     
     Chunk* old_chunk = vm->chunk;
+    uint8_t* old_code_start = old_chunk->code;
     size_t code_offset = old_chunk->code_count;
     size_t const_offset = old_chunk->constants_count;
     
@@ -80,8 +81,20 @@ bool vm_hot_patch(VM* vm, Chunk* new_chunk) {
     }
     
     // Restore IP (in case realloc moved it)
-    if (ip_offset > 0 || vm->ip == old_chunk->code) {
+    if (ip_offset > 0 || vm->ip == old_code_start) {
         vm->ip = old_chunk->code + ip_offset;
+    }
+
+    // Update Call Stack Return IPs if realloc happened
+    if (old_chunk->code != old_code_start) {
+        printf("[hot-patch] Code buffer moved from %p to %p. Relocating stack frames...\n", (void*)old_code_start, (void*)old_chunk->code);
+        ptrdiff_t diff = old_chunk->code - old_code_start;
+        for (size_t i = 0; i < vm->call_stack_top; ++i) {
+            CallFrame* frame = &vm->call_stack[i];
+            if (frame->return_ip >= old_code_start && frame->return_ip < old_code_start + code_offset) { // Check if within old range
+                 frame->return_ip += diff;
+            }
+        }
     }
     
     // 4. Relocate instructions in the appended block
