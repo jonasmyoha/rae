@@ -126,6 +126,14 @@ for TARGET in "${TARGETS[@]}"; do
         DISPLAY_NAME="$TEST_NAME"
     fi
 
+    # Determine if we should use --no-implicit
+    # Only use it for files directly in tests/cases (to avoid neighbor pollution)
+    # Don't use it for subdirectories (which are likely implicit projects)
+    NO_IMPLICIT_FLAG=""
+    if [ "$(dirname "$TEST_FILE")" = "$TEST_DIR" ]; then
+        NO_IMPLICIT_FLAG="--no-implicit"
+    fi
+
     TMP_OUTPUT_FILE=""
     TMP_INPUT_FILE=""
     TMP_OUTPUT_DIR=""
@@ -156,9 +164,15 @@ for TARGET in "${TARGETS[@]}"; do
     # Final command assembly
     if [ "${CMD_RUN_ARGS[0]}" = "run" ]; then
         if [ $APPEND_TEST_FILE -eq 1 ]; then
-            CMD_RUN_ARGS=("run" "--target" "$TARGET" "$TEST_FILE")
+            CMD_RUN_ARGS=("run" "--target" "$TARGET" $NO_IMPLICIT_FLAG "$TEST_FILE")
         else
-            CMD_RUN_ARGS=("run" "--target" "$TARGET" "$TMP_INPUT_FILE")
+            CMD_RUN_ARGS=("run" "--target" "$TARGET" $NO_IMPLICIT_FLAG "$TMP_INPUT_FILE")
+        fi
+    elif [ "${CMD_RUN_ARGS[0]}" = "build" ]; then
+        if [ $APPEND_TEST_FILE -eq 1 ]; then
+            CMD_RUN_ARGS=("build" $NO_IMPLICIT_FLAG "${CMD_RUN_ARGS[@]:1}" "$TEST_FILE")
+        else
+            CMD_RUN_ARGS=("build" $NO_IMPLICIT_FLAG "${CMD_RUN_ARGS[@]:1}" "$TMP_INPUT_FILE")
         fi
     elif [ $APPEND_TEST_FILE -eq 1 ]; then
       CMD_RUN_ARGS+=("$TEST_FILE")

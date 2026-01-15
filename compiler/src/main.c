@@ -44,6 +44,7 @@ typedef struct {
   bool watch;
   int timeout;
   int target;
+  bool no_implicit;
 } RunOptions;
 
 typedef struct {
@@ -53,6 +54,7 @@ typedef struct {
   bool emit_c;
   int target;
   int profile;
+  bool no_implicit;
 } BuildOptions;
 
 typedef struct {
@@ -455,18 +457,19 @@ static bool compile_file_chunk(const char* file_path,
                                Chunk* chunk,
                                uint64_t* out_hash,
                                WatchSources* watch_sources,
-                               const char* project_root);
+                               const char* project_root,
+                               bool no_implicit);
 static bool build_c_backend_output(const char* entry_file,
                                    const char* project_root,
-                                   const char* out_path);
+                                   const char* out_file,
+                                   bool no_implicit);
 static bool build_vm_output(const char* entry_file,
-                            const char* project_root,
-                            const char* out_path);
-static bool ensure_directory_tree(const char* dir_path);
+                               const char* project_root,
+                               const char* out_path,
+                               bool no_implicit);static bool ensure_directory_tree(const char* dir_path);
 static bool ensure_parent_directory(const char* file_path);
 static bool copy_runtime_assets(const char* dest_dir);
 static bool write_function_manifest(const AstModule* module, const char* out_c_path);
-static bool write_c_backend_stub(const AstModule* module, const char* out_path);
 static char* derive_entry_stem(const char* entry_file);
 typedef struct {
   WatchSources sources;
@@ -532,10 +535,16 @@ static bool parse_run_args(int argc, char** argv, RunOptions* opts) {
   opts->project_path = NULL;
   opts->timeout = 0;
   opts->target = BUILD_TARGET_LIVE;
+  opts->no_implicit = false;
 
   int i = 0;
   while (i < argc) {
     const char* arg = argv[i];
+    if (strcmp(arg, "--no-implicit") == 0) {
+      opts->no_implicit = true;
+      i += 1;
+      continue;
+    }
     if (strcmp(arg, "--watch") == 0 || strcmp(arg, "-w") == 0) {
       opts->watch = true;
       i += 1;
@@ -601,6 +610,7 @@ static bool parse_build_args(int argc, char** argv, BuildOptions* opts) {
   opts->emit_c = false;
   opts->target = BUILD_TARGET_COMPILED;
   opts->profile = BUILD_PROFILE_RELEASE;
+  opts->no_implicit = false;
 
   const char* entry_from_flag = NULL;
   const char* entry_positional = NULL;
@@ -608,6 +618,11 @@ static bool parse_build_args(int argc, char** argv, BuildOptions* opts) {
   int i = 0;
   while (i < argc) {
     const char* arg = argv[i];
+    if (strcmp(arg, "--no-implicit") == 0) {
+      opts->no_implicit = true;
+      i += 1;
+      continue;
+    }
     if (strcmp(arg, "--emit-c") == 0) {
       opts->emit_c = true;
       i += 1;
@@ -1898,7 +1913,7 @@ static bool auto_import_directory(ModuleGraph* graph, const char* entry_file_pat
   return ok;
 }
 
-static bool module_graph_build(ModuleGraph* graph, const char* entry_file, uint64_t* hash_out) {
+static bool module_graph_build(ModuleGraph* graph, const char* entry_file, uint64_t* hash_out, bool no_implicit) {
   char* resolved_entry = realpath(entry_file, NULL);
   if (!resolved_entry) {
     fprintf(stderr, "error: unable to resolve entry file '%s'\n", entry_file);
@@ -1917,7 +1932,7 @@ static bool module_graph_build(ModuleGraph* graph, const char* entry_file, uint6
   }
   ModuleNode* entry_node = module_graph_find(graph, module_path);
   // Implicitly import all .rae files in the project directory
-  if (entry_node) {
+  if (entry_node && !no_implicit) {
     if (!auto_import_directory(graph, entry_node->file_path, hash_out)) {
       free(module_path);
       free(resolved_entry);
@@ -2130,7 +2145,8 @@ static bool compile_file_chunk(const char* file_path,
                                Chunk* chunk,
                                uint64_t* out_hash,
                                WatchSources* watch_sources,
-                               const char* project_root) {
+                               const char* project_root,
+                               bool no_implicit) {
   Arena* arena = arena_create(1024 * 1024);
   if (!arena) {
     diag_fatal("could not allocate arena");
@@ -2144,7 +2160,7 @@ static bool compile_file_chunk(const char* file_path,
   watch_sources_init(&built_sources);
   uint64_t combined_hash = 0;
   uint64_t* hash_target = out_hash ? &combined_hash : NULL;
-  if (!module_graph_build(&graph, file_path, hash_target)) {
+  if (!module_graph_build(&graph, file_path, hash_target, no_implicit)) {
     watch_sources_clear(&built_sources);
     module_graph_free(&graph);
     arena_destroy(arena);
@@ -2174,33 +2190,8 @@ static bool compile_file_chunk(const char* file_path,
 
 static bool build_c_backend_output(const char* entry_file,
                                    const char* project_root,
-                                   const char* out_path) {
-  if (!out_path || out_path[0] == '\0') {
-    fprintf(stderr, "error: build requires a valid output path\n");
-    return false;
-  }
-  if (!ensure_parent_directory(out_path)) {
-    return false;
-  }
-  char out_dir[PATH_MAX];
-  const char* slash = strrchr(out_path, '/');
-  if (!slash) {
-    strncpy(out_dir, ".", sizeof(out_dir));
-    out_dir[sizeof(out_dir) - 1] = '\0';
-  } else {
-    size_t dir_len = (size_t)(slash - out_path);
-    if (dir_len == 0) {
-      strncpy(out_dir, "/", sizeof(out_dir));
-      out_dir[sizeof(out_dir) - 1] = '\0';
-    } else {
-      if (dir_len >= sizeof(out_dir)) {
-        fprintf(stderr, "error: output directory path too long\n");
-        return false;
-      }
-      memcpy(out_dir, out_path, dir_len);
-      out_dir[dir_len] = '\0';
-    }
-  }
+                                   const char* out_file,
+                                   bool no_implicit) {
   Arena* arena = arena_create(1024 * 1024);
   if (!arena) {
     diag_fatal("could not allocate arena");
@@ -2210,101 +2201,22 @@ static bool build_c_backend_output(const char* entry_file,
     arena_destroy(arena);
     return false;
   }
-  bool ok = module_graph_build(&graph, entry_file, NULL);
-  if (!ok) {
+  if (!module_graph_build(&graph, entry_file, NULL, no_implicit)) {
     module_graph_free(&graph);
     arena_destroy(arena);
     return false;
   }
   AstModule merged = merge_module_graph(&graph);
-  ok = c_backend_emit(&merged, out_path);
-  if (ok) {
-    ok = copy_runtime_assets(out_dir);
-  } else {
-    fprintf(stderr,
-            "note: Rae C backend is not finished, writing stub C output to '%s'.\n"
-            "note: See docs/c-backend-plan.md for the roadmap.\n",
-            out_path);
-    ok = write_c_backend_stub(&merged, out_path);
-  }
-  if (ok) {
-    ok = write_function_manifest(&merged, out_path);
-  }
+  bool ok = c_backend_emit(&merged, out_file);
   module_graph_free(&graph);
   arena_destroy(arena);
   return ok;
 }
 
-static bool write_c_backend_stub(const AstModule* module, const char* out_path) {
-  if (!module || !out_path) {
-    return false;
-  }
-  FILE* out = fopen(out_path, "w");
-  if (!out) {
-    fprintf(stderr, "error: unable to open '%s' for stub C output\n", out_path);
-    return false;
-  }
-  bool ok = true;
-  if (fprintf(out,
-              "/* Rae C backend stub output */\n"
-              "/* See docs/c-backend-plan.md for the roadmap. */\n"
-              "#include <stdio.h>\n\n") < 0) {
-    ok = false;
-  }
-  size_t func_count = 0;
-  for (const AstDecl* decl = module->decls; decl; decl = decl->next) {
-    if (decl->kind == AST_DECL_FUNC) {
-      func_count += 1;
-    }
-  }
-  if (ok) {
-    if (func_count == 0) {
-      if (fprintf(out, "/* No functions discovered in entry module. */\n") < 0) {
-        ok = false;
-      }
-    } else {
-      if (fprintf(out, "/* Rae functions discovered by the frontend: */\n") < 0) {
-        ok = false;
-      }
-      for (const AstDecl* decl = module->decls; decl && ok; decl = decl->next) {
-        if (decl->kind != AST_DECL_FUNC) {
-          continue;
-        }
-        char* name = str_to_cstr(decl->as.func_decl.name);
-        if (!name) {
-          ok = false;
-          break;
-        }
-        if (fprintf(out, "/*   - func %s */\n", name) < 0) {
-          ok = false;
-        }
-        free(name);
-      }
-    }
-  }
-  if (ok) {
-    if (fprintf(out,
-                "\nint main(void) {\n"
-                "  fprintf(stderr, \"Rae C backend stub: see docs/c-backend-plan.md.\\\\n\");\n"
-                "  fprintf(stderr, \"Parsed %zu Rae function(s); codegen not ready yet.\\\\n\");\n"
-                "  return 1;\n"
-                "}\n",
-                func_count) < 0) {
-      ok = false;
-    }
-  }
-  if (fclose(out) != 0) {
-    ok = false;
-  }
-  if (!ok) {
-    remove(out_path);
-  }
-  return ok;
-}
-
 static bool build_vm_output(const char* entry_file,
-                            const char* project_root,
-                            const char* out_path) {
+                               const char* project_root,
+                               const char* out_path,
+                               bool no_implicit) {
   if (!out_path || out_path[0] == '\0') {
     fprintf(stderr, "error: build requires a valid output path\n");
     return false;
@@ -2321,9 +2233,8 @@ static bool build_vm_output(const char* entry_file,
     arena_destroy(arena);
     return false;
   }
-  bool ok = module_graph_build(&graph, entry_file, NULL);
-  if (!ok) {
-    module_graph_free(&graph);
+  bool ok = module_graph_build(&graph, entry_file, NULL, no_implicit);
+  if (!ok) {    module_graph_free(&graph);
     arena_destroy(arena);
     return false;
   }
@@ -2397,7 +2308,7 @@ static bool build_hybrid_output(const char* entry_file,
     arena_destroy(arena);
     return false;
   }
-  bool ok = module_graph_build(&graph, entry_file, NULL);
+  bool ok = module_graph_build(&graph, entry_file, NULL, false);
   if (!ok) {
     module_graph_free(&graph);
     arena_destroy(arena);
@@ -2430,7 +2341,7 @@ static bool build_hybrid_output(const char* entry_file,
 static int run_vm_file(const RunOptions* run_opts, const char* project_root) {
   const char* file_path = run_opts->input_path;
   Chunk chunk;
-  if (!compile_file_chunk(file_path, &chunk, NULL, NULL, project_root)) {
+  if (!compile_file_chunk(file_path, &chunk, NULL, NULL, project_root, run_opts->no_implicit)) {
     return 1;
   }
 
@@ -2475,7 +2386,7 @@ static int run_compiled_file(const RunOptions* run_opts, const char* project_roo
   snprintf(temp_c, sizeof(temp_c), "%s/rae_compiled_%d.c", tmp_dir, getpid());
   snprintf(temp_bin, sizeof(temp_bin), "%s/rae_compiled_%d.bin", tmp_dir, getpid());
 
-  if (!build_c_backend_output(file_path, project_root, temp_c)) {
+  if (!build_c_backend_output(file_path, project_root, temp_c, run_opts->no_implicit)) {
     return 1;
   }
 
@@ -2611,7 +2522,8 @@ static int run_command(const char* cmd, int argc, char** argv) {
       case BUILD_TARGET_LIVE:
         return build_vm_output(build_opts.entry_path,
                                build_opts.project_path,
-                               build_opts.out_path) ?
+                               build_opts.out_path,
+                               build_opts.no_implicit) ?
                    0 :
                    1;
       case BUILD_TARGET_COMPILED:
@@ -2621,7 +2533,8 @@ static int run_command(const char* cmd, int argc, char** argv) {
         }
         return build_c_backend_output(build_opts.entry_path,
                                       build_opts.project_path,
-                                      build_opts.out_path) ?
+                                      build_opts.out_path,
+                                      build_opts.no_implicit) ?
                    0 :
                    1;
       case BUILD_TARGET_HYBRID:
@@ -2920,31 +2833,55 @@ static int run_vm_watch(const RunOptions* run_opts, const char* project_root) {
 
 
 
-  // Initial compilation
+    // Initial compilation
 
-  Chunk chunk;
 
-  uint64_t file_hash = 0;
 
-  WatchSources sources;
+    Chunk chunk;
 
-  watch_sources_init(&sources);
 
-  
 
-  if (!compile_file_chunk(file_path, &chunk, &file_hash, &sources, project_root)) {
+    uint64_t file_hash = 0;
 
-      fprintf(stderr, "error: initial compilation failed\n");
 
-      ctx.running = false;
 
-      sys_thread_join(watch_thread);
+    WatchSources sources;
 
-      sys_mutex_destroy(&ctx.mutex);
 
-      return 1;
 
-  }
+    watch_sources_init(&sources);
+
+
+
+    
+
+
+
+    if (!compile_file_chunk(file_path, &chunk, &file_hash, &sources, project_root, run_opts->no_implicit)) {
+
+
+
+        fprintf(stderr, "error: initial compilation failed\n");
+
+
+
+        ctx.running = false;
+
+
+
+        sys_thread_join(watch_thread);
+
+
+
+        sys_mutex_destroy(&ctx.mutex);
+
+
+
+        return 1;
+
+
+
+    }
 
   
 
@@ -3006,33 +2943,59 @@ static int run_vm_watch(const RunOptions* run_opts, const char* project_root) {
 
           
 
-          Chunk new_chunk;
-
-          chunk_init(&new_chunk);
-
-          uint64_t new_hash = 0;
-
-          WatchSources new_sources;
-
-          watch_sources_init(&new_sources);
+                    Chunk new_chunk;
 
           
 
-          if (compile_file_chunk(file_path, &new_chunk, &new_hash, &new_sources, project_root)) {
+                    chunk_init(&new_chunk);
 
-              sys_mutex_lock(&ctx.mutex);
+          
 
-              bool patched = vm_hot_patch(vm, &new_chunk);
+                    uint64_t new_hash = 0;
 
-              vm->reload_requested = false;
+          
 
-              sys_mutex_unlock(&ctx.mutex);
+                    WatchSources new_sources;
 
-              
+          
 
-              if (patched) {
+                    watch_sources_init(&new_sources);
 
-                  printf("[watch] Hot-patch successful.\n");
+          
+
+                    
+
+          
+
+                    if (compile_file_chunk(file_path, &new_chunk, &new_hash, &new_sources, project_root, run_opts->no_implicit)) {
+
+          
+
+                        sys_mutex_lock(&ctx.mutex);
+
+          
+
+                        bool patched = vm_hot_patch(vm, &new_chunk);
+
+          
+
+                        vm->reload_requested = false;
+
+          
+
+                        sys_mutex_unlock(&ctx.mutex);
+
+          
+
+                        
+
+          
+
+                        if (patched) {
+
+          
+
+                            printf("[watch] Hot-patch successful.\n");
 
                   chunk_free(&new_chunk); // Code copied to VM
 
