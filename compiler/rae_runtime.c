@@ -238,6 +238,14 @@ void rae_list_add(RaeList* list, int64_t item) {
   list->items[list->len++] = item;
 }
 
+void rae_list_remove(RaeList* list, int64_t index) {
+  if (!list || index < 0 || index >= list->len) return;
+  for (int64_t i = index; i < list->len - 1; i++) {
+    list->items[i] = list->items[i + 1];
+  }
+  list->len--;
+}
+
 int64_t rae_list_get(RaeList* list, int64_t index) {
   if (!list || index < 0 || index >= list->len) return 0;
   return list->items[index];

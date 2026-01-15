@@ -44,9 +44,18 @@ typedef enum {
   OP_VIEW_LOCAL = 0x26,
   OP_MOD_LOCAL = 0x27,
   OP_VIEW_FIELD = 0x28,
-  OP_MOD_FIELD = 0x29,
-  OP_SET_LOCAL_FIELD = 0x2A,
-  OP_DUP = 0x2B
+  OP_MOD_FIELD = 0x2A,
+  OP_SET_LOCAL_FIELD = 0x2B,
+  OP_DUP = 0x2C,
+  
+  /* Buffer Ops */
+  OP_BUF_ALLOC = 0x30,
+  OP_BUF_FREE = 0x31,
+  OP_BUF_GET = 0x32,
+  OP_BUF_SET = 0x33,
+  OP_BUF_COPY = 0x34,
+  OP_BUF_LEN = 0x35,
+  OP_BUF_RESIZE = 0x36
 } OpCode;
 
 typedef enum {
