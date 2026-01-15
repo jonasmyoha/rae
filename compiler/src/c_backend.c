@@ -36,6 +36,7 @@ enum {
 typedef struct {
   const AstModule* module;
   const AstParam* params;
+  const char* return_type_name;
   Str locals[256];
   Str local_types[256];
   bool local_is_ptr[256];
@@ -113,6 +114,7 @@ static const char* map_rae_type_to_c(Str type_name) {
   if (str_eq_cstr(type_name, "Bool")) return "int8_t";
   if (str_eq_cstr(type_name, "String")) return "const char*";
   if (str_eq_cstr(type_name, "List")) return "RaeList*";
+  if (str_eq_cstr(type_name, "Buffer")) return "void*";
   // For user types, return name. Caller might need to str_to_cstr.
   return NULL; 
 }
@@ -133,13 +135,15 @@ static bool emit_type_ref_as_c_type(const AstTypeRef* type, FILE* out) {
   const char* c_type_str = map_rae_type_to_c(current->text);
   if (c_type_str) {
       if (fprintf(out, "%s", c_type_str) < 0) return false;
+      // For primitive types (Int, Buffer, etc.), we ignore subsequent parts (generic args)
+      // because they are erased in the C backend for now.
   } else {
       if (fprintf(out, "%.*s", (int)current->text.len, current->text.data) < 0) return false;
-  }
-  
-  while (current->next) { // Handle multi-part identifiers (e.g., Module.Type)
-      current = current->next;
-      if (fprintf(out, "_%.*s", (int)current->text.len, current->text.data) < 0) return false; // Concatenate with underscore
+      
+      while (current->next) { // Handle multi-part identifiers (e.g., Module.Type)
+          current = current->next;
+          if (fprintf(out, "_%.*s", (int)current->text.len, current->text.data) < 0) return false; // Concatenate with underscore
+      }
   }
 
   if (is_ptr) {
@@ -515,12 +519,57 @@ static bool is_primitive_type(Str type_name) {
          str_eq_cstr(type_name, "Char") ||
          str_eq_cstr(type_name, "String") ||
          str_eq_cstr(type_name, "List") ||
-         str_eq_cstr(type_name, "Array");
+         str_eq_cstr(type_name, "Array") ||
+         str_eq_cstr(type_name, "Buffer");
 }
 
 static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
   const AstExpr* callee = expr->as.call.callee;
-  if (!emit_expr(ctx, callee, out, PREC_CALL)) return false;
+  
+  // Handle intrinsic renaming for C backend
+  if (callee->kind == AST_EXPR_IDENT) {
+      Str name = callee->as.ident;
+      if (str_eq_cstr(name, "__buf_alloc")) {
+          fprintf(out, "rae_buf_alloc");
+      } else if (str_eq_cstr(name, "__buf_free")) {
+          fprintf(out, "rae_buf_free");
+      } else if (str_eq_cstr(name, "__buf_resize")) {
+          fprintf(out, "rae_buf_resize");
+      } else if (str_eq_cstr(name, "__buf_len")) {
+          // Buffers in C backend are just pointers, length is managed by the wrapper struct
+          fprintf(out, "0 /* __buf_len not available on raw C pointer */");
+          return true;
+      } else if (str_eq_cstr(name, "__buf_copy")) {
+          fprintf(out, "rae_buf_copy");
+      } else if (str_eq_cstr(name, "__buf_get")) {
+          // Special case for __buf_get: array indexing
+          // __buf_get(buf, idx) -> ((int64_t*)buf)[idx]
+          const AstCallArg* arg = expr->as.call.args;
+          if (!arg || !arg->next) return false;
+          fprintf(out, "((int64_t*)(");
+          if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) return false;
+          fprintf(out, "))[");
+          if (!emit_expr(ctx, arg->next->value, out, PREC_LOWEST)) return false;
+          fprintf(out, "]");
+          return true;
+      } else if (str_eq_cstr(name, "__buf_set")) {
+          // Special case for __buf_set: array assignment
+          // __buf_set(buf, idx, val) -> ((int64_t*)buf)[idx] = val
+          const AstCallArg* arg = expr->as.call.args;
+          if (!arg || !arg->next || !arg->next->next) return false;
+          fprintf(out, "((int64_t*)(");
+          if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) return false;
+          fprintf(out, "))[");
+          if (!emit_expr(ctx, arg->next->value, out, PREC_LOWEST)) return false;
+          fprintf(out, "] = ");
+          if (!emit_expr(ctx, arg->next->next->value, out, PREC_LOWEST)) return false;
+          return true;
+      } else {
+          if (!emit_expr(ctx, callee, out, PREC_CALL)) return false;
+      }
+  } else {
+      if (!emit_expr(ctx, callee, out, PREC_CALL)) return false;
+  }
   
   // Find function declaration if possible
   const AstFuncDecl* func_decl = NULL;
@@ -1111,6 +1160,16 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
       if (fprintf(out, "  return ") < 0) {
         return false;
       }
+      
+      // If returning object literal or keyed collection literal without type, add cast
+      bool is_obj_like = (arg->value->kind == AST_EXPR_OBJECT && !arg->value->as.object_literal.type) ||
+                         (arg->value->kind == AST_EXPR_COLLECTION_LITERAL && !arg->value->as.collection.type && 
+                          arg->value->as.collection.elements && arg->value->as.collection.elements->key);
+      
+      if (is_obj_like) {
+          fprintf(out, "(%s)", ctx->return_type_name);
+      }
+      
       if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) {
         return false;
       }
@@ -1336,6 +1395,7 @@ static bool emit_function(const AstModule* module, const AstFuncDecl* func, FILE
   }
   CFuncContext ctx = {.module = module,
                       .params = func->params,
+                      .return_type_name = return_type,
                       .local_count = 0,
                       .returns_value = returns_value,
                       .temp_counter = 0};

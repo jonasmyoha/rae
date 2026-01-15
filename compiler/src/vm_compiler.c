@@ -416,6 +416,61 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
     return emit_native_call(compiler, name, (uint8_t)arg_count, (int)expr->line, (int)expr->column);
   }
 
+  /* Intrinsic Buffer Ops */
+  if (str_eq_cstr(name, "__buf_alloc")) {
+    const AstCallArg* arg = expr->as.call.args;
+    if (!arg || !compile_expr(compiler, arg->value)) return false;
+    emit_op(compiler, OP_BUF_ALLOC, (int)expr->line);
+    return true;
+  }
+  if (str_eq_cstr(name, "__buf_free")) {
+    const AstCallArg* arg = expr->as.call.args;
+    if (!arg || !compile_expr(compiler, arg->value)) return false;
+    emit_op(compiler, OP_BUF_FREE, (int)expr->line);
+    emit_constant(compiler, value_none(), (int)expr->line);
+    return true;
+  }
+  if (str_eq_cstr(name, "__buf_get")) {
+    const AstCallArg* arg = expr->as.call.args;
+    if (!arg || !compile_expr(compiler, arg->value)) return false;
+    if (!arg->next || !compile_expr(compiler, arg->next->value)) return false;
+    emit_op(compiler, OP_BUF_GET, (int)expr->line);
+    return true;
+  }
+  if (str_eq_cstr(name, "__buf_set")) {
+    const AstCallArg* arg = expr->as.call.args;
+    if (!arg || !compile_expr(compiler, arg->value)) return false;
+    if (!arg->next || !compile_expr(compiler, arg->next->value)) return false;
+    if (!arg->next->next || !compile_expr(compiler, arg->next->next->value)) return false;
+    emit_op(compiler, OP_BUF_SET, (int)expr->line);
+    emit_constant(compiler, value_none(), (int)expr->line);
+    return true;
+  }
+  if (str_eq_cstr(name, "__buf_len")) {
+    const AstCallArg* arg = expr->as.call.args;
+    if (!arg || !compile_expr(compiler, arg->value)) return false;
+    emit_op(compiler, OP_BUF_LEN, (int)expr->line);
+    return true;
+  }
+  if (str_eq_cstr(name, "__buf_resize")) {
+    const AstCallArg* arg = expr->as.call.args;
+    if (!arg || !compile_expr(compiler, arg->value)) return false;
+    if (!arg->next || !compile_expr(compiler, arg->next->value)) return false;
+    emit_op(compiler, OP_BUF_RESIZE, (int)expr->line);
+    emit_constant(compiler, value_none(), (int)expr->line);
+    return true;
+  }
+  if (str_eq_cstr(name, "__buf_copy")) {
+    const AstCallArg* arg = expr->as.call.args;
+    for (int i = 0; i < 5; i++) {
+        if (!arg || !compile_expr(compiler, arg->value)) return false;
+        arg = arg->next;
+    }
+    emit_op(compiler, OP_BUF_COPY, (int)expr->line);
+    emit_constant(compiler, value_none(), (int)expr->line);
+    return true;
+  }
+
   FunctionEntry* entry = function_table_find(&compiler->functions, name);
   if (!entry) {
     char buffer[128];
@@ -987,6 +1042,17 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       
       uint16_t total_arg_count = 1 + explicit_args_count;
 
+      // Handle Built-in List Methods as Native Calls
+      if (str_eq_cstr(method_name, "add")) {
+          return emit_native_call(compiler, str_from_cstr("rae_list_add"), (uint8_t)total_arg_count, (int)expr->line, (int)expr->column);
+      }
+      if (str_eq_cstr(method_name, "length")) {
+          return emit_native_call(compiler, str_from_cstr("rae_list_length"), (uint8_t)total_arg_count, (int)expr->line, (int)expr->column);
+      }
+      if (str_eq_cstr(method_name, "get")) {
+          return emit_native_call(compiler, str_from_cstr("rae_list_get"), (uint8_t)total_arg_count, (int)expr->line, (int)expr->column);
+      }
+
       if (!entry) {
         char buffer[128];
         snprintf(buffer, sizeof(buffer), "unknown method '%.*s'", (int)method_name.len, method_name.data);
@@ -1275,10 +1341,85 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
     }
     case AST_STMT_LOOP: {
       if (stmt->as.loop_stmt.is_range) {
-        diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column,
-                   "range loops not yet supported in VM");
-        compiler->had_error = true;
-        return false;
+        // Range loop: loop x: Type in collection { ... }
+        // stmt->as.loop_stmt.init is a DEF stmt for the loop variable 'x'
+        // stmt->as.loop_stmt.condition is the collection expression
+        
+        uint16_t scope_start_locals = compiler->local_count;
+        
+        // 1. Evaluate collection and store in a hidden local
+        if (!compile_expr(compiler, stmt->as.loop_stmt.condition)) return false;
+        Str col_name = str_from_cstr("__collection");
+        int col_slot = compiler_add_local(compiler, col_name, str_from_cstr("List"));
+        if (col_slot < 0) return false;
+        emit_op(compiler, OP_SET_LOCAL, (int)stmt->line);
+        emit_short(compiler, (uint16_t)col_slot, (int)stmt->line);
+        emit_op(compiler, OP_POP, (int)stmt->line); // Clean stack
+
+        // 2. Initialize index = 0 in a hidden local
+        emit_constant(compiler, value_int(0), (int)stmt->line);
+        Str idx_name = str_from_cstr("__index");
+        int idx_slot = compiler_add_local(compiler, idx_name, str_from_cstr("Int"));
+        if (idx_slot < 0) return false;
+        emit_op(compiler, OP_SET_LOCAL, (int)stmt->line);
+        emit_short(compiler, (uint16_t)idx_slot, (int)stmt->line);
+        emit_op(compiler, OP_POP, (int)stmt->line);
+
+        // 3. Loop Start
+        uint16_t loop_start = (uint16_t)compiler->chunk->code_count;
+
+        // 4. Condition: index < collection.length()
+        emit_op(compiler, OP_GET_LOCAL, (int)stmt->line);
+        emit_short(compiler, (uint16_t)idx_slot, (int)stmt->line);
+        
+        // Call length() on collection
+        emit_op(compiler, OP_GET_LOCAL, (int)stmt->line);
+        emit_short(compiler, (uint16_t)col_slot, (int)stmt->line);
+        if (!emit_native_call(compiler, str_from_cstr("rae_list_length"), 1, (int)stmt->line, 0)) return false;
+        
+        emit_op(compiler, OP_LT, (int)stmt->line);
+        uint16_t exit_jump = emit_jump(compiler, OP_JUMP_IF_FALSE, (int)stmt->line);
+        emit_op(compiler, OP_POP, (int)stmt->line);
+
+        // 5. Body Start: Bind x = collection.get(index)
+        // We need to define the user's loop variable
+        Str var_name = stmt->as.loop_stmt.init->as.def_stmt.name;
+        Str var_type = get_base_type_name(stmt->as.loop_stmt.init->as.def_stmt.type);
+        int var_slot = compiler_add_local(compiler, var_name, var_type);
+        if (var_slot < 0) return false;
+        
+        // collection.get(index)
+        emit_op(compiler, OP_GET_LOCAL, (int)stmt->line);
+        emit_short(compiler, (uint16_t)col_slot, (int)stmt->line);
+        emit_op(compiler, OP_GET_LOCAL, (int)stmt->line);
+        emit_short(compiler, (uint16_t)idx_slot, (int)stmt->line);
+        if (!emit_native_call(compiler, str_from_cstr("rae_list_get"), 2, (int)stmt->line, 0)) return false;
+        
+        emit_op(compiler, OP_SET_LOCAL, (int)stmt->line);
+        emit_short(compiler, (uint16_t)var_slot, (int)stmt->line);
+        emit_op(compiler, OP_POP, (int)stmt->line);
+
+        if (!compile_block(compiler, stmt->as.loop_stmt.body)) return false;
+
+        // 6. Increment: index = index + 1
+        emit_op(compiler, OP_GET_LOCAL, (int)stmt->line);
+        emit_short(compiler, (uint16_t)idx_slot, (int)stmt->line);
+        emit_constant(compiler, value_int(1), (int)stmt->line);
+        emit_op(compiler, OP_ADD, (int)stmt->line);
+        emit_op(compiler, OP_SET_LOCAL, (int)stmt->line);
+        emit_short(compiler, (uint16_t)idx_slot, (int)stmt->line);
+        emit_op(compiler, OP_POP, (int)stmt->line);
+
+        // 7. Jump back
+        emit_op(compiler, OP_JUMP, (int)stmt->line);
+        emit_short(compiler, loop_start, (int)stmt->line);
+
+        // 8. Exit
+        patch_jump(compiler, exit_jump);
+        emit_op(compiler, OP_POP, (int)stmt->line);
+        
+        compiler->local_count = scope_start_locals;
+        return true;
       }
       
       // Enter scope for loop variables

@@ -22,7 +22,6 @@ typedef struct {
 
 RaeList* rae_list_create(int64_t cap);
 void rae_list_add(RaeList* list, int64_t item);
-void rae_list_remove(RaeList* list, int64_t index);
 int64_t rae_list_get(RaeList* list, int64_t index);
 int64_t rae_list_length(RaeList* list);
 
