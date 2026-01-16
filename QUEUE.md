@@ -13,4 +13,16 @@
     - [x] Implement `List2Int` in Rae using `Buffer`.
     - [x] Implement `add`, `get`, `length`, and `remove` (with shifting) in Rae.
     - [x] Create benchmark comparing `List` (C) vs `List2Int` (Rae).
-- [ ] **Phase 3: Heterogeneous Lists (Any Type)**
+- [x] **Phase 3: Heterogeneous Lists (Any Type)**
+    - [x] Implement `Any` type support in compiler and VM.
+    - [x] Implement `List2` (using `Any`) in Rae.
+    - [x] Add automatic boxing/unboxing in C backend.
+- [x] **Phase 4: Generic List2<T>**
+    - [x] Implement `List2<T>` in Rae.
+    - [x] Add compiler support for generic type erasure in C backend.
+    - [x] Verify `List2<Int>` and `List2<String>` work in both VM and Compiled modes.
+- [ ] **Phase 5: Production List Transition**
+    - [ ] Rename `List2` to `List`.
+    - [ ] Move `Buffer` and `List` implementation to `core.rae`.
+    - [ ] Remove C-backed `List` implementation from compiler and runtime.
+    - [ ] Verify all existing tests and examples still pass.
