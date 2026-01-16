@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
 #include <stdint.h>
@@ -97,6 +98,25 @@ static bool native_next_tick(struct VM* vm,
   counter->next += 1;
   out_result->has_value = true;
   out_result->value = value_int(counter->next);
+  return true;
+}
+
+static bool native_rae_time_ms(struct VM* vm,
+                               VmNativeResult* out_result,
+                               const Value* args,
+                               size_t arg_count,
+                               void* user_data) {
+  (void)vm;
+  (void)args;
+  (void)user_data;
+  if (arg_count != 0) return false;
+  
+  struct timeval tv;
+  gettimeofday(&tv, NULL);
+  int64_t ms = (int64_t)tv.tv_sec * 1000 + (int64_t)tv.tv_usec / 1000;
+  
+  out_result->has_value = true;
+  out_result->value = value_int(ms);
   return true;
 }
 
@@ -388,6 +408,7 @@ static bool register_default_natives(VmRegistry* registry, TickCounter* tick_cou
   if (tick_counter) {
     ok = vm_registry_register_native(registry, "nextTick", native_next_tick, tick_counter) && ok;
   }
+  ok = vm_registry_register_native(registry, "rae_time_ms", native_rae_time_ms, NULL) && ok;
   ok = vm_registry_register_native(registry, "sleepMs", native_sleep_ms, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_str", native_rae_str, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_str_concat", native_rae_str_concat, NULL) && ok;
