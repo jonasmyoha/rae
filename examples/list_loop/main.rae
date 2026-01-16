@@ -1,91 +1,53 @@
-# -- List2 Prototype (Int only) --
-type List2Int {
-  data: Buffer Int
-  length: Int
-  capacity: Int
-}
-
-func createList2Int(initialCap: Int): ret List2Int {
-  ret {
-    data: __buf_alloc(size: initialCap),
-    length: 0,
-    capacity: initialCap,
-  }
-}
-
-func add(this: mod List2Int, value: Int) {
-  if this.length is this.capacity {
-    # Simple grow strategy
-    def newCap: Int = this.capacity * 2
-    if newCap is 0 { newCap = 4 }
-    
-    def newData: Buffer Int = __buf_alloc(size: newCap)
-    __buf_copy(
-      src: this.data, src_off: 0,
-      dst: newData, dst_off: 0,
-      len: this.length
-    )
-    __buf_free(buf: this.data)
-    this.data = newData
-    this.capacity = newCap
-  }
-  
-  __buf_set(buf: this.data, index: this.length, value: value)
-  this.length = this.length + 1
-}
-
-func get(this: view List2Int, index: Int): ret Int {
-  if index < 0 or index >= this.length {
-    log("List2Int index out of bounds")
-    ret 0
-  }
-  ret __buf_get(buf: this.data, index: index)
-}
-
-func remove(this: mod List2Int, index: Int) {
-  if index < 0 or index >= this.length {
-    ret
-  }
-  
-  # Shift elements
-  if index < this.length - 1 {
-    __buf_copy(
-      src: this.data, src_off: index + 1,
-      dst: this.data, dst_off: index,
-      len: this.length - index - 1
-    )
-  }
-  
-  this.length = this.length - 1
-}
+import list2_int
 
 func main() {
-  log("List2Int Prototype Test")
+  log("List2Int Library Test")
   def list: List2Int = createList2Int(initialCap: 2)
   
+  # 1. Test basic adds and grow
   add(this: list, value: 10)
   add(this: list, value: 20)
-  add(this: list, value: 30) # Triggers grow
+  add(this: list, value: 30)
   
-  log("Length after 3 adds (should be 3):")
+  log("Length (should be 3):")
   log(list.length)
   
-  log("Item at 0 (should be 10):")
-  log(get(list, index: 0))
-  log("Item at 1 (should be 20):")
+  # 2. Test insert
+  log("Inserting 15 at index 1...")
+  insert(this: list, index: 1, value: 15)
+  # [10, 15, 20, 30]
+  
+  log("Item at 1 (should be 15):")
   log(get(list, index: 1))
-  log("Item at 2 (should be 30):")
+  log("Item at 2 (should be 20):")
   log(get(list, index: 2))
   
-  log("Removing item at 1...")
-  remove(this: list, index: 1)
-  
-  log("New length (should be 2):")
+  # 3. Test pop
+  log("Popped value (should be 30):")
+  log(pop(list))
+  log("New length (should be 3):")
   log(list.length)
-  log("Item at 1 (should be 30):")
-  log(get(list, index: 1))
   
-  log("Iterating via loop:")
+  # 4. Test contains
+  log("Contains 15? (should be true):")
+  log(contains(list, value: 15))
+  log("Contains 100? (should be false):")
+  log(contains(list, value: 100))
+  
+  # 5. Test remove
+  log("Removing index 0...")
+  remove(this: list, index: 0)
+  # [15, 20]
+  log("Item at 0 (should be 15):")
+  log(get(list, index: 0))
+  
+  # 6. Final iteration
+  log("Final list items via buffer loop (includes capacity padding):")
+  loop item in list.data {
+     log(item)
+  }
+  
+  log("Final list items via length loop:")
   def i: Int = 0
   loop i < list.length {
     log(get(list, index: i))

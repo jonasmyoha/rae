@@ -1,0 +1,28 @@
+import list2_int
+
+func main() {
+  def count: Int = 10000
+  log("Benchmarking List (C) vs List2 (Rae) with {count} items")
+  
+  # 1. C List
+  def startC: Int = rae_time_ms()
+  def cList: List Int = {}
+  def i: Int = 0
+  loop i < count {
+    cList.add(value: i)
+    i = i + 1
+  }
+  def endC: Int = rae_time_ms()
+  log("C List Add Time: {endC - startC} ms")
+  
+  # 2. Rae List2
+  def startRae: Int = rae_time_ms()
+  def raeList: List2Int = createList2Int(initialCap: 10)
+  def j: Int = 0
+  loop j < count {
+    add(this: raeList, value: j)
+    j = j + 1
+  }
+  def endRae: Int = rae_time_ms()
+  log("Rae List2 Add Time: {endRae - startRae} ms")
+}
