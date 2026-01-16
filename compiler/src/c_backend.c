@@ -37,6 +37,7 @@ typedef struct {
   const AstModule* module;
   const AstFuncDecl* func_decl;
   const AstParam* params;
+  const AstIdentifierPart* generic_params;
   const char* return_type_name;
   Str locals[256];
   Str local_types[256];
@@ -49,6 +50,7 @@ typedef struct {
 
 // Forward declarations
 static const char* find_raylib_mapping(Str name);
+static const AstDecl* find_type_decl(const AstModule* module, Str name);
 static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_prec);
 static bool emit_function(const AstModule* module, const AstFuncDecl* func, FILE* out);
 static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
@@ -56,13 +58,13 @@ static bool emit_call(CFuncContext* ctx, const AstExpr* expr, FILE* out);
 static bool emit_log_call(CFuncContext* ctx, const AstExpr* expr, FILE* out, bool newline);
 static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out);
 static bool emit_string_literal(FILE* out, Str literal);
-static bool emit_param_list(const AstParam* params, FILE* out);
+static bool emit_param_list(CFuncContext* ctx, const AstParam* params, FILE* out);
 static const char* map_rae_type_to_c(Str type_name);
 static bool is_primitive_type(Str type_name);
 static bool is_pointer_type(CFuncContext* ctx, Str name);
 static bool is_mod_type(CFuncContext* ctx, Str name);
 static Str get_local_type_name(CFuncContext* ctx, Str name);
-static bool emit_type_ref_as_c_type(const AstTypeRef* type, FILE* out);
+static bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* out);
 static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static bool emit_match(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
@@ -71,7 +73,7 @@ static bool is_string_literal_expr(const AstExpr* expr);
 static bool match_cases_use_string(const AstMatchCase* cases, bool* out_use_string);
 static bool match_arms_use_string(const AstMatchArm* arms, bool* out_use_string);
 static bool func_has_return_value(const AstFuncDecl* func);
-static const char* c_return_type(const AstFuncDecl* func);
+static const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func);
 
 static int binary_op_precedence(AstBinaryOp op) {
   switch (op) {
@@ -120,7 +122,7 @@ static const char* map_rae_type_to_c(Str type_name) {
   return NULL;
 }
 
-static bool emit_type_ref_as_c_type(const AstTypeRef* type, FILE* out) {
+static bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* out) {
   if (!type || !type->parts) return fprintf(out, "int64_t") >= 0; // Default to int64_t for unknown types
 
   const AstIdentifierPart* current = type->parts;
@@ -139,7 +141,23 @@ static bool emit_type_ref_as_c_type(const AstTypeRef* type, FILE* out) {
           if (inner) {
               fprintf(out, "%s*", inner);
           } else {
-              fprintf(out, "%.*s*", (int)type->generic_args->parts->text.len, type->generic_args->parts->text.data);
+              // Check if it's a generic param
+              bool is_generic = false;
+              if (ctx && ctx->generic_params) {
+                  const AstIdentifierPart* gp = ctx->generic_params;
+                  while (gp) {
+                      if (str_eq(gp->text, type->generic_args->parts->text)) {
+                          is_generic = true;
+                          break;
+                      }
+                      gp = gp->next;
+                  }
+              }
+              if (is_generic) {
+                  fprintf(out, "RaeAny*");
+              } else {
+                  fprintf(out, "%.*s*", (int)type->generic_args->parts->text.len, type->generic_args->parts->text.data);
+              }
           }
       } else {
           fprintf(out, "void*");
@@ -151,11 +169,28 @@ static bool emit_type_ref_as_c_type(const AstTypeRef* type, FILE* out) {
   if (c_type_str) {
       if (fprintf(out, "%s", c_type_str) < 0) return false;
   } else {
-      if (fprintf(out, "%.*s", (int)current->text.len, current->text.data) < 0) return false;
-      
-      while (current->next) { // Handle multi-part identifiers (e.g., Module.Type)
-          current = current->next;
-          if (fprintf(out, "_%.*s", (int)current->text.len, current->text.data) < 0) return false; // Concatenate with underscore
+      // Check if it's a generic param
+      bool is_generic = false;
+      if (ctx && ctx->generic_params) {
+          const AstIdentifierPart* gp = ctx->generic_params;
+          while (gp) {
+              if (str_eq(gp->text, current->text)) {
+                  is_generic = true;
+                  break;
+              }
+              gp = gp->next;
+          }
+      }
+
+      if (is_generic) {
+          if (fprintf(out, "RaeAny") < 0) return false;
+      } else {
+          if (fprintf(out, "%.*s", (int)current->text.len, current->text.data) < 0) return false;
+          
+          while (current->next) { // Handle multi-part identifiers (e.g., Module.Type)
+              current = current->next;
+              if (fprintf(out, "_%.*s", (int)current->text.len, current->text.data) < 0) return false; // Concatenate with underscore
+          }
       }
   }
 
@@ -172,7 +207,7 @@ static bool emit_type_ref_as_c_type(const AstTypeRef* type, FILE* out) {
   return true;
 }
 
-static bool emit_param_list(const AstParam* params, FILE* out) {
+static bool emit_param_list(CFuncContext* ctx, const AstParam* params, FILE* out) {
   size_t index = 0;
   const AstParam* param = params;
   if (!param) {
@@ -196,7 +231,25 @@ static bool emit_param_list(const AstParam* params, FILE* out) {
             is_ptr = param->type->is_view || param->type->is_mod;
             Str first = param->type->parts->text;
             c_type_base = map_rae_type_to_c(first);
-            if (!c_type_base) c_type_base = free_me = str_to_cstr(first);
+            if (!c_type_base) {
+                // Check if it's a generic param
+                bool is_generic = false;
+                if (ctx && ctx->generic_params) {
+                    const AstIdentifierPart* gp = ctx->generic_params;
+                    while (gp) {
+                        if (str_eq(gp->text, first)) {
+                            is_generic = true;
+                            break;
+                        }
+                        gp = gp->next;
+                    }
+                }
+                if (is_generic) {
+                    c_type_base = "RaeAny";
+                } else {
+                    c_type_base = free_me = str_to_cstr(first);
+                }
+            }
         }
     }
     if (!c_type_base) c_type_base = "int64_t";
@@ -223,7 +276,7 @@ static bool func_has_return_value(const AstFuncDecl* func) {
   return false;
 }
 
-static const char* c_return_type(const AstFuncDecl* func) {
+static const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func) {
   if (func->returns) {
     if (func->returns->next) {
       fprintf(stderr, "error: C backend only supports single return values per function\n");
@@ -245,6 +298,23 @@ static const char* c_return_type(const AstFuncDecl* func) {
         }
         return mapped;
     }
+
+    // Check if it's a generic param
+    bool is_generic = false;
+    if (ctx && ctx->generic_params) {
+        const AstIdentifierPart* gp = ctx->generic_params;
+        while (gp) {
+            if (str_eq(gp->text, func->returns->type->parts->text)) {
+                is_generic = true;
+                break;
+            }
+            gp = gp->next;
+        }
+    }
+    if (is_generic) {
+        return "RaeAny";
+    }
+
     char* type_name = str_to_cstr(func->returns->type->parts->text);
     if (is_ptr) {
         char* buf = malloc(strlen(type_name) + 2);
@@ -266,64 +336,85 @@ static Str get_local_type_name(CFuncContext* ctx, Str name);
 
 static Str infer_expr_type(CFuncContext* ctx, const AstExpr* expr) {
     if (!expr) return (Str){0};
+    Str res = {0};
     switch (expr->kind) {
-        case AST_EXPR_IDENT: return get_local_type_name(ctx, expr->as.ident);
-        case AST_EXPR_INTEGER: return str_from_cstr("Int");
-        case AST_EXPR_FLOAT: return str_from_cstr("Float");
-        case AST_EXPR_BOOL: return str_from_cstr("Bool");
-        case AST_EXPR_STRING: return str_from_cstr("String");
-        case AST_EXPR_CHAR: return str_from_cstr("Char");
+        case AST_EXPR_IDENT:
+            res = get_local_type_name(ctx, expr->as.ident);
+            break;
+        case AST_EXPR_INTEGER: res = str_from_cstr("Int"); break;
+        case AST_EXPR_FLOAT: res = str_from_cstr("Float"); break;
+        case AST_EXPR_BOOL: res = str_from_cstr("Bool"); break;
+        case AST_EXPR_STRING: res = str_from_cstr("String"); break;
+        case AST_EXPR_CHAR: res = str_from_cstr("Char"); break;
         case AST_EXPR_CALL: {
             if (expr->as.call.callee->kind == AST_EXPR_IDENT) {
                 Str name = expr->as.call.callee->as.ident;
                 for (const AstDecl* d = ctx->module->decls; d; d = d->next) {
                     if (d->kind == AST_DECL_FUNC && str_eq(d->as.func_decl.name, name)) {
                         if (d->as.func_decl.returns && d->as.func_decl.returns->type && d->as.func_decl.returns->type->parts) {
-                            return d->as.func_decl.returns->type->parts->text;
+                            Str rtype = d->as.func_decl.returns->type->parts->text;
+                            
+                            // Check if rtype is a generic parameter of the function
+                            const AstIdentifierPart* gp = d->as.func_decl.generic_params;
+                            while (gp) {
+                                if (str_eq(gp->text, rtype)) { res = str_from_cstr("Any"); goto done; }
+                                gp = gp->next;
+                            }
+                            
+                            res = rtype;
+                            goto done;
                         }
                     }
                 }
                 // HACK: for positional 'get' sugar
                 if (str_eq_cstr(name, "get") && expr->as.call.args) {
                     Str obj_type = infer_expr_type(ctx, expr->as.call.args->value);
-                    if (str_eq_cstr(obj_type, "List2") || str_eq_cstr(obj_type, "Any")) return str_from_cstr("Any");
-                    if (str_eq_cstr(obj_type, "List2Int")) return str_from_cstr("Int");
+                    if (str_eq_cstr(obj_type, "List2") || str_eq_cstr(obj_type, "Any")) { res = str_from_cstr("Any"); goto done; }
+                    if (str_eq_cstr(obj_type, "List2Int")) { res = str_from_cstr("Int"); goto done; }
                 }
             }
-            return (Str){0};
+            break;
         }
         case AST_EXPR_MEMBER: {
             Str obj_type = infer_expr_type(ctx, expr->as.member.object);
             if (obj_type.len > 0) {
-                // Find struct field
-                for (const AstDecl* d = ctx->module->decls; d; d = d->next) {
-                    if (d->kind == AST_DECL_TYPE && str_eq(d->as.type_decl.name, obj_type)) {
-                        for (const AstTypeField* f = d->as.type_decl.fields; f; f = f->next) {
-                            if (str_eq(f->name, expr->as.member.member)) {
-                                if (f->type && f->type->parts) {
-                                    if (str_eq_cstr(f->type->parts->text, "Buffer") && f->type->generic_args && f->type->generic_args->parts) {
-                                        return f->type->generic_args->parts->text;
-                                    }
-                                    return f->type->parts->text;
-                                }
-                            }
+                const AstDecl* d = find_type_decl(ctx->module, obj_type);
+                if (d && d->kind == AST_DECL_TYPE) {
+                    for (const AstTypeField* f = d->as.type_decl.fields; f; f = f->next) {
+                        if (str_eq(f->name, expr->as.member.member)) {
+                                                                                                                            if (f->type && f->type->parts) {
+                                                                                                                                Str ftype = f->type->parts->text;
+                                                                                                                                if (str_eq_cstr(ftype, "Buffer") && f->type->generic_args && f->type->generic_args->parts) {
+                                                                                                                                    ftype = f->type->generic_args->parts->text;
+                                                                                                                                }
+                                                                                                                                
+                                                                                                                                // Check if ftype is a generic parameter of the type d
+                                                                                                                                const AstIdentifierPart* gp = d->as.type_decl.generic_params;
+                                                                                                                                while (gp) {
+                                                                                                                                    if (str_eq(gp->text, ftype)) { res = str_from_cstr("Any"); goto done; }
+                                                                                                                                    gp = gp->next;
+                                                                                                                                }
+                                                                                                                                res = ftype;
+                                                                                                                                goto done;
+                                                                                                                            }
                         }
                     }
                 }
             }
-            return (Str){0};
+            break;
         }
         case AST_EXPR_METHOD_CALL: {
             if (str_eq_cstr(expr->as.method_call.method_name, "get")) {
                 Str obj_type = infer_expr_type(ctx, expr->as.method_call.object);
-                // HACK: for List2Any prototype
-                if (str_eq_cstr(obj_type, "List2") || str_eq_cstr(obj_type, "Any")) return str_from_cstr("Any");
-                if (str_eq_cstr(obj_type, "List2Int")) return str_from_cstr("Int");
+                if (str_eq_cstr(obj_type, "List2") || str_eq_cstr(obj_type, "Any")) { res = str_from_cstr("Any"); goto done; }
+                if (str_eq_cstr(obj_type, "List2Int")) { res = str_from_cstr("Int"); goto done; }
             }
-            return (Str){0};
+            break;
         }
-        default: return (Str){0};
+        default: break;
     }
+done:
+    return res;
 }
 
 static bool is_string_expr(const AstExpr* expr) {
@@ -452,14 +543,9 @@ static bool emit_log_call(CFuncContext* ctx, const AstExpr* expr, FILE* out, boo
 
   // Handle Any specifically
   bool is_any = false;
-  if (value->kind == AST_EXPR_IDENT) {
-    Str type_name = get_local_type_name(ctx, value->as.ident);
-    if (str_eq_cstr(type_name, "Any")) is_any = true;
-  } else if (value->kind == AST_EXPR_CALL || value->kind == AST_EXPR_METHOD_CALL) {
-      Str ret_type = infer_expr_type(ctx, value);
-      if (str_eq_cstr(ret_type, "Any")) {
-          is_any = true;
-      }
+  Str inferred_type = infer_expr_type(ctx, value);
+  if (str_eq_cstr(inferred_type, "Any")) {
+      is_any = true;
   }
 
   if (is_any) {
@@ -634,7 +720,10 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
           
           // Try to determine element size
           const char* elem_size_str = "8"; // Default
-          if (ctx->func_decl && str_eq_cstr(ctx->func_decl->name, "createList2")) {
+          if (ctx->func_decl && ctx->func_decl->generic_params) {
+              elem_size_str = "sizeof(RaeAny)";
+          } else if (ctx->func_decl && (str_eq_cstr(ctx->func_decl->name, "createList2") || str_eq_cstr(ctx->func_decl->name, "grow"))) {
+              // HACK: for List2Any prototype
               elem_size_str = "sizeof(RaeAny)";
           }
           
@@ -651,9 +740,10 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
           if (!emit_expr(ctx, arg->next->value, out, PREC_LOWEST)) return false;
           
           const char* elem_size_str = "8";
-          if (ctx->func_decl && str_eq_cstr(ctx->func_decl->name, "grow")) {
-              Str this_type = get_local_type_name(ctx, str_from_cstr("this"));
-              if (str_eq_cstr(this_type, "List2")) elem_size_str = "sizeof(RaeAny)";
+          if (ctx->func_decl && ctx->func_decl->generic_params) {
+              elem_size_str = "sizeof(RaeAny)";
+          } else if (ctx->func_decl && str_eq_cstr(ctx->func_decl->name, "grow")) {
+              elem_size_str = "sizeof(RaeAny)";
           }
           fprintf(out, ", %s)", elem_size_str);
           return true;
@@ -672,8 +762,12 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
           if (!emit_expr(ctx, arg->next->next->next->next->value, out, PREC_LOWEST)) return false; // len
           
           const char* elem_size_str = "8";
-          Str buf_type = infer_expr_type(ctx, arg->value);
-          if (str_eq_cstr(buf_type, "List2") || str_eq_cstr(buf_type, "Any")) elem_size_str = "sizeof(RaeAny)";
+          if (ctx->func_decl && ctx->func_decl->generic_params) {
+              elem_size_str = "sizeof(RaeAny)";
+          } else {
+              Str buf_type = infer_expr_type(ctx, arg->value);
+              if (str_eq_cstr(buf_type, "List2") || str_eq_cstr(buf_type, "Any")) elem_size_str = "sizeof(RaeAny)";
+          }
           
           fprintf(out, ", %s)", elem_size_str);
           return true;
@@ -763,8 +857,20 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
              if (param->type && (param->type->is_view || param->type->is_mod)) {
                  needs_addr = true;
              }
-             if (param->type && param->type->parts && str_eq_cstr(param->type->parts->text, "Any")) {
-                 is_any_param = true;
+             if (param->type && param->type->parts) {
+                 Str ptype = param->type->parts->text;
+                 if (str_eq_cstr(ptype, "Any")) {
+                     is_any_param = true;
+                 } else if (func_decl->generic_params) {
+                     const AstIdentifierPart* gp = func_decl->generic_params;
+                     while (gp) {
+                         if (str_eq(gp->text, ptype)) {
+                             is_any_param = true;
+                             break;
+                         }
+                         gp = gp->next;
+                     }
+                 }
              }
              param = param->next;
         }
@@ -1149,20 +1255,53 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
       return fprintf(out, "%s%.*s", sep, (int)expr->as.member.member.len, expr->as.member.member.data) >= 0;
     }
     case AST_EXPR_OBJECT: {
+      const AstTypeDecl* type_decl = NULL;
       if (expr->as.object_literal.type) {
         fprintf(out, "(");
-        if (!emit_type_ref_as_c_type(expr->as.object_literal.type, out)) return false;
+        if (!emit_type_ref_as_c_type(ctx, expr->as.object_literal.type, out)) return false;
         fprintf(out, ")");
+        
+        Str type_name = expr->as.object_literal.type->parts->text;
+        const AstDecl* d = find_type_decl(ctx->module, type_name);
+        if (d && d->kind == AST_DECL_TYPE) type_decl = &d->as.type_decl;
       }
       if (fprintf(out, "{ ") < 0) return false;
       const AstObjectField* field = expr->as.object_literal.fields;
       while (field) {
         if (fprintf(out, ".%.*s = ", (int)field->name.len, field->name.data) < 0) return false;
-        if (!emit_expr(ctx, field->value, out, PREC_LOWEST)) return false;
-        field = field->next;
-        if (field) {
-          if (fprintf(out, ", ") < 0) return false;
+        
+        bool is_any_field = false;
+        if (type_decl) {
+            const AstTypeField* tf = type_decl->fields;
+            while (tf) {
+                if (str_eq(tf->name, field->name)) {
+                    if (tf->type && tf->type->parts) {
+                        Str ftype = tf->type->parts->text;
+                        if (str_eq_cstr(ftype, "Any")) is_any_field = true;
+                        else {
+                            // Check generic params of the TYPE declaration
+                            const AstIdentifierPart* gp = type_decl->generic_params;
+                            while (gp) {
+                                if (str_eq(gp->text, ftype)) {
+                                    is_any_field = true;
+                                    break;
+                                }
+                                gp = gp->next;
+                            }
+                        }
+                    }
+                    break;
+                }
+                tf = tf->next;
+            }
         }
+        
+        if (is_any_field) fprintf(out, "rae_any(");
+        if (!emit_expr(ctx, field->value, out, PREC_LOWEST)) return false;
+        if (is_any_field) fprintf(out, ")");
+        
+        if (field->next) fprintf(out, ", ");
+        field = field->next;
       }
       return fprintf(out, " }") >= 0;
     }
@@ -1250,7 +1389,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
       if (is_object) {
         if (expr->as.collection.type) {
           fprintf(out, "(");
-          if (!emit_type_ref_as_c_type(expr->as.collection.type, out)) return false;
+          if (!emit_type_ref_as_c_type(ctx, expr->as.collection.type, out)) return false;
           fprintf(out, ")");
         }
         fprintf(out, "{ ");
@@ -1335,9 +1474,23 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
         return false;
       }
       
-      bool ret_is_any = (ctx->func_decl && ctx->func_decl->returns && 
-                         ctx->func_decl->returns->type && ctx->func_decl->returns->type->parts &&
-                         str_eq_cstr(ctx->func_decl->returns->type->parts->text, "Any"));
+      bool ret_is_any = false;
+      if (ctx->func_decl && ctx->func_decl->returns && 
+          ctx->func_decl->returns->type && ctx->func_decl->returns->type->parts) {
+          Str rtype = ctx->func_decl->returns->type->parts->text;
+          if (str_eq_cstr(rtype, "Any")) {
+              ret_is_any = true;
+          } else if (ctx->func_decl->generic_params) {
+              const AstIdentifierPart* gp = ctx->func_decl->generic_params;
+              while (gp) {
+                  if (str_eq(gp->text, rtype)) {
+                      ret_is_any = true;
+                      break;
+                  }
+                  gp = gp->next;
+              }
+          }
+      }
 
       if (ret_is_any) {
           if (arg->value->kind == AST_EXPR_NONE) {
@@ -1370,7 +1523,7 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     
           fprintf(out, "  ");
           if (stmt->as.def_stmt.type) {
-              if (!emit_type_ref_as_c_type(stmt->as.def_stmt.type, out)) return false;
+              if (!emit_type_ref_as_c_type(ctx, stmt->as.def_stmt.type, out)) return false;
           } else {
               fprintf(out, "int64_t");
           }
@@ -1491,9 +1644,6 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
   }
 }
 
-static const char* c_return_type(const AstFuncDecl* func);
-static bool emit_param_list(const AstParam* params, FILE* out);
-
 typedef struct {
     const char* rae_name;
     const char* c_name;
@@ -1522,12 +1672,13 @@ static const char* find_raylib_mapping(Str name) {
 }
 
 static bool emit_raylib_wrapper(const AstFuncDecl* fn, const char* c_name, FILE* out) {
-    char* name = str_to_cstr(fn->name);
-    const char* return_type = c_return_type(fn);
-    
-    fprintf(out, "RAE_UNUSED static %s %s(", return_type, name);
-    emit_param_list(fn->params, out);
-    fprintf(out, ") {\n");
+  CFuncContext temp_ctx = {.generic_params = fn->generic_params};
+  const char* return_type = c_return_type(&temp_ctx, fn);
+  if (!return_type) return false;
+  
+  fprintf(out, "RAE_UNUSED static %s %.*s(", return_type, (int)fn->name.len, fn->name.data);
+  if (!emit_param_list(&temp_ctx, fn->params, out)) return false;
+  fprintf(out, ") {\n");
     
     if (str_eq_cstr(fn->name, "clearBackground")) {
         fprintf(out, "  %s((Color){ (unsigned char)r, (unsigned char)g, (unsigned char)b, (unsigned char)a });\n", c_name);
@@ -1552,7 +1703,6 @@ static bool emit_raylib_wrapper(const AstFuncDecl* fn, const char* c_name, FILE*
         fprintf(out, ");\n");
     }
     fprintf(out, "}\n\n");
-    free(name);
     return true;
 }
 
@@ -1564,8 +1714,13 @@ static bool emit_function(const AstModule* module, const AstFuncDecl* func, FILE
     fprintf(stderr, "error: C backend requires function bodies to be present\n");
     return false;
   }
+  
+  const AstIdentifierPart* generic_params = func->generic_params;
+  
   bool is_main = str_eq_cstr(func->name, "main");
-  const char* return_type = c_return_type(func);
+  
+  CFuncContext temp_ctx = {.generic_params = generic_params};
+  const char* return_type = c_return_type(&temp_ctx, func);
   if (!return_type) {
     return false;
   }
@@ -1574,42 +1729,53 @@ static bool emit_function(const AstModule* module, const AstFuncDecl* func, FILE
     fprintf(stderr, "error: C backend only supports single return values per function\n");
     return false;
   }
+  
   char* name = str_to_cstr(func->name);
   if (!name) return false;
+  
   bool ok = true;
   if (is_main) {
     ok = fprintf(out, "int main(") >= 0;
   } else {
     ok = fprintf(out, "RAE_UNUSED static %s %s(", return_type, name) >= 0;
   }
+  
   if (ok) {
-    ok = emit_param_list(func->params, out);
+    ok = emit_param_list(&temp_ctx, func->params, out);
   }
+  
   if (ok) {
     ok = fprintf(out, ") {\n") >= 0;
   }
+  
   if (!ok) {
     free(name);
     return false;
   }
+
   CFuncContext ctx = {.module = module,
                       .func_decl = func,
                       .params = func->params,
+                      .generic_params = generic_params,
                       .return_type_name = return_type,
                       .local_count = 0,
                       .returns_value = returns_value,
                       .temp_counter = 0};
+                      
   const AstStmt* stmt = func->body->first;
   while (stmt && ok) {
     ok = emit_stmt(&ctx, stmt, out);
     stmt = stmt->next;
   }
+  
   if (ok && is_main) {
     ok = fprintf(out, "  return 0;\n") >= 0;
   }
+  
   if (ok) {
     ok = fprintf(out, "}\n\n") >= 0;
   }
+  
   free(name);
   return ok;
 }
@@ -1654,18 +1820,14 @@ static bool emit_single_struct_def(const AstModule* module, const AstDecl* decl,
   char* name = str_to_cstr(decl->as.type_decl.name);
   if (fprintf(out, "typedef struct {\n") < 0) { free(name); return false; }
   
+  CFuncContext temp_ctx = {.generic_params = decl->as.type_decl.generic_params};
+
   field = decl->as.type_decl.fields;
   while (field) {
-    const char* c_type = "int64_t";
-    if (field->type && field->type->parts) {
-        const char* mapped = map_rae_type_to_c(field->type->parts->text);
-        if (mapped) c_type = mapped;
-        else c_type = str_to_cstr(field->type->parts->text); // leak
-    }
-    
+    fprintf(out, "  ");
     bool is_ptr = field->type && (field->type->is_view || field->type->is_mod);
-    
-    if (fprintf(out, "  %s%s %.*s;\n", c_type, is_ptr ? "*" : "", (int)field->name.len, field->name.data) < 0) {
+    if (!emit_type_ref_as_c_type(&temp_ctx, field->type, out)) { free(name); return false; }
+    if (fprintf(out, "%s %.*s;\n", is_ptr ? "*" : "", (int)field->name.len, field->name.data) < 0) {
       free(name); return false;
     }
     field = field->next;
@@ -1780,19 +1942,21 @@ bool c_backend_emit(const AstModule* module, const char* out_path) {
       ok = false;
       break;
     }
-    const char* return_type = c_return_type(fn);
+    CFuncContext temp_ctx = {.generic_params = fn->generic_params};
+    const char* return_type = c_return_type(&temp_ctx, fn);
     if (!return_type) {
       free(proto);
       ok = false;
       break;
     }
+    
     const char* qualifier = fn->is_extern ? "extern" : "RAE_UNUSED static";
     if (fprintf(out, "%s %s %s(", qualifier, return_type, proto) < 0) {
       free(proto);
       ok = false;
       break;
     }
-    if (!emit_param_list(fn->params, out)) {
+    if (!emit_param_list(&temp_ctx, fn->params, out)) {
       free(proto);
       ok = false;
       break;

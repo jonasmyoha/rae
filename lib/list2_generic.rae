@@ -1,0 +1,48 @@
+# -- List2 Generic --
+type List2(T) {
+  data: Buffer(T)
+  length: Int
+  capacity: Int
+}
+
+func createList2(T)(initialCap: Int): ret List2(T) {
+  ret {
+    data: __buf_alloc(size: initialCap),
+    length: 0,
+    capacity: initialCap,
+  }
+}
+
+func grow(T)(this: mod List2(T)) {
+  def newCap: Int = this.capacity * 2
+  if newCap is 0 { newCap = 4 }
+  
+  def newData: Buffer(T) = __buf_alloc(size: newCap)
+  __buf_copy(
+    src: this.data, src_off: 0,
+    dst: newData, dst_off: 0,
+    len: this.length
+  )
+  __buf_free(buf: this.data)
+  this.data = newData
+  this.capacity = newCap
+}
+
+func add(T)(this: mod List2(T), value: T) {
+  if this.length is this.capacity {
+    grow(this)
+  }
+  
+  __buf_set(buf: this.data, index: this.length, value: value)
+  this.length = this.length + 1
+}
+
+func get(T)(this: view List2(T), index: Int): ret T {
+  if index < 0 or index >= this.length {
+    # Default value for T? 
+    # For now, let's assume we return a dummy value if T is Int or none if Any.
+    # A real implementation would need a way to get default(T).
+    ret __buf_get(buf: this.data, index: 0) # HACK: this will likely crash if empty
+  }
+  ret __buf_get(buf: this.data, index: index)
+}
