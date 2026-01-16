@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <sys/time.h>
+
 static void rae_flush_stdout(void) {
   fflush(stdout);
 }
@@ -15,9 +17,36 @@ int64_t nextTick(void) {
   return ++g_tick_counter;
 }
 
+int64_t rae_time_ms(void) {
+  struct timeval tv;
+  gettimeofday(&tv, NULL);
+  return (int64_t)tv.tv_sec * 1000 + (int64_t)tv.tv_usec / 1000;
+}
+
 void sleepMs(int64_t ms) {
   if (ms > 0) {
     usleep((useconds_t)ms * 1000);
+  }
+}
+
+void rae_log_any(RaeAny value) {
+  rae_log_stream_any(value);
+  printf("\n");
+  rae_flush_stdout();
+}
+
+void rae_log_stream_any(RaeAny value) {
+  switch (value.type) {
+    case RAE_TYPE_INT: printf("%lld", (long long)value.as.i); break;
+    case RAE_TYPE_FLOAT: printf("%g", value.as.f); break;
+    case RAE_TYPE_BOOL: printf("%s", value.as.b ? "true" : "false"); break;
+    case RAE_TYPE_STRING: printf("%s", value.as.s ? value.as.s : "(null)"); break;
+    case RAE_TYPE_CHAR: rae_log_stream_char(value.as.i); break;
+    case RAE_TYPE_ID: printf("Id(%lld)", (long long)value.as.i); break;
+    case RAE_TYPE_KEY: printf("Key(\"%s\")", value.as.s ? value.as.s : "(null)"); break;
+    case RAE_TYPE_LIST: printf("[...]"); break;
+    case RAE_TYPE_BUFFER: printf("#(...)"); break;
+    case RAE_TYPE_NONE: printf("none"); break;
   }
 }
 
@@ -214,6 +243,28 @@ int64_t rae_random_int(int64_t min, int64_t max) {
   if (min >= max) return min;
   uint64_t range = (uint64_t)(max - min + 1);
   return min + (int64_t)(rae_next_u32() % range);
+}
+
+void* rae_buf_alloc(int64_t count, int64_t elem_size) {
+  if (count <= 0) return NULL;
+  return calloc((size_t)count, (size_t)elem_size);
+}
+
+void rae_buf_free(void* buf) {
+  if (buf) free(buf);
+}
+
+void* rae_buf_resize(void* buf, int64_t new_count, int64_t elem_size) {
+  if (new_count <= 0) {
+    if (buf) free(buf);
+    return NULL;
+  }
+  return realloc(buf, (size_t)new_count * (size_t)elem_size);
+}
+
+void rae_buf_copy(void* src, int64_t src_off, void* dst, int64_t dst_off, int64_t len, int64_t elem_size) {
+  if (!src || !dst || len <= 0) return;
+  memmove((char*)dst + dst_off * elem_size, (char*)src + src_off * elem_size, (size_t)len * (size_t)elem_size);
 }
 
 RaeList* rae_list_create(int64_t cap) {
