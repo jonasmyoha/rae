@@ -1,0 +1,56 @@
+# -- List2 Prototype (Any type) --
+type List2 {
+  data: Buffer Any
+  length: Int
+  capacity: Int
+}
+
+func createList2(initialCap: Int): ret List2 {
+  ret {
+    data: __buf_alloc(size: initialCap),
+    length: 0,
+    capacity: initialCap,
+  }
+}
+
+func grow(this: mod List2) {
+  def newCap: Int = this.capacity * 2
+  if newCap is 0 { newCap = 4 }
+  
+  def newData: Buffer Any = __buf_alloc(size: newCap)
+  __buf_copy(
+    src: this.data, src_off: 0,
+    dst: newData, dst_off: 0,
+    len: this.length
+  )
+  __buf_free(buf: this.data)
+  this.data = newData
+  this.capacity = newCap
+}
+
+func add(this: mod List2, value: Any) {
+  if this.length is this.capacity {
+    grow(this)
+  }
+  
+  __buf_set(buf: this.data, index: this.length, value: value)
+  this.length = this.length + 1
+}
+
+func get(this: view List2, index: Int): ret Any {
+  if index < 0 or index >= this.length {
+    ret none
+  }
+  ret __buf_get(buf: this.data, index: index)
+}
+
+func set(this: mod List2, index: Int, value: Any) {
+  if index < 0 or index >= this.length {
+    ret
+  }
+  __buf_set(buf: this.data, index: index, value: value)
+}
+
+func length(this: view List2): ret Int {
+  ret this.length
+}

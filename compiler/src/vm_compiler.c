@@ -1349,8 +1349,22 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
         
         // 1. Evaluate collection and store in a hidden local
         if (!compile_expr(compiler, stmt->as.loop_stmt.condition)) return false;
+        
         Str col_name = str_from_cstr("__collection");
-        int col_slot = compiler_add_local(compiler, col_name, str_from_cstr("List"));
+        Str col_type_name = str_from_cstr("List"); // Default
+        
+        // Simple type inference for identifiers
+        if (stmt->as.loop_stmt.condition->kind == AST_EXPR_IDENT) {
+            Str inferred = get_local_type_name(compiler, stmt->as.loop_stmt.condition->as.ident);
+            if (inferred.len > 0) col_type_name = inferred;
+        } else if (stmt->as.loop_stmt.condition->kind == AST_EXPR_MEMBER) {
+            // HACK: for List2Int prototype, we know 'data' is Buffer
+            if (str_eq_cstr(stmt->as.loop_stmt.condition->as.member.member, "data")) {
+                col_type_name = str_from_cstr("Buffer");
+            }
+        }
+        
+        int col_slot = compiler_add_local(compiler, col_name, col_type_name);
         if (col_slot < 0) return false;
         emit_op(compiler, OP_SET_LOCAL, (int)stmt->line);
         emit_short(compiler, (uint16_t)col_slot, (int)stmt->line);
@@ -1372,17 +1386,23 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
         emit_op(compiler, OP_GET_LOCAL, (int)stmt->line);
         emit_short(compiler, (uint16_t)idx_slot, (int)stmt->line);
         
+        // Determine collection type for length call
+        bool is_buf = str_eq_cstr(col_type_name, "Buffer");
+
         // Call length() on collection
         emit_op(compiler, OP_GET_LOCAL, (int)stmt->line);
         emit_short(compiler, (uint16_t)col_slot, (int)stmt->line);
-        if (!emit_native_call(compiler, str_from_cstr("rae_list_length"), 1, (int)stmt->line, 0)) return false;
+        if (is_buf) {
+            emit_op(compiler, OP_BUF_LEN, (int)stmt->line);
+        } else {
+            if (!emit_native_call(compiler, str_from_cstr("rae_list_length"), 1, (int)stmt->line, 0)) return false;
+        }
         
         emit_op(compiler, OP_LT, (int)stmt->line);
         uint16_t exit_jump = emit_jump(compiler, OP_JUMP_IF_FALSE, (int)stmt->line);
         emit_op(compiler, OP_POP, (int)stmt->line);
 
         // 5. Body Start: Bind x = collection.get(index)
-        // We need to define the user's loop variable
         Str var_name = stmt->as.loop_stmt.init->as.def_stmt.name;
         Str var_type = get_base_type_name(stmt->as.loop_stmt.init->as.def_stmt.type);
         int var_slot = compiler_add_local(compiler, var_name, var_type);
@@ -1393,8 +1413,11 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
         emit_short(compiler, (uint16_t)col_slot, (int)stmt->line);
         emit_op(compiler, OP_GET_LOCAL, (int)stmt->line);
         emit_short(compiler, (uint16_t)idx_slot, (int)stmt->line);
-        if (!emit_native_call(compiler, str_from_cstr("rae_list_get"), 2, (int)stmt->line, 0)) return false;
-        
+        if (is_buf) {
+            emit_op(compiler, OP_BUF_GET, (int)stmt->line);
+        } else {
+            if (!emit_native_call(compiler, str_from_cstr("rae_list_get"), 2, (int)stmt->line, 0)) return false;
+        }
         emit_op(compiler, OP_SET_LOCAL, (int)stmt->line);
         emit_short(compiler, (uint16_t)var_slot, (int)stmt->line);
         emit_op(compiler, OP_POP, (int)stmt->line);
@@ -1576,10 +1599,6 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
     case AST_STMT_ASSIGN: {
       const AstExpr* target = stmt->as.assign_stmt.target;
       if (target->kind == AST_EXPR_IDENT) {
-        if (!compile_expr(compiler, stmt->as.assign_stmt.value)) {
-          return false;
-        }
-
         int slot = compiler_find_local(compiler, target->as.ident);
         if (slot < 0) {
           char buffer[128];
@@ -1591,14 +1610,7 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
         }
 
         if (stmt->as.assign_stmt.is_bind) {
-            // Rebinding: LHS => RHS
-            // For now assume RHS is an identifier
-            // Check if LHS is a bindable slot.
-            if (target->kind == AST_EXPR_IDENT) {
-                // In a real compiler we'd check the type properties here.
-                // For now, let's just assume we allow it if it's a binding.
-            }
-            
+            // ... rebinding logic ...
             if (stmt->as.assign_stmt.value->kind == AST_EXPR_IDENT) {
                 int src_slot = compiler_find_local(compiler, stmt->as.assign_stmt.value->as.ident);
                 emit_op(compiler, OP_MOD_LOCAL, (int)stmt->line);
