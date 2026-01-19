@@ -68,7 +68,7 @@ static Str get_local_type_name(CFuncContext* ctx, Str name);
 static const AstTypeRef* get_local_type_ref(CFuncContext* ctx, Str name);
 static Str get_base_type_name(const AstTypeRef* type);
 static void emit_mangled_function_name(const AstFuncDecl* func, FILE* out);
-static const AstFuncDecl* find_function_overload(const AstModule* module, Str name, Str first_arg_type);
+static const AstFuncDecl* find_function_overload(const AstModule* module, Str name, const Str* param_types, uint16_t param_count);
 static bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* out);
 static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
@@ -375,7 +375,7 @@ static Str infer_expr_type(CFuncContext* ctx, const AstExpr* expr) {
                     first_arg_type = infer_expr_type(ctx, expr->as.call.args->value);
                 }
                 
-                const AstFuncDecl* d = find_function_overload(ctx->module, name, first_arg_type);
+                const AstFuncDecl* d = find_function_overload(ctx->module, name, &first_arg_type, 1);
                 if (d) {
                     if (d->returns && d->returns->type && d->returns->type->parts) {
                         Str rtype = d->returns->type->parts->text;
@@ -588,26 +588,73 @@ static bool is_primitive_type(Str type_name) {
          str_eq_cstr(type_name, "Any");
 }
 
-static const AstFuncDecl* find_function_overload(const AstModule* module, Str name, Str first_arg_type) {
+static const AstFuncDecl* find_function_overload(const AstModule* module, Str name, const Str* param_types, uint16_t param_count) {
     const AstFuncDecl* name_match = NULL;
     for (const AstDecl* d = module->decls; d; d = d->next) {
         if (d->kind == AST_DECL_FUNC && str_eq(d->as.func_decl.name, name)) {
-            Str d_first_type = {0};
-            if (d->as.func_decl.params) {
-                d_first_type = get_base_type_name(d->as.func_decl.params->type);
-            }
+            const AstFuncDecl* fd = &d->as.func_decl;
             
-            if (first_arg_type.len > 0 && str_eq(d_first_type, first_arg_type)) {
-                return &d->as.func_decl;
+            if (param_types != NULL) {
+                // Count parameters
+                uint16_t fd_param_count = 0;
+                for (const AstParam* p = fd->params; p; p = p->next) fd_param_count++;
+                
+                if (fd_param_count == param_count) {
+                    bool mismatch = false;
+                    const AstParam* p = fd->params;
+                    for (uint16_t j = 0; j < param_count; ++j) {
+                        Str fd_type = get_base_type_name(p->type);
+                        if (!str_eq(fd_type, param_types[j])) {
+                            mismatch = true;
+                            break;
+                        }
+                        p = p->next;
+                    }
+                    if (!mismatch) return fd;
+                }
+            } else if (param_count > 0) {
+                // Legacy/First-arg mode
+                Str fd_first_type = {0};
+                if (fd->params) fd_first_type = get_base_type_name(fd->params->type);
+                if (fd_first_type.len > 0 && str_eq(fd_first_type, param_types[0])) {
+                    return fd;
+                }
+            } else {
+                // Name only match
+                uint16_t fd_param_count = 0;
+                for (const AstParam* p = fd->params; p; p = p->next) fd_param_count++;
+                if (fd_param_count == 0) return fd;
+                if (!name_match) name_match = fd;
             }
-            if (first_arg_type.len == 0 && d_first_type.len == 0) {
-                return &d->as.func_decl;
-            }
-            if (!name_match) name_match = &d->as.func_decl;
         }
     }
-    if (first_arg_type.len == 0) return name_match;
-    return NULL;
+    return name_match;
+}
+
+static void emit_mangled_function_name(const AstFuncDecl* func, FILE* out) {
+    if (func->is_extern) {
+        if (str_eq_cstr(func->name, "sleep") || str_eq_cstr(func->name, "sleepMs")) {
+            fprintf(out, "rae_sleep");
+        } else if (str_eq_cstr(func->name, "getEnv")) {
+            fprintf(out, "rae_sys_get_env");
+        } else if (str_eq_cstr(func->name, "exit")) {
+            fprintf(out, "rae_sys_exit");
+        } else if (str_eq_cstr(func->name, "readFile")) {
+            fprintf(out, "rae_sys_read_file");
+        } else if (str_eq_cstr(func->name, "writeFile")) {
+            fprintf(out, "rae_sys_write_file");
+        } else {
+            fprintf(out, "%.*s", (int)func->name.len, func->name.data);
+        }
+        return;
+    }
+    
+    fprintf(out, "rae_%.*s", (int)func->name.len, func->name.data);
+    
+    for (const AstParam* p = func->params; p; p = p->next) {
+        Str p_type = get_base_type_name(p->type);
+        fprintf(out, "_%.*s", (int)p_type.len, p_type.data);
+    }
 }
 
 static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
@@ -710,11 +757,21 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
       if (find_raylib_mapping(callee->as.ident)) {
           is_raylib = true;
       } else {
-          Str first_arg_type = {0};
-          if (expr->as.call.args) {
-              first_arg_type = infer_expr_type(ctx, expr->as.call.args->value);
+          uint16_t arg_count = 0;
+          for (const AstCallArg* arg = expr->as.call.args; arg; arg = arg->next) arg_count++;
+          
+          Str* arg_types = NULL;
+          if (arg_count > 0) {
+              arg_types = malloc(arg_count * sizeof(Str));
+              const AstCallArg* arg = expr->as.call.args;
+              for (uint16_t i = 0; i < arg_count; ++i) {
+                  arg_types[i] = infer_expr_type(ctx, arg->value);
+                  arg = arg->next;
+              }
           }
-          func_decl = find_function_overload(ctx->module, callee->as.ident, first_arg_type);
+          
+          func_decl = find_function_overload(ctx->module, callee->as.ident, arg_types, arg_count);
+          free(arg_types);
       }
   }
 
@@ -979,7 +1036,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
       }
       
       // Check if it's a function (for function pointers or just to be safe)
-      const AstFuncDecl* fd = find_function_overload(ctx->module, expr->as.ident, (Str){0});
+      const AstFuncDecl* fd = find_function_overload(ctx->module, expr->as.ident, NULL, 0);
       if (fd) {
           emit_mangled_function_name(fd, out);
           return true;
@@ -1251,9 +1308,10 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
       AstExprList* current = expr->as.list;
       while (current) { element_count++; current = current->next; }
       
-      const AstFuncDecl* create_fn = find_function_overload(ctx->module, str_from_cstr("createList"), str_from_cstr("Int"));
-      const AstFuncDecl* add_fn = find_function_overload(ctx->module, str_from_cstr("add"), str_from_cstr("List"));
-
+          Str int_type = str_from_cstr("Int");
+          Str list_type = str_from_cstr("List");
+          const AstFuncDecl* create_fn = find_function_overload(ctx->module, str_from_cstr("createList"), &int_type, 1);
+          const AstFuncDecl* add_fn = find_function_overload(ctx->module, str_from_cstr("add"), &list_type, 1);
       fprintf(out, "__extension__ ({ List _l = ");
       if (create_fn) emit_mangled_function_name(create_fn, out);
       else fprintf(out, "createList");
@@ -1273,7 +1331,8 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
     }
     case AST_EXPR_INDEX: {
       Str target_type = infer_expr_type(ctx, expr->as.index.target);
-      const AstFuncDecl* func_decl = find_function_overload(ctx->module, str_from_cstr("get"), target_type);
+      Str param_types[] = { target_type };
+      const AstFuncDecl* func_decl = find_function_overload(ctx->module, str_from_cstr("get"), param_types, 1);
 
       if (func_decl) {
           emit_mangled_function_name(func_decl, out);
@@ -1299,7 +1358,8 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
     case AST_EXPR_METHOD_CALL: {
       Str method = expr->as.method_call.method_name;
       Str obj_type = infer_expr_type(ctx, expr->as.method_call.object);
-      const AstFuncDecl* func_decl = find_function_overload(ctx->module, method, obj_type);
+      Str param_types[] = { obj_type };
+    const AstFuncDecl* func_decl = find_function_overload(ctx->module, method, param_types, 1);
 
       if (func_decl) {
         const char* cast_pre = "";
@@ -1423,9 +1483,10 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
         return true;
       }
       
-      const AstFuncDecl* create_fn = find_function_overload(ctx->module, str_from_cstr("createList"), str_from_cstr("Int"));
-      const AstFuncDecl* add_fn = find_function_overload(ctx->module, str_from_cstr("add"), str_from_cstr("List"));
-
+          Str int_type = str_from_cstr("Int");
+          Str list_type = str_from_cstr("List");
+          const AstFuncDecl* create_fn = find_function_overload(ctx->module, str_from_cstr("createList"), &int_type, 1);
+          const AstFuncDecl* add_fn = find_function_overload(ctx->module, str_from_cstr("add"), &list_type, 1);
       fprintf(out, "__extension__ ({ List _l = ");
       if (create_fn) emit_mangled_function_name(create_fn, out);
       else fprintf(out, "createList");
@@ -1710,7 +1771,9 @@ static bool emit_raylib_wrapper(const AstFuncDecl* fn, const char* c_name, FILE*
   const char* return_type = c_return_type(&temp_ctx, fn);
   if (!return_type) return false;
   
-  fprintf(out, "RAE_UNUSED static %s %.*s(", return_type, (int)fn->name.len, fn->name.data);
+  fprintf(out, "RAE_UNUSED static %s ", return_type);
+  emit_mangled_function_name(fn, out);
+  fprintf(out, "(");
   if (!emit_param_list(&temp_ctx, fn->params, out)) return false;
   fprintf(out, ") {\n");
     
@@ -1738,33 +1801,6 @@ static bool emit_raylib_wrapper(const AstFuncDecl* fn, const char* c_name, FILE*
     }
     fprintf(out, "}\n\n");
     return true;
-}
-
-static void emit_mangled_function_name(const AstFuncDecl* func, FILE* out) {
-    if (func->is_extern) {
-        if (str_eq_cstr(func->name, "sleep") || str_eq_cstr(func->name, "sleepMs")) {
-            fprintf(out, "rae_sleep");
-        } else if (str_eq_cstr(func->name, "getEnv")) {
-            fprintf(out, "rae_sys_get_env");
-        } else if (str_eq_cstr(func->name, "exit")) {
-            fprintf(out, "rae_sys_exit");
-        } else if (str_eq_cstr(func->name, "readFile")) {
-            fprintf(out, "rae_sys_read_file");
-        } else if (str_eq_cstr(func->name, "writeFile")) {
-            fprintf(out, "rae_sys_write_file");
-        } else {
-            fprintf(out, "%.*s", (int)func->name.len, func->name.data);
-        }
-        return;
-    }
-    
-    if (func->params) {
-        Str first_type = get_base_type_name(func->params->type);
-        if (first_type.len > 0) {
-            fprintf(out, "%.*s_", (int)first_type.len, first_type.data);
-        }
-    }
-    fprintf(out, "%.*s", (int)func->name.len, func->name.data);
 }
 
 static bool emit_function(const AstModule* module, const AstFuncDecl* func, FILE* out) {
@@ -2039,16 +2075,32 @@ bool c_backend_emit_module(const AstModule* module, const char* out_path) {
     }
     
     bool body_emitted = false;
-    Str first_type = {0};
-    if (funcs[i]->params) first_type = get_base_type_name(funcs[i]->params->type);
 
     for (size_t j = 0; j < i; j++) {
-        Str j_first_type = {0};
-        if (funcs[j]->params) j_first_type = get_base_type_name(funcs[j]->params->type);
-
-        if (str_eq(funcs[j]->name, funcs[i]->name) && str_eq(j_first_type, first_type) && !funcs[j]->is_extern) {
-            body_emitted = true;
-            break;
+        const AstFuncDecl* fi = funcs[i];
+        const AstFuncDecl* fj = funcs[j];
+        if (str_eq(fj->name, fi->name) && !fj->is_extern) {
+            // Count params for both
+            uint16_t c_i = 0; for (const AstParam* p = fi->params; p; p = p->next) c_i++;
+            uint16_t c_j = 0; for (const AstParam* p = fj->params; p; p = p->next) c_j++;
+            
+            if (c_i == c_j) {
+                bool mismatch = false;
+                const AstParam* pi = fi->params;
+                const AstParam* pj = fj->params;
+                while (pi && pj) {
+                    if (!str_eq(get_base_type_name(pi->type), get_base_type_name(pj->type))) {
+                        mismatch = true;
+                        break;
+                    }
+                    pi = pi->next;
+                    pj = pj->next;
+                }
+                if (!mismatch) {
+                    body_emitted = true;
+                    break;
+                }
+            }
         }
     }
     if (body_emitted) continue;
