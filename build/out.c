@@ -121,14 +121,25 @@ RAE_UNUSED static int64_t randomInt(int64_t min, int64_t max) {
 }
 
 int main(void) {
-  int64_t x = 1;
-  int64_t __match0 = x;
-  if (__match0 == 1) {
-  rae_log_cstr("one");
-  } else if (__match0 == 2) {
-  rae_log_cstr("two");
-  } else {
-  rae_log_cstr("other");
+  rae_log_cstr("Standard List Test");
+  List list = __extension__ ({ List _l = createList(4); listAdd(&_l, rae_any(10)); listAdd(&_l, rae_any("Hello")); listAdd(&_l, rae_any(1)); listAdd(&_l, rae_any(3.14)); _l; });
+  rae_log_cstr("List items:");
+  int64_t i = 0;
+  {
+  while (i < listLength(list)) {
+  rae_log_i64(listGet(&(list), i));
+  i = i + 1;
   }
+  }
+  rae_log_cstr("Modification:");
+  listAdd(list, rae_any("New Item"));
+  {
+  while (i < listLength(list)) {
+  rae_log_i64(listGet(&(list), i));
+  i = i + 1;
+  }
+  }
+  rae_log_cstr("Done.");
   return 0;
 }
+

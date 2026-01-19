@@ -206,9 +206,6 @@ static bool native_rae_str(struct VM* vm,
     case VAL_OBJECT:
       out_result->value = value_string_copy("<object>", 8);
       break;
-    case VAL_LIST:
-      out_result->value = value_string_copy("<list>", 6);
-      break;
     case VAL_ARRAY:
       out_result->value = value_string_copy("<array>", 7);
       break;
@@ -260,91 +257,6 @@ static bool native_rae_str_concat(struct VM* vm,
   }
   out_result->has_value = true;
   out_result->value = value_string_take(res, len1 + len2);
-  return true;
-}
-
-static bool native_rae_list_create(struct VM* vm,
-                                   VmNativeResult* out_result,
-                                   const Value* args,
-                                   size_t arg_count,
-                                   void* user_data) {
-  (void)vm;
-  (void)user_data;
-  if (arg_count != 1 || args[0].type != VAL_INT) return false;
-  out_result->has_value = true;
-  out_result->value = value_list();
-  // ignore cap for now
-  return true;
-}
-
-static bool native_rae_list_add(struct VM* vm,
-                                VmNativeResult* out_result,
-                                const Value* args,
-                                size_t arg_count,
-                                void* user_data) {
-  (void)vm;
-  (void)user_data;
-  if (arg_count != 2) return false;
-  
-  Value* list_ptr = (Value*)&args[0];
-  if (list_ptr->type == VAL_REF) {
-    list_ptr = list_ptr->as.ref_value.target;
-  }
-  
-  if (list_ptr->type != VAL_LIST) return false;
-  
-  value_list_add(list_ptr, args[1]);
-  out_result->has_value = false;
-  return true;
-}
-
-static bool native_rae_list_get(struct VM* vm,
-                                VmNativeResult* out_result,
-                                const Value* args,
-                                size_t arg_count,
-                                void* user_data) {
-  (void)vm;
-  (void)user_data;
-  if (arg_count != 2 || args[1].type != VAL_INT) return false;
-  
-  Value list_val = args[0];
-  if (list_val.type == VAL_REF) {
-    list_val = *list_val.as.ref_value.target;
-  }
-  
-  if (list_val.type != VAL_LIST) return false;
-  
-  ValueList* vl = list_val.as.list_value;
-  int64_t index = args[1].as.int_value;
-  if (!vl || index < 0 || (size_t)index >= vl->count) {
-    out_result->has_value = true;
-    out_result->value = value_none();
-    return true;
-  }
-  out_result->has_value = true;
-  out_result->value = value_copy(&vl->items[index]);
-  return true;
-}
-
-static bool native_rae_list_length(struct VM* vm,
-                                   VmNativeResult* out_result,
-                                   const Value* args,
-                                   size_t arg_count,
-                                   void* user_data) {
-  (void)vm;
-  (void)user_data;
-  if (arg_count != 1) return false;
-  
-  Value list_val = args[0];
-  if (list_val.type == VAL_REF) {
-    list_val = *list_val.as.ref_value.target;
-  }
-  
-  if (list_val.type != VAL_LIST) return false;
-  
-  ValueList* vl = list_val.as.list_value;
-  out_result->has_value = true;
-  out_result->value = value_int(vl ? (int64_t)vl->count : 0);
   return true;
 }
 
@@ -415,10 +327,6 @@ static bool register_default_natives(VmRegistry* registry, TickCounter* tick_cou
   ok = vm_registry_register_native(registry, "rae_seed", native_rae_seed, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_random", native_rae_random, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_random_int", native_rae_random_int, NULL) && ok;
-  ok = vm_registry_register_native(registry, "rae_list_create", native_rae_list_create, NULL) && ok;
-  ok = vm_registry_register_native(registry, "rae_list_add", native_rae_list_add, NULL) && ok;
-  ok = vm_registry_register_native(registry, "rae_list_get", native_rae_list_get, NULL) && ok;
-  ok = vm_registry_register_native(registry, "rae_list_length", native_rae_list_length, NULL) && ok;
   ok = vm_registry_register_raylib(registry) && ok;
   ok = vm_registry_register_tinyexpr(registry) && ok;
   return ok;
@@ -1731,8 +1639,26 @@ static bool module_graph_load_module(ModuleGraph* graph,
                                      const char* file_path,
                                      ModuleStack* stack,
                                      uint64_t* hash_out) {
+  char canonical_path[PATH_MAX];
+  const char* path_to_check = file_path;
+  if (realpath(file_path, canonical_path)) {
+    path_to_check = canonical_path;
+  }
+
   if (module_graph_has_module(graph, module_path)) {
     return true;
+  }
+
+  // Also check if the file is already loaded under a different module path
+  for (ModuleNode* node = graph->head; node; node = node->next) {
+    char node_canonical[PATH_MAX];
+    if (realpath(node->file_path, node_canonical)) {
+      if (strcmp(node_canonical, path_to_check) == 0) {
+        return true;
+      }
+    } else if (strcmp(node->file_path, path_to_check) == 0) {
+      return true;
+    }
   }
   if (module_stack_contains(stack, module_path)) {
     fprintf(stderr, "error: cyclic import detected involving '%s'\n", module_path);

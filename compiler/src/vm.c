@@ -48,7 +48,6 @@ static bool value_is_truthy(const Value* value) {
     case VAL_NONE:
       return false;
     case VAL_OBJECT:
-    case VAL_LIST:
     case VAL_ARRAY:
     case VAL_BUFFER:
     case VAL_REF:
@@ -79,8 +78,6 @@ static bool values_equal(const Value* lhs, const Value* rhs) {
     case VAL_OBJECT:
       // Identity equality for objects
       return lhs->as.object_value.fields == rhs->as.object_value.fields;
-    case VAL_LIST:
-      return lhs->as.list_value == rhs->as.list_value;
     case VAL_ARRAY:
       return lhs->as.array_value == rhs->as.array_value;
     case VAL_BUFFER:
@@ -617,25 +614,6 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
           value_free(&val);
         }
         vm_push(vm, obj);
-        break;
-      }
-      case OP_LIST: {
-        uint16_t count = read_short(vm);
-        Value list = value_list();
-        // Pop elements in reverse order and add them to the list
-        Value* temp_elements = malloc(count * sizeof(Value));
-        if (!temp_elements) {
-            diag_error(NULL, 0, 0, "VM out of memory for list literal");
-            return VM_RUNTIME_ERROR;
-        }
-        for (int i = count - 1; i >= 0; --i) {
-            temp_elements[i] = vm_pop(vm);
-        }
-        for (int i = 0; i < count; ++i) {
-            value_list_add(&list, temp_elements[i]);
-        }
-        free(temp_elements);
-        vm_push(vm, list);
         break;
       }
       case OP_BUF_ALLOC: {
