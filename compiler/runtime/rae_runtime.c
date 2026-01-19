@@ -17,13 +17,13 @@ int64_t nextTick(void) {
   return ++g_tick_counter;
 }
 
-int64_t rae_time_ms(void) {
+int64_t nowMs(void) {
   struct timeval tv;
   gettimeofday(&tv, NULL);
   return (int64_t)tv.tv_sec * 1000 + (int64_t)tv.tv_usec / 1000;
 }
 
-void sleepMs(int64_t ms) {
+void rae_sleep(int64_t ms) {
   if (ms > 0) {
     usleep((useconds_t)ms * 1000);
   }

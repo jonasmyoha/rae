@@ -2,47 +2,47 @@ import list2_int
 
 func benchmarkNativeList(count: Int) {
   logS("Native List(Int): ")
-  def start: Int = rae_time_ms()
+  def start: Int = nowMs()
   
   # 1. Allocation & Adding
-  def startAdd: Int = rae_time_ms()
+  def startAdd: Int = nowMs()
   def list: List(Int) = createList(initialCap: 10)
   def i: Int = 0
   loop i < count {
     list.add(value: i)
     i = i + 1
   }
-  def endAdd: Int = rae_time_ms()
+  def endAdd: Int = nowMs()
   
   # 2. Freeing
-  def startFree: Int = rae_time_ms()
-  list.listFree()
-  def endFree: Int = rae_time_ms()
+  def startFree: Int = nowMs()
+  list.free()
+  def endFree: Int = nowMs()
   
-  def total: Int = rae_time_ms() - start
+  def total: Int = nowMs() - start
   log("{endAdd - startAdd}ms add, {endFree - startFree}ms free, {total}ms total")
 }
 
 func benchmarkSpecializedList(count: Int) {
   logS("Specialized List2Int: ")
-  def start: Int = rae_time_ms()
+  def start: Int = nowMs()
   
   # 1. Allocation & Adding
-  def startAdd: Int = rae_time_ms()
+  def startAdd: Int = nowMs()
   def list: List2Int = createList2Int(initialCap: 10)
   def i: Int = 0
   loop i < count {
     list.add(value: i)
     i = i + 1
   }
-  def endAdd: Int = rae_time_ms()
+  def endAdd: Int = nowMs()
   
   # 2. Freeing
-  def startFree: Int = rae_time_ms()
+  def startFree: Int = nowMs()
   list.list2Free()
-  def endFree: Int = rae_time_ms()
+  def endFree: Int = nowMs()
   
-  def total: Int = rae_time_ms() - start
+  def total: Int = nowMs() - start
   log("{endAdd - startAdd}ms add, {endFree - startFree}ms free, {total}ms total")
 }
 
@@ -56,8 +56,8 @@ func main() {
   loop i < iterations {
     log("Iteration {i + 1}:")
     
-    # Random order logic (simulated with randomInt)
-    if rae_random_int(min: 0, max: 1) is 0 {
+    # Random order logic (simulated with random)
+    if random(min: 0, max: 1) is 0 {
       benchmarkNativeList(count: count)
       benchmarkSpecializedList(count: count)
     } else {
