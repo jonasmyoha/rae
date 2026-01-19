@@ -23,11 +23,14 @@ const statsViewContainer = document.querySelector('[data-view="statistics"]');
 const statsViewRefreshBtn = document.getElementById("stats-view-refresh");
 const buildTestBtn = document.getElementById("build-test-btn");
 const statsTestsList = document.getElementById("stats-tests-list");
+const statsTestsMoreBtn = document.getElementById("stats-tests-more");
 const statsBuildsList = document.getElementById("stats-builds-list");
+const statsBuildsMoreBtn = document.getElementById("stats-builds-more");
 const lineCountCanvas = document.getElementById("line-count-chart");
 const lineCountSummary = document.getElementById("line-count-summary");
 const lineCountEmpty = document.getElementById("line-count-empty");
 const lineCountHistory = document.getElementById("line-count-history");
+const lineCountMoreBtn = document.getElementById("line-count-more");
 const testDurationCanvas = document.getElementById("test-duration-chart");
 const testDurationEmpty = document.getElementById("test-duration-empty");
 const buildDurationCanvas = document.getElementById("build-duration-chart");
@@ -1873,7 +1876,7 @@ async function refreshStatisticsPanels() {
     ]);
     if (testsResult.status === "fulfilled") {
       testDurationMetrics = testsResult.value;
-      renderMetricList(statsTestsList, testDurationMetrics, "tests.duration_ms");
+      renderMetricList(statsTestsList, testDurationMetrics, "tests.duration_ms", statsTestsMoreBtn);
     } else {
       testDurationMetrics = [];
       setStatsListPlaceholder(statsTestsList, "Failed to load test stats.");
@@ -1881,7 +1884,7 @@ async function refreshStatisticsPanels() {
     }
     if (buildsResult.status === "fulfilled") {
       buildDurationMetrics = buildsResult.value;
-      renderMetricList(statsBuildsList, buildDurationMetrics, "builds.duration_ms");
+      renderMetricList(statsBuildsList, buildDurationMetrics, "builds.duration_ms", statsBuildsMoreBtn);
     } else {
       buildDurationMetrics = [];
       setStatsListPlaceholder(statsBuildsList, "Failed to load build stats.");
@@ -1926,14 +1929,34 @@ async function fetchCompilerLineMetrics(limit = 60) {
   return Array.isArray(payload.data) ? payload.data : [];
 }
 
-function renderMetricList(listEl, entries, metricName) {
+function renderMetricList(listEl, entries, metricName, moreBtn) {
   if (!listEl) return;
   listEl.innerHTML = "";
   if (!entries.length) {
     setStatsListPlaceholder(listEl, "No stats recorded yet.");
+    if (moreBtn) moreBtn.hidden = true;
     return;
   }
-  for (const entry of entries) {
+  
+  const initialLimit = 3;
+  const showAll = moreBtn?.dataset.expanded === "true";
+  const visibleEntries = showAll ? entries : entries.slice(0, initialLimit);
+
+  if (moreBtn) {
+    moreBtn.hidden = entries.length <= initialLimit;
+    moreBtn.textContent = showAll ? "Show less" : "More...";
+    
+    // Setup click handler if not already done
+    if (!moreBtn.onclick) {
+      moreBtn.onclick = () => {
+        const isExpanded = moreBtn.dataset.expanded === "true";
+        moreBtn.dataset.expanded = String(!isExpanded);
+        renderMetricList(listEl, entries, metricName, moreBtn);
+      };
+    }
+  }
+
+  for (const entry of visibleEntries) {
     const item = document.createElement("li");
     item.className = "stats-item";
 
@@ -2011,10 +2034,29 @@ function renderLineCountHistory(entries) {
   lineCountHistory.innerHTML = "";
   if (!entries.length) {
     setStatsListPlaceholder(lineCountHistory, "No snapshots recorded yet.");
+    if (lineCountMoreBtn) lineCountMoreBtn.hidden = true;
     return;
   }
-  const rows = entries.slice(-6).reverse();
-  for (const entry of rows) {
+
+  const initialLimit = 3;
+  const showAll = lineCountMoreBtn?.dataset.expanded === "true";
+  const rows = entries.slice().reverse();
+  const visibleRows = showAll ? rows : rows.slice(0, initialLimit);
+
+  if (lineCountMoreBtn) {
+    lineCountMoreBtn.hidden = entries.length <= initialLimit;
+    lineCountMoreBtn.textContent = showAll ? "Show less" : "More...";
+    
+    if (!lineCountMoreBtn.onclick) {
+      lineCountMoreBtn.onclick = () => {
+        const isExpanded = lineCountMoreBtn.dataset.expanded === "true";
+        lineCountMoreBtn.dataset.expanded = String(!isExpanded);
+        renderLineCountHistory(entries);
+      };
+    }
+  }
+
+  for (const entry of visibleRows) {
     const item = document.createElement("li");
     item.className = "stats-item";
     const lineValue = document.createElement("div");
