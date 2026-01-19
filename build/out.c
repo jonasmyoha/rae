@@ -9,15 +9,13 @@ typedef struct {
   int64_t capacity;
 } List;
 
-typedef struct {
-  void* data;
-  int64_t length;
-  int64_t capacity;
-} List2Int;
-
+extern const char* readLine(void);
+extern int64_t readChar(void);
 extern int64_t nextTick(void);
 extern int64_t nowMs(void);
 extern void rae_sleep(int64_t ms);
+extern double rae_int_to_float(int64_t i);
+RAE_UNUSED static double Int_toFloat(int64_t this);
 RAE_UNUSED static List Int_createList(int64_t initialCap);
 RAE_UNUSED static void List_grow(List* this);
 RAE_UNUSED static void List_add(List* this, RaeAny value);
@@ -28,31 +26,13 @@ RAE_UNUSED static RaeAny List_pop(List* this);
 RAE_UNUSED static void List_remove(List* this, int64_t index);
 RAE_UNUSED static void List_clear(List* this);
 RAE_UNUSED static int64_t List_length(List* this);
+RAE_UNUSED static void List_swap(List* this, int64_t i, int64_t j);
+RAE_UNUSED static void List_sort(List* this);
 RAE_UNUSED static void List_free(List* this);
-extern void rae_seed(int64_t n);
-extern double rae_random(void);
-extern int64_t rae_random_int(int64_t min, int64_t max);
-RAE_UNUSED static void Int_seed(int64_t n);
-RAE_UNUSED static double random(void);
-RAE_UNUSED static int64_t Int_random(int64_t min, int64_t max);
-RAE_UNUSED static int64_t Int_abs(int64_t n);
-RAE_UNUSED static double Float_abs(double n);
-RAE_UNUSED static int64_t Int_min(int64_t a, int64_t b);
-RAE_UNUSED static int64_t Int_max(int64_t a, int64_t b);
-RAE_UNUSED static int64_t Int_clamp(int64_t val, int64_t low, int64_t high);
-RAE_UNUSED static List2Int Int_createList2Int(int64_t initialCap);
-RAE_UNUSED static void List2Int_grow(List2Int* this);
-RAE_UNUSED static void List2Int_add(List2Int* this, int64_t value);
-RAE_UNUSED static int64_t List2Int_get(List2Int* this, int64_t index);
-RAE_UNUSED static void List2Int_set(List2Int* this, int64_t index, int64_t value);
-RAE_UNUSED static void List2Int_insert(List2Int* this, int64_t index, int64_t value);
-RAE_UNUSED static int64_t List2Int_pop(List2Int* this);
-RAE_UNUSED static void List2Int_remove(List2Int* this, int64_t index);
-RAE_UNUSED static void List2Int_clear(List2Int* this);
-RAE_UNUSED static int8_t List2Int_contains(List2Int* this, int64_t value);
-RAE_UNUSED static void List2Int_list2Free(List2Int* this);
-RAE_UNUSED static void Int_benchmarkNativeList(int64_t count);
-RAE_UNUSED static void Int_benchmarkSpecializedList(int64_t count);
+
+RAE_UNUSED static double Int_toFloat(int64_t this) {
+  return rae_int_to_float(this);
+}
 
 RAE_UNUSED static List Int_createList(int64_t initialCap) {
   return (List){ .data = rae_buf_alloc(initialCap, sizeof(RaeAny)), .length = 0, .capacity = initialCap };
@@ -133,217 +113,44 @@ RAE_UNUSED static int64_t List_length(List* this) {
   return this->length;
 }
 
+RAE_UNUSED static void List_swap(List* this, int64_t i, int64_t j) {
+  RaeAny temp = ((RaeAny*)(this->data))[i];
+  ((RaeAny*)(this->data))[i] = rae_any(((RaeAny*)(this->data))[j]);
+  ((RaeAny*)(this->data))[j] = rae_any(temp);
+}
+
+RAE_UNUSED static void List_sort(List* this) {
+  int64_t n = List_length(this);
+  int64_t i = 0;
+  {
+  while (i < n) {
+  int64_t j = 0;
+  {
+  while (j < n - i - 1) {
+  int64_t a = ((int64_t)(List_get(this, j)).as.i);
+  int64_t b = ((int64_t)(List_get(this, j + 1)).as.i);
+  if (a > b) {
+  List_swap(this, j, j + 1);
+  }
+  j = j + 1;
+  }
+  }
+  i = i + 1;
+  }
+  }
+}
+
 RAE_UNUSED static void List_free(List* this) {
   rae_buf_free(this->data);
   this->length = 0;
   this->capacity = 0;
 }
 
-RAE_UNUSED static void Int_seed(int64_t n) {
-  rae_seed(n);
-}
-
-RAE_UNUSED static double random(void) {
-  return rae_random();
-}
-
-RAE_UNUSED static int64_t Int_random(int64_t min, int64_t max) {
-  return rae_random_int(min, max);
-}
-
-RAE_UNUSED static int64_t Int_abs(int64_t n) {
-  if (n < 0) {
-  return (-n);
-  }
-  return n;
-}
-
-RAE_UNUSED static double Float_abs(double n) {
-  if (n < 0.0) {
-  return (-n);
-  }
-  return n;
-}
-
-RAE_UNUSED static int64_t Int_min(int64_t a, int64_t b) {
-  if (a < b) {
-  return a;
-  }
-  return b;
-}
-
-RAE_UNUSED static int64_t Int_max(int64_t a, int64_t b) {
-  if (a > b) {
-  return a;
-  }
-  return b;
-}
-
-RAE_UNUSED static int64_t Int_clamp(int64_t val, int64_t low, int64_t high) {
-  if (val < low) {
-  return low;
-  }
-  if (val > high) {
-  return high;
-  }
-  return val;
-}
-
-RAE_UNUSED static List2Int Int_createList2Int(int64_t initialCap) {
-  return (List2Int){ .data = rae_buf_alloc(initialCap, 8), .length = 0, .capacity = initialCap };
-}
-
-RAE_UNUSED static void List2Int_grow(List2Int* this) {
-  int64_t newCap = this->capacity * 2;
-  if (newCap == 0) {
-  newCap = 4;
-  }
-  void* newData = rae_buf_alloc(newCap, sizeof(RaeAny));
-  rae_buf_copy(this->data, 0, newData, 0, this->length, 8);
-  rae_buf_free(this->data);
-  this->data = newData;
-  this->capacity = newCap;
-}
-
-RAE_UNUSED static void List2Int_add(List2Int* this, int64_t value) {
-  if (this->length == this->capacity) {
-  List2Int_grow(this);
-  }
-  ((int64_t*)(this->data))[this->length] = value;
-  this->length = this->length + 1;
-}
-
-RAE_UNUSED static int64_t List2Int_get(List2Int* this, int64_t index) {
-  if (index < 0 || index >= this->length) {
-  return 0;
-  }
-  return ((int64_t*)(this->data))[index];
-}
-
-RAE_UNUSED static void List2Int_set(List2Int* this, int64_t index, int64_t value) {
-  if (index < 0 || index >= this->length) {
-  return;
-  }
-  ((int64_t*)(this->data))[index] = value;
-}
-
-RAE_UNUSED static void List2Int_insert(List2Int* this, int64_t index, int64_t value) {
-  if (index < 0 || index > this->length) {
-  return;
-  }
-  if (this->length == this->capacity) {
-  List2Int_grow(this);
-  }
-  if (index < this->length) {
-  rae_buf_copy(this->data, index, this->data, index + 1, this->length - index, 8);
-  }
-  ((int64_t*)(this->data))[index] = value;
-  this->length = this->length + 1;
-}
-
-RAE_UNUSED static int64_t List2Int_pop(List2Int* this) {
-  if (this->length == 0) {
-  return 0;
-  }
-  int64_t val = ((int64_t*)(this->data))[this->length - 1];
-  this->length = this->length - 1;
-  return val;
-}
-
-RAE_UNUSED static void List2Int_remove(List2Int* this, int64_t index) {
-  if (index < 0 || index >= this->length) {
-  return;
-  }
-  if (index < this->length - 1) {
-  rae_buf_copy(this->data, index + 1, this->data, index, this->length - index - 1, 8);
-  }
-  this->length = this->length - 1;
-}
-
-RAE_UNUSED static void List2Int_clear(List2Int* this) {
-  this->length = 0;
-}
-
-RAE_UNUSED static int8_t List2Int_contains(List2Int* this, int64_t value) {
-  int64_t i = 0;
-  {
-  while (i < this->length) {
-  if (((int64_t*)(this->data))[i] == value) {
-  return 1;
-  }
-  i = i + 1;
-  }
-  }
-  return 0;
-}
-
-RAE_UNUSED static void List2Int_list2Free(List2Int* this) {
-  rae_buf_free(this->data);
-  this->length = 0;
-  this->capacity = 0;
-}
-
-RAE_UNUSED static void Int_benchmarkNativeList(int64_t count) {
-  rae_log_stream_cstr("Native List(Int): ");
-  int64_t start = nowMs();
-  int64_t startAdd = nowMs();
-  List list = Int_createList(10);
-  int64_t i = 0;
-  {
-  while (i < count) {
-  List_add(&(list), rae_any(i));
-  i = i + 1;
-  }
-  }
-  int64_t endAdd = nowMs();
-  int64_t startFree = nowMs();
-  List_free(&(list));
-  int64_t endFree = nowMs();
-  int64_t total = nowMs() - start;
-  rae_log_cstr(rae_str_concat(rae_str_concat(rae_str_concat(rae_str_concat(rae_str_concat(rae_str_concat("", rae_str(endAdd - startAdd)), "ms add, "), rae_str(endFree - startFree)), "ms free, "), rae_str(total)), "ms total"));
-}
-
-RAE_UNUSED static void Int_benchmarkSpecializedList(int64_t count) {
-  rae_log_stream_cstr("Specialized List2Int: ");
-  int64_t start = nowMs();
-  int64_t startAdd = nowMs();
-  List2Int list = Int_createList2Int(10);
-  int64_t i = 0;
-  {
-  while (i < count) {
-  List2Int_add(&(list), i);
-  i = i + 1;
-  }
-  }
-  int64_t endAdd = nowMs();
-  int64_t startFree = nowMs();
-  List2Int_list2Free(&(list));
-  int64_t endFree = nowMs();
-  int64_t total = nowMs() - start;
-  rae_log_cstr(rae_str_concat(rae_str_concat(rae_str_concat(rae_str_concat(rae_str_concat(rae_str_concat("", rae_str(endAdd - startAdd)), "ms add, "), rae_str(endFree - startFree)), "ms free, "), rae_str(total)), "ms total"));
-}
-
 int main(void) {
-  int64_t count = 1000000;
-  rae_log_cstr(rae_str_concat(rae_str_concat("Benchmarking Native Generic List vs Specialized List with ", rae_str(count)), " items"));
-  rae_log_cstr("----------------------------------------------------------------------");
-  int64_t iterations = 3;
-  int64_t i = 0;
-  {
-  while (i < iterations) {
-  rae_log_cstr(rae_str_concat(rae_str_concat("Iteration ", rae_str(i + 1)), ":"));
-  if (rae_random_int(0, 1) == 0) {
-  Int_benchmarkNativeList(count);
-  Int_benchmarkSpecializedList(count);
-  } else {
-  Int_benchmarkSpecializedList(count);
-  Int_benchmarkNativeList(count);
-  }
-  i = i + 1;
-  rae_log_cstr("");
-  }
-  }
-  rae_log_cstr("Benchmark complete.");
+  const char* s = "hello";
+  rae_log_cstr(s);
+  const char* r = "raw";
+  rae_log_cstr(r);
   return 0;
 }
 

@@ -9,31 +9,36 @@ typedef struct {
   int64_t capacity;
 } List;
 
+extern const char* readLine(void);
+extern int64_t readChar(void);
 extern int64_t nextTick(void);
-extern int64_t rae_time_ms(void);
-extern void sleepMs(int64_t ms);
-RAE_UNUSED static List createList(int64_t initialCap);
-RAE_UNUSED static void listGrow(List* this);
-RAE_UNUSED static void listAdd(List* this, RaeAny value);
-RAE_UNUSED static RaeAny listGet(List* this, int64_t index);
-RAE_UNUSED static void listSet(List* this, int64_t index, RaeAny value);
-RAE_UNUSED static void listInsert(List* this, int64_t index, RaeAny value);
-RAE_UNUSED static RaeAny listPop(List* this);
-RAE_UNUSED static void listRemove(List* this, int64_t index);
-RAE_UNUSED static void listClear(List* this);
-RAE_UNUSED static int64_t listLength(List* this);
-extern void rae_seed(int64_t n);
-extern double rae_random(void);
-extern int64_t rae_random_int(int64_t min, int64_t max);
-RAE_UNUSED static void seed(int64_t n);
-RAE_UNUSED static double random(void);
-RAE_UNUSED static int64_t randomInt(int64_t min, int64_t max);
+extern int64_t nowMs(void);
+extern void rae_sleep(int64_t ms);
+extern double rae_int_to_float(int64_t i);
+RAE_UNUSED static double Int_toFloat(int64_t this);
+RAE_UNUSED static List Int_createList(int64_t initialCap);
+RAE_UNUSED static void List_grow(List* this);
+RAE_UNUSED static void List_add(List* this, RaeAny value);
+RAE_UNUSED static RaeAny List_get(List* this, int64_t index);
+RAE_UNUSED static void List_set(List* this, int64_t index, RaeAny value);
+RAE_UNUSED static void List_insert(List* this, int64_t index, RaeAny value);
+RAE_UNUSED static RaeAny List_pop(List* this);
+RAE_UNUSED static void List_remove(List* this, int64_t index);
+RAE_UNUSED static void List_clear(List* this);
+RAE_UNUSED static int64_t List_length(List* this);
+RAE_UNUSED static void List_swap(List* this, int64_t i, int64_t j);
+RAE_UNUSED static void List_sort(List* this);
+RAE_UNUSED static void List_free(List* this);
 
-RAE_UNUSED static List createList(int64_t initialCap) {
+RAE_UNUSED static double Int_toFloat(int64_t this) {
+  return rae_int_to_float(this);
+}
+
+RAE_UNUSED static List Int_createList(int64_t initialCap) {
   return (List){ .data = rae_buf_alloc(initialCap, sizeof(RaeAny)), .length = 0, .capacity = initialCap };
 }
 
-RAE_UNUSED static void listGrow(List* this) {
+RAE_UNUSED static void List_grow(List* this) {
   int64_t newCap = this->capacity * 2;
   if (newCap == 0) {
   newCap = 4;
@@ -45,34 +50,34 @@ RAE_UNUSED static void listGrow(List* this) {
   this->capacity = newCap;
 }
 
-RAE_UNUSED static void listAdd(List* this, RaeAny value) {
+RAE_UNUSED static void List_add(List* this, RaeAny value) {
   if (this->length == this->capacity) {
-  listGrow(this);
+  List_grow(this);
   }
   ((RaeAny*)(this->data))[this->length] = rae_any(value);
   this->length = this->length + 1;
 }
 
-RAE_UNUSED static RaeAny listGet(List* this, int64_t index) {
+RAE_UNUSED static RaeAny List_get(List* this, int64_t index) {
   if (index < 0 || index >= this->length) {
   return rae_any_none();
   }
   return rae_any(((RaeAny*)(this->data))[index]);
 }
 
-RAE_UNUSED static void listSet(List* this, int64_t index, RaeAny value) {
+RAE_UNUSED static void List_set(List* this, int64_t index, RaeAny value) {
   if (index < 0 || index >= this->length) {
   return;
   }
   ((RaeAny*)(this->data))[index] = rae_any(value);
 }
 
-RAE_UNUSED static void listInsert(List* this, int64_t index, RaeAny value) {
+RAE_UNUSED static void List_insert(List* this, int64_t index, RaeAny value) {
   if (index < 0 || index > this->length) {
   return;
   }
   if (this->length == this->capacity) {
-  listGrow(this);
+  List_grow(this);
   }
   if (index < this->length) {
   rae_buf_copy(this->data, index, this->data, index + 1, this->length - index, sizeof(RaeAny));
@@ -81,7 +86,7 @@ RAE_UNUSED static void listInsert(List* this, int64_t index, RaeAny value) {
   this->length = this->length + 1;
 }
 
-RAE_UNUSED static RaeAny listPop(List* this) {
+RAE_UNUSED static RaeAny List_pop(List* this) {
   if (this->length == 0) {
   return rae_any_none();
   }
@@ -90,7 +95,7 @@ RAE_UNUSED static RaeAny listPop(List* this) {
   return rae_any(val);
 }
 
-RAE_UNUSED static void listRemove(List* this, int64_t index) {
+RAE_UNUSED static void List_remove(List* this, int64_t index) {
   if (index < 0 || index >= this->length) {
   return;
   }
@@ -100,24 +105,45 @@ RAE_UNUSED static void listRemove(List* this, int64_t index) {
   this->length = this->length - 1;
 }
 
-RAE_UNUSED static void listClear(List* this) {
+RAE_UNUSED static void List_clear(List* this) {
   this->length = 0;
 }
 
-RAE_UNUSED static int64_t listLength(List* this) {
+RAE_UNUSED static int64_t List_length(List* this) {
   return this->length;
 }
 
-RAE_UNUSED static void seed(int64_t n) {
-  rae_seed(n);
+RAE_UNUSED static void List_swap(List* this, int64_t i, int64_t j) {
+  RaeAny temp = ((RaeAny*)(this->data))[i];
+  ((RaeAny*)(this->data))[i] = rae_any(((RaeAny*)(this->data))[j]);
+  ((RaeAny*)(this->data))[j] = rae_any(temp);
 }
 
-RAE_UNUSED static double random(void) {
-  return rae_random();
+RAE_UNUSED static void List_sort(List* this) {
+  int64_t n = List_length(this);
+  int64_t i = 0;
+  {
+  while (i < n) {
+  int64_t j = 0;
+  {
+  while (j < n - i - 1) {
+  int64_t a = ((int64_t)(List_get(this, j)).as.i);
+  int64_t b = ((int64_t)(List_get(this, j + 1)).as.i);
+  if (a > b) {
+  List_swap(this, j, j + 1);
+  }
+  j = j + 1;
+  }
+  }
+  i = i + 1;
+  }
+  }
 }
 
-RAE_UNUSED static int64_t randomInt(int64_t min, int64_t max) {
-  return rae_random_int(min, max);
+RAE_UNUSED static void List_free(List* this) {
+  rae_buf_free(this->data);
+  this->length = 0;
+  this->capacity = 0;
 }
 
 int main(void) {
@@ -130,3 +156,4 @@ int main(void) {
   rae_log_cstr("C while done");
   return 0;
 }
+

@@ -26,9 +26,8 @@ RAE_UNUSED static RaeAny List_pop(List* this);
 RAE_UNUSED static void List_remove(List* this, int64_t index);
 RAE_UNUSED static void List_clear(List* this);
 RAE_UNUSED static int64_t List_length(List* this);
-RAE_UNUSED static void List_swap(List* this, int64_t i, int64_t j);
-RAE_UNUSED static void List_sort(List* this);
 RAE_UNUSED static void List_free(List* this);
+RAE_UNUSED static void helper(void);
 
 RAE_UNUSED static double Int_toFloat(int64_t this) {
   return rae_int_to_float(this);
@@ -113,49 +112,20 @@ RAE_UNUSED static int64_t List_length(List* this) {
   return this->length;
 }
 
-RAE_UNUSED static void List_swap(List* this, int64_t i, int64_t j) {
-  RaeAny temp = ((RaeAny*)(this->data))[i];
-  ((RaeAny*)(this->data))[i] = rae_any(((RaeAny*)(this->data))[j]);
-  ((RaeAny*)(this->data))[j] = rae_any(temp);
-}
-
-RAE_UNUSED static void List_sort(List* this) {
-  int64_t n = List_length(this);
-  int64_t i = 0;
-  {
-  while (i < n) {
-  int64_t j = 0;
-  {
-  while (j < n - i - 1) {
-  int64_t a = ((int64_t)(List_get(this, j)).as.i);
-  int64_t b = ((int64_t)(List_get(this, j + 1)).as.i);
-  if (a > b) {
-  List_swap(this, j, j + 1);
-  }
-  j = j + 1;
-  }
-  }
-  i = i + 1;
-  }
-  }
-}
-
 RAE_UNUSED static void List_free(List* this) {
   rae_buf_free(this->data);
   this->length = 0;
   this->capacity = 0;
 }
 
+RAE_UNUSED static void helper(void) {
+  rae_log_cstr("Hello from C backend helper");
+}
+
 int main(void) {
-  int64_t x = 1;
-  int64_t __match0 = x;
-  if (__match0 == 1) {
-  rae_log_cstr("one");
-  } else if (__match0 == 2) {
-  rae_log_cstr("two");
-  } else {
-  rae_log_cstr("other");
-  }
+  rae_log_cstr("C backend demo start");
+  helper();
+  rae_log_cstr("C backend demo end");
   return 0;
 }
 

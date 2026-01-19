@@ -166,6 +166,101 @@ const char* rae_str_concat(const char* a, const char* b) {
   return result;
 }
 
+int64_t rae_str_len(const char* s) {
+  if (!s) return 0;
+  return (int64_t)strlen(s);
+}
+
+int64_t rae_str_compare(const char* a, const char* b) {
+  if (!a && !b) return 0;
+  if (!a) return -1;
+  if (!b) return 1;
+  return (int64_t)strcmp(a, b);
+}
+
+const char* rae_str_sub(const char* s, int64_t start, int64_t len) {
+  if (!s) return "";
+  int64_t slen = (int64_t)strlen(s);
+  if (start < 0) start = 0;
+  if (start >= slen) return "";
+  if (start + len > slen) len = slen - start;
+  if (len <= 0) return "";
+  
+  char* result = malloc((size_t)len + 1);
+  if (result) {
+    memcpy(result, s + start, (size_t)len);
+    result[len] = '\0';
+  }
+  return result;
+}
+
+int8_t rae_str_contains(const char* s, const char* sub) {
+  if (!s || !sub) return 0;
+  return strstr(s, sub) != NULL;
+}
+
+double rae_str_to_f64(const char* s) {
+  if (!s) return 0.0;
+  return atof(s);
+}
+
+int64_t rae_str_to_i64(const char* s) {
+  if (!s) return 0;
+  return (int64_t)atoll(s);
+}
+
+const char* rae_io_read_line(void) {
+  char* buffer = NULL;
+  size_t len = 0;
+  if (getline(&buffer, &len, stdin) == -1) {
+    free(buffer);
+    return "";
+  }
+  // Remove newline
+  size_t blen = strlen(buffer);
+  if (blen > 0 && buffer[blen-1] == '\n') buffer[blen-1] = '\0';
+  return buffer;
+}
+
+int64_t rae_io_read_char(void) {
+  return (int64_t)getchar();
+}
+
+void rae_sys_exit(int64_t code) {
+  exit((int)code);
+}
+
+const char* rae_sys_get_env(const char* name) {
+  if (!name) return NULL;
+  return getenv(name);
+}
+
+const char* rae_sys_read_file(const char* path) {
+  if (!path) return NULL;
+  FILE* f = fopen(path, "rb");
+  if (!f) return NULL;
+  fseek(f, 0, SEEK_END);
+  long len = ftell(f);
+  fseek(f, 0, SEEK_SET);
+  char* buffer = malloc((size_t)len + 1);
+  if (buffer) {
+    fread(buffer, 1, (size_t)len, f);
+    buffer[len] = '\0';
+  }
+  fclose(f);
+  return buffer;
+}
+
+int8_t rae_sys_write_file(const char* path, const char* content) {
+  if (!path || !content) return 0;
+  FILE* f = fopen(path, "wb");
+  if (!f) return 0;
+  size_t len = strlen(content);
+  size_t written = fwrite(content, 1, len, f);
+  fclose(f);
+  return written == len;
+}
+
 const char* rae_str_i64(int64_t v) {
   char* buffer = malloc(32);
   if (buffer) {
@@ -262,4 +357,8 @@ void* rae_buf_resize(void* buf, int64_t new_count, int64_t elem_size) {
 void rae_buf_copy(void* src, int64_t src_off, void* dst, int64_t dst_off, int64_t len, int64_t elem_size) {
   if (!src || !dst || len <= 0) return;
   memmove((char*)dst + dst_off * elem_size, (char*)src + src_off * elem_size, (size_t)len * (size_t)elem_size);
+}
+
+double rae_int_to_float(int64_t i) {
+  return (double)i;
 }
