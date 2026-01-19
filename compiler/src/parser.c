@@ -1375,6 +1375,30 @@ static void check_camel_case(Parser* parser, const Token* token, const char* con
       parser_error(parser, token, "%s name '%.*s' should be camelCase (start with lowercase)",
                    context, (int)token->lexeme.len, token->lexeme.data);
     }
+    for (size_t i = 0; i < token->lexeme.len; ++i) {
+      if (token->lexeme.data[i] == '_') {
+        parser_error(parser, token, "%s name '%.*s' should be camelCase (no underscores allowed)",
+                     context, (int)token->lexeme.len, token->lexeme.data);
+        break;
+      }
+    }
+  }
+}
+
+static void check_pascal_case(Parser* parser, const Token* token, const char* context) {
+  if (token && token->lexeme.len > 0) {
+    char first = token->lexeme.data[0];
+    if (first >= 'a' && first <= 'z') {
+      parser_error(parser, token, "%s name '%.*s' should be PascalCase (start with uppercase)",
+                   context, (int)token->lexeme.len, token->lexeme.data);
+    }
+    for (size_t i = 0; i < token->lexeme.len; ++i) {
+      if (token->lexeme.data[i] == '_') {
+        parser_error(parser, token, "%s name '%.*s' should be PascalCase (no underscores allowed)",
+                     context, (int)token->lexeme.len, token->lexeme.data);
+        break;
+      }
+    }
   }
 }
 
@@ -1658,6 +1682,7 @@ static AstTypeField* parse_type_fields(Parser* parser) {
 static AstDecl* parse_type_declaration(Parser* parser) {
   const Token* type_token = parser_previous(parser);
   const Token* name = parser_consume_ident(parser, "expected type name");
+  check_pascal_case(parser, name, "type");
   AstDecl* decl = parser_alloc(parser, sizeof(AstDecl));
   decl->kind = AST_DECL_TYPE;
   decl->line = type_token->line;

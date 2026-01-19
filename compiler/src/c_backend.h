@@ -5,6 +5,6 @@
 
 #include "ast.h"
 
-bool c_backend_emit(const AstModule* module, const char* out_path);
+bool c_backend_emit_module(const AstModule* module, const char* out_path);
 
 #endif /* C_BACKEND_H */
