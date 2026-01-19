@@ -110,7 +110,7 @@ const server = Bun.serve<SocketData>({
 
     if (url.pathname === "/api/stats/recent" && req.method === "GET") {
       const metric = url.searchParams.get("metric") ?? "tests.duration_ms";
-      const limit = Math.min(Number(url.searchParams.get("limit") ?? 20), 100);
+      const limit = Math.min(Number(url.searchParams.get("limit") ?? 20), 1000);
       const data = statsStore.listRecentMetrics(metric, Number.isFinite(limit) ? limit : 20);
       return new Response(JSON.stringify({ metric, data }), {
         headers: { "Content-Type": "application/json" }
@@ -119,7 +119,7 @@ const server = Bun.serve<SocketData>({
 
     if (url.pathname === "/api/stats/compiler-metrics" && req.method === "GET") {
       const limitParam = Number(url.searchParams.get("limit") ?? 60);
-      const limit = Number.isFinite(limitParam) ? Math.max(1, Math.min(limitParam, 200)) : 60;
+      const limit = Number.isFinite(limitParam) ? Math.max(1, Math.min(limitParam, 1000)) : 60;
       const data = await readCompilerMetrics(limit);
       return new Response(JSON.stringify({ data }), {
         headers: { "Content-Type": "application/json" }

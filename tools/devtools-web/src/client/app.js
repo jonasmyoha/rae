@@ -1909,7 +1909,7 @@ async function refreshStatisticsPanels() {
   }
 }
 
-async function fetchMetricSeries(metric, limit = 15) {
+async function fetchMetricSeries(metric, limit = 500) {
   const response = await fetch(
     `/api/stats/recent?metric=${encodeURIComponent(metric)}&limit=${limit}`
   );
@@ -1920,7 +1920,7 @@ async function fetchMetricSeries(metric, limit = 15) {
   return Array.isArray(payload.data) ? payload.data : [];
 }
 
-async function fetchCompilerLineMetrics(limit = 60) {
+async function fetchCompilerLineMetrics(limit = 500) {
   const response = await fetch(`/api/stats/compiler-metrics?limit=${limit}`);
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}`);
