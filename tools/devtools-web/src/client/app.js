@@ -28,6 +28,10 @@ const lineCountCanvas = document.getElementById("line-count-chart");
 const lineCountSummary = document.getElementById("line-count-summary");
 const lineCountEmpty = document.getElementById("line-count-empty");
 const lineCountHistory = document.getElementById("line-count-history");
+const testDurationCanvas = document.getElementById("test-duration-chart");
+const testDurationEmpty = document.getElementById("test-duration-empty");
+const buildDurationCanvas = document.getElementById("build-duration-chart");
+const buildDurationEmpty = document.getElementById("build-duration-empty");
 const errorIndicator = document.getElementById("error-indicator");
 const errorCount = document.getElementById("error-count");
 const errorModal = document.getElementById("error-log-modal");
@@ -157,6 +161,8 @@ let exampleEditMode = false;
 let exampleEditorDirty = false;
 let statsViewLoaded = false;
 let compilerLineMetrics = [];
+let testDurationMetrics = [];
+let buildDurationMetrics = [];
 let lineChartFrame = null;
 let availableTargets = [];
 let lastTestTargetLabel = "";
@@ -1866,21 +1872,24 @@ async function refreshStatisticsPanels() {
       fetchCompilerLineMetrics()
     ]);
     if (testsResult.status === "fulfilled") {
-      renderMetricList(statsTestsList, testsResult.value, "tests.duration_ms");
+      testDurationMetrics = testsResult.value;
+      renderMetricList(statsTestsList, testDurationMetrics, "tests.duration_ms");
     } else {
+      testDurationMetrics = [];
       setStatsListPlaceholder(statsTestsList, "Failed to load test stats.");
       recordError("Stats", getErrorMessage(testsResult.reason));
     }
     if (buildsResult.status === "fulfilled") {
-      renderMetricList(statsBuildsList, buildsResult.value, "builds.duration_ms");
+      buildDurationMetrics = buildsResult.value;
+      renderMetricList(statsBuildsList, buildDurationMetrics, "builds.duration_ms");
     } else {
+      buildDurationMetrics = [];
       setStatsListPlaceholder(statsBuildsList, "Failed to load build stats.");
       recordError("Stats", getErrorMessage(buildsResult.reason));
     }
     if (compilerResult.status === "fulfilled") {
       compilerLineMetrics = compilerResult.value;
       renderLineCountDetails(compilerLineMetrics);
-      scheduleLineChartRender();
     } else {
       compilerLineMetrics = [];
       if (lineCountEmpty) {
@@ -1891,6 +1900,7 @@ async function refreshStatisticsPanels() {
       setStatsListPlaceholder(lineCountHistory, "No snapshots available.");
       recordError("Stats", getErrorMessage(compilerResult.reason));
     }
+    scheduleLineChartRender();
   } catch (error) {
     recordError("Stats", getErrorMessage(error));
   }
@@ -2022,44 +2032,62 @@ function renderLineCountHistory(entries) {
 }
 
 function scheduleLineChartRender() {
-  if (!lineCountCanvas || !compilerLineMetrics.length) return;
   if (!statsViewContainer || !statsViewContainer.classList.contains("is-active")) return;
   if (lineChartFrame) cancelAnimationFrame(lineChartFrame);
   lineChartFrame = requestAnimationFrame(() => {
-    drawLineCountChart(compilerLineMetrics);
+    if (lineCountCanvas && compilerLineMetrics.length) {
+      drawMetricChart(lineCountCanvas, compilerLineMetrics, "lines", lineCountEmpty);
+    }
+    if (testDurationCanvas && testDurationMetrics.length) {
+      drawMetricChart(
+        testDurationCanvas,
+        [...testDurationMetrics].reverse(),
+        "value",
+        testDurationEmpty
+      );
+    }
+    if (buildDurationCanvas && buildDurationMetrics.length) {
+      drawMetricChart(
+        buildDurationCanvas,
+        [...buildDurationMetrics].reverse(),
+        "value",
+        buildDurationEmpty
+      );
+    }
     lineChartFrame = null;
   });
 }
 
-function drawLineCountChart(entries) {
-  if (!lineCountCanvas) return;
-  const ctx = lineCountCanvas.getContext("2d");
+function drawMetricChart(canvas, entries, valueKey, emptyEl) {
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
   if (!ctx) return;
   if (!entries.length) {
-    ctx.clearRect(0, 0, lineCountCanvas.width, lineCountCanvas.height);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (emptyEl) emptyEl.hidden = false;
     return;
   }
-  if (lineCountEmpty) {
-    lineCountEmpty.hidden = true;
+  if (emptyEl) {
+    emptyEl.hidden = true;
   }
-  const width = lineCountCanvas.clientWidth || 600;
-  const height = lineCountCanvas.clientHeight || 260;
+  const width = canvas.clientWidth || 600;
+  const height = canvas.clientHeight || 260;
   const dpr = window.devicePixelRatio || 1;
-  lineCountCanvas.width = width * dpr;
-  lineCountCanvas.height = height * dpr;
+  canvas.width = width * dpr;
+  canvas.height = height * dpr;
   ctx.scale(dpr, dpr);
   ctx.clearRect(0, 0, width, height);
   const padding = 24;
   const chartWidth = width - padding * 2;
   const chartHeight = height - padding * 2;
-  const values = entries.map((entry) => entry.lines ?? 0);
+  const values = entries.map((entry) => entry[valueKey] ?? 0);
   const minValue = Math.min(...values);
   const maxValue = Math.max(...values);
   const range = Math.max(maxValue - minValue, 1);
   const spacing = entries.length > 1 ? chartWidth / (entries.length - 1) : 0;
   const points = entries.map((entry, index) => {
     const x = entries.length > 1 ? padding + index * spacing : padding + chartWidth / 2;
-    const normalized = (entry.lines - minValue) / range;
+    const normalized = (entry[valueKey] - minValue) / range;
     const y = padding + chartHeight - normalized * chartHeight;
     return { x, y };
   });
