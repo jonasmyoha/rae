@@ -320,8 +320,8 @@ static bool register_default_natives(VmRegistry* registry, TickCounter* tick_cou
   if (tick_counter) {
     ok = vm_registry_register_native(registry, "nextTick", native_next_tick, tick_counter) && ok;
   }
-  ok = vm_registry_register_native(registry, "rae_time_ms", native_rae_time_ms, NULL) && ok;
-  ok = vm_registry_register_native(registry, "sleepMs", native_sleep_ms, NULL) && ok;
+  ok = vm_registry_register_native(registry, "nowMs", native_rae_time_ms, NULL) && ok;
+  ok = vm_registry_register_native(registry, "sleep", native_sleep_ms, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_str", native_rae_str, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_str_concat", native_rae_str_concat, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_seed", native_rae_seed, NULL) && ok;
@@ -1677,8 +1677,13 @@ static bool module_graph_load_module(ModuleGraph* graph,
     *hash_out ^= module_hash + 0x9e3779b97f4a7c15ull + (*hash_out << 6) + (*hash_out >> 2);
   }
 
-  // Pre-scan for nostdlib
+  // Pre-scan for nostdlib and other lib usage
   bool use_stdlib = true;
+  bool needs_math = false;
+  bool needs_io = false;
+  bool needs_string = false;
+  bool needs_sys = false;
+
   {
     TokenList tokens = lexer_tokenize(graph->arena, file_path, source, file_size, true);
     if (tokens.had_error) {
@@ -1686,34 +1691,46 @@ static bool module_graph_load_module(ModuleGraph* graph,
         return false;
     }
     for (size_t i = 0; i < tokens.count; i++) {
-        if (tokens.data[i].kind == TOK_KW_IMPORT || tokens.data[i].kind == TOK_KW_EXPORT) {
+        Token* t = &tokens.data[i];
+        if (t->kind == TOK_KW_IMPORT || t->kind == TOK_KW_EXPORT) {
             if (i + 1 < tokens.count) {
-                Token* t = &tokens.data[i+1];
-                if (t->kind == TOK_IDENT && str_eq_cstr(t->lexeme, "nostdlib")) {
+                Token* next = &tokens.data[i+1];
+                if (next->kind == TOK_IDENT && str_eq_cstr(next->lexeme, "nostdlib")) {
                     use_stdlib = false;
-                    break;
                 }
-                if (t->kind == TOK_STRING || t->kind == TOK_STRING_START || t->kind == TOK_RAW_STRING) {
-                    Str s = t->lexeme;
-                    if (t->kind == TOK_STRING || t->kind == TOK_STRING_START) {
+                if (next->kind == TOK_STRING || next->kind == TOK_STRING_START || next->kind == TOK_RAW_STRING) {
+                    Str s = next->lexeme;
+                    if (next->kind == TOK_STRING || next->kind == TOK_STRING_START) {
                         if (s.len >= 10 && strncmp(s.data + 1, "nostdlib", 8) == 0 && (s.data[9] == '"' || s.data[9] == ' ' || s.data[9] == '\0' || s.data[9] == '}')) {
                             use_stdlib = false;
-                            break;
                         }
                     } else {
                         if (s.len == 8 && strncmp(s.data, "nostdlib", 8) == 0) {
                             use_stdlib = false;
-                            break;
                         }
                     }
                 }
             }
         }
+        
+        if (t->kind == TOK_IDENT) {
+            Str s = t->lexeme;
+            if (str_eq_cstr(s, "abs") || str_eq_cstr(s, "min") || str_eq_cstr(s, "max") || str_eq_cstr(s, "clamp") || str_eq_cstr(s, "random") || str_eq_cstr(s, "seed")) needs_math = true;
+            if (str_eq_cstr(s, "log") || str_eq_cstr(s, "logS") || str_eq_cstr(s, "readLine")) needs_io = true;
+            if (str_eq_cstr(s, "exit") || str_eq_cstr(s, "readFile") || str_eq_cstr(s, "getEnv")) needs_sys = true;
+            if (str_eq_cstr(s, "compare") || str_eq_cstr(s, "toInt") || str_eq_cstr(s, "toFloat")) needs_string = true;
+        }
     }
   }
 
   ModuleStack frame = {.module_path = module_path, .next = stack};
-  if (use_stdlib && (!module_path || (strcmp(module_path, "core") != 0 && strcmp(module_path, "math") != 0))) {
+  if (use_stdlib && (!module_path || (strcmp(module_path, "core") != 0 && 
+                                      strcmp(module_path, "math") != 0 &&
+                                      strcmp(module_path, "io") != 0 &&
+                                      strcmp(module_path, "string") != 0 &&
+                                      strcmp(module_path, "sys") != 0))) {
+    
+    // Always load core
     char* core_file = try_resolve_lib_module(graph->root_path, "core");
     if (core_file) {
       if (!module_graph_load_module(graph, "core", core_file, &frame, hash_out)) {
@@ -1722,13 +1739,50 @@ static bool module_graph_load_module(ModuleGraph* graph,
       }
       free(core_file);
     }
-    char* math_file = try_resolve_lib_module(graph->root_path, "math");
-    if (math_file) {
-      if (!module_graph_load_module(graph, "math", math_file, &frame, hash_out)) {
-        free(math_file);
-        return false;
-      }
-      free(math_file);
+
+    // Conditionally load others
+    if (needs_math) {
+        char* math_file = try_resolve_lib_module(graph->root_path, "math");
+        if (math_file) {
+          if (!module_graph_load_module(graph, "math", math_file, &frame, hash_out)) {
+            free(math_file);
+            return false;
+          }
+          free(math_file);
+        }
+    }
+
+    if (needs_io) {
+        char* io_file = try_resolve_lib_module(graph->root_path, "io");
+        if (io_file) {
+          if (!module_graph_load_module(graph, "io", io_file, &frame, hash_out)) {
+            free(io_file);
+            return false;
+          }
+          free(io_file);
+        }
+    }
+
+    if (needs_string) {
+        char* string_file = try_resolve_lib_module(graph->root_path, "string");
+        if (string_file) {
+          if (!module_graph_load_module(graph, "string", string_file, &frame, hash_out)) {
+            free(string_file);
+            return false;
+          }
+          free(string_file);
+        }
+    }
+
+    if (needs_sys) {
+        char* sys_file = try_resolve_lib_module(graph->root_path, "sys");
+        if (sys_file) {
+          if (!module_graph_load_module(graph, "sys", sys_file, &frame, hash_out)) {
+            free(sys_file);
+            return false;
+          }
+          free(sys_file);
+        }
     }
   }
 

@@ -17,13 +17,13 @@ int64_t nextTick(void) {
   return ++g_tick_counter;
 }
 
-int64_t rae_time_ms(void) {
+int64_t nowMs(void) {
   struct timeval tv;
   gettimeofday(&tv, NULL);
   return (int64_t)tv.tv_sec * 1000 + (int64_t)tv.tv_usec / 1000;
 }
 
-void sleepMs(int64_t ms) {
+void rae_sleep(int64_t ms) {
   if (ms > 0) {
     usleep((useconds_t)ms * 1000);
   }
@@ -48,6 +48,21 @@ void rae_log_stream_any(RaeAny value) {
     case RAE_TYPE_BUFFER: printf("#(...)"); break;
     case RAE_TYPE_NONE: printf("none"); break;
   }
+}
+
+void rae_log_list_fields(RaeAny* items, int64_t length, int64_t capacity) {
+  rae_log_stream_list_fields(items, length, capacity);
+  printf("\n");
+  fflush(stdout);
+}
+
+void rae_log_stream_list_fields(RaeAny* items, int64_t length, int64_t capacity) {
+  printf("{ #(");
+  for (int64_t i = 0; i < capacity; i++) {
+    if (i > 0) printf(", ");
+    rae_log_stream_any(items[i]);
+  }
+  printf("), %lld, %lld }", (long long)length, (long long)capacity);
 }
 
 void rae_log_cstr(const char* text) {
