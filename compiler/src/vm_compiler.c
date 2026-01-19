@@ -89,8 +89,20 @@ FunctionEntry* function_table_find(FunctionTable* table, Str name) {
   return NULL;
 }
 
-static bool function_table_add(FunctionTable* table, Str name, uint16_t param_count, bool is_extern, bool returns_ref) {
-  FunctionEntry* existing = function_table_find(table, name);
+FunctionEntry* function_table_find_overload(FunctionTable* table, Str name, Str first_param_type) {
+  if (!table) return NULL;
+  for (size_t i = 0; i < table->count; ++i) {
+    if (str_matches(table->entries[i].name, name)) {
+      if (first_param_type.len == 0 || str_matches(table->entries[i].first_param_type, first_param_type)) {
+        return &table->entries[i];
+      }
+    }
+  }
+  return NULL;
+}
+
+static bool function_table_add(FunctionTable* table, Str name, Str first_param_type, uint16_t param_count, bool is_extern, bool returns_ref) {
+  FunctionEntry* existing = function_table_find_overload(table, name, first_param_type);
   if (existing) {
     existing->param_count = param_count;
     existing->is_extern = is_extern;
@@ -108,6 +120,7 @@ static bool function_table_add(FunctionTable* table, Str name, uint16_t param_co
   }
   FunctionEntry* entry = &table->entries[table->count++];
   entry->name = name;
+  entry->first_param_type = first_param_type;
   entry->offset = INVALID_OFFSET;
   entry->param_count = param_count;
   entry->patches = NULL;
@@ -151,18 +164,6 @@ static bool patch_function_calls(FunctionTable* table, Chunk* chunk, const char*
     }
   }
   return true;
-}
-
-static uint16_t count_params(const AstParam* param) {
-  uint16_t count = 0;
-  while (param) {
-    if (count == UINT16_MAX) {
-      return UINT16_MAX;
-    }
-    count += 1;
-    param = param->next;
-  }
-  return count;
 }
 
 TypeEntry* type_table_find(TypeTable* table, Str name) {
@@ -212,15 +213,18 @@ bool collect_metadata(const char* file_path, const AstModule* module, FunctionTa
   const AstDecl* decl = module->decls;
   while (decl) {
     if (decl->kind == AST_DECL_FUNC) {
-      uint16_t param_count = count_params(decl->as.func_decl.params);
-      bool returns_ref = false;
-      if (decl->as.func_decl.returns) {
-        // Multi-returns are not fully supported in VM, but we can check the first one
-        if (decl->as.func_decl.returns->type) {
-            returns_ref = decl->as.func_decl.returns->type->is_view || decl->as.func_decl.returns->type->is_mod;
-        }
+      uint16_t param_count = 0;
+      Str first_param_type = {0};
+      const AstParam* param = decl->as.func_decl.params;
+      if (param) {
+          first_param_type = get_base_type_name(param->type);
       }
-      if (!function_table_add(funcs, decl->as.func_decl.name, param_count, decl->as.func_decl.is_extern, returns_ref)) {
+      while (param) {
+        param_count++;
+        param = param->next;
+      }
+      bool returns_ref = decl->as.func_decl.returns && (decl->as.func_decl.returns->type->is_view || decl->as.func_decl.returns->type->is_mod);
+      if (!function_table_add(funcs, decl->as.func_decl.name, first_param_type, param_count, decl->as.func_decl.is_extern, returns_ref)) {
         return false;
       }
     } else if (decl->kind == AST_DECL_TYPE) {
@@ -298,13 +302,42 @@ int compiler_add_local(BytecodeCompiler* compiler, Str name, Str type_name) {
 }
 
 static Str get_local_type_name(BytecodeCompiler* compiler, Str name) {
-  for (int i = (int)compiler->local_count - 1; i >= 0; --i) {
+  for (int i = compiler->local_count - 1; i >= 0; i--) {
     if (str_matches(compiler->locals[i].name, name)) {
       return compiler->locals[i].type_name;
     }
   }
   return (Str){0};
 }
+
+static Str infer_expr_type(BytecodeCompiler* compiler, const AstExpr* expr) {
+  if (!expr) return (Str){0};
+  switch (expr->kind) {
+    case AST_EXPR_IDENT:
+      return get_local_type_name(compiler, expr->as.ident);
+    case AST_EXPR_INTEGER: return str_from_cstr("Int");
+    case AST_EXPR_FLOAT: return str_from_cstr("Float");
+    case AST_EXPR_BOOL: return str_from_cstr("Bool");
+    case AST_EXPR_STRING: return str_from_cstr("String");
+    case AST_EXPR_CHAR: return str_from_cstr("Char");
+    case AST_EXPR_LIST:
+    case AST_EXPR_COLLECTION_LITERAL: {
+        // If it's a collection literal, we often know if it's a List
+        // (Simplified for now)
+        return str_from_cstr("List");
+    }
+    case AST_EXPR_CALL: {
+        if (expr->as.call.callee->kind == AST_EXPR_IDENT) {
+            FunctionEntry* entry = function_table_find(&compiler->functions, expr->as.call.callee->as.ident);
+            if (entry && str_eq_cstr(entry->name, "createList")) return str_from_cstr("List");
+        }
+        break;
+    }
+    default: break;
+  }
+  return (Str){0};
+}
+
 
 int compiler_find_local(BytecodeCompiler* compiler, Str name) {
   for (int i = (int)compiler->local_count - 1; i >= 0; --i) {
@@ -471,7 +504,17 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
     return true;
   }
 
-  FunctionEntry* entry = function_table_find(&compiler->functions, name);
+  FunctionEntry* entry = NULL;
+  const AstCallArg* first_arg = expr->as.call.args;
+  if (first_arg) {
+      Str first_arg_type = infer_expr_type(compiler, first_arg->value);
+      entry = function_table_find_overload(&compiler->functions, name, first_arg_type);
+  }
+  
+  if (!entry) {
+      entry = function_table_find(&compiler->functions, name);
+  }
+
   if (!entry) {
     char buffer[128];
     snprintf(buffer, sizeof(buffer), "unknown function '%.*s' for VM call", (int)name.len,
@@ -1000,6 +1043,10 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
 
       // Desugar: p.method(args) -> method(p, args)
       
+      // Infer receiver type for dispatch
+      Str receiver_type = infer_expr_type(compiler, expr->as.method_call.object);
+      entry = function_table_find_overload(&compiler->functions, method_name, receiver_type);
+
       // Compile the receiver ('this')
       const AstExpr* receiver = expr->as.method_call.object;
       
@@ -1009,17 +1056,6 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       if (receiver->kind == AST_EXPR_IDENT) {
           int slot = compiler_find_local(compiler, receiver->as.ident);
           if (slot >= 0) {
-              // Try to find if the function expects a reference or value.
-              // For sugar, we'll try searching for "method" first.
-              entry = function_table_find(&compiler->functions, method_name);
-              
-              // If not found, try common built-ins
-              if (!entry) {
-                if (str_eq_cstr(method_name, "add")) entry = function_table_find(&compiler->functions, str_from_cstr("listAdd"));
-                else if (str_eq_cstr(method_name, "length")) entry = function_table_find(&compiler->functions, str_from_cstr("listLength"));
-                else if (str_eq_cstr(method_name, "get")) entry = function_table_find(&compiler->functions, str_from_cstr("listGet"));
-              }
-
               // Decide how to push receiver
               emit_op(compiler, OP_MOD_LOCAL, (int)expr->line);
               emit_short(compiler, (uint16_t)slot, (int)expr->line);
@@ -1053,12 +1089,13 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       return emit_function_call(compiler, entry, (int)expr->line, (int)expr->column, total_arg_count);
     }
     case AST_EXPR_INDEX: {
+      Str target_type = infer_expr_type(compiler, expr->as.index.target);
       if (!compile_expr(compiler, expr->as.index.target)) return false;
       if (!compile_expr(compiler, expr->as.index.index)) return false;
-      // For index, we fallback to 'listGet' for now
-      FunctionEntry* entry = function_table_find(&compiler->functions, str_from_cstr("listGet"));
+      // For index, we fallback to 'get' for the specific type
+      FunctionEntry* entry = function_table_find_overload(&compiler->functions, str_from_cstr("get"), target_type);
       if (!entry) {
-          diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'listGet' method not found for indexing");
+          diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'get' method not found for indexing this type");
           compiler->had_error = true;
           return false;
       }
@@ -1823,7 +1860,11 @@ static bool compile_function(BytecodeCompiler* compiler, const AstDecl* decl) {
     return false;
   }
   const AstFuncDecl* func = &decl->as.func_decl;
-  FunctionEntry* entry = function_table_find(&compiler->functions, func->name);
+  Str first_param_type = {0};
+  if (func->params) {
+      first_param_type = get_base_type_name(func->params->type);
+  }
+  FunctionEntry* entry = function_table_find_overload(&compiler->functions, func->name, first_param_type);
   if (!entry) {
     diag_error(compiler->file_path, (int)decl->line, (int)decl->column,
                "function table entry missing during VM compilation");

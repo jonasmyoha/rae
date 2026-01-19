@@ -1,8 +1,8 @@
 # Core library for Rae
 extern func nextTick(): ret Int
-extern func rae_time_ms(): ret Int
+extern func nowMs(): ret Int
 
-extern func sleepMs(ms: Int)
+extern func sleep(ms: Int)
 
 # -- Generic List Implementation (Rae-native) --
 type List(T) {
@@ -19,7 +19,7 @@ func createList(T)(initialCap: Int): ret List(T) {
   }
 }
 
-func listGrow(T)(this: mod List(T)) {
+func grow(T)(this: mod List(T)) {
   def newCap: Int = this.capacity * 2
   if newCap is 0 { newCap = 4 }
   
@@ -34,36 +34,36 @@ func listGrow(T)(this: mod List(T)) {
   this.capacity = newCap
 }
 
-func listAdd(T)(this: mod List(T), value: T) {
+func add(T)(this: mod List(T), value: T) {
   if this.length is this.capacity {
-    listGrow(this)
+    grow(this)
   }
   
   __buf_set(buf: this.data, index: this.length, value: value)
   this.length = this.length + 1
 }
 
-func listGet(T)(this: view List(T), index: Int): ret T {
+func get(T)(this: view List(T), index: Int): ret T {
   if index < 0 or index >= this.length {
     ret none
   }
   ret __buf_get(buf: this.data, index: index)
 }
 
-func listSet(T)(this: mod List(T), index: Int, value: T) {
+func set(T)(this: mod List(T), index: Int, value: T) {
   if index < 0 or index >= this.length {
     ret
   }
   __buf_set(buf: this.data, index: index, value: value)
 }
 
-func listInsert(T)(this: mod List(T), index: Int, value: T) {
+func insert(T)(this: mod List(T), index: Int, value: T) {
   if index < 0 or index > this.length {
     ret
   }
   
   if this.length is this.capacity {
-    listGrow(this)
+    grow(this)
   }
   
   # Shift elements to the right
@@ -79,7 +79,7 @@ func listInsert(T)(this: mod List(T), index: Int, value: T) {
   this.length = this.length + 1
 }
 
-func listPop(T)(this: mod List(T)): ret T {
+func pop(T)(this: mod List(T)): ret T {
   if this.length is 0 {
     ret none
   }
@@ -88,7 +88,7 @@ func listPop(T)(this: mod List(T)): ret T {
   ret val
 }
 
-func listRemove(T)(this: mod List(T), index: Int) {
+func remove(T)(this: mod List(T), index: Int) {
   if index < 0 or index >= this.length {
     ret
   }
@@ -105,17 +105,16 @@ func listRemove(T)(this: mod List(T), index: Int) {
   this.length = this.length - 1
 }
 
-func listClear(T)(this: mod List(T)) {
+func clear(T)(this: mod List(T)) {
   this.length = 0
 }
 
-func listLength(T)(this: view List(T)): ret Int {
+func length(T)(this: view List(T)): ret Int {
   ret this.length
 }
 
-func listFree(T)(this: mod List(T)) {
+func free(T)(this: mod List(T)) {
   __buf_free(buf: this.data)
   this.length = 0
   this.capacity = 0
 }
-

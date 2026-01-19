@@ -62,6 +62,9 @@ void rae_log_stream_float(double value);
 void rae_log_any(RaeAny value);
 void rae_log_stream_any(RaeAny value);
 
+void rae_log_list_fields(RaeAny* items, int64_t length, int64_t capacity);
+void rae_log_stream_list_fields(RaeAny* items, int64_t length, int64_t capacity);
+
 /* Conversion Helpers */
 RAE_UNUSED static RaeAny rae_any_int(int64_t v) { return (RaeAny){RAE_TYPE_INT, {.i = v}}; }
 RAE_UNUSED static RaeAny rae_any_float(double v) { return (RaeAny){RAE_TYPE_FLOAT, {.f = v}}; }
@@ -104,7 +107,7 @@ double rae_random(void);
 int64_t rae_random_int(int64_t min, int64_t max);
 
 int64_t nextTick(void);
-int64_t rae_time_ms(void);
-void sleepMs(int64_t ms);
+int64_t nowMs(void);
+void rae_sleep(int64_t ms);
 
 #endif /* RAE_RUNTIME_H */

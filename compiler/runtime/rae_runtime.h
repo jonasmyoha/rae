@@ -107,7 +107,7 @@ double rae_random(void);
 int64_t rae_random_int(int64_t min, int64_t max);
 
 int64_t nextTick(void);
-int64_t rae_time_ms(void);
-void sleepMs(int64_t ms);
+int64_t nowMs(void);
+void rae_sleep(int64_t ms);
 
 #endif /* RAE_RUNTIME_H */
