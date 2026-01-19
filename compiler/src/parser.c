@@ -489,8 +489,9 @@ static AstDestructureBinding* append_destructure_binding(AstDestructureBinding* 
 static AstExpr* parse_expression(Parser* parser);
 static AstBlock* parse_block(Parser* parser);
 static AstStmt* parse_statement(Parser* parser);
-static AstExpr* parse_match_expression(Parser* parser, const Token* match_token);
 static AstExpr* parse_collection_literal(Parser* parser, const Token* start_token);
+static AstExpr* parse_list_literal(Parser* parser, const Token* start_token);
+static AstExpr* parse_match_expression(Parser* parser, const Token* start_token);
 static AstExpr* parse_typed_literal(Parser* parser, const Token* start_token, AstTypeRef* type_hint);
 static AstTypeRef* parse_type_ref_from_ident(Parser* parser, const Token* ident_token);
 static AstExpr* finish_call(Parser* parser, AstExpr* callee, const Token* start_token);
@@ -687,6 +688,39 @@ AstCollectionElement* append_collection_element(AstCollectionElement* head, AstC
   }
   tail->next = node;
   return head;
+}
+
+static AstExpr* parse_list_literal(Parser* parser, const Token* start_token) {
+  AstExpr* expr = new_expr(parser, AST_EXPR_COLLECTION_LITERAL, start_token);
+  AstCollectionElement* head = NULL;
+  AstCollectionElement* tail = NULL;
+
+  if (parser_match(parser, TOK_RBRACKET)) {
+    expr->as.collection.elements = NULL;
+    return expr;
+  }
+
+  do {
+    AstCollectionElement* element = parser_alloc(parser, sizeof(AstCollectionElement));
+    element->key = NULL;
+    element->value = parse_expression(parser);
+    element->next = NULL;
+
+    if (!head) {
+      head = tail = element;
+    } else {
+      tail->next = element;
+      tail = element;
+    }
+
+    if (parser_check(parser, TOK_RBRACKET)) break;
+    parser_consume(parser, TOK_COMMA, "expected ',' or ']' in list literal");
+    if (parser_check(parser, TOK_RBRACKET)) break;
+  } while (true);
+
+  parser_consume(parser, TOK_RBRACKET, "expected ']' at end of list literal");
+  expr->as.collection.elements = head;
+  return expr;
 }
 
 static AstExpr* parse_collection_literal(Parser* parser, const Token* start_token) {
@@ -1002,6 +1036,10 @@ static AstExpr* parse_primary(Parser* parser) {
     case TOK_LBRACE: { // Handle untyped collection literal (map or set)
       const Token* start = parser_advance(parser);
       return parse_collection_literal(parser, start);
+    }
+    case TOK_LBRACKET: { // Handle list literal
+      const Token* start = parser_advance(parser);
+      return parse_list_literal(parser, start);
     }
     case TOK_KW_MATCH: {
       const Token* match_token = parser_advance(parser);

@@ -38,24 +38,11 @@ typedef struct {
   } as;
 } RaeAny;
 
-typedef struct {
-  int64_t* items;
-  int64_t len;
-  int64_t cap;
-} RaeList;
-
 /* Buffer Ops */
 void* rae_buf_alloc(int64_t count, int64_t elem_size);
 void rae_buf_free(void* buf);
 void* rae_buf_resize(void* buf, int64_t new_count, int64_t elem_size);
 void rae_buf_copy(void* src, int64_t src_off, void* dst, int64_t dst_off, int64_t len, int64_t elem_size);
-
-/* List Ops */
-RaeList* rae_list_create(int64_t cap);
-void rae_list_add(RaeList* list, int64_t item);
-void rae_list_remove(RaeList* list, int64_t index);
-int64_t rae_list_get(RaeList* list, int64_t index);
-int64_t rae_list_length(RaeList* list);
 
 void rae_log_cstr(const char* text);
 void rae_log_stream_cstr(const char* text);
@@ -71,11 +58,12 @@ void rae_log_key(const char* value);
 void rae_log_stream_key(const char* value);
 void rae_log_float(double value);
 void rae_log_stream_float(double value);
-void rae_log_list(RaeList* list);
-void rae_log_stream_list(RaeList* list);
 
 void rae_log_any(RaeAny value);
 void rae_log_stream_any(RaeAny value);
+
+void rae_log_list_fields(RaeAny* items, int64_t length, int64_t capacity);
+void rae_log_stream_list_fields(RaeAny* items, int64_t length, int64_t capacity);
 
 /* Conversion Helpers */
 RAE_UNUSED static RaeAny rae_any_int(int64_t v) { return (RaeAny){RAE_TYPE_INT, {.i = v}}; }

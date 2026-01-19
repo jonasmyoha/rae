@@ -1,28 +1,73 @@
 import list2_int
 
-func main() {
-  def count: Int = 10000
-  log("Benchmarking List (C) vs List2 (Rae) with {count} items")
+func benchmarkNativeList(count: Int) {
+  logS("Native List(Int): ")
+  def start: Int = rae_time_ms()
   
-  # 1. C List
-  def startC: Int = rae_time_ms()
-  def cList: List Int = {}
+  # 1. Allocation & Adding
+  def startAdd: Int = rae_time_ms()
+  def list: List(Int) = createList(initialCap: 10)
   def i: Int = 0
   loop i < count {
-    cList.add(value: i)
+    list.add(value: i)
     i = i + 1
   }
-  def endC: Int = rae_time_ms()
-  log("C List Add Time: {endC - startC} ms")
+  def endAdd: Int = rae_time_ms()
   
-  # 2. Rae List2
-  def startRae: Int = rae_time_ms()
-  def raeList: List2Int = createList2Int(initialCap: 10)
-  def j: Int = 0
-  loop j < count {
-    add(this: raeList, value: j)
-    j = j + 1
+  # 2. Freeing
+  def startFree: Int = rae_time_ms()
+  list.listFree()
+  def endFree: Int = rae_time_ms()
+  
+  def total: Int = rae_time_ms() - start
+  log("{endAdd - startAdd}ms add, {endFree - startFree}ms free, {total}ms total")
+}
+
+func benchmarkSpecializedList(count: Int) {
+  logS("Specialized List2Int: ")
+  def start: Int = rae_time_ms()
+  
+  # 1. Allocation & Adding
+  def startAdd: Int = rae_time_ms()
+  def list: List2Int = createList2Int(initialCap: 10)
+  def i: Int = 0
+  loop i < count {
+    list.add(value: i)
+    i = i + 1
   }
-  def endRae: Int = rae_time_ms()
-  log("Rae List2 Add Time: {endRae - startRae} ms")
+  def endAdd: Int = rae_time_ms()
+  
+  # 2. Freeing
+  def startFree: Int = rae_time_ms()
+  list.list2Free()
+  def endFree: Int = rae_time_ms()
+  
+  def total: Int = rae_time_ms() - start
+  log("{endAdd - startAdd}ms add, {endFree - startFree}ms free, {total}ms total")
+}
+
+func main() {
+  def count: Int = 1000000
+  log("Benchmarking Native Generic List vs Specialized List with {count} items")
+  log("----------------------------------------------------------------------")
+  
+  def iterations: Int = 3
+  def i: Int = 0
+  loop i < iterations {
+    log("Iteration {i + 1}:")
+    
+    # Random order logic (simulated with randomInt)
+    if rae_random_int(min: 0, max: 1) is 0 {
+      benchmarkNativeList(count: count)
+      benchmarkSpecializedList(count: count)
+    } else {
+      benchmarkSpecializedList(count: count)
+      benchmarkNativeList(count: count)
+    }
+    
+    i = i + 1
+    log("")
+  }
+  
+  log("Benchmark complete.")
 }

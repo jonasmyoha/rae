@@ -68,7 +68,7 @@ Rae guarantees that all memory is initialized before use. Every variable and typ
 | `Float` | `0.0` |
 | `Bool` | `false` |
 | `String` | `""` (empty string) |
-| `List T` | `[]` (empty list) |
+| `List(T)` | `[]` (empty list) |
 | `Char` | `'\0'` (null character) |
 | `mod T`, `view T` | Invalid without explicit binding |
 

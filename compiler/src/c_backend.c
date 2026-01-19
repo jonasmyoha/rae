@@ -118,7 +118,7 @@ static const char* map_rae_type_to_c(Str type_name) {
   if (str_eq_cstr(type_name, "String")) return "const char*";
   if (str_eq_cstr(type_name, "Buffer")) return "void*";
   if (str_eq_cstr(type_name, "Any")) return "RaeAny";
-  if (str_eq_cstr(type_name, "List")) return "RaeList*";
+  if (str_eq_cstr(type_name, "List")) return "List";
   return NULL;
 }
 
@@ -668,11 +668,15 @@ static bool emit_log_call(CFuncContext* ctx, const AstExpr* expr, FILE* out, boo
   }
 
   if (is_list) {
-    if (fprintf(out, "  %s(", newline ? "rae_log_list" : "rae_log_stream_list") < 0) {
+    if (fprintf(out, "  %s(", newline ? "rae_log_list_fields" : "rae_log_stream_list_fields") < 0) {
       return false;
     }
     if (!emit_expr(ctx, value, out, PREC_LOWEST)) return false;
-    if (fprintf(out, ");\n") < 0) return false;
+    fprintf(out, ".data, ");
+    if (!emit_expr(ctx, value, out, PREC_LOWEST)) return false;
+    fprintf(out, ".length, ");
+    if (!emit_expr(ctx, value, out, PREC_LOWEST)) return false;
+    fprintf(out, ".capacity);\n");
     return true;
   }
   
@@ -702,8 +706,7 @@ static bool is_primitive_type(Str type_name) {
          str_eq_cstr(type_name, "String") ||
          str_eq_cstr(type_name, "Array") ||
          str_eq_cstr(type_name, "Buffer") ||
-         str_eq_cstr(type_name, "Any") ||
-         str_eq_cstr(type_name, "List");
+         str_eq_cstr(type_name, "Any");
 }
 
 static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
@@ -934,14 +937,14 @@ static bool is_pointer_type(CFuncContext* ctx, Str name) {
     if (str_eq(param->name, name)) {
         if (param->type) {
             if (param->type->is_view || param->type->is_mod) return true;
-            if (param->type->parts && (str_eq_cstr(param->type->parts->text, "List") || str_eq_cstr(param->type->parts->text, "Buffer"))) return true;
+            if (param->type->parts && str_eq_cstr(param->type->parts->text, "Buffer")) return true;
         }
     }
   }
   for (size_t i = 0; i < ctx->local_count; ++i) {
     if (str_eq(ctx->locals[i], name)) {
       if (ctx->local_is_ptr[i]) return true;
-      if (str_eq_cstr(ctx->local_types[i], "List") || str_eq_cstr(ctx->local_types[i], "Buffer")) return true;
+      if (str_eq_cstr(ctx->local_types[i], "Buffer")) return true;
     }
   }
   return false;
@@ -1307,24 +1310,30 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
     }
     case AST_EXPR_LIST: {
       uint16_t element_count = 0;
-      const AstExprList* current = expr->as.list;
+      AstExprList* current = expr->as.list;
       while (current) { element_count++; current = current->next; }
       
-      fprintf(out, "__extension__ ({ RaeList* _l = rae_list_create(%u); ", element_count);
+      fprintf(out, "__extension__ ({ List _l = createList(%u); ", element_count);
       current = expr->as.list;
       while (current) {
-        fprintf(out, "rae_list_add(_l, ");
+        fprintf(out, "listAdd(&_l, rae_any(");
         if (!emit_expr(ctx, current->value, out, PREC_LOWEST)) return false;
-        fprintf(out, "); ");
+        fprintf(out, ")); ");
         current = current->next;
       }
       fprintf(out, "_l; })");
       return true;
     }
     case AST_EXPR_INDEX: {
-      fprintf(out, "rae_list_get(");
+      Str target_type = infer_expr_type(ctx, expr->as.index.target);
+      if (str_eq_cstr(target_type, "List")) {
+          fprintf(out, "listGet(&(");
+      } else {
+          fprintf(out, "listGet(&("); // Default to listGet for now
+      }
+      
       if (!emit_expr(ctx, expr->as.index.target, out, PREC_LOWEST)) return false;
-      fprintf(out, ", ");
+      fprintf(out, "), ");
       if (!emit_expr(ctx, expr->as.index.index, out, PREC_LOWEST)) return false;
       fprintf(out, ")");
       return true;
@@ -1333,11 +1342,23 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
       Str method = expr->as.method_call.method_name;
       const char* c_func = NULL;
       char* free_me = NULL;
-      if (str_eq_cstr(method, "length")) c_func = "rae_list_length";
-      else if (str_eq_cstr(method, "add")) c_func = "rae_list_add";
-      else if (str_eq_cstr(method, "get")) c_func = "rae_list_get";
-      else if (str_eq_cstr(method, "toString")) c_func = "rae_str";
-      else c_func = free_me = str_to_cstr(method);
+      
+      Str obj_type = infer_expr_type(ctx, expr->as.method_call.object);
+      if (str_eq_cstr(obj_type, "List")) {
+          if (str_eq_cstr(method, "length")) c_func = "listLength";
+          else if (str_eq_cstr(method, "add")) c_func = "listAdd";
+          else if (str_eq_cstr(method, "get")) c_func = "listGet";
+          else if (str_eq_cstr(method, "set")) c_func = "listSet";
+          else if (str_eq_cstr(method, "insert")) c_func = "listInsert";
+          else if (str_eq_cstr(method, "pop")) c_func = "listPop";
+          else if (str_eq_cstr(method, "remove")) c_func = "listRemove";
+          else if (str_eq_cstr(method, "clear")) c_func = "listClear";
+      }
+      
+      if (!c_func) {
+          if (str_eq_cstr(method, "toString")) c_func = "rae_str";
+          else c_func = free_me = str_to_cstr(method);
+      }
       
       if (c_func) {
         fprintf(out, "%s(", c_func);
@@ -1363,7 +1384,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
           bool is_any_param = false;
           if (str_eq_cstr(method, "add") || str_eq_cstr(method, "set")) {
               Str obj_type = infer_expr_type(ctx, expr->as.method_call.object);
-              if (str_eq_cstr(obj_type, "List2") || str_eq_cstr(obj_type, "Any")) {
+              if (str_eq_cstr(obj_type, "List") || str_eq_cstr(obj_type, "List2") || str_eq_cstr(obj_type, "Any")) {
                   is_any_param = true;
               }
           }
@@ -1406,12 +1427,12 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
         return true;
       }
       
-      fprintf(out, "__extension__ ({ RaeList* _l = rae_list_create(%u); ", element_count);
+      fprintf(out, "__extension__ ({ List _l = createList(%u); ", element_count);
       current = expr->as.collection.elements;
       while (current) {
-        fprintf(out, "rae_list_add(_l, ");
+        fprintf(out, "listAdd(&_l, rae_any(");
         if (!emit_expr(ctx, current->value, out, PREC_LOWEST)) return false;
-        fprintf(out, "); ");
+        fprintf(out, ")); ");
         current = current->next;
       }
       fprintf(out, "_l; })");
