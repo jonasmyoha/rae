@@ -89,31 +89,42 @@ FunctionEntry* function_table_find(FunctionTable* table, Str name) {
   return NULL;
 }
 
-FunctionEntry* function_table_find_overload(FunctionTable* table, Str name, Str first_param_type) {
+FunctionEntry* function_table_find_overload(FunctionTable* table, Str name, const Str* param_types, uint16_t param_count) {
   if (!table) return NULL;
-  FunctionEntry* name_match = NULL;
   for (size_t i = 0; i < table->count; ++i) {
-    if (str_matches(table->entries[i].name, name)) {
-      if (first_param_type.len > 0 && str_matches(table->entries[i].first_param_type, first_param_type)) {
-        return &table->entries[i];
+    FunctionEntry* entry = &table->entries[i];
+    if (str_matches(entry->name, name)) {
+      if (entry->param_count == param_count) {
+        if (param_types == NULL) return entry;
+        
+        bool mismatch = false;
+        for (uint16_t j = 0; j < param_count; ++j) {
+          if (!str_matches(entry->param_types[j], param_types[j])) {
+            mismatch = true;
+            break;
+          }
+        }
+        if (!mismatch) return entry;
       }
-      if (first_param_type.len == 0 && table->entries[i].first_param_type.len == 0) {
-          return &table->entries[i];
-      }
-      if (!name_match) name_match = &table->entries[i];
     }
   }
-  // If no exact match found, fallback to name-only match ONLY if we didn't have a specific type request
-  if (first_param_type.len == 0) return name_match;
   return NULL;
 }
 
-static bool function_table_add(FunctionTable* table, Str name, Str first_param_type, uint16_t param_count, bool is_extern, bool returns_ref) {
-  FunctionEntry* existing = function_table_find_overload(table, name, first_param_type);
-  if (existing) {
-    existing->param_count = param_count;
-    existing->is_extern = is_extern;
-    return true;
+static bool function_table_add(FunctionTable* table, Str name, const Str* param_types, uint16_t param_count, bool is_extern, bool returns_ref) {
+  FunctionEntry* existing = function_table_find_overload(table, name, param_types, param_count);
+  if (existing && existing->param_count == param_count) {
+    bool exact = true;
+    for (uint16_t i = 0; i < param_count; ++i) {
+      if (!str_matches(existing->param_types[i], param_types[i])) {
+        exact = false;
+        break;
+      }
+    }
+    if (exact) {
+      existing->is_extern = is_extern;
+      return true;
+    }
   }
   if (table->count + 1 > table->capacity) {
     size_t old_cap = table->capacity;
@@ -127,7 +138,10 @@ static bool function_table_add(FunctionTable* table, Str name, Str first_param_t
   }
   FunctionEntry* entry = &table->entries[table->count++];
   entry->name = name;
-  entry->first_param_type = first_param_type;
+  entry->param_types = malloc(param_count * sizeof(Str));
+  for (uint16_t i = 0; i < param_count; ++i) {
+    entry->param_types[i] = param_types[i];
+  }
   entry->offset = INVALID_OFFSET;
   entry->param_count = param_count;
   entry->patches = NULL;
@@ -221,19 +235,26 @@ bool collect_metadata(const char* file_path, const AstModule* module, FunctionTa
   while (decl) {
     if (decl->kind == AST_DECL_FUNC) {
       uint16_t param_count = 0;
-      Str first_param_type = {0};
-      const AstParam* param = decl->as.func_decl.params;
-      if (param) {
-          first_param_type = get_base_type_name(param->type);
-      }
-      while (param) {
+      const AstParam* p = decl->as.func_decl.params;
+      while (p) {
         param_count++;
-        param = param->next;
+        p = p->next;
       }
+
+      Str* param_types = NULL;
+      if (param_count > 0) {
+        param_types = malloc(param_count * sizeof(Str));
+        p = decl->as.func_decl.params;
+        for (uint16_t i = 0; i < param_count; ++i) {
+          param_types[i] = get_base_type_name(p->type);
+          p = p->next;
+        }
+      }
+
       bool returns_ref = decl->as.func_decl.returns && (decl->as.func_decl.returns->type->is_view || decl->as.func_decl.returns->type->is_mod);
-      if (!function_table_add(funcs, decl->as.func_decl.name, first_param_type, param_count, decl->as.func_decl.is_extern, returns_ref)) {
-        return false;
-      }
+      bool ok = function_table_add(funcs, decl->as.func_decl.name, param_types, param_count, decl->as.func_decl.is_extern, returns_ref);
+      free(param_types);
+      if (!ok) return false;
     } else if (decl->kind == AST_DECL_TYPE) {
       size_t field_count = 0;
       const AstTypeField* f = decl->as.type_decl.fields;
@@ -280,7 +301,9 @@ void free_function_table(FunctionTable* table) {
   if (!table) return;
   for (size_t i = 0; i < table->count; ++i) {
     free(table->entries[i].patches);
+    free(table->entries[i].param_types);
     table->entries[i].patches = NULL;
+    table->entries[i].param_types = NULL;
     table->entries[i].patch_capacity = 0;
     table->entries[i].patch_count = 0;
   }
@@ -423,6 +446,16 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
     compiler->had_error = true;
     return false;
   }
+
+  uint16_t arg_count = 0;
+  {
+    const AstCallArg* arg = expr->as.call.args;
+    while (arg) {
+      arg_count++;
+      arg = arg->next;
+    }
+  }
+
   Str name = expr->as.call.callee->as.ident;
   bool is_log = str_eq_cstr(name, "log");
   bool is_log_s = str_eq_cstr(name, "logS");
@@ -446,11 +479,9 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
   bool is_rae_str = str_eq_cstr(name, "rae_str");
   bool is_rae_concat = str_eq_cstr(name, "rae_str_concat");
   if (is_rae_str || is_rae_concat) {
-    uint16_t arg_count = 0;
     const AstCallArg* arg = expr->as.call.args;
     while (arg) {
       if (!compile_expr(compiler, arg->value)) return false;
-      arg_count++;
       arg = arg->next;
     }
     return emit_native_call(compiler, name, (uint8_t)arg_count, (int)expr->line, (int)expr->column);
@@ -512,15 +543,19 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
   }
 
   FunctionEntry* entry = NULL;
-  const AstCallArg* first_arg = expr->as.call.args;
-  if (first_arg) {
-      Str first_arg_type = infer_expr_type(compiler, first_arg->value);
-      entry = function_table_find_overload(&compiler->functions, name, first_arg_type);
-  }
   
-  if (!entry) {
-      entry = function_table_find(&compiler->functions, name);
+  Str* arg_types = NULL;
+  if (arg_count > 0) {
+    arg_types = malloc(arg_count * sizeof(Str));
+    const AstCallArg* arg = expr->as.call.args;
+    for (uint16_t i = 0; i < arg_count; ++i) {
+      arg_types[i] = infer_expr_type(compiler, arg->value);
+      arg = arg->next;
+    }
   }
+
+  entry = function_table_find_overload(&compiler->functions, name, arg_types, arg_count);
+  free(arg_types);
 
   if (!entry) {
     char buffer[128];
@@ -531,10 +566,9 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
     return false;
   }
 
-  uint16_t arg_count = 0;
   const AstCallArg* arg = expr->as.call.args;
   while (arg) {
-    arg_count += 1;
+    if (!compile_expr(compiler, arg->value)) return false;
     arg = arg->next;
   }
   if (arg_count != entry->param_count) {
@@ -1052,7 +1086,8 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       
       // Infer receiver type for dispatch
       Str receiver_type = infer_expr_type(compiler, expr->as.method_call.object);
-      entry = function_table_find_overload(&compiler->functions, method_name, receiver_type);
+      Str param_types[] = { receiver_type };
+    entry = function_table_find_overload(&compiler->functions, method_name, param_types, 1);
 
       // Compile the receiver ('this')
       const AstExpr* receiver = expr->as.method_call.object;
@@ -1100,7 +1135,8 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       if (!compile_expr(compiler, expr->as.index.target)) return false;
       if (!compile_expr(compiler, expr->as.index.index)) return false;
       // For index, we fallback to 'get' for the specific type
-      FunctionEntry* entry = function_table_find_overload(&compiler->functions, str_from_cstr("get"), target_type);
+      Str param_types[] = { target_type };
+      FunctionEntry* entry = function_table_find_overload(&compiler->functions, str_from_cstr("get"), param_types, 1);
       if (!entry) {
           diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'get' method not found for indexing this type");
           compiler->had_error = true;
@@ -1129,7 +1165,8 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
           // Rae-native List construction
           while (current) { element_count++; current = current->next; }
 
-          FunctionEntry* create_entry = function_table_find_overload(&compiler->functions, str_from_cstr("createList"), str_from_cstr("Int"));
+          Str int_type = str_from_cstr("Int");
+    FunctionEntry* create_entry = function_table_find_overload(&compiler->functions, str_from_cstr("createList"), &int_type, 1);
           if (!create_entry) {
               diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'createList' not found in core.rae");
               return false;
@@ -1152,7 +1189,8 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
           // We pop it because we'll build it via the local ref and then push it back at the end
           emit_op(compiler, OP_POP, (int)expr->line);
 
-          FunctionEntry* add_entry = function_table_find_overload(&compiler->functions, str_from_cstr("add"), str_from_cstr("List"));
+          Str list_type = str_from_cstr("List");
+    FunctionEntry* add_entry = function_table_find_overload(&compiler->functions, str_from_cstr("add"), &list_type, 1);
           if (!add_entry) {
               diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'add' not found in core.rae");
               return false;
@@ -1187,7 +1225,8 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       AstExprList* current = expr->as.list;
       while (current) { element_count++; current = current->next; }
 
-      FunctionEntry* create_entry = function_table_find_overload(&compiler->functions, str_from_cstr("createList"), str_from_cstr("Int"));
+      Str int_type = str_from_cstr("Int");
+    FunctionEntry* create_entry = function_table_find_overload(&compiler->functions, str_from_cstr("createList"), &int_type, 1);
       if (!create_entry) {
           diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'createList' not found in core.rae");
           return false;
@@ -1206,7 +1245,8 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       emit_short(compiler, (uint16_t)slot, (int)expr->line);
       emit_op(compiler, OP_POP, (int)expr->line);
 
-      FunctionEntry* add_entry = function_table_find_overload(&compiler->functions, str_from_cstr("add"), str_from_cstr("List"));
+      Str list_type = str_from_cstr("List");
+    FunctionEntry* add_entry = function_table_find_overload(&compiler->functions, str_from_cstr("add"), &list_type, 1);
       if (!add_entry) {
           diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'add' not found in core.rae");
           return false;
@@ -1867,11 +1907,23 @@ static bool compile_function(BytecodeCompiler* compiler, const AstDecl* decl) {
     return false;
   }
   const AstFuncDecl* func = &decl->as.func_decl;
-  Str first_param_type = {0};
-  if (func->params) {
-      first_param_type = get_base_type_name(func->params->type);
+  
+  uint16_t param_count = 0;
+  for (const AstParam* p = func->params; p; p = p->next) param_count++;
+  
+  Str* param_types = NULL;
+  if (param_count > 0) {
+    param_types = malloc(param_count * sizeof(Str));
+    const AstParam* p = func->params;
+    for (uint16_t i = 0; i < param_count; ++i) {
+      param_types[i] = get_base_type_name(p->type);
+      p = p->next;
+    }
   }
-  FunctionEntry* entry = function_table_find_overload(&compiler->functions, func->name, first_param_type);
+
+  FunctionEntry* entry = function_table_find_overload(&compiler->functions, func->name, param_types, param_count);
+  free(param_types);
+
   if (!entry) {
     diag_error(compiler->file_path, (int)decl->line, (int)decl->column,
                "function table entry missing during VM compilation");
