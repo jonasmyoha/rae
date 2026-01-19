@@ -66,36 +66,6 @@ Value value_object(size_t field_count) {
   return value;
 }
 
-Value value_list(void) {
-  Value value = {.type = VAL_LIST};
-  value.as.list_value = malloc(sizeof(ValueList));
-  if (value.as.list_value) {
-    value.as.list_value->items = NULL;
-    value.as.list_value->count = 0;
-    value.as.list_value->capacity = 0;
-  }
-  return value;
-}
-
-void value_list_add(Value* list, Value item) {
-  if (!list || list->type != VAL_LIST || !list->as.list_value) return;
-  ValueList* vl = list->as.list_value;
-  if (vl->count + 1 > vl->capacity) {
-    size_t old_cap = vl->capacity;
-    size_t new_cap = old_cap < 8 ? 8 : old_cap * 2;
-    Value* new_items = realloc(vl->items, new_cap * sizeof(Value));
-    if (new_items) {
-      // Initialize new slots to VAL_NONE
-      for (size_t i = old_cap; i < new_cap; i++) {
-        new_items[i].type = VAL_NONE;
-      }
-      vl->items = new_items;
-      vl->capacity = new_cap;
-    }
-  }
-  vl->items[vl->count++] = item;
-}
-
 Value value_array(size_t count) {
   Value value = {.type = VAL_ARRAY};
   value.as.array_value = malloc(sizeof(ValueArray));
@@ -198,17 +168,6 @@ Value value_copy(const Value* value) {
         }
       }
       break;
-    case VAL_LIST:
-      if (value->as.list_value) {
-        copy.as.list_value = malloc(sizeof(ValueList));
-        copy.as.list_value->count = value->as.list_value->count;
-        copy.as.list_value->capacity = value->as.list_value->count;
-        copy.as.list_value->items = malloc(copy.as.list_value->capacity * sizeof(Value));
-        for (size_t i = 0; i < value->as.list_value->count; i++) {
-          copy.as.list_value->items[i] = value_copy(&value->as.list_value->items[i]);
-        }
-      }
-      break;
     case VAL_ARRAY:
       if (value->as.array_value) {
         copy.as.array_value = malloc(sizeof(ValueArray));
@@ -251,14 +210,6 @@ void value_free(Value* value) {
     free(value->as.object_value.fields);
     value->as.object_value.fields = NULL;
     value->as.object_value.field_count = 0;
-  } else if (value->type == VAL_LIST && value->as.list_value) {
-    ValueList* vl = value->as.list_value;
-    for (size_t i = 0; i < vl->count; i++) {
-      value_free(&vl->items[i]);
-    }
-    free(vl->items);
-    free(vl);
-    value->as.list_value = NULL;
   } else if (value->type == VAL_ARRAY && value->as.array_value) {
     ValueArray* va = value->as.array_value;
     for (size_t i = 0; i < va->count; i++) {
@@ -325,16 +276,6 @@ void value_print(const Value* value) {
         value_print(&value->as.object_value.fields[i]);
       }
       printf(" }");
-      break;
-    case VAL_LIST:
-      printf("[");
-      if (value->as.list_value) {
-        for (size_t i = 0; i < value->as.list_value->count; i++) {
-          if (i > 0) printf(", ");
-          value_print(&value->as.list_value->items[i]);
-        }
-      }
-      printf("]");
       break;
     case VAL_ARRAY:
       printf("@(");

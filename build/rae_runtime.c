@@ -50,21 +50,6 @@ void rae_log_stream_any(RaeAny value) {
   }
 }
 
-void rae_log_list_fields(RaeAny* items, int64_t length, int64_t capacity) {
-  rae_log_stream_list_fields(items, length, capacity);
-  printf("\n");
-  fflush(stdout);
-}
-
-void rae_log_stream_list_fields(RaeAny* items, int64_t length, int64_t capacity) {
-  printf("{ #(");
-  for (int64_t i = 0; i < capacity; i++) {
-    if (i > 0) printf(", ");
-    rae_log_stream_any(items[i]);
-  }
-  printf("), %lld, %lld }", (long long)length, (long long)capacity);
-}
-
 void rae_log_cstr(const char* text) {
   if (!text) {
     fputs("(null)\n", stdout);

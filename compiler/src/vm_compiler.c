@@ -1015,9 +1015,9 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
               
               // If not found, try common built-ins
               if (!entry) {
-                if (str_eq_cstr(method_name, "add")) entry = function_table_find(&compiler->functions, str_from_cstr("rae_list_add"));
-                else if (str_eq_cstr(method_name, "length")) entry = function_table_find(&compiler->functions, str_from_cstr("rae_list_length"));
-                else if (str_eq_cstr(method_name, "get")) entry = function_table_find(&compiler->functions, str_from_cstr("rae_list_get"));
+                if (str_eq_cstr(method_name, "add")) entry = function_table_find(&compiler->functions, str_from_cstr("listAdd"));
+                else if (str_eq_cstr(method_name, "length")) entry = function_table_find(&compiler->functions, str_from_cstr("listLength"));
+                else if (str_eq_cstr(method_name, "get")) entry = function_table_find(&compiler->functions, str_from_cstr("listGet"));
               }
 
               // Decide how to push receiver
@@ -1042,17 +1042,6 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       
       uint16_t total_arg_count = 1 + explicit_args_count;
 
-      // Handle Built-in List Methods as Native Calls
-      if (str_eq_cstr(method_name, "add")) {
-          return emit_native_call(compiler, str_from_cstr("rae_list_add"), (uint8_t)total_arg_count, (int)expr->line, (int)expr->column);
-      }
-      if (str_eq_cstr(method_name, "length")) {
-          return emit_native_call(compiler, str_from_cstr("rae_list_length"), (uint8_t)total_arg_count, (int)expr->line, (int)expr->column);
-      }
-      if (str_eq_cstr(method_name, "get")) {
-          return emit_native_call(compiler, str_from_cstr("rae_list_get"), (uint8_t)total_arg_count, (int)expr->line, (int)expr->column);
-      }
-
       if (!entry) {
         char buffer[128];
         snprintf(buffer, sizeof(buffer), "unknown method '%.*s'", (int)method_name.len, method_name.data);
@@ -1066,8 +1055,14 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
     case AST_EXPR_INDEX: {
       if (!compile_expr(compiler, expr->as.index.target)) return false;
       if (!compile_expr(compiler, expr->as.index.index)) return false;
-      // For index, we fallback to rae_list_get for now as it's the most common indexable
-      return emit_native_call(compiler, str_from_cstr("rae_list_get"), 2, (int)expr->line, (int)expr->column);
+      // For index, we fallback to 'listGet' for now
+      FunctionEntry* entry = function_table_find(&compiler->functions, str_from_cstr("listGet"));
+      if (!entry) {
+          diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'listGet' method not found for indexing");
+          compiler->had_error = true;
+          return false;
+      }
+      return emit_function_call(compiler, entry, (int)expr->line, (int)expr->column, 2);
     }
     case AST_EXPR_COLLECTION_LITERAL: {
       uint16_t element_count = 0;
@@ -1077,52 +1072,114 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
         is_map = true;
       }
 
-      // Compile all elements and push them onto the stack
-      while (current) {
-        if (is_map && !current->key) {
-          diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "mixed keyed and unkeyed elements in map literal");
-          compiler->had_error = true;
-          return false;
-        }
-        if (!is_map && current->key) {
-          diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "keyed elements in list literal");
-          compiler->had_error = true;
-          return false;
-        }
-
-        if (current->key) { 
-          // For object literals, we don't push the key string, just the value.
-          // The VM OP_CONSTRUCT will use the count.
-          // WAIT: If it's a Map, we need keys. If it's an Object literal, we don't.
-          // In Rae, {x: 1} can be either depending on context.
-          // For now, let's assume it's an object if it's being assigned to a struct type.
-          // The current VM compiler doesn't have easy access to that info here.
-          // Let's assume for now that keyed collection literals are OBJECTS for OP_CONSTRUCT.
-        }
-        if (!compile_expr(compiler, current->value)) return false;
-        element_count++;
-        current = current->next;
-      }
-
       if (is_map) {
-        emit_op(compiler, OP_CONSTRUCT, (int)expr->line);
-        emit_short(compiler, element_count, (int)expr->line);
+          while (current) {
+            if (!compile_expr(compiler, current->value)) return false;
+            element_count++;
+            current = current->next;
+          }
+          emit_op(compiler, OP_CONSTRUCT, (int)expr->line);
+          emit_short(compiler, element_count, (int)expr->line);
+          return true;
       } else {
-        emit_op(compiler, OP_LIST, (int)expr->line);
-        emit_short(compiler, element_count, (int)expr->line);
+          // Rae-native List construction
+          while (current) { element_count++; current = current->next; }
+
+          FunctionEntry* create_entry = function_table_find(&compiler->functions, str_from_cstr("createList"));
+          if (!create_entry) {
+              diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'createList' not found in core.rae");
+              return false;
+          }
+
+          // Push initialCap
+          emit_constant(compiler, value_int(element_count), (int)expr->line);
+          if (!emit_function_call(compiler, create_entry, (int)expr->line, (int)expr->column, 1)) return false;
+
+          // Store list in a temporary local to allow calling methods by reference
+          char temp_name[64];
+          snprintf(temp_name, sizeof(temp_name), "__list_lit_%zu_%zu", expr->line, expr->column);
+          int slot = compiler_add_local(compiler, str_from_cstr(temp_name), str_from_cstr("List"));
+          if (slot < 0) return false;
+          if (!compiler_ensure_local_capacity(compiler, compiler->local_count, (int)expr->line)) return false;
+
+          emit_op(compiler, OP_SET_LOCAL, (int)expr->line);
+          emit_short(compiler, (uint16_t)slot, (int)expr->line);
+          // Stack still has the list value (OP_SET_LOCAL leaves it there)
+          // We pop it because we'll build it via the local ref and then push it back at the end
+          emit_op(compiler, OP_POP, (int)expr->line);
+
+          FunctionEntry* add_entry = function_table_find(&compiler->functions, str_from_cstr("listAdd"));
+          if (!add_entry) {
+              diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'listAdd' not found in core.rae");
+              return false;
+          }
+
+          current = expr->as.collection.elements;
+          while (current) {
+              // Push mod ref to list
+              emit_op(compiler, OP_MOD_LOCAL, (int)expr->line);
+              emit_short(compiler, (uint16_t)slot, (int)expr->line);
+
+              // Compile element value
+              if (!compile_expr(compiler, current->value)) return false;
+
+              // Call listAdd(list, value)
+              if (!emit_function_call(compiler, add_entry, (int)expr->line, (int)expr->column, 2)) return false;
+
+              // Pop 'none' result of add
+              emit_op(compiler, OP_POP, (int)expr->line);
+
+              current = current->next;
+          }
+
+          // Push the final list back onto the stack
+          emit_op(compiler, OP_GET_LOCAL, (int)expr->line);
+          emit_short(compiler, (uint16_t)slot, (int)expr->line);
+          return true;
       }
-      return true;
     }
     case AST_EXPR_LIST: {
       uint16_t element_count = 0;
       AstExprList* current = expr->as.list;
-      while (current) {
-        if (!compile_expr(compiler, current->value)) return false;
-        element_count++;
-        current = current->next;
+      while (current) { element_count++; current = current->next; }
+
+      FunctionEntry* create_entry = function_table_find(&compiler->functions, str_from_cstr("createList"));
+      if (!create_entry) {
+          diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'createList' not found in core.rae");
+          return false;
       }
-      emit_op(compiler, OP_LIST, (int)expr->line);
-      emit_short(compiler, element_count, (int)expr->line);
+
+      emit_constant(compiler, value_int(element_count), (int)expr->line);
+      if (!emit_function_call(compiler, create_entry, (int)expr->line, (int)expr->column, 1)) return false;
+
+      char temp_name[64];
+      snprintf(temp_name, sizeof(temp_name), "__list_lit_%zu_%zu", expr->line, expr->column);
+      int slot = compiler_add_local(compiler, str_from_cstr(temp_name), str_from_cstr("List"));
+      if (slot < 0) return false;
+      if (!compiler_ensure_local_capacity(compiler, compiler->local_count, (int)expr->line)) return false;
+
+      emit_op(compiler, OP_SET_LOCAL, (int)expr->line);
+      emit_short(compiler, (uint16_t)slot, (int)expr->line);
+      emit_op(compiler, OP_POP, (int)expr->line);
+
+      FunctionEntry* add_entry = function_table_find(&compiler->functions, str_from_cstr("listAdd"));
+      if (!add_entry) {
+          diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'listAdd' not found in core.rae");
+          return false;
+      }
+
+      current = expr->as.list;
+      while (current) {
+          emit_op(compiler, OP_MOD_LOCAL, (int)expr->line);
+          emit_short(compiler, (uint16_t)slot, (int)expr->line);
+          if (!compile_expr(compiler, current->value)) return false;
+          if (!emit_function_call(compiler, add_entry, (int)expr->line, (int)expr->column, 2)) return false;
+          emit_op(compiler, OP_POP, (int)expr->line);
+          current = current->next;
+      }
+
+      emit_op(compiler, OP_GET_LOCAL, (int)expr->line);
+      emit_short(compiler, (uint16_t)slot, (int)expr->line);
       return true;
     }
     default:

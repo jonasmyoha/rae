@@ -13,7 +13,6 @@ typedef enum {
   VAL_CHAR,
   VAL_NONE,
   VAL_OBJECT,
-  VAL_LIST,
   VAL_ARRAY,
   VAL_BUFFER,
   VAL_REF,
@@ -42,12 +41,6 @@ typedef struct {
   struct Value* items;
   size_t count;
   size_t capacity;
-} ValueList;
-
-typedef struct {
-  struct Value* items;
-  size_t count;
-  size_t capacity;
   size_t ref_count;
 } ValueBuffer;
 
@@ -70,7 +63,6 @@ typedef struct Value {
     int64_t char_value;
     OwnedString string_value;
     Object object_value;
-    ValueList* list_value;
     ValueBuffer* buffer_value;
     ValueArray* array_value;
     Reference ref_value;
@@ -87,8 +79,6 @@ Value value_string_copy(const char* data, size_t length);
 Value value_string_take(char* data, size_t length);
 Value value_none(void);
 Value value_object(size_t field_count);
-Value value_list(void);
-void value_list_add(Value* list, Value item);
 Value value_array(size_t count);
 Value value_buffer(size_t capacity);
 bool value_buffer_resize(Value* buffer, size_t new_capacity);
