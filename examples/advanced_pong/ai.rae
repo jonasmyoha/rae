@@ -14,7 +14,7 @@ func paddleAiSystem(ai: mod AIState, ballY: Float, paddleY: Float): ret Float {
   if ai.state is 0 {
     ai.timer = ai.timer + 1
     # Reaction time ~0.2s (12 frames) plus random noise
-    if ai.timer > 12 + randomInt(min: 0, max: 6) {
+    if ai.timer > 12 + random(min: 0, max: 6) {
       ai.targetY = ballY
       ai.timer = 0
       ai.state = 1
@@ -27,20 +27,20 @@ func paddleAiSystem(ai: mod AIState, ballY: Float, paddleY: Float): ret Float {
       # Up
       ai.decision = 1
       # Press duration
-      ai.timer = randomInt(min: 50, max: 150)
+      ai.timer = random(min: 50, max: 150)
       ai.state = 2
     } else {
       if ai.targetY > paddleY + 60.0 {
         # Down
         ai.decision = 2
         # Press duration
-        ai.timer = randomInt(min: 5, max: 15)
+        ai.timer = random(min: 5, max: 15)
         ai.state = 2
       } else {
         # Good enough, don't move
         ai.decision = 0
         # Pause duration
-        ai.timer = randomInt(min: 5, max: 10)
+        ai.timer = random(min: 5, max: 10)
         ai.state = 3
       }
     }
@@ -57,7 +57,7 @@ func paddleAiSystem(ai: mod AIState, ballY: Float, paddleY: Float): ret Float {
     if ai.timer <= 0 {
       ai.state = 3
       # Pause after action
-      ai.timer = randomInt(min: 5, max: 10)
+      ai.timer = random(min: 5, max: 10)
     }
   }
   # 3: Pausing

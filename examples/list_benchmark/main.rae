@@ -1,6 +1,7 @@
 import list2_int
+import list2
 
-func benchmarkNativeList(count: Int) {
+func benchmarkNativeList(count: Int): ret Int {
   logS("Native List(Int): ")
   def start: Int = nowMs()
   
@@ -21,9 +22,33 @@ func benchmarkNativeList(count: Int) {
   
   def total: Int = nowMs() - start
   log("{endAdd - startAdd}ms add, {endFree - startFree}ms free, {total}ms total")
+  ret total
 }
 
-func benchmarkSpecializedList(count: Int) {
+func benchmarkList2(count: Int): ret Int {
+  logS("Library List2(Int): ")
+  def start: Int = nowMs()
+  
+  # 1. Allocation & Adding
+  def startAdd: Int = nowMs()
+  def list: List2(Int) = createList2(initialCap: 10)
+  def i: Int = 0
+  loop i < count {
+    list.add(value: i)
+    i = i + 1
+  }
+  def endAdd: Int = nowMs()
+  
+  # 2. Freeing
+  def startFree: Int = nowMs()
+  def endFree: Int = nowMs()
+  
+  def total: Int = nowMs() - start
+  log("{endAdd - startAdd}ms add, {endFree - startFree}ms free, {total}ms total")
+  ret total
+}
+
+func benchmarkSpecializedList(count: Int): ret Int {
   logS("Specialized List2Int: ")
   def start: Int = nowMs()
   
@@ -44,25 +69,58 @@ func benchmarkSpecializedList(count: Int) {
   
   def total: Int = nowMs() - start
   log("{endAdd - startAdd}ms add, {endFree - startFree}ms free, {total}ms total")
+  ret total
+}
+
+func sortBenchmarkData(names: mod List(String), times: mod List(Float)) {
+  def n: Int = times.length()
+  def i: Int = 0
+  loop i < n {
+    def j: Int = 0
+    loop j < n - i - 1 {
+      def t1: Float = times.get(index: j)
+      def t2: Float = times.get(index: j + 1)
+      if t1 > t2 {
+        # Swap times
+        times.swap(i: j, j: j + 1)
+        # Swap names accordingly
+        names.swap(i: j, j: j + 1)
+      }
+      j = j + 1
+    }
+    i = i + 1
+  }
 }
 
 func main() {
   def count: Int = 1000000
-  log("Benchmarking Native Generic List vs Specialized List with {count} items")
+  log("Benchmarking List Implementations with {count} items")
   log("----------------------------------------------------------------------")
   
   def iterations: Int = 3
   def i: Int = 0
+  
+  def totalNative: Int = 0
+  def totalList2: Int = 0
+  def totalSpec: Int = 0
+
   loop i < iterations {
     log("Iteration {i + 1}:")
     
-    # Random order logic (simulated with random)
-    if random(min: 0, max: 1) is 0 {
-      benchmarkNativeList(count: count)
-      benchmarkSpecializedList(count: count)
+    if i % 3 is 0 {
+      totalNative = totalNative + benchmarkNativeList(count: count)
+      totalList2 = totalList2 + benchmarkList2(count: count)
+      totalSpec = totalSpec + benchmarkSpecializedList(count: count)
     } else {
-      benchmarkSpecializedList(count: count)
-      benchmarkNativeList(count: count)
+      if i % 3 is 1 {
+        totalList2 = totalList2 + benchmarkList2(count: count)
+        totalSpec = totalSpec + benchmarkSpecializedList(count: count)
+        totalNative = totalNative + benchmarkNativeList(count: count)
+      } else {
+        totalSpec = totalSpec + benchmarkSpecializedList(count: count)
+        totalNative = totalNative + benchmarkNativeList(count: count)
+        totalList2 = totalList2 + benchmarkList2(count: count)
+      }
     }
     
     i = i + 1
@@ -70,4 +128,28 @@ func main() {
   }
   
   log("Benchmark complete.")
+  
+  def names: List(String) = createList(initialCap: 3)
+  names.add(value: "Native List(Int)")
+  names.add(value: "Library List2(Int)")
+  names.add(value: "Specialized List2Int")
+  
+  def times: List(Float) = createList(initialCap: 3)
+  times.add(value: totalNative.toFloat() / iterations.toFloat())
+  times.add(value: totalList2.toFloat() / iterations.toFloat())
+  times.add(value: totalSpec.toFloat() / iterations.toFloat())
+  
+  sortBenchmarkData(names: names, times: times)
+  
+  log("----------------------------------------------------------------------")
+  log("Results (Average over {iterations} runs, ordered fastest to slowest):")
+  
+  def rIdx: Int = 0
+  loop rIdx < times.length() {
+    log("{rIdx + 1}. {names.get(index: rIdx)}: {times.get(index: rIdx)}ms")
+    rIdx = rIdx + 1
+  }
+  log("----------------------------------------------------------------------")
+  
+  log("Winner: {names.get(index: 0)} is the fastest.")
 }

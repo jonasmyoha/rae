@@ -32,6 +32,7 @@
 #include "vm_tinyexpr.h"
 #include "raepack.h"
 #include "sys_thread.h"
+#include "../runtime/rae_runtime.h"
 
 typedef struct {
   const char* input_path;
@@ -238,27 +239,210 @@ static bool native_rae_str(struct VM* vm,
   return true;
 }
 
+static const Value* deref_value(const Value* v) {
+    while (v && v->type == VAL_REF) v = v->as.ref_value.target;
+    return v;
+}
+
 static bool native_rae_str_concat(struct VM* vm,
-                                  VmNativeResult* out_result,
-                                  const Value* args,
-                                  size_t arg_count,
-                                  void* user_data) {
+                                VmNativeResult* out_result,
+                                const Value* args,
+                                size_t arg_count,
+                                void* user_data) {
   (void)vm;
   (void)user_data;
   if (arg_count != 2) return false;
-  if (args[0].type != VAL_STRING || args[1].type != VAL_STRING) return false;
-  size_t len1 = args[0].as.string_value.length;
-  size_t len2 = args[1].as.string_value.length;
-  char* res = malloc(len1 + len2 + 1);
-  if (res) {
-    memcpy(res, args[0].as.string_value.chars, len1);
-    memcpy(res + len1, args[1].as.string_value.chars, len2);
-    res[len1 + len2] = '\0';
-  }
+  const Value* a_val = deref_value(&args[0]);
+  const Value* b_val = deref_value(&args[1]);
+  if (a_val->type != VAL_STRING || b_val->type != VAL_STRING) return false;
+  
+  const char* a = a_val->as.string_value.chars;
+  const char* b = b_val->as.string_value.chars;
+  const char* res = rae_str_concat(a, b);
   out_result->has_value = true;
-  out_result->value = value_string_take(res, len1 + len2);
+  out_result->value = value_string_take((char*)res, strlen(res));
   return true;
 }
+
+static bool native_rae_str_len(struct VM* vm,
+                                VmNativeResult* out_result,
+                                const Value* args,
+                                size_t arg_count,
+                                void* user_data) {
+  (void)vm; (void)user_data;
+  if (arg_count != 1) return false;
+  const Value* s_val = deref_value(&args[0]);
+  if (s_val->type != VAL_STRING) return false;
+  out_result->has_value = true;
+  out_result->value = value_int(rae_str_len(s_val->as.string_value.chars));
+  return true;
+}
+
+static bool native_rae_str_compare(struct VM* vm,
+                                    VmNativeResult* out_result,
+                                    const Value* args,
+                                    size_t arg_count,
+                                    void* user_data) {
+  (void)vm; (void)user_data;
+  if (arg_count != 2) return false;
+  const Value* a_val = deref_value(&args[0]);
+  const Value* b_val = deref_value(&args[1]);
+  if (a_val->type != VAL_STRING || b_val->type != VAL_STRING) return false;
+  out_result->has_value = true;
+  out_result->value = value_int(rae_str_compare(a_val->as.string_value.chars, b_val->as.string_value.chars));
+  return true;
+}
+
+static bool native_rae_str_sub(struct VM* vm,
+                                VmNativeResult* out_result,
+                                const Value* args,
+                                size_t arg_count,
+                                void* user_data) {
+  (void)vm; (void)user_data;
+  if (arg_count != 3) return false;
+  const Value* s_val = deref_value(&args[0]);
+  const Value* start_val = deref_value(&args[1]);
+  const Value* len_val = deref_value(&args[2]);
+  if (s_val->type != VAL_STRING || start_val->type != VAL_INT || len_val->type != VAL_INT) return false;
+  const char* res = rae_str_sub(s_val->as.string_value.chars, start_val->as.int_value, len_val->as.int_value);
+  out_result->has_value = true;
+  out_result->value = value_string_take((char*)res, strlen(res));
+  return true;
+}
+
+static bool native_rae_str_contains(struct VM* vm,
+                                     VmNativeResult* out_result,
+                                     const Value* args,
+                                     size_t arg_count,
+                                     void* user_data) {
+  (void)vm; (void)user_data;
+  if (arg_count != 2) return false;
+  const Value* s_val = deref_value(&args[0]);
+  const Value* sub_val = deref_value(&args[1]);
+  if (s_val->type != VAL_STRING || sub_val->type != VAL_STRING) return false;
+  out_result->has_value = true;
+  out_result->value = value_bool(rae_str_contains(s_val->as.string_value.chars, sub_val->as.string_value.chars));
+  return true;
+}
+
+static bool native_rae_str_to_f64(struct VM* vm,
+                                   VmNativeResult* out_result,
+                                   const Value* args,
+                                   size_t arg_count,
+                                   void* user_data) {
+  (void)vm; (void)user_data;
+  if (arg_count != 1) return false;
+  const Value* s_val = deref_value(&args[0]);
+  if (s_val->type != VAL_STRING) return false;
+  out_result->has_value = true;
+  out_result->value = value_float(rae_str_to_f64(s_val->as.string_value.chars));
+  return true;
+}
+
+static bool native_rae_str_to_i64(struct VM* vm,
+                                   VmNativeResult* out_result,
+                                   const Value* args,
+                                   size_t arg_count,
+                                   void* user_data) {
+  (void)vm; (void)user_data;
+  if (arg_count != 1) return false;
+  const Value* s_val = deref_value(&args[0]);
+  if (s_val->type != VAL_STRING) return false;
+  out_result->has_value = true;
+  out_result->value = value_int(rae_str_to_i64(s_val->as.string_value.chars));
+  return true;
+}
+
+
+static bool native_rae_io_read_line(struct VM* vm,
+                                     VmNativeResult* out_result,
+                                     const Value* args,
+                                     size_t arg_count,
+                                     void* user_data) {
+  (void)vm; (void)args; (void)user_data;
+  if (arg_count != 0) return false;
+  const char* res = rae_io_read_line();
+  out_result->has_value = true;
+  out_result->value = value_string_take((char*)res, strlen(res));
+  return true;
+}
+
+static bool native_rae_io_read_char(struct VM* vm,
+                                     VmNativeResult* out_result,
+                                     const Value* args,
+                                     size_t arg_count,
+                                     void* user_data) {
+  (void)vm; (void)args; (void)user_data;
+  if (arg_count != 0) return false;
+  out_result->has_value = true;
+  out_result->value = value_char(rae_io_read_char());
+  return true;
+}
+
+static bool native_rae_sys_exit(struct VM* vm,
+                                 VmNativeResult* out_result,
+                                 const Value* args,
+                                 size_t arg_count,
+                                 void* user_data) {
+  (void)vm; (void)user_data;
+  if (arg_count != 1) return false;
+  const Value* code_val = deref_value(&args[0]);
+  if (code_val->type != VAL_INT) return false;
+  rae_sys_exit(code_val->as.int_value);
+  out_result->has_value = false;
+  return true;
+}
+
+static bool native_rae_sys_get_env(struct VM* vm,
+                                    VmNativeResult* out_result,
+                                    const Value* args,
+                                    size_t arg_count,
+                                    void* user_data) {
+  (void)vm; (void)user_data;
+  if (arg_count != 1) return false;
+  const Value* name_val = deref_value(&args[0]);
+  if (name_val->type != VAL_STRING) return false;
+  const char* res = rae_sys_get_env(name_val->as.string_value.chars);
+  out_result->has_value = true;
+  if (res) out_result->value = value_string_copy(res, strlen(res));
+  else out_result->value = value_none();
+  return true;
+}
+
+static bool native_rae_sys_read_file(struct VM* vm,
+                                      VmNativeResult* out_result,
+                                      const Value* args,
+                                      size_t arg_count,
+                                      void* user_data) {
+  (void)vm; (void)user_data;
+  if (arg_count != 1) return false;
+  const Value* path_val = deref_value(&args[0]);
+  if (path_val->type != VAL_STRING) return false;
+  const char* res = rae_sys_read_file(path_val->as.string_value.chars);
+  out_result->has_value = true;
+  if (res) out_result->value = value_string_take((char*)res, strlen(res));
+  else out_result->value = value_none();
+  return true;
+}
+
+static bool native_rae_sys_write_file(struct VM* vm,
+                                       VmNativeResult* out_result,
+                                       const Value* args,
+                                       size_t arg_count,
+                                       void* user_data) {
+  (void)vm; (void)user_data;
+  if (arg_count != 2) return false;
+  const Value* path_val = deref_value(&args[0]);
+  const Value* content_val = deref_value(&args[1]);
+  if (path_val->type != VAL_STRING || content_val->type != VAL_STRING) return false;
+  bool ok = rae_sys_write_file(path_val->as.string_value.chars, content_val->as.string_value.chars);
+  out_result->has_value = true;
+  out_result->value = value_bool(ok);
+  return true;
+}
+
+
+
 
 static uint64_t g_vm_random_state = 0x123456789ABCDEF0ULL;
 
@@ -314,6 +498,20 @@ static bool native_rae_random_int(struct VM* vm,
   return true;
 }
 
+static bool native_rae_int_to_float(struct VM* vm,
+                                    VmNativeResult* out_result,
+                                    const Value* args,
+                                    size_t arg_count,
+                                    void* user_data) {
+  (void)vm; (void)user_data;
+  if (arg_count != 1) return false;
+  const Value* val = deref_value(&args[0]);
+  if (val->type != VAL_INT) return false;
+  out_result->has_value = true;
+  out_result->value = value_float((double)val->as.int_value);
+  return true;
+}
+
 static bool register_default_natives(VmRegistry* registry, TickCounter* tick_counter) {
   if (!registry) return false;
   bool ok = true;
@@ -322,8 +520,22 @@ static bool register_default_natives(VmRegistry* registry, TickCounter* tick_cou
   }
   ok = vm_registry_register_native(registry, "nowMs", native_rae_time_ms, NULL) && ok;
   ok = vm_registry_register_native(registry, "sleep", native_sleep_ms, NULL) && ok;
+  ok = vm_registry_register_native(registry, "sleepMs", native_sleep_ms, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_str", native_rae_str, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_str_concat", native_rae_str_concat, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_str_len", native_rae_str_len, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_str_compare", native_rae_str_compare, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_str_sub", native_rae_str_sub, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_str_contains", native_rae_str_contains, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_str_to_f64", native_rae_str_to_f64, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_str_to_i64", native_rae_str_to_i64, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_int_to_float", native_rae_int_to_float, NULL) && ok;
+  ok = vm_registry_register_native(registry, "readLine", native_rae_io_read_line, NULL) && ok;
+  ok = vm_registry_register_native(registry, "readChar", native_rae_io_read_char, NULL) && ok;
+  ok = vm_registry_register_native(registry, "exit", native_rae_sys_exit, NULL) && ok;
+  ok = vm_registry_register_native(registry, "getEnv", native_rae_sys_get_env, NULL) && ok;
+  ok = vm_registry_register_native(registry, "readFile", native_rae_sys_read_file, NULL) && ok;
+  ok = vm_registry_register_native(registry, "writeFile", native_rae_sys_write_file, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_seed", native_rae_seed, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_random", native_rae_random, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_random_int", native_rae_random_int, NULL) && ok;
@@ -335,6 +547,7 @@ static bool register_default_natives(VmRegistry* registry, TickCounter* tick_cou
 typedef struct ModuleNode {
   char* module_path;
   char* file_path;
+  char* canonical_path;
   AstModule* module;
   struct ModuleNode* next;
 } ModuleNode;
@@ -1139,14 +1352,22 @@ static bool module_graph_append(ModuleGraph* graph,
     fprintf(stderr, "error: out of memory while building module graph\n");
     return false;
   }
-  node->module_path = strdup(module_path);
+  node->module_path = module_path ? strdup(module_path) : NULL;
   node->file_path = strdup(file_path);
+  
+  char canonical[PATH_MAX];
+  if (realpath(file_path, canonical)) {
+      node->canonical_path = strdup(canonical);
+  } else {
+      node->canonical_path = strdup(file_path);
+  }
+
   node->module = module;
-  if (!node->module_path || !node->file_path) {
+  if ((module_path && !node->module_path) || !node->file_path || !node->canonical_path) {
     fprintf(stderr, "error: out of memory while duplicating module paths\n");
-    free(node->module_path);
+    if (node->module_path) free(node->module_path);
     free(node->file_path);
-    // Temporarily retain source_text buffers (freed with arena lifetime).
+    if (node->canonical_path) free(node->canonical_path);
     free(node);
     return false;
   }
@@ -1638,7 +1859,8 @@ static bool module_graph_load_module(ModuleGraph* graph,
                                      const char* module_path,
                                      const char* file_path,
                                      ModuleStack* stack,
-                                     uint64_t* hash_out) {
+                                     uint64_t* hash_out,
+                                     bool no_implicit) {
   char canonical_path[PATH_MAX];
   const char* path_to_check = file_path;
   if (realpath(file_path, canonical_path)) {
@@ -1651,12 +1873,7 @@ static bool module_graph_load_module(ModuleGraph* graph,
 
   // Also check if the file is already loaded under a different module path
   for (ModuleNode* node = graph->head; node; node = node->next) {
-    char node_canonical[PATH_MAX];
-    if (realpath(node->file_path, node_canonical)) {
-      if (strcmp(node_canonical, path_to_check) == 0) {
-        return true;
-      }
-    } else if (strcmp(node->file_path, path_to_check) == 0) {
+    if (strcmp(node->canonical_path, path_to_check) == 0) {
       return true;
     }
   }
@@ -1677,8 +1894,8 @@ static bool module_graph_load_module(ModuleGraph* graph,
     *hash_out ^= module_hash + 0x9e3779b97f4a7c15ull + (*hash_out << 6) + (*hash_out >> 2);
   }
 
-  // Pre-scan for nostdlib and other lib usage
   bool use_stdlib = true;
+  bool needs_core = false;
   bool needs_math = false;
   bool needs_io = false;
   bool needs_string = false;
@@ -1715,10 +1932,11 @@ static bool module_graph_load_module(ModuleGraph* graph,
         
         if (t->kind == TOK_IDENT) {
             Str s = t->lexeme;
-            if (str_eq_cstr(s, "abs") || str_eq_cstr(s, "min") || str_eq_cstr(s, "max") || str_eq_cstr(s, "clamp") || str_eq_cstr(s, "random") || str_eq_cstr(s, "seed")) needs_math = true;
-            if (str_eq_cstr(s, "log") || str_eq_cstr(s, "logS") || str_eq_cstr(s, "readLine")) needs_io = true;
-            if (str_eq_cstr(s, "exit") || str_eq_cstr(s, "readFile") || str_eq_cstr(s, "getEnv")) needs_sys = true;
-            if (str_eq_cstr(s, "compare") || str_eq_cstr(s, "toInt") || str_eq_cstr(s, "toFloat")) needs_string = true;
+            if (str_eq_cstr(s, "List") || str_eq_cstr(s, "add") || str_eq_cstr(s, "createList") || str_eq_cstr(s, "nextTick") || str_eq_cstr(s, "nowMs") || str_eq_cstr(s, "toFloat")) needs_core = true;
+            if (str_eq_cstr(s, "abs") || str_eq_cstr(s, "min") || str_eq_cstr(s, "max") || str_eq_cstr(s, "clamp") || str_eq_cstr(s, "random") || str_eq_cstr(s, "seed") || str_eq_cstr(s, "randomInt")) needs_math = true;
+            if (str_eq_cstr(s, "log") || str_eq_cstr(s, "logS") || str_eq_cstr(s, "readLine") || str_eq_cstr(s, "readChar")) needs_io = true;
+            if (str_eq_cstr(s, "exit") || str_eq_cstr(s, "readFile") || str_eq_cstr(s, "writeFile") || str_eq_cstr(s, "getEnv") || str_eq_cstr(s, "sleepMs")) needs_sys = true;
+            if (str_eq_cstr(s, "compare") || str_eq_cstr(s, "toInt") || str_eq_cstr(s, "toFloat") || str_eq_cstr(s, "concat") || str_eq_cstr(s, "sub") || str_eq_cstr(s, "contains")) needs_string = true;
         }
     }
   }
@@ -1730,21 +1948,27 @@ static bool module_graph_load_module(ModuleGraph* graph,
                                       strcmp(module_path, "string") != 0 &&
                                       strcmp(module_path, "sys") != 0))) {
     
-    // Always load core
-    char* core_file = try_resolve_lib_module(graph->root_path, "core");
-    if (core_file) {
-      if (!module_graph_load_module(graph, "core", core_file, &frame, hash_out)) {
-        free(core_file);
-        return false;
-      }
-      free(core_file);
+    // Load core if needed or if implicitly allowed
+    if ((needs_core || !no_implicit) && 
+        !module_graph_has_module(graph, "core") && 
+        !module_stack_contains(&frame, "core")) {
+        char* core_file = try_resolve_lib_module(graph->root_path, "core");
+        if (core_file) {
+          if (!module_graph_load_module(graph, "core", core_file, &frame, hash_out, no_implicit)) {
+            free(core_file);
+            return false;
+          }
+          free(core_file);
+        }
     }
 
-    // Conditionally load others
-    if (needs_math) {
+    // Conditionally load others if needed (even if no_implicit is set, if they are clearly needed by trigger symbols)
+    if (needs_math && 
+        !module_graph_has_module(graph, "math") && 
+        !module_stack_contains(&frame, "math")) {
         char* math_file = try_resolve_lib_module(graph->root_path, "math");
         if (math_file) {
-          if (!module_graph_load_module(graph, "math", math_file, &frame, hash_out)) {
+          if (!module_graph_load_module(graph, "math", math_file, &frame, hash_out, no_implicit)) {
             free(math_file);
             return false;
           }
@@ -1752,10 +1976,12 @@ static bool module_graph_load_module(ModuleGraph* graph,
         }
     }
 
-    if (needs_io) {
+    if (needs_io && 
+        !module_graph_has_module(graph, "io") && 
+        !module_stack_contains(&frame, "io")) {
         char* io_file = try_resolve_lib_module(graph->root_path, "io");
         if (io_file) {
-          if (!module_graph_load_module(graph, "io", io_file, &frame, hash_out)) {
+          if (!module_graph_load_module(graph, "io", io_file, &frame, hash_out, no_implicit)) {
             free(io_file);
             return false;
           }
@@ -1763,10 +1989,12 @@ static bool module_graph_load_module(ModuleGraph* graph,
         }
     }
 
-    if (needs_string) {
+    if (needs_string && 
+        !module_graph_has_module(graph, "string") && 
+        !module_stack_contains(&frame, "string")) {
         char* string_file = try_resolve_lib_module(graph->root_path, "string");
         if (string_file) {
-          if (!module_graph_load_module(graph, "string", string_file, &frame, hash_out)) {
+          if (!module_graph_load_module(graph, "string", string_file, &frame, hash_out, no_implicit)) {
             free(string_file);
             return false;
           }
@@ -1774,10 +2002,12 @@ static bool module_graph_load_module(ModuleGraph* graph,
         }
     }
 
-    if (needs_sys) {
+    if (needs_sys && 
+        !module_graph_has_module(graph, "sys") && 
+        !module_stack_contains(&frame, "sys")) {
         char* sys_file = try_resolve_lib_module(graph->root_path, "sys");
         if (sys_file) {
-          if (!module_graph_load_module(graph, "sys", sys_file, &frame, hash_out)) {
+          if (!module_graph_load_module(graph, "sys", sys_file, &frame, hash_out, no_implicit)) {
             free(sys_file);
             return false;
           }
@@ -1827,7 +2057,7 @@ static bool module_graph_load_module(ModuleGraph* graph,
         return false;
       }
     }
-    if (!module_graph_load_module(graph, normalized, child_file, &frame, hash_out)) {
+    if (!module_graph_load_module(graph, normalized, child_file, &frame, hash_out, no_implicit)) {
       free(normalized);
       free(child_file);
       return false;
@@ -1846,7 +2076,8 @@ static bool module_graph_load_module(ModuleGraph* graph,
 static bool scan_directory_for_modules(ModuleGraph* graph,
                                        const char* dir_path,
                                        const char* skip_file,
-                                       uint64_t* hash_out) {
+                                       uint64_t* hash_out,
+                                       bool no_implicit) {
   DIR* dir = opendir(dir_path);
   if (!dir) {
     return true;
@@ -1866,7 +2097,7 @@ static bool scan_directory_for_modules(ModuleGraph* graph,
       continue;
     }
     if (S_ISDIR(st.st_mode)) {
-      if (!scan_directory_for_modules(graph, child_path, skip_file, hash_out)) {
+      if (!scan_directory_for_modules(graph, child_path, skip_file, hash_out, no_implicit)) {
         closedir(dir);
         return false;
       }
@@ -1888,7 +2119,7 @@ static bool scan_directory_for_modules(ModuleGraph* graph,
       return false;
     }
     if (!module_graph_has_module(graph, module_path)) {
-      if (!module_graph_load_module(graph, module_path, child_path, NULL, hash_out)) {
+      if (!module_graph_load_module(graph, module_path, child_path, NULL, hash_out, no_implicit)) {
         free(module_path);
         closedir(dir);
         return false;
@@ -1900,7 +2131,7 @@ static bool scan_directory_for_modules(ModuleGraph* graph,
   return true;
 }
 
-static bool auto_import_directory(ModuleGraph* graph, const char* entry_file_path, uint64_t* hash_out) {
+static bool auto_import_directory(ModuleGraph* graph, const char* entry_file_path, uint64_t* hash_out, bool no_implicit) {
   char* dir_copy = strdup(entry_file_path);
   if (!dir_copy) {
     fprintf(stderr, "error: out of memory while scanning project directory\n");
@@ -1912,7 +2143,7 @@ static bool auto_import_directory(ModuleGraph* graph, const char* entry_file_pat
     return true;
   }
   *slash = '\0';
-  bool ok = scan_directory_for_modules(graph, dir_copy, entry_file_path, hash_out);
+  bool ok = scan_directory_for_modules(graph, dir_copy, entry_file_path, hash_out, no_implicit);
   free(dir_copy);
   return ok;
 }
@@ -1928,7 +2159,7 @@ static bool module_graph_build(ModuleGraph* graph, const char* entry_file, uint6
     free(resolved_entry);
     return false;
   }
-  bool ok = module_graph_load_module(graph, module_path, resolved_entry, NULL, hash_out);
+  bool ok = module_graph_load_module(graph, module_path, resolved_entry, NULL, hash_out, no_implicit);
   if (!ok) {
     free(module_path);
     free(resolved_entry);
@@ -1937,7 +2168,7 @@ static bool module_graph_build(ModuleGraph* graph, const char* entry_file, uint6
   ModuleNode* entry_node = module_graph_find(graph, module_path);
   // Implicitly import all .rae files in the project directory
   if (entry_node && !no_implicit) {
-    if (!auto_import_directory(graph, entry_node->file_path, hash_out)) {
+    if (!auto_import_directory(graph, entry_node->file_path, hash_out, no_implicit)) {
       free(module_path);
       free(resolved_entry);
       return false;
@@ -2211,7 +2442,7 @@ static bool build_c_backend_output(const char* entry_file,
     return false;
   }
   AstModule merged = merge_module_graph(&graph);
-  bool ok = c_backend_emit(&merged, out_file);
+  bool ok = c_backend_emit_module(&merged, out_file);
   if (ok) {
     char out_dir[PATH_MAX];
     strncpy(out_dir, out_file, sizeof(out_dir) - 1);
@@ -2342,7 +2573,7 @@ static bool build_hybrid_output(const char* entry_file,
     ok = write_function_manifest(&merged, chunk_path);
   }
   if (ok) {
-    ok = c_backend_emit(&merged, c_path);
+    ok = c_backend_emit_module(&merged, c_path);
   }
   if (ok) {
     ok = copy_runtime_assets(compiled_dir);

@@ -1,11 +1,36 @@
 # String utilities for Rae
+extern func rae_str_len(s: String): ret Int
+extern func rae_str_compare(a: String, b: String): ret Int
 extern func rae_str_concat(a: String, b: String): ret String
+extern func rae_str_sub(s: String, start: Int, len: Int): ret String
+extern func rae_str_contains(s: String, sub: String): ret Bool
+extern func rae_str_to_f64(s: String): ret Float
+extern func rae_str_to_i64(s: String): ret Int
 
 func length(this: String): ret Int {
-  # TODO: Implement string length intrinsic or extern
-  ret 0
+  ret rae_str_len(s: this)
+}
+
+func compare(this: String, other: String): ret Int {
+  ret rae_str_compare(a: this, b: other)
 }
 
 func concat(this: String, other: String): ret String {
   ret rae_str_concat(a: this, b: other)
+}
+
+func sub(this: String, start: Int, len: Int): ret String {
+  ret rae_str_sub(s: this, start: start, len: len)
+}
+
+func contains(this: String, sub: String): ret Bool {
+  ret rae_str_contains(s: this, sub: sub)
+}
+
+func toFloat(this: String): ret Float {
+  ret rae_str_to_f64(s: this)
+}
+
+func toInt(this: String): ret Int {
+  ret rae_str_to_i64(s: this)
 }

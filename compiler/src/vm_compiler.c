@@ -91,13 +91,20 @@ FunctionEntry* function_table_find(FunctionTable* table, Str name) {
 
 FunctionEntry* function_table_find_overload(FunctionTable* table, Str name, Str first_param_type) {
   if (!table) return NULL;
+  FunctionEntry* name_match = NULL;
   for (size_t i = 0; i < table->count; ++i) {
     if (str_matches(table->entries[i].name, name)) {
-      if (first_param_type.len == 0 || str_matches(table->entries[i].first_param_type, first_param_type)) {
+      if (first_param_type.len > 0 && str_matches(table->entries[i].first_param_type, first_param_type)) {
         return &table->entries[i];
       }
+      if (first_param_type.len == 0 && table->entries[i].first_param_type.len == 0) {
+          return &table->entries[i];
+      }
+      if (!name_match) name_match = &table->entries[i];
     }
   }
+  // If no exact match found, fallback to name-only match ONLY if we didn't have a specific type request
+  if (first_param_type.len == 0) return name_match;
   return NULL;
 }
 
@@ -1122,7 +1129,7 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
           // Rae-native List construction
           while (current) { element_count++; current = current->next; }
 
-          FunctionEntry* create_entry = function_table_find(&compiler->functions, str_from_cstr("createList"));
+          FunctionEntry* create_entry = function_table_find_overload(&compiler->functions, str_from_cstr("createList"), str_from_cstr("Int"));
           if (!create_entry) {
               diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'createList' not found in core.rae");
               return false;
@@ -1145,9 +1152,9 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
           // We pop it because we'll build it via the local ref and then push it back at the end
           emit_op(compiler, OP_POP, (int)expr->line);
 
-          FunctionEntry* add_entry = function_table_find(&compiler->functions, str_from_cstr("listAdd"));
+          FunctionEntry* add_entry = function_table_find_overload(&compiler->functions, str_from_cstr("add"), str_from_cstr("List"));
           if (!add_entry) {
-              diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'listAdd' not found in core.rae");
+              diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'add' not found in core.rae");
               return false;
           }
 
@@ -1180,7 +1187,7 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       AstExprList* current = expr->as.list;
       while (current) { element_count++; current = current->next; }
 
-      FunctionEntry* create_entry = function_table_find(&compiler->functions, str_from_cstr("createList"));
+      FunctionEntry* create_entry = function_table_find_overload(&compiler->functions, str_from_cstr("createList"), str_from_cstr("Int"));
       if (!create_entry) {
           diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'createList' not found in core.rae");
           return false;
@@ -1199,9 +1206,9 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       emit_short(compiler, (uint16_t)slot, (int)expr->line);
       emit_op(compiler, OP_POP, (int)expr->line);
 
-      FunctionEntry* add_entry = function_table_find(&compiler->functions, str_from_cstr("listAdd"));
+      FunctionEntry* add_entry = function_table_find_overload(&compiler->functions, str_from_cstr("add"), str_from_cstr("List"));
       if (!add_entry) {
-          diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'listAdd' not found in core.rae");
+          diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'add' not found in core.rae");
           return false;
       }
 
@@ -1872,10 +1879,7 @@ static bool compile_function(BytecodeCompiler* compiler, const AstDecl* decl) {
     return false;
   }
   if (entry->offset != INVALID_OFFSET) {
-    diag_error(compiler->file_path, (int)decl->line, (int)decl->column,
-               "duplicate function definition in VM compiler");
-    compiler->had_error = true;
-    return false;
+    return true; // Already compiled
   }
   if (func->is_extern) {
     return true;
