@@ -21,8 +21,27 @@
     - [x] Implement `List2<T>` in Rae.
     - [x] Add compiler support for generic type erasure in C backend.
     - [x] Verify `List2<Int>` and `List2<String>` work in both VM and Compiled modes.
-- [ ] **Phase 5: Production List Transition**
-    - [ ] Rename `List2` to `List`.
-    - [ ] Move `Buffer` and `List` implementation to `core.rae`.
-    - [ ] Remove C-backed `List` implementation from compiler and runtime.
-    - [ ] Verify all existing tests and examples still pass.
+- [x] **Phase 5: Production List Transition**
+    - [x] Rename `List2` to `List`.
+    - [x] Move `Buffer` and `List` implementation to `core.rae`.
+    - [x] Remove C-backed `List` implementation from compiler and runtime.
+    - [x] Verify all existing tests and examples still pass.
+- [ ] **Phase 6: Standard Library Implementation**
+    - [ ] **Compiler Infrastructure**
+        - [ ] Implement Type-Based Dispatch (Overloading) in VM compiler.
+        - [ ] Implement Type-Based Dispatch (Overloading) in C backend.
+        - [ ] Implement Name Mangling (`Type_method`) in C backend.
+        - [ ] Implement Conditional Auto-Imports (import only if symbol used).
+    - [ ] **Module: core**
+        - [ ] Standardize `nowMs()`, `sleep(ms)`, `nextTick()`.
+        - [ ] Move `List(T)` methods to standard naming (`add`, `get`, `length`, etc.).
+    - [ ] **Module: math**
+        - [ ] Implement basic math overloads (`abs`, `min`, `max`, `clamp`).
+        - [ ] Standardize randomness (`seed`, `randomFloat`, `randomInt`).
+    - [ ] **Module: string**
+        - [ ] Implement `length`, `compare`, `concat`, `sub`, `contains`, `toFloat`, `toInt`.
+    - [ ] **Module: io**
+        - [ ] Standardize `log`, `logS`.
+        - [ ] Implement `readLine`, `readChar`.
+    - [ ] **Module: sys**
+        - [ ] Implement `exit`, `getEnv`, `args`, `readFile`, `writeFile`.
