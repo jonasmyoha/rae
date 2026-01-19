@@ -1942,6 +1942,10 @@ function renderMetricList(listEl, entries, metricName, moreBtn) {
   const showAll = moreBtn?.dataset.expanded === "true";
   const visibleEntries = showAll ? entries : entries.slice(0, initialLimit);
 
+  if (listEl) {
+    listEl.classList.toggle("is-expanded", showAll);
+  }
+
   if (moreBtn) {
     moreBtn.hidden = entries.length <= initialLimit;
     moreBtn.textContent = showAll ? "Show less" : "More...";
@@ -2042,6 +2046,10 @@ function renderLineCountHistory(entries) {
   const showAll = lineCountMoreBtn?.dataset.expanded === "true";
   const rows = entries.slice().reverse();
   const visibleRows = showAll ? rows : rows.slice(0, initialLimit);
+
+  if (lineCountHistory) {
+    lineCountHistory.classList.toggle("is-expanded", showAll);
+  }
 
   if (lineCountMoreBtn) {
     lineCountMoreBtn.hidden = entries.length <= initialLimit;
