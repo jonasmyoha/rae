@@ -50,6 +50,21 @@ void rae_log_stream_any(RaeAny value) {
   }
 }
 
+void rae_log_list_fields(RaeAny* items, int64_t length, int64_t capacity) {
+  rae_log_stream_list_fields(items, length, capacity);
+  printf("\n");
+  fflush(stdout);
+}
+
+void rae_log_stream_list_fields(RaeAny* items, int64_t length, int64_t capacity) {
+  printf("{ #(");
+  for (int64_t i = 0; i < capacity; i++) {
+    if (i > 0) printf(", ");
+    rae_log_stream_any(items[i]);
+  }
+  printf("), %lld, %lld }", (long long)length, (long long)capacity);
+}
+
 void rae_log_cstr(const char* text) {
   if (!text) {
     fputs("(null)\n", stdout);
@@ -135,24 +150,6 @@ void rae_log_float(double value) {
 
 void rae_log_stream_float(double value) {
   printf("%g", value);
-  rae_flush_stdout();
-}
-
-void rae_log_list(RaeList* list) {
-  rae_log_stream_list(list);
-  printf("\n");
-  rae_flush_stdout();
-}
-
-void rae_log_stream_list(RaeList* list) {
-  printf("[");
-  if (list) {
-    for (int64_t i = 0; i < list->len; i++) {
-      if (i > 0) printf(", ");
-      printf("%lld", (long long)list->items[i]);
-    }
-  }
-  printf("]");
   rae_flush_stdout();
 }
 
@@ -265,44 +262,4 @@ void* rae_buf_resize(void* buf, int64_t new_count, int64_t elem_size) {
 void rae_buf_copy(void* src, int64_t src_off, void* dst, int64_t dst_off, int64_t len, int64_t elem_size) {
   if (!src || !dst || len <= 0) return;
   memmove((char*)dst + dst_off * elem_size, (char*)src + src_off * elem_size, (size_t)len * (size_t)elem_size);
-}
-
-RaeList* rae_list_create(int64_t cap) {
-  RaeList* list = malloc(sizeof(RaeList));
-  if (!list) return NULL;
-  list->len = 0;
-  list->cap = cap < 4 ? 4 : cap;
-  list->items = malloc(list->cap * sizeof(int64_t));
-  if (!list->items) {
-    free(list);
-    return NULL;
-  }
-  return list;
-}
-
-void rae_list_add(RaeList* list, int64_t item) {
-  if (!list) return;
-  if (list->len >= list->cap) {
-    list->cap *= 2;
-    list->items = realloc(list->items, list->cap * sizeof(int64_t));
-  }
-  list->items[list->len++] = item;
-}
-
-void rae_list_remove(RaeList* list, int64_t index) {
-  if (!list || index < 0 || index >= list->len) return;
-  for (int64_t i = index; i < list->len - 1; i++) {
-    list->items[i] = list->items[i + 1];
-  }
-  list->len--;
-}
-
-int64_t rae_list_get(RaeList* list, int64_t index) {
-  if (!list || index < 0 || index >= list->len) return 0;
-  return list->items[index];
-}
-
-int64_t rae_list_length(RaeList* list) {
-  if (!list) return 0;
-  return list->len;
 }
