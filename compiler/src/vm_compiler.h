@@ -10,7 +10,7 @@
 
 typedef struct {
   Str name;
-  Str first_param_type; // Type of the first parameter for dispatch
+  Str* param_types; // All parameter types for dispatch
   uint16_t offset;
   uint16_t param_count;
   uint16_t* patches;
@@ -76,7 +76,7 @@ bool vm_compile_module(const AstModule* module, Chunk* chunk, const char* file_p
 void free_function_table(FunctionTable* table);
 void free_type_table(TypeTable* table);
 FunctionEntry* function_table_find(FunctionTable* table, Str name);
-FunctionEntry* function_table_find_overload(FunctionTable* table, Str name, Str first_param_type);
+FunctionEntry* function_table_find_overload(FunctionTable* table, Str name, const Str* param_types, uint16_t param_count);
 TypeEntry* type_table_find(TypeTable* table, Str name);
 bool type_table_add(TypeTable* table, Str name, Str* field_names, const struct AstTypeRef** field_types, size_t field_count);
 int type_entry_find_field(const TypeEntry* entry, Str name);
