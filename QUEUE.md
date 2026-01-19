@@ -28,9 +28,9 @@
     - [x] Verify all existing tests and examples still pass.
 - [ ] **Phase 6: Standard Library Implementation**
     - [ ] **Compiler Infrastructure**
-        - [ ] Implement Type-Based Dispatch (Overloading) in VM compiler.
-        - [ ] Implement Type-Based Dispatch (Overloading) in C backend.
-        - [ ] Implement Name Mangling (`Type_method`) in C backend.
+        - [x] Implement Type-Based Dispatch (Overloading) in VM compiler.
+        - [x] Implement Type-Based Dispatch (Overloading) in C backend.
+        - [x] Implement Name Mangling (`Type_method`) in C backend.
         - [ ] Implement Conditional Auto-Imports (import only if symbol used).
     - [ ] **Module: core**
         - [ ] Standardize `nowMs()`, `sleep(ms)`, `nextTick()`.
