@@ -370,12 +370,22 @@ static Str infer_expr_type(CFuncContext* ctx, const AstExpr* expr) {
                     goto done;
                 }
                 
-                Str first_arg_type = {0};
-                if (expr->as.call.args) {
-                    first_arg_type = infer_expr_type(ctx, expr->as.call.args->value);
+                uint16_t arg_count = 0;
+                for (const AstCallArg* arg = expr->as.call.args; arg; arg = arg->next) arg_count++;
+                
+                Str* arg_types = NULL;
+                if (arg_count > 0) {
+                    arg_types = malloc(arg_count * sizeof(Str));
+                    const AstCallArg* arg = expr->as.call.args;
+                    for (uint16_t i = 0; i < arg_count; ++i) {
+                        arg_types[i] = infer_expr_type(ctx, arg->value);
+                        arg = arg->next;
+                    }
                 }
                 
-                const AstFuncDecl* d = find_function_overload(ctx->module, name, &first_arg_type, 1);
+                const AstFuncDecl* d = find_function_overload(ctx->module, name, arg_types, arg_count);
+                free(arg_types);
+                
                 if (d) {
                     if (d->returns && d->returns->type && d->returns->type->parts) {
                         Str rtype = d->returns->type->parts->text;
@@ -588,6 +598,67 @@ static bool is_primitive_type(Str type_name) {
          str_eq_cstr(type_name, "Any");
 }
 
+static Str strip_generics(Str type_name) {
+  for (size_t i = 0; i < type_name.len; ++i) {
+    if (type_name.data[i] == '(') {
+      return (Str){.data = type_name.data, .len = i};
+    }
+  }
+  return type_name;
+}
+
+static Str get_base_type_name_str(Str type_name) {
+  Str res = type_name;
+  if (str_starts_with_cstr(res, "mod ")) {
+    res.data += 4;
+    res.len -= 4;
+  } else if (str_starts_with_cstr(res, "view ")) {
+    res.data += 5;
+    res.len -= 5;
+  } else if (str_starts_with_cstr(res, "opt ")) {
+    res.data += 4;
+    res.len -= 4;
+  }
+  return res;
+}
+
+static bool types_match(Str entry_type_raw, Str call_type_raw) {
+  Str entry_type = get_base_type_name_str(entry_type_raw);
+  Str call_type = get_base_type_name_str(call_type_raw);
+
+  // 1. Exact match
+  if (str_eq(entry_type, call_type)) return true;
+  
+  // 2. Generic placeholder (single uppercase letter like 'T')
+  if (entry_type.len == 1 && entry_type.data[0] >= 'A' && entry_type.data[0] <= 'Z') {
+    return true;
+  }
+  
+  // Call 'Any' matches any entry type
+  if (str_eq_cstr(call_type, "Any")) {
+      return true;
+  }
+
+  // 3. Complex generic match: List(T) vs List(Int)
+  Str entry_base = strip_generics(entry_type);
+  Str call_base = strip_generics(call_type);
+  
+  if (str_eq(entry_base, call_base)) {
+    if (entry_type.len > entry_base.len && call_type.len > call_base.len) {
+        // Both have generics, match the inner part
+        Str entry_inner = { .data = entry_type.data + entry_base.len + 1, .len = entry_type.len - entry_base.len - 2 };
+        Str call_inner = { .data = call_type.data + call_base.len + 1, .len = call_type.len - call_base.len - 2 };
+        return types_match(entry_inner, call_inner);
+    }
+    // If entry has generics but call doesn't, it's a match (e.g. List(T) matches List)
+    if (entry_type.len > entry_base.len && call_type.len == call_base.len) {
+        return true;
+    }
+  }
+  
+  return false;
+}
+
 static const AstFuncDecl* find_function_overload(const AstModule* module, Str name, const Str* param_types, uint16_t param_count) {
     const AstFuncDecl* name_match = NULL;
     for (const AstDecl* d = module->decls; d; d = d->next) {
@@ -604,7 +675,9 @@ static const AstFuncDecl* find_function_overload(const AstModule* module, Str na
                     const AstParam* p = fd->params;
                     for (uint16_t j = 0; j < param_count; ++j) {
                         Str fd_type = get_base_type_name(p->type);
-                        if (!str_eq(fd_type, param_types[j])) {
+                        Str entry_base = get_base_type_name_str(fd_type);
+                        Str call_base = get_base_type_name_str(param_types[j]);
+                        if (!types_match(entry_base, call_base)) {
                             mismatch = true;
                             break;
                         }
@@ -616,7 +689,7 @@ static const AstFuncDecl* find_function_overload(const AstModule* module, Str na
                 // Legacy/First-arg mode
                 Str fd_first_type = {0};
                 if (fd->params) fd_first_type = get_base_type_name(fd->params->type);
-                if (fd_first_type.len > 0 && str_eq(fd_first_type, param_types[0])) {
+                if (fd_first_type.len > 0 && str_eq(get_base_type_name_str(fd_first_type), get_base_type_name_str(param_types[0]))) {
                     return fd;
                 }
             } else {
@@ -643,17 +716,32 @@ static void emit_mangled_function_name(const AstFuncDecl* func, FILE* out) {
             fprintf(out, "rae_sys_read_file");
         } else if (str_eq_cstr(func->name, "writeFile")) {
             fprintf(out, "rae_sys_write_file");
+        } else if (str_eq_cstr(func->name, "nextTick")) {
+            fprintf(out, "nextTick");
+        } else if (str_eq_cstr(func->name, "nowMs")) {
+            fprintf(out, "nowMs");
+        } else if (str_eq_cstr(func->name, "rae_random") || str_eq_cstr(func->name, "random")) {
+            fprintf(out, "rae_random");
+        } else if (str_eq_cstr(func->name, "rae_seed") || str_eq_cstr(func->name, "seed")) {
+            fprintf(out, "rae_seed");
+        } else if (str_eq_cstr(func->name, "rae_random_int") || str_eq_cstr(func->name, "random_int")) {
+            fprintf(out, "rae_random_int");
+        } else if (str_eq_cstr(func->name, "rae_int_to_float")) {
+            fprintf(out, "rae_int_to_float");
         } else {
-            fprintf(out, "%.*s", (int)func->name.len, func->name.data);
+            fprintf(out, "rae_ext_%.*s", (int)func->name.len, func->name.data);
         }
         return;
     }
     
     fprintf(out, "rae_%.*s", (int)func->name.len, func->name.data);
     
+    // Non-externs always get param-based mangling to avoid any chance of collision.
+    // We use a trailing underscore for each part.
+    fprintf(out, "_");
     for (const AstParam* p = func->params; p; p = p->next) {
         Str p_type = get_base_type_name(p->type);
-        fprintf(out, "_%.*s", (int)p_type.len, p_type.data);
+        fprintf(out, "%.*s_", (int)p_type.len, p_type.data);
     }
 }
 
@@ -1309,18 +1397,21 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
       while (current) { element_count++; current = current->next; }
       
           Str int_type = str_from_cstr("Int");
-          Str list_type = str_from_cstr("List");
+          Str add_types[] = { str_from_cstr("List"), str_from_cstr("Any") };
           const AstFuncDecl* create_fn = find_function_overload(ctx->module, str_from_cstr("createList"), &int_type, 1);
-          const AstFuncDecl* add_fn = find_function_overload(ctx->module, str_from_cstr("add"), &list_type, 1);
+          const AstFuncDecl* add_fn = find_function_overload(ctx->module, str_from_cstr("add"), add_types, 2);
       fprintf(out, "__extension__ ({ List _l = ");
       if (create_fn) emit_mangled_function_name(create_fn, out);
-      else fprintf(out, "createList");
+      else fprintf(out, "rae_createList_Int_");
       fprintf(out, "(%u); ", element_count);
 
       current = expr->as.list;
       while (current) {
-        if (add_fn) emit_mangled_function_name(add_fn, out);
-        else fprintf(out, "add");
+        if (add_fn) {
+            emit_mangled_function_name(add_fn, out);
+        } else {
+            fprintf(out, "rae_add_List_T_");
+        }
         fprintf(out, "(&_l, rae_any(");
         if (!emit_expr(ctx, current->value, out, PREC_LOWEST)) return false;
         fprintf(out, ")); ");
@@ -1331,8 +1422,8 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
     }
     case AST_EXPR_INDEX: {
       Str target_type = infer_expr_type(ctx, expr->as.index.target);
-      Str param_types[] = { target_type };
-      const AstFuncDecl* func_decl = find_function_overload(ctx->module, str_from_cstr("get"), param_types, 1);
+      Str param_types[] = { target_type, str_from_cstr("Int") };
+      const AstFuncDecl* func_decl = find_function_overload(ctx->module, str_from_cstr("get"), param_types, 2);
 
       if (func_decl) {
           emit_mangled_function_name(func_decl, out);
@@ -1357,9 +1448,23 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
     }
     case AST_EXPR_METHOD_CALL: {
       Str method = expr->as.method_call.method_name;
-      Str obj_type = infer_expr_type(ctx, expr->as.method_call.object);
-      Str param_types[] = { obj_type };
-    const AstFuncDecl* func_decl = find_function_overload(ctx->module, method, param_types, 1);
+      
+      uint16_t explicit_args_count = 0;
+      for (const AstCallArg* arg = expr->as.method_call.args; arg; arg = arg->next) explicit_args_count++;
+      uint16_t total_arg_count = 1 + explicit_args_count;
+
+      Str* arg_types = malloc(total_arg_count * sizeof(Str));
+      arg_types[0] = get_base_type_name_str(infer_expr_type(ctx, expr->as.method_call.object));
+      {
+          const AstCallArg* arg = expr->as.method_call.args;
+          for (uint16_t i = 0; i < explicit_args_count; ++i) {
+              arg_types[i + 1] = infer_expr_type(ctx, arg->value);
+              arg = arg->next;
+          }
+      }
+
+      const AstFuncDecl* func_decl = find_function_overload(ctx->module, method, arg_types, total_arg_count);
+      free(arg_types);
 
       if (func_decl) {
         const char* cast_pre = "";
@@ -1484,18 +1589,21 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
       }
       
           Str int_type = str_from_cstr("Int");
-          Str list_type = str_from_cstr("List");
+          Str add_types[] = { str_from_cstr("List"), str_from_cstr("Any") };
           const AstFuncDecl* create_fn = find_function_overload(ctx->module, str_from_cstr("createList"), &int_type, 1);
-          const AstFuncDecl* add_fn = find_function_overload(ctx->module, str_from_cstr("add"), &list_type, 1);
+          const AstFuncDecl* add_fn = find_function_overload(ctx->module, str_from_cstr("add"), add_types, 2);
       fprintf(out, "__extension__ ({ List _l = ");
       if (create_fn) emit_mangled_function_name(create_fn, out);
-      else fprintf(out, "createList");
+      else fprintf(out, "rae_createList_Int_");
       fprintf(out, "(%u); ", element_count);
 
       current = expr->as.collection.elements;
       while (current) {
-        if (add_fn) emit_mangled_function_name(add_fn, out);
-        else fprintf(out, "add");
+        if (add_fn) {
+            emit_mangled_function_name(add_fn, out);
+        } else {
+            fprintf(out, "rae_add_List_T_");
+        }
         fprintf(out, "(&_l, rae_any(");
         if (!emit_expr(ctx, current->value, out, PREC_LOWEST)) return false;
         fprintf(out, ")); ");
@@ -2108,7 +2216,7 @@ bool c_backend_emit_module(const AstModule* module, const char* out_path) {
     ok = emit_function(module, funcs[i], out);
   }
   if (ok && !has_main) {
-    fprintf(stderr, "error: C backend could find `func main`\n");
+    fprintf(stderr, "error: C backend could not find `func main` in project\n");
     ok = false;
   }
   free(funcs);

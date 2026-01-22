@@ -142,6 +142,7 @@ static bool native_sleep_ms(struct VM* vm,
     return false;
   }
   int64_t ms = args[0].as.int_value;
+  // printf("DEBUG sleepMs: %lld ms\n", (long long)ms);
   if (ms <= 0) {
     return true;
   }
@@ -149,39 +150,26 @@ static bool native_sleep_ms(struct VM* vm,
   return true;
 }
 
-static bool native_rae_str(struct VM* vm,
-                           VmNativeResult* out_result,
-                           const Value* args,
-                           size_t arg_count,
-                           void* user_data) {
-  (void)vm;
-  (void)user_data;
-  if (arg_count != 1) return false;
-  out_result->has_value = true;
-  switch (args[0].type) {
+static Value value_to_string_internal(Value val) {
+  switch (val.type) {
     case VAL_INT: {
       char buf[32];
-      sprintf(buf, "%lld", (long long)args[0].as.int_value);
-      out_result->value = value_string_copy(buf, strlen(buf));
-      break;
+      sprintf(buf, "%lld", (long long)val.as.int_value);
+      return value_string_copy(buf, strlen(buf));
     }
     case VAL_FLOAT: {
       char buf[32];
-      sprintf(buf, "%g", args[0].as.float_value);
-      out_result->value = value_string_copy(buf, strlen(buf));
-      break;
+      sprintf(buf, "%g", val.as.float_value);
+      return value_string_copy(buf, strlen(buf));
     }
     case VAL_BOOL: {
-      const char* s = args[0].as.bool_value ? "true" : "false";
-      out_result->value = value_string_copy(s, strlen(s));
-      break;
+      const char* s = val.as.bool_value ? "true" : "false";
+      return value_string_copy(s, strlen(s));
     }
     case VAL_STRING:
-      out_result->value =
-          value_string_copy(args[0].as.string_value.chars, args[0].as.string_value.length);
-      break;
+      return value_string_copy(val.as.string_value.chars, val.as.string_value.length);
     case VAL_CHAR: {
-      int64_t c = args[0].as.char_value;
+      int64_t c = val.as.char_value;
       char buf[5] = {0};
       if (c < 0x80) {
         buf[0] = (char)c;
@@ -198,44 +186,56 @@ static bool native_rae_str(struct VM* vm,
         buf[2] = (char)(0x80 | ((c >> 6) & 0x3F));
         buf[3] = (char)(0x80 | (c & 0x3F));
       }
-      out_result->value = value_string_copy(buf, strlen(buf));
-      break;
+      return value_string_copy(buf, strlen(buf));
     }
     case VAL_NONE:
-      out_result->value = value_string_copy("none", 4);
-      break;
+      return value_string_copy("none", 4);
     case VAL_OBJECT:
-      out_result->value = value_string_copy("<object>", 8);
-      break;
+      return value_string_copy("<object>", 8);
     case VAL_ARRAY:
-      out_result->value = value_string_copy("<array>", 7);
-      break;
+      return value_string_copy("<array>", 7);
     case VAL_BUFFER:
-      out_result->value = value_string_copy("<buffer>", 8);
-      break;
-    case VAL_REF: {
-      const char* prefix = args[0].as.ref_value.kind == REF_VIEW ? "view " : "mod ";
-      out_result->value = value_string_copy(prefix, strlen(prefix));
-      break;
-    }
+      return value_string_copy("<buffer>", 8);
+    case VAL_REF:
+      if (val.as.ref_value.target) {
+          return value_to_string_internal(*val.as.ref_value.target);
+      }
+      return value_string_copy("<ref:null>", 10);
     case VAL_ID: {
       char buf[64];
-      sprintf(buf, "Id(%lld)", (long long)args[0].as.id_value);
-      out_result->value = value_string_copy(buf, strlen(buf));
-      break;
+      sprintf(buf, "Id(%lld)", (long long)val.as.id_value);
+      return value_string_copy(buf, strlen(buf));
     }
     case VAL_KEY: {
-      size_t len = args[0].as.key_value.length;
+      size_t len = val.as.key_value.length;
       char* buf = malloc(len + 8);
       if (buf) {
         strcpy(buf, "Key(\"");
-        memcpy(buf + 5, args[0].as.key_value.chars, len);
+        memcpy(buf + 5, val.as.key_value.chars, len);
         strcpy(buf + 5 + len, "\")");
-        out_result->value = value_string_take(buf, len + 7);
+        Value res = value_string_take(buf, len + 7);
+        return res;
       }
-      break;
+      return value_string_copy("<key:error>", 11);
     }
   }
+  return value_string_copy("?", 1);
+}
+
+static Value value_to_string_object(Value val) {
+    return value_to_string_internal(val);
+}
+
+static bool native_rae_str(struct VM* vm,
+                           VmNativeResult* out_result,
+                           const Value* args,
+                           size_t arg_count,
+                           void* user_data) {
+  (void)vm;
+  (void)user_data;
+  if (arg_count != 1) return false;
+  out_result->has_value = true;
+  out_result->value = value_to_string_object(args[0]);
   return true;
 }
 
@@ -252,15 +252,24 @@ static bool native_rae_str_concat(struct VM* vm,
   (void)vm;
   (void)user_data;
   if (arg_count != 2) return false;
-  const Value* a_val = deref_value(&args[0]);
-  const Value* b_val = deref_value(&args[1]);
-  if (a_val->type != VAL_STRING || b_val->type != VAL_STRING) return false;
   
-  const char* a = a_val->as.string_value.chars;
-  const char* b = b_val->as.string_value.chars;
-  const char* res = rae_str_concat(a, b);
+  Value a_str_obj = value_to_string_object(args[0]);
+  Value b_str_obj = value_to_string_object(args[1]);
+  
+  const char* a = a_str_obj.as.string_value.chars;
+  const char* b = b_str_obj.as.string_value.chars;
+  const char* res_chars = rae_str_concat(a, b);
+
+  // printf("DEBUG concat: a='%s' b='%s' -> res='%s'\n", a, b, res_chars);
+  
   out_result->has_value = true;
-  out_result->value = value_string_take((char*)res, strlen(res));
+  out_result->value = value_string_copy(res_chars, strlen(res_chars));
+  free((void*)res_chars);
+  
+  // Clean up temporary string objects if they were newly allocated
+  value_free(&a_str_obj);
+  value_free(&b_str_obj);
+  
   return true;
 }
 
@@ -485,7 +494,14 @@ static bool native_rae_random_int(struct VM* vm,
                                   void* user_data) {
   (void)vm;
   (void)user_data;
-  if (arg_count != 2 || args[0].type != VAL_INT || args[1].type != VAL_INT) return false;
+  if (arg_count != 2) {
+      fprintf(stderr, "DEBUG random_int: arg_count=%zu (expected 2)\n", arg_count);
+      return false;
+  }
+  if (args[0].type != VAL_INT || args[1].type != VAL_INT) {
+      fprintf(stderr, "DEBUG random_int: types=%d,%d (expected %d,%d)\n", args[0].type, args[1].type, VAL_INT, VAL_INT);
+      return false;
+  }
   int64_t min = args[0].as.int_value;
   int64_t max = args[1].as.int_value;
   out_result->has_value = true;
