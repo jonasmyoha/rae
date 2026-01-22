@@ -4,6 +4,7 @@ import { Buffer } from "node:buffer";
 import {
   getExamplesRoot,
   getSyntaxSummaryPath,
+  getTestHistoryPath,
   getTestsRoot,
   loadConfig,
   resolveCompilerPath
@@ -48,6 +49,7 @@ const exampleRunner = new ExampleRunner(CONFIG, broadcastEvent);
 const testsRoot = getTestsRoot(CONFIG);
 const syntaxSummaryPath = getSyntaxSummaryPath(CONFIG);
 const examplesRoot = getExamplesRoot(CONFIG);
+const testHistoryPath = getTestHistoryPath(CONFIG);
 const compilerBinPath = resolveCompilerPath(CONFIG, "compiler/bin/rae");
 const compilerMetricsPath = path.resolve(
   process.cwd(),
@@ -129,6 +131,18 @@ const server = Bun.serve<SocketData>({
     if (url.pathname === "/api/tests/files" && req.method === "GET") {
       const tree = await readTestTree(testsRoot, 4);
       return new Response(JSON.stringify({ root: CONFIG.testsPath ?? "tests", tree }), {
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    if (url.pathname === "/api/tests/history" && req.method === "GET") {
+      const file = Bun.file(testHistoryPath);
+      if (await file.exists()) {
+        return new Response(file, {
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+      return new Response(JSON.stringify({}), {
         headers: { "Content-Type": "application/json" }
       });
     }
@@ -286,7 +300,7 @@ function handleClientEvent(event: ClientEvent) {
 
   if (event.type === "run-tests") {
     const mode = event.mode ?? "all";
-    testRunner.runTests(mode, event.targetId, event.disabledTests);
+    testRunner.runTests(mode, event.targetId, event.disabledTests, event.testName);
   }
 
   if (event.type === "stop-tests") {

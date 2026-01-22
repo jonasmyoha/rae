@@ -213,17 +213,32 @@
               <p class="test-list-empty">Run tests to see per-test status.</p>
             </div>
             <div class="test-inspector" id="test-inspector">
-              <div class="test-inspector-tabs" role="tablist">
-                <button type="button" class="is-active" data-inspector-tab="result">Result</button>
-                <button type="button" data-inspector-tab="source">Source</button>
-              </div>
-              <section
+              <header class="inspector-header">
+                <h3>Test Details & Actions</h3>
+                <div class="test-inspector-tabs" role="tablist">
+                  <button type="button" class="is-active" data-inspector-tab="result">Result</button>
+                  <button type="button" data-inspector-tab="history">History</button>
+                  <button type="button" data-inspector-tab="source">Source</button>
+                </div>
+                <div class="inspector-actions">
+                  <button type="button" id="run-test-live-btn" class="btn-action-mini">Run Live</button>
+                  <button type="button" id="run-test-compiled-btn" class="btn-action-mini">Run Compiled</button>
+                </div>
+              </header>              <section
                 class="inspect-panel test-detail"
                 id="test-detail"
                 data-inspector-panel="result"
                 aria-live="polite"
               >
                 <p class="detail-placeholder">Select a test to see details.</p>
+              </section>
+              <section
+                class="inspect-panel test-history-view is-hidden"
+                id="test-history-detail"
+                data-inspector-panel="history"
+                aria-live="polite"
+              >
+                <p class="detail-placeholder">Select a test to see history.</p>
               </section>
               <section
                 class="inspect-panel test-source-view is-hidden"

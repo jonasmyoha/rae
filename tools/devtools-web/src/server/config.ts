@@ -240,6 +240,10 @@ export function getExamplesRoot(config: RaeDevtoolsConfig): string {
   return resolveCompilerPath(config, config.examplesPath ?? "examples");
 }
 
+export function getTestHistoryPath(config: RaeDevtoolsConfig): string {
+  return resolveCompilerPath(config, "compiler/stats/test_history.json");
+}
+
 export function resolveTarget(config: RaeDevtoolsConfig, targetId?: string): TargetConfig {
   if (targetId) {
     const match = config.targets.find((target) => target.id === targetId);

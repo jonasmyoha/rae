@@ -258,6 +258,7 @@ export type ClientRunTestsMessage = {
   mode?: TestRunMode;
   targetId?: string;
   disabledTests?: string;
+  testName?: string;
 };
 
 export type ClientRunBuildMessage = {

@@ -32,6 +32,7 @@ type ActiveRun = {
   batchLabel: string;
   summaryTotals: { passed: number; failed: number };
   disabledTests?: string;
+  testName?: string;
 };
 
 export class TestRunner {
@@ -43,7 +44,7 @@ export class TestRunner {
     private stats?: StatsStore
   ) {}
 
-  runTests(mode: TestRunMode = "all", targetId?: string, disabledTests?: string) {
+  runTests(mode: TestRunMode = "all", targetId?: string, disabledTests?: string, testName?: string) {
     if (this.activeRun) {
       this.broadcast({
         type: "server-status",
@@ -74,7 +75,9 @@ export class TestRunner {
 
     const runId = randomUUID();
     const startedAt = Date.now();
-    const batchLabel = runnableTargets.map((target) => target.label).join(" + ");
+    const batchLabel = testName 
+        ? `${testName} [${runnableTargets.map(t => t.label).join(", ")}]` 
+        : runnableTargets.map((target) => target.label).join(" + ");
 
     const cwd = path.resolve(process.cwd(), this.config.compilerPath);
     this.activeRun = {
@@ -89,7 +92,8 @@ export class TestRunner {
       overallSuccess: true,
       batchLabel,
       summaryTotals: { passed: 0, failed: 0 },
-      disabledTests
+      disabledTests,
+      testName
     };
 
     this.broadcast(createRunStartedMessage(runId, mode, batchLabel, cwd));
@@ -124,7 +128,12 @@ export class TestRunner {
       env.RAE_SKIP_TESTS = this.activeRun.disabledTests;
     }
 
-    const child = spawn(target.testCommand, {
+    let command = target.testCommand;
+    if (this.activeRun.testName) {
+        command = `${target.testCommand} TEST=${this.activeRun.testName}`;
+    }
+
+    const child = spawn(command, {
       cwd,
       shell: true,
       env
