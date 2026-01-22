@@ -147,8 +147,6 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
     uint8_t instruction = *vm->ip++;
     switch (instruction) {
       case OP_CONSTANT: {
-    switch (instruction) {
-      case OP_CONSTANT: {
         uint16_t index = read_short(vm);
         if (index >= chunk->constants_count) {
           diag_fatal("bytecode constant index OOB");
