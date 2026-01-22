@@ -286,7 +286,12 @@ function handleClientEvent(event: ClientEvent) {
 
   if (event.type === "run-tests") {
     const mode = event.mode ?? "all";
-    testRunner.runTests(mode, event.targetId);
+    testRunner.runTests(mode, event.targetId, event.disabledTests);
+  }
+
+  if (event.type === "stop-tests") {
+    testRunner.stopTests(event.targetId);
+    exampleRunner.stop();
   }
 
   if (event.type === "run-build") {

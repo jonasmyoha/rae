@@ -4,6 +4,8 @@ const statusFeed = document.getElementById("status-feed");
 const connectionStatus = document.getElementById("connection-status");
 const heartbeatStatus = document.getElementById("heartbeat-status");
 const runTestsBtn = document.getElementById("run-tests-btn");
+const stopTestsBtn = document.getElementById("stop-tests-btn");
+const disabledTestsInput = document.getElementById("disabled-tests-input");
 const testStatusChip = document.getElementById("test-status-chip");
 const testLog = document.getElementById("test-log");
 const buildStatusChip = document.getElementById("build-status-chip");
@@ -351,6 +353,16 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
+stopTestsBtn?.addEventListener("click", () => requestStopTests());
+
+if (disabledTestsInput) {
+  const saved = localStorage.getItem("rae_disabled_tests");
+  if (saved) disabledTestsInput.value = saved;
+  disabledTestsInput.addEventListener("input", () => {
+    localStorage.setItem("rae_disabled_tests", disabledTestsInput.value);
+  });
+}
+
 buildBtn?.addEventListener("click", () => requestBuildCommand("build"));
 cleanBtn?.addEventListener("click", () => requestBuildCommand("clean"));
 rebuildBtn?.addEventListener("click", () => requestBuildCommand("rebuild"));
@@ -414,10 +426,26 @@ function requestTestRun(mode = "all") {
     return;
   }
 
+  const disabledTests = disabledTestsInput ? disabledTestsInput.value : "";
+
   socket.send(
     JSON.stringify({
       type: "run-tests",
-      mode
+      mode,
+      disabledTests
+    })
+  );
+}
+
+function requestStopTests() {
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    pushStatusItem("Cannot stop tests: socket disconnected.");
+    return;
+  }
+
+  socket.send(
+    JSON.stringify({
+      type: "stop-tests"
     })
   );
 }
