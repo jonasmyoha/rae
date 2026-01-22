@@ -1895,6 +1895,10 @@ static const NativeMap RAYLIB_MAP[] = {
     {"drawRectangle", "DrawRectangle"},
     {"drawCircle", "DrawCircle"},
     {"drawText", "DrawText"},
+    {"drawCube", "DrawCube"},
+    {"drawGrid", "DrawGrid"},
+    {"beginMode3D", "BeginMode3D"},
+    {"endMode3D", "EndMode3D"},
     {NULL, NULL}
 };
 
@@ -1926,12 +1930,23 @@ static bool emit_raylib_wrapper(const AstFuncDecl* fn, const char* c_name, FILE*
       const AstDecl* td = find_type_decl(module, type_name);
       
       if (td && td->kind == AST_DECL_TYPE && has_property(td->as.type_decl.properties, "c_struct")) {
-          // It's a mapped struct! In Raylib we often need to cast fields if they are mismatched,
-          // but for now we assume binary compatibility or explicit wrapper logic if needed.
-          // For Color specifically, Raylib uses unsigned char.
           if (str_eq_cstr(type_name, "Color")) {
               fprintf(out, "(Color){ (unsigned char)%.*s.r, (unsigned char)%.*s.g, (unsigned char)%.*s.b, (unsigned char)%.*s.a }", 
                       (int)p->name.len, p->name.data, (int)p->name.len, p->name.data, (int)p->name.len, p->name.data, (int)p->name.len, p->name.data);
+          } else if (str_eq_cstr(type_name, "Vector3")) {
+              fprintf(out, "(Vector3){ (float)%.*s.x, (float)%.*s.y, (float)%.*s.z }", 
+                      (int)p->name.len, p->name.data, (int)p->name.len, p->name.data, (int)p->name.len, p->name.data);
+          } else if (str_eq_cstr(type_name, "Camera3D")) {
+              fprintf(out, "(Camera3D){ ");
+              fprintf(out, ".position = (Vector3){ (float)%.*s.position.x, (float)%.*s.position.y, (float)%.*s.position.z }, ", 
+                      (int)p->name.len, p->name.data, (int)p->name.len, p->name.data, (int)p->name.len, p->name.data);
+              fprintf(out, ".target = (Vector3){ (float)%.*s.target.x, (float)%.*s.target.y, (float)%.*s.target.z }, ", 
+                      (int)p->name.len, p->name.data, (int)p->name.len, p->name.data, (int)p->name.len, p->name.data);
+              fprintf(out, ".up = (Vector3){ (float)%.*s.up.x, (float)%.*s.up.y, (float)%.*s.up.z }, ", 
+                      (int)p->name.len, p->name.data, (int)p->name.len, p->name.data, (int)p->name.len, p->name.data);
+              fprintf(out, ".fovy = (float)%.*s.fovy, .projection = (int)%.*s.projection ", 
+                      (int)p->name.len, p->name.data, (int)p->name.len, p->name.data);
+              fprintf(out, "}");
           } else {
               fprintf(out, "%.*s", (int)p->name.len, p->name.data);
           }
