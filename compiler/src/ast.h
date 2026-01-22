@@ -287,8 +287,19 @@ struct AstBlock {
 
 typedef enum {
   AST_DECL_TYPE,
-  AST_DECL_FUNC
+  AST_DECL_FUNC,
+  AST_DECL_ENUM
 } AstDeclKind;
+
+typedef struct AstEnumMember {
+  Str name;
+  struct AstEnumMember* next;
+} AstEnumMember;
+
+typedef struct {
+  Str name;
+  AstEnumMember* members;
+} AstEnumDecl;
 
 typedef struct {
   Str name;
@@ -315,6 +326,7 @@ struct AstDecl {
   union {
     AstTypeDecl type_decl;
     AstFuncDecl func_decl;
+    AstEnumDecl enum_decl;
   } as;
 };
 

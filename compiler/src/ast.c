@@ -555,6 +555,20 @@ static void dump_params(const AstParam* params, FILE* out, int indent) {
   }
 }
 
+static void dump_enum_decl(const AstDecl* decl, FILE* out, int indent) {
+  print_indent(out, indent);
+  fputs("enum ", out);
+  print_str(out, decl->as.enum_decl.name);
+  fputc('\n', out);
+  AstEnumMember* current = decl->as.enum_decl.members;
+  while (current) {
+    print_indent(out, indent + 1);
+    print_str(out, current->name);
+    fputc('\n', out);
+    current = current->next;
+  }
+}
+
 static void dump_func_decl(const AstDecl* decl, FILE* out, int indent) {
   print_indent(out, indent);
   if (decl->as.func_decl.is_extern) {
@@ -604,6 +618,9 @@ void ast_dump_module(const AstModule* module, FILE* out) {
         break;
       case AST_DECL_FUNC:
         dump_func_decl(decl, out, 1);
+        break;
+      case AST_DECL_ENUM:
+        dump_enum_decl(decl, out, 1);
         break;
     }
     decl = decl->next;

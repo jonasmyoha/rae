@@ -71,7 +71,7 @@ $(BUILD_DIR)/rae_tinyexpr.o: ../third_party/tinyexpr/rae_tinyexpr.c
 
 test: build
 	@chmod +x $(TEST_RUNNER)
-	@$(TEST_RUNNER)
+	@$(TEST_RUNNER) $(TEST)
 
 clean:
 	rm -rf $(BUILD_DIR) $(BIN_DIR)

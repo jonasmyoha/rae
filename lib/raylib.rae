@@ -1,4 +1,17 @@
 # Raylib wrapper for Rae
+
+type Color: c_struct {
+  r: Int
+  g: Int
+  b: Int
+  a: Int
+}
+
+type Vector2: c_struct {
+  x: Float
+  y: Float
+}
+
 extern func initWindow(width: Int, height: Int, title: String)
 
 extern func windowShouldClose(): ret Int
@@ -9,27 +22,21 @@ extern func beginDrawing()
 
 extern func endDrawing()
 
-extern func clearBackground(r: Int, g: Int, b: Int, a: Int)
+extern func clearBackground(color: Color)
 
 extern func drawRectangle(
   x: Float,
   y: Float,
   width: Float,
   height: Float,
-  r: Int,
-  g: Int,
-  b: Int,
-  a: Int,
+  color: Color
 )
 
 extern func drawCircle(
   x: Float,
   y: Float,
   radius: Float,
-  r: Int,
-  g: Int,
-  b: Int,
-  a: Int,
+  color: Color
 )
 
 extern func drawText(
@@ -37,10 +44,7 @@ extern func drawText(
   x: Float,
   y: Float,
   fontSize: Float,
-  r: Int,
-  g: Int,
-  b: Int,
-  a: Int,
+  color: Color
 )
 
 extern func setTargetFPS(fps: Int)
