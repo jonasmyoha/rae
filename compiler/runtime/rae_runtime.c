@@ -362,3 +362,22 @@ void rae_buf_copy(void* src, int64_t src_off, void* dst, int64_t dst_off, int64_
 double rae_int_to_float(int64_t i) {
   return (double)i;
 }
+
+/* Raylib wrappers for C backend */
+#include <raylib.h>
+
+void rae_ext_drawCubeWires(Vector3 pos, double width, double height, double length, Color color) {
+    DrawCubeWires(pos, (float)width, (float)height, (float)length, color);
+}
+
+void rae_ext_drawSphere(Vector3 centerPos, double radius, Color color) {
+    DrawSphere(centerPos, (float)radius, color);
+}
+
+double rae_ext_getTime(void) {
+    return GetTime();
+}
+
+Color rae_ext_colorFromHSV(double hue, double saturation, double value) {
+    return ColorFromHSV((float)hue, (float)saturation, (float)value);
+}

@@ -2,6 +2,7 @@
 #define RAE_RUNTIME_H
 
 #include <stdint.h>
+#include <math.h>
 
 #ifdef __GNUC__
 #define RAE_UNUSED __attribute__((unused))
@@ -137,6 +138,13 @@ int64_t nowMs(void);
 void rae_sleep(int64_t ms);
 
 double rae_int_to_float(int64_t i);
+
+/* Raylib wrappers */
+#include <raylib.h>
+void rae_ext_drawCubeWires(Vector3 pos, double width, double height, double length, Color color);
+void rae_ext_drawSphere(Vector3 centerPos, double radius, Color color);
+double rae_ext_getTime(void);
+Color rae_ext_colorFromHSV(double hue, double saturation, double value);
 
 #endif /* RAE_RUNTIME_H */
 

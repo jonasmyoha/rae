@@ -1195,7 +1195,24 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
         case AST_BIN_SUB: op = "-"; break;
         case AST_BIN_MUL: op = "*"; break;
         case AST_BIN_DIV: op = "/"; break;
-        case AST_BIN_MOD: op = "%"; break;
+        case AST_BIN_MOD: {
+            Str ltype = infer_expr_type(ctx, expr->as.binary.lhs);
+            Str rtype = infer_expr_type(ctx, expr->as.binary.rhs);
+            if (str_eq_cstr(ltype, "Float") || str_eq_cstr(rtype, "Float")) {
+                fprintf(out, "fmod(");
+                if (!emit_expr(ctx, expr->as.binary.lhs, out, PREC_LOWEST)) return false;
+                fprintf(out, ", ");
+                if (!emit_expr(ctx, expr->as.binary.rhs, out, PREC_LOWEST)) return false;
+                fprintf(out, ")");
+            } else {
+                if (need_paren) fprintf(out, "(");
+                if (!emit_expr(ctx, expr->as.binary.lhs, out, prec)) return false;
+                fprintf(out, " %% ");
+                if (!emit_expr(ctx, expr->as.binary.rhs, out, prec + 1)) return false;
+                if (need_paren) fprintf(out, ")");
+            }
+            return true;
+        }
         case AST_BIN_LT: op = "<"; break;
         case AST_BIN_GT: op = ">"; break;
         case AST_BIN_LE: op = "<="; break;
