@@ -296,6 +296,48 @@ int type_entry_find_field(const TypeEntry* entry, Str name) {
   return -1;
 }
 
+void free_enum_table(EnumTable* table) {
+  if (!table) return;
+  for (size_t i = 0; i < table->count; i++) {
+    free(table->entries[i].members);
+  }
+  free(table->entries);
+  table->entries = NULL;
+  table->count = 0;
+  table->capacity = 0;
+}
+
+EnumEntry* enum_table_find(EnumTable* table, Str name) {
+  if (!table) return NULL;
+  for (size_t i = 0; i < table->count; i++) {
+    if (str_matches(table->entries[i].name, name)) return &table->entries[i];
+  }
+  return NULL;
+}
+
+bool enum_table_add(EnumTable* table, Str name, Str* members, size_t member_count) {
+  if (enum_table_find(table, name)) return true;
+  if (table->count + 1 > table->capacity) {
+    size_t new_cap = table->capacity < 4 ? 4 : table->capacity * 2;
+    EnumEntry* resized = realloc(table->entries, new_cap * sizeof(EnumEntry));
+    if (!resized) return false;
+    table->entries = resized;
+    table->capacity = new_cap;
+  }
+  EnumEntry* entry = &table->entries[table->count++];
+  entry->name = name;
+  entry->members = members;
+  entry->member_count = member_count;
+  return true;
+}
+
+int enum_entry_find_member(const EnumEntry* entry, Str name) {
+  for (size_t i = 0; i < entry->member_count; i++) {
+    if (str_matches(entry->members[i], name)) return (int)i;
+  }
+  return -1;
+}
+
 static bool is_primitive_type(Str type_name) {
   return str_eq_cstr(type_name, "Int") || 
          str_eq_cstr(type_name, "Float") || 
@@ -303,12 +345,11 @@ static bool is_primitive_type(Str type_name) {
          str_eq_cstr(type_name, "String");
 }
 
-bool collect_metadata(const char* file_path, const AstModule* module, FunctionTable* funcs, TypeTable* types /* GEMINI: MethodTable* methods parameter removed to fix build */) {
-  // GEMINI: This function is not fully implemented yet, only a partial implementation.
-  // The method table is not yet populated.
+bool collect_metadata(const char* file_path, const AstModule* module, FunctionTable* funcs, TypeTable* types, EnumTable* enums) {
   const AstDecl* decl = module->decls;
   while (decl) {
     if (decl->kind == AST_DECL_FUNC) {
+      // ... (func handling remains same) ...
       uint16_t param_count = 0;
       const AstParam* p = decl->as.func_decl.params;
       while (p) {
@@ -356,6 +397,21 @@ bool collect_metadata(const char* file_path, const AstModule* module, FunctionTa
       if (!type_table_add(types, decl->as.type_decl.name, field_names, field_types, field_count)) {
         free(field_names);
         free(field_types);
+        return false;
+      }
+    } else if (decl->kind == AST_DECL_ENUM) {
+      size_t member_count = 0;
+      const AstEnumMember* m = decl->as.enum_decl.members;
+      while (m) { member_count++; m = m->next; }
+      
+      Str* members = malloc(member_count * sizeof(Str));
+      m = decl->as.enum_decl.members;
+      for (size_t i = 0; i < member_count; i++) {
+        members[i] = m->name;
+        m = m->next;
+      }
+      if (!enum_table_add(enums, decl->as.enum_decl.name, members, member_count)) {
+        free(members);
         return false;
       }
     }
@@ -408,6 +464,23 @@ int compiler_add_local(BytecodeCompiler* compiler, Str name, Str type_name) {
   compiler->locals[compiler->local_count].type_name = type_name;
   compiler->local_count += 1;
   return (int)(compiler->local_count - 1);
+}
+
+static const AstDecl* find_type_decl(const AstModule* module, Str name) {
+  for (const AstDecl* decl = module->decls; decl; decl = decl->next) {
+    if (decl->kind == AST_DECL_TYPE && str_matches(decl->as.type_decl.name, name)) {
+      return decl;
+    }
+  }
+  return NULL;
+}
+
+static bool has_property(const AstProperty* props, const char* name) {
+  while (props) {
+    if (str_eq_cstr(props->name, name)) return true;
+    props = props->next;
+  }
+  return false;
 }
 
 static Str get_local_type_name(BytecodeCompiler* compiler, Str name) {
@@ -778,8 +851,33 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
             if (!compile_expr(compiler, arg->value)) return false;
         }
     } else {
-        if (!compile_expr(compiler, arg->value)) {
-          return false;
+        // STRUCT-TO-STRUCT FFI (VM Flattening)
+        // If it's a native call, check if the argument type is a c_struct
+        bool flattened = false;
+        if (entry->is_extern) {
+            Str type_name = infer_expr_type(compiler, arg->value);
+            const AstDecl* type_decl = find_type_decl(compiler->module, type_name);
+            if (type_decl && type_decl->kind == AST_DECL_TYPE && has_property(type_decl->as.type_decl.properties, "c_struct")) {
+                // Flatten! Push each field
+                const AstTypeField* field = type_decl->as.type_decl.fields;
+                int field_idx = 0;
+                while (field) {
+                    if (!compile_expr(compiler, arg->value)) return false;
+                    emit_op(compiler, OP_GET_FIELD, (int)expr->line);
+                    emit_short(compiler, (uint16_t)field_idx, (int)expr->line);
+                    arg_count++; // Each field is a separate arg for existing native wrappers
+                    field = field->next;
+                    field_idx++;
+                }
+                arg_count--; // Remove the original struct arg count contribution
+                flattened = true;
+            }
+        }
+
+        if (!flattened) {
+            if (!compile_expr(compiler, arg->value)) {
+              return false;
+            }
         }
     }
     arg = arg->next;
@@ -879,6 +977,26 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
     case AST_EXPR_CALL:
       return compile_call(compiler, expr);
     case AST_EXPR_MEMBER: {
+      if (expr->as.member.object->kind == AST_EXPR_IDENT) {
+          Str obj_name = expr->as.member.object->as.ident;
+          // Check if it's an enum member access (e.g. Color.RED)
+          EnumEntry* en = enum_table_find(&compiler->enums, obj_name);
+          if (en) {
+              int member_idx = enum_entry_find_member(en, expr->as.member.member);
+              if (member_idx < 0) {
+                  char buffer[128];
+                  snprintf(buffer, sizeof(buffer), "enum '%.*s' has no member '%.*s'", 
+                           (int)obj_name.len, obj_name.data,
+                           (int)expr->as.member.member.len, expr->as.member.member.data);
+                  diag_error(compiler->file_path, (int)expr->line, (int)expr->column, buffer);
+                  compiler->had_error = true;
+                  return false;
+              }
+              emit_constant(compiler, value_int(member_idx), (int)expr->line);
+              return true;
+          }
+      }
+
       if (expr->as.member.object->kind != AST_EXPR_IDENT) {
         diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
                    "VM currently only supports member access on identifiers");
@@ -2126,6 +2244,7 @@ bool vm_compile_module(const AstModule* module, Chunk* chunk, const char* file_p
   chunk_init(chunk);
   BytecodeCompiler compiler = {
       .chunk = chunk,
+      .module = module,
       .file_path = file_path,
       .had_error = false,
       .current_function = NULL,
@@ -2134,9 +2253,10 @@ bool vm_compile_module(const AstModule* module, Chunk* chunk, const char* file_p
   };
   memset(&compiler.functions, 0, sizeof(FunctionTable));
   memset(&compiler.types, 0, sizeof(TypeTable));
-  memset(&compiler.methods, 0, sizeof(MethodTable)); // GEMINI: MethodTable initialization added to fix build.
+  memset(&compiler.methods, 0, sizeof(MethodTable));
+  memset(&compiler.enums, 0, sizeof(EnumTable));
 
-  if (!collect_metadata(file_path, module, &compiler.functions, &compiler.types /* GEMINI: methods param removed to fix build */)) {
+  if (!collect_metadata(file_path, module, &compiler.functions, &compiler.types, &compiler.enums)) {
     diag_error(file_path, 0, 0, "failed to prepare VM metadata");
     compiler.had_error = true;
   }
@@ -2180,6 +2300,7 @@ bool vm_compile_module(const AstModule* module, Chunk* chunk, const char* file_p
   bool success = !compiler.had_error;
   free_function_table(&compiler.functions);
   free_type_table(&compiler.types);
+  free_enum_table(&compiler.enums);
   // Method table free not yet implemented but should be added when used.
 
   return success;

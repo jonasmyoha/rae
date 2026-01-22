@@ -9,9 +9,10 @@ PASSED=0
 FAILED=0
 PASSED_TEST_NAMES=""
 TARGET_FILTER=$(printf "%s" "${TEST_TARGET:-${TARGET:-}}" | tr '[:upper:]' '[:lower:]')
+TEST_NAME_FILTER="$1"
 
 # Tests that are permanently disabled because they hang or are known to be broken
-HARDCODED_DISABLED=" 321_stack_leak 321 "
+HARDCODED_DISABLED=""
 
 echo "Running Rae tests..."
 echo
@@ -84,6 +85,14 @@ for TARGET in "${TARGETS[@]}"; do
       continue
     fi
     TEST_NAME=$(basename "$TEST_FILE" .rae)
+    TEST_NUMBER="${TEST_NAME%%_*}"
+
+    # Apply name filter if provided
+    if [ -n "$TEST_NAME_FILTER" ]; then
+      if [ "$TEST_NAME" != "$TEST_NAME_FILTER" ] && [ "$TEST_NUMBER" != "$TEST_NAME_FILTER" ]; then
+        continue
+      fi
+    fi
     
     # Check if we should skip this test (hardcoded or RAE_SKIP_TESTS env var)
     SKIP_LIST=" $HARDCODED_DISABLED $(echo "${RAE_SKIP_TESTS:-}" | tr ',' ' ') "
@@ -113,7 +122,7 @@ for TARGET in "${TARGETS[@]}"; do
 
     # Filtering logic
     RUN_THIS=1
-    if [ "$TARGET" = "compiled" ]; then
+    if [ "$TARGET" = "compiled" ] && [ -z "$TEST_NAME_FILTER" ]; then
         case "$TEST_NAME" in
             # Skip build tests that target live/hybrid specifically
             407_*|408_*) RUN_THIS=0 ;;
@@ -246,7 +255,8 @@ if [ $FAILED -gt 0 ]; then
 fi
 
 # Also run example smoke tests if we are in 'live' or default mode
-if [ -z "$TARGET_FILTER" ] || [ "$TARGET_FILTER" = "live" ]; then
+# AND we are not filtering for a specific test
+if ([ -z "$TARGET_FILTER" ] || [ "$TARGET_FILTER" = "live" ]) && [ -z "$TEST_NAME_FILTER" ]; then
   echo
   ./tools/run_examples.sh
 fi

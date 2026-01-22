@@ -19,27 +19,21 @@ type Paddle {
 func main() {
   initWindow(width: 800, height: 450, title: "Rae Pong")
   setTargetFPS(fps: 60)
+  
+  def white: Color = { r: 255, g: 255, b: 255, a: 255 }
+  def darkGray: Color = { r: 20, g: 20, b: 20, a: 255 }
+
   def ball: Ball = { x: 400.0, y: 225.0, dx: 4.0, dy: 4.0, radius: 10.0 }
   def p1: Paddle = { x: 20.0, y: 175.0, w: 10.0, h: 100.0, score: 0 }
   def p2: Paddle = { x: 770.0, y: 175.0, w: 10.0, h: 100.0, score: 0 }
+  
   loop not (windowShouldClose() is 1) {
     # Input
-    # W
-    if isKeyDown(key: 87) is 1 {
-      p1.y = p1.y - 5.0
-    }
-    # S
-    if isKeyDown(key: 83) is 1 {
-      p1.y = p1.y + 5.0
-    }
-    # Up
-    if isKeyDown(key: 265) is 1 {
-      p2.y = p2.y - 5.0
-    }
-    # Down
-    if isKeyDown(key: 264) is 1 {
-      p2.y = p2.y + 5.0
-    }
+    if isKeyDown(key: 87) is 1 { p1.y = p1.y - 5.0 } # W
+    if isKeyDown(key: 83) is 1 { p1.y = p1.y + 5.0 } # S
+    if isKeyDown(key: 265) is 1 { p2.y = p2.y - 5.0 } # Up
+    if isKeyDown(key: 264) is 1 { p2.y = p2.y + 5.0 } # Down
+    
     # Movement
     ball.x = ball.x + ball.dx
     ball.y = ball.y + ball.dy
@@ -50,17 +44,13 @@ func main() {
     # Collision with Paddle 1 (Left)
     if ball.x <= p1.x + p1.w {
       if ball.y >= p1.y and ball.y <= p1.y + p1.h {
-        if ball.dx < 0.0 {
-          ball.dx = ball.dx * -1.0
-        }
+        if ball.dx < 0.0 { ball.dx = ball.dx * -1.0 }
       }
     }
     # Collision with Paddle 2 (Right)
     if ball.x >= p2.x - ball.radius {
       if ball.y >= p2.y and ball.y <= p2.y + p2.h {
-        if ball.dx > 0.0 {
-          ball.dx = ball.dx * -1.0
-        }
+        if ball.dx > 0.0 { ball.dx = ball.dx * -1.0 }
       }
     }
     # Score
@@ -76,61 +66,12 @@ func main() {
     }
     # Drawing
     beginDrawing()
-    clearBackground(
-      r: 20,
-      g: 20,
-      b: 20,
-      a: 255,
-    )
-    drawCircle(
-      x: ball.x,
-      y: ball.y,
-      radius: ball.radius,
-      r: 255,
-      g: 255,
-      b: 255,
-      a: 255,
-    )
-    drawRectangle(
-      x: p1.x,
-      y: p1.y,
-      width: p1.w,
-      height: p1.h,
-      r: 255,
-      g: 255,
-      b: 255,
-      a: 255,
-    )
-    drawRectangle(
-      x: p2.x,
-      y: p2.y,
-      width: p2.w,
-      height: p2.h,
-      r: 255,
-      g: 255,
-      b: 255,
-      a: 255,
-    )
-    drawText(
-      text: "{p1.score}",
-      x: 200.0,
-      y: 20.0,
-      fontSize: 40.0,
-      r: 255,
-      g: 255,
-      b: 255,
-      a: 255,
-    )
-    drawText(
-      text: "{p2.score}",
-      x: 600.0,
-      y: 20.0,
-      fontSize: 40.0,
-      r: 255,
-      g: 255,
-      b: 255,
-      a: 255,
-    )
+    clearBackground(color: darkGray)
+    drawCircle(x: ball.x, y: ball.y, radius: ball.radius, color: white)
+    drawRectangle(x: p1.x, y: p1.y, width: p1.w, height: p1.h, color: white)
+    drawRectangle(x: p2.x, y: p2.y, width: p2.w, height: p2.h, color: white)
+    drawText(text: "{p1.score}", x: 200.0, y: 20.0, fontSize: 40.0, color: white)
+    drawText(text: "{p2.score}", x: 600.0, y: 20.0, fontSize: 40.0, color: white)
     endDrawing()
   }
   closeWindow()
