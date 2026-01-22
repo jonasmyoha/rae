@@ -3,6 +3,9 @@
 
 #include <stdint.h>
 #include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #ifdef __GNUC__
 #define RAE_UNUSED __attribute__((unused))
@@ -45,6 +48,30 @@ void rae_buf_free(void* buf);
 void* rae_buf_resize(void* buf, int64_t new_count, int64_t elem_size);
 void rae_buf_copy(void* src, int64_t src_off, void* dst, int64_t dst_off, int64_t len, int64_t elem_size);
 
+void rae_log_any(RaeAny value);
+void rae_log_stream_any(RaeAny value);
+
+/* Conversion Helpers */
+RAE_UNUSED static RaeAny rae_any_int(int64_t v) { return (RaeAny){RAE_TYPE_INT, {.i = v}}; }
+RAE_UNUSED static RaeAny rae_any_float(double v) { return (RaeAny){RAE_TYPE_FLOAT, {.f = v}}; }
+RAE_UNUSED static RaeAny rae_any_bool(int8_t v) { return (RaeAny){RAE_TYPE_BOOL, {.b = v}}; }
+RAE_UNUSED static RaeAny rae_any_string(const char* v) { return (RaeAny){RAE_TYPE_STRING, {.s = v}}; }
+RAE_UNUSED static RaeAny rae_any_none(void) { return (RaeAny){RAE_TYPE_NONE, {.i = 0}}; }
+RAE_UNUSED static RaeAny rae_any_ptr(void* v) { return (RaeAny){RAE_TYPE_BUFFER, {.ptr = v}}; }
+RAE_UNUSED static RaeAny rae_any_identity(RaeAny a) { return a; }
+
+#define rae_any(X) _Generic((X), \
+    int64_t: rae_any_int, \
+    int: rae_any_int, \
+    long: rae_any_int, \
+    double: rae_any_float, \
+    float: rae_any_float, \
+    int8_t: rae_any_bool, \
+    char*: rae_any_string, \
+    const char*: rae_any_string, \
+    RaeAny: rae_any_identity \
+)(X)
+
 void rae_log_cstr(const char* text);
 void rae_log_stream_cstr(const char* text);
 void rae_log_i64(int64_t value);
@@ -60,31 +87,8 @@ void rae_log_stream_key(const char* value);
 void rae_log_float(double value);
 void rae_log_stream_float(double value);
 
-void rae_log_any(RaeAny value);
-void rae_log_stream_any(RaeAny value);
-
 void rae_log_list_fields(RaeAny* items, int64_t length, int64_t capacity);
 void rae_log_stream_list_fields(RaeAny* items, int64_t length, int64_t capacity);
-
-/* Conversion Helpers */
-RAE_UNUSED static RaeAny rae_any_int(int64_t v) { return (RaeAny){RAE_TYPE_INT, {.i = v}}; }
-RAE_UNUSED static RaeAny rae_any_float(double v) { return (RaeAny){RAE_TYPE_FLOAT, {.f = v}}; }
-RAE_UNUSED static RaeAny rae_any_bool(int8_t v) { return (RaeAny){RAE_TYPE_BOOL, {.b = v}}; }
-RAE_UNUSED static RaeAny rae_any_string(const char* v) { return (RaeAny){RAE_TYPE_STRING, {.s = v}}; }
-RAE_UNUSED static RaeAny rae_any_none(void) { return (RaeAny){RAE_TYPE_NONE, {.i = 0}}; }
-RAE_UNUSED static RaeAny rae_any_identity(RaeAny a) { return a; }
-
-#define rae_any(X) _Generic((X), \
-    int64_t: rae_any_int, \
-    int: rae_any_int, \
-    long: rae_any_int, \
-    double: rae_any_float, \
-    float: rae_any_float, \
-    int8_t: rae_any_bool, \
-    char*: rae_any_string, \
-    const char*: rae_any_string, \
-    RaeAny: rae_any_identity \
-)(X)
 
 const char* rae_str_concat(const char* a, const char* b);
 int64_t rae_str_len(const char* s);
@@ -147,4 +151,3 @@ double rae_ext_getTime(void);
 Color rae_ext_colorFromHSV(double hue, double saturation, double value);
 
 #endif /* RAE_RUNTIME_H */
-
