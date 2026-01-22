@@ -257,7 +257,7 @@ static AstProperty* make_property(Parser* parser, Str name) {
 
 static AstProperty* parse_type_properties(Parser* parser) {
   AstProperty* head = NULL;
-  while (parser_check(parser, TOK_KW_PUB) || parser_check(parser, TOK_KW_PRIV)) {
+  while (parser_check(parser, TOK_KW_PUB) || parser_check(parser, TOK_KW_PRIV) || parser_check(parser, TOK_IDENT)) {
     const Token* token = parser_advance(parser);
     head = append_property(head, make_property(parser, token->lexeme));
   }
@@ -266,7 +266,8 @@ static AstProperty* parse_type_properties(Parser* parser) {
 
 static AstProperty* parse_func_properties(Parser* parser) {
   AstProperty* head = NULL;
-  while (parser_check(parser, TOK_KW_PUB) || parser_check(parser, TOK_KW_PRIV) || parser_check(parser, TOK_KW_SPAWN)) {
+  while (parser_check(parser, TOK_KW_PUB) || parser_check(parser, TOK_KW_PRIV) || 
+         parser_check(parser, TOK_KW_SPAWN) || parser_check(parser, TOK_IDENT)) {
     const Token* token = parser_advance(parser);
     head = append_property(head, make_property(parser, token->lexeme));
   }
@@ -1732,6 +1733,49 @@ static AstDecl* parse_func_declaration(Parser* parser, bool is_extern) {
   return decl;
 }
 
+static AstDecl* parse_enum_declaration(Parser* parser) {
+  const Token* enum_token = parser_previous(parser);
+  const Token* name = parser_consume_ident(parser, "expected enum name");
+  check_pascal_case(parser, name, "enum");
+  
+  AstDecl* decl = parser_alloc(parser, sizeof(AstDecl));
+  decl->kind = AST_DECL_ENUM;
+  decl->line = enum_token->line;
+  decl->column = enum_token->column;
+  decl->as.enum_decl.name = parser_copy_str(parser, name->lexeme);
+  decl->as.enum_decl.members = NULL;
+  
+  parser_consume(parser, TOK_LBRACE, "expected '{' after enum name");
+  
+  AstEnumMember* head = NULL;
+  AstEnumMember* tail = NULL;
+  
+  if (!parser_check(parser, TOK_RBRACE)) {
+    do {
+      const Token* member_name = parser_consume_ident(parser, "expected enum member name");
+      check_pascal_case(parser, member_name, "enum member");
+      
+      AstEnumMember* member = parser_alloc(parser, sizeof(AstEnumMember));
+      member->name = parser_copy_str(parser, member_name->lexeme);
+      member->next = NULL;
+      
+      if (!head) {
+        head = tail = member;
+      } else {
+        tail->next = member;
+        tail = member;
+      }
+      
+      if (parser_check(parser, TOK_RBRACE)) break;
+      parser_consume(parser, TOK_COMMA, "expected ',' or '}' in enum body");
+    } while (!parser_check(parser, TOK_RBRACE));
+  }
+  
+  parser_consume(parser, TOK_RBRACE, "expected '}' at end of enum body");
+  decl->as.enum_decl.members = head;
+  return decl;
+}
+
 static AstDecl* parse_declaration(Parser* parser) {
   if (parser_match(parser, TOK_KW_PUB) || parser_match(parser, TOK_KW_PRIV)) {
     const Token* token = parser_previous(parser);
@@ -1756,6 +1800,12 @@ static AstDecl* parse_declaration(Parser* parser) {
       parser_error(parser, parser_previous(parser), "extern is only valid before func");
     }
     return parse_type_declaration(parser);
+  }
+  if (parser_match(parser, TOK_KW_ENUM)) {
+    if (saw_extern) {
+      parser_error(parser, parser_previous(parser), "extern is only valid before func");
+    }
+    return parse_enum_declaration(parser);
   }
   if (parser_match(parser, TOK_KW_FUNC)) {
     return parse_func_declaration(parser, saw_extern);
