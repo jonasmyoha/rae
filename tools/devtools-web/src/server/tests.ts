@@ -31,6 +31,7 @@ type ActiveRun = {
   overallSuccess: boolean;
   batchLabel: string;
   summaryTotals: { passed: number; failed: number };
+  disabledTests?: string;
 };
 
 export class TestRunner {
@@ -42,7 +43,7 @@ export class TestRunner {
     private stats?: StatsStore
   ) {}
 
-  runTests(mode: TestRunMode = "all", targetId?: string) {
+  runTests(mode: TestRunMode = "all", targetId?: string, disabledTests?: string) {
     if (this.activeRun) {
       this.broadcast({
         type: "server-status",
@@ -87,7 +88,8 @@ export class TestRunner {
       targetIndex: 0,
       overallSuccess: true,
       batchLabel,
-      summaryTotals: { passed: 0, failed: 0 }
+      summaryTotals: { passed: 0, failed: 0 },
+      disabledTests
     };
 
     this.broadcast(createRunStartedMessage(runId, mode, batchLabel, cwd));
@@ -117,10 +119,15 @@ export class TestRunner {
       timestamp: new Date().toISOString()
     } satisfies TestRunOutputMessage);
 
+    const env = { ...process.env };
+    if (this.activeRun.disabledTests) {
+      env.RAE_SKIP_TESTS = this.activeRun.disabledTests;
+    }
+
     const child = spawn(target.testCommand, {
       cwd,
       shell: true,
-      env: process.env
+      env
     });
 
     this.activeRun.target = target;
@@ -262,8 +269,41 @@ export class TestRunner {
     });
   }
 
-  private cleanupActiveRun() {
+  cleanupActiveRun() {
     this.activeRun = null;
+  }
+
+  stopTests(targetId?: string) {
+    if (this.activeRun) {
+      this.broadcastStatus(`Stopping test run ${this.activeRun.id}...`);
+      try {
+        this.activeRun.process?.kill("SIGINT");
+      } catch (error) {
+        console.warn("[tests] Failed to kill active process", error);
+      }
+    }
+
+    // Always run the stop script to be sure
+    const cwd = path.resolve(process.cwd(), this.config.compilerPath);
+    const stopScript = "./compiler/tools/stop_tests_and_examples.sh";
+    
+    this.broadcastStatus("Running cleanup script...");
+    const child = spawn("bash", [stopScript], {
+      cwd,
+      shell: true,
+      env: process.env
+    });
+
+    child.on("error", (error) => {
+      this.broadcastStatus(`Error running cleanup script: ${error.message}`);
+    });
+
+    child.on("close", (code) => {
+      this.broadcastStatus(`Cleanup script finished (exit ${code})`);
+      if (this.activeRun) {
+          this.cleanupActiveRun();
+      }
+    });
   }
 
   private handleParsedLine(line: string) {

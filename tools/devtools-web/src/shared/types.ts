@@ -257,6 +257,7 @@ export type ClientRunTestsMessage = {
   type: "run-tests";
   mode?: TestRunMode;
   targetId?: string;
+  disabledTests?: string;
 };
 
 export type ClientRunBuildMessage = {
@@ -275,8 +276,14 @@ export type ClientRunExampleMessage = {
   actionId?: string;
 };
 
+export type ClientStopTestsMessage = {
+  type: "stop-tests";
+  targetId?: string;
+};
+
 export type ClientEvent =
   | ClientHelloMessage
   | ClientRunTestsMessage
   | ClientRunBuildMessage
-  | ClientRunExampleMessage;
+  | ClientRunExampleMessage
+  | ClientStopTestsMessage;
