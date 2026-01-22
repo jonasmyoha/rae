@@ -7,6 +7,7 @@ BIN="bin/rae"
 TEST_DIR="tests/cases"
 PASSED=0
 FAILED=0
+PASSED_TEST_NAMES=""
 TARGET_FILTER=$(printf "%s" "${TEST_TARGET:-${TARGET:-}}" | tr '[:upper:]' '[:lower:]')
 
 # Tests that are permanently disabled because they hang or are known to be broken
@@ -211,9 +212,11 @@ for TARGET in "${TARGETS[@]}"; do
     if [ "$ACTUAL_OUTPUT" = "$EXPECTED_OUTPUT" ]; then
       echo "PASS: $DISPLAY_NAME"
       ((PASSED++))
+      PASSED_TEST_NAMES="$PASSED_TEST_NAMES $TEST_NAME.rae"
     elif [ "$(head -n 1 "$EXPECT_FILE" | tr -d '\r')" = "BINARY_SKIP_MATCH" ]; then
       echo "PASS: $DISPLAY_NAME (binary match skipped)"
       ((PASSED++))
+      PASSED_TEST_NAMES="$PASSED_TEST_NAMES $TEST_NAME.rae"
     else
       echo "FAIL: $DISPLAY_NAME"
       echo "  Expected:"
@@ -231,6 +234,12 @@ echo
 echo "=========================================="
 echo "Results: $PASSED passed, $FAILED failed"
 echo "=========================================="
+
+# Update test history
+if [ -f "tools/update_test_history.py" ]; then
+  # Collect all PASSED_TEST_NAMES into a list
+  ./tools/update_test_history.py $PASSED_TEST_NAMES
+fi
 
 if [ $FAILED -gt 0 ]; then
   exit 1
