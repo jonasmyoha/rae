@@ -1,5 +1,4 @@
 import raylib
-
 type Position {
   x: Float
   y: Float
@@ -12,6 +11,10 @@ type Velocity {
   dz: Float
 }
 
+type ComponentColor {
+  hue: Float
+}
+
 func movementSystem(pos: mod Position, vel: view Velocity) {
   pos.x = pos.x + vel.dx
   pos.y = pos.y + vel.dy
@@ -22,55 +25,94 @@ func bounceSystem(pos: view Position, vel: mod Velocity) {
   if pos.y < 0.0 or pos.y > 5.0 {
     vel.dy = -vel.dy
   }
+  if pos.x < -10.0 or pos.x > 10.0 {
+    vel.dx = -vel.dx
+  }
 }
 
 func main() {
-  initWindow(width: 800, height: 450, title: "Rae 3D ECS Proof of Concept")
+  initWindow(width: 800, height: 450, title: "Rae Modern 3D Example")
   setTargetFPS(fps: 60)
-
   def cam: Camera3D = {
-    position: { x: 10.0, y: 10.0, z: 10.0 },
-    target: { x: 0.0, y: 0.0, z: 0.0 },
-    up: { x: 0.0, y: 1.0, z: 0.0 },
+    position: {x: 15.0, y: 15.0, z: 15.0},
+    target: {x: 0.0, y: 0.0, z: 0.0},
+    up: {x: 0.0, y: 1.0, z: 0.0},
     fovy: 45.0,
-    projection: 0 # CAMERA_PERSPECTIVE
+    projection: 0,
   }
-
-  def p: Position = { x: 0.0, y: 2.0, z: 0.0 }
-  def v: Velocity = { dx: 0.0, dy: 0.1, dz: 0.0 }
-  
-  def cubeColor: Color = { r: 255, g: 0, b: 0, a: 255 }
-  def bgColor: Color = { r: 20, g: 20, b: 20, a: 255 }
-  def textColor: Color = { r: 255, g: 255, b: 255, a: 255 }
-
+  def p1: Position = {x: 0.0, y: 2.0, z: 0.0}
+  def v1: Velocity = {dx: 0.05, dy: 0.1, dz: 0.0}
+  def p2: Position = {x: -5.0, y: 4.0, z: -2.0}
+  def v2: Velocity = {dx: -0.02, dy: 0.08, dz: 0.03}
+  def bgColor: Color = {
+    r: 30,
+    g: 30,
+    b: 40,
+    a: 255,
+  }
+  def gridColor: Color = {
+    r: 100,
+    g: 100,
+    b: 120,
+    a: 255,
+  }
   loop windowShouldClose() is 0 {
-    movementSystem(pos: p, vel: v)
-    bounceSystem(pos: p, vel: v)
-
+    movementSystem(pos: p1, vel: v1)
+    bounceSystem(pos: p1, vel: v1)
+    movementSystem(pos: p2, vel: v2)
+    bounceSystem(pos: p2, vel: v2)
+    def time: Float = getTime()
+    # Rainbow effect: cycle hue over time
+    def hue: Float = time * 60.0 % 360.0
+    def pastelRainbow: Color = colorFromHSV(
+      hue: hue,
+      saturation: 0.4,
+      value: 0.9,
+    )
+    def sphereColor: Color = colorFromHSV(
+      hue: (hue + 180.0) % 360.0,
+      saturation: 0.5,
+      value: 0.9,
+    )
     beginDrawing()
     clearBackground(color: bgColor)
-
     beginMode3D(camera: cam)
-    
-    # We cast p: Position to Vector3 implicitly in the C backend 
-    # but here we pass a literal Vector3 created from fields
+    # The modern pastel rainbow cube
+    drawGrid(slices: 20, spacing: 1.0)
+    # Add a wireframe outline for more "definition"
     drawCube(
-      pos: { x: p.x, y: p.y, z: p.z }, 
-      width: 2.0, 
-      height: 2.0, 
-      length: 2.0, 
-      color: cubeColor
+      pos: {x: p1.x, y: p1.y, z: p1.z},
+      width: 2.0,
+      height: 2.0,
+      length: 2.0,
+      color: pastelRainbow,
     )
-    
-    drawGrid(slices: 10, spacing: 1.0)
+    # A bouncing sphere
+    drawCubeWires(
+      pos: {x: p1.x, y: p1.y, z: p1.z},
+      width: 2.0,
+      height: 2.0,
+      length: 2.0,
+      color: {
+        r: 255,
+        g: 255,
+        b: 255,
+        a: 100,
+      },
+    )
+    drawSphere(centerPos: {x: p2.x, y: p2.y, z: p2.z}, radius: 1.5, color: sphereColor)
     endMode3D()
-
     drawText(
-      text: "3D ECS in Rae!", 
-      x: 10.0, 
-      y: 10.0, 
-      fontSize: 20.0, 
-      color: textColor
+      text: "Modern 3D in Rae (Pastel Rainbows)",
+      x: 20.0,
+      y: 20.0,
+      fontSize: 24.0,
+      color: {
+        r: 200,
+        g: 200,
+        b: 255,
+        a: 255,
+      },
     )
     endDrawing()
   }
