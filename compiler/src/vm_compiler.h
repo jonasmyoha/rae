@@ -53,12 +53,26 @@ typedef struct {
 } MethodTable;
 
 typedef struct {
+  Str name;
+  Str* members;
+  size_t member_count;
+} EnumEntry;
+
+typedef struct {
+  EnumEntry* entries;
+  size_t count;
+  size_t capacity;
+} EnumTable;
+
+typedef struct {
   Chunk* chunk;
+  const AstModule* module; // Add module pointer for metadata lookups
   const char* file_path;
   bool had_error;
   FunctionTable functions;
   TypeTable types;
   MethodTable methods; // New field for method table
+  EnumTable enums;     // New field for enum table
   const AstFuncDecl* current_function;
   struct {
     Str name;
@@ -81,7 +95,11 @@ FunctionEntry* function_table_find_overload(FunctionTable* table, Str name, cons
 TypeEntry* type_table_find(TypeTable* table, Str name);
 bool type_table_add(TypeTable* table, Str name, Str* field_names, const struct AstTypeRef** field_types, size_t field_count);
 int type_entry_find_field(const TypeEntry* entry, Str name);
-bool collect_metadata(const char* file_path, const AstModule* module, FunctionTable* funcs, TypeTable* types /* GEMINI: MethodTable* methods parameter removed to fix build */);
+void free_enum_table(EnumTable* table);
+EnumEntry* enum_table_find(EnumTable* table, Str name);
+bool enum_table_add(EnumTable* table, Str name, Str* members, size_t member_count);
+int enum_entry_find_member(const EnumEntry* entry, Str name);
+bool collect_metadata(const char* file_path, const AstModule* module, FunctionTable* funcs, TypeTable* types, EnumTable* enums);
 bool emit_function_call(BytecodeCompiler* compiler, FunctionEntry* entry, int line,
                                int column, uint8_t arg_count);
 bool emit_return(BytecodeCompiler* compiler, bool has_value, int line);

@@ -36,6 +36,7 @@ typedef enum {
   TOK_KW_KEY,
   TOK_KW_IF,
   TOK_KW_ELSE,
+  TOK_KW_ENUM,
   TOK_KW_LOOP,
   TOK_KW_IN,
   TOK_KW_MATCH,

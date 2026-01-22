@@ -52,6 +52,8 @@ typedef struct {
 // Forward declarations
 static const char* find_raylib_mapping(Str name);
 static const AstDecl* find_type_decl(const AstModule* module, Str name);
+static const AstDecl* find_enum_decl(const AstModule* module, Str name);
+static bool has_property(const AstProperty* props, const char* name);
 static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_prec);
 static bool emit_function(const AstModule* module, const AstFuncDecl* func, FILE* out);
 static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
@@ -979,13 +981,33 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
          if (fprintf(out, "*") < 0) return false;
     }
 
-    if (is_any_param && !needs_addr) fprintf(out, "rae_any(");
+    // STRUCT-TO-STRUCT FFI (C literal)
+    Str type_name = infer_expr_type(ctx, arg->value);
+    const AstDecl* type_decl = find_type_decl(ctx->module, type_name);
+    bool is_c_struct = type_decl && type_decl->kind == AST_DECL_TYPE && has_property(type_decl->as.type_decl.properties, "c_struct");
 
-    if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) {
-      return false;
+    if (is_c_struct && !needs_addr) {
+        fprintf(out, "(%.*s){ ", (int)type_name.len, type_name.data);
+        const AstTypeField* field = type_decl->as.type_decl.fields;
+        while (field) {
+            if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) return false;
+            fprintf(out, ".%.*s = ", (int)field->name.len, field->name.data);
+            if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) return false;
+            fprintf(out, ".%.*s", (int)field->name.len, field->name.data);
+            if (field->next) fprintf(out, ", ");
+            field = field->next;
+        }
+        fprintf(out, " }");
+    } else {
+        if (is_any_param && !needs_addr) fprintf(out, "rae_any(");
+
+        if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) {
+          return false;
+        }
+        
+        if (is_any_param && !needs_addr) fprintf(out, ")");
     }
-    
-    if (is_any_param && !needs_addr) fprintf(out, ")");
+
     if ((needs_addr && !have_ptr) || (!needs_addr && have_ptr)) {
          if (fprintf(out, ")") < 0) return false;
     }
@@ -1330,6 +1352,15 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
     case AST_EXPR_NONE:
       return fprintf(out, "0") >= 0; // none as 0 for now
     case AST_EXPR_MEMBER: {
+      if (expr->as.member.object->kind == AST_EXPR_IDENT) {
+          Str name = expr->as.member.object->as.ident;
+          const AstDecl* ed = find_enum_decl(ctx->module, name);
+          if (ed) {
+              return fprintf(out, "%.*s_%.*s", (int)name.len, name.data,
+                             (int)expr->as.member.member.len, expr->as.member.member.data) >= 0;
+          }
+      }
+
       const char* sep = ".";
       if (expr->as.member.object->kind == AST_EXPR_IDENT) {
           if (is_pointer_type(ctx, expr->as.member.object->as.ident)) {
@@ -1874,8 +1905,8 @@ static const char* find_raylib_mapping(Str name) {
     return NULL;
 }
 
-static bool emit_raylib_wrapper(const AstFuncDecl* fn, const char* c_name, FILE* out) {
-  CFuncContext temp_ctx = {.generic_params = fn->generic_params};
+static bool emit_raylib_wrapper(const AstFuncDecl* fn, const char* c_name, FILE* out, const AstModule* module) {
+  CFuncContext temp_ctx = {.module = module, .generic_params = fn->generic_params};
   const char* return_type = c_return_type(&temp_ctx, fn);
   if (!return_type) return false;
   
@@ -1885,30 +1916,39 @@ static bool emit_raylib_wrapper(const AstFuncDecl* fn, const char* c_name, FILE*
   if (!emit_param_list(&temp_ctx, fn->params, out)) return false;
   fprintf(out, ") {\n");
     
-    if (str_eq_cstr(fn->name, "clearBackground")) {
-        fprintf(out, "  %s((Color){ (unsigned char)r, (unsigned char)g, (unsigned char)b, (unsigned char)a });\n", c_name);
-    } else if (str_eq_cstr(fn->name, "drawRectangle")) {
-        fprintf(out, "  %s((int)x, (int)y, (int)width, (int)height, (Color){ (unsigned char)r, (unsigned char)g, (unsigned char)b, (unsigned char)a });\n", c_name);
-    } else if (str_eq_cstr(fn->name, "drawCircle")) {
-        fprintf(out, "  %s((int)x, (int)y, (float)radius, (Color){ (unsigned char)r, (unsigned char)g, (unsigned char)b, (unsigned char)a });\n", c_name);
-    } else if (str_eq_cstr(fn->name, "drawText")) {
-        fprintf(out, "  %s(text, (int)x, (int)y, (int)fontSize, (Color){ (unsigned char)r, (unsigned char)g, (unsigned char)b, (unsigned char)a });\n", c_name);
-    } else if (str_eq_cstr(fn->name, "initWindow")) {
-        fprintf(out, "  %s((int)width, (int)height, title);\n", c_name);
-    } else {
-        if (strcmp(return_type, "void") != 0) fprintf(out, "  return ");
-        else fprintf(out, "  ");
-        fprintf(out, "%s(", c_name);
-        const AstParam* p = fn->params;
-        while (p) {
-            fprintf(out, "%.*s", (int)p->name.len, p->name.data);
-            p = p->next;
-            if (p) fprintf(out, ", ");
-        }
-        fprintf(out, ");\n");
-    }
-    fprintf(out, "}\n\n");
-    return true;
+  if (strcmp(return_type, "void") != 0) fprintf(out, "  return ");
+  else fprintf(out, "  ");
+  
+  fprintf(out, "%s(", c_name);
+  const AstParam* p = fn->params;
+  while (p) {
+      Str type_name = get_base_type_name(p->type);
+      const AstDecl* td = find_type_decl(module, type_name);
+      
+      if (td && td->kind == AST_DECL_TYPE && has_property(td->as.type_decl.properties, "c_struct")) {
+          // It's a mapped struct! In Raylib we often need to cast fields if they are mismatched,
+          // but for now we assume binary compatibility or explicit wrapper logic if needed.
+          // For Color specifically, Raylib uses unsigned char.
+          if (str_eq_cstr(type_name, "Color")) {
+              fprintf(out, "(Color){ (unsigned char)%.*s.r, (unsigned char)%.*s.g, (unsigned char)%.*s.b, (unsigned char)%.*s.a }", 
+                      (int)p->name.len, p->name.data, (int)p->name.len, p->name.data, (int)p->name.len, p->name.data, (int)p->name.len, p->name.data);
+          } else {
+              fprintf(out, "%.*s", (int)p->name.len, p->name.data);
+          }
+      } else if (str_eq_cstr(type_name, "Int")) {
+          fprintf(out, "(int)%.*s", (int)p->name.len, p->name.data);
+      } else if (str_eq_cstr(type_name, "Float")) {
+          fprintf(out, "(float)%.*s", (int)p->name.len, p->name.data);
+      } else {
+          fprintf(out, "%.*s", (int)p->name.len, p->name.data);
+      }
+      
+      p = p->next;
+      if (p) fprintf(out, ", ");
+  }
+  fprintf(out, ");\n");
+  fprintf(out, "}\n\n");
+  return true;
 }
 
 static bool emit_function(const AstModule* module, const AstFuncDecl* func, FILE* out) {
@@ -1988,9 +2028,26 @@ static bool emit_function(const AstModule* module, const AstFuncDecl* func, FILE
   return ok;
 }
 
+static bool has_property(const AstProperty* props, const char* name) {
+  while (props) {
+    if (str_eq_cstr(props->name, name)) return true;
+    props = props->next;
+  }
+  return false;
+}
+
 static const AstDecl* find_type_decl(const AstModule* module, Str name) {
   for (const AstDecl* decl = module->decls; decl; decl = decl->next) {
     if (decl->kind == AST_DECL_TYPE && str_eq(decl->as.type_decl.name, name)) {
+      return decl;
+    }
+  }
+  return NULL;
+}
+
+static const AstDecl* find_enum_decl(const AstModule* module, Str name) {
+  for (const AstDecl* decl = module->decls; decl; decl = decl->next) {
+    if (decl->kind == AST_DECL_ENUM && str_eq(decl->as.enum_decl.name, name)) {
       return decl;
     }
   }
@@ -2008,6 +2065,12 @@ static bool emit_single_struct_def(const AstModule* module, const AstDecl* decl,
   // We'll add it to the list at the END, but for cycle detection in a robust compiler we'd need a "visiting" set.
   // For now, valid C structs can't have value-cycles.
   
+  if (has_property(decl->as.type_decl.properties, "c_struct")) {
+      emitted_types[*emitted_count] = decl->as.type_decl.name;
+      (*emitted_count)++;
+      return true;
+  }
+
   // Emit dependencies first
   const AstTypeField* field = decl->as.type_decl.fields;
   while (field) {
@@ -2045,6 +2108,24 @@ static bool emit_single_struct_def(const AstModule* module, const AstDecl* decl,
 
   emitted_types[*emitted_count] = decl->as.type_decl.name;
   (*emitted_count)++;
+  return true;
+}
+
+static bool emit_enum_defs(const AstModule* module, FILE* out) {
+  for (const AstDecl* decl = module->decls; decl; decl = decl->next) {
+    if (decl->kind == AST_DECL_ENUM) {
+      fprintf(out, "typedef enum {\n");
+      const AstEnumMember* m = decl->as.enum_decl.members;
+      while (m) {
+        fprintf(out, "  %.*s_%.*s", (int)decl->as.enum_decl.name.len, decl->as.enum_decl.name.data,
+                (int)m->name.len, m->name.data);
+        if (m->next) fprintf(out, ",");
+        fprintf(out, "\n");
+        m = m->next;
+      }
+      fprintf(out, "} %.*s;\n\n", (int)decl->as.enum_decl.name.len, decl->as.enum_decl.name.data);
+    }
+  }
   return true;
 }
 
@@ -2089,6 +2170,11 @@ bool c_backend_emit_module(const AstModule* module, const char* out_path) {
   }
   
   if (fprintf(out, "#include \"rae_runtime.h\"\n\n") < 0) return false;
+
+  if (!emit_enum_defs(module, out)) {
+    fclose(out);
+    return false;
+  }
 
   if (!emit_struct_defs(module, out)) {
     fclose(out);
@@ -2144,7 +2230,7 @@ bool c_backend_emit_module(const AstModule* module, const char* out_path) {
     
     const char* ray_mapping = find_raylib_mapping(fn->name);
     if (ray_mapping) {
-        if (!emit_raylib_wrapper(fn, ray_mapping, out)) {
+        if (!emit_raylib_wrapper(fn, ray_mapping, out, module)) {
             ok = false;
             break;
         }

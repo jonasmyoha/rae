@@ -982,9 +982,30 @@ static void pp_print_func_decl(PrettyPrinter* pp, const AstDecl* decl) {
   pp_newline(pp);
 }
 
+static void pp_print_enum_decl(PrettyPrinter* pp, const AstDecl* decl) {
+  pp_write(pp, "enum ");
+  pp_write_str(pp, decl->as.enum_decl.name);
+  pp_space(pp);
+  pp_begin_block(pp);
+  AstEnumMember* m = decl->as.enum_decl.members;
+  while (m) {
+    pp_write_str(pp, m->name);
+    if (m->next) {
+      pp_write(pp, ",");
+      pp_newline(pp);
+    }
+    m = m->next;
+  }
+  pp_newline(pp);
+  pp_end_block(pp);
+  pp_newline(pp);
+}
+
 static void pp_print_decl(PrettyPrinter* pp, const AstDecl* decl) {
   if (decl->kind == AST_DECL_TYPE) {
     pp_print_type_decl(pp, decl);
+  } else if (decl->kind == AST_DECL_ENUM) {
+    pp_print_enum_decl(pp, decl);
   } else {
     pp_print_func_decl(pp, decl);
   }
