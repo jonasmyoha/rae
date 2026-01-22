@@ -134,6 +134,62 @@ static bool native_isKeyDown(struct VM* vm, VmNativeResult* out, const Value* ar
     return true;
 }
 
+static bool native_drawCube(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 10) return false;
+    float px = (float)((args[0].type == VAL_FLOAT) ? args[0].as.float_value : args[0].as.int_value);
+    float py = (float)((args[1].type == VAL_FLOAT) ? args[1].as.float_value : args[1].as.int_value);
+    float pz = (float)((args[2].type == VAL_FLOAT) ? args[2].as.float_value : args[2].as.int_value);
+    float w = (float)((args[3].type == VAL_FLOAT) ? args[3].as.float_value : args[3].as.int_value);
+    float h = (float)((args[4].type == VAL_FLOAT) ? args[4].as.float_value : args[4].as.int_value);
+    float l = (float)((args[5].type == VAL_FLOAT) ? args[5].as.float_value : args[5].as.int_value);
+    unsigned char cr = (unsigned char)((args[6].type == VAL_FLOAT) ? args[6].as.float_value : args[6].as.int_value);
+    unsigned char cg = (unsigned char)((args[7].type == VAL_FLOAT) ? args[7].as.float_value : args[7].as.int_value);
+    unsigned char cb = (unsigned char)((args[8].type == VAL_FLOAT) ? args[8].as.float_value : args[8].as.int_value);
+    unsigned char ca = (unsigned char)((args[9].type == VAL_FLOAT) ? args[9].as.float_value : args[9].as.int_value);
+    DrawCube((Vector3){px, py, pz}, w, h, l, (Color){cr, cg, cb, ca});
+    out->has_value = false;
+    return true;
+}
+
+static bool native_drawGrid(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 2) return false;
+    int slices = (int)((args[0].type == VAL_FLOAT) ? args[0].as.float_value : args[0].as.int_value);
+    float spacing = (float)((args[1].type == VAL_FLOAT) ? args[1].as.float_value : args[1].as.int_value);
+    DrawGrid(slices, spacing);
+    out->has_value = false;
+    return true;
+}
+
+static bool native_beginMode3D(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 11) return false;
+    Camera3D cam = {0};
+    cam.position.x = (float)((args[0].type == VAL_FLOAT) ? args[0].as.float_value : args[0].as.int_value);
+    cam.position.y = (float)((args[1].type == VAL_FLOAT) ? args[1].as.float_value : args[1].as.int_value);
+    cam.position.z = (float)((args[2].type == VAL_FLOAT) ? args[2].as.float_value : args[2].as.int_value);
+    cam.target.x = (float)((args[3].type == VAL_FLOAT) ? args[3].as.float_value : args[3].as.int_value);
+    cam.target.y = (float)((args[4].type == VAL_FLOAT) ? args[4].as.float_value : args[4].as.int_value);
+    cam.target.z = (float)((args[5].type == VAL_FLOAT) ? args[5].as.float_value : args[5].as.int_value);
+    cam.up.x = (float)((args[6].type == VAL_FLOAT) ? args[6].as.float_value : args[6].as.int_value);
+    cam.up.y = (float)((args[7].type == VAL_FLOAT) ? args[7].as.float_value : args[7].as.int_value);
+    cam.up.z = (float)((args[8].type == VAL_FLOAT) ? args[8].as.float_value : args[8].as.int_value);
+    cam.fovy = (float)((args[9].type == VAL_FLOAT) ? args[9].as.float_value : args[9].as.int_value);
+    cam.projection = (int)((args[10].type == VAL_FLOAT) ? args[10].as.float_value : args[10].as.int_value);
+    BeginMode3D(cam);
+    out->has_value = false;
+    return true;
+}
+
+static bool native_endMode3D(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data; (void)args;
+    if (count != 0) return false;
+    EndMode3D();
+    out->has_value = false;
+    return true;
+}
+
 bool vm_registry_register_raylib(VmRegistry* registry) {
     bool ok = true;
     ok &= vm_registry_register_native(registry, "initWindow", native_initWindow, NULL);
@@ -145,6 +201,10 @@ bool vm_registry_register_raylib(VmRegistry* registry) {
     ok &= vm_registry_register_native(registry, "drawRectangle", native_drawRectangle, NULL);
     ok &= vm_registry_register_native(registry, "drawCircle", native_drawCircle, NULL);
     ok &= vm_registry_register_native(registry, "drawText", native_drawText, NULL);
+    ok &= vm_registry_register_native(registry, "drawCube", native_drawCube, NULL);
+    ok &= vm_registry_register_native(registry, "drawGrid", native_drawGrid, NULL);
+    ok &= vm_registry_register_native(registry, "beginMode3D", native_beginMode3D, NULL);
+    ok &= vm_registry_register_native(registry, "endMode3D", native_endMode3D, NULL);
     ok &= vm_registry_register_native(registry, "setTargetFPS", native_setTargetFPS, NULL);
     ok &= vm_registry_register_native(registry, "isKeyDown", native_isKeyDown, NULL);
     return ok;

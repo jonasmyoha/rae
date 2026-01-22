@@ -1512,7 +1512,14 @@ static AstStmt* parse_if_statement(Parser* parser, const Token* if_token) {
   stmt->as.if_stmt.condition = parse_expression(parser);
   stmt->as.if_stmt.then_block = parse_block(parser);
   if (parser_match(parser, TOK_KW_ELSE)) {
-    stmt->as.if_stmt.else_block = parse_block(parser);
+    if (parser_match(parser, TOK_KW_IF)) {
+      // Synthesize a block for the nested 'if' to keep AST consistent
+      AstBlock* block = parser_alloc(parser, sizeof(AstBlock));
+      block->first = parse_if_statement(parser, parser_previous(parser));
+      stmt->as.if_stmt.else_block = block;
+    } else {
+      stmt->as.if_stmt.else_block = parse_block(parser);
+    }
   }
   return stmt;
 }
