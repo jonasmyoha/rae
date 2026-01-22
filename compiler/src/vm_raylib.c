@@ -4,7 +4,10 @@
 
 static bool native_initWindow(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
-    if (count != 3) return false;
+    if (count != 3) {
+        fprintf(stderr, "error: initWindow expects 3 args, got %zu\n", count);
+        return false;
+    }
     int w = (args[0].type == VAL_FLOAT) ? (int)args[0].as.float_value : (int)args[0].as.int_value;
     int h = (args[1].type == VAL_FLOAT) ? (int)args[1].as.float_value : (int)args[1].as.int_value;
     const char* title = "Rae Window";
@@ -20,7 +23,10 @@ static bool native_initWindow(struct VM* vm, VmNativeResult* out, const Value* a
 
 static bool native_windowShouldClose(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data; (void)args;
-    if (count != 0) return false;
+    if (count != 0) {
+        fprintf(stderr, "error: windowShouldClose expects 0 args, got %zu\n", count);
+        return false;
+    }
     out->has_value = true;
     out->value = value_int(WindowShouldClose() ? 1 : 0);
     return true;
@@ -28,7 +34,10 @@ static bool native_windowShouldClose(struct VM* vm, VmNativeResult* out, const V
 
 static bool native_closeWindow(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data; (void)args;
-    if (count != 0) return false;
+    if (count != 0) {
+        fprintf(stderr, "error: closeWindow expects 0 args, got %zu\n", count);
+        return false;
+    }
     CloseWindow();
     out->has_value = false;
     return true;
@@ -36,7 +45,10 @@ static bool native_closeWindow(struct VM* vm, VmNativeResult* out, const Value* 
 
 static bool native_beginDrawing(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data; (void)args;
-    if (count != 0) return false;
+    if (count != 0) {
+        fprintf(stderr, "error: beginDrawing expects 0 args, got %zu\n", count);
+        return false;
+    }
     BeginDrawing();
     out->has_value = false;
     return true;
@@ -44,7 +56,10 @@ static bool native_beginDrawing(struct VM* vm, VmNativeResult* out, const Value*
 
 static bool native_endDrawing(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data; (void)args;
-    if (count != 0) return false;
+    if (count != 0) {
+        fprintf(stderr, "error: endDrawing expects 0 args, got %zu\n", count);
+        return false;
+    }
     EndDrawing();
     out->has_value = false;
     return true;
@@ -52,7 +67,10 @@ static bool native_endDrawing(struct VM* vm, VmNativeResult* out, const Value* a
 
 static bool native_clearBackground(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
-    if (count != 4) return false;
+    if (count != 4) {
+        fprintf(stderr, "error: clearBackground expects 4 args, got %zu\n", count);
+        return false;
+    }
     unsigned char r = (args[0].type == VAL_FLOAT) ? (unsigned char)args[0].as.float_value : (unsigned char)args[0].as.int_value;
     unsigned char g = (args[1].type == VAL_FLOAT) ? (unsigned char)args[1].as.float_value : (unsigned char)args[1].as.int_value;
     unsigned char b = (args[2].type == VAL_FLOAT) ? (unsigned char)args[2].as.float_value : (unsigned char)args[2].as.int_value;
@@ -64,7 +82,10 @@ static bool native_clearBackground(struct VM* vm, VmNativeResult* out, const Val
 
 static bool native_drawRectangle(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
-    if (count != 8) return false;
+    if (count != 8) {
+        fprintf(stderr, "error: drawRectangle expects 8 args, got %zu\n", count);
+        return false;
+    }
     int x = (args[0].type == VAL_FLOAT) ? (int)args[0].as.float_value : (int)args[0].as.int_value;
     int y = (args[1].type == VAL_FLOAT) ? (int)args[1].as.float_value : (int)args[1].as.int_value;
     int w = (args[2].type == VAL_FLOAT) ? (int)args[2].as.float_value : (int)args[2].as.int_value;
@@ -80,7 +101,10 @@ static bool native_drawRectangle(struct VM* vm, VmNativeResult* out, const Value
 
 static bool native_drawCircle(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
-    if (count != 7) return false;
+    if (count != 7) {
+        fprintf(stderr, "error: drawCircle expects 7 args, got %zu\n", count);
+        return false;
+    }
     int x = (args[0].type == VAL_FLOAT) ? (int)args[0].as.float_value : (int)args[0].as.int_value;
     int y = (args[1].type == VAL_FLOAT) ? (int)args[1].as.float_value : (int)args[1].as.int_value;
     float rad = (args[2].type == VAL_FLOAT) ? (float)args[2].as.float_value : (float)args[2].as.int_value;
@@ -95,7 +119,10 @@ static bool native_drawCircle(struct VM* vm, VmNativeResult* out, const Value* a
 
 static bool native_drawText(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
-    if (count != 8) return false;
+    if (count != 8) {
+        fprintf(stderr, "error: drawText expects 8 args, got %zu\n", count);
+        return false;
+    }
     
     const char* text = "???";
     if (args[0].type == VAL_STRING) {
@@ -118,7 +145,10 @@ static bool native_drawText(struct VM* vm, VmNativeResult* out, const Value* arg
 
 static bool native_setTargetFPS(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
-    if (count != 1) return false;
+    if (count != 1) {
+        fprintf(stderr, "error: setTargetFPS expects 1 arg, got %zu\n", count);
+        return false;
+    }
     int fps = (args[0].type == VAL_FLOAT) ? (int)args[0].as.float_value : (int)args[0].as.int_value;
     SetTargetFPS(fps);
     out->has_value = false;
@@ -127,7 +157,10 @@ static bool native_setTargetFPS(struct VM* vm, VmNativeResult* out, const Value*
 
 static bool native_isKeyDown(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
-    if (count != 1) return false;
+    if (count != 1) {
+        fprintf(stderr, "error: isKeyDown expects 1 arg, got %zu\n", count);
+        return false;
+    }
     int key = (args[0].type == VAL_FLOAT) ? (int)args[0].as.float_value : (int)args[0].as.int_value;
     out->has_value = true;
     out->value = value_int(IsKeyDown(key) ? 1 : 0);
@@ -136,7 +169,10 @@ static bool native_isKeyDown(struct VM* vm, VmNativeResult* out, const Value* ar
 
 static bool native_drawCube(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
-    if (count != 10) return false;
+    if (count != 10) {
+        fprintf(stderr, "error: drawCube expects 10 args, got %zu\n", count);
+        return false;
+    }
     float px = (float)((args[0].type == VAL_FLOAT) ? args[0].as.float_value : args[0].as.int_value);
     float py = (float)((args[1].type == VAL_FLOAT) ? args[1].as.float_value : args[1].as.int_value);
     float pz = (float)((args[2].type == VAL_FLOAT) ? args[2].as.float_value : args[2].as.int_value);
@@ -154,7 +190,10 @@ static bool native_drawCube(struct VM* vm, VmNativeResult* out, const Value* arg
 
 static bool native_drawGrid(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
-    if (count != 2) return false;
+    if (count != 2) {
+        fprintf(stderr, "error: drawGrid expects 2 args, got %zu\n", count);
+        return false;
+    }
     int slices = (int)((args[0].type == VAL_FLOAT) ? args[0].as.float_value : args[0].as.int_value);
     float spacing = (float)((args[1].type == VAL_FLOAT) ? args[1].as.float_value : args[1].as.int_value);
     DrawGrid(slices, spacing);
@@ -164,7 +203,10 @@ static bool native_drawGrid(struct VM* vm, VmNativeResult* out, const Value* arg
 
 static bool native_beginMode3D(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
-    if (count != 11) return false;
+    if (count != 11) {
+        fprintf(stderr, "error: beginMode3D expects 11 args, got %zu\n", count);
+        return false;
+    }
     Camera3D cam = {0};
     cam.position.x = (float)((args[0].type == VAL_FLOAT) ? args[0].as.float_value : args[0].as.int_value);
     cam.position.y = (float)((args[1].type == VAL_FLOAT) ? args[1].as.float_value : args[1].as.int_value);
@@ -184,7 +226,10 @@ static bool native_beginMode3D(struct VM* vm, VmNativeResult* out, const Value* 
 
 static bool native_endMode3D(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data; (void)args;
-    if (count != 0) return false;
+    if (count != 0) {
+        fprintf(stderr, "error: endMode3D expects 0 args, got %zu\n", count);
+        return false;
+    }
     EndMode3D();
     out->has_value = false;
     return true;

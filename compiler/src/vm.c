@@ -144,8 +144,9 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
 #ifdef DEBUG_TRACE_EXECUTION
     // Debug output
 #endif
-    // printf("IP: %lu OP: %d\n", (unsigned long)(vm->ip - vm->chunk->code), *vm->ip);
     uint8_t instruction = *vm->ip++;
+    switch (instruction) {
+      case OP_CONSTANT: {
     switch (instruction) {
       case OP_CONSTANT: {
         uint16_t index = read_short(vm);
@@ -241,13 +242,6 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         }
         const Value* args = vm->stack_top - arg_count;
         
-        // DEBUG: Log native call
-        // printf("[VM] Calling native %s with %d args\n", symbol.as.string_value.chars, arg_count);
-        // printf("[VM] Stack info: base=%p, top=%p, args=%p\n", (void*)vm->stack, (void*)vm->stack_top, (void*)args);
-        // for (int i = 0; i < (int)arg_count; i++) {
-        //    printf("  arg[%d] type: %d\n", i, args[i].type);
-        // }
-
         VmNativeResult result = {.has_value = false};
         if (!entry->callback(vm, &result, args, arg_count, entry->user_data)) {
           diag_error(NULL, 0, 0, "native function reported failure");
@@ -272,7 +266,6 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
           diag_error(NULL, 0, 0, "VM local slot out of range");
           return VM_RUNTIME_ERROR;
         }
-        // printf("[VM] GET_LOCAL slot %d (type %d)\n", slot, frame->locals[slot].type);
         vm_push(vm, value_copy(&frame->locals[slot]));
         break;
       }
@@ -288,7 +281,6 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
           return VM_RUNTIME_ERROR;
         }
         Value value = value_copy(vm_peek(vm, 0));
-        // printf("[VM] SET_LOCAL slot %d (new type %d)\n", slot, value.type);
         if (frame->locals[slot].type == VAL_REF) {
           if (frame->locals[slot].as.ref_value.kind == REF_VIEW) {
             diag_error(NULL, 0, 0, "cannot assign to a read-only 'view' reference");
@@ -327,15 +319,13 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
           diag_error(NULL, 0, 0, "VM local allocation outside of function");
           return VM_RUNTIME_ERROR;
         }
+        if (required > 256) {
+          diag_error(NULL, 0, 0, "VM local storage overflow (max 256)");
+          return VM_RUNTIME_ERROR;
+        }
         if (required > frame->slot_count) {
-          if ((frame->locals_base - vm->stack) + required >
-              (int)(sizeof(vm->stack) / sizeof(vm->stack[0]))) {
-            diag_error(NULL, 0, 0, "VM local storage overflow");
-            return VM_RUNTIME_ERROR;
-          }
           frame->slot_count = required;
         }
-        vm->stack_top = frame->slots + frame->slot_count;
         break;
       }
       case OP_POP:
@@ -459,7 +449,8 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
           value_free(&obj_val);
           return VM_RUNTIME_ERROR;
         }
-        vm_push(vm, value_copy(&target->as.object_value.fields[index]));
+        Value res = value_copy(&target->as.object_value.fields[index]);
+        vm_push(vm, res);
         value_free(&obj_val);
         break;
       }
@@ -610,12 +601,10 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         break;
       }
       case OP_CONSTRUCT: {
-        uint16_t count = read_short(vm);
-        Value obj = value_object(count);
-        for (int i = (int)count - 1; i >= 0; i--) {
-          Value val = vm_pop(vm);
-          obj.as.object_value.fields[i] = value_copy(&val);
-          value_free(&val);
+        uint16_t field_count = read_short(vm);
+        Value obj = value_object(field_count);
+        for (int i = (int)field_count - 1; i >= 0; --i) {
+          obj.as.object_value.fields[i] = vm_pop(vm);
         }
         vm_push(vm, obj);
         break;

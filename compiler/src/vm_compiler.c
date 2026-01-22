@@ -518,6 +518,12 @@ static Str infer_expr_type(BytecodeCompiler* compiler, const AstExpr* expr) {
         // (Simplified for now)
         return str_from_cstr("List");
     }
+    case AST_EXPR_OBJECT: {
+        if (expr->as.object_literal.type && expr->as.object_literal.type->parts) {
+            return expr->as.object_literal.type->parts->text;
+        }
+        break;
+    }
     case AST_EXPR_CALL: {
         if (expr->as.call.callee->kind == AST_EXPR_IDENT) {
             Str name = expr->as.call.callee->as.ident;
@@ -650,7 +656,55 @@ bool emit_return(BytecodeCompiler* compiler, bool has_value, int line) {
 }
 
 static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr);
-static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt);
+
+static bool emit_flattened_struct_args(BytecodeCompiler* compiler, const AstExpr* root_expr, Str type_name, uint16_t* total_args, int line) {
+    const AstDecl* type_decl = find_type_decl(compiler->module, type_name);
+    if (!type_decl || type_decl->kind != AST_DECL_TYPE || !has_property(type_decl->as.type_decl.properties, "c_struct")) {
+        // Not a c_struct or not found, just push as a single value
+        if (!compile_expr(compiler, root_expr)) return false;
+        (*total_args)++;
+        return true;
+    }
+
+    const AstTypeField* field = type_decl->as.type_decl.fields;
+    int field_idx = 0;
+    while (field) {
+        Str field_type = get_base_type_name(field->type);
+        const AstDecl* field_type_decl = find_type_decl(compiler->module, field_type);
+        
+        bool is_nested_struct = (field_type_decl && field_type_decl->kind == AST_DECL_TYPE && has_property(field_type_decl->as.type_decl.properties, "c_struct"));
+
+        if (is_nested_struct) {
+            // Nested struct!
+            if (!compile_expr(compiler, root_expr)) return false;
+            emit_op(compiler, OP_GET_FIELD, line);
+            emit_short(compiler, (uint16_t)field_idx, line);
+            
+            char temp_name[64];
+            snprintf(temp_name, sizeof(temp_name), "__flatten_tmp_%d_%d", line, field_idx);
+            int slot = compiler_add_local(compiler, str_from_cstr(temp_name), field_type);
+            if (slot < 0) return false;
+            if (!compiler_ensure_local_capacity(compiler, compiler->local_count, line)) return false;
+            
+            emit_op(compiler, OP_SET_LOCAL, line);
+            emit_short(compiler, (uint16_t)slot, line);
+            emit_op(compiler, OP_POP, line); // Return from SET_LOCAL
+            
+            AstExpr tmp_ident = { .kind = AST_EXPR_IDENT, .line = (size_t)line, .as = { .ident = str_from_cstr(temp_name) } };
+            if (!emit_flattened_struct_args(compiler, &tmp_ident, field_type, total_args, line)) return false;
+        } else {
+            // Primitive or regular field
+            if (!compile_expr(compiler, root_expr)) return false;
+            emit_op(compiler, OP_GET_FIELD, line);
+            emit_short(compiler, (uint16_t)field_idx, line);
+            (*total_args)++;
+        }
+        
+        field = field->next;
+        field_idx++;
+    }
+    return true;
+}
 
 static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
   if (expr->as.call.callee->kind != AST_EXPR_IDENT) {
@@ -853,28 +907,25 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
     } else {
         // STRUCT-TO-STRUCT FFI (VM Flattening)
         // If it's a native call, check if the argument type is a c_struct
-        bool flattened = false;
+        bool handled = false;
         if (entry->is_extern) {
             Str type_name = infer_expr_type(compiler, arg->value);
+            if (type_name.len == 0) {
+                // Try fallback to expected parameter type
+                type_name = entry->param_types[current_arg_idx];
+            }
+            
             const AstDecl* type_decl = find_type_decl(compiler->module, type_name);
             if (type_decl && type_decl->kind == AST_DECL_TYPE && has_property(type_decl->as.type_decl.properties, "c_struct")) {
-                // Flatten! Push each field
-                const AstTypeField* field = type_decl->as.type_decl.fields;
-                int field_idx = 0;
-                while (field) {
-                    if (!compile_expr(compiler, arg->value)) return false;
-                    emit_op(compiler, OP_GET_FIELD, (int)expr->line);
-                    emit_short(compiler, (uint16_t)field_idx, (int)expr->line);
-                    arg_count++; // Each field is a separate arg for existing native wrappers
-                    field = field->next;
-                    field_idx++;
-                }
-                arg_count--; // Remove the original struct arg count contribution
-                flattened = true;
+                // Flatten! Push each field (recursively)
+                uint16_t flattened_count = 0;
+                if (!emit_flattened_struct_args(compiler, arg->value, type_name, &flattened_count, (int)expr->line)) return false;
+                arg_count = (uint16_t)(arg_count + flattened_count - 1);
+                handled = true;
             }
         }
 
-        if (!flattened) {
+        if (!handled) {
             if (!compile_expr(compiler, arg->value)) {
               return false;
             }
@@ -1740,11 +1791,8 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
         return false;
       }
       
-      // Pop locals from 'then' block
-      while (compiler->local_count > scope_start_locals) {
-          emit_op(compiler, OP_POP, (int)stmt->line);
-          compiler->local_count--;
-      }
+      // Reset local count for scope reuse
+      compiler->local_count = scope_start_locals;
       
       uint16_t end_jump = emit_jump(compiler, OP_JUMP, (int)stmt->line);
       
@@ -1752,16 +1800,12 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
       emit_op(compiler, OP_POP, (int)stmt->line);
       
       if (stmt->as.if_stmt.else_block) {
-        // compiler->local_count is already reset to scope_start_locals by the loop above
         if (!compile_block(compiler, stmt->as.if_stmt.else_block)) {
           return false;
         }
         
-        // Pop locals from 'else' block
-        while (compiler->local_count > scope_start_locals) {
-            emit_op(compiler, OP_POP, (int)stmt->line);
-            compiler->local_count--;
-        }
+        // Reset local count for scope reuse
+        compiler->local_count = scope_start_locals;
       }
       
       patch_jump(compiler, end_jump);
@@ -1917,11 +1961,8 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
         emit_op(compiler, OP_POP, (int)stmt->line);
       }
       
-      // Exit scope (pop locals)
-      while (compiler->local_count > scope_start_locals) {
-        emit_op(compiler, OP_POP, (int)stmt->line);
-        compiler->local_count--;
-      }
+      // Reset local count for scope reuse
+      compiler->local_count = scope_start_locals;
       return true;
     }
     case AST_STMT_MATCH: {
