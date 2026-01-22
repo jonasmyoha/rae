@@ -19,6 +19,7 @@ const testSummaryText = document.getElementById("test-summary-text");
 const summaryPassCount = document.getElementById("summary-pass-count");
 const summaryFailCount = document.getElementById("summary-fail-count");
 const testDetail = document.getElementById("test-detail");
+const testHistoryDetail = document.getElementById("test-history-detail");
 const viewToggleButtons = document.querySelectorAll("[data-view-target]");
 const appViews = document.querySelectorAll("[data-view]");
 const statsViewContainer = document.querySelector('[data-view="statistics"]');
@@ -28,6 +29,8 @@ const statsTestsList = document.getElementById("stats-tests-list");
 const statsTestsMoreBtn = document.getElementById("stats-tests-more");
 const statsBuildsList = document.getElementById("stats-builds-list");
 const statsBuildsMoreBtn = document.getElementById("stats-builds-more");
+const runTestLiveBtn = document.getElementById("run-test-live-btn");
+const runTestCompiledBtn = document.getElementById("run-test-compiled-btn");
 const lineCountCanvas = document.getElementById("line-count-chart");
 const lineCountSummary = document.getElementById("line-count-summary");
 const lineCountEmpty = document.getElementById("line-count-empty");
@@ -138,6 +141,7 @@ let latestRunId = null;
 let latestBuildRunId = null;
 let currentBuildVersion = null;
 let testCases = new Map();
+let testHistory = {};
 let summaryCounts = { passed: 0, failed: 0 };
 let selectedTestName = null;
 let testFilesTree = [];
@@ -346,6 +350,9 @@ buildTestBtn?.addEventListener("click", () => {
 });
 
 runTestsBtn?.addEventListener("click", () => requestTestRun("all"));
+runTestLiveBtn?.addEventListener("click", () => requestSingleTestRun("live"));
+runTestCompiledBtn?.addEventListener("click", () => requestSingleTestRun("compiled"));
+
 document.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "t") {
     event.preventDefault();
@@ -435,6 +442,36 @@ function requestTestRun(mode = "all") {
       disabledTests
     })
   );
+}
+
+function requestSingleTestRun(targetId) {
+  if (!selectedTestName) {
+    pushStatusItem("No test selected.");
+    return;
+  }
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    pushStatusItem("Cannot run test: socket disconnected.");
+    return;
+  }
+
+  const disabledTests = disabledTestsInput ? disabledTestsInput.value : "";
+
+  // Clear log and show progress immediately
+  clearTestLog();
+  appendTestLine(`▶ Running single test: ${selectedTestName} (${targetId})`, "stdout");
+
+  socket.send(
+    JSON.stringify({
+      type: "run-tests",
+      mode: "all",
+      targetId,
+      testName: selectedTestName,
+      disabledTests
+    })
+  );
+  
+  // Switch to result tab to see output
+  setInspectorTab("result");
 }
 
 function requestStopTests() {
@@ -762,6 +799,8 @@ function appendBuildLine(text, stream = "stdout") {
 
 function setTestButtonsDisabled(disabled) {
   runTestsBtn.disabled = disabled;
+  if (runTestLiveBtn) runTestLiveBtn.disabled = disabled;
+  if (runTestCompiledBtn) runTestCompiledBtn.disabled = disabled;
 }
 
 function setBuildButtonsDisabled(disabled) {
@@ -1029,6 +1068,24 @@ function renderTestList() {
       badge.textContent = testCase.status === "pending" ? "pending" : testCase.status;
 
       row.appendChild(name);
+      
+      // Add history status if not currently passing
+      if (testCase.status !== "pass") {
+          const historyInfo = testHistory[testCase.name + ".rae"];
+          if (historyInfo) {
+              const histSpan = document.createElement("span");
+              histSpan.className = "history-mini";
+              if (historyInfo.last_passed_at.startsWith("1970")) {
+                  histSpan.textContent = "Never passed";
+                  histSpan.classList.add("history-never");
+              } else {
+                  const date = new Date(historyInfo.last_passed_at);
+                  histSpan.textContent = "Last pass: " + date.toLocaleDateString();
+              }
+              row.appendChild(histSpan);
+          }
+      }
+
       row.appendChild(badge);
       body.appendChild(row);
     }
@@ -1124,6 +1181,56 @@ function renderTestDetail() {
   testDetail.appendChild(header);
   testDetail.appendChild(meta);
   testDetail.appendChild(body);
+  
+  // Also render history if selected
+  renderTestHistory();
+}
+
+function renderTestHistory() {
+  if (!testHistoryDetail) return;
+  testHistoryDetail.innerHTML = "";
+  if (!selectedTestName) {
+    testHistoryDetail.innerHTML = '<p class="detail-placeholder">Select a test to see history.</p>';
+    return;
+  }
+
+  const historyInfo = testHistory[selectedTestName + ".rae"];
+  
+  const container = document.createElement("div");
+  container.className = "history-panel";
+  
+  const title = document.createElement("h3");
+  title.textContent = "Test History";
+  container.appendChild(title);
+
+  if (!historyInfo) {
+    const msg = document.createElement("p");
+    msg.className = "detail-placeholder";
+    msg.textContent = "No history recorded for this test yet.";
+    container.appendChild(msg);
+  } else {
+    const list = document.createElement("ul");
+    list.className = "history-list";
+    
+    const addedAt = new Date(historyInfo.added_at);
+    const addedItem = document.createElement("li");
+    addedItem.innerHTML = `<span class="history-label">Added:</span> <span class="history-date history-date--added">${addedAt.toLocaleString()}</span>`;
+    list.appendChild(addedItem);
+    
+    const passedAt = historyInfo.last_passed_at;
+    const passedItem = document.createElement("li");
+    if (passedAt.startsWith("1970")) {
+        passedItem.innerHTML = `<span class="history-label">Passed:</span> <span class="history-date history-date--never">Never passed</span>`;
+    } else {
+        const date = new Date(passedAt);
+        passedItem.innerHTML = `<span class="history-label">Passed:</span> <span class="history-date history-date--passed">${date.toLocaleString()}</span>`;
+    }
+    list.appendChild(passedItem);
+    
+    container.appendChild(list);
+  }
+  
+  testHistoryDetail.appendChild(container);
 }
 
 async function loadExamples() {
@@ -2309,10 +2416,19 @@ showcaseWatchBtn?.addEventListener("click", () => {
 
 async function loadTestFileTree(options = {}) {
   try {
-    const response = await fetch("/api/tests/files");
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const data = await response.json();
-    testFilesTree = data.tree ?? [];
+    const [filesRes, historyRes] = await Promise.all([
+      fetch("/api/tests/files"),
+      fetch("/api/tests/history")
+    ]);
+    
+    if (!filesRes.ok) throw new Error(`Files HTTP ${filesRes.status}`);
+    const filesData = await filesRes.json();
+    testFilesTree = filesData.tree ?? [];
+    
+    if (historyRes.ok) {
+      testHistory = await historyRes.json();
+    }
+    
     updateKnownTests(testFilesTree);
   } catch (error) {
     recordError("Test files", getErrorMessage(error));
@@ -2603,6 +2719,10 @@ function setInspectorTab(tab) {
       panel.classList.add("is-hidden");
     }
   });
+  
+  if (tab === "history") {
+      renderTestHistory();
+  }
 }
 
 function escapeRegex(str) {
