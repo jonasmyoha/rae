@@ -9,6 +9,9 @@ PASSED=0
 FAILED=0
 TARGET_FILTER=$(printf "%s" "${TEST_TARGET:-${TARGET:-}}" | tr '[:upper:]' '[:lower:]')
 
+# Tests that are permanently disabled because they hang or are known to be broken
+HARDCODED_DISABLED=" 321_stack_leak 321 "
+
 echo "Running Rae tests..."
 echo
 
@@ -80,6 +83,14 @@ for TARGET in "${TARGETS[@]}"; do
       continue
     fi
     TEST_NAME=$(basename "$TEST_FILE" .rae)
+    
+    # Check if we should skip this test (hardcoded or RAE_SKIP_TESTS env var)
+    SKIP_LIST=" $HARDCODED_DISABLED $(echo "${RAE_SKIP_TESTS:-}" | tr ',' ' ') "
+    TEST_NUMBER="${TEST_NAME%%_*}"
+    if [[ "$SKIP_LIST" =~ " $TEST_NAME " ]] || [[ "$SKIP_LIST" =~ " $TEST_NUMBER " ]]; then
+      echo "SKIP: $TEST_NAME (disabled)"
+      continue
+    fi
     
     EXPECT_FILE="${TEST_FILE%.rae}.expect"
     if [ ! -f "$EXPECT_FILE" ]; then

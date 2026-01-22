@@ -141,6 +141,10 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
   }
 
   for (;;) {
+#ifdef DEBUG_TRACE_EXECUTION
+    // Debug output
+#endif
+    // printf("IP: %lu OP: %d\n", (unsigned long)(vm->ip - vm->chunk->code), *vm->ip);
     uint8_t instruction = *vm->ip++;
     switch (instruction) {
       case OP_CONSTANT: {
@@ -240,7 +244,7 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         // DEBUG: Log native call
         // printf("[VM] Calling native %s with %d args\n", symbol.as.string_value.chars, arg_count);
         // printf("[VM] Stack info: base=%p, top=%p, args=%p\n", (void*)vm->stack, (void*)vm->stack_top, (void*)args);
-        // for (int i = 0; i < arg_count; i++) {
+        // for (int i = 0; i < (int)arg_count; i++) {
         //    printf("  arg[%d] type: %d\n", i, args[i].type);
         // }
 

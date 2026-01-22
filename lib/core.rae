@@ -125,23 +125,6 @@ func swap(T)(this: mod List(T), i: Int, j: Int) {
   __buf_set(buf: this.data, index: j, value: temp)
 }
 
-func sort(this: mod List(Int)) {
-  def n: Int = this.length()
-  def i: Int = 0
-  loop i < n {
-    def j: Int = 0
-    loop j < n - i - 1 {
-      def a: Int = this.get(index: j)
-      def b: Int = this.get(index: j + 1)
-      if a > b {
-        this.swap(i: j, j: j + 1)
-      }
-      j = j + 1
-    }
-    i = i + 1
-  }
-}
-
 func free(T)(this: mod List(T)) {
   __buf_free(buf: this.data)
   this.length = 0
