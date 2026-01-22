@@ -89,8 +89,67 @@ FunctionEntry* function_table_find(FunctionTable* table, Str name) {
   return NULL;
 }
 
+static Str strip_generics(Str type_name) {
+  for (size_t i = 0; i < type_name.len; ++i) {
+    if (type_name.data[i] == '(') {
+      return (Str){.data = type_name.data, .len = i};
+    }
+  }
+  return type_name;
+}
+
+static Str get_base_type_name_str(Str type_name) {
+  Str res = type_name;
+  if (str_starts_with_cstr(res, "mod ")) {
+    res.data += 4;
+    res.len -= 4;
+  } else if (str_starts_with_cstr(res, "view ")) {
+    res.data += 5;
+    res.len -= 5;
+  } else if (str_starts_with_cstr(res, "opt ")) {
+    res.data += 4;
+    res.len -= 4;
+  }
+  return res;
+}
+
+static bool types_match(Str entry_type_raw, Str call_type_raw) {
+  Str entry_type = get_base_type_name_str(entry_type_raw);
+  Str call_type = get_base_type_name_str(call_type_raw);
+
+  // printf("DEBUG types_match: entry_raw='%.*s' call_raw='%.*s' -> entry='%.*s' call='%.*s'\n", 
+  //   (int)entry_type_raw.len, entry_type_raw.data, (int)call_type_raw.len, call_type_raw.data,
+  //   (int)entry_type.len, entry_type.data, (int)call_type.len, call_type.data);
+
+  // 1. Exact match
+  if (str_matches(entry_type, call_type)) return true;
+  
+  // 2. Generic placeholder (single uppercase letter like 'T')
+  if (entry_type.len == 1 && entry_type.data[0] >= 'A' && entry_type.data[0] <= 'Z') {
+    return true;
+  }
+  
+  // 3. Complex generic match: List(T) vs List(Int)
+  Str entry_base = strip_generics(entry_type);
+  Str call_base = strip_generics(call_type);
+  
+  if (str_matches(entry_base, call_base) && entry_type.len > entry_base.len && call_type.len > call_base.len) {
+    // Both have generics, match the inner part
+    // entry: List(T), call: List(Int)
+    // inner entry: T, inner call: Int
+    Str entry_inner = { .data = entry_type.data + entry_base.len + 1, .len = entry_type.len - entry_base.len - 2 };
+    Str call_inner = { .data = call_type.data + call_base.len + 1, .len = call_type.len - call_base.len - 2 };
+    return types_match(entry_inner, call_inner);
+  }
+  
+  return false;
+}
+
 FunctionEntry* function_table_find_overload(FunctionTable* table, Str name, const Str* param_types, uint16_t param_count) {
   if (!table) return NULL;
+  
+  FunctionEntry* name_match = NULL;
+
   for (size_t i = 0; i < table->count; ++i) {
     FunctionEntry* entry = &table->entries[i];
     if (str_matches(entry->name, name)) {
@@ -99,32 +158,47 @@ FunctionEntry* function_table_find_overload(FunctionTable* table, Str name, cons
         
         bool mismatch = false;
         for (uint16_t j = 0; j < param_count; ++j) {
-          if (!str_matches(entry->param_types[j], param_types[j])) {
+          if (!types_match(entry->param_types[j], param_types[j])) {
             mismatch = true;
             break;
           }
         }
         if (!mismatch) return entry;
       }
+      
+      // Fallback: remember the first name match with same arity
+      if (!name_match && entry->param_count == param_count) {
+          name_match = entry;
+      }
+    }
+  }
+  return name_match;
+}
+
+static FunctionEntry* function_table_find_exact(FunctionTable* table, Str name, const Str* param_types, uint16_t param_count) {
+  if (!table) return NULL;
+  for (size_t i = 0; i < table->count; ++i) {
+    FunctionEntry* entry = &table->entries[i];
+    if (str_matches(entry->name, name) && entry->param_count == param_count) {
+      bool mismatch = false;
+      for (uint16_t j = 0; j < param_count; ++j) {
+        if (!str_matches(entry->param_types[j], param_types[j])) {
+          mismatch = true;
+          break;
+        }
+      }
+      if (!mismatch) return entry;
     }
   }
   return NULL;
 }
 
-static bool function_table_add(FunctionTable* table, Str name, const Str* param_types, uint16_t param_count, bool is_extern, bool returns_ref) {
-  FunctionEntry* existing = function_table_find_overload(table, name, param_types, param_count);
-  if (existing && existing->param_count == param_count) {
-    bool exact = true;
-    for (uint16_t i = 0; i < param_count; ++i) {
-      if (!str_matches(existing->param_types[i], param_types[i])) {
-        exact = false;
-        break;
-      }
-    }
-    if (exact) {
-      existing->is_extern = is_extern;
-      return true;
-    }
+static bool function_table_add(FunctionTable* table, Str name, const Str* param_types, uint16_t param_count, bool is_extern, bool returns_ref, Str return_type) {
+  FunctionEntry* existing = function_table_find_exact(table, name, param_types, param_count);
+  if (existing) {
+    existing->is_extern = is_extern;
+    existing->return_type = return_type;
+    return true;
   }
   if (table->count + 1 > table->capacity) {
     size_t old_cap = table->capacity;
@@ -149,6 +223,7 @@ static bool function_table_add(FunctionTable* table, Str name, const Str* param_
   entry->patch_capacity = 0;
   entry->is_extern = is_extern;
   entry->returns_ref = returns_ref;
+  entry->return_type = return_type;
   return true;
 }
 
@@ -252,7 +327,11 @@ bool collect_metadata(const char* file_path, const AstModule* module, FunctionTa
       }
 
       bool returns_ref = decl->as.func_decl.returns && (decl->as.func_decl.returns->type->is_view || decl->as.func_decl.returns->type->is_mod);
-      bool ok = function_table_add(funcs, decl->as.func_decl.name, param_types, param_count, decl->as.func_decl.is_extern, returns_ref);
+      Str return_type = (Str){0};
+      if (decl->as.func_decl.returns) {
+          return_type = get_base_type_name(decl->as.func_decl.returns->type);
+      }
+      bool ok = function_table_add(funcs, decl->as.func_decl.name, param_types, param_count, decl->as.func_decl.is_extern, returns_ref, return_type);
       free(param_types);
       if (!ok) return false;
     } else if (decl->kind == AST_DECL_TYPE) {
@@ -340,6 +419,16 @@ static Str get_local_type_name(BytecodeCompiler* compiler, Str name) {
   return (Str){0};
 }
 
+static Str get_generic_arg(Str type_name) {
+  for (size_t i = 0; i < type_name.len; ++i) {
+    if (type_name.data[i] == '(') {
+      Str res = { .data = type_name.data + i + 1, .len = type_name.len - i - 2 };
+      return res;
+    }
+  }
+  return (Str){0};
+}
+
 static Str infer_expr_type(BytecodeCompiler* compiler, const AstExpr* expr) {
   if (!expr) return (Str){0};
   switch (expr->kind) {
@@ -358,11 +447,63 @@ static Str infer_expr_type(BytecodeCompiler* compiler, const AstExpr* expr) {
     }
     case AST_EXPR_CALL: {
         if (expr->as.call.callee->kind == AST_EXPR_IDENT) {
-            FunctionEntry* entry = function_table_find(&compiler->functions, expr->as.call.callee->as.ident);
-            if (entry && str_eq_cstr(entry->name, "createList")) return str_from_cstr("List");
+            Str name = expr->as.call.callee->as.ident;
+            if (str_eq_cstr(name, "rae_str") || str_eq_cstr(name, "rae_str_concat") || str_eq_cstr(name, "rae_str_sub")) {
+                return str_from_cstr("String");
+            }
+            if (str_eq_cstr(name, "createList")) return str_from_cstr("List");
+            
+            // Calculate args for overload matching
+            uint16_t arg_count = 0;
+            for (const AstCallArg* arg = expr->as.call.args; arg; arg = arg->next) arg_count++;
+            
+            Str* arg_types = NULL;
+            if (arg_count > 0) {
+                arg_types = malloc(arg_count * sizeof(Str));
+                const AstCallArg* arg = expr->as.call.args;
+                for (uint16_t i = 0; i < arg_count; i++) {
+                    arg_types[i] = infer_expr_type(compiler, arg->value);
+                    arg = arg->next;
+                }
+            }
+            
+            FunctionEntry* entry = function_table_find_overload(&compiler->functions, name, arg_types, arg_count);
+            free(arg_types);
+            
+            if (entry) {
+                // If it's a generic List function returning T, we should return generic type
+                if (str_eq_cstr(entry->return_type, "T")) {
+                    // Try to infer T from first arg (receiver) if it's a List(T)
+                    if (arg_count > 0) {
+                        Str first_arg_type = infer_expr_type(compiler, expr->as.call.args->value);
+                        return get_generic_arg(first_arg_type);
+                    }
+                }
+                return entry->return_type;
+            }
         }
         break;
     }
+    case AST_EXPR_METHOD_CALL: {
+        Str method = expr->as.method_call.method_name;
+        if (str_eq_cstr(method, "length")) return str_from_cstr("Int");
+        if (str_eq_cstr(method, "nowMs")) return str_from_cstr("Int");
+        if (str_eq_cstr(method, "get") || str_eq_cstr(method, "pop")) {
+            Str receiver_type = infer_expr_type(compiler, expr->as.method_call.object);
+            return get_generic_arg(receiver_type);
+        }
+        break;
+    }
+    case AST_EXPR_MEMBER: {
+        // Fallback for some common member types if possible
+        if (str_eq_cstr(expr->as.member.member, "length")) return str_from_cstr("Int");
+        break;
+    }
+    case AST_EXPR_INDEX: {
+        Str target_type = infer_expr_type(compiler, expr->as.index.target);
+        return get_generic_arg(target_type);
+    }
+    case AST_EXPR_INTERP: return str_from_cstr("String");
     default: break;
   }
   return (Str){0};
@@ -566,11 +707,6 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
     return false;
   }
 
-  const AstCallArg* arg = expr->as.call.args;
-  while (arg) {
-    if (!compile_expr(compiler, arg->value)) return false;
-    arg = arg->next;
-  }
   if (arg_count != entry->param_count) {
     char buffer[160];
     snprintf(buffer, sizeof(buffer),
@@ -587,7 +723,7 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
     return false;
   }
 
-  arg = expr->as.call.args;
+  const AstCallArg* arg = expr->as.call.args;
   uint16_t current_arg_idx = 0;
   while (arg) {
     bool explicitly_referenced = (arg->value->kind == AST_EXPR_UNARY && 
@@ -646,8 +782,8 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
           return false;
         }
     }
-    current_arg_idx++;
     arg = arg->next;
+    current_arg_idx++;
   }
   return emit_function_call(compiler, entry, (int)expr->line, (int)expr->column,
                             (uint8_t)arg_count) && !compiler->had_error;
@@ -687,11 +823,17 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       part = part->next;
       
       while (part) {
-          // Push next value
+          // Current stack has LHS. Decide if LHS needs wrapping.
+          // Note: In the first iteration, LHS is the initial string part.
+          // In subsequent iterations, it's the result of the previous rae_str_concat (String).
+          
+          // Push RHS
           if (!compile_expr(compiler, part->value)) return false;
           
+          Str rhs_type = infer_expr_type(compiler, part->value);
+          
           // If the next value isn't a string (it's the {expression} result), wrap it in rae_str
-          if (part->value->kind != AST_EXPR_STRING) {
+          if (!str_eq_cstr(rhs_type, "String")) {
               emit_op(compiler, OP_NATIVE_CALL, (int)expr->line);
               const char* native_name = "rae_str";
               Str name_str = str_from_cstr(native_name);
@@ -700,7 +842,7 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
               emit_byte(compiler, 1, (int)expr->line); // 1 arg
           }
           
-          // Now stack has [lhs, rhs_str]. Call rae_str_concat
+          // Now stack has [LHS, RHS_str]. Call rae_str_concat
           emit_op(compiler, OP_NATIVE_CALL, (int)expr->line);
           const char* concat_name = "rae_str_concat";
           Str concat_str = str_from_cstr(concat_name);
@@ -1080,14 +1222,25 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       }
 
       FunctionEntry* entry = NULL;
-      uint16_t explicit_args_count = 0;
-
-      // Desugar: p.method(args) -> method(p, args)
       
-      // Infer receiver type for dispatch
-      Str receiver_type = infer_expr_type(compiler, expr->as.method_call.object);
-      Str param_types[] = { receiver_type };
-    entry = function_table_find_overload(&compiler->functions, method_name, param_types, 1);
+      // Calculate total arguments (1 receiver + explicit args)
+      uint16_t explicit_args_count = 0;
+      for (const AstCallArg* arg = expr->as.method_call.args; arg; arg = arg->next) explicit_args_count++;
+      uint16_t total_arg_count = 1 + explicit_args_count;
+
+      // Infer all types for dispatch
+      Str* arg_types = malloc(total_arg_count * sizeof(Str));
+      arg_types[0] = get_base_type_name_str(infer_expr_type(compiler, expr->as.method_call.object));
+      {
+          const AstCallArg* arg = expr->as.method_call.args;
+          for (uint16_t i = 0; i < explicit_args_count; ++i) {
+              arg_types[i + 1] = infer_expr_type(compiler, arg->value);
+              arg = arg->next;
+          }
+      }
+
+      entry = function_table_find_overload(&compiler->functions, method_name, arg_types, total_arg_count);
+      free(arg_types);
 
       // Compile the receiver ('this')
       const AstExpr* receiver = expr->as.method_call.object;
@@ -1114,11 +1267,8 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       const AstCallArg* current_arg = expr->as.method_call.args;
       while (current_arg) {
         if (!compile_expr(compiler, current_arg->value)) return false;
-        explicit_args_count++;
         current_arg = current_arg->next;
       }
-      
-      uint16_t total_arg_count = 1 + explicit_args_count;
 
       if (!entry) {
         char buffer[128];
@@ -1135,8 +1285,8 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       if (!compile_expr(compiler, expr->as.index.target)) return false;
       if (!compile_expr(compiler, expr->as.index.index)) return false;
       // For index, we fallback to 'get' for the specific type
-      Str param_types[] = { target_type };
-      FunctionEntry* entry = function_table_find_overload(&compiler->functions, str_from_cstr("get"), param_types, 1);
+      Str param_types[] = { target_type, str_from_cstr("Int") };
+      FunctionEntry* entry = function_table_find_overload(&compiler->functions, str_from_cstr("get"), param_types, 2);
       if (!entry) {
           diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'get' method not found for indexing this type");
           compiler->had_error = true;
@@ -1189,8 +1339,8 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
           // We pop it because we'll build it via the local ref and then push it back at the end
           emit_op(compiler, OP_POP, (int)expr->line);
 
-          Str list_type = str_from_cstr("List");
-    FunctionEntry* add_entry = function_table_find_overload(&compiler->functions, str_from_cstr("add"), &list_type, 1);
+          Str add_types[] = { str_from_cstr("List"), str_from_cstr("Any") };
+          FunctionEntry* add_entry = function_table_find_overload(&compiler->functions, str_from_cstr("add"), add_types, 2);
           if (!add_entry) {
               diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'add' not found in core.rae");
               return false;
@@ -1245,8 +1395,8 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       emit_short(compiler, (uint16_t)slot, (int)expr->line);
       emit_op(compiler, OP_POP, (int)expr->line);
 
-      Str list_type = str_from_cstr("List");
-    FunctionEntry* add_entry = function_table_find_overload(&compiler->functions, str_from_cstr("add"), &list_type, 1);
+      Str add_types[] = { str_from_cstr("List"), str_from_cstr("Any") };
+      FunctionEntry* add_entry = function_table_find_overload(&compiler->functions, str_from_cstr("add"), add_types, 2);
       if (!add_entry) {
           diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'add' not found in core.rae");
           return false;
@@ -1459,24 +1609,43 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
         compiler->had_error = true;
         return false;
       }
+      
+      uint16_t scope_start_locals = compiler->local_count;
+
       if (!compile_expr(compiler, stmt->as.if_stmt.condition)) {
         return false;
       }
       uint16_t else_jump = emit_jump(compiler, OP_JUMP_IF_FALSE, (int)stmt->line);
       emit_op(compiler, OP_POP, (int)stmt->line);
+      
       if (!compile_block(compiler, stmt->as.if_stmt.then_block)) {
         return false;
+      }
+      
+      // Pop locals from 'then' block
+      while (compiler->local_count > scope_start_locals) {
+          emit_op(compiler, OP_POP, (int)stmt->line);
+          compiler->local_count--;
       }
       
       uint16_t end_jump = emit_jump(compiler, OP_JUMP, (int)stmt->line);
       
       patch_jump(compiler, else_jump);
       emit_op(compiler, OP_POP, (int)stmt->line);
+      
       if (stmt->as.if_stmt.else_block) {
+        // compiler->local_count is already reset to scope_start_locals by the loop above
         if (!compile_block(compiler, stmt->as.if_stmt.else_block)) {
           return false;
         }
+        
+        // Pop locals from 'else' block
+        while (compiler->local_count > scope_start_locals) {
+            emit_op(compiler, OP_POP, (int)stmt->line);
+            compiler->local_count--;
+        }
       }
+      
       patch_jump(compiler, end_jump);
       return true;
     }
@@ -1632,38 +1801,8 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
       
       // Exit scope (pop locals)
       while (compiler->local_count > scope_start_locals) {
-        // In a real VM we'd emit OP_POP_LOCAL or similar, but here we just decrement compiler counter?
-        // Wait, the runtime stack needs to be popped if we declared locals.
-        // We need to emit OP_POP for each local we leave?
-        // Rae VM locals are on stack.
-        // Does VM have OP_POP_N? Or just OP_POP?
-        // Existing `compile_block` doesn't seem to emit POPs for locals?
-        // Let's check `compile_block`. It just loops.
-        // Ah, `compile_function` resets locals.
-        // It seems the current VM implementation might be "leaking" locals on stack or I missed where they are popped.
-        // Re-reading `vm_compiler.c`: `compile_block` does NOT pop locals.
-        // `compile_function` resets `local_count` at start.
-        // This implies locals persist until function return in current trivial VM?
-        // `compiler->local_count` is just a compile-time tracker.
-        // If I declare `def x = 1` in a loop, and loop runs 10 times, do I get 10 x's on stack?
-        // Yes, if I don't pop them.
-        // But `compile_stmt` for `AST_STMT_DEF` emits `SET_LOCAL`.
-        // `compiler_add_local` assigns a slot.
-        // If the loop re-executes, does it reuse the slot?
-        // The slot is fixed at compile time.
-        // `def x = 1` -> `SET_LOCAL 5`.
-        // Next iteration -> `SET_LOCAL 5`.
-        // So the stack depth doesn't grow per iteration.
-        // BUT, `init` is outside the loop body.
-        // If `init` defines `i`, it takes slot 0.
-        // `body` defines `x`, it takes slot 1.
-        // Next iteration, `x` uses slot 1 again.
-        // So "stack" growth is bounded by unique variables in source.
-        // So I don't need to emit POPs for scoping in this simple VM?
-        // However, `compiler->local_count` should be reset to `scope_start_locals` after the loop
-        // so that subsequent statements reuse those slots.
-        // Yes.
-        compiler->local_count = scope_start_locals;
+        emit_op(compiler, OP_POP, (int)stmt->line);
+        compiler->local_count--;
       }
       return true;
     }

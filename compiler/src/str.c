@@ -22,6 +22,12 @@ bool str_eq_cstr(Str a, const char* cstr) {
   return str_eq(a, str_from_cstr(cstr));
 }
 
+bool str_starts_with_cstr(Str s, const char* prefix) {
+  size_t prefix_len = strlen(prefix);
+  if (s.len < prefix_len) return false;
+  return memcmp(s.data, prefix, prefix_len) == 0;
+}
+
 char* str_to_cstr(Str s) {
   char* result = malloc(s.len + 1);
   if (!result) return NULL;

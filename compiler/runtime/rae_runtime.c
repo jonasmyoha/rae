@@ -4,7 +4,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
-
+#include <time.h>
 #include <sys/time.h>
 
 static void rae_flush_stdout(void) {

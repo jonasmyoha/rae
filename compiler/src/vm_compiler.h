@@ -18,6 +18,7 @@ typedef struct {
   size_t patch_capacity;
   bool is_extern;
   bool returns_ref;
+  Str return_type;
 } FunctionEntry;
 
 typedef struct {
