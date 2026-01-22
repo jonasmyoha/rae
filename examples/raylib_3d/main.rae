@@ -1,98 +1,71 @@
 import raylib
-type Position {
-  x: Float
-  y: Float
-  z: Float
-}
-
-type Velocity {
-  dx: Float
-  dy: Float
-  dz: Float
-}
-
-type ComponentColor {
+import math
+# Entity types: 0 = Cube, 1 = Sphere
+type Entity {
+  kind: Int
+  currentPos: Vector3
+  targetPos: Vector3
+  size: Float
   hue: Float
 }
 
-func movementSystem(pos: mod Position, vel: view Velocity) {
-  pos.x = pos.x + vel.dx
-  pos.y = pos.y + vel.dy
-  pos.z = pos.z + vel.dz
+func initEntity(
+  e: mod Entity,
+  kind: Int,
+  x: Float,
+  y: Float,
+  z: Float,
+  size: Float,
+  hue: Float,
+) {
+  e.kind = kind
+  e.currentPos = {x: x, y: y, z: z}
+  e.targetPos = {x: randomFloat(min: -10.0, max: 10.0), y: randomFloat(
+    min: 0.0,
+    max: 8.0,
+  ), z: randomFloat(min: -10.0, max: 10.0)}
+  e.size = size
+  e.hue = hue
 }
 
-func bounceSystem(pos: view Position, vel: mod Velocity) {
-  if pos.y < 0.0 or pos.y > 5.0 {
-    vel.dy = -vel.dy
-  }
-  if pos.x < -10.0 or pos.x > 10.0 {
-    vel.dx = -vel.dx
+func updateEntity(e: mod Entity) {
+  # Lerp speed
+  def t: Float = 0.03
+  # Current and target locals for VM workaround
+  def cp: Vector3 = e.currentPos
+  def tp: Vector3 = e.targetPos
+  def nx: Float = lerp(a: cp.x, b: tp.x, t: t)
+  def ny: Float = lerp(a: cp.y, b: tp.y, t: t)
+  def nz: Float = lerp(a: cp.z, b: tp.z, t: t)
+  e.currentPos = {x: nx, y: ny, z: nz}
+  # Distance check
+  def dx: Float = tp.x - nx
+  def dy: Float = tp.y - ny
+  def dz: Float = tp.z - nz
+  if abs(n: dx) < 0.2 and abs(n: dy) < 0.2 and abs(n: dz) < 0.2 {
+    def tx: Float = randomFloat(min: -10.0, max: 10.0)
+    def ty: Float = randomFloat(min: 0.0, max: 8.0)
+    def tz: Float = randomFloat(min: -10.0, max: 10.0)
+    e.targetPos = {x: tx, y: ty, z: tz}
   }
 }
 
-func main() {
-  initWindow(width: 800, height: 450, title: "Rae Modern 3D Example")
-  setTargetFPS(fps: 60)
-  def cam: Camera3D = {
-    position: {x: 15.0, y: 15.0, z: 15.0},
-    target: {x: 0.0, y: 0.0, z: 0.0},
-    up: {x: 0.0, y: 1.0, z: 0.0},
-    fovy: 45.0,
-    projection: 0,
-  }
-  def p1: Position = {x: 0.0, y: 2.0, z: 0.0}
-  def v1: Velocity = {dx: 0.05, dy: 0.1, dz: 0.0}
-  def p2: Position = {x: -5.0, y: 4.0, z: -2.0}
-  def v2: Velocity = {dx: -0.02, dy: 0.08, dz: 0.03}
-  def bgColor: Color = {
-    r: 30,
-    g: 30,
-    b: 40,
-    a: 255,
-  }
-  def gridColor: Color = {
-    r: 100,
-    g: 100,
-    b: 120,
-    a: 255,
-  }
-  loop windowShouldClose() is 0 {
-    movementSystem(pos: p1, vel: v1)
-    bounceSystem(pos: p1, vel: v1)
-    movementSystem(pos: p2, vel: v2)
-    bounceSystem(pos: p2, vel: v2)
-    def time: Float = getTime()
-    # Rainbow effect: cycle hue over time
-    def hue: Float = time * 60.0 % 360.0
-    def pastelRainbow: Color = colorFromHSV(
-      hue: hue,
-      saturation: 0.4,
-      value: 0.9,
-    )
-    def sphereColor: Color = colorFromHSV(
-      hue: (hue + 180.0) % 360.0,
-      saturation: 0.5,
-      value: 0.9,
-    )
-    beginDrawing()
-    clearBackground(color: bgColor)
-    beginMode3D(camera: cam)
-    # The modern pastel rainbow cube
-    drawGrid(slices: 20, spacing: 1.0)
-    # Add a wireframe outline for more "definition"
+func drawEntity(e: view Entity, time: Float) {
+  def h: Float = (e.hue + time * 30.0) % 360.0
+  def color: Color = colorFromHSV(hue: h, saturation: 0.4, value: 0.9)
+  if e.kind is 0 {
     drawCube(
-      pos: {x: p1.x, y: p1.y, z: p1.z},
-      width: 2.0,
-      height: 2.0,
-      length: 2.0,
-      color: pastelRainbow,
+      pos: e.currentPos,
+      width: e.size,
+      height: e.size,
+      length: e.size,
+      color: color,
     )
-    # A bouncing sphere
     drawCubeWires(
-      pos: {x: p1.x, y: p1.y, z: p1.z},
-      width: 2.0,
-      height: 2.0,
-      length: 2.0,
+      pos: e.currentPos,
+      width: e.size,
+      height: e.size,
+      length: e.size,
       color: {
         r: 255,
         g: 255,
@@ -100,10 +73,144 @@ func main() {
         a: 100,
       },
     )
-    drawSphere(centerPos: {x: p2.x, y: p2.y, z: p2.z}, radius: 1.5, color: sphereColor)
+  } else {
+    drawSphere(centerPos: e.currentPos, radius: e.size * 0.6, color: color)
+  }
+}
+
+func main() {
+  initWindow(width: 800, height: 450, title: "Rae Eased 3D Scene")
+  setTargetFPS(fps: 60)
+  def cam: Camera3D = {
+    position: {x: 18.0, y: 18.0, z: 18.0},
+    target: {x: 0.0, y: 0.0, z: 0.0},
+    up: {x: 0.0, y: 1.0, z: 0.0},
+    fovy: 45.0,
+    projection: 0,
+  }
+  def e1: Entity = {
+    kind: 0,
+    currentPos: {x: 0.0, y: 0.0, z: 0.0},
+    targetPos: {x: 0.0, y: 0.0, z: 0.0},
+    size: 0.0,
+    hue: 0.0,
+  }
+  def e2: Entity = {
+    kind: 0,
+    currentPos: {x: 0.0, y: 0.0, z: 0.0},
+    targetPos: {x: 0.0, y: 0.0, z: 0.0},
+    size: 0.0,
+    hue: 0.0,
+  }
+  def e3: Entity = {
+    kind: 0,
+    currentPos: {x: 0.0, y: 0.0, z: 0.0},
+    targetPos: {x: 0.0, y: 0.0, z: 0.0},
+    size: 0.0,
+    hue: 0.0,
+  }
+  def e4: Entity = {
+    kind: 0,
+    currentPos: {x: 0.0, y: 0.0, z: 0.0},
+    targetPos: {x: 0.0, y: 0.0, z: 0.0},
+    size: 0.0,
+    hue: 0.0,
+  }
+  def e5: Entity = {
+    kind: 0,
+    currentPos: {x: 0.0, y: 0.0, z: 0.0},
+    targetPos: {x: 0.0, y: 0.0, z: 0.0},
+    size: 0.0,
+    hue: 0.0,
+  }
+  def e6: Entity = {
+    kind: 0,
+    currentPos: {x: 0.0, y: 0.0, z: 0.0},
+    targetPos: {x: 0.0, y: 0.0, z: 0.0},
+    size: 0.0,
+    hue: 0.0,
+  }
+  initEntity(
+    e: e1,
+    kind: 0,
+    x: -5.0,
+    y: 2.0,
+    z: 0.0,
+    size: 2.0,
+    hue: 0.0,
+  )
+  initEntity(
+    e: e2,
+    kind: 0,
+    x: 5.0,
+    y: 5.0,
+    z: -5.0,
+    size: 1.5,
+    hue: 120.0,
+  )
+  initEntity(
+    e: e3,
+    kind: 0,
+    x: 0.0,
+    y: 8.0,
+    z: 5.0,
+    size: 2.5,
+    hue: 240.0,
+  )
+  initEntity(
+    e: e4,
+    kind: 1,
+    x: 8.0,
+    y: 3.0,
+    z: 8.0,
+    size: 2.0,
+    hue: 60.0,
+  )
+  initEntity(
+    e: e5,
+    kind: 1,
+    x: -8.0,
+    y: 1.0,
+    z: -8.0,
+    size: 1.8,
+    hue: 180.0,
+  )
+  initEntity(
+    e: e6,
+    kind: 1,
+    x: 3.0,
+    y: 6.0,
+    z: 2.0,
+    size: 2.2,
+    hue: 300.0,
+  )
+  def bgColor: Color = {
+    r: 20,
+    g: 20,
+    b: 30,
+    a: 255,
+  }
+  loop windowShouldClose() is 0 {
+    def time: Float = getTime()
+    updateEntity(e: e1)
+    updateEntity(e: e2)
+    updateEntity(e: e3)
+    updateEntity(e: e4)
+    updateEntity(e: e5)
+    updateEntity(e: e6)
+    beginDrawing()
+    clearBackground(color: bgColor)
+    beginMode3D(camera: cam)
+    drawGrid(slices: 20, spacing: 1.0)
+    drawEntity(e: e1, time: time)
+    drawEntity(e: e2, time: time)
+    drawEntity(e: e3, time: time)
+    drawEntity(e: e4, time: time)
+    drawEntity(e: e5, time: time)
+    drawEntity(e: e6, time: time)
     endMode3D()
     drawText(
-      text: "Modern 3D in Rae (Pastel Rainbows)",
+      text: "Modern Pastel Scene",
       x: 20.0,
       y: 20.0,
       fontSize: 24.0,
