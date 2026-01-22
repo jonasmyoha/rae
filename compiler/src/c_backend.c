@@ -507,6 +507,11 @@ static Str infer_expr_type(CFuncContext* ctx, const AstExpr* expr) {
             // Simplified: default to Any for now
             res = str_from_cstr("Any");
             break;
+        case AST_EXPR_OBJECT:
+            if (expr->as.object_literal.type && expr->as.object_literal.type->parts) {
+                res = expr->as.object_literal.type->parts->text;
+            }
+            break;
         default: break;
     }
 done:
@@ -667,15 +672,19 @@ static const AstFuncDecl* find_function_overload(const AstModule* module, Str na
         if (d->kind == AST_DECL_FUNC && str_eq(d->as.func_decl.name, name)) {
             const AstFuncDecl* fd = &d->as.func_decl;
             
-            if (param_types != NULL) {
-                // Count parameters
-                uint16_t fd_param_count = 0;
-                for (const AstParam* p = fd->params; p; p = p->next) fd_param_count++;
+            // Count parameters
+            uint16_t fd_param_count = 0;
+            for (const AstParam* p = fd->params; p; p = p->next) fd_param_count++;
+            
+            if (fd_param_count == param_count) {
+                if (!name_match) name_match = fd; // Keep first name+arity match as fallback
                 
-                if (fd_param_count == param_count) {
+                if (param_types != NULL) {
                     bool mismatch = false;
                     const AstParam* p = fd->params;
                     for (uint16_t j = 0; j < param_count; ++j) {
+                        if (param_types[j].len == 0) continue; // Skip matching if we don't know the call type (untyped literal)
+                        
                         Str fd_type = get_base_type_name(p->type);
                         Str entry_base = get_base_type_name_str(fd_type);
                         Str call_base = get_base_type_name_str(param_types[j]);
@@ -685,21 +694,8 @@ static const AstFuncDecl* find_function_overload(const AstModule* module, Str na
                         }
                         p = p->next;
                     }
-                    if (!mismatch) return fd;
+                    if (!mismatch) return fd; // Found exact match!
                 }
-            } else if (param_count > 0) {
-                // Legacy/First-arg mode
-                Str fd_first_type = {0};
-                if (fd->params) fd_first_type = get_base_type_name(fd->params->type);
-                if (fd_first_type.len > 0 && str_eq(get_base_type_name_str(fd_first_type), get_base_type_name_str(param_types[0]))) {
-                    return fd;
-                }
-            } else {
-                // Name only match
-                uint16_t fd_param_count = 0;
-                for (const AstParam* p = fd->params; p; p = p->next) fd_param_count++;
-                if (fd_param_count == 0) return fd;
-                if (!name_match) name_match = fd;
             }
         }
     }
@@ -841,28 +837,23 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
 
   // Find function declaration if possible for dispatch
   const AstFuncDecl* func_decl = NULL;
-  bool is_raylib = false;
   
   if (callee->kind == AST_EXPR_IDENT) {
-      if (find_raylib_mapping(callee->as.ident)) {
-          is_raylib = true;
-      } else {
-          uint16_t arg_count = 0;
-          for (const AstCallArg* arg = expr->as.call.args; arg; arg = arg->next) arg_count++;
-          
-          Str* arg_types = NULL;
-          if (arg_count > 0) {
-              arg_types = malloc(arg_count * sizeof(Str));
-              const AstCallArg* arg = expr->as.call.args;
-              for (uint16_t i = 0; i < arg_count; ++i) {
-                  arg_types[i] = infer_expr_type(ctx, arg->value);
-                  arg = arg->next;
-              }
+      uint16_t arg_count = 0;
+      for (const AstCallArg* arg = expr->as.call.args; arg; arg = arg->next) arg_count++;
+      
+      Str* arg_types = NULL;
+      if (arg_count > 0) {
+          arg_types = malloc(arg_count * sizeof(Str));
+          const AstCallArg* arg = expr->as.call.args;
+          for (uint16_t i = 0; i < arg_count; ++i) {
+              arg_types[i] = infer_expr_type(ctx, arg->value);
+              arg = arg->next;
           }
-          
-          func_decl = find_function_overload(ctx->module, callee->as.ident, arg_types, arg_count);
-          free(arg_types);
       }
+      
+      func_decl = find_function_overload(ctx->module, callee->as.ident, arg_types, arg_count);
+      free(arg_types);
   }
 
   // Handle return type casting if it's a generic return
@@ -942,10 +933,8 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                      }
                  }
              }
-             param = param->next;
+             // We'll advance 'param' at the end of the loop to be safe with all branches
         }
-    } else if (is_raylib) {
-        // ...
     } else {
         // Fallback heuristic
         if (arg->value->kind == AST_EXPR_IDENT) {
@@ -981,23 +970,64 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
          if (fprintf(out, "*") < 0) return false;
     }
 
-    // STRUCT-TO-STRUCT FFI (C literal)
-    Str type_name = infer_expr_type(ctx, arg->value);
-    const AstDecl* type_decl = find_type_decl(ctx->module, type_name);
-    bool is_c_struct = type_decl && type_decl->kind == AST_DECL_TYPE && has_property(type_decl->as.type_decl.properties, "c_struct");
+    Str arg_type = infer_expr_type(ctx, arg->value);
+    Str target_type = arg_type;
+    if (target_type.len == 0 && param && param->type && param->type->parts) {
+        target_type = param->type->parts->text;
+    }
+    
+    bool is_c_struct = false;
+    const AstDecl* type_decl = find_type_decl(ctx->module, target_type);
+    if (type_decl && type_decl->kind == AST_DECL_TYPE && has_property(type_decl->as.type_decl.properties, "c_struct")) {
+        is_c_struct = true;
+    } else if (str_eq_cstr(target_type, "Vector2") || str_eq_cstr(target_type, "Vector3") || 
+               str_eq_cstr(target_type, "Color") || str_eq_cstr(target_type, "Camera3D")) {
+        is_c_struct = true;
+    }
 
     if (is_c_struct && !needs_addr) {
-        fprintf(out, "(%.*s){ ", (int)type_name.len, type_name.data);
-        const AstTypeField* field = type_decl->as.type_decl.fields;
-        while (field) {
+        // If it's already an object of the right type (explicitly tagged), just emit it
+        if (arg->value->kind == AST_EXPR_OBJECT && arg->value->as.object_literal.type) {
             if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) return false;
-            fprintf(out, ".%.*s = ", (int)field->name.len, field->name.data);
+        } else if (arg->value->kind == AST_EXPR_OBJECT) {
+            // Manual field mapping for untyped literals
+            fprintf(out, "(%.*s){ ", (int)target_type.len, target_type.data);
+            if (type_decl) {
+                const AstTypeField* field = type_decl->as.type_decl.fields;
+                while (field) {
+                    fprintf(out, ".%.*s = ", (int)field->name.len, field->name.data);
+                    bool found_field = false;
+                    const AstObjectField* of = arg->value->as.object_literal.fields;
+                    while (of) {
+                        if (str_eq(of->name, field->name)) {
+                            if (!emit_expr(ctx, of->value, out, PREC_LOWEST)) return false;
+                            found_field = true;
+                            break;
+                        }
+                        of = of->next;
+                    }
+                    if (!found_field) fprintf(out, "0");
+                    if (field->next) fprintf(out, ", ");
+                    field = field->next;
+                }
+            } else {
+                // Fallback for untyped object literal mapping to unknown (but known c_struct) type
+                const AstObjectField* of = arg->value->as.object_literal.fields;
+                while (of) {
+                    fprintf(out, ".%.*s = ", (int)of->name.len, of->name.data);
+                    if (!emit_expr(ctx, of->value, out, PREC_LOWEST)) return false;
+                    if (of->next) fprintf(out, ", ");
+                    of = of->next;
+                }
+            }
+            fprintf(out, " }");
+        } else {
+            // It's a variable or other expression of the same/compatible type.
+            // C allows implicit conversion between structs if they are the SAME type,
+            // or we might need a cast if names differ but layout matches.
+            // For now, we assume Rae type matches C type name.
             if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) return false;
-            fprintf(out, ".%.*s", (int)field->name.len, field->name.data);
-            if (field->next) fprintf(out, ", ");
-            field = field->next;
         }
-        fprintf(out, " }");
     } else {
         if (is_any_param && !needs_addr) fprintf(out, "rae_any(");
 
@@ -1013,6 +1043,7 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     }
     
     arg = arg->next;
+    if (func_decl && param) param = param->next;
     arg_idx++;
   }
   fprintf(out, ")");
@@ -1382,10 +1413,13 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
         const AstDecl* d = find_type_decl(ctx->module, type_name);
         if (d && d->kind == AST_DECL_TYPE) type_decl = &d->as.type_decl;
       }
+      
       if (fprintf(out, "{ ") < 0) return false;
       const AstObjectField* field = expr->as.object_literal.fields;
       while (field) {
-        if (fprintf(out, ".%.*s = ", (int)field->name.len, field->name.data) < 0) return false;
+        if (field->name.len > 0) {
+            if (fprintf(out, ".%.*s = ", (int)field->name.len, field->name.data) < 0) return false;
+        }
         
         bool is_any_field = false;
         if (type_decl) {

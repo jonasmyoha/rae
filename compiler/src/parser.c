@@ -725,12 +725,12 @@ static AstExpr* parse_list_literal(Parser* parser, const Token* start_token) {
 }
 
 static AstExpr* parse_collection_literal(Parser* parser, const Token* start_token) {
-  AstExpr* expr = new_expr(parser, AST_EXPR_COLLECTION_LITERAL, start_token);
   AstCollectionElement* head = NULL;
   AstCollectionElement* tail = NULL;
-  bool is_map = false;
+  bool is_keyed = false;
 
   if (parser_match(parser, TOK_RBRACE)) { // Empty collection literal {}
+    AstExpr* expr = new_expr(parser, AST_EXPR_COLLECTION_LITERAL, start_token);
     expr->as.collection.elements = NULL;
     return expr;
   }
@@ -741,11 +741,11 @@ static AstExpr* parse_collection_literal(Parser* parser, const Token* start_toke
     
     // Check for key: value pair (implies map/object literal)
     if ((parser_check(parser, TOK_IDENT) || parser_check(parser, TOK_STRING)) && parser_peek_at(parser, 1)->kind == TOK_COLON) {
-      if (head && !is_map) { // First element defines type
+      if (head && !is_keyed) { // First element defines type
         parser_error(parser, parser_peek(parser), "mixing keyed and unkeyed elements in collection literal is not allowed");
         return NULL;
       }
-      is_map = true; // Mark as map/object
+      is_keyed = true; // Mark as map/object
 
       const Token* key_token = parser_advance(parser);
       Str key_str;
@@ -761,7 +761,7 @@ static AstExpr* parse_collection_literal(Parser* parser, const Token* start_toke
 
       element->value = parse_expression(parser);
     } else { // Unkeyed element (implies list literal)
-      if (head && is_map) { // First element defines type
+      if (head && is_keyed) { // First element defines type
         parser_error(parser, parser_peek(parser), "mixing keyed and unkeyed elements in collection literal is not allowed");
         return NULL;
       }
@@ -784,8 +784,30 @@ static AstExpr* parse_collection_literal(Parser* parser, const Token* start_toke
   } while (true);
   
   parser_consume(parser, TOK_RBRACE, "expected '}' after collection literal");
-  expr->as.collection.elements = head;
-  return expr;
+
+  if (is_keyed) {
+      // Return as Object literal if it has keys
+      AstExpr* expr = new_expr(parser, AST_EXPR_OBJECT, start_token);
+      expr->as.object_literal.type = NULL;
+      AstObjectField* o_head = NULL;
+      AstObjectField* o_tail = NULL;
+      
+      AstCollectionElement* curr = head;
+      while (curr) {
+          AstObjectField* field = parser_alloc(parser, sizeof(AstObjectField));
+          field->name = *curr->key;
+          field->value = curr->value;
+          field->next = NULL;
+          if (!o_head) { o_head = o_tail = field; } else { o_tail->next = field; o_tail = field; }
+          curr = curr->next;
+      }
+      expr->as.object_literal.fields = o_head;
+      return expr;
+  } else {
+      AstExpr* expr = new_expr(parser, AST_EXPR_COLLECTION_LITERAL, start_token);
+      expr->as.collection.elements = head;
+      return expr;
+  }
 }
 
 static bool type_is_list_or_array(AstTypeRef* type) {
