@@ -6,7 +6,7 @@ TERM_WAIT_SECONDS=2
 # Literal substrings to match in the *command line*
 MATCH_1="run_tests.sh"
 #MATCH_2="run_examples.sh"
-MATCH_2="list_native_any"
+MATCH_2="raylib_3d"
 
 SELF_NAME="stop_tests_and_examples.sh"
 
