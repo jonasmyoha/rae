@@ -46,14 +46,17 @@
     - [ ] **Module: sys**
         - [x] Implement `exit`, `getEnv`, `args`, `readFile`, `writeFile`.
 - [ ] **Phase 7: Tetris-Ready Features**
-    - [ ] **Struct-to-Struct FFI**
-        - [ ] Add `@c_struct` attribute or similar hint to Rae types.
-        - [ ] Update C backend to emit C struct literals and pass them by value to externs.
-        - [ ] Clean up `raylib.rae` to use `Color` and `Vector2` structs directly.
+    - [x] **Struct-to-Struct FFI**
+        - [x] Add `@c_struct` attribute or similar hint to Rae types.
+        - [x] Update C backend to emit C struct literals and pass them by value to externs.
+        - [x] Clean up `raylib.rae` to use `Color` and `Vector2` structs directly.
+    - [x] **Language Improvements**
+        - [x] Implement `else if` support in parser.
     - [ ] **Enums**
         - [ ] Add `enum` keyword to parser.
         - [ ] Implement enum members as constant `Int` values in VM and C backend.
         - [ ] Support enum exhaustive matching in `match` statements.
     - [ ] **Tetris Prototype**
         - [ ] Implement a clean, high-quality Tetris using new features.
+
 

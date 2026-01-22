@@ -12,6 +12,20 @@ type Vector2: c_struct {
   y: Float
 }
 
+type Vector3: c_struct {
+  x: Float
+  y: Float
+  z: Float
+}
+
+type Camera3D: c_struct {
+  position: Vector3
+  target: Vector3
+  up: Vector3
+  fovy: Float
+  projection: Int
+}
+
 extern func initWindow(width: Int, height: Int, title: String)
 
 extern func windowShouldClose(): ret Int
@@ -46,6 +60,20 @@ extern func drawText(
   fontSize: Float,
   color: Color
 )
+
+extern func drawCube(
+  pos: Vector3,
+  width: Float,
+  height: Float,
+  length: Float,
+  color: Color
+)
+
+extern func drawGrid(slices: Int, spacing: Float)
+
+extern func beginMode3D(camera: Camera3D)
+
+extern func endMode3D()
 
 extern func setTargetFPS(fps: Int)
 
