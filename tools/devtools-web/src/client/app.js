@@ -546,7 +546,7 @@ function handleBuildRunOutput(event) {
 function handleTestRunCompleted(event) {
   if (!latestRunId || event.runId !== latestRunId) return;
   const duration = (event.durationMs / 1000).toFixed(1);
-  const status = event.success ? "Passed" : "Failed";
+  const status = event.success ? "passed" : "failed";
   lastTestTargetLabel = event.targetLabel;
   setTestStatus(`${status} in ${duration}s`, event.success ? "is-success" : "is-failure", event.targetLabel);
   appendTestLine(
@@ -563,7 +563,7 @@ function handleTestRunCompleted(event) {
 function handleBuildRunCompleted(event) {
   if (!latestBuildRunId || event.runId !== latestBuildRunId) return;
   const duration = (event.durationMs / 1000).toFixed(1);
-  const status = event.success ? "Success" : "Failed";
+  const status = event.success ? "success" : "failed";
   lastBuildTargetLabel = event.targetLabel;
   setBuildStatus(`${status} in ${duration}s`, event.success ? "is-success" : "is-failure", event.targetLabel);
   appendBuildLine(
@@ -587,7 +587,7 @@ function handleBuildRunCompleted(event) {
 
 function handleTestRunError(event) {
   lastTestTargetLabel = event.targetLabel;
-  setTestStatus("Error", "is-failure", event.targetLabel);
+  setTestStatus("error", "is-failure", event.targetLabel);
   appendTestLine(`⚠ [${event.targetLabel}] ${event.message}`, "stderr");
   setTestButtonsDisabled(false);
   latestRunId = null;
@@ -597,7 +597,7 @@ function handleTestRunError(event) {
 function handleBuildRunError(event) {
   isBuildingAndTesting = false;
   lastBuildTargetLabel = event.targetLabel;
-  setBuildStatus("Error", "is-failure", event.targetLabel);
+  setBuildStatus("error", "is-failure", event.targetLabel);
   appendBuildLine(`⚠ [${event.targetLabel}] ${event.message}`, "stderr");
   setBuildButtonsDisabled(false);
   latestBuildRunId = null;
@@ -614,12 +614,12 @@ function handleExampleRunStarted(event) {
   lastExampleTargetLabel = event.targetLabel;
   const label =
     event.mode === "watch"
-      ? "Watching"
+      ? "watching"
       : event.mode === "build"
-        ? "Building"
+        ? "building"
         : event.mode === "action"
-          ? event.actionLabel ?? "Running action"
-          : "Running";
+          ? event.actionLabel ?? "running action"
+          : "running";
   setExampleStatus(label, "is-running", event.targetLabel);
   clearExampleOutput();
   allExampleLogLines = [];
@@ -647,7 +647,7 @@ function handleExampleRunCompleted(event) {
   const duration = (event.durationMs / 1000).toFixed(1);
   lastExampleTargetLabel = event.targetLabel;
   appendExampleOutput(
-    `● [${event.targetLabel}] ${event.mode === "watch" ? "Watch" : event.mode === "build" ? "Build" : "Run"} finished (exit ${
+    `● [${event.targetLabel}] ${event.mode === "watch" ? "watch" : event.mode === "build" ? "build" : "run"} finished (exit ${
       event.exitCode ?? "unknown"
     }) in ${duration}s`,
     event.success ? "stdout" : "stderr"
@@ -655,19 +655,19 @@ function handleExampleRunCompleted(event) {
   const label =
     event.mode === "watch"
       ? event.success
-        ? "Watch stopped"
-        : "Watch failed"
+        ? "watch stopped"
+        : "watch failed"
       : event.mode === "build"
         ? event.success
-          ? "Build complete"
-          : "Build failed"
+          ? "build complete"
+          : "build failed"
         : event.mode === "action"
           ? event.success
-            ? event.actionLabel ?? "Action complete"
-            : `${event.actionLabel ?? "Action"} failed`
+            ? event.actionLabel ?? "action complete"
+            : `${event.actionLabel ?? "action"} failed`
           : event.success
-            ? "Passed"
-            : "Failed";
+            ? "passed"
+            : "failed";
   setExampleStatus(label, event.success ? "is-success" : "is-failure", event.targetLabel);
   exampleRunActive = false;
   exampleWatchActive = false;
@@ -688,7 +688,7 @@ function handleExampleRunError(event) {
     return;
   }
   lastExampleTargetLabel = event.targetLabel;
-  setExampleStatus("Error", "is-failure", event.targetLabel);
+  setExampleStatus("error", "is-failure", event.targetLabel);
   appendExampleOutput(`⚠ [${event.targetLabel}] ${event.message}`, "stderr");
   exampleRunActive = false;
   exampleWatchActive = false;
@@ -1509,7 +1509,8 @@ function renderExampleTargetButtons(example) {
       if (!action.enabled) return;
       const button = document.createElement("button");
       button.type = "button";
-      button.textContent = shortLabel ? `${action.label} ${shortLabel}` : action.label;
+      const label = action.label.toLowerCase();
+      button.textContent = shortLabel ? `${label} ${shortLabel.toLowerCase()}` : label;
       if (action.secondary) {
         button.classList.add("secondary");
       }
@@ -1977,7 +1978,7 @@ async function triggerExampleRun(mode = "run", targetId = null, actionId = null)
     }
   } catch (error) {
     recordError("Example run", getErrorMessage(error));
-    setExampleStatus("Error", "is-failure", target.label);
+    setExampleStatus("error", "is-failure", target.label);
     exampleRunActive = false;
     exampleWatchActive = false;
     updateExampleButtons();
@@ -2233,8 +2234,8 @@ function formatMetricStatus(metadata = {}) {
   const status =
     metadata && typeof metadata.success === "boolean"
       ? metadata.success
-        ? "Success"
-        : "Failed"
+        ? "success"
+        : "failed"
       : "Recorded";
   const targetLabel =
     metadata && typeof metadata.targetLabel === "string"
