@@ -112,12 +112,8 @@ static bool native_rae_time_ms(struct VM* vm,
   (void)user_data;
   if (arg_count != 0) return false;
   
-  struct timeval tv;
-  gettimeofday(&tv, NULL);
-  int64_t ms = (int64_t)tv.tv_sec * 1000 + (int64_t)tv.tv_usec / 1000;
-  
   out_result->has_value = true;
-  out_result->value = value_int(ms);
+  out_result->value = value_int(rae_ext_nowMs());
   return true;
 }
 
@@ -146,7 +142,7 @@ static bool native_sleep_ms(struct VM* vm,
   if (ms <= 0) {
     return true;
   }
-  usleep((useconds_t)ms * 1000);
+  rae_ext_rae_sleep(ms);
   return true;
 }
 
@@ -258,7 +254,7 @@ static bool native_rae_str_concat(struct VM* vm,
   
   const char* a = a_str_obj.as.string_value.chars;
   const char* b = b_str_obj.as.string_value.chars;
-  const char* res_chars = rae_str_concat(a, b);
+  const char* res_chars = rae_ext_rae_str_concat(a, b);
 
   // printf("DEBUG concat: a='%s' b='%s' -> res='%s'\n", a, b, res_chars);
   
@@ -283,7 +279,7 @@ static bool native_rae_str_len(struct VM* vm,
   const Value* s_val = deref_value(&args[0]);
   if (s_val->type != VAL_STRING) return false;
   out_result->has_value = true;
-  out_result->value = value_int(rae_str_len(s_val->as.string_value.chars));
+  out_result->value = value_int(rae_ext_rae_str_len(s_val->as.string_value.chars));
   return true;
 }
 
@@ -298,7 +294,7 @@ static bool native_rae_str_compare(struct VM* vm,
   const Value* b_val = deref_value(&args[1]);
   if (a_val->type != VAL_STRING || b_val->type != VAL_STRING) return false;
   out_result->has_value = true;
-  out_result->value = value_int(rae_str_compare(a_val->as.string_value.chars, b_val->as.string_value.chars));
+  out_result->value = value_int(rae_ext_rae_str_compare(a_val->as.string_value.chars, b_val->as.string_value.chars));
   return true;
 }
 
@@ -313,7 +309,7 @@ static bool native_rae_str_sub(struct VM* vm,
   const Value* start_val = deref_value(&args[1]);
   const Value* len_val = deref_value(&args[2]);
   if (s_val->type != VAL_STRING || start_val->type != VAL_INT || len_val->type != VAL_INT) return false;
-  const char* res = rae_str_sub(s_val->as.string_value.chars, start_val->as.int_value, len_val->as.int_value);
+  const char* res = rae_ext_rae_str_sub(s_val->as.string_value.chars, start_val->as.int_value, len_val->as.int_value);
   out_result->has_value = true;
   out_result->value = value_string_take((char*)res, strlen(res));
   return true;
@@ -330,7 +326,7 @@ static bool native_rae_str_contains(struct VM* vm,
   const Value* sub_val = deref_value(&args[1]);
   if (s_val->type != VAL_STRING || sub_val->type != VAL_STRING) return false;
   out_result->has_value = true;
-  out_result->value = value_bool(rae_str_contains(s_val->as.string_value.chars, sub_val->as.string_value.chars));
+  out_result->value = value_bool(rae_ext_rae_str_contains(s_val->as.string_value.chars, sub_val->as.string_value.chars));
   return true;
 }
 
@@ -344,7 +340,7 @@ static bool native_rae_str_to_f64(struct VM* vm,
   const Value* s_val = deref_value(&args[0]);
   if (s_val->type != VAL_STRING) return false;
   out_result->has_value = true;
-  out_result->value = value_float(rae_str_to_f64(s_val->as.string_value.chars));
+  out_result->value = value_float(rae_ext_rae_str_to_f64(s_val->as.string_value.chars));
   return true;
 }
 
@@ -358,7 +354,7 @@ static bool native_rae_str_to_i64(struct VM* vm,
   const Value* s_val = deref_value(&args[0]);
   if (s_val->type != VAL_STRING) return false;
   out_result->has_value = true;
-  out_result->value = value_int(rae_str_to_i64(s_val->as.string_value.chars));
+  out_result->value = value_int(rae_ext_rae_str_to_i64(s_val->as.string_value.chars));
   return true;
 }
 
@@ -370,7 +366,7 @@ static bool native_rae_io_read_line(struct VM* vm,
                                      void* user_data) {
   (void)vm; (void)args; (void)user_data;
   if (arg_count != 0) return false;
-  const char* res = rae_io_read_line();
+  const char* res = rae_ext_rae_io_read_line();
   out_result->has_value = true;
   out_result->value = value_string_take((char*)res, strlen(res));
   return true;
@@ -384,7 +380,7 @@ static bool native_rae_io_read_char(struct VM* vm,
   (void)vm; (void)args; (void)user_data;
   if (arg_count != 0) return false;
   out_result->has_value = true;
-  out_result->value = value_char(rae_io_read_char());
+  out_result->value = value_char(rae_ext_rae_io_read_char());
   return true;
 }
 
@@ -397,7 +393,7 @@ static bool native_rae_sys_exit(struct VM* vm,
   if (arg_count != 1) return false;
   const Value* code_val = deref_value(&args[0]);
   if (code_val->type != VAL_INT) return false;
-  rae_sys_exit(code_val->as.int_value);
+  rae_ext_rae_sys_exit(code_val->as.int_value);
   out_result->has_value = false;
   return true;
 }
@@ -411,7 +407,7 @@ static bool native_rae_sys_get_env(struct VM* vm,
   if (arg_count != 1) return false;
   const Value* name_val = deref_value(&args[0]);
   if (name_val->type != VAL_STRING) return false;
-  const char* res = rae_sys_get_env(name_val->as.string_value.chars);
+  const char* res = rae_ext_rae_sys_get_env(name_val->as.string_value.chars);
   out_result->has_value = true;
   if (res) out_result->value = value_string_copy(res, strlen(res));
   else out_result->value = value_none();
@@ -427,7 +423,7 @@ static bool native_rae_sys_read_file(struct VM* vm,
   if (arg_count != 1) return false;
   const Value* path_val = deref_value(&args[0]);
   if (path_val->type != VAL_STRING) return false;
-  const char* res = rae_sys_read_file(path_val->as.string_value.chars);
+  const char* res = rae_ext_rae_sys_read_file(path_val->as.string_value.chars);
   out_result->has_value = true;
   if (res) out_result->value = value_string_take((char*)res, strlen(res));
   else out_result->value = value_none();
@@ -444,7 +440,7 @@ static bool native_rae_sys_write_file(struct VM* vm,
   const Value* path_val = deref_value(&args[0]);
   const Value* content_val = deref_value(&args[1]);
   if (path_val->type != VAL_STRING || content_val->type != VAL_STRING) return false;
-  bool ok = rae_sys_write_file(path_val->as.string_value.chars, content_val->as.string_value.chars);
+  bool ok = rae_ext_rae_sys_write_file(path_val->as.string_value.chars, content_val->as.string_value.chars);
   out_result->has_value = true;
   out_result->value = value_bool(ok);
   return true;

@@ -29,19 +29,19 @@ void rae_ext_rae_sleep(int64_t ms) {
   }
 }
 
-void rae_log_any(RaeAny value) {
-  rae_log_stream_any(value);
+void rae_ext_rae_log_any(RaeAny value) {
+  rae_ext_rae_log_stream_any(value);
   printf("\n");
   rae_flush_stdout();
 }
 
-void rae_log_stream_any(RaeAny value) {
+void rae_ext_rae_log_stream_any(RaeAny value) {
   switch (value.type) {
     case RAE_TYPE_INT: printf("%lld", (long long)value.as.i); break;
     case RAE_TYPE_FLOAT: printf("%g", value.as.f); break;
     case RAE_TYPE_BOOL: printf("%s", value.as.b ? "true" : "false"); break;
     case RAE_TYPE_STRING: printf("%s", value.as.s ? value.as.s : "(null)"); break;
-    case RAE_TYPE_CHAR: rae_log_stream_char(value.as.i); break;
+    case RAE_TYPE_CHAR: rae_ext_rae_log_stream_char(value.as.i); break;
     case RAE_TYPE_ID: printf("Id(%lld)", (long long)value.as.i); break;
     case RAE_TYPE_KEY: printf("Key(\"%s\")", value.as.s ? value.as.s : "(null)"); break;
     case RAE_TYPE_LIST: printf("[...]"); break;
@@ -50,22 +50,22 @@ void rae_log_stream_any(RaeAny value) {
   }
 }
 
-void rae_log_list_fields(RaeAny* items, int64_t length, int64_t capacity) {
-  rae_log_stream_list_fields(items, length, capacity);
+void rae_ext_rae_log_list_fields(RaeAny* items, int64_t length, int64_t capacity) {
+  rae_ext_rae_log_stream_list_fields(items, length, capacity);
   printf("\n");
   fflush(stdout);
 }
 
-void rae_log_stream_list_fields(RaeAny* items, int64_t length, int64_t capacity) {
+void rae_ext_rae_log_stream_list_fields(RaeAny* items, int64_t length, int64_t capacity) {
   printf("{ #(");
   for (int64_t i = 0; i < capacity; i++) {
     if (i > 0) printf(", ");
-    rae_log_stream_any(items[i]);
+    rae_ext_rae_log_stream_any(items[i]);
   }
   printf("), %lld, %lld }", (long long)length, (long long)capacity);
 }
 
-void rae_log_cstr(const char* text) {
+void rae_ext_rae_log_cstr(const char* text) {
   if (!text) {
     fputs("(null)\n", stdout);
     rae_flush_stdout();
@@ -76,7 +76,7 @@ void rae_log_cstr(const char* text) {
   rae_flush_stdout();
 }
 
-void rae_log_stream_cstr(const char* text) {
+void rae_ext_rae_log_stream_cstr(const char* text) {
   if (!text) {
     return;
   }
@@ -84,33 +84,33 @@ void rae_log_stream_cstr(const char* text) {
   rae_flush_stdout();
 }
 
-void rae_log_i64(int64_t value) {
+void rae_ext_rae_log_i64(int64_t value) {
   printf("%lld\n", (long long)value);
   rae_flush_stdout();
 }
 
-void rae_log_stream_i64(int64_t value) {
+void rae_ext_rae_log_stream_i64(int64_t value) {
   printf("%lld", (long long)value);
   rae_flush_stdout();
 }
 
-void rae_log_bool(int8_t value) {
+void rae_ext_rae_log_bool(int8_t value) {
   printf("%s\n", value ? "true" : "false");
   rae_flush_stdout();
 }
 
-void rae_log_stream_bool(int8_t value) {
+void rae_ext_rae_log_stream_bool(int8_t value) {
   printf("%s", value ? "true" : "false");
   rae_flush_stdout();
 }
 
-void rae_log_char(int64_t value) {
-  rae_log_stream_char(value);
+void rae_ext_rae_log_char(int64_t value) {
+  rae_ext_rae_log_stream_char(value);
   printf("\n");
   rae_flush_stdout();
 }
 
-void rae_log_stream_char(int64_t value) {
+void rae_ext_rae_log_stream_char(int64_t value) {
   if (value < 0x80) {
     printf("%c", (char)value);
   } else if (value < 0x800) {
@@ -123,32 +123,32 @@ void rae_log_stream_char(int64_t value) {
   rae_flush_stdout();
 }
 
-void rae_log_id(int64_t value) {
+void rae_ext_rae_log_id(int64_t value) {
   printf("%lld\n", (long long)value);
   rae_flush_stdout();
 }
 
-void rae_log_stream_id(int64_t value) {
+void rae_ext_rae_log_stream_id(int64_t value) {
   printf("%lld", (long long)value);
   rae_flush_stdout();
 }
 
-void rae_log_key(const char* value) {
+void rae_ext_rae_log_key(const char* value) {
   printf("%s\n", value ? value : "(null)");
   rae_flush_stdout();
 }
 
-void rae_log_stream_key(const char* value) {
+void rae_ext_rae_log_stream_key(const char* value) {
   printf("%s", value ? value : "(null)");
   rae_flush_stdout();
 }
 
-void rae_log_float(double value) {
+void rae_ext_rae_log_float(double value) {
   printf("%g\n", value);
   rae_flush_stdout();
 }
 
-void rae_log_stream_float(double value) {
+void rae_ext_rae_log_stream_float(double value) {
   printf("%g", value);
   rae_flush_stdout();
 }
@@ -332,16 +332,16 @@ int64_t rae_ext_rae_random_int(int64_t min, int64_t max) {
   return min + (int64_t)(rae_next_u32() % range);
 }
 
-void* rae_buf_alloc(int64_t count, int64_t elem_size) {
+void* rae_ext_rae_buf_alloc(int64_t count, int64_t elem_size) {
   if (count <= 0) return NULL;
   return calloc((size_t)count, (size_t)elem_size);
 }
 
-void rae_buf_free(void* buf) {
+void rae_ext_rae_buf_free(void* buf) {
   if (buf) free(buf);
 }
 
-void* rae_buf_resize(void* buf, int64_t new_count, int64_t elem_size) {
+void* rae_ext_rae_buf_resize(void* buf, int64_t new_count, int64_t elem_size) {
   if (new_count <= 0) {
     if (buf) free(buf);
     return NULL;
@@ -349,7 +349,7 @@ void* rae_buf_resize(void* buf, int64_t new_count, int64_t elem_size) {
   return realloc(buf, (size_t)new_count * (size_t)elem_size);
 }
 
-void rae_buf_copy(void* src, int64_t src_off, void* dst, int64_t dst_off, int64_t len, int64_t elem_size) {
+void rae_ext_rae_buf_copy(void* src, int64_t src_off, void* dst, int64_t dst_off, int64_t len, int64_t elem_size) {
   if (!src || !dst || len <= 0) return;
   memmove((char*)dst + dst_off * elem_size, (char*)src + src_off * elem_size, (size_t)len * (size_t)elem_size);
 }
