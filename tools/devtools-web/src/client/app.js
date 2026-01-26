@@ -2353,13 +2353,24 @@ function drawMetricChart(canvas, entries, valueKey, emptyEl) {
   if (emptyEl) {
     emptyEl.hidden = true;
   }
-  const width = canvas.clientWidth || 600;
-  const height = canvas.clientHeight || 260;
+  
+  // Use a stable way to get dimensions
+  const rect = canvas.getBoundingClientRect();
+  const width = rect.width || 600;
+  const height = rect.height || 260;
+  
   const dpr = window.devicePixelRatio || 1;
-  canvas.width = width * dpr;
-  canvas.height = height * dpr;
+  
+  // Only update if dimensions actually changed to avoid cumulative scaling
+  if (canvas.width !== Math.floor(width * dpr) || canvas.height !== Math.floor(height * dpr)) {
+    canvas.width = Math.floor(width * dpr);
+    canvas.height = Math.floor(height * dpr);
+  }
+  
+  ctx.resetTransform();
   ctx.scale(dpr, dpr);
   ctx.clearRect(0, 0, width, height);
+  
   const padding = 24;
   const chartWidth = width - padding * 2;
   const chartHeight = height - padding * 2;

@@ -151,6 +151,13 @@ body {
   grid-template-columns: 1fr 1fr;
 }
 
+@media (max-width: 900px) {
+  .app-view.is-active,
+  .app-view--stats.is-active {
+    grid-template-columns: 1fr;
+  }
+}
+
 .panel {
   background: var(--bg-panel);
   border: 1px solid var(--border);
@@ -324,7 +331,69 @@ button.btn-build-test {
 .badge.fail { background: rgba(248, 113, 113, 0.1); color: var(--danger); border-color: var(--danger); }
 .badge.pending { background: rgba(255, 255, 255, 0.05); color: var(--text-muted); }
 
-/* Examples view */
+/* Statistics View */
+.stats-card {
+  min-height: 400px;
+}
+
+.line-chart-container {
+  position: relative;
+  width: 100%;
+  height: 260px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 0.75rem;
+  margin-bottom: 1.5rem;
+  overflow: hidden;
+}
+
+.line-chart-container canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.line-chart-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.stats-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.stats-item {
+  padding: 0.75rem 1rem;
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.9rem;
+}
+
+.stats-item strong { color: var(--accent); }
+.stats-item time { font-size: 0.8rem; color: var(--text-muted); }
+
+.stats-more-btn {
+  margin-top: 1rem;
+  align-self: flex-start;
+}
+
+.line-count-summary {
+  margin-bottom: 1rem;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+}
+
+/* Examples View */
 .app-view[data-view="examples"] {
   position: relative;
 }
