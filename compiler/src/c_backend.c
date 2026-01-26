@@ -588,10 +588,14 @@ static bool emit_log_call(CFuncContext* ctx, const AstExpr* expr, FILE* out, boo
     return true;
   }
 
+  bool is_generic = strcmp(log_fn, "rae_log_any") == 0 || strcmp(log_fn, "rae_log_stream_any") == 0;
+
   if (fprintf(out, "  %s(", log_fn) < 0) return false;
+  if (is_generic) fprintf(out, "rae_any(");
   if (val_is_ptr) fprintf(out, "(*");
   if (!emit_expr(ctx, value, out, PREC_LOWEST)) return false;
   if (val_is_ptr) fprintf(out, ")");
+  if (is_generic) fprintf(out, ")");
   if (fprintf(out, ");\n") < 0) return false;
   
   return true;
