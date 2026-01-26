@@ -355,12 +355,16 @@ button.btn-build-test:hover:not(:disabled) {
 .examples-view {
   background: rgba(20, 20, 25, 0.7) !important;
   backdrop-filter: blur(20px);
+  min-height: calc(100vh - 120px);
+  display: flex;
+  flex-direction: column;
 }
 
 .examples-hero {
   padding: 4rem 2rem;
   text-align: center;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  flex-shrink: 0;
 }
 
 .gradient-text {
@@ -453,13 +457,14 @@ button.btn-build-test:hover:not(:disabled) {
 .examples-layout {
   display: grid;
   grid-template-columns: 300px 1fr;
-  min-height: 800px;
+  flex: 1; /* Take up available space */
 }
 
 .example-sidebar {
   border-right: 1px solid rgba(255, 255, 255, 0.05);
   background: rgba(0, 0, 0, 0.2);
   padding: 1.5rem;
+  overflow-y: auto;
 }
 
 .example-category-title {
@@ -496,6 +501,7 @@ button.btn-build-test:hover:not(:disabled) {
 .example-main {
   padding: 3rem;
   background: rgba(0, 0, 0, 0.1);
+  overflow-y: auto;
 }
 
 .example-target-actions {
@@ -622,16 +628,18 @@ button.btn-build-test:hover:not(:disabled) {
   font-size: 0.95rem;
 }
 
-/* Batch Report */
+/* Batch report */
 .batch-report {
   margin: 2rem;
-  padding: 2rem;
-  background: rgba(248, 113, 113, 0.03);
-  border: 1px solid rgba(248, 113, 113, 0.1);
+  padding: 2.5rem;
+  background: rgba(248, 113, 113, 0.04);
+  border: 1px solid rgba(248, 113, 113, 0.15);
   border-radius: 1.5rem;
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: 2rem;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+  flex-shrink: 0; /* Don't compress in flex column */
 }
 
 .batch-report[hidden] { display: none; }
@@ -639,18 +647,21 @@ button.btn-build-test:hover:not(:disabled) {
 .batch-report__header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
+  border-bottom: 1px solid rgba(248, 113, 113, 0.1);
+  padding-bottom: 1.5rem;
 }
 
 .batch-report h3 {
-  font-size: 1.25rem;
+  font-size: 1.5rem;
   color: var(--danger);
-  margin-bottom: 0.25rem;
+  margin-bottom: 0.5rem;
 }
 
 .batch-report-summary {
-  font-size: 0.95rem;
-  color: var(--text-muted);
+  font-size: 1rem;
+  color: var(--text);
+  font-weight: 500;
 }
 
 .batch-report__actions {
@@ -661,32 +672,39 @@ button.btn-build-test:hover:not(:disabled) {
 .batch-report__content {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  max-height: 500px;
-  overflow-y: auto;
+  gap: 1.5rem;
 }
 
 .batch-error-entry {
-  padding: 1.25rem;
-  background: rgba(0, 0, 0, 0.2);
+  padding: 1.5rem;
+  background: rgba(15, 17, 23, 0.6);
   border-radius: 1rem;
   border-left: 4px solid var(--danger);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.batch-error-entry--skipped {
+  border-left-color: var(--accent); /* Blue/Turquoise */
+  background: rgba(118, 225, 225, 0.03);
 }
 
 .batch-error-entry h4 {
-  font-size: 0.9rem;
-  margin-bottom: 0.75rem;
+  font-size: 1rem;
+  margin-bottom: 1rem;
   color: #fff;
+  font-family: 'JetBrains Mono', monospace;
 }
 
 .batch-error-log {
   font-family: "JetBrains Mono", monospace;
   font-size: 0.85rem;
-  color: var(--danger);
+  color: #fca5a5; /* Softer red for logs */
   white-space: pre-wrap;
-  background: rgba(0, 0, 0, 0.3);
-  padding: 1rem;
-  border-radius: 0.5rem;
+  background: rgba(0, 0, 0, 0.4);
+  padding: 1.25rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  line-height: 1.5;
 }
 
 /* Modals */
