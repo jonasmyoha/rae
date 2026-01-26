@@ -318,8 +318,9 @@ static const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func) {
 
     // Check if it's a generic param
     bool is_generic = false;
-    if (ctx && ctx->generic_params) {
-        const AstIdentifierPart* gp = ctx->generic_params;
+    const AstIdentifierPart* gps[] = { ctx ? ctx->generic_params : NULL, func->generic_params };
+    for (int i = 0; i < 2; i++) {
+        const AstIdentifierPart* gp = gps[i];
         while (gp) {
             if (str_eq(gp->text, func->returns->type->parts->text)) {
                 is_generic = true;
@@ -327,7 +328,9 @@ static const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func) {
             }
             gp = gp->next;
         }
+        if (is_generic) break;
     }
+    
     if (is_generic) {
         return "RaeAny";
     }
@@ -882,6 +885,14 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
           } else if (str_eq_cstr(inferred, "String")) {
               cast_pre = "((const char*)(";
               cast_post = ").as.s)";
+          } else {
+              // Custom type / struct pointer
+              char* type_name = str_to_cstr(inferred);
+              char* buf = malloc(strlen(type_name) + 32);
+              sprintf(buf, "((%.*s*)(", (int)inferred.len, inferred.data);
+              cast_pre = buf;
+              cast_post = ").as.ptr)";
+              free(type_name);
           }
       }
   }
@@ -1029,7 +1040,9 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) return false;
         }
     } else {
-        if (is_any_param && !needs_addr) fprintf(out, "rae_any(");
+        if (is_any_param && !needs_addr) {
+            fprintf(out, "rae_any(");
+        }
 
         if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) {
           return false;
@@ -1410,12 +1423,29 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
       }
 
       const char* sep = ".";
+      bool is_any = false;
       if (expr->as.member.object->kind == AST_EXPR_IDENT) {
           if (is_pointer_type(ctx, expr->as.member.object->as.ident)) {
               sep = "->";
           }
+          Str type_name = get_local_type_name(ctx, expr->as.member.object->as.ident);
+          if (str_eq_cstr(type_name, "Any")) is_any = true;
       }
       
+      if (is_any) {
+          Str inferred = infer_expr_type(ctx, expr);
+          const char* union_field = "ptr";
+          if (str_eq_cstr(inferred, "Int")) union_field = "i";
+          else if (str_eq_cstr(inferred, "Float")) union_field = "f";
+          else if (str_eq_cstr(inferred, "Bool")) union_field = "b";
+          else if (str_eq_cstr(inferred, "String")) union_field = "s";
+          
+          fprintf(out, "((");
+          if (!emit_expr(ctx, expr->as.member.object, out, PREC_CALL)) return false;
+          fprintf(out, ")%sas.%s)", sep, union_field);
+          return true;
+      }
+
       if (!emit_expr(ctx, expr->as.member.object, out, PREC_CALL)) return false;
       return fprintf(out, "%s%.*s", sep, (int)expr->as.member.member.len, expr->as.member.member.data) >= 0;
     }
@@ -1494,6 +1524,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
         } else {
             fprintf(out, "rae_add_List_T_");
         }
+        
         fprintf(out, "(&_l, rae_any(");
         if (!emit_expr(ctx, current->value, out, PREC_LOWEST)) return false;
         fprintf(out, ")); ");
@@ -1914,6 +1945,15 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
       if (val_needs_addr) {
           if (fprintf(out, "&(") < 0) return false;
       }
+
+      // Fix: If it's an object literal being assigned, we need a C cast (Type){...}
+      if (stmt->as.assign_stmt.value->kind == AST_EXPR_OBJECT && !stmt->as.assign_stmt.value->as.object_literal.type) {
+          Str target_type = infer_expr_type(ctx, stmt->as.assign_stmt.target);
+          if (target_type.len > 0) {
+              fprintf(out, "(%.*s)", (int)target_type.len, target_type.data);
+          }
+      }
+
       if (!emit_expr(ctx, stmt->as.assign_stmt.value, out, PREC_LOWEST)) return false;
       if (val_needs_addr) {
           if (fprintf(out, ")") < 0) return false;
@@ -1965,7 +2005,23 @@ static bool emit_raylib_wrapper(const AstFuncDecl* fn, const char* c_name, FILE*
   const char* return_type = c_return_type(&temp_ctx, fn);
   if (!return_type) return false;
   
-  fprintf(out, "RAE_UNUSED static %s ", return_type);
+  // If it's one of the ones we put in rae_runtime.c, don't emit implementation here
+  if (str_eq_cstr(fn->name, "initWindow") || 
+      str_eq_cstr(fn->name, "setConfigFlags") ||
+      str_eq_cstr(fn->name, "drawCubeWires") ||
+      str_eq_cstr(fn->name, "drawSphere") ||
+      str_eq_cstr(fn->name, "getTime") ||
+      str_eq_cstr(fn->name, "colorFromHSV")) {
+      return true;
+  }
+
+  bool is_ext = fn->is_extern || str_starts_with_cstr(fn->name, "rae_ext_");
+  if (is_ext) {
+      fprintf(out, "RAE_UNUSED %s ", return_type);
+  } else {
+      fprintf(out, "RAE_UNUSED static %s ", return_type);
+  }
+  
   emit_mangled_function_name(fn, out);
   fprintf(out, "(");
   if (!emit_param_list(&temp_ctx, fn->params, out)) return false;
@@ -2232,6 +2288,7 @@ bool c_backend_emit_module(const AstModule* module, const char* out_path) {
   }
   
   if (uses_raylib) {
+      if (fprintf(out, "#define RAE_HAS_RAYLIB\n") < 0) return false;
       if (fprintf(out, "#include <raylib.h>\n") < 0) return false;
   }
   
