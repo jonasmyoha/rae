@@ -177,6 +177,8 @@ let lineChartFrame = null;
 let availableTargets = [];
 let lastTestTargetLabel = "";
 let lastBuildTargetLabel = "";
+let isBatchRunning = false;
+let batchResults = [];
 let lastExampleTargetLabel = "";
 let currentExampleArtifacts = [];
 let currentExampleArtifactsTarget = "";
@@ -1497,35 +1499,33 @@ function renderExampleTargetButtons(example) {
   }
   exampleTargetActions.hidden = false;
 
-  const fragment = document.createDocumentFragment();
   targets.forEach((target) => {
-    const shortLabel = formatTargetShortLabel(target);
+    const row = document.createElement("div");
+    row.className = "example-actions-row";
+    
     const actions = [
       { mode: "run", label: "Run", enabled: target.supportsExampleRun, secondary: false },
       { mode: "watch", label: "Watch", enabled: target.supportsExampleWatch, secondary: true },
       { mode: "build", label: "Build", enabled: target.supportsExampleBuild, secondary: true }
     ];
+    
     actions.forEach((action) => {
       if (!action.enabled) return;
       const button = document.createElement("button");
       button.type = "button";
-      const label = action.label.toLowerCase();
-      button.textContent = shortLabel ? `${label} ${shortLabel.toLowerCase()}` : label;
+      const targetLabel = target.id.charAt(0).toUpperCase() + target.id.slice(1).toLowerCase();
+      button.textContent = `${action.label} ${targetLabel.toLowerCase()}`;
       if (action.secondary) {
         button.classList.add("secondary");
       }
       button.disabled = exampleRunActive;
       button.title = target.label;
       button.addEventListener("click", () => triggerExampleRun(action.mode, target.id));
-      fragment.appendChild(button);
+      row.appendChild(button);
     });
+    
+    exampleTargetActions.appendChild(row);
   });
-
-  if (!fragment.childNodes.length) {
-    exampleTargetActions.hidden = true;
-    return;
-  }
-  exampleTargetActions.appendChild(fragment);
 }
 
 function renderExampleActions(example) {
@@ -1913,6 +1913,147 @@ async function saveExampleSource() {
     recordError("Example save", getErrorMessage(error));
   }
 }
+
+const runAllExamplesBtn = document.getElementById("run-all-examples-btn");
+const runAllModeToggle = document.getElementById("run-all-mode-toggle");
+
+runAllExamplesBtn?.addEventListener("click", () => runAllExamples());
+
+async function runAllExamples() {
+  if (exampleRunActive) {
+    pushStatusItem("An example is already running. Please stop it first.");
+    return;
+  }
+  
+  const useCompiled = runAllModeToggle?.checked;
+  const targetId = useCompiled ? "compiled" : "live";
+  
+  isBatchRunning = true;
+  batchResults = [];
+  hideBatchReport();
+  
+  pushStatusItem(`Starting batch run of all examples (${targetId} mode)…`);
+  
+  for (const example of examples) {
+    if (!example.id) continue;
+    
+    // Select the example first
+    selectedExampleId = example.id;
+    selectedExampleFile = example.files[0]?.path ?? null;
+    renderExampleList();
+    renderExampleDetail();
+    
+    const entry = resolveExampleEntry(example, targetId);
+    if (!entry) {
+      batchResults.push({
+        id: example.id,
+        name: example.name,
+        success: false,
+        skipped: true,
+        errors: [`Target ${targetId} not supported`]
+      });
+      continue;
+    }
+    
+    appendExampleOutput(`\n--- AUTOMATED RUN: ${example.name} (${targetId}) ---`, "stdout");
+    
+    await triggerExampleRun("run", targetId);
+    
+    // Wait for up to 10 seconds or until finished
+    const start = Date.now();
+    let lastSuccess = false;
+    while (exampleRunActive && (Date.now() - start < 10000)) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    
+    if (exampleRunActive) {
+      appendExampleOutput(`\n--- TIME LIMIT REACHED (10s) for ${example.name} ---`, "stdout");
+      await stopExampleRun();
+      lastSuccess = false;
+    } else {
+      // The status will be updated by handleExampleRunCompleted
+      // We can grab the last success state from our internal logic or let the event handler set it
+      // For simplicity, we'll re-check the global state that was just updated
+      lastSuccess = !allExampleLogLines.some(l => l.stream === "stderr" && !l.text.startsWith("●"));
+    }
+    
+    // Collect errors from this run
+    const errors = allExampleLogLines
+      .filter(l => l.stream === "stderr")
+      .map(l => l.text);
+      
+    batchResults.push({
+      id: example.id,
+      name: example.name,
+      success: lastSuccess && errors.length === 0,
+      errors
+    });
+    
+    // Short pause between examples
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  
+  isBatchRunning = false;
+  pushStatusItem("Completed batch run of all examples.");
+  renderBatchReport();
+}
+
+function hideBatchReport() {
+  const report = document.getElementById("batch-report");
+  if (report) report.hidden = true;
+}
+
+function renderBatchReport() {
+  const report = document.getElementById("batch-report");
+  const summary = document.getElementById("batch-report-summary");
+  const content = document.getElementById("batch-report-content");
+  if (!report || !summary || !content) return;
+  
+  const total = batchResults.length;
+  const successes = batchResults.filter(r => r.success).length;
+  const failures = total - successes;
+  
+  summary.textContent = `${successes} / ${total} examples passed. ${failures} failed or had errors.`;
+  
+  content.innerHTML = "";
+  const failedResults = batchResults.filter(r => r.errors.length > 0);
+  
+  if (failedResults.length === 0) {
+    const p = document.createElement("p");
+    p.className = "batch-report-summary";
+    p.textContent = "All examples ran successfully without errors.";
+    content.appendChild(p);
+  } else {
+    failedResults.forEach(res => {
+      const div = document.createElement("div");
+      div.className = "batch-error-entry";
+      div.innerHTML = `<h4>${res.name}</h4><div class="batch-error-log">${res.errors.join("\n")}</div>`;
+      content.appendChild(div);
+    });
+  }
+  
+  report.hidden = false;
+  report.scrollIntoView({ behavior: "smooth" });
+}
+
+const copyBatchErrorsBtn = document.getElementById("copy-batch-errors-btn");
+const closeBatchReportBtn = document.getElementById("close-batch-report-btn");
+
+copyBatchErrorsBtn?.addEventListener("click", () => {
+  const reportText = batchResults
+    .filter(r => r.errors.length > 0)
+    .map(r => `--- ${r.name} ---\n${r.errors.join("\n")}`)
+    .join("\n\n");
+    
+  const summaryText = `Batch Run Summary: ${batchResults.filter(r => r.success).length} passed, ${batchResults.filter(r => !r.success).length} failed.\n\n`;
+  
+  writeToClipboard(summaryText + reportText).then(() => {
+    flashCopyState(copyBatchErrorsBtn, "Copied all errors!");
+    setTimeout(() => flashCopyState(copyBatchErrorsBtn, null, false), 2000);
+  });
+});
+
+closeBatchReportBtn?.addEventListener("click", () => hideBatchReport());
 
 async function triggerExampleRun(mode = "run", targetId = null, actionId = null) {
   const example = getSelectedExample();
