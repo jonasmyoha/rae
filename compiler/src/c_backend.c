@@ -2319,7 +2319,9 @@ bool c_backend_emit_module(const AstModule* module, const char* out_path) {
   }
   
   if (uses_raylib) {
+      if (fprintf(out, "#ifndef RAE_HAS_RAYLIB\n") < 0) return false;
       if (fprintf(out, "#define RAE_HAS_RAYLIB\n") < 0) return false;
+      if (fprintf(out, "#endif\n") < 0) return false;
       if (fprintf(out, "#include <raylib.h>\n") < 0) return false;
   }
   
