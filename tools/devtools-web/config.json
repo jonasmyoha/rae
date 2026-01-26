@@ -24,7 +24,7 @@
       "buildCommand": "cd compiler && make",
       "cleanCommand": "cd compiler && make clean",
       "rebuildCommand": "cd compiler && make clean && make",
-      "exampleRunCommand": "./compiler/bin/rae build --target compiled --project {{ENTRY_DIR}} --emit-c --out {{OUTDIR}}/out.c {{ENTRY}} && gcc -O2 -o {{OUTDIR}}/app {{OUTDIR}}/out.c {{OUTDIR}}/rae_runtime.c third_party/raylib/rae_raylib.c third_party/tinyexpr/rae_tinyexpr.c -I{{OUTDIR}} -Ithird_party/raylib -Ithird_party/tinyexpr -I/opt/homebrew/include -L/opt/homebrew/lib -lraylib -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL && {{OUTDIR}}/app",
+      "exampleRunCommand": "./compiler/bin/rae build --target compiled --project {{ENTRY_DIR}} --emit-c --out {{OUTDIR}}/out.c {{ENTRY}} && gcc -O2 -o {{OUTDIR}}/app {{OUTDIR}}/out.c {{OUTDIR}}/rae_runtime.c third_party/raylib/rae_raylib.c third_party/tinyexpr/rae_tinyexpr.c $(ls {{ENTRY_DIR}}/*.c 2>/dev/null || true) -I{{OUTDIR}} -Ithird_party/raylib -Ithird_party/tinyexpr -I/opt/homebrew/include -L/opt/homebrew/lib -DRAE_HAS_RAYLIB -lraylib -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL && {{OUTDIR}}/app",
       "exampleBuildCommand": "./compiler/bin/rae build --target compiled --project {{ENTRY_DIR}} --emit-c --out {{OUTDIR}} {{ENTRY}}"
     },
     {
@@ -34,7 +34,7 @@
       "buildCommand": "cd compiler && make",
       "cleanCommand": "cd compiler && make clean",
       "rebuildCommand": "cd compiler && make clean && make",
-      "exampleRunCommand": "./compiler/bin/rae build --target hybrid --project {{ENTRY_DIR}} --emit-c --out {{OUTDIR}}/out.c {{ENTRY}} && gcc -O2 -o {{OUTDIR}}/app {{OUTDIR}}/out.c {{OUTDIR}}/rae_runtime.c third_party/raylib/rae_raylib.c third_party/tinyexpr/rae_tinyexpr.c -I{{OUTDIR}} -Ithird_party/raylib -Ithird_party/tinyexpr -I/opt/homebrew/include -L/opt/homebrew/lib -lraylib -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL && {{OUTDIR}}/app",
+      "exampleRunCommand": "./compiler/bin/rae build --target hybrid --project {{ENTRY_DIR}} --emit-c --out {{OUTDIR}}/out.c {{ENTRY}} && gcc -O2 -o {{OUTDIR}}/app {{OUTDIR}}/out.c {{OUTDIR}}/rae_runtime.c third_party/raylib/rae_raylib.c third_party/tinyexpr/rae_tinyexpr.c $(ls {{ENTRY_DIR}}/*.c 2>/dev/null || true) -I{{OUTDIR}} -Ithird_party/raylib -Ithird_party/tinyexpr -I/opt/homebrew/include -L/opt/homebrew/lib -DRAE_HAS_RAYLIB -lraylib -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL && {{OUTDIR}}/app",
       "exampleBuildCommand": "./compiler/bin/rae build --target hybrid --project {{ENTRY_DIR}} --emit-c --out {{OUTDIR}} {{ENTRY}}"
     }
   ]
