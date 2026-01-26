@@ -150,7 +150,6 @@ let selectedTestSource = "";
 let allTestLogLines = [];
 let examplesBgFrame = null;
 let allBuildLogLines = [];
-let allBuildLogLines = [];
 let allExampleLogLines = [];
 let raeSyntax = null;
 let testDirectoryMap = new Map();
