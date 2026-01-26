@@ -69,7 +69,8 @@ RAE_UNUSED static RaeAny rae_any_identity(RaeAny a) { return a; }
     int8_t: rae_any_bool, \
     char*: rae_any_string, \
     const char*: rae_any_string, \
-    RaeAny: rae_any_identity \
+    RaeAny: rae_any_identity, \
+    default: rae_any_ptr \
 )(X)
 
 void rae_log_cstr(const char* text);
@@ -90,58 +91,58 @@ void rae_log_stream_float(double value);
 void rae_log_list_fields(RaeAny* items, int64_t length, int64_t capacity);
 void rae_log_stream_list_fields(RaeAny* items, int64_t length, int64_t capacity);
 
-const char* rae_str_concat(const char* a, const char* b);
-int64_t rae_str_len(const char* s);
-int64_t rae_str_compare(const char* a, const char* b);
-const char* rae_str_sub(const char* s, int64_t start, int64_t len);
-int8_t rae_str_contains(const char* s, const char* sub);
-double rae_str_to_f64(const char* s);
-int64_t rae_str_to_i64(const char* s);
+const char* rae_ext_rae_str_concat(const char* a, const char* b);
+int64_t rae_ext_rae_str_len(const char* s);
+int64_t rae_ext_rae_str_compare(const char* a, const char* b);
+const char* rae_ext_rae_str_sub(const char* s, int64_t start, int64_t len);
+int8_t rae_ext_rae_str_contains(const char* s, const char* sub);
+double rae_ext_rae_str_to_f64(const char* s);
+int64_t rae_ext_rae_str_to_i64(const char* s);
 
-const char* rae_io_read_line(void);
-int64_t rae_io_read_char(void);
+const char* rae_ext_rae_io_read_line(void);
+int64_t rae_ext_rae_io_read_char(void);
 
-void rae_sys_exit(int64_t code);
-const char* rae_sys_get_env(const char* name);
-const char* rae_sys_read_file(const char* path);
-int8_t rae_sys_write_file(const char* path, const char* content);
+void rae_ext_rae_sys_exit(int64_t code);
+const char* rae_ext_rae_sys_get_env(const char* name);
+const char* rae_ext_rae_sys_read_file(const char* path);
+int8_t rae_ext_rae_sys_write_file(const char* path, const char* content);
 
-const char* rae_str_i64(int64_t v);
-const char* rae_str_f64(double v);
-const char* rae_str_bool(int8_t v);
-const char* rae_str_char(int64_t v);
-const char* rae_str_cstr(const char* s);
+const char* rae_ext_rae_str_i64(int64_t v);
+const char* rae_ext_rae_str_f64(double v);
+const char* rae_ext_rae_str_bool(int8_t v);
+const char* rae_ext_rae_str_char(int64_t v);
+const char* rae_ext_rae_str_cstr(const char* s);
 
 RAE_UNUSED static const char* rae_str_any(RaeAny v) {
     switch (v.type) {
-        case RAE_TYPE_INT: return rae_str_i64(v.as.i);
-        case RAE_TYPE_FLOAT: return rae_str_f64(v.as.f);
-        case RAE_TYPE_BOOL: return rae_str_bool(v.as.b);
+        case RAE_TYPE_INT: return rae_ext_rae_str_i64(v.as.i);
+        case RAE_TYPE_FLOAT: return rae_ext_rae_str_f64(v.as.f);
+        case RAE_TYPE_BOOL: return rae_ext_rae_str_bool(v.as.b);
         case RAE_TYPE_STRING: return v.as.s ? v.as.s : "";
         default: return "";
     }
 }
 
 #define rae_str(X) _Generic((X), \
-    int64_t: rae_str_i64, \
-    int: rae_str_i64, \
-    double: rae_str_f64, \
-    float: rae_str_f64, \
-    int8_t: rae_str_bool, \
-    char*: rae_str_cstr, \
-    const char*: rae_str_cstr, \
+    int64_t: rae_ext_rae_str_i64, \
+    int: rae_ext_rae_str_i64, \
+    double: rae_ext_rae_str_f64, \
+    float: rae_ext_rae_str_f64, \
+    int8_t: rae_ext_rae_str_bool, \
+    char*: rae_ext_rae_str_cstr, \
+    const char*: rae_ext_rae_str_cstr, \
     RaeAny: rae_str_any \
 )(X)
 
-void rae_seed(int64_t seed);
-double rae_random(void);
-int64_t rae_random_int(int64_t min, int64_t max);
+void rae_ext_rae_seed(int64_t seed);
+double rae_ext_rae_random(void);
+int64_t rae_ext_rae_random_int(int64_t min, int64_t max);
 
-int64_t nextTick(void);
-int64_t nowMs(void);
-void rae_sleep(int64_t ms);
+int64_t rae_ext_nextTick(void);
+int64_t rae_ext_nowMs(void);
+void rae_ext_rae_sleep(int64_t ms);
 
-double rae_int_to_float(int64_t i);
+double rae_ext_rae_int_to_float(int64_t i);
 
 /* Raylib wrappers */
 #ifdef RAE_HAS_RAYLIB
