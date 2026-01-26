@@ -278,20 +278,20 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
           diag_error(NULL, 0, 0, "VM local slot out of range");
           return VM_RUNTIME_ERROR;
         }
-        Value value = value_copy(vm_peek(vm, 0));
+        Value val = vm_pop(vm);
         if (frame->locals[slot].type == VAL_REF) {
           if (frame->locals[slot].as.ref_value.kind == REF_VIEW) {
             diag_error(NULL, 0, 0, "cannot assign to a read-only 'view' reference");
-            value_free(&value);
+            value_free(&val);
             return VM_RUNTIME_ERROR;
           }
           value_free(frame->locals[slot].as.ref_value.target);
-          *frame->locals[slot].as.ref_value.target = value_copy(&value);
+          *frame->locals[slot].as.ref_value.target = value_copy(&val);
         } else {
           value_free(&frame->locals[slot]);
-          frame->locals[slot] = value_copy(&value);
+          frame->locals[slot] = value_copy(&val);
         }
-        value_free(&value);
+        vm_push(vm, val); // Result of assignment
         break;
       }
       case OP_BIND_LOCAL: {
@@ -518,27 +518,32 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
       }
       case OP_BIND_FIELD: {
         uint16_t index = read_short(vm);
-        Value value = vm_pop(vm); // The reference to bind
-        Value* obj_ptr = vm_peek(vm, 0); // Pointer to target object on stack
+        Value val = vm_pop(vm); // The reference to bind
+        Value obj_val = vm_pop(vm); // Target object
+        Value* target = &obj_val;
         
-        Value obj = *obj_ptr;
-        if (obj.type == VAL_REF) {
-          obj_ptr = obj.as.ref_value.target;
-          obj = *obj_ptr;
+        if (target->type == VAL_REF) {
+          target = target->as.ref_value.target;
         }
         
-        if (obj.type != VAL_OBJECT) {
+        if (target->type != VAL_OBJECT) {
           diag_error(NULL, 0, 0, "BIND_FIELD on non-object");
+          value_free(&val);
+          value_free(&obj_val);
           return VM_RUNTIME_ERROR;
         }
-        if (index >= obj.as.object_value.field_count) {
+        if (index >= target->as.object_value.field_count) {
           diag_error(NULL, 0, 0, "BIND_FIELD index out of range");
+          value_free(&val);
+          value_free(&obj_val);
           return VM_RUNTIME_ERROR;
         }
         
-        // Actually we need to set the field in the HEAP object
-        obj.as.object_value.fields[index] = value;
-        // value remains on stack as result of bind? typically yes for assign
+        value_free(&target->as.object_value.fields[index]);
+        target->as.object_value.fields[index] = value_copy(&val);
+        vm_push(vm, value_copy(&val)); // Return result
+        value_free(&val);
+        value_free(&obj_val);
         break;
       }
       case OP_REF_VIEW: {
