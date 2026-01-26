@@ -97,134 +97,263 @@
         </section>
       </div>
 
-      <div class="app-view is-active" data-view="compiler">
-        <section class="panel panel--full" id="build-panel">
-        <header class="panel-header">
-          <div>
-            <h2>Build controls</h2>
-            <p class="panel-subtitle">Trigger compiler build/clean tasks</p>
-          </div>
-          <div class="panel-actions">
-            <div class="test-status" id="build-status-chip">Idle</div>
-          </div>
-        </header>
-        <div class="build-controls">
-          <button id="build-test-btn" class="btn-build-test" type="button">
-            Build & Test
-          </button>
-          <span class="btn-separator"></span>
-          <button id="build-btn">Build (Ctrl+B)</button>
-          <button id="clean-btn" class="secondary">Clean</button>
-          <button id="rebuild-btn" class="secondary">Rebuild</button>
-        </div>
-        <div class="terminal-wrapper">
-          <div class="terminal" id="build-log" aria-live="polite">
-            <div class="terminal-line">Waiting for first build command…</div>
-          </div>
-        </div>
+            <div class="app-view is-active" data-view="compiler">
 
-        <div class="terminal-actions">
-          <button class="secondary" id="copy-build-log-btn" type="button">
-            <svg aria-hidden="true" viewBox="0 0 24 24" role="img" class="icon">
-              <path d="M16 1H4a3 3 0 0 0-3 3v12h2V4a1 1 0 0 1 1-1h12z"></path>
-              <path d="M20 5H8a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3zm1 15a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1z"></path>
-            </svg>
-            Copy full log
-          </button>
-          <button class="secondary" id="copy-build-errors-btn" type="button">
-            <svg aria-hidden="true" viewBox="0 0 24 24" role="img" class="icon">
-              <path d="M16 1H4a3 3 0 0 0-3 3v12h2V4a1 1 0 0 1 1-1h12z"></path>
-              <path d="M20 5H8a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3zm1 15a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1z"></path>
-            </svg>
-            Copy errors and warnings
-          </button>
-        </div>
-        </section>
-        <section class="panel panel--full" id="tests-panel">
-        <header class="panel-header">
-          <div>
-            <h2>Test runner</h2>
-            <p class="panel-subtitle">Run the Rae compiler test suite via this dashboard</p>
-          </div>
-          <div class="panel-actions">
-            <div class="test-status" id="test-status-chip">Idle</div>
-          </div>
-        </header>
-        <div class="test-controls">
-          <button id="run-tests-btn">Run all tests (Ctrl+T)</button>
-          <button id="run-failed-btn" class="secondary" disabled>Run failed (coming soon)</button>
-          <button id="stop-tests-btn">Stop all tests</button>
-          <input
-            type="text"
-            id="disabled-tests-input"
-            class="input-field"
-            placeholder="Disable tests (e.g. 321, 325)"
-            title="Comma separated list of test numbers or names to skip"
-          />
-        </div>
-        <div class="terminal-wrapper">
-          <div class="terminal" id="test-log" aria-live="polite">
-            <div class="terminal-line">Waiting for first test run…</div>
-          </div>
-        </div>
+              <section class="panel panel--full" id="build-panel">
 
-        <div class="terminal-actions">
-          <button class="secondary" id="copy-test-log-btn" type="button">
-            <svg aria-hidden="true" viewBox="0 0 24 24" role="img" class="icon">
-              <path d="M16 1H4a3 3 0 0 0-3 3v12h2V4a1 1 0 0 1 1-1h12z"></path>
-              <path d="M20 5H8a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3zm1 15a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1z"></path>
-            </svg>
-            Copy full log
-          </button>
-          <button class="secondary" id="copy-test-errors-btn" type="button" hidden>
-            <svg aria-hidden="true" viewBox="0 0 24 24" role="img" class="icon">
-              <path d="M16 1H4a3 3 0 0 0-3 3v12h2V4a1 1 0 0 1 1-1h12z"></path>
-              <path d="M20 5H8a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3zm1 15a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1z"></path>
-            </svg>
-            Copy errors only
-          </button>
-        </div>
+              <header class="panel-header">
 
-        <div class="test-errors-summary" id="test-errors-summary" hidden>
-          <header class="panel-header">
-            <div>
-              <h3>Errors & Warnings</h3>
-              <p class="panel-subtitle">Filtered view with surrounding context</p>
-            </div>
-          </header>
-          <div class="terminal terminal--mini" id="test-errors-log" aria-live="polite">
-            <div class="terminal-line">No failures detected.</div>
-          </div>
-        </div>
+                <div>
 
-        <div class="test-panel">
-          <div class="test-summary-card">
-            <div>
-              <p class="summary-title">Suite summary</p>
-              <p class="summary-stats" id="test-summary-text">Not run yet</p>
-            </div>
-            <div class="summary-counts">
-              <span class="pill pill--pass" id="summary-pass-count">0</span>
-              <span class="pill pill--fail" id="summary-fail-count">0</span>
-            </div>
-          </div>
-          <div class="test-panel-body">
-            <div class="test-list" id="test-list" aria-live="polite">
-              <p class="test-list-empty">Run tests to see per-test status.</p>
-            </div>
-            <div class="test-inspector" id="test-inspector">
-              <header class="inspector-header">
-                <h3>Test Details & Actions</h3>
-                <div class="test-inspector-tabs" role="tablist">
-                  <button type="button" class="is-active" data-inspector-tab="result">Result</button>
-                  <button type="button" data-inspector-tab="history">History</button>
-                  <button type="button" data-inspector-tab="source">Source</button>
+                  <h2>Build controls</h2>
+
+                  <p class="panel-subtitle">Trigger compiler build/clean tasks</p>
+
                 </div>
-                <div class="inspector-actions">
-                  <button type="button" id="run-test-live-btn" class="btn-action-mini">Run Live</button>
-                  <button type="button" id="run-test-compiled-btn" class="btn-action-mini">Run Compiled</button>
+
+                <div class="panel-actions">
+
+                  <div class="test-status" id="build-status-chip">Idle</div>
+
                 </div>
-              </header>              <section
+
+              </header>
+
+              <div class="build-controls">
+
+                <button id="build-test-btn" class="btn-build-test" type="button">
+
+                  Build & test
+
+                </button>
+
+                <span class="btn-separator"></span>
+
+                <button id="build-btn">Build (Ctrl+B)</button>
+
+                <button id="clean-btn" class="secondary">Clean</button>
+
+                <button id="rebuild-btn" class="secondary">Rebuild</button>
+
+              </div>
+
+              <div class="terminal-wrapper">
+
+                <div class="terminal" id="build-log" aria-live="polite">
+
+                  <div class="terminal-line">Waiting for first build command…</div>
+
+                </div>
+
+              </div>
+
+      
+
+              <div class="terminal-actions">
+
+                <button class="secondary" id="copy-build-log-btn" type="button">
+
+                  <svg aria-hidden="true" viewBox="0 0 24 24" role="img" class="icon">
+
+                    <path d="M16 1H4a3 3 0 0 0-3 3v12h2V4a1 1 0 0 1 1-1h12z"></path>
+
+                    <path d="M20 5H8a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3zm1 15a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1z"></path>
+
+                  </svg>
+
+                  Copy full log
+
+                </button>
+
+                <button class="secondary" id="copy-build-errors-btn" type="button">
+
+                  <svg aria-hidden="true" viewBox="0 0 24 24" role="img" class="icon">
+
+                    <path d="M16 1H4a3 3 0 0 0-3 3v12h2V4a1 1 0 0 1 1-1h12z"></path>
+
+                    <path d="M20 5H8a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3zm1 15a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1z"></path>
+
+                  </svg>
+
+                  Copy errors and warnings
+
+                </button>
+
+              </div>
+
+              </section>
+
+              <section class="panel panel--full" id="tests-panel">
+
+              <header class="panel-header">
+
+                <div>
+
+                  <h2>Test runner</h2>
+
+                  <p class="panel-subtitle">Run the Rae compiler test suite via this dashboard</p>
+
+                </div>
+
+                <div class="panel-actions">
+
+                  <div class="test-status" id="test-status-chip">Idle</div>
+
+                </div>
+
+              </header>
+
+              <div class="test-controls">
+
+                <button id="run-tests-btn">Run all tests (Ctrl+T)</button>
+
+                <button id="run-failed-btn" class="secondary" disabled>Run failed (coming soon)</button>
+
+                <button id="stop-tests-btn">Stop all tests</button>
+
+                <input
+
+                  type="text"
+
+                  id="disabled-tests-input"
+
+                  class="input-field"
+
+                  placeholder="Disable tests (e.g. 321, 325)"
+
+                  title="Comma separated list of test numbers or names to skip"
+
+                />
+
+              </div>
+
+              <div class="terminal-wrapper">
+
+                <div class="terminal" id="test-log" aria-live="polite">
+
+                  <div class="terminal-line">Waiting for first test run…</div>
+
+                </div>
+
+              </div>
+
+      
+
+              <div class="terminal-actions">
+
+                <button class="secondary" id="copy-test-log-btn" type="button">
+
+                  <svg aria-hidden="true" viewBox="0 0 24 24" role="img" class="icon">
+
+                    <path d="M16 1H4a3 3 0 0 0-3 3v12h2V4a1 1 0 0 1 1-1h12z"></path>
+
+                    <path d="M20 5H8a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3zm1 15a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1z"></path>
+
+                  </svg>
+
+                  Copy full log
+
+                </button>
+
+                <button class="secondary" id="copy-test-errors-btn" type="button" hidden>
+
+                  <svg aria-hidden="true" viewBox="0 0 24 24" role="img" class="icon">
+
+                    <path d="M16 1H4a3 3 0 0 0-3 3v12h2V4a1 1 0 0 1 1-1h12z"></path>
+
+                    <path d="M20 5H8a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3zm1 15a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1z"></path>
+
+                  </svg>
+
+                  Copy errors only
+
+                </button>
+
+              </div>
+
+      
+
+              <div class="test-errors-summary" id="test-errors-summary" hidden>
+
+                <header class="panel-header">
+
+                  <div>
+
+                    <h3>Errors & warnings</h3>
+
+                    <p class="panel-subtitle">Filtered view with surrounding context</p>
+
+                  </div>
+
+                </header>
+
+                <div class="terminal terminal--mini" id="test-errors-log" aria-live="polite">
+
+                  <div class="terminal-line">No failures detected.</div>
+
+                </div>
+
+              </div>
+
+      
+
+              <div class="test-panel">
+
+                <div class="test-summary-card">
+
+                  <div>
+
+                    <p class="summary-title">Suite summary</p>
+
+                    <p class="summary-stats" id="test-summary-text">Not run yet</p>
+
+                  </div>
+
+                  <div class="summary-counts">
+
+                    <span class="pill pill--pass" id="summary-pass-count">0</span>
+
+                    <span class="pill pill--fail" id="summary-fail-count">0</span>
+
+                  </div>
+
+                </div>
+
+                <div class="test-panel-body">
+
+                  <div class="test-list" id="test-list" aria-live="polite">
+
+                    <p class="test-list-empty">Run tests to see per-test status.</p>
+
+                  </div>
+
+                  <div class="test-inspector" id="test-inspector">
+
+                    <header class="inspector-header">
+
+                      <h3>Test details & actions</h3>
+
+                      <div class="test-inspector-tabs" role="tablist">
+
+                        <button type="button" class="is-active" data-inspector-tab="result">Result</button>
+
+                        <button type="button" data-inspector-tab="history">History</button>
+
+                        <button type="button" data-inspector-tab="source">Source</button>
+
+                      </div>
+
+                      <div class="inspector-actions">
+
+                        <button type="button" id="run-test-live-btn" class="btn-action-mini">Run live</button>
+
+                        <button type="button" id="run-test-compiled-btn" class="btn-action-mini">Run compiled</button>
+
+                      </div>
+
+                    </header>
+
+                    <section
                 class="inspect-panel test-detail"
                 id="test-detail"
                 data-inspector-panel="result"
@@ -378,8 +507,8 @@
         <section class="panel panel--full examples-view">
           <header class="examples-hero">
             <div class="examples-hero__text">
-              <h2 class="marketing-title gradient-text">Modern <strong>Examples</strong>.</h2>
-              <p class="marketing-subtitle">Explore Rae through interactive, high-performance logic.</p>
+              <h2 class="marketing-title gradient-text">Examples</h2>
+              <p class="marketing-subtitle">High-performance logic, interactive simulations, and system design patterns.</p>
             </div>
             <div class="examples-hero__actions">
               <div class="test-status" id="example-status-chip">Idle</div>
@@ -390,7 +519,7 @@
           <div class="examples-layout">
             <aside class="example-sidebar">
               <div class="example-list" id="example-list">
-                <p class="test-list-empty">Loading curated examples…</p>
+                <p class="test-list-empty">Loading examples…</p>
               </div>
             </aside>
             
@@ -398,13 +527,11 @@
               <div class="example-inspector">
                 <div class="example-header">
                   <div class="example-header__info">
-                    <h3 id="example-title" class="edgy-title">Select an example</h3>
+                    <h3 id="example-title" class="edgy-title">Select example</h3>
                     <p id="example-entry" class="example-entry"></p>
                   </div>
                   <div class="example-actions">
                     <div class="example-target-actions" id="example-target-actions"></div>
-                    <button id="toggle-edit-example-btn" type="button" class="secondary">Edit</button>
-                    <button id="save-example-btn" type="button" class="secondary" disabled>Save</button>
                   </div>
                 </div>
                 
@@ -422,14 +549,14 @@
                       <path d="M16 1H4a3 3 0 0 0-3 3v12h2V4a1 1 0 0 1 1-1h12z"></path>
                       <path d="M20 5H8a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3zm1 15a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1z"></path>
                     </svg>
-                    Copy Output
+                    Copy output
                   </button>
                   <button class="secondary" id="copy-example-errors-btn" type="button">
                     <svg aria-hidden="true" viewBox="0 0 24 24" role="img" class="icon">
                       <path d="M16 1H4a3 3 0 0 0-3 3v12h2V4a1 1 0 0 1 1-1h12z"></path>
                       <path d="M20 5H8a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3zm1 15a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1z"></path>
                     </svg>
-                    Copy Errors
+                    Copy errors
                   </button>
                 </div>
 
@@ -446,9 +573,13 @@
                 <div class="example-content">
                   <div class="example-files" id="example-files"></div>
                   <div class="example-source-view">
-                    <div class="source-header">
+                    <header class="source-view-header">
                       <h4 id="example-source-title">Source</h4>
-                    </div>
+                      <div class="example-source-actions">
+                        <button id="toggle-edit-example-btn" type="button" class="secondary mini">Edit source</button>
+                        <button id="save-example-btn" type="button" class="secondary mini" disabled>Save changes</button>
+                      </div>
+                    </header>
                     <pre class="source-code" id="example-source-code"><code></code></pre>
                     <textarea id="example-editor" class="example-editor" hidden></textarea>
                   </div>
