@@ -21,6 +21,18 @@ static bool native_initWindow(struct VM* vm, VmNativeResult* out, const Value* a
     return true;
 }
 
+static bool native_setConfigFlags(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 1) {
+        fprintf(stderr, "error: setConfigFlags expects 1 arg, got %zu\n", count);
+        return false;
+    }
+    int flags = (args[0].type == VAL_FLOAT) ? (int)args[0].as.float_value : (int)args[0].as.int_value;
+    SetConfigFlags((unsigned int)flags);
+    out->has_value = false;
+    return true;
+}
+
 static bool native_windowShouldClose(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data; (void)args;
     if (count != 0) {
@@ -330,6 +342,7 @@ static bool native_endMode3D(struct VM* vm, VmNativeResult* out, const Value* ar
 bool vm_registry_register_raylib(VmRegistry* registry) {
     bool ok = true;
     ok &= vm_registry_register_native(registry, "initWindow", native_initWindow, NULL);
+    ok &= vm_registry_register_native(registry, "setConfigFlags", native_setConfigFlags, NULL);
     ok &= vm_registry_register_native(registry, "windowShouldClose", native_windowShouldClose, NULL);
     ok &= vm_registry_register_native(registry, "closeWindow", native_closeWindow, NULL);
     ok &= vm_registry_register_native(registry, "beginDrawing", native_beginDrawing, NULL);
