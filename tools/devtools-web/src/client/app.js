@@ -1937,6 +1937,32 @@ async function runAllExamples() {
   for (const example of examples) {
     if (!example.id) continue;
     
+    // Skip examples that require manual staging or complex setup
+    if (example.id.includes("hybrid_hot_reload")) {
+      batchResults.push({
+        id: example.id,
+        name: example.name,
+        success: false,
+        skipped: true,
+        errors: ["Requires manual version staging"]
+      });
+      continue;
+    }
+
+    // Skip examples not supporting the current mode
+    if (Array.isArray(example.supportedTargets) && example.supportedTargets.length > 0) {
+      if (!example.supportedTargets.includes(targetId)) {
+        batchResults.push({
+          id: example.id,
+          name: example.name,
+          success: false,
+          skipped: true,
+          errors: [`Mode "${targetId}" not supported by this example.`]
+        });
+        continue;
+      }
+    }
+    
     // Select the example first
     selectedExampleId = example.id;
     selectedExampleFile = example.files[0]?.path ?? null;
@@ -1971,10 +1997,10 @@ async function runAllExamples() {
       await stopExampleRun();
       lastSuccess = false;
     } else {
-      // The status will be updated by handleExampleRunCompleted
-      // We can grab the last success state from our internal logic or let the event handler set it
-      // For simplicity, we'll re-check the global state that was just updated
-      lastSuccess = !allExampleLogLines.some(l => l.stream === "stderr" && !l.text.startsWith("●"));
+      // Re-check success from the last complete run
+      // We assume failure if there were any errors or if exit code was non-zero
+      const hasErrors = allExampleLogLines.some(l => l.stream === "stderr" && !l.text.startsWith("●"));
+      lastSuccess = !hasErrors;
     }
     
     // Collect errors from this run
@@ -1982,10 +2008,15 @@ async function runAllExamples() {
       .filter(l => l.stream === "stderr")
       .map(l => l.text);
       
+    if (!lastSuccess && errors.length === 0) {
+      errors.push("Example exited with error but produced no stderr output.");
+    }
+      
     batchResults.push({
       id: example.id,
       name: example.name,
       success: lastSuccess && errors.length === 0,
+      skipped: false,
       errors
     });
     
@@ -2011,41 +2042,55 @@ function renderBatchReport() {
   
   const total = batchResults.length;
   const successes = batchResults.filter(r => r.success).length;
-  const failures = total - successes;
+  const skipped = batchResults.filter(r => r.skipped).length;
+  const failures = total - successes - skipped;
+  const mode = runAllModeToggle?.checked ? "compiled" : "live";
   
-  summary.textContent = `${successes} / ${total} examples passed. ${failures} failed or had errors.`;
+  summary.textContent = `[${mode}] ${successes} passed, ${failures} failed, ${skipped} skipped (${total} total).`;
   
   content.innerHTML = "";
-  const failedResults = batchResults.filter(r => r.errors.length > 0);
+  const problemResults = batchResults.filter(r => !r.success);
   
-  if (failedResults.length === 0) {
+  if (problemResults.length === 0) {
     const p = document.createElement("p");
     p.className = "batch-report-summary";
     p.textContent = "All examples ran successfully without errors.";
     content.appendChild(p);
   } else {
-    failedResults.forEach(res => {
+    problemResults.forEach(res => {
       const div = document.createElement("div");
       div.className = "batch-error-entry";
-      div.innerHTML = `<h4>${res.name}</h4><div class="batch-error-log">${res.errors.join("\n")}</div>`;
+      if (res.skipped) {
+        div.classList.add("batch-error-entry--skipped");
+      }
+      const title = res.skipped ? `${res.name} (skipped)` : res.name;
+      const logContent = res.errors.length > 0 ? res.errors.join("\n") : "No error details available.";
+      div.innerHTML = `<h4>${title}</h4><div class="batch-error-log">${logContent}</div>`;
       content.appendChild(div);
     });
   }
   
   report.hidden = false;
-  report.scrollIntoView({ behavior: "smooth" });
+  // Scroll to report after a small delay
+  setTimeout(() => {
+    report.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, 100);
 }
 
 const copyBatchErrorsBtn = document.getElementById("copy-batch-errors-btn");
 const closeBatchReportBtn = document.getElementById("close-batch-report-btn");
 
 copyBatchErrorsBtn?.addEventListener("click", () => {
-  const reportText = batchResults
-    .filter(r => r.errors.length > 0)
+  const mode = runAllModeToggle?.checked ? "compiled" : "live";
+  
+  // Only include ACTUAL failures (not successes, and NOT skipped)
+  const actualFailures = batchResults.filter(r => !r.success && !r.skipped);
+  
+  const reportText = actualFailures
     .map(r => `--- ${r.name} ---\n${r.errors.join("\n")}`)
     .join("\n\n");
     
-  const summaryText = `Batch Run Summary: ${batchResults.filter(r => r.success).length} passed, ${batchResults.filter(r => !r.success).length} failed.\n\n`;
+  const summaryText = `Batch Run Summary [${mode}]: ${batchResults.filter(r => r.success).length} passed, ${actualFailures.length} failed, ${batchResults.filter(r => r.skipped).length} skipped.\n\n`;
   
   writeToClipboard(summaryText + reportText).then(() => {
     flashCopyState(copyBatchErrorsBtn, "Copied all errors!");

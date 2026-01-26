@@ -64,22 +64,26 @@ type ExampleDownloads = Array<{
 }>;
 
 const EXAMPLE_ORDER: Record<string, number> = {
-  hello: 1,
-  hello_compiled: 2,
-  math: 3,
-  random_basic: 4,
-  random_advanced: 5,
-  call_stack: 6,
-  hot_reload: 7,
-  auto_import_demo: 8,
-  multifile_report: 9,
-  external_c_library: 10,
-  hybrid_hot_reload: 11,
-  raylib_basic: 12,
-  pong: 13,
-  advanced_pong: 14,
-  raw_strings: 15,
-  raepack_demo: 16
+  "01_hello": 1,
+  "02_math": 2,
+  "03_random": 3,
+  "04_raw_strings": 4,
+  "05_list_basic": 5,
+  "06_list_loop": 6,
+  "07_list_benchmark": 7,
+  "10_memory_basics": 10,
+  "11_memory_model": 11,
+  "12_ref_escape": 12,
+  "13_multifile": 13,
+  "20_external_c": 20,
+  "21_stdlib_demo": 21,
+  "22_raepack_demo": 22,
+  "23_hot_reload": 23,
+  "24_hybrid_hot_reload": 24,
+  "90_raylib_basic": 90,
+  "91_pong_implicit": 91,
+  "92_pong_import": 92,
+  "93_raylib_3d": 93
 };
 
 export async function listExamples(
@@ -92,6 +96,7 @@ export async function listExamples(
 
   for (const entry of entries) {
     if (entry.name.startsWith(".")) continue;
+    if (entry.name === "legacy") continue; // Skip legacy folder
     const relativePath = entry.name;
     const fullPath = path.join(root, entry.name);
 
@@ -171,19 +176,19 @@ function makeMultiFileExample(
 
 function applyExampleOrdering(examples: ExampleDescriptor[]): ExampleDescriptor[] {
   const orders = Object.values(EXAMPLE_ORDER);
-  let nextOrder = orders.length ? Math.max(...orders) + 1 : 1;
+  let nextOrder = orders.length ? Math.max(...orders) + 1 : 100;
+  
   const decorated = examples.map((example) => {
-    const order = EXAMPLE_ORDER[example.id] ?? nextOrder++;
-    const baseName = stripOrderPrefix(example.name ?? example.id);
-    const numberedName = `${order}. ${baseName}`;
-    return { example: { ...example, name: numberedName }, order, name: numberedName };
+    // Try to extract number from folder name (e.g., "01_hello" -> 1)
+    const folderNumMatch = example.id.match(/^(\d+)_/);
+    const folderNum = folderNumMatch ? parseInt(folderNumMatch[1], 10) : null;
+    
+    const order = folderNum ?? EXAMPLE_ORDER[example.id] ?? nextOrder++;
+    return { example, order };
   });
-  decorated.sort((a, b) => {
-    if (a.order !== b.order) {
-      return a.order - b.order;
-    }
-    return a.name.localeCompare(b.name);
-  });
+
+  decorated.sort((a, b) => a.order - b.order);
+  
   return decorated.map((item) => item.example);
 }
 
