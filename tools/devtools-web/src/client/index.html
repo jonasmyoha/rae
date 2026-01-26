@@ -18,8 +18,8 @@
         <button class="app-nav__item" type="button" role="tab" aria-selected="false" data-view-target="statistics">
           Statistics
         </button>
-        <button class="app-nav__item" type="button" role="tab" aria-selected="false" data-view-target="showcase">
-          Showcase
+        <button class="app-nav__item" type="button" role="tab" aria-selected="false" data-view-target="examples">
+          Examples
         </button>
       </nav>
 
@@ -275,89 +275,6 @@
           </div>
         </div>
         </section>
-        <section class="panel panel--full" id="examples-panel">
-        <header class="panel-header">
-          <div>
-            <h2>Examples</h2>
-            <p class="panel-subtitle">Run Rae examples (VM mode) and inspect their source</p>
-          </div>
-          <div class="panel-actions">
-            <div class="test-status" id="example-status-chip">Idle</div>
-          </div>
-        </header>
-        <div class="examples-layout">
-          <div class="example-list" id="example-list">
-            <p class="test-list-empty">Loading examples…</p>
-          </div>
-          <div class="example-inspector">
-            <div class="example-header">
-              <div>
-                <h3 id="example-title">Select an example</h3>
-                <p id="example-entry" class="example-entry"></p>
-              </div>
-              <div class="example-actions">
-                <div class="example-target-actions" id="example-target-actions"></div>
-                <button id="stop-example-btn" type="button" class="secondary" disabled>Stop</button>
-                <button id="toggle-edit-example-btn" type="button" class="secondary">Edit</button>
-                <button id="save-example-btn" type="button" class="secondary" disabled>Save</button>
-              </div>
-              <div class="example-actions example-actions--secondary" id="example-custom-actions" hidden></div>
-            </div>
-            <div class="terminal-wrapper">
-              <div class="terminal example-terminal" id="example-output" aria-live="polite">
-                <div class="terminal-line">Run an example to see output.</div>
-              </div>
-            </div>
-            
-            <div class="terminal-actions">
-              <button class="secondary" id="copy-example-output-btn" type="button">
-                <svg aria-hidden="true" viewBox="0 0 24 24" role="img" class="icon">
-                  <path d="M16 1H4a3 3 0 0 0-3 3v12h2V4a1 1 0 0 1 1-1h12z"></path>
-                  <path d="M20 5H8a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3zm1 15a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1z"></path>
-                </svg>
-                Copy full log
-              </button>
-              <button class="secondary" id="copy-example-errors-btn" type="button">
-                <svg aria-hidden="true" viewBox="0 0 24 24" role="img" class="icon">
-                  <path d="M16 1H4a3 3 0 0 0-3 3v12h2V4a1 1 0 0 1 1-1h12z"></path>
-                  <path d="M20 5H8a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3zm1 15a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1z"></path>
-                </svg>
-                Copy errors and warnings
-              </button>
-            </div>
-            <div class="example-artifacts" id="example-artifacts">
-              <div>
-                <h4 id="example-artifacts-title">Build artifacts</h4>
-                <p id="example-artifacts-hint">Hybrid or compiled builds will list their files here.</p>
-              </div>
-              <ul class="example-artifacts-list" id="example-artifacts-list">
-                <li class="example-artifacts-empty">Build an example to inspect bundle contents.</li>
-              </ul>
-            </div>
-            <div class="example-downloads" id="example-downloads" hidden>
-              <div>
-                <h4>Staged downloads</h4>
-                <p id="example-downloads-hint">Use the hybrid buttons to stage VM chunks for host reloads.</p>
-              </div>
-              <ul class="example-downloads-list" id="example-downloads-list">
-                <li class="example-downloads-empty">No staged downloads yet.</li>
-              </ul>
-            </div>
-            <div class="example-content">
-              <div class="example-files" id="example-files">
-                <p class="test-list-empty">Example files will appear here.</p>
-              </div>
-              <div class="example-source-view">
-                <header>
-                  <h4 id="example-source-title">Select a file</h4>
-                </header>
-                <pre class="source-code" id="example-source-code"><code>No file selected.</code></pre>
-                <textarea id="example-editor" class="example-editor" hidden></textarea>
-              </div>
-            </div>
-          </div>
-        </div>
-        </section>
         <section class="panel">
         <header>
           <h2>Status stream</h2>
@@ -456,40 +373,86 @@
           <button class="stats-more-btn" id="line-count-more" hidden>More...</button>
         </section>
       </div>
-      <div class="app-view" data-view="showcase">
-        <section class="panel panel--full showcase-view">
-          <header class="showcase-header">
-            <div class="showcase-header__text">
-              <h2 class="marketing-title">Project <strong>Showcase</strong>.</h2>
-              <p class="marketing-subtitle">Explore complex Rae implementations and see the power of hot-reloading.</p>
+      <div class="app-view" data-view="examples">
+        <canvas id="examples-bg-canvas" class="examples-bg-canvas"></canvas>
+        <section class="panel panel--full examples-view">
+          <header class="examples-hero">
+            <div class="examples-hero__text">
+              <h2 class="marketing-title gradient-text">Modern <strong>Examples</strong>.</h2>
+              <p class="marketing-subtitle">Explore Rae through interactive, high-performance logic.</p>
             </div>
-            <div class="showcase-header__actions">
-              <button id="showcase-watch-btn" class="btn-live">
-                <span class="btn-live__pulse"></span>
-                <svg aria-hidden="true" viewBox="0 0 24 24" role="img" class="icon">
-                  <path d="M8 5v14l11-7z"></path>
-                </svg>
-                Watch Live
-              </button>
+            <div class="examples-hero__actions">
+              <div class="test-status" id="example-status-chip">Idle</div>
+              <button id="stop-example-btn" type="button" class="btn-action-mini secondary" disabled>Stop</button>
             </div>
           </header>
 
-          <div class="project-browser">
-            <aside class="project-browser__sidebar">
-              <div class="sidebar-label">Advanced Pong</div>
-              <nav class="file-tree" id="showcase-file-list">
-                <!-- Populated via JS -->
-              </nav>
+          <div class="examples-layout">
+            <aside class="example-sidebar">
+              <div class="example-list" id="example-list">
+                <p class="test-list-empty">Loading curated examples…</p>
+              </div>
             </aside>
-            <main class="project-browser__content">
-              <header class="file-header">
-                <div class="file-info">
-                  <span class="file-icon">📄</span>
-                  <h3 id="showcase-source-title">Select a file</h3>
+            
+            <main class="example-main">
+              <div class="example-inspector">
+                <div class="example-header">
+                  <div class="example-header__info">
+                    <h3 id="example-title" class="edgy-title">Select an example</h3>
+                    <p id="example-entry" class="example-entry"></p>
+                  </div>
+                  <div class="example-actions">
+                    <div class="example-target-actions" id="example-target-actions"></div>
+                    <button id="toggle-edit-example-btn" type="button" class="secondary">Edit</button>
+                    <button id="save-example-btn" type="button" class="secondary" disabled>Save</button>
+                  </div>
                 </div>
-              </header>
-              <div class="source-viewport">
-                <pre class="source-code" id="showcase-source-code"><code># Select a file from the sidebar to view its logic</code></pre>
+                
+                <div class="example-actions example-actions--secondary" id="example-custom-actions" hidden></div>
+
+                <div class="terminal-wrapper">
+                  <div class="terminal example-terminal" id="example-output" aria-live="polite">
+                    <div class="terminal-line">Select logic to see it in action.</div>
+                  </div>
+                </div>
+                
+                <div class="terminal-actions">
+                  <button class="secondary" id="copy-example-output-btn" type="button">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" role="img" class="icon">
+                      <path d="M16 1H4a3 3 0 0 0-3 3v12h2V4a1 1 0 0 1 1-1h12z"></path>
+                      <path d="M20 5H8a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3zm1 15a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1z"></path>
+                    </svg>
+                    Copy Output
+                  </button>
+                  <button class="secondary" id="copy-example-errors-btn" type="button">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" role="img" class="icon">
+                      <path d="M16 1H4a3 3 0 0 0-3 3v12h2V4a1 1 0 0 1 1-1h12z"></path>
+                      <path d="M20 5H8a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3zm1 15a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1z"></path>
+                    </svg>
+                    Copy Errors
+                  </button>
+                </div>
+
+                <div class="example-artifacts" id="example-artifacts">
+                  <h4 id="example-artifacts-title">Build artifacts</h4>
+                  <ul class="example-artifacts-list" id="example-artifacts-list"></ul>
+                </div>
+
+                <div class="example-downloads" id="example-downloads" hidden>
+                  <h4>Staged downloads</h4>
+                  <ul class="example-downloads-list" id="example-downloads-list"></ul>
+                </div>
+
+                <div class="example-content">
+                  <div class="example-files" id="example-files"></div>
+                  <div class="example-source-view">
+                    <div class="source-header">
+                      <h4 id="example-source-title">Source</h4>
+                    </div>
+                    <pre class="source-code" id="example-source-code"><code></code></pre>
+                    <textarea id="example-editor" class="example-editor" hidden></textarea>
+                  </div>
+                </div>
               </div>
             </main>
           </div>
