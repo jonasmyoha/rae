@@ -9,12 +9,12 @@ typedef struct {
   int64_t capacity;
 } List;
 
-extern const char* rae_ext_readLine(void);
-extern int64_t rae_ext_readChar(void);
-extern int64_t nextTick(void);
-extern int64_t nowMs(void);
-extern void rae_sleep(int64_t ms);
-extern double rae_int_to_float(int64_t i);
+extern const char* rae_ext_rae_io_read_line(void);
+extern int64_t rae_ext_rae_io_read_char(void);
+extern int64_t rae_ext_nextTick(void);
+extern int64_t rae_ext_nowMs(void);
+extern void rae_ext_rae_sleep(int64_t ms);
+extern double rae_ext_rae_int_to_float(int64_t i);
 RAE_UNUSED static double rae_toFloat_Int_(int64_t this);
 RAE_UNUSED static List rae_createList_Int_(int64_t initialCap);
 RAE_UNUSED static void rae_grow_List_(List* this);
@@ -32,11 +32,11 @@ extern int64_t rae_ext_external_c_func(int64_t a, int64_t b);
 RAE_UNUSED static int64_t rae_helper_(void);
 
 RAE_UNUSED static double rae_toFloat_Int_(int64_t this) {
-  return rae_int_to_float(this);
+  return rae_ext_rae_int_to_float(this);
 }
 
 RAE_UNUSED static List rae_createList_Int_(int64_t initialCap) {
-  return (List){ .data = rae_buf_alloc(initialCap, sizeof(RaeAny)), .length = 0, .capacity = initialCap };
+  return (List){ .data = rae_ext_rae_buf_alloc(initialCap, sizeof(RaeAny)), .length = 0, .capacity = initialCap };
 }
 
 RAE_UNUSED static void rae_grow_List_(List* this) {
@@ -44,9 +44,9 @@ RAE_UNUSED static void rae_grow_List_(List* this) {
   if (newCap == 0) {
   newCap = 4;
   }
-  RaeAny* newData = rae_buf_alloc(newCap, sizeof(RaeAny));
-  rae_buf_copy(this->data, 0, newData, 0, this->length, sizeof(RaeAny));
-  rae_buf_free(this->data);
+  RaeAny* newData = rae_ext_rae_buf_alloc(newCap, sizeof(RaeAny));
+  rae_ext_rae_buf_copy(this->data, 0, newData, 0, this->length, sizeof(RaeAny));
+  rae_ext_rae_buf_free(this->data);
   this->data = newData;
   this->capacity = newCap;
 }
@@ -81,7 +81,7 @@ RAE_UNUSED static void rae_insert_List_Int_T_(List* this, int64_t index, RaeAny 
   rae_grow_List_(this);
   }
   if (index < this->length) {
-  rae_buf_copy(this->data, index, this->data, index + 1, this->length - index, sizeof(RaeAny));
+  rae_ext_rae_buf_copy(this->data, index, this->data, index + 1, this->length - index, sizeof(RaeAny));
   }
   ((RaeAny*)(this->data))[index] = rae_any(value);
   this->length = this->length + 1;
@@ -101,7 +101,7 @@ RAE_UNUSED static void rae_remove_List_Int_(List* this, int64_t index) {
   return;
   }
   if (index < this->length - 1) {
-  rae_buf_copy(this->data, index + 1, this->data, index, this->length - index - 1, sizeof(RaeAny));
+  rae_ext_rae_buf_copy(this->data, index + 1, this->data, index, this->length - index - 1, sizeof(RaeAny));
   }
   this->length = this->length - 1;
 }
@@ -121,7 +121,7 @@ RAE_UNUSED static void rae_swap_List_Int_Int_(List* this, int64_t i, int64_t j) 
 }
 
 RAE_UNUSED static void rae_free_List_(List* this) {
-  rae_buf_free(this->data);
+  rae_ext_rae_buf_free(this->data);
   this->length = 0;
   this->capacity = 0;
 }
@@ -132,8 +132,8 @@ RAE_UNUSED static int64_t rae_helper_(void) {
 
 int main(void) {
   int64_t result = rae_ext_external_c_func(10, 20);
-  rae_log_i64(result);
-  rae_log_i64(rae_helper_());
+  rae_ext_rae_log_i64(result);
+  rae_ext_rae_log_i64(rae_helper_());
   return 0;
 }
 

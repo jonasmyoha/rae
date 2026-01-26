@@ -551,34 +551,34 @@ static bool emit_log_call(CFuncContext* ctx, const AstExpr* expr, FILE* out, boo
   const AstExpr* value = arg->value;
   
   Str type_name = infer_expr_type(ctx, value);
-  const char* log_fn = newline ? "rae_log_any" : "rae_log_stream_any";
+  const char* log_fn = newline ? "rae_ext_rae_log_any" : "rae_ext_rae_log_stream_any";
   bool is_list = false;
 
   if (str_eq_cstr(type_name, "Int")) {
-      log_fn = newline ? "rae_log_i64" : "rae_log_stream_i64";
+      log_fn = newline ? "rae_ext_rae_log_i64" : "rae_ext_rae_log_stream_i64";
   } else if (str_eq_cstr(type_name, "Float")) {
-      log_fn = newline ? "rae_log_float" : "rae_log_stream_float";
+      log_fn = newline ? "rae_ext_rae_log_float" : "rae_ext_rae_log_stream_float";
   } else if (str_eq_cstr(type_name, "Bool")) {
-      log_fn = newline ? "rae_log_bool" : "rae_log_stream_bool";
+      log_fn = newline ? "rae_ext_rae_log_bool" : "rae_ext_rae_log_stream_bool";
   } else if (str_eq_cstr(type_name, "Char")) {
-      log_fn = newline ? "rae_log_char" : "rae_log_stream_char";
+      log_fn = newline ? "rae_ext_rae_log_char" : "rae_ext_rae_log_stream_char";
   } else if (str_eq_cstr(type_name, "String")) {
-      log_fn = newline ? "rae_log_cstr" : "rae_log_stream_cstr";
+      log_fn = newline ? "rae_ext_rae_log_cstr" : "rae_ext_rae_log_stream_cstr";
   } else if (str_eq_cstr(type_name, "id")) {
-      log_fn = newline ? "rae_log_id" : "rae_log_stream_id";
+      log_fn = newline ? "rae_ext_rae_log_id" : "rae_ext_rae_log_stream_id";
   } else if (str_eq_cstr(type_name, "key")) {
-      log_fn = newline ? "rae_log_key" : "rae_log_stream_key";
+      log_fn = newline ? "rae_ext_rae_log_key" : "rae_ext_rae_log_stream_key";
   } else if (str_eq_cstr(type_name, "List")) {
       is_list = true;
   }
 
   bool val_is_ptr = (value->kind == AST_EXPR_IDENT && is_pointer_type(ctx, value->as.ident));
   if (val_is_ptr) {
-      fprintf(out, "  rae_log_stream_cstr(\"%s \");\n", is_mod_type(ctx, value->as.ident) ? "mod" : "view");
+      fprintf(out, "  rae_ext_rae_log_stream_cstr(\"%s \");\n", is_mod_type(ctx, value->as.ident) ? "mod" : "view");
   }
 
   if (is_list) {
-    if (fprintf(out, "  %s(", newline ? "rae_log_list_fields" : "rae_log_stream_list_fields") < 0) return false;
+    if (fprintf(out, "  %s(", newline ? "rae_ext_rae_log_list_fields" : "rae_ext_rae_log_stream_list_fields") < 0) return false;
     if (!emit_expr(ctx, value, out, PREC_LOWEST)) return false;
     fprintf(out, ".data, ");
     if (!emit_expr(ctx, value, out, PREC_LOWEST)) return false;
@@ -588,7 +588,7 @@ static bool emit_log_call(CFuncContext* ctx, const AstExpr* expr, FILE* out, boo
     return true;
   }
 
-  bool is_generic = strcmp(log_fn, "rae_log_any") == 0 || strcmp(log_fn, "rae_log_stream_any") == 0;
+  bool is_generic = strcmp(log_fn, "rae_ext_rae_log_any") == 0 || strcmp(log_fn, "rae_ext_rae_log_stream_any") == 0;
 
   if (fprintf(out, "  %s(", log_fn) < 0) return false;
   if (is_generic) fprintf(out, "rae_any(");
@@ -711,30 +711,53 @@ static const AstFuncDecl* find_function_overload(const AstModule* module, Str na
 
 static void emit_mangled_function_name(const AstFuncDecl* func, FILE* out) {
     if (func->is_extern) {
-        if (str_eq_cstr(func->name, "sleep") || str_eq_cstr(func->name, "sleepMs")) {
-            fprintf(out, "rae_sleep");
-        } else if (str_eq_cstr(func->name, "getEnv")) {
-            fprintf(out, "rae_sys_get_env");
-        } else if (str_eq_cstr(func->name, "exit")) {
-            fprintf(out, "rae_sys_exit");
-        } else if (str_eq_cstr(func->name, "readFile")) {
-            fprintf(out, "rae_sys_read_file");
-        } else if (str_eq_cstr(func->name, "writeFile")) {
-            fprintf(out, "rae_sys_write_file");
-        } else if (str_eq_cstr(func->name, "nextTick")) {
-            fprintf(out, "nextTick");
-        } else if (str_eq_cstr(func->name, "nowMs")) {
-            fprintf(out, "nowMs");
-        } else if (str_eq_cstr(func->name, "rae_random") || str_eq_cstr(func->name, "random")) {
-            fprintf(out, "rae_random");
-        } else if (str_eq_cstr(func->name, "rae_seed") || str_eq_cstr(func->name, "seed")) {
-            fprintf(out, "rae_seed");
-        } else if (str_eq_cstr(func->name, "rae_random_int") || str_eq_cstr(func->name, "random_int")) {
-            fprintf(out, "rae_random_int");
-        } else if (str_eq_cstr(func->name, "rae_int_to_float")) {
-            fprintf(out, "rae_int_to_float");
+        Str name = func->name;
+        if (str_eq_cstr(name, "sleep") || str_eq_cstr(name, "sleepMs")) {
+            fprintf(out, "rae_ext_rae_sleep");
+        } else if (str_eq_cstr(name, "rae_str") || str_eq_cstr(name, "str")) {
+            fprintf(out, "rae_ext_rae_str");
+        } else if (str_eq_cstr(name, "rae_str_len") || str_eq_cstr(name, "str_len")) {
+            fprintf(out, "rae_ext_rae_str_len");
+        } else if (str_eq_cstr(name, "rae_str_concat") || str_eq_cstr(name, "str_concat")) {
+            fprintf(out, "rae_ext_rae_str_concat");
+        } else if (str_eq_cstr(name, "rae_str_compare") || str_eq_cstr(name, "str_compare")) {
+            fprintf(out, "rae_ext_rae_str_compare");
+        } else if (str_eq_cstr(name, "rae_str_sub") || str_eq_cstr(name, "str_sub")) {
+            fprintf(out, "rae_ext_rae_str_sub");
+        } else if (str_eq_cstr(name, "rae_str_contains") || str_eq_cstr(name, "str_contains")) {
+            fprintf(out, "rae_ext_rae_str_contains");
+        } else if (str_eq_cstr(name, "rae_str_to_f64") || str_eq_cstr(name, "str_to_float")) {
+            fprintf(out, "rae_ext_rae_str_to_f64");
+        } else if (str_eq_cstr(name, "rae_str_to_i64") || str_eq_cstr(name, "str_to_int")) {
+            fprintf(out, "rae_ext_rae_str_to_i64");
+        } else if (str_eq_cstr(name, "getEnv")) {
+            fprintf(out, "rae_ext_rae_sys_get_env");
+        } else if (str_eq_cstr(name, "exit")) {
+            fprintf(out, "rae_ext_rae_sys_exit");
+        } else if (str_eq_cstr(name, "readFile")) {
+            fprintf(out, "rae_ext_rae_sys_read_file");
+        } else if (str_eq_cstr(name, "writeFile")) {
+            fprintf(out, "rae_ext_rae_sys_write_file");
+        } else if (str_eq_cstr(name, "nextTick")) {
+            fprintf(out, "rae_ext_nextTick");
+        } else if (str_eq_cstr(name, "nowMs")) {
+            fprintf(out, "rae_ext_nowMs");
+        } else if (str_eq_cstr(name, "rae_random") || str_eq_cstr(name, "random")) {
+            fprintf(out, "rae_ext_rae_random");
+        } else if (str_eq_cstr(name, "rae_seed") || str_eq_cstr(name, "seed")) {
+            fprintf(out, "rae_ext_rae_seed");
+        } else if (str_eq_cstr(name, "rae_random_int") || str_eq_cstr(name, "random_int")) {
+            fprintf(out, "rae_ext_rae_random_int");
+        } else if (str_eq_cstr(name, "rae_int_to_float")) {
+            fprintf(out, "rae_ext_rae_int_to_float");
+        } else if (str_eq_cstr(name, "readLine")) {
+            fprintf(out, "rae_ext_rae_io_read_line");
+        } else if (str_eq_cstr(name, "readChar")) {
+            fprintf(out, "rae_ext_rae_io_read_char");
         } else {
-            fprintf(out, "rae_ext_%.*s", (int)func->name.len, func->name.data);
+            // Unify: if it already starts with rae_str_ or similar, we just add rae_ext_
+            // The runtime now has rae_str_len etc.
+            fprintf(out, "rae_ext_%.*s", (int)name.len, name.data);
         }
         return;
     }
@@ -760,7 +783,7 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
       if (str_eq_cstr(name, "__buf_alloc")) {
           const AstCallArg* arg = expr->as.call.args;
           if (!arg) return false;
-          fprintf(out, "rae_buf_alloc(");
+          fprintf(out, "rae_ext_rae_buf_alloc(");
           if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) return false;
           const char* elem_size_str = "8"; // Default
           if (ctx->func_decl && ctx->func_decl->generic_params) elem_size_str = "sizeof(RaeAny)";
@@ -771,7 +794,7 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
       if (str_eq_cstr(name, "__buf_free")) {
           const AstCallArg* arg = expr->as.call.args;
           if (!arg) return false;
-          fprintf(out, "rae_buf_free(");
+          fprintf(out, "rae_ext_rae_buf_free(");
           if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) return false;
           fprintf(out, ")");
           return true;
@@ -779,7 +802,7 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
       if (str_eq_cstr(name, "__buf_resize")) {
           const AstCallArg* arg = expr->as.call.args;
           if (!arg || !arg->next) return false;
-          fprintf(out, "rae_buf_resize(");
+          fprintf(out, "rae_ext_rae_buf_resize(");
           if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) return false;
           fprintf(out, ", ");
           if (!emit_expr(ctx, arg->next->value, out, PREC_LOWEST)) return false;
@@ -792,7 +815,7 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
       if (str_eq_cstr(name, "__buf_copy")) {
           const AstCallArg* arg = expr->as.call.args;
           if (!arg || !arg->next || !arg->next->next || !arg->next->next->next || !arg->next->next->next->next) return false;
-          fprintf(out, "rae_buf_copy(");
+          fprintf(out, "rae_ext_rae_buf_copy(");
           if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) return false; // src
           fprintf(out, ", ");
           if (!emit_expr(ctx, arg->next->value, out, PREC_LOWEST)) return false; // src_off
@@ -891,12 +914,17 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
               cast_post = ").as.s)";
           } else {
               // Custom type / struct pointer
-              char* type_name = str_to_cstr(inferred);
-              char* buf = malloc(strlen(type_name) + 32);
-              sprintf(buf, "((%.*s*)(", (int)inferred.len, inferred.data);
-              cast_pre = buf;
-              cast_post = ").as.ptr)";
-              free(type_name);
+              if (str_eq_cstr(inferred, "Any")) {
+                  cast_pre = "((RaeAny)(";
+                  cast_post = "))";
+              } else {
+                  char* type_name = str_to_cstr(inferred);
+                  char* buf = malloc(strlen(type_name) + 32);
+                  sprintf(buf, "((%s*)(", type_name);
+                  cast_pre = buf;
+                  cast_post = ").as.ptr)";
+                  free(type_name);
+              }
           }
       }
   }
@@ -1144,7 +1172,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
       
       // (count - 1) concats needed
       for (size_t i = 0; i < count - 1; i++) {
-          fprintf(out, "rae_str_concat(");
+          fprintf(out, "rae_ext_rae_str_concat(");
       }
       
       // Initial part
@@ -1154,13 +1182,13 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
       while (part) {
           fprintf(out, ", ");
           if (part->value->kind != AST_EXPR_STRING) {
-              fprintf(out, "rae_str(");
+              fprintf(out, "rae_ext_rae_str(");
               if (!emit_expr(ctx, part->value, out, PREC_LOWEST)) return false;
               fprintf(out, ")");
           } else {
               if (!emit_expr(ctx, part->value, out, PREC_LOWEST)) return false;
           }
-          fprintf(out, ")"); // close rae_str_concat
+          fprintf(out, ")"); // close rae_ext_rae_str_concat
           part = part->next;
       }
       return true;
@@ -1249,16 +1277,15 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
           }
           
           if (use_strcmp) {
-              if (fprintf(out, "(strcmp(") < 0) return false;
-              if (fprintf(out, "(") < 0) return false;
+              if (fprintf(out, "(strcmp((rae_ext_rae_str(") < 0) return false;
               if (!emit_expr(ctx, expr->as.binary.lhs, out, prec)) return false;
-              if (fprintf(out, " ? ") < 0) return false;
+              if (fprintf(out, ") ? rae_ext_rae_str(") < 0) return false;
               if (!emit_expr(ctx, expr->as.binary.lhs, out, prec)) return false;
-              if (fprintf(out, " : \"\"), (") < 0) return false;
+              if (fprintf(out, ") : \"\"), (rae_ext_rae_str(") < 0) return false;
               if (!emit_expr(ctx, expr->as.binary.rhs, out, prec)) return false;
-              if (fprintf(out, " ? ") < 0) return false;
+              if (fprintf(out, ") ? rae_ext_rae_str(") < 0) return false;
               if (!emit_expr(ctx, expr->as.binary.rhs, out, prec)) return false;
-              if (fprintf(out, " : \"\")) == 0)") < 0) return false;
+              if (fprintf(out, ") : \"\")) == 0)") < 0) return false;
               return true;
           }
       }
@@ -1670,7 +1697,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
       
       // Fallback for built-ins or unknown methods
       if (str_eq_cstr(method, "toString")) {
-          fprintf(out, "rae_str(");
+          fprintf(out, "rae_ext_rae_str(");
           if (!emit_expr(ctx, expr->as.method_call.object, out, PREC_LOWEST)) return false;
           fprintf(out, ")");
           return true;

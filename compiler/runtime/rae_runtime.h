@@ -43,13 +43,13 @@ typedef struct {
 } RaeAny;
 
 /* Buffer Ops */
-void* rae_buf_alloc(int64_t count, int64_t elem_size);
-void rae_buf_free(void* buf);
-void* rae_buf_resize(void* buf, int64_t new_count, int64_t elem_size);
-void rae_buf_copy(void* src, int64_t src_off, void* dst, int64_t dst_off, int64_t len, int64_t elem_size);
+void* rae_ext_rae_buf_alloc(int64_t count, int64_t elem_size);
+void rae_ext_rae_buf_free(void* buf);
+void* rae_ext_rae_buf_resize(void* buf, int64_t new_count, int64_t elem_size);
+void rae_ext_rae_buf_copy(void* src, int64_t src_off, void* dst, int64_t dst_off, int64_t len, int64_t elem_size);
 
-void rae_log_any(RaeAny value);
-void rae_log_stream_any(RaeAny value);
+void rae_ext_rae_log_any(RaeAny value);
+void rae_ext_rae_log_stream_any(RaeAny value);
 
 /* Conversion Helpers */
 RAE_UNUSED static RaeAny rae_any_int(int64_t v) { return (RaeAny){RAE_TYPE_INT, {.i = v}}; }
@@ -73,23 +73,23 @@ RAE_UNUSED static RaeAny rae_any_identity(RaeAny a) { return a; }
     default: rae_any_ptr \
 )(X)
 
-void rae_log_cstr(const char* text);
-void rae_log_stream_cstr(const char* text);
-void rae_log_i64(int64_t value);
-void rae_log_stream_i64(int64_t value);
-void rae_log_bool(int8_t value);
-void rae_log_stream_bool(int8_t value);
-void rae_log_char(int64_t value);
-void rae_log_stream_char(int64_t value);
-void rae_log_id(int64_t value);
-void rae_log_stream_id(int64_t value);
-void rae_log_key(const char* value);
-void rae_log_stream_key(const char* value);
-void rae_log_float(double value);
-void rae_log_stream_float(double value);
+void rae_ext_rae_log_cstr(const char* text);
+void rae_ext_rae_log_stream_cstr(const char* text);
+void rae_ext_rae_log_i64(int64_t value);
+void rae_ext_rae_log_stream_i64(int64_t value);
+void rae_ext_rae_log_bool(int8_t value);
+void rae_ext_rae_log_stream_bool(int8_t value);
+void rae_ext_rae_log_char(int64_t value);
+void rae_ext_rae_log_stream_char(int64_t value);
+void rae_ext_rae_log_id(int64_t value);
+void rae_ext_rae_log_stream_id(int64_t value);
+void rae_ext_rae_log_key(const char* value);
+void rae_ext_rae_log_stream_key(const char* value);
+void rae_ext_rae_log_float(double value);
+void rae_ext_rae_log_stream_float(double value);
 
-void rae_log_list_fields(RaeAny* items, int64_t length, int64_t capacity);
-void rae_log_stream_list_fields(RaeAny* items, int64_t length, int64_t capacity);
+void rae_ext_rae_log_list_fields(RaeAny* items, int64_t length, int64_t capacity);
+void rae_ext_rae_log_stream_list_fields(RaeAny* items, int64_t length, int64_t capacity);
 
 const char* rae_ext_rae_str_concat(const char* a, const char* b);
 int64_t rae_ext_rae_str_len(const char* s);
@@ -123,7 +123,7 @@ RAE_UNUSED static const char* rae_str_any(RaeAny v) {
     }
 }
 
-#define rae_str(X) _Generic((X), \
+#define rae_ext_rae_str(X) _Generic((X), \
     int64_t: rae_ext_rae_str_i64, \
     int: rae_ext_rae_str_i64, \
     double: rae_ext_rae_str_f64, \

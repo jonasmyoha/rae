@@ -25,14 +25,30 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
 
   # 1. VM Compile Smoke Test
   if "$BIN" build --target live --project "$PROJECT_DIR" "$EXAMPLE_FILE" > /dev/null 2>&1; then
-    # 2. C Backend Smoke Test
-    if "$BIN" build --target compiled --emit-c --project "$PROJECT_DIR" "$EXAMPLE_FILE" > /dev/null 2>&1; then
-      echo "PASS: $EXAMPLE_NAME"
-      ((PASSED++))
+    # 2. C Backend Smoke Test (generate + compile + link)
+    TMP_OUT=$(mktemp -d)
+    if "$BIN" build --target compiled --emit-c --project "$PROJECT_DIR" --out "$TMP_OUT/out.c" "$EXAMPLE_FILE" > "$TMP_OUT/emit.log" 2>&1; then
+      # Attempt full compilation
+      # Note: we include Raylib flags since many examples use it.
+      if gcc -O2 -o "$TMP_OUT/app" "$TMP_OUT/out.c" "$TMP_OUT/rae_runtime.c" \
+         ../third_party/raylib/rae_raylib.c ../third_party/tinyexpr/rae_tinyexpr.c \
+         $(ls "$PROJECT_DIR"/*.c 2>/dev/null || true) \
+         -I"$TMP_OUT" -I../third_party/raylib -I../third_party/tinyexpr \
+         -I/opt/homebrew/include -L/opt/homebrew/lib -DRAE_HAS_RAYLIB \
+         -lraylib -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL > "$TMP_OUT/link.log" 2>&1; then
+        echo "PASS: $EXAMPLE_NAME"
+        ((PASSED++))
+      else
+        echo "FAIL: $EXAMPLE_NAME (C linking)"
+        cat "$TMP_OUT/link.log" | sed 's/^/  /'
+        ((FAILED++))
+      fi
     else
-      echo "FAIL: $EXAMPLE_NAME (C backend)"
+      echo "FAIL: $EXAMPLE_NAME (C backend emit)"
+      cat "$TMP_OUT/emit.log" | sed 's/^/  /'
       ((FAILED++))
     fi
+    rm -rf "$TMP_OUT"
   else
     echo "FAIL: $EXAMPLE_NAME (VM compiler)"
     ((FAILED++))
