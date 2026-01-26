@@ -74,5 +74,7 @@ test: build
 	@$(TEST_RUNNER) $(TEST)
 
 clean:
-	rm -rf $(BUILD_DIR) $(BIN_DIR)
+
+	rm -rf $(BUILD_DIR) $(BIN_DIR) ../build
+
 	@echo "Cleaned build artifacts"
