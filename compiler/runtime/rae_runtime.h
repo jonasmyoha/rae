@@ -144,10 +144,14 @@ void rae_sleep(int64_t ms);
 double rae_int_to_float(int64_t i);
 
 /* Raylib wrappers */
+#ifdef RAE_HAS_RAYLIB
 #include <raylib.h>
+void rae_ext_initWindow(int64_t width, int64_t height, const char* title);
+void rae_ext_setConfigFlags(int64_t flags);
 void rae_ext_drawCubeWires(Vector3 pos, double width, double height, double length, Color color);
 void rae_ext_drawSphere(Vector3 centerPos, double radius, Color color);
 double rae_ext_getTime(void);
 Color rae_ext_colorFromHSV(double hue, double saturation, double value);
+#endif
 
 #endif /* RAE_RUNTIME_H */

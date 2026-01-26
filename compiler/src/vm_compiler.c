@@ -1629,6 +1629,8 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
           return false;
         }
         emit_op(compiler, OP_SET_LOCAL, (int)stmt->line);
+        emit_short(compiler, (uint16_t)slot, (int)stmt->line);
+        emit_op(compiler, OP_POP, (int)stmt->line);
       } else if (stmt->as.def_stmt.is_bind) {
           if (!stmt->as.def_stmt.type || 
               (!stmt->as.def_stmt.type->is_view && 
@@ -1704,15 +1706,16 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
               }
           }
           emit_op(compiler, OP_BIND_LOCAL, (int)stmt->line);
+          emit_short(compiler, (uint16_t)slot, (int)stmt->line);
       } else {
           if (!compile_expr(compiler, stmt->as.def_stmt.value)) {
             return false;
           }
           emit_op(compiler, OP_SET_LOCAL, (int)stmt->line);
+          emit_short(compiler, (uint16_t)slot, (int)stmt->line);
+          emit_op(compiler, OP_POP, (int)stmt->line);
       }
       
-      emit_short(compiler, (uint16_t)slot, (int)stmt->line);
-      emit_op(compiler, OP_POP, (int)stmt->line);
       return true;
     }
     case AST_STMT_EXPR:
@@ -2112,13 +2115,14 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
                 }
             }
             emit_op(compiler, OP_BIND_LOCAL, (int)stmt->line);
+            emit_short(compiler, (uint16_t)slot, (int)stmt->line);
         } else {
             // Normal assignment: LHS = RHS
             if (!compile_expr(compiler, stmt->as.assign_stmt.value)) return false;
             emit_op(compiler, OP_SET_LOCAL, (int)stmt->line);
+            emit_short(compiler, (uint16_t)slot, (int)stmt->line);
+            emit_op(compiler, OP_POP, (int)stmt->line); // assigned value
         }
-        emit_short(compiler, (uint16_t)slot, (int)stmt->line);
-        emit_op(compiler, OP_POP, (int)stmt->line); // assigned value
         return true;
       } else if (target->kind == AST_EXPR_MEMBER) {
         if (target->as.member.object->kind != AST_EXPR_IDENT) {
@@ -2155,6 +2159,7 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
             if (!compile_expr(compiler, stmt->as.assign_stmt.value)) return false;
             emit_op(compiler, OP_BIND_FIELD, (int)stmt->line);
             emit_short(compiler, (uint16_t)field_index, (int)stmt->line);
+            emit_op(compiler, OP_POP, (int)stmt->line); // result of bind
         } else {
             int slot = compiler_find_local(compiler, obj_name);
             if (slot >= 0) {
@@ -2162,14 +2167,15 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
                 emit_op(compiler, OP_SET_LOCAL_FIELD, (int)stmt->line);
                 emit_short(compiler, (uint16_t)slot, (int)stmt->line);
                 emit_short(compiler, (uint16_t)field_index, (int)stmt->line);
+                emit_op(compiler, OP_POP, (int)stmt->line); // assigned value
             } else {
                 if (!compile_expr(compiler, target->as.member.object)) return false;
                 if (!compile_expr(compiler, stmt->as.assign_stmt.value)) return false;
                 emit_op(compiler, OP_SET_FIELD, (int)stmt->line);
                 emit_short(compiler, (uint16_t)field_index, (int)stmt->line);
+                emit_op(compiler, OP_POP, (int)stmt->line); // assigned value
             }
         }
-        emit_op(compiler, OP_POP, (int)stmt->line); // assigned value
         return true;
       } else {
         diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column,
