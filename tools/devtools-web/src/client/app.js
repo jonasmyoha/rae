@@ -148,6 +148,8 @@ let testFilesTree = [];
 let selectedTestFile = null;
 let selectedTestSource = "";
 let allTestLogLines = [];
+let examplesBgFrame = null;
+let allBuildLogLines = [];
 let allBuildLogLines = [];
 let allExampleLogLines = [];
 let raeSyntax = null;
@@ -1268,43 +1270,139 @@ function renderExampleList() {
     exampleListEl.innerHTML = `<p class="test-list-empty">No examples found.</p>`;
     return;
   }
+
+  // Define logical categories
+  const categories = [
+    { label: "01-04 Basics", min: 1, max: 4 },
+    { label: "05-07 Data Structures", min: 5, max: 7 },
+    { label: "10-12 Memory & Safety", min: 10, max: 12 },
+    { label: "13-19 Project Structure", min: 13, max: 19 },
+    { label: "20-29 Advanced & System", min: 20, max: 29 },
+    { label: "90-99 Graphics & Games", min: 90, max: 99 },
+    { label: "Legacy / Unsorted", min: 0, max: 0 } // Fallback
+  ];
+
   const fragment = document.createDocumentFragment();
-  examples.forEach((example) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = `example-card${selectedExampleId === example.id ? " is-active" : ""}`;
-    const targetSummary = describeExampleTargets(example);
-    button.innerHTML = `<h4>${example.name}</h4><p>${example.files.length} file${
-      example.files.length === 1 ? "" : "s"
-    } · ${targetSummary}</p>`;
-    if (example.description) {
-      const desc = document.createElement("p");
-      desc.className = "example-card-desc";
-      desc.textContent = example.description;
-      button.appendChild(desc);
-    }
-    button.addEventListener("click", () => {
-      if (exampleRunActive) {
-        stopExampleRun();
-      }
-      const previousId = selectedExampleId;
-      selectedExampleId = example.id;
-      if (previousId !== selectedExampleId) {
-        resetExampleArtifacts();
-      }
-      selectedExampleFile = example.files[0]?.path ?? null;
-      renderExampleList();
-      renderExampleDetail();
-      if (selectedExampleFile) {
-        loadExampleSource(selectedExampleFile);
-      } else {
-        exampleSourceTitle.textContent = "Select a file";
-        exampleSourceCode.innerHTML = "<code>No file selected.</code>";
-      }
+  
+  // Sort examples by ID (which starts with numbering)
+  const sortedExamples = [...examples].sort((a, b) => a.id.localeCompare(b.id));
+
+  categories.forEach(cat => {
+    const catExamples = sortedExamples.filter(ex => {
+      const num = parseInt(ex.id.split('_')[0]);
+      if (isNaN(num)) return cat.min === 0;
+      return num >= cat.min && num <= cat.max;
     });
-    fragment.appendChild(button);
+
+    if (catExamples.length > 0) {
+      const header = document.createElement("h5");
+      header.className = "example-category-title";
+      header.textContent = cat.label;
+      fragment.appendChild(header);
+
+      catExamples.forEach((example) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `example-card${selectedExampleId === example.id ? " is-active" : ""}`;
+        
+        // Clean name (remove number prefix for display)
+        const displayName = example.name.replace(/^\d+[_]/, '').replace(/_/g, ' ');
+        const targetSummary = describeExampleTargets(example);
+        
+        button.innerHTML = `<h4>${displayName}</h4><p>${targetSummary}</p>`;
+        
+        button.addEventListener("click", () => {
+          if (exampleRunActive) stopExampleRun();
+          const previousId = selectedExampleId;
+          selectedExampleId = example.id;
+          if (previousId !== selectedExampleId) resetExampleArtifacts();
+          selectedExampleFile = example.files[0]?.path ?? null;
+          renderExampleList();
+          renderExampleDetail();
+          if (selectedExampleFile) loadExampleSource(selectedExampleFile);
+        });
+        fragment.appendChild(button);
+      });
+    }
   });
+
   exampleListEl.appendChild(fragment);
+}
+
+function startExamplesBackgroundAnimation() {
+  const canvas = document.getElementById("examples-bg-canvas");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+
+  if (examplesBgFrame) cancelAnimationFrame(examplesBgFrame);
+
+  const triangles = [];
+  const count = 15;
+
+  for (let i = 0; i < count; i++) {
+    triangles.push({
+      x: Math.random() * window.innerWidth,
+      y: Math.random() * window.innerHeight,
+      size: 50 + Math.random() * 150,
+      rotation: Math.random() * Math.PI * 2,
+      rotationSpeed: (Math.random() - 0.5) * 0.01,
+      speedX: (Math.random() - 0.5) * 0.5,
+      speedY: (Math.random() - 0.5) * 0.5,
+      hue: Math.random() * 360
+    });
+  }
+
+  function animate() {
+    if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    triangles.forEach(t => {
+      t.x += t.speedX;
+      t.y += t.speedY;
+      t.rotation += t.rotationSpeed;
+
+      if (t.x < -t.size) t.x = canvas.width + t.size;
+      if (t.x > canvas.width + t.size) t.x = -t.size;
+      if (t.y < -t.size) t.y = canvas.height + t.size;
+      if (t.y > canvas.height + t.size) t.y = -t.size;
+
+      ctx.save();
+      ctx.translate(t.x, t.y);
+      ctx.rotate(t.rotation);
+      ctx.beginPath();
+      ctx.moveTo(0, -t.size / 2);
+      ctx.lineTo(t.size / 2, t.size / 2);
+      ctx.lineTo(-t.size / 2, t.size / 2);
+      ctx.closePath();
+      
+      const gradient = ctx.createLinearGradient(-t.size/2, -t.size/2, t.size/2, t.size/2);
+      gradient.addColorStop(0, `hsla(${t.hue}, 70%, 80%, 0.2)`);
+      gradient.addColorStop(1, `hsla(${(t.hue + 60) % 360}, 70%, 80%, 0.05)`);
+      
+      ctx.fillStyle = gradient;
+      ctx.fill();
+      ctx.strokeStyle = `hsla(${t.hue}, 70%, 80%, 0.3)`;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.restore();
+    });
+
+    examplesBgFrame = requestAnimationFrame(animate);
+  }
+
+  animate();
+}
+
+function stopExamplesBackgroundAnimation() {
+  if (examplesBgFrame) {
+    cancelAnimationFrame(examplesBgFrame);
+    examplesBgFrame = null;
+  }
 }
 
 function renderExampleDetail() {
@@ -2335,8 +2433,12 @@ function setActiveView(targetView) {
     }
   } else if (resolvedView === "why") {
     renderWhyExamples();
-  } else if (resolvedView === "showcase") {
-    setupShowcase();
+  } else if (resolvedView === "examples") {
+    startExamplesBackgroundAnimation();
+  }
+  
+  if (resolvedView !== "examples") {
+    stopExamplesBackgroundAnimation();
   }
 }
 
