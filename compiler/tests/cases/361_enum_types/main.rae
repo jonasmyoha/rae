@@ -1,0 +1,30 @@
+enum Status {
+  Idle,
+  Running,
+  Error
+}
+
+type Worker {
+  wid: Int
+  state: Status
+}
+
+func printStatus(s: Status) {
+  if s is Status.Idle {
+    log("Idle")
+  } else if s is Status.Running {
+    log("Running")
+  } else {
+    log("Error")
+  }
+}
+
+func main() {
+  def w: Worker = { wid: 1, state: Status.Running }
+  
+  log(w.wid)
+  printStatus(w.state)
+  
+  w.state = Status.Error
+  printStatus(w.state)
+}

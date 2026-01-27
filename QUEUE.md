@@ -52,11 +52,14 @@
         - [x] Clean up `raylib.rae` to use `Color` and `Vector2` structs directly.
     - [x] **Language Improvements**
         - [x] Implement `else if` support in parser.
-    - [ ] **Enums**
-        - [ ] Add `enum` keyword to parser.
-        - [ ] Implement enum members as constant `Int` values in VM and C backend.
+    - [x] **Enums**
+        - [x] Add `enum` keyword to parser.
+        - [x] Implement enum members as constant `Int` values in VM and C backend.
         - [ ] Support enum exhaustive matching in `match` statements.
+    - [ ] **Infrastructure & Quality**
+        - [ ] Restructure all tests to use individual folders (Implicit Project structure).
+        - [ ] Enhance string interpolation: ensure automatic `.toString()` works for all types and support complex expressions.
+        - [ ] Refactor existing examples to use `enum` instead of raw `Int` constants (e.g. `raylib_3d`).
     - [ ] **Tetris Prototype**
-        - [ ] Implement a clean, high-quality Tetris using new features.
-
-
+        - [ ] Implement a clean, high-quality Tetris in 2D using Raylib and Enums.
+    
