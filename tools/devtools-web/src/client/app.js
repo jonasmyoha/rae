@@ -161,6 +161,7 @@ const HEARTBEAT_STALE_MS = 60000;
 let testTreeRefreshTimer = null;
 let knownTests = new Map();
 let examples = [];
+let exampleCategories = [];
 let selectedExampleId = null;
 let selectedExampleFile = null;
 let activeExampleRunId = null;
@@ -821,6 +822,7 @@ function handleServerInfo(event) {
 
   currentBuildVersion = event.version;
   initializeTargets(event.targets ?? []);
+  exampleCategories = event.exampleCategories ?? [];
   
   if (testStatusChip) setTestStatus("Idle", "", null);
   if (buildStatusChip) setBuildStatus("Idle", "", null);
@@ -1276,59 +1278,84 @@ function renderExampleList() {
     return;
   }
 
-  // Define logical categories
-  const categories = [
-    { label: "01-04 Basics", min: 1, max: 4 },
-    { label: "05-07 Data Structures", min: 5, max: 7 },
+  // Fallback if server hasn't provided categories yet
+  const activeCategories = exampleCategories.length ? exampleCategories : [
+    { label: "01-05 Basics", min: 1, max: 5 },
+    { label: "06-09 Data Structures", min: 6, max: 9 },
     { label: "10-12 Memory & Safety", min: 10, max: 12 },
     { label: "13-19 Project Structure", min: 13, max: 19 },
     { label: "20-29 Advanced & System", min: 20, max: 29 },
-    { label: "90-99 Graphics & Games", min: 90, max: 99 },
-    { label: "Legacy / Unsorted", min: 0, max: 0 } // Fallback
+    { label: "90-99 Graphics & Games", min: 90, max: 99 }
   ];
+
+  const groups = new Map();
+
+  examples.forEach(ex => {
+    let category = ex.category;
+    
+    if (!category) {
+      const num = parseInt(ex.id.split('_')[0]);
+      if (!isNaN(num)) {
+        const cat = activeCategories.find(c => num >= c.min && num <= c.max);
+        category = cat ? cat.label : "Other";
+      } else {
+        category = "Other";
+      }
+    }
+
+    if (!groups.has(category)) groups.set(category, []);
+    groups.get(category).push(ex);
+  });
 
   const fragment = document.createDocumentFragment();
   
-  // Sort examples by ID (which starts with numbering)
-  const sortedExamples = [...examples].sort((a, b) => a.id.localeCompare(b.id));
+  // Sort categories: use order of activeCategories if possible
+  const categoryOrder = activeCategories.map(c => c.label);
+  const sortedCategoryNames = Array.from(groups.keys()).sort((a, b) => {
+    const idxA = categoryOrder.indexOf(a);
+    const idxB = categoryOrder.indexOf(b);
+    if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+    if (idxA !== -1) return -1;
+    if (idxB !== -1) return 1;
+    if (a === "Other") return 1;
+    if (b === "Other") return -1;
+    return a.localeCompare(b);
+  });
 
-  categories.forEach(cat => {
-    const catExamples = sortedExamples.filter(ex => {
-      const num = parseInt(ex.id.split('_')[0]);
-      if (isNaN(num)) return cat.min === 0;
-      return num >= cat.min && num <= cat.max;
-    });
+  sortedCategoryNames.forEach(catName => {
+    const catExamples = groups.get(catName);
+    if (!catExamples.length) return;
 
-    if (catExamples.length > 0) {
-      const header = document.createElement("h5");
-      header.className = "example-category-title";
-      header.textContent = cat.label;
-      fragment.appendChild(header);
+    const header = document.createElement("h5");
+    header.className = "example-category-title";
+    header.textContent = catName;
+    fragment.appendChild(header);
 
-      catExamples.forEach((example) => {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = `example-card${selectedExampleId === example.id ? " is-active" : ""}`;
-        
-        // Clean name (remove number prefix for display)
-        const displayName = example.name.replace(/^\d+[_]/, '').replace(/_/g, ' ');
-        const targetSummary = describeExampleTargets(example);
-        
-        button.innerHTML = `<h4>${displayName}</h4><p>${targetSummary}</p>`;
-        
-        button.addEventListener("click", () => {
-          if (exampleRunActive) stopExampleRun();
-          const previousId = selectedExampleId;
-          selectedExampleId = example.id;
-          if (previousId !== selectedExampleId) resetExampleArtifacts();
-          selectedExampleFile = example.files[0]?.path ?? null;
-          renderExampleList();
-          renderExampleDetail();
-          if (selectedExampleFile) loadExampleSource(selectedExampleFile);
-        });
-        fragment.appendChild(button);
+    catExamples.forEach((example) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `example-card${selectedExampleId === example.id ? " is-active" : ""}`;
+      if (example.hidden) button.classList.add("is-hidden-example");
+      
+      // Clean name (remove number prefix for display)
+      const displayName = example.name.replace(/^\d+[_]/, '').replace(/_/g, ' ');
+      const targetSummary = describeExampleTargets(example);
+      const hiddenBadge = example.hidden ? ' <span class="badge pending" style="font-size: 0.6rem; vertical-align: middle;">HIDDEN</span>' : '';
+      
+      button.innerHTML = `<h4>${displayName}${hiddenBadge}</h4><p>${targetSummary}</p>`;
+      
+      button.addEventListener("click", () => {
+        if (exampleRunActive) stopExampleRun();
+        const previousId = selectedExampleId;
+        selectedExampleId = example.id;
+        if (previousId !== selectedExampleId) resetExampleArtifacts();
+        selectedExampleFile = example.files[0]?.path ?? null;
+        renderExampleList();
+        renderExampleDetail();
+        if (selectedExampleFile) loadExampleSource(selectedExampleFile);
       });
-    }
+      fragment.appendChild(button);
+    });
   });
 
   exampleListEl.appendChild(fragment);

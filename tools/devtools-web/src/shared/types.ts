@@ -20,12 +20,20 @@ export type TargetInfoMessage = {
   supportsExampleBuild: boolean;
 };
 
+export type ExampleCategory = {
+  id: string;
+  label: string;
+  min: number;
+  max: number;
+};
+
 export type ServerInfoMessage = {
   type: "server-info";
   version: string;
   startedAt: string;
   targets: TargetInfoMessage[];
   defaultTargetId: string;
+  exampleCategories?: ExampleCategory[];
 };
 
 export type ExampleFileDescriptor = {
@@ -50,6 +58,8 @@ export type ExampleDescriptor = {
   defaultTargetId?: string;
   targetEntries?: Record<string, string>;
   actions?: ExampleActionDescriptor[];
+  hidden?: boolean;
+  category?: string;
 };
 
 export type ExampleRunMode = "run" | "watch" | "build" | "action";

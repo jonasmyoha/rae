@@ -15,6 +15,8 @@ type ExampleMetadata = {
   supportedTargets?: string[];
   defaultTargetId?: string;
   actions?: ExampleActionMetadata[];
+  hidden?: boolean;
+  category?: string;
 };
 
 type ExampleActionMetadata = {
@@ -63,29 +65,20 @@ type ExampleDownloads = Array<{
   }>;
 }>;
 
-const EXAMPLE_ORDER: Record<string, number> = {
-  "01_hello": 1,
-  "02_math": 2,
-  "03_random": 3,
-  "04_raw_strings": 4,
-  "05_list_basic": 5,
-  "06_list_loop": 6,
-  "07_list_benchmark": 7,
-  "08_enum": 8,
-  "10_memory_basics": 10,
-  "11_memory_model": 11,
-  "12_ref_escape": 12,
-  "13_multifile": 13,
-  "20_external_c": 20,
-  "21_stdlib_demo": 21,
-  "22_raepack_demo": 22,
-  "23_hot_reload": 23,
-  "24_hybrid_hot_reload": 24,
-  "90_raylib_basic": 90,
-  "91_pong_implicit": 91,
-  "92_pong_import": 92,
-  "93_raylib_3d": 93
-};
+function applyExampleOrdering(examples: ExampleDescriptor[]): ExampleDescriptor[] {
+  const decorated = examples.map((example) => {
+    // Try to extract number from folder name (e.g., "01_hello" -> 1)
+    const folderNumMatch = example.id.match(/^(\d+)_/);
+    const folderNum = folderNumMatch ? parseInt(folderNumMatch[1], 10) : null;
+    
+    const order = folderNum ?? 999;
+    return { example, order };
+  });
+
+  decorated.sort((a, b) => a.order - b.order || a.example.id.localeCompare(b.example.id));
+  
+  return decorated.map((item) => item.example);
+}
 
 export async function listExamples(
   root: string,
@@ -170,28 +163,13 @@ function makeMultiFileExample(
     description: metadata?.description,
     supportedTargets: supportedTargets?.length ? supportedTargets : undefined,
     defaultTargetId,
-    targetEntries: packInfo?.targetEntries
+    targetEntries: packInfo?.targetEntries,
+    hidden: metadata?.hidden,
+    category: metadata?.category
   };
   return descriptor;
 }
 
-function applyExampleOrdering(examples: ExampleDescriptor[]): ExampleDescriptor[] {
-  const orders = Object.values(EXAMPLE_ORDER);
-  let nextOrder = orders.length ? Math.max(...orders) + 1 : 100;
-  
-  const decorated = examples.map((example) => {
-    // Try to extract number from folder name (e.g., "01_hello" -> 1)
-    const folderNumMatch = example.id.match(/^(\d+)_/);
-    const folderNum = folderNumMatch ? parseInt(folderNumMatch[1], 10) : null;
-    
-    const order = folderNum ?? EXAMPLE_ORDER[example.id] ?? nextOrder++;
-    return { example, order };
-  });
-
-  decorated.sort((a, b) => a.order - b.order);
-  
-  return decorated.map((item) => item.example);
-}
 
 function stripOrderPrefix(name: string): string {
   return name.replace(/^\d+\.\s+/, "");

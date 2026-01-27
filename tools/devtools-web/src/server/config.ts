@@ -14,6 +14,13 @@ export type TargetConfig = {
   exampleBuildCommand?: string;
 };
 
+export type ExampleCategoryConfig = {
+  id: string;
+  label: string;
+  min: number;
+  max: number;
+};
+
 export type RaeDevtoolsConfig = {
   compilerPath: string;
   port: number;
@@ -22,6 +29,7 @@ export type RaeDevtoolsConfig = {
   examplesPath?: string;
   targets: TargetConfig[];
   defaultTarget: string;
+  exampleCategories?: ExampleCategoryConfig[];
   configSource?: string;
 };
 
@@ -160,7 +168,8 @@ function normalizeConfig(parsed: PartialConfig = {}): RaeDevtoolsConfig {
     syntaxSummaryPath: parsed.syntaxSummaryPath ?? DEFAULT_CONFIG.syntaxSummaryPath,
     examplesPath: parsed.examplesPath ?? DEFAULT_CONFIG.examplesPath,
     targets: [],
-    defaultTarget: parsed.defaultTarget ?? DEFAULT_CONFIG.defaultTarget
+    defaultTarget: parsed.defaultTarget ?? DEFAULT_CONFIG.defaultTarget,
+    exampleCategories: parsed.exampleCategories
   };
 
   const resolvedTargets = deriveTargets(parsed);
