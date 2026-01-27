@@ -821,6 +821,10 @@ function handleServerInfo(event) {
 
   currentBuildVersion = event.version;
   initializeTargets(event.targets ?? []);
+  
+  if (testStatusChip) setTestStatus("Idle", "", null);
+  if (buildStatusChip) setBuildStatus("Idle", "", null);
+  if (exampleStatusChip) setExampleStatus("Idle", "", null);
 }
 
 function handleTestCase(event) {
@@ -2280,11 +2284,11 @@ function recomputeSummaryCounts() {
 }
 
 async function refreshStatisticsPanels() {
-  if (statsTestsList) setStatsListPlaceholder(statsTestsList, "Loading test metrics…");
-  if (statsBuildsList) setStatsListPlaceholder(statsBuildsList, "Loading build metrics…");
-  if (lineCountHistory) setStatsListPlaceholder(lineCountHistory, "Loading snapshots…");
-  if (lineCountEmpty) {
-    lineCountEmpty.hidden = false;
+  if (statsTestsList && !testDurationMetrics.length) setStatsListPlaceholder(statsTestsList, "Loading test metrics…");
+  if (statsBuildsList && !buildDurationMetrics.length) setStatsListPlaceholder(statsBuildsList, "Loading build metrics…");
+  if (lineCountHistory && !compilerLineMetrics.length) setStatsListPlaceholder(lineCountHistory, "Loading snapshots…");
+  if (lineCountEmpty && !compilerLineMetrics.length) {
+    lineCountEmpty.style.display = "flex";
     lineCountEmpty.textContent = "Loading line counts…";
   }
   try {
@@ -2311,11 +2315,12 @@ async function refreshStatisticsPanels() {
     }
     if (compilerResult.status === "fulfilled") {
       compilerLineMetrics = compilerResult.value;
+      if (lineCountEmpty) lineCountEmpty.style.display = "none";
       renderLineCountDetails(compilerLineMetrics);
     } else {
       compilerLineMetrics = [];
       if (lineCountEmpty) {
-        lineCountEmpty.hidden = false;
+        lineCountEmpty.style.display = "flex";
         lineCountEmpty.textContent = "Failed to load compiler metrics.";
       }
       if (lineCountSummary) lineCountSummary.textContent = "";
@@ -2446,8 +2451,10 @@ function renderLineCountDetails(entries) {
     }
   }
   if (!entries.length && lineCountEmpty) {
-    lineCountEmpty.hidden = false;
+    lineCountEmpty.style.display = "flex";
     lineCountEmpty.textContent = "Run the metrics script to record compiler line counts.";
+  } else if (lineCountEmpty) {
+    lineCountEmpty.style.display = "none";
   }
   renderLineCountHistory(entries);
 }
@@ -2534,7 +2541,7 @@ function drawMetricChart(canvas, entries, valueKey, emptyEl) {
   if (!entries.length) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (emptyEl) {
-      emptyEl.hidden = false;
+      emptyEl.style.display = "flex";
       // Use original text if available, or a generic one
       if (emptyEl.id === "line-count-empty") emptyEl.textContent = "No line counts recorded yet.";
       else if (emptyEl.id === "test-duration-empty") emptyEl.textContent = "No test runs recorded yet.";
@@ -2543,7 +2550,7 @@ function drawMetricChart(canvas, entries, valueKey, emptyEl) {
     return;
   }
   if (emptyEl) {
-    emptyEl.hidden = true;
+    emptyEl.style.display = "none";
   }
   
   // Use a stable way to get dimensions

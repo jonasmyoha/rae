@@ -85,11 +85,47 @@ body {
 .status-pill.is-connected { border-color: var(--success); background: rgba(52, 211, 153, 0.05); color: var(--success); }
 .status-pill.is-disconnected { border-color: var(--danger); background: rgba(248, 113, 113, 0.05); color: var(--danger); }
 
+.test-status {
+  padding: 0.4rem 1.2rem;
+  border-radius: 999px;
+  border: 2px solid rgba(154, 161, 185, 0.3); /* Distinct grey border */
+  font-size: 0.85rem;
+  font-weight: 700;
+  transition: all 0.2s;
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text-muted);
+}
+
+.test-status.is-running {
+  border-color: rgba(154, 161, 185, 0.8);
+  color: var(--text);
+  background: rgba(154, 161, 185, 0.1);
+  animation: status-pulse 2s infinite;
+}
+
+@keyframes status-pulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.7; }
+  100% { opacity: 1; }
+}
+
+.test-status.is-success {
+  border-color: var(--success);
+  color: var(--success);
+  background: rgba(52, 211, 153, 0.05);
+}
+
+.test-status.is-failure {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: rgba(248, 113, 113, 0.05);
+}
+
 .error-indicator {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  border: 1px solid var(--border);
+  border: 2px solid rgba(154, 161, 185, 0.3); /* Neutral grey border */
   background: rgba(248, 113, 113, 0.08);
   color: var(--danger);
   display: inline-flex;
@@ -98,6 +134,10 @@ body {
   cursor: pointer;
   position: relative;
   transition: all 0.2s;
+}
+
+.error-indicator.has-errors {
+  border-color: var(--danger);
 }
 
 .error-indicator svg { width: 18px; height: 18px; fill: currentColor; }
@@ -283,6 +323,31 @@ button.btn-build-test:hover:not(:disabled) {
 
 .test-summary-card.is-success { border-color: var(--success); background: rgba(52, 211, 153, 0.03); }
 .test-summary-card.is-failure { border-color: var(--danger); background: rgba(248, 113, 113, 0.03); }
+
+.test-errors-summary {
+  border: 2px solid rgba(154, 161, 185, 0.3); /* Distinct grey border */
+  border-radius: 1rem;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  background: rgba(255, 255, 255, 0.02);
+  transition: all 0.2s;
+}
+
+.test-errors-summary.is-running {
+  border-color: rgba(154, 161, 185, 0.8);
+  background: rgba(154, 161, 185, 0.05);
+  animation: status-pulse 2s infinite;
+}
+
+.test-errors-summary.is-success {
+  border-color: var(--success);
+  background: rgba(52, 211, 153, 0.05);
+}
+
+.test-errors-summary.is-failure {
+  border-color: var(--danger);
+  background: rgba(248, 113, 113, 0.05);
+}
 
 .summary-counts { display: flex; gap: 0.5rem; }
 .pill {
