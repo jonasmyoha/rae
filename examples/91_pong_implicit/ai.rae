@@ -1,70 +1,77 @@
-# AI System for Advanced Pong
-# State: 0=Observing, 1=Deciding, 2=Acting, 3=Pausing
-type AIState {
-  state: Int
-  timer: Int
-  targetY: Float
-  decision: Int
+enum AIPhase {
+  Observing,
+  Deciding,
+  Acting,
+  Pausing
 }
 
-# 0=None, 1=Up, 2=Down
+enum AIDecision {
+  None,
+  Up,
+  Down
+}
+
+# AI System for Advanced Pong
+type AIState {
+  state: AIPhase
+  timer: Int
+  targetY: Float
+  decision: AIDecision
+}
+
 func paddleAiSystem(ai: mod AIState, ballY: Float, paddleY: Float): ret Float {
   def newY: Float = paddleY
-  # 0: Observing (Reaction Delay)
-  if ai.state is 0 {
+  if ai.state is AIPhase.Observing {
     ai.timer = ai.timer + 1
     # Reaction time ~0.2s (12 frames) plus random noise
     if ai.timer > 12 + random(min: 0, max: 6) {
       ai.targetY = ballY
       ai.timer = 0
-      ai.state = 1
+      ai.state = AIPhase.Deciding
     }
   }
-  # 1: Deciding
-  if ai.state is 1 {
+  if ai.state is AIPhase.Deciding {
     # Simple logic: if ball is significantly above or below center of paddle
     if ai.targetY < paddleY + 40.0 {
       # Up
-      ai.decision = 1
+      ai.decision = AIDecision.Up
       # Press duration
       ai.timer = random(min: 50, max: 150)
-      ai.state = 2
+      ai.state = AIPhase.Acting
     } else {
       if ai.targetY > paddleY + 60.0 {
         # Down
-        ai.decision = 2
+        ai.decision = AIDecision.Down
         # Press duration
         ai.timer = random(min: 5, max: 15)
-        ai.state = 2
+        ai.state = AIPhase.Acting
       } else {
         # Good enough, don't move
-        ai.decision = 0
+        ai.decision = AIDecision.None
         # Pause duration
         ai.timer = random(min: 5, max: 10)
-        ai.state = 3
+        ai.state = AIPhase.Pausing
       }
     }
   }
-  # 2: Acting (Key Press)
-  if ai.state is 2 {
-    if ai.decision is 1 {
+  if ai.state is AIPhase.Acting {
+    if ai.decision is AIDecision.Up {
       newY = newY - 4.5
     }
-    if ai.decision is 2 {
+    if ai.decision is AIDecision.Down {
       newY = newY + 4.5
     }
     ai.timer = ai.timer - 1
     if ai.timer <= 0 {
-      ai.state = 3
+      ai.state = AIPhase.Pausing
       # Pause after action
       ai.timer = random(min: 5, max: 10)
     }
   }
-  # 3: Pausing
-  if ai.state is 3 {
+  if ai.state is AIPhase.Pausing {
     ai.timer = ai.timer - 1
     if ai.timer <= 0 {
-      ai.state = 0
+      ai.state = AIPhase.Observing
       ai.timer = 0
     }
   }

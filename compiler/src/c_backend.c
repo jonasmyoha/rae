@@ -47,6 +47,7 @@ typedef struct {
   size_t local_count;
   bool returns_value;
   size_t temp_counter;
+  const AstTypeRef* expected_type;
 } CFuncContext;
 
 // Forward declarations
@@ -1176,14 +1177,28 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
       }
       
       // Initial part
-      if (!emit_expr(ctx, part->value, out, PREC_LOWEST)) return false;
+      if (part->value->kind != AST_EXPR_STRING) {
+          Str type_name = infer_expr_type(ctx, part->value);
+          bool is_enum = find_enum_decl(ctx->module, type_name) != NULL;
+          fprintf(out, "rae_ext_rae_str(");
+          if (is_enum) fprintf(out, "(int64_t)(");
+          if (!emit_expr(ctx, part->value, out, PREC_LOWEST)) return false;
+          if (is_enum) fprintf(out, ")");
+          fprintf(out, ")");
+      } else {
+          if (!emit_expr(ctx, part->value, out, PREC_LOWEST)) return false;
+      }
       part = part->next;
       
       while (part) {
           fprintf(out, ", ");
           if (part->value->kind != AST_EXPR_STRING) {
+              Str type_name = infer_expr_type(ctx, part->value);
+              bool is_enum = find_enum_decl(ctx->module, type_name) != NULL;
               fprintf(out, "rae_ext_rae_str(");
+              if (is_enum) fprintf(out, "(int64_t)(");
               if (!emit_expr(ctx, part->value, out, PREC_LOWEST)) return false;
+              if (is_enum) fprintf(out, ")");
               fprintf(out, ")");
           } else {
               if (!emit_expr(ctx, part->value, out, PREC_LOWEST)) return false;
@@ -1490,6 +1505,22 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
         Str type_name = expr->as.object_literal.type->parts->text;
         const AstDecl* d = find_type_decl(ctx->module, type_name);
         if (d && d->kind == AST_DECL_TYPE) type_decl = &d->as.type_decl;
+      } else {
+          const AstTypeRef* type_hint = ctx->expected_type;
+          if (type_hint && type_hint->parts) {
+              Str type_name = type_hint->parts->text;
+              const AstDecl* d = find_type_decl(ctx->module, type_name);
+              if (d && d->kind == AST_DECL_TYPE) type_decl = &d->as.type_decl;
+          }
+          
+          if (!type_decl) {
+              // If no explicit type, try to infer it from the expression itself (e.g. via expected type in context)
+              Str inferred = infer_expr_type(ctx, expr);
+              if (inferred.len > 0) {
+                  const AstDecl* d = find_type_decl(ctx->module, inferred);
+                  if (d && d->kind == AST_DECL_TYPE) type_decl = &d->as.type_decl;
+              }
+          }
       }
       
       if (fprintf(out, "{ ") < 0) return false;
@@ -1890,9 +1921,23 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
               if (val_needs_addr) {
                   if (fprintf(out, "&(") < 0) return false;
               }
+
+              ctx->expected_type = stmt->as.def_stmt.type;
+
+              // Fix: If it's an object literal being assigned, we need a C cast (Type){...}
+              if (stmt->as.def_stmt.value->kind == AST_EXPR_OBJECT && !stmt->as.def_stmt.value->as.object_literal.type) {
+                  if (stmt->as.def_stmt.type) {
+                      fprintf(out, "(");
+                      if (!emit_type_ref_as_c_type(ctx, stmt->as.def_stmt.type, out)) return false;
+                      fprintf(out, ")");
+                  }
+              }
+
               if (!emit_expr(ctx, stmt->as.def_stmt.value, out, PREC_LOWEST)) {
+                ctx->expected_type = NULL;
                 return false;
               }
+              ctx->expected_type = NULL;
               if (val_needs_addr) {
                   if (fprintf(out, ")") < 0) return false;
               }
@@ -1977,6 +2022,10 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
           if (fprintf(out, "&(") < 0) return false;
       }
 
+      if (stmt->as.assign_stmt.target->kind == AST_EXPR_IDENT) {
+          ctx->expected_type = get_local_type_ref(ctx, stmt->as.assign_stmt.target->as.ident);
+      }
+
       // Fix: If it's an object literal being assigned, we need a C cast (Type){...}
       if (stmt->as.assign_stmt.value->kind == AST_EXPR_OBJECT && !stmt->as.assign_stmt.value->as.object_literal.type) {
           Str target_type = infer_expr_type(ctx, stmt->as.assign_stmt.target);
@@ -1985,7 +2034,11 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
           }
       }
 
-      if (!emit_expr(ctx, stmt->as.assign_stmt.value, out, PREC_LOWEST)) return false;
+      if (!emit_expr(ctx, stmt->as.assign_stmt.value, out, PREC_LOWEST)) {
+          ctx->expected_type = NULL;
+          return false;
+      }
+      ctx->expected_type = NULL;
       if (val_needs_addr) {
           if (fprintf(out, ")") < 0) return false;
       }
