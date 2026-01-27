@@ -27,7 +27,8 @@ if [ ! -d "$TEST_DIR" ]; then
   exit 0
 fi
 
-TEST_FILES=$(find "$TEST_DIR" -name "*.rae" | sort)
+# Find all test directories (directories containing main.rae)
+TEST_FILES=$(find "$TEST_DIR" -name "main.rae" | sort)
 
 if [ -z "$TEST_FILES" ]; then
   echo "No test files found in $TEST_DIR"
@@ -38,30 +39,6 @@ if [ -n "$TARGET_FILTER" ]; then
   echo "Target filter: $TARGET_FILTER"
   echo
 fi
-
-should_run_test() {
-  local name="$1"
-  case "$TARGET_FILTER" in
-    compiled)
-      case "$name" in
-        400_*|401_*|402_*|403_*|404_*|405_*|406_*) return 0 ;;
-        *) return 1 ;;
-      esac
-      ;;
-    hybrid)
-      case "$name" in
-        407_*|408_*) return 0 ;;
-        *) return 1 ;;
-      esac
-      ;;
-    ""|live)
-      return 0
-      ;;
-    *)
-      return 0
-      ;;
-  esac
-}
 
 # Targets to test
 if [ -n "$TARGET_FILTER" ]; then
@@ -78,13 +55,14 @@ for TARGET in "${TARGETS[@]}"; do
     case "$TEST_FILE" in
       */helpers/*)
         continue
-        ;;
+        ;; 
     esac
     TEST_DIRNAME=$(dirname "$TEST_FILE")
     if [ -f "$TEST_DIRNAME/.raetesthelper" ]; then
       continue
     fi
-    TEST_NAME=$(basename "$TEST_FILE" .rae)
+    # Test name is the directory name
+    TEST_NAME=$(basename "$TEST_DIRNAME")
     TEST_NUMBER="${TEST_NAME%%_*}"
 
     # Apply name filter if provided
@@ -96,21 +74,20 @@ for TARGET in "${TARGETS[@]}"; do
     
     # Check if we should skip this test (hardcoded or RAE_SKIP_TESTS env var)
     SKIP_LIST=" $HARDCODED_DISABLED $(echo "${RAE_SKIP_TESTS:-}" | tr ',' ' ') "
-    TEST_NUMBER="${TEST_NAME%%_*}"
     if [[ "$SKIP_LIST" =~ " $TEST_NAME " ]] || [[ "$SKIP_LIST" =~ " $TEST_NUMBER " ]]; then
       echo "SKIP: $TEST_NAME (disabled)"
       continue
     fi
     
-    EXPECT_FILE="${TEST_FILE%.rae}.expect"
+    EXPECT_FILE="$TEST_DIRNAME/expected.txt"
     if [ ! -f "$EXPECT_FILE" ]; then
       if [ "$TARGET" = "${TARGETS[0]}" ]; then
-        echo "SKIP: $TEST_NAME (no .expect file)"
+        echo "SKIP: $TEST_NAME (no expected.txt file)"
       fi
       continue
     fi
 
-    CMD_FILE="${TEST_FILE%.rae}.cmd"
+    CMD_FILE="$TEST_DIRNAME/config.cmd"
     CMD_ARGS=("parse") # Default
     if [ -f "$CMD_FILE" ]; then
       CMD_LINE=$(head -n 1 "$CMD_FILE" | tr -d '\r')
@@ -125,15 +102,18 @@ for TARGET in "${TARGETS[@]}"; do
     if [ "$TARGET" = "compiled" ] && [ -z "$TEST_NAME_FILTER" ]; then
         case "$TEST_NAME" in
             # Skip build tests that target live/hybrid specifically
-            407_*|408_*) RUN_THIS=0 ;;
+            407_*|408_*)
+                RUN_THIS=0 ;;
             # Skip tests that don't have func main() (C backend expects a main)
-            000_*|100_*|101_*|102_*|103_*|104_*|105_*|340_*) RUN_THIS=0 ;;
+            000_*|100_*|101_*|102_*|103_*|104_*|105_*|340_*) 
+                RUN_THIS=0 ;;
             # Skip tests known to have different output or no support in C yet
-            306_*|318_*|332_*|334_*|338_*|339_*|343_*) RUN_THIS=0 ;;
+            306_*|318_*|332_*|334_*|338_*|339_*|343_*) 
+                RUN_THIS=0 ;;
         esac
         # C backend only handles 'run' or 'build' commands in this loop
         case "${CMD_ARGS[0]}" in
-            lex|parse|format|pack) RUN_THIS=0 ;;
+            lex|parse|format|pack) RUN_THIS=0 ;; 
         esac
     fi
 
@@ -145,14 +125,6 @@ for TARGET in "${TARGETS[@]}"; do
     DISPLAY_NAME="$TEST_NAME [$TARGET]"
     if [[ "${CMD_ARGS[0]}" =~ ^(parse|lex|format)$ ]]; then
         DISPLAY_NAME="$TEST_NAME"
-    fi
-
-    # Determine if we should use --no-implicit
-    # Only use it for files directly in tests/cases (to avoid neighbor pollution)
-    # Don't use it for subdirectories (which are likely implicit projects)
-    NO_IMPLICIT_FLAG=""
-    if [ "$(dirname "$TEST_FILE")" = "$TEST_DIR" ]; then
-        NO_IMPLICIT_FLAG="--no-implicit"
     fi
 
     TMP_OUTPUT_FILE=""
@@ -184,17 +156,9 @@ for TARGET in "${TARGETS[@]}"; do
 
     # Final command assembly
     if [ "${CMD_RUN_ARGS[0]}" = "run" ]; then
-        if [ $APPEND_TEST_FILE -eq 1 ]; then
-            CMD_RUN_ARGS=("run" "--target" "$TARGET" $NO_IMPLICIT_FLAG "$TEST_FILE")
-        else
-            CMD_RUN_ARGS=("run" "--target" "$TARGET" $NO_IMPLICIT_FLAG "$TMP_INPUT_FILE")
-        fi
+        CMD_RUN_ARGS=("run" "--target" "$TARGET" "$TEST_FILE")
     elif [ "${CMD_RUN_ARGS[0]}" = "build" ]; then
-        if [ $APPEND_TEST_FILE -eq 1 ]; then
-            CMD_RUN_ARGS=("build" $NO_IMPLICIT_FLAG "${CMD_RUN_ARGS[@]:1}" "$TEST_FILE")
-        else
-            CMD_RUN_ARGS=("build" $NO_IMPLICIT_FLAG "${CMD_RUN_ARGS[@]:1}" "$TMP_INPUT_FILE")
-        fi
+        CMD_RUN_ARGS=("build" "${CMD_RUN_ARGS[@]:1}" "$TEST_FILE")
     elif [ $APPEND_TEST_FILE -eq 1 ]; then
       CMD_RUN_ARGS+=("$TEST_FILE")
     fi
@@ -240,13 +204,12 @@ for TARGET in "${TARGETS[@]}"; do
 done
 
 echo
-echo "=========================================="
-echo "Results: $PASSED passed, $FAILED failed"
-echo "=========================================="
+echo "==========================================
+Results: $PASSED passed, $FAILED failed
+=========================================="
 
 # Update test history
 if [ -f "tools/update_test_history.py" ]; then
-  # Collect all PASSED_TEST_NAMES into a list
   ./tools/update_test_history.py $PASSED_TEST_NAMES
 fi
 

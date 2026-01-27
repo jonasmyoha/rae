@@ -21,23 +21,23 @@ func updatePosition(p: mod Point, v: Velocity) {
 
 func main() {
   # 1. Copy semantics (=)
-  def v1: Velocity = { dx: 1.0, dy: 1.0 }
+  def v1: Velocity = {dx: 1.0, dy: 1.0}
   # Deep copy
   def v2: Velocity = v1
   v2.dx = 2.0
   log("v1.dx (should be 1.0):")
   log(v1.dx)
-  log("v2.dx (should be 2.0):")
   # 2. Binding semantics (=>)
+  log("v2.dx (should be 2.0):")
   log(v2.dx)
-  def p: Point = { x: 0.0, y: 0.0 }
+  def p: Point = {x: 0.0, y: 0.0}
   # Mutable binding
   def pRef: mod Point => p
   pRef.x = 10.0
-  log("p.x after pRef modification (should be 10.0):")
   # 3. Complex types: opt mod
+  log("p.x after pRef modification (should be 10.0):")
   log(p.x)
-  def target: Point = { x: 5.0, y: 5.0 }
+  def target: Point = {x: 5.0, y: 5.0}
   def selected: opt mod Point => target
   match selected {
     default {
