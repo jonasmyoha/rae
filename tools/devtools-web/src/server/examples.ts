@@ -71,6 +71,7 @@ const EXAMPLE_ORDER: Record<string, number> = {
   "05_list_basic": 5,
   "06_list_loop": 6,
   "07_list_benchmark": 7,
+  "08_enum": 8,
   "10_memory_basics": 10,
   "11_memory_model": 11,
   "12_ref_escape": 12,
