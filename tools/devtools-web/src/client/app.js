@@ -2504,10 +2504,10 @@ function scheduleLineChartRender() {
   if (!statsViewContainer || !statsViewContainer.classList.contains("is-active")) return;
   if (lineChartFrame) cancelAnimationFrame(lineChartFrame);
   lineChartFrame = requestAnimationFrame(() => {
-    if (lineCountCanvas && compilerLineMetrics.length) {
+    if (lineCountCanvas) {
       drawMetricChart(lineCountCanvas, compilerLineMetrics, "lines", lineCountEmpty);
     }
-    if (testDurationCanvas && testDurationMetrics.length) {
+    if (testDurationCanvas) {
       drawMetricChart(
         testDurationCanvas,
         [...testDurationMetrics].reverse(),
@@ -2515,7 +2515,7 @@ function scheduleLineChartRender() {
         testDurationEmpty
       );
     }
-    if (buildDurationCanvas && buildDurationMetrics.length) {
+    if (buildDurationCanvas) {
       drawMetricChart(
         buildDurationCanvas,
         [...buildDurationMetrics].reverse(),
@@ -2533,7 +2533,13 @@ function drawMetricChart(canvas, entries, valueKey, emptyEl) {
   if (!ctx) return;
   if (!entries.length) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    if (emptyEl) emptyEl.hidden = false;
+    if (emptyEl) {
+      emptyEl.hidden = false;
+      // Use original text if available, or a generic one
+      if (emptyEl.id === "line-count-empty") emptyEl.textContent = "No line counts recorded yet.";
+      else if (emptyEl.id === "test-duration-empty") emptyEl.textContent = "No test runs recorded yet.";
+      else if (emptyEl.id === "build-duration-empty") emptyEl.textContent = "No build runs recorded yet.";
+    }
     return;
   }
   if (emptyEl) {
