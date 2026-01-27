@@ -54,13 +54,13 @@ export class ExampleRunner {
     private broadcast: BroadcastFn
   ) {}
 
-  run(entry: string, options: ExampleRunOptions = {}) {
+  async run(entry: string, options: ExampleRunOptions = {}) {
     if (!entry) {
       this.broadcastStatus("Example entry path missing.");
       return;
     }
 
-    this.stop();
+    await this.stop();
 
     const target = resolveTarget(this.config, options.targetId);
     const action = options.action;
@@ -78,7 +78,8 @@ export class ExampleRunner {
     const child = spawn(prepared.command, {
       cwd,
       shell: true,
-      env: process.env
+      env: process.env,
+      detached: true
     });
 
     this.activeRun = {
@@ -233,15 +234,52 @@ export class ExampleRunner {
     this.activeRun = null;
   }
 
-  stop() {
+  async stop(): Promise<void> {
     if (!this.activeRun) return;
-    this.activeRun.stopRequested = true;
-    try {
-      this.activeRun.process.kill("SIGINT");
-    } catch (error) {
-      console.warn("[examples] Failed to kill process", error);
-      this.activeRun.stopRequested = false;
+    
+    const run = this.activeRun;
+    const pid = run.process.pid;
+    
+    if (!pid) {
+      this.activeRun = null;
+      return;
     }
+
+    run.stopRequested = true;
+
+    return new Promise<void>((resolve) => {
+      const timeout = setTimeout(() => {
+        try {
+          if (os.platform() === "win32") {
+            spawn("taskkill", ["/pid", pid.toString(), "/f", "/t"]);
+          } else {
+            process.kill(-pid, "SIGKILL");
+          }
+        } catch (e) {
+          // ignore
+        }
+      }, 3000);
+
+      run.process.on("close", () => {
+        clearTimeout(timeout);
+        this.activeRun = null;
+        resolve();
+      });
+
+      try {
+        if (os.platform() === "win32") {
+          spawn("taskkill", ["/pid", pid.toString(), "/t"]);
+        } else {
+          // Kill the entire process group
+          process.kill(-pid, "SIGINT");
+        }
+      } catch (error) {
+        console.warn("[examples] Failed to kill process group", error);
+        clearTimeout(timeout);
+        this.activeRun = null;
+        resolve();
+      }
+    });
   }
 
   private prepareCommand(

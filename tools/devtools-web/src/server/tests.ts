@@ -136,7 +136,8 @@ export class TestRunner {
     const child = spawn(command, {
       cwd,
       shell: true,
-      env
+      env,
+      detached: true
     });
 
     this.activeRun.target = target;
@@ -282,13 +283,18 @@ export class TestRunner {
     this.activeRun = null;
   }
 
-  stopTests(targetId?: string) {
-    if (this.activeRun) {
-      this.broadcastStatus(`Stopping test run ${this.activeRun.id}...`);
-      try {
-        this.activeRun.process?.kill("SIGINT");
-      } catch (error) {
-        console.warn("[tests] Failed to kill active process", error);
+  async stopTests(targetId?: string): Promise<void> {
+    const run = this.activeRun;
+    if (run && run.process) {
+      this.broadcastStatus(`Stopping test run ${run.id}...`);
+      const pid = run.process.pid;
+      if (pid) {
+        try {
+          // Kill the entire process group
+          process.kill(-pid, "SIGTERM");
+        } catch (error) {
+          console.warn("[tests] Failed to kill active process group", error);
+        }
       }
     }
 
@@ -297,21 +303,27 @@ export class TestRunner {
     const stopScript = "./compiler/tools/stop_tests_and_examples.sh";
     
     this.broadcastStatus("Running cleanup script...");
-    const child = spawn("bash", [stopScript], {
-      cwd,
-      shell: true,
-      env: process.env
-    });
+    
+    return new Promise<void>((resolve) => {
+      const child = spawn("bash", [stopScript], {
+        cwd,
+        shell: true,
+        env: process.env
+      });
 
-    child.on("error", (error) => {
-      this.broadcastStatus(`Error running cleanup script: ${error.message}`);
-    });
+      child.on("error", (error) => {
+        this.broadcastStatus(`Error running cleanup script: ${error.message}`);
+        if (this.activeRun) this.cleanupActiveRun();
+        resolve();
+      });
 
-    child.on("close", (code) => {
-      this.broadcastStatus(`Cleanup script finished (exit ${code})`);
-      if (this.activeRun) {
-          this.cleanupActiveRun();
-      }
+      child.on("close", (code) => {
+        this.broadcastStatus(`Cleanup script finished (exit ${code})`);
+        if (this.activeRun) {
+            this.cleanupActiveRun();
+        }
+        resolve();
+      });
     });
   }
 
