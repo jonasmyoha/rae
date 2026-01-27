@@ -363,7 +363,8 @@ function createServerInfoMessage(): ServerEvent {
     version: BUILD_VERSION,
     startedAt: SERVER_START.toISOString(),
     targets: describeTargets(),
-    defaultTargetId: CONFIG.defaultTarget
+    defaultTargetId: CONFIG.defaultTarget,
+    exampleCategories: CONFIG.exampleCategories
   };
 }
 
