@@ -219,7 +219,7 @@ const server = Bun.serve<SocketData>({
       const mode = resolveExampleMode(payload);
       const rawTargetId = typeof payload.targetId === "string" ? payload.targetId : undefined;
       const targetId = rawTargetId ?? action?.targetId ?? undefined;
-      exampleRunner.run(entry, {
+      await exampleRunner.run(entry, {
         mode,
         targetId,
         watch: Boolean(payload.watch),
@@ -234,7 +234,7 @@ const server = Bun.serve<SocketData>({
     }
 
     if (url.pathname === "/api/examples/stop" && req.method === "POST") {
-      exampleRunner.stop();
+      await exampleRunner.stop();
       return new Response(JSON.stringify({ ok: true }), {
         headers: { "Content-Type": "application/json" }
       });
@@ -292,7 +292,7 @@ setInterval(() => {
   broadcastHeartbeat();
 }, HEARTBEAT_INTERVAL_MS);
 
-function handleClientEvent(event: ClientEvent) {
+async function handleClientEvent(event: ClientEvent) {
   if (event.type === "client-hello") {
     console.log(`[ws] Client connected with version ${event.version}`);
     broadcastStatus(`Client connected (v${event.version})`);
@@ -304,8 +304,8 @@ function handleClientEvent(event: ClientEvent) {
   }
 
   if (event.type === "stop-tests") {
-    testRunner.stopTests(event.targetId);
-    exampleRunner.stop();
+    await testRunner.stopTests(event.targetId);
+    await exampleRunner.stop();
   }
 
   if (event.type === "run-build") {
@@ -329,7 +329,7 @@ function handleClientEvent(event: ClientEvent) {
       }
     }
     const targetId = event.targetId ?? actionMeta?.targetId;
-    exampleRunner.run(event.entry, {
+    await exampleRunner.run(event.entry, {
       mode,
       targetId,
       watch: event.watch,
