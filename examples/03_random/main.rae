@@ -4,13 +4,15 @@ func main() {
   setTargetFPS(fps: 60)
   seed(n: 42)
   def frameCount: Int = -1
-  
-  def darkGray: Color = { r: 20, g: 20, b: 20, a: 255 }
-
+  def darkGray: Color = {
+    r: 20,
+    g: 20,
+    b: 20,
+    a: 255,
+  }
   loop windowShouldClose() is 0 {
-    frameCount++
     # log("frame: {frameCount} Sleeping for 10ms...")
-    
+    frameCount++
     beginDrawing()
     def i: Int = 0
     loop i < 5 {
@@ -20,12 +22,20 @@ func main() {
       def r: Int = random(min: 50, max: 255)
       def g: Int = random(min: 50, max: 255)
       def b: Int = random(min: 50, max: 255)
-      
-      def color: Color = { r: r, g: g, b: b, a: 150 }
-      drawCircle(x: x, y: y, radius: radius, color: color)
+      def color: Color = {
+        r: r,
+        g: g,
+        b: b,
+        a: 150,
+      }
+      drawCircle(
+        x: x,
+        y: y,
+        radius: radius,
+        color: color,
+      )
       i = i + 1
     }
-    
     # Press Space to clear
     if isKeyDown(key: 32) is 1 {
       clearBackground(color: darkGray)

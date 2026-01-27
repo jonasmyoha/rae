@@ -1,58 +1,47 @@
 import list2_int
-
 func main() {
   log("List2Int Library Test")
   def list: List2Int = createList2Int(initialCap: 2)
-  
   # 1. Test basic adds and grow
   add(this: list, value: 10)
   add(this: list, value: 20)
   add(this: list, value: 30)
-  
   log("Length (should be 3):")
-  log(list.length)
-  
   # 2. Test insert
+  log(list.length)
   log("Inserting 15 at index 1...")
-  insert(this: list, index: 1, value: 15)
   # [10, 15, 20, 30]
-  
+  insert(this: list, index: 1, value: 15)
   log("Item at 1 (should be 15):")
   log(get(list, index: 1))
   log("Item at 2 (should be 20):")
-  log(get(list, index: 2))
-  
   # 3. Test pop
+  log(get(list, index: 2))
   log("Popped value (should be 30):")
   log(pop(list))
   log("New length (should be 3):")
-  log(list.length)
-  
   # 4. Test contains
+  log(list.length)
   log("Contains 15? (should be true):")
   log(contains(list, value: 15))
   log("Contains 100? (should be false):")
-  log(contains(list, value: 100))
-  
   # 5. Test remove
+  log(contains(list, value: 100))
   log("Removing index 0...")
-  remove(this: list, index: 0)
   # [15, 20]
+  remove(this: list, index: 0)
   log("Item at 0 (should be 15):")
-  log(get(list, index: 0))
-  
   # 6. Final iteration
+  log(get(list, index: 0))
   log("Final list items via buffer loop (includes capacity padding):")
-  loop item in list.data {
-     log(item)
+  loop item: Int in list.data {
+    log(item)
   }
-  
   log("Final list items via length loop:")
   def i: Int = 0
   loop i < list.length {
     log(get(list, index: i))
     i = i + 1
   }
-  
   log("Done.")
 }
