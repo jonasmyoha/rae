@@ -833,6 +833,15 @@ static void pp_print_assign_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
   pp_newline(pp);
 }
 
+static void pp_print_defer_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
+  pp_check_comments(pp, stmt->line);
+  pp_write(pp, "defer ");
+  pp_begin_block(pp);
+  pp_print_block_body(pp, stmt->as.defer_stmt.block);
+  pp_end_block(pp);
+  pp_newline(pp);
+}
+
 static void pp_print_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
   switch (stmt->kind) {
     case AST_STMT_DEF: pp_print_def_stmt(pp, stmt); break;
@@ -847,6 +856,7 @@ static void pp_print_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
     case AST_STMT_LOOP: pp_print_loop_stmt(pp, stmt); break;
     case AST_STMT_MATCH: pp_print_match_stmt(pp, stmt); break;
     case AST_STMT_ASSIGN: pp_print_assign_stmt(pp, stmt); break;
+    case AST_STMT_DEFER: pp_print_defer_stmt(pp, stmt); break;
   }
 }
 

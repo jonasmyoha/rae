@@ -1,0 +1,27 @@
+import string
+
+func main() {
+  def s: String = "  hello world  "
+  def t: String = s.trim()
+  log("Trimmed: '{t}'")
+  
+  log("Starts with 'hello': {t.startsWith(prefix: "hello")}")
+  log("Starts with 'world': {t.startsWith(prefix: "world")}")
+  
+  log("Ends with 'world': {t.endsWith(suffix: "world")}")
+  log("Ends with 'hello': {t.endsWith(suffix: "hello")}")
+  
+  log("Index of 'world': {t.indexOf(sub: "world")}")
+  log("Index of 'none': {t.indexOf(sub: "none")}")
+  
+  log("Contains 'lo wo': {t.contains(sub: "lo wo")}")
+  
+  def csv: String = "a,b,c,d"
+  def parts: List(String) = csv.split(sep: ",")
+  log("CSV parts count: {parts.length()}")
+  def i: Int = 0
+  loop i < parts.length() {
+    log("Part {i}: '{parts.get(index: i)}'")
+    i = i + 1
+  }
+}

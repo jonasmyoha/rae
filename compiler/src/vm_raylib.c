@@ -92,16 +92,66 @@ static bool native_endDrawing(struct VM* vm, VmNativeResult* out, const Value* a
 }
 
 static bool native_clearBackground(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+  (void)vm; (void)data;
+  if (count != 4) {
+      fprintf(stderr, "error: clearBackground expects 4 args, got %zu\n", count);
+      return false;
+  }
+  unsigned char r = (args[0].type == VAL_FLOAT) ? (unsigned char)args[0].as.float_value : (unsigned char)args[0].as.int_value;
+  unsigned char g = (args[1].type == VAL_FLOAT) ? (unsigned char)args[1].as.float_value : (unsigned char)args[1].as.int_value;
+  unsigned char b = (args[2].type == VAL_FLOAT) ? (unsigned char)args[2].as.float_value : (unsigned char)args[2].as.int_value;
+  unsigned char a = (args[3].type == VAL_FLOAT) ? (unsigned char)args[3].as.float_value : (unsigned char)args[3].as.int_value;
+  ClearBackground((Color){r, g, b, a});
+  out->has_value = false;
+  return true;
+}
+
+static bool native_loadTexture(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
-    if (count != 4) {
-        fprintf(stderr, "error: clearBackground expects 4 args, got %zu\n", count);
-        return false;
-    }
-    unsigned char r = (args[0].type == VAL_FLOAT) ? (unsigned char)args[0].as.float_value : (unsigned char)args[0].as.int_value;
-    unsigned char g = (args[1].type == VAL_FLOAT) ? (unsigned char)args[1].as.float_value : (unsigned char)args[1].as.int_value;
-    unsigned char b = (args[2].type == VAL_FLOAT) ? (unsigned char)args[2].as.float_value : (unsigned char)args[2].as.int_value;
-    unsigned char a = (args[3].type == VAL_FLOAT) ? (unsigned char)args[3].as.float_value : (unsigned char)args[3].as.int_value;
-    ClearBackground((Color){r, g, b, a});
+    if (count != 1 || args[0].type != VAL_STRING) return false;
+    Texture t = LoadTexture(args[0].as.string_value.chars);
+    out->has_value = true;
+    out->value = value_object(5);
+    out->value.as.object_value.fields[0] = value_int((int64_t)t.id);
+    out->value.as.object_value.fields[1] = value_int((int64_t)t.width);
+    out->value.as.object_value.fields[2] = value_int((int64_t)t.height);
+    out->value.as.object_value.fields[3] = value_int((int64_t)t.mipmaps);
+    out->value.as.object_value.fields[4] = value_int((int64_t)t.format);
+    return true;
+}
+
+static bool native_unloadTexture(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 5) return false; // Texture flattened
+    Texture t = {
+        .id = (unsigned int)args[0].as.int_value,
+        .width = (int)args[1].as.int_value,
+        .height = (int)args[2].as.int_value,
+        .mipmaps = (int)args[3].as.int_value,
+        .format = (int)args[4].as.int_value
+    };
+    UnloadTexture(t);
+    out->has_value = false;
+    return true;
+}
+
+static bool native_drawTexture(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 11) return false; // Texture(5) + x(1) + y(1) + Color(4)
+    Texture t = {
+        .id = (unsigned int)args[0].as.int_value,
+        .width = (int)args[1].as.int_value,
+        .height = (int)args[2].as.int_value,
+        .mipmaps = (int)args[3].as.int_value,
+        .format = (int)args[4].as.int_value
+    };
+    int x = (args[5].type == VAL_FLOAT) ? (int)args[5].as.float_value : (int)args[5].as.int_value;
+    int y = (args[6].type == VAL_FLOAT) ? (int)args[6].as.float_value : (int)args[6].as.int_value;
+    unsigned char r = (args[7].type == VAL_FLOAT) ? (unsigned char)args[7].as.float_value : (unsigned char)args[7].as.int_value;
+    unsigned char g = (args[8].type == VAL_FLOAT) ? (unsigned char)args[8].as.float_value : (unsigned char)args[8].as.int_value;
+    unsigned char b = (args[9].type == VAL_FLOAT) ? (unsigned char)args[9].as.float_value : (unsigned char)args[9].as.int_value;
+    unsigned char a = (args[10].type == VAL_FLOAT) ? (unsigned char)args[10].as.float_value : (unsigned char)args[10].as.int_value;
+    DrawTexture(t, x, y, (Color){r, g, b, a});
     out->has_value = false;
     return true;
 }
@@ -393,6 +443,9 @@ bool vm_registry_register_raylib(VmRegistry* registry) {
     ok &= vm_registry_register_native(registry, "beginDrawing", native_beginDrawing, NULL);
     ok &= vm_registry_register_native(registry, "endDrawing", native_endDrawing, NULL);
     ok &= vm_registry_register_native(registry, "clearBackground", native_clearBackground, NULL);
+    ok &= vm_registry_register_native(registry, "loadTexture", native_loadTexture, NULL);
+    ok &= vm_registry_register_native(registry, "unloadTexture", native_unloadTexture, NULL);
+    ok &= vm_registry_register_native(registry, "drawTexture", native_drawTexture, NULL);
     ok &= vm_registry_register_native(registry, "drawRectangle", native_drawRectangle, NULL);
     ok &= vm_registry_register_native(registry, "drawRectangleLines", native_drawRectangleLines, NULL);
     ok &= vm_registry_register_native(registry, "drawCircle", native_drawCircle, NULL);
