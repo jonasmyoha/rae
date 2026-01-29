@@ -179,6 +179,18 @@ static bool native_isKeyDown(struct VM* vm, VmNativeResult* out, const Value* ar
     return true;
 }
 
+static bool native_isKeyPressed(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 1) {
+        fprintf(stderr, "error: isKeyPressed expects 1 arg, got %zu\n", count);
+        return false;
+    }
+    int key = (args[0].type == VAL_FLOAT) ? (int)args[0].as.float_value : (int)args[0].as.int_value;
+    out->has_value = true;
+    out->value = value_int(IsKeyPressed(key) ? 1 : 0);
+    return true;
+}
+
 static bool native_drawCube(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
     if (count != 10) {
@@ -360,6 +372,7 @@ bool vm_registry_register_raylib(VmRegistry* registry) {
     ok &= vm_registry_register_native(registry, "endMode3D", native_endMode3D, NULL);
     ok &= vm_registry_register_native(registry, "setTargetFPS", native_setTargetFPS, NULL);
     ok &= vm_registry_register_native(registry, "isKeyDown", native_isKeyDown, NULL);
+    ok &= vm_registry_register_native(registry, "isKeyPressed", native_isKeyPressed, NULL);
     ok &= vm_registry_register_native(registry, "getTime", native_getTime, NULL);
     ok &= vm_registry_register_native(registry, "colorFromHSV", native_colorFromHSV, NULL);
     return ok;

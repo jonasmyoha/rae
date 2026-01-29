@@ -1,5 +1,6 @@
 import raylib
 import ai
+
 # -- Components (Plain Data Types) --
 type PaddleTransform {
   x: Float
@@ -18,10 +19,10 @@ func movementSystem(pos: mod PaddleTransform, vel: view Velocity) {
 }
 
 func bounceSystem(
-  pos: view PaddleTransform,
-  vel: mod Velocity,
-  radius: Float,
-  height: Float,
+  pos: view PaddleTransform
+  vel: mod Velocity
+  radius: Float
+  height: Float
 ) {
   if pos.y < radius {
     vel.dy = 4.0
@@ -32,12 +33,12 @@ func bounceSystem(
 }
 
 func paddleCollisionSystem(
-  bPos: view PaddleTransform,
-  bVel: mod Velocity,
-  pPos: view PaddleTransform,
-  pWidth: Float,
-  pHeight: Float,
-  isLeft: Int,
+  bPos: view PaddleTransform
+  bVel: mod Velocity
+  pPos: view PaddleTransform
+  pWidth: Float
+  pHeight: Float
+  isLeft: Int
 ) {
   if isLeft is 1 {
     if bPos.x - 10.0 < pPos.x + pWidth {
@@ -65,10 +66,10 @@ func paddleCollisionSystem(
 }
 
 func paddleInputSystem(
-  pos: mod PaddleTransform,
-  speed: Float,
-  height: Float,
-  pHeight: Float,
+  pos: mod PaddleTransform
+  speed: Float
+  height: Float
+  pHeight: Float
 ) {
   # W (87) / Up (265)
   if isKeyDown(key: 87) is 1 {
@@ -95,48 +96,48 @@ func paddleInputSystem(
 
 func drawUISystem(p1Score: Int, p2Score: Int, winner: Int) {
   def red: Color = {
-    r: 235,
-    g: 0,
-    b: 0,
-    a: 255,
+    r: 235
+    g: 0
+    b: 0
+    a: 255
   }
   def green: Color = {
-    r: 5,
-    g: 145,
-    b: 0,
-    a: 255,
+    r: 5
+    g: 145
+    b: 0
+    a: 255
   }
   def teal: Color = {
-    r: 5,
-    g: 145,
-    b: 120,
-    a: 255,
+    r: 5
+    g: 145
+    b: 120
+    a: 255
   }
   if winner <= 0 {
     drawText(
-      text: "{p1Score} - {p2Score}",
-      x: 350.0,
-      y: 20.0,
-      fontSize: 40.0,
-      color: red,
+      text: "{p1Score} - {p2Score}"
+      x: 350.0
+      y: 20.0
+      fontSize: 40.0
+      color: red
     )
   }
   if winner is 1 {
     drawText(
-      text: "YOU WIN",
-      x: 350.0,
-      y: 200.0,
-      fontSize: 40.0,
-      color: green,
+      text: "YOU WIN"
+      x: 350.0
+      y: 200.0
+      fontSize: 40.0
+      color: green
     )
   }
   if winner is 2 {
     drawText(
-      text: "CPU WINS",
-      x: 350.0,
-      y: 200.0,
-      fontSize: 40.0,
-      color: teal,
+      text: "CPU WINS"
+      x: 350.0
+      y: 200.0
+      fontSize: 40.0
+      color: teal
     )
   }
 }
@@ -146,60 +147,60 @@ func main() {
   initWindow(width: 800, height: 450, title: "Rae Advanced Pong (ECS)")
   setTargetFPS(fps: 60)
   def white: Color = {
-    r: 255,
-    g: 255,
-    b: 255,
-    a: 255,
+    r: 255
+    g: 255
+    b: 255
+    a: 255
   }
   def darkGray: Color = {
-    r: 20,
-    g: 20,
-    b: 20,
-    a: 255,
+    r: 20
+    g: 20
+    b: 20
+    a: 255
   }
   def p1Pos: PaddleTransform = {x: 20.0, y: 175.0}
   def p2Pos: PaddleTransform = {x: 760.0, y: 175.0}
   def bPos: PaddleTransform = {x: 400.0, y: 225.0}
   def bVel: Velocity = {dx: 4.0, dy: 4.0}
   def aiState: AIState = {
-    state: AIPhase.Observing,
-    timer: 0,
-    targetY: 225.0,
-    decision: AIDecision.None,
+    state: AIPhase.Observing
+    timer: 0
+    targetY: 225.0
+    decision: AIDecision.None
   }
   def p1Score: Int = 0
   def p2Score: Int = 0
   def winner: Int = 0
   loop windowShouldClose() is 0 {
     paddleInputSystem(
-      pos: p1Pos,
-      speed: 5.0,
-      height: 450.0,
-      pHeight: 100.0,
+      pos: p1Pos
+      speed: 5.0
+      height: 450.0
+      pHeight: 100.0
     )
     p2Pos.y = paddleAiSystem(ai: aiState, ballY: bPos.y, paddleY: p2Pos.y)
     movementSystem(pos: bPos, vel: bVel)
     bounceSystem(
-      pos: bPos,
-      vel: bVel,
-      radius: 10.0,
-      height: 450.0,
+      pos: bPos
+      vel: bVel
+      radius: 10.0
+      height: 450.0
     )
     paddleCollisionSystem(
-      bPos: bPos,
-      bVel: bVel,
-      pPos: p1Pos,
-      pWidth: 20.0,
-      pHeight: 100.0,
-      isLeft: 1,
+      bPos: bPos
+      bVel: bVel
+      pPos: p1Pos
+      pWidth: 20.0
+      pHeight: 100.0
+      isLeft: 1
     )
     paddleCollisionSystem(
-      bPos: bPos,
-      bVel: bVel,
-      pPos: p2Pos,
-      pWidth: 20.0,
-      pHeight: 100.0,
-      isLeft: 0,
+      bPos: bPos
+      bVel: bVel
+      pPos: p2Pos
+      pWidth: 20.0
+      pHeight: 100.0
+      isLeft: 0
     )
     if bPos.x < 0.0 {
       p2Score = p2Score + 1
@@ -223,26 +224,27 @@ func main() {
     clearBackground(color: darkGray)
     drawUISystem(p1Score: p1Score, p2Score: p2Score, winner: winner)
     drawRectangle(
-      x: 20.0,
-      y: p1Pos.y,
-      width: 20.0,
-      height: 100.0,
-      color: white,
+      x: 20.0
+      y: p1Pos.y
+      width: 20.0
+      height: 100.0
+      color: white
     )
     drawRectangle(
-      x: 760.0,
-      y: p2Pos.y,
-      width: 20.0,
-      height: 100.0,
-      color: white,
+      x: 760.0
+      y: p2Pos.y
+      width: 20.0
+      height: 100.0
+      color: white
     )
     drawCircle(
-      x: bPos.x,
-      y: bPos.y,
-      radius: 10.0,
-      color: white,
+      x: bPos.x
+      y: bPos.y
+      radius: 10.0
+      color: white
     )
     endDrawing()
   }
   closeWindow()
 }
+

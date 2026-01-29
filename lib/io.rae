@@ -1,5 +1,12 @@
-# IO library for Rae
-extern func readLine(): ret String
-extern func readChar(): ret Char
+# IO utilities for Rae
+func rae_io_read_line() extern ret String
 
-# log/logS are currently handled as intrinsics in the VM compiler
+func rae_io_read_char() extern ret Char
+
+func readLine() ret String {
+  ret rae_io_read_line()
+}
+
+func readChar() ret Char {
+  ret rae_io_read_char()
+}

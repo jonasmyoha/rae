@@ -1,5 +1,4 @@
 # Raylib wrapper for Rae
-
 type Color: c_struct {
   r: Int
   g: Int
@@ -26,84 +25,77 @@ type Camera3D: c_struct {
   projection: Int
 }
 
-extern func initWindow(width: Int, height: Int, title: String)
+func initWindow(width: Int, height: Int, title: String) extern
 
-extern func setConfigFlags(flags: Int)
+func setConfigFlags(flags: Int) extern
 
-extern func windowShouldClose(): ret Int
+func windowShouldClose() extern ret Int
 
-extern func closeWindow()
+func closeWindow() extern
 
-extern func beginDrawing()
+func beginDrawing() extern
 
-extern func endDrawing()
+func endDrawing() extern
 
-extern func clearBackground(color: Color)
+func clearBackground(color: Color) extern
 
-extern func drawRectangle(
-  x: Float,
-  y: Float,
-  width: Float,
-  height: Float,
+func drawRectangle(
+  x: Float
+  y: Float
+  width: Float
+  height: Float
   color: Color
-)
+) extern
 
-extern func drawCircle(
-  x: Float,
-  y: Float,
-  radius: Float,
+func drawCircle(x: Float, y: Float, radius: Float, color: Color) extern
+
+func drawText(
+  text: String
+  x: Float
+  y: Float
+  fontSize: Float
   color: Color
-)
+) extern
 
-extern func drawText(
-  text: String,
-  x: Float,
-  y: Float,
-  fontSize: Float,
+func drawCube(
+  pos: Vector3
+  width: Float
+  height: Float
+  length: Float
   color: Color
-)
+) extern
 
-extern func drawCube(
-  pos: Vector3,
-  width: Float,
-  height: Float,
-  length: Float,
+func drawCubeWires(
+  pos: Vector3
+  width: Float
+  height: Float
+  length: Float
   color: Color
-)
+) extern
 
-extern func drawCubeWires(
-  pos: Vector3,
-  width: Float,
-  height: Float,
-  length: Float,
+func drawSphere(centerPos: Vector3, radius: Float, color: Color) extern
+
+func drawCylinder(
+  position: Vector3
+  radiusTop: Float
+  radiusBottom: Float
+  height: Float
+  slices: Int
   color: Color
-)
+) extern
 
-extern func drawSphere(
-  centerPos: Vector3,
-  radius: Float,
-  color: Color
-)
+func drawGrid(slices: Int, spacing: Float) extern
 
-extern func drawCylinder(
-  position: Vector3,
-  radiusTop: Float,
-  radiusBottom: Float,
-  height: Float,
-  slices: Int,
-  color: Color
-)
+func beginMode3D(camera: Camera3D) extern
 
-extern func drawGrid(slices: Int, spacing: Float)
+func endMode3D() extern
 
-extern func beginMode3D(camera: Camera3D)
+func setTargetFPS(fps: Int) extern
 
-extern func endMode3D()
+func isKeyDown(key: Int) extern ret Int
 
-extern func setTargetFPS(fps: Int)
+func isKeyPressed(key: Int) extern ret Int
 
-extern func isKeyDown(key: Int): ret Int
+func getTime() extern ret Float
 
-extern func getTime(): ret Float
-
-extern func colorFromHSV(hue: Float, saturation: Float, value: Float): ret Color
+func colorFromHSV(hue: Float, saturation: Float, value: Float) extern ret Color

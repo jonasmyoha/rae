@@ -330,6 +330,35 @@ static bool native_rae_str_contains(struct VM* vm,
   return true;
 }
 
+static bool native_rae_str_eq(struct VM* vm,
+                               VmNativeResult* out_result,
+                               const Value* args,
+                               size_t arg_count,
+                               void* user_data) {
+  (void)vm; (void)user_data;
+  if (arg_count != 2) return false;
+  const Value* a_val = deref_value(&args[0]);
+  const Value* b_val = deref_value(&args[1]);
+  if (a_val->type != VAL_STRING || b_val->type != VAL_STRING) return false;
+  out_result->has_value = true;
+  out_result->value = value_bool(rae_ext_rae_str_eq(a_val->as.string_value.chars, b_val->as.string_value.chars));
+  return true;
+}
+
+static bool native_rae_str_hash(struct VM* vm,
+                                 VmNativeResult* out_result,
+                                 const Value* args,
+                                 size_t arg_count,
+                                 void* user_data) {
+  (void)vm; (void)user_data;
+  if (arg_count != 1) return false;
+  const Value* s_val = deref_value(&args[0]);
+  if (s_val->type != VAL_STRING) return false;
+  out_result->has_value = true;
+  out_result->value = value_int(rae_ext_rae_str_hash(s_val->as.string_value.chars));
+  return true;
+}
+
 static bool native_rae_str_to_f64(struct VM* vm,
                                    VmNativeResult* out_result,
                                    const Value* args,
@@ -537,6 +566,8 @@ static bool register_default_natives(VmRegistry* registry, TickCounter* tick_cou
   ok = vm_registry_register_native(registry, "rae_str_concat", native_rae_str_concat, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_str_len", native_rae_str_len, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_str_compare", native_rae_str_compare, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_str_eq", native_rae_str_eq, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_str_hash", native_rae_str_hash, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_str_sub", native_rae_str_sub, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_str_contains", native_rae_str_contains, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_str_to_f64", native_rae_str_to_f64, NULL) && ok;
@@ -2394,7 +2425,7 @@ static bool compile_file_chunk(const char* file_path,
                                WatchSources* watch_sources,
                                const char* project_root,
                                bool no_implicit) {
-  Arena* arena = arena_create(1024 * 1024);
+  Arena* arena = arena_create(16 * 1024 * 1024);
   if (!arena) {
     diag_fatal("could not allocate arena");
   }
@@ -2439,7 +2470,7 @@ static bool build_c_backend_output(const char* entry_file,
                                    const char* project_root,
                                    const char* out_file,
                                    bool no_implicit) {
-  Arena* arena = arena_create(1024 * 1024);
+  Arena* arena = arena_create(16 * 1024 * 1024);
   if (!arena) {
     diag_fatal("could not allocate arena");
   }
@@ -2483,7 +2514,7 @@ static bool build_vm_output(const char* entry_file,
   if (!ensure_parent_directory(out_path)) {
     return false;
   }
-  Arena* arena = arena_create(1024 * 1024);
+  Arena* arena = arena_create(16 * 1024 * 1024);
   if (!arena) {
     diag_fatal("could not allocate arena");
   }
@@ -2558,7 +2589,7 @@ static bool build_hybrid_output(const char* entry_file,
   }
   free(entry_stem);
 
-  Arena* arena = arena_create(1024 * 1024);
+  Arena* arena = arena_create(16 * 1024 * 1024);
   if (!arena) {
     diag_fatal("could not allocate arena");
   }
@@ -2817,7 +2848,7 @@ static int run_command(const char* cmd, int argc, char** argv) {
     fprintf(stderr, "error: could not read file '%s'\n", file_path);
     return 1;
   }
-  arena = arena_create(1024 * 1024);
+  arena = arena_create(16 * 1024 * 1024);
   if (!arena) {
     free(source);
     diag_fatal("could not allocate arena");

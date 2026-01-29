@@ -2,7 +2,16 @@ type Worker: priv {
   idx: Int
 }
 
-func launch(w: Worker): spawn ret Worker {
+func launch(w: Worker) spawn ret Worker {
   spawn start(idx: w.idx)
   ret w
+}
+
+func start(idx: Int) {
+  log("Worker {idx} started")
+}
+
+func main() {
+  def w: Worker = { idx: 1 }
+  launch(w: w)
 }

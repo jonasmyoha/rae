@@ -1,36 +1,54 @@
 # String utilities for Rae
-extern func rae_str_len(s: String): ret Int
-extern func rae_str_compare(a: String, b: String): ret Int
-extern func rae_str_concat(a: String, b: String): ret String
-extern func rae_str_sub(s: String, start: Int, len: Int): ret String
-extern func rae_str_contains(s: String, sub: String): ret Bool
-extern func rae_str_to_f64(s: String): ret Float
-extern func rae_str_to_i64(s: String): ret Int
+func rae_str_len(s: String) extern ret Int
 
-func length(this: String): ret Int {
+func rae_str_compare(a: String, b: String) extern ret Int
+
+func rae_str_eq(a: String, b: String) extern ret Bool
+
+func rae_str_hash(s: String) extern ret Int
+
+func rae_str_concat(a: String, b: String) extern ret String
+
+func rae_str_sub(s: String, start: Int, len: Int) extern ret String
+
+func rae_str_contains(s: String, sub: String) extern ret Bool
+
+func rae_str_to_f64(s: String) extern ret Float
+
+func rae_str_to_i64(s: String) extern ret Int
+
+func length(this: String) ret Int {
   ret rae_str_len(s: this)
 }
 
-func compare(this: String, other: String): ret Int {
+func compare(this: String, other: String) ret Int {
   ret rae_str_compare(a: this, b: other)
 }
 
-func concat(this: String, other: String): ret String {
+func equals(this: String, other: String) ret Bool {
+  ret rae_str_eq(a: this, b: other)
+}
+
+func hash(this: String) ret Int {
+  ret rae_str_hash(s: this)
+}
+
+func concat(this: String, other: String) ret String {
   ret rae_str_concat(a: this, b: other)
 }
 
-func sub(this: String, start: Int, len: Int): ret String {
+func sub(this: String, start: Int, len: Int) ret String {
   ret rae_str_sub(s: this, start: start, len: len)
 }
 
-func contains(this: String, sub: String): ret Bool {
+func contains(this: String, sub: String) ret Bool {
   ret rae_str_contains(s: this, sub: sub)
 }
 
-func toFloat(this: String): ret Float {
+func toFloat(this: String) ret Float {
   ret rae_str_to_f64(s: this)
 }
 
-func toInt(this: String): ret Int {
+func toInt(this: String) ret Int {
   ret rae_str_to_i64(s: this)
 }

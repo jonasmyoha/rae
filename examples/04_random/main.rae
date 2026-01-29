@@ -1,46 +1,38 @@
+import math
 import raylib
 func main() {
-  initWindow(width: 800, height: 450, title: "Rae Random Circles")
+  initWindow(width: 400, height: 400, title: "Rae Random Demo")
   setTargetFPS(fps: 60)
-  seed(n: 42)
-  def frameCount: Int = -1
-  def darkGray: Color = {
-    r: 20,
-    g: 20,
-    b: 20,
-    a: 255,
-  }
+  def bgColor: Color = {
+    r: 20
+    g: 20
+    b: 25
+    a: 255
+    }
   loop windowShouldClose() is 0 {
-    # log("frame: {frameCount} Sleeping for 10ms...")
-    frameCount++
     beginDrawing()
+    clearBackground(color: bgColor)
     def i: Int = 0
-    loop i < 5 {
-      def x: Float = random() * 800.0
-      def y: Float = random() * 450.0
-      def radius: Float = random() * 40.0 + 5.0
-      def r: Int = random(min: 50, max: 255)
-      def g: Int = random(min: 50, max: 255)
-      def b: Int = random(min: 50, max: 255)
-      def color: Color = {
-        r: r,
-        g: g,
-        b: b,
-        a: 150,
-      }
+    loop i < 10 {
+      def x: Float = random(min: 0, max: 400).toFloat()
+      def y: Float = random(min: 0, max: 400).toFloat()
+      def r: Float = random(min: 5, max: 20).toFloat()
       drawCircle(
-        x: x,
-        y: y,
-        radius: radius,
-        color: color,
+        x: x
+        y: y
+        radius: r
+        color: {
+          r: random(min: 100, max: 255)
+          g: random(min: 100, max: 255)
+          b: random(min: 100, max: 255)
+          a: 255
+                }
       )
       i = i + 1
-    }
-    # Press Space to clear
-    if isKeyDown(key: 32) is 1 {
-      clearBackground(color: darkGray)
     }
     endDrawing()
   }
   closeWindow()
 }
+
+
