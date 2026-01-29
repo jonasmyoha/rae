@@ -353,6 +353,15 @@ static bool is_primitive_type(Str type_name) {
 }
 
 bool collect_metadata(const char* file_path, const AstModule* module, FunctionTable* funcs, TypeTable* types, EnumTable* enums) {
+  if (!module) return true;
+
+  // Process imports first
+  for (const AstImport* imp = module->imports; imp; imp = imp->next) {
+      if (!collect_metadata(file_path, imp->module, funcs, types, enums)) {
+          return false;
+      }
+  }
+
   const AstDecl* decl = module->decls;
   while (decl) {
     if (decl->kind == AST_DECL_FUNC) {
@@ -833,6 +842,28 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
   free(arg_types);
 
   if (!entry) {
+    // Raylib fallback for build mode where imports might not be fully populated
+    const char* raylib_funcs[] = {
+        "initWindow", "windowShouldClose", "closeWindow", "beginDrawing", "endDrawing",
+        "setTargetFPS", "isKeyDown", "isKeyPressed", "clearBackground", "drawRectangle",
+        "drawRectangleLines", "drawCircle", "drawText", "drawCube", "drawCubeWires",
+        "drawSphere", "drawCylinder", "drawGrid", "beginMode3D", "endMode3D",
+        "getTime", "colorFromHSV", "random", "random_int", "seed", NULL
+    };
+    bool found_raylib = false;
+    for (int i = 0; raylib_funcs[i]; i++) {
+        if (str_eq_cstr(name, raylib_funcs[i])) { found_raylib = true; break; }
+    }
+    
+    if (found_raylib) {
+        // Create a temporary entry for the native call
+        emit_op(compiler, OP_NATIVE_CALL, (int)expr->line);
+        uint16_t name_idx = chunk_add_constant(compiler->chunk, value_string_copy(name.data, name.len));
+        emit_short(compiler, name_idx, (int)expr->line);
+        emit_byte(compiler, (uint8_t)arg_count, (int)expr->line);
+        return true;
+    }
+
     char buffer[128];
     snprintf(buffer, sizeof(buffer), "unknown function '%.*s' for VM call", (int)name.len,
              name.data);
