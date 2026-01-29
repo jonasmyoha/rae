@@ -223,7 +223,8 @@ typedef enum {
   AST_STMT_IF,
   AST_STMT_LOOP,
   AST_STMT_MATCH,
-  AST_STMT_ASSIGN
+  AST_STMT_ASSIGN,
+  AST_STMT_DEFER
 } AstStmtKind;
 
 typedef struct AstMatchCase {
@@ -279,6 +280,9 @@ struct AstStmt {
       AstExpr* value;
       bool is_bind;
     } assign_stmt;
+    struct {
+      AstBlock* block;
+    } defer_stmt;
   } as;
 };
 

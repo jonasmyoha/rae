@@ -1464,6 +1464,12 @@ static AstMatchArm* append_match_arm(AstMatchArm* head, AstMatchArm* node) {
   return head;
 }
 
+static AstStmt* parse_defer_statement(Parser* parser, const Token* token) {
+  AstStmt* stmt = new_stmt(parser, AST_STMT_DEFER, token);
+  stmt->as.defer_stmt.block = parse_block(parser);
+  return stmt;
+}
+
 static AstStmt* parse_match_statement(Parser* parser, const Token* match_token) {
   AstStmt* stmt = new_stmt(parser, AST_STMT_MATCH, match_token);
   stmt->as.match_stmt.subject = parse_expression(parser);
@@ -1788,6 +1794,9 @@ static AstStmt* parse_statement(Parser* parser) {
   }
   if (parser_match(parser, TOK_KW_MATCH)) {
     return parse_match_statement(parser, parser_previous(parser));
+  }
+  if (parser_match(parser, TOK_KW_DEFER)) {
+    return parse_defer_statement(parser, parser_previous(parser));
   }
   
   AstExpr* expr = parse_expression(parser);
