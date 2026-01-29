@@ -36,8 +36,46 @@ type Game {
   height: Int
   currentPiece: Piece
   score: Int
+  lines: Int
+  level: Int
   moveTimer: Int
   moveDelay: Int
+}
+
+func getModernColor(id: Int) ret Color {
+  if id is 1 { # I - Cyan
+    ret { r: 100, g: 230, b: 255, a: 255 }
+  }
+  if id is 2 { # J - Blue
+    ret { r: 120, g: 160, b: 255, a: 255 }
+  }
+  if id is 3 { # L - Orange
+    ret { r: 255, g: 180, b: 120, a: 255 }
+  }
+  if id is 4 { # O - Yellow
+    ret { r: 255, g: 230, b: 120, a: 255 }
+  }
+  if id is 5 { # S - Green
+    ret { r: 120, g: 255, b: 160, a: 255 }
+  }
+  if id is 6 { # T - Purple
+    ret { r: 200, g: 160, b: 255, a: 255 }
+  }
+  if id is 7 { # Z - Red
+    ret { r: 255, g: 120, b: 140, a: 255 }
+  }
+  # Empty
+  ret { r: 40, g: 40, b: 50, a: 255 }
+}
+
+func getKindId(kind: TetrominoKind) ret Int {
+  if kind is TetrominoKind.I { ret 1 }
+  if kind is TetrominoKind.J { ret 2 }
+  if kind is TetrominoKind.L { ret 3 }
+  if kind is TetrominoKind.O { ret 4 }
+  if kind is TetrominoKind.S { ret 5 }
+  if kind is TetrominoKind.T { ret 6 }
+  ret 7 # Z
 }
 
 # Returns 1 if cell at (x, y) is occupied or out of bounds
@@ -48,7 +86,10 @@ func isOccupied(g: view Game, x: Int, y: Int) ret Int {
   if y < 0 {
     ret 0 # Allow pieces above the board
   }
-  ret g.grid.get(index: y * g.width + x)
+  if g.grid.get(index: y * g.width + x) > 0 {
+    ret 1
+  }
+  ret 0
 }
 
 # Simple shape definitions (4x4 max)
@@ -175,6 +216,7 @@ func lockPiece(g: mod Game) {
   def cp: mod Piece => g.currentPiece
   def pos: view Pos => cp.pos
   def grid: mod List(Int) => g.grid
+  def kindId: Int = getKindId(kind: cp.kind)
   def py: Int = 0
   loop py < 4 {
     def px: Int = 0
@@ -188,7 +230,7 @@ func lockPiece(g: mod Game) {
         def gx: Int = pos.x + px
         def gy: Int = pos.y + py
         if gy >= 0 and gy < g.height {
-          grid.set(index: gy * g.width + gx, value: 1)
+          grid.set(index: gy * g.width + gx, value: kindId)
         }
       }
       px = px + 1
@@ -199,6 +241,7 @@ func lockPiece(g: mod Game) {
 
 func checkLines(g: mod Game) {
   def grid: mod List(Int) => g.grid
+  def linesCleared: Int = 0
   def y: Int = g.height - 1
   loop y >= 0 {
     def full: Int = 1
@@ -211,7 +254,7 @@ func checkLines(g: mod Game) {
     }
     
     if full is 1 {
-      g.score = g.score + 100
+      linesCleared = linesCleared + 1
       # Shift lines down
       def ty: Int = y
       loop ty > 0 {
@@ -232,6 +275,25 @@ func checkLines(g: mod Game) {
       y = y + 1
     }
     y = y - 1
+  }
+  
+  if linesCleared > 0 {
+    g.lines = g.lines + linesCleared
+    g.score = g.score + (linesCleared * 100 * g.level)
+    
+    # Level progression: every 10 lines
+    def newLevel: Int = (g.lines / 10) + 1
+    if newLevel > 10 {
+      newLevel = 10
+    }
+    if newLevel > g.level {
+      g.level = newLevel
+      # Decrease delay (increase speed)
+      g.moveDelay = 32 - (g.level * 3)
+      if g.moveDelay < 2 {
+        g.moveDelay = 2
+      }
+    }
   }
 }
 
@@ -269,12 +331,15 @@ func initGame(g: mod Game) {
   g.width = 10
   g.height = 20
   g.score = 0
+  g.lines = 0
+  g.level = 1
   g.moveTimer = 0
-  # frames
   g.moveDelay = 30
+  
   # Initialize grid with 0s
   def i: Int = 0
   def grid: mod List(Int) => g.grid
+  grid.clear()
   loop i < g.width * g.height {
     grid.add(value: 0)
     i = i + 1
@@ -285,11 +350,24 @@ func initGame(g: mod Game) {
 func draw(g: view Game) {
   beginDrawing()
   clearBackground(color: {
-    r: 20
-    g: 20
-    b: 25
+    r: 30
+    g: 30
+    b: 40
     a: 255
   })
+  
+  def offsetX: Float = 100.0
+  def offsetY: Float = 50.0
+  def cellSize: Float = 20.0
+  
+  # Draw Grid Area Outline (Modern Pastel Lavender)
+  drawRectangleLines(
+    x: offsetX - 2.0
+    y: offsetY - 2.0
+    width: (g.width.toFloat() * cellSize) + 4.0
+    height: (g.height.toFloat() * cellSize) + 4.0
+    color: { r: 180, g: 180, b: 255, a: 255 }
+  )
   
   # Draw Grid
   def y: Int = 0
@@ -299,16 +377,11 @@ func draw(g: view Game) {
       def val: Int = g.grid.get(index: y * g.width + x)
       if val > 0 {
         drawRectangle(
-          x: (x * 20 + 100).toFloat()
-          y: (y * 20 + 50).toFloat()
-          width: 18.0
-          height: 18.0
-          color: {
-            r: 100
-            g: 100
-            b: 255
-            a: 255
-          }
+          x: x.toFloat() * cellSize + offsetX
+          y: y.toFloat() * cellSize + offsetY
+          width: cellSize - 1.0
+          height: cellSize - 1.0
+          color: getModernColor(id: val)
         )
       }
       x = x + 1
@@ -319,6 +392,7 @@ func draw(g: view Game) {
   # Draw current piece
   def cp: view Piece => g.currentPiece
   def pos: view Pos => cp.pos
+  def kindId: Int = getKindId(kind: cp.kind)
   def py: Int = 0
   loop py < 4 {
     def px: Int = 0
@@ -330,16 +404,11 @@ func draw(g: view Game) {
         py: py
       ) is 1 {
         drawRectangle(
-          x: ((pos.x + px) * 20 + 100).toFloat()
-          y: ((pos.y + py) * 20 + 50).toFloat()
-          width: 18.0
-          height: 18.0
-          color: {
-            r: 255
-            g: 100
-            b: 100
-            a: 255
-          }
+          x: (pos.x + px).toFloat() * cellSize + offsetX
+          y: (pos.y + py).toFloat() * cellSize + offsetY
+          width: cellSize - 1.0
+          height: cellSize - 1.0
+          color: getModernColor(id: kindId)
         )
       }
       px = px + 1
@@ -347,31 +416,36 @@ func draw(g: view Game) {
     py = py + 1
   }
   
+  # UI Text (Modern Pastel Rainbow Palette)
   drawText(
-    text: "Score: {g.score}"
+    text: "SCORE: {g.score}"
     x: 10.0
     y: 10.0
     fontSize: 20.0
-    color: {
-      r: 255
-      g: 255
-      b: 255
-      a: 255
-    }
+    color: { r: 255, g: 200, b: 200, a: 255 } # Soft Pink
+  )
+  drawText(
+    text: "LEVEL: {g.level}"
+    x: 10.0
+    y: 35.0
+    fontSize: 20.0
+    color: { r: 200, g: 255, b: 200, a: 255 } # Soft Green
+  )
+  drawText(
+    text: "LINES: {g.lines}"
+    x: 10.0
+    y: 60.0
+    fontSize: 20.0
+    color: { r: 200, g: 200, b: 255, a: 255 } # Soft Blue
   )
   
   if g.state is GameState.Paused {
     drawText(
       text: "PAUSED"
-      x: 150.0
+      x: 140.0
       y: 200.0
       fontSize: 40.0
-      color: {
-        r: 255
-        g: 255
-        b: 0
-        a: 255
-      }
+      color: { r: 255, g: 255, b: 180, a: 255 } # Soft Yellow
     )
   }
   if g.state is GameState.GameOver {
@@ -380,24 +454,14 @@ func draw(g: view Game) {
       x: 100.0
       y: 200.0
       fontSize: 40.0
-      color: {
-        r: 255
-        g: 0
-        b: 0
-        a: 255
-      }
+      color: { r: 255, g: 150, b: 150, a: 255 } # Soft Red
     )
     drawText(
       text: "Press R to Restart"
       x: 120.0
       y: 250.0
       fontSize: 20.0
-      color: {
-        r: 255
-        g: 255
-        b: 255
-        a: 255
-      }
+      color: { r: 220, g: 220, b: 220, a: 255 } # Light Gray
     )
   }
   
@@ -405,6 +469,9 @@ func draw(g: view Game) {
 }
 
 func main() {
+  # FLAG_WINDOW_RESIZABLE = 4
+  # We can't easily use Bitwise OR yet, so just 4
+  setConfigFlags(flags: 4)
   initWindow(width: 400, height: 500, title: "Rae Tetris 2D")
   setTargetFPS(fps: 60)
   
@@ -422,6 +489,8 @@ func main() {
       rotation: 0
     }
     score: 0
+    lines: 0
+    level: 1
     moveTimer: 0
     moveDelay: 0
   }
@@ -432,7 +501,6 @@ func main() {
     # Input: Global (Menu/GameOver)
     if g.state is GameState.GameOver {
       if isKeyPressed(key: 82) is 1 { # R key
-        g.grid.clear()
         initGame(g)
       }
     }
@@ -494,5 +562,3 @@ func main() {
   
   closeWindow()
 }
-
-
