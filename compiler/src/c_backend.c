@@ -820,7 +820,14 @@ static const AstFuncDecl* find_function_overload(const AstModule* module, CFuncC
         }
     }
 
-    // Phase 2: Mangled generic matches
+    // Phase 2: Search in imported modules
+    for (const AstImport* imp = module->imports; imp; imp = imp->next) {
+        if (!imp->module) continue;
+        const AstFuncDecl* found = find_function_overload(imp->module, ctx, name, param_types, param_count);
+        if (found) return found;
+    }
+
+    // Phase 3: Mangled generic matches
     // Only used when 'name' is NOT a simple name but a mangled one
     // AND it starts with 'rae_'
     char* n_cstr = str_to_cstr(name);
@@ -901,6 +908,12 @@ static void emit_mangled_function_name(const AstFuncDecl* func, FILE* out) {
             // The runtime now has rae_str_len etc.
             fprintf(out, "rae_ext_%.*s", (int)name.len, name.data);
         }
+        return;
+    }
+
+    const char* ray_mapping = find_raylib_mapping(func->name);
+    if (ray_mapping) {
+        fprintf(out, "rae_%.*s_", (int)func->name.len, func->name.data);
         return;
     }
     
@@ -1128,6 +1141,8 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
 
   if (func_decl && !str_eq_cstr(func_decl->name, "main")) {
       emit_mangled_function_name(func_decl, out);
+  } else if (callee->kind == AST_EXPR_IDENT && find_raylib_mapping(callee->as.ident)) {
+      fprintf(out, "rae_%.*s_", (int)callee->as.ident.len, callee->as.ident.data);
   } else {
       if (!emit_expr(ctx, callee, out, PREC_CALL)) return false;
   }
@@ -2401,6 +2416,7 @@ static const NativeMap RAYLIB_MAP[] = {
     {"isKeyPressed", "IsKeyPressed"},
     {"clearBackground", "ClearBackground"},
     {"drawRectangle", "DrawRectangle"},
+    {"drawRectangleLines", "DrawRectangleLines"},
     {"drawCircle", "DrawCircle"},
     {"drawText", "DrawText"},
     {"drawCube", "DrawCube"},
@@ -2478,7 +2494,11 @@ static bool emit_raylib_wrapper(const AstFuncDecl* fn, const char* c_name, FILE*
       } else if (str_eq_cstr(type_name, "Int")) {
           fprintf(out, "(int)%.*s", (int)p->name.len, p->name.data);
       } else if (str_eq_cstr(type_name, "Float")) {
-          fprintf(out, "(float)%.*s", (int)p->name.len, p->name.data);
+          if (str_eq_cstr(fn->name, "drawRectangleLines")) {
+              fprintf(out, "(int)%.*s", (int)p->name.len, p->name.data);
+          } else {
+              fprintf(out, "(float)%.*s", (int)p->name.len, p->name.data);
+          }
       } else {
           fprintf(out, "%.*s", (int)p->name.len, p->name.data);
       }
@@ -2698,9 +2718,11 @@ bool c_backend_emit_module(const AstModule* module, const char* out_path) {
   bool uses_raylib = false;
   const AstDecl* scan = module->decls;
   while (scan) {
-      if (scan->kind == AST_DECL_FUNC && find_raylib_mapping(scan->as.func_decl.name)) {
-          uses_raylib = true;
-          break;
+      if (scan->kind == AST_DECL_FUNC) {
+          if (find_raylib_mapping(scan->as.func_decl.name)) {
+              uses_raylib = true;
+              break;
+          }
       }
       scan = scan->next;
   }
