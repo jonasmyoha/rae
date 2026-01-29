@@ -2,6 +2,20 @@
 #include <raylib.h>
 #include <stdio.h>
 
+static bool native_getScreenWidth(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data; (void)args; (void)count;
+    out->has_value = true;
+    out->value = value_int(GetScreenWidth());
+    return true;
+}
+
+static bool native_getScreenHeight(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data; (void)args; (void)count;
+    out->has_value = true;
+    out->value = value_int(GetScreenHeight());
+    return true;
+}
+
 static bool native_initWindow(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
     if (count != 3) {
@@ -394,6 +408,8 @@ bool vm_registry_register_raylib(VmRegistry* registry) {
     ok &= vm_registry_register_native(registry, "isKeyDown", native_isKeyDown, NULL);
     ok &= vm_registry_register_native(registry, "isKeyPressed", native_isKeyPressed, NULL);
     ok &= vm_registry_register_native(registry, "getTime", native_getTime, NULL);
+    ok &= vm_registry_register_native(registry, "getScreenWidth", native_getScreenWidth, NULL);
+    ok &= vm_registry_register_native(registry, "getScreenHeight", native_getScreenHeight, NULL);
     ok &= vm_registry_register_native(registry, "colorFromHSV", native_colorFromHSV, NULL);
     return ok;
 }
