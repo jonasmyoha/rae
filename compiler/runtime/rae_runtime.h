@@ -94,6 +94,8 @@ void rae_ext_rae_log_stream_list_fields(RaeAny* items, int64_t length, int64_t c
 const char* rae_ext_rae_str_concat(const char* a, const char* b);
 int64_t rae_ext_rae_str_len(const char* s);
 int64_t rae_ext_rae_str_compare(const char* a, const char* b);
+int8_t rae_ext_rae_str_eq(const char* a, const char* b);
+int64_t rae_ext_rae_str_hash(const char* s);
 const char* rae_ext_rae_str_sub(const char* s, int64_t start, int64_t len);
 int8_t rae_ext_rae_str_contains(const char* s, const char* sub);
 double rae_ext_rae_str_to_f64(const char* s);
@@ -119,6 +121,7 @@ RAE_UNUSED static const char* rae_str_any(RaeAny v) {
         case RAE_TYPE_FLOAT: return rae_ext_rae_str_f64(v.as.f);
         case RAE_TYPE_BOOL: return rae_ext_rae_str_bool(v.as.b);
         case RAE_TYPE_STRING: return v.as.s ? v.as.s : "";
+        case RAE_TYPE_NONE: return "none";
         default: return "";
     }
 }

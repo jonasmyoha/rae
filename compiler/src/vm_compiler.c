@@ -114,21 +114,28 @@ static Str get_base_type_name_str(Str type_name) {
 }
 
 static bool types_match(Str entry_type_raw, Str call_type_raw) {
-  Str entry_type = get_base_type_name_str(entry_type_raw);
-  Str call_type = get_base_type_name_str(call_type_raw);
-
-  // printf("DEBUG types_match: entry_raw='%.*s' call_raw='%.*s' -> entry='%.*s' call='%.*s'\n", 
-  //   (int)entry_type_raw.len, entry_type_raw.data, (int)call_type_raw.len, call_type_raw.data,
-  //   (int)entry_type.len, entry_type.data, (int)call_type.len, call_type.data);
+  Str entry_type = strip_generics(get_base_type_name_str(entry_type_raw));
+  Str call_type = strip_generics(get_base_type_name_str(call_type_raw));
 
   // 1. Exact match
   if (str_matches(entry_type, call_type)) return true;
   
   // 2. Generic placeholder (single uppercase letter like 'T')
+  // If entry type is a placeholder, it matches anything
   if (entry_type.len == 1 && entry_type.data[0] >= 'A' && entry_type.data[0] <= 'Z') {
     return true;
   }
   
+  // 'Any' in call matches anything in entry
+  if (str_eq_cstr(call_type, "Any")) {
+      return true;
+  }
+  
+  // 'Any' in entry matches anything in call
+  if (str_eq_cstr(entry_type, "Any")) {
+      return true;
+  }
+
   // 3. Complex generic match: List(T) vs List(Int)
   Str entry_base = strip_generics(entry_type);
   Str call_base = strip_generics(call_type);

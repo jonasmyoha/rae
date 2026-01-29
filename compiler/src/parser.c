@@ -264,16 +264,6 @@ static AstProperty* parse_type_properties(Parser* parser) {
   return head;
 }
 
-static AstProperty* parse_func_properties(Parser* parser) {
-  AstProperty* head = NULL;
-  while (parser_check(parser, TOK_KW_PUB) || parser_check(parser, TOK_KW_PRIV) || 
-         parser_check(parser, TOK_KW_SPAWN) || parser_check(parser, TOK_IDENT)) {
-    const Token* token = parser_advance(parser);
-    head = append_property(head, make_property(parser, token->lexeme));
-  }
-  return head;
-}
-
 static AstImport* append_import(AstImport* head, AstImport* node) {
   if (!node) {
     return head;
@@ -377,6 +367,28 @@ static AstImport* parse_import_clause(Parser* parser, bool is_export) {
   return clause;
 }
 
+static bool is_multiline(const Token* start, const Token* end) {
+  return start->line != end->line;
+}
+
+static void parser_consume_comma(Parser* parser, bool multiline, const char* context) {
+  if (multiline) {
+    if (parser_match(parser, TOK_COMMA)) {
+      parser_error(parser, parser_previous(parser), "comma not allowed in multi-line %s", context);
+    }
+  } else {
+    if (!parser_match(parser, TOK_COMMA)) {
+      parser_error(parser, parser_peek(parser), "comma required in single-line %s", context);
+    }
+  }
+}
+
+static void check_no_trailing_comma(Parser* parser, const char* context) {
+  if (parser_previous(parser)->kind == TOK_COMMA) {
+    parser_error(parser, parser_previous(parser), "trailing comma not allowed in %s", context);
+  }
+}
+
 static AstParam* append_param(AstParam* head, AstParam* node) {
   if (!head) {
     return node;
@@ -399,18 +411,38 @@ static AstParam* parse_param(Parser* parser) {
 }
 
 static AstParam* parse_param_list(Parser* parser) {
-  parser_consume(parser, TOK_LPAREN, "expected '(' after function name");
+  const Token* start = parser_consume(parser, TOK_LPAREN, "expected '(' after function name");
   if (parser_match(parser, TOK_RPAREN)) {
     return NULL;
   }
+  
+  // Peek ahead to find the closing RPAREN to determine if it's multi-line
+  const Token* end = NULL;
+  int depth = 1;
+  for (size_t i = 0; i < parser->count - parser->index; i++) {
+    const Token* t = parser_peek_at(parser, i);
+    if (t->kind == TOK_LPAREN) depth++;
+    else if (t->kind == TOK_RPAREN) {
+      depth--;
+      if (depth == 0) {
+        end = t;
+        break;
+      }
+    }
+  }
+  bool multiline = end ? is_multiline(start, end) : false;
+
   AstParam* head = NULL;
   for (;;) {
     head = append_param(head, parse_param(parser));
-    if (parser_match(parser, TOK_RPAREN)) {
+    if (parser_check(parser, TOK_RPAREN)) {
+      parser_advance(parser);
+      check_no_trailing_comma(parser, "parameter list");
       break;
     }
-    parser_consume(parser, TOK_COMMA, "expected ',' between parameters");
+    parser_consume_comma(parser, multiline, "parameter list");
     if (parser_match(parser, TOK_RPAREN)) {
+      check_no_trailing_comma(parser, "parameter list");
       break;
     }
   }
@@ -429,9 +461,9 @@ static AstReturnItem* append_return_item(AstReturnItem* head, AstReturnItem* nod
   return head;
 }
 
-static AstReturnItem* parse_return_clause(Parser* parser) {
+static AstReturnItem* parse_return_clause(Parser* parser, bool multiline) {
   AstReturnItem* head = NULL;
-  do {
+  for (;;) {
     AstReturnItem* item = parser_alloc(parser, sizeof(AstReturnItem));
     if (parser_check(parser, TOK_IDENT) && parser_peek_at(parser, 1)->kind == TOK_COLON) {
       const Token* label = parser_advance(parser);
@@ -441,10 +473,16 @@ static AstReturnItem* parse_return_clause(Parser* parser) {
     }
     item->type = parse_type_ref(parser);
     head = append_return_item(head, item);
-    if (parser_check(parser, TOK_LBRACE) || parser_check(parser, TOK_EOF)) break;
-    // Also check for next top level decl or end of return clause markers if any
-    // Actually, return clause is usually followed by a { or newline.
-  } while (parser_match(parser, TOK_COMMA));
+    
+    if (parser_check(parser, TOK_LBRACE) || parser_check(parser, TOK_EOF) || 
+        parser_check(parser, TOK_KW_FUNC) || parser_check(parser, TOK_KW_TYPE)) break;
+    
+    parser_consume_comma(parser, multiline, "return type list");
+    if (parser_check(parser, TOK_LBRACE)) {
+      check_no_trailing_comma(parser, "return type list");
+      break;
+    }
+  }
   return head;
 }
 
@@ -648,6 +686,23 @@ static AstExpr* finish_call(Parser* parser, AstExpr* callee, const Token* start_
   if (parser_match(parser, TOK_RPAREN)) {
     return expr;
   }
+
+  // Peek ahead to find the closing RPAREN to determine if it's multi-line
+  const Token* end = NULL;
+  int depth = 1;
+  for (size_t i = 0; i < parser->count - parser->index; i++) {
+    const Token* t = parser_peek_at(parser, i);
+    if (t->kind == TOK_LPAREN) depth++;
+    else if (t->kind == TOK_RPAREN) {
+      depth--;
+      if (depth == 0) {
+        end = t;
+        break;
+      }
+    }
+  }
+  bool multiline = end ? is_multiline(start_token, end) : false;
+
   AstCallArg* args = NULL;
   size_t arg_idx = 0;
   do {
@@ -670,9 +725,13 @@ static AstExpr* finish_call(Parser* parser, AstExpr* callee, const Token* start_
     }
     args = append_call_arg(args, arg);
     arg_idx++;
-    if (parser_check(parser, TOK_RPAREN)) break;
-    parser_consume(parser, TOK_COMMA, "expected ',' between arguments");
     if (parser_check(parser, TOK_RPAREN)) {
+      check_no_trailing_comma(parser, "argument list");
+      break;
+    }
+    parser_consume_comma(parser, multiline, "argument list");
+    if (parser_check(parser, TOK_RPAREN)) {
+      check_no_trailing_comma(parser, "argument list");
       break;
     }
   } while (true);
@@ -701,6 +760,22 @@ static AstExpr* parse_list_literal(Parser* parser, const Token* start_token) {
     return expr;
   }
 
+  // Peek ahead to find the closing RBRACKET to determine if it's multi-line
+  const Token* end = NULL;
+  int depth = 1;
+  for (size_t i = 0; i < parser->count - parser->index; i++) {
+    const Token* t = parser_peek_at(parser, i);
+    if (t->kind == TOK_LBRACKET) depth++;
+    else if (t->kind == TOK_RBRACKET) {
+      depth--;
+      if (depth == 0) {
+        end = t;
+        break;
+      }
+    }
+  }
+  bool multiline = end ? is_multiline(start_token, end) : false;
+
   do {
     AstCollectionElement* element = parser_alloc(parser, sizeof(AstCollectionElement));
     element->key = NULL;
@@ -714,9 +789,15 @@ static AstExpr* parse_list_literal(Parser* parser, const Token* start_token) {
       tail = element;
     }
 
-    if (parser_check(parser, TOK_RBRACKET)) break;
-    parser_consume(parser, TOK_COMMA, "expected ',' or ']' in list literal");
-    if (parser_check(parser, TOK_RBRACKET)) break;
+    if (parser_check(parser, TOK_RBRACKET)) {
+      check_no_trailing_comma(parser, "list literal");
+      break;
+    }
+    parser_consume_comma(parser, multiline, "list literal");
+    if (parser_check(parser, TOK_RBRACKET)) {
+      check_no_trailing_comma(parser, "list literal");
+      break;
+    }
   } while (true);
 
   parser_consume(parser, TOK_RBRACKET, "expected ']' at end of list literal");
@@ -734,6 +815,22 @@ static AstExpr* parse_collection_literal(Parser* parser, const Token* start_toke
     expr->as.collection.elements = NULL;
     return expr;
   }
+
+  // Peek ahead to find the closing RBRACE to determine if it's multi-line
+  const Token* end = NULL;
+  int depth = 1;
+  for (size_t i = 0; i < parser->count - parser->index; i++) {
+    const Token* t = parser_peek_at(parser, i);
+    if (t->kind == TOK_LBRACE) depth++;
+    else if (t->kind == TOK_RBRACE) {
+      depth--;
+      if (depth == 0) {
+        end = t;
+        break;
+      }
+    }
+  }
+  bool multiline = end ? is_multiline(start_token, end) : false;
 
   do {
     AstCollectionElement* element = parser_alloc(parser, sizeof(AstCollectionElement));
@@ -776,9 +873,13 @@ static AstExpr* parse_collection_literal(Parser* parser, const Token* start_toke
     }
     
     // Check for closing brace or comma
-    if (parser_check(parser, TOK_RBRACE)) break; // Break if closing brace found
-    parser_consume(parser, TOK_COMMA, "expected ',' or '}' in collection literal");
-    if (parser_check(parser, TOK_RBRACE)) { // Allow trailing comma
+    if (parser_check(parser, TOK_RBRACE)) {
+      check_no_trailing_comma(parser, "collection literal");
+      break;
+    }
+    parser_consume_comma(parser, multiline, "collection literal");
+    if (parser_check(parser, TOK_RBRACE)) {
+      check_no_trailing_comma(parser, "collection literal");
       break;
     }
   } while (true);
@@ -841,6 +942,22 @@ static AstExpr* parse_typed_literal(Parser* parser, const Token* start_token, As
         return expr;
       }
 
+      // Peek ahead to find the closing RBRACE to determine if it's multi-line
+      const Token* end = NULL;
+      int depth = 1;
+      for (size_t i = 0; i < parser->count - parser->index; i++) {
+        const Token* t = parser_peek_at(parser, i);
+        if (t->kind == TOK_LBRACE) depth++;
+        else if (t->kind == TOK_RBRACE) {
+          depth--;
+          if (depth == 0) {
+            end = t;
+            break;
+          }
+        }
+      }
+      bool multiline = end ? is_multiline(start_token, end) : false;
+
       do {
         AstObjectField* field = parser_alloc(parser, sizeof(AstObjectField));
         const Token* key_token = parser_consume_ident(parser, "expected field name in object literal");
@@ -850,9 +967,15 @@ static AstExpr* parse_typed_literal(Parser* parser, const Token* start_token, As
 
         if (!head) { head = tail = field; } else { tail->next = field; tail = field; }
         
-        if (parser_check(parser, TOK_RBRACE)) break;
-        parser_consume(parser, TOK_COMMA, "expected ',' or '}' in object literal");
-        if (parser_check(parser, TOK_RBRACE)) break;
+        if (parser_check(parser, TOK_RBRACE)) {
+          check_no_trailing_comma(parser, "object literal");
+          break;
+        }
+        parser_consume_comma(parser, multiline, "object literal");
+        if (parser_check(parser, TOK_RBRACE)) {
+          check_no_trailing_comma(parser, "object literal");
+          break;
+        }
       } while (true);
       parser_consume(parser, TOK_RBRACE, "expected '}' after object literal");
       expr->as.object_literal.fields = head;
@@ -869,6 +992,22 @@ static AstExpr* parse_typed_literal(Parser* parser, const Token* start_token, As
         return expr;
       }
 
+      // Peek ahead to find the closing RBRACE to determine if it's multi-line
+      const Token* end = NULL;
+      int depth = 1;
+      for (size_t i = 0; i < parser->count - parser->index; i++) {
+        const Token* t = parser_peek_at(parser, i);
+        if (t->kind == TOK_LBRACE) depth++;
+        else if (t->kind == TOK_RBRACE) {
+          depth--;
+          if (depth == 0) {
+            end = t;
+            break;
+          }
+        }
+      }
+      bool multiline = end ? is_multiline(start_token, end) : false;
+
       do {
         AstCollectionElement* element = parser_alloc(parser, sizeof(AstCollectionElement));
         element->key = NULL; // List/Array elements have no keys
@@ -877,9 +1016,15 @@ static AstExpr* parse_typed_literal(Parser* parser, const Token* start_token, As
 
         if (!head) { head = tail = element; } else { tail->next = element; tail = element; }
         
-        if (parser_check(parser, TOK_RBRACE)) break;
-        parser_consume(parser, TOK_COMMA, "expected ',' or '}' in list literal");
-        if (parser_check(parser, TOK_RBRACE)) break;
+        if (parser_check(parser, TOK_RBRACE)) {
+          check_no_trailing_comma(parser, "list literal");
+          break;
+        }
+        parser_consume_comma(parser, multiline, "list literal");
+        if (parser_check(parser, TOK_RBRACE)) {
+          check_no_trailing_comma(parser, "list literal");
+          break;
+        }
       } while (true);
       parser_consume(parser, TOK_RBRACE, "expected '}' after list literal");
       expr->as.collection.elements = head;
@@ -1266,13 +1411,13 @@ static AstIdentifierPart* parse_generic_params(Parser* parser) {
   
   if (parser_peek_at(parser, 1)->kind == TOK_RPAREN) return NULL; // () is params
   
-  // Check if it looks like a parameter list: (name: type)
-  // 'name' can be IDENT, or keywords like 'key', 'id' which are allowed as argument names.
-  TokenKind k = parser_peek_at(parser, 1)->kind;
-  bool is_ident = (k == TOK_IDENT || k == TOK_KW_ID || k == TOK_KW_KEY);
-  
-  if (is_ident && parser_peek_at(parser, 2)->kind == TOK_COLON) { 
-      return NULL;
+  // Check if it looks like a parameter list: (name: type) or (name: type, ...)
+  // Generic params are just (T) or (T, U)
+  for (size_t i = 1; i < parser->count - parser->index; i++) {
+    TokenKind k = parser_peek_at(parser, i)->kind;
+    if (k == TOK_COLON) return NULL; // Found a colon, definitely regular params
+    if (k == TOK_RPAREN) break; // End of list, no colon found yet
+    if (k == TOK_EOF) break;
   }
 
   parser_advance(parser); // Consume (
@@ -1692,6 +1837,24 @@ static AstTypeField* append_field(AstTypeField* head, AstTypeField* node) {
 }
 
 static AstTypeField* parse_type_fields(Parser* parser) {
+  const Token* start = parser_previous(parser); // TOK_LBRACE
+  
+  // Peek ahead to find the closing RBRACE to determine if it's multi-line
+  const Token* end = NULL;
+  int depth = 1;
+  for (size_t i = 0; i < parser->count - parser->index; i++) {
+    const Token* t = parser_peek_at(parser, i);
+    if (t->kind == TOK_LBRACE) depth++;
+    else if (t->kind == TOK_RBRACE) {
+      depth--;
+      if (depth == 0) {
+        end = t;
+        break;
+      }
+    }
+  }
+  bool multiline = end ? is_multiline(start, end) : false;
+
   AstTypeField* head = NULL;
   while (!parser_check(parser, TOK_RBRACE) && !parser_check(parser, TOK_EOF)) {
     const Token* field_name = parser_consume_ident(parser, "expected field name");
@@ -1701,9 +1864,14 @@ static AstTypeField* parse_type_fields(Parser* parser) {
     field->type = parse_type_ref(parser);
     head = append_field(head, field);
     
-    if (parser_check(parser, TOK_RBRACE)) break;
-    if (parser_match(parser, TOK_COMMA)) {
-        if (parser_check(parser, TOK_RBRACE)) break;
+    if (parser_check(parser, TOK_RBRACE)) {
+      check_no_trailing_comma(parser, "type fields");
+      break;
+    }
+    parser_consume_comma(parser, multiline, "type fields");
+    if (parser_check(parser, TOK_RBRACE)) {
+      check_no_trailing_comma(parser, "type fields");
+      break;
     }
   }
   return head;
@@ -1733,24 +1901,51 @@ static AstDecl* parse_type_declaration(Parser* parser) {
 
 static AstDecl* parse_func_declaration(Parser* parser, bool is_extern) {
   const Token* func_token = parser_previous(parser);
-  const Token* name = parser_consume_ident(parser, "expected function name");
-  if (!is_extern) { // Externs might need C names which can be PascalCase (e.g. Raylib, Windows API)
-      check_camel_case(parser, name, "function");
-  }
+  const Token* name_token = parser_consume_ident(parser, "expected function name");
+  
   AstDecl* decl = parser_alloc(parser, sizeof(AstDecl));
   decl->kind = AST_DECL_FUNC;
   decl->line = func_token->line;
   decl->column = func_token->column;
-  decl->as.func_decl.name = parser_copy_str(parser, name->lexeme);
-  decl->as.func_decl.is_extern = is_extern;
-  decl->as.func_decl.generic_params = parse_generic_params(parser); // Parse generic params
+  decl->as.func_decl.name = parser_copy_str(parser, name_token->lexeme);
+  decl->as.func_decl.generic_params = parse_generic_params(parser);
   decl->as.func_decl.params = parse_param_list(parser);
-  if (parser_match(parser, TOK_COLON)) {
-    decl->as.func_decl.properties = parse_func_properties(parser);
-    if (parser_match(parser, TOK_KW_RET)) {
-      decl->as.func_decl.returns = parse_return_clause(parser);
-    }
+  
+  // Parse zero or more modifiers (extern, priv, spawn, etc.)
+  AstProperty* props_head = NULL;
+  
+  // Also handle legacy colon before properties
+  parser_match(parser, TOK_COLON);
+
+  while (parser_check(parser, TOK_IDENT) || parser_check(parser, TOK_KW_EXTERN) || 
+         parser_check(parser, TOK_KW_PRIV) || parser_check(parser, TOK_KW_PUB) || 
+         parser_check(parser, TOK_KW_SPAWN)) {
+    const Token* mod_token = parser_advance(parser);
+    if (mod_token->kind == TOK_KW_EXTERN) is_extern = true;
+    
+    AstProperty* prop = make_property(parser, mod_token->lexeme);
+    props_head = append_property(props_head, prop);
   }
+  decl->as.func_decl.properties = props_head;
+  decl->as.func_decl.is_extern = is_extern;
+
+  // Handle optional colon before ret (legacy)
+  parser_match(parser, TOK_COLON);
+
+  if (parser_match(parser, TOK_KW_RET)) {
+    const Token* ret_token = parser_previous(parser);
+    const Token* end_brace = NULL;
+    for (size_t i = 0; i < parser->count - parser->index; i++) {
+      const Token* t = parser_peek_at(parser, i);
+      if (t->kind == TOK_LBRACE || t->kind == TOK_EOF || t->kind == TOK_KW_FUNC || t->kind == TOK_KW_TYPE) {
+        end_brace = t;
+        break;
+      }
+    }
+    bool multiline_ret = end_brace ? is_multiline(ret_token, end_brace) : false;
+    decl->as.func_decl.returns = parse_return_clause(parser, multiline_ret);
+  }
+  
   if (is_extern) {
     if (parser_check(parser, TOK_LBRACE)) {
       parser_error(parser, parser_peek(parser), "extern functions cannot have a body");
@@ -1758,6 +1953,7 @@ static AstDecl* parse_func_declaration(Parser* parser, bool is_extern) {
     decl->as.func_decl.body = NULL;
     return decl;
   }
+  
   decl->as.func_decl.body = parse_block(parser);
   return decl;
 }
@@ -1774,8 +1970,24 @@ static AstDecl* parse_enum_declaration(Parser* parser) {
   decl->as.enum_decl.name = parser_copy_str(parser, name->lexeme);
   decl->as.enum_decl.members = NULL;
   
-  parser_consume(parser, TOK_LBRACE, "expected '{' after enum name");
+  const Token* start = parser_consume(parser, TOK_LBRACE, "expected '{' after enum name");
   
+  // Peek ahead to find the closing RBRACE to determine if it's multi-line
+  const Token* end = NULL;
+  int depth = 1;
+  for (size_t i = 0; i < parser->count - parser->index; i++) {
+    const Token* t = parser_peek_at(parser, i);
+    if (t->kind == TOK_LBRACE) depth++;
+    else if (t->kind == TOK_RBRACE) {
+      depth--;
+      if (depth == 0) {
+        end = t;
+        break;
+      }
+    }
+  }
+  bool multiline = end ? is_multiline(start, end) : false;
+
   AstEnumMember* head = NULL;
   AstEnumMember* tail = NULL;
   
@@ -1795,8 +2007,15 @@ static AstDecl* parse_enum_declaration(Parser* parser) {
         tail = member;
       }
       
-      if (parser_check(parser, TOK_RBRACE)) break;
-      parser_consume(parser, TOK_COMMA, "expected ',' or '}' in enum body");
+      if (parser_check(parser, TOK_RBRACE)) {
+        check_no_trailing_comma(parser, "enum variants");
+        break;
+      }
+      parser_consume_comma(parser, multiline, "enum variants");
+      if (parser_check(parser, TOK_RBRACE)) {
+        check_no_trailing_comma(parser, "enum variants");
+        break;
+      }
     } while (!parser_check(parser, TOK_RBRACE));
   }
   
@@ -1806,11 +2025,11 @@ static AstDecl* parse_enum_declaration(Parser* parser) {
 }
 
 static AstDecl* parse_declaration(Parser* parser) {
-  if (parser_match(parser, TOK_KW_PUB) || parser_match(parser, TOK_KW_PRIV)) {
-    const Token* token = parser_previous(parser);
+  if (parser_check(parser, TOK_KW_PUB) || parser_check(parser, TOK_KW_PRIV)) {
+    const Token* token = parser_advance(parser);
     Str text = token->lexeme;
     if (parser_check(parser, TOK_KW_FUNC)) {
-      parser_error(parser, token, "Function property '%.*s' cannot be defined before function. It must be put into the properties section after the function parameters like this: 'func name(): %.*s'",
+      parser_error(parser, token, "Function property '%.*s' cannot be defined before function. It must be put into the properties section after the function parameters like this: 'func name() %.*s'",
                    (int)text.len, text.data, (int)text.len, text.data);
       return NULL;
     }
@@ -1823,26 +2042,25 @@ static AstDecl* parse_declaration(Parser* parser) {
     return NULL;
   }
 
-  bool saw_extern = parser_match(parser, TOK_KW_EXTERN);
+  bool is_extern = parser_match(parser, TOK_KW_EXTERN);
+  
   if (parser_match(parser, TOK_KW_TYPE)) {
-    if (saw_extern) {
-      parser_error(parser, parser_previous(parser), "extern is only valid before func");
-    }
     return parse_type_declaration(parser);
   }
   if (parser_match(parser, TOK_KW_ENUM)) {
-    if (saw_extern) {
-      parser_error(parser, parser_previous(parser), "extern is only valid before func");
-    }
     return parse_enum_declaration(parser);
   }
   if (parser_match(parser, TOK_KW_FUNC)) {
-    return parse_func_declaration(parser, saw_extern);
+    return parse_func_declaration(parser, is_extern);
   }
-  if (saw_extern) {
+  
+  if (is_extern) {
     parser_error(parser, parser_previous(parser), "extern must be followed by func");
+    return NULL;
   }
-  parser_error(parser, parser_peek(parser), "expected 'type' or 'func'");
+
+  parser_error(parser, parser_peek(parser), "expected 'type', 'enum' or 'func'");
+  parser_advance(parser); // Advance to avoid infinite loop
   return NULL;
 }
 

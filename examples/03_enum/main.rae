@@ -1,64 +1,11 @@
-enum Direction {
-  North,
-  East,
-  South,
-  West
-}
-
-type Player {
-  x: Int
-  y: Int
-  facing: Direction
-}
-
-func move(p: mod Player) {
-  match p.facing {
-    case Direction.North {
-      p.y = p.y - 1
-    }
-    case Direction.East {
-      p.x = p.x + 1
-    }
-    case Direction.South {
-      p.y = p.y + 1
-    }
-    case Direction.West {
-      p.x = p.x - 1
-    }
-  }
-}
-
-func turnRight(p: mod Player) {
-  if p.facing is Direction.North {
-    p.facing = Direction.East
-  } else {
-    if p.facing is Direction.East {
-      p.facing = Direction.South
-    } else {
-      if p.facing is Direction.South {
-        p.facing = Direction.West
-      } else {
-        p.facing = Direction.North
-      }
-    }
-  }
-}
-
-func printPlayer(p: view Player) {
-  log("Player at ({p.x}, {p.y}) facing {p.facing}")
-}
+enum Direction { North, South, East, West }
 
 func main() {
-  def p: Player = {x: 0, y: 0, facing: Direction.North}
-  log("Initial state:")
-  printPlayer(p)
-  move(p)
-  log("After move:")
-  printPlayer(p)
-  turnRight(p)
-  log("After turn:")
-  printPlayer(p)
-  move(p)
-  log("After move:")
-  printPlayer(p)
+  def d: Direction = Direction.North
+  log("Direction: {d}")
+  if d is Direction.North {
+    log("Going North")
+  }
 }
+
+

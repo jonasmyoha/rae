@@ -178,6 +178,23 @@ int64_t rae_ext_rae_str_compare(const char* a, const char* b) {
   return (int64_t)strcmp(a, b);
 }
 
+int8_t rae_ext_rae_str_eq(const char* a, const char* b) {
+  if (a == b) return 1;
+  if (!a || !b) return 0;
+  return strcmp(a, b) == 0;
+}
+
+int64_t rae_ext_rae_str_hash(const char* s) {
+  if (!s) return 0;
+  // FNV-1a hash
+  uint64_t hash = 0xcbf29ce484222325ULL;
+  while (*s) {
+    hash ^= (uint64_t)(unsigned char)(*s++);
+    hash *= 0x100000001b3ULL;
+  }
+  return (int64_t)hash;
+}
+
 const char* rae_ext_rae_str_sub(const char* s, int64_t start, int64_t len) {
   if (!s) return "";
   int64_t slen = (int64_t)strlen(s);
