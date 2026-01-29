@@ -845,7 +845,7 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
     // Raylib fallback for build mode where imports might not be fully populated
     const char* raylib_funcs[] = {
         "initWindow", "windowShouldClose", "closeWindow", "beginDrawing", "endDrawing",
-        "setTargetFPS", "isKeyDown", "isKeyPressed", "clearBackground", "drawRectangle",
+        "setTargetFPS", "getScreenWidth", "getScreenHeight", "isKeyDown", "isKeyPressed", "clearBackground", "drawRectangle",
         "drawRectangleLines", "drawCircle", "drawText", "drawCube", "drawCubeWires",
         "drawSphere", "drawCylinder", "drawGrid", "beginMode3D", "endMode3D",
         "getTime", "colorFromHSV", "random", "random_int", "seed", NULL
