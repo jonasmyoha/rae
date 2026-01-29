@@ -2000,6 +2000,13 @@ async function runAllExamples() {
     renderExampleList();
     renderExampleDetail();
     
+    if (selectedExampleFile) {
+      await loadExampleSource(selectedExampleFile);
+    }
+    
+    // Small delay to allow UI to breathe/update
+    await new Promise(resolve => setTimeout(resolve, 50));
+    
     const entry = resolveExampleEntry(example, targetId);
     if (!entry) {
       batchResults.push({
@@ -3005,11 +3012,16 @@ function highlightRae(code, isPack = false) {
   // E. Parameter/Argument labels (name:)
   result = result.replace(/\b([a-zA-Z_]\w*)(?=:)/g, (match) => addPlaceholder(match, "tok-parameter"));
 
+  // EE. Enum Member Access (Type.Member)
+  result = result.replace(/\b([A-Z]\w*)\.([a-zA-Z_]\w*)\b/g, (match, type, member) => {
+      return `${addPlaceholder(type, "tok-type")}.${addPlaceholder(member, "tok-enum-member")}`;
+  });
+
   // F. Keywords, Types, and Modifiers
   const controlKeywords = ["if", "else", "loop", "in", "match", "case", "default", "ret", "spawn", "import", "export", "extern", "is"];
   const typeKeywords = ["Int", "Float", "Bool", "String", "Char", "List", "Array"];
   const modifierKeywords = ["view", "mod", "opt", "own", "pub", "priv", "pack", "live", "compiled", "hybrid"];
-  const declarationKeywords = ["type", "def"]; // 'func' handled in Rule C
+  const declarationKeywords = ["type", "enum", "def"]; // 'func' handled in Rule C
   const literalKeywords = ["true", "false", "none"];
 
   const allWords = [...controlKeywords, ...typeKeywords, ...modifierKeywords, ...declarationKeywords, ...literalKeywords];
