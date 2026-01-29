@@ -111,6 +111,25 @@ static bool native_drawRectangle(struct VM* vm, VmNativeResult* out, const Value
     return true;
 }
 
+static bool native_drawRectangleLines(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 8) {
+        fprintf(stderr, "error: drawRectangleLines expects 8 args, got %zu\n", count);
+        return false;
+    }
+    int x = (args[0].type == VAL_FLOAT) ? (int)args[0].as.float_value : (int)args[0].as.int_value;
+    int y = (args[1].type == VAL_FLOAT) ? (int)args[1].as.float_value : (int)args[1].as.int_value;
+    int w = (args[2].type == VAL_FLOAT) ? (int)args[2].as.float_value : (int)args[2].as.int_value;
+    int h = (args[3].type == VAL_FLOAT) ? (int)args[3].as.float_value : (int)args[3].as.int_value;
+    unsigned char r = (args[4].type == VAL_FLOAT) ? (unsigned char)args[4].as.float_value : (unsigned char)args[4].as.int_value;
+    unsigned char g = (args[5].type == VAL_FLOAT) ? (unsigned char)args[5].as.float_value : (unsigned char)args[5].as.int_value;
+    unsigned char b = (args[6].type == VAL_FLOAT) ? (unsigned char)args[6].as.float_value : (unsigned char)args[6].as.int_value;
+    unsigned char a = (args[7].type == VAL_FLOAT) ? (unsigned char)args[7].as.float_value : (unsigned char)args[7].as.int_value;
+    DrawRectangleLines(x, y, w, h, (Color){r, g, b, a});
+    out->has_value = false;
+    return true;
+}
+
 static bool native_drawCircle(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
     if (count != 7) {
@@ -361,6 +380,7 @@ bool vm_registry_register_raylib(VmRegistry* registry) {
     ok &= vm_registry_register_native(registry, "endDrawing", native_endDrawing, NULL);
     ok &= vm_registry_register_native(registry, "clearBackground", native_clearBackground, NULL);
     ok &= vm_registry_register_native(registry, "drawRectangle", native_drawRectangle, NULL);
+    ok &= vm_registry_register_native(registry, "drawRectangleLines", native_drawRectangleLines, NULL);
     ok &= vm_registry_register_native(registry, "drawCircle", native_drawCircle, NULL);
     ok &= vm_registry_register_native(registry, "drawText", native_drawText, NULL);
     ok &= vm_registry_register_native(registry, "drawCube", native_drawCube, NULL);
