@@ -356,9 +356,13 @@ func draw(g: view Game) {
     a: 255
   })
   
-  def offsetX: Float = 100.0
-  def offsetY: Float = 50.0
-  def cellSize: Float = 20.0
+  def sw: Float = getScreenWidth().toFloat()
+  def sh: Float = getScreenHeight().toFloat()
+  
+  # Calculate scaling: target height is 20 rows, let's leave 10% margin top/bottom
+  def cellSize: Float = (sh * 0.8) / 20.0
+  def offsetX: Float = (sw - (g.width.toFloat() * cellSize)) / 2.0
+  def offsetY: Float = (sh - (g.height.toFloat() * cellSize)) / 2.0
   
   # Draw Grid Area Outline (Modern Pastel Lavender)
   drawRectangleLines(
@@ -417,50 +421,54 @@ func draw(g: view Game) {
   }
   
   # UI Text (Modern Pastel Rainbow Palette)
+  # Scale font size based on screen height
+  def fontSize: Float = sh / 25.0
+  if fontSize < 10.0 { fontSize = 10.0 }
+
   drawText(
     text: "SCORE: {g.score}"
     x: 10.0
     y: 10.0
-    fontSize: 20.0
+    fontSize: fontSize
     color: { r: 255, g: 200, b: 200, a: 255 } # Soft Pink
   )
   drawText(
     text: "LEVEL: {g.level}"
     x: 10.0
-    y: 35.0
-    fontSize: 20.0
+    y: 10.0 + fontSize * 1.2
+    fontSize: fontSize
     color: { r: 200, g: 255, b: 200, a: 255 } # Soft Green
   )
   drawText(
     text: "LINES: {g.lines}"
     x: 10.0
-    y: 60.0
-    fontSize: 20.0
+    y: 10.0 + fontSize * 2.4
+    fontSize: fontSize
     color: { r: 200, g: 200, b: 255, a: 255 } # Soft Blue
   )
   
   if g.state is GameState.Paused {
     drawText(
       text: "PAUSED"
-      x: 140.0
-      y: 200.0
-      fontSize: 40.0
+      x: sw / 2.0 - (fontSize * 3.0)
+      y: sh / 2.0
+      fontSize: fontSize * 2.0
       color: { r: 255, g: 255, b: 180, a: 255 } # Soft Yellow
     )
   }
   if g.state is GameState.GameOver {
     drawText(
       text: "GAME OVER"
-      x: 100.0
-      y: 200.0
-      fontSize: 40.0
+      x: sw / 2.0 - (fontSize * 4.0)
+      y: sh / 2.0
+      fontSize: fontSize * 2.0
       color: { r: 255, g: 150, b: 150, a: 255 } # Soft Red
     )
     drawText(
       text: "Press R to Restart"
-      x: 120.0
-      y: 250.0
-      fontSize: 20.0
+      x: sw / 2.0 - (fontSize * 4.0)
+      y: sh / 2.0 + fontSize * 2.2
+      fontSize: fontSize
       color: { r: 220, g: 220, b: 220, a: 255 } # Light Gray
     )
   }

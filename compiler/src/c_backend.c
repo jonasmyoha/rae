@@ -2412,6 +2412,8 @@ static const NativeMap RAYLIB_MAP[] = {
     {"beginDrawing", "BeginDrawing"},
     {"endDrawing", "EndDrawing"},
     {"setTargetFPS", "SetTargetFPS"},
+    {"getScreenWidth", "GetScreenWidth"},
+    {"getScreenHeight", "GetScreenHeight"},
     {"isKeyDown", "IsKeyDown"},
     {"isKeyPressed", "IsKeyPressed"},
     {"clearBackground", "ClearBackground"},
