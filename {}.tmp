@@ -1,0 +1,2026 @@
+# Math and Random library for Rae
+import core
+func rae_seed(n: Int) extern
+
+func rae_random() extern ret Float
+
+func rae_random_int(min: Int, max: Int) extern ret Int
+
+func seed(n: Int) {
+  rae_seed(n: n)
+}
+
+func random() ret Float {
+  ret rae_random()
+}
+
+func random(min: Int, max: Int) ret Int {
+  ret rae_random_int(min: min, max: max)
+}
+
+func abs(n: Int) ret Int {
+  if n < 0 {
+    ret -n
+  }
+  ret n
+}
+
+func abs(n: Float) ret Float {
+  if n < 0.0 {
+    ret -n
+  }
+  ret n
+}
+
+func min(a: Int, b: Int) ret Int {
+  if a < b {
+    ret a
+  }
+  ret b
+}
+
+func max(a: Int, b: Int) ret Int {
+  if a > b {
+    ret a
+  }
+  ret b
+}
+
+func clamp(val: Int, low: Int, high: Int) ret Int {
+  if val < low {
+    ret low
+  }
+  if val > high {
+    ret high
+  }
+  ret val
+}
+
+func lerp(a: Float, b: Float, t: Float) ret Float {
+  ret a + (b - a) * t
+}
+
+func randomFloat(min: Float, max: Float) ret Float {
+  ret min + rae_random() * (max - min)
+}
+# String utilities for Rae
+func rae_str_len(s: String) extern ret Int
+
+func rae_str_compare(a: String, b: String) extern ret Int
+
+func rae_str_eq(a: String, b: String) extern ret Bool
+
+func rae_str_hash(s: String) extern ret Int
+
+func rae_str_concat(a: String, b: String) extern ret String
+
+func rae_str_sub(s: String, start: Int, len: Int) extern ret String
+
+func rae_str_contains(s: String, sub: String) extern ret Bool
+
+func rae_str_to_f64(s: String) extern ret Float
+
+func rae_str_to_i64(s: String) extern ret Int
+
+func length(this: String) ret Int {
+  ret rae_str_len(s: this)
+}
+
+func compare(this: String, other: String) ret Int {
+  ret rae_str_compare(a: this, b: other)
+}
+
+func equals(this: String, other: String) ret Bool {
+  ret rae_str_eq(a: this, b: other)
+}
+
+func hash(this: String) ret Int {
+  ret rae_str_hash(s: this)
+}
+
+func concat(this: String, other: String) ret String {
+  ret rae_str_concat(a: this, b: other)
+}
+
+func sub(this: String, start: Int, len: Int) ret String {
+  ret rae_str_sub(s: this, start: start, len: len)
+}
+
+func contains(this: String, sub: String) ret Bool {
+  ret rae_str_contains(s: this, sub: sub)
+}
+
+func toFloat(this: String) ret Float {
+  ret rae_str_to_f64(s: this)
+}
+
+func toInt(this: String) ret Int {
+  ret rae_str_to_i64(s: this)
+}
+# Specialized List implementation for Rae
+type List2 {
+  data: Buffer(Any)
+  length: Int
+  capacity: Int
+}
+
+func createList2(initialCap: Int) ret List2 {
+  ret { data: __buf_alloc(size: initialCap), length: 0, capacity: initialCap }
+}
+
+func grow(this: mod List2) {
+  def newCap: Int = this.capacity * 2
+  if newCap is 0 {
+    newCap = 4
+  }
+  def newData: Buffer(Any) = __buf_alloc(size: newCap)
+  __buf_copy(
+    src: this.data
+    src_off: 0
+    dst: newData
+    dst_off: 0
+    len: this.length
+  )
+  __buf_free(buf: this.data)
+  this.data = newData
+  this.capacity = newCap
+}
+
+func add(this: mod List2, value: Any) {
+  if this.length is this.capacity {
+    grow(this)
+  }
+  __buf_set(buf: this.data, index: this.length, value: value)
+  this.length = this.length + 1
+}
+
+func get(this: view List2, index: Int) ret Any {
+  ret __buf_get(buf: this.data, index: index)
+}
+
+func length(this: view List2) ret Int {
+  ret this.length
+}
+# Core library for Rae
+func nextTick() extern ret Int
+
+func nowMs() extern ret Int
+
+func sleep(ms: Int) extern
+
+func rae_int_to_float(i: Int) extern ret Float
+
+func toFloat(this: Int) ret Float {
+  ret rae_int_to_float(i: this)
+}
+
+# -- Generic List Implementation (Rae-native) --
+type List(T) {
+  data: Buffer(T)
+  length: Int
+  capacity: Int
+}
+
+func createList(T)(initialCap: Int) ret List(T) {
+  ret { data: __buf_alloc(size: initialCap), length: 0, capacity: initialCap }
+}
+
+func grow(T)(this: mod List(T)) {
+  def newCap: Int = this.capacity * 2
+  if newCap is 0 {
+    newCap = 4
+  }
+  def newData: Buffer(T) = __buf_alloc(size: newCap)
+  __buf_copy(
+    src: this.data
+    src_off: 0
+    dst: newData
+    dst_off: 0
+    len: this.length
+  )
+  __buf_free(buf: this.data)
+  this.data = newData
+  this.capacity = newCap
+}
+
+func add(T)(this: mod List(T), value: T) {
+  if this.length is this.capacity {
+    grow(this)
+  }
+  __buf_set(buf: this.data, index: this.length, value: value)
+  this.length = this.length + 1
+}
+
+func get(T)(this: view List(T), index: Int) ret T {
+  if index < 0 or index >= this.length {
+    ret none
+  }
+  ret __buf_get(buf: this.data, index: index)
+}
+
+func set(T)(this: mod List(T), index: Int, value: T) {
+  if index < 0 or index >= this.length {
+    ret
+  }
+  __buf_set(buf: this.data, index: index, value: value)
+}
+
+func insert(T)(this: mod List(T), index: Int, value: T) {
+  if index < 0 or index > this.length {
+    ret
+  }
+  if this.length is this.capacity {
+    grow(this)
+  }
+  # Shift elements to the right
+  if index < this.length {
+    __buf_copy(
+      src: this.data
+      src_off: index
+      dst: this.data
+      dst_off: index + 1
+      len: this.length - index
+    )
+  }
+  __buf_set(buf: this.data, index: index, value: value)
+  this.length = this.length + 1
+}
+
+func pop(T)(this: mod List(T)) ret T {
+  if this.length is 0 {
+    ret none
+  }
+  def val: T = __buf_get(buf: this.data, index: this.length - 1)
+  this.length = this.length - 1
+  ret val
+}
+
+func remove(T)(this: mod List(T), index: Int) {
+  if index < 0 or index >= this.length {
+    ret
+  }
+  # Shift elements to the left
+  if index < this.length - 1 {
+    __buf_copy(
+      src: this.data
+      src_off: index + 1
+      dst: this.data
+      dst_off: index
+      len: this.length - index - 1
+    )
+  }
+  this.length = this.length - 1
+}
+
+func clear(T)(this: mod List(T)) {
+  this.length = 0
+}
+
+func length(T)(this: view List(T)) ret Int {
+  ret this.length
+}
+
+func swap(T)(this: mod List(T), i: Int, j: Int) {
+  def temp: T = __buf_get(buf: this.data, index: i)
+  __buf_set(buf: this.data, index: i, value: __buf_get(buf: this.data, index: j))
+  __buf_set(buf: this.data, index: j, value: temp)
+}
+
+func free(T)(this: mod List(T)) {
+  __buf_free(buf: this.data)
+  this.length = 0
+  this.capacity = 0
+}
+
+# -- Specialized Map Implementations --
+func rae_str_hash(s: String) extern ret Int
+
+func rae_str_eq(a: String, b: String) extern ret Bool
+
+type StringMapEntry(V) {
+  k: String
+  value: V
+  occupied: Bool
+}
+
+type StringMap(V) {
+  data: Buffer(StringMapEntry(V))
+  length: Int
+  capacity: Int
+}
+
+func createStringMap(V)(initialCap: Int) ret StringMap(V) {
+  ret { data: __buf_alloc(size: initialCap), length: 0, capacity: initialCap }
+}
+
+func set(V)(this: mod StringMap(V), k: String, value: V) {
+  if this.capacity is 0 {
+    this.capacity = 8
+    this.data = __buf_alloc(size: this.capacity)
+  }
+  if this.length * 2 > this.capacity {
+    growStringMap(this)
+  }
+  def h: Int = rae_str_hash(s: k)
+  def idx: Int = h % this.capacity
+  if idx < 0 {
+    idx = -idx
+  }
+  loop true {
+    def entry: StringMapEntry(V) = __buf_get(buf: this.data, index: idx)
+    if not entry.occupied {
+      entry.k = k
+      entry.value = value
+      entry.occupied = true
+      __buf_set(buf: this.data, index: idx, value: entry)
+      this.length = this.length + 1
+      ret
+    }
+    if rae_str_eq(a: entry.k, b: k) {
+      entry.value = value
+      __buf_set(buf: this.data, index: idx, value: entry)
+      ret
+    }
+    idx = (idx + 1) % this.capacity
+  }
+}
+
+func get(V)(this: view StringMap(V), k: String) ret opt V {
+  if this.capacity is 0 {
+    ret none
+  }
+  def h: Int = rae_str_hash(s: k)
+  def idx: Int = h % this.capacity
+  if idx < 0 {
+    idx = -idx
+  }
+  def startIdx: Int = idx
+  loop true {
+    def entry: StringMapEntry(V) = __buf_get(buf: this.data, index: idx)
+    if not entry.occupied {
+      ret none
+    }
+    if rae_str_eq(a: entry.k, b: k) {
+      ret entry.value
+    }
+    idx = (idx + 1) % this.capacity
+    if idx is startIdx {
+      ret none
+    }
+  }
+}
+
+func has(V)(this: view StringMap(V), k: String) ret Bool {
+  match get(this, k: k) {
+    case none {
+      ret false
+    }
+    default {
+      ret true
+    }
+  }
+}
+
+func growStringMap(V)(this: mod StringMap(V)) {
+  def oldCap: Int = this.capacity
+  def oldData: Buffer(StringMapEntry(V)) = this.data
+  this.capacity = oldCap * 2
+  if this.capacity is 0 {
+    this.capacity = 8
+  }
+  this.data = __buf_alloc(size: this.capacity)
+  this.length = 0
+  def i: Int = 0
+  loop i < oldCap {
+    def entry: StringMapEntry(V) = __buf_get(buf: oldData, index: i)
+    if entry.occupied {
+      set(this, k: entry.k, value: entry.value)
+    }
+    i = i + 1
+  }
+  __buf_free(buf: oldData)
+}
+
+func free(V)(this: mod StringMap(V)) {
+  __buf_free(buf: this.data)
+  this.length = 0
+  this.capacity = 0
+}
+
+# -- IntMap Implementation --
+type IntMapEntry(V) {
+  k: Int
+  value: V
+  occupied: Bool
+}
+
+type IntMap(V) {
+  data: Buffer(IntMapEntry(V))
+  length: Int
+  capacity: Int
+}
+
+func createIntMap(V)(initialCap: Int) ret IntMap(V) {
+  ret { data: __buf_alloc(size: initialCap), length: 0, capacity: initialCap }
+}
+
+func set(V)(this: mod IntMap(V), k: Int, value: V) {
+  if this.capacity is 0 {
+    this.capacity = 8
+    this.data = __buf_alloc(size: this.capacity)
+  }
+  if this.length * 2 > this.capacity {
+    growIntMap(this)
+  }
+  # Simple hash for Int
+  def h: Int = k
+  def idx: Int = h % this.capacity
+  if idx < 0 {
+    idx = -idx
+  }
+  loop true {
+    def entry: IntMapEntry(V) = __buf_get(buf: this.data, index: idx)
+    if not entry.occupied {
+      entry.k = k
+      entry.value = value
+      entry.occupied = true
+      __buf_set(buf: this.data, index: idx, value: entry)
+      this.length = this.length + 1
+      ret
+    }
+    if entry.k is k {
+      entry.value = value
+      __buf_set(buf: this.data, index: idx, value: entry)
+      ret
+    }
+    idx = (idx + 1) % this.capacity
+  }
+}
+
+func get(V)(this: view IntMap(V), k: Int) ret opt V {
+  if this.capacity is 0 {
+    ret none
+  }
+  def h: Int = k
+  def idx: Int = h % this.capacity
+  if idx < 0 {
+    idx = -idx
+  }
+  def startIdx: Int = idx
+  loop true {
+    def entry: IntMapEntry(V) = __buf_get(buf: this.data, index: idx)
+    if not entry.occupied {
+      ret none
+    }
+    if entry.k is k {
+      ret entry.value
+    }
+    idx = (idx + 1) % this.capacity
+    if idx is startIdx {
+      ret none
+    }
+  }
+}
+
+func has(V)(this: view IntMap(V), k: Int) ret Bool {
+  match get(this, k: k) {
+    case none {
+      ret false
+    }
+    default {
+      ret true
+    }
+  }
+}
+
+func growIntMap(V)(this: mod IntMap(V)) {
+  def oldCap: Int = this.capacity
+  def oldData: Buffer(IntMapEntry(V)) = this.data
+  this.capacity = oldCap * 2
+  if this.capacity is 0 {
+    this.capacity = 8
+  }
+  this.data = __buf_alloc(size: this.capacity)
+  this.length = 0
+  def i: Int = 0
+  loop i < oldCap {
+    def entry: view IntMapEntry(V) = __buf_get(buf: oldData, index: i)
+    if entry.occupied {
+      set(this, k: entry.k, value: entry.value)
+    }
+    i = i + 1
+  }
+  __buf_free(buf: oldData)
+}
+
+func free(V)(this: mod IntMap(V)) {
+  __buf_free(buf: this.data)
+  this.length = 0
+  this.capacity = 0
+}
+# System utilities for Rae
+func rae_sys_exit(code: Int) extern
+
+func rae_sys_get_env(name: String) extern ret String
+
+func rae_sys_read_file(path: String) extern ret opt String
+
+func rae_sys_write_file(path: String, content: String) extern ret Bool
+
+func exit(code: Int) {
+  rae_sys_exit(code: code)
+}
+
+func getEnv(name: String) ret String {
+  ret rae_sys_get_env(name: name)
+}
+
+func readFile(path: String) ret opt String {
+  ret rae_sys_read_file(path: path)
+}
+
+func writeFile(path: String, content: String) ret Bool {
+  ret rae_sys_write_file(path: path, content: content)
+}
+# Integer-only List2 implementation for Rae
+type List2Int {
+  data: Buffer(Int)
+  length: Int
+  capacity: Int
+}
+
+func createList2Int(initialCap: Int) ret List2Int {
+  ret { data: __buf_alloc(size: initialCap), length: 0, capacity: initialCap }
+}
+
+func grow(this: mod List2Int) {
+  def newCap: Int = this.capacity * 2
+  if newCap is 0 {
+    newCap = 4
+  }
+  def newData: Buffer(Int) = __buf_alloc(size: newCap)
+  __buf_copy(
+    src: this.data
+    src_off: 0
+    dst: newData
+    dst_off: 0
+    len: this.length
+  )
+  __buf_free(buf: this.data)
+  this.data = newData
+  this.capacity = newCap
+}
+
+func add(this: mod List2Int, value: Int) {
+  if this.length is this.capacity {
+    grow(this)
+  }
+  __buf_set(buf: this.data, index: this.length, value: value)
+  this.length = this.length + 1
+}
+
+func get(this: view List2Int, index: Int) ret Int {
+  ret __buf_get(buf: this.data, index: index)
+}
+
+func length(this: view List2Int) ret Int {
+  ret this.length
+}
+# TinyExpr bindings for Rae
+func rae_tinyexpr_eval(expr: String) extern ret Float
+
+func tinyExprEval(expr: String) ret Float {
+  ret rae_tinyexpr_eval(expr: expr)
+}
+# IO utilities for Rae
+func rae_io_read_line() extern ret String
+
+func rae_io_read_char() extern ret Char
+
+func readLine() ret String {
+  ret rae_io_read_line()
+}
+
+func readChar() ret Char {
+  ret rae_io_read_char()
+}
+# Raylib wrapper for Rae
+type Color: c_struct {
+  r: Int
+  g: Int
+  b: Int
+  a: Int
+}
+
+type Vector2: c_struct {
+  x: Float
+  y: Float
+}
+
+type Vector3: c_struct {
+  x: Float
+  y: Float
+  z: Float
+}
+
+type Camera3D: c_struct {
+  position: Vector3
+  target: Vector3
+  up: Vector3
+  fovy: Float
+  projection: Int
+}
+
+func initWindow(width: Int, height: Int, title: String) extern
+
+func setConfigFlags(flags: Int) extern
+
+func windowShouldClose() extern ret Int
+
+func closeWindow() extern
+
+func beginDrawing() extern
+
+func endDrawing() extern
+
+func clearBackground(color: Color) extern
+
+func drawRectangle(
+  x: Float
+  y: Float
+  width: Float
+  height: Float
+  color: Color
+) extern
+
+func drawCircle(x: Float, y: Float, radius: Float, color: Color) extern
+
+func drawText(
+  text: String
+  x: Float
+  y: Float
+  fontSize: Float
+  color: Color
+) extern
+
+func drawCube(
+  pos: Vector3
+  width: Float
+  height: Float
+  length: Float
+  color: Color
+) extern
+
+func drawCubeWires(
+  pos: Vector3
+  width: Float
+  height: Float
+  length: Float
+  color: Color
+) extern
+
+func drawSphere(centerPos: Vector3, radius: Float, color: Color) extern
+
+func drawCylinder(
+  position: Vector3
+  radiusTop: Float
+  radiusBottom: Float
+  height: Float
+  slices: Int
+  color: Color
+) extern
+
+func drawGrid(slices: Int, spacing: Float) extern
+
+func beginMode3D(camera: Camera3D) extern
+
+func endMode3D() extern
+
+func setTargetFPS(fps: Int) extern
+
+func isKeyDown(key: Int) extern ret Int
+
+func isKeyPressed(key: Int) extern ret Int
+
+func getTime() extern ret Float
+
+func colorFromHSV(hue: Float, saturation: Float, value: Float) extern ret Color
+# Generic List2 implementation for Rae
+type List2Generic(T) {
+  data: Buffer(T)
+  length: Int
+  capacity: Int
+}
+
+func createList2Generic(T)(initialCap: Int) ret List2Generic(T) {
+  ret { data: __buf_alloc(size: initialCap), length: 0, capacity: initialCap }
+}
+
+func grow(T)(this: mod List2Generic(T)) {
+  def newCap: Int = this.capacity * 2
+  if newCap is 0 {
+    newCap = 4
+  }
+  def newData: Buffer(T) = __buf_alloc(size: newCap)
+  __buf_copy(
+    src: this.data
+    src_off: 0
+    dst: newData
+    dst_off: 0
+    len: this.length
+  )
+  __buf_free(buf: this.data)
+  this.data = newData
+  this.capacity = newCap
+}
+
+func add(T)(this: mod List2Generic(T), value: T) {
+  if this.length is this.capacity {
+    grow(this)
+  }
+  __buf_set(buf: this.data, index: this.length, value: value)
+  this.length = this.length + 1
+}
+
+func get(T)(this: view List2Generic(T), index: Int) ret T {
+  ret __buf_get(buf: this.data, index: index)
+}
+
+func length(T)(this: view List2Generic(T)) ret Int {
+  ret this.length
+}
+func main() {
+  loop true {
+    log("Hello from hot reload RAE4!")
+    sleep(ms: 1000)
+  }
+}
+func showHeader() pub {
+  log("--- Report Start ---")
+}
+func showFooter() pub {
+  log("--- Report End ---")
+}
+import ui/header
+import ui/footer
+func main() {
+  log("Report pipeline kicked off (imports ready)")
+  showHeader()
+  log("  • header/footer modules imported")
+  showFooter()
+}
+type Velocity {
+  dx: Float
+  dy: Float
+}
+
+type Entity {
+  pos: Point
+  vel: opt Velocity
+}
+
+# Optional value, self-contained
+type Point {
+  x: Float
+  y: Float
+}
+
+func updatePosition(p: mod Point, v: Velocity) {
+  p.x = p.x + v.dx
+  p.y = p.y + v.dy
+}
+
+func main() {
+  # 1. Copy semantics (=)
+  def v1: Velocity = { dx: 1.0, dy: 1.0 }
+  # Deep copy
+  def v2: Velocity = v1
+  v2.dx = 2.0
+  log("v1.dx (should be 1.0):")
+  # 2. Binding semantics (=>)
+  log(v1.dx)
+  log("v2.dx (should be 2.0):")
+  log(v2.dx)
+  def p: Point = { x: 0.0, y: 0.0 }
+  # Mutable binding
+  def pRef: mod Point => p
+  pRef.x = 10.0
+  # 3. Complex types: opt mod
+  log("p.x after pRef modification (should be 10.0):")
+  log(p.x)
+  def target: Point = { x: 5.0, y: 5.0 }
+  def selected: opt mod Point => target
+  match selected {
+    default {
+      log("Selected point exists, moving it...")
+      updatePosition(p: selected, v: v1)
+    }
+  }
+  log("target.x after update (should be 6.0):")
+  log(target.x)
+}
+func external_c_func(a: Int, b: Int) ret Int
+
+func main() {
+  def result: Int = external_c_func(a: 10, b: 20)
+  log("Result: ")
+  log(result)
+  log("\n")
+}
+func main() {
+  def step: Int = 0
+  loop step < 5 {
+    log("[Hybrid demo] Loop tick")
+    log(step)
+    step = step + 1
+    if step is 2 {
+      log("[Hybrid demo] Dev hot-reload bundle staged")
+    }
+    log("[Hybrid demo] Release bundle staged")
+  }
+  log("[Hybrid demo] Loop exit")
+}
+
+func init() {
+  log("[Hybrid demo] Booting hybrid host runtime")
+}
+
+func shutdown() {
+  log("[Hybrid demo] Hybrid host shutdown")
+}
+import examples/hybrid_hot_reload/scripts/downloaded/dev_patch
+import examples/hybrid_hot_reload/scripts/downloaded/release_patch
+func buildHybridDevBundle() {
+  log("[Hybrid demo] Compiling host stub for dev profile")
+  emitDevPatch()
+  log("[Hybrid demo] vm/dev_patch.vmchunk staged for hot reload testing")
+}
+
+func buildHybridReleaseBundle() {
+  log("[Hybrid demo] Compiling host stub for release profile")
+  emitReleasePatch()
+  log("[Hybrid demo] vm/release_patch.vmchunk staged for hot reload testing")
+}
+func emitDevPatch() {
+  log("  [dev v1] Embedding downloaded script for VM hot reload")
+  log("  [dev v1] This chunk would be reloaded automatically during development")
+}
+func emitReleasePatch() {
+  log("  [release v1] Embedding signed script for shipped builds")
+  log("  [release v1] Host watches for this file to appear and reloads safely")
+}
+func emitDevPatch() {
+  log("  [dev v1] Embedding downloaded script for VM hot reload")
+  log("  [dev v1] This chunk would be reloaded automatically during development")
+}
+func emitReleasePatch() {
+  log("  [release v1] Embedding signed script for shipped builds")
+  log("  [release v1] Host watches for this file to appear and reloads safely")
+}
+func emitDevPatch() {
+  log("  [dev v3] Third iteration of the downloaded VM chunk")
+  log("  [dev v3] Demonstrates repeatable hot reload updates")
+}
+func emitReleasePatch() {
+  log("  [release v3] Third signed bundle staged for download")
+  log("  [release v3] Shows repeated reloads with minimal downtime")
+}
+func emitDevPatch() {
+  log("  [dev v2] Downloaded script updated for iteration two")
+  log("  [dev v2] Hot reload would swap behavior without restarting the host")
+}
+func emitReleasePatch() {
+  log("  [release v2] Signed patch for the second release iteration")
+  log("  [release v2] Host replaces the VM chunk while staying online")
+}
+func add(a: Int, b: Int) ret Int {
+  ret a + b
+}
+
+func triple(value: Int) ret Int {
+  ret value * 3
+}
+
+func chain(a: Int, b: Int, c: Int) ret Int {
+  ret triple(value: a + b) + c
+}
+
+func main() {
+  log("VM math demo start")
+  log(add(a: 2, b: 5))
+  log(triple(value: 4))
+  log(chain(a: 1, b: 2, c: 3))
+  log("VM math demo end")
+}
+enum Direction { North, South, East, West }
+
+func main() {
+  def d: Direction = Direction.North
+  log("Direction: {d}")
+  if d is Direction.North {
+    log("Going North")
+  }
+}
+func main() {
+  def xs: List(Int) = createList(initialCap: 4)
+  xs.add(value: 10)
+  xs.add(value: 20)
+  xs.add(value: 30)
+  log("Length: {xs.length}")
+  log("Item 0: {xs.get(index: 0)}")
+  log("Item 1: {xs.get(index: 1)}")
+  log("Item 2: {xs.get(index: 2)}")
+}
+import list2
+func main() {
+  log("List2 Any Test")
+  def list: List2(Any) = createList2(initialCap: 2)
+  add(list, value: 10)
+  add(list, value: "Hello")
+  add(list, value: true)
+  add(list, value: 3.14)
+  log("List items:")
+  def i: Int = 0
+  loop i < length(list) {
+    log(get(list, index: i))
+    i = i + 1
+  }
+  log("Done.")
+}
+import list2_generic
+func main() {
+  log("Generic List2 Test (Int)")
+  def list: List2(Int) = createList2(initialCap: 2)
+  add(list, value: 10)
+  add(list, value: 20)
+  add(list, value: 30)
+  log("List items:")
+  def i: Int = 0
+  loop i < list.length {
+    log(get(list, index: i))
+    i = i + 1
+  }
+  log("Generic List2 Test (String)")
+  def slist: List2(String) = createList2(initialCap: 2)
+  add(slist, value: "Hello")
+  add(slist, value: "Generics")
+  log("List items:")
+  def j: Int = 0
+  loop j < slist.length {
+    log(get(slist, index: j))
+    j = j + 1
+  }
+  log("Done.")
+}
+func greet() {
+  log("Hello from greet()")
+}
+
+func runSequence() {
+  log("Entering runSequence()")
+  greet()
+  log("Leaving runSequence()")
+}
+
+func main() {
+  log("VM call test start")
+  runSequence()
+  log("VM call test end")
+}
+func main() {
+  log("Auto-import demo start")
+  showHeader()
+  showBody()
+  showFooter()
+  log("Auto-import demo end")
+}
+func showHeader() pub {
+  log("=== Report Header ===")
+}
+func showFooter() pub {
+  log("=== Report Footer ===")
+}
+func showBody() pub {
+  log("Body: data from src/body.rae")
+}
+func main() {
+  log("Main loop running (use Stop to exit)")
+  loop true {
+    logS("tick ")
+    log(nextTick())
+    sleep(ms: 100)
+  }
+}
+type User {
+  name: String
+}
+
+# Dummy Store interface
+# extern type UserStore {
+#   func idOf(key: key User) ret opt id User
+#   func keyOf(id: id User) ret opt key User
+# }
+func main() {
+  def externalKey: key User = "uid_99"
+  # Mapping used by the store layer
+  # def internalId: opt id User = store.idOf(key: externalKey)
+  log("Store maps between stable keys and fast local IDs.")
+}
+func doubleValue(value: Int) {
+  def doubled: Int = value * 2
+  helper(input: doubled)
+}
+
+func helper(input: Int) {
+  log("Helper ran")
+}
+
+func sumChain(a: Int, b: Int, c: Int) {
+  log("sumChain start")
+  def total: Int = a + b + c
+  doubleValue(value: total)
+  if total > 5 {
+    log("total > 5")
+  } else {
+    log("total <= 5")
+  }
+  log("sumChain done")
+}
+
+func main() {
+  log("C backend demo start")
+  sumChain(a: 1, b: 2, c: 3)
+  log("C backend demo end")
+}
+func main() {
+  log("Standard List Test")
+  def list: List(Any) = {
+    10
+    "Hello"
+    true
+    3.14
+    }
+  log("List items:")
+  def i: Int = 0
+  loop i < list.length() {
+    log(list[i])
+    i = i + 1
+  }
+  log("Modification:")
+  list.add(value: "New Item")
+  loop i < list.length() {
+    log(list[i])
+    i = i + 1
+  }
+  log("Done.")
+}
+type Velocity {
+  dx: Float
+  dy: Float
+}
+
+# Correct: Storing identity tokens (values) instead of references
+# def velocityIds: List(id Velocity) = {}
+func main() {
+  def v: Velocity = { dx: 1.0, dy: 1.0 }
+  # Opaque handle from a store
+  def vid: id Velocity = 101
+  # Safe to store values
+  # velocityIds.add(item: vid)
+  log("Storing ID is safe because it is a value, not a reference.")
+}
+type Box(T) {
+  value: T
+}
+
+func setValue(T)(b: mod Box(T), val: T) {
+  b.value = val
+}
+
+func main() {
+  # Int Box
+  def b: Box(Int) = { value: 42 }
+  log(b.value)
+  setValue(b, val: 100)
+  # Float Box
+  log(b.value)
+  def bf: Box(Float) = { value: 3.14 }
+  log(bf.value)
+  setValue(bf, val: 2.718)
+  # String Box
+  log(bf.value)
+  def bs: Box(String) = { value: "hello" }
+  log(bs.value)
+  setValue(bs, val: "world")
+  log(bs.value)
+}
+func main() {
+  log("--- Rae Standard Library Demo ---")
+  log("1. Time")
+  log("Current time: {nowMs()} ms")
+  log("2. Math Overloads")
+  log("abs(-10): {abs(-10)}")
+  log("abs(-3.14): {abs(-3.14)}")
+  log("min(5, 10): {min(5, b: 10)}")
+  log("max(5, 10): {max(5, b: 10)}")
+  log("clamp(15, low: 0, high: 10): {clamp(15, low: 0, high: 10)}")
+  log("3. Randomness")
+  seed(n: 42)
+  log("Random float: {random()}")
+  log("Random int (1-100): {random(min: 1, max: 100)}")
+  log("4. String Utilities")
+  def s: String = "Hello, Rae!"
+  log("String: {s}")
+  log("Length: {s.length()}")
+  def sub: String = "Rae"
+  log("Contains 'Rae'? {s.contains(sub: sub)}")
+  log("Substring (0, 5): {s.sub(start: 0, len: 5)}")
+  def nStr: String = "123"
+  log("String '123' to Int: {nStr.toInt()}")
+  log("5. System")
+  def path: opt String = getEnv(name: "PATH")
+  log("PATH env: {path}")
+  log("Demo complete.")
+}
+type Point {
+  x: Int
+  y: Int
+}
+
+func main() {
+  # 1. Value Type
+  def p1: Point = { x: 10, y: 20 }
+  # Copy
+  def p2: Point = p1
+  p2.x = 30
+  # Prints 10
+  # 2. Borrow Type
+  log(p1.x)
+  def r: mod Point => p1
+  r.y = 50
+  # Prints 50
+  # 3. Identity Types
+  log(p1.y)
+  def pid: id Point = 1
+  def pkey: key Point = "point_001"
+  # 4. Optional Borrow
+  log(pid)
+  log(pkey)
+  def op: opt view Point => p1
+  match op {
+    case none {
+      log("none")
+    }
+    default {
+      log("has point")
+    }
+  }
+}
+type Velocity {
+  dx: Float
+  dy: Float
+}
+
+# Assume a global-ish list
+# def globalVelocities: List(view Velocity) = {} # This is illegal per spec
+func main() {
+  def v: Velocity = { dx: 1.0, dy: 1.0 }
+  # Illegal: Trying to store a reference into a list that might outlive v
+  # list.add(item: view v) 
+  log("Borrows cannot be stored in long-lived containers like List")
+}
+func main() {
+  log("Hello from the RaePack demo!")
+}
+func main() {
+  log("Hello, Rae!")
+}
+import math
+import raylib
+func main() {
+  initWindow(width: 400, height: 400, title: "Rae Random Demo")
+  setTargetFPS(fps: 60)
+  def bgColor: Color = {
+    r: 20
+    g: 20
+    b: 25
+    a: 255
+    }
+  loop windowShouldClose() is 0 {
+    beginDrawing()
+    clearBackground(color: bgColor)
+    def i: Int = 0
+    loop i < 10 {
+      def x: Float = random(min: 0, max: 400).toFloat()
+      def y: Float = random(min: 0, max: 400).toFloat()
+      def r: Float = random(min: 5, max: 20).toFloat()
+      drawCircle(
+        x: x
+        y: y
+        radius: r
+        color: {
+          r: random(min: 100, max: 255)
+          g: random(min: 100, max: 255)
+          b: random(min: 100, max: 255)
+          a: 255
+                }
+      )
+      i = i + 1
+    }
+    endDrawing()
+  }
+  closeWindow()
+}
+func main() {
+  def xs: List(Int) = createList(initialCap: 10)
+  def i: Int = 0
+  loop i < 5 {
+    xs.add(value: i * 10)
+    i = i + 1
+  }
+  def j: Int = 0
+  loop j < xs.length {
+    log("xs({j}) = {xs.get(index: j)}")
+    j = j + 1
+  }
+}
+func main() {
+  def s: String = r"This is a \ raw string"
+  log(s)
+  def s2: String = r#"String with "quotes" and #hashes#"#
+  log(s2)
+}
+import core
+func benchmarkNative(count: Int) ret Int {
+  def l: List(Int) = createList(initialCap: 10)
+  def i: Int = 0
+  loop i < count {
+    l.add(value: i)
+    i = i + 1
+  }
+  def total: Int = 0
+  def j: Int = 0
+  loop j < l.length {
+    total = total + l.get(index: j)
+    j = j + 1
+  }
+  ret total
+}
+
+func main() {
+  def count: Int = 1000
+  log("Benchmarking native List with {count} items...")
+  def start: Int = nowMs()
+  def result: Int = benchmarkNative(count: count)
+  def end: Int = nowMs()
+  log("Result: {result}")
+  log("Time: {end - start}ms")
+}
+type Point {
+  x: Int
+}
+
+func xView(p: view Point) ret view Int {
+  ret view  p.x
+}
+
+func main() {
+  def p: Point = { x: 7 }
+  def r: view Int => p.xView()
+  # expect 7
+  # expect 7
+  log(r)
+  log(p.x)
+}
+func main() {
+  loop false {
+    log("never runs")
+  }
+  log("done")
+}
+import ./missing/helper
+func main() {
+  log("unreachable")
+}
+func main() {
+  log("Auto import start")
+  log("Auto import end")
+}
+# Auto-import smoke test: helper module defines func main().
+func main() {
+  def i: Int = 0
+  loop i < 100 {
+    def x: Int = 10
+    if i < 50 {
+      def y: Int = 20
+    }
+    i = i + 1
+  }
+  log("Done")
+}
+type Point {
+  x: Int
+  y: Int
+}
+
+func main() {
+  def p: Point = { x: 1, y: 2 }
+  def v: view Point => p
+  log(v.x)
+  def m: mod Point => p
+  m.y = 20
+  log(p.y)
+  def ov: opt view Point => p
+  match ov {
+    default {
+      log("has value")
+    }
+  }
+  def on: opt view Point => none
+  match on {
+    case none {
+      log("none")
+    }
+    default {
+      log("has value")
+    }
+  }
+}
+func makePoint() ret Point {
+  def origin: Point => { x: 0, y: 0 }
+  ret origin
+}
+import core
+func main() {
+  def x: Int = 1
+  match x {
+    case 1 {
+      log("one")
+    }
+    case 2 {
+      log("two")
+    }
+    default {
+      log("other")
+    }
+  }
+}
+import core
+func main() {
+  def x: Int = 10
+  if x > 3 {
+    log("value greater than three")
+  } else {
+    log("value small")
+  }
+}
+type Bad {
+  r: view Int
+}
+
+# ERROR: view/mod not allowed in struct fields
+func main() {
+  log("bad")
+}
+func main() {
+  def x: List(Int) = { 10, 20 }
+  x.add(value: 30)
+  log(x)
+}
+type Point {
+  x: Int
+  y: Int
+}
+
+func main() {
+  def p: Point = { x: 1, y: 2 }
+  def r: mod Point => p
+  r.x = 10
+  # expect 10
+  # expect 10
+  log(p.x)
+  log(r.x)
+}
+type Point {
+  x: Int
+}
+
+func main() {
+  def p: Point = { x: 1 }
+  def rx: mod Int => p.x
+  rx = 10
+  # expect 10
+  log(p.x)
+}
+func add(a: Int, b: Int) ret Int {
+  spawn log("adding")
+  ret a + b
+}
+func compute(a: Int, b: Int) ret Int {
+  def doubled: Int = a * 2
+  log(doubled)
+  ret doubled + b
+}
+
+func main() {
+  log(compute(a: 2, b: 3))
+}
+func classify(n: Int) ret result: String {
+  if n < 0 {
+    ret result: "negative"
+  } else {
+    match n {
+      case 0 {
+        ret result: "zero"
+      }
+      default {
+        spawn heavyWork(idx: n)
+        ret result: "positive"
+      }
+    }
+  }
+}
+func main() {
+  def x: Int = 1
+  log(x)
+  x = 2
+  log(x)
+  x = x + 10
+  log(x)
+  x = x * 2
+  log(x)
+  def y: Int = 100
+  log(y)
+  y = y / 2
+  log(y)
+}
+func main() {
+  def s: String = r"with
+cr"
+  log(s)
+}
+import core
+func external_c_func(a: Int, b: Int) ret Int
+
+func helper() ret Int {
+  ret 42
+}
+
+func main() {
+  def result: Int = external_c_func(a: 10, b: 20)
+  log(result)
+  log(helper())
+}
+func main() {
+  def x: Int = 1
+  match x {
+    case 1 {
+      log("one")
+    }
+    case 2 {
+      log("two")
+    }
+    default {
+      log("default")
+    }
+  }
+  def y: Int = 0
+  match y {
+    case 0 {
+      log("zero")
+    }
+    default {
+      log("fallback")
+    }
+  }
+}
+type Point {
+  x: Int
+}
+
+func main() {
+  def pid: id Point = 1
+  def pkey: key Point = "p1"
+  def opid: opt id Point = none
+  def opkey: opt key Point = none
+  log(pid)
+  log(pkey)
+}
+type Point {
+  x: Int
+}
+
+func xMod(p: mod Point) ret mod Int {
+  ret mod  p.x
+}
+
+func xView(p: view Point) ret view Int {
+  ret view  p.x
+}
+
+func main() {
+  # ERROR: cannot take/return mod/view reference into a temporary literal
+  def a: mod Int => xMod({ x: 1 })
+  def b: view Int => xView({ x: 1 })
+}
+import core
+func main() {
+  log("Core lib test start")
+  log("Tick 1: {nextTick()}")
+  log("Tick 2: {nextTick()}")
+  log("Sleeping for 10ms...")
+  sleep(ms: 10)
+  log("Core lib test end")
+}
+func main() {
+  log("hi")
+}
+func classify(n: Int) ret result: Int {
+  if n < 0 {
+    ret result: "negative"
+  } else {
+    match n {
+      case 0 {
+        ret result: "zero"
+      }
+      default {
+        spawn heavyWork(idx: n)
+        ret result: "positive"
+      }
+    }
+  }
+}
+import nostdlib
+func main() {
+  nextTick()
+}
+import core
+func helper(a: Int, b: Int) {
+  log("Helper ran")
+}
+
+func sumChain(a: Int, b: Int) ret Int {
+  log("sumChain start")
+  def total: Int = a + b
+  if total > 5 {
+    log("total > 5")
+  } else {
+    log("total <= 5")
+  }
+  log("sumChain done")
+  ret total
+}
+
+func main() {
+  log("C backend demo start")
+  helper(a: 1, b: 2)
+  def res: Int = sumChain(a: 3, b: 4)
+  log("C backend demo end")
+}
+type Point {
+  x: Int
+}
+
+func xMod(p: mod Point) ret mod Int {
+  ret mod  p.x
+}
+
+func main() {
+  def p: Point = { x: 1 }
+  # positional arg call is ok
+  def rx: mod Int => xMod(p)
+  rx = 10
+  # aliasing-friendly: direct access while rx exists is OK in Rae
+  # expect 10
+  log(p.x)
+}
+func divide(a: Int, b: Int) ret result: Int, error: opt Error {
+  if b is 0 {
+    ret error: "division by zero"
+  }
+  ret result: a / b
+}
+
+func useDivide(a: Int, b: Int) ret result: Int {
+  def sum: result, def err: error = divide(a: a, b: b)
+  ret sum
+}
+func main() {
+  log(r"hello")
+  log(r#"He said "hi""#)
+  log(r##"Contains "# and quotes " safely"##)
+  log(r"line1
+line2")
+  log(r"back\slash")
+}
+type State {
+  score: Int
+  active: Bool
+  name: String
+}
+
+func main() {
+  # score: 0, active: false, name: ""
+  def s: State = <expr>
+  if s.score is 0 {
+    log("score ok")
+  }
+  if s.active is false {
+    log("active ok")
+  }
+  if s.name is "" {
+    log("name ok")
+  }
+  def x: Int = <expr>
+  if x is 0 {
+    log("primitive ok")
+  }
+  if s.active.toString() is "false" {
+    log("bool toString ok")
+  }
+}
+func greet() {
+  log("Hello from greet()")
+}
+
+func runSequence() {
+  log("Entering runSequence()")
+  greet()
+  log("Leaving runSequence()")
+}
+
+func main() {
+  log("VM call test start")
+  runSequence()
+  log("VM call test end")
+}
+type GameState: pub {
+  score: Int
+}
+
+func tick(state: GameState) ret GameState {
+  def clone: GameState => state
+  ret clone
+}
+func divide(a: Int, b: Int) ret result: Int, error: opt Error {
+  if b is 0 {
+    ret error: "divide by zero"
+  }
+  ret result: a / b
+}
+
+func useDivide(a: Int, b: Int) ret result: Int {
+  def sum: result, def err: error = divide(a: a, b: b)
+  ret sum
+}
+func main() {
+  def s: String = r"withcr"
+  log(s)
+}
+import core
+func main() {
+  log("Main loop running (use Stop to exit)")
+  def tick: Int = 0
+  loop tick < 3 {
+    logS("tick ")
+    log(tick)
+    tick = tick + 1
+  }
+}
+func main() {
+  def x: Int = 1
+  def value: Int = match x { case 1 => 10, default => 20 }
+  log(value)
+  def s: String = "a"
+  def strResult: String = match s { case "a" => "got_a", default => "other" }
+  log(strResult)
+}
+type Point {
+  x: Int
+}
+
+func badMod() ret mod Int {
+  def p: Point = { x: 1 }
+  # ERROR: reference escapes local storage
+  ret mod  p.x
+}
+
+func badView() ret view Int {
+  def p: Point = { x: 1 }
+  # ERROR: reference escapes local storage
+  ret view  p.x
+}
+
+func main() {
+  log("should not run")
+}
+import math
+func main() {
+  log("Random 1: {random()}")
+  log("Random 2: {random()}")
+  log("Int 1-10: {random(min: 1, max: 10)}")
+  log("Int 1-10: {random(min: 1, max: 10)}")
+}
+type Point {
+  x: Int
+  y: Int
+}
+
+func test(p: opt mod id Point) {
+  log("Stacked properties parsed correctly")
+}
+
+func main() {
+  # This is just a parsing test for now
+  log("Parsing test")
+}
+func main() {
+  log("Hello, Rae!")
+  logS("Streaming ")
+  log("done")
+}
+type Point: pub {
+  x: Int
+  y: Int
+}
+
+type MaybeError {
+  message: String
+}
+func main() {
+  log("C-style loop test")
+  loop i: Int = 0, i < 5, ++i {
+    log(i)
+  }
+}
+type Point {
+  x: Int
+  y: Int
+}
+
+func main() {
+  def a: Point = { x: 1, y: 2 }
+  def b: Point = a
+  b.x = 10
+  # expect 1
+  # expect 10
+  log(a.x)
+  log(b.x)
+}
+import ../../../modules/greetings/banner
+import ../../../modules/greetings/body
+func main() {
+  log("Starting multi-module smoke test")
+  log("Loaded compiler/modules/greetings/banner")
+  log("Loaded compiler/modules/greetings/body")
+}
+type User {
+  name: String
+}
+
+func main() {
+  def pid: id User = 123
+  def pkey: key User = "u_123"
+  log(pid)
+  log(pkey)
+}
+# Smoke test - empty file
+func normal() {
+  log("formatted")
+}
+
+# raefmt: off
+func unformatted() {
+    log( value: "verbatim"  )
+}
+# raefmt: on
+
+func backToNormal() {
+  log("formatted again")
+}
+import core
+func main() {
+  def x: Int = 1
+  def result: Int = match x { case 1 => 10, default => 20 }
+  log(result)
+}
+func main() {
+  log("hi")
+}
+func main() {
+  log("hi")
+}
+import core
+func helper() {
+  log("Hello from C backend helper")
+}
+
+func main() {
+  log("C backend demo start")
+  helper()
+  log("C backend demo end")
+}
+func main() {
+  def name: String = "Rae"
+  def version: Int = 1
+  log("Hello {name}, version {version}!")
+  log("Math: {1 + 2 * 3}")
+  log("Escaped {brace} and backslash \\")
+}
+import core
+func main() {
+  def s: String = "hello"
+  log(s)
+  def r: String = r"raw"
+  log(r)
+}
+type Point {
+  x: Int
+}
+
+func main() {
+  # ERROR: nonsensical combination
+  def p: view id Point = 1
+}
+import core
+func main() {
+  def i: Int = 0
+  loop i < 0 {
+    log("never runs")
+  }
+  log("C while done")
+}
+func main() {
+  if 1 < 2 {
+    log("then")
+  } else {
+    log("else")
+  }
+  if 5 < 2 {
+    log("nope")
+  } else {
+    log("else branch")
+  }
+  if 1 < 2 and 2 < 3 {
+    log("and ok")
+  }
+  log(1 < 2 and 0 < 1)
+  log(5 < 2 or 3 < 1)
+  log(not (1 < 2))
+}
+func divide(a: Int, b: Int) ret result: Int, error: opt Error {
+  if b is 0 {
+    ret error: "divide by zero"
+  }
+  ret result: a / b
+}
+func main() {
+  log("Auto-import demo start")
+  renderHeader()
+  renderBody()
+  renderFooter()
+  log("Auto-import demo end")
+}
+func renderHeader() {
+  log("=== Report Header ===")
+}
+func renderFooter() {
+  log("=== Report Footer ===")
+}
+func renderBody() {
+  log("Body: data from src/body.rae")
+}
+type Counter {
+  val: Int
+}
+
+func main() {
+  def x: Int = 10
+  # 11
+  # 11
+  # 11
+  log(++x)
+  # 12
+  log(x)
+  # 11
+  log(x++)
+  # 11
+  log(x)
+  # 11
+  log(--x)
+  # 10
+  log(x)
+  log(x--)
+  log(x)
+  def c: Counter = { val: 5 }
+  # 6
+  # 6
+  # 6
+  log(++c.val)
+  # 7
+  log(c.val)
+  # 6
+  log(c.val++)
+  # 6
+  log(c.val)
+  # 6
+  log(--c.val)
+  # 5
+  log(c.val)
+  log(c.val--)
+  log(c.val)
+}
+func main() {
+  log("Tick: {nextTick()}")
+}
+func main() {
+  def x: List(Int) = { 10, 20, 30 }
+  log(x)
+}
+func main() {
+  log("StringMap test")
+  def m: StringMap(Int) = createStringMap(initialCap: 4)
+  m.set(key: "apple", value: 10)
+  m.set(key: "banana", value: 20)
+  m.set(key: "cherry", value: 30)
+  def k1: String = "apple"
+  def k2: String = "banana"
+  def k3: String = "cherry"
+  def k4: String = "durian"
+  log("apple: {m.get(key: k1)}")
+  log("banana: {m.get(key: k2)}")
+  log("cherry: {m.get(key: k3)}")
+  log("missing: {m.get(key: k4)}")
+  log("has banana: {m.has(key: k2)}")
+  log("has durian: {m.has(key: k4)}")
+  log("length: {m.length}")
+  log("IntMap test")
+  def m2: IntMap(String) = createIntMap(initialCap: 4)
+  # test hashing/probing
+  m2.set(key: 1, value: "one")
+  m2.set(key: 2, value: "two")
+  m2.set(key: 10, value: "ten")
+  log("1: {m2.get(key: 1)}")
+  log("2: {m2.get(key: 2)}")
+  log("10: {m2.get(key: 10)}")
+  log("length: {m2.length}")
+}
+import core
+func init(name: String) {
+  log(name)
+}
+
+func main() {
+  log("vm build demo")
+}
+import core
+func init(name: String) {
+  log(name)
+}
+
+func main() {
+  log("hybrid entry")
+}
+type Point {
+  x: Int
+}
+
+func getX(p: mod Point) ret mod Int {
+  # OK: derived from param
+  ret mod  p.x
+}
+
+func main() {
+  def p: Point = { x: 1 }
+  def rx: mod Int => getX(p: p)
+  rx = 10
+  # expect 10
+  log(p.x)
+}
+func main() {
+  log("raepack helper")
+}
+func add(a: Int, b: Int) ret Int {
+  ret a + b
+}
+
+func triple(value: Int) ret Int {
+  ret value * 3
+}
+
+func chain(a: Int, b: Int, c: Int) ret Int {
+  ret triple(value: a + b) + c
+}
+
+func main() {
+  log("VM math demo start")
+  log(add(a: 2, b: 5))
+  log(triple(value: 4))
+  log(chain(a: 1, b: 2, c: 3))
+  log("VM math demo end")
+}
+func main() {
+  def x: Int = 1
+  # ERROR: cannot bind plain value type Int
+  def y: Int => x
+}

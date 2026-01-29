@@ -1,17 +1,7 @@
-enum AIPhase {
-  Observing,
-  Deciding,
-  Acting,
-  Pausing
-}
+enum AIPhase { Observing, Reacting, Moving }
 
-enum AIDecision {
-  None,
-  Up,
-  Down
-}
+enum AIDecision { None, Up, Down }
 
-# AI System for Advanced Pong
 type AIState {
   state: AIPhase
   timer: Int
@@ -19,68 +9,34 @@ type AIState {
   decision: AIDecision
 }
 
-func paddleAiSystem(ai: mod AIState, ballY: Float, paddleY: Float): ret Float {
-  def newY: Float = paddleY
+func paddleAiSystem(ai: mod AIState, ballY: Float, paddleY: Float) ret Float {
+  def speed: Float = 4.0
+  def paddleHeight: Float = 100.0
   if ai.state is AIPhase.Observing {
     ai.timer = ai.timer + 1
-    # Reaction time ~0.2s (12 frames) plus random noise
-    if ai.timer > 12 + random(min: 0, max: 6) {
-      ai.targetY = ballY
+    if ai.timer > 20 {
+      ai.state = AIPhase.Reacting
       ai.timer = 0
-      ai.state = AIPhase.Deciding
     }
-  }
-  if ai.state is AIPhase.Deciding {
-    # Simple logic: if ball is significantly above or below center of paddle
-    if ai.targetY < paddleY + 40.0 {
-      # Up
-      ai.decision = AIDecision.Up
-      # Press duration
-      ai.timer = random(min: 50, max: 150)
-      ai.state = AIPhase.Acting
+  } else {
+    if ai.state is AIPhase.Reacting {
+      ai.targetY = ballY - paddleHeight / 2.0
+      ai.state = AIPhase.Moving
     } else {
-      if ai.targetY > paddleY + 60.0 {
-        # Down
-        ai.decision = AIDecision.Down
-        # Press duration
-        ai.timer = random(min: 5, max: 15)
-        ai.state = AIPhase.Acting
-      } else {
-        # Good enough, don't move
-        ai.decision = AIDecision.None
-        # Pause duration
-        ai.timer = random(min: 5, max: 10)
-        ai.state = AIPhase.Pausing
+      if ai.state is AIPhase.Moving {
+        if paddleY < ai.targetY - 10.0 {
+          paddleY = paddleY + speed
+        } else {
+          if paddleY > ai.targetY + 10.0 {
+            paddleY = paddleY - speed
+          } else {
+            ai.state = AIPhase.Observing
+          }
+        }
       }
     }
   }
-  if ai.state is AIPhase.Acting {
-    if ai.decision is AIDecision.Up {
-      newY = newY - 4.5
-    }
-    if ai.decision is AIDecision.Down {
-      newY = newY + 4.5
-    }
-    ai.timer = ai.timer - 1
-    if ai.timer <= 0 {
-      ai.state = AIPhase.Pausing
-      # Pause after action
-      ai.timer = random(min: 5, max: 10)
-    }
-  }
-  if ai.state is AIPhase.Pausing {
-    ai.timer = ai.timer - 1
-    if ai.timer <= 0 {
-      ai.state = AIPhase.Observing
-      ai.timer = 0
-    }
-  }
-  # Bounds check
-  if newY < 0.0 {
-    newY = 0.0
-  }
-  if newY > 350.0 {
-    newY = 350.0
-  }
-  ret newY
+  ret paddleY
 }
+
+

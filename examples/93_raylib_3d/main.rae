@@ -1,7 +1,8 @@
 import raylib
 import math
+
 enum EntityKind {
-  Cube,
+  Cube
   Sphere
 }
 
@@ -14,20 +15,21 @@ type Entity {
 }
 
 func initEntity(
-  e: mod Entity,
-  kind: EntityKind,
-  x: Float,
-  y: Float,
-  z: Float,
-  size: Float,
-  hue: Float,
+  e: mod Entity
+  kind: EntityKind
+  x: Float
+  y: Float
+  z: Float
+  size: Float
+  hue: Float
 ) {
   e.kind = kind
   e.currentPos = {x: x, y: y, z: z}
-  e.targetPos = {x: randomFloat(min: -10.0, max: 10.0), y: randomFloat(
-    min: 0.0,
-    max: 8.0,
-  ), z: randomFloat(min: -10.0, max: 10.0)}
+  e.targetPos = {
+    x: randomFloat(min: -10.0, max: 10.0)
+    y: randomFloat(min: 0.0, max: 8.0)
+    z: randomFloat(min: -10.0, max: 10.0)
+  }
   e.size = size
   e.hue = hue
 }
@@ -60,23 +62,23 @@ func drawEntity(e: view Entity, time: Float) {
   match e.kind {
     case EntityKind.Cube {
       drawCube(
-        pos: e.currentPos,
-        width: e.size,
-        height: e.size,
-        length: e.size,
-        color: color,
+        pos: e.currentPos
+        width: e.size
+        height: e.size
+        length: e.size
+        color: color
       )
       drawCubeWires(
-        pos: e.currentPos,
-        width: e.size,
-        height: e.size,
-        length: e.size,
+        pos: e.currentPos
+        width: e.size
+        height: e.size
+        length: e.size
         color: {
-          r: 255,
-          g: 255,
-          b: 255,
-          a: 100,
-        },
+          r: 255
+          g: 255
+          b: 255
+          a: 100
+        }
       )
     }
     case EntityKind.Sphere {
@@ -92,113 +94,113 @@ func main() {
   initWindow(width: 800, height: 450, title: "Rae Eased 3D Scene")
   setTargetFPS(fps: 60)
   def cam: Camera3D = {
-    position: {x: 18.0, y: 18.0, z: 18.0},
-    target: {x: 0.0, y: 0.0, z: 0.0},
-    up: {x: 0.0, y: 1.0, z: 0.0},
-    fovy: 45.0,
-    projection: 0,
+    position: {x: 18.0, y: 18.0, z: 18.0}
+    target: {x: 0.0, y: 0.0, z: 0.0}
+    up: {x: 0.0, y: 1.0, z: 0.0}
+    fovy: 45.0
+    projection: 0
   }
   def e1: Entity = {
-    kind: EntityKind.Cube,
-    currentPos: {x: 0.0, y: 0.0, z: 0.0},
-    targetPos: {x: 0.0, y: 0.0, z: 0.0},
-    size: 0.0,
-    hue: 0.0,
+    kind: EntityKind.Cube
+    currentPos: {x: 0.0, y: 0.0, z: 0.0}
+    targetPos: {x: 0.0, y: 0.0, z: 0.0}
+    size: 0.0
+    hue: 0.0
   }
   def e2: Entity = {
-    kind: EntityKind.Cube,
-    currentPos: {x: 0.0, y: 0.0, z: 0.0},
-    targetPos: {x: 0.0, y: 0.0, z: 0.0},
-    size: 0.0,
-    hue: 0.0,
+    kind: EntityKind.Cube
+    currentPos: {x: 0.0, y: 0.0, z: 0.0}
+    targetPos: {x: 0.0, y: 0.0, z: 0.0}
+    size: 0.0
+    hue: 0.0
   }
   def e3: Entity = {
-    kind: EntityKind.Cube,
-    currentPos: {x: 0.0, y: 0.0, z: 0.0},
-    targetPos: {x: 0.0, y: 0.0, z: 0.0},
-    size: 0.0,
-    hue: 0.0,
+    kind: EntityKind.Cube
+    currentPos: {x: 0.0, y: 0.0, z: 0.0}
+    targetPos: {x: 0.0, y: 0.0, z: 0.0}
+    size: 0.0
+    hue: 0.0
   }
   def e4: Entity = {
-    kind: EntityKind.Cube,
-    currentPos: {x: 0.0, y: 0.0, z: 0.0},
-    targetPos: {x: 0.0, y: 0.0, z: 0.0},
-    size: 0.0,
-    hue: 0.0,
+    kind: EntityKind.Cube
+    currentPos: {x: 0.0, y: 0.0, z: 0.0}
+    targetPos: {x: 0.0, y: 0.0, z: 0.0}
+    size: 0.0
+    hue: 0.0
   }
   def e5: Entity = {
-    kind: EntityKind.Cube,
-    currentPos: {x: 0.0, y: 0.0, z: 0.0},
-    targetPos: {x: 0.0, y: 0.0, z: 0.0},
-    size: 0.0,
-    hue: 0.0,
+    kind: EntityKind.Cube
+    currentPos: {x: 0.0, y: 0.0, z: 0.0}
+    targetPos: {x: 0.0, y: 0.0, z: 0.0}
+    size: 0.0
+    hue: 0.0
   }
   def e6: Entity = {
-    kind: EntityKind.Cube,
-    currentPos: {x: 0.0, y: 0.0, z: 0.0},
-    targetPos: {x: 0.0, y: 0.0, z: 0.0},
-    size: 0.0,
-    hue: 0.0,
+    kind: EntityKind.Cube
+    currentPos: {x: 0.0, y: 0.0, z: 0.0}
+    targetPos: {x: 0.0, y: 0.0, z: 0.0}
+    size: 0.0
+    hue: 0.0
   }
   initEntity(
-    e: e1,
-    kind: EntityKind.Cube,
-    x: -5.0,
-    y: 2.0,
-    z: 0.0,
-    size: 2.0,
-    hue: 0.0,
+    e: e1
+    kind: EntityKind.Cube
+    x: -5.0
+    y: 2.0
+    z: 0.0
+    size: 2.0
+    hue: 0.0
   )
   initEntity(
-    e: e2,
-    kind: EntityKind.Cube,
-    x: 5.0,
-    y: 5.0,
-    z: -5.0,
-    size: 1.5,
-    hue: 120.0,
+    e: e2
+    kind: EntityKind.Cube
+    x: 5.0
+    y: 5.0
+    z: -5.0
+    size: 1.5
+    hue: 120.0
   )
   initEntity(
-    e: e3,
-    kind: EntityKind.Cube,
-    x: 0.0,
-    y: 8.0,
-    z: 5.0,
-    size: 2.5,
-    hue: 240.0,
+    e: e3
+    kind: EntityKind.Cube
+    x: 0.0
+    y: 8.0
+    z: 5.0
+    size: 2.5
+    hue: 240.0
   )
   initEntity(
-    e: e4,
-    kind: EntityKind.Sphere,
-    x: 8.0,
-    y: 3.0,
-    z: 8.0,
-    size: 2.0,
-    hue: 60.0,
+    e: e4
+    kind: EntityKind.Sphere
+    x: 8.0
+    y: 3.0
+    z: 8.0
+    size: 2.0
+    hue: 60.0
   )
   initEntity(
-    e: e5,
-    kind: EntityKind.Sphere,
-    x: -8.0,
-    y: 1.0,
-    z: -8.0,
-    size: 1.8,
-    hue: 180.0,
+    e: e5
+    kind: EntityKind.Sphere
+    x: -8.0
+    y: 1.0
+    z: -8.0
+    size: 1.8
+    hue: 180.0
   )
   initEntity(
-    e: e6,
-    kind: EntityKind.Sphere,
-    x: 3.0,
-    y: 6.0,
-    z: 2.0,
-    size: 2.2,
-    hue: 300.0,
+    e: e6
+    kind: EntityKind.Sphere
+    x: 3.0
+    y: 6.0
+    z: 2.0
+    size: 2.2
+    hue: 300.0
   )
   def bgColor: Color = {
-    r: 20,
-    g: 20,
-    b: 30,
-    a: 255,
+    r: 20
+    g: 20
+    b: 30
+    a: 255
   }
   loop windowShouldClose() is 0 {
     def time: Float = getTime()
@@ -220,16 +222,16 @@ func main() {
     drawEntity(e: e6, time: time)
     endMode3D()
     drawText(
-      text: "Modern Pastel Scene",
-      x: 20.0,
-      y: 20.0,
-      fontSize: 24.0,
+      text: "Modern Pastel Scene"
+      x: 20.0
+      y: 20.0
+      fontSize: 24.0
       color: {
-        r: 200,
-        g: 200,
-        b: 255,
-        a: 255,
-      },
+        r: 200
+        g: 200
+        b: 255
+        a: 255
+      }
     )
     endDrawing()
   }

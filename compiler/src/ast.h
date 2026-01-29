@@ -17,6 +17,7 @@ typedef struct AstStmt AstStmt;
 typedef struct AstExpr AstExpr;
 typedef struct AstTypeRef AstTypeRef;
 typedef struct AstImport AstImport;
+typedef struct AstModule AstModule;
 typedef struct AstMatchArm AstMatchArm;
 
 typedef struct AstIdentifierPart {
@@ -333,17 +334,18 @@ struct AstDecl {
 struct AstImport {
   bool is_export;
   Str path;
+  struct AstModule* module;
   size_t line;
   size_t column;
   AstImport* next;
 };
 
-typedef struct {
+struct AstModule {
   AstImport* imports;
   AstDecl* decls;
   Token* comments;
   size_t comment_count;
-} AstModule;
+};
 
 void ast_dump_module(const AstModule* module, FILE* out);
 

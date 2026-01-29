@@ -1,12 +1,13 @@
 # Core library for Rae
-extern func nextTick(): ret Int
-extern func nowMs(): ret Int
+func nextTick() extern ret Int
 
-extern func sleep(ms: Int)
+func nowMs() extern ret Int
 
-extern func rae_int_to_float(i: Int): ret Float
+func sleep(ms: Int) extern
 
-func toFloat(this: Int): ret Float {
+func rae_int_to_float(i: Int) extern ret Float
+
+func toFloat(this: Int) ret Float {
   ret rae_int_to_float(i: this)
 }
 
@@ -17,22 +18,21 @@ type List(T) {
   capacity: Int
 }
 
-func createList(T)(initialCap: Int): ret List(T) {
-  ret {
-    data: __buf_alloc(size: initialCap),
-    length: 0,
-    capacity: initialCap,
-  }
+func createList(T)(initialCap: Int) ret List(T) {
+  ret { data: __buf_alloc(size: initialCap), length: 0, capacity: initialCap }
 }
 
 func grow(T)(this: mod List(T)) {
   def newCap: Int = this.capacity * 2
-  if newCap is 0 { newCap = 4 }
-  
+  if newCap is 0 {
+    newCap = 4
+  }
   def newData: Buffer(T) = __buf_alloc(size: newCap)
   __buf_copy(
-    src: this.data, src_off: 0,
-    dst: newData, dst_off: 0,
+    src: this.data
+    src_off: 0
+    dst: newData
+    dst_off: 0
     len: this.length
   )
   __buf_free(buf: this.data)
@@ -44,12 +44,11 @@ func add(T)(this: mod List(T), value: T) {
   if this.length is this.capacity {
     grow(this)
   }
-  
   __buf_set(buf: this.data, index: this.length, value: value)
   this.length = this.length + 1
 }
 
-func get(T)(this: view List(T), index: Int): ret T {
+func get(T)(this: view List(T), index: Int) ret T {
   if index < 0 or index >= this.length {
     ret none
   }
@@ -67,25 +66,24 @@ func insert(T)(this: mod List(T), index: Int, value: T) {
   if index < 0 or index > this.length {
     ret
   }
-  
   if this.length is this.capacity {
     grow(this)
   }
-  
   # Shift elements to the right
   if index < this.length {
     __buf_copy(
-      src: this.data, src_off: index,
-      dst: this.data, dst_off: index + 1,
+      src: this.data
+      src_off: index
+      dst: this.data
+      dst_off: index + 1
       len: this.length - index
     )
   }
-  
   __buf_set(buf: this.data, index: index, value: value)
   this.length = this.length + 1
 }
 
-func pop(T)(this: mod List(T)): ret T {
+func pop(T)(this: mod List(T)) ret T {
   if this.length is 0 {
     ret none
   }
@@ -98,16 +96,16 @@ func remove(T)(this: mod List(T), index: Int) {
   if index < 0 or index >= this.length {
     ret
   }
-  
   # Shift elements to the left
   if index < this.length - 1 {
     __buf_copy(
-      src: this.data, src_off: index + 1,
-      dst: this.data, dst_off: index,
+      src: this.data
+      src_off: index + 1
+      dst: this.data
+      dst_off: index
       len: this.length - index - 1
     )
   }
-  
   this.length = this.length - 1
 }
 
@@ -115,7 +113,7 @@ func clear(T)(this: mod List(T)) {
   this.length = 0
 }
 
-func length(T)(this: view List(T)): ret Int {
+func length(T)(this: view List(T)) ret Int {
   ret this.length
 }
 
@@ -126,6 +124,227 @@ func swap(T)(this: mod List(T), i: Int, j: Int) {
 }
 
 func free(T)(this: mod List(T)) {
+  __buf_free(buf: this.data)
+  this.length = 0
+  this.capacity = 0
+}
+
+# -- Specialized Map Implementations --
+func rae_str_hash(s: String) extern ret Int
+
+func rae_str_eq(a: String, b: String) extern ret Bool
+
+type StringMapEntry(V) {
+  k: String
+  value: V
+  occupied: Bool
+}
+
+type StringMap(V) {
+  data: Buffer(StringMapEntry(V))
+  length: Int
+  capacity: Int
+}
+
+func createStringMap(V)(initialCap: Int) ret StringMap(V) {
+  ret { data: __buf_alloc(size: initialCap), length: 0, capacity: initialCap }
+}
+
+func set(V)(this: mod StringMap(V), k: String, value: V) {
+  if this.capacity is 0 {
+    this.capacity = 8
+    this.data = __buf_alloc(size: this.capacity)
+  }
+  if this.length * 2 > this.capacity {
+    growStringMap(this)
+  }
+  def h: Int = rae_str_hash(s: k)
+  def idx: Int = h % this.capacity
+  if idx < 0 {
+    idx = -idx
+  }
+  loop true {
+    def entry: StringMapEntry(V) = __buf_get(buf: this.data, index: idx)
+    if not entry.occupied {
+      __buf_set(buf: this.data, index: idx, value: { k: k, value: value, occupied: true })
+      this.length = this.length + 1
+      ret
+    }
+    if rae_str_eq(a: entry.k, b: k) {
+      entry.value = value
+      __buf_set(buf: this.data, index: idx, value: entry)
+      ret
+    }
+    idx = (idx + 1) % this.capacity
+  }
+}
+
+func get(V)(this: view StringMap(V), k: String) ret opt V {
+  if this.capacity is 0 {
+    ret none
+  }
+  def h: Int = rae_str_hash(s: k)
+  def idx: Int = h % this.capacity
+  if idx < 0 {
+    idx = -idx
+  }
+  def startIdx: Int = idx
+  loop true {
+    def entry: StringMapEntry(V) = __buf_get(buf: this.data, index: idx)
+    if not entry.occupied {
+      ret none
+    }
+    if rae_str_eq(a: entry.k, b: k) {
+      ret entry.value
+    }
+    idx = (idx + 1) % this.capacity
+    if idx is startIdx {
+      ret none
+    }
+  }
+}
+
+func has(V)(this: view StringMap(V), k: String) ret Bool {
+  match get(this, k: k) {
+    case none {
+      ret false
+    }
+    default {
+      ret true
+    }
+  }
+}
+
+func growStringMap(V)(this: mod StringMap(V)) {
+  def oldCap: Int = this.capacity
+  def oldData: Buffer(StringMapEntry(V)) = this.data
+  this.capacity = oldCap * 2
+  if this.capacity is 0 {
+    this.capacity = 8
+  }
+  this.data = __buf_alloc(size: this.capacity)
+  this.length = 0
+  def i: Int = 0
+  loop i < oldCap {
+    def entry: StringMapEntry(V) = __buf_get(buf: oldData, index: i)
+    if entry.occupied {
+      set(this, k: entry.k, value: entry.value)
+    }
+    i = i + 1
+  }
+  __buf_free(buf: oldData)
+}
+
+func free(V)(this: mod StringMap(V)) {
+  __buf_free(buf: this.data)
+  this.length = 0
+  this.capacity = 0
+}
+
+# -- IntMap Implementation --
+type IntMapEntry(V) {
+  k: Int
+  value: V
+  occupied: Bool
+}
+
+type IntMap(V) {
+  data: Buffer(IntMapEntry(V))
+  length: Int
+  capacity: Int
+}
+
+func createIntMap(V)(initialCap: Int) ret IntMap(V) {
+  ret { data: __buf_alloc(size: initialCap), length: 0, capacity: initialCap }
+}
+
+func set(V)(this: mod IntMap(V), k: Int, value: V) {
+  if this.capacity is 0 {
+    this.capacity = 8
+    this.data = __buf_alloc(size: this.capacity)
+  }
+  if this.length * 2 > this.capacity {
+    growIntMap(this)
+  }
+  # Simple hash for Int
+  def h: Int = k
+  def idx: Int = h % this.capacity
+  if idx < 0 {
+    idx = -idx
+  }
+  loop true {
+    def entry: IntMapEntry(V) = __buf_get(buf: this.data, index: idx)
+    if not entry.occupied {
+      __buf_set(buf: this.data, index: idx, value: { k: k, value: value, occupied: true })
+      this.length = this.length + 1
+      ret
+    }
+    if entry.k is k {
+      entry.value = value
+      __buf_set(buf: this.data, index: idx, value: entry)
+      ret
+    }
+    idx = (idx + 1) % this.capacity
+  }
+}
+
+func get(V)(this: view IntMap(V), k: Int) ret opt V {
+  if this.capacity is 0 {
+    ret none
+  }
+  def h: Int = k
+  def idx: Int = h % this.capacity
+  if idx < 0 {
+    idx = -idx
+  }
+  def startIdx: Int = idx
+  loop true {
+    def entry: IntMapEntry(V) = __buf_get(buf: this.data, index: idx)
+    if not entry.occupied {
+      ret none
+    }
+    if entry.k is k {
+      ret entry.value
+    }
+    idx = (idx + 1) % this.capacity
+    if idx is startIdx {
+      ret none
+    }
+  }
+}
+
+func has(V)(this: view IntMap(V), k: Int) ret Bool {
+  match get(this, k: k) {
+    case none {
+      ret false
+    }
+    default {
+      ret true
+    }
+  }
+}
+
+func growIntMap(V)(this: mod IntMap(V)) {
+  def oldCap: Int = this.capacity
+  def oldData: Buffer(IntMapEntry(V)) = this.data
+  this.capacity = oldCap * 2
+  if this.capacity is 0 {
+    this.capacity = 8
+  }
+  this.data = __buf_alloc(size: this.capacity)
+  this.length = 0
+  def i: Int = 0
+  loop i < oldCap {
+    def entry: IntMapEntry(V) = __buf_get(buf: oldData, index: i)
+    if entry.occupied {
+      set(this, k: entry.k, value: entry.value)
+    }
+    i = i + 1
+  }
+  __buf_free(buf: oldData)
+}
+
+func free(V)(this: mod IntMap(V)) {
   __buf_free(buf: this.data)
   this.length = 0
   this.capacity = 0
