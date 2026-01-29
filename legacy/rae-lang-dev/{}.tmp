@@ -1,0 +1,1412 @@
+# TinyExpr wrapper for Rae
+extern func tinyExprEval(expr: String) ret Int
+func main() {
+  loop true {
+    log("Hello from hot reload RAE4!")
+    sleep(ms: 1000)
+  }
+}
+func showHeader() : pub {
+  log("--- Report Start ---")
+}
+func showFooter() : pub {
+  log("--- Report End ---")
+}
+import ui/header
+import ui/footer
+func main() {
+  log("Report pipeline kicked off (imports ready)")
+  showHeader()
+  log("  • header/footer modules imported")
+  showFooter()
+}
+type Velocity {
+  dx: Float
+  dy: Float
+}
+
+type Entity {
+  pos: Point
+  vel: opt Velocity
+}
+
+# Optional value, self-contained
+type Point {
+  x: Float
+  y: Float
+}
+
+func updatePosition(p: mod Point, v: Velocity) {
+  p.x = p.x + v.dx
+  p.y = p.y + v.dy
+}
+
+func main() {
+  # 1. Copy semantics (=)
+  def v1: Velocity = { dx: 1.0, dy: 1.0 }
+  # Deep copy
+  def v2: Velocity = v1
+  v2.dx = 2.0
+  log("v1.dx (should be 1.0):")
+  # 2. Binding semantics (=>)
+  log(v1.dx)
+  log("v2.dx (should be 2.0):")
+  log(v2.dx)
+  def p: Point = { x: 0.0, y: 0.0 }
+  # Mutable binding
+  def pRef: mod Point => p
+  pRef.x = 10.0
+  # 3. Complex types: opt mod
+  log("p.x after pRef modification (should be 10.0):")
+  log(p.x)
+  def target: Point = { x: 5.0, y: 5.0 }
+  def selected: opt mod Point => target
+  match selected {
+    default {
+      log("Selected point exists, moving it...")
+      updatePosition(p: selected, v: v1)
+    }
+  }
+  log("target.x after update (should be 6.0):")
+  log(target.x)
+}
+extern func external_c_func(a: Int, b: Int) ret Int
+
+func main() {
+  def result: Int = external_c_func(a: 10, b: 20)
+  log("Result: ")
+  log(result)
+  log("\n")
+}
+func main() {
+  def step: Int = 0
+  loop step < 5 {
+    log("[Hybrid demo] Loop tick")
+    log(step)
+    step = step + 1
+    if step is 2 {
+      log("[Hybrid demo] Dev hot-reload bundle staged")
+    }
+    log("[Hybrid demo] Release bundle staged")
+  }
+  log("[Hybrid demo] Loop exit")
+}
+
+func init() {
+  log("[Hybrid demo] Booting hybrid host runtime")
+}
+
+func shutdown() {
+  log("[Hybrid demo] Hybrid host shutdown")
+}
+import examples/hybrid_hot_reload/scripts/downloaded/dev_patch
+import examples/hybrid_hot_reload/scripts/downloaded/release_patch
+func buildHybridDevBundle() {
+  log("[Hybrid demo] Compiling host stub for dev profile")
+  emitDevPatch()
+  log("[Hybrid demo] vm/dev_patch.vmchunk staged for hot reload testing")
+}
+
+func buildHybridReleaseBundle() {
+  log("[Hybrid demo] Compiling host stub for release profile")
+  emitReleasePatch()
+  log("[Hybrid demo] vm/release_patch.vmchunk staged for hot reload testing")
+}
+func emitDevPatch() {
+  log("  [dev v1] Embedding downloaded script for VM hot reload")
+  log("  [dev v1] This chunk would be reloaded automatically during development")
+}
+func emitReleasePatch() {
+  log("  [release v1] Embedding signed script for shipped builds")
+  log("  [release v1] Host watches for this file to appear and reloads safely")
+}
+func emitDevPatch() {
+  log("  [dev v1] Embedding downloaded script for VM hot reload")
+  log("  [dev v1] This chunk would be reloaded automatically during development")
+}
+func emitReleasePatch() {
+  log("  [release v1] Embedding signed script for shipped builds")
+  log("  [release v1] Host watches for this file to appear and reloads safely")
+}
+func emitDevPatch() {
+  log("  [dev v3] Third iteration of the downloaded VM chunk")
+  log("  [dev v3] Demonstrates repeatable hot reload updates")
+}
+func emitReleasePatch() {
+  log("  [release v3] Third signed bundle staged for download")
+  log("  [release v3] Shows repeated reloads with minimal downtime")
+}
+func emitDevPatch() {
+  log("  [dev v2] Downloaded script updated for iteration two")
+  log("  [dev v2] Hot reload would swap behavior without restarting the host")
+}
+func emitReleasePatch() {
+  log("  [release v2] Signed patch for the second release iteration")
+  log("  [release v2] Host replaces the VM chunk while staying online")
+}
+func add(a: Int, b: Int) {
+  ret a + b
+}
+
+func triple(value: Int) {
+  ret value * 3
+}
+
+func chain(a: Int, b: Int, c: Int) {
+  ret triple(value: a + b) + c
+}
+
+func main() {
+  log("VM math demo start")
+  log(add(a: 2, b: 5))
+  log(triple(value: 4))
+  log(chain(a: 1, b: 2, c: 3))
+  log("VM math demo end")
+}
+func main() {
+  def numbers: List(Int) = {
+    1
+    2
+    3
+    4
+    5
+    }
+  log(numbers)
+}
+import list2
+func main() {
+  log("List2 Any Test")
+  def list: List2(Any) = createList2(initialCap: 2)
+  add(list, value: 10)
+  add(list, value: "Hello")
+  add(list, value: true)
+  add(list, value: 3.14)
+  log("List items:")
+  def i: Int = 0
+  loop i < length(list) {
+    log(get(list, index: i))
+    i = i + 1
+  }
+  log("Done.")
+}
+import list2_generic
+func main() {
+  log("Generic List2 Test (Int)")
+  def list: List2(Int) = createList2(initialCap: 2)
+  add(list, value: 10)
+  add(list, value: 20)
+  add(list, value: 30)
+  log("List items:")
+  def i: Int = 0
+  loop i < list.length {
+    log(get(list, index: i))
+    i = i + 1
+  }
+  log("Generic List2 Test (String)")
+  def slist: List2(String) = createList2(initialCap: 2)
+  add(slist, value: "Hello")
+  add(slist, value: "Generics")
+  log("List items:")
+  def j: Int = 0
+  loop j < slist.length {
+    log(get(slist, index: j))
+    j = j + 1
+  }
+  log("Done.")
+}
+func greet() {
+  log("Hello from greet()")
+}
+
+func runSequence() {
+  log("Entering runSequence()")
+  greet()
+  log("Leaving runSequence()")
+}
+
+func main() {
+  log("VM call test start")
+  runSequence()
+  log("VM call test end")
+}
+func main() {
+  log("Auto-import demo start")
+  showHeader()
+  showBody()
+  showFooter()
+  log("Auto-import demo end")
+}
+func showHeader() : pub {
+  log("=== Report Header ===")
+}
+func showFooter() : pub {
+  log("=== Report Footer ===")
+}
+func showBody() : pub {
+  log("Body: data from src/body.rae")
+}
+func main() {
+  log("Main loop running (use Stop to exit)")
+  loop true {
+    logS("tick ")
+    log(nextTick())
+    sleep(ms: 100)
+  }
+}
+type User {
+  name: String
+}
+
+# Dummy Store interface
+# extern type UserStore {
+#   func idOf(key: key User): ret opt id User
+#   func keyOf(id: id User): ret opt key User
+# }
+func main() {
+  def externalKey: key User = "uid_99"
+  # Mapping used by the store layer
+  # def internalId: opt id User = store.idOf(key: externalKey)
+  log("Store maps between stable keys and fast local IDs.")
+}
+func doubleValue(value: Int) {
+  def doubled: Int = value * 2
+  helper(input: doubled)
+}
+
+func helper(input: Int) {
+  log("Helper ran")
+}
+
+func sumChain(a: Int, b: Int, c: Int) {
+  log("sumChain start")
+  def total: Int = a + b + c
+  doubleValue(value: total)
+  if total > 5 {
+    log("total > 5")
+  } else {
+    log("total <= 5")
+  }
+  log("sumChain done")
+}
+
+func main() {
+  log("C backend demo start")
+  sumChain(a: 1, b: 2, c: 3)
+  log("C backend demo end")
+}
+func main() {
+  log("Standard List Test")
+  def list: List(Any) = {
+    10
+    "Hello"
+    true
+    3.14
+    }
+  log("List items:")
+  def i: Int = 0
+  loop i < list.length() {
+    log(list[i])
+    i = i + 1
+  }
+  log("Modification:")
+  list.add(value: "New Item")
+  loop i < list.length() {
+    log(list[i])
+    i = i + 1
+  }
+  log("Done.")
+}
+type Velocity {
+  dx: Float
+  dy: Float
+}
+
+# Correct: Storing identity tokens (values) instead of references
+# def velocityIds: List(id Velocity) = {}
+func main() {
+  def v: Velocity = { dx: 1.0, dy: 1.0 }
+  # Opaque handle from a store
+  def vid: id Velocity = 101
+  # Safe to store values
+  # velocityIds.add(item: vid)
+  log("Storing ID is safe because it is a value, not a reference.")
+}
+type Box(T) {
+  value: T
+}
+
+func setValue(T)(b: mod Box(T), val: T) {
+  b.value = val
+}
+
+func main() {
+  # Int Box
+  def b: Box(Int) = { value: 42 }
+  log(b.value)
+  setValue(b, val: 100)
+  # Float Box
+  log(b.value)
+  def bf: Box(Float) = { value: 3.14 }
+  log(bf.value)
+  setValue(bf, val: 2.718)
+  # String Box
+  log(bf.value)
+  def bs: Box(String) = { value: "hello" }
+  log(bs.value)
+  setValue(bs, val: "world")
+  log(bs.value)
+}
+func main() {
+  log("--- Rae Standard Library Demo ---")
+  log("1. Time")
+  log("Current time: {nowMs()} ms")
+  log("2. Math Overloads")
+  log("abs(-10): {abs(-10)}")
+  log("abs(-3.14): {abs(-3.14)}")
+  log("min(5, 10): {min(5, b: 10)}")
+  log("max(5, 10): {max(5, b: 10)}")
+  log("clamp(15, low: 0, high: 10): {clamp(15, low: 0, high: 10)}")
+  log("3. Randomness")
+  seed(n: 42)
+  log("Random float: {random()}")
+  log("Random int (1-100): {random(min: 1, max: 100)}")
+  log("4. String Utilities")
+  def s: String = "Hello, Rae!"
+  log("String: {s}")
+  log("Length: {s.length()}")
+  def sub: String = "Rae"
+  log("Contains 'Rae'? {s.contains(sub: sub)}")
+  log("Substring (0, 5): {s.sub(start: 0, len: 5)}")
+  def nStr: String = "123"
+  log("String '123' to Int: {nStr.toInt()}")
+  log("5. System")
+  def path: opt String = getEnv(name: "PATH")
+  log("PATH env: {path}")
+  log("Demo complete.")
+}
+type Point {
+  x: Int
+  y: Int
+}
+
+func main() {
+  # 1. Value Type
+  def p1: Point = { x: 10, y: 20 }
+  # Copy
+  def p2: Point = p1
+  p2.x = 30
+  # Prints 10
+  # 2. Borrow Type
+  log(p1.x)
+  def r: mod Point => p1
+  r.y = 50
+  # Prints 50
+  # 3. Identity Types
+  log(p1.y)
+  def pid: id Point = 1
+  def pkey: key Point = "point_001"
+  # 4. Optional Borrow
+  log(pid)
+  log(pkey)
+  def op: opt view Point => p1
+  match op {
+    case none {
+      log("none")
+    }
+    default {
+      log("has point")
+    }
+  }
+}
+type Velocity {
+  dx: Float
+  dy: Float
+}
+
+# Assume a global-ish list
+# def globalVelocities: List(view Velocity) = {} # This is illegal per spec
+func main() {
+  def v: Velocity = { dx: 1.0, dy: 1.0 }
+  # Illegal: Trying to store a reference into a list that might outlive v
+  # list.add(item: view v) 
+  log("Borrows cannot be stored in long-lived containers like List")
+}
+func main() {
+  log("Hello from the RaePack demo!")
+}
+func main() {
+  log("Hello, Rae oh yeah!")
+}
+import list2_int
+func main() {
+  log("List2Int Library Test")
+  def list: List2Int = createList2Int(initialCap: 2)
+  # 1. Test basic adds and grow
+  add(this: list, value: 10)
+  add(this: list, value: 20)
+  add(this: list, value: 30)
+  # 2. Test insert
+  log("Length (should be 3):")
+  log(list.length)
+  # [10, 15, 20, 30]
+  log("Inserting 15 at index 1...")
+  insert(this: list, index: 1, value: 15)
+  log("Item at 1 (should be 15):")
+  log(get(list, index: 1))
+  # 3. Test pop
+  log("Item at 2 (should be 20):")
+  log(get(list, index: 2))
+  log("Popped value (should be 30):")
+  log(pop(list))
+  # 4. Test contains
+  log("New length (should be 3):")
+  log(list.length)
+  log("Contains 15? (should be true):")
+  log(contains(list, value: 15))
+  # 5. Test remove
+  log("Contains 100? (should be false):")
+  log(contains(list, value: 100))
+  # [15, 20]
+  log("Removing index 0...")
+  remove(this: list, index: 0)
+  # 6. Final iteration
+  log("Item at 0 (should be 15):")
+  log(get(list, index: 0))
+  log("Final list items via buffer loop (includes capacity padding):")
+  loop item: Int in list.data {
+    log(item)
+  }
+  log("Final list items via length loop:")
+  def i: Int = 0
+  loop i < list.length {
+    log(get(list, index: i))
+    i = i + 1
+  }
+  log("Done.")
+}
+# Raw String Literals in Rae
+func main() {
+  # Standard raw string
+  def s1: String = r"No escapes \n \t here"
+  # Raw string with hashes to include quotes
+  log(s1)
+  def s2: String = r#"He said "Rae is cool!""#
+  # Scale up hashes if content contains "#
+  # sequence safely"
+  log(s2)
+  def s3: String = r"Contains "
+  # Multiline raw strings
+  log(s3)
+  def s4: String = r"This is
+a multiline
+raw string"
+  log(s4)
+}
+import list2_int
+import list2
+func benchmarkNativeList(count: Int) ret Int {
+  logS("Native List(Int): ")
+  def start: Int = nowMs()
+  # 1. Allocation & Adding
+  def startAdd: Int = nowMs()
+  def list: List(Int) = createList(initialCap: 10)
+  def i: Int = 0
+  loop i < count {
+    list.add(value: i)
+    i = i + 1
+  }
+  def endAdd: Int = nowMs()
+  # 2. Freeing
+  def startFree: Int = nowMs()
+  list.free()
+  def endFree: Int = nowMs()
+  def total: Int = nowMs() - start
+  log("{endAdd - startAdd}ms add, {endFree - startFree}ms free, {total}ms total")
+  ret total
+}
+
+func benchmarkList2(count: Int) ret Int {
+  logS("Library List2(Int): ")
+  def start: Int = nowMs()
+  # 1. Allocation & Adding
+  def startAdd: Int = nowMs()
+  def list: List2(Int) = createList2(initialCap: 10)
+  def i: Int = 0
+  loop i < count {
+    list.add(value: i)
+    i = i + 1
+  }
+  def endAdd: Int = nowMs()
+  # 2. Freeing
+  def startFree: Int = nowMs()
+  def endFree: Int = nowMs()
+  def total: Int = nowMs() - start
+  log("{endAdd - startAdd}ms add, {endFree - startFree}ms free, {total}ms total")
+  ret total
+}
+
+func benchmarkSpecializedList(count: Int) ret Int {
+  logS("Specialized List2Int: ")
+  def start: Int = nowMs()
+  # 1. Allocation & Adding
+  def startAdd: Int = nowMs()
+  def list: List2Int = createList2Int(initialCap: 10)
+  def i: Int = 0
+  loop i < count {
+    list.add(value: i)
+    i = i + 1
+  }
+  def endAdd: Int = nowMs()
+  # 2. Freeing
+  def startFree: Int = nowMs()
+  list.list2Free()
+  def endFree: Int = nowMs()
+  def total: Int = nowMs() - start
+  log("{endAdd - startAdd}ms add, {endFree - startFree}ms free, {total}ms total")
+  ret total
+}
+
+func sortBenchmarkData(names: mod List(String), times: mod List(Float)) {
+  def n: Int = times.length()
+  def i: Int = 0
+  loop i < n {
+    def j: Int = 0
+    loop j < n - i - 1 {
+      def t1: Float = times.get(index: j)
+      def t2: Float = times.get(index: j + 1)
+      if t1 > t2 {
+        # Swap times
+        # Swap names accordingly
+        times.swap(i: j, j: j + 1)
+        names.swap(i: j, j: j + 1)
+      }
+      j = j + 1
+    }
+    i = i + 1
+  }
+}
+
+func main() {
+  def count: Int = 1000000
+  log("Benchmarking List Implementations with {count} items")
+  log("----------------------------------------------------------------------")
+  def iterations: Int = 3
+  def i: Int = 0
+  def totalNative: Int = 0
+  def totalList2: Int = 0
+  def totalSpec: Int = 0
+  loop i < iterations {
+    log("Iteration {i + 1}:")
+    if i % 3 is 0 {
+      totalNative = totalNative + benchmarkNativeList(count: count)
+      totalList2 = totalList2 + benchmarkList2(count: count)
+      totalSpec = totalSpec + benchmarkSpecializedList(count: count)
+    } else {
+      if i % 3 is 1 {
+        totalList2 = totalList2 + benchmarkList2(count: count)
+        totalSpec = totalSpec + benchmarkSpecializedList(count: count)
+        totalNative = totalNative + benchmarkNativeList(count: count)
+      } else {
+        totalSpec = totalSpec + benchmarkSpecializedList(count: count)
+        totalNative = totalNative + benchmarkNativeList(count: count)
+        totalList2 = totalList2 + benchmarkList2(count: count)
+      }
+    }
+    i = i + 1
+    log("")
+  }
+  log("Benchmark complete.")
+  def names: List(String) = createList(initialCap: 3)
+  names.add(value: "Native List(Int)")
+  names.add(value: "Library List2(Int)")
+  names.add(value: "Specialized List2Int")
+  def times: List(Float) = createList(initialCap: 3)
+  times.add(value: totalNative.toFloat() / iterations.toFloat())
+  times.add(value: totalList2.toFloat() / iterations.toFloat())
+  times.add(value: totalSpec.toFloat() / iterations.toFloat())
+  sortBenchmarkData(names: names, times: times)
+  log("----------------------------------------------------------------------")
+  log("Results (Average over {iterations} runs, ordered fastest to slowest):")
+  def rIdx: Int = 0
+  loop rIdx < times.length() {
+    log("{rIdx + 1}. {names.get(index: rIdx)}: {times.get(index: rIdx)}ms")
+    rIdx = rIdx + 1
+  }
+  log("----------------------------------------------------------------------")
+  log("Winner: {names.get(index: 0)} is the fastest.")
+}
+type Point {
+  x: Int
+}
+
+func xView(p: view Point) ret view Int {
+  ret view  p.x
+}
+
+func main() {
+  def p: Point = { x: 7 }
+  def r: view Int => p.xView()
+  # expect 7
+  # expect 7
+  log(r)
+  log(p.x)
+}
+func main() {
+  loop false {
+    log("never runs")
+  }
+  log("done")
+}
+import ./missing/helper
+func main() {
+  log("unreachable")
+}
+func main() {
+  log("Auto import start")
+  log("Auto import end")
+}
+# Auto-import smoke test: helper module defines func main().
+func main() {
+  def i: Int = 0
+  loop i < 100 {
+    def x: Int = 10
+    if i < 50 {
+      def y: Int = 20
+    }
+    i = i + 1
+  }
+  log("Done")
+}
+type Point {
+  x: Int
+  y: Int
+}
+
+func main() {
+  def p: Point = { x: 1, y: 2 }
+  def v: view Point => p
+  log(v.x)
+  def m: mod Point => p
+  m.y = 20
+  log(p.y)
+  def ov: opt view Point => p
+  match ov {
+    default {
+      log("has value")
+    }
+  }
+  def on: opt view Point => none
+  match on {
+    case none {
+      log("none")
+    }
+    default {
+      log("has value")
+    }
+  }
+}
+func makePoint() ret Point {
+  def origin: Point => { x: 0, y: 0 }
+  ret origin
+}
+import core
+func main() {
+  def x: Int = 1
+  match x {
+    case 1 {
+      log("one")
+    }
+    case 2 {
+      log("two")
+    }
+    default {
+      log("other")
+    }
+  }
+}
+import core
+func main() {
+  def x: Int = 10
+  if x > 3 {
+    log("value greater than three")
+  } else {
+    log("value small")
+  }
+}
+type Bad {
+  r: view Int
+}
+
+# ERROR: view/mod not allowed in struct fields
+func main() {
+  log("bad")
+}
+func main() {
+  log("hi")
+}
+func main() {
+  def x: List(Int) = { 10, 20 }
+  x.add(value: 30)
+  log(x)
+}
+type Point {
+  x: Int
+  y: Int
+}
+
+func main() {
+  def p: Point = { x: 1, y: 2 }
+  def r: mod Point => p
+  r.x = 10
+  # expect 10
+  # expect 10
+  log(p.x)
+  log(r.x)
+}
+type Point: pub {
+  x: Int
+  y: Int
+}
+
+func add(a: Int, b: Int) : pub ret Int {
+  def sum: Int = a + b
+  ret sum
+}
+type Point {
+  x: Int
+}
+
+func main() {
+  def p: Point = { x: 1 }
+  def rx: mod Int => p.x
+  rx = 10
+  # expect 10
+  log(p.x)
+}
+func add(a: Int, b: Int) ret Int {
+  spawn log("adding")
+  ret a + b
+}
+func compute(a: Int, b: Int) ret Int {
+  def doubled: Int = a * 2
+  log(doubled)
+  ret doubled + b
+}
+
+func main() {
+  log(compute(a: 2, b: 3))
+}
+func classify(n: Int) ret result: String {
+  if n < 0 {
+    ret result: "negative"
+  } else {
+    match n {
+      case 0 {
+        ret result: "zero"
+      }
+      default {
+        spawn heavyWork(idx: n)
+        ret result: "positive"
+      }
+    }
+  }
+}
+func main() {
+  def x: Int = 1
+  log(x)
+  x = 2
+  log(x)
+  x = x + 10
+  log(x)
+  x = x * 2
+  log(x)
+  def y: Int = 100
+  log(y)
+  y = y / 2
+  log(y)
+}
+func main() {
+  def s: String = r"with
+cr"
+  log(s)
+}
+import core
+extern func external_c_func(a: Int, b: Int) ret Int
+
+func helper() ret Int {
+  ret 42
+}
+
+func main() {
+  def result: Int = external_c_func(a: 10, b: 20)
+  log(result)
+  log(helper())
+}
+func main() {
+  def x: Int = 1
+  match x {
+    case 1 {
+      log("one")
+    }
+    case 2 {
+      log("two")
+    }
+    default {
+      log("default")
+    }
+  }
+  def y: Int = 0
+  match y {
+    case 0 {
+      log("zero")
+    }
+    default {
+      log("fallback")
+    }
+  }
+}
+type Point {
+  x: Int
+}
+
+func main() {
+  def pid: id Point = 1
+  def pkey: key Point = "p1"
+  def opid: opt id Point = none
+  def opkey: opt key Point = none
+  log(pid)
+  log(pkey)
+}
+type Point {
+  x: Int
+}
+
+func xMod(p: mod Point) ret mod Int {
+  ret mod  p.x
+}
+
+func xView(p: view Point) ret view Int {
+  ret view  p.x
+}
+
+func main() {
+  # ERROR: cannot take/return mod/view reference into a temporary literal
+  def a: mod Int => xMod({ x: 1 })
+  def b: view Int => xView({ x: 1 })
+}
+import core
+func main() {
+  log("Core lib test start")
+  log("Tick 1: {nextTick()}")
+  log("Tick 2: {nextTick()}")
+  log("Sleeping for 10ms...")
+  sleep(ms: 10)
+  log("Core lib test end")
+}
+func main() {
+  log("hi")
+}
+func classify(n: Int) ret result: Int {
+  if n < 0 {
+    ret result: "negative"
+  } else {
+    match n {
+      case 0 {
+        ret result: "zero"
+      }
+      default {
+        spawn heavyWork(idx: n)
+        ret result: "positive"
+      }
+    }
+  }
+}
+import nostdlib
+func main() {
+  nextTick()
+}
+import core
+func helper(a: Int, b: Int) {
+  log("Helper ran")
+}
+
+func sumChain(a: Int, b: Int) ret Int {
+  log("sumChain start")
+  def total: Int = a + b
+  if total > 5 {
+    log("total > 5")
+  } else {
+    log("total <= 5")
+  }
+  log("sumChain done")
+  ret total
+}
+
+func main() {
+  log("C backend demo start")
+  helper(a: 1, b: 2)
+  def res: Int = sumChain(a: 3, b: 4)
+  log("C backend demo end")
+}
+type Point {
+  x: Int
+}
+
+func xMod(p: mod Point) ret mod Int {
+  ret mod  p.x
+}
+
+func main() {
+  def p: Point = { x: 1 }
+  # positional arg call is ok
+  def rx: mod Int => xMod(p)
+  rx = 10
+  # aliasing-friendly: direct access while rx exists is OK in Rae
+  # expect 10
+  log(p.x)
+}
+func divide(a: Int, b: Int) ret result: Int, error: opt Error {
+  if b is 0 {
+    ret error: "division by zero"
+  }
+  ret result: a / b
+}
+
+func useDivide(a: Int, b: Int) ret result: Int {
+  def sum: result, def err: error = divide(a: a, b: b)
+  ret sum
+}
+func main() {
+  log(r"hello")
+  log(r#"He said "hi""#)
+  log(r##"Contains "# and quotes " safely"##)
+  log(r"line1
+line2")
+  log(r"back\slash")
+}
+type State {
+  score: Int
+  active: Bool
+  name: String
+}
+
+func main() {
+  # score: 0, active: false, name: ""
+  def s: State = <expr>
+  if s.score is 0 {
+    log("score ok")
+  }
+  if s.active is false {
+    log("active ok")
+  }
+  if s.name is "" {
+    log("name ok")
+  }
+  def x: Int = <expr>
+  if x is 0 {
+    log("primitive ok")
+  }
+  if s.active.toString() is "false" {
+    log("bool toString ok")
+  }
+}
+func greet() {
+  log("Hello from greet()")
+}
+
+func runSequence() {
+  log("Entering runSequence()")
+  greet()
+  log("Leaving runSequence()")
+}
+
+func main() {
+  log("VM call test start")
+  runSequence()
+  log("VM call test end")
+}
+type GameState: pub {
+  score: Int
+}
+
+func tick(state: GameState) ret GameState {
+  def clone: GameState => state
+  ret clone
+}
+func divide(a: Int, b: Int) ret result: Int, error: opt Error {
+  if b is 0 {
+    ret error: "divide by zero"
+  }
+  ret result: a / b
+}
+
+func useDivide(a: Int, b: Int) ret result: Int {
+  def sum: result, def err: error = divide(a: a, b: b)
+  ret sum
+}
+func main() {
+  def s: String = r"withcr"
+  log(s)
+}
+import core
+func main() {
+  log("Main loop running (use Stop to exit)")
+  def tick: Int = 0
+  loop tick < 3 {
+    logS("tick ")
+    log(tick)
+    tick = tick + 1
+  }
+}
+func main() {
+  def x: Int = 1
+  def value: Int = match x { case 1 => 10, default => 20 }
+  log(value)
+  def s: String = "a"
+  def strResult: String = match s { case "a" => "got_a", default => "other" }
+  log(strResult)
+}
+type Point {
+  x: Int
+}
+
+func badMod() ret mod Int {
+  def p: Point = { x: 1 }
+  # ERROR: reference escapes local storage
+  ret mod  p.x
+}
+
+func badView() ret view Int {
+  def p: Point = { x: 1 }
+  # ERROR: reference escapes local storage
+  ret view  p.x
+}
+
+func main() {
+  log("should not run")
+}
+import math
+func main() {
+  log("Random 1: {random()}")
+  log("Random 2: {random()}")
+  log("Int 1-10: {random(min: 1, max: 10)}")
+  log("Int 1-10: {random(min: 1, max: 10)}")
+}
+type Point {
+  x: Int
+  y: Int
+}
+
+func test(p: opt mod id Point) {
+  log("Stacked properties parsed correctly")
+}
+
+func main() {
+  # This is just a parsing test for now
+  log("Parsing test")
+}
+func main() {
+  log("Hello, Rae!")
+  logS("Streaming ")
+  log("done")
+}
+type Point: pub {
+  x: Int
+  y: Int
+}
+
+type MaybeError {
+  message: String
+}
+func main() {
+  log("C-style loop test")
+  loop i: Int = 0, i < 5, ++i {
+    log(i)
+  }
+}
+type Point {
+  x: Int
+  y: Int
+}
+
+func main() {
+  def a: Point = { x: 1, y: 2 }
+  def b: Point = a
+  b.x = 10
+  # expect 1
+  # expect 10
+  log(a.x)
+  log(b.x)
+}
+import ../../../modules/greetings/banner
+import ../../../modules/greetings/body
+func main() {
+  log("Starting multi-module smoke test")
+  log("Loaded compiler/modules/greetings/banner")
+  log("Loaded compiler/modules/greetings/body")
+}
+type User {
+  name: String
+}
+
+func main() {
+  def pid: id User = 123
+  def pkey: key User = "u_123"
+  log(pid)
+  log(pkey)
+}
+# Smoke test - empty file
+func normal() {
+  log("formatted")
+}
+
+# raefmt: off
+func unformatted() {
+    log( value: "verbatim"  )
+}
+# raefmt: on
+
+func backToNormal() {
+  log("formatted again")
+}
+import core
+func main() {
+  def x: Int = 1
+  def result: Int = match x { case 1 => 10, default => 20 }
+  log(result)
+}
+func main() {
+  log("hi")
+}
+func main() {
+  log("hi")
+}
+import core
+func helper() {
+  log("Hello from C backend helper")
+}
+
+func main() {
+  log("C backend demo start")
+  helper()
+  log("C backend demo end")
+}
+type Point: pub {
+  x: Int
+  y: Int
+}
+
+func add(a: Int, b: Int) : pub ret Int {
+  def sum: Int = a + b
+  ret sum
+}
+func main() {
+  def name: String = "Rae"
+  def version: Int = 1
+  log("Hello {name}, version {version}!")
+  log("Math: {1 + 2 * 3}")
+  log("Escaped {brace} and backslash \\")
+}
+import core
+func main() {
+  def s: String = "hello"
+  log(s)
+  def r: String = r"raw"
+  log(r)
+}
+type Point {
+  x: Int
+}
+
+func main() {
+  # ERROR: nonsensical combination
+  def p: view id Point = 1
+}
+import core
+func main() {
+  def i: Int = 0
+  loop i < 0 {
+    log("never runs")
+  }
+  log("C while done")
+}
+func main() {
+  if 1 < 2 {
+    log("then")
+  } else {
+    log("else")
+  }
+  if 5 < 2 {
+    log("nope")
+  } else {
+    log("else branch")
+  }
+  if 1 < 2 and 2 < 3 {
+    log("and ok")
+  }
+  log(1 < 2 and 0 < 1)
+  log(5 < 2 or 3 < 1)
+  log(not (1 < 2))
+}
+func divide(a: Int, b: Int) ret result: Int, error: opt Error {
+  if b is 0 {
+    ret error: "divide by zero"
+  }
+  ret result: a / b
+}
+func main() {
+  log("Auto-import demo start")
+  renderHeader()
+  renderBody()
+  renderFooter()
+  log("Auto-import demo end")
+}
+func renderHeader() {
+  log("=== Report Header ===")
+}
+func renderFooter() {
+  log("=== Report Footer ===")
+}
+func renderBody() {
+  log("Body: data from src/body.rae")
+}
+type Counter {
+  val: Int
+}
+
+func main() {
+  def x: Int = 10
+  # 11
+  # 11
+  # 11
+  log(++x)
+  # 12
+  log(x)
+  # 11
+  log(x++)
+  # 11
+  log(x)
+  # 11
+  log(--x)
+  # 10
+  log(x)
+  log(x--)
+  log(x)
+  def c: Counter = { val: 5 }
+  # 6
+  # 6
+  # 6
+  log(++c.val)
+  # 7
+  log(c.val)
+  # 6
+  log(c.val++)
+  # 6
+  log(c.val)
+  # 6
+  log(--c.val)
+  # 5
+  log(c.val)
+  log(c.val--)
+  log(c.val)
+}
+func main() {
+  log("Tick: {nextTick()}")
+}
+func main() {
+  def x: List(Int) = { 10, 20, 30 }
+  log(x)
+}
+func main() {
+  log("StringMap test")
+  def m: StringMap(Int) = createStringMap(initialCap: 4)
+  m.set(key: "apple", value: 10)
+  m.set(key: "banana", value: 20)
+  m.set(key: "cherry", value: 30)
+  def k1: String = "apple"
+  def k2: String = "banana"
+  def k3: String = "cherry"
+  def k4: String = "durian"
+  log("apple: {m.get(key: k1)}")
+  log("banana: {m.get(key: k2)}")
+  log("cherry: {m.get(key: k3)}")
+  log("missing: {m.get(key: k4)}")
+  log("has banana: {m.has(key: k2)}")
+  log("has durian: {m.has(key: k4)}")
+  log("length: {m.length}")
+  log("IntMap test")
+  def m2: IntMap(String) = createIntMap(initialCap: 4)
+  # test hashing/probing
+  m2.set(key: 1, value: "one")
+  m2.set(key: 2, value: "two")
+  m2.set(key: 10, value: "ten")
+  log("1: {m2.get(key: 1)}")
+  log("2: {m2.get(key: 2)}")
+  log("10: {m2.get(key: 10)}")
+  log("length: {m2.length}")
+}
+import core
+func init(name: String) {
+  log(name)
+}
+
+func main() {
+  log("vm build demo")
+}
+import core
+func init(name: String) {
+  log(name)
+}
+
+func main() {
+  log("hybrid entry")
+}
+type Point {
+  x: Int
+}
+
+func getX(p: mod Point) ret mod Int {
+  # OK: derived from param
+  ret mod  p.x
+}
+
+func main() {
+  def p: Point = { x: 1 }
+  def rx: mod Int => getX(p: p)
+  rx = 10
+  # expect 10
+  log(p.x)
+}
+func main() {
+  log("raepack helper")
+}
+#[ outer comment
+   #[ nested ]#
+ ]#
+func meaning() ret result: Int {
+  ret 42
+}
+func add(a: Int, b: Int) ret Int {
+  ret a + b
+}
+
+func triple(value: Int) ret Int {
+  ret value * 3
+}
+
+func chain(a: Int, b: Int, c: Int) ret Int {
+  ret triple(value: a + b) + c
+}
+
+func main() {
+  log("VM math demo start")
+  log(add(a: 2, b: 5))
+  log(triple(value: 4))
+  log(chain(a: 1, b: 2, c: 3))
+  log("VM math demo end")
+}
+func main() {
+  def x: Int = 1
+  # ERROR: cannot bind plain value type Int
+  def y: Int => x
+}
