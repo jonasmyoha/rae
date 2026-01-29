@@ -330,6 +330,67 @@ static bool native_rae_str_contains(struct VM* vm,
   return true;
 }
 
+static bool native_rae_str_starts_with(struct VM* vm,
+                                     VmNativeResult* out_result,
+                                     const Value* args,
+                                     size_t arg_count,
+                                     void* user_data) {
+  (void)vm; (void)user_data;
+  if (arg_count != 2) return false;
+  const Value* s_val = deref_value(&args[0]);
+  const Value* prefix_val = deref_value(&args[1]);
+  if (s_val->type != VAL_STRING || prefix_val->type != VAL_STRING) return false;
+  out_result->has_value = true;
+  out_result->value = value_bool(rae_ext_rae_str_starts_with(s_val->as.string_value.chars, prefix_val->as.string_value.chars));
+  return true;
+}
+
+static bool native_rae_str_ends_with(struct VM* vm,
+                                     VmNativeResult* out_result,
+                                     const Value* args,
+                                     size_t arg_count,
+                                     void* user_data) {
+  (void)vm; (void)user_data;
+  if (arg_count != 2) return false;
+  const Value* s_val = deref_value(&args[0]);
+  const Value* suffix_val = deref_value(&args[1]);
+  if (s_val->type != VAL_STRING || suffix_val->type != VAL_STRING) return false;
+  out_result->has_value = true;
+  out_result->value = value_bool(rae_ext_rae_str_ends_with(s_val->as.string_value.chars, suffix_val->as.string_value.chars));
+  return true;
+}
+
+static bool native_rae_str_index_of(struct VM* vm,
+                                     VmNativeResult* out_result,
+                                     const Value* args,
+                                     size_t arg_count,
+                                     void* user_data) {
+  (void)vm; (void)user_data;
+  if (arg_count != 2) return false;
+  const Value* s_val = deref_value(&args[0]);
+  const Value* sub_val = deref_value(&args[1]);
+  if (s_val->type != VAL_STRING || sub_val->type != VAL_STRING) return false;
+  out_result->has_value = true;
+  out_result->value = value_int(rae_ext_rae_str_index_of(s_val->as.string_value.chars, sub_val->as.string_value.chars));
+  return true;
+}
+
+static bool native_rae_str_trim(struct VM* vm,
+                                     VmNativeResult* out_result,
+                                     const Value* args,
+                                     size_t arg_count,
+                                     void* user_data) {
+  (void)vm; (void)user_data;
+  if (arg_count != 1) return false;
+  const Value* s_val = deref_value(&args[0]);
+  if (s_val->type != VAL_STRING) return false;
+  const char* trimmed = rae_ext_rae_str_trim(s_val->as.string_value.chars);
+  out_result->has_value = true;
+  out_result->value = value_string_copy(trimmed, strlen(trimmed));
+  free((void*)trimmed);
+  return true;
+}
+
 static bool native_rae_str_eq(struct VM* vm,
                                VmNativeResult* out_result,
                                const Value* args,
@@ -570,6 +631,10 @@ static bool register_default_natives(VmRegistry* registry, TickCounter* tick_cou
   ok = vm_registry_register_native(registry, "rae_str_hash", native_rae_str_hash, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_str_sub", native_rae_str_sub, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_str_contains", native_rae_str_contains, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_str_starts_with", native_rae_str_starts_with, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_str_ends_with", native_rae_str_ends_with, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_str_index_of", native_rae_str_index_of, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_str_trim", native_rae_str_trim, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_str_to_f64", native_rae_str_to_f64, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_str_to_i64", native_rae_str_to_i64, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_int_to_float", native_rae_int_to_float, NULL) && ok;

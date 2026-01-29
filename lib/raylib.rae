@@ -25,6 +25,14 @@ type Camera3D: c_struct {
   projection: Int
 }
 
+type Texture: c_struct {
+  id: Int
+  width: Int
+  height: Int
+  mipmaps: Int
+  format: Int
+}
+
 func initWindow(width: Int, height: Int, title: String) extern
 
 func setConfigFlags(flags: Int) extern
@@ -38,6 +46,20 @@ func beginDrawing() extern
 func endDrawing() extern
 
 func clearBackground(color: Color) extern
+
+func loadTexture(fileName: String) extern ret Texture
+
+func unloadTexture(texture: Texture) extern
+
+func drawTexture(texture: Texture, x: Float, y: Float, tint: Color) extern
+
+func drawTextureEx(
+  texture: Texture
+  pos: Vector2
+  rotation: Float
+  scale: Float
+  tint: Color
+) extern
 
 func drawRectangle(
   x: Float

@@ -153,6 +153,11 @@ static const char* map_rae_type_to_c(Str type_name) {
   if (str_eq_cstr(type_name, "Buffer")) return "void*";
   if (str_eq_cstr(type_name, "Any")) return "RaeAny";
   if (str_eq_cstr(type_name, "List")) return "List";
+  if (str_eq_cstr(type_name, "Texture")) return "Texture";
+  if (str_eq_cstr(type_name, "Color")) return "Color";
+  if (str_eq_cstr(type_name, "Vector2")) return "Vector2";
+  if (str_eq_cstr(type_name, "Vector3")) return "Vector3";
+  if (str_eq_cstr(type_name, "Camera3D")) return "Camera3D";
   return NULL;
 }
 
@@ -875,6 +880,14 @@ static void emit_mangled_function_name(const AstFuncDecl* func, FILE* out) {
             fprintf(out, "rae_ext_rae_str_sub");
         } else if (str_eq_cstr(name, "rae_str_contains") || str_eq_cstr(name, "str_contains")) {
             fprintf(out, "rae_ext_rae_str_contains");
+        } else if (str_eq_cstr(name, "rae_str_starts_with") || str_eq_cstr(name, "str_starts_with")) {
+            fprintf(out, "rae_ext_rae_str_starts_with");
+        } else if (str_eq_cstr(name, "rae_str_ends_with") || str_eq_cstr(name, "str_ends_with")) {
+            fprintf(out, "rae_ext_rae_str_ends_with");
+        } else if (str_eq_cstr(name, "rae_str_index_of") || str_eq_cstr(name, "str_index_of")) {
+            fprintf(out, "rae_ext_rae_str_index_of");
+        } else if (str_eq_cstr(name, "rae_str_trim") || str_eq_cstr(name, "str_trim")) {
+            fprintf(out, "rae_ext_rae_str_trim");
         } else if (str_eq_cstr(name, "rae_str_to_f64") || str_eq_cstr(name, "str_to_float")) {
             fprintf(out, "rae_ext_rae_str_to_f64");
         } else if (str_eq_cstr(name, "rae_str_to_i64") || str_eq_cstr(name, "str_to_int")) {
@@ -2417,6 +2430,10 @@ static const NativeMap RAYLIB_MAP[] = {
     {"isKeyDown", "IsKeyDown"},
     {"isKeyPressed", "IsKeyPressed"},
     {"clearBackground", "ClearBackground"},
+    {"loadTexture", "LoadTexture"},
+    {"unloadTexture", "UnloadTexture"},
+    {"drawTexture", "DrawTexture"},
+    {"drawTextureEx", "DrawTextureEx"},
     {"drawRectangle", "DrawRectangle"},
     {"drawRectangleLines", "DrawRectangleLines"},
     {"drawCircle", "DrawCircle"},
@@ -2479,6 +2496,9 @@ static bool emit_raylib_wrapper(const AstFuncDecl* fn, const char* c_name, FILE*
           } else if (str_eq_cstr(type_name, "Vector3")) {
               fprintf(out, "(Vector3){ (float)%.*s.x, (float)%.*s.y, (float)%.*s.z }", 
                       (int)p->name.len, p->name.data, (int)p->name.len, p->name.data, (int)p->name.len, p->name.data);
+          } else if (str_eq_cstr(type_name, "Texture")) {
+              fprintf(out, "(Texture){ .id = (unsigned int)%.*s.id, .width = (int)%.*s.width, .height = (int)%.*s.height, .mipmaps = (int)%.*s.mipmaps, .format = (int)%.*s.format }", 
+                      (int)p->name.len, p->name.data, (int)p->name.len, p->name.data, (int)p->name.len, p->name.data, (int)p->name.len, p->name.data, (int)p->name.len, p->name.data);
           } else if (str_eq_cstr(type_name, "Camera3D")) {
               fprintf(out, "(Camera3D){ ");
               fprintf(out, ".position = (Vector3){ (float)%.*s.position.x, (float)%.*s.position.y, (float)%.*s.position.z }, ", 

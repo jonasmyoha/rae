@@ -60,6 +60,6 @@
         - [ ] Restructure all tests to use individual folders (Implicit Project structure).
         - [ ] Enhance string interpolation: ensure automatic `.toString()` works for all types and support complex expressions.
         - [ ] Refactor existing examples to use `enum` instead of raw `Int` constants (e.g. `raylib_3d`).
-    - [ ] **Tetris Prototype**
-        - [ ] Implement a clean, high-quality Tetris in 2D using Raylib and Enums.
+    - [x] **Tetris Prototype**
+        - [x] Implement a clean, high-quality Tetris in 2D using Raylib and Enums.
     

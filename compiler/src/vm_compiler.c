@@ -845,8 +845,9 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
     // Raylib fallback for build mode where imports might not be fully populated
     const char* raylib_funcs[] = {
         "initWindow", "windowShouldClose", "closeWindow", "beginDrawing", "endDrawing",
-        "setTargetFPS", "getScreenWidth", "getScreenHeight", "isKeyDown", "isKeyPressed", "clearBackground", "drawRectangle",
-        "drawRectangleLines", "drawCircle", "drawText", "drawCube", "drawCubeWires",
+        "setTargetFPS", "getScreenWidth", "getScreenHeight", "isKeyDown", "isKeyPressed", "clearBackground", 
+        "loadTexture", "unloadTexture", "drawTexture", "drawTextureEx",
+        "drawRectangle", "drawRectangleLines", "drawCircle", "drawText", "drawCube", "drawCubeWires",
         "drawSphere", "drawCylinder", "drawGrid", "beginMode3D", "endMode3D",
         "getTime", "colorFromHSV", "random", "random_int", "seed", NULL
     };
@@ -1641,6 +1642,7 @@ static const char* stmt_kind_name(AstStmtKind kind) {
     case AST_STMT_LOOP: return "loop";
     case AST_STMT_MATCH: return "match";
     case AST_STMT_ASSIGN: return "assignment";
+    case AST_STMT_DEFER: return "defer";
   }
   return "unknown";
 }
@@ -2222,6 +2224,9 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
         return false;
       }
     }
+    case AST_STMT_DEFER:
+      diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, "defer not supported in VM yet");
+      return false;
     default: {
       char buffer[128];
       snprintf(buffer, sizeof(buffer), "%s statement not supported in VM yet", stmt_kind_name(stmt->kind));

@@ -178,6 +178,23 @@ int64_t rae_ext_rae_str_compare(const char* a, const char* b) {
   return (int64_t)strcmp(a, b);
 }
 
+int8_t rae_ext_rae_str_eq(const char* a, const char* b) {
+  if (a == b) return 1;
+  if (!a || !b) return 0;
+  return strcmp(a, b) == 0;
+}
+
+int64_t rae_ext_rae_str_hash(const char* s) {
+  if (!s) return 0;
+  // FNV-1a hash
+  uint64_t hash = 0xcbf29ce484222325ULL;
+  while (*s) {
+    hash ^= (uint64_t)(unsigned char)(*s++);
+    hash *= 0x100000001b3ULL;
+  }
+  return (int64_t)hash;
+}
+
 const char* rae_ext_rae_str_sub(const char* s, int64_t start, int64_t len) {
   if (!s) return "";
   int64_t slen = (int64_t)strlen(s);
@@ -197,6 +214,44 @@ const char* rae_ext_rae_str_sub(const char* s, int64_t start, int64_t len) {
 int8_t rae_ext_rae_str_contains(const char* s, const char* sub) {
   if (!s || !sub) return 0;
   return strstr(s, sub) != NULL;
+}
+
+int8_t rae_ext_rae_str_starts_with(const char* s, const char* prefix) {
+  if (!s || !prefix) return 0;
+  size_t len_s = strlen(s);
+  size_t len_p = strlen(prefix);
+  if (len_p > len_s) return 0;
+  return strncmp(s, prefix, len_p) == 0;
+}
+
+int8_t rae_ext_rae_str_ends_with(const char* s, const char* suffix) {
+  if (!s || !suffix) return 0;
+  size_t len_s = strlen(s);
+  size_t len_suffix = strlen(suffix);
+  if (len_suffix > len_s) return 0;
+  return strncmp(s + len_s - len_suffix, suffix, len_suffix) == 0;
+}
+
+int64_t rae_ext_rae_str_index_of(const char* s, const char* sub) {
+  if (!s || !sub) return -1;
+  const char* p = strstr(s, sub);
+  if (!p) return -1;
+  return (int64_t)(p - s);
+}
+
+const char* rae_ext_rae_str_trim(const char* s) {
+  if (!s) return "";
+  while (*s && (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r')) s++;
+  if (!*s) return "";
+  const char* end = s + strlen(s) - 1;
+  while (end > s && (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r')) end--;
+  size_t len = (size_t)(end - s + 1);
+  char* result = malloc(len + 1);
+  if (result) {
+    memcpy(result, s, len);
+    result[len] = '\0';
+  }
+  return result;
 }
 
 double rae_ext_rae_str_to_f64(const char* s) {

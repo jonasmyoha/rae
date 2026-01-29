@@ -13,6 +13,14 @@ func rae_str_sub(s: String, start: Int, len: Int) extern ret String
 
 func rae_str_contains(s: String, sub: String) extern ret Bool
 
+func rae_str_starts_with(s: String, prefix: String) extern ret Bool
+
+func rae_str_ends_with(s: String, suffix: String) extern ret Bool
+
+func rae_str_index_of(s: String, sub: String) extern ret Int
+
+func rae_str_trim(s: String) extern ret String
+
 func rae_str_to_f64(s: String) extern ret Float
 
 func rae_str_to_i64(s: String) extern ret Int
@@ -43,6 +51,44 @@ func sub(this: String, start: Int, len: Int) ret String {
 
 func contains(this: String, sub: String) ret Bool {
   ret rae_str_contains(s: this, sub: sub)
+}
+
+func startsWith(this: String, prefix: String) ret Bool {
+  ret rae_str_starts_with(s: this, prefix: prefix)
+}
+
+func endsWith(this: String, suffix: String) ret Bool {
+  ret rae_str_ends_with(s: this, suffix: suffix)
+}
+
+func indexOf(this: String, sub: String) ret Int {
+  ret rae_str_index_of(s: this, sub: sub)
+}
+
+func trim(this: String) ret String {
+  ret rae_str_trim(s: this)
+}
+
+func split(this: String, sep: String) ret List(String) {
+  def result: List(String) = createList(initialCap: 4)
+  if sep.length() is 0 {
+    add(result, value: this)
+    ret result
+  }
+  
+  def remaining: String = this
+  loop true {
+    def idx: Int = remaining.indexOf(sub: sep)
+    if idx is -1 {
+      add(result, value: remaining)
+      ret result
+    }
+    
+    def part: String = remaining.sub(start: 0, len: idx)
+    add(result, value: part)
+    remaining = remaining.sub(start: idx + sep.length(), len: remaining.length() - idx - sep.length())
+  }
+  ret result
 }
 
 func toFloat(this: String) ret Float {
