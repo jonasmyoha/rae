@@ -457,6 +457,12 @@ static void dump_match_stmt(const AstStmt* stmt, FILE* out, int indent) {
   }
 }
 
+static void dump_defer_stmt(const AstStmt* stmt, FILE* out, int indent) {
+  print_indent(out, indent);
+  fputs("defer\n", out);
+  dump_block(stmt->as.defer_stmt.block, out, indent + 1);
+}
+
 static void dump_block(const AstBlock* block, FILE* out, int indent) {
   if (!block || !block->first) {
     print_indent(out, indent);
@@ -489,6 +495,9 @@ static void dump_block(const AstBlock* block, FILE* out, int indent) {
         break;
       case AST_STMT_ASSIGN:
         dump_assign_stmt(stmt, out, indent);
+        break;
+      case AST_STMT_DEFER:
+        dump_defer_stmt(stmt, out, indent);
         break;
     }
     stmt = stmt->next;

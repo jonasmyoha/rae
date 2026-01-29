@@ -34,27 +34,27 @@
 
 ## B. Example Validation — 2D Tetris
 
-[ ] Create examples/tetris2d/
-    [ ] Minimal game loop
-    [ ] Grid logic using List
-    [ ] Input handling
-    [ ] Scoring system
-    [ ] Pause / restart states
+[x] Create examples/tetris2d/
+    [x] Minimal game loop
+    [x] Grid logic using List
+    [x] Input handling
+    [x] Scoring system
+    [x] Pause / restart states
 
-[ ] Add enum-based game state
-    [ ] Menu
-    [ ] Playing
-    [ ] Paused
-    [ ] GameOver
+[x] Add enum-based game state
+    [x] Menu
+    [x] Playing
+    [x] Paused
+    [x] GameOver
 
-[ ] Add README.md for tetris2d
-    [ ] Build instructions
-    [ ] Run instructions
-    [ ] VM vs C backend notes
+[x] Add README.md for tetris2d
+    [x] Build instructions
+    [x] Run instructions
+    [x] VM vs C backend notes
 
-[ ] Add CI smoke test for tetris2d
-    [ ] Compiles successfully
-    [ ] Runs headless or minimal frame loop
+[x] Add CI smoke test for tetris2d
+    [x] Compiles successfully
+    [x] Runs headless or minimal frame loop
 
 ---
 

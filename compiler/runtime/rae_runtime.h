@@ -98,6 +98,10 @@ int8_t rae_ext_rae_str_eq(const char* a, const char* b);
 int64_t rae_ext_rae_str_hash(const char* s);
 const char* rae_ext_rae_str_sub(const char* s, int64_t start, int64_t len);
 int8_t rae_ext_rae_str_contains(const char* s, const char* sub);
+int8_t rae_ext_rae_str_starts_with(const char* s, const char* prefix);
+int8_t rae_ext_rae_str_ends_with(const char* s, const char* suffix);
+int64_t rae_ext_rae_str_index_of(const char* s, const char* sub);
+const char* rae_ext_rae_str_trim(const char* s);
 double rae_ext_rae_str_to_f64(const char* s);
 int64_t rae_ext_rae_str_to_i64(const char* s);
 

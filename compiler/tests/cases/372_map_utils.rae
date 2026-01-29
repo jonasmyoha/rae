@@ -1,0 +1,19 @@
+func main() {
+  def m: StringMap(Int) = createStringMap(initialCap: 4)
+  set(m, k: "a", value: 1)
+  set(m, k: "b", value: 2)
+  set(m, k: "c", value: 3)
+  
+  log("Initial keys count: {m.keys().length()}")
+  
+  remove(m, k: "b")
+  log("Keys after remove 'b': {m.keys().length()}")
+  
+  def ks: List(String) = m.keys()
+  def i: Int = 0
+  loop i < ks.length() {
+    def k: String = ks.get(index: i)
+    log("Key {i}: {k} -> {m.get(k: k)}")
+    i = i + 1
+  }
+}
