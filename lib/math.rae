@@ -1,55 +1,65 @@
 # Math and Random library for Rae
 import core
+func rae_seed(n: Int) extern
 
-extern func rae_seed(n: Int)
+func rae_random() extern ret Float
 
-extern func rae_random(): ret Float
-
-extern func rae_random_int(min: Int, max: Int): ret Int
+func rae_random_int(min: Int, max: Int) extern ret Int
 
 func seed(n: Int) {
   rae_seed(n: n)
 }
 
-func random(): ret Float {
+func random() ret Float {
   ret rae_random()
 }
 
-func random(min: Int, max: Int): ret Int {
+func random(min: Int, max: Int) ret Int {
   ret rae_random_int(min: min, max: max)
 }
 
-func abs(n: Int): ret Int {
-  if n < 0 { ret -n }
+func abs(n: Int) ret Int {
+  if n < 0 {
+    ret -n
+  }
   ret n
 }
 
-func abs(n: Float): ret Float {
-  if n < 0.0 { ret -n }
+func abs(n: Float) ret Float {
+  if n < 0.0 {
+    ret -n
+  }
   ret n
 }
 
-func min(a: Int, b: Int): ret Int {
-  if a < b { ret a }
+func min(a: Int, b: Int) ret Int {
+  if a < b {
+    ret a
+  }
   ret b
 }
 
-func max(a: Int, b: Int): ret Int {
-  if a > b { ret a }
+func max(a: Int, b: Int) ret Int {
+  if a > b {
+    ret a
+  }
   ret b
 }
 
-func clamp(val: Int, low: Int, high: Int): ret Int {
-  if val < low { ret low }
-  if val > high { ret high }
+func clamp(val: Int, low: Int, high: Int) ret Int {
+  if val < low {
+    ret low
+  }
+  if val > high {
+    ret high
+  }
   ret val
 }
 
-func lerp(a: Float, b: Float, t: Float): ret Float {
+func lerp(a: Float, b: Float, t: Float) ret Float {
   ret a + (b - a) * t
 }
 
-func randomFloat(min: Float, max: Float): ret Float {
+func randomFloat(min: Float, max: Float) ret Float {
   ret min + rae_random() * (max - min)
 }
-

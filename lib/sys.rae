@@ -1,5 +1,24 @@
-# System and Files library for Rae
-extern func exit(code: Int)
-extern func getEnv(name: String): ret opt String
-extern func readFile(path: String): ret opt String
-extern func writeFile(path: String, content: String): ret Bool
+# System utilities for Rae
+func rae_sys_exit(code: Int) extern
+
+func rae_sys_get_env(name: String) extern ret String
+
+func rae_sys_read_file(path: String) extern ret opt String
+
+func rae_sys_write_file(path: String, content: String) extern ret Bool
+
+func exit(code: Int) {
+  rae_sys_exit(code: code)
+}
+
+func getEnv(name: String) ret String {
+  ret rae_sys_get_env(name: name)
+}
+
+func readFile(path: String) ret opt String {
+  ret rae_sys_read_file(path: path)
+}
+
+func writeFile(path: String, content: String) ret Bool {
+  ret rae_sys_write_file(path: path, content: content)
+}

@@ -470,8 +470,15 @@ TokenList lexer_tokenize(Arena* arena,
   for (;;) {
     lexer_skip_whitespace(&lexer);
     if (lexer_is_at_end(&lexer)) {
-      if (length > 0 && source[length - 1] != '\n' && lexer.strict) {
-          lexer_error(&lexer, lexer.line, lexer.column, "Rae files must end with a newline (\\n). Missing final newline at end of file. Run `rae format` to fix.");
+      if (length > 0 && lexer.strict) {
+          // Find last character that is not a space or tab
+          size_t last_idx = length - 1;
+          while (last_idx > 0 && (source[last_idx] == ' ' || source[last_idx] == '\t')) {
+              last_idx--;
+          }
+          if (source[last_idx] != '\n' && source[last_idx] != '\r') {
+              lexer_error(&lexer, lexer.line, lexer.column, "Rae files must end with a newline (\\n). Missing final newline at end of file. Run `rae format` to fix.");
+          }
       }
       Str lexeme = str_from_buf(source + lexer.index, 0);
       Token eof_token = {.kind = TOK_EOF, .lexeme = lexeme, .line = lexer.line, .column = lexer.column};

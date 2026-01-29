@@ -1,0 +1,28 @@
+func main() {
+  log("StringMap test")
+  def m: StringMap(Int) = createStringMap(initialCap: 4)
+  m.set(key: "apple", value: 10)
+  m.set(key: "banana", value: 20)
+  m.set(key: "cherry", value: 30)
+  def k1: String = "apple"
+  def k2: String = "banana"
+  def k3: String = "cherry"
+  def k4: String = "durian"
+  log("apple: {m.get(key: k1)}")
+  log("banana: {m.get(key: k2)}")
+  log("cherry: {m.get(key: k3)}")
+  log("missing: {m.get(key: k4)}")
+  log("has banana: {m.has(key: k2)}")
+  log("has durian: {m.has(key: k4)}")
+  log("length: {m.length}")
+  log("IntMap test")
+  def m2: IntMap(String) = createIntMap(initialCap: 4)
+  # test hashing/probing
+  m2.set(key: 1, value: "one")
+  m2.set(key: 2, value: "two")
+  m2.set(key: 10, value: "ten")
+  log("1: {m2.get(key: 1)}")
+  log("2: {m2.get(key: 2)}")
+  log("10: {m2.get(key: 10)}")
+  log("length: {m2.length}")
+}

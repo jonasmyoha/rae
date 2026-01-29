@@ -312,7 +312,6 @@ static void pp_call_args(PrettyPrinter* pp, const AstCallArg* args) {
         pp_write(pp, ": ");
       }
       pp_expr_prec(pp, current->value, PREC_LOWEST);
-      pp_write(pp, ",");
       pp_newline(pp);
       current = current->next;
     }
@@ -327,48 +326,6 @@ static void pp_call_args(PrettyPrinter* pp, const AstCallArg* args) {
         pp_write_str(pp, current->name);
         pp_write(pp, ": ");
       }
-      pp_expr_prec(pp, current->value, PREC_LOWEST);
-      first = 0;
-      current = current->next;
-    }
-  }
-}
-
-static void pp_object_fields(PrettyPrinter* pp, const AstObjectField* fields) {
-  if (!fields) return;
-  const AstObjectField* current = fields;
-  
-  bool wrap = false;
-  int count = 0;
-  int estimated_len = pp->current_col;
-  while (current) {
-    count++;
-    estimated_len += (int)current->name.len + 2 + 20;
-    current = current->next;
-  }
-  if (count > 3 || estimated_len > 100) wrap = true;
-
-  current = fields;
-  if (wrap) {
-    pp_newline(pp);
-    pp->indent++;
-    while (current) {
-      pp_write_str(pp, current->name);
-      pp_write(pp, ": ");
-      pp_expr_prec(pp, current->value, PREC_LOWEST);
-      pp_write(pp, ",");
-      pp_newline(pp);
-      current = current->next;
-    }
-    pp->indent--;
-    pp_write_indent(pp);
-    pp->start_of_line = 0;
-  } else {
-    int first = 1;
-    while (current) {
-      if (!first) { pp_write(pp, ", "); }
-      pp_write_str(pp, current->name);
-      pp_write(pp, ": ");
       pp_expr_prec(pp, current->value, PREC_LOWEST);
       first = 0;
       current = current->next;
@@ -457,12 +414,46 @@ static void pp_expr_prec(PrettyPrinter* pp, const AstExpr* expr, int parent_prec
       pp_write(pp, "none");
       break;
     case AST_EXPR_OBJECT:
-      if (expr->as.object_literal.type) { // If there's a specified type
+      if (expr->as.object_literal.type) {
         pp_write_type(pp, expr->as.object_literal.type);
         pp_space(pp);
       }
-      pp_write_char(pp, '{'); // Object literals now use curly braces
-      pp_object_fields(pp, expr->as.object_literal.fields); // Pass the fields
+      pp_write_char(pp, '{');
+      if (expr->as.object_literal.fields) {
+        bool wrap = false;
+        int count = 0;
+        AstObjectField* scan = expr->as.object_literal.fields;
+        while (scan) { count++; scan = scan->next; }
+        if (count > 3) wrap = true;
+
+        if (wrap) {
+          pp_newline(pp);
+          pp->indent++;
+          AstObjectField* field = expr->as.object_literal.fields;
+          while (field) {
+            pp_write_str(pp, field->name);
+            pp_write(pp, ": ");
+            pp_expr_prec(pp, field->value, PREC_LOWEST);
+            pp_newline(pp);
+            field = field->next;
+          }
+          pp->indent--;
+          pp_write_indent(pp);
+        } else {
+          pp_space(pp);
+          AstObjectField* field = expr->as.object_literal.fields;
+          int first = 1;
+          while (field) {
+            if (!first) pp_write(pp, ", ");
+            pp_write_str(pp, field->name);
+            pp_write(pp, ": ");
+            pp_expr_prec(pp, field->value, PREC_LOWEST);
+            first = 0;
+            field = field->next;
+          }
+          pp_space(pp);
+        }
+      }
       pp_write_char(pp, '}');
       break;
     case AST_EXPR_MATCH: {
@@ -559,39 +550,83 @@ static void pp_expr_prec(PrettyPrinter* pp, const AstExpr* expr, int parent_prec
       break;
     }
     case AST_EXPR_COLLECTION_LITERAL: {
+      if (expr->as.collection.type) {
+        pp_write_type(pp, expr->as.collection.type);
+        pp_space(pp);
+      }
       pp_write_char(pp, '{');
       AstCollectionElement* current = expr->as.collection.elements;
       if (current) {
-        pp_space(pp);
-        int first = 1;
-        while (current) {
-          if (!first) {
-            pp_write(pp, ", ");
+        bool wrap = false;
+        int count = 0;
+        AstCollectionElement* scan = current;
+        while (scan) { count++; scan = scan->next; }
+        if (count > 3) wrap = true;
+
+        if (wrap) {
+          pp_newline(pp);
+          pp->indent++;
+          while (current) {
+            if (current->key) {
+              pp_write_str(pp, *current->key);
+              pp_write(pp, ": ");
+            }
+            pp_expr_prec(pp, current->value, PREC_LOWEST);
+            pp_newline(pp);
+            current = current->next;
           }
-          if (current->key) { // If it's a keyed element, it's a Map/Object literal
-            pp_write_str(pp, *current->key);
-            pp_write(pp, ": ");
+          pp->indent--;
+          pp_write_indent(pp);
+        } else {
+          pp_space(pp);
+          int first = 1;
+          while (current) {
+            if (!first) { pp_write(pp, ", "); }
+            if (current->key) {
+              pp_write_str(pp, *current->key);
+              pp_write(pp, ": ");
+            }
+            pp_expr_prec(pp, current->value, PREC_LOWEST);
+            first = 0;
+            current = current->next;
           }
-          pp_expr_prec(pp, current->value, PREC_LOWEST);
-          first = 0;
-          current = current->next;
+          pp_space(pp);
         }
-        pp_space(pp);
       }
       pp_write_char(pp, '}');
       break;
     }
     case AST_EXPR_LIST: {
-      pp_write(pp, "[");
+      pp_write_char(pp, '[');
       AstExprList* current = expr->as.list;
-      while (current) {
-        pp_expr_prec(pp, current->value, PREC_LOWEST);
-        if (current->next) {
-          pp_write(pp, ", ");
+      if (current) {
+        bool wrap = false;
+        int count = 0;
+        AstExprList* scan = current;
+        while (scan) { count++; scan = scan->next; }
+        if (count > 5) wrap = true;
+
+        if (wrap) {
+          pp_newline(pp);
+          pp->indent++;
+          while (current) {
+            pp_expr_prec(pp, current->value, PREC_LOWEST);
+            pp_newline(pp);
+            current = current->next;
+          }
+          pp->indent--;
+          pp_write_indent(pp);
+        } else {
+          int first = 1;
+          while (current) {
+            if (!first) pp_write(pp, ", ");
+            pp_expr_prec(pp, current->value, PREC_LOWEST);
+            first = 0;
+            current = current->next;
+          }
         }
-        current = current->next;
       }
-      pp_write(pp, "]");
+      pp_write_char(pp, ']');
       break;
     }
     case AST_EXPR_INDEX: {
@@ -627,12 +662,14 @@ static void pp_print_def_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
   pp_write_str(pp, stmt->as.def_stmt.name);
   pp_write(pp, ": ");
   pp_write_type(pp, stmt->as.def_stmt.type);
-  if (stmt->as.def_stmt.is_bind) {
-    pp_write(pp, " => ");
-  } else {
-    pp_write(pp, " = ");
+  if (stmt->as.def_stmt.value) {
+    if (stmt->as.def_stmt.is_bind) {
+      pp_write(pp, " => ");
+    } else {
+      pp_write(pp, " = ");
+    }
+    pp_expr(pp, stmt->as.def_stmt.value);
   }
-  pp_expr(pp, stmt->as.def_stmt.value);
   pp_newline(pp);
 }
 
@@ -684,7 +721,6 @@ static void pp_print_return_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
         pp_write(pp, ": ");
       }
       pp_expr(pp, current->value);
-      pp_write(pp, ",");
       pp_newline(pp);
       current = current->next;
     }
@@ -819,7 +855,7 @@ static void pp_print_type_decl(PrettyPrinter* pp, const AstDecl* decl) {
   pp_write(pp, "type ");
   pp_write_str(pp, decl->as.type_decl.name);
   if (decl->as.type_decl.generic_params) {
-    pp_write_char(pp, '[');
+    pp_write_char(pp, '(');
     AstIdentifierPart* current = decl->as.type_decl.generic_params;
     int first = 1;
     while (current) {
@@ -830,7 +866,7 @@ static void pp_print_type_decl(PrettyPrinter* pp, const AstDecl* decl) {
       first = 0;
       current = current->next;
     }
-    pp_write_char(pp, ']');
+    pp_write_char(pp, ')');
   }
   if (decl->as.type_decl.properties) {
     pp_write(pp, ": ");
@@ -872,7 +908,6 @@ static void pp_print_params(PrettyPrinter* pp, const AstParam* param) {
       pp_write_str(pp, current->name);
       pp_write(pp, ": ");
       pp_write_type(pp, current->type);
-      pp_write(pp, ",");
       pp_newline(pp);
       current = current->next;
     }
@@ -916,7 +951,6 @@ static void pp_print_return_items(PrettyPrinter* pp, const AstReturnItem* item) 
         pp_write(pp, ": ");
       }
       pp_write_type(pp, current->type);
-      pp_write(pp, ",");
       pp_newline(pp);
       current = current->next;
     }
@@ -940,13 +974,10 @@ static void pp_print_return_items(PrettyPrinter* pp, const AstReturnItem* item) 
 
 static void pp_print_func_decl(PrettyPrinter* pp, const AstDecl* decl) {
   pp_check_comments(pp, decl->line);
-  if (decl->as.func_decl.is_extern) {
-    pp_write(pp, "extern ");
-  }
   pp_write(pp, "func ");
   pp_write_str(pp, decl->as.func_decl.name);
   if (decl->as.func_decl.generic_params) {
-    pp_write_char(pp, '[');
+    pp_write_char(pp, '(');
     AstIdentifierPart* current = decl->as.func_decl.generic_params;
     int first = 1;
     while (current) {
@@ -957,22 +988,23 @@ static void pp_print_func_decl(PrettyPrinter* pp, const AstDecl* decl) {
       first = 0;
       current = current->next;
     }
-    pp_write_char(pp, ']');
+    pp_write_char(pp, ')');
   }
   pp_write(pp, "(");
   pp_print_params(pp, decl->as.func_decl.params);
   pp_write(pp, ")");
-  int has_props = decl->as.func_decl.properties != NULL;
-  int has_returns = decl->as.func_decl.returns != NULL;
-  if (has_props || has_returns) {
-    pp_write(pp, ": ");
-    if (has_props) pp_write_properties(pp, decl->as.func_decl.properties);
-    if (has_returns) {
-      if (has_props) pp_space(pp);
-      pp_write(pp, "ret ");
-      pp_print_return_items(pp, decl->as.func_decl.returns);
-    }
+  
+  if (decl->as.func_decl.properties) {
+    pp_space(pp);
+    pp_write_properties(pp, decl->as.func_decl.properties);
   }
+
+  if (decl->as.func_decl.returns) {
+    pp_space(pp);
+    pp_write(pp, "ret ");
+    pp_print_return_items(pp, decl->as.func_decl.returns);
+  }
+
   if (decl->as.func_decl.body) {
       pp_space(pp);
       pp_begin_block(pp);
@@ -986,18 +1018,37 @@ static void pp_print_enum_decl(PrettyPrinter* pp, const AstDecl* decl) {
   pp_write(pp, "enum ");
   pp_write_str(pp, decl->as.enum_decl.name);
   pp_space(pp);
-  pp_begin_block(pp);
+  
+  bool wrap = false;
+  int count = 0;
   AstEnumMember* m = decl->as.enum_decl.members;
   while (m) {
-    pp_write_str(pp, m->name);
-    if (m->next) {
-      pp_write(pp, ",");
-      pp_newline(pp);
-    }
+    count++;
     m = m->next;
   }
-  pp_newline(pp);
-  pp_end_block(pp);
+  if (count > 5) wrap = true;
+
+  if (wrap) {
+    pp_begin_block(pp);
+    m = decl->as.enum_decl.members;
+    while (m) {
+      pp_write_str(pp, m->name);
+      pp_newline(pp);
+      m = m->next;
+    }
+    pp_end_block(pp);
+  } else {
+    pp_write(pp, "{ ");
+    m = decl->as.enum_decl.members;
+    int first = 1;
+    while (m) {
+      if (!first) pp_write(pp, ", ");
+      pp_write_str(pp, m->name);
+      first = 0;
+      m = m->next;
+    }
+    pp_write(pp, " }");
+  }
   pp_newline(pp);
 }
 

@@ -1,4 +1,3 @@
-
 type Box(T) {
   value: T
 }
@@ -9,18 +8,20 @@ func setValue(T)(b: mod Box(T), val: T) {
 
 func main() {
   # Int Box
-  def b: Box(Int) = {value: 42}
-  log(b.value)
-  setValue(b, val: 100)
+  def b: Box(Int) = { value: 42 }
   log(b.value)
   # Float Box
-  def bf: Box(Float) = {value: 3.14}
-  log(bf.value)
-  setValue(bf, val: 2.718)
+  setValue(b, val: 100)
+  log(b.value)
+  def bf: Box(Float) = { value: 3.14 }
   log(bf.value)
   # String Box
-  def bs: Box(String) = {value: "hello"}
+  setValue(bf, val: 2.718)
+  log(bf.value)
+  def bs: Box(String) = { value: "hello" }
   log(bs.value)
   setValue(bs, val: "world")
   log(bs.value)
 }
+
+

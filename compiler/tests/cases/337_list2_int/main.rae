@@ -1,24 +1,32 @@
 # -- List2 Prototype (Int only) --
 type List2Int {
-  data: Buffer Int
+  data: Buffer(Int)
   length: Int
   capacity: Int
 }
 
-func createList2Int(initialCap: Int): ret List2Int {
+func createList2Int(initialCap: Int) ret List2Int {
   ret {
-    data: __buf_alloc(size: initialCap),
-    length: 0,
-    capacity: initialCap,
+    data: __buf_alloc(size: initialCap)
+    length: 0
+    capacity: initialCap
   }
 }
 
 func add(this: mod List2Int, value: Int) {
   if this.length is this.capacity {
     def newCap: Int = this.capacity * 2
-    if newCap is 0 { newCap = 4 }
-    def newData: Buffer Int = __buf_alloc(size: newCap)
-    __buf_copy(src: this.data, src_off: 0, dst: newData, dst_off: 0, len: this.length)
+    if newCap is 0 {
+      newCap = 4
+    }
+    def newData: Buffer(Int) = __buf_alloc(size: newCap)
+    __buf_copy(
+      src: this.data
+      src_off: 0
+      dst: newData
+      dst_off: 0
+      len: this.length
+    )
     __buf_free(buf: this.data)
     this.data = newData
     this.capacity = newCap
@@ -27,7 +35,7 @@ func add(this: mod List2Int, value: Int) {
   this.length = this.length + 1
 }
 
-func get(this: view List2Int, index: Int): ret Int {
+func get(this: view List2Int, index: Int) ret Int {
   ret __buf_get(buf: this.data, index: index)
 }
 
@@ -37,8 +45,8 @@ func main() {
   add(this: list, value: 200)
   add(this: list, value: 300)
   
-  log(get(list, index: 0))
-  log(get(list, index: 1))
-  log(get(list, index: 2))
+  log(get(this: list, index: 0))
+  log(get(this: list, index: 1))
+  log(get(this: list, index: 2))
   log(list.length)
 }

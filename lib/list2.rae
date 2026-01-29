@@ -1,26 +1,25 @@
-# -- List2 Generic --
-type List2(T) {
-  data: Buffer(T)
+# Specialized List implementation for Rae
+type List2 {
+  data: Buffer(Any)
   length: Int
   capacity: Int
 }
 
-func createList2(T)(initialCap: Int): ret List2(T) {
-  ret {
-    data: __buf_alloc(size: initialCap),
-    length: 0,
-    capacity: initialCap,
-  }
+func createList2(initialCap: Int) ret List2 {
+  ret { data: __buf_alloc(size: initialCap), length: 0, capacity: initialCap }
 }
 
-func grow(T)(this: mod List2(T)) {
+func grow(this: mod List2) {
   def newCap: Int = this.capacity * 2
-  if newCap is 0 { newCap = 4 }
-  
-  def newData: Buffer(T) = __buf_alloc(size: newCap)
+  if newCap is 0 {
+    newCap = 4
+  }
+  def newData: Buffer(Any) = __buf_alloc(size: newCap)
   __buf_copy(
-    src: this.data, src_off: 0,
-    dst: newData, dst_off: 0,
+    src: this.data
+    src_off: 0
+    dst: newData
+    dst_off: 0
     len: this.length
   )
   __buf_free(buf: this.data)
@@ -28,81 +27,18 @@ func grow(T)(this: mod List2(T)) {
   this.capacity = newCap
 }
 
-func add(T)(this: mod List2(T), value: T) {
+func add(this: mod List2, value: Any) {
   if this.length is this.capacity {
     grow(this)
   }
-  
   __buf_set(buf: this.data, index: this.length, value: value)
   this.length = this.length + 1
 }
 
-func get(T)(this: view List2(T), index: Int): ret T {
-  if index < 0 or index >= this.length {
-    ret none
-  }
+func get(this: view List2, index: Int) ret Any {
   ret __buf_get(buf: this.data, index: index)
 }
 
-func set(T)(this: mod List2(T), index: Int, value: T) {
-  if index < 0 or index >= this.length {
-    ret
-  }
-  __buf_set(buf: this.data, index: index, value: value)
-}
-
-func insert(T)(this: mod List2(T), index: Int, value: T) {
-  if index < 0 or index > this.length {
-    ret
-  }
-  
-  if this.length is this.capacity {
-    grow(this)
-  }
-  
-  # Shift elements to the right
-  if index < this.length {
-    __buf_copy(
-      src: this.data, src_off: index,
-      dst: this.data, dst_off: index + 1,
-      len: this.length - index
-    )
-  }
-  
-  __buf_set(buf: this.data, index: index, value: value)
-  this.length = this.length + 1
-}
-
-func pop(T)(this: mod List2(T)): ret T {
-  if this.length is 0 {
-    ret none
-  }
-  def val: T = __buf_get(buf: this.data, index: this.length - 1)
-  this.length = this.length - 1
-  ret val
-}
-
-func remove(T)(this: mod List2(T), index: Int) {
-  if index < 0 or index >= this.length {
-    ret
-  }
-  
-  # Shift elements to the left
-  if index < this.length - 1 {
-    __buf_copy(
-      src: this.data, src_off: index + 1,
-      dst: this.data, dst_off: index,
-      len: this.length - index - 1
-    )
-  }
-  
-  this.length = this.length - 1
-}
-
-func clear(T)(this: mod List2(T)) {
-  this.length = 0
-}
-
-func length(T)(this: view List2(T)): ret Int {
+func length(this: view List2) ret Int {
   ret this.length
 }

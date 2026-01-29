@@ -430,26 +430,24 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         break;
       }
       case OP_GET_FIELD: {
-        uint16_t index = read_short(vm);
-        Value obj_val = vm_pop(vm);
-        Value* target = &obj_val;
-        if (obj_val.type == VAL_REF) {
-          target = obj_val.as.ref_value.target;
+        uint16_t field_index = read_short(vm);
+        Value val = vm_pop(vm);
+        Value* target = &val;
+        if (val.type == VAL_REF) {
+          target = val.as.ref_value.target;
         }
         
+        if (target->type == VAL_NONE) {
+          vm_push(vm, value_none());
+          break;
+        }
         if (target->type != VAL_OBJECT) {
-          diag_error(NULL, 0, 0, "GET_FIELD on non-object");
-          value_free(&obj_val);
+          char buf[128];
+          snprintf(buf, sizeof(buf), "GET_FIELD on non-object (got type %d)", target->type);
+          diag_error(NULL, 0, 0, buf);
           return VM_RUNTIME_ERROR;
         }
-        if (index >= target->as.object_value.field_count) {
-          diag_error(NULL, 0, 0, "GET_FIELD index out of range");
-          value_free(&obj_val);
-          return VM_RUNTIME_ERROR;
-        }
-        Value res = value_copy(&target->as.object_value.fields[index]);
-        vm_push(vm, res);
-        value_free(&obj_val);
+        vm_push(vm, target->as.object_value.fields[field_index]);
         break;
       }
       case OP_SET_FIELD: {
