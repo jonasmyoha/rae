@@ -4,6 +4,7 @@
   "patterns": [
     { "include": "#comments" },
     { "include": "#keywords" },
+    { "include": "#enums" },
     { "include": "#strings" },
     { "include": "#constants" },
     { "include": "#storage" },
@@ -39,11 +40,22 @@
         }
       ]
     },
+    "enums": {
+      "patterns": [
+        {
+          "match": "\\b([A-Z][a-zA-Z0-9_]*)\\.([a-zA-Z0-9_]+)\\b",
+          "captures": {
+            "1": { "name": "storage.type.rae" },
+            "2": { "name": "variable.other.enum.rae" }
+          }
+        }
+      ]
+    },
     "storage": {
       "patterns": [
         {
           "name": "keyword.declaration.rae",
-          "match": "\\b(type|func|def|pack)\\b"
+          "match": "\\b(type|enum|func|def|pack)\\b"
         },
         {
           "name": "storage.type.rae",
