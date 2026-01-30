@@ -81,6 +81,7 @@ typedef struct {
   } locals[256];
   uint16_t local_count;
   uint16_t allocated_locals;
+  Str expected_type;
 } BytecodeCompiler;
 
 #define INVALID_OFFSET UINT16_MAX
