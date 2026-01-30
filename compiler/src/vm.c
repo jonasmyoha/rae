@@ -141,6 +141,18 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
   }
 
   for (;;) {
+    // 1. Check for external signals
+    if (vm->reload_requested) {
+        return VM_RUNTIME_RELOAD;
+    }
+
+    // 2. Check for timeout
+    if (vm->timeout_seconds > 0) {
+        if (time(NULL) - vm->start_time > vm->timeout_seconds) {
+            return VM_RUNTIME_TIMEOUT;
+        }
+    }
+
 #ifdef DEBUG_TRACE_EXECUTION
     // Debug output
 #endif
