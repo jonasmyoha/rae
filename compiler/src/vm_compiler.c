@@ -30,6 +30,7 @@ static void patch_jump(BytecodeCompiler* compiler, uint16_t offset);
 static bool compile_block(BytecodeCompiler* compiler, const AstBlock* block);
 static bool emit_native_call(BytecodeCompiler* compiler, Str name, uint8_t arg_count, int line,
                              int column);
+static bool emit_default_value(BytecodeCompiler* compiler, const AstTypeRef* type, int line);
 
 static void emit_byte(BytecodeCompiler* compiler, uint8_t byte, int line) {
   chunk_write(compiler->chunk, byte, line);
@@ -1333,15 +1334,54 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       return false;
     }
     case AST_EXPR_OBJECT: {
-      uint16_t count = 0;
-      const AstObjectField* f = expr->as.object_literal.fields;
-      while (f) {
-        if (!compile_expr(compiler, f->value)) return false;
-        count++;
-        f = f->next;
+      Str type_name = {0};
+      if (expr->as.object_literal.type && expr->as.object_literal.type->parts) {
+          type_name = expr->as.object_literal.type->parts->text;
+      } else {
+          type_name = compiler->expected_type;
       }
-      emit_op(compiler, OP_CONSTRUCT, (int)expr->line);
-      emit_short(compiler, count, (int)expr->line);
+      
+      TypeEntry* type = type_name.len > 0 ? type_table_find(&compiler->types, type_name) : NULL;
+      
+      if (type) {
+          // Reorder fields according to type definition
+          Str saved_expected = compiler->expected_type;
+          for (size_t i = 0; i < type->field_count; i++) {
+              Str expected_name = type->field_names[i];
+              compiler->expected_type = get_base_type_name(type->field_types[i]);
+              
+              const AstObjectField* f = expr->as.object_literal.fields;
+              bool found = false;
+              while (f) {
+                  if (str_matches(f->name, expected_name)) {
+                      if (!compile_expr(compiler, f->value)) return false;
+                      found = true;
+                      break;
+                  }
+                  f = f->next;
+              }
+              if (!found) {
+                  // Push default value if field is missing in literal
+                  if (!emit_default_value(compiler, type->field_types[i], (int)expr->line)) {
+                      return false;
+                  }
+              }
+          }
+          compiler->expected_type = saved_expected;
+          emit_op(compiler, OP_CONSTRUCT, (int)expr->line);
+          emit_short(compiler, (uint16_t)type->field_count, (int)expr->line);
+      } else {
+          // Untyped or unknown type: push in order of appearance
+          uint16_t count = 0;
+          const AstObjectField* f = expr->as.object_literal.fields;
+          while (f) {
+            if (!compile_expr(compiler, f->value)) return false;
+            count++;
+            f = f->next;
+          }
+          emit_op(compiler, OP_CONSTRUCT, (int)expr->line);
+          emit_short(compiler, count, (int)expr->line);
+      }
       return true;
     }
     case AST_EXPR_MATCH: {
@@ -1748,9 +1788,13 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
           emit_op(compiler, OP_BIND_LOCAL, (int)stmt->line);
           emit_short(compiler, (uint16_t)slot, (int)stmt->line);
       } else {
+          Str saved_expected = compiler->expected_type;
+          compiler->expected_type = type_name;
           if (!compile_expr(compiler, stmt->as.def_stmt.value)) {
+            compiler->expected_type = saved_expected;
             return false;
           }
+          compiler->expected_type = saved_expected;
           emit_op(compiler, OP_SET_LOCAL, (int)stmt->line);
           emit_short(compiler, (uint16_t)slot, (int)stmt->line);
           emit_op(compiler, OP_POP, (int)stmt->line);
