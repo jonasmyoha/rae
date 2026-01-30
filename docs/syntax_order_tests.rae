@@ -1,0 +1,180 @@
+#--- 1:
+
+# Current rae
+def v: Pos = { x: 5, y: 12 }
+def o: opt Pos = none
+def w: mod Pos => transform.modPosition()
+def r: view Pos => other.pos()
+
+# old rae has the issue that you can't see type from assignments. It should be a rule to always have type visible on either side of =
+if o is none {
+  o = { x: 5, y: 12 }
+}
+w = { x: 9, y: 9 } # Copy/replace value in transform.position
+
+# type with value members
+type Pos {
+  x: Int
+  y: Int
+}
+
+# type with optional members
+type Something {
+  a: opt Int
+  b: opt Int
+}
+
+# function parameters
+func some(this: view Pos, that: Pos) ret Int {
+  that.x += this.x
+  ret that.x
+}
+
+# calling functions with named parameters
+def result: Int = v.some(that: o)
+
+
+#--- 2:
+
+# Trying out var, with mandatory val, not defaulting to val. Can get annoying with built-in types like val Int.
+var v: val Pos = { x: 5, y: 12 }
+var o: opt Pos = none
+var w: mod Pos => transform.position()
+var r: view Pos => other.pos()
+
+# We should change to using type in either side of = like here. It is clear that it is a Pos.
+if o is none {
+  o = Pos{ x: 5, y: 12 }
+}
+w = Pos{ x: 9, y: 9 } # Copy/replace value in transform.position
+
+# type with value members
+type Pos {
+  x: val Int
+  y: val Int
+}
+
+# type with optional members
+type Something {
+  a: opt Int
+  b: opt Int
+}
+
+# function parameters
+func some(this: view Pos, that: val Pos) ret val Int {
+  that.x += this.x
+  ret that.x
+}
+
+# calling functions with named parameters
+var result: val Int = v.some(that: o)
+
+
+#--- 3:
+
+# Another test. It is maybe searchable with "v:".
+val v: Pos = { x: 5, y: 12 }
+opt o: Pos = none
+mod w: Pos => transform.position()
+view r: Pos => other.pos()
+
+if o is none {
+  o = Pos{ x: 5, y: 12 }
+}
+w = Pos{ x: 9, y: 9 } # Copy/replace value in transform.position
+
+# type with value members
+type Pos {
+  val x: Int
+  val y: Int
+}
+
+# type with optional members
+type Something {
+  opt a: Int
+  opt b: Int
+}
+
+# function parameters, here is a clear disconnect. So sometimes the name is in the middle, and in return types not.
+# That is very unclear.
+func some(view this: Pos, val that: Pos) ret val Int {
+  that.x += this.x
+  ret that.x
+}
+
+# calling functions with named parameters. Here it breaks too. You can't just copy paste the function definition and go on,
+# you have to remove the val etc. from before the name.
+val result: Int = v.some(that: o)
+
+
+#--- 4:
+
+# And another. This is not as searchable as "def v". Well if you know that v is a Pos, then you can search "Pos v".
+val Pos v = { x: 5, y: 12 }
+opt Pos o = none
+mod Pos w => transform.position()
+view Pos r => other.pos()
+
+if o is none {
+  o = Pos{ x: 5, y: 12 }
+}
+w = Pos{ x: 9, y: 9 } # Copy/replace value in transform.position
+
+# type with value members
+type Pos {
+  val Int x
+  val Int y
+}
+
+# type with optional members
+type Something {
+  opt Int a
+  opt Int b
+}
+
+# function parameters
+func some(view Pos this, val Pos that) ret val Int {
+  that.x += this.x
+  ret that.x
+}
+
+# calling functions with named parameters. Totally different shape than function definition again.
+val Int result = v.some(that: o)
+
+#--- 5:
+
+# And finally, the one which start with the name (this has maybe best shape continuity):
+
+v: Pos = { x: 5, y: 12 }
+# or
+v: val Pos = { x: 5, y: 12 }
+o: opt Pos = none
+w: mod Pos => transform.position()
+r: view Pos => other.pos()
+
+if o is none {
+  o = Pos{ x: 5, y: 12 }
+}
+w = Pos{ x: 9, y: 9 } # Copy/replace value in transform.position
+
+type Pos{
+  x: Int
+  # or
+  y: val Int
+}
+
+type Something{
+  a: opt Int
+  b: opt Int
+}
+
+# function parameters
+func some(this: view Pos, that: val Pos) ret val Int {
+  that.x += this.x
+  ret that.x
+}
+
+# calling functions with named parameters
+result: val Int = v.some(that: o)
+
+# Any other variation that I didn't cover? I'm sure there are some, but what do they look like and are they good?
