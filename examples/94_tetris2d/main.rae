@@ -40,6 +40,8 @@ type Game {
   level: Int
   moveTimer: Int
   moveDelay: Int
+  hMoveTimer: Int
+  hMoveDelay: Int
 }
 
 func getModernColor(index: Int) ret Color {
@@ -335,6 +337,9 @@ func initGame(g: mod Game) {
   g.level = 1
   g.moveTimer = 0
   g.moveDelay = 30
+  g.hMoveTimer = 0
+  g.hMoveDelay = 6   # tweak: 3–6 feels reasonable at 60fps
+
   
   # Initialize grid with 0s
   def i: Int = 0
@@ -476,6 +481,71 @@ func draw(g: view Game) {
   endDrawing()
 }
 
+func handleInput(g: mod Game) {
+  if g.state is not GameState.Playing {
+    ret
+  }
+
+  def cp: mod Piece => g.currentPiece
+  def pos: mod Pos => cp.pos
+
+  # Horizontal repeat timer
+  g.hMoveTimer = g.hMoveTimer + 1
+
+  def moveLeft: Int  = isKeyDown(key: 263) or isKeyDown(key: 65)
+  def moveRight: Int = isKeyDown(key: 262) or isKeyDown(key: 68)
+
+  if g.hMoveTimer >= g.hMoveDelay {
+    if moveLeft is 1 and moveRight is 0 {
+      if canMove(g: g, dx: -1, dy: 0, dr: 0) is 1 {
+        pos.x = pos.x - 1
+        g.hMoveTimer = 0
+      }
+    }
+
+    if moveRight is 1 and moveLeft is 0 {
+      if canMove(g: g, dx: 1, dy: 0, dr: 0) is 1 {
+        pos.x = pos.x + 1
+        g.hMoveTimer = 0
+      }
+    }
+  }
+
+  # Reset when no horizontal key held
+  if moveLeft is 0 and moveRight is 0 {
+    g.hMoveTimer = g.hMoveTimer
+  }
+
+  # Rotate (still single-press)
+  if isKeyPressed(key: 32) is 1
+    or isKeyPressed(key: 265) is 1
+    or isKeyPressed(key: 87) is 1 {
+    if canMove(g: g, dx: 0, dy: 0, dr: 1) is 1 {
+      cp.rotation = (cp.rotation + 1) % 4
+    }
+  }
+
+  # Soft Drop
+  def effectiveDelay: Int = g.moveDelay
+  if isKeyDown(key: 264) is 1 or isKeyDown(key: 83) is 1 {
+    effectiveDelay = 2
+  }
+
+  # Gravity
+  g.moveTimer = g.moveTimer + 1
+  if g.moveTimer >= effectiveDelay {
+    if canMove(g: g, dx: 0, dy: 1, dr: 0) is 1 {
+      pos.y = pos.y + 1
+    } else {
+      lockPiece(g)
+      checkLines(g)
+      spawnPiece(g)
+    }
+    g.moveTimer = 0
+  }
+}
+
+
 func main() {
   # FLAG_WINDOW_RESIZABLE = 4
   # We can't easily use Bitwise OR yet, so just 4
@@ -522,47 +592,9 @@ func main() {
       }
     }
     
+    # early returns don't work yet, so gate it here.
     if g.state is GameState.Playing {
-      def cp: mod Piece => g.currentPiece
-      def pos: mod Pos => cp.pos
-      
-      # Left/Right
-      if isKeyPressed(key: 263) is 1 {
-        if canMove(g: g, dx: -1, dy: 0, dr: 0) is 1 {
-          pos.x = pos.x - 1
-        }
-      }
-      if isKeyPressed(key: 262) is 1 {
-        if canMove(g: g, dx: 1, dy: 0, dr: 0) is 1 {
-          pos.x = pos.x + 1
-        }
-      }
-      
-      # Rotate
-      if isKeyPressed(key: 32) is 1 or isKeyPressed(key: 265) is 1 { # Space or Up
-        if canMove(g: g, dx: 0, dy: 0, dr: 1) is 1 {
-          cp.rotation = (cp.rotation + 1) % 4
-        }
-      }
-      
-      # Soft Drop
-      def effectiveDelay: Int = g.moveDelay
-      if isKeyDown(key: 264) is 1 { # Down arrow
-        effectiveDelay = 2
-      }
-      
-      # Gravity
-      g.moveTimer = g.moveTimer + 1
-      if g.moveTimer >= effectiveDelay {
-        if canMove(g: g, dx: 0, dy: 1, dr: 0) is 1 {
-          pos.y = pos.y + 1
-        } else {
-          lockPiece(g)
-          checkLines(g)
-          spawnPiece(g)
-        }
-        g.moveTimer = 0
-      }
+      handleInput(g)
     }
     
     draw(g)
