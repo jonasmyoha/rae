@@ -47,7 +47,8 @@ func getModernColor(index: Int) ret Color {
       g: 230
       b: 255
       a: 255
-        }
+
+    }
   }
   # J - Blue
   if index is 2 {
@@ -56,7 +57,8 @@ func getModernColor(index: Int) ret Color {
       g: 160
       b: 255
       a: 255
-        }
+
+    }
   }
   # L - Orange
   if index is 3 {
@@ -65,7 +67,8 @@ func getModernColor(index: Int) ret Color {
       g: 180
       b: 120
       a: 255
-        }
+
+    }
   }
   # O - Yellow
   if index is 4 {
@@ -74,7 +77,8 @@ func getModernColor(index: Int) ret Color {
       g: 230
       b: 120
       a: 255
-        }
+
+    }
   }
   # S - Green
   if index is 5 {
@@ -83,7 +87,8 @@ func getModernColor(index: Int) ret Color {
       g: 255
       b: 160
       a: 255
-        }
+
+    }
   }
   # T - Purple
   if index is 6 {
@@ -92,7 +97,8 @@ func getModernColor(index: Int) ret Color {
       g: 160
       b: 255
       a: 255
-        }
+
+    }
   }
   # Z - Red
   if index is 7 {
@@ -101,7 +107,8 @@ func getModernColor(index: Int) ret Color {
       g: 120
       b: 140
       a: 255
-        }
+
+    }
   }
   # Empty
   ret {
@@ -109,7 +116,8 @@ func getModernColor(index: Int) ret Color {
     g: 40
     b: 50
     a: 255
-    }
+
+  }
 }
 
 func getKindId(kind: TetrominoKind) ret Int {
@@ -292,6 +300,7 @@ func canMove(g: view Game, dx: Int, dy: Int, dr: Int) ret Int {
         rot: newRot
         px: px
         py: py
+
       ) is 1 {
         if isOccupied(g: g, x: newX + px, y: newY + py) is 1 {
           ret 0
@@ -318,6 +327,7 @@ func lockPiece(g: mod Game) {
         rot: cp.rotation
         px: px
         py: py
+
       ) is 1 {
         let gx: Int = pos.x + px
         let gy: Int = pos.y + py
@@ -423,6 +433,7 @@ func spawnPiece(g: mod Game) {
     dx: 0
     dy: 0
     dr: 0
+
   ) is 0 {
     g.state = GameState.GameOver
   }
@@ -458,7 +469,8 @@ func draw(g: view Game) {
     g: 30
     b: 40
     a: 255
-    })
+
+  })
   let sw: Float = getScreenWidth().toFloat()
   let sh: Float = getScreenHeight().toFloat()
   # Calculate scaling: target height is 20 rows, let's leave 10% margin top/bottom
@@ -477,7 +489,9 @@ func draw(g: view Game) {
       g: 180
       b: 255
       a: 255
-        }
+
+    }
+
   )
   let y: Int = 0
   loop y < g.height {
@@ -491,6 +505,7 @@ func draw(g: view Game) {
           width: cellSize - 1.0
           height: cellSize - 1.0
           color: getModernColor(id: val)
+
         )
       }
       x = x + 1
@@ -510,6 +525,7 @@ func draw(g: view Game) {
         rot: cp.rotation
         px: px
         py: py
+
       ) is 1 {
         drawRectangle(
           x: (pos.x + px).toFloat() * cellSize + offsetX
@@ -517,6 +533,7 @@ func draw(g: view Game) {
           width: cellSize - 1.0
           height: cellSize - 1.0
           color: getModernColor(id: kindId)
+
         )
       }
       px = px + 1
@@ -531,6 +548,7 @@ func draw(g: view Game) {
   }
   # Soft Pink
   # Soft Green
+  # Soft Blue
   drawText(
     text: "SCORE: {g.score}"
     x: 10.0
@@ -541,9 +559,10 @@ func draw(g: view Game) {
       g: 200
       b: 200
       a: 255
-        }
+
+    }
+
   )
-  # Soft Blue
   drawText(
     text: "LEVEL: {g.level}"
     x: 10.0
@@ -554,7 +573,9 @@ func draw(g: view Game) {
       g: 255
       b: 200
       a: 255
-        }
+
+    }
+
   )
   drawText(
     text: "LINES: {g.lines}"
@@ -566,7 +587,9 @@ func draw(g: view Game) {
       g: 200
       b: 255
       a: 255
-        }
+
+    }
+
   )
   if g.state is GameState.Paused {
     # Soft Yellow
@@ -580,7 +603,9 @@ func draw(g: view Game) {
         g: 255
         b: 180
         a: 255
-            }
+
+      }
+
     )
   }
   if g.state is GameState.GameOver {
@@ -596,7 +621,9 @@ func draw(g: view Game) {
         g: 150
         b: 150
         a: 255
-            }
+
+      }
+
     )
     drawText(
       text: "Press R to Restart"
@@ -608,7 +635,9 @@ func draw(g: view Game) {
         g: 220
         b: 220
         a: 255
-            }
+
+      }
+
     )
   }
   endDrawing()
@@ -631,6 +660,7 @@ func handleInput(g: mod Game) {
         dx: -1
         dy: 0
         dr: 0
+
       ) is 1 {
         pos.x = pos.x - 1
         g.hMoveTimer = 0
@@ -642,6 +672,7 @@ func handleInput(g: mod Game) {
         dx: 1
         dy: 0
         dr: 0
+
       ) is 1 {
         pos.x = pos.x + 1
         g.hMoveTimer = 0
@@ -659,6 +690,7 @@ func handleInput(g: mod Game) {
       dx: 0
       dy: 0
       dr: 1
+
     ) is 1 {
       cp.rotation = (cp.rotation + 1) % 4
     }
@@ -676,6 +708,7 @@ func handleInput(g: mod Game) {
       dx: 0
       dy: 1
       dr: 0
+
     ) is 1 {
       pos.y = pos.y + 1
     } else {
@@ -706,7 +739,8 @@ func main() {
     moveDelay: 0
     hMoveTimer: 0
     hMoveDelay: 0
-    }
+
+  }
   initGame(g)
   loop windowShouldClose() is 0 {
     # Input: Global (Menu/GameOver)
