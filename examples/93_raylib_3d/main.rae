@@ -21,11 +21,10 @@ func initEntity(
 ) {
   e.kind = kind
   e.currentPos = { x: x, y: y, z: z }
-  e.targetPos = {
-    x: randomFloat(min: -10.0, max: 10.0)
-    y: randomFloat(min: 0.0, max: 8.0)
-    z: randomFloat(min: -10.0, max: 10.0)
-  }
+  e.targetPos = { x: randomFloat(min: -10.0, max: 10.0), y: randomFloat(
+    min: 0.0
+    max: 8.0
+  ), z: randomFloat(min: -10.0, max: 10.0) }
   e.size = size
   e.hue = hue
 }
@@ -54,7 +53,11 @@ func updateEntity(e: mod Entity) {
 
 func drawEntity(e: view Entity, time: Float) {
   let h: Float = (e.hue + time * 30.0) % 360.0
-  let color: Color = colorFromHSV(hue: h, saturation: 0.4, value: 0.9)
+  let color: Color = colorFromHSV(
+    hue: h
+    saturation: 0.4
+    value: 0.9
+  )
   match e.kind {
     case EntityKind.Cube {
       drawCube(
@@ -74,11 +77,15 @@ func drawEntity(e: view Entity, time: Float) {
           g: 255
           b: 255
           a: 100
-                }
+        }
       )
     }
     case EntityKind.Sphere {
-      drawSphere(centerPos: e.currentPos, radius: e.size * 0.6, color: color)
+      drawSphere(
+        centerPos: e.currentPos
+        radius: e.size * 0.6
+        color: color
+      )
     }
   }
 }
@@ -95,49 +102,49 @@ func main() {
     up: { x: 0.0, y: 1.0, z: 0.0 }
     fovy: 45.0
     projection: 0
-    }
+  }
   let e1: Entity = {
     kind: EntityKind.Cube
     currentPos: { x: 0.0, y: 0.0, z: 0.0 }
     targetPos: { x: 0.0, y: 0.0, z: 0.0 }
     size: 0.0
     hue: 0.0
-    }
+  }
   let e2: Entity = {
     kind: EntityKind.Cube
     currentPos: { x: 0.0, y: 0.0, z: 0.0 }
     targetPos: { x: 0.0, y: 0.0, z: 0.0 }
     size: 0.0
     hue: 0.0
-    }
+  }
   let e3: Entity = {
     kind: EntityKind.Cube
     currentPos: { x: 0.0, y: 0.0, z: 0.0 }
     targetPos: { x: 0.0, y: 0.0, z: 0.0 }
     size: 0.0
     hue: 0.0
-    }
+  }
   let e4: Entity = {
     kind: EntityKind.Cube
     currentPos: { x: 0.0, y: 0.0, z: 0.0 }
     targetPos: { x: 0.0, y: 0.0, z: 0.0 }
     size: 0.0
     hue: 0.0
-    }
+  }
   let e5: Entity = {
     kind: EntityKind.Cube
     currentPos: { x: 0.0, y: 0.0, z: 0.0 }
     targetPos: { x: 0.0, y: 0.0, z: 0.0 }
     size: 0.0
     hue: 0.0
-    }
+  }
   let e6: Entity = {
     kind: EntityKind.Cube
     currentPos: { x: 0.0, y: 0.0, z: 0.0 }
     targetPos: { x: 0.0, y: 0.0, z: 0.0 }
     size: 0.0
     hue: 0.0
-    }
+  }
   initEntity(
     e: e1
     kind: EntityKind.Cube
@@ -197,7 +204,7 @@ func main() {
     g: 20
     b: 30
     a: 255
-    }
+  }
   loop windowShouldClose() is 0 {
     let time: Float = getTime()
     updateEntity(e: e1)
@@ -227,7 +234,7 @@ func main() {
         g: 200
         b: 255
         a: 255
-            }
+      }
     )
     endDrawing()
   }
