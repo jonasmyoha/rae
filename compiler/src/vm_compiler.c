@@ -379,6 +379,11 @@ bool collect_metadata(const char* file_path, const AstModule* module, FunctionTa
         param_types = malloc(param_count * sizeof(Str));
         p = decl->as.func_decl.params;
         for (uint16_t i = 0; i < param_count; ++i) {
+          if (p->type->is_opt && (p->type->is_view || p->type->is_mod)) {
+            diag_error(file_path, (int)p->type->line, (int)p->type->column, "opt view/mod not allowed");
+            free(param_types);
+            return false;
+          }
           param_types[i] = get_base_type_name(p->type);
           p = p->next;
         }
@@ -387,6 +392,11 @@ bool collect_metadata(const char* file_path, const AstModule* module, FunctionTa
       bool returns_ref = decl->as.func_decl.returns && (decl->as.func_decl.returns->type->is_view || decl->as.func_decl.returns->type->is_mod);
       Str return_type = (Str){0};
       if (decl->as.func_decl.returns) {
+          if (decl->as.func_decl.returns->type->is_opt && (decl->as.func_decl.returns->type->is_view || decl->as.func_decl.returns->type->is_mod)) {
+            diag_error(file_path, (int)decl->as.func_decl.returns->type->line, (int)decl->as.func_decl.returns->type->column, "opt view/mod not allowed");
+            if (param_types) free(param_types);
+            return false;
+          }
           return_type = get_base_type_name(decl->as.func_decl.returns->type);
       }
       bool ok = function_table_add(funcs, decl->as.func_decl.name, param_types, param_count, decl->as.func_decl.is_extern, returns_ref, return_type);
@@ -403,6 +413,12 @@ bool collect_metadata(const char* file_path, const AstModule* module, FunctionTa
       for (size_t i = 0; i < field_count; i++) {
         if (f->type->is_view || f->type->is_mod) {
           diag_error(file_path, (int)f->type->line, (int)f->type->column, "view/mod not allowed in struct fields");
+          free(field_names);
+          free(field_types);
+          return false;
+        }
+        if (f->type->is_opt && (f->type->is_view || f->type->is_mod)) {
+          diag_error(file_path, (int)f->type->line, (int)f->type->column, "opt view/mod not allowed");
           free(field_names);
           free(field_types);
           return false;
@@ -1674,7 +1690,7 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
 
 static const char* stmt_kind_name(AstStmtKind kind) {
   switch (kind) {
-    case AST_STMT_DEF: return "def";
+    case AST_STMT_LET: return "let";
     case AST_STMT_DESTRUCT: return "destructure";
     case AST_STMT_EXPR: return "expression";
     case AST_STMT_RET: return "ret";
@@ -1692,10 +1708,10 @@ static bool emit_default_value(BytecodeCompiler* compiler, const AstTypeRef* typ
 static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
   if (!stmt) return true;
   switch (stmt->kind) {
-    case AST_STMT_DEF: {
-      Str type_name = get_base_type_name(stmt->as.def_stmt.type);
+    case AST_STMT_LET: {
+      Str type_name = get_base_type_name(stmt->as.let_stmt.type);
 
-      int slot = compiler_add_local(compiler, stmt->as.def_stmt.name, type_name);
+      int slot = compiler_add_local(compiler, stmt->as.let_stmt.name, type_name);
       if (slot < 0) {
         return false;
       }
@@ -1703,30 +1719,30 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
         return false;
       }
 
-      if (!stmt->as.def_stmt.value) {
+      if (!stmt->as.let_stmt.value) {
         // Automatically initialize to default value
-        if (!emit_default_value(compiler, stmt->as.def_stmt.type, (int)stmt->line)) {
+        if (!emit_default_value(compiler, stmt->as.let_stmt.type, (int)stmt->line)) {
           return false;
         }
         emit_op(compiler, OP_SET_LOCAL, (int)stmt->line);
         emit_short(compiler, (uint16_t)slot, (int)stmt->line);
         emit_op(compiler, OP_POP, (int)stmt->line);
-      } else if (stmt->as.def_stmt.is_bind) {
-          if (!stmt->as.def_stmt.type || 
-              (!stmt->as.def_stmt.type->is_view && 
-               !stmt->as.def_stmt.type->is_mod && 
-               !stmt->as.def_stmt.type->is_opt)) {
+      } else if (stmt->as.let_stmt.is_bind) {
+          if (!stmt->as.let_stmt.type || 
+              (!stmt->as.let_stmt.type->is_view && 
+               !stmt->as.let_stmt.type->is_mod && 
+               !stmt->as.let_stmt.type->is_opt)) {
               diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, "=> not allowed for plain value types");
               return false;
           }
           // If the RHS is an identifier or member, we can emit a specific VIEW/MOD instruction
           // to get its address.
-          if (stmt->as.def_stmt.value->kind == AST_EXPR_IDENT) {
-              int src_slot = compiler_find_local(compiler, stmt->as.def_stmt.value->as.ident);
-              emit_op(compiler, stmt->as.def_stmt.type && stmt->as.def_stmt.type->is_view ? OP_VIEW_LOCAL : OP_MOD_LOCAL, (int)stmt->line);
+          if (stmt->as.let_stmt.value->kind == AST_EXPR_IDENT) {
+              int src_slot = compiler_find_local(compiler, stmt->as.let_stmt.value->as.ident);
+              emit_op(compiler, stmt->as.let_stmt.type && stmt->as.let_stmt.type->is_view ? OP_VIEW_LOCAL : OP_MOD_LOCAL, (int)stmt->line);
               emit_short(compiler, (uint16_t)src_slot, (int)stmt->line);
-          } else if (stmt->as.def_stmt.value->kind == AST_EXPR_MEMBER) {
-              const AstExpr* member_expr = stmt->as.def_stmt.value;
+          } else if (stmt->as.let_stmt.value->kind == AST_EXPR_MEMBER) {
+              const AstExpr* member_expr = stmt->as.let_stmt.value;
               if (member_expr->as.member.object->kind == AST_EXPR_IDENT) {
                   Str obj_name = member_expr->as.member.object->as.ident;
                   Str type_name = get_local_type_name(compiler, obj_name);
@@ -1735,9 +1751,9 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
                       int field_index = type_entry_find_field(type, member_expr->as.member.member);
                       if (field_index >= 0) {
                           int obj_slot = compiler_find_local(compiler, obj_name);
-                          emit_op(compiler, stmt->as.def_stmt.type && stmt->as.def_stmt.type->is_view ? OP_VIEW_LOCAL : OP_MOD_LOCAL, (int)stmt->line);
+                          emit_op(compiler, stmt->as.let_stmt.type && stmt->as.let_stmt.type->is_view ? OP_VIEW_LOCAL : OP_MOD_LOCAL, (int)stmt->line);
                           emit_short(compiler, (uint16_t)obj_slot, (int)stmt->line);
-                          emit_op(compiler, stmt->as.def_stmt.type && stmt->as.def_stmt.type->is_view ? OP_VIEW_FIELD : OP_MOD_FIELD, (int)stmt->line);
+                          emit_op(compiler, stmt->as.let_stmt.type && stmt->as.let_stmt.type->is_view ? OP_VIEW_FIELD : OP_MOD_FIELD, (int)stmt->line);
                           emit_short(compiler, (uint16_t)field_index, (int)stmt->line);
                       } else {
                           diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, "cannot bind reference (=>) to a value");
@@ -1753,11 +1769,11 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
               }
           } else {
               // Fallback: compile as value
-              if (!compile_expr(compiler, stmt->as.def_stmt.value)) return false;
+              if (!compile_expr(compiler, stmt->as.let_stmt.value)) return false;
               
               bool already_ref = false;
-              if (stmt->as.def_stmt.value->kind == AST_EXPR_CALL) {
-                  const AstExpr* callee = stmt->as.def_stmt.value->as.call.callee;
+              if (stmt->as.let_stmt.value->kind == AST_EXPR_CALL) {
+                  const AstExpr* callee = stmt->as.let_stmt.value->as.call.callee;
                   if (callee->kind == AST_EXPR_IDENT) {
                       Str name = callee->as.ident;
                       FunctionEntry* entry = function_table_find(&compiler->functions, name);
@@ -1765,8 +1781,8 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
                           already_ref = true;
                       }
                   }
-              } else if (stmt->as.def_stmt.value->kind == AST_EXPR_METHOD_CALL) {
-                  Str method_name = stmt->as.def_stmt.value->as.method_call.method_name;
+              } else if (stmt->as.let_stmt.value->kind == AST_EXPR_METHOD_CALL) {
+                  Str method_name = stmt->as.let_stmt.value->as.method_call.method_name;
                   FunctionEntry* entry = function_table_find(&compiler->functions, method_name);
                   if (!entry) {
                       // Try common list methods
@@ -1776,7 +1792,7 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
                   if (entry && entry->returns_ref) {
                       already_ref = true;
                   }
-              } else if (stmt->as.def_stmt.value->kind == AST_EXPR_NONE) {
+              } else if (stmt->as.let_stmt.value->kind == AST_EXPR_NONE) {
                   already_ref = true;
               }
               
@@ -1790,7 +1806,7 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
       } else {
           Str saved_expected = compiler->expected_type;
           compiler->expected_type = type_name;
-          if (!compile_expr(compiler, stmt->as.def_stmt.value)) {
+          if (!compile_expr(compiler, stmt->as.let_stmt.value)) {
             compiler->expected_type = saved_expected;
             return false;
           }
@@ -1962,8 +1978,8 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
         emit_op(compiler, OP_POP, (int)stmt->line);
 
         // 5. Body Start: Bind x = collection.get(index)
-        Str var_name = stmt->as.loop_stmt.init->as.def_stmt.name;
-        Str var_type = get_base_type_name(stmt->as.loop_stmt.init->as.def_stmt.type);
+        Str var_name = stmt->as.loop_stmt.init->as.let_stmt.name;
+        Str var_type = get_base_type_name(stmt->as.loop_stmt.init->as.let_stmt.type);
         int var_slot = compiler_add_local(compiler, var_name, var_type);
         if (var_slot < 0) return false;
         
@@ -2136,73 +2152,17 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
         }
 
         if (stmt->as.assign_stmt.is_bind) {
-            // ... rebinding logic ...
-            if (stmt->as.assign_stmt.value->kind == AST_EXPR_IDENT) {
-                int src_slot = compiler_find_local(compiler, stmt->as.assign_stmt.value->as.ident);
-                emit_op(compiler, OP_MOD_LOCAL, (int)stmt->line);
-                emit_short(compiler, (uint16_t)src_slot, (int)stmt->line);
-            } else if (stmt->as.assign_stmt.value->kind == AST_EXPR_MEMBER) {
-                const AstExpr* member_expr = stmt->as.assign_stmt.value;
-                if (member_expr->as.member.object->kind == AST_EXPR_IDENT) {
-                    Str obj_name = member_expr->as.member.object->as.ident;
-                    Str type_name = get_local_type_name(compiler, obj_name);
-                    TypeEntry* type = type_table_find(&compiler->types, type_name);
-                    if (type) {
-                        int field_index = type_entry_find_field(type, member_expr->as.member.member);
-                        if (field_index >= 0) {
-                            int obj_slot = compiler_find_local(compiler, obj_name);
-                            emit_op(compiler, OP_MOD_LOCAL, (int)stmt->line);
-                            emit_short(compiler, (uint16_t)obj_slot, (int)stmt->line);
-                            emit_op(compiler, OP_MOD_FIELD, (int)stmt->line);
-                            emit_short(compiler, (uint16_t)field_index, (int)stmt->line);
-                        } else {
-                            diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, "cannot bind reference (=>) to a value");
-                            return false;
-                        }
-                    } else {
-                        diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, "cannot bind reference (=>) to a value");
-                        return false;
-                    }
-                } else {
-                    diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, "cannot bind reference (=>) to a value");
-                    return false;
-                }
-            } else {
-                if (!compile_expr(compiler, stmt->as.assign_stmt.value)) return false;
-                
-                bool already_ref = false;
-                if (stmt->as.assign_stmt.value->kind == AST_EXPR_CALL) {
-                    const AstExpr* callee = stmt->as.assign_stmt.value->as.call.callee;
-                    if (callee->kind == AST_EXPR_IDENT) {
-                        Str name = callee->as.ident;
-                        FunctionEntry* entry = function_table_find(&compiler->functions, name);
-                        if (entry && entry->returns_ref) {
-                            already_ref = true;
-                        }
-                    }
-                } else if (stmt->as.assign_stmt.value->kind == AST_EXPR_METHOD_CALL) {
-                    Str method_name = stmt->as.assign_stmt.value->as.method_call.method_name;
-                    FunctionEntry* entry = function_table_find(&compiler->functions, method_name);
-                    if (!entry) {
-                        if (str_eq_cstr(method_name, "get")) entry = function_table_find(&compiler->functions, str_from_cstr("rae_list_get"));
-                    }
-                    if (entry && entry->returns_ref) {
-                        already_ref = true;
-                    }
-                } else if (stmt->as.assign_stmt.value->kind == AST_EXPR_NONE) {
-                    already_ref = true;
-                }
-                
-                if (!already_ref) {
-                    diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, "cannot bind reference (=>) to a value; RHS must be a reference or a function returning one");
-                    return false;
-                }
-            }
-            emit_op(compiler, OP_BIND_LOCAL, (int)stmt->line);
-            emit_short(compiler, (uint16_t)slot, (int)stmt->line);
+            diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, "rebinding an alias is illegal. '=>' is only for 'let' bindings.");
+            return false;
         } else {
             // Normal assignment: LHS = RHS
-            if (!compile_expr(compiler, stmt->as.assign_stmt.value)) return false;
+            Str saved_expected = compiler->expected_type;
+            compiler->expected_type = get_local_type_name(compiler, target->as.ident);
+            if (!compile_expr(compiler, stmt->as.assign_stmt.value)) {
+                compiler->expected_type = saved_expected;
+                return false;
+            }
+            compiler->expected_type = saved_expected;
             emit_op(compiler, OP_SET_LOCAL, (int)stmt->line);
             emit_short(compiler, (uint16_t)slot, (int)stmt->line);
             emit_op(compiler, OP_POP, (int)stmt->line); // assigned value
@@ -2239,22 +2199,32 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
         }
 
         if (stmt->as.assign_stmt.is_bind) {
-            if (!compile_expr(compiler, target->as.member.object)) return false;
-            if (!compile_expr(compiler, stmt->as.assign_stmt.value)) return false;
-            emit_op(compiler, OP_BIND_FIELD, (int)stmt->line);
-            emit_short(compiler, (uint16_t)field_index, (int)stmt->line);
-            emit_op(compiler, OP_POP, (int)stmt->line); // result of bind
+            diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, "rebinding an alias is illegal. '=>' is only for 'let' bindings.");
+            return false;
         } else {
+            Str field_type = get_base_type_name(type->field_types[field_index]);
             int slot = compiler_find_local(compiler, obj_name);
             if (slot >= 0) {
-                if (!compile_expr(compiler, stmt->as.assign_stmt.value)) return false;
+                Str saved_expected = compiler->expected_type;
+                compiler->expected_type = field_type;
+                if (!compile_expr(compiler, stmt->as.assign_stmt.value)) {
+                    compiler->expected_type = saved_expected;
+                    return false;
+                }
+                compiler->expected_type = saved_expected;
                 emit_op(compiler, OP_SET_LOCAL_FIELD, (int)stmt->line);
                 emit_short(compiler, (uint16_t)slot, (int)stmt->line);
                 emit_short(compiler, (uint16_t)field_index, (int)stmt->line);
                 emit_op(compiler, OP_POP, (int)stmt->line); // assigned value
             } else {
                 if (!compile_expr(compiler, target->as.member.object)) return false;
-                if (!compile_expr(compiler, stmt->as.assign_stmt.value)) return false;
+                Str saved_expected = compiler->expected_type;
+                compiler->expected_type = field_type;
+                if (!compile_expr(compiler, stmt->as.assign_stmt.value)) {
+                    compiler->expected_type = saved_expected;
+                    return false;
+                }
+                compiler->expected_type = saved_expected;
                 emit_op(compiler, OP_SET_FIELD, (int)stmt->line);
                 emit_short(compiler, (uint16_t)field_index, (int)stmt->line);
                 emit_op(compiler, OP_POP, (int)stmt->line); // assigned value
@@ -2384,6 +2354,7 @@ bool vm_compile_module(const AstModule* module, Chunk* chunk, const char* file_p
       .current_function = NULL,
       .local_count = 0,
       .allocated_locals = 0,
+      .expected_type = {0},
   };
   memset(&compiler.functions, 0, sizeof(FunctionTable));
   memset(&compiler.types, 0, sizeof(TypeTable));
@@ -2441,7 +2412,17 @@ bool vm_compile_module(const AstModule* module, Chunk* chunk, const char* file_p
 }
 
 static bool emit_default_value(BytecodeCompiler* compiler, const AstTypeRef* type, int line) {
-  if (!type || !type->parts) {
+  if (!type) {
+    emit_constant(compiler, value_int(0), line);
+    return true;
+  }
+
+  if (type->is_opt) {
+    emit_constant(compiler, value_none(), line);
+    return true;
+  }
+
+  if (!type->parts) {
     emit_constant(compiler, value_int(0), line);
     return true;
   }

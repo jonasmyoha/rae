@@ -1,13 +1,13 @@
 import core
 func benchmarkNative(count: Int) ret Int {
-  def l: List(Int) = createList(initialCap: 10)
-  def i: Int = 0
+  let l: List(Int) = createList(initialCap: 10)
+  let i: Int = 0
   loop i < count {
     l.add(value: i)
     i = i + 1
   }
-  def total: Int = 0
-  def j: Int = 0
+  let total: Int = 0
+  let j: Int = 0
   loop j < l.length {
     total = total + l.get(index: j)
     j = j + 1
@@ -16,13 +16,11 @@ func benchmarkNative(count: Int) ret Int {
 }
 
 func main() {
-  def count: Int = 1000
+  let count: Int = 1000
   log("Benchmarking native List with {count} items...")
-  def start: Int = nowMs()
-  def result: Int = benchmarkNative(count: count)
-  def end: Int = nowMs()
+  let start: Int = nowMs()
+  let result: Int = benchmarkNative(count: count)
+  let end: Int = nowMs()
   log("Result: {result}")
   log("Time: {end - start}ms")
 }
-
-

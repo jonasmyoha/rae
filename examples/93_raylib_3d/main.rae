@@ -1,10 +1,6 @@
 import raylib
 import math
-
-enum EntityKind {
-  Cube
-  Sphere
-}
+enum EntityKind { Cube, Sphere }
 
 type Entity {
   kind: EntityKind
@@ -24,7 +20,7 @@ func initEntity(
   hue: Float
 ) {
   e.kind = kind
-  e.currentPos = {x: x, y: y, z: z}
+  e.currentPos = { x: x, y: y, z: z }
   e.targetPos = {
     x: randomFloat(min: -10.0, max: 10.0)
     y: randomFloat(min: 0.0, max: 8.0)
@@ -36,29 +32,29 @@ func initEntity(
 
 func updateEntity(e: mod Entity) {
   # Lerp speed
-  def t: Float = 0.03
+  let t: Float = 0.03
   # Current and target locals for VM workaround
-  def cp: Vector3 = e.currentPos
-  def tp: Vector3 = e.targetPos
-  def nx: Float = lerp(a: cp.x, b: tp.x, t: t)
-  def ny: Float = lerp(a: cp.y, b: tp.y, t: t)
-  def nz: Float = lerp(a: cp.z, b: tp.z, t: t)
-  e.currentPos = {x: nx, y: ny, z: nz}
+  let cp: Vector3 = e.currentPos
+  let tp: Vector3 = e.targetPos
+  let nx: Float = lerp(a: cp.x, b: tp.x, t: t)
+  let ny: Float = lerp(a: cp.y, b: tp.y, t: t)
+  let nz: Float = lerp(a: cp.z, b: tp.z, t: t)
+  e.currentPos = { x: nx, y: ny, z: nz }
   # Distance check
-  def dx: Float = tp.x - nx
-  def dy: Float = tp.y - ny
-  def dz: Float = tp.z - nz
+  let dx: Float = tp.x - nx
+  let dy: Float = tp.y - ny
+  let dz: Float = tp.z - nz
   if abs(n: dx) < 0.2 and abs(n: dy) < 0.2 and abs(n: dz) < 0.2 {
-    def tx: Float = randomFloat(min: -10.0, max: 10.0)
-    def ty: Float = randomFloat(min: 0.0, max: 8.0)
-    def tz: Float = randomFloat(min: -10.0, max: 10.0)
-    e.targetPos = {x: tx, y: ty, z: tz}
+    let tx: Float = randomFloat(min: -10.0, max: 10.0)
+    let ty: Float = randomFloat(min: 0.0, max: 8.0)
+    let tz: Float = randomFloat(min: -10.0, max: 10.0)
+    e.targetPos = { x: tx, y: ty, z: tz }
   }
 }
 
 func drawEntity(e: view Entity, time: Float) {
-  def h: Float = (e.hue + time * 30.0) % 360.0
-  def color: Color = colorFromHSV(hue: h, saturation: 0.4, value: 0.9)
+  let h: Float = (e.hue + time * 30.0) % 360.0
+  let color: Color = colorFromHSV(hue: h, saturation: 0.4, value: 0.9)
   match e.kind {
     case EntityKind.Cube {
       drawCube(
@@ -78,7 +74,7 @@ func drawEntity(e: view Entity, time: Float) {
           g: 255
           b: 255
           a: 100
-        }
+                }
       )
     }
     case EntityKind.Sphere {
@@ -93,55 +89,55 @@ func main() {
   setConfigFlags(flags: 1028)
   initWindow(width: 800, height: 450, title: "Rae Eased 3D Scene")
   setTargetFPS(fps: 60)
-  def cam: Camera3D = {
-    position: {x: 18.0, y: 18.0, z: 18.0}
-    target: {x: 0.0, y: 0.0, z: 0.0}
-    up: {x: 0.0, y: 1.0, z: 0.0}
+  let cam: Camera3D = {
+    position: { x: 18.0, y: 18.0, z: 18.0 }
+    target: { x: 0.0, y: 0.0, z: 0.0 }
+    up: { x: 0.0, y: 1.0, z: 0.0 }
     fovy: 45.0
     projection: 0
-  }
-  def e1: Entity = {
+    }
+  let e1: Entity = {
     kind: EntityKind.Cube
-    currentPos: {x: 0.0, y: 0.0, z: 0.0}
-    targetPos: {x: 0.0, y: 0.0, z: 0.0}
+    currentPos: { x: 0.0, y: 0.0, z: 0.0 }
+    targetPos: { x: 0.0, y: 0.0, z: 0.0 }
     size: 0.0
     hue: 0.0
-  }
-  def e2: Entity = {
+    }
+  let e2: Entity = {
     kind: EntityKind.Cube
-    currentPos: {x: 0.0, y: 0.0, z: 0.0}
-    targetPos: {x: 0.0, y: 0.0, z: 0.0}
+    currentPos: { x: 0.0, y: 0.0, z: 0.0 }
+    targetPos: { x: 0.0, y: 0.0, z: 0.0 }
     size: 0.0
     hue: 0.0
-  }
-  def e3: Entity = {
+    }
+  let e3: Entity = {
     kind: EntityKind.Cube
-    currentPos: {x: 0.0, y: 0.0, z: 0.0}
-    targetPos: {x: 0.0, y: 0.0, z: 0.0}
+    currentPos: { x: 0.0, y: 0.0, z: 0.0 }
+    targetPos: { x: 0.0, y: 0.0, z: 0.0 }
     size: 0.0
     hue: 0.0
-  }
-  def e4: Entity = {
+    }
+  let e4: Entity = {
     kind: EntityKind.Cube
-    currentPos: {x: 0.0, y: 0.0, z: 0.0}
-    targetPos: {x: 0.0, y: 0.0, z: 0.0}
+    currentPos: { x: 0.0, y: 0.0, z: 0.0 }
+    targetPos: { x: 0.0, y: 0.0, z: 0.0 }
     size: 0.0
     hue: 0.0
-  }
-  def e5: Entity = {
+    }
+  let e5: Entity = {
     kind: EntityKind.Cube
-    currentPos: {x: 0.0, y: 0.0, z: 0.0}
-    targetPos: {x: 0.0, y: 0.0, z: 0.0}
+    currentPos: { x: 0.0, y: 0.0, z: 0.0 }
+    targetPos: { x: 0.0, y: 0.0, z: 0.0 }
     size: 0.0
     hue: 0.0
-  }
-  def e6: Entity = {
+    }
+  let e6: Entity = {
     kind: EntityKind.Cube
-    currentPos: {x: 0.0, y: 0.0, z: 0.0}
-    targetPos: {x: 0.0, y: 0.0, z: 0.0}
+    currentPos: { x: 0.0, y: 0.0, z: 0.0 }
+    targetPos: { x: 0.0, y: 0.0, z: 0.0 }
     size: 0.0
     hue: 0.0
-  }
+    }
   initEntity(
     e: e1
     kind: EntityKind.Cube
@@ -196,14 +192,14 @@ func main() {
     size: 2.2
     hue: 300.0
   )
-  def bgColor: Color = {
+  let bgColor: Color = {
     r: 20
     g: 20
     b: 30
     a: 255
-  }
+    }
   loop windowShouldClose() is 0 {
-    def time: Float = getTime()
+    let time: Float = getTime()
     updateEntity(e: e1)
     updateEntity(e: e2)
     updateEntity(e: e3)
@@ -231,7 +227,7 @@ func main() {
         g: 200
         b: 255
         a: 255
-      }
+            }
     )
     endDrawing()
   }

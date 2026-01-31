@@ -5,32 +5,23 @@ type Point {
 
 func main() {
   # 1. Value Type
-  def p1: Point = { x: 10, y: 20 }
+  let p1: Point = { x: 10, y: 20 }
   # Copy
-  def p2: Point = p1
+  let p2: Point = p1
   p2.x = 30
   # Prints 10
   # 2. Borrow Type
   log(p1.x)
-  def r: mod Point => p1
+  let r: mod Point => p1
   r.y = 50
   # Prints 50
   # 3. Identity Types
   log(p1.y)
-  def pid: id Point = 1
-  def pkey: key Point = "point_001"
-  # 4. Optional Borrow
+  let pid: id Point = 1
+  let pkey: key Point = "point_001"
+  # 4. Borrow
   log(pid)
   log(pkey)
-  def op: opt view Point => p1
-  match op {
-    case none {
-      log("none")
-    }
-    default {
-      log("has point")
-    }
-  }
+  let r2: view Point => p1
+  log(r2.x)
 }
-
-
