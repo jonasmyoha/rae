@@ -89,18 +89,22 @@ w = { x: 1, y: 2 }          # Legal: copies value into aliased storage
 
 With `let`, the binding's type MUST appear on the left side only. The right side must be type-free for the top-level expression.
 
+With `ret`, structural literals MUST be explicitly typed at the return site for clarity.
+
 Legal:
 ```rae
 let i: Int = 5
 let v: Pos = { x: 5, y: 12 }
 let v: Pos = {}
 let v: Pos
+ret Color { r: 255, g: 0, b: 0, a: 255 }
 ```
 
 Illegal:
 ```rae
 let i = Int { 5 }               # ERROR: type on wrong side
 let v: Pos = Pos { x: 5 }       # ERROR: redundant type on RHS
+ret { r: 255, g: 0, b: 0 }      # ERROR: structural literal must be typed in ret
 ```
 
 **Exception:** Nested structural literals MUST be typed when their type is not otherwise known from immediate context.

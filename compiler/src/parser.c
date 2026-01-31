@@ -1697,6 +1697,16 @@ static AstStmt* parse_return_statement(Parser* parser, const Token* ret_token) {
     return stmt;
   }
   stmt->as.ret_stmt.values = parse_return_values(parser);
+  
+  // Rule 3.1 Extension: Enforce type visibility for top-level structural literals in return
+  AstReturnArg* arg = stmt->as.ret_stmt.values;
+  while (arg) {
+      if (arg->value->kind == AST_EXPR_OBJECT && arg->value->as.object_literal.type == NULL) {
+          parser_error(parser, ret_token, "structural literals in 'ret' must be explicitly typed (e.g. 'ret Color { ... }').");
+      }
+      arg = arg->next;
+  }
+  
   return stmt;
 }
 
