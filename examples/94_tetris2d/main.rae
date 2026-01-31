@@ -42,74 +42,34 @@ type Game {
 func getModernColor(index: Int) ret Color {
   # I - Cyan
   if index is 1 {
-    ret Color {
-      r: 100
-      g: 230
-      b: 255
-      a: 255
-    }
+    ret Color { r: 100, g: 230, b: 255, a: 255 }
   }
   # J - Blue
   if index is 2 {
-    ret Color {
-      r: 120
-      g: 160
-      b: 255
-      a: 255
-    }
+    ret Color { r: 120, g: 160, b: 255, a: 255 }
   }
   # L - Orange
   if index is 3 {
-    ret Color {
-      r: 255
-      g: 180
-      b: 120
-      a: 255
-    }
+    ret Color { r: 255, g: 180, b: 120, a: 255 }
   }
   # O - Yellow
   if index is 4 {
-    ret Color {
-      r: 255
-      g: 230
-      b: 120
-      a: 255
-    }
+    ret Color { r: 255, g: 230, b: 120, a: 255 }
   }
   # S - Green
   if index is 5 {
-    ret Color {
-      r: 120
-      g: 255
-      b: 160
-      a: 255
-    }
+    ret Color { r: 120, g: 255, b: 160, a: 255 }
   }
   # T - Purple
   if index is 6 {
-    ret Color {
-      r: 200
-      g: 160
-      b: 255
-      a: 255
-    }
+    ret Color { r: 200, g: 160, b: 255, a: 255 }
   }
   # Z - Red
   if index is 7 {
-    ret Color {
-      r: 255
-      g: 120
-      b: 140
-      a: 255
-    }
+    ret Color { r: 255, g: 120, b: 140, a: 255 }
   }
   # Empty
-  ret Color {
-    r: 40
-    g: 40
-    b: 50
-    a: 255
-  }
+  ret Color { r: 40, g: 40, b: 50, a: 255 }
 }
 
 func getKindId(kind: TetrominoKind) ret Int {
@@ -453,12 +413,7 @@ func initGame(g: mod Game) {
 
 func draw(g: view Game) {
   beginDrawing()
-  clearBackground(color: Color {
-    r: 30
-    g: 30
-    b: 40
-    a: 255
-  })
+  clearBackground(color: Color { r: 30, g: 30, b: 40, a: 255 })
   let sw: Float = getScreenWidth().toFloat()
   let sh: Float = getScreenHeight().toFloat()
   # Calculate scaling: target height is 20 rows, let's leave 10% margin top/bottom
@@ -472,12 +427,7 @@ func draw(g: view Game) {
     y: offsetY - 2.0
     width: g.width.toFloat() * cellSize + 4.0
     height: g.height.toFloat() * cellSize + 4.0
-    color: Color {
-      r: 180
-      g: 180
-      b: 255
-      a: 255
-    }
+    color: Color { r: 180, g: 180, b: 255, a: 255 }
   )
   let y: Int = 0
   loop y < g.height {
@@ -537,36 +487,21 @@ func draw(g: view Game) {
     x: 10.0
     y: 10.0
     fontSize: fontSize
-    color: Color {
-      r: 255
-      g: 200
-      b: 200
-      a: 255
-    }
+    color: Color { r: 255, g: 200, b: 200, a: 255 }
   )
   drawText(
     text: "LEVEL: {g.level}"
     x: 10.0
     y: 10.0 + fontSize * 1.2
     fontSize: fontSize
-    color: Color {
-      r: 200
-      g: 255
-      b: 200
-      a: 255
-    }
+    color: Color { r: 200, g: 255, b: 200, a: 255 }
   )
   drawText(
     text: "LINES: {g.lines}"
     x: 10.0
     y: 10.0 + fontSize * 2.4
     fontSize: fontSize
-    color: Color {
-      r: 200
-      g: 200
-      b: 255
-      a: 255
-    }
+    color: Color { r: 200, g: 200, b: 255, a: 255 }
   )
   if g.state is GameState.Paused {
     # Soft Yellow
@@ -575,12 +510,7 @@ func draw(g: view Game) {
       x: sw / 2.0 - fontSize * 3.0
       y: sh / 2.0
       fontSize: fontSize * 2.0
-      color: Color {
-        r: 255
-        g: 255
-        b: 180
-        a: 255
-      }
+      color: Color { r: 255, g: 255, b: 180, a: 255 }
     )
   }
   if g.state is GameState.GameOver {
@@ -591,24 +521,14 @@ func draw(g: view Game) {
       x: sw / 2.0 - fontSize * 4.0
       y: sh / 2.0
       fontSize: fontSize * 2.0
-      color: Color {
-        r: 255
-        g: 150
-        b: 150
-        a: 255
-      }
+      color: Color { r: 255, g: 150, b: 150, a: 255 }
     )
     drawText(
       text: "Press R to Restart"
       x: sw / 2.0 - fontSize * 4.0
       y: sh / 2.0 + fontSize * 2.2
       fontSize: fontSize
-      color: Color {
-        r: 220
-        g: 220
-        b: 220
-        a: 255
-      }
+      color: Color { r: 220, g: 220, b: 220, a: 255 }
     )
   }
   endDrawing()
