@@ -423,7 +423,7 @@ static void pp_expr_prec(PrettyPrinter* pp, const AstExpr* expr, int parent_prec
         int count = 0;
         AstObjectField* scan = expr->as.object_literal.fields;
         while (scan) { count++; scan = scan->next; }
-        if (count > 3) wrap = true;
+        if (count > 4) wrap = true;
 
         if (wrap) {
           pp_newline(pp);
@@ -559,7 +559,7 @@ static void pp_expr_prec(PrettyPrinter* pp, const AstExpr* expr, int parent_prec
         int count = 0;
         AstCollectionElement* scan = current;
         while (scan) { count++; scan = scan->next; }
-        if (count > 3) wrap = true;
+        if (count > 4) wrap = true;
 
         if (wrap) {
           pp_newline(pp);
