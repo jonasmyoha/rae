@@ -94,24 +94,9 @@ func paddleInputSystem(
 }
 
 func drawUISystem(p1Score: Int, p2Score: Int, winner: Int) {
-  let red: Color = {
-    r: 235
-    g: 0
-    b: 0
-    a: 255
-  }
-  let green: Color = {
-    r: 5
-    g: 145
-    b: 0
-    a: 255
-  }
-  let teal: Color = {
-    r: 5
-    g: 145
-    b: 120
-    a: 255
-  }
+  let red: Color = { r: 235, g: 0, b: 0, a: 255 }
+  let green: Color = { r: 5, g: 145, b: 0, a: 255 }
+  let teal: Color = { r: 5, g: 145, b: 120, a: 255 }
   if winner <= 0 {
     drawText(
       text: "{p1Score} - {p2Score}"
@@ -145,28 +130,13 @@ func drawUISystem(p1Score: Int, p2Score: Int, winner: Int) {
 func main() {
   initWindow(width: 800, height: 450, title: "Rae Advanced Pong (ECS)")
   setTargetFPS(fps: 60)
-  let white: Color = {
-    r: 255
-    g: 255
-    b: 255
-    a: 255
-  }
-  let darkGray: Color = {
-    r: 20
-    g: 20
-    b: 20
-    a: 255
-  }
+  let white: Color = { r: 255, g: 255, b: 255, a: 255 }
+  let darkGray: Color = { r: 20, g: 20, b: 20, a: 255 }
   let p1Pos: PaddleTransform = { x: 20.0, y: 175.0 }
   let p2Pos: PaddleTransform = { x: 760.0, y: 175.0 }
   let bPos: PaddleTransform = { x: 400.0, y: 225.0 }
   let bVel: Velocity = { dx: 4.0, dy: 4.0 }
-  let aiState: AIState = {
-    state: AIPhase.Observing
-    timer: 0
-    targetY: 225.0
-    decision: AIDecision.None
-  }
+  let aiState: AIState = { state: AIPhase.Observing, timer: 0, targetY: 225.0, decision: AIDecision.None }
   let p1Score: Int = 0
   let p2Score: Int = 0
   let winner: Int = 0
