@@ -465,6 +465,20 @@ TokenList lexer_tokenize(Arena* arena,
       .had_error = false,
   };
 
+  size_t max_lines = 1000;
+  
+  // Check for directives in the first few lines
+  if (length > 10 && source[0] == '#') {
+      const char* directive = strstr(source, "# rae: max-lines");
+      if (directive && (size_t)(directive - source) < 200) {
+          char* end;
+          long val = strtol(directive + 16, &end, 10);
+          if (val > 0) {
+              max_lines = (size_t)val;
+          }
+      }
+  }
+
   TokenBuffer buffer = {0};
 
   for (;;) {
@@ -484,6 +498,16 @@ TokenList lexer_tokenize(Arena* arena,
       Token eof_token = {.kind = TOK_EOF, .lexeme = lexeme, .line = lexer.line, .column = lexer.column};
       token_buffer_push(&buffer, eof_token);
       break;
+    }
+
+    if (lexer.line > max_lines) {
+        lexer_error(&lexer, lexer.line, lexer.column, "file exceeds maximum allowed line count of %zu. Use '# rae: max-lines <N>' at the top of the file to increase this limit.", max_lines);
+        // We only report this once, so we could break or continue. 
+        // Break to avoid flooding with the same error if it continues.
+        Str lexeme = str_from_buf(source + lexer.index, 0);
+        Token eof_token = {.kind = TOK_EOF, .lexeme = lexeme, .line = lexer.line, .column = lexer.column};
+        token_buffer_push(&buffer, eof_token);
+        break;
     }
 
     size_t start_index = lexer.index;
