@@ -1593,7 +1593,7 @@ static bool looks_like_destructure(Parser* parser) {
   while (i < parser->count) {
     TokenKind kind = parser->tokens[i].kind;
     if (kind == TOK_COMMA) {
-      if (i + 1 < parser->count && parser->tokens[i + 1].kind == TOK_KW_DEF) {
+      if (i + 1 < parser->count && parser->tokens[i + 1].kind == TOK_KW_LET) {
         return true;
       }
       return false;
@@ -1619,8 +1619,8 @@ static bool expr_is_call_like(const AstExpr* expr) {
   return false;
 }
 
-static AstStmt* parse_destructure_statement(Parser* parser, const Token* def_token) {
-  AstStmt* stmt = new_stmt(parser, AST_STMT_DESTRUCT, def_token);
+static AstStmt* parse_destructure_statement(Parser* parser, const Token* let_token) {
+  AstStmt* stmt = new_stmt(parser, AST_STMT_DESTRUCT, let_token);
   AstDestructureBinding* bindings = NULL;
   size_t binding_count = 0;
   for (;;) {
@@ -1633,40 +1633,60 @@ static AstStmt* parse_destructure_statement(Parser* parser, const Token* def_tok
     bindings = append_destructure_binding(bindings, binding);
     binding_count++;
     if (parser_match(parser, TOK_COMMA)) {
-      parser_consume(parser, TOK_KW_DEF, "expected 'def' before next destructuring binding");
+      parser_consume(parser, TOK_KW_LET, "expected 'let' before next destructuring binding");
       continue;
     }
     break;
   }
   if (binding_count < 2) {
-    parser_error(parser, def_token, "destructuring assignments require at least two bindings");
+    parser_error(parser, let_token, "destructuring assignments require at least two bindings");
   }
   parser_consume(parser, TOK_ASSIGN, "destructuring assignments require '=' ");
   AstExpr* rhs = parse_expression(parser);
   if (!expr_is_call_like(rhs)) {
-    parser_error(parser, def_token, "destructuring assignments require a call expression on the right-hand side");
+    parser_error(parser, let_token, "destructuring assignments require a call expression on the right-hand side");
   }
   stmt->as.destruct_stmt.bindings = bindings;
   stmt->as.destruct_stmt.call = rhs;
   return stmt;
 }
 
-static AstStmt* parse_def_statement(Parser* parser, const Token* def_token) {
-  const Token* name = parser_consume_ident(parser, "expected identifier after 'def'");
+static AstStmt* parse_let_statement(Parser* parser, const Token* let_token) {
+  const Token* name = parser_consume_ident(parser, "expected identifier after 'let'");
   check_camel_case(parser, name, "variable");
   parser_consume(parser, TOK_COLON, "expected ':' after local name");
-  AstStmt* stmt = new_stmt(parser, AST_STMT_DEF, def_token);
-  stmt->as.def_stmt.name = parser_copy_str(parser, name->lexeme);
-  stmt->as.def_stmt.type = parse_type_ref(parser);
+  
+  AstTypeRef* type = parse_type_ref(parser);
+  AstStmt* stmt = new_stmt(parser, AST_STMT_LET, let_token);
+  stmt->as.let_stmt.name = parser_copy_str(parser, name->lexeme);
+  stmt->as.let_stmt.type = type;
+  
   if (parser_match(parser, TOK_ASSIGN)) {
-    stmt->as.def_stmt.is_bind = false;
-    stmt->as.def_stmt.value = parse_expression(parser);
+    stmt->as.let_stmt.is_bind = false;
+    if (type->is_view || type->is_mod) {
+        parser_error(parser, parser_previous(parser), "use '=>' for alias bindings (view/mod)");
+    }
+    stmt->as.let_stmt.value = parse_expression(parser);
+    
+    // Rule 3.1: Reject typed constructor expressions on the RHS of let
+    if (stmt->as.let_stmt.value->kind == AST_EXPR_OBJECT && stmt->as.let_stmt.value->as.object_literal.type != NULL) {
+        // Exempt the canonical default value expression: Type {}
+        if (stmt->as.let_stmt.value->as.object_literal.fields != NULL) {
+            parser_error(parser, let_token, "with 'let', the binding's type must be written on the left-hand side only. Remove the type name from the RHS.");
+        }
+    }
   } else if (parser_match(parser, TOK_ARROW)) {
-    stmt->as.def_stmt.is_bind = true;
-    stmt->as.def_stmt.value = parse_expression(parser);
+    stmt->as.let_stmt.is_bind = true;
+    if (!type->is_view && !type->is_mod) {
+        parser_error(parser, parser_previous(parser), "'=>' is only legal when the target type is mod T or view T");
+    }
+    stmt->as.let_stmt.value = parse_expression(parser);
   } else {
-    stmt->as.def_stmt.is_bind = false;
-    stmt->as.def_stmt.value = NULL;
+    stmt->as.let_stmt.is_bind = false;
+    stmt->as.let_stmt.value = NULL;
+    if (type->is_view || type->is_mod) {
+        parser_error(parser, let_token, "alias bindings (view/mod) must be explicitly initialized");
+    }
   }
   return stmt;
 }
@@ -1708,11 +1728,11 @@ static AstStmt* parse_loop_statement(Parser* parser, const Token* loop_token) {
 
     if (parser_match(parser, TOK_KW_IN)) {
       stmt->as.loop_stmt.is_range = true;
-      AstStmt* init = new_stmt(parser, AST_STMT_DEF, name);
-      init->as.def_stmt.name = parser_copy_str(parser, name->lexeme);
-      init->as.def_stmt.type = type;
-      init->as.def_stmt.value = NULL;
-      init->as.def_stmt.is_bind = false;
+      AstStmt* init = new_stmt(parser, AST_STMT_LET, name);
+      init->as.let_stmt.name = parser_copy_str(parser, name->lexeme);
+      init->as.let_stmt.type = type;
+      init->as.let_stmt.value = NULL;
+      init->as.let_stmt.is_bind = false;
 
       stmt->as.loop_stmt.init = init;
       stmt->as.loop_stmt.condition = parse_expression(parser);
@@ -1727,11 +1747,11 @@ static AstStmt* parse_loop_statement(Parser* parser, const Token* loop_token) {
         parser_error(parser, parser_peek(parser), "expected '=' or 'in' in loop declaration");
       }
 
-      AstStmt* init = new_stmt(parser, AST_STMT_DEF, name);
-      init->as.def_stmt.name = parser_copy_str(parser, name->lexeme);
-      init->as.def_stmt.type = type;
-      init->as.def_stmt.value = parse_expression(parser);
-      init->as.def_stmt.is_bind = is_bind;
+      AstStmt* init = new_stmt(parser, AST_STMT_LET, name);
+      init->as.let_stmt.name = parser_copy_str(parser, name->lexeme);
+      init->as.let_stmt.type = type;
+      init->as.let_stmt.value = parse_expression(parser);
+      init->as.let_stmt.is_bind = is_bind;
 
       stmt->as.loop_stmt.init = init;
       parser_consume(parser, TOK_COMMA, "expected ',' after loop init");
@@ -1747,11 +1767,11 @@ static AstStmt* parse_loop_statement(Parser* parser, const Token* loop_token) {
         parser_error(parser, NULL, "range loop variable must be an identifier");
       }
       stmt->as.loop_stmt.is_range = true;
-      AstStmt* init = new_stmt(parser, AST_STMT_DEF, NULL);
-      init->as.def_stmt.name = parser_copy_str(parser, expr->as.ident);
-      init->as.def_stmt.type = NULL;
-      init->as.def_stmt.value = NULL;
-      init->as.def_stmt.is_bind = false;
+      AstStmt* init = new_stmt(parser, AST_STMT_LET, NULL);
+      init->as.let_stmt.name = parser_copy_str(parser, expr->as.ident);
+      init->as.let_stmt.type = NULL;
+      init->as.let_stmt.value = NULL;
+      init->as.let_stmt.is_bind = false;
 
       stmt->as.loop_stmt.init = init;
       stmt->as.loop_stmt.condition = parse_expression(parser);
@@ -1776,12 +1796,12 @@ static AstStmt* parse_loop_statement(Parser* parser, const Token* loop_token) {
 }
 
 static AstStmt* parse_statement(Parser* parser) {
-  if (parser_match(parser, TOK_KW_DEF)) {
-    const Token* def_token = parser_previous(parser);
+  if (parser_match(parser, TOK_KW_LET)) {
+    const Token* let_token = parser_previous(parser);
     if (looks_like_destructure(parser)) {
-      return parse_destructure_statement(parser, def_token);
+      return parse_destructure_statement(parser, let_token);
     }
-    return parse_def_statement(parser, def_token);
+    return parse_let_statement(parser, let_token);
   }
   if (parser_match(parser, TOK_KW_RET)) {
     return parse_return_statement(parser, parser_previous(parser));
@@ -1808,11 +1828,8 @@ static AstStmt* parse_statement(Parser* parser) {
     return stmt;
   }
   if (parser_match(parser, TOK_ARROW)) {
-    AstStmt* stmt = new_stmt(parser, AST_STMT_ASSIGN, parser_previous(parser));
-    stmt->as.assign_stmt.target = expr;
-    stmt->as.assign_stmt.value = parse_expression(parser);
-    stmt->as.assign_stmt.is_bind = true;
-    return stmt;
+    parser_error(parser, parser_previous(parser), "rebinding an alias is illegal. '=>' is only for 'let' bindings.");
+    return NULL;
   }
 
   AstStmt* stmt = new_stmt(parser, AST_STMT_EXPR, parser_peek(parser));
@@ -2061,6 +2078,11 @@ static AstDecl* parse_declaration(Parser* parser) {
   }
   if (parser_match(parser, TOK_KW_FUNC)) {
     return parse_func_declaration(parser, is_extern);
+  }
+  
+  if (!is_extern && parser_check(parser, TOK_KW_FUNC)) {
+      parser_advance(parser);
+      return parse_func_declaration(parser, false);
   }
   
   if (is_extern) {

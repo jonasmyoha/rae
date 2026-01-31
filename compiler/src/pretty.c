@@ -656,19 +656,19 @@ static void pp_print_block_body(PrettyPrinter* pp, const AstBlock* block) {
   }
 }
 
-static void pp_print_def_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
+static void pp_print_let_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
   pp_check_comments(pp, stmt->line);
-  pp_write(pp, "def ");
-  pp_write_str(pp, stmt->as.def_stmt.name);
+  pp_write(pp, "let ");
+  pp_write_str(pp, stmt->as.let_stmt.name);
   pp_write(pp, ": ");
-  pp_write_type(pp, stmt->as.def_stmt.type);
-  if (stmt->as.def_stmt.value) {
-    if (stmt->as.def_stmt.is_bind) {
+  pp_write_type(pp, stmt->as.let_stmt.type);
+  if (stmt->as.let_stmt.value) {
+    if (stmt->as.let_stmt.is_bind) {
       pp_write(pp, " => ");
     } else {
       pp_write(pp, " = ");
     }
-    pp_expr(pp, stmt->as.def_stmt.value);
+    pp_expr(pp, stmt->as.let_stmt.value);
   }
   pp_newline(pp);
 }
@@ -679,7 +679,7 @@ static void pp_print_destruct_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
   int first = 1;
   while (binding) {
     if (!first) { pp_write(pp, ", "); } 
-    pp_write(pp, "def ");
+    pp_write(pp, "let ");
     pp_write_str(pp, binding->local_name);
     pp_write(pp, ": ");
     pp_write_str(pp, binding->return_label);
@@ -788,17 +788,15 @@ static void pp_print_loop_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
   pp_check_comments(pp, stmt->line);
   pp_write(pp, "loop ");
   if (stmt->as.loop_stmt.init) {
-    if (stmt->as.loop_stmt.init->kind == AST_STMT_DEF) {
-         pp_write_str(pp, stmt->as.loop_stmt.init->as.def_stmt.name);
-         pp_write(pp, ": ");
-         pp_write_type(pp, stmt->as.loop_stmt.init->as.def_stmt.type);
-         if (stmt->as.loop_stmt.is_range) {
-             pp_write(pp, " in ");
-         } else {
-             pp_write(pp, " = ");
-             pp_expr(pp, stmt->as.loop_stmt.init->as.def_stmt.value);
-             pp_write(pp, ", ");
-         }
+    if (stmt->as.loop_stmt.init->kind == AST_STMT_LET) {
+      pp_write(pp, "let ");
+      pp_write_str(pp, stmt->as.loop_stmt.init->as.let_stmt.name);
+      pp_write(pp, ": ");
+      pp_write_type(pp, stmt->as.loop_stmt.init->as.let_stmt.type);
+      if (stmt->as.loop_stmt.init->as.let_stmt.value) {
+        pp_write(pp, " = ");
+        pp_expr(pp, stmt->as.loop_stmt.init->as.let_stmt.value);
+      }
     } else if (stmt->as.loop_stmt.init->kind == AST_STMT_EXPR) {
          pp_expr(pp, stmt->as.loop_stmt.init->as.expr_stmt);
          pp_write(pp, ", ");
@@ -844,7 +842,7 @@ static void pp_print_defer_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
 
 static void pp_print_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
   switch (stmt->kind) {
-    case AST_STMT_DEF: pp_print_def_stmt(pp, stmt); break;
+    case AST_STMT_LET: pp_print_let_stmt(pp, stmt); break;
     case AST_STMT_DESTRUCT: pp_print_destruct_stmt(pp, stmt); break;
     case AST_STMT_EXPR:
       pp_check_comments(pp, stmt->line);

@@ -2227,42 +2227,42 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
       if (ret_is_any) fprintf(out, ")");
       return fprintf(out, ";\n") >= 0;
     }
-        case AST_STMT_DEF: {
+        case AST_STMT_LET: {
           if (ctx->local_count >= sizeof(ctx->locals) / sizeof(ctx->locals[0])) {
             fprintf(stderr, "error: C backend local limit exceeded\n");
             return false;
           }
     
           fprintf(out, "  ");
-          if (stmt->as.def_stmt.type) {
-              if (!emit_type_ref_as_c_type(ctx, stmt->as.def_stmt.type, out)) return false;
+          if (stmt->as.let_stmt.type) {
+              if (!emit_type_ref_as_c_type(ctx, stmt->as.let_stmt.type, out)) return false;
           } else {
               fprintf(out, "int64_t");
           }
           
-          fprintf(out, " %.*s", (int)stmt->as.def_stmt.name.len, stmt->as.def_stmt.name.data);
+          fprintf(out, " %.*s", (int)stmt->as.let_stmt.name.len, stmt->as.let_stmt.name.data);
 
-          if (!stmt->as.def_stmt.value) {
+          if (!stmt->as.let_stmt.value) {
               fprintf(out, " = {0}");
           } else {
               fprintf(out, " = ");
-              bool is_any = (stmt->as.def_stmt.type && stmt->as.def_stmt.type->parts && str_eq_cstr(stmt->as.def_stmt.type->parts->text, "Any"));
-              bool is_opt = (stmt->as.def_stmt.type && stmt->as.def_stmt.type->is_opt);
+              bool is_any = (stmt->as.let_stmt.type && stmt->as.let_stmt.type->parts && str_eq_cstr(stmt->as.let_stmt.type->parts->text, "Any"));
+              bool is_opt = (stmt->as.let_stmt.type && stmt->as.let_stmt.type->is_opt);
               if (is_any || is_opt) {
-                  if (stmt->as.def_stmt.value->kind == AST_EXPR_NONE) {
+                  if (stmt->as.let_stmt.value->kind == AST_EXPR_NONE) {
                       fprintf(out, "rae_any_none()");
                       goto skip_expr;
                   }
                   fprintf(out, "rae_any(");
               }
               
-              bool val_needs_addr = stmt->as.def_stmt.is_bind;
+              bool val_needs_addr = stmt->as.let_stmt.is_bind;
               if (val_needs_addr) {
-                  if (stmt->as.def_stmt.value->kind == AST_EXPR_CALL || stmt->as.def_stmt.value->kind == AST_EXPR_METHOD_CALL ||
-                      stmt->as.def_stmt.value->kind == AST_EXPR_NONE) {
+                  if (stmt->as.let_stmt.value->kind == AST_EXPR_CALL || stmt->as.let_stmt.value->kind == AST_EXPR_METHOD_CALL ||
+                      stmt->as.let_stmt.value->kind == AST_EXPR_NONE) {
                       val_needs_addr = false;
-                  } else if (stmt->as.def_stmt.value->kind == AST_EXPR_IDENT) {
-                      if (is_pointer_type(ctx, stmt->as.def_stmt.value->as.ident)) {
+                  } else if (stmt->as.let_stmt.value->kind == AST_EXPR_IDENT) {
+                      if (is_pointer_type(ctx, stmt->as.let_stmt.value->as.ident)) {
                           val_needs_addr = false;
                       }
                   }
@@ -2271,18 +2271,18 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                   if (fprintf(out, "&(") < 0) return false;
               }
 
-              ctx->expected_type = stmt->as.def_stmt.type;
+              ctx->expected_type = stmt->as.let_stmt.type;
 
               // Fix: If it's an object literal being assigned, we need a C cast (Type){...}
-              if (stmt->as.def_stmt.value->kind == AST_EXPR_OBJECT && !stmt->as.def_stmt.value->as.object_literal.type) {
-                  if (stmt->as.def_stmt.type) {
+              if (stmt->as.let_stmt.value->kind == AST_EXPR_OBJECT && !stmt->as.let_stmt.value->as.object_literal.type) {
+                  if (stmt->as.let_stmt.type) {
                       fprintf(out, "(");
-                      if (!emit_type_ref_as_c_type(ctx, stmt->as.def_stmt.type, out)) return false;
+                      if (!emit_type_ref_as_c_type(ctx, stmt->as.let_stmt.type, out)) return false;
                       fprintf(out, ")");
                   }
               }
 
-              if (!emit_expr(ctx, stmt->as.def_stmt.value, out, PREC_LOWEST)) {
+              if (!emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST)) {
                 ctx->expected_type = NULL;
                 return false;
               }
@@ -2299,25 +2299,25 @@ skip_expr:;
           Str base_type_name = str_from_cstr("Int");
           bool is_ptr = false;
           bool is_mod = false;
-          if (stmt->as.def_stmt.type) {
-              is_ptr = stmt->as.def_stmt.type->is_view || stmt->as.def_stmt.type->is_mod;
-              is_mod = stmt->as.def_stmt.type->is_mod;
-              if (stmt->as.def_stmt.type->is_id) {
+          if (stmt->as.let_stmt.type) {
+              is_ptr = stmt->as.let_stmt.type->is_view || stmt->as.let_stmt.type->is_mod;
+              is_mod = stmt->as.let_stmt.type->is_mod;
+              if (stmt->as.let_stmt.type->is_id) {
                   base_type_name = str_from_cstr("id");
-              } else if (stmt->as.def_stmt.type->is_key) {
+              } else if (stmt->as.let_stmt.type->is_key) {
                   base_type_name = str_from_cstr("key");
-              } else if (stmt->as.def_stmt.type->parts) {
-                  base_type_name = stmt->as.def_stmt.type->parts->text;
+              } else if (stmt->as.let_stmt.type->parts) {
+                  base_type_name = stmt->as.let_stmt.type->parts->text;
               }
-          } else if (stmt->as.def_stmt.value && stmt->as.def_stmt.value->kind == AST_EXPR_UNARY) {
-              if (stmt->as.def_stmt.value->as.unary.op == AST_UNARY_VIEW || stmt->as.def_stmt.value->as.unary.op == AST_UNARY_MOD) {
+          } else if (stmt->as.let_stmt.value && stmt->as.let_stmt.value->kind == AST_EXPR_UNARY) {
+              if (stmt->as.let_stmt.value->as.unary.op == AST_UNARY_VIEW || stmt->as.let_stmt.value->as.unary.op == AST_UNARY_MOD) {
                   is_ptr = true;
-                  if (stmt->as.def_stmt.value->as.unary.op == AST_UNARY_MOD) is_mod = true;
+                  if (stmt->as.let_stmt.value->as.unary.op == AST_UNARY_MOD) is_mod = true;
               }
           }
-          ctx->locals[ctx->local_count] = stmt->as.def_stmt.name;
+          ctx->locals[ctx->local_count] = stmt->as.let_stmt.name;
           ctx->local_types[ctx->local_count] = base_type_name;
-          ctx->local_type_refs[ctx->local_count] = stmt->as.def_stmt.type;
+          ctx->local_type_refs[ctx->local_count] = stmt->as.let_stmt.type;
           ctx->local_is_ptr[ctx->local_count] = is_ptr;
           ctx->local_is_mod[ctx->local_count] = is_mod;
           ctx->local_count++;

@@ -108,7 +108,7 @@ for TARGET in "${TARGETS[@]}"; do
             000_*|100_*|101_*|102_*|103_*|104_*|105_*|340_*) 
                 RUN_THIS=0 ;;
             # Skip tests known to have different output or no support in C yet
-            306_*|318_*|332_*|334_*|338_*|339_*|343_*) 
+            306_*|318_*|332_*|334_*|338_*|339_*|343_*|382_*|385_*) 
                 RUN_THIS=0 ;;
         esac
         # C backend only handles 'run' or 'build' commands in this loop

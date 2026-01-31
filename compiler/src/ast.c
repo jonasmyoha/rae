@@ -320,14 +320,14 @@ static void dump_properties(const AstProperty* prop, FILE* out) {
 
 static void dump_block(const AstBlock* block, FILE* out, int indent);
 
-static void dump_def_stmt(const AstStmt* stmt, FILE* out, int indent) {
+static void dump_let_stmt(const AstStmt* stmt, FILE* out, int indent) {
   print_indent(out, indent);
-  fputs("def ", out);
-  print_str(out, stmt->as.def_stmt.name);
+  fputs("let ", out);
+  print_str(out, stmt->as.let_stmt.name);
   fputs(": ", out);
-  dump_type_ref(stmt->as.def_stmt.type, out);
-  fputs(stmt->as.def_stmt.is_bind ? " => " : " = ", out);
-  dump_expr(stmt->as.def_stmt.value, out);
+  dump_type_ref(stmt->as.let_stmt.type, out);
+  fputs(stmt->as.let_stmt.is_bind ? " => " : " = ", out);
+  dump_expr(stmt->as.let_stmt.value, out);
   fputc('\n', out);
 }
 
@@ -398,15 +398,15 @@ static void dump_loop_stmt(const AstStmt* stmt, FILE* out, int indent) {
   print_indent(out, indent);
   fputs("loop ", out);
   if (stmt->as.loop_stmt.init) {
-    if (stmt->as.loop_stmt.init->kind == AST_STMT_DEF) {
-        print_str(out, stmt->as.loop_stmt.init->as.def_stmt.name);
+    if (stmt->as.loop_stmt.init->kind == AST_STMT_LET) {
+        print_str(out, stmt->as.loop_stmt.init->as.let_stmt.name);
         fputs(": ", out);
-        dump_type_ref(stmt->as.loop_stmt.init->as.def_stmt.type, out);
+        dump_type_ref(stmt->as.loop_stmt.init->as.let_stmt.type, out);
         if (stmt->as.loop_stmt.is_range) {
             fputs(" in ", out);
         } else {
              fputs(" = ", out);
-             dump_expr(stmt->as.loop_stmt.init->as.def_stmt.value, out);
+             dump_expr(stmt->as.loop_stmt.init->as.let_stmt.value, out);
              fputs(", ", out);
         }
     } else if (stmt->as.loop_stmt.init->kind == AST_STMT_EXPR) {
@@ -472,8 +472,8 @@ static void dump_block(const AstBlock* block, FILE* out, int indent) {
   const AstStmt* stmt = block->first;
   while (stmt) {
     switch (stmt->kind) {
-      case AST_STMT_DEF:
-        dump_def_stmt(stmt, out, indent);
+      case AST_STMT_LET:
+        dump_let_stmt(stmt, out, indent);
         break;
       case AST_STMT_DESTRUCT:
         dump_destructure_stmt(stmt, out, indent);
