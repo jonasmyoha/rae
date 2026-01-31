@@ -64,7 +64,7 @@ cat > spec/rae.md << 'EOF'
 ### 1.3 Keywords
 
 ```
-type func def ret spawn
+type func let ret spawn
 own view mod opt
 if else match case
 true false none
@@ -120,7 +120,7 @@ type Point: pub {
 
 Rules:
 * Fields use `name: Type`
-* `def` is **not allowed** in type fields
+* `let` is **not allowed** in type fields
 
 ### 3.2 Optional Types
 
@@ -143,7 +143,7 @@ func add(a: view Point, b: view Point): pub ret Point {
 
 Rules:
 * Parameters use `name: Type`
-* `def` is **not allowed** in parameters
+* `let` is **not allowed** in parameters
 * Function properties (pub, spawn) come **after the parameter list**, space-separated
 * Return declaration (`ret`) comes last
 
@@ -187,12 +187,12 @@ spawn heavyWork(id: 1)
 ## 6. Local Bindings
 
 ```rae
-def x: Int = 10
-def p: own Point => (x: 1, y: 2)
+let x: Int = 10
+let p: own Point => (x: 1, y: 2)
 ```
 
 Rules:
-* `def` is used **only** for locals
+* `let` is used **only** for locals
 * Type annotation is required
 
 ---
@@ -249,7 +249,7 @@ spawn heavyWork(id: 2)
 
 ## 9. Constraints
 
-1. `def` is **only** allowed for local bindings
+1. `let` is **only** allowed for local bindings
 2. `=` always copies by value
 3. `=>` binds owning references
 4. No semicolons

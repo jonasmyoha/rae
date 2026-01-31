@@ -36,12 +36,12 @@ typedef struct {
 } Keyword;
 
 static const Keyword KEYWORDS[] = {
-    {"and", TOK_KW_AND},     {"case", TOK_KW_CASE},    {"def", TOK_KW_DEF},
+    {"and", TOK_KW_AND},     {"case", TOK_KW_CASE},
     {"default", TOK_KW_DEFAULT},{"else", TOK_KW_ELSE},   {"export", TOK_KW_EXPORT},
     {"extern", TOK_KW_EXTERN},{"false", TOK_KW_FALSE}, {"func", TOK_KW_FUNC},
     {"id", TOK_KW_ID},       {"if", TOK_KW_IF},       {"import", TOK_KW_IMPORT},
     {"in", TOK_KW_IN},       {"is", TOK_KW_IS},       {"key", TOK_KW_KEY},
-    {"enum", TOK_KW_ENUM},
+    {"let", TOK_KW_LET},     {"enum", TOK_KW_ENUM},
     {"loop", TOK_KW_LOOP},    {"match", TOK_KW_MATCH},
     {"mod", TOK_KW_MOD},     {"none", TOK_KW_NONE},    {"not", TOK_KW_NOT},
     {"opt", TOK_KW_OPT},     {"or", TOK_KW_OR},
@@ -65,7 +65,7 @@ static const char* const TOKEN_KIND_NAMES[] = {
     [TOK_BLOCK_COMMENT] = "TOK_BLOCK_COMMENT",
     [TOK_KW_TYPE] = "TOK_TYPE",
     [TOK_KW_FUNC] = "TOK_FUNC",
-    [TOK_KW_DEF] = "TOK_DEF",
+    [TOK_KW_LET] = "TOK_LET",
     [TOK_KW_RET] = "TOK_RET",
     [TOK_KW_SPAWN] = "TOK_SPAWN",
     [TOK_KW_VIEW] = "TOK_VIEW",

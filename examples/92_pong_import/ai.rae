@@ -1,15 +1,6 @@
-enum AIPhase {
-  Observing
-  Deciding
-  Acting
-  Pausing
-}
+enum AIPhase { Observing, Deciding, Acting, Pausing }
 
-enum AIDecision {
-  None
-  Up
-  Down
-}
+enum AIDecision { None, Up, Down }
 
 # AI System for Advanced Pong
 type AIState {
@@ -20,7 +11,7 @@ type AIState {
 }
 
 func paddleAiSystem(ai: mod AIState, ballY: Float, paddleY: Float) ret Float {
-  def newY: Float = paddleY
+  let newY: Float = paddleY
   if ai.state is AIPhase.Observing {
     ai.timer = ai.timer + 1
     # Reaction time ~0.2s (12 frames) plus random noise
@@ -84,4 +75,3 @@ func paddleAiSystem(ai: mod AIState, ballY: Float, paddleY: Float) ret Float {
   }
   ret newY
 }
-

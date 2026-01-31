@@ -23,11 +23,11 @@ func createList(T)(initialCap: Int) ret List(T) {
 }
 
 func grow(T)(this: mod List(T)) {
-  def newCap: Int = this.capacity * 2
+  let newCap: Int = this.capacity * 2
   if newCap is 0 {
     newCap = 4
   }
-  def newData: Buffer(T) = __buf_alloc(size: newCap)
+  let newData: Buffer(T) = __buf_alloc(size: newCap)
   __buf_copy(
     src: this.data
     src_off: 0
@@ -87,7 +87,7 @@ func pop(T)(this: mod List(T)) ret T {
   if this.length is 0 {
     ret none
   }
-  def val: T = __buf_get(buf: this.data, index: this.length - 1)
+  let val: T = __buf_get(buf: this.data, index: this.length - 1)
   this.length = this.length - 1
   ret val
 }
@@ -118,7 +118,7 @@ func length(T)(this: view List(T)) ret Int {
 }
 
 func swap(T)(this: mod List(T), i: Int, j: Int) {
-  def temp: T = __buf_get(buf: this.data, index: i)
+  let temp: T = __buf_get(buf: this.data, index: i)
   __buf_set(buf: this.data, index: i, value: __buf_get(buf: this.data, index: j))
   __buf_set(buf: this.data, index: j, value: temp)
 }
@@ -158,13 +158,13 @@ func set(V)(this: mod StringMap(V), k: String, value: V) {
   if this.length * 2 > this.capacity {
     growStringMap(this)
   }
-  def h: Int = rae_str_hash(s: k)
-  def idx: Int = h % this.capacity
+  let h: Int = rae_str_hash(s: k)
+  let idx: Int = h % this.capacity
   if idx < 0 {
     idx = -idx
   }
   loop true {
-    def entry: StringMapEntry(V) = __buf_get(buf: this.data, index: idx)
+    let entry: StringMapEntry(V) = __buf_get(buf: this.data, index: idx)
     if not entry.occupied {
       __buf_set(buf: this.data, index: idx, value: { k: k, value: value, occupied: true })
       this.length = this.length + 1
@@ -183,14 +183,14 @@ func get(V)(this: view StringMap(V), k: String) ret opt V {
   if this.capacity is 0 {
     ret none
   }
-  def h: Int = rae_str_hash(s: k)
-  def idx: Int = h % this.capacity
+  let h: Int = rae_str_hash(s: k)
+  let idx: Int = h % this.capacity
   if idx < 0 {
     idx = -idx
   }
-  def startIdx: Int = idx
+  let startIdx: Int = idx
   loop true {
-    def entry: StringMapEntry(V) = __buf_get(buf: this.data, index: idx)
+    let entry: StringMapEntry(V) = __buf_get(buf: this.data, index: idx)
     if not entry.occupied {
       ret none
     }
@@ -219,14 +219,14 @@ func remove(V)(this: mod StringMap(V), k: String) {
   if this.capacity is 0 {
     ret
   }
-  def h: Int = rae_str_hash(s: k)
-  def idx: Int = h % this.capacity
+  let h: Int = rae_str_hash(s: k)
+  let idx: Int = h % this.capacity
   if idx < 0 {
     idx = -idx
   }
-  def startIdx: Int = idx
+  let startIdx: Int = idx
   loop true {
-    def entry: StringMapEntry(V) = __buf_get(buf: this.data, index: idx)
+    let entry: StringMapEntry(V) = __buf_get(buf: this.data, index: idx)
     if not entry.occupied {
       ret
     }
@@ -252,10 +252,10 @@ func remove(V)(this: mod StringMap(V), k: String) {
 }
 
 func keys(V)(this: view StringMap(V)) ret List(String) {
-  def result: List(String) = createList(initialCap: this.length)
-  def i: Int = 0
+  let result: List(String) = createList(initialCap: this.length)
+  let i: Int = 0
   loop i < this.capacity {
-    def entry: StringMapEntry(V) = __buf_get(buf: this.data, index: i)
+    let entry: StringMapEntry(V) = __buf_get(buf: this.data, index: i)
     if entry.occupied {
       add(result, value: entry.k)
     }
@@ -265,10 +265,10 @@ func keys(V)(this: view StringMap(V)) ret List(String) {
 }
 
 func values(V)(this: view StringMap(V)) ret List(V) {
-  def result: List(V) = createList(initialCap: this.length)
-  def i: Int = 0
+  let result: List(V) = createList(initialCap: this.length)
+  let i: Int = 0
   loop i < this.capacity {
-    def entry: StringMapEntry(V) = __buf_get(buf: this.data, index: i)
+    let entry: StringMapEntry(V) = __buf_get(buf: this.data, index: i)
     if entry.occupied {
       add(result, value: entry.value)
     }
@@ -278,17 +278,17 @@ func values(V)(this: view StringMap(V)) ret List(V) {
 }
 
 func growStringMap(V)(this: mod StringMap(V)) {
-  def oldCap: Int = this.capacity
-  def oldData: Buffer(StringMapEntry(V)) = this.data
+  let oldCap: Int = this.capacity
+  let oldData: Buffer(StringMapEntry(V)) = this.data
   this.capacity = oldCap * 2
   if this.capacity is 0 {
     this.capacity = 8
   }
   this.data = __buf_alloc(size: this.capacity)
   this.length = 0
-  def i: Int = 0
+  let i: Int = 0
   loop i < oldCap {
-    def entry: StringMapEntry(V) = __buf_get(buf: oldData, index: i)
+    let entry: StringMapEntry(V) = __buf_get(buf: oldData, index: i)
     if entry.occupied {
       set(this, k: entry.k, value: entry.value)
     }
@@ -329,13 +329,13 @@ func set(V)(this: mod IntMap(V), k: Int, value: V) {
     growIntMap(this)
   }
   # Simple hash for Int
-  def h: Int = k
-  def idx: Int = h % this.capacity
+  let h: Int = k
+  let idx: Int = h % this.capacity
   if idx < 0 {
     idx = -idx
   }
   loop true {
-    def entry: IntMapEntry(V) = __buf_get(buf: this.data, index: idx)
+    let entry: IntMapEntry(V) = __buf_get(buf: this.data, index: idx)
     if not entry.occupied {
       __buf_set(buf: this.data, index: idx, value: { k: k, value: value, occupied: true })
       this.length = this.length + 1
@@ -354,14 +354,14 @@ func get(V)(this: view IntMap(V), k: Int) ret opt V {
   if this.capacity is 0 {
     ret none
   }
-  def h: Int = k
-  def idx: Int = h % this.capacity
+  let h: Int = k
+  let idx: Int = h % this.capacity
   if idx < 0 {
     idx = -idx
   }
-  def startIdx: Int = idx
+  let startIdx: Int = idx
   loop true {
-    def entry: IntMapEntry(V) = __buf_get(buf: this.data, index: idx)
+    let entry: IntMapEntry(V) = __buf_get(buf: this.data, index: idx)
     if not entry.occupied {
       ret none
     }
@@ -390,14 +390,14 @@ func remove(V)(this: mod IntMap(V), k: Int) {
   if this.capacity is 0 {
     ret
   }
-  def h: Int = k
-  def idx: Int = h % this.capacity
+  let h: Int = k
+  let idx: Int = h % this.capacity
   if idx < 0 {
     idx = -idx
   }
-  def startIdx: Int = idx
+  let startIdx: Int = idx
   loop true {
-    def entry: IntMapEntry(V) = __buf_get(buf: this.data, index: idx)
+    let entry: IntMapEntry(V) = __buf_get(buf: this.data, index: idx)
     if not entry.occupied {
       ret
     }
@@ -415,10 +415,10 @@ func remove(V)(this: mod IntMap(V), k: Int) {
 }
 
 func keys(V)(this: view IntMap(V)) ret List(Int) {
-  def result: List(Int) = createList(initialCap: this.length)
-  def i: Int = 0
+  let result: List(Int) = createList(initialCap: this.length)
+  let i: Int = 0
   loop i < this.capacity {
-    def entry: IntMapEntry(V) = __buf_get(buf: this.data, index: i)
+    let entry: IntMapEntry(V) = __buf_get(buf: this.data, index: i)
     if entry.occupied {
       add(result, value: entry.k)
     }
@@ -428,10 +428,10 @@ func keys(V)(this: view IntMap(V)) ret List(Int) {
 }
 
 func values(V)(this: view IntMap(V)) ret List(V) {
-  def result: List(V) = createList(initialCap: this.length)
-  def i: Int = 0
+  let result: List(V) = createList(initialCap: this.length)
+  let i: Int = 0
   loop i < this.capacity {
-    def entry: IntMapEntry(V) = __buf_get(buf: this.data, index: i)
+    let entry: IntMapEntry(V) = __buf_get(buf: this.data, index: i)
     if entry.occupied {
       add(result, value: entry.value)
     }
@@ -441,17 +441,17 @@ func values(V)(this: view IntMap(V)) ret List(V) {
 }
 
 func growIntMap(V)(this: mod IntMap(V)) {
-  def oldCap: Int = this.capacity
-  def oldData: Buffer(IntMapEntry(V)) = this.data
+  let oldCap: Int = this.capacity
+  let oldData: Buffer(IntMapEntry(V)) = this.data
   this.capacity = oldCap * 2
   if this.capacity is 0 {
     this.capacity = 8
   }
   this.data = __buf_alloc(size: this.capacity)
   this.length = 0
-  def i: Int = 0
+  let i: Int = 0
   loop i < oldCap {
-    def entry: IntMapEntry(V) = __buf_get(buf: oldData, index: i)
+    let entry: IntMapEntry(V) = __buf_get(buf: oldData, index: i)
     if entry.occupied {
       set(this, k: entry.k, value: entry.value)
     }

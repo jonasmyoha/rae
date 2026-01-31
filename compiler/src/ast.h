@@ -216,7 +216,7 @@ typedef struct AstReturnArg {
 } AstReturnArg;
 
 typedef enum {
-  AST_STMT_DEF,
+  AST_STMT_LET,
   AST_STMT_DESTRUCT,
   AST_STMT_EXPR,
   AST_STMT_RET,
@@ -250,7 +250,7 @@ struct AstStmt {
       AstTypeRef* type;
       bool is_bind;
       AstExpr* value;
-    } def_stmt;
+    } let_stmt;
     struct {
       AstDestructureBinding* bindings;
       AstExpr* call;

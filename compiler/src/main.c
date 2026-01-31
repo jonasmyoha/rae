@@ -186,8 +186,23 @@ static Value value_to_string_internal(Value val) {
     }
     case VAL_NONE:
       return value_string_copy("none", 4);
-    case VAL_OBJECT:
-      return value_string_copy("<object>", 8);
+    case VAL_OBJECT: {
+      // Use a fixed size buffer for simplicity in the VM
+      char buf[512];
+      size_t offset = 0;
+      offset += snprintf(buf + offset, sizeof(buf) - offset, "{ ");
+      for (size_t i = 0; i < val.as.object_value.field_count; i++) {
+          if (i > 0) offset += snprintf(buf + offset, sizeof(buf) - offset, ", ");
+          Value field_str = value_to_string_internal(val.as.object_value.fields[i]);
+          if (field_str.type == VAL_STRING) {
+              offset += snprintf(buf + offset, sizeof(buf) - offset, "%.*s", (int)field_str.as.string_value.length, field_str.as.string_value.chars);
+              value_free(&field_str);
+          }
+          if (offset >= sizeof(buf) - 10) break;
+      }
+      snprintf(buf + offset, sizeof(buf) - offset, " }");
+      return value_string_copy(buf, strlen(buf));
+    }
     case VAL_ARRAY:
       return value_string_copy("<array>", 7);
     case VAL_BUFFER:

@@ -70,21 +70,21 @@ func trim(this: String) ret String {
 }
 
 func split(this: String, sep: String) ret List(String) {
-  def result: List(String) = createList(initialCap: 4)
+  let result: List(String) = createList(initialCap: 4)
   if sep.length() is 0 {
     add(result, value: this)
     ret result
   }
   
-  def remaining: String = this
+  let remaining: String = this
   loop true {
-    def idx: Int = remaining.indexOf(sub: sep)
+    let idx: Int = remaining.indexOf(sub: sep)
     if idx is -1 {
       add(result, value: remaining)
       ret result
     }
     
-    def part: String = remaining.sub(start: 0, len: idx)
+    let part: String = remaining.sub(start: 0, len: idx)
     add(result, value: part)
     remaining = remaining.sub(start: idx + sep.length(), len: remaining.length() - idx - sep.length())
   }

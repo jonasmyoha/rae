@@ -10,11 +10,11 @@ func createList2Generic(T)(initialCap: Int) ret List2Generic(T) {
 }
 
 func grow(T)(this: mod List2Generic(T)) {
-  def newCap: Int = this.capacity * 2
+  let newCap: Int = this.capacity * 2
   if newCap is 0 {
     newCap = 4
   }
-  def newData: Buffer(T) = __buf_alloc(size: newCap)
+  let newData: Buffer(T) = __buf_alloc(size: newCap)
   __buf_copy(
     src: this.data
     src_off: 0
