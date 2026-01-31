@@ -316,8 +316,7 @@ static void pp_call_args(PrettyPrinter* pp, const AstCallArg* args) {
       current = current->next;
     }
     pp->indent--;
-    pp_write_indent(pp);
-    pp->start_of_line = 0;
+    pp_newline(pp);
   } else {
     int first = 1;
     while (current) {
@@ -438,7 +437,7 @@ static void pp_expr_prec(PrettyPrinter* pp, const AstExpr* expr, int parent_prec
             field = field->next;
           }
           pp->indent--;
-          pp_write_indent(pp);
+          pp_newline(pp);
         } else {
           pp_space(pp);
           AstObjectField* field = expr->as.object_literal.fields;
@@ -576,7 +575,7 @@ static void pp_expr_prec(PrettyPrinter* pp, const AstExpr* expr, int parent_prec
             current = current->next;
           }
           pp->indent--;
-          pp_write_indent(pp);
+          pp_newline(pp);
         } else {
           pp_space(pp);
           int first = 1;
@@ -615,7 +614,7 @@ static void pp_expr_prec(PrettyPrinter* pp, const AstExpr* expr, int parent_prec
             current = current->next;
           }
           pp->indent--;
-          pp_write_indent(pp);
+          pp_newline(pp);
         } else {
           int first = 1;
           while (current) {
@@ -920,8 +919,7 @@ static void pp_print_params(PrettyPrinter* pp, const AstParam* param) {
       current = current->next;
     }
     pp->indent--;
-    pp_write_indent(pp);
-    pp->start_of_line = 0;
+    pp_newline(pp);
   } else {
     int first = 1;
     while (current) {
@@ -963,8 +961,7 @@ static void pp_print_return_items(PrettyPrinter* pp, const AstReturnItem* item) 
       current = current->next;
     }
     pp->indent--;
-    pp_write_indent(pp);
-    pp->start_of_line = 0;
+    pp_newline(pp);
   } else {
     int first = 1;
     while (current) {
