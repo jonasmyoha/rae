@@ -4,25 +4,10 @@ type Point {
 }
 
 func main() {
-  def p: Point = { x: 1, y: 2 }
-  def v: view Point => p
+  let p: Point = { x: 1, y: 2 }
+  let v: view Point => p
   log(v.x)
-  def m: mod Point => p
+  let m: mod Point => p
   m.y = 20
   log(p.y)
-  def ov: opt view Point => p
-  match ov {
-    default {
-      log("has value")
-    }
-  }
-  def on: opt view Point => none
-  match on {
-    case none {
-      log("none")
-    }
-    default {
-      log("has value")
-    }
-  }
 }

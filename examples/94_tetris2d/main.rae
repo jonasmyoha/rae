@@ -1,12 +1,6 @@
 import raylib
 import math
-
-enum GameState {
-  Menu
-  Playing
-  Paused
-  GameOver
-}
+enum GameState { Menu, Playing, Paused, GameOver }
 
 enum TetrominoKind {
   I
@@ -26,9 +20,10 @@ type Pos {
 type Piece {
   kind: TetrominoKind
   pos: Pos
-  rotation: Int # 0-3
+  rotation: Int
 }
 
+# 0-3
 type Game {
   state: GameState
   grid: List(Int)
@@ -45,39 +40,99 @@ type Game {
 }
 
 func getModernColor(index: Int) ret Color {
-  if index is 1 { # I - Cyan
-    ret { r: 100, g: 230, b: 255, a: 255 }
+  # I - Cyan
+  if index is 1 {
+    ret {
+      r: 100
+      g: 230
+      b: 255
+      a: 255
+        }
   }
-  if index is 2 { # J - Blue
-    ret { r: 120, g: 160, b: 255, a: 255 }
+  # J - Blue
+  if index is 2 {
+    ret {
+      r: 120
+      g: 160
+      b: 255
+      a: 255
+        }
   }
-  if index is 3 { # L - Orange
-    ret { r: 255, g: 180, b: 120, a: 255 }
+  # L - Orange
+  if index is 3 {
+    ret {
+      r: 255
+      g: 180
+      b: 120
+      a: 255
+        }
   }
-  if index is 4 { # O - Yellow
-    ret { r: 255, g: 230, b: 120, a: 255 }
+  # O - Yellow
+  if index is 4 {
+    ret {
+      r: 255
+      g: 230
+      b: 120
+      a: 255
+        }
   }
-  if index is 5 { # S - Green
-    ret { r: 120, g: 255, b: 160, a: 255 }
+  # S - Green
+  if index is 5 {
+    ret {
+      r: 120
+      g: 255
+      b: 160
+      a: 255
+        }
   }
-  if index is 6 { # T - Purple
-    ret { r: 200, g: 160, b: 255, a: 255 }
+  # T - Purple
+  if index is 6 {
+    ret {
+      r: 200
+      g: 160
+      b: 255
+      a: 255
+        }
   }
-  if index is 7 { # Z - Red
-    ret { r: 255, g: 120, b: 140, a: 255 }
+  # Z - Red
+  if index is 7 {
+    ret {
+      r: 255
+      g: 120
+      b: 140
+      a: 255
+        }
   }
   # Empty
-  ret { r: 40, g: 40, b: 50, a: 255 }
+  ret {
+    r: 40
+    g: 40
+    b: 50
+    a: 255
+    }
 }
 
 func getKindId(kind: TetrominoKind) ret Int {
-  if kind is TetrominoKind.I { ret 1 }
-  if kind is TetrominoKind.J { ret 2 }
-  if kind is TetrominoKind.L { ret 3 }
-  if kind is TetrominoKind.O { ret 4 }
-  if kind is TetrominoKind.S { ret 5 }
-  if kind is TetrominoKind.T { ret 6 }
-  ret 7 # Z
+  if kind is TetrominoKind.I {
+    ret 1
+  }
+  if kind is TetrominoKind.J {
+    ret 2
+  }
+  if kind is TetrominoKind.L {
+    ret 3
+  }
+  if kind is TetrominoKind.O {
+    ret 4
+  }
+  if kind is TetrominoKind.S {
+    ret 5
+  }
+  if kind is TetrominoKind.T {
+    ret 6
+  }
+  # Z
+  ret 7
 }
 
 # Returns 1 if cell at (x, y) is occupied or out of bounds
@@ -86,7 +141,8 @@ func isOccupied(g: view Game, x: Int, y: Int) ret Int {
     ret 1
   }
   if y < 0 {
-    ret 0 # Allow pieces above the board
+    # Allow pieces above the board
+    ret 0
   }
   if g.grid.get(index: y * g.width + x) > 0 {
     ret 1
@@ -106,82 +162,112 @@ func getShapeCell(kind: TetrominoKind, rot: Int, px: Int, py: Int) ret Int {
         ret 1
       }
     }
-  } else if kind is TetrominoKind.J {
-    if rot is 0 {
-      if (px is 1 and py >= 0 and py <= 2) or (px is 0 and py is 2) {
-        ret 1
-      }
-    } else if rot is 1 {
-      if (py is 1 and px >= 0 and px <= 2) or (px is 0 and py is 0) {
-        ret 1
-      }
-    } else if rot is 2 {
-      if (px is 1 and py >= 0 and py <= 2) or (px is 2 and py is 0) {
-        ret 1
-      }
-    } else if rot is 3 {
-      if (py is 1 and px >= 0 and px <= 2) or (px is 2 and py is 2) {
-        ret 1
-      }
-    }
-  } else if kind is TetrominoKind.L {
-    if rot is 0 {
-      if (px is 1 and py >= 0 and py <= 2) or (px is 2 and py is 2) {
-        ret 1
-      }
-    } else if rot is 1 {
-      if (py is 1 and px >= 0 and px <= 2) or (px is 0 and py is 2) {
-        ret 1
-      }
-    } else if rot is 2 {
-      if (px is 1 and py >= 0 and py <= 2) or (px is 0 and py is 0) {
-        ret 1
-      }
-    } else if rot is 3 {
-      if (py is 1 and px >= 0 and px <= 2) or (px is 2 and py is 0) {
-        ret 1
-      }
-    }
-  } else if kind is TetrominoKind.O {
-    if px >= 1 and px <= 2 and py >= 1 and py <= 2 {
-      ret 1
-    }
-  } else if kind is TetrominoKind.S {
-    if rot is 0 or rot is 2 {
-      if (py is 1 and px >= 1 and px <= 2) or (py is 2 and px >= 0 and px <= 1) {
-        ret 1
+  } else {
+    if kind is TetrominoKind.J {
+      if rot is 0 {
+        if px is 1 and py >= 0 and py <= 2 or px is 0 and py is 2 {
+          ret 1
+        }
+      } else {
+        if rot is 1 {
+          if py is 1 and px >= 0 and px <= 2 or px is 0 and py is 0 {
+            ret 1
+          }
+        } else {
+          if rot is 2 {
+            if px is 1 and py >= 0 and py <= 2 or px is 2 and py is 0 {
+              ret 1
+            }
+          } else {
+            if rot is 3 {
+              if py is 1 and px >= 0 and px <= 2 or px is 2 and py is 2 {
+                ret 1
+              }
+            }
+          }
+        }
       }
     } else {
-      if (px is 1 and py >= 0 and py <= 1) or (px is 2 and py >= 1 and py <= 2) {
-        ret 1
-      }
-    }
-  } else if kind is TetrominoKind.T {
-    if rot is 0 {
-      if (py is 1 and px >= 0 and px <= 2) or (px is 1 and py is 0) {
-        ret 1
-      }
-    } else if rot is 1 {
-      if (px is 1 and py >= 0 and py <= 2) or (px is 2 and py is 1) {
-        ret 1
-      }
-    } else if rot is 2 {
-      if (py is 1 and px >= 0 and px <= 2) or (px is 1 and py is 2) {
-        ret 1
-      }
-    } else if rot is 3 {
-      if (px is 1 and py >= 0 and py <= 2) or (px is 0 and py is 1) {
-        ret 1
-      }
-    }
-  } else if kind is TetrominoKind.Z {
-    if rot is 0 or rot is 2 {
-      if (py is 1 and px >= 0 and px <= 1) or (py is 2 and px >= 1 and px <= 2) {
-        ret 1
-      }
-    } else {
-      if (px is 1 and py >= 1 and py <= 2) or (px is 2 and py >= 0 and py <= 1) {
-        ret 1
+      if kind is TetrominoKind.L {
+        if rot is 0 {
+          if px is 1 and py >= 0 and py <= 2 or px is 2 and py is 2 {
+            ret 1
+          }
+        } else {
+          if rot is 1 {
+            if py is 1 and px >= 0 and px <= 2 or px is 0 and py is 2 {
+              ret 1
+            }
+          } else {
+            if rot is 2 {
+              if px is 1 and py >= 0 and py <= 2 or px is 0 and py is 0 {
+                ret 1
+              }
+            } else {
+              if rot is 3 {
+                if py is 1 and px >= 0 and px <= 2 or px is 2 and py is 0 {
+                  ret 1
+                }
+              }
+            }
+          }
+        }
+      } else {
+        if kind is TetrominoKind.O {
+          if px >= 1 and px <= 2 and py >= 1 and py <= 2 {
+            ret 1
+          }
+        } else {
+          if kind is TetrominoKind.S {
+            if rot is 0 or rot is 2 {
+              if py is 1 and px >= 1 and px <= 2 or py is 2 and px >= 0 and px <= 1 {
+                ret 1
+              }
+            } else {
+              if px is 1 and py >= 0 and py <= 1 or px is 2 and py >= 1 and py <= 2 {
+                ret 1
+              }
+            }
+          } else {
+            if kind is TetrominoKind.T {
+              if rot is 0 {
+                if py is 1 and px >= 0 and px <= 2 or px is 1 and py is 0 {
+                  ret 1
+                }
+              } else {
+                if rot is 1 {
+                  if px is 1 and py >= 0 and py <= 2 or px is 2 and py is 1 {
+                    ret 1
+                  }
+                } else {
+                  if rot is 2 {
+                    if py is 1 and px >= 0 and px <= 2 or px is 1 and py is 2 {
+                      ret 1
+                    }
+                  } else {
+                    if rot is 3 {
+                      if px is 1 and py >= 0 and py <= 2 or px is 0 and py is 1 {
+                        ret 1
+                      }
+                    }
+                  }
+                }
+              }
+            } else {
+              if kind is TetrominoKind.Z {
+                if rot is 0 or rot is 2 {
+                  if py is 1 and px >= 0 and px <= 1 or py is 2 and px >= 1 and px <= 2 {
+                    ret 1
+                  }
+                } else {
+                  if px is 1 and py >= 1 and py <= 2 or px is 2 and py >= 0 and py <= 1 {
+                    ret 1
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     }
   }
@@ -189,20 +275,24 @@ func getShapeCell(kind: TetrominoKind, rot: Int, px: Int, py: Int) ret Int {
 }
 
 func canMove(g: view Game, dx: Int, dy: Int, dr: Int) ret Int {
-  def cp: view Piece => g.currentPiece
-  def pos: view Pos => cp.pos
-  def newX: Int = pos.x + dx
-  def newY: Int = pos.y + dy
-  def newRot: Int = (cp.rotation + dr) % 4
+  let cp: view Piece => g.currentPiece
+  let pos: view Pos => cp.pos
+  let newX: Int = pos.x + dx
+  let newY: Int = pos.y + dy
+  let newRot: Int = (cp.rotation + dr) % 4
   if newRot < 0 {
     newRot = newRot + 4
   }
-  
-  def py: Int = 0
+  let py: Int = 0
   loop py < 4 {
-    def px: Int = 0
+    let px: Int = 0
     loop px < 4 {
-      if getShapeCell(kind: cp.kind, rot: newRot, px: px, py: py) is 1 {
+      if getShapeCell(
+        kind: cp.kind
+        rot: newRot
+        px: px
+        py: py
+      ) is 1 {
         if isOccupied(g: g, x: newX + px, y: newY + py) is 1 {
           ret 0
         }
@@ -215,13 +305,13 @@ func canMove(g: view Game, dx: Int, dy: Int, dr: Int) ret Int {
 }
 
 func lockPiece(g: mod Game) {
-  def cp: mod Piece => g.currentPiece
-  def pos: view Pos => cp.pos
-  def grid: mod List(Int) => g.grid
-  def kindId: Int = getKindId(kind: cp.kind)
-  def py: Int = 0
+  let cp: mod Piece => g.currentPiece
+  let pos: view Pos => cp.pos
+  let grid: mod List(Int) => g.grid
+  let kindId: Int = getKindId(kind: cp.kind)
+  let py: Int = 0
   loop py < 4 {
-    def px: Int = 0
+    let px: Int = 0
     loop px < 4 {
       if getShapeCell(
         kind: cp.kind
@@ -229,8 +319,8 @@ func lockPiece(g: mod Game) {
         px: px
         py: py
       ) is 1 {
-        def gx: Int = pos.x + px
-        def gy: Int = pos.y + py
+        let gx: Int = pos.x + px
+        let gy: Int = pos.y + py
         if gy >= 0 and gy < g.height {
           grid.set(index: gy * g.width + gx, value: kindId)
         }
@@ -242,25 +332,24 @@ func lockPiece(g: mod Game) {
 }
 
 func checkLines(g: mod Game) {
-  def grid: mod List(Int) => g.grid
-  def linesCleared: Int = 0
-  def y: Int = g.height - 1
+  let grid: mod List(Int) => g.grid
+  let linesCleared: Int = 0
+  let y: Int = g.height - 1
   loop y >= 0 {
-    def full: Int = 1
-    def x: Int = 0
+    let full: Int = 1
+    let x: Int = 0
     loop x < g.width {
       if grid.get(index: y * g.width + x) is 0 {
         full = 0
       }
       x = x + 1
     }
-    
     if full is 1 {
       linesCleared = linesCleared + 1
       # Shift lines down
-      def ty: Int = y
+      let ty: Int = y
       loop ty > 0 {
-        def tx: Int = 0
+        let tx: Int = 0
         loop tx < g.width {
           grid.set(index: ty * g.width + tx, value: grid.get(index: (ty - 1) * g.width + tx))
           tx = tx + 1
@@ -268,7 +357,7 @@ func checkLines(g: mod Game) {
         ty = ty - 1
       }
       # Top line is 0
-      def tx: Int = 0
+      let tx: Int = 0
       loop tx < g.width {
         grid.set(index: tx, value: 0)
         tx = tx + 1
@@ -278,20 +367,18 @@ func checkLines(g: mod Game) {
     }
     y = y - 1
   }
-  
   if linesCleared > 0 {
     g.lines = g.lines + linesCleared
-    g.score = g.score + (linesCleared * 100 * g.level)
-    
+    g.score = g.score + linesCleared * 100 * g.level
     # Level progression: every 10 lines
-    def newLevel: Int = (g.lines / 10) + 1
+    let newLevel: Int = g.lines / 10 + 1
     if newLevel > 10 {
       newLevel = 10
     }
     if newLevel > g.level {
       g.level = newLevel
       # Decrease delay (increase speed)
-      g.moveDelay = 32 - (g.level * 3)
+      g.moveDelay = 32 - g.level * 3
       if g.moveDelay < 2 {
         g.moveDelay = 2
       }
@@ -300,30 +387,43 @@ func checkLines(g: mod Game) {
 }
 
 func spawnPiece(g: mod Game) {
-  def cp: mod Piece => g.currentPiece
-  def k: Int = random(min: 0, max: 6)
+  let cp: mod Piece => g.currentPiece
+  let k: Int = random(min: 0, max: 6)
   if k is 0 {
     cp.kind = TetrominoKind.I
-  } else if k is 1 {
-    cp.kind = TetrominoKind.J
-  } else if k is 2 {
-    cp.kind = TetrominoKind.L
-  } else if k is 3 {
-    cp.kind = TetrominoKind.O
-  } else if k is 4 {
-    cp.kind = TetrominoKind.S
-  } else if k is 5 {
-    cp.kind = TetrominoKind.T
   } else {
-    cp.kind = TetrominoKind.Z
+    if k is 1 {
+      cp.kind = TetrominoKind.J
+    } else {
+      if k is 2 {
+        cp.kind = TetrominoKind.L
+      } else {
+        if k is 3 {
+          cp.kind = TetrominoKind.O
+        } else {
+          if k is 4 {
+            cp.kind = TetrominoKind.S
+          } else {
+            if k is 5 {
+              cp.kind = TetrominoKind.T
+            } else {
+              cp.kind = TetrominoKind.Z
+            }
+          }
+        }
+      }
+    }
   }
-  
-  def pos: mod Pos => cp.pos
+  let pos: mod Pos => cp.pos
   pos.x = g.width / 2 - 2
   pos.y = -1
   cp.rotation = 0
-  
-  if canMove(g: g, dx: 0, dy: 0, dr: 0) is 0 {
+  if canMove(
+    g: g
+    dx: 0
+    dy: 0
+    dr: 0
+  ) is 0 {
     g.state = GameState.GameOver
   }
 }
@@ -338,12 +438,11 @@ func initGame(g: mod Game) {
   g.moveTimer = 0
   g.moveDelay = 30
   g.hMoveTimer = 0
-  g.hMoveDelay = 6   # tweak: 3–6 feels reasonable at 60fps
-
-  
+  # tweak: 3–6 feels reasonable at 60fps
+  g.hMoveDelay = 6
   # Initialize grid with 0s
-  def i: Int = 0
-  def grid: mod List(Int) => g.grid
+  let i: Int = 0
+  let grid: mod List(Int) => g.grid
   grid.clear()
   loop i < g.width * g.height {
     grid.add(value: 0)
@@ -359,31 +458,32 @@ func draw(g: view Game) {
     g: 30
     b: 40
     a: 255
-  })
-  
-  def sw: Float = getScreenWidth().toFloat()
-  def sh: Float = getScreenHeight().toFloat()
-  
+    })
+  let sw: Float = getScreenWidth().toFloat()
+  let sh: Float = getScreenHeight().toFloat()
   # Calculate scaling: target height is 20 rows, let's leave 10% margin top/bottom
-  def cellSize: Float = (sh * 0.8) / 20.0
-  def offsetX: Float = (sw - (g.width.toFloat() * cellSize)) / 2.0
-  def offsetY: Float = (sh - (g.height.toFloat() * cellSize)) / 2.0
-  
+  let cellSize: Float = sh * 0.8 / 20.0
+  let offsetX: Float = (sw - g.width.toFloat() * cellSize) / 2.0
+  let offsetY: Float = (sh - g.height.toFloat() * cellSize) / 2.0
   # Draw Grid Area Outline (Modern Pastel Lavender)
+  # Draw Grid
   drawRectangleLines(
     x: offsetX - 2.0
     y: offsetY - 2.0
-    width: (g.width.toFloat() * cellSize) + 4.0
-    height: (g.height.toFloat() * cellSize) + 4.0
-    color: { r: 180, g: 180, b: 255, a: 255 }
+    width: g.width.toFloat() * cellSize + 4.0
+    height: g.height.toFloat() * cellSize + 4.0
+    color: {
+      r: 180
+      g: 180
+      b: 255
+      a: 255
+        }
   )
-  
-  # Draw Grid
-  def y: Int = 0
+  let y: Int = 0
   loop y < g.height {
-    def x: Int = 0
+    let x: Int = 0
     loop x < g.width {
-      def val: Int = g.grid.get(index: y * g.width + x)
+      let val: Int = g.grid.get(index: y * g.width + x)
       if val > 0 {
         drawRectangle(
           x: x.toFloat() * cellSize + offsetX
@@ -397,14 +497,13 @@ func draw(g: view Game) {
     }
     y = y + 1
   }
-  
   # Draw current piece
-  def cp: view Piece => g.currentPiece
-  def pos: view Pos => cp.pos
-  def kindId: Int = getKindId(kind: cp.kind)
-  def py: Int = 0
+  let cp: view Piece => g.currentPiece
+  let pos: view Pos => cp.pos
+  let kindId: Int = getKindId(kind: cp.kind)
+  let py: Int = 0
   loop py < 4 {
-    def px: Int = 0
+    let px: Int = 0
     loop px < 4 {
       if getShapeCell(
         kind: cp.kind
@@ -424,60 +523,94 @@ func draw(g: view Game) {
     }
     py = py + 1
   }
-  
   # UI Text (Modern Pastel Rainbow Palette)
   # Scale font size based on screen height
-  def fontSize: Float = sh / 25.0
-  if fontSize < 10.0 { fontSize = 10.0 }
-
+  let fontSize: Float = sh / 25.0
+  if fontSize < 10.0 {
+    fontSize = 10.0
+  }
+  # Soft Pink
+  # Soft Green
   drawText(
     text: "SCORE: {g.score}"
     x: 10.0
     y: 10.0
     fontSize: fontSize
-    color: { r: 255, g: 200, b: 200, a: 255 } # Soft Pink
+    color: {
+      r: 255
+      g: 200
+      b: 200
+      a: 255
+        }
   )
+  # Soft Blue
   drawText(
     text: "LEVEL: {g.level}"
     x: 10.0
     y: 10.0 + fontSize * 1.2
     fontSize: fontSize
-    color: { r: 200, g: 255, b: 200, a: 255 } # Soft Green
+    color: {
+      r: 200
+      g: 255
+      b: 200
+      a: 255
+        }
   )
   drawText(
     text: "LINES: {g.lines}"
     x: 10.0
     y: 10.0 + fontSize * 2.4
     fontSize: fontSize
-    color: { r: 200, g: 200, b: 255, a: 255 } # Soft Blue
+    color: {
+      r: 200
+      g: 200
+      b: 255
+      a: 255
+        }
   )
-  
   if g.state is GameState.Paused {
+    # Soft Yellow
     drawText(
       text: "PAUSED"
-      x: sw / 2.0 - (fontSize * 3.0)
+      x: sw / 2.0 - fontSize * 3.0
       y: sh / 2.0
       fontSize: fontSize * 2.0
-      color: { r: 255, g: 255, b: 180, a: 255 } # Soft Yellow
+      color: {
+        r: 255
+        g: 255
+        b: 180
+        a: 255
+            }
     )
   }
   if g.state is GameState.GameOver {
+    # Soft Red
+    # Light Gray
     drawText(
       text: "GAME OVER"
-      x: sw / 2.0 - (fontSize * 4.0)
+      x: sw / 2.0 - fontSize * 4.0
       y: sh / 2.0
       fontSize: fontSize * 2.0
-      color: { r: 255, g: 150, b: 150, a: 255 } # Soft Red
+      color: {
+        r: 255
+        g: 150
+        b: 150
+        a: 255
+            }
     )
     drawText(
       text: "Press R to Restart"
-      x: sw / 2.0 - (fontSize * 4.0)
+      x: sw / 2.0 - fontSize * 4.0
       y: sh / 2.0 + fontSize * 2.2
       fontSize: fontSize
-      color: { r: 220, g: 220, b: 220, a: 255 } # Light Gray
+      color: {
+        r: 220
+        g: 220
+        b: 220
+        a: 255
+            }
     )
   }
-  
   endDrawing()
 }
 
@@ -485,56 +618,65 @@ func handleInput(g: mod Game) {
   if g.state is not GameState.Playing {
     ret
   }
-
-  def cp: mod Piece => g.currentPiece
-  def pos: mod Pos => cp.pos
-
+  let cp: mod Piece => g.currentPiece
+  let pos: mod Pos => cp.pos
   # Horizontal repeat timer
   g.hMoveTimer = g.hMoveTimer + 1
-
-  def moveLeft: Int  = isKeyDown(key: 263) or isKeyDown(key: 65)
-  def moveRight: Int = isKeyDown(key: 262) or isKeyDown(key: 68)
-
+  let moveLeft: Int = isKeyDown(key: 263) or isKeyDown(key: 65)
+  let moveRight: Int = isKeyDown(key: 262) or isKeyDown(key: 68)
   if g.hMoveTimer >= g.hMoveDelay {
     if moveLeft is 1 and moveRight is 0 {
-      if canMove(g: g, dx: -1, dy: 0, dr: 0) is 1 {
+      if canMove(
+        g: g
+        dx: -1
+        dy: 0
+        dr: 0
+      ) is 1 {
         pos.x = pos.x - 1
         g.hMoveTimer = 0
       }
     }
-
     if moveRight is 1 and moveLeft is 0 {
-      if canMove(g: g, dx: 1, dy: 0, dr: 0) is 1 {
+      if canMove(
+        g: g
+        dx: 1
+        dy: 0
+        dr: 0
+      ) is 1 {
         pos.x = pos.x + 1
         g.hMoveTimer = 0
       }
     }
   }
-
   # Reset when no horizontal key held
   if moveLeft is 0 and moveRight is 0 {
     g.hMoveTimer = g.hMoveTimer
   }
-
   # Rotate (still single-press)
-  if isKeyPressed(key: 32) is 1
-    or isKeyPressed(key: 265) is 1
-    or isKeyPressed(key: 87) is 1 {
-    if canMove(g: g, dx: 0, dy: 0, dr: 1) is 1 {
+  if isKeyPressed(key: 32) is 1 or isKeyPressed(key: 265) is 1 or isKeyPressed(key: 87) is 1 {
+    if canMove(
+      g: g
+      dx: 0
+      dy: 0
+      dr: 1
+    ) is 1 {
       cp.rotation = (cp.rotation + 1) % 4
     }
   }
-
   # Soft Drop
-  def effectiveDelay: Int = g.moveDelay
+  let effectiveDelay: Int = g.moveDelay
   if isKeyDown(key: 264) is 1 or isKeyDown(key: 83) is 1 {
     effectiveDelay = 2
   }
-
   # Gravity
   g.moveTimer = g.moveTimer + 1
   if g.moveTimer >= effectiveDelay {
-    if canMove(g: g, dx: 0, dy: 1, dr: 0) is 1 {
+    if canMove(
+      g: g
+      dx: 0
+      dy: 1
+      dr: 0
+    ) is 1 {
       pos.y = pos.y + 1
     } else {
       lockPiece(g)
@@ -545,60 +687,51 @@ func handleInput(g: mod Game) {
   }
 }
 
-
 func main() {
   # FLAG_WINDOW_RESIZABLE = 4
   # We can't easily use Bitwise OR yet, so just 4
   setConfigFlags(flags: 4)
   initWindow(width: 400, height: 500, title: "Rae Tetris 2D")
   setTargetFPS(fps: 60)
-  
-  def g: Game = {
+  let g: Game = {
     state: GameState.Menu
     grid: createList(initialCap: 200)
     width: 0
     height: 0
-    currentPiece: {
-      kind: TetrominoKind.I
-      pos: {
-        x: 0
-        y: 0
-      }
-      rotation: 0
-    }
+    currentPiece: { kind: TetrominoKind.I, pos: { x: 0, y: 0 }, rotation: 0 }
     score: 0
     lines: 0
     level: 1
     moveTimer: 0
     moveDelay: 0
-  }
-  
+    hMoveTimer: 0
+    hMoveDelay: 0
+    }
   initGame(g)
-  
   loop windowShouldClose() is 0 {
     # Input: Global (Menu/GameOver)
     if g.state is GameState.GameOver {
-      if isKeyPressed(key: 82) is 1 { # R key
+      # R key
+      if isKeyPressed(key: 82) is 1 {
         initGame(g)
       }
     }
-    
     # Input: Pause
-    if isKeyPressed(key: 80) is 1 { # P key
+    # P key
+    if isKeyPressed(key: 80) is 1 {
       if g.state is GameState.Playing {
         g.state = GameState.Paused
-      } else if g.state is GameState.Paused {
-        g.state = GameState.Playing
+      } else {
+        if g.state is GameState.Paused {
+          g.state = GameState.Playing
+        }
       }
     }
-    
     # early returns don't work yet, so gate it here.
     if g.state is GameState.Playing {
       handleInput(g)
     }
-    
     draw(g)
   }
-  
   closeWindow()
 }

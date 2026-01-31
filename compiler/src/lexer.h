@@ -26,7 +26,7 @@ typedef enum {
   /* Keywords */
   TOK_KW_TYPE,
   TOK_KW_FUNC,
-  TOK_KW_DEF,
+  TOK_KW_LET,
   TOK_KW_RET,
   TOK_KW_SPAWN,
   TOK_KW_VIEW,

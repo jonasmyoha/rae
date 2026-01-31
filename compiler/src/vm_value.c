@@ -273,6 +273,8 @@ void value_print(const Value* value) {
       printf("{ ");
       for (size_t i = 0; i < value->as.object_value.field_count; i++) {
         if (i > 0) printf(", ");
+        // Note: we don't have field names at runtime easily here without more metadata
+        // but we can at least print the values
         value_print(&value->as.object_value.fields[i]);
       }
       printf(" }");
