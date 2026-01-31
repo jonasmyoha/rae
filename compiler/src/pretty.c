@@ -149,7 +149,7 @@ static void pp_check_comments(PrettyPrinter* pp, size_t line) {
             pp_write(pp, "#");
             size_t remaining = len - pos;
             size_t to_write = remaining;
-            if (pp->indent * 2 + 1 + remaining > 120) {
+            if (pp->indent * 2 + 1 + remaining > 100) {
                 to_write = 120 - (pp->indent * 2 + 1);
                 size_t last_space = to_write;
                 while (last_space > 0 && !isspace((unsigned char)text[pos + last_space])) {
@@ -301,7 +301,7 @@ static void pp_call_args(PrettyPrinter* pp, const AstCallArg* args) {
     estimated_len += (int)current->name.len + 2 + 20; 
     current = current->next; 
   }
-  if (count > 3 || estimated_len > 120) wrap = true;
+  if (count > 3 || estimated_len > 100) wrap = true;
   
   current = args;
   if (wrap) {
@@ -421,9 +421,14 @@ static void pp_expr_prec(PrettyPrinter* pp, const AstExpr* expr, int parent_prec
       if (expr->as.object_literal.fields) {
         bool wrap = false;
         int count = 0;
+        int estimated_len = pp->current_col;
         AstObjectField* scan = expr->as.object_literal.fields;
-        while (scan) { count++; scan = scan->next; }
-        if (count > 4) wrap = true;
+        while (scan) { 
+          count++; 
+          estimated_len += (int)scan->name.len + 2 + 20; 
+          scan = scan->next; 
+        }
+        if (count > 4 || estimated_len > 100) wrap = true;
 
         if (wrap) {
           pp_newline(pp);
@@ -557,9 +562,14 @@ static void pp_expr_prec(PrettyPrinter* pp, const AstExpr* expr, int parent_prec
       if (current) {
         bool wrap = false;
         int count = 0;
+        int estimated_len = pp->current_col;
         AstCollectionElement* scan = current;
-        while (scan) { count++; scan = scan->next; }
-        if (count > 4) wrap = true;
+        while (scan) { 
+          count++; 
+          estimated_len += (scan->key ? (int)scan->key->len + 2 : 0) + 20;
+          scan = scan->next; 
+        }
+        if (count > 4 || estimated_len > 100) wrap = true;
 
         if (wrap) {
           pp_newline(pp);
@@ -599,9 +609,14 @@ static void pp_expr_prec(PrettyPrinter* pp, const AstExpr* expr, int parent_prec
       if (current) {
         bool wrap = false;
         int count = 0;
+        int estimated_len = pp->current_col;
         AstExprList* scan = current;
-        while (scan) { count++; scan = scan->next; }
-        if (count > 5) wrap = true;
+        while (scan) { 
+          count++; 
+          estimated_len += 20; 
+          scan = scan->next; 
+        }
+        if (count > 5 || estimated_len > 100) wrap = true;
 
         if (wrap) {
           pp_newline(pp);

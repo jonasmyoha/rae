@@ -99,19 +99,19 @@ func drawUISystem(p1Score: Int, p2Score: Int, winner: Int) {
     g: 0
     b: 0
     a: 255
-    }
+  }
   let green: Color = {
     r: 5
     g: 145
     b: 0
     a: 255
-    }
+  }
   let teal: Color = {
     r: 5
     g: 145
     b: 120
     a: 255
-    }
+  }
   if winner <= 0 {
     drawText(
       text: "{p1Score} - {p2Score}"
@@ -150,13 +150,13 @@ func main() {
     g: 255
     b: 255
     a: 255
-    }
+  }
   let darkGray: Color = {
     r: 20
     g: 20
     b: 20
     a: 255
-    }
+  }
   let p1Pos: PaddleTransform = { x: 20.0, y: 175.0 }
   let p2Pos: PaddleTransform = { x: 760.0, y: 175.0 }
   let bPos: PaddleTransform = { x: 400.0, y: 225.0 }
@@ -166,7 +166,7 @@ func main() {
     timer: 0
     targetY: 225.0
     decision: AIDecision.None
-    }
+  }
   let p1Score: Int = 0
   let p2Score: Int = 0
   let winner: Int = 0
@@ -177,7 +177,11 @@ func main() {
       height: 450.0
       pHeight: 100.0
     )
-    p2Pos.y = paddleAiSystem(ai: aiState, ballY: bPos.y, paddleY: p2Pos.y)
+    p2Pos.y = paddleAiSystem(
+      ai: aiState
+      ballY: bPos.y
+      paddleY: p2Pos.y
+    )
     movementSystem(pos: bPos, vel: bVel)
     bounceSystem(
       pos: bPos
@@ -221,7 +225,11 @@ func main() {
     }
     beginDrawing()
     clearBackground(color: darkGray)
-    drawUISystem(p1Score: p1Score, p2Score: p2Score, winner: winner)
+    drawUISystem(
+      p1Score: p1Score
+      p2Score: p2Score
+      winner: winner
+    )
     drawRectangle(
       x: 20.0
       y: p1Pos.y

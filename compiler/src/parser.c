@@ -372,14 +372,11 @@ static bool is_multiline(const Token* start, const Token* end) {
 }
 
 static void parser_consume_comma(Parser* parser, bool multiline, const char* context) {
-  if (multiline) {
-    if (parser_match(parser, TOK_COMMA)) {
-      parser_error(parser, parser_previous(parser), "comma not allowed in multi-line %s", context);
-    }
-  } else {
-    if (!parser_match(parser, TOK_COMMA)) {
+  if (parser_match(parser, TOK_COMMA)) {
+    return;
+  }
+  if (!multiline) {
       parser_error(parser, parser_peek(parser), "comma required in single-line %s", context);
-    }
   }
 }
 
