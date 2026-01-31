@@ -425,7 +425,7 @@ static void pp_expr_prec(PrettyPrinter* pp, const AstExpr* expr, int parent_prec
         AstObjectField* scan = expr->as.object_literal.fields;
         while (scan) { 
           count++; 
-          estimated_len += (int)scan->name.len + 2 + 20; 
+          estimated_len += (int)scan->name.len + 2 + 10; // estimate 10 per value instead of 20
           scan = scan->next; 
         }
         if (count > 4 || estimated_len > 100) wrap = true;
@@ -566,7 +566,7 @@ static void pp_expr_prec(PrettyPrinter* pp, const AstExpr* expr, int parent_prec
         AstCollectionElement* scan = current;
         while (scan) { 
           count++; 
-          estimated_len += (scan->key ? (int)scan->key->len + 2 : 0) + 20;
+          estimated_len += (scan->key ? (int)scan->key->len + 2 : 0) + 10;
           scan = scan->next; 
         }
         if (count > 4 || estimated_len > 100) wrap = true;
@@ -613,7 +613,7 @@ static void pp_expr_prec(PrettyPrinter* pp, const AstExpr* expr, int parent_prec
         AstExprList* scan = current;
         while (scan) { 
           count++; 
-          estimated_len += 20; 
+          estimated_len += 10; 
           scan = scan->next; 
         }
         if (count > 5 || estimated_len > 100) wrap = true;
