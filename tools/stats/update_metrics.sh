@@ -32,33 +32,42 @@ fi
 CURRENT_COMMIT="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || echo "none")"
 
 DECISION="$(NEW_FILE_COUNT=$FILE_COUNT NEW_LINE_COUNT=$LINE_COUNT CURRENT_COMMIT="$CURRENT_COMMIT" METRICS_FILE="$METRICS_FILE" python3 - <<'PY'
-import json, os, sys
+import json, os, sys, datetime
 path = os.environ["METRICS_FILE"]
 new_files = int(os.environ["NEW_FILE_COUNT"])
 new_lines = int(os.environ["NEW_LINE_COUNT"])
 new_commit = os.environ["CURRENT_COMMIT"]
+now = datetime.datetime.now()
+today_str = now.strftime("%Y-%m-%d")
+
 try:
     with open(path, "r", encoding="utf-8") as fh:
         lines = [line.strip() for line in fh if line.strip()]
 except FileNotFoundError:
     print("append")
     sys.exit(0)
+
 if not lines:
     print("append")
     sys.exit(0)
+
 try:
     data = json.loads(lines[-1])
 except json.JSONDecodeError:
     print("append")
     sys.exit(0)
+
+last_timestamp = data.get("timestamp", "")
+is_today = last_timestamp.startswith(today_str)
+
 if data.get("src_file_count") == new_files and data.get("src_line_count") == new_lines:
-    last_commit = data.get("commit", "")
-    if last_commit and last_commit == new_commit:
-        message = f"Compiler metrics unchanged for commit {new_commit}; skipping update."
-    else:
-        message = "Compiler metrics unchanged; skipping update."
-    print("skip")
-    print(message)
+    if data.get("commit", "") == new_commit:
+        print("skip")
+        print(f"Compiler metrics unchanged for commit {new_commit}; skipping update.")
+        sys.exit(0)
+
+if is_today:
+    print("replace")
 else:
     print("append")
 PY
@@ -77,7 +86,20 @@ fi
 TIMESTAMP="$(date +"%Y-%m-%d %H:%M:%S %z")"
 mkdir -p "$STATS_DIR"
 JSON_ENTRY=$(printf '{"timestamp":"%s","commit":"%s","src_file_count":%d,"src_line_count":%d}' "$TIMESTAMP" "$CURRENT_COMMIT" "$FILE_COUNT" "$LINE_COUNT")
-echo "$JSON_ENTRY" >> "$METRICS_FILE"
+
+if [ "$DECISION_CODE" = "replace" ]; then
+  # Remove the last line and append the new one
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    sed -i '' '$d' "$METRICS_FILE"
+  else
+    sed -i '$d' "$METRICS_FILE"
+  fi
+  echo "$JSON_ENTRY" >> "$METRICS_FILE"
+  echo "Updated today's compiler metrics: $JSON_ENTRY"
+else
+  echo "$JSON_ENTRY" >> "$METRICS_FILE"
+  echo "Recorded compiler metrics: $JSON_ENTRY"
+fi
 
 cat > "$LATEST_FILE" <<NOTE
 Rae compiler metrics
