@@ -43,6 +43,8 @@ const buildDurationEmpty = document.getElementById("build-duration-empty");
 const errorIndicator = document.getElementById("error-indicator");
 const errorCount = document.getElementById("error-count");
 const errorBtnText = document.getElementById("error-btn-text");
+const errorIconCheck = document.getElementById("error-icon-check");
+const errorIconWarning = document.getElementById("error-icon-warning");
 const errorModal = document.getElementById("error-log-modal");
 const errorLogList = document.getElementById("error-log-list");
 const errorLogEmpty = document.getElementById("error-log-empty");
@@ -3103,10 +3105,14 @@ function updateErrorIndicator() {
     errorIndicator.classList.add("has-errors");
     errorIndicator.setAttribute("title", `Open error log (${count})`);
     if (errorBtnText) errorBtnText.textContent = "Errors";
+    if (errorIconCheck) errorIconCheck.style.display = "none";
+    if (errorIconWarning) errorIconWarning.style.display = "";
   } else {
     errorIndicator.classList.remove("has-errors");
     errorIndicator.setAttribute("title", "Open error log (0)");
     if (errorBtnText) errorBtnText.textContent = "No errors";
+    if (errorIconCheck) errorIconCheck.style.display = "";
+    if (errorIconWarning) errorIconWarning.style.display = "none";
   }
 }
 
