@@ -21,10 +21,11 @@ func initEntity(
 ) {
   e.kind = kind
   e.currentPos = { x: x, y: y, z: z }
-  e.targetPos = { x: randomFloat(min: -10.0, max: 10.0), y: randomFloat(
-    min: 0.0
-    max: 8.0
-  ), z: randomFloat(min: -10.0, max: 10.0) }
+  e.targetPos = {
+    x: randomFloat(min: -10.0, max: 10.0)
+    y: randomFloat(min: 0.0, max: 8.0)
+    z: randomFloat(min: -10.0, max: 10.0)
+  }
   e.size = size
   e.hue = hue
 }
@@ -53,11 +54,7 @@ func updateEntity(e: mod Entity) {
 
 func drawEntity(e: view Entity, time: Float) {
   let h: Float = (e.hue + time * 30.0) % 360.0
-  let color: Color = colorFromHSV(
-    hue: h
-    saturation: 0.4
-    value: 0.9
-  )
+  let color: Color = colorFromHSV(hue: h, saturation: 0.4, value: 0.9)
   match e.kind {
     case EntityKind.Cube {
       drawCube(
@@ -76,11 +73,7 @@ func drawEntity(e: view Entity, time: Float) {
       )
     }
     case EntityKind.Sphere {
-      drawSphere(
-        centerPos: e.currentPos
-        radius: e.size * 0.6
-        color: color
-      )
+      drawSphere(centerPos: e.currentPos, radius: e.size * 0.6, color: color)
     }
   }
 }

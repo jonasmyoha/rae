@@ -119,10 +119,7 @@ func length(T)(this: view List(T)) ret Int {
 
 func swap(T)(this: mod List(T), i: Int, j: Int) {
   let temp: T = __buf_get(buf: this.data, index: i)
-  __buf_set(buf: this.data, index: i, value: __buf_get(
-    buf: this.data
-    index: j
-  ))
+  __buf_set(buf: this.data, index: i, value: __buf_get(buf: this.data, index: j))
   __buf_set(buf: this.data, index: j, value: temp)
 }
 
@@ -169,11 +166,7 @@ func set(V)(this: mod StringMap(V), k: String, value: V) {
   loop true {
     let entry: StringMapEntry(V) = __buf_get(buf: this.data, index: idx)
     if not entry.occupied {
-      __buf_set(buf: this.data, index: idx, value: {
-        k: k
-        value: value
-        occupied: true
-      })
+      __buf_set(buf: this.data, index: idx, value: { k: k, value: value, occupied: true })
       this.length = this.length + 1
       ret
     }
@@ -344,11 +337,7 @@ func set(V)(this: mod IntMap(V), k: Int, value: V) {
   loop true {
     let entry: IntMapEntry(V) = __buf_get(buf: this.data, index: idx)
     if not entry.occupied {
-      __buf_set(buf: this.data, index: idx, value: {
-        k: k
-        value: value
-        occupied: true
-      })
+      __buf_set(buf: this.data, index: idx, value: { k: k, value: value, occupied: true })
       this.length = this.length + 1
       ret
     }

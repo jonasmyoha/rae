@@ -25,18 +25,26 @@ typedef struct {
   const char* source;
   VerbatimRange verbatim_ranges[64];
   size_t verbatim_count;
+  bool force_oneline;
 } PrettyPrinter;
 
+static void pp_write_char(PrettyPrinter* pp, char ch);
+
 static void pp_write_indent(PrettyPrinter* pp) {
+  if (pp->force_oneline) return;
   for (int i = 0; i < pp->indent; ++i) {
-    fputs("  ", pp->out);
+    if (pp->out) fputs("  ", pp->out);
     pp->current_col += 2;
   }
   pp->start_of_line = 0;
 }
 
 static void pp_newline(PrettyPrinter* pp) {
-  fputc('\n', pp->out);
+  if (pp->force_oneline) {
+    pp_write_char(pp, ' ');
+    return;
+  }
+  if (pp->out) fputc('\n', pp->out);
   pp->start_of_line = 1;
   pp->current_col = 0;
 }
@@ -46,7 +54,7 @@ static void pp_write_raw(PrettyPrinter* pp, const char* text, size_t len) {
     pp_write_indent(pp);
     pp->start_of_line = 0;
   }
-  fwrite(text, 1, len, pp->out);
+  if (pp->out) fwrite(text, 1, len, pp->out);
   pp->current_col += (int)len;
 }
 
@@ -287,26 +295,111 @@ static const char* unary_op_text(AstUnaryOp op) {
   return "?";
 }
 
+static void pp_write_char(PrettyPrinter* pp, char ch);
 static void pp_expr_prec(PrettyPrinter* pp, const AstExpr* expr, int parent_prec);
+
+static void pp_call_args_oneline(PrettyPrinter* pp, const AstCallArg* args) {
+  const AstCallArg* current = args;
+  int first = 1;
+  while (current) {
+    if (!first) { pp_write(pp, ", "); } 
+    if (current->name.len > 0) {
+      pp_write_str(pp, current->name);
+      pp_write(pp, ": ");
+    }
+    pp_expr_prec(pp, current->value, PREC_LOWEST);
+    first = 0;
+    current = current->next;
+  }
+}
+
+static void pp_obj_fields_oneline(PrettyPrinter* pp, const AstObjectField* fields) {
+  const AstObjectField* field = fields;
+  int first = 1;
+  while (field) {
+    if (!first) pp_write(pp, ", ");
+    pp_write_str(pp, field->name);
+    pp_write(pp, ": ");
+    pp_expr_prec(pp, field->value, PREC_LOWEST);
+    first = 0;
+    field = field->next;
+  }
+}
+
+static void pp_coll_elements_oneline(PrettyPrinter* pp, const AstCollectionElement* elements) {
+  const AstCollectionElement* current = elements;
+  int first = 1;
+  while (current) {
+    if (!first) { pp_write(pp, ", "); }
+    if (current->key) {
+      pp_write_str(pp, *current->key);
+      pp_write(pp, ": ");
+    }
+    pp_expr_prec(pp, current->value, PREC_LOWEST);
+    first = 0;
+    current = current->next;
+  }
+}
+
+static void pp_list_elements_oneline(PrettyPrinter* pp, const AstExprList* elements) {
+  const AstExprList* current = elements;
+  int first = 1;
+  while (current) {
+    if (!first) pp_write(pp, ", ");
+    pp_expr_prec(pp, current->value, PREC_LOWEST);
+    first = 0;
+    current = current->next;
+  }
+}
+
+static int measure_call_args(PrettyPrinter* pp, const AstCallArg* args) {
+  PrettyPrinter measure = *pp;
+  measure.out = NULL;
+  measure.force_oneline = true;
+  pp_call_args_oneline(&measure, args);
+  return measure.current_col;
+}
+
+static int measure_obj_fields(PrettyPrinter* pp, const AstObjectField* fields) {
+  PrettyPrinter measure = *pp;
+  measure.out = NULL;
+  measure.force_oneline = true;
+  pp_obj_fields_oneline(&measure, fields);
+  return measure.current_col;
+}
+
+static int measure_coll_elements(PrettyPrinter* pp, const AstCollectionElement* elements) {
+  PrettyPrinter measure = *pp;
+  measure.out = NULL;
+  measure.force_oneline = true;
+  pp_coll_elements_oneline(&measure, elements);
+  return measure.current_col;
+}
+
+static int measure_list_elements(PrettyPrinter* pp, const AstExprList* elements) {
+  PrettyPrinter measure = *pp;
+  measure.out = NULL;
+  measure.force_oneline = true;
+  pp_list_elements_oneline(&measure, elements);
+  return measure.current_col;
+}
 
 static void pp_call_args(PrettyPrinter* pp, const AstCallArg* args) {
   if (!args) return;
   const AstCallArg* current = args;
-  
-  bool wrap = false;
   int count = 0;
-  int estimated_len = pp->current_col;
-  while (current) { 
-    count++; 
-    estimated_len += (int)current->name.len + 2 + 20; 
-    current = current->next; 
+  while (current) { count++; current = current->next; }
+  bool wrap = false;
+  if (count > 4) {
+    wrap = true;
+  } else {
+    int len = measure_call_args(pp, args);
+    if (len > 100) wrap = true;
   }
-  if (count > 3 || estimated_len > 100) wrap = true;
-  
-  current = args;
   if (wrap) {
     pp_newline(pp);
     pp->indent++;
+    current = args;
     while (current) {
       if (current->name.len > 0) {
         pp_write_str(pp, current->name);
@@ -318,17 +411,7 @@ static void pp_call_args(PrettyPrinter* pp, const AstCallArg* args) {
     }
     pp->indent--;
   } else {
-    int first = 1;
-    while (current) {
-      if (!first) { pp_write(pp, ", "); } 
-      if (current->name.len > 0) {
-        pp_write_str(pp, current->name);
-        pp_write(pp, ": ");
-      }
-      pp_expr_prec(pp, current->value, PREC_LOWEST);
-      first = 0;
-      current = current->next;
-    }
+    pp_call_args_oneline(pp, args);
   }
 }
 
@@ -421,14 +504,15 @@ static void pp_expr_prec(PrettyPrinter* pp, const AstExpr* expr, int parent_prec
       if (expr->as.object_literal.fields) {
         bool wrap = false;
         int count = 0;
-        int estimated_len = pp->current_col;
         AstObjectField* scan = expr->as.object_literal.fields;
-        while (scan) { 
-          count++; 
-          estimated_len += (int)scan->name.len + 2 + 10; // estimate 10 per value instead of 20
-          scan = scan->next; 
+        while (scan) { count++; scan = scan->next; }
+        
+        if (count > 4) {
+          wrap = true;
+        } else {
+          int len = measure_obj_fields(pp, expr->as.object_literal.fields);
+          if (len > 100) wrap = true;
         }
-        if (count > 4 || estimated_len > 100) wrap = true;
 
         if (wrap) {
           pp_newline(pp);
@@ -444,16 +528,7 @@ static void pp_expr_prec(PrettyPrinter* pp, const AstExpr* expr, int parent_prec
           pp->indent--;
         } else {
           pp_space(pp);
-          AstObjectField* field = expr->as.object_literal.fields;
-          int first = 1;
-          while (field) {
-            if (!first) pp_write(pp, ", ");
-            pp_write_str(pp, field->name);
-            pp_write(pp, ": ");
-            pp_expr_prec(pp, field->value, PREC_LOWEST);
-            first = 0;
-            field = field->next;
-          }
+          pp_obj_fields_oneline(pp, expr->as.object_literal.fields);
           pp_space(pp);
         }
       }
@@ -562,14 +637,15 @@ static void pp_expr_prec(PrettyPrinter* pp, const AstExpr* expr, int parent_prec
       if (current) {
         bool wrap = false;
         int count = 0;
-        int estimated_len = pp->current_col;
         AstCollectionElement* scan = current;
-        while (scan) { 
-          count++; 
-          estimated_len += (scan->key ? (int)scan->key->len + 2 : 0) + 10;
-          scan = scan->next; 
+        while (scan) { count++; scan = scan->next; }
+        
+        if (count > 4) {
+          wrap = true;
+        } else {
+          int len = measure_coll_elements(pp, current);
+          if (len > 100) wrap = true;
         }
-        if (count > 4 || estimated_len > 100) wrap = true;
 
         if (wrap) {
           pp_newline(pp);
@@ -586,17 +662,7 @@ static void pp_expr_prec(PrettyPrinter* pp, const AstExpr* expr, int parent_prec
           pp->indent--;
         } else {
           pp_space(pp);
-          int first = 1;
-          while (current) {
-            if (!first) { pp_write(pp, ", "); }
-            if (current->key) {
-              pp_write_str(pp, *current->key);
-              pp_write(pp, ": ");
-            }
-            pp_expr_prec(pp, current->value, PREC_LOWEST);
-            first = 0;
-            current = current->next;
-          }
+          pp_coll_elements_oneline(pp, current);
           pp_space(pp);
         }
       }
@@ -609,14 +675,15 @@ static void pp_expr_prec(PrettyPrinter* pp, const AstExpr* expr, int parent_prec
       if (current) {
         bool wrap = false;
         int count = 0;
-        int estimated_len = pp->current_col;
         AstExprList* scan = current;
-        while (scan) { 
-          count++; 
-          estimated_len += 10; 
-          scan = scan->next; 
+        while (scan) { count++; scan = scan->next; }
+        
+        if (count > 5) {
+          wrap = true;
+        } else {
+          int len = measure_list_elements(pp, current);
+          if (len > 100) wrap = true;
         }
-        if (count > 5 || estimated_len > 100) wrap = true;
 
         if (wrap) {
           pp_newline(pp);
@@ -628,13 +695,7 @@ static void pp_expr_prec(PrettyPrinter* pp, const AstExpr* expr, int parent_prec
           }
           pp->indent--;
         } else {
-          int first = 1;
-          while (current) {
-            if (!first) pp_write(pp, ", ");
-            pp_expr_prec(pp, current->value, PREC_LOWEST);
-            first = 0;
-            current = current->next;
-          }
+          pp_list_elements_oneline(pp, current);
         }
       }
       pp_write_char(pp, ']');

@@ -376,7 +376,10 @@ static void parser_consume_comma(Parser* parser, bool multiline, const char* con
     return;
   }
   if (!multiline) {
-      parser_error(parser, parser_peek(parser), "comma required in single-line %s", context);
+      TokenKind next = parser_peek(parser)->kind;
+      if (next != TOK_RPAREN && next != TOK_RBRACE && next != TOK_RBRACKET) {
+          parser_error(parser, parser_peek(parser), "expected ',' or newline between elements in %s", context);
+      }
   }
 }
 
