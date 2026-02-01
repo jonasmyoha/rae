@@ -2364,6 +2364,11 @@ static bool compile_function(BytecodeCompiler* compiler, const AstDecl* decl) {
 
 bool vm_compile_module(const AstModule* module, Chunk* chunk, const char* file_path) {
   if (!module || !chunk) return false;
+  
+  if (module->had_error) {
+      return false;
+  }
+
   chunk_init(chunk);
   BytecodeCompiler compiler = {
       .chunk = chunk,
