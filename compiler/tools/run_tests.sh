@@ -203,7 +203,12 @@ for TARGET in "${TARGETS[@]}"; do
     fi
 
     if [ $SKIP_EXEC -eq 0 ]; then
-        CMD_STDOUT=$("$BIN" "${CMD_RUN_ARGS[@]}" 2>&1 || true)
+        # For parse/lex/format, we want to capture both stdout and stderr to see errors + any partial results
+        if [[ "${CMD_ARGS[0]}" =~ ^(parse|lex|format)$ ]]; then
+            CMD_STDOUT=$("$BIN" "${CMD_RUN_ARGS[@]}" 2>&1 || true)
+        else
+            CMD_STDOUT=$("$BIN" "${CMD_RUN_ARGS[@]}" 2>&1 || true)
+        fi
         ACTUAL_OUTPUT="$CMD_STDOUT"
         
         if [ -n "$TMP_OUTPUT_FILE" ]; then
