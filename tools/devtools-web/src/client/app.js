@@ -42,6 +42,7 @@ const buildDurationCanvas = document.getElementById("build-duration-chart");
 const buildDurationEmpty = document.getElementById("build-duration-empty");
 const errorIndicator = document.getElementById("error-indicator");
 const errorCount = document.getElementById("error-count");
+const errorBtnText = document.getElementById("error-btn-text");
 const errorModal = document.getElementById("error-log-modal");
 const errorLogList = document.getElementById("error-log-list");
 const errorLogEmpty = document.getElementById("error-log-empty");
@@ -3101,9 +3102,11 @@ function updateErrorIndicator() {
   if (count > 0) {
     errorIndicator.classList.add("has-errors");
     errorIndicator.setAttribute("title", `Open error log (${count})`);
+    if (errorBtnText) errorBtnText.textContent = "Errors";
   } else {
     errorIndicator.classList.remove("has-errors");
     errorIndicator.setAttribute("title", "Open error log (0)");
+    if (errorBtnText) errorBtnText.textContent = "No errors";
   }
 }
 
