@@ -52,7 +52,6 @@ static void print_source_line(const char* file, int line, int col) {
 
 void diag_error(const char* file, int line, int col, const char* message) {
   diag_report(file, line, col, message);
-  exit(1);
 }
 
 void diag_report(const char* file, int line, int col, const char* message) {

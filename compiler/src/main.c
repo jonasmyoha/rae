@@ -2145,7 +2145,7 @@ static bool module_graph_load_module(ModuleGraph* graph,
       return false;
   }
   AstModule* module = parse_module(graph->arena, file_path, tokens);
-  if (!module) {
+  if (!module || module->had_error) {
     free(source);
     return false;
   }
@@ -3146,7 +3146,7 @@ static void* watch_thread_func(void* arg) {
         
         const char* changed = watch_state_poll_change(ctx->state);
         if (changed) {
-            printf("[watch] change detected in %s\n", changed);
+            printf("[watch] change detected in %s\n", changed); fflush(stdout);
             ctx->change_detected = true;
             if (ctx->vm) {
                 ctx->vm->reload_requested = true;
@@ -3295,142 +3295,56 @@ static int run_vm_watch(const RunOptions* run_opts, const char* project_root) {
 
   int exit_code = 0;
 
-  for (;;) {
-
+    for (;;) {
       VmModule* module = vm_registry_find(&registry, file_path);
-
       if (!module) break;
 
-
-
       VMResult result = vm_run(vm, &module->chunk);
-
       
-
       if (result == VM_RUNTIME_RELOAD) {
-
           printf("[watch] Hot-reload requested! Patching...\n");
-
+          Chunk new_chunk;
+          chunk_init(&new_chunk);
+          uint64_t new_hash = 0;
+          WatchSources new_sources;
+          watch_sources_init(&new_sources);
           
-
-                    Chunk new_chunk;
-
-          
-
-                    chunk_init(&new_chunk);
-
-          
-
-                    uint64_t new_hash = 0;
-
-          
-
-                    WatchSources new_sources;
-
-          
-
-                    watch_sources_init(&new_sources);
-
-          
-
-                    
-
-          
-
-                    if (compile_file_chunk(file_path, &new_chunk, &new_hash, &new_sources, project_root, run_opts->no_implicit)) {
-
-          
-
-                        sys_mutex_lock(&ctx.mutex);
-
-          
-
-                        bool patched = vm_hot_patch(vm, &new_chunk);
-
-          
-
-                        vm->reload_requested = false;
-
-          
-
-                        sys_mutex_unlock(&ctx.mutex);
-
-          
-
-                        
-
-          
-
-                        if (patched) {
-
-          
-
-                            printf("[watch] Hot-patch successful.\n");
-
-                  chunk_free(&new_chunk); // Code copied to VM
-
-                  watch_state_apply_sources(&watch_state, &new_sources);
-
-                  
-
-                  // Clear change flag
-
-                  sys_mutex_lock(&ctx.mutex);
-
-                  ctx.change_detected = false;
-
-                  sys_mutex_unlock(&ctx.mutex);
-
-                  
-
-                  continue; // Resume VM
-
-              } else {
-
-                  printf("[watch] Hot-patch failed. Resuming old code.\n");
-
-                  chunk_free(&new_chunk);
-
-              }
-
-          } else {
-
-              printf("[watch] Recompilation failed. Resuming old code.\n");
-
+          if (compile_file_chunk(file_path, &new_chunk, &new_hash, &new_sources, project_root, run_opts->no_implicit)) {
+              sys_mutex_lock(&ctx.mutex);
+              bool patched = vm_hot_patch(vm, &new_chunk);
               vm->reload_requested = false;
-
+              sys_mutex_unlock(&ctx.mutex);
+              
+              if (patched) {
+                  watch_state_apply_sources(&watch_state, &new_sources);
+                  printf("[watch] Hot-patch successful.\n");
+              } else {
+                  printf("[watch] Hot-patch failed (VM rejection). Continuing with old code.\n"); fflush(stdout);
+              }
+              chunk_free(&new_chunk);
+              watch_sources_clear(&new_sources);
+          } else {
+              printf("[watch] Hot-reload rejected: compilation errors. Continuing with old code.\n"); fflush(stdout);
+              sys_mutex_lock(&ctx.mutex);
+              vm->reload_requested = false;
+              sys_mutex_unlock(&ctx.mutex);
+              chunk_free(&new_chunk);
+              watch_sources_clear(&new_sources);
           }
-
-          watch_sources_clear(&new_sources);
-
           
-
           sys_mutex_lock(&ctx.mutex);
-
           ctx.change_detected = false;
-
           sys_mutex_unlock(&ctx.mutex);
-
-          
-
-      } else {
-
-          if (result == VM_RUNTIME_TIMEOUT) {
-
-             fprintf(stderr, "info: [watch] execution timed out\n");
-
-          } else if (result != VM_RUNTIME_OK) {
-
-             fprintf(stderr, "info: [watch] execution error\n");
-
-             exit_code = 1;
-
-          }
-
-          break; // Exit loop on normal exit or error
-
+          continue;
       }
-
+      
+      if (result == VM_RUNTIME_TIMEOUT) {
+          fprintf(stderr, "info: [watch] execution timed out\n");
+      } else if (result != VM_RUNTIME_OK) {
+          fprintf(stderr, "info: [watch] execution error\n");
+          exit_code = 1;
+      }
+      break;
   }
 
 
