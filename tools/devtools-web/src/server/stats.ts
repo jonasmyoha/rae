@@ -33,17 +33,49 @@ export class StatsStore {
   }
 
   record(metricName: string, metricValue: number, metadata: MetricMetadata = {}) {
-    this.db
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).toISOString();
+
+    // Check if we already have an entry for this metric today
+    const existing = this.db
       .query(
-        `INSERT INTO stats (timestamp, metric_name, metric_value, metadata)
-         VALUES ($timestamp, $metric_name, $metric_value, $metadata)`
+        `SELECT id FROM stats 
+         WHERE metric_name = $metric_name 
+         AND timestamp >= $start AND timestamp <= $end`
       )
-      .run({
-        $timestamp: new Date().toISOString(),
+      .get({
         $metric_name: metricName,
-        $metric_value: metricValue,
-        $metadata: JSON.stringify(metadata)
-      });
+        $start: todayStart,
+        $end: todayEnd
+      }) as { id: number } | null;
+
+    if (existing) {
+      this.db
+        .query(
+          `UPDATE stats 
+           SET timestamp = $timestamp, metric_value = $metric_value, metadata = $metadata 
+           WHERE id = $id`
+        )
+        .run({
+          $timestamp: now.toISOString(),
+          $metric_value: metricValue,
+          $metadata: JSON.stringify(metadata),
+          $id: existing.id
+        });
+    } else {
+      this.db
+        .query(
+          `INSERT INTO stats (timestamp, metric_name, metric_value, metadata)
+           VALUES ($timestamp, $metric_name, $metric_value, $metadata)`
+        )
+        .run({
+          $timestamp: now.toISOString(),
+          $metric_name: metricName,
+          $metric_value: metricValue,
+          $metadata: JSON.stringify(metadata)
+        });
+    }
   }
 
   recordTestRun(data: TestRunStats) {
