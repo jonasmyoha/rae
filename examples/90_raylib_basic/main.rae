@@ -1,29 +1,40 @@
 import raylib
+type State {
+  bgColor: Color
+  pastelCircle: Color
+  textColor: Color
+}
+
 func main() {
   # FLAG_WINDOW_RESIZABLE = 4
   setConfigFlags(flags: 4)
   initWindow(width: 800, height: 450, title: "Raylib Basic")
   setTargetFPS(fps: 60)
-  let bgColor: Color = { r: 100, g: 120, b: 130, a: 255 }
-  let pastelCircle: Color = { r: 255, g: 200, b: 180, a: 255 }
-  let textColor: Color = { r: 240, g: 240, b: 240, a: 255 }
+  let s: State = {
+    bgColor: { r: 100, g: 120, b: 130, a: 255 }
+    pastelCircle: { r: 255, g: 200, b: 180, a: 255 }
+    textColor: { r: 240, g: 240, b: 240, a: 255 }
+  }
   loop windowShouldClose() is 0 {
-    let sw: Int = getScreenWidth()
-    let sh: Int = getScreenHeight()
-    let centerX: Float = sw.toFloat() / 2.0
-    let centerY: Float = sh.toFloat() / 2.0
-    log("JONDE sw: {sw} sh: {sh}")
-    beginDrawing()
-    clearBackground(color: bgColor)
-    drawCircle(x: centerX, y: centerY, radius: 80.0, color: pastelCircle)
-    drawText(
-      text: "Raylib & Rae"
-      x: centerX - 90.0
-      y: centerY + 100.0
-      fontSize: 30.0
-      color: textColor
-    )
-    endDrawing()
+    tick(s)
   }
   closeWindow()
+}
+
+func tick(s: view State) {
+  let sw: Int = getScreenWidth()
+  let sh: Int = getScreenHeight()
+  let centerX: Float = sw.toFloat() / 2.0
+  let centerY: Float = sh.toFloat() / 2.0
+  beginDrawing()
+  clearBackground(color: s.bgColor)
+  drawCircle(x: centerX, y: centerY, radius: 80.0, color: s.pastelCircle)
+  drawText(
+    text: "Raylib & Rae"
+    x: centerX - 90.0
+    y: centerY + 100.0
+    fontSize: 30.0
+    color: s.textColor
+  )
+  endDrawing()
 }
