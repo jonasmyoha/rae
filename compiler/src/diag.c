@@ -50,15 +50,22 @@ static void print_source_line(const char* file, int line, int col) {
   fclose(f);
 }
 
+static int g_error_count = 0;
+
 void diag_error(const char* file, int line, int col, const char* message) {
   diag_report(file, line, col, message);
 }
 
 void diag_report(const char* file, int line, int col, const char* message) {
+  g_error_count++;
   fprintf(stderr, "%s:%d:%d: %s\n", simplify_path(file), line, col, message);
   if (file && line > 0) {
     print_source_line(file, line, col);
   }
+}
+
+int diag_error_count(void) {
+  return g_error_count;
 }
 
 void diag_fatal(const char* message) {

@@ -2989,7 +2989,7 @@ static int run_command(const char* cmd, int argc, char** argv) {
 
   arena_destroy(arena);
   free(source);
-  return 0;
+  return diag_error_count() > 0 ? 1 : 0;
 }
 
 int main(int argc, char** argv) {
