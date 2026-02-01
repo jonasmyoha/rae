@@ -1,8 +1,14 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, appendFileSync, existsSync } from "node:fs";
 import path from "node:path";
-import { Database } from "bun:sqlite";
 
 type MetricMetadata = Record<string, unknown>;
+
+export type RuntimeMetricEntry = {
+  timestamp: string;
+  metric_name: string;
+  metric_value: number;
+  metadata: MetricMetadata;
+};
 
 export type TestRunStats = {
   runId: string;
@@ -24,57 +30,43 @@ export type BuildRunStats = {
 };
 
 export class StatsStore {
-  private db: Database;
+  private metricsPath: string;
 
-  constructor(dbPath = path.resolve(process.cwd(), "data", "devtools.db")) {
-    mkdirSync(path.dirname(dbPath), { recursive: true });
-    this.db = new Database(dbPath, { create: true });
-    this.bootstrap();
+  constructor(metricsPath = path.resolve(process.cwd(), "data", "runtime_metrics.jsonl")) {
+    this.metricsPath = metricsPath;
+    mkdirSync(path.dirname(this.metricsPath), { recursive: true });
+    if (!existsSync(this.metricsPath)) {
+      writeFileSync(this.metricsPath, "");
+    }
   }
 
   record(metricName: string, metricValue: number, metadata: MetricMetadata = {}) {
     const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).toISOString();
+    const todayStr = now.toISOString().split("T")[0]; // YYYY-MM-DD
 
-    // Check if we already have an entry for this metric today
-    const existing = this.db
-      .query(
-        `SELECT id FROM stats 
-         WHERE metric_name = $metric_name 
-         AND timestamp >= $start AND timestamp <= $end`
-      )
-      .get({
-        $metric_name: metricName,
-        $start: todayStart,
-        $end: todayEnd
-      }) as { id: number } | null;
+    const entries = this.readAll();
+    
+    // Find if we already have an entry for this metric today
+    // We look for the last one that matches the name and date
+    const index = entries.findLastIndex(e => 
+      e.metric_name === metricName && 
+      e.timestamp.startsWith(todayStr)
+    );
 
-    if (existing) {
-      this.db
-        .query(
-          `UPDATE stats 
-           SET timestamp = $timestamp, metric_value = $metric_value, metadata = $metadata 
-           WHERE id = $id`
-        )
-        .run({
-          $timestamp: now.toISOString(),
-          $metric_value: metricValue,
-          $metadata: JSON.stringify(metadata),
-          $id: existing.id
-        });
+    const newEntry: RuntimeMetricEntry = {
+      timestamp: now.toISOString(),
+      metric_name: metricName,
+      metric_value: metricValue,
+      metadata
+    };
+
+    if (index !== -1) {
+      // Update existing entry for today
+      entries[index] = newEntry;
+      this.writeAll(entries);
     } else {
-      this.db
-        .query(
-          `INSERT INTO stats (timestamp, metric_name, metric_value, metadata)
-           VALUES ($timestamp, $metric_name, $metric_value, $metadata)`
-        )
-        .run({
-          $timestamp: now.toISOString(),
-          $metric_name: metricName,
-          $metric_value: metricValue,
-          $metadata: JSON.stringify(metadata)
-        });
+      // Append new entry
+      appendFileSync(this.metricsPath, JSON.stringify(newEntry) + "\n");
     }
   }
 
@@ -105,43 +97,32 @@ export class StatsStore {
   }
 
   listRecentMetrics(metricName: string, limit = 20) {
-    const rows = this.db
-      .query(
-        `SELECT timestamp, metric_value AS value, metadata
-         FROM stats
-         WHERE metric_name = $metric
-         ORDER BY timestamp DESC
-         LIMIT $limit`
-      )
-      .all({
-        $metric: metricName,
-        $limit: limit
-      }) as Array<{ timestamp: string; value: number; metadata: string | null }>;
-
-    return rows.map((row) => ({
-      timestamp: row.timestamp,
-      value: row.value,
-      metadata: row.metadata ? JSON.parse(row.metadata) : null
-    }));
+    const all = this.readAll();
+    return all
+      .filter(e => e.metric_name === metricName)
+      .reverse()
+      .slice(0, limit)
+      .map(e => ({
+        timestamp: e.timestamp,
+        value: e.metric_value,
+        metadata: e.metadata
+      }));
   }
 
-  private bootstrap() {
-    this.db
-      .query(
-        `CREATE TABLE IF NOT EXISTS stats (
-          id INTEGER PRIMARY KEY,
-          timestamp TEXT NOT NULL,
-          metric_name TEXT NOT NULL,
-          metric_value REAL NOT NULL,
-          metadata TEXT
-        );`
-      )
-      .run();
-    this.db
-      .query(
-        `CREATE INDEX IF NOT EXISTS idx_metric_time
-         ON stats(metric_name, timestamp);`
-      )
-      .run();
+  private readAll(): RuntimeMetricEntry[] {
+    try {
+      const content = readFileSync(this.metricsPath, "utf-8");
+      return content
+        .split("\n")
+        .filter(line => line.trim().length > 0)
+        .map(line => JSON.parse(line));
+    } catch (e) {
+      return [];
+    }
+  }
+
+  private writeAll(entries: RuntimeMetricEntry[]) {
+    const content = entries.map(e => JSON.stringify(e)).join("\n") + "\n";
+    writeFileSync(this.metricsPath, content);
   }
 }
