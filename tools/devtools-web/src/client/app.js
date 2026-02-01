@@ -3097,13 +3097,13 @@ function recordError(source, message) {
 function updateErrorIndicator() {
   if (!errorIndicator || !errorCount) return;
   const count = errorEntries.length;
-  errorCount.textContent = count > 0 ? count.toString() : "";
+  errorCount.textContent = count.toString();
   if (count > 0) {
     errorIndicator.classList.add("has-errors");
     errorIndicator.setAttribute("title", `Open error log (${count})`);
   } else {
     errorIndicator.classList.remove("has-errors");
-    errorIndicator.setAttribute("title", "No errors");
+    errorIndicator.setAttribute("title", "Open error log (0)");
   }
 }
 
@@ -3141,7 +3141,6 @@ function renderErrorLog() {
 function toggleErrorModal(show) {
   if (!errorModal) return;
   if (show) {
-    if (!errorEntries.length) return;
     errorModal.classList.add("is-visible");
     errorModal.setAttribute("aria-hidden", "false");
   } else {

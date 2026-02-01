@@ -32,17 +32,18 @@
         <div class="status-pill connection-indicator" id="connection-status">Connecting…</div>
         <div class="status-pill heartbeat-indicator" id="heartbeat-status">Heartbeat: waiting…</div>
         <button
-          class="error-indicator"
+          class="btn-error-log"
           id="error-indicator"
           type="button"
           title="Open error log"
           aria-label="Open error log"
         >
-          <svg aria-hidden="true" viewBox="0 0 24 24" role="img">
+          <svg aria-hidden="true" viewBox="0 0 24 24" role="img" class="icon">
             <path
               d="M12 2a1 1 0 0 1 .88.53l9 16A1 1 0 0 1 21 20H3a1 1 0 0 1-.88-1.47l9-16A1 1 0 0 1 12 2zm0 3.46L4.74 18h14.52zM11 9h2v5h-2zm0 6h2v2h-2z"
             ></path>
           </svg>
+          <span>Errors</span>
           <span class="error-indicator__count" id="error-count">0</span>
         </button>
       </div>
@@ -206,8 +207,6 @@
               <div class="test-controls">
 
                 <button id="run-tests-btn">Run all tests (Ctrl+T)</button>
-
-                <button id="run-failed-btn" class="secondary" disabled>Run failed (coming soon)</button>
 
                 <button id="stop-tests-btn">Stop all tests</button>
 
@@ -625,12 +624,15 @@
         <header class="error-modal__header">
           <div>
             <h3 id="error-log-title">Error log</h3>
-            <p class="error-modal__subtitle">Recent issues captured in the dashboard</p>
+            <p class="error-modal__subtitle">Recent dashboard, server, and runtime issues</p>
           </div>
           <button id="error-log-close" class="error-modal__close" type="button" aria-label="Close error log">
             Close
           </button>
         </header>
+        <div class="error-modal__info">
+          <p>This log captures issues related to the dashboard connectivity, server communication, and unexpected runtime errors. It does <strong>not</strong> include compiler errors or test failures, which are shown in their respective terminal views.</p>
+        </div>
         <ul class="error-log-list" id="error-log-list"></ul>
         <p class="error-log-empty" id="error-log-empty">No errors recorded.</p>
       </div>
