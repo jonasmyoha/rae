@@ -108,7 +108,10 @@ static bool native_clearBackground(struct VM* vm, VmNativeResult* out, const Val
 
 static bool native_loadTexture(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
-    if (count != 1 || args[0].type != VAL_STRING) return false;
+    if (count != 1 || args[0].type != VAL_STRING) {
+        fprintf(stderr, "error: loadTexture expects 1 string arg, got %zu\n", count);
+        return false;
+    }
     Texture t = LoadTexture(args[0].as.string_value.chars);
     out->has_value = true;
     out->value = value_object(5);
@@ -122,7 +125,10 @@ static bool native_loadTexture(struct VM* vm, VmNativeResult* out, const Value* 
 
 static bool native_unloadTexture(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
-    if (count != 5) return false; // Texture flattened
+    if (count != 5) {
+        fprintf(stderr, "error: unloadTexture expects 5 args (flattened Texture), got %zu\n", count);
+        return false;
+    }
     Texture t = {
         .id = (unsigned int)args[0].as.int_value,
         .width = (int)args[1].as.int_value,
@@ -137,7 +143,10 @@ static bool native_unloadTexture(struct VM* vm, VmNativeResult* out, const Value
 
 static bool native_drawTexture(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
-    if (count != 11) return false; // Texture(5) + x(1) + y(1) + Color(4)
+    if (count != 11) {
+        fprintf(stderr, "error: drawTexture expects 11 args (Texture(5) + x(1) + y(1) + Color(4)), got %zu\n", count);
+        return false;
+    }
     Texture t = {
         .id = (unsigned int)args[0].as.int_value,
         .width = (int)args[1].as.int_value,
@@ -151,7 +160,7 @@ static bool native_drawTexture(struct VM* vm, VmNativeResult* out, const Value* 
     unsigned char g = (args[8].type == VAL_FLOAT) ? (unsigned char)args[8].as.float_value : (unsigned char)args[8].as.int_value;
     unsigned char b = (args[9].type == VAL_FLOAT) ? (unsigned char)args[9].as.float_value : (unsigned char)args[9].as.int_value;
     unsigned char a = (args[10].type == VAL_FLOAT) ? (unsigned char)args[10].as.float_value : (unsigned char)args[10].as.int_value;
-    DrawTexture(t, x, y, (Color){r, g, b, a});
+    DrawTexture(t, (float)x, (float)y, (Color){r, g, b, a});
     out->has_value = false;
     return true;
 }
