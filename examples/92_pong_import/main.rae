@@ -136,29 +136,20 @@ func main() {
   let p2Pos: PaddleTransform = { x: 760.0, y: 175.0 }
   let bPos: PaddleTransform = { x: 400.0, y: 225.0 }
   let bVel: Velocity = { dx: 4.0, dy: 4.0 }
-  let aiState: AIState = { state: AIPhase.Observing, timer: 0, targetY: 225.0, decision: AIDecision.None }
+  let aiState: AIState = {
+    state: AIPhase.Observing
+    timer: 0
+    targetY: 225.0
+    decision: AIDecision.None
+  }
   let p1Score: Int = 0
   let p2Score: Int = 0
   let winner: Int = 0
   loop windowShouldClose() is 0 {
-    paddleInputSystem(
-      pos: p1Pos
-      speed: 5.0
-      height: 450.0
-      pHeight: 100.0
-    )
-    p2Pos.y = paddleAiSystem(
-      ai: aiState
-      ballY: bPos.y
-      paddleY: p2Pos.y
-    )
+    paddleInputSystem(pos: p1Pos, speed: 5.0, height: 450.0, pHeight: 100.0)
+    p2Pos.y = paddleAiSystem(ai: aiState, ballY: bPos.y, paddleY: p2Pos.y)
     movementSystem(pos: bPos, vel: bVel)
-    bounceSystem(
-      pos: bPos
-      vel: bVel
-      radius: 10.0
-      height: 450.0
-    )
+    bounceSystem(pos: bPos, vel: bVel, radius: 10.0, height: 450.0)
     paddleCollisionSystem(
       bPos: bPos
       bVel: bVel
@@ -195,11 +186,7 @@ func main() {
     }
     beginDrawing()
     clearBackground(color: darkGray)
-    drawUISystem(
-      p1Score: p1Score
-      p2Score: p2Score
-      winner: winner
-    )
+    drawUISystem(p1Score: p1Score, p2Score: p2Score, winner: winner)
     drawRectangle(
       x: 20.0
       y: p1Pos.y
@@ -214,12 +201,7 @@ func main() {
       height: 100.0
       color: white
     )
-    drawCircle(
-      x: bPos.x
-      y: bPos.y
-      radius: 10.0
-      color: white
-    )
+    drawCircle(x: bPos.x, y: bPos.y, radius: 10.0, color: white)
     endDrawing()
   }
   closeWindow()
