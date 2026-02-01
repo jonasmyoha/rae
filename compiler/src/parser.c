@@ -372,14 +372,13 @@ static bool is_multiline(const Token* start, const Token* end) {
 }
 
 static void parser_consume_comma(Parser* parser, bool multiline, const char* context) {
+  (void)multiline;
+  (void)context;
+  // In Rae v0.3, commas are optional everywhere as long as there is 
+  // either a newline OR a space between tokens.
+  // The lexer/parser handles the separation of tokens naturally.
   if (parser_match(parser, TOK_COMMA)) {
     return;
-  }
-  if (!multiline) {
-      TokenKind next = parser_peek(parser)->kind;
-      if (next != TOK_RPAREN && next != TOK_RBRACE && next != TOK_RBRACKET) {
-          parser_error(parser, parser_peek(parser), "expected ',' or newline between elements in %s", context);
-      }
   }
 }
 
@@ -701,7 +700,7 @@ static AstExpr* finish_call(Parser* parser, AstExpr* callee, const Token* start_
       }
     }
   }
-  bool multiline = end ? is_multiline(start_token, end) : false;
+  bool multiline = end ? is_multiline(parser_peek(parser), end) : false;
 
   AstCallArg* args = NULL;
   size_t arg_idx = 0;
@@ -1267,7 +1266,7 @@ static AstExpr* parse_postfix(Parser* parser) {
             args = append_call_arg(args, arg);
             arg_idx++;
             if (parser_check(parser, TOK_RPAREN)) break;
-            parser_consume(parser, TOK_COMMA, "expected ',' between arguments");
+            parser_consume_comma(parser, false, "argument list");
             if (parser_check(parser, TOK_RPAREN)) {
               break;
             }
