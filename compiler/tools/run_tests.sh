@@ -102,7 +102,7 @@ for TARGET in "${TARGETS[@]}"; do
     if [ "$TARGET" = "compiled" ] && [ -z "$TEST_NAME_FILTER" ]; then
         case "$TEST_NAME" in
             # Skip build tests that target live/hybrid specifically
-            407_*|408_*)
+            407_*|408_*|395_*)
                 RUN_THIS=0 ;;
             # Skip tests that don't have func main() (C backend expects a main)
             000_*|100_*|101_*|102_*|103_*|104_*|105_*|340_*) 
@@ -155,7 +155,45 @@ for TARGET in "${TARGETS[@]}"; do
     done
 
     # Final command assembly
-    if [ "${CMD_RUN_ARGS[0]}" = "run" ]; then
+    SKIP_EXEC=0
+    if [ "${CMD_RUN_ARGS[0]}" = "hot-reload" ]; then
+        # Special handling for hot-reload tests
+        # It expects a main.rae and a main_v2.rae
+        # It will copy main.rae to a tmp file, start watch run in background,
+        # wait, copy main_v2.rae over the tmp file, wait, then stop.
+        TMP_HOT_FILE=$(mktemp -t rae_test_XXXXXX.rae)
+        cp "$TEST_FILE" "$TMP_HOT_FILE"
+        
+        if [ -z "$TMP_OUTPUT_FILE" ]; then
+          TMP_OUTPUT_FILE=$(mktemp)
+        fi
+        
+        # Start in background
+        "$BIN" run --target live --watch "$TMP_HOT_FILE" > "$TMP_OUTPUT_FILE" 2>&1 &
+        HOT_PID=$!
+        
+        # Wait for initial run
+        sleep 2
+        
+        # Patch
+        V2_FILE="${TEST_DIRNAME}/main_v2.rae"
+        if [ -f "$V2_FILE" ]; then
+            cp "$V2_FILE" "$TMP_HOT_FILE"
+        fi
+        
+        # Wait for patch and execution
+        sleep 5
+        
+        # Cleanup
+        kill $HOT_PID || true
+        rm -f "$TMP_HOT_FILE"
+        
+        # Set up actual output for comparison
+        ACTUAL_OUTPUT=$(cat "$TMP_OUTPUT_FILE")
+        rm -f "$TMP_OUTPUT_FILE"
+        DISPLAY_NAME="$TEST_NAME [hot-reload]"
+        SKIP_EXEC=1
+    elif [ "${CMD_RUN_ARGS[0]}" = "run" ]; then
         CMD_RUN_ARGS=("run" "--target" "$TARGET" "$TEST_FILE")
     elif [ "${CMD_RUN_ARGS[0]}" = "build" ]; then
         CMD_RUN_ARGS=("build" "${CMD_RUN_ARGS[@]:1}" "$TEST_FILE")
@@ -163,17 +201,19 @@ for TARGET in "${TARGETS[@]}"; do
       CMD_RUN_ARGS+=("$TEST_FILE")
     fi
 
-    CMD_STDOUT=$("$BIN" "${CMD_RUN_ARGS[@]}" 2>&1 || true)
-    ACTUAL_OUTPUT="$CMD_STDOUT"
-    
-    if [ -n "$TMP_OUTPUT_FILE" ]; then
-      ACTUAL_OUTPUT=$(cat "$TMP_OUTPUT_FILE")
-      rm -f "$TMP_OUTPUT_FILE"
-    elif [ -n "$TMP_INPUT_FILE" ]; then
-      if [ "${CMD_ARGS[0]}" = "format" ]; then
-          ACTUAL_OUTPUT=$(cat "$TMP_INPUT_FILE")
-      fi
-      rm -f "$TMP_INPUT_FILE"
+    if [ $SKIP_EXEC -eq 0 ]; then
+        CMD_STDOUT=$("$BIN" "${CMD_RUN_ARGS[@]}" 2>&1 || true)
+        ACTUAL_OUTPUT="$CMD_STDOUT"
+        
+        if [ -n "$TMP_OUTPUT_FILE" ]; then
+          ACTUAL_OUTPUT=$(cat "$TMP_OUTPUT_FILE")
+          rm -f "$TMP_OUTPUT_FILE"
+        elif [ -n "$TMP_INPUT_FILE" ]; then
+          if [ "${CMD_ARGS[0]}" = "format" ]; then
+              ACTUAL_OUTPUT=$(cat "$TMP_INPUT_FILE")
+          fi
+          rm -f "$TMP_INPUT_FILE"
+        fi
     fi
 
     if [ -n "$TMP_OUTPUT_DIR" ]; then
@@ -182,12 +222,23 @@ for TARGET in "${TARGETS[@]}"; do
     fi
     
     EXPECTED_OUTPUT=$(cat "$EXPECT_FILE")
-    if [ "$ACTUAL_OUTPUT" = "$EXPECTED_OUTPUT" ]; then
-      echo "PASS: $DISPLAY_NAME"
-      ((PASSED++))
-      PASSED_TEST_NAMES="$PASSED_TEST_NAMES $TEST_NAME.rae"
+    
+    IS_MATCH=0
+    if [ "${EXPECTED_OUTPUT:0:6}" = "REGEX:" ]; then
+        PATTERN="${EXPECTED_OUTPUT:6}"
+        # Use python for robust regex matching including multiline/newlines
+        if echo "$ACTUAL_OUTPUT" | python3 -c "import sys, re; pattern=r\"\"\"$PATTERN\"\"\"; exit(0 if re.search(pattern, sys.stdin.read(), re.DOTALL) else 1)" 2>/dev/null; then
+            IS_MATCH=1
+        fi
+    elif [ "$ACTUAL_OUTPUT" = "$EXPECTED_OUTPUT" ]; then
+        IS_MATCH=1
     elif [ "$(head -n 1 "$EXPECT_FILE" | tr -d '\r')" = "BINARY_SKIP_MATCH" ]; then
-      echo "PASS: $DISPLAY_NAME (binary match skipped)"
+        IS_MATCH=1
+        DISPLAY_NAME="$DISPLAY_NAME (binary match skipped)"
+    fi
+
+    if [ $IS_MATCH -eq 1 ]; then
+      echo "PASS: $DISPLAY_NAME"
       ((PASSED++))
       PASSED_TEST_NAMES="$PASSED_TEST_NAMES $TEST_NAME.rae"
     else
