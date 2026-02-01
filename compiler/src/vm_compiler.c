@@ -607,6 +607,18 @@ static Str infer_expr_type(BytecodeCompiler* compiler, const AstExpr* expr) {
         break;
     }
     case AST_EXPR_MEMBER: {
+        Str obj_type = infer_expr_type(compiler, expr->as.member.object);
+        if (obj_type.len == 0) return (Str){0};
+        
+        Str base_type = get_base_type_name_str(obj_type);
+        TypeEntry* type = type_table_find(&compiler->types, base_type);
+        if (type) {
+            int field_idx = type_entry_find_field(type, expr->as.member.member);
+            if (field_idx >= 0) {
+                return get_base_type_name(type->field_types[field_idx]);
+            }
+        }
+        
         // Fallback for some common member types if possible
         if (str_eq_cstr(expr->as.member.member, "length")) return str_from_cstr("Int");
         break;
@@ -1104,14 +1116,8 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
           }
       }
 
-      if (expr->as.member.object->kind != AST_EXPR_IDENT) {
-        diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
-                   "VM currently only supports member access on identifiers");
-        compiler->had_error = true;
-        return false;
-      }
-      Str obj_name = expr->as.member.object->as.ident;
-      Str type_name = get_local_type_name(compiler, obj_name);
+      Str obj_type_raw = infer_expr_type(compiler, expr->as.member.object);
+      Str type_name = get_base_type_name_str(obj_type_raw);
       if (type_name.len == 0) {
         diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
                    "could not determine type of object for member access");
@@ -1705,6 +1711,42 @@ static const char* stmt_kind_name(AstStmtKind kind) {
 
 static bool emit_default_value(BytecodeCompiler* compiler, const AstTypeRef* type, int line);
 
+static bool emit_lvalue_ref(BytecodeCompiler* compiler, const AstExpr* expr) {
+    if (expr->kind == AST_EXPR_IDENT) {
+        int slot = compiler_find_local(compiler, expr->as.ident);
+        if (slot < 0) {
+            diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "unknown identifier for reference");
+            return false;
+        }
+        emit_op(compiler, OP_MOD_LOCAL, (int)expr->line);
+        emit_short(compiler, (uint16_t)slot, (int)expr->line);
+        return true;
+    } else if (expr->kind == AST_EXPR_MEMBER) {
+        if (!emit_lvalue_ref(compiler, expr->as.member.object)) return false;
+        
+        Str obj_type_raw = infer_expr_type(compiler, expr->as.member.object);
+        Str obj_type = get_base_type_name_str(obj_type_raw);
+        TypeEntry* type = type_table_find(&compiler->types, obj_type);
+        if (!type) {
+            char buffer[128];
+            snprintf(buffer, sizeof(buffer), "unknown type '%.*s' for member reference", (int)obj_type.len, obj_type.data);
+            diag_error(compiler->file_path, (int)expr->line, (int)expr->column, buffer);
+            return false;
+        }
+        
+        int field_index = type_entry_find_field(type, expr->as.member.member);
+        if (field_index < 0) {
+            diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "unknown field for reference");
+            return false;
+        }
+        
+        emit_op(compiler, OP_MOD_FIELD, (int)expr->line);
+        emit_short(compiler, (uint16_t)field_index, (int)expr->line);
+        return true;
+    }
+    return false;
+}
+
 static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
   if (!stmt) return true;
   switch (stmt->kind) {
@@ -2169,67 +2211,44 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
         }
         return true;
       } else if (target->kind == AST_EXPR_MEMBER) {
-        if (target->as.member.object->kind != AST_EXPR_IDENT) {
-          diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column,
-                     "VM currently only supports member assignment on identifiers");
-          compiler->had_error = true;
-          return false;
+        if (stmt->as.assign_stmt.is_bind) {
+            diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, "rebinding an alias is illegal. '=>' is only for 'let' bindings.");
+            return false;
         }
-        Str obj_name = target->as.member.object->as.ident;
-        Str type_name = get_local_type_name(compiler, obj_name);
-        if (type_name.len == 0) {
-          diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column,
-                     "could not determine type of object for member assignment");
-          compiler->had_error = true;
-          return false;
-        }
-        TypeEntry* type = type_table_find(&compiler->types, type_name);
+
+        // 1. Get reference to the parent object
+        if (!emit_lvalue_ref(compiler, target->as.member.object)) return false;
+
+        // 2. Resolve the field index and type
+        Str obj_type_raw = infer_expr_type(compiler, target->as.member.object);
+        Str obj_type = get_base_type_name_str(obj_type_raw);
+        TypeEntry* type = type_table_find(&compiler->types, obj_type);
         if (!type) {
           char buffer[128];
-          snprintf(buffer, sizeof(buffer), "unknown type '%.*s' for member assignment", (int)type_name.len, type_name.data);
+          snprintf(buffer, sizeof(buffer), "unknown type '%.*s' for member assignment", (int)obj_type.len, obj_type.data);
           diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, buffer);
-          compiler->had_error = true;
           return false;
         }
         int field_index = type_entry_find_field(type, target->as.member.member);
         if (field_index < 0) {
-          diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, "unknown field");
-          compiler->had_error = true;
+          diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, "unknown field for assignment");
           return false;
         }
 
-        if (stmt->as.assign_stmt.is_bind) {
-            diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, "rebinding an alias is illegal. '=>' is only for 'let' bindings.");
+        // 3. Compile the value to be assigned
+        Str field_type = get_base_type_name(type->field_types[field_index]);
+        Str saved_expected = compiler->expected_type;
+        compiler->expected_type = field_type;
+        if (!compile_expr(compiler, stmt->as.assign_stmt.value)) {
+            compiler->expected_type = saved_expected;
             return false;
-        } else {
-            Str field_type = get_base_type_name(type->field_types[field_index]);
-            int slot = compiler_find_local(compiler, obj_name);
-            if (slot >= 0) {
-                Str saved_expected = compiler->expected_type;
-                compiler->expected_type = field_type;
-                if (!compile_expr(compiler, stmt->as.assign_stmt.value)) {
-                    compiler->expected_type = saved_expected;
-                    return false;
-                }
-                compiler->expected_type = saved_expected;
-                emit_op(compiler, OP_SET_LOCAL_FIELD, (int)stmt->line);
-                emit_short(compiler, (uint16_t)slot, (int)stmt->line);
-                emit_short(compiler, (uint16_t)field_index, (int)stmt->line);
-                emit_op(compiler, OP_POP, (int)stmt->line); // assigned value
-            } else {
-                if (!compile_expr(compiler, target->as.member.object)) return false;
-                Str saved_expected = compiler->expected_type;
-                compiler->expected_type = field_type;
-                if (!compile_expr(compiler, stmt->as.assign_stmt.value)) {
-                    compiler->expected_type = saved_expected;
-                    return false;
-                }
-                compiler->expected_type = saved_expected;
-                emit_op(compiler, OP_SET_FIELD, (int)stmt->line);
-                emit_short(compiler, (uint16_t)field_index, (int)stmt->line);
-                emit_op(compiler, OP_POP, (int)stmt->line); // assigned value
-            }
         }
+        compiler->expected_type = saved_expected;
+
+        // 4. Set the field
+        emit_op(compiler, OP_SET_FIELD, (int)stmt->line);
+        emit_short(compiler, (uint16_t)field_index, (int)stmt->line);
+        emit_op(compiler, OP_POP, (int)stmt->line); // assigned value
         return true;
       } else {
         diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column,

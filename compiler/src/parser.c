@@ -15,6 +15,7 @@ typedef struct {
   const Token* tokens;
   size_t count;
   size_t index;
+  bool had_error;
 } Parser;
 
 typedef struct {
@@ -23,6 +24,7 @@ typedef struct {
 } BinaryInfo;
 
 static void parser_error(Parser* parser, const Token* token, const char* fmt, ...) {
+  parser->had_error = true;
   char buffer[256];
   va_list args;
   va_start(args, fmt);
@@ -2165,6 +2167,7 @@ AstModule* parse_module(Arena* arena, const char* file_path, TokenList tokens) {
   }
   module->imports = imports;
   module->decls = head;
+  module->had_error = parser.had_error;
   return module;
 }
 

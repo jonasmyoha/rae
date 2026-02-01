@@ -349,6 +349,7 @@ struct AstModule {
   AstDecl* decls;
   Token* comments;
   size_t comment_count;
+  bool had_error;
 };
 
 void ast_dump_module(const AstModule* module, FILE* out);
