@@ -186,6 +186,7 @@ for TARGET in "${TARGETS[@]}"; do
         
         # Cleanup
         kill $HOT_PID || true
+        wait $HOT_PID 2>/dev/null || true
         rm -f "$TMP_HOT_FILE"
         
         # Set up actual output for comparison
