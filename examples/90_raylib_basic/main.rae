@@ -1,11 +1,34 @@
 import raylib
 func main() {
+  # FLAG_WINDOW_RESIZABLE = 4
+  setConfigFlags(flags: 4)
   initWindow(width: 800, height: 450, title: "Raylib Basic")
-  let c: Color = { r: 255, g: 255, b: 255, a: 255 }
+  setTargetFPS(fps: 60)
+  let bgColor: Color = { r: 100, g: 120, b: 130, a: 255 }
+  let pastelCircle: Color = { r: 255, g: 200, b: 180, a: 255 }
+  let textColor: Color = { r: 240, g: 240, b: 240, a: 255 }
   loop windowShouldClose() is 0 {
+    let sw: Int = getScreenWidth()
+    let sh: Int = getScreenHeight()
+    let centerX: Float = sw.toFloat() / 2.0
+    let centerY: Float = sh.toFloat() / 2.0
     beginDrawing()
-    clearBackground(color: c)
-    drawCircle(x: 400.0, y: 225.0, radius: 50.0, color: { r: 255, g: 0, b: 0, a: 255 })
+    clearBackground(color: bgColor)
+    drawCircle(x: centerX, y: centerY, radius: 80.0, color: pastelCircle)
+    drawText(
+      text: "Raylib & Rae"
+      x: centerX - 80.0
+      y: centerY + 100.0
+      fontSize: 30.0
+      color: textColor
+    )
+    drawText(
+      text: "Window is now resizable"
+      x: 10.0
+      y: 10.0
+      fontSize: 20.0
+      color: textColor
+    )
     endDrawing()
   }
   closeWindow()

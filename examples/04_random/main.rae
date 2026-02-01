@@ -1,22 +1,26 @@
 import math
 import raylib
 func main() {
-  initWindow(width: 400, height: 400, title: "Rae Random Demo")
+  # FLAG_WINDOW_RESIZABLE = 4
+  setConfigFlags(flags: 4)
+  initWindow(width: 800, height: 450, title: "Rae Random Demo")
   setTargetFPS(fps: 60)
   let bgColor: Color = { r: 20, g: 20, b: 25, a: 255 }
   loop windowShouldClose() is 0 {
+    let sw: Int = getScreenWidth()
+    let sh: Int = getScreenHeight()
     beginDrawing()
     clearBackground(color: bgColor)
     let i: Int = 0
     loop i < 10 {
-      let x: Float = random(min: 0, max: 400).toFloat()
-      let y: Float = random(min: 0, max: 400).toFloat()
+      let x: Float = random(min: 0, max: sw).toFloat()
+      let y: Float = random(min: 0, max: sh).toFloat()
       let r: Float = random(min: 5, max: 20).toFloat()
       drawCircle(
         x: x
         y: y
         radius: r
-        color: {
+        color: Color {
           r: random(min: 100, max: 255)
           g: random(min: 100, max: 255)
           b: random(min: 100, max: 255)
@@ -25,6 +29,13 @@ func main() {
       )
       i = i + 1
     }
+    drawText(
+      text: "Resizable 16:9 Window"
+      x: 10.0
+      y: 10.0
+      fontSize: 20.0
+      color: Color { r: 200, g: 200, b: 200, a: 255 }
+    )
     endDrawing()
   }
   closeWindow()
