@@ -109,11 +109,21 @@ bool vm_hot_patch(VM* vm, Chunk* new_chunk) {
             break;
         }
 
-        if (op == OP_CONSTANT) {
+        if (op == OP_CONSTANT || op == OP_CONSTRUCT || op == OP_LIST || 
+            op == OP_BIND_LOCAL || op == OP_BIND_FIELD ||
+            op == OP_VIEW_LOCAL || op == OP_MOD_LOCAL ||
+            op == OP_VIEW_FIELD || op == OP_MOD_FIELD ||
+            op == OP_GET_FIELD || op == OP_SET_FIELD) {
             uint16_t idx = (uint16_t)((code_base[cursor + 1] << 8) | code_base[cursor + 2]);
             idx += (uint16_t)const_offset;
             code_base[cursor + 1] = (idx >> 8) & 0xFF;
             code_base[cursor + 2] = idx & 0xFF;
+        } else if (op == OP_NATIVE_CALL) {
+            uint16_t idx = (uint16_t)((code_base[cursor + 1] << 8) | code_base[cursor + 2]);
+            idx += (uint16_t)const_offset;
+            code_base[cursor + 1] = (idx >> 8) & 0xFF;
+            code_base[cursor + 2] = idx & 0xFF;
+            // Byte after short is arg_count, skip it
         } else if (op == OP_JUMP || op == OP_JUMP_IF_FALSE || op == OP_CALL) {
             uint16_t target = (uint16_t)((code_base[cursor + 1] << 8) | code_base[cursor + 2]);
             target += (uint16_t)code_offset;
