@@ -109,11 +109,7 @@ bool vm_hot_patch(VM* vm, Chunk* new_chunk) {
             break;
         }
 
-        if (op == OP_CONSTANT || op == OP_CONSTRUCT || op == OP_LIST || 
-            op == OP_BIND_LOCAL || op == OP_BIND_FIELD ||
-            op == OP_VIEW_LOCAL || op == OP_MOD_LOCAL ||
-            op == OP_VIEW_FIELD || op == OP_MOD_FIELD ||
-            op == OP_GET_FIELD || op == OP_SET_FIELD) {
+        if (op == OP_CONSTANT) {
             uint16_t idx = (uint16_t)((code_base[cursor + 1] << 8) | code_base[cursor + 2]);
             idx += (uint16_t)const_offset;
             code_base[cursor + 1] = (idx >> 8) & 0xFF;
@@ -123,7 +119,6 @@ bool vm_hot_patch(VM* vm, Chunk* new_chunk) {
             idx += (uint16_t)const_offset;
             code_base[cursor + 1] = (idx >> 8) & 0xFF;
             code_base[cursor + 2] = idx & 0xFF;
-            // Byte after short is arg_count, skip it
         } else if (op == OP_JUMP || op == OP_JUMP_IF_FALSE || op == OP_CALL) {
             uint16_t target = (uint16_t)((code_base[cursor + 1] << 8) | code_base[cursor + 2]);
             target += (uint16_t)code_offset;
@@ -133,20 +128,18 @@ bool vm_hot_patch(VM* vm, Chunk* new_chunk) {
         cursor += len;
     }
     
-    // 5. Install Trampolines
+    // 5. Install Trampolines and update function registry
     int patched_count = 0;
     for (size_t i = 0; i < new_chunk->functions_count; ++i) {
         FunctionDebugInfo* new_fn = &new_chunk->functions[i];
+        size_t new_addr = code_offset + new_fn->offset;
         
-        // Find old function
+        // Find old function to patch
         for (size_t j = 0; j < old_chunk->functions_count; ++j) {
             FunctionDebugInfo* old_fn = &old_chunk->functions[j];
             if (strcmp(old_fn->name, new_fn->name) == 0) {
-                // Found match!
-                // Calculate new absolute address
-                size_t new_addr = code_offset + new_fn->offset;
-                
-                // Write trampoline at old_fn->offset
+                // Found match! Write trampoline at original offset.
+                // This ensures existing calls to the original address are redirected.
                 old_chunk->code[old_fn->offset] = OP_JUMP;
                 old_chunk->code[old_fn->offset + 1] = (new_addr >> 8) & 0xFF;
                 old_chunk->code[old_fn->offset + 2] = new_addr & 0xFF;
@@ -156,6 +149,9 @@ bool vm_hot_patch(VM* vm, Chunk* new_chunk) {
                 break;
             }
         }
+        
+        // Unconditionally add new function info so future patches can find it at its new location
+        chunk_add_function_info(old_chunk, new_fn->name, new_addr);
     }
     
     printf("[hot-patch] Applied %d patches. Code size: %zu -> %zu\n", 
