@@ -247,12 +247,7 @@ func canMove(g: view Game, dx: Int, dy: Int, dr: Int) ret Int {
   loop py < 4 {
     let px: Int = 0
     loop px < 4 {
-      if getShapeCell(
-        kind: cp.kind
-        rot: newRot
-        px: px
-        py: py
-      ) is 1 {
+      if getShapeCell(kind: cp.kind, rot: newRot, px: px, py: py) is 1 {
         if isOccupied(g: g, x: newX + px, y: newY + py) is 1 {
           ret 0
         }
@@ -273,12 +268,7 @@ func lockPiece(g: mod Game) {
   loop py < 4 {
     let px: Int = 0
     loop px < 4 {
-      if getShapeCell(
-        kind: cp.kind
-        rot: cp.rotation
-        px: px
-        py: py
-      ) is 1 {
+      if getShapeCell(kind: cp.kind, rot: cp.rotation, px: px, py: py) is 1 {
         let gx: Int = pos.x + px
         let gy: Int = pos.y + py
         if gy >= 0 and gy < g.height {
@@ -378,12 +368,7 @@ func spawnPiece(g: mod Game) {
   pos.x = g.width / 2 - 2
   pos.y = -1
   cp.rotation = 0
-  if canMove(
-    g: g
-    dx: 0
-    dy: 0
-    dr: 0
-  ) is 0 {
+  if canMove(g: g, dx: 0, dy: 0, dr: 0) is 0 {
     g.state = GameState.GameOver
   }
 }
@@ -455,12 +440,7 @@ func draw(g: view Game) {
   loop py < 4 {
     let px: Int = 0
     loop px < 4 {
-      if getShapeCell(
-        kind: cp.kind
-        rot: cp.rotation
-        px: px
-        py: py
-      ) is 1 {
+      if getShapeCell(kind: cp.kind, rot: cp.rotation, px: px, py: py) is 1 {
         drawRectangle(
           x: (pos.x + px).toFloat() * cellSize + offsetX
           y: (pos.y + py).toFloat() * cellSize + offsetY
@@ -546,23 +526,13 @@ func handleInput(g: mod Game) {
   let moveRight: Int = isKeyDown(key: 262) or isKeyDown(key: 68)
   if g.hMoveTimer >= g.hMoveDelay {
     if moveLeft is 1 and moveRight is 0 {
-      if canMove(
-        g: g
-        dx: -1
-        dy: 0
-        dr: 0
-      ) is 1 {
+      if canMove(g: g, dx: -1, dy: 0, dr: 0) is 1 {
         pos.x = pos.x - 1
         g.hMoveTimer = 0
       }
     }
     if moveRight is 1 and moveLeft is 0 {
-      if canMove(
-        g: g
-        dx: 1
-        dy: 0
-        dr: 0
-      ) is 1 {
+      if canMove(g: g, dx: 1, dy: 0, dr: 0) is 1 {
         pos.x = pos.x + 1
         g.hMoveTimer = 0
       }
@@ -573,15 +543,8 @@ func handleInput(g: mod Game) {
     g.hMoveTimer = g.hMoveTimer
   }
   # Rotate (still single-press)
-  if isKeyPressed(key: 32) is 1 or isKeyPressed(key: 265) is 1 or isKeyPressed(
-    key: 87
-  ) is 1 {
-    if canMove(
-      g: g
-      dx: 0
-      dy: 0
-      dr: 1
-    ) is 1 {
+  if isKeyPressed(key: 32) is 1 or isKeyPressed(key: 265) is 1 or isKeyPressed(key: 87) is 1 {
+    if canMove(g: g, dx: 0, dy: 0, dr: 1) is 1 {
       cp.rotation = (cp.rotation + 1) % 4
     }
   }
@@ -593,12 +556,7 @@ func handleInput(g: mod Game) {
   # Gravity
   g.moveTimer = g.moveTimer + 1
   if g.moveTimer >= effectiveDelay {
-    if canMove(
-      g: g
-      dx: 0
-      dy: 1
-      dr: 0
-    ) is 1 {
+    if canMove(g: g, dx: 0, dy: 1, dr: 0) is 1 {
       pos.y = pos.y + 1
     } else {
       lockPiece(g)
