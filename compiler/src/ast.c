@@ -631,6 +631,8 @@ void ast_dump_module(const AstModule* module, FILE* out) {
       case AST_DECL_ENUM:
         dump_enum_decl(decl, out, 1);
         break;
+      case AST_DECL_GLOBAL_LET:
+        break;
     }
     decl = decl->next;
   }

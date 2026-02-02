@@ -29,7 +29,7 @@ typedef struct {
 void chunk_init(Chunk* chunk);
 void chunk_free(Chunk* chunk);
 void chunk_write(Chunk* chunk, uint8_t byte, int line);
-uint16_t chunk_add_constant(Chunk* chunk, Value value);
+uint32_t chunk_add_constant(Chunk* chunk, Value value);
 void chunk_add_function_info(Chunk* chunk, const char* name, size_t offset);
 
 #endif /* VM_CHUNK_H */

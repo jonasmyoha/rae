@@ -2061,6 +2061,43 @@ static AstDecl* parse_enum_declaration(Parser* parser) {
   return decl;
 }
 
+static Str str_clone(Parser* parser, Str s) {
+    if (s.len == 0) return s;
+    char* copy = parser_alloc(parser, s.len);
+    memcpy(copy, s.data, s.len);
+    return (Str){.data = copy, .len = s.len};
+}
+
+static AstDecl* parse_global_let_declaration(Parser* parser) {
+  const Token* token = parser_peek_at(parser, -1);
+  Str name = str_clone(parser, parser_consume(parser, TOK_IDENT, "expected identifier after 'let'")->lexeme);
+  
+  AstTypeRef* type = NULL;
+  if (parser_match(parser, TOK_COLON)) {
+    type = parse_type_ref(parser);
+  }
+  
+  bool is_bind = false;
+  AstExpr* value = NULL;
+  if (parser_match(parser, TOK_ASSIGN)) {
+    value = parse_expression(parser);
+  } else if (parser_match(parser, TOK_ARROW)) {
+    is_bind = true;
+    value = parse_expression(parser);
+  }
+  
+  AstDecl* decl = parser_alloc(parser, sizeof(AstDecl));
+  decl->kind = AST_DECL_GLOBAL_LET;
+  decl->line = token->line;
+  decl->column = token->column;
+  decl->as.let_decl.name = name;
+  decl->as.let_decl.type = type;
+  decl->as.let_decl.is_bind = is_bind;
+  decl->as.let_decl.value = value;
+  decl->next = NULL;
+  return decl;
+}
+
 static AstDecl* parse_declaration(Parser* parser) {
   if (parser_check(parser, TOK_KW_PUB) || parser_check(parser, TOK_KW_PRIV)) {
     const Token* token = parser_advance(parser);
@@ -2090,17 +2127,10 @@ static AstDecl* parse_declaration(Parser* parser) {
   if (parser_match(parser, TOK_KW_FUNC)) {
     return parse_func_declaration(parser, is_extern);
   }
-  
-  if (!is_extern && parser_check(parser, TOK_KW_FUNC)) {
-      parser_advance(parser);
-      return parse_func_declaration(parser, false);
+  if (parser_match(parser, TOK_KW_LET)) {
+    return parse_global_let_declaration(parser);
   }
   
-  if (is_extern) {
-    parser_error(parser, parser_previous(parser), "extern must be followed by func");
-    return NULL;
-  }
-
   parser_error(parser, parser_peek(parser), "expected 'type', 'enum' or 'func'");
   parser_advance(parser); // Advance to avoid infinite loop
   return NULL;

@@ -293,7 +293,8 @@ struct AstBlock {
 typedef enum {
   AST_DECL_TYPE,
   AST_DECL_FUNC,
-  AST_DECL_ENUM
+  AST_DECL_ENUM,
+  AST_DECL_GLOBAL_LET
 } AstDeclKind;
 
 typedef struct AstEnumMember {
@@ -332,6 +333,12 @@ struct AstDecl {
     AstTypeDecl type_decl;
     AstFuncDecl func_decl;
     AstEnumDecl enum_decl;
+    struct {
+      Str name;
+      AstTypeRef* type;
+      bool is_bind;
+      AstExpr* value;
+    } let_decl;
   } as;
 };
 

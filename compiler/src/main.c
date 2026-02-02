@@ -129,6 +129,9 @@ static bool native_sleep_ms(struct VM* vm,
     return false;
   }
   out_result->has_value = false;
+  if (arg_count == 0) {
+      return true;
+  }
   if (arg_count != 1) {
     diag_error(NULL, 0, 0, "sleepMs expects exactly one argument");
     return false;
@@ -138,7 +141,6 @@ static bool native_sleep_ms(struct VM* vm,
     return false;
   }
   int64_t ms = args[0].as.int_value;
-  // printf("DEBUG sleepMs: %lld ms\n", (long long)ms);
   if (ms <= 0) {
     return true;
   }
@@ -655,6 +657,8 @@ static bool register_default_natives(VmRegistry* registry, TickCounter* tick_cou
   ok = vm_registry_register_native(registry, "rae_int_to_float", native_rae_int_to_float, NULL) && ok;
   ok = vm_registry_register_native(registry, "readLine", native_rae_io_read_line, NULL) && ok;
   ok = vm_registry_register_native(registry, "readChar", native_rae_io_read_char, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_io_read_line", native_rae_io_read_line, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_io_read_char", native_rae_io_read_char, NULL) && ok;
   ok = vm_registry_register_native(registry, "exit", native_rae_sys_exit, NULL) && ok;
   ok = vm_registry_register_native(registry, "getEnv", native_rae_sys_get_env, NULL) && ok;
   ok = vm_registry_register_native(registry, "readFile", native_rae_sys_read_file, NULL) && ok;
@@ -726,7 +730,9 @@ static bool compile_file_chunk(const char* file_path,
                                uint64_t* out_hash,
                                WatchSources* watch_sources,
                                const char* project_root,
-                               bool no_implicit);
+                               bool no_implicit,
+                               VmRegistry* registry,
+                               bool is_patch);
 static bool build_c_backend_output(const char* entry_file,
                                    const char* project_root,
                                    const char* out_file,
@@ -2504,7 +2510,9 @@ static bool compile_file_chunk(const char* file_path,
                                uint64_t* out_hash,
                                WatchSources* watch_sources,
                                const char* project_root,
-                               bool no_implicit) {
+                               bool no_implicit,
+                               VmRegistry* registry,
+                               bool is_patch) {
   Arena* arena = arena_create(16 * 1024 * 1024);
   if (!arena) {
     diag_fatal("could not allocate arena");
@@ -2533,7 +2541,7 @@ static bool compile_file_chunk(const char* file_path,
     }
   }
   AstModule merged = merge_module_graph(&graph);
-  bool ok = vm_compile_module(&merged, chunk, file_path);
+  bool ok = vm_compile_module(&merged, chunk, file_path, registry, is_patch);
   module_graph_free(&graph);
   arena_destroy(arena);
   if (ok && out_hash) {
@@ -2611,7 +2619,7 @@ static bool build_vm_output(const char* entry_file,
   AstModule merged = merge_module_graph(&graph);
   Chunk chunk;
   chunk_init(&chunk);
-  ok = vm_compile_module(&merged, &chunk, entry_file);
+  ok = vm_compile_module(&merged, &chunk, entry_file, NULL, false);
   if (ok) {
     ok = write_vm_chunk_file(&chunk, out_path);
   }
@@ -2688,7 +2696,7 @@ static bool build_hybrid_output(const char* entry_file,
 
   Chunk chunk;
   chunk_init(&chunk);
-  ok = vm_compile_module(&merged, &chunk, entry_file);
+  ok = vm_compile_module(&merged, &chunk, entry_file, NULL, false);
   if (ok) {
     ok = write_vm_chunk_file(&chunk, chunk_path);
   }
@@ -2710,8 +2718,19 @@ static bool build_hybrid_output(const char* entry_file,
 
 static int run_vm_file(const RunOptions* run_opts, const char* project_root) {
   const char* file_path = run_opts->input_path;
+  
+  VmRegistry registry;
+  vm_registry_init(&registry);
+  TickCounter tick_counter = {.next = 0};
+  if (!register_default_natives(&registry, &tick_counter)) {
+    fprintf(stderr, "error: failed to register VM native functions\n");
+    vm_registry_free(&registry);
+    return 1;
+  }
+
   Chunk chunk;
-  if (!compile_file_chunk(file_path, &chunk, NULL, NULL, project_root, run_opts->no_implicit)) {
+  if (!compile_file_chunk(file_path, &chunk, NULL, NULL, project_root, run_opts->no_implicit, &registry, false)) {
+    vm_registry_free(&registry);
     return 1;
   }
 
@@ -2724,16 +2743,6 @@ static int run_vm_file(const RunOptions* run_opts, const char* project_root) {
   vm_init(vm);
   vm->timeout_seconds = run_opts->timeout;
   
-  VmRegistry registry;
-  vm_registry_init(&registry);
-  TickCounter tick_counter = {.next = 0};
-  if (!register_default_natives(&registry, &tick_counter)) {
-    fprintf(stderr, "error: failed to register VM native functions\n");
-    vm_registry_free(&registry);
-    chunk_free(&chunk);
-    free(vm);
-    return 1;
-  }
   vm_set_registry(vm, &registry);
   VMResult result = vm_run(vm, &chunk);
   if (result == VM_RUNTIME_TIMEOUT) {
@@ -3227,31 +3236,63 @@ static int run_vm_watch(const RunOptions* run_opts, const char* project_root) {
 
 
 
-    if (!compile_file_chunk(file_path, &chunk, &file_hash, &sources, project_root, run_opts->no_implicit)) {
+        if (!compile_file_chunk(file_path, &chunk, &file_hash, &sources, project_root, run_opts->no_implicit, &registry, false)) {
 
 
 
-        fprintf(stderr, "error: initial compilation failed\n");
+    
 
 
 
-        ctx.running = false;
+          vm_registry_free(&registry);
 
 
 
-        sys_thread_join(watch_thread);
+    
 
 
 
-        sys_mutex_destroy(&ctx.mutex);
+          ctx.running = false;
 
 
 
-        return 1;
+    
 
 
 
-    }
+          sys_thread_join(watch_thread);
+
+
+
+    
+
+
+
+          sys_mutex_destroy(&ctx.mutex);
+
+
+
+    
+
+
+
+          return 1;
+
+
+
+    
+
+
+
+        }
+
+
+
+    
+
+
+
+    
 
   
 
@@ -3309,7 +3350,7 @@ static int run_vm_watch(const RunOptions* run_opts, const char* project_root) {
           WatchSources new_sources;
           watch_sources_init(&new_sources);
           
-          if (compile_file_chunk(file_path, &new_chunk, &new_hash, &new_sources, project_root, run_opts->no_implicit)) {
+          if (compile_file_chunk(file_path, &new_chunk, &new_hash, &new_sources, project_root, run_opts->no_implicit, &registry, true)) {
               sys_mutex_lock(&ctx.mutex);
               bool patched = vm_hot_patch(vm, &new_chunk);
               vm->reload_requested = false;
