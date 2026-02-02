@@ -408,6 +408,17 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         Value rhs = vm_pop(vm);
         Value lhs = vm_pop(vm);
         
+        while (lhs.type == VAL_REF) {
+            Value next = value_copy(lhs.as.ref_value.target);
+            value_free(&lhs);
+            lhs = next;
+        }
+        while (rhs.type == VAL_REF) {
+            Value next = value_copy(rhs.as.ref_value.target);
+            value_free(&rhs);
+            rhs = next;
+        }
+
         if ((lhs.type == VAL_INT || lhs.type == VAL_FLOAT) && (rhs.type == VAL_INT || rhs.type == VAL_FLOAT)) {
             if (lhs.type == VAL_FLOAT || rhs.type == VAL_FLOAT) {
                 double l = (lhs.type == VAL_FLOAT) ? lhs.as.float_value : (double)lhs.as.int_value;
@@ -462,6 +473,18 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
       case OP_GE: {
         Value rhs = vm_pop(vm);
         Value lhs = vm_pop(vm);
+
+        while (lhs.type == VAL_REF) {
+            Value next = value_copy(lhs.as.ref_value.target);
+            value_free(&lhs);
+            lhs = next;
+        }
+        while (rhs.type == VAL_REF) {
+            Value next = value_copy(rhs.as.ref_value.target);
+            value_free(&rhs);
+            rhs = next;
+        }
+
         if ((lhs.type == VAL_INT || lhs.type == VAL_FLOAT) && (rhs.type == VAL_INT || rhs.type == VAL_FLOAT)) {
           double l = (lhs.type == VAL_FLOAT) ? lhs.as.float_value : (double)lhs.as.int_value;
           double r = (rhs.type == VAL_FLOAT) ? rhs.as.float_value : (double)rhs.as.int_value;
@@ -488,11 +511,19 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
       case OP_NE: {
         Value rhs = vm_pop(vm);
         Value lhs = vm_pop(vm);
-        bool equal = values_equal(&lhs, &rhs);
+
+        Value* l = &lhs;
+        if (lhs.type == VAL_REF) l = lhs.as.ref_value.target;
+        Value* r = &rhs;
+        if (rhs.type == VAL_REF) r = rhs.as.ref_value.target;
+
+        bool equal = values_equal(l, r);
         if (instruction == OP_NE) {
           equal = !equal;
         }
         vm_push(vm, value_bool(equal));
+        value_free(&lhs);
+        value_free(&rhs);
         break;
       }
       case OP_NOT: {
@@ -504,6 +535,9 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         uint32_t field_index = read_uint32(vm);
         Value val = vm_pop(vm);
         Value* target = &val;
+        if (val.type == VAL_REF) {
+          target = val.as.ref_value.target;
+        }
         if (val.type == VAL_REF) {
           target = val.as.ref_value.target;
         }
@@ -670,6 +704,39 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
       }
       case OP_DUP: {
         vm_push(vm, value_copy(vm_peek(vm, 0)));
+        break;
+      }
+      case OP_LOAD_REF: {
+        Value ref = vm_pop(vm);
+        if (ref.type != VAL_REF) {
+          diag_error(NULL, 0, 0, "OP_LOAD_REF on non-reference");
+          value_free(&ref);
+          return VM_RUNTIME_ERROR;
+        }
+        vm_push(vm, value_copy(ref.as.ref_value.target));
+        value_free(&ref);
+        break;
+      }
+      case OP_STORE_REF: {
+        Value val = vm_pop(vm);
+        Value ref = vm_pop(vm);
+        if (ref.type != VAL_REF) {
+          diag_error(NULL, 0, 0, "OP_STORE_REF on non-reference");
+          value_free(&val);
+          value_free(&ref);
+          return VM_RUNTIME_ERROR;
+        }
+        if (ref.as.ref_value.kind == REF_VIEW) {
+          diag_error(NULL, 0, 0, "cannot store through a read-only 'view' reference");
+          value_free(&val);
+          value_free(&ref);
+          return VM_RUNTIME_ERROR;
+        }
+        value_free(ref.as.ref_value.target);
+        *ref.as.ref_value.target = value_copy(&val);
+        vm_push(vm, value_copy(&val)); // Return result of assignment
+        value_free(&val);
+        value_free(&ref);
         break;
       }
       case OP_CONSTRUCT: {
