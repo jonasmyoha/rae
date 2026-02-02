@@ -865,6 +865,12 @@ static const AstFuncDecl* find_function_overload(const AstModule* module, CFuncC
 }
 
 static void emit_mangled_function_name(const AstFuncDecl* func, FILE* out) {
+    const char* ray_mapping = find_raylib_mapping(func->name);
+    if (ray_mapping) {
+        fprintf(out, "rae_ext_%.*s", (int)func->name.len, func->name.data);
+        return;
+    }
+
     if (func->is_extern) {
         Str name = func->name;
         if (str_eq_cstr(name, "sleep") || str_eq_cstr(name, "sleepMs")) {
@@ -918,19 +924,11 @@ static void emit_mangled_function_name(const AstFuncDecl* func, FILE* out) {
         } else if (str_eq_cstr(name, "readChar")) {
             fprintf(out, "rae_ext_rae_io_read_char");
         } else {
-            // Unify: if it already starts with rae_str_ or similar, we just add rae_ext_
-            // The runtime now has rae_str_len etc.
             fprintf(out, "rae_ext_%.*s", (int)name.len, name.data);
         }
         return;
     }
 
-    const char* ray_mapping = find_raylib_mapping(func->name);
-    if (ray_mapping) {
-        fprintf(out, "rae_%.*s_", (int)func->name.len, func->name.data);
-        return;
-    }
-    
     fprintf(out, "rae_%.*s", (int)func->name.len, func->name.data);
     
     // Non-externs always get param-based mangling to avoid any chance of collision.
@@ -1162,8 +1160,13 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
 
   if (func_decl && !str_eq_cstr(func_decl->name, "main")) {
       emit_mangled_function_name(func_decl, out);
-  } else if (callee->kind == AST_EXPR_IDENT && find_raylib_mapping(callee->as.ident)) {
-      fprintf(out, "rae_%.*s_", (int)callee->as.ident.len, callee->as.ident.data);
+  } else if (callee->kind == AST_EXPR_IDENT) {
+      const char* ray_mapping = find_raylib_mapping(callee->as.ident);
+      if (ray_mapping) {
+          fprintf(out, "rae_ext_%.*s", (int)callee->as.ident.len, callee->as.ident.data);
+      } else {
+          if (!emit_expr(ctx, callee, out, PREC_CALL)) return false;
+      }
   } else {
       if (!emit_expr(ctx, callee, out, PREC_CALL)) return false;
   }
@@ -1174,7 +1177,6 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
   const AstCallArg* arg = expr->as.call.args;
   const AstParam* param = func_decl ? func_decl->params : NULL;
   bool first = true;
-  size_t arg_idx = 0;
   
   while (arg) {
     if (!first) {
@@ -1217,16 +1219,6 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 needs_addr = true;
             }
         }
-        
-        // HACK: for positional 'add'/'set' sugar
-        if (callee->kind == AST_EXPR_IDENT) {
-            Str name = callee->as.ident;
-            if (str_eq_cstr(name, "add") || str_eq_cstr(name, "set")) {
-                if (arg_idx > 0) {
-                    is_any_param = true;
-                }
-            }
-        }
     }
 
     bool have_ptr = false;
@@ -1241,7 +1233,7 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     if (needs_addr && !have_ptr) {
          if (fprintf(out, "&(") < 0) return false;
     } else if (!needs_addr && have_ptr) {
-         if (fprintf(out, "*") < 0) return false;
+         if (fprintf(out, "*(") < 0) return false;
     }
 
     Str arg_type = infer_expr_type(ctx, arg->value);
@@ -1257,6 +1249,13 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     } else if (str_eq_cstr(target_type, "Vector2") || str_eq_cstr(target_type, "Vector3") || 
                str_eq_cstr(target_type, "Color") || str_eq_cstr(target_type, "Camera3D")) {
         is_c_struct = true;
+    }
+
+    bool arg_is_any = str_eq_cstr(arg_type, "Any");
+    bool arg_is_opt = false;
+    if (arg->value->kind == AST_EXPR_IDENT) {
+        const AstTypeRef* tr = get_local_type_ref(ctx, arg->value->as.ident);
+        if (tr && tr->is_opt) arg_is_opt = true;
     }
 
     if (is_c_struct && !needs_addr) {
@@ -1303,13 +1302,6 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) return false;
         }
     } else {
-        bool arg_is_any = str_eq_cstr(arg_type, "Any");
-        bool arg_is_opt = false;
-        if (arg->value->kind == AST_EXPR_IDENT) {
-            const AstTypeRef* tr = get_local_type_ref(ctx, arg->value->as.ident);
-            if (tr && tr->is_opt) arg_is_opt = true;
-        }
-
         if (is_any_param && !needs_addr) {
             fprintf(out, "rae_any(");
         } else if (!is_any_param && (arg_is_any || arg_is_opt)) {
@@ -1368,7 +1360,6 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     
     arg = arg->next;
     if (func_decl && param) param = param->next;
-    arg_idx++;
   }
   fprintf(out, ")");
   fprintf(out, "%s", cast_post);

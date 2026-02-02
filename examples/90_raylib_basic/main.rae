@@ -1,8 +1,11 @@
 import raylib
+
 type State {
   bgColor: Color
   pastelCircle: Color
   textColor: Color
+  radius: Int
+  direction: Bool
 }
 
 func main() {
@@ -14,11 +17,32 @@ func main() {
     bgColor: { r: 100, g: 120, b: 130, a: 255 }
     pastelCircle: { r: 255, g: 200, b: 180, a: 255 }
     textColor: { r: 240, g: 240, b: 240, a: 255 }
+    radius: 80
+    direction: false
   }
   loop windowShouldClose() is 0 {
     tick(s)
   }
   closeWindow()
+}
+
+func drawShadowText(text: String, x: Float, y: Float, fontSize: Float, color: view Color) {
+  # text shadow
+  drawText(
+    text: text
+    x: x + 2
+    y: y + 2
+    fontSize: fontSize
+    color: Color { r: 10, g: 12, b: 13, a: 95 }
+  )
+  # actual text
+  drawText(
+    text: text
+    x: x
+    y: y
+    fontSize: 30.0
+    color: color
+  )
 }
 
 func tick(s: view State) {
@@ -28,10 +52,26 @@ func tick(s: view State) {
   let sh: Int = getScreenHeight()
   let centerX: Float = sw.toFloat() / 2.0
   let centerY: Float = sh.toFloat() / 2.0
+
+  #let radius: mod Int => s.radius
+  if s.direction is false {
+    s.radius = s.radius - 1
+    if s.radius <= -10 {
+      s.direction = true
+    }
+  }
+  else if s.direction {
+    s.radius = s.radius + 1
+    if s.radius >= 520 {
+      s.direction = false
+    }
+  }
+
   beginDrawing()
   clearBackground(color: s.bgColor)
-  drawCircle(x: centerX, y: centerY, radius: 80.0, color: s.pastelCircle)
-  drawText(
+  drawCircle(x: centerX, y: centerY, radius: s.radius, color: s.pastelCircle)
+  # let text: String = "Raylib & Rae"
+  drawShadowText(
     text: "Raylib & Rae"
     x: centerX - 95.0
     y: centerY + 100.0
