@@ -2002,7 +2002,7 @@ static bool module_graph_load_module(ModuleGraph* graph,
 
   // Also check if the file is already loaded under a different module path
   for (ModuleNode* node = graph->head; node; node = node->next) {
-    if (strcmp(node->canonical_path, path_to_check) == 0) {
+    if (node->canonical_path && strcmp(node->canonical_path, path_to_check) == 0) {
       return true;
     }
   }
@@ -2309,7 +2309,7 @@ static bool module_graph_build(ModuleGraph* graph, const char* entry_file, uint6
 }
 
 static AstModule merge_module_graph(const ModuleGraph* graph) {
-  AstModule merged = {.imports = NULL, .decls = NULL};
+  AstModule merged = {.file_path = graph->head ? graph->head->file_path : NULL, .imports = NULL, .decls = NULL};
   AstDecl* tail = NULL;
   for (ModuleNode* node = graph->head; node; node = node->next) {
     AstDecl* decls = node->module ? node->module->decls : NULL;

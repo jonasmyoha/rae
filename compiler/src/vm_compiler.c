@@ -884,21 +884,6 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
   free(arg_types);
 
   if (!entry) {
-    // Check for native function in registry
-    char* name_cstr = str_to_cstr(name);
-    bool found_native = (compiler->registry && vm_registry_find_native(compiler->registry, name_cstr));
-    free(name_cstr);
-    
-    if (found_native) {
-        // Emit arguments first
-        const AstCallArg* arg = expr->as.call.args;
-        while (arg) {
-            if (!compile_expr(compiler, arg->value)) return false;
-            arg = arg->next;
-        }
-        return emit_native_call(compiler, name, (uint8_t)arg_count, (int)expr->line, (int)expr->column);
-    }
-
     char buffer[128];
     snprintf(buffer, sizeof(buffer), "unknown function '%.*s' for VM call", (int)name.len,
              name.data);
