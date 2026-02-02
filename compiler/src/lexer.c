@@ -450,200 +450,199 @@ static void scan_char_literal(Lexer* lexer, TokenBuffer* buffer, size_t start_in
 TokenList lexer_tokenize(Arena* arena,
                          const char* file_path,
                          const char* source,
-                         size_t length,
-                         bool strict) {
-  Lexer lexer = {
-      .file_path = file_path,
-      .input = source,
-      .length = length,
-      .index = 0,
-      .line = 1,
-      .column = 1,
-      .interpolation_depth = 0,
-      .inside_raw_string = false,
-      .strict = strict,
-      .had_error = false,
-  };
-
-  size_t max_lines = 1000;
-  
-  // Check for directives in the first few lines
-  if (length > 10 && source[0] == '#') {
-      const char* directive = strstr(source, "# rae: max-lines");
-      if (directive && (size_t)(directive - source) < 200) {
-          char* end;
-          long val = strtol(directive + 16, &end, 10);
-          if (val > 0) {
-              max_lines = (size_t)val;
-          }
-      }
-  }
-
-  TokenBuffer buffer = {0};
-
-  for (;;) {
-    lexer_skip_whitespace(&lexer);
-    if (lexer_is_at_end(&lexer)) {
-      if (length > 0 && lexer.strict) {
-          // Find last character that is not a space or tab
-          size_t last_idx = length - 1;
-          while (last_idx > 0 && (source[last_idx] == ' ' || source[last_idx] == '\t')) {
-              last_idx--;
-          }
-          if (source[last_idx] != '\n' && source[last_idx] != '\r') {
-              lexer_error(&lexer, lexer.line, lexer.column, "Rae files must end with a newline (\\n). Missing final newline at end of file. Run `rae format` to fix.");
-          }
-      }
-      Str lexeme = str_from_buf(source + lexer.index, 0);
-      Token eof_token = {.kind = TOK_EOF, .lexeme = lexeme, .line = lexer.line, .column = lexer.column};
-      token_buffer_push(&buffer, eof_token);
-      break;
-    }
-
-    if (lexer.line > max_lines) {
-        lexer_error(&lexer, lexer.line, lexer.column, "file exceeds maximum allowed line count of %zu. Use '# rae: max-lines <N>' at the top of the file to increase this limit.", max_lines);
-        // We only report this once, so we could break or continue. 
-        // Break to avoid flooding with the same error if it continues.
-        Str lexeme = str_from_buf(source + lexer.index, 0);
-        Token eof_token = {.kind = TOK_EOF, .lexeme = lexeme, .line = lexer.line, .column = lexer.column};
-        token_buffer_push(&buffer, eof_token);
-        break;
-    }
-
-    size_t start_index = lexer.index;
-    size_t token_line = lexer.line;
-    size_t token_column = lexer.column;
-    char c = lexer_advance(&lexer);
-
-    switch (c) {
-      case '#':
-        if (lexer_peek(&lexer) == '[') {
-          lexer_advance(&lexer);
-          scan_block_comment(&lexer, &buffer, start_index, token_line, token_column);
-        } else {
-          scan_line_comment(&lexer, &buffer, start_index, token_line, token_column);
-        }
-        break;
-      case '(':
-        emit_token(&lexer, &buffer, TOK_LPAREN, start_index, token_line, token_column);
-        break;
-      case ')':
-        emit_token(&lexer, &buffer, TOK_RPAREN, start_index, token_line, token_column);
-        break;
-      case '{':
-        emit_token(&lexer, &buffer, TOK_LBRACE, start_index, token_line, token_column);
-        break;
-      case '}':
-        emit_token(&lexer, &buffer, TOK_RBRACE, start_index, token_line, token_column);
-        if (lexer.interpolation_depth > 0) {
-            lexer.interpolation_depth--;
-            scan_string(&lexer, &buffer, lexer.index, lexer.line, lexer.column, true);
-        }
-        break;
-      case '[':
-        emit_token(&lexer, &buffer, TOK_LBRACKET, start_index, token_line, token_column);
-        break;
-      case ']':
-        emit_token(&lexer, &buffer, TOK_RBRACKET, start_index, token_line, token_column);
-        break;
-      case ',':
-        emit_token(&lexer, &buffer, TOK_COMMA, start_index, token_line, token_column);
-        break;
-      case ':':
-        emit_token(&lexer, &buffer, TOK_COLON, start_index, token_line, token_column);
-        break;
-      case '.':
-        emit_token(&lexer, &buffer, TOK_DOT, start_index, token_line, token_column);
-        break;
-      case '+':
-        if (lexer_peek(&lexer) == '+') {
-          lexer_advance(&lexer);
-          emit_token(&lexer, &buffer, TOK_INC, start_index, token_line, token_column);
-        } else {
-          emit_token(&lexer, &buffer, TOK_PLUS, start_index, token_line, token_column);
-        }
-        break;
-      case '-':
-        if (lexer_peek(&lexer) == '-') {
-          lexer_advance(&lexer);
-          emit_token(&lexer, &buffer, TOK_DEC, start_index, token_line, token_column);
-        } else {
-          emit_token(&lexer, &buffer, TOK_MINUS, start_index, token_line, token_column);
-        }
-        break;
-      case '*':
-        emit_token(&lexer, &buffer, TOK_STAR, start_index, token_line, token_column);
-        break;
-      case '/':
-        emit_token(&lexer, &buffer, TOK_SLASH, start_index, token_line, token_column);
-        break;
-      case '%':
-        emit_token(&lexer, &buffer, TOK_PERCENT, start_index, token_line, token_column);
-        break;
-      case '=':
-        if (lexer_peek(&lexer) == '>') {
-          lexer_advance(&lexer);
-          emit_token(&lexer, &buffer, TOK_ARROW, start_index, token_line, token_column);
-        } else {
-          emit_token(&lexer, &buffer, TOK_ASSIGN, start_index, token_line, token_column);
-        }
-        break;
-      case '<':
-        if (lexer_peek(&lexer) == '=') {
-          lexer_advance(&lexer);
-          emit_token(&lexer, &buffer, TOK_LESS_EQUAL, start_index, token_line, token_column);
-        } else {
-          emit_token(&lexer, &buffer, TOK_LESS, start_index, token_line, token_column);
-        }
-        break;
-      case '>':
-        if (lexer_peek(&lexer) == '=') {
-          lexer_advance(&lexer);
-          emit_token(&lexer, &buffer, TOK_GREATER_EQUAL, start_index, token_line, token_column);
-        } else {
-          emit_token(&lexer, &buffer, TOK_GREATER, start_index, token_line, token_column);
-        }
-        break;
-      case '"':
-        scan_string(&lexer, &buffer, start_index, token_line, token_column, false);
-        break;
-      case '\'':
-        scan_char_literal(&lexer, &buffer, start_index, token_line, token_column);
-        break;
-      case 'r':
-        if (lexer_peek(&lexer) == '"' || lexer_peek(&lexer) == '#') {
-          scan_raw_string(&lexer, &buffer, start_index, token_line, token_column);
-        } else {
-          scan_identifier(&lexer, &buffer, start_index, token_line, token_column);
-        }
-        break;
-      default:
-        if (isdigit((unsigned char)c)) {
-          scan_number(&lexer, &buffer, start_index, token_line, token_column, c);
-        } else if (is_ident_start(c)) {
-          scan_identifier(&lexer, &buffer, start_index, token_line, token_column);
-        } else {
-          lexer_error(&lexer, token_line, token_column, "unexpected character '%c'", c);
-        }
-        break;
-    }
-  }
-
-  Token* stored = NULL;
-  if (buffer.count > 0) {
-    stored = arena_alloc(arena, buffer.count * sizeof(Token));
-    if (!stored) {
-      free(buffer.data);
-      diag_fatal("lexer arena allocation failed");
-    }
-    memcpy(stored, buffer.data, buffer.count * sizeof(Token));
-  }
-
-  free(buffer.data);
-  return (TokenList){.data = stored, .count = buffer.count, .had_error = lexer.had_error};
-}
-
-const char* token_kind_name(TokenKind kind) {
+                                                  size_t length,
+                                                  bool strict) {
+                           Lexer lexer = {
+                               .file_path = file_path,
+                               .input = source,
+                               .length = length,
+                               .index = 0,
+                               .line = 1,
+                               .column = 1,
+                               .interpolation_depth = 0,
+                               .inside_raw_string = false,
+                               .strict = strict,
+                               .had_error = false,
+                           };
+                         
+                           size_t max_lines = 1000;
+                           
+                           // Check for directives in the first few lines
+                           if (length > 10 && source[0] == '#') {
+                               const char* directive = strstr(source, "# rae: max-lines");
+                               if (directive && (size_t)(directive - source) < 200) {
+                                   char* end;
+                                   long val = strtol(directive + 16, &end, 10);
+                                   if (val > 0) {
+                                       max_lines = (size_t)val;
+                                   }
+                               }
+                           }
+                         
+                           TokenBuffer buffer = {0};
+                         
+                           for (;;) {
+                             lexer_skip_whitespace(&lexer);
+                             if (lexer_is_at_end(&lexer)) {
+                               if (length > 0 && lexer.strict) {
+                                   // Find last character that is not a space or tab
+                                   size_t last_idx = length - 1;
+                                   while (last_idx > 0 && (source[last_idx] == ' ' || source[last_idx] == '\t')) {
+                                       last_idx--;
+                                   }
+                                   if (source[last_idx] != '\n' && source[last_idx] != '\r') {
+                                       lexer_error(&lexer, lexer.line, lexer.column, "Rae files must end with a newline (\\n). Missing final newline at end of file. Run `rae format` to fix.");
+                                   }
+                               }
+                               Str lexeme = str_from_buf(source + lexer.index, 0);
+                               Token eof_token = {.kind = TOK_EOF, .lexeme = lexeme, .line = lexer.line, .column = lexer.column};
+                               token_buffer_push(&buffer, eof_token);
+                               break;
+                             }
+                         
+                             if (lexer.line > max_lines) {
+                                 lexer_error(&lexer, lexer.line, lexer.column, "file exceeds maximum allowed line count of %zu. Use '# rae: max-lines <N>' at the top of the file to increase this limit.", max_lines);
+                                 // We only report this once, so we could break or continue. 
+                                 // Break to avoid flooding with the same error if it continues.
+                                 Str lexeme = str_from_buf(source + lexer.index, 0);
+                                 Token eof_token = {.kind = TOK_EOF, .lexeme = lexeme, .line = lexer.line, .column = lexer.column};
+                                 token_buffer_push(&buffer, eof_token);
+                                 break;
+                             }
+                         
+                             size_t start_index = lexer.index;
+                             size_t token_line = lexer.line;
+                             size_t token_column = lexer.column;
+                             char c = lexer_advance(&lexer);
+                         
+                             switch (c) {
+                               case '#':
+                                 if (lexer_peek(&lexer) == '[') {
+                                   lexer_advance(&lexer);
+                                   scan_block_comment(&lexer, &buffer, start_index, token_line, token_column);
+                                 } else {
+                                   scan_line_comment(&lexer, &buffer, start_index, token_line, token_column);
+                                 }
+                                 break;
+                               case '(':
+                                 emit_token(&lexer, &buffer, TOK_LPAREN, start_index, token_line, token_column);
+                                 break;
+                               case ')':
+                                 emit_token(&lexer, &buffer, TOK_RPAREN, start_index, token_line, token_column);
+                                 break;
+                               case '{':
+                                 emit_token(&lexer, &buffer, TOK_LBRACE, start_index, token_line, token_column);
+                                 break;
+                               case '}':
+                                 emit_token(&lexer, &buffer, TOK_RBRACE, start_index, token_line, token_column);
+                                 if (lexer.interpolation_depth > 0) {
+                                     lexer.interpolation_depth--;
+                                     scan_string(&lexer, &buffer, lexer.index, lexer.line, lexer.column, true);
+                                 }
+                                 break;
+                               case '[':
+                                 emit_token(&lexer, &buffer, TOK_LBRACKET, start_index, token_line, token_column);
+                                 break;
+                               case ']':
+                                 emit_token(&lexer, &buffer, TOK_RBRACKET, start_index, token_line, token_column);
+                                 break;
+                               case ',':
+                                 emit_token(&lexer, &buffer, TOK_COMMA, start_index, token_line, token_column);
+                                 break;
+                               case ':':
+                                 emit_token(&lexer, &buffer, TOK_COLON, start_index, token_line, token_column);
+                                 break;
+                               case '.':
+                                 emit_token(&lexer, &buffer, TOK_DOT, start_index, token_line, token_column);
+                                 break;
+                               case '+':
+                                 if (lexer_peek(&lexer) == '+') {
+                                   lexer_advance(&lexer);
+                                   emit_token(&lexer, &buffer, TOK_INC, start_index, token_line, token_column);
+                                 } else {
+                                   emit_token(&lexer, &buffer, TOK_PLUS, start_index, token_line, token_column);
+                                 }
+                                 break;
+                               case '-':
+                                 if (lexer_peek(&lexer) == '-') {
+                                   lexer_advance(&lexer);
+                                   emit_token(&lexer, &buffer, TOK_DEC, start_index, token_line, token_column);
+                                 } else {
+                                   emit_token(&lexer, &buffer, TOK_MINUS, start_index, token_line, token_column);
+                                 }
+                                 break;
+                               case '*':
+                                 emit_token(&lexer, &buffer, TOK_STAR, start_index, token_line, token_column);
+                                 break;
+                               case '/':
+                                 emit_token(&lexer, &buffer, TOK_SLASH, start_index, token_line, token_column);
+                                 break;
+                               case '%':
+                                 emit_token(&lexer, &buffer, TOK_PERCENT, start_index, token_line, token_column);
+                                 break;
+                               case '=':
+                                 if (lexer_peek(&lexer) == '>') {
+                                   lexer_advance(&lexer);
+                                   emit_token(&lexer, &buffer, TOK_ARROW, start_index, token_line, token_column);
+                                 } else {
+                                   emit_token(&lexer, &buffer, TOK_ASSIGN, start_index, token_line, token_column);
+                                 }
+                                 break;
+                               case '<':
+                                 if (lexer_peek(&lexer) == '=') {
+                                   lexer_advance(&lexer);
+                                   emit_token(&lexer, &buffer, TOK_LESS_EQUAL, start_index, token_line, token_column);
+                                 } else {
+                                   emit_token(&lexer, &buffer, TOK_LESS, start_index, token_line, token_column);
+                                 }
+                                 break;
+                               case '>':
+                                 if (lexer_peek(&lexer) == '=') {
+                                   lexer_advance(&lexer);
+                                   emit_token(&lexer, &buffer, TOK_GREATER_EQUAL, start_index, token_line, token_column);
+                                 } else {
+                                   emit_token(&lexer, &buffer, TOK_GREATER, start_index, token_line, token_column);
+                                 }
+                                 break;
+                               case '"':
+                                 scan_string(&lexer, &buffer, start_index, token_line, token_column, false);
+                                 break;
+                               case '\'':
+                                 scan_char_literal(&lexer, &buffer, start_index, token_line, token_column);
+                                 break;
+                               case 'r':
+                                 if (lexer_peek(&lexer) == '"' || lexer_peek(&lexer) == '#') {
+                                   scan_raw_string(&lexer, &buffer, start_index, token_line, token_column);
+                                 } else {
+                                   scan_identifier(&lexer, &buffer, start_index, token_line, token_column);
+                                 }
+                                 break;
+                               default:
+                                 if (isdigit((unsigned char)c)) {
+                                   scan_number(&lexer, &buffer, start_index, token_line, token_column, c);
+                                 } else if (is_ident_start(c)) {
+                                   scan_identifier(&lexer, &buffer, start_index, token_line, token_column);
+                                 } else {
+                                   lexer_error(&lexer, token_line, token_column, "unexpected character '%c'", c);
+                                 }
+                                 break;
+                             }
+                           }
+                         
+                           Token* stored = NULL;
+                           if (buffer.count > 0) {
+                             stored = arena_alloc(arena, buffer.count * sizeof(Token));
+                             if (!stored) {
+                               free(buffer.data);
+                               diag_fatal("lexer arena allocation failed");
+                             }
+                             memcpy(stored, buffer.data, buffer.count * sizeof(Token));
+                           }
+                         
+                           free(buffer.data);
+                           return (TokenList){.data = stored, .count = buffer.count, .had_error = lexer.had_error};
+                         }
+                         const char* token_kind_name(TokenKind kind) {
   size_t count = sizeof(TOKEN_KIND_NAMES) / sizeof(TOKEN_KIND_NAMES[0]);
   if (kind < 0 || (size_t)kind >= count || TOKEN_KIND_NAMES[kind] == NULL) {
     return "TOK_UNKNOWN";
