@@ -198,9 +198,16 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
       case OP_JUMP_IF_FALSE: {
         uint32_t target = read_uint32(vm);
         Value* condition = vm_peek(vm, 0);
-        if (!value_is_truthy(condition)) {
+        Value resolved = value_copy(condition);
+        while (resolved.type == VAL_REF) {
+            Value next = value_copy(resolved.as.ref_value.target);
+            value_free(&resolved);
+            resolved = next;
+        }
+        if (!value_is_truthy(&resolved)) {
           vm->ip = vm->chunk->code + target;
         }
+        value_free(&resolved);
         break;
       }
       case OP_CALL: {
@@ -262,6 +269,16 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         if (!entry || !entry->callback) {
           diag_error(NULL, 0, 0, "native function not registered");
           return VM_RUNTIME_ERROR;
+        }
+        
+        // Dereference arguments if needed
+        for (uint8_t i = 0; i < arg_count; i++) {
+            Value* arg = vm->stack_top - arg_count + i;
+            while (arg->type == VAL_REF) {
+                Value next = value_copy(arg->as.ref_value.target);
+                value_free(arg);
+                *arg = next;
+            }
         }
         
         const Value* args = vm->stack_top - arg_count;
@@ -457,14 +474,21 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
       }
       case OP_NEG: {
         Value operand = vm_pop(vm);
+        while (operand.type == VAL_REF) {
+            Value next = value_copy(operand.as.ref_value.target);
+            value_free(&operand);
+            operand = next;
+        }
         if (operand.type == VAL_INT) {
           vm_push(vm, value_int(-operand.as.int_value));
         } else if (operand.type == VAL_FLOAT) {
           vm_push(vm, value_float(-operand.as.float_value));
         } else {
           diag_error(NULL, 0, 0, "negation expects numeric operand");
+          value_free(&operand);
           return VM_RUNTIME_ERROR;
         }
+        value_free(&operand);
         break;
       }
       case OP_LT:
@@ -528,7 +552,13 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
       }
       case OP_NOT: {
         Value operand = vm_pop(vm);
+        while (operand.type == VAL_REF) {
+            Value next = value_copy(operand.as.ref_value.target);
+            value_free(&operand);
+            operand = next;
+        }
         vm_push(vm, value_bool(!value_is_truthy(&operand)));
+        value_free(&operand);
         break;
       }
       case OP_GET_FIELD: {
