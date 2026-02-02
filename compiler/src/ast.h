@@ -352,6 +352,7 @@ struct AstImport {
 };
 
 struct AstModule {
+  const char* file_path;
   AstImport* imports;
   AstDecl* decls;
   Token* comments;

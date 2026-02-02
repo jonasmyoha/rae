@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #include "lexer.h"
+#include "diag.h"
 
 typedef struct {
   int64_t next;
@@ -1087,6 +1088,13 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
       
       func_decl = find_function_overload(ctx->module, ctx, callee->as.ident, arg_types, arg_count);
       free(arg_types);
+
+      if (!func_decl && !find_raylib_mapping(callee->as.ident)) {
+          char buffer[128];
+          snprintf(buffer, sizeof(buffer), "unknown function '%.*s' for VM call", (int)callee->as.ident.len, callee->as.ident.data);
+          diag_error(ctx->module->file_path, (int)expr->line, (int)expr->column, buffer);
+          return false;
+      }
   }
 
   // Handle return type casting if it's a generic return
