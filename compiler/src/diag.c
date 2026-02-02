@@ -62,6 +62,7 @@ void diag_report(const char* file, int line, int col, const char* message) {
   if (file && line > 0) {
     print_source_line(file, line, col);
   }
+  fflush(stderr);
 }
 
 int diag_error_count(void) {
