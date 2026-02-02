@@ -46,6 +46,8 @@ typedef enum {
   OP_MOD_FIELD = 0x2A,
   OP_SET_LOCAL_FIELD = 0x2B,
   OP_DUP = 0x2C,
+  OP_LOAD_REF = 0x2D,
+  OP_STORE_REF = 0x2E,
   
   /* Buffer Ops */
   OP_BUF_ALLOC = 0x30,
