@@ -1,50 +1,187 @@
 #include "vm_registry.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 static char* dup_string(const char* src) {
-  if (!src) return NULL;
-  size_t len = strlen(src);
-  char* copy = malloc(len + 1);
-  if (copy) {
-    memcpy(copy, src, len + 1);
-  }
-  return copy;
+    if (!src) return NULL;
+    size_t len = strlen(src);
+    char* copy = malloc(len + 1);
+    if (copy) {
+        memcpy(copy, src, len + 1);
+    }
+    return copy;
+}
+
+static Str str_dup(Str s) {
+    if (!s.data) return (Str){0};
+    char* copy = malloc(s.len);
+    if (!copy) return (Str){0};
+    memcpy(copy, s.data, s.len);
+    return (Str){.data = copy, .len = s.len};
+}
+
+static void str_free(Str s) {
+    if (s.data) free((void*)s.data);
 }
 
 void vm_registry_init(VmRegistry* registry) {
-  if (!registry) return;
-  registry->modules = NULL;
-  registry->count = 0;
-  registry->capacity = 0;
-  registry->natives = NULL;
-  registry->native_count = 0;
-  registry->native_capacity = 0;
+    if (!registry) return;
+    registry->modules = NULL;
+    registry->count = 0;
+    registry->capacity = 0;
+    registry->natives = NULL;
+    registry->native_count = 0;
+    registry->native_capacity = 0;
+
+    registry->globals = NULL;
+    registry->global_init_bits = NULL;
+    registry->global_count = 0;
+    registry->global_capacity = 0;
+
+    registry->global_mappings = NULL;
+    registry->mapping_count = 0;
+    registry->mapping_capacity = 0;
 }
 
 void vm_registry_free(VmRegistry* registry) {
-  if (!registry) return;
-  for (size_t i = 0; i < registry->count; ++i) {
-    VmModule* module = &registry->modules[i];
-    chunk_free(&module->chunk);
-    free(module->path);
-    module->path = NULL;
+    if (!registry) return;
+    for (size_t i = 0; i < registry->count; ++i) {
+        VmModule* module = &registry->modules[i];
+        chunk_free(&module->chunk);
+        free(module->path);
+        module->path = NULL;
+    }
+    free(registry->modules);
+    registry->modules = NULL;
+    registry->count = 0;
+    registry->capacity = 0;
+    for (size_t i = 0; i < registry->native_count; ++i) {
+        free(registry->natives[i].name);
+        registry->natives[i].name = NULL;
+        registry->natives[i].callback = NULL;
+        registry->natives[i].user_data = NULL;
+    }
+    free(registry->natives);
+    registry->natives = NULL;
+    registry->native_count = 0;
+    registry->native_capacity = 0;
+
+    // Free globals
+    for (size_t i = 0; i < registry->global_count; ++i) {
+        value_free(&registry->globals[i]);
+    }
+    free(registry->globals);
+    free(registry->global_init_bits);
+
+    // Free mappings
+    for (size_t i = 0; i < registry->mapping_count; ++i) {
+        str_free(registry->global_mappings[i].name);
+        str_free(registry->global_mappings[i].type_name);
+    }
+    free(registry->global_mappings);
+}
+
+uint32_t vm_registry_ensure_global(VmRegistry* registry, Str name, Str type_name) {
+
+  uint32_t existing = vm_registry_find_global(registry, name);
+
+  if (existing != VM_GLOBAL_NOT_FOUND) {
+
+    return existing;
+
   }
-  free(registry->modules);
-  registry->modules = NULL;
-  registry->count = 0;
-  registry->capacity = 0;
-  for (size_t i = 0; i < registry->native_count; ++i) {
-    free(registry->natives[i].name);
-    registry->natives[i].name = NULL;
-    registry->natives[i].callback = NULL;
-    registry->natives[i].user_data = NULL;
+
+  
+
+
+  
+
+  // Create new mapping
+
+  if (registry->mapping_count + 1 > registry->mapping_capacity) {
+
+
+        size_t old_cap = registry->mapping_capacity;
+        size_t new_cap = old_cap < 8 ? 8 : old_cap * 2;
+        VmGlobalMapping* resized = realloc(registry->global_mappings, new_cap * sizeof(VmGlobalMapping));
+        if (!resized) return VM_GLOBAL_NOT_FOUND;
+        registry->global_mappings = resized;
+        registry->mapping_capacity = new_cap;
+    }
+
+    uint32_t index = (uint32_t)registry->global_count;
+
+    // Ensure storage capacity
+    if (registry->global_count + 1 > registry->global_capacity) {
+        size_t old_cap = registry->global_capacity;
+        size_t new_cap = old_cap < 8 ? 8 : old_cap * 2;
+        Value* resized_globals = realloc(registry->globals, new_cap * sizeof(Value));
+        if (!resized_globals) return VM_GLOBAL_NOT_FOUND;
+        registry->globals = resized_globals;
+
+        uint8_t* resized_bits = realloc(registry->global_init_bits, new_cap * sizeof(uint8_t));
+        if (!resized_bits) return VM_GLOBAL_NOT_FOUND;
+        registry->global_init_bits = resized_bits;
+
+        registry->global_capacity = new_cap;
+    }
+
+      if (str_eq_cstr(type_name, "Int")) {
+
+          registry->globals[index] = value_int(0);
+
+      } else if (str_eq_cstr(type_name, "Float")) {
+
+          registry->globals[index] = value_float(0.0);
+
+      } else if (str_eq_cstr(type_name, "Bool")) {
+
+          registry->globals[index] = value_bool(false);
+
+      } else if (str_eq_cstr(type_name, "String")) {
+
+          registry->globals[index] = value_string_copy("", 0);
+
+      } else {
+
+          registry->globals[index] = value_none();
+
+      }
+
+      
+
+      registry->global_init_bits[index] = 0;
+
+    
+    registry->global_count++;
+
+    VmGlobalMapping* mapping = &registry->global_mappings[registry->mapping_count++];
+    mapping->name = str_dup(name);
+    mapping->type_name = str_dup(type_name);
+    mapping->index = index;
+
+    return index;
+}
+
+uint32_t vm_registry_find_global(const VmRegistry* registry, Str name) {
+  if (!registry) return VM_GLOBAL_NOT_FOUND;
+  for (size_t i = 0; i < registry->mapping_count; ++i) {
+    if (str_eq(registry->global_mappings[i].name, name)) {
+      return registry->global_mappings[i].index;
+    }
   }
-  free(registry->natives);
-  registry->natives = NULL;
-  registry->native_count = 0;
-  registry->native_capacity = 0;
+  return VM_GLOBAL_NOT_FOUND;
+}
+Str vm_registry_get_global_type(const VmRegistry* registry, Str name) {
+    if (!registry) return (Str){0};
+    for (size_t i = 0; i < registry->mapping_count; ++i) {
+        if (str_eq(registry->global_mappings[i].name, name)) {
+            return registry->global_mappings[i].type_name;
+        }
+    }
+    return (Str){0};
 }
 
 VmModule* vm_registry_find(VmRegistry* registry, const char* path) {

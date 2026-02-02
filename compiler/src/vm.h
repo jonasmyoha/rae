@@ -36,7 +36,6 @@ typedef enum {
   OP_GET_FIELD = 0x1E,
   OP_SET_FIELD = 0x1F,
   OP_CONSTRUCT = 0x20,
-  OP_LIST = 0x21,
   OP_BIND_LOCAL = 0x22,
   OP_BIND_FIELD = 0x23,
   OP_REF_VIEW = 0x24,
@@ -55,7 +54,13 @@ typedef enum {
   OP_BUF_SET = 0x33,
   OP_BUF_COPY = 0x34,
   OP_BUF_LEN = 0x35,
-  OP_BUF_RESIZE = 0x36
+  OP_BUF_RESIZE = 0x36,
+  
+  /* Globals */
+  OP_GET_GLOBAL = 0x40,
+  OP_SET_GLOBAL = 0x41,
+  OP_GET_GLOBAL_INIT_BIT = 0x42,
+  OP_SET_GLOBAL_INIT_BIT = 0x43
 } OpCode;
 
 typedef enum {
@@ -66,9 +71,10 @@ typedef enum {
 } VMResult;
 
 typedef struct {
+  struct CodeSegment* segment;
   uint8_t* return_ip;
   Value* slots;
-  uint16_t slot_count;
+  uint32_t slot_count;
   Value* locals_base;
   Value locals[256];
 } CallFrame;

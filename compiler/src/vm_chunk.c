@@ -58,7 +58,7 @@ void chunk_write(Chunk* chunk, uint8_t byte, int line) {
   chunk->code_count += 1;
 }
 
-uint16_t chunk_add_constant(Chunk* chunk, Value value) {
+uint32_t chunk_add_constant(Chunk* chunk, Value value) {
   if (!chunk) return 0;
   if (chunk->constants_count + 1 > chunk->constants_capacity) {
     size_t old_capacity = chunk->constants_capacity;
@@ -69,7 +69,7 @@ uint16_t chunk_add_constant(Chunk* chunk, Value value) {
   }
   chunk->constants[chunk->constants_count] = value;
   chunk->constants_count += 1;
-  return (uint16_t)(chunk->constants_count - 1);
+  return (uint32_t)(chunk->constants_count - 1);
 }
 
 void chunk_add_function_info(Chunk* chunk, const char* name, size_t offset) {
