@@ -53,16 +53,16 @@ func tick(s: view State) {
   let centerX: Float = sw.toFloat() / 2.0
   let centerY: Float = sh.toFloat() / 2.0
 
-  #let radius: mod Int => s.radius
+  let radius: mod Int => s.radius
   if s.direction is false {
-    s.radius = s.radius - 1
-    if s.radius <= -10 {
+    radius = radius - 1
+    if radius <= -10 {
       s.direction = true
     }
   }
   else if s.direction {
-    s.radius = s.radius + 1
-    if s.radius >= 520 {
+    radius = radius + 1
+    if radius >= 520 {
       s.direction = false
     }
   }
@@ -70,7 +70,6 @@ func tick(s: view State) {
   beginDrawing()
   clearBackground(color: s.bgColor)
   drawCircle(x: centerX, y: centerY, radius: s.radius, color: s.pastelCircle)
-  #let text: String = "Raylib & Rae"
   drawShadowText(
     text: "Raylib & Rae"
     x: centerX - 95.0
