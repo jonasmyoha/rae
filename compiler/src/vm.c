@@ -1,6 +1,8 @@
 #include "vm.h"
 
+
 #include <stdio.h>
+
 #include <stdlib.h> // For malloc and free
 #include <string.h>
 #include <math.h>
@@ -116,9 +118,12 @@ void vm_set_registry(VM* vm, VmRegistry* registry) {
   vm->registry = registry;
 }
 
-static uint16_t read_short(VM* vm) {
-  uint16_t value = (uint16_t)(vm->ip[0] << 8 | vm->ip[1]);
-  vm->ip += 2;
+static uint32_t read_uint32(VM* vm) {
+  uint32_t value = ((uint32_t)vm->ip[0] << 24) |
+                   ((uint32_t)vm->ip[1] << 16) |
+                   ((uint32_t)vm->ip[2] << 8)  |
+                   ((uint32_t)vm->ip[3]);
+  vm->ip += 4;
   return value;
 }
 
@@ -138,6 +143,17 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
   if (!is_resume) {
       vm->ip = chunk->code;
       vm->start_time = time(NULL);
+      
+      // Set up initial frame for module-level execution (globals + initial call)
+      vm->call_stack_top = 1;
+      CallFrame* frame = &vm->call_stack[0];
+      frame->return_ip = NULL;
+      frame->slots = vm->stack;
+      frame->slot_count = 0;
+      frame->locals_base = frame->slots;
+      for (int i = 0; i < 256; i++) {
+        frame->locals[i] = value_none();
+      }
   }
 
   for (;;) {
@@ -153,13 +169,10 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         }
     }
 
-#ifdef DEBUG_TRACE_EXECUTION
-    // Debug output
-#endif
     uint8_t instruction = *vm->ip++;
     switch (instruction) {
       case OP_CONSTANT: {
-        uint16_t index = read_short(vm);
+        uint32_t index = read_uint32(vm);
         if (index >= chunk->constants_count) {
           diag_fatal("bytecode constant index OOB");
         }
@@ -178,12 +191,12 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         break;
       }
       case OP_JUMP: {
-        uint16_t target = read_short(vm);
+        uint32_t target = read_uint32(vm);
         vm->ip = vm->chunk->code + target;
         break;
       }
       case OP_JUMP_IF_FALSE: {
-        uint16_t target = read_short(vm);
+        uint32_t target = read_uint32(vm);
         Value* condition = vm_peek(vm, 0);
         if (!value_is_truthy(condition)) {
           vm->ip = vm->chunk->code + target;
@@ -191,7 +204,7 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         break;
       }
       case OP_CALL: {
-        uint16_t target = read_short(vm);
+        uint32_t target = read_uint32(vm);
         uint8_t arg_count = *vm->ip++;
         if (vm->stack_top - vm->stack < arg_count) {
           diag_error(NULL, 0, 0, "not enough arguments on stack for call");
@@ -226,17 +239,17 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         break;
       }
       case OP_NATIVE_CALL: {
-        uint16_t const_index = read_short(vm);
+        uint32_t const_index = read_uint32(vm);
         uint8_t arg_count = *vm->ip++;
         if (!vm->registry) {
           diag_error(NULL, 0, 0, "native call attempted without registry");
           return VM_RUNTIME_ERROR;
         }
-        if (const_index >= vm->chunk->constants_count) {
+        if (const_index >= chunk->constants_count) {
           diag_error(NULL, 0, 0, "native symbol index OOB");
           return VM_RUNTIME_ERROR;
         }
-        Value symbol = vm->chunk->constants[const_index];
+        Value symbol = chunk->constants[const_index];
         if (symbol.type != VAL_STRING || !symbol.as.string_value.chars) {
           diag_error(NULL, 0, 0, "native symbol constant must be string");
           return VM_RUNTIME_ERROR;
@@ -250,6 +263,7 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
           diag_error(NULL, 0, 0, "native function not registered");
           return VM_RUNTIME_ERROR;
         }
+        
         const Value* args = vm->stack_top - arg_count;
         
         VmNativeResult result = {.has_value = false};
@@ -266,7 +280,7 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         break;
       }
       case OP_GET_LOCAL: {
-        uint16_t slot = read_short(vm);
+        uint32_t slot = read_uint32(vm);
         CallFrame* frame = vm_current_frame(vm);
         if (!frame) {
           diag_error(NULL, 0, 0, "VM local access outside of function");
@@ -280,7 +294,7 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         break;
       }
       case OP_SET_LOCAL: {
-        uint16_t slot = read_short(vm);
+        uint32_t slot = read_uint32(vm);
         CallFrame* frame = vm_current_frame(vm);
         if (!frame) {
           diag_error(NULL, 0, 0, "VM local access outside of function");
@@ -307,7 +321,7 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         break;
       }
       case OP_BIND_LOCAL: {
-        uint16_t slot = read_short(vm);
+        uint32_t slot = read_uint32(vm);
         CallFrame* frame = vm_current_frame(vm);
         if (!frame) {
           diag_error(NULL, 0, 0, "VM local access outside of function");
@@ -323,7 +337,7 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         break;
       }
       case OP_ALLOC_LOCAL: {
-        uint16_t required = read_short(vm);
+        uint32_t required = read_uint32(vm);
         CallFrame* frame = vm_current_frame(vm);
         if (!frame) {
           diag_error(NULL, 0, 0, "VM local allocation outside of function");
@@ -338,9 +352,54 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         }
         break;
       }
-      case OP_POP:
+      
+      case OP_GET_GLOBAL: {
+        uint32_t index = read_uint32(vm);
+        if (!vm->registry || index >= vm->registry->global_count) {
+          diag_error(NULL, 0, 0, "global index OOB");
+          return VM_RUNTIME_ERROR;
+        }
+        vm_push(vm, value_copy(&vm->registry->globals[index]));
+        break;
+      }
+      
+      case OP_SET_GLOBAL: {
+        uint32_t index = read_uint32(vm);
+        if (!vm->registry || index >= vm->registry->global_count) {
+          diag_error(NULL, 0, 0, "global index OOB");
+          return VM_RUNTIME_ERROR;
+        }
+        Value val = vm_pop(vm);
+        value_free(&vm->registry->globals[index]);
+        vm->registry->globals[index] = value_copy(&val);
+        vm_push(vm, val);
+        break;
+      }
+      
+      case OP_GET_GLOBAL_INIT_BIT: {
+        uint32_t index = read_uint32(vm);
+        if (!vm->registry || index >= vm->registry->global_count) {
+          diag_error(NULL, 0, 0, "global index OOB");
+          return VM_RUNTIME_ERROR;
+        }
+        bool is_init = (vm->registry->global_init_bits[index] != 0);
+        vm_push(vm, value_bool(is_init));
+        break;
+      }
+      
+      case OP_SET_GLOBAL_INIT_BIT: {
+        uint32_t index = read_uint32(vm);
+        if (!vm->registry || index >= vm->registry->global_count) {
+          diag_error(NULL, 0, 0, "global index OOB");
+          return VM_RUNTIME_ERROR;
+        }
+        vm->registry->global_init_bits[index] = 1;
+        break;
+      }
+      case OP_POP: {
         vm_pop(vm);
         break;
+      }
       case OP_ADD:
       case OP_SUB:
       case OP_MUL:
@@ -442,7 +501,7 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         break;
       }
       case OP_GET_FIELD: {
-        uint16_t field_index = read_short(vm);
+        uint32_t field_index = read_uint32(vm);
         Value val = vm_pop(vm);
         Value* target = &val;
         if (val.type == VAL_REF) {
@@ -463,7 +522,7 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         break;
       }
       case OP_SET_FIELD: {
-        uint16_t index = read_short(vm);
+        uint32_t index = read_uint32(vm);
         Value val = vm_pop(vm);
         Value obj_val = vm_pop(vm);
         Value* target = &obj_val;
@@ -497,8 +556,8 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         break;
       }
       case OP_SET_LOCAL_FIELD: {
-        uint16_t slot = read_short(vm);
-        uint16_t index = read_short(vm);
+        uint32_t slot = read_uint32(vm);
+        uint32_t index = read_uint32(vm);
         Value val = vm_pop(vm);
         CallFrame* frame = vm_current_frame(vm);
         if (!frame) return VM_RUNTIME_ERROR;
@@ -527,7 +586,7 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         break;
       }
       case OP_BIND_FIELD: {
-        uint16_t index = read_short(vm);
+        uint32_t index = read_uint32(vm);
         Value val = vm_pop(vm); // The reference to bind
         Value obj_val = vm_pop(vm); // Target object
         Value* target = &obj_val;
@@ -577,7 +636,7 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
       }
       case OP_VIEW_LOCAL:
       case OP_MOD_LOCAL: {
-        uint16_t slot = read_short(vm);
+        uint32_t slot = read_uint32(vm);
         CallFrame* frame = vm_current_frame(vm);
         if (!frame) return VM_RUNTIME_ERROR;
         if (slot >= 256) return VM_RUNTIME_ERROR;
@@ -595,7 +654,7 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
       }
       case OP_VIEW_FIELD:
       case OP_MOD_FIELD: {
-        uint16_t index = read_short(vm);
+        uint32_t index = read_uint32(vm);
         Value obj = vm_pop(vm);
         if (obj.type == VAL_REF) {
           obj = *obj.as.ref_value.target;
@@ -614,7 +673,7 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         break;
       }
       case OP_CONSTRUCT: {
-        uint16_t field_count = read_short(vm);
+        uint32_t field_count = read_uint32(vm);
         Value obj = value_object(field_count);
         for (int i = (int)field_count - 1; i >= 0; --i) {
           obj.as.object_value.fields[i] = vm_pop(vm);
@@ -746,7 +805,8 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
           result = vm_pop(vm);
           push_result = true;
         }
-        if (vm->call_stack_top == 0) {
+        if (vm->call_stack_top <= 1) {
+          vm->call_stack_top = 0;
           return VM_RUNTIME_OK;
         }
         CallFrame* frame = &vm->call_stack[--vm->call_stack_top];
