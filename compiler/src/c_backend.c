@@ -1231,6 +1231,25 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     }
     
     if (needs_addr && !have_ptr) {
+         // Special case: if it's a literal, we need a compound literal to take the address of a temporary
+         if (arg->value->kind == AST_EXPR_STRING || arg->value->kind == AST_EXPR_INTEGER || 
+             arg->value->kind == AST_EXPR_FLOAT || arg->value->kind == AST_EXPR_BOOL) {
+             
+             const char* c_type = "int64_t";
+             if (arg->value->kind == AST_EXPR_STRING) c_type = "const char*";
+             else if (arg->value->kind == AST_EXPR_FLOAT) c_type = "double";
+             else if (arg->value->kind == AST_EXPR_BOOL) c_type = "int8_t";
+             
+             fprintf(out, "&((%s){ ", c_type);
+             if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) return false;
+             fprintf(out, " })");
+             
+             // Advance to next argument skipping normal emission
+             arg = arg->next;
+             if (func_decl && param) param = param->next;
+             continue;
+         }
+         
          if (fprintf(out, "&(") < 0) return false;
     } else if (!needs_addr && have_ptr) {
          if (fprintf(out, "*(") < 0) return false;
