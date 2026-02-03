@@ -37,6 +37,18 @@ char* str_to_cstr(Str s) {
   return result;
 }
 
+Str str_dup(Str s) {
+    if (s.len == 0) return (Str){0};
+    char* copy = malloc(s.len + 1);
+    memcpy(copy, s.data, s.len);
+    copy[s.len] = '\0';
+    return str_from_buf(copy, s.len);
+}
+
+void str_free(Str s) {
+    if (s.data) free((void*)s.data);
+}
+
 bool str_is_empty(Str s) {
   return s.len == 0;
 }

@@ -23,12 +23,10 @@ static Value vm_pop(VM* vm) {
 }
 
 static void vm_push(VM* vm, Value value) {
-  if (vm->stack_top >= vm->stack + STACK_MAX) {
-    diag_error(NULL, 0, 0, "VM stack overflow");
-    return;
+  if (vm->stack_top - vm->stack >= STACK_MAX) {
+    diag_fatal("VM stack overflow");
   }
-  *vm->stack_top = value;
-  vm->stack_top += 1;
+  *vm->stack_top++ = value;
 }
 
 static Value* vm_peek(VM* vm, size_t distance) {
@@ -101,10 +99,26 @@ void vm_init(VM* vm) {
   if (!vm) return;
   vm->chunk = NULL;
   vm_reset_stack(vm);
+  vm->call_stack_capacity = 256;
+  vm->call_stack = malloc(sizeof(CallFrame) * vm->call_stack_capacity);
   vm->call_stack_top = 0;
   vm->registry = NULL;
   vm->timeout_seconds = 0;
   vm->start_time = 0;
+  vm->reload_requested = false;
+}
+
+void vm_free(VM* vm) {
+  if (!vm) return;
+  if (vm->call_stack) {
+    // Clear any remaining values in frames
+    for (size_t i = 0; i < vm->call_stack_top; i++) {
+      for (int j = 0; j < 256; j++) {
+        value_free(&vm->call_stack[i].locals[j]);
+      }
+    }
+    free(vm->call_stack);
+  }
 }
 
 void vm_reset_stack(VM* vm) {
@@ -150,7 +164,6 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
       frame->return_ip = NULL;
       frame->slots = vm->stack;
       frame->slot_count = 0;
-      frame->locals_base = frame->slots;
       for (int i = 0; i < 256; i++) {
         frame->locals[i] = value_none();
       }
@@ -217,27 +230,29 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
           diag_error(NULL, 0, 0, "not enough arguments on stack for call");
           return VM_RUNTIME_ERROR;
         }
-        if (vm->call_stack_top >= sizeof(vm->call_stack) / sizeof(vm->call_stack[0])) {
+        if (vm->call_stack_top >= vm->call_stack_capacity) {
           diag_error(NULL, 0, 0, "call stack overflow");
           return VM_RUNTIME_ERROR;
         }
         CallFrame* frame = &vm->call_stack[vm->call_stack_top++];
         frame->return_ip = vm->ip;
         frame->slots = vm->stack_top - arg_count;
-        frame->locals_base = frame->slots;
         frame->slot_count = arg_count;
         
-        // Zero-initialize locals to prevent garbage values
-        for (int i = 0; i < 256; i++) {
-          frame->locals[i] = value_none();
-        }
-
-        // Copy arguments to stable locals storage
+        // Transfer arguments to stable locals storage (caller pops, callee owns)
         for (int i = 0; i < arg_count; i++) {
-          // DON'T value_copy here, just assign.
-          // Arguments are already prepared by the caller (either a new copy or a reference).
           frame->locals[i] = frame->slots[i];
+          frame->slots[i] = value_none();
         }
+        
+        // Remaining locals will be initialized by OP_ALLOC_LOCAL if needed.
+        // But for safety, we should ensure they are at least VAL_NONE if accessed before alloc.
+        // Actually, let's just zero out up to 256 only if we really need to, or rely on ALLOC.
+        // For now, let's just initialize the rest to NONE to avoid garbage value_free.
+        for (int i = arg_count; i < 256; i++) {
+          frame->locals[i].type = VAL_NONE;
+        }
+        
         if (target >= vm->chunk->code_count) {
           diag_error(NULL, 0, 0, "invalid function address");
           return VM_RUNTIME_ERROR;
@@ -569,26 +584,30 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
       }
       case OP_GET_FIELD: {
         uint32_t field_index = read_uint32(vm);
-        Value val = vm_pop(vm);
-        Value* target = &val;
-        if (val.type == VAL_REF) {
-          target = val.as.ref_value.target;
-        }
-        if (val.type == VAL_REF) {
-          target = val.as.ref_value.target;
+        Value obj_val = vm_pop(vm);
+        Value* target = &obj_val;
+        
+        while (target->type == VAL_REF) {
+          target = target->as.ref_value.target;
         }
         
         if (target->type == VAL_NONE) {
           vm_push(vm, value_none());
-          break;
-        }
-        if (target->type != VAL_OBJECT) {
+        } else if (target->type != VAL_OBJECT) {
           char buf[128];
           snprintf(buf, sizeof(buf), "GET_FIELD on non-object (got type %d)", target->type);
           diag_error(NULL, 0, 0, buf);
+          value_free(&obj_val);
           return VM_RUNTIME_ERROR;
+        } else if (field_index >= target->as.object_value.field_count) {
+          diag_error(NULL, 0, 0, "GET_FIELD index OOB");
+          value_free(&obj_val);
+          return VM_RUNTIME_ERROR;
+        } else {
+          vm_push(vm, value_copy(&target->as.object_value.fields[field_index]));
         }
-        vm_push(vm, target->as.object_value.fields[field_index]);
+        
+        value_free(&obj_val);
         break;
       }
       case OP_SET_FIELD: {
@@ -711,13 +730,15 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         if (!frame) return VM_RUNTIME_ERROR;
         if (slot >= 256) return VM_RUNTIME_ERROR;
         Value* target = &frame->locals[slot];
+        
+        // Resolve pointer chain: if slot already holds a reference, point to its target.
+        while (target->type == VAL_REF) {
+          target = target->as.ref_value.target;
+        }
+        
         if (target->type == VAL_NONE) {
           vm_push(vm, value_none());
         } else {
-          // Resolve pointer chain: if slot already holds a reference, point to its target.
-          while (target->type == VAL_REF) {
-            target = target->as.ref_value.target;
-          }
           vm_push(vm, value_ref(target, instruction == OP_MOD_LOCAL ? REF_MOD : REF_VIEW));
         }
         break;
@@ -725,16 +746,30 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
       case OP_VIEW_FIELD:
       case OP_MOD_FIELD: {
         uint32_t index = read_uint32(vm);
-        Value obj = vm_pop(vm);
-        if (obj.type == VAL_REF) {
-          obj = *obj.as.ref_value.target;
+        Value obj_val = vm_pop(vm);
+        
+        if (obj_val.type != VAL_REF) {
+            // Cannot take reference to a temporary (literal or result of expr)
+            value_free(&obj_val);
+            diag_error(NULL, 0, 0, "cannot take reference to a temporary value");
+            return VM_RUNTIME_ERROR;
         }
-        if (obj.type != VAL_OBJECT) return VM_RUNTIME_ERROR;
-        Value* target = &obj.as.object_value.fields[index];
-        if (target->type == VAL_NONE) {
-          vm_push(vm, value_none());
-        } else {
-          vm_push(vm, value_ref(target, instruction == OP_MOD_FIELD ? REF_MOD : REF_VIEW));
+        
+        Value* target_obj = obj_val.as.ref_value.target;
+        while (target_obj->type == VAL_REF) {
+            target_obj = target_obj->as.ref_value.target;
+        }
+        
+        if (target_obj->type != VAL_OBJECT || index >= target_obj->as.object_value.field_count) {
+            value_free(&obj_val);
+            return VM_RUNTIME_ERROR;
+        }
+        
+        Value* field_target = &target_obj->as.object_value.fields[index];
+        vm_push(vm, value_ref(field_target, instruction == OP_MOD_FIELD ? REF_MOD : REF_VIEW));
+        
+        if (obj_val.type != VAL_REF) {
+            value_free(&obj_val); 
         }
         break;
       }
@@ -810,60 +845,91 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
       case OP_BUF_GET: {
         Value idx_val = vm_pop(vm);
         Value buf_val = vm_pop(vm);
-        if (buf_val.type != VAL_BUFFER || idx_val.type != VAL_INT) {
+        
+        Value* resolved_buf = &buf_val;
+        while (resolved_buf->type == VAL_REF) {
+            resolved_buf = resolved_buf->as.ref_value.target;
+        }
+        
+        if (resolved_buf->type != VAL_BUFFER || idx_val.type != VAL_INT) {
           diag_error(NULL, 0, 0, "OP_BUF_GET invalid arguments");
+          value_free(&buf_val); value_free(&idx_val);
           return VM_RUNTIME_ERROR;
         }
-        ValueBuffer* vb = buf_val.as.buffer_value;
+        ValueBuffer* vb = resolved_buf->as.buffer_value;
         int64_t idx = idx_val.as.int_value;
         if (idx < 0 || (size_t)idx >= vb->count) {
           diag_error(NULL, 0, 0, "OP_BUF_GET out of bounds");
+          value_free(&buf_val); value_free(&idx_val);
           return VM_RUNTIME_ERROR;
         }
         Value res = value_copy(&vb->items[idx]);
-        // printf("[VM] BUF_GET: idx=%lld, type=%d\n", idx, res.type);
         vm_push(vm, res);
+        value_free(&buf_val); value_free(&idx_val);
         break;
       }
       case OP_BUF_SET: {
         Value val = vm_pop(vm);
         Value idx_val = vm_pop(vm);
         Value buf_val = vm_pop(vm);
-        if (buf_val.type != VAL_BUFFER || idx_val.type != VAL_INT) {
+        
+        Value* resolved_buf = &buf_val;
+        while (resolved_buf->type == VAL_REF) {
+            resolved_buf = resolved_buf->as.ref_value.target;
+        }
+        
+        if (resolved_buf->type != VAL_BUFFER || idx_val.type != VAL_INT) {
           diag_error(NULL, 0, 0, "OP_BUF_SET invalid arguments");
+          value_free(&val); value_free(&idx_val); value_free(&buf_val);
           return VM_RUNTIME_ERROR;
         }
-        ValueBuffer* vb = buf_val.as.buffer_value;
+        ValueBuffer* vb = resolved_buf->as.buffer_value;
         int64_t idx = idx_val.as.int_value;
         if (idx < 0 || (size_t)idx >= vb->count) {
           diag_error(NULL, 0, 0, "OP_BUF_SET out of bounds");
+          value_free(&val); value_free(&idx_val); value_free(&buf_val);
           return VM_RUNTIME_ERROR;
         }
-        // printf("[VM] BUF_SET: idx=%lld, type=%d\n", idx, val.type);
         value_free(&vb->items[idx]);
         vb->items[idx] = value_copy(&val);
+        value_free(&val); value_free(&idx_val); value_free(&buf_val);
         break;
       }
       case OP_BUF_LEN: {
         Value buf_val = vm_pop(vm);
-        if (buf_val.type != VAL_BUFFER) {
+        Value* resolved_buf = &buf_val;
+        while (resolved_buf->type == VAL_REF) {
+            resolved_buf = resolved_buf->as.ref_value.target;
+        }
+        if (resolved_buf->type != VAL_BUFFER) {
           diag_error(NULL, 0, 0, "OP_BUF_LEN expects buffer");
+          value_free(&buf_val);
           return VM_RUNTIME_ERROR;
         }
-        vm_push(vm, value_int((int64_t)buf_val.as.buffer_value->count));
+        vm_push(vm, value_int((int64_t)resolved_buf->as.buffer_value->count));
+        value_free(&buf_val);
         break;
       }
       case OP_BUF_RESIZE: {
         Value size_val = vm_pop(vm);
-        Value* buf_val = vm_peek(vm, 0); // Modifies in place on stack
-        if (buf_val->type != VAL_BUFFER || size_val.type != VAL_INT) {
+        Value* buf_stack_ptr = vm_peek(vm, 0); // Modifies in place on stack
+        
+        Value* resolved_buf = buf_stack_ptr;
+        while (resolved_buf->type == VAL_REF) {
+            resolved_buf = resolved_buf->as.ref_value.target;
+        }
+        
+        if (resolved_buf->type != VAL_BUFFER || size_val.type != VAL_INT) {
           diag_error(NULL, 0, 0, "OP_BUF_RESIZE invalid arguments");
+          value_free(&size_val);
           return VM_RUNTIME_ERROR;
         }
-        if (!value_buffer_resize(buf_val, (size_t)size_val.as.int_value)) {
+        if (!value_buffer_resize(resolved_buf, (size_t)size_val.as.int_value)) {
           diag_error(NULL, 0, 0, "OP_BUF_RESIZE failed (out of memory)");
+          value_free(&size_val);
           return VM_RUNTIME_ERROR;
         }
+        value_free(&size_val);
         break;
       }
       case OP_BUF_COPY: {
@@ -873,15 +939,22 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         Value src_off_val = vm_pop(vm);
         Value src_buf_val = vm_pop(vm);
         
-        if (src_buf_val.type != VAL_BUFFER || dst_buf_val.type != VAL_BUFFER ||
+        Value* resolved_src = &src_buf_val;
+        while (resolved_src->type == VAL_REF) resolved_src = resolved_src->as.ref_value.target;
+        Value* resolved_dst = &dst_buf_val;
+        while (resolved_dst->type == VAL_REF) resolved_dst = resolved_dst->as.ref_value.target;
+        
+        if (resolved_src->type != VAL_BUFFER || resolved_dst->type != VAL_BUFFER ||
             src_off_val.type != VAL_INT || dst_off_val.type != VAL_INT ||
             count_val.type != VAL_INT) {
           diag_error(NULL, 0, 0, "OP_BUF_COPY invalid arguments");
+          value_free(&count_val); value_free(&dst_off_val); value_free(&dst_buf_val);
+          value_free(&src_off_val); value_free(&src_buf_val);
           return VM_RUNTIME_ERROR;
         }
         
-        ValueBuffer* src = src_buf_val.as.buffer_value;
-        ValueBuffer* dst = dst_buf_val.as.buffer_value;
+        ValueBuffer* src = resolved_src->as.buffer_value;
+        ValueBuffer* dst = resolved_dst->as.buffer_value;
         int64_t so = src_off_val.as.int_value;
         int64_t doff = dst_off_val.as.int_value;
         int64_t count = count_val.as.int_value;
@@ -889,15 +962,31 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         if (so < 0 || (size_t)so + count > src->count || 
             doff < 0 || (size_t)doff + count > dst->count || count < 0) {
           diag_error(NULL, 0, 0, "OP_BUF_COPY out of bounds");
+          value_free(&count_val); value_free(&dst_off_val); value_free(&dst_buf_val);
+          value_free(&src_off_val); value_free(&src_buf_val);
           return VM_RUNTIME_ERROR;
         }
         
-        memmove(dst->items + doff, src->items + so, count * sizeof(Value));
-        if (src != dst) {
+        if (src == dst) {
+            if (doff < so) {
+                for (int64_t i = 0; i < count; i++) {
+                    value_free(&dst->items[doff + i]);
+                    dst->items[doff + i] = value_copy(&src->items[so + i]);
+                }
+            } else if (doff > so) {
+                for (int64_t i = count - 1; i >= 0; i--) {
+                    value_free(&dst->items[doff + i]);
+                    dst->items[doff + i] = value_copy(&src->items[so + i]);
+                }
+            }
+        } else {
             for (int64_t i = 0; i < count; i++) {
+                value_free(&dst->items[doff + i]);
                 dst->items[doff + i] = value_copy(&src->items[so + i]);
             }
         }
+        value_free(&count_val); value_free(&dst_off_val); value_free(&dst_buf_val);
+        value_free(&src_off_val); value_free(&src_buf_val);
         break;
       }
       case OP_RETURN: {
@@ -908,8 +997,15 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
           result = vm_pop(vm);
           push_result = true;
         }
+        
+        CallFrame* current_frame = &vm->call_stack[vm->call_stack_top - 1];
+        for (int i = 0; i < 256; i++) {
+          value_free(&current_frame->locals[i]);
+        }
+
         if (vm->call_stack_top <= 1) {
           vm->call_stack_top = 0;
+          if (push_result) value_free(&result);
           return VM_RUNTIME_OK;
         }
         CallFrame* frame = &vm->call_stack[--vm->call_stack_top];

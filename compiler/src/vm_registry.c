@@ -14,18 +14,6 @@ static char* dup_string(const char* src) {
     return copy;
 }
 
-static Str str_dup(Str s) {
-    if (!s.data) return (Str){0};
-    char* copy = malloc(s.len);
-    if (!copy) return (Str){0};
-    memcpy(copy, s.data, s.len);
-    return (Str){.data = copy, .len = s.len};
-}
-
-static void str_free(Str s) {
-    if (s.data) free((void*)s.data);
-}
-
 void vm_registry_init(VmRegistry* registry) {
     if (!registry) return;
     registry->modules = NULL;

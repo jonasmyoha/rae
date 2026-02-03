@@ -344,6 +344,23 @@ int enum_entry_find_member(const EnumEntry* entry, Str name) {
   return -1;
 }
 
+static Str get_type_name_with_refs(const AstTypeRef* type) {
+    if (!type) return (Str){0};
+    
+    char buffer[256];
+    int offset = 0;
+    if (type->is_view) {
+        offset += snprintf(buffer + offset, sizeof(buffer) - offset, "view ");
+    } else if (type->is_mod) {
+        offset += snprintf(buffer + offset, sizeof(buffer) - offset, "mod ");
+    }
+    
+    Str base = get_base_type_name(type);
+    snprintf(buffer + offset, sizeof(buffer) - offset, "%.*s", (int)base.len, base.data);
+    
+    return str_dup(str_from_cstr(buffer)); // Note: this leaks in compiler
+}
+
 bool collect_metadata(const char* file_path, const AstModule* module, FunctionTable* funcs, TypeTable* types, EnumTable* enums, VmRegistry* registry) {
   if (!module) return true;
 
@@ -375,7 +392,7 @@ bool collect_metadata(const char* file_path, const AstModule* module, FunctionTa
             free(param_types);
             return false;
           }
-          param_types[i] = get_base_type_name(p->type);
+          param_types[i] = get_type_name_with_refs(p->type);
           p = p->next;
         }
       }
@@ -388,7 +405,7 @@ bool collect_metadata(const char* file_path, const AstModule* module, FunctionTa
             if (param_types) free(param_types);
             return false;
           }
-          return_type = get_base_type_name(decl->as.func_decl.returns->type);
+          return_type = get_type_name_with_refs(decl->as.func_decl.returns->type);
       }
       bool ok = function_table_add(funcs, decl->as.func_decl.name, param_types, param_count, decl->as.func_decl.is_extern, returns_ref, return_type);
       free(param_types);
@@ -904,6 +921,7 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
   const AstCallArg* arg = expr->as.call.args;
   uint32_t current_arg_idx = 0;
   while (arg) {
+    bool handled_arg = false;
     bool explicitly_referenced = (arg->value->kind == AST_EXPR_UNARY && 
                                 (arg->value->as.unary.op == AST_UNARY_VIEW || 
                                  arg->value->as.unary.op == AST_UNARY_MOD));
@@ -938,7 +956,7 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
         }
     }
 
-    if (!entry->is_extern && !explicitly_referenced && arg->value->kind == AST_EXPR_IDENT) {
+    if (!explicitly_referenced && arg->value->kind == AST_EXPR_IDENT) {
         // Check signature to see if we should pass by reference
         bool is_ref_param = false;
         if (current_arg_idx < entry->param_count) {
@@ -951,21 +969,17 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
         if (is_ref_param) {
             int slot = compiler_find_local(compiler, arg->value->as.ident);
             if (slot >= 0) {
-                // If the parameter is a view, we should technically use OP_VIEW_LOCAL, 
-                // but OP_MOD_LOCAL works for both as it just takes the address.
-                // The VM enforces view safety on writes.
                 emit_op(compiler, OP_MOD_LOCAL, (int)expr->line);
                 emit_uint32(compiler, (uint32_t)slot, (int)expr->line);
-            } else {
-                if (!compile_expr(compiler, arg->value)) return false;
+                handled_arg = true;
             }
-        } else {
-            if (!compile_expr(compiler, arg->value)) return false;
         }
-    } else {
+    }
+
+    if (!handled_arg) {
         // STRUCT-TO-STRUCT FFI (VM Flattening)
         // If it's a native call, check if the argument type is a c_struct
-        bool handled = false;
+        bool handled_flattening = false;
         if (entry->is_extern) {
             Str type_name = infer_expr_type(compiler, arg->value);
             if (type_name.len == 0) {
@@ -979,11 +993,11 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
                 uint32_t flattened_count = 0;
                 if (!emit_flattened_struct_args(compiler, arg->value, type_name, &flattened_count, (int)expr->line)) return false;
                 arg_count = (uint32_t)(arg_count + flattened_count - 1);
-                handled = true;
+                handled_flattening = true;
             }
         }
 
-        if (!handled) {
+        if (!handled_flattening) {
             if (!compile_expr(compiler, arg->value)) {
               return false;
             }
