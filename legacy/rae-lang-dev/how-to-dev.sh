@@ -33,9 +33,12 @@ function show_help() {
     echo ""
     echo -e "${BOLD}GEMINI COMMANDS:${NC}"
     echo -e "  ${BLUE}--gemini${NC}           Resume the latest session in --yolo mode"
+    echo -e "  ${BLUE}--gemini new${NC}       Start a NEW Gemini session"
     echo -e "  ${BLUE}--gemini list${NC}      List all available Gemini sessions"
     echo -e "  ${BLUE}--gemini <index>${NC}   Resume a specific session by index (e.g., 1, 2)"
     echo -e "  ${BLUE}--gemini <id>${NC}      Resume a specific session by ID"
+    echo ""
+    echo -e "${BOLD}NOTE:${NC} Gemini commands use the ${BOLD}gemini-3-flash-preview${NC} model."
     echo ""
     echo -e "${BOLD}DEVELOPMENT GUIDES:${NC}"
     echo -e "  ${YELLOW}* Compiler:${NC} The compiler source is in ${BOLD}rae/compiler/src/${NC}."
@@ -68,21 +71,21 @@ function run_setup() {
     ./setup.sh
 }
 
-function list_sessions() {
-    echo -e "${BLUE}${BOLD}Available Gemini Sessions:${NC}"
-    gemini --list-sessions
-}
-
 function start_gemini() {
     local target=$1
+    local model="gemini-3-flash-preview"
     if [ -z "$target" ]; then
-        echo -e "${BLUE}Starting Gemini in --yolo mode (resuming latest)...${NC}"
-        gemini --yolo --resume latest
+        echo -e "${BLUE}Starting Gemini in --yolo mode (resuming latest) with model $model...${NC}"
+        gemini --yolo -m "$model" --resume latest
+    elif [ "$target" == "new" ]; then
+        echo -e "${BLUE}Starting a NEW Gemini session with model $model...${NC}"
+        gemini --yolo -m "$model"
     elif [ "$target" == "list" ]; then
-        list_sessions
+        echo -e "${BLUE}${BOLD}Available Gemini Sessions:${NC}"
+        gemini -m "$model" --list-sessions
     else
-        echo -e "${BLUE}Resuming Gemini session: $target${NC}"
-        gemini --yolo --resume "$target"
+        echo -e "${BLUE}Resuming Gemini session: $target with model $model...${NC}"
+        gemini --yolo -m "$model" --resume "$target"
     fi
 }
 

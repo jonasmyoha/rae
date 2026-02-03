@@ -177,10 +177,20 @@ Codex MUST NOT:
 
 ## Completion behavior
 
-When a task is complete:
-1. Ensure code builds/tests
-2. Emit exactly one final `SAY:` summary
-3. Stop and wait
+- **Completion behavior**:
+  When a task is complete:
+  1. Ensure code builds/tests
+  2. Emit exactly one final `SAY:` summary
+  3. Stop and wait
+
+## Testing
+
+To run the full test suite, use the following command from the `rae/compiler` directory. It is recommended to use a timeout to prevent hanging:
+
+```bash
+# Using perl if 'timeout' command is not available (common on macOS)
+perl -e 'alarm shift; exec @ARGV' 60 make test
+```
 
 Example:
 ```
