@@ -1,0 +1,58 @@
+# Time and Timer library for Rae
+import core
+
+type Timer {
+  startTime: Int
+  accumulated: Int
+  running: Bool
+}
+
+func createTimer() ret Timer {
+  ret Timer {
+    startTime: 0
+    accumulated: 0
+    running: false
+  }
+}
+
+func start(t: mod Timer) {
+  if t.running {
+    ret
+  }
+  t.startTime = nowNs()
+  t.running = true
+}
+
+func stop(t: mod Timer) {
+  if t.running is false {
+    ret
+  }
+  let now: Int = nowNs()
+  t.accumulated = t.accumulated + (now - t.startTime)
+  t.running = false
+}
+
+func reset(t: mod Timer) {
+  t.startTime = 0
+  t.accumulated = 0
+  t.running = false
+}
+
+func elapsedNs(t: view Timer) ret Int {
+  let total: Int = t.accumulated
+  if t.running {
+    let now: Int = nowNs()
+    ret total + (now - t.startTime)
+  }
+  ret total
+}
+
+func elapsedMs(t: view Timer) ret Float {
+  let ns: Int = elapsedNs(t)
+  ret ns.toFloat() / 1000000.0
+}
+
+func elapsedSeconds(t: view Timer) ret Float {
+  let ns: Int = elapsedNs(t)
+  ret ns.toFloat() / 1000000000.0
+}
