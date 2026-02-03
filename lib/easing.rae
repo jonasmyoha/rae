@@ -1,0 +1,120 @@
+# Easing library for Rae
+import math
+
+# PI is imported from math
+
+func easeLinear(t: Float) ret Float {
+  ret t
+}
+
+# Sine
+func easeInSine(t: Float) ret Float {
+  ret 1.0 - cos(x: (t * PI()) / 2.0)
+}
+
+func easeOutSine(t: Float) ret Float {
+  ret sin(x: (t * PI()) / 2.0)
+}
+
+func easeInOutSine(t: Float) ret Float {
+  ret -(cos(x: PI() * t) - 1.0) / 2.0
+}
+
+# Quad
+func easeInQuad(t: Float) ret Float {
+  ret t * t
+}
+
+func easeOutQuad(t: Float) ret Float {
+  ret 1.0 - (1.0 - t) * (1.0 - t)
+}
+
+func easeInOutQuad(t: Float) ret Float {
+  if t < 0.5 {
+    ret 2.0 * t * t
+  }
+  ret 1.0 - pow(base: -2.0 * t + 2.0, exp: 2.0) / 2.0
+}
+
+# Cubic
+func easeInCubic(t: Float) ret Float {
+  ret t * t * t
+}
+
+func easeOutCubic(t: Float) ret Float {
+  ret 1.0 - pow(base: 1.0 - t, exp: 3.0)
+}
+
+func easeInOutCubic(t: Float) ret Float {
+  if t < 0.5 {
+    ret 4.0 * t * t * t
+  }
+  ret 1.0 - pow(base: -2.0 * t + 2.0, exp: 3.0) / 2.0
+}
+
+# Quart
+func easeInQuart(t: Float) ret Float {
+  ret t * t * t * t
+}
+
+func easeOutQuart(t: Float) ret Float {
+  ret 1.0 - pow(base: 1.0 - t, exp: 4.0)
+}
+
+func easeInOutQuart(t: Float) ret Float {
+  if t < 0.5 {
+    ret 8.0 * t * t * t * t
+  }
+  ret 1.0 - pow(base: -2.0 * t + 2.0, exp: 4.0) / 2.0
+}
+
+# Expo
+func easeInExpo(t: Float) ret Float {
+  if t is 0.0 {
+    ret 0.0
+  }
+  ret pow(base: 2.0, exp: 10.0 * t - 10.0)
+}
+
+func easeOutExpo(t: Float) ret Float {
+  if t is 1.0 {
+    ret 1.0
+  }
+  ret 1.0 - pow(base: 2.0, exp: -10.0 * t)
+}
+
+# Back
+func easeInBack(t: Float) ret Float {
+  let c1: Float = 1.70158
+  let c3: Float = c1 + 1.0
+  ret c3 * t * t * t - c1 * t * t
+}
+
+func easeOutBack(t: Float) ret Float {
+  let c1: Float = 1.70158
+  let c3: Float = c1 + 1.0
+  ret 1.0 + c3 * pow(base: t - 1.0, exp: 3.0) + c1 * pow(base: t - 1.0, exp: 2.0)
+}
+
+# Bounce
+func easeOutBounce(t: Float) ret Float {
+  let n1: Float = 7.5625
+  let d1: Float = 2.75
+
+  if t < 1.0 / d1 {
+    ret n1 * t * t
+  } else if t < 2.0 / d1 {
+    t = t - 1.5 / d1
+    ret n1 * t * t + 0.75
+  } else if t < 2.5 / d1 {
+    t = t - 2.25 / d1
+    ret n1 * t * t + 0.9375
+  } else {
+    t = t - 2.625 / d1
+    ret n1 * t * t + 0.984375
+  }
+}
+
+func easeInBounce(t: Float) ret Float {
+  ret 1.0 - easeOutBounce(1.0 - t)
+}

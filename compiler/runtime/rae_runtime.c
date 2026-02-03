@@ -445,6 +445,21 @@ double rae_ext_rae_int_to_float(int64_t i) {
   return (double)i;
 }
 
+double rae_ext_rae_math_sin(double x) { return sin(x); }
+double rae_ext_rae_math_cos(double x) { return cos(x); }
+double rae_ext_rae_math_tan(double x) { return tan(x); }
+double rae_ext_rae_math_asin(double x) { return asin(x); }
+double rae_ext_rae_math_acos(double x) { return acos(x); }
+double rae_ext_rae_math_atan(double x) { return atan(x); }
+double rae_ext_rae_math_atan2(double y, double x) { return atan2(y, x); }
+double rae_ext_rae_math_sqrt(double x) { return sqrt(x); }
+double rae_ext_rae_math_pow(double base, double exp) { return pow(base, exp); }
+double rae_ext_rae_math_exp(double x) { return exp(x); }
+double rae_ext_rae_math_log(double x) { return log(x); }
+double rae_ext_rae_math_floor(double x) { return floor(x); }
+double rae_ext_rae_math_ceil(double x) { return ceil(x); }
+double rae_ext_rae_math_round(double x) { return round(x); }
+
 #ifdef RAE_HAS_RAYLIB
 /* Raylib wrappers for C backend */
 #include <raylib.h>

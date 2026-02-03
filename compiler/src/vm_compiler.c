@@ -344,13 +344,6 @@ int enum_entry_find_member(const EnumEntry* entry, Str name) {
   return -1;
 }
 
-static bool is_primitive_type(Str type_name) {
-  return str_eq_cstr(type_name, "Int") || 
-         str_eq_cstr(type_name, "Float") || 
-         str_eq_cstr(type_name, "Bool") || 
-         str_eq_cstr(type_name, "String");
-}
-
 bool collect_metadata(const char* file_path, const AstModule* module, FunctionTable* funcs, TypeTable* types, EnumTable* enums, VmRegistry* registry) {
   if (!module) return true;
 
@@ -946,14 +939,21 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
     }
 
     if (!entry->is_extern && !explicitly_referenced && arg->value->kind == AST_EXPR_IDENT) {
-        // HACK: for now, assume any ident passed to a call might need referencing
-        // if we don't have full type info. 
-        // This is safer than copying for the 335 test case.
-        // BUT: skip primitives, they should always be copied.
-        Str type_name = get_local_type_name(compiler, arg->value->as.ident);
-        if (type_name.len > 0 && !is_primitive_type(type_name)) {
+        // Check signature to see if we should pass by reference
+        bool is_ref_param = false;
+        if (current_arg_idx < entry->param_count) {
+            Str p_type = entry->param_types[current_arg_idx];
+            if (str_starts_with_cstr(p_type, "mod ") || str_starts_with_cstr(p_type, "view ")) {
+                is_ref_param = true;
+            }
+        }
+
+        if (is_ref_param) {
             int slot = compiler_find_local(compiler, arg->value->as.ident);
             if (slot >= 0) {
+                // If the parameter is a view, we should technically use OP_VIEW_LOCAL, 
+                // but OP_MOD_LOCAL works for both as it just takes the address.
+                // The VM enforces view safety on writes.
                 emit_op(compiler, OP_MOD_LOCAL, (int)expr->line);
                 emit_uint32(compiler, (uint32_t)slot, (int)expr->line);
             } else {
