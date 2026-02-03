@@ -974,6 +974,34 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
                 handled_arg = true;
             }
         }
+    } else if (!explicitly_referenced && arg->value->kind == AST_EXPR_MEMBER) {
+        // Check signature to see if we should pass by reference
+        bool is_ref_param = false;
+        bool is_mod = false;
+        if (current_arg_idx < entry->param_count) {
+            Str p_type = entry->param_types[current_arg_idx];
+            if (str_starts_with_cstr(p_type, "mod ") || str_starts_with_cstr(p_type, "view ")) {
+                is_ref_param = true;
+                is_mod = str_starts_with_cstr(p_type, "mod ");
+            }
+        }
+
+        if (is_ref_param) {
+            const AstExpr* member_expr = arg->value;
+            Str obj_type_raw = infer_expr_type(compiler, member_expr->as.member.object);
+            Str type_name = get_base_type_name_str(obj_type_raw);
+            TypeEntry* type = type_table_find(&compiler->types, type_name);
+            if (type) {
+                int field_index = type_entry_find_field(type, member_expr->as.member.member);
+                if (field_index >= 0) {
+                    if (compile_expr(compiler, member_expr->as.member.object)) {
+                        emit_op(compiler, is_mod ? OP_MOD_FIELD : OP_VIEW_FIELD, (int)expr->line);
+                        emit_uint32(compiler, (uint32_t)field_index, (int)expr->line);
+                        handled_arg = true;
+                    }
+                }
+            }
+        }
     }
 
     if (!handled_arg) {
