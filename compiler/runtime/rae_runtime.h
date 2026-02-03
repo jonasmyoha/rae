@@ -155,6 +155,7 @@ int64_t rae_ext_rae_random_int(int64_t min, int64_t max);
 
 int64_t rae_ext_nextTick(void);
 int64_t rae_ext_nowMs(void);
+int64_t rae_ext_nowNs(void);
 void rae_ext_rae_sleep(int64_t ms);
 
 double rae_ext_rae_int_to_float(int64_t i);
