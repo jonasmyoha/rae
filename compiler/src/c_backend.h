@@ -5,6 +5,8 @@
 
 #include "ast.h"
 
-bool c_backend_emit_module(const AstModule* module, const char* out_path);
+struct VmRegistry;
+
+bool c_backend_emit_module(const AstModule* module, const char* out_path, struct VmRegistry* registry);
 
 #endif /* C_BACKEND_H */

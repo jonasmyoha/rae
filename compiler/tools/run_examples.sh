@@ -31,10 +31,8 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
       # Attempt full compilation
       # Note: we include Raylib flags since many examples use it.
       if gcc -O2 -o "$TMP_OUT/app" "$TMP_OUT/out.c" "$TMP_OUT/rae_runtime.c" \
-         ../third_party/raylib/rae_raylib.c ../third_party/tinyexpr/rae_tinyexpr.c \
-         $(ls "$PROJECT_DIR"/*.c 2>/dev/null || true) \
-         -I"$TMP_OUT" -I../third_party/raylib -I../third_party/tinyexpr \
-         -I/opt/homebrew/include -L/opt/homebrew/lib -DRAE_HAS_RAYLIB \
+         $(ls "$PROJECT_DIR"/*.c 2>/dev/null | grep -v "rae_runtime.c" | grep -v "main_compiled.c" || true) \
+         -I"$TMP_OUT" -I/opt/homebrew/include -L/opt/homebrew/lib -DRAE_HAS_RAYLIB \
          -lraylib -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL > "$TMP_OUT/link.log" 2>&1; then
         echo "PASS: $EXAMPLE_NAME"
         ((PASSED++))

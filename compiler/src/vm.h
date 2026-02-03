@@ -77,7 +77,6 @@ typedef struct {
   uint8_t* return_ip;
   Value* slots;
   uint32_t slot_count;
-  Value* locals_base;
   Value locals[256];
 } CallFrame;
 
@@ -86,8 +85,9 @@ typedef struct VM {
   uint8_t* ip;
   Value stack[STACK_MAX];
   Value* stack_top;
-  CallFrame call_stack[64];
+  CallFrame* call_stack; // Heap allocated
   size_t call_stack_top;
+  size_t call_stack_capacity;
   VmRegistry* registry;
   int timeout_seconds;
   time_t start_time;
@@ -98,6 +98,7 @@ typedef struct VM {
 } VM;
 
 void vm_init(VM* vm);
+void vm_free(VM* vm);
 VMResult vm_run(VM* vm, Chunk* chunk);
 void vm_reset_stack(VM* vm);
 void vm_set_registry(VM* vm, VmRegistry* registry);

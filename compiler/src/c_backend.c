@@ -5,6 +5,7 @@
 #include <string.h>
 #include <stdint.h>
 
+#include "vm_registry.h"
 #include "lexer.h"
 #include "diag.h"
 
@@ -49,6 +50,7 @@ typedef struct {
   bool returns_value;
   size_t temp_counter;
   const AstTypeRef* expected_type;
+  const struct VmRegistry* registry;
 } CFuncContext;
 
 // Forward declarations
@@ -57,7 +59,7 @@ static const AstDecl* find_type_decl(const AstModule* module, Str name);
 static const AstDecl* find_enum_decl(const AstModule* module, Str name);
 static bool has_property(const AstProperty* props, const char* name);
 static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_prec);
-static bool emit_function(const AstModule* module, const AstFuncDecl* func, FILE* out);
+static bool emit_function(const AstModule* module, const AstFuncDecl* func, FILE* out, const struct VmRegistry* registry);
 static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static bool emit_call(CFuncContext* ctx, const AstExpr* expr, FILE* out);
 static bool emit_log_call(CFuncContext* ctx, const AstExpr* expr, FILE* out, bool newline);
@@ -1113,13 +1115,41 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
       }
       
       func_decl = find_function_overload(ctx->module, ctx, callee->as.ident, arg_types, arg_count);
+      
+      // If not found with exact types, try finding any overload by name only to get a generic signature
+      if (!func_decl) {
+          for (const AstDecl* d = ctx->module->decls; d; d = d->next) {
+              if (d->kind == AST_DECL_FUNC && str_eq(d->as.func_decl.name, callee->as.ident)) {
+                  func_decl = &d->as.func_decl;
+                  break;
+              }
+          }
+      }
+      
+      if (!func_decl) {
+          // Check imports for any overload
+          for (const AstImport* imp = ctx->module->imports; imp; imp = imp->next) {
+              if (!imp->module) continue;
+              for (const AstDecl* d = imp->module->decls; d; d = d->next) {
+                  if (d->kind == AST_DECL_FUNC && str_eq(d->as.func_decl.name, callee->as.ident)) {
+                      func_decl = &d->as.func_decl;
+                      break;
+                  }
+              }
+              if (func_decl) break;
+          }
+      }
+
       free(arg_types);
 
       if (!func_decl && !find_raylib_mapping(callee->as.ident)) {
-          char buffer[128];
-          snprintf(buffer, sizeof(buffer), "unknown function '%.*s' for VM call", (int)callee->as.ident.len, callee->as.ident.data);
-          diag_error(ctx->module->file_path, (int)expr->line, (int)expr->column, buffer);
-          return false;
+          // Final check: persistent registry from VM
+          if (!ctx->registry || !vm_registry_find_native(ctx->registry, str_to_cstr(callee->as.ident))) {
+              char buffer[128];
+              snprintf(buffer, sizeof(buffer), "unknown function '%.*s'", (int)callee->as.ident.len, callee->as.ident.data);
+              diag_error(ctx->module->file_path, (int)expr->line, (int)expr->column, buffer);
+              return false;
+          }
       }
   }
 
@@ -1310,7 +1340,7 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         if (arg->value->kind == AST_EXPR_OBJECT && arg->value->as.object_literal.type) {
             if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) return false;
         } else if (arg->value->kind == AST_EXPR_OBJECT) {
-            // Manual field mapping for untyped literals
+            // Fix: All native calls with untyped object literals MUST have a cast: (Type){...}
             fprintf(out, "(%.*s){ ", (int)target_type.len, target_type.data);
             if (type_decl) {
                 const AstTypeField* field = type_decl->as.type_decl.fields;
@@ -2102,8 +2132,11 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
               }
           }
 
-          if (is_any_param) fprintf(out, "rae_any(");
-          if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) return false;
+              if (is_any_param) fprintf(out, "rae_any(");
+
+              if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) return false;
+
+          
           if (is_any_param) fprintf(out, ")");
           
           arg = arg->next;
@@ -2485,6 +2518,7 @@ static const NativeMap RAYLIB_MAP[] = {
     {"drawCircle", "DrawCircle"},
     {"drawText", "DrawText"},
     {"drawCube", "DrawCube"},
+    {"drawSphere", "DrawSphere"},
     {"drawCylinder", "DrawCylinder"},
     {"drawGrid", "DrawGrid"},
     {"beginMode3D", "BeginMode3D"},
@@ -2579,7 +2613,7 @@ static bool emit_raylib_wrapper(const AstFuncDecl* fn, const char* c_name, FILE*
   return true;
 }
 
-static bool emit_function(const AstModule* module, const AstFuncDecl* func, FILE* out) {
+static bool emit_function(const AstModule* module, const AstFuncDecl* func, FILE* out, const struct VmRegistry* registry) {
   if (func->is_extern) {
     return true;
   }
@@ -2592,7 +2626,7 @@ static bool emit_function(const AstModule* module, const AstFuncDecl* func, FILE
   
   bool is_main = str_eq_cstr(func->name, "main");
   
-  CFuncContext temp_ctx = {.generic_params = generic_params};
+  CFuncContext temp_ctx = {.generic_params = generic_params, .registry = registry};
   const char* return_type = c_return_type(&temp_ctx, func);
   if (!return_type) {
     return false;
@@ -2770,13 +2804,17 @@ static bool emit_struct_defs(const AstModule* module, FILE* out) {
   return true;
 }
 
-bool c_backend_emit_module(const AstModule* module, const char* out_path) {
+bool c_backend_emit_module(const AstModule* module, const char* out_path, struct VmRegistry* registry) {
   if (!module || !out_path) return false;
   FILE* out = fopen(out_path, "w");
   if (!out) {
     fprintf(stderr, "error: unable to open '%s' for C backend output\n", out_path);
     return false;
   }
+  
+  CFuncContext ctx = {0};
+  ctx.module = module;
+  ctx.registry = registry;
   bool ok = true;
   if (fprintf(out, "/* Generated by Rae C backend (experimental) */\n") < 0) return false;
   if (fprintf(out, "#include <stdint.h>\n") < 0) return false;
@@ -2932,7 +2970,7 @@ bool c_backend_emit_module(const AstModule* module, const char* out_path) {
     }
     if (body_emitted) continue;
 
-    ok = emit_function(module, funcs[i], out);
+    ok = emit_function(module, funcs[i], out, registry);
   }
   if (ok && !has_main) {
     fprintf(stderr, "error: C backend could not find `func main` in project\n");
