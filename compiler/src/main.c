@@ -102,26 +102,21 @@ static bool native_next_tick(struct VM* vm,
   return true;
 }
 
-static bool native_rae_time_ms(struct VM* vm,
-                               VmNativeResult* out_result,
-                               const Value* args,
-                               size_t arg_count,
-                               void* user_data) {
-  (void)vm;
-  (void)args;
-  (void)user_data;
-  if (arg_count != 0) return false;
-  
-  out_result->has_value = true;
+static bool native_rae_time_ms(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
+  (void)vm; (void)args; (void)arg_count; (void)user_data;
   out_result->value = value_int(rae_ext_nowMs());
+  out_result->has_value = true;
   return true;
 }
 
-static bool native_sleep_ms(struct VM* vm,
-                            VmNativeResult* out_result,
-                            const Value* args,
-                            size_t arg_count,
-                            void* user_data) {
+static bool native_rae_time_ns(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
+  (void)vm; (void)args; (void)arg_count; (void)user_data;
+  out_result->value = value_int(rae_ext_nowNs());
+  out_result->has_value = true;
+  return true;
+}
+
+static bool native_sleep_ms(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
   (void)vm;
   (void)user_data;
   if (!out_result) {
@@ -638,6 +633,7 @@ static bool register_default_natives(VmRegistry* registry, TickCounter* tick_cou
     ok = vm_registry_register_native(registry, "nextTick", native_next_tick, tick_counter) && ok;
   }
   ok = vm_registry_register_native(registry, "nowMs", native_rae_time_ms, NULL) && ok;
+  ok = vm_registry_register_native(registry, "nowNs", native_rae_time_ns, NULL) && ok;
   ok = vm_registry_register_native(registry, "sleep", native_sleep_ms, NULL) && ok;
   ok = vm_registry_register_native(registry, "sleepMs", native_sleep_ms, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_str", native_rae_str, NULL) && ok;
