@@ -7,6 +7,10 @@
 #include <time.h>
 #include <sys/time.h>
 
+#ifdef __APPLE__
+#include <mach/mach_time.h>
+#endif
+
 static void rae_flush_stdout(void) {
   fflush(stdout);
 }
@@ -21,6 +25,18 @@ int64_t rae_ext_nowMs(void) {
   struct timeval tv;
   gettimeofday(&tv, NULL);
   return (int64_t)tv.tv_sec * 1000 + (int64_t)tv.tv_usec / 1000;
+}
+
+int64_t rae_ext_nowNs(void) {
+#ifdef __APPLE__
+  static mach_timebase_info_data_t timebase;
+  if (timebase.denom == 0) mach_timebase_info(&timebase);
+  return (int64_t)((mach_absolute_time() * timebase.numer) / timebase.denom);
+#else
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
+#endif
 }
 
 void rae_ext_rae_sleep(int64_t ms) {
