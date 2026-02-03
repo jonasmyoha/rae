@@ -160,6 +160,22 @@ void rae_ext_rae_sleep(int64_t ms);
 
 double rae_ext_rae_int_to_float(int64_t i);
 
+/* Math Primitives */
+double rae_ext_rae_math_sin(double x);
+double rae_ext_rae_math_cos(double x);
+double rae_ext_rae_math_tan(double x);
+double rae_ext_rae_math_asin(double x);
+double rae_ext_rae_math_acos(double x);
+double rae_ext_rae_math_atan(double x);
+double rae_ext_rae_math_atan2(double y, double x);
+double rae_ext_rae_math_sqrt(double x);
+double rae_ext_rae_math_pow(double base, double exp);
+double rae_ext_rae_math_exp(double x);
+double rae_ext_rae_math_log(double x);
+double rae_ext_rae_math_floor(double x);
+double rae_ext_rae_math_ceil(double x);
+double rae_ext_rae_math_round(double x);
+
 /* Raylib wrappers */
 #ifdef RAE_HAS_RAYLIB
 #include <raylib.h>
