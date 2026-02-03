@@ -724,6 +724,7 @@ bool emit_return(BytecodeCompiler* compiler, bool has_value, int line) {
 }
 
 static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr);
+static bool emit_lvalue_ref(BytecodeCompiler* compiler, const AstExpr* expr, bool is_mod);
 
 static bool emit_flattened_struct_args(BytecodeCompiler* compiler, const AstExpr* root_expr, Str type_name, uint32_t* total_args, int line) {
     const AstDecl* type_decl = find_type_decl(compiler->module, type_name);
@@ -987,19 +988,8 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
         }
 
         if (is_ref_param) {
-            const AstExpr* member_expr = arg->value;
-            Str obj_type_raw = infer_expr_type(compiler, member_expr->as.member.object);
-            Str type_name = get_base_type_name_str(obj_type_raw);
-            TypeEntry* type = type_table_find(&compiler->types, type_name);
-            if (type) {
-                int field_index = type_entry_find_field(type, member_expr->as.member.member);
-                if (field_index >= 0) {
-                    if (compile_expr(compiler, member_expr->as.member.object)) {
-                        emit_op(compiler, is_mod ? OP_MOD_FIELD : OP_VIEW_FIELD, (int)expr->line);
-                        emit_uint32(compiler, (uint32_t)field_index, (int)expr->line);
-                        handled_arg = true;
-                    }
-                }
+            if (emit_lvalue_ref(compiler, arg->value, is_mod)) {
+                handled_arg = true;
             }
         }
     }
@@ -1773,18 +1763,18 @@ static const char* stmt_kind_name(AstStmtKind kind) {
 
 static bool emit_default_value(BytecodeCompiler* compiler, const AstTypeRef* type, int line);
 
-static bool emit_lvalue_ref(BytecodeCompiler* compiler, const AstExpr* expr) {
+static bool emit_lvalue_ref(BytecodeCompiler* compiler, const AstExpr* expr, bool is_mod) {
     if (expr->kind == AST_EXPR_IDENT) {
         int slot = compiler_find_local(compiler, expr->as.ident);
         if (slot < 0) {
             diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "unknown identifier for reference");
             return false;
         }
-        emit_op(compiler, OP_MOD_LOCAL, (int)expr->line);
+        emit_op(compiler, is_mod ? OP_MOD_LOCAL : OP_VIEW_LOCAL, (int)expr->line);
         emit_uint32(compiler, (uint32_t)slot, (int)expr->line);
         return true;
     } else if (expr->kind == AST_EXPR_MEMBER) {
-        if (!emit_lvalue_ref(compiler, expr->as.member.object)) return false;
+        if (!emit_lvalue_ref(compiler, expr->as.member.object, is_mod)) return false;
         
         Str obj_type_raw = infer_expr_type(compiler, expr->as.member.object);
         Str obj_type = get_base_type_name_str(obj_type_raw);
@@ -1802,7 +1792,7 @@ static bool emit_lvalue_ref(BytecodeCompiler* compiler, const AstExpr* expr) {
             return false;
         }
         
-        emit_op(compiler, OP_MOD_FIELD, (int)expr->line);
+        emit_op(compiler, is_mod ? OP_MOD_FIELD : OP_VIEW_FIELD, (int)expr->line);
         emit_uint32(compiler, (uint32_t)field_index, (int)expr->line);
         return true;
     }
@@ -2345,7 +2335,7 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
         }
 
         // 1. Get reference to the parent object
-        if (!emit_lvalue_ref(compiler, target->as.member.object)) return false;
+        if (!emit_lvalue_ref(compiler, target->as.member.object, true)) return false;
 
         // 2. Resolve the field index and type
         Str obj_type_raw = infer_expr_type(compiler, target->as.member.object);
