@@ -1,0 +1,21 @@
+type Inner {
+  value: Int
+}
+
+type Outer {
+  inner: Inner
+}
+
+func mutate(i: mod Inner) {
+  i.value = i.value + 1
+}
+
+func main() {
+  let o: Outer = {
+    inner: { value: 10 }
+  }
+  
+  log(o.inner.value)
+  mutate(i: o.inner)
+  log(o.inner.value)
+}
