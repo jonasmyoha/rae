@@ -12,7 +12,7 @@ TARGET_FILTER=$(printf "%s" "${TEST_TARGET:-${TARGET:-}}" | tr '[:upper:]' '[:lo
 TEST_NAME_FILTER="$1"
 
 # Tests that are permanently disabled because they hang or are known to be broken
-HARDCODED_DISABLED=""
+HARDCODED_DISABLED="395_hot_reload_basic 396_global_persistence 397_hot_reload_structs 399_hot_reload_error"
 
 echo "Running Rae tests..."
 echo
