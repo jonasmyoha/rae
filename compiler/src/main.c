@@ -1555,6 +1555,9 @@ static bool module_graph_append(ModuleGraph* graph,
   }
 
   node->module = module;
+  if (module) {
+      module->file_path = node->file_path;
+  }
   if ((module_path && !node->module_path) || !node->file_path || !node->canonical_path) {
     fprintf(stderr, "error: out of memory while duplicating module paths\n");
     if (node->module_path) free(node->module_path);
@@ -2372,7 +2375,7 @@ static bool module_graph_build(ModuleGraph* graph, const char* entry_file, uint6
 }
 
 static AstModule merge_module_graph(const ModuleGraph* graph) {
-  AstModule merged = {.file_path = graph->head ? graph->head->file_path : NULL, .imports = NULL, .decls = NULL};
+  AstModule merged = {.file_path = NULL, .imports = NULL, .decls = NULL};
   AstDecl* tail = NULL;
   for (ModuleNode* node = graph->head; node; node = node->next) {
     AstDecl* decls = node->module ? node->module->decls : NULL;
@@ -2636,7 +2639,19 @@ static bool build_c_backend_output(const char* entry_file,
     return false;
   }
   AstModule merged = merge_module_graph(&graph);
-  bool ok = c_backend_emit_module(&merged, out_file);
+  
+  VmRegistry registry;
+  vm_registry_init(&registry);
+  TickCounter tick_counter = {.next = 0};
+  if (!register_default_natives(&registry, &tick_counter)) {
+      fprintf(stderr, "error: failed to register natives for build\n");
+      vm_registry_free(&registry);
+      module_graph_free(&graph);
+      arena_destroy(arena);
+      return false;
+  }
+
+  bool ok = c_backend_emit_module(&merged, out_file, &registry);
   if (ok) {
     char out_dir[PATH_MAX];
     strncpy(out_dir, out_file, sizeof(out_dir) - 1);
@@ -2649,6 +2664,7 @@ static bool build_c_backend_output(const char* entry_file,
       ok = copy_runtime_assets(".");
     }
   }
+  vm_registry_free(&registry);
   module_graph_free(&graph);
   arena_destroy(arena);
   return ok;
@@ -2757,9 +2773,20 @@ static bool build_hybrid_output(const char* entry_file,
   }
   AstModule merged = merge_module_graph(&graph);
 
+  VmRegistry registry;
+  vm_registry_init(&registry);
+  TickCounter tick_counter = {.next = 0};
+  if (!register_default_natives(&registry, &tick_counter)) {
+      fprintf(stderr, "error: failed to register natives for build\n");
+      vm_registry_free(&registry);
+      module_graph_free(&graph);
+      arena_destroy(arena);
+      return false;
+  }
+
   Chunk chunk;
   chunk_init(&chunk);
-  ok = vm_compile_module(&merged, &chunk, entry_file, NULL, false);
+  ok = vm_compile_module(&merged, &chunk, entry_file, &registry, false);
   if (ok) {
     ok = write_vm_chunk_file(&chunk, chunk_path);
   }
@@ -2767,12 +2794,13 @@ static bool build_hybrid_output(const char* entry_file,
     ok = write_function_manifest(&merged, chunk_path);
   }
   if (ok) {
-    ok = c_backend_emit_module(&merged, c_path);
+    ok = c_backend_emit_module(&merged, c_path, &registry);
   }
   if (ok) {
     ok = copy_runtime_assets(compiled_dir);
   }
 
+  vm_registry_free(&registry);
   chunk_free(&chunk);
   module_graph_free(&graph);
   arena_destroy(arena);
@@ -2813,6 +2841,7 @@ static int run_vm_file(const RunOptions* run_opts, const char* project_root) {
   }
   vm_registry_free(&registry);
   chunk_free(&chunk);
+  vm_free(vm);
   free(vm);
   return (result == VM_RUNTIME_OK || result == VM_RUNTIME_TIMEOUT) ? 0 : 1;
 }
@@ -3393,20 +3422,29 @@ static int run_vm_watch(const RunOptions* run_opts, const char* project_root) {
 
 
 
-  printf("[watch] VM started. PID: %d\n", getpid());
-
-
+  printf("[watch] VM started. PID: %d\n", getpid()); fflush(stdout);
 
   int exit_code = 0;
+  while (ctx.running) {
+    if (!isatty(fileno(stdin))) {
+        // When not in a TTY (like in tests), check if stdin is closed to exit
+        int c = fgetc(stdin);
+        if (c == EOF) {
+            ctx.running = false;
+            break;
+        }
+        ungetc(c, stdin);
+    }
 
     for (;;) {
+      if (!ctx.running) break;
       VmModule* module = vm_registry_find(&registry, file_path);
       if (!module) break;
 
       VMResult result = vm_run(vm, &module->chunk);
       
       if (result == VM_RUNTIME_RELOAD) {
-          printf("[watch] Hot-reload requested! Patching...\n");
+          printf("[watch] Hot-reload requested! Patching...\n"); fflush(stdout);
           Chunk new_chunk;
           chunk_init(&new_chunk);
           uint64_t new_hash = 0;
@@ -3421,7 +3459,7 @@ static int run_vm_watch(const RunOptions* run_opts, const char* project_root) {
               
               if (patched) {
                   watch_state_apply_sources(&watch_state, &new_sources);
-                  printf("[watch] Hot-patch successful.\n");
+                  printf("[watch] Hot-patch successful.\n"); fflush(stdout);
               } else {
                   printf("[watch] Hot-patch failed (VM rejection). Continuing with old code.\n"); fflush(stdout);
               }
@@ -3449,18 +3487,19 @@ static int run_vm_watch(const RunOptions* run_opts, const char* project_root) {
           exit_code = 1;
       }
       break;
+    }
   }
 
-
-
   // Cleanup
-
   ctx.running = false;
-
   sys_thread_join(watch_thread);
 
-  sys_mutex_destroy(&ctx.mutex);
+  sys_mutex_lock(&ctx.mutex);
+  ctx.vm = NULL; // Signal watcher thread that VM is gone
+  sys_mutex_unlock(&ctx.mutex);
 
+  sys_mutex_destroy(&ctx.mutex);
+  vm_free(vm);
   free(vm);
 
   vm_registry_free(&registry);
