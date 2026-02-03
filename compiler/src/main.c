@@ -626,6 +626,57 @@ static bool native_rae_int_to_float(struct VM* vm,
   return true;
 }
 
+#define MATH_UNARY_OP(name, fn) \
+static bool native_rae_math_##name(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) { \
+  (void)vm; (void)user_data; \
+  if (arg_count != 1) return false; \
+  const Value* val = deref_value(&args[0]); \
+  if (val->type != VAL_FLOAT && val->type != VAL_INT) return false; \
+  double x = (val->type == VAL_FLOAT) ? val->as.float_value : (double)val->as.int_value; \
+  out_result->has_value = true; \
+  out_result->value = value_float(fn(x)); \
+  return true; \
+}
+
+MATH_UNARY_OP(sin, rae_ext_rae_math_sin)
+MATH_UNARY_OP(cos, rae_ext_rae_math_cos)
+MATH_UNARY_OP(tan, rae_ext_rae_math_tan)
+MATH_UNARY_OP(asin, rae_ext_rae_math_asin)
+MATH_UNARY_OP(acos, rae_ext_rae_math_acos)
+MATH_UNARY_OP(atan, rae_ext_rae_math_atan)
+MATH_UNARY_OP(sqrt, rae_ext_rae_math_sqrt)
+MATH_UNARY_OP(exp, rae_ext_rae_math_exp)
+MATH_UNARY_OP(log, rae_ext_rae_math_log)
+MATH_UNARY_OP(floor, rae_ext_rae_math_floor)
+MATH_UNARY_OP(ceil, rae_ext_rae_math_ceil)
+MATH_UNARY_OP(round, rae_ext_rae_math_round)
+
+static bool native_rae_math_atan2(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
+  (void)vm; (void)user_data;
+  if (arg_count != 2) return false;
+  const Value* val_y = deref_value(&args[0]);
+  const Value* val_x = deref_value(&args[1]);
+  if ((val_y->type != VAL_FLOAT && val_y->type != VAL_INT) || (val_x->type != VAL_FLOAT && val_x->type != VAL_INT)) return false;
+  double y = (val_y->type == VAL_FLOAT) ? val_y->as.float_value : (double)val_y->as.int_value;
+  double x = (val_x->type == VAL_FLOAT) ? val_x->as.float_value : (double)val_x->as.int_value;
+  out_result->has_value = true;
+  out_result->value = value_float(rae_ext_rae_math_atan2(y, x));
+  return true;
+}
+
+static bool native_rae_math_pow(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
+  (void)vm; (void)user_data;
+  if (arg_count != 2) return false;
+  const Value* val_base = deref_value(&args[0]);
+  const Value* val_exp = deref_value(&args[1]);
+  if ((val_base->type != VAL_FLOAT && val_base->type != VAL_INT) || (val_exp->type != VAL_FLOAT && val_exp->type != VAL_INT)) return false;
+  double b = (val_base->type == VAL_FLOAT) ? val_base->as.float_value : (double)val_base->as.int_value;
+  double e = (val_exp->type == VAL_FLOAT) ? val_exp->as.float_value : (double)val_exp->as.int_value;
+  out_result->has_value = true;
+  out_result->value = value_float(rae_ext_rae_math_pow(b, e));
+  return true;
+}
+
 static bool register_default_natives(VmRegistry* registry, TickCounter* tick_counter) {
   if (!registry) return false;
   bool ok = true;
@@ -662,6 +713,22 @@ static bool register_default_natives(VmRegistry* registry, TickCounter* tick_cou
   ok = vm_registry_register_native(registry, "rae_seed", native_rae_seed, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_random", native_rae_random, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_random_int", native_rae_random_int, NULL) && ok;
+  
+  ok = vm_registry_register_native(registry, "sin", native_rae_math_sin, NULL) && ok;
+  ok = vm_registry_register_native(registry, "cos", native_rae_math_cos, NULL) && ok;
+  ok = vm_registry_register_native(registry, "tan", native_rae_math_tan, NULL) && ok;
+  ok = vm_registry_register_native(registry, "asin", native_rae_math_asin, NULL) && ok;
+  ok = vm_registry_register_native(registry, "acos", native_rae_math_acos, NULL) && ok;
+  ok = vm_registry_register_native(registry, "atan", native_rae_math_atan, NULL) && ok;
+  ok = vm_registry_register_native(registry, "atan2", native_rae_math_atan2, NULL) && ok;
+  ok = vm_registry_register_native(registry, "sqrt", native_rae_math_sqrt, NULL) && ok;
+  ok = vm_registry_register_native(registry, "pow", native_rae_math_pow, NULL) && ok;
+  ok = vm_registry_register_native(registry, "exp", native_rae_math_exp, NULL) && ok;
+  ok = vm_registry_register_native(registry, "math_log", native_rae_math_log, NULL) && ok;
+  ok = vm_registry_register_native(registry, "floor", native_rae_math_floor, NULL) && ok;
+  ok = vm_registry_register_native(registry, "ceil", native_rae_math_ceil, NULL) && ok;
+  ok = vm_registry_register_native(registry, "round", native_rae_math_round, NULL) && ok;
+
   ok = vm_registry_register_raylib(registry) && ok;
   ok = vm_registry_register_tinyexpr(registry) && ok;
   return ok;
