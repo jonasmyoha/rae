@@ -324,6 +324,10 @@ const char* rae_ext_rae_str_i64(int64_t v) {
   return buffer;
 }
 
+const char* rae_ext_rae_str_i64_ptr(int64_t* v) {
+  return rae_ext_rae_str_i64(*v);
+}
+
 const char* rae_ext_rae_str_f64(double v) {
   char* buffer = malloc(32);
   if (buffer) {
@@ -332,8 +336,16 @@ const char* rae_ext_rae_str_f64(double v) {
   return buffer;
 }
 
+const char* rae_ext_rae_str_f64_ptr(double* v) {
+  return rae_ext_rae_str_f64(*v);
+}
+
 const char* rae_ext_rae_str_bool(int8_t v) {
   return v ? "true" : "false";
+}
+
+const char* rae_ext_rae_str_bool_ptr(int8_t* v) {
+  return rae_ext_rae_str_bool(*v);
 }
 
 const char* rae_ext_rae_str_char(int64_t v) {
@@ -364,6 +376,10 @@ const char* rae_ext_rae_str_char(int64_t v) {
 
 const char* rae_ext_rae_str_cstr(const char* s) {
   return s;
+}
+
+const char* rae_ext_rae_str_cstr_ptr(const char** s) {
+  return *s;
 }
 
 static uint64_t g_rae_random_state = 0x123456789ABCDEF0ULL;
