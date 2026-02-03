@@ -288,7 +288,13 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
           diag_error(NULL, 0, 0, "native function reported failure");
           return VM_RUNTIME_ERROR;
         }
+        
+        // Clean up arguments
+        for (uint8_t i = 0; i < arg_count; i++) {
+            value_free(vm->stack_top - arg_count + i);
+        }
         vm->stack_top -= arg_count;
+        
         if (result.has_value) {
           vm_push(vm, result.value);
         } else {

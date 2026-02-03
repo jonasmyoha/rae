@@ -923,6 +923,34 @@ static void emit_mangled_function_name(const AstFuncDecl* func, FILE* out) {
             fprintf(out, "rae_ext_rae_io_read_line");
         } else if (str_eq_cstr(name, "readChar")) {
             fprintf(out, "rae_ext_rae_io_read_char");
+        } else if (str_eq_cstr(name, "sin")) {
+            fprintf(out, "rae_ext_rae_math_sin");
+        } else if (str_eq_cstr(name, "cos")) {
+            fprintf(out, "rae_ext_rae_math_cos");
+        } else if (str_eq_cstr(name, "tan")) {
+            fprintf(out, "rae_ext_rae_math_tan");
+        } else if (str_eq_cstr(name, "asin")) {
+            fprintf(out, "rae_ext_rae_math_asin");
+        } else if (str_eq_cstr(name, "acos")) {
+            fprintf(out, "rae_ext_rae_math_acos");
+        } else if (str_eq_cstr(name, "atan")) {
+            fprintf(out, "rae_ext_rae_math_atan");
+        } else if (str_eq_cstr(name, "atan2")) {
+            fprintf(out, "rae_ext_rae_math_atan2");
+        } else if (str_eq_cstr(name, "sqrt")) {
+            fprintf(out, "rae_ext_rae_math_sqrt");
+        } else if (str_eq_cstr(name, "pow")) {
+            fprintf(out, "rae_ext_rae_math_pow");
+        } else if (str_eq_cstr(name, "exp")) {
+            fprintf(out, "rae_ext_rae_math_exp");
+        } else if (str_eq_cstr(name, "math_log")) {
+            fprintf(out, "rae_ext_rae_math_log");
+        } else if (str_eq_cstr(name, "floor")) {
+            fprintf(out, "rae_ext_rae_math_floor");
+        } else if (str_eq_cstr(name, "ceil")) {
+            fprintf(out, "rae_ext_rae_math_ceil");
+        } else if (str_eq_cstr(name, "round")) {
+            fprintf(out, "rae_ext_rae_math_round");
         } else {
             fprintf(out, "rae_ext_%.*s", (int)name.len, name.data);
         }
