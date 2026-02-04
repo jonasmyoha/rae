@@ -3071,6 +3071,12 @@ static int run_command(const char* cmd, int argc, char** argv) {
       raepack_free(&pack);
     } else {
       AstModule* module = parse_module(arena, format_opts.input_path, tokens);
+      if (diag_error_count() > 0) {
+          fprintf(stderr, "error: formatting failed due to previous errors\n");
+          arena_destroy(arena);
+          free(source);
+          return 1;
+      }
       if (format_opts.write_in_place || format_opts.output_path) {
         const char* output_path = format_opts.write_in_place ? format_opts.input_path : format_opts.output_path;
         FILE* out = fopen(output_path, "w");

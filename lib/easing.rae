@@ -2,18 +2,17 @@
 import math
 
 # PI is imported from math
-
 func easeLinear(t: Float) ret Float {
   ret t
 }
 
 # Sine
 func easeInSine(t: Float) ret Float {
-  ret 1.0 - cos(x: (t * PI()) / 2.0)
+  ret 1.0 - cos(x: t * PI() / 2.0)
 }
 
 func easeOutSine(t: Float) ret Float {
-  ret sin(x: (t * PI()) / 2.0)
+  ret sin(x: t * PI() / 2.0)
 }
 
 func easeInOutSine(t: Float) ret Float {
@@ -100,18 +99,21 @@ func easeOutBack(t: Float) ret Float {
 func easeOutBounce(t: Float) ret Float {
   let n1: Float = 7.5625
   let d1: Float = 2.75
-
   if t < 1.0 / d1 {
     ret n1 * t * t
-  } else if t < 2.0 / d1 {
-    t = t - 1.5 / d1
-    ret n1 * t * t + 0.75
-  } else if t < 2.5 / d1 {
-    t = t - 2.25 / d1
-    ret n1 * t * t + 0.9375
   } else {
-    t = t - 2.625 / d1
-    ret n1 * t * t + 0.984375
+    if t < 2.0 / d1 {
+      t = t - 1.5 / d1
+      ret n1 * t * t + 0.75
+    } else {
+      if t < 2.5 / d1 {
+        t = t - 2.25 / d1
+        ret n1 * t * t + 0.9375
+      } else {
+        t = t - 2.625 / d1
+        ret n1 * t * t + 0.984375
+      }
+    }
   }
 }
 
