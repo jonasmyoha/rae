@@ -31,7 +31,7 @@
 
 ```
 type func let ret spawn
-view mod opt
+view mod val opt
 if else match case
 true false none
 and or not is
@@ -164,6 +164,22 @@ let result: Int = v.some(that: (o or Pos {}))
 * All function parameters are **named**.
 * **Positional First Argument:** The first argument of a function call can be passed positionally if it is unambiguous (e.g. `log("Hi")`).
 * Functions with a return type must use an explicit `ret` statement.
+
+#### 5.1.1 Parameter Passing Semantics
+
+Rae uses "borrow-by-default" for function parameters to prevent accidental performance overhead from copying large structures.
+
+*   **`view` by default:** Any parameter declared as `x: T` is semantically a `view` reference. It is read-only and does not transfer ownership.
+*   **`mod T`**: Explicitly allows mutation of the caller's value.
+*   **`val T`**: Explicitly forces the parameter to be passed by value (copied). This is useful when the function needs its own owned copy to mutate locally without affecting the caller, or for small primitive-like types.
+*   **Optimization (SVO)**: The compiler may internally pass small, trivially copyable types (e.g., `Int`, `Float`, `Vec2`, `Color`) by value even if declared as `view` (default), provided it does not change observable semantics.
+
+Examples:
+```rae
+func draw(p: Point)           # Semantically: view Point (read-only)
+func move(p: mod Point)       # mutable reference
+func update(p: val Point)     # explicitly passed by value (copy)
+```
 
 ### 5.2 Indexing
 
