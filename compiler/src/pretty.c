@@ -865,9 +865,14 @@ static void pp_print_loop_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
       pp_write_str(pp, stmt->as.loop_stmt.init->as.let_stmt.name);
       pp_write(pp, ": ");
       pp_write_type(pp, stmt->as.loop_stmt.init->as.let_stmt.type);
-      if (stmt->as.loop_stmt.init->as.let_stmt.value) {
-        pp_write(pp, " = ");
-        pp_expr(pp, stmt->as.loop_stmt.init->as.let_stmt.value);
+      if (stmt->as.loop_stmt.is_range) {
+        pp_write(pp, " in ");
+      } else {
+        if (stmt->as.loop_stmt.init->as.let_stmt.value) {
+          pp_write(pp, " = ");
+          pp_expr(pp, stmt->as.loop_stmt.init->as.let_stmt.value);
+        }
+        pp_write(pp, ", ");
       }
     } else if (stmt->as.loop_stmt.init->kind == AST_STMT_EXPR) {
          pp_expr(pp, stmt->as.loop_stmt.init->as.expr_stmt);
@@ -1194,6 +1199,10 @@ void pretty_print_module(const AstModule* module, const char* source, FILE* out)
     pp_write_str(&pp, imp->path);
     pp_newline(&pp);
     imp = imp->next;
+  }
+
+  if (module->imports) {
+    pp_newline(&pp);
   }
 
   const AstDecl* decl = module->decls;

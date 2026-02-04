@@ -10,51 +10,32 @@ type State {
 func main() {
   initWindow(width: 800, height: 450, title: "Rae Easing 2D")
   setTargetFPS(fps: 60)
-
-  let s: State = {
-    timer: createTimer()
-    animDuration: 2.0
-  }
-  
+  let s: State = { timer: createTimer(), animDuration: 2.0 }
   start(t: s.timer)
-
   loop windowShouldClose() is 0 {
     let elapsed: Float = elapsedSeconds(t: s.timer)
-    
     # Loop animation
     if elapsed > s.animDuration {
       reset(t: s.timer)
       start(t: s.timer)
       elapsed = 0.0
     }
-    
     let t: Float = elapsed / s.animDuration
     let easedT: Float = easeInOutQuad(t: t)
-    
     let startX: Float = 100.0
     let endX: Float = 700.0
     let currentX: Float = startX + (endX - startX) * easedT
-    
     beginDrawing()
-    clearBackground(color: {r: 245, g: 245, b: 245, a: 255})
-    
+    clearBackground(color: { r: 245, g: 245, b: 245, a: 255 })
     drawText(
       text: "Easing: easeInOutQuad"
       x: 10.0
       y: 10.0
       fontSize: 20.0
-      color: {r: 200, g: 200, b: 200, a: 255}
+      color: { r: 200, g: 200, b: 200, a: 255 }
     )
-    
-    drawCircle(
-      x: currentX
-      y: 225.0
-      radius: 40.0
-      color: {r: 230, g: 41, b: 55, a: 255}
-    )
-    
+    drawCircle(x: currentX, y: 225.0, radius: 40.0, color: { r: 230, g: 41, b: 55, a: 255 })
     endDrawing()
   }
-
   closeWindow()
 }
