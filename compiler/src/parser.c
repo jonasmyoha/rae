@@ -91,9 +91,17 @@ static const Token* parser_consume(Parser* parser, TokenKind kind, const char* m
   return NULL;
 }
 
+static bool is_ident_like(TokenKind kind) {
+  return kind == TOK_IDENT || kind == TOK_KW_ID || kind == TOK_KW_KEY || kind == TOK_KW_VAL;
+}
+
+static bool looks_like_ident(Parser* parser) {
+  return is_ident_like(parser_peek(parser)->kind);
+}
+
 static const Token* parser_consume_ident(Parser* parser, const char* message) {
   const Token* token = parser_peek(parser);
-  if (token->kind == TOK_IDENT || token->kind == TOK_KW_ID || token->kind == TOK_KW_KEY) {
+  if (is_ident_like(token->kind)) {
     return parser_advance(parser);
   }
   parser_error(parser, token, message);
@@ -148,6 +156,14 @@ static AstIdentifierPart* make_identifier_part(Parser* parser, Str text) {
 
 static AstTypeRef* parse_type_ref_from_ident(Parser* parser, const Token* ident_token) {
   AstTypeRef* type = parser_alloc(parser, sizeof(AstTypeRef));
+  type->line = ident_token->line;
+  type->column = ident_token->column;
+  type->is_opt = false;
+  type->is_view = false;
+  type->is_mod = false;
+  type->is_val = false;
+  type->is_id = false;
+  type->is_key = false;
   type->parts = make_identifier_part(parser, ident_token->lexeme);
   type->generic_args = NULL; // For now, no generic args from simple ident
   type->next = NULL;
@@ -169,6 +185,14 @@ static AstTypeRef* parse_type_ref(Parser* parser) {
   AstTypeRef* type = parser_alloc(parser, sizeof(AstTypeRef));
   type->line = start_token->line;
   type->column = start_token->column;
+  type->is_opt = false;
+  type->is_view = false;
+  type->is_mod = false;
+  type->is_val = false;
+  type->is_id = false;
+  type->is_key = false;
+  type->generic_args = NULL;
+  type->next = NULL;
   
   if (parser_match(parser, TOK_KW_OPT)) {
     type->is_opt = true;
@@ -178,6 +202,8 @@ static AstTypeRef* parse_type_ref(Parser* parser) {
     type->is_view = true;
   } else if (parser_match(parser, TOK_KW_MOD)) {
     type->is_mod = true;
+  } else if (parser_match(parser, TOK_KW_VAL)) {
+    type->is_val = true;
   }
   
   if (parser_match(parser, TOK_KW_ID)) {
@@ -192,7 +218,7 @@ static AstTypeRef* parse_type_ref(Parser* parser) {
   
   while (true) {
     TokenKind kind = parser_peek(parser)->kind;
-    if (kind == TOK_IDENT) {
+    if (is_ident_like(kind)) {
       const Token* tok = parser_advance(parser);
       AstIdentifierPart* part = make_identifier_part(parser, tok->lexeme);
       if (!parts_head) {
@@ -260,7 +286,7 @@ static AstProperty* make_property(Parser* parser, Str name) {
 
 static AstProperty* parse_type_properties(Parser* parser) {
   AstProperty* head = NULL;
-  while (parser_check(parser, TOK_KW_PUB) || parser_check(parser, TOK_KW_PRIV) || parser_check(parser, TOK_IDENT)) {
+  while (parser_check(parser, TOK_KW_PUB) || parser_check(parser, TOK_KW_PRIV) || looks_like_ident(parser)) {
     const Token* token = parser_advance(parser);
     head = append_property(head, make_property(parser, token->lexeme));
   }
@@ -289,12 +315,11 @@ static Str parse_import_path_spec(Parser* parser) {
   size_t tokens_to_consume = 0;
   
   while (true) {
-    const Token* t = parser_peek_at(parser, tokens_to_consume);
-    if (!t || t->kind == TOK_EOF) break;
+        const Token* t = parser_peek_at(parser, tokens_to_consume);
+        if (!t || t->kind == TOK_EOF) break;
     
-    bool is_path_char = false;
-    if (t->kind == TOK_IDENT || t->kind == TOK_INTEGER) is_path_char = true;
-    else if (t->kind == TOK_DOT || t->kind == TOK_SLASH) is_path_char = true;
+        bool is_path_char = false;
+        if (is_ident_like(t->kind) || t->kind == TOK_INTEGER) is_path_char = true;    else if (t->kind == TOK_DOT || t->kind == TOK_SLASH) is_path_char = true;
     else if (t->kind == TOK_MINUS || t->kind == TOK_PLUS) is_path_char = true;
     
     // Stop at keywords that start a new declaration, unless part of a path (preceded by separator)
@@ -315,9 +340,10 @@ static Str parse_import_path_spec(Parser* parser) {
     if (!is_path_char) break;
     
     if (tokens_to_consume > 0) {
-        const Token* prev = parser_peek_at(parser, tokens_to_consume - 1);
-        bool prev_ident = (prev->kind == TOK_IDENT || prev->kind == TOK_INTEGER);
-        bool curr_ident = (t->kind == TOK_IDENT || t->kind == TOK_INTEGER);
+    const Token* prev = parser_peek_at(parser, tokens_to_consume - 1);
+    bool prev_ident = (is_ident_like(prev->kind) || prev->kind == TOK_INTEGER);
+    bool curr_ident = (is_ident_like(t->kind) || t->kind == TOK_INTEGER);
+
         if (prev_ident && curr_ident) break;
     }
     
@@ -837,7 +863,7 @@ static AstExpr* parse_collection_literal(Parser* parser, const Token* start_toke
     element->key = NULL;
     
     // Check for key: value pair (implies map/object literal)
-    if ((parser_check(parser, TOK_IDENT) || parser_check(parser, TOK_STRING)) && parser_peek_at(parser, 1)->kind == TOK_COLON) {
+    if ((looks_like_ident(parser) || parser_check(parser, TOK_STRING)) && parser_peek_at(parser, 1)->kind == TOK_COLON) {
       if (head && !is_keyed) { // First element defines type
         parser_error(parser, parser_peek(parser), "mixing keyed and unkeyed elements in collection literal is not allowed");
         return NULL;
@@ -1052,9 +1078,15 @@ static bool is_type_name(Str name) {
 static AstExpr* parse_primary(Parser* parser) {
   const Token* token = parser_peek(parser);
 
-  // Check for typed object literal first
-  if (token->kind == TOK_IDENT && is_type_name(token->lexeme)) {
-    if (parser_peek_at(parser, 1)->kind == TOK_LBRACE) {
+        // Check for typed object literal first
+
+        TokenKind k0 = token->kind;
+
+        if (is_ident_like(k0) && is_type_name(token->lexeme)) {
+
+          if (parser_peek_at(parser, 1)->kind == TOK_LBRACE) {
+
+  
       const Token* ident_token = parser_advance(parser); // Consume the identifier
       AstTypeRef* type_ref = parse_type_ref_from_ident(parser, ident_token); // Create AstTypeRef from this ident_token
       const Token* start_token = parser_advance(parser); // Consume LBRACE
@@ -1081,6 +1113,7 @@ static AstExpr* parse_primary(Parser* parser) {
 
   // If not a typed object literal, proceed with other primary expressions
   switch (token->kind) {
+    case TOK_KW_VAL:
     case TOK_IDENT: {
       parser_advance(parser); // Already peeked and confirmed not a typed object literal
       AstExpr* expr = new_expr(parser, AST_EXPR_IDENT, token);
@@ -1598,7 +1631,7 @@ static void check_pascal_case(Parser* parser, const Token* token, const char* co
 
 static bool looks_like_destructure(Parser* parser) {
   size_t i = parser->index;
-  if (i >= parser->count || parser->tokens[i].kind != TOK_IDENT) {
+  if (i >= parser->count || !is_ident_like(parser->tokens[i].kind)) {
     return false;
   }
   i++;
@@ -1606,7 +1639,7 @@ static bool looks_like_destructure(Parser* parser) {
     return false;
   }
   i++;
-  if (i >= parser->count || parser->tokens[i].kind != TOK_IDENT) {
+  if (i >= parser->count || !is_ident_like(parser->tokens[i].kind)) {
     return false;
   }
   i++;
@@ -1753,7 +1786,7 @@ static AstStmt* parse_loop_statement(Parser* parser, const Token* loop_token) {
 
   parser_match(parser, TOK_KW_LET); // Optional 'let'
 
-  if (parser_check(parser, TOK_IDENT) && parser_peek_at(parser, 1)->kind == TOK_COLON) {
+  if (looks_like_ident(parser) && parser_peek_at(parser, 1)->kind == TOK_COLON) {
     const Token* name = parser_advance(parser);
     parser_consume(parser, TOK_COLON, "expected ':' after identifier");
     AstTypeRef* type = parse_type_ref(parser);
