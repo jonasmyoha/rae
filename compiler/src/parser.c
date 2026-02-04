@@ -214,6 +214,7 @@ static AstTypeRef* parse_type_ref(Parser* parser) {
   
   if (!consumed_base) {
     parser_error(parser, parser_peek(parser), "expected type");
+    parser_advance(parser); // Consume the token to prevent infinite loops
   }
   type->parts = parts_head;
 
@@ -501,17 +502,6 @@ static AstCallArg* append_call_arg(AstCallArg* head, AstCallArg* node) {
   return head;
 }
 
-static AstStmt* append_stmt(AstStmt* head, AstStmt* node) {
-  if (!head) {
-    return node;
-  }
-  AstStmt* tail = head;
-  while (tail->next) {
-    tail = tail->next;
-  }
-  tail->next = node;
-  return head;
-}
 
 static AstDestructureBinding* append_destructure_binding(AstDestructureBinding* head, AstDestructureBinding* node) {
   if (!head) {
@@ -707,6 +697,7 @@ static AstExpr* finish_call(Parser* parser, AstExpr* callee, const Token* start_
   AstCallArg* args = NULL;
   size_t arg_idx = 0;
   do {
+    size_t prev_index = parser->index;
     AstCallArg* arg = parser_alloc(parser, sizeof(AstCallArg));
     
     // Check if it looks like a named argument: Identifier (or keyword) followed by ':'
@@ -734,6 +725,9 @@ static AstExpr* finish_call(Parser* parser, AstExpr* callee, const Token* start_
     if (parser_check(parser, TOK_RPAREN)) {
       check_no_trailing_comma(parser, "argument list");
       break;
+    }
+    if (parser->index == prev_index) {
+        parser_advance(parser);
     }
   } while (true);
   parser_consume(parser, TOK_RPAREN, "expected ')' after arguments");
@@ -778,6 +772,7 @@ static AstExpr* parse_list_literal(Parser* parser, const Token* start_token) {
   bool multiline = end ? is_multiline(start_token, end) : false;
 
   do {
+    size_t prev_index = parser->index;
     AstCollectionElement* element = parser_alloc(parser, sizeof(AstCollectionElement));
     element->key = NULL;
     element->value = parse_expression(parser);
@@ -798,6 +793,9 @@ static AstExpr* parse_list_literal(Parser* parser, const Token* start_token) {
     if (parser_check(parser, TOK_RBRACKET)) {
       check_no_trailing_comma(parser, "list literal");
       break;
+    }
+    if (parser->index == prev_index) {
+        parser_advance(parser);
     }
   } while (true);
 
@@ -834,6 +832,7 @@ static AstExpr* parse_collection_literal(Parser* parser, const Token* start_toke
   bool multiline = end ? is_multiline(start_token, end) : false;
 
   do {
+    size_t prev_index = parser->index;
     AstCollectionElement* element = parser_alloc(parser, sizeof(AstCollectionElement));
     element->key = NULL;
     
@@ -882,6 +881,9 @@ static AstExpr* parse_collection_literal(Parser* parser, const Token* start_toke
     if (parser_check(parser, TOK_RBRACE)) {
       check_no_trailing_comma(parser, "collection literal");
       break;
+    }
+    if (parser->index == prev_index) {
+        parser_advance(parser);
     }
   } while (true);
   
@@ -960,6 +962,7 @@ static AstExpr* parse_typed_literal(Parser* parser, const Token* start_token, As
       bool multiline = end ? is_multiline(start_token, end) : false;
 
       do {
+        size_t prev_index = parser->index;
         AstObjectField* field = parser_alloc(parser, sizeof(AstObjectField));
         const Token* key_token = parser_consume_ident(parser, "expected field name in object literal");
         field->name = parser_copy_str(parser, key_token->lexeme);
@@ -976,6 +979,9 @@ static AstExpr* parse_typed_literal(Parser* parser, const Token* start_token, As
         if (parser_check(parser, TOK_RBRACE)) {
           check_no_trailing_comma(parser, "object literal");
           break;
+        }
+        if (parser->index == prev_index) {
+            parser_advance(parser);
         }
       } while (true);
       parser_consume(parser, TOK_RBRACE, "expected '}' after object literal");
@@ -1010,6 +1016,7 @@ static AstExpr* parse_typed_literal(Parser* parser, const Token* start_token, As
       bool multiline = end ? is_multiline(start_token, end) : false;
 
       do {
+        size_t prev_index = parser->index;
         AstCollectionElement* element = parser_alloc(parser, sizeof(AstCollectionElement));
         element->key = NULL; // List/Array elements have no keys
         
@@ -1025,6 +1032,9 @@ static AstExpr* parse_typed_literal(Parser* parser, const Token* start_token, As
         if (parser_check(parser, TOK_RBRACE)) {
           check_no_trailing_comma(parser, "list literal");
           break;
+        }
+        if (parser->index == prev_index) {
+            parser_advance(parser);
         }
       } while (true);
       parser_consume(parser, TOK_RBRACE, "expected '}' after list literal");
@@ -1216,6 +1226,7 @@ static AstExpr* parse_primary(Parser* parser) {
     }
     default:
       parser_error(parser, token, "unexpected token in expression");
+      parser_advance(parser); // Advance to avoid infinite loops
       return NULL;
   }
 }
@@ -1478,6 +1489,7 @@ static AstStmt* parse_match_statement(Parser* parser, const Token* match_token) 
   AstMatchCase* cases = NULL;
   bool saw_default = false;
   while (!parser_check(parser, TOK_RBRACE) && !parser_check(parser, TOK_EOF)) {
+    size_t prev_index = parser->index;
     AstMatchCase* match_case = parser_alloc(parser, sizeof(AstMatchCase));
     if (parser_match(parser, TOK_KW_CASE)) {
       match_case->pattern = parse_expression(parser);
@@ -1495,6 +1507,9 @@ static AstStmt* parse_match_statement(Parser* parser, const Token* match_token) 
       match_case->block = NULL;
     }
     cases = append_match_case(cases, match_case);
+    if (parser->index == prev_index) {
+        parser_advance(parser);
+    }
   }
   if (!cases) {
     parser_error(parser, parser_peek(parser), "match must have at least one case");
@@ -1511,6 +1526,7 @@ static AstExpr* parse_match_expression(Parser* parser, const Token* match_token)
   AstMatchArm* arms = NULL;
   bool saw_default = false;
   while (!parser_check(parser, TOK_RBRACE) && !parser_check(parser, TOK_EOF)) {
+    size_t prev_index = parser->index;
     bool is_default = false;
     AstExpr* pattern = NULL;
     if (parser_match(parser, TOK_KW_DEFAULT)) {
@@ -1537,6 +1553,9 @@ static AstExpr* parse_match_expression(Parser* parser, const Token* match_token)
     arms = append_match_arm(arms, arm);
     if (parser_check(parser, TOK_RBRACE)) break;
     parser_match(parser, TOK_COMMA);
+    if (parser->index == prev_index) {
+        parser_advance(parser);
+    }
   }
   parser_consume(parser, TOK_RBRACE, "expected '}' after match expression");
   expr->as.match_expr.arms = arms;
@@ -1732,6 +1751,8 @@ static AstStmt* parse_loop_statement(Parser* parser, const Token* loop_token) {
   AstStmt* stmt = new_stmt(parser, AST_STMT_LOOP, loop_token);
   stmt->as.loop_stmt.is_range = false;
 
+  parser_match(parser, TOK_KW_LET); // Optional 'let'
+
   if (parser_check(parser, TOK_IDENT) && parser_peek_at(parser, 1)->kind == TOK_COLON) {
     const Token* name = parser_advance(parser);
     parser_consume(parser, TOK_COLON, "expected ':' after identifier");
@@ -1851,13 +1872,21 @@ static AstStmt* parse_statement(Parser* parser) {
 static AstBlock* parse_block(Parser* parser) {
   parser_consume(parser, TOK_LBRACE, "expected '{' to start block");
   AstBlock* block = parser_alloc(parser, sizeof(AstBlock));
-  AstStmt* head = NULL;
+  block->first = NULL;
+  AstStmt* tail = NULL;
   while (!parser_check(parser, TOK_RBRACE) && !parser_check(parser, TOK_EOF)) {
+    size_t prev_index = parser->index;
     AstStmt* stmt = parse_statement(parser);
-    head = append_stmt(head, stmt);
+    if (stmt) {
+      if (!block->first) block->first = stmt;
+      else tail->next = stmt;
+      tail = stmt;
+    }
+    if (parser->index == prev_index) {
+      parser_advance(parser); // Force progress
+    }
   }
   parser_consume(parser, TOK_RBRACE, "expected '}' to close block");
-  block->first = head;
   return block;
 }
 
@@ -2183,17 +2212,25 @@ AstModule* parse_module(Arena* arena, const char* file_path, TokenList tokens) {
   module->comment_count = comment_count;
   AstImport* imports = NULL;
   while (parser_check(&parser, TOK_KW_IMPORT) || (parser_check(&parser, TOK_KW_EXPORT) && parser_peek_at(&parser, 1)->kind == TOK_STRING)) {
+    size_t prev_index = parser.index;
     if (parser_match(&parser, TOK_KW_IMPORT)) {
         imports = append_import(imports, parse_import_clause(&parser, false));
     } else {
         parser_advance(&parser); // consume export
         imports = append_import(imports, parse_import_clause(&parser, true));
     }
+    if (parser.index == prev_index) {
+        parser_advance(&parser);
+    }
   }
   AstDecl* head = NULL;
   while (!parser_check(&parser, TOK_EOF)) {
+    size_t prev_index = parser.index;
     AstDecl* decl = parse_declaration(&parser);
     head = append_decl(head, decl);
+    if (parser.index == prev_index) {
+        parser_advance(&parser);
+    }
   }
   module->imports = imports;
   module->decls = head;
