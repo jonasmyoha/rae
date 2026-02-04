@@ -30,6 +30,7 @@ typedef struct AstTypeRef {
   bool is_opt;
   bool is_view;
   bool is_mod;
+  bool is_val;
   bool is_id;
   bool is_key;
   size_t line;

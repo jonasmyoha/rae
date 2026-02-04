@@ -1,0 +1,24 @@
+type Large {
+  a: Int
+  b: Int
+  c: Int
+}
+
+func modifyVal(l: val Large) {
+  l.a = 999
+  log("inside modifyVal l.a: {l.a}")
+}
+
+func modifyDefault(l: Large) {
+  # l.a = 888 # ERROR: view by default
+  log("inside modifyDefault l.a: {l.a}")
+}
+
+func main() {
+  let l: Large = { a: 1, b: 2, c: 3 }
+  log("before modifyVal l.a: {l.a}")
+  modifyVal(l)
+  log("after modifyVal l.a: {l.a}")
+  
+  modifyDefault(l)
+}

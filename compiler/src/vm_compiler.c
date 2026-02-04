@@ -88,6 +88,17 @@ FunctionEntry* function_table_find(FunctionTable* table, Str name) {
   return NULL;
 }
 
+static bool is_primitive_type(Str type_name) {
+  return str_eq_cstr(type_name, "Int") || 
+         str_eq_cstr(type_name, "Float") || 
+         str_eq_cstr(type_name, "Bool") || 
+         str_eq_cstr(type_name, "Char") ||
+         str_eq_cstr(type_name, "String") ||
+         str_eq_cstr(type_name, "Array") ||
+         str_eq_cstr(type_name, "Buffer") ||
+         str_eq_cstr(type_name, "Any");
+}
+
 static Str strip_generics(Str type_name) {
   for (size_t i = 0; i < type_name.len; ++i) {
     if (type_name.data[i] == '(') {
@@ -349,13 +360,19 @@ static Str get_type_name_with_refs(const AstTypeRef* type) {
     
     char buffer[256];
     int offset = 0;
+    Str base = get_base_type_name(type);
+
     if (type->is_view) {
         offset += snprintf(buffer + offset, sizeof(buffer) - offset, "view ");
     } else if (type->is_mod) {
         offset += snprintf(buffer + offset, sizeof(buffer) - offset, "mod ");
+    } else if (type->is_val) {
+        offset += snprintf(buffer + offset, sizeof(buffer) - offset, "val ");
+    } else if (!is_primitive_type(base)) {
+        // Semantically view by default for non-primitives
+        offset += snprintf(buffer + offset, sizeof(buffer) - offset, "view ");
     }
     
-    Str base = get_base_type_name(type);
     snprintf(buffer + offset, sizeof(buffer) - offset, "%.*s", (int)base.len, base.data);
     
     return str_dup(str_from_cstr(buffer)); // Note: this leaks in compiler
@@ -500,7 +517,7 @@ void compiler_reset_locals(BytecodeCompiler* compiler) {
   compiler->allocated_locals = 0;
 }
 
-int compiler_add_local(BytecodeCompiler* compiler, Str name, Str type_name) {
+int compiler_add_local(BytecodeCompiler* compiler, Str name, Str type_name, bool is_ptr, bool is_mod) {
   if (compiler->local_count >= sizeof(compiler->locals) / sizeof(compiler->locals[0])) {
     diag_error(compiler->file_path, 0, 0, "VM compiler local limit exceeded");
     compiler->had_error = true;
@@ -509,6 +526,8 @@ int compiler_add_local(BytecodeCompiler* compiler, Str name, Str type_name) {
   compiler->locals[compiler->local_count].name = name;
   compiler->locals[compiler->local_count].slot = compiler->local_count;
   compiler->locals[compiler->local_count].type_name = type_name;
+  compiler->locals[compiler->local_count].is_ptr = is_ptr;
+  compiler->locals[compiler->local_count].is_mod = is_mod;
   compiler->local_count += 1;
   return (int)(compiler->local_count - 1);
 }
@@ -751,7 +770,7 @@ static bool emit_flattened_struct_args(BytecodeCompiler* compiler, const AstExpr
             
             char temp_name[64];
             snprintf(temp_name, sizeof(temp_name), "__flatten_tmp_%d_%d", line, field_idx);
-            int slot = compiler_add_local(compiler, str_from_cstr(temp_name), field_type);
+            int slot = compiler_add_local(compiler, str_from_cstr(temp_name), field_type, false, false);
             if (slot < 0) return false;
             if (!compiler_ensure_local_capacity(compiler, compiler->local_count, line)) return false;
             
@@ -957,42 +976,111 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
         }
     }
 
-    if (!explicitly_referenced && arg->value->kind == AST_EXPR_IDENT) {
-        // Check signature to see if we should pass by reference
-        bool is_ref_param = false;
-        if (current_arg_idx < entry->param_count) {
-            Str p_type = entry->param_types[current_arg_idx];
-            if (str_starts_with_cstr(p_type, "mod ") || str_starts_with_cstr(p_type, "view ")) {
-                is_ref_param = true;
-            }
-        }
+        if (!explicitly_referenced && arg->value->kind == AST_EXPR_IDENT) {
 
-        if (is_ref_param) {
-            int slot = compiler_find_local(compiler, arg->value->as.ident);
-            if (slot >= 0) {
-                emit_op(compiler, OP_MOD_LOCAL, (int)expr->line);
-                emit_uint32(compiler, (uint32_t)slot, (int)expr->line);
-                handled_arg = true;
-            }
-        }
-    } else if (!explicitly_referenced && arg->value->kind == AST_EXPR_MEMBER) {
-        // Check signature to see if we should pass by reference
-        bool is_ref_param = false;
-        bool is_mod = false;
-        if (current_arg_idx < entry->param_count) {
-            Str p_type = entry->param_types[current_arg_idx];
-            if (str_starts_with_cstr(p_type, "mod ") || str_starts_with_cstr(p_type, "view ")) {
-                is_ref_param = true;
-                is_mod = str_starts_with_cstr(p_type, "mod ");
-            }
-        }
+            // Check signature to see if we should pass by reference
 
-        if (is_ref_param) {
-            if (emit_lvalue_ref(compiler, arg->value, is_mod)) {
-                handled_arg = true;
+            bool is_ref_param = false;
+
+            if (current_arg_idx < entry->param_count) {
+
+                Str p_type = entry->param_types[current_arg_idx];
+
+                if (str_starts_with_cstr(p_type, "mod ") || str_starts_with_cstr(p_type, "view ")) {
+
+                    is_ref_param = true;
+
+                }
+
+            } else if (!entry->is_extern) {
+
+                // Fallback for non-extern calls without full signature (shouldn't happen with entry)
+
+                Str arg_type = infer_expr_type(compiler, arg->value);
+
+                if (arg_type.len > 0 && !is_primitive_type(arg_type)) {
+
+                    is_ref_param = true;
+
+                }
+
             }
-        }
-    }
+
+    
+
+            if (is_ref_param) {
+
+                int slot = compiler_find_local(compiler, arg->value->as.ident);
+
+                if (slot >= 0) {
+
+                    // Determine if we need mod or view ref
+
+                    bool is_mod = false;
+
+                    if (current_arg_idx < entry->param_count) {
+
+                        is_mod = str_starts_with_cstr(entry->param_types[current_arg_idx], "mod ");
+
+                    }
+
+                    emit_op(compiler, is_mod ? OP_MOD_LOCAL : OP_VIEW_LOCAL, (int)expr->line);
+
+                    emit_uint32(compiler, (uint32_t)slot, (int)expr->line);
+
+                    handled_arg = true;
+
+                }
+
+            }
+
+            } else if (!explicitly_referenced && arg->value->kind == AST_EXPR_MEMBER) {
+
+                // Check signature to see if we should pass by reference
+
+                bool is_ref_param = false;
+
+                bool is_mod = false;
+
+                if (current_arg_idx < entry->param_count) {
+
+                    Str p_type = entry->param_types[current_arg_idx];
+
+                    if (str_starts_with_cstr(p_type, "mod ") || str_starts_with_cstr(p_type, "view ")) {
+
+                        is_ref_param = true;
+
+                        is_mod = str_starts_with_cstr(p_type, "mod ");
+
+                    }
+
+                } else if (!entry->is_extern) {
+
+                    Str arg_type = infer_expr_type(compiler, arg->value);
+
+                    if (arg_type.len > 0 && !is_primitive_type(arg_type)) {
+
+                        is_ref_param = true;
+
+                    }
+
+                }
+
+        
+
+                if (is_ref_param) {
+
+                    if (emit_lvalue_ref(compiler, arg->value, is_mod)) {
+
+                        handled_arg = true;
+
+                    }
+
+                }
+
+            }
+
+        
 
     if (!handled_arg) {
         // STRUCT-TO-STRUCT FFI (VM Flattening)
@@ -1457,7 +1545,7 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       return true;
     }
     case AST_EXPR_MATCH: {
-      int subject_slot = compiler_add_local(compiler, str_from_cstr("$match_subject"), (Str){0});
+      int subject_slot = compiler_add_local(compiler, str_from_cstr("$match_subject"), (Str){0}, false, false);
       if (subject_slot < 0) {
         return false;
       }
@@ -1471,7 +1559,7 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       emit_uint32(compiler, (uint32_t)subject_slot, (int)expr->line);
       emit_op(compiler, OP_POP, (int)expr->line);
 
-      int result_slot = compiler_add_local(compiler, str_from_cstr("$match_value"), (Str){0});
+      int result_slot = compiler_add_local(compiler, str_from_cstr("$match_value"), (Str){0}, false, false);
       if (result_slot < 0) {
         return false;
       }
@@ -1649,7 +1737,7 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
           // Store list in a temporary local to allow calling methods by reference
           char temp_name[64];
           snprintf(temp_name, sizeof(temp_name), "__list_lit_%zu_%zu", expr->line, expr->column);
-          int slot = compiler_add_local(compiler, str_from_cstr(temp_name), str_from_cstr("List"));
+          int slot = compiler_add_local(compiler, str_from_cstr(temp_name), str_from_cstr("List"), false, false);
           if (slot < 0) return false;
           if (!compiler_ensure_local_capacity(compiler, compiler->local_count, (int)expr->line)) return false;
 
@@ -1707,7 +1795,7 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
 
       char temp_name[64];
       snprintf(temp_name, sizeof(temp_name), "__list_lit_%zu_%zu", expr->line, expr->column);
-      int slot = compiler_add_local(compiler, str_from_cstr(temp_name), str_from_cstr("List"));
+      int slot = compiler_add_local(compiler, str_from_cstr(temp_name), str_from_cstr("List"), false, false);
       if (slot < 0) return false;
       if (!compiler_ensure_local_capacity(compiler, compiler->local_count, (int)expr->line)) return false;
 
@@ -1764,16 +1852,22 @@ static const char* stmt_kind_name(AstStmtKind kind) {
 static bool emit_default_value(BytecodeCompiler* compiler, const AstTypeRef* type, int line);
 
 static bool emit_lvalue_ref(BytecodeCompiler* compiler, const AstExpr* expr, bool is_mod) {
-    if (expr->kind == AST_EXPR_IDENT) {
-        int slot = compiler_find_local(compiler, expr->as.ident);
-        if (slot < 0) {
-            diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "unknown identifier for reference");
-            return false;
+        if (expr->kind == AST_EXPR_IDENT) {
+            int slot = compiler_find_local(compiler, expr->as.ident);
+            if (slot < 0) {
+                diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "unknown identifier for reference");
+                return false;
+            }
+            if (compiler->locals[slot].is_ptr) {
+                emit_op(compiler, OP_GET_LOCAL, (int)expr->line);
+                emit_uint32(compiler, (uint32_t)slot, (int)expr->line);
+            } else {
+                emit_op(compiler, is_mod ? OP_MOD_LOCAL : OP_VIEW_LOCAL, (int)expr->line);
+                emit_uint32(compiler, (uint32_t)slot, (int)expr->line);
+            }
+            return true;
         }
-        emit_op(compiler, is_mod ? OP_MOD_LOCAL : OP_VIEW_LOCAL, (int)expr->line);
-        emit_uint32(compiler, (uint32_t)slot, (int)expr->line);
-        return true;
-    } else if (expr->kind == AST_EXPR_MEMBER) {
+     else if (expr->kind == AST_EXPR_MEMBER) {
         if (!emit_lvalue_ref(compiler, expr->as.member.object, is_mod)) return false;
         
         Str obj_type_raw = infer_expr_type(compiler, expr->as.member.object);
@@ -1841,9 +1935,15 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
           return true;
       }
 
-      Str type_name = get_base_type_name(stmt->as.let_stmt.type);
+            Str type_name = get_base_type_name(stmt->as.let_stmt.type);
 
-      int slot = compiler_add_local(compiler, stmt->as.let_stmt.name, type_name);
+            bool is_ptr = stmt->as.let_stmt.type && (stmt->as.let_stmt.type->is_view || stmt->as.let_stmt.type->is_mod);
+
+            bool is_mod = stmt->as.let_stmt.type && stmt->as.let_stmt.type->is_mod;
+
+            int slot = compiler_add_local(compiler, stmt->as.let_stmt.name, type_name, is_ptr, is_mod);
+
+      
       if (slot < 0) {
         return false;
       }
@@ -2071,7 +2171,7 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
             }
         }
         
-        int col_slot = compiler_add_local(compiler, col_name, col_type_name);
+        int col_slot = compiler_add_local(compiler, col_name, col_type_name, false, false);
         if (col_slot < 0) return false;
         emit_op(compiler, OP_SET_LOCAL, (int)stmt->line);
         emit_uint32(compiler, (uint32_t)col_slot, (int)stmt->line);
@@ -2080,7 +2180,7 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
         // 2. Initialize index = 0 in a hidden local
         emit_constant(compiler, value_int(0), (int)stmt->line);
         Str idx_name = str_from_cstr("__index");
-        int idx_slot = compiler_add_local(compiler, idx_name, str_from_cstr("Int"));
+        int idx_slot = compiler_add_local(compiler, idx_name, str_from_cstr("Int"), false, false);
         if (idx_slot < 0) return false;
         emit_op(compiler, OP_SET_LOCAL, (int)stmt->line);
         emit_uint32(compiler, (uint32_t)idx_slot, (int)stmt->line);
@@ -2112,7 +2212,7 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
         // 5. Body Start: Bind x = collection.get(index)
         Str var_name = stmt->as.loop_stmt.init->as.let_stmt.name;
         Str var_type = get_base_type_name(stmt->as.loop_stmt.init->as.let_stmt.type);
-        int var_slot = compiler_add_local(compiler, var_name, var_type);
+        int var_slot = compiler_add_local(compiler, var_name, var_type, false, false);
         if (var_slot < 0) return false;
         
         // collection.get(index)
@@ -2207,7 +2307,7 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
         compiler->had_error = true;
         return false;
       }
-      int subject_slot = compiler_add_local(compiler, str_from_cstr("$match"), (Str){0});
+      int subject_slot = compiler_add_local(compiler, str_from_cstr("$match"), (Str){0}, false, false);
       if (subject_slot < 0) {
         return false;
       }
@@ -2315,6 +2415,15 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
             diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, "rebinding an alias is illegal. '=>' is only for 'let' bindings.");
             return false;
         } else {
+            // Check if local is view (read-only)
+            if (compiler->locals[slot].is_ptr && !compiler->locals[slot].is_mod) {
+                char buffer[160];
+                snprintf(buffer, sizeof(buffer), "cannot assign to read-only view identifier '%.*s'", (int)target->as.ident.len, target->as.ident.data);
+                diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, buffer);
+                compiler->had_error = true;
+                return false;
+            }
+
             // Normal assignment: LHS = RHS
             Str saved_expected = compiler->expected_type;
             compiler->expected_type = get_local_type_name(compiler, target->as.ident);
@@ -2332,6 +2441,18 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
         if (stmt->as.assign_stmt.is_bind) {
             diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, "rebinding an alias is illegal. '=>' is only for 'let' bindings.");
             return false;
+        }
+
+        // Check if the object itself is a read-only view
+        if (target->as.member.object->kind == AST_EXPR_IDENT) {
+            int slot = compiler_find_local(compiler, target->as.member.object->as.ident);
+            if (slot >= 0 && compiler->locals[slot].is_ptr && !compiler->locals[slot].is_mod) {
+                char buffer[160];
+                snprintf(buffer, sizeof(buffer), "cannot mutate field of read-only view '%.*s'", (int)target->as.member.object->as.ident.len, target->as.member.object->as.ident.data);
+                diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, buffer);
+                compiler->had_error = true;
+                return false;
+            }
         }
 
         // 1. Get reference to the parent object
@@ -2457,7 +2578,23 @@ static bool compile_function(BytecodeCompiler* compiler, const AstDecl* decl) {
   const AstParam* param = func->params;
   while (param) {
     Str type_name = get_base_type_name(param->type);
-    if (compiler_add_local(compiler, param->name, type_name) < 0) {
+    
+    // SEMANTICS: view-by-default
+    bool is_ptr = false;
+    bool is_mod = false;
+    if (param->type) {
+        is_mod = param->type->is_mod;
+        if (param->type->is_id || param->type->is_key) {
+            is_ptr = false;
+        } else {
+            bool is_val = param->type->is_val;
+            bool is_explicit_view = param->type->is_view;
+            bool is_primitive = is_primitive_type(type_name);
+            is_ptr = (is_mod || is_explicit_view || (!is_val && !is_primitive));
+        }
+    }
+
+    if (compiler_add_local(compiler, param->name, type_name, is_ptr, is_mod) < 0) {
       compiler->current_function = NULL;
       return false;
     }
