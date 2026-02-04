@@ -83,6 +83,8 @@ typedef struct {
     Str name;
     uint32_t slot;
     Str type_name; // Store type name for locals
+    bool is_ptr;
+    bool is_mod;
   } locals[256];
   uint32_t local_count;
   uint32_t allocated_locals;
@@ -109,7 +111,7 @@ bool collect_metadata(const char* file_path, const AstModule* module, FunctionTa
 bool emit_function_call(BytecodeCompiler* compiler, FunctionEntry* entry, int line,
                                int column, uint8_t arg_count);
 bool emit_return(BytecodeCompiler* compiler, bool has_value, int line);
-int compiler_add_local(BytecodeCompiler* compiler, Str name, Str type_name);
+int compiler_add_local(BytecodeCompiler* compiler, Str name, Str type_name, bool is_ptr, bool is_mod);
 int compiler_find_local(BytecodeCompiler* compiler, Str name);
 void compiler_reset_locals(BytecodeCompiler* compiler);
 bool compiler_ensure_local_capacity(BytecodeCompiler* compiler, uint32_t required, int line);
