@@ -26,8 +26,15 @@ func main() {
   closeWindow()
 }
 
-func drawShadowText(text: view String, x: Float, y: Float, fontSize: Float, color: view Color) {
+func drawShadowText(
+  text: view String
+  x: Float
+  y: Float
+  fontSize: Float
+  color: view Color
+) {
   # text shadow
+  # actual text
   drawText(
     text: text
     x: x + 2
@@ -35,7 +42,6 @@ func drawShadowText(text: view String, x: Float, y: Float, fontSize: Float, colo
     fontSize: fontSize
     color: Color { r: 10, g: 12, b: 13, a: 95 }
   )
-  # actual text
   drawText(
     text: text
     x: x
@@ -52,21 +58,20 @@ func tick(s: view State) {
   let sh: Int = getScreenHeight()
   let centerX: Float = sw.toFloat() / 2.0
   let centerY: Float = sh.toFloat() / 2.0
-
   let radius: mod Int => s.radius
   if s.direction is false {
     radius = radius - 1
     if radius <= -10 {
       s.direction = true
     }
-  }
-  else if s.direction {
-    radius = radius + 1
-    if radius >= 520 {
-      s.direction = false
+  } else {
+    if s.direction {
+      radius = radius + 1
+      if radius >= 520 {
+        s.direction = false
+      }
     }
   }
-
   beginDrawing()
   clearBackground(color: s.bgColor)
   drawCircle(x: centerX, y: centerY, radius: radius, color: s.pastelCircle)
