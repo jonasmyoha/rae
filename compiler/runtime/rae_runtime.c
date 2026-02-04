@@ -335,24 +335,24 @@ int8_t rae_ext_rae_sys_write_file(const char* path, const char* content) {
 const char* rae_ext_rae_str_i64(int64_t v) {
   char* buffer = malloc(32);
   if (buffer) {
-    sprintf(buffer, "%lld", (long long)v);
+    snprintf(buffer, 32, "%lld", (long long)v);
   }
   return buffer;
 }
 
-const char* rae_ext_rae_str_i64_ptr(int64_t* v) {
+const char* rae_ext_rae_str_i64_ptr(const int64_t* v) {
   return rae_ext_rae_str_i64(*v);
 }
 
 const char* rae_ext_rae_str_f64(double v) {
   char* buffer = malloc(32);
   if (buffer) {
-    sprintf(buffer, "%g", v);
+    snprintf(buffer, 32, "%g", v);
   }
   return buffer;
 }
 
-const char* rae_ext_rae_str_f64_ptr(double* v) {
+const char* rae_ext_rae_str_f64_ptr(const double* v) {
   return rae_ext_rae_str_f64(*v);
 }
 
@@ -360,7 +360,7 @@ const char* rae_ext_rae_str_bool(int8_t v) {
   return v ? "true" : "false";
 }
 
-const char* rae_ext_rae_str_bool_ptr(int8_t* v) {
+const char* rae_ext_rae_str_bool_ptr(const int8_t* v) {
   return rae_ext_rae_str_bool(*v);
 }
 
