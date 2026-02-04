@@ -249,7 +249,7 @@ static bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, F
       // is_ptr is true ONLY if explicitly view/mod.
   }
 
-  if (is_ptr) {
+  if (is_ptr && !type->is_val) {
       if (fprintf(out, "*") < 0) return false;
   }
 
@@ -360,7 +360,8 @@ static const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func) {
       fprintf(stderr, "error: C backend only supports single return values per function\n");
       return NULL;
     }
-    bool is_ptr = func->returns->type->is_view || func->returns->type->is_mod;
+    bool is_view = func->returns->type->is_view;
+    bool is_ptr = is_view || func->returns->type->is_mod;
     
     if (func->returns->type->is_id) return "int64_t";
     if (func->returns->type->is_key) return "const char*";
@@ -368,10 +369,8 @@ static const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func) {
     const char* mapped = map_rae_type_to_c(func->returns->type->parts->text);
     if (mapped) {
         if (is_ptr) {
-            // HACK: this will leak or produce weird results if mapped is "const char*"
-            // but for now it helps with "mod T" returns.
-            char* buf = malloc(strlen(mapped) + 2);
-            sprintf(buf, "%s*", mapped);
+            char* buf = malloc(strlen(mapped) + 16);
+            sprintf(buf, "%s%s*", is_view ? "const " : "", mapped);
             return buf; // leak
         }
         return mapped;
@@ -398,8 +397,8 @@ static const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func) {
 
     char* type_name = str_to_cstr(func->returns->type->parts->text);
     if (is_ptr) {
-        char* buf = malloc(strlen(type_name) + 2);
-        sprintf(buf, "%s*", type_name);
+        char* buf = malloc(strlen(type_name) + 16);
+        sprintf(buf, "%s%s*", is_view ? "const " : "", type_name);
         free(type_name);
         return buf; // leak
     }
@@ -1360,7 +1359,7 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
          
          if (fprintf(out, "&(") < 0) return false;
     } else if (!needs_addr && have_ptr) {
-         if (fprintf(out, "*(") < 0) return false;
+         if (fprintf(out, "(*") < 0) return false;
     }
 
     Str arg_type = infer_expr_type(ctx, arg->value);
@@ -2364,6 +2363,7 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     
           fprintf(out, "  ");
           if (stmt->as.let_stmt.type) {
+              if (stmt->as.let_stmt.type->is_view) fprintf(out, "const ");
               if (!emit_type_ref_as_c_type(ctx, stmt->as.let_stmt.type, out)) return false;
           } else {
               fprintf(out, "int64_t");
@@ -2470,9 +2470,9 @@ skip_expr:;
       }
       
       if (is_ptr && !stmt->as.assign_stmt.is_bind) {
-          fprintf(out, "(*(");
+          fprintf(out, "(*");
           if (!emit_expr(ctx, stmt->as.assign_stmt.target, out, PREC_ASSIGN)) return false;
-          fprintf(out, "))");
+          fprintf(out, ")");
       } else {
           if (!emit_expr(ctx, stmt->as.assign_stmt.target, out, PREC_ASSIGN)) return false;
       }
@@ -2619,26 +2619,33 @@ static bool emit_raylib_wrapper(const AstFuncDecl* fn, const char* c_name, FILE*
       Str type_name = get_base_type_name(p->type);
       const AstDecl* td = find_type_decl(module, type_name);
       
+      bool is_mod = p->type && p->type->is_mod;
+      bool is_explicit_view = p->type && p->type->is_view;
+      bool is_val = p->type && p->type->is_val;
+      bool is_primitive = is_primitive_type(type_name);
+      bool is_ptr = (is_mod || is_explicit_view || (!is_val && !is_primitive));
+      const char* op = is_ptr ? "->" : ".";
+
       if (td && td->kind == AST_DECL_TYPE && has_property(td->as.type_decl.properties, "c_struct")) {
           if (str_eq_cstr(type_name, "Color")) {
-              fprintf(out, "(Color){ (unsigned char)%.*s.r, (unsigned char)%.*s.g, (unsigned char)%.*s.b, (unsigned char)%.*s.a }", 
-                      (int)p->name.len, p->name.data, (int)p->name.len, p->name.data, (int)p->name.len, p->name.data, (int)p->name.len, p->name.data);
+              fprintf(out, "(Color){ (unsigned char)%.*s%sr, (unsigned char)%.*s%sg, (unsigned char)%.*s%sb, (unsigned char)%.*s%sa }", 
+                      (int)p->name.len, p->name.data, op, (int)p->name.len, p->name.data, op, (int)p->name.len, p->name.data, op, (int)p->name.len, p->name.data, op);
           } else if (str_eq_cstr(type_name, "Vector3")) {
-              fprintf(out, "(Vector3){ (float)%.*s.x, (float)%.*s.y, (float)%.*s.z }", 
-                      (int)p->name.len, p->name.data, (int)p->name.len, p->name.data, (int)p->name.len, p->name.data);
+              fprintf(out, "(Vector3){ (float)%.*s%sx, (float)%.*s%sy, (float)%.*s%sz }", 
+                      (int)p->name.len, p->name.data, op, (int)p->name.len, p->name.data, op, (int)p->name.len, p->name.data, op);
           } else if (str_eq_cstr(type_name, "Texture")) {
-              fprintf(out, "(Texture){ .id = (unsigned int)%.*s.id, .width = (int)%.*s.width, .height = (int)%.*s.height, .mipmaps = (int)%.*s.mipmaps, .format = (int)%.*s.format }", 
-                      (int)p->name.len, p->name.data, (int)p->name.len, p->name.data, (int)p->name.len, p->name.data, (int)p->name.len, p->name.data, (int)p->name.len, p->name.data);
+              fprintf(out, "(Texture){ .id = (unsigned int)%.*s%sid, .width = (int)%.*s%swidth, .height = (int)%.*s%sheight, .mipmaps = (int)%.*s%smipmaps, .format = (int)%.*s%sformat }", 
+                      (int)p->name.len, p->name.data, op, (int)p->name.len, p->name.data, op, (int)p->name.len, p->name.data, op, (int)p->name.len, p->name.data, op, (int)p->name.len, p->name.data, op);
           } else if (str_eq_cstr(type_name, "Camera3D")) {
               fprintf(out, "(Camera3D){ ");
-              fprintf(out, ".position = (Vector3){ (float)%.*s.position.x, (float)%.*s.position.y, (float)%.*s.position.z }, ", 
-                      (int)p->name.len, p->name.data, (int)p->name.len, p->name.data, (int)p->name.len, p->name.data);
-              fprintf(out, ".target = (Vector3){ (float)%.*s.target.x, (float)%.*s.target.y, (float)%.*s.target.z }, ", 
-                      (int)p->name.len, p->name.data, (int)p->name.len, p->name.data, (int)p->name.len, p->name.data);
-              fprintf(out, ".up = (Vector3){ (float)%.*s.up.x, (float)%.*s.up.y, (float)%.*s.up.z }, ", 
-                      (int)p->name.len, p->name.data, (int)p->name.len, p->name.data, (int)p->name.len, p->name.data);
-              fprintf(out, ".fovy = (float)%.*s.fovy, .projection = (int)%.*s.projection ", 
-                      (int)p->name.len, p->name.data, (int)p->name.len, p->name.data);
+              fprintf(out, ".position = (Vector3){ (float)%.*s%sposition.x, (float)%.*s%sposition.y, (float)%.*s%sposition.z }, ", 
+                      (int)p->name.len, p->name.data, op, (int)p->name.len, p->name.data, op, (int)p->name.len, p->name.data, op);
+              fprintf(out, ".target = (Vector3){ (float)%.*s%starget.x, (float)%.*s%starget.y, (float)%.*s%starget.z }, ", 
+                      (int)p->name.len, p->name.data, op, (int)p->name.len, p->name.data, op, (int)p->name.len, p->name.data, op);
+              fprintf(out, ".up = (Vector3){ (float)%.*s%sup.x, (float)%.*s%sup.y, (float)%.*s%sup.z }, ", 
+                      (int)p->name.len, p->name.data, op, (int)p->name.len, p->name.data, op, (int)p->name.len, p->name.data, op);
+              fprintf(out, ".fovy = (float)%.*s%sfovy, .projection = (int)%.*s%sprojection ", 
+                      (int)p->name.len, p->name.data, op, (int)p->name.len, p->name.data, op);
               fprintf(out, "}");
           } else {
               fprintf(out, "%.*s", (int)p->name.len, p->name.data);
