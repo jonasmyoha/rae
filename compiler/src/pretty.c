@@ -1204,6 +1204,7 @@ void pretty_print_module(const AstModule* module, const char* source, FILE* out)
 
   if (module->imports) {
     pp_newline(&pp);
+    pp_newline(&pp);
   }
 
   const AstDecl* decl = module->decls;
