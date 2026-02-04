@@ -185,6 +185,7 @@ static void pp_write_type(PrettyPrinter* pp, const AstTypeRef* type) {
   if (type->is_opt) pp_write(pp, "opt ");
   if (type->is_view) pp_write(pp, "view ");
   if (type->is_mod) pp_write(pp, "mod ");
+  if (type->is_val) pp_write(pp, "val ");
   if (type->is_id) pp_write(pp, "id ");
   if (type->is_key) pp_write(pp, "key ");
   
@@ -204,7 +205,7 @@ static void pp_write_type(PrettyPrinter* pp, const AstTypeRef* type) {
   }
   if (type->generic_args) {
     pp_write_char(pp, '(');
-    AstTypeRef* generic_param = type->generic_args;
+    const AstTypeRef* generic_param = type->generic_args;
     int is_first_generic_param = 1;
     while (generic_param) {
       if (!is_first_generic_param) {

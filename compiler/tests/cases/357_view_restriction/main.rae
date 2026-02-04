@@ -1,0 +1,17 @@
+type Point {
+  x: Int
+}
+
+func testAssign(p: Point) {
+  p = { x: 10 } # Error: cannot assign to view
+}
+
+func testMutate(p: Point) {
+  p.x = 10 # Error: cannot mutate field of view
+}
+
+func main() {
+  let pt: Point = { x: 1 }
+  testAssign(pt)
+  testMutate(pt)
+}

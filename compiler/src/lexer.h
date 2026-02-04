@@ -31,6 +31,7 @@ typedef enum {
   TOK_KW_SPAWN,
   TOK_KW_VIEW,
   TOK_KW_MOD,
+  TOK_KW_VAL,
   TOK_KW_OPT,
   TOK_KW_ID,
   TOK_KW_KEY,

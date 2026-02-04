@@ -1,0 +1,47 @@
+type Point {
+  x: Int
+  y: Int
+}
+
+# view by default (implicit)
+func testView(p: Point) {
+  log("testView x: {p.x}")
+  # p.x = 10 # Error: p is view
+}
+
+# Explicit view
+func testExplicitView(p: view Point) {
+  log("testExplicitView x: {p.x}")
+}
+
+# mod reference
+func testMod(p: mod Point) {
+  p.x = p.x + 1
+  log("testMod x: {p.x}")
+}
+
+# val copy
+func testVal(p: val Point) {
+  p.x = 100
+  log("testVal x: {p.x}")
+}
+
+# Primitive view (should be passed by value internally but semantically view)
+func testInt(i: Int) {
+  log("testInt: {i}")
+}
+
+func main() {
+  let pt: Point = { x: 1, y: 2 }
+  
+  testView(pt)
+  testExplicitView(pt)
+  
+  testMod(mod pt)
+  log("after mod pt.x: {pt.x}")
+  
+  testVal(pt)
+  log("after val pt.x: {pt.x}")
+  
+  testInt(42)
+}

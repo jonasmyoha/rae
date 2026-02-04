@@ -230,6 +230,7 @@ static bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, F
 
       if (is_generic) {
           if (fprintf(out, "RaeAny") < 0) return false;
+          is_ptr = false; // RaeAny is a value type
       } else {
           if (fprintf(out, "%.*s", (int)current->text.len, current->text.data) < 0) return false;
           
@@ -238,6 +239,14 @@ static bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, F
               if (fprintf(out, "_%.*s", (int)current->text.len, current->text.data) < 0) return false; // Concatenate with underscore
           }
       }
+  }
+
+  // Update is_ptr for non-explicit view/mod if it's not a primitive and not explicitly val
+  if (!is_ptr && !type->is_val && !is_primitive_type(current->text)) {
+      // For local variables (not params), they are owned values by default.
+      // But wait, this function is used for let statements TOO.
+      // If it's a let statement, we usually want the owned type.
+      // is_ptr is true ONLY if explicitly view/mod.
   }
 
   if (is_ptr) {
@@ -274,8 +283,22 @@ static bool emit_param_list(CFuncContext* ctx, const AstParam* params, FILE* out
         } else if (param->type->is_key) {
             c_type_base = "const char*";
         } else if (param->type->parts) {
-            is_ptr = param->type->is_view || param->type->is_mod;
             Str first = param->type->parts->text;
+            
+            // SEMANTICS: view-by-default
+            // mod T -> T*
+            // val T -> T
+            // T     -> const T* (semantically view)
+            // Exception: primitives are passed by value even if 'view'
+            
+            bool is_mod = param->type->is_mod;
+            bool is_val = param->type->is_val;
+            bool is_explicit_view = param->type->is_view;
+            bool is_primitive = is_primitive_type(first);
+            
+            is_ptr = (is_mod || is_explicit_view || (!is_val && !is_primitive));
+            bool is_const = (!is_mod && is_ptr);
+
             c_type_base = map_rae_type_to_c(first);
             if (!c_type_base) {
                 // Check if it's a generic param
@@ -292,9 +315,18 @@ static bool emit_param_list(CFuncContext* ctx, const AstParam* params, FILE* out
                 }
                 if (is_generic) {
                     c_type_base = "RaeAny";
+                    is_ptr = false; // RaeAny is already a value type (container)
+                    is_const = false;
                 } else {
                     c_type_base = free_me = str_to_cstr(first);
                 }
+            }
+
+            if (is_const) {
+                char* buf = malloc(strlen(c_type_base) + 7);
+                sprintf(buf, "const %s", c_type_base);
+                if (free_me) free(free_me);
+                c_type_base = free_me = buf;
             }
         }
     }
@@ -1248,10 +1280,11 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     if (func_decl) {
         // We have signature!
         if (param) {
-             // If param expects ptr (view/mod), we need addr
-             if (param->type && (param->type->is_view || param->type->is_mod)) {
-                 needs_addr = true;
-             }
+             // SEMANTICS:
+             // needs_addr is true if:
+             // 1. Explicitly mod/view
+             // 2. Default (implicit view) AND not primitive AND not explicitly val
+             
              if (param->type && param->type->parts) {
                  Str ptype = param->type->parts->text;
                  if (str_eq_cstr(ptype, "Any")) {
@@ -1267,15 +1300,32 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                      }
                  }
              }
+
+             if (param->type) {
+                 bool is_mod = param->type->is_mod;
+                 bool is_explicit_view = param->type->is_view;
+                 bool is_val = param->type->is_val;
+                 bool is_primitive = false;
+                 if (param->type->parts) {
+                     is_primitive = is_primitive_type(param->type->parts->text);
+                 }
+                 
+                 if (is_mod || is_explicit_view || (!is_val && !is_primitive)) {
+                     needs_addr = true;
+                 }
+                 
+                 // SPECIAL CASE: RaeAny is a value type even if it's a generic T
+                 if (is_any_param) {
+                     needs_addr = false;
+                 }
+             }
              // We'll advance 'param' at the end of the loop to be safe with all branches
         }
     } else {
-        // Fallback heuristic
-        if (arg->value->kind == AST_EXPR_IDENT) {
-            Str type_name = get_local_type_name(ctx, arg->value->as.ident);
-            if (type_name.len > 0 && !is_primitive_type(type_name)) {
-                needs_addr = true;
-            }
+        // Fallback heuristic: assume view-by-default for non-primitives
+        Str arg_type_name = infer_expr_type(ctx, arg->value);
+        if (arg_type_name.len > 0 && !is_primitive_type(arg_type_name)) {
+            needs_addr = true;
         }
     }
 
@@ -1335,7 +1385,34 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         if (tr && tr->is_opt) arg_is_opt = true;
     }
 
-    if (is_c_struct && !needs_addr) {
+    if (is_any_param && !arg_is_any && !arg_is_opt) {
+        fprintf(out, "rae_any(");
+    } else if (!is_any_param && (arg_is_any || arg_is_opt)) {
+            // Unwrapping Any/opt to concrete type
+            if (needs_addr) {
+                // reference (ptr)
+                if (target_type.len > 0) {
+                    fprintf(out, "((%.*s*)(", (int)target_type.len, target_type.data);
+                } else {
+                    fprintf(out, "((void*)(");
+                }
+            } else {
+                // value
+                if (str_eq_cstr(target_type, "Int")) {
+                    fprintf(out, "((int64_t)(");
+                } else if (str_eq_cstr(target_type, "Float")) {
+                    fprintf(out, "((double)(");
+                } else if (str_eq_cstr(target_type, "Bool")) {
+                    fprintf(out, "((int8_t)(");
+                } else if (str_eq_cstr(target_type, "String")) {
+                    fprintf(out, "((const char*)(");
+                } else {
+                    fprintf(out, "((void*)("); // fallback
+                }
+            }
+        }
+
+    if (is_c_struct && !needs_addr && !is_any_param) {
         // If it's already an object of the right type (explicitly tagged), just emit it
         if (arg->value->kind == AST_EXPR_OBJECT && arg->value->as.object_literal.type) {
             if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) return false;
@@ -1379,54 +1456,27 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) return false;
         }
     } else {
-        if (is_any_param && !needs_addr) {
-            fprintf(out, "rae_any(");
-        } else if (!is_any_param && (arg_is_any || arg_is_opt)) {
-            // Unwrapping Any/opt to concrete type
-            if (needs_addr) {
-                // reference (ptr)
-                if (target_type.len > 0) {
-                    fprintf(out, "((%.*s*)(", (int)target_type.len, target_type.data);
-                } else {
-                    fprintf(out, "((void*)(");
-                }
-            } else {
-                // value
-                if (str_eq_cstr(target_type, "Int")) {
-                    fprintf(out, "((int64_t)(");
-                } else if (str_eq_cstr(target_type, "Float")) {
-                    fprintf(out, "((double)(");
-                } else if (str_eq_cstr(target_type, "Bool")) {
-                    fprintf(out, "((int8_t)(");
-                } else if (str_eq_cstr(target_type, "String")) {
-                    fprintf(out, "((const char*)(");
-                } else {
-                    fprintf(out, "((void*)("); // fallback
-                }
-            }
-        }
-
         if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) {
           return false;
         }
-        
-        if (is_any_param && !needs_addr) {
-            fprintf(out, ")");
-        } else if (!is_any_param && (arg_is_any || arg_is_opt)) {
-            if (needs_addr) {
-                fprintf(out, ").as.ptr)");
+    }
+
+    if (is_any_param && !arg_is_any && !arg_is_opt) {
+        fprintf(out, ")");
+    } else if (!is_any_param && (arg_is_any || arg_is_opt)) {
+        if (needs_addr) {
+            fprintf(out, ").as.ptr)");
+        } else {
+            if (str_eq_cstr(target_type, "Int")) {
+                fprintf(out, ").as.i)");
+            } else if (str_eq_cstr(target_type, "Float")) {
+                fprintf(out, ").as.f)");
+            } else if (str_eq_cstr(target_type, "Bool")) {
+                fprintf(out, ").as.b)");
+            } else if (str_eq_cstr(target_type, "String")) {
+                fprintf(out, ").as.s)");
             } else {
-                if (str_eq_cstr(target_type, "Int")) {
-                    fprintf(out, ").as.i)");
-                } else if (str_eq_cstr(target_type, "Float")) {
-                    fprintf(out, ").as.f)");
-                } else if (str_eq_cstr(target_type, "Bool")) {
-                    fprintf(out, ").as.b)");
-                } else if (str_eq_cstr(target_type, "String")) {
-                    fprintf(out, ").as.s)");
-                } else {
-                    fprintf(out, ").as.ptr)");
-                }
+                fprintf(out, ").as.ptr)");
             }
         }
     }
@@ -2671,6 +2721,37 @@ static bool emit_function(const AstModule* module, const AstFuncDecl* func, FILE
                       .local_count = 0,
                       .returns_value = returns_value,
                       .temp_counter = 0};
+
+  // Populate initial locals from parameters
+  const AstParam* p = func->params;
+  while (p) {
+      if (ctx.local_count < 256) {
+          ctx.locals[ctx.local_count] = p->name;
+          ctx.local_type_refs[ctx.local_count] = p->type;
+          ctx.local_types[ctx.local_count] = get_base_type_name(p->type);
+          
+          bool is_ptr = false;
+          bool is_mod = false;
+          if (p->type) {
+              is_mod = p->type->is_mod;
+              if (p->type->is_id) {
+                  is_ptr = false;
+              } else if (p->type->is_key) {
+                  is_ptr = false;
+              } else if (p->type->parts) {
+                  Str base = p->type->parts->text;
+                  bool is_val = p->type->is_val;
+                  bool is_explicit_view = p->type->is_view;
+                  bool is_primitive = is_primitive_type(base);
+                  is_ptr = (is_mod || is_explicit_view || (!is_val && !is_primitive));
+              }
+          }
+          ctx.local_is_ptr[ctx.local_count] = is_ptr;
+          ctx.local_is_mod[ctx.local_count] = is_mod;
+          ctx.local_count++;
+      }
+      p = p->next;
+  }
                       
   const AstStmt* stmt = func->body->first;
   while (stmt && ok) {
