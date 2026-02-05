@@ -27,3 +27,8 @@
 - [ ] **Link ENet:** Add ENet dependency to the compiler and runtime.
 - [ ] **UDP API:** Create `lib/net.rae` for UDP packet sending/receiving.
 - [ ] **P2P Pong:** A proof-of-concept where two local binaries exchange paddle/ball state.
+
+## Step 6: Platform Verification
+- [ ] **Desktop (Steam):** Verify C-linking and networking on Windows/macOS/Linux.
+- [ ] **iOS (iPhone):** Verify static linkage and socket permissions in a simulated iOS environment.
+- [ ] **TLS Setup:** (Optional) Add mbedTLS to Mongoose for production HTTPS support.
