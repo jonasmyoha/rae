@@ -35,7 +35,7 @@ Before networking can be implemented, the following language gaps must be closed
 ## 4. Phase 3: Web & Real-time (The "Connected" Phase)
 - **Client:** Tetris fetches leaderboards from a Vite/Node.js server using Mongoose.
 - **Server:** Re-implement the highscore server in Rae using Mongoose.
-- **UDP POC:** A P2P Tetris mode where two players sync grids via ENet.
+- **UDP POC:** A P2P Pong mode where two players sync paddle/ball state via ENet.
 
 ---
 
