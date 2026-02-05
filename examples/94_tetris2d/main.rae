@@ -330,9 +330,9 @@ func checkLines(g: mod Game) {
     let newLevel: Int = g.lines + 1
     if (newLevel > g.level) {
       g.level = newLevel
-      # FRANTIC SPEED: Decrease delay aggressively
-      # Level 1: 20 frames, Level 10: 2 frames (Max Speed)
-      g.moveDelay = 22 - g.level * 2
+      # GRADUAL FRANTIC SPEED: 
+      # Level 1: ~21 frames, Level 15: 2 frames (Max Speed)
+      g.moveDelay = 22 - (g.level * 4 / 3)
       if (g.moveDelay < 2) {
         g.moveDelay = 2
       }
@@ -388,7 +388,7 @@ func initGame(g: mod Game) {
   g.lines = 0
   g.level = 1
   g.moveTimer = 0
-  g.moveDelay = 20
+  g.moveDelay = 21
   g.hMoveTimer = 0
   # repeat speed
   g.hMoveDelay = 4
