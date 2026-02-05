@@ -39,7 +39,14 @@ Before networking can be implemented, the following language gaps must be closed
 
 ---
 
-## 5. Missing Architectural Pieces
+## 5. Concurrency Model (The "Spawn" Model)
+Rae uses a "reversed" async/await model to keep game loops simple:
+- **Definition:** Functions that *can* run asynchronously must be marked with the `spawn` modifier: `func fetchScores() spawn { ... }`.
+- **Synchronous Call:** Calling it normally `fetchScores()` runs it synchronously (blocking), similar to `await` in other languages.
+- **Asynchronous Call:** To run it in the background, use the `spawn` keyword at the call site: `spawn fetchScores()`.
+- **Advantage:** This ensures that by default, game logic is deterministic and sequential unless the developer explicitly asks for a background task.
+
+## 6. Missing Architectural Pieces
 - **Constructors:** We don't need heavy OOP constructors. We need an `init` convention or a special `init` function that the compiler calls after `{}` allocation.
 - **Destructors:** To be determined. For now, `defer` handles 90% of the use cases for manual resource management.
 - **Spawn/Threads:** We need a `sys.spawn(() => { ... })` primitive.

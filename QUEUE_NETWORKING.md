@@ -3,6 +3,7 @@
 ## Step 1: Language Foundation (Pre-requisites)
 - [ ] **Defaults:** Enforce zero-initialization for all locals and struct fields in VM and C backend.
 - [ ] **The `defer` Keyword:** Implement `defer` in the parser, VM, and C backend for scope-based cleanup.
+- [ ] **Spawn Syntax:** Implement the `spawn` call-site keyword and ensure it triggers background execution for `spawn`-modified functions.
 - [ ] **JSON Gen:** Implement compiler-generated `toJson()` and `fromJson()` for all `type` definitions.
 - [ ] **Binary Gen:** Implement `toBinary()` and `fromBinary()` for compact packet serialization.
 - [ ] **String Utils:** Add `split`, `trim`, `find`, and `replace` to `lib/string.rae`.
