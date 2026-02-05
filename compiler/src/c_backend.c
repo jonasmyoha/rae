@@ -51,6 +51,7 @@ typedef struct {
   size_t temp_counter;
   const AstTypeRef* expected_type;
   const struct VmRegistry* registry;
+  bool uses_raylib;
 } CFuncContext;
 
 // Forward declarations
@@ -58,16 +59,17 @@ static const char* find_raylib_mapping(Str name);
 static const AstDecl* find_type_decl(const AstModule* module, Str name);
 static const AstDecl* find_enum_decl(const AstModule* module, Str name);
 static bool has_property(const AstProperty* props, const char* name);
-static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_prec);
-static bool emit_function(const AstModule* module, const AstFuncDecl* func, FILE* out, const struct VmRegistry* registry);
+static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_prec, bool is_lvalue);
+static bool emit_function(const AstModule* module, const AstFuncDecl* func, FILE* out, const struct VmRegistry* registry, bool uses_raylib);
 static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static bool emit_call(CFuncContext* ctx, const AstExpr* expr, FILE* out);
 static bool emit_log_call(CFuncContext* ctx, const AstExpr* expr, FILE* out, bool newline);
 static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out);
 static bool emit_string_literal(FILE* out, Str literal);
-static bool emit_param_list(CFuncContext* ctx, const AstParam* params, FILE* out);
+static bool emit_param_list(CFuncContext* ctx, const AstParam* params, FILE* out, bool is_extern);
 static const char* map_rae_type_to_c(Str type_name);
 static bool is_primitive_type(Str type_name);
+static bool is_raylib_builtin_type(Str type_name);
 static bool is_pointer_type(CFuncContext* ctx, Str name);
 static bool is_mod_type(CFuncContext* ctx, Str name);
 static Str get_local_type_name(CFuncContext* ctx, Str name);
@@ -262,7 +264,7 @@ static bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, F
   return true;
 }
 
-static bool emit_param_list(CFuncContext* ctx, const AstParam* params, FILE* out) {
+static bool emit_param_list(CFuncContext* ctx, const AstParam* params, FILE* out, bool is_extern) {
   size_t index = 0;
   const AstParam* param = params;
   if (!param) {
@@ -294,9 +296,20 @@ static bool emit_param_list(CFuncContext* ctx, const AstParam* params, FILE* out
             bool is_mod = param->type->is_mod;
             bool is_val = param->type->is_val;
             bool is_explicit_view = param->type->is_view;
-            bool is_primitive = is_primitive_type(first);
+            bool is_primitive = is_primitive_type(first) || (ctx && ctx->uses_raylib && is_raylib_builtin_type(first));
             
-            is_ptr = (is_mod || is_explicit_view || (!is_val && !is_primitive));
+            // Treat enums as primitives (value types)
+            if (!is_primitive && ctx && ctx->module) {
+                if (find_enum_decl(ctx->module, first)) {
+                    is_primitive = true;
+                }
+            }
+            
+            if (is_extern) {
+                is_ptr = (is_mod || is_explicit_view);
+            } else {
+                is_ptr = (is_mod || is_explicit_view || (!is_val && !is_primitive));
+            }
             bool is_const = (!is_mod && is_ptr);
 
             c_type_base = map_rae_type_to_c(first);
@@ -322,8 +335,10 @@ static bool emit_param_list(CFuncContext* ctx, const AstParam* params, FILE* out
                 }
             }
 
-            if (is_const) {
-                char* buf = malloc(strlen(c_type_base) + 7);
+            bool is_already_const_param = (c_type_base && strstr(c_type_base, "const ") == c_type_base);
+
+            if (is_const && !is_already_const_param) {
+                char* buf = malloc(strlen(c_type_base) + 16);
                 sprintf(buf, "const %s", c_type_base);
                 if (free_me) free(free_me);
                 c_type_base = free_me = buf;
@@ -367,10 +382,11 @@ static const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func) {
     if (func->returns->type->is_key) return "const char*";
 
     const char* mapped = map_rae_type_to_c(func->returns->type->parts->text);
+    bool is_already_const = (mapped && strcmp(mapped, "const char*") == 0);
     if (mapped) {
         if (is_ptr) {
             char* buf = malloc(strlen(mapped) + 16);
-            sprintf(buf, "%s%s*", is_view ? "const " : "", mapped);
+            sprintf(buf, "%s%s*", (is_view && !is_already_const) ? "const " : "", mapped);
             return buf; // leak
         }
         return mapped;
@@ -396,9 +412,10 @@ static const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func) {
     }
 
     char* type_name = str_to_cstr(func->returns->type->parts->text);
+    bool is_already_const_custom = (strcmp(type_name, "const char*") == 0);
     if (is_ptr) {
         char* buf = malloc(strlen(type_name) + 16);
-        sprintf(buf, "%s%s*", is_view ? "const " : "", type_name);
+        sprintf(buf, "%s%s*", (is_view && !is_already_const_custom) ? "const " : "", type_name);
         free(type_name);
         return buf; // leak
     }
@@ -708,11 +725,11 @@ static bool emit_log_call(CFuncContext* ctx, const AstExpr* expr, FILE* out, boo
 
   if (is_list) {
     if (fprintf(out, "  %s(", newline ? "rae_ext_rae_log_list_fields" : "rae_ext_rae_log_stream_list_fields") < 0) return false;
-    if (!emit_expr(ctx, value, out, PREC_LOWEST)) return false;
+    if (!emit_expr(ctx, value, out, PREC_LOWEST, false)) return false;
     fprintf(out, ".data, ");
-    if (!emit_expr(ctx, value, out, PREC_LOWEST)) return false;
+    if (!emit_expr(ctx, value, out, PREC_LOWEST, false)) return false;
     fprintf(out, ".length, ");
-    if (!emit_expr(ctx, value, out, PREC_LOWEST)) return false;
+    if (!emit_expr(ctx, value, out, PREC_LOWEST, false)) return false;
     fprintf(out, ".capacity);\n");
     return true;
   }
@@ -724,7 +741,7 @@ static bool emit_log_call(CFuncContext* ctx, const AstExpr* expr, FILE* out, boo
   if (is_generic) fprintf(out, "rae_any(");
   if (is_enum) fprintf(out, "(int64_t)(");
   if (val_is_ptr) fprintf(out, "(*");
-  if (!emit_expr(ctx, value, out, PREC_LOWEST)) return false;
+  if (!emit_expr(ctx, value, out, PREC_LOWEST, false)) return false;
   if (val_is_ptr) fprintf(out, ")");
   if (is_enum) fprintf(out, ")");
   if (is_generic) fprintf(out, ")");
@@ -734,17 +751,25 @@ static bool emit_log_call(CFuncContext* ctx, const AstExpr* expr, FILE* out, boo
 }
 
 static bool is_primitive_type(Str type_name) {
-  return str_eq_cstr(type_name, "Int") || 
-         str_eq_cstr(type_name, "Float") || 
-         str_eq_cstr(type_name, "Bool") || 
-         str_eq_cstr(type_name, "Char") ||
-         str_eq_cstr(type_name, "String") ||
-         str_eq_cstr(type_name, "Array") ||
-         str_eq_cstr(type_name, "Buffer") ||
-         str_eq_cstr(type_name, "Any");
+    return str_eq_cstr(type_name, "Int") || 
+           str_eq_cstr(type_name, "Float") || 
+           str_eq_cstr(type_name, "Bool") || 
+           str_eq_cstr(type_name, "Char") ||
+           str_eq_cstr(type_name, "String") ||
+           str_eq_cstr(type_name, "Array") ||
+           str_eq_cstr(type_name, "Buffer") ||
+           str_eq_cstr(type_name, "Any");
 }
 
-static Str strip_generics(Str type_name) {
+static bool is_raylib_builtin_type(Str type_name) {
+    return str_eq_cstr(type_name, "Vector2") || 
+           str_eq_cstr(type_name, "Vector3") || 
+           str_eq_cstr(type_name, "Color") ||
+           str_eq_cstr(type_name, "Texture") ||
+           str_eq_cstr(type_name, "Camera3D");
+}
+  
+         static Str strip_generics(Str type_name) {
   for (size_t i = 0; i < type_name.len; ++i) {
     if (type_name.data[i] == '(') {
       return (Str){.data = type_name.data, .len = i};
@@ -1012,7 +1037,7 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
           const AstCallArg* arg = expr->as.call.args;
           if (!arg) return false;
           fprintf(out, "rae_ext_rae_buf_alloc(");
-          if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) return false;
+          if (!emit_expr(ctx, arg->value, out, PREC_LOWEST, false)) return false;
           const char* elem_size_str = "8"; // Default
           if (ctx->func_decl && ctx->func_decl->generic_params) elem_size_str = "sizeof(RaeAny)";
           else if (ctx->func_decl && (str_eq_cstr(ctx->func_decl->name, "createList2") || str_eq_cstr(ctx->func_decl->name, "grow"))) elem_size_str = "sizeof(RaeAny)";
@@ -1023,7 +1048,7 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
           const AstCallArg* arg = expr->as.call.args;
           if (!arg) return false;
           fprintf(out, "rae_ext_rae_buf_free(");
-          if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) return false;
+          if (!emit_expr(ctx, arg->value, out, PREC_LOWEST, false)) return false;
           fprintf(out, ")");
           return true;
       }
@@ -1031,9 +1056,9 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
           const AstCallArg* arg = expr->as.call.args;
           if (!arg || !arg->next) return false;
           fprintf(out, "rae_ext_rae_buf_resize(");
-          if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) return false;
+          if (!emit_expr(ctx, arg->value, out, PREC_LOWEST, false)) return false;
           fprintf(out, ", ");
-          if (!emit_expr(ctx, arg->next->value, out, PREC_LOWEST)) return false;
+          if (!emit_expr(ctx, arg->next->value, out, PREC_LOWEST, false)) return false;
           const char* elem_size_str = "8";
           if (ctx->func_decl && ctx->func_decl->generic_params) elem_size_str = "sizeof(RaeAny)";
           else if (ctx->func_decl && str_eq_cstr(ctx->func_decl->name, "grow")) elem_size_str = "sizeof(RaeAny)";
@@ -1044,15 +1069,15 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
           const AstCallArg* arg = expr->as.call.args;
           if (!arg || !arg->next || !arg->next->next || !arg->next->next->next || !arg->next->next->next->next) return false;
           fprintf(out, "rae_ext_rae_buf_copy(");
-          if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) return false; // src
+          if (!emit_expr(ctx, arg->value, out, PREC_LOWEST, false)) return false; // src
           fprintf(out, ", ");
-          if (!emit_expr(ctx, arg->next->value, out, PREC_LOWEST)) return false; // src_off
+          if (!emit_expr(ctx, arg->next->value, out, PREC_LOWEST, false)) return false; // src_off
           fprintf(out, ", ");
-          if (!emit_expr(ctx, arg->next->next->value, out, PREC_LOWEST)) return false; // dst
+          if (!emit_expr(ctx, arg->next->next->value, out, PREC_LOWEST, false)) return false; // dst
           fprintf(out, ", ");
-          if (!emit_expr(ctx, arg->next->next->next->value, out, PREC_LOWEST)) return false; // dst_off
+          if (!emit_expr(ctx, arg->next->next->next->value, out, PREC_LOWEST, false)) return false; // dst_off
           fprintf(out, ", ");
-          if (!emit_expr(ctx, arg->next->next->next->next->value, out, PREC_LOWEST)) return false; // len
+          if (!emit_expr(ctx, arg->next->next->next->next->value, out, PREC_LOWEST, false)) return false; // len
           const char* elem_size_str = "8";
           if (ctx->func_decl && ctx->func_decl->generic_params) elem_size_str = "sizeof(RaeAny)";
           else {
@@ -1085,9 +1110,9 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
               }
           }
           fprintf(out, "((%s*)(", inner_c);
-          if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) return false;
+          if (!emit_expr(ctx, arg->value, out, PREC_LOWEST, false)) return false;
           fprintf(out, "))[");
-          if (!emit_expr(ctx, arg->next->value, out, PREC_LOWEST)) return false;
+          if (!emit_expr(ctx, arg->next->value, out, PREC_LOWEST, false)) return false;
           fprintf(out, "]");
           return true;
       }
@@ -1114,15 +1139,15 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
               }
           }
           fprintf(out, "((%s*)(", inner_c);
-          if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) return false;
+          if (!emit_expr(ctx, arg->value, out, PREC_LOWEST, false)) return false;
           fprintf(out, "))[");
-          if (!emit_expr(ctx, arg->next->value, out, PREC_LOWEST)) return false;
+          if (!emit_expr(ctx, arg->next->value, out, PREC_LOWEST, false)) return false;
           fprintf(out, "] = ");
           if (strcmp(inner_c, "RaeAny") == 0) fprintf(out, "rae_any(");
           else if (arg->next->next->value->kind == AST_EXPR_OBJECT && !is_primitive_type(item_type)) {
               fprintf(out, "(%s)", inner_c);
           }
-          if (!emit_expr(ctx, arg->next->next->value, out, PREC_LOWEST)) return false;
+          if (!emit_expr(ctx, arg->next->next->value, out, PREC_LOWEST, false)) return false;
           if (strcmp(inner_c, "RaeAny") == 0) fprintf(out, ")");
           return true;
       }
@@ -1254,10 +1279,10 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
       if (ray_mapping) {
           fprintf(out, "rae_ext_%.*s", (int)callee->as.ident.len, callee->as.ident.data);
       } else {
-          if (!emit_expr(ctx, callee, out, PREC_CALL)) return false;
+          if (!emit_expr(ctx, callee, out, PREC_CALL, false)) return false;
       }
   } else {
-      if (!emit_expr(ctx, callee, out, PREC_CALL)) return false;
+      if (!emit_expr(ctx, callee, out, PREC_CALL, false)) return false;
   }
 
   if (fprintf(out, "(") < 0) return false;
@@ -1306,7 +1331,11 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                  bool is_val = param->type->is_val;
                  bool is_primitive = false;
                  if (param->type->parts) {
-                     is_primitive = is_primitive_type(param->type->parts->text);
+                     Str ptype = param->type->parts->text;
+                     is_primitive = is_primitive_type(ptype) || (ctx->uses_raylib && is_raylib_builtin_type(ptype));
+                     if (!is_primitive && find_enum_decl(ctx->module, ptype)) {
+                         is_primitive = true;
+                     }
                  }
                  
                  if (is_mod || is_explicit_view || (!is_val && !is_primitive)) {
@@ -1324,7 +1353,11 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         // Fallback heuristic: assume view-by-default for non-primitives
         Str arg_type_name = infer_expr_type(ctx, arg->value);
         if (arg_type_name.len > 0 && !is_primitive_type(arg_type_name)) {
-            needs_addr = true;
+            // Also skip if it's an enum
+            bool is_enum = find_enum_decl(ctx->module, arg_type_name) != NULL;
+            if (!is_enum) {
+                needs_addr = true;
+            }
         }
     }
 
@@ -1348,7 +1381,7 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
              else if (arg->value->kind == AST_EXPR_BOOL) c_type = "int8_t";
              
              fprintf(out, "&((%s){ ", c_type);
-             if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) return false;
+             if (!emit_expr(ctx, arg->value, out, PREC_LOWEST, false)) return false;
              fprintf(out, " })");
              
              // Advance to next argument skipping normal emission
@@ -1414,7 +1447,7 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     if (is_c_struct && !needs_addr && !is_any_param) {
         // If it's already an object of the right type (explicitly tagged), just emit it
         if (arg->value->kind == AST_EXPR_OBJECT && arg->value->as.object_literal.type) {
-            if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) return false;
+            if (!emit_expr(ctx, arg->value, out, PREC_LOWEST, false)) return false;
         } else if (arg->value->kind == AST_EXPR_OBJECT) {
             // Fix: All native calls with untyped object literals MUST have a cast: (Type){...}
             fprintf(out, "(%.*s){ ", (int)target_type.len, target_type.data);
@@ -1426,7 +1459,7 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     const AstObjectField* of = arg->value->as.object_literal.fields;
                     while (of) {
                         if (str_eq(of->name, field->name)) {
-                            if (!emit_expr(ctx, of->value, out, PREC_LOWEST)) return false;
+                            if (!emit_expr(ctx, of->value, out, PREC_LOWEST, false)) return false;
                             found_field = true;
                             break;
                         }
@@ -1441,7 +1474,7 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 const AstObjectField* of = arg->value->as.object_literal.fields;
                 while (of) {
                     fprintf(out, ".%.*s = ", (int)of->name.len, of->name.data);
-                    if (!emit_expr(ctx, of->value, out, PREC_LOWEST)) return false;
+                    if (!emit_expr(ctx, of->value, out, PREC_LOWEST, false)) return false;
                     if (of->next) fprintf(out, ", ");
                     of = of->next;
                 }
@@ -1452,10 +1485,10 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             // C allows implicit conversion between structs if they are the SAME type,
             // or we might need a cast if names differ but layout matches.
             // For now, we assume Rae type matches C type name.
-            if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) return false;
+            if (!emit_expr(ctx, arg->value, out, PREC_LOWEST, false)) return false;
         }
     } else {
-        if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) {
+        if (!emit_expr(ctx, arg->value, out, PREC_LOWEST, false)) {
           return false;
         }
     }
@@ -1550,7 +1583,7 @@ static const AstTypeRef* get_local_type_ref(CFuncContext* ctx, Str name) {
   return NULL;
 }
 
-static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_prec) {
+static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_prec, bool is_lvalue) {
   if (!expr) return false;
   switch (expr->kind) {
     case AST_EXPR_STRING:
@@ -1577,11 +1610,11 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
           bool is_enum = find_enum_decl(ctx->module, type_name) != NULL;
           fprintf(out, "rae_ext_rae_str(");
           if (is_enum) fprintf(out, "(int64_t)(");
-          if (!emit_expr(ctx, part->value, out, PREC_LOWEST)) return false;
+          if (!emit_expr(ctx, part->value, out, PREC_LOWEST, false)) return false;
           if (is_enum) fprintf(out, ")");
           fprintf(out, ")");
       } else {
-          if (!emit_expr(ctx, part->value, out, PREC_LOWEST)) return false;
+          if (!emit_expr(ctx, part->value, out, PREC_LOWEST, false)) return false;
       }
       part = part->next;
       
@@ -1592,11 +1625,11 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
               bool is_enum = find_enum_decl(ctx->module, type_name) != NULL;
               fprintf(out, "rae_ext_rae_str(");
               if (is_enum) fprintf(out, "(int64_t)(");
-              if (!emit_expr(ctx, part->value, out, PREC_LOWEST)) return false;
+              if (!emit_expr(ctx, part->value, out, PREC_LOWEST, false)) return false;
               if (is_enum) fprintf(out, ")");
               fprintf(out, ")");
           } else {
-              if (!emit_expr(ctx, part->value, out, PREC_LOWEST)) return false;
+              if (!emit_expr(ctx, part->value, out, PREC_LOWEST, false)) return false;
           }
           fprintf(out, ")"); // close rae_ext_rae_str_concat
           part = part->next;
@@ -1618,6 +1651,14 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
     case AST_EXPR_BOOL:
       return fprintf(out, "%d", expr->as.boolean ? 1 : 0) >= 0;
     case AST_EXPR_IDENT: {
+      const AstTypeRef* tr = get_local_type_ref(ctx, expr->as.ident);
+      if (is_lvalue) {
+          if (tr && tr->is_view) {
+              char msg[256];
+              snprintf(msg, sizeof(msg), "cannot assign to read-only view identifier '%.*s'", (int)expr->as.ident.len, expr->as.ident.data);
+              diag_error(ctx->module->file_path, (int)expr->line, (int)expr->column + 2, msg);
+          }
+      }
       for (const AstParam* param = ctx->params; param; param = param->next) {
         if (str_eq(param->name, expr->as.ident)) {
           fprintf(out, "%.*s", (int)expr->as.ident.len, expr->as.ident.data);
@@ -1648,7 +1689,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
       if (expr->as.binary.op == AST_BIN_IS && expr->as.binary.rhs->kind == AST_EXPR_NONE) {
           if (lhs_is_any) {
               fprintf(out, "(");
-              if (!emit_expr(ctx, expr->as.binary.lhs, out, PREC_LOWEST)) return false;
+              if (!emit_expr(ctx, expr->as.binary.lhs, out, PREC_LOWEST, false)) return false;
               fprintf(out, ".type == RAE_TYPE_NONE)");
               return true;
           }
@@ -1667,15 +1708,15 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
             Str rtype = infer_expr_type(ctx, expr->as.binary.rhs);
             if (str_eq_cstr(ltype, "Float") || str_eq_cstr(rtype, "Float")) {
                 fprintf(out, "fmod(");
-                if (!emit_expr(ctx, expr->as.binary.lhs, out, PREC_LOWEST)) return false;
+                if (!emit_expr(ctx, expr->as.binary.lhs, out, PREC_LOWEST, false)) return false;
                 fprintf(out, ", ");
-                if (!emit_expr(ctx, expr->as.binary.rhs, out, PREC_LOWEST)) return false;
+                if (!emit_expr(ctx, expr->as.binary.rhs, out, PREC_LOWEST, false)) return false;
                 fprintf(out, ")");
             } else {
                 if (need_paren) fprintf(out, "(");
-                if (!emit_expr(ctx, expr->as.binary.lhs, out, prec)) return false;
+                if (!emit_expr(ctx, expr->as.binary.lhs, out, prec, false)) return false;
                 fprintf(out, " %% ");
-                if (!emit_expr(ctx, expr->as.binary.rhs, out, prec + 1)) return false;
+                if (!emit_expr(ctx, expr->as.binary.rhs, out, prec + 1, false)) return false;
                 if (need_paren) fprintf(out, ")");
             }
             return true;
@@ -1700,13 +1741,13 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
           
           if (use_strcmp) {
               if (fprintf(out, "(strcmp((rae_ext_rae_str(") < 0) return false;
-              if (!emit_expr(ctx, expr->as.binary.lhs, out, prec)) return false;
+              if (!emit_expr(ctx, expr->as.binary.lhs, out, prec, false)) return false;
               if (fprintf(out, ") ? rae_ext_rae_str(") < 0) return false;
-              if (!emit_expr(ctx, expr->as.binary.lhs, out, prec)) return false;
+              if (!emit_expr(ctx, expr->as.binary.lhs, out, prec, false)) return false;
               if (fprintf(out, ") : \"\"), (rae_ext_rae_str(") < 0) return false;
-              if (!emit_expr(ctx, expr->as.binary.rhs, out, prec)) return false;
+              if (!emit_expr(ctx, expr->as.binary.rhs, out, prec, false)) return false;
               if (fprintf(out, ") ? rae_ext_rae_str(") < 0) return false;
-              if (!emit_expr(ctx, expr->as.binary.rhs, out, prec)) return false;
+              if (!emit_expr(ctx, expr->as.binary.rhs, out, prec, false)) return false;
               if (fprintf(out, ") : \"\")) == 0)") < 0) return false;
               return true;
           }
@@ -1716,14 +1757,14 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
       
       bool lhs_is_ptr = (expr->as.binary.lhs->kind == AST_EXPR_IDENT && is_pointer_type(ctx, expr->as.binary.lhs->as.ident));
       if (lhs_is_ptr) fprintf(out, "(*");
-      if (!emit_expr(ctx, expr->as.binary.lhs, out, prec)) return false;
+      if (!emit_expr(ctx, expr->as.binary.lhs, out, prec, false)) return false;
       if (lhs_is_ptr) fprintf(out, ")");
       
       if (fprintf(out, " %s ", op) < 0) return false;
       
       bool rhs_is_ptr = (expr->as.binary.rhs->kind == AST_EXPR_IDENT && is_pointer_type(ctx, expr->as.binary.rhs->as.ident));
       if (rhs_is_ptr) fprintf(out, "(*");
-      if (!emit_expr(ctx, expr->as.binary.rhs, out, prec + 1)) return false;
+      if (!emit_expr(ctx, expr->as.binary.rhs, out, prec + 1, false)) return false;
       if (rhs_is_ptr) fprintf(out, ")");
       
       if (need_paren && fprintf(out, ")") < 0) return false;
@@ -1732,30 +1773,30 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
     case AST_EXPR_UNARY:
       if (expr->as.unary.op == AST_UNARY_NEG) {
         if (fprintf(out, "(-") < 0) return false;
-        if (!emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY)) return false;
+        if (!emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, false)) return false;
         return fprintf(out, ")") >= 0;
       } else if (expr->as.unary.op == AST_UNARY_NOT) {
         if (fprintf(out, "(!(") < 0) return false;
-        if (!emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY)) return false;
+        if (!emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, false)) return false;
         return fprintf(out, "))") >= 0;
       } else if (expr->as.unary.op == AST_UNARY_PRE_INC) {
         if (fprintf(out, "++") < 0) return false;
-        if (!emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY)) return false;
+        if (!emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, true)) return false;
         return true;
       } else if (expr->as.unary.op == AST_UNARY_PRE_DEC) {
         if (fprintf(out, "--") < 0) return false;
-        if (!emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY)) return false;
+        if (!emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, true)) return false;
         return true;
       } else if (expr->as.unary.op == AST_UNARY_POST_INC) {
-        if (!emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY)) return false;
+        if (!emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, true)) return false;
         return fprintf(out, "++") >= 0;
       } else if (expr->as.unary.op == AST_UNARY_POST_DEC) {
-        if (!emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY)) return false;
+        if (!emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, true)) return false;
         return fprintf(out, "--") >= 0;
       } else if (expr->as.unary.op == AST_UNARY_VIEW || expr->as.unary.op == AST_UNARY_MOD) {
         // In C backend, references are pointers. We take the address of the operand.
         if (fprintf(out, "(&(") < 0) return false;
-        if (!emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY)) return false;
+        if (!emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, false)) return false;
         return fprintf(out, "))") >= 0;
       }
       fprintf(stderr, "error: C backend unsupported unary operator\n");
@@ -1792,7 +1833,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
       if (fprintf(out, "__extension__ ({ %s __match%zu = ", match_type, temp_id) < 0) {
         return false;
       }
-      if (!emit_expr(ctx, expr->as.match_expr.subject, out, PREC_LOWEST)) {
+      if (!emit_expr(ctx, expr->as.match_expr.subject, out, PREC_LOWEST, false)) {
         return false;
       }
       if (fprintf(out, "; %s __result%zu; ", res_type, temp_id) < 0) {
@@ -1818,7 +1859,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
           if (fprintf(out, "%s{ __result%zu = ", first ? "" : " else ", temp_id) < 0) {
             return false;
           }
-          if (!emit_expr(ctx, arm->value, out, PREC_LOWEST)) {
+          if (!emit_expr(ctx, arm->value, out, PREC_LOWEST, false)) {
             return false;
           }
           if (fprintf(out, "; } ") < 0) {
@@ -1834,7 +1875,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
               return false;
             }
           }
-          if (!emit_expr(ctx, arm->pattern, out, PREC_LOWEST)) {
+          if (!emit_expr(ctx, arm->pattern, out, PREC_LOWEST, false)) {
             return false;
           }
           if (use_string) {
@@ -1846,7 +1887,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
               return false;
             }
           }
-          if (!emit_expr(ctx, arm->value, out, PREC_LOWEST)) {
+          if (!emit_expr(ctx, arm->value, out, PREC_LOWEST, false)) {
             return false;
           }
           if (fprintf(out, "; } ") < 0) {
@@ -1866,6 +1907,14 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
     case AST_EXPR_NONE:
       return fprintf(out, "0") >= 0; // none as 0 for now
     case AST_EXPR_MEMBER: {
+      if (is_lvalue && expr->as.member.object->kind == AST_EXPR_IDENT) {
+          const AstTypeRef* tr = get_local_type_ref(ctx, expr->as.member.object->as.ident);
+          if (tr && tr->is_view) {
+              char msg[256];
+              snprintf(msg, sizeof(msg), "cannot mutate field of read-only view '%.*s'", (int)expr->as.member.object->as.ident.len, expr->as.member.object->as.ident.data);
+              diag_error(ctx->module->file_path, (int)expr->line, (int)expr->column + 2, msg);
+          }
+      }
       if (expr->as.member.object->kind == AST_EXPR_IDENT) {
           Str name = expr->as.member.object->as.ident;
           const AstDecl* ed = find_enum_decl(ctx->module, name);
@@ -1894,12 +1943,12 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
           else if (str_eq_cstr(inferred, "String")) union_field = "s";
           
           fprintf(out, "((");
-          if (!emit_expr(ctx, expr->as.member.object, out, PREC_CALL)) return false;
+          if (!emit_expr(ctx, expr->as.member.object, out, PREC_CALL, false)) return false;
           fprintf(out, ")%sas.%s)", sep, union_field);
           return true;
       }
 
-      if (!emit_expr(ctx, expr->as.member.object, out, PREC_CALL)) return false;
+      if (!emit_expr(ctx, expr->as.member.object, out, PREC_CALL, false)) return false;
       return fprintf(out, "%s%.*s", sep, (int)expr->as.member.member.len, expr->as.member.member.data) >= 0;
     }
     case AST_EXPR_OBJECT: {
@@ -1964,7 +2013,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
         }
         
         if (is_any_field) fprintf(out, "rae_any(");
-        if (!emit_expr(ctx, field->value, out, PREC_LOWEST)) return false;
+        if (!emit_expr(ctx, field->value, out, PREC_LOWEST, false)) return false;
         if (is_any_field) fprintf(out, ")");
         
         if (field->next) fprintf(out, ", ");
@@ -1995,7 +2044,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
         }
         
         fprintf(out, "(&_l, rae_any(");
-        if (!emit_expr(ctx, current->value, out, PREC_LOWEST)) return false;
+        if (!emit_expr(ctx, current->value, out, PREC_LOWEST, false)) return false;
         fprintf(out, ")); ");
         current = current->next;
       }
@@ -2003,6 +2052,14 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
       return true;
     }
     case AST_EXPR_INDEX: {
+      if (is_lvalue && expr->as.index.target->kind == AST_EXPR_IDENT) {
+          const AstTypeRef* tr = get_local_type_ref(ctx, expr->as.index.target->as.ident);
+          if (tr && tr->is_view) {
+              char msg[256];
+              snprintf(msg, sizeof(msg), "cannot mutate read-only view '%.*s' via indexing", (int)expr->as.index.target->as.ident.len, expr->as.index.target->as.ident.data);
+              diag_error(ctx->module->file_path, (int)expr->line, (int)expr->column + 2, msg);
+          }
+      }
       Str target_type = infer_expr_type(ctx, expr->as.index.target);
       Str param_types[] = { target_type, str_from_cstr("Int") };
       const AstFuncDecl* func_decl = find_function_overload(ctx->module, ctx, str_from_cstr("get"), param_types, 2);
@@ -2017,11 +2074,11 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
           }
           
           if (needs_addr) fprintf(out, "&(");
-          if (!emit_expr(ctx, expr->as.index.target, out, PREC_LOWEST)) return false;
+          if (!emit_expr(ctx, expr->as.index.target, out, PREC_LOWEST, false)) return false;
           if (needs_addr) fprintf(out, ")");
           
           fprintf(out, ", ");
-          if (!emit_expr(ctx, expr->as.index.index, out, PREC_LOWEST)) return false;
+          if (!emit_expr(ctx, expr->as.index.index, out, PREC_LOWEST, false)) return false;
           fprintf(out, ")");
           return true;
       }
@@ -2157,7 +2214,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
         if (needs_addr && !have_ptr) fprintf(out, "&(");
         else if (!needs_addr && have_ptr) fprintf(out, "*(");
         
-        if (!emit_expr(ctx, receiver, out, PREC_LOWEST)) return false;
+        if (!emit_expr(ctx, receiver, out, PREC_LOWEST, false)) return false;
         
         if ((needs_addr && !have_ptr) || (!needs_addr && have_ptr)) fprintf(out, ")");
 
@@ -2183,7 +2240,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
 
               if (is_any_param) fprintf(out, "rae_any(");
 
-              if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) return false;
+              if (!emit_expr(ctx, arg->value, out, PREC_LOWEST, false)) return false;
 
           
           if (is_any_param) fprintf(out, ")");
@@ -2199,7 +2256,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
       // Fallback for built-ins or unknown methods
       if (str_eq_cstr(method, "toString")) {
           fprintf(out, "rae_ext_rae_str(");
-          if (!emit_expr(ctx, expr->as.method_call.object, out, PREC_LOWEST)) return false;
+          if (!emit_expr(ctx, expr->as.method_call.object, out, PREC_LOWEST, false)) return false;
           fprintf(out, ")");
           return true;
       }
@@ -2225,7 +2282,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
           if (current->key) {
             fprintf(out, ".%.*s = ", (int)current->key->len, current->key->data);
           }
-          if (!emit_expr(ctx, current->value, out, PREC_LOWEST)) return false;
+          if (!emit_expr(ctx, current->value, out, PREC_LOWEST, false)) return false;
           if (current->next) fprintf(out, ", ");
           current = current->next;
         }
@@ -2250,7 +2307,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
             fprintf(out, "rae_add_List_T_");
         }
         fprintf(out, "(&_l, rae_any(");
-        if (!emit_expr(ctx, current->value, out, PREC_LOWEST)) return false;
+        if (!emit_expr(ctx, current->value, out, PREC_LOWEST, false)) return false;
         fprintf(out, ")); ");
         current = current->next;
       }
@@ -2265,7 +2322,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
 static bool emit_call(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
   if (expr->kind == AST_EXPR_METHOD_CALL) {
       if (fprintf(out, "  ") < 0) return false;
-      if (!emit_expr(ctx, expr, out, PREC_LOWEST)) return false;
+      if (!emit_expr(ctx, expr, out, PREC_LOWEST, false)) return false;
       return fprintf(out, ";\n") >= 0;
   }
   
@@ -2281,7 +2338,7 @@ static bool emit_call(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
   }
 
   if (fprintf(out, "  ") < 0) return false;
-  if (!emit_expr(ctx, expr, out, PREC_LOWEST)) {
+  if (!emit_expr(ctx, expr, out, PREC_LOWEST, false)) {
     return false;
   }
   if (fprintf(out, ";\n") < 0) {
@@ -2291,7 +2348,7 @@ static bool emit_call(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
 }
 
 static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
-  if (!stmt) return true;
+  if (!stmt) return false;
   switch (stmt->kind) {
     case AST_STMT_RET: {
       const AstReturnArg* arg = stmt->as.ret_stmt.values;
@@ -2348,7 +2405,7 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
           fprintf(out, "(%s)", ctx->return_type_name);
       }
       
-      if (!emit_expr(ctx, arg->value, out, PREC_LOWEST)) {
+      if (!emit_expr(ctx, arg->value, out, PREC_LOWEST, false)) {
         return false;
       }
       
@@ -2363,7 +2420,12 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     
           fprintf(out, "  ");
           if (stmt->as.let_stmt.type) {
-              if (stmt->as.let_stmt.type->is_view) fprintf(out, "const ");
+              bool is_already_const = false;
+              if (stmt->as.let_stmt.type->parts) {
+                  const char* mapped = map_rae_type_to_c(stmt->as.let_stmt.type->parts->text);
+                  if (mapped && strcmp(mapped, "const char*") == 0) is_already_const = true;
+              }
+              if (stmt->as.let_stmt.type->is_view && !is_already_const) fprintf(out, "const ");
               if (!emit_type_ref_as_c_type(ctx, stmt->as.let_stmt.type, out)) return false;
           } else {
               fprintf(out, "int64_t");
@@ -2411,7 +2473,7 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                   }
               }
 
-              if (!emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST)) {
+              if (!emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, false)) {
                 ctx->expected_type = NULL;
                 return false;
               }
@@ -2471,11 +2533,12 @@ skip_expr:;
       
       if (is_ptr && !stmt->as.assign_stmt.is_bind) {
           fprintf(out, "(*");
-          if (!emit_expr(ctx, stmt->as.assign_stmt.target, out, PREC_ASSIGN)) return false;
+          if (!emit_expr(ctx, stmt->as.assign_stmt.target, out, PREC_ASSIGN, true)) return false;
           fprintf(out, ")");
       } else {
-          if (!emit_expr(ctx, stmt->as.assign_stmt.target, out, PREC_ASSIGN)) return false;
+          if (!emit_expr(ctx, stmt->as.assign_stmt.target, out, PREC_ASSIGN, true)) return false;
       }
+      
       
       if (fprintf(out, " = ") < 0) return false;
       
@@ -2522,7 +2585,7 @@ skip_expr:;
           }
       }
 
-      if (!emit_expr(ctx, stmt->as.assign_stmt.value, out, PREC_LOWEST)) {
+      if (!emit_expr(ctx, stmt->as.assign_stmt.value, out, PREC_LOWEST, false)) {
           ctx->expected_type = NULL;
           return false;
       }
@@ -2584,7 +2647,7 @@ static const char* find_raylib_mapping(Str name) {
 }
 
 static bool emit_raylib_wrapper(const AstFuncDecl* fn, const char* c_name, FILE* out, const AstModule* module) {
-  CFuncContext temp_ctx = {.module = module, .generic_params = fn->generic_params};
+  CFuncContext temp_ctx = {.module = module, .generic_params = fn->generic_params, .uses_raylib = true};
   const char* return_type = c_return_type(&temp_ctx, fn);
   if (!return_type) return false;
   
@@ -2607,7 +2670,7 @@ static bool emit_raylib_wrapper(const AstFuncDecl* fn, const char* c_name, FILE*
   
   emit_mangled_function_name(fn, out);
   fprintf(out, "(");
-  if (!emit_param_list(&temp_ctx, fn->params, out)) return false;
+  if (!emit_param_list(&temp_ctx, fn->params, out, false)) return false;
   fprintf(out, ") {\n");
     
   if (strcmp(return_type, "void") != 0) fprintf(out, "  return ");
@@ -2622,7 +2685,7 @@ static bool emit_raylib_wrapper(const AstFuncDecl* fn, const char* c_name, FILE*
       bool is_mod = p->type && p->type->is_mod;
       bool is_explicit_view = p->type && p->type->is_view;
       bool is_val = p->type && p->type->is_val;
-      bool is_primitive = is_primitive_type(type_name);
+      bool is_primitive = is_primitive_type(type_name) || is_raylib_builtin_type(type_name);
       bool is_ptr = (is_mod || is_explicit_view || (!is_val && !is_primitive));
       const char* op = is_ptr ? "->" : ".";
 
@@ -2630,6 +2693,9 @@ static bool emit_raylib_wrapper(const AstFuncDecl* fn, const char* c_name, FILE*
           if (str_eq_cstr(type_name, "Color")) {
               fprintf(out, "(Color){ (unsigned char)%.*s%sr, (unsigned char)%.*s%sg, (unsigned char)%.*s%sb, (unsigned char)%.*s%sa }", 
                       (int)p->name.len, p->name.data, op, (int)p->name.len, p->name.data, op, (int)p->name.len, p->name.data, op, (int)p->name.len, p->name.data, op);
+          } else if (str_eq_cstr(type_name, "Vector2")) {
+              fprintf(out, "(Vector2){ (float)%.*s%sx, (float)%.*s%sy }", 
+                      (int)p->name.len, p->name.data, op, (int)p->name.len, p->name.data, op);
           } else if (str_eq_cstr(type_name, "Vector3")) {
               fprintf(out, "(Vector3){ (float)%.*s%sx, (float)%.*s%sy, (float)%.*s%sz }", 
                       (int)p->name.len, p->name.data, op, (int)p->name.len, p->name.data, op, (int)p->name.len, p->name.data, op);
@@ -2670,7 +2736,8 @@ static bool emit_raylib_wrapper(const AstFuncDecl* fn, const char* c_name, FILE*
   return true;
 }
 
-static bool emit_function(const AstModule* module, const AstFuncDecl* func, FILE* out, const struct VmRegistry* registry) {
+static bool emit_function(const AstModule* module, const AstFuncDecl* func, FILE* out, const struct VmRegistry* registry, bool uses_raylib) {
+  if (!func || !func->body) return false;
   if (func->is_extern) {
     return true;
   }
@@ -2683,7 +2750,7 @@ static bool emit_function(const AstModule* module, const AstFuncDecl* func, FILE
   
   bool is_main = str_eq_cstr(func->name, "main");
   
-  CFuncContext temp_ctx = {.generic_params = generic_params, .registry = registry};
+  CFuncContext temp_ctx = {.module = module, .generic_params = generic_params, .registry = registry, .uses_raylib = uses_raylib};
   const char* return_type = c_return_type(&temp_ctx, func);
   if (!return_type) {
     return false;
@@ -2708,7 +2775,7 @@ static bool emit_function(const AstModule* module, const AstFuncDecl* func, FILE
   }
   
   if (ok) {
-    ok = emit_param_list(&temp_ctx, func->params, out);
+    ok = emit_param_list(&temp_ctx, func->params, out, false);
   }
   
   if (ok) {
@@ -2727,7 +2794,8 @@ static bool emit_function(const AstModule* module, const AstFuncDecl* func, FILE
                       .return_type_name = return_type,
                       .local_count = 0,
                       .returns_value = returns_value,
-                      .temp_counter = 0};
+                      .temp_counter = 0,
+                      .uses_raylib = uses_raylib};
 
   // Populate initial locals from parameters
   const AstParam* p = func->params;
@@ -2749,8 +2817,16 @@ static bool emit_function(const AstModule* module, const AstFuncDecl* func, FILE
                   Str base = p->type->parts->text;
                   bool is_val = p->type->is_val;
                   bool is_explicit_view = p->type->is_view;
-                  bool is_primitive = is_primitive_type(base);
+                  bool is_primitive = is_primitive_type(base) || (uses_raylib && is_raylib_builtin_type(base));
+                  if (!is_primitive && ctx.module && find_enum_decl(ctx.module, base)) {
+                      is_primitive = true;
+                  }
                   is_ptr = (is_mod || is_explicit_view || (!is_val && !is_primitive));
+                  
+                  // Apply view-by-default logic to the TypeRef itself if it's not val, mod, or primitive
+                  if (!is_val && !is_mod && !is_primitive) {
+                      p->type->is_view = true;
+                  }
               }
           }
           ctx.local_is_ptr[ctx.local_count] = is_ptr;
@@ -2766,6 +2842,7 @@ static bool emit_function(const AstModule* module, const AstFuncDecl* func, FILE
     stmt = stmt->next;
   }
   
+
   if (ok && is_main) {
     ok = fprintf(out, "  return 0;\n") >= 0;
   }
@@ -2805,10 +2882,22 @@ static const AstDecl* find_enum_decl(const AstModule* module, Str name) {
 }
 
 static bool emit_single_struct_def(const AstModule* module, const AstDecl* decl, FILE* out, 
-                                   Str* emitted_types, size_t* emitted_count) {
+                                   Str* emitted_types, size_t* emitted_count, bool uses_raylib) {
   // Check if already emitted
   for (size_t i = 0; i < *emitted_count; ++i) {
     if (str_eq(emitted_types[i], decl->as.type_decl.name)) return true;
+  }
+
+  Str name_str = decl->as.type_decl.name;
+  if (is_primitive_type(name_str)) {
+      emitted_types[*emitted_count] = name_str;
+      (*emitted_count)++;
+      return true;
+  }
+  if (uses_raylib && is_raylib_builtin_type(name_str)) {
+      emitted_types[*emitted_count] = name_str;
+      (*emitted_count)++;
+      return true;
   }
 
   // Mark as emitted to prevent infinite recursion on cycles (though cycles require pointers in C)
@@ -2827,10 +2916,11 @@ static bool emit_single_struct_def(const AstModule* module, const AstDecl* decl,
     if (field->type && field->type->parts && !field->type->is_view && !field->type->is_mod) {
       // It's a value field. Check if it's a user type.
       Str type_name = field->type->parts->text;
-      if (!is_primitive_type(type_name)) {
+      bool skip_dep = is_primitive_type(type_name) || (uses_raylib && is_raylib_builtin_type(type_name));
+      if (!skip_dep) {
         const AstDecl* dep = find_type_decl(module, type_name);
         if (dep) {
-          if (!emit_single_struct_def(module, dep, out, emitted_types, emitted_count)) return false;
+          if (!emit_single_struct_def(module, dep, out, emitted_types, emitted_count, uses_raylib)) return false;
         }
       }
     }
@@ -2841,7 +2931,7 @@ static bool emit_single_struct_def(const AstModule* module, const AstDecl* decl,
   char* name = str_to_cstr(decl->as.type_decl.name);
   if (fprintf(out, "typedef struct {\n") < 0) { free(name); return false; }
   
-  CFuncContext temp_ctx = {.generic_params = decl->as.type_decl.generic_params};
+  CFuncContext temp_ctx = {.generic_params = decl->as.type_decl.generic_params, .uses_raylib = uses_raylib};
 
   field = decl->as.type_decl.fields;
   while (field) {
@@ -2861,9 +2951,11 @@ static bool emit_single_struct_def(const AstModule* module, const AstDecl* decl,
   return true;
 }
 
-static bool emit_enum_defs(const AstModule* module, FILE* out) {
+static bool emit_enum_defs(const AstModule* module, FILE* out, bool uses_raylib) {
   for (const AstDecl* decl = module->decls; decl; decl = decl->next) {
     if (decl->kind == AST_DECL_ENUM) {
+      if (is_primitive_type(decl->as.enum_decl.name)) continue;
+      if (uses_raylib && is_raylib_builtin_type(decl->as.enum_decl.name)) continue;
       fprintf(out, "typedef enum {\n");
       const AstEnumMember* m = decl->as.enum_decl.members;
       while (m) {
@@ -2879,49 +2971,66 @@ static bool emit_enum_defs(const AstModule* module, FILE* out) {
   return true;
 }
 
-static bool emit_struct_defs(const AstModule* module, FILE* out) {
+static bool emit_struct_defs(const AstModule* module, FILE* out, bool uses_raylib) {
   // Simple array to track emitted types
   Str emitted_types[256]; // simplistic limit
   size_t emitted_count = 0;
 
   for (const AstDecl* decl = module->decls; decl; decl = decl->next) {
     if (decl->kind == AST_DECL_TYPE) {
-      if (!emit_single_struct_def(module, decl, out, emitted_types, &emitted_count)) return false;
+      if (!emit_single_struct_def(module, decl, out, emitted_types, &emitted_count, uses_raylib)) return false;
     }
   }
   return true;
 }
 
-bool c_backend_emit_module(const AstModule* module, const char* out_path, struct VmRegistry* registry) {
+bool c_backend_emit_module(const AstModule* module, const char* out_path, struct VmRegistry* registry, bool* out_uses_raylib) {
   if (!module || !out_path) return false;
+  if (out_uses_raylib) *out_uses_raylib = false;
   FILE* out = fopen(out_path, "w");
   if (!out) {
     fprintf(stderr, "error: unable to open '%s' for C backend output\n", out_path);
     return false;
   }
+
+  // Pre-scan for Raylib usage
+  bool uses_raylib = false;
+  const AstImport* imp = module->imports;
+  while (imp) {
+      char* imp_path = str_to_cstr(imp->path);
+      if (imp_path && strcmp(imp_path, "raylib") == 0) {
+          uses_raylib = true;
+          free(imp_path);
+          break;
+      }
+      if (imp_path) free(imp_path);
+      imp = imp->next;
+  }
+
+  if (!uses_raylib) {
+      const AstDecl* scan = module->decls;
+      while (scan) {
+          if (scan->kind == AST_DECL_FUNC) {
+              if (find_raylib_mapping(scan->as.func_decl.name) ||
+                  str_eq_cstr(scan->as.func_decl.name, "rae_ext_drawCubeWires") ||
+                  str_eq_cstr(scan->as.func_decl.name, "rae_ext_drawSphere") ||
+                  str_eq_cstr(scan->as.func_decl.name, "rae_ext_initWindow")) {
+                  uses_raylib = true;
+                  break;
+              }
+          }
+          scan = scan->next;
+      }
+  }
   
   CFuncContext ctx = {0};
   ctx.module = module;
   ctx.registry = registry;
+  ctx.uses_raylib = uses_raylib;
   bool ok = true;
-  if (fprintf(out, "/* Generated by Rae C backend (experimental) */\n") < 0) return false;
-  if (fprintf(out, "#include <stdint.h>\n") < 0) return false;
-  if (fprintf(out, "#include <string.h>\n") < 0) return false;
-  
-  // Pre-scan for Raylib usage
-  bool uses_raylib = false;
-  const AstDecl* scan = module->decls;
-  while (scan) {
-      if (scan->kind == AST_DECL_FUNC) {
-          if (find_raylib_mapping(scan->as.func_decl.name)) {
-              uses_raylib = true;
-              break;
-          }
-      }
-      scan = scan->next;
-  }
   
   if (uses_raylib) {
+      if (out_uses_raylib) *out_uses_raylib = true;
       if (fprintf(out, "#ifndef RAE_HAS_RAYLIB\n") < 0) return false;
       if (fprintf(out, "#define RAE_HAS_RAYLIB\n") < 0) return false;
       if (fprintf(out, "#endif\n") < 0) return false;
@@ -2930,12 +3039,12 @@ bool c_backend_emit_module(const AstModule* module, const char* out_path, struct
   
   if (fprintf(out, "#include \"rae_runtime.h\"\n\n") < 0) return false;
 
-  if (!emit_enum_defs(module, out)) {
+  if (!emit_enum_defs(module, out, uses_raylib)) {
     fclose(out);
     return false;
   }
 
-  if (!emit_struct_defs(module, out)) {
+  if (!emit_struct_defs(module, out, uses_raylib)) {
     fclose(out);
     return false;
   }
@@ -2996,7 +3105,7 @@ bool c_backend_emit_module(const AstModule* module, const char* out_path, struct
         continue;
     }
 
-    CFuncContext temp_ctx = {.generic_params = fn->generic_params};
+    CFuncContext temp_ctx = {.module = module, .generic_params = fn->generic_params, .uses_raylib = uses_raylib};
     const char* return_type = c_return_type(&temp_ctx, fn);
     if (!return_type) {
       ok = false;
@@ -3008,7 +3117,7 @@ bool c_backend_emit_module(const AstModule* module, const char* out_path, struct
     emit_mangled_function_name(fn, out);
     fprintf(out, "(");
 
-    if (!emit_param_list(&temp_ctx, fn->params, out)) {
+    if (!emit_param_list(&temp_ctx, fn->params, out, fn->is_extern)) {
       ok = false;
       break;
     }
@@ -3017,6 +3126,8 @@ bool c_backend_emit_module(const AstModule* module, const char* out_path, struct
       break;
     }
   }
+
+
   if (ok && func_count > 1) {
     ok = fprintf(out, "\n") >= 0;
   }
@@ -3058,9 +3169,17 @@ bool c_backend_emit_module(const AstModule* module, const char* out_path, struct
     }
     if (body_emitted) continue;
 
-    ok = emit_function(module, funcs[i], out, registry);
-  }
-  if (ok && !has_main) {
+            ok = emit_function(module, funcs[i], out, registry, uses_raylib);
+
+          }
+
+          if (diag_error_count() > 0) ok = false;
+
+        
+
+      if (ok && !has_main) {
+
+    
     fprintf(stderr, "error: C backend could not find `func main` in project\n");
     ok = false;
   }
@@ -3083,7 +3202,7 @@ static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
   if (fprintf(out, "  if (") < 0) {
     return false;
   }
-  if (!emit_expr(ctx, stmt->as.if_stmt.condition, out, PREC_LOWEST)) {
+  if (!emit_expr(ctx, stmt->as.if_stmt.condition, out, PREC_LOWEST, false)) {
     return false;
   }
   if (fprintf(out, ") {\n") < 0) {
@@ -3137,7 +3256,7 @@ static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
 
   if (fprintf(out, "  while (") < 0) return false;
   if (stmt->as.loop_stmt.condition) {
-    if (!emit_expr(ctx, stmt->as.loop_stmt.condition, out, PREC_LOWEST)) return false;
+    if (!emit_expr(ctx, stmt->as.loop_stmt.condition, out, PREC_LOWEST, false)) return false;
   } else {
     if (fprintf(out, "1") < 0) return false;
   }
@@ -3153,7 +3272,7 @@ static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
 
   if (stmt->as.loop_stmt.increment) {
     if (fprintf(out, "  ") < 0) return false;
-    if (!emit_expr(ctx, stmt->as.loop_stmt.increment, out, PREC_LOWEST)) return false;
+    if (!emit_expr(ctx, stmt->as.loop_stmt.increment, out, PREC_LOWEST, false)) return false;
     if (fprintf(out, ";\n") < 0) return false;
   }
 
@@ -3300,7 +3419,7 @@ static bool emit_match(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     if (fprintf(out, "  int64_t __match%zu = ", temp_id) < 0) return false;
   }
   if (is_any || is_opt_subj) fprintf(out, "rae_any(");
-  if (!emit_expr(ctx, stmt->as.match_stmt.subject, out, PREC_LOWEST)) {
+  if (!emit_expr(ctx, stmt->as.match_stmt.subject, out, PREC_LOWEST, false)) {
     return false;
   }
   if (is_any || is_opt_subj) fprintf(out, ")");
@@ -3341,7 +3460,7 @@ static bool emit_match(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     if ((is_any || is_opt_subj) && current->pattern && current->pattern->kind == AST_EXPR_NONE) {
         // Skip emitting 0 for none since we already handled it
     } else {
-        if (!emit_expr(ctx, current->pattern, out, PREC_LOWEST)) {
+        if (!emit_expr(ctx, current->pattern, out, PREC_LOWEST, false)) {
           return false;
         }
     }

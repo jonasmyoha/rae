@@ -799,7 +799,8 @@ static bool compile_file_chunk(const char* file_path,
 static bool build_c_backend_output(const char* entry_file,
                                    const char* project_root,
                                    const char* out_file,
-                                   bool no_implicit);
+                                   bool no_implicit,
+                                   bool* out_uses_raylib);
 static bool build_vm_output(const char* entry_file,
                                const char* project_root,
                                const char* out_path,
@@ -1263,33 +1264,19 @@ static bool copy_file_to(const char* src_path, const char* dest_path) {
   return ok;
 }
 
-static bool copy_runtime_file(const char* dest_dir, const char* file_name) {
-  char src_path[PATH_MAX];
-  char dest_path[PATH_MAX];
-  if (snprintf(src_path, sizeof(src_path), "%s/%s", RAE_RUNTIME_SOURCE_DIR, file_name) >=
-      (int)sizeof(src_path)) {
-    fprintf(stderr, "error: runtime source path too long\n");
-    return false;
-  }
-  if (snprintf(dest_path, sizeof(dest_path), "%s/%s", dest_dir, file_name) >=
-      (int)sizeof(dest_path)) {
-    fprintf(stderr, "error: runtime destination path too long\n");
-    return false;
-  }
-  return copy_file_to(src_path, dest_path);
-}
-
-static bool copy_runtime_assets(const char* dest_dir) {
-  if (!dest_dir || dest_dir[0] == '\0') {
-    dest_dir = ".";
-  }
-  if (!copy_runtime_file(dest_dir, "rae_runtime.h")) {
-    return false;
-  }
-  if (!copy_runtime_file(dest_dir, "rae_runtime.c")) {
-    return false;
-  }
-  return true;
+static bool copy_runtime_assets(const char* out_dir) {
+  char src_h[PATH_MAX];
+  char src_c[PATH_MAX];
+  char dst_h[PATH_MAX];
+  char dst_c[PATH_MAX];
+  
+  snprintf(src_h, sizeof(src_h), "%s/rae_runtime.h", RAE_RUNTIME_SOURCE_DIR);
+  snprintf(src_c, sizeof(src_c), "%s/rae_runtime.c", RAE_RUNTIME_SOURCE_DIR);
+  snprintf(dst_h, sizeof(dst_h), "%s/rae_runtime.h", out_dir);
+  snprintf(dst_c, sizeof(dst_c), "%s/rae_runtime.c", out_dir);
+  
+  if (!copy_file_to(src_h, dst_h)) return false;
+  return copy_file_to(src_c, dst_c);
 }
 
 static bool write_bytes(FILE* out, const void* data, size_t size) {
@@ -2376,6 +2363,9 @@ static bool module_graph_build(ModuleGraph* graph, const char* entry_file, uint6
 
 static AstModule merge_module_graph(const ModuleGraph* graph) {
   AstModule merged = {.file_path = NULL, .imports = NULL, .decls = NULL};
+  if (graph->tail && graph->tail->module) {
+      merged.file_path = graph->tail->module->file_path;
+  }
   AstDecl* tail = NULL;
   for (ModuleNode* node = graph->head; node; node = node->next) {
     AstDecl* decls = node->module ? node->module->decls : NULL;
@@ -2623,7 +2613,9 @@ static bool compile_file_chunk(const char* file_path,
 static bool build_c_backend_output(const char* entry_file,
                                    const char* project_root,
                                    const char* out_file,
-                                   bool no_implicit) {
+                                   bool no_implicit,
+                                   bool* out_uses_raylib) {
+  diag_reset();
   Arena* arena = arena_create(16 * 1024 * 1024);
   if (!arena) {
     diag_fatal("could not allocate arena");
@@ -2638,6 +2630,7 @@ static bool build_c_backend_output(const char* entry_file,
     arena_destroy(arena);
     return false;
   }
+  
   AstModule merged = merge_module_graph(&graph);
   
   VmRegistry registry;
@@ -2651,7 +2644,7 @@ static bool build_c_backend_output(const char* entry_file,
       return false;
   }
 
-  bool ok = c_backend_emit_module(&merged, out_file, &registry);
+  bool ok = c_backend_emit_module(&merged, out_file, &registry, out_uses_raylib);
   if (ok) {
     char out_dir[PATH_MAX];
     strncpy(out_dir, out_file, sizeof(out_dir) - 1);
@@ -2794,7 +2787,8 @@ static bool build_hybrid_output(const char* entry_file,
     ok = write_function_manifest(&merged, chunk_path);
   }
   if (ok) {
-    ok = c_backend_emit_module(&merged, c_path, &registry);
+    bool dummy_uses_raylib = false;
+    ok = c_backend_emit_module(&merged, c_path, &registry, &dummy_uses_raylib);
   }
   if (ok) {
     ok = copy_runtime_assets(compiled_dir);
@@ -2857,7 +2851,8 @@ static int run_compiled_file(const RunOptions* run_opts, const char* project_roo
   snprintf(temp_c, sizeof(temp_c), "%s/rae_compiled_%d.c", tmp_dir, getpid());
   snprintf(temp_bin, sizeof(temp_bin), "%s/rae_compiled_%d.bin", tmp_dir, getpid());
 
-  if (!build_c_backend_output(file_path, project_root, temp_c, run_opts->no_implicit)) {
+  bool uses_raylib = false;
+  if (!build_c_backend_output(file_path, project_root, temp_c, run_opts->no_implicit, &uses_raylib)) {
     return 1;
   }
 
@@ -2867,8 +2862,9 @@ static int run_compiled_file(const RunOptions* run_opts, const char* project_roo
   char runtime_dir[PATH_MAX];
   snprintf(runtime_dir, sizeof(runtime_dir), "%s", RAE_RUNTIME_SOURCE_DIR);
   
-  snprintf(cmd, sizeof(cmd), "gcc -std=c11 -O2 -I%s %s %s/rae_runtime.c -o %s", 
-           runtime_dir, temp_c, runtime_dir, temp_bin);
+  const char* raylib_define = uses_raylib ? "-DRAE_HAS_RAYLIB" : "";
+  snprintf(cmd, sizeof(cmd), "gcc -std=c11 -O2 %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib -lraylib -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL %s %s/rae_runtime.c -o %s", 
+           raylib_define, runtime_dir, temp_c, runtime_dir, temp_bin);
   
   if (system(cmd) != 0) {
     fprintf(stderr, "error: failed to compile C output\n");
@@ -3002,10 +2998,12 @@ static int run_command(const char* cmd, int argc, char** argv) {
           fprintf(stderr, "error: --emit-c is required for compiled builds\n");
           return 1;
         }
+        bool dummy_uses_raylib = false;
         return build_c_backend_output(build_opts.entry_path,
                                       build_opts.project_path,
                                       build_opts.out_path,
-                                      build_opts.no_implicit) ?
+                                      build_opts.no_implicit,
+                                      &dummy_uses_raylib) ?
                    0 :
                    1;
       case BUILD_TARGET_HYBRID:
