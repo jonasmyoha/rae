@@ -66,6 +66,7 @@ RAE_UNUSED static RaeAny rae_any_identity(RaeAny a) { return a; }
     long: rae_any_int, \
     double: rae_any_float, \
     float: rae_any_float, \
+    uint8_t: rae_any_int, \
     int8_t: rae_any_bool, \
     char*: rae_any_string, \
     const char*: rae_any_string, \
@@ -147,6 +148,7 @@ RAE_UNUSED static const char* rae_str_any(RaeAny v) {
     int8_t: rae_ext_rae_str_bool, \
     int8_t*: rae_ext_rae_str_bool_ptr, \
     const int8_t*: rae_ext_rae_str_bool_ptr, \
+    unsigned char: rae_ext_rae_str_i64, \
     char*: rae_ext_rae_str_cstr, \
     const char*: rae_ext_rae_str_cstr, \
     char**: rae_ext_rae_str_cstr_ptr, \

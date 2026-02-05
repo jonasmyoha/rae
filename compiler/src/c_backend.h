@@ -7,6 +7,6 @@
 
 struct VmRegistry;
 
-bool c_backend_emit_module(const AstModule* module, const char* out_path, struct VmRegistry* registry);
+bool c_backend_emit_module(const AstModule* module, const char* out_path, struct VmRegistry* registry, bool* out_uses_raylib);
 
 #endif /* C_BACKEND_H */
