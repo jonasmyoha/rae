@@ -26,4 +26,4 @@
 ## Step 5: Real-time Multiplayer (ENet)
 - [ ] **Link ENet:** Add ENet dependency to the compiler and runtime.
 - [ ] **UDP API:** Create `lib/net.rae` for UDP packet sending/receiving.
-- [ ] **P2P Tetris:** A proof-of-concept where two local binaries exchange game state.
+- [ ] **P2P Pong:** A proof-of-concept where two local binaries exchange paddle/ball state.
