@@ -119,6 +119,9 @@ static Str get_base_type_name_str(Str type_name) {
   } else if (str_starts_with_cstr(res, "opt ")) {
     res.data += 4;
     res.len -= 4;
+  } else if (str_starts_with_cstr(res, "val ")) {
+    res.data += 4;
+    res.len -= 4;
   }
   return res;
 }
@@ -747,7 +750,9 @@ static bool emit_lvalue_ref(BytecodeCompiler* compiler, const AstExpr* expr, boo
 
 static bool emit_flattened_struct_args(BytecodeCompiler* compiler, const AstExpr* root_expr, Str type_name, uint32_t* total_args, int line) {
     const AstDecl* type_decl = find_type_decl(compiler->module, type_name);
-    if (!type_decl || type_decl->kind != AST_DECL_TYPE || !has_property(type_decl->as.type_decl.properties, "c_struct")) {
+    bool is_c_struct = (type_decl && type_decl->kind == AST_DECL_TYPE && has_property(type_decl->as.type_decl.properties, "c_struct"));
+    
+    if (!is_c_struct) {
         // Not a c_struct or not found, just push as a single value
         if (!compile_expr(compiler, root_expr)) return false;
         (*total_args)++;
@@ -913,6 +918,9 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
   entry = function_table_find_overload(&compiler->functions, name, arg_types, arg_count);
   free(arg_types);
 
+  if (entry) {
+  }
+
   if (!entry) {
     char buffer[128];
     snprintf(buffer, sizeof(buffer), "unknown function '%.*s' for VM call", (int)name.len,
@@ -976,111 +984,58 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
         }
     }
 
-        if (!explicitly_referenced && arg->value->kind == AST_EXPR_IDENT) {
-
-            // Check signature to see if we should pass by reference
-
-            bool is_ref_param = false;
-
-            if (current_arg_idx < entry->param_count) {
-
-                Str p_type = entry->param_types[current_arg_idx];
-
-                if (str_starts_with_cstr(p_type, "mod ") || str_starts_with_cstr(p_type, "view ")) {
-
-                    is_ref_param = true;
-
-                }
-
-            } else if (!entry->is_extern) {
-
-                // Fallback for non-extern calls without full signature (shouldn't happen with entry)
-
-                Str arg_type = infer_expr_type(compiler, arg->value);
-
-                if (arg_type.len > 0 && !is_primitive_type(arg_type)) {
-
-                    is_ref_param = true;
-
-                }
-
+    if (!entry->is_extern && !explicitly_referenced && arg->value->kind == AST_EXPR_IDENT) {
+        // Check signature to see if we should pass by reference
+        bool is_ref_param = false;
+        if (current_arg_idx < entry->param_count) {
+            Str p_type = entry->param_types[current_arg_idx];
+            if (str_starts_with_cstr(p_type, "mod ") || str_starts_with_cstr(p_type, "view ")) {
+                is_ref_param = true;
             }
-
-    
-
-            if (is_ref_param) {
-
-                int slot = compiler_find_local(compiler, arg->value->as.ident);
-
-                if (slot >= 0) {
-
-                    // Determine if we need mod or view ref
-
-                    bool is_mod = false;
-
-                    if (current_arg_idx < entry->param_count) {
-
-                        is_mod = str_starts_with_cstr(entry->param_types[current_arg_idx], "mod ");
-
-                    }
-
-                    emit_op(compiler, is_mod ? OP_MOD_LOCAL : OP_VIEW_LOCAL, (int)expr->line);
-
-                    emit_uint32(compiler, (uint32_t)slot, (int)expr->line);
-
-                    handled_arg = true;
-
-                }
-
+        } else {
+            // Fallback for non-extern calls without full signature (shouldn't happen with entry)
+            Str arg_type = infer_expr_type(compiler, arg->value);
+            if (arg_type.len > 0 && !is_primitive_type(arg_type)) {
+                is_ref_param = true;
             }
+        }
 
-            } else if (!explicitly_referenced && arg->value->kind == AST_EXPR_MEMBER) {
-
-                // Check signature to see if we should pass by reference
-
-                bool is_ref_param = false;
-
+        if (is_ref_param) {
+            int slot = compiler_find_local(compiler, arg->value->as.ident);
+            if (slot >= 0) {
+                // Determine if we need mod or view ref
                 bool is_mod = false;
-
                 if (current_arg_idx < entry->param_count) {
-
-                    Str p_type = entry->param_types[current_arg_idx];
-
-                    if (str_starts_with_cstr(p_type, "mod ") || str_starts_with_cstr(p_type, "view ")) {
-
-                        is_ref_param = true;
-
-                        is_mod = str_starts_with_cstr(p_type, "mod ");
-
-                    }
-
-                } else if (!entry->is_extern) {
-
-                    Str arg_type = infer_expr_type(compiler, arg->value);
-
-                    if (arg_type.len > 0 && !is_primitive_type(arg_type)) {
-
-                        is_ref_param = true;
-
-                    }
-
+                    is_mod = str_starts_with_cstr(entry->param_types[current_arg_idx], "mod ");
                 }
-
-        
-
-                if (is_ref_param) {
-
-                    if (emit_lvalue_ref(compiler, arg->value, is_mod)) {
-
-                        handled_arg = true;
-
-                    }
-
-                }
-
+                emit_op(compiler, is_mod ? OP_MOD_LOCAL : OP_VIEW_LOCAL, (int)expr->line);
+                emit_uint32(compiler, (uint32_t)slot, (int)expr->line);
+                handled_arg = true;
             }
+        }
+    } else if (!entry->is_extern && !explicitly_referenced && arg->value->kind == AST_EXPR_MEMBER) {
+        // Check signature to see if we should pass by reference
+        bool is_ref_param = false;
+        bool is_mod = false;
+        if (current_arg_idx < entry->param_count) {
+            Str p_type = entry->param_types[current_arg_idx];
+            if (str_starts_with_cstr(p_type, "mod ") || str_starts_with_cstr(p_type, "view ")) {
+                is_ref_param = true;
+                is_mod = str_starts_with_cstr(p_type, "mod ");
+            }
+        } else {
+            Str arg_type = infer_expr_type(compiler, arg->value);
+            if (arg_type.len > 0 && !is_primitive_type(arg_type)) {
+                is_ref_param = true;
+            }
+        }
 
-        
+        if (is_ref_param) {
+            if (emit_lvalue_ref(compiler, arg->value, is_mod)) {
+                handled_arg = true;
+            }
+        }
+    }
 
     if (!handled_arg) {
         // STRUCT-TO-STRUCT FFI (VM Flattening)
@@ -1093,11 +1048,12 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
                 type_name = entry->param_types[current_arg_idx];
             }
             
-            const AstDecl* type_decl = find_type_decl(compiler->module, type_name);
+            Str base_type_name = get_base_type_name_str(type_name);
+            const AstDecl* type_decl = find_type_decl(compiler->module, base_type_name);
             if (type_decl && type_decl->kind == AST_DECL_TYPE && has_property(type_decl->as.type_decl.properties, "c_struct")) {
                 // Flatten! Push each field (recursively)
                 uint32_t flattened_count = 0;
-                if (!emit_flattened_struct_args(compiler, arg->value, type_name, &flattened_count, (int)expr->line)) return false;
+                if (!emit_flattened_struct_args(compiler, arg->value, base_type_name, &flattened_count, (int)expr->line)) return false;
                 arg_count = (uint32_t)(arg_count + flattened_count - 1);
                 handled_flattening = true;
             }

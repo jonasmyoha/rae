@@ -69,6 +69,10 @@ int diag_error_count(void) {
   return g_error_count;
 }
 
+void diag_reset(void) {
+  g_error_count = 0;
+}
+
 void diag_fatal(const char* message) {
   fprintf(stderr, "error: %s\n", message);
   exit(1);
