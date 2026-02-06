@@ -1,0 +1,31 @@
+type Vec2 {
+  x: Float = 1.0
+  y: Float = 2.0
+}
+
+type Player {
+  name: String = "Anonymous"
+  pos: Vec2 = { x: 10.0, y: 10.0 }
+  score: Int = 100
+  active: Bool = true
+}
+
+func main() {
+  # 1. Local with all defaults
+  let p: Player
+  log("Player.name: {p.name}")
+  log("Player.pos: {p.pos.x}, {p.pos.y}")
+  log("Player.score: {p.score}")
+  log("Player.active: {p.active}")
+
+  # 2. Local with partial literal
+  let p2: Player = { name: "Jonas", pos: { x: 0.0 } }
+  log("Player2.name: {p2.name}")
+  log("Player2.pos: {p2.pos.x}, {p2.pos.y}") # y should be 2.0 from Vec2 defaults
+  log("Player2.score: {p2.score}")
+  log("Player2.active: {p2.active}")
+
+  # 3. Explicit Vec2 with defaults
+  let v: Vec2
+  log("Vec2: {v.x}, {v.y}")
+}

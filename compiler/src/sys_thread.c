@@ -14,6 +14,10 @@ bool sys_thread_join(sys_thread_t thread) {
     return true;
 }
 
+sys_thread_t sys_thread_self(void) {
+    return GetCurrentThread();
+}
+
 bool sys_mutex_init(sys_mutex_t* mutex) {
     *mutex = CreateMutex(NULL, FALSE, NULL);
     return *mutex != NULL;
@@ -46,6 +50,10 @@ bool sys_thread_create(sys_thread_t* thread, sys_thread_func_t func, void* arg) 
 
 bool sys_thread_join(sys_thread_t thread) {
     return pthread_join(thread, NULL) == 0;
+}
+
+sys_thread_t sys_thread_self(void) {
+    return pthread_self();
 }
 
 bool sys_mutex_init(sys_mutex_t* mutex) {

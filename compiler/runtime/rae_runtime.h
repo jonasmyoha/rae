@@ -164,6 +164,10 @@ int64_t rae_ext_nextTick(void);
 int64_t rae_ext_nowMs(void);
 int64_t rae_ext_nowNs(void);
 void rae_ext_rae_sleep(int64_t ms);
+void rae_spawn(void* (*func)(void*), void* data);
+
+/* JSON Parsing */
+RaeAny rae_ext_json_get(const char* json, const char* field);
 
 double rae_ext_rae_int_to_float(int64_t i);
 

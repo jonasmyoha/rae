@@ -31,6 +31,8 @@ static bool compile_block(BytecodeCompiler* compiler, const AstBlock* block);
 static bool emit_native_call(BytecodeCompiler* compiler, Str name, uint8_t arg_count, int line,
                              int column);
 static bool emit_default_value(BytecodeCompiler* compiler, const AstTypeRef* type, int line);
+static bool emit_defers(BytecodeCompiler* compiler, int min_depth);
+static void pop_defers(BytecodeCompiler* compiler, int depth);
 
 static void emit_byte(BytecodeCompiler* compiler, uint8_t byte, int line) {
   chunk_write(compiler->chunk, byte, line);
@@ -51,6 +53,26 @@ static void emit_constant(BytecodeCompiler* compiler, Value value, int line) {
   uint32_t index = chunk_add_constant(compiler->chunk, value);
   emit_op(compiler, OP_CONSTANT, line);
   emit_uint32(compiler, index, line);
+}
+
+static bool emit_defers(BytecodeCompiler* compiler, int min_depth) {
+  // We must execute defers in reverse order of their addition.
+  // Note: we don't pop them here because multiple return paths might need them.
+  for (int i = compiler->defer_stack.count - 1; i >= 0; i--) {
+    if (compiler->defer_stack.entries[i].scope_depth >= min_depth) {
+      if (!compile_block(compiler, compiler->defer_stack.entries[i].block)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+static void pop_defers(BytecodeCompiler* compiler, int depth) {
+  while (compiler->defer_stack.count > 0 && 
+         compiler->defer_stack.entries[compiler->defer_stack.count - 1].scope_depth >= depth) {
+    compiler->defer_stack.count--;
+  }
 }
 
 static void write_uint32_at(Chunk* chunk, uint32_t offset, uint32_t value) {
@@ -292,7 +314,7 @@ TypeEntry* type_table_find(TypeTable* table, Str name) {
   return NULL;
 }
 
-bool type_table_add(TypeTable* table, Str name, Str* field_names, const AstTypeRef** field_types, size_t field_count) {
+bool type_table_add(TypeTable* table, Str name, Str* field_names, const AstTypeRef** field_types, const AstExpr** field_defaults, size_t field_count) {
   if (type_table_find(table, name)) return true;
   if (table->count + 1 > table->capacity) {
     size_t new_cap = table->capacity < 4 ? 4 : table->capacity * 2;
@@ -305,6 +327,7 @@ bool type_table_add(TypeTable* table, Str name, Str* field_names, const AstTypeR
   entry->name = name;
   entry->field_names = field_names;
   entry->field_types = field_types;
+  entry->field_defaults = field_defaults;
   entry->field_count = field_count;
   return true;
 }
@@ -437,28 +460,51 @@ bool collect_metadata(const char* file_path, const AstModule* module, FunctionTa
       
       Str* field_names = malloc(field_count * sizeof(Str));
       const AstTypeRef** field_types = malloc(field_count * sizeof(AstTypeRef*));
+      const AstExpr** field_defaults = malloc(field_count * sizeof(AstExpr*));
       f = decl->as.type_decl.fields;
       for (size_t i = 0; i < field_count; i++) {
         if (f->type->is_view || f->type->is_mod) {
           diag_error(file_path, (int)f->type->line, (int)f->type->column, "view/mod not allowed in struct fields");
           free(field_names);
           free(field_types);
+          free(field_defaults);
           return false;
         }
         if (f->type->is_opt && (f->type->is_view || f->type->is_mod)) {
           diag_error(file_path, (int)f->type->line, (int)f->type->column, "opt view/mod not allowed");
           free(field_names);
           free(field_types);
+          free(field_defaults);
           return false;
         }
         field_names[i] = f->name;
         field_types[i] = f->type;
+        field_defaults[i] = f->default_value;
         f = f->next;
       }
-      if (!type_table_add(types, decl->as.type_decl.name, field_names, field_types, field_count)) {
+      if (!type_table_add(types, decl->as.type_decl.name, field_names, field_types, field_defaults, field_count)) {
         free(field_names);
         free(field_types);
+        free(field_defaults);
         return false;
+      }
+
+      if (registry) {
+          char** c_field_names = malloc(field_count * sizeof(char*));
+          char** c_field_types = malloc(field_count * sizeof(char*));
+          for (size_t i = 0; i < field_count; i++) {
+              c_field_names[i] = str_to_cstr(field_names[i]);
+              c_field_types[i] = str_to_cstr(get_base_type_name(field_types[i]));
+          }
+          char* type_name_cstr = str_to_cstr(decl->as.type_decl.name);
+          vm_registry_add_type_metadata(registry, type_name_cstr, c_field_names, c_field_types, field_count);
+          free(type_name_cstr);
+          for (size_t i = 0; i < field_count; i++) {
+              free(c_field_names[i]);
+              free(c_field_types[i]);
+          }
+          free(c_field_names);
+          free(c_field_types);
       }
     } else if (decl->kind == AST_DECL_ENUM) {
       size_t member_count = 0;
@@ -492,6 +538,7 @@ void free_type_table(TypeTable* table) {
   for (size_t i = 0; i < table->count; i++) {
     free(table->entries[i].field_names);
     free(table->entries[i].field_types);
+    free(table->entries[i].field_defaults);
   }
   free(table->entries);
   table->entries = NULL;
@@ -518,6 +565,8 @@ void free_function_table(FunctionTable* table) {
 void compiler_reset_locals(BytecodeCompiler* compiler) {
   compiler->local_count = 0;
   compiler->allocated_locals = 0;
+  compiler->scope_depth = 0;
+  compiler->defer_stack.count = 0;
 }
 
 int compiler_add_local(BytecodeCompiler* compiler, Str name, Str type_name, bool is_ptr, bool is_mod) {
@@ -799,7 +848,26 @@ static bool emit_flattened_struct_args(BytecodeCompiler* compiler, const AstExpr
     return true;
 }
 
-static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
+static bool emit_spawn_call(BytecodeCompiler* compiler, FunctionEntry* entry, int line,
+                               int column, uint8_t arg_count) {
+  if (!entry) return false;
+  if (entry->is_extern) {
+    diag_error(compiler->file_path, line, column, "cannot spawn extern functions yet");
+    return false;
+  }
+  emit_op(compiler, OP_SPAWN, line);
+  uint32_t patch_offset = (uint32_t)compiler->chunk->code_count;
+  emit_uint32(compiler, 0, line);
+  emit_byte(compiler, arg_count, line);
+  if (!function_entry_add_patch(entry, patch_offset)) {
+    diag_error(compiler->file_path, line, column, "failed to record spawn call patch");
+    compiler->had_error = true;
+    return false;
+  }
+  return true;
+}
+
+static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr, bool is_spawn) {
   if (expr->as.call.callee->kind != AST_EXPR_IDENT) {
   
     diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
@@ -821,6 +889,10 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
   bool is_log = str_eq_cstr(name, "log");
   bool is_log_s = str_eq_cstr(name, "logS");
   if (is_log || is_log_s) {
+    if (is_spawn) {
+        diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "cannot spawn log/logS");
+        return false;
+    }
     const AstCallArg* arg = expr->as.call.args;
     if (!arg || arg->next) {
       diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
@@ -840,6 +912,10 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
   bool is_rae_str = str_eq_cstr(name, "rae_str");
   bool is_rae_concat = str_eq_cstr(name, "rae_str_concat");
   if (is_rae_str || is_rae_concat) {
+    if (is_spawn) {
+        diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "cannot spawn rae_str/rae_str_concat");
+        return false;
+    }
     const AstCallArg* arg = expr->as.call.args;
     while (arg) {
       if (!compile_expr(compiler, arg->value)) return false;
@@ -850,12 +926,14 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
 
   /* Intrinsic Buffer Ops */
   if (str_eq_cstr(name, "__buf_alloc")) {
+    if (is_spawn) { diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "cannot spawn buffer ops"); return false; }
     const AstCallArg* arg = expr->as.call.args;
     if (!arg || !compile_expr(compiler, arg->value)) return false;
     emit_op(compiler, OP_BUF_ALLOC, (int)expr->line);
     return true;
   }
   if (str_eq_cstr(name, "__buf_free")) {
+    if (is_spawn) { diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "cannot spawn buffer ops"); return false; }
     const AstCallArg* arg = expr->as.call.args;
     if (!arg || !compile_expr(compiler, arg->value)) return false;
     emit_op(compiler, OP_BUF_FREE, (int)expr->line);
@@ -863,6 +941,7 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
     return true;
   }
   if (str_eq_cstr(name, "__buf_get")) {
+    if (is_spawn) { diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "cannot spawn buffer ops"); return false; }
     const AstCallArg* arg = expr->as.call.args;
     if (!arg || !compile_expr(compiler, arg->value)) return false;
     if (!arg->next || !compile_expr(compiler, arg->next->value)) return false;
@@ -870,6 +949,7 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
     return true;
   }
   if (str_eq_cstr(name, "__buf_set")) {
+    if (is_spawn) { diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "cannot spawn buffer ops"); return false; }
     const AstCallArg* arg = expr->as.call.args;
     if (!arg || !compile_expr(compiler, arg->value)) return false;
     if (!arg->next || !compile_expr(compiler, arg->next->value)) return false;
@@ -879,12 +959,14 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
     return true;
   }
   if (str_eq_cstr(name, "__buf_len")) {
+    if (is_spawn) { diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "cannot spawn buffer ops"); return false; }
     const AstCallArg* arg = expr->as.call.args;
     if (!arg || !compile_expr(compiler, arg->value)) return false;
     emit_op(compiler, OP_BUF_LEN, (int)expr->line);
     return true;
   }
   if (str_eq_cstr(name, "__buf_resize")) {
+    if (is_spawn) { diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "cannot spawn buffer ops"); return false; }
     const AstCallArg* arg = expr->as.call.args;
     if (!arg || !compile_expr(compiler, arg->value)) return false;
     if (!arg->next || !compile_expr(compiler, arg->next->value)) return false;
@@ -893,6 +975,7 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
     return true;
   }
   if (str_eq_cstr(name, "__buf_copy")) {
+    if (is_spawn) { diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "cannot spawn buffer ops"); return false; }
     const AstCallArg* arg = expr->as.call.args;
     for (int i = 0; i < 5; i++) {
         if (!arg || !compile_expr(compiler, arg->value)) return false;
@@ -1068,6 +1151,14 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr) {
     arg = arg->next;
     current_arg_idx++;
   }
+  
+  if (is_spawn) {
+      if (!emit_spawn_call(compiler, entry, (int)expr->line, (int)expr->column, (uint8_t)arg_count)) return false;
+      // Spawned calls don't return a value to the caller stack (immediately)
+      emit_constant(compiler, value_none(), (int)expr->line);
+      return true;
+  }
+
   return emit_function_call(compiler, entry, (int)expr->line, (int)expr->column,
                             (uint8_t)arg_count) && !compiler->had_error;
 }
@@ -1188,7 +1279,7 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       return true;
     }
     case AST_EXPR_CALL:
-      return compile_call(compiler, expr);
+      return compile_call(compiler, expr, false);
     case AST_EXPR_MEMBER: {
       if (expr->as.member.object->kind == AST_EXPR_IDENT) {
           Str obj_name = expr->as.member.object->as.ident;
@@ -1317,6 +1408,15 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       }
     }
     case AST_EXPR_UNARY: {
+      if (expr->as.unary.op == AST_UNARY_SPAWN) {
+          const AstExpr* call = expr->as.unary.operand;
+          if (call->kind != AST_EXPR_CALL) {
+              diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "spawn must be followed by a function call");
+              return false;
+          }
+          return compile_call(compiler, call, true);
+      }
+
       if (!compile_expr(compiler, expr->as.unary.operand)) {
         return false;
       }
@@ -1352,6 +1452,12 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
           compiler->had_error = true;
           return false;
         }
+      } else if (expr->as.unary.op == AST_UNARY_SPAWN) {
+          if (expr->as.unary.operand->kind != AST_EXPR_CALL) {
+              diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "spawn must be followed by a function call");
+              return false;
+          }
+          return compile_call(compiler, expr->as.unary.operand, true);
       } else if (expr->as.unary.op == AST_UNARY_PRE_INC || expr->as.unary.op == AST_UNARY_PRE_DEC ||
                  expr->as.unary.op == AST_UNARY_POST_INC || expr->as.unary.op == AST_UNARY_POST_DEC) {
         bool is_post = (expr->as.unary.op == AST_UNARY_POST_INC || expr->as.unary.op == AST_UNARY_POST_DEC);
@@ -1478,14 +1584,20 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
               }
               if (!found) {
                   // Push default value if field is missing in literal
-                  if (!emit_default_value(compiler, type->field_types[i], (int)expr->line)) {
-                      return false;
+                  if (type->field_defaults[i]) {
+                      if (!compile_expr(compiler, type->field_defaults[i])) return false;
+                  } else {
+                      if (!emit_default_value(compiler, type->field_types[i], (int)expr->line)) {
+                          return false;
+                      }
                   }
               }
           }
           compiler->expected_type = saved_expected;
           emit_op(compiler, OP_CONSTRUCT, (int)expr->line);
           emit_uint32(compiler, (uint32_t)type->field_count, (int)expr->line);
+          uint32_t type_idx = chunk_add_constant(compiler->chunk, value_string_copy(type->name.data, type->name.len));
+          emit_uint32(compiler, type_idx, (int)expr->line);
       } else {
           // Untyped or unknown type: push in order of appearance
           uint32_t count = 0;
@@ -1497,6 +1609,7 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
           }
           emit_op(compiler, OP_CONSTRUCT, (int)expr->line);
           emit_uint32(compiler, count, (int)expr->line);
+          emit_uint32(compiler, 0xFFFFFFFF, (int)expr->line);
       }
       return true;
     }
@@ -1583,6 +1696,55 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       if (str_eq_cstr(method_name, "toString")) {
           if (!compile_expr(compiler, expr->as.method_call.object)) return false;
           return emit_native_call(compiler, str_from_cstr("rae_str"), 1, (int)expr->line, (int)expr->column);
+      }
+
+      // Handle built-in toJson() for all types
+      if (str_eq_cstr(method_name, "toJson")) {
+          if (!compile_expr(compiler, expr->as.method_call.object)) return false;
+          return emit_native_call(compiler, str_from_cstr("rae_to_json"), 1, (int)expr->line, (int)expr->column);
+      }
+
+      // Handle built-in fromJson() for all types
+      if (str_eq_cstr(method_name, "fromJson")) {
+          if (expr->as.method_call.object->kind == AST_EXPR_IDENT) {
+              Str type_name = expr->as.method_call.object->as.ident;
+              TypeEntry* te = type_table_find(&compiler->types, type_name);
+              if (te) {
+                  // Push type name as first hidden arg
+                  emit_constant(compiler, value_string_copy(type_name.data, type_name.len), (int)expr->line);
+                  // Push JSON string arg
+                  if (expr->as.method_call.args) {
+                      if (!compile_expr(compiler, expr->as.method_call.args->value)) return false;
+                  } else {
+                      emit_constant(compiler, value_string_copy("", 0), (int)expr->line);
+                  }
+                  return emit_native_call(compiler, str_from_cstr("rae_from_json"), 2, (int)expr->line, (int)expr->column);
+              }
+          }
+      }
+
+      // Handle built-in toBinary() for all types
+      if (str_eq_cstr(method_name, "toBinary")) {
+          if (!compile_expr(compiler, expr->as.method_call.object)) return false;
+          return emit_native_call(compiler, str_from_cstr("rae_to_binary"), 1, (int)expr->line, (int)expr->column);
+      }
+
+      // Handle built-in fromBinary() for all types
+      if (str_eq_cstr(method_name, "fromBinary")) {
+          if (expr->as.method_call.object->kind == AST_EXPR_IDENT) {
+              Str type_name = expr->as.method_call.object->as.ident;
+              TypeEntry* te = type_table_find(&compiler->types, type_name);
+              if (te) {
+                  emit_constant(compiler, value_string_copy(type_name.data, type_name.len), (int)expr->line);
+                  if (expr->as.method_call.args) {
+                      if (!compile_expr(compiler, expr->as.method_call.args->value)) return false;
+                  } else {
+                      diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "fromBinary expects 1 argument");
+                      return false;
+                  }
+                  return emit_native_call(compiler, str_from_cstr("rae_from_binary"), 2, (int)expr->line, (int)expr->column);
+              }
+          }
       }
 
       FunctionEntry* entry = NULL;
@@ -1674,6 +1836,7 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
           }
           emit_op(compiler, OP_CONSTRUCT, (int)expr->line);
           emit_uint32(compiler, element_count, (int)expr->line);
+          emit_uint32(compiler, 0xFFFFFFFF, (int)expr->line);
           return true;
       } else {
           // Rae-native List construction
@@ -2014,53 +2177,55 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
       return true;
     case AST_STMT_RET: {
       const AstReturnArg* arg = stmt->as.ret_stmt.values;
-      if (!arg) {
-        return emit_return(compiler, false, (int)stmt->line);
-      }
-      if (arg->next) {
-        diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column,
-                   "multiple return values not supported in VM yet");
-        compiler->had_error = true;
-        return false;
-      }
-      if (arg->has_label) {
-        diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column,
-                   "labeled returns not supported in VM yet");
-        compiler->had_error = true;
-        return false;
-      }
-
-      // Lifetime check: can only return reference derived from params
-      if (arg->value->kind == AST_EXPR_UNARY && 
-          (arg->value->as.unary.op == AST_UNARY_VIEW || arg->value->as.unary.op == AST_UNARY_MOD)) {
-          const AstExpr* operand = arg->value->as.unary.operand;
-          const AstExpr* base_obj = operand;
-          while (base_obj->kind == AST_EXPR_MEMBER) {
-              base_obj = base_obj->as.member.object;
-          }
-          if (base_obj->kind == AST_EXPR_IDENT) {
-              int slot = compiler_find_local(compiler, base_obj->as.ident);
-              if (slot >= 0) {
-                  // In our simple VM compiler, parameters are the first N locals.
-                  // We need to check if 'slot' corresponds to a parameter.
-                  uint32_t param_count = 0;
-                  if (compiler->current_function) {
-                      const AstParam* p = compiler->current_function->params;
-                      while (p) { param_count++; p = p->next; }
-                  }
-                  if (slot >= (int)param_count) {
-                      diag_report(compiler->file_path, (int)arg->value->line, (int)arg->value->column, "reference escapes local storage");
-                      compiler->had_error = true;
-                      // continue to compile to find more errors
-                  }
-              }
-          }
-      }
-
-      if (!compile_expr(compiler, arg->value)) {
-        return false;
-      }
-      return emit_return(compiler, true, (int)stmt->line);
+            if (!arg) {
+              if (!emit_defers(compiler, 0)) return false;
+              return emit_return(compiler, false, (int)stmt->line);
+            }
+            if (arg->next) {
+              diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column,
+                         "multiple return values not supported in VM yet");
+              compiler->had_error = true;
+              return false;
+            }
+            if (arg->has_label) {
+              diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column,
+                         "labeled returns not supported in VM yet");
+              compiler->had_error = true;
+              return false;
+            }
+      
+            // Lifetime check: can only return reference derived from params
+            if (arg->value->kind == AST_EXPR_UNARY && 
+                (arg->value->as.unary.op == AST_UNARY_VIEW || arg->value->as.unary.op == AST_UNARY_MOD)) {
+                const AstExpr* operand = arg->value->as.unary.operand;
+                const AstExpr* base_obj = operand;
+                while (base_obj->kind == AST_EXPR_MEMBER) {
+                    base_obj = base_obj->as.member.object;
+                }
+                if (base_obj->kind == AST_EXPR_IDENT) {
+                    int slot = compiler_find_local(compiler, base_obj->as.ident);
+                    if (slot >= 0) {
+                        // In our simple VM compiler, parameters are the first N locals.
+                        // We need to check if 'slot' corresponds to a parameter.
+                        uint32_t param_count = 0;
+                        if (compiler->current_function) {
+                            const AstParam* p = compiler->current_function->params;
+                            while (p) { param_count++; p = p->next; }
+                        }
+                        if (slot >= (int)param_count) {
+                            diag_report(compiler->file_path, (int)arg->value->line, (int)arg->value->column, "reference escapes local storage");
+                            compiler->had_error = true;
+                            // continue to compile to find more errors
+                        }
+                    }
+                }
+            }
+      
+            if (!compile_expr(compiler, arg->value)) {
+              return false;
+            }
+            if (!emit_defers(compiler, 0)) return false;
+            return emit_return(compiler, true, (int)stmt->line);
     }
     case AST_STMT_IF: {
       if (!stmt->as.if_stmt.condition || !stmt->as.if_stmt.then_block) {
@@ -2452,9 +2617,17 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
         return false;
       }
     }
-    case AST_STMT_DEFER:
-      diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, "defer not supported in VM yet");
-      return false;
+    case AST_STMT_DEFER: {
+      if (compiler->defer_stack.count >= 64) {
+        diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, "defer stack overflow");
+        compiler->had_error = true;
+        return false;
+      }
+      compiler->defer_stack.entries[compiler->defer_stack.count].block = stmt->as.defer_stmt.block;
+      compiler->defer_stack.entries[compiler->defer_stack.count].scope_depth = compiler->scope_depth;
+      compiler->defer_stack.count++;
+      return true;
+    }
     default: {
       char buffer[128];
       snprintf(buffer, sizeof(buffer), "%s statement not supported in VM yet", stmt_kind_name(stmt->kind));
@@ -2466,6 +2639,7 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
 }
 
 static bool compile_block(BytecodeCompiler* compiler, const AstBlock* block) {
+  compiler->scope_depth++;
   const AstStmt* stmt = block ? block->first : NULL;
   bool success = true;
   while (stmt) {
@@ -2474,6 +2648,13 @@ static bool compile_block(BytecodeCompiler* compiler, const AstBlock* block) {
     }
     stmt = stmt->next;
   }
+  
+  if (!emit_defers(compiler, compiler->scope_depth)) {
+    success = false;
+  }
+  pop_defers(compiler, compiler->scope_depth);
+  
+  compiler->scope_depth--;
   return success;
 }
 
@@ -2558,13 +2739,14 @@ static bool compile_function(BytecodeCompiler* compiler, const AstDecl* decl) {
   }
   compiler->allocated_locals = compiler->local_count;
 
-  const AstStmt* stmt = func->body->first;
   bool success = true;
-  while (stmt) {
-    if (!compile_stmt(compiler, stmt)) {
-      success = false;
-    }
-    stmt = stmt->next;
+  if (!compile_block(compiler, func->body)) {
+    success = false;
+  }
+
+  // Implicit return at end of function
+  if (!emit_defers(compiler, 0)) {
+    success = false;
   }
   emit_return(compiler, false, (int)decl->line);
   compiler->current_function = NULL;
@@ -2724,6 +2906,8 @@ static bool emit_default_value(BytecodeCompiler* compiler, const AstTypeRef* typ
     emit_uint32(compiler, chunk_add_constant(compiler->chunk, value_string_copy("rae_list_create", 15)), line);
     emit_constant(compiler, value_int(0), line);
     emit_byte(compiler, 1, line);
+  } else if (enum_table_find(&compiler->enums, type_name)) {
+    emit_constant(compiler, value_int(0), line);
   } else {
     TypeEntry* entry = type_table_find(&compiler->types, type_name);
     if (!entry) {
@@ -2734,12 +2918,20 @@ static bool emit_default_value(BytecodeCompiler* compiler, const AstTypeRef* typ
     }
 
     for (size_t i = 0; i < entry->field_count; i++) {
-      if (!emit_default_value(compiler, entry->field_types[i], line)) {
-        return false;
+      if (entry->field_defaults[i]) {
+        if (!compile_expr(compiler, entry->field_defaults[i])) {
+          return false;
+        }
+      } else {
+        if (!emit_default_value(compiler, entry->field_types[i], line)) {
+          return false;
+        }
       }
     }
     emit_op(compiler, OP_CONSTRUCT, line);
     emit_uint32(compiler, (uint32_t)entry->field_count, line);
+    uint32_t type_idx = chunk_add_constant(compiler->chunk, value_string_copy(entry->name.data, entry->name.len));
+    emit_uint32(compiler, type_idx, line);
   }
 
   return true;

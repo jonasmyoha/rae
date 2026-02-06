@@ -114,7 +114,7 @@ static bool native_loadTexture(struct VM* vm, VmNativeResult* out, const Value* 
     }
     Texture t = LoadTexture(args[0].as.string_value.chars);
     out->has_value = true;
-    out->value = value_object(5);
+    out->value = value_object(5, "Texture");
     out->value.as.object_value.fields[0] = value_int((int64_t)t.id);
     out->value.as.object_value.fields[1] = value_int((int64_t)t.width);
     out->value.as.object_value.fields[2] = value_int((int64_t)t.height);
@@ -388,7 +388,7 @@ static bool native_colorFromHSV(struct VM* vm, VmNativeResult* out, const Value*
     float v = (float)((args[2].type == VAL_FLOAT) ? args[2].as.float_value : args[2].as.int_value);
     Color c = ColorFromHSV(h, s, v);
     out->has_value = true;
-    out->value = value_object(4);
+    out->value = value_object(4, "Color");
     out->value.as.object_value.fields[0] = value_int(c.r);
     out->value.as.object_value.fields[1] = value_int(c.g);
     out->value.as.object_value.fields[2] = value_int(c.b);
