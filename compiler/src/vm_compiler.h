@@ -32,6 +32,7 @@ typedef struct {
   Str name;
   Str* field_names;
   const struct AstTypeRef** field_types;
+  const struct AstExpr** field_defaults;
   size_t field_count;
 } TypeEntry;
 
@@ -68,6 +69,16 @@ typedef struct {
 struct VmRegistry;
 
 typedef struct {
+  const struct AstBlock* block;
+  int scope_depth;
+} DeferEntry;
+
+typedef struct {
+  DeferEntry entries[64];
+  int count;
+} DeferStack;
+
+typedef struct {
   Chunk* chunk;
   const AstModule* module; // Add module pointer for metadata lookups
   const char* file_path;
@@ -79,6 +90,8 @@ typedef struct {
   MethodTable methods; // New field for method table
   EnumTable enums;     // New field for enum table
   const AstFuncDecl* current_function;
+  int scope_depth;
+  DeferStack defer_stack;
   struct {
     Str name;
     uint32_t slot;
@@ -101,7 +114,7 @@ void free_type_table(TypeTable* table);
 FunctionEntry* function_table_find(FunctionTable* table, Str name);
 FunctionEntry* function_table_find_overload(FunctionTable* table, Str name, const Str* param_types, uint32_t param_count);
 TypeEntry* type_table_find(TypeTable* table, Str name);
-bool type_table_add(TypeTable* table, Str name, Str* field_names, const struct AstTypeRef** field_types, size_t field_count);
+bool type_table_add(TypeTable* table, Str name, Str* field_names, const struct AstTypeRef** field_types, const struct AstExpr** field_defaults, size_t field_count);
 int type_entry_find_field(const TypeEntry* entry, Str name);
 void free_enum_table(EnumTable* table);
 EnumEntry* enum_table_find(EnumTable* table, Str name);

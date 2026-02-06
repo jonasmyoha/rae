@@ -31,10 +31,17 @@ void vm_registry_init(VmRegistry* registry) {
     registry->global_mappings = NULL;
     registry->mapping_count = 0;
     registry->mapping_capacity = 0;
+
+    registry->type_metadata = NULL;
+    registry->type_metadata_count = 0;
+    registry->type_metadata_capacity = 0;
+
+    sys_mutex_init(&registry->mutex);
 }
 
 void vm_registry_free(VmRegistry* registry) {
     if (!registry) return;
+    sys_mutex_lock(&registry->mutex);
     for (size_t i = 0; i < registry->count; ++i) {
         VmModule* module = &registry->modules[i];
         chunk_free(&module->chunk);
@@ -69,6 +76,21 @@ void vm_registry_free(VmRegistry* registry) {
         str_free(registry->global_mappings[i].type_name);
     }
     free(registry->global_mappings);
+
+    // Free type metadata
+    for (size_t i = 0; i < registry->type_metadata_count; i++) {
+        free(registry->type_metadata[i].name);
+        for (size_t j = 0; j < registry->type_metadata[i].field_count; j++) {
+            free(registry->type_metadata[i].field_names[j]);
+            free(registry->type_metadata[i].field_types[j]);
+        }
+        free(registry->type_metadata[i].field_names);
+        free(registry->type_metadata[i].field_types);
+    }
+    free(registry->type_metadata);
+
+    sys_mutex_unlock(&registry->mutex);
+    sys_mutex_destroy(&registry->mutex);
 }
 
 uint32_t vm_registry_ensure_global(VmRegistry* registry, Str name, Str type_name) {
@@ -293,4 +315,48 @@ const VmNativeEntry* vm_registry_find_native(const VmRegistry* registry, const c
     }
   }
   return NULL;
+}
+
+void vm_registry_add_type_metadata(VmRegistry* registry, const char* name, char** field_names, char** field_types, size_t field_count) {
+    if (!registry || !name) return;
+    sys_mutex_lock(&registry->mutex);
+    
+    // Check if already exists
+    for (size_t i = 0; i < registry->type_metadata_count; i++) {
+        if (strcmp(registry->type_metadata[i].name, name) == 0) {
+            sys_mutex_unlock(&registry->mutex);
+            return;
+        }
+    }
+
+    if (registry->type_metadata_count + 1 > registry->type_metadata_capacity) {
+        size_t old_cap = registry->type_metadata_capacity;
+        size_t new_cap = old_cap < 8 ? 8 : old_cap * 2;
+        VmTypeMetadata* resized = realloc(registry->type_metadata, new_cap * sizeof(VmTypeMetadata));
+        if (!resized) { sys_mutex_unlock(&registry->mutex); return; }
+        registry->type_metadata = resized;
+        registry->type_metadata_capacity = new_cap;
+    }
+
+    VmTypeMetadata* meta = &registry->type_metadata[registry->type_metadata_count++];
+    meta->name = strdup(name);
+    meta->field_count = field_count;
+    meta->field_names = malloc(field_count * sizeof(char*));
+    meta->field_types = malloc(field_count * sizeof(char*));
+    for (size_t i = 0; i < field_count; i++) {
+        meta->field_names[i] = strdup(field_names[i]);
+        meta->field_types[i] = strdup(field_types[i]);
+    }
+    sys_mutex_unlock(&registry->mutex);
+}
+
+const VmTypeMetadata* vm_registry_find_type_metadata(const VmRegistry* registry, const char* name) {
+    if (!registry || !name) return NULL;
+    // We don't lock here for simplicity and performance, assuming it's mostly read-only after init
+    for (size_t i = 0; i < registry->type_metadata_count; i++) {
+        if (strcmp(registry->type_metadata[i].name, name) == 0) {
+            return &registry->type_metadata[i];
+        }
+    }
+    return NULL;
 }

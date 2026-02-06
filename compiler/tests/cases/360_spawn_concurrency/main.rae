@@ -1,0 +1,14 @@
+func background(idVal: Int) {
+  log("Background start: {idVal}")
+  sleep(100)
+  log("Background end: {idVal}")
+}
+
+func main() {
+  log("Main start")
+  spawn background(1)
+  spawn background(2)
+  log("Main continue")
+  sleep(200) # Wait for threads to finish
+  log("Main end")
+}

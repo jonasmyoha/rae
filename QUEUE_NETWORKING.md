@@ -1,12 +1,29 @@
 # QUEUE: Networking & Persistence
 
 ## Step 1: Language Foundation (Pre-requisites)
-- [ ] **Defaults:** Enforce zero-initialization for all locals and struct fields in VM and C backend.
-- [ ] **The `defer` Keyword:** Implement `defer` in the parser, VM, and C backend for scope-based cleanup.
-- [ ] **Spawn Syntax:** Implement the `spawn` call-site keyword and ensure it triggers background execution for `spawn`-modified functions.
+- [x] **Defaults:** Enforce zero-initialization for all locals and struct fields in VM and C backend.
+    - [x] Add test case `358_default_init` covering all types (Int, Float, Bool, String, enums, structs).
+    - [x] VM: Ensure `AST_STMT_LET` without value emits `OP_DEFAULT_VALUE` or equivalent zeroing.
+    - [x] VM: Ensure struct allocation (object literals or defaults) zeroes all fields.
+    - [x] C Backend: Ensure `let` declarations without value emit `{0}` initialization.
+    - [x] C Backend: Ensure struct declarations/allocations use `{0}`.
+    - [x] Create example `14_defaults` demonstrating the feature.
+- [x] **The `defer` Keyword:** Implement `defer` in the parser, VM, and C backend for scope-based cleanup.
+    - [x] Parser: Support `defer <stmt>` syntax.
+    - [x] VM Compiler: Implement a "defer stack" during compilation to emit cleanup code at every scope exit point (return, end of block).
+    - [x] VM: Ensure `OP_DEFER` or similar correctly executes the deferred statement.
+    - [x] C Backend: Implement `defer` using a similar cleanup-stack approach or a goto-based cleanup pattern.
+    - [x] Add test case `359_defer_logic` covering multiple defers and early returns.
+    - [x] Create example `15_defer_cleanup` showing file handle management.
+- [x] **Spawn Syntax:** Implement the `spawn` call-site keyword and ensure it triggers background execution for `spawn`-modified functions.
+    - [x] Parser: Add `spawn` as a valid call-site prefix.
+    - [x] VM Compiler: Emit `OP_SPAWN` for calls prefixed with `spawn`.
+    - [x] VM: Implement `OP_SPAWN` using `sys_thread` to run the function in the background.
+    - [x] C Backend: Implement `spawn` call using `pthread` or equivalent.
+    - [x] Add test case `360_spawn_concurrency`.
 - [ ] **JSON Gen:** Implement compiler-generated `toJson()` and `fromJson()` for all `type` definitions.
 - [ ] **Binary Gen:** Implement `toBinary()` and `fromBinary()` for compact packet serialization.
-- [ ] **String Utils:** Add `split`, `trim`, `find`, and `replace` to `lib/string.rae`.
+- [x] **String Utils:** Add `split`, `trim`, `find`, and `replace` to `lib/string.rae`.
 
 ## Step 2: Robust Local Persistence
 - [ ] **File Ops:** Add `sys.rename`, `sys.delete`, and `sys.exists` to the stdlib.

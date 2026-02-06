@@ -36,6 +36,7 @@ typedef enum {
   OP_GET_FIELD = 0x1E,
   OP_SET_FIELD = 0x1F,
   OP_CONSTRUCT = 0x20,
+  OP_SPAWN = 0x21,
   OP_BIND_LOCAL = 0x22,
   OP_BIND_FIELD = 0x23,
   OP_REF_VIEW = 0x24,

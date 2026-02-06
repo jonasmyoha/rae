@@ -1,0 +1,49 @@
+enum Status {
+  Active
+  Inactive
+}
+
+type Point {
+  x: Int
+  y: Int
+}
+
+type Entity {
+  id: Int
+  pos: Point
+  active: Bool
+  name: String
+  status: Status
+}
+
+func main() {
+  # 1. Local primitives
+  let i: Int
+  let f: Float
+  let b: Bool
+  let s: String
+  
+  log("Int: {i}")
+  log("Float: {f}")
+  log("Bool: {b}")
+  log("String: '{s}'")
+
+  # 2. Local enum
+  let st: Status
+  log("Enum: {st is Status.Active}")
+
+  # 3. Local struct (should zero all fields)
+  let e: Entity
+  log("Entity.id: {e.id}")
+  log("Entity.pos.x: {e.pos.x}")
+  log("Entity.pos.y: {e.pos.y}")
+  log("Entity.active: {e.active}")
+  log("Entity.name: '{e.name}'")
+  log("Entity.status is Active: {e.status is Status.Active}")
+
+  # 4. Partial object literal (unspecified fields should zero)
+  let e2: Entity = { id: 42 }
+  log("Entity2.id: {e2.id}")
+  log("Entity2.pos.x: {e2.pos.x}")
+  log("Entity2.active: {e2.active}")
+}

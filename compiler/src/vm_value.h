@@ -52,6 +52,7 @@ typedef struct {
 typedef struct {
   struct Value* fields;
   size_t field_count;
+  char* type_name;
 } Object;
 
 typedef struct Value {
@@ -78,7 +79,7 @@ Value value_char(int64_t v);
 Value value_string_copy(const char* data, size_t length);
 Value value_string_take(char* data, size_t length);
 Value value_none(void);
-Value value_object(size_t field_count);
+Value value_object(size_t field_count, const char* type_name);
 Value value_array(size_t count);
 Value value_buffer(size_t capacity);
 bool value_buffer_resize(Value* buffer, size_t new_capacity);
@@ -88,5 +89,11 @@ Value value_key_copy(const char* data, size_t length);
 Value value_copy(const Value* value);
 void value_free(Value* value);
 void value_print(const Value* value);
+
+typedef const char** (*VmFieldNamesResolver)(void* user_data, const char* type_name, size_t* out_count);
+Value value_to_json(const Value* value, VmFieldNamesResolver resolver, void* user_data);
+
+Value value_to_binary(const Value* value);
+Value value_from_binary(const Value* buffer, const char* type_name, VmFieldNamesResolver resolver, void* user_data);
 
 #endif /* VM_VALUE_H */

@@ -7,6 +7,12 @@
 #include <time.h>
 #include <sys/time.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <pthread.h>
+#endif
+
 #ifdef __APPLE__
 #include <mach/mach_time.h>
 #endif
@@ -43,6 +49,78 @@ void rae_ext_rae_sleep(int64_t ms) {
   if (ms > 0) {
     usleep((useconds_t)ms * 1000);
   }
+}
+
+void rae_spawn(void* (*func)(void*), void* data) {
+#ifdef _WIN32
+    CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)func, data, 0, NULL);
+#else
+    pthread_t thread;
+    if (pthread_create(&thread, NULL, func, data) == 0) {
+        pthread_detach(thread);
+    }
+#endif
+}
+
+RaeAny rae_ext_json_get(const char* json, const char* field) {
+    if (!json || !field) return (RaeAny){RAE_TYPE_NONE, {0}};
+    
+    // Tiny naive JSON parser: look for "field": value
+    char search[256];
+    snprintf(search, sizeof(search), "\"%s\"", field);
+    const char* key_pos = strstr(json, search);
+    if (!key_pos) return (RaeAny){RAE_TYPE_NONE, {0}};
+    
+    const char* colon = strchr(key_pos + strlen(search), ':');
+    if (!colon) return (RaeAny){RAE_TYPE_NONE, {0}};
+    
+    const char* val_start = colon + 1;
+    while (*val_start && (*val_start == ' ' || *val_start == '\t' || *val_start == '\n' || *val_start == '\r')) {
+        val_start++;
+    }
+    
+    if (*val_start == '\"') {
+        // String value
+        val_start++;
+        const char* val_end = strchr(val_start, '\"');
+        if (!val_end) return (RaeAny){RAE_TYPE_NONE, {0}};
+        size_t len = val_end - val_start;
+        char* res = malloc(len + 1);
+        memcpy(res, val_start, len);
+        res[len] = '\0';
+        return (RaeAny){RAE_TYPE_STRING, {.s = res}};
+    } else if (*val_start == 't') {
+        return (RaeAny){RAE_TYPE_BOOL, {.b = 1}};
+    } else if (*val_start == 'f') {
+        return (RaeAny){RAE_TYPE_BOOL, {.b = 0}};
+    } else if (*val_start == 'n') {
+        return (RaeAny){RAE_TYPE_NONE, {0}};
+    } else if (*val_start == '-' || (*val_start >= '0' && *val_start <= '9')) {
+        // Number
+        char* end;
+        double f = strtod(val_start, &end);
+        if (strchr(val_start, '.') && strchr(val_start, '.') < end) {
+            return (RaeAny){RAE_TYPE_FLOAT, {.f = f}};
+        } else {
+            return (RaeAny){RAE_TYPE_INT, {.i = (int64_t)f}};
+        }
+    } else if (*val_start == '{') {
+        // Nested object (simplified: just return the raw string part)
+        int depth = 1;
+        const char* p = val_start + 1;
+        while (*p && depth > 0) {
+            if (*p == '{') depth++;
+            else if (*p == '}') depth--;
+            p++;
+        }
+        size_t len = p - val_start;
+        char* res = malloc(len + 1);
+        memcpy(res, val_start, len);
+        res[len] = '\0';
+        return (RaeAny){RAE_TYPE_STRING, {.s = res}}; // We return objects as strings for now
+    }
+    
+    return (RaeAny){RAE_TYPE_NONE, {0}};
 }
 
 void rae_ext_rae_log_any(RaeAny value) {

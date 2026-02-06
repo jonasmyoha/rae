@@ -1,0 +1,24 @@
+func testNested() {
+  log("start")
+  defer { log("1") }
+  if true {
+    defer { log("2") }
+    log("inside if")
+  }
+  log("end")
+}
+
+func testReturn() {
+  log("ret start")
+  defer { log("r1") }
+  if true {
+    defer { log("r2") }
+    ret
+  }
+  log("ret end")
+}
+
+func main() {
+  testNested()
+  testReturn()
+}

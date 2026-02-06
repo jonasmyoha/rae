@@ -5,6 +5,7 @@
 
 #include "vm_chunk.h"
 #include "str.h"
+#include "sys_thread.h"
 
 typedef struct {
   char* path;
@@ -36,6 +37,13 @@ typedef struct {
   uint32_t index;
 } VmGlobalMapping;
 
+typedef struct {
+  char* name;
+  char** field_names;
+  char** field_types;
+  size_t field_count;
+} VmTypeMetadata;
+
 typedef struct VmRegistry {
   VmModule* modules;
   size_t count;
@@ -54,6 +62,13 @@ typedef struct VmRegistry {
   VmGlobalMapping* global_mappings;
   size_t mapping_count;
   size_t mapping_capacity;
+
+  sys_mutex_t mutex;
+
+  // Type metadata for reflection (e.g. toJson)
+  VmTypeMetadata* type_metadata;
+  size_t type_metadata_count;
+  size_t type_metadata_capacity;
 } VmRegistry;
 
 void vm_registry_init(VmRegistry* registry);
@@ -66,6 +81,9 @@ bool vm_registry_register_native(VmRegistry* registry,
                                  VmNativeCallback callback,
                                  void* user_data);
 const VmNativeEntry* vm_registry_find_native(const VmRegistry* registry, const char* name);
+
+void vm_registry_add_type_metadata(VmRegistry* registry, const char* name, char** field_names, char** field_types, size_t field_count);
+const VmTypeMetadata* vm_registry_find_type_metadata(const VmRegistry* registry, const char* name);
 
 // Globals management
 uint32_t vm_registry_ensure_global(VmRegistry* registry, Str name, Str type_name);
