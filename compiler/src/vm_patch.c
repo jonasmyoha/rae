@@ -48,9 +48,10 @@ static int get_instruction_len(uint8_t op) {
         case OP_NE: return 1;
         case OP_NOT: return 1;
         case OP_NATIVE_CALL: return 6;
+        case OP_SPAWN: return 6;
         case OP_GET_FIELD: return 5;
         case OP_SET_FIELD: return 5;
-        case OP_CONSTRUCT: return 5;
+        case OP_CONSTRUCT: return 9;
         case OP_BIND_LOCAL: return 5;
         case OP_BIND_FIELD: return 5;
         case OP_REF_VIEW: return 1;
@@ -130,7 +131,7 @@ bool vm_hot_patch(VM* vm, Chunk* new_chunk) {
             uint32_t idx = read_uint32_at(code_base, cursor + 1);
             idx += (uint32_t)const_offset;
             write_uint32_at(code_base, cursor + 1, idx);
-        } else if (op == OP_JUMP || op == OP_JUMP_IF_FALSE || op == OP_CALL) {
+        } else if (op == OP_JUMP || op == OP_JUMP_IF_FALSE || op == OP_CALL || op == OP_SPAWN) {
             uint32_t target = read_uint32_at(code_base, cursor + 1);
             target += (uint32_t)code_offset;
             write_uint32_at(code_base, cursor + 1, target);

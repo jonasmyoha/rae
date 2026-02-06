@@ -80,6 +80,8 @@ typedef struct {
   int64_t next;
 } TickCounter;
 
+static const Value* deref_value(const Value* v);
+
 static bool native_next_tick(struct VM* vm,
                              VmNativeResult* out_result,
                              const Value* args,
@@ -232,6 +234,121 @@ static Value value_to_string_internal(Value val) {
 
 static Value value_to_string_object(Value val) {
     return value_to_string_internal(val);
+}
+
+static const char** field_names_resolver(void* user_data, const char* type_name, size_t* out_count) {
+  VmRegistry* registry = (VmRegistry*)user_data;
+  const VmTypeMetadata* meta = vm_registry_find_type_metadata(registry, type_name);
+  if (meta) {
+    *out_count = meta->field_count;
+    return (const char**)meta->field_names;
+  }
+  return NULL;
+}
+
+static bool native_to_json(struct VM* vm,
+                                VmNativeResult* out_result,
+                                const Value* args,
+                                size_t arg_count,
+                                void* user_data) {
+  (void)user_data;
+  if (arg_count != 1) return false;
+  const Value* val = deref_value(&args[0]);
+  out_result->has_value = true;
+  out_result->value = value_to_json(val, field_names_resolver, vm->registry);
+  return true;
+}
+
+static bool native_from_json(struct VM* vm,
+                                  VmNativeResult* out_result,
+                                  const Value* args,
+                                  size_t arg_count,
+                                  void* user_data) {
+  (void)user_data;
+  if (arg_count != 2) return false;
+  
+  // 1. Get JSON string
+  const Value* json_val = deref_value(&args[1]);
+  if (json_val->type != VAL_STRING) return false;
+  const char* json = json_val->as.string_value.chars;
+  
+  // 2. Get type name (passed from compiler as first hidden arg for T.fromJson)
+  const Value* type_val = deref_value(&args[0]);
+  if (type_val->type != VAL_STRING) return false;
+  const char* type_name = type_val->as.string_value.chars;
+  
+  // 3. Find metadata
+  const VmTypeMetadata* meta = vm_registry_find_type_metadata(vm->registry, type_name);
+  if (!meta) return false;
+  
+  // 4. Create object and populate fields
+  Value obj = value_object(meta->field_count, type_name);
+  for (size_t i = 0; i < meta->field_count; i++) {
+      RaeAny val = rae_ext_json_get(json, meta->field_names[i]);
+      const char* field_type = meta->field_types[i];
+      
+      switch (val.type) {
+          case RAE_TYPE_INT: obj.as.object_value.fields[i] = value_int(val.as.i); break;
+          case RAE_TYPE_FLOAT: obj.as.object_value.fields[i] = value_float(val.as.f); break;
+          case RAE_TYPE_BOOL: obj.as.object_value.fields[i] = value_bool(val.as.b); break;
+          case RAE_TYPE_STRING: {
+              if (val.as.s && val.as.s[0] == '{') {
+                  // Recursive parse if we have metadata for this field's type
+                  const VmTypeMetadata* field_meta = vm_registry_find_type_metadata(vm->registry, field_type);
+                  if (field_meta) {
+                      Value sub_args[2];
+                      sub_args[0] = value_string_copy(field_type, strlen(field_type));
+                      sub_args[1] = value_string_copy(val.as.s, strlen(val.as.s));
+                      VmNativeResult sub_res = {0};
+                      if (native_from_json(vm, &sub_res, sub_args, 2, user_data)) {
+                          obj.as.object_value.fields[i] = sub_res.value;
+                      }
+                      value_free(&sub_args[0]);
+                      value_free(&sub_args[1]);
+                  } else {
+                      obj.as.object_value.fields[i] = value_string_take((char*)val.as.s, strlen(val.as.s));
+                  }
+              } else {
+                  obj.as.object_value.fields[i] = value_string_take((char*)val.as.s, strlen(val.as.s));
+              }
+              break;
+          }
+          default: break;
+      }
+  }
+  
+  out_result->has_value = true;
+  out_result->value = obj;
+  return true;
+}
+
+static bool native_to_binary(struct VM* vm,
+                                  VmNativeResult* out_result,
+                                  const Value* args,
+                                  size_t arg_count,
+                                  void* user_data) {
+  (void)vm; (void)user_data;
+  if (arg_count != 1) return false;
+  const Value* val = deref_value(&args[0]);
+  out_result->has_value = true;
+  out_result->value = value_to_binary(val);
+  return true;
+}
+
+static bool native_from_binary(struct VM* vm,
+                                    VmNativeResult* out_result,
+                                    const Value* args,
+                                    size_t arg_count,
+                                    void* user_data) {
+  (void)user_data;
+  if (arg_count != 2) return false;
+  const Value* type_val = deref_value(&args[0]);
+  const Value* buf_val = deref_value(&args[1]);
+  if (type_val->type != VAL_STRING || buf_val->type != VAL_BUFFER) return false;
+  
+  out_result->has_value = true;
+  out_result->value = value_from_binary(buf_val, type_val->as.string_value.chars, field_names_resolver, vm->registry);
+  return true;
 }
 
 static bool native_rae_str(struct VM* vm,
@@ -688,6 +805,10 @@ static bool register_default_natives(VmRegistry* registry, TickCounter* tick_cou
   ok = vm_registry_register_native(registry, "sleep", native_sleep_ms, NULL) && ok;
   ok = vm_registry_register_native(registry, "sleepMs", native_sleep_ms, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_str", native_rae_str, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_to_json", native_to_json, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_from_json", native_from_json, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_to_binary", native_to_binary, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_from_binary", native_from_binary, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_str_concat", native_rae_str_concat, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_str_len", native_rae_str_len, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_str_compare", native_rae_str_compare, NULL) && ok;

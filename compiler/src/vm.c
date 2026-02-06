@@ -10,6 +10,46 @@
 #include "diag.h"
 #include "vm_registry.h"
 #include "vm_value.h" // For Value, value_list, value_list_add
+#include "sys_thread.h"
+
+typedef struct {
+  Chunk* chunk;
+  uint32_t target;
+  Value args[256];
+  uint8_t arg_count;
+  VmRegistry* registry;
+} SpawnData;
+
+static void* spawn_thread_wrapper(void* arg) {
+  SpawnData* data = (SpawnData*)arg;
+  
+  VM sub_vm;
+  vm_init(&sub_vm);
+  sub_vm.registry = data->registry;
+  
+  // Set up initial frame
+  sub_vm.call_stack_top = 1;
+  CallFrame* frame = &sub_vm.call_stack[0];
+  frame->return_ip = NULL;
+  frame->slots = sub_vm.stack;
+  frame->slot_count = data->arg_count;
+  
+  // Note: we reversed them during pop, so we reverse them back during assign or vice versa
+  for (int i = 0; i < data->arg_count; i++) {
+    frame->locals[i] = data->args[data->arg_count - 1 - i];
+  }
+  for (int i = data->arg_count; i < 256; i++) {
+    frame->locals[i] = value_none();
+  }
+  
+  sub_vm.ip = data->chunk->code + data->target;
+  
+  vm_run(&sub_vm, data->chunk);
+  
+  vm_free(&sub_vm);
+  free(data);
+  return NULL;
+}
 
 static Value vm_pop(VM* vm) {
   if (vm->stack_top == vm->stack) {
@@ -98,6 +138,7 @@ static bool values_equal(const Value* lhs, const Value* rhs) {
 void vm_init(VM* vm) {
   if (!vm) return;
   vm->chunk = NULL;
+  vm->ip = NULL;
   vm_reset_stack(vm);
   vm->call_stack_capacity = 256;
   vm->call_stack = malloc(sizeof(CallFrame) * vm->call_stack_capacity);
@@ -155,17 +196,21 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
   vm->chunk = chunk;
   
   if (!is_resume) {
-      vm->ip = chunk->code;
+      if (vm->ip == NULL) {
+          vm->ip = chunk->code;
+      }
       vm->start_time = time(NULL);
       
-      // Set up initial frame for module-level execution (globals + initial call)
-      vm->call_stack_top = 1;
-      CallFrame* frame = &vm->call_stack[0];
-      frame->return_ip = NULL;
-      frame->slots = vm->stack;
-      frame->slot_count = 0;
-      for (int i = 0; i < 256; i++) {
-        frame->locals[i] = value_none();
+      // Set up initial frame for module-level execution if not already set up (e.g. by spawn)
+      if (vm->call_stack_top == 0) {
+          vm->call_stack_top = 1;
+          CallFrame* frame = &vm->call_stack[0];
+          frame->return_ip = NULL;
+          frame->slots = vm->stack;
+          frame->slot_count = 0;
+          for (int i = 0; i < 256; i++) {
+            frame->locals[i] = value_none();
+          }
       }
   }
 
@@ -258,6 +303,37 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
           return VM_RUNTIME_ERROR;
         }
         vm->ip = vm->chunk->code + target;
+        break;
+      }
+      case OP_SPAWN: {
+        uint32_t target = read_uint32(vm);
+        uint8_t arg_count = *vm->ip++;
+        
+        if (vm->stack_top - vm->stack < arg_count) {
+          diag_error(NULL, 0, 0, "not enough arguments on stack for spawn");
+          return VM_RUNTIME_ERROR;
+        }
+        
+        SpawnData* data = malloc(sizeof(SpawnData));
+        data->chunk = vm->chunk;
+        data->target = target;
+        data->arg_count = arg_count;
+        data->registry = vm->registry;
+        
+        // Transfer arguments (pop from current VM, transfer to SpawnData)
+        for (int i = 0; i < arg_count; i++) {
+          data->args[i] = vm_pop(vm);
+        }
+        
+        sys_thread_t thread;
+        if (!sys_thread_create(&thread, spawn_thread_wrapper, data)) {
+          diag_error(NULL, 0, 0, "failed to spawn thread");
+          // cleanup
+          for (int i = 0; i < arg_count; i++) value_free(&data->args[i]);
+          free(data);
+          return VM_RUNTIME_ERROR;
+        }
+        // We don't join here, it runs detached (or we'll manage it later)
         break;
       }
       case OP_NATIVE_CALL: {
@@ -812,7 +888,12 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
       }
       case OP_CONSTRUCT: {
         uint32_t field_count = read_uint32(vm);
-        Value obj = value_object(field_count);
+        uint32_t type_name_index = read_uint32(vm);
+        const char* type_name = NULL;
+        if (type_name_index != 0xFFFFFFFF) {
+            type_name = vm->chunk->constants[type_name_index].as.string_value.chars;
+        }
+        Value obj = value_object(field_count, type_name);
         for (int i = (int)field_count - 1; i >= 0; --i) {
           obj.as.object_value.fields[i] = vm_pop(vm);
         }

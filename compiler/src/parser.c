@@ -1961,6 +1961,10 @@ static AstTypeField* parse_type_fields(Parser* parser) {
     AstTypeField* field = parser_alloc(parser, sizeof(AstTypeField));
     field->name = parser_copy_str(parser, field_name->lexeme);
     field->type = parse_type_ref(parser);
+    field->default_value = NULL;
+    if (parser_match(parser, TOK_KW_IS) || parser_match(parser, TOK_ASSIGN)) {
+      field->default_value = parse_expression(parser);
+    }
     head = append_field(head, field);
     
     if (parser_check(parser, TOK_RBRACE)) {
