@@ -61,6 +61,7 @@ typedef struct AstReturnItem {
 typedef struct AstTypeField {
   Str name;
   AstTypeRef* type;
+  AstExpr* default_value;
   struct AstTypeField* next;
 } AstTypeField;
 

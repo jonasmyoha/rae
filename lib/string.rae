@@ -92,6 +92,27 @@ func split(this: String, sep: String) ret List(String) {
   ret result
 }
 
+func replace(this: String, old: String, new: String) ret String {
+  if old.length() is 0 {
+    ret this
+  }
+  let parts: List(String) = this.split(sep: old)
+  ret parts.join(sep: new)
+}
+
+func join(this: view List(String), sep: String) ret String {
+  if this.length() is 0 {
+    ret ""
+  }
+  let result: String = this.get(index: 0)
+  let i: Int = 1
+  loop i < this.length() {
+    result = result.concat(other: sep).concat(other: this.get(index: i))
+    i = i + 1
+  }
+  ret result
+}
+
 func toFloat(this: String) ret Float {
   ret rae_str_to_f64(s: this)
 }

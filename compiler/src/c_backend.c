@@ -36,6 +36,16 @@ enum {
 };
 
 typedef struct {
+  const struct AstBlock* block;
+  int scope_depth;
+} CDeferEntry;
+
+typedef struct {
+  CDeferEntry entries[64];
+  int count;
+} CDeferStack;
+
+typedef struct {
   const AstModule* module;
   const AstFuncDecl* func_decl;
   const AstParam* params;
@@ -52,6 +62,9 @@ typedef struct {
   const AstTypeRef* expected_type;
   const struct VmRegistry* registry;
   bool uses_raylib;
+  bool is_main;
+  int scope_depth;
+  CDeferStack defer_stack;
 } CFuncContext;
 
 // Forward declarations
@@ -62,6 +75,9 @@ static bool has_property(const AstProperty* props, const char* name);
 static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_prec, bool is_lvalue);
 static bool emit_function(const AstModule* module, const AstFuncDecl* func, FILE* out, const struct VmRegistry* registry, bool uses_raylib);
 static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
+static bool emit_spawn_wrapper(CFuncContext* ctx, const AstFuncDecl* func, FILE* out);
+static bool emit_defers(CFuncContext* ctx, int min_depth, FILE* out);
+static void pop_defers(CFuncContext* ctx, int depth);
 static bool emit_call(CFuncContext* ctx, const AstExpr* expr, FILE* out);
 static bool emit_log_call(CFuncContext* ctx, const AstExpr* expr, FILE* out, bool newline);
 static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out);
@@ -460,8 +476,18 @@ static Str infer_buffer_element_type(CFuncContext* ctx, const AstExpr* expr) {
     return (Str){0};
 }
 
+static const AstExpr* g_infer_expr_stack[64];
+static size_t g_infer_expr_stack_count = 0;
+
 static Str infer_expr_type(CFuncContext* ctx, const AstExpr* expr) {
     if (!expr) return (Str){0};
+    
+    for (size_t i = 0; i < g_infer_expr_stack_count; i++) {
+        if (g_infer_expr_stack[i] == expr) return (Str){0};
+    }
+    if (g_infer_expr_stack_count >= 64) return (Str){0};
+    g_infer_expr_stack[g_infer_expr_stack_count++] = expr;
+
     Str res = {0};
     switch (expr->kind) {
         case AST_EXPR_IDENT:
@@ -657,11 +683,14 @@ static Str infer_expr_type(CFuncContext* ctx, const AstExpr* expr) {
         case AST_EXPR_OBJECT:
             if (expr->as.object_literal.type && expr->as.object_literal.type->parts) {
                 res = expr->as.object_literal.type->parts->text;
+            } else if (ctx->expected_type && ctx->expected_type->parts) {
+                res = ctx->expected_type->parts->text;
             }
             break;
         default: break;
     }
 done:
+    g_infer_expr_stack_count--;
     return res;
 }
 
@@ -1793,6 +1822,55 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
       } else if (expr->as.unary.op == AST_UNARY_POST_DEC) {
         if (!emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, true)) return false;
         return fprintf(out, "--") >= 0;
+      } else if (expr->as.unary.op == AST_UNARY_SPAWN) {
+          const AstExpr* call = expr->as.unary.operand;
+          if (call->kind != AST_EXPR_CALL || call->as.call.callee->kind != AST_EXPR_IDENT) {
+              fprintf(stderr, "error: spawn must be followed by a function call\n");
+              return false;
+          }
+          
+          Str name = call->as.call.callee->as.ident;
+          uint16_t arg_count = 0;
+          for (const AstCallArg* arg = call->as.call.args; arg; arg = arg->next) arg_count++;
+          
+          Str* arg_types = NULL;
+          if (arg_count > 0) {
+              arg_types = malloc(arg_count * sizeof(Str));
+              const AstCallArg* arg = call->as.call.args;
+              for (uint16_t i = 0; i < arg_count; ++i) {
+                  arg_types[i] = infer_expr_type(ctx, arg->value);
+                  arg = arg->next;
+              }
+          }
+          
+          const AstFuncDecl* func = find_function_overload(ctx->module, ctx, name, arg_types, arg_count);
+          if (arg_types) free(arg_types);
+          
+          if (!func) {
+              fprintf(stderr, "error: could not find function for spawn\n");
+              return false;
+          }
+
+          fprintf(out, "(void)__extension__ ({ ");
+          fprintf(out, "_spawn_args_");
+          emit_mangled_function_name(func, out);
+          fprintf(out, "* _args = malloc(sizeof(*_args)); ");
+          
+          const AstCallArg* carg = call->as.call.args;
+          const AstParam* p = func->params;
+          while (carg && p) {
+              fprintf(out, "_args->%.*s = ", (int)p->name.len, p->name.data);
+              if (!emit_expr(ctx, carg->value, out, PREC_LOWEST, false)) return false;
+              fprintf(out, "; ");
+              carg = carg->next;
+              p = p->next;
+          }
+          
+          fprintf(out, "rae_spawn(_spawn_wrapper_");
+          emit_mangled_function_name(func, out);
+          fprintf(out, ", _args); ");
+          fprintf(out, "0; })");
+          return true;
       } else if (expr->as.unary.op == AST_UNARY_VIEW || expr->as.unary.op == AST_UNARY_MOD) {
         // In C backend, references are pointers. We take the address of the operand.
         if (fprintf(out, "(&(") < 0) return false;
@@ -1953,7 +2031,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
     }
     case AST_EXPR_OBJECT: {
       const AstTypeDecl* type_decl = NULL;
-      if (expr->as.object_literal.type) {
+      if (expr->as.object_literal.type && expr->as.object_literal.type->parts) {
         fprintf(out, "(");
         if (!emit_type_ref_as_c_type(ctx, expr->as.object_literal.type, out)) return false;
         fprintf(out, ")");
@@ -1971,7 +2049,10 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
           
           if (!type_decl) {
               // If no explicit type, try to infer it from the expression itself (e.g. via expected type in context)
+              const AstTypeRef* saved_expected = ctx->expected_type;
+              ctx->expected_type = NULL;
               Str inferred = infer_expr_type(ctx, expr);
+              ctx->expected_type = saved_expected;
               if (inferred.len > 0) {
                   const AstDecl* d = find_type_decl(ctx->module, inferred);
                   if (d && d->kind == AST_DECL_TYPE) type_decl = &d->as.type_decl;
@@ -1980,44 +2061,85 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
       }
       
       if (fprintf(out, "{ ") < 0) return false;
-      const AstObjectField* field = expr->as.object_literal.fields;
-      while (field) {
-        if (field->name.len > 0) {
-            if (fprintf(out, ".%.*s = ", (int)field->name.len, field->name.data) < 0) return false;
-        }
-        
-        bool is_any_field = false;
-        if (type_decl) {
-            const AstTypeField* tf = type_decl->fields;
-            while (tf) {
-                if (str_eq(tf->name, field->name)) {
-                    if (tf->type && tf->type->parts) {
-                        Str ftype = tf->type->parts->text;
-                        if (str_eq_cstr(ftype, "Any")) is_any_field = true;
-                        else {
-                            // Check generic params of the TYPE declaration
-                            const AstIdentifierPart* gp = type_decl->generic_params;
-                            while (gp) {
-                                if (str_eq(gp->text, ftype)) {
-                                    is_any_field = true;
-                                    break;
-                                }
-                                gp = gp->next;
-                            }
-                        }
-                    }
-                    break;
-                }
-                tf = tf->next;
+      
+      if (type_decl) {
+          const AstTypeField* tf = type_decl->fields;
+          const AstTypeRef* saved_expected = ctx->expected_type;
+          while (tf) {
+              ctx->expected_type = tf->type;
+              if (fprintf(out, ".%.*s = ", (int)tf->name.len, tf->name.data) < 0) {
+                  ctx->expected_type = saved_expected;
+                  return false;
+              }
+              
+              bool is_any_field = false;
+              if (tf->type && tf->type->parts) {
+                  Str ftype = tf->type->parts->text;
+                  if (str_eq_cstr(ftype, "Any")) is_any_field = true;
+                  else if (type_decl) {
+                      const AstIdentifierPart* gp = type_decl->generic_params;
+                      while (gp) {
+                          if (str_eq(gp->text, ftype)) {
+                              is_any_field = true;
+                              break;
+                          }
+                          gp = gp->next;
+                      }
+                  }
+              }
+
+              const AstObjectField* f = expr->as.object_literal.fields;
+              bool found = false;
+              while (f) {
+                  if (str_eq(f->name, tf->name)) {
+                      if (is_any_field) fprintf(out, "rae_any(");
+                      if (!emit_expr(ctx, f->value, out, PREC_LOWEST, false)) {
+                          ctx->expected_type = saved_expected;
+                          return false;
+                      }
+                      if (is_any_field) fprintf(out, ")");
+                      found = true;
+                      break;
+                  }
+                  f = f->next;
+              }
+              
+              if (!found) {
+                  if (tf->default_value) {
+                      if (is_any_field) fprintf(out, "rae_any(");
+                      if (!emit_expr(ctx, tf->default_value, out, PREC_LOWEST, false)) {
+                          ctx->expected_type = saved_expected;
+                          return false;
+                      }
+                      if (is_any_field) fprintf(out, ")");
+                  } else {
+                      if (is_any_field) fprintf(out, "rae_any_none()");
+                      else {
+                          bool is_primitive = false;
+                          if (tf->type && tf->type->parts) {
+                              is_primitive = is_primitive_type(tf->type->parts->text) || str_eq_cstr(tf->type->parts->text, "key");
+                          }
+                          if (is_primitive) fprintf(out, "0");
+                          else fprintf(out, "{0}");
+                      }
+                  }
+              }
+              
+              if (tf->next) fprintf(out, ", ");
+              tf = tf->next;
+          }
+          ctx->expected_type = saved_expected;
+      } else {
+          const AstObjectField* field = expr->as.object_literal.fields;
+          while (field) {
+            if (field->name.len > 0) {
+                if (fprintf(out, ".%.*s = ", (int)field->name.len, field->name.data) < 0) return false;
             }
-        }
-        
-        if (is_any_field) fprintf(out, "rae_any(");
-        if (!emit_expr(ctx, field->value, out, PREC_LOWEST, false)) return false;
-        if (is_any_field) fprintf(out, ")");
-        
-        if (field->next) fprintf(out, ", ");
-        field = field->next;
+            if (!emit_expr(ctx, field->value, out, PREC_LOWEST, false)) return false;
+            if (field->next) fprintf(out, ", ");
+            field = field->next;
+          }
+          if (!expr->as.object_literal.fields) fprintf(out, "0");
       }
       return fprintf(out, " }") >= 0;
     }
@@ -2104,6 +2226,76 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
 
       const AstFuncDecl* func_decl = find_function_overload(ctx->module, ctx, method, arg_types, total_arg_count);
       free(arg_types);
+
+      if (!func_decl && str_eq_cstr(method, "toJson") && explicit_args_count == 0) {
+          Str type = get_base_type_name_str(infer_expr_type(ctx, expr->as.method_call.object));
+          const AstDecl* td = find_type_decl(ctx->module, type);
+          if (td && td->kind == AST_DECL_TYPE) {
+              fprintf(out, "rae_toJson_%.*s_(", (int)type.len, type.data);
+              bool is_ptr = false;
+              if (expr->as.method_call.object->kind == AST_EXPR_IDENT) {
+                  is_ptr = is_pointer_type(ctx, expr->as.method_call.object->as.ident);
+              }
+              if (is_ptr) {
+                  if (!emit_expr(ctx, expr->as.method_call.object, out, PREC_LOWEST, false)) return false;
+              } else {
+                  fprintf(out, "&(");
+                  if (!emit_expr(ctx, expr->as.method_call.object, out, PREC_LOWEST, false)) return false;
+                  fprintf(out, ")");
+              }
+              fprintf(out, ")");
+              return true;
+          }
+      }
+
+      if (!func_decl && str_eq_cstr(method, "fromJson") && explicit_args_count == 1) {
+          // Note: in Rae we use T.fromJson(json), but desugared it might look like obj.fromJson(json)
+          // Actually, we want to support static-like calls: Type.fromJson(json)
+          if (expr->as.method_call.object->kind == AST_EXPR_IDENT) {
+              Str type_name = expr->as.method_call.object->as.ident;
+              const AstDecl* td = find_type_decl(ctx->module, type_name);
+              if (td && td->kind == AST_DECL_TYPE) {
+                  fprintf(out, "rae_fromJson_%.*s_(", (int)type_name.len, type_name.data);
+                  if (!emit_expr(ctx, expr->as.method_call.args->value, out, PREC_LOWEST, false)) return false;
+                  fprintf(out, ")");
+                  return true;
+              }
+          }
+      }
+
+      if (!func_decl && str_eq_cstr(method, "toBinary") && explicit_args_count == 0) {
+          Str type = get_base_type_name_str(infer_expr_type(ctx, expr->as.method_call.object));
+          const AstDecl* td = find_type_decl(ctx->module, type);
+          if (td && td->kind == AST_DECL_TYPE) {
+              fprintf(out, "rae_toBinary_%.*s_(", (int)type.len, type.data);
+              bool is_ptr = false;
+              if (expr->as.method_call.object->kind == AST_EXPR_IDENT) {
+                  is_ptr = is_pointer_type(ctx, expr->as.method_call.object->as.ident);
+              }
+              if (is_ptr) {
+                  if (!emit_expr(ctx, expr->as.method_call.object, out, PREC_LOWEST, false)) return false;
+              } else {
+                  fprintf(out, "&(");
+                  if (!emit_expr(ctx, expr->as.method_call.object, out, PREC_LOWEST, false)) return false;
+                  fprintf(out, ")");
+              }
+              fprintf(out, ", NULL)"); // TODO: support out_size
+              return true;
+          }
+      }
+
+      if (!func_decl && str_eq_cstr(method, "fromBinary") && explicit_args_count == 1) {
+          if (expr->as.method_call.object->kind == AST_EXPR_IDENT) {
+              Str type_name = expr->as.method_call.object->as.ident;
+              const AstDecl* td = find_type_decl(ctx->module, type_name);
+              if (td && td->kind == AST_DECL_TYPE) {
+                  fprintf(out, "rae_fromBinary_%.*s_(", (int)type_name.len, type_name.data);
+                  if (!emit_expr(ctx, expr->as.method_call.args->value, out, PREC_LOWEST, false)) return false;
+                  fprintf(out, ", 0)"); // TODO: support size
+                  return true;
+              }
+          }
+      }
 
       if (func_decl) {
         const char* cast_pre = "";
@@ -2347,15 +2539,101 @@ static bool emit_call(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
   return true;
 }
 
+static bool emit_defers(CFuncContext* ctx, int min_depth, FILE* out) {
+  for (int i = (int)ctx->defer_stack.count - 1; i >= 0; i--) {
+    if (ctx->defer_stack.entries[i].scope_depth >= min_depth) {
+      const AstStmt* stmt = ctx->defer_stack.entries[i].block->first;
+      while (stmt) {
+        if (!emit_stmt(ctx, stmt, out)) return false;
+        stmt = stmt->next;
+      }
+    }
+  }
+  return true;
+}
+
+static void pop_defers(CFuncContext* ctx, int depth) {
+  while (ctx->defer_stack.count > 0 && 
+         ctx->defer_stack.entries[ctx->defer_stack.count - 1].scope_depth >= depth) {
+    ctx->defer_stack.count--;
+  }
+}
+
+static bool emit_block(CFuncContext* ctx, const AstBlock* block, FILE* out) {
+  if (!block) return true;
+  ctx->scope_depth++;
+  const AstStmt* inner = block->first;
+  while (inner) {
+    if (!emit_stmt(ctx, inner, out)) return false;
+    inner = inner->next;
+  }
+  if (!emit_defers(ctx, ctx->scope_depth, out)) return false;
+  pop_defers(ctx, ctx->scope_depth);
+  ctx->scope_depth--;
+  return true;
+}
+
+static bool emit_spawn_wrapper(CFuncContext* ctx, const AstFuncDecl* func, FILE* out) {
+  fprintf(out, "typedef struct {\n");
+  const AstParam* p = func->params;
+  while (p) {
+    fprintf(out, "  ");
+    if (!emit_type_ref_as_c_type(ctx, p->type, out)) return false;
+    fprintf(out, " %.*s;\n", (int)p->name.len, p->name.data);
+    p = p->next;
+  }
+  fprintf(out, "} _spawn_args_");
+  emit_mangled_function_name(func, out);
+  fprintf(out, ";\n\n");
+
+  fprintf(out, "static void* _spawn_wrapper_");
+  emit_mangled_function_name(func, out);
+  fprintf(out, "(void* data) {\n");
+  fprintf(out, "  _spawn_args_");
+  emit_mangled_function_name(func, out);
+  fprintf(out, "* args = (_spawn_args_");
+  emit_mangled_function_name(func, out);
+  fprintf(out, "*)data;\n");
+  
+  fprintf(out, "  ");
+  emit_mangled_function_name(func, out);
+  fprintf(out, "(");
+  p = func->params;
+  while (p) {
+    fprintf(out, "args->%.*s", (int)p->name.len, p->name.data);
+    p = p->next;
+    if (p) fprintf(out, ", ");
+  }
+  fprintf(out, ");\n");
+  fprintf(out, "  free(args);\n");
+  fprintf(out, "  return NULL;\n");
+  fprintf(out, "}\n\n");
+  return true;
+}
+
 static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
   if (!stmt) return false;
   switch (stmt->kind) {
+    case AST_STMT_DEFER: {
+      if (ctx->defer_stack.count >= 64) {
+        fprintf(stderr, "error: C backend defer stack overflow\n");
+        return false;
+      }
+      ctx->defer_stack.entries[ctx->defer_stack.count].block = stmt->as.defer_stmt.block;
+      ctx->defer_stack.entries[ctx->defer_stack.count].scope_depth = ctx->scope_depth;
+      ctx->defer_stack.count++;
+      return true;
+    }
     case AST_STMT_RET: {
       const AstReturnArg* arg = stmt->as.ret_stmt.values;
       if (!arg) {
-        if (ctx->returns_value) {
+        if (ctx->returns_value && !ctx->is_main) {
           fprintf(stderr, "error: return without value in function expecting a value\n");
           return false;
+        }
+        if (!emit_defers(ctx, 0, out)) return false;
+        if (ctx->is_main) {
+            return fprintf(out, "  return 0;\n") >= 0;
         }
         return fprintf(out, "  return;\n") >= 0;
       }
@@ -2367,7 +2645,8 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
         fprintf(stderr, "error: return with value in non-returning function\n");
         return false;
       }
-      if (fprintf(out, "  return ") < 0) {
+      
+      if (fprintf(out, "  %s _ret = ", ctx->return_type_name) < 0) {
         return false;
       }
       
@@ -2391,7 +2670,8 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
 
       if (ret_is_any) {
           if (arg->value->kind == AST_EXPR_NONE) {
-              return fprintf(out, "rae_any_none();\n") >= 0;
+              fprintf(out, "rae_any_none();\n");
+              goto after_ret_val;
           }
           fprintf(out, "rae_any(");
       }
@@ -2410,7 +2690,11 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
       }
       
       if (ret_is_any) fprintf(out, ")");
-      return fprintf(out, ";\n") >= 0;
+      fprintf(out, ";\n");
+
+after_ret_val:
+      if (!emit_defers(ctx, 0, out)) return false;
+      return fprintf(out, "  return _ret;\n") >= 0;
     }
         case AST_STMT_LET: {
           if (ctx->local_count >= sizeof(ctx->locals) / sizeof(ctx->locals[0])) {
@@ -2434,7 +2718,23 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
           fprintf(out, " %.*s", (int)stmt->as.let_stmt.name.len, stmt->as.let_stmt.name.data);
 
           if (!stmt->as.let_stmt.value) {
-              fprintf(out, " = {0}");
+              fprintf(out, " = ");
+              if (stmt->as.let_stmt.type) {
+                  AstExpr synthetic = {0};
+                  synthetic.kind = AST_EXPR_OBJECT;
+                  synthetic.as.object_literal.type = stmt->as.let_stmt.type;
+                  synthetic.line = stmt->line;
+                  synthetic.column = stmt->column;
+                  
+                  ctx->expected_type = stmt->as.let_stmt.type;
+                  if (!emit_expr(ctx, &synthetic, out, PREC_LOWEST, false)) {
+                      ctx->expected_type = NULL;
+                      return false;
+                  }
+                  ctx->expected_type = NULL;
+              } else {
+                  fprintf(out, "{0}");
+              }
           } else {
               fprintf(out, " = ");
               bool is_any = (stmt->as.let_stmt.type && stmt->as.let_stmt.type->parts && str_eq_cstr(stmt->as.let_stmt.type->parts->text, "Any"));
@@ -2646,6 +2946,192 @@ static const char* find_raylib_mapping(Str name) {
     return NULL;
 }
 
+static bool emit_json_methods(const AstModule* module, FILE* out, bool uses_raylib) {
+  (void)uses_raylib;
+  
+  // 1. Forward declarations
+  for (const AstDecl* decl = module->decls; decl; decl = decl->next) {
+    if (decl->kind == AST_DECL_TYPE) {
+      const AstTypeDecl* td = &decl->as.type_decl;
+      if (has_property(td->properties, "c_struct")) continue;
+      if (is_raylib_builtin_type(td->name)) continue;
+      fprintf(out, "RAE_UNUSED static const char* rae_toJson_%.*s_(%.*s* this);\n",
+              (int)td->name.len, td->name.data, (int)td->name.len, td->name.data);
+      fprintf(out, "RAE_UNUSED static %.*s rae_fromJson_%.*s_(const char* json);\n",
+              (int)td->name.len, td->name.data, (int)td->name.len, td->name.data);
+      fprintf(out, "RAE_UNUSED static void* rae_toBinary_%.*s_(%.*s* this, int64_t* out_size);\n",
+              (int)td->name.len, td->name.data, (int)td->name.len, td->name.data);
+      fprintf(out, "RAE_UNUSED static %.*s rae_fromBinary_%.*s_(void* data, int64_t size);\n",
+              (int)td->name.len, td->name.data, (int)td->name.len, td->name.data);
+    }
+  }
+  fprintf(out, "\n");
+
+  // 2. Implementations
+  for (const AstDecl* decl = module->decls; decl; decl = decl->next) {
+    if (decl->kind == AST_DECL_TYPE) {
+      const AstTypeDecl* td = &decl->as.type_decl;
+      if (has_property(td->properties, "c_struct")) continue;
+      if (is_raylib_builtin_type(td->name)) continue;
+      
+      // toJson
+      fprintf(out, "RAE_UNUSED static const char* rae_toJson_%.*s_(%.*s* this) {\n",
+              (int)td->name.len, td->name.data, (int)td->name.len, td->name.data);
+      fprintf(out, "  const char* res = \"{\";\n");
+      
+      const AstTypeField* f = td->fields;
+      while (f) {
+        fprintf(out, "  res = rae_ext_rae_str_concat(res, \"\\\"%.*s\\\": \");\n", (int)f->name.len, f->name.data);
+        Str base = get_base_type_name(f->type);
+        if (str_eq_cstr(base, "Int")) {
+          fprintf(out, "  res = rae_ext_rae_str_concat(res, rae_ext_rae_str_i64(this->%.*s));\n", (int)f->name.len, f->name.data);
+        } else if (str_eq_cstr(base, "Float")) {
+          fprintf(out, "  res = rae_ext_rae_str_concat(res, rae_ext_rae_str_f64(this->%.*s));\n", (int)f->name.len, f->name.data);
+        } else if (str_eq_cstr(base, "Bool")) {
+          fprintf(out, "  res = rae_ext_rae_str_concat(res, this->%.*s ? \"true\" : \"false\");\n", (int)f->name.len, f->name.data);
+        } else if (str_eq_cstr(base, "String")) {
+          fprintf(out, "  res = rae_ext_rae_str_concat(res, \"\\\"\");\n");
+          fprintf(out, "  res = rae_ext_rae_str_concat(res, this->%.*s ? this->%.*s : \"\");\n", (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
+          fprintf(out, "  res = rae_ext_rae_str_concat(res, \"\\\"\");\n");
+        } else if (find_type_decl(module, base)) {
+          if (is_raylib_builtin_type(base)) {
+              if (str_eq_cstr(base, "Vector2")) {
+                  fprintf(out, "  res = rae_ext_rae_str_concat(res, \"{\\\"x\\\": \");\n");
+                  fprintf(out, "  res = rae_ext_rae_str_concat(res, rae_ext_rae_str_f64(this->%.*s.x));\n", (int)f->name.len, f->name.data);
+                  fprintf(out, "  res = rae_ext_rae_str_concat(res, \", \\\"y\\\": \");\n");
+                  fprintf(out, "  res = rae_ext_rae_str_concat(res, rae_ext_rae_str_f64(this->%.*s.y));\n", (int)f->name.len, f->name.data);
+                  fprintf(out, "  res = rae_ext_rae_str_concat(res, \"}\");\n");
+              } else if (str_eq_cstr(base, "Vector3")) {
+                  fprintf(out, "  res = rae_ext_rae_str_concat(res, \"{\\\"x\\\": \");\n");
+                  fprintf(out, "  res = rae_ext_rae_str_concat(res, rae_ext_rae_str_f64(this->%.*s.x));\n", (int)f->name.len, f->name.data);
+                  fprintf(out, "  res = rae_ext_rae_str_concat(res, \", \\\"y\\\": \");\n");
+                  fprintf(out, "  res = rae_ext_rae_str_concat(res, rae_ext_rae_str_f64(this->%.*s.y));\n", (int)f->name.len, f->name.data);
+                  fprintf(out, "  res = rae_ext_rae_str_concat(res, \", \\\"z\\\": \");\n");
+                  fprintf(out, "  res = rae_ext_rae_str_concat(res, rae_ext_rae_str_f64(this->%.*s.z));\n", (int)f->name.len, f->name.data);
+                  fprintf(out, "  res = rae_ext_rae_str_concat(res, \"}\");\n");
+              } else if (str_eq_cstr(base, "Color")) {
+                  fprintf(out, "  res = rae_ext_rae_str_concat(res, \"{\\\"r\\\": \");\n");
+                  fprintf(out, "  res = rae_ext_rae_str_concat(res, rae_ext_rae_str_i64(this->%.*s.r));\n", (int)f->name.len, f->name.data);
+                  fprintf(out, "  res = rae_ext_rae_str_concat(res, \", \\\"g\\\": \");\n");
+                  fprintf(out, "  res = rae_ext_rae_str_concat(res, rae_ext_rae_str_i64(this->%.*s.g));\n", (int)f->name.len, f->name.data);
+                  fprintf(out, "  res = rae_ext_rae_str_concat(res, \", \\\"b\\\": \");\n");
+                  fprintf(out, "  res = rae_ext_rae_str_concat(res, rae_ext_rae_str_i64(this->%.*s.b));\n", (int)f->name.len, f->name.data);
+                  fprintf(out, "  res = rae_ext_rae_str_concat(res, \", \\\"a\\\": \");\n");
+                  fprintf(out, "  res = rae_ext_rae_str_concat(res, rae_ext_rae_str_i64(this->%.*s.a));\n", (int)f->name.len, f->name.data);
+                  fprintf(out, "  res = rae_ext_rae_str_concat(res, \"}\");\n");
+              } else {
+                  fprintf(out, "  res = rae_ext_rae_str_concat(res, \"null\");\n");
+              }
+          } else {
+              // Check if the type is actually a generic parameter of td
+              bool is_generic_param = false;
+              const AstIdentifierPart* gp = td->generic_params;
+              while (gp) {
+                  if (str_eq(gp->text, base)) { is_generic_param = true; break; }
+                  gp = gp->next;
+              }
+
+              if (is_generic_param || f->type->is_opt) {
+                  fprintf(out, "  res = rae_ext_rae_str_concat(res, rae_str_any(this->%.*s));\n", (int)f->name.len, f->name.data);
+              } else {
+                  // Check if the type has a toJson method
+                  fprintf(out, "  res = rae_ext_rae_str_concat(res, rae_toJson_%.*s_(&this->%.*s));\n", (int)base.len, base.data, (int)f->name.len, f->name.data);
+              }
+          }
+        } else if (find_enum_decl(module, base)) {
+          fprintf(out, "  res = rae_ext_rae_str_concat(res, rae_ext_rae_str_i64(this->%.*s));\n", (int)f->name.len, f->name.data);
+        } else {
+          fprintf(out, "  res = rae_ext_rae_str_concat(res, \"null\");\n");
+        }
+        
+        f = f->next;
+        if (f) fprintf(out, "  res = rae_ext_rae_str_concat(res, \", \");\n");
+      }
+      
+      fprintf(out, "  res = rae_ext_rae_str_concat(res, \"}\");\n");
+      fprintf(out, "  return res;\n");
+      fprintf(out, "}\n\n");
+
+      // fromJson
+      fprintf(out, "RAE_UNUSED static %.*s rae_fromJson_%.*s_(const char* json) {\n",
+              (int)td->name.len, td->name.data, (int)td->name.len, td->name.data);
+      fprintf(out, "  %.*s res = {0};\n", (int)td->name.len, td->name.data);
+      fprintf(out, "  RaeAny val;\n");
+      
+      f = td->fields;
+      while (f) {
+        fprintf(out, "  val = rae_ext_json_get(json, \"%.*s\");\n", (int)f->name.len, f->name.data);
+        Str base = get_base_type_name(f->type);
+        if (str_eq_cstr(base, "Int")) {
+          fprintf(out, "  if (val.type == RAE_TYPE_INT) res.%.*s = val.as.i;\n", (int)f->name.len, f->name.data);
+        } else if (str_eq_cstr(base, "Float")) {
+          fprintf(out, "  if (val.type == RAE_TYPE_FLOAT) res.%.*s = val.as.f;\n", (int)f->name.len, f->name.data);
+          fprintf(out, "  else if (val.type == RAE_TYPE_INT) res.%.*s = (double)val.as.i;\n", (int)f->name.len, f->name.data);
+        } else if (str_eq_cstr(base, "Bool")) {
+          fprintf(out, "  if (val.type == RAE_TYPE_BOOL) res.%.*s = val.as.b;\n", (int)f->name.len, f->name.data);
+        } else if (str_eq_cstr(base, "String")) {
+          fprintf(out, "  if (val.type == RAE_TYPE_STRING) res.%.*s = val.as.s;\n", (int)f->name.len, f->name.data);
+        } else if (find_type_decl(module, base)) {
+          if (is_raylib_builtin_type(base)) {
+              fprintf(out, "  if (val.type == RAE_TYPE_STRING) {\n");
+              if (str_eq_cstr(base, "Vector2")) {
+                  fprintf(out, "    RaeAny field_val;\n");
+                  fprintf(out, "    field_val = rae_ext_json_get(val.as.s, \"x\"); if (field_val.type == RAE_TYPE_FLOAT) res.%.*s.x = field_val.as.f; else if (field_val.type == RAE_TYPE_INT) res.%.*s.x = (double)field_val.as.i;\n", (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
+                  fprintf(out, "    field_val = rae_ext_json_get(val.as.s, \"y\"); if (field_val.type == RAE_TYPE_FLOAT) res.%.*s.y = field_val.as.f; else if (field_val.type == RAE_TYPE_INT) res.%.*s.y = (double)field_val.as.i;\n", (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
+              } else if (str_eq_cstr(base, "Vector3")) {
+                  fprintf(out, "    RaeAny field_val;\n");
+                  fprintf(out, "    field_val = rae_ext_json_get(val.as.s, \"x\"); if (field_val.type == RAE_TYPE_FLOAT) res.%.*s.x = field_val.as.f; else if (field_val.type == RAE_TYPE_INT) res.%.*s.x = (double)field_val.as.i;\n", (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
+                  fprintf(out, "    field_val = rae_ext_json_get(val.as.s, \"y\"); if (field_val.type == RAE_TYPE_FLOAT) res.%.*s.y = field_val.as.f; else if (field_val.type == RAE_TYPE_INT) res.%.*s.y = (double)field_val.as.i;\n", (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
+                  fprintf(out, "    field_val = rae_ext_json_get(val.as.s, \"z\"); if (field_val.type == RAE_TYPE_FLOAT) res.%.*s.z = field_val.as.f; else if (field_val.type == RAE_TYPE_INT) res.%.*s.z = (double)field_val.as.i;\n", (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
+              } else if (str_eq_cstr(base, "Color")) {
+                  fprintf(out, "    RaeAny field_val;\n");
+                  fprintf(out, "    field_val = rae_ext_json_get(val.as.s, \"r\"); if (field_val.type == RAE_TYPE_INT) res.%.*s.r = field_val.as.i;\n", (int)f->name.len, f->name.data);
+                  fprintf(out, "    field_val = rae_ext_json_get(val.as.s, \"g\"); if (field_val.type == RAE_TYPE_INT) res.%.*s.g = field_val.as.i;\n", (int)f->name.len, f->name.data);
+                  fprintf(out, "    field_val = rae_ext_json_get(val.as.s, \"b\"); if (field_val.type == RAE_TYPE_INT) res.%.*s.b = field_val.as.i;\n", (int)f->name.len, f->name.data);
+                  fprintf(out, "    field_val = rae_ext_json_get(val.as.s, \"a\"); if (field_val.type == RAE_TYPE_INT) res.%.*s.a = field_val.as.i;\n", (int)f->name.len, f->name.data);
+              }
+              fprintf(out, "  }\n");
+          } else {
+              bool is_generic_param = false;
+              const AstIdentifierPart* gp = td->generic_params;
+              while (gp) {
+                  if (str_eq(gp->text, base)) { is_generic_param = true; break; }
+                  gp = gp->next;
+              }
+              if (is_generic_param || f->type->is_opt) {
+                  fprintf(out, "  res.%.*s = val;\n", (int)f->name.len, f->name.data);
+              } else {
+                  fprintf(out, "  if (val.type == RAE_TYPE_STRING) res.%.*s = rae_fromJson_%.*s_(val.as.s);\n", (int)f->name.len, f->name.data, (int)base.len, base.data);
+              }
+          }
+        } else if (find_enum_decl(module, base)) {
+          fprintf(out, "  if (val.type == RAE_TYPE_INT) res.%.*s = val.as.i;\n", (int)f->name.len, f->name.data);
+        }
+        f = f->next;
+      }
+      fprintf(out, "  return res;\n");
+      fprintf(out, "}\n\n");
+
+      // toBinary (Stubs for now)
+      fprintf(out, "RAE_UNUSED static void* rae_toBinary_%.*s_(%.*s* this, int64_t* out_size) {\n",
+              (int)td->name.len, td->name.data, (int)td->name.len, td->name.data);
+      fprintf(out, "  (void)this;\n");
+      fprintf(out, "  if (out_size) *out_size = 0;\n");
+      fprintf(out, "  return NULL;\n");
+      fprintf(out, "}\n\n");
+
+      // fromBinary (Stubs for now)
+      fprintf(out, "RAE_UNUSED static %.*s rae_fromBinary_%.*s_(void* data, int64_t size) {\n",
+              (int)td->name.len, td->name.data, (int)td->name.len, td->name.data);
+      fprintf(out, "  (void)data; (void)size;\n");
+      fprintf(out, "  %.*s res = {0};\n", (int)td->name.len, td->name.data);
+      fprintf(out, "  return res;\n");
+      fprintf(out, "}\n\n");
+    }
+  }
+  return true;
+}
+
 static bool emit_raylib_wrapper(const AstFuncDecl* fn, const char* c_name, FILE* out, const AstModule* module) {
   CFuncContext temp_ctx = {.module = module, .generic_params = fn->generic_params, .uses_raylib = true};
   const char* return_type = c_return_type(&temp_ctx, fn);
@@ -2795,7 +3281,10 @@ static bool emit_function(const AstModule* module, const AstFuncDecl* func, FILE
                       .local_count = 0,
                       .returns_value = returns_value,
                       .temp_counter = 0,
-                      .uses_raylib = uses_raylib};
+                      .uses_raylib = uses_raylib,
+                      .is_main = is_main,
+                      .scope_depth = 0,
+                      .defer_stack = {0}};
 
   // Populate initial locals from parameters
   const AstParam* p = func->params;
@@ -2836,12 +3325,17 @@ static bool emit_function(const AstModule* module, const AstFuncDecl* func, FILE
       p = p->next;
   }
                       
-  const AstStmt* stmt = func->body->first;
-  while (stmt && ok) {
-    ok = emit_stmt(&ctx, stmt, out);
-    stmt = stmt->next;
+  ctx.local_count = 0; // reset for actual emission if needed, wait no it's already populated
+  // Wait, I should probably NOT reset it here if I just populated it.
+  // Actually CFuncContext is local to this function.
+
+  if (!emit_block(&ctx, func->body, out)) {
+    ok = false;
   }
   
+  if (ok) {
+    if (!emit_defers(&ctx, 0, out)) ok = false;
+  }
 
   if (ok && is_main) {
     ok = fprintf(out, "  return 0;\n") >= 0;
@@ -2849,6 +3343,10 @@ static bool emit_function(const AstModule* module, const AstFuncDecl* func, FILE
   
   if (ok) {
     ok = fprintf(out, "}\n\n") >= 0;
+  }
+
+  if (ok && !is_main) {
+      ok = emit_spawn_wrapper(&ctx, func, out);
   }
   
   free(name);
@@ -2863,22 +3361,55 @@ static bool has_property(const AstProperty* props, const char* name) {
   return false;
 }
 
+static const AstModule* g_find_module_stack[64];
+static size_t g_find_module_stack_count = 0;
+
 static const AstDecl* find_type_decl(const AstModule* module, Str name) {
+  if (!module) return NULL;
   for (const AstDecl* decl = module->decls; decl; decl = decl->next) {
     if (decl->kind == AST_DECL_TYPE && str_eq(decl->as.type_decl.name, name)) {
       return decl;
     }
   }
-  return NULL;
+  
+  for (size_t i = 0; i < g_find_module_stack_count; i++) {
+      if (g_find_module_stack[i] == module) return NULL;
+  }
+  if (g_find_module_stack_count >= 64) return NULL;
+  g_find_module_stack[g_find_module_stack_count++] = module;
+
+  const AstDecl* found = NULL;
+  for (const AstImport* imp = module->imports; imp; imp = imp->next) {
+    found = find_type_decl(imp->module, name);
+    if (found) break;
+  }
+  
+  g_find_module_stack_count--;
+  return found;
 }
 
 static const AstDecl* find_enum_decl(const AstModule* module, Str name) {
+  if (!module) return NULL;
   for (const AstDecl* decl = module->decls; decl; decl = decl->next) {
     if (decl->kind == AST_DECL_ENUM && str_eq(decl->as.enum_decl.name, name)) {
       return decl;
     }
   }
-  return NULL;
+  
+  for (size_t i = 0; i < g_find_module_stack_count; i++) {
+      if (g_find_module_stack[i] == module) return NULL;
+  }
+  if (g_find_module_stack_count >= 64) return NULL;
+  g_find_module_stack[g_find_module_stack_count++] = module;
+
+  const AstDecl* found = NULL;
+  for (const AstImport* imp = module->imports; imp; imp = imp->next) {
+    found = find_enum_decl(imp->module, name);
+    if (found) break;
+  }
+  
+  g_find_module_stack_count--;
+  return found;
 }
 
 static bool emit_single_struct_def(const AstModule* module, const AstDecl* decl, FILE* out, 
@@ -3049,6 +3580,11 @@ bool c_backend_emit_module(const AstModule* module, const char* out_path, struct
     return false;
   }
 
+  if (!emit_json_methods(module, out, uses_raylib)) {
+    fclose(out);
+    return false;
+  }
+
   size_t func_count = 0;
   for (const AstDecl* decl = module->decls; decl; decl = decl->next) {
     if (decl->kind == AST_DECL_FUNC) {
@@ -3208,12 +3744,8 @@ static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
   if (fprintf(out, ") {\n") < 0) {
     return false;
   }
-  const AstStmt* inner = stmt->as.if_stmt.then_block->first;
-  while (inner) {
-    if (!emit_stmt(ctx, inner, out)) {
-      return false;
-    }
-    inner = inner->next;
+  if (!emit_block(ctx, stmt->as.if_stmt.then_block, out)) {
+    return false;
   }
   if (fprintf(out, "  }") < 0) {
     return false;
@@ -3222,12 +3754,8 @@ static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     if (fprintf(out, " else {\n") < 0) {
       return false;
     }
-    const AstStmt* else_stmt = stmt->as.if_stmt.else_block->first;
-    while (else_stmt) {
-      if (!emit_stmt(ctx, else_stmt, out)) {
-        return false;
-      }
-      else_stmt = else_stmt->next;
+    if (!emit_block(ctx, stmt->as.if_stmt.else_block, out)) {
+      return false;
     }
     if (fprintf(out, "  }") < 0) {
       return false;
@@ -3247,36 +3775,67 @@ static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
 
   // Wrap in scope to handle init variable lifetime
   if (fprintf(out, "  {\n") < 0) return false;
+  ctx->scope_depth++;
 
   if (stmt->as.loop_stmt.init) {
     if (!emit_stmt(ctx, stmt->as.loop_stmt.init, out)) {
+      ctx->scope_depth--;
       return false;
     }
   }
 
-  if (fprintf(out, "  while (") < 0) return false;
+  if (fprintf(out, "  while (") < 0) {
+    ctx->scope_depth--;
+    return false;
+  }
   if (stmt->as.loop_stmt.condition) {
-    if (!emit_expr(ctx, stmt->as.loop_stmt.condition, out, PREC_LOWEST, false)) return false;
-  } else {
-    if (fprintf(out, "1") < 0) return false;
-  }
-  if (fprintf(out, ") {\n") < 0) return false;
-
-  const AstStmt* inner = stmt->as.loop_stmt.body->first;
-  while (inner) {
-    if (!emit_stmt(ctx, inner, out)) {
+    if (!emit_expr(ctx, stmt->as.loop_stmt.condition, out, PREC_LOWEST, false)) {
+      ctx->scope_depth--;
       return false;
     }
-    inner = inner->next;
+  } else {
+    if (fprintf(out, "1") < 0) {
+      ctx->scope_depth--;
+      return false;
+    }
+  }
+  if (fprintf(out, ") {\n") < 0) {
+    ctx->scope_depth--;
+    return false;
+  }
+
+  if (!emit_block(ctx, stmt->as.loop_stmt.body, out)) {
+    ctx->scope_depth--;
+    return false;
   }
 
   if (stmt->as.loop_stmt.increment) {
-    if (fprintf(out, "  ") < 0) return false;
-    if (!emit_expr(ctx, stmt->as.loop_stmt.increment, out, PREC_LOWEST, false)) return false;
-    if (fprintf(out, ";\n") < 0) return false;
+    if (fprintf(out, "  ") < 0) {
+      ctx->scope_depth--;
+      return false;
+    }
+    if (!emit_expr(ctx, stmt->as.loop_stmt.increment, out, PREC_LOWEST, false)) {
+      ctx->scope_depth--;
+      return false;
+    }
+    if (fprintf(out, ";\n") < 0) {
+      ctx->scope_depth--;
+      return false;
+    }
   }
 
-  if (fprintf(out, "  }\n") < 0) return false;
+  if (fprintf(out, "  }\n") < 0) {
+    ctx->scope_depth--;
+    return false;
+  }
+  
+  if (!emit_defers(ctx, ctx->scope_depth, out)) {
+    ctx->scope_depth--;
+    return false;
+  }
+  pop_defers(ctx, ctx->scope_depth);
+  ctx->scope_depth--;
+
   if (fprintf(out, "  }\n") < 0) return false;
   return true;
 }
@@ -3474,12 +4033,8 @@ static bool emit_match(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
         return false;
       }
     }
-    const AstStmt* inner = current->block ? current->block->first : NULL;
-    while (inner) {
-      if (!emit_stmt(ctx, inner, out)) {
-        return false;
-      }
-      inner = inner->next;
+    if (!emit_block(ctx, current->block, out)) {
+      return false;
     }
     if (fprintf(out, "  }") < 0) {
       return false;
@@ -3488,26 +4043,19 @@ static bool emit_match(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     current = current->next;
   }
   if (default_case) {
-    const AstStmt* inner = default_case->block ? default_case->block->first : NULL;
     if (case_index > 0) {
       if (fprintf(out, " else {\n") < 0) {
         return false;
       }
-      while (inner) {
-        if (!emit_stmt(ctx, inner, out)) {
-          return false;
-        }
-        inner = inner->next;
+      if (!emit_block(ctx, default_case->block, out)) {
+        return false;
       }
       if (fprintf(out, "  }") < 0) {
         return false;
       }
     } else {
-      while (inner) {
-        if (!emit_stmt(ctx, inner, out)) {
-          return false;
-        }
-        inner = inner->next;
+      if (!emit_block(ctx, default_case->block, out)) {
+        return false;
       }
     }
   }

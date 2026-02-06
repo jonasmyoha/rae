@@ -1,0 +1,52 @@
+import "raylib"
+
+type Dimensions {
+  width: Float
+  height: Float
+}
+
+type Style {
+  color: Color
+  visible: Bool
+  opacity: Float
+}
+
+type Entity {
+  id: Int
+  name: String
+  pos: Vector3
+  size: Dimensions
+  style: Style
+}
+
+func main() {
+  let e: Entity = {
+    id: 42
+    name: "Golden Statue"
+    pos: { x: 100.0, y: 5.5, z: -20.0 }
+    size: { width: 2.0, height: 5.0 }
+    style: {
+      color: { r: 255, g: 215, b: 0, a: 255 }
+      visible: true
+      opacity: 0.9
+    }
+  }
+  
+  log("--- 1. Original Entity ---")
+  log("Name: {e.name}, Pos: {e.pos.x}, {e.pos.y}, {e.pos.z}")
+  
+  log("--- 2. To JSON ---")
+  let json: String = e.toJson()
+  log(json)
+
+  log("--- 3. From JSON ---")
+  let e2: Entity = Entity.fromJson(json: json)
+  log("Decoded Name: {e2.name}")
+  log("Decoded ID: {e2.id}")
+  log("Decoded Pos: {e2.pos.x}, {e2.pos.y}, {e2.pos.z}")
+  log("Decoded Style Visible: {e2.style.visible}")
+  log("Decoded Style Opacity: {e2.style.opacity}")
+  
+  # Check Raylib types specifically
+  log("Decoded Color R: {e2.style.color.r}")
+}

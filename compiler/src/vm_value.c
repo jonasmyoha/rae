@@ -54,13 +54,14 @@ Value value_none(void) {
   return value;
 }
 
-Value value_object(size_t field_count) {
+Value value_object(size_t field_count, const char* type_name) {
   Value value = {.type = VAL_OBJECT};
   value.as.object_value.field_count = field_count;
   value.as.object_value.fields = malloc(field_count * sizeof(Value));
+  value.as.object_value.type_name = type_name ? strdup(type_name) : NULL;
   if (value.as.object_value.fields) {
     for (size_t i = 0; i < field_count; i++) {
-      value.as.object_value.fields[i].type = VAL_NONE;
+      value.as.object_value.fields[i] = value_none();
     }
   }
   return value;
@@ -141,6 +142,103 @@ Value value_key_copy(const char* data, size_t length) {
   return value;
 }
 
+Value value_to_json(const Value* value, VmFieldNamesResolver resolver, void* user_data) {
+  if (!value) return value_string_copy("null", 4);
+  
+  char buffer[1024]; // Simple buffer for now
+  switch (value->type) {
+    case VAL_NONE: return value_string_copy("null", 4);
+    case VAL_BOOL: return value_string_copy(value->as.bool_value ? "true" : "false", value->as.bool_value ? 4 : 5);
+    case VAL_INT: {
+      int len = snprintf(buffer, sizeof(buffer), "%lld", (long long)value->as.int_value);
+      return value_string_copy(buffer, len);
+    }
+    case VAL_FLOAT: {
+      int len = snprintf(buffer, sizeof(buffer), "%g", value->as.float_value);
+      return value_string_copy(buffer, len);
+    }
+    case VAL_STRING: {
+      // Very basic escaping for now
+      int len = snprintf(buffer, sizeof(buffer), "\"%s\"", value->as.string_value.chars ? value->as.string_value.chars : "");
+      return value_string_copy(buffer, len);
+    }
+    case VAL_OBJECT: {
+      const char* type_name = value->as.object_value.type_name;
+      size_t field_count = 0;
+      const char** field_names = NULL;
+      if (type_name && resolver) {
+          field_names = resolver(user_data, type_name, &field_count);
+      }
+      
+      if (!field_names || field_count != value->as.object_value.field_count) {
+          return value_string_copy("{}", 2);
+      }
+
+      // Pre-calculate length
+      size_t total_len = 2; // { }
+      for (size_t i = 0; i < field_count; i++) {
+          total_len += strlen(field_names[i]) + 4; // "name": 
+          Value field_json = value_to_json(&value->as.object_value.fields[i], resolver, user_data);
+          total_len += field_json.as.string_value.length;
+          value_free(&field_json);
+          if (i < field_count - 1) total_len += 2; // , 
+      }
+
+      char* res = malloc(total_len + 1);
+      strcpy(res, "{");
+      for (size_t i = 0; i < field_count; i++) {
+          strcat(res, "\"");
+          strcat(res, field_names[i]);
+          strcat(res, "\": ");
+          Value field_json = value_to_json(&value->as.object_value.fields[i], resolver, user_data);
+          strcat(res, field_json.as.string_value.chars);
+          value_free(&field_json);
+          if (i < field_count - 1) strcat(res, ", ");
+      }
+      strcat(res, "}");
+      Value result = value_string_take(res, total_len);
+      return result;
+    }
+    default:
+      return value_string_copy("null", 4);
+  }
+}
+
+Value value_to_binary(const Value* value) {
+  if (!value) return value_buffer(0);
+  
+  // Very simple binary format: type byte + data
+  // For primitive types it's fixed size. For strings/objects it's variable.
+  switch (value->type) {
+    case VAL_INT: {
+      Value buf = value_buffer(9);
+      buf.as.buffer_value->items[0] = value_int(VAL_INT);
+      buf.as.buffer_value->items[1] = value_int(value->as.int_value);
+      buf.as.buffer_value->count = 2;
+      return buf;
+    }
+    // ... Simplified: just return a dummy for now to verify pipeline
+    default: {
+      Value buf = value_buffer(1);
+      buf.as.buffer_value->items[0] = value_int(value->type);
+      buf.as.buffer_value->count = 1;
+      return buf;
+    }
+  }
+}
+
+Value value_from_binary(const Value* buffer, const char* type_name, VmFieldNamesResolver resolver, void* user_data) {
+    (void)type_name; (void)resolver; (void)user_data;
+    if (!buffer || buffer->type != VAL_BUFFER || buffer->as.buffer_value->count < 1) return value_none();
+    
+    Value type_val = buffer->as.buffer_value->items[0];
+    if (type_val.type == VAL_INT && type_val.as.int_value == VAL_INT && buffer->as.buffer_value->count >= 2) {
+        return value_copy(&buffer->as.buffer_value->items[1]);
+    }
+    
+    return value_none();
+}
+
 Value value_copy(const Value* value) {
   if (!value) return value_none();
   
@@ -167,6 +265,7 @@ Value value_copy(const Value* value) {
           copy.as.object_value.fields[i] = value_copy(&value->as.object_value.fields[i]);
         }
       }
+      copy.as.object_value.type_name = value->as.object_value.type_name ? strdup(value->as.object_value.type_name) : NULL;
       break;
     case VAL_ARRAY:
       if (value->as.array_value) {
@@ -203,12 +302,18 @@ void value_free(Value* value) {
     free(value->as.key_value.chars);
     value->as.key_value.chars = NULL;
     value->as.key_value.length = 0;
-  } else if (value->type == VAL_OBJECT && value->as.object_value.fields) {
-    for (size_t i = 0; i < value->as.object_value.field_count; ++i) {
-      value_free(&value->as.object_value.fields[i]);
+  } else if (value->type == VAL_OBJECT) {
+    if (value->as.object_value.fields) {
+      for (size_t i = 0; i < value->as.object_value.field_count; ++i) {
+        value_free(&value->as.object_value.fields[i]);
+      }
+      free(value->as.object_value.fields);
     }
-    free(value->as.object_value.fields);
+    if (value->as.object_value.type_name) {
+      free(value->as.object_value.type_name);
+    }
     value->as.object_value.fields = NULL;
+    value->as.object_value.type_name = NULL;
     value->as.object_value.field_count = 0;
   } else if (value->type == VAL_ARRAY && value->as.array_value) {
     ValueArray* va = value->as.array_value;
