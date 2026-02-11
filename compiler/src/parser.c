@@ -1114,6 +1114,8 @@ static AstExpr* parse_primary(Parser* parser) {
   // If not a typed object literal, proceed with other primary expressions
   switch (token->kind) {
     case TOK_KW_VAL:
+    case TOK_KW_ID:
+    case TOK_KW_KEY:
     case TOK_IDENT: {
       parser_advance(parser); // Already peeked and confirmed not a typed object literal
       AstExpr* expr = new_expr(parser, AST_EXPR_IDENT, token);

@@ -1,0 +1,39 @@
+import "sys"
+
+func main() {
+  log("1. Hashing password...")
+  let pwd: String = "password123"
+  let salt: String = "saltsaltsalt"
+  let hash: Buffer(Int) = __buf_alloc(size: 32)
+  # 1 block (1KB), 1 iteration, 32 bytes output
+  sys.rae_crypto_argon2i(password: pwd, salt: salt, nb_blocks: 1, nb_iterations: 1, hash_buf: hash, hash_len: 32)
+  log("Hash generated (32 bytes).")
+  
+  log("2. Encrypting data...")
+  let key: Buffer(Int) = hash # Use hash as key
+  let nonce: Buffer(Int) = __buf_alloc(size: 24) # Zero nonce for demo
+  
+  let msgLen: Int = 3
+  let plain: Buffer(Int) = __buf_alloc(size: msgLen)
+  __buf_set(buf: plain, index: 0, value: 65) # 'A'
+  __buf_set(buf: plain, index: 1, value: 66) # 'B'
+  __buf_set(buf: plain, index: 2, value: 67) # 'C'
+  
+  let mac: Buffer(Int) = __buf_alloc(size: 16)
+  let cipher: Buffer(Int) = __buf_alloc(size: msgLen)
+  
+  sys.encrypt(key: key, nonce: nonce, plain: plain, len: msgLen, mac: mac, cipher: cipher)
+  log("Encryption done.")
+  
+  log("3. Decrypting data...")
+  let recovered: Buffer(Int) = __buf_alloc(size: msgLen)
+  if sys.decrypt(key: key, nonce: nonce, mac: mac, cipher: cipher, len: msgLen, plain: recovered) {
+    log("Decryption successful!")
+    let v0: Int = __buf_get(buf: recovered, index: 0)
+    let v1: Int = __buf_get(buf: recovered, index: 1)
+    let v2: Int = __buf_get(buf: recovered, index: 2)
+    log("Recovered: {v0}, {v1}, {v2}")
+  } else {
+    log("ERROR: Decryption failed.")
+  }
+}
