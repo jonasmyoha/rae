@@ -358,7 +358,9 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         }
         const VmNativeEntry* entry = vm_registry_find_native(vm->registry, symbol.as.string_value.chars);
         if (!entry || !entry->callback) {
-          diag_error(NULL, 0, 0, "native function not registered");
+          char buffer[128];
+          snprintf(buffer, sizeof(buffer), "native function not registered: %s", symbol.as.string_value.chars);
+          diag_error(NULL, 0, 0, buffer);
           return VM_RUNTIME_ERROR;
         }
         

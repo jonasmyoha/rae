@@ -100,6 +100,44 @@ static bool str_matches(Str a, Str b) {
   return a.len == b.len && strncmp(a.data, b.data, a.len) == 0;
 }
 
+static bool is_stdlib_module(Str name) {
+    return str_eq_cstr(name, "core") || 
+           str_eq_cstr(name, "math") || 
+           str_eq_cstr(name, "io") || 
+           str_eq_cstr(name, "string") || 
+           str_eq_cstr(name, "sys") ||
+           str_eq_cstr(name, "raylib") ||
+           str_eq_cstr(name, "time") ||
+           str_eq_cstr(name, "easing") ||
+           str_eq_cstr(name, "tinyexpr") ||
+           str_eq_cstr(name, "list2");
+}
+
+static bool is_module_import(BytecodeCompiler* compiler, Str name) {
+    if (is_stdlib_module(name)) return true;
+    if (!compiler->module) return false;
+    for (const AstImport* imp = compiler->module->imports; imp; imp = imp->next) {
+        Str path = imp->path;
+        const char* last_slash = NULL;
+        for (size_t i = 0; i < path.len; i++) {
+            if (path.data[i] == '/' || path.data[i] == '\\') {
+                last_slash = &path.data[i];
+            }
+        }
+        
+        Str mod_name;
+        if (last_slash) {
+            mod_name.data = last_slash + 1;
+            mod_name.len = (path.data + path.len) - (last_slash + 1);
+        } else {
+            mod_name = path;
+        }
+        
+        if (str_matches(mod_name, name)) return true;
+    }
+    return false;
+}
+
 FunctionEntry* function_table_find(FunctionTable* table, Str name) {
   if (!table) return NULL;
   for (size_t i = 0; i < table->count; ++i) {
@@ -114,10 +152,10 @@ static bool is_primitive_type(Str type_name) {
   return str_eq_cstr(type_name, "Int") || 
          str_eq_cstr(type_name, "Float") || 
          str_eq_cstr(type_name, "Bool") || 
-         str_eq_cstr(type_name, "Char") ||
-         str_eq_cstr(type_name, "String") ||
-         str_eq_cstr(type_name, "Array") ||
-         str_eq_cstr(type_name, "Buffer") ||
+         str_eq_cstr(type_name, "Char") || 
+         str_eq_cstr(type_name, "String") || 
+         str_eq_cstr(type_name, "Array") || 
+         str_eq_cstr(type_name, "Buffer") || 
          str_eq_cstr(type_name, "Any");
 }
 
@@ -1691,7 +1729,55 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
     }
     case AST_EXPR_METHOD_CALL: {
       Str method_name = expr->as.method_call.method_name;
-      
+      const AstExpr* receiver = expr->as.method_call.object;
+
+      // Check if it's a module call like sys.exit()
+      if (receiver->kind == AST_EXPR_IDENT && is_module_import(compiler, receiver->as.ident)) {
+          Str mod_name = receiver->as.ident;
+          uint32_t arg_count = 0;
+          for (const AstCallArg* arg = expr->as.method_call.args; arg; arg = arg->next) arg_count++;
+          
+          Str* arg_types = NULL;
+          if (arg_count > 0) {
+              arg_types = malloc(arg_count * sizeof(Str));
+              const AstCallArg* arg = expr->as.method_call.args;
+              for (uint32_t i = 0; i < arg_count; i++) {
+                  arg_types[i] = infer_expr_type(compiler, arg->value);
+                  arg = arg->next;
+              }
+          }
+          
+          // Match in function table (without mod prefix, as they are currently flat in FunctionTable)
+          FunctionEntry* entry = function_table_find_overload(&compiler->functions, method_name, arg_types, arg_count);
+          free(arg_types);
+          
+          if (entry) {
+              // Compile args
+              const AstCallArg* arg = expr->as.method_call.args;
+              while (arg) {
+                  if (!compile_expr(compiler, arg->value)) return false;
+                  arg = arg->next;
+              }
+              return emit_function_call(compiler, entry, (int)expr->line, (int)expr->column, (uint8_t)arg_count);
+          }
+          
+          // If not found in Rae functions, maybe it's a native with prefix mod.member
+          char* combined = malloc(mod_name.len + method_name.len + 2);
+          sprintf(combined, "%.*s.%.*s", (int)mod_name.len, mod_name.data, (int)method_name.len, method_name.data);
+          Str full_name = str_from_buf(combined, strlen(combined));
+          
+          // Compile args
+          const AstCallArg* arg = expr->as.method_call.args;
+          while (arg) {
+              if (!compile_expr(compiler, arg->value)) { free(combined); return false; }
+              arg = arg->next;
+          }
+          
+          bool ok = emit_native_call(compiler, full_name, (uint8_t)arg_count, (int)expr->line, (int)expr->column);
+          free(combined);
+          return ok;
+      }
+
       // Handle built-in toString() for all types
       if (str_eq_cstr(method_name, "toString")) {
           if (!compile_expr(compiler, expr->as.method_call.object)) return false;
@@ -1769,7 +1855,6 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       free(arg_types);
 
       // Compile the receiver ('this')
-      const AstExpr* receiver = expr->as.method_call.object;
       
       // We need to decide whether to pass the receiver as a reference or a value.
       // For now, in the VM, we often prefer mod reference for potential mutation

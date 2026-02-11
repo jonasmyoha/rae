@@ -29,12 +29,13 @@ SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/vm_compiler.c \
        $(SRC_DIR)/vm_registry.c \
        $(SRC_DIR)/vm_raylib.c \
-       $(SRC_DIR)/vm_tinyexpr.c
+       $(SRC_DIR)/vm_tinyexpr.c \
+       $(SRC_DIR)/vm_monocypher.c
 
-EXT_SRCS = ../third_party/tinyexpr/rae_tinyexpr.c
+EXT_SRCS = ../third_party/tinyexpr/rae_tinyexpr.c ../third_party/monocypher/monocypher.c
 
 OBJS = $(SRCS:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)
-OBJS += $(BUILD_DIR)/rae_tinyexpr.o
+OBJS += $(BUILD_DIR)/rae_tinyexpr.o $(BUILD_DIR)/monocypher.o
 
 TARGET = $(BIN_DIR)/rae
 TEST_RUNNER = tools/run_tests.sh
@@ -45,7 +46,7 @@ all: build
 
 build: $(TARGET)
 
-$(BIN_DIR)/rae: $(BUILD_DIR)/main.o $(BUILD_DIR)/arena.o $(BUILD_DIR)/str.o $(BUILD_DIR)/diag.o $(BUILD_DIR)/lexer.o $(BUILD_DIR)/ast.o $(BUILD_DIR)/parser.o $(BUILD_DIR)/pretty.o $(BUILD_DIR)/c_backend.o $(BUILD_DIR)/raepack.o $(BUILD_DIR)/vm_chunk.o $(BUILD_DIR)/vm_value.o $(BUILD_DIR)/vm.o $(BUILD_DIR)/vm_compiler.o $(BUILD_DIR)/vm_registry.o $(BUILD_DIR)/vm_raylib.o $(BUILD_DIR)/vm_tinyexpr.o $(BUILD_DIR)/rae_tinyexpr.o $(BUILD_DIR)/sys_thread.o $(BUILD_DIR)/vm_patch.o $(BUILD_DIR)/rae_runtime.o
+$(BIN_DIR)/rae: $(BUILD_DIR)/main.o $(BUILD_DIR)/arena.o $(BUILD_DIR)/str.o $(BUILD_DIR)/diag.o $(BUILD_DIR)/lexer.o $(BUILD_DIR)/ast.o $(BUILD_DIR)/parser.o $(BUILD_DIR)/pretty.o $(BUILD_DIR)/c_backend.o $(BUILD_DIR)/raepack.o $(BUILD_DIR)/vm_chunk.o $(BUILD_DIR)/vm_value.o $(BUILD_DIR)/vm.o $(BUILD_DIR)/vm_compiler.o $(BUILD_DIR)/vm_registry.o $(BUILD_DIR)/vm_raylib.o $(BUILD_DIR)/vm_tinyexpr.o $(BUILD_DIR)/vm_monocypher.o $(BUILD_DIR)/rae_tinyexpr.o $(BUILD_DIR)/monocypher.o $(BUILD_DIR)/sys_thread.o $(BUILD_DIR)/vm_patch.o $(BUILD_DIR)/rae_runtime.o
 	@mkdir -p $(BIN_DIR)
 	$(CC) -o $@ $^ $(LDFLAGS)
 
@@ -68,6 +69,10 @@ $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
 $(BUILD_DIR)/rae_tinyexpr.o: ../third_party/tinyexpr/rae_tinyexpr.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -Wno-error -Wno-pedantic -Wno-gnu-zero-variadic-macro-arguments -c -o $@ $<
+
+$(BUILD_DIR)/monocypher.o: ../third_party/monocypher/monocypher.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -Wno-error -Wno-pedantic -c -o $@ $<
 
 test: build
 	@chmod +x $(TEST_RUNNER)

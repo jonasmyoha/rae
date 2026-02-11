@@ -32,6 +32,18 @@ typedef enum {
 } RaeType;
 
 typedef struct {
+  void* data;
+  int64_t length;
+  int64_t capacity;
+} RaeList;
+
+typedef struct {
+  void* data;
+  int64_t length;
+  int64_t capacity;
+} RaeMap;
+
+typedef struct {
   RaeType type;
   union {
     int64_t i;
@@ -114,6 +126,11 @@ void rae_ext_rae_sys_exit(int64_t code);
 const char* rae_ext_rae_sys_get_env(const char* name);
 const char* rae_ext_rae_sys_read_file(const char* path);
 int8_t rae_ext_rae_sys_write_file(const char* path, const char* content);
+int8_t rae_ext_rae_sys_rename(const char* oldPath, const char* newPath);
+int8_t rae_ext_rae_sys_delete(const char* path);
+int8_t rae_ext_rae_sys_exists(const char* path);
+int8_t rae_ext_rae_sys_lock_file(const char* path);
+int8_t rae_ext_rae_sys_unlock_file(const char* path);
 
 const char* rae_ext_rae_str_i64(int64_t v);
 const char* rae_ext_rae_str_i64_ptr(const int64_t* v);

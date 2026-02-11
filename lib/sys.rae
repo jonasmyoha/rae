@@ -7,6 +7,22 @@ func rae_sys_read_file(path: String) extern ret opt String
 
 func rae_sys_write_file(path: String, content: String) extern ret Bool
 
+func rae_sys_rename(oldPath: String, newPath: String) extern ret Bool
+
+func rae_sys_delete(path: String) extern ret Bool
+
+func rae_sys_exists(path: String) extern ret Bool
+
+func rae_sys_lock_file(path: String) extern ret Bool
+
+func rae_sys_unlock_file(path: String) extern ret Bool
+
+func rae_crypto_argon2i(password: String, salt: String, nb_blocks: Int, nb_iterations: Int, hash_buf: Any, hash_len: Int) extern
+
+func rae_crypto_lock(key: Any, nonce: Any, plain: Any, plain_len: Int, mac: Any, cipher: Any) extern
+
+func rae_crypto_unlock(key: Any, nonce: Any, mac: Any, cipher: Any, cipher_len: Int, plain: Any) extern ret Int
+
 func exit(code: Int) {
   rae_sys_exit(code: code)
 }
@@ -21,4 +37,32 @@ func readFile(path: String) ret opt String {
 
 func writeFile(path: String, content: String) ret Bool {
   ret rae_sys_write_file(path: path, content: content)
+}
+
+func rename(oldPath: String, newPath: String) ret Bool {
+  ret rae_sys_rename(oldPath: oldPath, newPath: newPath)
+}
+
+func delete(path: String) ret Bool {
+  ret rae_sys_delete(path: path)
+}
+
+func exists(path: String) ret Bool {
+  ret rae_sys_exists(path: path)
+}
+
+func lockFile(path: String) ret Bool {
+  ret rae_sys_lock_file(path: path)
+}
+
+func unlockFile(path: String) ret Bool {
+  ret rae_sys_unlock_file(path: path)
+}
+
+func encrypt(key: Any, nonce: Any, plain: Any, len: Int, mac: Any, cipher: Any) {
+  rae_crypto_lock(key: key, nonce: nonce, plain: plain, plain_len: len, mac: mac, cipher: cipher)
+}
+
+func decrypt(key: Any, nonce: Any, mac: Any, cipher: Any, len: Int, plain: Any) ret Bool {
+  ret rae_crypto_unlock(key: key, nonce: nonce, mac: mac, cipher: cipher, cipher_len: len, plain: plain) is 0
 }
