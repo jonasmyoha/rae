@@ -730,10 +730,10 @@ static bool native_rae_random_int(struct VM* vm,
 }
 
 static bool native_rae_int_to_float(struct VM* vm,
-                                    VmNativeResult* out_result,
-                                    const Value* args,
-                                    size_t arg_count,
-                                    void* user_data) {
+                                VmNativeResult* out_result,
+                                const Value* args,
+                                size_t arg_count,
+                                void* user_data) {
   (void)vm; (void)user_data;
   if (arg_count != 1) return false;
   const Value* val = deref_value(&args[0]);
@@ -743,6 +743,19 @@ static bool native_rae_int_to_float(struct VM* vm,
   return true;
 }
 
+static bool native_rae_float_to_int(struct VM* vm,
+                                VmNativeResult* out_result,
+                                const Value* args,
+                                size_t arg_count,
+                                void* user_data) {
+  (void)vm; (void)user_data;
+  if (arg_count != 1) return false;
+  const Value* val = deref_value(&args[0]);
+  if (val->type != VAL_FLOAT) return false;
+  out_result->has_value = true;
+  out_result->value = value_int((int64_t)val->as.float_value);
+  return true;
+}
 #define MATH_UNARY_OP(name, fn) \
 static bool native_rae_math_##name(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) { \
   (void)vm; (void)user_data; \
@@ -823,6 +836,7 @@ static bool register_default_natives(VmRegistry* registry, TickCounter* tick_cou
   ok = vm_registry_register_native(registry, "rae_str_to_f64", native_rae_str_to_f64, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_str_to_i64", native_rae_str_to_i64, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_int_to_float", native_rae_int_to_float, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_float_to_int", native_rae_float_to_int, NULL) && ok;
   ok = vm_registry_register_native(registry, "readLine", native_rae_io_read_line, NULL) && ok;
   ok = vm_registry_register_native(registry, "readChar", native_rae_io_read_char, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_io_read_line", native_rae_io_read_line, NULL) && ok;

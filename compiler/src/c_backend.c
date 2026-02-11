@@ -204,6 +204,22 @@ static bool type_refs_equal(const AstTypeRef* a, const AstTypeRef* b) {
     
     if (a->is_opt != b->is_opt || a->is_view != b->is_view || a->is_mod != b->is_mod) return false;
     
+    // Erasure logic: If both are Rae generic types (not Buffer/Array), 
+    // then they are equal if they have the same argument count.
+    if (a->generic_args && b->generic_args && a->parts && b->parts) {
+        Str base = a->parts->text;
+        if (!str_eq_cstr(base, "Buffer") && !str_eq_cstr(base, "Array")) {
+            // Check arg count
+            const AstTypeRef* aa = a->generic_args;
+            const AstTypeRef* ab = b->generic_args;
+            while (aa && ab) {
+                aa = aa->next;
+                ab = ab->next;
+            }
+            return aa == NULL && ab == NULL;
+        }
+    }
+
     const AstTypeRef* aa = a->generic_args;
     const AstTypeRef* ab = b->generic_args;
     while (aa && ab) {
@@ -215,17 +231,23 @@ static bool type_refs_equal(const AstTypeRef* a, const AstTypeRef* b) {
 }
 
 static void register_generic_type(const AstTypeRef* type) {
-    if (!type || !type->generic_args) return;
+    if (!type || !type->generic_args || !type->parts) return;
+    
+    // Canonicalize: Rae generic types (like List, Map) are ALWAYS erased to Any in the C backend.
+    // Native types like Buffer are specialized.
+    // type_refs_equal already handles the logic of equating single-letter generic params to Any.
+    
     for (size_t i = 0; i < g_generic_type_count; i++) {
         if (type_refs_equal(g_generic_types[i], type)) return;
     }
+    
     if (g_generic_type_count < 512) {
         g_generic_types[g_generic_type_count++] = type;
-    }
-    
-    // Recursively register generic arguments
-    for (const AstTypeRef* a = type->generic_args; a; a = a->next) {
-        register_generic_type(a);
+        
+        // Register recursive generic types (e.g., List(List(T)))
+        for (const AstTypeRef* a = type->generic_args; a; a = a->next) {
+            register_generic_type(a);
+        }
     }
 }
 
@@ -284,19 +306,21 @@ static void emit_mangled_type_name_ext(const AstTypeRef* type, FILE* out, bool e
     fprintf(out, "rae_%.*s", (int)base.len, base.data);
     if (type->generic_args) {
         fprintf(out, "_");
+        
+        // Rae generic types (like List, Map) are ALWAYS erased to Any in the C backend
+        // to share code and struct definitions. Native types like Buffer are specialized.
+        bool force_erase = erased || (!str_eq_cstr(base, "Buffer") && !str_eq_cstr(base, "Array"));
+
         for (const AstTypeRef* a = type->generic_args; a; a = a->next) {
-            if (erased) {
+            Str ab = get_base_type_name(a);
+            bool is_gen_param = (ab.len == 1 && ab.data[0] >= 'A' && ab.data[0] <= 'Z');
+
+            if (force_erase || is_gen_param) {
                 fprintf(out, "Any_");
             } else if (a->generic_args) {
                 emit_mangled_type_name_ext(a, out, erased);
             } else {
-                Str ab = get_base_type_name(a);
-                // If it looks like a generic parameter (single char), call it Any
-                if (ab.len == 1 && ab.data[0] >= 'A' && ab.data[0] <= 'Z') {
-                    fprintf(out, "Any_");
-                } else {
-                    fprintf(out, "%.*s_", (int)ab.len, ab.data);
-                }
+                fprintf(out, "%.*s_", (int)ab.len, ab.data);
             }
         }
     }
@@ -3317,9 +3341,10 @@ static const NativeMap RAYLIB_MAP[] = {
     {"unloadTexture", "UnloadTexture"},
     {"drawTexture", "DrawTexture"},
     {"drawTextureEx", "DrawTextureEx"},
-    {"drawRectangle", "DrawRectangle"},
-    {"drawRectangleLines", "DrawRectangleLines"},
+    {"drawRectangleGradientV", "DrawRectangleGradientV"},
+    {"drawRectangleGradientH", "DrawRectangleGradientH"},
     {"drawCircle", "DrawCircle"},
+    {"drawCircleGradient", "DrawCircleGradient"},
     {"drawText", "DrawText"},
     {"drawCube", "DrawCube"},
     {"drawSphere", "DrawSphere"},
@@ -3527,15 +3552,31 @@ static bool emit_json_methods(CFuncContext* ctx, FILE* out, bool uses_raylib) {
   }
 
   // 3. Specialized generic JSON methods
-  for (size_t i = 0; i < g_emitted_generic_type_count; i++) {
-    fprintf(out, "RAE_UNUSED static const char* rae_toJson_");
-    emit_mangled_type_name(g_emitted_generic_types[i], out);
-    fprintf(out, "_(void* this) {\n");
+  static char* emitted_names[512];
+  size_t emitted_count = 0;
+
+  for (size_t i = 0; i < g_generic_type_count; i++) {
+    char* mangled = mangled_type_name_to_cstr(g_generic_types[i]);
+    bool duplicate = false;
+    for (size_t j = 0; j < emitted_count; j++) {
+        if (strcmp(emitted_names[j], mangled) == 0) {
+            duplicate = true;
+            break;
+        }
+    }
+    if (duplicate) {
+        free(mangled);
+        continue;
+    }
+    emitted_names[emitted_count++] = mangled;
+
+    fprintf(out, "RAE_UNUSED static const char* rae_toJson_%s_(void* this) {\n", mangled);
     fprintf(out, "  (void)this;\n");
     fprintf(out, "  return \"{}\";\n");
     fprintf(out, "}\n\n");
   }
 
+  for (size_t i = 0; i < emitted_count; i++) free(emitted_names[i]);
   return true;
 }
 
@@ -3547,8 +3588,20 @@ static bool emit_raylib_wrapper(const AstFuncDecl* fn, const char* c_name, FILE*
   // If it's one of the ones we put in rae_runtime.c, don't emit implementation here
   if (str_eq_cstr(fn->name, "initWindow") || 
       str_eq_cstr(fn->name, "setConfigFlags") ||
+      str_eq_cstr(fn->name, "drawCube") ||
       str_eq_cstr(fn->name, "drawCubeWires") ||
       str_eq_cstr(fn->name, "drawSphere") ||
+      str_eq_cstr(fn->name, "drawCircle") ||
+      str_eq_cstr(fn->name, "drawCircleGradient") ||
+      str_eq_cstr(fn->name, "drawRectangle") ||
+      str_eq_cstr(fn->name, "drawRectangleLines") ||
+      str_eq_cstr(fn->name, "drawRectangleGradientV") ||
+      str_eq_cstr(fn->name, "drawRectangleGradientH") ||
+      str_eq_cstr(fn->name, "drawCylinder") ||
+      str_eq_cstr(fn->name, "drawGrid") ||
+      str_eq_cstr(fn->name, "beginMode3D") ||
+      str_eq_cstr(fn->name, "endMode3D") ||
+      str_eq_cstr(fn->name, "drawText") ||
       str_eq_cstr(fn->name, "getTime") ||
       str_eq_cstr(fn->name, "colorFromHSV")) {
       return true;
@@ -3926,19 +3979,53 @@ static bool emit_struct_defs(const AstModule* module, FILE* out, bool uses_rayli
   }
 
   // 2. Forward declarations for specialized generic structs
+  // Track which mangled names we've already emitted to avoid redefinitions
+  static char* emitted_generic_names[512];
+  size_t emitted_generic_count = 0;
+
   for (size_t i = 0; i < g_generic_type_count; i++) {
-    fprintf(out, "typedef struct ");
-    emit_mangled_type_name(g_generic_types[i], out);
-    fprintf(out, " ");
-    emit_mangled_type_name(g_generic_types[i], out);
-    fprintf(out, ";\n");
+    char* mangled = mangled_type_name_to_cstr(g_generic_types[i]);
+    bool duplicate = false;
+    for (size_t j = 0; j < emitted_generic_count; j++) {
+        if (strcmp(emitted_generic_names[j], mangled) == 0) {
+            duplicate = true;
+            break;
+        }
+    }
+    if (duplicate) {
+        free(mangled);
+        continue;
+    }
+    
+    emitted_generic_names[emitted_generic_count++] = mangled;
+    fprintf(out, "typedef struct %s %s;\n", mangled, mangled);
   }
   fprintf(out, "\n");
 
   // 3. Specialized generic structs
+  // Reset tracking for implementations
+  for (size_t i = 0; i < emitted_generic_count; i++) free(emitted_generic_names[i]);
+  emitted_generic_count = 0;
+
   for (size_t i = 0; i < g_generic_type_count; i++) {
+    char* mangled = mangled_type_name_to_cstr(g_generic_types[i]);
+    bool duplicate = false;
+    for (size_t j = 0; j < emitted_generic_count; j++) {
+        if (strcmp(emitted_generic_names[j], mangled) == 0) {
+            duplicate = true;
+            break;
+        }
+    }
+    if (duplicate) {
+        free(mangled);
+        continue;
+    }
+    
+    emitted_generic_names[emitted_generic_count++] = mangled;
     if (!emit_specialized_struct_def(module, g_generic_types[i], out, uses_raylib)) return false;
   }
+  
+  for (size_t i = 0; i < emitted_generic_count; i++) free(emitted_generic_names[i]);
   return true;
 }
 
