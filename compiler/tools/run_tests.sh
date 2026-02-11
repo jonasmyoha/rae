@@ -195,7 +195,7 @@ for TARGET in "${TARGETS[@]}"; do
         DISPLAY_NAME="$TEST_NAME [hot-reload]"
         SKIP_EXEC=1
     elif [ "${CMD_RUN_ARGS[0]}" = "run" ]; then
-        CMD_RUN_ARGS=("run" "--target" "$TARGET" "$TEST_FILE")
+        CMD_RUN_ARGS=("run" "--target" "$TARGET" "${CMD_RUN_ARGS[@]:1}" "$TEST_FILE")
     elif [ "${CMD_RUN_ARGS[0]}" = "build" ]; then
         CMD_RUN_ARGS=("build" "${CMD_RUN_ARGS[@]:1}" "$TEST_FILE")
     elif [ $APPEND_TEST_FILE -eq 1 ]; then

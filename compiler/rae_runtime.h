@@ -187,6 +187,7 @@ void rae_spawn(void* (*func)(void*), void* data);
 RaeAny rae_ext_json_get(const char* json, const char* field);
 
 double rae_ext_rae_int_to_float(int64_t i);
+int64_t rae_ext_rae_float_to_int(double f);
 
 /* Math Primitives */
 double rae_ext_rae_math_sin(double x);
@@ -211,6 +212,18 @@ void rae_ext_initWindow(int64_t width, int64_t height, const char* title);
 void rae_ext_setConfigFlags(int64_t flags);
 void rae_ext_drawCubeWires(Vector3 pos, double width, double height, double length, Color color);
 void rae_ext_drawSphere(Vector3 centerPos, double radius, Color color);
+void rae_ext_drawCylinder(Vector3 position, double radiusTop, double radiusBottom, double height, int64_t slices, Color color);
+void rae_ext_drawGrid(int64_t slices, double spacing);
+void rae_ext_beginMode3D(Camera3D camera);
+void rae_ext_endMode3D(void);
+void rae_ext_drawRectangle(double x, double y, double width, double height, Color color);
+void rae_ext_drawRectangleLines(double x, double y, double width, double height, Color color);
+void rae_ext_drawCube(Vector3 pos, double width, double height, double length, Color color);
+void rae_ext_drawText(const char* text, double x, double y, double fontSize, Color color);
+void rae_ext_drawCircle(double x, double y, double radius, Color color);
+void rae_ext_drawCircleGradient(int64_t x, int64_t y, double radius, Color color1, Color color2);
+void rae_ext_drawRectangleGradientV(int64_t x, int64_t y, int64_t width, int64_t height, Color color1, Color color2);
+void rae_ext_drawRectangleGradientH(int64_t x, int64_t y, int64_t width, int64_t height, Color color1, Color color2);
 double rae_ext_getTime(void);
 Color rae_ext_colorFromHSV(double hue, double saturation, double value);
 #endif
