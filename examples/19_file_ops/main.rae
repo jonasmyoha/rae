@@ -1,0 +1,33 @@
+import "sys"
+
+func main() {
+  let path: String = "test_file.txt"
+  let newPath: String = "renamed_file.txt"
+  
+  log("1. Writing file...")
+  writeFile(path: path, content: "Hello Rae File System!")
+  
+  if exists(path: path) {
+    log("2. File exists correctly.")
+  } else {
+    log("2. ERROR: File does not exist after write.")
+  }
+  
+  log("3. Renaming file...")
+  rename(oldPath: path, newPath: newPath)
+  
+  if not exists(path: path) and exists(path: newPath) {
+    log("4. Rename successful.")
+  } else {
+    log("4. ERROR: Rename failed.")
+  }
+  
+  log("5. Deleting file...")
+  delete(path: newPath)
+  
+  if not exists(path: newPath) {
+    log("6. Delete successful.")
+  } else {
+    log("6. ERROR: Delete failed.")
+  }
+}

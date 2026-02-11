@@ -32,6 +32,18 @@ typedef enum {
 } RaeType;
 
 typedef struct {
+  void* data;
+  int64_t length;
+  int64_t capacity;
+} RaeList;
+
+typedef struct {
+  void* data;
+  int64_t length;
+  int64_t capacity;
+} RaeMap;
+
+typedef struct {
   RaeType type;
   union {
     int64_t i;
@@ -66,9 +78,11 @@ RAE_UNUSED static RaeAny rae_any_identity(RaeAny a) { return a; }
     long: rae_any_int, \
     double: rae_any_float, \
     float: rae_any_float, \
+    uint8_t: rae_any_int, \
     int8_t: rae_any_bool, \
     char*: rae_any_string, \
     const char*: rae_any_string, \
+    const char**: rae_any_ptr, \
     RaeAny: rae_any_identity, \
     default: rae_any_ptr \
 )(X)
@@ -98,6 +112,10 @@ int8_t rae_ext_rae_str_eq(const char* a, const char* b);
 int64_t rae_ext_rae_str_hash(const char* s);
 const char* rae_ext_rae_str_sub(const char* s, int64_t start, int64_t len);
 int8_t rae_ext_rae_str_contains(const char* s, const char* sub);
+int8_t rae_ext_rae_str_starts_with(const char* s, const char* prefix);
+int8_t rae_ext_rae_str_ends_with(const char* s, const char* suffix);
+int64_t rae_ext_rae_str_index_of(const char* s, const char* sub);
+const char* rae_ext_rae_str_trim(const char* s);
 double rae_ext_rae_str_to_f64(const char* s);
 int64_t rae_ext_rae_str_to_i64(const char* s);
 
@@ -108,12 +126,21 @@ void rae_ext_rae_sys_exit(int64_t code);
 const char* rae_ext_rae_sys_get_env(const char* name);
 const char* rae_ext_rae_sys_read_file(const char* path);
 int8_t rae_ext_rae_sys_write_file(const char* path, const char* content);
+int8_t rae_ext_rae_sys_rename(const char* oldPath, const char* newPath);
+int8_t rae_ext_rae_sys_delete(const char* path);
+int8_t rae_ext_rae_sys_exists(const char* path);
+int8_t rae_ext_rae_sys_lock_file(const char* path);
+int8_t rae_ext_rae_sys_unlock_file(const char* path);
 
 const char* rae_ext_rae_str_i64(int64_t v);
+const char* rae_ext_rae_str_i64_ptr(const int64_t* v);
 const char* rae_ext_rae_str_f64(double v);
+const char* rae_ext_rae_str_f64_ptr(const double* v);
 const char* rae_ext_rae_str_bool(int8_t v);
+const char* rae_ext_rae_str_bool_ptr(const int8_t* v);
 const char* rae_ext_rae_str_char(int64_t v);
 const char* rae_ext_rae_str_cstr(const char* s);
+const char* rae_ext_rae_str_cstr_ptr(const char** s);
 
 RAE_UNUSED static const char* rae_str_any(RaeAny v) {
     switch (v.type) {
@@ -128,12 +155,21 @@ RAE_UNUSED static const char* rae_str_any(RaeAny v) {
 
 #define rae_ext_rae_str(X) _Generic((X), \
     int64_t: rae_ext_rae_str_i64, \
+    int64_t*: rae_ext_rae_str_i64_ptr, \
+    const int64_t*: rae_ext_rae_str_i64_ptr, \
     int: rae_ext_rae_str_i64, \
     double: rae_ext_rae_str_f64, \
+    double*: rae_ext_rae_str_f64_ptr, \
+    const double*: rae_ext_rae_str_f64_ptr, \
     float: rae_ext_rae_str_f64, \
     int8_t: rae_ext_rae_str_bool, \
+    int8_t*: rae_ext_rae_str_bool_ptr, \
+    const int8_t*: rae_ext_rae_str_bool_ptr, \
+    unsigned char: rae_ext_rae_str_i64, \
     char*: rae_ext_rae_str_cstr, \
     const char*: rae_ext_rae_str_cstr, \
+    char**: rae_ext_rae_str_cstr_ptr, \
+    const char**: rae_ext_rae_str_cstr_ptr, \
     RaeAny: rae_str_any \
 )(X)
 
@@ -143,9 +179,30 @@ int64_t rae_ext_rae_random_int(int64_t min, int64_t max);
 
 int64_t rae_ext_nextTick(void);
 int64_t rae_ext_nowMs(void);
+int64_t rae_ext_nowNs(void);
 void rae_ext_rae_sleep(int64_t ms);
+void rae_spawn(void* (*func)(void*), void* data);
+
+/* JSON Parsing */
+RaeAny rae_ext_json_get(const char* json, const char* field);
 
 double rae_ext_rae_int_to_float(int64_t i);
+
+/* Math Primitives */
+double rae_ext_rae_math_sin(double x);
+double rae_ext_rae_math_cos(double x);
+double rae_ext_rae_math_tan(double x);
+double rae_ext_rae_math_asin(double x);
+double rae_ext_rae_math_acos(double x);
+double rae_ext_rae_math_atan(double x);
+double rae_ext_rae_math_atan2(double y, double x);
+double rae_ext_rae_math_sqrt(double x);
+double rae_ext_rae_math_pow(double base, double exp);
+double rae_ext_rae_math_exp(double x);
+double rae_ext_rae_math_log(double x);
+double rae_ext_rae_math_floor(double x);
+double rae_ext_rae_math_ceil(double x);
+double rae_ext_rae_math_round(double x);
 
 /* Raylib wrappers */
 #ifdef RAE_HAS_RAYLIB

@@ -410,6 +410,45 @@ int8_t rae_ext_rae_sys_write_file(const char* path, const char* content) {
   return written == len;
 }
 
+int8_t rae_ext_rae_sys_rename(const char* oldPath, const char* newPath) {
+    if (!oldPath || !newPath) return 0;
+    return rename(oldPath, newPath) == 0;
+}
+
+int8_t rae_ext_rae_sys_delete(const char* path) {
+    if (!path) return 0;
+    return remove(path) == 0;
+}
+
+#include <sys/file.h> // For flock
+
+int8_t rae_ext_rae_sys_exists(const char* path) {
+    if (!path) return 0;
+    return access(path, F_OK) == 0;
+}
+
+int8_t rae_ext_rae_sys_lock_file(const char* path) {
+    if (!path) return 0;
+    int fd = open(path, O_RDWR | O_CREAT, 0666);
+    if (fd < 0) return 0;
+    if (flock(fd, LOCK_EX) < 0) {
+        close(fd);
+        return 0;
+    }
+    // Note: We are leaking the FD here for simplicity in this prototype.
+    // In a real implementation, we'd need a way to track and close it.
+    return 1;
+}
+
+int8_t rae_ext_rae_sys_unlock_file(const char* path) {
+    if (!path) return 0;
+    int fd = open(path, O_RDWR);
+    if (fd < 0) return 0;
+    flock(fd, LOCK_UN);
+    close(fd);
+    return 1;
+}
+
 const char* rae_ext_rae_str_i64(int64_t v) {
   char* buffer = malloc(32);
   if (buffer) {
