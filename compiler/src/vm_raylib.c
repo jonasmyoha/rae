@@ -221,6 +221,74 @@ static bool native_drawCircle(struct VM* vm, VmNativeResult* out, const Value* a
     return true;
 }
 
+static bool native_drawCircleGradient(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 11) {
+        fprintf(stderr, "error: drawCircleGradient expects 11 args (x, y, radius, Color1(4), Color2(4)), got %zu\n", count);
+        return false;
+    }
+    int x = (int)((args[0].type == VAL_FLOAT) ? args[0].as.float_value : args[0].as.int_value);
+    int y = (int)((args[1].type == VAL_FLOAT) ? args[1].as.float_value : args[1].as.int_value);
+    float rad = (float)((args[2].type == VAL_FLOAT) ? args[2].as.float_value : args[2].as.int_value);
+    unsigned char r1 = (unsigned char)((args[3].type == VAL_FLOAT) ? args[3].as.float_value : args[3].as.int_value);
+    unsigned char g1 = (unsigned char)((args[4].type == VAL_FLOAT) ? args[4].as.float_value : args[4].as.int_value);
+    unsigned char b1 = (unsigned char)((args[5].type == VAL_FLOAT) ? args[5].as.float_value : args[5].as.int_value);
+    unsigned char a1 = (unsigned char)((args[6].type == VAL_FLOAT) ? args[6].as.float_value : args[6].as.int_value);
+    unsigned char r2 = (unsigned char)((args[7].type == VAL_FLOAT) ? args[7].as.float_value : args[7].as.int_value);
+    unsigned char g2 = (unsigned char)((args[8].type == VAL_FLOAT) ? args[8].as.float_value : args[8].as.int_value);
+    unsigned char b2 = (unsigned char)((args[9].type == VAL_FLOAT) ? args[9].as.float_value : args[9].as.int_value);
+    unsigned char a2 = (unsigned char)((args[10].type == VAL_FLOAT) ? args[10].as.float_value : args[10].as.int_value);
+    DrawCircleGradient(x, y, rad, (Color){r1, g1, b1, a1}, (Color){r2, g2, b2, a2});
+    out->has_value = false;
+    return true;
+}
+
+static bool native_drawRectangleGradientV(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 12) {
+        fprintf(stderr, "error: drawRectangleGradientV expects 12 args, got %zu\n", count);
+        return false;
+    }
+    int x = (int)((args[0].type == VAL_FLOAT) ? args[0].as.float_value : args[0].as.int_value);
+    int y = (int)((args[1].type == VAL_FLOAT) ? args[1].as.float_value : args[1].as.int_value);
+    int w = (int)((args[2].type == VAL_FLOAT) ? args[2].as.float_value : args[2].as.int_value);
+    int h = (int)((args[3].type == VAL_FLOAT) ? args[3].as.float_value : args[3].as.int_value);
+    unsigned char r1 = (unsigned char)((args[4].type == VAL_FLOAT) ? args[4].as.float_value : args[4].as.int_value);
+    unsigned char g1 = (unsigned char)((args[5].type == VAL_FLOAT) ? args[5].as.float_value : args[5].as.int_value);
+    unsigned char b1 = (unsigned char)((args[6].type == VAL_FLOAT) ? args[6].as.float_value : args[6].as.int_value);
+    unsigned char a1 = (unsigned char)((args[7].type == VAL_FLOAT) ? args[7].as.float_value : args[7].as.int_value);
+    unsigned char r2 = (unsigned char)((args[8].type == VAL_FLOAT) ? args[8].as.float_value : args[8].as.int_value);
+    unsigned char g2 = (unsigned char)((args[9].type == VAL_FLOAT) ? args[9].as.float_value : args[9].as.int_value);
+    unsigned char b2 = (unsigned char)((args[10].type == VAL_FLOAT) ? args[10].as.float_value : args[10].as.int_value);
+    unsigned char a2 = (unsigned char)((args[11].type == VAL_FLOAT) ? args[11].as.float_value : args[11].as.int_value);
+    DrawRectangleGradientV(x, y, w, h, (Color){r1, g1, b1, a1}, (Color){r2, g2, b2, a2});
+    out->has_value = false;
+    return true;
+}
+
+static bool native_drawRectangleGradientH(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 12) {
+        fprintf(stderr, "error: drawRectangleGradientH expects 12 args, got %zu\n", count);
+        return false;
+    }
+    int x = (int)((args[0].type == VAL_FLOAT) ? args[0].as.float_value : args[0].as.int_value);
+    int y = (int)((args[1].type == VAL_FLOAT) ? args[1].as.float_value : args[1].as.int_value);
+    int w = (int)((args[2].type == VAL_FLOAT) ? args[2].as.float_value : args[2].as.int_value);
+    int h = (int)((args[3].type == VAL_FLOAT) ? args[3].as.float_value : args[3].as.int_value);
+    unsigned char r1 = (unsigned char)((args[4].type == VAL_FLOAT) ? args[4].as.float_value : args[4].as.int_value);
+    unsigned char g1 = (unsigned char)((args[5].type == VAL_FLOAT) ? args[5].as.float_value : args[5].as.int_value);
+    unsigned char b1 = (unsigned char)((args[6].type == VAL_FLOAT) ? args[6].as.float_value : args[6].as.int_value);
+    unsigned char a1 = (unsigned char)((args[7].type == VAL_FLOAT) ? args[7].as.float_value : args[7].as.int_value);
+    unsigned char r2 = (unsigned char)((args[8].type == VAL_FLOAT) ? args[8].as.float_value : args[8].as.int_value);
+    unsigned char g2 = (unsigned char)((args[9].type == VAL_FLOAT) ? args[9].as.float_value : args[9].as.int_value);
+    unsigned char b2 = (unsigned char)((args[10].type == VAL_FLOAT) ? args[10].as.float_value : args[10].as.int_value);
+    unsigned char a2 = (unsigned char)((args[11].type == VAL_FLOAT) ? args[11].as.float_value : args[11].as.int_value);
+    DrawRectangleGradientH(x, y, w, h, (Color){r1, g1, b1, a1}, (Color){r2, g2, b2, a2});
+    out->has_value = false;
+    return true;
+}
+
 static bool native_drawText(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
     if (count != 8) {
@@ -457,7 +525,10 @@ bool vm_registry_register_raylib(VmRegistry* registry) {
     ok &= vm_registry_register_native(registry, "drawTexture", native_drawTexture, NULL);
     ok &= vm_registry_register_native(registry, "drawRectangle", native_drawRectangle, NULL);
     ok &= vm_registry_register_native(registry, "drawRectangleLines", native_drawRectangleLines, NULL);
+    ok &= vm_registry_register_native(registry, "drawRectangleGradientV", native_drawRectangleGradientV, NULL);
+    ok &= vm_registry_register_native(registry, "drawRectangleGradientH", native_drawRectangleGradientH, NULL);
     ok &= vm_registry_register_native(registry, "drawCircle", native_drawCircle, NULL);
+    ok &= vm_registry_register_native(registry, "drawCircleGradient", native_drawCircleGradient, NULL);
     ok &= vm_registry_register_native(registry, "drawText", native_drawText, NULL);
     ok &= vm_registry_register_native(registry, "drawCube", native_drawCube, NULL);
     ok &= vm_registry_register_native(registry, "drawCubeWires", native_drawCubeWires, NULL);
