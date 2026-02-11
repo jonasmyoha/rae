@@ -562,6 +562,10 @@ double rae_ext_rae_int_to_float(int64_t i) {
   return (double)i;
 }
 
+int64_t rae_ext_rae_float_to_int(double f) {
+  return (int64_t)f;
+}
+
 double rae_ext_rae_math_sin(double x) { return sin(x); }
 double rae_ext_rae_math_cos(double x) { return cos(x); }
 double rae_ext_rae_math_tan(double x) { return tan(x); }
@@ -597,11 +601,59 @@ void rae_ext_drawSphere(Vector3 centerPos, double radius, Color color) {
     DrawSphere(centerPos, (float)radius, color);
 }
 
+void rae_ext_drawCircle(double x, double y, double radius, Color color) {
+    DrawCircle((int)x, (int)y, (float)radius, color);
+}
+
+void rae_ext_drawCircleGradient(int64_t x, int64_t y, double radius, Color color1, Color color2) {
+    DrawCircleGradient((int)x, (int)y, (float)radius, color1, color2);
+}
+
+void rae_ext_drawRectangleGradientV(int64_t x, int64_t y, int64_t width, int64_t height, Color color1, Color color2) {
+    DrawRectangleGradientV((int)x, (int)y, (int)width, (int)height, color1, color2);
+}
+
+void rae_ext_drawRectangleGradientH(int64_t x, int64_t y, int64_t width, int64_t height, Color color1, Color color2) {
+    DrawRectangleGradientH((int)x, (int)y, (int)width, (int)height, color1, color2);
+}
+
 double rae_ext_getTime(void) {
     return GetTime();
 }
 
 Color rae_ext_colorFromHSV(double hue, double saturation, double value) {
     return ColorFromHSV((float)hue, (float)saturation, (float)value);
+}
+
+void rae_ext_drawCylinder(Vector3 position, double radiusTop, double radiusBottom, double height, int64_t slices, Color color) {
+    DrawCylinder(position, (float)radiusTop, (float)radiusBottom, (float)height, (int)slices, color);
+}
+
+void rae_ext_drawGrid(int64_t slices, double spacing) {
+    DrawGrid((int)slices, (float)spacing);
+}
+
+void rae_ext_beginMode3D(Camera3D camera) {
+    BeginMode3D(camera);
+}
+
+void rae_ext_endMode3D(void) {
+    EndMode3D();
+}
+
+void rae_ext_drawRectangle(double x, double y, double width, double height, Color color) {
+    DrawRectangle((int)x, (int)y, (int)width, (int)height, color);
+}
+
+void rae_ext_drawRectangleLines(double x, double y, double width, double height, Color color) {
+    DrawRectangleLines((int)x, (int)y, (int)width, (int)height, color);
+}
+
+void rae_ext_drawCube(Vector3 pos, double width, double height, double length, Color color) {
+    DrawCube(pos, (float)width, (float)height, (float)length, color);
+}
+
+void rae_ext_drawText(const char* text, double x, double y, double fontSize, Color color) {
+    DrawText(text, (int)x, (int)y, (int)fontSize, color);
 }
 #endif

@@ -2,39 +2,66 @@ import raylib
 import easing
 import time
 
-type State {
-  timer: Timer
-  animDuration: Float
-}
-
 func main() {
   initWindow(width: 800, height: 450, title: "Rae Easing 2D")
   setTargetFPS(fps: 60)
-  let s: State = { timer: createTimer(), animDuration: 2.0 }
-  start(t: s.timer)
+  
+  let timer: Timer = createTimer()
+  let animDuration: Float = 2.0
+  start(t: timer)
+  
   loop windowShouldClose() is 0 {
-    let elapsed: Float = elapsedSeconds(t: s.timer)
-    # Loop animation
-    if elapsed > s.animDuration {
-      reset(t: s.timer)
-      start(t: s.timer)
+    let elapsed: Float = elapsedSeconds(t: timer)
+    if elapsed > animDuration {
+      reset(t: timer)
+      start(t: timer)
       elapsed = 0.0
     }
-    let t: Float = elapsed / s.animDuration
+    
+    let t: Float = elapsed / animDuration
     let easedT: Float = easeInOutQuad(t: t)
-    let startX: Float = 100.0
-    let endX: Float = 700.0
+    
+    let startX: Float = 150.0
+    let endX: Float = 650.0
     let currentX: Float = startX + (endX - startX) * easedT
+    
+    # Modern Rainbowish Colors
+    let hue: Float = t * 360.0
+    let mainColor: Color = colorFromHSV(hue: hue, saturation: 0.6, value: 0.9)
+    let centerColor: Color = colorFromHSV(hue: hue, saturation: 0.3, value: 1.0)
+    
     beginDrawing()
-    clearBackground(color: { r: 245, g: 245, b: 245, a: 255 })
+    
+    # Darker, nicer background gradient
+    drawRectangleGradientV(
+      x: 0
+      y: 0
+      width: 800
+      height: 450
+      color1: { r: 20, g: 30, b: 48, a: 255 }
+      color2: { r: 36, g: 59, b: 85, a: 255 }
+    )
+    
     drawText(
       text: "Easing: easeInOutQuad"
-      x: 10.0
-      y: 10.0
+      x: 20.0
+      y: 20.0
       fontSize: 20.0
-      color: { r: 200, g: 200, b: 200, a: 255 }
+      color: { r: 150, g: 150, b: 180, a: 255 }
     )
-    drawCircle(x: currentX, y: 225.0, radius: 40.0, color: { r: 230, g: 41, b: 55, a: 255 })
+    
+    # Shadow
+    drawCircle(x: currentX + 5.0, y: 230.0, radius: 45.0, color: { r: 0, g: 0, b: 0, a: 40 })
+    
+    # Shaded ball (gradient)
+    drawCircleGradient(
+      x: toInt(this: currentX)
+      y: 225
+      radius: 40.0
+      color1: centerColor
+      color2: mainColor
+    )
+    
     endDrawing()
   }
   closeWindow()
