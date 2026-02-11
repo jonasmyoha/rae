@@ -82,6 +82,11 @@ bool vm_registry_register_native(VmRegistry* registry,
                                  void* user_data);
 const VmNativeEntry* vm_registry_find_native(const VmRegistry* registry, const char* name);
 
+// Sub-registry loaders
+bool vm_registry_register_raylib(VmRegistry* registry);
+bool vm_registry_register_tinyexpr(VmRegistry* registry);
+bool vm_registry_register_monocypher(VmRegistry* registry);
+
 void vm_registry_add_type_metadata(VmRegistry* registry, const char* name, char** field_names, char** field_types, size_t field_count);
 const VmTypeMetadata* vm_registry_find_type_metadata(const VmRegistry* registry, const char* name);
 

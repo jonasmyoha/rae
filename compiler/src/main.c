@@ -2174,6 +2174,7 @@ static bool module_graph_load_module(ModuleGraph* graph,
     return true;
   }
 
+
   // Also check if the file is already loaded under a different module path
   for (ModuleNode* node = graph->head; node; node = node->next) {
     if (node->canonical_path && strcmp(node->canonical_path, path_to_check) == 0) {
@@ -2468,6 +2469,24 @@ static bool module_graph_build(ModuleGraph* graph, const char* entry_file, uint6
     free(resolved_entry);
     return false;
   }
+
+  // Load core library explicitly if it exists in the project root
+  if (graph->root_path && !no_implicit) {
+      char core_path[PATH_MAX];
+      snprintf(core_path, sizeof(core_path), "%s/lib/core.rae", graph->root_path);
+      if (file_exists(core_path)) {
+          char* abs_core = realpath(core_path, NULL);
+          if (abs_core) {
+              char* core_module_path = derive_module_path(graph->root_path, abs_core);
+              if (core_module_path) {
+                  module_graph_load_module(graph, core_module_path, abs_core, NULL, hash_out, no_implicit);
+                  free(core_module_path);
+              }
+              free(abs_core);
+          }
+      }
+  }
+
   ModuleNode* entry_node = module_graph_find(graph, module_path);
   // Implicitly import all .rae files in the project directory
   if (entry_node && !no_implicit) {
@@ -2487,20 +2506,26 @@ static AstModule merge_module_graph(const ModuleGraph* graph) {
   if (graph->tail && graph->tail->module) {
       merged.file_path = graph->tail->module->file_path;
   }
+  AstDecl* head = NULL;
   AstDecl* tail = NULL;
   for (ModuleNode* node = graph->head; node; node = node->next) {
-    AstDecl* decls = node->module ? node->module->decls : NULL;
-    if (!decls) continue;
-    if (!merged.decls) {
-      merged.decls = decls;
+    if (!node->module || !node->module->decls) continue;
+    
+    // Copy the declaration list head
+    AstDecl* current = node->module->decls;
+    if (!head) {
+      head = current;
     } else {
-      tail->next = decls;
+      tail->next = current;
     }
-    while (decls->next) {
-      decls = decls->next;
+    
+    // Find the new tail
+    while (current->next) {
+      current = current->next;
     }
-    tail = decls;
+    tail = current;
   }
+  merged.decls = head;
   return merged;
 }
 
@@ -3012,6 +3037,50 @@ static int run_command(const char* cmd, int argc, char** argv) {
   bool is_build = (strcmp(cmd, "build") == 0);
   bool is_pack = (strcmp(cmd, "pack") == 0);
 
+  const char* project_root = NULL;
+  char repo_root[PATH_MAX];
+  char project_path[PATH_MAX];
+
+  if (is_run || is_build) {
+      const char* input_path = NULL;
+      if (is_run) {
+          RunOptions run_opts;
+          if (parse_run_args(argc, argv, &run_opts)) input_path = run_opts.input_path;
+      } else {
+          BuildOptions build_opts;
+          if (parse_build_args(argc, argv, &build_opts)) input_path = build_opts.entry_path;
+      }
+
+      if (input_path) {
+          char abs_input[PATH_MAX];
+          if (realpath(input_path, abs_input)) {
+              strncpy(project_path, abs_input, sizeof(project_path) - 1);
+              project_path[sizeof(project_path) - 1] = '\0';
+              char* slash = strrchr(project_path, '/');
+              if (slash) *slash = '\0';
+              else strcpy(project_path, ".");
+
+              strncpy(repo_root, project_path, sizeof(repo_root) - 1);
+              repo_root[sizeof(repo_root) - 1] = '\0';
+              
+              bool found_root = false;
+              for (int i = 0; i < 5; ++i) {
+                  char test_lib[PATH_MAX];
+                  snprintf(test_lib, sizeof(test_lib), "%s/lib/core.rae", repo_root);
+                  if (file_exists(test_lib)) {
+                      found_root = true;
+                      break;
+                  }
+                  char* parent = strrchr(repo_root, '/');
+                  if (!parent || parent == repo_root) break;
+                  *parent = '\0';
+              }
+              if (found_root) project_root = repo_root;
+              else project_root = project_path;
+          }
+      }
+  }
+
   if (is_format) {
     if (!parse_format_args(argc, argv, &format_opts)) {
       print_usage(cmd);
@@ -3025,67 +3094,22 @@ static int run_command(const char* cmd, int argc, char** argv) {
       return 1;
     }
     file_path = argv[0];
-          } else if (is_run) {
-            RunOptions run_opts;
-            if (!parse_run_args(argc, argv, &run_opts)) {
-              print_usage(cmd);
-              return 1;
-            }
-            
-            char abs_input[PATH_MAX];
-            if (!realpath(run_opts.input_path, abs_input)) {
-                fprintf(stderr, "error: unable to resolve input path '%s'\n", run_opts.input_path);
-                return 1;
-            }
-        
-            char project_path[PATH_MAX];
-            strncpy(project_path, abs_input, sizeof(project_path) - 1);
-            project_path[sizeof(project_path) - 1] = '\0';
-            char* slash = strrchr(project_path, '/');
-            if (slash) {
-                *slash = '\0';
-            } else {
-                strcpy(project_path, ".");
-            }
-        
-                                    // Smart discovery: search upwards for the 'lib' folder to find the repo root.
-                                    // This allows scripts in examples/ or tests/ to find standard library and neighboring files.
-                                    char repo_root[PATH_MAX];
-                                    strncpy(repo_root, project_path, sizeof(repo_root) - 1);
-                                    repo_root[sizeof(repo_root) - 1] = '\0';
-                                    
-                                    bool found_root = false;
-                                    for (int i = 0; i < 5; ++i) { // search up to 5 levels
-                                        char test_lib[PATH_MAX];
-                                        snprintf(test_lib, sizeof(test_lib), "%s/lib/core.rae", repo_root);
-                                        if (file_exists(test_lib)) {
-                                            found_root = true;
-                                            break;
-                                        }
-                                        char* parent = strrchr(repo_root, '/');
-                                        if (!parent || parent == repo_root) break;
-                                        *parent = '\0';
-                                    }
-                                
-                                        const char* final_root = run_opts.project_path ? run_opts.project_path : (found_root ? repo_root : project_path);
-                                
-                                    
-                                
-                                        RunOptions adjusted_opts = run_opts;                        // Use relative path for tests to match expectations
-        
-                        adjusted_opts.input_path = run_opts.input_path;
-        
-                    
-        
-                        if (run_opts.target == BUILD_TARGET_COMPILED) {
-        
-                          return run_compiled_file(&adjusted_opts, final_root);
-        
-                        }
-        
-                    
-        
-                        return run_opts.watch ? run_vm_watch(&adjusted_opts, final_root) : run_vm_file(&adjusted_opts, final_root);    } else if (is_pack) {    PackOptions pack_opts;
+                    } else if (is_run) {
+                      RunOptions run_opts;
+                      if (!parse_run_args(argc, argv, &run_opts)) {
+                        print_usage(cmd);
+                        return 1;
+                      }
+                      
+                      const char* final_root = run_opts.project_path ? run_opts.project_path : project_root;
+                      if (!final_root) final_root = ".";
+          
+                      RunOptions adjusted_opts = run_opts;
+                      if (run_opts.target == BUILD_TARGET_COMPILED) {
+                        return run_compiled_file(&adjusted_opts, final_root);
+                      }
+                      return run_opts.watch ? run_vm_watch(&adjusted_opts, final_root) : run_vm_file(&adjusted_opts, final_root);
+              } else if (is_pack) {    PackOptions pack_opts;
     if (!parse_pack_args(argc, argv, &pack_opts)) {
       print_usage(cmd);
       return 1;
@@ -3101,15 +3125,17 @@ static int run_command(const char* cmd, int argc, char** argv) {
       fprintf(stderr, "error: entry file '%s' not found\n", build_opts.entry_path);
       return 1;
     }
-    if (build_opts.project_path && !directory_exists(build_opts.project_path)) {
-      fprintf(stderr, "error: project path '%s' not found or not a directory\n",
-              build_opts.project_path);
+    
+    const char* final_root = build_opts.project_path ? build_opts.project_path : project_root;
+    if (final_root && !directory_exists(final_root)) {
+      fprintf(stderr, "error: project path '%s' not found or not a directory\n", final_root);
       return 1;
     }
+
     switch (build_opts.target) {
       case BUILD_TARGET_LIVE:
         return build_vm_output(build_opts.entry_path,
-                               build_opts.project_path,
+                               final_root,
                                build_opts.out_path,
                                build_opts.no_implicit) ?
                    0 :
@@ -3121,7 +3147,7 @@ static int run_command(const char* cmd, int argc, char** argv) {
         }
         bool dummy_uses_raylib = false;
         return build_c_backend_output(build_opts.entry_path,
-                                      build_opts.project_path,
+                                      final_root,
                                       build_opts.out_path,
                                       build_opts.no_implicit,
                                       &dummy_uses_raylib) ?
@@ -3129,7 +3155,7 @@ static int run_command(const char* cmd, int argc, char** argv) {
                    1;
       case BUILD_TARGET_HYBRID:
         return build_hybrid_output(build_opts.entry_path,
-                                   build_opts.project_path,
+                                   final_root,
                                    build_opts.out_path) ?
                    0 :
                    1;

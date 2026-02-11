@@ -1,0 +1,23 @@
+import "sys"
+
+func main() {
+  let path: String = "data.lock"
+  
+  log("Attempting to lock {path}...")
+  if lockFile(path: path) {
+    log("Lock acquired successfully.")
+    
+    # Simulate work
+    log("Doing critical work...")
+    sleep(100)
+    
+    log("Releasing lock...")
+    if unlockFile(path: path) {
+      log("Lock released.")
+    } else {
+      log("ERROR: Failed to release lock.")
+    }
+  } else {
+    log("ERROR: Could not acquire lock.")
+  }
+}
