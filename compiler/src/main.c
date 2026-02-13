@@ -2917,8 +2917,12 @@ static bool build_c_backend_output(const char* entry_file,
   ctx.generic_types = arena_alloc(arena, sizeof(AstTypeRef*) * ctx.generic_type_cap);
   ctx.emitted_generic_type_cap = 512;
   ctx.emitted_generic_types = arena_alloc(arena, sizeof(AstTypeRef*) * ctx.emitted_generic_type_cap);
+  ctx.emitted_generic_type_cap = 512;
+  ctx.emitted_generic_types = arena_alloc(arena, sizeof(AstTypeRef*) * ctx.emitted_generic_type_cap);
   ctx.specialized_func_cap = 512;
   ctx.specialized_funcs = arena_alloc(arena, sizeof(FunctionSpecialization) * ctx.specialized_func_cap);
+  ctx.emitted_method_cap = 1024;
+  ctx.emitted_method_names = arena_alloc(arena, sizeof(char*) * ctx.emitted_method_cap);
   
   VmRegistry registry;
   vm_registry_init(&registry);
@@ -3065,8 +3069,12 @@ static bool build_hybrid_output(const char* entry_file,
   ctx.generic_types = arena_alloc(arena, sizeof(AstTypeRef*) * ctx.generic_type_cap);
   ctx.emitted_generic_type_cap = 512;
   ctx.emitted_generic_types = arena_alloc(arena, sizeof(AstTypeRef*) * ctx.emitted_generic_type_cap);
+  ctx.emitted_generic_type_cap = 512;
+  ctx.emitted_generic_types = arena_alloc(arena, sizeof(AstTypeRef*) * ctx.emitted_generic_type_cap);
   ctx.specialized_func_cap = 512;
   ctx.specialized_funcs = arena_alloc(arena, sizeof(FunctionSpecialization) * ctx.specialized_func_cap);
+  ctx.emitted_method_cap = 1024;
+  ctx.emitted_method_names = arena_alloc(arena, sizeof(char*) * ctx.emitted_method_cap);
 
   VmRegistry registry;
   vm_registry_init(&registry);

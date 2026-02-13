@@ -14,7 +14,7 @@
 #define RAE_UNUSED
 #endif
 
-typedef int32_t rae_Char;
+typedef int64_t rae_Char;
 
 typedef struct {
   const char* data;
@@ -74,19 +74,33 @@ RAE_UNUSED static RaeAny rae_any_float_ptr(const double* v) { return (RaeAny){RA
 RAE_UNUSED static RaeAny rae_any_bool(bool v) { return (RaeAny){RAE_TYPE_BOOL, {.b = v ? 1 : 0}}; }
 RAE_UNUSED static RaeAny rae_any_bool_ptr(const bool* v) { return (RaeAny){RAE_TYPE_BOOL, {.b = *v ? 1 : 0}}; }
 RAE_UNUSED static RaeAny rae_any_char(rae_Char v) { return (RaeAny){RAE_TYPE_CHAR, {.i = v}}; }
+RAE_UNUSED static RaeAny rae_any_char_ptr(const int64_t* v) { return (RaeAny){RAE_TYPE_CHAR, {.i = *v}}; }
 RAE_UNUSED static RaeAny rae_any_string(const char* v) { return (RaeAny){RAE_TYPE_STRING, {.s = v}}; }
 RAE_UNUSED static RaeAny rae_any_none(void) { return (RaeAny){RAE_TYPE_NONE, {.i = 0}}; }
 RAE_UNUSED static RaeAny rae_any_ptr(void* v) { return (RaeAny){RAE_TYPE_BUFFER, {.ptr = v}}; }
 RAE_UNUSED static RaeAny rae_any_identity(RaeAny a) { return a; }
+RAE_UNUSED static RaeAny rae_any_identity_ptr(const RaeAny* a) { return *a; }
 
 #define rae_any(X) _Generic((X), \
-    long long: rae_any_int, \
+    int64_t: rae_any_int, \
     double: rae_any_float, \
-    rae_Char: rae_any_char, \
     char*: rae_any_string, \
     const char*: rae_any_string, \
     RaeAny: rae_any_identity, \
+    RaeAny*: rae_any_identity_ptr, \
     bool: rae_any_bool, \
+    int8_t: rae_any_bool, \
+    uint8_t: rae_any_int, \
+    int64_t*: rae_any_int_ptr, \
+    const int64_t*: rae_any_int_ptr, \
+    double*: rae_any_float_ptr, \
+    const double*: rae_any_float_ptr, \
+    bool*: rae_any_bool_ptr, \
+    const bool*: rae_any_bool_ptr, \
+    int8_t*: rae_any_bool_ptr, \
+    const int8_t*: rae_any_bool_ptr, \
+    uint8_t*: rae_any_int_ptr, \
+    const uint8_t*: rae_any_int_ptr, \
     default: rae_any_ptr \
 )(X)
 
