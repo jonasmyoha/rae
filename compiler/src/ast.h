@@ -463,6 +463,10 @@ typedef struct CompilerContext {
     size_t specialized_func_count;
     size_t specialized_func_cap;
 
+    const char** emitted_method_names;
+    size_t emitted_method_count;
+    size_t emitted_method_cap;
+
     struct AstModule* current_module;
 } CompilerContext;
 

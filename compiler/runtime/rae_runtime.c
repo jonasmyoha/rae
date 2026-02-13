@@ -139,7 +139,7 @@ void rae_ext_rae_log_stream_any(RaeAny value) {
     case RAE_TYPE_ID: printf("Id(%lld)", (long long)value.as.i); break;
     case RAE_TYPE_KEY: printf("Key(\"%s\")", value.as.s ? value.as.s : "(null)"); break;
     case RAE_TYPE_LIST: printf("[...]"); break;
-    case RAE_TYPE_BUFFER: printf("#(...)"); break;
+    case RAE_TYPE_BUFFER: printf("%p", value.as.ptr); break;
     case RAE_TYPE_NONE: printf("none"); break;
   }
 }
