@@ -183,6 +183,7 @@ struct AstExpr {
     struct {
       AstExpr* callee;
       AstCallArg* args;
+      AstTypeRef* generic_args;
     } call;
     struct {
       AstExpr* object;
@@ -202,6 +203,7 @@ struct AstExpr {
       AstExpr* object;
       Str method_name;
       AstCallArg* args;
+      AstTypeRef* generic_args;
     } method_call;
     AstCollectionLiteral collection;
     struct {
@@ -361,6 +363,80 @@ struct AstModule {
   size_t comment_count;
   bool had_error;
 };
+
+// Forward declarations for context components
+// (These types should be defined in their respective headers or here)
+struct StringInterner;
+struct DiagState;
+struct TypeTable;
+struct SymbolTable;
+
+typedef struct FunctionSpecialization {
+
+    const AstFuncDecl* decl;
+
+    const AstTypeRef* concrete_args;
+
+} FunctionSpecialization;
+
+
+
+
+
+typedef struct CompilerContext {
+
+    Arena* ast_arena;
+
+    Arena* backend_arena;
+
+    struct StringInterner* interner;
+
+    struct DiagState* diags;
+
+    struct TypeTable* types;
+
+    struct SymbolTable* symbols;
+
+    // ... add more subsystems as needed
+
+    
+
+    // Project-wide AST state (formerly static globals in c_backend.c)
+
+    const AstDecl** all_decls;
+
+    size_t all_decl_count;
+
+    size_t all_decl_cap;
+
+    
+
+    const AstTypeRef** generic_types;
+
+    size_t generic_type_count;
+
+    size_t generic_type_cap;
+
+
+
+    const AstTypeRef** emitted_generic_types;
+
+    size_t emitted_generic_type_count;
+
+    size_t emitted_generic_type_cap;
+
+
+
+    FunctionSpecialization* specialized_funcs;
+
+    size_t specialized_func_count;
+
+    size_t specialized_func_cap;
+
+    struct AstModule* current_module;
+
+
+} CompilerContext;
 
 void ast_dump_module(const AstModule* module, FILE* out);
 

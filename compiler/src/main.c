@@ -807,6 +807,108 @@ static bool native_rae_math_pow(struct VM* vm, VmNativeResult* out_result, const
   return true;
 }
 
+static bool native_rae_ext_rae_buf_alloc(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
+  (void)vm; (void)user_data;
+  if (arg_count != 2) { printf("DEBUG: buf_alloc failed arg_count %zu\n", arg_count); return false; }
+  const Value* val_size = deref_value(&args[0]);
+  if (val_size->type != VAL_INT) { printf("DEBUG: buf_alloc failed size type %d\n", val_size->type); return false; }
+  out_result->has_value = true;
+  out_result->value = value_buffer(val_size->as.int_value);
+  return true;
+}
+
+static bool native_rae_ext_rae_buf_free(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
+  (void)vm; (void)user_data;
+  if (arg_count != 1) { printf("DEBUG: buf_free failed arg_count %zu\n", arg_count); return false; }
+  const Value* val = deref_value(&args[0]);
+  if (val->type != VAL_BUFFER) { printf("DEBUG: buf_free failed type %d\n", val->type); return false; }
+  out_result->has_value = false;
+  return true;
+}
+
+static bool native_rae_ext_rae_buf_copy(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
+  (void)vm; (void)user_data;
+  if (arg_count != 6) { printf("DEBUG: buf_copy failed arg_count %zu\n", arg_count); return false; }
+  const Value* src_val = deref_value(&args[0]);
+  const Value* src_off = deref_value(&args[1]);
+  const Value* dst_val = deref_value(&args[2]);
+  const Value* dst_off = deref_value(&args[3]);
+  const Value* len = deref_value(&args[4]);
+  if (src_val->type != VAL_BUFFER || src_off->type != VAL_INT || dst_val->type != VAL_BUFFER || dst_off->type != VAL_INT || len->type != VAL_INT) {
+      printf("DEBUG: buf_copy failed types: src=%d, src_off=%d, dst=%d, dst_off=%d, len=%d\n", 
+             src_val->type, src_off->type, dst_val->type, dst_off->type, len->type);
+      return false;
+  }
+  
+  ValueBuffer* src = src_val->as.buffer_value;
+  ValueBuffer* dst = dst_val->as.buffer_value;
+  
+  for (size_t i = 0; i < (size_t)len->as.int_value; i++) {
+      size_t s_idx = src_off->as.int_value + i;
+      size_t d_idx = dst_off->as.int_value + i;
+      if (s_idx < src->count && d_idx < dst->count) {
+          value_free(&dst->items[d_idx]);
+          dst->items[d_idx] = value_copy(&src->items[s_idx]);
+      }
+  }
+  
+  out_result->has_value = false;
+  return true;
+}
+
+static bool native_rae_ext_rae_buf_set(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
+  (void)vm; (void)user_data;
+  if (arg_count != 3) { printf("DEBUG: buf_set failed arg_count %zu\n", arg_count); return false; }
+  const Value* buf_val = deref_value(&args[0]);
+  const Value* index = deref_value(&args[1]);
+  const Value* value = deref_value(&args[2]);
+  if (buf_val->type != VAL_BUFFER || index->type != VAL_INT) { 
+      printf("DEBUG: buf_set failed types: buf=%d, index=%d\n", buf_val->type, index->type);
+      return false; 
+  }
+  
+  ValueBuffer* vb = buf_val->as.buffer_value;
+  if ((size_t)index->as.int_value < vb->count) {
+      value_free(&vb->items[index->as.int_value]);
+      vb->items[index->as.int_value] = value_copy(value);
+  }
+  
+  out_result->has_value = false;
+  return true;
+}
+
+static bool native_rae_ext_rae_buf_get(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
+  (void)vm; (void)user_data;
+  if (arg_count != 2) { printf("DEBUG: buf_get failed arg_count %zu\n", arg_count); return false; }
+  const Value* buf_val = deref_value(&args[0]);
+  const Value* index = deref_value(&args[1]);
+  if (buf_val->type != VAL_BUFFER || index->type != VAL_INT) {
+      printf("DEBUG: buf_get failed types: buf=%d, index=%d\n", buf_val->type, index->type);
+      return false;
+  }
+  
+  ValueBuffer* vb = buf_val->as.buffer_value;
+  if ((size_t)index->as.int_value < vb->count) {
+      out_result->has_value = true;
+      out_result->value = value_copy(&vb->items[index->as.int_value]);
+      return true;
+  }
+  
+  out_result->has_value = true;
+  out_result->value = value_none();
+  return true;
+}
+
+static bool native_sizeof(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
+  (void)vm; (void)args; (void)user_data;
+  // In the current VM, all values (Int, Float, Bool, String, etc.) are stored in the 
+  // 16-byte Value struct (8-byte union + type tag). 
+  // However, for Buffer/List storage, we currently store the union part (8 bytes).
+  out_result->has_value = true;
+  out_result->value = value_int(8);
+  return true;
+}
+
 static bool register_default_natives(VmRegistry* registry, TickCounter* tick_counter) {
   if (!registry) return false;
   bool ok = true;
@@ -848,7 +950,15 @@ static bool register_default_natives(VmRegistry* registry, TickCounter* tick_cou
   ok = vm_registry_register_native(registry, "rae_seed", native_rae_seed, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_random", native_rae_random, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_random_int", native_rae_random_int, NULL) && ok;
+  ok = vm_registry_register_native(registry, "sizeof", native_sizeof, NULL) && ok;
   
+  // Buffer primitives
+  ok = vm_registry_register_native(registry, "rae_ext_rae_buf_alloc", native_rae_ext_rae_buf_alloc, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_ext_rae_buf_free", native_rae_ext_rae_buf_free, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_ext_rae_buf_copy", native_rae_ext_rae_buf_copy, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_ext_rae_buf_set", native_rae_ext_rae_buf_set, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_ext_rae_buf_get", native_rae_ext_rae_buf_get, NULL) && ok;
+
   ok = vm_registry_register_native(registry, "sin", native_rae_math_sin, NULL) && ok;
   ok = vm_registry_register_native(registry, "cos", native_rae_math_cos, NULL) && ok;
   ok = vm_registry_register_native(registry, "tan", native_rae_math_tan, NULL) && ok;
@@ -2757,7 +2867,13 @@ static bool compile_file_chunk(const char* file_path,
     }
   }
   AstModule merged = merge_module_graph(&graph);
-  bool ok = vm_compile_module(&merged, chunk, file_path, registry, is_patch);
+  
+  CompilerContext ctx = {0};
+  ctx.ast_arena = arena;
+  // Note: VM compiler does not yet use all_decls/generic_types project-wide state
+  // but we provide the context for future unification.
+
+  bool ok = vm_compile_module(&ctx, &merged, chunk, file_path, registry, is_patch);
   module_graph_free(&graph);
   arena_destroy(arena);
   if (ok && out_hash) {
@@ -2793,6 +2909,17 @@ static bool build_c_backend_output(const char* entry_file,
   
   AstModule merged = merge_module_graph(&graph);
   
+  CompilerContext ctx = {0};
+  ctx.ast_arena = arena;
+  ctx.all_decl_cap = 2048;
+  ctx.all_decls = arena_alloc(arena, sizeof(AstDecl*) * ctx.all_decl_cap);
+  ctx.generic_type_cap = 512;
+  ctx.generic_types = arena_alloc(arena, sizeof(AstTypeRef*) * ctx.generic_type_cap);
+  ctx.emitted_generic_type_cap = 512;
+  ctx.emitted_generic_types = arena_alloc(arena, sizeof(AstTypeRef*) * ctx.emitted_generic_type_cap);
+  ctx.specialized_func_cap = 512;
+  ctx.specialized_funcs = arena_alloc(arena, sizeof(FunctionSpecialization) * ctx.specialized_func_cap);
+  
   VmRegistry registry;
   vm_registry_init(&registry);
   TickCounter tick_counter = {.next = 0};
@@ -2804,7 +2931,7 @@ static bool build_c_backend_output(const char* entry_file,
       return false;
   }
 
-  bool ok = c_backend_emit_module(&merged, out_file, &registry, out_uses_raylib);
+  bool ok = c_backend_emit_module(&ctx, &merged, out_file, &registry, out_uses_raylib);
   if (ok) {
     char out_dir[PATH_MAX];
     strncpy(out_dir, out_file, sizeof(out_dir) - 1);
@@ -2849,9 +2976,13 @@ static bool build_vm_output(const char* entry_file,
     return false;
   }
   AstModule merged = merge_module_graph(&graph);
+  
+  CompilerContext ctx = {0};
+  ctx.ast_arena = arena;
+
   Chunk chunk;
   chunk_init(&chunk);
-  ok = vm_compile_module(&merged, &chunk, entry_file, NULL, false);
+  ok = vm_compile_module(&ctx, &merged, &chunk, entry_file, NULL, false);
   if (ok) {
     ok = write_vm_chunk_file(&chunk, out_path);
   }
@@ -2926,6 +3057,17 @@ static bool build_hybrid_output(const char* entry_file,
   }
   AstModule merged = merge_module_graph(&graph);
 
+  CompilerContext ctx = {0};
+  ctx.ast_arena = arena;
+  ctx.all_decl_cap = 2048;
+  ctx.all_decls = arena_alloc(arena, sizeof(AstDecl*) * ctx.all_decl_cap);
+  ctx.generic_type_cap = 512;
+  ctx.generic_types = arena_alloc(arena, sizeof(AstTypeRef*) * ctx.generic_type_cap);
+  ctx.emitted_generic_type_cap = 512;
+  ctx.emitted_generic_types = arena_alloc(arena, sizeof(AstTypeRef*) * ctx.emitted_generic_type_cap);
+  ctx.specialized_func_cap = 512;
+  ctx.specialized_funcs = arena_alloc(arena, sizeof(FunctionSpecialization) * ctx.specialized_func_cap);
+
   VmRegistry registry;
   vm_registry_init(&registry);
   TickCounter tick_counter = {.next = 0};
@@ -2939,7 +3081,7 @@ static bool build_hybrid_output(const char* entry_file,
 
   Chunk chunk;
   chunk_init(&chunk);
-  ok = vm_compile_module(&merged, &chunk, entry_file, &registry, false);
+  ok = vm_compile_module(&ctx, &merged, &chunk, entry_file, &registry, false);
   if (ok) {
     ok = write_vm_chunk_file(&chunk, chunk_path);
   }
@@ -2948,7 +3090,7 @@ static bool build_hybrid_output(const char* entry_file,
   }
   if (ok) {
     bool dummy_uses_raylib = false;
-    ok = c_backend_emit_module(&merged, c_path, &registry, &dummy_uses_raylib);
+    ok = c_backend_emit_module(&ctx, &merged, c_path, &registry, &dummy_uses_raylib);
   }
   if (ok) {
     ok = copy_runtime_assets(compiled_dir);
