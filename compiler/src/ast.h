@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdint.h>
 
 #include "arena.h"
 #include "str.h"
