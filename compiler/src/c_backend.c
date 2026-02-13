@@ -883,16 +883,18 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
               const char* mangled_arg = rae_mangle_type(ctx->compiler_ctx, ctx->generic_params, type->generic_args);
               fprintf(out, "%s", mangled_arg);
           }
-          fprintf(out, "){ .data = LIFT_TO_TEMP(");
+          fprintf(out, "){ .data = (");
           emit_type_ref_as_c_type(ctx, type->generic_args, out, false);
-          fprintf(out, "[], {");
+          fprintf(out, "*)LIFT_TO_TEMP(");
+          emit_type_ref_as_c_type(ctx, type->generic_args, out, false);
+          fprintf(out, "[], ");
           int count = 0;
           for (const AstCollectionElement* e = expr->as.collection.elements; e; e = e->next) {
               emit_expr(ctx, e->value, out, PREC_LOWEST, false);
               if (e->next) fprintf(out, ", ");
               count++;
           }
-          fprintf(out, "}), .length = ((int64_t)%dLL), .capacity = ((int64_t)%dLL) }", count, count);
+          fprintf(out, "), .length = ((int64_t)%dLL), .capacity = ((int64_t)%dLL) }", count, count);
       } else {
           fprintf(out, "0");
       }

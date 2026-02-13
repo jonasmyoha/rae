@@ -145,6 +145,27 @@ const char* rae_ext_rae_str_char(int64_t v);
 const char* rae_ext_rae_str_cstr(const char* s);
 const char* rae_ext_rae_str_cstr_ptr(const char** s);
 
+int64_t rae_ext_nowMs(void);
+int64_t rae_ext_nowNs(void);
+void rae_ext_rae_sleep(int64_t ms);
+
+double rae_ext_rae_math_sin(double x);
+double rae_ext_rae_math_cos(double x);
+double rae_ext_rae_math_tan(double x);
+double rae_ext_rae_math_asin(double x);
+double rae_ext_rae_math_acos(double x);
+double rae_ext_rae_math_atan(double x);
+double rae_ext_rae_math_atan2(double y, double x);
+double rae_ext_rae_math_sqrt(double x);
+double rae_ext_rae_math_pow(double b, double e);
+double rae_ext_rae_math_exp(double x);
+double rae_ext_rae_math_log(double x);
+double rae_ext_rae_math_floor(double x);
+double rae_ext_rae_math_ceil(double x);
+double rae_ext_rae_math_round(double x);
+
+RaeAny rae_ext_json_get(const char* json, const char* field);
+
 RAE_UNUSED static const char* rae_str_any(RaeAny v) {
     switch (v.type) {
         case RAE_TYPE_INT: return rae_ext_rae_str_i64(v.as.i);
