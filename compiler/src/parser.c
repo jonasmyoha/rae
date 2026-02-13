@@ -700,6 +700,8 @@ static Str unescape_string(Parser* parser, Str lit, bool strip_start, bool strip
 static AstExpr* finish_call(Parser* parser, AstExpr* callee, const Token* start_token) {
   AstExpr* expr = new_expr(parser, AST_EXPR_CALL, start_token);
   expr->as.call.callee = callee;
+  expr->as.call.generic_args = NULL;
+
   if (parser_match(parser, TOK_RPAREN)) {
     return expr;
   }
@@ -758,6 +760,55 @@ static AstExpr* finish_call(Parser* parser, AstExpr* callee, const Token* start_
   } while (true);
   parser_consume(parser, TOK_RPAREN, "expected ')' after arguments");
   expr->as.call.args = args;
+
+  // Check if followed by another '(', which means the first set were generics: foo(T)(args)
+  if (parser_match(parser, TOK_LPAREN)) {
+    // Convert first set of args to generic_args
+    AstTypeRef* generic_head = NULL;
+    for (AstCallArg* a = args; a; a = a->next) {
+        if (a->value->kind == AST_EXPR_IDENT) {
+            AstTypeRef* tr = parser_alloc(parser, sizeof(AstTypeRef));
+            tr->parts = parser_alloc(parser, sizeof(AstIdentifierPart));
+            tr->parts->text = a->value->as.ident;
+            tr->parts->next = NULL;
+            tr->generic_args = NULL;
+            tr->next = NULL;
+            generic_head = append_type_ref_list(generic_head, tr);
+        } else {
+            // Complex types in generic calls not supported yet
+        }
+    }
+    expr->as.call.generic_args = generic_head;
+    expr->as.call.args = NULL; // Reset and parse value args
+
+    if (!parser_match(parser, TOK_RPAREN)) {
+      AstCallArg* val_args = NULL;
+      size_t val_idx = 0;
+      do {
+        AstCallArg* arg = parser_alloc(parser, sizeof(AstCallArg));
+        TokenKind k = parser_peek(parser)->kind;
+        bool is_ident_like = (k == TOK_IDENT || k == TOK_KW_ID || k == TOK_KW_KEY);
+        bool is_named_arg = is_ident_like && parser_check_at(parser, 1, TOK_COLON);
+
+        if (val_idx == 0 && !is_named_arg) {
+            arg->name = (Str){0};
+            arg->value = parse_expression(parser);
+        } else {
+            const Token* name = parser_consume_ident(parser, "expected argument name");
+            parser_consume(parser, TOK_COLON, "expected ':' after argument name");
+            arg->name = parser_copy_str(parser, name->lexeme);
+            arg->value = parse_expression(parser);
+        }
+        val_args = append_call_arg(val_args, arg);
+        val_idx++;
+        if (parser_check(parser, TOK_RPAREN)) break;
+        parser_consume_comma(parser, false, "argument list");
+      } while (true);
+      parser_consume(parser, TOK_RPAREN, "expected ')' after arguments");
+      expr->as.call.args = val_args;
+    }
+  }
+
   return expr;
 }
 
