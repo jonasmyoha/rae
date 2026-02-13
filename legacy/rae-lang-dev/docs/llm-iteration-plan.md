@@ -39,13 +39,13 @@ typedef struct {
 
 ### Tasks
 
-* [>Gemini] Refactor project-wide state (singletons, static arrays) into a unified `CompilerContext`.
+* [x] Refactor project-wide state (singletons, static arrays) into a unified `CompilerContext`.
 
   * [x] Define `CompilerContext` in `ast.h`.
   * [x] Update `c_backend.h` signature.
   * [x] Refactor `c_backend.c` to use `ctx->` instead of `g_` globals.
   * [x] Update `main.c` to initialize and pass `CompilerContext` for C builds.
-  * [ ] Update `vm_compiler.c` to use `CompilerContext`.
+  * [x] Update `vm_compiler.c` to use `CompilerContext`.
   * [ ] Unify `StringInterner` and `TypeTable` into `CompilerContext`.
 
 * [ ] Ban implicit "lazy init" via `static bool initialized`. Use explicit `compiler_init(ctx)`.
@@ -53,7 +53,7 @@ typedef struct {
 ## Phase 3: Make Code Patterns LLM-Proof
 
 * [ ] Arena-Based Lifetimes: Prefer `arena_alloc` over manual `free` for AST and IR nodes to reduce lifetime errors.
-* [ ] Centralized Mangler: Move all mangling logic out of `c_backend.c` into a shared `src/mangler.c`.
+* [>Gemini] Centralized Mangler: Move all mangling logic out of `c_backend.c` into a shared `src/mangler.c`.
 * [ ] ID-Based Comparisons: Replace `if (str_eq(type_name, "Buffer"))` with `if (type->id == CORE_TYPE_BUFFER)`.
 * [ ] Assertion Helpers: Add `RAE_ASSERT(condition, message)` that prints context-aware diagnostics before failing.
 
