@@ -28,6 +28,12 @@ bool str_starts_with_cstr(Str s, const char* prefix) {
   return memcmp(s.data, prefix, prefix_len) == 0;
 }
 
+bool str_ends_with_cstr(Str s, const char* suffix) {
+  size_t suffix_len = strlen(suffix);
+  if (s.len < suffix_len) return false;
+  return memcmp(s.data + s.len - suffix_len, suffix, suffix_len) == 0;
+}
+
 char* str_to_cstr(Str s) {
   char* result = malloc(s.len + 1);
   if (!result) return NULL;
