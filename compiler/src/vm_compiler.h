@@ -8,64 +8,6 @@
 #include "vm_chunk.h"
 #include "str.h" // For Str
 
-typedef struct {
-  Str name;
-  Str* param_types; // All parameter types for dispatch
-  struct CodeSegment* segment;
-  uint32_t offset;
-  uint32_t param_count;
-  uint32_t* patches;
-  size_t patch_count;
-  size_t patch_capacity;
-  bool is_extern;
-  bool returns_ref;
-  Str return_type;
-} FunctionEntry;
-
-typedef struct {
-  FunctionEntry* entries;
-  size_t count;
-  size_t capacity;
-} FunctionTable;
-
-typedef struct {
-  Str name;
-  Str* field_names;
-  const struct AstTypeRef** field_types;
-  const struct AstExpr** field_defaults;
-  size_t field_count;
-} TypeEntry;
-
-typedef struct {
-  TypeEntry* entries;
-  size_t count;
-  size_t capacity;
-} TypeTable;
-
-typedef struct {
-  Str type_name; // e.g., "List", "Array"
-  Str method_name; // e.g., "add", "len"
-  Str actual_function_name; // e.g., "rae_list_add", "rae_list_len"
-} MethodEntry;
-
-typedef struct {
-  MethodEntry* entries;
-  size_t count;
-  size_t capacity;
-} MethodTable;
-
-typedef struct {
-  Str name;
-  Str* members;
-  size_t member_count;
-} EnumEntry;
-
-typedef struct {
-  EnumEntry* entries;
-  size_t count;
-  size_t capacity;
-} EnumTable;
-
 struct VmRegistry;
 
 typedef struct {
@@ -86,10 +28,6 @@ typedef struct {
   struct VmRegistry* registry;
   bool is_patch;
   bool had_error;
-  FunctionTable functions;
-  TypeTable types;
-  MethodTable methods; // New field for method table
-  EnumTable enums;     // New field for enum table
   const AstFuncDecl* current_function;
   int scope_depth;
   DeferStack defer_stack;
