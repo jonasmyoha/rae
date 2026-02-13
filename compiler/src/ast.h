@@ -365,77 +365,104 @@ struct AstModule {
 };
 
 // Forward declarations for context components
-// (These types should be defined in their respective headers or here)
 struct StringInterner;
 struct DiagState;
-struct TypeTable;
 struct SymbolTable;
 
+typedef struct {
+  Str name;
+  Str* param_types; // All parameter types for dispatch
+  struct CodeSegment* segment;
+  uint32_t offset;
+  uint32_t param_count;
+  uint32_t* patches;
+  size_t patch_count;
+  size_t patch_capacity;
+  bool is_extern;
+  bool returns_ref;
+  Str return_type;
+} FunctionEntry;
+
+typedef struct {
+  FunctionEntry* entries;
+  size_t count;
+  size_t capacity;
+} FunctionTable;
+
+typedef struct {
+  Str name;
+  Str* field_names;
+  const struct AstTypeRef** field_types;
+  const struct AstExpr** field_defaults;
+  size_t field_count;
+} TypeEntry;
+
+typedef struct {
+  TypeEntry* entries;
+  size_t count;
+  size_t capacity;
+} TypeTable;
+
+typedef struct {
+  Str type_name; // e.g., "List", "Array"
+  Str method_name; // e.g., "add", "len"
+  Str actual_function_name; // e.g., "rae_list_add", "rae_list_len"
+} MethodEntry;
+
+typedef struct {
+  MethodEntry* entries;
+  size_t count;
+  size_t capacity;
+} MethodTable;
+
+typedef struct {
+  Str name;
+  Str* members;
+  size_t member_count;
+} EnumEntry;
+
+typedef struct {
+  EnumEntry* entries;
+  size_t count;
+  size_t capacity;
+} EnumTable;
+
 typedef struct FunctionSpecialization {
-
     const AstFuncDecl* decl;
-
     const AstTypeRef* concrete_args;
-
 } FunctionSpecialization;
 
-
-
-
-
 typedef struct CompilerContext {
-
     Arena* ast_arena;
-
     Arena* backend_arena;
-
     struct StringInterner* interner;
-
     struct DiagState* diags;
-
-    struct TypeTable* types;
-
     struct SymbolTable* symbols;
 
-    // ... add more subsystems as needed
-
+    // Unified tables (formerly in BytecodeCompiler)
+    FunctionTable functions;
+    TypeTable types;
+    MethodTable methods;
+    EnumTable enums;
     
-
     // Project-wide AST state (formerly static globals in c_backend.c)
-
     const AstDecl** all_decls;
-
     size_t all_decl_count;
-
     size_t all_decl_cap;
-
     
-
     const AstTypeRef** generic_types;
-
     size_t generic_type_count;
-
     size_t generic_type_cap;
 
-
-
     const AstTypeRef** emitted_generic_types;
-
     size_t emitted_generic_type_count;
-
     size_t emitted_generic_type_cap;
 
-
-
     FunctionSpecialization* specialized_funcs;
-
     size_t specialized_func_count;
-
     size_t specialized_func_cap;
 
     struct AstModule* current_module;
-
-
 } CompilerContext;
 
 void ast_dump_module(const AstModule* module, FILE* out);
