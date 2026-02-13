@@ -79,6 +79,7 @@ typedef struct {
 } DeferStack;
 
 typedef struct {
+  CompilerContext* compiler_ctx;
   Chunk* chunk;
   const AstModule* module; // Add module pointer for metadata lookups
   const char* file_path;
@@ -106,21 +107,22 @@ typedef struct {
 
 #define INVALID_OFFSET UINT16_MAX
 
-bool vm_compile_module(const AstModule* module, Chunk* chunk, const char* file_path, struct VmRegistry* registry, bool is_patch);
+bool vm_compile_module(CompilerContext* ctx, const AstModule* module, Chunk* chunk, const char* file_path, struct VmRegistry* registry, bool is_patch);
 
 // Function prototypes from vm_compiler.c
 void free_function_table(FunctionTable* table);
 void free_type_table(TypeTable* table);
 FunctionEntry* function_table_find(FunctionTable* table, Str name);
 FunctionEntry* function_table_find_overload(FunctionTable* table, Str name, const Str* param_types, uint32_t param_count);
+bool function_table_add(CompilerContext* ctx, FunctionTable* table, Str name, Str* param_types, uint32_t param_count, bool is_extern, bool returns_ref, Str return_type);
 TypeEntry* type_table_find(TypeTable* table, Str name);
-bool type_table_add(TypeTable* table, Str name, Str* field_names, const struct AstTypeRef** field_types, const struct AstExpr** field_defaults, size_t field_count);
+bool type_table_add(CompilerContext* ctx, TypeTable* table, Str name, Str* field_names, const struct AstTypeRef** field_types, const struct AstExpr** field_defaults, size_t field_count);
 int type_entry_find_field(const TypeEntry* entry, Str name);
 void free_enum_table(EnumTable* table);
 EnumEntry* enum_table_find(EnumTable* table, Str name);
-bool enum_table_add(EnumTable* table, Str name, Str* members, size_t member_count);
+bool enum_table_add(CompilerContext* ctx, EnumTable* table, Str name, Str* members, size_t member_count);
 int enum_entry_find_member(const EnumEntry* entry, Str name);
-bool collect_metadata(const char* file_path, const AstModule* module, FunctionTable* funcs, TypeTable* types, EnumTable* enums, struct VmRegistry* registry);
+bool collect_metadata(CompilerContext* ctx, const char* file_path, const AstModule* module, FunctionTable* funcs, TypeTable* types, EnumTable* enums, struct VmRegistry* registry);
 bool emit_function_call(BytecodeCompiler* compiler, FunctionEntry* entry, int line,
                                int column, uint8_t arg_count);
 bool emit_return(BytecodeCompiler* compiler, bool has_value, int line);
