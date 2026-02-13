@@ -793,7 +793,7 @@ static Str infer_expr_type(BytecodeCompiler* compiler, const AstExpr* expr) {
                 }
             }
             
-            FunctionEntry* entry = function_table_find_overload(&compiler->functions, name, arg_types, arg_count);
+            FunctionEntry* entry = function_table_find_overload(&compiler->compiler_ctx->functions, name, arg_types, arg_count);
             free(arg_types);
             
             if (entry) {
@@ -825,7 +825,7 @@ static Str infer_expr_type(BytecodeCompiler* compiler, const AstExpr* expr) {
         if (obj_type.len == 0) return (Str){0};
         
         Str base_type = get_base_type_name_str(obj_type);
-        TypeEntry* type = type_table_find(&compiler->types, base_type);
+        TypeEntry* type = type_table_find(&compiler->compiler_ctx->types, base_type);
         if (type) {
             int field_idx = type_entry_find_field(type, expr->as.member.member);
             if (field_idx >= 0) {
@@ -1118,7 +1118,7 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr, bool i
     }
   }
 
-  entry = function_table_find_overload(&compiler->functions, name, arg_types, arg_count);
+  entry = function_table_find_overload(&compiler->compiler_ctx->functions, name, arg_types, arg_count);
   free(arg_types);
 
   if (entry) {
@@ -1404,7 +1404,7 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       if (expr->as.member.object->kind == AST_EXPR_IDENT) {
           Str obj_name = expr->as.member.object->as.ident;
           // Check if it's an enum member access (e.g. Color.RED)
-          EnumEntry* en = enum_table_find(&compiler->enums, obj_name);
+          EnumEntry* en = enum_table_find(&compiler->compiler_ctx->enums, obj_name);
           if (en) {
               int member_idx = enum_entry_find_member(en, expr->as.member.member);
               if (member_idx < 0) {
@@ -1429,7 +1429,7 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
         compiler->had_error = true;
         return false;
       }
-      TypeEntry* type = type_table_find(&compiler->types, type_name);
+      TypeEntry* type = type_table_find(&compiler->compiler_ctx->types, type_name);
       if (!type) {
         char buffer[128];
         snprintf(buffer, sizeof(buffer), "unknown type '%.*s'", (int)type_name.len, type_name.data);
@@ -1561,7 +1561,7 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
         } else if (operand->kind == AST_EXPR_MEMBER) {
           if (!compile_expr(compiler, operand->as.member.object)) return false;
           Str type_name = get_local_type_name(compiler, operand->as.member.object->as.ident);
-          TypeEntry* type = type_table_find(&compiler->types, type_name);
+          TypeEntry* type = type_table_find(&compiler->compiler_ctx->types, type_name);
           int field_index = type_entry_find_field(type, operand->as.member.member);
           
           emit_op(compiler, is_mod ? OP_MOD_FIELD : OP_VIEW_FIELD, (int)expr->line);
@@ -1621,7 +1621,7 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
                            "could not determine type for member increment/decrement");
                 return false;
             }
-            TypeEntry* type = type_table_find(&compiler->types, type_name);
+            TypeEntry* type = type_table_find(&compiler->compiler_ctx->types, type_name);
             int field_index = type_entry_find_field(type, operand->as.member.member);
             if (field_index < 0) {
                 diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "unknown field");
@@ -1683,7 +1683,7 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
           type_name = compiler->expected_type;
       }
       
-      TypeEntry* type = type_name.len > 0 ? type_table_find(&compiler->types, type_name) : NULL;
+      TypeEntry* type = type_name.len > 0 ? type_table_find(&compiler->compiler_ctx->types, type_name) : NULL;
       
       if (type) {
           // Reorder fields according to type definition
@@ -1830,7 +1830,7 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
           }
           
           // Match in function table (without mod prefix, as they are currently flat in FunctionTable)
-          FunctionEntry* entry = function_table_find_overload(&compiler->functions, method_name, arg_types, arg_count);
+          FunctionEntry* entry = function_table_find_overload(&compiler->compiler_ctx->functions, method_name, arg_types, arg_count);
           free(arg_types);
           
           if (entry) {
@@ -1876,7 +1876,7 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       if (str_eq_cstr(method_name, "fromJson")) {
           if (expr->as.method_call.object->kind == AST_EXPR_IDENT) {
               Str type_name = expr->as.method_call.object->as.ident;
-              TypeEntry* te = type_table_find(&compiler->types, type_name);
+              TypeEntry* te = type_table_find(&compiler->compiler_ctx->types, type_name);
               if (te) {
                   // Push type name as first hidden arg
                   emit_constant(compiler, value_string_copy(type_name.data, type_name.len), (int)expr->line);
@@ -1901,7 +1901,7 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       if (str_eq_cstr(method_name, "fromBinary")) {
           if (expr->as.method_call.object->kind == AST_EXPR_IDENT) {
               Str type_name = expr->as.method_call.object->as.ident;
-              TypeEntry* te = type_table_find(&compiler->types, type_name);
+              TypeEntry* te = type_table_find(&compiler->compiler_ctx->types, type_name);
               if (te) {
                   emit_constant(compiler, value_string_copy(type_name.data, type_name.len), (int)expr->line);
                   if (expr->as.method_call.args) {
@@ -1933,7 +1933,7 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
           }
       }
 
-      entry = function_table_find_overload(&compiler->functions, method_name, arg_types, total_arg_count);
+      entry = function_table_find_overload(&compiler->compiler_ctx->functions, method_name, arg_types, total_arg_count);
       free(arg_types);
 
       // Compile the receiver ('this')
@@ -1979,7 +1979,7 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       if (!compile_expr(compiler, expr->as.index.index)) return false;
       // For index, we fallback to 'get' for the specific type
       Str param_types[] = { target_type, str_from_cstr("Int") };
-      FunctionEntry* entry = function_table_find_overload(&compiler->functions, str_from_cstr("get"), param_types, 2);
+      FunctionEntry* entry = function_table_find_overload(&compiler->compiler_ctx->functions, str_from_cstr("get"), param_types, 2);
       if (!entry) {
           diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'get' method not found for indexing this type");
           compiler->had_error = true;
@@ -2010,7 +2010,7 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
           while (current) { element_count++; current = current->next; }
 
           Str int_type = str_from_cstr("Int");
-    FunctionEntry* create_entry = function_table_find_overload(&compiler->functions, str_from_cstr("createList"), &int_type, 1);
+    FunctionEntry* create_entry = function_table_find_overload(&compiler->compiler_ctx->functions, str_from_cstr("createList"), &int_type, 1);
           if (!create_entry) {
               diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'createList' not found in core.rae");
               return false;
@@ -2034,7 +2034,7 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
           emit_op(compiler, OP_POP, (int)expr->line);
 
           Str add_types[] = { str_from_cstr("List"), str_from_cstr("Any") };
-          FunctionEntry* add_entry = function_table_find_overload(&compiler->functions, str_from_cstr("add"), add_types, 2);
+          FunctionEntry* add_entry = function_table_find_overload(&compiler->compiler_ctx->functions, str_from_cstr("add"), add_types, 2);
           if (!add_entry) {
               diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'add' not found in core.rae");
               return false;
@@ -2070,7 +2070,7 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       while (current) { element_count++; current = current->next; }
 
       Str int_type = str_from_cstr("Int");
-    FunctionEntry* create_entry = function_table_find_overload(&compiler->functions, str_from_cstr("createList"), &int_type, 1);
+    FunctionEntry* create_entry = function_table_find_overload(&compiler->compiler_ctx->functions, str_from_cstr("createList"), &int_type, 1);
       if (!create_entry) {
           diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'createList' not found in core.rae");
           return false;
@@ -2090,7 +2090,7 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       emit_op(compiler, OP_POP, (int)expr->line);
 
       Str add_types[] = { str_from_cstr("List"), str_from_cstr("Any") };
-      FunctionEntry* add_entry = function_table_find_overload(&compiler->functions, str_from_cstr("add"), add_types, 2);
+      FunctionEntry* add_entry = function_table_find_overload(&compiler->compiler_ctx->functions, str_from_cstr("add"), add_types, 2);
       if (!add_entry) {
           diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'add' not found in core.rae");
           return false;
@@ -2158,7 +2158,7 @@ static bool emit_lvalue_ref(BytecodeCompiler* compiler, const AstExpr* expr, boo
         
         Str obj_type_raw = infer_expr_type(compiler, expr->as.member.object);
         Str obj_type = get_base_type_name_str(obj_type_raw);
-        TypeEntry* type = type_table_find(&compiler->types, obj_type);
+        TypeEntry* type = type_table_find(&compiler->compiler_ctx->types, obj_type);
         if (!type) {
             char buffer[128];
             snprintf(buffer, sizeof(buffer), "unknown type '%.*s' for member reference", (int)obj_type.len, obj_type.data);
@@ -2264,7 +2264,7 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
               if (member_expr->as.member.object->kind == AST_EXPR_IDENT) {
                   Str obj_name = member_expr->as.member.object->as.ident;
                   Str type_name = get_local_type_name(compiler, obj_name);
-                  TypeEntry* type = type_table_find(&compiler->types, type_name);
+                  TypeEntry* type = type_table_find(&compiler->compiler_ctx->types, type_name);
                   if (type) {
                       int field_index = type_entry_find_field(type, member_expr->as.member.member);
                       if (field_index >= 0) {
@@ -2294,18 +2294,18 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
                   const AstExpr* callee = stmt->as.let_stmt.value->as.call.callee;
                   if (callee->kind == AST_EXPR_IDENT) {
                       Str name = callee->as.ident;
-                      FunctionEntry* entry = function_table_find(&compiler->functions, name);
+                      FunctionEntry* entry = function_table_find(&compiler->compiler_ctx->functions, name);
                       if (entry && entry->returns_ref) {
                           already_ref = true;
                       }
                   }
               } else if (stmt->as.let_stmt.value->kind == AST_EXPR_METHOD_CALL) {
                   Str method_name = stmt->as.let_stmt.value->as.method_call.method_name;
-                  FunctionEntry* entry = function_table_find(&compiler->functions, method_name);
+                  FunctionEntry* entry = function_table_find(&compiler->compiler_ctx->functions, method_name);
                   if (!entry) {
                       // Try common list methods
-                      if (str_eq_cstr(method_name, "add")) entry = function_table_find(&compiler->functions, str_from_cstr("rae_list_add"));
-                      else if (str_eq_cstr(method_name, "get")) entry = function_table_find(&compiler->functions, str_from_cstr("rae_list_get"));
+                      if (str_eq_cstr(method_name, "add")) entry = function_table_find(&compiler->compiler_ctx->functions, str_from_cstr("rae_list_add"));
+                      else if (str_eq_cstr(method_name, "get")) entry = function_table_find(&compiler->compiler_ctx->functions, str_from_cstr("rae_list_get"));
                   }
                   if (entry && entry->returns_ref) {
                       already_ref = true;
@@ -2749,7 +2749,7 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
         // 2. Resolve the field index and type
         Str obj_type_raw = infer_expr_type(compiler, target->as.member.object);
         Str obj_type = get_base_type_name_str(obj_type_raw);
-        TypeEntry* type = type_table_find(&compiler->types, obj_type);
+        TypeEntry* type = type_table_find(&compiler->compiler_ctx->types, obj_type);
         if (!type) {
           char buffer[128];
           snprintf(buffer, sizeof(buffer), "unknown type '%.*s' for member assignment", (int)obj_type.len, obj_type.data);
@@ -2844,7 +2844,7 @@ static bool compile_function(BytecodeCompiler* compiler, const AstDecl* decl) {
     }
   }
 
-  FunctionEntry* entry = function_table_find_overload(&compiler->functions, func->name, param_types, param_count);
+  FunctionEntry* entry = function_table_find_overload(&compiler->compiler_ctx->functions, func->name, param_types, param_count);
   free(param_types);
 
   if (!entry) {
@@ -2946,18 +2946,14 @@ bool vm_compile_module(CompilerContext* ctx, const AstModule* module, Chunk* chu
       .allocated_locals = 0,
       .expected_type = {0},
   };
-  memset(&compiler.functions, 0, sizeof(FunctionTable));
-  memset(&compiler.types, 0, sizeof(TypeTable));
-  memset(&compiler.methods, 0, sizeof(MethodTable));
-  memset(&compiler.enums, 0, sizeof(EnumTable));
 
-  if (!collect_metadata(ctx, file_path, module, &compiler.functions, &compiler.types, &compiler.enums, registry)) {
+  if (!collect_metadata(ctx, file_path, module, &ctx->functions, &ctx->types, &ctx->enums, registry)) {
     diag_error(file_path, 0, 0, "failed to prepare VM metadata");
     compiler.had_error = true;
   }
 
   Str main_name = str_from_cstr("main");
-  FunctionEntry* main_entry = function_table_find(&compiler.functions, main_name);
+  FunctionEntry* main_entry = function_table_find(&ctx->functions, main_name);
   if (!main_entry) {
     diag_error(file_path, 0, 0, "no `func main` found for VM execution");
     compiler.had_error = true;
@@ -3019,7 +3015,7 @@ bool vm_compile_module(CompilerContext* ctx, const AstModule* module, Chunk* chu
   emit_return(&compiler, false, 0);
 
   if (!compiler.had_error) {
-    if (!patch_function_calls(&compiler.functions, chunk, file_path)) {
+    if (!patch_function_calls(&ctx->functions, chunk, file_path)) {
       compiler.had_error = true;
     }
   }
@@ -3029,9 +3025,9 @@ bool vm_compile_module(CompilerContext* ctx, const AstModule* module, Chunk* chu
   }
   
   bool success = !compiler.had_error;
-  free_function_table(&compiler.functions);
-  free_type_table(&compiler.types);
-  free_enum_table(&compiler.enums);
+  // free_function_table(&compiler.functions);
+  // free_type_table(&compiler.types);
+  // free_enum_table(&compiler.enums);
   // Method table free not yet implemented but should be added when used.
 
   return success;
@@ -3074,10 +3070,10 @@ static bool emit_default_value(BytecodeCompiler* compiler, const AstTypeRef* typ
     emit_uint32(compiler, chunk_add_constant(compiler->chunk, value_string_copy("rae_list_create", 15)), line);
     emit_constant(compiler, value_int(0), line);
     emit_byte(compiler, 1, line);
-  } else if (enum_table_find(&compiler->enums, type_name)) {
+  } else if (enum_table_find(&compiler->compiler_ctx->enums, type_name)) {
     emit_constant(compiler, value_int(0), line);
   } else {
-    TypeEntry* entry = type_table_find(&compiler->types, type_name);
+    TypeEntry* entry = type_table_find(&compiler->compiler_ctx->types, type_name);
     if (!entry) {
       char buf[128];
       snprintf(buf, sizeof(buf), "unknown type '%.*s' for default initialization", (int)type_name.len, type_name.data);
