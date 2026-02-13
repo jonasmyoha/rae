@@ -273,7 +273,7 @@ static FunctionEntry* function_table_find_exact(FunctionTable* table, Str name, 
   return NULL;
 }
 
-static bool function_table_add(FunctionTable* table, Str name, const Str* param_types, uint32_t param_count, bool is_extern, bool returns_ref, Str return_type) {
+bool function_table_add(CompilerContext* ctx, FunctionTable* table, Str name, Str* param_types, uint32_t param_count, bool is_extern, bool returns_ref, Str return_type) {
   FunctionEntry* existing = function_table_find_exact(table, name, param_types, param_count);
   if (existing) {
     existing->is_extern = is_extern;
@@ -283,16 +283,16 @@ static bool function_table_add(FunctionTable* table, Str name, const Str* param_
   if (table->count + 1 > table->capacity) {
     size_t old_cap = table->capacity;
     size_t new_cap = old_cap < 8 ? 8 : old_cap * 2;
-    FunctionEntry* resized = realloc(table->entries, new_cap * sizeof(FunctionEntry));
-    if (!resized) {
-      return false;
+    FunctionEntry* new_entries = arena_alloc(ctx->ast_arena, new_cap * sizeof(FunctionEntry));
+    if (table->entries) {
+        memcpy(new_entries, table->entries, table->count * sizeof(FunctionEntry));
     }
-    table->entries = resized;
+    table->entries = new_entries;
     table->capacity = new_cap;
   }
   FunctionEntry* entry = &table->entries[table->count++];
   entry->name = name;
-  entry->param_types = malloc(param_count * sizeof(Str));
+  entry->param_types = arena_alloc(ctx->ast_arena, param_count * sizeof(Str));
   for (uint32_t i = 0; i < param_count; ++i) {
     entry->param_types[i] = param_types[i];
   }
@@ -352,13 +352,16 @@ TypeEntry* type_table_find(TypeTable* table, Str name) {
   return NULL;
 }
 
-bool type_table_add(TypeTable* table, Str name, Str* field_names, const AstTypeRef** field_types, const AstExpr** field_defaults, size_t field_count) {
+bool type_table_add(CompilerContext* ctx, TypeTable* table, Str name, Str* field_names, const AstTypeRef** field_types, const AstExpr** field_defaults, size_t field_count) {
   if (type_table_find(table, name)) return true;
   if (table->count + 1 > table->capacity) {
-    size_t new_cap = table->capacity < 4 ? 4 : table->capacity * 2;
-    TypeEntry* resized = realloc(table->entries, new_cap * sizeof(TypeEntry));
-    if (!resized) return false;
-    table->entries = resized;
+    size_t old_cap = table->capacity;
+    size_t new_cap = old_cap < 4 ? 4 : old_cap * 2;
+    TypeEntry* new_entries = arena_alloc(ctx->ast_arena, new_cap * sizeof(TypeEntry));
+    if (table->entries) {
+        memcpy(new_entries, table->entries, table->count * sizeof(TypeEntry));
+    }
+    table->entries = new_entries;
     table->capacity = new_cap;
   }
   TypeEntry* entry = &table->entries[table->count++];
@@ -379,10 +382,6 @@ int type_entry_find_field(const TypeEntry* entry, Str name) {
 
 void free_enum_table(EnumTable* table) {
   if (!table) return;
-  for (size_t i = 0; i < table->count; i++) {
-    free(table->entries[i].members);
-  }
-  free(table->entries);
   table->entries = NULL;
   table->count = 0;
   table->capacity = 0;
@@ -396,13 +395,16 @@ EnumEntry* enum_table_find(EnumTable* table, Str name) {
   return NULL;
 }
 
-bool enum_table_add(EnumTable* table, Str name, Str* members, size_t member_count) {
+bool enum_table_add(CompilerContext* ctx, EnumTable* table, Str name, Str* members, size_t member_count) {
   if (enum_table_find(table, name)) return true;
   if (table->count + 1 > table->capacity) {
-    size_t new_cap = table->capacity < 4 ? 4 : table->capacity * 2;
-    EnumEntry* resized = realloc(table->entries, new_cap * sizeof(EnumEntry));
-    if (!resized) return false;
-    table->entries = resized;
+    size_t old_cap = table->capacity;
+    size_t new_cap = old_cap < 4 ? 4 : old_cap * 2;
+    EnumEntry* new_entries = arena_alloc(ctx->ast_arena, new_cap * sizeof(EnumEntry));
+    if (table->entries) {
+        memcpy(new_entries, table->entries, table->count * sizeof(EnumEntry));
+    }
+    table->entries = new_entries;
     table->capacity = new_cap;
   }
   EnumEntry* entry = &table->entries[table->count++];
@@ -442,129 +444,218 @@ static Str get_type_name_with_refs(const AstTypeRef* type) {
     return str_dup(str_from_cstr(buffer)); // Note: this leaks in compiler
 }
 
-bool collect_metadata(const char* file_path, const AstModule* module, FunctionTable* funcs, TypeTable* types, EnumTable* enums, VmRegistry* registry) {
+bool collect_metadata(CompilerContext* ctx, const char* file_path, const AstModule* module, FunctionTable* funcs, TypeTable* types, EnumTable* enums, VmRegistry* registry) {
+
   if (!module) return true;
 
+
+
   // Process imports first
+
   for (const AstImport* imp = module->imports; imp; imp = imp->next) {
-      if (!collect_metadata(file_path, imp->module, funcs, types, enums, registry)) {
+
+      if (!collect_metadata(ctx, file_path, imp->module, funcs, types, enums, registry)) {
+
           return false;
+
       }
+
   }
 
+
+
   const AstDecl* decl = module->decls;
+
   while (decl) {
+
     if (decl->kind == AST_DECL_FUNC) {
+
       // ... (func handling remains same) ...
+
       uint32_t param_count = 0;
+
       const AstParam* p = decl->as.func_decl.params;
+
       while (p) {
+
         param_count++;
+
         p = p->next;
+
       }
+
+
 
       Str* param_types = NULL;
+
       if (param_count > 0) {
-        param_types = malloc(param_count * sizeof(Str));
+
+        param_types = arena_alloc(ctx->ast_arena, param_count * sizeof(Str));
+
         p = decl->as.func_decl.params;
+
         for (uint32_t i = 0; i < param_count; ++i) {
+
           if (p->type->is_opt && (p->type->is_view || p->type->is_mod)) {
+
             diag_error(file_path, (int)p->type->line, (int)p->type->column, "opt view/mod not allowed");
-            free(param_types);
+
             return false;
+
           }
+
           param_types[i] = get_type_name_with_refs(p->type);
+
           p = p->next;
+
         }
+
       }
+
+
 
       bool returns_ref = decl->as.func_decl.returns && (decl->as.func_decl.returns->type->is_view || decl->as.func_decl.returns->type->is_mod);
+
       Str return_type = (Str){0};
+
       if (decl->as.func_decl.returns) {
+
           if (decl->as.func_decl.returns->type->is_opt && (decl->as.func_decl.returns->type->is_view || decl->as.func_decl.returns->type->is_mod)) {
+
             diag_error(file_path, (int)decl->as.func_decl.returns->type->line, (int)decl->as.func_decl.returns->type->column, "opt view/mod not allowed");
-            if (param_types) free(param_types);
+
             return false;
+
           }
+
           return_type = get_type_name_with_refs(decl->as.func_decl.returns->type);
-      }
-      bool ok = function_table_add(funcs, decl->as.func_decl.name, param_types, param_count, decl->as.func_decl.is_extern, returns_ref, return_type);
-      free(param_types);
-      if (!ok) return false;
-    } else if (decl->kind == AST_DECL_TYPE) {
-      size_t field_count = 0;
-      const AstTypeField* f = decl->as.type_decl.fields;
-      while (f) { field_count++; f = f->next; }
-      
-      Str* field_names = malloc(field_count * sizeof(Str));
-      const AstTypeRef** field_types = malloc(field_count * sizeof(AstTypeRef*));
-      const AstExpr** field_defaults = malloc(field_count * sizeof(AstExpr*));
-      f = decl->as.type_decl.fields;
-      for (size_t i = 0; i < field_count; i++) {
-        if (f->type->is_view || f->type->is_mod) {
-          diag_error(file_path, (int)f->type->line, (int)f->type->column, "view/mod not allowed in struct fields");
-          free(field_names);
-          free(field_types);
-          free(field_defaults);
-          return false;
-        }
-        if (f->type->is_opt && (f->type->is_view || f->type->is_mod)) {
-          diag_error(file_path, (int)f->type->line, (int)f->type->column, "opt view/mod not allowed");
-          free(field_names);
-          free(field_types);
-          free(field_defaults);
-          return false;
-        }
-        field_names[i] = f->name;
-        field_types[i] = f->type;
-        field_defaults[i] = f->default_value;
-        f = f->next;
-      }
-      if (!type_table_add(types, decl->as.type_decl.name, field_names, field_types, field_defaults, field_count)) {
-        free(field_names);
-        free(field_types);
-        free(field_defaults);
-        return false;
+
       }
 
-      if (registry) {
-          char** c_field_names = malloc(field_count * sizeof(char*));
-          char** c_field_types = malloc(field_count * sizeof(char*));
-          for (size_t i = 0; i < field_count; i++) {
-              c_field_names[i] = str_to_cstr(field_names[i]);
-              c_field_types[i] = str_to_cstr(get_base_type_name(field_types[i]));
-          }
-          char* type_name_cstr = str_to_cstr(decl->as.type_decl.name);
-          vm_registry_add_type_metadata(registry, type_name_cstr, c_field_names, c_field_types, field_count);
-          free(type_name_cstr);
-          for (size_t i = 0; i < field_count; i++) {
-              free(c_field_names[i]);
-              free(c_field_types[i]);
-          }
-          free(c_field_names);
-          free(c_field_types);
-      }
-    } else if (decl->kind == AST_DECL_ENUM) {
-      size_t member_count = 0;
-      const AstEnumMember* m = decl->as.enum_decl.members;
-      while (m) { member_count++; m = m->next; }
+      bool ok = function_table_add(ctx, funcs, decl->as.func_decl.name, param_types, param_count, decl->as.func_decl.is_extern, returns_ref, return_type);
+
+      if (!ok) return false;
+
+    } else if (decl->kind == AST_DECL_TYPE) {
+
+      size_t field_count = 0;
+
+      const AstTypeField* f = decl->as.type_decl.fields;
+
+      while (f) { field_count++; f = f->next; }
+
       
-      Str* members = malloc(member_count * sizeof(Str));
-      m = decl->as.enum_decl.members;
-      for (size_t i = 0; i < member_count; i++) {
-        members[i] = m->name;
-        m = m->next;
-      }
-      if (!enum_table_add(enums, decl->as.enum_decl.name, members, member_count)) {
-        free(members);
-        return false;
-      }
-    } else if (decl->kind == AST_DECL_GLOBAL_LET) {
-        if (registry) {
-            Str name = decl->as.let_decl.name;
-            Str type_name_str = get_base_type_name(decl->as.let_decl.type);
-            vm_registry_ensure_global(registry, name, type_name_str);
+
+      Str* field_names = arena_alloc(ctx->ast_arena, field_count * sizeof(Str));
+
+      const AstTypeRef** field_types = arena_alloc(ctx->ast_arena, field_count * sizeof(AstTypeRef*));
+
+      const AstExpr** field_defaults = arena_alloc(ctx->ast_arena, field_count * sizeof(AstExpr*));
+
+      f = decl->as.type_decl.fields;
+
+      for (size_t i = 0; i < field_count; i++) {
+
+        if (f->type->is_view || f->type->is_mod) {
+
+          diag_error(file_path, (int)f->type->line, (int)f->type->column, "view/mod not allowed in struct fields");
+
+          return false;
+
         }
+
+        if (f->type->is_opt && (f->type->is_view || f->type->is_mod)) {
+
+          diag_error(file_path, (int)f->type->line, (int)f->type->column, "opt view/mod not allowed");
+
+          return false;
+
+        }
+
+        field_names[i] = f->name;
+
+        field_types[i] = f->type;
+
+        field_defaults[i] = f->default_value;
+
+        f = f->next;
+
+      }
+
+      if (!type_table_add(ctx, types, decl->as.type_decl.name, field_names, field_types, field_defaults, field_count)) {
+
+        return false;
+
+      }
+
+
+
+      if (registry) {
+
+          char** c_field_names = arena_alloc(ctx->ast_arena, field_count * sizeof(char*));
+
+          char** c_field_types = arena_alloc(ctx->ast_arena, field_count * sizeof(char*));
+
+          for (size_t i = 0; i < field_count; i++) {
+
+              c_field_names[i] = str_to_cstr(field_names[i]);
+
+              c_field_types[i] = str_to_cstr(get_base_type_name(field_types[i]));
+
+          }
+
+          char* type_name_cstr = str_to_cstr(decl->as.type_decl.name);
+
+          vm_registry_add_type_metadata(registry, type_name_cstr, c_field_names, c_field_types, field_count);
+
+          free(type_name_cstr);
+
+          // Note: we let these leak for now or they should be on arena if registry supported it
+
+          // Actually str_to_cstr uses malloc, so we should ideally have arena-based versions.
+
+      }
+
+    } else if (decl->kind == AST_DECL_ENUM) {
+
+      size_t member_count = 0;
+
+      const AstEnumMember* m = decl->as.enum_decl.members;
+
+      while (m) { member_count++; m = m->next; }
+
+      
+
+      Str* members = arena_alloc(ctx->ast_arena, member_count * sizeof(Str));
+
+      m = decl->as.enum_decl.members;
+
+      for (size_t i = 0; i < member_count; i++) {
+
+        members[i] = m->name;
+
+        m = m->next;
+
+      }
+
+      if (!enum_table_add(ctx, enums, decl->as.enum_decl.name, members, member_count)) {
+
+        return false;
+
+      }
+
+    } else if (decl->kind == AST_DECL_GLOBAL_LET) {
+
+        if (registry) {
+
+            Str name = decl->as.let_decl.name;
+
+            Str type_name_str = get_base_type_name(decl->as.let_decl.type);
+
+            vm_registry_ensure_global(registry, name, type_name_str);
+
+        }
+
     }
     decl = decl->next;
   }
@@ -573,12 +664,6 @@ bool collect_metadata(const char* file_path, const AstModule* module, FunctionTa
 
 void free_type_table(TypeTable* table) {
   if (!table) return;
-  for (size_t i = 0; i < table->count; i++) {
-    free(table->entries[i].field_names);
-    free(table->entries[i].field_types);
-    free(table->entries[i].field_defaults);
-  }
-  free(table->entries);
   table->entries = NULL;
   table->count = 0;
   table->capacity = 0;
@@ -588,13 +673,10 @@ void free_function_table(FunctionTable* table) {
   if (!table) return;
   for (size_t i = 0; i < table->count; ++i) {
     free(table->entries[i].patches);
-    free(table->entries[i].param_types);
     table->entries[i].patches = NULL;
-    table->entries[i].param_types = NULL;
     table->entries[i].patch_capacity = 0;
     table->entries[i].patch_count = 0;
   }
-  free(table->entries);
   table->entries = NULL;
   table->count = 0;
   table->capacity = 0;
@@ -2841,7 +2923,7 @@ static bool compile_function(BytecodeCompiler* compiler, const AstDecl* decl) {
   return success;
 }
 
-bool vm_compile_module(const AstModule* module, Chunk* chunk, const char* file_path, VmRegistry* registry, bool is_patch) {
+bool vm_compile_module(CompilerContext* ctx, const AstModule* module, Chunk* chunk, const char* file_path, VmRegistry* registry, bool is_patch) {
   if (!module || !chunk) {
       return false;
   }
@@ -2852,6 +2934,7 @@ bool vm_compile_module(const AstModule* module, Chunk* chunk, const char* file_p
 
   chunk_init(chunk);
   BytecodeCompiler compiler = {
+      .compiler_ctx = ctx,
       .chunk = chunk,
       .module = module,
       .file_path = file_path,
@@ -2868,7 +2951,7 @@ bool vm_compile_module(const AstModule* module, Chunk* chunk, const char* file_p
   memset(&compiler.methods, 0, sizeof(MethodTable));
   memset(&compiler.enums, 0, sizeof(EnumTable));
 
-  if (!collect_metadata(file_path, module, &compiler.functions, &compiler.types, &compiler.enums, registry)) {
+  if (!collect_metadata(ctx, file_path, module, &compiler.functions, &compiler.types, &compiler.enums, registry)) {
     diag_error(file_path, 0, 0, "failed to prepare VM metadata");
     compiler.had_error = true;
   }

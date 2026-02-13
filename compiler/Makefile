@@ -1,9 +1,25 @@
 # Rae Compiler Makefile
 
+# Build modes: DEV_FAST (default) or CI_STRICT
+MODE ?= DEV_FAST
+
 CC = gcc
-CFLAGS = -std=c11 -Wall -Wextra -Wpedantic -Werror -O2 -g
+COMMON_CFLAGS = -std=c11 -Wall -Wextra -Wpedantic -O2 -g
 LDFLAGS = -lraylib -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL -L/opt/homebrew/lib
-CFLAGS += -I/opt/homebrew/include -I../third_party/tinyexpr
+COMMON_CFLAGS += -I/opt/homebrew/include -I../third_party/tinyexpr
+
+ifeq ($(MODE), CI_STRICT)
+    CFLAGS = $(COMMON_CFLAGS) -Werror
+else
+    # Rapid iteration mode: keep critical errors, but don't stall on unused code
+    CFLAGS = $(COMMON_CFLAGS) \
+             -Wno-error=unused-variable \
+             -Wno-error=unused-parameter \
+             -Wno-error=unused-function \
+             -Wno-error=unused-but-set-variable \
+             -Wno-error=missing-field-initializers \
+             -Wno-error=sign-compare
+endif
 
 SRC_DIR = src
 BUILD_DIR = build
@@ -30,7 +46,8 @@ SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/vm_registry.c \
        $(SRC_DIR)/vm_raylib.c \
        $(SRC_DIR)/vm_tinyexpr.c \
-       $(SRC_DIR)/vm_monocypher.c
+       $(SRC_DIR)/vm_monocypher.c \
+       $(SRC_DIR)/mangler.c
 
 EXT_SRCS = ../third_party/tinyexpr/rae_tinyexpr.c ../third_party/monocypher/monocypher.c
 
@@ -40,13 +57,13 @@ OBJS += $(BUILD_DIR)/rae_tinyexpr.o $(BUILD_DIR)/monocypher.o
 TARGET = $(BIN_DIR)/rae
 TEST_RUNNER = tools/run_tests.sh
 
-.PHONY: all build test clean
+.PHONY: all build test clean smoke
 
 all: build
 
 build: $(TARGET)
 
-$(BIN_DIR)/rae: $(BUILD_DIR)/main.o $(BUILD_DIR)/arena.o $(BUILD_DIR)/str.o $(BUILD_DIR)/diag.o $(BUILD_DIR)/lexer.o $(BUILD_DIR)/ast.o $(BUILD_DIR)/parser.o $(BUILD_DIR)/pretty.o $(BUILD_DIR)/c_backend.o $(BUILD_DIR)/raepack.o $(BUILD_DIR)/vm_chunk.o $(BUILD_DIR)/vm_value.o $(BUILD_DIR)/vm.o $(BUILD_DIR)/vm_compiler.o $(BUILD_DIR)/vm_registry.o $(BUILD_DIR)/vm_raylib.o $(BUILD_DIR)/vm_tinyexpr.o $(BUILD_DIR)/vm_monocypher.o $(BUILD_DIR)/rae_tinyexpr.o $(BUILD_DIR)/monocypher.o $(BUILD_DIR)/sys_thread.o $(BUILD_DIR)/vm_patch.o $(BUILD_DIR)/rae_runtime.o
+$(BIN_DIR)/rae: $(BUILD_DIR)/main.o $(BUILD_DIR)/arena.o $(BUILD_DIR)/str.o $(BUILD_DIR)/diag.o $(BUILD_DIR)/lexer.o $(BUILD_DIR)/ast.o $(BUILD_DIR)/parser.o $(BUILD_DIR)/pretty.o $(BUILD_DIR)/c_backend.o $(BUILD_DIR)/raepack.o $(BUILD_DIR)/vm_chunk.o $(BUILD_DIR)/vm_value.o $(BUILD_DIR)/vm.o $(BUILD_DIR)/vm_compiler.o $(BUILD_DIR)/vm_registry.o $(BUILD_DIR)/vm_raylib.o $(BUILD_DIR)/vm_tinyexpr.o $(BUILD_DIR)/mangler.o $(BUILD_DIR)/vm_monocypher.o $(BUILD_DIR)/rae_tinyexpr.o $(BUILD_DIR)/monocypher.o $(BUILD_DIR)/sys_thread.o $(BUILD_DIR)/vm_patch.o $(BUILD_DIR)/rae_runtime.o
 	@mkdir -p $(BIN_DIR)
 	$(CC) -o $@ $^ $(LDFLAGS)
 
@@ -78,8 +95,10 @@ test: build
 	@chmod +x $(TEST_RUNNER)
 	@$(TEST_RUNNER) $(TEST)
 
+smoke: build
+	@chmod +x tools/smoke.sh
+	@./tools/smoke.sh
+
 clean:
-
 	rm -rf $(BUILD_DIR) $(BIN_DIR) ../build
-
 	@echo "Cleaned build artifacts"

@@ -17,7 +17,7 @@
 #include <mach/mach_time.h>
 #endif
 
-static void rae_flush_stdout(void) {
+void rae_flush_stdout(void) {
   fflush(stdout);
 }
 
