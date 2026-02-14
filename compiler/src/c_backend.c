@@ -1667,11 +1667,26 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         const AstCallArg* buf = expr->as.call.args;
         const AstCallArg* idx = buf->next;
         const AstCallArg* val = idx->next;
+        
+        const AstTypeRef* tr = infer_expr_type_ref(ctx, buf->value);
+        AstTypeRef elem_tr = {0};
+        bool has_elem = false;
+        if (tr && tr->generic_args) { elem_tr = *tr->generic_args; has_elem = true; }
+
         emit_expr(ctx, buf->value, out, PREC_CALL, false);
         fprintf(out, "[");
         emit_expr(ctx, idx->value, out, PREC_LOWEST, false);
         fprintf(out, "] = ");
+        
+        AstTypeRef old_expected = ctx->expected_type;
+        bool old_has = ctx->has_expected_type;
+        if (has_elem) { ctx->expected_type = elem_tr; ctx->has_expected_type = true; }
+        else ctx->has_expected_type = false;
+
         emit_expr(ctx, val->value, out, PREC_LOWEST, false);
+        
+        ctx->expected_type = old_expected;
+        ctx->has_expected_type = old_has;
         return true;
     }
     if (str_eq_cstr(callee->as.ident, "rae_ext_rae_buf_get") || str_eq_cstr(callee->as.ident, "__buf_get")) {
