@@ -66,7 +66,8 @@ typedef struct {
   size_t local_count;
   bool returns_value;
   size_t temp_counter;
-  const AstTypeRef* expected_type;
+  AstTypeRef expected_type;
+  bool has_expected_type;
   const struct VmRegistry* registry;
   bool uses_raylib;
   bool is_main;
@@ -75,8 +76,8 @@ typedef struct {
 } CFuncContext;
 
 // Forward declarations
-static const AstDecl* find_type_decl(const AstModule* module, Str name);
-static const AstDecl* find_enum_decl(const AstModule* module, Str name);
+static const AstDecl* find_type_decl(CFuncContext* ctx, const AstModule* module, Str name);
+static const AstDecl* find_enum_decl(CFuncContext* ctx, const AstModule* module, Str name);
 static bool has_property(const AstProperty* props, const char* name);
 static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_prec, bool is_lvalue);
 static bool emit_function(CompilerContext* compiler_ctx, const AstModule* module, const AstFuncDecl* func, FILE* out, const struct VmRegistry* registry, bool uses_raylib);
@@ -157,7 +158,13 @@ static bool types_match(Str a, Str b) {
   return false;
 }
 
-static const AstDecl* find_type_decl(const AstModule* module, Str name) {
+static const AstDecl* find_type_decl(CFuncContext* ctx, const AstModule* module, Str name) {
+  if (ctx && ctx->compiler_ctx) {
+      for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
+          const AstDecl* decl = ctx->compiler_ctx->all_decls[i];
+          if (decl->kind == AST_DECL_TYPE && types_match(decl->as.type_decl.name, name)) return decl;
+      }
+  }
   if (!module) return NULL;
   for (const AstDecl* decl = module->decls; decl; decl = decl->next) {
     if (decl->kind == AST_DECL_TYPE && types_match(decl->as.type_decl.name, name)) {
@@ -169,14 +176,20 @@ static const AstDecl* find_type_decl(const AstModule* module, Str name) {
   g_find_module_stack[g_find_module_stack_count++] = module;
   const AstDecl* found = NULL;
   for (const AstImport* imp = module->imports; imp; imp = imp->next) {
-    found = find_type_decl(imp->module, name);
+    found = find_type_decl(ctx, imp->module, name);
     if (found) break;
   }
   g_find_module_stack_count--;
   return found;
 }
 
-static const AstDecl* find_enum_decl(const AstModule* module, Str name) {
+static const AstDecl* find_enum_decl(CFuncContext* ctx, const AstModule* module, Str name) {
+  if (ctx && ctx->compiler_ctx) {
+      for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
+          const AstDecl* decl = ctx->compiler_ctx->all_decls[i];
+          if (decl->kind == AST_DECL_ENUM && types_match(decl->as.enum_decl.name, name)) return decl;
+      }
+  }
   if (!module) return NULL;
   for (const AstDecl* decl = module->decls; decl; decl = decl->next) {
     if (decl->kind == AST_DECL_ENUM && types_match(decl->as.enum_decl.name, name)) {
@@ -188,7 +201,7 @@ static const AstDecl* find_enum_decl(const AstModule* module, Str name) {
   g_find_module_stack[g_find_module_stack_count++] = module;
   const AstDecl* found = NULL;
   for (const AstImport* imp = module->imports; imp; imp = imp->next) {
-    found = find_enum_decl(imp->module, name);
+    found = find_enum_decl(ctx, imp->module, name);
     if (found) break;
   }
   g_find_module_stack_count--;
@@ -271,12 +284,20 @@ static AstTypeRef* substitute_type_ref(CompilerContext* ctx, const AstIdentifier
         const AstTypeRef* arg = concrete_args;
         while (gp && arg) {
             if (str_eq(gp->text, base)) {
-                // Return a copy of the argument, but ALSO substitute its own generic args if it has any
-                // This handles cases like List(T) where T=List(Int)
+                AstTypeRef* result = (AstTypeRef*)arg;
                 if (arg->generic_args) {
-                    return substitute_type_ref(ctx, NULL, NULL, arg);
+                    result = substitute_type_ref(ctx, NULL, NULL, arg);
                 }
-                return (AstTypeRef*)arg;
+                
+                // Copy flags from the original type ref (e.g. if it was mod V)
+                if (type->is_view || type->is_mod) {
+                    AstTypeRef* copy = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
+                    *copy = *result;
+                    if (type->is_view) copy->is_view = true;
+                    if (type->is_mod) copy->is_mod = true;
+                    result = copy;
+                }
+                return result;
             }
             gp = gp->next; arg = arg->next;
         }
@@ -415,7 +436,7 @@ scan_args:
         
         // Fallback: search in core module explicitly
         if (!d && ctx->current_module) {
-            d = find_type_decl(ctx->current_module, base);
+            d = find_type_decl(NULL, ctx->current_module, base);
         }
 
         if (d && d->kind == AST_DECL_TYPE) {
@@ -545,8 +566,8 @@ static void discover_specializations_expr(CFuncContext* ctx, const AstExpr* expr
                         }
                         
                         // Try inferring from expected return type
-                        if (!inferred_args && ctx->expected_type && d->returns) {
-                            AstTypeRef* inferred = infer_generic_args(ctx->compiler_ctx, d, d->returns->type, ctx->expected_type);
+                        if (!inferred_args && ctx->has_expected_type && d->returns) {
+                            AstTypeRef* inferred = infer_generic_args(ctx->compiler_ctx, d, d->returns->type, &ctx->expected_type);
                             if (inferred) inferred_args = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, inferred);
                         }
                     }
@@ -605,9 +626,10 @@ static void discover_specializations_stmt(CFuncContext* ctx, const AstStmt* stmt
                         type = infer_expr_type_ref(ctx, s->as.let_stmt.value);
                     }
                     
-                    ctx->expected_type = type;
+                    if (type) { ctx->expected_type = *type; ctx->has_expected_type = true; }
+                    else ctx->has_expected_type = false;
                     discover_specializations_expr(ctx, s->as.let_stmt.value);
-                    ctx->expected_type = NULL;
+                    ctx->has_expected_type = false;
                     
                     if (ctx->local_count < 256) {
                         ctx->locals[ctx->local_count] = s->as.let_stmt.name;
@@ -629,9 +651,11 @@ static void discover_specializations_stmt(CFuncContext* ctx, const AstStmt* stmt
             case AST_STMT_ASSIGN: 
                 discover_specializations_expr(ctx, s->as.assign_stmt.target); 
                 {
-                    ctx->expected_type = infer_expr_type_ref(ctx, s->as.assign_stmt.target);
+                    const AstTypeRef* tr = infer_expr_type_ref(ctx, s->as.assign_stmt.target);
+                    if (tr) { ctx->expected_type = *tr; ctx->has_expected_type = true; }
+                    else ctx->has_expected_type = false;
                     discover_specializations_expr(ctx, s->as.assign_stmt.value); 
-                    ctx->expected_type = NULL;
+                    ctx->has_expected_type = false;
                     
                     // If it's a bind (destructuring), we need to register locals just like emit_stmt does
                     if (s->as.assign_stmt.is_bind) {
@@ -838,13 +862,26 @@ static bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, F
       fprintf(out, "*");
       return true; 
   } else {
+      // Check if it's a generic parameter
+      if (ctx && ctx->generic_params && ctx->generic_args) {
+          const AstIdentifierPart* gp = ctx->generic_params;
+          const AstTypeRef* arg = ctx->generic_args;
+          while (gp && arg) {
+              if (str_eq(gp->text, base)) {
+                  emit_type_ref_as_c_type(ctx, arg, out, skip_ptr);
+                  return true;
+              }
+              gp = gp->next; arg = arg->next;
+          }
+      }
+
       // Use centralized mangler for consistent name mapping
       const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type);
       
       // Raylib built-ins are handled specially (no rae_ prefix)
       if (ctx && ctx->uses_raylib && is_raylib_builtin_type(base)) {
           // Only use unprefixed name if it's NOT a local Rae type
-          if (!find_type_decl(ctx->module, base)) {
+          if (!find_type_decl(ctx, ctx->module, base)) {
               fprintf(out, "%.*s", (int)base.len, base.data);
           } else {
               fprintf(out, "rae_%.*s", (int)base.len, base.data);
@@ -986,18 +1023,26 @@ static const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* e
             return tr;
         }
         case AST_EXPR_MEMBER: {
-            Str obj_name = infer_expr_type(ctx, expr->as.member.object);
-            const AstDecl* d = find_type_decl(ctx->module, obj_name);
+            const AstTypeRef* obj_tr = infer_expr_type_ref(ctx, expr->as.member.object);
+            Str obj_name = get_base_type_name(obj_tr);
+            if (obj_name.len == 0) obj_name = infer_expr_type(ctx, expr->as.member.object);
+            
+            const AstDecl* d = find_type_decl(ctx, ctx->module, obj_name);
             if (d && d->kind == AST_DECL_TYPE) {
-                for (const AstTypeField* f = d->as.type_decl.fields; f; f = f->next) if (str_eq(f->name, expr->as.member.member)) return f->type;
+                for (const AstTypeField* f = d->as.type_decl.fields; f; f = f->next) {
+                    if (str_eq(f->name, expr->as.member.member)) {
+                        const AstTypeRef* concrete_args = (obj_tr && obj_tr->generic_args) ? obj_tr->generic_args : ctx->generic_args;
+                        return substitute_type_ref(ctx->compiler_ctx, d->as.type_decl.generic_params, concrete_args, f->type);
+                    }
+                }
             }
             break;
         }
         case AST_EXPR_INDEX: {
             const AstTypeRef* tr = infer_expr_type_ref(ctx, expr->as.index.target);
             if (tr) {
-                if (str_eq_cstr(tr->parts->text, "Buffer") && tr->generic_args) return tr->generic_args;
-                if (str_eq_cstr(tr->parts->text, "List") && tr->generic_args) return tr->generic_args;
+                Str base = get_base_type_name(tr);
+                if ((str_eq_cstr(base, "Buffer") || str_eq_cstr(base, "List")) && tr->generic_args) return tr->generic_args;
             }
             break;
         }
@@ -1154,7 +1199,7 @@ static Str infer_expr_type(CFuncContext* ctx, const AstExpr* expr) {
         }
         case AST_EXPR_MEMBER: {
             if (expr->as.member.object->kind == AST_EXPR_IDENT) {
-                const AstDecl* ed = find_enum_decl(ctx->module, expr->as.member.object->as.ident);
+                const AstDecl* ed = find_enum_decl(ctx, ctx->module, expr->as.member.object->as.ident);
                 if (ed) { res = ed->as.enum_decl.name; break; }
             }
             const AstTypeRef* tr = infer_expr_type_ref(ctx, expr); 
@@ -1255,36 +1300,13 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
         break;
     }
     case AST_EXPR_CALL: {
-        const AstExpr* callee = expr->as.call.callee;
-        if (callee->kind == AST_EXPR_IDENT) {
-            Str name = callee->as.ident;
-            if (str_eq_cstr(name, "rae_ext_rae_buf_alloc") || str_eq_cstr(name, "__buf_alloc") ||
-                str_eq_cstr(name, "rae_ext_rae_buf_resize") || str_eq_cstr(name, "__buf_resize")) {
-                fprintf(out, "(");
-                const AstTypeRef* elem_type = NULL;
-                if (expr->as.call.generic_args) {
-                    elem_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, expr->as.call.generic_args);
-                } else {
-                    // Try to infer from return type if possible
-                    const AstTypeRef* tr = infer_expr_type_ref(ctx, expr);
-                    if (tr && tr->generic_args) elem_type = tr->generic_args;
-                }
-                
-                if (elem_type) {
-                    emit_type_ref_as_c_type(ctx, elem_type, out, false);
-                } else {
-                    fprintf(out, "int64_t");
-                }
-                fprintf(out, "*)");
-            }
-        }
         emit_call_expr(ctx, expr, out);
         break;
     }
     case AST_EXPR_MEMBER: {
         const AstExpr* obj = expr->as.member.object;
         if (obj->kind == AST_EXPR_IDENT) {
-            const AstDecl* ed = find_enum_decl(ctx->module, obj->as.ident);
+            const AstDecl* ed = find_enum_decl(ctx, ctx->module, obj->as.ident);
             if (ed) {
                 fprintf(out, "%.*s_%.*s", (int)obj->as.ident.len, obj->as.ident.data, (int)expr->as.member.member.len, expr->as.member.member.data);
                 break;
@@ -1311,7 +1333,11 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
         break;
     }
     case AST_EXPR_OBJECT: {
-      const AstTypeRef* type = expr->as.object_literal.type ? expr->as.object_literal.type : ctx->expected_type;
+      const AstTypeRef* type = expr->as.object_literal.type ? expr->as.object_literal.type : (ctx->has_expected_type ? &ctx->expected_type : NULL);
+      
+      // Fallback: try to infer from expression itself if no context type
+      if (!type) type = infer_expr_type_ref(ctx, expr);
+
       if (type) {
           fprintf(out, "(");
           emit_type_ref_as_c_type(ctx, type, out, false);
@@ -1322,30 +1348,32 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
         fprintf(out, ".%.*s = ", (int)f->name.len, f->name.data);
         
         const AstTypeRef* field_type = NULL;
+        AstTypeRef field_tr = {0};
+        bool has_field_tr = false;
+
         if (type && type->parts) {
             Str base = type->parts->text;
-            const AstDecl* td = NULL;
-            for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
-                const AstDecl* ad = ctx->compiler_ctx->all_decls[i];
-                if (ad->kind == AST_DECL_TYPE && types_match(ad->as.type_decl.name, base)) {
-                    td = ad; break;
-                }
-            }
+            const AstDecl* td = find_type_decl(ctx, ctx->module, base);
             if (td && td->kind == AST_DECL_TYPE) {
                 for (const AstTypeField* tf = td->as.type_decl.fields; tf; tf = tf->next) {
                     if (str_eq(tf->name, f->name)) {
-                        field_type = substitute_type_ref(ctx->compiler_ctx, td->as.type_decl.generic_params, type->generic_args, tf->type);
-                        register_generic_type(ctx->compiler_ctx, field_type);
+                        AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, td->as.type_decl.generic_params, type->generic_args, tf->type);
+                        if (sub) { field_tr = *sub; has_field_tr = true; field_type = &field_tr; }
+                        register_generic_type(ctx->compiler_ctx, sub);
                         break;
                     }
                 }
             }
         }
         
-        const AstTypeRef* old_expected = ctx->expected_type;
-        ctx->expected_type = field_type;
+        AstTypeRef old_expected = ctx->expected_type;
+        bool old_has = ctx->has_expected_type;
+        if (has_field_tr) { ctx->expected_type = field_tr; ctx->has_expected_type = true; }
+        else ctx->has_expected_type = false;
+
         emit_expr(ctx, f->value, out, PREC_LOWEST, false);
         ctx->expected_type = old_expected;
+        ctx->has_expected_type = old_has;
         
         if (f->next) fprintf(out, ", ");
       }
@@ -1353,7 +1381,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
       break;
     }
     case AST_EXPR_COLLECTION_LITERAL: {
-      const AstTypeRef* type = expr->as.collection.type ? expr->as.collection.type : ctx->expected_type;
+      const AstTypeRef* type = expr->as.collection.type ? expr->as.collection.type : (ctx->has_expected_type ? &ctx->expected_type : NULL);
       if (!type || !type->parts) { fprintf(out, "0"); break; }
       
       Str base = type->parts->text;
@@ -1526,7 +1554,7 @@ static bool emit_rae_any_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out)
     // Check if it's an lvalue we can take the address of
     bool is_enum_access = false;
     if (expr->kind == AST_EXPR_MEMBER && expr->as.member.object->kind == AST_EXPR_IDENT) {
-        if (find_enum_decl(ctx->module, expr->as.member.object->as.ident)) is_enum_access = true;
+        if (find_enum_decl(ctx, ctx->module, expr->as.member.object->as.ident)) is_enum_access = true;
     }
     bool is_ptr_var = (expr->kind == AST_EXPR_IDENT && is_pointer_type(ctx, expr->as.ident));
     bool is_lvalue = (expr->kind == AST_EXPR_IDENT || expr->kind == AST_EXPR_MEMBER || expr->kind == AST_EXPR_INDEX) && !is_enum_access && !is_ptr_var;
@@ -2098,9 +2126,10 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 fprintf(out, ")");
             }
             if (stmt->as.let_stmt.value) {
-                ctx->expected_type = stmt->as.let_stmt.type; 
+                if (stmt->as.let_stmt.type) { ctx->expected_type = *stmt->as.let_stmt.type; ctx->has_expected_type = true; }
+                else ctx->has_expected_type = false;
                 emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, false); 
-                ctx->expected_type = NULL;
+                ctx->has_expected_type = false;
             } else {
                 fprintf(out, "{0}");
             }
@@ -2161,10 +2190,16 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             fprintf(out, " = ");
             
             if (needs_ref) fprintf(out, "&(");
-            AstTypeRef d_tr = {0};
-            if (tr && target_is_ptr_var && !stmt->as.assign_stmt.is_bind) { d_tr = *tr; d_tr.is_view = d_tr.is_mod = false; ctx->expected_type = &d_tr; }
-            else ctx->expected_type = tr;
-            emit_expr(ctx, stmt->as.assign_stmt.value, out, PREC_LOWEST, false); ctx->expected_type = NULL;
+            if (tr) {
+                ctx->expected_type = *tr;
+                if (target_is_ptr_var && !stmt->as.assign_stmt.is_bind) { 
+                    ctx->expected_type.is_view = ctx->expected_type.is_mod = false; 
+                }
+                ctx->has_expected_type = true;
+            } else {
+                ctx->has_expected_type = false;
+            }
+            emit_expr(ctx, stmt->as.assign_stmt.value, out, PREC_LOWEST, false); ctx->has_expected_type = false;
             if (needs_ref) fprintf(out, ")");
             
             fprintf(out, ";\n"); return true;
@@ -2653,7 +2688,7 @@ static bool emit_single_struct_def(CompilerContext* ctx, const AstModule* m, con
   if (has_property(d->as.type_decl.properties, "c_struct")) { et[(*ec)++] = ns; return true; }
   for (const AstTypeField* f = d->as.type_decl.fields; f; f = f->next) {
     if (f->type && f->type->parts && !f->type->is_view && !f->type->is_mod) {
-      const AstDecl* dep = find_type_decl(m, f->type->parts->text);
+      const AstDecl* dep = find_type_decl(NULL, m, f->type->parts->text);
       if (dep) emit_single_struct_def(ctx, m, dep, out, et, ec, ray);
     }
   }
