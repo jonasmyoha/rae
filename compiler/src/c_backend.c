@@ -98,6 +98,8 @@ static bool is_generic_param(const AstIdentifierPart* params, Str name);
 static Str get_local_type_name(CFuncContext* ctx, Str name);
 static const AstTypeRef* get_local_type_ref(CFuncContext* ctx, Str name);
 static Str get_base_type_name(const AstTypeRef* type);
+static bool emit_auto_init(CFuncContext* ctx, const AstTypeRef* type, FILE* out);
+static bool emit_struct_auto_init(CFuncContext* ctx, const AstDecl* decl, const AstTypeRef* tr, FILE* out);
 static const AstFuncDecl* find_function_overload(const AstModule* module, CFuncContext* ctx, Str name, const Str* param_types, uint16_t param_count, bool is_method);
 static bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* out, bool skip_ptr);
 static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
@@ -977,6 +979,49 @@ static const AstTypeRef* get_local_type_ref(CFuncContext* ctx, Str name) {
     for (int i = (int)ctx->local_count - 1; i >= 0; i--) if (str_eq(ctx->locals[i], name)) return ctx->local_type_refs[i];
     return NULL;
 }
+static bool emit_auto_init(CFuncContext* ctx, const AstTypeRef* type, FILE* out) {
+    if (!type) {
+        fprintf(out, "{0}");
+        return true;
+    }
+    
+    if (type->is_opt) {
+        fprintf(out, "rae_any_none()");
+        return true;
+    }
+    
+    Str base = get_base_type_name(type);
+    if (str_eq_cstr(base, "Int") || str_eq_cstr(base, "Char")) {
+        fprintf(out, "0");
+    } else if (str_eq_cstr(base, "Float")) {
+        fprintf(out, "0.0");
+    } else if (str_eq_cstr(base, "Bool")) {
+        fprintf(out, "false");
+    } else if (str_eq_cstr(base, "String")) {
+        fprintf(out, "\"\"");
+    } else {
+        const AstDecl* d = find_type_decl(ctx, ctx->module, base);
+        if (d && d->kind == AST_DECL_TYPE) {
+            emit_struct_auto_init(ctx, d, type, out);
+        } else {
+            fprintf(out, "{0}");
+        }
+    }
+    return true;
+}
+
+static bool emit_struct_auto_init(CFuncContext* ctx, const AstDecl* decl, const AstTypeRef* tr, FILE* out) {
+    fprintf(out, "{ ");
+    for (const AstTypeField* f = decl->as.type_decl.fields; f; f = f->next) {
+        fprintf(out, ".%.*s = ", (int)f->name.len, f->name.data);
+        const AstTypeRef* field_tr = substitute_type_ref(ctx->compiler_ctx, decl->as.type_decl.generic_params, tr->generic_args, f->type);
+        emit_auto_init(ctx, field_tr, out);
+        if (f->next) fprintf(out, ", ");
+    }
+    fprintf(out, " }");
+    return true;
+}
+
 static bool is_pointer_type(CFuncContext* ctx, Str name) {
     for (int i = (int)ctx->local_count - 1; i >= 0; i--) if (str_eq(ctx->locals[i], name)) return ctx->local_is_ptr[i];
     return false;
@@ -1107,6 +1152,12 @@ static const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* e
         }
         case AST_EXPR_METHOD_CALL: {
             Str member = expr->as.method_call.method_name;
+            if (str_eq_cstr(member, "toString")) {
+                AstTypeRef* tr = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
+                *tr = (AstTypeRef){.parts = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstIdentifierPart))};
+                tr->parts->text = str_from_cstr("String");
+                return tr;
+            }
             Str obj_name = infer_expr_type(ctx, expr->as.method_call.object);
             uint16_t param_count = 1;
             for (const AstCallArg* a = expr->as.method_call.args; a; a = a->next) param_count++;
@@ -1239,6 +1290,10 @@ static Str infer_expr_type(CFuncContext* ctx, const AstExpr* expr) {
         }
         case AST_EXPR_METHOD_CALL: {
             Str member = expr->as.method_call.method_name;
+            if (str_eq_cstr(member, "toString")) {
+                res = str_from_cstr("String");
+                break;
+            }
             Str obj_name = infer_expr_type(ctx, expr->as.method_call.object);
             uint16_t param_count = 1;
             for (const AstCallArg* a = expr->as.method_call.args; a; a = a->next) param_count++;
@@ -2266,7 +2321,7 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 }
                 ctx->has_expected_type = false;
             } else {
-                fprintf(out, "{0}");
+                emit_auto_init(ctx, stmt->as.let_stmt.type, out);
             }
             if (is_ref && !source_is_ptr) fprintf(out, ")");
             
