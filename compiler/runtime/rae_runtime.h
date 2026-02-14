@@ -76,10 +76,18 @@ RAE_UNUSED static RaeAny rae_any_bool_ptr(const bool* v) { return (RaeAny){RAE_T
 RAE_UNUSED static RaeAny rae_any_char(rae_Char v) { return (RaeAny){RAE_TYPE_CHAR, {.i = v}}; }
 RAE_UNUSED static RaeAny rae_any_char_ptr(const int64_t* v) { return (RaeAny){RAE_TYPE_CHAR, {.i = *v}}; }
 RAE_UNUSED static RaeAny rae_any_string(const char* v) { return (RaeAny){RAE_TYPE_STRING, {.s = v}}; }
+RAE_UNUSED static RaeAny rae_any_string_ptr(const char* const* v) { return (RaeAny){RAE_TYPE_STRING, {.s = *v}}; }
 RAE_UNUSED static RaeAny rae_any_none(void) { return (RaeAny){RAE_TYPE_NONE, {.i = 0}}; }
 RAE_UNUSED static RaeAny rae_any_ptr(void* v) { return (RaeAny){RAE_TYPE_BUFFER, {.ptr = v}}; }
 RAE_UNUSED static RaeAny rae_any_identity(RaeAny a) { return a; }
 RAE_UNUSED static RaeAny rae_any_identity_ptr(const RaeAny* a) { return *a; }
+RAE_UNUSED static bool rae_any_is_none(RaeAny a) { return a.type == RAE_TYPE_NONE; }
+RAE_UNUSED static bool rae_any_eq(RaeAny a, RaeAny b) {
+    if (a.type != b.type) return false;
+    if (a.type == RAE_TYPE_NONE) return true;
+    if (a.type == RAE_TYPE_STRING) return strcmp(a.as.s, b.as.s) == 0;
+    return a.as.i == b.as.i;
+}
 
 #define rae_any(X) _Generic((X), \
     int64_t: rae_any_int, \
@@ -101,6 +109,9 @@ RAE_UNUSED static RaeAny rae_any_identity_ptr(const RaeAny* a) { return *a; }
     const int8_t*: rae_any_bool_ptr, \
     uint8_t*: rae_any_int_ptr, \
     const uint8_t*: rae_any_int_ptr, \
+    char**: rae_any_string_ptr, \
+    const char**: rae_any_string_ptr, \
+    const char* const*: rae_any_string_ptr, \
     default: rae_any_ptr \
 )(X)
 
