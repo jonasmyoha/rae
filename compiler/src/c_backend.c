@@ -159,6 +159,7 @@ static bool types_match(Str a, Str b) {
 }
 
 static const AstDecl* find_type_decl(CFuncContext* ctx, const AstModule* module, Str name) {
+  fprintf(stderr, "DEBUG: find_type_decl %.*s\n", (int)name.len, name.data);
   if (ctx && ctx->compiler_ctx) {
       for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
           const AstDecl* decl = ctx->compiler_ctx->all_decls[i];
@@ -855,13 +856,20 @@ static bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, F
   else if (str_eq_cstr(base, "Bool")) fprintf(out, "rae_Bool");
   else if (str_eq_cstr(base, "Char")) fprintf(out, "int64_t");
   else if (str_eq_cstr(base, "String")) fprintf(out, "const char*");
-  else if (str_eq_cstr(base, "Buffer") && type->generic_args) {
-      // Buffer(T) is already a pointer to T in C.
-      // T*
-      emit_type_ref_as_c_type(ctx, type->generic_args, out, true); // skip_ptr because we add it here
-      fprintf(out, "*");
-      return true; 
-  } else {
+    else if (str_eq_cstr(base, "Buffer") && type->generic_args) {
+        // Buffer(Any) maps to void*
+        Str arg_base = get_base_type_name(type->generic_args);
+        if (str_eq_cstr(arg_base, "Any") || arg_base.len == 0) {
+            fprintf(out, "void*");
+            return true;
+        }
+        // Buffer(T) is already a pointer to T in C.
+        // T*
+        emit_type_ref_as_c_type(ctx, type->generic_args, out, true); // skip_ptr because we add it here
+        fprintf(out, "*");
+        return true; 
+    }
+   else {
       // Check if it's a generic parameter
       if (ctx && ctx->generic_params && ctx->generic_args) {
           const AstIdentifierPart* gp = ctx->generic_params;
@@ -1120,8 +1128,18 @@ static const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* e
                     const AstTypeRef* receiver_type = infer_expr_type_ref(ctx, expr->as.method_call.object);
                     inferred_args = infer_generic_args(ctx->compiler_ctx, fd, fd->params->type, receiver_type);
                 }
-                if (inferred_args) return substitute_type_ref(ctx->compiler_ctx, fd->generic_params, inferred_args, fd->returns->type);
-                return fd->returns->type;
+                
+                const AstTypeRef* base_ret = fd->returns->type;
+                AstTypeRef* result = (AstTypeRef*)base_ret;
+                if (inferred_args) result = substitute_type_ref(ctx->compiler_ctx, fd->generic_params, inferred_args, base_ret);
+                
+                if (base_ret->is_opt && !result->is_opt) {
+                    AstTypeRef* copy = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
+                    *copy = *result;
+                    copy->is_opt = true;
+                    result = copy;
+                }
+                return result;
             }
             break;
         }
@@ -1249,6 +1267,7 @@ static Str infer_expr_type(CFuncContext* ctx, const AstExpr* expr) {
 
 static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_prec, bool is_lvalue) {
   if (!expr) return true;
+  fprintf(stderr, "DEBUG: emit_expr kind=%d\n", expr->kind);
   switch (expr->kind) {
     case AST_EXPR_INTEGER: fprintf(out, "((int64_t)%.*sLL)", (int)expr->as.integer.len, expr->as.integer.data); break;
     case AST_EXPR_FLOAT: fprintf(out, "%.*s", (int)expr->as.floating.len, expr->as.floating.data); break;
@@ -2164,6 +2183,8 @@ static bool emit_block(CFuncContext* ctx, const AstBlock* block, FILE* out) {
 }
 
 static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
+    if (!stmt) return true;
+    fprintf(stderr, "DEBUG: emit_stmt kind=%d\n", stmt->kind);
     switch (stmt->kind) {
         case AST_STMT_LET: {
             fprintf(out, "  ");
@@ -2173,33 +2194,36 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             fprintf(out, " %.*s = ", (int)stmt->as.let_stmt.name.len, stmt->as.let_stmt.name.data);
             
             bool source_is_ptr = false;
-            const AstTypeRef* source_tr = infer_expr_type_ref(ctx, stmt->as.let_stmt.value);
-            if (source_tr && (source_tr->is_view || source_tr->is_mod)) source_is_ptr = true;
-            
-            // Check if it's a function call that returns a reference
-            if (!source_is_ptr && stmt->as.let_stmt.value->kind == AST_EXPR_CALL) {
-                const AstExpr* callee = stmt->as.let_stmt.value->as.call.callee;
-                if (callee->kind == AST_EXPR_IDENT) {
-                    uint16_t param_count = 0;
-                    for (const AstCallArg* a = stmt->as.let_stmt.value->as.call.args; a; a = a->next) param_count++;
-                    const AstFuncDecl* fd = find_function_overload(ctx->module, ctx, callee->as.ident, NULL, param_count, false);
-                    if (!fd) fd = find_function_overload(ctx->module, ctx, callee->as.ident, NULL, param_count, true);
-                    if (fd && fd->returns && (fd->returns->type->is_view || fd->returns->type->is_mod)) source_is_ptr = true;
-                } else if (callee->kind == AST_EXPR_MEMBER) {
-                    Str member = callee->as.member.member;
-                    Str obj_name = infer_expr_type(ctx, callee->as.member.object);
+            const AstTypeRef* source_tr = NULL;
+            if (stmt->as.let_stmt.value) {
+                source_tr = infer_expr_type_ref(ctx, stmt->as.let_stmt.value);
+                if (source_tr && (source_tr->is_view || source_tr->is_mod)) source_is_ptr = true;
+                
+                // Check if it's a function call that returns a reference
+                if (!source_is_ptr && stmt->as.let_stmt.value->kind == AST_EXPR_CALL) {
+                    const AstExpr* callee = stmt->as.let_stmt.value->as.call.callee;
+                    if (callee->kind == AST_EXPR_IDENT) {
+                        uint16_t param_count = 0;
+                        for (const AstCallArg* a = stmt->as.let_stmt.value->as.call.args; a; a = a->next) param_count++;
+                        const AstFuncDecl* fd = find_function_overload(ctx->module, ctx, callee->as.ident, NULL, param_count, false);
+                        if (!fd) fd = find_function_overload(ctx->module, ctx, callee->as.ident, NULL, param_count, true);
+                        if (fd && fd->returns && (fd->returns->type->is_view || fd->returns->type->is_mod)) source_is_ptr = true;
+                    } else if (callee->kind == AST_EXPR_MEMBER) {
+                        Str member = callee->as.member.member;
+                        Str obj_name = infer_expr_type(ctx, callee->as.member.object);
+                        uint16_t param_count = 1;
+                        for (const AstCallArg* a = stmt->as.let_stmt.value->as.call.args; a; a = a->next) param_count++;
+                        const AstFuncDecl* fd = find_function_overload(ctx->module, ctx, member, &obj_name, param_count, true);
+                        if (fd && fd->returns && (fd->returns->type->is_view || fd->returns->type->is_mod)) source_is_ptr = true;
+                    }
+                } else if (!source_is_ptr && stmt->as.let_stmt.value->kind == AST_EXPR_METHOD_CALL) {
+                    Str method_name = stmt->as.let_stmt.value->as.method_call.method_name;
+                    Str obj_name = infer_expr_type(ctx, stmt->as.let_stmt.value->as.method_call.object);
                     uint16_t param_count = 1;
-                    for (const AstCallArg* a = stmt->as.let_stmt.value->as.call.args; a; a = a->next) param_count++;
-                    const AstFuncDecl* fd = find_function_overload(ctx->module, ctx, member, &obj_name, param_count, true);
+                    for (const AstCallArg* a = stmt->as.let_stmt.value->as.method_call.args; a; a = a->next) param_count++;
+                    const AstFuncDecl* fd = find_function_overload(ctx->module, ctx, method_name, &obj_name, param_count, true);
                     if (fd && fd->returns && (fd->returns->type->is_view || fd->returns->type->is_mod)) source_is_ptr = true;
                 }
-            } else if (!source_is_ptr && stmt->as.let_stmt.value->kind == AST_EXPR_METHOD_CALL) {
-                Str method_name = stmt->as.let_stmt.value->as.method_call.method_name;
-                Str obj_name = infer_expr_type(ctx, stmt->as.let_stmt.value->as.method_call.object);
-                uint16_t param_count = 1;
-                for (const AstCallArg* a = stmt->as.let_stmt.value->as.method_call.args; a; a = a->next) param_count++;
-                const AstFuncDecl* fd = find_function_overload(ctx->module, ctx, method_name, &obj_name, param_count, true);
-                if (fd && fd->returns && (fd->returns->type->is_view || fd->returns->type->is_mod)) source_is_ptr = true;
             }
             
             if (is_ref && !source_is_ptr) fprintf(out, "&(");
@@ -2270,8 +2294,8 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         Str m = c->as.member.member; Str on = infer_expr_type(ctx, c->as.member.object);
                         uint16_t pc = 1; for (const AstCallArg* ca = stmt->as.assign_stmt.value->as.call.args; ca; ca = ca->next) pc++;
                         const AstFuncDecl* fd = find_function_overload(ctx->module, ctx, m, &on, pc, true);
-                                            if (fd && fd->returns && (fd->returns->type->is_view || fd->returns->type->is_mod)) source_is_ptr = true;
-                                        }
+                        if (fd && fd->returns && (fd->returns->type->is_view || fd->returns->type->is_mod)) source_is_ptr = true;
+                    }
                                     } else if (!source_is_ptr && stmt->as.assign_stmt.value->kind == AST_EXPR_METHOD_CALL) {
                                         Str m = stmt->as.assign_stmt.value->as.method_call.method_name;
                                         Str on = infer_expr_type(ctx, stmt->as.assign_stmt.value->as.method_call.object);
