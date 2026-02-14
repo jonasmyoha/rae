@@ -159,7 +159,6 @@ static bool types_match(Str a, Str b) {
 }
 
 static const AstDecl* find_type_decl(CFuncContext* ctx, const AstModule* module, Str name) {
-  fprintf(stderr, "DEBUG: find_type_decl %.*s\n", (int)name.len, name.data);
   if (ctx && ctx->compiler_ctx) {
       for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
           const AstDecl* decl = ctx->compiler_ctx->all_decls[i];
@@ -1267,7 +1266,6 @@ static Str infer_expr_type(CFuncContext* ctx, const AstExpr* expr) {
 
 static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_prec, bool is_lvalue) {
   if (!expr) return true;
-  fprintf(stderr, "DEBUG: emit_expr kind=%d\n", expr->kind);
   switch (expr->kind) {
     case AST_EXPR_INTEGER: fprintf(out, "((int64_t)%.*sLL)", (int)expr->as.integer.len, expr->as.integer.data); break;
     case AST_EXPR_FLOAT: fprintf(out, "%.*s", (int)expr->as.floating.len, expr->as.floating.data); break;
@@ -1449,18 +1447,32 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
               const char* mangled_arg = rae_mangle_type(ctx->compiler_ctx, ctx->generic_params, type->generic_args);
               fprintf(out, "%s", mangled_arg);
           }
-          fprintf(out, "){ .data = (");
+          fprintf(out, "){ .data = ");
+          
+          // Use statement expression to allocate and initialize heap buffer
+          fprintf(out, "({ ");
           emit_type_ref_as_c_type(ctx, type->generic_args, out, false);
-          fprintf(out, "*)LIFT_TO_TEMP(");
-          emit_type_ref_as_c_type(ctx, type->generic_args, out, false);
-          fprintf(out, "[], ");
+          fprintf(out, "* __tmp_buf = rae_ext_rae_buf_alloc(");
+          
           int count = 0;
-          for (const AstCollectionElement* e = expr->as.collection.elements; e; e = e->next) {
-              emit_expr(ctx, e->value, out, PREC_LOWEST, false);
-              if (e->next) fprintf(out, ", ");
-              count++;
+          for (const AstCollectionElement* e = expr->as.collection.elements; e; e = e->next) count++;
+          
+          fprintf(out, "%d, sizeof(", count);
+          emit_type_ref_as_c_type(ctx, type->generic_args, out, false);
+          fprintf(out, ")); ");
+          
+          if (count > 0) {
+              fprintf(out, "static const ");
+              emit_type_ref_as_c_type(ctx, type->generic_args, out, false);
+              fprintf(out, " __stack_init[] = {");
+              for (const AstCollectionElement* e = expr->as.collection.elements; e; e = e->next) {
+                  emit_expr(ctx, e->value, out, PREC_LOWEST, false);
+                  if (e->next) fprintf(out, ", ");
+              }
+              fprintf(out, "}; memcpy(__tmp_buf, __stack_init, sizeof(__stack_init)); ");
           }
-          fprintf(out, "), .length = ((int64_t)%dLL), .capacity = ((int64_t)%dLL) }", count, count);
+          
+          fprintf(out, "__tmp_buf; }), .length = ((int64_t)%dLL), .capacity = ((int64_t)%dLL) }", count, count);
       } else {
           fprintf(out, "0");
       }
@@ -2184,7 +2196,6 @@ static bool emit_block(CFuncContext* ctx, const AstBlock* block, FILE* out) {
 
 static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     if (!stmt) return true;
-    fprintf(stderr, "DEBUG: emit_stmt kind=%d\n", stmt->kind);
     switch (stmt->kind) {
         case AST_STMT_LET: {
             fprintf(out, "  ");
