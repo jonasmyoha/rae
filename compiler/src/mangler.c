@@ -302,6 +302,12 @@ const char* rae_mangle_function(CompilerContext* ctx, const AstFuncDecl* func) {
             return res;
         }
 
+        if (str_starts_with_cstr(func->name, "rae_ext_")) {
+            char* res = arena_alloc(ctx->ast_arena, func->name.len + 1);
+            sprintf(res, "%.*s", (int)func->name.len, func->name.data);
+            return res;
+        }
+
         char* res = arena_alloc(ctx->ast_arena, func->name.len + 9);
         sprintf(res, "rae_ext_%.*s", (int)func->name.len, func->name.data);
         return res;
