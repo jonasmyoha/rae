@@ -1397,7 +1397,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
         const AstMatchArm* arm = expr->as.match_expr.arms;
         int count = 0;
         Str type_name = infer_expr_type(ctx, expr->as.match_expr.subject);
-        bool is_str = str_eq_cstr(type_name, "String");
+        bool is_str = types_match(type_name, str_from_cstr("String"));
         
         while (arm) {
             if (!arm->pattern) {
