@@ -79,7 +79,7 @@ typedef struct {
 static const AstDecl* find_type_decl(CFuncContext* ctx, const AstModule* module, Str name);
 static const AstDecl* find_enum_decl(CFuncContext* ctx, const AstModule* module, Str name);
 static bool has_property(const AstProperty* props, const char* name);
-static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_prec, bool is_lvalue);
+static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_prec, bool is_lvalue, bool suppress_deref);
 static bool emit_function(CompilerContext* compiler_ctx, const AstModule* module, const AstFuncDecl* func, FILE* out, const struct VmRegistry* registry, bool uses_raylib);
 static bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* f, const AstTypeRef* args, FILE* out, const struct VmRegistry* r, bool ray);
 static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
@@ -851,55 +851,71 @@ static bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, F
   if (type->is_opt) { fprintf(out, "RaeAny"); if (is_ptr) fprintf(out, "*"); return true; }
 
   Str base = type->parts->text;
+  bool is_mod = type->is_mod;
 
-  if (str_eq_cstr(base, "Int")) fprintf(out, "int64_t");
-  else if (str_eq_cstr(base, "Float")) fprintf(out, "double");
-  else if (str_eq_cstr(base, "Bool")) fprintf(out, "rae_Bool");
-  else if (str_eq_cstr(base, "Char")) fprintf(out, "int64_t");
-  else if (str_eq_cstr(base, "String")) fprintf(out, "const char*");
-    else if (str_eq_cstr(base, "Buffer") && type->generic_args) {
-        // Buffer(Any) maps to void*
+  if (str_eq_cstr(base, "Int")) { 
+      if (is_ptr) fprintf(out, "rae_%s_Int", is_mod ? "Mod" : "View");
+      else fprintf(out, "int64_t"); 
+      return true; 
+  }
+  else if (str_eq_cstr(base, "Float")) { 
+      if (is_ptr) fprintf(out, "rae_%s_Float", is_mod ? "Mod" : "View");
+      else fprintf(out, "double"); 
+      return true; 
+  }
+  else if (str_eq_cstr(base, "Bool")) { 
+      if (is_ptr) fprintf(out, "rae_%s_Bool", is_mod ? "Mod" : "View");
+      else fprintf(out, "rae_Bool"); 
+      return true; 
+  }
+  else if (str_eq_cstr(base, "Char")) { 
+      if (is_ptr) fprintf(out, "rae_%s_Char", is_mod ? "Mod" : "View");
+      else fprintf(out, "rae_Char"); 
+      return true; 
+  }
+  else if (str_eq_cstr(base, "String")) { 
+      if (is_ptr) fprintf(out, "rae_%s_String", is_mod ? "Mod" : "View");
+      else fprintf(out, "const char*"); 
+      return true; 
+  }
+  else if (str_eq_cstr(base, "Any")) { 
+      if (is_ptr) fprintf(out, "RaeAny*"); 
+      else fprintf(out, "RaeAny"); 
+      return true; 
+  }
+  else if (str_eq_cstr(base, "Buffer") && type->generic_args) {
         Str arg_base = get_base_type_name(type->generic_args);
         if (str_eq_cstr(arg_base, "Any") || arg_base.len == 0) {
             fprintf(out, "void*");
             return true;
         }
-        // Buffer(T) is already a pointer to T in C.
-        // T*
-        emit_type_ref_as_c_type(ctx, type->generic_args, out, true); // skip_ptr because we add it here
+        emit_type_ref_as_c_type(ctx, type->generic_args, out, false);
         fprintf(out, "*");
         return true; 
-    }
-   else {
-      // Check if it's a generic parameter
-      if (ctx && ctx->generic_params && ctx->generic_args) {
-          const AstIdentifierPart* gp = ctx->generic_params;
-          const AstTypeRef* arg = ctx->generic_args;
-          while (gp && arg) {
-              if (str_eq(gp->text, base)) {
-                  emit_type_ref_as_c_type(ctx, arg, out, skip_ptr);
-                  return true;
-              }
-              gp = gp->next; arg = arg->next;
-          }
-      }
+  }
 
-      // Use centralized mangler for consistent name mapping
-      const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type);
-      
-      // Raylib built-ins are handled specially (no rae_ prefix)
-      if (ctx && ctx->uses_raylib && is_raylib_builtin_type(base)) {
-          // Only use unprefixed name if it's NOT a local Rae type
-          if (!find_type_decl(ctx, ctx->module, base)) {
-              fprintf(out, "%.*s", (int)base.len, base.data);
-          } else {
-              fprintf(out, "rae_%.*s", (int)base.len, base.data);
+  if (ctx && ctx->generic_params && ctx->generic_args) {
+      const AstIdentifierPart* gp = ctx->generic_params;
+      const AstTypeRef* arg = ctx->generic_args;
+      while (gp && arg) {
+          if (str_eq(gp->text, base)) {
+              emit_type_ref_as_c_type(ctx, arg, out, false);
+              return true;
           }
-      } else if (strcmp(mangled, "const_char_p") == 0) {
-          fprintf(out, "const char*");
-      } else {
-          fprintf(out, "%s", mangled);
+          gp = gp->next; arg = arg->next;
       }
+  }
+
+  const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type);
+  
+  if (ctx && ctx->uses_raylib && is_raylib_builtin_type(base)) {
+      if (!find_type_decl(ctx, ctx->module, base)) {
+          fprintf(out, "%.*s", (int)base.len, base.data);
+      } else {
+          fprintf(out, "rae_%.*s", (int)base.len, base.data);
+      }
+  } else {
+      fprintf(out, "%s", mangled);
   }
 
   if (is_ptr) fprintf(out, "*");
@@ -1024,6 +1040,11 @@ static bool emit_struct_auto_init(CFuncContext* ctx, const AstDecl* decl, const 
 
 static bool is_pointer_type(CFuncContext* ctx, Str name) {
     for (int i = (int)ctx->local_count - 1; i >= 0; i--) if (str_eq(ctx->locals[i], name)) return ctx->local_is_ptr[i];
+    return false;
+}
+
+static bool is_mod_type(CFuncContext* ctx, Str name) {
+    for (int i = (int)ctx->local_count - 1; i >= 0; i--) if (str_eq(ctx->locals[i], name)) return ctx->local_is_mod[i];
     return false;
 }
 
@@ -1319,18 +1340,18 @@ static Str infer_expr_type(CFuncContext* ctx, const AstExpr* expr) {
     g_infer_expr_stack_count--; return res;
 }
 
-static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_prec, bool is_lvalue) {
+static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_prec, bool is_lvalue, bool suppress_deref) {
   if (!expr) return true;
   switch (expr->kind) {
     case AST_EXPR_INTEGER: fprintf(out, "((int64_t)%.*sLL)", (int)expr->as.integer.len, expr->as.integer.data); break;
     case AST_EXPR_FLOAT: fprintf(out, "%.*s", (int)expr->as.floating.len, expr->as.floating.data); break;
     case AST_EXPR_BOOL: fprintf(out, "(bool)%s", expr->as.boolean ? "true" : "false"); break;
     case AST_EXPR_STRING: emit_string_literal(out, expr->as.string_lit); break;
-    case AST_EXPR_CHAR: fprintf(out, "(rae_Char)%lld", expr->as.char_value); break;
+    case AST_EXPR_CHAR: fprintf(out, "(rae_Char){%lld}", expr->as.char_value); break;
     case AST_EXPR_IDENT: {
         bool is_ptr = is_pointer_type(ctx, expr->as.ident);
         Str type_name = get_local_type_name(ctx, expr->as.ident);
-        if (is_ptr && !is_lvalue && is_primitive_type(type_name)) fprintf(out, "(*%.*s)", (int)expr->as.ident.len, expr->as.ident.data);
+        if (is_ptr && !is_lvalue && !suppress_deref && is_primitive_type(type_name)) fprintf(out, "(*%.*s)", (int)expr->as.ident.len, expr->as.ident.data);
         else fprintf(out, "%.*s", (int)expr->as.ident.len, expr->as.ident.data);
         break;
     }
@@ -1345,16 +1366,16 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
 
       if (is_str_cmp) {
           fprintf(out, "(bool)rae_ext_rae_str_eq(");
-          emit_expr(ctx, expr->as.binary.lhs, out, PREC_LOWEST, false);
+          emit_expr(ctx, expr->as.binary.lhs, out, PREC_LOWEST, false, false);
           fprintf(out, ", ");
-          emit_expr(ctx, expr->as.binary.rhs, out, PREC_LOWEST, false);
+          emit_expr(ctx, expr->as.binary.rhs, out, PREC_LOWEST, false, false);
           fprintf(out, ")");
           break;
       }
 
       if (is_bool_op) fprintf(out, "(bool)(");
       if (prec < parent_prec) fprintf(out, "(");
-      emit_expr(ctx, expr->as.binary.lhs, out, prec, false);
+      emit_expr(ctx, expr->as.binary.lhs, out, prec, false, false);
       switch (expr->as.binary.op) {
         case AST_BIN_ADD: fprintf(out, " + "); break; case AST_BIN_SUB: fprintf(out, " - "); break;
         case AST_BIN_MUL: fprintf(out, " * "); break; case AST_BIN_DIV: fprintf(out, " / "); break;
@@ -1363,21 +1384,21 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
         case AST_BIN_GE: fprintf(out, " >= "); break; case AST_BIN_IS: fprintf(out, " == "); break;
         case AST_BIN_AND: fprintf(out, " && "); break; case AST_BIN_OR: fprintf(out, " || "); break;
       }
-      emit_expr(ctx, expr->as.binary.rhs, out, prec, false);
+      emit_expr(ctx, expr->as.binary.rhs, out, prec, false, false);
       if (prec < parent_prec) fprintf(out, ")");
       if (is_bool_op) fprintf(out, ")");
       break;
     }
     case AST_EXPR_UNARY: {
         switch (expr->as.unary.op) {
-            case AST_UNARY_NOT: fprintf(out, "((bool)!("); emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, false); fprintf(out, "))"); break;
-            case AST_UNARY_NEG: fprintf(out, "-("); emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, false); fprintf(out, ")"); break;
-            case AST_UNARY_PRE_INC: fprintf(out, "++("); emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, true); fprintf(out, ")"); break;
-            case AST_UNARY_PRE_DEC: fprintf(out, "--("); emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, true); fprintf(out, ")"); break;
-            case AST_UNARY_POST_INC: emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, true); fprintf(out, "++"); break;
-            case AST_UNARY_POST_DEC: emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, true); fprintf(out, "--"); break;
+            case AST_UNARY_NOT: fprintf(out, "((bool)!("); emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, false, false); fprintf(out, "))"); break;
+            case AST_UNARY_NEG: fprintf(out, "-("); emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, false, false); fprintf(out, ")"); break;
+            case AST_UNARY_PRE_INC: fprintf(out, "++("); emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, true, false); fprintf(out, ")"); break;
+            case AST_UNARY_PRE_DEC: fprintf(out, "--("); emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, true, false); fprintf(out, ")"); break;
+            case AST_UNARY_POST_INC: emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, true, false); fprintf(out, "++"); break;
+            case AST_UNARY_POST_DEC: emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, true, false); fprintf(out, "--"); break;
             case AST_UNARY_VIEW:
-            case AST_UNARY_MOD: emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, false); break;
+            case AST_UNARY_MOD: emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, false, false); break;
             default: break;
         }
         break;
@@ -1422,10 +1443,10 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
         }
 
         if (obj_is_ptr_var || obj_is_ptr) {
-            emit_expr(ctx, obj, out, PREC_CALL, true); // Pass true for is_lvalue to avoid (*ptr)
+            emit_expr(ctx, obj, out, PREC_CALL, true, false); // Pass true for is_lvalue to avoid (*ptr)
             fprintf(out, "->%.*s", (int)expr->as.member.member.len, expr->as.member.member.data);
         } else {
-            emit_expr(ctx, obj, out, PREC_CALL, false);
+            emit_expr(ctx, obj, out, PREC_CALL, false, false);
             fprintf(out, ".%.*s", (int)expr->as.member.member.len, expr->as.member.member.data);
         }
         break;
@@ -1469,7 +1490,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
         if (has_field_tr) { ctx->expected_type = field_tr; ctx->has_expected_type = true; }
         else ctx->has_expected_type = false;
 
-        emit_expr(ctx, f->value, out, PREC_LOWEST, false);
+        emit_expr(ctx, f->value, out, PREC_LOWEST, false, false);
         ctx->expected_type = old_expected;
         ctx->has_expected_type = old_has;
         
@@ -1492,7 +1513,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
           emit_type_ref_as_c_type(ctx, type->generic_args, out, false);
           fprintf(out, "[], {");
           for (const AstCollectionElement* e = expr->as.collection.elements; e; e = e->next) {
-              emit_expr(ctx, e->value, out, PREC_LOWEST, false);
+              emit_expr(ctx, e->value, out, PREC_LOWEST, false, false);
               if (e->next) fprintf(out, ", ");
           }
           fprintf(out, "})");
@@ -1521,7 +1542,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
               emit_type_ref_as_c_type(ctx, type->generic_args, out, false);
               fprintf(out, " __stack_init[] = {");
               for (const AstCollectionElement* e = expr->as.collection.elements; e; e = e->next) {
-                  emit_expr(ctx, e->value, out, PREC_LOWEST, false);
+                  emit_expr(ctx, e->value, out, PREC_LOWEST, false, false);
                   if (e->next) fprintf(out, ", ");
               }
               fprintf(out, "}; memcpy(__tmp_buf, __stack_init, sizeof(__stack_init)); ");
@@ -1541,23 +1562,23 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
         
         while (arm) {
             if (!arm->pattern) {
-                emit_expr(ctx, arm->value, out, PREC_LOWEST, false);
+                emit_expr(ctx, arm->value, out, PREC_LOWEST, false, false);
                 break;
             } else {
                 fprintf(out, "(");
                 if (is_str) {
                     fprintf(out, "rae_ext_rae_str_eq(");
-                    emit_expr(ctx, expr->as.match_expr.subject, out, PREC_LOWEST, false);
+                    emit_expr(ctx, expr->as.match_expr.subject, out, PREC_LOWEST, false, false);
                     fprintf(out, ", ");
-                    emit_expr(ctx, arm->pattern, out, PREC_LOWEST, false);
+                    emit_expr(ctx, arm->pattern, out, PREC_LOWEST, false, false);
                     fprintf(out, ")");
                 } else {
-                    emit_expr(ctx, expr->as.match_expr.subject, out, PREC_EQUALITY, false);
+                    emit_expr(ctx, expr->as.match_expr.subject, out, PREC_EQUALITY, false, false);
                     fprintf(out, " == ");
-                    emit_expr(ctx, arm->pattern, out, PREC_EQUALITY, false);
+                    emit_expr(ctx, arm->pattern, out, PREC_EQUALITY, false, false);
                 }
                 fprintf(out, " ? ");
-                emit_expr(ctx, arm->value, out, PREC_TERNARY, false);
+                emit_expr(ctx, arm->value, out, PREC_TERNARY, false, false);
                 fprintf(out, " : ");
                 count++;
             }
@@ -1576,7 +1597,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
             fprintf(out, "), ");
             if (p->next) {
                 AstExpr sub = {.kind = AST_EXPR_INTERP, .as.interp.parts = p->next};
-                emit_expr(ctx, &sub, out, PREC_LOWEST, false);
+                emit_expr(ctx, &sub, out, PREC_LOWEST, false, false);
             } else {
                 fprintf(out, "\"\"");
             }
@@ -1632,7 +1653,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
         const AstExprList* item = expr->as.list;
         fprintf(out, "{ ");
         while (item) {
-            emit_expr(ctx, item->value, out, PREC_LOWEST, false);
+            emit_expr(ctx, item->value, out, PREC_LOWEST, false, false);
             if (item->next) fprintf(out, ", ");
             item = item->next;
         }
@@ -1643,13 +1664,13 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
         bool is_ptr = expr->as.index.target->kind == AST_EXPR_IDENT && is_pointer_type(ctx, expr->as.index.target->as.ident);
         if (is_ptr) {
             fprintf(out, "(");
-            emit_expr(ctx, expr->as.index.target, out, PREC_CALL, false);
+            emit_expr(ctx, expr->as.index.target, out, PREC_CALL, false, false);
             fprintf(out, ")");
         } else {
-            emit_expr(ctx, expr->as.index.target, out, PREC_CALL, false);
+            emit_expr(ctx, expr->as.index.target, out, PREC_CALL, false, false);
         }
         fprintf(out, "[");
-        emit_expr(ctx, expr->as.index.index, out, PREC_LOWEST, false);
+        emit_expr(ctx, expr->as.index.index, out, PREC_LOWEST, false, false);
         fprintf(out, "]");
         break;
     }
@@ -1681,7 +1702,7 @@ static bool emit_rae_any_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out)
     if (tr && tr->is_opt) {
         if (!is_ptr && (is_primitive || str_eq_cstr(type_name, "String"))) {
             fprintf(out, "rae_any((");
-            emit_expr(ctx, expr, out, PREC_LOWEST, false);
+            emit_expr(ctx, expr, out, PREC_LOWEST, false, true);
             if (str_eq_cstr(type_name, "Int") || str_eq_cstr(type_name, "Char")) fprintf(out, ").as.i)");
             else if (str_eq_cstr(type_name, "Float")) fprintf(out, ").as.f)");
             else if (str_eq_cstr(type_name, "Bool")) fprintf(out, ").as.b)");
@@ -1689,7 +1710,7 @@ static bool emit_rae_any_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out)
             else fprintf(out, ").as.ptr)");
             return true;
         }
-        emit_expr(ctx, expr, out, PREC_LOWEST, false);
+        emit_expr(ctx, expr, out, PREC_LOWEST, false, true);
         return true;
     }
     
@@ -1699,65 +1720,65 @@ static bool emit_rae_any_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out)
         if (find_enum_decl(ctx, ctx->module, expr->as.member.object->as.ident)) is_enum_access = true;
     }
     bool is_ptr_var = (expr->kind == AST_EXPR_IDENT && is_pointer_type(ctx, expr->as.ident));
+    bool is_mod_var = (expr->kind == AST_EXPR_IDENT && is_mod_type(ctx, expr->as.ident));
     bool is_lvalue = (expr->kind == AST_EXPR_IDENT || expr->kind == AST_EXPR_MEMBER || expr->kind == AST_EXPR_INDEX) && !is_enum_access && !is_ptr_var;
     
+    const AstTypeRef* tr_full = tr ? tr : infer_expr_type_ref(ctx, expr);
+    bool is_view_expr = tr_full && tr_full->is_view;
+    bool is_mod_expr = tr_full && tr_full->is_mod;
+
     if (str_eq_cstr(type_name, "Any")) {
         // Already an Any, just emit it (rae_any will handle it via identity)
         fprintf(out, "rae_any(");
-        emit_expr(ctx, expr, out, PREC_LOWEST, false);
+        emit_expr(ctx, expr, out, PREC_LOWEST, false, true);
         fprintf(out, ")");
     } else if (str_eq_cstr(type_name, "Char")) {
         // Use specialized helper for Char to ensure correct RaeType tagging
         fprintf(out, "rae_any_char(");
-        emit_expr(ctx, expr, out, PREC_LOWEST, false);
+        emit_expr(ctx, expr, out, PREC_LOWEST, false, true);
         fprintf(out, ")");
     } else if (str_eq_cstr(type_name, "Bool")) {
         // Use specialized helper for Bool to ensure correct RaeType tagging
         fprintf(out, "rae_any_bool(");
-        emit_expr(ctx, expr, out, PREC_LOWEST, false);
+        emit_expr(ctx, expr, out, PREC_LOWEST, false, true);
         fprintf(out, ")");
     } else if (is_enum_access) {
         // Enum values are int64_t but rae_any needs them explicitly cast to match int64_t
         fprintf(out, "rae_any((int64_t)(");
-        emit_expr(ctx, expr, out, PREC_LOWEST, false);
+        emit_expr(ctx, expr, out, PREC_LOWEST, false, true);
         fprintf(out, "))");
     } else if (is_primitive || is_raylib || str_eq_cstr(type_name, "String")) {
         // Primitives should be passed by value to rae_any.
-        if (is_ptr) {
-            fprintf(out, "rae_any(");
-            emit_expr(ctx, expr, out, PREC_LOWEST, false);
-            fprintf(out, ")");
-        } else {
-            fprintf(out, "rae_any(");
-            emit_expr(ctx, expr, out, PREC_LOWEST, false);
-            fprintf(out, ")");
-        }
+        fprintf(out, "rae_any(");
+        emit_expr(ctx, expr, out, PREC_LOWEST, false, true);
+        fprintf(out, ")");
     } else if (str_eq_cstr(type_name, "Array") || str_eq_cstr(type_name, "Buffer")) {
         // These are effectively pointers, pass by value to rae_any
         fprintf(out, "rae_any(");
-        emit_expr(ctx, expr, out, PREC_LOWEST, false);
+        emit_expr(ctx, expr, out, PREC_LOWEST, false, true);
         fprintf(out, ")");
     } else {
         if (is_lvalue) {
             fprintf(out, "rae_any(&(");
-            emit_expr(ctx, expr, out, PREC_LOWEST, false);
+            emit_expr(ctx, expr, out, PREC_LOWEST, false, true);
             fprintf(out, "))");
         } else {
             // It's a non-primitive rvalue (like a struct return or literal), lift to temp so we can take address
             fprintf(out, "rae_any(LIFT_TO_TEMP(");
-            const AstTypeRef* tr_full = infer_expr_type_ref(ctx, expr);
             if (tr_full) {
-                emit_type_ref_as_c_type(ctx, tr_full, out, false);
-            } else {
-                // Fallback to name-based mapping if full ref not available
+                const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr_full);
+                fprintf(out, "%s", mangled);
+            } else if (type_name.len > 0) {
                 if (is_primitive_type(type_name)) {
                     fprintf(out, "%.*s", (int)type_name.len, type_name.data);
                 } else {
                     fprintf(out, "rae_%.*s", (int)type_name.len, type_name.data);
                 }
+            } else {
+                fprintf(out, "int64_t"); // Panic fallback
             }
             fprintf(out, ", ");
-            emit_expr(ctx, expr, out, PREC_LOWEST, false);
+            emit_expr(ctx, expr, out, PREC_LOWEST, false, true);
             fprintf(out, "))");
         }
     }
@@ -1768,13 +1789,13 @@ static bool emit_log_any_call(CFuncContext* ctx, const AstExpr* expr, FILE* out,
     const AstTypeRef* tr = infer_expr_type_ref(ctx, expr);
     if (tr && tr->is_opt) {
         fprintf(out, "%s(rae_any(", stream ? "rae_ext_rae_log_stream_any" : "rae_ext_rae_log_any");
-        emit_expr(ctx, expr, out, PREC_LOWEST, false);
+        emit_expr(ctx, expr, out, PREC_LOWEST, false, false);
         fprintf(out, "))");
         return true;
     }
     if (tr && tr->is_opt) {
         fprintf(out, "%s(", stream ? "rae_ext_rae_log_stream_any" : "rae_ext_rae_log_any");
-        emit_expr(ctx, expr, out, PREC_LOWEST, false);
+        emit_expr(ctx, expr, out, PREC_LOWEST, false, false);
         fprintf(out, ")");
         return true;
     }
@@ -1784,13 +1805,13 @@ static bool emit_log_any_call(CFuncContext* ctx, const AstExpr* expr, FILE* out,
     bool is_id_key = tr && (tr->is_id || tr->is_key);
     
     if (str_eq_cstr(type_name, "Char")) {
-        fprintf(out, "%s(rae_any_char(", stream ? "rae_ext_rae_log_stream_any" : "rae_ext_rae_log_any");
-        emit_expr(ctx, expr, out, PREC_LOWEST, false);
-        fprintf(out, "))");
+        fprintf(out, "%s(", stream ? "rae_ext_rae_log_stream_any" : "rae_ext_rae_log_any");
+        emit_rae_any_expr(ctx, expr, out);
+        fprintf(out, ")");
     } else if (str_eq_cstr(type_name, "Bool")) {
-        fprintf(out, "%s(rae_any_bool(", stream ? "rae_ext_rae_log_stream_any" : "rae_ext_rae_log_any");
-        emit_expr(ctx, expr, out, PREC_LOWEST, false);
-        fprintf(out, "))");
+        fprintf(out, "%s(", stream ? "rae_ext_rae_log_stream_any" : "rae_ext_rae_log_any");
+        emit_rae_any_expr(ctx, expr, out);
+        fprintf(out, ")");
     } else if (is_primitive || is_raylib || is_id_key || str_eq_cstr(type_name, "String") || str_eq_cstr(type_name, "Any") || type_name.len == 0) {
         fprintf(out, "%s(", stream ? "rae_ext_rae_log_stream_any" : "rae_ext_rae_log_any");
         emit_rae_any_expr(ctx, expr, out);
@@ -1800,10 +1821,10 @@ static bool emit_log_any_call(CFuncContext* ctx, const AstExpr* expr, FILE* out,
         const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
         if (stream) {
             fprintf(out, "rae_log_stream_%s_(", mangled);
-            emit_expr(ctx, expr, out, PREC_LOWEST, false);
+            emit_expr(ctx, expr, out, PREC_LOWEST, false, false);
         } else {
             fprintf(out, "rae_log_%s_(", mangled);
-            emit_expr(ctx, expr, out, PREC_LOWEST, false);
+            emit_expr(ctx, expr, out, PREC_LOWEST, false, false);
         }
         fprintf(out, ")");
     }
@@ -1827,9 +1848,9 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         bool has_elem = false;
         if (tr && tr->generic_args) { elem_tr = *tr->generic_args; has_elem = true; }
 
-        emit_expr(ctx, buf->value, out, PREC_CALL, false);
+        emit_expr(ctx, buf->value, out, PREC_CALL, false, false);
         fprintf(out, "[");
-        emit_expr(ctx, idx->value, out, PREC_LOWEST, false);
+        emit_expr(ctx, idx->value, out, PREC_LOWEST, false, false);
         fprintf(out, "] = ");
         
         AstTypeRef old_expected = ctx->expected_type;
@@ -1837,7 +1858,7 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         if (has_elem) { ctx->expected_type = elem_tr; ctx->has_expected_type = true; }
         else ctx->has_expected_type = false;
 
-        emit_expr(ctx, val->value, out, PREC_LOWEST, false);
+        emit_expr(ctx, val->value, out, PREC_LOWEST, false, false);
         
         ctx->expected_type = old_expected;
         ctx->has_expected_type = old_has;
@@ -1846,9 +1867,9 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     if (str_eq_cstr(callee->as.ident, "rae_ext_rae_buf_get") || str_eq_cstr(callee->as.ident, "__buf_get")) {
         const AstCallArg* buf = expr->as.call.args;
         const AstCallArg* idx = buf->next;
-        emit_expr(ctx, buf->value, out, PREC_CALL, false);
+        emit_expr(ctx, buf->value, out, PREC_CALL, false, false);
         fprintf(out, "[");
-        emit_expr(ctx, idx->value, out, PREC_LOWEST, false);
+        emit_expr(ctx, idx->value, out, PREC_LOWEST, false, false);
         fprintf(out, "]");
         return true;
     }
@@ -1856,7 +1877,7 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         fprintf(out, "(void*)rae_ext_rae_buf_alloc(");
         const AstCallArg* a = expr->as.call.args;
         while (a) {
-            emit_expr(ctx, a->value, out, PREC_LOWEST, false);
+            emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
             if (a->next) fprintf(out, ", ");
             a = a->next;
         }
@@ -1877,7 +1898,7 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     }
     if (str_eq_cstr(callee->as.ident, "rae_ext_rae_buf_free") || str_eq_cstr(callee->as.ident, "__buf_free")) {
         fprintf(out, "rae_ext_rae_buf_free((void*)(");
-        if (expr->as.call.args) emit_expr(ctx, expr->as.call.args->value, out, PREC_LOWEST, false);
+        if (expr->as.call.args) emit_expr(ctx, expr->as.call.args->value, out, PREC_LOWEST, false, false);
         fprintf(out, "))");
         return true;
     }
@@ -1887,7 +1908,7 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         int count = 0;
         while (a) {
             if (count == 0 || count == 2) fprintf(out, "(void*)(");
-            emit_expr(ctx, a->value, out, PREC_LOWEST, false);
+            emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
             if (count == 0 || count == 2) fprintf(out, ")");
             if (a->next) fprintf(out, ", ");
             a = a->next;
@@ -1939,7 +1960,7 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     if (str_eq_cstr(callee->as.ident, "__buf_alloc")) {
         fprintf(out, "rae_ext_rae_buf_alloc(");
         const AstCallArg* a = expr->as.call.args;
-        emit_expr(ctx, a->value, out, PREC_LOWEST, false);
+        emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
         fprintf(out, ", sizeof(");
         const AstTypeRef* tr = infer_expr_type_ref(ctx, expr);
         if (tr && tr->generic_args) {
@@ -1956,7 +1977,7 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     }
     if (str_eq_cstr(callee->as.ident, "__buf_free")) {
         fprintf(out, "rae_ext_rae_buf_free(");
-        emit_expr(ctx, expr->as.call.args->value, out, PREC_LOWEST, false);
+        emit_expr(ctx, expr->as.call.args->value, out, PREC_LOWEST, false, false);
         fprintf(out, ")");
         return true;
     }
@@ -1967,11 +1988,11 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         const AstCallArg* dst = src_off->next;
         const AstCallArg* dst_off = dst->next;
         const AstCallArg* len = dst_off->next;
-        emit_expr(ctx, src->value, out, PREC_LOWEST, false); fprintf(out, ", ");
-        emit_expr(ctx, src_off->value, out, PREC_LOWEST, false); fprintf(out, ", ");
-        emit_expr(ctx, dst->value, out, PREC_LOWEST, false); fprintf(out, ", ");
-        emit_expr(ctx, dst_off->value, out, PREC_LOWEST, false); fprintf(out, ", ");
-        emit_expr(ctx, len->value, out, PREC_LOWEST, false);
+        emit_expr(ctx, src->value, out, PREC_LOWEST, false, false); fprintf(out, ", ");
+        emit_expr(ctx, src_off->value, out, PREC_LOWEST, false, false); fprintf(out, ", ");
+        emit_expr(ctx, dst->value, out, PREC_LOWEST, false, false); fprintf(out, ", ");
+        emit_expr(ctx, dst_off->value, out, PREC_LOWEST, false, false); fprintf(out, ", ");
+        emit_expr(ctx, len->value, out, PREC_LOWEST, false, false);
         fprintf(out, ", 8)"); // Default element size for now
         return true;
     }
@@ -2147,7 +2168,7 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
 
                     while (a) {
 
-                        emit_expr(ctx, a->value, out, PREC_LOWEST, false);
+                        emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
 
                         if (a->next) fprintf(out, ", ");
 
@@ -2220,15 +2241,15 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, p->type);
                 emit_type_ref_as_c_type(ctx, sub, out, true); // skip_ptr because we take address
                 fprintf(out, ", ");
-                emit_expr(ctx, a->value, out, PREC_LOWEST, false);
+                emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
                 fprintf(out, ")");
             } else {
                 fprintf(out, "&(");
-                emit_expr(ctx, a->value, out, PREC_LOWEST, false);
+                emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
                 fprintf(out, ")");
             }
         } else {
-            emit_expr(ctx, a->value, out, PREC_LOWEST, false);
+            emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
         }
         
         if (a->next) fprintf(out, ", ");
@@ -2238,7 +2259,7 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     return true;
 }
 
-static bool emit_call(CFuncContext* ctx, const AstExpr* expr, FILE* out) { fprintf(out, "  "); emit_expr(ctx, expr, out, PREC_LOWEST, false); fprintf(out, ";\n"); return true; }
+static bool emit_call(CFuncContext* ctx, const AstExpr* expr, FILE* out) { fprintf(out, "  "); emit_expr(ctx, expr, out, PREC_LOWEST, false, false); fprintf(out, ";\n"); return true; }
 
 static bool emit_block(CFuncContext* ctx, const AstBlock* block, FILE* out) {
     if (!block) return true;
@@ -2310,14 +2331,14 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 if (needs_unwrap) {
                     Str base = get_base_type_name(stmt->as.let_stmt.type);
                     fprintf(out, "(");
-                    emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, false);
+                    emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, false, false);
                     if (str_eq_cstr(base, "Int") || str_eq_cstr(base, "Char")) fprintf(out, ").as.i");
                     else if (str_eq_cstr(base, "Float")) fprintf(out, ").as.f");
                     else if (str_eq_cstr(base, "Bool")) fprintf(out, ").as.b");
                     else if (str_eq_cstr(base, "String")) fprintf(out, ").as.s");
                     else fprintf(out, ").as.ptr");
                 } else {
-                    emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, false); 
+                    emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, false, false); 
                 }
                 ctx->has_expected_type = false;
             } else {
@@ -2331,6 +2352,7 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 const char* tn = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, stmt->as.let_stmt.type);
                 ctx->local_types[ctx->local_count] = str_from_cstr(tn);
                 ctx->local_is_ptr[ctx->local_count] = stmt->as.let_stmt.type && (stmt->as.let_stmt.type->is_view || stmt->as.let_stmt.type->is_mod);
+                ctx->local_is_mod[ctx->local_count] = stmt->as.let_stmt.type && stmt->as.let_stmt.type->is_mod;
                 ctx->local_count++;
             }
             return true;
@@ -2375,7 +2397,7 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             }
 
             if (target_is_ptr_var && !stmt->as.assign_stmt.is_bind) fprintf(out, "(*");
-            emit_expr(ctx, stmt->as.assign_stmt.target, out, PREC_ASSIGN, true);
+            emit_expr(ctx, stmt->as.assign_stmt.target, out, PREC_ASSIGN, true, false);
             if (target_is_ptr_var && !stmt->as.assign_stmt.is_bind) fprintf(out, ")");
             fprintf(out, " = ");
             
@@ -2399,14 +2421,14 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             if (needs_unwrap) {
                 Str base = get_base_type_name(tr);
                 fprintf(out, "(");
-                emit_expr(ctx, stmt->as.assign_stmt.value, out, PREC_LOWEST, false);
+                emit_expr(ctx, stmt->as.assign_stmt.value, out, PREC_LOWEST, false, false);
                 if (str_eq_cstr(base, "Int") || str_eq_cstr(base, "Char")) fprintf(out, ").as.i");
                 else if (str_eq_cstr(base, "Float")) fprintf(out, ").as.f");
                 else if (str_eq_cstr(base, "Bool")) fprintf(out, ").as.b");
                 else if (str_eq_cstr(base, "String")) fprintf(out, ").as.s");
                 else fprintf(out, ").as.ptr");
             } else {
-                emit_expr(ctx, stmt->as.assign_stmt.value, out, PREC_LOWEST, false);
+                emit_expr(ctx, stmt->as.assign_stmt.value, out, PREC_LOWEST, false, false);
             }
             ctx->has_expected_type = false;
             if (needs_ref) fprintf(out, ")");
@@ -2432,14 +2454,14 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         emit_type_ref_as_c_type(ctx, ctx->func_decl->returns->type, out, false);
                         fprintf(out, ")");
                     }
-                    emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, false);
+                    emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, false, false);
                     if (!source_is_ptr) fprintf(out, ")");
                 } else if (ret_is_opt) {
                     fprintf(out, "rae_any(");
-                    emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, false);
+                    emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, false, false);
                     fprintf(out, ")");
                 } else {
-                    emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, false);
+                    emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, false, false);
                 }
             }
             fprintf(out, ";\n");
@@ -2481,13 +2503,17 @@ static bool emit_generic_helpers(CompilerContext* ctx, FILE* out) {
 
           fprintf(out, "RAE_UNUSED static void rae_log_stream_%s_(%s val) {\n", m, m);
           fprintf(out, "  printf(\"{ #(\");\n");
-          fprintf(out, "  for (int64_t i = 0; i < val.length; i++) {\n");
+          fprintf(out, "  for (int64_t i = 0; i < val.capacity; i++) {\n");
           fprintf(out, "    if (i > 0) printf(\", \");\n");
+          fprintf(out, "    if (i < val.length) {\n");
           if (elem_is_primitive || str_eq_cstr(elem_base, "String") || str_eq_cstr(elem_base, "Any")) {
-              fprintf(out, "    rae_ext_rae_log_stream_any(rae_any(val.data[i]));\n");
+              fprintf(out, "      rae_ext_rae_log_stream_any(rae_any(val.data[i]));\n");
           } else {
-              fprintf(out, "    rae_log_stream_%s_(val.data[i]);\n", elem_mangled);
+              fprintf(out, "      rae_log_stream_%s_(val.data[i]);\n", elem_mangled);
           }
+          fprintf(out, "    } else {\n");
+          fprintf(out, "      printf(\"none\");\n");
+          fprintf(out, "    }\n");
           fprintf(out, "  }\n");
           fprintf(out, "  printf(\"), %%lld, %%lld }\", (long long)val.length, (long long)val.capacity);\n");
           fprintf(out, "}\n");
@@ -2706,6 +2732,11 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       fprintf(out, "typedef int8_t rae_Bool;\n");
   }
   fprintf(out, "typedef const char* const_char_p;\n");
+  fprintf(out, "typedef struct { int64_t* ptr; } rae_View_Int; typedef struct { int64_t* ptr; } rae_Mod_Int;\n");
+  fprintf(out, "typedef struct { double* ptr; } rae_View_Float; typedef struct { double* ptr; } rae_Mod_Float;\n");
+  fprintf(out, "typedef struct { rae_Bool* ptr; } rae_View_Bool; typedef struct { rae_Bool* ptr; } rae_Mod_Bool;\n");
+  fprintf(out, "typedef struct { rae_Char* ptr; } rae_View_Char; typedef struct { rae_Char* ptr; } rae_Mod_Char;\n");
+  fprintf(out, "typedef struct { const char** ptr; } rae_View_String; typedef struct { const char** ptr; } rae_Mod_String;\n");
   fprintf(out, "#define LIFT_TO_TEMP(T, ...) (&(T){__VA_ARGS__})\n");
   fprintf(out, "#define LIFT_VALUE(T, ...) ((T){__VA_ARGS__})\n\n");
 
@@ -2817,7 +2848,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
 }
 
 static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
-  fprintf(out, "  if ("); emit_expr(ctx, stmt->as.if_stmt.condition, out, PREC_LOWEST, false); fprintf(out, ") {\n");
+  fprintf(out, "  if ("); emit_expr(ctx, stmt->as.if_stmt.condition, out, PREC_LOWEST, false, false); fprintf(out, ") {\n");
   emit_block(ctx, stmt->as.if_stmt.then_block, out); fprintf(out, "  }");
   if (stmt->as.if_stmt.else_block) { fprintf(out, " else {\n"); emit_block(ctx, stmt->as.if_stmt.else_block, out); fprintf(out, "  }"); }
   fprintf(out, "\n"); return true;
@@ -2825,9 +2856,9 @@ static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
 
 static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
   fprintf(out, "  {\n"); ctx->scope_depth++; if (stmt->as.loop_stmt.init) emit_stmt(ctx, stmt->as.loop_stmt.init, out);
-  fprintf(out, "  while ("); if (stmt->as.loop_stmt.condition) emit_expr(ctx, stmt->as.loop_stmt.condition, out, PREC_LOWEST, false); else fprintf(out, "1");
+  fprintf(out, "  while ("); if (stmt->as.loop_stmt.condition) emit_expr(ctx, stmt->as.loop_stmt.condition, out, PREC_LOWEST, false, false); else fprintf(out, "1");
   fprintf(out, ") {\n"); emit_block(ctx, stmt->as.loop_stmt.body, out);
-  if (stmt->as.loop_stmt.increment) { fprintf(out, "  "); emit_expr(ctx, stmt->as.loop_stmt.increment, out, PREC_LOWEST, false); fprintf(out, ";\n"); }
+  if (stmt->as.loop_stmt.increment) { fprintf(out, "  "); emit_expr(ctx, stmt->as.loop_stmt.increment, out, PREC_LOWEST, false, false); fprintf(out, ";\n"); }
   fprintf(out, "  }\n"); emit_defers(ctx, ctx->scope_depth, out); pop_defers(ctx, ctx->scope_depth); ctx->scope_depth--; fprintf(out, "  }\n"); return true;
 }
 
@@ -2859,6 +2890,7 @@ static bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, 
             const char* tn = rae_mangle_type_specialized(ctx, f->generic_params, args, p->type);
             cctx.local_types[cctx.local_count] = str_from_cstr(tn);
             cctx.local_is_ptr[cctx.local_count] = p->type && (p->type->is_view || p->type->is_mod);
+            cctx.local_is_mod[cctx.local_count] = p->type && p->type->is_mod;
             cctx.local_count++;
         }
     }
@@ -2890,6 +2922,7 @@ static bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFun
           const char* tn = rae_mangle_type_specialized(ctx, f->generic_params, NULL, p->type);
           cctx.local_types[cctx.local_count] = str_from_cstr(tn);
           cctx.local_is_ptr[cctx.local_count] = p->type && (p->type->is_view || p->type->is_mod);
+          cctx.local_is_mod[cctx.local_count] = p->type && p->type->is_mod;
           cctx.local_count++;
       }
   }
@@ -3100,21 +3133,21 @@ static bool emit_match(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
   else if (use_str) fprintf(out, "  const char* __m%zu = ", tid);
   else fprintf(out, "  int64_t __m%zu = ", tid);
   
-  emit_expr(ctx, stmt->as.match_stmt.subject, out, PREC_LOWEST, false); fprintf(out, ";\n");
+  emit_expr(ctx, stmt->as.match_stmt.subject, out, PREC_LOWEST, false, false); fprintf(out, ";\n");
   int ci = 0; const AstMatchCase* def = NULL;
   for (const AstMatchCase* c = stmt->as.match_stmt.cases; c; c = c->next) {
     if (!c->pattern || is_wildcard_pattern(c->pattern)) { def = c; continue; }
     if (use_any) {
         fprintf(out, "%s(rae_any_eq(__m%zu, ", ci > 0 ? " else if " : "  if ", tid);
-        emit_expr(ctx, c->pattern, out, PREC_LOWEST, false);
+        emit_expr(ctx, c->pattern, out, PREC_LOWEST, false, false);
         fprintf(out, ")) {\n");
     } else if (use_str) {
         fprintf(out, "%s(rae_ext_rae_str_eq(__m%zu, ", ci > 0 ? " else if " : "  if ", tid);
-        emit_expr(ctx, c->pattern, out, PREC_LOWEST, false);
+        emit_expr(ctx, c->pattern, out, PREC_LOWEST, false, false);
         fprintf(out, ")) {\n");
     } else {
         fprintf(out, "%s(__m%zu == ", ci > 0 ? " else if " : "  if ", tid);
-        emit_expr(ctx, c->pattern, out, PREC_LOWEST, false);
+        emit_expr(ctx, c->pattern, out, PREC_LOWEST, false, false);
         fprintf(out, ") {\n");
     }
     emit_block(ctx, c->block, out); fprintf(out, "  }"); ci++;
