@@ -63,16 +63,16 @@ void rae_spawn(void* (*func)(void*), void* data) {
 }
 
 RaeAny rae_ext_json_get(const char* json, const char* field) {
-    if (!json || !field) return (RaeAny){RAE_TYPE_NONE, {0}};
+    if (!json || !field) return (RaeAny){RAE_TYPE_NONE, false, false, {0}};
     
     // Tiny naive JSON parser: look for "field": value
     char search[256];
     snprintf(search, sizeof(search), "\"%s\"", field);
     const char* key_pos = strstr(json, search);
-    if (!key_pos) return (RaeAny){RAE_TYPE_NONE, {0}};
+    if (!key_pos) return (RaeAny){RAE_TYPE_NONE, false, false, {0}};
     
     const char* colon = strchr(key_pos + strlen(search), ':');
-    if (!colon) return (RaeAny){RAE_TYPE_NONE, {0}};
+    if (!colon) return (RaeAny){RAE_TYPE_NONE, false, false, {0}};
     
     const char* val_start = colon + 1;
     while (*val_start && (*val_start == ' ' || *val_start == '\t' || *val_start == '\n' || *val_start == '\r')) {
@@ -83,26 +83,26 @@ RaeAny rae_ext_json_get(const char* json, const char* field) {
         // String value
         val_start++;
         const char* val_end = strchr(val_start, '\"');
-        if (!val_end) return (RaeAny){RAE_TYPE_NONE, {0}};
+        if (!val_end) return (RaeAny){RAE_TYPE_NONE, false, false, {0}};
         size_t len = val_end - val_start;
         char* res = malloc(len + 1);
         memcpy(res, val_start, len);
         res[len] = '\0';
-        return (RaeAny){RAE_TYPE_STRING, {.s = res}};
+        return (RaeAny){RAE_TYPE_STRING, false, false, {.s = res}};
     } else if (*val_start == 't') {
-        return (RaeAny){RAE_TYPE_BOOL, {.b = 1}};
+        return (RaeAny){RAE_TYPE_BOOL, false, false, {.b = 1}};
     } else if (*val_start == 'f') {
-        return (RaeAny){RAE_TYPE_BOOL, {.b = 0}};
+        return (RaeAny){RAE_TYPE_BOOL, false, false, {.b = 0}};
     } else if (*val_start == 'n') {
-        return (RaeAny){RAE_TYPE_NONE, {0}};
+        return (RaeAny){RAE_TYPE_NONE, false, false, {0}};
     } else if (*val_start == '-' || (*val_start >= '0' && *val_start <= '9')) {
         // Number
         char* end;
         double f = strtod(val_start, &end);
         if (strchr(val_start, '.') && strchr(val_start, '.') < end) {
-            return (RaeAny){RAE_TYPE_FLOAT, {.f = f}};
+            return (RaeAny){RAE_TYPE_FLOAT, false, false, {.f = f}};
         } else {
-            return (RaeAny){RAE_TYPE_INT, {.i = (int64_t)f}};
+            return (RaeAny){RAE_TYPE_INT, false, false, {.i = (int64_t)f}};
         }
     } else if (*val_start == '{') {
         // Nested object (simplified: just return the raw string part)
@@ -117,10 +117,10 @@ RaeAny rae_ext_json_get(const char* json, const char* field) {
         char* res = malloc(len + 1);
         memcpy(res, val_start, len);
         res[len] = '\0';
-        return (RaeAny){RAE_TYPE_STRING, {.s = res}}; // We return objects as strings for now
+        return (RaeAny){RAE_TYPE_STRING, false, false, {.s = res}}; // We return objects as strings for now
     }
     
-    return (RaeAny){RAE_TYPE_NONE, {0}};
+    return (RaeAny){RAE_TYPE_NONE, false, false, {0}};
 }
 
 void rae_ext_rae_log_any(RaeAny value) {
@@ -130,6 +130,9 @@ void rae_ext_rae_log_any(RaeAny value) {
 }
 
 void rae_ext_rae_log_stream_any(RaeAny value) {
+  if (value.is_view) printf("view ");
+  else if (value.is_mod) printf("mod ");
+  
   switch (value.type) {
     case RAE_TYPE_INT: printf("%lld", (long long)value.as.i); break;
     case RAE_TYPE_FLOAT: printf("%g", value.as.f); break;
@@ -154,7 +157,11 @@ void rae_ext_rae_log_stream_list_fields(RaeAny* items, int64_t length, int64_t c
   printf("{ #(");
   for (int64_t i = 0; i < capacity; i++) {
     if (i > 0) printf(", ");
-    rae_ext_rae_log_stream_any(items[i]);
+    if (i < length) {
+      rae_ext_rae_log_stream_any(items[i]);
+    } else {
+      printf("none");
+    }
   }
   printf("), %lld, %lld }", (long long)length, (long long)capacity);
 }
@@ -371,8 +378,8 @@ const char* rae_ext_rae_io_read_line(void) {
   return buffer;
 }
 
-int64_t rae_ext_rae_io_read_char(void) {
-  return (int64_t)getchar();
+rae_Char rae_ext_rae_io_read_char(void) {
+  return (rae_Char){ (int64_t)getchar() };
 }
 
 void rae_ext_rae_sys_exit(int64_t code) {

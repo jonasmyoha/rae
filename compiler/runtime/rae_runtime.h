@@ -14,7 +14,7 @@
 #define RAE_UNUSED
 #endif
 
-typedef int64_t rae_Char;
+typedef struct { int64_t v; } rae_Char;
 
 typedef struct {
   const char* data;
@@ -48,6 +48,8 @@ typedef struct {
 
 typedef struct {
   RaeType type;
+  bool is_view;
+  bool is_mod;
   union {
     int64_t i;
     double f;
@@ -67,25 +69,57 @@ void rae_ext_rae_log_any(RaeAny value);
 void rae_ext_rae_log_stream_any(RaeAny value);
 
 /* Conversion Helpers */
-RAE_UNUSED static RaeAny rae_any_int(int64_t v) { return (RaeAny){RAE_TYPE_INT, {.i = v}}; }
-RAE_UNUSED static RaeAny rae_any_int_ptr(const int64_t* v) { return (RaeAny){RAE_TYPE_INT, {.i = *v}}; }
-RAE_UNUSED static RaeAny rae_any_float(double v) { return (RaeAny){RAE_TYPE_FLOAT, {.f = v}}; }
-RAE_UNUSED static RaeAny rae_any_float_ptr(const double* v) { return (RaeAny){RAE_TYPE_FLOAT, {.f = *v}}; }
-RAE_UNUSED static RaeAny rae_any_bool(bool v) { return (RaeAny){RAE_TYPE_BOOL, {.b = v ? 1 : 0}}; }
-RAE_UNUSED static RaeAny rae_any_bool_ptr(const bool* v) { return (RaeAny){RAE_TYPE_BOOL, {.b = *v ? 1 : 0}}; }
-RAE_UNUSED static RaeAny rae_any_char(rae_Char v) { return (RaeAny){RAE_TYPE_CHAR, {.i = v}}; }
-RAE_UNUSED static RaeAny rae_any_char_ptr(const int64_t* v) { return (RaeAny){RAE_TYPE_CHAR, {.i = *v}}; }
-RAE_UNUSED static RaeAny rae_any_string(const char* v) { return (RaeAny){RAE_TYPE_STRING, {.s = v}}; }
-RAE_UNUSED static RaeAny rae_any_string_ptr(const char* const* v) { return (RaeAny){RAE_TYPE_STRING, {.s = *v}}; }
-RAE_UNUSED static RaeAny rae_any_none(void) { return (RaeAny){RAE_TYPE_NONE, {.i = 0}}; }
-RAE_UNUSED static RaeAny rae_any_ptr(void* v) { return (RaeAny){RAE_TYPE_BUFFER, {.ptr = v}}; }
+RAE_UNUSED static RaeAny rae_any_int(int64_t v) { return (RaeAny){RAE_TYPE_INT, false, false, {.i = v}}; }
+RAE_UNUSED static RaeAny rae_any_int_ptr(const int64_t* v) { return (RaeAny){RAE_TYPE_INT, true, false, {.i = *v}}; }
+RAE_UNUSED static RaeAny rae_any_float(double v) { return (RaeAny){RAE_TYPE_FLOAT, false, false, {.f = v}}; }
+RAE_UNUSED static RaeAny rae_any_float_ptr(const double* v) { return (RaeAny){RAE_TYPE_FLOAT, true, false, {.f = *v}}; }
+RAE_UNUSED static RaeAny rae_any_bool(bool v) { return (RaeAny){RAE_TYPE_BOOL, false, false, {.b = v ? 1 : 0}}; }
+RAE_UNUSED static RaeAny rae_any_bool_ptr(const bool* v) { return (RaeAny){RAE_TYPE_BOOL, true, false, {.b = *v ? 1 : 0}}; }
+RAE_UNUSED static RaeAny rae_any_char(rae_Char v) { return (RaeAny){RAE_TYPE_CHAR, false, false, {.i = v.v}}; }
+RAE_UNUSED static RaeAny rae_any_char_ptr(const rae_Char* v) { return (RaeAny){RAE_TYPE_CHAR, true, false, {.i = v->v}}; }
+RAE_UNUSED static RaeAny rae_any_string(const char* v) { return (RaeAny){RAE_TYPE_STRING, false, false, {.s = v}}; }
+RAE_UNUSED static RaeAny rae_any_string_ptr(const char* const* v) { return (RaeAny){RAE_TYPE_STRING, true, false, {.s = *v}}; }
+
+// Special wrappers for Rae View/Mod structs
+typedef struct { int64_t* ptr; } rae_View_Int;
+typedef struct { int64_t* ptr; } rae_Mod_Int;
+typedef struct { double* ptr; } rae_View_Float;
+typedef struct { double* ptr; } rae_Mod_Float;
+typedef struct { int8_t* ptr; } rae_View_Bool;
+typedef struct { int8_t* ptr; } rae_Mod_Bool;
+typedef struct { rae_Char* ptr; } rae_View_Char;
+typedef struct { rae_Char* ptr; } rae_Mod_Char;
+typedef struct { const char** ptr; } rae_View_String;
+typedef struct { const char** ptr; } rae_Mod_String;
+
+RAE_UNUSED static RaeAny rae_any_view_int(rae_View_Int v) { return (RaeAny){RAE_TYPE_INT, true, false, {.i = *v.ptr}}; }
+RAE_UNUSED static RaeAny rae_any_mod_int(rae_Mod_Int v) { return (RaeAny){RAE_TYPE_INT, false, true, {.i = *v.ptr}}; }
+RAE_UNUSED static RaeAny rae_any_view_float(rae_View_Float v) { return (RaeAny){RAE_TYPE_FLOAT, true, false, {.f = *v.ptr}}; }
+RAE_UNUSED static RaeAny rae_any_mod_float(rae_Mod_Float v) { return (RaeAny){RAE_TYPE_FLOAT, false, true, {.f = *v.ptr}}; }
+RAE_UNUSED static RaeAny rae_any_view_bool(rae_View_Bool v) { return (RaeAny){RAE_TYPE_BOOL, true, false, {.b = *v.ptr}}; }
+RAE_UNUSED static RaeAny rae_any_mod_bool(rae_Mod_Bool v) { return (RaeAny){RAE_TYPE_BOOL, false, true, {.b = *v.ptr}}; }
+RAE_UNUSED static RaeAny rae_any_view_char(rae_View_Char v) { return (RaeAny){RAE_TYPE_CHAR, true, false, {.i = v.ptr->v}}; }
+RAE_UNUSED static RaeAny rae_any_mod_char(rae_Mod_Char v) { return (RaeAny){RAE_TYPE_CHAR, false, true, {.i = v.ptr->v}}; }
+RAE_UNUSED static RaeAny rae_any_view_string(rae_View_String v) { return (RaeAny){RAE_TYPE_STRING, true, false, {.s = *v.ptr}}; }
+RAE_UNUSED static RaeAny rae_any_mod_string(rae_Mod_String v) { return (RaeAny){RAE_TYPE_STRING, false, true, {.s = *v.ptr}}; }
+RAE_UNUSED static RaeAny rae_any_none(void) { return (RaeAny){RAE_TYPE_NONE, false, false, {.i = 0}}; }
+RAE_UNUSED static RaeAny rae_any_ptr(void* v) { return (RaeAny){RAE_TYPE_BUFFER, false, false, {.ptr = v}}; }
+RAE_UNUSED static RaeAny rae_any_view(RaeAny a) { a.is_view = true; return a; }
+RAE_UNUSED static RaeAny rae_any_mod(RaeAny a) { a.is_mod = true; return a; }
 RAE_UNUSED static RaeAny rae_any_identity(RaeAny a) { return a; }
-RAE_UNUSED static RaeAny rae_any_identity_ptr(const RaeAny* a) { return *a; }
+RAE_UNUSED static RaeAny rae_any_identity_ptr(const RaeAny* a) { 
+    RaeAny res = *a;
+    res.is_view = true;
+    return res;
+}
 RAE_UNUSED static bool rae_any_is_none(RaeAny a) { return a.type == RAE_TYPE_NONE; }
 RAE_UNUSED static bool rae_any_eq(RaeAny a, RaeAny b) {
     if (a.type != b.type) return false;
     if (a.type == RAE_TYPE_NONE) return true;
-    if (a.type == RAE_TYPE_STRING) return strcmp(a.as.s, b.as.s) == 0;
+    if (a.type == RAE_TYPE_STRING) {
+        if (!a.as.s || !b.as.s) return a.as.s == b.as.s;
+        return strcmp(a.as.s, b.as.s) == 0;
+    }
     return a.as.i == b.as.i;
 }
 
@@ -98,20 +132,18 @@ RAE_UNUSED static bool rae_any_eq(RaeAny a, RaeAny b) {
     RaeAny*: rae_any_identity_ptr, \
     bool: rae_any_bool, \
     int8_t: rae_any_bool, \
+    rae_Char: rae_any_char, \
+    rae_View_Int: rae_any_view_int, \
+    rae_Mod_Int: rae_any_mod_int, \
+    rae_View_Float: rae_any_view_float, \
+    rae_Mod_Float: rae_any_mod_float, \
+    rae_View_Bool: rae_any_view_bool, \
+    rae_Mod_Bool: rae_any_mod_bool, \
+    rae_View_Char: rae_any_view_char, \
+    rae_Mod_Char: rae_any_mod_char, \
+    rae_View_String: rae_any_view_string, \
+    rae_Mod_String: rae_any_mod_string, \
     uint8_t: rae_any_int, \
-    int64_t*: rae_any_int_ptr, \
-    const int64_t*: rae_any_int_ptr, \
-    double*: rae_any_float_ptr, \
-    const double*: rae_any_float_ptr, \
-    bool*: rae_any_bool_ptr, \
-    const bool*: rae_any_bool_ptr, \
-    int8_t*: rae_any_bool_ptr, \
-    const int8_t*: rae_any_bool_ptr, \
-    uint8_t*: rae_any_int_ptr, \
-    const uint8_t*: rae_any_int_ptr, \
-    char**: rae_any_string_ptr, \
-    const char**: rae_any_string_ptr, \
-    const char* const*: rae_any_string_ptr, \
     default: rae_any_ptr \
 )(X)
 
@@ -148,7 +180,7 @@ double rae_ext_rae_str_to_f64(const char* s);
 int64_t rae_ext_rae_str_to_i64(const char* s);
 
 const char* rae_ext_rae_io_read_line(void);
-int64_t rae_ext_rae_io_read_char(void);
+rae_Char rae_ext_rae_io_read_char(void);
 
 void rae_ext_rae_sys_exit(int64_t code);
 const char* rae_ext_rae_sys_get_env(const char* name);
@@ -190,18 +222,37 @@ double rae_ext_rae_math_ceil(double x);
 double rae_ext_rae_math_round(double x);
 
 RaeAny rae_ext_json_get(const char* json, const char* field);
+const char* rae_ext_rae_str_i64(int64_t v);
+const char* rae_ext_rae_str_f64(double v);
+const char* rae_ext_rae_str_bool(int8_t v);
+const char* rae_ext_rae_str_char(int64_t v);
 
 RAE_UNUSED static const char* rae_str_any(RaeAny v) {
+    const char* res = "";
     switch (v.type) {
-        case RAE_TYPE_INT: return rae_ext_rae_str_i64(v.as.i);
-        case RAE_TYPE_FLOAT: return rae_ext_rae_str_f64(v.as.f);
-        case RAE_TYPE_BOOL: return rae_ext_rae_str_bool(v.as.b);
-        case RAE_TYPE_STRING: return v.as.s ? v.as.s : "";
-        case RAE_TYPE_CHAR: return rae_ext_rae_str_char(v.as.i);
-        case RAE_TYPE_NONE: return "none";
-        default: return "";
+        case RAE_TYPE_INT: res = rae_ext_rae_str_i64(v.as.i); break;
+        case RAE_TYPE_FLOAT: res = rae_ext_rae_str_f64(v.as.f); break;
+        case RAE_TYPE_BOOL: res = rae_ext_rae_str_bool(v.as.b); break;
+        case RAE_TYPE_STRING: res = v.as.s ? v.as.s : ""; break;
+        case RAE_TYPE_CHAR: res = rae_ext_rae_str_char(v.as.i); break;
+        case RAE_TYPE_NONE: res = "none"; break;
+        default: res = ""; break;
     }
+    if (v.is_view) return rae_ext_rae_str_concat("view ", res);
+    if (v.is_mod) return rae_ext_rae_str_concat("mod ", res);
+    return res;
 }
+
+RAE_UNUSED static const char* rae_str_view_int(rae_View_Int v) { return rae_str_any(rae_any_view_int(v)); }
+RAE_UNUSED static const char* rae_str_mod_int(rae_Mod_Int v) { return rae_str_any(rae_any_mod_int(v)); }
+RAE_UNUSED static const char* rae_str_view_float(rae_View_Float v) { return rae_str_any(rae_any_view_float(v)); }
+RAE_UNUSED static const char* rae_str_mod_float(rae_Mod_Float v) { return rae_str_any(rae_any_mod_float(v)); }
+RAE_UNUSED static const char* rae_str_view_bool(rae_View_Bool v) { return rae_str_any(rae_any_view_bool(v)); }
+RAE_UNUSED static const char* rae_str_mod_bool(rae_Mod_Bool v) { return rae_str_any(rae_any_mod_bool(v)); }
+RAE_UNUSED static const char* rae_str_view_char(rae_View_Char v) { return rae_str_any(rae_any_view_char(v)); }
+RAE_UNUSED static const char* rae_str_mod_char(rae_Mod_Char v) { return rae_str_any(rae_any_mod_char(v)); }
+RAE_UNUSED static const char* rae_str_view_string(rae_View_String v) { return rae_str_any(rae_any_view_string(v)); }
+RAE_UNUSED static const char* rae_str_mod_string(rae_Mod_String v) { return rae_str_any(rae_any_mod_string(v)); }
 
 #define rae_ext_rae_str(X) _Generic((X), \
     long long: rae_ext_rae_str_i64, \
@@ -216,6 +267,17 @@ RAE_UNUSED static const char* rae_str_any(RaeAny v) {
     const char*: rae_ext_rae_str_cstr, \
     const char**: rae_ext_rae_str_cstr_ptr, \
     rae_Char: rae_ext_rae_str_char, \
+    rae_Char*: rae_ext_rae_str_char_ptr, \
+    rae_View_Int: rae_str_view_int, \
+    rae_Mod_Int: rae_str_mod_int, \
+    rae_View_Float: rae_str_view_float, \
+    rae_Mod_Float: rae_str_mod_float, \
+    rae_View_Bool: rae_str_view_bool, \
+    rae_Mod_Bool: rae_str_mod_bool, \
+    rae_View_Char: rae_str_view_char, \
+    rae_Mod_Char: rae_str_mod_char, \
+    rae_View_String: rae_str_view_string, \
+    rae_Mod_String: rae_str_mod_string, \
     default: rae_ext_rae_str_cstr \
 )(X)
 
