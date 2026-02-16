@@ -241,7 +241,7 @@ void rae_ext_rae_log_stream_float(double value);
 void rae_ext_rae_log_list_fields(RaeAny* items, int64_t length, int64_t capacity);
 void rae_ext_rae_log_stream_list_fields(RaeAny* items, int64_t length, int64_t capacity);
 
-rae_String rae_ext_rae_str_from_cstr(void* s);
+rae_String rae_ext_rae_str_from_cstr(const void* s);
 rae_String rae_ext_rae_str_from_buf(const uint8_t* data, int64_t len);
 void* rae_ext_rae_str_to_cstr(rae_String s);
 void rae_ext_rae_str_free(rae_String s);
@@ -328,9 +328,6 @@ RAE_UNUSED static const char* rae_str_any(RaeAny v) {
         case RAE_TYPE_CHAR: res = rae_ext_rae_str_to_cstr(rae_ext_rae_str_char((uint32_t)v.as.i)); break;
         case RAE_TYPE_NONE: res = "none"; break;
         default: res = ""; break;
-    }
-    if (v.is_mod) {
-        // No prefix for str_any
     }
     return res;
 }
