@@ -257,20 +257,33 @@ TypeInfo* sema_resolve_type(CompilerContext* ctx, AstTypeRef* type_ref) {
 }
 
 static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, SymbolTable* symbols, AstTypeRef* type_ref) {
-    if (!type_ref || !type_ref->parts) return type_get_void(ctx->type_registry);
+    if (!type_ref) return type_get_void(ctx->type_registry);
     
-    Str name = type_ref->parts->text;
-    if (str_eq_cstr(name, "Int")) return type_get_int(ctx->type_registry);
-    if (str_eq_cstr(name, "Float")) return type_get_float(ctx->type_registry);
-    if (str_eq_cstr(name, "Bool")) return type_get_bool(ctx->type_registry);
-    if (str_eq_cstr(name, "String")) return type_get_string(ctx->type_registry);
-    if (str_eq_cstr(name, "Char")) return type_get_char(ctx->type_registry);
-    if (str_eq_cstr(name, "Any")) return type_get_any(ctx->type_registry);
-
-    if (symbols) {
-        Symbol* sym = symbol_table_lookup(symbols, name);
-        if (sym && sym->type) return sym->type;
+    TypeInfo* base = NULL;
+    if (type_ref->parts) {
+        Str name = type_ref->parts->text;
+        if (str_eq_cstr(name, "Int")) base = type_get_int(ctx->type_registry);
+        else if (str_eq_cstr(name, "Float")) base = type_get_float(ctx->type_registry);
+        else if (str_eq_cstr(name, "Bool")) base = type_get_bool(ctx->type_registry);
+        else if (str_eq_cstr(name, "String")) base = type_get_string(ctx->type_registry);
+        else if (str_eq_cstr(name, "Char")) base = type_get_char(ctx->type_registry);
+        else if (str_eq_cstr(name, "Any")) base = type_get_any(ctx->type_registry);
+        else if (symbols) {
+            Symbol* sym = symbol_table_lookup(symbols, name);
+            if (sym && sym->type) base = sym->type;
+        }
     }
 
-    return type_get_void(ctx->type_registry); 
+    if (!base) base = type_get_void(ctx->type_registry);
+
+    if (type_ref->is_opt) {
+        base = type_get_opt(ctx->type_registry, base);
+    }
+    if (type_ref->is_view) {
+        base = type_get_ref(ctx->type_registry, base, false);
+    } else if (type_ref->is_mod) {
+        base = type_get_ref(ctx->type_registry, base, true);
+    }
+
+    return base;
 }
