@@ -104,6 +104,12 @@ static bool native_next_tick(struct VM* vm,
   return true;
 }
 
+static bool native_sizeof(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
+    (void)vm; (void)args; (void)arg_count; (void)user_data;
+    out_result->value = value_int(8); // Placeholder size for any type in VM
+    return true;
+}
+
 static bool native_rae_time_ms(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
   (void)vm; (void)args; (void)arg_count; (void)user_data;
   out_result->value = value_int(rae_ext_nowMs());
@@ -1053,6 +1059,7 @@ static bool register_default_natives(VmRegistry* registry, TickCounter* tick_cou
   ok = vm_registry_register_native(registry, "rae_str_at", native_rae_str_at, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_ext_rae_str_at", native_rae_str_at, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_ext_rae_str_from_cstr", native_rae_str_from_cstr, NULL) && ok;
+  ok = vm_registry_register_native(registry, "sizeof", native_sizeof, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_ext_rae_str_to_cstr", native_rae_str_to_cstr, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_str_to_f64", native_rae_str_to_f64, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_str_to_i64", native_rae_str_to_i64, NULL) && ok;
@@ -1069,7 +1076,6 @@ static bool register_default_natives(VmRegistry* registry, TickCounter* tick_cou
   ok = vm_registry_register_native(registry, "rae_seed", native_rae_seed, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_random", native_rae_random, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_random_int", native_rae_random_int, NULL) && ok;
-  ok = vm_registry_register_native(registry, "sizeof", native_sizeof, NULL) && ok;
   
   // Buffer primitives
   ok = vm_registry_register_native(registry, "rae_ext_rae_buf_alloc", native_rae_ext_rae_buf_alloc, NULL) && ok;
