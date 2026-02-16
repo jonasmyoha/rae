@@ -21,7 +21,7 @@ void rae_flush_stdout(void) {
   fflush(stdout);
 }
 
-rae_String rae_ext_rae_str_from_cstr(void* s) {
+rae_String rae_ext_rae_str_from_cstr(const void* s) {
   if (!s) return (rae_String){NULL, 0};
   int64_t len = (int64_t)strlen((const char*)s);
   uint8_t* data = malloc(len + 1);
