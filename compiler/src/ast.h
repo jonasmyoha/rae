@@ -369,10 +369,10 @@ struct AstModule {
   bool had_error;
 };
 
-// Forward declarations for context components
 struct StringInterner;
 struct DiagState;
 struct SymbolTable;
+struct InstantiationStack;
 
 typedef struct {
   Str name;
@@ -444,6 +444,7 @@ typedef struct CompilerContext {
     struct DiagState* diags;
     struct SymbolTable* symbols;
     struct TypeRegistry* type_registry;
+    struct InstantiationStack* instantiation_stack;
 
     // Unified tables (formerly in BytecodeCompiler)
     FunctionTable functions;

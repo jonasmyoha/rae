@@ -48,11 +48,36 @@ static Symbol* symbol_table_lookup(SymbolTable* table, Str name) {
     return NULL;
 }
 
+typedef struct InstantiationEntry {
+    const char* file_path;
+    size_t line;
+    size_t column;
+    struct InstantiationEntry* next;
+} InstantiationEntry;
+
+typedef struct InstantiationStack {
+    InstantiationEntry* head;
+} InstantiationStack;
+
+static void instantiation_stack_push(InstantiationStack* stack, Arena* arena, const char* file_path, size_t line, size_t column) {
+    InstantiationEntry* entry = arena_alloc(arena, sizeof(InstantiationEntry));
+    entry->file_path = file_path;
+    entry->line = line;
+    entry->column = column;
+    entry->next = stack->head;
+    stack->head = entry;
+}
+
+static void instantiation_stack_pop(InstantiationStack* stack) {
+    if (stack->head) stack->head = stack->head->next;
+}
+
 // Forward declarations
 static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstDecl* decl);
 static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr);
 static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstStmt* stmt);
 static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstTypeRef* type_ref);
+static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, AstDecl* generic_decl, TypeInfo** args, size_t arg_count, size_t line, size_t column);
 
 // --- AST Cloning ---
 
@@ -193,7 +218,7 @@ static AstStmt* clone_stmt(Arena* arena, const AstStmt* stmt) {
 
 // --- Specialization ---
 
-static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, AstDecl* generic_decl, TypeInfo** args, size_t arg_count) {
+static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, AstDecl* generic_decl, TypeInfo** args, size_t arg_count, size_t line, size_t column) {
     AstDecl* existing = type_registry_find_specialization(ctx->type_registry, generic_decl, args, arg_count);
     if (existing) return existing;
 
@@ -254,6 +279,8 @@ static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, AstDecl
     else if (spec->kind == AST_DECL_TYPE) spec->as.type_decl.name = mangled_name;
 
     // 4. Analyze specialized body
+    instantiation_stack_push(ctx->instantiation_stack, ctx->ast_arena, module->file_path, line, column);
+    
     SymbolTable spec_symbols = {0};
     symbol_table_push_scope(&spec_symbols);
     AstIdentifierPart* param = (generic_decl->kind == AST_DECL_FUNC) ? generic_decl->as.func_decl.generic_params : generic_decl->as.type_decl.generic_params;
@@ -266,6 +293,8 @@ static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, AstDecl
     sema_analyze_decl(ctx, module, &spec_symbols, spec);
     symbol_table_pop_scope(&spec_symbols);
     
+    instantiation_stack_pop(ctx->instantiation_stack);
+    
     return spec;
 }
 
@@ -275,6 +304,10 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
     if (!ctx->type_registry) {
         ctx->type_registry = arena_alloc(ctx->ast_arena, sizeof(TypeRegistry));
         type_registry_init(ctx->type_registry, ctx->ast_arena);
+    }
+    if (!ctx->instantiation_stack) {
+        ctx->instantiation_stack = arena_alloc(ctx->ast_arena, sizeof(InstantiationStack));
+        ctx->instantiation_stack->head = NULL;
     }
     
     SymbolTable symbols = {0};
@@ -572,7 +605,7 @@ static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* mod
                         }
                         base = type_get_struct(ctx->type_registry, sym->decl, args, arg_count);
                         if (!type_registry_find_specialization(ctx->type_registry, sym->decl, args, arg_count)) {
-                            AstDecl* spec = specialize_decl(ctx, module, sym->decl, args, arg_count);
+                            AstDecl* spec = specialize_decl(ctx, module, sym->decl, args, arg_count, type_ref->line, type_ref->column);
                             spec->next = module->decls;
                             module->decls = spec;
                         }
