@@ -2358,11 +2358,7 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
 
         bool is_param_ref = p_type && (p_type->is_view || p_type->is_mod);
         bool is_buffer_param = p_type && str_eq_cstr(get_base_type_name(p_type), "Buffer");
-        bool is_param_raw_ptr = is_buffer_param;
-        if (d) {
-            printf("DEBUG: call to %.*s, is_ext: %d, is_buffer_param: %d, p_type: %s\n", 
-                   (int)d->name.len, d->name.data, d->is_extern, is_buffer_param, p_type ? "YES" : "NULL");
-        }
+        bool is_param_raw_ptr = is_buffer_param || source_is_buffer;
         if (d && d->is_extern) {
              if (str_eq_cstr(d->name, "rae_ext_rae_str_from_cstr")) is_param_raw_ptr = true;
              // other externs likely take raw pointers too if they take mod/view
