@@ -268,9 +268,28 @@ static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, SymbolTable* s
         else if (str_eq_cstr(name, "String")) base = type_get_string(ctx->type_registry);
         else if (str_eq_cstr(name, "Char")) base = type_get_char(ctx->type_registry);
         else if (str_eq_cstr(name, "Any")) base = type_get_any(ctx->type_registry);
+        else if (str_eq_cstr(name, "Buffer")) {
+            TypeInfo* arg = type_get_void(ctx->type_registry);
+            if (type_ref->generic_args) arg = sema_resolve_type_internal(ctx, symbols, type_ref->generic_args);
+            base = type_get_buffer(ctx->type_registry, arg);
+        }
         else if (symbols) {
             Symbol* sym = symbol_table_lookup(symbols, name);
-            if (sym && sym->type) base = sym->type;
+            if (sym && sym->type) {
+                if (type_ref->generic_args && sym->decl && sym->decl->kind == AST_DECL_TYPE) {
+                    // Resolve all generic args
+                    TypeInfo* args[16]; // Max 16 generic args
+                    size_t arg_count = 0;
+                    AstTypeRef* curr_arg = type_ref->generic_args;
+                    while (curr_arg && arg_count < 16) {
+                        args[arg_count++] = sema_resolve_type_internal(ctx, symbols, curr_arg);
+                        curr_arg = curr_arg->next;
+                    }
+                    base = type_get_struct(ctx->type_registry, sym->decl, args, arg_count);
+                } else {
+                    base = sym->type;
+                }
+            }
         }
     }
 
