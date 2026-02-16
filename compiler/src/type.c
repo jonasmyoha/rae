@@ -230,29 +230,40 @@ TypeInfo* type_get_generic_param(TypeRegistry* r, Str name) {
 }
 
 TypeInfo* type_get_struct(TypeRegistry* r, AstDecl* decl, TypeInfo** args, size_t arg_count) {
-    // For now, simple interning by decl pointer if no args
-    if (arg_count == 0) {
-        uint64_t h = hash_type(TYPE_STRUCT, &decl, sizeof(decl));
-        size_t idx = h % r->capacity;
-        TypeInfo* curr = r->buckets[idx];
-        while (curr) {
-            if (curr->kind == TYPE_STRUCT && curr->as.structure.decl == decl && curr->as.structure.generic_count == 0)
-                return curr;
-            curr = curr->next_interned;
-        }
+    // Hash based on decl pointer and all generic args
+    uint64_t h = hash_type(TYPE_STRUCT, &decl, sizeof(decl));
+    for (size_t i = 0; i < arg_count; i++) {
+        h ^= hash_type(TYPE_STRUCT, &args[i], sizeof(TypeInfo*));
+    }
 
-        TypeInfo* t = (TypeInfo*)arena_alloc(r->arena, sizeof(TypeInfo));
-        t->kind = TYPE_STRUCT;
-        t->as.structure.decl = decl;
+    size_t idx = h % r->capacity;
+    TypeInfo* curr = r->buckets[idx];
+    while (curr) {
+        if (curr->kind == TYPE_STRUCT && curr->as.structure.decl == decl && curr->as.structure.generic_count == arg_count) {
+            bool match = true;
+            for (size_t i = 0; i < arg_count; i++) {
+                if (curr->as.structure.generic_args[i] != args[i]) { match = false; break; }
+            }
+            if (match) return curr;
+        }
+        curr = curr->next_interned;
+    }
+
+    TypeInfo* t = (TypeInfo*)arena_alloc(r->arena, sizeof(TypeInfo));
+    t->kind = TYPE_STRUCT;
+    t->as.structure.decl = decl;
+    t->as.structure.generic_count = arg_count;
+    if (arg_count > 0) {
+        t->as.structure.generic_args = (TypeInfo**)arena_alloc(r->arena, sizeof(TypeInfo*) * arg_count);
+        memcpy(t->as.structure.generic_args, args, sizeof(TypeInfo*) * arg_count);
+    } else {
         t->as.structure.generic_args = NULL;
-        t->as.structure.generic_count = 0;
-        t->name = decl->as.type_decl.name;
-        add_interned(r, h, t);
-        return t;
     }
     
-    // Generic instantiations would need more complex hashing of the args array
-    return NULL; 
+    // Canonical name: "Name(Arg1, Arg2)"
+    t->name = decl->as.type_decl.name; // Simplified for now
+    add_interned(r, h, t);
+    return t;
 }
 
 // Utilities
