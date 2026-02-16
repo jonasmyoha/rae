@@ -202,10 +202,40 @@ static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, AstDecl
     spec->next = NULL;
 
     if (generic_decl->kind == AST_DECL_FUNC) {
-        spec->as.func_decl.params = NULL; // TODO: clone params
+        // Clone and map params
+        AstParam* head = NULL;
+        AstParam* tail = NULL;
+        AstParam* p = generic_decl->as.func_decl.params;
+        while (p) {
+            AstParam* np = arena_alloc(ctx->ast_arena, sizeof(AstParam));
+            *np = *p;
+            np->type = clone_type_ref(ctx->ast_arena, p->type);
+            np->next = NULL;
+            if (!head) head = np;
+            if (tail) tail->next = np;
+            tail = np;
+            p = p->next;
+        }
+        spec->as.func_decl.params = head;
         spec->as.func_decl.body = clone_block(ctx->ast_arena, generic_decl->as.func_decl.body);
         spec->as.func_decl.generic_params = NULL;
     } else if (generic_decl->kind == AST_DECL_TYPE) {
+        // Struct specialization - clone fields
+        AstTypeField* head = NULL;
+        AstTypeField* tail = NULL;
+        AstTypeField* f = generic_decl->as.type_decl.fields;
+        while (f) {
+            AstTypeField* nf = arena_alloc(ctx->ast_arena, sizeof(AstTypeField));
+            *nf = *f;
+            nf->type = clone_type_ref(ctx->ast_arena, f->type);
+            nf->default_value = clone_expr(ctx->ast_arena, f->default_value);
+            nf->next = NULL;
+            if (!head) head = nf;
+            if (tail) tail->next = nf;
+            tail = nf;
+            f = f->next;
+        }
+        spec->as.type_decl.fields = head;
         spec->as.type_decl.generic_params = NULL;
     }
 
