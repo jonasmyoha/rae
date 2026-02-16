@@ -24,6 +24,7 @@
 #include "ast.h"
 #include "pretty.h"
 #include "c_backend.h"
+#include "sema.h"
 #include "raepack.h"
 #include "vm.h"
 #include "vm_compiler.h"
@@ -102,12 +103,6 @@ static bool native_next_tick(struct VM* vm,
   out_result->has_value = true;
   out_result->value = value_int(counter->next);
   return true;
-}
-
-static bool native_sizeof(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
-    (void)vm; (void)args; (void)arg_count; (void)user_data;
-    out_result->value = value_int(8); // Placeholder size for any type in VM
-    return true;
 }
 
 static bool native_rae_time_ms(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
@@ -2997,6 +2992,13 @@ static bool compile_file_chunk(const char* file_path,
   ctx.ast_arena = arena;
   // Note: VM compiler does not yet use all_decls/generic_types project-wide state
   // but we provide the context for future unification.
+  
+  if (!sema_analyze_module(&ctx, &merged)) {
+      watch_sources_clear(&built_sources);
+      module_graph_free(&graph);
+      arena_destroy(arena);
+      return false;
+  }
 
   bool ok = vm_compile_module(&ctx, &merged, chunk, file_path, registry, is_patch);
   module_graph_free(&graph);
@@ -3048,6 +3050,12 @@ static bool build_c_backend_output(const char* entry_file,
   ctx.specialized_funcs = arena_alloc(arena, sizeof(FunctionSpecialization) * ctx.specialized_func_cap);
   ctx.emitted_method_cap = 1024;
   ctx.emitted_method_names = arena_alloc(arena, sizeof(char*) * ctx.emitted_method_cap);
+  
+  if (!sema_analyze_module(&ctx, &merged)) {
+      module_graph_free(&graph);
+      arena_destroy(arena);
+      return false;
+  }
   
   VmRegistry registry;
   vm_registry_init(&registry);
