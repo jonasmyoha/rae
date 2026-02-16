@@ -47,14 +47,18 @@ const char* find_raylib_mapping(Str name) {
 }
 
 const char* map_rae_type_to_c(Str type_name) {
-  if (str_eq_cstr(type_name, "Int")) return "int64_t";
+  if (str_eq_cstr(type_name, "Int64") || str_eq_cstr(type_name, "Int")) return "int64_t";
+  if (str_eq_cstr(type_name, "Int32")) return "int32_t";
+  if (str_eq_cstr(type_name, "UInt64")) return "uint64_t";
+  if (str_eq_cstr(type_name, "UInt32")) return "uint32_t";
   if (str_eq_cstr(type_name, "Id")) return "int64_t";
   if (str_eq_cstr(type_name, "Key")) return "const char*";
-  if (str_eq_cstr(type_name, "Float")) return "double";
+  if (str_eq_cstr(type_name, "Float64") || str_eq_cstr(type_name, "Float")) return "double";
+  if (str_eq_cstr(type_name, "Float32")) return "float";
   if (str_eq_cstr(type_name, "Bool")) return "rae_Bool";
-  if (str_eq_cstr(type_name, "Char")) return "rae_Char";
-  if (str_eq_cstr(type_name, "String")) return "const char*";
-  if (str_eq_cstr(type_name, "Buffer")) return "void*";
+  if (str_eq_cstr(type_name, "Char32")) return "uint32_t";
+  if (str_eq_cstr(type_name, "String")) return "rae_String";
+  if (str_eq_cstr(type_name, "Buffer")) return "void";
   if (str_eq_cstr(type_name, "Any")) return "RaeAny";
   if (str_eq_cstr(type_name, "List")) return "rae_List";
   if (str_eq_cstr(type_name, "StringMap")) return "rae_StringMap";
@@ -64,21 +68,29 @@ const char* map_rae_type_to_c(Str type_name) {
 }
 
 bool is_primitive_type(Str type_name) {
-    return str_eq_cstr(type_name, "Int") || 
+    return str_eq_cstr(type_name, "Int64") || 
+           str_eq_cstr(type_name, "Int") || 
+           str_eq_cstr(type_name, "Int32") || 
+           str_eq_cstr(type_name, "UInt64") || 
+           str_eq_cstr(type_name, "UInt32") || 
            str_eq_cstr(type_name, "Id") || 
            str_eq_cstr(type_name, "Key") || 
+           str_eq_cstr(type_name, "Float64") || 
            str_eq_cstr(type_name, "Float") || 
+           str_eq_cstr(type_name, "Float32") || 
            str_eq_cstr(type_name, "Bool") || 
-           str_eq_cstr(type_name, "Char") ||
+           str_eq_cstr(type_name, "Char32") ||
            str_eq_cstr(type_name, "String") ||
            str_eq_cstr(type_name, "Any") ||
-           str_eq_cstr(type_name, "rae_Bool") ||
-           str_eq_cstr(type_name, "rae_Char") ||
            str_eq_cstr(type_name, "int64_t") ||
-           str_eq_cstr(type_name, "double") ||
-           str_eq_cstr(type_name, "int8_t") ||
            str_eq_cstr(type_name, "int32_t") ||
+           str_eq_cstr(type_name, "uint64_t") ||
+           str_eq_cstr(type_name, "uint32_t") ||
+           str_eq_cstr(type_name, "double") ||
+           str_eq_cstr(type_name, "float") ||
+           str_eq_cstr(type_name, "int8_t") ||
            str_eq_cstr(type_name, "const_char_p") ||
+           str_eq_cstr(type_name, "rae_String") ||
            str_eq_cstr(type_name, "const char*") ||
            str_eq_cstr(type_name, "RaeAny");
 }
@@ -99,7 +111,7 @@ static Str get_base_type_name(const AstTypeRef* type) {
 static void mangle_type_recursive(CompilerContext* ctx, const struct AstIdentifierPart* generic_params, const AstTypeRef* type, char* buf, size_t* pos, size_t cap, bool force_erase) {
     (void)force_erase; // Monomorphisation means we don't erase
     if (!type || !type->parts) {
-        *pos += snprintf(buf + *pos, cap - *pos, "rae_Int");
+        *pos += snprintf(buf + *pos, cap - *pos, "rae_Int64");
         return;
     }
     Str base = type->parts->text;
@@ -121,21 +133,37 @@ static void mangle_type_recursive(CompilerContext* ctx, const struct AstIdentifi
     if (mapped) {
         // Map to stable C name
         if (str_eq_cstr(base, "String")) {
-            *pos += snprintf(buf + *pos, cap - *pos, "const_char_p");
-        } else if (str_eq_cstr(base, "Int")) {
+            *pos += snprintf(buf + *pos, cap - *pos, "rae_String");
+        } else if (str_eq_cstr(base, "Int64") || str_eq_cstr(base, "Int")) {
             *pos += snprintf(buf + *pos, cap - *pos, "int64_t");
-        } else if (str_eq_cstr(base, "Float")) {
+        } else if (str_eq_cstr(base, "Int32")) {
+            *pos += snprintf(buf + *pos, cap - *pos, "int32_t");
+        } else if (str_eq_cstr(base, "UInt64")) {
+            *pos += snprintf(buf + *pos, cap - *pos, "uint64_t");
+        } else if (str_eq_cstr(base, "UInt32")) {
+            *pos += snprintf(buf + *pos, cap - *pos, "uint32_t");
+        } else if (str_eq_cstr(base, "Float64") || str_eq_cstr(base, "Float")) {
             *pos += snprintf(buf + *pos, cap - *pos, "double");
+        } else if (str_eq_cstr(base, "Float32")) {
+            *pos += snprintf(buf + *pos, cap - *pos, "float");
         } else if (str_eq_cstr(base, "Bool")) {
             *pos += snprintf(buf + *pos, cap - *pos, "rae_Bool");
-        } else if (str_eq_cstr(base, "Char")) {
-            *pos += snprintf(buf + *pos, cap - *pos, "rae_Char");
+        } else if (str_eq_cstr(base, "Char32")) {
+            *pos += snprintf(buf + *pos, cap - *pos, "uint32_t");
         } else if (str_eq_cstr(base, "Any")) {
             *pos += snprintf(buf + *pos, cap - *pos, "RaeAny");
+        } else if (str_eq_cstr(base, "Buffer")) {
+            Str arg_base = {0};
+            if (type->generic_args) arg_base = get_base_type_name(type->generic_args);
+            if (arg_base.len == 0 || str_eq_cstr(arg_base, "Any") || str_eq_cstr(arg_base, "RaeAny")) {
+                *pos += snprintf(buf + *pos, cap - *pos, "void_p");
+                return;
+            }
+            *pos += snprintf(buf + *pos, cap - *pos, "rae_Buffer");
         } else {
             *pos += snprintf(buf + *pos, cap - *pos, "%s", mapped);
         }
-    } else if (str_eq_cstr(base, "int64_t") || str_eq_cstr(base, "double") || str_eq_cstr(base, "int8_t") || str_eq_cstr(base, "int32_t") || str_eq_cstr(base, "const_char_p") || str_eq_cstr(base, "RaeAny") || str_starts_with_cstr(base, "rae_")) {
+    } else if (str_eq_cstr(base, "int64_t") || str_eq_cstr(base, "double") || str_eq_cstr(base, "int8_t") || str_eq_cstr(base, "int32_t") || str_eq_cstr(base, "const_char_p") || str_eq_cstr(base, "rae_String") || str_eq_cstr(base, "RaeAny") || str_starts_with_cstr(base, "rae_")) {
         *pos += snprintf(buf + *pos, cap - *pos, "%.*s", (int)base.len, base.data);
     } else {
         *pos += snprintf(buf + *pos, cap - *pos, "rae_%.*s", (int)base.len, base.data);
@@ -163,7 +191,7 @@ static void sanitize_mangled_name(char* name) {
 
 static void mangle_type_recursive_specialized(CompilerContext* ctx, const struct AstIdentifierPart* generic_params, const AstTypeRef* concrete_args, const AstTypeRef* type, char* buf, size_t* pos, size_t cap) {
     if (!type || !type->parts) {
-        *pos += snprintf(buf + *pos, cap - *pos, "rae_Int");
+        *pos += snprintf(buf + *pos, cap - *pos, "rae_Int64");
         return;
     }
     Str base = type->parts->text;
@@ -191,14 +219,27 @@ static void mangle_type_recursive_specialized(CompilerContext* ctx, const struct
 
     const char* mapped = map_rae_type_to_c(base);
     if (mapped) {
-        if (str_eq_cstr(base, "String")) *pos += snprintf(buf + *pos, cap - *pos, "const_char_p");
-        else if (str_eq_cstr(base, "Int")) *pos += snprintf(buf + *pos, cap - *pos, "int64_t");
-        else if (str_eq_cstr(base, "Float")) *pos += snprintf(buf + *pos, cap - *pos, "double");
+        if (str_eq_cstr(base, "String")) *pos += snprintf(buf + *pos, cap - *pos, "rae_String");
+        else if (str_eq_cstr(base, "Int64")) *pos += snprintf(buf + *pos, cap - *pos, "int64_t");
+        else if (str_eq_cstr(base, "Int32")) *pos += snprintf(buf + *pos, cap - *pos, "int32_t");
+        else if (str_eq_cstr(base, "UInt64")) *pos += snprintf(buf + *pos, cap - *pos, "uint64_t");
+        else if (str_eq_cstr(base, "UInt32")) *pos += snprintf(buf + *pos, cap - *pos, "uint32_t");
+        else if (str_eq_cstr(base, "Float64")) *pos += snprintf(buf + *pos, cap - *pos, "double");
+        else if (str_eq_cstr(base, "Float32")) *pos += snprintf(buf + *pos, cap - *pos, "float");
         else if (str_eq_cstr(base, "Bool")) *pos += snprintf(buf + *pos, cap - *pos, "rae_Bool");
-        else if (str_eq_cstr(base, "Char")) *pos += snprintf(buf + *pos, cap - *pos, "rae_Char");
+        else if (str_eq_cstr(base, "Char32")) *pos += snprintf(buf + *pos, cap - *pos, "uint32_t");
         else if (str_eq_cstr(base, "Any")) *pos += snprintf(buf + *pos, cap - *pos, "RaeAny");
+        else if (str_eq_cstr(base, "Buffer")) {
+            Str arg_base = {0};
+            if (type->generic_args) arg_base = get_base_type_name(type->generic_args);
+            if (arg_base.len == 0 || str_eq_cstr(arg_base, "Any") || str_eq_cstr(arg_base, "RaeAny")) {
+                *pos += snprintf(buf + *pos, cap - *pos, "void_p");
+                return;
+            }
+            *pos += snprintf(buf + *pos, cap - *pos, "rae_Buffer");
+        }
         else *pos += snprintf(buf + *pos, cap - *pos, "%s", mapped);
-    } else if (str_eq_cstr(base, "int64_t") || str_eq_cstr(base, "double") || str_eq_cstr(base, "int8_t") || str_eq_cstr(base, "int32_t") || str_eq_cstr(base, "const_char_p") || str_eq_cstr(base, "RaeAny") || str_starts_with_cstr(base, "rae_")) {
+    } else if (str_eq_cstr(base, "int64_t") || str_eq_cstr(base, "double") || str_eq_cstr(base, "int8_t") || str_eq_cstr(base, "int32_t") || str_eq_cstr(base, "uint64_t") || str_eq_cstr(base, "uint32_t") || str_eq_cstr(base, "float") || str_eq_cstr(base, "const_char_p") || str_eq_cstr(base, "rae_String") || str_eq_cstr(base, "RaeAny") || str_starts_with_cstr(base, "rae_")) {
         *pos += snprintf(buf + *pos, cap - *pos, "%.*s", (int)base.len, base.data);
     } else {
         *pos += snprintf(buf + *pos, cap - *pos, "rae_%.*s", (int)base.len, base.data);
