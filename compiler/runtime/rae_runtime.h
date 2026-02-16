@@ -329,15 +329,16 @@ RAE_UNUSED static const char* rae_str_any(RaeAny v) {
         case RAE_TYPE_NONE: res = "none"; break;
         default: res = ""; break;
     }
-    if (v.is_view) {
-        if (strncmp(res, "view ", 5) == 0) return res;
-        return rae_ext_rae_str_to_cstr(rae_ext_rae_str_concat(rae_ext_rae_str_from_cstr((void*)"view "), rae_ext_rae_str_from_cstr((void*)res)));
-    }
     if (v.is_mod) {
-        if (strncmp(res, "mod ", 4) == 0) return res;
-        return rae_ext_rae_str_to_cstr(rae_ext_rae_str_concat(rae_ext_rae_str_from_cstr((void*)"mod "), rae_ext_rae_str_from_cstr((void*)res)));
+        // No prefix for str_any
     }
     return res;
+}
+
+RAE_UNUSED static RaeAny rae_any_unwrap(RaeAny v) {
+    v.is_view = false;
+    v.is_mod = false;
+    return v;
 }
 
 #define rae_ext_rae_str(X) _Generic((X), \
