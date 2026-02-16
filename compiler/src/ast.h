@@ -11,6 +11,7 @@
 #include "arena.h"
 #include "str.h"
 #include "lexer.h"
+#include "type.h"
 
 typedef struct AstDecl AstDecl;
 typedef struct AstBlock AstBlock;
@@ -161,6 +162,7 @@ typedef struct AstObjectLiteral {
 
 struct AstExpr {
   AstExprKind kind;
+  TypeInfo* resolved_type; // The semantically analyzed type of this expression
   size_t line;
   size_t column;
   bool is_raw;
@@ -331,6 +333,7 @@ typedef struct {
 
 struct AstDecl {
   AstDeclKind kind;
+  TypeInfo* resolved_type; // The type this declaration represents (e.g. for functions, the func type)
   size_t line;
   size_t column;
   AstDecl* next;
@@ -439,6 +442,7 @@ typedef struct CompilerContext {
     struct StringInterner* interner;
     struct DiagState* diags;
     struct SymbolTable* symbols;
+    struct TypeRegistry* type_registry;
 
     // Unified tables (formerly in BytecodeCompiler)
     FunctionTable functions;
