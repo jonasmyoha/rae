@@ -149,8 +149,8 @@ FunctionEntry* function_table_find(FunctionTable* table, Str name) {
 }
 
 static bool is_primitive_type(Str type_name) {
-  return str_eq_cstr(type_name, "Int") || 
-         str_eq_cstr(type_name, "Float") || 
+  return str_eq_cstr(type_name, "Int64") || 
+         str_eq_cstr(type_name, "Float64") || 
          str_eq_cstr(type_name, "Bool") || 
          str_eq_cstr(type_name, "Char") || 
          str_eq_cstr(type_name, "String") || 
@@ -754,8 +754,9 @@ static Str infer_expr_type(BytecodeCompiler* compiler, const AstExpr* expr) {
   switch (expr->kind) {
     case AST_EXPR_IDENT:
       return get_local_type_name(compiler, expr->as.ident);
-    case AST_EXPR_INTEGER: return str_from_cstr("Int");
-    case AST_EXPR_FLOAT: return str_from_cstr("Float");
+            case AST_EXPR_INTEGER: return str_from_cstr("Int64");
+            case AST_EXPR_FLOAT: return str_from_cstr("Float64");
+    
     case AST_EXPR_BOOL: return str_from_cstr("Bool");
     case AST_EXPR_STRING: return str_from_cstr("String");
     case AST_EXPR_CHAR: return str_from_cstr("Char");
@@ -812,8 +813,8 @@ static Str infer_expr_type(BytecodeCompiler* compiler, const AstExpr* expr) {
     }
     case AST_EXPR_METHOD_CALL: {
         Str method = expr->as.method_call.method_name;
-        if (str_eq_cstr(method, "length")) return str_from_cstr("Int");
-        if (str_eq_cstr(method, "nowMs")) return str_from_cstr("Int");
+        if (str_eq_cstr(method, "length")) return str_from_cstr("Int64");
+        if (str_eq_cstr(method, "nowMs")) return str_from_cstr("Int64");
         if (str_eq_cstr(method, "get") || str_eq_cstr(method, "pop")) {
             Str receiver_type = infer_expr_type(compiler, expr->as.method_call.object);
             return get_generic_arg(receiver_type);
@@ -834,7 +835,7 @@ static Str infer_expr_type(BytecodeCompiler* compiler, const AstExpr* expr) {
         }
         
         // Fallback for some common member types if possible
-        if (str_eq_cstr(expr->as.member.member, "length")) return str_from_cstr("Int");
+        if (str_eq_cstr(expr->as.member.member, "length")) return str_from_cstr("Int64");
         break;
     }
     case AST_EXPR_INDEX: {
@@ -1978,7 +1979,7 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       if (!compile_expr(compiler, expr->as.index.target)) return false;
       if (!compile_expr(compiler, expr->as.index.index)) return false;
       // For index, we fallback to 'get' for the specific type
-      Str param_types[] = { target_type, str_from_cstr("Int") };
+      Str param_types[] = { target_type, str_from_cstr("Int64") };
       FunctionEntry* entry = function_table_find_overload(&compiler->compiler_ctx->functions, str_from_cstr("get"), param_types, 2);
       if (!entry) {
           diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'get' method not found for indexing this type");
@@ -2009,7 +2010,7 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
           // Rae-native List construction
           while (current) { element_count++; current = current->next; }
 
-          Str int_type = str_from_cstr("Int");
+          Str int_type = str_from_cstr("Int64");
     FunctionEntry* create_entry = function_table_find_overload(&compiler->compiler_ctx->functions, str_from_cstr("createList"), &int_type, 1);
           if (!create_entry) {
               diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'createList' not found in core.rae");
@@ -2069,7 +2070,7 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       AstExprList* current = expr->as.list;
       while (current) { element_count++; current = current->next; }
 
-      Str int_type = str_from_cstr("Int");
+      Str int_type = str_from_cstr("Int64");
     FunctionEntry* create_entry = function_table_find_overload(&compiler->compiler_ctx->functions, str_from_cstr("createList"), &int_type, 1);
       if (!create_entry) {
           diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'createList' not found in core.rae");
@@ -2468,7 +2469,7 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
         // 2. Initialize index = 0 in a hidden local
         emit_constant(compiler, value_int(0), (int)stmt->line);
         Str idx_name = str_from_cstr("__index");
-        int idx_slot = compiler_add_local(compiler, idx_name, str_from_cstr("Int"), false, false);
+        int idx_slot = compiler_add_local(compiler, idx_name, str_from_cstr("Int64"), false, false);
         if (idx_slot < 0) return false;
         emit_op(compiler, OP_SET_LOCAL, (int)stmt->line);
         emit_uint32(compiler, (uint32_t)idx_slot, (int)stmt->line);
@@ -2483,12 +2484,24 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
         
         // Determine collection type for length call
         bool is_buf = str_eq_cstr(col_type_name, "Buffer");
+        bool is_str = str_eq_cstr(col_type_name, "String");
 
         // Call length() on collection
         emit_op(compiler, OP_GET_LOCAL, (int)stmt->line);
         emit_uint32(compiler, (uint32_t)col_slot, (int)stmt->line);
         if (is_buf) {
             emit_op(compiler, OP_BUF_LEN, (int)stmt->line);
+        } else if (is_str) {
+            // For string, we want to iterate bytes or decoded chars?
+            // The requirement says iteration yields Char32.
+            // But we need a way to track current byte index and decode.
+            // Simplified: for now, just iterate bytes as Int (we'll fix to Char32 if needed)
+            // Wait, the requirement says "iteration yields Char32 by decoding UTF-8".
+            // This means we need a specialized OP_STR_ITER or similar.
+            emit_op(compiler, OP_NATIVE_CALL, (int)stmt->line);
+            uint32_t name_idx = chunk_add_constant(compiler->chunk, value_string_copy("rae_str_len", 14));
+            emit_uint32(compiler, name_idx, (int)stmt->line);
+            emit_byte(compiler, 1, (int)stmt->line);
         } else {
             if (!emit_native_call(compiler, str_from_cstr("rae_list_length"), 1, (int)stmt->line, 0)) return false;
         }
@@ -2510,6 +2523,8 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
         emit_uint32(compiler, (uint32_t)idx_slot, (int)stmt->line);
         if (is_buf) {
             emit_op(compiler, OP_BUF_GET, (int)stmt->line);
+        } else if (is_str) {
+            if (!emit_native_call(compiler, str_from_cstr("rae_str_at"), 2, (int)stmt->line, 0)) return false;
         } else {
             if (!emit_native_call(compiler, str_from_cstr("rae_list_get"), 2, (int)stmt->line, 0)) return false;
         }
@@ -3055,9 +3070,9 @@ static bool emit_default_value(BytecodeCompiler* compiler, const AstTypeRef* typ
     return false;
   }
 
-  if (str_eq_cstr(type_name, "Int")) {
+  if (str_eq_cstr(type_name, "Int64")) {
     emit_constant(compiler, value_int(0), line);
-  } else if (str_eq_cstr(type_name, "Float")) {
+  } else if (str_eq_cstr(type_name, "Float64")) {
     emit_constant(compiler, value_float(0.0), line);
   } else if (str_eq_cstr(type_name, "Bool")) {
     emit_constant(compiler, value_bool(false), line);

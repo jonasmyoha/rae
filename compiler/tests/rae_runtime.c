@@ -17,7 +17,7 @@
 #include <mach/mach_time.h>
 #endif
 
-void rae_flush_stdout(void) {
+static void rae_flush_stdout(void) {
   fflush(stdout);
 }
 
@@ -63,16 +63,16 @@ void rae_spawn(void* (*func)(void*), void* data) {
 }
 
 RaeAny rae_ext_json_get(const char* json, const char* field) {
-    if (!json || !field) return (RaeAny){RAE_TYPE_NONE, false, false, {0}};
+    if (!json || !field) return (RaeAny){RAE_TYPE_NONE, {0}};
     
     // Tiny naive JSON parser: look for "field": value
     char search[256];
     snprintf(search, sizeof(search), "\"%s\"", field);
     const char* key_pos = strstr(json, search);
-    if (!key_pos) return (RaeAny){RAE_TYPE_NONE, false, false, {0}};
+    if (!key_pos) return (RaeAny){RAE_TYPE_NONE, {0}};
     
     const char* colon = strchr(key_pos + strlen(search), ':');
-    if (!colon) return (RaeAny){RAE_TYPE_NONE, false, false, {0}};
+    if (!colon) return (RaeAny){RAE_TYPE_NONE, {0}};
     
     const char* val_start = colon + 1;
     while (*val_start && (*val_start == ' ' || *val_start == '\t' || *val_start == '\n' || *val_start == '\r')) {
@@ -83,26 +83,26 @@ RaeAny rae_ext_json_get(const char* json, const char* field) {
         // String value
         val_start++;
         const char* val_end = strchr(val_start, '\"');
-        if (!val_end) return (RaeAny){RAE_TYPE_NONE, false, false, {0}};
+        if (!val_end) return (RaeAny){RAE_TYPE_NONE, {0}};
         size_t len = val_end - val_start;
         char* res = malloc(len + 1);
         memcpy(res, val_start, len);
         res[len] = '\0';
-        return (RaeAny){RAE_TYPE_STRING, false, false, {.s = res}};
+        return (RaeAny){RAE_TYPE_STRING, {.s = res}};
     } else if (*val_start == 't') {
-        return (RaeAny){RAE_TYPE_BOOL, false, false, {.b = 1}};
+        return (RaeAny){RAE_TYPE_BOOL, {.b = 1}};
     } else if (*val_start == 'f') {
-        return (RaeAny){RAE_TYPE_BOOL, false, false, {.b = 0}};
+        return (RaeAny){RAE_TYPE_BOOL, {.b = 0}};
     } else if (*val_start == 'n') {
-        return (RaeAny){RAE_TYPE_NONE, false, false, {0}};
+        return (RaeAny){RAE_TYPE_NONE, {0}};
     } else if (*val_start == '-' || (*val_start >= '0' && *val_start <= '9')) {
         // Number
         char* end;
         double f = strtod(val_start, &end);
         if (strchr(val_start, '.') && strchr(val_start, '.') < end) {
-            return (RaeAny){RAE_TYPE_FLOAT64, false, false, {.f = f}};
+            return (RaeAny){RAE_TYPE_FLOAT, {.f = f}};
         } else {
-            return (RaeAny){RAE_TYPE_INT64, false, false, {.i = (int64_t)f}};
+            return (RaeAny){RAE_TYPE_INT, {.i = (int64_t)f}};
         }
     } else if (*val_start == '{') {
         // Nested object (simplified: just return the raw string part)
@@ -117,10 +117,10 @@ RaeAny rae_ext_json_get(const char* json, const char* field) {
         char* res = malloc(len + 1);
         memcpy(res, val_start, len);
         res[len] = '\0';
-        return (RaeAny){RAE_TYPE_STRING, false, false, {.s = res}}; // We return objects as strings for now
+        return (RaeAny){RAE_TYPE_STRING, {.s = res}}; // We return objects as strings for now
     }
     
-    return (RaeAny){RAE_TYPE_NONE, false, false, {0}};
+    return (RaeAny){RAE_TYPE_NONE, {0}};
 }
 
 void rae_ext_rae_log_any(RaeAny value) {
@@ -130,67 +130,17 @@ void rae_ext_rae_log_any(RaeAny value) {
 }
 
 void rae_ext_rae_log_stream_any(RaeAny value) {
-  if (value.type == RAE_TYPE_ANY) {
-      // If it's a reference to an Any, dereference and recurse
-      RaeAny inner = *(RaeAny*)value.as.ptr;
-      if (value.is_view) inner.is_view = true;
-      if (value.is_mod) inner.is_mod = true;
-      rae_ext_rae_log_stream_any(inner);
-      return;
-  }
-
-  if (value.is_view) printf("view ");
-  else if (value.is_mod) printf("mod ");
-  
-  bool is_ref = value.is_view || value.is_mod;
-
   switch (value.type) {
-    case RAE_TYPE_INT64: {
-        int64_t v = is_ref ? *(int64_t*)value.as.ptr : value.as.i;
-        printf("%lld", (long long)v); 
-        break;
-    }
-    case RAE_TYPE_INT32: {
-        int32_t v = is_ref ? *(int32_t*)value.as.ptr : (int32_t)value.as.i;
-        printf("%d", v); 
-        break;
-    }
-    case RAE_TYPE_UINT64: {
-        uint64_t v = is_ref ? *(uint64_t*)value.as.ptr : (uint64_t)value.as.i;
-        printf("%llu", (unsigned long long)v); 
-        break;
-    }
-    case RAE_TYPE_FLOAT64: {
-        double v = is_ref ? *(double*)value.as.ptr : value.as.f;
-        printf("%g", v); 
-        break;
-    }
-    case RAE_TYPE_FLOAT32: {
-        float v = is_ref ? *(float*)value.as.ptr : (float)value.as.f;
-        printf("%g", (double)v); 
-        break;
-    }
-    case RAE_TYPE_BOOL: {
-        int8_t v = is_ref ? *(int8_t*)value.as.ptr : value.as.b;
-        printf("%s", v ? "true" : "false"); 
-        break;
-    }
-    case RAE_TYPE_STRING: {
-        const char* v = is_ref ? *(const char**)value.as.ptr : value.as.s;
-        printf("%s", v ? v : "(null)"); 
-        break;
-    }
-    case RAE_TYPE_CHAR: {
-        int64_t v = is_ref ? ((rae_Char*)value.as.ptr)->v : value.as.i;
-        rae_ext_rae_log_stream_char(v); 
-        break;
-    }
+    case RAE_TYPE_INT: printf("%lld", (long long)value.as.i); break;
+    case RAE_TYPE_FLOAT: printf("%g", value.as.f); break;
+    case RAE_TYPE_BOOL: printf("%s", value.as.b ? "true" : "false"); break;
+    case RAE_TYPE_STRING: printf("%s", value.as.s ? value.as.s : "(null)"); break;
+    case RAE_TYPE_CHAR: rae_ext_rae_log_stream_char(value.as.i); break;
     case RAE_TYPE_ID: printf("Id(%lld)", (long long)value.as.i); break;
     case RAE_TYPE_KEY: printf("Key(\"%s\")", value.as.s ? value.as.s : "(null)"); break;
     case RAE_TYPE_LIST: printf("[...]"); break;
-    case RAE_TYPE_BUFFER: printf("%p", value.as.ptr); break;
+    case RAE_TYPE_BUFFER: printf("#(...)"); break;
     case RAE_TYPE_NONE: printf("none"); break;
-    case RAE_TYPE_ANY: printf("Any(...)"); break;
   }
 }
 
@@ -204,11 +154,7 @@ void rae_ext_rae_log_stream_list_fields(RaeAny* items, int64_t length, int64_t c
   printf("{ #(");
   for (int64_t i = 0; i < capacity; i++) {
     if (i > 0) printf(", ");
-    if (i < length) {
-      rae_ext_rae_log_stream_any(items[i]);
-    } else {
-      printf("none");
-    }
+    rae_ext_rae_log_stream_any(items[i]);
   }
   printf("), %lld, %lld }", (long long)length, (long long)capacity);
 }
@@ -425,8 +371,8 @@ const char* rae_ext_rae_io_read_line(void) {
   return buffer;
 }
 
-rae_Char rae_ext_rae_io_read_char(void) {
-  return (rae_Char){ (int64_t)getchar() };
+int64_t rae_ext_rae_io_read_char(void) {
+  return (int64_t)getchar();
 }
 
 void rae_ext_rae_sys_exit(int64_t code) {

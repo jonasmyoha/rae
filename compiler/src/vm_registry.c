@@ -138,11 +138,11 @@ uint32_t vm_registry_ensure_global(VmRegistry* registry, Str name, Str type_name
         registry->global_capacity = new_cap;
     }
 
-      if (str_eq_cstr(type_name, "Int")) {
+      if (str_eq_cstr(type_name, "Int64")) {
 
           registry->globals[index] = value_int(0);
 
-      } else if (str_eq_cstr(type_name, "Float")) {
+      } else if (str_eq_cstr(type_name, "Float64")) {
 
           registry->globals[index] = value_float(0.0);
 

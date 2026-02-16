@@ -170,7 +170,7 @@ struct AstExpr {
     Str floating;
     Str string_lit;
     Str char_lit;
-    int64_t char_value;
+    uint32_t char_value;
     bool boolean;
     struct {
       AstExpr* lhs;

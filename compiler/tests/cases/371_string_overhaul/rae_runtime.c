@@ -502,7 +502,7 @@ void rae_ext_rae_sys_exit(int64_t code) {
 rae_String rae_ext_rae_sys_get_env(rae_String name) {
   if (!name.data) return (rae_String){NULL, 0};
   const char* val = getenv((const char*)name.data);
-  return rae_ext_rae_str_from_cstr((void*)val);
+  return rae_ext_rae_str_from_cstr(val);
 }
 
 rae_String rae_ext_rae_sys_read_file(rae_String path) {
@@ -525,9 +525,9 @@ int8_t rae_ext_rae_sys_write_file(rae_String path, rae_String content) {
   if (!path.data || !content.data) return 0;
   FILE* f = fopen((const char*)path.data, "wb");
   if (!f) return 0;
-  size_t written = fwrite(content.data, 1, (size_t)content.len, f);
+  size_t written = fwrite(content.data, 1, content.len, f);
   fclose(f);
-  return written == (size_t)content.len;
+  return written == content.len;
 }
 
 int8_t rae_ext_rae_sys_rename(rae_String oldPath, rae_String newPath) {
@@ -636,11 +636,11 @@ rae_String rae_ext_rae_str_string_ptr(const rae_String* s) {
 }
 
 rae_String rae_ext_rae_str_cstr(const char* s) {
-  return rae_ext_rae_str_from_cstr((void*)s);
+  return rae_ext_rae_str_from_cstr(s);
 }
 
 rae_String rae_ext_rae_str_cstr_ptr(const char** s) {
-  return rae_ext_rae_str_from_cstr((void*)*s);
+  return rae_ext_rae_str_from_cstr(*s);
 }
 
 static uint64_t g_rae_random_state = 0x123456789ABCDEF0ULL;
