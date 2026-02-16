@@ -1,0 +1,120 @@
+static bool emit_rae_any_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
+    if (!expr) return true;
+    
+    Str type_name = infer_expr_type(ctx, expr);
+    bool is_primitive = is_primitive_type(type_name);
+    
+    const AstTypeRef* tr_full = infer_expr_type_ref(ctx, expr);
+    bool is_ref = tr_full && (tr_full->is_view || tr_full->is_mod);
+    bool is_mod = tr_full && tr_full->is_mod;
+    
+    // Buffer, List and Any are pointer types in C, don't treat them as Rae references for tagging
+    bool is_pointer_representation = str_eq_cstr(type_name, "List") || str_eq_cstr(type_name, "Buffer") || str_eq_cstr(type_name, "Any");
+    if (is_pointer_representation) {
+        fprintf(out, "rae_any((");
+        emit_expr(ctx, expr, out, PREC_LOWEST, false, true);
+        fprintf(out, "))");
+        return true;
+    }
+
+    if (tr_full && tr_full->is_opt) {
+        if (!is_ref && (is_primitive || str_eq_cstr(type_name, "String"))) {
+            fprintf(out, "rae_any((");
+            emit_expr(ctx, expr, out, PREC_LOWEST, false, true);
+            if (str_eq_cstr(type_name, "Int64") || str_eq_cstr(type_name, "Int") || str_eq_cstr(type_name, "Char") || str_eq_cstr(type_name, "Char32")) fprintf(out, ").as.i)");
+            else if (str_eq_cstr(type_name, "Float64") || str_eq_cstr(type_name, "Float")) fprintf(out, ").as.f)");
+            else if (str_eq_cstr(type_name, "Bool")) fprintf(out, ").as.b)");
+            else if (str_eq_cstr(type_name, "String")) fprintf(out, ").as.s)");
+            else fprintf(out, ").as.ptr)");
+            return true;
+        }
+        emit_expr(ctx, expr, out, PREC_LOWEST, false, true);
+        return true;
+    }
+    
+    if (is_primitive || str_eq_cstr(type_name, "String")) {
+        if (is_ref) {
+            const char* rt = "RAE_TYPE_NONE";
+            const char* ct = "int64_t";
+            if (str_eq_cstr(type_name, "Int64") || str_eq_cstr(type_name, "Int") || str_eq_cstr(type_name, "int64_t")) { rt = "RAE_TYPE_INT64"; ct = "int64_t"; }
+            else if (str_eq_cstr(type_name, "Int32") || str_eq_cstr(type_name, "int32_t")) { rt = "RAE_TYPE_INT32"; ct = "int32_t"; }
+            else if (str_eq_cstr(type_name, "UInt64") || str_eq_cstr(type_name, "uint64_t")) { rt = "RAE_TYPE_UINT64"; ct = "uint64_t"; }
+            else if (str_eq_cstr(type_name, "Float64") || str_eq_cstr(type_name, "Float") || str_eq_cstr(type_name, "double")) { rt = "RAE_TYPE_FLOAT64"; ct = "double"; }
+            else if (str_eq_cstr(type_name, "Float32") || str_eq_cstr(type_name, "float")) { rt = "RAE_TYPE_FLOAT32"; ct = "float"; }
+            else if (str_eq_cstr(type_name, "Bool") || str_eq_cstr(type_name, "rae_Bool") || str_eq_cstr(type_name, "int8_t")) { rt = "RAE_TYPE_BOOL"; ct = "rae_Bool"; }
+            else if (str_eq_cstr(type_name, "Char") || str_eq_cstr(type_name, "Char32") || str_eq_cstr(type_name, "uint32_t")) { rt = "RAE_TYPE_CHAR"; ct = "uint32_t"; }
+            else if (str_eq_cstr(type_name, "String") || str_eq_cstr(type_name, "rae_String") || str_eq_cstr(type_name, "const_char_p") || str_eq_cstr(type_name, "const char*")) {
+                // String is special: it's a struct but we treat it as primitive for Any
+                fprintf(out, "rae_any((");
+                emit_expr(ctx, expr, out, PREC_LOWEST, false, true);
+                fprintf(out, "))");
+                return true;
+            }
+            
+            fprintf(out, "rae_any_%s(LIFT_TO_TEMP(%s, ", is_mod ? "mod" : "view", ct);
+            emit_expr(ctx, expr, out, PREC_LOWEST, false, true);
+            fprintf(out, "), %s)", rt);
+        } else {
+            if (str_eq_cstr(type_name, "Char") || str_eq_cstr(type_name, "Char32")) fprintf(out, "rae_any_char((");
+            else if (str_eq_cstr(type_name, "Bool")) fprintf(out, "rae_any_bool((");
+            else fprintf(out, "rae_any((");
+            emit_expr(ctx, expr, out, PREC_LOWEST, false, true);
+            fprintf(out, "))");
+        }
+        return true;
+    }
+
+    // Non-primitive types (structs, etc)
+    bool is_enum_access = false;
+    if (expr->kind == AST_EXPR_MEMBER && expr->as.member.object->kind == AST_EXPR_IDENT) {
+        if (find_enum_decl(ctx, ctx->module, expr->as.member.object->as.ident)) is_enum_access = true;
+    }
+    bool is_ptr_var = (expr->kind == AST_EXPR_IDENT && is_pointer_type(ctx, expr->as.ident));
+    bool is_lvalue = (expr->kind == AST_EXPR_IDENT || expr->kind == AST_EXPR_MEMBER || expr->kind == AST_EXPR_INDEX) && !is_enum_access && !is_ptr_var;
+
+    if (is_ptr_var) {
+        // Already a pointer representation
+        fprintf(out, "rae_any((");
+        emit_expr(ctx, expr, out, PREC_LOWEST, false, true);
+        fprintf(out, ".ptr))");
+        return true;
+    }
+
+    if (is_lvalue) {
+        if (is_mod) fprintf(out, "rae_any_mod(");
+        else if (is_ref) fprintf(out, "rae_any_view(");
+        fprintf(out, "rae_any(&(");
+        emit_expr(ctx, expr, out, PREC_LOWEST, false, true);
+        fprintf(out, "))");
+        if (is_ref) fprintf(out, ", RAE_TYPE_BUFFER)");
+        return true;
+    }
+
+    // Rvalue non-primitive
+    if (is_mod) fprintf(out, "rae_any_mod(");
+    else if (is_ref) fprintf(out, "rae_any_view(");
+    
+    if (is_ref) {
+        fprintf(out, "rae_any((*(LIFT_TO_TEMP(");
+        if (is_enum_access) {
+            fprintf(out, "int64_t");
+        } else {
+            const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr_full);
+            fprintf(out, "%s", mangled);
+        }
+        fprintf(out, ", ");
+        emit_expr(ctx, expr, out, PREC_LOWEST, false, true);
+        fprintf(out, "))).ptr)");
+    } else {
+        // Rvalue struct: lift to temp and take address for rae_any_ptr
+        fprintf(out, "rae_any_ptr(&(LIFT_VALUE(");
+        const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr_full);
+        fprintf(out, "%s, ", mangled);
+        emit_expr(ctx, expr, out, PREC_LOWEST, false, true);
+        fprintf(out, ")))");
+    }
+    
+    if (is_ref) fprintf(out, ", RAE_TYPE_BUFFER)");
+
+    return true;
+}
