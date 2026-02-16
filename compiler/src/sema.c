@@ -192,6 +192,35 @@ static void sema_analyze_stmt(CompilerContext* ctx, SymbolTable* symbols, AstStm
     }
 }
 
+static TypeInfo* find_field_type(CompilerContext* ctx, SymbolTable* symbols, TypeInfo* struct_type, Str field_name) {
+    if (struct_type->kind == TYPE_REF) struct_type = struct_type->as.ref.base;
+    if (struct_type->kind != TYPE_STRUCT) return NULL;
+
+    AstDecl* decl = struct_type->as.structure.decl;
+    AstTypeField* field = decl->as.type_decl.fields;
+    while (field) {
+        if (str_eq(field->name, field_name)) {
+            // If it's a generic struct, we must substitute generic parameters in the field type
+            if (struct_type->as.structure.generic_count > 0) {
+                // Create a temporary scope for generic mapping
+                symbol_table_push_scope(symbols);
+                AstIdentifierPart* param = decl->as.type_decl.generic_params;
+                size_t i = 0;
+                while (param && i < struct_type->as.structure.generic_count) {
+                    symbol_table_define(symbols, ctx->ast_arena, param->text, NULL, struct_type->as.structure.generic_args[i]);
+                    param = param->next; i++;
+                }
+                TypeInfo* result = sema_resolve_type_internal(ctx, symbols, field->type);
+                symbol_table_pop_scope(symbols);
+                return result;
+            }
+            return sema_resolve_type_internal(ctx, symbols, field->type);
+        }
+        field = field->next;
+    }
+    return NULL;
+}
+
 static void sema_analyze_expr(CompilerContext* ctx, SymbolTable* symbols, AstExpr* expr) {
     if (!expr) return;
     
@@ -232,9 +261,22 @@ static void sema_analyze_expr(CompilerContext* ctx, SymbolTable* symbols, AstExp
                 sema_analyze_expr(ctx, symbols, arg->value);
                 arg = arg->next;
             }
+            // Return type resolution:
+            if (expr->as.call.callee->kind == AST_EXPR_IDENT) {
+                Symbol* sym = symbol_table_lookup(symbols, expr->as.call.callee->as.ident);
+                if (sym && sym->decl && sym->decl->kind == AST_DECL_FUNC) {
+                    // TODO: handle multi-return
+                    if (sym->decl->as.func_decl.returns) {
+                        expr->resolved_type = sema_resolve_type_internal(ctx, symbols, sym->decl->as.func_decl.returns->type);
+                    }
+                }
+            }
             break;
         case AST_EXPR_MEMBER:
             sema_analyze_expr(ctx, symbols, expr->as.member.object);
+            if (expr->as.member.object->resolved_type) {
+                expr->resolved_type = find_field_type(ctx, symbols, expr->as.member.object->resolved_type, expr->as.member.member);
+            }
             break;
         case AST_EXPR_METHOD_CALL:
             sema_analyze_expr(ctx, symbols, expr->as.method_call.object);
@@ -247,6 +289,12 @@ static void sema_analyze_expr(CompilerContext* ctx, SymbolTable* symbols, AstExp
         case AST_EXPR_INDEX:
             sema_analyze_expr(ctx, symbols, expr->as.index.target);
             sema_analyze_expr(ctx, symbols, expr->as.index.index);
+            // Result of index Buffer(T) is T
+            if (expr->as.index.target->resolved_type) {
+                TypeInfo* t = expr->as.index.target->resolved_type;
+                if (t->kind == TYPE_REF) t = t->as.ref.base;
+                if (t->kind == TYPE_BUFFER) expr->resolved_type = t->as.buffer.base;
+            }
             break;
         default: break;
     }
