@@ -263,11 +263,17 @@ static void sema_analyze_expr(CompilerContext* ctx, SymbolTable* symbols, AstExp
             }
             // Return type resolution:
             if (expr->as.call.callee->kind == AST_EXPR_IDENT) {
-                Symbol* sym = symbol_table_lookup(symbols, expr->as.call.callee->as.ident);
-                if (sym && sym->decl && sym->decl->kind == AST_DECL_FUNC) {
-                    // TODO: handle multi-return
-                    if (sym->decl->as.func_decl.returns) {
-                        expr->resolved_type = sema_resolve_type_internal(ctx, symbols, sym->decl->as.func_decl.returns->type);
+                Str name = expr->as.call.callee->as.ident;
+                if (str_eq_cstr(name, "sizeof")) {
+                    expr->is_builtin_sizeof = true;
+                    expr->resolved_type = type_get_int(ctx->type_registry);
+                } else {
+                    Symbol* sym = symbol_table_lookup(symbols, name);
+                    if (sym && sym->decl && sym->decl->kind == AST_DECL_FUNC) {
+                        // TODO: handle multi-return
+                        if (sym->decl->as.func_decl.returns) {
+                            expr->resolved_type = sema_resolve_type_internal(ctx, symbols, sym->decl->as.func_decl.returns->type);
+                        }
                     }
                 }
             }

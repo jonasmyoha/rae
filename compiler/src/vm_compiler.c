@@ -1005,6 +1005,12 @@ static bool emit_spawn_call(BytecodeCompiler* compiler, FunctionEntry* entry, in
 }
 
 static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr, bool is_spawn) {
+  if (expr->is_builtin_sizeof) {
+      // In the VM, all values are currently 8 bytes (union part).
+      emit_constant(compiler, value_int(8), (int)expr->line);
+      return true;
+  }
+
   if (expr->as.call.callee->kind != AST_EXPR_IDENT) {
   
     diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
@@ -1023,6 +1029,10 @@ static bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr, bool i
   }
 
   Str name = expr->as.call.callee->as.ident;
+  if (str_eq_cstr(name, "sizeof")) {
+      emit_constant(compiler, value_int(8), (int)expr->line);
+      return true;
+  }
   bool is_log = str_eq_cstr(name, "log");
   bool is_log_s = str_eq_cstr(name, "logS");
   if (is_log || is_log_s) {
@@ -2808,9 +2818,24 @@ static bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
         emit_uint32(compiler, (uint32_t)field_index, (int)stmt->line);
         emit_op(compiler, OP_POP, (int)stmt->line); // assigned value
         return true;
+      } else if (target->kind == AST_EXPR_INDEX) {
+        // Indexed assignment: target[index] = value
+        // Sequence: push buffer, push index, push value
+        if (!compile_expr(compiler, target->as.index.target)) return false;
+        if (!compile_expr(compiler, target->as.index.index)) return false;
+        if (!compile_expr(compiler, stmt->as.assign_stmt.value)) return false;
+        
+        emit_op(compiler, OP_BUF_SET, (int)stmt->line);
+        // Note: OP_BUF_SET doesn't return a value, so we don't need to pop.
+        // Wait, assignments in Rae usually return the value. 
+        // But OP_BUF_SET implementation in vm.c doesn't push the value back.
+        // Let's check other SET ops. OP_SET_FIELD pushes result.
+        // If we want consistency, we might need OP_BUF_SET to push result or use DUP.
+        // For now, let's just make it work for statements.
+        return true;
       } else {
         diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column,
-                   "VM currently only supports assignment to identifiers or members");
+                   "VM currently only supports assignment to identifiers, members, or indices");
         compiler->had_error = true;
         return false;
       }
