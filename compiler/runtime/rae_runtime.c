@@ -155,6 +155,8 @@ RaeAny rae_ext_json_get(const char* json, const char* field) {
 }
 
 void rae_ext_rae_log_any(RaeAny value) {
+  if (value.is_view) printf("view ");
+  else if (value.is_mod) printf("mod ");
   rae_ext_rae_log_stream_any(value);
   printf("\n");
   rae_flush_stdout();
@@ -170,9 +172,6 @@ void rae_ext_rae_log_stream_any(RaeAny value) {
       return;
   }
 
-  if (value.is_view) printf("view ");
-  else if (value.is_mod) printf("mod ");
-  
   bool is_ref = value.is_view || value.is_mod;
 
   switch (value.type) {
@@ -389,9 +388,9 @@ int64_t rae_ext_rae_str_compare(rae_String a, rae_String b) {
   }
 }
 
-int8_t rae_ext_rae_str_eq(rae_String a, rae_String b) {
-  if (a.len != b.len) return 0;
-  if (a.len == 0) return 1;
+rae_Bool rae_ext_rae_str_eq(rae_String a, rae_String b) {
+  if (a.len != b.len) return false;
+  if (a.len == 0) return true;
   return memcmp(a.data, b.data, a.len) == 0;
 }
 
@@ -421,24 +420,24 @@ rae_String rae_ext_rae_str_sub(rae_String s, int64_t start, int64_t len) {
   return (rae_String){result_data, len};
 }
 
-int8_t rae_ext_rae_str_contains(rae_String s, rae_String sub) {
-  if (!s.data || !sub.data) return 0;
-  if (sub.len == 0) return 1;
-  if (sub.len > s.len) return 0;
+rae_Bool rae_ext_rae_str_contains(rae_String s, rae_String sub) {
+  if (!s.data || !sub.data) return false;
+  if (sub.len == 0) return true;
+  if (sub.len > s.len) return false;
   // Naive search because we don't necessarily have NUL termination at the right place if it's a subslice
   // But we DO ensure NUL termination in our helpers.
   return strstr((const char*)s.data, (const char*)sub.data) != NULL;
 }
 
-int8_t rae_ext_rae_str_starts_with(rae_String s, rae_String prefix) {
-  if (prefix.len > s.len) return 0;
-  if (prefix.len == 0) return 1;
+rae_Bool rae_ext_rae_str_starts_with(rae_String s, rae_String prefix) {
+  if (prefix.len > s.len) return false;
+  if (prefix.len == 0) return true;
   return memcmp(s.data, prefix.data, prefix.len) == 0;
 }
 
-int8_t rae_ext_rae_str_ends_with(rae_String s, rae_String suffix) {
-  if (suffix.len > s.len) return 0;
-  if (suffix.len == 0) return 1;
+rae_Bool rae_ext_rae_str_ends_with(rae_String s, rae_String suffix) {
+  if (suffix.len > s.len) return false;
+  if (suffix.len == 0) return true;
   return memcmp(s.data + s.len - suffix.len, suffix.data, suffix.len) == 0;
 }
 
@@ -540,52 +539,52 @@ rae_String rae_ext_rae_sys_read_file(rae_String path) {
   return (rae_String){buffer, (int64_t)len};
 }
 
-int8_t rae_ext_rae_sys_write_file(rae_String path, rae_String content) {
-  if (!path.data || !content.data) return 0;
+rae_Bool rae_ext_rae_sys_write_file(rae_String path, rae_String content) {
+  if (!path.data || !content.data) return false;
   FILE* f = fopen((const char*)path.data, "wb");
-  if (!f) return 0;
+  if (!f) return false;
   size_t written = fwrite(content.data, 1, (size_t)content.len, f);
   fclose(f);
   return written == (size_t)content.len;
 }
 
-int8_t rae_ext_rae_sys_rename(rae_String oldPath, rae_String newPath) {
-    if (!oldPath.data || !newPath.data) return 0;
+rae_Bool rae_ext_rae_sys_rename(rae_String oldPath, rae_String newPath) {
+    if (!oldPath.data || !newPath.data) return false;
     return rename((const char*)oldPath.data, (const char*)newPath.data) == 0;
 }
 
-int8_t rae_ext_rae_sys_delete(rae_String path) {
-    if (!path.data) return 0;
+rae_Bool rae_ext_rae_sys_delete(rae_String path) {
+    if (!path.data) return false;
     return remove((const char*)path.data) == 0;
 }
 
 #include <sys/file.h> // For flock
 
-int8_t rae_ext_rae_sys_exists(rae_String path) {
-    if (!path.data) return 0;
+rae_Bool rae_ext_rae_sys_exists(rae_String path) {
+    if (!path.data) return false;
     return access((const char*)path.data, F_OK) == 0;
 }
 
-int8_t rae_ext_rae_sys_lock_file(rae_String path) {
-    if (!path.data) return 0;
+rae_Bool rae_ext_rae_sys_lock_file(rae_String path) {
+    if (!path.data) return false;
     int fd = open((const char*)path.data, O_RDWR | O_CREAT, 0666);
-    if (fd < 0) return 0;
+    if (fd < 0) return false;
     if (flock(fd, LOCK_EX) < 0) {
         close(fd);
-        return 0;
+        return false;
     }
     // Note: We are leaking the FD here for simplicity in this prototype.
     // In a real implementation, we'd need a way to track and close it.
-    return 1;
+    return true;
 }
 
-int8_t rae_ext_rae_sys_unlock_file(rae_String path) {
-    if (!path.data) return 0;
+rae_Bool rae_ext_rae_sys_unlock_file(rae_String path) {
+    if (!path.data) return false;
     int fd = open((const char*)path.data, O_RDWR);
-    if (fd < 0) return 0;
+    if (fd < 0) return false;
     flock(fd, LOCK_UN);
     close(fd);
-    return 1;
+    return true;
 }
 
 rae_String rae_ext_rae_str_i64(int64_t v) {
@@ -608,11 +607,11 @@ rae_String rae_ext_rae_str_f64_ptr(const double* v) {
   return rae_ext_rae_str_f64(*v);
 }
 
-rae_String rae_ext_rae_str_bool(int8_t v) {
+rae_String rae_ext_rae_str_bool(rae_Bool v) {
   return rae_ext_rae_str_from_cstr(v ? "true" : "false");
 }
 
-rae_String rae_ext_rae_str_bool_ptr(const int8_t* v) {
+rae_String rae_ext_rae_str_bool_ptr(const rae_Bool* v) {
   return rae_ext_rae_str_bool(*v);
 }
 
