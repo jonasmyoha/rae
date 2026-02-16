@@ -64,15 +64,28 @@ struct TypeInfo {
 };
 
 // Global registry for type interning
+typedef struct SpecializationEntry {
+    struct AstDecl* generic_decl;
+    TypeInfo** generic_args;
+    size_t arg_count;
+    struct AstDecl* specialized_decl;
+    struct SpecializationEntry* next;
+} SpecializationEntry;
+
 typedef struct TypeRegistry {
     TypeInfo** buckets;
     size_t capacity;
     size_t count;
+    SpecializationEntry* specializations; // List of specialized declarations
     struct Arena* arena; // Allocator for TypeInfo structs
 } TypeRegistry;
 
 // Initialization
 void type_registry_init(TypeRegistry* registry, struct Arena* arena);
+
+// Specialization management
+struct AstDecl* type_registry_find_specialization(TypeRegistry* r, struct AstDecl* generic_decl, TypeInfo** args, size_t arg_count);
+void type_registry_add_specialization(TypeRegistry* r, struct AstDecl* generic_decl, TypeInfo** args, size_t arg_count, struct AstDecl* specialized_decl);
 
 // Core Type Constructors (Interning included)
 TypeInfo* type_get_void(TypeRegistry* registry);
