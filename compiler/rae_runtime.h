@@ -241,7 +241,7 @@ void rae_ext_rae_log_stream_float(double value);
 void rae_ext_rae_log_list_fields(RaeAny* items, int64_t length, int64_t capacity);
 void rae_ext_rae_log_stream_list_fields(RaeAny* items, int64_t length, int64_t capacity);
 
-rae_String rae_ext_rae_str_from_cstr(void* s);
+rae_String rae_ext_rae_str_from_cstr(const void* s);
 rae_String rae_ext_rae_str_from_buf(const uint8_t* data, int64_t len);
 void* rae_ext_rae_str_to_cstr(rae_String s);
 void rae_ext_rae_str_free(rae_String s);
@@ -329,15 +329,13 @@ RAE_UNUSED static const char* rae_str_any(RaeAny v) {
         case RAE_TYPE_NONE: res = "none"; break;
         default: res = ""; break;
     }
-    if (v.is_view) {
-        if (strncmp(res, "view ", 5) == 0) return res;
-        return rae_ext_rae_str_to_cstr(rae_ext_rae_str_concat(rae_ext_rae_str_from_cstr((void*)"view "), rae_ext_rae_str_from_cstr((void*)res)));
-    }
-    if (v.is_mod) {
-        if (strncmp(res, "mod ", 4) == 0) return res;
-        return rae_ext_rae_str_to_cstr(rae_ext_rae_str_concat(rae_ext_rae_str_from_cstr((void*)"mod "), rae_ext_rae_str_from_cstr((void*)res)));
-    }
     return res;
+}
+
+RAE_UNUSED static RaeAny rae_any_unwrap(RaeAny v) {
+    v.is_view = false;
+    v.is_mod = false;
+    return v;
 }
 
 #define rae_ext_rae_str(X) _Generic((X), \
