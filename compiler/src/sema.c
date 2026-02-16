@@ -49,10 +49,10 @@ static Symbol* symbol_table_lookup(SymbolTable* table, Str name) {
 }
 
 // Forward declarations
-static void sema_analyze_decl(CompilerContext* ctx, SymbolTable* symbols, AstDecl* decl);
-static void sema_analyze_expr(CompilerContext* ctx, SymbolTable* symbols, AstExpr* expr);
-static void sema_analyze_stmt(CompilerContext* ctx, SymbolTable* symbols, AstStmt* stmt);
-static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, SymbolTable* symbols, AstTypeRef* type_ref);
+static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstDecl* decl);
+static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr);
+static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstStmt* stmt);
+static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstTypeRef* type_ref);
 
 // --- AST Cloning ---
 
@@ -109,7 +109,6 @@ static AstExpr* clone_expr(Arena* arena, const AstExpr* expr) {
             res->as.method_call.args = clone_call_args(arena, expr->as.method_call.args);
             res->as.method_call.generic_args = clone_type_ref(arena, expr->as.method_call.generic_args);
             break;
-        // TODO: collection literals, objects, etc.
         default: break;
     }
     return res;
@@ -194,12 +193,10 @@ static AstStmt* clone_stmt(Arena* arena, const AstStmt* stmt) {
 
 // --- Specialization ---
 
-static AstDecl* specialize_decl(CompilerContext* ctx, AstDecl* generic_decl, TypeInfo** args, size_t arg_count) {
-    // 1. Check cache
+static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, AstDecl* generic_decl, TypeInfo** args, size_t arg_count) {
     AstDecl* existing = type_registry_find_specialization(ctx->type_registry, generic_decl, args, arg_count);
     if (existing) return existing;
 
-    // 2. Clone decl
     AstDecl* spec = arena_alloc(ctx->ast_arena, sizeof(AstDecl));
     *spec = *generic_decl;
     spec->next = NULL;
@@ -207,20 +204,15 @@ static AstDecl* specialize_decl(CompilerContext* ctx, AstDecl* generic_decl, Typ
     if (generic_decl->kind == AST_DECL_FUNC) {
         spec->as.func_decl.params = NULL; // TODO: clone params
         spec->as.func_decl.body = clone_block(ctx->ast_arena, generic_decl->as.func_decl.body);
-        spec->as.func_decl.generic_params = NULL; // It's now concrete
+        spec->as.func_decl.generic_params = NULL;
     } else if (generic_decl->kind == AST_DECL_TYPE) {
-        // Struct specialization
         spec->as.type_decl.generic_params = NULL;
-        // TODO: clone fields
     }
 
-    // 3. Register
     type_registry_add_specialization(ctx->type_registry, generic_decl, args, arg_count, spec);
 
-    // 4. Analyze specialized body with generic mapping in scope
+    // Analyze specialized body
     SymbolTable spec_symbols = {0};
-    // Populate top-levels (simplified: ideally use a global scope)
-    // For now, let's just push the generic mapping
     symbol_table_push_scope(&spec_symbols);
     AstIdentifierPart* param = (generic_decl->kind == AST_DECL_FUNC) ? generic_decl->as.func_decl.generic_params : generic_decl->as.type_decl.generic_params;
     for (size_t i = 0; i < arg_count && param; i++) {
@@ -228,8 +220,9 @@ static AstDecl* specialize_decl(CompilerContext* ctx, AstDecl* generic_decl, Typ
         param = param->next;
     }
     
-    // Recursive analysis would happen here, but we need to ensure all functions are in scope
-    // For now, let's just store it. The actual full Pass 2 will find it if we add it to module decls.
+    // Recursive analysis
+    sema_analyze_decl(ctx, module, &spec_symbols, spec);
+    symbol_table_pop_scope(&spec_symbols);
     
     return spec;
 }
@@ -244,7 +237,6 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
     
     SymbolTable symbols = {0};
     
-    // Pass 1: Declare all types and functions (populate symbol table)
     AstDecl* decl = module->decls;
     while (decl) {
         Str name = {0};
@@ -267,16 +259,13 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
         decl = decl->next;
     }
 
-    // Pass 2: Analyze bodies
     decl = module->decls;
     while (decl) {
-        // Skip generic definitions in Pass 2 (they are analyzed when specialized)
         bool is_generic = false;
         if (decl->kind == AST_DECL_FUNC && decl->as.func_decl.generic_params) is_generic = true;
         if (decl->kind == AST_DECL_TYPE && decl->as.type_decl.generic_params) is_generic = true;
-        
         if (!is_generic) {
-            sema_analyze_decl(ctx, &symbols, decl);
+            sema_analyze_decl(ctx, module, &symbols, decl);
         }
         decl = decl->next;
     }
@@ -284,15 +273,14 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
     return !module->had_error;
 }
 
-static void sema_analyze_decl(CompilerContext* ctx, SymbolTable* symbols, AstDecl* decl) {
+static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstDecl* decl) {
     if (!decl) return;
     switch (decl->kind) {
         case AST_DECL_FUNC: {
             symbol_table_push_scope(symbols);
-            // Define parameters in function scope
             AstParam* param = decl->as.func_decl.params;
             while (param) {
-                TypeInfo* t = sema_resolve_type_internal(ctx, symbols, param->type);
+                TypeInfo* t = sema_resolve_type_internal(ctx, module, symbols, param->type);
                 symbol_table_define(symbols, ctx->ast_arena, param->name, NULL, t);
                 param = param->next;
             }
@@ -300,7 +288,7 @@ static void sema_analyze_decl(CompilerContext* ctx, SymbolTable* symbols, AstDec
             if (decl->as.func_decl.body) {
                 AstStmt* stmt = decl->as.func_decl.body->first;
                 while (stmt) {
-                    sema_analyze_stmt(ctx, symbols, stmt);
+                    sema_analyze_stmt(ctx, module, symbols, stmt);
                     stmt = stmt->next;
                 }
             }
@@ -309,7 +297,7 @@ static void sema_analyze_decl(CompilerContext* ctx, SymbolTable* symbols, AstDec
         }
         case AST_DECL_GLOBAL_LET: {
             if (decl->as.let_decl.value) {
-                sema_analyze_expr(ctx, symbols, decl->as.let_decl.value);
+                sema_analyze_expr(ctx, module, symbols, decl->as.let_decl.value);
             }
             break;
         }
@@ -317,19 +305,19 @@ static void sema_analyze_decl(CompilerContext* ctx, SymbolTable* symbols, AstDec
     }
 }
 
-static void sema_analyze_stmt(CompilerContext* ctx, SymbolTable* symbols, AstStmt* stmt) {
+static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstStmt* stmt) {
     if (!stmt) return;
     switch (stmt->kind) {
         case AST_STMT_EXPR:
-            if (stmt->as.expr_stmt) sema_analyze_expr(ctx, symbols, stmt->as.expr_stmt);
+            if (stmt->as.expr_stmt) sema_analyze_expr(ctx, module, symbols, stmt->as.expr_stmt);
             break;
         case AST_STMT_LET: {
             TypeInfo* t = NULL;
             if (stmt->as.let_stmt.type) {
-                t = sema_resolve_type_internal(ctx, symbols, stmt->as.let_stmt.type);
+                t = sema_resolve_type_internal(ctx, module, symbols, stmt->as.let_stmt.type);
             }
             if (stmt->as.let_stmt.value) {
-                sema_analyze_expr(ctx, symbols, stmt->as.let_stmt.value);
+                sema_analyze_expr(ctx, module, symbols, stmt->as.let_stmt.value);
                 if (!t && stmt->as.let_stmt.value->resolved_type) {
                     t = stmt->as.let_stmt.value->resolved_type;
                 }
@@ -340,49 +328,49 @@ static void sema_analyze_stmt(CompilerContext* ctx, SymbolTable* symbols, AstStm
         case AST_STMT_RET: {
             AstReturnArg* arg = stmt->as.ret_stmt.values;
             while (arg) {
-                if (arg->value) sema_analyze_expr(ctx, symbols, arg->value);
+                if (arg->value) sema_analyze_expr(ctx, module, symbols, arg->value);
                 arg = arg->next;
             }
             break;
         }
         case AST_STMT_IF: {
-            if (stmt->as.if_stmt.condition) sema_analyze_expr(ctx, symbols, stmt->as.if_stmt.condition);
+            if (stmt->as.if_stmt.condition) sema_analyze_expr(ctx, module, symbols, stmt->as.if_stmt.condition);
             if (stmt->as.if_stmt.then_block) {
                 symbol_table_push_scope(symbols);
                 AstStmt* s = stmt->as.if_stmt.then_block->first;
-                while (s) { sema_analyze_stmt(ctx, symbols, s); s = s->next; }
+                while (s) { sema_analyze_stmt(ctx, module, symbols, s); s = s->next; }
                 symbol_table_pop_scope(symbols);
             }
             if (stmt->as.if_stmt.else_block) {
                 symbol_table_push_scope(symbols);
                 AstStmt* s = stmt->as.if_stmt.else_block->first;
-                while (s) { sema_analyze_stmt(ctx, symbols, s); s = s->next; }
+                while (s) { sema_analyze_stmt(ctx, module, symbols, s); s = s->next; }
                 symbol_table_pop_scope(symbols);
             }
             break;
         }
         case AST_STMT_LOOP: {
              symbol_table_push_scope(symbols);
-             if (stmt->as.loop_stmt.init) sema_analyze_stmt(ctx, symbols, stmt->as.loop_stmt.init);
-             if (stmt->as.loop_stmt.condition) sema_analyze_expr(ctx, symbols, stmt->as.loop_stmt.condition);
-             if (stmt->as.loop_stmt.increment) sema_analyze_expr(ctx, symbols, stmt->as.loop_stmt.increment);
+             if (stmt->as.loop_stmt.init) sema_analyze_stmt(ctx, module, symbols, stmt->as.loop_stmt.init);
+             if (stmt->as.loop_stmt.condition) sema_analyze_expr(ctx, module, symbols, stmt->as.loop_stmt.condition);
+             if (stmt->as.loop_stmt.increment) sema_analyze_expr(ctx, module, symbols, stmt->as.loop_stmt.increment);
              if (stmt->as.loop_stmt.body) {
                  AstStmt* s = stmt->as.loop_stmt.body->first;
-                 while (s) { sema_analyze_stmt(ctx, symbols, s); s = s->next; }
+                 while (s) { sema_analyze_stmt(ctx, module, symbols, s); s = s->next; }
              }
              symbol_table_pop_scope(symbols);
              break;
         }
         case AST_STMT_ASSIGN: {
-            sema_analyze_expr(ctx, symbols, stmt->as.assign_stmt.target);
-            sema_analyze_expr(ctx, symbols, stmt->as.assign_stmt.value);
+            sema_analyze_expr(ctx, module, symbols, stmt->as.assign_stmt.target);
+            sema_analyze_expr(ctx, module, symbols, stmt->as.assign_stmt.value);
             break;
         }
         default: break;
     }
 }
 
-static TypeInfo* find_field_type(CompilerContext* ctx, SymbolTable* symbols, TypeInfo* struct_type, Str field_name) {
+static TypeInfo* find_field_type(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, TypeInfo* struct_type, Str field_name) {
     if (struct_type->kind == TYPE_REF) struct_type = struct_type->as.ref.base;
     if (struct_type->kind != TYPE_STRUCT) return NULL;
 
@@ -398,18 +386,18 @@ static TypeInfo* find_field_type(CompilerContext* ctx, SymbolTable* symbols, Typ
                     symbol_table_define(symbols, ctx->ast_arena, param->text, NULL, struct_type->as.structure.generic_args[i]);
                     param = param->next; i++;
                 }
-                TypeInfo* result = sema_resolve_type_internal(ctx, symbols, field->type);
+                TypeInfo* result = sema_resolve_type_internal(ctx, module, symbols, field->type);
                 symbol_table_pop_scope(symbols);
                 return result;
             }
-            return sema_resolve_type_internal(ctx, symbols, field->type);
+            return sema_resolve_type_internal(ctx, module, symbols, field->type);
         }
         field = field->next;
     }
     return NULL;
 }
 
-static void sema_analyze_expr(CompilerContext* ctx, SymbolTable* symbols, AstExpr* expr) {
+static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr) {
     if (!expr) return;
     
     switch (expr->kind) {
@@ -436,17 +424,17 @@ static void sema_analyze_expr(CompilerContext* ctx, SymbolTable* symbols, AstExp
             expr->resolved_type = type_get_char(ctx->type_registry);
             break;
         case AST_EXPR_BINARY:
-            sema_analyze_expr(ctx, symbols, expr->as.binary.lhs);
-            sema_analyze_expr(ctx, symbols, expr->as.binary.rhs);
+            sema_analyze_expr(ctx, module, symbols, expr->as.binary.lhs);
+            sema_analyze_expr(ctx, module, symbols, expr->as.binary.rhs);
             if (expr->as.binary.lhs && expr->as.binary.lhs->resolved_type) {
                 expr->resolved_type = expr->as.binary.lhs->resolved_type;
             }
             break;
         case AST_EXPR_CALL:
-            sema_analyze_expr(ctx, symbols, expr->as.call.callee);
+            sema_analyze_expr(ctx, module, symbols, expr->as.call.callee);
             AstCallArg* arg = expr->as.call.args;
             while (arg) {
-                sema_analyze_expr(ctx, symbols, arg->value);
+                sema_analyze_expr(ctx, module, symbols, arg->value);
                 arg = arg->next;
             }
             if (expr->as.call.callee->kind == AST_EXPR_IDENT) {
@@ -458,23 +446,23 @@ static void sema_analyze_expr(CompilerContext* ctx, SymbolTable* symbols, AstExp
                     Symbol* sym = symbol_table_lookup(symbols, name);
                     if (sym && sym->decl && sym->decl->kind == AST_DECL_FUNC) {
                         if (sym->decl->as.func_decl.returns) {
-                            expr->resolved_type = sema_resolve_type_internal(ctx, symbols, sym->decl->as.func_decl.returns->type);
+                            expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, sym->decl->as.func_decl.returns->type);
                         }
                     }
                 }
             }
             break;
         case AST_EXPR_MEMBER:
-            sema_analyze_expr(ctx, symbols, expr->as.member.object);
+            sema_analyze_expr(ctx, module, symbols, expr->as.member.object);
             if (expr->as.member.object->resolved_type) {
-                expr->resolved_type = find_field_type(ctx, symbols, expr->as.member.object->resolved_type, expr->as.member.member);
+                expr->resolved_type = find_field_type(ctx, module, symbols, expr->as.member.object->resolved_type, expr->as.member.member);
             }
             break;
         case AST_EXPR_METHOD_CALL:
-            sema_analyze_expr(ctx, symbols, expr->as.method_call.object);
+            sema_analyze_expr(ctx, module, symbols, expr->as.method_call.object);
             AstCallArg* marg = expr->as.method_call.args;
             while (marg) {
-                sema_analyze_expr(ctx, symbols, marg->value);
+                sema_analyze_expr(ctx, module, symbols, marg->value);
                 marg = marg->next;
             }
             if (expr->as.method_call.object->resolved_type) {
@@ -486,7 +474,7 @@ static void sema_analyze_expr(CompilerContext* ctx, SymbolTable* symbols, AstExp
                         Symbol* sym = symbol_table_lookup(symbols, entry->actual_function_name);
                         if (sym && sym->decl && sym->decl->kind == AST_DECL_FUNC) {
                             if (sym->decl->as.func_decl.returns) {
-                                expr->resolved_type = sema_resolve_type_internal(ctx, symbols, sym->decl->as.func_decl.returns->type);
+                                expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, sym->decl->as.func_decl.returns->type);
                             }
                         }
                         break;
@@ -495,8 +483,8 @@ static void sema_analyze_expr(CompilerContext* ctx, SymbolTable* symbols, AstExp
             }
             break;
         case AST_EXPR_INDEX:
-            sema_analyze_expr(ctx, symbols, expr->as.index.target);
-            sema_analyze_expr(ctx, symbols, expr->as.index.index);
+            sema_analyze_expr(ctx, module, symbols, expr->as.index.target);
+            sema_analyze_expr(ctx, module, symbols, expr->as.index.index);
             if (expr->as.index.target->resolved_type) {
                 TypeInfo* t = expr->as.index.target->resolved_type;
                 if (t->kind == TYPE_REF) t = t->as.ref.base;
@@ -508,10 +496,10 @@ static void sema_analyze_expr(CompilerContext* ctx, SymbolTable* symbols, AstExp
 }
 
 TypeInfo* sema_resolve_type(CompilerContext* ctx, AstTypeRef* type_ref) {
-    return sema_resolve_type_internal(ctx, NULL, type_ref);
+    return sema_resolve_type_internal(ctx, NULL, NULL, type_ref);
 }
 
-static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, SymbolTable* symbols, AstTypeRef* type_ref) {
+static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstTypeRef* type_ref) {
     if (!type_ref) return type_get_void(ctx->type_registry);
     
     TypeInfo* base = NULL;
@@ -525,7 +513,7 @@ static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, SymbolTable* s
         else if (str_eq_cstr(name, "Any")) base = type_get_any(ctx->type_registry);
         else if (str_eq_cstr(name, "Buffer")) {
             TypeInfo* arg = type_get_void(ctx->type_registry);
-            if (type_ref->generic_args) arg = sema_resolve_type_internal(ctx, symbols, type_ref->generic_args);
+            if (type_ref->generic_args) arg = sema_resolve_type_internal(ctx, module, symbols, type_ref->generic_args);
             base = type_get_buffer(ctx->type_registry, arg);
         }
         else if (symbols) {
@@ -537,17 +525,18 @@ static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, SymbolTable* s
                         size_t arg_count = 0;
                         AstTypeRef* curr_arg = type_ref->generic_args;
                         while (curr_arg && arg_count < 16) {
-                            args[arg_count++] = sema_resolve_type_internal(ctx, symbols, curr_arg);
+                            args[arg_count++] = sema_resolve_type_internal(ctx, module, symbols, curr_arg);
                             curr_arg = curr_arg->next;
                         }
                         base = type_get_struct(ctx->type_registry, sym->decl, args, arg_count);
+                        if (!type_registry_find_specialization(ctx->type_registry, sym->decl, args, arg_count)) {
+                            AstDecl* spec = specialize_decl(ctx, module, sym->decl, args, arg_count);
+                            spec->next = module->decls;
+                            module->decls = spec;
+                        }
                     } else {
                         base = sym->type;
                     }
-                } else if (sym->decl && sym->decl->kind == AST_DECL_TYPE) {
-                     // Inside a generic decl, we might see "T" which resolves to a generic param type
-                     // handled by Pass 1 symbol table insertion? 
-                     // No, T is added to symbols during specialize_decl.
                 }
             }
         }
