@@ -285,6 +285,25 @@ static void sema_analyze_expr(CompilerContext* ctx, SymbolTable* symbols, AstExp
                 sema_analyze_expr(ctx, symbols, marg->value);
                 marg = marg->next;
             }
+            if (expr->as.method_call.object->resolved_type) {
+                TypeInfo* t = expr->as.method_call.object->resolved_type;
+                if (t->kind == TYPE_REF) t = t->as.ref.base;
+                
+                // Lookup in MethodTable
+                for (size_t i = 0; i < ctx->methods.count; i++) {
+                    MethodEntry* entry = &ctx->methods.entries[i];
+                    if (str_eq(entry->type_name, t->name) && str_eq(entry->method_name, expr->as.method_call.method_name)) {
+                        // Resolve the return type of the actual function
+                        Symbol* sym = symbol_table_lookup(symbols, entry->actual_function_name);
+                        if (sym && sym->decl && sym->decl->kind == AST_DECL_FUNC) {
+                            if (sym->decl->as.func_decl.returns) {
+                                expr->resolved_type = sema_resolve_type_internal(ctx, symbols, sym->decl->as.func_decl.returns->type);
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
             break;
         case AST_EXPR_INDEX:
             sema_analyze_expr(ctx, symbols, expr->as.index.target);
