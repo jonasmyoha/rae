@@ -52,6 +52,7 @@ static Symbol* symbol_table_lookup(SymbolTable* table, Str name) {
 static void sema_analyze_decl(CompilerContext* ctx, SymbolTable* symbols, AstDecl* decl);
 static void sema_analyze_expr(CompilerContext* ctx, SymbolTable* symbols, AstExpr* expr);
 static void sema_analyze_stmt(CompilerContext* ctx, SymbolTable* symbols, AstStmt* stmt);
+static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, SymbolTable* symbols, AstTypeRef* type_ref);
 
 bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
     if (!ctx->type_registry) {
@@ -65,14 +66,20 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
     AstDecl* decl = module->decls;
     while (decl) {
         Str name = {0};
+        TypeInfo* t = NULL;
         switch (decl->kind) {
-            case AST_DECL_TYPE: name = decl->as.type_decl.name; break;
+            case AST_DECL_TYPE: 
+                name = decl->as.type_decl.name; 
+                // Create the type identity immediately for structs
+                t = type_get_struct(ctx->type_registry, decl, NULL, 0);
+                decl->resolved_type = t;
+                break;
             case AST_DECL_FUNC: name = decl->as.func_decl.name; break;
             case AST_DECL_ENUM: name = decl->as.enum_decl.name; break;
             case AST_DECL_GLOBAL_LET: name = decl->as.let_decl.name; break;
         }
         if (name.len > 0) {
-            symbol_table_define(&symbols, ctx->ast_arena, name, decl, NULL);
+            symbol_table_define(&symbols, ctx->ast_arena, name, decl, t);
         }
         decl = decl->next;
     }
@@ -95,7 +102,7 @@ static void sema_analyze_decl(CompilerContext* ctx, SymbolTable* symbols, AstDec
             // Define parameters in function scope
             AstParam* param = decl->as.func_decl.params;
             while (param) {
-                TypeInfo* t = sema_resolve_type(ctx, param->type);
+                TypeInfo* t = sema_resolve_type_internal(ctx, symbols, param->type);
                 symbol_table_define(symbols, ctx->ast_arena, param->name, NULL, t);
                 param = param->next;
             }
@@ -129,7 +136,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, SymbolTable* symbols, AstStm
         case AST_STMT_LET: {
             TypeInfo* t = NULL;
             if (stmt->as.let_stmt.type) {
-                t = sema_resolve_type(ctx, stmt->as.let_stmt.type);
+                t = sema_resolve_type_internal(ctx, symbols, stmt->as.let_stmt.type);
             }
             if (stmt->as.let_stmt.value) {
                 sema_analyze_expr(ctx, symbols, stmt->as.let_stmt.value);
@@ -246,6 +253,10 @@ static void sema_analyze_expr(CompilerContext* ctx, SymbolTable* symbols, AstExp
 }
 
 TypeInfo* sema_resolve_type(CompilerContext* ctx, AstTypeRef* type_ref) {
+    return sema_resolve_type_internal(ctx, NULL, type_ref);
+}
+
+static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, SymbolTable* symbols, AstTypeRef* type_ref) {
     if (!type_ref || !type_ref->parts) return type_get_void(ctx->type_registry);
     
     Str name = type_ref->parts->text;
@@ -255,6 +266,11 @@ TypeInfo* sema_resolve_type(CompilerContext* ctx, AstTypeRef* type_ref) {
     if (str_eq_cstr(name, "String")) return type_get_string(ctx->type_registry);
     if (str_eq_cstr(name, "Char")) return type_get_char(ctx->type_registry);
     if (str_eq_cstr(name, "Any")) return type_get_any(ctx->type_registry);
+
+    if (symbols) {
+        Symbol* sym = symbol_table_lookup(symbols, name);
+        if (sym && sym->type) return sym->type;
+    }
 
     return type_get_void(ctx->type_registry); 
 }
