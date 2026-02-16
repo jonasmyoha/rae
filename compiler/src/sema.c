@@ -241,7 +241,19 @@ static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, AstDecl
 
     type_registry_add_specialization(ctx->type_registry, generic_decl, args, arg_count, spec);
 
-    // Analyze specialized body
+    // 3. Assign unique mangled name
+    // Simple mangling: Name_Arg1_Arg2
+    char name_buf[256];
+    Str base_name = (generic_decl->kind == AST_DECL_FUNC) ? generic_decl->as.func_decl.name : generic_decl->as.type_decl.name;
+    int len = snprintf(name_buf, sizeof(name_buf), "%.*s_", (int)base_name.len, base_name.data);
+    for (size_t i = 0; i < arg_count; i++) {
+        len += snprintf(name_buf + len, sizeof(name_buf) - len, "%.*s%s", (int)args[i]->name.len, args[i]->name.data, (i == arg_count - 1) ? "" : "_");
+    }
+    Str mangled_name = str_dup_arena(ctx->ast_arena, (Str){(uint8_t*)name_buf, (size_t)len});
+    if (spec->kind == AST_DECL_FUNC) spec->as.func_decl.name = mangled_name;
+    else if (spec->kind == AST_DECL_TYPE) spec->as.type_decl.name = mangled_name;
+
+    // 4. Analyze specialized body
     SymbolTable spec_symbols = {0};
     symbol_table_push_scope(&spec_symbols);
     AstIdentifierPart* param = (generic_decl->kind == AST_DECL_FUNC) ? generic_decl->as.func_decl.generic_params : generic_decl->as.type_decl.generic_params;
