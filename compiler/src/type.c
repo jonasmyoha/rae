@@ -1,0 +1,244 @@
+#include "type.h"
+#include "arena.h"
+#include "ast.h"
+#include <string.h>
+#include <stdlib.h>
+
+#define TYPE_BUCKETS_INITIAL 256
+
+void type_registry_init(TypeRegistry* registry, Arena* arena) {
+    registry->arena = arena;
+    registry->capacity = TYPE_BUCKETS_INITIAL;
+    registry->count = 0;
+    registry->buckets = (TypeInfo**)arena_alloc(arena, sizeof(TypeInfo*) * registry->capacity);
+    memset(registry->buckets, 0, sizeof(TypeInfo*) * registry->capacity);
+}
+
+// FNV-1a hash function for type structure
+static uint64_t hash_type(TypeKind kind, const void* key_data, size_t key_len) {
+    uint64_t hash = 14695981039346656037ULL;
+    hash ^= (uint64_t)kind;
+    hash *= 1099511628211ULL;
+    
+    const uint8_t* bytes = (const uint8_t*)key_data;
+    for (size_t i = 0; i < key_len; i++) {
+        hash ^= bytes[i];
+        hash *= 1099511628211ULL;
+    }
+    return hash;
+}
+
+static TypeInfo* find_interned(TypeRegistry* reg, uint64_t hash, TypeKind kind, const void* key_data, size_t key_len) {
+    size_t idx = hash % reg->capacity;
+    TypeInfo* curr = reg->buckets[idx];
+    while (curr) {
+        if (curr->kind == kind) {
+            // Simplified check: usually we'd store the key too, but here we reconstruct or check
+            // For now, let's assume hash collision is rare enough or handled by deeper equality checks
+            // But strict interning needs exact match.
+            // Let's implement exact match logic based on kind.
+            bool match = false;
+            switch (kind) {
+                case TYPE_VOID: case TYPE_BOOL: case TYPE_INT: case TYPE_FLOAT: 
+                case TYPE_STRING: case TYPE_CHAR: case TYPE_ANY:
+                    match = true; // Singletons
+                    break;
+                case TYPE_REF:
+                    if (curr->as.ref.is_mod == ((bool*)key_data)[0] && 
+                        curr->as.ref.base == ((TypeInfo**)key_data)[1]) match = true;
+                    break;
+                case TYPE_OPT:
+                case TYPE_BUFFER:
+                    if (curr->as.opt.base == *(TypeInfo**)key_data) match = true;
+                    break;
+                case TYPE_GENERIC_PARAM:
+                    if (str_eq(curr->as.generic_param.param_name, *(Str*)key_data)) match = true;
+                    break;
+                 // Structs need more complex key data (decl pointer + args array)
+                 default: break;
+            }
+            if (match) return curr;
+        }
+        curr = curr->next_interned;
+    }
+    return NULL;
+}
+
+static void add_interned(TypeRegistry* reg, uint64_t hash, TypeInfo* type) {
+    size_t idx = hash % reg->capacity;
+    type->next_interned = reg->buckets[idx];
+    reg->buckets[idx] = type;
+    reg->count++;
+    // TODO: Resize if load factor high
+}
+
+// --- Primitive Constructors ---
+
+TypeInfo* type_get_void(TypeRegistry* r) {
+    static TypeInfo* t = NULL;
+    if (!t) {
+        t = (TypeInfo*)arena_alloc(r->arena, sizeof(TypeInfo));
+        t->kind = TYPE_VOID;
+        t->name = (Str){(uint8_t*)"Void", 4};
+        add_interned(r, hash_type(TYPE_VOID, NULL, 0), t);
+    }
+    return t;
+}
+
+TypeInfo* type_get_bool(TypeRegistry* r) {
+    static TypeInfo* t = NULL;
+    if (!t) {
+        t = (TypeInfo*)arena_alloc(r->arena, sizeof(TypeInfo));
+        t->kind = TYPE_BOOL;
+        t->name = (Str){(uint8_t*)"Bool", 4};
+        add_interned(r, hash_type(TYPE_BOOL, NULL, 0), t);
+    }
+    return t;
+}
+
+TypeInfo* type_get_int(TypeRegistry* r) {
+    static TypeInfo* t = NULL;
+    if (!t) {
+        t = (TypeInfo*)arena_alloc(r->arena, sizeof(TypeInfo));
+        t->kind = TYPE_INT;
+        t->name = (Str){(uint8_t*)"Int", 3};
+        add_interned(r, hash_type(TYPE_INT, NULL, 0), t);
+    }
+    return t;
+}
+
+TypeInfo* type_get_float(TypeRegistry* r) {
+    static TypeInfo* t = NULL;
+    if (!t) {
+        t = (TypeInfo*)arena_alloc(r->arena, sizeof(TypeInfo));
+        t->kind = TYPE_FLOAT;
+        t->name = (Str){(uint8_t*)"Float", 5};
+        add_interned(r, hash_type(TYPE_FLOAT, NULL, 0), t);
+    }
+    return t;
+}
+
+TypeInfo* type_get_string(TypeRegistry* r) {
+    static TypeInfo* t = NULL;
+    if (!t) {
+        t = (TypeInfo*)arena_alloc(r->arena, sizeof(TypeInfo));
+        t->kind = TYPE_STRING;
+        t->name = (Str){(uint8_t*)"String", 6};
+        add_interned(r, hash_type(TYPE_STRING, NULL, 0), t);
+    }
+    return t;
+}
+
+TypeInfo* type_get_char(TypeRegistry* r) {
+    static TypeInfo* t = NULL;
+    if (!t) {
+        t = (TypeInfo*)arena_alloc(r->arena, sizeof(TypeInfo));
+        t->kind = TYPE_CHAR;
+        t->name = (Str){(uint8_t*)"Char", 4};
+        add_interned(r, hash_type(TYPE_CHAR, NULL, 0), t);
+    }
+    return t;
+}
+
+TypeInfo* type_get_any(TypeRegistry* r) {
+    static TypeInfo* t = NULL;
+    if (!t) {
+        t = (TypeInfo*)arena_alloc(r->arena, sizeof(TypeInfo));
+        t->kind = TYPE_ANY;
+        t->name = (Str){(uint8_t*)"Any", 3};
+        add_interned(r, hash_type(TYPE_ANY, NULL, 0), t);
+    }
+    return t;
+}
+
+TypeInfo* type_get_ref(TypeRegistry* r, TypeInfo* base, bool is_mod) {
+    // Key: [is_mod (1 byte), base_ptr (8 bytes)]
+    struct { bool m; TypeInfo* b; } key = { is_mod, base };
+    uint64_t h = hash_type(TYPE_REF, &key, sizeof(key));
+    
+    // We need a custom find because the generic one above was illustrative.
+    // Ideally we make `find_interned` generic or use a specific lookup here.
+    // For speed implementing specialized logic inline:
+    size_t idx = h % r->capacity;
+    TypeInfo* curr = r->buckets[idx];
+    while (curr) {
+        if (curr->kind == TYPE_REF && curr->as.ref.is_mod == is_mod && curr->as.ref.base == base)
+            return curr;
+        curr = curr->next_interned;
+    }
+
+    TypeInfo* t = (TypeInfo*)arena_alloc(r->arena, sizeof(TypeInfo));
+    t->kind = TYPE_REF;
+    t->as.ref.base = base;
+    t->as.ref.is_mod = is_mod;
+    // Construct name: "view T" or "mod T"
+    // Note: This leaks/uses arena for string construction, which is fine for interned types
+    // Simplified name construction:
+    // char buf[64]; snprintf(buf, 64, "%s %.*s", is_mod ? "mod" : "view", (int)base->name.len, base->name.data);
+    // t->name = str_dup_arena(r->arena, (Str){(uint8_t*)buf, strlen(buf)});
+    t->name = (Str){0}; // Defer name gen for now
+    add_interned(r, h, t);
+    return t;
+}
+
+TypeInfo* type_get_opt(TypeRegistry* r, TypeInfo* base) {
+    uint64_t h = hash_type(TYPE_OPT, &base, sizeof(base));
+    size_t idx = h % r->capacity;
+    TypeInfo* curr = r->buckets[idx];
+    while (curr) {
+        if (curr->kind == TYPE_OPT && curr->as.opt.base == base) return curr;
+        curr = curr->next_interned;
+    }
+    
+    TypeInfo* t = (TypeInfo*)arena_alloc(r->arena, sizeof(TypeInfo));
+    t->kind = TYPE_OPT;
+    t->as.opt.base = base;
+    add_interned(r, h, t);
+    return t;
+}
+
+TypeInfo* type_get_buffer(TypeRegistry* r, TypeInfo* base) {
+    uint64_t h = hash_type(TYPE_BUFFER, &base, sizeof(base));
+    size_t idx = h % r->capacity;
+    TypeInfo* curr = r->buckets[idx];
+    while (curr) {
+        if (curr->kind == TYPE_BUFFER && curr->as.buffer.base == base) return curr;
+        curr = curr->next_interned;
+    }
+
+    TypeInfo* t = (TypeInfo*)arena_alloc(r->arena, sizeof(TypeInfo));
+    t->kind = TYPE_BUFFER;
+    t->as.buffer.base = base;
+    add_interned(r, h, t);
+    return t;
+}
+
+TypeInfo* type_get_generic_param(TypeRegistry* r, Str name) {
+    uint64_t h = hash_type(TYPE_GENERIC_PARAM, name.data, name.len);
+    size_t idx = h % r->capacity;
+    TypeInfo* curr = r->buckets[idx];
+    while (curr) {
+        if (curr->kind == TYPE_GENERIC_PARAM && str_eq(curr->as.generic_param.param_name, name)) return curr;
+        curr = curr->next_interned;
+    }
+    TypeInfo* t = (TypeInfo*)arena_alloc(r->arena, sizeof(TypeInfo));
+    t->kind = TYPE_GENERIC_PARAM;
+    t->as.generic_param.param_name = name;
+    t->name = name;
+    add_interned(r, h, t);
+    return t;
+}
+
+// Utilities
+
+bool type_is_same(TypeInfo* a, TypeInfo* b) {
+    return a == b; // Interning guarantees this!
+}
+
+bool type_is_primitive(TypeInfo* t) {
+    return t->kind >= TYPE_VOID && t->kind <= TYPE_CHAR;
+}
+
+bool type_is_numeric(TypeInfo* t) {
+    return t->kind == TYPE_INT || t->kind == TYPE_FLOAT;
+}
