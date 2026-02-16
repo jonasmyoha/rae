@@ -229,6 +229,32 @@ TypeInfo* type_get_generic_param(TypeRegistry* r, Str name) {
     return t;
 }
 
+TypeInfo* type_get_struct(TypeRegistry* r, AstDecl* decl, TypeInfo** args, size_t arg_count) {
+    // For now, simple interning by decl pointer if no args
+    if (arg_count == 0) {
+        uint64_t h = hash_type(TYPE_STRUCT, &decl, sizeof(decl));
+        size_t idx = h % r->capacity;
+        TypeInfo* curr = r->buckets[idx];
+        while (curr) {
+            if (curr->kind == TYPE_STRUCT && curr->as.structure.decl == decl && curr->as.structure.generic_count == 0)
+                return curr;
+            curr = curr->next_interned;
+        }
+
+        TypeInfo* t = (TypeInfo*)arena_alloc(r->arena, sizeof(TypeInfo));
+        t->kind = TYPE_STRUCT;
+        t->as.structure.decl = decl;
+        t->as.structure.generic_args = NULL;
+        t->as.structure.generic_count = 0;
+        t->name = decl->as.type_decl.name;
+        add_interned(r, h, t);
+        return t;
+    }
+    
+    // Generic instantiations would need more complex hashing of the args array
+    return NULL; 
+}
+
 // Utilities
 
 bool type_is_same(TypeInfo* a, TypeInfo* b) {
