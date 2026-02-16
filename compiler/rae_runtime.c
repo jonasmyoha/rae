@@ -21,6 +21,37 @@ void rae_flush_stdout(void) {
   fflush(stdout);
 }
 
+rae_String rae_ext_rae_str_from_cstr(void* s) {
+  if (!s) return (rae_String){NULL, 0};
+  int64_t len = (int64_t)strlen((const char*)s);
+  uint8_t* data = malloc(len + 1);
+  if (data) {
+    memcpy(data, s, len);
+    data[len] = '\0';
+  }
+  return (rae_String){data, len};
+}
+
+rae_String rae_ext_rae_str_from_buf(const uint8_t* data, int64_t len) {
+  if (!data || len < 0) return (rae_String){NULL, 0};
+  uint8_t* buf = malloc(len + 1);
+  if (buf) {
+    memcpy(buf, data, len);
+    buf[len] = '\0';
+  }
+  return (rae_String){buf, len};
+}
+
+void* rae_ext_rae_str_to_cstr(rae_String s) {
+  // We ensure rae_String is always NUL-terminated for convenience,
+  // but we should still handle the case where it might not be if we ever change that.
+  return (void*)s.data;
+}
+
+void rae_ext_rae_str_free(rae_String s) {
+  if (s.data) free(s.data);
+}
+
 static int64_t g_tick_counter = 0;
 
 int64_t rae_ext_nextTick(void) {
@@ -85,10 +116,10 @@ RaeAny rae_ext_json_get(const char* json, const char* field) {
         const char* val_end = strchr(val_start, '\"');
         if (!val_end) return (RaeAny){RAE_TYPE_NONE, false, false, {0}};
         size_t len = val_end - val_start;
-        char* res = malloc(len + 1);
+        uint8_t* res = malloc(len + 1);
         memcpy(res, val_start, len);
         res[len] = '\0';
-        return (RaeAny){RAE_TYPE_STRING, false, false, {.s = res}};
+        return (RaeAny){RAE_TYPE_STRING, false, false, {.s = {res, (int64_t)len}}};
     } else if (*val_start == 't') {
         return (RaeAny){RAE_TYPE_BOOL, false, false, {.b = 1}};
     } else if (*val_start == 'f') {
@@ -114,10 +145,10 @@ RaeAny rae_ext_json_get(const char* json, const char* field) {
             p++;
         }
         size_t len = p - val_start;
-        char* res = malloc(len + 1);
+        uint8_t* res = malloc(len + 1);
         memcpy(res, val_start, len);
         res[len] = '\0';
-        return (RaeAny){RAE_TYPE_STRING, false, false, {.s = res}}; // We return objects as strings for now
+        return (RaeAny){RAE_TYPE_STRING, false, false, {.s = {res, (int64_t)len}}}; // We return objects as strings for now
     }
     
     return (RaeAny){RAE_TYPE_NONE, false, false, {0}};
@@ -176,17 +207,29 @@ void rae_ext_rae_log_stream_any(RaeAny value) {
         break;
     }
     case RAE_TYPE_STRING: {
-        const char* v = is_ref ? *(const char**)value.as.ptr : value.as.s;
-        printf("%s", v ? v : "(null)"); 
+        rae_String v = is_ref ? *(rae_String*)value.as.ptr : value.as.s;
+        if (v.data) fwrite(v.data, 1, v.len, stdout);
+        else printf("(null)"); 
         break;
     }
     case RAE_TYPE_CHAR: {
-        int64_t v = is_ref ? ((rae_Char*)value.as.ptr)->v : value.as.i;
+        uint32_t v = is_ref ? *(uint32_t*)value.as.ptr : (uint32_t)value.as.i;
         rae_ext_rae_log_stream_char(v); 
         break;
     }
     case RAE_TYPE_ID: printf("Id(%lld)", (long long)value.as.i); break;
-    case RAE_TYPE_KEY: printf("Key(\"%s\")", value.as.s ? value.as.s : "(null)"); break;
+    case RAE_TYPE_KEY: {
+        rae_String v = is_ref ? *(rae_String*)value.as.ptr : value.as.s;
+        printf("Key(\"");
+        if (v.data) fwrite(v.data, 1, v.len, stdout);
+        printf("\")");
+        break;
+    }
+    case RAE_TYPE_UINT32: {
+        uint32_t v = is_ref ? *(uint32_t*)value.as.ptr : (uint32_t)value.as.i;
+        printf("%u", v); 
+        break;
+    }
     case RAE_TYPE_LIST: printf("[...]"); break;
     case RAE_TYPE_BUFFER: printf("%p", value.as.ptr); break;
     case RAE_TYPE_NONE: printf("none"); break;
@@ -232,6 +275,19 @@ void rae_ext_rae_log_stream_cstr(const char* text) {
   rae_flush_stdout();
 }
 
+void rae_ext_rae_log_string(rae_String value) {
+  rae_ext_rae_log_stream_string(value);
+  printf("\n");
+  rae_flush_stdout();
+}
+
+void rae_ext_rae_log_stream_string(rae_String value) {
+  if (value.data) {
+    fwrite(value.data, 1, value.len, stdout);
+  }
+  rae_flush_stdout();
+}
+
 void rae_ext_rae_log_i64(int64_t value) {
   printf("%lld\n", (long long)value);
   rae_flush_stdout();
@@ -252,13 +308,13 @@ void rae_ext_rae_log_stream_bool(int8_t value) {
   rae_flush_stdout();
 }
 
-void rae_ext_rae_log_char(int64_t value) {
+void rae_ext_rae_log_char(uint32_t value) {
   rae_ext_rae_log_stream_char(value);
   printf("\n");
   rae_flush_stdout();
 }
 
-void rae_ext_rae_log_stream_char(int64_t value) {
+void rae_ext_rae_log_stream_char(uint32_t value) {
   if (value < 0x80) {
     printf("%c", (char)value);
   } else if (value < 0x800) {
@@ -281,14 +337,14 @@ void rae_ext_rae_log_stream_id(int64_t value) {
   rae_flush_stdout();
 }
 
-void rae_ext_rae_log_key(const char* value) {
-  printf("%s\n", value ? value : "(null)");
+void rae_ext_rae_log_key(rae_String value) {
+  rae_ext_rae_log_stream_string(value);
+  printf("\n");
   rae_flush_stdout();
 }
 
-void rae_ext_rae_log_stream_key(const char* value) {
-  printf("%s", value ? value : "(null)");
-  rae_flush_stdout();
+void rae_ext_rae_log_stream_key(rae_String value) {
+  rae_ext_rae_log_stream_string(value);
 }
 
 void rae_ext_rae_log_float(double value) {
@@ -301,189 +357,218 @@ void rae_ext_rae_log_stream_float(double value) {
   rae_flush_stdout();
 }
 
-const char* rae_ext_rae_str_concat(const char* a, const char* b) {
-  if (!a) a = "";
-  if (!b) b = "";
-  size_t len_a = strlen(a);
-  size_t len_b = strlen(b);
-  char* result = malloc(len_a + len_b + 1);
-  if (result) {
-    strcpy(result, a);
-    strcat(result, b);
+rae_String rae_ext_rae_str_concat(rae_String a, rae_String b) {
+  int64_t len_a = a.len;
+  int64_t len_b = b.len;
+  uint8_t* result_data = malloc(len_a + len_b + 1);
+  if (result_data) {
+    if (a.data) memcpy(result_data, a.data, len_a);
+    if (b.data) memcpy(result_data + len_a, b.data, len_b);
+    result_data[len_a + len_b] = '\0';
   }
-  return result;
+  return (rae_String){result_data, len_a + len_b};
 }
 
-int64_t rae_ext_rae_str_len(const char* s) {
-  if (!s) return 0;
-  return (int64_t)strlen(s);
+rae_String rae_ext_rae_str_concat_cstr(rae_String a, rae_String b) {
+  return rae_ext_rae_str_concat(a, b);
 }
 
-int64_t rae_ext_rae_str_compare(const char* a, const char* b) {
-  if (!a && !b) return 0;
-  if (!a) return -1;
-  if (!b) return 1;
-  return (int64_t)strcmp(a, b);
+int64_t rae_ext_rae_str_len(rae_String s) {
+  return s.len;
 }
 
-int8_t rae_ext_rae_str_eq(const char* a, const char* b) {
-  if (a == b) return 1;
-  if (!a || !b) return 0;
-  return strcmp(a, b) == 0;
+int64_t rae_ext_rae_str_compare(rae_String a, rae_String b) {
+  if (a.len < b.len) {
+    int res = memcmp(a.data, b.data, a.len);
+    return res == 0 ? -1 : res;
+  } else if (a.len > b.len) {
+    int res = memcmp(a.data, b.data, b.len);
+    return res == 0 ? 1 : res;
+  } else {
+    return memcmp(a.data, b.data, a.len);
+  }
 }
 
-int64_t rae_ext_rae_str_hash(const char* s) {
-  if (!s) return 0;
+int8_t rae_ext_rae_str_eq(rae_String a, rae_String b) {
+  if (a.len != b.len) return 0;
+  if (a.len == 0) return 1;
+  return memcmp(a.data, b.data, a.len) == 0;
+}
+
+int64_t rae_ext_rae_str_hash(rae_String s) {
+  if (!s.data) return 0;
   // FNV-1a hash
   uint64_t hash = 0xcbf29ce484222325ULL;
-  while (*s) {
-    hash ^= (uint64_t)(unsigned char)(*s++);
+  for (int64_t i = 0; i < s.len; i++) {
+    hash ^= (uint64_t)s.data[i];
     hash *= 0x100000001b3ULL;
   }
   return (int64_t)hash;
 }
 
-const char* rae_ext_rae_str_sub(const char* s, int64_t start, int64_t len) {
-  if (!s) return "";
-  int64_t slen = (int64_t)strlen(s);
+rae_String rae_ext_rae_str_sub(rae_String s, int64_t start, int64_t len) {
+  if (!s.data) return (rae_String){NULL, 0};
   if (start < 0) start = 0;
-  if (start >= slen) return "";
-  if (start + len > slen) len = slen - start;
-  if (len <= 0) return "";
+  if (start >= s.len) return (rae_String){NULL, 0};
+  if (start + len > s.len) len = s.len - start;
+  if (len <= 0) return (rae_String){NULL, 0};
   
-  char* result = malloc((size_t)len + 1);
-  if (result) {
-    memcpy(result, s + start, (size_t)len);
-    result[len] = '\0';
+  uint8_t* result_data = malloc((size_t)len + 1);
+  if (result_data) {
+    memcpy(result_data, s.data + start, (size_t)len);
+    result_data[len] = '\0';
   }
-  return result;
+  return (rae_String){result_data, len};
 }
 
-int8_t rae_ext_rae_str_contains(const char* s, const char* sub) {
-  if (!s || !sub) return 0;
-  return strstr(s, sub) != NULL;
+int8_t rae_ext_rae_str_contains(rae_String s, rae_String sub) {
+  if (!s.data || !sub.data) return 0;
+  if (sub.len == 0) return 1;
+  if (sub.len > s.len) return 0;
+  // Naive search because we don't necessarily have NUL termination at the right place if it's a subslice
+  // But we DO ensure NUL termination in our helpers.
+  return strstr((const char*)s.data, (const char*)sub.data) != NULL;
 }
 
-int8_t rae_ext_rae_str_starts_with(const char* s, const char* prefix) {
-  if (!s || !prefix) return 0;
-  size_t len_s = strlen(s);
-  size_t len_p = strlen(prefix);
-  if (len_p > len_s) return 0;
-  return strncmp(s, prefix, len_p) == 0;
+int8_t rae_ext_rae_str_starts_with(rae_String s, rae_String prefix) {
+  if (prefix.len > s.len) return 0;
+  if (prefix.len == 0) return 1;
+  return memcmp(s.data, prefix.data, prefix.len) == 0;
 }
 
-int8_t rae_ext_rae_str_ends_with(const char* s, const char* suffix) {
-  if (!s || !suffix) return 0;
-  size_t len_s = strlen(s);
-  size_t len_suffix = strlen(suffix);
-  if (len_suffix > len_s) return 0;
-  return strncmp(s + len_s - len_suffix, suffix, len_suffix) == 0;
+int8_t rae_ext_rae_str_ends_with(rae_String s, rae_String suffix) {
+  if (suffix.len > s.len) return 0;
+  if (suffix.len == 0) return 1;
+  return memcmp(s.data + s.len - suffix.len, suffix.data, suffix.len) == 0;
 }
 
-int64_t rae_ext_rae_str_index_of(const char* s, const char* sub) {
-  if (!s || !sub) return -1;
-  const char* p = strstr(s, sub);
+int64_t rae_ext_rae_str_index_of(rae_String s, rae_String sub) {
+  if (!s.data || !sub.data) return -1;
+  if (sub.len == 0) return 0;
+  const char* p = strstr((const char*)s.data, (const char*)sub.data);
   if (!p) return -1;
-  return (int64_t)(p - s);
+  return (int64_t)(p - (const char*)s.data);
 }
 
-const char* rae_ext_rae_str_trim(const char* s) {
-  if (!s) return "";
-  while (*s && (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r')) s++;
-  if (!*s) return "";
-  const char* end = s + strlen(s) - 1;
-  while (end > s && (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r')) end--;
-  size_t len = (size_t)(end - s + 1);
-  char* result = malloc(len + 1);
-  if (result) {
-    memcpy(result, s, len);
-    result[len] = '\0';
+rae_String rae_ext_rae_str_trim(rae_String s) {
+  if (!s.data || s.len == 0) return (rae_String){NULL, 0};
+  int64_t start = 0;
+  while (start < s.len && (s.data[start] == ' ' || s.data[start] == '\t' || s.data[start] == '\n' || s.data[start] == '\r')) start++;
+  if (start == s.len) return (rae_String){NULL, 0};
+  int64_t end = s.len - 1;
+  while (end > start && (s.data[end] == ' ' || s.data[end] == '\t' || s.data[end] == '\n' || s.data[end] == '\r')) end--;
+  return rae_ext_rae_str_sub(s, start, end - start + 1);
+}
+
+uint32_t rae_ext_rae_str_at(rae_String s, int64_t index) {
+  if (!s.data || index < 0 || index >= s.len) return 0;
+  uint8_t c = s.data[index];
+  if (c < 0x80) return (uint32_t)c;
+  if ((c & 0xE0) == 0xC0) {
+    if (index + 1 >= s.len) return (uint32_t)c;
+    return (uint32_t)(((c & 0x1F) << 6) | (s.data[index+1] & 0x3F));
   }
-  return result;
+  if ((c & 0xF0) == 0xE0) {
+    if (index + 2 >= s.len) return (uint32_t)c;
+    return (uint32_t)(((c & 0x0F) << 12) | ((s.data[index+1] & 0x3F) << 6) | (s.data[index+2] & 0x3F));
+  }
+  if ((c & 0xF8) == 0xF0) {
+    if (index + 3 >= s.len) return (uint32_t)c;
+    return (uint32_t)(((c & 0x07) << 18) | ((s.data[index+1] & 0x3F) << 12) | ((s.data[index+2] & 0x3F) << 6) | (s.data[index+3] & 0x3F));
+  }
+  return (uint32_t)c;
 }
 
-double rae_ext_rae_str_to_f64(const char* s) {
-  if (!s) return 0.0;
-  return atof(s);
+double rae_ext_rae_str_to_f64(rae_String s) {
+  if (!s.data) return 0.0;
+  return atof((const char*)s.data);
 }
 
-int64_t rae_ext_rae_str_to_i64(const char* s) {
-  if (!s) return 0;
-  return (int64_t)atoll(s);
+int64_t rae_ext_rae_str_to_i64(rae_String s) {
+  if (!s.data) return 0;
+  return (int64_t)atoll((const char*)s.data);
 }
 
-const char* rae_ext_rae_io_read_line(void) {
+rae_String rae_ext_rae_io_read_line(void) {
   char* buffer = NULL;
   size_t len = 0;
   if (getline(&buffer, &len, stdin) == -1) {
     free(buffer);
-    return "";
+    return (rae_String){NULL, 0};
   }
   // Remove newline
   size_t blen = strlen(buffer);
-  if (blen > 0 && buffer[blen-1] == '\n') buffer[blen-1] = '\0';
-  return buffer;
+  if (blen > 0 && buffer[blen-1] == '\n') {
+      buffer[blen-1] = '\0';
+      blen--;
+  }
+  if (blen > 0 && buffer[blen-1] == '\r') {
+      buffer[blen-1] = '\0';
+      blen--;
+  }
+  return (rae_String){(uint8_t*)buffer, (int64_t)blen};
 }
 
 rae_Char rae_ext_rae_io_read_char(void) {
-  return (rae_Char){ (int64_t)getchar() };
+  // TODO: Proper UTF-8 read from stdin
+  return (uint32_t)getchar();
 }
 
 void rae_ext_rae_sys_exit(int64_t code) {
   exit((int)code);
 }
 
-const char* rae_ext_rae_sys_get_env(const char* name) {
-  if (!name) return NULL;
-  return getenv(name);
+rae_String rae_ext_rae_sys_get_env(rae_String name) {
+  if (!name.data) return (rae_String){NULL, 0};
+  const char* val = getenv((const char*)name.data);
+  return rae_ext_rae_str_from_cstr((void*)val);
 }
 
-const char* rae_ext_rae_sys_read_file(const char* path) {
-  if (!path) return NULL;
-  FILE* f = fopen(path, "rb");
-  if (!f) return NULL;
+rae_String rae_ext_rae_sys_read_file(rae_String path) {
+  if (!path.data) return (rae_String){NULL, 0};
+  FILE* f = fopen((const char*)path.data, "rb");
+  if (!f) return (rae_String){NULL, 0};
   fseek(f, 0, SEEK_END);
   long len = ftell(f);
   fseek(f, 0, SEEK_SET);
-  char* buffer = malloc((size_t)len + 1);
+  uint8_t* buffer = malloc((size_t)len + 1);
   if (buffer) {
     fread(buffer, 1, (size_t)len, f);
     buffer[len] = '\0';
   }
   fclose(f);
-  return buffer;
+  return (rae_String){buffer, (int64_t)len};
 }
 
-int8_t rae_ext_rae_sys_write_file(const char* path, const char* content) {
-  if (!path || !content) return 0;
-  FILE* f = fopen(path, "wb");
+int8_t rae_ext_rae_sys_write_file(rae_String path, rae_String content) {
+  if (!path.data || !content.data) return 0;
+  FILE* f = fopen((const char*)path.data, "wb");
   if (!f) return 0;
-  size_t len = strlen(content);
-  size_t written = fwrite(content, 1, len, f);
+  size_t written = fwrite(content.data, 1, (size_t)content.len, f);
   fclose(f);
-  return written == len;
+  return written == (size_t)content.len;
 }
 
-int8_t rae_ext_rae_sys_rename(const char* oldPath, const char* newPath) {
-    if (!oldPath || !newPath) return 0;
-    return rename(oldPath, newPath) == 0;
+int8_t rae_ext_rae_sys_rename(rae_String oldPath, rae_String newPath) {
+    if (!oldPath.data || !newPath.data) return 0;
+    return rename((const char*)oldPath.data, (const char*)newPath.data) == 0;
 }
 
-int8_t rae_ext_rae_sys_delete(const char* path) {
-    if (!path) return 0;
-    return remove(path) == 0;
+int8_t rae_ext_rae_sys_delete(rae_String path) {
+    if (!path.data) return 0;
+    return remove((const char*)path.data) == 0;
 }
 
 #include <sys/file.h> // For flock
 
-int8_t rae_ext_rae_sys_exists(const char* path) {
-    if (!path) return 0;
-    return access(path, F_OK) == 0;
+int8_t rae_ext_rae_sys_exists(rae_String path) {
+    if (!path.data) return 0;
+    return access((const char*)path.data, F_OK) == 0;
 }
 
-int8_t rae_ext_rae_sys_lock_file(const char* path) {
-    if (!path) return 0;
-    int fd = open(path, O_RDWR | O_CREAT, 0666);
+int8_t rae_ext_rae_sys_lock_file(rae_String path) {
+    if (!path.data) return 0;
+    int fd = open((const char*)path.data, O_RDWR | O_CREAT, 0666);
     if (fd < 0) return 0;
     if (flock(fd, LOCK_EX) < 0) {
         close(fd);
@@ -494,79 +579,87 @@ int8_t rae_ext_rae_sys_lock_file(const char* path) {
     return 1;
 }
 
-int8_t rae_ext_rae_sys_unlock_file(const char* path) {
-    if (!path) return 0;
-    int fd = open(path, O_RDWR);
+int8_t rae_ext_rae_sys_unlock_file(rae_String path) {
+    if (!path.data) return 0;
+    int fd = open((const char*)path.data, O_RDWR);
     if (fd < 0) return 0;
     flock(fd, LOCK_UN);
     close(fd);
     return 1;
 }
 
-const char* rae_ext_rae_str_i64(int64_t v) {
-  char* buffer = malloc(32);
-  if (buffer) {
-    snprintf(buffer, 32, "%lld", (long long)v);
-  }
-  return buffer;
+rae_String rae_ext_rae_str_i64(int64_t v) {
+  char buffer[32];
+  int len = snprintf(buffer, 32, "%lld", (long long)v);
+  return rae_ext_rae_str_from_buf((uint8_t*)buffer, len);
 }
 
-const char* rae_ext_rae_str_i64_ptr(const int64_t* v) {
+rae_String rae_ext_rae_str_i64_ptr(const int64_t* v) {
   return rae_ext_rae_str_i64(*v);
 }
 
-const char* rae_ext_rae_str_f64(double v) {
-  char* buffer = malloc(32);
-  if (buffer) {
-    snprintf(buffer, 32, "%g", v);
-  }
-  return buffer;
+rae_String rae_ext_rae_str_f64(double v) {
+  char buffer[32];
+  int len = snprintf(buffer, 32, "%g", v);
+  return rae_ext_rae_str_from_buf((uint8_t*)buffer, len);
 }
 
-const char* rae_ext_rae_str_f64_ptr(const double* v) {
+rae_String rae_ext_rae_str_f64_ptr(const double* v) {
   return rae_ext_rae_str_f64(*v);
 }
 
-const char* rae_ext_rae_str_bool(int8_t v) {
-  return v ? "true" : "false";
+rae_String rae_ext_rae_str_bool(int8_t v) {
+  return rae_ext_rae_str_from_cstr(v ? "true" : "false");
 }
 
-const char* rae_ext_rae_str_bool_ptr(const int8_t* v) {
+rae_String rae_ext_rae_str_bool_ptr(const int8_t* v) {
   return rae_ext_rae_str_bool(*v);
 }
 
-const char* rae_ext_rae_str_char(int64_t v) {
-  char* buffer = malloc(5);
-  if (buffer) {
-    if (v < 0x80) {
-      buffer[0] = (char)v;
-      buffer[1] = '\0';
-    } else if (v < 0x800) {
-      buffer[0] = (char)(0xC0 | (v >> 6));
-      buffer[1] = (char)(0x80 | (v & 0x3F));
-      buffer[2] = '\0';
-    } else if (v < 0x10000) {
-      buffer[0] = (char)(0xE0 | (v >> 12));
-      buffer[1] = (char)(0x80 | ((v >> 6) & 0x3F));
-      buffer[2] = (char)(0x80 | (v & 0x3F));
-      buffer[3] = '\0';
-    } else {
-      buffer[0] = (char)(0xF0 | (v >> 18));
-      buffer[1] = (char)(0x80 | ((v >> 12) & 0x3F));
-      buffer[2] = (char)(0x80 | ((v >> 6) & 0x3F));
-      buffer[3] = (char)(0x80 | (v & 0x3F));
-      buffer[4] = '\0';
-    }
+rae_String rae_ext_rae_str_char(uint32_t v) {
+  uint8_t buffer[5];
+  int len = 0;
+  if (v < 0x80) {
+    buffer[0] = (uint8_t)v;
+    len = 1;
+  } else if (v < 0x800) {
+    buffer[0] = (uint8_t)(0xC0 | (v >> 6));
+    buffer[1] = (uint8_t)(0x80 | (v & 0x3F));
+    len = 2;
+  } else if (v < 0x10000) {
+    buffer[0] = (uint8_t)(0xE0 | (v >> 12));
+    buffer[1] = (uint8_t)(0x80 | ((v >> 6) & 0x3F));
+    buffer[2] = (uint8_t)(0x80 | (v & 0x3F));
+    len = 3;
+  } else {
+    buffer[0] = (uint8_t)(0xF0 | (v >> 18));
+    buffer[1] = (uint8_t)(0x80 | ((v >> 12) & 0x3F));
+    buffer[2] = (uint8_t)(0x80 | ((v >> 6) & 0x3F));
+    buffer[3] = (uint8_t)(0x80 | (v & 0x3F));
+    len = 4;
   }
-  return buffer;
+  buffer[len] = '\0';
+  return rae_ext_rae_str_from_buf(buffer, len);
 }
 
-const char* rae_ext_rae_str_cstr(const char* s) {
-  return s;
+rae_String rae_ext_rae_str_char_ptr(const uint32_t* v) {
+    return rae_ext_rae_str_char(*v);
 }
 
-const char* rae_ext_rae_str_cstr_ptr(const char** s) {
-  return *s;
+rae_String rae_ext_rae_str_string(rae_String s) {
+    return rae_ext_rae_str_from_buf(s.data, s.len);
+}
+
+rae_String rae_ext_rae_str_string_ptr(const rae_String* s) {
+    return rae_ext_rae_str_from_buf(s->data, s->len);
+}
+
+rae_String rae_ext_rae_str_cstr(const char* s) {
+  return rae_ext_rae_str_from_cstr((void*)s);
+}
+
+rae_String rae_ext_rae_str_cstr_ptr(const char** s) {
+  return rae_ext_rae_str_from_cstr((void*)*s);
 }
 
 static uint64_t g_rae_random_state = 0x123456789ABCDEF0ULL;
@@ -639,8 +732,8 @@ double rae_ext_rae_math_round(double x) { return round(x); }
 /* Raylib wrappers for C backend */
 #include <raylib.h>
 
-void rae_ext_initWindow(int64_t width, int64_t height, const char* title) {
-    InitWindow((int)width, (int)height, title);
+void rae_ext_initWindow(int64_t width, int64_t height, rae_String title) {
+    InitWindow((int)width, (int)height, (const char*)title.data);
 }
 
 void rae_ext_setConfigFlags(int64_t flags) {
@@ -707,7 +800,7 @@ void rae_ext_drawCube(Vector3 pos, double width, double height, double length, C
     DrawCube(pos, (float)width, (float)height, (float)length, color);
 }
 
-void rae_ext_drawText(const char* text, double x, double y, double fontSize, Color color) {
-    DrawText(text, (int)x, (int)y, (int)fontSize, color);
+void rae_ext_drawText(rae_String text, double x, double y, double fontSize, Color color) {
+    DrawText((const char*)text.data, (int)x, (int)y, (int)fontSize, color);
 }
 #endif

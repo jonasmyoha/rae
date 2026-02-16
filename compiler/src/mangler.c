@@ -377,6 +377,12 @@ const char* rae_mangle_specialized_function(CompilerContext* ctx, const AstFuncD
     char buf[2048];
     size_t pos = snprintf(buf, sizeof(buf), "rae_%.*s_", (int)func->name.len, func->name.data);
     
+    // Include generic arguments in the name to distinguish specializations
+    for (const AstTypeRef* a = concrete_args; a; a = a->next) {
+        const char* mangled_arg = rae_mangle_type_specialized(ctx, NULL, NULL, a);
+        pos += snprintf(buf + pos, sizeof(buf) - pos, "%s_", mangled_arg);
+    }
+
     for (const AstParam* p = func->params; p; p = p->next) {
         const char* mangled_param = rae_mangle_type_specialized(ctx, func->generic_params, concrete_args, p->type);
         pos += snprintf(buf + pos, sizeof(buf) - pos, "%s_", mangled_param);
