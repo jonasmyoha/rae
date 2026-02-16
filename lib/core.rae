@@ -333,6 +333,10 @@ func createInt64Map(V)(initialCap: Int) ret IntMap(V) {
   ret IntMap(V) { data: rae_ext_rae_buf_alloc(size: initialCap, elemSize: sizeof(IntMapEntry(V))()), length: 0, capacity: initialCap }
 }
 
+func createIntMap(V)(initialCap: Int) ret IntMap(V) {
+  ret createInt64Map(V)(initialCap: initialCap)
+}
+
 func set(V)(this: mod IntMap(V), k: Int, value: V) {
   if this.capacity is 0 {
     this.capacity = 8
