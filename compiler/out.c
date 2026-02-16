@@ -14,10 +14,7 @@ RAE_UNUSED void rae_ext_rae_buf_copy(void* src, int64_t src_off, void* dst, int6
 // Forward declarations for specialized generics
 typedef struct rae_List_rae_String rae_List_rae_String;
 typedef struct rae_List_int64_t rae_List_int64_t;
-typedef struct rae_StringMap_int64_t rae_StringMap_int64_t;
-typedef struct rae_StringMapEntry_int64_t rae_StringMapEntry_int64_t;
-typedef struct rae_IntMap_rae_String rae_IntMap_rae_String;
-typedef struct rae_IntMapEntry_rae_String rae_IntMapEntry_rae_String;
+typedef struct rae_List_rae_String rae_List_rae_String;
 typedef struct rae_StringMapEntry_RaeAny rae_StringMapEntry_RaeAny;
 typedef struct rae_IntMapEntry_RaeAny rae_IntMapEntry_RaeAny;
 typedef struct rae_MapEntry_RaeAny rae_MapEntry_RaeAny;
@@ -36,34 +33,6 @@ struct rae_List_int64_t {
   int64_t capacity;
 };
 
-typedef struct rae_StringMap_int64_t rae_StringMap_int64_t;
-struct rae_StringMap_int64_t {
-  rae_StringMapEntry_int64_t* data;
-  int64_t length;
-  int64_t capacity;
-};
-
-typedef struct rae_StringMapEntry_int64_t rae_StringMapEntry_int64_t;
-struct rae_StringMapEntry_int64_t {
-  rae_String k;
-  int64_t value;
-  rae_Bool occupied;
-};
-
-typedef struct rae_IntMap_rae_String rae_IntMap_rae_String;
-struct rae_IntMap_rae_String {
-  rae_IntMapEntry_rae_String* data;
-  int64_t length;
-  int64_t capacity;
-};
-
-typedef struct rae_IntMapEntry_rae_String rae_IntMapEntry_rae_String;
-struct rae_IntMapEntry_rae_String {
-  int64_t k;
-  rae_String value;
-  rae_Bool occupied;
-};
-
 RAE_UNUSED static const char* rae_toJson_rae_List_rae_String_(rae_List_rae_String* this);
 RAE_UNUSED static rae_List_rae_String rae_fromJson_rae_List_rae_String_(const char* json);
 RAE_UNUSED static void rae_log_rae_List_rae_String_(rae_List_rae_String val);
@@ -74,26 +43,6 @@ RAE_UNUSED static rae_List_int64_t rae_fromJson_rae_List_int64_t_(const char* js
 RAE_UNUSED static void rae_log_rae_List_int64_t_(rae_List_int64_t val);
 RAE_UNUSED static void rae_log_stream_rae_List_int64_t_(rae_List_int64_t val);
 RAE_UNUSED static const char* rae_str_rae_List_int64_t_(rae_List_int64_t val);
-RAE_UNUSED static const char* rae_toJson_rae_StringMap_int64_t_(rae_StringMap_int64_t* this);
-RAE_UNUSED static rae_StringMap_int64_t rae_fromJson_rae_StringMap_int64_t_(const char* json);
-RAE_UNUSED static void rae_log_rae_StringMap_int64_t_(rae_StringMap_int64_t val);
-RAE_UNUSED static void rae_log_stream_rae_StringMap_int64_t_(rae_StringMap_int64_t val);
-RAE_UNUSED static const char* rae_str_rae_StringMap_int64_t_(rae_StringMap_int64_t val);
-RAE_UNUSED static const char* rae_toJson_rae_StringMapEntry_int64_t_(rae_StringMapEntry_int64_t* this);
-RAE_UNUSED static rae_StringMapEntry_int64_t rae_fromJson_rae_StringMapEntry_int64_t_(const char* json);
-RAE_UNUSED static void rae_log_rae_StringMapEntry_int64_t_(rae_StringMapEntry_int64_t val);
-RAE_UNUSED static void rae_log_stream_rae_StringMapEntry_int64_t_(rae_StringMapEntry_int64_t val);
-RAE_UNUSED static const char* rae_str_rae_StringMapEntry_int64_t_(rae_StringMapEntry_int64_t val);
-RAE_UNUSED static const char* rae_toJson_rae_IntMap_rae_String_(rae_IntMap_rae_String* this);
-RAE_UNUSED static rae_IntMap_rae_String rae_fromJson_rae_IntMap_rae_String_(const char* json);
-RAE_UNUSED static void rae_log_rae_IntMap_rae_String_(rae_IntMap_rae_String val);
-RAE_UNUSED static void rae_log_stream_rae_IntMap_rae_String_(rae_IntMap_rae_String val);
-RAE_UNUSED static const char* rae_str_rae_IntMap_rae_String_(rae_IntMap_rae_String val);
-RAE_UNUSED static const char* rae_toJson_rae_IntMapEntry_rae_String_(rae_IntMapEntry_rae_String* this);
-RAE_UNUSED static rae_IntMapEntry_rae_String rae_fromJson_rae_IntMapEntry_rae_String_(const char* json);
-RAE_UNUSED static void rae_log_rae_IntMapEntry_rae_String_(rae_IntMapEntry_rae_String val);
-RAE_UNUSED static void rae_log_stream_rae_IntMapEntry_rae_String_(rae_IntMapEntry_rae_String val);
-RAE_UNUSED static const char* rae_str_rae_IntMapEntry_rae_String_(rae_IntMapEntry_rae_String val);
 
 RAE_UNUSED static const char* rae_toJson_rae_List_rae_String_(rae_List_rae_String* this) { (void)this; return "{}"; }
 RAE_UNUSED static rae_List_rae_String rae_fromJson_rae_List_rae_String_(const char* json) { (void)json; rae_List_rae_String res = {0}; return res; }
@@ -129,30 +78,6 @@ RAE_UNUSED static void rae_log_stream_rae_List_int64_t_(rae_List_int64_t val) {
 }
 RAE_UNUSED static const char* rae_str_rae_List_int64_t_(rae_List_int64_t val) { (void)val; return "List(...)"; }
 
-RAE_UNUSED static const char* rae_toJson_rae_StringMap_int64_t_(rae_StringMap_int64_t* this) { (void)this; return "{}"; }
-RAE_UNUSED static rae_StringMap_int64_t rae_fromJson_rae_StringMap_int64_t_(const char* json) { (void)json; rae_StringMap_int64_t res = {0}; return res; }
-RAE_UNUSED static void rae_log_rae_StringMap_int64_t_(rae_StringMap_int64_t val) { rae_log_stream_rae_StringMap_int64_t_(val); printf("\n"); }
-RAE_UNUSED static void rae_log_stream_rae_StringMap_int64_t_(rae_StringMap_int64_t val) { (void)val; printf("StringMap(...)"); }
-RAE_UNUSED static const char* rae_str_rae_StringMap_int64_t_(rae_StringMap_int64_t val) { (void)val; return "StringMap(...)"; }
-
-RAE_UNUSED static const char* rae_toJson_rae_StringMapEntry_int64_t_(rae_StringMapEntry_int64_t* this) { (void)this; return "{}"; }
-RAE_UNUSED static rae_StringMapEntry_int64_t rae_fromJson_rae_StringMapEntry_int64_t_(const char* json) { (void)json; rae_StringMapEntry_int64_t res = {0}; return res; }
-RAE_UNUSED static void rae_log_rae_StringMapEntry_int64_t_(rae_StringMapEntry_int64_t val) { rae_log_stream_rae_StringMapEntry_int64_t_(val); printf("\n"); }
-RAE_UNUSED static void rae_log_stream_rae_StringMapEntry_int64_t_(rae_StringMapEntry_int64_t val) { (void)val; printf("StringMapEntry(...)"); }
-RAE_UNUSED static const char* rae_str_rae_StringMapEntry_int64_t_(rae_StringMapEntry_int64_t val) { (void)val; return "StringMapEntry(...)"; }
-
-RAE_UNUSED static const char* rae_toJson_rae_IntMap_rae_String_(rae_IntMap_rae_String* this) { (void)this; return "{}"; }
-RAE_UNUSED static rae_IntMap_rae_String rae_fromJson_rae_IntMap_rae_String_(const char* json) { (void)json; rae_IntMap_rae_String res = {0}; return res; }
-RAE_UNUSED static void rae_log_rae_IntMap_rae_String_(rae_IntMap_rae_String val) { rae_log_stream_rae_IntMap_rae_String_(val); printf("\n"); }
-RAE_UNUSED static void rae_log_stream_rae_IntMap_rae_String_(rae_IntMap_rae_String val) { (void)val; printf("IntMap(...)"); }
-RAE_UNUSED static const char* rae_str_rae_IntMap_rae_String_(rae_IntMap_rae_String val) { (void)val; return "IntMap(...)"; }
-
-RAE_UNUSED static const char* rae_toJson_rae_IntMapEntry_rae_String_(rae_IntMapEntry_rae_String* this) { (void)this; return "{}"; }
-RAE_UNUSED static rae_IntMapEntry_rae_String rae_fromJson_rae_IntMapEntry_rae_String_(const char* json) { (void)json; rae_IntMapEntry_rae_String res = {0}; return res; }
-RAE_UNUSED static void rae_log_rae_IntMapEntry_rae_String_(rae_IntMapEntry_rae_String val) { rae_log_stream_rae_IntMapEntry_rae_String_(val); printf("\n"); }
-RAE_UNUSED static void rae_log_stream_rae_IntMapEntry_rae_String_(rae_IntMapEntry_rae_String val) { (void)val; printf("IntMapEntry(...)"); }
-RAE_UNUSED static const char* rae_str_rae_IntMapEntry_rae_String_(rae_IntMapEntry_rae_String val) { (void)val; return "IntMapEntry(...)"; }
-
 RAE_UNUSED  int64_t rae_ext_nextTick(void);
 RAE_UNUSED  int64_t rae_ext_nowMs(void);
 RAE_UNUSED  int64_t rae_ext_nowNs(void);
@@ -172,21 +97,45 @@ RAE_UNUSED  rae_String rae_ext_rae_io_read_line(void);
 RAE_UNUSED  uint32_t rae_ext_rae_io_read_char(void);
 RAE_UNUSED static rae_String rae_readLine_(void);
 RAE_UNUSED static uint32_t rae_readChar_(void);
+RAE_UNUSED  int64_t rae_ext_rae_str_len(rae_String s);
+RAE_UNUSED  int64_t rae_ext_rae_str_compare(rae_String a, rae_String b);
+RAE_UNUSED  rae_String rae_ext_rae_str_concat(rae_String a, rae_String b);
+RAE_UNUSED  rae_String rae_ext_rae_str_sub(rae_String s, int64_t start, int64_t len);
+RAE_UNUSED  rae_Bool rae_ext_rae_str_contains(rae_String s, rae_String sub);
+RAE_UNUSED  rae_Bool rae_ext_rae_str_starts_with(rae_String s, rae_String prefix);
+RAE_UNUSED  rae_Bool rae_ext_rae_str_ends_with(rae_String s, rae_String suffix);
+RAE_UNUSED  int64_t rae_ext_rae_str_index_of(rae_String s, rae_String sub);
+RAE_UNUSED  rae_String rae_ext_rae_str_trim(rae_String s);
+RAE_UNUSED  double rae_ext_rae_str_to_f64(rae_String s);
+RAE_UNUSED  int64_t rae_ext_rae_str_to_i64(rae_String s);
+RAE_UNUSED  rae_String rae_ext_rae_str_from_cstr(void* s);
+RAE_UNUSED  void* rae_ext_rae_str_to_cstr(rae_String s);
+RAE_UNUSED static rae_String rae_fromCStr_void_p_(void* s);
+RAE_UNUSED static void* rae_toCStr_rae_String_(rae_String this);
+RAE_UNUSED  uint32_t rae_ext_rae_str_at(rae_String s, int64_t index);
+RAE_UNUSED static uint32_t rae_at_rae_String_int64_t_(rae_String this, int64_t index);
+RAE_UNUSED static int64_t rae_length_rae_String_(rae_String this);
+RAE_UNUSED static int64_t rae_compare_rae_String_rae_String_(rae_String this, rae_String other);
+RAE_UNUSED static rae_Bool rae_equals_rae_String_rae_String_(rae_String this, rae_String other);
+RAE_UNUSED static int64_t rae_hash_rae_String_(rae_String this);
+RAE_UNUSED static rae_String rae_concat_rae_String_rae_String_(rae_String this, rae_String other);
+RAE_UNUSED static rae_String rae_sub_rae_String_int64_t_int64_t_(rae_String this, int64_t start, int64_t len);
+RAE_UNUSED static rae_Bool rae_contains_rae_String_rae_String_(rae_String this, rae_String sub);
+RAE_UNUSED static rae_Bool rae_startsWith_rae_String_rae_String_(rae_String this, rae_String prefix);
+RAE_UNUSED static rae_Bool rae_endsWith_rae_String_rae_String_(rae_String this, rae_String suffix);
+RAE_UNUSED static int64_t rae_indexOf_rae_String_rae_String_(rae_String this, rae_String sub);
+RAE_UNUSED static rae_String rae_trim_rae_String_(rae_String this);
+RAE_UNUSED static rae_List_rae_String rae_split_rae_String_rae_String_(rae_String this, rae_String sep);
+RAE_UNUSED static rae_String rae_replace_rae_String_rae_String_rae_String_(rae_String this, rae_String old, rae_String new);
+RAE_UNUSED static rae_String rae_join_rae_List_rae_String_rae_String_(rae_List_rae_String* this, rae_String sep);
+RAE_UNUSED static double rae_toFloat_rae_String_(rae_String this);
+RAE_UNUSED static int64_t rae_toInt_rae_String_(rae_String this);
 int main(void);
-RAE_UNUSED static rae_StringMap_int64_t rae_createStringMap_int64_t_int64_t_(int64_t initialCap);
-RAE_UNUSED static void rae_set_int64_t_rae_StringMap_int64_t_rae_String_int64_t_(rae_StringMap_int64_t* this, rae_String k, int64_t value);
-RAE_UNUSED static RaeAny rae_get_int64_t_rae_StringMap_int64_t_rae_String_(rae_StringMap_int64_t* this, rae_String k);
-RAE_UNUSED static rae_Bool rae_has_int64_t_rae_StringMap_int64_t_rae_String_(rae_StringMap_int64_t* this, rae_String k);
-RAE_UNUSED static rae_IntMap_rae_String rae_createIntMap_rae_String_int64_t_(int64_t initialCap);
-RAE_UNUSED static void rae_set_rae_String_rae_IntMap_rae_String_int64_t_rae_String_(rae_IntMap_rae_String* this, int64_t k, rae_String value);
-RAE_UNUSED static RaeAny rae_get_rae_String_rae_IntMap_rae_String_int64_t_(rae_IntMap_rae_String* this, int64_t k);
-RAE_UNUSED static int64_t rae_sizeof_int64_t_(void);
-RAE_UNUSED static void rae_growStringMap_int64_t_rae_StringMap_int64_t_(rae_StringMap_int64_t* this);
-RAE_UNUSED static rae_IntMap_rae_String rae_createInt64Map_rae_String_int64_t_(int64_t initialCap);
+RAE_UNUSED static rae_List_rae_String rae_createList_rae_String_int64_t_(int64_t initialCap);
+RAE_UNUSED static void rae_add_rae_String_rae_List_rae_String_rae_String_(rae_List_rae_String* this, rae_String value);
+RAE_UNUSED static rae_String rae_get_rae_String_rae_List_rae_String_int64_t_(rae_List_rae_String* this, int64_t index);
 RAE_UNUSED static int64_t rae_sizeof_rae_String_(void);
-RAE_UNUSED static void rae_growInt64Map_rae_String_rae_IntMap_rae_String_(rae_IntMap_rae_String* this);
-RAE_UNUSED static void rae_set_int64_t_rae_List_int64_t_int64_t_int64_t_(rae_List_int64_t* this, int64_t index, int64_t value);
-RAE_UNUSED static void rae_set_rae_String_rae_List_rae_String_int64_t_rae_String_(rae_List_rae_String* this, int64_t index, rae_String value);
+RAE_UNUSED static void rae_grow_rae_String_rae_List_rae_String_(rae_List_rae_String* this);
 
 RAE_UNUSED static double rae_toFloat_int64_t_(int64_t this) {
   {
@@ -212,321 +161,225 @@ RAE_UNUSED static uint32_t rae_readChar_(void) {
   }
 }
 
+RAE_UNUSED static rae_String rae_fromCStr_void_p_(void* s) {
+  {
+  return rae_ext_rae_str_from_cstr((*s));
+  }
+}
+
+RAE_UNUSED static void* rae_toCStr_rae_String_(rae_String this) {
+  {
+  return rae_ext_rae_str_to_cstr(this);
+  }
+}
+
+RAE_UNUSED static uint32_t rae_at_rae_String_int64_t_(rae_String this, int64_t index) {
+  {
+  return rae_ext_rae_str_at(this, index);
+  }
+}
+
+RAE_UNUSED static int64_t rae_length_rae_String_(rae_String this) {
+  {
+  return rae_ext_rae_str_len(this);
+  }
+}
+
+RAE_UNUSED static int64_t rae_compare_rae_String_rae_String_(rae_String this, rae_String other) {
+  {
+  return rae_ext_rae_str_compare(this, other);
+  }
+}
+
+RAE_UNUSED static rae_Bool rae_equals_rae_String_rae_String_(rae_String this, rae_String other) {
+  {
+  return rae_ext_rae_str_eq(this, other);
+  }
+}
+
+RAE_UNUSED static int64_t rae_hash_rae_String_(rae_String this) {
+  {
+  return rae_ext_rae_str_hash(this);
+  }
+}
+
+RAE_UNUSED static rae_String rae_concat_rae_String_rae_String_(rae_String this, rae_String other) {
+  {
+  return rae_ext_rae_str_concat(this, other);
+  }
+}
+
+RAE_UNUSED static rae_String rae_sub_rae_String_int64_t_int64_t_(rae_String this, int64_t start, int64_t len) {
+  {
+  return rae_ext_rae_str_sub(this, start, len);
+  }
+}
+
+RAE_UNUSED static rae_Bool rae_contains_rae_String_rae_String_(rae_String this, rae_String sub) {
+  {
+  return rae_ext_rae_str_contains(this, sub);
+  }
+}
+
+RAE_UNUSED static rae_Bool rae_startsWith_rae_String_rae_String_(rae_String this, rae_String prefix) {
+  {
+  return rae_ext_rae_str_starts_with(this, prefix);
+  }
+}
+
+RAE_UNUSED static rae_Bool rae_endsWith_rae_String_rae_String_(rae_String this, rae_String suffix) {
+  {
+  return rae_ext_rae_str_ends_with(this, suffix);
+  }
+}
+
+RAE_UNUSED static int64_t rae_indexOf_rae_String_rae_String_(rae_String this, rae_String sub) {
+  {
+  return rae_ext_rae_str_index_of(this, sub);
+  }
+}
+
+RAE_UNUSED static rae_String rae_trim_rae_String_(rae_String this) {
+  {
+  return rae_ext_rae_str_trim(this);
+  }
+}
+
+RAE_UNUSED static rae_List_rae_String rae_split_rae_String_rae_String_(rae_String this, rae_String sep) {
+  {
+  rae_List_rae_String result = rae_createList_rae_String_int64_t_(((int64_t)4LL));
+  if ((bool)(rae_length_rae_String_(sep) == ((int64_t)0LL))) {
+  {
+  rae_add_rae_String_rae_List_rae_String_rae_String_(&(result), this);
+  return result;
+  }
+  }
+  rae_String remaining = this;
+  {
+  while ((bool)true) {
+  {
+  int64_t idx = rae_indexOf_rae_String_rae_String_(remaining, sep);
+  if ((bool)(idx == -(((int64_t)1LL)))) {
+  {
+  rae_add_rae_String_rae_List_rae_String_rae_String_(&(result), remaining);
+  return result;
+  }
+  }
+  rae_String part = rae_sub_rae_String_int64_t_int64_t_(remaining, ((int64_t)0LL), idx);
+  rae_add_rae_String_rae_List_rae_String_rae_String_(&(result), part);
+  remaining = rae_sub_rae_String_int64_t_int64_t_(remaining, idx + rae_length_rae_String_(sep), rae_length_rae_String_(remaining) - idx - rae_length_rae_String_(sep));
+  }
+  }
+  }
+  return result;
+  }
+}
+
+RAE_UNUSED static rae_String rae_replace_rae_String_rae_String_rae_String_(rae_String this, rae_String old, rae_String new) {
+  {
+  if ((bool)(rae_length_rae_String_(old) == ((int64_t)0LL))) {
+  {
+  return this;
+  }
+  }
+  rae_List_rae_String parts = rae_split_rae_String_rae_String_(this, old);
+  return rae_join_rae_List_rae_String_rae_String_(&(parts), new);
+  }
+}
+
+RAE_UNUSED static rae_String rae_join_rae_List_rae_String_rae_String_(rae_List_rae_String* this, rae_String sep) {
+  {
+  if ((bool)(this->length == ((int64_t)0LL))) {
+  {
+  return (rae_String){(uint8_t*)"", 0};
+  }
+  }
+  rae_String result = rae_get_rae_String_rae_List_rae_String_int64_t_(this, ((int64_t)0LL));
+  int64_t i = ((int64_t)1LL);
+  {
+  while ((bool)(i < this->length)) {
+  {
+  result = rae_concat_rae_String_rae_String_(rae_concat_rae_String_rae_String_(result, sep), rae_get_rae_String_rae_List_rae_String_int64_t_(this, i));
+  i = i + ((int64_t)1LL);
+  }
+  }
+  }
+  return result;
+  }
+}
+
+RAE_UNUSED static double rae_toFloat_rae_String_(rae_String this) {
+  {
+  return rae_ext_rae_str_to_f64(this);
+  }
+}
+
+RAE_UNUSED static int64_t rae_toInt_rae_String_(rae_String this) {
+  {
+  return rae_ext_rae_str_to_i64(this);
+  }
+}
+
 int main(void) {
   {
-  rae_ext_rae_log_any(rae_any(((rae_String){(uint8_t*)"StringMap test", 14})));
-  rae_StringMap_int64_t m = rae_createStringMap_int64_t_(((int64_t)4LL));
-  rae_set_int64_t_rae_StringMap_int64_t_rae_String_int64_t_(&(m), (rae_String){(uint8_t*)"apple", 5}, ((int64_t)10LL));
-  rae_set_int64_t_rae_StringMap_int64_t_rae_String_int64_t_(&(m), (rae_String){(uint8_t*)"banana", 6}, ((int64_t)20LL));
-  rae_set_int64_t_rae_StringMap_int64_t_rae_String_int64_t_(&(m), (rae_String){(uint8_t*)"cherry", 6}, ((int64_t)30LL));
-  rae_String k1 = (rae_String){(uint8_t*)"apple", 5};
-  rae_String k2 = (rae_String){(uint8_t*)"banana", 6};
-  rae_String k3 = (rae_String){(uint8_t*)"cherry", 6};
-  rae_String k4 = (rae_String){(uint8_t*)"durian", 6};
-  rae_ext_rae_log_stream_any(rae_any(((rae_String){(uint8_t*)"apple: ", 7}))), rae_ext_rae_log_stream_any(rae_get_int64_t_rae_StringMap_int64_t_rae_String_(&(m), k1)), rae_ext_rae_log_stream_any(rae_any(((rae_String){(uint8_t*)"", 0}))), rae_ext_rae_log_cstr("");
-  rae_ext_rae_log_stream_any(rae_any(((rae_String){(uint8_t*)"banana: ", 8}))), rae_ext_rae_log_stream_any(rae_get_int64_t_rae_StringMap_int64_t_rae_String_(&(m), k2)), rae_ext_rae_log_stream_any(rae_any(((rae_String){(uint8_t*)"", 0}))), rae_ext_rae_log_cstr("");
-  rae_ext_rae_log_stream_any(rae_any(((rae_String){(uint8_t*)"cherry: ", 8}))), rae_ext_rae_log_stream_any(rae_get_int64_t_rae_StringMap_int64_t_rae_String_(&(m), k3)), rae_ext_rae_log_stream_any(rae_any(((rae_String){(uint8_t*)"", 0}))), rae_ext_rae_log_cstr("");
-  rae_ext_rae_log_stream_any(rae_any(((rae_String){(uint8_t*)"missing: ", 9}))), rae_ext_rae_log_stream_any(rae_get_int64_t_rae_StringMap_int64_t_rae_String_(&(m), k4)), rae_ext_rae_log_stream_any(rae_any(((rae_String){(uint8_t*)"", 0}))), rae_ext_rae_log_cstr("");
-  rae_ext_rae_log_stream_any(rae_any(((rae_String){(uint8_t*)"has banana: ", 12}))), rae_ext_rae_log_stream_any(rae_any((rae_has_int64_t_rae_StringMap_int64_t_rae_String_(&(m), k2)))), rae_ext_rae_log_stream_any(rae_any(((rae_String){(uint8_t*)"", 0}))), rae_ext_rae_log_cstr("");
-  rae_ext_rae_log_stream_any(rae_any(((rae_String){(uint8_t*)"has durian: ", 12}))), rae_ext_rae_log_stream_any(rae_any((rae_has_int64_t_rae_StringMap_int64_t_rae_String_(&(m), k4)))), rae_ext_rae_log_stream_any(rae_any(((rae_String){(uint8_t*)"", 0}))), rae_ext_rae_log_cstr("");
-  rae_ext_rae_log_stream_any(rae_any(((rae_String){(uint8_t*)"length: ", 8}))), rae_ext_rae_log_stream_any(rae_any((m.length))), rae_ext_rae_log_stream_any(rae_any(((rae_String){(uint8_t*)"", 0}))), rae_ext_rae_log_cstr("");
-  rae_ext_rae_log_any(rae_any(((rae_String){(uint8_t*)"IntMap test", 11})));
-  rae_IntMap_rae_String m2 = rae_createIntMap_int64_t_(((int64_t)4LL));
-  rae_set_rae_String_rae_IntMap_rae_String_int64_t_rae_String_(&(m2), ((int64_t)1LL), (rae_String){(uint8_t*)"one", 3});
-  rae_set_rae_String_rae_IntMap_rae_String_int64_t_rae_String_(&(m2), ((int64_t)2LL), (rae_String){(uint8_t*)"two", 3});
-  rae_set_rae_String_rae_IntMap_rae_String_int64_t_rae_String_(&(m2), ((int64_t)10LL), (rae_String){(uint8_t*)"ten", 3});
-  rae_ext_rae_log_stream_any(rae_any(((rae_String){(uint8_t*)"1: ", 3}))), rae_ext_rae_log_stream_any(rae_get_rae_String_rae_IntMap_rae_String_int64_t_(&(m2), ((int64_t)1LL))), rae_ext_rae_log_stream_any(rae_any(((rae_String){(uint8_t*)"", 0}))), rae_ext_rae_log_cstr("");
-  rae_ext_rae_log_stream_any(rae_any(((rae_String){(uint8_t*)"2: ", 3}))), rae_ext_rae_log_stream_any(rae_get_rae_String_rae_IntMap_rae_String_int64_t_(&(m2), ((int64_t)2LL))), rae_ext_rae_log_stream_any(rae_any(((rae_String){(uint8_t*)"", 0}))), rae_ext_rae_log_cstr("");
-  rae_ext_rae_log_stream_any(rae_any(((rae_String){(uint8_t*)"10: ", 4}))), rae_ext_rae_log_stream_any(rae_get_rae_String_rae_IntMap_rae_String_int64_t_(&(m2), ((int64_t)10LL))), rae_ext_rae_log_stream_any(rae_any(((rae_String){(uint8_t*)"", 0}))), rae_ext_rae_log_cstr("");
-  rae_ext_rae_log_stream_any(rae_any(((rae_String){(uint8_t*)"length: ", 8}))), rae_ext_rae_log_stream_any(rae_any((m2.length))), rae_ext_rae_log_stream_any(rae_any(((rae_String){(uint8_t*)"", 0}))), rae_ext_rae_log_cstr("");
+  rae_String s = (rae_String){(uint8_t*)"Hello \xf0\x9f\x92\x9c", 10};
+  rae_ext_rae_log_any(rae_any((rae_length_rae_String_(s))));
+  rae_ext_rae_log_any(rae_any((rae_at_rae_String_int64_t_(s, ((int64_t)0LL)))));
+  rae_ext_rae_log_any(rae_any((rae_at_rae_String_int64_t_(s, ((int64_t)6LL)))));
+  uint32_t c = rae_at_rae_String_int64_t_(s, ((int64_t)6LL));
+  rae_ext_rae_log_any(rae_any((c)));
+  rae_String s2 = rae_fromCStr_void_p_(rae_toCStr_rae_String_(s));
+  rae_ext_rae_log_any(rae_any((s2)));
+  rae_ext_rae_log_any(rae_any((rae_equals_rae_String_rae_String_(s, s2))));
+  rae_List_rae_String l = rae_createList_rae_String_int64_t_(((int64_t)1LL));
+  rae_add_rae_String_rae_List_rae_String_rae_String_(&(l), (rae_String){(uint8_t*)"test", 4});
+  rae_ext_rae_log_any(rae_any((l.length)));
   }
   return 0;
 }
 
-RAE_UNUSED static rae_StringMap_int64_t rae_createStringMap_int64_t_int64_t_(int64_t initialCap) {
+RAE_UNUSED static rae_List_rae_String rae_createList_rae_String_int64_t_(int64_t initialCap) {
   {
-  return (rae_StringMap_int64_t){ .data = (void*)rae_ext_rae_buf_alloc(initialCap, sizeof(int64_t)), .length = ((int64_t)0LL), .capacity = initialCap };
+  return (rae_List_rae_String){ .data = (void*)rae_ext_rae_buf_alloc(initialCap, sizeof(rae_String)), .length = ((int64_t)0LL), .capacity = initialCap };
   }
 }
 
-RAE_UNUSED static void rae_set_int64_t_rae_StringMap_int64_t_rae_String_int64_t_(rae_StringMap_int64_t* this, rae_String k, int64_t value) {
+RAE_UNUSED static void rae_add_rae_String_rae_List_rae_String_rae_String_(rae_List_rae_String* this, rae_String value) {
   {
-  if ((bool)(this->capacity == ((int64_t)0LL))) {
+  if ((bool)(this->length == this->capacity)) {
   {
-  this->capacity = ((int64_t)8LL);
-  this->data = (void*)rae_ext_rae_buf_alloc(this->capacity, sizeof(int64_t));
+  rae_grow_rae_String_rae_List_rae_String_(this);
   }
   }
-  if ((bool)(this->length * ((int64_t)2LL) > this->capacity)) {
-  {
-  rae_growStringMap_int64_t_rae_StringMap_int64_t_(this);
-  }
-  }
-  int64_t h = rae_ext_rae_str_hash(k);
-  int64_t idx = h % this->capacity;
-  if ((bool)(idx < ((int64_t)0LL))) {
-  {
-  idx = -(idx);
-  }
-  }
-  {
-  while ((bool)true) {
-  {
-  rae_StringMapEntry_int64_t entry = this->data[idx];
-  if (((bool)!(entry.occupied))) {
-  {
-  this->data[idx] = (rae_StringMapEntry_int64_t){ .k = k, .value = value, .occupied = (bool)true };
+  this->data[this->length] = value;
   this->length = this->length + ((int64_t)1LL);
-  return;
-  }
-  }
-  if (rae_ext_rae_str_eq(entry.k, k)) {
-  {
-  entry.value = value;
-  this->data[idx] = entry;
-  return;
-  }
-  }
-  idx = (idx + ((int64_t)1LL)) % this->capacity;
-  }
-  }
-  }
   }
 }
 
-RAE_UNUSED static RaeAny rae_get_int64_t_rae_StringMap_int64_t_rae_String_(rae_StringMap_int64_t* this, rae_String k) {
-  {
-  if ((bool)(this->capacity == ((int64_t)0LL))) {
-  {
-  return rae_any(rae_any_none());
-  }
-  }
-  int64_t h = rae_ext_rae_str_hash(k);
-  int64_t idx = h % this->capacity;
-  if ((bool)(idx < ((int64_t)0LL))) {
-  {
-  idx = -(idx);
-  }
-  }
-  int64_t startIdx = idx;
-  {
-  while ((bool)true) {
-  {
-  rae_StringMapEntry_int64_t entry = this->data[idx];
-  if (((bool)!(entry.occupied))) {
-  {
-  return rae_any(rae_any_none());
-  }
-  }
-  if (rae_ext_rae_str_eq(entry.k, k)) {
-  {
-  return rae_any(entry.value);
-  }
-  }
-  idx = (idx + ((int64_t)1LL)) % this->capacity;
-  if ((bool)(idx == startIdx)) {
-  {
-  return rae_any(rae_any_none());
-  }
-  }
-  }
-  }
-  }
-  }
-}
-
-RAE_UNUSED static rae_Bool rae_has_int64_t_rae_StringMap_int64_t_rae_String_(rae_StringMap_int64_t* this, rae_String k) {
-  {
-  RaeAny __m0 = rae_get_int64_t_rae_StringMap_int64_t_rae_String_(this, k);
-  if (rae_any_eq(__m0, rae_any_none())) {
-  {
-  return (bool)false;
-  }
-  } else {
-  {
-  return (bool)true;
-  }
-  }
-  }
-}
-
-RAE_UNUSED static rae_IntMap_rae_String rae_createIntMap_rae_String_int64_t_(int64_t initialCap) {
-  {
-  return rae_createInt64Map_rae_String_int64_t_(initialCap);
-  }
-}
-
-RAE_UNUSED static void rae_set_rae_String_rae_IntMap_rae_String_int64_t_rae_String_(rae_IntMap_rae_String* this, int64_t k, rae_String value) {
-  {
-  if ((bool)(this->capacity == ((int64_t)0LL))) {
-  {
-  this->capacity = ((int64_t)8LL);
-  this->data = (void*)rae_ext_rae_buf_alloc(this->capacity, sizeof(int64_t));
-  }
-  }
-  if ((bool)(this->length * ((int64_t)2LL) > this->capacity)) {
-  {
-  rae_growInt64Map_rae_String_rae_IntMap_rae_String_(this);
-  }
-  }
-  int64_t h = k;
-  int64_t idx = h % this->capacity;
-  if ((bool)(idx < ((int64_t)0LL))) {
-  {
-  idx = -(idx);
-  }
-  }
-  {
-  while ((bool)true) {
-  {
-  rae_IntMapEntry_rae_String entry = this->data[idx];
-  if (((bool)!(entry.occupied))) {
-  {
-  this->data[idx] = (rae_IntMapEntry_rae_String){ .k = k, .value = value, .occupied = (bool)true };
-  this->length = this->length + ((int64_t)1LL);
-  return;
-  }
-  }
-  if ((bool)(entry.k == k)) {
-  {
-  entry.value = value;
-  this->data[idx] = entry;
-  return;
-  }
-  }
-  idx = (idx + ((int64_t)1LL)) % this->capacity;
-  }
-  }
-  }
-  }
-}
-
-RAE_UNUSED static RaeAny rae_get_rae_String_rae_IntMap_rae_String_int64_t_(rae_IntMap_rae_String* this, int64_t k) {
-  {
-  if ((bool)(this->capacity == ((int64_t)0LL))) {
-  {
-  return rae_any((rae_String){0});
-  }
-  }
-  int64_t h = k;
-  int64_t idx = h % this->capacity;
-  if ((bool)(idx < ((int64_t)0LL))) {
-  {
-  idx = -(idx);
-  }
-  }
-  int64_t startIdx = idx;
-  {
-  while ((bool)true) {
-  {
-  rae_IntMapEntry_rae_String entry = this->data[idx];
-  if (((bool)!(entry.occupied))) {
-  {
-  return rae_any((rae_String){0});
-  }
-  }
-  if ((bool)(entry.k == k)) {
-  {
-  return rae_any(entry.value);
-  }
-  }
-  idx = (idx + ((int64_t)1LL)) % this->capacity;
-  if ((bool)(idx == startIdx)) {
-  {
-  return rae_any((rae_String){0});
-  }
-  }
-  }
-  }
-  }
-  }
-}
-
-RAE_UNUSED static void rae_growStringMap_int64_t_rae_StringMap_int64_t_(rae_StringMap_int64_t* this) {
-  {
-  int64_t oldCap = this->capacity;
-  rae_StringMapEntry_int64_t* oldData = this->data;
-  this->capacity = oldCap * ((int64_t)2LL);
-  if ((bool)(this->capacity == ((int64_t)0LL))) {
-  {
-  this->capacity = ((int64_t)8LL);
-  }
-  }
-  this->data = (void*)rae_ext_rae_buf_alloc(this->capacity, sizeof(int64_t));
-  this->length = ((int64_t)0LL);
-  int64_t i = ((int64_t)0LL);
-  {
-  while ((bool)(i < oldCap)) {
-  {
-  rae_StringMapEntry_int64_t entry = oldData[i];
-  if (entry.occupied) {
-  {
-  rae_set_int64_t_rae_StringMap_int64_t_rae_String_int64_t_(this, entry.k, entry.value);
-  }
-  }
-  i = i + ((int64_t)1LL);
-  }
-  }
-  }
-  rae_ext_rae_buf_free((void*)(oldData));
-  }
-}
-
-RAE_UNUSED static rae_IntMap_rae_String rae_createInt64Map_rae_String_int64_t_(int64_t initialCap) {
-  {
-  return (rae_IntMap_rae_String){ .data = (void*)rae_ext_rae_buf_alloc(initialCap, sizeof(int64_t)), .length = ((int64_t)0LL), .capacity = initialCap };
-  }
-}
-
-RAE_UNUSED static void rae_growInt64Map_rae_String_rae_IntMap_rae_String_(rae_IntMap_rae_String* this) {
-  {
-  int64_t oldCap = this->capacity;
-  rae_IntMapEntry_rae_String* oldData = this->data;
-  this->capacity = oldCap * ((int64_t)2LL);
-  if ((bool)(this->capacity == ((int64_t)0LL))) {
-  {
-  this->capacity = ((int64_t)8LL);
-  }
-  }
-  this->data = (void*)rae_ext_rae_buf_alloc(this->capacity, sizeof(int64_t));
-  this->length = ((int64_t)0LL);
-  int64_t i = ((int64_t)0LL);
-  {
-  while ((bool)(i < oldCap)) {
-  {
-  rae_IntMapEntry_rae_String entry = oldData[i];
-  if (entry.occupied) {
-  {
-  rae_set_rae_String_rae_IntMap_rae_String_int64_t_rae_String_(this, entry.k, entry.value);
-  }
-  }
-  i = i + ((int64_t)1LL);
-  }
-  }
-  }
-  rae_ext_rae_buf_free((void*)(oldData));
-  }
-}
-
-RAE_UNUSED static void rae_set_int64_t_rae_List_int64_t_int64_t_int64_t_(rae_List_int64_t* this, int64_t index, int64_t value) {
+RAE_UNUSED static rae_String rae_get_rae_String_rae_List_rae_String_int64_t_(rae_List_rae_String* this, int64_t index) {
   {
   if ((bool)((bool)(index < ((int64_t)0LL)) || (bool)(index >= this->length))) {
   {
-  return;
+  return (rae_String){0};
   }
   }
-  this->data[index] = value;
+  return this->data[index];
   }
 }
 
-RAE_UNUSED static void rae_set_rae_String_rae_List_rae_String_int64_t_rae_String_(rae_List_rae_String* this, int64_t index, rae_String value) {
+RAE_UNUSED static void rae_grow_rae_String_rae_List_rae_String_(rae_List_rae_String* this) {
   {
-  if ((bool)((bool)(index < ((int64_t)0LL)) || (bool)(index >= this->length))) {
+  int64_t newCap = this->capacity * ((int64_t)2LL);
+  if ((bool)(newCap == ((int64_t)0LL))) {
   {
-  return;
+  newCap = ((int64_t)4LL);
   }
   }
-  this->data[index] = value;
+  rae_String* newData = (void*)rae_ext_rae_buf_alloc(newCap, sizeof(rae_String));
+  rae_ext_rae_buf_copy((void*)(this->data), ((int64_t)0LL), (void*)(newData), ((int64_t)0LL), this->length, sizeof(rae_String));
+  rae_ext_rae_buf_free((void*)(this->data));
+  this->data = newData;
+  this->capacity = newCap;
   }
 }
 
