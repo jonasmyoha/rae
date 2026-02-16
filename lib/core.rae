@@ -165,18 +165,19 @@ type StringMap(V) {
   data: Buffer(StringMapEntry(V))
   length: Int
   capacity: Int
+  isGrowing: Bool
 }
 
 func createStringMap(V)(initialCap: Int) ret StringMap(V) {
-  ret StringMap(V) { data: rae_ext_rae_buf_alloc(size: initialCap, elemSize: sizeof(StringMapEntry(V))()), length: 0, capacity: initialCap }
+  ret StringMap(V) { data: rae_ext_rae_buf_alloc(size: initialCap, elemSize: sizeof(StringMapEntry(V))), length: 0, capacity: initialCap, isGrowing: false }
 }
 
 func set(V)(this: mod StringMap(V), k: String, value: V) {
   if this.capacity is 0 {
     this.capacity = 8
-    this.data = rae_ext_rae_buf_alloc(size: this.capacity, elemSize: sizeof(StringMapEntry(V))())
+    this.data = rae_ext_rae_buf_alloc(size: this.capacity, elemSize: sizeof(StringMapEntry(V)))
   }
-  if this.length * 2 > this.capacity {
+  if not this.isGrowing and this.length * 2 > this.capacity {
     growStringMap(this)
   }
   let h: Int = rae_str_hash(s: k)
@@ -291,14 +292,16 @@ func values(V)(this: view StringMap(V)) ret List(V) {
 }
 
 func growStringMap(V)(this: mod StringMap(V)) {
+  this.isGrowing = true
   let oldCap: Int = this.capacity
   let oldData: Buffer(StringMapEntry(V)) = this.data
   this.capacity = oldCap * 2
   if this.capacity is 0 {
     this.capacity = 8
   }
-  this.data = rae_ext_rae_buf_alloc(size: this.capacity, elemSize: sizeof(StringMapEntry(V))())
+  this.data = rae_ext_rae_buf_alloc(size: this.capacity, elemSize: sizeof(StringMapEntry(V)))
   this.length = 0
+  
   let i: Int = 0
   loop i < oldCap {
     let entry: StringMapEntry(V) = rae_ext_rae_buf_get(buf: oldData, index: i)
@@ -308,6 +311,7 @@ func growStringMap(V)(this: mod StringMap(V)) {
     i = i + 1
   }
   rae_ext_rae_buf_free(buf: oldData)
+  this.isGrowing = false
 }
 
 func free(V)(this: mod StringMap(V)) {
@@ -327,10 +331,11 @@ type IntMap(V) {
   data: Buffer(IntMapEntry(V))
   length: Int
   capacity: Int
+  isGrowing: Bool
 }
 
 func createInt64Map(V)(initialCap: Int) ret IntMap(V) {
-  ret IntMap(V) { data: rae_ext_rae_buf_alloc(size: initialCap, elemSize: sizeof(IntMapEntry(V))()), length: 0, capacity: initialCap }
+  ret IntMap(V) { data: rae_ext_rae_buf_alloc(size: initialCap, elemSize: sizeof(IntMapEntry(V))), length: 0, capacity: initialCap, isGrowing: false }
 }
 
 func createIntMap(V)(initialCap: Int) ret IntMap(V) {
@@ -340,9 +345,9 @@ func createIntMap(V)(initialCap: Int) ret IntMap(V) {
 func set(V)(this: mod IntMap(V), k: Int, value: V) {
   if this.capacity is 0 {
     this.capacity = 8
-    this.data = rae_ext_rae_buf_alloc(size: this.capacity, elemSize: sizeof(IntMapEntry(V))())
+    this.data = rae_ext_rae_buf_alloc(size: this.capacity, elemSize: sizeof(IntMapEntry(V)))
   }
-  if this.length * 2 > this.capacity {
+  if not this.isGrowing and this.length * 2 > this.capacity {
     growInt64Map(this)
   }
   # Simple hash for Int
@@ -354,13 +359,13 @@ func set(V)(this: mod IntMap(V), k: Int, value: V) {
   loop true {
     let entry: IntMapEntry(V) = rae_ext_rae_buf_get(buf: this.data, index: idx)
     if not entry.occupied {
-      rae_ext_rae_buf_set(buf: this.data, index: idx, value: { k: k, value: value, occupied: true })
+      this.data[idx] = IntMapEntry(V) { k: k, value: value, occupied: true }
       this.length = this.length + 1
       ret
     }
     if entry.k is k {
       entry.value = value
-      rae_ext_rae_buf_set(buf: this.data, index: idx, value: entry)
+      this.data[idx] = entry
       ret
     }
     idx = (idx + 1) % this.capacity
@@ -393,12 +398,26 @@ func get(V)(this: view IntMap(V), k: Int) ret opt V {
 }
 
 func has(V)(this: view IntMap(V), k: Int) ret Bool {
-  match get(this, k: k) {
-    case none {
+  if this.capacity is 0 {
+    ret false
+  }
+  let h: Int = k
+  let idx: Int = h % this.capacity
+  if idx < 0 {
+    idx = -idx
+  }
+  let startIdx: Int = idx
+  loop true {
+    let entry: IntMapEntry(V) = rae_ext_rae_buf_get(buf: this.data, index: idx)
+    if not entry.occupied {
       ret false
     }
-    default {
+    if entry.k is k {
       ret true
+    }
+    idx = (idx + 1) % this.capacity
+    if idx is startIdx {
+      ret false
     }
   }
 }
@@ -458,14 +477,16 @@ func values(V)(this: view IntMap(V)) ret List(V) {
 }
 
 func growInt64Map(V)(this: mod IntMap(V)) {
+  this.isGrowing = true
   let oldCap: Int = this.capacity
   let oldData: Buffer(IntMapEntry(V)) = this.data
   this.capacity = oldCap * 2
   if this.capacity is 0 {
     this.capacity = 8
   }
-  this.data = rae_ext_rae_buf_alloc(size: this.capacity, elemSize: sizeof(IntMapEntry(V))())
+  this.data = rae_ext_rae_buf_alloc(size: this.capacity, elemSize: sizeof(IntMapEntry(V)))
   this.length = 0
+  
   let i: Int = 0
   loop i < oldCap {
     let entry: IntMapEntry(V) = rae_ext_rae_buf_get(buf: oldData, index: i)
@@ -475,6 +496,7 @@ func growInt64Map(V)(this: mod IntMap(V)) {
     i = i + 1
   }
   rae_ext_rae_buf_free(buf: oldData)
+  this.isGrowing = false
 }
 
 func free(V)(this: mod IntMap(V)) {

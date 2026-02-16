@@ -901,14 +901,20 @@ static bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, F
       return true; 
   }
   else if (str_eq_cstr(base, "Any")) { 
-      if (is_ptr) fprintf(out, "RaeAny*"); 
+      if (is_ptr) fprintf(out, "%sRaeAny*", type->is_view ? "const " : ""); 
       else fprintf(out, "RaeAny"); 
       return true; 
   }
   else if (str_eq_cstr(base, "Buffer") && type->generic_args) {
+        if (type->is_view) fprintf(out, "const ");
         Str arg_base = get_base_type_name(type->generic_args);
         if (str_eq_cstr(arg_base, "Any") || arg_base.len == 0) {
             fprintf(out, "void*");
+            return true;
+        }
+        if (is_ptr) {
+            emit_type_ref_as_c_type(ctx, type->generic_args, out, false);
+            fprintf(out, "*");
             return true;
         }
         emit_type_ref_as_c_type(ctx, type->generic_args, out, false);
@@ -2020,26 +2026,48 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         const AstTypeRef* type_to_emit = NULL;
         if (expr->as.call.generic_args) {
             type_to_emit = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, expr->as.call.generic_args);
-        } else if (expr->as.call.args && expr->as.call.args->value->kind == AST_EXPR_IDENT) {
-            // Check if it's a generic parameter
-            Str ident = expr->as.call.args->value->as.ident;
-            if (ctx->generic_params) {
-                const AstIdentifierPart* gp = ctx->generic_params;
-                const AstTypeRef* arg = ctx->generic_args;
-                while (gp && arg) {
-                    if (str_eq(gp->text, ident)) { type_to_emit = arg; break; }
-                    gp = gp->next; arg = arg->next;
+        } else if (expr->as.call.args) {
+            const AstExpr* arg_expr = expr->as.call.args->value;
+            if (arg_expr->kind == AST_EXPR_IDENT) {
+                // Check if it's a generic parameter
+                Str ident = arg_expr->as.ident;
+                if (ctx->generic_params) {
+                    const AstIdentifierPart* gp = ctx->generic_params;
+                    const AstTypeRef* arg = ctx->generic_args;
+                    while (gp && arg) {
+                        if (str_eq(gp->text, ident)) { type_to_emit = arg; break; }
+                        gp = gp->next; arg = arg->next;
+                    }
                 }
-            }
-            if (!type_to_emit) {
-                // Fallback to identifier as type name
-                fprintf(out, "rae_%.*s", (int)ident.len, ident.data);
+                if (!type_to_emit) {
+                    // Fallback to identifier as type name
+                    const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = ident}});
+                    fprintf(out, "%s", mangled);
+                    fprintf(out, ")");
+                    return true;
+                }
+            } else if (arg_expr->kind == AST_EXPR_CALL) {
+                // sizeof(SomeType(V))
+                const AstExpr* callee = arg_expr->as.call.callee;
+                if (callee->kind == AST_EXPR_IDENT) {
+                    const AstTypeRef* ga = arg_expr->as.call.generic_args;
+                    if (!ga && arg_expr->as.call.args) {
+                        // Fallback: treat first regular argument as generic if it looks like a type
+                        const AstExpr* first_arg = arg_expr->as.call.args->value;
+                        if (first_arg->kind == AST_EXPR_IDENT) {
+                            ga = &(AstTypeRef){.parts = &(AstIdentifierPart){.text = first_arg->as.ident}};
+                        }
+                    }
+                    type_to_emit = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = callee->as.ident}, .generic_args = (AstTypeRef*)ga});
+                } else {
+                    type_to_emit = infer_expr_type_ref(ctx, arg_expr);
+                }
             }
         }
         
         if (type_to_emit) {
             emit_type_ref_as_c_type(ctx, type_to_emit, out, false);
-        } else if (!expr->as.call.args) {
+        } else {
             fprintf(out, "int64_t"); // Default
         }
         fprintf(out, ")");
@@ -2329,10 +2357,14 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
 
         bool is_param_ref = p_type && (p_type->is_view || p_type->is_mod);
         bool is_buffer_param = p_type && str_eq_cstr(get_base_type_name(p_type), "Buffer");
-        bool is_param_raw_ptr = is_buffer_param || (!is_primitive_ref(ctx, p_type) && is_param_ref);
-
-        if (!p_type && d && d->is_extern) {
+        bool is_param_raw_ptr = false;
+        if (d && d->is_extern) {
              if (str_eq_cstr(d->name, "rae_ext_rae_str_from_cstr")) is_param_raw_ptr = true;
+             // other externs likely take raw pointers too if they take mod/view
+             else if (is_param_ref) is_param_raw_ptr = true;
+        } else if (p_type && str_eq_cstr(get_base_type_name(p_type), "Buffer")) {
+             // __buf_ functions take raw pointers
+             if (d && str_starts_with_cstr(d->name, "rae_ext_rae_buf_")) is_param_raw_ptr = true;
         }
 
         if (is_param_ref && !source_is_ref) {
@@ -2347,7 +2379,7 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             }
         }
         
-        if (needs_ref && !is_buffer_param) {
+        if (needs_ref && !is_param_raw_ptr) {
             bool is_prim_ref_param = is_primitive_ref(ctx, p_type);
             if (is_rvalue) {
                 bool val_is_struct_literal = (a->value->kind == AST_EXPR_OBJECT || a->value->kind == AST_EXPR_STRING || a->value->kind == AST_EXPR_COLLECTION_LITERAL);
@@ -2388,7 +2420,8 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 else fprintf(out, ")");
             }
         } else {
-            emit_expr(ctx, a->value, out, PREC_LOWEST, false, is_param_raw_ptr);
+            bool suppress_indirection = is_param_raw_ptr || (source_is_ref && is_param_ref && !is_primitive_ref(ctx, p_type));
+            emit_expr(ctx, a->value, out, PREC_LOWEST, false, suppress_indirection);
         }
         
         if (a->next) fprintf(out, ", ");
