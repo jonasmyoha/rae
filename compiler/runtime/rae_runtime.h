@@ -17,6 +17,12 @@
 typedef uint32_t rae_Char32;
 typedef uint32_t rae_Char;
 
+#ifdef RAE_HAS_RAYLIB
+typedef bool rae_Bool;
+#else
+typedef int8_t rae_Bool;
+#endif
+
 typedef struct {
   uint8_t* data;
   int64_t len;
@@ -81,9 +87,8 @@ RAE_UNUSED static RaeAny rae_any_uint64(uint64_t v) { return (RaeAny){RAE_TYPE_U
 RAE_UNUSED static RaeAny rae_any_int_ptr(const int64_t* v) { return (RaeAny){RAE_TYPE_INT64, true, false, {.ptr = (void*)v}}; }
 RAE_UNUSED static RaeAny rae_any_float(double v) { return (RaeAny){RAE_TYPE_FLOAT64, false, false, {.f = v}}; }
 RAE_UNUSED static RaeAny rae_any_float32(float v) { return (RaeAny){RAE_TYPE_FLOAT32, false, false, {.f = v}}; }
-RAE_UNUSED static RaeAny rae_any_float_ptr(const double* v) { return (RaeAny){RAE_TYPE_FLOAT64, true, false, {.ptr = (void*)v}}; }
+RAE_UNUSED static RaeAny rae_any_float_ptr(const void* v) { return (RaeAny){RAE_TYPE_FLOAT64, true, false, {.ptr = (void*)v}}; }
 RAE_UNUSED static RaeAny rae_any_bool(int8_t v) { return (RaeAny){RAE_TYPE_BOOL, false, false, {.b = v}}; }
-RAE_UNUSED static RaeAny rae_any_bool_ptr(const bool* v) { return (RaeAny){RAE_TYPE_BOOL, true, false, {.ptr = (void*)v}}; }
 RAE_UNUSED static RaeAny rae_any_char(uint32_t v) { return (RaeAny){RAE_TYPE_CHAR, false, false, {.i = (int64_t)v}}; }
 RAE_UNUSED static RaeAny rae_any_char_ptr(const uint32_t* v) { return (RaeAny){RAE_TYPE_CHAR, true, false, {.ptr = (void*)v}}; }
 RAE_UNUSED static RaeAny rae_any_string(rae_String v) { return (RaeAny){RAE_TYPE_STRING, false, false, {.s = v}}; }
@@ -120,6 +125,50 @@ RAE_UNUSED static RaeAny rae_any_identity_ptr(const RaeAny* a) {
     res.is_view = true;
     return res;
 }
+
+// Helpers for reference structs
+typedef struct { int64_t* ptr; } rae_View_Int64;
+typedef struct { int64_t* ptr; } rae_Mod_Int64;
+typedef struct { int32_t* ptr; } rae_View_Int32;
+typedef struct { int32_t* ptr; } rae_Mod_Int32;
+typedef struct { uint64_t* ptr; } rae_View_UInt64;
+typedef struct { uint64_t* ptr; } rae_Mod_UInt64;
+typedef struct { uint32_t* ptr; } rae_View_UInt32;
+typedef struct { uint32_t* ptr; } rae_Mod_UInt32;
+typedef struct { double* ptr; } rae_View_Float64;
+typedef struct { double* ptr; } rae_Mod_Float64;
+typedef struct { float* ptr; } rae_View_Float32;
+typedef struct { float* ptr; } rae_Mod_Float32;
+typedef struct { rae_Bool* ptr; } rae_View_Bool;
+typedef struct { rae_Bool* ptr; } rae_Mod_Bool;
+typedef struct { uint32_t* ptr; } rae_View_Char32;
+typedef struct { uint32_t* ptr; } rae_Mod_Char32;
+typedef struct { uint32_t* ptr; } rae_View_Char;
+typedef struct { uint32_t* ptr; } rae_Mod_Char;
+typedef struct { rae_String* ptr; } rae_View_String;
+typedef struct { rae_String* ptr; } rae_Mod_String;
+
+RAE_UNUSED static RaeAny rae_any_view_int64(rae_View_Int64 v) { return rae_any_view(v.ptr, RAE_TYPE_INT64); }
+RAE_UNUSED static RaeAny rae_any_mod_int64(rae_Mod_Int64 v) { return rae_any_mod(v.ptr, RAE_TYPE_INT64); }
+RAE_UNUSED static RaeAny rae_any_view_int32(rae_View_Int32 v) { return rae_any_view(v.ptr, RAE_TYPE_INT32); }
+RAE_UNUSED static RaeAny rae_any_mod_int32(rae_Mod_Int32 v) { return rae_any_mod(v.ptr, RAE_TYPE_INT32); }
+RAE_UNUSED static RaeAny rae_any_view_uint64(rae_View_UInt64 v) { return rae_any_view(v.ptr, RAE_TYPE_UINT64); }
+RAE_UNUSED static RaeAny rae_any_mod_uint64(rae_Mod_UInt64 v) { return rae_any_mod(v.ptr, RAE_TYPE_UINT64); }
+RAE_UNUSED static RaeAny rae_any_view_uint32(rae_View_UInt32 v) { return rae_any_view(v.ptr, RAE_TYPE_UINT32); }
+RAE_UNUSED static RaeAny rae_any_mod_uint32(rae_Mod_UInt32 v) { return rae_any_mod(v.ptr, RAE_TYPE_UINT32); }
+RAE_UNUSED static RaeAny rae_any_view_float64(rae_View_Float64 v) { return rae_any_view(v.ptr, RAE_TYPE_FLOAT64); }
+RAE_UNUSED static RaeAny rae_any_mod_float64(rae_Mod_Float64 v) { return rae_any_mod(v.ptr, RAE_TYPE_FLOAT64); }
+RAE_UNUSED static RaeAny rae_any_view_float32(rae_View_Float32 v) { return rae_any_view(v.ptr, RAE_TYPE_FLOAT32); }
+RAE_UNUSED static RaeAny rae_any_mod_float32(rae_Mod_Float32 v) { return rae_any_mod(v.ptr, RAE_TYPE_FLOAT32); }
+RAE_UNUSED static RaeAny rae_any_view_bool(rae_View_Bool v) { return rae_any_view(v.ptr, RAE_TYPE_BOOL); }
+RAE_UNUSED static RaeAny rae_any_mod_bool(rae_Mod_Bool v) { return rae_any_mod(v.ptr, RAE_TYPE_BOOL); }
+RAE_UNUSED static RaeAny rae_any_view_char32(rae_View_Char32 v) { return rae_any_view(v.ptr, RAE_TYPE_CHAR); }
+RAE_UNUSED static RaeAny rae_any_mod_char32(rae_Mod_Char32 v) { return rae_any_mod(v.ptr, RAE_TYPE_CHAR); }
+RAE_UNUSED static RaeAny rae_any_view_char(rae_View_Char v) { return rae_any_view(v.ptr, RAE_TYPE_CHAR); }
+RAE_UNUSED static RaeAny rae_any_mod_char(rae_Mod_Char v) { return rae_any_mod(v.ptr, RAE_TYPE_CHAR); }
+RAE_UNUSED static RaeAny rae_any_view_string(rae_View_String v) { return rae_any_view(v.ptr, RAE_TYPE_STRING); }
+RAE_UNUSED static RaeAny rae_any_mod_string(rae_Mod_String v) { return rae_any_mod(v.ptr, RAE_TYPE_STRING); }
+
 RAE_UNUSED static bool rae_any_is_none(RaeAny a) { return a.type == RAE_TYPE_NONE; }
 RAE_UNUSED static bool rae_any_eq(RaeAny a, RaeAny b) {
     if (a.type != b.type) return false;
@@ -133,7 +182,9 @@ RAE_UNUSED static bool rae_any_eq(RaeAny a, RaeAny b) {
     return a.as.i == b.as.i;
 }
 
-#define rae_any(X) _Generic((X), \
+RAE_UNUSED static RaeAny rae_any_bool_ptr(rae_Bool* v) { return rae_any_view(v, RAE_TYPE_BOOL); }
+
+#define rae_any(X) _Generic(((X)), \
     int64_t: rae_any_int, \
     int32_t: rae_any_int32, \
     uint64_t: rae_any_uint64, \
@@ -144,8 +195,29 @@ RAE_UNUSED static bool rae_any_eq(RaeAny a, RaeAny b) {
     RaeAny*: rae_any_identity_ptr, \
     bool: rae_any_bool, \
     int8_t: rae_any_bool, \
+    rae_Bool*: rae_any_bool_ptr, \
     uint32_t: rae_any_char, \
     uint8_t: rae_any_int, \
+    rae_View_Int64: rae_any_view_int64, \
+    rae_Mod_Int64: rae_any_mod_int64, \
+    rae_View_Int32: rae_any_view_int32, \
+    rae_Mod_Int32: rae_any_mod_int32, \
+    rae_View_UInt64: rae_any_view_uint64, \
+    rae_Mod_UInt64: rae_any_mod_uint64, \
+    rae_View_UInt32: rae_any_view_uint32, \
+    rae_Mod_UInt32: rae_any_mod_uint32, \
+    rae_View_Float64: rae_any_view_float64, \
+    rae_Mod_Float64: rae_any_mod_float64, \
+    rae_View_Float32: rae_any_view_float32, \
+    rae_Mod_Float32: rae_any_mod_float32, \
+    rae_View_Bool: rae_any_view_bool, \
+    rae_Mod_Bool: rae_any_mod_bool, \
+    rae_View_Char32: rae_any_view_char32, \
+    rae_Mod_Char32: rae_any_mod_char32, \
+    rae_View_Char: rae_any_view_char, \
+    rae_Mod_Char: rae_any_mod_char, \
+    rae_View_String: rae_any_view_string, \
+    rae_Mod_String: rae_any_mod_string, \
     default: rae_any_ptr \
 )(X)
 
