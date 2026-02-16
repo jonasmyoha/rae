@@ -12,6 +12,37 @@ void type_registry_init(TypeRegistry* registry, Arena* arena) {
     registry->count = 0;
     registry->buckets = (TypeInfo**)arena_alloc(arena, sizeof(TypeInfo*) * registry->capacity);
     memset(registry->buckets, 0, sizeof(TypeInfo*) * registry->capacity);
+    registry->specializations = NULL;
+}
+
+AstDecl* type_registry_find_specialization(TypeRegistry* r, AstDecl* generic_decl, TypeInfo** args, size_t arg_count) {
+    SpecializationEntry* curr = r->specializations;
+    while (curr) {
+        if (curr->generic_decl == generic_decl && curr->arg_count == arg_count) {
+            bool match = true;
+            for (size_t i = 0; i < arg_count; i++) {
+                if (curr->generic_args[i] != args[i]) { match = false; break; }
+            }
+            if (match) return curr->specialized_decl;
+        }
+        curr = curr->next;
+    }
+    return NULL;
+}
+
+void type_registry_add_specialization(TypeRegistry* r, AstDecl* generic_decl, TypeInfo** args, size_t arg_count, AstDecl* specialized_decl) {
+    SpecializationEntry* entry = arena_alloc(r->arena, sizeof(SpecializationEntry));
+    entry->generic_decl = generic_decl;
+    entry->arg_count = arg_count;
+    if (arg_count > 0) {
+        entry->generic_args = arena_alloc(r->arena, sizeof(TypeInfo*) * arg_count);
+        memcpy(entry->generic_args, args, sizeof(TypeInfo*) * arg_count);
+    } else {
+        entry->generic_args = NULL;
+    }
+    entry->specialized_decl = specialized_decl;
+    entry->next = r->specializations;
+    r->specializations = entry;
 }
 
 // FNV-1a hash function for type structure
