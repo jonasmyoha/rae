@@ -22,7 +22,7 @@ Value value_bool(bool v) {
   return value;
 }
 
-Value value_char(int64_t v) {
+Value value_char(uint32_t v) {
   Value value = {.type = VAL_CHAR};
   value.as.char_value = v;
   return value;
@@ -30,7 +30,7 @@ Value value_char(int64_t v) {
 
 Value value_string_copy(const char* data, size_t length) {
   Value value = {.type = VAL_STRING};
-  value.as.string_value.length = length;
+  value.as.string_value.length = (int64_t)length;
   value.as.string_value.chars = malloc(length + 1);
   if (value.as.string_value.chars) {
     memcpy(value.as.string_value.chars, data, length);
@@ -39,10 +39,10 @@ Value value_string_copy(const char* data, size_t length) {
   return value;
 }
 
-Value value_string_take(char* data, size_t length) {
+Value value_string_take(uint8_t* data, size_t length) {
   Value value = {.type = VAL_STRING};
   value.as.string_value.chars = data;
-  value.as.string_value.length = length;
+  value.as.string_value.length = (int64_t)length;
   if (value.as.string_value.chars) {
     value.as.string_value.chars[length] = '\0';
   }
@@ -354,7 +354,7 @@ void value_print(const Value* value) {
       printf("%s", value->as.bool_value ? "true" : "false");
       break;
     case VAL_CHAR: {
-      int64_t c = value->as.char_value;
+      uint32_t c = value->as.char_value;
       if (c < 0x80) {
         printf("%c", (char)c);
       } else if (c < 0x800) {

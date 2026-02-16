@@ -329,7 +329,7 @@ type IntMap(V) {
   capacity: Int
 }
 
-func createIntMap(V)(initialCap: Int) ret IntMap(V) {
+func createInt64Map(V)(initialCap: Int) ret IntMap(V) {
   ret IntMap(V) { data: rae_ext_rae_buf_alloc(size: initialCap, elemSize: sizeof(IntMapEntry(V))()), length: 0, capacity: initialCap }
 }
 
@@ -339,7 +339,7 @@ func set(V)(this: mod IntMap(V), k: Int, value: V) {
     this.data = rae_ext_rae_buf_alloc(size: this.capacity, elemSize: sizeof(IntMapEntry(V))())
   }
   if this.length * 2 > this.capacity {
-    growIntMap(this)
+    growInt64Map(this)
   }
   # Simple hash for Int
   let h: Int = k
@@ -453,7 +453,7 @@ func values(V)(this: view IntMap(V)) ret List(V) {
   ret result
 }
 
-func growIntMap(V)(this: mod IntMap(V)) {
+func growInt64Map(V)(this: mod IntMap(V)) {
   let oldCap: Int = this.capacity
   let oldData: Buffer(IntMapEntry(V)) = this.data
   this.capacity = oldCap * 2

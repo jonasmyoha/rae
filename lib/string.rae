@@ -25,6 +25,23 @@ func rae_str_to_f64(s: String) extern ret Float
 
 func rae_str_to_i64(s: String) extern ret Int
 
+func rae_ext_rae_str_from_cstr(s: Buffer(Any)) extern ret String
+func rae_ext_rae_str_to_cstr(s: String) extern ret Buffer(Any)
+
+func fromCStr(s: Buffer(Any)) ret String {
+    ret rae_ext_rae_str_from_cstr(s: s)
+}
+
+func toCStr(this: String) ret Buffer(Any) {
+    ret rae_ext_rae_str_to_cstr(s: this)
+}
+
+func rae_ext_rae_str_at(s: String, index: Int) extern ret Char32
+
+func at(this: String, index: Int) ret Char32 {
+    ret rae_ext_rae_str_at(s: this, index: index)
+}
+
 func length(this: String) ret Int {
   ret rae_str_len(s: this)
 }
@@ -70,7 +87,7 @@ func trim(this: String) ret String {
 }
 
 func split(this: String, sep: String) ret List(String) {
-  let result: List(String) = createList(initialCap: 4)
+  let result: List(String) = createList(String)(initialCap: 4)
   if sep.length() is 0 {
     add(result, value: this)
     ret result
@@ -101,13 +118,13 @@ func replace(this: String, old: String, new: String) ret String {
 }
 
 func join(this: view List(String), sep: String) ret String {
-  if this.length() is 0 {
+  if this.length is 0 {
     ret ""
   }
-  let result: String = this.get(index: 0)
+  let result: String = get(this, index: 0)
   let i: Int = 1
-  loop i < this.length() {
-    result = result.concat(other: sep).concat(other: this.get(index: i))
+  loop i < this.length {
+    result = result.concat(other: sep).concat(other: get(this, index: i))
     i = i + 1
   }
   ret result

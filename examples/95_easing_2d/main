@@ -1,0 +1,2216 @@
+#ifndef RAE_HAS_RAYLIB
+#define RAE_HAS_RAYLIB
+#endif
+#include <raylib.h>
+#include "rae_runtime.h"
+
+typedef struct {
+  int64_t startTime;
+  int64_t accumulated;
+  int8_t running;
+} Timer;
+
+typedef struct rae_Buffer_Any_ rae_Buffer_Any_;
+typedef struct rae_List_Any_ rae_List_Any_;
+typedef struct rae_Buffer_rae_StringMapEntry_Any_ rae_Buffer_rae_StringMapEntry_Any_;
+typedef struct rae_StringMapEntry_Any_ rae_StringMapEntry_Any_;
+typedef struct rae_StringMap_Any_ rae_StringMap_Any_;
+typedef struct rae_List_String_ rae_List_String_;
+typedef struct rae_Buffer_rae_IntMapEntry_Any_ rae_Buffer_rae_IntMapEntry_Any_;
+typedef struct rae_IntMapEntry_Any_ rae_IntMapEntry_Any_;
+typedef struct rae_IntMap_Any_ rae_IntMap_Any_;
+typedef struct rae_List_Int_ rae_List_Int_;
+
+struct rae_List_Any_ {
+  RaeAny* data;
+  int64_t length;
+  int64_t capacity;
+};
+
+struct rae_StringMapEntry_Any_ {
+  const char* k;
+  RaeAny value;
+  int8_t occupied;
+};
+
+struct rae_StringMap_Any_ {
+  rae_StringMapEntry_Any_* data;
+  int64_t length;
+  int64_t capacity;
+};
+
+struct rae_List_String_ {
+  const char** data;
+  int64_t length;
+  int64_t capacity;
+};
+
+struct rae_IntMapEntry_Any_ {
+  int64_t k;
+  RaeAny value;
+  int8_t occupied;
+};
+
+struct rae_IntMap_Any_ {
+  rae_IntMapEntry_Any_* data;
+  int64_t length;
+  int64_t capacity;
+};
+
+struct rae_List_Int_ {
+  int64_t* data;
+  int64_t length;
+  int64_t capacity;
+};
+
+RAE_UNUSED static const char* rae_toJson_Timer_(Timer* this);
+RAE_UNUSED static Timer rae_fromJson_Timer_(const char* json);
+RAE_UNUSED static void* rae_toBinary_Timer_(Timer* this, int64_t* out_size);
+RAE_UNUSED static Timer rae_fromBinary_Timer_(void* data, int64_t size);
+
+RAE_UNUSED static const char* rae_toJson_Timer_(Timer* this) {
+  const char* res = "{";
+  res = rae_ext_rae_str_concat(res, "\"startTime\": ");
+  res = rae_ext_rae_str_concat(res, rae_ext_rae_str_i64(this->startTime));
+  res = rae_ext_rae_str_concat(res, ", ");
+  res = rae_ext_rae_str_concat(res, "\"accumulated\": ");
+  res = rae_ext_rae_str_concat(res, rae_ext_rae_str_i64(this->accumulated));
+  res = rae_ext_rae_str_concat(res, ", ");
+  res = rae_ext_rae_str_concat(res, "\"running\": ");
+  res = rae_ext_rae_str_concat(res, this->running ? "true" : "false");
+  res = rae_ext_rae_str_concat(res, "}");
+  return res;
+}
+
+RAE_UNUSED static Timer rae_fromJson_Timer_(const char* json) {
+  Timer res = {0};
+  RaeAny val;
+  val = rae_ext_json_get(json, "startTime");
+  if (val.type == RAE_TYPE_INT) res.startTime = val.as.i;
+  val = rae_ext_json_get(json, "accumulated");
+  if (val.type == RAE_TYPE_INT) res.accumulated = val.as.i;
+  val = rae_ext_json_get(json, "running");
+  if (val.type == RAE_TYPE_BOOL) res.running = val.as.b;
+  return res;
+}
+
+RAE_UNUSED static void* rae_toBinary_Timer_(Timer* this, int64_t* out_size) {
+  (void)this;
+  if (out_size) *out_size = 0;
+  return NULL;
+}
+
+RAE_UNUSED static Timer rae_fromBinary_Timer_(void* data, int64_t size) {
+  (void)data; (void)size;
+  Timer res = {0};
+  return res;
+}
+
+RAE_UNUSED static const char* rae_toJson_rae_Buffer_Any__(void* this) {
+  (void)this;
+  return "{}";
+}
+
+RAE_UNUSED static const char* rae_toJson_rae_List_Any__(void* this) {
+  (void)this;
+  return "{}";
+}
+
+RAE_UNUSED static const char* rae_toJson_rae_Buffer_rae_StringMapEntry_Any__(void* this) {
+  (void)this;
+  return "{}";
+}
+
+RAE_UNUSED static const char* rae_toJson_rae_StringMapEntry_Any__(void* this) {
+  (void)this;
+  return "{}";
+}
+
+RAE_UNUSED static const char* rae_toJson_rae_StringMap_Any__(void* this) {
+  (void)this;
+  return "{}";
+}
+
+RAE_UNUSED static const char* rae_toJson_rae_List_String__(void* this) {
+  (void)this;
+  return "{}";
+}
+
+RAE_UNUSED static const char* rae_toJson_rae_Buffer_rae_IntMapEntry_Any__(void* this) {
+  (void)this;
+  return "{}";
+}
+
+RAE_UNUSED static const char* rae_toJson_rae_IntMapEntry_Any__(void* this) {
+  (void)this;
+  return "{}";
+}
+
+RAE_UNUSED static const char* rae_toJson_rae_IntMap_Any__(void* this) {
+  (void)this;
+  return "{}";
+}
+
+RAE_UNUSED static const char* rae_toJson_rae_List_Int__(void* this) {
+  (void)this;
+  return "{}";
+}
+
+extern int64_t rae_ext_nextTick(void);
+extern int64_t rae_ext_nowMs(void);
+extern int64_t rae_ext_nowNs(void);
+extern void rae_ext_rae_sleep(int64_t ms);
+extern double rae_ext_rae_int_to_float(int64_t i);
+extern int64_t rae_ext_rae_float_to_int(double f);
+RAE_UNUSED static double rae_toFloat_rae_Int_(int64_t this);
+RAE_UNUSED static int64_t rae_toInt_rae_Float_(double this);
+RAE_UNUSED static rae_List_Any_ rae_createList_rae_Int_(int64_t initialCap);
+RAE_UNUSED static void rae_grow_rae_List_Any__(rae_List_Any_* this);
+RAE_UNUSED static void rae_add_rae_List_Any__rae_T_(rae_List_Any_* this, RaeAny value);
+RAE_UNUSED static RaeAny rae_get_rae_List_Any__rae_Int_(const rae_List_Any_* this, int64_t index);
+RAE_UNUSED static void rae_set_rae_List_Any__rae_Int_rae_T_(rae_List_Any_* this, int64_t index, RaeAny value);
+RAE_UNUSED static void rae_insert_rae_List_Any__rae_Int_rae_T_(rae_List_Any_* this, int64_t index, RaeAny value);
+RAE_UNUSED static RaeAny rae_pop_rae_List_Any__(rae_List_Any_* this);
+RAE_UNUSED static void rae_remove_rae_List_Any__rae_Int_(rae_List_Any_* this, int64_t index);
+RAE_UNUSED static void rae_clear_rae_List_Any__(rae_List_Any_* this);
+RAE_UNUSED static int64_t rae_length_rae_List_Any__(const rae_List_Any_* this);
+RAE_UNUSED static void rae_swap_rae_List_Any__rae_Int_rae_Int_(rae_List_Any_* this, int64_t i, int64_t j);
+RAE_UNUSED static void rae_free_rae_List_Any__(rae_List_Any_* this);
+extern int64_t rae_ext_rae_str_hash(const char* s);
+extern int8_t rae_ext_rae_str_eq(const char* a, const char* b);
+RAE_UNUSED static rae_StringMap_Any_ rae_createStringMap_rae_Int_(int64_t initialCap);
+RAE_UNUSED static void rae_set_rae_StringMap_Any__rae_String_rae_V_(rae_StringMap_Any_* this, const char* k, RaeAny value);
+RAE_UNUSED static RaeAny rae_get_rae_StringMap_Any__rae_String_(const rae_StringMap_Any_* this, const char* k);
+RAE_UNUSED static int8_t rae_has_rae_StringMap_Any__rae_String_(const rae_StringMap_Any_* this, const char* k);
+RAE_UNUSED static void rae_remove_rae_StringMap_Any__rae_String_(rae_StringMap_Any_* this, const char* k);
+RAE_UNUSED static rae_List_String_ rae_keys_rae_StringMap_Any__(const rae_StringMap_Any_* this);
+RAE_UNUSED static rae_List_Any_ rae_values_rae_StringMap_Any__(const rae_StringMap_Any_* this);
+RAE_UNUSED static void rae_growStringMap_rae_StringMap_Any__(rae_StringMap_Any_* this);
+RAE_UNUSED static void rae_free_rae_StringMap_Any__(rae_StringMap_Any_* this);
+RAE_UNUSED static rae_IntMap_Any_ rae_createIntMap_rae_Int_(int64_t initialCap);
+RAE_UNUSED static void rae_set_rae_IntMap_Any__rae_Int_rae_V_(rae_IntMap_Any_* this, int64_t k, RaeAny value);
+RAE_UNUSED static RaeAny rae_get_rae_IntMap_Any__rae_Int_(const rae_IntMap_Any_* this, int64_t k);
+RAE_UNUSED static int8_t rae_has_rae_IntMap_Any__rae_Int_(const rae_IntMap_Any_* this, int64_t k);
+RAE_UNUSED static void rae_remove_rae_IntMap_Any__rae_Int_(rae_IntMap_Any_* this, int64_t k);
+RAE_UNUSED static rae_List_Int_ rae_keys_rae_IntMap_Any__(const rae_IntMap_Any_* this);
+RAE_UNUSED static rae_List_Any_ rae_values_rae_IntMap_Any__(const rae_IntMap_Any_* this);
+RAE_UNUSED static void rae_growIntMap_rae_IntMap_Any__(rae_IntMap_Any_* this);
+RAE_UNUSED static void rae_free_rae_IntMap_Any__(rae_IntMap_Any_* this);
+extern int64_t rae_ext_rae_str_len(const char* s);
+extern int64_t rae_ext_rae_str_compare(const char* a, const char* b);
+extern const char* rae_ext_rae_str_concat(const char* a, const char* b);
+extern const char* rae_ext_rae_str_sub(const char* s, int64_t start, int64_t len);
+extern int8_t rae_ext_rae_str_contains(const char* s, const char* sub);
+extern int8_t rae_ext_rae_str_starts_with(const char* s, const char* prefix);
+extern int8_t rae_ext_rae_str_ends_with(const char* s, const char* suffix);
+extern int64_t rae_ext_rae_str_index_of(const char* s, const char* sub);
+extern const char* rae_ext_rae_str_trim(const char* s);
+extern double rae_ext_rae_str_to_f64(const char* s);
+extern int64_t rae_ext_rae_str_to_i64(const char* s);
+RAE_UNUSED static int64_t rae_length_rae_String_(const char* this);
+RAE_UNUSED static int64_t rae_compare_rae_String_rae_String_(const char* this, const char* other);
+RAE_UNUSED static int8_t rae_equals_rae_String_rae_String_(const char* this, const char* other);
+RAE_UNUSED static int64_t rae_hash_rae_String_(const char* this);
+RAE_UNUSED static const char* rae_concat_rae_String_rae_String_(const char* this, const char* other);
+RAE_UNUSED static const char* rae_sub_rae_String_rae_Int_rae_Int_(const char* this, int64_t start, int64_t len);
+RAE_UNUSED static int8_t rae_contains_rae_String_rae_String_(const char* this, const char* sub);
+RAE_UNUSED static int8_t rae_startsWith_rae_String_rae_String_(const char* this, const char* prefix);
+RAE_UNUSED static int8_t rae_endsWith_rae_String_rae_String_(const char* this, const char* suffix);
+RAE_UNUSED static int64_t rae_indexOf_rae_String_rae_String_(const char* this, const char* sub);
+RAE_UNUSED static const char* rae_trim_rae_String_(const char* this);
+RAE_UNUSED static rae_List_String_ rae_split_rae_String_rae_String_(const char* this, const char* sep);
+RAE_UNUSED static const char* rae_replace_rae_String_rae_String_rae_String_(const char* this, const char* old, const char* new);
+RAE_UNUSED static const char* rae_join_rae_List_String__rae_String_(const rae_List_String_* this, const char* sep);
+RAE_UNUSED static double rae_toFloat_rae_String_(const char* this);
+RAE_UNUSED static int64_t rae_toInt_rae_String_(const char* this);
+extern void rae_ext_setConfigFlags(int64_t flags);
+RAE_UNUSED int64_t rae_ext_windowShouldClose(void) {
+  return WindowShouldClose();
+}
+
+RAE_UNUSED void rae_ext_closeWindow(void) {
+  CloseWindow();
+}
+
+RAE_UNUSED void rae_ext_beginDrawing(void) {
+  BeginDrawing();
+}
+
+RAE_UNUSED void rae_ext_endDrawing(void) {
+  EndDrawing();
+}
+
+RAE_UNUSED void rae_ext_clearBackground(Color color) {
+  ClearBackground((Color){ (unsigned char)color.r, (unsigned char)color.g, (unsigned char)color.b, (unsigned char)color.a });
+}
+
+RAE_UNUSED Texture rae_ext_loadTexture(const char* fileName) {
+  return LoadTexture(fileName);
+}
+
+RAE_UNUSED void rae_ext_unloadTexture(Texture texture) {
+  UnloadTexture((Texture){ .id = (unsigned int)texture.id, .width = (int)texture.width, .height = (int)texture.height, .mipmaps = (int)texture.mipmaps, .format = (int)texture.format });
+}
+
+RAE_UNUSED void rae_ext_drawTexture(Texture texture, double x, double y, Color tint) {
+  DrawTexture((Texture){ .id = (unsigned int)texture.id, .width = (int)texture.width, .height = (int)texture.height, .mipmaps = (int)texture.mipmaps, .format = (int)texture.format }, (float)x, (float)y, (Color){ (unsigned char)tint.r, (unsigned char)tint.g, (unsigned char)tint.b, (unsigned char)tint.a });
+}
+
+RAE_UNUSED void rae_ext_drawTextureEx(Texture texture, Vector2 pos, double rotation, double scale, Color tint) {
+  DrawTextureEx((Texture){ .id = (unsigned int)texture.id, .width = (int)texture.width, .height = (int)texture.height, .mipmaps = (int)texture.mipmaps, .format = (int)texture.format }, (Vector2){ (float)pos.x, (float)pos.y }, (float)rotation, (float)scale, (Color){ (unsigned char)tint.r, (unsigned char)tint.g, (unsigned char)tint.b, (unsigned char)tint.a });
+}
+
+extern void rae_ext_drawRectangle(double x, double y, double width, double height, Color color);
+extern void rae_ext_drawRectangleLines(double x, double y, double width, double height, Color color);
+RAE_UNUSED void rae_ext_drawCircle(double x, double y, double radius, Color color) {
+  DrawCircle((float)x, (float)y, (float)radius, (Color){ (unsigned char)color.r, (unsigned char)color.g, (unsigned char)color.b, (unsigned char)color.a });
+}
+
+RAE_UNUSED void rae_ext_drawCircleGradient(int64_t x, int64_t y, double radius, Color color1, Color color2) {
+  DrawCircleGradient((int)x, (int)y, (float)radius, (Color){ (unsigned char)color1.r, (unsigned char)color1.g, (unsigned char)color1.b, (unsigned char)color1.a }, (Color){ (unsigned char)color2.r, (unsigned char)color2.g, (unsigned char)color2.b, (unsigned char)color2.a });
+}
+
+RAE_UNUSED void rae_ext_drawRectangleGradientV(int64_t x, int64_t y, int64_t width, int64_t height, Color color1, Color color2) {
+  DrawRectangleGradientV((int)x, (int)y, (int)width, (int)height, (Color){ (unsigned char)color1.r, (unsigned char)color1.g, (unsigned char)color1.b, (unsigned char)color1.a }, (Color){ (unsigned char)color2.r, (unsigned char)color2.g, (unsigned char)color2.b, (unsigned char)color2.a });
+}
+
+RAE_UNUSED void rae_ext_drawRectangleGradientH(int64_t x, int64_t y, int64_t width, int64_t height, Color color1, Color color2) {
+  DrawRectangleGradientH((int)x, (int)y, (int)width, (int)height, (Color){ (unsigned char)color1.r, (unsigned char)color1.g, (unsigned char)color1.b, (unsigned char)color1.a }, (Color){ (unsigned char)color2.r, (unsigned char)color2.g, (unsigned char)color2.b, (unsigned char)color2.a });
+}
+
+RAE_UNUSED void rae_ext_drawText(const char* text, double x, double y, double fontSize, Color color) {
+  DrawText(text, (float)x, (float)y, (float)fontSize, (Color){ (unsigned char)color.r, (unsigned char)color.g, (unsigned char)color.b, (unsigned char)color.a });
+}
+
+RAE_UNUSED void rae_ext_drawCube(Vector3 pos, double width, double height, double length, Color color) {
+  DrawCube((Vector3){ (float)pos.x, (float)pos.y, (float)pos.z }, (float)width, (float)height, (float)length, (Color){ (unsigned char)color.r, (unsigned char)color.g, (unsigned char)color.b, (unsigned char)color.a });
+}
+
+extern void rae_ext_drawCubeWires(Vector3 pos, double width, double height, double length, Color color);
+RAE_UNUSED void rae_ext_drawCylinder(Vector3 position, double radiusTop, double radiusBottom, double height, int64_t slices, Color color) {
+  DrawCylinder((Vector3){ (float)position.x, (float)position.y, (float)position.z }, (float)radiusTop, (float)radiusBottom, (float)height, (int)slices, (Color){ (unsigned char)color.r, (unsigned char)color.g, (unsigned char)color.b, (unsigned char)color.a });
+}
+
+RAE_UNUSED void rae_ext_drawGrid(int64_t slices, double spacing) {
+  DrawGrid((int)slices, (float)spacing);
+}
+
+RAE_UNUSED void rae_ext_beginMode3D(Camera3D camera) {
+  BeginMode3D((Camera3D){ .position = (Vector3){ (float)camera.position.x, (float)camera.position.y, (float)camera.position.z }, .target = (Vector3){ (float)camera.target.x, (float)camera.target.y, (float)camera.target.z }, .up = (Vector3){ (float)camera.up.x, (float)camera.up.y, (float)camera.up.z }, .fovy = (float)camera.fovy, .projection = (int)camera.projection });
+}
+
+RAE_UNUSED void rae_ext_endMode3D(void) {
+  EndMode3D();
+}
+
+RAE_UNUSED void rae_ext_setTargetFPS(int64_t fps) {
+  SetTargetFPS((int)fps);
+}
+
+RAE_UNUSED int64_t rae_ext_isKeyDown(int64_t key) {
+  return IsKeyDown((int)key);
+}
+
+RAE_UNUSED int64_t rae_ext_isKeyPressed(int64_t key) {
+  return IsKeyPressed((int)key);
+}
+
+RAE_UNUSED int64_t rae_ext_getScreenWidth(void) {
+  return GetScreenWidth();
+}
+
+RAE_UNUSED int64_t rae_ext_getScreenHeight(void) {
+  return GetScreenHeight();
+}
+
+extern double rae_ext_getTime(void);
+extern Color rae_ext_colorFromHSV(double hue, double saturation, double value);
+extern void rae_ext_rae_seed(int64_t n);
+extern double rae_ext_rae_random(void);
+extern int64_t rae_ext_rae_random_int(int64_t min, int64_t max);
+extern double rae_ext_rae_math_sin(double x);
+extern double rae_ext_rae_math_cos(double x);
+extern double rae_ext_rae_math_tan(double x);
+extern double rae_ext_rae_math_asin(double x);
+extern double rae_ext_rae_math_acos(double x);
+extern double rae_ext_rae_math_atan(double x);
+extern double rae_ext_rae_math_atan2(double y, double x);
+extern double rae_ext_rae_math_sqrt(double x);
+extern double rae_ext_rae_math_pow(double base, double exp);
+extern double rae_ext_rae_math_exp(double x);
+extern double rae_ext_rae_math_log(double x);
+extern double rae_ext_rae_math_floor(double x);
+extern double rae_ext_rae_math_ceil(double x);
+extern double rae_ext_rae_math_round(double x);
+RAE_UNUSED static double rae_PI_(void);
+RAE_UNUSED static void rae_seed_rae_Int_(int64_t n);
+RAE_UNUSED static double rae_random_(void);
+RAE_UNUSED static int64_t rae_random_rae_Int_rae_Int_(int64_t min, int64_t max);
+RAE_UNUSED static int64_t rae_abs_rae_Int_(int64_t n);
+RAE_UNUSED static double rae_abs_rae_Float_(double n);
+RAE_UNUSED static int64_t rae_min_rae_Int_rae_Int_(int64_t a, int64_t b);
+RAE_UNUSED static int64_t rae_max_rae_Int_rae_Int_(int64_t a, int64_t b);
+RAE_UNUSED static int64_t rae_clamp_rae_Int_rae_Int_rae_Int_(int64_t val, int64_t low, int64_t high);
+RAE_UNUSED static double rae_lerp_rae_Float_rae_Float_rae_Float_(double a, double b, double t);
+RAE_UNUSED static double rae_randomFloat_rae_Float_rae_Float_(double min, double max);
+RAE_UNUSED static double rae_easeLinear_rae_Float_(double t);
+RAE_UNUSED static double rae_easeInSine_rae_Float_(double t);
+RAE_UNUSED static double rae_easeOutSine_rae_Float_(double t);
+RAE_UNUSED static double rae_easeInOutSine_rae_Float_(double t);
+RAE_UNUSED static double rae_easeInQuad_rae_Float_(double t);
+RAE_UNUSED static double rae_easeOutQuad_rae_Float_(double t);
+RAE_UNUSED static double rae_easeInOutQuad_rae_Float_(double t);
+RAE_UNUSED static double rae_easeInCubic_rae_Float_(double t);
+RAE_UNUSED static double rae_easeOutCubic_rae_Float_(double t);
+RAE_UNUSED static double rae_easeInOutCubic_rae_Float_(double t);
+RAE_UNUSED static double rae_easeInQuart_rae_Float_(double t);
+RAE_UNUSED static double rae_easeOutQuart_rae_Float_(double t);
+RAE_UNUSED static double rae_easeInOutQuart_rae_Float_(double t);
+RAE_UNUSED static double rae_easeInExpo_rae_Float_(double t);
+RAE_UNUSED static double rae_easeOutExpo_rae_Float_(double t);
+RAE_UNUSED static double rae_easeInBack_rae_Float_(double t);
+RAE_UNUSED static double rae_easeOutBack_rae_Float_(double t);
+RAE_UNUSED static double rae_easeOutBounce_rae_Float_(double t);
+RAE_UNUSED static double rae_easeInBounce_rae_Float_(double t);
+RAE_UNUSED static Timer rae_createTimer_(void);
+RAE_UNUSED static void rae_start_rae_Timer_(Timer* t);
+RAE_UNUSED static void rae_stop_rae_Timer_(Timer* t);
+RAE_UNUSED static void rae_reset_rae_Timer_(Timer* t);
+RAE_UNUSED static int64_t rae_elapsedNs_rae_Timer_(const Timer* t);
+RAE_UNUSED static double rae_elapsedMs_rae_Timer_(const Timer* t);
+RAE_UNUSED static double rae_elapsedSeconds_rae_Timer_(const Timer* t);
+
+RAE_UNUSED static double rae_toFloat_rae_Int_(int64_t this) {
+  double _ret = rae_ext_rae_int_to_float(this);
+  return _ret;
+}
+
+typedef struct {
+  int64_t this;
+} _spawn_args_rae_toFloat_rae_Int_;
+
+static void* _spawn_wrapper_rae_toFloat_rae_Int_(void* data) {
+  _spawn_args_rae_toFloat_rae_Int_* args = (_spawn_args_rae_toFloat_rae_Int_*)data;
+  rae_toFloat_rae_Int_(args->this);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static int64_t rae_toInt_rae_Float_(double this) {
+  int64_t _ret = rae_ext_rae_float_to_int(this);
+  return _ret;
+}
+
+typedef struct {
+  double this;
+} _spawn_args_rae_toInt_rae_Float_;
+
+static void* _spawn_wrapper_rae_toInt_rae_Float_(void* data) {
+  _spawn_args_rae_toInt_rae_Float_* args = (_spawn_args_rae_toInt_rae_Float_*)data;
+  rae_toInt_rae_Float_(args->this);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static rae_List_Any_ rae_createList_rae_Int_(int64_t initialCap) {
+  rae_List_Any_ _ret = (rae_List_Any_){ .data = rae_ext_rae_buf_alloc(initialCap, sizeof(RaeAny)), .length = 0, .capacity = initialCap };
+  return _ret;
+}
+
+typedef struct {
+  int64_t initialCap;
+} _spawn_args_rae_createList_rae_Int_;
+
+static void* _spawn_wrapper_rae_createList_rae_Int_(void* data) {
+  _spawn_args_rae_createList_rae_Int_* args = (_spawn_args_rae_createList_rae_Int_*)data;
+  rae_createList_rae_Int_(args->initialCap);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static void rae_grow_rae_List_Any__(rae_List_Any_* this) {
+  int64_t newCap = this->capacity * 2;
+  if (newCap == 0) {
+  newCap = 4;
+  }
+  RaeAny* newData = rae_ext_rae_buf_alloc(newCap, sizeof(RaeAny));
+  rae_ext_rae_buf_copy(this->data, 0, newData, 0, this->length, sizeof(RaeAny));
+  rae_ext_rae_buf_free(this->data);
+  this->data = newData;
+  this->capacity = newCap;
+}
+
+typedef struct {
+  rae_List_Any_* this;
+} _spawn_args_rae_grow_rae_List_Any__;
+
+static void* _spawn_wrapper_rae_grow_rae_List_Any__(void* data) {
+  _spawn_args_rae_grow_rae_List_Any__* args = (_spawn_args_rae_grow_rae_List_Any__*)data;
+  rae_grow_rae_List_Any__(args->this);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static void rae_add_rae_List_Any__rae_T_(rae_List_Any_* this, RaeAny value) {
+  if (this->length == this->capacity) {
+  rae_grow_rae_List_Any__(this);
+  }
+  ((RaeAny*)( this->data))[this->length] = rae_any(value);
+  this->length = this->length + 1;
+}
+
+typedef struct {
+  rae_List_Any_* this;
+  RaeAny value;
+} _spawn_args_rae_add_rae_List_Any__rae_T_;
+
+static void* _spawn_wrapper_rae_add_rae_List_Any__rae_T_(void* data) {
+  _spawn_args_rae_add_rae_List_Any__rae_T_* args = (_spawn_args_rae_add_rae_List_Any__rae_T_*)data;
+  rae_add_rae_List_Any__rae_T_(args->this, args->value);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static RaeAny rae_get_rae_List_Any__rae_Int_(const rae_List_Any_* this, int64_t index) {
+  if (index < 0 || index >= this->length) {
+  RaeAny _ret = rae_any_none();
+  return _ret;
+  }
+  RaeAny _ret = rae_any(((RaeAny*)( this->data))[index]);
+  return _ret;
+}
+
+typedef struct {
+  rae_List_Any_* this;
+  int64_t index;
+} _spawn_args_rae_get_rae_List_Any__rae_Int_;
+
+static void* _spawn_wrapper_rae_get_rae_List_Any__rae_Int_(void* data) {
+  _spawn_args_rae_get_rae_List_Any__rae_Int_* args = (_spawn_args_rae_get_rae_List_Any__rae_Int_*)data;
+  rae_get_rae_List_Any__rae_Int_(args->this, args->index);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static void rae_set_rae_List_Any__rae_Int_rae_T_(rae_List_Any_* this, int64_t index, RaeAny value) {
+  if (index < 0 || index >= this->length) {
+  return;
+  }
+  ((RaeAny*)( this->data))[index] = rae_any(value);
+}
+
+typedef struct {
+  rae_List_Any_* this;
+  int64_t index;
+  RaeAny value;
+} _spawn_args_rae_set_rae_List_Any__rae_Int_rae_T_;
+
+static void* _spawn_wrapper_rae_set_rae_List_Any__rae_Int_rae_T_(void* data) {
+  _spawn_args_rae_set_rae_List_Any__rae_Int_rae_T_* args = (_spawn_args_rae_set_rae_List_Any__rae_Int_rae_T_*)data;
+  rae_set_rae_List_Any__rae_Int_rae_T_(args->this, args->index, args->value);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static void rae_insert_rae_List_Any__rae_Int_rae_T_(rae_List_Any_* this, int64_t index, RaeAny value) {
+  if (index < 0 || index > this->length) {
+  return;
+  }
+  if (this->length == this->capacity) {
+  rae_grow_rae_List_Any__(this);
+  }
+  if (index < this->length) {
+  rae_ext_rae_buf_copy(this->data, index, this->data, index + 1, this->length - index, sizeof(RaeAny));
+  }
+  ((RaeAny*)( this->data))[index] = rae_any(value);
+  this->length = this->length + 1;
+}
+
+typedef struct {
+  rae_List_Any_* this;
+  int64_t index;
+  RaeAny value;
+} _spawn_args_rae_insert_rae_List_Any__rae_Int_rae_T_;
+
+static void* _spawn_wrapper_rae_insert_rae_List_Any__rae_Int_rae_T_(void* data) {
+  _spawn_args_rae_insert_rae_List_Any__rae_Int_rae_T_* args = (_spawn_args_rae_insert_rae_List_Any__rae_Int_rae_T_*)data;
+  rae_insert_rae_List_Any__rae_Int_rae_T_(args->this, args->index, args->value);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static RaeAny rae_pop_rae_List_Any__(rae_List_Any_* this) {
+  if (this->length == 0) {
+  RaeAny _ret = rae_any_none();
+  return _ret;
+  }
+  RaeAny val = ((RaeAny*)( this->data))[this->length - 1];
+  this->length = this->length - 1;
+  RaeAny _ret = rae_any(val);
+  return _ret;
+}
+
+typedef struct {
+  rae_List_Any_* this;
+} _spawn_args_rae_pop_rae_List_Any__;
+
+static void* _spawn_wrapper_rae_pop_rae_List_Any__(void* data) {
+  _spawn_args_rae_pop_rae_List_Any__* args = (_spawn_args_rae_pop_rae_List_Any__*)data;
+  rae_pop_rae_List_Any__(args->this);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static void rae_remove_rae_List_Any__rae_Int_(rae_List_Any_* this, int64_t index) {
+  if (index < 0 || index >= this->length) {
+  return;
+  }
+  if (index < this->length - 1) {
+  rae_ext_rae_buf_copy(this->data, index + 1, this->data, index, this->length - index - 1, sizeof(RaeAny));
+  }
+  this->length = this->length - 1;
+}
+
+typedef struct {
+  rae_List_Any_* this;
+  int64_t index;
+} _spawn_args_rae_remove_rae_List_Any__rae_Int_;
+
+static void* _spawn_wrapper_rae_remove_rae_List_Any__rae_Int_(void* data) {
+  _spawn_args_rae_remove_rae_List_Any__rae_Int_* args = (_spawn_args_rae_remove_rae_List_Any__rae_Int_*)data;
+  rae_remove_rae_List_Any__rae_Int_(args->this, args->index);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static void rae_clear_rae_List_Any__(rae_List_Any_* this) {
+  this->length = 0;
+}
+
+typedef struct {
+  rae_List_Any_* this;
+} _spawn_args_rae_clear_rae_List_Any__;
+
+static void* _spawn_wrapper_rae_clear_rae_List_Any__(void* data) {
+  _spawn_args_rae_clear_rae_List_Any__* args = (_spawn_args_rae_clear_rae_List_Any__*)data;
+  rae_clear_rae_List_Any__(args->this);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static int64_t rae_length_rae_List_Any__(const rae_List_Any_* this) {
+  int64_t _ret = this->length;
+  return _ret;
+}
+
+typedef struct {
+  rae_List_Any_* this;
+} _spawn_args_rae_length_rae_List_Any__;
+
+static void* _spawn_wrapper_rae_length_rae_List_Any__(void* data) {
+  _spawn_args_rae_length_rae_List_Any__* args = (_spawn_args_rae_length_rae_List_Any__*)data;
+  rae_length_rae_List_Any__(args->this);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static void rae_swap_rae_List_Any__rae_Int_rae_Int_(rae_List_Any_* this, int64_t i, int64_t j) {
+  RaeAny temp = ((RaeAny*)( this->data))[i];
+  ((RaeAny*)( this->data))[i] = rae_any(((RaeAny*)( this->data))[j]);
+  ((RaeAny*)( this->data))[j] = rae_any(temp);
+}
+
+typedef struct {
+  rae_List_Any_* this;
+  int64_t i;
+  int64_t j;
+} _spawn_args_rae_swap_rae_List_Any__rae_Int_rae_Int_;
+
+static void* _spawn_wrapper_rae_swap_rae_List_Any__rae_Int_rae_Int_(void* data) {
+  _spawn_args_rae_swap_rae_List_Any__rae_Int_rae_Int_* args = (_spawn_args_rae_swap_rae_List_Any__rae_Int_rae_Int_*)data;
+  rae_swap_rae_List_Any__rae_Int_rae_Int_(args->this, args->i, args->j);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static void rae_free_rae_List_Any__(rae_List_Any_* this) {
+  rae_ext_rae_buf_free(this->data);
+  this->length = 0;
+  this->capacity = 0;
+}
+
+typedef struct {
+  rae_List_Any_* this;
+} _spawn_args_rae_free_rae_List_Any__;
+
+static void* _spawn_wrapper_rae_free_rae_List_Any__(void* data) {
+  _spawn_args_rae_free_rae_List_Any__* args = (_spawn_args_rae_free_rae_List_Any__*)data;
+  rae_free_rae_List_Any__(args->this);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static rae_StringMap_Any_ rae_createStringMap_rae_Int_(int64_t initialCap) {
+  rae_StringMap_Any_ _ret = (rae_StringMap_Any_){ .data = rae_ext_rae_buf_alloc(initialCap, sizeof(RaeAny)), .length = 0, .capacity = initialCap };
+  return _ret;
+}
+
+typedef struct {
+  int64_t initialCap;
+} _spawn_args_rae_createStringMap_rae_Int_;
+
+static void* _spawn_wrapper_rae_createStringMap_rae_Int_(void* data) {
+  _spawn_args_rae_createStringMap_rae_Int_* args = (_spawn_args_rae_createStringMap_rae_Int_*)data;
+  rae_createStringMap_rae_Int_(args->initialCap);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static void rae_set_rae_StringMap_Any__rae_String_rae_V_(rae_StringMap_Any_* this, const char* k, RaeAny value) {
+  if (this->capacity == 0) {
+  this->capacity = 8;
+  this->data = rae_ext_rae_buf_alloc(this->capacity, sizeof(RaeAny));
+  }
+  if (this->length * 2 > this->capacity) {
+  rae_growStringMap_rae_StringMap_Any__(this);
+  }
+  int64_t h = rae_ext_rae_str_hash(k);
+  int64_t idx = h % this->capacity;
+  if (idx < 0) {
+  idx = (-idx);
+  }
+  {
+  while (1) {
+  rae_StringMapEntry_Any_ entry = ((rae_StringMapEntry_Any_*)( this->data))[idx];
+  if ((!(entry.occupied))) {
+  ((rae_StringMapEntry_Any_*)( this->data))[idx] = (rae_StringMapEntry_Any_){ .k = k, .value = rae_any(value), .occupied = 1 };
+  this->length = this->length + 1;
+  return;
+  }
+  if (rae_ext_rae_str_eq(entry.k, k)) {
+  entry.value = value;
+  ((rae_StringMapEntry_Any_*)( this->data))[idx] = entry;
+  return;
+  }
+  idx = (idx + 1) % this->capacity;
+  }
+  }
+}
+
+typedef struct {
+  rae_StringMap_Any_* this;
+  const char* k;
+  RaeAny value;
+} _spawn_args_rae_set_rae_StringMap_Any__rae_String_rae_V_;
+
+static void* _spawn_wrapper_rae_set_rae_StringMap_Any__rae_String_rae_V_(void* data) {
+  _spawn_args_rae_set_rae_StringMap_Any__rae_String_rae_V_* args = (_spawn_args_rae_set_rae_StringMap_Any__rae_String_rae_V_*)data;
+  rae_set_rae_StringMap_Any__rae_String_rae_V_(args->this, args->k, args->value);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static RaeAny rae_get_rae_StringMap_Any__rae_String_(const rae_StringMap_Any_* this, const char* k) {
+  if (this->capacity == 0) {
+  RaeAny _ret = rae_any_none();
+  return _ret;
+  }
+  int64_t h = rae_ext_rae_str_hash(k);
+  int64_t idx = h % this->capacity;
+  if (idx < 0) {
+  idx = (-idx);
+  }
+  int64_t startIdx = idx;
+  {
+  while (1) {
+  rae_StringMapEntry_Any_ entry = ((rae_StringMapEntry_Any_*)( this->data))[idx];
+  if ((!(entry.occupied))) {
+  RaeAny _ret = rae_any_none();
+  return _ret;
+  }
+  if (rae_ext_rae_str_eq(entry.k, k)) {
+  RaeAny _ret = rae_any(entry.value);
+  return _ret;
+  }
+  idx = (idx + 1) % this->capacity;
+  if (idx == startIdx) {
+  RaeAny _ret = rae_any_none();
+  return _ret;
+  }
+  }
+  }
+}
+
+typedef struct {
+  rae_StringMap_Any_* this;
+  const char* k;
+} _spawn_args_rae_get_rae_StringMap_Any__rae_String_;
+
+static void* _spawn_wrapper_rae_get_rae_StringMap_Any__rae_String_(void* data) {
+  _spawn_args_rae_get_rae_StringMap_Any__rae_String_* args = (_spawn_args_rae_get_rae_StringMap_Any__rae_String_*)data;
+  rae_get_rae_StringMap_Any__rae_String_(args->this, args->k);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static int8_t rae_has_rae_StringMap_Any__rae_String_(const rae_StringMap_Any_* this, const char* k) {
+  RaeAny __match0 = rae_any(((RaeAny)(rae_get_rae_StringMap_Any__rae_String_(this, k))));
+  if (__match0.type == RAE_TYPE_NONE) {
+  int8_t _ret = 0;
+  return _ret;
+  } else {
+  int8_t _ret = 1;
+  return _ret;
+  }
+}
+
+typedef struct {
+  rae_StringMap_Any_* this;
+  const char* k;
+} _spawn_args_rae_has_rae_StringMap_Any__rae_String_;
+
+static void* _spawn_wrapper_rae_has_rae_StringMap_Any__rae_String_(void* data) {
+  _spawn_args_rae_has_rae_StringMap_Any__rae_String_* args = (_spawn_args_rae_has_rae_StringMap_Any__rae_String_*)data;
+  rae_has_rae_StringMap_Any__rae_String_(args->this, args->k);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static void rae_remove_rae_StringMap_Any__rae_String_(rae_StringMap_Any_* this, const char* k) {
+  if (this->capacity == 0) {
+  return;
+  }
+  int64_t h = rae_ext_rae_str_hash(k);
+  int64_t idx = h % this->capacity;
+  if (idx < 0) {
+  idx = (-idx);
+  }
+  int64_t startIdx = idx;
+  {
+  while (1) {
+  rae_StringMapEntry_Any_ entry = ((rae_StringMapEntry_Any_*)( this->data))[idx];
+  if ((!(entry.occupied))) {
+  return;
+  }
+  if (rae_ext_rae_str_eq(entry.k, k)) {
+  entry.occupied = 0;
+  ((rae_StringMapEntry_Any_*)( this->data))[idx] = entry;
+  this->length = this->length - 1;
+  return;
+  }
+  idx = (idx + 1) % this->capacity;
+  if (idx == startIdx) {
+  return;
+  }
+  }
+  }
+}
+
+typedef struct {
+  rae_StringMap_Any_* this;
+  const char* k;
+} _spawn_args_rae_remove_rae_StringMap_Any__rae_String_;
+
+static void* _spawn_wrapper_rae_remove_rae_StringMap_Any__rae_String_(void* data) {
+  _spawn_args_rae_remove_rae_StringMap_Any__rae_String_* args = (_spawn_args_rae_remove_rae_StringMap_Any__rae_String_*)data;
+  rae_remove_rae_StringMap_Any__rae_String_(args->this, args->k);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static rae_List_String_ rae_keys_rae_StringMap_Any__(const rae_StringMap_Any_* this) {
+  rae_List_String_ result = ((union { rae_List_Any_ src; rae_List_String_ dst; }){ .src = rae_createList_rae_Int_(this->length) }).dst;
+  int64_t i = 0;
+  {
+  while (i < this->capacity) {
+  rae_StringMapEntry_Any_ entry = ((rae_StringMapEntry_Any_*)( this->data))[i];
+  if (entry.occupied) {
+  rae_add_rae_List_Any__rae_T_(((rae_List_Any_*)&(result)), rae_any(entry.k));
+  }
+  i = i + 1;
+  }
+  }
+  rae_List_String_ _ret = result;
+  return _ret;
+}
+
+typedef struct {
+  rae_StringMap_Any_* this;
+} _spawn_args_rae_keys_rae_StringMap_Any__;
+
+static void* _spawn_wrapper_rae_keys_rae_StringMap_Any__(void* data) {
+  _spawn_args_rae_keys_rae_StringMap_Any__* args = (_spawn_args_rae_keys_rae_StringMap_Any__*)data;
+  rae_keys_rae_StringMap_Any__(args->this);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static rae_List_Any_ rae_values_rae_StringMap_Any__(const rae_StringMap_Any_* this) {
+  rae_List_Any_ result = ((union { rae_List_Any_ src; rae_List_Any_ dst; }){ .src = rae_createList_rae_Int_(this->length) }).dst;
+  int64_t i = 0;
+  {
+  while (i < this->capacity) {
+  rae_StringMapEntry_Any_ entry = ((rae_StringMapEntry_Any_*)( this->data))[i];
+  if (entry.occupied) {
+  rae_add_rae_List_Any__rae_T_(((rae_List_Any_*)&(result)), entry.value);
+  }
+  i = i + 1;
+  }
+  }
+  rae_List_Any_ _ret = result;
+  return _ret;
+}
+
+typedef struct {
+  rae_StringMap_Any_* this;
+} _spawn_args_rae_values_rae_StringMap_Any__;
+
+static void* _spawn_wrapper_rae_values_rae_StringMap_Any__(void* data) {
+  _spawn_args_rae_values_rae_StringMap_Any__* args = (_spawn_args_rae_values_rae_StringMap_Any__*)data;
+  rae_values_rae_StringMap_Any__(args->this);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static void rae_growStringMap_rae_StringMap_Any__(rae_StringMap_Any_* this) {
+  int64_t oldCap = this->capacity;
+  rae_StringMapEntry_Any_* oldData = this->data;
+  this->capacity = oldCap * 2;
+  if (this->capacity == 0) {
+  this->capacity = 8;
+  }
+  this->data = rae_ext_rae_buf_alloc(this->capacity, sizeof(RaeAny));
+  this->length = 0;
+  int64_t i = 0;
+  {
+  while (i < oldCap) {
+  rae_StringMapEntry_Any_ entry = ((rae_StringMapEntry_Any_*)( oldData))[i];
+  if (entry.occupied) {
+  rae_set_rae_StringMap_Any__rae_String_rae_V_(this, entry.k, entry.value);
+  }
+  i = i + 1;
+  }
+  }
+  rae_ext_rae_buf_free(oldData);
+}
+
+typedef struct {
+  rae_StringMap_Any_* this;
+} _spawn_args_rae_growStringMap_rae_StringMap_Any__;
+
+static void* _spawn_wrapper_rae_growStringMap_rae_StringMap_Any__(void* data) {
+  _spawn_args_rae_growStringMap_rae_StringMap_Any__* args = (_spawn_args_rae_growStringMap_rae_StringMap_Any__*)data;
+  rae_growStringMap_rae_StringMap_Any__(args->this);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static void rae_free_rae_StringMap_Any__(rae_StringMap_Any_* this) {
+  rae_ext_rae_buf_free(this->data);
+  this->length = 0;
+  this->capacity = 0;
+}
+
+typedef struct {
+  rae_StringMap_Any_* this;
+} _spawn_args_rae_free_rae_StringMap_Any__;
+
+static void* _spawn_wrapper_rae_free_rae_StringMap_Any__(void* data) {
+  _spawn_args_rae_free_rae_StringMap_Any__* args = (_spawn_args_rae_free_rae_StringMap_Any__*)data;
+  rae_free_rae_StringMap_Any__(args->this);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static rae_IntMap_Any_ rae_createIntMap_rae_Int_(int64_t initialCap) {
+  rae_IntMap_Any_ _ret = (rae_IntMap_Any_){ .data = rae_ext_rae_buf_alloc(initialCap, sizeof(RaeAny)), .length = 0, .capacity = initialCap };
+  return _ret;
+}
+
+typedef struct {
+  int64_t initialCap;
+} _spawn_args_rae_createIntMap_rae_Int_;
+
+static void* _spawn_wrapper_rae_createIntMap_rae_Int_(void* data) {
+  _spawn_args_rae_createIntMap_rae_Int_* args = (_spawn_args_rae_createIntMap_rae_Int_*)data;
+  rae_createIntMap_rae_Int_(args->initialCap);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static void rae_set_rae_IntMap_Any__rae_Int_rae_V_(rae_IntMap_Any_* this, int64_t k, RaeAny value) {
+  if (this->capacity == 0) {
+  this->capacity = 8;
+  this->data = rae_ext_rae_buf_alloc(this->capacity, sizeof(RaeAny));
+  }
+  if (this->length * 2 > this->capacity) {
+  rae_growIntMap_rae_IntMap_Any__(this);
+  }
+  int64_t h = k;
+  int64_t idx = h % this->capacity;
+  if (idx < 0) {
+  idx = (-idx);
+  }
+  {
+  while (1) {
+  rae_IntMapEntry_Any_ entry = ((rae_IntMapEntry_Any_*)( this->data))[idx];
+  if ((!(entry.occupied))) {
+  ((rae_IntMapEntry_Any_*)( this->data))[idx] = (rae_IntMapEntry_Any_){ .k = k, .value = rae_any(value), .occupied = 1 };
+  this->length = this->length + 1;
+  return;
+  }
+  if (entry.k == k) {
+  entry.value = value;
+  ((rae_IntMapEntry_Any_*)( this->data))[idx] = entry;
+  return;
+  }
+  idx = (idx + 1) % this->capacity;
+  }
+  }
+}
+
+typedef struct {
+  rae_IntMap_Any_* this;
+  int64_t k;
+  RaeAny value;
+} _spawn_args_rae_set_rae_IntMap_Any__rae_Int_rae_V_;
+
+static void* _spawn_wrapper_rae_set_rae_IntMap_Any__rae_Int_rae_V_(void* data) {
+  _spawn_args_rae_set_rae_IntMap_Any__rae_Int_rae_V_* args = (_spawn_args_rae_set_rae_IntMap_Any__rae_Int_rae_V_*)data;
+  rae_set_rae_IntMap_Any__rae_Int_rae_V_(args->this, args->k, args->value);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static RaeAny rae_get_rae_IntMap_Any__rae_Int_(const rae_IntMap_Any_* this, int64_t k) {
+  if (this->capacity == 0) {
+  RaeAny _ret = rae_any_none();
+  return _ret;
+  }
+  int64_t h = k;
+  int64_t idx = h % this->capacity;
+  if (idx < 0) {
+  idx = (-idx);
+  }
+  int64_t startIdx = idx;
+  {
+  while (1) {
+  rae_IntMapEntry_Any_ entry = ((rae_IntMapEntry_Any_*)( this->data))[idx];
+  if ((!(entry.occupied))) {
+  RaeAny _ret = rae_any_none();
+  return _ret;
+  }
+  if (entry.k == k) {
+  RaeAny _ret = rae_any(entry.value);
+  return _ret;
+  }
+  idx = (idx + 1) % this->capacity;
+  if (idx == startIdx) {
+  RaeAny _ret = rae_any_none();
+  return _ret;
+  }
+  }
+  }
+}
+
+typedef struct {
+  rae_IntMap_Any_* this;
+  int64_t k;
+} _spawn_args_rae_get_rae_IntMap_Any__rae_Int_;
+
+static void* _spawn_wrapper_rae_get_rae_IntMap_Any__rae_Int_(void* data) {
+  _spawn_args_rae_get_rae_IntMap_Any__rae_Int_* args = (_spawn_args_rae_get_rae_IntMap_Any__rae_Int_*)data;
+  rae_get_rae_IntMap_Any__rae_Int_(args->this, args->k);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static int8_t rae_has_rae_IntMap_Any__rae_Int_(const rae_IntMap_Any_* this, int64_t k) {
+  RaeAny __match0 = rae_any(((RaeAny)(rae_get_rae_IntMap_Any__rae_Int_(this, k))));
+  if (__match0.type == RAE_TYPE_NONE) {
+  int8_t _ret = 0;
+  return _ret;
+  } else {
+  int8_t _ret = 1;
+  return _ret;
+  }
+}
+
+typedef struct {
+  rae_IntMap_Any_* this;
+  int64_t k;
+} _spawn_args_rae_has_rae_IntMap_Any__rae_Int_;
+
+static void* _spawn_wrapper_rae_has_rae_IntMap_Any__rae_Int_(void* data) {
+  _spawn_args_rae_has_rae_IntMap_Any__rae_Int_* args = (_spawn_args_rae_has_rae_IntMap_Any__rae_Int_*)data;
+  rae_has_rae_IntMap_Any__rae_Int_(args->this, args->k);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static void rae_remove_rae_IntMap_Any__rae_Int_(rae_IntMap_Any_* this, int64_t k) {
+  if (this->capacity == 0) {
+  return;
+  }
+  int64_t h = k;
+  int64_t idx = h % this->capacity;
+  if (idx < 0) {
+  idx = (-idx);
+  }
+  int64_t startIdx = idx;
+  {
+  while (1) {
+  rae_IntMapEntry_Any_ entry = ((rae_IntMapEntry_Any_*)( this->data))[idx];
+  if ((!(entry.occupied))) {
+  return;
+  }
+  if (entry.k == k) {
+  entry.occupied = 0;
+  ((rae_IntMapEntry_Any_*)( this->data))[idx] = entry;
+  this->length = this->length - 1;
+  return;
+  }
+  idx = (idx + 1) % this->capacity;
+  if (idx == startIdx) {
+  return;
+  }
+  }
+  }
+}
+
+typedef struct {
+  rae_IntMap_Any_* this;
+  int64_t k;
+} _spawn_args_rae_remove_rae_IntMap_Any__rae_Int_;
+
+static void* _spawn_wrapper_rae_remove_rae_IntMap_Any__rae_Int_(void* data) {
+  _spawn_args_rae_remove_rae_IntMap_Any__rae_Int_* args = (_spawn_args_rae_remove_rae_IntMap_Any__rae_Int_*)data;
+  rae_remove_rae_IntMap_Any__rae_Int_(args->this, args->k);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static rae_List_Int_ rae_keys_rae_IntMap_Any__(const rae_IntMap_Any_* this) {
+  rae_List_Int_ result = ((union { rae_List_Any_ src; rae_List_Int_ dst; }){ .src = rae_createList_rae_Int_(this->length) }).dst;
+  int64_t i = 0;
+  {
+  while (i < this->capacity) {
+  rae_IntMapEntry_Any_ entry = ((rae_IntMapEntry_Any_*)( this->data))[i];
+  if (entry.occupied) {
+  rae_add_rae_List_Any__rae_T_(((rae_List_Any_*)&(result)), rae_any(entry.k));
+  }
+  i = i + 1;
+  }
+  }
+  rae_List_Int_ _ret = result;
+  return _ret;
+}
+
+typedef struct {
+  rae_IntMap_Any_* this;
+} _spawn_args_rae_keys_rae_IntMap_Any__;
+
+static void* _spawn_wrapper_rae_keys_rae_IntMap_Any__(void* data) {
+  _spawn_args_rae_keys_rae_IntMap_Any__* args = (_spawn_args_rae_keys_rae_IntMap_Any__*)data;
+  rae_keys_rae_IntMap_Any__(args->this);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static rae_List_Any_ rae_values_rae_IntMap_Any__(const rae_IntMap_Any_* this) {
+  rae_List_Any_ result = ((union { rae_List_Any_ src; rae_List_Any_ dst; }){ .src = rae_createList_rae_Int_(this->length) }).dst;
+  int64_t i = 0;
+  {
+  while (i < this->capacity) {
+  rae_IntMapEntry_Any_ entry = ((rae_IntMapEntry_Any_*)( this->data))[i];
+  if (entry.occupied) {
+  rae_add_rae_List_Any__rae_T_(((rae_List_Any_*)&(result)), entry.value);
+  }
+  i = i + 1;
+  }
+  }
+  rae_List_Any_ _ret = result;
+  return _ret;
+}
+
+typedef struct {
+  rae_IntMap_Any_* this;
+} _spawn_args_rae_values_rae_IntMap_Any__;
+
+static void* _spawn_wrapper_rae_values_rae_IntMap_Any__(void* data) {
+  _spawn_args_rae_values_rae_IntMap_Any__* args = (_spawn_args_rae_values_rae_IntMap_Any__*)data;
+  rae_values_rae_IntMap_Any__(args->this);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static void rae_growIntMap_rae_IntMap_Any__(rae_IntMap_Any_* this) {
+  int64_t oldCap = this->capacity;
+  rae_IntMapEntry_Any_* oldData = this->data;
+  this->capacity = oldCap * 2;
+  if (this->capacity == 0) {
+  this->capacity = 8;
+  }
+  this->data = rae_ext_rae_buf_alloc(this->capacity, sizeof(RaeAny));
+  this->length = 0;
+  int64_t i = 0;
+  {
+  while (i < oldCap) {
+  rae_IntMapEntry_Any_ entry = ((rae_IntMapEntry_Any_*)( oldData))[i];
+  if (entry.occupied) {
+  rae_set_rae_IntMap_Any__rae_Int_rae_V_(this, entry.k, entry.value);
+  }
+  i = i + 1;
+  }
+  }
+  rae_ext_rae_buf_free(oldData);
+}
+
+typedef struct {
+  rae_IntMap_Any_* this;
+} _spawn_args_rae_growIntMap_rae_IntMap_Any__;
+
+static void* _spawn_wrapper_rae_growIntMap_rae_IntMap_Any__(void* data) {
+  _spawn_args_rae_growIntMap_rae_IntMap_Any__* args = (_spawn_args_rae_growIntMap_rae_IntMap_Any__*)data;
+  rae_growIntMap_rae_IntMap_Any__(args->this);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static void rae_free_rae_IntMap_Any__(rae_IntMap_Any_* this) {
+  rae_ext_rae_buf_free(this->data);
+  this->length = 0;
+  this->capacity = 0;
+}
+
+typedef struct {
+  rae_IntMap_Any_* this;
+} _spawn_args_rae_free_rae_IntMap_Any__;
+
+static void* _spawn_wrapper_rae_free_rae_IntMap_Any__(void* data) {
+  _spawn_args_rae_free_rae_IntMap_Any__* args = (_spawn_args_rae_free_rae_IntMap_Any__*)data;
+  rae_free_rae_IntMap_Any__(args->this);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static int64_t rae_length_rae_String_(const char* this) {
+  int64_t _ret = rae_ext_rae_str_len(this);
+  return _ret;
+}
+
+typedef struct {
+  const char* this;
+} _spawn_args_rae_length_rae_String_;
+
+static void* _spawn_wrapper_rae_length_rae_String_(void* data) {
+  _spawn_args_rae_length_rae_String_* args = (_spawn_args_rae_length_rae_String_*)data;
+  rae_length_rae_String_(args->this);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static int64_t rae_compare_rae_String_rae_String_(const char* this, const char* other) {
+  int64_t _ret = rae_ext_rae_str_compare(this, other);
+  return _ret;
+}
+
+typedef struct {
+  const char* this;
+  const char* other;
+} _spawn_args_rae_compare_rae_String_rae_String_;
+
+static void* _spawn_wrapper_rae_compare_rae_String_rae_String_(void* data) {
+  _spawn_args_rae_compare_rae_String_rae_String_* args = (_spawn_args_rae_compare_rae_String_rae_String_*)data;
+  rae_compare_rae_String_rae_String_(args->this, args->other);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static int8_t rae_equals_rae_String_rae_String_(const char* this, const char* other) {
+  int8_t _ret = rae_ext_rae_str_eq(this, other);
+  return _ret;
+}
+
+typedef struct {
+  const char* this;
+  const char* other;
+} _spawn_args_rae_equals_rae_String_rae_String_;
+
+static void* _spawn_wrapper_rae_equals_rae_String_rae_String_(void* data) {
+  _spawn_args_rae_equals_rae_String_rae_String_* args = (_spawn_args_rae_equals_rae_String_rae_String_*)data;
+  rae_equals_rae_String_rae_String_(args->this, args->other);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static int64_t rae_hash_rae_String_(const char* this) {
+  int64_t _ret = rae_ext_rae_str_hash(this);
+  return _ret;
+}
+
+typedef struct {
+  const char* this;
+} _spawn_args_rae_hash_rae_String_;
+
+static void* _spawn_wrapper_rae_hash_rae_String_(void* data) {
+  _spawn_args_rae_hash_rae_String_* args = (_spawn_args_rae_hash_rae_String_*)data;
+  rae_hash_rae_String_(args->this);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static const char* rae_concat_rae_String_rae_String_(const char* this, const char* other) {
+  const char* _ret = rae_ext_rae_str_concat(this, other);
+  return _ret;
+}
+
+typedef struct {
+  const char* this;
+  const char* other;
+} _spawn_args_rae_concat_rae_String_rae_String_;
+
+static void* _spawn_wrapper_rae_concat_rae_String_rae_String_(void* data) {
+  _spawn_args_rae_concat_rae_String_rae_String_* args = (_spawn_args_rae_concat_rae_String_rae_String_*)data;
+  rae_concat_rae_String_rae_String_(args->this, args->other);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static const char* rae_sub_rae_String_rae_Int_rae_Int_(const char* this, int64_t start, int64_t len) {
+  const char* _ret = rae_ext_rae_str_sub(this, start, len);
+  return _ret;
+}
+
+typedef struct {
+  const char* this;
+  int64_t start;
+  int64_t len;
+} _spawn_args_rae_sub_rae_String_rae_Int_rae_Int_;
+
+static void* _spawn_wrapper_rae_sub_rae_String_rae_Int_rae_Int_(void* data) {
+  _spawn_args_rae_sub_rae_String_rae_Int_rae_Int_* args = (_spawn_args_rae_sub_rae_String_rae_Int_rae_Int_*)data;
+  rae_sub_rae_String_rae_Int_rae_Int_(args->this, args->start, args->len);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static int8_t rae_contains_rae_String_rae_String_(const char* this, const char* sub) {
+  int8_t _ret = rae_ext_rae_str_contains(this, sub);
+  return _ret;
+}
+
+typedef struct {
+  const char* this;
+  const char* sub;
+} _spawn_args_rae_contains_rae_String_rae_String_;
+
+static void* _spawn_wrapper_rae_contains_rae_String_rae_String_(void* data) {
+  _spawn_args_rae_contains_rae_String_rae_String_* args = (_spawn_args_rae_contains_rae_String_rae_String_*)data;
+  rae_contains_rae_String_rae_String_(args->this, args->sub);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static int8_t rae_startsWith_rae_String_rae_String_(const char* this, const char* prefix) {
+  int8_t _ret = rae_ext_rae_str_starts_with(this, prefix);
+  return _ret;
+}
+
+typedef struct {
+  const char* this;
+  const char* prefix;
+} _spawn_args_rae_startsWith_rae_String_rae_String_;
+
+static void* _spawn_wrapper_rae_startsWith_rae_String_rae_String_(void* data) {
+  _spawn_args_rae_startsWith_rae_String_rae_String_* args = (_spawn_args_rae_startsWith_rae_String_rae_String_*)data;
+  rae_startsWith_rae_String_rae_String_(args->this, args->prefix);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static int8_t rae_endsWith_rae_String_rae_String_(const char* this, const char* suffix) {
+  int8_t _ret = rae_ext_rae_str_ends_with(this, suffix);
+  return _ret;
+}
+
+typedef struct {
+  const char* this;
+  const char* suffix;
+} _spawn_args_rae_endsWith_rae_String_rae_String_;
+
+static void* _spawn_wrapper_rae_endsWith_rae_String_rae_String_(void* data) {
+  _spawn_args_rae_endsWith_rae_String_rae_String_* args = (_spawn_args_rae_endsWith_rae_String_rae_String_*)data;
+  rae_endsWith_rae_String_rae_String_(args->this, args->suffix);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static int64_t rae_indexOf_rae_String_rae_String_(const char* this, const char* sub) {
+  int64_t _ret = rae_ext_rae_str_index_of(this, sub);
+  return _ret;
+}
+
+typedef struct {
+  const char* this;
+  const char* sub;
+} _spawn_args_rae_indexOf_rae_String_rae_String_;
+
+static void* _spawn_wrapper_rae_indexOf_rae_String_rae_String_(void* data) {
+  _spawn_args_rae_indexOf_rae_String_rae_String_* args = (_spawn_args_rae_indexOf_rae_String_rae_String_*)data;
+  rae_indexOf_rae_String_rae_String_(args->this, args->sub);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static const char* rae_trim_rae_String_(const char* this) {
+  const char* _ret = rae_ext_rae_str_trim(this);
+  return _ret;
+}
+
+typedef struct {
+  const char* this;
+} _spawn_args_rae_trim_rae_String_;
+
+static void* _spawn_wrapper_rae_trim_rae_String_(void* data) {
+  _spawn_args_rae_trim_rae_String_* args = (_spawn_args_rae_trim_rae_String_*)data;
+  rae_trim_rae_String_(args->this);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static rae_List_String_ rae_split_rae_String_rae_String_(const char* this, const char* sep) {
+  rae_List_String_ result = ((union { rae_List_Any_ src; rae_List_String_ dst; }){ .src = rae_createList_rae_Int_(4) }).dst;
+  if (rae_length_rae_String_(sep) == 0) {
+  rae_add_rae_List_Any__rae_T_(((rae_List_Any_*)&(result)), rae_any(this));
+  rae_List_String_ _ret = result;
+  return _ret;
+  }
+  const char* remaining = this;
+  {
+  while (1) {
+  int64_t idx = rae_indexOf_rae_String_rae_String_(remaining, sep);
+  if (idx == (-1)) {
+  rae_add_rae_List_Any__rae_T_(((rae_List_Any_*)&(result)), rae_any(remaining));
+  rae_List_String_ _ret = result;
+  return _ret;
+  }
+  const char* part = rae_sub_rae_String_rae_Int_rae_Int_(remaining, 0, idx);
+  rae_add_rae_List_Any__rae_T_(((rae_List_Any_*)&(result)), rae_any(part));
+  remaining = rae_sub_rae_String_rae_Int_rae_Int_(remaining, idx + rae_length_rae_String_(sep), rae_length_rae_String_(remaining) - idx - rae_length_rae_String_(sep));
+  }
+  }
+  rae_List_String_ _ret = result;
+  return _ret;
+}
+
+typedef struct {
+  const char* this;
+  const char* sep;
+} _spawn_args_rae_split_rae_String_rae_String_;
+
+static void* _spawn_wrapper_rae_split_rae_String_rae_String_(void* data) {
+  _spawn_args_rae_split_rae_String_rae_String_* args = (_spawn_args_rae_split_rae_String_rae_String_*)data;
+  rae_split_rae_String_rae_String_(args->this, args->sep);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static const char* rae_replace_rae_String_rae_String_rae_String_(const char* this, const char* old, const char* new) {
+  if (rae_length_rae_String_(old) == 0) {
+  const char* _ret = this;
+  return _ret;
+  }
+  rae_List_String_ parts = rae_split_rae_String_rae_String_(this, old);
+  const char* _ret = rae_join_rae_List_String__rae_String_(((rae_List_String_*)&(parts)), new);
+  return _ret;
+}
+
+typedef struct {
+  const char* this;
+  const char* old;
+  const char* new;
+} _spawn_args_rae_replace_rae_String_rae_String_rae_String_;
+
+static void* _spawn_wrapper_rae_replace_rae_String_rae_String_rae_String_(void* data) {
+  _spawn_args_rae_replace_rae_String_rae_String_rae_String_* args = (_spawn_args_rae_replace_rae_String_rae_String_rae_String_*)data;
+  rae_replace_rae_String_rae_String_rae_String_(args->this, args->old, args->new);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static const char* rae_join_rae_List_String__rae_String_(const rae_List_String_* this, const char* sep) {
+  if (rae_length_rae_List_Any__(this) == 0) {
+  const char* _ret = "";
+  return _ret;
+  }
+  const char* result = ((const char*)(rae_get_rae_List_Any__rae_Int_(this, 0)).as.s);
+  int64_t i = 1;
+  {
+  while (i < rae_length_rae_List_Any__(this)) {
+  result = rae_concat_rae_String_rae_String_(rae_concat_rae_String_rae_String_(result, sep), ((const char*)(rae_get_rae_List_Any__rae_Int_(this, i)).as.s));
+  i = i + 1;
+  }
+  }
+  const char* _ret = result;
+  return _ret;
+}
+
+typedef struct {
+  rae_List_String_* this;
+  const char* sep;
+} _spawn_args_rae_join_rae_List_String__rae_String_;
+
+static void* _spawn_wrapper_rae_join_rae_List_String__rae_String_(void* data) {
+  _spawn_args_rae_join_rae_List_String__rae_String_* args = (_spawn_args_rae_join_rae_List_String__rae_String_*)data;
+  rae_join_rae_List_String__rae_String_(args->this, args->sep);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static double rae_toFloat_rae_String_(const char* this) {
+  double _ret = rae_ext_rae_str_to_f64(this);
+  return _ret;
+}
+
+typedef struct {
+  const char* this;
+} _spawn_args_rae_toFloat_rae_String_;
+
+static void* _spawn_wrapper_rae_toFloat_rae_String_(void* data) {
+  _spawn_args_rae_toFloat_rae_String_* args = (_spawn_args_rae_toFloat_rae_String_*)data;
+  rae_toFloat_rae_String_(args->this);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static int64_t rae_toInt_rae_String_(const char* this) {
+  int64_t _ret = rae_ext_rae_str_to_i64(this);
+  return _ret;
+}
+
+typedef struct {
+  const char* this;
+} _spawn_args_rae_toInt_rae_String_;
+
+static void* _spawn_wrapper_rae_toInt_rae_String_(void* data) {
+  _spawn_args_rae_toInt_rae_String_* args = (_spawn_args_rae_toInt_rae_String_*)data;
+  rae_toInt_rae_String_(args->this);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static double rae_PI_(void) {
+  double _ret = 3.14159265358979323846;
+  return _ret;
+}
+
+typedef struct {
+} _spawn_args_rae_PI_;
+
+static void* _spawn_wrapper_rae_PI_(void* data) {
+  _spawn_args_rae_PI_* args = (_spawn_args_rae_PI_*)data;
+  rae_PI_();
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static void rae_seed_rae_Int_(int64_t n) {
+  rae_ext_rae_seed(n);
+}
+
+typedef struct {
+  int64_t n;
+} _spawn_args_rae_seed_rae_Int_;
+
+static void* _spawn_wrapper_rae_seed_rae_Int_(void* data) {
+  _spawn_args_rae_seed_rae_Int_* args = (_spawn_args_rae_seed_rae_Int_*)data;
+  rae_seed_rae_Int_(args->n);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static double rae_random_(void) {
+  double _ret = rae_ext_rae_random();
+  return _ret;
+}
+
+typedef struct {
+} _spawn_args_rae_random_;
+
+static void* _spawn_wrapper_rae_random_(void* data) {
+  _spawn_args_rae_random_* args = (_spawn_args_rae_random_*)data;
+  rae_random_();
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static int64_t rae_random_rae_Int_rae_Int_(int64_t min, int64_t max) {
+  int64_t _ret = rae_ext_rae_random_int(min, max);
+  return _ret;
+}
+
+typedef struct {
+  int64_t min;
+  int64_t max;
+} _spawn_args_rae_random_rae_Int_rae_Int_;
+
+static void* _spawn_wrapper_rae_random_rae_Int_rae_Int_(void* data) {
+  _spawn_args_rae_random_rae_Int_rae_Int_* args = (_spawn_args_rae_random_rae_Int_rae_Int_*)data;
+  rae_random_rae_Int_rae_Int_(args->min, args->max);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static int64_t rae_abs_rae_Int_(int64_t n) {
+  if (n < 0) {
+  int64_t _ret = (-n);
+  return _ret;
+  }
+  int64_t _ret = n;
+  return _ret;
+}
+
+typedef struct {
+  int64_t n;
+} _spawn_args_rae_abs_rae_Int_;
+
+static void* _spawn_wrapper_rae_abs_rae_Int_(void* data) {
+  _spawn_args_rae_abs_rae_Int_* args = (_spawn_args_rae_abs_rae_Int_*)data;
+  rae_abs_rae_Int_(args->n);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static double rae_abs_rae_Float_(double n) {
+  if (n < 0.0) {
+  double _ret = (-n);
+  return _ret;
+  }
+  double _ret = n;
+  return _ret;
+}
+
+typedef struct {
+  double n;
+} _spawn_args_rae_abs_rae_Float_;
+
+static void* _spawn_wrapper_rae_abs_rae_Float_(void* data) {
+  _spawn_args_rae_abs_rae_Float_* args = (_spawn_args_rae_abs_rae_Float_*)data;
+  rae_abs_rae_Float_(args->n);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static int64_t rae_min_rae_Int_rae_Int_(int64_t a, int64_t b) {
+  if (a < b) {
+  int64_t _ret = a;
+  return _ret;
+  }
+  int64_t _ret = b;
+  return _ret;
+}
+
+typedef struct {
+  int64_t a;
+  int64_t b;
+} _spawn_args_rae_min_rae_Int_rae_Int_;
+
+static void* _spawn_wrapper_rae_min_rae_Int_rae_Int_(void* data) {
+  _spawn_args_rae_min_rae_Int_rae_Int_* args = (_spawn_args_rae_min_rae_Int_rae_Int_*)data;
+  rae_min_rae_Int_rae_Int_(args->a, args->b);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static int64_t rae_max_rae_Int_rae_Int_(int64_t a, int64_t b) {
+  if (a > b) {
+  int64_t _ret = a;
+  return _ret;
+  }
+  int64_t _ret = b;
+  return _ret;
+}
+
+typedef struct {
+  int64_t a;
+  int64_t b;
+} _spawn_args_rae_max_rae_Int_rae_Int_;
+
+static void* _spawn_wrapper_rae_max_rae_Int_rae_Int_(void* data) {
+  _spawn_args_rae_max_rae_Int_rae_Int_* args = (_spawn_args_rae_max_rae_Int_rae_Int_*)data;
+  rae_max_rae_Int_rae_Int_(args->a, args->b);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static int64_t rae_clamp_rae_Int_rae_Int_rae_Int_(int64_t val, int64_t low, int64_t high) {
+  if (val < low) {
+  int64_t _ret = low;
+  return _ret;
+  }
+  if (val > high) {
+  int64_t _ret = high;
+  return _ret;
+  }
+  int64_t _ret = val;
+  return _ret;
+}
+
+typedef struct {
+  int64_t val;
+  int64_t low;
+  int64_t high;
+} _spawn_args_rae_clamp_rae_Int_rae_Int_rae_Int_;
+
+static void* _spawn_wrapper_rae_clamp_rae_Int_rae_Int_rae_Int_(void* data) {
+  _spawn_args_rae_clamp_rae_Int_rae_Int_rae_Int_* args = (_spawn_args_rae_clamp_rae_Int_rae_Int_rae_Int_*)data;
+  rae_clamp_rae_Int_rae_Int_rae_Int_(args->val, args->low, args->high);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static double rae_lerp_rae_Float_rae_Float_rae_Float_(double a, double b, double t) {
+  double _ret = a + (b - a) * t;
+  return _ret;
+}
+
+typedef struct {
+  double a;
+  double b;
+  double t;
+} _spawn_args_rae_lerp_rae_Float_rae_Float_rae_Float_;
+
+static void* _spawn_wrapper_rae_lerp_rae_Float_rae_Float_rae_Float_(void* data) {
+  _spawn_args_rae_lerp_rae_Float_rae_Float_rae_Float_* args = (_spawn_args_rae_lerp_rae_Float_rae_Float_rae_Float_*)data;
+  rae_lerp_rae_Float_rae_Float_rae_Float_(args->a, args->b, args->t);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static double rae_randomFloat_rae_Float_rae_Float_(double min, double max) {
+  double _ret = min + rae_ext_rae_random() * (max - min);
+  return _ret;
+}
+
+typedef struct {
+  double min;
+  double max;
+} _spawn_args_rae_randomFloat_rae_Float_rae_Float_;
+
+static void* _spawn_wrapper_rae_randomFloat_rae_Float_rae_Float_(void* data) {
+  _spawn_args_rae_randomFloat_rae_Float_rae_Float_* args = (_spawn_args_rae_randomFloat_rae_Float_rae_Float_*)data;
+  rae_randomFloat_rae_Float_rae_Float_(args->min, args->max);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static double rae_easeLinear_rae_Float_(double t) {
+  double _ret = t;
+  return _ret;
+}
+
+typedef struct {
+  double t;
+} _spawn_args_rae_easeLinear_rae_Float_;
+
+static void* _spawn_wrapper_rae_easeLinear_rae_Float_(void* data) {
+  _spawn_args_rae_easeLinear_rae_Float_* args = (_spawn_args_rae_easeLinear_rae_Float_*)data;
+  rae_easeLinear_rae_Float_(args->t);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static double rae_easeInSine_rae_Float_(double t) {
+  double _ret = 1.0 - rae_ext_rae_math_cos(t * rae_PI_() / 2.0);
+  return _ret;
+}
+
+typedef struct {
+  double t;
+} _spawn_args_rae_easeInSine_rae_Float_;
+
+static void* _spawn_wrapper_rae_easeInSine_rae_Float_(void* data) {
+  _spawn_args_rae_easeInSine_rae_Float_* args = (_spawn_args_rae_easeInSine_rae_Float_*)data;
+  rae_easeInSine_rae_Float_(args->t);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static double rae_easeOutSine_rae_Float_(double t) {
+  double _ret = rae_ext_rae_math_sin(t * rae_PI_() / 2.0);
+  return _ret;
+}
+
+typedef struct {
+  double t;
+} _spawn_args_rae_easeOutSine_rae_Float_;
+
+static void* _spawn_wrapper_rae_easeOutSine_rae_Float_(void* data) {
+  _spawn_args_rae_easeOutSine_rae_Float_* args = (_spawn_args_rae_easeOutSine_rae_Float_*)data;
+  rae_easeOutSine_rae_Float_(args->t);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static double rae_easeInOutSine_rae_Float_(double t) {
+  double _ret = (-(rae_ext_rae_math_cos(rae_PI_() * t) - 1.0)) / 2.0;
+  return _ret;
+}
+
+typedef struct {
+  double t;
+} _spawn_args_rae_easeInOutSine_rae_Float_;
+
+static void* _spawn_wrapper_rae_easeInOutSine_rae_Float_(void* data) {
+  _spawn_args_rae_easeInOutSine_rae_Float_* args = (_spawn_args_rae_easeInOutSine_rae_Float_*)data;
+  rae_easeInOutSine_rae_Float_(args->t);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static double rae_easeInQuad_rae_Float_(double t) {
+  double _ret = t * t;
+  return _ret;
+}
+
+typedef struct {
+  double t;
+} _spawn_args_rae_easeInQuad_rae_Float_;
+
+static void* _spawn_wrapper_rae_easeInQuad_rae_Float_(void* data) {
+  _spawn_args_rae_easeInQuad_rae_Float_* args = (_spawn_args_rae_easeInQuad_rae_Float_*)data;
+  rae_easeInQuad_rae_Float_(args->t);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static double rae_easeOutQuad_rae_Float_(double t) {
+  double _ret = 1.0 - (1.0 - t) * (1.0 - t);
+  return _ret;
+}
+
+typedef struct {
+  double t;
+} _spawn_args_rae_easeOutQuad_rae_Float_;
+
+static void* _spawn_wrapper_rae_easeOutQuad_rae_Float_(void* data) {
+  _spawn_args_rae_easeOutQuad_rae_Float_* args = (_spawn_args_rae_easeOutQuad_rae_Float_*)data;
+  rae_easeOutQuad_rae_Float_(args->t);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static double rae_easeInOutQuad_rae_Float_(double t) {
+  if (t < 0.5) {
+  double _ret = 2.0 * t * t;
+  return _ret;
+  }
+  double _ret = 1.0 - rae_ext_rae_math_pow((-2.0) * t + 2.0, 2.0) / 2.0;
+  return _ret;
+}
+
+typedef struct {
+  double t;
+} _spawn_args_rae_easeInOutQuad_rae_Float_;
+
+static void* _spawn_wrapper_rae_easeInOutQuad_rae_Float_(void* data) {
+  _spawn_args_rae_easeInOutQuad_rae_Float_* args = (_spawn_args_rae_easeInOutQuad_rae_Float_*)data;
+  rae_easeInOutQuad_rae_Float_(args->t);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static double rae_easeInCubic_rae_Float_(double t) {
+  double _ret = t * t * t;
+  return _ret;
+}
+
+typedef struct {
+  double t;
+} _spawn_args_rae_easeInCubic_rae_Float_;
+
+static void* _spawn_wrapper_rae_easeInCubic_rae_Float_(void* data) {
+  _spawn_args_rae_easeInCubic_rae_Float_* args = (_spawn_args_rae_easeInCubic_rae_Float_*)data;
+  rae_easeInCubic_rae_Float_(args->t);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static double rae_easeOutCubic_rae_Float_(double t) {
+  double _ret = 1.0 - rae_ext_rae_math_pow(1.0 - t, 3.0);
+  return _ret;
+}
+
+typedef struct {
+  double t;
+} _spawn_args_rae_easeOutCubic_rae_Float_;
+
+static void* _spawn_wrapper_rae_easeOutCubic_rae_Float_(void* data) {
+  _spawn_args_rae_easeOutCubic_rae_Float_* args = (_spawn_args_rae_easeOutCubic_rae_Float_*)data;
+  rae_easeOutCubic_rae_Float_(args->t);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static double rae_easeInOutCubic_rae_Float_(double t) {
+  if (t < 0.5) {
+  double _ret = 4.0 * t * t * t;
+  return _ret;
+  }
+  double _ret = 1.0 - rae_ext_rae_math_pow((-2.0) * t + 2.0, 3.0) / 2.0;
+  return _ret;
+}
+
+typedef struct {
+  double t;
+} _spawn_args_rae_easeInOutCubic_rae_Float_;
+
+static void* _spawn_wrapper_rae_easeInOutCubic_rae_Float_(void* data) {
+  _spawn_args_rae_easeInOutCubic_rae_Float_* args = (_spawn_args_rae_easeInOutCubic_rae_Float_*)data;
+  rae_easeInOutCubic_rae_Float_(args->t);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static double rae_easeInQuart_rae_Float_(double t) {
+  double _ret = t * t * t * t;
+  return _ret;
+}
+
+typedef struct {
+  double t;
+} _spawn_args_rae_easeInQuart_rae_Float_;
+
+static void* _spawn_wrapper_rae_easeInQuart_rae_Float_(void* data) {
+  _spawn_args_rae_easeInQuart_rae_Float_* args = (_spawn_args_rae_easeInQuart_rae_Float_*)data;
+  rae_easeInQuart_rae_Float_(args->t);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static double rae_easeOutQuart_rae_Float_(double t) {
+  double _ret = 1.0 - rae_ext_rae_math_pow(1.0 - t, 4.0);
+  return _ret;
+}
+
+typedef struct {
+  double t;
+} _spawn_args_rae_easeOutQuart_rae_Float_;
+
+static void* _spawn_wrapper_rae_easeOutQuart_rae_Float_(void* data) {
+  _spawn_args_rae_easeOutQuart_rae_Float_* args = (_spawn_args_rae_easeOutQuart_rae_Float_*)data;
+  rae_easeOutQuart_rae_Float_(args->t);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static double rae_easeInOutQuart_rae_Float_(double t) {
+  if (t < 0.5) {
+  double _ret = 8.0 * t * t * t * t;
+  return _ret;
+  }
+  double _ret = 1.0 - rae_ext_rae_math_pow((-2.0) * t + 2.0, 4.0) / 2.0;
+  return _ret;
+}
+
+typedef struct {
+  double t;
+} _spawn_args_rae_easeInOutQuart_rae_Float_;
+
+static void* _spawn_wrapper_rae_easeInOutQuart_rae_Float_(void* data) {
+  _spawn_args_rae_easeInOutQuart_rae_Float_* args = (_spawn_args_rae_easeInOutQuart_rae_Float_*)data;
+  rae_easeInOutQuart_rae_Float_(args->t);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static double rae_easeInExpo_rae_Float_(double t) {
+  if (t == 0.0) {
+  double _ret = 0.0;
+  return _ret;
+  }
+  double _ret = rae_ext_rae_math_pow(2.0, 10.0 * t - 10.0);
+  return _ret;
+}
+
+typedef struct {
+  double t;
+} _spawn_args_rae_easeInExpo_rae_Float_;
+
+static void* _spawn_wrapper_rae_easeInExpo_rae_Float_(void* data) {
+  _spawn_args_rae_easeInExpo_rae_Float_* args = (_spawn_args_rae_easeInExpo_rae_Float_*)data;
+  rae_easeInExpo_rae_Float_(args->t);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static double rae_easeOutExpo_rae_Float_(double t) {
+  if (t == 1.0) {
+  double _ret = 1.0;
+  return _ret;
+  }
+  double _ret = 1.0 - rae_ext_rae_math_pow(2.0, (-10.0) * t);
+  return _ret;
+}
+
+typedef struct {
+  double t;
+} _spawn_args_rae_easeOutExpo_rae_Float_;
+
+static void* _spawn_wrapper_rae_easeOutExpo_rae_Float_(void* data) {
+  _spawn_args_rae_easeOutExpo_rae_Float_* args = (_spawn_args_rae_easeOutExpo_rae_Float_*)data;
+  rae_easeOutExpo_rae_Float_(args->t);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static double rae_easeInBack_rae_Float_(double t) {
+  double c1 = 1.70158;
+  double c3 = c1 + 1.0;
+  double _ret = c3 * t * t * t - c1 * t * t;
+  return _ret;
+}
+
+typedef struct {
+  double t;
+} _spawn_args_rae_easeInBack_rae_Float_;
+
+static void* _spawn_wrapper_rae_easeInBack_rae_Float_(void* data) {
+  _spawn_args_rae_easeInBack_rae_Float_* args = (_spawn_args_rae_easeInBack_rae_Float_*)data;
+  rae_easeInBack_rae_Float_(args->t);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static double rae_easeOutBack_rae_Float_(double t) {
+  double c1 = 1.70158;
+  double c3 = c1 + 1.0;
+  double _ret = 1.0 + c3 * rae_ext_rae_math_pow(t - 1.0, 3.0) + c1 * rae_ext_rae_math_pow(t - 1.0, 2.0);
+  return _ret;
+}
+
+typedef struct {
+  double t;
+} _spawn_args_rae_easeOutBack_rae_Float_;
+
+static void* _spawn_wrapper_rae_easeOutBack_rae_Float_(void* data) {
+  _spawn_args_rae_easeOutBack_rae_Float_* args = (_spawn_args_rae_easeOutBack_rae_Float_*)data;
+  rae_easeOutBack_rae_Float_(args->t);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static double rae_easeOutBounce_rae_Float_(double t) {
+  double n1 = 7.5625;
+  double d1 = 2.75;
+  if (t < 1.0 / d1) {
+  double _ret = n1 * t * t;
+  return _ret;
+  } else {
+  if (t < 2.0 / d1) {
+  t = t - 1.5 / d1;
+  double _ret = n1 * t * t + 0.75;
+  return _ret;
+  } else {
+  if (t < 2.5 / d1) {
+  t = t - 2.25 / d1;
+  double _ret = n1 * t * t + 0.9375;
+  return _ret;
+  } else {
+  t = t - 2.625 / d1;
+  double _ret = n1 * t * t + 0.984375;
+  return _ret;
+  }
+  }
+  }
+}
+
+typedef struct {
+  double t;
+} _spawn_args_rae_easeOutBounce_rae_Float_;
+
+static void* _spawn_wrapper_rae_easeOutBounce_rae_Float_(void* data) {
+  _spawn_args_rae_easeOutBounce_rae_Float_* args = (_spawn_args_rae_easeOutBounce_rae_Float_*)data;
+  rae_easeOutBounce_rae_Float_(args->t);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static double rae_easeInBounce_rae_Float_(double t) {
+  double _ret = 1.0 - rae_easeOutBounce_rae_Float_(1.0 - t);
+  return _ret;
+}
+
+typedef struct {
+  double t;
+} _spawn_args_rae_easeInBounce_rae_Float_;
+
+static void* _spawn_wrapper_rae_easeInBounce_rae_Float_(void* data) {
+  _spawn_args_rae_easeInBounce_rae_Float_* args = (_spawn_args_rae_easeInBounce_rae_Float_*)data;
+  rae_easeInBounce_rae_Float_(args->t);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static Timer rae_createTimer_(void) {
+  Timer _ret = (Timer){ .startTime = 0, .accumulated = 0, .running = 0 };
+  return _ret;
+}
+
+typedef struct {
+} _spawn_args_rae_createTimer_;
+
+static void* _spawn_wrapper_rae_createTimer_(void* data) {
+  _spawn_args_rae_createTimer_* args = (_spawn_args_rae_createTimer_*)data;
+  rae_createTimer_();
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static void rae_start_rae_Timer_(Timer* t) {
+  if (t->running) {
+  return;
+  }
+  t->startTime = rae_ext_nowNs();
+  t->running = 1;
+}
+
+typedef struct {
+  Timer* t;
+} _spawn_args_rae_start_rae_Timer_;
+
+static void* _spawn_wrapper_rae_start_rae_Timer_(void* data) {
+  _spawn_args_rae_start_rae_Timer_* args = (_spawn_args_rae_start_rae_Timer_*)data;
+  rae_start_rae_Timer_(args->t);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static void rae_stop_rae_Timer_(Timer* t) {
+  if (t->running == 0) {
+  return;
+  }
+  int64_t now = rae_ext_nowNs();
+  t->accumulated = t->accumulated + (now - t->startTime);
+  t->running = 0;
+}
+
+typedef struct {
+  Timer* t;
+} _spawn_args_rae_stop_rae_Timer_;
+
+static void* _spawn_wrapper_rae_stop_rae_Timer_(void* data) {
+  _spawn_args_rae_stop_rae_Timer_* args = (_spawn_args_rae_stop_rae_Timer_*)data;
+  rae_stop_rae_Timer_(args->t);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static void rae_reset_rae_Timer_(Timer* t) {
+  t->startTime = 0;
+  t->accumulated = 0;
+  t->running = 0;
+}
+
+typedef struct {
+  Timer* t;
+} _spawn_args_rae_reset_rae_Timer_;
+
+static void* _spawn_wrapper_rae_reset_rae_Timer_(void* data) {
+  _spawn_args_rae_reset_rae_Timer_* args = (_spawn_args_rae_reset_rae_Timer_*)data;
+  rae_reset_rae_Timer_(args->t);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static int64_t rae_elapsedNs_rae_Timer_(const Timer* t) {
+  int64_t total = t->accumulated;
+  if (t->running) {
+  int64_t now = rae_ext_nowNs();
+  int64_t _ret = total + (now - t->startTime);
+  return _ret;
+  }
+  int64_t _ret = total;
+  return _ret;
+}
+
+typedef struct {
+  Timer* t;
+} _spawn_args_rae_elapsedNs_rae_Timer_;
+
+static void* _spawn_wrapper_rae_elapsedNs_rae_Timer_(void* data) {
+  _spawn_args_rae_elapsedNs_rae_Timer_* args = (_spawn_args_rae_elapsedNs_rae_Timer_*)data;
+  rae_elapsedNs_rae_Timer_(args->t);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static double rae_elapsedMs_rae_Timer_(const Timer* t) {
+  int64_t ns = rae_elapsedNs_rae_Timer_(t);
+  double _ret = rae_toFloat_rae_Int_(ns) / 1000000.0;
+  return _ret;
+}
+
+typedef struct {
+  Timer* t;
+} _spawn_args_rae_elapsedMs_rae_Timer_;
+
+static void* _spawn_wrapper_rae_elapsedMs_rae_Timer_(void* data) {
+  _spawn_args_rae_elapsedMs_rae_Timer_* args = (_spawn_args_rae_elapsedMs_rae_Timer_*)data;
+  rae_elapsedMs_rae_Timer_(args->t);
+  free(args);
+  return NULL;
+}
+
+RAE_UNUSED static double rae_elapsedSeconds_rae_Timer_(const Timer* t) {
+  int64_t ns = rae_elapsedNs_rae_Timer_(t);
+  double _ret = rae_toFloat_rae_Int_(ns) / 1000000000.0;
+  return _ret;
+}
+
+typedef struct {
+  Timer* t;
+} _spawn_args_rae_elapsedSeconds_rae_Timer_;
+
+static void* _spawn_wrapper_rae_elapsedSeconds_rae_Timer_(void* data) {
+  _spawn_args_rae_elapsedSeconds_rae_Timer_* args = (_spawn_args_rae_elapsedSeconds_rae_Timer_*)data;
+  rae_elapsedSeconds_rae_Timer_(args->t);
+  free(args);
+  return NULL;
+}
+
+int main(void) {
+  rae_ext_initWindow(800, 450, "Rae Easing 2D");
+  rae_ext_setTargetFPS(60);
+  Timer timer = rae_createTimer_();
+  double animDuration = 2.0;
+  rae_start_rae_Timer_(&(timer));
+  {
+  while (rae_ext_windowShouldClose() == 0) {
+  double elapsed = rae_elapsedSeconds_rae_Timer_(&(timer));
+  if (elapsed > animDuration) {
+  rae_reset_rae_Timer_(&(timer));
+  rae_start_rae_Timer_(&(timer));
+  elapsed = 0.0;
+  }
+  double t = elapsed / animDuration;
+  double easedT = rae_easeInOutQuad_rae_Float_(t);
+  double startX = 150.0;
+  double endX = 650.0;
+  double currentX = startX + (endX - startX) * easedT;
+  double hue = t * 360.0;
+  Color mainColor = rae_ext_colorFromHSV(hue, 0.6, 0.9);
+  Color centerColor = rae_ext_colorFromHSV(hue, 0.3, 1.0);
+  rae_ext_beginDrawing();
+  rae_ext_drawRectangleGradientV(0, 0, 800, 450, (Color){ .r = 20, .g = 30, .b = 48, .a = 255 }, (Color){ .r = 36, .g = 59, .b = 85, .a = 255 });
+  rae_ext_drawText("Easing: easeInOutQuad", 20.0, 20.0, 20.0, (Color){ .r = 150, .g = 150, .b = 180, .a = 255 });
+  rae_ext_drawCircle(currentX + 5.0, 230.0, 45.0, (Color){ .r = 0, .g = 0, .b = 0, .a = 40 });
+  rae_ext_drawCircleGradient(rae_toInt_rae_Float_(currentX), 225, 40.0, centerColor, mainColor);
+  rae_ext_endDrawing();
+  }
+  }
+  rae_ext_closeWindow();
+  return 0;
+}
+

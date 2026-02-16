@@ -2,6 +2,7 @@
 #define RAE_RUNTIME_H
 
 #include <stdint.h>
+#include <stdbool.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,6 +13,8 @@
 #else
 #define RAE_UNUSED
 #endif
+
+typedef int64_t rae_Char;
 
 typedef struct {
   const char* data;
@@ -32,6 +35,18 @@ typedef enum {
 } RaeType;
 
 typedef struct {
+  void* data;
+  int64_t length;
+  int64_t capacity;
+} RaeList;
+
+typedef struct {
+  void* data;
+  int64_t length;
+  int64_t capacity;
+} RaeMap;
+
+typedef struct {
   RaeType type;
   union {
     int64_t i;
@@ -42,7 +57,7 @@ typedef struct {
   } as;
 } RaeAny;
 
-/* Buffer Ops */
+void rae_flush_stdout(void);
 void* rae_ext_rae_buf_alloc(int64_t count, int64_t elem_size);
 void rae_ext_rae_buf_free(void* buf);
 void* rae_ext_rae_buf_resize(void* buf, int64_t new_count, int64_t elem_size);
@@ -53,23 +68,39 @@ void rae_ext_rae_log_stream_any(RaeAny value);
 
 /* Conversion Helpers */
 RAE_UNUSED static RaeAny rae_any_int(int64_t v) { return (RaeAny){RAE_TYPE_INT, {.i = v}}; }
+RAE_UNUSED static RaeAny rae_any_int_ptr(const int64_t* v) { return (RaeAny){RAE_TYPE_INT, {.i = *v}}; }
 RAE_UNUSED static RaeAny rae_any_float(double v) { return (RaeAny){RAE_TYPE_FLOAT, {.f = v}}; }
-RAE_UNUSED static RaeAny rae_any_bool(int8_t v) { return (RaeAny){RAE_TYPE_BOOL, {.b = v}}; }
+RAE_UNUSED static RaeAny rae_any_float_ptr(const double* v) { return (RaeAny){RAE_TYPE_FLOAT, {.f = *v}}; }
+RAE_UNUSED static RaeAny rae_any_bool(bool v) { return (RaeAny){RAE_TYPE_BOOL, {.b = v ? 1 : 0}}; }
+RAE_UNUSED static RaeAny rae_any_bool_ptr(const bool* v) { return (RaeAny){RAE_TYPE_BOOL, {.b = *v ? 1 : 0}}; }
+RAE_UNUSED static RaeAny rae_any_char(rae_Char v) { return (RaeAny){RAE_TYPE_CHAR, {.i = v}}; }
+RAE_UNUSED static RaeAny rae_any_char_ptr(const int64_t* v) { return (RaeAny){RAE_TYPE_CHAR, {.i = *v}}; }
 RAE_UNUSED static RaeAny rae_any_string(const char* v) { return (RaeAny){RAE_TYPE_STRING, {.s = v}}; }
 RAE_UNUSED static RaeAny rae_any_none(void) { return (RaeAny){RAE_TYPE_NONE, {.i = 0}}; }
 RAE_UNUSED static RaeAny rae_any_ptr(void* v) { return (RaeAny){RAE_TYPE_BUFFER, {.ptr = v}}; }
 RAE_UNUSED static RaeAny rae_any_identity(RaeAny a) { return a; }
+RAE_UNUSED static RaeAny rae_any_identity_ptr(const RaeAny* a) { return *a; }
 
 #define rae_any(X) _Generic((X), \
     int64_t: rae_any_int, \
-    int: rae_any_int, \
-    long: rae_any_int, \
     double: rae_any_float, \
-    float: rae_any_float, \
-    int8_t: rae_any_bool, \
     char*: rae_any_string, \
     const char*: rae_any_string, \
     RaeAny: rae_any_identity, \
+    RaeAny*: rae_any_identity_ptr, \
+    bool: rae_any_bool, \
+    int8_t: rae_any_bool, \
+    uint8_t: rae_any_int, \
+    int64_t*: rae_any_int_ptr, \
+    const int64_t*: rae_any_int_ptr, \
+    double*: rae_any_float_ptr, \
+    const double*: rae_any_float_ptr, \
+    bool*: rae_any_bool_ptr, \
+    const bool*: rae_any_bool_ptr, \
+    int8_t*: rae_any_bool_ptr, \
+    const int8_t*: rae_any_bool_ptr, \
+    uint8_t*: rae_any_int_ptr, \
+    const uint8_t*: rae_any_int_ptr, \
     default: rae_any_ptr \
 )(X)
 
@@ -112,12 +143,42 @@ void rae_ext_rae_sys_exit(int64_t code);
 const char* rae_ext_rae_sys_get_env(const char* name);
 const char* rae_ext_rae_sys_read_file(const char* path);
 int8_t rae_ext_rae_sys_write_file(const char* path, const char* content);
+int8_t rae_ext_rae_sys_rename(const char* oldPath, const char* newPath);
+int8_t rae_ext_rae_sys_delete(const char* path);
+int8_t rae_ext_rae_sys_exists(const char* path);
+int8_t rae_ext_rae_sys_lock_file(const char* path);
+int8_t rae_ext_rae_sys_unlock_file(const char* path);
 
 const char* rae_ext_rae_str_i64(int64_t v);
+const char* rae_ext_rae_str_i64_ptr(const int64_t* v);
 const char* rae_ext_rae_str_f64(double v);
+const char* rae_ext_rae_str_f64_ptr(const double* v);
 const char* rae_ext_rae_str_bool(int8_t v);
+const char* rae_ext_rae_str_bool_ptr(const int8_t* v);
 const char* rae_ext_rae_str_char(int64_t v);
 const char* rae_ext_rae_str_cstr(const char* s);
+const char* rae_ext_rae_str_cstr_ptr(const char** s);
+
+int64_t rae_ext_nowMs(void);
+int64_t rae_ext_nowNs(void);
+void rae_ext_rae_sleep(int64_t ms);
+
+double rae_ext_rae_math_sin(double x);
+double rae_ext_rae_math_cos(double x);
+double rae_ext_rae_math_tan(double x);
+double rae_ext_rae_math_asin(double x);
+double rae_ext_rae_math_acos(double x);
+double rae_ext_rae_math_atan(double x);
+double rae_ext_rae_math_atan2(double y, double x);
+double rae_ext_rae_math_sqrt(double x);
+double rae_ext_rae_math_pow(double b, double e);
+double rae_ext_rae_math_exp(double x);
+double rae_ext_rae_math_log(double x);
+double rae_ext_rae_math_floor(double x);
+double rae_ext_rae_math_ceil(double x);
+double rae_ext_rae_math_round(double x);
+
+RaeAny rae_ext_json_get(const char* json, const char* field);
 
 RAE_UNUSED static const char* rae_str_any(RaeAny v) {
     switch (v.type) {
@@ -125,41 +186,26 @@ RAE_UNUSED static const char* rae_str_any(RaeAny v) {
         case RAE_TYPE_FLOAT: return rae_ext_rae_str_f64(v.as.f);
         case RAE_TYPE_BOOL: return rae_ext_rae_str_bool(v.as.b);
         case RAE_TYPE_STRING: return v.as.s ? v.as.s : "";
+        case RAE_TYPE_CHAR: return rae_ext_rae_str_char(v.as.i);
         case RAE_TYPE_NONE: return "none";
         default: return "";
     }
 }
 
 #define rae_ext_rae_str(X) _Generic((X), \
-    int64_t: rae_ext_rae_str_i64, \
-    int: rae_ext_rae_str_i64, \
+    long long: rae_ext_rae_str_i64, \
+    long long*: rae_ext_rae_str_i64_ptr, \
+    const long long*: rae_ext_rae_str_i64_ptr, \
     double: rae_ext_rae_str_f64, \
+    double*: rae_ext_rae_str_f64_ptr, \
+    const double*: rae_ext_rae_str_f64_ptr, \
     float: rae_ext_rae_str_f64, \
-    int8_t: rae_ext_rae_str_bool, \
+    bool: rae_ext_rae_str_bool, \
     char*: rae_ext_rae_str_cstr, \
     const char*: rae_ext_rae_str_cstr, \
-    RaeAny: rae_str_any \
+    const char**: rae_ext_rae_str_cstr_ptr, \
+    rae_Char: rae_ext_rae_str_char, \
+    default: rae_ext_rae_str_cstr \
 )(X)
 
-void rae_ext_rae_seed(int64_t seed);
-double rae_ext_rae_random(void);
-int64_t rae_ext_rae_random_int(int64_t min, int64_t max);
-
-int64_t rae_ext_nextTick(void);
-int64_t rae_ext_nowMs(void);
-void rae_ext_rae_sleep(int64_t ms);
-
-double rae_ext_rae_int_to_float(int64_t i);
-
-/* Raylib wrappers */
-#ifdef RAE_HAS_RAYLIB
-#include <raylib.h>
-void rae_ext_initWindow(int64_t width, int64_t height, const char* title);
-void rae_ext_setConfigFlags(int64_t flags);
-void rae_ext_drawCubeWires(Vector3 pos, double width, double height, double length, Color color);
-void rae_ext_drawSphere(Vector3 centerPos, double radius, Color color);
-double rae_ext_getTime(void);
-Color rae_ext_colorFromHSV(double hue, double saturation, double value);
 #endif
-
-#endif /* RAE_RUNTIME_H */
