@@ -9,7 +9,6 @@ static void sema_analyze_expr(CompilerContext* ctx, AstExpr* expr);
 static void sema_analyze_stmt(CompilerContext* ctx, AstStmt* stmt);
 
 bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
-    printf("Sema: Module %s\n", module->file_path ? module->file_path : "unknown");
     if (!ctx->type_registry) {
         ctx->type_registry = arena_alloc(ctx->ast_arena, sizeof(TypeRegistry));
         type_registry_init(ctx->type_registry, ctx->ast_arena);
@@ -34,7 +33,6 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
 
 static void sema_analyze_decl(CompilerContext* ctx, AstDecl* decl) {
     if (!decl) return;
-    printf("Sema: Decl kind %d\n", decl->kind);
     switch (decl->kind) {
         case AST_DECL_FUNC: {
             if (decl->as.func_decl.body) {
