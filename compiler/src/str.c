@@ -1,6 +1,7 @@
 /* str.c - String slice implementation */
 
 #include "str.h"
+#include "arena.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -57,6 +58,14 @@ void str_free(Str s) {
 
 bool str_is_empty(Str s) {
   return s.len == 0;
+}
+
+Str str_dup_arena(Arena* arena, Str s) {
+    if (s.len == 0) return (Str){0};
+    char* copy = arena_alloc(arena, s.len + 1);
+    memcpy(copy, s.data, s.len);
+    copy[s.len] = '\0';
+    return str_from_buf(copy, s.len);
 }
 
 char* read_file(const char* path, size_t* out_size) {
