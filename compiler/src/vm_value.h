@@ -21,8 +21,8 @@ typedef enum {
 } ValueType;
 
 typedef struct {
-  char* chars;
-  size_t length;
+  uint8_t* chars;
+  int64_t length;
 } OwnedString;
 
 struct Value;
@@ -61,7 +61,7 @@ typedef struct Value {
     int64_t int_value;
     double float_value;
     bool bool_value;
-    int64_t char_value;
+    uint32_t char_value;
     OwnedString string_value;
     Object object_value;
     ValueBuffer* buffer_value;
@@ -75,9 +75,9 @@ typedef struct Value {
 Value value_int(int64_t v);
 Value value_float(double v);
 Value value_bool(bool v);
-Value value_char(int64_t v);
+Value value_char(uint32_t v);
 Value value_string_copy(const char* data, size_t length);
-Value value_string_take(char* data, size_t length);
+Value value_string_take(uint8_t* data, size_t length);
 Value value_none(void);
 Value value_object(size_t field_count, const char* type_name);
 Value value_array(size_t count);

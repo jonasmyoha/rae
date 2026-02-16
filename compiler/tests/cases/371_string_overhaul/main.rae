@@ -1,0 +1,20 @@
+import "string"
+
+func main() {
+  let s: String = "Hello 💜"
+  log(s.length()) # Expected: 10
+  
+  log(s.at(index: 0)) # H
+  log(s.at(index: 6)) # 💜
+  
+  let c: Char32 = s.at(index: 6)
+  log(c)
+  
+  let s2: String = fromCStr(s: s.toCStr())
+  log(s2)
+  log(s.equals(other: s2))
+  
+  let l: List(String) = createList(String)(initialCap: 1)
+  add(l, value: "test")
+  log(l.length)
+}

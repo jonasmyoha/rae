@@ -595,7 +595,7 @@ static BinaryInfo get_binary_info(TokenKind kind) {
 }
 
 // Helper functions for parsing literal values (MOVED UP)
-static int64_t parse_char_value(Str text) {
+static uint32_t parse_char_value(Str text) {
   if (text.len == 0) return 0;
   if (text.data[0] == '\\') {
     if (text.len < 2) return 0;
@@ -609,7 +609,7 @@ static int64_t parse_char_value(Str text) {
     if (esc == '"') return '"';
     if (esc == 'u') {
         if (text.len < 4) return 0;
-        int64_t val = 0;
+        uint32_t val = 0;
         for (size_t i = 3; i < text.len; i++) {
             char h = text.data[i];
             if (h == '}') break;
@@ -623,11 +623,11 @@ static int64_t parse_char_value(Str text) {
     return esc;
   }
   unsigned char c = (unsigned char)text.data[0];
-  if (c < 0x80) return c;
-  if ((c & 0xE0) == 0xC0) return ((c & 0x1F) << 6) | (text.data[1] & 0x3F);
-  if ((c & 0xF0) == 0xE0) return ((c & 0x0F) << 12) | ((text.data[1] & 0x3F) << 6) | (text.data[2] & 0x3F);
-  if ((c & 0xF8) == 0xF0) return ((c & 0x07) << 18) | ((text.data[1] & 0x3F) << 12) | ((text.data[2] & 0x3F) << 6) | (text.data[3] & 0x3F);
-  return c;
+  if (c < 0x80) return (uint32_t)c;
+  if ((c & 0xE0) == 0xC0) return (uint32_t)(((c & 0x1F) << 6) | (text.data[1] & 0x3F));
+  if ((c & 0xF0) == 0xE0) return (uint32_t)(((c & 0x0F) << 12) | ((text.data[1] & 0x3F) << 6) | (text.data[2] & 0x3F));
+  if ((c & 0xF8) == 0xF0) return (uint32_t)(((c & 0x07) << 18) | ((text.data[1] & 0x3F) << 12) | ((text.data[2] & 0x3F) << 6) | (text.data[3] & 0x3F));
+  return (uint32_t)c;
 }
 
 static Str unescape_string(Parser* parser, Str lit, bool strip_start, bool strip_end) {
