@@ -256,6 +256,25 @@ void rae_ext_rae_log_stream_list_fields(RaeAny* items, int64_t length, int64_t c
   printf("), %lld, %lld }", (long long)length, (long long)capacity);
 }
 
+void rae_ext_rae_log_cstr(const char* text) {
+  if (!text) {
+    fputs("(null)\n", stdout);
+    rae_flush_stdout();
+    return;
+  }
+  fputs(text, stdout);
+  fputc('\n', stdout);
+  rae_flush_stdout();
+}
+
+void rae_ext_rae_log_stream_cstr(const char* text) {
+  if (!text) {
+    return;
+  }
+  fputs(text, stdout);
+  rae_flush_stdout();
+}
+
 void rae_ext_rae_log_string(rae_String value) {
   rae_ext_rae_log_stream_string(value);
   printf("\n");

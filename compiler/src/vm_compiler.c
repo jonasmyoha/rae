@@ -150,9 +150,12 @@ FunctionEntry* function_table_find(FunctionTable* table, Str name) {
 
 static bool is_primitive_type(Str type_name) {
   return str_eq_cstr(type_name, "Int64") || 
+         str_eq_cstr(type_name, "Int") || 
          str_eq_cstr(type_name, "Float64") || 
+         str_eq_cstr(type_name, "Float") || 
          str_eq_cstr(type_name, "Bool") || 
          str_eq_cstr(type_name, "Char") || 
+         str_eq_cstr(type_name, "Char32") || 
          str_eq_cstr(type_name, "String") || 
          str_eq_cstr(type_name, "Array") || 
          str_eq_cstr(type_name, "Buffer") || 
@@ -183,6 +186,19 @@ static Str get_base_type_name_str(Str type_name) {
     res.data += 4;
     res.len -= 4;
   }
+  
+  if (str_eq_cstr(res, "Int")) return str_from_cstr("Int64");
+  if (str_eq_cstr(res, "Float")) return str_from_cstr("Float64");
+  if (str_eq_cstr(res, "Char")) return str_from_cstr("Char32");
+
+  // Check if it's a generic type like List(Int)
+  for (size_t i = 0; i < res.len; i++) {
+      if (res.data[i] == '(') {
+          res.len = i;
+          break;
+      }
+  }
+
   return res;
 }
 
@@ -755,11 +771,11 @@ static Str infer_expr_type(BytecodeCompiler* compiler, const AstExpr* expr) {
     case AST_EXPR_IDENT:
       return get_local_type_name(compiler, expr->as.ident);
             case AST_EXPR_INTEGER: return str_from_cstr("Int64");
-            case AST_EXPR_FLOAT: return str_from_cstr("Float64");
+    case AST_EXPR_FLOAT: return str_from_cstr("Float64");
     
     case AST_EXPR_BOOL: return str_from_cstr("Bool");
     case AST_EXPR_STRING: return str_from_cstr("String");
-    case AST_EXPR_CHAR: return str_from_cstr("Char");
+    case AST_EXPR_CHAR: return str_from_cstr("Char32");
     case AST_EXPR_LIST:
     case AST_EXPR_COLLECTION_LITERAL: {
         // If it's a collection literal, we often know if it's a List
@@ -3070,15 +3086,15 @@ static bool emit_default_value(BytecodeCompiler* compiler, const AstTypeRef* typ
     return false;
   }
 
-  if (str_eq_cstr(type_name, "Int64")) {
+  if (str_eq_cstr(type_name, "Int64") || str_eq_cstr(type_name, "Int")) {
     emit_constant(compiler, value_int(0), line);
-  } else if (str_eq_cstr(type_name, "Float64")) {
+  } else if (str_eq_cstr(type_name, "Float64") || str_eq_cstr(type_name, "Float")) {
     emit_constant(compiler, value_float(0.0), line);
   } else if (str_eq_cstr(type_name, "Bool")) {
     emit_constant(compiler, value_bool(false), line);
   } else if (str_eq_cstr(type_name, "String")) {
     emit_constant(compiler, value_string_copy("", 0), line);
-  } else if (str_eq_cstr(type_name, "Char")) {
+  } else if (str_eq_cstr(type_name, "Char") || str_eq_cstr(type_name, "Char32")) {
     emit_constant(compiler, value_int(0), line);
   } else if (str_eq_cstr(type_name, "List") || str_eq_cstr(type_name, "Array")) {
     emit_op(compiler, OP_NATIVE_CALL, line);
