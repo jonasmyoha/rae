@@ -2333,6 +2333,7 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
 
         const AstTypeRef* source_tr = infer_expr_type_ref(ctx, a->value);
         bool source_is_ref = source_tr && (source_tr->is_view || source_tr->is_mod);
+        bool source_is_buffer = source_tr && str_eq_cstr(get_base_type_name(source_tr), "Buffer");
         
         // ... (check call/method return refs) ...
         if (!source_is_ref && a->value->kind == AST_EXPR_CALL) {
@@ -2357,17 +2358,18 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
 
         bool is_param_ref = p_type && (p_type->is_view || p_type->is_mod);
         bool is_buffer_param = p_type && str_eq_cstr(get_base_type_name(p_type), "Buffer");
-        bool is_param_raw_ptr = false;
+        bool is_param_raw_ptr = is_buffer_param;
+        if (d) {
+            printf("DEBUG: call to %.*s, is_ext: %d, is_buffer_param: %d, p_type: %s\n", 
+                   (int)d->name.len, d->name.data, d->is_extern, is_buffer_param, p_type ? "YES" : "NULL");
+        }
         if (d && d->is_extern) {
              if (str_eq_cstr(d->name, "rae_ext_rae_str_from_cstr")) is_param_raw_ptr = true;
              // other externs likely take raw pointers too if they take mod/view
-             else if (is_param_ref) is_param_raw_ptr = true;
-        } else if (p_type && str_eq_cstr(get_base_type_name(p_type), "Buffer")) {
-             // __buf_ functions take raw pointers
-             if (d && str_starts_with_cstr(d->name, "rae_ext_rae_buf_")) is_param_raw_ptr = true;
+             else if (is_param_ref && !is_primitive_ref(ctx, p_type)) is_param_raw_ptr = true;
         }
 
-        if (is_param_ref && !source_is_ref) {
+        if (is_param_ref && !source_is_ref && !is_buffer_param) {
             bool is_ptr_var = (a->value->kind == AST_EXPR_IDENT && is_pointer_type(ctx, a->value->as.ident)) || 
                              (source_tr && str_eq_cstr(get_base_type_name(source_tr), "Buffer"));
             if (is_ptr_var) {
@@ -2421,6 +2423,7 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             }
         } else {
             bool suppress_indirection = is_param_raw_ptr || (source_is_ref && is_param_ref && !is_primitive_ref(ctx, p_type));
+            if (source_is_buffer && is_param_raw_ptr) suppress_indirection = true;
             emit_expr(ctx, a->value, out, PREC_LOWEST, false, suppress_indirection);
         }
         
