@@ -9,6 +9,9 @@ These instructions define **how Codex should work**, communicate progress, and i
 
 ## Global Language Rules (MUST BE ENFORCED)
 
+### Mandates:
+- **Timeouts**: ALWAYS run long-running commands (builds, tests, examples) with explicit timeouts (e.g. `timeout 60 ...` or `perl -e 'alarm shift; exec @ARGV' 60 ...`) to prevent infinite hangs.
+
 ### Naming conventions (language-wide, normative):
 - Function names MUST be `camelCase` (e.g. `add`, `removeLast`, `ensureCapacity`)
 - Type names MUST be `PascalCase` (e.g. `List`, `Map`, `HashMap`, `Ptr`)
