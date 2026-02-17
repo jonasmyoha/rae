@@ -351,6 +351,19 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
 static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstDecl* decl) {
     if (!decl) return;
     switch (decl->kind) {
+        case AST_DECL_TYPE: {
+            AstTypeField* field = decl->as.type_decl.fields;
+            while (field) {
+                if (field->type) {
+                    sema_resolve_type_internal(ctx, module, symbols, field->type);
+                }
+                if (field->default_value) {
+                    sema_analyze_expr(ctx, module, symbols, field->default_value);
+                }
+                field = field->next;
+            }
+            break;
+        }
         case AST_DECL_FUNC: {
             symbol_table_push_scope(symbols);
             AstParam* param = decl->as.func_decl.params;
@@ -623,5 +636,6 @@ static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* mod
     if (type_ref->is_view) base = type_get_ref(ctx->type_registry, base, false);
     else if (type_ref->is_mod) base = type_get_ref(ctx->type_registry, base, true);
 
+    type_ref->resolved_type = base;
     return base;
 }

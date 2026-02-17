@@ -29,6 +29,7 @@ typedef struct AstIdentifierPart {
 
 typedef struct AstTypeRef {
   AstIdentifierPart* parts;
+  TypeInfo* resolved_type;
   bool is_opt;
   bool is_view;
   bool is_mod;
