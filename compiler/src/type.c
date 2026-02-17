@@ -299,6 +299,59 @@ TypeInfo* type_get_struct(TypeRegistry* r, AstDecl* decl, TypeInfo** args, size_
 
 // Utilities
 
+static void type_mangle_recursive(Arena* arena, TypeInfo* t, char* buf, size_t* pos, size_t cap) {
+    if (!t) return;
+    switch (t->kind) {
+        case TYPE_VOID: *pos += snprintf(buf + *pos, cap - *pos, "void"); break;
+        case TYPE_INT: *pos += snprintf(buf + *pos, cap - *pos, "int64_t"); break;
+        case TYPE_FLOAT: *pos += snprintf(buf + *pos, cap - *pos, "double"); break;
+        case TYPE_BOOL: *pos += snprintf(buf + *pos, cap - *pos, "rae_Bool"); break;
+        case TYPE_CHAR: *pos += snprintf(buf + *pos, cap - *pos, "uint32_t"); break;
+        case TYPE_STRING: *pos += snprintf(buf + *pos, cap - *pos, "rae_String"); break;
+        case TYPE_ANY:
+        case TYPE_OPT: *pos += snprintf(buf + *pos, cap - *pos, "RaeAny"); break;
+        case TYPE_BUFFER:
+            *pos += snprintf(buf + *pos, cap - *pos, "Buffer_");
+            type_mangle_recursive(arena, t->as.buffer.base, buf, pos, cap);
+            break;
+        case TYPE_REF:
+            *pos += snprintf(buf + *pos, cap - *pos, t->as.ref.is_mod ? "rae_Mod_" : "rae_View_");
+            type_mangle_recursive(arena, t->as.ref.base, buf, pos, cap);
+            break;
+        case TYPE_STRUCT: {
+            *pos += snprintf(buf + *pos, cap - *pos, "rae_%.*s", (int)t->name.len, t->name.data);
+            if (t->as.structure.generic_count > 0) {
+                *pos += snprintf(buf + *pos, cap - *pos, "_");
+                for (size_t i = 0; i < t->as.structure.generic_count; i++) {
+                    type_mangle_recursive(arena, t->as.structure.generic_args[i], buf, pos, cap);
+                    if (i < t->as.structure.generic_count - 1) *pos += snprintf(buf + *pos, cap - *pos, "_");
+                }
+            }
+            break;
+        }
+        case TYPE_GENERIC_PARAM:
+            *pos += snprintf(buf + *pos, cap - *pos, "rae_%.*s", (int)t->as.generic_param.param_name.len, t->as.generic_param.param_name.data);
+            break;
+    }
+}
+
+Str type_mangle_name(Arena* arena, TypeInfo* t) {
+    char buf[1024];
+    size_t pos = 0;
+    type_mangle_recursive(arena, t, buf, &pos, sizeof(buf));
+    
+    // Sanitize
+    for (size_t i = 0; i < pos; i++) {
+        if (!((buf[i] >= 'a' && buf[i] <= 'z') || (buf[i] >= 'A' && buf[i] <= 'Z') || (buf[i] >= '0' && buf[i] <= '9') || buf[i] == '_')) {
+            buf[i] = '_';
+        }
+    }
+    
+    char* res = arena_alloc(arena, pos + 1);
+    memcpy(res, buf, pos + 1);
+    return (Str){(uint8_t*)res, pos};
+}
+
 bool type_is_same(TypeInfo* a, TypeInfo* b) {
     return a == b; // Interning guarantees this!
 }
