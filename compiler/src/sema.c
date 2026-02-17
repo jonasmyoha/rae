@@ -454,6 +454,30 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
             sema_analyze_expr(ctx, module, symbols, stmt->as.assign_stmt.value);
             break;
         }
+        case AST_STMT_MATCH: {
+            sema_analyze_expr(ctx, module, symbols, stmt->as.match_stmt.subject);
+            AstMatchCase* c = stmt->as.match_stmt.cases;
+            while (c) {
+                if (c->pattern) sema_analyze_expr(ctx, module, symbols, c->pattern);
+                if (c->block) {
+                    symbol_table_push_scope(symbols);
+                    AstStmt* s = c->block->first;
+                    while (s) { sema_analyze_stmt(ctx, module, symbols, s); s = s->next; }
+                    symbol_table_pop_scope(symbols);
+                }
+                c = c->next;
+            }
+            break;
+        }
+        case AST_STMT_DEFER: {
+            if (stmt->as.defer_stmt.block) {
+                symbol_table_push_scope(symbols);
+                AstStmt* s = stmt->as.defer_stmt.block->first;
+                while (s) { sema_analyze_stmt(ctx, module, symbols, s); s = s->next; }
+                symbol_table_pop_scope(symbols);
+            }
+            break;
+        }
         default: break;
     }
 }
@@ -514,8 +538,22 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
         case AST_EXPR_BINARY:
             sema_analyze_expr(ctx, module, symbols, expr->as.binary.lhs);
             sema_analyze_expr(ctx, module, symbols, expr->as.binary.rhs);
-            if (expr->as.binary.lhs && expr->as.binary.lhs->resolved_type) {
+            if (expr->as.binary.op >= AST_BIN_LT && expr->as.binary.op <= AST_BIN_OR) {
+                expr->resolved_type = type_get_bool(ctx->type_registry);
+            } else if (expr->as.binary.lhs && expr->as.binary.lhs->resolved_type) {
                 expr->resolved_type = expr->as.binary.lhs->resolved_type;
+            }
+            break;
+        case AST_EXPR_UNARY:
+            sema_analyze_expr(ctx, module, symbols, expr->as.unary.operand);
+            if (expr->as.unary.op == AST_UNARY_NOT) {
+                expr->resolved_type = type_get_bool(ctx->type_registry);
+            } else if (expr->as.unary.op == AST_UNARY_VIEW || expr->as.unary.op == AST_UNARY_MOD) {
+                if (expr->as.unary.operand->resolved_type) {
+                    expr->resolved_type = type_get_ref(ctx->type_registry, expr->as.unary.operand->resolved_type, expr->as.unary.op == AST_UNARY_MOD);
+                }
+            } else if (expr->as.unary.operand->resolved_type) {
+                expr->resolved_type = expr->as.unary.operand->resolved_type;
             }
             break;
         case AST_EXPR_CALL:
@@ -556,16 +594,26 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
             if (expr->as.method_call.object->resolved_type) {
                 TypeInfo* t = expr->as.method_call.object->resolved_type;
                 if (t->kind == TYPE_REF) t = t->as.ref.base;
-                for (size_t i = 0; i < ctx->methods.count; i++) {
-                    MethodEntry* entry = &ctx->methods.entries[i];
-                    if (str_eq(entry->type_name, t->name) && str_eq(entry->method_name, expr->as.method_call.method_name)) {
-                        Symbol* sym = symbol_table_lookup(symbols, entry->actual_function_name);
-                        if (sym && sym->decl && sym->decl->kind == AST_DECL_FUNC) {
-                            if (sym->decl->as.func_decl.returns) {
-                                expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, sym->decl->as.func_decl.returns->type);
+                
+                // Hardcoded some common methods if needed, but better to use SymbolTable
+                if (str_eq_cstr(expr->as.method_call.method_name, "toFloat")) {
+                    expr->resolved_type = type_get_float(ctx->type_registry);
+                } else if (str_eq_cstr(expr->as.method_call.method_name, "toInt")) {
+                    expr->resolved_type = type_get_int(ctx->type_registry);
+                } else if (str_eq_cstr(expr->as.method_call.method_name, "toCStr")) {
+                    expr->resolved_type = type_get_string(ctx->type_registry);
+                } else {
+                    for (size_t i = 0; i < ctx->methods.count; i++) {
+                        MethodEntry* entry = &ctx->methods.entries[i];
+                        if (str_eq(entry->type_name, t->name) && str_eq(entry->method_name, expr->as.method_call.method_name)) {
+                            Symbol* sym = symbol_table_lookup(symbols, entry->actual_function_name);
+                            if (sym && sym->decl && sym->decl->kind == AST_DECL_FUNC) {
+                                if (sym->decl->as.func_decl.returns) {
+                                    expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, sym->decl->as.func_decl.returns->type);
+                                }
                             }
+                            break;
                         }
-                        break;
                     }
                 }
             }
@@ -577,6 +625,60 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                 TypeInfo* t = expr->as.index.target->resolved_type;
                 if (t->kind == TYPE_REF) t = t->as.ref.base;
                 if (t->kind == TYPE_BUFFER) expr->resolved_type = t->as.buffer.base;
+                else if (t->kind == TYPE_STRUCT) {
+                    // Check if it's List(T)
+                    if (str_eq_cstr(t->name, "List")) {
+                        if (t->as.structure.generic_count > 0) {
+                            expr->resolved_type = t->as.structure.generic_args[0];
+                        }
+                    }
+                }
+            }
+            break;
+        case AST_EXPR_OBJECT:
+            if (expr->as.object_literal.type) {
+                expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, expr->as.object_literal.type);
+            }
+            for (AstObjectField* f = expr->as.object_literal.fields; f; f = f->next) {
+                sema_analyze_expr(ctx, module, symbols, f->value);
+            }
+            break;
+        case AST_EXPR_COLLECTION_LITERAL: {
+            AstCollectionLiteral* coll = &expr->as.collection;
+            for (AstCollectionElement* e = coll->elements; e; e = e->next) {
+                sema_analyze_expr(ctx, module, symbols, e->value);
+            }
+            if (coll->type) {
+                expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, coll->type);
+            } else {
+                // Infer from elements? For now just use Any
+                TypeInfo* any = type_get_any(ctx->type_registry);
+                // Assume List for now
+                Symbol* list_sym = symbol_table_lookup(symbols, str_from_cstr("List"));
+                if (list_sym && list_sym->decl) {
+                    TypeInfo* args[1] = { any };
+                    expr->resolved_type = type_get_struct(ctx->type_registry, list_sym->decl, args, 1);
+                }
+            }
+            break;
+        }
+        case AST_EXPR_MATCH:
+            sema_analyze_expr(ctx, module, symbols, expr->as.match_expr.subject);
+            // Resolve arm types... for now just use first arm's type
+            for (AstMatchArm* arm = expr->as.match_expr.arms; arm; arm = arm->next) {
+                sema_analyze_expr(ctx, module, symbols, arm->value);
+                if (!expr->resolved_type) expr->resolved_type = arm->value->resolved_type;
+            }
+            break;
+        case AST_EXPR_INTERP:
+            for (AstInterpPart* p = expr->as.interp.parts; p; p = p->next) {
+                sema_analyze_expr(ctx, module, symbols, p->value);
+            }
+            expr->resolved_type = type_get_string(ctx->type_registry);
+            break;
+        case AST_EXPR_LIST:
+            for (AstExprList* item = expr->as.list; item; item = item->next) {
+                sema_analyze_expr(ctx, module, symbols, item->value);
             }
             break;
         default: break;

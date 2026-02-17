@@ -131,7 +131,9 @@ typedef enum {
   AST_EXPR_INDEX,
   AST_EXPR_METHOD_CALL,
   AST_EXPR_COLLECTION_LITERAL,
-  AST_EXPR_INTERP
+  AST_EXPR_INTERP,
+  AST_EXPR_BOX,
+  AST_EXPR_UNBOX
 } AstExprKind;
 
 typedef struct AstInterpPart {
