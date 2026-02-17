@@ -51,6 +51,25 @@ typedef struct {
 } CDeferStack;
 
 typedef struct {
+    const AstDecl** items;
+    size_t count;
+    size_t capacity;
+} DeclList;
+
+static bool decl_list_contains(DeclList* list, const AstDecl* d) {
+    for (size_t i = 0; i < list->count; i++) {
+        if (list->items[i] == d) return true;
+    }
+    return false;
+}
+
+static void decl_list_add(DeclList* list, const AstDecl* d) {
+    if (list->count < list->capacity) {
+        list->items[list->count++] = d;
+    }
+}
+
+typedef struct {
   CompilerContext* compiler_ctx;
   const AstModule* module;
   const AstFuncDecl* func_decl;
@@ -79,6 +98,7 @@ typedef struct {
 static const AstDecl* find_type_decl(CFuncContext* ctx, const AstModule* module, Str name);
 static const AstDecl* find_enum_decl(CFuncContext* ctx, const AstModule* module, Str name);
 static bool has_property(const AstProperty* props, const char* name);
+static bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* out, bool skip_ptr);
 static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_prec, bool is_lvalue, bool suppress_deref);
 static bool emit_function(CompilerContext* compiler_ctx, const AstModule* module, const AstFuncDecl* func, FILE* out, const struct VmRegistry* registry, bool uses_raylib);
 static bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* f, const AstTypeRef* args, FILE* out, const struct VmRegistry* r, bool ray);
@@ -91,13 +111,64 @@ static bool emit_log_call(CFuncContext* ctx, const AstExpr* expr, FILE* out, boo
 static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out);
 static bool emit_string_literal(FILE* out, Str literal);
 static bool emit_param_list(CFuncContext* ctx, const AstParam* params, FILE* out, bool is_extern);
-static bool emit_single_struct_def(CompilerContext* ctx, const AstModule* m, const AstDecl* d, FILE* out, Str* et, size_t* ec, bool ray);
 static bool is_pointer_type(CFuncContext* ctx, Str name);
 static bool is_mod_type(CFuncContext* ctx, Str name);
 static bool is_generic_param(const AstIdentifierPart* params, Str name);
 static Str get_local_type_name(CFuncContext* ctx, Str name);
 static const AstTypeRef* get_local_type_ref(CFuncContext* ctx, Str name);
 static Str get_base_type_name(const AstTypeRef* type);
+
+static bool emit_struct_recursive(CompilerContext* ctx, const AstModule* m, const AstDecl* d, FILE* out, DeclList* emitted, DeclList* visiting, bool ray) {
+    if (!d || d->kind != AST_DECL_TYPE) return true;
+    if (d->as.type_decl.generic_params) return true; // Skip templates
+    
+    if (decl_list_contains(emitted, d)) return true;
+    if (decl_list_contains(visiting, d)) return true;
+    
+    decl_list_add(visiting, d);
+    
+    // Process dependencies (fields embedded by value)
+    for (const AstTypeField* f = d->as.type_decl.fields; f; f = f->next) {
+        if (!f->type) continue;
+        if (f->type->is_view || f->type->is_mod) continue;
+        
+        if (f->type->parts) {
+            Str base = f->type->parts->text;
+            const AstDecl* dep = find_type_decl(NULL, m, base);
+            if (dep && dep != d) {
+                emit_struct_recursive(ctx, m, dep, out, emitted, visiting, ray);
+            }
+        }
+    }
+    
+    if (!has_property(d->as.type_decl.properties, "c_struct")) {
+        Str ns = d->as.type_decl.name;
+        char* n = str_to_cstr(ns);
+        char final_name[512];
+        if (strncmp(n, "rae_", 4) == 0) strncpy(final_name, n, 511);
+        else snprintf(final_name, 511, "rae_%s", n);
+        final_name[511] = '\0';
+
+        fprintf(out, "typedef struct %s %s;\n", final_name, final_name);
+        fprintf(out, "struct %s {\n", final_name);
+        
+        CFuncContext tctx = {0};
+        tctx.compiler_ctx = ctx; tctx.module = m; tctx.uses_raylib = ray;
+        
+        for (const AstTypeField* f = d->as.type_decl.fields; f; f = f->next) {
+            fprintf(out, "  ");
+            emit_type_ref_as_c_type(&tctx, f->type, out, false);
+            bool p = f->type && (f->type->is_view || f->type->is_mod);
+            fprintf(out, "%s %.*s;\n", p ? "*" : "", (int)f->name.len, f->name.data);
+        }
+        fprintf(out, "};\n\n");
+        free(n);
+    }
+    
+    decl_list_add(emitted, d);
+    visiting->count--;
+    return true;
+}
 static bool emit_auto_init(CFuncContext* ctx, const AstTypeRef* type, FILE* out);
 static bool emit_struct_auto_init(CFuncContext* ctx, const AstDecl* decl, const AstTypeRef* tr, FILE* out);
 static const AstFuncDecl* find_function_overload(const AstModule* module, CFuncContext* ctx, Str name, const Str* param_types, uint16_t param_count, bool is_method, const AstExpr* call_expr);
@@ -231,15 +302,12 @@ static void register_decl(CompilerContext* ctx, const AstDecl* decl) {
 
 static void collect_decls_from_module(CompilerContext* ctx, const AstModule* module) {
     if (!module) return;
-    static const AstModule* visited[128];
-    static size_t visited_count = 0;
-    if (visited_count > 100) visited_count = 0; 
-
-    for (size_t i = 0; i < visited_count; i++) {
-        if (visited[i] == module) return;
-    }
-    if (visited_count < 128) {
-        visited[visited_count++] = module;
+    
+    // Check if already in all_decls by looking at the first decl
+    if (module->decls) {
+        for (size_t i = 0; i < ctx->all_decl_count; i++) {
+            if (ctx->all_decls[i] == module->decls) return;
+        }
     }
 
     for (const AstDecl* decl = module->decls; decl; decl = decl->next) {
@@ -250,74 +318,90 @@ static void collect_decls_from_module(CompilerContext* ctx, const AstModule* mod
     }
 }
 
+static int g_type_equal_depth = 0;
 static bool type_refs_equal(const AstTypeRef* a, const AstTypeRef* b) {
     if (a == b) return true;
     if (!a || !b) return false;
+    if ((uintptr_t)a < 0x1000 || (uintptr_t)b < 0x1000) return false;
+    if (g_type_equal_depth > 32) return false;
+    g_type_equal_depth++;
+    
+    bool res = false;
     if (a->parts && b->parts) {
-        if (!str_eq(a->parts->text, b->parts->text)) return false;
-    } else if (a->parts != b->parts) return false;
+        if ((uintptr_t)a->parts < 0x1000 || (uintptr_t)b->parts < 0x1000) { res = false; goto done; }
+        if (!str_eq(a->parts->text, b->parts->text)) { res = false; goto done; }
+    } else if (a->parts != b->parts) { res = false; goto done; }
     
-    if (a->is_opt != b->is_opt || a->is_view != b->is_view || a->is_mod != b->is_mod) return false;
+    if (a->is_opt != b->is_opt || a->is_view != b->is_view || a->is_mod != b->is_mod) { res = false; goto done; }
     
-    const AstTypeRef* arg_a = a->generic_args;
-    const AstTypeRef* arg_b = b->generic_args;
-    while (arg_a && arg_b) {
-        if (!type_refs_equal(arg_a, arg_b)) return false;
-        arg_a = arg_a->next;
-        arg_b = arg_b->next;
+    {
+        const AstTypeRef* arg_a = a->generic_args;
+        const AstTypeRef* arg_b = b->generic_args;
+        while (arg_a && arg_b) {
+            if (!type_refs_equal(arg_a, arg_b)) { res = false; goto done; }
+            arg_a = arg_a->next;
+            arg_b = arg_b->next;
+        }
+        res = (arg_a == arg_b);
     }
-    return arg_a == arg_b;
+
+done:
+    g_type_equal_depth--;
+    return res;
 }
 
 static bool is_concrete_type(const AstTypeRef* type) {
     if (!type) return true;
-    if (type->parts) {
+    if (type->parts && !type->parts->next) {
         Str base = type->parts->text;
         if (base.len == 1 && base.data[0] >= 'A' && base.data[0] <= 'Z') return false;
     }
-    if (type->generic_args) {
-        for (const AstTypeRef* a = type->generic_args; a; a = a->next) {
-            if (!is_concrete_type(a)) return false;
-        }
+    const AstTypeRef* arg = type->generic_args;
+    while (arg) {
+        if (!is_concrete_type(arg)) return false;
+        arg = arg->next;
     }
     return true;
 }
 
+static AstIdentifierPart* clone_parts(CompilerContext* ctx, const AstIdentifierPart* p) {
+    if (!p) return NULL;
+    AstIdentifierPart* res = arena_alloc(ctx->ast_arena, sizeof(AstIdentifierPart));
+    *res = *p;
+    res->next = clone_parts(ctx, p->next);
+    return res;
+}
+
 static AstTypeRef* substitute_type_ref(CompilerContext* ctx, const AstIdentifierPart* generic_params, const AstTypeRef* concrete_args, const AstTypeRef* type) {
     if (!type) return NULL;
-    if (!type->parts) return (AstTypeRef*)type;
-    
-    Str base = type->parts->text;
     
     // Check if it's a generic param that needs substitution
-    if (generic_params && concrete_args) {
+    if (generic_params && concrete_args && type->parts && !type->parts->next) {
+        Str base = type->parts->text;
         const AstIdentifierPart* gp = generic_params;
         const AstTypeRef* arg = concrete_args;
         while (gp && arg) {
             if (str_eq(gp->text, base)) {
-                AstTypeRef* result = (AstTypeRef*)arg;
-                if (arg->generic_args) {
-                    result = substitute_type_ref(ctx, NULL, NULL, arg);
-                }
+                const AstTypeRef* match = arg;
+                if (match->generic_args) match = substitute_type_ref(ctx, NULL, NULL, match);
                 
-                // Copy flags from the original type ref (e.g. if it was mod V)
-                if (type->is_view || type->is_mod) {
-                    AstTypeRef* copy = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
-                    *copy = *result;
-                    if (type->is_view) copy->is_view = true;
-                    if (type->is_mod) copy->is_mod = true;
-                    result = copy;
-                }
+                AstTypeRef* result = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
+                *result = *match;
+                result->next = NULL;
+                result->parts = clone_parts(ctx, match->parts); // Deep clone parts
+                if (type->is_view) result->is_view = true;
+                if (type->is_mod) result->is_mod = true;
                 return result;
             }
             gp = gp->next; arg = arg->next;
         }
     }
     
-    // If it has generic args, substitute them recursively
     if (type->generic_args) {
         AstTypeRef* new_type = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
         *new_type = *type;
+        new_type->next = NULL; // Sibling-less
+        new_type->parts = clone_parts(ctx, type->parts); // Deep clone parts
         AstTypeRef* sub_args = NULL;
         AstTypeRef* last_sub = NULL;
         for (const AstTypeRef* a = type->generic_args; a; a = a->next) {
@@ -327,12 +411,16 @@ static AstTypeRef* substitute_type_ref(CompilerContext* ctx, const AstIdentifier
             last_sub = sub;
         }
         new_type->generic_args = sub_args;
-        // Ensure next pointer is null for the new chain
         if (last_sub) last_sub->next = NULL;
         return new_type;
     }
     
-    return (AstTypeRef*)type;
+    // Fallback: always return a fresh sibling-less node with cloned parts
+    AstTypeRef* result = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
+    *result = *type;
+    result->next = NULL;
+    result->parts = clone_parts(ctx, type->parts); // Deep clone parts
+    return result;
 }
 
 static AstTypeRef* infer_generic_args(CompilerContext* ctx, const AstFuncDecl* func, const AstTypeRef* pattern, const AstTypeRef* concrete_type) {
@@ -382,10 +470,17 @@ static AstTypeRef* infer_generic_args(CompilerContext* ctx, const AstFuncDecl* f
 
 static void register_function_specialization(CompilerContext* ctx, const AstFuncDecl* decl, const AstTypeRef* concrete_args) {
     if (!decl || !concrete_args) return;
+    for (const AstTypeRef* arg = concrete_args; arg; arg = arg->next) {
+        if ((uintptr_t)arg->parts < 0x1000 && (uintptr_t)arg->parts != 0) {
+            return;
+        }
+    }
     
     // Ensure all args are concrete
     for (const AstTypeRef* arg = concrete_args; arg; arg = arg->next) {
-        if (!is_concrete_type(arg)) return;
+        if (!is_concrete_type(arg)) {
+            return;
+        }
     }
 
     // Check if already registered
@@ -399,19 +494,23 @@ static void register_function_specialization(CompilerContext* ctx, const AstFunc
                 if (!type_refs_equal(a, b)) { match = false; break; }
                 a = a->next; b = b->next;
             }
-            if (match && !a && !b) return;
+            if (match && !a && !b) {
+                return;
+            }
         }
     }
     
     if (ctx->specialized_func_count < ctx->specialized_func_cap) {
         ctx->specialized_funcs[ctx->specialized_func_count].decl = decl;
-        ctx->specialized_funcs[ctx->specialized_func_count].concrete_args = concrete_args;
+        ctx->specialized_funcs[ctx->specialized_func_count].concrete_args = (AstTypeRef*)concrete_args;
         ctx->specialized_func_count++;
     }
 }
 
 static void register_generic_type(CompilerContext* ctx, const AstTypeRef* type) {
     if (!type || !type->generic_args || !is_concrete_type(type)) return;
+    if ((uintptr_t)type < 0x1000) return;
+    if ((uintptr_t)type->parts < 0x1000) return;
     
     Str base = type->parts->text;
     bool is_buffer = str_eq_cstr(base, "Buffer");
@@ -501,31 +600,32 @@ static void collect_type_refs_expr(CompilerContext* ctx, const AstExpr* expr) {
 }
 
 static void collect_type_refs_stmt(CompilerContext* ctx, const AstStmt* stmt) {
-    if (!stmt) return;
-    switch (stmt->kind) {
-        case AST_STMT_LET:
-            register_generic_type(ctx, stmt->as.let_stmt.type);
-            collect_type_refs_expr(ctx, stmt->as.let_stmt.value);
-            break;
-        case AST_STMT_ASSIGN:
-            collect_type_refs_expr(ctx, stmt->as.assign_stmt.target);
-            collect_type_refs_expr(ctx, stmt->as.assign_stmt.value);
-            break;
-        case AST_STMT_EXPR:
-            collect_type_refs_expr(ctx, stmt->as.expr_stmt);
-            break;
-        case AST_STMT_IF:
-            collect_type_refs_expr(ctx, stmt->as.if_stmt.condition);
-            collect_type_refs_stmt(ctx, (const AstStmt*)stmt->as.if_stmt.then_block);
-            collect_type_refs_stmt(ctx, (const AstStmt*)stmt->as.if_stmt.else_block);
-            break;
-        case AST_STMT_LOOP:
-            collect_type_refs_stmt(ctx, stmt->as.loop_stmt.init);
-            collect_type_refs_expr(ctx, stmt->as.loop_stmt.condition);
-            collect_type_refs_expr(ctx, stmt->as.loop_stmt.increment);
-            collect_type_refs_stmt(ctx, (const AstStmt*)stmt->as.loop_stmt.body);
-            break;
-        default: break;
+    for (const AstStmt* s = stmt; s; s = s->next) {
+        switch (s->kind) {
+            case AST_STMT_LET:
+                register_generic_type(ctx, s->as.let_stmt.type);
+                collect_type_refs_expr(ctx, s->as.let_stmt.value);
+                break;
+            case AST_STMT_ASSIGN:
+                collect_type_refs_expr(ctx, s->as.assign_stmt.target);
+                collect_type_refs_expr(ctx, s->as.assign_stmt.value);
+                break;
+            case AST_STMT_EXPR:
+                collect_type_refs_expr(ctx, s->as.expr_stmt);
+                break;
+            case AST_STMT_IF:
+                collect_type_refs_expr(ctx, s->as.if_stmt.condition);
+                if (s->as.if_stmt.then_block) collect_type_refs_stmt(ctx, s->as.if_stmt.then_block->first);
+                if (s->as.if_stmt.else_block) collect_type_refs_stmt(ctx, s->as.if_stmt.else_block->first);
+                break;
+            case AST_STMT_LOOP:
+                collect_type_refs_stmt(ctx, s->as.loop_stmt.init);
+                collect_type_refs_expr(ctx, s->as.loop_stmt.condition);
+                collect_type_refs_expr(ctx, s->as.loop_stmt.increment);
+                if (s->as.loop_stmt.body) collect_type_refs_stmt(ctx, s->as.loop_stmt.body->first);
+                break;
+            default: break;
+        }
     }
 }
 
@@ -693,6 +793,13 @@ static void discover_specializations_stmt(CFuncContext* ctx, const AstStmt* stmt
             case AST_STMT_RET: { AstReturnArg* v = s->as.ret_stmt.values; while (v) { discover_specializations_expr(ctx, v->value); v = v->next; } break; }
             case AST_STMT_IF: discover_specializations_expr(ctx, s->as.if_stmt.condition); if (s->as.if_stmt.then_block) discover_specializations_stmt(ctx, s->as.if_stmt.then_block->first); if (s->as.if_stmt.else_block) discover_specializations_stmt(ctx, s->as.if_stmt.else_block->first); break;
             case AST_STMT_LOOP: if (s->as.loop_stmt.init) discover_specializations_stmt(ctx, s->as.loop_stmt.init); if (s->as.loop_stmt.condition) discover_specializations_expr(ctx, s->as.loop_stmt.condition); if (s->as.loop_stmt.increment) discover_specializations_expr(ctx, s->as.loop_stmt.increment); if (s->as.loop_stmt.body) discover_specializations_stmt(ctx, s->as.loop_stmt.body->first); break;
+            case AST_STMT_MATCH:
+                discover_specializations_expr(ctx, s->as.match_stmt.subject);
+                for (const AstMatchCase* c = s->as.match_stmt.cases; c; c = c->next) {
+                    if (c->pattern) discover_specializations_expr(ctx, c->pattern);
+                    if (c->block) discover_specializations_stmt(ctx, c->block->first);
+                }
+                break;
             case AST_STMT_DEFER: if (s->as.defer_stmt.block) discover_specializations_stmt(ctx, s->as.defer_stmt.block->first); break;
             default: break;
         }
@@ -727,11 +834,22 @@ static void discover_specializations_module(CompilerContext* ctx, const AstModul
         for (size_t i = discovered; i < limit; i++) {
             const AstFuncDecl* f = ctx->specialized_funcs[i].decl;
             const AstTypeRef* args = ctx->specialized_funcs[i].concrete_args;
-            CFuncContext fctx = {.compiler_ctx = ctx, .module = module, .func_decl = f, .generic_params = f->generic_params, .generic_args = args};
+            if (!f) continue;
+            
+            CFuncContext fctx = {0};
+            fctx.compiler_ctx = ctx;
+            fctx.module = module;
+            fctx.func_decl = f;
+            fctx.generic_params = f->generic_params;
+            fctx.generic_args = args;
+            
             for (const AstParam* p = f->params; p; p = p->next) {
                 if (fctx.local_count < 256) {
                     fctx.locals[fctx.local_count] = p->name;
-                    fctx.local_type_refs[fctx.local_count] = substitute_type_ref(ctx, f->generic_params, args, p->type);
+                    AstTypeRef* tr = substitute_type_ref(ctx, f->generic_params, args, p->type);
+                    fctx.local_type_refs[fctx.local_count] = tr;
+                    const char* mn = rae_mangle_type_specialized(ctx, f->generic_params, args, p->type);
+                    fctx.local_types[fctx.local_count] = str_from_cstr(mn);
                     fctx.local_count++;
                 }
             }
@@ -748,7 +866,7 @@ static void collect_type_refs_module(CompilerContext* ctx) {
             for (const AstParam* p = d->as.func_decl.params; p; p = p->next) register_generic_type(ctx, p->type);
             if (d->as.func_decl.returns) register_generic_type(ctx, d->as.func_decl.returns->type);
             if (d->as.func_decl.body) {
-                for (const AstStmt* s = d->as.func_decl.body->first; s; s = s->next) collect_type_refs_stmt(ctx, s);
+                collect_type_refs_stmt(ctx, d->as.func_decl.body->first);
             }
         } else if (d->kind == AST_DECL_TYPE) {
             for (const AstTypeField* f = d->as.type_decl.fields; f; f = f->next) register_generic_type(ctx, f->type);
@@ -768,60 +886,6 @@ static void collect_type_refs_module(CompilerContext* ctx) {
     } while (ctx->generic_type_count > last_generic_count || ctx->specialized_func_count > last_func_count);
 }
 
-static bool emit_specialized_struct_def(CompilerContext* ctx, const AstModule* module, const AstTypeRef* type, FILE* out, bool uses_raylib) {
-    (void)uses_raylib;
-    if (!type || !type->generic_args) return true;
-    for (size_t i = 0; i < ctx->emitted_generic_type_count; i++) {
-        if (type_refs_equal(ctx->emitted_generic_types[i], type)) return true;
-    }
-    if (ctx->emitted_generic_type_count < ctx->emitted_generic_type_cap) {
-        ctx->emitted_generic_types[ctx->emitted_generic_type_count++] = type;
-    }
-
-    Str base = type->parts->text;
-    const char* mangled = rae_mangle_type(ctx, NULL, type);
-    CFuncContext dummy_ctx = {0}; dummy_ctx.compiler_ctx = ctx; dummy_ctx.module = module; dummy_ctx.uses_raylib = uses_raylib;
-
-    if (str_eq_cstr(base, "List") || str_eq_cstr(base, "Box")) {
-        fprintf(out, "typedef struct %s %s;\nstruct %s {\n", mangled, mangled, mangled);
-        fprintf(out, "  ");
-        if (str_eq_cstr(base, "Box")) {
-            emit_type_ref_as_c_type(&dummy_ctx, type->generic_args, out, false);
-            fprintf(out, " value;\n};\n\n");
-        } else {
-            // Buffer(T) correctly emits T*
-            // We want 'T* data;'
-            emit_type_ref_as_c_type(&dummy_ctx, type->generic_args, out, false);
-            fprintf(out, "* data;\n  int64_t length;\n  int64_t capacity;\n};\n\n");
-        }
-        return true;
-    }
-
-    const AstDecl* d = NULL;
-    for (size_t i = 0; i < ctx->all_decl_count; i++) {
-        if (ctx->all_decls[i]->kind == AST_DECL_TYPE && types_match(ctx->all_decls[i]->as.type_decl.name, base)) {
-            d = ctx->all_decls[i];
-            break;
-        }
-    }
-    if (!d || d->kind != AST_DECL_TYPE) return true;
-
-    fprintf(out, "typedef struct %s %s;\nstruct %s {\n", mangled, mangled, mangled);
-    CFuncContext field_ctx = {0};
-    field_ctx.compiler_ctx = ctx;
-    field_ctx.module = module;
-    field_ctx.uses_raylib = uses_raylib;
-    field_ctx.generic_params = d->as.type_decl.generic_params;
-    field_ctx.generic_args = type->generic_args;
-
-    for (const AstTypeField* f = d->as.type_decl.fields; f; f = f->next) {
-        fprintf(out, "  ");
-        emit_type_ref_as_c_type(&field_ctx, f->type, out, false);
-        fprintf(out, " %.*s;\n", (int)f->name.len, f->name.data);
-    }
-    fprintf(out, "};\n\n");
-    return true;
-}
 
 static int binary_op_precedence(AstBinaryOp op) {
   switch (op) {
@@ -936,13 +1000,27 @@ static bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, F
 
   const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type);
   
-  if (ctx && ctx->uses_raylib && is_raylib_builtin_type(base)) {
-      if (!find_type_decl(ctx, ctx->module, base)) {
-          fprintf(out, "%.*s", (int)base.len, base.data);
-      } else {
-          fprintf(out, "rae_%.*s", (int)base.len, base.data);
-      }
-  } else {
+    if (ctx && ctx->uses_raylib && is_raylib_builtin_type(base)) {
+  
+        const AstDecl* td = find_type_decl(NULL, ctx->module, base);
+  
+        if (td && td->kind == AST_DECL_TYPE && has_property(td->as.type_decl.properties, "c_struct")) {
+  
+            fprintf(out, "%.*s", (int)base.len, base.data);
+  
+        } else if (!td) {
+  
+            fprintf(out, "%.*s", (int)base.len, base.data);
+  
+        } else {
+  
+            fprintf(out, "rae_%.*s", (int)base.len, base.data);
+  
+        }
+  
+    }
+  
+   else {
       fprintf(out, "%s", mangled);
   }
 
@@ -1116,8 +1194,18 @@ static bool is_generic_param(const AstIdentifierPart* params, Str name) {
     return false;
 }
 
+static const AstTypeRef* g_infer_expr_ref_stack[64];
+static size_t g_infer_expr_ref_stack_count = 0;
+
 static const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
     if (!expr) return NULL;
+    for (size_t i = 0; i < g_infer_expr_ref_stack_count; i++) {
+        if (g_infer_expr_ref_stack[i] == (const AstTypeRef*)expr) return NULL;
+    }
+    if (g_infer_expr_ref_stack_count >= 64) return NULL;
+    g_infer_expr_ref_stack[g_infer_expr_ref_stack_count++] = (const AstTypeRef*)expr;
+
+    const AstTypeRef* res = NULL;
     if (expr->kind == AST_EXPR_CALL && expr->as.call.callee->kind == AST_EXPR_IDENT) {
         Str name = expr->as.call.callee->as.ident;
         if (str_eq_cstr(name, "rae_ext_rae_buf_alloc") || str_eq_cstr(name, "__buf_alloc") ||
@@ -1126,34 +1214,34 @@ static const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* e
             buf_tr->parts = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstIdentifierPart));
             buf_tr->parts->text = str_from_cstr("Buffer");
             buf_tr->generic_args = (AstTypeRef*)expr->as.call.generic_args;
-            return buf_tr;
+            res = buf_tr; goto done;
         }
     }
     switch (expr->kind) {
-        case AST_EXPR_IDENT: return get_local_type_ref(ctx, expr->as.ident);
+        case AST_EXPR_IDENT: res = get_local_type_ref(ctx, expr->as.ident); goto done;
         case AST_EXPR_INTEGER: {
             AstTypeRef* tr = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
             *tr = (AstTypeRef){.parts = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstIdentifierPart))};
             tr->parts->text = str_from_cstr("Int64");
-            return tr;
+            res = tr; goto done;
         }
         case AST_EXPR_FLOAT: {
             AstTypeRef* tr = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
             *tr = (AstTypeRef){.parts = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstIdentifierPart))};
             tr->parts->text = str_from_cstr("Float64");
-            return tr;
+            res = tr; goto done;
         }
         case AST_EXPR_BOOL: {
             AstTypeRef* tr = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
             *tr = (AstTypeRef){.parts = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstIdentifierPart))};
             tr->parts->text = str_from_cstr("Bool");
-            return tr;
+            res = tr; goto done;
         }
         case AST_EXPR_STRING: {
             AstTypeRef* tr = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
             *tr = (AstTypeRef){.parts = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstIdentifierPart))};
             tr->parts->text = str_from_cstr("String");
-            return tr;
+            res = tr; goto done;
         }
         case AST_EXPR_MEMBER: {
             const AstTypeRef* obj_tr = infer_expr_type_ref(ctx, expr->as.member.object);
@@ -1165,7 +1253,8 @@ static const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* e
                 for (const AstTypeField* f = d->as.type_decl.fields; f; f = f->next) {
                     if (str_eq(f->name, expr->as.member.member)) {
                         const AstTypeRef* concrete_args = (obj_tr && obj_tr->generic_args) ? obj_tr->generic_args : ctx->generic_args;
-                        return substitute_type_ref(ctx->compiler_ctx, d->as.type_decl.generic_params, concrete_args, f->type);
+                        res = substitute_type_ref(ctx->compiler_ctx, d->as.type_decl.generic_params, concrete_args, f->type);
+                        goto done;
                     }
                 }
             }
@@ -1175,7 +1264,7 @@ static const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* e
             const AstTypeRef* tr = infer_expr_type_ref(ctx, expr->as.index.target);
             if (tr) {
                 Str base = get_base_type_name(tr);
-                if ((str_eq_cstr(base, "Buffer") || str_eq_cstr(base, "List")) && tr->generic_args) return tr->generic_args;
+                if ((str_eq_cstr(base, "Buffer") || str_eq_cstr(base, "List")) && tr->generic_args) { res = tr->generic_args; goto done; }
             }
             break;
         }
@@ -1218,7 +1307,7 @@ static const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* e
                         copy->is_opt = true;
                         result = copy;
                     }
-                    return result;
+                    res = result; goto done;
                 }
             } else if (expr->as.call.callee->kind == AST_EXPR_MEMBER) {
                 Str member = expr->as.call.callee->as.member.member;
@@ -1226,7 +1315,7 @@ static const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* e
                 uint16_t param_count = 1; 
                 for (const AstCallArg* a = expr->as.call.args; a; a = a->next) param_count++;
                 const AstFuncDecl* fd = find_function_overload(ctx->module, ctx, member, &obj_name, param_count, true, expr);
-                if (fd && fd->returns) return fd->returns->type;
+                if (fd && fd->returns) { res = fd->returns->type; goto done; }
             }
             break;
         }
@@ -1236,7 +1325,7 @@ static const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* e
                 AstTypeRef* tr = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
                 *tr = (AstTypeRef){.parts = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstIdentifierPart))};
                 tr->parts->text = str_from_cstr("String");
-                return tr;
+                res = tr; goto done;
             }
             Str obj_name = infer_expr_type(ctx, expr->as.method_call.object);
             uint16_t param_count = 1;
@@ -1269,13 +1358,15 @@ static const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* e
                     copy->is_opt = true;
                     result = copy;
                 }
-                return result;
+                res = result; goto done;
             }
             break;
         }
         default: break;
     }
-    return NULL;
+done:
+    g_infer_expr_ref_stack_count--;
+    return res;
 }
 
 static const AstExpr* g_infer_expr_stack[64];
@@ -2881,32 +2972,17 @@ static bool emit_json_methods(CompilerContext* ctx, const AstModule* module, FIL
 }
 
 static bool emit_struct_defs(CompilerContext* ctx, const AstModule* module, FILE* out, bool uses_raylib) {
-  static char* emitted_m[1024]; size_t count_m = 0;
-  size_t processed_generic = 0;
-  
-  // Loop as long as we have unprocessed generic types.
-  // emit_specialized_struct_def might call register_generic_type, increasing ctx->generic_type_count.
-  while (processed_generic < ctx->generic_type_count) {
-    size_t current_count = ctx->generic_type_count;
-    for (size_t i = processed_generic; i < current_count; i++) {
-      const char* m = rae_mangle_type(ctx, NULL, ctx->generic_types[i]);
-      bool dup = false;
-      for (size_t j = 0; j < count_m; j++) {
-        if (strcmp(emitted_m[j], m) == 0) { dup = true; break; }
-      }
-      if (dup) continue;
-      
-      emitted_m[count_m++] = (char*)m; 
-      emit_specialized_struct_def(ctx, module, ctx->generic_types[i], out, uses_raylib);
+    DeclList emitted = { .items = malloc(sizeof(AstDecl*) * 2048), .capacity = 2048, .count = 0 };
+    DeclList visiting = { .items = malloc(sizeof(AstDecl*) * 2048), .capacity = 2048, .count = 0 };
+    for (size_t i = 0; i < ctx->all_decl_count; i++) {
+        const AstDecl* d = ctx->all_decls[i];
+        if (d->kind == AST_DECL_TYPE && !d->as.type_decl.generic_params) {
+            emit_struct_recursive(ctx, module, d, out, &emitted, &visiting, uses_raylib);
+        }
     }
-    processed_generic = current_count;
-  }
-  Str emitted_t[512]; size_t count_t = 0;
-  for (size_t i = 0; i < ctx->all_decl_count; i++) {
-    const AstDecl* d = ctx->all_decls[i];
-    if (d->kind == AST_DECL_TYPE && !d->as.type_decl.generic_params) emit_single_struct_def(ctx, module, d, out, emitted_t, &count_t, uses_raylib);
-  }
-  return true;
+    free(emitted.items);
+    free(visiting.items);
+    return true;
 }
 
 static bool emit_enum_defs(CompilerContext* ctx, const AstModule* module, FILE* out, bool uses_raylib) {
@@ -3188,24 +3264,6 @@ static bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFun
   if (tctx.is_main) fprintf(out, "  return 0;\n"); fprintf(out, "}\n\n"); return true;
 }
 
-static bool emit_single_struct_def(CompilerContext* ctx, const AstModule* m, const AstDecl* d, FILE* out, Str* et, size_t* ec, bool ray) {
-  for (size_t i = 0; i < *ec; i++) if (str_eq(et[i], d->as.type_decl.name)) return true;
-  Str ns = d->as.type_decl.name; if (is_primitive_type(ns) || (ray && is_raylib_builtin_type(ns))) { et[(*ec)++] = ns; return true; }
-  if (has_property(d->as.type_decl.properties, "c_struct")) { et[(*ec)++] = ns; return true; }
-  for (const AstTypeField* f = d->as.type_decl.fields; f; f = f->next) {
-    if (f->type && f->type->parts && !f->type->is_view && !f->type->is_mod) {
-      const AstDecl* dep = find_type_decl(NULL, m, f->type->parts->text);
-      if (dep) emit_single_struct_def(ctx, m, dep, out, et, ec, ray);
-    }
-  }
-  char* n = str_to_cstr(ns); fprintf(out, "typedef struct rae_%s rae_%s;\nstruct rae_%s {\n", n, n, n);
-  CFuncContext tctx = {.compiler_ctx = ctx, .generic_params = d->as.type_decl.generic_params, .uses_raylib = ray};
-  for (const AstTypeField* f = d->as.type_decl.fields; f; f = f->next) {
-    fprintf(out, "  "); bool p = f->type && (f->type->is_view || f->type->is_mod);
-    emit_type_ref_as_c_type(&tctx, f->type, out, false); fprintf(out, "%s %.*s;\n", p ? "*" : "", (int)f->name.len, f->name.data);
-  }
-  fprintf(out, "};\n\n"); free(n); et[(*ec)++] = ns; return true;
-}
 
 static bool emit_defers(CFuncContext* ctx, int min_depth, FILE* out) {
   for (int i = ctx->defer_stack.count - 1; i >= 0; i--) {
