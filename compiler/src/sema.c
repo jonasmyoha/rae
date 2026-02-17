@@ -10,6 +10,7 @@ struct Symbol {
     AstDecl* decl;
     TypeInfo* type;
     int scope_depth;
+    bool is_immutable;
     Symbol* next;
 };
 
@@ -29,12 +30,13 @@ static void symbol_table_pop_scope(SymbolTable* table) {
     table->current_depth--;
 }
 
-static void symbol_table_define(SymbolTable* table, Arena* arena, Str name, AstDecl* decl, TypeInfo* type) {
+static void symbol_table_define(SymbolTable* table, Arena* arena, Str name, AstDecl* decl, TypeInfo* type, bool is_immutable) {
     Symbol* sym = arena_alloc(arena, sizeof(Symbol));
     sym->name = name;
     sym->decl = decl;
     sym->type = type;
     sym->scope_depth = table->current_depth;
+    sym->is_immutable = is_immutable;
     sym->next = table->head;
     table->head = sym;
 }
@@ -79,6 +81,72 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
 static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstTypeRef* type_ref);
 static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr** expr_ptr);
 static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, AstDecl* generic_decl, TypeInfo** args, size_t arg_count, size_t line, size_t column);
+AstTypeRef* substitute_type_ref(CompilerContext* ctx, const AstIdentifierPart* generic_params, const AstTypeRef* concrete_args, const AstTypeRef* type);
+AstTypeRef* infer_generic_args(CompilerContext* ctx, const AstFuncDecl* func, const AstTypeRef* pattern, const AstTypeRef* concrete_type);
+bool type_refs_equal(const AstTypeRef* a, const AstTypeRef* b);
+Str get_base_type_name(const AstTypeRef* type);
+AstIdentifierPart* clone_parts(CompilerContext* ctx, const AstIdentifierPart* p);
+
+AstIdentifierPart* clone_parts(CompilerContext* ctx, const AstIdentifierPart* p) {
+    if (!p) return NULL;
+    AstIdentifierPart* res = arena_alloc(ctx->ast_arena, sizeof(AstIdentifierPart));
+    *res = *p;
+    res->next = clone_parts(ctx, p->next);
+    return res;
+}
+
+AstTypeRef* substitute_type_ref(CompilerContext* ctx, const AstIdentifierPart* generic_params, const AstTypeRef* concrete_args, const AstTypeRef* type) {
+    if (!type) return NULL;
+    
+    if (generic_params && concrete_args && type->parts && !type->parts->next) {
+        Str base = type->parts->text;
+        const AstIdentifierPart* gp = generic_params;
+        const AstTypeRef* arg = concrete_args;
+        while (gp && arg) {
+            if (str_eq(gp->text, base)) {
+                const AstTypeRef* match = arg;
+                if (match->generic_args) match = substitute_type_ref(ctx, NULL, NULL, match);
+                
+                AstTypeRef* result = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
+                *result = *match;
+                result->next = NULL;
+                result->parts = clone_parts(ctx, match->parts);
+                if (type->is_view) result->is_view = true;
+                if (type->is_mod) result->is_mod = true;
+                if (type->is_opt) result->is_opt = true;
+                return result;
+            }
+            gp = gp->next; arg = arg->next;
+        }
+    }
+    
+    if (type->generic_args) {
+        AstTypeRef* new_type = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
+        *new_type = *type;
+        new_type->next = NULL;
+        new_type->parts = clone_parts(ctx, type->parts);
+        AstTypeRef* sub_args = NULL;
+        AstTypeRef* last_sub = NULL;
+        for (const AstTypeRef* a = type->generic_args; a; a = a->next) {
+            AstTypeRef* sub = substitute_type_ref(ctx, generic_params, concrete_args, a);
+            if (!sub_args) sub_args = sub;
+            else last_sub->next = sub;
+            last_sub = sub;
+        }
+        new_type->generic_args = sub_args;
+        if (last_sub) last_sub->next = NULL;
+        if (type->is_view) new_type->is_view = true;
+        if (type->is_mod) new_type->is_mod = true;
+        if (type->is_opt) new_type->is_opt = true;
+        return new_type;
+    }
+    
+    AstTypeRef* result = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
+    *result = *type;
+    result->next = NULL;
+    result->parts = clone_parts(ctx, type->parts);
+    return result;
+}
 
 // --- AST Cloning ---
 
@@ -220,6 +288,8 @@ static AstStmt* clone_stmt(Arena* arena, const AstStmt* stmt) {
 // --- Specialization ---
 
 static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, AstDecl* generic_decl, TypeInfo** args, size_t arg_count, size_t line, size_t column) {
+    Str base_name = (generic_decl->kind == AST_DECL_FUNC) ? generic_decl->as.func_decl.name : generic_decl->as.type_decl.name;
+    
     AstDecl* existing = type_registry_find_specialization(ctx->type_registry, generic_decl, args, arg_count);
     if (existing) return existing;
 
@@ -227,7 +297,19 @@ static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, AstDecl
     *spec = *generic_decl;
     spec->next = NULL;
 
+    // Create concrete type refs for mangling/further resolution
+    AstTypeRef* args_tr = NULL;
+    AstTypeRef* last_tr = NULL;
+    for (size_t i = 0; i < arg_count; i++) {
+        AstTypeRef* tr = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
+        tr->resolved_type = args[i];
+        tr->next = NULL;
+        if (!args_tr) args_tr = tr; else last_tr->next = tr;
+        last_tr = tr;
+    }
+
     if (generic_decl->kind == AST_DECL_FUNC) {
+        spec->as.func_decl.specialization_args = args_tr;
         // Clone and map params
         AstParam* head = NULL;
         AstParam* tail = NULL;
@@ -235,7 +317,7 @@ static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, AstDecl
         while (p) {
             AstParam* np = arena_alloc(ctx->ast_arena, sizeof(AstParam));
             *np = *p;
-            np->type = clone_type_ref(ctx->ast_arena, p->type);
+            np->type = substitute_type_ref(ctx, generic_decl->as.func_decl.generic_params, args_tr, p->type);
             np->next = NULL;
             if (!head) head = np;
             if (tail) tail->next = np;
@@ -243,6 +325,21 @@ static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, AstDecl
             p = p->next;
         }
         spec->as.func_decl.params = head;
+        if (generic_decl->as.func_decl.returns) {
+            AstReturnItem* head_ret = NULL;
+            AstReturnItem* tail_ret = NULL;
+            AstReturnItem* r = generic_decl->as.func_decl.returns;
+            while (r) {
+                AstReturnItem* nr = arena_alloc(ctx->ast_arena, sizeof(AstReturnItem));
+                *nr = *r;
+                nr->type = substitute_type_ref(ctx, generic_decl->as.func_decl.generic_params, args_tr, r->type);
+                nr->next = NULL;
+                if (!head_ret) head_ret = nr; else tail_ret->next = nr;
+                tail_ret = nr;
+                r = r->next;
+            }
+            spec->as.func_decl.returns = head_ret;
+        }
         spec->as.func_decl.body = clone_block(ctx->ast_arena, generic_decl->as.func_decl.body);
         spec->as.func_decl.generic_params = NULL;
     } else if (generic_decl->kind == AST_DECL_TYPE) {
@@ -253,7 +350,7 @@ static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, AstDecl
         while (f) {
             AstTypeField* nf = arena_alloc(ctx->ast_arena, sizeof(AstTypeField));
             *nf = *f;
-            nf->type = clone_type_ref(ctx->ast_arena, f->type);
+            nf->type = substitute_type_ref(ctx, generic_decl->as.type_decl.generic_params, args_tr, f->type);
             nf->default_value = clone_expr(ctx->ast_arena, f->default_value);
             nf->next = NULL;
             if (!head) head = nf;
@@ -267,35 +364,7 @@ static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, AstDecl
 
     type_registry_add_specialization(ctx->type_registry, generic_decl, args, arg_count, spec);
 
-    // 3. Assign unique mangled name
-    // Simple mangling: Name_Arg1_Arg2
-    char name_buf[256];
-    Str base_name = (generic_decl->kind == AST_DECL_FUNC) ? generic_decl->as.func_decl.name : generic_decl->as.type_decl.name;
-    int len = snprintf(name_buf, sizeof(name_buf), "%.*s_", (int)base_name.len, base_name.data);
-    for (size_t i = 0; i < arg_count; i++) {
-        len += snprintf(name_buf + len, sizeof(name_buf) - len, "%.*s%s", (int)args[i]->name.len, args[i]->name.data, (i == arg_count - 1) ? "" : "_");
-    }
-    Str mangled_name = str_dup_arena(ctx->ast_arena, (Str){(uint8_t*)name_buf, (size_t)len});
-    if (spec->kind == AST_DECL_FUNC) spec->as.func_decl.name = mangled_name;
-    else if (spec->kind == AST_DECL_TYPE) spec->as.type_decl.name = mangled_name;
-
-    // 4. Analyze specialized body
-    instantiation_stack_push(ctx->instantiation_stack, ctx->ast_arena, module->file_path, line, column);
-    
-    SymbolTable spec_symbols = {0};
-    symbol_table_push_scope(&spec_symbols);
-    AstIdentifierPart* param = (generic_decl->kind == AST_DECL_FUNC) ? generic_decl->as.func_decl.generic_params : generic_decl->as.type_decl.generic_params;
-    for (size_t i = 0; i < arg_count && param; i++) {
-        symbol_table_define(&spec_symbols, ctx->ast_arena, param->text, NULL, args[i]);
-        param = param->next;
-    }
-    
-    // Recursive analysis
-    sema_analyze_decl(ctx, module, &spec_symbols, spec);
-    symbol_table_pop_scope(&spec_symbols);
-    
-    instantiation_stack_pop(ctx->instantiation_stack);
-    
+    // 4. Return spec (will be analyzed by discovery loop in sema_analyze_module)
     return spec;
 }
 
@@ -313,37 +382,61 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
     
     SymbolTable symbols = {0};
     
-    AstDecl* decl = module->decls;
-    while (decl) {
-        Str name = {0};
-        TypeInfo* t = NULL;
-        switch (decl->kind) {
-            case AST_DECL_TYPE: 
-                name = decl->as.type_decl.name; 
-                if (!decl->as.type_decl.generic_params) {
-                    t = type_get_struct(ctx->type_registry, decl, NULL, 0);
-                    decl->resolved_type = t;
+    // Discovery loop
+    size_t processed_count = 0;
+    static const AstDecl* processed[8192];
+    
+    bool found_new = true;
+    while (found_new) {
+        found_new = false;
+        
+        // Register all currently known symbols
+        AstDecl* d = module->decls;
+        while (d) {
+            Str name = {0};
+            TypeInfo* t = NULL;
+            switch (d->kind) {
+                case AST_DECL_TYPE: 
+                    name = d->as.type_decl.name; 
+                    if (!d->as.type_decl.generic_params && !d->resolved_type) {
+                        t = type_get_struct(ctx->type_registry, d, NULL, 0);
+                        d->resolved_type = t;
+                    }
+                    break;
+                case AST_DECL_FUNC: name = d->as.func_decl.name; break;
+                case AST_DECL_ENUM: name = d->as.enum_decl.name; break;
+                case AST_DECL_GLOBAL_LET: name = d->as.let_decl.name; break;
+                default: break;
+            }
+            
+            if (name.len > 0) {
+                // Only define if not already in symbols (to avoid duplicates in merged modules)
+                if (!symbol_table_lookup(&symbols, name)) {
+                    symbol_table_define(&symbols, ctx->ast_arena, name, d, d->resolved_type, (d->kind == AST_DECL_FUNC && !d->as.func_decl.generic_params));
                 }
-                break;
-            case AST_DECL_FUNC: name = decl->as.func_decl.name; break;
-            case AST_DECL_ENUM: name = decl->as.enum_decl.name; break;
-            case AST_DECL_GLOBAL_LET: name = decl->as.let_decl.name; break;
+            }
+            d = d->next;
         }
-        if (name.len > 0) {
-            symbol_table_define(&symbols, ctx->ast_arena, name, decl, t);
-        }
-        decl = decl->next;
-    }
 
-    decl = module->decls;
-    while (decl) {
-        bool is_generic = false;
-        if (decl->kind == AST_DECL_FUNC && decl->as.func_decl.generic_params) is_generic = true;
-        if (decl->kind == AST_DECL_TYPE && decl->as.type_decl.generic_params) is_generic = true;
-        if (!is_generic) {
-            sema_analyze_decl(ctx, module, &symbols, decl);
+        // Process un-analyzed declarations
+        d = module->decls;
+        while (d) {
+            bool already = false;
+            for (size_t i = 0; i < processed_count; i++) if (processed[i] == d) { already = true; break; }
+            if (already) { d = d->next; continue; }
+            
+            if (processed_count < 8192) processed[processed_count++] = d;
+            found_new = true;
+
+            bool is_generic = false;
+            if (d->kind == AST_DECL_FUNC && d->as.func_decl.generic_params) is_generic = true;
+            if (d->kind == AST_DECL_TYPE && d->as.type_decl.generic_params) is_generic = true;
+            
+            if (!is_generic) {
+                sema_analyze_decl(ctx, module, &symbols, d);
+            }
+            d = d->next;
         }
-        decl = decl->next;
     }
 
     return !module->had_error;
@@ -369,13 +462,15 @@ static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTab
             symbol_table_push_scope(symbols);
             TypeInfo* current_return_type = type_get_void(ctx->type_registry);
             if (decl->as.func_decl.returns) {
+                if (!decl->as.func_decl.returns->type) {
+                }
                 current_return_type = sema_resolve_type_internal(ctx, module, symbols, decl->as.func_decl.returns->type);
             }
             
             AstParam* param = decl->as.func_decl.params;
             while (param) {
                 TypeInfo* t = sema_resolve_type_internal(ctx, module, symbols, param->type);
-                symbol_table_define(symbols, ctx->ast_arena, param->name, NULL, t);
+                symbol_table_define(symbols, ctx->ast_arena, param->name, NULL, t, (param->type && !param->type->is_mod));
                 param = param->next;
             }
 
@@ -417,7 +512,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                 }
                 if (t) ensure_type_match(ctx, t, &stmt->as.let_stmt.value);
             }
-            symbol_table_define(symbols, ctx->ast_arena, stmt->as.let_stmt.name, NULL, t);
+            symbol_table_define(symbols, ctx->ast_arena, stmt->as.let_stmt.name, NULL, t, false);
             break;
         }
         case AST_STMT_RET: {
@@ -508,7 +603,7 @@ static TypeInfo* find_field_type(CompilerContext* ctx, AstModule* module, Symbol
                 AstIdentifierPart* param = decl->as.type_decl.generic_params;
                 size_t i = 0;
                 while (param && i < struct_type->as.structure.generic_count) {
-                    symbol_table_define(symbols, ctx->ast_arena, param->text, NULL, struct_type->as.structure.generic_args[i]);
+                    symbol_table_define(symbols, ctx->ast_arena, param->text, NULL, struct_type->as.structure.generic_args[i], true);
                     param = param->next; i++;
                 }
                 TypeInfo* result = sema_resolve_type_internal(ctx, module, symbols, field->type);
@@ -535,6 +630,12 @@ static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr*
         *expr_ptr = box;
     } else if (expected->kind != TYPE_ANY && expr->resolved_type->kind == TYPE_ANY) {
         // Wrap in UNBOX
+        AstExpr* unbox = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
+        *unbox = (AstExpr){.kind = AST_EXPR_UNBOX, .resolved_type = expected, .line = expr->line, .column = expr->column};
+        unbox->as.unary.operand = expr;
+        *expr_ptr = unbox;
+    } else if (expected->kind != TYPE_OPT && expr->resolved_type->kind == TYPE_OPT) {
+        // Implicitly unwrap opt T to T (for now, to match VM behavior)
         AstExpr* unbox = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
         *unbox = (AstExpr){.kind = AST_EXPR_UNBOX, .resolved_type = expected, .line = expr->line, .column = expr->column};
         unbox->as.unary.operand = expr;
@@ -646,26 +747,44 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                 } else if (str_eq_cstr(expr->as.method_call.method_name, "toCStr")) {
                     expr->resolved_type = type_get_string(ctx->type_registry);
                 } else {
+                    bool found = false;
                     for (size_t i = 0; i < ctx->methods.count; i++) {
                         MethodEntry* entry = &ctx->methods.entries[i];
                         if (str_eq(entry->type_name, t->name) && str_eq(entry->method_name, expr->as.method_call.method_name)) {
                             Symbol* sym = symbol_table_lookup(symbols, entry->actual_function_name);
                             if (sym && sym->decl && sym->decl->kind == AST_DECL_FUNC) {
+                                expr->decl_link = sym->decl;
                                 if (sym->decl->as.func_decl.returns) {
                                     expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, sym->decl->as.func_decl.returns->type);
                                 }
-                                
-                                // Boxing/Unboxing for arguments (skip first param which is 'this')
-                                AstParam* p = sym->decl->as.func_decl.params;
-                                if (p) p = p->next; // Skip 'this'
-                                AstCallArg* a = expr->as.method_call.args;
-                                while (p && a) {
-                                    TypeInfo* pt = sema_resolve_type_internal(ctx, module, symbols, p->type);
-                                    ensure_type_match(ctx, pt, &a->value);
-                                    p = p->next; a = a->next;
-                                }
+                                found = true;
                             }
                             break;
+                        }
+                    }
+                    
+                    if (!found) {
+                        // Extension method search (global function with 'this' param)
+                        // For now, we'll just look up by name and assume it's an extension method if it takes the right 'this'
+                        Symbol* sym = symbol_table_lookup(symbols, expr->as.method_call.method_name);
+                        if (sym && sym->decl && sym->decl->kind == AST_DECL_FUNC) {
+                            expr->decl_link = sym->decl;
+                            if (sym->decl->as.func_decl.returns) {
+                                expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, sym->decl->as.func_decl.returns->type);
+                            }
+                            found = true;
+                        }
+                    }
+                    
+                    if (found && expr->decl_link) {
+                        // Boxing/Unboxing for arguments (skip first param which is 'this')
+                        AstParam* p = expr->decl_link->as.func_decl.params;
+                        if (p) p = p->next; // Skip 'this'
+                        AstCallArg* a = expr->as.method_call.args;
+                        while (p && a) {
+                            TypeInfo* pt = sema_resolve_type_internal(ctx, module, symbols, p->type);
+                            ensure_type_match(ctx, pt, &a->value);
+                            p = p->next; a = a->next;
                         }
                     }
                 }
@@ -762,22 +881,24 @@ static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* mod
         else if (symbols) {
             Symbol* sym = symbol_table_lookup(symbols, name);
             if (sym) {
-                if (type_ref->generic_args && sym->decl && sym->decl->kind == AST_DECL_TYPE) {
-                    TypeInfo* args[16];
-                    size_t arg_count = 0;
-                    AstTypeRef* curr_arg = type_ref->generic_args;
-                    while (curr_arg && arg_count < 16) {
-                        args[arg_count++] = sema_resolve_type_internal(ctx, module, symbols, curr_arg);
-                        curr_arg = curr_arg->next;
+                if (sym->type) {
+                    if (type_ref->generic_args && sym->decl && sym->decl->kind == AST_DECL_TYPE) {
+                        TypeInfo* args[16];
+                        size_t arg_count = 0;
+                        AstTypeRef* curr_arg = type_ref->generic_args;
+                        while (curr_arg && arg_count < 16) {
+                            args[arg_count++] = sema_resolve_type_internal(ctx, module, symbols, curr_arg);
+                            curr_arg = curr_arg->next;
+                        }
+                        base = type_get_struct(ctx->type_registry, sym->decl, args, arg_count);
+                        if (!type_registry_find_specialization(ctx->type_registry, sym->decl, args, arg_count)) {
+                            AstDecl* spec = specialize_decl(ctx, module, sym->decl, args, arg_count, type_ref->line, type_ref->column);
+                            spec->next = module->decls;
+                            module->decls = spec;
+                        }
+                    } else {
+                        base = sym->type;
                     }
-                    base = type_get_struct(ctx->type_registry, sym->decl, args, arg_count);
-                    if (!type_registry_find_specialization(ctx->type_registry, sym->decl, args, arg_count)) {
-                        AstDecl* spec = specialize_decl(ctx, module, sym->decl, args, arg_count, type_ref->line, type_ref->column);
-                        spec->next = module->decls;
-                        module->decls = spec;
-                    }
-                } else if (sym->type) {
-                    base = sym->type;
                 }
             }
         }
