@@ -51,21 +51,21 @@ typedef struct {
 } CDeferStack;
 
 typedef struct {
-    const AstDecl** items;
+    const char** items;
     size_t count;
     size_t capacity;
-} DeclList;
+} EmittedTypeList;
 
-static bool decl_list_contains(DeclList* list, const AstDecl* d) {
+static bool emitted_list_contains(EmittedTypeList* list, const char* name) {
     for (size_t i = 0; i < list->count; i++) {
-        if (list->items[i] == d) return true;
+        if (strcmp(list->items[i], name) == 0) return true;
     }
     return false;
 }
 
-static void decl_list_add(DeclList* list, const AstDecl* d) {
+static void emitted_list_add(EmittedTypeList* list, const char* name) {
     if (list->count < list->capacity) {
-        list->items[list->count++] = d;
+        list->items[list->count++] = name;
     }
 }
 
@@ -98,6 +98,7 @@ typedef struct {
 static const AstDecl* find_type_decl(CFuncContext* ctx, const AstModule* module, Str name);
 static const AstDecl* find_enum_decl(CFuncContext* ctx, const AstModule* module, Str name);
 static bool has_property(const AstProperty* props, const char* name);
+static AstTypeRef* substitute_type_ref(CompilerContext* ctx, const AstIdentifierPart* generic_params, const AstTypeRef* concrete_args, const AstTypeRef* type);
 static bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* out, bool skip_ptr);
 static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_prec, bool is_lvalue, bool suppress_deref);
 static bool emit_function(CompilerContext* compiler_ctx, const AstModule* module, const AstFuncDecl* func, FILE* out, const struct VmRegistry* registry, bool uses_raylib);
@@ -118,54 +119,74 @@ static Str get_local_type_name(CFuncContext* ctx, Str name);
 static const AstTypeRef* get_local_type_ref(CFuncContext* ctx, Str name);
 static Str get_base_type_name(const AstTypeRef* type);
 
-static bool emit_struct_recursive(CompilerContext* ctx, const AstModule* m, const AstDecl* d, FILE* out, DeclList* emitted, DeclList* visiting, bool ray) {
-    if (!d || d->kind != AST_DECL_TYPE) return true;
-    if (d->as.type_decl.generic_params) return true; // Skip templates
+static bool emit_type_recursive(CompilerContext* ctx, const AstModule* m, const AstTypeRef* type, FILE* out, EmittedTypeList* emitted, EmittedTypeList* visiting, bool ray) {
+    if (!type || !type->parts) return true;
+    Str base = type->parts->text;
+    if (is_primitive_type(base) || (ray && is_raylib_builtin_type(base))) return true;
     
-    if (decl_list_contains(emitted, d)) return true;
-    if (decl_list_contains(visiting, d)) return true;
+    const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, type);
+    if (emitted_list_contains(emitted, mangled)) return true;
+    if (emitted_list_contains(visiting, mangled)) return true;
     
-    decl_list_add(visiting, d);
+    emitted_list_add(visiting, mangled);
     
-    // Process dependencies (fields embedded by value)
-    for (const AstTypeField* f = d->as.type_decl.fields; f; f = f->next) {
-        if (!f->type) continue;
-        if (f->type->is_view || f->type->is_mod) continue;
-        
-        if (f->type->parts) {
-            Str base = f->type->parts->text;
-            const AstDecl* dep = find_type_decl(NULL, m, base);
-            if (dep && dep != d) {
-                emit_struct_recursive(ctx, m, dep, out, emitted, visiting, ray);
-            }
+    // Find the declaration
+    const AstDecl* d = find_type_decl(NULL, m, base);
+    if (!d || d->kind != AST_DECL_TYPE) {
+        // Special handling for built-in generics like List, Buffer if not found as decls
+        if (str_eq_cstr(base, "List") || str_eq_cstr(base, "Buffer")) {
+            // These are pointers, they don't depend on their element type BY VALUE.
+            // But we should still ensure the element type is emitted if it's a struct?
+            // Actually, for pointers we don't need it.
+        } else {
+            visiting->count--;
+            return true;
         }
     }
-    
-    if (!has_property(d->as.type_decl.properties, "c_struct")) {
-        Str ns = d->as.type_decl.name;
-        char* n = str_to_cstr(ns);
-        char final_name[512];
-        if (strncmp(n, "rae_", 4) == 0) strncpy(final_name, n, 511);
-        else snprintf(final_name, 511, "rae_%s", n);
-        final_name[511] = '\0';
 
-        fprintf(out, "typedef struct %s %s;\n", final_name, final_name);
-        fprintf(out, "struct %s {\n", final_name);
+    if (d && d->kind == AST_DECL_TYPE) {
+        const AstTypeDecl* td = &d->as.type_decl;
+        const AstIdentifierPart* params = td->generic_params;
+        const AstTypeRef* args = type->generic_args;
         
-        CFuncContext tctx = {0};
-        tctx.compiler_ctx = ctx; tctx.module = m; tctx.uses_raylib = ray;
-        
-        for (const AstTypeField* f = d->as.type_decl.fields; f; f = f->next) {
-            fprintf(out, "  ");
-            emit_type_ref_as_c_type(&tctx, f->type, out, false);
-            bool p = f->type && (f->type->is_view || f->type->is_mod);
-            fprintf(out, "%s %.*s;\n", p ? "*" : "", (int)f->name.len, f->name.data);
+        // Process dependencies
+        for (const AstTypeField* f = td->fields; f; f = f->next) {
+            if (!f->type) continue;
+            if (f->type->is_view || f->type->is_mod) continue;
+            
+            // For generic types, we need to substitute before recursing
+            AstTypeRef* concrete_f = substitute_type_ref(ctx, params, args, f->type);
+            emit_type_recursive(ctx, m, concrete_f, out, emitted, visiting, ray);
         }
-        fprintf(out, "};\n\n");
-        free(n);
+        
+        // Emit definition
+        if (!has_property(td->properties, "c_struct")) {
+            fprintf(out, "typedef struct %s %s;\n", mangled, mangled);
+            fprintf(out, "struct %s {\n", mangled);
+            
+            CFuncContext tctx = {0};
+            tctx.compiler_ctx = ctx; tctx.module = m; tctx.uses_raylib = ray;
+            tctx.generic_params = params; tctx.generic_args = args;
+            
+            for (const AstTypeField* f = td->fields; f; f = f->next) {
+                fprintf(out, "  ");
+                emit_type_ref_as_c_type(&tctx, f->type, out, false);
+                bool p = f->type && (f->type->is_view || f->type->is_mod);
+                fprintf(out, "%s %.*s;\n", p ? "*" : "", (int)f->name.len, f->name.data);
+            }
+            fprintf(out, "};\n\n");
+        }
+    } else if (str_eq_cstr(base, "List") || str_eq_cstr(base, "Buffer")) {
+        // Built-in List/Buffer
+        fprintf(out, "typedef struct %s %s;\n", mangled, mangled);
+        fprintf(out, "struct %s {\n", mangled);
+        CFuncContext tctx = {0}; tctx.compiler_ctx = ctx; tctx.module = m; tctx.uses_raylib = ray;
+        fprintf(out, "  ");
+        emit_type_ref_as_c_type(&tctx, type->generic_args, out, false);
+        fprintf(out, "* data;\n  int64_t length;\n  int64_t capacity;\n};\n\n");
     }
-    
-    decl_list_add(emitted, d);
+
+    emitted_list_add(emitted, mangled);
     visiting->count--;
     return true;
 }
@@ -519,7 +540,12 @@ static void register_generic_type(CompilerContext* ctx, const AstTypeRef* type) 
         for (size_t i = 0; i < ctx->generic_type_count; i++) {
             if (type_refs_equal(ctx->generic_types[i], type)) goto scan_args;
         }
-        if (ctx->generic_type_count < ctx->generic_type_cap) {
+        // Check if already registered
+    for (size_t i = 0; i < ctx->generic_type_count; i++) {
+        if (type_refs_equal(ctx->generic_types[i], type)) return;
+    }
+    
+    if (ctx->generic_type_count < ctx->generic_type_cap) {
             ctx->generic_types[ctx->generic_type_count++] = type;
         }
     }
@@ -2972,14 +2998,24 @@ static bool emit_json_methods(CompilerContext* ctx, const AstModule* module, FIL
 }
 
 static bool emit_struct_defs(CompilerContext* ctx, const AstModule* module, FILE* out, bool uses_raylib) {
-    DeclList emitted = { .items = malloc(sizeof(AstDecl*) * 2048), .capacity = 2048, .count = 0 };
-    DeclList visiting = { .items = malloc(sizeof(AstDecl*) * 2048), .capacity = 2048, .count = 0 };
+    EmittedTypeList emitted = { .items = malloc(sizeof(char*) * 2048), .capacity = 2048, .count = 0 };
+    EmittedTypeList visiting = { .items = malloc(sizeof(char*) * 2048), .capacity = 2048, .count = 0 };
+    
+    // First, emit all pre-discovered specialized generic types
+    for (size_t i = 0; i < ctx->generic_type_count; i++) {
+        emit_type_recursive(ctx, module, (AstTypeRef*)ctx->generic_types[i], out, &emitted, &visiting, uses_raylib);
+    }
+
+    // Then, emit all regular structs from declarations
     for (size_t i = 0; i < ctx->all_decl_count; i++) {
         const AstDecl* d = ctx->all_decls[i];
         if (d->kind == AST_DECL_TYPE && !d->as.type_decl.generic_params) {
-            emit_struct_recursive(ctx, module, d, out, &emitted, &visiting, uses_raylib);
+            AstTypeRef tr = { .parts = arena_alloc(ctx->ast_arena, sizeof(AstIdentifierPart)) };
+            tr.parts->text = d->as.type_decl.name;
+            emit_type_recursive(ctx, module, &tr, out, &emitted, &visiting, uses_raylib);
         }
     }
+    
     free(emitted.items);
     free(visiting.items);
     return true;
@@ -3077,10 +3113,14 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
 
   // Forward declarations for all specialized generic types
   fprintf(out, "// Forward declarations for specialized generics\n");
+  EmittedTypeList emitted_fwd = { .items = malloc(sizeof(char*) * 1024), .capacity = 1024, .count = 0 };
   for (size_t i = 0; i < ctx->generic_type_count; i++) {
-      const char* m = rae_mangle_type(ctx, NULL, ctx->generic_types[i]);
+      const char* m = rae_mangle_type(ctx, NULL, (AstTypeRef*)ctx->generic_types[i]);
+      if (emitted_list_contains(&emitted_fwd, m)) continue;
       fprintf(out, "typedef struct %s %s;\n", m, m);
+      emitted_list_add(&emitted_fwd, m);
   }
+  free(emitted_fwd.items);
   // Also common map entries
   fprintf(out, "typedef struct rae_StringMapEntry_RaeAny rae_StringMapEntry_RaeAny;\n");
   fprintf(out, "typedef struct rae_IntMapEntry_RaeAny rae_IntMapEntry_RaeAny;\n");
