@@ -1597,22 +1597,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
         break;
     }
     case AST_EXPR_CALL: {
-        const AstTypeRef* tr = infer_expr_type_ref(ctx, expr);
-        bool returns_any = tr && tr->is_opt;
-        bool needs_unwrap = returns_any && ctx->has_expected_type;
-        
-        if (needs_unwrap) {
-            Str base = get_base_type_name(&ctx->expected_type);
-            fprintf(out, "(");
-            emit_call_expr(ctx, expr, out);
-            if (str_eq_cstr(base, "Int64") || str_eq_cstr(base, "Int") || str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32")) fprintf(out, ").as.i");
-            else if (str_eq_cstr(base, "Float64") || str_eq_cstr(base, "Float")) fprintf(out, ").as.f");
-            else if (str_eq_cstr(base, "Bool")) fprintf(out, ").as.b");
-            else if (str_eq_cstr(base, "String")) fprintf(out, ").as.s");
-            else fprintf(out, ").as.ptr");
-        } else {
-            emit_call_expr(ctx, expr, out);
-        }
+        emit_call_expr(ctx, expr, out);
         break;
     }
     case AST_EXPR_MEMBER: {
@@ -1646,6 +1631,28 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
         } else {
             emit_expr(ctx, obj, out, PREC_CALL, false, false);
             fprintf(out, ".%.*s", (int)expr->as.member.member.len, expr->as.member.member.data);
+        }
+        break;
+    }
+    case AST_EXPR_BOX: {
+        fprintf(out, "rae_any_box(");
+        emit_expr(ctx, expr->as.unary.operand, out, PREC_LOWEST, false, false);
+        fprintf(out, ")");
+        break;
+    }
+    case AST_EXPR_UNBOX: {
+        if (expr->resolved_type) {
+            TypeInfo* t = expr->resolved_type;
+            if (t->kind == TYPE_REF) t = t->as.ref.base;
+            fprintf(out, "(");
+            emit_expr(ctx, expr->as.unary.operand, out, PREC_LOWEST, false, false);
+            if (t->kind == TYPE_INT || t->kind == TYPE_CHAR) fprintf(out, ").as.i");
+            else if (t->kind == TYPE_FLOAT) fprintf(out, ").as.f");
+            else if (t->kind == TYPE_BOOL) fprintf(out, ").as.b");
+            else if (t->kind == TYPE_STRING) fprintf(out, ").as.s");
+            else fprintf(out, ").as.ptr");
+        } else {
+            emit_expr(ctx, expr->as.unary.operand, out, PREC_LOWEST, false, false);
         }
         break;
     }
@@ -1828,23 +1835,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
         call.as.call.args = first_arg;
         call.as.call.generic_args = expr->as.method_call.generic_args;
         
-        // Use the same logic as AST_EXPR_CALL for unwrapping
-        const AstTypeRef* tr = infer_expr_type_ref(ctx, &call);
-        bool returns_any = tr && tr->is_opt;
-        bool needs_unwrap = returns_any && ctx->has_expected_type;
-        
-        if (needs_unwrap) {
-            Str base = get_base_type_name(&ctx->expected_type);
-            fprintf(out, "(");
-            emit_call_expr(ctx, &call, out);
-            if (str_eq_cstr(base, "Int64") || str_eq_cstr(base, "Int") || str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32")) fprintf(out, ").as.i");
-            else if (str_eq_cstr(base, "Float64") || str_eq_cstr(base, "Float")) fprintf(out, ").as.f");
-            else if (str_eq_cstr(base, "Bool")) fprintf(out, ").as.b");
-            else if (str_eq_cstr(base, "String")) fprintf(out, ").as.s");
-            else fprintf(out, ").as.ptr");
-        } else {
-            emit_call_expr(ctx, &call, out);
-        }
+        emit_call_expr(ctx, &call, out);
         break;
     }
     case AST_EXPR_LIST: {
