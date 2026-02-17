@@ -284,6 +284,10 @@ const char* rae_mangle_type(CompilerContext* ctx, const struct AstIdentifierPart
 const char* rae_mangle_function(CompilerContext* ctx, const AstFuncDecl* func) {
     if (!func) return "unknown";
     
+    if (func->specialization_args) {
+        return rae_mangle_specialized_function(ctx, func, func->specialization_args);
+    }
+    
     if (find_raylib_mapping(func->name)) {
         char* res = arena_alloc(ctx->ast_arena, func->name.len + 9);
         sprintf(res, "rae_ext_%.*s", (int)func->name.len, func->name.data);

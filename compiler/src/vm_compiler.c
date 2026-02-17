@@ -484,31 +484,19 @@ bool collect_metadata(CompilerContext* ctx, const char* file_path, const AstModu
 
 
 
-    while (decl) {
+        while (decl) {
 
 
 
-      if (decl->kind == AST_DECL_FUNC) {
+          if (decl->kind == AST_DECL_FUNC) {
 
 
 
-        if (decl->as.func_decl.generic_params) {
+            uint32_t param_count = 0;
 
 
 
-            decl = decl->next;
-
-
-
-            continue;
-
-
-
-        }
-
-
-
-        uint32_t param_count = 0;
+    
 
 
 
@@ -2161,6 +2149,10 @@ static bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       emit_uint32(compiler, (uint32_t)slot, (int)expr->line);
       return true;
     }
+    case AST_EXPR_BOX:
+    case AST_EXPR_UNBOX:
+      // In current VM, values carry their own type tags, no-op conversion
+      return compile_expr(compiler, expr->as.unary.operand);
     default:
       diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
                  "expression not supported in VM yet");
@@ -3042,10 +3034,8 @@ bool vm_compile_module(CompilerContext* ctx, const AstModule* module, Chunk* chu
   const AstDecl* decl = module->decls;
   while (decl) {
     if (decl->kind == AST_DECL_FUNC) {
-      if (!decl->as.func_decl.generic_params) {
-          if (!compile_function(&compiler, decl)) {
-            compiler.had_error = true;
-          }
+      if (!compile_function(&compiler, decl)) {
+        compiler.had_error = true;
       }
     } else if (decl->kind == AST_DECL_GLOBAL_LET) {
         // Handle global let as a statement in the "module entry" area
