@@ -3044,8 +3044,6 @@ static bool build_c_backend_output(const char* entry_file,
   ctx.generic_types = arena_alloc(arena, sizeof(AstTypeRef*) * ctx.generic_type_cap);
   ctx.emitted_generic_type_cap = 512;
   ctx.emitted_generic_types = arena_alloc(arena, sizeof(AstTypeRef*) * ctx.emitted_generic_type_cap);
-  ctx.emitted_generic_type_cap = 512;
-  ctx.emitted_generic_types = arena_alloc(arena, sizeof(AstTypeRef*) * ctx.emitted_generic_type_cap);
   ctx.specialized_func_cap = 512;
   ctx.specialized_funcs = arena_alloc(arena, sizeof(FunctionSpecialization) * ctx.specialized_func_cap);
   ctx.emitted_method_cap = 1024;
@@ -3200,8 +3198,6 @@ static bool build_hybrid_output(const char* entry_file,
   ctx.all_decls = arena_alloc(arena, sizeof(AstDecl*) * ctx.all_decl_cap);
   ctx.generic_type_cap = 512;
   ctx.generic_types = arena_alloc(arena, sizeof(AstTypeRef*) * ctx.generic_type_cap);
-  ctx.emitted_generic_type_cap = 512;
-  ctx.emitted_generic_types = arena_alloc(arena, sizeof(AstTypeRef*) * ctx.emitted_generic_type_cap);
   ctx.emitted_generic_type_cap = 512;
   ctx.emitted_generic_types = arena_alloc(arena, sizeof(AstTypeRef*) * ctx.emitted_generic_type_cap);
   ctx.specialized_func_cap = 512;
