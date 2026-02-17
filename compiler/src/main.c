@@ -3036,6 +3036,15 @@ static bool build_c_backend_output(const char* entry_file,
   
   AstModule merged = merge_module_graph(&graph);
   
+  bool uses_raylib = false;
+  for (ModuleNode* node = graph.head; node; node = node->next) {
+      if (node->module_path && (strcmp(node->module_path, "raylib") == 0 || strstr(node->module_path, "/raylib.rae") || strstr(node->module_path, "\\raylib.rae"))) {
+          uses_raylib = true;
+          break;
+      }
+  }
+  if (out_uses_raylib) *out_uses_raylib = uses_raylib;
+
   CompilerContext ctx = {0};
   ctx.ast_arena = arena;
   ctx.all_decl_cap = 2048;

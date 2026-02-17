@@ -195,6 +195,11 @@ static bool emit_struct_auto_init(CFuncContext* ctx, const AstDecl* decl, const 
 static const AstFuncDecl* find_function_overload(const AstModule* module, CFuncContext* ctx, Str name, const Str* param_types, uint16_t param_count, bool is_method, const AstExpr* call_expr);
 static bool is_primitive_ref(CFuncContext* ctx, const AstTypeRef* tr) {
     if (!tr || !(tr->is_view || tr->is_mod)) return false;
+    if (tr->resolved_type) {
+        TypeInfo* t = tr->resolved_type;
+        if (t->kind == TYPE_REF) t = t->as.ref.base;
+        return type_is_primitive(t) || t->kind == TYPE_STRING || (ctx->uses_raylib && t->kind == TYPE_STRUCT && is_raylib_builtin_type(t->name));
+    }
     Str base = get_base_type_name(tr);
     if (str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int64") || str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float64") || 
         str_eq_cstr(base, "Bool") || str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32") || str_eq_cstr(base, "String") ||
@@ -412,6 +417,7 @@ static AstTypeRef* substitute_type_ref(CompilerContext* ctx, const AstIdentifier
                 result->parts = clone_parts(ctx, match->parts); // Deep clone parts
                 if (type->is_view) result->is_view = true;
                 if (type->is_mod) result->is_mod = true;
+                if (type->is_opt) result->is_opt = true;
                 return result;
             }
             gp = gp->next; arg = arg->next;
@@ -955,8 +961,58 @@ static bool emit_string_literal(FILE* out, Str literal) {
   return true;
 }
 
+static bool is_pointer_param(CFuncContext* ctx, const AstTypeRef* tr, bool is_extern) {
+    if (!tr) return false;
+    if (tr->is_view || tr->is_mod) return true;
+    if (is_extern) return false;
+    if (tr->is_val) return false;
+    Str base = get_base_type_name(tr);
+    if (is_primitive_type(base)) return false;
+    if (ctx->uses_raylib && is_raylib_builtin_type(base)) return false;
+    return true;
+}
+
+static bool is_pointer_expr(CFuncContext* ctx, const AstExpr* expr) {
+    const AstTypeRef* tr = infer_expr_type_ref(ctx, expr);
+    return is_pointer_param(ctx, tr, false);
+}
+
 static bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* out, bool skip_ptr) {
-  if (!type || !type->parts) { fprintf(out, "int64_t"); return true; }
+  if (!type) { fprintf(out, "int64_t"); return true; }
+  if (type->resolved_type) {
+      // Use TypeInfo to emit C type
+      TypeInfo* t = type->resolved_type;
+      bool is_ptr = (type->is_view || type->is_mod) && !skip_ptr;
+      
+      if (t->kind == TYPE_INT) { fprintf(out, "int64_t"); if (is_ptr) fprintf(out, "*"); return true; }
+      if (t->kind == TYPE_FLOAT) { fprintf(out, "double"); if (is_ptr) fprintf(out, "*"); return true; }
+      if (t->kind == TYPE_BOOL) { fprintf(out, "rae_Bool"); if (is_ptr) fprintf(out, "*"); return true; }
+      if (t->kind == TYPE_CHAR) { fprintf(out, "uint32_t"); if (is_ptr) fprintf(out, "*"); return true; }
+      if (t->kind == TYPE_STRING) { fprintf(out, "rae_String"); if (is_ptr) fprintf(out, "*"); return true; }
+      if (t->kind == TYPE_ANY || t->kind == TYPE_OPT) { fprintf(out, "RaeAny"); if (is_ptr) fprintf(out, "*"); return true; }
+      if (t->kind == TYPE_BUFFER) {
+          if (type->is_view) fprintf(out, "const ");
+          if (t->as.buffer.base->kind == TYPE_ANY || t->as.buffer.base->kind == TYPE_VOID) fprintf(out, "void*");
+          else {
+              // Recurse for element type
+              AstTypeRef tmp = { .resolved_type = t->as.buffer.base };
+              emit_type_ref_as_c_type(ctx, &tmp, out, false);
+              fprintf(out, "*");
+          }
+          return true;
+      }
+      if (t->kind == TYPE_REF) {
+          return emit_type_ref_as_c_type(ctx, &(AstTypeRef){.resolved_type = t->as.ref.base, .is_view = t->as.ref.is_mod == false, .is_mod = t->as.ref.is_mod}, out, skip_ptr);
+      }
+      
+      // Fallback to mangled name for structs
+      Str mangled = type_mangle_name(ctx->compiler_ctx->ast_arena, t);
+      fprintf(out, "%.*s", (int)mangled.len, mangled.data);
+      if (is_ptr) fprintf(out, "*");
+      return true;
+  }
+
+  if (!type->parts) { fprintf(out, "int64_t"); return true; }
   bool is_ptr = (type->is_view || type->is_mod) && !skip_ptr;
   if (type->is_id) { fprintf(out, "int64_t"); if (is_ptr) fprintf(out, "*"); return true; }
   if (type->is_key) { fprintf(out, "rae_String"); if (is_ptr) fprintf(out, "*"); return true; }
@@ -1059,10 +1115,9 @@ static bool emit_param_list(CFuncContext* ctx, const AstParam* params, FILE* out
   for (const AstParam* p = params; p; p = p->next) {
     if (index > 0) fprintf(out, ", ");
     if (p->type) {
-        bool is_mod = p->type->is_mod, is_val = p->type->is_val, is_view = p->type->is_view;
-        Str base = get_base_type_name(p->type);
-        bool is_ptr = is_extern ? (is_mod || is_view) : (is_mod || is_view || (!is_val && !is_primitive_type(base) && !(ctx->uses_raylib && is_raylib_builtin_type(base))));
-        if (is_view && !is_ptr && !str_eq_cstr(base, "String")) fprintf(out, "const ");
+        bool is_mod = p->type->is_mod, is_view = p->type->is_view;
+        bool is_ptr = is_pointer_param(ctx, p->type, is_extern);
+        if (is_view && !is_ptr && !str_eq_cstr(get_base_type_name(p->type), "String")) fprintf(out, "const ");
         CFuncContext p_ctx = *ctx; AstTypeRef p_type = *p->type; p_type.is_view = is_view; p_type.is_mod = is_mod;
         emit_type_ref_as_c_type(&p_ctx, &p_type, out, false);
         fprintf(out, " %.*s", (int)p->name.len, p->name.data);
@@ -1142,6 +1197,16 @@ static const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func) {
         if (is_ptr) { char* b = malloc(strlen(mapped) + 16); sprintf(b, "%s%s*", (is_view && strcmp(mapped, "const char*") != 0) ? "const " : "", mapped); return b; }
         return mapped;
     }
+
+    if (ctx && ctx->uses_raylib && is_raylib_builtin_type(base)) {
+        const AstDecl* td = find_type_decl(ctx, ctx->module, base);
+        if (td && td->kind == AST_DECL_TYPE && has_property(td->as.type_decl.properties, "c_struct")) {
+            return str_to_cstr(base);
+        } else if (!td) {
+            return str_to_cstr(base);
+        }
+    }
+
     char* raw = str_to_cstr(base); char* res = malloc(strlen(raw) + 8); sprintf(res, "rae_%s", raw); free(raw);
     if (is_ptr) { char* b = malloc(strlen(res) + 16); sprintf(b, "%s%s*", is_view ? "const " : "", res); free(res); return b; }
     return res;
@@ -2433,11 +2498,7 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     for (const AstCallArg* a = expr->as.call.args; a; a = a->next) {
         bool needs_ref = false;
         bool is_rvalue = true;
-        
         const AstTypeRef* p_type = p ? p->type : NULL;
-        if (p && d && d->generic_params) {
-            p_type = substitute_type_ref(ctx->compiler_ctx, d->generic_params, ctx->generic_args, p->type);
-        }
 
         const AstTypeRef* source_tr = infer_expr_type_ref(ctx, a->value);
         bool source_is_ref = source_tr && (source_tr->is_view || source_tr->is_mod);
@@ -2464,7 +2525,7 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             if (fd && fd->returns && (fd->returns->type->is_view || fd->returns->type->is_mod)) source_is_ref = true;
         }
 
-        bool is_param_ref = p_type && (p_type->is_view || p_type->is_mod);
+        bool is_param_ref = is_pointer_param(ctx, p_type, d && d->is_extern);
         bool is_buffer_param = p_type && str_eq_cstr(get_base_type_name(p_type), "Buffer");
         bool is_param_raw_ptr = is_buffer_param || source_is_buffer;
         if (d && d->is_extern) {
@@ -2559,11 +2620,10 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             else fprintf(out, "int64_t");
             fprintf(out, " %.*s = ", (int)stmt->as.let_stmt.name.len, stmt->as.let_stmt.name.data);
             
-            bool source_is_ptr = false;
+            bool source_is_ptr = is_pointer_expr(ctx, stmt->as.let_stmt.value);
             const AstTypeRef* source_tr = NULL;
             if (stmt->as.let_stmt.value) {
                 source_tr = infer_expr_type_ref(ctx, stmt->as.let_stmt.value);
-                if (source_tr && (source_tr->is_view || source_tr->is_mod)) source_is_ptr = true;
                 
                 // Check if it's a function call that returns a reference
                 if (!source_is_ptr && stmt->as.let_stmt.value->kind == AST_EXPR_CALL) {
@@ -2685,9 +2745,8 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             bool needs_lift = false;
             if (target_is_ptr_var && stmt->as.assign_stmt.is_bind) {
                 // Binding a reference: ptr = &val
-                bool source_is_ptr = false;
+                bool source_is_ptr = is_pointer_expr(ctx, stmt->as.assign_stmt.value);
                 const AstTypeRef* source_tr = infer_expr_type_ref(ctx, stmt->as.assign_stmt.value);
-                if (source_tr && (source_tr->is_view || source_tr->is_mod)) source_is_ptr = true;
                 
                 // Also check if it's a function call that returns a reference
                 if (!source_is_ptr && stmt->as.assign_stmt.value->kind == AST_EXPR_CALL) {
@@ -3075,9 +3134,11 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
 
   FILE* out = fopen(out_path, "w"); if (!out) return false;
 
-  bool uses_raylib = false;
-  for (const AstImport* imp = module->imports; imp; imp = imp->next) {
-      if (str_eq_cstr(imp->path, "raylib")) { uses_raylib = true; break; }
+  bool uses_raylib = (out_uses_raylib && *out_uses_raylib);
+  if (!uses_raylib) {
+      for (const AstImport* imp = module->imports; imp; imp = imp->next) {
+          if (str_eq_cstr(imp->path, "raylib")) { uses_raylib = true; break; }
+      }
   }
   // Check entry module imports as well (redundant but safe)
   if (!uses_raylib) {
@@ -3252,7 +3313,7 @@ static bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, 
             cctx.local_types[cctx.local_count] = str_from_cstr(tn);
             
             bool is_prim_ref = is_primitive_ref(&cctx, tr);
-            cctx.local_is_ptr[cctx.local_count] = (tr && (tr->is_view || tr->is_mod || !is_primitive_type(get_base_type_name(tr)))) && !is_prim_ref;
+            cctx.local_is_ptr[cctx.local_count] = is_pointer_param(&cctx, tr, false) && !is_prim_ref;
             cctx.local_is_mod[cctx.local_count] = tr && tr->is_mod;
             cctx.local_count++;
         }
@@ -3286,7 +3347,7 @@ static bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFun
           cctx.local_types[cctx.local_count] = str_from_cstr(tn);
           
           bool is_prim_ref = is_primitive_ref(&cctx, p->type);
-          cctx.local_is_ptr[cctx.local_count] = (p->type && (p->type->is_view || p->type->is_mod || !is_primitive_type(get_base_type_name(p->type)))) && !is_prim_ref;
+          cctx.local_is_ptr[cctx.local_count] = is_pointer_param(&cctx, p->type, false) && !is_prim_ref;
           cctx.local_is_mod[cctx.local_count] = p->type && p->type->is_mod;
           cctx.local_count++;
       }
