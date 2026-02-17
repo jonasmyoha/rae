@@ -143,6 +143,7 @@ let heartbeatTimer;
 let latestRunId = null;
 let latestBuildRunId = null;
 let currentBuildVersion = null;
+let defaultTargetId = null;
 let testCases = new Map();
 let testHistory = {};
 let summaryCounts = { passed: 0, failed: 0 };
@@ -353,7 +354,7 @@ setActiveView(defaultView);
 
 buildTestBtn?.addEventListener("click", () => {
   isBuildingAndTesting = true;
-  requestBuildCommand("rebuild");
+  requestBuildCommand("rebuild", defaultTargetId);
 });
 
 runTestsBtn?.addEventListener("click", () => requestTestRun("all"));
@@ -494,7 +495,7 @@ function requestStopTests() {
   );
 }
 
-function requestBuildCommand(command = "build") {
+function requestBuildCommand(command = "build", targetId) {
   if (!socket || socket.readyState !== WebSocket.OPEN) {
     pushStatusItem("Cannot run build command: socket disconnected.");
     return;
@@ -503,7 +504,8 @@ function requestBuildCommand(command = "build") {
   socket.send(
     JSON.stringify({
       type: "run-build",
-      command
+      command,
+      targetId
     })
   );
 }
@@ -824,6 +826,7 @@ function handleServerInfo(event) {
   }
 
   currentBuildVersion = event.version;
+  defaultTargetId = event.defaultTargetId;
   initializeTargets(event.targets ?? []);
   exampleCategories = event.exampleCategories ?? [];
   
