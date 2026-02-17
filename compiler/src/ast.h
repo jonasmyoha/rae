@@ -166,6 +166,7 @@ typedef struct AstObjectLiteral {
 struct AstExpr {
   AstExprKind kind;
   TypeInfo* resolved_type; // The semantically analyzed type of this expression
+  struct AstDecl* decl_link; // For identifiers/calls, points to the resolved declaration
   bool is_builtin_sizeof;
   size_t line;
   size_t column;

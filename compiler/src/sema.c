@@ -762,24 +762,22 @@ static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* mod
         else if (symbols) {
             Symbol* sym = symbol_table_lookup(symbols, name);
             if (sym) {
-                if (sym->type) {
-                    if (type_ref->generic_args && sym->decl && sym->decl->kind == AST_DECL_TYPE) {
-                        TypeInfo* args[16];
-                        size_t arg_count = 0;
-                        AstTypeRef* curr_arg = type_ref->generic_args;
-                        while (curr_arg && arg_count < 16) {
-                            args[arg_count++] = sema_resolve_type_internal(ctx, module, symbols, curr_arg);
-                            curr_arg = curr_arg->next;
-                        }
-                        base = type_get_struct(ctx->type_registry, sym->decl, args, arg_count);
-                        if (!type_registry_find_specialization(ctx->type_registry, sym->decl, args, arg_count)) {
-                            AstDecl* spec = specialize_decl(ctx, module, sym->decl, args, arg_count, type_ref->line, type_ref->column);
-                            spec->next = module->decls;
-                            module->decls = spec;
-                        }
-                    } else {
-                        base = sym->type;
+                if (type_ref->generic_args && sym->decl && sym->decl->kind == AST_DECL_TYPE) {
+                    TypeInfo* args[16];
+                    size_t arg_count = 0;
+                    AstTypeRef* curr_arg = type_ref->generic_args;
+                    while (curr_arg && arg_count < 16) {
+                        args[arg_count++] = sema_resolve_type_internal(ctx, module, symbols, curr_arg);
+                        curr_arg = curr_arg->next;
                     }
+                    base = type_get_struct(ctx->type_registry, sym->decl, args, arg_count);
+                    if (!type_registry_find_specialization(ctx->type_registry, sym->decl, args, arg_count)) {
+                        AstDecl* spec = specialize_decl(ctx, module, sym->decl, args, arg_count, type_ref->line, type_ref->column);
+                        spec->next = module->decls;
+                        module->decls = spec;
+                    }
+                } else if (sym->type) {
+                    base = sym->type;
                 }
             }
         }
