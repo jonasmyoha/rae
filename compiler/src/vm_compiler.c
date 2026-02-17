@@ -480,15 +480,39 @@ bool collect_metadata(CompilerContext* ctx, const char* file_path, const AstModu
 
 
 
-  const AstDecl* decl = module->decls;
+    const AstDecl* decl = module->decls;
 
-  while (decl) {
 
-    if (decl->kind == AST_DECL_FUNC) {
 
-      // ... (func handling remains same) ...
+    while (decl) {
 
-      uint32_t param_count = 0;
+
+
+      if (decl->kind == AST_DECL_FUNC) {
+
+
+
+        if (decl->as.func_decl.generic_params) {
+
+
+
+            decl = decl->next;
+
+
+
+            continue;
+
+
+
+        }
+
+
+
+        uint32_t param_count = 0;
+
+
+
+  
 
       const AstParam* p = decl->as.func_decl.params;
 
@@ -3018,8 +3042,10 @@ bool vm_compile_module(CompilerContext* ctx, const AstModule* module, Chunk* chu
   const AstDecl* decl = module->decls;
   while (decl) {
     if (decl->kind == AST_DECL_FUNC) {
-      if (!compile_function(&compiler, decl)) {
-        compiler.had_error = true;
+      if (!decl->as.func_decl.generic_params) {
+          if (!compile_function(&compiler, decl)) {
+            compiler.had_error = true;
+          }
       }
     } else if (decl->kind == AST_DECL_GLOBAL_LET) {
         // Handle global let as a statement in the "module entry" area
