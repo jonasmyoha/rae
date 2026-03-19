@@ -800,6 +800,19 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
         break;
     }
     case AST_EXPR_BINARY: {
+      // Special case: string equality — use rae_ext_rae_str_eq instead of ==
+      if (expr->as.binary.op == AST_BIN_IS) {
+          const AstTypeRef* lhs_tr = infer_expr_type_ref(ctx, expr->as.binary.lhs);
+          Str lhs_base = get_base_type_name(lhs_tr);
+          if (str_eq_cstr(lhs_base, "String") || str_eq_cstr(lhs_base, "rae_String")) {
+              fprintf(out, "(bool)rae_ext_rae_str_eq(");
+              emit_expr(ctx, expr->as.binary.lhs, out, PREC_LOWEST, false, false);
+              fprintf(out, ", ");
+              emit_expr(ctx, expr->as.binary.rhs, out, PREC_LOWEST, false, false);
+              fprintf(out, ")");
+              break;
+          }
+      }
       int prec = binary_op_precedence(expr->as.binary.op); bool is_bool_op = expr->as.binary.op >= AST_BIN_LT && expr->as.binary.op <= AST_BIN_OR;
       if (is_bool_op) fprintf(out, "(bool)("); if (prec < parent_prec) fprintf(out, "(");
       emit_expr(ctx, expr->as.binary.lhs, out, prec, false, false);
