@@ -682,6 +682,8 @@ int64_t rae_ext_rae_random_int(int64_t min, int64_t max) {
   return min + (int64_t)(rae_next_u32() % range);
 }
 
+double rae_ext_rae_int_to_float(int64_t v) { return (double)v; }
+int64_t rae_ext_rae_float_to_int(double v) { return (int64_t)v; }
 void* rae_ext_rae_buf_alloc(int64_t count, int64_t elem_size) {
   if (count <= 0) return NULL;
   return calloc((size_t)count, (size_t)elem_size);
@@ -704,12 +706,14 @@ void rae_ext_rae_buf_copy(void* src, int64_t src_off, void* dst, int64_t dst_off
   memmove((char*)dst + dst_off * elem_size, (char*)src + src_off * elem_size, (size_t)len * (size_t)elem_size);
 }
 
-double rae_ext_rae_int_to_float(int64_t i) {
-  return (double)i;
+void rae_ext_rae_buf_set(void* buf, int64_t index, RaeAny value) {
+  if (!buf) return;
+  ((RaeAny*)buf)[index] = value;
 }
 
-int64_t rae_ext_rae_float_to_int(double f) {
-  return (int64_t)f;
+RaeAny rae_ext_rae_buf_get(void* buf, int64_t index) {
+  if (!buf) return (RaeAny){0};
+  return ((RaeAny*)buf)[index];
 }
 
 double rae_ext_rae_math_sin(double x) { return sin(x); }
