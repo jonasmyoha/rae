@@ -966,6 +966,43 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
         }
         break;
     }
+    case AST_EXPR_MATCH: {
+        // Match expression: emit as ternary chain
+        // match x { case 1 => 10, case 2 => 20, default => 30 }
+        // -> (x == 1) ? 10 : (x == 2) ? 20 : 30
+        const AstMatchArm* arm = expr->as.match_expr.arms;
+        fprintf(out, "(");
+        while (arm) {
+            if (!arm->pattern) {
+                // default arm
+                emit_expr(ctx, arm->value, out, PREC_LOWEST, false, false);
+            } else {
+                // Check if string comparison needed
+                const AstTypeRef* subj_tr = infer_expr_type_ref(ctx, expr->as.match_expr.subject);
+                Str subj_base = get_base_type_name(subj_tr);
+                bool is_string = str_eq_cstr(subj_base, "String") || str_eq_cstr(subj_base, "rae_String");
+                if (is_string) {
+                    fprintf(out, "rae_ext_rae_str_eq(");
+                    emit_expr(ctx, expr->as.match_expr.subject, out, PREC_LOWEST, false, false);
+                    fprintf(out, ", ");
+                    emit_expr(ctx, arm->pattern, out, PREC_LOWEST, false, false);
+                    fprintf(out, ")");
+                } else {
+                    fprintf(out, "(");
+                    emit_expr(ctx, expr->as.match_expr.subject, out, PREC_LOWEST, false, false);
+                    fprintf(out, " == ");
+                    emit_expr(ctx, arm->pattern, out, PREC_LOWEST, false, false);
+                    fprintf(out, ")");
+                }
+                fprintf(out, " ? ");
+                emit_expr(ctx, arm->value, out, PREC_LOWEST, false, false);
+                fprintf(out, " : ");
+            }
+            arm = arm->next;
+        }
+        fprintf(out, ")");
+        break;
+    }
     default: break;
   }
   return true;
@@ -1037,14 +1074,17 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         const AstParam* p = fd->params;
         while (a) {
             bool needs_addr = false;
-            if (p && (p->type->is_view || p->type->is_mod)) {
+            bool needs_prim_view_wrap = false;
+            if (p && p->type && (p->type->is_view || p->type->is_mod)) {
                 const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, a->value);
-                if (arg_tr && !arg_tr->is_view && !arg_tr->is_mod) {
+                bool arg_is_ref = arg_tr && (arg_tr->is_view || arg_tr->is_mod);
+                if (!arg_is_ref) {
                     Str base = get_base_type_name(p->type);
-                    if (!is_primitive_type(base)) needs_addr = true;
+                    if (is_primitive_type(base)) needs_prim_view_wrap = true;
+                    else needs_addr = true;
                 }
             }
-            
+
             // Auto-box if param is Any and arg is not already boxed
             bool needs_box = false;
             if (p && p->type && a->value->kind != AST_EXPR_BOX) {
@@ -1052,10 +1092,19 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 if (str_eq_cstr(param_base, "Any")) needs_box = true;
             }
 
+            if (needs_prim_view_wrap) {
+                // Wrap primitive in view struct: (rae_View_Int64){ .ptr = &(int64_t){expr} }
+                fprintf(out, "(");
+                emit_type_ref_as_c_type(ctx, p->type, out, false);
+                fprintf(out, "){ .ptr = (");
+                emit_type_ref_as_c_type(ctx, p->type, out, true);
+                fprintf(out, "[]){");
+            }
             if (needs_addr) fprintf(out, "&");
             if (needs_box) fprintf(out, "rae_any((");
             emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
             if (needs_box) fprintf(out, "))");
+            if (needs_prim_view_wrap) fprintf(out, "} }");
 
             if (a->next) fprintf(out, ", ");
             a = a->next; if (p) p = p->next;
@@ -1145,10 +1194,24 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             if (is_ref_bind) {
                 Str base = get_base_type_name(stmt->as.let_stmt.type);
                 if (is_primitive_type(base)) {
-                    // Primitive ref: rae_Mod_Int64 r = { .ptr = &x };
-                    fprintf(out, "{ .ptr = &");
-                    emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, true, true);
-                    fprintf(out, " }");
+                    // Check if the value is a function call returning a ref type
+                    // (can't take address of rvalue — assign directly)
+                    bool value_returns_ref = false;
+                    if (stmt->as.let_stmt.value && (stmt->as.let_stmt.value->kind == AST_EXPR_CALL || stmt->as.let_stmt.value->kind == AST_EXPR_METHOD_CALL)) {
+                        const AstExpr* val = stmt->as.let_stmt.value;
+                        const AstFuncDecl* vfd = val->decl_link ? &val->decl_link->as.func_decl : NULL;
+                        if (vfd && vfd->returns && vfd->returns->type && (vfd->returns->type->is_view || vfd->returns->type->is_mod))
+                            value_returns_ref = true;
+                    }
+                    if (value_returns_ref) {
+                        // Function already returns ref wrapper — assign directly
+                        emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, false, false);
+                    } else {
+                        // Primitive ref: rae_Mod_Int64 r = { .ptr = &x };
+                        fprintf(out, "{ .ptr = &");
+                        emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, true, true);
+                        fprintf(out, " }");
+                    }
                 } else {
                     fprintf(out, "&");
                     emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, false, true);
