@@ -80,6 +80,15 @@ void rae_ext_rae_buf_copy(void* src, int64_t src_off, void* dst, int64_t dst_off
 void rae_ext_rae_buf_set(void* buf, int64_t index, RaeAny value);
 RaeAny rae_ext_rae_buf_get(void* buf, int64_t index);
 
+/* Legacy buffer intrinsics (single-arg alloc, value-sized elements) */
+RAE_UNUSED static void* rae_ext___buf_alloc(int64_t count) { return rae_ext_rae_buf_alloc(count, sizeof(int64_t)); }
+RAE_UNUSED static void rae_ext___buf_free(void* buf) { rae_ext_rae_buf_free(buf); }
+RAE_UNUSED static void rae_ext___buf_set(void* buf, int64_t index, int64_t value) { if (buf) ((int64_t*)buf)[index] = value; }
+RAE_UNUSED static int64_t rae_ext___buf_get(void* buf, int64_t index) { return buf ? ((int64_t*)buf)[index] : 0; }
+RAE_UNUSED static void rae_ext___buf_copy(void* src, int64_t src_off, void* dst, int64_t dst_off, int64_t len) {
+    if (src && dst && len > 0) memmove((int64_t*)dst + dst_off, (int64_t*)src + src_off, (size_t)len * sizeof(int64_t));
+}
+
 void rae_ext_rae_log_any(RaeAny value);
 void rae_ext_rae_log_stream_any(RaeAny value);
 

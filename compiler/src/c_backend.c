@@ -1022,6 +1022,19 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         }
         fprintf(out, ")"); return true;
     }
+    // Handle sizeof in fallback path (when decl_link is missing)
+    if (expr->as.call.callee && expr->as.call.callee->kind == AST_EXPR_IDENT &&
+        str_eq_cstr(expr->as.call.callee->as.ident, "sizeof")) {
+        fprintf(out, "sizeof(");
+        if (expr->as.call.generic_args) {
+            AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, expr->as.call.generic_args);
+            emit_type_ref_as_c_type(ctx, sub, out, false);
+        } else {
+            fprintf(out, "void");
+        }
+        fprintf(out, ")");
+        return true;
+    }
     // Fallback: look up function by name when decl_link is missing
     if (expr->as.call.callee && expr->as.call.callee->kind == AST_EXPR_IDENT) {
         Str callee_name = expr->as.call.callee->as.ident;
@@ -1062,8 +1075,11 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             fprintf(out, ")");
             return true;
         }
-        // Last resort: emit as rae_<name>
-        fprintf(out, "rae_%.*s(", (int)callee_name.len, callee_name.data);
+        // Last resort: emit as rae_<name> (or rae_ext_ for intrinsics)
+        if (str_starts_with_cstr(callee_name, "__buf_"))
+            fprintf(out, "rae_ext_%.*s(", (int)callee_name.len, callee_name.data);
+        else
+            fprintf(out, "rae_%.*s(", (int)callee_name.len, callee_name.data);
         const AstCallArg* a = expr->as.call.args;
         while (a) {
             emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
