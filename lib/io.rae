@@ -1,7 +1,16 @@
 # IO utilities for Rae
+func rae_ext_rae_log_any(value: Any) extern
+func rae_ext_rae_log_stream_any(value: Any) extern
 func rae_io_read_line() extern ret String
-
 func rae_io_read_char() extern ret Char32
+
+func log(value: Any) {
+    rae_ext_rae_log_any(value: value)
+}
+
+func logS(value: Any) {
+    rae_ext_rae_log_stream_any(value: value)
+}
 
 func readLine() ret String {
     ret rae_io_read_line()
