@@ -945,6 +945,20 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     if (expr->decl_link && expr->decl_link->kind == AST_DECL_FUNC) {
         const AstFuncDecl* fd = &expr->decl_link->as.func_decl;
         Str name = fd->name;
+        // If decl_link points to a generic function but call has no generic args,
+        // try to find a non-generic overload with matching arg count instead
+        if (fd->generic_params && !expr->as.call.generic_args && !ctx->generic_params) {
+            uint16_t call_argc = 0;
+            for (const AstCallArg* ca = expr->as.call.args; ca; ca = ca->next) call_argc++;
+            for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
+                const AstDecl* d = ctx->compiler_ctx->all_decls[i];
+                if (d->kind == AST_DECL_FUNC && !d->as.func_decl.generic_params && str_eq(d->as.func_decl.name, name)) {
+                    uint16_t pc = 0;
+                    for (const AstParam* pp = d->as.func_decl.params; pp; pp = pp->next) pc++;
+                    if (pc == call_argc) { fd = &d->as.func_decl; break; }
+                }
+            }
+        }
         if (str_eq_cstr(name, "sizeof")) {
             fprintf(out, "sizeof(");
             if (expr->as.call.generic_args) {
@@ -956,7 +970,29 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             fprintf(out, ")");
             return true;
         }
-        fprintf(out, "%s(", rae_mangle_function(ctx->compiler_ctx, fd));
+        // If calling a generic function from a specialized context, substitute type params
+        const char* call_name;
+        if (fd->generic_params && ctx->generic_params && ctx->generic_args) {
+            // Build concrete args by substituting T -> concrete type
+            AstTypeRef* concrete = NULL; AstTypeRef* last = NULL;
+            for (const AstIdentifierPart* gp = fd->generic_params; gp; gp = gp->next) {
+                AstTypeRef tmp = {0}; AstIdentifierPart part = {0}; part.text = gp->text;
+                tmp.parts = &part;
+                AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &tmp);
+                AstTypeRef* node = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
+                *node = *sub; node->next = NULL;
+                if (!concrete) concrete = node; else last->next = node;
+                last = node;
+            }
+            call_name = rae_mangle_specialized_function(ctx->compiler_ctx, fd, concrete);
+            // Also register this specialization so its body gets emitted
+            register_function_specialization(ctx->compiler_ctx, fd, concrete);
+        } else if (fd->specialization_args) {
+            call_name = rae_mangle_specialized_function(ctx->compiler_ctx, fd, fd->specialization_args);
+        } else {
+            call_name = rae_mangle_function(ctx->compiler_ctx, fd);
+        }
+        fprintf(out, "%s(", call_name);
         const AstCallArg* a = expr->as.call.args;
         const AstParam* p = fd->params;
         while (a) {
@@ -989,15 +1025,24 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     // Fallback: look up function by name when decl_link is missing
     if (expr->as.call.callee && expr->as.call.callee->kind == AST_EXPR_IDENT) {
         Str callee_name = expr->as.call.callee->as.ident;
-        // Search for the function declaration by name
+        // Search for the function declaration by name, preferring non-generic and matching arg count
+        uint16_t call_arg_count = 0;
+        for (const AstCallArg* ca = expr->as.call.args; ca; ca = ca->next) call_arg_count++;
         const AstFuncDecl* found_fd = NULL;
+        const AstFuncDecl* generic_fallback = NULL;
         for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
             const AstDecl* d = ctx->compiler_ctx->all_decls[i];
             if (d->kind == AST_DECL_FUNC && str_eq(d->as.func_decl.name, callee_name)) {
-                found_fd = &d->as.func_decl;
-                break;
+                uint16_t param_count = 0;
+                for (const AstParam* pp = d->as.func_decl.params; pp; pp = pp->next) param_count++;
+                if (!d->as.func_decl.generic_params && param_count == call_arg_count) {
+                    found_fd = &d->as.func_decl;
+                    break;
+                }
+                if (!generic_fallback) generic_fallback = &d->as.func_decl;
             }
         }
+        if (!found_fd) found_fd = generic_fallback;
         if (found_fd) {
             fprintf(out, "%s(", rae_mangle_function(ctx->compiler_ctx, found_fd));
             const AstCallArg* a = expr->as.call.args;

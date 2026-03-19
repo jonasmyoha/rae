@@ -77,6 +77,8 @@ void* rae_ext_rae_buf_alloc(int64_t count, int64_t elem_size);
 void rae_ext_rae_buf_free(void* buf);
 void* rae_ext_rae_buf_resize(void* buf, int64_t new_count, int64_t elem_size);
 void rae_ext_rae_buf_copy(void* src, int64_t src_off, void* dst, int64_t dst_off, int64_t len, int64_t elem_size);
+void rae_ext_rae_buf_set(void* buf, int64_t index, RaeAny value);
+RaeAny rae_ext_rae_buf_get(void* buf, int64_t index);
 
 void rae_ext_rae_log_any(RaeAny value);
 void rae_ext_rae_log_stream_any(RaeAny value);
