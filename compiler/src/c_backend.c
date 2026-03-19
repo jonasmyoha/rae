@@ -1,5 +1,6 @@
 #include "c_backend.h"
 #include "mangler.h"
+#include "sema.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -96,32 +97,38 @@ typedef struct {
 
 // Forward declarations
 static const AstDecl* find_type_decl(CFuncContext* ctx, const AstModule* module, Str name);
-static const AstDecl* find_enum_decl(CFuncContext* ctx, const AstModule* module, Str name);
 static bool has_property(const AstProperty* props, const char* name);
-static AstTypeRef* substitute_type_ref(CompilerContext* ctx, const AstIdentifierPart* generic_params, const AstTypeRef* concrete_args, const AstTypeRef* type);
 static bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* out, bool skip_ptr);
 static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_prec, bool is_lvalue, bool suppress_deref);
 static bool emit_function(CompilerContext* compiler_ctx, const AstModule* module, const AstFuncDecl* func, FILE* out, const struct VmRegistry* registry, bool uses_raylib);
 static bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* f, const AstTypeRef* args, FILE* out, const struct VmRegistry* r, bool ray);
 static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
-static bool emit_spawn_wrapper(CFuncContext* ctx, const AstFuncDecl* func, FILE* out);
 static bool emit_defers(CFuncContext* ctx, int min_depth, FILE* out);
 static void pop_defers(CFuncContext* ctx, int depth);
-static bool emit_call(CFuncContext* ctx, const AstExpr* expr, FILE* out);
-static bool emit_log_call(CFuncContext* ctx, const AstExpr* expr, FILE* out, bool newline);
 static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out);
 static bool emit_string_literal(FILE* out, Str literal);
-static bool emit_param_list(CFuncContext* ctx, const AstParam* params, FILE* out, bool is_extern);
-static bool is_pointer_type(CFuncContext* ctx, Str name);
 static bool is_mod_type(CFuncContext* ctx, Str name);
 static bool is_generic_param(const AstIdentifierPart* params, Str name);
 static Str get_local_type_name(CFuncContext* ctx, Str name);
 static const AstTypeRef* get_local_type_ref(CFuncContext* ctx, Str name);
-static Str get_base_type_name(const AstTypeRef* type);
 
 static bool emit_type_recursive(CompilerContext* ctx, const AstModule* m, const AstTypeRef* type, FILE* out, EmittedTypeList* emitted, EmittedTypeList* visiting, bool ray) {
-    if (!type || !type->parts) return true;
-    Str base = type->parts->text;
+    if (!type) return true;
+    
+    if (type->resolved_type) {
+        if (type->resolved_type->kind == TYPE_BUFFER) {
+            // Buffer(T) - T might need registration but Buffer is a pointer
+            if (type->generic_args) emit_type_recursive(ctx, m, type->generic_args, out, emitted, visiting, ray);
+            return true;
+        }
+        if (type->resolved_type->kind < TYPE_STRUCT) return true;
+    }
+
+    Str base = {0};
+    if (type->parts) base = type->parts->text;
+    else if (type->resolved_type) base = type->resolved_type->name;
+    
+    if (base.len == 0) return true;
     if (is_primitive_type(base) || (ray && is_raylib_builtin_type(base))) return true;
     
     const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, type);
@@ -131,52 +138,7 @@ static bool emit_type_recursive(CompilerContext* ctx, const AstModule* m, const 
     emitted_list_add(visiting, mangled);
     
     // Find the declaration
-    const AstDecl* d = find_type_decl(NULL, m, base);
-    if (!d || d->kind != AST_DECL_TYPE) {
-        // Special handling for built-in generics like List, Buffer if not found as decls
-        if (str_eq_cstr(base, "List") || str_eq_cstr(base, "Buffer")) {
-            // These are pointers, they don't depend on their element type BY VALUE.
-            // But we should still ensure the element type is emitted if it's a struct?
-            // Actually, for pointers we don't need it.
-        } else {
-            visiting->count--;
-            return true;
-        }
-    }
-
-    if (d && d->kind == AST_DECL_TYPE) {
-        const AstTypeDecl* td = &d->as.type_decl;
-        const AstIdentifierPart* params = td->generic_params;
-        const AstTypeRef* args = type->generic_args;
-        
-        // Process dependencies
-        for (const AstTypeField* f = td->fields; f; f = f->next) {
-            if (!f->type) continue;
-            if (f->type->is_view || f->type->is_mod) continue;
-            
-            // For generic types, we need to substitute before recursing
-            AstTypeRef* concrete_f = substitute_type_ref(ctx, params, args, f->type);
-            emit_type_recursive(ctx, m, concrete_f, out, emitted, visiting, ray);
-        }
-        
-        // Emit definition
-        if (!has_property(td->properties, "c_struct")) {
-            fprintf(out, "typedef struct %s %s;\n", mangled, mangled);
-            fprintf(out, "struct %s {\n", mangled);
-            
-            CFuncContext tctx = {0};
-            tctx.compiler_ctx = ctx; tctx.module = m; tctx.uses_raylib = ray;
-            tctx.generic_params = params; tctx.generic_args = args;
-            
-            for (const AstTypeField* f = td->fields; f; f = f->next) {
-                fprintf(out, "  ");
-                emit_type_ref_as_c_type(&tctx, f->type, out, false);
-                bool p = f->type && (f->type->is_view || f->type->is_mod);
-                fprintf(out, "%s %.*s;\n", p ? "*" : "", (int)f->name.len, f->name.data);
-            }
-            fprintf(out, "};\n\n");
-        }
-    } else if (str_eq_cstr(base, "List") || str_eq_cstr(base, "Buffer")) {
+    if (str_eq_cstr(base, "List") || str_eq_cstr(base, "Buffer")) {
         // Built-in List/Buffer
         fprintf(out, "typedef struct %s %s;\n", mangled, mangled);
         fprintf(out, "struct %s {\n", mangled);
@@ -184,12 +146,42 @@ static bool emit_type_recursive(CompilerContext* ctx, const AstModule* m, const 
         fprintf(out, "  ");
         emit_type_ref_as_c_type(&tctx, type->generic_args, out, false);
         fprintf(out, "* data;\n  int64_t length;\n  int64_t capacity;\n};\n\n");
+    } else {
+        const AstDecl* d = find_type_decl(NULL, m, base);
+        if (d && d->kind == AST_DECL_TYPE) {
+            const AstTypeDecl* td = &d->as.type_decl;
+            const AstIdentifierPart* params = td->generic_params;
+            const AstTypeRef* args = type->generic_args;
+            if (!params && d->as.type_decl.generic_template) params = d->as.type_decl.generic_template->as.type_decl.generic_params;
+            
+            // Dependencies
+            for (const AstTypeField* f = td->fields; f; f = f->next) {
+                if (!f->type || f->type->is_view || f->type->is_mod) continue;
+                AstTypeRef* sub = substitute_type_ref(ctx, params, args, f->type);
+                emit_type_recursive(ctx, m, sub, out, emitted, visiting, ray);
+            }
+            
+            if (!has_property(td->properties, "c_struct")) {
+                fprintf(out, "typedef struct %s %s;\n", mangled, mangled);
+                fprintf(out, "struct %s {\n", mangled);
+                CFuncContext tctx = {0}; tctx.compiler_ctx = ctx; tctx.module = m; tctx.uses_raylib = ray;
+                tctx.generic_params = params; tctx.generic_args = args;
+                for (const AstTypeField* f = td->fields; f; f = f->next) {
+                    fprintf(out, "  ");
+                    emit_type_ref_as_c_type(&tctx, f->type, out, false);
+                    bool p = f->type && (f->type->is_view || f->type->is_mod);
+                    fprintf(out, "%s %.*s;\n", p ? "*" : "", (int)f->name.len, f->name.data);
+                }
+                fprintf(out, "};\n\n");
+            }
+        }
     }
 
     emitted_list_add(emitted, mangled);
     visiting->count--;
     return true;
 }
+
 static bool emit_auto_init(CFuncContext* ctx, const AstTypeRef* type, FILE* out);
 static bool emit_struct_auto_init(CFuncContext* ctx, const AstDecl* decl, const AstTypeRef* tr, FILE* out);
 static const AstFuncDecl* find_function_overload(const AstModule* module, CFuncContext* ctx, Str name, const Str* param_types, uint16_t param_count, bool is_method, const AstExpr* call_expr);
@@ -202,29 +194,64 @@ static bool is_primitive_ref(CFuncContext* ctx, const AstTypeRef* tr) {
     return is_primitive_type(base) || (ctx->uses_raylib && is_raylib_builtin_type(base));
 }
 
-static bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* out, bool skip_ptr);
+
 static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
-static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
-static bool emit_match(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
-static bool is_wildcard_pattern(const AstExpr* expr);
-static bool is_string_literal_expr(const AstExpr* expr);
-static bool match_cases_use_string(const AstMatchCase* cases, bool* out_use_string);
-static bool match_arms_use_string(const AstMatchArm* arms, bool* out_use_string);
+static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
+    fprintf(out, "  if (");
+    emit_expr(ctx, stmt->as.if_stmt.condition, out, PREC_LOWEST, false, false);
+    fprintf(out, ") {\n");
+    if (stmt->as.if_stmt.then_block) {
+        for (const AstStmt* s = stmt->as.if_stmt.then_block->first; s; s = s->next) emit_stmt(ctx, s, out);
+    }
+    fprintf(out, "  }");
+    if (stmt->as.if_stmt.else_block) {
+        fprintf(out, " else {\n");
+        for (const AstStmt* s = stmt->as.if_stmt.else_block->first; s; s = s->next) emit_stmt(ctx, s, out);
+        fprintf(out, "  }\n");
+    } else {
+        fprintf(out, "\n");
+    }
+    return true;
+}
+
+static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
+    fprintf(out, "  for (");
+    if (stmt->as.loop_stmt.init) {
+        // Init stmt usually doesn't have a newline/indent in for loop
+        if (stmt->as.loop_stmt.init->kind == AST_STMT_LET) {
+            const char* tn = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, stmt->as.loop_stmt.init->as.let_stmt.type);
+            fprintf(out, "%s %.*s = ", tn, (int)stmt->as.loop_stmt.init->as.let_stmt.name.len, stmt->as.loop_stmt.init->as.let_stmt.name.data);
+            emit_expr(ctx, stmt->as.loop_stmt.init->as.let_stmt.value, out, PREC_LOWEST, false, false);
+        } else {
+            emit_expr(ctx, stmt->as.loop_stmt.init->as.expr_stmt, out, PREC_LOWEST, false, false);
+        }
+    }
+    fprintf(out, "; ");
+    if (stmt->as.loop_stmt.condition) emit_expr(ctx, stmt->as.loop_stmt.condition, out, PREC_LOWEST, false, false);
+    fprintf(out, "; ");
+    if (stmt->as.loop_stmt.increment) emit_expr(ctx, stmt->as.loop_stmt.increment, out, PREC_LOWEST, false, false);
+    fprintf(out, ") {\n");
+    if (stmt->as.loop_stmt.body) {
+        for (const AstStmt* s = stmt->as.loop_stmt.body->first; s; s = s->next) emit_stmt(ctx, s, out);
+    }
+    fprintf(out, "  }\n");
+    return true;
+}
+
+static bool emit_match(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
+    (void)ctx; (void)stmt; (void)out;
+    fprintf(stderr, "warning: match stmt not yet implemented in unified C backend\n");
+    return true;
+}
+
 static bool func_has_return_value(const AstFuncDecl* func);
+
 static const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func);
 static const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr);
 static Str infer_expr_type(CFuncContext* ctx, const AstExpr* expr);
 
-static Str get_base_type_name(const AstTypeRef* type) {
-    if (!type || !type->parts) return (Str){0};
-    return type->parts->text;
-}
-
 static bool has_property(const AstProperty* props, const char* name) {
-  while (props) {
-    if (str_eq_cstr(props->name, name)) return true;
-    props = props->next;
-  }
+  while (props) { if (str_eq_cstr(props->name, name)) return true; props = props->next; }
   return false;
 }
 
@@ -237,27 +264,6 @@ static bool types_match(Str a, Str b) {
   if (str_eq_cstr(b, "String") && (str_eq_cstr(a, "const char*") || str_eq_cstr(a, "rae_String"))) return true;
   if (str_eq_cstr(a, "String") && str_eq_cstr(b, "const_char_p")) return true;
   if (str_eq_cstr(b, "String") && str_eq_cstr(a, "const_char_p")) return true;
-  
-  if (str_starts_with_cstr(a, "rae_")) {
-      // Strip rae_ prefix and generic suffix
-      char* raw = str_to_cstr(a);
-      char* start = raw + 4;
-      char* end = strchr(start, '_');
-      if (end) *end = '\0';
-      bool match = str_eq_cstr(b, start);
-      free(raw);
-      if (match) return true;
-  }
-  if (str_starts_with_cstr(b, "rae_")) {
-      // Strip rae_ prefix and generic suffix
-      char* raw = str_to_cstr(b);
-      char* start = raw + 4;
-      char* end = strchr(start, '_');
-      if (end) *end = '\0';
-      bool match = str_eq_cstr(a, start);
-      free(raw);
-      if (match) return true;
-  }
   return false;
 }
 
@@ -269,21 +275,13 @@ static const AstDecl* find_type_decl(CFuncContext* ctx, const AstModule* module,
       }
   }
   if (!module) return NULL;
-  for (const AstDecl* decl = module->decls; decl; decl = decl->next) {
-    if (decl->kind == AST_DECL_TYPE && types_match(decl->as.type_decl.name, name)) {
-      return decl;
-    }
-  }
+  for (const AstDecl* decl = module->decls; decl; decl = decl->next) { if (decl->kind == AST_DECL_TYPE && types_match(decl->as.type_decl.name, name)) return decl; }
   for (size_t i = 0; i < g_find_module_stack_count; i++) if (g_find_module_stack[i] == module) return NULL;
   if (g_find_module_stack_count >= 64) return NULL;
   g_find_module_stack[g_find_module_stack_count++] = module;
   const AstDecl* found = NULL;
-  for (const AstImport* imp = module->imports; imp; imp = imp->next) {
-    found = find_type_decl(ctx, imp->module, name);
-    if (found) break;
-  }
-  g_find_module_stack_count--;
-  return found;
+  for (const AstImport* imp = module->imports; imp; imp = imp->next) { found = find_type_decl(ctx, imp->module, name); if (found) break; }
+  g_find_module_stack_count--; return found;
 }
 
 static const AstDecl* find_enum_decl(CFuncContext* ctx, const AstModule* module, Str name) {
@@ -294,233 +292,70 @@ static const AstDecl* find_enum_decl(CFuncContext* ctx, const AstModule* module,
       }
   }
   if (!module) return NULL;
-  for (const AstDecl* decl = module->decls; decl; decl = decl->next) {
-    if (decl->kind == AST_DECL_ENUM && types_match(decl->as.enum_decl.name, name)) {
-      return decl;
-    }
-  }
+  for (const AstDecl* decl = module->decls; decl; decl = decl->next) { if (decl->kind == AST_DECL_ENUM && types_match(decl->as.enum_decl.name, name)) return decl; }
   for (size_t i = 0; i < g_find_module_stack_count; i++) if (g_find_module_stack[i] == module) return NULL;
   if (g_find_module_stack_count >= 64) return NULL;
   g_find_module_stack[g_find_module_stack_count++] = module;
   const AstDecl* found = NULL;
-  for (const AstImport* imp = module->imports; imp; imp = imp->next) {
-    found = find_enum_decl(ctx, imp->module, name);
-    if (found) break;
-  }
-  g_find_module_stack_count--;
-  return found;
+  for (const AstImport* imp = module->imports; imp; imp = imp->next) { found = find_enum_decl(ctx, imp->module, name); if (found) break; }
+  g_find_module_stack_count--; return found;
 }
 
 static void register_decl(CompilerContext* ctx, const AstDecl* decl) {
     if (!decl) return;
-    for (size_t i = 0; i < ctx->all_decl_count; i++) {
-        if (ctx->all_decls[i] == decl) return;
-    }
-    if (ctx->all_decl_count < ctx->all_decl_cap) {
-        ctx->all_decls[ctx->all_decl_count++] = decl;
-    }
+    for (size_t i = 0; i < ctx->all_decl_count; i++) { if (ctx->all_decls[i] == decl) return; }
+    if (ctx->all_decl_count < ctx->all_decl_cap) ctx->all_decls[ctx->all_decl_count++] = decl;
 }
 
 static void collect_decls_from_module(CompilerContext* ctx, const AstModule* module) {
     if (!module) return;
-    
-    // Check if already in all_decls by looking at the first decl
-    if (module->decls) {
-        for (size_t i = 0; i < ctx->all_decl_count; i++) {
-            if (ctx->all_decls[i] == module->decls) return;
-        }
-    }
-
-    for (const AstDecl* decl = module->decls; decl; decl = decl->next) {
-        register_decl(ctx, decl);
-    }
-    for (const AstImport* imp = module->imports; imp; imp = imp->next) {
-        collect_decls_from_module(ctx, imp->module);
-    }
+    if (module->decls) { for (size_t i = 0; i < ctx->all_decl_count; i++) { if (ctx->all_decls[i] == module->decls) return; } }
+    for (const AstDecl* decl = module->decls; decl; decl = decl->next) register_decl(ctx, decl);
+    for (const AstImport* imp = module->imports; imp; imp = imp->next) collect_decls_from_module(ctx, imp->module);
 }
 
 static int g_type_equal_depth = 0;
 static bool type_refs_equal(const AstTypeRef* a, const AstTypeRef* b) {
     if (a == b) return true;
     if (!a || !b) return false;
+    if (a->resolved_type && b->resolved_type && a->resolved_type == b->resolved_type) return true;
     if ((uintptr_t)a < 0x1000 || (uintptr_t)b < 0x1000) return false;
     if (g_type_equal_depth > 32) return false;
     g_type_equal_depth++;
-    
     bool res = false;
     if (a->parts && b->parts) {
         if ((uintptr_t)a->parts < 0x1000 || (uintptr_t)b->parts < 0x1000) { res = false; goto done; }
         if (!str_eq(a->parts->text, b->parts->text)) { res = false; goto done; }
     } else if (a->parts != b->parts) { res = false; goto done; }
-    
     if (a->is_opt != b->is_opt || a->is_view != b->is_view || a->is_mod != b->is_mod) { res = false; goto done; }
-    
-    {
-        const AstTypeRef* arg_a = a->generic_args;
-        const AstTypeRef* arg_b = b->generic_args;
-        while (arg_a && arg_b) {
-            if (!type_refs_equal(arg_a, arg_b)) { res = false; goto done; }
-            arg_a = arg_a->next;
-            arg_b = arg_b->next;
-        }
-        res = (arg_a == arg_b);
-    }
-
+    const AstTypeRef* arg_a = a->generic_args; const AstTypeRef* arg_b = b->generic_args;
+    while (arg_a && arg_b) { if (!type_refs_equal(arg_a, arg_b)) { res = false; goto done; } arg_a = arg_a->next; arg_b = arg_b->next; }
+    res = (arg_a == arg_b);
 done:
-    g_type_equal_depth--;
-    return res;
+    g_type_equal_depth--; return res;
 }
 
 static bool is_concrete_type(const AstTypeRef* type) {
     if (!type) return true;
-    if (type->parts && !type->parts->next) {
-        Str base = type->parts->text;
-        if (base.len == 1 && base.data[0] >= 'A' && base.data[0] <= 'Z') return false;
-    }
+    if (type->parts && !type->parts->next) { Str base = type->parts->text; if (base.len == 1 && base.data[0] >= 'A' && base.data[0] <= 'Z') return false; }
     const AstTypeRef* arg = type->generic_args;
-    while (arg) {
-        if (!is_concrete_type(arg)) return false;
-        arg = arg->next;
-    }
+    while (arg) { if (!is_concrete_type(arg)) return false; arg = arg->next; }
     return true;
 }
 
-static AstIdentifierPart* clone_parts(CompilerContext* ctx, const AstIdentifierPart* p) {
-    if (!p) return NULL;
-    AstIdentifierPart* res = arena_alloc(ctx->ast_arena, sizeof(AstIdentifierPart));
-    *res = *p;
-    res->next = clone_parts(ctx, p->next);
-    return res;
-}
-
-static AstTypeRef* substitute_type_ref(CompilerContext* ctx, const AstIdentifierPart* generic_params, const AstTypeRef* concrete_args, const AstTypeRef* type) {
-    if (!type) return NULL;
-    
-    // Check if it's a generic param that needs substitution
-    if (generic_params && concrete_args && type->parts && !type->parts->next) {
-        Str base = type->parts->text;
-        const AstIdentifierPart* gp = generic_params;
-        const AstTypeRef* arg = concrete_args;
-        while (gp && arg) {
-            if (str_eq(gp->text, base)) {
-                const AstTypeRef* match = arg;
-                if (match->generic_args) match = substitute_type_ref(ctx, NULL, NULL, match);
-                
-                AstTypeRef* result = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
-                *result = *match;
-                result->next = NULL;
-                result->parts = clone_parts(ctx, match->parts); // Deep clone parts
-                if (type->is_view) result->is_view = true;
-                if (type->is_mod) result->is_mod = true;
-                return result;
-            }
-            gp = gp->next; arg = arg->next;
-        }
-    }
-    
-    if (type->generic_args) {
-        AstTypeRef* new_type = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
-        *new_type = *type;
-        new_type->next = NULL; // Sibling-less
-        new_type->parts = clone_parts(ctx, type->parts); // Deep clone parts
-        AstTypeRef* sub_args = NULL;
-        AstTypeRef* last_sub = NULL;
-        for (const AstTypeRef* a = type->generic_args; a; a = a->next) {
-            AstTypeRef* sub = substitute_type_ref(ctx, generic_params, concrete_args, a);
-            if (!sub_args) sub_args = sub;
-            else last_sub->next = sub;
-            last_sub = sub;
-        }
-        new_type->generic_args = sub_args;
-        if (last_sub) last_sub->next = NULL;
-        return new_type;
-    }
-    
-    // Fallback: always return a fresh sibling-less node with cloned parts
-    AstTypeRef* result = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
-    *result = *type;
-    result->next = NULL;
-    result->parts = clone_parts(ctx, type->parts); // Deep clone parts
-    return result;
-}
-
-static AstTypeRef* infer_generic_args(CompilerContext* ctx, const AstFuncDecl* func, const AstTypeRef* pattern, const AstTypeRef* concrete_type) {
-    if (!func || !func->generic_params || !pattern || !concrete_type) return NULL;
-    
-    // Check if base types match (e.g. List vs List)
-    Str pattern_base = get_base_type_name(pattern);
-    Str receiver_base = get_base_type_name(concrete_type);
-    if (!str_eq(pattern_base, receiver_base)) return NULL;
-    
-    AstTypeRef* inferred_list = NULL;
-    AstTypeRef* last_inferred = NULL;
-    
-    // Iterate over func generic params (e.g. T)
-    for (const AstIdentifierPart* gp = func->generic_params; gp; gp = gp->next) {
-        AstTypeRef* match = NULL;
-        
-        // Find usage of T in pattern->generic_args
-        const AstTypeRef* p_arg = pattern->generic_args;
-        const AstTypeRef* r_arg = concrete_type->generic_args;
-        
-        while (p_arg && r_arg) {
-            Str p_name = get_base_type_name(p_arg);
-            if (str_eq(p_name, gp->text)) {
-                match = (AstTypeRef*)r_arg; // Found match!
-                break;
-            }
-            p_arg = p_arg->next;
-            r_arg = r_arg->next;
-        }
-        
-        if (match) {
-            AstTypeRef* copy = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
-            *copy = *match;
-            copy->next = NULL;
-            if (!inferred_list) inferred_list = copy;
-            else last_inferred->next = copy;
-            last_inferred = copy;
-        } else {
-            // Could not infer this param
-            return NULL; 
-        }
-    }
-    
-    return inferred_list;
-}
-
-static void register_function_specialization(CompilerContext* ctx, const AstFuncDecl* decl, const AstTypeRef* concrete_args) {
+void register_function_specialization(CompilerContext* ctx, const AstFuncDecl* decl, const AstTypeRef* concrete_args) {
     if (!decl || !concrete_args) return;
     for (const AstTypeRef* arg = concrete_args; arg; arg = arg->next) {
-        if ((uintptr_t)arg->parts < 0x1000 && (uintptr_t)arg->parts != 0) {
-            return;
-        }
+        if ((uintptr_t)arg->parts < 0x1000 && (uintptr_t)arg->parts != 0) return;
+        if (!is_concrete_type(arg)) return;
     }
-    
-    // Ensure all args are concrete
-    for (const AstTypeRef* arg = concrete_args; arg; arg = arg->next) {
-        if (!is_concrete_type(arg)) {
-            return;
-        }
-    }
-
-    // Check if already registered
     for (size_t i = 0; i < ctx->specialized_func_count; i++) {
         if (ctx->specialized_funcs[i].decl == decl) {
-            // Check if generic args match
-            const AstTypeRef* a = ctx->specialized_funcs[i].concrete_args;
-            const AstTypeRef* b = concrete_args;
-            bool match = true;
-            while (a && b) {
-                if (!type_refs_equal(a, b)) { match = false; break; }
-                a = a->next; b = b->next;
-            }
-            if (match && !a && !b) {
-                return;
-            }
+            const AstTypeRef* a = ctx->specialized_funcs[i].concrete_args; const AstTypeRef* b = concrete_args;
+            bool match = true; while (a && b) { if (!type_refs_equal(a, b)) { match = false; break; } a = a->next; b = b->next; }
+            if (match && !a && !b) return;
         }
     }
-    
     if (ctx->specialized_func_count < ctx->specialized_func_cap) {
         ctx->specialized_funcs[ctx->specialized_func_count].decl = decl;
         ctx->specialized_funcs[ctx->specialized_func_count].concrete_args = (AstTypeRef*)concrete_args;
@@ -528,131 +363,84 @@ static void register_function_specialization(CompilerContext* ctx, const AstFunc
     }
 }
 
-static void register_generic_type(CompilerContext* ctx, const AstTypeRef* type) {
-    if (!type || !type->generic_args || !is_concrete_type(type)) return;
+void register_generic_type(CompilerContext* ctx, const AstTypeRef* type) {
+    if (!type || !is_concrete_type(type)) return;
     if ((uintptr_t)type < 0x1000) return;
-    if ((uintptr_t)type->parts < 0x1000) return;
-    
-    Str base = type->parts->text;
-    bool is_buffer = str_eq_cstr(base, "Buffer");
-
-    if (!is_buffer) {
-        for (size_t i = 0; i < ctx->generic_type_count; i++) {
-            if (type_refs_equal(ctx->generic_types[i], type)) goto scan_args;
-        }
-        // Check if already registered
-    for (size_t i = 0; i < ctx->generic_type_count; i++) {
-        if (type_refs_equal(ctx->generic_types[i], type)) return;
+    if (type->resolved_type && type->resolved_type->kind < TYPE_STRUCT) {
+        if (type->resolved_type->kind == TYPE_BUFFER) { for (const AstTypeRef* arg = type->generic_args; arg; arg = arg->next) register_generic_type(ctx, arg); }
+        return;
     }
-    
-    if (ctx->generic_type_count < ctx->generic_type_cap) {
-            ctx->generic_types[ctx->generic_type_count++] = type;
-        }
-    }
-
+    Str base = {0};
+    if (type->parts) base = type->parts->text; else if (type->resolved_type) base = type->resolved_type->name;
+    if (base.len > 0) { if (str_eq_cstr(base, "Void") || str_eq_cstr(base, "void") || is_primitive_type(base)) return; }
+    for (size_t i = 0; i < ctx->generic_type_count; i++) { if (type_refs_equal(ctx->generic_types[i], type)) goto scan_args; }
+    if (ctx->generic_type_count < ctx->generic_type_cap) ctx->generic_types[ctx->generic_type_count++] = type;
 scan_args:
-    // Also register any generic types used in arguments of this type
-    for (const AstTypeRef* arg = type->generic_args; arg; arg = arg->next) {
-        register_generic_type(ctx, arg);
+    for (const AstTypeRef* arg = type->generic_args; arg; arg = arg->next) register_generic_type(ctx, arg);
+    bool is_list = str_eq_cstr(base, "List");
+    bool is_buffer = (type->resolved_type && type->resolved_type->kind == TYPE_BUFFER) || str_eq_cstr(base, "Buffer");
+    if (is_buffer || is_list || str_eq_cstr(base, "Box")) return;
+    const AstDecl* d = NULL;
+    for (size_t i = 0; i < ctx->all_decl_count; i++) {
+        const AstDecl* ad = ctx->all_decls[i];
+        if (ad->kind == AST_DECL_TYPE && types_match(ad->as.type_decl.name, base)) { d = ad; break; }
     }
-
-    // Also register any generic types used in fields of this type
-    if (is_buffer || str_eq_cstr(base, "List") || str_eq_cstr(base, "Box")) {
-        // Primitive generics: scanned args above
-    } else {
-        const AstDecl* d = NULL;
-        // Search in all collected declarations first (most comprehensive)
-        for (size_t i = 0; i < ctx->all_decl_count; i++) {
-            const AstDecl* ad = ctx->all_decls[i];
-            if (ad->kind == AST_DECL_TYPE && types_match(ad->as.type_decl.name, base)) {
-                d = ad;
-                break;
+    if (!d && ctx->current_module) d = find_type_decl(NULL, ctx->current_module, base);
+    if (d && d->kind == AST_DECL_TYPE) {
+        for (const AstTypeField* f = d->as.type_decl.fields; f; f = f->next) {
+            if (f->type) {
+                const AstIdentifierPart* params = d->as.type_decl.generic_params; const AstTypeRef* args = type->generic_args;
+                if (!params && d->as.type_decl.generic_template) params = d->as.type_decl.generic_template->as.type_decl.generic_params;
+                AstTypeRef* sub = substitute_type_ref(ctx, params, args, f->type); register_generic_type(ctx, sub);
             }
         }
-        
-        // Fallback: search in core module explicitly
-        if (!d && ctx->current_module) {
-            d = find_type_decl(NULL, ctx->current_module, base);
-        }
+    }
+}
 
-        if (d && d->kind == AST_DECL_TYPE) {
-            for (const AstTypeField* f = d->as.type_decl.fields; f; f = f->next) {
-                if (f->type) {
-                    AstTypeRef* sub = substitute_type_ref(ctx, d->as.type_decl.generic_params, type->generic_args, f->type);
-                    register_generic_type(ctx, sub);
+static const AstFuncDecl* find_function_overload(const AstModule* module, CFuncContext* ctx, Str name, const Str* param_types, uint16_t param_count, bool is_method, const AstExpr* call_expr) {
+    if (!module) return NULL;
+    
+    for (const AstDecl* d = module->decls; d; d = d->next) {
+        if (d->kind == AST_DECL_FUNC) {
+            const AstFuncDecl* fd = &d->as.func_decl;
+            if (str_eq(fd->name, name)) {
+                uint16_t fd_param_count = 0;
+                for (const AstParam* p = fd->params; p; p = p->next) fd_param_count++;
+                
+                if (fd_param_count == param_count) {
+                    if (is_method && fd->params) {
+                        TypeInfo* fd_rec_t = sema_resolve_type(ctx->compiler_ctx, fd->params->type);
+                        Str obj_type = {0};
+                        if (param_types && param_types[0].len > 0) obj_type = param_types[0];
+                        else if (call_expr && call_expr->kind == AST_EXPR_METHOD_CALL) {
+                            const AstTypeRef* tr = infer_expr_type_ref(ctx, call_expr->as.method_call.object);
+                            if (tr) {
+                                const char* m = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
+                                obj_type = str_from_cstr(m);
+                            }
+                        }
+                        
+                        if (obj_type.len > 0) {
+                            if (types_match(fd_rec_t->name, obj_type)) return fd;
+                            const char* mfd = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, fd->params->type);
+                            if (str_eq_cstr(obj_type, mfd)) return fd;
+                        }
+                    } else if (!is_method) {
+                        return fd;
+                    }
                 }
             }
         }
     }
-}
 
-static void collect_type_refs_expr(CompilerContext* ctx, const AstExpr* expr);
-static void collect_type_refs_stmt(CompilerContext* ctx, const AstStmt* stmt);
-static bool emit_rae_any_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out);
-
-static void collect_type_refs_expr(CompilerContext* ctx, const AstExpr* expr) {
-    if (!expr) return;
-    switch (expr->kind) {
-        case AST_EXPR_OBJECT:
-            register_generic_type(ctx, expr->as.object_literal.type);
-            for (const AstObjectField* f = expr->as.object_literal.fields; f; f = f->next) collect_type_refs_expr(ctx, f->value);
-            break;
-        case AST_EXPR_COLLECTION_LITERAL:
-            register_generic_type(ctx, expr->as.collection.type);
-            for (const AstCollectionElement* e = expr->as.collection.elements; e; e = e->next) {
-                collect_type_refs_expr(ctx, e->value);
-            }
-            break;
-        case AST_EXPR_CALL:
-            collect_type_refs_expr(ctx, expr->as.call.callee);
-            for (const AstCallArg* a = expr->as.call.args; a; a = a->next) collect_type_refs_expr(ctx, a->value);
-            break;
-        case AST_EXPR_BINARY:
-            collect_type_refs_expr(ctx, expr->as.binary.lhs);
-            collect_type_refs_expr(ctx, expr->as.binary.rhs);
-            break;
-        case AST_EXPR_UNARY:
-            collect_type_refs_expr(ctx, expr->as.unary.operand);
-            break;
-        case AST_EXPR_MEMBER:
-            collect_type_refs_expr(ctx, expr->as.member.object);
-            break;
-        case AST_EXPR_INDEX:
-            collect_type_refs_expr(ctx, expr->as.index.target);
-            collect_type_refs_expr(ctx, expr->as.index.index);
-            break;
-        default: break;
+    // Search in imported modules
+    for (const AstImport* imp = module->imports; imp; imp = imp->next) {
+        if (!imp->module) continue;
+        const AstFuncDecl* found = find_function_overload(imp->module, ctx, name, param_types, param_count, is_method, call_expr);
+        if (found) return found;
     }
-}
 
-static void collect_type_refs_stmt(CompilerContext* ctx, const AstStmt* stmt) {
-    for (const AstStmt* s = stmt; s; s = s->next) {
-        switch (s->kind) {
-            case AST_STMT_LET:
-                register_generic_type(ctx, s->as.let_stmt.type);
-                collect_type_refs_expr(ctx, s->as.let_stmt.value);
-                break;
-            case AST_STMT_ASSIGN:
-                collect_type_refs_expr(ctx, s->as.assign_stmt.target);
-                collect_type_refs_expr(ctx, s->as.assign_stmt.value);
-                break;
-            case AST_STMT_EXPR:
-                collect_type_refs_expr(ctx, s->as.expr_stmt);
-                break;
-            case AST_STMT_IF:
-                collect_type_refs_expr(ctx, s->as.if_stmt.condition);
-                if (s->as.if_stmt.then_block) collect_type_refs_stmt(ctx, s->as.if_stmt.then_block->first);
-                if (s->as.if_stmt.else_block) collect_type_refs_stmt(ctx, s->as.if_stmt.else_block->first);
-                break;
-            case AST_STMT_LOOP:
-                collect_type_refs_stmt(ctx, s->as.loop_stmt.init);
-                collect_type_refs_expr(ctx, s->as.loop_stmt.condition);
-                collect_type_refs_expr(ctx, s->as.loop_stmt.increment);
-                if (s->as.loop_stmt.body) collect_type_refs_stmt(ctx, s->as.loop_stmt.body->first);
-                break;
-            default: break;
-        }
-    }
+    return NULL;
 }
 
 static void discover_specializations_expr(CFuncContext* ctx, const AstExpr* expr) {
@@ -661,79 +449,45 @@ static void discover_specializations_expr(CFuncContext* ctx, const AstExpr* expr
         case AST_EXPR_CALL: {
             const AstExpr* callee = expr->as.call.callee;
             if (callee->kind == AST_EXPR_IDENT) {
-                uint16_t param_count = 0;
-                for (const AstCallArg* a = expr->as.call.args; a; a = a->next) param_count++;
-                
-                const AstFuncDecl* d = NULL;
-                d = find_function_overload(ctx->module, ctx, callee->as.ident, NULL, param_count, false, expr);
+                uint16_t param_count = 0; for (const AstCallArg* a = expr->as.call.args; a; a = a->next) param_count++;
+                const AstFuncDecl* d = find_function_overload(ctx->module, ctx, callee->as.ident, NULL, param_count, false, expr);
                 if (!d) d = find_function_overload(ctx->module, ctx, callee->as.ident, NULL, param_count, true, expr);
-
-                if ((str_eq_cstr(callee->as.ident, "sizeof") || 
-                     str_eq_cstr(callee->as.ident, "__buf_alloc") || 
-                     str_eq_cstr(callee->as.ident, "__buf_free") || 
-                     str_eq_cstr(callee->as.ident, "__buf_copy")) && expr->as.call.generic_args) {
-                    AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, expr->as.call.generic_args);
-                    register_generic_type(ctx->compiler_ctx, sub);
+                if ((str_eq_cstr(callee->as.ident, "sizeof") || str_eq_cstr(callee->as.ident, "__buf_alloc") || str_eq_cstr(callee->as.ident, "__buf_free") || str_eq_cstr(callee->as.ident, "__buf_copy")) && expr->as.call.generic_args) {
+                    AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, expr->as.call.generic_args); register_generic_type(ctx->compiler_ctx, sub);
                 }
-
                 if (d && d->generic_params) {
                     AstTypeRef* inferred_args = NULL;
                     if (expr->as.call.generic_args) {
-                        AstTypeRef* concrete_args = NULL;
-                        AstTypeRef* last_arg = NULL;
+                        AstTypeRef* concrete_args = NULL; AstTypeRef* last_arg = NULL;
                         for (const AstTypeRef* arg = expr->as.call.generic_args; arg; arg = arg->next) {
                             AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, arg);
-                            if (!concrete_args) concrete_args = sub;
-                            else last_arg->next = sub;
-                            last_arg = sub;
+                            if (!concrete_args) concrete_args = sub; else last_arg->next = sub; last_arg = sub;
                         }
                         inferred_args = concrete_args;
-                    } else {
-                        if (!inferred_args && d->params && str_eq_cstr(d->params->name, "this")) {
-                            const AstCallArg* first_arg = expr->as.call.args;
-                            if (first_arg) {
-                                const AstTypeRef* receiver_type = infer_expr_type_ref(ctx, first_arg->value);
-                                AstTypeRef* inferred = infer_generic_args(ctx->compiler_ctx, d, d->params->type, receiver_type);
-                                if (inferred) inferred_args = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, inferred);
-                            }
-                        }
-                        
-                        if (!inferred_args && ctx->generic_args) {
-                            inferred_args = (AstTypeRef*)ctx->generic_args;
-                        }
-                        
-                        // Try inferring from expected return type
-                        if (!inferred_args && ctx->has_expected_type && d->returns) {
-                            AstTypeRef* inferred = infer_generic_args(ctx->compiler_ctx, d, d->returns->type, &ctx->expected_type);
+                    } else if (d->params && str_eq_cstr(d->params->name, "this")) {
+                        const AstCallArg* first_arg = expr->as.call.args;
+                        if (first_arg) {
+                            const AstTypeRef* receiver_type = infer_expr_type_ref(ctx, first_arg->value);
+                            AstTypeRef* inferred = infer_generic_args(ctx->compiler_ctx, d, d->params->type, receiver_type);
                             if (inferred) inferred_args = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, inferred);
                         }
                     }
-                    if (inferred_args) {
-                        register_function_specialization(ctx->compiler_ctx, d, inferred_args);
-                    }
+                    if (inferred_args) register_function_specialization(ctx->compiler_ctx, d, inferred_args);
                 }
             }
             for (const AstCallArg* a = expr->as.call.args; a; a = a->next) discover_specializations_expr(ctx, a->value);
             break;
         }
         case AST_EXPR_METHOD_CALL: {
-            uint16_t param_count = 1;
-            for (const AstCallArg* a = expr->as.method_call.args; a; a = a->next) param_count++;
-            
-            const AstFuncDecl* d = NULL;
+            uint16_t param_count = 1; for (const AstCallArg* a = expr->as.method_call.args; a; a = a->next) param_count++;
             Str obj_type = infer_expr_type(ctx, expr->as.method_call.object);
-            d = find_function_overload(ctx->module, ctx, expr->as.method_call.method_name, &obj_type, param_count, true, expr);
-
+            const AstFuncDecl* d = find_function_overload(ctx->module, ctx, expr->as.method_call.method_name, &obj_type, param_count, true, expr);
             if (d && d->generic_params) {
                 const AstTypeRef* receiver_type = infer_expr_type_ref(ctx, expr->as.method_call.object);
                 AstTypeRef* inferred = infer_generic_args(ctx->compiler_ctx, d, d->params->type, receiver_type);
-                if (inferred) {
-                    AstTypeRef* concrete = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, inferred);
-                    register_function_specialization(ctx->compiler_ctx, d, concrete);
-                }
+                if (inferred) { AstTypeRef* concrete = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, inferred); register_function_specialization(ctx->compiler_ctx, d, concrete); }
             }
-            discover_specializations_expr(ctx, expr->as.method_call.object);
-            for (const AstCallArg* a = expr->as.method_call.args; a; a = a->next) discover_specializations_expr(ctx, a->value);
+            discover_specializations_expr(ctx, expr->as.method_call.object); for (const AstCallArg* a = expr->as.method_call.args; a; a = a->next) discover_specializations_expr(ctx, a->value);
             break;
         }
         case AST_EXPR_BINARY: discover_specializations_expr(ctx, expr->as.binary.lhs); discover_specializations_expr(ctx, expr->as.binary.rhs); break;
@@ -742,13 +496,6 @@ static void discover_specializations_expr(CFuncContext* ctx, const AstExpr* expr
         case AST_EXPR_INDEX: discover_specializations_expr(ctx, expr->as.index.target); discover_specializations_expr(ctx, expr->as.index.index); break;
         case AST_EXPR_OBJECT: for (const AstObjectField* f = expr->as.object_literal.fields; f; f = f->next) discover_specializations_expr(ctx, f->value); break;
         case AST_EXPR_COLLECTION_LITERAL: for (const AstCollectionElement* e = expr->as.collection.elements; e; e = e->next) discover_specializations_expr(ctx, e->value); break;
-        case AST_EXPR_MATCH: discover_specializations_expr(ctx, expr->as.match_expr.subject); break;
-        case AST_EXPR_LIST: { const AstExprList* item = expr->as.list; while (item) { discover_specializations_expr(ctx, item->value); item = item->next; } break; }
-        case AST_EXPR_INTERP:
-            for (const AstInterpPart* p = expr->as.interp.parts; p; p = p->next) {
-                discover_specializations_expr(ctx, p->value);
-            }
-            break;
         default: break;
     }
 }
@@ -758,127 +505,47 @@ static void discover_specializations_stmt(CFuncContext* ctx, const AstStmt* stmt
         switch (s->kind) {
             case AST_STMT_LET: 
                 if (s->as.let_stmt.value) {
-                    const AstTypeRef* type = s->as.let_stmt.type;
-                    if (!type) {
-                        type = infer_expr_type_ref(ctx, s->as.let_stmt.value);
-                    }
-                    
+                    const AstTypeRef* type = s->as.let_stmt.type ? s->as.let_stmt.type : infer_expr_type_ref(ctx, s->as.let_stmt.value);
                     if (type) { ctx->expected_type = *type; ctx->has_expected_type = true; }
-                    else ctx->has_expected_type = false;
-                    discover_specializations_expr(ctx, s->as.let_stmt.value);
-                    ctx->has_expected_type = false;
-                    
+                    discover_specializations_expr(ctx, s->as.let_stmt.value); ctx->has_expected_type = false;
                     if (ctx->local_count < 256) {
-                        ctx->locals[ctx->local_count] = s->as.let_stmt.name;
-                        ctx->local_type_refs[ctx->local_count] = type;
-                        ctx->local_is_ptr[ctx->local_count] = type && (type->is_view || type->is_mod) && !is_primitive_ref(ctx, type);
-                        ctx->local_is_mod[ctx->local_count] = type && type->is_mod;
+                        ctx->locals[ctx->local_count] = s->as.let_stmt.name; ctx->local_type_refs[ctx->local_count] = type;
                         const char* mn = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type);
-                        ctx->local_types[ctx->local_count] = str_from_cstr(mn);
-                        ctx->local_count++;
-                    }
-                } else {
-                    if (ctx->local_count < 256) {
-                        ctx->locals[ctx->local_count] = s->as.let_stmt.name;
-                        ctx->local_type_refs[ctx->local_count] = s->as.let_stmt.type;
-                        ctx->local_is_ptr[ctx->local_count] = s->as.let_stmt.type && (s->as.let_stmt.type->is_view || s->as.let_stmt.type->is_mod) && !is_primitive_ref(ctx, s->as.let_stmt.type);
-                        ctx->local_is_mod[ctx->local_count] = s->as.let_stmt.type && s->as.let_stmt.type->is_mod;
-                        const char* mn = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, s->as.let_stmt.type);
-                        ctx->local_types[ctx->local_count] = str_from_cstr(mn);
-                        ctx->local_count++;
+                        ctx->local_types[ctx->local_count] = str_from_cstr(mn); ctx->local_count++;
                     }
                 }
                 break;
             case AST_STMT_ASSIGN: 
-                discover_specializations_expr(ctx, s->as.assign_stmt.target); 
+                discover_specializations_expr(ctx, s->as.assign_stmt.target);
                 {
                     const AstTypeRef* tr = infer_expr_type_ref(ctx, s->as.assign_stmt.target);
                     if (tr) { ctx->expected_type = *tr; ctx->has_expected_type = true; }
-                    else ctx->has_expected_type = false;
-                    discover_specializations_expr(ctx, s->as.assign_stmt.value); 
-                    ctx->has_expected_type = false;
-                    
-                    // If it's a bind (destructuring), we need to register locals just like emit_stmt does
-                    if (s->as.assign_stmt.is_bind) {
-                        if (s->as.assign_stmt.target->kind == AST_EXPR_IDENT) {
-                            if (ctx->local_count < 256) {
-                                ctx->locals[ctx->local_count] = s->as.assign_stmt.target->as.ident;
-                                AstTypeRef* t = infer_expr_type_ref(ctx, s->as.assign_stmt.value);
-                                ctx->local_type_refs[ctx->local_count] = t;
-                                ctx->local_is_ptr[ctx->local_count] = t && (t->is_view || t->is_mod) && !is_primitive_ref(ctx, t);
-                                ctx->local_is_mod[ctx->local_count] = t && t->is_mod;
-                                const char* mn = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, t);
-                                ctx->local_types[ctx->local_count] = str_from_cstr(mn);
-                                ctx->local_count++;
-                            }
-                        }
-                    }
+                    discover_specializations_expr(ctx, s->as.assign_stmt.value); ctx->has_expected_type = false;
                 }
                 break;
             case AST_STMT_EXPR: discover_specializations_expr(ctx, s->as.expr_stmt); break;
-            case AST_STMT_RET: { AstReturnArg* v = s->as.ret_stmt.values; while (v) { discover_specializations_expr(ctx, v->value); v = v->next; } break; }
             case AST_STMT_IF: discover_specializations_expr(ctx, s->as.if_stmt.condition); if (s->as.if_stmt.then_block) discover_specializations_stmt(ctx, s->as.if_stmt.then_block->first); if (s->as.if_stmt.else_block) discover_specializations_stmt(ctx, s->as.if_stmt.else_block->first); break;
             case AST_STMT_LOOP: if (s->as.loop_stmt.init) discover_specializations_stmt(ctx, s->as.loop_stmt.init); if (s->as.loop_stmt.condition) discover_specializations_expr(ctx, s->as.loop_stmt.condition); if (s->as.loop_stmt.increment) discover_specializations_expr(ctx, s->as.loop_stmt.increment); if (s->as.loop_stmt.body) discover_specializations_stmt(ctx, s->as.loop_stmt.body->first); break;
-            case AST_STMT_MATCH:
-                discover_specializations_expr(ctx, s->as.match_stmt.subject);
-                for (const AstMatchCase* c = s->as.match_stmt.cases; c; c = c->next) {
-                    if (c->pattern) discover_specializations_expr(ctx, c->pattern);
-                    if (c->block) discover_specializations_stmt(ctx, c->block->first);
-                }
-                break;
-            case AST_STMT_DEFER: if (s->as.defer_stmt.block) discover_specializations_stmt(ctx, s->as.defer_stmt.block->first); break;
             default: break;
         }
     }
 }
 
 static void discover_specializations_module(CompilerContext* ctx, const AstModule* module) {
-    // Phase 1: Discover from non-generic functions and globals
     for (size_t i = 0; i < ctx->all_decl_count; i++) {
         const AstDecl* d = ctx->all_decls[i];
-        if (d->kind == AST_DECL_GLOBAL_LET) {
-            register_generic_type(ctx, d->as.let_decl.type);
-            CFuncContext fctx = {.compiler_ctx = ctx, .module = module};
-            discover_specializations_expr(&fctx, d->as.let_decl.value);
-        } else if (d->kind == AST_DECL_FUNC && !d->as.func_decl.generic_params) {
+        if (d->kind == AST_DECL_FUNC && !d->as.func_decl.generic_params) {
             CFuncContext fctx = {.compiler_ctx = ctx, .module = module, .func_decl = &d->as.func_decl};
-            for (const AstParam* p = d->as.func_decl.params; p; p = p->next) {
-                if (fctx.local_count < 256) {
-                    fctx.locals[fctx.local_count] = p->name;
-                    fctx.local_type_refs[fctx.local_count] = p->type;
-                    fctx.local_count++;
-                }
-            }
             if (d->as.func_decl.body) discover_specializations_stmt(&fctx, d->as.func_decl.body->first);
         }
     }
-
-    // Phase 2: Discover from specialized functions recursively
     size_t discovered = 0;
     while (discovered < ctx->specialized_func_count) {
         size_t limit = ctx->specialized_func_count;
         for (size_t i = discovered; i < limit; i++) {
-            const AstFuncDecl* f = ctx->specialized_funcs[i].decl;
-            const AstTypeRef* args = ctx->specialized_funcs[i].concrete_args;
+            const AstFuncDecl* f = ctx->specialized_funcs[i].decl; const AstTypeRef* args = ctx->specialized_funcs[i].concrete_args;
             if (!f) continue;
-            
-            CFuncContext fctx = {0};
-            fctx.compiler_ctx = ctx;
-            fctx.module = module;
-            fctx.func_decl = f;
-            fctx.generic_params = f->generic_params;
-            fctx.generic_args = args;
-            
-            for (const AstParam* p = f->params; p; p = p->next) {
-                if (fctx.local_count < 256) {
-                    fctx.locals[fctx.local_count] = p->name;
-                    AstTypeRef* tr = substitute_type_ref(ctx, f->generic_params, args, p->type);
-                    fctx.local_type_refs[fctx.local_count] = tr;
-                    const char* mn = rae_mangle_type_specialized(ctx, f->generic_params, args, p->type);
-                    fctx.local_types[fctx.local_count] = str_from_cstr(mn);
-                    fctx.local_count++;
-                }
-            }
+            CFuncContext fctx = {.compiler_ctx = ctx, .module = module, .func_decl = f, .generic_params = f->generic_params, .generic_args = args};
             if (f->body) discover_specializations_stmt(&fctx, f->body->first);
         }
         discovered = limit;
@@ -886,32 +553,12 @@ static void discover_specializations_module(CompilerContext* ctx, const AstModul
 }
 
 static void collect_type_refs_module(CompilerContext* ctx) {
-    for (size_t i = 0; i < ctx->all_decl_count; i++) {
-        const AstDecl* d = ctx->all_decls[i];
-        if (d->kind == AST_DECL_FUNC) {
-            for (const AstParam* p = d->as.func_decl.params; p; p = p->next) register_generic_type(ctx, p->type);
-            if (d->as.func_decl.returns) register_generic_type(ctx, d->as.func_decl.returns->type);
-            if (d->as.func_decl.body) {
-                collect_type_refs_stmt(ctx, d->as.func_decl.body->first);
-            }
-        } else if (d->kind == AST_DECL_TYPE) {
-            for (const AstTypeField* f = d->as.type_decl.fields; f; f = f->next) register_generic_type(ctx, f->type);
-        } else if (d->kind == AST_DECL_GLOBAL_LET) {
-            register_generic_type(ctx, d->as.let_decl.type);
-            collect_type_refs_expr(ctx, d->as.let_decl.value);
-        }
-    }
-    
-    // Recursive discovery: keep scanning as long as new generic types or specialized functions are found
-    size_t last_generic_count = 0;
-    size_t last_func_count = 0;
+    size_t last_generic_count = 0; size_t last_func_count = 0;
     do {
-        last_generic_count = ctx->generic_type_count;
-        last_func_count = ctx->specialized_func_count;
+        last_generic_count = ctx->generic_type_count; last_func_count = ctx->specialized_func_count;
         discover_specializations_module(ctx, ctx->current_module);
     } while (ctx->generic_type_count > last_generic_count || ctx->specialized_func_count > last_func_count);
 }
-
 
 static int binary_op_precedence(AstBinaryOp op) {
   switch (op) {
@@ -931,125 +578,77 @@ static int binary_op_precedence(AstBinaryOp op) {
   return PREC_LOWEST;
 }
 
+
+
 static bool emit_string_literal(FILE* out, Str literal) {
   fprintf(out, "(rae_String){(uint8_t*)\"");
   for (size_t i = 0; i < literal.len; i++) {
     char c = literal.data[i];
     switch (c) {
-      case '"': fprintf(out, "\\\""); break;
-      case '\\': fprintf(out, "\\\\"); break;
-      case '\n': fprintf(out, "\\n"); break;
-      case '\r': fprintf(out, "\\r"); break;
-      case '\t': fprintf(out, "\\t"); break;
-      default: {
-          if ((unsigned char)c < 32 || (unsigned char)c > 126) {
-              fprintf(out, "\\x%02x", (unsigned char)c);
-          } else {
-              fputc(c, out);
-          }
-          break;
-      }
+      case '"': fprintf(out, "\\\""); break; case '\\': fprintf(out, "\\\\"); break; case '\n': fprintf(out, "\\n"); break;
+      case '\r': fprintf(out, "\\r"); break; case '\t': fprintf(out, "\\t"); break;
+      default: { if ((unsigned char)c < 32 || (unsigned char)c > 126) fprintf(out, "\\x%02x", (unsigned char)c); else fputc(c, out); break; }
     }
   }
-  fprintf(out, "\", %lld}", (long long)literal.len);
-  return true;
+  fprintf(out, "\", %lld}", (long long)literal.len); return true;
 }
 
 static bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* out, bool skip_ptr) {
-  if (!type || !type->parts) { fprintf(out, "int64_t"); return true; }
+  if (!type) { fprintf(out, "int64_t"); return true; }
+  if (type->resolved_type) {
+      TypeInfo* t = type->resolved_type; bool is_ptr = (type->is_view || type->is_mod) && !skip_ptr;
+      if (t->kind == TYPE_INT) { fprintf(out, "int64_t"); if (is_ptr) fprintf(out, "*"); return true; }
+      if (t->kind == TYPE_FLOAT) { fprintf(out, "double"); if (is_ptr) fprintf(out, "*"); return true; }
+      if (t->kind == TYPE_BOOL) { fprintf(out, "rae_Bool"); if (is_ptr) fprintf(out, "*"); return true; }
+      if (t->kind == TYPE_CHAR) { fprintf(out, "uint32_t"); if (is_ptr) fprintf(out, "*"); return true; }
+      if (t->kind == TYPE_STRING) { fprintf(out, "rae_String"); if (is_ptr) fprintf(out, "*"); return true; }
+      if (t->kind == TYPE_ANY || t->kind == TYPE_OPT) { fprintf(out, "RaeAny"); if (is_ptr) fprintf(out, "*"); return true; }
+      if (t->kind == TYPE_BUFFER) {
+          if (type->is_view) fprintf(out, "const ");
+          if (t->as.buffer.base->kind == TYPE_ANY || t->as.buffer.base->kind == TYPE_VOID) fprintf(out, "void*");
+          else { AstTypeRef tmp = { .resolved_type = t->as.buffer.base }; emit_type_ref_as_c_type(ctx, &tmp, out, false); fprintf(out, "*"); }
+          return true;
+      }
+      if (t->kind == TYPE_STRUCT) {
+          if (type->is_view) fprintf(out, "const ");
+          const char* name = type_mangle_name(ctx->compiler_ctx->ast_arena, t).data;
+          fprintf(out, "%s", name);
+          if (is_ptr) fprintf(out, "*");
+          return true;
+      }
+  }
+  if (!type->parts) { fprintf(out, "int64_t"); return true; }
   bool is_ptr = (type->is_view || type->is_mod) && !skip_ptr;
   if (type->is_id) { fprintf(out, "int64_t"); if (is_ptr) fprintf(out, "*"); return true; }
   if (type->is_key) { fprintf(out, "rae_String"); if (is_ptr) fprintf(out, "*"); return true; }
   if (type->is_opt) { fprintf(out, "RaeAny"); if (is_ptr) fprintf(out, "*"); return true; }
-
-  Str base = type->parts->text;
-  bool is_mod = type->is_mod;
-
-  if (str_eq_cstr(base, "Int64") || str_eq_cstr(base, "Int")) { 
-      if (is_ptr) fprintf(out, "rae_%s_Int64", is_mod ? "Mod" : "View");
-      else fprintf(out, "int64_t"); 
-      return true; 
-  }
-  else if (str_eq_cstr(base, "Float64") || str_eq_cstr(base, "Float")) { 
-      if (is_ptr) fprintf(out, "rae_%s_Float64", is_mod ? "Mod" : "View");
-      else fprintf(out, "double"); 
-      return true; 
-  }
-  else if (str_eq_cstr(base, "Bool")) { 
-      if (is_ptr) fprintf(out, "rae_%s_Bool", is_mod ? "Mod" : "View");
-      else fprintf(out, "rae_Bool"); 
-      return true; 
-  }
-  else if (str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32")) { 
-      if (is_ptr) fprintf(out, "rae_%s_Char%s", is_mod ? "Mod" : "View", str_eq_cstr(base, "Char32") ? "32" : "");
-      else fprintf(out, "uint32_t"); 
-      return true; 
-  }
-  else if (str_eq_cstr(base, "String")) { 
-      if (is_ptr) fprintf(out, "rae_%s_String", is_mod ? "Mod" : "View");
-      else fprintf(out, "rae_String"); 
-      return true; 
-  }
-  else if (str_eq_cstr(base, "Any")) { 
-      if (is_ptr) fprintf(out, "%sRaeAny*", type->is_view ? "const " : ""); 
-      else fprintf(out, "RaeAny"); 
-      return true; 
-  }
-  else if (str_eq_cstr(base, "Buffer") && type->generic_args) {
+  Str base = type->parts->text; bool is_mod = type->is_mod;
+  if (str_eq_cstr(base, "Int64") || str_eq_cstr(base, "Int")) { if (is_ptr) fprintf(out, "rae_%s_Int64", is_mod ? "Mod" : "View"); else fprintf(out, "int64_t"); return true; }
+  if (str_eq_cstr(base, "Float64") || str_eq_cstr(base, "Float")) { if (is_ptr) fprintf(out, "rae_%s_Float64", is_mod ? "Mod" : "View"); else fprintf(out, "double"); return true; }
+  if (str_eq_cstr(base, "Bool")) { if (is_ptr) fprintf(out, "rae_%s_Bool", is_mod ? "Mod" : "View"); else fprintf(out, "rae_Bool"); return true; }
+  if (str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32")) { if (is_ptr) fprintf(out, "rae_%s_Char%s", is_mod ? "Mod" : "View", str_eq_cstr(base, "Char32") ? "32" : ""); else fprintf(out, "uint32_t"); return true; }
+  if (str_eq_cstr(base, "String")) { if (is_ptr) fprintf(out, "rae_%s_String", is_mod ? "Mod" : "View"); else fprintf(out, "rae_String"); return true; }
+  if (str_eq_cstr(base, "Any")) { if (is_ptr) fprintf(out, "%sRaeAny*", type->is_view ? "const " : ""); else fprintf(out, "RaeAny"); return true; }
+  if (str_eq_cstr(base, "Buffer") && type->generic_args) {
         if (type->is_view) fprintf(out, "const ");
-        Str arg_base = get_base_type_name(type->generic_args);
-        if (str_eq_cstr(arg_base, "Any") || arg_base.len == 0) {
-            fprintf(out, "void*");
-            return true;
-        }
-        if (is_ptr) {
-            emit_type_ref_as_c_type(ctx, type->generic_args, out, false);
-            fprintf(out, "*");
-            return true;
-        }
-        emit_type_ref_as_c_type(ctx, type->generic_args, out, false);
-        fprintf(out, "*");
-        return true; 
+        Str arg_base = get_base_type_name(type->generic_args); if (str_eq_cstr(arg_base, "Any") || arg_base.len == 0) { fprintf(out, "void*"); return true; }
+        emit_type_ref_as_c_type(ctx, type->generic_args, out, false); fprintf(out, "*"); return true; 
   }
-
   if (ctx && ctx->generic_params && ctx->generic_args) {
-      const AstIdentifierPart* gp = ctx->generic_params;
-      const AstTypeRef* arg = ctx->generic_args;
-      while (gp && arg) {
-          if (str_eq(gp->text, base)) {
-              emit_type_ref_as_c_type(ctx, arg, out, false);
-              return true;
-          }
-          gp = gp->next; arg = arg->next;
-      }
+      const AstIdentifierPart* gp = ctx->generic_params; const AstTypeRef* arg = ctx->generic_args;
+      while (gp && arg) { if (str_eq(gp->text, base)) { emit_type_ref_as_c_type(ctx, arg, out, false); return true; } gp = gp->next; arg = arg->next; }
   }
-
+  // Check if this is an enum type — emit as int64_t
+  if (ctx) {
+      const AstDecl* ed = find_enum_decl(ctx, ctx->module, base);
+      if (ed) { fprintf(out, "int64_t"); if (is_ptr) fprintf(out, "*"); return true; }
+  }
   const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type);
-  
-    if (ctx && ctx->uses_raylib && is_raylib_builtin_type(base)) {
-  
+  if (ctx && ctx->uses_raylib && is_raylib_builtin_type(base)) {
         const AstDecl* td = find_type_decl(NULL, ctx->module, base);
-  
-        if (td && td->kind == AST_DECL_TYPE && has_property(td->as.type_decl.properties, "c_struct")) {
-  
-            fprintf(out, "%.*s", (int)base.len, base.data);
-  
-        } else if (!td) {
-  
-            fprintf(out, "%.*s", (int)base.len, base.data);
-  
-        } else {
-  
-            fprintf(out, "rae_%.*s", (int)base.len, base.data);
-  
-        }
-  
-    }
-  
-   else {
-      fprintf(out, "%s", mangled);
-  }
-
+        if (td && td->kind == AST_DECL_TYPE && has_property(td->as.type_decl.properties, "c_struct")) fprintf(out, "%.*s", (int)base.len, base.data);
+        else if (!td) fprintf(out, "%.*s", (int)base.len, base.data); else fprintf(out, "rae_%.*s", (int)base.len, base.data);
+  } else fprintf(out, "%s", mangled);
   if (is_ptr) fprintf(out, "*");
   return true;
 }
@@ -1064,8 +663,7 @@ static bool emit_param_list(CFuncContext* ctx, const AstParam* params, FILE* out
         bool is_ptr = is_extern ? (is_mod || is_view) : (is_mod || is_view || (!is_val && !is_primitive_type(base) && !(ctx->uses_raylib && is_raylib_builtin_type(base))));
         if (is_view && !is_ptr && !str_eq_cstr(base, "String")) fprintf(out, "const ");
         CFuncContext p_ctx = *ctx; AstTypeRef p_type = *p->type; p_type.is_view = is_view; p_type.is_mod = is_mod;
-        emit_type_ref_as_c_type(&p_ctx, &p_type, out, false);
-        fprintf(out, " %.*s", (int)p->name.len, p->name.data);
+        emit_type_ref_as_c_type(&p_ctx, &p_type, out, false); fprintf(out, " %.*s", (int)p->name.len, p->name.data);
     }
     index++;
   }
@@ -1074,118 +672,45 @@ static bool emit_param_list(CFuncContext* ctx, const AstParam* params, FILE* out
 }
 
 static const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func) {
-  if (str_eq_cstr(func->name, "rae_ext_rae_buf_alloc") || str_eq_cstr(func->name, "__buf_alloc") ||
-      str_eq_cstr(func->name, "rae_ext_rae_buf_resize") || str_eq_cstr(func->name, "__buf_resize") ||
-      str_eq_cstr(func->name, "rae_ext_rae_str_to_cstr") || str_eq_cstr(func->name, "toCStr")) {
-      return "void*";
-  }
-  if (str_eq_cstr(func->name, "rae_ext_rae_buf_free") || str_eq_cstr(func->name, "__buf_free") ||
-      str_eq_cstr(func->name, "rae_ext_rae_buf_copy") || str_eq_cstr(func->name, "__buf_copy")) {
-      return "void";
-  }
+  if (str_eq_cstr(func->name, "rae_ext_rae_buf_alloc") || str_eq_cstr(func->name, "__buf_alloc") || str_eq_cstr(func->name, "rae_ext_rae_buf_resize") || str_eq_cstr(func->name, "__buf_resize") || str_eq_cstr(func->name, "rae_ext_rae_str_to_cstr") || str_eq_cstr(func->name, "toCStr")) return "void*";
+  if (str_eq_cstr(func->name, "rae_ext_rae_buf_free") || str_eq_cstr(func->name, "__buf_free") || str_eq_cstr(func->name, "rae_ext_rae_buf_copy") || str_eq_cstr(func->name, "__buf_copy")) return "void";
   if (func->returns && func->returns->type) {
-    AstTypeRef* tr = func->returns->type;
-    if (tr->is_opt) return "RaeAny";
+    AstTypeRef* tr = func->returns->type; if (tr->is_opt) return "RaeAny";
     bool is_view = tr->is_view, is_mod = tr->is_mod, is_ptr = is_view || is_mod;
     if (tr->is_id) return is_ptr ? "int64_t*" : "int64_t";
     if (tr->is_key) return is_ptr ? "rae_String*" : "rae_String";
-    
     Str base = get_base_type_name(tr);
-    bool is_prim = is_primitive_type(base);
-
-    if (is_prim) {
-        if (str_eq_cstr(base, "Int64") || str_eq_cstr(base, "Int")) {
-            if (is_ptr) return is_mod ? "rae_Mod_Int64" : "rae_View_Int64";
-            return "int64_t";
-        }
-        if (str_eq_cstr(base, "Float64") || str_eq_cstr(base, "Float")) {
-            if (is_ptr) return is_mod ? "rae_Mod_Float64" : "rae_View_Float64";
-            return "double";
-        }
-        if (str_eq_cstr(base, "Bool")) {
-            if (is_ptr) return is_mod ? "rae_Mod_Bool" : "rae_View_Bool";
-            return "rae_Bool";
-        }
-        if (str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32")) {
-            if (is_ptr) return is_mod ? "rae_Mod_Char32" : "rae_View_Char32";
-            return "uint32_t";
-        }
-        if (str_eq_cstr(base, "String")) {
-            if (is_ptr) return is_mod ? "rae_Mod_String" : "rae_View_String";
-            return "rae_String";
-        }
+    if (is_primitive_type(base)) {
+        if (str_eq_cstr(base, "Int64") || str_eq_cstr(base, "Int")) return is_ptr ? (is_mod ? "rae_Mod_Int64" : "rae_View_Int64") : "int64_t";
+        if (str_eq_cstr(base, "Float64") || str_eq_cstr(base, "Float")) return is_ptr ? (is_mod ? "rae_Mod_Float64" : "rae_View_Float64") : "double";
+        if (str_eq_cstr(base, "Bool")) return is_ptr ? (is_mod ? "rae_Mod_Bool" : "rae_View_Bool") : "rae_Bool";
+        if (str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32")) return is_ptr ? (is_mod ? "rae_Mod_Char32" : "rae_View_Char32") : "uint32_t";
+        if (str_eq_cstr(base, "String")) return is_ptr ? (is_mod ? "rae_Mod_String" : "rae_View_String") : "rae_String";
     }
-
-    if (tr->is_opt && !tr->generic_args && !(ctx && ctx->generic_params)) return "RaeAny";
-
-    if (tr->generic_args || (ctx && ctx->generic_params)) {
-        const char* m = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
-        // If it's still 'rae_Any' or starts with 'opt', map to concrete if possible
-        if (strcmp(m, "RaeAny") == 0) return "RaeAny";
-        
-        // Handle substituted primitive names in specialized return types
-        if (strcmp(m, "rae_Int64") == 0 || strcmp(m, "int64_t") == 0) return "int64_t";
-        if (strcmp(m, "rae_Int32") == 0 || strcmp(m, "int32_t") == 0) return "int32_t";
-        if (strcmp(m, "rae_UInt64") == 0 || strcmp(m, "uint64_t") == 0) return "uint64_t";
-        if (strcmp(m, "rae_UInt32") == 0 || strcmp(m, "uint32_t") == 0) return "uint32_t";
-        if (strcmp(m, "rae_Float64") == 0 || strcmp(m, "double") == 0) return "double";
-        if (strcmp(m, "rae_Float32") == 0 || strcmp(m, "float") == 0) return "float";
-        if (strcmp(m, "rae_Bool") == 0) return "rae_Bool";
-        if (strcmp(m, "rae_Char") == 0 || strcmp(m, "rae_Char32") == 0 || strcmp(m, "uint32_t") == 0) return "uint32_t";
-        if (strcmp(m, "rae_String") == 0) return "rae_String";
-        
-        if (is_ptr) { char* b = malloc(strlen(m) + 16); sprintf(b, "%s%s*", is_view ? "const " : "", m); return b; }
-        return m;
-    }
-    const char* mapped = map_rae_type_to_c(base);
-    if (mapped) {
-        if (is_ptr) { char* b = malloc(strlen(mapped) + 16); sprintf(b, "%s%s*", (is_view && strcmp(mapped, "const char*") != 0) ? "const " : "", mapped); return b; }
-        return mapped;
-    }
-    char* raw = str_to_cstr(base); char* res = malloc(strlen(raw) + 8); sprintf(res, "rae_%s", raw); free(raw);
-    if (is_ptr) { char* b = malloc(strlen(res) + 16); sprintf(b, "%s%s*", is_view ? "const " : "", res); free(res); return b; }
-    return res;
+    const char* m = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
+    if (strcmp(m, "RaeAny") == 0) return "RaeAny";
+    if (strcmp(m, "rae_Int64") == 0 || strcmp(m, "int64_t") == 0) return "int64_t";
+    if (strcmp(m, "rae_Bool") == 0) return "rae_Bool";
+    if (strcmp(m, "rae_String") == 0) return "rae_String";
+    if (is_ptr) { char* b = malloc(strlen(m) + 16); sprintf(b, "%s%s*", is_view ? "const " : "", m); return b; }
+    return m;
   }
   return func_has_return_value(func) ? "int64_t" : "void";
 }
 
 static bool func_has_return_value(const AstFuncDecl* func) { return func->returns != NULL; }
-static Str get_local_type_name(CFuncContext* ctx, Str name) {
-    for (int i = (int)ctx->local_count - 1; i >= 0; i--) if (str_eq(ctx->locals[i], name)) return ctx->local_types[i];
-    return (Str){0};
-}
-static const AstTypeRef* get_local_type_ref(CFuncContext* ctx, Str name) {
-    for (int i = (int)ctx->local_count - 1; i >= 0; i--) if (str_eq(ctx->locals[i], name)) return ctx->local_type_refs[i];
-    return NULL;
-}
+static Str get_local_type_name(CFuncContext* ctx, Str name) { for (int i = (int)ctx->local_count - 1; i >= 0; i--) if (str_eq(ctx->locals[i], name)) return ctx->local_types[i]; return (Str){0}; }
+static const AstTypeRef* get_local_type_ref(CFuncContext* ctx, Str name) { for (int i = (int)ctx->local_count - 1; i >= 0; i--) if (str_eq(ctx->locals[i], name)) return ctx->local_type_refs[i]; return NULL; }
+
 static bool emit_auto_init(CFuncContext* ctx, const AstTypeRef* type, FILE* out) {
-    if (!type) {
-        fprintf(out, "{0}");
-        return true;
-    }
-    
-    if (type->is_opt) {
-        fprintf(out, "rae_any_none()");
-        return true;
-    }
-    
+    if (!type) { fprintf(out, "{0}"); return true; }
+    if (type->is_opt) { fprintf(out, "rae_any_none()"); return true; }
     Str base = get_base_type_name(type);
-    if (str_eq_cstr(base, "Int64") || str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int32") || str_eq_cstr(base, "UInt64") || str_eq_cstr(base, "UInt32") || str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32")) {
-        fprintf(out, "0");
-    } else if (str_eq_cstr(base, "Float64") || str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float32")) {
-        fprintf(out, "0.0");
-    } else if (str_eq_cstr(base, "Bool")) {
-        fprintf(out, "false");
-    } else if (str_eq_cstr(base, "String")) {
-        fprintf(out, "(rae_String){0}");
-    } else {
-        const AstDecl* d = find_type_decl(ctx, ctx->module, base);
-        if (d && d->kind == AST_DECL_TYPE) {
-            emit_struct_auto_init(ctx, d, type, out);
-        } else {
-            fprintf(out, "{0}");
-        }
-    }
+    if (str_eq_cstr(base, "Int64") || str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int32") || str_eq_cstr(base, "UInt64") || str_eq_cstr(base, "UInt32") || str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32")) fprintf(out, "0");
+    else if (str_eq_cstr(base, "Float64") || str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float32")) fprintf(out, "0.0");
+    else if (str_eq_cstr(base, "Bool")) fprintf(out, "false");
+    else if (str_eq_cstr(base, "String")) fprintf(out, "(rae_String){0}");
+    else { const AstDecl* d = find_type_decl(ctx, ctx->module, base); if (d && d->kind == AST_DECL_TYPE) emit_struct_auto_init(ctx, d, type, out); else fprintf(out, "{0}"); }
     return true;
 }
 
@@ -1193,327 +718,56 @@ static bool emit_struct_auto_init(CFuncContext* ctx, const AstDecl* decl, const 
     fprintf(out, "{ ");
     for (const AstTypeField* f = decl->as.type_decl.fields; f; f = f->next) {
         fprintf(out, ".%.*s = ", (int)f->name.len, f->name.data);
-        const AstTypeRef* field_tr = substitute_type_ref(ctx->compiler_ctx, decl->as.type_decl.generic_params, tr->generic_args, f->type);
-        emit_auto_init(ctx, field_tr, out);
-        if (f->next) fprintf(out, ", ");
+        AstTypeRef* field_tr = substitute_type_ref(ctx->compiler_ctx, decl->as.type_decl.generic_params, tr->generic_args, f->type);
+        emit_auto_init(ctx, field_tr, out); if (f->next) fprintf(out, ", ");
     }
-    fprintf(out, " }");
-    return true;
+    fprintf(out, " }"); return true;
 }
 
 static bool is_pointer_type(CFuncContext* ctx, Str name) {
-    for (int i = (int)ctx->local_count - 1; i >= 0; i--) if (str_eq(ctx->locals[i], name)) return ctx->local_is_ptr[i];
-    return false;
-}
-
-static bool is_mod_type(CFuncContext* ctx, Str name) {
-    for (int i = (int)ctx->local_count - 1; i >= 0; i--) if (str_eq(ctx->locals[i], name)) return ctx->local_is_mod[i];
-    return false;
-}
-
-static bool is_generic_param(const AstIdentifierPart* params, Str name) {
-    const AstIdentifierPart* p = params;
-    while (p) {
-        if (str_eq(p->text, name)) return true;
-        p = p->next;
+    if (str_eq_cstr(name, "Buffer") || str_eq_cstr(name, "List")) return true;
+    for (int i = (int)ctx->local_count - 1; i >= 0; i--) {
+        if (str_eq(ctx->locals[i], name)) {
+            if (ctx->local_is_ptr[i]) return true;
+            const AstTypeRef* tr = ctx->local_type_refs[i];
+            if (tr) {
+                Str base = get_base_type_name(tr);
+                if (str_eq_cstr(base, "Buffer") || str_eq_cstr(base, "List")) return true;
+            }
+            return false;
+        }
     }
     return false;
 }
 
-static const AstTypeRef* g_infer_expr_ref_stack[64];
-static size_t g_infer_expr_ref_stack_count = 0;
+static bool is_generic_param(const AstIdentifierPart* params, Str name) { const AstIdentifierPart* p = params; while (p) { if (str_eq(p->text, name)) return true; p = p->next; } return false; }
 
 static const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
     if (!expr) return NULL;
-    for (size_t i = 0; i < g_infer_expr_ref_stack_count; i++) {
-        if (g_infer_expr_ref_stack[i] == (const AstTypeRef*)expr) return NULL;
-    }
-    if (g_infer_expr_ref_stack_count >= 64) return NULL;
-    g_infer_expr_ref_stack[g_infer_expr_ref_stack_count++] = (const AstTypeRef*)expr;
-
-    const AstTypeRef* res = NULL;
-    if (expr->kind == AST_EXPR_CALL && expr->as.call.callee->kind == AST_EXPR_IDENT) {
-        Str name = expr->as.call.callee->as.ident;
-        if (str_eq_cstr(name, "rae_ext_rae_buf_alloc") || str_eq_cstr(name, "__buf_alloc") ||
-            str_eq_cstr(name, "rae_ext_rae_buf_resize") || str_eq_cstr(name, "__buf_resize")) {
-            AstTypeRef* buf_tr = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
-            buf_tr->parts = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstIdentifierPart));
-            buf_tr->parts->text = str_from_cstr("Buffer");
-            buf_tr->generic_args = (AstTypeRef*)expr->as.call.generic_args;
-            res = buf_tr; goto done;
-        }
-    }
     switch (expr->kind) {
-        case AST_EXPR_IDENT: res = get_local_type_ref(ctx, expr->as.ident); goto done;
-        case AST_EXPR_INTEGER: {
-            AstTypeRef* tr = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
-            *tr = (AstTypeRef){.parts = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstIdentifierPart))};
-            tr->parts->text = str_from_cstr("Int64");
-            res = tr; goto done;
-        }
-        case AST_EXPR_FLOAT: {
-            AstTypeRef* tr = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
-            *tr = (AstTypeRef){.parts = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstIdentifierPart))};
-            tr->parts->text = str_from_cstr("Float64");
-            res = tr; goto done;
-        }
-        case AST_EXPR_BOOL: {
-            AstTypeRef* tr = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
-            *tr = (AstTypeRef){.parts = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstIdentifierPart))};
-            tr->parts->text = str_from_cstr("Bool");
-            res = tr; goto done;
-        }
-        case AST_EXPR_STRING: {
-            AstTypeRef* tr = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
-            *tr = (AstTypeRef){.parts = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstIdentifierPart))};
-            tr->parts->text = str_from_cstr("String");
-            res = tr; goto done;
-        }
+        case AST_EXPR_IDENT: return get_local_type_ref(ctx, expr->as.ident);
         case AST_EXPR_MEMBER: {
-            const AstTypeRef* obj_tr = infer_expr_type_ref(ctx, expr->as.member.object);
-            Str obj_name = get_base_type_name(obj_tr);
+            const AstTypeRef* obj_tr = infer_expr_type_ref(ctx, expr->as.member.object); Str obj_name = get_base_type_name(obj_tr);
             if (obj_name.len == 0) obj_name = infer_expr_type(ctx, expr->as.member.object);
-            
             const AstDecl* d = find_type_decl(ctx, ctx->module, obj_name);
             if (d && d->kind == AST_DECL_TYPE) {
                 for (const AstTypeField* f = d->as.type_decl.fields; f; f = f->next) {
-                    if (str_eq(f->name, expr->as.member.member)) {
-                        const AstTypeRef* concrete_args = (obj_tr && obj_tr->generic_args) ? obj_tr->generic_args : ctx->generic_args;
-                        res = substitute_type_ref(ctx->compiler_ctx, d->as.type_decl.generic_params, concrete_args, f->type);
-                        goto done;
-                    }
+                    if (str_eq(f->name, expr->as.member.member)) return substitute_type_ref(ctx->compiler_ctx, d->as.type_decl.generic_params, (obj_tr && obj_tr->generic_args) ? obj_tr->generic_args : ctx->generic_args, f->type);
                 }
             }
             break;
         }
-        case AST_EXPR_INDEX: {
-            const AstTypeRef* tr = infer_expr_type_ref(ctx, expr->as.index.target);
-            if (tr) {
-                Str base = get_base_type_name(tr);
-                if ((str_eq_cstr(base, "Buffer") || str_eq_cstr(base, "List")) && tr->generic_args) { res = tr->generic_args; goto done; }
-            }
-            break;
-        }
-        case AST_EXPR_CALL: {
-            if (expr->as.call.callee->kind == AST_EXPR_IDENT) {
-                uint16_t param_count = 0;
-                for (const AstCallArg* a = expr->as.call.args; a; a = a->next) param_count++;
-                
-                Str* param_types = NULL;
-                if (param_count > 0) {
-                    param_types = calloc(param_count, sizeof(Str));
-                    const AstCallArg* a = expr->as.call.args;
-                    for (uint16_t i = 0; i < param_count; i++) {
-                        param_types[i] = infer_expr_type(ctx, a->value);
-                        a = a->next;
-                    }
-                }
-
-                const AstFuncDecl* fd = find_function_overload(ctx->module, ctx, expr->as.call.callee->as.ident, param_types, param_count, false, expr);
-                if (!fd) fd = find_function_overload(ctx->module, ctx, expr->as.call.callee->as.ident, param_types, param_count, true, expr);
-                
-                if (param_types) free(param_types);
-                if (fd && fd->returns) {
-                    AstTypeRef* inferred_args = NULL;
-                    if (fd->generic_params && fd->params && str_eq_cstr(fd->params->name, "this")) {
-                        const AstCallArg* first_arg = expr->as.call.args;
-                        if (first_arg) {
-                            const AstTypeRef* receiver_type = infer_expr_type_ref(ctx, first_arg->value);
-                            inferred_args = infer_generic_args(ctx->compiler_ctx, fd, fd->params->type, receiver_type);
-                        }
-                    }
-                    
-                    const AstTypeRef* base_ret = fd->returns->type;
-                    AstTypeRef* result = (AstTypeRef*)base_ret;
-                    if (inferred_args) result = substitute_type_ref(ctx->compiler_ctx, fd->generic_params, inferred_args, base_ret);
-                    
-                    if (base_ret->is_opt && !result->is_opt) {
-                        AstTypeRef* copy = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
-                        *copy = *result;
-                        copy->is_opt = true;
-                        result = copy;
-                    }
-                    res = result; goto done;
-                }
-            } else if (expr->as.call.callee->kind == AST_EXPR_MEMBER) {
-                Str member = expr->as.call.callee->as.member.member;
-                Str obj_name = infer_expr_type(ctx, expr->as.call.callee->as.member.object);
-                uint16_t param_count = 1; 
-                for (const AstCallArg* a = expr->as.call.args; a; a = a->next) param_count++;
-                const AstFuncDecl* fd = find_function_overload(ctx->module, ctx, member, &obj_name, param_count, true, expr);
-                if (fd && fd->returns) { res = fd->returns->type; goto done; }
-            }
-            break;
-        }
-        case AST_EXPR_METHOD_CALL: {
-            Str member = expr->as.method_call.method_name;
-            if (str_eq_cstr(member, "toString")) {
-                AstTypeRef* tr = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
-                *tr = (AstTypeRef){.parts = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstIdentifierPart))};
-                tr->parts->text = str_from_cstr("String");
-                res = tr; goto done;
-            }
-            Str obj_name = infer_expr_type(ctx, expr->as.method_call.object);
-            uint16_t param_count = 1;
-            for (const AstCallArg* a = expr->as.method_call.args; a; a = a->next) param_count++;
-            
-            Str* param_types = calloc(param_count, sizeof(Str));
-            param_types[0] = obj_name;
-            const AstCallArg* a = expr->as.method_call.args;
-            for (uint16_t i = 1; i < param_count; i++) {
-                param_types[i] = infer_expr_type(ctx, a->value);
-                a = a->next;
-            }
-
-            const AstFuncDecl* fd = find_function_overload(ctx->module, ctx, member, param_types, param_count, true, expr);
-            free(param_types);
-            if (fd && fd->returns) {
-                AstTypeRef* inferred_args = NULL;
-                if (fd->generic_params) {
-                    const AstTypeRef* receiver_type = infer_expr_type_ref(ctx, expr->as.method_call.object);
-                    inferred_args = infer_generic_args(ctx->compiler_ctx, fd, fd->params->type, receiver_type);
-                }
-                
-                const AstTypeRef* base_ret = fd->returns->type;
-                AstTypeRef* result = (AstTypeRef*)base_ret;
-                if (inferred_args) result = substitute_type_ref(ctx->compiler_ctx, fd->generic_params, inferred_args, base_ret);
-                
-                if (base_ret->is_opt && !result->is_opt) {
-                    AstTypeRef* copy = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
-                    *copy = *result;
-                    copy->is_opt = true;
-                    result = copy;
-                }
-                res = result; goto done;
-            }
-            break;
-        }
+        case AST_EXPR_CALL: if (expr->decl_link && expr->decl_link->kind == AST_DECL_FUNC) return expr->decl_link->as.func_decl.returns ? expr->decl_link->as.func_decl.returns->type : NULL; break;
         default: break;
     }
-done:
-    g_infer_expr_ref_stack_count--;
-    return res;
+    return NULL;
 }
 
-static const AstExpr* g_infer_expr_stack[64];
-static size_t g_infer_expr_stack_count = 0;
 static Str infer_expr_type(CFuncContext* ctx, const AstExpr* expr) {
     if (!expr) return (Str){0};
-    if (expr->kind == AST_EXPR_CALL && expr->as.call.callee->kind == AST_EXPR_IDENT) {
-        Str name = expr->as.call.callee->as.ident;
-        if (str_eq_cstr(name, "rae_ext_rae_buf_alloc") || str_eq_cstr(name, "__buf_alloc") ||
-            str_eq_cstr(name, "rae_ext_rae_buf_resize") || str_eq_cstr(name, "__buf_resize")) {
-            return str_from_cstr("Buffer");
-        }
-    }
-    for (size_t i = 0; i < g_infer_expr_stack_count; i++) if (g_infer_expr_stack[i] == expr) return (Str){0};
-    if (g_infer_expr_stack_count >= 64) return (Str){0};
-    g_infer_expr_stack[g_infer_expr_stack_count++] = expr;
-    Str res = {0};
-    switch (expr->kind) {
-        case AST_EXPR_IDENT: res = get_local_type_name(ctx, expr->as.ident); break;
-        case AST_EXPR_INTEGER: res = str_from_cstr("Int64"); break;
-        case AST_EXPR_FLOAT: res = str_from_cstr("Float64"); break;
-        case AST_EXPR_BOOL: res = str_from_cstr("Bool"); break;
-        case AST_EXPR_STRING: res = str_from_cstr("String"); break;
-        case AST_EXPR_CHAR: res = str_from_cstr("Char"); break;
-        case AST_EXPR_BINARY: {
-            if (expr->as.binary.op >= AST_BIN_LT && expr->as.binary.op <= AST_BIN_OR) res = str_from_cstr("Bool");
-            else res = infer_expr_type(ctx, expr->as.binary.lhs);
-            break;
-        }
-        case AST_EXPR_UNARY: {
-            if (expr->as.unary.op == AST_UNARY_NOT) res = str_from_cstr("Bool");
-            else res = infer_expr_type(ctx, expr->as.unary.operand);
-            break;
-        }
-        case AST_EXPR_CALL: {
-            if (expr->as.call.callee->kind == AST_EXPR_IDENT) {
-                uint16_t param_count = 0;
-                for (const AstCallArg* a = expr->as.call.args; a; a = a->next) param_count++;
-                
-                Str* param_types = NULL;
-                if (param_count > 0) {
-                    param_types = calloc(param_count, sizeof(Str));
-                    const AstCallArg* a = expr->as.call.args;
-                    for (uint16_t i = 0; i < param_count; i++) {
-                        param_types[i] = infer_expr_type(ctx, a->value);
-                        a = a->next;
-                    }
-                }
-
-                const AstFuncDecl* fd = find_function_overload(ctx->module, ctx, expr->as.call.callee->as.ident, param_types, param_count, false, expr);
-                if (!fd) fd = find_function_overload(ctx->module, ctx, expr->as.call.callee->as.ident, param_types, param_count, true, expr);
-                
-                if (param_types) free(param_types);
-                if (fd && fd->returns) {
-                    const char* tn = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, fd->returns->type);
-                    res = str_from_cstr(tn);
-                }
-            } else if (expr->as.call.callee->kind == AST_EXPR_MEMBER) {
-                Str member = expr->as.call.callee->as.member.member;
-                Str obj_name = infer_expr_type(ctx, expr->as.call.callee->as.member.object);
-                uint16_t param_count = 1;
-                for (const AstCallArg* a = expr->as.call.args; a; a = a->next) param_count++;
-                const AstFuncDecl* fd = find_function_overload(ctx->module, ctx, member, &obj_name, param_count, true, expr);
-                if (fd && fd->returns) {
-                    const char* tn = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, fd->returns->type);
-                    res = str_from_cstr(tn);
-                }
-            }
-            break;
-        }
-        case AST_EXPR_INDEX: {
-            const AstTypeRef* tr = infer_expr_type_ref(ctx, expr->as.index.target);
-            if (tr) {
-                if ((str_eq_cstr(tr->parts->text, "Buffer") || str_eq_cstr(tr->parts->text, "List")) && tr->generic_args) {
-                    const char* tn = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr->generic_args);
-                    res = str_from_cstr(tn);
-                }
-            }
-            break;
-        }
-        case AST_EXPR_MEMBER: {
-            if (expr->as.member.object->kind == AST_EXPR_IDENT) {
-                const AstDecl* ed = find_enum_decl(ctx, ctx->module, expr->as.member.object->as.ident);
-                if (ed) { res = ed->as.enum_decl.name; break; }
-            }
-            const AstTypeRef* tr = infer_expr_type_ref(ctx, expr); 
-            if (tr) {
-                const char* tn = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
-                res = str_from_cstr(tn);
-            }
-            break;
-        }
-        case AST_EXPR_METHOD_CALL: {
-            Str member = expr->as.method_call.method_name;
-            if (str_eq_cstr(member, "toString")) {
-                res = str_from_cstr("String");
-                break;
-            }
-            Str obj_name = infer_expr_type(ctx, expr->as.method_call.object);
-            uint16_t param_count = 1;
-            for (const AstCallArg* a = expr->as.method_call.args; a; a = a->next) param_count++;
-            
-            Str* param_types = calloc(param_count, sizeof(Str));
-            param_types[0] = obj_name;
-            const AstCallArg* a = expr->as.method_call.args;
-            for (uint16_t i = 1; i < param_count; i++) {
-                param_types[i] = infer_expr_type(ctx, a->value);
-                a = a->next;
-            }
-
-            const AstFuncDecl* fd = find_function_overload(ctx->module, ctx, member, param_types, param_count, true, expr);
-            free(param_types);
-            if (fd && fd->returns) {
-                const char* tn = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, fd->returns->type);
-                res = str_from_cstr(tn);
-            }
-            break;
-        }
-        default: break;
-    }
-    g_infer_expr_stack_count--; return res;
+    const AstTypeRef* tr = infer_expr_type_ref(ctx, expr);
+    if (tr) return str_from_cstr(rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr));
+    return (Str){0};
 }
 
 static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_prec, bool is_lvalue, bool suppress_deref) {
@@ -1525,49 +779,29 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
     case AST_EXPR_STRING: emit_string_literal(out, expr->as.string_lit); break;
     case AST_EXPR_CHAR: fprintf(out, "(uint32_t)%uU", (uint32_t)expr->as.char_value); break;
     case AST_EXPR_IDENT: {
-        bool is_ptr = is_pointer_type(ctx, expr->as.ident);
         const AstTypeRef* tr = infer_expr_type_ref(ctx, expr);
         bool is_prim_ref = is_primitive_ref(ctx, tr);
-
+        bool is_ptr = is_pointer_type(ctx, expr->as.ident);
+        
         if (is_prim_ref && !is_lvalue && !suppress_deref) {
             fprintf(out, "(*%.*s.ptr)", (int)expr->as.ident.len, expr->as.ident.data);
         } else if (is_ptr && !is_lvalue && !suppress_deref) {
-            fprintf(out, "(*%.*s)", (int)expr->as.ident.len, expr->as.ident.data);
+            // Check if it's a Buffer or List - they are pointers but shouldn't be dereferenced here 
+            // if we are just passing them or accessing members via ->
+            Str base = get_base_type_name(tr);
+            if (str_eq_cstr(base, "Buffer") || str_eq_cstr(base, "List")) {
+                fprintf(out, "%.*s", (int)expr->as.ident.len, expr->as.ident.data);
+            } else {
+                fprintf(out, "(*%.*s)", (int)expr->as.ident.len, expr->as.ident.data);
+            }
         } else {
             fprintf(out, "%.*s", (int)expr->as.ident.len, expr->as.ident.data);
         }
         break;
     }
-    case AST_EXPR_NONE: {
-        if (ctx->has_expected_type) {
-            Str base = get_base_type_name(&ctx->expected_type);
-            if (str_eq_cstr(base, "String")) {
-                fprintf(out, "(rae_String){0}");
-                break;
-            }
-        }
-        fprintf(out, "rae_any_none()");
-        break;
-    }
     case AST_EXPR_BINARY: {
-      int prec = binary_op_precedence(expr->as.binary.op);
-      bool is_bool_op = expr->as.binary.op >= AST_BIN_LT && expr->as.binary.op <= AST_BIN_OR;
-      
-      Str lhs_type = infer_expr_type(ctx, expr->as.binary.lhs);
-      Str rhs_type = infer_expr_type(ctx, expr->as.binary.rhs);
-      bool is_str_cmp = (types_match(lhs_type, str_from_cstr("String")) && types_match(rhs_type, str_from_cstr("String"))) && (expr->as.binary.op == AST_BIN_IS);
-
-      if (is_str_cmp) {
-          fprintf(out, "(bool)rae_ext_rae_str_eq(");
-          emit_expr(ctx, expr->as.binary.lhs, out, PREC_LOWEST, false, false);
-          fprintf(out, ", ");
-          emit_expr(ctx, expr->as.binary.rhs, out, PREC_LOWEST, false, false);
-          fprintf(out, ")");
-          break;
-      }
-
-      if (is_bool_op) fprintf(out, "(bool)(");
-      if (prec < parent_prec) fprintf(out, "(");
+      int prec = binary_op_precedence(expr->as.binary.op); bool is_bool_op = expr->as.binary.op >= AST_BIN_LT && expr->as.binary.op <= AST_BIN_OR;
+      if (is_bool_op) fprintf(out, "(bool)("); if (prec < parent_prec) fprintf(out, "(");
       emit_expr(ctx, expr->as.binary.lhs, out, prec, false, false);
       switch (expr->as.binary.op) {
         case AST_BIN_ADD: fprintf(out, " + "); break; case AST_BIN_SUB: fprintf(out, " - "); break;
@@ -1578,289 +812,128 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
         case AST_BIN_AND: fprintf(out, " && "); break; case AST_BIN_OR: fprintf(out, " || "); break;
       }
       emit_expr(ctx, expr->as.binary.rhs, out, prec, false, false);
-      if (prec < parent_prec) fprintf(out, ")");
-      if (is_bool_op) fprintf(out, ")");
-      break;
+      if (prec < parent_prec) fprintf(out, ")"); if (is_bool_op) fprintf(out, ")"); break;
     }
     case AST_EXPR_UNARY: {
         switch (expr->as.unary.op) {
             case AST_UNARY_NOT: fprintf(out, "((bool)!("); emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, false, false); fprintf(out, "))"); break;
             case AST_UNARY_NEG: fprintf(out, "-("); emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, false, false); fprintf(out, ")"); break;
-            case AST_UNARY_PRE_INC: fprintf(out, "++("); emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, true, false); fprintf(out, ")"); break;
-            case AST_UNARY_PRE_DEC: fprintf(out, "--("); emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, true, false); fprintf(out, ")"); break;
+            case AST_UNARY_VIEW: case AST_UNARY_MOD: emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, false, false); break;
+            case AST_UNARY_PRE_INC: fprintf(out, "++"); emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, true, false); break;
+            case AST_UNARY_PRE_DEC: fprintf(out, "--"); emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, true, false); break;
             case AST_UNARY_POST_INC: emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, true, false); fprintf(out, "++"); break;
             case AST_UNARY_POST_DEC: emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, true, false); fprintf(out, "--"); break;
-            case AST_UNARY_VIEW:
-            case AST_UNARY_MOD: emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, false, false); break;
             default: break;
         }
         break;
     }
-    case AST_EXPR_CALL: {
-        emit_call_expr(ctx, expr, out);
-        break;
+    case AST_EXPR_CALL: emit_call_expr(ctx, expr, out); break;
+    case AST_EXPR_METHOD_CALL: {
+        AstExpr call = { .kind = AST_EXPR_CALL, .line = expr->line, .column = expr->column, .decl_link = expr->decl_link };
+        call.as.call.callee = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstExpr)); call.as.call.callee->kind = AST_EXPR_IDENT; call.as.call.callee->as.ident = expr->as.method_call.method_name;
+        AstCallArg* first_arg = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstCallArg)); first_arg->name = str_from_cstr("this"); first_arg->value = expr->as.method_call.object; first_arg->next = expr->as.method_call.args;
+        call.as.call.args = first_arg; call.as.call.generic_args = expr->as.method_call.generic_args;
+        emit_call_expr(ctx, &call, out); break;
     }
     case AST_EXPR_MEMBER: {
-        const AstExpr* obj = expr->as.member.object;
-        if (obj->kind == AST_EXPR_IDENT) {
-            const AstDecl* ed = find_enum_decl(ctx, ctx->module, obj->as.ident);
+        // Check if this is an enum access (e.g. Color.Green)
+        if (expr->as.member.object->kind == AST_EXPR_IDENT) {
+            const AstDecl* ed = find_enum_decl(ctx, ctx->module, expr->as.member.object->as.ident);
             if (ed) {
-                fprintf(out, "%.*s_%.*s", (int)obj->as.ident.len, obj->as.ident.data, (int)expr->as.member.member.len, expr->as.member.member.data);
+                fprintf(out, "%.*s_%.*s", (int)expr->as.member.object->as.ident.len, expr->as.member.object->as.ident.data,
+                    (int)expr->as.member.member.len, expr->as.member.member.data);
                 break;
             }
         }
-        
-        const AstTypeRef* obj_tr = infer_expr_type_ref(ctx, obj);
-        bool obj_is_ref = obj_tr && (obj_tr->is_view || obj_tr->is_mod);
-        bool obj_is_ptr_var = obj->kind == AST_EXPR_IDENT && is_pointer_type(ctx, obj->as.ident);
-        
-        bool is_primitive_ref = false;
-        if (obj_is_ref) {
-            Str base = get_base_type_name(obj_tr);
-            if (is_primitive_type(base) || str_eq_cstr(base, "String") || (ctx->uses_raylib && is_raylib_builtin_type(base))) {
-                is_primitive_ref = true;
-            }
-        }
-
-        if (is_primitive_ref) {
-            emit_expr(ctx, obj, out, PREC_CALL, false, false);
-            fprintf(out, ".ptr->%.*s", (int)expr->as.member.member.len, expr->as.member.member.data);
-        } else if (obj_is_ptr_var || obj_is_ref) {
-            emit_expr(ctx, obj, out, PREC_CALL, true, false); // Pass true for is_lvalue to avoid (*ptr)
-            fprintf(out, "->%.*s", (int)expr->as.member.member.len, expr->as.member.member.data);
-        } else {
-            emit_expr(ctx, obj, out, PREC_CALL, false, false);
-            fprintf(out, ".%.*s", (int)expr->as.member.member.len, expr->as.member.member.data);
-        }
+        const AstTypeRef* obj_tr = infer_expr_type_ref(ctx, expr->as.member.object);
+        Str obj_base = get_base_type_name(obj_tr);
+        bool use_arrow = (obj_tr && (obj_tr->is_view || obj_tr->is_mod)) ||
+                         str_eq_cstr(obj_base, "List") || str_eq_cstr(obj_base, "Buffer");
+        emit_expr(ctx, expr->as.member.object, out, PREC_CALL, true, false);
+        fprintf(out, "%s%.*s", use_arrow ? "->" : ".", (int)expr->as.member.member.len, expr->as.member.member.data);
         break;
     }
-    case AST_EXPR_BOX: {
-        fprintf(out, "rae_any_box(");
-        emit_expr(ctx, expr->as.unary.operand, out, PREC_LOWEST, false, false);
-        fprintf(out, ")");
-        break;
+    case AST_EXPR_INDEX: {
+        emit_expr(ctx, expr->as.index.target, out, PREC_CALL, false, false); fprintf(out, "["); emit_expr(ctx, expr->as.index.index, out, PREC_LOWEST, false, false); fprintf(out, "]"); break;
     }
+    case AST_EXPR_BOX: fprintf(out, "rae_any(("); emit_expr(ctx, expr->as.unary.operand, out, PREC_LOWEST, false, false); fprintf(out, "))"); break;
     case AST_EXPR_UNBOX: {
         if (expr->resolved_type) {
-            TypeInfo* t = expr->resolved_type;
-            if (t->kind == TYPE_REF) t = t->as.ref.base;
-            fprintf(out, "(");
-            emit_expr(ctx, expr->as.unary.operand, out, PREC_LOWEST, false, false);
-            if (t->kind == TYPE_INT || t->kind == TYPE_CHAR) fprintf(out, ").as.i");
-            else if (t->kind == TYPE_FLOAT) fprintf(out, ").as.f");
-            else if (t->kind == TYPE_BOOL) fprintf(out, ").as.b");
-            else if (t->kind == TYPE_STRING) fprintf(out, ").as.s");
-            else fprintf(out, ").as.ptr");
-        } else {
-            emit_expr(ctx, expr->as.unary.operand, out, PREC_LOWEST, false, false);
-        }
+            TypeInfo* t = expr->resolved_type; if (t->kind == TYPE_REF) t = t->as.ref.base;
+            fprintf(out, "("); emit_expr(ctx, expr->as.unary.operand, out, PREC_LOWEST, false, false);
+            if (t->kind == TYPE_INT || t->kind == TYPE_CHAR) fprintf(out, ").as.i"); else if (t->kind == TYPE_FLOAT) fprintf(out, ").as.f"); else if (t->kind == TYPE_BOOL) fprintf(out, ").as.b"); else if (t->kind == TYPE_STRING) fprintf(out, ").as.s"); else fprintf(out, ").as.ptr");
+        } else emit_expr(ctx, expr->as.unary.operand, out, PREC_LOWEST, false, false);
         break;
     }
     case AST_EXPR_OBJECT: {
-      const AstTypeRef* type = expr->as.object_literal.type ? expr->as.object_literal.type : (ctx->has_expected_type ? &ctx->expected_type : NULL);
-      
-      // Fallback: try to infer from expression itself if no context type
-      if (!type) type = infer_expr_type_ref(ctx, expr);
-
-      if (type) {
-          fprintf(out, "(");
-          emit_type_ref_as_c_type(ctx, type, out, false);
-          fprintf(out, ")");
-      }
-      fprintf(out, "{ ");
-      for (const AstObjectField* f = expr->as.object_literal.fields; f; f = f->next) {
-        fprintf(out, ".%.*s = ", (int)f->name.len, f->name.data);
-        
-        const AstTypeRef* field_type = NULL;
-        AstTypeRef field_tr = {0};
-        bool has_field_tr = false;
-
-        if (type && type->parts) {
-            Str base = type->parts->text;
-            const AstDecl* td = find_type_decl(ctx, ctx->module, base);
-            if (td && td->kind == AST_DECL_TYPE) {
-                for (const AstTypeField* tf = td->as.type_decl.fields; tf; tf = tf->next) {
-                    if (str_eq(tf->name, f->name)) {
-                        AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, td->as.type_decl.generic_params, type->generic_args, tf->type);
-                        if (sub) { field_tr = *sub; has_field_tr = true; field_type = &field_tr; }
-                        register_generic_type(ctx->compiler_ctx, sub);
-                        break;
-                    }
-                }
-            }
+        bool needs_cast = true;
+        if (expr->as.object_literal.type) {
+            fprintf(out, "(");
+            emit_type_ref_as_c_type(ctx, expr->as.object_literal.type, out, false);
+            fprintf(out, ")");
         }
-        
-        AstTypeRef old_expected = ctx->expected_type;
-        bool old_has = ctx->has_expected_type;
-        if (has_field_tr) { ctx->expected_type = field_tr; ctx->has_expected_type = true; }
-        else ctx->has_expected_type = false;
-
-        emit_expr(ctx, f->value, out, PREC_LOWEST, false, false);
-        ctx->expected_type = old_expected;
-        ctx->has_expected_type = old_has;
-        
-        if (f->next) fprintf(out, ", ");
-      }
-      fprintf(out, " }");
-      break;
-    }
-    case AST_EXPR_COLLECTION_LITERAL: {
-      const AstTypeRef* type = expr->as.collection.type ? expr->as.collection.type : (ctx->has_expected_type ? &ctx->expected_type : NULL);
-      if (!type || !type->parts) { fprintf(out, "0"); break; }
-      
-      Str base = type->parts->text;
-      bool is_buffer = str_eq_cstr(base, "Buffer");
-      bool is_list = str_eq_cstr(base, "List");
-      
-      if (is_buffer) {
-          // Emit as C array literal
-          fprintf(out, "LIFT_TO_TEMP(");
-          emit_type_ref_as_c_type(ctx, type->generic_args, out, false);
-          fprintf(out, "[], {");
-          for (const AstCollectionElement* e = expr->as.collection.elements; e; e = e->next) {
-              emit_expr(ctx, e->value, out, PREC_LOWEST, false, false);
-              if (e->next) fprintf(out, ", ");
-          }
-          fprintf(out, "})");
-      } else if (is_list) {
-          fprintf(out, "(rae_%.*s_", (int)base.len, base.data);
-          if (type->generic_args) {
-              const char* mangled_arg = rae_mangle_type(ctx->compiler_ctx, ctx->generic_params, type->generic_args);
-              fprintf(out, "%s", mangled_arg);
-          }
-          fprintf(out, "){ .data = ");
-          
-          // Use statement expression to allocate and initialize heap buffer
-          fprintf(out, "({ ");
-          emit_type_ref_as_c_type(ctx, type->generic_args, out, false);
-          fprintf(out, "* __tmp_buf = rae_ext_rae_buf_alloc(");
-          
-          int count = 0;
-          for (const AstCollectionElement* e = expr->as.collection.elements; e; e = e->next) count++;
-          
-          fprintf(out, "%d, sizeof(", count);
-          emit_type_ref_as_c_type(ctx, type->generic_args, out, false);
-          fprintf(out, ")); ");
-          
-          if (count > 0) {
-              fprintf(out, "static const ");
-              emit_type_ref_as_c_type(ctx, type->generic_args, out, false);
-              fprintf(out, " __stack_init[] = {");
-              for (const AstCollectionElement* e = expr->as.collection.elements; e; e = e->next) {
-                  emit_expr(ctx, e->value, out, PREC_LOWEST, false, false);
-                  if (e->next) fprintf(out, ", ");
-              }
-              fprintf(out, "}; memcpy(__tmp_buf, __stack_init, sizeof(__stack_init)); ");
-          }
-          
-          fprintf(out, "__tmp_buf; }), .length = ((int64_t)%dLL), .capacity = ((int64_t)%dLL) }", count, count);
-      } else {
-          fprintf(out, "0");
-      }
-      break;
-    }
-    case AST_EXPR_MATCH: {
-        const AstMatchArm* arm = expr->as.match_expr.arms;
-        int count = 0;
-        Str type_name = infer_expr_type(ctx, expr->as.match_expr.subject);
-        bool is_str = types_match(type_name, str_from_cstr("String"));
-        
-        while (arm) {
-            if (!arm->pattern) {
-                emit_expr(ctx, arm->value, out, PREC_LOWEST, false, false);
-                break;
-            } else {
-                fprintf(out, "(");
-                if (is_str) {
-                    fprintf(out, "rae_ext_rae_str_eq(");
-                    emit_expr(ctx, expr->as.match_expr.subject, out, PREC_LOWEST, false, false);
-                    fprintf(out, ", ");
-                    emit_expr(ctx, arm->pattern, out, PREC_LOWEST, false, false);
-                    fprintf(out, ")");
-                } else {
-                    emit_expr(ctx, expr->as.match_expr.subject, out, PREC_EQUALITY, false, false);
-                    fprintf(out, " == ");
-                    emit_expr(ctx, arm->pattern, out, PREC_EQUALITY, false, false);
-                }
-                fprintf(out, " ? ");
-                emit_expr(ctx, arm->value, out, PREC_TERNARY, false, false);
-                fprintf(out, " : ");
-                count++;
-            }
-            arm = arm->next;
-        }
-        if (!arm) fprintf(out, "0"); // Fallback if no default
-        for (int i = 0; i < count; i++) fprintf(out, ")");
-        break;
-    }
-    case AST_EXPR_INTERP: {
-        fprintf(out, "rae_ext_rae_str_concat(");
-        const AstInterpPart* p = expr->as.interp.parts;
-        if (p) {
-            fprintf(out, "rae_str_any(rae_any_unwrap(");
-            emit_rae_any_expr(ctx, p->value, out);
-            fprintf(out, ")), ");
-            if (p->next) {
-                AstExpr sub = {.kind = AST_EXPR_INTERP, .as.interp.parts = p->next};
-                emit_expr(ctx, &sub, out, PREC_LOWEST, false, false);
-            } else {
-                fprintf(out, "(rae_String){0}");
-            }
-        } else {
-            fprintf(out, "(rae_String){0}, (rae_String){0}");
-        }
-        fprintf(out, ")");
-        break;
-    }
-    case AST_EXPR_METHOD_CALL: {
-        Str method_name = expr->as.method_call.method_name;
-        if (str_eq_cstr(method_name, "toString")) {
-            // Built-in toString() handling
-            fprintf(out, "rae_ext_rae_str_from_cstr(rae_str_any(");
-            emit_rae_any_expr(ctx, expr->as.method_call.object, out);
-            fprintf(out, "))");
-            break;
-        }
-        // Desugar to function call: method(object, args...)
-        AstExpr call = { .kind = AST_EXPR_CALL, .line = expr->line, .column = expr->column };
-        call.as.call.callee = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstExpr));
-        call.as.call.callee->kind = AST_EXPR_IDENT;
-        call.as.call.callee->as.ident = method_name;
-        
-        AstCallArg* first_arg = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstCallArg));
-        first_arg->name = str_from_cstr("this");
-        first_arg->value = expr->as.method_call.object;
-        first_arg->next = expr->as.method_call.args;
-        
-        call.as.call.args = first_arg;
-        call.as.call.generic_args = expr->as.method_call.generic_args;
-        
-        emit_call_expr(ctx, &call, out);
-        break;
-    }
-    case AST_EXPR_LIST: {
-        const AstExprList* item = expr->as.list;
         fprintf(out, "{ ");
-        while (item) {
-            emit_expr(ctx, item->value, out, PREC_LOWEST, false, false);
-            if (item->next) fprintf(out, ", ");
-            item = item->next;
+        for (const AstObjectField* f = expr->as.object_literal.fields; f; f = f->next) {
+            fprintf(out, ".%.*s = ", (int)f->name.len, f->name.data);
+            emit_expr(ctx, f->value, out, PREC_LOWEST, false, false);
+            if (f->next) fprintf(out, ", ");
         }
         fprintf(out, " }");
         break;
     }
-    case AST_EXPR_INDEX: {
-        bool is_ptr = expr->as.index.target->kind == AST_EXPR_IDENT && is_pointer_type(ctx, expr->as.index.target->as.ident);
-        if (is_ptr) {
-            fprintf(out, "(");
-            emit_expr(ctx, expr->as.index.target, out, PREC_CALL, false, false);
-            fprintf(out, ")");
-        } else {
-            emit_expr(ctx, expr->as.index.target, out, PREC_CALL, false, false);
+    case AST_EXPR_LIST: {
+        for (const AstExprList* item = expr->as.list; item; item = item->next) {
+            emit_expr(ctx, item->value, out, PREC_LOWEST, false, false);
+            if (item->next) fprintf(out, ", ");
         }
-        fprintf(out, "[");
-        emit_expr(ctx, expr->as.index.index, out, PREC_LOWEST, false, false);
-        fprintf(out, "]");
+        break;
+    }
+    case AST_EXPR_INTERP: {
+        AstInterpPart* part = expr->as.interp.parts;
+        if (!part) { fprintf(out, "(rae_String){(uint8_t*)\"\", 0}"); break; }
+        // Count parts to determine nesting
+        int count = 0;
+        for (AstInterpPart* p = part; p; p = p->next) count++;
+        if (count == 1) {
+            // Single part - just emit as string
+            if (part->value->kind == AST_EXPR_STRING) {
+                emit_expr(ctx, part->value, out, PREC_LOWEST, false, false);
+            } else {
+                fprintf(out, "rae_ext_rae_str((");
+                emit_expr(ctx, part->value, out, PREC_LOWEST, false, false);
+                fprintf(out, "))");
+            }
+        } else {
+            // Multiple parts - nest rae_ext_rae_str_concat calls
+            // Build: concat(concat(concat(part1, str(part2)), str(part3)), str(part4))
+            int opens = 0;
+            bool first = true;
+            for (AstInterpPart* p = part; p; p = p->next) {
+                if (first) { first = false; continue; }
+                fprintf(out, "rae_ext_rae_str_concat(");
+                opens++;
+            }
+            // Emit first part
+            if (part->value->kind == AST_EXPR_STRING) {
+                emit_expr(ctx, part->value, out, PREC_LOWEST, false, false);
+            } else {
+                fprintf(out, "rae_ext_rae_str((");
+                emit_expr(ctx, part->value, out, PREC_LOWEST, false, false);
+                fprintf(out, "))");
+            }
+            // Emit remaining parts
+            for (AstInterpPart* p = part->next; p; p = p->next) {
+                fprintf(out, ", ");
+                if (p->value->kind == AST_EXPR_STRING) {
+                    emit_expr(ctx, p->value, out, PREC_LOWEST, false, false);
+                } else {
+                    fprintf(out, "rae_ext_rae_str((");
+                    emit_expr(ctx, p->value, out, PREC_LOWEST, false, false);
+                    fprintf(out, "))");
+                }
+                fprintf(out, ")");
+            }
+        }
         break;
     }
     default: break;
@@ -1868,1680 +941,304 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
   return true;
 }
 
-static bool emit_rae_any_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
-    if (!expr) return true;
-    
-    Str type_name = infer_expr_type(ctx, expr);
-    bool is_primitive = is_primitive_type(type_name);
-    
-    const AstTypeRef* tr_full = infer_expr_type_ref(ctx, expr);
-    bool is_ref = tr_full && (tr_full->is_view || tr_full->is_mod);
-    bool is_mod = tr_full && tr_full->is_mod;
-
-    bool is_enum_access = false;
-    if (expr->kind == AST_EXPR_MEMBER && expr->as.member.object->kind == AST_EXPR_IDENT) {
-        if (find_enum_decl(ctx, ctx->module, expr->as.member.object->as.ident)) is_enum_access = true;
-    }
-    
-    // Buffer, List and Any are pointer types in C, don't treat them as Rae references for tagging
-    bool is_pointer_representation = str_eq_cstr(type_name, "List") || str_eq_cstr(type_name, "Buffer") || str_eq_cstr(type_name, "Any");
-    if (is_pointer_representation) {
-        fprintf(out, "rae_any((");
-        emit_expr(ctx, expr, out, PREC_LOWEST, false, true);
-        fprintf(out, "))");
-        return true;
-    }
-
-    if (tr_full && tr_full->is_opt) {
-        if (!is_ref && (is_primitive || str_eq_cstr(type_name, "String"))) {
-            fprintf(out, "rae_any((");
-            emit_expr(ctx, expr, out, PREC_LOWEST, false, true);
-            if (str_eq_cstr(type_name, "Int64") || str_eq_cstr(type_name, "Char")) fprintf(out, ").as.i)");
-            else if (str_eq_cstr(type_name, "Float64")) fprintf(out, ").as.f)");
-            else if (str_eq_cstr(type_name, "Bool")) fprintf(out, ").as.b)");
-            else if (str_eq_cstr(type_name, "String")) fprintf(out, ").as.s)");
-            else fprintf(out, ").as.ptr)");
-            return true;
-        }
-        emit_expr(ctx, expr, out, PREC_LOWEST, false, true);
-        return true;
-    }
-    
-    if (is_primitive || str_eq_cstr(type_name, "String") || is_enum_access || (tr_full && (tr_full->is_id || tr_full->is_key))) {
-        if (is_ref) {
-            const char* rt = "RAE_TYPE_NONE";
-            const char* ct = "int64_t";
-            if (str_eq_cstr(type_name, "Int64") || str_eq_cstr(type_name, "Int") || str_eq_cstr(type_name, "int64_t")) { rt = "RAE_TYPE_INT64"; ct = "int64_t"; }
-            else if (str_eq_cstr(type_name, "Int32") || str_eq_cstr(type_name, "int32_t")) { rt = "RAE_TYPE_INT32"; ct = "int32_t"; }
-            else if (str_eq_cstr(type_name, "UInt64") || str_eq_cstr(type_name, "uint64_t")) { rt = "RAE_TYPE_UINT64"; ct = "uint64_t"; }
-            else if (str_eq_cstr(type_name, "Float64") || str_eq_cstr(type_name, "Float") || str_eq_cstr(type_name, "double")) { rt = "RAE_TYPE_FLOAT64"; ct = "double"; }
-            else if (str_eq_cstr(type_name, "Float32") || str_eq_cstr(type_name, "float")) { rt = "RAE_TYPE_FLOAT32"; ct = "float"; }
-            else if (str_eq_cstr(type_name, "Bool") || str_eq_cstr(type_name, "rae_Bool") || str_eq_cstr(type_name, "int8_t")) { rt = "RAE_TYPE_BOOL"; ct = "rae_Bool"; }
-            else if (str_eq_cstr(type_name, "Char") || str_eq_cstr(type_name, "Char32") || str_eq_cstr(type_name, "uint32_t")) { rt = "RAE_TYPE_CHAR"; ct = "uint32_t"; }
-            else if (str_eq_cstr(type_name, "String") || str_eq_cstr(type_name, "rae_String") || str_eq_cstr(type_name, "const_char_p") || str_eq_cstr(type_name, "const char*")) { rt = "RAE_TYPE_STRING"; ct = "rae_String"; }
-            
-            fprintf(out, "rae_any_%s(", is_mod ? "mod" : "view");
-            emit_expr(ctx, expr, out, PREC_LOWEST, false, true);
-            fprintf(out, ".ptr, %s)", rt);
-        } else {
-            if (str_eq_cstr(type_name, "Char") || str_eq_cstr(type_name, "Char32")) fprintf(out, "rae_any_char((");
-            else if (str_eq_cstr(type_name, "Bool")) fprintf(out, "rae_any_bool((");
-            else fprintf(out, "rae_any((");
-            emit_expr(ctx, expr, out, PREC_LOWEST, false, true);
-            fprintf(out, "))");
-        }
-        return true;
-    }
-
-    bool is_ptr_var = (expr->kind == AST_EXPR_IDENT && is_pointer_type(ctx, expr->as.ident));
-    bool is_lvalue = (expr->kind == AST_EXPR_IDENT || expr->kind == AST_EXPR_MEMBER || expr->kind == AST_EXPR_INDEX) && !is_enum_access && !is_ptr_var;
-
-    if (is_ptr_var) {
-        // Already a pointer representation
-        fprintf(out, "rae_any((");
-        emit_expr(ctx, expr, out, PREC_LOWEST, false, true);
-        fprintf(out, "))");
-        return true;
-    }
-
-    if (is_lvalue) {
-        if (is_mod) fprintf(out, "rae_any_mod(");
-        else if (is_ref) fprintf(out, "rae_any_view(");
-        fprintf(out, "rae_any((&(");
-        emit_expr(ctx, expr, out, PREC_LOWEST, false, true);
-        fprintf(out, ")))");
-        if (is_ref) fprintf(out, ", RAE_TYPE_BUFFER)");
-        return true;
-    }
-
-    // Rvalue, lift to temp
-    if (is_ref && is_primitive) {
-        const char* rt = "RAE_TYPE_NONE";
-        const char* ct = "int64_t";
-        if (str_eq_cstr(type_name, "Int64") || str_eq_cstr(type_name, "Int") || str_eq_cstr(type_name, "int64_t")) { rt = "RAE_TYPE_INT64"; ct = "int64_t"; }
-        else if (str_eq_cstr(type_name, "Int32") || str_eq_cstr(type_name, "int32_t")) { rt = "RAE_TYPE_INT32"; ct = "int32_t"; }
-        else if (str_eq_cstr(type_name, "UInt64") || str_eq_cstr(type_name, "uint64_t")) { rt = "RAE_TYPE_UINT64"; ct = "uint64_t"; }
-        else if (str_eq_cstr(type_name, "Float64") || str_eq_cstr(type_name, "Float") || str_eq_cstr(type_name, "double")) { rt = "RAE_TYPE_FLOAT64"; ct = "double"; }
-        else if (str_eq_cstr(type_name, "Float32") || str_eq_cstr(type_name, "float")) { rt = "RAE_TYPE_FLOAT32"; ct = "float"; }
-        else if (str_eq_cstr(type_name, "Bool") || str_eq_cstr(type_name, "rae_Bool") || str_eq_cstr(type_name, "int8_t")) { rt = "RAE_TYPE_BOOL"; ct = "rae_Bool"; }
-        else if (str_eq_cstr(type_name, "Char") || str_eq_cstr(type_name, "Char32") || str_eq_cstr(type_name, "uint32_t")) { rt = "RAE_TYPE_CHAR"; ct = "uint32_t"; }
-        else if (str_eq_cstr(type_name, "String") || str_eq_cstr(type_name, "rae_String") || str_eq_cstr(type_name, "const_char_p") || str_eq_cstr(type_name, "const char*")) {
-            // String is a struct rvalue, don't lift to temp with {X}
-            fprintf(out, "rae_any(");
-            emit_expr(ctx, expr, out, PREC_LOWEST, false, true);
-            fprintf(out, ")");
-            return true;
-        }
-
-        fprintf(out, "rae_any_%s(", is_mod ? "mod" : "view");
-        fprintf(out, "LIFT_TO_TEMP_STRUCT(");
-        emit_type_ref_as_c_type(ctx, tr_full, out, false);
-        fprintf(out, ", .ptr = LIFT_TO_TEMP(%s, ", ct);
-        emit_expr(ctx, expr, out, PREC_LOWEST, false, true);
-        fprintf(out, "))).ptr, %s)", rt);
-    } else {
-        if (is_mod) fprintf(out, "rae_any_mod(");
-        else if (is_ref) fprintf(out, "rae_any_view(");
-        
-        if (!is_ref && !is_mod && (str_eq_cstr(type_name, "String") || str_eq_cstr(type_name, "rae_String"))) {
-             fprintf(out, "rae_any((");
-             emit_expr(ctx, expr, out, PREC_LOWEST, false, true);
-             fprintf(out, "))");
-             return true;
-        }
-
-        if (is_ref) {
-            fprintf(out, "rae_any((");
-            emit_expr(ctx, expr, out, PREC_LOWEST, false, true);
-            fprintf(out, ".ptr))");
-        } else {
-            fprintf(out, "rae_any_ptr(&(LIFT_VALUE(");
-            const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr_full);
-            fprintf(out, "%s, ", mangled);
-            emit_expr(ctx, expr, out, PREC_LOWEST, false, true);
-            fprintf(out, ")))");
-        }
-        
-        if (is_ref) fprintf(out, ", RAE_TYPE_BUFFER)");
-    }
-
-    return true;
-}
-static bool emit_log_any_call(CFuncContext* ctx, const AstExpr* expr, FILE* out, bool stream) {
-    const AstTypeRef* tr = infer_expr_type_ref(ctx, expr);
-    Str type_name = get_base_type_name(tr);
-    bool is_primitive = is_primitive_type(type_name);
-    bool is_raylib = ctx->uses_raylib && is_raylib_builtin_type(type_name);
-    bool is_id_key = tr && (tr->is_id || tr->is_key);
-    
-    if (is_primitive || is_raylib || is_id_key || str_eq_cstr(type_name, "String") || str_eq_cstr(type_name, "Any") || type_name.len == 0 || (tr && tr->is_opt)) {
-        fprintf(out, "%s(", stream ? "rae_ext_rae_log_stream_any" : "rae_ext_rae_log_any");
-        emit_rae_any_expr(ctx, expr, out);
-        fprintf(out, ")");
-    } else {
-        // Use specialized logger
-        const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
-        if (stream) {
-            fprintf(out, "rae_log_stream_%s_(", mangled);
-            emit_expr(ctx, expr, out, PREC_LOWEST, false, false);
-        } else {
-            fprintf(out, "rae_log_%s_(", mangled);
-            emit_expr(ctx, expr, out, PREC_LOWEST, false, false);
-        }
-        fprintf(out, ")");
-    }
-    return true;
-}
-
 static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
-    const AstExpr* callee = expr->as.call.callee;
-    if (callee->kind != AST_EXPR_IDENT) return false;
-    
-    const AstFuncDecl* d = NULL;
+    if (expr->decl_link && expr->decl_link->kind == AST_DECL_FUNC) {
+        const AstFuncDecl* fd = &expr->decl_link->as.func_decl;
+        Str name = fd->name;
+        if (str_eq_cstr(name, "sizeof")) {
+            fprintf(out, "sizeof(");
+            if (expr->as.call.generic_args) {
+                AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, expr->as.call.generic_args);
+                emit_type_ref_as_c_type(ctx, sub, out, false);
+            } else {
+                fprintf(out, "void");
+            }
+            fprintf(out, ")");
+            return true;
+        }
+        fprintf(out, "%s(", rae_mangle_function(ctx->compiler_ctx, fd));
+        const AstCallArg* a = expr->as.call.args;
+        const AstParam* p = fd->params;
+        while (a) {
+            bool needs_addr = false;
+            if (p && (p->type->is_view || p->type->is_mod)) {
+                const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, a->value);
+                if (arg_tr && !arg_tr->is_view && !arg_tr->is_mod) {
+                    Str base = get_base_type_name(p->type);
+                    if (!is_primitive_type(base)) needs_addr = true;
+                }
+            }
+            
+            // Auto-box if param is Any and arg is not already boxed
+            bool needs_box = false;
+            if (p && p->type && a->value->kind != AST_EXPR_BOX) {
+                Str param_base = get_base_type_name(p->type);
+                if (str_eq_cstr(param_base, "Any")) needs_box = true;
+            }
 
-    // Special handling for buffer primitives to support monomorphisation
-    if (str_eq_cstr(callee->as.ident, "rae_ext_rae_buf_set") || str_eq_cstr(callee->as.ident, "__buf_set")) {
-        const AstCallArg* buf = expr->as.call.args;
-        const AstCallArg* idx = buf->next;
-        const AstCallArg* val = idx->next;
-        
-        const AstTypeRef* tr = infer_expr_type_ref(ctx, buf->value);
-        AstTypeRef elem_tr = {0};
-        bool has_elem = false;
-        if (tr && tr->generic_args) { elem_tr = *tr->generic_args; has_elem = true; }
+            if (needs_addr) fprintf(out, "&");
+            if (needs_box) fprintf(out, "rae_any((");
+            emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
+            if (needs_box) fprintf(out, "))");
 
-        emit_expr(ctx, buf->value, out, PREC_CALL, false, false);
-        fprintf(out, "[");
-        emit_expr(ctx, idx->value, out, PREC_LOWEST, false, false);
-        fprintf(out, "] = ");
-        
-        AstTypeRef old_expected = ctx->expected_type;
-        bool old_has = ctx->has_expected_type;
-        if (has_elem) { ctx->expected_type = elem_tr; ctx->has_expected_type = true; }
-        else ctx->has_expected_type = false;
-
-        emit_expr(ctx, val->value, out, PREC_LOWEST, false, false);
-        
-        ctx->expected_type = old_expected;
-        ctx->has_expected_type = old_has;
-        return true;
+            if (a->next) fprintf(out, ", ");
+            a = a->next; if (p) p = p->next;
+        }
+        fprintf(out, ")"); return true;
     }
-    if (str_eq_cstr(callee->as.ident, "rae_ext_rae_buf_get") || str_eq_cstr(callee->as.ident, "__buf_get")) {
-        const AstCallArg* buf = expr->as.call.args;
-        const AstCallArg* idx = buf->next;
-        emit_expr(ctx, buf->value, out, PREC_CALL, false, false);
-        fprintf(out, "[");
-        emit_expr(ctx, idx->value, out, PREC_LOWEST, false, false);
-        fprintf(out, "]");
-        return true;
-    }
-    if (str_eq_cstr(callee->as.ident, "rae_ext_rae_buf_alloc") || str_eq_cstr(callee->as.ident, "__buf_alloc")) {
-        fprintf(out, "(void*)rae_ext_rae_buf_alloc(");
+    // Fallback: look up function by name when decl_link is missing
+    if (expr->as.call.callee && expr->as.call.callee->kind == AST_EXPR_IDENT) {
+        Str callee_name = expr->as.call.callee->as.ident;
+        // Search for the function declaration by name
+        const AstFuncDecl* found_fd = NULL;
+        for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
+            const AstDecl* d = ctx->compiler_ctx->all_decls[i];
+            if (d->kind == AST_DECL_FUNC && str_eq(d->as.func_decl.name, callee_name)) {
+                found_fd = &d->as.func_decl;
+                break;
+            }
+        }
+        if (found_fd) {
+            fprintf(out, "%s(", rae_mangle_function(ctx->compiler_ctx, found_fd));
+            const AstCallArg* a = expr->as.call.args;
+            const AstParam* p = found_fd->params;
+            while (a) {
+                bool needs_box = false;
+                if (p && p->type && a->value->kind != AST_EXPR_BOX) {
+                    Str param_base = get_base_type_name(p->type);
+                    if (str_eq_cstr(param_base, "Any")) needs_box = true;
+                }
+                if (needs_box) fprintf(out, "rae_any((");
+                emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
+                if (needs_box) fprintf(out, "))");
+                if (a->next) fprintf(out, ", ");
+                a = a->next; if (p) p = p->next;
+            }
+            fprintf(out, ")");
+            return true;
+        }
+        // Last resort: emit as rae_<name>
+        fprintf(out, "rae_%.*s(", (int)callee_name.len, callee_name.data);
         const AstCallArg* a = expr->as.call.args;
         while (a) {
             emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
             if (a->next) fprintf(out, ", ");
             a = a->next;
         }
-        // Buffer allocation needs element size if not provided
-        uint16_t arg_count = 0; for (const AstCallArg* ca = expr->as.call.args; ca; ca = ca->next) arg_count++;
-        if (arg_count == 1) {
-            fprintf(out, ", sizeof(");
-            if (expr->as.call.generic_args) {
-                AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, expr->as.call.generic_args);
-                emit_type_ref_as_c_type(ctx, sub, out, false);
-            } else {
-                fprintf(out, "int64_t");
-            }
-            fprintf(out, ")");
-        }
         fprintf(out, ")");
         return true;
     }
-    if (str_eq_cstr(callee->as.ident, "rae_ext_rae_buf_free") || str_eq_cstr(callee->as.ident, "__buf_free")) {
-        fprintf(out, "rae_ext_rae_buf_free((void*)(");
-        if (expr->as.call.args) emit_expr(ctx, expr->as.call.args->value, out, PREC_LOWEST, false, false);
-        fprintf(out, "))");
-        return true;
-    }
-    if (str_eq_cstr(callee->as.ident, "rae_ext_rae_buf_copy") || str_eq_cstr(callee->as.ident, "__buf_copy")) {
-        fprintf(out, "rae_ext_rae_buf_copy(");
-        const AstCallArg* a = expr->as.call.args;
-        int count = 0;
-        while (a) {
-            if (count == 0 || count == 2) fprintf(out, "(void*)(");
-            emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
-            if (count == 0 || count == 2) fprintf(out, ")");
-            if (a->next) fprintf(out, ", ");
-            a = a->next;
-            count++;
-        }
-        if (count == 5) {
-            fprintf(out, ", sizeof(");
-            if (expr->as.call.generic_args) {
-                AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, expr->as.call.generic_args);
-                emit_type_ref_as_c_type(ctx, sub, out, false);
-            } else {
-                fprintf(out, "int64_t");
-            }
-            fprintf(out, ")");
-        }
-        fprintf(out, ")");
-        return true;
-    }
-    if (str_eq_cstr(callee->as.ident, "sizeof")) {
-        fprintf(out, "sizeof(");
-        const AstTypeRef* type_to_emit = NULL;
-        if (expr->as.call.generic_args) {
-            type_to_emit = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, expr->as.call.generic_args);
-        } else if (expr->as.call.args) {
-            const AstExpr* arg_expr = expr->as.call.args->value;
-            if (arg_expr->kind == AST_EXPR_IDENT) {
-                // Check if it's a generic parameter
-                Str ident = arg_expr->as.ident;
-                if (ctx->generic_params) {
-                    const AstIdentifierPart* gp = ctx->generic_params;
-                    const AstTypeRef* arg = ctx->generic_args;
-                    while (gp && arg) {
-                        if (str_eq(gp->text, ident)) { type_to_emit = arg; break; }
-                        gp = gp->next; arg = arg->next;
-                    }
-                }
-                if (!type_to_emit) {
-                    // Fallback to identifier as type name
-                    const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = ident}});
-                    fprintf(out, "%s", mangled);
-                    fprintf(out, ")");
-                    return true;
-                }
-            } else if (arg_expr->kind == AST_EXPR_CALL) {
-                // sizeof(SomeType(V))
-                const AstExpr* callee = arg_expr->as.call.callee;
-                if (callee->kind == AST_EXPR_IDENT) {
-                    const AstTypeRef* ga = arg_expr->as.call.generic_args;
-                    if (!ga && arg_expr->as.call.args) {
-                        // Fallback: treat first regular argument as generic if it looks like a type
-                        const AstExpr* first_arg = arg_expr->as.call.args->value;
-                        if (first_arg->kind == AST_EXPR_IDENT) {
-                            ga = &(AstTypeRef){.parts = &(AstIdentifierPart){.text = first_arg->as.ident}};
-                        }
-                    }
-                    type_to_emit = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = callee->as.ident}, .generic_args = (AstTypeRef*)ga});
-                } else {
-                    type_to_emit = infer_expr_type_ref(ctx, arg_expr);
-                }
-            }
-        }
-        
-        if (type_to_emit) {
-            emit_type_ref_as_c_type(ctx, type_to_emit, out, false);
-        } else {
-            fprintf(out, "int64_t"); // Default
-        }
-        fprintf(out, ")");
-        return true;
-    }
-    if (str_eq_cstr(callee->as.ident, "__buf_alloc")) {
-        fprintf(out, "rae_ext_rae_buf_alloc(");
-        const AstCallArg* a = expr->as.call.args;
-        emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
-        fprintf(out, ", sizeof(");
-        const AstTypeRef* tr = infer_expr_type_ref(ctx, expr);
-        if (tr && tr->generic_args) {
-            AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr->generic_args);
-            emit_type_ref_as_c_type(ctx, sub, out, false);
-        } else if (expr->as.call.generic_args) {
-            AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, expr->as.call.generic_args);
-            emit_type_ref_as_c_type(ctx, sub, out, false);
-        } else {
-            fprintf(out, "int64_t");
-        }
-        fprintf(out, "))");
-        return true;
-    }
-    if (str_eq_cstr(callee->as.ident, "__buf_free")) {
-        fprintf(out, "rae_ext_rae_buf_free(");
-        emit_expr(ctx, expr->as.call.args->value, out, PREC_LOWEST, false, false);
-        fprintf(out, ")");
-        return true;
-    }
-    if (str_eq_cstr(callee->as.ident, "__buf_copy")) {
-        fprintf(out, "rae_ext_rae_buf_copy(");
-        const AstCallArg* src = expr->as.call.args;
-        const AstCallArg* src_off = src->next;
-        const AstCallArg* dst = src_off->next;
-        const AstCallArg* dst_off = dst->next;
-        const AstCallArg* len = dst_off->next;
-        emit_expr(ctx, src->value, out, PREC_LOWEST, false, false); fprintf(out, ", ");
-        emit_expr(ctx, src_off->value, out, PREC_LOWEST, false, false); fprintf(out, ", ");
-        emit_expr(ctx, dst->value, out, PREC_LOWEST, false, false); fprintf(out, ", ");
-        emit_expr(ctx, dst_off->value, out, PREC_LOWEST, false, false); fprintf(out, ", ");
-        emit_expr(ctx, len->value, out, PREC_LOWEST, false, false);
-        fprintf(out, ", 8)"); // Default element size for now
-        return true;
-    }
-
-        if (str_eq_cstr(callee->as.ident, "log")) {
-
-            const AstCallArg* a = expr->as.call.args;
-
-            if (a && a->value->kind == AST_EXPR_INTERP) {
-
-                const AstInterpPart* p = a->value->as.interp.parts;
-
-                while (p) {
-
-                    emit_log_any_call(ctx, p->value, out, true);
-
-                    fprintf(out, ", ");
-
-                    p = p->next;
-
-                }
-
-                fprintf(out, "rae_ext_rae_log_cstr(\"\")"); 
-
-                return true;
-
-            }
-
-                
-
-            if (a) {
-
-                emit_log_any_call(ctx, a->value, out, false);
-
-                return true;
-
-            }
-
-            fprintf(out, "rae_ext_rae_log_cstr(\"\")");
-
-            return true;
-
-        } else if (str_eq_cstr(callee->as.ident, "log_stream") || str_eq_cstr(callee->as.ident, "logS")) {
-
-            const AstCallArg* a = expr->as.call.args;
-
-            if (a) {
-
-                emit_log_any_call(ctx, a->value, out, true);
-
-                return true;
-
-            }
-
-            return true;
-
-        }
-
-    
-
-        // Check if it's already an external function call (starts with rae_ext_)
-
-        if (str_starts_with_cstr(callee->as.ident, "rae_ext_")) {
-
-            fprintf(out, "%.*s(", (int)callee->as.ident.len, callee->as.ident.data);
-
-        } else {
-
-            // Find the actual function declaration to mangle correctly
-
-            uint16_t param_count = 0;
-
-            for (const AstCallArg* a = expr->as.call.args; a; a = a->next) param_count++;
-
-            
-
-            Str receiver_type_name = {0};
-
-            if (expr->as.call.args) receiver_type_name = infer_expr_type(ctx, expr->as.call.args->value);
-
-            
-
-                        d = find_function_overload(ctx->module, ctx, callee->as.ident, &receiver_type_name, param_count, false, expr);
-
-            
-
-                        if (!d) d = find_function_overload(ctx->module, ctx, callee->as.ident, &receiver_type_name, param_count, true, expr);
-
-            
-
-                        if (!d) d = find_function_overload(ctx->module, ctx, callee->as.ident, NULL, param_count, false, expr);
-
-            
-
-                        if (!d) d = find_function_overload(ctx->module, ctx, callee->as.ident, NULL, param_count, true, expr);
-
-            
-
-                if (d) {
-                    if (d->generic_params && !expr->as.call.generic_args && !ctx->generic_args) {
-                         // Missing generic args for generic function
-                    }
-                    
-                    AstTypeRef* inferred_args = NULL;
-                    if (d->generic_params && expr->as.call.generic_args) {
-
-                    // We MUST substitute any generic parameters in the call's generic args
-
-                    // using the current function's specialization context.
-
-                    AstTypeRef* concrete_args = NULL;
-
-                    AstTypeRef* last_arg = NULL;
-
-                    for (const AstTypeRef* arg = expr->as.call.generic_args; arg; arg = arg->next) {
-
-                        AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, arg);
-
-                        if (!concrete_args) concrete_args = sub;
-
-                        else last_arg->next = sub;
-
-                        last_arg = sub;
-
-                    }
-
-                    inferred_args = concrete_args;
-
-                } else if (d->generic_params) {
-                    // Try inferring from receiver
-                    if (!inferred_args && d->params && str_eq_cstr(d->params->name, "this")) {
-                        const AstCallArg* first_arg = expr->as.call.args;
-                        if (first_arg) {
-                            const AstTypeRef* receiver_type = infer_expr_type_ref(ctx, first_arg->value);
-                            AstTypeRef* inferred = infer_generic_args(ctx->compiler_ctx, d, d->params->type, receiver_type);
-                            if (inferred) {
-                                // We MUST substitute any generic parameters in the inferred args
-                                inferred_args = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, inferred);
-                            }
-                        }
-                    }
-
-                    // Try inferring from expected return type (e.g. let m: Map(Int) = createMap(4))
-                    if (!inferred_args && ctx->has_expected_type && d->returns && d->returns->type) {
-                        inferred_args = infer_generic_args(ctx->compiler_ctx, d, d->returns->type, &ctx->expected_type);
-                    }
-
-                    if (!inferred_args && ctx->generic_args) {
-                        // Implicit specialization: use current function's generic args if the callee is generic
-                        inferred_args = (AstTypeRef*)ctx->generic_args;
-                    }
-
-                }
-
-                
-
-                if (inferred_args) {
-                    // Ensure all generic parameters in inferred args are substituted using calling context
-                    AstTypeRef* concrete = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, inferred_args);
-                    register_function_specialization(ctx->compiler_ctx, d, concrete);
-                    fprintf(out, "%s(", rae_mangle_specialized_function(ctx->compiler_ctx, d, concrete));
-                } else {
-                    fprintf(out, "%s(", rae_mangle_function(ctx->compiler_ctx, d));
-                }
-
-            } else {
-
-                // Fallback for cases where decl is not found (e.g. some built-ins or log)
-
-                const char* ray_mapping = find_raylib_mapping(callee->as.ident);
-
-                if (ray_mapping) {
-
-                    fprintf(out, "rae_ext_%.*s(", (int)callee->as.ident.len, callee->as.ident.data);
-
-                } else if (str_starts_with_cstr(callee->as.ident, "create") && expr->as.call.generic_args) {
-                    AstTypeRef* concrete = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, expr->as.call.generic_args);
-                    const char* m = rae_mangle_type_ext(ctx->compiler_ctx, NULL, concrete, true);
-                    if (strncmp(m, "rae_", 4) == 0) fprintf(out, "rae_create%s_", m + 4);
-                    else fprintf(out, "rae_create%s_", m);
-                    
-                    // Fallback must also mangle parameter types to match specialized decl
-                    const AstCallArg* a = expr->as.call.args;
-                    while (a) {
-                        Str arg_type = infer_expr_type(ctx, a->value);
-                        const char* mt = rae_mangle_type_ext(ctx->compiler_ctx, NULL, substitute_type_ref(ctx->compiler_ctx, NULL, NULL, infer_expr_type_ref(ctx, a->value)), true);
-                        if (strncmp(mt, "rae_", 4) == 0) fprintf(out, "%s_", mt + 4);
-                        else fprintf(out, "%s_", mt);
-                        a = a->next;
-                    }
-                    fprintf(out, "(");
-                    
-                    a = expr->as.call.args;
-                    while (a) {
-                        emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
-                        if (a->next) fprintf(out, ", ");
-                        a = a->next;
-                    }
-                    fprintf(out, ")");
-                    return true;
-                } else {
-
-                    fprintf(out, "rae_%.*s_(", (int)callee->as.ident.len, callee->as.ident.data);
-
-                }
-
-            }
-
-        }
-
-    
-    
-    const AstParam* p = d ? d->params : NULL;
-    for (const AstCallArg* a = expr->as.call.args; a; a = a->next) {
-        bool needs_ref = false;
-        bool is_rvalue = true;
-        
-        const AstTypeRef* p_type = p ? p->type : NULL;
-        if (p && d && d->generic_params) {
-            p_type = substitute_type_ref(ctx->compiler_ctx, d->generic_params, ctx->generic_args, p->type);
-        }
-
-        const AstTypeRef* source_tr = infer_expr_type_ref(ctx, a->value);
-        bool source_is_ref = source_tr && (source_tr->is_view || source_tr->is_mod);
-        bool source_is_buffer = source_tr && str_eq_cstr(get_base_type_name(source_tr), "Buffer");
-        
-        // ... (check call/method return refs) ...
-        if (!source_is_ref && a->value->kind == AST_EXPR_CALL) {
-            const AstExpr* c = a->value->as.call.callee;
-            if (c->kind == AST_EXPR_IDENT) {
-                uint16_t pc = 0; for (const AstCallArg* ca = a->value->as.call.args; ca; ca = ca->next) pc++;
-                const AstFuncDecl* fd = find_function_overload(ctx->module, ctx, c->as.ident, NULL, pc, false, a->value);
-                if (!fd) fd = find_function_overload(ctx->module, ctx, c->as.ident, NULL, pc, true, a->value);
-                if (fd && fd->returns && (fd->returns->type->is_view || fd->returns->type->is_mod)) source_is_ref = true;
-            } else if (c->kind == AST_EXPR_MEMBER) {
-                Str m = c->as.member.member; Str on = infer_expr_type(ctx, c->as.member.object);
-                uint16_t pc = 1; for (const AstCallArg* ca = a->value->as.call.args; ca; ca = ca->next) pc++;
-                const AstFuncDecl* fd = find_function_overload(ctx->module, ctx, m, &on, pc, true, a->value);
-                if (fd && fd->returns && (fd->returns->type->is_view || fd->returns->type->is_mod)) source_is_ref = true;
-            }
-        } else if (!source_is_ref && a->value->kind == AST_EXPR_METHOD_CALL) {
-            Str m = a->value->as.method_call.method_name; Str on = infer_expr_type(ctx, a->value->as.method_call.object);
-            uint16_t pc = 1; for (const AstCallArg* ca = a->value->as.method_call.args; ca; ca = ca->next) pc++;
-            const AstFuncDecl* fd = find_function_overload(ctx->module, ctx, m, &on, pc, true, a->value);
-            if (fd && fd->returns && (fd->returns->type->is_view || fd->returns->type->is_mod)) source_is_ref = true;
-        }
-
-        bool is_param_ref = p_type && (p_type->is_view || p_type->is_mod);
-        bool is_buffer_param = p_type && str_eq_cstr(get_base_type_name(p_type), "Buffer");
-        bool is_param_raw_ptr = is_buffer_param || source_is_buffer;
-        if (d && d->is_extern) {
-             if (str_eq_cstr(d->name, "rae_ext_rae_str_from_cstr")) is_param_raw_ptr = true;
-             // other externs likely take raw pointers too if they take mod/view
-             else if (is_param_ref && !is_primitive_ref(ctx, p_type)) is_param_raw_ptr = true;
-        }
-
-        if (is_param_ref && !source_is_ref && !is_buffer_param) {
-            bool is_ptr_var = (a->value->kind == AST_EXPR_IDENT && is_pointer_type(ctx, a->value->as.ident)) || 
-                             (source_tr && str_eq_cstr(get_base_type_name(source_tr), "Buffer"));
-            if (is_ptr_var) {
-                needs_ref = false; is_rvalue = false;
-            } else if (a->value->kind == AST_EXPR_IDENT || a->value->kind == AST_EXPR_MEMBER || a->value->kind == AST_EXPR_INDEX) {
-                needs_ref = true; is_rvalue = false;
-            } else {
-                needs_ref = true; is_rvalue = true;
-            }
-        }
-        
-        if (needs_ref && !is_param_raw_ptr) {
-            bool is_prim_ref_param = is_primitive_ref(ctx, p_type);
-            if (is_rvalue) {
-                bool val_is_struct_literal = (a->value->kind == AST_EXPR_OBJECT || a->value->kind == AST_EXPR_STRING || a->value->kind == AST_EXPR_COLLECTION_LITERAL);
-                if (is_prim_ref_param) {
-                    fprintf(out, "LIFT_TO_TEMP_STRUCT(");
-                    emit_type_ref_as_c_type(ctx, p_type, out, false);
-                    fprintf(out, ", .ptr = ");
-                    if (val_is_struct_literal) fprintf(out, "&(");
-                    else {
-                        fprintf(out, "LIFT_TO_TEMP(");
-                        emit_type_ref_as_c_type(ctx, p_type, out, true);
-                        fprintf(out, ", ");
-                    }
-                } else {
-                    if (val_is_struct_literal) fprintf(out, "&(");
-                    else {
-                        fprintf(out, "LIFT_TO_TEMP(");
-                        emit_type_ref_as_c_type(ctx, p_type, out, true);
-                        fprintf(out, ", ");
-                    }
-                }
-                emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
-                if (is_prim_ref_param) {
-                    fprintf(out, "))");
-                } else {
-                    fprintf(out, ")");
-                }
-            } else {
-                if (is_prim_ref_param) {
-                    fprintf(out, "LIFT_TO_TEMP_STRUCT(");
-                    emit_type_ref_as_c_type(ctx, p_type, out, false);
-                    fprintf(out, ", .ptr = &(");
-                } else {
-                    fprintf(out, "&(");
-                }
-                emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
-                if (is_prim_ref_param) fprintf(out, "))");
-                else fprintf(out, ")");
-            }
-        } else {
-            bool suppress_indirection = is_param_raw_ptr || (source_is_ref && is_param_ref && !is_primitive_ref(ctx, p_type));
-            if (source_is_buffer && is_param_raw_ptr) suppress_indirection = true;
-            emit_expr(ctx, a->value, out, PREC_LOWEST, false, suppress_indirection);
-        }
-        
-        if (a->next) fprintf(out, ", ");
-        if (p) p = p->next;
-    }
-    fprintf(out, ")");
-    return true;
-}
-
-static bool emit_call(CFuncContext* ctx, const AstExpr* expr, FILE* out) { fprintf(out, "  "); emit_expr(ctx, expr, out, PREC_LOWEST, false, false); fprintf(out, ";\n"); return true; }
-
-static bool emit_block(CFuncContext* ctx, const AstBlock* block, FILE* out) {
-    if (!block) return true;
-    fprintf(out, "  {\n"); int old = (int)ctx->local_count; ctx->scope_depth++;
-    for (const AstStmt* s = block->first; s; s = s->next) emit_stmt(ctx, s, out);
-    emit_defers(ctx, ctx->scope_depth, out); pop_defers(ctx, ctx->scope_depth);
-    ctx->scope_depth--; ctx->local_count = old; fprintf(out, "  }\n");
-    return true;
+    return false;
 }
 
 static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     if (!stmt) return true;
     switch (stmt->kind) {
+        case AST_STMT_EXPR: emit_expr(ctx, stmt->as.expr_stmt, out, PREC_LOWEST, false, false); fprintf(out, ";\n"); break;
         case AST_STMT_LET: {
             fprintf(out, "  ");
-            bool is_ref = stmt->as.let_stmt.type && (stmt->as.let_stmt.type->is_view || stmt->as.let_stmt.type->is_mod);
-            if (stmt->as.let_stmt.type) emit_type_ref_as_c_type(ctx, stmt->as.let_stmt.type, out, false);
-            else fprintf(out, "int64_t");
+            emit_type_ref_as_c_type(ctx, stmt->as.let_stmt.type, out, false);
             fprintf(out, " %.*s = ", (int)stmt->as.let_stmt.name.len, stmt->as.let_stmt.name.data);
-            
-            bool source_is_ptr = false;
-            const AstTypeRef* source_tr = NULL;
-            if (stmt->as.let_stmt.value) {
-                source_tr = infer_expr_type_ref(ctx, stmt->as.let_stmt.value);
-                if (source_tr && (source_tr->is_view || source_tr->is_mod)) source_is_ptr = true;
-                
-                // Check if it's a function call that returns a reference
-                if (!source_is_ptr && stmt->as.let_stmt.value->kind == AST_EXPR_CALL) {
-                    const AstExpr* callee = stmt->as.let_stmt.value->as.call.callee;
-                    if (callee->kind == AST_EXPR_IDENT) {
-                        uint16_t param_count = 0;
-                        for (const AstCallArg* a = stmt->as.let_stmt.value->as.call.args; a; a = a->next) param_count++;
-                        const AstFuncDecl* fd = find_function_overload(ctx->module, ctx, callee->as.ident, NULL, param_count, false, stmt->as.let_stmt.value);
-                        if (!fd) fd = find_function_overload(ctx->module, ctx, callee->as.ident, NULL, param_count, true, stmt->as.let_stmt.value);
-                        if (fd && fd->returns && (fd->returns->type->is_view || fd->returns->type->is_mod)) source_is_ptr = true;
-                    } else if (callee->kind == AST_EXPR_MEMBER) {
-                        Str member = callee->as.member.member;
-                        Str obj_name = infer_expr_type(ctx, callee->as.member.object);
-                        uint16_t param_count = 1;
-                        for (const AstCallArg* a = stmt->as.let_stmt.value->as.call.args; a; a = a->next) param_count++;
-                        const AstFuncDecl* fd = find_function_overload(ctx->module, ctx, member, &obj_name, param_count, true, stmt->as.let_stmt.value);
-                        if (fd && fd->returns && (fd->returns->type->is_view || fd->returns->type->is_mod)) source_is_ptr = true;
-                    }
-                } else if (!source_is_ptr && stmt->as.let_stmt.value->kind == AST_EXPR_METHOD_CALL) {
-                    Str method_name = stmt->as.let_stmt.value->as.method_call.method_name;
-                    Str obj_name = infer_expr_type(ctx, stmt->as.let_stmt.value->as.method_call.object);
-                    uint16_t param_count = 1;
-                    for (const AstCallArg* a = stmt->as.let_stmt.value->as.method_call.args; a; a = a->next) param_count++;
-                    const AstFuncDecl* fd = find_function_overload(ctx->module, ctx, method_name, &obj_name, param_count, true, stmt->as.let_stmt.value);
-                    if (fd && fd->returns && (fd->returns->type->is_view || fd->returns->type->is_mod)) source_is_ptr = true;
-                }
-            }
-            
-            bool needs_lift = is_primitive_ref(ctx, stmt->as.let_stmt.type) && !source_is_ptr;
-
-            if (needs_lift) {
-                fprintf(out, "LIFT_VALUE(");
-                emit_type_ref_as_c_type(ctx, stmt->as.let_stmt.type, out, false);
-                fprintf(out, ", .ptr = &(");
-            } else if (is_ref && !source_is_ptr) {
-                fprintf(out, "&(");
-            }
-            if (is_ref && source_is_ptr) {
-                // No cast needed for structs
-            }
-            if (stmt->as.let_stmt.value) {
-                bool needs_unwrap = false;
-                if (source_tr && source_tr->is_opt && stmt->as.let_stmt.type && !stmt->as.let_stmt.type->is_opt && !is_ref) {
-                    needs_unwrap = true;
-                }
-
-                if (stmt->as.let_stmt.type) { ctx->expected_type = *stmt->as.let_stmt.type; ctx->has_expected_type = true; }
-                else ctx->has_expected_type = false;
-                
-                if (needs_unwrap) {
-                    Str base = get_base_type_name(stmt->as.let_stmt.type);
-                    fprintf(out, "(");
-                    emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, false, false);
-                    if (str_eq_cstr(base, "Int64") || str_eq_cstr(base, "Int") || str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32")) fprintf(out, ").as.i");
-                    else if (str_eq_cstr(base, "Float64") || str_eq_cstr(base, "Float")) fprintf(out, ").as.f");
-                    else if (str_eq_cstr(base, "Bool")) fprintf(out, ").as.b");
-                    else if (str_eq_cstr(base, "String")) fprintf(out, ").as.s");
-                    else fprintf(out, ").as.ptr");
+            bool is_ref_bind = stmt->as.let_stmt.is_bind && stmt->as.let_stmt.type &&
+                               (stmt->as.let_stmt.type->is_view || stmt->as.let_stmt.type->is_mod);
+            if (is_ref_bind) {
+                Str base = get_base_type_name(stmt->as.let_stmt.type);
+                if (is_primitive_type(base)) {
+                    // Primitive ref: rae_Mod_Int64 r = { .ptr = &x };
+                    fprintf(out, "{ .ptr = &");
+                    emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, true, true);
+                    fprintf(out, " }");
                 } else {
-                    emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, false, false); 
+                    fprintf(out, "&");
+                    emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, false, true);
                 }
-                ctx->has_expected_type = false;
+            } else if (stmt->as.let_stmt.value) {
+                emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, false, false);
             } else {
+                // Auto-init: let x: Type (no initializer)
                 emit_auto_init(ctx, stmt->as.let_stmt.type, out);
             }
-            if (needs_lift) fprintf(out, "))");
-            else if (is_ref && !source_is_ptr) fprintf(out, ")");
-            
             fprintf(out, ";\n");
-            if (ctx->local_count < 256) {
-                ctx->locals[ctx->local_count] = stmt->as.let_stmt.name; ctx->local_type_refs[ctx->local_count] = stmt->as.let_stmt.type;
-                const char* tn = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, stmt->as.let_stmt.type);
-                ctx->local_types[ctx->local_count] = str_from_cstr(tn);
-                
-                // If it's a primitive ref, it's NOT a raw C pointer in our representation (it's a struct rae_View_Int)
-                bool is_prim_ref = is_primitive_ref(ctx, stmt->as.let_stmt.type);
-                ctx->local_is_ptr[ctx->local_count] = (stmt->as.let_stmt.type && (stmt->as.let_stmt.type->is_view || stmt->as.let_stmt.type->is_mod)) && !is_prim_ref;
-                ctx->local_is_mod[ctx->local_count] = (stmt->as.let_stmt.type && stmt->as.let_stmt.type->is_mod);
-                ctx->local_count++;
-            }
-            return true;
+            const char* tn = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, stmt->as.let_stmt.type);
+            if (ctx->local_count < 256) { ctx->locals[ctx->local_count] = stmt->as.let_stmt.name; ctx->local_types[ctx->local_count] = str_from_cstr(tn); ctx->local_type_refs[ctx->local_count] = stmt->as.let_stmt.type; ctx->local_count++; }
+            break;
         }
         case AST_STMT_ASSIGN: {
             fprintf(out, "  ");
-            const AstExpr* target = stmt->as.assign_stmt.target;
-            const AstTypeRef* tr = infer_expr_type_ref(ctx, target);
-
-            if (target->kind == AST_EXPR_IDENT) {
-                int slot = -1;
-                for (int i = (int)ctx->local_count - 1; i >= 0; i--) {
-                    if (str_eq(ctx->locals[i], target->as.ident)) { slot = i; break; }
-                }
-                if (slot >= 0 && ctx->local_is_ptr[slot] && !ctx->local_is_mod[slot]) {
-                    char buffer[160];
-                    snprintf(buffer, sizeof(buffer), "cannot assign to read-only view identifier '%.*s'", (int)target->as.ident.len, target->as.ident.data);
-                    diag_error(ctx->module->file_path, (int)stmt->line, (int)stmt->column, buffer);
-                    return false;
-                }
-            } else if (target->kind == AST_EXPR_MEMBER) {
-                if (target->as.member.object->kind == AST_EXPR_IDENT) {
-                    int slot = -1;
-                    for (int i = (int)ctx->local_count - 1; i >= 0; i--) {
-                        if (str_eq(ctx->locals[i], target->as.member.object->as.ident)) { slot = i; break; }
-                    }
-                    if (slot >= 0 && ctx->local_is_ptr[slot] && !ctx->local_is_mod[slot]) {
-                        char buffer[160];
-                        snprintf(buffer, sizeof(buffer), "cannot mutate field of read-only view '%.*s'", (int)target->as.member.object->as.ident.len, target->as.member.object->as.ident.data);
-                        diag_error(ctx->module->file_path, (int)stmt->line, (int)stmt->column, buffer);
-                        return false;
-                    }
-                }
-            }
-
-            bool target_is_ptr_var = target->kind == AST_EXPR_IDENT && is_pointer_type(ctx, target->as.ident);
-            bool target_is_mod_ref = is_primitive_ref(ctx, tr);
-
-            // If it's a mod/view variable being reassigned (not dereferenced), we need & or LIFT_VALUE
-            bool needs_ref = false;
-            bool needs_lift = false;
-            if (target_is_ptr_var && stmt->as.assign_stmt.is_bind) {
-                // Binding a reference: ptr = &val
-                bool source_is_ptr = false;
-                const AstTypeRef* source_tr = infer_expr_type_ref(ctx, stmt->as.assign_stmt.value);
-                if (source_tr && (source_tr->is_view || source_tr->is_mod)) source_is_ptr = true;
-                
-                // Also check if it's a function call that returns a reference
-                if (!source_is_ptr && stmt->as.assign_stmt.value->kind == AST_EXPR_CALL) {
-                    const AstExpr* c = stmt->as.assign_stmt.value->as.call.callee;
-                    if (c->kind == AST_EXPR_IDENT) {
-                        uint16_t pc = 0; for (const AstCallArg* ca = stmt->as.assign_stmt.value->as.call.args; ca; ca = ca->next) pc++;
-                        const AstFuncDecl* fd = find_function_overload(ctx->module, ctx, c->as.ident, NULL, pc, false, stmt->as.assign_stmt.value);
-                        if (!fd) fd = find_function_overload(ctx->module, ctx, c->as.ident, NULL, pc, true, stmt->as.assign_stmt.value);
-                        if (fd && fd->returns && (fd->returns->type->is_view || fd->returns->type->is_mod)) source_is_ptr = true;
-                    } else if (c->kind == AST_EXPR_MEMBER) {
-                        Str m = c->as.member.member; Str on = infer_expr_type(ctx, c->as.member.object);
-                        uint16_t pc = 1; for (const AstCallArg* ca = stmt->as.assign_stmt.value->as.call.args; ca; ca = ca->next) pc++;
-                        const AstFuncDecl* fd = find_function_overload(ctx->module, ctx, m, &on, pc, true, stmt->as.assign_stmt.value);
-                        if (fd && fd->returns && (fd->returns->type->is_view || fd->returns->type->is_mod)) source_is_ptr = true;
-                    }
-                                    } else if (!source_is_ptr && stmt->as.assign_stmt.value->kind == AST_EXPR_METHOD_CALL) {
-                                        Str m = stmt->as.assign_stmt.value->as.method_call.method_name;
-                                        Str on = infer_expr_type(ctx, stmt->as.assign_stmt.value->as.method_call.object);
-                                        uint16_t pc = 1; for (const AstCallArg* ca = stmt->as.assign_stmt.value->as.call.args; ca; ca = ca->next) pc++;
-                                        const AstFuncDecl* fd = find_function_overload(ctx->module, ctx, m, &on, pc, true, stmt->as.assign_stmt.value);
-                                        if (fd && fd->returns && (fd->returns->type->is_view || fd->returns->type->is_mod)) source_is_ptr = true;
-                                    }
-                                    
-                                    if (!source_is_ptr) {
-                                        if (is_primitive_ref(ctx, tr)) needs_lift = true;
-                                        else needs_ref = true;
-                                    }
-                        
-            }
-
-            if (target_is_mod_ref && !stmt->as.assign_stmt.is_bind) {
-                fprintf(out, "(*");
-                emit_expr(ctx, stmt->as.assign_stmt.target, out, PREC_ASSIGN, true, false);
-                fprintf(out, ".ptr)");
-            } else {
-                if (target_is_ptr_var && !stmt->as.assign_stmt.is_bind) fprintf(out, "(*");
-                emit_expr(ctx, stmt->as.assign_stmt.target, out, PREC_ASSIGN, true, false);
-                if (target_is_ptr_var && !stmt->as.assign_stmt.is_bind) fprintf(out, ")");
-            }
+            emit_expr(ctx, stmt->as.assign_stmt.target, out, PREC_LOWEST, true, false);
             fprintf(out, " = ");
-            
-            if (needs_lift) {
-                fprintf(out, "LIFT_VALUE(");
-                emit_type_ref_as_c_type(ctx, tr, out, false);
-                fprintf(out, ", .ptr = &(");
-            } else if (needs_ref) {
-                fprintf(out, "&(");
-            }
-            
-            if (tr) {
-                ctx->expected_type = *tr;
-                if (target_is_ptr_var && !stmt->as.assign_stmt.is_bind) { 
-                    ctx->expected_type.is_view = ctx->expected_type.is_mod = false; 
-                }
-                ctx->has_expected_type = true;
-            } else {
-                ctx->has_expected_type = false;
-            }
-
-            bool needs_unwrap = false;
-            const AstTypeRef* source_tr = infer_expr_type_ref(ctx, stmt->as.assign_stmt.value);
-            if (source_tr && source_tr->is_opt && tr && !tr->is_opt && !(tr->is_view || tr->is_mod)) {
-                needs_unwrap = true;
-            }
-
-            if (needs_unwrap) {
-                Str base = get_base_type_name(tr);
-                fprintf(out, "(");
-                emit_expr(ctx, stmt->as.assign_stmt.value, out, PREC_LOWEST, false, false);
-                if (str_eq_cstr(base, "Int64") || str_eq_cstr(base, "Int") || str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32")) fprintf(out, ").as.i");
-                else if (str_eq_cstr(base, "Float64") || str_eq_cstr(base, "Float")) fprintf(out, ").as.f");
-                else if (str_eq_cstr(base, "Bool")) fprintf(out, ").as.b");
-                else if (str_eq_cstr(base, "String")) fprintf(out, ").as.s");
-                else fprintf(out, ").as.ptr");
-            } else {
-                emit_expr(ctx, stmt->as.assign_stmt.value, out, PREC_LOWEST, false, false);
-            }
-            ctx->has_expected_type = false;
-            if (needs_lift) fprintf(out, "))");
-            else if (needs_ref) fprintf(out, ")");
-            
-            fprintf(out, ";\n"); return true;
-        }
-        case AST_STMT_EXPR: return emit_call(ctx, stmt->as.expr_stmt, out);
-        case AST_STMT_RET: {
-            fprintf(out, "  ");
-            emit_defers(ctx, 0, out);
-            fprintf(out, "return");
-            if (stmt->as.ret_stmt.values) {
-                fprintf(out, " ");
-                bool ret_is_ref = ctx->func_decl && ctx->func_decl->returns && ctx->func_decl->returns->type && (ctx->func_decl->returns->type->is_view || ctx->func_decl->returns->type->is_mod);
-                bool ret_is_opt = ctx->func_decl && ctx->func_decl->returns && ctx->func_decl->returns->type && ctx->func_decl->returns->type->is_opt;
-                
-                if (ctx->func_decl && ctx->func_decl->returns && ctx->func_decl->returns->type) {
-                    ctx->has_expected_type = true;
-                    // Substitute generic return type if necessary
-                    ctx->expected_type = *substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, ctx->func_decl->returns->type);
-                }
-
-                if (ret_is_ref) {
-                    const AstTypeRef* tr = infer_expr_type_ref(ctx, stmt->as.ret_stmt.values->value);
-                    bool source_is_ref_type = tr && (tr->is_view || tr->is_mod);
-                    bool is_prim_ret = is_primitive_ref(ctx, ctx->func_decl->returns->type);
-
-                    if (is_prim_ret) {
-                        fprintf(out, "LIFT_VALUE(");
-                        emit_type_ref_as_c_type(ctx, ctx->func_decl->returns->type, out, false);
-                        fprintf(out, ", .ptr = ");
-                        if (!source_is_ref_type) fprintf(out, "&(");
-                        else {
-                            fprintf(out, "(");
-                            emit_type_ref_as_c_type(ctx, ctx->func_decl->returns->type, out, true); // skip_ptr to get base pointer type
-                            fprintf(out, "*)(");
-                        }
-                    } else {
-                        if (!source_is_ref_type) fprintf(out, "&(");
-                    }
-
-                    if (source_is_ref_type && !is_prim_ret) {
-                        fprintf(out, "(");
-                        emit_type_ref_as_c_type(ctx, ctx->func_decl->returns->type, out, false);
-                        fprintf(out, ")");
-                    }
-                    
-                    if (source_is_ref_type && is_prim_ret) {
-                         emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, false, false);
-                         fprintf(out, ".ptr");
-                    } else {
-                         emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, false, false);
-                    }
-
-                    if (is_prim_ret) {
-                        if (!source_is_ref_type) fprintf(out, ")");
-                        fprintf(out, ")");
-                    } else {
-                        if (!source_is_ref_type) fprintf(out, ")");
-                    }
-                } else if (ret_is_opt) {
-                    fprintf(out, "rae_any(");
-                    emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, false, false);
+            // For struct literal assignments, add compound literal cast if missing
+            if (stmt->as.assign_stmt.value->kind == AST_EXPR_OBJECT &&
+                !stmt->as.assign_stmt.value->as.object_literal.type) {
+                const AstTypeRef* target_tr = infer_expr_type_ref(ctx, stmt->as.assign_stmt.target);
+                if (target_tr) {
+                    fprintf(out, "(");
+                    emit_type_ref_as_c_type(ctx, target_tr, out, true);
                     fprintf(out, ")");
+                }
+            }
+            emit_expr(ctx, stmt->as.assign_stmt.value, out, PREC_LOWEST, false, false);
+            fprintf(out, ";\n");
+            break;
+        }
+        case AST_STMT_RET: 
+            fprintf(out, "  return "); 
+            if (stmt->as.ret_stmt.values) {
+                if (stmt->as.ret_stmt.values->value->kind == AST_EXPR_LIST) {
+                    emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, false, false);
                 } else {
                     emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, false, false);
                 }
-                ctx->has_expected_type = false;
             }
-            fprintf(out, ";\n");
-            return true;
-        }
-        case AST_STMT_IF: return emit_if(ctx, stmt, out);
-        case AST_STMT_LOOP: return emit_loop(ctx, stmt, out);
-        case AST_STMT_DEFER: {
-            if (ctx->defer_stack.count < 64) {
-                ctx->defer_stack.entries[ctx->defer_stack.count].block = stmt->as.defer_stmt.block;
-                ctx->defer_stack.entries[ctx->defer_stack.count].scope_depth = ctx->scope_depth;
-                ctx->defer_stack.count++;
+            fprintf(out, ";\n"); 
+            break;
+        case AST_STMT_IF: emit_if(ctx, stmt, out); break;
+        case AST_STMT_LOOP: emit_loop(ctx, stmt, out); break;
+        case AST_STMT_MATCH: {
+            const AstExpr* subject = stmt->as.match_stmt.subject;
+            bool first = true;
+            for (const AstMatchCase* c = stmt->as.match_stmt.cases; c; c = c->next) {
+                if (!c->pattern) {
+                    // default case
+                    if (!first) fprintf(out, " else {\n");
+                    else fprintf(out, "  {\n");
+                } else {
+                    fprintf(out, first ? "  if (" : " else if (");
+                    emit_expr(ctx, subject, out, PREC_LOWEST, false, false);
+                    fprintf(out, " == ");
+                    emit_expr(ctx, c->pattern, out, PREC_LOWEST, false, false);
+                    fprintf(out, ") {\n");
+                }
+                first = false;
+                if (c->block) {
+                    for (AstStmt* s = c->block->first; s; s = s->next)
+                        emit_stmt(ctx, s, out);
+                }
+                fprintf(out, "  }");
             }
-            return true;
+            fprintf(out, "\n");
+            break;
         }
-        case AST_STMT_MATCH: return emit_match(ctx, stmt, out);
-        default: return true;
+        default: break;
     }
-}
-
-static bool emit_generic_helpers(CompilerContext* ctx, FILE* out) {
-  size_t processed = 0;
-  while (processed < ctx->generic_type_count) {
-    size_t current_count = ctx->generic_type_count;
-    for (size_t i = processed; i < current_count; i++) {
-      const char* m = rae_mangle_type(ctx, NULL, ctx->generic_types[i]);
-      bool dup = false; for (size_t j = 0; j < ctx->emitted_method_count; j++) if (strcmp(ctx->emitted_method_names[j], m) == 0) { dup = true; break; }
-      if (dup) continue; 
-      if (ctx->emitted_method_count < ctx->emitted_method_cap) ctx->emitted_method_names[ctx->emitted_method_count++] = m;
-
-      Str base = ctx->generic_types[i]->parts->text;
-      fprintf(out, "RAE_UNUSED static const char* rae_toJson_%s_(%s* this) { (void)this; return \"{}\"; }\n", m, m);
-      fprintf(out, "RAE_UNUSED static %s rae_fromJson_%s_(const char* json) { (void)json; %s res = {0}; return res; }\n", m, m, m);
-      fprintf(out, "RAE_UNUSED static void rae_log_%s_(%s val) { rae_log_stream_%s_(val); printf(\"\\n\"); }\n", m, m, m);
-      if (str_eq_cstr(base, "List")) {
-          const char* elem_mangled = rae_mangle_type_specialized(ctx, NULL, NULL, ctx->generic_types[i]->generic_args);
-          Str elem_base = get_base_type_name(ctx->generic_types[i]->generic_args);
-          bool elem_is_primitive = is_primitive_type(elem_base);
-
-          fprintf(out, "RAE_UNUSED static void rae_log_stream_%s_(%s val) {\n", m, m);
-          fprintf(out, "  printf(\"{ #(\");\n");
-          fprintf(out, "  for (int64_t i = 0; i < val.capacity; i++) {\n");
-          fprintf(out, "    if (i > 0) printf(\", \");\n");
-          fprintf(out, "    if (i < val.length) {\n");
-          if (elem_is_primitive || str_eq_cstr(elem_base, "String") || str_eq_cstr(elem_base, "Any")) {
-              fprintf(out, "      rae_ext_rae_log_stream_any(rae_any(val.data[i]));\n");
-          } else {
-              fprintf(out, "      rae_log_stream_%s_(val.data[i]);\n", elem_mangled);
-          }
-          fprintf(out, "    } else {\n");
-          fprintf(out, "      printf(\"none\");\n");
-          fprintf(out, "    }\n");
-          fprintf(out, "  }\n");
-          fprintf(out, "  printf(\"), %%lld, %%lld }\", (long long)val.length, (long long)val.capacity);\n");
-          fprintf(out, "}\n");
-          fprintf(out, "RAE_UNUSED static const char* rae_str_%s_(%s val) { (void)val; return \"List(...)\"; }\n\n", m, m);
-      } else {
-          fprintf(out, "RAE_UNUSED static void rae_log_stream_%s_(%s val) { (void)val; printf(\"%.*s(...)\"); }\n", m, m, (int)base.len, base.data);
-          fprintf(out, "RAE_UNUSED static const char* rae_str_%s_(%s val) { (void)val; return \"%.*s(...)\"; }\n\n", m, m, (int)base.len, base.data);
-      }
-    }
-    processed = current_count;
-  }
-  return true;
-}
-
-static bool emit_json_methods(CompilerContext* ctx, const AstModule* module, FILE* out, bool uses_raylib) {
-  (void)module;
-  // Use context to track emitted names to avoid duplicates
-  ctx->emitted_method_count = 0;
-
-  for (size_t i = 0; i < ctx->all_decl_count; i++) {
-    const AstDecl* d = ctx->all_decls[i];
-    if (d->kind == AST_DECL_TYPE && !d->as.type_decl.generic_params) {
-      const AstTypeDecl* td = &d->as.type_decl;
-      if (has_property(td->properties, "c_struct")) continue;
-      
-      const char* m = rae_mangle_type(ctx, NULL, & (AstTypeRef){.parts = & (AstIdentifierPart){.text = td->name}});
-      bool dup = false; for (size_t j = 0; j < ctx->emitted_method_count; j++) if (strcmp(ctx->emitted_method_names[j], m) == 0) { dup = true; break; }
-      if (dup) continue; 
-      if (ctx->emitted_method_count < ctx->emitted_method_cap) ctx->emitted_method_names[ctx->emitted_method_count++] = m;
-
-      fprintf(out, "RAE_UNUSED static const char* rae_toJson_%s_(%s* this);\n", m, m);
-      fprintf(out, "RAE_UNUSED static %s rae_fromJson_%s_(const char* json);\n", m, m);
-      fprintf(out, "RAE_UNUSED static void rae_log_%s_(%s val);\n", m, m);
-      fprintf(out, "RAE_UNUSED static void rae_log_stream_%s_(%s val);\n", m, m);
-      fprintf(out, "RAE_UNUSED static const char* rae_str_%s_(%s val);\n", m, m);
-    } else if (d->kind == AST_DECL_ENUM) {
-      const AstEnumDecl* ed = &d->as.enum_decl;
-      if (is_primitive_type(ed->name) || (uses_raylib && is_raylib_builtin_type(ed->name))) continue;
-      
-      const char* m = rae_mangle_type(ctx, NULL, & (AstTypeRef){.parts = & (AstIdentifierPart){.text = ed->name}});
-      bool dup = false; for (size_t j = 0; j < ctx->emitted_method_count; j++) if (strcmp(ctx->emitted_method_names[j], m) == 0) { dup = true; break; }
-      if (dup) continue; 
-      if (ctx->emitted_method_count < ctx->emitted_method_cap) ctx->emitted_method_names[ctx->emitted_method_count++] = m;
-
-      fprintf(out, "RAE_UNUSED static void rae_log_%s_(%s val);\n", m, m);
-      fprintf(out, "RAE_UNUSED static void rae_log_stream_%s_(%s val);\n", m, m);
-      fprintf(out, "RAE_UNUSED static const char* rae_str_%s_(%s val);\n", m, m);
-    }
-  }
-  for (size_t i = 0; i < ctx->generic_type_count; i++) {
-      const char* m = rae_mangle_type(ctx, NULL, ctx->generic_types[i]);
-      bool dup = false; for (size_t j = 0; j < ctx->emitted_method_count; j++) if (strcmp(ctx->emitted_method_names[j], m) == 0) { dup = true; break; }
-      if (dup) continue; 
-      if (ctx->emitted_method_count < ctx->emitted_method_cap) ctx->emitted_method_names[ctx->emitted_method_count++] = m;
-
-      fprintf(out, "RAE_UNUSED static const char* rae_toJson_%s_(%s* this);\n", m, m);
-      fprintf(out, "RAE_UNUSED static %s rae_fromJson_%s_(const char* json);\n", m, m);
-      fprintf(out, "RAE_UNUSED static void rae_log_%s_(%s val);\n", m, m);
-      fprintf(out, "RAE_UNUSED static void rae_log_stream_%s_(%s val);\n", m, m);
-      fprintf(out, "RAE_UNUSED static const char* rae_str_%s_(%s val);\n", m, m);
-  }
-  fprintf(out, "\n");
-  
-  ctx->emitted_method_count = 0;
-  for (size_t i = 0; i < ctx->all_decl_count; i++) {
-    const AstDecl* d = ctx->all_decls[i];
-    if (d->kind == AST_DECL_TYPE && !d->as.type_decl.generic_params) {
-      const AstTypeDecl* td = &d->as.type_decl;
-      if (has_property(td->properties, "c_struct")) continue;
-      
-      const char* m = rae_mangle_type(ctx, NULL, & (AstTypeRef){.parts = & (AstIdentifierPart){.text = td->name}});
-      bool dup = false; for (size_t j = 0; j < ctx->emitted_method_count; j++) if (strcmp(ctx->emitted_method_names[j], m) == 0) { dup = true; break; }
-      if (dup) continue; 
-      if (ctx->emitted_method_count < ctx->emitted_method_cap) ctx->emitted_method_names[ctx->emitted_method_count++] = m;
-
-      fprintf(out, "RAE_UNUSED static const char* rae_toJson_%s_(%s* this) { (void)this; return \"{}\"; }\n", m, m);
-      fprintf(out, "RAE_UNUSED static %s rae_fromJson_%s_(const char* json) { (void)json; %s res = {0}; return res; }\n", m, m, m);
-      fprintf(out, "RAE_UNUSED static void rae_log_%s_(%s val) { rae_log_stream_%s_(val); printf(\"\\n\"); }\n", m, m, m);
-      fprintf(out, "RAE_UNUSED static void rae_log_stream_%s_(%s val) { (void)val; printf(\"%.*s(...)\"); }\n", m, m, (int)td->name.len, td->name.data);
-      fprintf(out, "RAE_UNUSED static const char* rae_str_%s_(%s val) { (void)val; return \"%.*s(...)\"; }\n\n", m, m, (int)td->name.len, td->name.data);
-    } else if (d->kind == AST_DECL_ENUM) {
-      const AstEnumDecl* ed = &d->as.enum_decl;
-      if (is_primitive_type(ed->name) || (uses_raylib && is_raylib_builtin_type(ed->name))) continue;
-      
-      const char* m = rae_mangle_type(ctx, NULL, & (AstTypeRef){.parts = & (AstIdentifierPart){.text = ed->name}});
-      bool dup = false; for (size_t j = 0; j < ctx->emitted_method_count; j++) if (strcmp(ctx->emitted_method_names[j], m) == 0) { dup = true; break; }
-      if (dup) continue; 
-      if (ctx->emitted_method_count < ctx->emitted_method_cap) ctx->emitted_method_names[ctx->emitted_method_count++] = m;
-
-      fprintf(out, "RAE_UNUSED static void rae_log_%s_(%s val) { rae_log_stream_%s_(val); printf(\"\\n\"); }\n", m, m, m);
-      fprintf(out, "RAE_UNUSED static void rae_log_stream_%s_(%s val) { printf(\"%%lld\", (long long)val); }\n", m, m);
-      fprintf(out, "RAE_UNUSED static const char* rae_str_%s_(%s val) { (void)val; return \"Enum\"; }\n\n", m, m);
-    }
-  }
-  
-  size_t last_gen_count = 0;
-  do {
-      last_gen_count = ctx->generic_type_count;
-      emit_generic_helpers(ctx, out);
-  } while (ctx->generic_type_count > last_gen_count);
-  
-  return true;
-}
-
-static bool emit_struct_defs(CompilerContext* ctx, const AstModule* module, FILE* out, bool uses_raylib) {
-    EmittedTypeList emitted = { .items = malloc(sizeof(char*) * 2048), .capacity = 2048, .count = 0 };
-    EmittedTypeList visiting = { .items = malloc(sizeof(char*) * 2048), .capacity = 2048, .count = 0 };
-    
-    // First, emit all pre-discovered specialized generic types
-    for (size_t i = 0; i < ctx->generic_type_count; i++) {
-        emit_type_recursive(ctx, module, (AstTypeRef*)ctx->generic_types[i], out, &emitted, &visiting, uses_raylib);
-    }
-
-    // Then, emit all regular structs from declarations
-    for (size_t i = 0; i < ctx->all_decl_count; i++) {
-        const AstDecl* d = ctx->all_decls[i];
-        if (d->kind == AST_DECL_TYPE && !d->as.type_decl.generic_params) {
-            AstTypeRef tr = { .parts = arena_alloc(ctx->ast_arena, sizeof(AstIdentifierPart)) };
-            tr.parts->text = d->as.type_decl.name;
-            emit_type_recursive(ctx, module, &tr, out, &emitted, &visiting, uses_raylib);
-        }
-    }
-    
-    free(emitted.items);
-    free(visiting.items);
     return true;
 }
 
-static bool emit_enum_defs(CompilerContext* ctx, const AstModule* module, FILE* out, bool uses_raylib) {
-  for (size_t i = 0; i < ctx->all_decl_count; i++) {
-    const AstDecl* d = ctx->all_decls[i];
-    if (d->kind == AST_DECL_ENUM) {
-      if (is_primitive_type(d->as.enum_decl.name) || (uses_raylib && is_raylib_builtin_type(d->as.enum_decl.name))) continue;
-      fprintf(out, "typedef enum {\n");
-      for (const AstEnumMember* m = d->as.enum_decl.members; m; m = m->next) fprintf(out, "  %.*s_%.*s%s\n", (int)d->as.enum_decl.name.len, d->as.enum_decl.name.data, (int)m->name.len, m->name.data, m->next ? "," : "");
-      fprintf(out, "} rae_%.*s;\n\n", (int)d->as.enum_decl.name.len, d->as.enum_decl.name.data);
-    }
-  }
-  return true;
-}
-
-bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const char* out_path, struct VmRegistry* registry, bool* out_uses_raylib) {
-
-  ctx->all_decl_count = 0;
-  ctx->generic_type_count = 0;
-  ctx->emitted_generic_type_count = 0;
-  ctx->specialized_func_count = 0;
-  ctx->emitted_method_count = 0;
-  ctx->current_module = (AstModule*)module;
-
-  // Aggregate all declarations from graph and entry module
-  collect_decls_from_module(ctx, module);
-  for (const AstDecl* d = module->decls; d; d = d->next) register_decl(ctx, d);
-
-  // Deep recursive discovery of types and specializations
-  collect_type_refs_module(ctx);
-  
-  // Specialization pass for all collected declarations (not just the entry module)
-  size_t processed_funcs = 0;
-  size_t processed_specs = 0;
-  while (true) {
-      size_t start_generic = ctx->generic_type_count;
-      size_t start_funcs = ctx->specialized_func_count;
-      
-      // Discover from non-generic functions
-      for (size_t i = processed_funcs; i < ctx->all_decl_count; i++) {
-          const AstDecl* d = ctx->all_decls[i];
-          if (d->kind == AST_DECL_FUNC && !d->as.func_decl.generic_params) {
-              CFuncContext fctx = {.compiler_ctx = ctx, .module = module, .func_decl = &d->as.func_decl};
-              if (d->as.func_decl.body) discover_specializations_stmt(&fctx, d->as.func_decl.body->first);
-          }
-      }
-      processed_funcs = ctx->all_decl_count;
-
-      // Discover from specialized functions recursively
-      while (processed_specs < ctx->specialized_func_count) {
-          size_t limit = ctx->specialized_func_count;
-          for (size_t i = processed_specs; i < limit; i++) {
-              const AstFuncDecl* f = ctx->specialized_funcs[i].decl;
-              const AstTypeRef* args = ctx->specialized_funcs[i].concrete_args;
-              CFuncContext fctx = {.compiler_ctx = ctx, .module = module, .func_decl = f, .generic_params = f->generic_params, .generic_args = args};
-              if (f->body) discover_specializations_stmt(&fctx, f->body->first);
-          }
-          processed_specs = limit;
-      }
-
-      if (ctx->generic_type_count == start_generic && ctx->specialized_func_count == start_funcs) break;
-  }
-
-  FILE* out = fopen(out_path, "w"); if (!out) return false;
-
-  bool uses_raylib = false;
-  for (const AstImport* imp = module->imports; imp; imp = imp->next) {
-      if (str_eq_cstr(imp->path, "raylib")) { uses_raylib = true; break; }
-  }
-  // Check entry module imports as well (redundant but safe)
-  if (!uses_raylib) {
-      for (const AstImport* imp = module->imports; imp; imp = imp->next) {
-          char* p = str_to_cstr(imp->path);
-          if (p && (strcmp(p, "raylib") == 0 || str_ends_with_cstr(imp->path, "/raylib.rae") || str_ends_with_cstr(imp->path, "\\raylib.rae"))) { uses_raylib = true; free(p); break; }
-          free(p);
-      }
-  }
-
-  if (uses_raylib) { if (out_uses_raylib) *out_uses_raylib = true; fprintf(out, "#ifndef RAE_HAS_RAYLIB\n#define RAE_HAS_RAYLIB\n#endif\n#include <raylib.h>\n"); }
-
-  fprintf(out, "#include \"rae_runtime.h\"\n\n");
-  fprintf(out, "typedef const char* const_char_p;\n");
-  fprintf(out, "#define LIFT_TO_TEMP(T, ...) (&(T){__VA_ARGS__})\n");
-  fprintf(out, "#define LIFT_TO_TEMP_STRUCT(T, ...) ((T){__VA_ARGS__})\n");
-  fprintf(out, "#define LIFT_VALUE(T, ...) ((T){__VA_ARGS__})\n\n");
-
-  fprintf(out, "// Built-in buffer functions\n");
-  fprintf(out, "RAE_UNUSED void* rae_ext_rae_buf_alloc(int64_t size, int64_t elemSize);\n");
-  fprintf(out, "RAE_UNUSED void rae_ext_rae_buf_free(void* ptr);\n");
-  fprintf(out, "RAE_UNUSED void* rae_ext_rae_buf_resize(void* ptr, int64_t new_size, int64_t elemSize);\n");
-  fprintf(out, "RAE_UNUSED void rae_ext_rae_buf_copy(void* src, int64_t src_off, void* dst, int64_t dst_off, int64_t len, int64_t elemSize);\n\n");
-
-  // Forward declarations for all specialized generic types
-  fprintf(out, "// Forward declarations for specialized generics\n");
-  EmittedTypeList emitted_fwd = { .items = malloc(sizeof(char*) * 1024), .capacity = 1024, .count = 0 };
-  for (size_t i = 0; i < ctx->generic_type_count; i++) {
-      const char* m = rae_mangle_type(ctx, NULL, (AstTypeRef*)ctx->generic_types[i]);
-      if (emitted_list_contains(&emitted_fwd, m)) continue;
-      fprintf(out, "typedef struct %s %s;\n", m, m);
-      emitted_list_add(&emitted_fwd, m);
-  }
-  free(emitted_fwd.items);
-  // Also common map entries
-  fprintf(out, "typedef struct rae_StringMapEntry_RaeAny rae_StringMapEntry_RaeAny;\n");
-  fprintf(out, "typedef struct rae_IntMapEntry_RaeAny rae_IntMapEntry_RaeAny;\n");
-  fprintf(out, "typedef struct rae_MapEntry_RaeAny rae_MapEntry_RaeAny;\n\n");
-
-  emit_enum_defs(ctx, module, out, uses_raylib);
-  emit_struct_defs(ctx, module, out, uses_raylib);
-  emit_json_methods(ctx, module, out, uses_raylib);
-
-  
-
-  // Prototypes for ALL functions (non-generic first)
-  const char* emitted_names[2048];
-  size_t emitted_count = 0;
-
-  for (size_t i = 0; i < ctx->all_decl_count; i++) {
-      const AstDecl* d = ctx->all_decls[i];
-      if (d->kind == AST_DECL_FUNC) {
-          const AstFuncDecl* f = &d->as.func_decl;
-          if (f->generic_params != NULL) continue;
-          
-          const char* mangled = rae_mangle_function(ctx, f);
-          bool dup = false;
-          for (size_t j = 0; j < emitted_count; j++) if (strcmp(emitted_names[j], mangled) == 0) { dup = true; break; }
-          if (dup) continue;
-          if (emitted_count < 2048) emitted_names[emitted_count++] = mangled;
-
-          CFuncContext tctx = {.compiler_ctx = ctx, .module = module, .func_decl = f, .uses_raylib = uses_raylib};
-          const char* rt = c_return_type(&tctx, f);
-          
-          if (str_eq_cstr(f->name, "main")) {
-              fprintf(out, "int main(void);\n");
-          } else {
-              bool is_ext = f->is_extern || str_starts_with_cstr(f->name, "rae_ext_");
-              fprintf(out, "RAE_UNUSED %s %s %s(", is_ext ? "" : "static", rt, mangled);
-              emit_param_list(&tctx, f->params, out, is_ext);
-              fprintf(out, ");\n");
-          }
-      }
-  }
-
-  // Prototypes for ALL specialized functions (pre-discovered)
-  size_t emitted_protos = 0;
-  while (emitted_protos < ctx->specialized_func_count) {
-      size_t current_limit = ctx->specialized_func_count;
-      for (size_t i = emitted_protos; i < current_limit; i++) {
-          const AstFuncDecl* f = ctx->specialized_funcs[i].decl;
-          const AstTypeRef* args = ctx->specialized_funcs[i].concrete_args;
-          
-          const char* mangled = rae_mangle_specialized_function(ctx, f, args);
-          // bool dup = false;
-          // for (size_t j = 0; j < emitted_count; j++) if (strcmp(emitted_names[j], mangled) == 0) { dup = true; break; }
-          // if (dup) continue;
-          // if (emitted_count < 2048) emitted_names[emitted_count++] = mangled;
-
-          CFuncContext tctx = {.compiler_ctx = ctx, .module = module, .func_decl = f, .uses_raylib = uses_raylib, .generic_params = f->generic_params, .generic_args = args};
-          const char* rt = c_return_type(&tctx, f);
-          fprintf(out, "RAE_UNUSED static %s %s(", rt, mangled);
-          const AstParam* p = f->params;
-          while (p) {
-              emit_type_ref_as_c_type(&tctx, p->type, out, false);
-              fprintf(out, " %.*s%s", (int)p->name.len, p->name.data, p->next ? ", " : "");
-              p = p->next;
-          }
-          if (!f->params) fprintf(out, "void");
-          fprintf(out, ");\n");
-      }
-      emitted_protos = current_limit;
-  }
-
-  fprintf(out, "\n");
-
-  // Bodies for ALL functions
-  for (size_t i = 0; i < ctx->all_decl_count; i++) {
-      const AstDecl* d = ctx->all_decls[i];
-      if (d->kind == AST_DECL_FUNC) {
-          const AstFuncDecl* f = &d->as.func_decl;
-          if (f->generic_params != NULL) continue;
-          emit_function(ctx, module, f, out, registry, uses_raylib); 
-      }
-  }
-
-  // Bodies for specialized functions (handled in a loop to support recursive specializations)
-  size_t emitted_specialized = 0;
-  while (emitted_specialized < ctx->specialized_func_count) {
-      size_t current_limit = ctx->specialized_func_count;
-      for (size_t i = emitted_specialized; i < current_limit; i++) {
-          emit_specialized_function(ctx, module, ctx->specialized_funcs[i].decl, ctx->specialized_funcs[i].concrete_args, out, registry, uses_raylib);
-      }
-      emitted_specialized = current_limit;
-  }
-
-  fclose(out); return true;
-}
-
-static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
-  fprintf(out, "  if ("); emit_expr(ctx, stmt->as.if_stmt.condition, out, PREC_LOWEST, false, false); fprintf(out, ") {\n");
-  emit_block(ctx, stmt->as.if_stmt.then_block, out); fprintf(out, "  }");
-  if (stmt->as.if_stmt.else_block) { fprintf(out, " else {\n"); emit_block(ctx, stmt->as.if_stmt.else_block, out); fprintf(out, "  }"); }
-  fprintf(out, "\n"); return true;
-}
-
-static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
-  fprintf(out, "  {\n"); ctx->scope_depth++; if (stmt->as.loop_stmt.init) emit_stmt(ctx, stmt->as.loop_stmt.init, out);
-  fprintf(out, "  while ("); if (stmt->as.loop_stmt.condition) emit_expr(ctx, stmt->as.loop_stmt.condition, out, PREC_LOWEST, false, false); else fprintf(out, "1");
-  fprintf(out, ") {\n"); emit_block(ctx, stmt->as.loop_stmt.body, out);
-  if (stmt->as.loop_stmt.increment) { fprintf(out, "  "); emit_expr(ctx, stmt->as.loop_stmt.increment, out, PREC_LOWEST, false, false); fprintf(out, ";\n"); }
-  fprintf(out, "  }\n"); emit_defers(ctx, ctx->scope_depth, out); pop_defers(ctx, ctx->scope_depth); ctx->scope_depth--; fprintf(out, "  }\n"); return true;
-}
-
-static bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* f, const AstTypeRef* args, FILE* out, const struct VmRegistry* r, bool ray) {
-    if (str_eq_cstr(f->name, "sizeof")) return true;
-    if (str_eq_cstr(f->name, "__buf_alloc") || str_eq_cstr(f->name, "__buf_free") || str_eq_cstr(f->name, "__buf_copy")) return true;
-    CFuncContext tctx = {.compiler_ctx = ctx, .module = m, .func_decl = f, .uses_raylib = ray, .registry = r, .generic_params = f->generic_params, .generic_args = args};
-    const char* rt = c_return_type(&tctx, f);
-    const char* mangled = rae_mangle_specialized_function(ctx, f, args);
-
-    if (str_eq_cstr(f->name, "main")) { fprintf(out, "int main("); tctx.is_main = true; }
-    else {
-        fprintf(out, "RAE_UNUSED static %s %s(", rt, mangled);
-    }
-    const AstParam* p = f->params;
-    while (p) {
-        emit_type_ref_as_c_type(&tctx, p->type, out, false);
-        fprintf(out, " %.*s%s", (int)p->name.len, p->name.data, p->next ? ", " : "");
-        p = p->next;
-    }
-    if (!f->params) fprintf(out, "void");
-    fprintf(out, ") {\n");
-    
-    CFuncContext cctx = tctx; cctx.return_type_name = rt; cctx.returns_value = func_has_return_value(f);
-    for (const AstParam* p = f->params; p; p = p->next) {
-        if (cctx.local_count < 256) {
-            cctx.locals[cctx.local_count] = p->name; 
-            const AstTypeRef* tr = substitute_type_ref(ctx, f->generic_params, args, p->type);
-            cctx.local_type_refs[cctx.local_count] = tr;
-            const char* tn = rae_mangle_type_specialized(ctx, f->generic_params, args, p->type);
-            cctx.local_types[cctx.local_count] = str_from_cstr(tn);
-            
-            bool is_prim_ref = is_primitive_ref(&cctx, tr);
-            cctx.local_is_ptr[cctx.local_count] = (tr && (tr->is_view || tr->is_mod || !is_primitive_type(get_base_type_name(tr)))) && !is_prim_ref;
-            cctx.local_is_mod[cctx.local_count] = tr && tr->is_mod;
-            cctx.local_count++;
-        }
-    }
-    emit_block(&cctx, f->body, out);
-    if (tctx.is_main) fprintf(out, "  return 0;\n");
-    fprintf(out, "}\n\n");
-    return true;
-}
+static bool emit_defers(CFuncContext* ctx, int min_depth, FILE* out) { (void)ctx; (void)min_depth; (void)out; return true; }
+static void pop_defers(CFuncContext* ctx, int depth) { (void)ctx; (void)depth; }
 
 static bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* f, FILE* out, const struct VmRegistry* r, bool ray) {
   if (f->is_extern || str_starts_with_cstr(f->name, "rae_ext_")) return true;
   CFuncContext tctx = {.compiler_ctx = ctx, .module = m, .func_decl = f, .uses_raylib = ray, .registry = r};
-  const char* rt = c_return_type(&tctx, f);
-  const char* mangled = rae_mangle_function(ctx, f);
-
-  if (str_eq_cstr(f->name, "main")) { fprintf(out, "int main("); tctx.is_main = true; }
-  else {
-      bool is_ext = f->is_extern || str_starts_with_cstr(f->name, "rae_ext_");
-      fprintf(out, "RAE_UNUSED %s %s ", is_ext ? "" : "static", rt);
-      fprintf(out, "%s", mangled);
-      fprintf(out, "(");
+  const char* rt = c_return_type(&tctx, f); const char* mangled = rae_mangle_function(ctx, f);
+  
+  bool is_main = str_eq_cstr(f->name, "main");
+  if (is_main) {
+      fprintf(out, "int main(int argc, char** argv) {\n  (void)argc; (void)argv;\n");
+  } else {
+      fprintf(out, "RAE_UNUSED static %s %s(", rt, mangled); emit_param_list(&tctx, f->params, out, false); fprintf(out, ") {\n");
   }
-  emit_param_list(&tctx, f->params, out, f->is_extern || str_starts_with_cstr(f->name, "rae_ext_"));
-  fprintf(out, ") {\n");
-  CFuncContext cctx = tctx; cctx.return_type_name = rt; cctx.returns_value = func_has_return_value(f);
-  for (const AstParam* p = f->params; p; p = p->next) {
-      if (cctx.local_count < 256) {
-          cctx.locals[cctx.local_count] = p->name; cctx.local_type_refs[cctx.local_count] = p->type;
-          const char* tn = rae_mangle_type_specialized(ctx, f->generic_params, NULL, p->type);
-          cctx.local_types[cctx.local_count] = str_from_cstr(tn);
-          
-          bool is_prim_ref = is_primitive_ref(&cctx, p->type);
-          cctx.local_is_ptr[cctx.local_count] = (p->type && (p->type->is_view || p->type->is_mod || !is_primitive_type(get_base_type_name(p->type)))) && !is_prim_ref;
-          cctx.local_is_mod[cctx.local_count] = p->type && p->type->is_mod;
-          cctx.local_count++;
-      }
-  }
-  emit_block(&cctx, f->body, out);
-  if (tctx.is_main) fprintf(out, "  return 0;\n"); fprintf(out, "}\n\n"); return true;
-}
 
-
-static bool emit_defers(CFuncContext* ctx, int min_depth, FILE* out) {
-  for (int i = ctx->defer_stack.count - 1; i >= 0; i--) {
-    if (ctx->defer_stack.entries[i].scope_depth >= min_depth) {
-      if (!emit_block(ctx, ctx->defer_stack.entries[i].block, out)) return false;
-    }
+  for (const AstParam* p = f->params; p; p = p->next) { 
+      if (tctx.local_count < 256) { 
+          tctx.locals[tctx.local_count] = p->name; 
+          tctx.local_type_refs[tctx.local_count] = p->type; 
+          const char* tn = rae_mangle_type_specialized(ctx, NULL, NULL, p->type);
+          tctx.local_types[tctx.local_count] = str_from_cstr(tn); 
+          tctx.local_count++; 
+      } 
   }
+  
+  if (f->body) { for (AstStmt* s = f->body->first; s; s = s->next) emit_stmt(&tctx, s, out); }
+  
+  if (is_main) fprintf(out, "  return 0;\n}\n\n");
+  else fprintf(out, "}\n\n"); 
   return true;
 }
 
-static void pop_defers(CFuncContext* ctx, int depth) {
-  while (ctx->defer_stack.count > 0 && ctx->defer_stack.entries[ctx->defer_stack.count - 1].scope_depth >= depth) {
-    ctx->defer_stack.count--;
-  }
+static bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* f, const AstTypeRef* args, FILE* out, const struct VmRegistry* r, bool ray) {
+  const AstIdentifierPart* gp_src = f->generic_params; if (!gp_src && f->generic_template) gp_src = f->generic_template->as.func_decl.generic_params;
+  CFuncContext tctx = {.compiler_ctx = ctx, .module = m, .func_decl = f, .uses_raylib = ray, .registry = r, .generic_params = gp_src, .generic_args = args};
+  const char* rt = c_return_type(&tctx, f); const char* mangled = rae_mangle_specialized_function(ctx, f, args);
+  fprintf(out, "RAE_UNUSED static %s %s(", rt, mangled); emit_param_list(&tctx, f->params, out, false); fprintf(out, ") {\n");
+  for (const AstParam* p = f->params; p; p = p->next) { if (tctx.local_count < 256) { tctx.locals[tctx.local_count] = p->name; tctx.local_type_refs[tctx.local_count] = p->type; tctx.local_types[tctx.local_count] = str_from_cstr(rae_mangle_type_specialized(ctx, gp_src, args, p->type)); tctx.local_count++; } }
+  if (f->body) { for (AstStmt* s = f->body->first; s; s = s->next) emit_stmt(&tctx, s, out); }
+  fprintf(out, "}\n\n"); return true;
 }
 
-static bool emit_spawn_wrapper(CFuncContext* ctx, const AstFuncDecl* func, FILE* out) {
-  (void)ctx; (void)func; (void)out;
-  return true; 
-}
+bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const char* out_path, struct VmRegistry* registry, bool* out_uses_raylib) {
+  if (!module) return false;
+  ctx->all_decl_count = 0; collect_decls_from_module(ctx, module); ctx->current_module = (AstModule*)module;
+  
+  FILE* out = fopen(out_path, "w"); if (!out) return false;
+  fprintf(out, "#include \"rae_runtime.h\"\n\n");
+  EmittedTypeList emitted = { .items = malloc(sizeof(char*) * 1024), .capacity = 1024, .count = 0 };
+  EmittedTypeList visiting = { .items = malloc(sizeof(char*) * 1024), .capacity = 1024, .count = 0 };
+  for (size_t i = 0; i < ctx->generic_type_count; i++) emit_type_recursive(ctx, module, ctx->generic_types[i], out, &emitted, &visiting, false);
 
-static bool base_types_match(Str pattern, Str concrete) {
-    if (str_eq(pattern, concrete)) return true;
-    if (str_starts_with_cstr(concrete, "rae_")) {
-        // Strip rae_ prefix and also any generic suffix starting with _ (e.g. rae_StringMap_int64_t -> StringMap)
-        char* raw = str_to_cstr(concrete);
-        char* start = raw + 4;
-        char* end = strchr(start, '_');
-        if (end) *end = '\0';
-        bool match = strcmp(start, str_to_cstr(pattern)) == 0;
-        free(raw);
-        return match;
-    }
-    // Also handle C primitive types mapping back to Rae
-    if (str_eq_cstr(concrete, "int64_t") && (str_eq_cstr(pattern, "Int") || str_eq_cstr(pattern, "Int64"))) return true;
-    if (str_eq_cstr(concrete, "double") && (str_eq_cstr(pattern, "Float") || str_eq_cstr(pattern, "Float64"))) return true;
-    if (str_eq_cstr(concrete, "uint32_t") && (str_eq_cstr(pattern, "Char") || str_eq_cstr(pattern, "Char32"))) return true;
-    
-    return false;
-}
-
-static const AstFuncDecl* find_function_overload(const AstModule* module, CFuncContext* ctx, Str name, const Str* param_types, uint16_t param_count, bool is_method, const AstExpr* call_expr) {
-  const AstDecl** decls = NULL;
-  size_t count = 0;
-
-  if (ctx && ctx->compiler_ctx) {
-      decls = ctx->compiler_ctx->all_decls;
-      count = ctx->compiler_ctx->all_decl_count;
-  } else if (module) {
-      // Temporary fallback if context not available
-      decls = (const AstDecl**)module->decls;
-      // This is a bit unsafe as it's not a proper array, but we'll fix it if needed
+  // Emit enum definitions as #define constants
+  for (size_t i = 0; i < ctx->all_decl_count; i++) {
+      const AstDecl* d = ctx->all_decls[i];
+      if (d->kind == AST_DECL_ENUM) {
+          int64_t idx = 0;
+          for (const AstEnumMember* m = d->as.enum_decl.members; m; m = m->next) {
+              fprintf(out, "#define %.*s_%.*s ((int64_t)%lldLL)\n",
+                  (int)d->as.enum_decl.name.len, d->as.enum_decl.name.data,
+                  (int)m->name.len, m->name.data, (long long)idx++);
+          }
+          fprintf(out, "\n");
+      }
   }
 
-  if (!decls && module) {
-      // Proper fallback: use module-based recursive search if all_decls not available
-      for (const AstDecl* d = module->decls; d; d = d->next) {
-          if (d->kind == AST_DECL_FUNC && str_eq(d->as.func_decl.name, name)) {
-              const AstFuncDecl* f = &d->as.func_decl;
-              bool has_this = f->params && str_eq_cstr(f->params->name, "this");
-              if (is_method && !has_this) continue;
-              if (!is_method && has_this) continue;
-              uint16_t c = 0; for (const AstParam* p = f->params; p; p = p->next) c++;
-              if (c == param_count) {
-                  if (is_method && param_types) {
-                      if (base_types_match(get_base_type_name(f->params->type), param_types[0])) return f;
-                  } else if (!param_types) return f;
-              }
-          }
+  // Emit non-generic user-defined struct types
+  for (size_t i = 0; i < ctx->all_decl_count; i++) {
+      const AstDecl* d = ctx->all_decls[i];
+      if (d->kind == AST_DECL_TYPE && !d->as.type_decl.generic_params) {
+          AstTypeRef tr = {0};
+          AstIdentifierPart part = {0};
+          part.text = d->as.type_decl.name;
+          tr.parts = &part;
+          emit_type_recursive(ctx, module, &tr, out, &emitted, &visiting, false);
       }
-      for (const AstImport* imp = module->imports; imp; imp = imp->next) {
-          const AstFuncDecl* f = find_function_overload(imp->module, ctx, name, param_types, param_count, is_method, call_expr);
-          if (f) return f;
-      }
-      return NULL;
   }
 
-  // Phase 1: Try to find exact match for method receiver (named 'this')
-  for (size_t i = 0; i < count; i++) {
-    const AstDecl* d = decls[i];
-    if (d->kind == AST_DECL_FUNC && str_eq(d->as.func_decl.name, name)) {
-      const AstFuncDecl* f = &d->as.func_decl;
-      bool has_this = f->params && str_eq_cstr(f->params->name, "this");
-      if (is_method && !has_this) continue;
-      if (!is_method && has_this) continue;
-
-      uint16_t c = 0; for (const AstParam* p = f->params; p; p = p->next) c++;
-      if (c == param_count) {
-          if (is_method && param_types) {
-              Str p_base = get_base_type_name(f->params->type);
-              if (base_types_match(p_base, param_types[0])) return f;
-          } else if (!is_method) {
-              if (call_expr && (call_expr->kind == AST_EXPR_CALL || call_expr->kind == AST_EXPR_METHOD_CALL)) {
-                  bool names_match = true;
-                  const AstParam* fp = f->params;
-                  const AstCallArg* ca = (call_expr->kind == AST_EXPR_CALL) ? call_expr->as.call.args : call_expr->as.method_call.args;
-                  while (fp && ca) {
-                      if (ca->name.len > 0 && !str_eq(ca->name, fp->name)) { names_match = false; break; }
-                      fp = fp->next; ca = ca->next;
-                  }
-                  if (names_match) return f;
-              } else {
-                  return f;
-              }
-          } else if (!param_types) {
-              return f;
-          }
+  // Prototypes for non-generic functions
+  for (size_t i = 0; i < ctx->all_decl_count; i++) {
+      const AstDecl* d = ctx->all_decls[i];
+      if (d->kind == AST_DECL_FUNC && !d->as.func_decl.generic_params && !d->as.func_decl.is_extern && !str_eq_cstr(d->as.func_decl.name, "main")) {
+          CFuncContext tctx = {.compiler_ctx = ctx, .module = module, .func_decl = &d->as.func_decl};
+          fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&tctx, &d->as.func_decl), rae_mangle_function(ctx, &d->as.func_decl));
+          emit_param_list(&tctx, d->as.func_decl.params, out, false);
+          fprintf(out, ");\n");
       }
-    }
   }
 
-  // Phase 2: Relaxed matching (UFCS - first param matches type but not named 'this')
-  for (size_t i = 0; i < count; i++) {
-    const AstDecl* d = decls[i];
-    if (d->kind == AST_DECL_FUNC && str_eq(d->as.func_decl.name, name)) {
-      const AstFuncDecl* f = &d->as.func_decl;
-      bool has_this = f->params && str_eq_cstr(f->params->name, "this");
-      if (is_method && !f->params) continue;
-      if (!is_method && has_this) continue;
-
-      uint16_t c = 0; for (const AstParam* p = f->params; p; p = p->next) c++;
-      if (c == param_count) {
-          if (is_method && param_types) {
-              if (types_match(get_base_type_name(f->params->type), param_types[0])) return f;
-          } else if (!is_method) {
-              if (call_expr && (call_expr->kind == AST_EXPR_CALL || call_expr->kind == AST_EXPR_METHOD_CALL)) {
-                  bool names_match = true;
-                  const AstParam* fp = f->params;
-                  const AstCallArg* ca = (call_expr->kind == AST_EXPR_CALL) ? call_expr->as.call.args : call_expr->as.method_call.args;
-                  while (fp && ca) {
-                      if (ca->name.len > 0 && !str_eq(ca->name, fp->name)) { names_match = false; break; }
-                      fp = fp->next; ca = ca->next;
-                  }
-                  if (names_match) return f;
-              } else {
-                  return f;
-              }
-          } else if (!param_types) {
-              return f;
-          }
-      }
-    }
-  }
-
-  // Phase 3: Generic fallback or name-only match
-  for (size_t i = 0; i < count; i++) {
-    const AstDecl* d = decls[i];
-    if (d->kind == AST_DECL_FUNC && str_eq(d->as.func_decl.name, name)) {
-      const AstFuncDecl* f = &d->as.func_decl;
-      bool has_this = f->params && str_eq_cstr(f->params->name, "this");
-      if (is_method && !f->params) continue;
-      if (!is_method && has_this) continue;
-
-      uint16_t c = 0; for (const AstParam* p = f->params; p; p = p->next) c++;
-      if (c == param_count) {
-          if (!is_method && param_types) {
-              // Full parameter list match for non-methods
-              bool match = true;
-              const AstParam* p = f->params;
-              for (uint16_t i = 0; i < param_count; i++) {
-                  Str p_base = get_base_type_name(p->type);
-                  if (!types_match(p_base, param_types[i])) { match = false; break; }
-                  p = p->next;
-              }
-              if (match) return f;
-          } else if (!param_types) {
-              return f;
-          }
-          bool match = true;
-          const AstParam* p = f->params;
-          for (uint16_t i = 0; i < param_count; i++) {
-              Str p_base = get_base_type_name(p->type);
-              // Allow generic parameters to match anything in this phase
-              bool is_gp = false;
-              if (f->generic_params) {
-                  for (const AstIdentifierPart* gp = f->generic_params; gp; gp = gp->next) {
-                      if (str_eq(p_base, gp->text)) { is_gp = true; break; }
-                  }
-              }
-              if (!is_gp && !types_match(p_base, param_types[i])) { match = false; break; }
-              p = p->next;
-          }
-          if (match) return f;
-      }
-    }
+  // Prototypes for specialized functions
+  for (size_t i = 0; i < ctx->specialized_func_count; i++) {
+      const AstFuncDecl* f = ctx->specialized_funcs[i].decl; const AstTypeRef* args = ctx->specialized_funcs[i].concrete_args;
+      const char* mangled = rae_mangle_specialized_function(ctx, f, args);
+      CFuncContext tctx = {.compiler_ctx = ctx, .module = module, .generic_params = f->generic_params, .generic_args = args};
+      fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&tctx, f), mangled); emit_param_list(&tctx, f->params, out, false); fprintf(out, ");\n");
   }
   
-  return NULL;
-}
-
-static bool is_wildcard_pattern(const AstExpr* expr) {
-  return expr && expr->kind == AST_EXPR_IDENT && str_eq_cstr(expr->as.ident, "_");
-}
-
-static bool is_string_literal_expr(const AstExpr* expr) {
-  return expr && expr->kind == AST_EXPR_STRING;
-}
-
-static bool match_cases_use_string(const AstMatchCase* cases, bool* out_use_string) {
-  bool s = false, o = false;
-  for (const AstMatchCase* c = cases; c; c = c->next) {
-    if (c->pattern) { if (is_string_literal_expr(c->pattern)) s = true; else o = true; }
+  // Bodies for non-generic functions
+  for (size_t i = 0; i < ctx->all_decl_count; i++) {
+      const AstDecl* d = ctx->all_decls[i];
+      if (d->kind == AST_DECL_FUNC && !d->as.func_decl.generic_params && !d->as.func_decl.is_extern && !str_eq_cstr(d->as.func_decl.name, "main")) {
+          emit_function(ctx, module, &d->as.func_decl, out, registry, false);
+      }
   }
-  if (s && o) return false;
-  *out_use_string = s; return true;
-}
 
-static bool match_arms_use_string(const AstMatchArm* arms, bool* out_use_string) {
-  bool s = false, o = false;
-  for (const AstMatchArm* a = arms; a; a = a->next) {
-    if (a->pattern) { if (is_string_literal_expr(a->pattern)) s = true; else o = true; }
-  }
-  if (s && o) return false;
-  *out_use_string = s; return true;
-}
-
-static bool emit_match(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
-  if (!stmt->as.match_stmt.subject || !stmt->as.match_stmt.cases) return false;
-  bool use_str = false; match_cases_use_string(stmt->as.match_stmt.cases, &use_str);
+  // Bodies for specialized functions
+  for (size_t i = 0; i < ctx->specialized_func_count; i++) emit_specialized_function(ctx, module, ctx->specialized_funcs[i].decl, ctx->specialized_funcs[i].concrete_args, out, registry, false);
   
-  const AstTypeRef* tr = infer_expr_type_ref(ctx, stmt->as.match_stmt.subject);
-  bool use_any = tr && tr->is_opt;
-
-  size_t tid = ctx->temp_counter++;
-  if (use_any) fprintf(out, "  RaeAny __m%zu = ", tid);
-  else if (use_str) fprintf(out, "  const char* __m%zu = ", tid);
-  else fprintf(out, "  int64_t __m%zu = ", tid);
-  
-  emit_expr(ctx, stmt->as.match_stmt.subject, out, PREC_LOWEST, false, false); fprintf(out, ";\n");
-  int ci = 0; const AstMatchCase* def = NULL;
-  for (const AstMatchCase* c = stmt->as.match_stmt.cases; c; c = c->next) {
-    if (!c->pattern || is_wildcard_pattern(c->pattern)) { def = c; continue; }
-    if (use_any) {
-        fprintf(out, "%s(rae_any_eq(__m%zu, ", ci > 0 ? " else if " : "  if ", tid);
-        emit_expr(ctx, c->pattern, out, PREC_LOWEST, false, false);
-        fprintf(out, ")) {\n");
-    } else if (use_str) {
-        fprintf(out, "%s(rae_ext_rae_str_eq(__m%zu, ", ci > 0 ? " else if " : "  if ", tid);
-        emit_expr(ctx, c->pattern, out, PREC_LOWEST, false, false);
-        fprintf(out, ")) {\n");
-    } else {
-        fprintf(out, "%s(__m%zu == ", ci > 0 ? " else if " : "  if ", tid);
-        emit_expr(ctx, c->pattern, out, PREC_LOWEST, false, false);
-        fprintf(out, ") {\n");
-    }
-    emit_block(ctx, c->block, out); fprintf(out, "  }"); ci++;
+  // Finally emit main
+  for (size_t i = 0; i < ctx->all_decl_count; i++) {
+      const AstDecl* d = ctx->all_decls[i];
+      if (d->kind == AST_DECL_FUNC && str_eq_cstr(d->as.func_decl.name, "main")) {
+          emit_function(ctx, module, &d->as.func_decl, out, registry, false);
+      }
   }
-  if (def) { if (ci > 0) fprintf(out, " else {\n"); emit_block(ctx, def->block, out); if (ci > 0) fprintf(out, "  }"); }
-  fprintf(out, "\n"); return true;
+
+  fclose(out); return true;
 }

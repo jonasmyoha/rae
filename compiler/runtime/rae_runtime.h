@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <wchar.h>
 
 #ifdef __GNUC__
 #define RAE_UNUSED __attribute__((unused))
@@ -80,7 +81,17 @@ void rae_ext_rae_buf_copy(void* src, int64_t src_off, void* dst, int64_t dst_off
 void rae_ext_rae_log_any(RaeAny value);
 void rae_ext_rae_log_stream_any(RaeAny value);
 
+/* Mangled wrappers for primitives (used by specialized generics) */
+RAE_UNUSED static void rae_log_stream_int64_t_(int64_t v) { printf("%lld", (long long)v); }
+RAE_UNUSED static void rae_log_stream_double_(double v) { printf("%g", v); }
+RAE_UNUSED static void rae_log_stream_rae_Bool_(rae_Bool v) { printf("%s", v ? "true" : "false"); }
+RAE_UNUSED static void rae_log_stream_rae_String_(rae_String v) { printf("%.*s", (int)v.len, (char*)v.data); }
+RAE_UNUSED static void rae_log_stream_uint32_t_(uint32_t v) { printf("%lc", (wint_t)v); }
+RAE_UNUSED static void rae_log_stream_RaeAny_(RaeAny v) { rae_ext_rae_log_stream_any(v); }
+
 /* Conversion Helpers */
+RAE_UNUSED double rae_ext_rae_int_to_float(int64_t v);
+RAE_UNUSED int64_t rae_ext_rae_float_to_int(double v);
 RAE_UNUSED static RaeAny rae_any_int(int64_t v) { return (RaeAny){RAE_TYPE_INT64, false, false, {.i = v}}; }
 RAE_UNUSED static RaeAny rae_any_int32(int32_t v) { return (RaeAny){RAE_TYPE_INT32, false, false, {.i = v}}; }
 RAE_UNUSED static RaeAny rae_any_uint64(uint64_t v) { return (RaeAny){RAE_TYPE_UINT64, false, false, {.i = (int64_t)v}}; }
@@ -265,6 +276,10 @@ int64_t rae_ext_rae_str_to_i64(rae_String s);
 rae_String rae_ext_rae_io_read_line(void);
 rae_Char rae_ext_rae_io_read_char(void);
 
+void rae_ext_rae_seed(int64_t seed);
+double rae_ext_rae_random(void);
+int64_t rae_ext_rae_random_int(int64_t min, int64_t max);
+
 void rae_ext_rae_sys_exit(int64_t code);
 rae_String rae_ext_rae_sys_get_env(rae_String name);
 rae_String rae_ext_rae_sys_read_file(rae_String path);
@@ -288,6 +303,7 @@ rae_String rae_ext_rae_str_string_ptr(const rae_String* s);
 rae_String rae_ext_rae_str_cstr(const char* s); // Legacy/helper
 rae_String rae_ext_rae_str_cstr_ptr(const char** s); // Legacy/helper
 
+int64_t rae_ext_nextTick(void);
 int64_t rae_ext_nowMs(void);
 int64_t rae_ext_nowNs(void);
 void rae_ext_rae_sleep(int64_t ms);
