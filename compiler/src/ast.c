@@ -125,7 +125,11 @@ static void dump_call_args(const AstCallArg* arg, FILE* out) {
       print_str(out, current->name);
       fputs(": ", out);
     }
-    dump_expr(current->value, out);
+    if (current->value) {
+      dump_expr(current->value, out);
+    } else {
+      fputs("<NULL_VALUE>", out);
+    }
     first = false;
     current = current->next;
   }
@@ -149,6 +153,10 @@ static void dump_object_fields(const AstObjectField* field, FILE* out) {
 static void dump_expr(const AstExpr* expr, FILE* out) {
   if (!expr) {
     fputs("<expr?>", out);
+    return;
+  }
+  if ((uintptr_t)expr < 0x1000) {
+    fprintf(out, "<invalid:%p>", (void*)expr);
     return;
   }
   switch (expr->kind) {
@@ -295,6 +303,16 @@ static void dump_expr(const AstExpr* expr, FILE* out) {
       print_str(out, expr->as.method_call.method_name);
       fputc('(', out);
       dump_call_args(expr->as.method_call.args, out);
+      fputc(')', out);
+      break;
+    case AST_EXPR_BOX:
+      fputs("box(", out);
+      dump_expr(expr->as.unary.operand, out);
+      fputc(')', out);
+      break;
+    case AST_EXPR_UNBOX:
+      fputs("unbox(", out);
+      dump_expr(expr->as.unary.operand, out);
       fputc(')', out);
       break;
   }

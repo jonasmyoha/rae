@@ -895,9 +895,7 @@ static bool native_rae_math_pow(struct VM* vm, VmNativeResult* out_result, const
 
 static bool native_rae_ext_rae_buf_alloc(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
   (void)vm; (void)user_data;
-  if (arg_count != 2) { printf("DEBUG: buf_alloc failed arg_count %zu\n", arg_count); return false; }
   const Value* val_size = deref_value(&args[0]);
-  if (val_size->type != VAL_INT) { printf("DEBUG: buf_alloc failed size type %d\n", val_size->type); return false; }
   out_result->has_value = true;
   out_result->value = value_buffer(val_size->as.int_value);
   return true;
@@ -905,24 +903,19 @@ static bool native_rae_ext_rae_buf_alloc(struct VM* vm, VmNativeResult* out_resu
 
 static bool native_rae_ext_rae_buf_free(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
   (void)vm; (void)user_data;
-  if (arg_count != 1) { printf("DEBUG: buf_free failed arg_count %zu\n", arg_count); return false; }
   const Value* val = deref_value(&args[0]);
-  if (val->type != VAL_BUFFER) { printf("DEBUG: buf_free failed type %d\n", val->type); return false; }
   out_result->has_value = false;
   return true;
 }
 
 static bool native_rae_ext_rae_buf_copy(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
   (void)vm; (void)user_data;
-  if (arg_count != 6) { printf("DEBUG: buf_copy failed arg_count %zu\n", arg_count); return false; }
   const Value* src_val = deref_value(&args[0]);
   const Value* src_off = deref_value(&args[1]);
   const Value* dst_val = deref_value(&args[2]);
   const Value* dst_off = deref_value(&args[3]);
   const Value* len = deref_value(&args[4]);
   if (src_val->type != VAL_BUFFER || src_off->type != VAL_INT || dst_val->type != VAL_BUFFER || dst_off->type != VAL_INT || len->type != VAL_INT) {
-      printf("DEBUG: buf_copy failed types: src=%d, src_off=%d, dst=%d, dst_off=%d, len=%d\n", 
-             src_val->type, src_off->type, dst_val->type, dst_off->type, len->type);
       return false;
   }
   
@@ -944,12 +937,10 @@ static bool native_rae_ext_rae_buf_copy(struct VM* vm, VmNativeResult* out_resul
 
 static bool native_rae_ext_rae_buf_set(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
   (void)vm; (void)user_data;
-  if (arg_count != 3) { printf("DEBUG: buf_set failed arg_count %zu\n", arg_count); return false; }
   const Value* buf_val = deref_value(&args[0]);
   const Value* index = deref_value(&args[1]);
   const Value* value = deref_value(&args[2]);
   if (buf_val->type != VAL_BUFFER || index->type != VAL_INT) { 
-      printf("DEBUG: buf_set failed types: buf=%d, index=%d\n", buf_val->type, index->type);
       return false; 
   }
   
@@ -965,11 +956,9 @@ static bool native_rae_ext_rae_buf_set(struct VM* vm, VmNativeResult* out_result
 
 static bool native_rae_ext_rae_buf_get(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
   (void)vm; (void)user_data;
-  if (arg_count != 2) { printf("DEBUG: buf_get failed arg_count %zu\n", arg_count); return false; }
   const Value* buf_val = deref_value(&args[0]);
   const Value* index = deref_value(&args[1]);
   if (buf_val->type != VAL_BUFFER || index->type != VAL_INT) {
-      printf("DEBUG: buf_get failed types: buf=%d, index=%d\n", buf_val->type, index->type);
       return false;
   }
   
@@ -2408,23 +2397,23 @@ static bool module_graph_load_module(ModuleGraph* graph,
                                      ModuleStack* stack,
                                      uint64_t* hash_out,
                                      bool no_implicit) {
-  char canonical_path[PATH_MAX];
-  const char* path_to_check = file_path;
-  if (realpath(file_path, canonical_path)) {
-    path_to_check = canonical_path;
-  }
-
-  if (module_graph_has_module(graph, module_path)) {
-    return true;
-  }
-
-
-  // Also check if the file is already loaded under a different module path
-  for (ModuleNode* node = graph->head; node; node = node->next) {
-    if (node->canonical_path && strcmp(node->canonical_path, path_to_check) == 0) {
+    char canonical_path[PATH_MAX];
+    const char* path_to_check = file_path;
+    if (realpath(file_path, canonical_path)) {
+      path_to_check = canonical_path;
+    }
+  
+    // Check by canonical path first (most reliable)
+    for (ModuleNode* node = graph->head; node; node = node->next) {
+      if (node->canonical_path && strcmp(node->canonical_path, path_to_check) == 0) {
+        return true;
+      }
+    }
+  
+    if (module_graph_has_module(graph, module_path)) {
       return true;
     }
-  }
+  
   if (module_stack_contains(stack, module_path)) {
     fprintf(stderr, "error: cyclic import detected involving '%s'\n", module_path);
     module_stack_print_trace(stack, module_path);
@@ -2753,7 +2742,6 @@ static AstModule merge_module_graph(const ModuleGraph* graph) {
   AstDecl* head = NULL;
   AstDecl* tail = NULL;
   for (ModuleNode* node = graph->head; node; node = node->next) {
-    if (!node->module || !node->module->decls) continue;
     
     // Copy the declaration list head
     AstDecl* current = node->module->decls;
@@ -3047,15 +3035,15 @@ static bool build_c_backend_output(const char* entry_file,
 
   CompilerContext ctx = {0};
   ctx.ast_arena = arena;
-  ctx.all_decl_cap = 2048;
+  ctx.all_decl_cap = 8192;
   ctx.all_decls = arena_alloc(arena, sizeof(AstDecl*) * ctx.all_decl_cap);
-  ctx.generic_type_cap = 512;
+  ctx.generic_type_cap = 1024;
   ctx.generic_types = arena_alloc(arena, sizeof(AstTypeRef*) * ctx.generic_type_cap);
-  ctx.emitted_generic_type_cap = 512;
+  ctx.emitted_generic_type_cap = 1024;
   ctx.emitted_generic_types = arena_alloc(arena, sizeof(AstTypeRef*) * ctx.emitted_generic_type_cap);
-  ctx.specialized_func_cap = 512;
+  ctx.specialized_func_cap = 2048;
   ctx.specialized_funcs = arena_alloc(arena, sizeof(FunctionSpecialization) * ctx.specialized_func_cap);
-  ctx.emitted_method_cap = 1024;
+  ctx.emitted_method_cap = 2048;
   ctx.emitted_method_names = arena_alloc(arena, sizeof(char*) * ctx.emitted_method_cap);
   
   if (!sema_analyze_module(&ctx, &merged)) {
@@ -3203,15 +3191,15 @@ static bool build_hybrid_output(const char* entry_file,
 
   CompilerContext ctx = {0};
   ctx.ast_arena = arena;
-  ctx.all_decl_cap = 2048;
+  ctx.all_decl_cap = 8192;
   ctx.all_decls = arena_alloc(arena, sizeof(AstDecl*) * ctx.all_decl_cap);
-  ctx.generic_type_cap = 512;
+  ctx.generic_type_cap = 1024;
   ctx.generic_types = arena_alloc(arena, sizeof(AstTypeRef*) * ctx.generic_type_cap);
-  ctx.emitted_generic_type_cap = 512;
+  ctx.emitted_generic_type_cap = 1024;
   ctx.emitted_generic_types = arena_alloc(arena, sizeof(AstTypeRef*) * ctx.emitted_generic_type_cap);
-  ctx.specialized_func_cap = 512;
+  ctx.specialized_func_cap = 2048;
   ctx.specialized_funcs = arena_alloc(arena, sizeof(FunctionSpecialization) * ctx.specialized_func_cap);
-  ctx.emitted_method_cap = 1024;
+  ctx.emitted_method_cap = 2048;
   ctx.emitted_method_names = arena_alloc(arena, sizeof(char*) * ctx.emitted_method_cap);
 
   VmRegistry registry;
@@ -3700,7 +3688,6 @@ static void* watch_thread_func(void* arg) {
         
         const char* changed = watch_state_poll_change(ctx->state);
         if (changed) {
-            printf("[watch] change detected in %s\n", changed); fflush(stdout);
             ctx->change_detected = true;
             if (ctx->vm) {
                 ctx->vm->reload_requested = true;
@@ -3715,7 +3702,6 @@ static void* watch_thread_func(void* arg) {
 static int run_vm_watch(const RunOptions* run_opts, const char* project_root) {
   const char* file_path = run_opts->input_path;
   printf("Watching '%s' for changes (Ctrl+C to exit)\n", file_path);
-  fflush(stdout);
 
   VmRegistry registry;
   vm_registry_init(&registry);
@@ -3875,7 +3861,6 @@ static int run_vm_watch(const RunOptions* run_opts, const char* project_root) {
 
 
 
-  printf("[watch] VM started. PID: %d\n", getpid()); fflush(stdout);
 
   int exit_code = 0;
   while (ctx.running) {
@@ -3897,7 +3882,6 @@ static int run_vm_watch(const RunOptions* run_opts, const char* project_root) {
       VMResult result = vm_run(vm, &module->chunk);
       
       if (result == VM_RUNTIME_RELOAD) {
-          printf("[watch] Hot-reload requested! Patching...\n"); fflush(stdout);
           Chunk new_chunk;
           chunk_init(&new_chunk);
           uint64_t new_hash = 0;
@@ -3912,14 +3896,11 @@ static int run_vm_watch(const RunOptions* run_opts, const char* project_root) {
               
               if (patched) {
                   watch_state_apply_sources(&watch_state, &new_sources);
-                  printf("[watch] Hot-patch successful.\n"); fflush(stdout);
               } else {
-                  printf("[watch] Hot-patch failed (VM rejection). Continuing with old code.\n"); fflush(stdout);
               }
               chunk_free(&new_chunk);
               watch_sources_clear(&new_sources);
           } else {
-              printf("[watch] Hot-reload rejected: compilation errors. Continuing with old code.\n"); fflush(stdout);
               sys_mutex_lock(&ctx.mutex);
               vm->reload_requested = false;
               sys_mutex_unlock(&ctx.mutex);

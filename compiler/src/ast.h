@@ -323,6 +323,8 @@ typedef struct {
   Str name;
   AstProperty* properties;
   AstIdentifierPart* generic_params; // Linked list of type parameter names (e.g. T, K, V)
+  AstTypeRef* specialization_args; // Concrete types used
+  struct AstDecl* generic_template; // Link back
   AstTypeField* fields;
 } AstTypeDecl;
 
@@ -330,7 +332,8 @@ typedef struct {
   Str name;
   AstParam* params;
   AstIdentifierPart* generic_params; // Linked list of type parameter names (e.g. T, K, V)
-  AstTypeRef* specialization_args; // For specialized instances, the concrete types used
+  AstTypeRef* specialization_args; // Concrete types used
+  struct AstDecl* generic_template; // Link back
   AstProperty* properties;
   AstReturnItem* returns;
   bool is_extern;
