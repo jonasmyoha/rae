@@ -191,10 +191,12 @@ static const AstFuncDecl* find_function_overload(const AstModule* module, CFuncC
 static bool is_primitive_ref(CFuncContext* ctx, const AstTypeRef* tr) {
     if (!tr || !(tr->is_view || tr->is_mod)) return false;
     Str base = get_base_type_name(tr);
-    if (str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int64") || str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float64") || 
+    // Buffer and List are already pointers — no wrapper struct
+    if (str_eq_cstr(base, "Buffer") || str_eq_cstr(base, "List") || str_eq_cstr(base, "Any")) return false;
+    if (str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int64") || str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float64") ||
         str_eq_cstr(base, "Bool") || str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32") || str_eq_cstr(base, "String") ||
         tr->is_id || tr->is_key) return true;
-    return is_primitive_type(base) || (ctx->uses_raylib && is_raylib_builtin_type(base));
+    return false;
 }
 
 
@@ -1277,7 +1279,6 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 bool is_prim_ref_return = is_ref_return && is_primitive_type(get_base_type_name(ret_type));
 
                 if (is_prim_ref_return) {
-                    // Return (rae_Mod_Int64){ .ptr = &expr }
                     fprintf(out, "(");
                     emit_type_ref_as_c_type(ctx, ret_type, out, false);
                     fprintf(out, "){ .ptr = &");
@@ -1285,6 +1286,17 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     fprintf(out, " }");
                 } else {
                     emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, false, false);
+                }
+            } else {
+                // Bare return — emit default value for non-void functions
+                if (ctx->func_decl && str_eq_cstr(ctx->func_decl->name, "main")) {
+                    fprintf(out, "0");
+                } else {
+                    const AstTypeRef* ret_type = ctx->func_decl && ctx->func_decl->returns ? ctx->func_decl->returns->type : NULL;
+                    if (ret_type) {
+                        if (ret_type->is_opt) fprintf(out, "rae_any_none()");
+                        else emit_auto_init(ctx, ret_type, out);
+                    }
                 }
             }
             fprintf(out, ";\n");
