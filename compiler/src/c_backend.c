@@ -1126,32 +1126,67 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
         }
         case AST_STMT_ASSIGN: {
             fprintf(out, "  ");
-            emit_expr(ctx, stmt->as.assign_stmt.target, out, PREC_LOWEST, true, false);
-            fprintf(out, " = ");
-            // For struct literal assignments, add compound literal cast if missing
-            if (stmt->as.assign_stmt.value->kind == AST_EXPR_OBJECT &&
-                !stmt->as.assign_stmt.value->as.object_literal.type) {
-                const AstTypeRef* target_tr = infer_expr_type_ref(ctx, stmt->as.assign_stmt.target);
-                if (target_tr) {
+            // Check if assigning to a mod ref variable (e.g. rx = 10 where rx is rae_Mod_Int64)
+            const AstTypeRef* target_tr = infer_expr_type_ref(ctx, stmt->as.assign_stmt.target);
+            bool is_mod_ref = target_tr && target_tr->is_mod;
+            bool is_prim_mod_ref = is_mod_ref && is_primitive_type(get_base_type_name(target_tr));
+
+            if (is_prim_mod_ref) {
+                // *rx.ptr = value
+                fprintf(out, "*");
+                emit_expr(ctx, stmt->as.assign_stmt.target, out, PREC_LOWEST, true, true);
+                fprintf(out, ".ptr = ");
+                emit_expr(ctx, stmt->as.assign_stmt.value, out, PREC_LOWEST, false, false);
+            } else if (is_mod_ref) {
+                // *r = value (for non-primitive mod refs like mod Point)
+                fprintf(out, "*");
+                emit_expr(ctx, stmt->as.assign_stmt.target, out, PREC_LOWEST, true, true);
+                fprintf(out, " = ");
+                // Add compound literal cast for struct literals
+                if (stmt->as.assign_stmt.value->kind == AST_EXPR_OBJECT &&
+                    !stmt->as.assign_stmt.value->as.object_literal.type && target_tr) {
                     fprintf(out, "(");
                     emit_type_ref_as_c_type(ctx, target_tr, out, true);
                     fprintf(out, ")");
                 }
+                emit_expr(ctx, stmt->as.assign_stmt.value, out, PREC_LOWEST, false, false);
+            } else {
+                emit_expr(ctx, stmt->as.assign_stmt.target, out, PREC_LOWEST, true, false);
+                fprintf(out, " = ");
+                // For struct literal assignments, add compound literal cast if missing
+                if (stmt->as.assign_stmt.value->kind == AST_EXPR_OBJECT &&
+                    !stmt->as.assign_stmt.value->as.object_literal.type && target_tr) {
+                    fprintf(out, "(");
+                    emit_type_ref_as_c_type(ctx, target_tr, out, true);
+                    fprintf(out, ")");
+                }
+                emit_expr(ctx, stmt->as.assign_stmt.value, out, PREC_LOWEST, false, false);
             }
-            emit_expr(ctx, stmt->as.assign_stmt.value, out, PREC_LOWEST, false, false);
             fprintf(out, ";\n");
             break;
         }
-        case AST_STMT_RET: 
-            fprintf(out, "  return "); 
+        case AST_STMT_RET: {
+            fprintf(out, "  return ");
             if (stmt->as.ret_stmt.values) {
-                if (stmt->as.ret_stmt.values->value->kind == AST_EXPR_LIST) {
-                    emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, false, false);
+                // Check if return type is a mod/view ref
+                const AstTypeRef* ret_type = ctx->func_decl && ctx->func_decl->returns ? ctx->func_decl->returns->type : NULL;
+                bool is_ref_return = ret_type && (ret_type->is_view || ret_type->is_mod);
+                bool is_prim_ref_return = is_ref_return && is_primitive_type(get_base_type_name(ret_type));
+
+                if (is_prim_ref_return) {
+                    // Return (rae_Mod_Int64){ .ptr = &expr }
+                    fprintf(out, "(");
+                    emit_type_ref_as_c_type(ctx, ret_type, out, false);
+                    fprintf(out, "){ .ptr = &");
+                    emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, true, true);
+                    fprintf(out, " }");
                 } else {
                     emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, false, false);
                 }
             }
-            fprintf(out, ";\n"); 
+            fprintf(out, ";\n");
+            break;
+        } 
             break;
         case AST_STMT_IF: emit_if(ctx, stmt, out); break;
         case AST_STMT_LOOP: emit_loop(ctx, stmt, out); break;
