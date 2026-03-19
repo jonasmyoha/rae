@@ -130,7 +130,10 @@ static bool emit_type_recursive(CompilerContext* ctx, const AstModule* m, const 
     
     if (base.len == 0) return true;
     if (is_primitive_type(base) || (ray && is_raylib_builtin_type(base))) return true;
-    
+    // Skip c_struct types (raylib types defined externally)
+    { const AstDecl* td = find_type_decl(NULL, m, base);
+      if (td && td->kind == AST_DECL_TYPE && has_property(td->as.type_decl.properties, "c_struct")) return true; }
+
     const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, type);
     if (emitted_list_contains(emitted, mangled)) return true;
     if (emitted_list_contains(visiting, mangled)) return true;
@@ -643,6 +646,15 @@ static bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, F
       const AstDecl* ed = find_enum_decl(ctx, ctx->module, base);
       if (ed) { fprintf(out, "int64_t"); if (is_ptr) fprintf(out, "*"); return true; }
   }
+  // Check for c_struct property types (raylib types etc.) — emit as bare name
+  if (ctx) {
+      const AstDecl* td = find_type_decl(ctx, ctx->module, base);
+      if (td && td->kind == AST_DECL_TYPE && has_property(td->as.type_decl.properties, "c_struct")) {
+          fprintf(out, "%.*s", (int)base.len, base.data);
+          if (is_ptr) fprintf(out, "*");
+          return true;
+      }
+  }
   const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type);
   if (ctx && ctx->uses_raylib && is_raylib_builtin_type(base)) {
         const AstDecl* td = find_type_decl(NULL, ctx->module, base);
@@ -958,18 +970,28 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     if (expr->decl_link && expr->decl_link->kind == AST_DECL_FUNC) {
         const AstFuncDecl* fd = &expr->decl_link->as.func_decl;
         Str name = fd->name;
-        // If decl_link points to a generic function but call has no generic args,
-        // try to find a non-generic overload with matching arg count instead
-        if (fd->generic_params && !expr->as.call.generic_args && !ctx->generic_params) {
+        // Fix overload resolution: check if decl_link points to wrong overload
+        {
             uint16_t call_argc = 0;
             for (const AstCallArg* ca = expr->as.call.args; ca; ca = ca->next) call_argc++;
-            for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
-                const AstDecl* d = ctx->compiler_ctx->all_decls[i];
-                if (d->kind == AST_DECL_FUNC && !d->as.func_decl.generic_params && str_eq(d->as.func_decl.name, name)) {
-                    uint16_t pc = 0;
-                    for (const AstParam* pp = d->as.func_decl.params; pp; pp = pp->next) pc++;
-                    if (pc == call_argc) { fd = &d->as.func_decl; break; }
+            uint16_t decl_argc = 0;
+            for (const AstParam* pp = fd->params; pp; pp = pp->next) decl_argc++;
+            bool needs_fix = (fd->generic_params && !expr->as.call.generic_args && !ctx->generic_params)
+                          || (call_argc != decl_argc);
+            if (needs_fix) {
+                const AstFuncDecl* best = NULL;
+                for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
+                    const AstDecl* d = ctx->compiler_ctx->all_decls[i];
+                    if (d->kind == AST_DECL_FUNC && str_eq(d->as.func_decl.name, name)) {
+                        uint16_t pc = 0;
+                        for (const AstParam* pp = d->as.func_decl.params; pp; pp = pp->next) pc++;
+                        if (pc == call_argc) {
+                            if (!d->as.func_decl.generic_params) { best = &d->as.func_decl; break; }
+                            if (!best) best = &d->as.func_decl;
+                        }
+                    }
                 }
+                if (best) fd = best;
             }
         }
         if (str_eq_cstr(name, "sizeof")) {
