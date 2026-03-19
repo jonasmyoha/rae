@@ -475,6 +475,11 @@ static void discover_specializations_expr(CFuncContext* ctx, const AstExpr* expr
                             if (inferred) inferred_args = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, inferred);
                         }
                     }
+                    // Try return-type inference from expected type (let x: Type = genericFunc(...))
+                    if (!inferred_args && ctx->has_expected_type && d->returns && d->returns->type) {
+                        AstTypeRef* inferred = infer_generic_args(ctx->compiler_ctx, d, d->returns->type, &ctx->expected_type);
+                        if (inferred) inferred_args = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, inferred);
+                    }
                     if (inferred_args) register_function_specialization(ctx->compiler_ctx, d, inferred_args);
                 }
             }
@@ -1300,7 +1305,10 @@ static bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, 
 bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const char* out_path, struct VmRegistry* registry, bool* out_uses_raylib) {
   if (!module) return false;
   ctx->all_decl_count = 0; collect_decls_from_module(ctx, module); ctx->current_module = (AstModule*)module;
-  
+
+  // Discover generic specializations by walking all function bodies
+  collect_type_refs_module(ctx);
+
   FILE* out = fopen(out_path, "w"); if (!out) return false;
   fprintf(out, "#include \"rae_runtime.h\"\n\n");
   EmittedTypeList emitted = { .items = malloc(sizeof(char*) * 1024), .capacity = 1024, .count = 0 };
@@ -1360,8 +1368,29 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       }
   }
 
-  // Bodies for specialized functions
-  for (size_t i = 0; i < ctx->specialized_func_count; i++) emit_specialized_function(ctx, module, ctx->specialized_funcs[i].decl, ctx->specialized_funcs[i].concrete_args, out, registry, false);
+  // Bodies for specialized functions (iterative — emitting may discover new specializations)
+  {
+      size_t emitted_idx = 0;
+      size_t prototyped_count = ctx->specialized_func_count; // already prototyped above
+      while (emitted_idx < ctx->specialized_func_count) {
+          // Emit prototypes for any newly discovered specializations
+          while (prototyped_count < ctx->specialized_func_count) {
+              const AstFuncDecl* f = ctx->specialized_funcs[prototyped_count].decl;
+              const AstTypeRef* args = ctx->specialized_funcs[prototyped_count].concrete_args;
+              const char* mangled = rae_mangle_specialized_function(ctx, f, args);
+              const AstIdentifierPart* gp = f->generic_params;
+              if (!gp && f->generic_template && f->generic_template->kind == AST_DECL_FUNC)
+                  gp = f->generic_template->as.func_decl.generic_params;
+              CFuncContext tctx = {.compiler_ctx = ctx, .module = module, .generic_params = gp, .generic_args = args};
+              fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&tctx, f), mangled);
+              emit_param_list(&tctx, f->params, out, false);
+              fprintf(out, ");\n");
+              prototyped_count++;
+          }
+          emit_specialized_function(ctx, module, ctx->specialized_funcs[emitted_idx].decl, ctx->specialized_funcs[emitted_idx].concrete_args, out, registry, false);
+          emitted_idx++;
+      }
+  }
   
   // Finally emit main
   for (size_t i = 0; i < ctx->all_decl_count; i++) {
