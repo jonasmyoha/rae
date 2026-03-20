@@ -317,6 +317,7 @@ rae_String rae_ext_rae_str_char_ptr(const uint32_t* v);
 rae_String rae_ext_rae_str_string(rae_String s);
 rae_String rae_ext_rae_str_string_ptr(const rae_String* s);
 rae_String rae_ext_rae_str_cstr(const char* s); // Legacy/helper
+RAE_UNUSED static rae_String rae_ext_rae_str_u8(unsigned char v) { return rae_ext_rae_str_i64((int64_t)v); }
 
 /* JSON helpers */
 RAE_UNUSED static rae_String rae_json_build(const char* s, int64_t len) {
@@ -437,6 +438,7 @@ int64_t rae_ext_measureText(rae_String text, int64_t fontSize);
     rae_String*: rae_ext_rae_str_string_ptr, \
     uint32_t: rae_ext_rae_str_char, \
     uint32_t*: rae_ext_rae_str_char_ptr, \
+    unsigned char: rae_ext_rae_str_u8, \
     default: rae_ext_rae_str_string \
 )(X)
 
