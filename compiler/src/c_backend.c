@@ -473,6 +473,9 @@ static void discover_specializations_expr(CFuncContext* ctx, const AstExpr* expr
                         const AstCallArg* first_arg = expr->as.call.args;
                         if (first_arg) {
                             const AstTypeRef* receiver_type = infer_expr_type_ref(ctx, first_arg->value);
+                            // Substitute receiver type through generic context
+                            if (receiver_type && ctx->generic_params && ctx->generic_args)
+                                receiver_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, receiver_type);
                             AstTypeRef* inferred = infer_generic_args(ctx->compiler_ctx, d, d->params->type, receiver_type);
                             if (inferred) inferred_args = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, inferred);
                         }
@@ -505,7 +508,25 @@ static void discover_specializations_expr(CFuncContext* ctx, const AstExpr* expr
         case AST_EXPR_MEMBER: discover_specializations_expr(ctx, expr->as.member.object); break;
         case AST_EXPR_INDEX: discover_specializations_expr(ctx, expr->as.index.target); discover_specializations_expr(ctx, expr->as.index.index); break;
         case AST_EXPR_OBJECT: for (const AstObjectField* f = expr->as.object_literal.fields; f; f = f->next) discover_specializations_expr(ctx, f->value); break;
-        case AST_EXPR_COLLECTION_LITERAL: for (const AstCollectionElement* e = expr->as.collection.elements; e; e = e->next) discover_specializations_expr(ctx, e->value); break;
+        case AST_EXPR_COLLECTION_LITERAL: {
+            for (const AstCollectionElement* e = expr->as.collection.elements; e; e = e->next) discover_specializations_expr(ctx, e->value);
+            // Register createList and add specializations from expected type
+            if (ctx->has_expected_type && ctx->expected_type.generic_args) {
+                const AstTypeRef* elem_type = ctx->expected_type.generic_args;
+                const AstFuncDecl* create_fd = NULL;
+                const AstFuncDecl* add_fd = NULL;
+                for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
+                    const AstDecl* d = ctx->compiler_ctx->all_decls[i];
+                    if (d->kind != AST_DECL_FUNC) continue;
+                    if (str_eq_cstr(d->as.func_decl.name, "createList") && d->as.func_decl.generic_params) create_fd = &d->as.func_decl;
+                    if (str_eq_cstr(d->as.func_decl.name, "add") && d->as.func_decl.generic_params) add_fd = &d->as.func_decl;
+                }
+                if (create_fd) register_function_specialization(ctx->compiler_ctx, create_fd, elem_type);
+                if (add_fd) register_function_specialization(ctx->compiler_ctx, add_fd, elem_type);
+                register_generic_type(ctx->compiler_ctx, &ctx->expected_type);
+            }
+            break;
+        }
         default: break;
     }
 }
@@ -556,6 +577,16 @@ static void discover_specializations_module(CompilerContext* ctx, const AstModul
             const AstFuncDecl* f = ctx->specialized_funcs[i].decl; const AstTypeRef* args = ctx->specialized_funcs[i].concrete_args;
             if (!f) continue;
             CFuncContext fctx = {.compiler_ctx = ctx, .module = module, .func_decl = f, .generic_params = f->generic_params, .generic_args = args};
+            // Populate locals from params so infer_expr_type_ref works for 'this' etc.
+            for (const AstParam* p = f->params; p; p = p->next) {
+                if (fctx.local_count < 256) {
+                    fctx.locals[fctx.local_count] = p->name;
+                    fctx.local_type_refs[fctx.local_count] = p->type;
+                    const char* tn = rae_mangle_type_specialized(ctx, f->generic_params, args, p->type);
+                    fctx.local_types[fctx.local_count] = str_from_cstr(tn);
+                    fctx.local_count++;
+                }
+            }
             if (f->body) discover_specializations_stmt(&fctx, f->body->first);
         }
         discovered = limit;
@@ -1148,7 +1179,25 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         }
         if (!found_fd) found_fd = generic_fallback;
         if (found_fd) {
-            fprintf(out, "%s(", rae_mangle_function(ctx->compiler_ctx, found_fd));
+            // If generic and in specialized context, substitute type params
+            const char* fb_call_name;
+            if (found_fd->generic_params && ctx->generic_params && ctx->generic_args) {
+                AstTypeRef* concrete = NULL; AstTypeRef* last = NULL;
+                for (const AstIdentifierPart* gp = found_fd->generic_params; gp; gp = gp->next) {
+                    AstTypeRef tmp = {0}; AstIdentifierPart part = {0}; part.text = gp->text;
+                    tmp.parts = &part;
+                    AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &tmp);
+                    AstTypeRef* node = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
+                    *node = *sub; node->next = NULL;
+                    if (!concrete) concrete = node; else last->next = node;
+                    last = node;
+                }
+                fb_call_name = rae_mangle_specialized_function(ctx->compiler_ctx, found_fd, concrete);
+                register_function_specialization(ctx->compiler_ctx, found_fd, concrete);
+            } else {
+                fb_call_name = rae_mangle_function(ctx->compiler_ctx, found_fd);
+            }
+            fprintf(out, "%s(", fb_call_name);
             const AstCallArg* a = expr->as.call.args;
             const AstParam* p = found_fd->params;
             while (a) {
@@ -1218,6 +1267,48 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     fprintf(out, "&");
                     emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, false, true);
                 }
+            } else if (stmt->as.let_stmt.value && stmt->as.let_stmt.value->kind == AST_EXPR_COLLECTION_LITERAL) {
+                // Collection literal: let x: List(Int) = { 10, 20, 30 }
+                // Emit as: createList(count) followed by add() calls
+                const AstTypeRef* list_type = stmt->as.let_stmt.type;
+                const AstTypeRef* elem_type = list_type ? list_type->generic_args : NULL;
+                int count = 0;
+                for (const AstCollectionElement* e = stmt->as.let_stmt.value->as.collection.elements; e; e = e->next) count++;
+
+                // Find createList and add functions
+                const AstFuncDecl* create_fd = NULL;
+                const AstFuncDecl* add_fd = NULL;
+                for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
+                    const AstDecl* d = ctx->compiler_ctx->all_decls[i];
+                    if (d->kind != AST_DECL_FUNC) continue;
+                    if (str_eq_cstr(d->as.func_decl.name, "createList") && d->as.func_decl.generic_params) create_fd = &d->as.func_decl;
+                    if (str_eq_cstr(d->as.func_decl.name, "add") && d->as.func_decl.generic_params) add_fd = &d->as.func_decl;
+                }
+
+                if (create_fd && add_fd && elem_type) {
+                    // Register specializations
+                    register_function_specialization(ctx->compiler_ctx, create_fd, elem_type);
+                    register_function_specialization(ctx->compiler_ctx, add_fd, elem_type);
+                    // Emit: Type name = createList_T_(count);
+                    const char* create_name = rae_mangle_specialized_function(ctx->compiler_ctx, create_fd, elem_type);
+                    fprintf(out, "%s(((int64_t)%dLL));\n", create_name, count);
+                    // Emit add calls
+                    const char* add_name = rae_mangle_specialized_function(ctx->compiler_ctx, add_fd, elem_type);
+                    Str var_name = stmt->as.let_stmt.name;
+                    for (const AstCollectionElement* e = stmt->as.let_stmt.value->as.collection.elements; e; e = e->next) {
+                        fprintf(out, "  %s(&%.*s, ", add_name, (int)var_name.len, var_name.data);
+                        emit_expr(ctx, e->value, out, PREC_LOWEST, false, false);
+                        fprintf(out, ");\n");
+                    }
+                    // Register generic type for struct emission
+                    register_generic_type(ctx->compiler_ctx, list_type);
+                } else {
+                    fprintf(out, "{0};\n");
+                }
+                // Skip the trailing ";\n" since we already emitted it
+                const char* tn = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, stmt->as.let_stmt.type);
+                if (ctx->local_count < 256) { ctx->locals[ctx->local_count] = stmt->as.let_stmt.name; ctx->local_types[ctx->local_count] = str_from_cstr(tn); ctx->local_type_refs[ctx->local_count] = stmt->as.let_stmt.type; ctx->local_count++; }
+                break;
             } else if (stmt->as.let_stmt.value) {
                 emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, false, false);
             } else {
@@ -1444,6 +1535,23 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   }
 
   // Bodies for specialized functions (iterative — emitting may discover new specializations)
+  // First: emit ALL prototypes from discovery pass (may include ones found during iterative discovery)
+  for (size_t i = 0; i < ctx->specialized_func_count; i++) {
+      const AstFuncDecl* pf = ctx->specialized_funcs[i].decl;
+      const AstTypeRef* pa = ctx->specialized_funcs[i].concrete_args;
+      const char* pm = rae_mangle_specialized_function(ctx, pf, pa);
+      // Check if already prototyped (avoid duplicates)
+      bool already_proto = false;
+      for (size_t j = 0; j < i; j++) {
+          const char* prev = rae_mangle_specialized_function(ctx, ctx->specialized_funcs[j].decl, ctx->specialized_funcs[j].concrete_args);
+          if (strcmp(pm, prev) == 0) { already_proto = true; break; }
+      }
+      if (already_proto) continue;
+      const AstIdentifierPart* pgp = pf->generic_params;
+      if (!pgp && pf->generic_template && pf->generic_template->kind == AST_DECL_FUNC) pgp = pf->generic_template->as.func_decl.generic_params;
+      CFuncContext ptctx = {.compiler_ctx = ctx, .module = module, .generic_params = pgp, .generic_args = pa};
+      fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&ptctx, pf), pm); emit_param_list(&ptctx, pf->params, out, false); fprintf(out, ");\n");
+  }
   {
       size_t emitted_idx = 0;
       size_t prototyped_count = ctx->specialized_func_count; // already prototyped above
@@ -1468,10 +1576,32 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   }
   
   // Finally emit main
+  size_t pre_main_spec_count = ctx->specialized_func_count;
   for (size_t i = 0; i < ctx->all_decl_count; i++) {
       const AstDecl* d = ctx->all_decls[i];
       if (d->kind == AST_DECL_FUNC && str_eq_cstr(d->as.func_decl.name, "main")) {
           emit_function(ctx, module, &d->as.func_decl, out, registry, false);
+      }
+  }
+
+  // Emit any specializations discovered during main (e.g. from collection literals)
+  {
+      size_t emitted_idx2 = pre_main_spec_count;
+      while (emitted_idx2 < ctx->specialized_func_count) {
+          // Prototype
+          const AstFuncDecl* f = ctx->specialized_funcs[emitted_idx2].decl;
+          const AstTypeRef* args = ctx->specialized_funcs[emitted_idx2].concrete_args;
+          const char* mangled = rae_mangle_specialized_function(ctx, f, args);
+          const AstIdentifierPart* gp = f->generic_params;
+          if (!gp && f->generic_template && f->generic_template->kind == AST_DECL_FUNC)
+              gp = f->generic_template->as.func_decl.generic_params;
+          CFuncContext tctx = {.compiler_ctx = ctx, .module = module, .generic_params = gp, .generic_args = args};
+          fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&tctx, f), mangled);
+          emit_param_list(&tctx, f->params, out, false);
+          fprintf(out, ");\n");
+          // Body
+          emit_specialized_function(ctx, module, f, args, out, registry, false);
+          emitted_idx2++;
       }
   }
 
