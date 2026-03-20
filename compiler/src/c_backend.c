@@ -1090,6 +1090,27 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     if (expr->decl_link && expr->decl_link->kind == AST_DECL_FUNC) {
         const AstFuncDecl* fd = &expr->decl_link->as.func_decl;
         Str name = fd->name;
+
+        // Special case: log/logS with List struct argument — emit list log directly
+        if ((str_eq_cstr(name, "log") || str_eq_cstr(name, "logS")) && expr->as.call.args) {
+            const AstExpr* arg_val = expr->as.call.args->value;
+            // Skip BOX wrapper to get actual arg
+            if (arg_val->kind == AST_EXPR_BOX) arg_val = arg_val->as.unary.operand;
+            const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, arg_val);
+            Str arg_base = get_base_type_name(arg_tr);
+            if (arg_tr && str_eq_cstr(arg_base, "List") && !arg_tr->is_view && !arg_tr->is_mod) {
+                bool is_log = str_eq_cstr(name, "log");
+                fprintf(out, "rae_ext_rae_%s_list_fields((RaeAny*)(", is_log ? "log" : "log_stream");
+                emit_expr(ctx, arg_val, out, PREC_LOWEST, false, false);
+                fprintf(out, ").data, (");
+                emit_expr(ctx, arg_val, out, PREC_LOWEST, false, false);
+                fprintf(out, ").length, (");
+                emit_expr(ctx, arg_val, out, PREC_LOWEST, false, false);
+                fprintf(out, ").capacity)");
+                return true;
+            }
+        }
+
         // Fix overload resolution: check if decl_link points to wrong overload
         {
             uint16_t call_argc = 0;

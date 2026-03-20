@@ -3299,7 +3299,7 @@ static int run_compiled_file(const RunOptions* run_opts, const char* project_roo
   snprintf(runtime_dir, sizeof(runtime_dir), "%s", RAE_RUNTIME_SOURCE_DIR);
   
   const char* raylib_define = uses_raylib ? "-DRAE_HAS_RAYLIB" : "";
-  snprintf(cmd, sizeof(cmd), "gcc -std=c11 -O2 %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib -lraylib -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL %s %s/rae_runtime.c -o %s", 
+  snprintf(cmd, sizeof(cmd), "gcc -std=c11 -O2 -w %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib -lraylib -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL %s %s/rae_runtime.c -o %s",
            raylib_define, runtime_dir, temp_c, runtime_dir, temp_bin);
   
   if (system(cmd) != 0) {
