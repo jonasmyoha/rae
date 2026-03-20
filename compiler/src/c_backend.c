@@ -1264,11 +1264,30 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             AstTypeRef* concrete = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, expr->as.call.generic_args);
             call_name = rae_mangle_specialized_function(ctx->compiler_ctx, gen_fd, concrete);
             register_function_specialization(ctx->compiler_ctx, gen_fd, concrete);
-        } else if (fd->specialization_args) {
-            // Sema already resolved to a specialized decl
+        } else if (fd->specialization_args && !(ctx->generic_params && ctx->generic_args)) {
+            // Sema already resolved to a specialized decl — use its args
+            // But NOT when we're inside a specialized context (the sema resolution
+            // might be from a different specialization of the same template)
             const AstFuncDecl* gen_fd = fd->generic_template ? &fd->generic_template->as.func_decl : fd;
             call_name = rae_mangle_specialized_function(ctx->compiler_ctx, gen_fd, fd->specialization_args);
             register_function_specialization(ctx->compiler_ctx, gen_fd, fd->specialization_args);
+        } else if (fd->specialization_args && ctx->generic_params && ctx->generic_args) {
+            // Re-derive concrete args from current context (not from sema's fixed specialization)
+            // Sema may have resolved this for a different T (e.g., grow(int64_t) inside add(String))
+            const AstFuncDecl* gen_fd = fd->generic_template ? &fd->generic_template->as.func_decl : fd;
+            const AstIdentifierPart* gen_gp = gen_fd->generic_params;
+            AstTypeRef* concrete = NULL; AstTypeRef* last = NULL;
+            for (const AstIdentifierPart* gp = gen_gp; gp; gp = gp->next) {
+                AstTypeRef tmp = {0}; AstIdentifierPart part = {0}; part.text = gp->text;
+                tmp.parts = &part;
+                AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &tmp);
+                AstTypeRef* node = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
+                *node = *sub; node->next = NULL;
+                if (!concrete) concrete = node; else last->next = node;
+                last = node;
+            }
+            call_name = rae_mangle_specialized_function(ctx->compiler_ctx, gen_fd, concrete);
+            register_function_specialization(ctx->compiler_ctx, gen_fd, concrete);
         } else if (0 && fd->generic_template) {
             // Sema already resolved to a specialized decl — use the template + specialization args
             call_name = rae_mangle_specialized_function(ctx->compiler_ctx, &fd->generic_template->as.func_decl, fd->specialization_args);
