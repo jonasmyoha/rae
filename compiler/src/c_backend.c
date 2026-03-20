@@ -1214,14 +1214,33 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             for (const AstParam* pp = fd->params; pp; pp = pp->next) decl_argc++;
             bool needs_fix = (fd->generic_params && !fd->specialization_args && !expr->as.call.generic_args && !ctx->generic_params)
                           || (call_argc != decl_argc && !fd->specialization_args);
+            // For method calls, also re-resolve if receiver type doesn't match fd's first param
+            bool is_method_style = expr->as.call.args && str_eq_cstr(expr->as.call.args->name, "this");
+            if (is_method_style && fd->generic_params && fd->params) {
+                const AstTypeRef* recv_tr = infer_expr_type_ref(ctx, expr->as.call.args->value);
+                Str recv_base = recv_tr ? get_base_type_name(recv_tr) : (Str){0};
+                Str param_base = get_base_type_name(fd->params->type);
+                if (recv_base.len > 0 && !str_eq(recv_base, param_base)) needs_fix = true;
+            }
             if (needs_fix) {
                 const AstFuncDecl* best = NULL;
+                // Determine receiver type for method overload matching
+                Str fix_recv_base = {0};
+                if (is_method_style) {
+                    const AstTypeRef* rtr = infer_expr_type_ref(ctx, expr->as.call.args->value);
+                    if (rtr) fix_recv_base = get_base_type_name(rtr);
+                }
                 for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
                     const AstDecl* d = ctx->compiler_ctx->all_decls[i];
                     if (d->kind == AST_DECL_FUNC && str_eq(d->as.func_decl.name, name)) {
                         uint16_t pc = 0;
                         for (const AstParam* pp = d->as.func_decl.params; pp; pp = pp->next) pc++;
                         if (pc == call_argc) {
+                            // Prefer match by receiver type for methods
+                            if (fix_recv_base.len > 0 && d->as.func_decl.params) {
+                                Str pb = get_base_type_name(d->as.func_decl.params->type);
+                                if (str_eq(pb, fix_recv_base)) { best = &d->as.func_decl; break; }
+                            }
                             if (!d->as.func_decl.generic_params) { best = &d->as.func_decl; break; }
                             if (!best) best = &d->as.func_decl;
                         }
@@ -1400,8 +1419,15 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     if (expr->as.call.callee && expr->as.call.callee->kind == AST_EXPR_IDENT) {
         Str callee_name = expr->as.call.callee->as.ident;
         // Search for the function declaration by name, preferring non-generic and matching arg count
+        // For method calls (first arg is 'this'), also match receiver type
         uint16_t call_arg_count = 0;
         for (const AstCallArg* ca = expr->as.call.args; ca; ca = ca->next) call_arg_count++;
+        bool is_method_call = expr->as.call.args && str_eq_cstr(expr->as.call.args->name, "this");
+        Str receiver_base = {0};
+        if (is_method_call) {
+            const AstTypeRef* recv_tr = infer_expr_type_ref(ctx, expr->as.call.args->value);
+            if (recv_tr) receiver_base = get_base_type_name(recv_tr);
+        }
         const AstFuncDecl* found_fd = NULL;
         const AstFuncDecl* generic_fallback = NULL;
         for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
@@ -1412,6 +1438,14 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 if (!d->as.func_decl.generic_params && param_count == call_arg_count) {
                     found_fd = &d->as.func_decl;
                     break;
+                }
+                // For method overloads, match receiver type
+                if (is_method_call && d->as.func_decl.params && receiver_base.len > 0) {
+                    Str param_base = get_base_type_name(d->as.func_decl.params->type);
+                    if (str_eq(param_base, receiver_base)) {
+                        generic_fallback = &d->as.func_decl;
+                        continue;
+                    }
                 }
                 if (!generic_fallback) generic_fallback = &d->as.func_decl;
             }
