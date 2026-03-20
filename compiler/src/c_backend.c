@@ -934,7 +934,13 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
     case AST_EXPR_INDEX: {
         emit_expr(ctx, expr->as.index.target, out, PREC_CALL, false, false); fprintf(out, "["); emit_expr(ctx, expr->as.index.index, out, PREC_LOWEST, false, false); fprintf(out, "]"); break;
     }
-    case AST_EXPR_BOX: fprintf(out, "rae_any(("); emit_expr(ctx, expr->as.unary.operand, out, PREC_LOWEST, false, false); fprintf(out, "))"); break;
+    case AST_EXPR_BOX: {
+        // For primitive refs, pass wrapper directly so rae_any picks mod/view variant
+        const AstTypeRef* box_tr = infer_expr_type_ref(ctx, expr->as.unary.operand);
+        bool box_suppress = box_tr && (box_tr->is_view || box_tr->is_mod) && is_primitive_type(get_base_type_name(box_tr));
+        fprintf(out, "rae_any(("); emit_expr(ctx, expr->as.unary.operand, out, PREC_LOWEST, false, box_suppress); fprintf(out, "))");
+        break;
+    }
     case AST_EXPR_UNBOX: {
         if (expr->resolved_type) {
             TypeInfo* t = expr->resolved_type; if (t->kind == TYPE_REF) t = t->as.ref.base;
@@ -1149,9 +1155,17 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 fprintf(out, "[]){");
             }
             if (needs_addr) fprintf(out, "&");
-            if (needs_box) fprintf(out, "rae_any((");
-            emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
-            if (needs_box) fprintf(out, "))");
+            if (needs_box) {
+                // For ref-typed args, pass wrapper directly so rae_any picks
+                // the mod/view variant and preserves the flag
+                const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, a->value);
+                bool arg_is_prim_ref = arg_tr && (arg_tr->is_view || arg_tr->is_mod) && is_primitive_type(get_base_type_name(arg_tr));
+                fprintf(out, "rae_any((");
+                emit_expr(ctx, a->value, out, PREC_LOWEST, false, arg_is_prim_ref);
+                fprintf(out, "))");
+            } else {
+                emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
+            }
             if (needs_prim_view_wrap) fprintf(out, "} }");
 
             if (a->next) fprintf(out, ", ");
