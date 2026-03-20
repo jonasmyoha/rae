@@ -396,6 +396,11 @@ void register_function_specialization(CompilerContext* ctx, const AstFuncDecl* d
 void register_generic_type(CompilerContext* ctx, const AstTypeRef* type) {
     if (!type || !is_concrete_type(type)) return;
     if ((uintptr_t)type < 0x1000) return;
+    // Don't register types with void generic args (spurious specializations)
+    for (const AstTypeRef* a = type->generic_args; a; a = a->next) {
+        Str ab = get_base_type_name(a);
+        if (str_eq_cstr(ab, "void") || (a->resolved_type && a->resolved_type->kind == TYPE_VOID)) return;
+    }
     if (type->resolved_type && type->resolved_type->kind < TYPE_STRUCT) {
         if (type->resolved_type->kind == TYPE_BUFFER) { for (const AstTypeRef* arg = type->generic_args; arg; arg = arg->next) register_generic_type(ctx, arg); }
         return;
@@ -1379,8 +1384,9 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 bool arg_is_ref = arg_tr && (arg_tr->is_view || arg_tr->is_mod);
                 if (!arg_is_ref) {
                     Str base = get_base_type_name(p->type);
-                    if (is_primitive_type(base)) needs_prim_view_wrap = true;
-                    else needs_addr = true;
+                    if (is_primitive_type(base) && !str_eq_cstr(base, "Buffer") && !str_eq_cstr(base, "Any")) needs_prim_view_wrap = true;
+                    else if (!str_eq_cstr(base, "Buffer") && !str_eq_cstr(base, "Any")) needs_addr = true;
+                    // Buffer and Any are already pointers — no & needed for view/mod
                 }
             }
             // Extern function: struct param by value — dereference if arg is pointer
