@@ -752,6 +752,11 @@ static const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func) {
     if (tr->is_id) return is_ptr ? "int64_t*" : "int64_t";
     if (tr->is_key) return is_ptr ? "rae_String*" : "rae_String";
     Str base = get_base_type_name(tr);
+    // Check if return type is an enum — emit as int64_t
+    if (ctx && ctx->module) {
+        const AstDecl* ed = find_enum_decl(ctx, ctx->module, base);
+        if (ed) return is_ptr ? "int64_t*" : "int64_t";
+    }
     if (is_primitive_type(base)) {
         if (str_eq_cstr(base, "Int64") || str_eq_cstr(base, "Int")) return is_ptr ? (is_mod ? "rae_Mod_Int64" : "rae_View_Int64") : "int64_t";
         if (str_eq_cstr(base, "Float64") || str_eq_cstr(base, "Float")) return is_ptr ? (is_mod ? "rae_Mod_Float64" : "rae_View_Float64") : "double";

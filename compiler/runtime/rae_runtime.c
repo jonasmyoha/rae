@@ -830,6 +830,7 @@ void rae_ext_beginDrawing(void) { BeginDrawing(); }
 void rae_ext_endDrawing(void) { EndDrawing(); }
 void rae_ext_clearBackground(Color color) { ClearBackground(color); }
 int64_t rae_ext_isKeyDown(int64_t key) { return (int64_t)IsKeyDown((int)key); }
+int64_t rae_ext_isKeyPressed(int64_t key) { return (int64_t)IsKeyPressed((int)key); }
 int64_t rae_ext_getScreenWidth(void) { return (int64_t)GetScreenWidth(); }
 int64_t rae_ext_getScreenHeight(void) { return (int64_t)GetScreenHeight(); }
 Texture rae_ext_loadTexture(rae_String fileName) { return LoadTexture((const char*)fileName.data); }
