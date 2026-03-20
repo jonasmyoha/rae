@@ -312,6 +312,17 @@ rae_String rae_ext_rae_str_char_ptr(const uint32_t* v);
 rae_String rae_ext_rae_str_string(rae_String s);
 rae_String rae_ext_rae_str_string_ptr(const rae_String* s);
 rae_String rae_ext_rae_str_cstr(const char* s); // Legacy/helper
+
+/* JSON helpers */
+RAE_UNUSED static rae_String rae_json_build(const char* s, int64_t len) {
+    uint8_t* copy = (uint8_t*)malloc((size_t)len + 1);
+    if (copy) { memcpy(copy, s, (size_t)len); copy[len] = 0; }
+    return (rae_String){copy, len};
+}
+int64_t rae_json_extract_int(rae_String json, const char* key);
+double rae_json_extract_float(rae_String json, const char* key);
+rae_String rae_json_extract_string(rae_String json, const char* key);
+rae_Bool rae_json_extract_bool(rae_String json, const char* key);
 rae_String rae_ext_rae_str_cstr_ptr(const char** s); // Legacy/helper
 
 int64_t rae_ext_nextTick(void);

@@ -931,6 +931,27 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
             fprintf(out, "))");
             break;
         }
+        // Built-in method: toJson() → rae_toJson_TYPE_(&object)
+        if (str_eq_cstr(expr->as.method_call.method_name, "toJson") && !expr->as.method_call.args) {
+            const AstTypeRef* obj_tr = infer_expr_type_ref(ctx, expr->as.method_call.object);
+            Str obj_base = get_base_type_name(obj_tr);
+            const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, obj_tr);
+            fprintf(out, "rae_toJson_%s_(&", mangled);
+            emit_expr(ctx, expr->as.method_call.object, out, PREC_LOWEST, true, false);
+            fprintf(out, ")");
+            break;
+        }
+        // Built-in static method: Type.fromJson(json: str) → rae_fromJson_TYPE_(str)
+        if (str_eq_cstr(expr->as.method_call.method_name, "fromJson")) {
+            Str type_name = {0};
+            if (expr->as.method_call.object->kind == AST_EXPR_IDENT) type_name = expr->as.method_call.object->as.ident;
+            if (type_name.len > 0) {
+                fprintf(out, "rae_fromJson_rae_%.*s_(", (int)type_name.len, type_name.data);
+                if (expr->as.method_call.args) emit_expr(ctx, expr->as.method_call.args->value, out, PREC_LOWEST, false, false);
+                fprintf(out, ")");
+                break;
+            }
+        }
         AstExpr call = { .kind = AST_EXPR_CALL, .line = expr->line, .column = expr->column, .decl_link = expr->decl_link };
         call.as.call.callee = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstExpr)); call.as.call.callee->kind = AST_EXPR_IDENT; call.as.call.callee->as.ident = expr->as.method_call.method_name;
         AstCallArg* first_arg = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstCallArg)); first_arg->name = str_from_cstr("this"); first_arg->value = expr->as.method_call.object; first_arg->next = expr->as.method_call.args;
@@ -1713,6 +1734,65 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
           tr.parts = &part;
           emit_type_recursive(ctx, module, &tr, out, &emitted, &visiting, false);
       }
+  }
+
+  // Generate toJson/fromJson for non-generic user struct types
+  for (size_t i = 0; i < ctx->all_decl_count; i++) {
+      const AstDecl* d = ctx->all_decls[i];
+      if (d->kind != AST_DECL_TYPE || d->as.type_decl.generic_params) continue;
+      if (has_property(d->as.type_decl.properties, "c_struct")) continue;
+      const AstTypeDecl* td = &d->as.type_decl;
+      const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = td->name}});
+
+      // toJson: rae_String rae_toJson_TYPE_(TYPE* this)
+      fprintf(out, "RAE_UNUSED static rae_String rae_toJson_%s_(%s* this) {\n", mangled, mangled);
+      fprintf(out, "  char __buf[4096]; int __p = 0;\n");
+      fprintf(out, "  __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"{\");\n");
+      bool first = true;
+      for (const AstTypeField* f = td->fields; f; f = f->next) {
+          if (!first) fprintf(out, "  __p += snprintf(__buf + __p, sizeof(__buf) - __p, \", \");\n");
+          first = false;
+          Str base = get_base_type_name(f->type);
+          if (str_eq_cstr(base, "String")) {
+              fprintf(out, "  __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": \\\"%%.*s\\\"\", (int)this->%.*s.len, (char*)this->%.*s.data);\n",
+                  (int)f->name.len, f->name.data, (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
+          } else if (str_eq_cstr(base, "Int64") || str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int32")) {
+              fprintf(out, "  __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": %%lld\", (long long)this->%.*s);\n",
+                  (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
+          } else if (str_eq_cstr(base, "Float64") || str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float32")) {
+              fprintf(out, "  __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": %%g\", this->%.*s);\n",
+                  (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
+          } else if (str_eq_cstr(base, "Bool")) {
+              fprintf(out, "  __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": %%s\", this->%.*s ? \"true\" : \"false\");\n",
+                  (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
+          } else {
+              fprintf(out, "  __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": ...\");\n",
+                  (int)f->name.len, f->name.data);
+          }
+      }
+      fprintf(out, "  __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"}\");\n");
+      fprintf(out, "  return rae_json_build(__buf, __p);\n}\n\n");
+
+      // fromJson: TYPE rae_fromJson_TYPE_(rae_String json)
+      fprintf(out, "RAE_UNUSED static %s rae_fromJson_%s_(rae_String json) {\n", mangled, mangled);
+      fprintf(out, "  %s __r = {0};\n", mangled);
+      for (const AstTypeField* f = td->fields; f; f = f->next) {
+          Str base = get_base_type_name(f->type);
+          if (str_eq_cstr(base, "String")) {
+              fprintf(out, "  __r.%.*s = rae_json_extract_string(json, \"%.*s\");\n",
+                  (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
+          } else if (str_eq_cstr(base, "Int64") || str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int32")) {
+              fprintf(out, "  __r.%.*s = rae_json_extract_int(json, \"%.*s\");\n",
+                  (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
+          } else if (str_eq_cstr(base, "Float64") || str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float32")) {
+              fprintf(out, "  __r.%.*s = rae_json_extract_float(json, \"%.*s\");\n",
+                  (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
+          } else if (str_eq_cstr(base, "Bool")) {
+              fprintf(out, "  __r.%.*s = rae_json_extract_bool(json, \"%.*s\");\n",
+                  (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
+          }
+      }
+      fprintf(out, "  return __r;\n}\n\n");
   }
 
   // Forward declarations for user extern functions (not in runtime header)
