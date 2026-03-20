@@ -988,8 +988,7 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
         }
         const AstTypeRef* obj_tr = infer_expr_type_ref(ctx, expr->as.member.object);
         Str obj_base = get_base_type_name(obj_tr);
-        bool use_arrow = (obj_tr && (obj_tr->is_view || obj_tr->is_mod)) ||
-                         str_eq_cstr(obj_base, "List") || str_eq_cstr(obj_base, "Buffer");
+        bool use_arrow = (obj_tr && (obj_tr->is_view || obj_tr->is_mod));
         emit_expr(ctx, expr->as.member.object, out, PREC_CALL, true, false);
         fprintf(out, "%s%.*s", use_arrow ? "->" : ".", (int)expr->as.member.member.len, expr->as.member.member.data);
         break;
