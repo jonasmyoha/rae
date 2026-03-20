@@ -557,6 +557,15 @@ static void discover_specializations_stmt(CFuncContext* ctx, const AstStmt* stmt
             case AST_STMT_EXPR: discover_specializations_expr(ctx, s->as.expr_stmt); break;
             case AST_STMT_IF: discover_specializations_expr(ctx, s->as.if_stmt.condition); if (s->as.if_stmt.then_block) discover_specializations_stmt(ctx, s->as.if_stmt.then_block->first); if (s->as.if_stmt.else_block) discover_specializations_stmt(ctx, s->as.if_stmt.else_block->first); break;
             case AST_STMT_LOOP: if (s->as.loop_stmt.init) discover_specializations_stmt(ctx, s->as.loop_stmt.init); if (s->as.loop_stmt.condition) discover_specializations_expr(ctx, s->as.loop_stmt.condition); if (s->as.loop_stmt.increment) discover_specializations_expr(ctx, s->as.loop_stmt.increment); if (s->as.loop_stmt.body) discover_specializations_stmt(ctx, s->as.loop_stmt.body->first); break;
+            case AST_STMT_RET: if (s->as.ret_stmt.values && s->as.ret_stmt.values->value) discover_specializations_expr(ctx, s->as.ret_stmt.values->value); break;
+            case AST_STMT_MATCH: {
+                if (s->as.match_stmt.subject) discover_specializations_expr(ctx, s->as.match_stmt.subject);
+                for (const AstMatchCase* mc = s->as.match_stmt.cases; mc; mc = mc->next) {
+                    if (mc->pattern) discover_specializations_expr(ctx, mc->pattern);
+                    if (mc->block) discover_specializations_stmt(ctx, mc->block->first);
+                }
+                break;
+            }
             default: break;
         }
     }
@@ -1087,8 +1096,8 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             for (const AstCallArg* ca = expr->as.call.args; ca; ca = ca->next) call_argc++;
             uint16_t decl_argc = 0;
             for (const AstParam* pp = fd->params; pp; pp = pp->next) decl_argc++;
-            bool needs_fix = (fd->generic_params && !expr->as.call.generic_args && !ctx->generic_params)
-                          || (call_argc != decl_argc);
+            bool needs_fix = (fd->generic_params && !fd->specialization_args && !expr->as.call.generic_args && !ctx->generic_params)
+                          || (call_argc != decl_argc && !fd->specialization_args);
             if (needs_fix) {
                 const AstFuncDecl* best = NULL;
                 for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
@@ -1116,9 +1125,26 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             fprintf(out, ")");
             return true;
         }
-        // If calling a generic function from a specialized context, substitute type params
+        // If calling a generic function, determine concrete type args
         const char* call_name;
-        if (fd->generic_params && ctx->generic_params && ctx->generic_args) {
+        if (expr->as.call.generic_args) {
+            // Explicit generic args on the call: createStringMap(Int)(...)
+            const AstFuncDecl* gen_fd = fd;
+            if (fd->generic_template && fd->generic_template->kind == AST_DECL_FUNC)
+                gen_fd = &fd->generic_template->as.func_decl;
+            AstTypeRef* concrete = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, expr->as.call.generic_args);
+            call_name = rae_mangle_specialized_function(ctx->compiler_ctx, gen_fd, concrete);
+            register_function_specialization(ctx->compiler_ctx, gen_fd, concrete);
+        } else if (fd->specialization_args) {
+            // Sema already resolved to a specialized decl
+            const AstFuncDecl* gen_fd = fd->generic_template ? &fd->generic_template->as.func_decl : fd;
+            call_name = rae_mangle_specialized_function(ctx->compiler_ctx, gen_fd, fd->specialization_args);
+            register_function_specialization(ctx->compiler_ctx, gen_fd, fd->specialization_args);
+        } else if (0 && fd->generic_template) {
+            // Sema already resolved to a specialized decl — use the template + specialization args
+            call_name = rae_mangle_specialized_function(ctx->compiler_ctx, &fd->generic_template->as.func_decl, fd->specialization_args);
+            register_function_specialization(ctx->compiler_ctx, &fd->generic_template->as.func_decl, fd->specialization_args);
+        } else if (fd->generic_params && ctx->generic_params && ctx->generic_args) {
             // Build concrete args by substituting T -> concrete type
             AstTypeRef* concrete = NULL; AstTypeRef* last = NULL;
             for (const AstIdentifierPart* gp = fd->generic_params; gp; gp = gp->next) {
@@ -1135,6 +1161,34 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             register_function_specialization(ctx->compiler_ctx, fd, concrete);
         } else if (fd->specialization_args) {
             call_name = rae_mangle_specialized_function(ctx->compiler_ctx, fd, fd->specialization_args);
+        } else if (fd->generic_params) {
+            // Generic function called without explicit specialization context
+            // Try to find concrete args by: 1) receiver inference, 2) looking at registered specializations
+            AstTypeRef* inferred = NULL;
+            // Method-style: infer from first arg (this)
+            if (fd->params && str_eq_cstr(fd->params->name, "this") && expr->as.call.args) {
+                const AstTypeRef* recv = infer_expr_type_ref(ctx, expr->as.call.args->value);
+                if (recv) inferred = infer_generic_args(ctx->compiler_ctx, fd, fd->params->type, recv);
+            }
+            // Return-type inference from expected context (if available)
+            if (!inferred && ctx->has_expected_type && fd->returns && fd->returns->type) {
+                inferred = infer_generic_args(ctx->compiler_ctx, fd, fd->returns->type, &ctx->expected_type);
+            }
+            // Last resort: look for a matching registered specialization
+            if (!inferred) {
+                for (size_t i = 0; i < ctx->compiler_ctx->specialized_func_count; i++) {
+                    if (ctx->compiler_ctx->specialized_funcs[i].decl == fd) {
+                        inferred = (AstTypeRef*)ctx->compiler_ctx->specialized_funcs[i].concrete_args;
+                        break;
+                    }
+                }
+            }
+            if (inferred) {
+                call_name = rae_mangle_specialized_function(ctx->compiler_ctx, fd, inferred);
+                register_function_specialization(ctx->compiler_ctx, fd, inferred);
+            } else {
+                call_name = rae_mangle_function(ctx->compiler_ctx, fd);
+            }
         } else {
             call_name = rae_mangle_function(ctx->compiler_ctx, fd);
         }
@@ -1225,9 +1279,14 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         }
         if (!found_fd) found_fd = generic_fallback;
         if (found_fd) {
-            // If generic and in specialized context, substitute type params
+            // If generic, determine concrete type args
             const char* fb_call_name;
-            if (found_fd->generic_params && ctx->generic_params && ctx->generic_args) {
+            if (found_fd->generic_params && expr->as.call.generic_args) {
+                // Explicit generic args on the call
+                AstTypeRef* concrete = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, expr->as.call.generic_args);
+                fb_call_name = rae_mangle_specialized_function(ctx->compiler_ctx, found_fd, concrete);
+                register_function_specialization(ctx->compiler_ctx, found_fd, concrete);
+            } else if (found_fd->generic_params && ctx->generic_params && ctx->generic_args) {
                 AstTypeRef* concrete = NULL; AstTypeRef* last = NULL;
                 for (const AstIdentifierPart* gp = found_fd->generic_params; gp; gp = gp->next) {
                     AstTypeRef tmp = {0}; AstIdentifierPart part = {0}; part.text = gp->text;
@@ -1243,7 +1302,7 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             } else {
                 fb_call_name = rae_mangle_function(ctx->compiler_ctx, found_fd);
             }
-            fprintf(out, "%s(", fb_call_name);
+fprintf(out, "%s(", fb_call_name);
             const AstCallArg* a = expr->as.call.args;
             const AstParam* p = found_fd->params;
             while (a) {
@@ -1356,7 +1415,10 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 if (ctx->local_count < 256) { ctx->locals[ctx->local_count] = stmt->as.let_stmt.name; ctx->local_types[ctx->local_count] = str_from_cstr(tn); ctx->local_type_refs[ctx->local_count] = stmt->as.let_stmt.type; ctx->local_count++; }
                 break;
             } else if (stmt->as.let_stmt.value) {
+                // Set expected type so generic call resolution can infer from let type
+                if (stmt->as.let_stmt.type) { ctx->expected_type = *stmt->as.let_stmt.type; ctx->has_expected_type = true; }
                 emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, false, false);
+                ctx->has_expected_type = false;
             } else {
                 // Auto-init: let x: Type (no initializer)
                 emit_auto_init(ctx, stmt->as.let_stmt.type, out);
