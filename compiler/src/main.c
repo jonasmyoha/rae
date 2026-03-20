@@ -3313,7 +3313,9 @@ static int run_compiled_file(const RunOptions* run_opts, const char* project_roo
           size_t pos = 0;
           while ((ent = readdir(d)) != NULL) {
               size_t nlen = strlen(ent->d_name);
-              if (nlen > 2 && strcmp(ent->d_name + nlen - 2, ".c") == 0) {
+              if (nlen > 2 && strcmp(ent->d_name + nlen - 2, ".c") == 0 &&
+                  strcmp(ent->d_name, "rae_runtime.c") != 0 && strcmp(ent->d_name, "monocypher.c") != 0 &&
+                  strncmp(ent->d_name, "rae_compiled_", 13) != 0 && strcmp(ent->d_name, "out.c") != 0) {
                   pos += snprintf(extra_c_files + pos, sizeof(extra_c_files) - pos, " %s/%s", src_dir, ent->d_name);
               }
           }
