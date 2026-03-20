@@ -399,7 +399,16 @@ static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTab
             AstParam* param = decl->as.func_decl.params;
             while (param) {
                 TypeInfo* t = sema_resolve_type_internal(ctx, module, symbols, param->type);
-                symbol_table_define(symbols, ctx->ast_arena, param->name, NULL, t, (param->type && !param->type->is_mod));
+                // Only struct params without 'mod' are immutable (view by default)
+                // Primitives (Int, Float, Bool, String, Char) are value-copy params — always mutable
+                bool is_view_param = false;
+                if (param->type && !param->type->is_mod && !param->type->is_view) {
+                    // Check if it's a struct type (not primitive)
+                    if (t && t->kind == TYPE_STRUCT) is_view_param = true;
+                } else if (param->type && param->type->is_view) {
+                    is_view_param = true;
+                }
+                symbol_table_define(symbols, ctx->ast_arena, param->name, NULL, t, is_view_param);
                 param = param->next;
             }
             if (decl->as.func_decl.body) {
