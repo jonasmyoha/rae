@@ -636,6 +636,9 @@ static bool emit_string_literal(FILE* out, Str literal) {
 
 static bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* out, bool skip_ptr) {
   if (!type) { fprintf(out, "int64_t"); return true; }
+  // Identity types: always emit underlying primitive regardless of resolved_type
+  if (type->is_id) { bool is_ptr = (type->is_view || type->is_mod) && !skip_ptr; fprintf(out, "int64_t"); if (is_ptr) fprintf(out, "*"); return true; }
+  if (type->is_key) { bool is_ptr = (type->is_view || type->is_mod) && !skip_ptr; fprintf(out, "rae_String"); if (is_ptr) fprintf(out, "*"); return true; }
   if (type->resolved_type) {
       TypeInfo* t = type->resolved_type; bool is_ptr = (type->is_view || type->is_mod) && !skip_ptr;
       if (t->kind == TYPE_INT) { fprintf(out, "int64_t"); if (is_ptr) fprintf(out, "*"); return true; }
