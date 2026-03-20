@@ -83,7 +83,12 @@ RaeAny rae_ext_rae_buf_get(void* buf, int64_t index);
 /* Legacy buffer intrinsics (single-arg alloc, value-sized elements) */
 RAE_UNUSED static void* rae_ext___buf_alloc(int64_t count) { return rae_ext_rae_buf_alloc(count, sizeof(int64_t)); }
 RAE_UNUSED static void rae_ext___buf_free(void* buf) { rae_ext_rae_buf_free(buf); }
-RAE_UNUSED static void rae_ext___buf_set(void* buf, int64_t index, int64_t value) { if (buf) ((int64_t*)buf)[index] = value; }
+RAE_UNUSED static void rae_ext___buf_set_i64(void* buf, int64_t index, int64_t value) { if (buf) ((int64_t*)buf)[index] = value; }
+RAE_UNUSED static void rae_ext___buf_set_any(void* buf, int64_t index, RaeAny value) { if (buf) ((int64_t*)buf)[index] = value.as.i; }
+#define rae_ext___buf_set(buf, index, value) _Generic((value), \
+    int64_t: rae_ext___buf_set_i64, \
+    RaeAny: rae_ext___buf_set_any \
+)(buf, index, value)
 RAE_UNUSED static int64_t rae_ext___buf_get(void* buf, int64_t index) { return buf ? ((int64_t*)buf)[index] : 0; }
 RAE_UNUSED static void rae_ext___buf_copy(void* src, int64_t src_off, void* dst, int64_t dst_off, int64_t len) {
     if (src && dst && len > 0) memmove((int64_t*)dst + dst_off, (int64_t*)src + src_off, (size_t)len * sizeof(int64_t));
