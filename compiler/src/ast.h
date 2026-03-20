@@ -482,6 +482,9 @@ typedef struct CompilerContext {
     size_t emitted_method_cap;
 
     struct AstModule* current_module;
+
+    // Sema: expected type for return-type generic inference
+    const AstTypeRef* sema_expected_type;
 } CompilerContext;
 
 void ast_dump_module(const AstModule* module, FILE* out);
