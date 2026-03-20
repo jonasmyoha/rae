@@ -382,6 +382,7 @@ void rae_ext_beginDrawing(void);
 void rae_ext_endDrawing(void);
 void rae_ext_clearBackground(Color color);
 int64_t rae_ext_isKeyDown(int64_t key);
+int64_t rae_ext_isKeyPressed(int64_t key);
 int64_t rae_ext_getScreenWidth(void);
 int64_t rae_ext_getScreenHeight(void);
 double rae_ext_getTime(void);
