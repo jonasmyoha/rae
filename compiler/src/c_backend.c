@@ -1057,9 +1057,24 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
         fprintf(out, ")");
         break;
     }
+    case AST_EXPR_NONE: fprintf(out, "rae_any_none()"); break;
     default: break;
   }
   return true;
+}
+
+// Emit unbox suffix for opt T return types: .as.s, .as.i, .as.f, .as.b
+static void emit_opt_unbox_suffix(CFuncContext* ctx, const AstFuncDecl* fd, FILE* out) {
+    if (!fd->returns || !fd->returns->type || !fd->returns->type->is_opt) return;
+    AstTypeRef* ret_tr = fd->returns->type;
+    // Get the base type of opt T, substituting through generic context
+    AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, ret_tr);
+    Str base = get_base_type_name(sub);
+    if (str_eq_cstr(base, "Int64") || str_eq_cstr(base, "Int") || str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32")) fprintf(out, ".as.i");
+    else if (str_eq_cstr(base, "Float64") || str_eq_cstr(base, "Float")) fprintf(out, ".as.f");
+    else if (str_eq_cstr(base, "Bool")) fprintf(out, ".as.b");
+    else if (str_eq_cstr(base, "String")) fprintf(out, ".as.s");
+    // For other types (structs, Any), no unbox needed — RaeAny is the right type
 }
 
 static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
@@ -1171,7 +1186,9 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             if (a->next) fprintf(out, ", ");
             a = a->next; if (p) p = p->next;
         }
-        fprintf(out, ")"); return true;
+        fprintf(out, ")");
+        emit_opt_unbox_suffix(ctx, fd, out);
+        return true;
     }
     // Handle sizeof in fallback path (when decl_link is missing)
     if (expr->as.call.callee && expr->as.call.callee->kind == AST_EXPR_IDENT &&
@@ -1487,10 +1504,19 @@ static bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFun
   return true;
 }
 
+// Track emitted specialized functions to avoid redefinitions
+static const char* g_emitted_spec_funcs[4096];
+static size_t g_emitted_spec_func_count = 0;
+
 static bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* f, const AstTypeRef* args, FILE* out, const struct VmRegistry* r, bool ray) {
   const AstIdentifierPart* gp_src = f->generic_params; if (!gp_src && f->generic_template) gp_src = f->generic_template->as.func_decl.generic_params;
   CFuncContext tctx = {.compiler_ctx = ctx, .module = m, .func_decl = f, .uses_raylib = ray, .registry = r, .generic_params = gp_src, .generic_args = args};
   const char* rt = c_return_type(&tctx, f); const char* mangled = rae_mangle_specialized_function(ctx, f, args);
+  // Dedup check: skip if already emitted
+  for (size_t i = 0; i < g_emitted_spec_func_count; i++) {
+      if (strcmp(g_emitted_spec_funcs[i], mangled) == 0) return true;
+  }
+  if (g_emitted_spec_func_count < 4096) g_emitted_spec_funcs[g_emitted_spec_func_count++] = mangled;
   fprintf(out, "RAE_UNUSED static %s %s(", rt, mangled); emit_param_list(&tctx, f->params, out, false); fprintf(out, ") {\n");
   for (const AstParam* p = f->params; p; p = p->next) { if (tctx.local_count < 256) { tctx.locals[tctx.local_count] = p->name; tctx.local_type_refs[tctx.local_count] = p->type; tctx.local_types[tctx.local_count] = str_from_cstr(rae_mangle_type_specialized(ctx, gp_src, args, p->type)); tctx.local_count++; } }
   if (f->body) { for (AstStmt* s = f->body->first; s; s = s->next) emit_stmt(&tctx, s, out); }
@@ -1499,6 +1525,7 @@ static bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, 
 
 bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const char* out_path, struct VmRegistry* registry, bool* out_uses_raylib) {
   if (!module) return false;
+  g_emitted_spec_func_count = 0; // Reset dedup for this compilation
   ctx->all_decl_count = 0; collect_decls_from_module(ctx, module); ctx->current_module = (AstModule*)module;
 
   // Discover generic specializations by walking all function bodies
