@@ -130,6 +130,11 @@ static bool emit_type_recursive(CompilerContext* ctx, const AstModule* m, const 
     
     if (base.len == 0) return true;
     if (is_primitive_type(base) || (ray && is_raylib_builtin_type(base))) return true;
+    // Skip spurious void/Any specializations
+    for (const AstTypeRef* ga = type->generic_args; ga; ga = ga->next) {
+        Str ga_base = get_base_type_name(ga);
+        if (str_eq_cstr(ga_base, "void") || ga_base.len == 0) return true;
+    }
     // Skip c_struct types (raylib types defined externally)
     { const AstDecl* td = find_type_decl(NULL, m, base);
       if (td && td->kind == AST_DECL_TYPE && has_property(td->as.type_decl.properties, "c_struct")) return true; }
@@ -142,7 +147,8 @@ static bool emit_type_recursive(CompilerContext* ctx, const AstModule* m, const 
     
     // Find the declaration
     if (str_eq_cstr(base, "List") || str_eq_cstr(base, "Buffer")) {
-        // Built-in List/Buffer
+        // Built-in List/Buffer — recursively emit element type first
+        if (type->generic_args) emit_type_recursive(ctx, m, type->generic_args, out, emitted, visiting, ray);
         fprintf(out, "typedef struct %s %s;\n", mangled, mangled);
         fprintf(out, "struct %s {\n", mangled);
         CFuncContext tctx = {0}; tctx.compiler_ctx = ctx; tctx.module = m; tctx.uses_raylib = ray;
@@ -161,14 +167,29 @@ static bool emit_type_recursive(CompilerContext* ctx, const AstModule* m, const 
             const AstTypeRef* args = type->generic_args;
             if (!params && d->as.type_decl.generic_template) params = d->as.type_decl.generic_template->as.type_decl.generic_params;
             
-            // Dependencies
+            // Dependencies — also recurse into Buffer element types
             for (const AstTypeField* f = td->fields; f; f = f->next) {
                 if (!f->type || f->type->is_view || f->type->is_mod) continue;
                 AstTypeRef* sub = substitute_type_ref(ctx, params, args, f->type);
                 emit_type_recursive(ctx, m, sub, out, emitted, visiting, ray);
+                // If the field is Buffer(X), also emit X
+                Str fbase = get_base_type_name(sub);
+                if ((str_eq_cstr(fbase, "Buffer") || str_eq_cstr(fbase, "List")) && sub->generic_args) {
+                    emit_type_recursive(ctx, m, sub->generic_args, out, emitted, visiting, ray);
+                }
             }
             
             if (!has_property(td->properties, "c_struct")) {
+                // Skip structs with void fields (spurious specializations)
+                bool has_void = false;
+                for (const AstTypeField* fv = td->fields; fv; fv = fv->next) {
+                    if (fv->type) {
+                        AstTypeRef* fsub = substitute_type_ref(ctx, params, args, fv->type);
+                        Str fb = get_base_type_name(fsub);
+                        if (str_eq_cstr(fb, "void") || fb.len == 0) { has_void = true; break; }
+                    }
+                }
+                if (has_void) { emitted_list_add(emitted, mangled); visiting->count--; return true; }
                 fprintf(out, "typedef struct %s %s;\n", mangled, mangled);
                 fprintf(out, "struct %s {\n", mangled);
                 CFuncContext tctx = {0}; tctx.compiler_ctx = ctx; tctx.module = m; tctx.uses_raylib = ray;
