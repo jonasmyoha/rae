@@ -1506,35 +1506,65 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             break;
         }
         case AST_STMT_RET: {
-            fprintf(out, "  return ");
-            if (stmt->as.ret_stmt.values) {
-                // Check if return type is a mod/view ref
-                const AstTypeRef* ret_type = ctx->func_decl && ctx->func_decl->returns ? ctx->func_decl->returns->type : NULL;
-                bool is_ref_return = ret_type && (ret_type->is_view || ret_type->is_mod);
-                bool is_prim_ref_return = is_ref_return && is_primitive_type(get_base_type_name(ret_type));
-
-                if (is_prim_ref_return) {
-                    fprintf(out, "(");
-                    emit_type_ref_as_c_type(ctx, ret_type, out, false);
-                    fprintf(out, "){ .ptr = &");
-                    emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, true, true);
-                    fprintf(out, " }");
+            if (ctx->defer_stack.count > 0) {
+                // Has defers — emit them before returning
+                if (stmt->as.ret_stmt.values) {
+                    // Store return value in temp, emit defers, then return temp
+                    const char* rt = c_return_type(ctx, ctx->func_decl);
+                    fprintf(out, "  %s __ret_val = ", rt);
+                    const AstTypeRef* ret_type = ctx->func_decl && ctx->func_decl->returns ? ctx->func_decl->returns->type : NULL;
+                    bool is_ref_return = ret_type && (ret_type->is_view || ret_type->is_mod);
+                    bool is_prim_ref_return = is_ref_return && is_primitive_type(get_base_type_name(ret_type));
+                    if (is_prim_ref_return) {
+                        fprintf(out, "("); emit_type_ref_as_c_type(ctx, ret_type, out, false);
+                        fprintf(out, "){ .ptr = &"); emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, true, true);
+                        fprintf(out, " }");
+                    } else {
+                        emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, false, false);
+                    }
+                    fprintf(out, ";\n");
+                    emit_defers(ctx, 0, out);
+                    fprintf(out, "  return __ret_val;\n");
                 } else {
-                    emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, false, false);
+                    // Bare return
+                    emit_defers(ctx, 0, out);
+                    fprintf(out, "  return ");
+                    if (ctx->func_decl && str_eq_cstr(ctx->func_decl->name, "main")) fprintf(out, "0");
+                    else {
+                        const AstTypeRef* ret_type = ctx->func_decl && ctx->func_decl->returns ? ctx->func_decl->returns->type : NULL;
+                        if (ret_type) {
+                            if (ret_type->is_opt) fprintf(out, "rae_any_none()");
+                            else emit_auto_init(ctx, ret_type, out);
+                        }
+                    }
+                    fprintf(out, ";\n");
                 }
             } else {
-                // Bare return — emit default value for non-void functions
-                if (ctx->func_decl && str_eq_cstr(ctx->func_decl->name, "main")) {
-                    fprintf(out, "0");
-                } else {
+                // No defers — direct return
+                fprintf(out, "  return ");
+                if (stmt->as.ret_stmt.values) {
                     const AstTypeRef* ret_type = ctx->func_decl && ctx->func_decl->returns ? ctx->func_decl->returns->type : NULL;
-                    if (ret_type) {
-                        if (ret_type->is_opt) fprintf(out, "rae_any_none()");
-                        else emit_auto_init(ctx, ret_type, out);
+                    bool is_ref_return = ret_type && (ret_type->is_view || ret_type->is_mod);
+                    bool is_prim_ref_return = is_ref_return && is_primitive_type(get_base_type_name(ret_type));
+                    if (is_prim_ref_return) {
+                        fprintf(out, "("); emit_type_ref_as_c_type(ctx, ret_type, out, false);
+                        fprintf(out, "){ .ptr = &"); emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, true, true);
+                        fprintf(out, " }");
+                    } else {
+                        emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, false, false);
+                    }
+                } else {
+                    if (ctx->func_decl && str_eq_cstr(ctx->func_decl->name, "main")) fprintf(out, "0");
+                    else {
+                        const AstTypeRef* ret_type = ctx->func_decl && ctx->func_decl->returns ? ctx->func_decl->returns->type : NULL;
+                        if (ret_type) {
+                            if (ret_type->is_opt) fprintf(out, "rae_any_none()");
+                            else emit_auto_init(ctx, ret_type, out);
+                        }
                     }
                 }
+                fprintf(out, ";\n");
             }
-            fprintf(out, ";\n");
             break;
         } 
             break;
@@ -1565,13 +1595,34 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             fprintf(out, "\n");
             break;
         }
+        case AST_STMT_DEFER: {
+            // Push defer block onto stack — will be emitted before returns and at function end
+            if (ctx->defer_stack.count < 64) {
+                ctx->defer_stack.entries[ctx->defer_stack.count].block = stmt->as.defer_stmt.block;
+                ctx->defer_stack.entries[ctx->defer_stack.count].scope_depth = 0;
+                ctx->defer_stack.count++;
+            }
+            break;
+        }
         default: break;
     }
     return true;
 }
 
-static bool emit_defers(CFuncContext* ctx, int min_depth, FILE* out) { (void)ctx; (void)min_depth; (void)out; return true; }
-static void pop_defers(CFuncContext* ctx, int depth) { (void)ctx; (void)depth; }
+static bool emit_defers(CFuncContext* ctx, int min_depth, FILE* out) {
+    // Emit deferred blocks in reverse order (LIFO)
+    for (int i = ctx->defer_stack.count - 1; i >= min_depth; i--) {
+        const AstBlock* block = ctx->defer_stack.entries[i].block;
+        if (block) {
+            for (AstStmt* s = block->first; s; s = s->next)
+                emit_stmt(ctx, s, out);
+        }
+    }
+    return true;
+}
+static void pop_defers(CFuncContext* ctx, int depth) {
+    while (ctx->defer_stack.count > depth) ctx->defer_stack.count--;
+}
 
 static bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* f, FILE* out, const struct VmRegistry* r, bool ray) {
   if (f->is_extern || str_starts_with_cstr(f->name, "rae_ext_")) return true;
@@ -1596,7 +1647,10 @@ static bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFun
   }
   
   if (f->body) { for (AstStmt* s = f->body->first; s; s = s->next) emit_stmt(&tctx, s, out); }
-  
+
+  // Emit any remaining defers at function end
+  if (tctx.defer_stack.count > 0) emit_defers(&tctx, 0, out);
+
   if (is_main) fprintf(out, "  return 0;\n}\n\n");
   else fprintf(out, "}\n\n"); 
   return true;
