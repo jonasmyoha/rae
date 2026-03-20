@@ -1715,6 +1715,22 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       }
   }
 
+  // Forward declarations for user extern functions (not in runtime header)
+  for (size_t i = 0; i < ctx->all_decl_count; i++) {
+      const AstDecl* d = ctx->all_decls[i];
+      if (d->kind == AST_DECL_FUNC && d->as.func_decl.is_extern && !d->as.func_decl.generic_params) {
+          const char* mangled = rae_mangle_function(ctx, &d->as.func_decl);
+          // Skip functions already declared in runtime header (rae_ext_rae_* and known builtins)
+          if (str_starts_with_cstr(d->as.func_decl.name, "rae_ext_") ||
+              str_starts_with_cstr(d->as.func_decl.name, "rae_") ||
+              str_starts_with_cstr(d->as.func_decl.name, "__buf_")) continue;
+          CFuncContext tctx = {.compiler_ctx = ctx, .module = module, .func_decl = &d->as.func_decl};
+          fprintf(out, "%s %s(", c_return_type(&tctx, &d->as.func_decl), mangled);
+          emit_param_list(&tctx, d->as.func_decl.params, out, true);
+          fprintf(out, ");\n");
+      }
+  }
+
   // Prototypes for non-generic functions
   for (size_t i = 0; i < ctx->all_decl_count; i++) {
       const AstDecl* d = ctx->all_decls[i];
