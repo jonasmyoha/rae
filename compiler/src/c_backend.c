@@ -1484,10 +1484,34 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 }
                 fb_call_name = rae_mangle_specialized_function(ctx->compiler_ctx, found_fd, concrete);
                 register_function_specialization(ctx->compiler_ctx, found_fd, concrete);
+            } else if (found_fd->generic_params && is_method_call) {
+                // Safety net: infer from receiver type in non-generic context
+                const AstTypeRef* recv_tr = infer_expr_type_ref(ctx, expr->as.call.args->value);
+                if (recv_tr) {
+                    AstTypeRef* sub_recv = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, recv_tr);
+                    AstTypeRef* inferred = infer_generic_args(ctx->compiler_ctx, found_fd, found_fd->params->type, sub_recv);
+                    if (inferred) {
+                        fb_call_name = rae_mangle_specialized_function(ctx->compiler_ctx, found_fd, inferred);
+                        register_function_specialization(ctx->compiler_ctx, found_fd, inferred);
+                    } else {
+                        fb_call_name = rae_mangle_function(ctx->compiler_ctx, found_fd);
+                    }
+                } else {
+                    fb_call_name = rae_mangle_function(ctx->compiler_ctx, found_fd);
+                }
+            } else if (found_fd->generic_params && ctx->has_expected_type && found_fd->returns && found_fd->returns->type) {
+                // Infer from return type context
+                AstTypeRef* inferred = infer_generic_args(ctx->compiler_ctx, found_fd, found_fd->returns->type, &ctx->expected_type);
+                if (inferred) {
+                    fb_call_name = rae_mangle_specialized_function(ctx->compiler_ctx, found_fd, inferred);
+                    register_function_specialization(ctx->compiler_ctx, found_fd, inferred);
+                } else {
+                    fb_call_name = rae_mangle_function(ctx->compiler_ctx, found_fd);
+                }
             } else {
                 fb_call_name = rae_mangle_function(ctx->compiler_ctx, found_fd);
             }
-fprintf(out, "%s(", fb_call_name);
+            fprintf(out, "%s(", fb_call_name);
             const AstCallArg* a = expr->as.call.args;
             const AstParam* p = found_fd->params;
             while (a) {
