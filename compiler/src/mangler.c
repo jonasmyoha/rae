@@ -267,10 +267,12 @@ static void mangle_type_recursive_specialized(CompilerContext* ctx, const struct
         else *pos += snprintf(buf + *pos, cap - *pos, "%s", mapped);
     } else if (str_eq_cstr(base, "int64_t") || str_eq_cstr(base, "double") || str_eq_cstr(base, "int8_t") || str_eq_cstr(base, "int32_t") || str_eq_cstr(base, "uint64_t") || str_eq_cstr(base, "uint32_t") || str_eq_cstr(base, "float") || str_eq_cstr(base, "const_char_p") || str_eq_cstr(base, "rae_String") || str_eq_cstr(base, "RaeAny") || str_starts_with_cstr(base, "rae_")) {
         *pos += snprintf(buf + *pos, cap - *pos, "%.*s", (int)base.len, base.data);
+    } else if (is_raylib_builtin_type(base)) {
+        *pos += snprintf(buf + *pos, cap - *pos, "%.*s", (int)base.len, base.data);
     } else {
         *pos += snprintf(buf + *pos, cap - *pos, "rae_%.*s", (int)base.len, base.data);
     }
-    
+
     if (type->generic_args) {
         *pos += snprintf(buf + *pos, cap - *pos, "_");
         for (const AstTypeRef* a = type->generic_args; a; a = a->next) {
