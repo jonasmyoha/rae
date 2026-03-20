@@ -1049,13 +1049,23 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
             fprintf(out, "(");
             emit_type_ref_as_c_type(ctx, expr->as.object_literal.type, out, false);
             fprintf(out, ")");
+        } else if (ctx->has_expected_type) {
+            // No explicit type — use expected type from context (e.g. function parameter)
+            fprintf(out, "(");
+            emit_type_ref_as_c_type(ctx, &ctx->expected_type, out, false);
+            fprintf(out, ")");
         }
         fprintf(out, "{ ");
+        // Clear expected_type inside object literal to prevent nested objects
+        // from inheriting the parent type
+        bool saved_has_exp = ctx->has_expected_type;
+        ctx->has_expected_type = false;
         for (const AstObjectField* f = expr->as.object_literal.fields; f; f = f->next) {
             fprintf(out, ".%.*s = ", (int)f->name.len, f->name.data);
             emit_expr(ctx, f->value, out, PREC_LOWEST, false, false);
             if (f->next) fprintf(out, ", ");
         }
+        ctx->has_expected_type = saved_has_exp;
         fprintf(out, " }");
         break;
     }
@@ -1340,6 +1350,11 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 emit_type_ref_as_c_type(ctx, p->type, out, true);
                 fprintf(out, "[]){");
             }
+            // Set expected type for OBJECT literal cast inference
+            bool had_expected = ctx->has_expected_type;
+            AstTypeRef saved_expected = ctx->expected_type;
+            if (p && p->type) { ctx->expected_type = *p->type; ctx->has_expected_type = true; }
+
             if (needs_addr) fprintf(out, "&");
             if (needs_deref) fprintf(out, "(*");
             if (needs_box) {
@@ -1355,6 +1370,10 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             }
             if (needs_deref) fprintf(out, ")");
             if (needs_prim_view_wrap) fprintf(out, "} }");
+
+            // Restore expected type
+            ctx->has_expected_type = had_expected;
+            ctx->expected_type = saved_expected;
 
             if (a->next) fprintf(out, ", ");
             a = a->next; if (p) p = p->next;
@@ -1440,10 +1459,19 @@ fprintf(out, "%s(", fb_call_name);
                     Str param_base = get_base_type_name(p->type);
                     if (str_eq_cstr(param_base, "Any")) needs_box = true;
                 }
+                // Set expected type for OBJECT literal cast inference
+                bool had_exp = ctx->has_expected_type;
+                AstTypeRef saved_exp = ctx->expected_type;
+                if (p && p->type) { ctx->expected_type = *p->type; ctx->has_expected_type = true; }
+
                 if (needs_addr) fprintf(out, "&");
                 if (needs_box) fprintf(out, "rae_any((");
                 emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
                 if (needs_box) fprintf(out, "))");
+
+                ctx->has_expected_type = had_exp;
+                ctx->expected_type = saved_exp;
+
                 if (a->next) fprintf(out, ", ");
                 a = a->next; if (p) p = p->next;
             }
