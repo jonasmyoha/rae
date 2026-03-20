@@ -895,6 +895,24 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
               break;
           }
       }
+      // Float modulo: emit fmod(a, b) instead of a % b
+      if (expr->as.binary.op == AST_BIN_MOD) {
+          bool lhs_float = expr->as.binary.lhs->kind == AST_EXPR_FLOAT;
+          bool rhs_float = expr->as.binary.rhs->kind == AST_EXPR_FLOAT;
+          if (!lhs_float && !rhs_float) {
+              const AstTypeRef* ltr = infer_expr_type_ref(ctx, expr->as.binary.lhs);
+              Str lb = get_base_type_name(ltr);
+              if (str_eq_cstr(lb, "Float64") || str_eq_cstr(lb, "Float") || str_eq_cstr(lb, "Float32") || str_eq_cstr(lb, "double")) lhs_float = true;
+          }
+          if (lhs_float || rhs_float) {
+              fprintf(out, "fmod(");
+              emit_expr(ctx, expr->as.binary.lhs, out, PREC_LOWEST, false, false);
+              fprintf(out, ", ");
+              emit_expr(ctx, expr->as.binary.rhs, out, PREC_LOWEST, false, false);
+              fprintf(out, ")");
+              break;
+          }
+      }
       int prec = binary_op_precedence(expr->as.binary.op); bool is_bool_op = expr->as.binary.op >= AST_BIN_LT && expr->as.binary.op <= AST_BIN_OR;
       if (is_bool_op) fprintf(out, "(bool)("); if (prec < parent_prec) fprintf(out, "(");
       emit_expr(ctx, expr->as.binary.lhs, out, prec, false, false);
