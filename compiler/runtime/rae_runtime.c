@@ -806,4 +806,18 @@ void rae_ext_drawCube(Vector3 pos, double width, double height, double length, C
 void rae_ext_drawText(rae_String text, double x, double y, double fontSize, Color color) {
     DrawText((const char*)text.data, (int)x, (int)y, (int)fontSize, color);
 }
+
+int64_t rae_ext_windowShouldClose(void) { return (int64_t)WindowShouldClose(); }
+void rae_ext_closeWindow(void) { CloseWindow(); }
+void rae_ext_setTargetFPS(int64_t fps) { SetTargetFPS((int)fps); }
+void rae_ext_beginDrawing(void) { BeginDrawing(); }
+void rae_ext_endDrawing(void) { EndDrawing(); }
+void rae_ext_clearBackground(Color color) { ClearBackground(color); }
+int64_t rae_ext_isKeyDown(int64_t key) { return (int64_t)IsKeyDown((int)key); }
+int64_t rae_ext_getScreenWidth(void) { return (int64_t)GetScreenWidth(); }
+int64_t rae_ext_getScreenHeight(void) { return (int64_t)GetScreenHeight(); }
+Texture rae_ext_loadTexture(rae_String fileName) { return LoadTexture((const char*)fileName.data); }
+void rae_ext_unloadTexture(Texture texture) { UnloadTexture(texture); }
+void rae_ext_drawTexture(Texture texture, double x, double y, Color tint) { DrawTexture(texture, (int)x, (int)y, tint); }
+int64_t rae_ext_measureText(rae_String text, int64_t fontSize) { return (int64_t)MeasureText((const char*)text.data, (int)fontSize); }
 #endif
