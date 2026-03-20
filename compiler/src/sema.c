@@ -472,6 +472,28 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
             sema_analyze_expr(ctx, module, symbols, stmt->as.assign_stmt.target);
             sema_analyze_expr(ctx, module, symbols, stmt->as.assign_stmt.value);
             if (stmt->as.assign_stmt.target->resolved_type) ensure_type_match(ctx, stmt->as.assign_stmt.target->resolved_type, &stmt->as.assign_stmt.value);
+            // View restriction checks
+            if (stmt->as.assign_stmt.target->kind == AST_EXPR_IDENT) {
+                Symbol* sym = symbol_table_lookup(symbols, stmt->as.assign_stmt.target->as.ident);
+                if (sym && sym->is_immutable) {
+                    char buffer[160];
+                    snprintf(buffer, sizeof(buffer), "cannot assign to read-only view identifier '%.*s'",
+                        (int)stmt->as.assign_stmt.target->as.ident.len, stmt->as.assign_stmt.target->as.ident.data);
+                    diag_error(module->file_path, (int)stmt->line, (int)stmt->column, buffer);
+                    module->had_error = true;
+                }
+            } else if (stmt->as.assign_stmt.target->kind == AST_EXPR_MEMBER &&
+                       stmt->as.assign_stmt.target->as.member.object->kind == AST_EXPR_IDENT) {
+                Symbol* sym = symbol_table_lookup(symbols, stmt->as.assign_stmt.target->as.member.object->as.ident);
+                if (sym && sym->is_immutable) {
+                    char buffer[160];
+                    snprintf(buffer, sizeof(buffer), "cannot mutate field of read-only view '%.*s'",
+                        (int)stmt->as.assign_stmt.target->as.member.object->as.ident.len,
+                        stmt->as.assign_stmt.target->as.member.object->as.ident.data);
+                    diag_error(module->file_path, (int)stmt->line, (int)stmt->column, buffer);
+                    module->had_error = true;
+                }
+            }
             break;
         }
         default: break;
