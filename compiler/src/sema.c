@@ -657,10 +657,22 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                 }
                 if (!found) {
                     // First try simple symbol lookup (works for non-overloaded methods)
+                    // But verify receiver type matches to avoid wrong overload
                     Symbol* sym = symbol_table_lookup(symbols, expr->as.method_call.method_name);
                     if (sym && sym->decl && sym->decl->kind == AST_DECL_FUNC) {
                         AstFuncDecl* fd = &sym->decl->as.func_decl;
-                        if (!fd->generic_params) {
+                        if (!fd->generic_params && fd->params) {
+                            // Check if this param type matches receiver
+                            TypeInfo* param_t = sema_resolve_type_internal(ctx, module, symbols, fd->params->type);
+                            TypeInfo* recv_t = expr->as.method_call.object->resolved_type;
+                            if (recv_t && recv_t->kind == TYPE_REF) recv_t = recv_t->as.ref.base;
+                            if (param_t && param_t->kind == TYPE_REF) param_t = param_t->as.ref.base;
+                            if (!recv_t || !param_t || recv_t == param_t) {
+                                expr->decl_link = sym->decl;
+                                if (fd->returns) expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, fd->returns->type);
+                                found = true;
+                            }
+                        } else if (!fd->generic_params && !fd->params) {
                             expr->decl_link = sym->decl;
                             if (fd->returns) expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, fd->returns->type);
                             found = true;
@@ -696,9 +708,14 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                         if (!fd->params || !str_eq_cstr(fd->params->name, "this")) continue;
                         if (fd->generic_params && rec) {
                             AstTypeRef* ga = infer_generic_args(ctx, fd, fd->params->type, &rec_tr);
-                            if (ga) { best_decl = dd; break; } // found matching overload
-                        } else if (!fd->generic_params) {
-                            best_decl = dd; // non-generic fallback
+                            if (ga) { best_decl = dd; break; }
+                        } else if (!fd->generic_params && rec) {
+                            // Non-generic: check receiver type matches this param
+                            TypeInfo* pt = sema_resolve_type_internal(ctx, module, symbols, fd->params->type);
+                            if (pt && pt->kind == TYPE_REF) pt = pt->as.ref.base;
+                            if (pt == rec || (pt && rec && pt->kind == rec->kind && str_eq(pt->name, rec->name))) {
+                                best_decl = dd; break;
+                            }
                         }
                     }
                     // Also search imports
@@ -714,6 +731,12 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                                 if (fd->generic_params && rec) {
                                     AstTypeRef* ga = infer_generic_args(ctx, fd, fd->params->type, &rec_tr);
                                     if (ga) { best_decl = dd; break; }
+                                } else if (!fd->generic_params && rec) {
+                                    TypeInfo* pt = sema_resolve_type_internal(ctx, module, symbols, fd->params->type);
+                                    if (pt && pt->kind == TYPE_REF) pt = pt->as.ref.base;
+                                    if (pt == rec || (pt && rec && pt->kind == rec->kind && str_eq(pt->name, rec->name))) {
+                                        best_decl = dd; break;
+                                    }
                                 }
                             }
                         }
