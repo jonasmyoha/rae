@@ -1254,6 +1254,7 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         const AstParam* p = fd->params;
         while (a) {
             bool needs_addr = false;
+            bool needs_deref = false;
             bool needs_prim_view_wrap = false;
             if (p && p->type && (p->type->is_view || p->type->is_mod)) {
                 const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, a->value);
@@ -1262,6 +1263,16 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     Str base = get_base_type_name(p->type);
                     if (is_primitive_type(base)) needs_prim_view_wrap = true;
                     else needs_addr = true;
+                }
+            }
+            // Extern function: struct param by value — dereference if arg is pointer
+            if (p && p->type && fd->is_extern && !(p->type->is_view || p->type->is_mod)) {
+                Str pbase = get_base_type_name(p->type);
+                if (!is_primitive_type(pbase) && pbase.len > 0) {
+                    const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, a->value);
+                    if (arg_tr && (arg_tr->is_view || arg_tr->is_mod)) needs_deref = true;
+                    // Also check if the arg is a pointer-type local (non-primitive struct param)
+                    if (a->value->kind == AST_EXPR_IDENT && is_pointer_type(ctx, a->value->as.ident)) needs_deref = true;
                 }
             }
 
@@ -1281,17 +1292,19 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 fprintf(out, "[]){");
             }
             if (needs_addr) fprintf(out, "&");
+            if (needs_deref) fprintf(out, "(*");
             if (needs_box) {
                 // For ref-typed args, pass wrapper directly so rae_any picks
                 // the mod/view variant and preserves the flag
-                const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, a->value);
-                bool arg_is_prim_ref = arg_tr && (arg_tr->is_view || arg_tr->is_mod) && is_primitive_type(get_base_type_name(arg_tr));
+                const AstTypeRef* arg_tr2 = infer_expr_type_ref(ctx, a->value);
+                bool arg_is_prim_ref = arg_tr2 && (arg_tr2->is_view || arg_tr2->is_mod) && is_primitive_type(get_base_type_name(arg_tr2));
                 fprintf(out, "rae_any((");
                 emit_expr(ctx, a->value, out, PREC_LOWEST, false, arg_is_prim_ref);
                 fprintf(out, "))");
             } else {
                 emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
             }
+            if (needs_deref) fprintf(out, ")");
             if (needs_prim_view_wrap) fprintf(out, "} }");
 
             if (a->next) fprintf(out, ", ");
@@ -1363,11 +1376,21 @@ fprintf(out, "%s(", fb_call_name);
             const AstCallArg* a = expr->as.call.args;
             const AstParam* p = found_fd->params;
             while (a) {
+                bool needs_addr = false;
                 bool needs_box = false;
+                if (p && p->type && (p->type->is_view || p->type->is_mod)) {
+                    const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, a->value);
+                    bool arg_is_ref = arg_tr && (arg_tr->is_view || arg_tr->is_mod);
+                    if (!arg_is_ref) {
+                        Str pbase = get_base_type_name(p->type);
+                        if (!is_primitive_type(pbase)) needs_addr = true;
+                    }
+                }
                 if (p && p->type && a->value->kind != AST_EXPR_BOX) {
                     Str param_base = get_base_type_name(p->type);
                     if (str_eq_cstr(param_base, "Any")) needs_box = true;
                 }
+                if (needs_addr) fprintf(out, "&");
                 if (needs_box) fprintf(out, "rae_any((");
                 emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
                 if (needs_box) fprintf(out, "))");
