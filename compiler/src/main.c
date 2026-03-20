@@ -3299,8 +3299,30 @@ static int run_compiled_file(const RunOptions* run_opts, const char* project_roo
   snprintf(runtime_dir, sizeof(runtime_dir), "%s", RAE_RUNTIME_SOURCE_DIR);
   
   const char* raylib_define = uses_raylib ? "-DRAE_HAS_RAYLIB" : "";
-  snprintf(cmd, sizeof(cmd), "gcc -std=c11 -O2 -w %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib -lraylib -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL %s %s/rae_runtime.c -o %s",
-           raylib_define, runtime_dir, temp_c, runtime_dir, temp_bin);
+
+  // Find .c files next to the source .rae file
+  char extra_c_files[PATH_MAX * 4] = {0};
+  {
+      char src_dir[PATH_MAX];
+      snprintf(src_dir, sizeof(src_dir), "%s", file_path);
+      char* last_sep = strrchr(src_dir, '/');
+      if (last_sep) *last_sep = '\0'; else snprintf(src_dir, sizeof(src_dir), ".");
+      DIR* d = opendir(src_dir);
+      if (d) {
+          struct dirent* ent;
+          size_t pos = 0;
+          while ((ent = readdir(d)) != NULL) {
+              size_t nlen = strlen(ent->d_name);
+              if (nlen > 2 && strcmp(ent->d_name + nlen - 2, ".c") == 0) {
+                  pos += snprintf(extra_c_files + pos, sizeof(extra_c_files) - pos, " %s/%s", src_dir, ent->d_name);
+              }
+          }
+          closedir(d);
+      }
+  }
+
+  snprintf(cmd, sizeof(cmd), "gcc -std=c11 -O2 -w %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib -lraylib -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL %s %s/rae_runtime.c%s -o %s",
+           raylib_define, runtime_dir, temp_c, runtime_dir, extra_c_files, temp_bin);
   
   if (system(cmd) != 0) {
     fprintf(stderr, "error: failed to compile C output\n");
