@@ -731,6 +731,49 @@ double rae_ext_rae_math_floor(double x) { return floor(x); }
 double rae_ext_rae_math_ceil(double x) { return ceil(x); }
 double rae_ext_rae_math_round(double x) { return round(x); }
 
+/* JSON helpers for C backend */
+static const char* rae_json_find_key(const char* json, int64_t json_len, const char* key) {
+    size_t klen = strlen(key);
+    for (int64_t i = 0; i < json_len - (int64_t)klen - 2; i++) {
+        if (json[i] == '"' && memcmp(json + i + 1, key, klen) == 0 && json[i + 1 + klen] == '"') {
+            int64_t j = i + 1 + (int64_t)klen + 1;
+            while (j < json_len && (json[j] == ':' || json[j] == ' ')) j++;
+            return json + j;
+        }
+    }
+    return NULL;
+}
+
+int64_t rae_json_extract_int(rae_String json, const char* key) {
+    const char* v = rae_json_find_key((const char*)json.data, json.len, key);
+    if (!v) return 0;
+    return strtoll(v, NULL, 10);
+}
+
+double rae_json_extract_float(rae_String json, const char* key) {
+    const char* v = rae_json_find_key((const char*)json.data, json.len, key);
+    if (!v) return 0.0;
+    return strtod(v, NULL);
+}
+
+rae_Bool rae_json_extract_bool(rae_String json, const char* key) {
+    const char* v = rae_json_find_key((const char*)json.data, json.len, key);
+    if (!v) return 0;
+    return (v[0] == 't') ? 1 : 0;
+}
+
+rae_String rae_json_extract_string(rae_String json, const char* key) {
+    const char* v = rae_json_find_key((const char*)json.data, json.len, key);
+    if (!v || *v != '"') return (rae_String){NULL, 0};
+    v++;
+    const char* end = strchr(v, '"');
+    if (!end) return (rae_String){NULL, 0};
+    int64_t len = (int64_t)(end - v);
+    uint8_t* copy = (uint8_t*)malloc((size_t)len + 1);
+    if (copy) { memcpy(copy, v, (size_t)len); copy[len] = 0; }
+    return (rae_String){copy, len};
+}
+
 /* Crypto stub wrappers for C backend — actual crypto requires monocypher linkage */
 void rae_ext_rae_crypto_lock(RaeAny key, RaeAny nonce, RaeAny plain, int64_t plain_len, RaeAny mac, RaeAny cipher) {
     (void)key; (void)nonce; (void)plain; (void)plain_len; (void)mac; (void)cipher;
