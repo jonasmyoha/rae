@@ -656,32 +656,82 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                     }
                 }
                 if (!found) {
+                    // First try simple symbol lookup (works for non-overloaded methods)
                     Symbol* sym = symbol_table_lookup(symbols, expr->as.method_call.method_name);
                     if (sym && sym->decl && sym->decl->kind == AST_DECL_FUNC) {
                         AstFuncDecl* fd = &sym->decl->as.func_decl;
-                        if (fd->generic_params) {
-                            TypeInfo* rec = expr->as.method_call.object->resolved_type; if (rec->kind == TYPE_REF) rec = rec->as.ref.base;
-                            AstTypeRef rec_tr = { .parts = arena_alloc(ctx->ast_arena, sizeof(AstIdentifierPart)) }; rec_tr.parts->text = rec->name;
-                            if (rec->kind == TYPE_STRUCT && rec->as.structure.generic_count > 0) {
-                                AstTypeRef* head = NULL; AstTypeRef* tail = NULL;
-                                for (size_t j = 0; j < rec->as.structure.generic_count; j++) {
-                                    AstTypeRef* arg_tr = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
-                                    arg_tr->resolved_type = rec->as.structure.generic_args[j]; arg_tr->next = NULL;
-                                    if (!head) head = arg_tr; else tail->next = arg_tr; tail = arg_tr;
-                                }
-                                rec_tr.generic_args = head;
+                        if (!fd->generic_params) {
+                            expr->decl_link = sym->decl;
+                            if (fd->returns) expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, fd->returns->type);
+                            found = true;
+                        }
+                    }
+                }
+                if (!found) {
+                    // Search ALL functions with matching name for generic overload resolution.
+                    // Methods like set/get/has exist on multiple types (List, StringMap, IntMap).
+                    TypeInfo* rec = expr->as.method_call.object->resolved_type;
+                    if (rec && rec->kind == TYPE_REF) rec = rec->as.ref.base;
+                    AstTypeRef rec_tr = {0};
+                    if (rec) {
+                        rec_tr.parts = arena_alloc(ctx->ast_arena, sizeof(AstIdentifierPart));
+                        rec_tr.parts->text = rec->name;
+                        if (rec->kind == TYPE_STRUCT && rec->as.structure.generic_count > 0) {
+                            AstTypeRef* head = NULL; AstTypeRef* tail = NULL;
+                            for (size_t j = 0; j < rec->as.structure.generic_count; j++) {
+                                AstTypeRef* arg_tr = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
+                                arg_tr->resolved_type = rec->as.structure.generic_args[j]; arg_tr->next = NULL;
+                                if (!head) head = arg_tr; else tail->next = arg_tr; tail = arg_tr;
                             }
+                            rec_tr.generic_args = head;
+                        }
+                    }
+                    // Iterate all decls to find the best matching overload for this receiver type
+                    AstDecl* best_decl = NULL;
+                    for (AstDecl* dd = module->decls; dd; dd = dd->next) {
+                        if (dd->kind != AST_DECL_FUNC) continue;
+                        if (!str_eq(dd->as.func_decl.name, expr->as.method_call.method_name)) continue;
+                        if (dd->as.func_decl.specialization_args) continue; // skip existing specializations
+                        AstFuncDecl* fd = &dd->as.func_decl;
+                        if (!fd->params || !str_eq_cstr(fd->params->name, "this")) continue;
+                        if (fd->generic_params && rec) {
+                            AstTypeRef* ga = infer_generic_args(ctx, fd, fd->params->type, &rec_tr);
+                            if (ga) { best_decl = dd; break; } // found matching overload
+                        } else if (!fd->generic_params) {
+                            best_decl = dd; // non-generic fallback
+                        }
+                    }
+                    // Also search imports
+                    if (!best_decl) {
+                        for (const AstImport* imp = module->imports; imp && !best_decl; imp = imp->next) {
+                            if (!imp->module) continue;
+                            for (AstDecl* dd = imp->module->decls; dd; dd = dd->next) {
+                                if (dd->kind != AST_DECL_FUNC) continue;
+                                if (!str_eq(dd->as.func_decl.name, expr->as.method_call.method_name)) continue;
+                                if (dd->as.func_decl.specialization_args) continue;
+                                AstFuncDecl* fd = &dd->as.func_decl;
+                                if (!fd->params || !str_eq_cstr(fd->params->name, "this")) continue;
+                                if (fd->generic_params && rec) {
+                                    AstTypeRef* ga = infer_generic_args(ctx, fd, fd->params->type, &rec_tr);
+                                    if (ga) { best_decl = dd; break; }
+                                }
+                            }
+                        }
+                    }
+                    if (best_decl) {
+                        AstFuncDecl* fd = &best_decl->as.func_decl;
+                        if (fd->generic_params && rec) {
                             AstTypeRef* ga = infer_generic_args(ctx, fd, fd->params->type, &rec_tr);
                             if (ga) {
                                 TypeInfo* type_args[16]; size_t ac = 0;
                                 for (AstTypeRef* tr = ga; tr && ac < 16; tr = tr->next) type_args[ac++] = sema_resolve_type_internal(ctx, module, symbols, tr);
-                                AstDecl* spec = type_registry_find_specialization(ctx->type_registry, sym->decl, type_args, ac);
-                                if (!spec) spec = specialize_decl(ctx, module, sym->decl, type_args, ac, expr->line, expr->column);
+                                AstDecl* spec = type_registry_find_specialization(ctx->type_registry, best_decl, type_args, ac);
+                                if (!spec) spec = specialize_decl(ctx, module, best_decl, type_args, ac, expr->line, expr->column);
                                 expr->decl_link = spec;
                             } else {
-                                expr->decl_link = sym->decl;
+                                expr->decl_link = best_decl;
                             }
-                        } else expr->decl_link = sym->decl;
+                        } else expr->decl_link = best_decl;
                         if (expr->decl_link->as.func_decl.returns) expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, expr->decl_link->as.func_decl.returns->type);
                         found = true;
                     }
