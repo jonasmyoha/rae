@@ -3,27 +3,43 @@
 
 Use chat text that starts with "add to queue" to append tasks.
 
-## C Backend Monomorphisation — Remaining Fixes
-
-- [ ] Task 1: Emit collection literals (`let x: List(Int) = { 10, 20, 30 }`) — handle AST_EXPR_COLLECTION_LITERAL in c_backend emit_expr by emitting createList + add calls. Fixes 325_list_literal, 337_list_method.
-- [ ] Task 2: Fix identity/newtype lowering (`let pid: User = 123`) — detect `is id`/`is key` types and emit underlying primitive type. Fixes 341_identity_behavior + smoke 10_memory_basics, identity_fix, store_mapping.
-- [ ] Task 3: Fix toString() method resolution — `s.active.toString()` emits `rae_toString` undeclared. Emit as type-specific rae_ext_rae_str call. Fixes 350_auto_init (partial).
-- [ ] Task 4: Fix output format mismatches for ref types — 336 outputs `7` instead of `view 7`, 351 outputs `80` instead of `mod 80`. Decide: update test expectations or add prefix in C log. Also finish 350_auto_init string eq chain.
-- [ ] CHECKPOINT 1: Re-run all tests after tasks 1-4. Evaluate results. Update remaining tasks.
-- [ ] Task 5: Fix opt T return type unboxing — `get(T)` returns RaeAny but callers expect rae_String. Add .as.s/.as.i unboxing at call sites when return type is opt T. Fixes 371_string_overhaul + ~10 smoke tests.
-- [ ] Task 6: Fix createIntMap/createInt64Map specialization chain — inner specialization not discovered. Improve C backend discovery pass transitive following. Fixes 370_map_basic.
-- [ ] Task 7: Fix rae_any macro for struct types — _Generic has no case for List/custom structs. Add struct handling or avoid boxing. Fixes multiple smoke tests.
-- [ ] Task 8: Fix view restriction diagnostic for compiled target — test expects compiler errors but compiled target emits nothing. Wire sema view checks for compiled path. Fixes 357_view_restriction.
-- [ ] CHECKPOINT 2: Re-run all tests after tasks 5-8. Major smoke test re-assessment.
-- [ ] Task 9: Add raylib C function forward declarations — emit declarations for rae_ext_initWindow etc. when raylib is imported. Fixes ~8 raylib smoke tests.
-- [ ] Task 10: Add crypto function declarations and C wrappers — rae_ext_rae_crypto_lock/unlock using monocypher. Fixes 19_file_ops, 27_file_locking, 28_crypto_demo.
-- [ ] Task 11: Fix random(min,max) overload in imported modules — 2-arg random not found in import context. Extend overload search. Fixes 04_random, 92_pong_import, 94_tetris.
-- [ ] Task 12: Implement defer statement emission — collect defers, emit before returns and at function end. Fixes 15_defer_cleanup.
-- [ ] CHECKPOINT 3: Re-run all tests after tasks 9-12. Full re-assessment.
-- [ ] Task 13: Fix external C function linking — compile user .c files alongside generated output. Fixes 20_external_c.
-- [ ] Task 14: Fix JSON serialization (toJson/fromJson) — implement C-side or mark VM-only. Fixes 17_json_demo, 18_complex_json.
-- [ ] Task 15: Fix method this parameter passing (value vs pointer) — add & for struct this args in method calls. Fixes 25_timer_demo + others.
-- [ ] Task 16: Fix float modulo operator — emit fmod(a,b) instead of a%b for doubles. Fixes 93_raylib_3d.
-- [ ] CHECKPOINT 4: Final evaluation. Plan next phase.
+- [x] #1 Task 1: Emit collection literals (`let x: List(Int) = { 10, 20, 30 }`) — handle AST_EXPR_COLLECTION_LITERAL in c_backend emit_expr by emitting createList + add calls. Fixes 325_list_literal, 337_list_method.
+- [x] #2 Task 2: Fix identity/newtype lowering (`let pid: User = 123`) — detect `is id`/`is key` types and emit underlying primitive type. Fixes 341_identity_behavior + smoke 10_memory_basics, identity_fix, store_mapping.
+- [x] #3 Task 3: Fix toString() method resolution — `s.active.toString()` emits `rae_toString` undeclared. Emit as type-specific rae_ext_rae_str call. Fixes 350_auto_init (partial).
+- [x] #4 Task 4: Fix output format mismatches for ref types — 336 outputs `7` instead of `view 7`, 351 outputs `80` instead of `mod 80`. Decide: update test expectations or add prefix in C log. Also finish 350_auto_init string eq chain.
+- [x] #5 CHECKPOINT 1: Re-run all tests after tasks 1-4. Evaluate results. Update remaining tasks.
+- [x] #6 Task 5: Fix opt T return type unboxing — `get(T)` returns RaeAny but callers expect rae_String. Add .as.s/.as.i unboxing at call sites when return type is opt T. Fixes 371_string_overhaul + ~10 smoke tests.
+- [x] #7 Task 6: Fix createIntMap/createInt64Map specialization chain — inner specialization not discovered. Improve C backend discovery pass transitive following. Fixes 370_map_basic.
+- [x] #8 Task 7: Fix rae_any macro for struct types — _Generic has no case for List/custom structs. Add struct handling or avoid boxing. Fixes multiple smoke tests.
+- [x] #9 Task 8: Fix view restriction diagnostic for compiled target — test expects compiler errors but compiled target emits nothing. Wire sema view checks for compiled path. Fixes 357_view_restriction.
+- [x] #10 CHECKPOINT 2: Re-run all tests after tasks 5-8. Major smoke test re-assessment.
+- [x] #11 Task 9: Add raylib C function forward declarations — emit declarations for rae_ext_initWindow etc. when raylib is imported. Fixes ~8 raylib smoke tests.
+- [x] #12 Task 10: Add crypto function declarations and C wrappers — rae_ext_rae_crypto_lock/unlock using monocypher. Fixes 19_file_ops, 27_file_locking, 28_crypto_demo.
+- [x] #13 Task 11: Fix random(min,max) overload in imported modules — 2-arg random not found in import context. Extend overload search. Fixes 04_random, 92_pong_import, 94_tetris.
+- [x] #14 Task 12: Implement defer statement emission — collect defers, emit before returns and at function end. Fixes 15_defer_cleanup.
+- [x] #15 CHECKPOINT 3: Re-run all tests after tasks 9-12. Full re-assessment.
+- [x] #16 Task 13: Fix external C function linking — compile user .c files alongside generated output. Fixes 20_external_c.
+- [x] #17 Task 14: Fix JSON serialization (toJson/fromJson) — implement C-side or mark VM-only. Fixes 17_json_demo, 18_complex_json.
+- [x] #18 Task 15: Fix method this parameter passing (value vs pointer) — add & for struct this args in method calls. Fixes 25_timer_demo + others.
+- [x] #19 Task 16: Fix float modulo operator — emit fmod(a,b) instead of a%b for doubles. Fixes 93_raylib_3d.
+- [x] #20 CHECKPOINT 4: Final evaluation. Plan next phase.
+- [x] #21 Fix opt T unboxing — UNBOX emits `.as.s` on `rae_String` when extern returns concrete type not RaeAny. Skip unbox for concrete return types. Fixes 19_file_ops, 21_stdlib_demo, 27_file_locking, 28_crypto_demo, 371_string_overhaul.
+- [x] #22 Fix List member `->` vs `.` in interpolation/non-method contexts — `xs->length` should be `xs.length` for value-type List variables. Fixes 06_list_basic, 07_list_loop, 08_list_benchmark.
+- [x] #23 Add compound literal cast for c_struct types in function call args — bare `{ .r=20 }` needs `(Color){ .r=20 }` cast. Fixes 93_raylib_3d, 95_easing_2d, 96_easing_3d.
+- [x] #24 CHECKPOINT 5: Re-run all tests after #21-#23. Evaluate progress.
+- [x] #25 Fix Legacy List2 buf ops type mismatch — old List2 API passes RaeAny where int64_t expected. Fix buf_set/get for non-generic List2. Fixes list_library_any, list_library_int, list_native_any.
+- [x] #26 Fix map method T substitution — `m.set(...)` / `m.get(...)` on StringMap/IntMap emit `rae_T` instead of concrete type. Fixes 370_map_basic.
+- [x] #27 Fix 337_list_method output — element 20 stored as none. Debug buf_set index in add specialization. Fixes 337_list_method.
+- [x] #28 Fix 18_complex_json — add uint8_t to rae_ext_rae_str _Generic macro for raylib Color fields. Fixes 18_complex_json.
+- [x] #29 Fix 94_tetris2d — cross-type specialization chain (grow for List(String) inside List(Int) context). Fixes 94_tetris2d.
+- [x] #30 Fix generic_test Box(T) — Buffer field typed as uint8_t* gets int64_t. Needs monomorphised struct field types. Fixes generic_test.
+- [x] #31 CHECKPOINT 6: Final phase 2 evaluation.
+- [x] #32 Add AST_EXPR_INTERP handling to sema — sema doesn't walk string interpolation sub-expressions, so method calls like `xs.get(index: 0)` inside `"{...}"` never get `decl_link` resolved. Add INTERP case to `sema_analyze_expr` to recurse into interp parts. HIGH IMPACT: fixes 06_list_basic, 07_list_loop, and similar interpolation-heavy tests. LOW RISK.
+- [x] #33 Clear `generic_params` on specialized decls in `specialize_decl()` — specializations inherit `generic_params` from the template via struct copy, confusing C backend code paths that check `fd->generic_params` to decide if a function is generic. A specialization has `specialization_args`, NOT `generic_params`. Set `generic_params = NULL` on specializations, use `generic_template->generic_params` where param names are needed. MEDIUM RISK: must audit all `generic_params` checks.
+- [x] #34 Generalize sema generic inference beyond `this` parameter — sema only infers generic args from the first param if named `this`. Extend to try ALL param/arg pairs: if an arg has a resolved struct type with generic args, try `infer_generic_args` against the corresponding param type. Fixes generic_test (`setValue(T)(b: mod Box(T), val: T)`). MEDIUM RISK.
+- [x] #35 CHECKPOINT 7: Re-run all tests after #32-#34. Evaluate which of the 9 failures are fixed.
+- [x] #36 Add receiver-type inference to C backend fallback for non-generic contexts — safety net for cases where sema still fails. When fallback finds a generic function and the first arg has a known struct type with generic args, infer concrete types and emit the specialized name. LOW RISK.
+- [x] #37 Fix map entry type emission — `StringMapEntry(V)` and `IntMapEntry(V)` referenced by StringMap/IntMap fields are not discovered by the generic type emission pass. Walk struct field types recursively during type discovery. Fixes 370_map_basic (partial). MEDIUM RISK.
+- [x] #38 CHECKPOINT 8: Final phase 3 evaluation. Target: 0 unit failures, ≤3 example failures.
 
 <!-- SUMU_QUEUE_END -->

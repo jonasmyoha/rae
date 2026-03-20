@@ -205,3 +205,14 @@ SAY: Lexer refactor complete and all tests pass.
 ---
 
 End of instructions.
+
+<!-- SUMU_QUEUE_NOTE -->
+## SUMU AI
+SUMU AI is a voice-first desktop AI assistant app for running project tools and agent workflows.
+
+## QUEUE.md
+`QUEUE.md` is managed by SUMU for queued project tasks.
+- SUMU may create this file when queue features are used.
+- SUMU updates queue item status markers, including `[>sumu]` for in-progress and `[x]` for done.
+- Keep manual edits simple to avoid merge conflicts with SUMU updates.
+
