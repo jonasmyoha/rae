@@ -578,7 +578,7 @@ static void discover_specializations_stmt(CFuncContext* ctx, const AstStmt* stmt
 static void discover_specializations_module(CompilerContext* ctx, const AstModule* module) {
     for (size_t i = 0; i < ctx->all_decl_count; i++) {
         const AstDecl* d = ctx->all_decls[i];
-        if (d->kind == AST_DECL_FUNC && !d->as.func_decl.generic_params) {
+        if (d->kind == AST_DECL_FUNC && !d->as.func_decl.generic_params && !d->as.func_decl.specialization_args) {
             CFuncContext fctx = {.compiler_ctx = ctx, .module = module, .func_decl = &d->as.func_decl};
             if (d->as.func_decl.body) discover_specializations_stmt(&fctx, d->as.func_decl.body->first);
         }
@@ -589,13 +589,15 @@ static void discover_specializations_module(CompilerContext* ctx, const AstModul
         for (size_t i = discovered; i < limit; i++) {
             const AstFuncDecl* f = ctx->specialized_funcs[i].decl; const AstTypeRef* args = ctx->specialized_funcs[i].concrete_args;
             if (!f) continue;
-            CFuncContext fctx = {.compiler_ctx = ctx, .module = module, .func_decl = f, .generic_params = f->generic_params, .generic_args = args};
+            const AstIdentifierPart* disc_gp = f->generic_params;
+            if (!disc_gp && f->generic_template && f->generic_template->kind == AST_DECL_FUNC) disc_gp = f->generic_template->as.func_decl.generic_params;
+            CFuncContext fctx = {.compiler_ctx = ctx, .module = module, .func_decl = f, .generic_params = disc_gp, .generic_args = args};
             // Populate locals from params so infer_expr_type_ref works for 'this' etc.
             for (const AstParam* p = f->params; p; p = p->next) {
                 if (fctx.local_count < 256) {
                     fctx.locals[fctx.local_count] = p->name;
                     fctx.local_type_refs[fctx.local_count] = p->type;
-                    const char* tn = rae_mangle_type_specialized(ctx, f->generic_params, args, p->type);
+                    const char* tn = rae_mangle_type_specialized(ctx, disc_gp, args, p->type);
                     fctx.local_types[fctx.local_count] = str_from_cstr(tn);
                     fctx.local_count++;
                 }
@@ -1965,7 +1967,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   // Prototypes for non-generic functions
   for (size_t i = 0; i < ctx->all_decl_count; i++) {
       const AstDecl* d = ctx->all_decls[i];
-      if (d->kind == AST_DECL_FUNC && !d->as.func_decl.generic_params && !d->as.func_decl.is_extern && !str_eq_cstr(d->as.func_decl.name, "main")) {
+      if (d->kind == AST_DECL_FUNC && !d->as.func_decl.generic_params && !d->as.func_decl.specialization_args && !d->as.func_decl.is_extern && !str_eq_cstr(d->as.func_decl.name, "main")) {
           CFuncContext tctx = {.compiler_ctx = ctx, .module = module, .func_decl = &d->as.func_decl};
           fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&tctx, &d->as.func_decl), rae_mangle_function(ctx, &d->as.func_decl));
           emit_param_list(&tctx, d->as.func_decl.params, out, false);
@@ -1977,14 +1979,16 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   for (size_t i = 0; i < ctx->specialized_func_count; i++) {
       const AstFuncDecl* f = ctx->specialized_funcs[i].decl; const AstTypeRef* args = ctx->specialized_funcs[i].concrete_args;
       const char* mangled = rae_mangle_specialized_function(ctx, f, args);
-      CFuncContext tctx = {.compiler_ctx = ctx, .module = module, .generic_params = f->generic_params, .generic_args = args};
+      const AstIdentifierPart* gp = f->generic_params;
+      if (!gp && f->generic_template && f->generic_template->kind == AST_DECL_FUNC) gp = f->generic_template->as.func_decl.generic_params;
+      CFuncContext tctx = {.compiler_ctx = ctx, .module = module, .generic_params = gp, .generic_args = args};
       fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&tctx, f), mangled); emit_param_list(&tctx, f->params, out, false); fprintf(out, ");\n");
   }
   
   // Bodies for non-generic functions
   for (size_t i = 0; i < ctx->all_decl_count; i++) {
       const AstDecl* d = ctx->all_decls[i];
-      if (d->kind == AST_DECL_FUNC && !d->as.func_decl.generic_params && !d->as.func_decl.is_extern && !str_eq_cstr(d->as.func_decl.name, "main")) {
+      if (d->kind == AST_DECL_FUNC && !d->as.func_decl.generic_params && !d->as.func_decl.specialization_args && !d->as.func_decl.is_extern && !str_eq_cstr(d->as.func_decl.name, "main")) {
           emit_function(ctx, module, &d->as.func_decl, out, registry, false);
       }
   }
