@@ -664,8 +664,13 @@ static bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, F
       }
       if (t->kind == TYPE_STRUCT) {
           if (type->is_view) fprintf(out, "const ");
-          const char* name = type_mangle_name(ctx->compiler_ctx->ast_arena, t).data;
-          fprintf(out, "%s", name);
+          // Check if it's a raylib c_struct type — emit bare name
+          if (is_raylib_builtin_type(t->name)) {
+              fprintf(out, "%.*s", (int)t->name.len, t->name.data);
+          } else {
+              const char* name = type_mangle_name(ctx->compiler_ctx->ast_arena, t).data;
+              fprintf(out, "%s", name);
+          }
           if (is_ptr) fprintf(out, "*");
           return true;
       }
@@ -697,6 +702,11 @@ static bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, F
       if (ed) { fprintf(out, "int64_t"); if (is_ptr) fprintf(out, "*"); return true; }
   }
   // Check for c_struct property types (raylib types etc.) — emit as bare name
+  if (is_raylib_builtin_type(base)) {
+      fprintf(out, "%.*s", (int)base.len, base.data);
+      if (is_ptr) fprintf(out, "*");
+      return true;
+  }
   if (ctx) {
       const AstDecl* td = find_type_decl(ctx, ctx->module, base);
       if (td && td->kind == AST_DECL_TYPE && has_property(td->as.type_decl.properties, "c_struct")) {
