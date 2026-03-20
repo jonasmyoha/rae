@@ -857,7 +857,12 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
       if (expr->as.binary.op == AST_BIN_IS) {
           const AstTypeRef* lhs_tr = infer_expr_type_ref(ctx, expr->as.binary.lhs);
           Str lhs_base = get_base_type_name(lhs_tr);
-          if (str_eq_cstr(lhs_base, "String") || str_eq_cstr(lhs_base, "rae_String")) {
+          bool lhs_is_string = str_eq_cstr(lhs_base, "String") || str_eq_cstr(lhs_base, "rae_String");
+          bool rhs_is_string_lit = expr->as.binary.rhs->kind == AST_EXPR_STRING;
+          // Also detect toString() calls — they always return String
+          bool lhs_is_tostring = expr->as.binary.lhs->kind == AST_EXPR_METHOD_CALL &&
+              str_eq_cstr(expr->as.binary.lhs->as.method_call.method_name, "toString");
+          if (lhs_is_string || rhs_is_string_lit || lhs_is_tostring) {
               fprintf(out, "(bool)rae_ext_rae_str_eq(");
               emit_expr(ctx, expr->as.binary.lhs, out, PREC_LOWEST, false, false);
               fprintf(out, ", ");
@@ -895,6 +900,13 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
     }
     case AST_EXPR_CALL: emit_call_expr(ctx, expr, out); break;
     case AST_EXPR_METHOD_CALL: {
+        // Built-in method: toString() → rae_ext_rae_str(object)
+        if (str_eq_cstr(expr->as.method_call.method_name, "toString") && !expr->as.method_call.args) {
+            fprintf(out, "rae_ext_rae_str((");
+            emit_expr(ctx, expr->as.method_call.object, out, PREC_LOWEST, false, false);
+            fprintf(out, "))");
+            break;
+        }
         AstExpr call = { .kind = AST_EXPR_CALL, .line = expr->line, .column = expr->column, .decl_link = expr->decl_link };
         call.as.call.callee = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstExpr)); call.as.call.callee->kind = AST_EXPR_IDENT; call.as.call.callee->as.ident = expr->as.method_call.method_name;
         AstCallArg* first_arg = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstCallArg)); first_arg->name = str_from_cstr("this"); first_arg->value = expr->as.method_call.object; first_arg->next = expr->as.method_call.args;
