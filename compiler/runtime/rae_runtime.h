@@ -365,6 +365,11 @@ RAE_UNUSED static RaeAny rae_any_unwrap(RaeAny v) {
     return v;
 }
 
+/* Crypto function declarations */
+void rae_ext_rae_crypto_lock(RaeAny key, RaeAny nonce, RaeAny plain, int64_t plain_len, RaeAny mac, RaeAny cipher);
+int64_t rae_ext_rae_crypto_unlock(RaeAny key, RaeAny nonce, RaeAny mac, RaeAny cipher, int64_t cipher_len, RaeAny plain);
+void rae_ext_rae_crypto_argon2i(RaeAny work_area, RaeAny password, RaeAny salt, int64_t nb_blocks, RaeAny nb_iterations, RaeAny hash_buf, int64_t hash_len);
+
 /* Raylib wrapper function declarations */
 #ifdef RAE_HAS_RAYLIB
 #include <raylib.h>
