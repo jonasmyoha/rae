@@ -1006,9 +1006,41 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
     }
     case AST_EXPR_UNBOX: {
         if (expr->resolved_type) {
-            TypeInfo* t = expr->resolved_type; if (t->kind == TYPE_REF) t = t->as.ref.base;
-            fprintf(out, "("); emit_expr(ctx, expr->as.unary.operand, out, PREC_LOWEST, false, false);
-            if (t->kind == TYPE_INT || t->kind == TYPE_CHAR) fprintf(out, ").as.i"); else if (t->kind == TYPE_FLOAT) fprintf(out, ").as.f"); else if (t->kind == TYPE_BOOL) fprintf(out, ").as.b"); else if (t->kind == TYPE_STRING) fprintf(out, ").as.s"); else fprintf(out, ").as.ptr");
+            // Check if the operand already returns the concrete type (not RaeAny)
+            // This happens when an extern function returns e.g. rae_String directly
+            // but sema inserted UNBOX because the Rae decl says ret opt String
+            bool skip_unbox = false;
+            const AstExpr* inner = expr->as.unary.operand;
+            // Skip through nested BOX to find the actual call
+            if (inner->kind == AST_EXPR_BOX) inner = inner->as.unary.operand;
+            // Check via decl_link
+            if (inner->kind == AST_EXPR_CALL && inner->decl_link && inner->decl_link->kind == AST_DECL_FUNC) {
+                const AstFuncDecl* ifd = &inner->decl_link->as.func_decl;
+                if (ifd->is_extern) skip_unbox = true;
+            }
+            // Also check: if inner is a call whose callee name starts with rae_ext_ or is an extern
+            // (handles fallback path where decl_link is NULL)
+            if (!skip_unbox && inner->kind == AST_EXPR_CALL && inner->as.call.callee &&
+                inner->as.call.callee->kind == AST_EXPR_IDENT) {
+                Str cname = inner->as.call.callee->as.ident;
+                if (str_starts_with_cstr(cname, "rae_ext_") || str_starts_with_cstr(cname, "rae_sys_") ||
+                    str_starts_with_cstr(cname, "rae_io_") || str_starts_with_cstr(cname, "rae_crypto_")) {
+                    skip_unbox = true;
+                }
+                // Also look up function by name — if it's extern, skip
+                for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count && !skip_unbox; i++) {
+                    const AstDecl* d = ctx->compiler_ctx->all_decls[i];
+                    if (d->kind == AST_DECL_FUNC && str_eq(d->as.func_decl.name, cname) && d->as.func_decl.is_extern)
+                        skip_unbox = true;
+                }
+            }
+            if (skip_unbox) {
+                emit_expr(ctx, expr->as.unary.operand, out, PREC_LOWEST, false, false);
+            } else {
+                TypeInfo* t = expr->resolved_type; if (t->kind == TYPE_REF) t = t->as.ref.base;
+                fprintf(out, "("); emit_expr(ctx, expr->as.unary.operand, out, PREC_LOWEST, false, false);
+                if (t->kind == TYPE_INT || t->kind == TYPE_CHAR) fprintf(out, ").as.i"); else if (t->kind == TYPE_FLOAT) fprintf(out, ").as.f"); else if (t->kind == TYPE_BOOL) fprintf(out, ").as.b"); else if (t->kind == TYPE_STRING) fprintf(out, ").as.s"); else fprintf(out, ").as.ptr");
+            }
         } else emit_expr(ctx, expr->as.unary.operand, out, PREC_LOWEST, false, false);
         break;
     }
@@ -1329,7 +1361,8 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             a = a->next; if (p) p = p->next;
         }
         fprintf(out, ")");
-        emit_opt_unbox_suffix(ctx, fd, out);
+        // Don't unbox extern calls — they return concrete C types, not RaeAny
+        if (!fd->is_extern) emit_opt_unbox_suffix(ctx, fd, out);
         return true;
     }
     // Handle sizeof in fallback path (when decl_link is missing)
@@ -1582,7 +1615,10 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         fprintf(out, "){ .ptr = &"); emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, true, true);
                         fprintf(out, " }");
                     } else {
-                        emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, false, false);
+                        bool opt_return = ret_type && ret_type->is_opt;
+                        bool val_is_box = stmt->as.ret_stmt.values->value->kind == AST_EXPR_BOX;
+                        if (opt_return && !val_is_box) { fprintf(out, "rae_any(("); emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, false, false); fprintf(out, "))"); }
+                        else emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, false, false);
                     }
                     fprintf(out, ";\n");
                     emit_defers(ctx, 0, out);
@@ -1613,7 +1649,10 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         fprintf(out, "){ .ptr = &"); emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, true, true);
                         fprintf(out, " }");
                     } else {
-                        emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, false, false);
+                        bool opt_return = ret_type && ret_type->is_opt;
+                        bool val_is_box = stmt->as.ret_stmt.values->value->kind == AST_EXPR_BOX;
+                        if (opt_return && !val_is_box) { fprintf(out, "rae_any(("); emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, false, false); fprintf(out, "))"); }
+                        else emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, false, false);
                     }
                 } else {
                     if (ctx->func_decl && str_eq_cstr(ctx->func_decl->name, "main")) fprintf(out, "0");
