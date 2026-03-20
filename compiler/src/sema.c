@@ -579,23 +579,31 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                         if (fd->generic_params) {
                             AstTypeRef* inferred_args = NULL;
                             if (expr->as.call.generic_args) inferred_args = expr->as.call.generic_args;
-                            else if (fd->params && str_eq_cstr(fd->params->name, "this") && expr->as.call.args) {
-                                const AstExpr* first_arg = expr->as.call.args->value;
-                                if (first_arg->resolved_type) {
-                                    TypeInfo* rec = first_arg->resolved_type; if (rec->kind == TYPE_REF) rec = rec->as.ref.base;
-                                    if (rec->kind == TYPE_STRUCT) {
-                                        AstTypeRef rec_tr = { .parts = arena_alloc(ctx->ast_arena, sizeof(AstIdentifierPart)) }; rec_tr.parts->text = rec->name;
-                                        if (rec->as.structure.generic_count > 0) {
-                                            AstTypeRef* head = NULL; AstTypeRef* tail = NULL;
-                                            for (size_t i = 0; i < rec->as.structure.generic_count; i++) {
-                                                AstTypeRef* arg_tr = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
-                                                arg_tr->resolved_type = rec->as.structure.generic_args[i]; arg_tr->next = NULL;
-                                                if (!head) head = arg_tr; else tail->next = arg_tr; tail = arg_tr;
+                            else {
+                                // Try to infer generic args from ANY param/arg pair
+                                // where the arg has a resolved struct type with generic args
+                                AstParam* p = fd->params;
+                                AstCallArg* a = expr->as.call.args;
+                                while (p && a && !inferred_args) {
+                                    if (a->value && a->value->resolved_type) {
+                                        TypeInfo* arg_t = a->value->resolved_type;
+                                        if (arg_t->kind == TYPE_REF) arg_t = arg_t->as.ref.base;
+                                        if (arg_t->kind == TYPE_STRUCT) {
+                                            AstTypeRef rec_tr = { .parts = arena_alloc(ctx->ast_arena, sizeof(AstIdentifierPart)) };
+                                            rec_tr.parts->text = arg_t->name;
+                                            if (arg_t->as.structure.generic_count > 0) {
+                                                AstTypeRef* head = NULL; AstTypeRef* tail = NULL;
+                                                for (size_t i = 0; i < arg_t->as.structure.generic_count; i++) {
+                                                    AstTypeRef* ga = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
+                                                    ga->resolved_type = arg_t->as.structure.generic_args[i]; ga->next = NULL;
+                                                    if (!head) head = ga; else tail->next = ga; tail = ga;
+                                                }
+                                                rec_tr.generic_args = head;
                                             }
-                                            rec_tr.generic_args = head;
+                                            inferred_args = infer_generic_args(ctx, fd, p->type, &rec_tr);
                                         }
-                                        inferred_args = infer_generic_args(ctx, fd, fd->params->type, &rec_tr);
                                     }
+                                    p = p->next; a = a->next;
                                 }
                             }
                             if (inferred_args) {
