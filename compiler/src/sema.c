@@ -271,7 +271,12 @@ static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, AstDecl
     if (existing) return existing;
     AstDecl* spec = arena_alloc(ctx->ast_arena, sizeof(AstDecl));
     *spec = *generic_decl; spec->next = NULL;
-    if (spec->kind == AST_DECL_FUNC) spec->as.func_decl.generic_template = generic_decl;
+    if (spec->kind == AST_DECL_FUNC) {
+        spec->as.func_decl.generic_template = generic_decl;
+        // Specializations are NOT templates — clear generic_params.
+        // Use generic_template->generic_params when param names are needed.
+        spec->as.func_decl.generic_params = NULL;
+    }
     else if (spec->kind == AST_DECL_TYPE) spec->as.type_decl.generic_template = generic_decl;
     AstTypeRef* args_tr = NULL; AstTypeRef* last_tr = NULL;
     for (size_t i = 0; i < arg_count; i++) {
