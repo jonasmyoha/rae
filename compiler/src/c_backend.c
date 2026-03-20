@@ -151,6 +151,10 @@ static bool emit_type_recursive(CompilerContext* ctx, const AstModule* m, const 
         fprintf(out, "* data;\n  int64_t length;\n  int64_t capacity;\n};\n\n");
     } else {
         const AstDecl* d = find_type_decl(NULL, m, base);
+        // If we found a specialized version, use the generic template instead
+        // (so fields have T not substituted types, and we apply our own substitution)
+        if (d && d->kind == AST_DECL_TYPE && d->as.type_decl.specialization_args && d->as.type_decl.generic_template)
+            d = d->as.type_decl.generic_template;
         if (d && d->kind == AST_DECL_TYPE) {
             const AstTypeDecl* td = &d->as.type_decl;
             const AstIdentifierPart* params = td->generic_params;
