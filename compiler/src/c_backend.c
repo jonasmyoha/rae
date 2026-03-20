@@ -1250,14 +1250,8 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             }
         }
         if (str_eq_cstr(name, "sizeof")) {
-            fprintf(out, "sizeof(");
-            if (expr->as.call.generic_args) {
-                AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, expr->as.call.generic_args);
-                emit_type_ref_as_c_type(ctx, sub, out, false);
-            } else {
-                fprintf(out, "void");
-            }
-            fprintf(out, ")");
+            // Use sizeof(RaeAny) for buffer element sizes since buf_set/buf_get use RaeAny
+            fprintf(out, "sizeof(RaeAny)");
             return true;
         }
         // If calling a generic function, determine concrete type args
@@ -1405,14 +1399,7 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     // Handle sizeof in fallback path (when decl_link is missing)
     if (expr->as.call.callee && expr->as.call.callee->kind == AST_EXPR_IDENT &&
         str_eq_cstr(expr->as.call.callee->as.ident, "sizeof")) {
-        fprintf(out, "sizeof(");
-        if (expr->as.call.generic_args) {
-            AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, expr->as.call.generic_args);
-            emit_type_ref_as_c_type(ctx, sub, out, false);
-        } else {
-            fprintf(out, "void");
-        }
-        fprintf(out, ")");
+        fprintf(out, "sizeof(RaeAny)");
         return true;
     }
     // Fallback: look up function by name when decl_link is missing
