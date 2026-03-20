@@ -186,6 +186,17 @@ static AstExpr* clone_expr(Arena* arena, const AstExpr* expr) {
                 res->as.object_literal.fields = head;
             }
             break;
+        case AST_EXPR_INTERP: {
+            AstInterpPart* head = NULL; AstInterpPart* tail = NULL;
+            AstInterpPart* curr = expr->as.interp.parts;
+            while (curr) {
+                AstInterpPart* p = arena_alloc(arena, sizeof(AstInterpPart)); *p = *curr;
+                p->value = clone_expr(arena, curr->value); p->next = NULL;
+                if (!head) head = p; else tail->next = p; tail = p; curr = curr->next;
+            }
+            res->as.interp.parts = head;
+            break;
+        }
         default: break;
     }
     return res;
@@ -680,6 +691,15 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
         case AST_EXPR_BOX: sema_analyze_expr(ctx, module, symbols, expr->as.unary.operand); break;
         case AST_EXPR_UNBOX: sema_analyze_expr(ctx, module, symbols, expr->as.unary.operand); break;
         case AST_EXPR_OBJECT: if (expr->as.object_literal.type) expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, expr->as.object_literal.type); for (AstObjectField* f = expr->as.object_literal.fields; f; f = f->next) sema_analyze_expr(ctx, module, symbols, f->value); break;
+        case AST_EXPR_INTERP: {
+            AstInterpPart* part = expr->as.interp.parts;
+            while (part) {
+                if (part->value) sema_analyze_expr(ctx, module, symbols, part->value);
+                part = part->next;
+            }
+            expr->resolved_type = type_get_string(ctx->type_registry);
+            break;
+        }
         default: break;
     }
 }
