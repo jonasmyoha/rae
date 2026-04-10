@@ -1655,9 +1655,13 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     // Emit add calls
                     const char* add_name = rae_mangle_specialized_function(ctx->compiler_ctx, add_fd, elem_type);
                     Str var_name = stmt->as.let_stmt.name;
+                    Str et_base = get_base_type_name(elem_type);
+                    bool elem_is_any = str_eq_cstr(et_base, "Any") || str_eq_cstr(et_base, "RaeAny");
                     for (const AstCollectionElement* e = stmt->as.let_stmt.value->as.collection.elements; e; e = e->next) {
                         fprintf(out, "  %s(&%.*s, ", add_name, (int)var_name.len, var_name.data);
+                        if (elem_is_any) fprintf(out, "rae_any((");
                         emit_expr(ctx, e->value, out, PREC_LOWEST, false, false);
+                        if (elem_is_any) fprintf(out, "))");
                         fprintf(out, ");\n");
                     }
                     // Register generic type for struct emission
