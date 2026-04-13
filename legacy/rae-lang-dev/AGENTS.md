@@ -70,6 +70,7 @@ Do not introduce features that increase expressive power at the cost of clarity,
   3. Update tests if applicable
   4. Stop and wait for confirmation before starting unrelated work
 
+- **File size limit**: Aim to keep all source files under 1,000 lines of code (LOC). If a file exceeds this limit, it should be refactored into smaller, domain-specific modules. This helps maintain clarity and reduces LLM context usage.
 - **Git operations**:
   - **Commit frequently**: Always commit meaningful work before moving on to the next task in the `QUEUE`.
   - **Commit messages**: Use good, clear, and descriptive commit messages that explain *why* the change was made.
