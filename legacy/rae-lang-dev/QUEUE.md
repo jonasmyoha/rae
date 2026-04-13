@@ -1,8 +1,4 @@
 <!-- SUMU_QUEUE_START -->
-# SUMU queue
-
-Use chat text that starts with "add to queue" to append tasks.
-
 - [x] #1 Task 1: Emit collection literals (`let x: List(Int) = { 10, 20, 30 }`) — handle AST_EXPR_COLLECTION_LITERAL in c_backend emit_expr by emitting createList + add calls. Fixes 325_list_literal, 337_list_method.
 - [x] #2 Task 2: Fix identity/newtype lowering (`let pid: User = 123`) — detect `is id`/`is key` types and emit underlying primitive type. Fixes 341_identity_behavior + smoke 10_memory_basics, identity_fix, store_mapping.
 - [x] #3 Task 3: Fix toString() method resolution — `s.active.toString()` emits `rae_toString` undeclared. Emit as type-specific rae_ext_rae_str call. Fixes 350_auto_init (partial).
@@ -41,5 +37,4 @@ Use chat text that starts with "add to queue" to append tasks.
 - [x] #36 Add receiver-type inference to C backend fallback for non-generic contexts — safety net for cases where sema still fails. When fallback finds a generic function and the first arg has a known struct type with generic args, infer concrete types and emit the specialized name. LOW RISK.
 - [x] #37 Fix map entry type emission — `StringMapEntry(V)` and `IntMapEntry(V)` referenced by StringMap/IntMap fields are not discovered by the generic type emission pass. Walk struct field types recursively during type discovery. Fixes 370_map_basic (partial). MEDIUM RISK.
 - [x] #38 CHECKPOINT 8: Final phase 3 evaluation. Target: 0 unit failures, ≤3 example failures.
-
 <!-- SUMU_QUEUE_END -->

@@ -16,3 +16,14 @@
   2. Fix generic buffer/list/map emission and specialization substitution.
   3. Fix ref/view/value lowering.
   4. Fix remaining semantic sugar lowering (`match` expr, string compare, identity).
+- 2026-03-20 checkpoint: state is much better; only 6 failures remain (172/174 unit, 41/45 examples per Clo memory).
+- The remaining failures now look mostly like one core issue: generic template bodies are being shared across specializations, so inner `decl_link`/call resolution sticks to the first specialization.
+- Remaining special cases:
+  - 370 / 21 / 94 / `list_native_any`: cross-specialization method resolution and wrong concrete type binding.
+  - 371: bad lowering for `const void*` / `fromCStr`.
+  - 28: undeclared `sys` suggests missed symbol binding or wrong clone/reanalysis path.
+- Best next move is no longer wide cleanup; it is targeted sema specialization repair:
+  - clone specialized bodies freshly,
+  - clear or avoid reusing stale `decl_link`/resolved-type state,
+  - rerun call resolution per specialization before C emission,
+  - then fix the 1-2 remaining emitter bugs.
