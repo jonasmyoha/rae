@@ -255,6 +255,42 @@ void rae_ext_rae_log_stream_list_fields(RaeAny* items, int64_t length, int64_t c
   printf("), %lld, %lld }", (long long)length, (long long)capacity);
 }
 
+void rae_ext_rae_log_stream_list_typed(void* data, int64_t length, int64_t capacity, int elem_kind) {
+  printf("{ #(");
+  for (int64_t i = 0; i < capacity; i++) {
+    if (i > 0) printf(", ");
+    if (i >= length) { printf("none"); continue; }
+    switch (elem_kind) {
+      case RAE_LIST_ELEM_ANY:    rae_ext_rae_log_stream_any(((RaeAny*)data)[i]); break;
+      case RAE_LIST_ELEM_INT64:  printf("%lld", (long long)((int64_t*)data)[i]); break;
+      case RAE_LIST_ELEM_FLOAT64:printf("%g", ((double*)data)[i]); break;
+      case RAE_LIST_ELEM_BOOL:   printf("%s", ((bool*)data)[i] ? "true" : "false"); break;
+      case RAE_LIST_ELEM_CHAR32: {
+        uint32_t cp = ((uint32_t*)data)[i];
+        // Encode as UTF-8 for printable codepoints, else fall back to U+XXXX.
+        if (cp < 0x80) { putchar((int)cp); }
+        else if (cp < 0x800) { putchar(0xC0 | (cp >> 6)); putchar(0x80 | (cp & 0x3F)); }
+        else if (cp < 0x10000) { putchar(0xE0 | (cp >> 12)); putchar(0x80 | ((cp >> 6) & 0x3F)); putchar(0x80 | (cp & 0x3F)); }
+        else { putchar(0xF0 | (cp >> 18)); putchar(0x80 | ((cp >> 12) & 0x3F)); putchar(0x80 | ((cp >> 6) & 0x3F)); putchar(0x80 | (cp & 0x3F)); }
+        break;
+      }
+      case RAE_LIST_ELEM_STRING: {
+        rae_String s = ((rae_String*)data)[i];
+        printf("\"%.*s\"", (int)s.len, (const char*)s.data);
+        break;
+      }
+      default: printf("?"); break;
+    }
+  }
+  printf("), %lld, %lld }", (long long)length, (long long)capacity);
+}
+
+void rae_ext_rae_log_list_typed(void* data, int64_t length, int64_t capacity, int elem_kind) {
+  rae_ext_rae_log_stream_list_typed(data, length, capacity, elem_kind);
+  printf("\n");
+  fflush(stdout);
+}
+
 void rae_ext_rae_log_cstr(const char* text) {
   if (!text) {
     fputs("(null)\n", stdout);
@@ -649,6 +685,24 @@ rae_String rae_ext_rae_str_string(rae_String s) {
     return rae_ext_rae_str_from_buf(s.data, s.len);
 }
 
+rae_String rae_ext_rae_str_any(RaeAny v) {
+    // Format a boxed value as a Rae string. Handles `none` and primitive types
+    // by delegating to the typed formatters; defaults to empty for structs and
+    // other heap types (those should be formatted via toString instead).
+    switch (v.type) {
+        case RAE_TYPE_INT64:   return rae_ext_rae_str_i64(v.as.i);
+        case RAE_TYPE_INT32:   return rae_ext_rae_str_i64(v.as.i);
+        case RAE_TYPE_UINT64:  return rae_ext_rae_str_i64(v.as.i);
+        case RAE_TYPE_FLOAT64: return rae_ext_rae_str_f64(v.as.f);
+        case RAE_TYPE_FLOAT32: return rae_ext_rae_str_f64(v.as.f);
+        case RAE_TYPE_BOOL:    return rae_ext_rae_str_bool(v.as.b);
+        case RAE_TYPE_STRING:  return v.as.s;
+        case RAE_TYPE_CHAR:    return rae_ext_rae_str_char((uint32_t)v.as.i);
+        case RAE_TYPE_NONE:    return (rae_String){(uint8_t*)"none", 4};
+        default:               return (rae_String){(uint8_t*)"", 0};
+    }
+}
+
 rae_String rae_ext_rae_str_string_ptr(const rae_String* s) {
     return rae_ext_rae_str_from_buf(s->data, s->len);
 }
@@ -706,12 +760,22 @@ void rae_ext_rae_buf_copy(void* src, int64_t src_off, void* dst, int64_t dst_off
   memmove((char*)dst + dst_off * elem_size, (char*)src + src_off * elem_size, (size_t)len * (size_t)elem_size);
 }
 
-void rae_ext_rae_buf_set(void* buf, int64_t index, RaeAny value) {
+void rae_ext_rae_buf_set(void* buf, int64_t index, int64_t elem_size, const void* value) {
+  if (!buf || !value) return;
+  memcpy((char*)buf + (index * elem_size), value, (size_t)elem_size);
+}
+
+void rae_ext_rae_buf_get(void* buf, int64_t index, int64_t elem_size, void* out_val) {
+  if (!buf || !out_val) return;
+  memcpy(out_val, (char*)buf + (index * elem_size), (size_t)elem_size);
+}
+
+void rae_ext_rae_buf_set_any(void* buf, int64_t index, RaeAny value) {
   if (!buf) return;
   ((RaeAny*)buf)[index] = value;
 }
 
-RaeAny rae_ext_rae_buf_get(void* buf, int64_t index) {
+RaeAny rae_ext_rae_buf_get_any(void* buf, int64_t index) {
   if (!buf) return (RaeAny){0};
   return ((RaeAny*)buf)[index];
 }

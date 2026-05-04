@@ -2976,10 +2976,8 @@ static bool compile_file_chunk(const char* file_path,
   }
   AstModule merged = merge_module_graph(&graph);
   
-  CompilerContext ctx = {0};
-  ctx.ast_arena = arena;
-  // Note: VM compiler does not yet use all_decls/generic_types project-wide state
-  // but we provide the context for future unification.
+  CompilerContext ctx;
+  compiler_init(&ctx, arena);
   
   if (!sema_analyze_module(&ctx, &merged)) {
       watch_sources_clear(&built_sources);
@@ -3033,18 +3031,8 @@ static bool build_c_backend_output(const char* entry_file,
   }
   if (out_uses_raylib) *out_uses_raylib = uses_raylib;
 
-  CompilerContext ctx = {0};
-  ctx.ast_arena = arena;
-  ctx.all_decl_cap = 8192;
-  ctx.all_decls = arena_alloc(arena, sizeof(AstDecl*) * ctx.all_decl_cap);
-  ctx.generic_type_cap = 1024;
-  ctx.generic_types = arena_alloc(arena, sizeof(AstTypeRef*) * ctx.generic_type_cap);
-  ctx.emitted_generic_type_cap = 1024;
-  ctx.emitted_generic_types = arena_alloc(arena, sizeof(AstTypeRef*) * ctx.emitted_generic_type_cap);
-  ctx.specialized_func_cap = 2048;
-  ctx.specialized_funcs = arena_alloc(arena, sizeof(FunctionSpecialization) * ctx.specialized_func_cap);
-  ctx.emitted_method_cap = 2048;
-  ctx.emitted_method_names = arena_alloc(arena, sizeof(char*) * ctx.emitted_method_cap);
+  CompilerContext ctx;
+  compiler_init(&ctx, arena);
   
   if (!sema_analyze_module(&ctx, &merged)) {
       module_graph_free(&graph);

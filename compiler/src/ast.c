@@ -1,8 +1,45 @@
 /* ast.c - AST helper utilities */
 
 #include "ast.h"
+#include "diag.h"
+#include "str.h"
+#include "type.h"
 
 #include <stdio.h>
+#include <string.h>
+
+void compiler_init(CompilerContext* ctx, Arena* ast_arena) {
+    memset(ctx, 0, sizeof(CompilerContext));
+    ctx->ast_arena = ast_arena;
+    
+    ctx->interner = arena_alloc(ast_arena, sizeof(StringInterner));
+    interner_init(ctx->interner, ast_arena);
+    
+    ctx->diags = arena_alloc(ast_arena, sizeof(DiagState));
+    diag_init(ctx->diags);
+
+    // Initial capacity for project-wide state
+    ctx->all_decl_cap = 8192;
+    ctx->all_decls = arena_alloc(ast_arena, sizeof(AstDecl*) * ctx->all_decl_cap);
+    
+    ctx->generic_type_cap = 1024;
+    ctx->generic_types = arena_alloc(ast_arena, sizeof(AstTypeRef*) * ctx->generic_type_cap);
+    
+    ctx->emitted_generic_type_cap = 1024;
+    ctx->emitted_generic_types = arena_alloc(ast_arena, sizeof(AstTypeRef*) * ctx->emitted_generic_type_cap);
+    
+    ctx->specialized_func_cap = 2048;
+    ctx->specialized_funcs = arena_alloc(ast_arena, sizeof(FunctionSpecialization) * ctx->specialized_func_cap);
+    
+    ctx->emitted_method_cap = 2048;
+    ctx->emitted_method_names = arena_alloc(ast_arena, sizeof(char*) * ctx->emitted_method_cap);
+}
+
+void compiler_free(CompilerContext* ctx) {
+    // Arena-based allocation means we don't need much manual free-ing,
+    // but this is where we'd clean up non-arena resources.
+    (void)ctx;
+}
 
 static void print_indent(FILE* out, int level) {
   for (int i = 0; i < level; ++i) {
