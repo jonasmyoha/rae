@@ -49,6 +49,7 @@ SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/vm_value.c \
        $(SRC_DIR)/vm.c \
        $(SRC_DIR)/vm_compiler.c \
+       $(SRC_DIR)/vm_natives_core.c \
        $(SRC_DIR)/vm_registry.c \
        $(SRC_DIR)/vm_raylib.c \
        $(SRC_DIR)/vm_tinyexpr.c \
@@ -69,7 +70,7 @@ all: build
 
 build: $(TARGET)
 
-$(BIN_DIR)/rae: $(BUILD_DIR)/main.o $(BUILD_DIR)/arena.o $(BUILD_DIR)/str.o $(BUILD_DIR)/diag.o $(BUILD_DIR)/type.o $(BUILD_DIR)/sema.o $(BUILD_DIR)/lexer.o $(BUILD_DIR)/ast.o $(BUILD_DIR)/parser.o $(BUILD_DIR)/pretty.o $(BUILD_DIR)/c_backend.o $(BUILD_DIR)/c_call.o $(BUILD_DIR)/c_discovery.o $(BUILD_DIR)/c_expr.o $(BUILD_DIR)/c_stmt.o $(BUILD_DIR)/raepack.o $(BUILD_DIR)/vm_chunk.o $(BUILD_DIR)/vm_value.o $(BUILD_DIR)/vm.o $(BUILD_DIR)/vm_compiler.o $(BUILD_DIR)/vm_registry.o $(BUILD_DIR)/vm_raylib.o $(BUILD_DIR)/vm_tinyexpr.o $(BUILD_DIR)/mangler.o $(BUILD_DIR)/vm_monocypher.o $(BUILD_DIR)/rae_tinyexpr.o $(BUILD_DIR)/monocypher.o $(BUILD_DIR)/sys_thread.o $(BUILD_DIR)/vm_patch.o $(BUILD_DIR)/rae_runtime.o
+$(BIN_DIR)/rae: $(BUILD_DIR)/main.o $(BUILD_DIR)/arena.o $(BUILD_DIR)/str.o $(BUILD_DIR)/diag.o $(BUILD_DIR)/type.o $(BUILD_DIR)/sema.o $(BUILD_DIR)/lexer.o $(BUILD_DIR)/ast.o $(BUILD_DIR)/parser.o $(BUILD_DIR)/pretty.o $(BUILD_DIR)/c_backend.o $(BUILD_DIR)/c_call.o $(BUILD_DIR)/c_discovery.o $(BUILD_DIR)/c_expr.o $(BUILD_DIR)/c_stmt.o $(BUILD_DIR)/raepack.o $(BUILD_DIR)/vm_chunk.o $(BUILD_DIR)/vm_value.o $(BUILD_DIR)/vm.o $(BUILD_DIR)/vm_compiler.o $(BUILD_DIR)/vm_natives_core.o $(BUILD_DIR)/vm_registry.o $(BUILD_DIR)/vm_raylib.o $(BUILD_DIR)/vm_tinyexpr.o $(BUILD_DIR)/mangler.o $(BUILD_DIR)/vm_monocypher.o $(BUILD_DIR)/rae_tinyexpr.o $(BUILD_DIR)/monocypher.o $(BUILD_DIR)/sys_thread.o $(BUILD_DIR)/vm_patch.o $(BUILD_DIR)/rae_runtime.o
 	@mkdir -p $(BIN_DIR)
 	$(CC) -o $@ $^ $(LDFLAGS)
 
