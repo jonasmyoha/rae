@@ -306,13 +306,26 @@ static bool types_match(Str a, Str b) {
 }
 
 static const AstDecl* find_type_decl(CFuncContext* ctx, const AstModule* module, Str name) {
+  // Prefer the generic template over specialisation clones — both share the
+  // same `name`, but a spec clone has already-substituted field types which
+  // would mislead substitution at the caller. Pass 1: template/non-generic.
+  // Pass 2: anything that matches.
   if (ctx && ctx->compiler_ctx) {
+      for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
+          const AstDecl* decl = ctx->compiler_ctx->all_decls[i];
+          if (decl->kind == AST_DECL_TYPE && !decl->as.type_decl.specialization_args &&
+              types_match(decl->as.type_decl.name, name)) return decl;
+      }
       for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
           const AstDecl* decl = ctx->compiler_ctx->all_decls[i];
           if (decl->kind == AST_DECL_TYPE && types_match(decl->as.type_decl.name, name)) return decl;
       }
   }
   if (!module) return NULL;
+  for (const AstDecl* decl = module->decls; decl; decl = decl->next) {
+      if (decl->kind == AST_DECL_TYPE && !decl->as.type_decl.specialization_args &&
+          types_match(decl->as.type_decl.name, name)) return decl;
+  }
   for (const AstDecl* decl = module->decls; decl; decl = decl->next) { if (decl->kind == AST_DECL_TYPE && types_match(decl->as.type_decl.name, name)) return decl; }
   for (size_t i = 0; i < g_find_module_stack_count; i++) if (g_find_module_stack[i] == module) return NULL;
   if (g_find_module_stack_count >= 64) return NULL;
