@@ -50,14 +50,17 @@ static void print_source_line(const char* file, int line, int col) {
   fclose(f);
 }
 
-static int g_error_count = 0;
-
-void diag_error(const char* file, int line, int col, const char* message) {
-  diag_report(file, line, col, message);
+void diag_init(DiagState* state) {
+  state->error_count = 0;
+  state->had_fatal = false;
 }
 
-void diag_report(const char* file, int line, int col, const char* message) {
-  g_error_count++;
+void diag_ctx_error(DiagState* state, const char* file, int line, int col, const char* message) {
+  diag_ctx_report(state, file, line, col, message);
+}
+
+void diag_ctx_report(DiagState* state, const char* file, int line, int col, const char* message) {
+  state->error_count++;
   fprintf(stderr, "%s:%d:%d: %s\n", simplify_path(file), line, col, message);
   if (file && line > 0) {
     print_source_line(file, line, col);
@@ -65,15 +68,41 @@ void diag_report(const char* file, int line, int col, const char* message) {
   fflush(stderr);
 }
 
-int diag_error_count(void) {
-  return g_error_count;
+int diag_ctx_error_count(DiagState* state) {
+  return state->error_count;
+}
+
+void diag_ctx_reset(DiagState* state) {
+  state->error_count = 0;
+  state->had_fatal = false;
+}
+
+void diag_ctx_fatal(DiagState* state, const char* message) {
+  state->had_fatal = true;
+  fprintf(stderr, "fatal error: %s\n", message);
+  exit(1);
+}
+
+// Global state for legacy fallback
+static DiagState g_diag_legacy = {0};
+
+void (diag_error)(const char* file, int line, int col, const char* message) {
+    diag_ctx_error(&g_diag_legacy, file, line, col, message);
+}
+
+void (diag_report)(const char* file, int line, int col, const char* message) {
+    diag_ctx_report(&g_diag_legacy, file, line, col, message);
+}
+
+void (diag_fatal)(const char* message) {
+
+  diag_ctx_fatal(&g_diag_legacy, message);
 }
 
 void diag_reset(void) {
-  g_error_count = 0;
+  diag_ctx_reset(&g_diag_legacy);
 }
 
-void diag_fatal(const char* message) {
-  fprintf(stderr, "error: %s\n", message);
-  exit(1);
+int diag_error_count(void) {
+  return diag_ctx_error_count(&g_diag_legacy);
 }

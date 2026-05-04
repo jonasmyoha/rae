@@ -25,9 +25,9 @@ func sizeof(T)() extern ret Int
 # -- Buffer Primitives (Compiler-internal) --
 func rae_ext_rae_buf_alloc(size: Int, elemSize: Int) extern ret Buffer(Any)
 func rae_ext_rae_buf_free(buf: Buffer(Any)) extern
-func rae_ext_rae_buf_copy(src: Buffer(Any), src_off: Int, dst: Buffer(Any), dst_off: Int, len: Int, elemSize: Int) extern
-func rae_ext_rae_buf_set(buf: Buffer(Any), index: Int, value: Any) extern
-func rae_ext_rae_buf_get(buf: Buffer(Any), index: Int) extern ret Any
+func rae_ext_rae_buf_copy(V)(src: Buffer(V), src_off: Int, dst: Buffer(V), dst_off: Int, len: Int, elemSize: Int) extern
+func rae_ext_rae_buf_set(V)(buf: mod Buffer(V), index: Int, value: V) extern
+func rae_ext_rae_buf_get(V)(buf: view Buffer(V), index: Int) extern ret V
 
 # -- Generic List Implementation (Rae-native) --
 type List(T) {

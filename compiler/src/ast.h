@@ -487,6 +487,9 @@ typedef struct CompilerContext {
     const AstTypeRef* sema_expected_type;
 } CompilerContext;
 
+void compiler_init(CompilerContext* ctx, Arena* ast_arena);
+void compiler_free(CompilerContext* ctx);
+
 void ast_dump_module(const AstModule* module, FILE* out);
 
 #endif /* AST_H */

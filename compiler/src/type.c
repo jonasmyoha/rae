@@ -319,7 +319,22 @@ static void type_mangle_recursive(Arena* arena, TypeInfo* t, char* buf, size_t* 
             type_mangle_recursive(arena, t->as.ref.base, buf, pos, cap);
             break;
         case TYPE_STRUCT: {
-            *pos += snprintf(buf + *pos, cap - *pos, "rae_%.*s", (int)t->name.len, t->name.data);
+            Str base_name = t->name;
+            if (t->as.structure.decl && t->as.structure.decl->kind == AST_DECL_TYPE) {
+                base_name = t->as.structure.decl->as.type_decl.name;
+                if (t->as.structure.decl->as.type_decl.generic_template && t->as.structure.decl->as.type_decl.generic_template->kind == AST_DECL_TYPE) {
+                    base_name = t->as.structure.decl->as.type_decl.generic_template->as.type_decl.name;
+                }
+            }
+
+            // Map Rae primitive names to C names if they appear as base names
+            if (str_eq_cstr(base_name, "Int") || str_eq_cstr(base_name, "Int64")) *pos += snprintf(buf + *pos, cap - *pos, "int64_t");
+            else if (str_eq_cstr(base_name, "Float") || str_eq_cstr(base_name, "Float64")) *pos += snprintf(buf + *pos, cap - *pos, "double");
+            else if (str_eq_cstr(base_name, "Bool")) *pos += snprintf(buf + *pos, cap - *pos, "rae_Bool");
+            else if (str_eq_cstr(base_name, "String")) *pos += snprintf(buf + *pos, cap - *pos, "rae_String");
+            else if (str_eq_cstr(base_name, "Void")) *pos += snprintf(buf + *pos, cap - *pos, "void");
+            else *pos += snprintf(buf + *pos, cap - *pos, "rae_%.*s", (int)base_name.len, base_name.data);
+
             if (t->as.structure.generic_count > 0) {
                 *pos += snprintf(buf + *pos, cap - *pos, "_");
                 for (size_t i = 0; i < t->as.structure.generic_count; i++) {
