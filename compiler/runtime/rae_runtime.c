@@ -849,9 +849,9 @@ int64_t rae_ext_rae_crypto_unlock(RaeAny key, RaeAny nonce, RaeAny mac, RaeAny c
     return -1; /* Requires monocypher linkage */
 }
 
-void rae_ext_rae_crypto_argon2i(RaeAny work_area, RaeAny password, RaeAny salt, int64_t nb_blocks, RaeAny nb_iterations_any, RaeAny hash_buf, int64_t hash_len) {
-    (void)work_area; (void)password; (void)salt; (void)nb_blocks; (void)nb_iterations_any; (void)hash_buf; (void)hash_len;
-    /* Requires monocypher linkage */
+void rae_ext_rae_crypto_argon2i(rae_String password, rae_String salt, int64_t nb_blocks, int64_t nb_iterations, RaeAny hash_buf, int64_t hash_len) {
+    (void)password; (void)salt; (void)nb_blocks; (void)nb_iterations; (void)hash_buf; (void)hash_len;
+    /* Requires monocypher linkage; signature matches lib/sys.rae declaration. */
 }
 
 #ifdef RAE_HAS_RAYLIB
