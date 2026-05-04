@@ -68,6 +68,35 @@ Str str_dup_arena(Arena* arena, Str s) {
     return str_from_buf(copy, s.len);
 }
 
+void interner_init(StringInterner* interner, Arena* arena) {
+  interner->arena = arena;
+  interner->count = 0;
+  interner->capacity = 1024;
+  interner->strings = arena_alloc(arena, sizeof(Str) * interner->capacity);
+}
+
+Str interner_intern(StringInterner* interner, Str s) {
+  for (size_t i = 0; i < interner->count; i++) {
+    if (str_eq(interner->strings[i], s)) return interner->strings[i];
+  }
+  
+  if (interner->count >= interner->capacity) {
+    size_t new_cap = interner->capacity * 2;
+    Str* new_strings = arena_alloc(interner->arena, sizeof(Str) * new_cap);
+    memcpy(new_strings, interner->strings, sizeof(Str) * interner->count);
+    interner->strings = new_strings;
+    interner->capacity = new_cap;
+  }
+  
+  Str interned = str_dup_arena(interner->arena, s);
+  interner->strings[interner->count++] = interned;
+  return interned;
+}
+
+Str interner_intern_cstr(StringInterner* interner, const char* s) {
+  return interner_intern(interner, str_from_cstr(s));
+}
+
 char* read_file(const char* path, size_t* out_size) {
   FILE* f = fopen(path, "rb");
   if (!f) return NULL;

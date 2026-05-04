@@ -13,6 +13,13 @@ typedef struct {
 
 struct Arena;
 
+typedef struct StringInterner {
+  struct Arena* arena;
+  Str* strings;
+  size_t count;
+  size_t capacity;
+} StringInterner;
+
 Str str_from_cstr(const char* cstr);
 Str str_from_buf(const char* data, size_t len);
 bool str_eq(Str a, Str b);
@@ -24,6 +31,12 @@ Str str_dup_arena(struct Arena* arena, Str s);
 void str_free(Str s);
 char* str_to_cstr(Str s);
 bool str_is_empty(Str s);
+
+// String interning
+void interner_init(StringInterner* interner, struct Arena* arena);
+Str interner_intern(StringInterner* interner, Str s);
+Str interner_intern_cstr(StringInterner* interner, const char* s);
+
 char* read_file(const char* path, size_t* out_size);
 
 #endif /* STR_H */

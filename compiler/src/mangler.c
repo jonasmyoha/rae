@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <ctype.h>
 
 typedef struct {
     const char* rae_name;
@@ -109,18 +110,50 @@ bool is_raylib_builtin_type(Str type_name) {
            str_eq_cstr(type_name, "Camera3D");
 }
 
-static Str get_base_type_name(const AstTypeRef* type) {
-    if (!type || !type->parts) return (Str){0};
-    return type->parts->text;
+static void sanitize_mangled_name(char* name) {
+    if (!name) return;
+    for (char* p = name; *p; p++) {
+        if (!isalnum(*p) && *p != '_') {
+            *p = '_';
+        }
+    }
 }
 
-static void mangle_type_recursive(CompilerContext* ctx, const struct AstIdentifierPart* generic_params, const AstTypeRef* type, char* buf, size_t* pos, size_t cap, bool force_erase) {
-    (void)force_erase; // Monomorphisation means we don't erase
-    if (!type) {
-        *pos += snprintf(buf + *pos, cap - *pos, "int64_t");
-        return;
-    }
+static Str get_base_type_name(const AstTypeRef* type) {
+    if (!type) return (Str){0};
+    if (type->parts) return type->parts->text;
+    if (type->resolved_type) return type->resolved_type->name;
+    return (Str){0};
+}
+
+static bool mangle_primitive_ref(const AstTypeRef* type, Str base, char* buf, size_t* pos, size_t cap) {
+    bool is_prim = str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int64") || 
+                   str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float64") ||
+                   str_eq_cstr(base, "Bool") || str_eq_cstr(base, "String") || 
+                   str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32") ||
+                   type->is_id || type->is_key;
     
+    if (is_prim && (type->is_view || type->is_mod)) {
+        *pos += snprintf(buf + *pos, cap - *pos, "rae_%s_", type->is_mod ? "Mod" : "View");
+        if (str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int64") || type->is_id) *pos += snprintf(buf + *pos, cap - *pos, "Int64");
+        else if (str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float64")) *pos += snprintf(buf + *pos, cap - *pos, "Float64");
+        else if (str_eq_cstr(base, "Bool")) *pos += snprintf(buf + *pos, cap - *pos, "Bool");
+        else if (str_eq_cstr(base, "String") || type->is_key) *pos += snprintf(buf + *pos, cap - *pos, "String");
+        else if (str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32")) *pos += snprintf(buf + *pos, cap - *pos, "Char");
+        return true;
+    }
+    return false;
+}
+
+static void mangle_type_recursive_specialized(CompilerContext* ctx, const struct AstIdentifierPart* generic_params, const AstTypeRef* concrete_args, const AstTypeRef* type, char* buf, size_t* pos, size_t cap);
+
+static void mangle_type_recursive(CompilerContext* ctx, const struct AstIdentifierPart* generic_params, const AstTypeRef* type, char* buf, size_t* pos, size_t cap, bool force_erase) {
+    (void)force_erase;
+    if (!type) { *pos += snprintf(buf + *pos, cap - *pos, "int64_t"); return; }
+    
+    Str base = get_base_type_name(type);
+    if (mangle_primitive_ref(type, base, buf, pos, cap)) return;
+
     if (!type->parts) {
         if (type->resolved_type) {
             Str m = type_mangle_name(ctx->ast_arena, type->resolved_type);
@@ -130,45 +163,11 @@ static void mangle_type_recursive(CompilerContext* ctx, const struct AstIdentifi
         *pos += snprintf(buf + *pos, cap - *pos, "int64_t");
         return;
     }
-    Str base = type->parts->text;
-    
-    // Check if it's a generic param
-    bool is_generic_param = false;
-    if (generic_params) {
-        const struct AstIdentifierPart* gp = generic_params;
-        while (gp) {
-            if (str_eq(gp->text, base)) {
-                is_generic_param = true;
-                break;
-            }
-            gp = gp->next;
-        }
-    }
 
     const char* mapped = map_rae_type_to_c(base);
     if (mapped) {
-        // Map to stable C name
-        if (str_eq_cstr(base, "String")) {
-            *pos += snprintf(buf + *pos, cap - *pos, "rae_String");
-        } else if (str_eq_cstr(base, "Int64") || str_eq_cstr(base, "Int")) {
-            *pos += snprintf(buf + *pos, cap - *pos, "int64_t");
-        } else if (str_eq_cstr(base, "Int32")) {
-            *pos += snprintf(buf + *pos, cap - *pos, "int32_t");
-        } else if (str_eq_cstr(base, "UInt64")) {
-            *pos += snprintf(buf + *pos, cap - *pos, "uint64_t");
-        } else if (str_eq_cstr(base, "UInt32")) {
-            *pos += snprintf(buf + *pos, cap - *pos, "uint32_t");
-        } else if (str_eq_cstr(base, "Float64") || str_eq_cstr(base, "Float")) {
-            *pos += snprintf(buf + *pos, cap - *pos, "double");
-        } else if (str_eq_cstr(base, "Float32")) {
-            *pos += snprintf(buf + *pos, cap - *pos, "float");
-        } else if (str_eq_cstr(base, "Bool")) {
-            *pos += snprintf(buf + *pos, cap - *pos, "rae_Bool");
-        } else if (str_eq_cstr(base, "Char32")) {
-            *pos += snprintf(buf + *pos, cap - *pos, "uint32_t");
-        } else if (str_eq_cstr(base, "Any")) {
-            *pos += snprintf(buf + *pos, cap - *pos, "RaeAny");
-        } else if (str_eq_cstr(base, "Buffer")) {
+        if (str_eq_cstr(base, "String")) *pos += snprintf(buf + *pos, cap - *pos, "rae_String");
+        else if (str_eq_cstr(base, "Buffer")) {
             Str arg_base = {0};
             if (type->generic_args) arg_base = get_base_type_name(type->generic_args);
             if (arg_base.len == 0 || str_eq_cstr(arg_base, "Any") || str_eq_cstr(arg_base, "RaeAny")) {
@@ -179,7 +178,7 @@ static void mangle_type_recursive(CompilerContext* ctx, const struct AstIdentifi
         } else {
             *pos += snprintf(buf + *pos, cap - *pos, "%s", mapped);
         }
-    } else if (str_eq_cstr(base, "int64_t") || str_eq_cstr(base, "double") || str_eq_cstr(base, "int8_t") || str_eq_cstr(base, "int32_t") || str_eq_cstr(base, "const_char_p") || str_eq_cstr(base, "rae_String") || str_eq_cstr(base, "RaeAny") || str_starts_with_cstr(base, "rae_")) {
+    } else if (str_eq_cstr(base, "int64_t") || str_eq_cstr(base, "double") || str_eq_cstr(base, "rae_String") || str_starts_with_cstr(base, "rae_")) {
         *pos += snprintf(buf + *pos, cap - *pos, "%.*s", (int)base.len, base.data);
     } else {
         *pos += snprintf(buf + *pos, cap - *pos, "rae_%.*s", (int)base.len, base.data);
@@ -194,25 +193,25 @@ static void mangle_type_recursive(CompilerContext* ctx, const struct AstIdentifi
     }
 }
 
-#include <ctype.h>
-
-static void sanitize_mangled_name(char* name) {
-    if (!name) return;
-    for (char* p = name; *p; p++) {
-        if (!isalnum(*p) && *p != '_') {
-            *p = '_';
-        }
-    }
-}
-
 static void mangle_type_recursive_specialized(CompilerContext* ctx, const struct AstIdentifierPart* generic_params, const AstTypeRef* concrete_args, const AstTypeRef* type, char* buf, size_t* pos, size_t cap) {
-    if (!type) {
-        *pos += snprintf(buf + *pos, cap - *pos, "int64_t");
-        return;
-    }
+    if (!type) { *pos += snprintf(buf + *pos, cap - *pos, "int64_t"); return; }
     
+    Str base = get_base_type_name(type);
+    if (mangle_primitive_ref(type, base, buf, pos, cap)) return;
+
     if (!type->parts) {
         if (type->resolved_type) {
+            if (type->resolved_type->kind == TYPE_GENERIC_PARAM && generic_params) {
+                const struct AstIdentifierPart* gp = generic_params;
+                const AstTypeRef* arg = concrete_args;
+                while (gp) {
+                    if (str_eq(gp->text, type->resolved_type->as.generic_param.param_name)) {
+                        if (arg) { mangle_type_recursive_specialized(ctx, NULL, NULL, arg, buf, pos, cap); return; }
+                        break;
+                    }
+                    gp = gp->next; if (arg) arg = arg->next;
+                }
+            }
             Str m = type_mangle_name(ctx->ast_arena, type->resolved_type);
             *pos += snprintf(buf + *pos, cap - *pos, "%.*s", (int)m.len, m.data);
             return;
@@ -220,24 +219,14 @@ static void mangle_type_recursive_specialized(CompilerContext* ctx, const struct
         *pos += snprintf(buf + *pos, cap - *pos, "int64_t");
         return;
     }
-    Str base = type->parts->text;
     
-    // Check if it's a generic param that needs substitution
     if (generic_params) {
         const struct AstIdentifierPart* gp = generic_params;
         const AstTypeRef* arg = concrete_args;
         while (gp) {
             if (str_eq(gp->text, base)) {
-                if (arg) {
-                    // Perform substitution! Mangle the argument instead.
-                    mangle_type_recursive_specialized(ctx, NULL, NULL, arg, buf, pos, cap);
-                    return;
-                } else {
-                    // It's a generic parameter but we don't have a concrete argument yet.
-                    // This happens during prototype emission for generic functions.
-                    *pos += snprintf(buf + *pos, cap - *pos, "rae_%.*s", (int)base.len, base.data);
-                    return;
-                }
+                if (arg) { mangle_type_recursive_specialized(ctx, NULL, NULL, arg, buf, pos, cap); return; }
+                else { *pos += snprintf(buf + *pos, cap - *pos, "rae_%.*s", (int)base.len, base.data); return; }
             }
             gp = gp->next; if (arg) arg = arg->next;
         }
@@ -246,15 +235,6 @@ static void mangle_type_recursive_specialized(CompilerContext* ctx, const struct
     const char* mapped = map_rae_type_to_c(base);
     if (mapped) {
         if (str_eq_cstr(base, "String")) *pos += snprintf(buf + *pos, cap - *pos, "rae_String");
-        else if (str_eq_cstr(base, "Int64")) *pos += snprintf(buf + *pos, cap - *pos, "int64_t");
-        else if (str_eq_cstr(base, "Int32")) *pos += snprintf(buf + *pos, cap - *pos, "int32_t");
-        else if (str_eq_cstr(base, "UInt64")) *pos += snprintf(buf + *pos, cap - *pos, "uint64_t");
-        else if (str_eq_cstr(base, "UInt32")) *pos += snprintf(buf + *pos, cap - *pos, "uint32_t");
-        else if (str_eq_cstr(base, "Float64")) *pos += snprintf(buf + *pos, cap - *pos, "double");
-        else if (str_eq_cstr(base, "Float32")) *pos += snprintf(buf + *pos, cap - *pos, "float");
-        else if (str_eq_cstr(base, "Bool")) *pos += snprintf(buf + *pos, cap - *pos, "rae_Bool");
-        else if (str_eq_cstr(base, "Char32")) *pos += snprintf(buf + *pos, cap - *pos, "uint32_t");
-        else if (str_eq_cstr(base, "Any")) *pos += snprintf(buf + *pos, cap - *pos, "RaeAny");
         else if (str_eq_cstr(base, "Buffer")) {
             Str arg_base = {0};
             if (type->generic_args) arg_base = get_base_type_name(type->generic_args);
@@ -263,9 +243,10 @@ static void mangle_type_recursive_specialized(CompilerContext* ctx, const struct
                 return;
             }
             *pos += snprintf(buf + *pos, cap - *pos, "rae_Buffer");
+        } else {
+            *pos += snprintf(buf + *pos, cap - *pos, "%s", mapped);
         }
-        else *pos += snprintf(buf + *pos, cap - *pos, "%s", mapped);
-    } else if (str_eq_cstr(base, "int64_t") || str_eq_cstr(base, "double") || str_eq_cstr(base, "int8_t") || str_eq_cstr(base, "int32_t") || str_eq_cstr(base, "uint64_t") || str_eq_cstr(base, "uint32_t") || str_eq_cstr(base, "float") || str_eq_cstr(base, "const_char_p") || str_eq_cstr(base, "rae_String") || str_eq_cstr(base, "RaeAny") || str_starts_with_cstr(base, "rae_")) {
+    } else if (str_eq_cstr(base, "int64_t") || str_eq_cstr(base, "double") || str_eq_cstr(base, "rae_String") || str_starts_with_cstr(base, "rae_")) {
         *pos += snprintf(buf + *pos, cap - *pos, "%.*s", (int)base.len, base.data);
     } else if (is_raylib_builtin_type(base)) {
         *pos += snprintf(buf + *pos, cap - *pos, "%.*s", (int)base.len, base.data);
@@ -283,24 +264,17 @@ static void mangle_type_recursive_specialized(CompilerContext* ctx, const struct
 }
 
 const char* rae_mangle_type_specialized(CompilerContext* ctx, const AstIdentifierPart* generic_params, const AstTypeRef* concrete_args, const AstTypeRef* type) {
-    char buf[1024];
-    size_t pos = 0;
+    char buf[1024]; size_t pos = 0;
     mangle_type_recursive_specialized(ctx, generic_params, concrete_args, type, buf, &pos, sizeof(buf));
-    char* result = arena_alloc(ctx->ast_arena, pos + 1);
-    memcpy(result, buf, pos + 1);
-    sanitize_mangled_name(result);
-    return result;
+    char* result = arena_alloc(ctx->ast_arena, pos + 1); memcpy(result, buf, pos + 1);
+    sanitize_mangled_name(result); return result;
 }
 
 const char* rae_mangle_type_ext(CompilerContext* ctx, const struct AstIdentifierPart* generic_params, const AstTypeRef* type, bool force_erase) {
-    char buf[1024];
-    size_t pos = 0;
+    char buf[1024]; size_t pos = 0;
     mangle_type_recursive(ctx, generic_params, type, buf, &pos, sizeof(buf), force_erase);
-    
-    char* result = arena_alloc(ctx->ast_arena, pos + 1);
-    memcpy(result, buf, pos + 1);
-    sanitize_mangled_name(result);
-    return result;
+    char* result = arena_alloc(ctx->ast_arena, pos + 1); memcpy(result, buf, pos + 1);
+    sanitize_mangled_name(result); return result;
 }
 
 const char* rae_mangle_type(CompilerContext* ctx, const struct AstIdentifierPart* generic_params, const AstTypeRef* type) {
@@ -309,21 +283,11 @@ const char* rae_mangle_type(CompilerContext* ctx, const struct AstIdentifierPart
 
 const char* rae_mangle_function(CompilerContext* ctx, const AstFuncDecl* func) {
     if (!func) return "unknown";
-    
-    if (func->specialization_args) {
-        return rae_mangle_specialized_function(ctx, func, func->specialization_args);
-    }
-    
-    if (find_raylib_mapping(func->name)) {
-        char* res = arena_alloc(ctx->ast_arena, func->name.len + 9);
-        sprintf(res, "rae_ext_%.*s", (int)func->name.len, func->name.data);
-        return res;
-    }
+    if (func->specialization_args) return rae_mangle_specialized_function(ctx, func, func->specialization_args);
+    if (find_raylib_mapping(func->name)) { char* res = arena_alloc(ctx->ast_arena, func->name.len + 9); sprintf(res, "rae_ext_%.*s", (int)func->name.len, func->name.data); return res; }
 
     if (func->is_extern) {
-        Str name = func->name;
-        const char* mapped = NULL;
-        
+        Str name = func->name; const char* mapped = NULL;
         if (str_eq_cstr(name, "sleep") || str_eq_cstr(name, "sleepMs")) mapped = "rae_ext_rae_sleep";
         else if (str_eq_cstr(name, "rae_str") || str_eq_cstr(name, "str")) mapped = "rae_ext_rae_str";
         else if (str_eq_cstr(name, "rae_str_len") || str_eq_cstr(name, "str_len")) mapped = "rae_ext_rae_str_len";
@@ -345,11 +309,7 @@ const char* rae_mangle_function(CompilerContext* ctx, const AstFuncDecl* func) {
         else if (str_eq_cstr(name, "nowMs")) mapped = "rae_ext_nowMs";
         else if (str_eq_cstr(name, "rae_random")) mapped = "rae_ext_rae_random";
         else if (str_eq_cstr(name, "rae_random_int")) mapped = "rae_ext_rae_random_int";
-        else if (str_eq_cstr(name, "random")) {
-            uint16_t c = 0; for (const AstParam* p = func->params; p; p = p->next) c++;
-            if (c == 0) mapped = "rae_ext_rae_random";
-            else if (c == 2) mapped = "rae_ext_rae_random_int";
-        }
+        else if (str_eq_cstr(name, "random")) { uint16_t c = 0; for (const AstParam* p = func->params; p; p = p->next) c++; if (c == 0) mapped = "rae_ext_rae_random"; else if (c == 2) mapped = "rae_ext_rae_random_int"; }
         else if (str_eq_cstr(name, "random_int")) mapped = "rae_ext_rae_random_int";
         else if (str_eq_cstr(name, "rae_int_to_float")) mapped = "rae_ext_rae_int_to_float";
         else if (str_eq_cstr(name, "readLine")) mapped = "rae_ext_rae_io_read_line";
@@ -375,62 +335,33 @@ const char* rae_mangle_function(CompilerContext* ctx, const AstFuncDecl* func) {
         else if (str_eq_cstr(name, "__buf_copy")) mapped = "rae_ext___buf_copy";
         else if (str_eq_cstr(name, "__buf_resize")) mapped = "rae_ext___buf_resize";
 
-        if (mapped) {
-            char* res = arena_alloc(ctx->ast_arena, strlen(mapped) + 1);
-            strcpy(res, mapped);
-            return res;
-        }
-
-        if (str_starts_with_cstr(func->name, "rae_ext_")) {
-            char* res = arena_alloc(ctx->ast_arena, func->name.len + 1);
-            sprintf(res, "%.*s", (int)func->name.len, func->name.data);
-            return res;
-        }
-
-        char* res = arena_alloc(ctx->ast_arena, func->name.len + 9);
-        sprintf(res, "rae_ext_%.*s", (int)func->name.len, func->name.data);
-        return res;
+        if (mapped) { char* res = arena_alloc(ctx->ast_arena, strlen(mapped) + 1); strcpy(res, mapped); return res; }
+        if (str_starts_with_cstr(func->name, "rae_ext_")) { char* res = arena_alloc(ctx->ast_arena, func->name.len + 1); sprintf(res, "%.*s", (int)func->name.len, func->name.data); return res; }
+        char* res = arena_alloc(ctx->ast_arena, func->name.len + 9); sprintf(res, "rae_ext_%.*s", (int)func->name.len, func->name.data); return res;
     }
 
-    char buf[2048];
-    size_t pos = snprintf(buf, sizeof(buf), "rae_%.*s_", (int)func->name.len, func->name.data);
-    
-    for (const AstParam* p = func->params; p; p = p->next) {
-        const char* mangled_param = rae_mangle_type_specialized(ctx, func->generic_params, NULL, p->type);
-        pos += snprintf(buf + pos, sizeof(buf) - pos, "%s_", mangled_param);
-    }
-    
-    char* result = arena_alloc(ctx->ast_arena, pos + 1);
-    memcpy(result, buf, pos + 1);
-    sanitize_mangled_name(result);
-    return result;
+    char buf[2048]; size_t pos = 0;
+    if (str_starts_with_cstr(func->name, "rae_")) pos = snprintf(buf, sizeof(buf), "%.*s_", (int)func->name.len, func->name.data);
+    else pos = snprintf(buf, sizeof(buf), "rae_%.*s_", (int)func->name.len, func->name.data);
+    for (const AstParam* p = func->params; p; p = p->next) { const char* mangled_param = rae_mangle_type(ctx, func->generic_params, p->type); pos += snprintf(buf + pos, sizeof(buf) - pos, "%s_", mangled_param); }
+    char* result = arena_alloc(ctx->ast_arena, pos + 1); memcpy(result, buf, pos + 1);
+    sanitize_mangled_name(result); return result;
 }
 
 const char* rae_mangle_specialized_function(CompilerContext* ctx, const AstFuncDecl* func, const AstTypeRef* concrete_args) {
     if (!func) return "unknown";
     if (!concrete_args) return rae_mangle_function(ctx, func);
     
-    char buf[2048];
-    size_t pos = snprintf(buf, sizeof(buf), "rae_%.*s_", (int)func->name.len, func->name.data);
+    char buf[2048]; size_t pos = 0;
+    if (str_starts_with_cstr(func->name, "rae_")) pos = snprintf(buf, sizeof(buf), "%.*s_", (int)func->name.len, func->name.data);
+    else pos = snprintf(buf, sizeof(buf), "rae_%.*s_", (int)func->name.len, func->name.data);
     
     const AstIdentifierPart* gp = func->generic_params;
-    if (!gp && func->generic_template && func->generic_template->kind == AST_DECL_FUNC) {
-        gp = func->generic_template->as.func_decl.generic_params;
-    }
+    if (!gp && func->generic_template && func->generic_template->kind == AST_DECL_FUNC) gp = func->generic_template->as.func_decl.generic_params;
 
-    // Include generic arguments in the name to distinguish specializations
-    for (const AstTypeRef* a = concrete_args; a; a = a->next) {
-        const char* mangled_arg = rae_mangle_type_specialized(ctx, NULL, NULL, a);
-        pos += snprintf(buf + pos, sizeof(buf) - pos, "%s_", mangled_arg);
-    }
-
-    for (const AstParam* p = func->params; p; p = p->next) {
-        const char* mangled_param = rae_mangle_type_specialized(ctx, gp, concrete_args, p->type);
-        pos += snprintf(buf + pos, sizeof(buf) - pos, "%s_", mangled_param);
-    }
+    for (const AstTypeRef* a = concrete_args; a; a = a->next) { const char* mangled_arg = rae_mangle_type_specialized(ctx, NULL, NULL, a); pos += snprintf(buf + pos, sizeof(buf) - pos, "%s_", mangled_arg); }
+    for (const AstParam* p = func->params; p; p = p->next) { const char* mangled_param = rae_mangle_type_specialized(ctx, gp, concrete_args, p->type); pos += snprintf(buf + pos, sizeof(buf) - pos, "%s_", mangled_param); }
     
-    char* result = arena_alloc(ctx->ast_arena, pos + 1);
-    memcpy(result, buf, pos + 1);
-    sanitize_mangled_name(result);
-    return result;
+    char* result = arena_alloc(ctx->ast_arena, pos + 1); memcpy(result, buf, pos + 1);
+    sanitize_mangled_name(result); return result;
 }
