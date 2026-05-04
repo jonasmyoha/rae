@@ -553,15 +553,19 @@ static void discover_specializations_expr(CFuncContext* ctx, const AstExpr* expr
                             if (!concrete_args) concrete_args = sub; else last_arg->next = sub; last_arg = sub;
                         }
                         inferred_args = concrete_args;
-                    } else if (d->params && str_eq_cstr(d->params->name, "this")) {
-                        const AstCallArg* first_arg = expr->as.call.args;
-                        if (first_arg) {
-                            const AstTypeRef* receiver_type = infer_expr_type_ref(ctx, first_arg->value);
-                            // Substitute receiver type through generic context
-                            if (receiver_type && ctx->generic_params && ctx->generic_args)
-                                receiver_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, receiver_type);
-                            AstTypeRef* inferred = infer_generic_args(ctx->compiler_ctx, d, d->params->type, receiver_type);
-                            if (inferred) inferred_args = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, inferred);
+                    } else if (d->params) {
+                        // Try inference from each param/arg pair (not just `this`).
+                        const AstParam* p = d->params;
+                        const AstCallArg* a = expr->as.call.args;
+                        while (!inferred_args && p && a) {
+                            const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, a->value);
+                            if (arg_tr) {
+                                if (ctx->generic_params && ctx->generic_args)
+                                    arg_tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, arg_tr);
+                                AstTypeRef* inferred = infer_generic_args(ctx->compiler_ctx, d, p->type, arg_tr);
+                                if (inferred) inferred_args = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, inferred);
+                            }
+                            p = p->next; a = a->next;
                         }
                     }
                     // Try return-type inference from expected type (let x: Type = genericFunc(...))
@@ -946,7 +950,21 @@ static bool is_generic_param(const AstIdentifierPart* params, Str name) { const 
 
 static const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
     if (!expr) return NULL;
+    // Cache primitive literal type-refs in static storage so callers can hold a
+    // pointer past the function return.
+    static AstIdentifierPart kInt_part = { .text = { .data = (uint8_t*)"Int", .len = 3 } };
+    static AstTypeRef kInt_tr = { .parts = &kInt_part };
+    static AstIdentifierPart kFloat_part = { .text = { .data = (uint8_t*)"Float", .len = 5 } };
+    static AstTypeRef kFloat_tr = { .parts = &kFloat_part };
+    static AstIdentifierPart kBool_part = { .text = { .data = (uint8_t*)"Bool", .len = 4 } };
+    static AstTypeRef kBool_tr = { .parts = &kBool_part };
+    static AstIdentifierPart kString_part = { .text = { .data = (uint8_t*)"String", .len = 6 } };
+    static AstTypeRef kString_tr = { .parts = &kString_part };
     switch (expr->kind) {
+        case AST_EXPR_INTEGER: return &kInt_tr;
+        case AST_EXPR_FLOAT: return &kFloat_tr;
+        case AST_EXPR_BOOL: return &kBool_tr;
+        case AST_EXPR_STRING: return &kString_tr;
         case AST_EXPR_IDENT: return get_local_type_ref(ctx, expr->as.ident);
         case AST_EXPR_MEMBER: {
             const AstTypeRef* obj_tr = infer_expr_type_ref(ctx, expr->as.member.object); Str obj_name = get_base_type_name(obj_tr);
@@ -1047,6 +1065,28 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
               break;
           }
       }
+      // For arithmetic/comparison ops on primitives, propagate the side that has a
+      // known primitive type as the expected type for both sides. This lets calls
+      // returning opt T auto-unbox when used in `g.grid.get(i) > 0` etc.
+      bool is_arith_or_cmp = (expr->as.binary.op >= AST_BIN_ADD && expr->as.binary.op <= AST_BIN_GE) ||
+                             expr->as.binary.op == AST_BIN_IS;
+      bool had_exp_bin = ctx->has_expected_type;
+      AstTypeRef saved_exp_bin = ctx->expected_type;
+      if (is_arith_or_cmp && !none_compare) {
+          const AstTypeRef* lhs_ti = infer_expr_type_ref(ctx, expr->as.binary.lhs);
+          const AstTypeRef* rhs_ti = infer_expr_type_ref(ctx, expr->as.binary.rhs);
+          const AstTypeRef* picked = NULL;
+          // Prefer whichever side has a non-opt primitive type.
+          if (lhs_ti && !lhs_ti->is_opt) {
+              Str b = get_base_type_name(lhs_ti);
+              if (is_primitive_type(b) && !str_eq_cstr(b, "Any")) picked = lhs_ti;
+          }
+          if (!picked && rhs_ti && !rhs_ti->is_opt) {
+              Str b = get_base_type_name(rhs_ti);
+              if (is_primitive_type(b) && !str_eq_cstr(b, "Any")) picked = rhs_ti;
+          }
+          if (picked) { ctx->expected_type = *picked; ctx->has_expected_type = true; }
+      }
       int prec = binary_op_precedence(expr->as.binary.op); bool is_bool_op = expr->as.binary.op >= AST_BIN_LT && expr->as.binary.op <= AST_BIN_OR;
       if (is_bool_op) fprintf(out, "(bool)("); if (prec < parent_prec) fprintf(out, "(");
       emit_expr(ctx, expr->as.binary.lhs, out, prec, false, false);
@@ -1060,6 +1100,8 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
       }
       emit_expr(ctx, expr->as.binary.rhs, out, prec, false, false);
       if (prec < parent_prec) fprintf(out, ")"); if (is_bool_op) fprintf(out, ")");
+      ctx->has_expected_type = had_exp_bin;
+      ctx->expected_type = saved_exp_bin;
       ctx->suppress_opt_unbox = saved_unbox;
       break;
     }
@@ -1106,6 +1148,34 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
                 break;
             }
         }
+        // Module-qualified call: `sys.fn(args)` where `sys` is an imported module
+        // name. The c_backend flattens imports into ctx->all_decls and clears
+        // module->imports, so detect it by: object is an IDENT, the ident has
+        // no local binding and no inferable type, and a function `method_name`
+        // exists in the project.
+        if (expr->as.method_call.object->kind == AST_EXPR_IDENT) {
+            Str obj_name = expr->as.method_call.object->as.ident;
+            const AstTypeRef* obj_tr = infer_expr_type_ref(ctx, expr->as.method_call.object);
+            bool obj_has_value = obj_tr != NULL || is_pointer_type(ctx, obj_name);
+            bool fn_exists = false;
+            if (!obj_has_value) {
+                for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
+                    const AstDecl* d = ctx->compiler_ctx->all_decls[i];
+                    if (d->kind == AST_DECL_FUNC && str_eq(d->as.func_decl.name, expr->as.method_call.method_name)) {
+                        fn_exists = true; break;
+                    }
+                }
+            }
+            if (!obj_has_value && fn_exists) {
+                AstExpr call = { .kind = AST_EXPR_CALL, .line = expr->line, .column = expr->column, .decl_link = expr->decl_link };
+                call.as.call.callee = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstExpr));
+                call.as.call.callee->kind = AST_EXPR_IDENT;
+                call.as.call.callee->as.ident = expr->as.method_call.method_name;
+                call.as.call.args = expr->as.method_call.args;
+                call.as.call.generic_args = expr->as.method_call.generic_args;
+                emit_call_expr(ctx, &call, out); break;
+            }
+        }
         AstExpr call = { .kind = AST_EXPR_CALL, .line = expr->line, .column = expr->column, .decl_link = expr->decl_link };
         call.as.call.callee = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstExpr)); call.as.call.callee->kind = AST_EXPR_IDENT; call.as.call.callee->as.ident = expr->as.method_call.method_name;
         AstCallArg* first_arg = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstCallArg)); first_arg->name = str_from_cstr("this"); first_arg->value = expr->as.method_call.object; first_arg->next = expr->as.method_call.args;
@@ -1130,6 +1200,24 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
         break;
     }
     case AST_EXPR_INDEX: {
+        // List(T) is a struct, not a raw array; lower `xs[i]` to a typed
+        // buffer access on the data pointer.
+        const AstTypeRef* tgt_tr = infer_expr_type_ref(ctx, expr->as.index.target);
+        Str tgt_base = get_base_type_name(tgt_tr);
+        if (str_eq_cstr(tgt_base, "List")) {
+            const AstTypeRef* elem_tr = tgt_tr ? tgt_tr->generic_args : NULL;
+            AstTypeRef* sub = elem_tr ? substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, elem_tr) : NULL;
+            fprintf(out, "(*(");
+            if (sub) emit_type_ref_as_c_type(ctx, sub, out, false); else fprintf(out, "RaeAny");
+            fprintf(out, "*)( (char*)((");
+            emit_expr(ctx, expr->as.index.target, out, PREC_CALL, false, false);
+            fprintf(out, ").data) + (");
+            emit_expr(ctx, expr->as.index.index, out, PREC_LOWEST, false, false);
+            fprintf(out, ") * sizeof(");
+            if (sub) emit_type_ref_as_c_type(ctx, sub, out, false); else fprintf(out, "RaeAny");
+            fprintf(out, ") ))");
+            break;
+        }
         emit_expr(ctx, expr->as.index.target, out, PREC_CALL, false, false); fprintf(out, "["); emit_expr(ctx, expr->as.index.index, out, PREC_LOWEST, false, false); fprintf(out, "]"); break;
     }
     case AST_EXPR_BOX: {
@@ -1180,28 +1268,52 @@ static bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int par
         break;
     }
     case AST_EXPR_OBJECT: {
-        bool needs_cast = true;
+        // Resolve the literal's struct type so we can propagate per-field expected
+        // types into each value. This lets generic calls infer args from the
+        // surrounding field type (e.g. `grid: createList(initialCap: 200)`
+        // where the field's declared type is `List(Int)`).
+        const AstTypeRef* obj_tr = expr->as.object_literal.type;
+        if (!obj_tr && ctx->has_expected_type) obj_tr = &ctx->expected_type;
+        const AstDecl* struct_decl = NULL;
+        if (obj_tr) {
+            Str obj_base = get_base_type_name(obj_tr);
+            struct_decl = find_type_decl(ctx, ctx->module, obj_base);
+        }
         if (expr->as.object_literal.type) {
             fprintf(out, "(");
             emit_type_ref_as_c_type(ctx, expr->as.object_literal.type, out, false);
             fprintf(out, ")");
         } else if (ctx->has_expected_type) {
-            // No explicit type — use expected type from context (e.g. function parameter)
             fprintf(out, "(");
             emit_type_ref_as_c_type(ctx, &ctx->expected_type, out, false);
             fprintf(out, ")");
         }
         fprintf(out, "{ ");
-        // Clear expected_type inside object literal to prevent nested objects
-        // from inheriting the parent type
         bool saved_has_exp = ctx->has_expected_type;
-        ctx->has_expected_type = false;
+        AstTypeRef saved_exp = ctx->expected_type;
         for (const AstObjectField* f = expr->as.object_literal.fields; f; f = f->next) {
             fprintf(out, ".%.*s = ", (int)f->name.len, f->name.data);
+            // Look up the field's declared type and use it as expected_type.
+            const AstTypeRef* field_tr = NULL;
+            if (struct_decl && struct_decl->kind == AST_DECL_TYPE) {
+                for (const AstTypeField* td = struct_decl->as.type_decl.fields; td; td = td->next) {
+                    if (str_eq(td->name, f->name)) { field_tr = td->type; break; }
+                }
+            }
+            if (field_tr) {
+                AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx,
+                    struct_decl->as.type_decl.generic_params,
+                    obj_tr ? obj_tr->generic_args : NULL, field_tr);
+                ctx->expected_type = *sub;
+                ctx->has_expected_type = true;
+            } else {
+                ctx->has_expected_type = false;
+            }
             emit_expr(ctx, f->value, out, PREC_LOWEST, false, false);
             if (f->next) fprintf(out, ", ");
         }
         ctx->has_expected_type = saved_has_exp;
+        ctx->expected_type = saved_exp;
         fprintf(out, " }");
         break;
     }
@@ -1602,9 +1714,19 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             }
             concrete = head;
         } else if (fd->generic_params) {
-            if (fd->params && str_eq_cstr(fd->params->name, "this") && expr->as.call.args) {
-                const AstTypeRef* recv = infer_expr_type_ref(ctx, expr->as.call.args->value);
-                if (recv) concrete = infer_generic_args(ctx->compiler_ctx, fd, fd->params->type, recv);
+            // Try inference from each param/arg pair (not just `this`) — this handles
+            // top-level calls like `setValue(b, val: 100)` where the first param is
+            // not named "this" but its type still binds the generic arg.
+            const AstParam* p = fd->params;
+            const AstCallArg* a = expr->as.call.args;
+            while (!concrete && p && a) {
+                const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, a->value);
+                if (arg_tr && p->type) {
+                    if (ctx->generic_params && ctx->generic_args)
+                        arg_tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, arg_tr);
+                    concrete = infer_generic_args(ctx->compiler_ctx, fd, p->type, arg_tr);
+                }
+                p = p->next; a = a->next;
             }
             if (!concrete && ctx->has_expected_type && fd->returns && fd->returns->type) {
                 concrete = infer_generic_args(ctx->compiler_ctx, fd, fd->returns->type, &ctx->expected_type);
@@ -1640,14 +1762,43 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     if ((arg_tr && (arg_tr->is_view || arg_tr->is_mod)) || (a->value->kind == AST_EXPR_IDENT && is_pointer_type(ctx, a->value->as.ident))) needs_deref = true;
                 }
             }
-            if (p && p->type && a->value->kind != AST_EXPR_BOX && str_eq_cstr(get_base_type_name(p->type), "Any")) needs_box = true;
+            if (p && p->type && a->value->kind != AST_EXPR_BOX) {
+                Str pbase_check = get_base_type_name(p->type);
+                bool param_is_any = str_eq_cstr(pbase_check, "Any");
+                // For generic param T that resolves to Any (e.g. List(Any) → T=Any),
+                // also detect via the call's `concrete` substitution.
+                if (!param_is_any && fd->generic_params && concrete) {
+                    const AstIdentifierPart* gp = fd->generic_params; const AstTypeRef* ga = concrete;
+                    while (gp && ga) {
+                        if (str_eq(gp->text, pbase_check)) {
+                            Str ga_base = get_base_type_name(ga);
+                            if (str_eq_cstr(ga_base, "Any")) param_is_any = true;
+                            break;
+                        }
+                        gp = gp->next; ga = ga->next;
+                    }
+                }
+                if (param_is_any) needs_box = true;
+            }
 
             if (needs_prim_wrap) {
                 fprintf(out, "("); emit_type_ref_as_c_type(ctx, p->type, out, false);
                 fprintf(out, "){ .ptr = ("); emit_type_ref_as_c_type(ctx, p->type, out, true); fprintf(out, "[]){");
             }
             bool had_exp = ctx->has_expected_type; AstTypeRef saved_exp = ctx->expected_type;
-            if (p && p->type) { ctx->expected_type = *p->type; ctx->has_expected_type = true; }
+            if (p && p->type) {
+                // Substitute generic params in the param type so opt-unbox can detect
+                // concrete primitive types when the callee is a generic template.
+                AstTypeRef* p_substituted = p->type;
+                if (fd->generic_params && concrete) {
+                    p_substituted = substitute_type_ref(ctx->compiler_ctx, fd->generic_params, concrete, p->type);
+                } else if (fd->specialization_args && fd->generic_template && fd->generic_template->kind == AST_DECL_FUNC) {
+                    p_substituted = substitute_type_ref(ctx->compiler_ctx,
+                        fd->generic_template->as.func_decl.generic_params,
+                        fd->specialization_args, p->type);
+                }
+                ctx->expected_type = *p_substituted; ctx->has_expected_type = true;
+            }
             if (needs_addr) fprintf(out, "&");
             if (needs_deref) fprintf(out, "(*");
             if (needs_box) {
@@ -1772,7 +1923,20 @@ static bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             } else if (stmt->as.let_stmt.value) {
                 // Set expected type so generic call resolution can infer from let type
                 if (stmt->as.let_stmt.type) { ctx->expected_type = *stmt->as.let_stmt.type; ctx->has_expected_type = true; }
+                // If declared type is `opt T` and the value's inferred type is the
+                // concrete T, wrap with rae_any() so RaeAny holds the boxed value.
+                bool needs_box = false;
+                if (stmt->as.let_stmt.type && stmt->as.let_stmt.type->is_opt) {
+                    const AstTypeRef* val_tr = infer_expr_type_ref(ctx, stmt->as.let_stmt.value);
+                    if (val_tr && !val_tr->is_opt) {
+                        Str val_base = get_base_type_name(val_tr);
+                        // Don't box if value is already RaeAny (e.g. another opt result)
+                        if (!str_eq_cstr(val_base, "Any") && val_base.len > 0) needs_box = true;
+                    }
+                }
+                if (needs_box) fprintf(out, "rae_any((");
                 emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, false, false);
+                if (needs_box) fprintf(out, "))");
                 ctx->has_expected_type = false;
             } else {
                 // Auto-init: let x: Type (no initializer)
