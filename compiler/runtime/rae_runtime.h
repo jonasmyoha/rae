@@ -77,8 +77,12 @@ void* rae_ext_rae_buf_alloc(int64_t count, int64_t elem_size);
 void rae_ext_rae_buf_free(void* buf);
 void* rae_ext_rae_buf_resize(void* buf, int64_t new_count, int64_t elem_size);
 void rae_ext_rae_buf_copy(void* src, int64_t src_off, void* dst, int64_t dst_off, int64_t len, int64_t elem_size);
-void rae_ext_rae_buf_set(void* buf, int64_t index, RaeAny value);
-RaeAny rae_ext_rae_buf_get(void* buf, int64_t index);
+void rae_ext_rae_buf_set(void* buf, int64_t index, int64_t elem_size, const void* value);
+void rae_ext_rae_buf_get(void* buf, int64_t index, int64_t elem_size, void* out_val);
+
+/* Legacy buffer primitives for VM (where everything is still boxed in RaeAny/Value) */
+void rae_ext_rae_buf_set_any(void* buf, int64_t index, RaeAny value);
+RaeAny rae_ext_rae_buf_get_any(void* buf, int64_t index);
 
 /* Legacy buffer intrinsics (single-arg alloc, value-sized elements) */
 RAE_UNUSED static void* rae_ext___buf_alloc(int64_t count) { return rae_ext_rae_buf_alloc(count, sizeof(int64_t)); }
@@ -268,6 +272,19 @@ void rae_ext_rae_log_stream_float(double value);
 void rae_ext_rae_log_list_fields(RaeAny* items, int64_t length, int64_t capacity);
 void rae_ext_rae_log_stream_list_fields(RaeAny* items, int64_t length, int64_t capacity);
 
+// Typed list logging: monomorphised lists store concrete element types
+// (int64_t, double, rae_String, ...), not RaeAny — we need typed iteration.
+typedef enum {
+  RAE_LIST_ELEM_ANY = 0,
+  RAE_LIST_ELEM_INT64,
+  RAE_LIST_ELEM_FLOAT64,
+  RAE_LIST_ELEM_BOOL,
+  RAE_LIST_ELEM_CHAR32,
+  RAE_LIST_ELEM_STRING,
+} RaeListElemKind;
+void rae_ext_rae_log_list_typed(void* data, int64_t length, int64_t capacity, int elem_kind);
+void rae_ext_rae_log_stream_list_typed(void* data, int64_t length, int64_t capacity, int elem_kind);
+
 rae_String rae_ext_rae_str_from_cstr(const void* s);
 rae_String rae_ext_rae_str_from_buf(const uint8_t* data, int64_t len);
 void* rae_ext_rae_str_to_cstr(rae_String s);
@@ -318,6 +335,7 @@ rae_String rae_ext_rae_str_string(rae_String s);
 rae_String rae_ext_rae_str_string_ptr(const rae_String* s);
 rae_String rae_ext_rae_str_cstr(const char* s); // Legacy/helper
 RAE_UNUSED static rae_String rae_ext_rae_str_u8(unsigned char v) { return rae_ext_rae_str_i64((int64_t)v); }
+rae_String rae_ext_rae_str_any(RaeAny v); // String-format any boxed value (incl. `none`)
 
 /* JSON helpers */
 RAE_UNUSED static rae_String rae_json_build(const char* s, int64_t len) {
@@ -439,6 +457,7 @@ int64_t rae_ext_measureText(rae_String text, int64_t fontSize);
     uint32_t: rae_ext_rae_str_char, \
     uint32_t*: rae_ext_rae_str_char_ptr, \
     unsigned char: rae_ext_rae_str_u8, \
+    RaeAny: rae_ext_rae_str_any, \
     default: rae_ext_rae_str_string \
 )(X)
 
