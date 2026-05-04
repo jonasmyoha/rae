@@ -530,6 +530,9 @@ static void discover_specializations_expr(CFuncContext* ctx, const AstExpr* expr
                         if (dd->kind != AST_DECL_FUNC || !str_eq(dd->as.func_decl.name, callee->as.ident)) continue;
                         uint16_t pc = 0; for (const AstParam* pp = dd->as.func_decl.params; pp; pp = pp->next) pc++;
                         if (pc != param_count) continue;
+                        // Skip specialization clones — they would force their own concrete
+                        // args; we want the generic template so we can re-infer per call.
+                        if (dd->as.func_decl.specialization_args) continue;
                         // Prefer matching receiver base when first param is "this".
                         if (dd->as.func_decl.params && str_eq_cstr(dd->as.func_decl.params->name, "this") && receiver_base.len > 0) {
                             Str param_base = get_base_type_name(dd->as.func_decl.params->type);
@@ -600,7 +603,42 @@ static void discover_specializations_expr(CFuncContext* ctx, const AstExpr* expr
         case AST_EXPR_UNARY: discover_specializations_expr(ctx, expr->as.unary.operand); break;
         case AST_EXPR_MEMBER: discover_specializations_expr(ctx, expr->as.member.object); break;
         case AST_EXPR_INDEX: discover_specializations_expr(ctx, expr->as.index.target); discover_specializations_expr(ctx, expr->as.index.index); break;
-        case AST_EXPR_OBJECT: for (const AstObjectField* f = expr->as.object_literal.fields; f; f = f->next) discover_specializations_expr(ctx, f->value); break;
+        case AST_EXPR_OBJECT: {
+            // Propagate per-field expected types so generic calls inside a struct
+            // literal infer from the field's declared type
+            // (e.g. `Game { grid: createList(initialCap: 200) }` where
+            // `grid: List(Int)`).
+            const AstTypeRef* obj_tr = expr->as.object_literal.type;
+            if (!obj_tr && ctx->has_expected_type) obj_tr = &ctx->expected_type;
+            const AstDecl* struct_decl = NULL;
+            if (obj_tr) {
+                Str obj_base = get_base_type_name(obj_tr);
+                struct_decl = find_type_decl(ctx, ctx->module, obj_base);
+            }
+            bool saved_has_exp = ctx->has_expected_type;
+            AstTypeRef saved_exp = ctx->expected_type;
+            for (const AstObjectField* f = expr->as.object_literal.fields; f; f = f->next) {
+                const AstTypeRef* field_tr = NULL;
+                if (struct_decl && struct_decl->kind == AST_DECL_TYPE) {
+                    for (const AstTypeField* td = struct_decl->as.type_decl.fields; td; td = td->next) {
+                        if (str_eq(td->name, f->name)) { field_tr = td->type; break; }
+                    }
+                }
+                if (field_tr) {
+                    AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx,
+                        struct_decl->as.type_decl.generic_params,
+                        obj_tr ? obj_tr->generic_args : NULL, field_tr);
+                    ctx->expected_type = *sub;
+                    ctx->has_expected_type = true;
+                } else {
+                    ctx->has_expected_type = false;
+                }
+                discover_specializations_expr(ctx, f->value);
+            }
+            ctx->has_expected_type = saved_has_exp;
+            ctx->expected_type = saved_exp;
+            break;
+        }
         case AST_EXPR_INTERP: {
             for (const AstInterpPart* p = expr->as.interp.parts; p; p = p->next) discover_specializations_expr(ctx, p->value);
             break;
@@ -1655,12 +1693,17 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         }
         const AstFuncDecl* generic_fallback = NULL;
         const AstFuncDecl* receiver_match = NULL;
+        const AstFuncDecl* nongeneric_match = NULL;
         for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
             const AstDecl* d = ctx->compiler_ctx->all_decls[i];
             if (d->kind == AST_DECL_FUNC && str_eq(d->as.func_decl.name, callee_name)) {
                 uint16_t param_count = 0; for (const AstParam* pp = d->as.func_decl.params; pp; pp = pp->next) param_count++;
                 if (param_count != call_arg_count) continue;
-                if (!d->as.func_decl.generic_params) { fd = &d->as.func_decl; break; }
+                // Skip specialization clones (specialization_args set, generic_params cleared)
+                // — they would force their own concrete args regardless of context.
+                // Prefer the generic template so we can re-infer from the call site.
+                if (d->as.func_decl.specialization_args) continue;
+                if (!d->as.func_decl.generic_params) { nongeneric_match = &d->as.func_decl; continue; }
                 if (d->as.func_decl.params && str_eq_cstr(d->as.func_decl.params->name, "this") && receiver_base.len > 0) {
                     Str param_base = get_base_type_name(d->as.func_decl.params->type);
                     if (str_eq(param_base, receiver_base)) { receiver_match = &d->as.func_decl; continue; }
@@ -1668,7 +1711,7 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 if (!generic_fallback) generic_fallback = &d->as.func_decl;
             }
         }
-        if (!fd) fd = receiver_match ? receiver_match : generic_fallback;
+        if (!fd) fd = nongeneric_match ? nongeneric_match : (receiver_match ? receiver_match : generic_fallback);
     }
 
     if (fd) {
@@ -1702,7 +1745,22 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         }
 
         const char* call_name = NULL; AstTypeRef* concrete = NULL;
-        if (expr->as.call.generic_args) {
+        // If sema linked the call to a spec clone but the call site has a clear
+        // expected return type, prefer to re-infer from that. This catches cases
+        // like `g.grid = createList(initialCap: 200)` where `grid: List(Int)` should
+        // override any earlier `createList<String>` specialisation sema may have
+        // attached.
+        if (fd->specialization_args && fd->generic_template && fd->generic_template->kind == AST_DECL_FUNC &&
+            ctx->has_expected_type && !expr->as.call.generic_args) {
+            const AstFuncDecl* tmpl = &fd->generic_template->as.func_decl;
+            if (tmpl->returns && tmpl->returns->type) {
+                AstTypeRef* re_inferred = infer_generic_args(ctx->compiler_ctx, tmpl, tmpl->returns->type, &ctx->expected_type);
+                if (re_inferred) { concrete = re_inferred; fd = tmpl; }
+            }
+        }
+        if (concrete) {
+            // already resolved above
+        } else if (expr->as.call.generic_args) {
             concrete = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, expr->as.call.generic_args);
         } else if (fd->generic_params && ctx->generic_params && ctx->generic_args) {
             AstTypeRef* head = NULL; AstTypeRef* tail = NULL;
@@ -1732,7 +1790,6 @@ static bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 concrete = infer_generic_args(ctx->compiler_ctx, fd, fd->returns->type, &ctx->expected_type);
             }
         }
-        
         if (concrete) {
             const AstFuncDecl* gen_fd = fd->generic_template ? &fd->generic_template->as.func_decl : fd;
             call_name = rae_mangle_specialized_function(ctx->compiler_ctx, gen_fd, concrete);
