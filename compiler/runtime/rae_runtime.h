@@ -410,14 +410,14 @@ void rae_ext_rae_crypto_argon2i(rae_String password, rae_String salt, int64_t nb
 #include <raylib.h>
 void rae_ext_initWindow(int64_t width, int64_t height, rae_String title);
 void rae_ext_setConfigFlags(int64_t flags);
-int64_t rae_ext_windowShouldClose(void);
+rae_Bool rae_ext_windowShouldClose(void);
 void rae_ext_closeWindow(void);
 void rae_ext_setTargetFPS(int64_t fps);
 void rae_ext_beginDrawing(void);
 void rae_ext_endDrawing(void);
 void rae_ext_clearBackground(Color color);
-int64_t rae_ext_isKeyDown(int64_t key);
-int64_t rae_ext_isKeyPressed(int64_t key);
+rae_Bool rae_ext_isKeyDown(int64_t key);
+rae_Bool rae_ext_isKeyPressed(int64_t key);
 int64_t rae_ext_getScreenWidth(void);
 int64_t rae_ext_getScreenHeight(void);
 double rae_ext_getTime(void);
