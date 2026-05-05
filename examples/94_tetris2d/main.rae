@@ -581,13 +581,13 @@ func handleInput(g: mod Game) {
   let moved: Int = 0
 
   # DAS (Delayed Auto Shift)
-  let moveLeft: Int = isKeyDown(key: 263) or isKeyDown(key: 65)
-  let moveRight: Int = isKeyDown(key: 262) or isKeyDown(key: 68)
+  let moveLeft: Bool = isKeyDown(key: 263) or isKeyDown(key: 65)
+  let moveRight: Bool = isKeyDown(key: 262) or isKeyDown(key: 68)
 
-  if moveLeft is 1 or moveRight is 1 {
+  if moveLeft or moveRight {
     if g.hMoveTimer is 0 {
       # First press: move immediately
-      if moveLeft is 1 {
+      if moveLeft {
         if canMove(g: g, dx: -1, dy: 0, dr: 0) is 1 {
           pos.x = pos.x - 1
           moved = 1
@@ -603,7 +603,7 @@ func handleInput(g: mod Game) {
       g.hMoveTimer = g.hMoveTimer + 1
       if g.hMoveTimer >= g.dasDelay {
         if (g.hMoveTimer - g.dasDelay) % g.hMoveDelay is 0 {
-          if moveLeft is 1 {
+          if moveLeft {
             if canMove(g: g, dx: -1, dy: 0, dr: 0) is 1 {
               pos.x = pos.x - 1
               moved = 1
@@ -622,7 +622,7 @@ func handleInput(g: mod Game) {
   }
 
   # Rotate (still single-press)
-  if isKeyPressed(key: 32) is 1 or isKeyPressed(key: 265) is 1 or isKeyPressed(key: 87) is 1 {
+  if isKeyPressed(key: 32) or isKeyPressed(key: 265) or isKeyPressed(key: 87) {
     if canMove(g: g, dx: 0, dy: 0, dr: 1) is 1 {
       cp.rotation = (cp.rotation + 1) % 4
       moved = 1
@@ -638,7 +638,7 @@ func handleInput(g: mod Game) {
 
   # Soft Drop
   let effectiveDelay: Int = g.moveDelay
-  if isKeyDown(key: 264) is 1 or isKeyDown(key: 83) is 1 {
+  if isKeyDown(key: 264) or isKeyDown(key: 83) {
     effectiveDelay = 2
   }
 
@@ -695,17 +695,17 @@ func main() {
     maxLockTimer: 0
   }
   initGame(g)
-  loop windowShouldClose() is 0 {
+  loop not windowShouldClose() {
     # Input: Global (Menu/GameOver)
     if g.state is GameState.GameOver {
       # R key
-      if isKeyPressed(key: 82) is 1 {
+      if isKeyPressed(key: 82) {
         initGame(g)
       }
     }
     # Input: Pause
     # P key
-    if isKeyPressed(key: 80) is 1 {
+    if isKeyPressed(key: 80) {
       if g.state is GameState.Playing {
         g.state = GameState.Paused
       } else {
