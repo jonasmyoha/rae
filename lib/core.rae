@@ -144,6 +144,48 @@ func swap(T)(this: mod List(T), i: Int, j: Int) {
   rae_ext_rae_buf_set(buf: this.data, index: j, value: temp)
 }
 
+# In-place insertion sort, ascending. Works for any numeric T (Int / Float)
+# where `<` is defined. For String / struct types, write a custom sort or
+# use `sortByDesc` once a comparator API lands.
+func sort(T)(this: mod List(T)) {
+  let i: Int = 1
+  loop i < this.length {
+    let j: Int = i
+    loop j > 0 {
+      let a: T = rae_ext_rae_buf_get(buf: this.data, index: j - 1)
+      let b: T = rae_ext_rae_buf_get(buf: this.data, index: j)
+      if a < b {
+        # already in order
+        j = 0
+      } else {
+        swap(this, i: j - 1, j: j)
+        j = j - 1
+      }
+    }
+    i = i + 1
+  }
+}
+
+# In-place insertion sort, descending. Useful for highscore tables and
+# anything that wants the largest values first.
+func sortDesc(T)(this: mod List(T)) {
+  let i: Int = 1
+  loop i < this.length {
+    let j: Int = i
+    loop j > 0 {
+      let a: T = rae_ext_rae_buf_get(buf: this.data, index: j - 1)
+      let b: T = rae_ext_rae_buf_get(buf: this.data, index: j)
+      if a > b {
+        j = 0
+      } else {
+        swap(this, i: j - 1, j: j)
+        j = j - 1
+      }
+    }
+    i = i + 1
+  }
+}
+
 func free(T)(this: mod List(T)) {
   rae_ext_rae_buf_free(buf: this.data)
   this.length = 0

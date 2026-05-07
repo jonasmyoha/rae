@@ -1,0 +1,34 @@
+# Generic List(T) sort + sortDesc — ascending and descending insertion sort.
+
+func main() {
+  let xs: List(Int) = createList(Int)(initialCap: 8)
+  add(xs, value: 5)
+  add(xs, value: 2)
+  add(xs, value: 9)
+  add(xs, value: 1)
+  add(xs, value: 7)
+
+  sort(xs)
+  log("asc 0: {get(xs, index: 0)}")
+  log("asc 1: {get(xs, index: 1)}")
+  log("asc 2: {get(xs, index: 2)}")
+  log("asc 3: {get(xs, index: 3)}")
+  log("asc 4: {get(xs, index: 4)}")
+
+  sortDesc(xs)
+  log("desc 0: {get(xs, index: 0)}")
+  log("desc 1: {get(xs, index: 1)}")
+  log("desc 2: {get(xs, index: 2)}")
+  log("desc 3: {get(xs, index: 3)}")
+  log("desc 4: {get(xs, index: 4)}")
+
+  # Sort floats too — uses the same generic body.
+  let fs: List(Float) = createList(Float)(initialCap: 4)
+  add(fs, value: 3.14)
+  add(fs, value: 1.41)
+  add(fs, value: 2.71)
+  sort(fs)
+  log("float asc 0: {get(fs, index: 0)}")
+  log("float asc 1: {get(fs, index: 1)}")
+  log("float asc 2: {get(fs, index: 2)}")
+}
