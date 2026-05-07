@@ -97,6 +97,7 @@ typedef enum {
   AST_BIN_LE,
   AST_BIN_GE,
   AST_BIN_IS,
+  AST_BIN_NEQ, // `is not` (and reserved for `!=` if added later)
   AST_BIN_AND,
   AST_BIN_OR
 } AstBinaryOp;

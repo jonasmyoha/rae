@@ -393,6 +393,7 @@ int binary_op_precedence(AstBinaryOp op) {
     case AST_BIN_LE: return PREC_RELATIONAL;
     case AST_BIN_GE: return PREC_RELATIONAL;
     case AST_BIN_IS: return PREC_EQUALITY;
+    case AST_BIN_NEQ: return PREC_EQUALITY;
     case AST_BIN_AND: return PREC_LOGICAL_AND;
     case AST_BIN_OR: return PREC_LOGICAL_OR;
   }
