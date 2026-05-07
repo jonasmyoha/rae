@@ -869,6 +869,26 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       fprintf(out, "  return __out;\n}\n\n");
   }
 
+  // Emit top-level `let` globals as static C variables. We bundle every
+  // imported module into one translation unit, so plain `static` works
+  // (no need for extern/header). Initialised lets get their initialiser
+  // expression; uninitialised ones get the type's zero value.
+  {
+      CFuncContext gctx = {.compiler_ctx = ctx, .module = module};
+      for (size_t i = 0; i < ctx->all_decl_count; i++) {
+          const AstDecl* d = ctx->all_decls[i];
+          if (d->kind != AST_DECL_GLOBAL_LET) continue;
+          fprintf(out, "RAE_UNUSED static ");
+          if (d->as.let_decl.type) emit_type_ref_as_c_type(&gctx, d->as.let_decl.type, out, false);
+          else fprintf(out, "int64_t");
+          fprintf(out, " %.*s = ", (int)d->as.let_decl.name.len, d->as.let_decl.name.data);
+          if (d->as.let_decl.value) emit_expr(&gctx, d->as.let_decl.value, out, PREC_LOWEST, false, false);
+          else emit_auto_init(&gctx, d->as.let_decl.type, out);
+          fprintf(out, ";\n");
+      }
+      fprintf(out, "\n");
+  }
+
   // Forward declarations for user extern functions (not in runtime header)
   for (size_t i = 0; i < ctx->all_decl_count; i++) {
       const AstDecl* d = ctx->all_decls[i];
