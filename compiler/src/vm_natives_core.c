@@ -63,6 +63,32 @@ static bool native_rae_time_ns(struct VM* vm, VmNativeResult* out_result, const 
   return true;
 }
 
+static bool native_format_timestamp(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
+  (void)vm; (void)user_data;
+  if (arg_count != 1 || args[0].type != VAL_INT) {
+    diag_error(NULL, 0, 0, "formatTimestamp expects one Int (epoch ms)");
+    return false;
+  }
+  rae_String s = rae_ext_formatTimestamp(args[0].as.int_value);
+  out_result->has_value = true;
+  out_result->value = value_string_copy((const char*)s.data, (size_t)s.len);
+  rae_ext_rae_str_free(s);
+  return true;
+}
+
+static bool native_format_date(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
+  (void)vm; (void)user_data;
+  if (arg_count != 1 || args[0].type != VAL_INT) {
+    diag_error(NULL, 0, 0, "formatDate expects one Int (epoch ms)");
+    return false;
+  }
+  rae_String s = rae_ext_formatDate(args[0].as.int_value);
+  out_result->has_value = true;
+  out_result->value = value_string_copy((const char*)s.data, (size_t)s.len);
+  rae_ext_rae_str_free(s);
+  return true;
+}
+
 static bool native_sleep_ms(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
   (void)vm;
   (void)user_data;
@@ -966,6 +992,8 @@ bool register_default_natives(VmRegistry* registry, TickCounter* tick_counter) {
   }
   ok = vm_registry_register_native(registry, "nowMs", native_rae_time_ms, NULL) && ok;
   ok = vm_registry_register_native(registry, "nowNs", native_rae_time_ns, NULL) && ok;
+  ok = vm_registry_register_native(registry, "formatTimestamp", native_format_timestamp, NULL) && ok;
+  ok = vm_registry_register_native(registry, "formatDate", native_format_date, NULL) && ok;
   ok = vm_registry_register_native(registry, "sleep", native_sleep_ms, NULL) && ok;
   ok = vm_registry_register_native(registry, "sleepMs", native_sleep_ms, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_str", native_rae_str, NULL) && ok;
