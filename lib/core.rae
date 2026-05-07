@@ -186,6 +186,21 @@ func sortDesc(T)(this: mod List(T)) {
   }
 }
 
+# In-place reverse. Works for any T.
+func reverse(T)(this: mod List(T)) {
+  let lo: Int = 0
+  let hi: Int = this.length - 1
+  loop lo < hi {
+    swap(this, i: lo, j: hi)
+    lo = lo + 1
+    hi = hi - 1
+  }
+}
+
+func isEmpty(T)(this: view List(T)) ret Bool {
+  ret this.length is 0
+}
+
 func free(T)(this: mod List(T)) {
   rae_ext_rae_buf_free(buf: this.data)
   this.length = 0
