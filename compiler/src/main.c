@@ -2088,13 +2088,21 @@ static bool build_vm_output(const char* entry_file,
     return false;
   }
   AstModule merged = merge_module_graph(&graph);
-  
+
   CompilerContext ctx = {0};
   ctx.ast_arena = arena;
 
+  // We need a registry purely so globals get slots assigned during
+  // bytecode emission — without it `vm_registry_ensure_global` is
+  // skipped and any cross-file `let foo: Int = ...` reference fails
+  // resolution with "unknown identifier in VM". `run` already builds
+  // a registry; `build` was the gap.
+  VmRegistry registry;
+  vm_registry_init(&registry);
+
   Chunk chunk;
   chunk_init(&chunk);
-  ok = vm_compile_module(&ctx, &merged, &chunk, entry_file, NULL, false);
+  ok = vm_compile_module(&ctx, &merged, &chunk, entry_file, &registry, false);
   if (ok) {
     ok = write_vm_chunk_file(&chunk, out_path);
   }
@@ -2102,6 +2110,7 @@ static bool build_vm_output(const char* entry_file,
     ok = write_function_manifest(&merged, out_path);
   }
   chunk_free(&chunk);
+  vm_registry_free(&registry);
   module_graph_free(&graph);
   arena_destroy(arena);
   return ok;
