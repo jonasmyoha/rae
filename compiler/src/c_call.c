@@ -26,8 +26,10 @@ void emit_opt_unbox_suffix(CFuncContext* ctx, const AstFuncDecl* fd, const AstTy
 
     // Only unbox when the call's result is being consumed as a concrete primitive type
     // (e.g. `let s: String = get(...)`). When the consumer expects RaeAny (log args,
-    // interpolation, none comparisons), keep the RaeAny so the runtime can format it.
+    // interpolation, none comparisons) or itself an opt T, keep the RaeAny so the
+    // runtime can format / pass it through.
     if (!ctx->has_expected_type) return;
+    if (ctx->expected_type.is_opt) return;
     Str expected_base = get_base_type_name(&ctx->expected_type);
     bool expected_concrete = str_eq_cstr(expected_base, "Int") || str_eq_cstr(expected_base, "Int64") ||
         str_eq_cstr(expected_base, "Float") || str_eq_cstr(expected_base, "Float64") ||

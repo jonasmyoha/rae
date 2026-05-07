@@ -254,6 +254,10 @@ bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
             case AST_BIN_IS:
               emit_op(compiler, OP_EQ, (int)expr->line);
               return true;
+            case AST_BIN_NEQ:
+              emit_op(compiler, OP_EQ, (int)expr->line);
+              emit_op(compiler, OP_NOT, (int)expr->line);
+              return true;
             default:
               diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
                          "binary operator not supported in VM yet");
