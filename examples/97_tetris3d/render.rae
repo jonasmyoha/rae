@@ -30,18 +30,13 @@ func drawBlock(gx: Int, gy: Int, kindId: Int, flash: Float) {
     b = 255
   }
   let lit: Color = { r: r, g: g, b: b, a: 255 }
-  drawCube(pos: pos, width: 0.92, height: 0.92, length: 0.92, color: lit)
-  drawCubeWires(
-    pos: pos
-    width: 0.96
-    height: 0.96
-    length: 0.96
-    color: { r: 255, g: 255, b: 255, a: 90 }
-  )
+  # Full-cell cube — adjacent cells of the same piece tile seamlessly.
+  drawCube(pos: pos, width: 1.0, height: 1.0, length: 1.0, color: lit)
 }
 
-# Draw the wireframe of the play well — a 4-edge cuboid floor outlining
-# `gridWidth` x `gridHeight` cells.
+# Draw the grid lines of the play well, half a block behind the cubes
+# (z = -0.5) so they sit on the back face of every cell — visible
+# through empty cells, hidden behind locked / falling pieces.
 func drawWell() {
   # Bind globals to locals so method-call dispatch picks the Int.toFloat()
   # overload instead of String.toFloat() (overload resolution doesn't see
@@ -50,12 +45,13 @@ func drawWell() {
   let gh: Int = gridHeight
   let gwF: Float = gw.toFloat()
   let ghF: Float = gh.toFloat()
+  let backZ: Float = 0.0 - 0.5
 
   let i: Int = 0
   loop i <= gh {
     let y: Float = 0.0 - i.toFloat()
     drawCubeWires(
-      pos: Vector3 { x: gwF / 2.0, y: y, z: 0.0 }
+      pos: Vector3 { x: gwF / 2.0, y: y, z: backZ }
       width: gwF
       height: 0.02
       length: 0.02
@@ -67,7 +63,7 @@ func drawWell() {
   loop j <= gw {
     let x: Float = j.toFloat()
     drawCubeWires(
-      pos: Vector3 { x: x, y: 0.0 - ghF / 2.0, z: 0.0 }
+      pos: Vector3 { x: x, y: 0.0 - ghF / 2.0, z: backZ }
       width: 0.02
       height: ghF
       length: 0.02
@@ -133,9 +129,9 @@ func drawGhostPiece(w: view World) {
         let pos: Vector3 = cellPos(gx: cp.x + px, gy: cp.y + drop + py)
         drawCubeWires(
           pos: pos
-          width: 0.92
-          height: 0.92
-          length: 0.92
+          width: 1.0
+          height: 1.0
+          length: 1.0
           color: { r: 200, g: 200, b: 220, a: 60 }
         )
       }
