@@ -442,6 +442,9 @@ Texture rae_ext_loadTexture(rae_String fileName);
 void rae_ext_unloadTexture(Texture texture);
 void rae_ext_drawTexture(Texture texture, double x, double y, Color tint);
 int64_t rae_ext_measureText(rae_String text, int64_t fontSize);
+void rae_ext_loadFontInto(int64_t slot, rae_String path, int64_t fontSize);
+void rae_ext_unloadFontSlot(int64_t slot);
+void rae_ext_drawTextWithFont(int64_t slot, rae_String text, double x, double y, double fontSize, double spacing, Color color);
 #endif
 
 #define rae_ext_rae_str(X) _Generic((X), \

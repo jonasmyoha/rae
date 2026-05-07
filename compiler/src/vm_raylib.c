@@ -511,6 +511,97 @@ static bool native_endMode3D(struct VM* vm, VmNativeResult* out, const Value* ar
     return true;
 }
 
+/* Font slot natives for the VM. We don't share storage with the compiled
+ * runtime — the runtime's raylib bits are #ifdef'd out of bin/rae's
+ * rae_runtime.o — so this module owns its own font slots. The slot indices
+ * + codepoint coverage match the runtime side so user code is portable. */
+#define VM_FONT_SLOTS 8
+static Font g_vm_fonts[VM_FONT_SLOTS];
+static int g_vm_font_loaded[VM_FONT_SLOTS];
+
+static const int g_vm_font_codepoints[] = {
+    32,  33,  34,  35,  36,  37,  38,  39,  40,  41,  42,  43,  44,  45,  46,  47,
+    48,  49,  50,  51,  52,  53,  54,  55,  56,  57,  58,  59,  60,  61,  62,  63,
+    64,  65,  66,  67,  68,  69,  70,  71,  72,  73,  74,  75,  76,  77,  78,  79,
+    80,  81,  82,  83,  84,  85,  86,  87,  88,  89,  90,  91,  92,  93,  94,  95,
+    96,  97,  98,  99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111,
+    112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126,
+    0x00B7, 0x2013, 0x2014, 0x2192, 0x2190, 0x2191, 0x2193, 0x2026
+};
+#define VM_FONT_CODEPOINT_COUNT ((int)(sizeof(g_vm_font_codepoints)/sizeof(g_vm_font_codepoints[0])))
+
+static bool native_loadFontInto(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 3) {
+        fprintf(stderr, "error: loadFontInto expects 3 args (slot, path, fontSize), got %zu\n", count);
+        return false;
+    }
+    int64_t slot = (args[0].type == VAL_FLOAT) ? (int64_t)args[0].as.float_value : args[0].as.int_value;
+    if (args[1].type != VAL_STRING) {
+        fprintf(stderr, "error: loadFontInto expects path as string\n");
+        return false;
+    }
+    const char* path = args[1].as.string_value.chars;
+    int fontSize = (args[2].type == VAL_FLOAT) ? (int)args[2].as.float_value : (int)args[2].as.int_value;
+    if (slot < 0 || slot >= VM_FONT_SLOTS) {
+        out->has_value = false;
+        return true;
+    }
+    if (g_vm_font_loaded[slot]) {
+        UnloadFont(g_vm_fonts[slot]);
+        g_vm_font_loaded[slot] = 0;
+    }
+    g_vm_fonts[slot] = LoadFontEx(path, fontSize, (int*)g_vm_font_codepoints, VM_FONT_CODEPOINT_COUNT);
+    g_vm_font_loaded[slot] = (g_vm_fonts[slot].texture.id != 0);
+    out->has_value = false;
+    return true;
+}
+
+static bool native_unloadFontSlot(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 1) {
+        fprintf(stderr, "error: unloadFontSlot expects 1 arg, got %zu\n", count);
+        return false;
+    }
+    int64_t slot = (args[0].type == VAL_FLOAT) ? (int64_t)args[0].as.float_value : args[0].as.int_value;
+    if (slot >= 0 && slot < VM_FONT_SLOTS && g_vm_font_loaded[slot]) {
+        UnloadFont(g_vm_fonts[slot]);
+        g_vm_font_loaded[slot] = 0;
+    }
+    out->has_value = false;
+    return true;
+}
+
+static bool native_drawTextWithFont(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 10) {
+        fprintf(stderr, "error: drawTextWithFont expects 10 args (slot, text, x, y, fontSize, spacing, r, g, b, a), got %zu\n", count);
+        return false;
+    }
+    int64_t slot = (args[0].type == VAL_FLOAT) ? (int64_t)args[0].as.float_value : args[0].as.int_value;
+    if (args[1].type != VAL_STRING) {
+        fprintf(stderr, "error: drawTextWithFont expects text as string\n");
+        return false;
+    }
+    const char* text = args[1].as.string_value.chars;
+    float x = (args[2].type == VAL_FLOAT) ? (float)args[2].as.float_value : (float)args[2].as.int_value;
+    float y = (args[3].type == VAL_FLOAT) ? (float)args[3].as.float_value : (float)args[3].as.int_value;
+    float fontSize = (args[4].type == VAL_FLOAT) ? (float)args[4].as.float_value : (float)args[4].as.int_value;
+    float spacing = (args[5].type == VAL_FLOAT) ? (float)args[5].as.float_value : (float)args[5].as.int_value;
+    unsigned char r = (args[6].type == VAL_FLOAT) ? (unsigned char)args[6].as.float_value : (unsigned char)args[6].as.int_value;
+    unsigned char g = (args[7].type == VAL_FLOAT) ? (unsigned char)args[7].as.float_value : (unsigned char)args[7].as.int_value;
+    unsigned char b = (args[8].type == VAL_FLOAT) ? (unsigned char)args[8].as.float_value : (unsigned char)args[8].as.int_value;
+    unsigned char a = (args[9].type == VAL_FLOAT) ? (unsigned char)args[9].as.float_value : (unsigned char)args[9].as.int_value;
+    Color col = {r, g, b, a};
+    if (slot >= 0 && slot < VM_FONT_SLOTS && g_vm_font_loaded[slot]) {
+        DrawTextEx(g_vm_fonts[slot], text, (Vector2){x, y}, fontSize, spacing, col);
+    } else {
+        DrawText(text, (int)x, (int)y, (int)fontSize, col);
+    }
+    out->has_value = false;
+    return true;
+}
+
 bool vm_registry_register_raylib(VmRegistry* registry) {
     bool ok = true;
     ok &= vm_registry_register_native(registry, "initWindow", native_initWindow, NULL);
@@ -544,5 +635,8 @@ bool vm_registry_register_raylib(VmRegistry* registry) {
     ok &= vm_registry_register_native(registry, "getScreenWidth", native_getScreenWidth, NULL);
     ok &= vm_registry_register_native(registry, "getScreenHeight", native_getScreenHeight, NULL);
     ok &= vm_registry_register_native(registry, "colorFromHSV", native_colorFromHSV, NULL);
+    ok &= vm_registry_register_native(registry, "loadFontInto", native_loadFontInto, NULL);
+    ok &= vm_registry_register_native(registry, "unloadFontSlot", native_unloadFontSlot, NULL);
+    ok &= vm_registry_register_native(registry, "drawTextWithFont", native_drawTextWithFont, NULL);
     return ok;
 }

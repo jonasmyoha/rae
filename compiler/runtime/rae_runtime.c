@@ -974,4 +974,78 @@ Texture rae_ext_loadTexture(rae_String fileName) { return LoadTexture((const cha
 void rae_ext_unloadTexture(Texture texture) { UnloadTexture(texture); }
 void rae_ext_drawTexture(Texture texture, double x, double y, Color tint) { DrawTexture(texture, (int)x, (int)y, tint); }
 int64_t rae_ext_measureText(rae_String text, int64_t fontSize) { return (int64_t)MeasureText((const char*)text.data, (int)fontSize); }
+
+/* Custom font support.
+ *
+ * Raylib's `Font` struct holds internal arrays/pointers, which makes passing
+ * it across the Rae ↔ C boundary awkward (especially for the live VM, where
+ * structs go through RaeAny). We sidestep that with a fixed-size array of
+ * "font slots" addressed by `Int`. A slot starts unloaded; `loadFontInto`
+ * fills it via raylib's `LoadFontEx` with a codepoint table that covers
+ * basic ASCII plus the few Unicode glyphs the HUD uses (arrows, middle dot,
+ * em dash). `drawTextWithFont` falls back to the default font if the slot
+ * isn't loaded yet, so the program never silently shows blank text.
+ */
+#define RAE_FONT_SLOTS 8
+static Font g_rae_fonts[RAE_FONT_SLOTS];
+static int g_rae_font_loaded[RAE_FONT_SLOTS];
+
+static const int g_rae_font_codepoints[] = {
+    /* ASCII printable */
+    32,  33,  34,  35,  36,  37,  38,  39,  40,  41,  42,  43,  44,  45,  46,  47,
+    48,  49,  50,  51,  52,  53,  54,  55,  56,  57,  58,  59,  60,  61,  62,  63,
+    64,  65,  66,  67,  68,  69,  70,  71,  72,  73,  74,  75,  76,  77,  78,  79,
+    80,  81,  82,  83,  84,  85,  86,  87,  88,  89,  90,  91,  92,  93,  94,  95,
+    96,  97,  98,  99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111,
+    112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126,
+    /* HUD glyphs */
+    0x00B7, /* · middle dot */
+    0x2013, /* – en dash */
+    0x2014, /* — em dash */
+    0x2192, /* → right arrow */
+    0x2190, /* ← left arrow */
+    0x2191, /* ↑ up arrow */
+    0x2193, /* ↓ down arrow */
+    0x2026  /* … horizontal ellipsis */
+};
+#define RAE_FONT_CODEPOINT_COUNT ((int)(sizeof(g_rae_font_codepoints)/sizeof(g_rae_font_codepoints[0])))
+
+void rae_ext_loadFontInto(int64_t slot, rae_String path, int64_t fontSize) {
+    if (slot < 0 || slot >= RAE_FONT_SLOTS) return;
+    if (g_rae_font_loaded[slot]) {
+        UnloadFont(g_rae_fonts[slot]);
+        g_rae_font_loaded[slot] = 0;
+    }
+    g_rae_fonts[slot] = LoadFontEx(
+        (const char*)path.data,
+        (int)fontSize,
+        (int*)g_rae_font_codepoints,
+        RAE_FONT_CODEPOINT_COUNT
+    );
+    g_rae_font_loaded[slot] = (g_rae_fonts[slot].texture.id != 0);
+}
+
+void rae_ext_unloadFontSlot(int64_t slot) {
+    if (slot < 0 || slot >= RAE_FONT_SLOTS) return;
+    if (g_rae_font_loaded[slot]) {
+        UnloadFont(g_rae_fonts[slot]);
+        g_rae_font_loaded[slot] = 0;
+    }
+}
+
+void rae_ext_drawTextWithFont(int64_t slot, rae_String text, double x, double y, double fontSize, double spacing, Color color) {
+    if (slot >= 0 && slot < RAE_FONT_SLOTS && g_rae_font_loaded[slot]) {
+        DrawTextEx(
+            g_rae_fonts[slot],
+            (const char*)text.data,
+            (Vector2){(float)x, (float)y},
+            (float)fontSize,
+            (float)spacing,
+            color
+        );
+    } else {
+        /* Fallback: default font — keeps text on screen if the TTF is missing. */
+        DrawText((const char*)text.data, (int)x, (int)y, (int)fontSize, color);
+    }
+}
 #endif

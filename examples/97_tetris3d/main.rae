@@ -28,6 +28,9 @@ func main() {
   setConfigFlags(flags: 4)
   initWindow(width: 1024, height: 720, title: "Rae Tetris 3D")
   setTargetFPS(fps: 60)
+  # Load Roboto for the HUD. Must come AFTER initWindow because
+  # raylib's font loader needs the GL context to upload the atlas.
+  initHudFont()
 
   let w: World = {
     state: GameState.Playing
@@ -53,5 +56,6 @@ func main() {
   loop not windowShouldClose() {
     runFrame(w)
   }
+  unloadHudFont()
   closeWindow()
 }
