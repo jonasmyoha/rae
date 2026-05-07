@@ -669,6 +669,56 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
              symbol_table_pop_scope(symbols);
              break;
         }
+        case AST_STMT_MATCH: {
+            if (stmt->as.match_stmt.subject) sema_analyze_expr(ctx, module, symbols, stmt->as.match_stmt.subject);
+            bool has_default = false;
+            const AstDecl* enum_decl = NULL;
+            Str enum_name = {0};
+            for (AstMatchCase* mc = stmt->as.match_stmt.cases; mc; mc = mc->next) {
+                if (!mc->pattern) { has_default = true; }
+                else {
+                    sema_analyze_expr(ctx, module, symbols, mc->pattern);
+                    if (!enum_decl && mc->pattern->kind == AST_EXPR_MEMBER &&
+                        mc->pattern->as.member.object->kind == AST_EXPR_IDENT) {
+                        Str obj_name = mc->pattern->as.member.object->as.ident;
+                        Symbol* sym = symbol_table_lookup(symbols, obj_name);
+                        if (sym && sym->decl && sym->decl->kind == AST_DECL_ENUM) {
+                            enum_decl = sym->decl;
+                            enum_name = obj_name;
+                        }
+                    }
+                }
+                if (mc->block) {
+                    symbol_table_push_scope(symbols);
+                    AstStmt* s = mc->block->first;
+                    while (s) { sema_analyze_stmt(ctx, module, symbols, s, current_return_type); s = s->next; }
+                    symbol_table_pop_scope(symbols);
+                }
+            }
+            if (enum_decl && !has_default) {
+                for (AstEnumMember* em = enum_decl->as.enum_decl.members; em; em = em->next) {
+                    bool covered = false;
+                    for (AstMatchCase* mc = stmt->as.match_stmt.cases; mc && !covered; mc = mc->next) {
+                        if (!mc->pattern || mc->pattern->kind != AST_EXPR_MEMBER) continue;
+                        if (mc->pattern->as.member.object->kind != AST_EXPR_IDENT) continue;
+                        if (!str_eq(mc->pattern->as.member.object->as.ident, enum_name)) continue;
+                        if (str_eq(mc->pattern->as.member.member, em->name)) covered = true;
+                    }
+                    if (!covered) {
+                        char buffer[256];
+                        snprintf(buffer, sizeof(buffer),
+                            "non-exhaustive match on enum '%.*s': missing case '%.*s.%.*s' (add it or use a 'default' arm)",
+                            (int)enum_name.len, enum_name.data,
+                            (int)enum_name.len, enum_name.data,
+                            (int)em->name.len, em->name.data);
+                        diag_error(module->file_path, (int)stmt->line, (int)stmt->column, buffer);
+                        module->had_error = true;
+                        break;
+                    }
+                }
+            }
+            break;
+        }
         case AST_STMT_ASSIGN: {
             sema_analyze_expr(ctx, module, symbols, stmt->as.assign_stmt.target);
             sema_analyze_expr(ctx, module, symbols, stmt->as.assign_stmt.value);
