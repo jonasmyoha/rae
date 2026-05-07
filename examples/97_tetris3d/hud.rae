@@ -1,0 +1,84 @@
+# 2D HUD overlay drawn after `endMode3D()`. Plain `drawText` for now;
+# the user has flagged a UI refactor as a separate task.
+import raylib
+
+let hudWhite: Color = { r: 230, g: 230, b: 240, a: 255 }
+let hudMuted: Color = { r: 150, g: 160, b: 180, a: 255 }
+let hudAccent: Color = { r: 120, g: 230, b: 255, a: 255 }
+
+func drawNextPanel(w: view World) {
+  let panelX: Float = getScreenWidth().toFloat() - 220.0
+  let panelY: Float = 80.0
+  drawText(text: "NEXT", x: panelX, y: panelY, fontSize: 22.0, color: hudMuted)
+
+  # Render the next piece as small cubes in 2D space using rectangles
+  # — keeping HUD code free of camera dependency.
+  let cellSize: Float = 24.0
+  let kind: TetrominoKind = w.nextKind
+  let id: Int = getKindId(kind: kind)
+  let baseColor: Color = kindColor(id: id)
+  let py: Int = 0
+  loop py < 4 {
+    let px: Int = 0
+    loop px < 4 {
+      if getShapeCell(kind: kind, rot: 0, px: px, py: py) is 1 {
+        let rx: Float = panelX + 20.0 + px.toFloat() * cellSize
+        let ry: Float = panelY + 40.0 + py.toFloat() * cellSize
+        drawRectangle(
+          x: rx
+          y: ry
+          width: cellSize - 2.0
+          height: cellSize - 2.0
+          color: baseColor
+        )
+      }
+      px = px + 1
+    }
+    py = py + 1
+  }
+}
+
+func hudSystem(w: view World) {
+  drawText(text: "Tetris 3D", x: 20.0, y: 20.0, fontSize: 28.0, color: hudAccent)
+
+  drawText(text: "SCORE", x: 20.0, y: 80.0, fontSize: 18.0, color: hudMuted)
+  drawText(text: "{w.score}", x: 20.0, y: 102.0, fontSize: 28.0, color: hudWhite)
+
+  drawText(text: "LINES", x: 20.0, y: 150.0, fontSize: 18.0, color: hudMuted)
+  drawText(text: "{w.lines}", x: 20.0, y: 172.0, fontSize: 28.0, color: hudWhite)
+
+  drawText(text: "LEVEL", x: 20.0, y: 220.0, fontSize: 18.0, color: hudMuted)
+  drawText(text: "{w.level}", x: 20.0, y: 242.0, fontSize: 28.0, color: hudWhite)
+
+  drawNextPanel(w: w)
+
+  let h: Int = getScreenHeight()
+  drawText(
+    text: "←→ move · ↑ rotate · ↓ soft drop · space hard drop · P pause"
+    x: 20.0
+    y: h.toFloat() - 28.0
+    fontSize: 14.0
+    color: hudMuted
+  )
+
+  if w.state is GameState.GameOver {
+    let sw: Float = getScreenWidth().toFloat()
+    drawText(
+      text: "GAME OVER — press R to restart"
+      x: sw / 2.0 - 200.0
+      y: 200.0
+      fontSize: 28.0
+      color: { r: 255, g: 120, b: 140, a: 255 }
+    )
+  }
+  if w.state is GameState.Paused {
+    let sw: Float = getScreenWidth().toFloat()
+    drawText(
+      text: "PAUSED"
+      x: sw / 2.0 - 60.0
+      y: 220.0
+      fontSize: 36.0
+      color: hudAccent
+    )
+  }
+}
