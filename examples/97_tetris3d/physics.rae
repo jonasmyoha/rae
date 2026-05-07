@@ -138,7 +138,15 @@ func spawnNextPiece(w: mod World) {
   }
 }
 
-# Apply gravity to the active piece; lock it when it can't fall further.
+# Apply gravity to the active piece, then lock once it has been resting
+# on something for `lockDelay` frames.
+#
+# `fallTimer` ticks every frame; on every `fallDelay` frames the piece
+# tries to drop one row. `lockTimer` ticks every frame the piece is
+# grounded — independent of fall ticks — so locking happens promptly
+# (~lockDelay frames after touchdown, not lockDelay×fallDelay frames).
+# Sliding is preserved: a successful left/right/rotate while grounded
+# resets the timer (handled in input.tryMove).
 func physicsSystem(w: mod World) {
   if w.state is not GameState.Playing {
     ret
@@ -149,20 +157,30 @@ func physicsSystem(w: mod World) {
       w.lockFlash = 0.0
     }
   }
+
+  let grounded: Bool = canMove(w: w, dx: 0, dy: 1, dr: 0) is 0
+
+  # Gravity tick.
   w.fallTimer = w.fallTimer + 1
   if w.fallTimer >= w.fallDelay {
     w.fallTimer = 0
-    if canMove(w: w, dx: 0, dy: 1, dr: 0) is 1 {
+    if not grounded {
       w.currentPiece.y = w.currentPiece.y + 1
-      w.lockTimer = 0
-    } else {
-      w.lockTimer = w.lockTimer + 1
-      if w.lockTimer >= w.lockDelay {
-        w.lockTimer = 0
-        lockPiece(w: w)
-        checkLines(w: w)
-        spawnNextPiece(w: w)
-      }
+      grounded = canMove(w: w, dx: 0, dy: 1, dr: 0) is 0
     }
+  }
+
+  # Lock tick: only counts while grounded; resets the moment the piece
+  # finds it can fall again (e.g. after the player slides into a hole).
+  if grounded {
+    w.lockTimer = w.lockTimer + 1
+    if w.lockTimer >= w.lockDelay {
+      w.lockTimer = 0
+      lockPiece(w: w)
+      checkLines(w: w)
+      spawnNextPiece(w: w)
+    }
+  } else {
+    w.lockTimer = 0
   }
 }
