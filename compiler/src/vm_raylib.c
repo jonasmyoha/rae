@@ -609,6 +609,65 @@ static bool native_drawTextWithFont(struct VM* vm, VmNativeResult* out, const Va
     return true;
 }
 
+/* Window/monitor natives — used by examples that want to pick a window
+ * size relative to the user's display. */
+static bool native_getCurrentMonitor(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data; (void)args; (void)count;
+    out->has_value = true;
+    out->value = value_int(GetCurrentMonitor());
+    return true;
+}
+
+static bool native_getMonitorWidth(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 1) {
+        fprintf(stderr, "error: getMonitorWidth expects 1 arg, got %zu\n", count);
+        return false;
+    }
+    int monitor = (args[0].type == VAL_FLOAT) ? (int)args[0].as.float_value : (int)args[0].as.int_value;
+    out->has_value = true;
+    out->value = value_int(GetMonitorWidth(monitor));
+    return true;
+}
+
+static bool native_getMonitorHeight(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 1) {
+        fprintf(stderr, "error: getMonitorHeight expects 1 arg, got %zu\n", count);
+        return false;
+    }
+    int monitor = (args[0].type == VAL_FLOAT) ? (int)args[0].as.float_value : (int)args[0].as.int_value;
+    out->has_value = true;
+    out->value = value_int(GetMonitorHeight(monitor));
+    return true;
+}
+
+static bool native_setWindowSize(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 2) {
+        fprintf(stderr, "error: setWindowSize expects 2 args, got %zu\n", count);
+        return false;
+    }
+    int w = (args[0].type == VAL_FLOAT) ? (int)args[0].as.float_value : (int)args[0].as.int_value;
+    int h = (args[1].type == VAL_FLOAT) ? (int)args[1].as.float_value : (int)args[1].as.int_value;
+    SetWindowSize(w, h);
+    out->has_value = false;
+    return true;
+}
+
+static bool native_setWindowPosition(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 2) {
+        fprintf(stderr, "error: setWindowPosition expects 2 args, got %zu\n", count);
+        return false;
+    }
+    int x = (args[0].type == VAL_FLOAT) ? (int)args[0].as.float_value : (int)args[0].as.int_value;
+    int y = (args[1].type == VAL_FLOAT) ? (int)args[1].as.float_value : (int)args[1].as.int_value;
+    SetWindowPosition(x, y);
+    out->has_value = false;
+    return true;
+}
+
 bool vm_registry_register_raylib(VmRegistry* registry) {
     bool ok = true;
     ok &= vm_registry_register_native(registry, "initWindow", native_initWindow, NULL);
@@ -645,5 +704,10 @@ bool vm_registry_register_raylib(VmRegistry* registry) {
     ok &= vm_registry_register_native(registry, "loadFontInto", native_loadFontInto, NULL);
     ok &= vm_registry_register_native(registry, "unloadFontSlot", native_unloadFontSlot, NULL);
     ok &= vm_registry_register_native(registry, "drawTextWithFont", native_drawTextWithFont, NULL);
+    ok &= vm_registry_register_native(registry, "getCurrentMonitor", native_getCurrentMonitor, NULL);
+    ok &= vm_registry_register_native(registry, "getMonitorWidth", native_getMonitorWidth, NULL);
+    ok &= vm_registry_register_native(registry, "getMonitorHeight", native_getMonitorHeight, NULL);
+    ok &= vm_registry_register_native(registry, "setWindowSize", native_setWindowSize, NULL);
+    ok &= vm_registry_register_native(registry, "setWindowPosition", native_setWindowPosition, NULL);
     return ok;
 }
