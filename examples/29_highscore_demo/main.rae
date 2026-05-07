@@ -1,0 +1,63 @@
+# Highscore demo: brings together List(struct), in-place sort,
+# and the new time stdlib (formatTimestamp / formatDate).
+#
+# Pretend each entry was recorded at a specific epoch ms (in a real game
+# you'd capture nowMs() at submit time). Sort by points descending and
+# print a small leaderboard.
+
+import time
+
+type Score {
+  name: String
+  points: Int
+  whenMs: Int
+}
+
+# Selection sort by `points` descending. Mirrors the pattern from
+# tests/cases/378_list_struct_sort — generic List sort doesn't apply
+# because Score has no `<` / `>` for the whole struct, only for the
+# field we care about.
+func sortByPointsDesc(xs: mod List(Score)) {
+  let n: Int = xs.length
+  let i: Int = 0
+  loop i < n - 1 {
+    let max: Int = i
+    let j: Int = i + 1
+    loop j < n {
+      let a: Score = rae_ext_rae_buf_get(buf: xs.data, index: max)
+      let b: Score = rae_ext_rae_buf_get(buf: xs.data, index: j)
+      if b.points > a.points {
+        max = j
+      }
+      j = j + 1
+    }
+    if not (max is i) {
+      swap(xs, i: i, j: max)
+    }
+    i = i + 1
+  }
+}
+
+func main() {
+  let board: List(Score) = createList(Score)(initialCap: 5)
+  let s1: Score = { name: "ada", points: 120, whenMs: 1700000000000 }
+  let s2: Score = { name: "lin", points: 350, whenMs: 1700086400000 }
+  let s3: Score = { name: "tom", points: 80,  whenMs: 1700172800000 }
+  let s4: Score = { name: "kim", points: 240, whenMs: 1700259200000 }
+  let s5: Score = { name: "jay", points: 400, whenMs: 1700345600000 }
+  add(board, value: s1)
+  add(board, value: s2)
+  add(board, value: s3)
+  add(board, value: s4)
+  add(board, value: s5)
+
+  sortByPointsDesc(board)
+
+  log("== HIGHSCORES ==")
+  let i: Int = 0
+  loop i < board.length {
+    let s: Score = rae_ext_rae_buf_get(buf: board.data, index: i)
+    log("{i + 1}. {s.name} - {s.points} pts ({formatDate(epochMs: s.whenMs)})")
+    i = i + 1
+  }
+}
