@@ -1,0 +1,101 @@
+# Keyboard input. DAS (Delayed Auto-Shift) for repeat-side moves so
+# the piece doesn't sprint at one frame per cell when you hold left/right.
+import raylib
+
+# Raylib key codes (no enum because they're sparse and not 0..N).
+let keyLeft: Int = 263
+let keyRight: Int = 262
+let keyDown: Int = 264
+let keyUp: Int = 265
+let keyA: Int = 65
+let keyD: Int = 68
+let keyS: Int = 83
+let keyW: Int = 87
+let keySpace: Int = 32
+let keyP: Int = 80
+let keyR: Int = 82
+
+func tryMove(w: mod World, dx: Int, dr: Int) {
+  if canMove(w: w, dx: dx, dy: 0, dr: dr) is 1 {
+    w.currentPiece.x = w.currentPiece.x + dx
+    let newRot: Int = (w.currentPiece.rotation + dr) % 4
+    if newRot < 0 {
+      newRot = newRot + 4
+    }
+    w.currentPiece.rotation = newRot
+    w.lockTimer = 0
+  }
+}
+
+# Hard drop: slam to the bottom and lock immediately.
+func hardDrop(w: mod World) {
+  loop canMove(w: w, dx: 0, dy: 1, dr: 0) is 1 {
+    w.currentPiece.y = w.currentPiece.y + 1
+    w.score = w.score + 2
+  }
+  lockPiece(w: w)
+  checkLines(w: w)
+  spawnNextPiece(w: w)
+}
+
+func inputSystem(w: mod World) {
+  if w.state is GameState.GameOver {
+    if isKeyPressed(key: keyR) {
+      initWorld(w)
+    }
+    ret
+  }
+  if w.state is not GameState.Playing {
+    ret
+  }
+
+  if isKeyPressed(key: keyP) {
+    w.state = GameState.Paused
+  }
+
+  let moveLeft: Bool = isKeyDown(key: keyLeft) or isKeyDown(key: keyA)
+  let moveRight: Bool = isKeyDown(key: keyRight) or isKeyDown(key: keyD)
+
+  if moveLeft or moveRight {
+    if w.hMoveTimer is 0 {
+      if moveLeft {
+        tryMove(w: w, dx: -1, dr: 0)
+      } else {
+        tryMove(w: w, dx: 1, dr: 0)
+      }
+      w.hMoveTimer = 1
+    } else {
+      w.hMoveTimer = w.hMoveTimer + 1
+      if w.hMoveTimer >= w.dasDelay {
+        if (w.hMoveTimer - w.dasDelay) % w.hMoveDelay is 0 {
+          if moveLeft {
+            tryMove(w: w, dx: -1, dr: 0)
+          } else {
+            tryMove(w: w, dx: 1, dr: 0)
+          }
+        }
+      }
+    }
+  } else {
+    w.hMoveTimer = 0
+  }
+
+  # Soft drop (down arrow / S) — falls one row each frame, +1 point per row.
+  if isKeyDown(key: keyDown) or isKeyDown(key: keyS) {
+    if canMove(w: w, dx: 0, dy: 1, dr: 0) is 1 {
+      w.currentPiece.y = w.currentPiece.y + 1
+      w.score = w.score + 1
+      w.fallTimer = 0
+    }
+  }
+
+  # Rotate CCW with up / W.
+  if isKeyPressed(key: keyUp) or isKeyPressed(key: keyW) {
+    tryMove(w: w, dx: 0, dr: 1)
+  }
+
+  # Hard drop with space.
+  if isKeyPressed(key: keySpace) {
+    hardDrop(w: w)
+  }
+}

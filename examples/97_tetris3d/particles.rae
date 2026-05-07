@@ -1,0 +1,140 @@
+# Particle system. Lifetime-driven point sprites; the storage is a
+# fixed-cap List(Particle) on World, with `active: Bool` as the free-slot
+# flag. We never grow the list mid-game so spawning past the cap silently
+# drops the request — keeps frame timing predictable.
+import raylib
+
+func findFreeParticle(w: mod World) ret Int {
+  let i: Int = 0
+  loop i < maxParticles {
+    let cur: Particle = rae_ext_rae_buf_get(buf: w.particles.data, index: i)
+    if cur.active is false {
+      ret i
+    }
+    i = i + 1
+  }
+  ret -1
+}
+
+func spawnParticle(
+  w: mod World
+  px: Float
+  py: Float
+  pz: Float
+  vx: Float
+  vy: Float
+  vz: Float
+  life: Float
+  size: Float
+  color: Color
+) {
+  let idx: Int = findFreeParticle(w)
+  if idx < 0 {
+    ret
+  }
+  let p: Particle = {
+    active: true
+    px: px
+    py: py
+    pz: pz
+    vx: vx
+    vy: vy
+    vz: vz
+    life: life
+    size: size
+    color: color
+  }
+  let particles: mod List(Particle) => w.particles
+  particles.set(index: idx, value: p)
+}
+
+# Sprays particles outward along a row that just cleared. Called from
+# physics.checkLines when a row is full.
+func spawnLineClearParticles(w: mod World, row: Int) {
+  let cellY: Float = (0.0 - row.toFloat()) - 0.5
+  let i: Int = 0
+  loop i < gridWidth {
+    let cellX: Float = i.toFloat() + 0.5
+    # 4 small particles per cell of the cleared row.
+    let burst: Int = 0
+    loop burst < 4 {
+      let vx: Float = randomFloat(min: 0.0 - 4.0, max: 4.0)
+      let vy: Float = randomFloat(min: 2.0, max: 6.0)
+      let vz: Float = randomFloat(min: 0.0 - 4.0, max: 4.0)
+      let hue: Float = randomFloat(min: 0.0, max: 360.0)
+      let col: Color = colorFromHSV(hue: hue, saturation: 0.7, value: 1.0)
+      spawnParticle(
+        w: w
+        px: cellX
+        py: cellY
+        pz: 0.0
+        vx: vx
+        vy: vy
+        vz: vz
+        life: 0.7
+        size: 0.18
+        color: col
+      )
+      burst = burst + 1
+    }
+    i = i + 1
+  }
+}
+
+# Update + cull active particles. dt is fixed at 1/60 — raylib drives
+# the loop at setTargetFPS(60).
+func particleSystem(w: mod World) {
+  let dt: Float = 0.016
+  let i: Int = 0
+  loop i < maxParticles {
+    let p: Particle = rae_ext_rae_buf_get(buf: w.particles.data, index: i)
+    if p.active {
+      let newLife: Float = p.life - dt
+      if newLife <= 0.0 {
+        let dead: Particle = makeEmptyParticle()
+        let particles: mod List(Particle) => w.particles
+        particles.set(index: i, value: dead)
+      } else {
+        let nx: Float = p.px + p.vx * dt
+        let ny: Float = p.py + p.vy * dt
+        let nz: Float = p.pz + p.vz * dt
+        # Simple gravity.
+        let nvy: Float = p.vy - 9.8 * dt
+        # Fade alpha by remaining-life ratio (life starts at 0.7).
+        let alpha: Float = newLife / 0.7
+        let baseA: Int = 255
+        let newA: Int = (alpha * baseA.toFloat()).toInt()
+        if newA < 0 {
+          newA = 0
+        }
+        let updated: Particle = {
+          active: true
+          px: nx
+          py: ny
+          pz: nz
+          vx: p.vx
+          vy: nvy
+          vz: p.vz
+          life: newLife
+          size: p.size
+          color: { r: p.color.r, g: p.color.g, b: p.color.b, a: newA }
+        }
+        let particles: mod List(Particle) => w.particles
+        particles.set(index: i, value: updated)
+      }
+    }
+    i = i + 1
+  }
+}
+
+func renderParticles(w: view World) {
+  let i: Int = 0
+  loop i < maxParticles {
+    let p: Particle = rae_ext_rae_buf_get(buf: w.particles.data, index: i)
+    if p.active {
+      let pos: Vector3 = { x: p.px, y: p.py, z: p.pz }
+      drawCube(pos: pos, width: p.size, height: p.size, length: p.size, color: p.color)
+    }
+    i = i + 1
+  }
+}
