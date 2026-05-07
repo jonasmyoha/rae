@@ -685,6 +685,10 @@ const char* g_emitted_spec_funcs[4096];
 static size_t g_emitted_spec_func_count = 0;
 
 bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* f, const AstTypeRef* args, FILE* out, const struct VmRegistry* r, bool ray) {
+  // Specialized externs (sizeof(T)(), rae_ext_rae_buf_get(V), ...) have no
+  // body and their call sites are inlined elsewhere — emitting an empty
+  // function body produces -Wreturn-type warnings.
+  if (f->is_extern) return true;
   const AstIdentifierPart* gp_src = f->generic_params; if (!gp_src && f->generic_template) gp_src = f->generic_template->as.func_decl.generic_params;
   CFuncContext tctx = {.compiler_ctx = ctx, .module = m, .func_decl = f, .uses_raylib = ray, .registry = r, .generic_params = gp_src, .generic_args = args};
   const char* rt = c_return_type(&tctx, f); const char* mangled = rae_mangle_specialized_function(ctx, f, args);
@@ -825,9 +829,10 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       }
   }
 
-  // Prototypes for specialized functions
+  // Prototypes for specialized functions (skip externs — their call sites are inlined)
   for (size_t i = 0; i < ctx->specialized_func_count; i++) {
       const AstFuncDecl* f = ctx->specialized_funcs[i].decl; const AstTypeRef* args = ctx->specialized_funcs[i].concrete_args;
+      if (f->is_extern) continue;
       const char* mangled = rae_mangle_specialized_function(ctx, f, args);
       const AstIdentifierPart* gp = f->generic_params;
       if (!gp && f->generic_template && f->generic_template->kind == AST_DECL_FUNC) gp = f->generic_template->as.func_decl.generic_params;
@@ -848,6 +853,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   for (size_t i = 0; i < ctx->specialized_func_count; i++) {
       const AstFuncDecl* pf = ctx->specialized_funcs[i].decl;
       const AstTypeRef* pa = ctx->specialized_funcs[i].concrete_args;
+      if (pf->is_extern) continue;
       const char* pm = rae_mangle_specialized_function(ctx, pf, pa);
       // Check if already prototyped (avoid duplicates)
       bool already_proto = false;
@@ -869,6 +875,8 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
           while (prototyped_count < ctx->specialized_func_count) {
               const AstFuncDecl* f = ctx->specialized_funcs[prototyped_count].decl;
               const AstTypeRef* args = ctx->specialized_funcs[prototyped_count].concrete_args;
+              prototyped_count++;
+              if (f->is_extern) continue;
               const char* mangled = rae_mangle_specialized_function(ctx, f, args);
               const AstIdentifierPart* gp = f->generic_params;
               if (!gp && f->generic_template && f->generic_template->kind == AST_DECL_FUNC)
@@ -877,7 +885,6 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
               fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&tctx, f), mangled);
               emit_param_list(&tctx, f->params, out, false);
               fprintf(out, ");\n");
-              prototyped_count++;
           }
           emit_specialized_function(ctx, module, ctx->specialized_funcs[emitted_idx].decl, ctx->specialized_funcs[emitted_idx].concrete_args, out, registry, false);
           emitted_idx++;
@@ -897,9 +904,10 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   {
       size_t emitted_idx2 = pre_main_spec_count;
       while (emitted_idx2 < ctx->specialized_func_count) {
-          // Prototype
           const AstFuncDecl* f = ctx->specialized_funcs[emitted_idx2].decl;
           const AstTypeRef* args = ctx->specialized_funcs[emitted_idx2].concrete_args;
+          emitted_idx2++;
+          if (f->is_extern) continue;
           const char* mangled = rae_mangle_specialized_function(ctx, f, args);
           const AstIdentifierPart* gp = f->generic_params;
           if (!gp && f->generic_template && f->generic_template->kind == AST_DECL_FUNC)
@@ -908,9 +916,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
           fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&tctx, f), mangled);
           emit_param_list(&tctx, f->params, out, false);
           fprintf(out, ");\n");
-          // Body
           emit_specialized_function(ctx, module, f, args, out, registry, false);
-          emitted_idx2++;
       }
   }
 
