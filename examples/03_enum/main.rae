@@ -1,9 +1,40 @@
-enum Direction { North, South, East, West }
+enum Direction {
+  North
+  South
+  East
+  West
+}
+
+# Sema requires every enum case to be covered (or a `default` arm) —
+# delete one of the cases below and the compiler will tell you which
+# Direction is missing.
+func describe(d: Int) ret String {
+  match d {
+    case Direction.North {
+      ret "going north"
+    }
+    case Direction.South {
+      ret "going south"
+    }
+    case Direction.East {
+      ret "going east"
+    }
+    case Direction.West {
+      ret "going west"
+    }
+  }
+  ret "unknown"
+}
 
 func main() {
-  let d: Direction = Direction.North
-  log("Direction: {d}")
-  if d is Direction.North {
-    log("Going North")
+  log(describe(d: Direction.North))
+  log(describe(d: Direction.South))
+  log(describe(d: Direction.East))
+  log(describe(d: Direction.West))
+
+  # `is` still works for single-value checks.
+  let d: Direction = Direction.East
+  if d is Direction.East {
+    log("d is East")
   }
 }
