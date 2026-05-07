@@ -1,0 +1,60 @@
+# Validates the friendly wrappers in lib/string.rae over rae_str_*
+# externs. Phase 6 QUEUE item.
+import "string"
+
+func main() {
+  let s: String = "hello world"
+
+  # Length / equality / compare
+  log("length: {s.length()}")
+  let same: Bool = s.equals(other: s)
+  log("equals self: {same}")
+  let other: String = "goodbye"
+  let diff: Bool = s.equals(other: other)
+  log("equals other: {diff}")
+  let cmp: Int = s.compare(other: "hello")
+  log("compare: {cmp}")
+
+  # Concat
+  let g: String = "good"
+  let bye: String = "bye"
+  log("concat: {g.concat(other: bye)}")
+
+  # Sub / contains / starts/ends / indexOf
+  log("sub: {s.sub(start: 0, len: 5)}")
+  let world: String = "world"
+  let xyz: String = "xyz"
+  let hello: String = "hello"
+  log("contains world: {s.contains(sub: world)}")
+  log("contains xyz: {s.contains(sub: xyz)}")
+  log("startsWith hello: {s.startsWith(prefix: hello)}")
+  log("endsWith world: {s.endsWith(suffix: world)}")
+  log("indexOf world: {s.indexOf(sub: world)}")
+  let nope: String = "nope"
+  log("indexOf nope: {s.indexOf(sub: nope)}")
+
+  # Trim
+  let padded: String = "  spaced  "
+  log("trim: '{padded.trim()}'")
+
+  # toInt / toFloat
+  let n: String = "42"
+  let f: String = "3.14"
+  log("toInt: {n.toInt()}")
+  log("toFloat: {f.toFloat()}")
+
+  # split + join roundtrip
+  let csv: String = "a,b,c,d"
+  let comma: String = ","
+  let parts: List(String) = csv.split(sep: comma)
+  log("split count: {parts.length}")
+  log("split 0: {get(parts, index: 0)}")
+  log("split 3: {get(parts, index: 3)}")
+  let dash: String = "-"
+  let rejoined: String = parts.join(sep: dash)
+  log("join: {rejoined}")
+
+  # replace
+  let there: String = "there"
+  log("replace: {s.replace(old: world, new: there)}")
+}
