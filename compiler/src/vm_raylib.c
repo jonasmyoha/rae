@@ -551,8 +551,15 @@ static bool native_loadFontInto(struct VM* vm, VmNativeResult* out, const Value*
         UnloadFont(g_vm_fonts[slot]);
         g_vm_font_loaded[slot] = 0;
     }
-    g_vm_fonts[slot] = LoadFontEx(path, fontSize, (int*)g_vm_font_codepoints, VM_FONT_CODEPOINT_COUNT);
-    g_vm_font_loaded[slot] = (g_vm_fonts[slot].texture.id != 0);
+    /* High-res atlas + bilinear filter — same strategy as the compiled
+     * runtime; see rae_runtime.c::rae_ext_loadFontInto for the why. */
+    int atlasSize = fontSize * 2;
+    if (atlasSize < 64) atlasSize = 64;
+    g_vm_fonts[slot] = LoadFontEx(path, atlasSize, (int*)g_vm_font_codepoints, VM_FONT_CODEPOINT_COUNT);
+    if (g_vm_fonts[slot].texture.id != 0) {
+        SetTextureFilter(g_vm_fonts[slot].texture, TEXTURE_FILTER_BILINEAR);
+        g_vm_font_loaded[slot] = 1;
+    }
     out->has_value = false;
     return true;
 }
