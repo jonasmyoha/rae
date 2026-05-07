@@ -14,6 +14,29 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Emit "rae_ext_rae_str(X)" for primitives, "rae_to_str_<Type>_(&X)" for user
+// structs. The _Generic-based macro can't be extended from generated code,
+// so user types route through the per-type function emitted in c_backend.c.
+static void emit_to_string_expr(CFuncContext* ctx, const AstExpr* operand, FILE* out) {
+    const AstTypeRef* tr = infer_expr_type_ref(ctx, operand);
+    Str base = get_base_type_name(tr);
+    const AstDecl* d = (base.len > 0) ? find_type_decl(ctx, ctx->module, base) : NULL;
+    bool is_user_struct = d && d->kind == AST_DECL_TYPE
+        && !has_property(d->as.type_decl.properties, "c_struct")
+        && !d->as.type_decl.generic_params
+        && !(tr && tr->is_opt);
+    if (is_user_struct) {
+        const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = base}});
+        fprintf(out, "rae_to_str_%s_(&(", mangled);
+        emit_expr(ctx, operand, out, PREC_LOWEST, false, false);
+        fprintf(out, "))");
+    } else {
+        fprintf(out, "rae_ext_rae_str((");
+        emit_expr(ctx, operand, out, PREC_LOWEST, false, false);
+        fprintf(out, "))");
+    }
+}
+
 bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_prec, bool is_lvalue, bool suppress_deref) {
   if (!expr) return true;
   switch (expr->kind) {
@@ -161,11 +184,10 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
     }
     case AST_EXPR_CALL: emit_call_expr(ctx, expr, out); break;
     case AST_EXPR_METHOD_CALL: {
-        // Built-in method: toString() → rae_ext_rae_str(object)
+        // Built-in method: toString() → rae_ext_rae_str(object) or
+        // rae_to_str_TYPE_(&object) for user structs.
         if (str_eq_cstr(expr->as.method_call.method_name, "toString") && !expr->as.method_call.args) {
-            fprintf(out, "rae_ext_rae_str((");
-            emit_expr(ctx, expr->as.method_call.object, out, PREC_LOWEST, false, false);
-            fprintf(out, "))");
+            emit_to_string_expr(ctx, expr->as.method_call.object, out);
             break;
         }
         // Built-in method: toJson() → rae_toJson_TYPE_(&object)
@@ -376,9 +398,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             if (part->value->kind == AST_EXPR_STRING) {
                 emit_expr(ctx, part->value, out, PREC_LOWEST, false, false);
             } else {
-                fprintf(out, "rae_ext_rae_str((");
-                emit_expr(ctx, part->value, out, PREC_LOWEST, false, false);
-                fprintf(out, "))");
+                emit_to_string_expr(ctx, part->value, out);
             }
         } else {
             // Multiple parts - nest rae_ext_rae_str_concat calls
@@ -394,9 +414,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             if (part->value->kind == AST_EXPR_STRING) {
                 emit_expr(ctx, part->value, out, PREC_LOWEST, false, false);
             } else {
-                fprintf(out, "rae_ext_rae_str((");
-                emit_expr(ctx, part->value, out, PREC_LOWEST, false, false);
-                fprintf(out, "))");
+                emit_to_string_expr(ctx, part->value, out);
             }
             // Emit remaining parts
             for (AstInterpPart* p = part->next; p; p = p->next) {
@@ -404,9 +422,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                 if (p->value->kind == AST_EXPR_STRING) {
                     emit_expr(ctx, p->value, out, PREC_LOWEST, false, false);
                 } else {
-                    fprintf(out, "rae_ext_rae_str((");
-                    emit_expr(ctx, p->value, out, PREC_LOWEST, false, false);
-                    fprintf(out, "))");
+                    emit_to_string_expr(ctx, p->value, out);
                 }
                 fprintf(out, ")");
             }

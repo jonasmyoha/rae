@@ -807,6 +807,68 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       fprintf(out, "  return __r;\n}\n\n");
   }
 
+  // Generate rae_to_str_TYPE_ for non-c_struct user types so interpolation
+  // (`"{p}"`) and `.toString()` produce the same "{ 10, 20 }" output the
+  // Live VM gives. The _Generic-based rae_ext_rae_str macro can't be
+  // extended for user types, so we emit a per-type function and switch
+  // call sites to call it directly when the arg type is a user struct.
+  // Emit forward declarations first so structs can reference each other
+  // regardless of source order.
+  for (size_t i = 0; i < ctx->all_decl_count; i++) {
+      const AstDecl* d = ctx->all_decls[i];
+      if (d->kind != AST_DECL_TYPE || d->as.type_decl.generic_params) continue;
+      if (has_property(d->as.type_decl.properties, "c_struct")) continue;
+      const AstTypeDecl* td = &d->as.type_decl;
+      const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = td->name}});
+      fprintf(out, "RAE_UNUSED static rae_String rae_to_str_%s_(const %s* this);\n", mangled, mangled);
+  }
+  fprintf(out, "\n");
+  for (size_t i = 0; i < ctx->all_decl_count; i++) {
+      const AstDecl* d = ctx->all_decls[i];
+      if (d->kind != AST_DECL_TYPE || d->as.type_decl.generic_params) continue;
+      if (has_property(d->as.type_decl.properties, "c_struct")) continue;
+      const AstTypeDecl* td = &d->as.type_decl;
+      const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = td->name}});
+
+      fprintf(out, "RAE_UNUSED static rae_String rae_to_str_%s_(const %s* this) {\n", mangled, mangled);
+      fprintf(out, "  rae_String __out = (rae_String){(uint8_t*)\"{ \", 2};\n");
+      bool first = true;
+      for (const AstTypeField* f = td->fields; f; f = f->next) {
+          if (!first) fprintf(out, "  __out = rae_ext_rae_str_concat(__out, (rae_String){(uint8_t*)\", \", 2});\n");
+          first = false;
+          Str fbase = get_base_type_name(f->type);
+          // opt T fields are stored as RaeAny; routing through the _Generic
+          // macro picks rae_ext_rae_str_any. Nested concrete user structs go
+          // through their own rae_to_str_; c_struct fields (raylib Color etc.)
+          // and generic instantiations (List(Int), Map(K,V)) have no entry in
+          // the _Generic macro, so render them as a "<Type>" placeholder
+          // rather than hit a compile error.
+          CFuncContext lookup_ctx = {.compiler_ctx = ctx, .module = module};
+          const AstDecl* fd = find_type_decl(&lookup_ctx, module, fbase);
+          bool is_user_struct = fd && fd->kind == AST_DECL_TYPE
+              && !has_property(fd->as.type_decl.properties, "c_struct")
+              && !fd->as.type_decl.generic_params;
+          bool is_c_struct = fd && fd->kind == AST_DECL_TYPE
+              && has_property(fd->as.type_decl.properties, "c_struct");
+          bool has_generic_args = f->type && f->type->generic_args;
+          bool is_generic_template = fd && fd->kind == AST_DECL_TYPE && fd->as.type_decl.generic_params;
+          bool is_opt_field = f->type && f->type->is_opt;
+          if (is_user_struct && !is_opt_field && !has_generic_args) {
+              const char* fmangled = rae_mangle_type_specialized(ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = fbase}});
+              fprintf(out, "  __out = rae_ext_rae_str_concat(__out, rae_to_str_%s_(&this->%.*s));\n",
+                  fmangled, (int)f->name.len, f->name.data);
+          } else if ((is_c_struct || has_generic_args || is_generic_template) && !is_opt_field) {
+              fprintf(out, "  __out = rae_ext_rae_str_concat(__out, (rae_String){(uint8_t*)\"<%.*s>\", %d});\n",
+                  (int)fbase.len, fbase.data, (int)fbase.len + 2);
+          } else {
+              fprintf(out, "  __out = rae_ext_rae_str_concat(__out, rae_ext_rae_str(this->%.*s));\n",
+                  (int)f->name.len, f->name.data);
+          }
+      }
+      fprintf(out, "  __out = rae_ext_rae_str_concat(__out, (rae_String){(uint8_t*)\" }\", 2});\n");
+      fprintf(out, "  return __out;\n}\n\n");
+  }
+
   // Forward declarations for user extern functions (not in runtime header)
   for (size_t i = 0; i < ctx->all_decl_count; i++) {
       const AstDecl* d = ctx->all_decls[i];
