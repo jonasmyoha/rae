@@ -249,7 +249,8 @@ static int binary_precedence(AstBinaryOp op) {
   switch (op) {
     case AST_BIN_OR: return PREC_OR;
     case AST_BIN_AND: return PREC_AND;
-    case AST_BIN_IS: return PREC_IS;
+    case AST_BIN_IS:
+    case AST_BIN_NEQ: return PREC_IS;
     case AST_BIN_LT:
     case AST_BIN_GT:
     case AST_BIN_LE:
@@ -275,6 +276,7 @@ static const char* binary_op_text(AstBinaryOp op) {
     case AST_BIN_LE: return "<=";
     case AST_BIN_GE: return ">=";
     case AST_BIN_IS: return "is";
+    case AST_BIN_NEQ: return "is not";
     case AST_BIN_AND: return "and";
     case AST_BIN_OR: return "or";
   }
