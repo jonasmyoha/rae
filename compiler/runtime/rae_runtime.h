@@ -353,6 +353,8 @@ int64_t rae_ext_nextTick(void);
 int64_t rae_ext_nowMs(void);
 int64_t rae_ext_nowNs(void);
 void rae_ext_rae_sleep(int64_t ms);
+rae_String rae_ext_formatTimestamp(int64_t epoch_ms);
+rae_String rae_ext_formatDate(int64_t epoch_ms);
 
 double rae_ext_rae_math_sin(double x);
 double rae_ext_rae_math_cos(double x);
