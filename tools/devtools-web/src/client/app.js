@@ -185,6 +185,22 @@ function makeStreamClassifier() {
 const testLineClassifier = makeStreamClassifier();
 const buildLineClassifier = makeStreamClassifier();
 const exampleLineClassifier = makeStreamClassifier();
+
+// Returns true if a captured line should count as a *real* error for
+// pass/fail accounting. gcc/clang warnings, raylib's INFO/WARNING console
+// chatter, and our own status markers don't count.
+function isRealError(text, stream) {
+  if (stream !== "stderr") return false;
+  if (!text || !text.trim()) return false;
+  if (text.startsWith("●")) return false;
+  if (/\bwarning:/.test(text)) return false;
+  if (/^\d+\s+warnings?\s+generated/i.test(text)) return false;
+  if (/^INFO:/.test(text) || /^WARNING:/.test(text)) return false;
+  if (/^\s*(\d+\s*)?\|/.test(text)) return false;
+  if (/^\s*\^/.test(text)) return false;
+  if (/^\s*~+/.test(text)) return false;
+  return true;
+}
 let raeSyntax = null;
 let testDirectoryMap = new Map();
 const errorEntries = [];
@@ -2061,42 +2077,36 @@ async function runAllExamples() {
     }
     
     appendExampleOutput(`\n--- AUTOMATED RUN: ${example.name} (${targetId}) ---`, "stdout");
-    
+
+    const beforeRunIdx = allExampleLogLines.length;
     await triggerExampleRun("run", targetId);
-    
+
     // Wait for up to 10 seconds or until finished
     const start = Date.now();
-    let lastSuccess = false;
     while (exampleRunActive && (Date.now() - start < 10000)) {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
-    
-    if (exampleRunActive) {
+
+    const timedOut = exampleRunActive;
+    if (timedOut) {
       appendExampleOutput(`\n--- TIME LIMIT REACHED (10s) for ${example.name} ---`, "stdout");
       await stopExampleRun();
-      lastSuccess = false;
-    } else {
-      // Re-check success from the last complete run
-      // We assume failure if there were any errors or if exit code was non-zero
-      const hasErrors = allExampleLogLines.some(l => l.stream === "stderr" && !l.text.startsWith("●"));
-      lastSuccess = !hasErrors;
     }
-    
-    // Collect errors from this run
-    const errors = allExampleLogLines
-      .filter(l => l.stream === "stderr")
-      .map(l => l.text);
-      
-    if (!lastSuccess && errors.length === 0) {
-      errors.push("Example exited with error but produced no stderr output.");
-    }
-      
+
+    // Look only at this example's lines, and only count real errors —
+    // warnings (gcc/clang) and raylib's INFO/WARNING console output are
+    // not failures. Interactive examples that ran the full 10s window
+    // without crashing pass too.
+    const runLines = allExampleLogLines.slice(beforeRunIdx);
+    const errorLines = runLines.filter(l => isRealError(l.text, l.stream)).map(l => l.text);
+    const success = errorLines.length === 0;
+
     batchResults.push({
       id: example.id,
       name: example.name,
-      success: lastSuccess && errors.length === 0,
+      success,
       skipped: false,
-      errors
+      errors: success ? [] : errorLines
     });
     
     // Short pause between examples
