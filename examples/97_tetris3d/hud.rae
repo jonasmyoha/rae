@@ -1,15 +1,48 @@
-# 2D HUD overlay drawn after `endMode3D()`. Plain `drawText` for now;
-# the user has flagged a UI refactor as a separate task.
+# 2D HUD overlay drawn after `endMode3D()`.
+#
+# Uses raylib's TTF font support via the runtime helpers:
+#   loadFontInto(slot, path, fontSize)   — load once on startup
+#   drawTextWithFont(slot, text, ...)    — draw a glyph string
+#   unloadFontSlot(slot)                 — release on shutdown
+# Slot 0 is reserved for our HUD font (Roboto-Regular.ttf, Apache 2.0,
+# shipped next to this file). Falling back to the raylib default font
+# if the TTF is missing keeps text on screen — the codepoint table on
+# the runtime side covers ASCII plus the arrows / middle dot / em dash
+# the control hint uses.
 import raylib
+
+let hudFontSlot: Int = 0
+let hudFontSize: Int = 24
+let hudFontPath: String = "examples/97_tetris3d/Roboto-Regular.ttf"
 
 let hudWhite: Color = { r: 230, g: 230, b: 240, a: 255 }
 let hudMuted: Color = { r: 150, g: 160, b: 180, a: 255 }
 let hudAccent: Color = { r: 120, g: 230, b: 255, a: 255 }
 
+func initHudFont() {
+  loadFontInto(slot: hudFontSlot, path: hudFontPath, fontSize: hudFontSize)
+}
+
+func unloadHudFont() {
+  unloadFontSlot(slot: hudFontSlot)
+}
+
+func hudText(text: String, x: Float, y: Float, fontSize: Float, color: Color) {
+  drawTextWithFont(
+    slot: hudFontSlot
+    text: text
+    x: x
+    y: y
+    fontSize: fontSize
+    spacing: 1.0
+    color: color
+  )
+}
+
 func drawNextPanel(w: view World) {
   let panelX: Float = getScreenWidth().toFloat() - 220.0
   let panelY: Float = 80.0
-  drawText(text: "NEXT", x: panelX, y: panelY, fontSize: 22.0, color: hudMuted)
+  hudText(text: "NEXT", x: panelX, y: panelY, fontSize: 22.0, color: hudMuted)
 
   # Render the next piece as small cubes in 2D space using rectangles
   # — keeping HUD code free of camera dependency.
@@ -39,21 +72,21 @@ func drawNextPanel(w: view World) {
 }
 
 func hudSystem(w: view World) {
-  drawText(text: "Tetris 3D", x: 20.0, y: 20.0, fontSize: 28.0, color: hudAccent)
+  hudText(text: "Tetris 3D", x: 20.0, y: 20.0, fontSize: 28.0, color: hudAccent)
 
-  drawText(text: "SCORE", x: 20.0, y: 80.0, fontSize: 18.0, color: hudMuted)
-  drawText(text: "{w.score}", x: 20.0, y: 102.0, fontSize: 28.0, color: hudWhite)
+  hudText(text: "SCORE", x: 20.0, y: 80.0, fontSize: 18.0, color: hudMuted)
+  hudText(text: "{w.score}", x: 20.0, y: 102.0, fontSize: 28.0, color: hudWhite)
 
-  drawText(text: "LINES", x: 20.0, y: 150.0, fontSize: 18.0, color: hudMuted)
-  drawText(text: "{w.lines}", x: 20.0, y: 172.0, fontSize: 28.0, color: hudWhite)
+  hudText(text: "LINES", x: 20.0, y: 150.0, fontSize: 18.0, color: hudMuted)
+  hudText(text: "{w.lines}", x: 20.0, y: 172.0, fontSize: 28.0, color: hudWhite)
 
-  drawText(text: "LEVEL", x: 20.0, y: 220.0, fontSize: 18.0, color: hudMuted)
-  drawText(text: "{w.level}", x: 20.0, y: 242.0, fontSize: 28.0, color: hudWhite)
+  hudText(text: "LEVEL", x: 20.0, y: 220.0, fontSize: 18.0, color: hudMuted)
+  hudText(text: "{w.level}", x: 20.0, y: 242.0, fontSize: 28.0, color: hudWhite)
 
   drawNextPanel(w: w)
 
   let h: Int = getScreenHeight()
-  drawText(
+  hudText(
     text: "←→ move · ↑ rotate · ↓ soft drop · space hard drop · P pause"
     x: 20.0
     y: h.toFloat() - 28.0
@@ -63,17 +96,18 @@ func hudSystem(w: view World) {
 
   if w.state is GameState.GameOver {
     let sw: Float = getScreenWidth().toFloat()
-    drawText(
+    let warn: Color = { r: 255, g: 120, b: 140, a: 255 }
+    hudText(
       text: "GAME OVER — press R to restart"
       x: sw / 2.0 - 200.0
       y: 200.0
       fontSize: 28.0
-      color: { r: 255, g: 120, b: 140, a: 255 }
+      color: warn
     )
   }
   if w.state is GameState.Paused {
     let sw: Float = getScreenWidth().toFloat()
-    drawText(
+    hudText(
       text: "PAUSED"
       x: sw / 2.0 - 60.0
       y: 220.0

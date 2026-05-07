@@ -93,6 +93,24 @@ func drawText(
   color: Color
 ) extern
 
+# Custom font support — addresses fonts by integer slot (0..7) instead of
+# exposing raylib's Font struct directly. Slots are global; load once and
+# reuse. `drawTextWithFont` falls back to the default font if the slot
+# isn't loaded, so a missing TTF doesn't blank out the screen.
+func loadFontInto(slot: Int, path: String, fontSize: Int) extern
+
+func unloadFontSlot(slot: Int) extern
+
+func drawTextWithFont(
+  slot: Int
+  text: String
+  x: Float
+  y: Float
+  fontSize: Float
+  spacing: Float
+  color: Color
+) extern
+
 func drawCube(
   pos: Vector3
   width: Float
