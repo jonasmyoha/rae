@@ -1016,13 +1016,24 @@ void rae_ext_loadFontInto(int64_t slot, rae_String path, int64_t fontSize) {
         UnloadFont(g_rae_fonts[slot]);
         g_rae_font_loaded[slot] = 0;
     }
+    /* Quality strategy: bake the glyph atlas at a high resolution and let
+     * the GPU bilinear-filter at draw time. Raylib's default is point
+     * sampling, which is fine for retro pixel fonts but turns smooth
+     * vector fonts (Roboto etc.) into a blocky mess at non-native sizes.
+     * Use max(64, fontSize * 2) so a typical 18–28 px UI request gets a
+     * 64–96 px atlas — sharp at the requested size, smooth when scaled. */
+    int atlasSize = (int)fontSize * 2;
+    if (atlasSize < 64) atlasSize = 64;
     g_rae_fonts[slot] = LoadFontEx(
         (const char*)path.data,
-        (int)fontSize,
+        atlasSize,
         (int*)g_rae_font_codepoints,
         RAE_FONT_CODEPOINT_COUNT
     );
-    g_rae_font_loaded[slot] = (g_rae_fonts[slot].texture.id != 0);
+    if (g_rae_fonts[slot].texture.id != 0) {
+        SetTextureFilter(g_rae_fonts[slot].texture, TEXTURE_FILTER_BILINEAR);
+        g_rae_font_loaded[slot] = 1;
+    }
 }
 
 void rae_ext_unloadFontSlot(int64_t slot) {
