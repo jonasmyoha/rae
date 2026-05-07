@@ -82,6 +82,36 @@ void rae_ext_rae_sleep(int64_t ms) {
   }
 }
 
+rae_String rae_ext_formatTimestamp(int64_t epoch_ms) {
+  time_t secs = (time_t)(epoch_ms / 1000);
+  struct tm tm_buf;
+  struct tm* tm_p = gmtime_r(&secs, &tm_buf);
+  if (!tm_p) return (rae_String){NULL, 0};
+  char buf[32];
+  int n = (int)strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", tm_p);
+  if (n <= 0) return (rae_String){NULL, 0};
+  uint8_t* data = malloc((size_t)n + 1);
+  if (!data) return (rae_String){NULL, 0};
+  memcpy(data, buf, (size_t)n);
+  data[n] = '\0';
+  return (rae_String){data, (int64_t)n};
+}
+
+rae_String rae_ext_formatDate(int64_t epoch_ms) {
+  time_t secs = (time_t)(epoch_ms / 1000);
+  struct tm tm_buf;
+  struct tm* tm_p = gmtime_r(&secs, &tm_buf);
+  if (!tm_p) return (rae_String){NULL, 0};
+  char buf[16];
+  int n = (int)strftime(buf, sizeof(buf), "%Y-%m-%d", tm_p);
+  if (n <= 0) return (rae_String){NULL, 0};
+  uint8_t* data = malloc((size_t)n + 1);
+  if (!data) return (rae_String){NULL, 0};
+  memcpy(data, buf, (size_t)n);
+  data[n] = '\0';
+  return (rae_String){data, (int64_t)n};
+}
+
 void rae_spawn(void* (*func)(void*), void* data) {
 #ifdef _WIN32
     CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)func, data, 0, NULL);
