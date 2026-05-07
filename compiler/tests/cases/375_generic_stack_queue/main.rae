@@ -1,0 +1,59 @@
+# Generic Stack(T) and Queue(T) — a small demo that user-defined generic
+# types and functions monomorphise correctly across multiple instantiations.
+
+type Stack(T) {
+  data: List(T)
+}
+
+func createStack(T)() ret Stack(T) {
+  ret Stack(T) { data: createList(T)(initialCap: 4) }
+}
+
+func push(T)(this: mod Stack(T), value: T) {
+  add(this.data, value: value)
+}
+
+func pop(T)(this: mod Stack(T)) ret opt T {
+  if this.data.length is 0 {
+    ret none
+  }
+  let last: opt T = get(this.data, index: this.data.length - 1)
+  this.data.length = this.data.length - 1
+  ret last
+}
+
+func peek(T)(this: view Stack(T)) ret opt T {
+  if this.data.length is 0 {
+    ret none
+  }
+  ret get(this.data, index: this.data.length - 1)
+}
+
+func size(T)(this: view Stack(T)) ret Int {
+  ret this.data.length
+}
+
+func main() {
+  # Stack(Int)
+  let si: Stack(Int) = createStack(Int)()
+  push(si, value: 10)
+  push(si, value: 20)
+  push(si, value: 30)
+  log("int size: {size(si)}")
+  log("int peek: {peek(si)}")
+  log("int pop: {pop(si)}")
+  log("int size: {size(si)}")
+
+  # Stack(String) — second instantiation of the same template
+  let ss: Stack(String) = createStack(String)()
+  push(ss, value: "alpha")
+  push(ss, value: "beta")
+  log("str size: {size(ss)}")
+  log("str peek: {peek(ss)}")
+  log("str pop: {pop(ss)}")
+  log("str size: {size(ss)}")
+
+  # Empty stack returns none from pop/peek
+  let empty: Stack(Int) = createStack(Int)()
+  log("empty pop is none: {pop(empty) is none}")
+}
