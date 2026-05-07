@@ -26,8 +26,27 @@ func runFrame(w: mod World) {
 
 func main() {
   setConfigFlags(flags: 4)
-  initWindow(width: 1024, height: 720, title: "Rae Tetris 3D")
+  # Open with a placeholder size; we resize to a portrait that's ~80%
+  # of the user's monitor height once raylib can tell us the dimensions.
+  initWindow(width: 600, height: 900, title: "Rae Tetris 3D")
   setTargetFPS(fps: 60)
+
+  # Pick a portrait window: ~80% of monitor height, narrow aspect that
+  # mirrors the well + side HUD. Centre it on the current monitor.
+  let monitor: Int = getCurrentMonitor()
+  let monW: Int = getMonitorWidth(monitor: monitor)
+  let monH: Int = getMonitorHeight(monitor: monitor)
+  let winH: Int = (monH * 8) / 10
+  # 9:16 portrait; clamp width to 80% of monitor width so it fits on
+  # short-and-wide displays too.
+  let winW: Int = (winH * 9) / 16
+  let maxW: Int = (monW * 8) / 10
+  if winW > maxW {
+    winW = maxW
+  }
+  setWindowSize(width: winW, height: winH)
+  setWindowPosition(x: (monW - winW) / 2, y: (monH - winH) / 2)
+
   # Load Roboto for the HUD. Must come AFTER initWindow because
   # raylib's font loader needs the GL context to upload the atlas.
   initHudFont()

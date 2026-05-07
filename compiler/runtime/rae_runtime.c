@@ -970,6 +970,11 @@ rae_Bool rae_ext_isKeyDown(int64_t key) { return IsKeyDown((int)key); }
 rae_Bool rae_ext_isKeyPressed(int64_t key) { return IsKeyPressed((int)key); }
 int64_t rae_ext_getScreenWidth(void) { return (int64_t)GetScreenWidth(); }
 int64_t rae_ext_getScreenHeight(void) { return (int64_t)GetScreenHeight(); }
+int64_t rae_ext_getCurrentMonitor(void) { return (int64_t)GetCurrentMonitor(); }
+int64_t rae_ext_getMonitorWidth(int64_t monitor) { return (int64_t)GetMonitorWidth((int)monitor); }
+int64_t rae_ext_getMonitorHeight(int64_t monitor) { return (int64_t)GetMonitorHeight((int)monitor); }
+void rae_ext_setWindowSize(int64_t width, int64_t height) { SetWindowSize((int)width, (int)height); }
+void rae_ext_setWindowPosition(int64_t x, int64_t y) { SetWindowPosition((int)x, (int)y); }
 Texture rae_ext_loadTexture(rae_String fileName) { return LoadTexture((const char*)fileName.data); }
 void rae_ext_unloadTexture(Texture texture) { UnloadTexture(texture); }
 void rae_ext_drawTexture(Texture texture, double x, double y, Color tint) { DrawTexture(texture, (int)x, (int)y, tint); }
