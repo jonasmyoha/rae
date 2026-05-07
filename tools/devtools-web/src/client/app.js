@@ -41,9 +41,6 @@ const buildDurationCanvas = document.getElementById("build-duration-chart");
 const buildDurationEmpty = document.getElementById("build-duration-empty");
 const errorIndicator = document.getElementById("error-indicator");
 const errorCount = document.getElementById("error-count");
-const errorBtnText = document.getElementById("error-btn-text");
-const errorIconCheck = document.getElementById("error-icon-check");
-const errorIconWarning = document.getElementById("error-icon-warning");
 const errorModal = document.getElementById("error-log-modal");
 const errorLogList = document.getElementById("error-log-list");
 const errorLogEmpty = document.getElementById("error-log-empty");
@@ -277,27 +274,31 @@ function scheduleReconnect() {
   reconnectTimer = setTimeout(connect, 1500);
 }
 
-// Single pill that covers both transport (WebSocket) and liveness (server
-// heartbeat). The two were separate pills but conveyed nearly the same
-// thing in practice — the rare case of "WS open but server hung" is now
-// shown as a yellow "Stale" state on the same pill.
+// Single dot that covers both transport (WebSocket) and liveness (server
+// heartbeat). The two used to be separate pills, but conveyed nearly the
+// same thing in practice — the rare "WS open but server hung" case is now
+// shown as a yellow "stale" colour on the same dot. Full text lives in
+// the title attribute (native tooltip on hover).
 let lastConnectionState = "connecting";
 function setConnectionState(state, timestamp) {
   lastConnectionState = state;
   connectionStatus.classList.remove("is-connected", "is-disconnected", "is-stale");
+  let tooltip;
   if (state === "connected") {
-    const time = timestamp ? ` · ${new Date(timestamp).toLocaleTimeString()}` : "";
-    connectionStatus.textContent = `Connected${time}`;
+    const time = timestamp ? new Date(timestamp).toLocaleTimeString() : null;
+    tooltip = time ? `Connected · last heartbeat ${time}` : "Connected";
     connectionStatus.classList.add("is-connected");
   } else if (state === "stale") {
-    connectionStatus.textContent = "Server stalled";
+    tooltip = "Server stalled — no heartbeat in 60s";
     connectionStatus.classList.add("is-stale");
   } else if (state === "disconnected") {
-    connectionStatus.textContent = "Disconnected – retrying…";
+    tooltip = "Disconnected — retrying…";
     connectionStatus.classList.add("is-disconnected");
   } else {
-    connectionStatus.textContent = "Connecting…";
+    tooltip = "Connecting…";
   }
+  connectionStatus.setAttribute("title", tooltip);
+  connectionStatus.setAttribute("aria-label", tooltip);
 }
 
 function updateHeartbeatIndicator(timestamp) {
@@ -3155,21 +3156,16 @@ function recordError(source, message) {
 }
 
 function updateErrorIndicator() {
-  if (!errorIndicator || !errorCount) return;
+  if (!errorIndicator) return;
   const count = errorEntries.length;
-  errorCount.textContent = count.toString();
   if (count > 0) {
     errorIndicator.classList.add("has-errors");
-    errorIndicator.setAttribute("title", `Open error log (${count})`);
-    if (errorBtnText) errorBtnText.textContent = "Errors";
-    if (errorIconCheck) errorIconCheck.style.display = "none";
-    if (errorIconWarning) errorIconWarning.style.display = "";
+    errorIndicator.setAttribute("title", `${count} error${count === 1 ? "" : "s"} — click to open log`);
+    if (errorCount) errorCount.textContent = count > 99 ? "99+" : count.toString();
   } else {
     errorIndicator.classList.remove("has-errors");
-    errorIndicator.setAttribute("title", "Open error log (0)");
-    if (errorBtnText) errorBtnText.textContent = "No errors";
-    if (errorIconCheck) errorIconCheck.style.display = "";
-    if (errorIconWarning) errorIconWarning.style.display = "none";
+    errorIndicator.setAttribute("title", "No errors — click to open log");
+    if (errorCount) errorCount.textContent = "";
   }
 }
 
