@@ -1,0 +1,47 @@
+enum Color {
+  Red
+  Green
+  Blue
+}
+
+enum State {
+  Idle
+  Running
+  Done
+}
+
+func describe(c: Int) ret String {
+  match c {
+    case Color.Red {
+      ret "red"
+    }
+    case Color.Green {
+      ret "green"
+    }
+    case Color.Blue {
+      ret "blue"
+    }
+  }
+  ret "unknown"
+}
+
+func describeState(s: Int) ret String {
+  match s {
+    case State.Idle {
+      ret "idle"
+    }
+    default {
+      ret "active"
+    }
+  }
+  ret "unreachable"
+}
+
+func main() {
+  log(describe(c: Color.Red))
+  log(describe(c: Color.Green))
+  log(describe(c: Color.Blue))
+  log(describeState(s: State.Idle))
+  log(describeState(s: State.Running))
+  log(describeState(s: State.Done))
+}
