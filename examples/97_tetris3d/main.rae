@@ -1,0 +1,76 @@
+# 97_tetris3d — entry point.
+#
+# Auto-import picks up the sibling .rae files (world, tetromino, camera,
+# ...) so we don't need explicit `import` for them. raylib and math are
+# stdlib, so they're spelled out.
+import raylib
+import math
+
+func runFrame(w: mod World) {
+  cameraSystem(w)
+
+  beginDrawing()
+  clearBackground(color: Color { r: 18, g: 20, b: 28, a: 255 })
+
+  let cam: Camera3D = cameraForWorld(w)
+  beginMode3D(camera: cam)
+
+  # Floor reference grid.
+  drawGrid(slices: 20, spacing: 1.0)
+
+  # Placeholder: a single cube at the bottom of the well so we can see
+  # the camera is pointing somewhere reasonable. Real rendering arrives
+  # in render.rae next phase.
+  let probe: Vector3 = { x: 4.5, y: -19.5, z: 0.0 }
+  drawCube(pos: probe, width: 0.9, height: 0.9, length: 0.9, color: kindColor(id: 1))
+  drawCubeWires(
+    pos: probe
+    width: 1.0
+    height: 1.0
+    length: 1.0
+    color: Color { r: 255, g: 255, b: 255, a: 80 }
+  )
+
+  endMode3D()
+
+  drawText(
+    text: "Tetris 3D — phase 1 scaffold"
+    x: 20.0
+    y: 20.0
+    fontSize: 24.0
+    color: Color { r: 230, g: 230, b: 240, a: 255 }
+  )
+  endDrawing()
+}
+
+func main() {
+  setConfigFlags(flags: 4)
+  initWindow(width: 1024, height: 720, title: "Rae Tetris 3D")
+  setTargetFPS(fps: 60)
+
+  let w: World = {
+    state: GameState.Playing
+    grid: createList(Int)(initialCap: 0)
+    currentPiece: { kind: TetrominoKind.I, x: 3, y: 0, rotation: 0 }
+    nextKind: TetrominoKind.O
+    score: 0
+    lines: 0
+    level: 1
+    fallTimer: 0
+    fallDelay: 30
+    hMoveTimer: 0
+    hMoveDelay: 4
+    dasDelay: 12
+    lockTimer: 0
+    lockDelay: 30
+    camTime: 0.0
+    particles: createList(Particle)(initialCap: 0)
+    lockFlash: 0.0
+  }
+  initWorld(w)
+
+  loop not windowShouldClose() {
+    runFrame(w)
+  }
+  closeWindow()
+}
