@@ -9,6 +9,7 @@
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
+#include <poll.h>
 #include <stdint.h>
 #include <ctype.h>
 #include <limits.h>
@@ -2867,14 +2868,22 @@ static int run_vm_watch(const RunOptions* run_opts, const char* project_root) {
 
   int exit_code = 0;
   while (ctx.running) {
+    // Non-blocking check for stdin EOF in non-TTY contexts (e.g. CI). The previous
+    // implementation called fgetc() which blocked when stdin was redirected from
+    // /dev/null or otherwise had no data ready, preventing the VM from ever
+    // running. Use poll() with 0 timeout so we only consume stdin when something
+    // is actually there.
     if (!isatty(fileno(stdin))) {
-        // When not in a TTY (like in tests), check if stdin is closed to exit
-        int c = fgetc(stdin);
-        if (c == EOF) {
-            ctx.running = false;
-            break;
+        struct pollfd pfd = { .fd = fileno(stdin), .events = POLLIN };
+        int pr = poll(&pfd, 1, 0);
+        if (pr > 0 && (pfd.revents & (POLLIN | POLLHUP))) {
+            int c = fgetc(stdin);
+            if (c == EOF) {
+                ctx.running = false;
+                break;
+            }
+            ungetc(c, stdin);
         }
-        ungetc(c, stdin);
     }
 
     for (;;) {
