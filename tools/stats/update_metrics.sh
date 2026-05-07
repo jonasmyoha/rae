@@ -83,7 +83,12 @@ if [ "$DECISION_CODE" = "skip" ]; then
   exit 0
 fi
 
-TIMESTAMP="$(date +"%Y-%m-%d %H:%M:%S %z")"
+# Write an ISO 8601 timestamp ("2026-05-07T22:46:03+03:00") so JS Date
+# can parse it on every browser. macOS `date` doesn't accept %:z, so
+# build the colon-separated offset manually.
+TZ_OFFSET="$(date +"%z")"           # +0300
+TZ_OFFSET_COLON="${TZ_OFFSET:0:3}:${TZ_OFFSET:3:2}"
+TIMESTAMP="$(date +"%Y-%m-%dT%H:%M:%S")${TZ_OFFSET_COLON}"
 mkdir -p "$STATS_DIR"
 JSON_ENTRY=$(printf '{"timestamp":"%s","commit":"%s","src_file_count":%d,"src_line_count":%d}' "$TIMESTAMP" "$CURRENT_COMMIT" "$FILE_COUNT" "$LINE_COUNT")
 
