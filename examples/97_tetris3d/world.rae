@@ -1,0 +1,140 @@
+# World — central component bag for the game. Shared mutably between
+# systems via `mod World`, read-only via `view World`. The "ECS" here is
+# a parallel-array layout over typed component lists; "entities" are
+# implicit indices, not first-class IDs.
+import raylib
+
+let gridWidth: Int = 10
+let gridHeight: Int = 20
+let maxParticles: Int = 64
+
+enum GameState {
+  Menu
+  Playing
+  Paused
+  GameOver
+}
+
+type Piece {
+  kind: TetrominoKind
+  x: Int
+  y: Int
+  rotation: Int
+}
+
+# A particle is a short-lived 3D point sprite. `active` is the free-slot
+# flag — inactive slots are reused before the list grows.
+type Particle {
+  active: Bool
+  px: Float
+  py: Float
+  pz: Float
+  vx: Float
+  vy: Float
+  vz: Float
+  life: Float
+  size: Float
+  color: Color
+}
+
+type World {
+  state: GameState
+
+  # Locked-board grid, row-major. 0 = empty, 1..7 = colour id.
+  grid: List(Int)
+
+  currentPiece: Piece
+  nextKind: TetrominoKind
+
+  # Score / progression
+  score: Int
+  lines: Int
+  level: Int
+
+  # Tick timers
+  fallTimer: Int
+  fallDelay: Int          # frames per row, decreases with level
+  hMoveTimer: Int
+  hMoveDelay: Int
+  dasDelay: Int
+  lockTimer: Int
+  lockDelay: Int
+
+  # Camera state (lerp targets are computed by cameraSystem)
+  camTime: Float
+
+  # Particles
+  particles: List(Particle)
+
+  # Visual flash on the most recently locked piece — fades over a few frames
+  lockFlash: Float
+}
+
+func makeEmptyParticle() ret Particle {
+  ret Particle {
+    active: false
+    px: 0.0
+    py: 0.0
+    pz: 0.0
+    vx: 0.0
+    vy: 0.0
+    vz: 0.0
+    life: 0.0
+    size: 0.0
+    color: Color { r: 255, g: 255, b: 255, a: 255 }
+  }
+}
+
+func initWorld(w: mod World) {
+  w.state = GameState.Playing
+
+  let grid: List(Int) = createList(initialCap: gridWidth * gridHeight)
+  let i: Int = 0
+  loop i < gridWidth * gridHeight {
+    grid.add(value: 0)
+    i = i + 1
+  }
+  w.grid = grid
+
+  w.currentPiece = Piece { kind: randomKind(), x: 3, y: 0, rotation: 0 }
+  w.nextKind = randomKind()
+
+  w.score = 0
+  w.lines = 0
+  w.level = 1
+  w.fallTimer = 0
+  w.fallDelay = 30
+  w.hMoveTimer = 0
+  w.hMoveDelay = 4
+  w.dasDelay = 12
+  w.lockTimer = 0
+  w.lockDelay = 30
+
+  w.camTime = 0.0
+  w.lockFlash = 0.0
+
+  let particles: List(Particle) = createList(initialCap: maxParticles)
+  let p: Int = 0
+  let blank: Particle = makeEmptyParticle()
+  loop p < maxParticles {
+    add(particles, value: blank)
+    p = p + 1
+  }
+  w.particles = particles
+}
+
+func gridGet(w: view World, x: Int, y: Int) ret Int {
+  if x < 0 or x >= gridWidth or y < 0 or y >= gridHeight {
+    ret 1
+  }
+  let v: Int = w.grid.get(index: y * gridWidth + x)
+  ret v
+}
+
+func gridSet(w: mod World, x: Int, y: Int, value: Int) {
+  if x < 0 or x >= gridWidth or y < 0 or y >= gridHeight {
+    ret
+  }
+  let g: mod List(Int) => w.grid
+  g.set(index: y * gridWidth + x, value: value)
+}
