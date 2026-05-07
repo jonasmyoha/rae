@@ -201,6 +201,32 @@ func isEmpty(T)(this: view List(T)) ret Bool {
   ret this.length is 0
 }
 
+# Linear search for `value`. Works for any T where `is` is defined.
+func contains(T)(this: view List(T), value: T) ret Bool {
+  let i: Int = 0
+  loop i < this.length {
+    let cur: T = rae_ext_rae_buf_get(buf: this.data, index: i)
+    if cur is value {
+      ret true
+    }
+    i = i + 1
+  }
+  ret false
+}
+
+# Returns the first index of `value`, or -1 if not found.
+func indexOf(T)(this: view List(T), value: T) ret Int {
+  let i: Int = 0
+  loop i < this.length {
+    let cur: T = rae_ext_rae_buf_get(buf: this.data, index: i)
+    if cur is value {
+      ret i
+    }
+    i = i + 1
+  }
+  ret -1
+}
+
 func free(T)(this: mod List(T)) {
   rae_ext_rae_buf_free(buf: this.data)
   this.length = 0

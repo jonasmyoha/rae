@@ -6,6 +6,10 @@ func main() {
   add(this: xs, value: 4)
 
   log("isEmpty: {isEmpty(this: xs)}")
+  log("contains 3: {contains(this: xs, value: 3)}")
+  log("contains 9: {contains(this: xs, value: 9)}")
+  log("indexOf 2: {indexOf(this: xs, value: 2)}")
+  log("indexOf 99: {indexOf(this: xs, value: 99)}")
 
   reverse(this: xs)
   log("reversed length: {xs.length}")
@@ -14,4 +18,12 @@ func main() {
 
   let empty: List(Int) = createList(initialCap: 1)
   log("empty isEmpty: {isEmpty(this: empty)}")
+
+  # Same overload names also exist on String — receiver-typed dispatch
+  # picks the right implementation.
+  let s: String = "hello"
+  let needleLL: String = "ll"
+  let needleL: String = "l"
+  log("string contains ll: {contains(this: s, sub: needleLL)}")
+  log("string indexOf l: {indexOf(this: s, sub: needleL)}")
 }
