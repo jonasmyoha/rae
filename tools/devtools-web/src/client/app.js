@@ -2,7 +2,6 @@ import { loadRaeSyntax } from "./raeSyntax.js";
 
 const statusFeed = document.getElementById("status-feed");
 const connectionStatus = document.getElementById("connection-status");
-const heartbeatStatus = document.getElementById("heartbeat-status");
 const runTestsBtn = document.getElementById("run-tests-btn");
 const stopTestsBtn = document.getElementById("stop-tests-btn");
 const disabledTestsInput = document.getElementById("disabled-tests-input");
@@ -242,7 +241,7 @@ function connect() {
   socket = new WebSocket(`${protocol}://${window.location.host}/ws`);
 
   socket.addEventListener("open", () => {
-    updateConnectionIndicator("Connected", "is-connected");
+    setConnectionState("connected");
     socket.send(
       JSON.stringify({
         type: "client-hello",
@@ -262,8 +261,7 @@ function connect() {
   });
 
   socket.addEventListener("close", () => {
-    updateConnectionIndicator("Disconnected – retrying…", "is-disconnected");
-    setHeartbeatWaiting();
+    setConnectionState("disconnected");
     scheduleReconnect();
   });
 
@@ -279,27 +277,38 @@ function scheduleReconnect() {
   reconnectTimer = setTimeout(connect, 1500);
 }
 
-function updateConnectionIndicator(label, modifierClass) {
-  connectionStatus.textContent = label;
-  connectionStatus.classList.remove("is-connected", "is-disconnected");
-  if (modifierClass) {
-    connectionStatus.classList.add(modifierClass);
+// Single pill that covers both transport (WebSocket) and liveness (server
+// heartbeat). The two were separate pills but conveyed nearly the same
+// thing in practice — the rare case of "WS open but server hung" is now
+// shown as a yellow "Stale" state on the same pill.
+let lastConnectionState = "connecting";
+function setConnectionState(state, timestamp) {
+  lastConnectionState = state;
+  connectionStatus.classList.remove("is-connected", "is-disconnected", "is-stale");
+  if (state === "connected") {
+    const time = timestamp ? ` · ${new Date(timestamp).toLocaleTimeString()}` : "";
+    connectionStatus.textContent = `Connected${time}`;
+    connectionStatus.classList.add("is-connected");
+  } else if (state === "stale") {
+    connectionStatus.textContent = "Server stalled";
+    connectionStatus.classList.add("is-stale");
+  } else if (state === "disconnected") {
+    connectionStatus.textContent = "Disconnected – retrying…";
+    connectionStatus.classList.add("is-disconnected");
+  } else {
+    connectionStatus.textContent = "Connecting…";
   }
 }
 
 function updateHeartbeatIndicator(timestamp) {
-  heartbeatStatus.textContent = `Heartbeat: ${new Date(timestamp).toLocaleTimeString()}`;
-  heartbeatStatus.classList.remove("is-stale");
+  setConnectionState("connected", timestamp);
   if (heartbeatTimer) clearTimeout(heartbeatTimer);
   heartbeatTimer = setTimeout(() => {
-    heartbeatStatus.classList.add("is-stale");
-    heartbeatStatus.textContent = "Heartbeat: waiting…";
+    if (lastConnectionState === "connected") setConnectionState("stale");
   }, HEARTBEAT_STALE_MS);
 }
 
 function setHeartbeatWaiting() {
-  heartbeatStatus.classList.add("is-stale");
-  heartbeatStatus.textContent = "Heartbeat: waiting…";
   if (heartbeatTimer) {
     clearTimeout(heartbeatTimer);
     heartbeatTimer = undefined;
