@@ -1462,6 +1462,13 @@ static AstExpr* parse_binary(Parser* parser, int min_prec) {
       break;
     }
     const Token* op_token = parser_advance(parser);
+    // `is not` is a single binary inequality operator. Without this,
+    // `x is not y` would parse as `x is (not y)`, comparing x against
+    // the boolean negation of y — almost never what the user wants.
+    if (info.op == AST_BIN_IS && parser_peek(parser)->kind == TOK_KW_NOT) {
+      parser_advance(parser);
+      info.op = AST_BIN_NEQ;
+    }
     AstExpr* right = parse_binary(parser, info.precedence + 1);
     AstExpr* binary = new_expr(parser, AST_EXPR_BINARY, op_token);
     binary->as.binary.op = info.op;

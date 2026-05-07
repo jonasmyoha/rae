@@ -45,7 +45,8 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
     }
     case AST_EXPR_BINARY: {
       // Special case: string equality — use rae_ext_rae_str_eq instead of ==
-      if (expr->as.binary.op == AST_BIN_IS) {
+      // (and its negation for `is not`).
+      if (expr->as.binary.op == AST_BIN_IS || expr->as.binary.op == AST_BIN_NEQ) {
           const AstTypeRef* lhs_tr = infer_expr_type_ref(ctx, expr->as.binary.lhs);
           Str lhs_base = get_base_type_name(lhs_tr);
           bool lhs_is_string = str_eq_cstr(lhs_base, "String") || str_eq_cstr(lhs_base, "rae_String");
@@ -54,27 +55,33 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
           bool lhs_is_tostring = expr->as.binary.lhs->kind == AST_EXPR_METHOD_CALL &&
               str_eq_cstr(expr->as.binary.lhs->as.method_call.method_name, "toString");
           if (lhs_is_string || rhs_is_string_lit || lhs_is_tostring) {
-              fprintf(out, "(bool)rae_ext_rae_str_eq(");
+              if (expr->as.binary.op == AST_BIN_NEQ) fprintf(out, "(bool)(!rae_ext_rae_str_eq(");
+              else fprintf(out, "(bool)rae_ext_rae_str_eq(");
               emit_expr(ctx, expr->as.binary.lhs, out, PREC_LOWEST, false, false);
               fprintf(out, ", ");
               emit_expr(ctx, expr->as.binary.rhs, out, PREC_LOWEST, false, false);
-              fprintf(out, ")");
+              if (expr->as.binary.op == AST_BIN_NEQ) fprintf(out, "))");
+              else fprintf(out, ")");
               break;
           }
       }
-      // `x is none` / `none is x`: emit a runtime tag check rather than `==`,
-      // because RaeAny is a struct and `==` between two structs is invalid C.
-      // The non-NONE side keeps its RaeAny value (suppress_opt_unbox).
-      bool none_compare = (expr->as.binary.op == AST_BIN_IS) &&
+      // `x is none` / `x is not none`: emit a runtime tag check rather than
+      // `==` / `!=`, because RaeAny is a struct and struct equality is invalid
+      // C. The non-NONE side keeps its RaeAny value (suppress_opt_unbox).
+      bool none_compare = (expr->as.binary.op == AST_BIN_IS || expr->as.binary.op == AST_BIN_NEQ) &&
           (expr->as.binary.rhs->kind == AST_EXPR_NONE || expr->as.binary.lhs->kind == AST_EXPR_NONE);
       bool saved_unbox = ctx->suppress_opt_unbox;
       if (none_compare) {
           const AstExpr* operand = (expr->as.binary.lhs->kind == AST_EXPR_NONE)
               ? expr->as.binary.rhs : expr->as.binary.lhs;
           ctx->suppress_opt_unbox = true;
-          fprintf(out, "rae_any_is_none(");
+          // Wrap the result in (bool) so the `_Generic` rae_ext_rae_str macro
+          // matches the rae_Bool branch in interpolation contexts.
+          if (expr->as.binary.op == AST_BIN_NEQ) fprintf(out, "((bool)(!rae_any_is_none(");
+          else fprintf(out, "((bool)rae_any_is_none(");
           emit_expr(ctx, operand, out, PREC_LOWEST, false, false);
-          fprintf(out, ")");
+          if (expr->as.binary.op == AST_BIN_NEQ) fprintf(out, ")))");
+          else fprintf(out, "))");
           ctx->suppress_opt_unbox = saved_unbox;
           break;
       }
@@ -101,7 +108,8 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
       // known primitive type as the expected type for both sides. This lets calls
       // returning opt T auto-unbox when used in `g.grid.get(i) > 0` etc.
       bool is_arith_or_cmp = (expr->as.binary.op >= AST_BIN_ADD && expr->as.binary.op <= AST_BIN_GE) ||
-                             expr->as.binary.op == AST_BIN_IS;
+                             expr->as.binary.op == AST_BIN_IS ||
+                             expr->as.binary.op == AST_BIN_NEQ;
       bool had_exp_bin = ctx->has_expected_type;
       AstTypeRef saved_exp_bin = ctx->expected_type;
       if (is_arith_or_cmp && !none_compare) {
@@ -128,6 +136,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         case AST_BIN_MOD: fprintf(out, " %% "); break; case AST_BIN_LT: fprintf(out, " < "); break;
         case AST_BIN_GT: fprintf(out, " > "); break; case AST_BIN_LE: fprintf(out, " <= "); break;
         case AST_BIN_GE: fprintf(out, " >= "); break; case AST_BIN_IS: fprintf(out, " == "); break;
+        case AST_BIN_NEQ: fprintf(out, " != "); break;
         case AST_BIN_AND: fprintf(out, " && "); break; case AST_BIN_OR: fprintf(out, " || "); break;
       }
       emit_expr(ctx, expr->as.binary.rhs, out, prec, false, false);

@@ -1,0 +1,32 @@
+# `is not` is parsed as a single inequality binary op (AST_BIN_NEQ).
+# Without proper handling, `x is not y` would parse as `x is (not y)`,
+# comparing x against the boolean negation of y.
+
+func main() {
+  # Int inequality
+  let a: Int = 5
+  let b: Int = 7
+  log("5 is not 7: {a is not b}")
+  log("5 is not 5: {a is not a}")
+
+  # String inequality dispatches to rae_ext_rae_str_eq + negation
+  let s1: String = "hello"
+  let s2: String = "world"
+  log("hello is not world: {s1 is not s2}")
+  log("hello is not hello: {s1 is not s1}")
+
+  # `is not none` on opt T — uses the runtime tag check, not RaeAny ==
+  let xs: List(Int) = createList(Int)(initialCap: 2)
+  add(xs, value: 42)
+  let g: opt Int = get(xs, index: 0)
+  log("populated is not none: {g is not none}")
+  let m: opt Int = get(xs, index: 99)
+  log("oob is not none: {m is not none}")
+
+  # Selection-sort idiom that prompted this work
+  let i: Int = 0
+  let max: Int = 3
+  if max is not i {
+    log("swap branch reachable")
+  }
+}
