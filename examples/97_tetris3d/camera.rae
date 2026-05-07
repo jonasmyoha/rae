@@ -1,0 +1,37 @@
+# Camera setup and motion. The camera floats around the well in a slow
+# orbit; line clears later get to nudge it for a satisfying screen-shake.
+import raylib
+import math
+
+func makeCamera() ret Camera3D {
+  ret Camera3D {
+    position: Vector3 { x: 18.0, y: 16.0, z: 22.0 }
+    target: Vector3 { x: 5.0, y: -10.0, z: 0.0 }
+    up: Vector3 { x: 0.0, y: 1.0, z: 0.0 }
+    fovy: 45.0
+    projection: 0
+  }
+}
+
+# Slow ease-y orbit around the well. cameraSystem reads `camTime` off
+# the World and writes a fresh `Camera3D` each frame; we don't store
+# the camera on the World so the layout stays plain-data.
+func cameraForWorld(w: view World) ret Camera3D {
+  let t: Float = w.camTime
+  let radius: Float = 24.0
+  let height: Float = 14.0
+  let cx: Float = sin(x: t * 0.25) * radius
+  let cz: Float = cos(x: t * 0.25) * radius
+
+  ret Camera3D {
+    position: Vector3 { x: cx + 5.0, y: height, z: cz }
+    target: Vector3 { x: 4.5, y: -10.0, z: 0.0 }
+    up: Vector3 { x: 0.0, y: 1.0, z: 0.0 }
+    fovy: 45.0
+    projection: 0
+  }
+}
+
+func cameraSystem(w: mod World) {
+  w.camTime = w.camTime + 0.016
+}
