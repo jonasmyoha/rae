@@ -45,12 +45,21 @@ func inputSystem(w: mod World) {
     }
     ret
   }
-  if w.state is not GameState.Playing {
-    ret
+
+  # P toggles between Playing and Paused. Handled BEFORE the
+  # "skip-input-if-not-Playing" gate so the player can unpause.
+  if isKeyPressed(key: keyP) {
+    if w.state is GameState.Playing {
+      w.state = GameState.Paused
+    } else {
+      if w.state is GameState.Paused {
+        w.state = GameState.Playing
+      }
+    }
   }
 
-  if isKeyPressed(key: keyP) {
-    w.state = GameState.Paused
+  if w.state is not GameState.Playing {
+    ret
   }
 
   let moveLeft: Bool = isKeyDown(key: keyLeft) or isKeyDown(key: keyA)
