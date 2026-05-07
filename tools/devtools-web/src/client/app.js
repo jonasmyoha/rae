@@ -155,6 +155,36 @@ let allTestLogLines = [];
 let examplesBgFrame = null;
 let allBuildLogLines = [];
 let allExampleLogLines = [];
+
+// Classifies a stderr line as "warning" (yellow) or "stderr" (red, default).
+// Compiler diagnostics span multiple lines (header + source pointer + caret),
+// so we keep state and let continuation lines inherit the last severity until
+// a non-diagnostic line resets it.
+function makeStreamClassifier() {
+  let lastLevel = null;
+  return {
+    classify(text, stream) {
+      if (stream !== "stderr") { lastLevel = null; return stream; }
+      if (/\berror:/.test(text)) { lastLevel = "error"; return "stderr"; }
+      if (/\bwarning:/.test(text)) { lastLevel = "warning"; return "warning"; }
+      const isContinuation = /^\s*(\d+\s*)?\|/.test(text)
+        || /^\s*\^/.test(text)
+        || /^\s*~+/.test(text)
+        || /^\d+\s+warnings?\s+generated/i.test(text)
+        || /^\d+\s+errors?\s+generated/i.test(text);
+      if (isContinuation) {
+        return lastLevel === "warning" ? "warning" : "stderr";
+      }
+      lastLevel = null;
+      return "stderr";
+    },
+    reset() { lastLevel = null; }
+  };
+}
+
+const testLineClassifier = makeStreamClassifier();
+const buildLineClassifier = makeStreamClassifier();
+const exampleLineClassifier = makeStreamClassifier();
 let raeSyntax = null;
 let testDirectoryMap = new Map();
 const errorEntries = [];
@@ -716,18 +746,20 @@ function setTestStatus(label, modifierClass, targetLabel) {
 function clearTestLog() {
   if (!testLog) return;
   testLog.innerHTML = "";
+  testLineClassifier.reset();
 }
 
 function clearBuildLog() {
   if (!buildLog) return;
   buildLog.innerHTML = "";
+  buildLineClassifier.reset();
 }
 
 function appendTestLine(text, stream = "stdout") {
   if (!testLog) return;
   allTestLogLines.push({ text, stream });
   const lineEl = document.createElement("div");
-  lineEl.className = `terminal-line ${stream}`;
+  lineEl.className = `terminal-line ${testLineClassifier.classify(text, stream)}`;
   lineEl.textContent = text;
   testLog.appendChild(lineEl);
   testLog.scrollTop = testLog.scrollHeight;
@@ -776,6 +808,7 @@ function updateTestErrorSummary() {
 
   const sortedIndices = Array.from(mergedIndices).sort((a, b) => a - b);
   let lastIdx = -1;
+  const summaryClassifier = makeStreamClassifier();
 
   sortedIndices.forEach(idx => {
     if (lastIdx !== -1 && idx > lastIdx + 1) {
@@ -783,11 +816,12 @@ function updateTestErrorSummary() {
       sep.className = "terminal-line terminal-line--sep";
       sep.textContent = "---";
       testErrorsLog.appendChild(sep);
+      summaryClassifier.reset();
     }
-    
+
     const line = allTestLogLines[idx];
     const lineEl = document.createElement("div");
-    lineEl.className = `terminal-line ${line.stream}`;
+    lineEl.className = `terminal-line ${summaryClassifier.classify(line.text, line.stream)}`;
     lineEl.textContent = line.text;
     testErrorsLog.appendChild(lineEl);
     lastIdx = idx;
@@ -800,7 +834,7 @@ function appendBuildLine(text, stream = "stdout") {
   if (!buildLog) return;
   allBuildLogLines.push({ text, stream });
   const lineEl = document.createElement("div");
-  lineEl.className = `terminal-line ${stream}`;
+  lineEl.className = `terminal-line ${buildLineClassifier.classify(text, stream)}`;
   lineEl.textContent = text;
   buildLog.appendChild(lineEl);
   buildLog.scrollTop = buildLog.scrollHeight;
@@ -1697,13 +1731,14 @@ function setExampleStatus(label, modifierClass, targetLabel) {
 function clearExampleOutput() {
   if (!exampleOutput) return;
   exampleOutput.innerHTML = `<div class="terminal-line">Run an example to see output.</div>`;
+  exampleLineClassifier.reset();
 }
 
 function appendExampleOutput(text, stream = "stdout") {
   if (!exampleOutput) return;
   allExampleLogLines.push({ text, stream });
   const lineEl = document.createElement("div");
-  lineEl.className = `terminal-line ${stream}`;
+  lineEl.className = `terminal-line ${exampleLineClassifier.classify(text, stream)}`;
   lineEl.textContent = text;
   exampleOutput.appendChild(lineEl);
   exampleOutput.scrollTop = exampleOutput.scrollHeight;
