@@ -255,27 +255,48 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 recv_tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, recv_tr);
             if (recv_tr) receiver_base = get_base_type_name(recv_tr);
         }
-        const AstFuncDecl* generic_fallback = NULL;
+        // Resolve overloads in priority order. Both List(T) and String can
+        // export `contains`/`indexOf` etc.; without receiver-typed dispatch
+        // the resolver would pick whichever appears first in declaration
+        // order, which depends on import order (a footgun).
+        //   1. non-generic with matching `this` base (most specific)
+        //   2. generic with matching `this` base
+        //   3. non-generic without `this` (free function)
+        //   4. generic without `this`
+        // Specialisation clones are skipped — we want the template so we
+        // can re-infer per call.
+        const AstFuncDecl* nongeneric_receiver_match = NULL;
         const AstFuncDecl* receiver_match = NULL;
-        const AstFuncDecl* nongeneric_match = NULL;
+        const AstFuncDecl* nongeneric_fallback = NULL;
+        const AstFuncDecl* generic_fallback = NULL;
         for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
             const AstDecl* d = ctx->compiler_ctx->all_decls[i];
-            if (d->kind == AST_DECL_FUNC && str_eq(d->as.func_decl.name, callee_name)) {
-                uint16_t param_count = 0; for (const AstParam* pp = d->as.func_decl.params; pp; pp = pp->next) param_count++;
-                if (param_count != call_arg_count) continue;
-                // Skip specialization clones (specialization_args set, generic_params cleared)
-                // — they would force their own concrete args regardless of context.
-                // Prefer the generic template so we can re-infer from the call site.
-                if (d->as.func_decl.specialization_args) continue;
-                if (!d->as.func_decl.generic_params) { nongeneric_match = &d->as.func_decl; continue; }
-                if (d->as.func_decl.params && str_eq_cstr(d->as.func_decl.params->name, "this") && receiver_base.len > 0) {
-                    Str param_base = get_base_type_name(d->as.func_decl.params->type);
-                    if (str_eq(param_base, receiver_base)) { receiver_match = &d->as.func_decl; continue; }
-                }
-                if (!generic_fallback) generic_fallback = &d->as.func_decl;
+            if (d->kind != AST_DECL_FUNC || !str_eq(d->as.func_decl.name, callee_name)) continue;
+            const AstFuncDecl* candidate = &d->as.func_decl;
+            uint16_t param_count = 0; for (const AstParam* pp = candidate->params; pp; pp = pp->next) param_count++;
+            if (param_count != call_arg_count) continue;
+            if (candidate->specialization_args) continue;
+
+            bool has_this = candidate->params && str_eq_cstr(candidate->params->name, "this");
+            bool receiver_matches = false;
+            if (has_this && receiver_base.len > 0) {
+                Str param_base = get_base_type_name(candidate->params->type);
+                receiver_matches = str_eq(param_base, receiver_base);
+            }
+            if (!candidate->generic_params) {
+                if (receiver_matches) { if (!nongeneric_receiver_match) nongeneric_receiver_match = candidate; }
+                else if (!nongeneric_fallback) nongeneric_fallback = candidate;
+            } else {
+                if (receiver_matches) { if (!receiver_match) receiver_match = candidate; }
+                else if (!generic_fallback) generic_fallback = candidate;
             }
         }
-        if (!fd) fd = nongeneric_match ? nongeneric_match : (receiver_match ? receiver_match : generic_fallback);
+        if (!fd) {
+            fd = nongeneric_receiver_match ? nongeneric_receiver_match
+               : receiver_match ? receiver_match
+               : nongeneric_fallback ? nongeneric_fallback
+               : generic_fallback;
+        }
     }
 
     if (fd) {
