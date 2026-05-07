@@ -572,7 +572,12 @@ bool emit_auto_init(CFuncContext* ctx, const AstTypeRef* type, FILE* out) {
     else if (str_eq_cstr(base, "Float64") || str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float32")) fprintf(out, "0.0");
     else if (str_eq_cstr(base, "Bool")) fprintf(out, "false");
     else if (str_eq_cstr(base, "String")) fprintf(out, "(rae_String){0}");
-    else { const AstDecl* d = find_type_decl(ctx, ctx->module, base); if (d && d->kind == AST_DECL_TYPE) emit_struct_auto_init(ctx, d, type, out); else fprintf(out, "{0}"); }
+    else {
+        const AstDecl* d = find_type_decl(ctx, ctx->module, base);
+        if (d && d->kind == AST_DECL_TYPE) emit_struct_auto_init(ctx, d, type, out);
+        else if (find_enum_decl(ctx, ctx->module, base)) fprintf(out, "0");
+        else fprintf(out, "{0}");
+    }
     return true;
 }
 
