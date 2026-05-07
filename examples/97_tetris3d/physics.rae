@@ -148,14 +148,18 @@ func spawnNextPiece(w: mod World) {
 # Sliding is preserved: a successful left/right/rotate while grounded
 # resets the timer (handled in input.tryMove).
 func physicsSystem(w: mod World) {
-  if w.state is not GameState.Playing {
-    ret
-  }
+  # Lock-flash decay runs every frame regardless of state. Otherwise the
+  # flash from the piece that triggered Game Over freezes mid-bright and
+  # never returns to normal colour.
   if w.lockFlash > 0.0 {
     w.lockFlash = w.lockFlash - 0.05
     if w.lockFlash < 0.0 {
       w.lockFlash = 0.0
     }
+  }
+
+  if w.state is not GameState.Playing {
+    ret
   }
 
   let grounded: Bool = canMove(w: w, dx: 0, dy: 1, dr: 0) is 0
