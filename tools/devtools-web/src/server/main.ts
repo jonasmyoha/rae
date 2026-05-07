@@ -376,6 +376,23 @@ function createStatusMessage(message: string): ServerEvent {
   };
 }
 
+// Legacy entries were written as "YYYY-MM-DD HH:MM:SS +ZZZZ" by
+// update_metrics.sh. Safari (and the WHATWG Date spec) reject that
+// format — only ISO 8601 with `T` separator and `+HH:MM` offset is
+// guaranteed to parse cross-browser. Normalise on read so the client
+// never has to deal with the legacy shape.
+function normalizeCompilerTimestamp(raw: string): string {
+  const trimmed = raw.trim();
+  // Already ISO 8601-ish (has a `T` separator) — pass through.
+  if (/^\d{4}-\d{2}-\d{2}T/.test(trimmed)) return trimmed;
+  // "YYYY-MM-DD HH:MM:SS +ZZZZ" or "YYYY-MM-DD HH:MM:SS +ZZ:ZZ"
+  const m = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\s*([+-])(\d{2}):?(\d{2}))?$/.exec(trimmed);
+  if (!m) return trimmed;
+  const [, date, time, sign, hh, mm] = m;
+  if (sign && hh && mm) return `${date}T${time}${sign}${hh}:${mm}`;
+  return `${date}T${time}`;
+}
+
 async function readCompilerMetrics(limit: number): Promise<CompilerMetricEntry[]> {
   try {
     const file = Bun.file(compilerMetricsPath);
@@ -389,8 +406,9 @@ async function readCompilerMetrics(limit: number): Promise<CompilerMetricEntry[]
       try {
         const parsed = JSON.parse(line);
         if (typeof parsed.src_line_count !== "number") continue;
+        const ts = typeof parsed.timestamp === "string" ? normalizeCompilerTimestamp(parsed.timestamp) : null;
         entries.push({
-          timestamp: typeof parsed.timestamp === "string" ? parsed.timestamp : null,
+          timestamp: ts,
           commit: typeof parsed.commit === "string" ? parsed.commit : null,
           files: typeof parsed.src_file_count === "number" ? parsed.src_file_count : null,
           lines: parsed.src_line_count
