@@ -62,13 +62,22 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
               break;
           }
       }
-      // `x is none` / `none is x`: keep the opt result as RaeAny so the comparison
-      // against rae_any_none() type-checks. Otherwise auto-unbox would yield a
-      // primitive on one side and RaeAny on the other.
+      // `x is none` / `none is x`: emit a runtime tag check rather than `==`,
+      // because RaeAny is a struct and `==` between two structs is invalid C.
+      // The non-NONE side keeps its RaeAny value (suppress_opt_unbox).
       bool none_compare = (expr->as.binary.op == AST_BIN_IS) &&
           (expr->as.binary.rhs->kind == AST_EXPR_NONE || expr->as.binary.lhs->kind == AST_EXPR_NONE);
       bool saved_unbox = ctx->suppress_opt_unbox;
-      if (none_compare) ctx->suppress_opt_unbox = true;
+      if (none_compare) {
+          const AstExpr* operand = (expr->as.binary.lhs->kind == AST_EXPR_NONE)
+              ? expr->as.binary.rhs : expr->as.binary.lhs;
+          ctx->suppress_opt_unbox = true;
+          fprintf(out, "rae_any_is_none(");
+          emit_expr(ctx, operand, out, PREC_LOWEST, false, false);
+          fprintf(out, ")");
+          ctx->suppress_opt_unbox = saved_unbox;
+          break;
+      }
       // Float modulo: emit fmod(a, b) instead of a % b
       if (expr->as.binary.op == AST_BIN_MOD) {
           bool lhs_float = expr->as.binary.lhs->kind == AST_EXPR_FLOAT;
