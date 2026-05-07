@@ -1,0 +1,154 @@
+# 3D scene rendering: the locked board, the falling piece, particles,
+# and a wireframe well frame so the play area is legible from any
+# camera angle. Coordinates: x is column 0..gridWidth, y goes DOWN
+# in grid space but is flipped to negative-Y in 3D so the well sits
+# above the floor grid.
+import raylib
+
+# Convert (gridX, gridY) to world Vector3 centred on the cell.
+func cellPos(gx: Int, gy: Int) ret Vector3 {
+  let cx: Float = gx.toFloat() + 0.5
+  let cy: Float = (0.0 - gy.toFloat()) - 0.5
+  ret Vector3 { x: cx, y: cy, z: 0.0 }
+}
+
+func drawBlock(gx: Int, gy: Int, kindId: Int, flash: Float) {
+  let pos: Vector3 = cellPos(gx: gx, gy: gy)
+  let col: Color = kindColor(id: kindId)
+  # Lock-flash: brighten colour briefly when a piece just locks.
+  let mix: Int = (flash * 80.0).toInt()
+  let r: Int = col.r + mix
+  let g: Int = col.g + mix
+  let b: Int = col.b + mix
+  if r > 255 {
+    r = 255
+  }
+  if g > 255 {
+    g = 255
+  }
+  if b > 255 {
+    b = 255
+  }
+  let lit: Color = { r: r, g: g, b: b, a: 255 }
+  drawCube(pos: pos, width: 0.92, height: 0.92, length: 0.92, color: lit)
+  drawCubeWires(
+    pos: pos
+    width: 0.96
+    height: 0.96
+    length: 0.96
+    color: { r: 255, g: 255, b: 255, a: 90 }
+  )
+}
+
+# Draw the wireframe of the play well — a 4-edge cuboid floor outlining
+# `gridWidth` x `gridHeight` cells.
+func drawWell() {
+  # Bind globals to locals so method-call dispatch picks the Int.toFloat()
+  # overload instead of String.toFloat() (overload resolution doesn't see
+  # global Ints as having a clear receiver type yet).
+  let gw: Int = gridWidth
+  let gh: Int = gridHeight
+  let gwF: Float = gw.toFloat()
+  let ghF: Float = gh.toFloat()
+
+  let i: Int = 0
+  loop i <= gh {
+    let y: Float = 0.0 - i.toFloat()
+    drawCubeWires(
+      pos: Vector3 { x: gwF / 2.0, y: y, z: 0.0 }
+      width: gwF
+      height: 0.02
+      length: 0.02
+      color: { r: 80, g: 90, b: 110, a: 60 }
+    )
+    i = i + 1
+  }
+  let j: Int = 0
+  loop j <= gw {
+    let x: Float = j.toFloat()
+    drawCubeWires(
+      pos: Vector3 { x: x, y: 0.0 - ghF / 2.0, z: 0.0 }
+      width: 0.02
+      height: ghF
+      length: 0.02
+      color: { r: 80, g: 90, b: 110, a: 60 }
+    )
+    j = j + 1
+  }
+}
+
+func drawLockedGrid(w: view World) {
+  let y: Int = 0
+  loop y < gridHeight {
+    let x: Int = 0
+    loop x < gridWidth {
+      let v: Int = gridGet(w: w, x: x, y: y)
+      if v > 0 {
+        drawBlock(gx: x, gy: y, kindId: v, flash: w.lockFlash)
+      }
+      x = x + 1
+    }
+    y = y + 1
+  }
+}
+
+func drawCurrentPiece(w: view World) {
+  if w.state is GameState.GameOver {
+    ret
+  }
+  let cp: view Piece => w.currentPiece
+  let kindId: Int = getKindId(kind: cp.kind)
+  let py: Int = 0
+  loop py < 4 {
+    let px: Int = 0
+    loop px < 4 {
+      if getShapeCell(kind: cp.kind, rot: cp.rotation, px: px, py: py) is 1 {
+        drawBlock(gx: cp.x + px, gy: cp.y + py, kindId: kindId, flash: 0.0)
+      }
+      px = px + 1
+    }
+    py = py + 1
+  }
+}
+
+# Ghost piece: faint outline of where the current piece will land.
+func drawGhostPiece(w: view World) {
+  if w.state is GameState.GameOver {
+    ret
+  }
+  let cp: view Piece => w.currentPiece
+  # Find drop distance.
+  let drop: Int = 0
+  loop canMove(w: w, dx: 0, dy: drop + 1, dr: 0) is 1 {
+    drop = drop + 1
+  }
+  if drop is 0 {
+    ret
+  }
+  let py: Int = 0
+  loop py < 4 {
+    let px: Int = 0
+    loop px < 4 {
+      if getShapeCell(kind: cp.kind, rot: cp.rotation, px: px, py: py) is 1 {
+        let pos: Vector3 = cellPos(gx: cp.x + px, gy: cp.y + drop + py)
+        drawCubeWires(
+          pos: pos
+          width: 0.92
+          height: 0.92
+          length: 0.92
+          color: { r: 200, g: 200, b: 220, a: 60 }
+        )
+      }
+      px = px + 1
+    }
+    py = py + 1
+  }
+}
+
+func renderSystem(w: view World) {
+  drawWell()
+  drawLockedGrid(w)
+  drawGhostPiece(w)
+  drawCurrentPiece(w)
+  renderParticles(w)
+}
