@@ -1,0 +1,168 @@
+# Physics: gravity, collision, locking, line clears, scoring.
+# Adapted from 94_tetris2d/main.rae — same rules, same numbers.
+import raylib
+
+# Returns 1 if the cell at (x, y) is solid (locked block or out of
+# bounds on the sides / bottom). Above the well (y < 0) is treated as
+# empty so a piece can spawn there.
+func isOccupied(w: view World, x: Int, y: Int) ret Int {
+  if x < 0 or x >= gridWidth or y >= gridHeight {
+    ret 1
+  }
+  if y < 0 {
+    ret 0
+  }
+  if gridGet(w: w, x: x, y: y) > 0 {
+    ret 1
+  }
+  ret 0
+}
+
+func canMove(w: view World, dx: Int, dy: Int, dr: Int) ret Int {
+  let cp: view Piece => w.currentPiece
+  let newX: Int = cp.x + dx
+  let newY: Int = cp.y + dy
+  let newRot: Int = (cp.rotation + dr) % 4
+  if newRot < 0 {
+    newRot = newRot + 4
+  }
+  let py: Int = 0
+  loop py < 4 {
+    let px: Int = 0
+    loop px < 4 {
+      if getShapeCell(kind: cp.kind, rot: newRot, px: px, py: py) is 1 {
+        if isOccupied(w: w, x: newX + px, y: newY + py) is 1 {
+          ret 0
+        }
+      }
+      px = px + 1
+    }
+    py = py + 1
+  }
+  ret 1
+}
+
+func lockPiece(w: mod World) {
+  let cp: view Piece => w.currentPiece
+  let kindId: Int = getKindId(kind: cp.kind)
+  let py: Int = 0
+  loop py < 4 {
+    let px: Int = 0
+    loop px < 4 {
+      if getShapeCell(kind: cp.kind, rot: cp.rotation, px: px, py: py) is 1 {
+        let gx: Int = cp.x + px
+        let gy: Int = cp.y + py
+        if gy >= 0 and gy < gridHeight {
+          gridSet(w: w, x: gx, y: gy, value: kindId)
+        }
+      }
+      px = px + 1
+    }
+    py = py + 1
+  }
+  w.lockFlash = 1.0
+}
+
+func checkLines(w: mod World) {
+  let cleared: Int = 0
+  let y: Int = gridHeight - 1
+  loop y >= 0 {
+    let full: Int = 1
+    let x: Int = 0
+    loop x < gridWidth {
+      if gridGet(w: w, x: x, y: y) is 0 {
+        full = 0
+      }
+      x = x + 1
+    }
+    if full is 1 {
+      cleared = cleared + 1
+      spawnLineClearParticles(w: w, row: y)
+      # Shift everything above one row down.
+      let ty: Int = y
+      loop ty > 0 {
+        let tx: Int = 0
+        loop tx < gridWidth {
+          let above: Int = gridGet(w: w, x: tx, y: ty - 1)
+          gridSet(w: w, x: tx, y: ty, value: above)
+          tx = tx + 1
+        }
+        ty = ty - 1
+      }
+      let tx: Int = 0
+      loop tx < gridWidth {
+        gridSet(w: w, x: tx, y: 0, value: 0)
+        tx = tx + 1
+      }
+      # Re-check the same row index since rows shifted down.
+      y = y + 1
+    }
+    y = y - 1
+  }
+  if cleared > 0 {
+    w.lines = w.lines + cleared
+    # 1/2/3/4-line bonus matching modern guideline scoring.
+    let mult: Int = 100
+    if cleared is 2 {
+      mult = 300
+    }
+    if cleared is 3 {
+      mult = 500
+    }
+    if cleared is 4 {
+      mult = 800
+    }
+    w.score = w.score + mult * w.level
+    let newLevel: Int = w.lines / 10 + 1
+    if newLevel > w.level {
+      w.level = newLevel
+      w.fallDelay = 30 - (w.level * 2)
+      if w.fallDelay < 4 {
+        w.fallDelay = 4
+      }
+    }
+  }
+}
+
+func spawnNextPiece(w: mod World) {
+  let p: Piece = {
+    kind: w.nextKind
+    x: 3
+    y: 0
+    rotation: 0
+  }
+  w.currentPiece = p
+  w.nextKind = randomKind()
+  if canMove(w: w, dx: 0, dy: 0, dr: 0) is 0 {
+    w.state = GameState.GameOver
+  }
+}
+
+# Apply gravity to the active piece; lock it when it can't fall further.
+func physicsSystem(w: mod World) {
+  if w.state is not GameState.Playing {
+    ret
+  }
+  if w.lockFlash > 0.0 {
+    w.lockFlash = w.lockFlash - 0.05
+    if w.lockFlash < 0.0 {
+      w.lockFlash = 0.0
+    }
+  }
+  w.fallTimer = w.fallTimer + 1
+  if w.fallTimer >= w.fallDelay {
+    w.fallTimer = 0
+    if canMove(w: w, dx: 0, dy: 1, dr: 0) is 1 {
+      w.currentPiece.y = w.currentPiece.y + 1
+      w.lockTimer = 0
+    } else {
+      w.lockTimer = w.lockTimer + 1
+      if w.lockTimer >= w.lockDelay {
+        w.lockTimer = 0
+        lockPiece(w: w)
+        checkLines(w: w)
+        spawnNextPiece(w: w)
+      }
+    }
+  }
+}
