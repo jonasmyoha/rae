@@ -1,0 +1,131 @@
+import json
+import string
+import core
+import ui/components
+import ui/ecs
+import ui/registry
+import ui/scene
+import ui/scene_loader
+
+# Build a minimal .raescene-shaped JSON via concat. `{` starts string
+# interpolation in Rae so we have to escape every `{` and `}` with
+# `\{` / `\}` to keep them literal.
+func sampleScene() ret String {
+  let s: String = ""
+  s = s.concat(other: "\{")
+  s = s.concat(other: "\"type\":\"Scene\",")
+  s = s.concat(other: "\"version\":2,")
+  s = s.concat(other: "\"sceneId\":\"music-player-album\",")
+  s = s.concat(other: "\"root\":\"AlbumRoot\",")
+  s = s.concat(other: "\"nodes\":\{")
+  s = s.concat(other: "\"AlbumRoot\":\{")
+  s = s.concat(other: "\"Rect\":\{\"x\":0,\"y\":0,\"w\":600,\"h\":1300\},")
+  s = s.concat(other: "\"Layout\":\{\"type\":\"Vertical\",\"gap\":16,\"alignCross\":\"Start\"\},")
+  s = s.concat(other: "\"Padding\":\{\"l\":24,\"t\":24,\"r\":24,\"b\":12\},")
+  s = s.concat(other: "\"Children\":[\"TopBar\",\"AlbumHero\",\"PlayBtn\"]")
+  s = s.concat(other: "\},")
+  s = s.concat(other: "\"TopBar\":\{")
+  s = s.concat(other: "\"Layout\":\{\"type\":\"Horizontal\",\"gap\":12,\"alignCross\":\"Center\"\},")
+  s = s.concat(other: "\"Children\":[\"BackBtn\"]")
+  s = s.concat(other: "\},")
+  s = s.concat(other: "\"BackBtn\":\{")
+  s = s.concat(other: "\"Sprite\":\{\"textureKey\":\"icon-back\"\},")
+  s = s.concat(other: "\"OnClick\":\{\"actionId\":\"nav.back\"\}")
+  s = s.concat(other: "\},")
+  s = s.concat(other: "\"AlbumHero\":\{")
+  s = s.concat(other: "\"Text\":\{\"text\":\"Charcoal\",\"styleId\":\"h1\"\},")
+  s = s.concat(other: "\"Active\":\{\"value\":true\}")
+  s = s.concat(other: "\},")
+  s = s.concat(other: "\"PlayBtn\":\{")
+  s = s.concat(other: "\"Shape\":\{\"kind\":\"RoundedRect\",\"radius\":24,\"fill\":\{\"r\":0,\"g\":0,\"b\":0,\"a\":255\}\},")
+  s = s.concat(other: "\"Button\":\{\"role\":\"primary\"\},")
+  s = s.concat(other: "\"OnClick\":\{\"actionId\":\"music.play\"\}")
+  s = s.concat(other: "\}")
+  s = s.concat(other: "\}")
+  s = s.concat(other: "\}")
+  ret s
+}
+
+func main() {
+  let scene: Scene = parseScene(source: sampleScene())
+  log("scene.ok = {scene.ok}")
+  log("scene.sceneId = {scene.sceneId}")
+  log("scene.rootNodeId = {scene.rootNodeId}")
+  log("scene.nodes.length = {scene.nodes.length}")
+
+  if scene.ok is false {
+    log("error: {scene.errorMsg}")
+    ret
+  }
+
+  let world: UiWorld = createUiWorld()
+  let rootEntity: Int = loadScene(world: world, scene: scene)
+  log("rootEntity = {rootEntity}")
+  log("alive = {aliveCount(world: world)}")
+  log("nodeIds map size = {world.nodeIds.length}")
+
+  log("--- entity dump ---")
+  dumpScene(world: world, scene: scene)
+
+  # Confirm a couple of components actually got the right values.
+  log("--- component spot-checks ---")
+  let albumRootIdOpt: opt Int = world.nodeIds.get(k: "AlbumRoot")
+  if albumRootIdOpt is none {
+    log("AlbumRoot missing")
+  } else {
+    let albumRootId: Int = albumRootIdOpt
+    if componentHas(this: world.rects, entity: albumRootId) {
+      let r: Rect = componentGet(this: world.rects, entity: albumRootId)
+      log("AlbumRoot Rect: {r.x},{r.y} {r.w}x{r.h}")
+    }
+    if componentHas(this: world.layouts, entity: albumRootId) {
+      let lay: Layout = componentGet(this: world.layouts, entity: albumRootId)
+      log("AlbumRoot Layout: kind={lay.kind} gap={lay.gap} alignCross={lay.alignCross}")
+    }
+    if componentHas(this: world.childrens, entity: albumRootId) {
+      let ch: Children = componentGet(this: world.childrens, entity: albumRootId)
+      log("AlbumRoot has {ch.ids.length} children")
+    }
+  }
+
+  let backBtnIdOpt: opt Int = world.nodeIds.get(k: "BackBtn")
+  if backBtnIdOpt is none {
+    log("BackBtn missing")
+  } else {
+    let backBtnId: Int = backBtnIdOpt
+    let oc: OnClick = componentGet(this: world.onClicks, entity: backBtnId)
+    log("BackBtn OnClick.actionId = {oc.actionId}")
+    let sp: Sprite = componentGet(this: world.sprites, entity: backBtnId)
+    log("BackBtn Sprite.textureKey = {sp.textureKey}")
+  }
+
+  let playBtnIdOpt: opt Int = world.nodeIds.get(k: "PlayBtn")
+  if playBtnIdOpt is none {
+    log("PlayBtn missing")
+  } else {
+    let playBtnId: Int = playBtnIdOpt
+    let sh: Shape = componentGet(this: world.shapes, entity: playBtnId)
+    log("PlayBtn Shape.kind={sh.kind} radius={sh.radius}")
+    log("PlayBtn Shape.fill.r={sh.fill.r} a={sh.fill.a}")
+  }
+
+  # --- malformed input ---
+  log("--- malformed inputs ---")
+  let bad1: Scene = parseScene(source: "\{\"type\":\"NotScene\",\"version\":2\}")
+  log("bad type ok={bad1.ok} msg={bad1.errorMsg}")
+
+  let bad2: String = ""
+  bad2 = bad2.concat(other: "\{\"type\":\"Scene\",\"version\":1\}")
+  let badScene2: Scene = parseScene(source: bad2)
+  log("bad version ok={badScene2.ok} msg={badScene2.errorMsg}")
+
+  let bad3: String = ""
+  bad3 = bad3.concat(other: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Missing\",\"nodes\":\{\"Other\":\{\}\}\}")
+  let badScene3: Scene = parseScene(source: bad3)
+  log("bad root ok={badScene3.ok} msg={badScene3.errorMsg}")
+
+  let bad4: String = ""
+  bad4 = bad4.concat(other: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"R\",\"nodes\":\{\"R\":\{\"Children\":[\"Ghost\"]\}\}\}")
+  let badScene4: Scene = parseScene(source: bad4)
+  log("bad child ok={badScene4.ok} msg={badScene4.errorMsg}")
+}

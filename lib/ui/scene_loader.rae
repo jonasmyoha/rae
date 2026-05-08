@@ -1,0 +1,221 @@
+# Materialise a parsed `Scene` into ECS state on a `UiWorld`.
+#
+# Three passes:
+# 1. allocate one entity per SceneNode and register `nodeId → entity`
+#    in `world.nodeIds` so children can resolve.
+# 2. apply each node's component bag via `applyComponentByName`. The
+#    "Children" key is special-cased and skipped here.
+# 3. build `Children` and `ParentLink` components — done last so all
+#    entities are guaranteed allocated when we resolve childIds.
+#
+# Returns the root entity id, or -1 if the scene wasn't ok.
+import string
+import core
+import json
+
+# Minimal helper: append an Int to a List(Int) via a non-generic
+# function. Same workaround as the ones in ecs.rae — needed when the
+# caller is itself inside a generic body, but kept available here
+# anyway for symmetry.
+func appendIntListSL(lst: mod List(Int), value: Int) {
+  lst.add(value: value)
+}
+
+func loadScene(world: mod UiWorld, scene: view Scene) ret Int {
+  if scene.ok is false {
+    ret -1
+  }
+
+  # ---------- pass 1: allocate entities, populate nodeIds map ----------
+  let nodeCount: Int = scene.nodes.length
+  let entitiesByNodeIndex: List(Int) = createList(Int)(initialCap: nodeCount)
+  let nodeIdsMap: mod StringMap(Int) => world.nodeIds
+  let i: Int = 0
+  loop i < nodeCount {
+    let node: SceneNode = sceneNodeAt(this: scene, idx: i)
+    let entity: Int = createEntity(world: world)
+    appendIntListSL(lst: entitiesByNodeIndex, value: entity)
+    nodeIdsMap.set(k: node.nodeId, value: entity)
+    i = i + 1
+  }
+
+  # ---------- pass 2: apply components ----------
+  let docView: view JsonDoc => scene.doc
+  let j: Int = 0
+  loop j < nodeCount {
+    let node: SceneNode = sceneNodeAt(this: scene, idx: j)
+    let entity: Int = entitiesByNodeIndex.get(index: j)
+
+    # Always tag the entity with NodeId + Name (label = nodeId by default)
+    # so the dump and overrides can identify it without reading the
+    # component bag. NodeId from the bag (if present) wins.
+    let defaultNodeId: NodeId = { id: node.nodeId }
+    componentSet(this: world.nodeIdComponents, entity: entity, data: defaultNodeId)
+    let defaultName: Name = { label: node.nodeId }
+    componentSet(this: world.names, entity: entity, data: defaultName)
+
+    # Walk the node's component bag in declaration order.
+    let bag: JsonValue = jsonValueAt(doc: docView, idx: node.componentsValueIdx)
+    let keyCount: Int = jsonObjectLen(this: bag)
+    let k: Int = 0
+    loop k < keyCount {
+      let key: String = jsonObjectKeyAt(doc: docView, this: bag, idx: k)
+      # Children is hierarchy, not a component — handled in pass 3.
+      let childrenKey: String = "Children"
+      if key.equals(other: childrenKey) {
+        k = k + 1
+      } else {
+        let valueAtKey: JsonValue = jsonObjectValueAt(doc: docView, this: bag, idx: k)
+        applyComponentByName(
+          world: world
+          entity: entity
+          name: key
+          doc: docView
+          val: valueAtKey
+        )
+        k = k + 1
+      }
+    }
+    j = j + 1
+  }
+
+  # ---------- pass 3: hierarchy (Children + ParentLink) ----------
+  let p: Int = 0
+  loop p < nodeCount {
+    let node: SceneNode = sceneNodeAt(this: scene, idx: p)
+    let parentEntity: Int = entitiesByNodeIndex.get(index: p)
+    let kn: Int = node.childrenIds.length
+    if kn > 0 {
+      let kids: List(Int) = createList(Int)(initialCap: kn)
+      let q: Int = 0
+      loop q < kn {
+        let childId: String = node.childrenIds.get(index: q)
+        let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
+        if childIdx >= 0 {
+          let childEntity: Int = entitiesByNodeIndex.get(index: childIdx)
+          appendIntListSL(lst: kids, value: childEntity)
+          let pl: ParentLink = { parent: parentEntity }
+          componentSet(this: world.parentLinks, entity: childEntity, data: pl)
+        }
+        q = q + 1
+      }
+      let ch: Children = { ids: kids }
+      componentSet(this: world.childrens, entity: parentEntity, data: ch)
+    }
+    p = p + 1
+  }
+
+  # Root entity = the entity allocated for `scene.rootNodeId`.
+  let rootIdx: Int = sceneNodeIndex(this: scene, nodeId: scene.rootNodeId)
+  if rootIdx < 0 {
+    ret -1
+  }
+  let rootEntity: Int = entitiesByNodeIndex.get(index: rootIdx)
+  ret rootEntity
+}
+
+# Diagnostic helper used by tests and the eventual editor: dump the
+# entity list with its NodeId, parent, and the names of components
+# attached to it. Doesn't pretty-print component data — just the
+# inventory. Stable order: by NodeId in scene.nodes.
+func dumpScene(world: view UiWorld, scene: view Scene) {
+  let n: Int = scene.nodes.length
+  let i: Int = 0
+  loop i < n {
+    let node: SceneNode = sceneNodeAt(this: scene, idx: i)
+    let entityIdx: Int = sceneNodeIndex(this: scene, nodeId: node.nodeId)
+    # Resolve via the world's nodeIds map (more authoritative than our
+    # local list — covers later runtime additions too).
+    let entityOpt: opt Int = world.nodeIds.get(k: node.nodeId)
+    if entityOpt is none {
+      log("  [{node.nodeId}] (not in world.nodeIds — skipped)")
+    } else {
+      let entity: Int = entityOpt
+      let parentStr: String = "(root)"
+      if componentHas(this: world.parentLinks, entity: entity) {
+        let pl: ParentLink = componentGet(this: world.parentLinks, entity: entity)
+        parentStr = "parent=ent{pl.parent}"
+      }
+      let comps: String = componentNamesFor(world: world, entity: entity)
+      log("  [{node.nodeId}] ent={entity} {parentStr} comps=[{comps}]")
+    }
+    i = i + 1
+  }
+}
+
+# Returns a comma-separated list of authored component names attached
+# to `entity`. Order matches `registeredComponentNames()` for stable
+# diagnostic output.
+func componentNamesFor(world: view UiWorld, entity: Int) ret String {
+  let parts: List(String) = createList(String)(initialCap: 8)
+  if componentHas(this: world.rects, entity: entity) {
+    parts.add(value: "Rect")
+  }
+  if componentHas(this: world.sizes, entity: entity) {
+    parts.add(value: "Size")
+  }
+  if componentHas(this: world.layouts, entity: entity) {
+    parts.add(value: "Layout")
+  }
+  if componentHas(this: world.paddings, entity: entity) {
+    parts.add(value: "Padding")
+  }
+  if componentHas(this: world.aligns, entity: entity) {
+    parts.add(value: "Align")
+  }
+  if componentHas(this: world.offsets, entity: entity) {
+    parts.add(value: "Offset")
+  }
+  if componentHas(this: world.sprites, entity: entity) {
+    parts.add(value: "Sprite")
+  }
+  if componentHas(this: world.texts, entity: entity) {
+    parts.add(value: "Text")
+  }
+  if componentHas(this: world.shapes, entity: entity) {
+    parts.add(value: "Shape")
+  }
+  if componentHas(this: world.actives, entity: entity) {
+    parts.add(value: "Active")
+  }
+  if componentHas(this: world.opacities, entity: entity) {
+    parts.add(value: "Opacity")
+  }
+  if componentHas(this: world.onClicks, entity: entity) {
+    parts.add(value: "OnClick")
+  }
+  if componentHas(this: world.buttons, entity: entity) {
+    parts.add(value: "Button")
+  }
+  if componentHas(this: world.names, entity: entity) {
+    parts.add(value: "Name")
+  }
+  if componentHas(this: world.nodeIdComponents, entity: entity) {
+    parts.add(value: "NodeId")
+  }
+  if componentHas(this: world.sceneInstances, entity: entity) {
+    parts.add(value: "SceneInstance")
+  }
+  if componentHas(this: world.textBindings, entity: entity) {
+    parts.add(value: "TextBinding")
+  }
+  if componentHas(this: world.maskShapes, entity: entity) {
+    parts.add(value: "MaskShape")
+  }
+  if componentHas(this: world.childrens, entity: entity) {
+    parts.add(value: "Children")
+  }
+  let comma: String = ","
+  let acc: String = ""
+  let i: Int = 0
+  loop i < parts.length {
+    let s: String = parts.get(index: i)
+    if i is 0 {
+      acc = s
+    } else {
+      acc = acc.concat(other: comma).concat(other: s)
+    }
+    i = i + 1
+  }
+  ret acc
+}

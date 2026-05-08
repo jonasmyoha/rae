@@ -10,11 +10,17 @@
 # validation that a `.raescene` file doesn't reference unknown
 # components, etc.).
 #
-# Phase 1c (#42) will fill in `applyComponentByName` with actual JSON
-# deserialisation. For #41 the registry just exposes the catalogue and
-# offers a tiny smoke-test helper.
+# Phase 1c (#42) fills in `applyComponentByName` with the per-component
+# JSON deserialisers and applier dispatch. The dispatch is a long
+# if/else chain rather than a function pointer table because Rae has
+# no first-class function references — adding a new component costs
+# one new arm here, one entry in `registeredComponentNames`, and one
+# field on `UiWorld`. Components not yet handled (most effects,
+# DataRequest, ListView) fall through to a silent no-op so a scene
+# file can still load if it carries them.
 import string
 import core
+import json
 
 # Build the canonical list of authored component names. Phase 1c uses
 # this to validate that every node's keys (other than `Children`) name
@@ -87,4 +93,526 @@ func isKnownComponent(name: String) ret Bool {
 
 func registeredComponentCount() ret Int {
   ret registeredComponentNames().length
+}
+
+# -----------------------------------------------------------------
+# Helpers — JSON value extraction with sensible defaults
+# -----------------------------------------------------------------
+
+func optFloat(doc: view JsonDoc, container: view JsonValue, key: String, fallback: Float) ret Float {
+  let idx: Int = jsonField(doc: doc, this: container, key: key)
+  if idx < 0 {
+    ret fallback
+  }
+  let v: JsonValue = jsonValueAt(doc: doc, idx: idx)
+  ret jsonFloat(this: v, fallback: fallback)
+}
+
+func optInt(doc: view JsonDoc, container: view JsonValue, key: String, fallback: Int) ret Int {
+  let idx: Int = jsonField(doc: doc, this: container, key: key)
+  if idx < 0 {
+    ret fallback
+  }
+  let v: JsonValue = jsonValueAt(doc: doc, idx: idx)
+  ret jsonInt(this: v, fallback: fallback)
+}
+
+func optString(doc: view JsonDoc, container: view JsonValue, key: String, fallback: String) ret String {
+  let idx: Int = jsonField(doc: doc, this: container, key: key)
+  if idx < 0 {
+    ret fallback
+  }
+  let v: JsonValue = jsonValueAt(doc: doc, idx: idx)
+  ret jsonString(this: v, fallback: fallback)
+}
+
+func optBool(doc: view JsonDoc, container: view JsonValue, key: String, fallback: Bool) ret Bool {
+  let idx: Int = jsonField(doc: doc, this: container, key: key)
+  if idx < 0 {
+    ret fallback
+  }
+  let v: JsonValue = jsonValueAt(doc: doc, idx: idx)
+  ret jsonBool(this: v, fallback: fallback)
+}
+
+# -----------------------------------------------------------------
+# Enum-from-string lookups
+#
+# Each authored enum has a small set of legal string values. Anything
+# unrecognised falls back to the safest default. Keeping these inline
+# (rather than in a Map) avoids touching the StringMap-inside-struct
+# Live-VM corner.
+# -----------------------------------------------------------------
+
+func parseSizeMode(s: String) ret SizeMode {
+  let hugStr: String = "Hug"
+  let fillStr: String = "Fill"
+  if s.equals(other: hugStr) {
+    ret SizeMode.Hug
+  }
+  if s.equals(other: fillStr) {
+    ret SizeMode.Fill
+  }
+  ret SizeMode.Fixed
+}
+
+func parseLayoutType(s: String) ret LayoutType {
+  let h: String = "Horizontal"
+  let v: String = "Vertical"
+  let g: String = "Grid"
+  let st: String = "Stack"
+  if s.equals(other: h) {
+    ret LayoutType.Horizontal
+  }
+  if s.equals(other: v) {
+    ret LayoutType.Vertical
+  }
+  if s.equals(other: g) {
+    ret LayoutType.Grid
+  }
+  if s.equals(other: st) {
+    ret LayoutType.Stack
+  }
+  ret LayoutType.None
+}
+
+func parseAlignKind(s: String) ret AlignKind {
+  let c: String = "Center"
+  let e: String = "End"
+  let sb: String = "SpaceBetween"
+  let str: String = "Stretch"
+  if s.equals(other: c) {
+    ret AlignKind.Center
+  }
+  if s.equals(other: e) {
+    ret AlignKind.End
+  }
+  if s.equals(other: sb) {
+    ret AlignKind.SpaceBetween
+  }
+  if s.equals(other: str) {
+    ret AlignKind.Stretch
+  }
+  ret AlignKind.Start
+}
+
+func parseShapeKind(s: String) ret ShapeKind {
+  let rr: String = "RoundedRect"
+  let c: String = "Circle"
+  if s.equals(other: rr) {
+    ret ShapeKind.RoundedRect
+  }
+  if s.equals(other: c) {
+    ret ShapeKind.Circle
+  }
+  ret ShapeKind.Rect
+}
+
+func parseScaleMode(s: String) ret ScaleMode {
+  let fi: String = "Fill"
+  let st: String = "Stretch"
+  if s.equals(other: fi) {
+    ret ScaleMode.Fill
+  }
+  if s.equals(other: st) {
+    ret ScaleMode.Stretch
+  }
+  ret ScaleMode.Fit
+}
+
+func parseWrapWidthMode(s: String) ret WrapWidthMode {
+  let nw: String = "NodeWidth"
+  if s.equals(other: nw) {
+    ret WrapWidthMode.NodeWidth
+  }
+  ret WrapWidthMode.None
+}
+
+func parseHitAreaKind(s: String) ret HitAreaKind {
+  let rr: String = "RoundedRect"
+  if s.equals(other: rr) {
+    ret HitAreaKind.RoundedRect
+  }
+  ret HitAreaKind.Rect
+}
+
+func parseMaskKind(s: String) ret MaskKind {
+  let rr: String = "RoundedRect"
+  if s.equals(other: rr) {
+    ret MaskKind.RoundedRect
+  }
+  ret MaskKind.Circle
+}
+
+func parseResolverMode(s: String) ret ResolverMode {
+  let r: String = "Random"
+  let h: String = "Hash"
+  let d: String = "Direct"
+  if s.equals(other: r) {
+    ret ResolverMode.Random
+  }
+  if s.equals(other: h) {
+    ret ResolverMode.Hash
+  }
+  if s.equals(other: d) {
+    ret ResolverMode.Direct
+  }
+  ret ResolverMode.Fixed
+}
+
+func parseTextFormat(s: String) ret TextFormat {
+  let n: String = "Number"
+  let p: String = "Percent1"
+  let c: String = "Coins"
+  let h: String = "HandRank"
+  if s.equals(other: n) {
+    ret TextFormat.Number
+  }
+  if s.equals(other: p) {
+    ret TextFormat.Percent1
+  }
+  if s.equals(other: c) {
+    ret TextFormat.Coins
+  }
+  if s.equals(other: h) {
+    ret TextFormat.HandRank
+  }
+  ret TextFormat.Plain
+}
+
+# -----------------------------------------------------------------
+# Sub-type deserialisers
+# -----------------------------------------------------------------
+
+func deserInsets(doc: view JsonDoc, val: view JsonValue) ret Insets {
+  let l: Float = optFloat(doc: doc, container: val, key: "l", fallback: 0.0)
+  let t: Float = optFloat(doc: doc, container: val, key: "t", fallback: 0.0)
+  let r: Float = optFloat(doc: doc, container: val, key: "r", fallback: 0.0)
+  let b: Float = optFloat(doc: doc, container: val, key: "b", fallback: 0.0)
+  ret Insets { l: l, t: t, r: r, b: b }
+}
+
+func deserVec2(doc: view JsonDoc, val: view JsonValue) ret Vec2 {
+  let x: Float = optFloat(doc: doc, container: val, key: "x", fallback: 0.0)
+  let y: Float = optFloat(doc: doc, container: val, key: "y", fallback: 0.0)
+  ret Vec2 { x: x, y: y }
+}
+
+func deserRgba(doc: view JsonDoc, val: view JsonValue) ret RgbaColor {
+  let r: Int = optInt(doc: doc, container: val, key: "r", fallback: 0)
+  let g: Int = optInt(doc: doc, container: val, key: "g", fallback: 0)
+  let b: Int = optInt(doc: doc, container: val, key: "b", fallback: 0)
+  let a: Int = optInt(doc: doc, container: val, key: "a", fallback: 255)
+  ret RgbaColor { r: r, g: g, b: b, a: a }
+}
+
+func deserSizeAxis(doc: view JsonDoc, val: view JsonValue) ret SizeAxis {
+  let modeStr: String = optString(doc: doc, container: val, key: "mode", fallback: "Fixed")
+  let mode: SizeMode = parseSizeMode(s: modeStr)
+  let minV: Int = optInt(doc: doc, container: val, key: "min", fallback: -1)
+  let maxV: Int = optInt(doc: doc, container: val, key: "max", fallback: -1)
+  ret SizeAxis { mode: mode, min: minV, max: maxV }
+}
+
+# -----------------------------------------------------------------
+# Component deserialisers — call site is the dispatch in
+# `applyComponentByName`. Each function takes the JsonValue of the
+# component bag (e.g. `{"x":0,"w":100}`) and produces the typed
+# component.
+# -----------------------------------------------------------------
+
+func deserRect(doc: view JsonDoc, val: view JsonValue) ret Rect {
+  ret Rect {
+    x: optFloat(doc: doc, container: val, key: "x", fallback: 0.0)
+    y: optFloat(doc: doc, container: val, key: "y", fallback: 0.0)
+    w: optFloat(doc: doc, container: val, key: "w", fallback: 0.0)
+    h: optFloat(doc: doc, container: val, key: "h", fallback: 0.0)
+  }
+}
+
+func deserSize(doc: view JsonDoc, val: view JsonValue) ret Size {
+  let wIdx: Int = jsonField(doc: doc, this: val, key: "w")
+  let hIdx: Int = jsonField(doc: doc, this: val, key: "h")
+  let wAxis: SizeAxis = defaultSizeAxis()
+  let hAxis: SizeAxis = defaultSizeAxis()
+  if wIdx >= 0 {
+    let wv: JsonValue = jsonValueAt(doc: doc, idx: wIdx)
+    wAxis = deserSizeAxis(doc: doc, val: wv)
+  }
+  if hIdx >= 0 {
+    let hv: JsonValue = jsonValueAt(doc: doc, idx: hIdx)
+    hAxis = deserSizeAxis(doc: doc, val: hv)
+  }
+  ret Size { w: wAxis, h: hAxis }
+}
+
+func deserLayout(doc: view JsonDoc, val: view JsonValue) ret Layout {
+  let typeStr: String = optString(doc: doc, container: val, key: "type", fallback: "None")
+  let alignMainStr: String = optString(doc: doc, container: val, key: "alignMain", fallback: "Start")
+  let alignCrossStr: String = optString(doc: doc, container: val, key: "alignCross", fallback: "Start")
+  ret Layout {
+    kind: parseLayoutType(s: typeStr)
+    gap: optFloat(doc: doc, container: val, key: "gap", fallback: 0.0)
+    alignMain: parseAlignKind(s: alignMainStr)
+    alignCross: parseAlignKind(s: alignCrossStr)
+    columns: optInt(doc: doc, container: val, key: "columns", fallback: 0)
+    rowGap: optFloat(doc: doc, container: val, key: "rowGap", fallback: 0.0)
+    columnGap: optFloat(doc: doc, container: val, key: "columnGap", fallback: 0.0)
+  }
+}
+
+func deserPadding(doc: view JsonDoc, val: view JsonValue) ret Padding {
+  ret Padding { insets: deserInsets(doc: doc, val: val) }
+}
+
+func deserMargin(doc: view JsonDoc, val: view JsonValue) ret Margin {
+  ret Margin { insets: deserInsets(doc: doc, val: val) }
+}
+
+func deserAlign(doc: view JsonDoc, val: view JsonValue) ret Align {
+  let xIdx: Int = jsonField(doc: doc, this: val, key: "x")
+  let yIdx: Int = jsonField(doc: doc, this: val, key: "y")
+  let xK: AlignKind = AlignKind.Start
+  let yK: AlignKind = AlignKind.Start
+  if xIdx >= 0 {
+    let xv: JsonValue = jsonValueAt(doc: doc, idx: xIdx)
+    let s: String = jsonString(this: xv, fallback: "Start")
+    xK = parseAlignKind(s: s)
+  }
+  if yIdx >= 0 {
+    let yv: JsonValue = jsonValueAt(doc: doc, idx: yIdx)
+    let s: String = jsonString(this: yv, fallback: "Start")
+    yK = parseAlignKind(s: s)
+  }
+  ret Align {
+    x: xK
+    y: yK
+    hasX: xIdx >= 0
+    hasY: yIdx >= 0
+  }
+}
+
+func deserOffset(doc: view JsonDoc, val: view JsonValue) ret Offset {
+  ret Offset {
+    delta: deserVec2(doc: doc, val: val)
+  }
+}
+
+func deserSprite(doc: view JsonDoc, val: view JsonValue) ret Sprite {
+  let s: Sprite = defaultSprite()
+  s.textureKey = optString(doc: doc, container: val, key: "textureKey", fallback: "")
+  let scaleModeStr: String = optString(doc: doc, container: val, key: "scaleMode", fallback: "Fit")
+  s.scaleMode = parseScaleMode(s: scaleModeStr)
+  let tintIdx: Int = jsonField(doc: doc, this: val, key: "tint")
+  if tintIdx >= 0 {
+    let tv: JsonValue = jsonValueAt(doc: doc, idx: tintIdx)
+    s.tint = deserRgba(doc: doc, val: tv)
+  }
+  ret s
+}
+
+func deserText(doc: view JsonDoc, val: view JsonValue) ret Text {
+  let txt: String = optString(doc: doc, container: val, key: "text", fallback: "")
+  let style: String = optString(doc: doc, container: val, key: "styleId", fallback: "")
+  let wrapStr: String = optString(doc: doc, container: val, key: "wrapWidthMode", fallback: "None")
+  ret Text {
+    text: txt
+    styleId: style
+    wrapWidthMode: parseWrapWidthMode(s: wrapStr)
+  }
+}
+
+func deserShape(doc: view JsonDoc, val: view JsonValue) ret Shape {
+  let kindStr: String = optString(doc: doc, container: val, key: "kind", fallback: "Rect")
+  let s: Shape = defaultShape()
+  s.kind = parseShapeKind(s: kindStr)
+  s.strokeWidth = optFloat(doc: doc, container: val, key: "strokeWidth", fallback: 0.0)
+  s.radius = optFloat(doc: doc, container: val, key: "radius", fallback: 0.0)
+  let fillIdx: Int = jsonField(doc: doc, this: val, key: "fill")
+  if fillIdx >= 0 {
+    let fv: JsonValue = jsonValueAt(doc: doc, idx: fillIdx)
+    s.fill = deserRgba(doc: doc, val: fv)
+  }
+  let strokeIdx: Int = jsonField(doc: doc, this: val, key: "stroke")
+  if strokeIdx >= 0 {
+    let sv: JsonValue = jsonValueAt(doc: doc, idx: strokeIdx)
+    s.stroke = deserRgba(doc: doc, val: sv)
+  }
+  ret s
+}
+
+func deserActive(doc: view JsonDoc, val: view JsonValue) ret Active {
+  ret Active {
+    value: optBool(doc: doc, container: val, key: "value", fallback: true)
+  }
+}
+
+func deserOpacity(doc: view JsonDoc, val: view JsonValue) ret Opacity {
+  ret Opacity {
+    value: optFloat(doc: doc, container: val, key: "value", fallback: 1.0)
+  }
+}
+
+func deserOnClick(doc: view JsonDoc, val: view JsonValue) ret OnClick {
+  ret OnClick {
+    actionId: optString(doc: doc, container: val, key: "actionId", fallback: "")
+    actionIdDouble: optString(doc: doc, container: val, key: "actionIdDouble", fallback: "")
+    actionIdTriple: optString(doc: doc, container: val, key: "actionIdTriple", fallback: "")
+    maxDelayMs: optInt(doc: doc, container: val, key: "maxDelayMs", fallback: 250)
+  }
+}
+
+func deserButton(doc: view JsonDoc, val: view JsonValue) ret Button {
+  ret Button { role: optString(doc: doc, container: val, key: "role", fallback: "") }
+}
+
+func deserName(doc: view JsonDoc, val: view JsonValue) ret Name {
+  ret Name { label: optString(doc: doc, container: val, key: "label", fallback: "") }
+}
+
+func deserPrimaryType(doc: view JsonDoc, val: view JsonValue) ret PrimaryType {
+  ret PrimaryType { typeName: optString(doc: doc, container: val, key: "typeName", fallback: "") }
+}
+
+func deserNodeId(doc: view JsonDoc, val: view JsonValue) ret NodeId {
+  # `id` is a reserved keyword in Rae, so it can't appear after a
+  # type-prefixed struct literal in `ret`. Drop the type prefix by
+  # binding to a typed local first, then return the local.
+  let nid: String = optString(doc: doc, container: val, key: "id", fallback: "")
+  let r: NodeId = { id: nid }
+  ret r
+}
+
+func deserSceneInstance(doc: view JsonDoc, val: view JsonValue) ret SceneInstance {
+  # `params` is preserved as raw JSON-ish text only when the user
+  # passes a string here; full param/override application is phase 1f.
+  let sid: String = optString(doc: doc, container: val, key: "sceneId", fallback: "")
+  ret SceneInstance {
+    sceneId: sid
+    paramsJson: ""
+  }
+}
+
+func deserTextBinding(doc: view JsonDoc, val: view JsonValue) ret TextBinding {
+  # `key` is also a reserved keyword. Same workaround.
+  let formatStr: String = optString(doc: doc, container: val, key: "format", fallback: "Plain")
+  let bk: String = optString(doc: doc, container: val, key: "key", fallback: "")
+  let bp: String = optString(doc: doc, container: val, key: "prefix", fallback: "")
+  let bs: String = optString(doc: doc, container: val, key: "suffix", fallback: "")
+  let bf: TextFormat = parseTextFormat(s: formatStr)
+  let r: TextBinding = {
+    key: bk
+    format: bf
+    prefix: bp
+    suffix: bs
+  }
+  ret r
+}
+
+func deserMaskShape(doc: view JsonDoc, val: view JsonValue) ret MaskShape {
+  let kindStr: String = optString(doc: doc, container: val, key: "kind", fallback: "Circle")
+  ret MaskShape {
+    kind: parseMaskKind(s: kindStr)
+    sourceNodeId: optString(doc: doc, container: val, key: "sourceNodeId", fallback: "")
+    radius: optFloat(doc: doc, container: val, key: "radius", fallback: 0.0)
+  }
+}
+
+# -----------------------------------------------------------------
+# applyComponentByName: dispatch a (name, val) onto the right
+# ComponentTable on the world.
+# -----------------------------------------------------------------
+
+func applyComponentByName(
+  world: mod UiWorld
+  entity: Int
+  name: String
+  doc: view JsonDoc
+  val: view JsonValue
+) {
+  if name.equals(other: "Rect") {
+    componentSet(this: world.rects, entity: entity, data: deserRect(doc: doc, val: val))
+    ret
+  }
+  if name.equals(other: "Size") {
+    componentSet(this: world.sizes, entity: entity, data: deserSize(doc: doc, val: val))
+    ret
+  }
+  if name.equals(other: "Layout") {
+    componentSet(this: world.layouts, entity: entity, data: deserLayout(doc: doc, val: val))
+    ret
+  }
+  if name.equals(other: "Padding") {
+    componentSet(this: world.paddings, entity: entity, data: deserPadding(doc: doc, val: val))
+    ret
+  }
+  if name.equals(other: "Margin") {
+    componentSet(this: world.margins, entity: entity, data: deserMargin(doc: doc, val: val))
+    ret
+  }
+  if name.equals(other: "Align") {
+    componentSet(this: world.aligns, entity: entity, data: deserAlign(doc: doc, val: val))
+    ret
+  }
+  if name.equals(other: "Offset") {
+    componentSet(this: world.offsets, entity: entity, data: deserOffset(doc: doc, val: val))
+    ret
+  }
+  if name.equals(other: "Sprite") {
+    componentSet(this: world.sprites, entity: entity, data: deserSprite(doc: doc, val: val))
+    ret
+  }
+  if name.equals(other: "Text") {
+    componentSet(this: world.texts, entity: entity, data: deserText(doc: doc, val: val))
+    ret
+  }
+  if name.equals(other: "Shape") {
+    componentSet(this: world.shapes, entity: entity, data: deserShape(doc: doc, val: val))
+    ret
+  }
+  if name.equals(other: "Active") {
+    componentSet(this: world.actives, entity: entity, data: deserActive(doc: doc, val: val))
+    ret
+  }
+  if name.equals(other: "Opacity") {
+    componentSet(this: world.opacities, entity: entity, data: deserOpacity(doc: doc, val: val))
+    ret
+  }
+  if name.equals(other: "OnClick") {
+    componentSet(this: world.onClicks, entity: entity, data: deserOnClick(doc: doc, val: val))
+    ret
+  }
+  if name.equals(other: "Button") {
+    componentSet(this: world.buttons, entity: entity, data: deserButton(doc: doc, val: val))
+    ret
+  }
+  if name.equals(other: "Name") {
+    componentSet(this: world.names, entity: entity, data: deserName(doc: doc, val: val))
+    ret
+  }
+  if name.equals(other: "PrimaryType") {
+    componentSet(this: world.primaryTypes, entity: entity, data: deserPrimaryType(doc: doc, val: val))
+    ret
+  }
+  if name.equals(other: "NodeId") {
+    componentSet(this: world.nodeIdComponents, entity: entity, data: deserNodeId(doc: doc, val: val))
+    ret
+  }
+  if name.equals(other: "SceneInstance") {
+    componentSet(this: world.sceneInstances, entity: entity, data: deserSceneInstance(doc: doc, val: val))
+    ret
+  }
+  if name.equals(other: "TextBinding") {
+    componentSet(this: world.textBindings, entity: entity, data: deserTextBinding(doc: doc, val: val))
+    ret
+  }
+  if name.equals(other: "MaskShape") {
+    componentSet(this: world.maskShapes, entity: entity, data: deserMaskShape(doc: doc, val: val))
+    ret
+  }
+  # Unknown / not-yet-handled components are ignored. The scene loader
+  # warns about names that aren't in `registeredComponentNames`, so an
+  # unknown name is a typo; one that's listed but not handled here
+  # (e.g. WobbleFx, ListView, DataRequest in #42) just won't produce
+  # ECS state until its phase lands.
 }
