@@ -593,3 +593,154 @@ after the music player ships.
 - `lib/raylib.rae` — already has `loadFontInto`, `drawTextWithFont`,
   `getMonitorWidth/Height`, `setWindowSize/Position`, plus the standard
   shape and texture API. Sufficient for phase 1.
+
+---
+
+## Checkpoint 10 — Phase 2 review
+
+Both music-player screens now build, layout, render, and respond to
+pointer input via the scene-driven runtime. The album view (screen 2)
+mounts five `track-row.raescene` instances with per-row text overrides;
+the now-playing view (screen 1) is a single mounted `music-player-now-
+playing.raescene`. Both screens share `mini-player.raescene` and
+`nav-tabs.raescene` mounts at the bottom. The host loop rebuilds the
+ECS world when navigation actions (`nav.home`, `nav.library`,
+`nav.back`) fire, which is the simplest expression of the
+"`prepareLayoutRootForLoad` root reuse" pattern that Royal Blush
+itself uses.
+
+Baseline screenshots live under `screenshots/album.png` and
+`screenshots/now-playing.png`; `snapshot.sh` regenerates either one.
+
+### Stdlib status
+
+| module                  | state     | notes                                   |
+| ----------------------- | --------- | --------------------------------------- |
+| `lib/json.rae`          | shipped   | flat-pool tree; covers parse needs      |
+| `lib/ui/components.rae` | shipped   | 39 authored + 8 derived component types |
+| `lib/ui/ecs.rae`        | shipped   | ComponentTable cap=256 to dodge a       |
+|                         |           | C-backend grow corruption bug           |
+| `lib/ui/registry.rae`   | shipped   | one match arm per component; manual     |
+| `lib/ui/scene.rae`      | shipped   | `.raescene` v2 parser + node lookup     |
+| `lib/ui/scene_loader.rae`| shipped  | full-scene → fresh entities             |
+| `lib/ui/scene_instance.rae`| shipped| mount-with-override, string-only        |
+| `lib/ui/layout.rae`     | shipped   | None/Horizontal/Vertical/Stack          |
+| `lib/ui/transform.rae`  | shipped   | absolute pos + alpha + visibility       |
+| `lib/ui/render.rae`     | shipped   | Shape/Sprite/Text                       |
+| `lib/ui/text_measure.rae`| shipped  | default-font width only                 |
+| `lib/ui/textures.rae`   | shipped   | linear-scan registry                    |
+| `lib/ui/input.rae`      | shipped   | hit-test + ActionEvent queue            |
+| `lib/ui/list_view.rae`  | **next**  | spec below                              |
+
+### Stdlib gaps surfaced during phases 1–2
+
+These are real, but most are workable around. None block the workout
+app; they're each a backlog item.
+
+1. **`SceneInstance` overrides only support strings.** `SceneOverride`
+   carries a `valueString` and `applyOverride` dispatches to
+   `Text.text`, `Sprite.textureKey`, and `Active.value`. Numeric / RGBA
+   / enum overrides need new dispatch arms. The workout app likely
+   wants `Shape.fill` overrides for set-completion progress shading.
+2. **`StringMap` `nodeIds` is a single global.** Mounting the same
+   sub-scene multiple times overwrites previous node-id → entity
+   mappings, so per-instance overrides are applied immediately during
+   mount and can't be re-applied later by id. Long-term we want
+   scoped node-ids: one map per `SceneInstance` mount, addressable as
+   `sceneScope.nodeId`.
+3. **No `OnClick` payload.** Action handlers receive an `actionId` and
+   the entity that fired, but no per-row data. The album example
+   can't tell which track row's `track.more` was tapped without
+   walking the entity tree. The workout app's "log set" buttons need
+   this; either thread payload through `OnClick`, or expose the
+   entity's parent chain so the host can recover scope.
+4. **`opt String` double-unbox.** The compiled C backend emits
+   `(...).as.s.as.s` for `let s: String = readFile(...)`. We side-step
+   it by declaring a non-`opt` extern with the same C name. A fix in
+   the c-backend's UNBOX path would let us drop the workaround.
+5. **`var.toFloat()` on globals.** The C backend emits `rae_toFloat()`
+   with no args when the receiver is a top-level `let`. Worked around
+   by binding to a local first; spec'd as a sema/c-backend bug.
+6. **Custom-font text measurement.** `measureText` covers raylib's
+   default font; `MeasureTextEx` (custom font) isn't bound yet. Hug-
+   text on `drawTextWithFont` over-/under-estimates by ~10 %. Adding
+   one binding closes this.
+7. **Image-asset preload manifest.** `lib/ui/textures.rae` is a
+   linear list and the example hand-codes the icon name list. A
+   `manifest.raescene` (or just JSON) would let the asset list live
+   alongside the rest of the scene authoring.
+8. **Hot-reload of `.raescene`.** Worth wiring before the workout app
+   so iterating layouts doesn't require a recompile.
+9. **macOS+Metal `TakeScreenshot`** returns the cleared back buffer in
+   a fast headless flow; documented in `snapshot.sh`. Long-term fix
+   is to render to an off-screen `RenderTexture` and `ExportImage`
+   that, which removes the macOS dependency.
+
+### `lib/ui/list_view.rae` — what it needs
+
+The component already exists in `components.rae`:
+
+```rae
+type ListView {
+  itemSceneId: String           # which sub-scene to mount per item
+  itemKeyField: String          # data field that uniquely identifies a row
+  itemHeight: Float             # row height (pre-virtualisation)
+  itemGap: Float
+  visibleItemCount: Int         # rough viewport size in rows
+  overscanRows: Int             # rows mounted but not visible (each side)
+  bindings: List(ListViewBinding)
+  loadingSceneId: String
+  emptySceneId: String
+  errorSceneId: String
+}
+
+type ListViewBinding {
+  nodeId: String                # which node inside the item scene to patch
+  componentName: String         # e.g. "Text"
+  fieldName: String             # e.g. "text"
+  itemField: String             # e.g. "title" — the field on the data row
+  prefix: String
+  suffix: String
+}
+```
+
+The runtime module needs to:
+
+1. **Resolve the item scene** from `SceneRegistry` by `itemSceneId`.
+2. **Take a data list** (heterogeneous `List(JsonValue)` or a simple
+   `List(StringMap(String))`). Phase 1 spec: stringly-typed rows. The
+   workout app's per-set rows are int + string + bool, so we either
+   accept `List(JsonValue)` and require `JsonValue` field accessors,
+   or define a small `ListRow = StringMap(String)` and let the host
+   pre-render numeric values to strings.
+3. **Compute window**: index range `[scrollIndex - overscan,
+   scrollIndex + visibleItemCount + overscan]`, clamp to `[0, len)`.
+4. **Mount items in window**: for each index in range, mount the item
+   scene under a per-row mount entity sized
+   `(itemWidth, itemHeight)`. Overrides come from `bindings`:
+   for each binding, look up the row's `itemField` in the data row,
+   wrap with `prefix`/`suffix`, and emit a `SceneOverride` targeting
+   `bindings[i].nodeId`/`componentName`/`fieldName`.
+5. **Update on scroll**: when the visible window shifts, unmount rows
+   that left the window (free their entities) and mount the newly
+   exposed ones. Item entities must live in their own pool so
+   `world.alive` doesn't grow unbounded.
+6. **Loading / empty / error fall-throughs**: if the data list is
+   loading/empty/errored (state tracked by the host), mount the
+   matching `*SceneId` instead of the per-row scenes.
+
+The track-row mount pattern in `examples/98_mobile_ui/main.rae`
+(`buildTrackList`) is essentially a hand-rolled Phase-1 version of
+this. Rolling it into `lib/ui/list_view.rae` is a straight extraction:
+`buildTrackList` becomes `mountListView(world, listEntity, listView,
+data)`, and the example shrinks by ~40 LOC. Items 1–5 above cover the
+full Phase 1 surface; virtualisation (#5) can land as Phase 2 once the
+workout app's longer set list demands it.
+
+#### Open question
+
+Whether `List(JsonValue)` is a good enough payload, or whether we want
+a `RaeAny`-style sum to keep numeric data numeric. `JsonValue` works
+for stringification (today's bindings) but doesn't help once we have
+numeric overrides (gap #1 above). Lock this in once Phase 3 of
+overrides lands.
