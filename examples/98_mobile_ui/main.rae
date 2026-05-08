@@ -28,19 +28,22 @@ import ui/scene_instance
 import ui/input
 
 # ----- size constants kept central so tweaking the layout is easy -----
+# screenH chosen so the whole stack fits in macOS's available window
+# height (1117 desktop minus chrome ≈ 1079). The actual raylib window
+# may be shorter on smaller displays.
 let screenW: Float = 600.0
-let screenH: Float = 1300.0
+let screenH: Float = 1079.0
 let outerPad: Float = 20.0
 let outerGap: Float = 12.0
 
 let topBarH: Float = 56.0
-let heroH: Float = 420.0
+let heroH: Float = 380.0
 let titleH: Float = 80.0
-let trackRowH: Float = 64.0
-let trackGap: Float = 8.0
+let trackRowH: Float = 56.0
+let trackGap: Float = 6.0
 let trackRowCount: Int = 5
-let miniPlayerH: Float = 96.0
-let navTabsH: Float = 64.0
+let miniPlayerH: Float = 80.0
+let navTabsH: Float = 56.0
 
 let fontSlot: Int = 0
 
@@ -53,6 +56,12 @@ let iconTint: RgbaColor = { r: 30, g: 30, b: 36, a: 255 }
 let trackRowPath: String = "examples/98_mobile_ui/assets/scenes/track-row.raescene"
 let navTabsPath: String = "examples/98_mobile_ui/assets/scenes/nav-tabs.raescene"
 let miniPlayerPath: String = "examples/98_mobile_ui/assets/scenes/mini-player.raescene"
+let nowPlayingPath: String = "examples/98_mobile_ui/assets/scenes/music-player-now-playing.raescene"
+
+enum Screen {
+  NowPlaying
+  Album
+}
 
 # ----- helpers --------------------------------------------------------
 
@@ -172,6 +181,7 @@ type AlbumScenes {
   trackRow: Scene
   navTabs: Scene
   miniPlayer: Scene
+  nowPlaying: Scene
 }
 
 func loadAllScenes() ret AlbumScenes {
@@ -179,6 +189,7 @@ func loadAllScenes() ret AlbumScenes {
     trackRow: loadSceneFile(path: trackRowPath)
     navTabs: loadSceneFile(path: navTabsPath)
     miniPlayer: loadSceneFile(path: miniPlayerPath)
+    nowPlaying: loadSceneFile(path: nowPlayingPath)
   }
 }
 
@@ -316,6 +327,63 @@ func buildSimpleSceneInstance(
   ret mount
 }
 
+# Build the now-playing screen world. Same outer chrome (mini-player +
+# nav-tabs at the bottom) as the album view, but the middle slot
+# mounts the now-playing scene instead of the topbar/hero/title/list
+# stack.
+func buildNowPlayingWorld(scenes: view AlbumScenes) ret UiWorld {
+  let world: UiWorld = createUiWorld()
+
+  let root: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: root, w: screenW, h: screenH)
+  setShapeRect(world: world, entity: root, fill: surfaceColor)
+  let layV: LayoutType = LayoutType.Vertical
+  let alignS: AlignKind = AlignKind.Start
+  setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
+  setPaddingAll(world: world, entity: root, n: outerPad)
+
+  # The now-playing scene fills whatever's left after the bottom bars.
+  let bottomGap: Float = outerGap * 2.0
+  let npH: Float = screenH - outerPad * 2.0 - miniPlayerH - navTabsH - bottomGap
+  let np: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: np, w: screenW - outerPad * 2.0, h: npH)
+  let noOverrides: List(SceneOverride) = emptyOverrides()
+  let mounted: Int = mountSceneInstance(
+    world: world
+    mountEntity: np
+    scene: scenes.nowPlaying
+    overrides: noOverrides
+  )
+
+  let miniPlayer: Int = buildSimpleSceneInstance(
+    world: world
+    scene: scenes.miniPlayer
+    w: screenW - outerPad * 2.0
+    h: miniPlayerH
+  )
+  let navTabs: Int = buildSimpleSceneInstance(
+    world: world
+    scene: scenes.navTabs
+    w: screenW - outerPad * 2.0
+    h: navTabsH
+  )
+
+  let kids: List(Int) = createList(Int)(initialCap: 3)
+  kids.add(value: np)
+  kids.add(value: miniPlayer)
+  kids.add(value: navTabs)
+  attachChildren(world: world, parent: root, kids: kids)
+
+  ret world
+}
+
+func buildScreenWorld(screen: Screen, scenes: view AlbumScenes) ret UiWorld {
+  if screen is Screen.Album {
+    ret buildAlbumWorld(scenes: scenes)
+  }
+  ret buildNowPlayingWorld(scenes: scenes)
+}
+
 func buildAlbumWorld(scenes: view AlbumScenes) ret UiWorld {
   let world: UiWorld = createUiWorld()
 
@@ -388,27 +456,35 @@ func loadIcons(reg: mod TextureRegistry) {
 
 func main() {
   setConfigFlags(flags: 4)
-  initWindow(width: 600, height: 1300, title: "Rae Mobile UI — Album")
+  let winW: Float = screenW
+  let winH: Float = screenH
+  initWindow(width: winW.toInt(), height: winH.toInt(), title: "Rae Mobile UI — Album")
   setWindowPosition(x: 50, y: 50)
   setTargetFPS(fps: 60)
 
   loadFontInto(slot: fontSlot, path: "examples/98_mobile_ui/assets/Roboto-Regular.ttf", fontSize: 36)
 
   let scenes: AlbumScenes = loadAllScenes()
-  let world: UiWorld = buildAlbumWorld(scenes: scenes)
   let texReg: TextureRegistry = createTextureRegistry()
   loadIcons(reg: texReg)
 
-  layoutSystem(world: world)
-  transformSystem(world: world)
-
-  # Screenshot mode (CHECKPOINT 9 regression watch). If
-  # `RAE_UI_SCREENSHOT` is set, render a few frames and self-screenshot
-  # via raylib's `takeScreenshot`. On macOS the back-buffer read is
-  # unreliable; the snapshot tooling falls back to `screencapture -R`.
-  let screenshotPath: String = getEnv(name: "RAE_UI_SCREENSHOT")
+  let screenshotEnv: String = getEnv(name: "RAE_UI_SCREENSHOT")
   let bg: Color = { r: 32, g: 32, b: 36, a: 255 }
-  if screenshotPath.length() > 0 {
+
+  if screenshotEnv.length() > 0 {
+    # Screenshot mode: pick the screen via `RAE_UI_SCREEN` env var
+    # ("now-playing" / "album"), default to album to match the existing
+    # baseline. Render a few frames and self-screenshot via raylib —
+    # the snapshot tooling falls back to `screencapture -R` on macOS.
+    let screenEnv: String = getEnv(name: "RAE_UI_SCREEN")
+    let nowKey: String = "now-playing"
+    let screen: Screen = Screen.Album
+    if screenEnv.equals(other: nowKey) {
+      screen = Screen.NowPlaying
+    }
+    let world: UiWorld = buildScreenWorld(screen: screen, scenes: scenes)
+    layoutSystem(world: world)
+    transformSystem(world: world)
     let warmupFrames: Int = 30
     let f: Int = 0
     loop f < warmupFrames {
@@ -416,21 +492,49 @@ func main() {
       clearBackground(color: bg)
       renderSystem(world: world, reg: texReg)
       if f is (warmupFrames / 2) {
-        takeScreenshot(fileName: screenshotPath)
+        takeScreenshot(fileName: screenshotEnv)
       }
       endDrawing()
       f = f + 1
     }
   } else {
-    let input: InputSystem = createInputSystem()
-    loop not windowShouldClose() {
-      updateInputSystem(input: input, world: world)
-      dispatchActions(input: input)
+    # Interactive mode: outer loop owns the world for the *current*
+    # screen; the inner loop runs frames until either the user closes
+    # the window or a `dispatchActions` call returns a different
+    # screen, at which point the outer loop re-builds the world. This
+    # is the "loadScene + prepareLayoutRootForLoad-style root reuse"
+    # pattern flattened into a Rae-friendly two-loop structure.
+    let startScreenEnv: String = getEnv(name: "RAE_UI_SCREEN")
+    let albumKey: String = "album"
+    let currentScreen: Screen = Screen.NowPlaying
+    if startScreenEnv.equals(other: albumKey) {
+      currentScreen = Screen.Album
+    }
+    let running: Bool = true
+    loop running {
+      let world: UiWorld = buildScreenWorld(screen: currentScreen, scenes: scenes)
+      layoutSystem(world: world)
+      transformSystem(world: world)
 
-      beginDrawing()
-      clearBackground(color: bg)
-      renderSystem(world: world, reg: texReg)
-      endDrawing()
+      let input: InputSystem = createInputSystem()
+      let switching: Bool = false
+      loop running and switching is false {
+        if windowShouldClose() {
+          running = false
+        } else {
+          updateInputSystem(input: input, world: world)
+          let nextScreen: Screen = dispatchActions(input: input, current: currentScreen)
+          if nextScreen is not currentScreen {
+            currentScreen = nextScreen
+            switching = true
+          } else {
+            beginDrawing()
+            clearBackground(color: bg)
+            renderSystem(world: world, reg: texReg)
+            endDrawing()
+          }
+        }
+      }
     }
   }
 
@@ -439,16 +543,37 @@ func main() {
   closeWindow()
 }
 
-# Pull every action fired this frame and route to the right action.
-# Phase 1g just logs each event; later phases plug into actual
-# navigation / playback state.
-func dispatchActions(input: view InputSystem) {
+# Drain every fired action and route into a target screen. Returns the
+# next screen — equal to `current` if no navigation action fired.
+func dispatchActions(input: view InputSystem, current: Screen) ret Screen {
+  let next: Screen = current
   let n: Int = input.events.length
   let i: Int = 0
   loop i < n {
     let ev: ActionEvent = rae_ext_rae_buf_get(buf: input.events.data, index: i)
     let actionId: String = ev.actionId
     log("[action] {actionId} (entity {ev.entity})")
+
+    let homeKey: String = "nav.home"
+    let libraryKey: String = "nav.library"
+    let backKey: String = "nav.back"
+    if actionId.equals(other: homeKey) {
+      next = Screen.NowPlaying
+    }
+    if actionId.equals(other: libraryKey) {
+      next = Screen.Album
+    }
+    if actionId.equals(other: backKey) {
+      # Back from now-playing returns to album; back from album returns
+      # to now-playing. There's no deeper history yet so they ping-pong.
+      if current is Screen.Album {
+        next = Screen.NowPlaying
+      } else {
+        next = Screen.Album
+      }
+    }
+
     i = i + 1
   }
+  ret next
 }
