@@ -1,0 +1,72 @@
+{
+  "type": "Scene",
+  "version": 2,
+  "sceneId": "music-player-now-playing",
+  "root": "NowPlaying",
+  "nodes": {
+    "NowPlaying": {
+      "Layout": {"type": "Vertical", "gap": 16, "alignCross": "Start"},
+      "Padding": {"l": 20, "t": 20, "r": 20, "b": 20},
+      "Shape": {"kind": "Rect", "fill": {"r": 246, "g": 246, "b": 248, "a": 255}},
+      "Children": ["TopBar", "Hero", "TrackInfo", "ProgressBar", "TimeLabels"]
+    },
+
+    "TopBar": {
+      "Rect": {"x": 0, "y": 0, "w": 560, "h": 56},
+      "Layout": {"type": "Horizontal", "gap": 16, "alignCross": "Center"},
+      "Children": ["BackBtn", "BarTitle", "MoreBtn"]
+    },
+    "BackBtn": {
+      "Rect": {"x": 0, "y": 0, "w": 40, "h": 40},
+      "Sprite": {"textureKey": "icon-back"},
+      "OnClick": {"actionId": "nav.back"}
+    },
+    "BarTitle": {
+      "Rect": {"x": 0, "y": 0, "w": 380, "h": 40},
+      "Text": {"text": "NOW PLAYING", "styleId": "muted"}
+    },
+    "MoreBtn": {
+      "Rect": {"x": 0, "y": 0, "w": 40, "h": 40},
+      "Sprite": {"textureKey": "icon-more"},
+      "OnClick": {"actionId": "nav.more"}
+    },
+
+    "Hero": {
+      "Rect": {"x": 0, "y": 0, "w": 560, "h": 480},
+      "Shape": {"kind": "RoundedRect", "radius": 28, "fill": {"r": 70, "g": 70, "b": 80, "a": 255}}
+    },
+
+    "TrackInfo": {
+      "Rect": {"x": 0, "y": 0, "w": 560, "h": 96},
+      "Layout": {"type": "Vertical", "gap": 4, "alignCross": "Start"},
+      "Children": ["TrackTitle", "TrackArtist"]
+    },
+    "TrackTitle": {
+      "Rect": {"x": 0, "y": 0, "w": 480, "h": 48},
+      "Text": {"text": "Charcoal", "styleId": "h1"}
+    },
+    "TrackArtist": {
+      "Rect": {"x": 0, "y": 0, "w": 480, "h": 32},
+      "Text": {"text": "Royal Blush", "styleId": "muted"}
+    },
+
+    "ProgressBar": {
+      "Rect": {"x": 0, "y": 0, "w": 560, "h": 6},
+      "Shape": {"kind": "RoundedRect", "radius": 3, "fill": {"r": 200, "g": 200, "b": 210, "a": 255}}
+    },
+
+    "TimeLabels": {
+      "Rect": {"x": 0, "y": 0, "w": 560, "h": 28},
+      "Layout": {"type": "Horizontal", "gap": 16, "alignCross": "Center"},
+      "Children": ["TimeNow", "TimeTotal"]
+    },
+    "TimeNow": {
+      "Rect": {"x": 0, "y": 0, "w": 80, "h": 24},
+      "Text": {"text": "1:14", "styleId": "caption"}
+    },
+    "TimeTotal": {
+      "Rect": {"x": 0, "y": 0, "w": 80, "h": 24},
+      "Text": {"text": "3:24", "styleId": "caption"}
+    }
+  }
+}
