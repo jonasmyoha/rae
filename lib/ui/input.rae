@@ -1,0 +1,191 @@
+# Pointer input — RUICS Phase 1g.
+#
+# Each frame:
+#   1. `updateInputSystem` polls the raylib mouse, runs a hit-test
+#      against the world's `WorldTransform` + `ComputedRect` bounds,
+#      and tracks the entity that received the press.
+#   2. On release, if the released entity matches the pressed entity
+#      and carries an `OnClick.actionId`, an `ActionEvent` is appended
+#      to `input.events`.
+#   3. The host code reads `input.events` after `updateInputSystem`
+#      returns and dispatches each event by `actionId` — Rae has no
+#      first-class function pointers (yet), so a callback registry
+#      doesn't fit. The event-queue approach keeps the API stupid and
+#      the user dispatches via a small `if/else` on `actionId`.
+#
+# Coordinates are in logical (point) units, matching `WorldTransform`.
+import core
+import string
+import raylib
+
+# Internal: left mouse button.
+let mouseButtonLeft: Int = 0
+let inputNoEntity: Int = -1
+
+type PointerState {
+  x: Float
+  y: Float
+  down: Bool
+  pressed: Bool
+  released: Bool
+}
+
+type ActionEvent {
+  entity: Int
+  actionId: String
+}
+
+type InputSystem {
+  pointer: PointerState
+  pressedEntity: Int
+  events: List(ActionEvent)
+}
+
+func createInputSystem() ret InputSystem {
+  ret InputSystem {
+    pointer: PointerState {
+      x: 0.0
+      y: 0.0
+      down: false
+      pressed: false
+      released: false
+    }
+    pressedEntity: inputNoEntity
+    events: createList(ActionEvent)(initialCap: 8)
+  }
+}
+
+# Returns true if the point (x, y) is inside the entity's
+# `WorldTransform`+`ComputedRect` bounds. Skips entities without one
+# of those, or with `WorldTransform.visible == false`.
+func pointInEntity(world: view UiWorld, entity: Int, x: Float, y: Float) ret Bool {
+  if componentHas(this: world.worldTransforms, entity: entity) is false {
+    ret false
+  }
+  if componentHas(this: world.computedRects, entity: entity) is false {
+    ret false
+  }
+  let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: entity)
+  if wt.visible is false {
+    ret false
+  }
+  let cr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
+  if x < wt.x {
+    ret false
+  }
+  if y < wt.y {
+    ret false
+  }
+  if x > wt.x + cr.w {
+    ret false
+  }
+  if y > wt.y + cr.h {
+    ret false
+  }
+  ret true
+}
+
+# Hit-test recursion. Visits children in reverse declaration order so
+# the visually-topmost child (last painted) wins. Returns the deepest
+# hit entity that has an `OnClick` component, or -1 if nothing under
+# (x, y) handles clicks.
+func hitTestEntity(world: view UiWorld, entity: Int, x: Float, y: Float) ret Int {
+  if pointInEntity(world: world, entity: entity, x: x, y: y) is false {
+    ret inputNoEntity
+  }
+
+  # Children first, in reverse declaration order.
+  if componentHas(this: world.childrens, entity: entity) {
+    let ch: Children = componentGet(this: world.childrens, entity: entity)
+    let n: Int = ch.ids.length
+    let i: Int = n - 1
+    loop i >= 0 {
+      let cid: Int = ch.ids.get(index: i)
+      let hit: Int = hitTestEntity(world: world, entity: cid, x: x, y: y)
+      if hit is not inputNoEntity {
+        ret hit
+      }
+      i = i - 1
+    }
+  }
+
+  # Self.
+  if componentHas(this: world.onClicks, entity: entity) {
+    ret entity
+  }
+  ret inputNoEntity
+}
+
+# Walk every alive root and return the topmost entity at (x, y) that
+# carries `OnClick`.
+func hitTest(world: view UiWorld, x: Float, y: Float) ret Int {
+  let alive: view List(Int) => world.alive
+  let n: Int = alive.length
+  let i: Int = n - 1
+  loop i >= 0 {
+    let e: Int = alive.get(index: i)
+    if componentHas(this: world.parentLinks, entity: e) is false {
+      let hit: Int = hitTestEntity(world: world, entity: e, x: x, y: y)
+      if hit is not inputNoEntity {
+        ret hit
+      }
+    }
+    i = i - 1
+  }
+  ret inputNoEntity
+}
+
+# Append an `ActionEvent` to the input system's queue.
+func appendActionEvent(input: mod InputSystem, entity: Int, actionId: String) {
+  let events: mod List(ActionEvent) => input.events
+  let ev: ActionEvent = { entity: entity, actionId: actionId }
+  events.add(value: ev)
+}
+
+# Clear the per-frame action queue. Call before `updateInputSystem`
+# if the host hasn't drained the queue itself.
+func clearActionEvents(input: mod InputSystem) {
+  let events: mod List(ActionEvent) => input.events
+  loop events.length > 0 {
+    events.remove(index: events.length - 1)
+  }
+}
+
+# Poll the raylib mouse, hit-test, and fire `OnClick` events. Old
+# events from the previous frame are cleared first. Coordinates come
+# back in logical points.
+func updateInputSystem(input: mod InputSystem, world: view UiWorld) {
+  clearActionEvents(input: input)
+
+  let mx: Float = getMouseX().toFloat()
+  let my: Float = getMouseY().toFloat()
+  let down: Bool = isMouseButtonDown(button: mouseButtonLeft)
+  let pressed: Bool = isMouseButtonPressed(button: mouseButtonLeft)
+  let released: Bool = isMouseButtonReleased(button: mouseButtonLeft)
+
+  let nextPointer: PointerState = {
+    x: mx
+    y: my
+    down: down
+    pressed: pressed
+    released: released
+  }
+  input.pointer = nextPointer
+
+  if pressed {
+    input.pressedEntity = hitTest(world: world, x: mx, y: my)
+  }
+
+  if released {
+    let hit: Int = hitTest(world: world, x: mx, y: my)
+    if hit is not inputNoEntity {
+      if hit is input.pressedEntity {
+        if componentHas(this: world.onClicks, entity: hit) {
+          let oc: OnClick = componentGet(this: world.onClicks, entity: hit)
+          appendActionEvent(input: input, entity: hit, actionId: oc.actionId)
+        }
+      }
+    }
+    input.pressedEntity = inputNoEntity
+  }
+}
