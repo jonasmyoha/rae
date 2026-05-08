@@ -45,7 +45,7 @@
 - [x] #44 UI Phase 1e: Extend `lib/ui/render.rae` to `Sprite` (raylib texture), `Text` (`drawTextWithFont`), `Shape:RoundedRect`, `Shape:Circle`. Add `lib/ui/text_measure.rae` for hug-text using `measureText`. Add `lib/ui/textures.rae` with lazy texture loading from `assets/`. Ship 14 placeholder icons + Roboto. Album scene now reads as the real screen 2 (track rows still hand-laid, no scene instance yet).
 - [x] #45 UI CHECKPOINT 9: Album scene renders correctly without scene instances; snapshot screenshot for regression watching.
 - [x] #46 UI Phase 1f: Add `lib/ui/scene_instance.rae` — load nested `.raescene`, preserve mounting entity placement (`Rect/Size/Align/Offset/Constraints/OverflowPolicy/TransformFx`), apply `params.overrides` (target by `nodeId`/component/field). Replace hand-laid track rows in album scene with five `SceneInstance`s of `track-row.raescene`. Wire `nav-tabs.raescene` and `mini-player.raescene` similarly.
-- [ ] #47 UI Phase 1g: Add `lib/ui/input.rae` — gather pointer state, hit-test by `HitArea`/`PointerEvents`, dispatch `OnClick.actionId` to a registered action handler. Tabs and play button become tappable.
+- [x] #47 UI Phase 1g: Add `lib/ui/input.rae` — gather pointer state, hit-test by `HitArea`/`PointerEvents`, dispatch `OnClick.actionId` to a registered action handler. Tabs and play button become tappable.
 - [ ] #48 UI Phase 2: Add `music-player-now-playing.raescene` (screen 1). Tab navigation switches between two scenes via `loadScene` + `prepareLayoutRootForLoad`-style root reuse.
 - [ ] #49 UI CHECKPOINT 10: Both screens reachable; review for stdlib gaps before committing to workout app screens. Decide what `lib/ui/list_view.rae` needs.
 <!-- SUMU_QUEUE_END -->
