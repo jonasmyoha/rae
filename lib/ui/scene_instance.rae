@@ -1,0 +1,363 @@
+# SceneInstance — RUICS Phase 1f.
+#
+# Mount a parsed `Scene` under an existing entity, preserving the
+# mount entity's placement components (Rect / Size / Align / Offset /
+# Constraints / OverflowPolicy / TransformFx) and replacing the rest
+# with the scene root's components. The scene root's descendants
+# become descendants of the mount entity, with their own components
+# applied as authored.
+#
+# Useful for two patterns:
+#
+# 1. Hand-built scenes that want a reusable child fragment, e.g. the
+#    music-player album view mounting five copies of `track-row.raescene`
+#    instead of laying out each row by hand.
+#
+# 2. Eventually, a top-level `loadAndMount(world, sceneId, params)` for
+#    full-page scenes — but that's the same primitive plus a registry
+#    lookup, which is why `SceneRegistry` lives here too.
+#
+# Overrides
+# ---------
+# `SceneOverride` lets the caller patch specific fields on specific
+# nodes after the scene is loaded. Only string-valued fields are
+# supported in Phase 1f — `Text.text`, `Sprite.textureKey`, and
+# `Active.value` (parsed as `"true"` / `"false"`). The dispatch table
+# lives in `applyOverride`; extending it for numeric / colour overrides
+# is a follow-up when the music player needs them.
+import core
+import string
+import json
+
+# -----------------------------------------------------------------
+# Types
+# -----------------------------------------------------------------
+
+# Per-field override. `valueString` is the only value type for now;
+# numeric/colour overrides should encode their value as a string and
+# parse it inside `applyOverride`.
+type SceneOverride {
+  nodeId: String
+  componentName: String
+  fieldName: String
+  valueString: String
+}
+
+# Map of `sceneId` -> parsed Scene. Filled by the host before any
+# `mountSceneInstance` call. Two parallel lists; lookup is linear,
+# which is fine for the tens of authored scenes a typical app has.
+type SceneRegistry {
+  ids: List(String)
+  scenes: List(Scene)
+}
+
+# -----------------------------------------------------------------
+# SceneRegistry
+# -----------------------------------------------------------------
+
+func createSceneRegistry() ret SceneRegistry {
+  ret SceneRegistry {
+    ids: createList(String)(initialCap: 8)
+    scenes: createList(Scene)(initialCap: 8)
+  }
+}
+
+func registerScene(reg: mod SceneRegistry, key: String, scene: Scene) {
+  let idsList: mod List(String) => reg.ids
+  let scenesList: mod List(Scene) => reg.scenes
+  idsList.add(value: key)
+  scenesList.add(value: scene)
+}
+
+# Returns the index of `key` in the registry, or -1 if not present.
+func sceneRegistryIndex(reg: view SceneRegistry, key: String) ret Int {
+  let n: Int = reg.ids.length
+  let i: Int = 0
+  loop i < n {
+    let k: String = reg.ids.get(index: i)
+    if k.equals(other: key) {
+      ret i
+    }
+    i = i + 1
+  }
+  ret -1
+}
+
+func sceneRegistryHas(reg: view SceneRegistry, key: String) ret Bool {
+  ret sceneRegistryIndex(reg: reg, key: key) >= 0
+}
+
+# -----------------------------------------------------------------
+# Override builders — convenience wrappers so the hand-built scene
+# code reads as a list of small declarations.
+# -----------------------------------------------------------------
+
+func emptyOverrides() ret List(SceneOverride) {
+  ret createList(SceneOverride)(initialCap: 4)
+}
+
+func addOverride(
+  list: mod List(SceneOverride)
+  nodeId: String
+  componentName: String
+  fieldName: String
+  value: String
+) {
+  let o: SceneOverride = {
+    nodeId: nodeId
+    componentName: componentName
+    fieldName: fieldName
+    valueString: value
+  }
+  list.add(value: o)
+}
+
+# Shorthand for the most common case: text replacement on a Text node.
+func addTextOverride(list: mod List(SceneOverride), nodeId: String, value: String) {
+  let textKey: String = "Text"
+  let textField: String = "text"
+  addOverride(
+    list: list
+    nodeId: nodeId
+    componentName: textKey
+    fieldName: textField
+    value: value
+  )
+}
+
+# Shorthand for swapping a sprite's textureKey.
+func addSpriteOverride(list: mod List(SceneOverride), nodeId: String, value: String) {
+  let spriteKey: String = "Sprite"
+  let spriteField: String = "textureKey"
+  addOverride(
+    list: list
+    nodeId: nodeId
+    componentName: spriteKey
+    fieldName: spriteField
+    value: value
+  )
+}
+
+# -----------------------------------------------------------------
+# Mount logic
+# -----------------------------------------------------------------
+
+# Returns true for the components that the *mount entity* keeps when
+# the scene is mounted (geometry/placement live on the parent of the
+# scene; the scene contributes its inner layout, padding, visuals, and
+# behaviour). RUICS § 6.4.
+func isPlacementComponent(name: String) ret Bool {
+  if name.equals(other: "Rect") {
+    ret true
+  }
+  if name.equals(other: "Size") {
+    ret true
+  }
+  if name.equals(other: "Align") {
+    ret true
+  }
+  if name.equals(other: "Offset") {
+    ret true
+  }
+  if name.equals(other: "Constraints") {
+    ret true
+  }
+  if name.equals(other: "OverflowPolicy") {
+    ret true
+  }
+  if name.equals(other: "TransformFx") {
+    ret true
+  }
+  ret false
+}
+
+func appendIntListSI(lst: mod List(Int), value: Int) {
+  lst.add(value: value)
+}
+
+# Mount `scene` under `mountEntity`. Returns `mountEntity` on success,
+# or -1 if the scene wasn't ok.
+#
+# Behaviour:
+# - The scene's root node's components (excluding placement) are
+#   applied directly onto `mountEntity`. Existing components on the
+#   mount entity are replaced — caller is expected to set placement
+#   *before* calling this.
+# - All non-root nodes are allocated as new entities under
+#   `mountEntity`'s subtree.
+# - `world.nodeIds` is populated for every node in the mounted scene
+#   so overrides and later code can resolve by id.
+# - `overrides` is applied last, after the whole subtree is built.
+func mountSceneInstance(
+  world: mod UiWorld
+  mountEntity: Int
+  scene: view Scene
+  overrides: view List(SceneOverride)
+) ret Int {
+  if scene.ok is false {
+    ret -1
+  }
+  let nodeCount: Int = scene.nodes.length
+  let rootIdx: Int = sceneNodeIndex(this: scene, nodeId: scene.rootNodeId)
+  if rootIdx < 0 {
+    ret -1
+  }
+
+  # Pass 1: allocate entities. The scene's root maps to `mountEntity`;
+  # every other node gets a fresh entity.
+  let entitiesByNodeIndex: List(Int) = createList(Int)(initialCap: nodeCount)
+  let nodeIdsMap: mod StringMap(Int) => world.nodeIds
+  let i: Int = 0
+  loop i < nodeCount {
+    let node: SceneNode = sceneNodeAt(this: scene, idx: i)
+    let entity: Int = mountEntity
+    if i is not rootIdx {
+      entity = createEntity(world: world)
+    }
+    appendIntListSI(lst: entitiesByNodeIndex, value: entity)
+    nodeIdsMap.set(k: node.nodeId, value: entity)
+    i = i + 1
+  }
+
+  # Pass 2: apply components. For the scene's root node we skip
+  # placement components — those belong to the mount entity. Other
+  # nodes get all their components applied via `applyComponentByName`.
+  let docView: view JsonDoc => scene.doc
+  let j: Int = 0
+  loop j < nodeCount {
+    let node: SceneNode = sceneNodeAt(this: scene, idx: j)
+    let entity: Int = entitiesByNodeIndex.get(index: j)
+    let isRoot: Bool = j is rootIdx
+
+    let bag: JsonValue = jsonValueAt(doc: docView, idx: node.componentsValueIdx)
+    let keyCount: Int = jsonObjectLen(this: bag)
+    let k: Int = 0
+    loop k < keyCount {
+      let key: String = jsonObjectKeyAt(doc: docView, this: bag, idx: k)
+      let childrenKey: String = "Children"
+      let skip: Bool = false
+      if key.equals(other: childrenKey) {
+        skip = true
+      }
+      if isRoot {
+        if isPlacementComponent(name: key) {
+          skip = true
+        }
+      }
+      if skip is false {
+        let valueAtKey: JsonValue = jsonObjectValueAt(doc: docView, this: bag, idx: k)
+        applyComponentByName(
+          world: world
+          entity: entity
+          name: key
+          doc: docView
+          val: valueAtKey
+        )
+      }
+      k = k + 1
+    }
+    j = j + 1
+  }
+
+  # Pass 3: build hierarchy (Children + ParentLink).
+  let p: Int = 0
+  loop p < nodeCount {
+    let node: SceneNode = sceneNodeAt(this: scene, idx: p)
+    let parentEntity: Int = entitiesByNodeIndex.get(index: p)
+    let kn: Int = node.childrenIds.length
+    if kn > 0 {
+      let kids: List(Int) = createList(Int)(initialCap: kn)
+      let q: Int = 0
+      loop q < kn {
+        let childId: String = node.childrenIds.get(index: q)
+        let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
+        if childIdx >= 0 {
+          let childEntity: Int = entitiesByNodeIndex.get(index: childIdx)
+          appendIntListSI(lst: kids, value: childEntity)
+          let pl: ParentLink = { parent: parentEntity }
+          componentSet(this: world.parentLinks, entity: childEntity, data: pl)
+        }
+        q = q + 1
+      }
+      let ch: Children = { ids: kids }
+      componentSet(this: world.childrens, entity: parentEntity, data: ch)
+    }
+    p = p + 1
+  }
+
+  # Pass 4: apply overrides.
+  let on: Int = overrides.length
+  let oi: Int = 0
+  loop oi < on {
+    let o: SceneOverride = rae_ext_rae_buf_get(buf: overrides.data, index: oi)
+    let nodeIdx: Int = sceneNodeIndex(this: scene, nodeId: o.nodeId)
+    if nodeIdx >= 0 {
+      let targetEntity: Int = entitiesByNodeIndex.get(index: nodeIdx)
+      applyOverride(world: world, entity: targetEntity, override: o)
+    }
+    oi = oi + 1
+  }
+
+  ret mountEntity
+}
+
+# Apply a single SceneOverride to an entity. Currently supports:
+#
+#   Text.text          (string)
+#   Sprite.textureKey  (string)
+#   Active.value       ("true" / "false")
+#
+# Other field types are no-ops — the caller is expected not to pass
+# overrides for unsupported fields. Extending this is a per-field
+# addition; the dispatch is just a name match.
+func applyOverride(world: mod UiWorld, entity: Int, override: view SceneOverride) {
+  let textKey: String = "Text"
+  let spriteKey: String = "Sprite"
+  let activeKey: String = "Active"
+
+  if override.componentName.equals(other: textKey) {
+    let textField: String = "text"
+    if override.fieldName.equals(other: textField) {
+      if componentHas(this: world.texts, entity: entity) {
+        let cur: Text = componentGet(this: world.texts, entity: entity)
+        let updated: Text = {
+          text: override.valueString
+          styleId: cur.styleId
+          wrapWidthMode: cur.wrapWidthMode
+        }
+        componentSet(this: world.texts, entity: entity, data: updated)
+      }
+    }
+    ret
+  }
+
+  if override.componentName.equals(other: spriteKey) {
+    let textureField: String = "textureKey"
+    if override.fieldName.equals(other: textureField) {
+      if componentHas(this: world.sprites, entity: entity) {
+        let cur: Sprite = componentGet(this: world.sprites, entity: entity)
+        let updated: Sprite = {
+          textureKey: override.valueString
+          tint: cur.tint
+          scaleMode: cur.scaleMode
+          tileScale: cur.tileScale
+          nineSlice: cur.nineSlice
+          hasNineSlice: cur.hasNineSlice
+        }
+        componentSet(this: world.sprites, entity: entity, data: updated)
+      }
+    }
+    ret
+  }
+
+  if override.componentName.equals(other: activeKey) {
+    let valueField: String = "value"
+    if override.fieldName.equals(other: valueField) {
+      let trueStr: String = "true"
+      let v: Bool = override.valueString.equals(other: trueStr)
+      let active: Active = { value: v }
+      componentSet(this: world.actives, entity: entity, data: active)
+    }
+    ret
+  }
+}
