@@ -1,0 +1,145 @@
+import json
+
+# Build composite JSON via concat — `{` starts string interpolation in
+# Rae, so authoring object literals inline is awkward.
+func sampleObject() ret String {
+  let s: String = "\{"
+  s = s.concat(other: "\"name\":\"Charcoal\",")
+  s = s.concat(other: "\"songs\":8,")
+  s = s.concat(other: "\"on\":true,")
+  s = s.concat(other: "\"tags\":[\"folk\",\"acoustic\"]")
+  s = s.concat(other: "\}")
+  ret s
+}
+
+# A nested object so we can confirm parent ranges over a child object's
+# pool entries don't get aliased.
+func nestedObject() ret String {
+  let s: String = "\{"
+  s = s.concat(other: "\"outer\":\{")
+  s = s.concat(other: "\"inner\":[1,2,[3,4]]")
+  s = s.concat(other: "\},")
+  s = s.concat(other: "\"trailer\":\"end\"")
+  s = s.concat(other: "\}")
+  ret s
+}
+
+func showPrimitives() {
+  let qmark: String = "?"
+
+  # null
+  let d1: JsonDoc = parseJson(source: "null")
+  let r1: JsonValue = jsonRoot(doc: d1)
+  if r1.kind is JsonKind.Null {
+    log("null: ok")
+  }
+
+  # The compiled C backend can't take `&` of a function call rvalue
+  # passed as `view T`, so always bind the JsonRoot to a local first.
+  let d2: JsonDoc = parseJson(source: "true")
+  let r2: JsonValue = jsonRoot(doc: d2)
+  log("true: {jsonBool(this: r2, fallback: false)}")
+
+  let d3: JsonDoc = parseJson(source: "false")
+  let r3: JsonValue = jsonRoot(doc: d3)
+  log("false: {jsonBool(this: r3, fallback: true)}")
+
+  let d4: JsonDoc = parseJson(source: "42")
+  let r4: JsonValue = jsonRoot(doc: d4)
+  log("int42: {jsonInt(this: r4, fallback: -1)}")
+
+  let d5: JsonDoc = parseJson(source: "-3.5")
+  let r5: JsonValue = jsonRoot(doc: d5)
+  log("flt: {jsonFloat(this: r5, fallback: 0.0)}")
+
+  let d6: JsonDoc = parseJson(source: "\"hi\"")
+  let r6: JsonValue = jsonRoot(doc: d6)
+  log("str: {jsonString(this: r6, fallback: qmark)}")
+}
+
+func showObject() {
+  let qmark: String = "?"
+  let doc: JsonDoc = parseJson(source: sampleObject())
+  if doc.ok is false {
+    log("object failed at {doc.errorPos}")
+    ret
+  }
+  let root: JsonValue = jsonRoot(doc: doc)
+  log("obj.len = {jsonObjectLen(this: root)}")
+
+  let nameIdx: Int = jsonField(doc: doc, this: root, key: "name")
+  let nameVal: JsonValue = jsonValueAt(doc: doc, idx: nameIdx)
+  log("name = {jsonString(this: nameVal, fallback: qmark)}")
+
+  let songsIdx: Int = jsonField(doc: doc, this: root, key: "songs")
+  let songsVal: JsonValue = jsonValueAt(doc: doc, idx: songsIdx)
+  log("songs = {jsonInt(this: songsVal, fallback: -1)}")
+
+  let onIdx: Int = jsonField(doc: doc, this: root, key: "on")
+  let onVal: JsonValue = jsonValueAt(doc: doc, idx: onIdx)
+  log("on = {jsonBool(this: onVal, fallback: false)}")
+
+  let tagsIdx: Int = jsonField(doc: doc, this: root, key: "tags")
+  let tagsVal: JsonValue = jsonValueAt(doc: doc, idx: tagsIdx)
+  log("tags.len = {jsonArrayLen(this: tagsVal)}")
+  let i: Int = 0
+  loop i < jsonArrayLen(this: tagsVal) {
+    let tagVal: JsonValue = jsonArrayAt(doc: doc, this: tagsVal, idx: i)
+    log("  tags[{i}] = {jsonString(this: tagVal, fallback: qmark)}")
+    i = i + 1
+  }
+
+  let missingIdx: Int = jsonField(doc: doc, this: root, key: "nope")
+  log("missing field idx = {missingIdx}")
+}
+
+func showNested() {
+  let qmark: String = "?"
+  let doc: JsonDoc = parseJson(source: nestedObject())
+  if doc.ok is false {
+    log("nested failed at {doc.errorPos}")
+    ret
+  }
+  let root: JsonValue = jsonRoot(doc: doc)
+  let outerIdx: Int = jsonField(doc: doc, this: root, key: "outer")
+  let outerVal: JsonValue = jsonValueAt(doc: doc, idx: outerIdx)
+  let innerIdx: Int = jsonField(doc: doc, this: outerVal, key: "inner")
+  let innerVal: JsonValue = jsonValueAt(doc: doc, idx: innerIdx)
+  log("inner.len = {jsonArrayLen(this: innerVal)}")
+
+  let v0: JsonValue = jsonArrayAt(doc: doc, this: innerVal, idx: 0)
+  log("inner[0] = {jsonInt(this: v0, fallback: -1)}")
+  let v2: JsonValue = jsonArrayAt(doc: doc, this: innerVal, idx: 2)
+  log("inner[2].len = {jsonArrayLen(this: v2)}")
+  let nestedItem: JsonValue = jsonArrayAt(doc: doc, this: v2, idx: 1)
+  log("inner[2][1] = {jsonInt(this: nestedItem, fallback: -1)}")
+
+  let trailerIdx: Int = jsonField(doc: doc, this: root, key: "trailer")
+  let trailerVal: JsonValue = jsonValueAt(doc: doc, idx: trailerIdx)
+  log("trailer = {jsonString(this: trailerVal, fallback: qmark)}")
+}
+
+func showMalformed() {
+  # Trailing garbage.
+  let d1: JsonDoc = parseJson(source: "42 trailing")
+  log("trailing.ok = {d1.ok}")
+
+  # Unterminated string.
+  let d2: JsonDoc = parseJson(source: "\"oops")
+  log("untermStr.ok = {d2.ok}")
+
+  # Unterminated object.
+  let d3: JsonDoc = parseJson(source: "\{\"a\":1")
+  log("untermObj.ok = {d3.ok}")
+
+  # Bare bad token.
+  let d4: JsonDoc = parseJson(source: "tru")
+  log("badTok.ok = {d4.ok}")
+}
+
+func main() {
+  showPrimitives()
+  showObject()
+  showNested()
+  showMalformed()
+}
