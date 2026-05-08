@@ -952,6 +952,11 @@ void rae_ext_drawRectangleLines(double x, double y, double width, double height,
     DrawRectangleLines((int)x, (int)y, (int)width, (int)height, color);
 }
 
+void rae_ext_drawRectangleRounded(double x, double y, double width, double height, double roundness, int64_t segments, Color color) {
+    Rectangle rec = {(float)x, (float)y, (float)width, (float)height};
+    DrawRectangleRounded(rec, (float)roundness, (int)segments, color);
+}
+
 void rae_ext_drawCube(Vector3 pos, double width, double height, double length, Color color) {
     DrawCube(pos, (float)width, (float)height, (float)length, color);
 }
@@ -978,6 +983,7 @@ void rae_ext_setWindowPosition(int64_t x, int64_t y) { SetWindowPosition((int)x,
 Texture rae_ext_loadTexture(rae_String fileName) { return LoadTexture((const char*)fileName.data); }
 void rae_ext_unloadTexture(Texture texture) { UnloadTexture(texture); }
 void rae_ext_drawTexture(Texture texture, double x, double y, Color tint) { DrawTexture(texture, (int)x, (int)y, tint); }
+void rae_ext_drawTextureEx(Texture texture, Vector2 pos, double rotation, double scale, Color tint) { DrawTextureEx(texture, pos, (float)rotation, (float)scale, tint); }
 int64_t rae_ext_measureText(rae_String text, int64_t fontSize) { return (int64_t)MeasureText((const char*)text.data, (int)fontSize); }
 
 /* Custom font support.

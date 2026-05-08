@@ -1,0 +1,22 @@
+# Text measurement helpers — used by Hug-sized Text nodes during the
+# layout measure pass.
+#
+# Phase 1e ships only the default-font path (`measureText`). Once the
+# font-slot API needs custom-font measurement, add a
+# `measureTextWidthWithFont(slot, text, fontSize, spacing)` binding to
+# raylib.rae and route through here. Until then, custom fonts use the
+# default-font width as a heuristic — close enough for typical UI
+# strings since Roboto's metrics are within ~10 % of raylib's default
+# at the same size.
+import raylib
+
+# Returns the width in pixels of `text` rendered with the default font
+# at `fontSize`. Height is conventionally `fontSize` for the default
+# font; raylib doesn't expose a per-line height with its default.
+func measureTextWidth(text: String, fontSize: Int) ret Int {
+  ret measureText(text: text, fontSize: fontSize)
+}
+
+func measureTextHeight(fontSize: Int) ret Int {
+  ret fontSize
+}
