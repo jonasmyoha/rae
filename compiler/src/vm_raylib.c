@@ -416,6 +416,47 @@ static bool native_isKeyPressed(struct VM* vm, VmNativeResult* out, const Value*
     return true;
 }
 
+static bool native_getMouseX(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data; (void)args; (void)count;
+    out->has_value = true;
+    out->value = value_int(GetMouseX());
+    return true;
+}
+
+static bool native_getMouseY(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data; (void)args; (void)count;
+    out->has_value = true;
+    out->value = value_int(GetMouseY());
+    return true;
+}
+
+static bool native_isMouseButtonDown(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 1) { fprintf(stderr, "error: isMouseButtonDown expects 1 arg, got %zu\n", count); return false; }
+    int b = (args[0].type == VAL_FLOAT) ? (int)args[0].as.float_value : (int)args[0].as.int_value;
+    out->has_value = true;
+    out->value = value_int(IsMouseButtonDown(b) ? 1 : 0);
+    return true;
+}
+
+static bool native_isMouseButtonPressed(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 1) { fprintf(stderr, "error: isMouseButtonPressed expects 1 arg, got %zu\n", count); return false; }
+    int b = (args[0].type == VAL_FLOAT) ? (int)args[0].as.float_value : (int)args[0].as.int_value;
+    out->has_value = true;
+    out->value = value_int(IsMouseButtonPressed(b) ? 1 : 0);
+    return true;
+}
+
+static bool native_isMouseButtonReleased(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 1) { fprintf(stderr, "error: isMouseButtonReleased expects 1 arg, got %zu\n", count); return false; }
+    int b = (args[0].type == VAL_FLOAT) ? (int)args[0].as.float_value : (int)args[0].as.int_value;
+    out->has_value = true;
+    out->value = value_int(IsMouseButtonReleased(b) ? 1 : 0);
+    return true;
+}
+
 static bool native_drawCube(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
     if (count != 10) {
@@ -781,6 +822,11 @@ bool vm_registry_register_raylib(VmRegistry* registry) {
     ok &= vm_registry_register_native(registry, "setTargetFPS", native_setTargetFPS, NULL);
     ok &= vm_registry_register_native(registry, "isKeyDown", native_isKeyDown, NULL);
     ok &= vm_registry_register_native(registry, "isKeyPressed", native_isKeyPressed, NULL);
+    ok &= vm_registry_register_native(registry, "getMouseX", native_getMouseX, NULL);
+    ok &= vm_registry_register_native(registry, "getMouseY", native_getMouseY, NULL);
+    ok &= vm_registry_register_native(registry, "isMouseButtonDown", native_isMouseButtonDown, NULL);
+    ok &= vm_registry_register_native(registry, "isMouseButtonPressed", native_isMouseButtonPressed, NULL);
+    ok &= vm_registry_register_native(registry, "isMouseButtonReleased", native_isMouseButtonReleased, NULL);
     ok &= vm_registry_register_native(registry, "getTime", native_getTime, NULL);
     ok &= vm_registry_register_native(registry, "getScreenWidth", native_getScreenWidth, NULL);
     ok &= vm_registry_register_native(registry, "getScreenHeight", native_getScreenHeight, NULL);

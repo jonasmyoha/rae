@@ -25,6 +25,7 @@ import ui/render
 import ui/textures
 import ui/scene
 import ui/scene_instance
+import ui/input
 
 # ----- size constants kept central so tweaking the layout is easy -----
 let screenW: Float = 600.0
@@ -421,7 +422,11 @@ func main() {
       f = f + 1
     }
   } else {
+    let input: InputSystem = createInputSystem()
     loop not windowShouldClose() {
+      updateInputSystem(input: input, world: world)
+      dispatchActions(input: input)
+
       beginDrawing()
       clearBackground(color: bg)
       renderSystem(world: world, reg: texReg)
@@ -432,4 +437,18 @@ func main() {
   textureUnloadAll(reg: texReg)
   unloadFontSlot(slot: fontSlot)
   closeWindow()
+}
+
+# Pull every action fired this frame and route to the right action.
+# Phase 1g just logs each event; later phases plug into actual
+# navigation / playback state.
+func dispatchActions(input: view InputSystem) {
+  let n: Int = input.events.length
+  let i: Int = 0
+  loop i < n {
+    let ev: ActionEvent = rae_ext_rae_buf_get(buf: input.events.data, index: i)
+    let actionId: String = ev.actionId
+    log("[action] {actionId} (entity {ev.entity})")
+    i = i + 1
+  }
 }
