@@ -1,28 +1,37 @@
-# Render system — RUICS § 9 in Rae form, *minimal* version.
+# Render system — RUICS § 9 in Rae form, Phase 1e.
 #
-# This is the Phase 1d "first user-visible milestone" painter: walks
-# the scene top-down (so painters' algorithm draws parents before
-# children) and paints any entity that has a `Shape: Rect` using
-# raylib's `drawRectangle`. Other Shape kinds (RoundedRect, Circle),
-# Sprites, and Text are deferred to Phase 1e (`lib/ui/render.rae`
-# extension in queue #44).
+# Walks the scene top-down (painters' algorithm) and paints every
+# entity that has a visible WorldTransform plus one of:
+#   * Shape: Rect / RoundedRect / Circle  (raylib primitives)
+#   * Sprite                              (raylib texture from registry)
+#   * Text                                (custom font slot 0, falls
+#                                          back to default font)
 #
 # Inputs:
 #   WorldTransform — absolute screen position + alpha + visibility,
 #                    written by transformSystem.
 #   ComputedRect   — local size used for the paint extent; we use w/h
-#                    from here rather than reconstructing it from
-#                    WorldTransform alone.
-#   Shape          — fill colour + kind (only Rect is painted).
+#                    from here rather than reconstructing it.
+#   Shape, Sprite, Text — the three visual component kinds.
+#   TextureRegistry (optional) — used only when a Sprite needs to
+#                    resolve `textureKey` to a concrete `Texture`.
+#                    `renderSystem` accepts a registry parameter; the
+#                    `renderSystemNoTextures` variant skips Sprites.
 #
-# The render pass does NOT mutate the world; it only reads.
+# The render pass does NOT mutate the world; it only reads. Text uses
+# font slot `defaultFontSlot` (0). Callers must `loadFontInto(0, ...)`
+# before drawing if they want a custom font; otherwise raylib's bitmap
+# default font is used.
 import core
 import string
 import raylib
 
-# Compose the entity's effective alpha: WorldTransform.alpha is already
-# the multiplied chain alpha (see transform.rae). We just clamp it to
-# [0,1] and turn it into the [0,255] integer raylib expects.
+# Default text font slot; matches `loadFontInto(slot: 0, ...)`.
+let defaultFontSlot: Int = 0
+
+# Compose the entity's effective alpha into a [0,255] integer for
+# raylib. WorldTransform.alpha is already the multiplied chain alpha
+# (see transform.rae); we just clamp + scale here.
 func renderAlpha255(world: view UiWorld, entity: Int) ret Int {
   if componentHas(this: world.worldTransforms, entity: entity) is false {
     ret 255
@@ -38,8 +47,179 @@ func renderAlpha255(world: view UiWorld, entity: Int) ret Int {
   ret (a * 255.0).toInt()
 }
 
-# Paint a single entity if it carries a `Shape: Rect`.
-func paintEntity(world: view UiWorld, entity: Int) {
+# Apply the chain alpha to a `RgbaColor` and return a raylib `Color`.
+func toRaylibColor(c: RgbaColor, chain255: Int) ret Color {
+  let combinedA: Int = (c.a * chain255) / 255
+  ret Color { r: c.r, g: c.g, b: c.b, a: combinedA }
+}
+
+# Paint Shape variants on `entity` using the world transform / size
+# already on it. Caller has already verified visibility + alpha > 0.
+func paintShape(world: view UiWorld, entity: Int, wt: view WorldTransform, cr: view ComputedRect, chain255: Int) {
+  let sh: Shape = componentGet(this: world.shapes, entity: entity)
+  let fill: Color = toRaylibColor(c: sh.fill, chain255: chain255)
+
+  if sh.kind is ShapeKind.Rect {
+    drawRectangle(
+      x: wt.x
+      y: wt.y
+      width: cr.w
+      height: cr.h
+      color: fill
+    )
+    ret
+  }
+  if sh.kind is ShapeKind.RoundedRect {
+    # `Shape.radius` is given in pixels in components.rae; raylib's
+    # roundness is a fraction of the smaller side. Convert.
+    let smaller: Float = cr.w
+    if cr.h < smaller {
+      smaller = cr.h
+    }
+    let half: Float = smaller / 2.0
+    let r: Float = sh.radius
+    if r > half {
+      r = half
+    }
+    let roundness: Float = 0.0
+    if smaller > 0.0 {
+      roundness = (r * 2.0) / smaller
+    }
+    drawRectangleRounded(
+      x: wt.x
+      y: wt.y
+      width: cr.w
+      height: cr.h
+      roundness: roundness
+      segments: 10
+      color: fill
+    )
+    ret
+  }
+  if sh.kind is ShapeKind.Circle {
+    # Centred inside the entity's box. Use radius from Shape, falling
+    # back to half the smaller side if not set.
+    let smaller: Float = cr.w
+    if cr.h < smaller {
+      smaller = cr.h
+    }
+    let r: Float = sh.radius
+    if r <= 0.0 {
+      r = smaller / 2.0
+    }
+    let cx: Float = wt.x + (cr.w / 2.0)
+    let cy: Float = wt.y + (cr.h / 2.0)
+    drawCircle(x: cx, y: cy, radius: r, color: fill)
+    ret
+  }
+}
+
+func paintSprite(reg: view TextureRegistry, world: view UiWorld, entity: Int, wt: view WorldTransform, cr: view ComputedRect, chain255: Int) {
+  let sp: Sprite = componentGet(this: world.sprites, entity: entity)
+  if textureHas(reg: reg, key: sp.textureKey) is false {
+    ret
+  }
+  let tex: Texture = textureGet(reg: reg, key: sp.textureKey)
+  let tint: Color = toRaylibColor(c: sp.tint, chain255: chain255)
+
+  # ScaleMode.Fit/Fill/Stretch — for Phase 1e we treat all three the
+  # same: scale the texture so its longer edge fills the box. Proper
+  # per-mode behaviour lands once we implement nine-slice and ratio-
+  # aware fitting in Phase 1f.
+  let scaleX: Float = 1.0
+  let scaleY: Float = 1.0
+  if tex.width > 0 {
+    scaleX = cr.w / tex.width.toFloat()
+  }
+  if tex.height > 0 {
+    scaleY = cr.h / tex.height.toFloat()
+  }
+  let scale: Float = scaleX
+  if scaleY < scale {
+    scale = scaleY
+  }
+  if scale <= 0.0 {
+    scale = 1.0
+  }
+
+  let drawW: Float = tex.width.toFloat() * scale
+  let drawH: Float = tex.height.toFloat() * scale
+  let offX: Float = (cr.w - drawW) / 2.0
+  let offY: Float = (cr.h - drawH) / 2.0
+
+  drawTextureEx(
+    texture: tex
+    pos: Vector2 { x: wt.x + offX, y: wt.y + offY }
+    rotation: 0.0
+    scale: scale
+    tint: tint
+  )
+}
+
+# Resolve a Text node's font size / colour from its style id. Phase 1e
+# uses a small built-in stylesheet for the music player; once Phase
+# 1f's `Style` component lands, this routes through that table instead.
+func textStyleSize(styleId: String) ret Float {
+  let h1: String = "h1"
+  let h2: String = "h2"
+  let body: String = "body"
+  let caption: String = "caption"
+  if styleId.equals(other: h1) {
+    ret 36.0
+  }
+  if styleId.equals(other: h2) {
+    ret 28.0
+  }
+  if styleId.equals(other: caption) {
+    ret 16.0
+  }
+  ret 20.0
+}
+
+func textStyleColor(styleId: String, chain255: Int) ret Color {
+  let mute: String = "muted"
+  let caption: String = "caption"
+  let primary: String = "primary"
+  if styleId.equals(other: mute) {
+    let muted: RgbaColor = { r: 130, g: 130, b: 140, a: 255 }
+    ret toRaylibColor(c: muted, chain255: chain255)
+  }
+  if styleId.equals(other: caption) {
+    let cap: RgbaColor = { r: 140, g: 140, b: 150, a: 255 }
+    ret toRaylibColor(c: cap, chain255: chain255)
+  }
+  if styleId.equals(other: primary) {
+    let prim: RgbaColor = { r: 240, g: 240, b: 240, a: 255 }
+    ret toRaylibColor(c: prim, chain255: chain255)
+  }
+  let dark: RgbaColor = { r: 30, g: 30, b: 36, a: 255 }
+  ret toRaylibColor(c: dark, chain255: chain255)
+}
+
+func paintText(world: view UiWorld, entity: Int, wt: view WorldTransform, cr: view ComputedRect, chain255: Int) {
+  let tx: Text = componentGet(this: world.texts, entity: entity)
+  let txt: String = tx.text
+  if txt.length() is 0 {
+    ret
+  }
+  let size: Float = textStyleSize(styleId: tx.styleId)
+  let col: Color = textStyleColor(styleId: tx.styleId, chain255: chain255)
+  drawTextWithFont(
+    slot: defaultFontSlot
+    text: txt
+    x: wt.x
+    y: wt.y
+    fontSize: size
+    spacing: 1.0
+    color: col
+  )
+}
+
+# Paint a single entity. Order: Shape (background) → Sprite → Text, so
+# text/sprites layer on top of Shape backgrounds correctly when an
+# entity carries multiple visual components (e.g. a button background
+# + label).
+func paintEntity(world: view UiWorld, reg: view TextureRegistry, entity: Int) {
   if componentHas(this: world.worldTransforms, entity: entity) is false {
     ret
   }
@@ -50,41 +230,27 @@ func paintEntity(world: view UiWorld, entity: Int) {
   if wt.alpha <= 0.0 {
     ret
   }
-  if componentHas(this: world.shapes, entity: entity) is false {
-    ret
-  }
   if componentHas(this: world.computedRects, entity: entity) is false {
     ret
   }
   let cr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
-  let sh: Shape = componentGet(this: world.shapes, entity: entity)
+  let chain255: Int = renderAlpha255(world: world, entity: entity)
 
-  # Phase 1d only paints Shape:Rect. RoundedRect/Circle are intentionally
-  # ignored here so the album scene shows the right structure even if
-  # the corners aren't rounded yet.
-  if sh.kind is ShapeKind.Rect {
-    let chain255: Int = renderAlpha255(world: world, entity: entity)
-    let combinedA: Int = (sh.fill.a * chain255) / 255
-    let col: Color = {
-      r: sh.fill.r
-      g: sh.fill.g
-      b: sh.fill.b
-      a: combinedA
-    }
-    drawRectangle(
-      x: wt.x
-      y: wt.y
-      width: cr.w
-      height: cr.h
-      color: col
-    )
+  if componentHas(this: world.shapes, entity: entity) {
+    paintShape(world: world, entity: entity, wt: wt, cr: cr, chain255: chain255)
+  }
+  if componentHas(this: world.sprites, entity: entity) {
+    paintSprite(reg: reg, world: world, entity: entity, wt: wt, cr: cr, chain255: chain255)
+  }
+  if componentHas(this: world.texts, entity: entity) {
+    paintText(world: world, entity: entity, wt: wt, cr: cr, chain255: chain255)
   }
 }
 
 # Recursive top-down walk. Painter's algorithm — parent before its
 # children, declaration order between siblings.
-func paintSubtree(world: view UiWorld, entity: Int) {
-  paintEntity(world: world, entity: entity)
+func paintSubtree(world: view UiWorld, reg: view TextureRegistry, entity: Int) {
+  paintEntity(world: world, reg: reg, entity: entity)
   if componentHas(this: world.childrens, entity: entity) is false {
     ret
   }
@@ -93,14 +259,15 @@ func paintSubtree(world: view UiWorld, entity: Int) {
   let i: Int = 0
   loop i < n {
     let cid: Int = ch.ids.get(index: i)
-    paintSubtree(world: world, entity: cid)
+    paintSubtree(world: world, reg: reg, entity: cid)
     i = i + 1
   }
 }
 
 # Entry point. Walks every alive root (no ParentLink) that has a
-# WorldTransform and paints its subtree.
-func renderSystem(world: view UiWorld) {
+# WorldTransform and paints its subtree. Pass an empty
+# `TextureRegistry` if no Sprites are in use.
+func renderSystem(world: view UiWorld, reg: view TextureRegistry) {
   let alive: view List(Int) => world.alive
   let n: Int = alive.length
   let i: Int = 0
@@ -108,7 +275,7 @@ func renderSystem(world: view UiWorld) {
     let e: Int = alive.get(index: i)
     if componentHas(this: world.parentLinks, entity: e) is false {
       if componentHas(this: world.worldTransforms, entity: e) {
-        paintSubtree(world: world, entity: e)
+        paintSubtree(world: world, reg: reg, entity: e)
       }
     }
     i = i + 1

@@ -1,0 +1,116 @@
+# Texture registry — lazy-loaded raylib textures keyed by string.
+#
+# `Sprite.textureKey` carries a logical name (e.g. "icon-back"); the
+# renderer looks it up in a `TextureRegistry` to resolve to a concrete
+# `Texture`. Keeping the registry separate from the ECS world means
+# multiple worlds can share an asset cache, and texture loading stays
+# tied to the raylib lifecycle (must be called between
+# `initWindow()` / `closeWindow()`).
+#
+# The registry stores textures in two parallel lists; lookup is a
+# linear scan. UIs typically have a few dozen textures total — a hash
+# map would be over-engineering.
+import core
+import string
+import raylib
+
+type TextureEntry {
+  key: String
+  texture: Texture
+  path: String
+}
+
+type TextureRegistry {
+  entries: List(TextureEntry)
+}
+
+func createTextureRegistry() ret TextureRegistry {
+  ret TextureRegistry {
+    entries: createList(TextureEntry)(initialCap: 16)
+  }
+}
+
+# Register and immediately load a texture. Returns the loaded Texture.
+# Does not deduplicate — callers should check `textureHas` first if a
+# key might be re-registered.
+func textureLoad(reg: mod TextureRegistry, key: String, path: String) ret Texture {
+  let tex: Texture = loadTexture(fileName: path)
+  let entry: TextureEntry = {
+    key: key
+    texture: tex
+    path: path
+  }
+  reg.entries.add(value: entry)
+  ret tex
+}
+
+# Find the index of `key` in the registry, or -1 if not present.
+func textureIndex(reg: view TextureRegistry, key: String) ret Int {
+  let n: Int = reg.entries.length
+  let i: Int = 0
+  loop i < n {
+    let e: TextureEntry = rae_ext_rae_buf_get(buf: reg.entries.data, index: i)
+    if e.key.equals(other: key) {
+      ret i
+    }
+    i = i + 1
+  }
+  ret -1
+}
+
+func textureHas(reg: view TextureRegistry, key: String) ret Bool {
+  ret textureIndex(reg: reg, key: key) >= 0
+}
+
+# Get a loaded texture by key. Returns a zero-id Texture if missing —
+# raylib's `DrawTexture` on a zero-id texture is a no-op, so a missing
+# asset doesn't crash the program. Callers that need to detect this
+# should `textureHas` first.
+func textureGet(reg: view TextureRegistry, key: String) ret Texture {
+  let idx: Int = textureIndex(reg: reg, key: key)
+  if idx < 0 {
+    let empty: Texture = { id: 0, width: 0, height: 0, mipmaps: 0, format: 0 }
+    ret empty
+  }
+  let e: TextureEntry = rae_ext_rae_buf_get(buf: reg.entries.data, index: idx)
+  let t: Texture = e.texture
+  ret t
+}
+
+# Bulk loader: takes parallel `keys` and `paths` lists and registers
+# each pair. Order in `keys`/`paths` must match.
+func textureLoadBatch(
+  reg: mod TextureRegistry
+  keys: view List(String)
+  paths: view List(String)
+) {
+  let n: Int = keys.length
+  let m: Int = paths.length
+  let count: Int = n
+  if m < count {
+    count = m
+  }
+  let i: Int = 0
+  loop i < count {
+    let k: String = keys.get(index: i)
+    let p: String = paths.get(index: i)
+    let loaded: Texture = textureLoad(reg: reg, key: k, path: p)
+    i = i + 1
+  }
+}
+
+# Release every loaded texture and clear the registry. Call before
+# `closeWindow()` so raylib doesn't leak GPU memory.
+func textureUnloadAll(reg: mod TextureRegistry) {
+  let n: Int = reg.entries.length
+  let i: Int = 0
+  loop i < n {
+    let e: TextureEntry = rae_ext_rae_buf_get(buf: reg.entries.data, index: i)
+    unloadTexture(texture: e.texture)
+    i = i + 1
+  }
+  let entries: mod List(TextureEntry) => reg.entries
+  loop entries.length > 0 {
+    entries.remove(index: entries.length - 1)
+  }
+}

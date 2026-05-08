@@ -165,6 +165,32 @@ static bool native_drawTexture(struct VM* vm, VmNativeResult* out, const Value* 
     return true;
 }
 
+static bool native_drawTextureEx(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 13) {
+        fprintf(stderr, "error: drawTextureEx expects 13 args (Texture(5) + pos(2) + rotation + scale + Color(4)), got %zu\n", count);
+        return false;
+    }
+    Texture t = {
+        .id = (unsigned int)args[0].as.int_value,
+        .width = (int)args[1].as.int_value,
+        .height = (int)args[2].as.int_value,
+        .mipmaps = (int)args[3].as.int_value,
+        .format = (int)args[4].as.int_value
+    };
+    float px = (args[5].type == VAL_FLOAT) ? (float)args[5].as.float_value : (float)args[5].as.int_value;
+    float py = (args[6].type == VAL_FLOAT) ? (float)args[6].as.float_value : (float)args[6].as.int_value;
+    float rotation = (args[7].type == VAL_FLOAT) ? (float)args[7].as.float_value : (float)args[7].as.int_value;
+    float scale = (args[8].type == VAL_FLOAT) ? (float)args[8].as.float_value : (float)args[8].as.int_value;
+    unsigned char r = (args[9].type == VAL_FLOAT) ? (unsigned char)args[9].as.float_value : (unsigned char)args[9].as.int_value;
+    unsigned char g = (args[10].type == VAL_FLOAT) ? (unsigned char)args[10].as.float_value : (unsigned char)args[10].as.int_value;
+    unsigned char b = (args[11].type == VAL_FLOAT) ? (unsigned char)args[11].as.float_value : (unsigned char)args[11].as.int_value;
+    unsigned char a = (args[12].type == VAL_FLOAT) ? (unsigned char)args[12].as.float_value : (unsigned char)args[12].as.int_value;
+    DrawTextureEx(t, (Vector2){px, py}, rotation, scale, (Color){r, g, b, a});
+    out->has_value = false;
+    return true;
+}
+
 static bool native_drawRectangle(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
     if (count != 8) {
@@ -200,6 +226,45 @@ static bool native_drawRectangleLines(struct VM* vm, VmNativeResult* out, const 
     unsigned char a = (args[7].type == VAL_FLOAT) ? (unsigned char)args[7].as.float_value : (unsigned char)args[7].as.int_value;
     DrawRectangleLines(x, y, w, h, (Color){r, g, b, a});
     out->has_value = false;
+    return true;
+}
+
+static bool native_drawRectangleRounded(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 10) {
+        fprintf(stderr, "error: drawRectangleRounded expects 10 args (x, y, w, h, roundness, segments, Color(4)), got %zu\n", count);
+        return false;
+    }
+    float x = (args[0].type == VAL_FLOAT) ? (float)args[0].as.float_value : (float)args[0].as.int_value;
+    float y = (args[1].type == VAL_FLOAT) ? (float)args[1].as.float_value : (float)args[1].as.int_value;
+    float w = (args[2].type == VAL_FLOAT) ? (float)args[2].as.float_value : (float)args[2].as.int_value;
+    float h = (args[3].type == VAL_FLOAT) ? (float)args[3].as.float_value : (float)args[3].as.int_value;
+    float roundness = (args[4].type == VAL_FLOAT) ? (float)args[4].as.float_value : (float)args[4].as.int_value;
+    int segments = (args[5].type == VAL_FLOAT) ? (int)args[5].as.float_value : (int)args[5].as.int_value;
+    unsigned char r = (args[6].type == VAL_FLOAT) ? (unsigned char)args[6].as.float_value : (unsigned char)args[6].as.int_value;
+    unsigned char g = (args[7].type == VAL_FLOAT) ? (unsigned char)args[7].as.float_value : (unsigned char)args[7].as.int_value;
+    unsigned char b = (args[8].type == VAL_FLOAT) ? (unsigned char)args[8].as.float_value : (unsigned char)args[8].as.int_value;
+    unsigned char a = (args[9].type == VAL_FLOAT) ? (unsigned char)args[9].as.float_value : (unsigned char)args[9].as.int_value;
+    Rectangle rec = {x, y, w, h};
+    DrawRectangleRounded(rec, roundness, segments, (Color){r, g, b, a});
+    out->has_value = false;
+    return true;
+}
+
+static bool native_measureText(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 2) {
+        fprintf(stderr, "error: measureText expects 2 args (text, fontSize), got %zu\n", count);
+        return false;
+    }
+    if (args[0].type != VAL_STRING) {
+        fprintf(stderr, "error: measureText expects text as string\n");
+        return false;
+    }
+    const char* text = args[0].as.string_value.chars;
+    int fontSize = (args[1].type == VAL_FLOAT) ? (int)args[1].as.float_value : (int)args[1].as.int_value;
+    out->has_value = true;
+    out->value = value_int(MeasureText(text, fontSize));
     return true;
 }
 
@@ -680,8 +745,11 @@ bool vm_registry_register_raylib(VmRegistry* registry) {
     ok &= vm_registry_register_native(registry, "loadTexture", native_loadTexture, NULL);
     ok &= vm_registry_register_native(registry, "unloadTexture", native_unloadTexture, NULL);
     ok &= vm_registry_register_native(registry, "drawTexture", native_drawTexture, NULL);
+    ok &= vm_registry_register_native(registry, "drawTextureEx", native_drawTextureEx, NULL);
     ok &= vm_registry_register_native(registry, "drawRectangle", native_drawRectangle, NULL);
     ok &= vm_registry_register_native(registry, "drawRectangleLines", native_drawRectangleLines, NULL);
+    ok &= vm_registry_register_native(registry, "drawRectangleRounded", native_drawRectangleRounded, NULL);
+    ok &= vm_registry_register_native(registry, "measureText", native_measureText, NULL);
     ok &= vm_registry_register_native(registry, "drawRectangleGradientV", native_drawRectangleGradientV, NULL);
     ok &= vm_registry_register_native(registry, "drawRectangleGradientH", native_drawRectangleGradientH, NULL);
     ok &= vm_registry_register_native(registry, "drawCircle", native_drawCircle, NULL);
