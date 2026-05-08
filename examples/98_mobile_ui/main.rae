@@ -1,0 +1,159 @@
+# Music-player album scene — Phase 1d demo.
+#
+# First user-visible milestone of the scene-driven UI runtime. Builds
+# a hand-coded ECS world that approximates the album screen layout,
+# runs `layoutSystem` + `transformSystem` once, then paints the result
+# every frame with `renderSystem`. Only `Shape:Rect` is supported in
+# Phase 1d, so each node renders as a flat grey/coloured rectangle —
+# enough to verify positions and sizes without the rest of the
+# stylesheet/sprite/text plumbing landing first.
+#
+# Future phases progressively replace these placeholders:
+#   1e — RoundedRect/Circle, Sprite, Text + texture loading.
+#   1f — `.raescene` files and SceneInstance overrides.
+#   1g — pointer input / OnClick dispatch.
+import raylib
+import core
+import string
+import ui/components
+import ui/ecs
+import ui/layout
+import ui/transform
+import ui/render
+
+func makeFixedSize() ret Size {
+  ret Size {
+    w: SizeAxis { mode: SizeMode.Fixed, min: -1, max: -1 }
+    h: SizeAxis { mode: SizeMode.Fixed, min: -1, max: -1 }
+  }
+}
+
+func setRectFixed(world: mod UiWorld, entity: Int, w: Float, h: Float) {
+  let r: Rect = { x: 0.0, y: 0.0, w: w, h: h }
+  componentSet(this: world.rects, entity: entity, data: r)
+  componentSet(this: world.sizes, entity: entity, data: makeFixedSize())
+}
+
+func setShapeRect(world: mod UiWorld, entity: Int, r: Int, g: Int, b: Int) {
+  let shape: Shape = {
+    kind: ShapeKind.Rect
+    fill: RgbaColor { r: r, g: g, b: b, a: 255 }
+    stroke: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
+    strokeWidth: 0.0
+    radius: 0.0
+  }
+  componentSet(this: world.shapes, entity: entity, data: shape)
+}
+
+func attachChildren(world: mod UiWorld, parent: Int, kids: view List(Int)) {
+  let copy: List(Int) = createList(Int)(initialCap: kids.length)
+  let i: Int = 0
+  loop i < kids.length {
+    let kid: Int = kids.get(index: i)
+    copy.add(value: kid)
+    let pl: ParentLink = { parent: parent }
+    componentSet(this: world.parentLinks, entity: kid, data: pl)
+    i = i + 1
+  }
+  let ch: Children = { ids: copy }
+  componentSet(this: world.childrens, entity: parent, data: ch)
+}
+
+# Build the album-screen layout in code (no .raescene yet — that lands
+# in queue #46). Approximate dimensions taken from
+# `examples/98_mobile_ui/screens/music_player_screen_2.png`:
+#   600 x 1300 stage
+#   24 px outer padding, 16 px gap between rows
+#   80 px top bar
+#   528 px hero artwork
+#   400 px track list (5 rows)
+#   180 px play / mini-controls block
+func buildAlbumWorld() ret UiWorld {
+  let world: UiWorld = createUiWorld()
+
+  let root: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: root, w: 600.0, h: 1300.0)
+  setShapeRect(world: world, entity: root, r: 245, g: 245, b: 245)
+  let rootLayout: Layout = {
+    kind: LayoutType.Vertical
+    gap: 16.0
+    alignMain: AlignKind.Start
+    alignCross: AlignKind.Start
+    columns: 0
+    rowGap: 0.0
+    columnGap: 0.0
+  }
+  componentSet(this: world.layouts, entity: root, data: rootLayout)
+  let rootPad: Padding = { insets: Insets { l: 24.0, t: 24.0, r: 24.0, b: 24.0 } }
+  componentSet(this: world.paddings, entity: root, data: rootPad)
+
+  let topBar: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: topBar, w: 552.0, h: 56.0)
+  setShapeRect(world: world, entity: topBar, r: 220, g: 220, b: 220)
+
+  let hero: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: hero, w: 552.0, h: 528.0)
+  setShapeRect(world: world, entity: hero, r: 90, g: 90, b: 100)
+
+  let title: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: title, w: 552.0, h: 64.0)
+  setShapeRect(world: world, entity: title, r: 200, g: 200, b: 200)
+
+  let trackList: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: trackList, w: 552.0, h: 400.0)
+  let trackListLayout: Layout = {
+    kind: LayoutType.Vertical
+    gap: 12.0
+    alignMain: AlignKind.Start
+    alignCross: AlignKind.Start
+    columns: 0
+    rowGap: 0.0
+    columnGap: 0.0
+  }
+  componentSet(this: world.layouts, entity: trackList, data: trackListLayout)
+  let trackKids: List(Int) = createList(Int)(initialCap: 5)
+  let i: Int = 0
+  loop i < 5 {
+    let row: Int = createEntity(world: world)
+    setRectFixed(world: world, entity: row, w: 552.0, h: 64.0)
+    let shade: Int = 230 - (i * 8)
+    setShapeRect(world: world, entity: row, r: shade, g: shade, b: shade)
+    trackKids.add(value: row)
+    i = i + 1
+  }
+  attachChildren(world: world, parent: trackList, kids: trackKids)
+
+  let playBlock: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: playBlock, w: 552.0, h: 100.0)
+  setShapeRect(world: world, entity: playBlock, r: 0, g: 0, b: 0)
+
+  let rootKids: List(Int) = createList(Int)(initialCap: 5)
+  rootKids.add(value: topBar)
+  rootKids.add(value: hero)
+  rootKids.add(value: title)
+  rootKids.add(value: trackList)
+  rootKids.add(value: playBlock)
+  attachChildren(world: world, parent: root, kids: rootKids)
+
+  ret world
+}
+
+func main() {
+  setConfigFlags(flags: 4)
+  initWindow(width: 600, height: 1300, title: "Rae Mobile UI — Album")
+  setTargetFPS(fps: 60)
+
+  let world: UiWorld = buildAlbumWorld()
+
+  layoutSystem(world: world)
+  transformSystem(world: world)
+
+  let bg: Color = { r: 32, g: 32, b: 36, a: 255 }
+  loop not windowShouldClose() {
+    beginDrawing()
+    clearBackground(color: bg)
+    renderSystem(world: world)
+    endDrawing()
+  }
+  closeWindow()
+}

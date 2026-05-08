@@ -1,0 +1,796 @@
+# Two-phase layout — RUICS § 7 in Rae form.
+#
+# Phase 1 (`measureSubtree`)  : bottom-up walk that writes
+#                                MeasuredSize for Hug nodes, taking
+#                                gaps and padding into account.
+# Phase 2 (`computeSubtree`)  : top-down walk that resolves each
+#                                node's final size and position into
+#                                ComputedRect, distributing remaining
+#                                main-axis space across `Fill`
+#                                children, clamping by Constraints,
+#                                and respecting `Align` on the cross
+#                                axis (and inside Stack containers on
+#                                both axes).
+#
+# Coordinate space is **local to parent**: ComputedRect.x and .y are
+# offsets relative to the parent's content origin. The TransformSystem
+# in transform.rae composes these into absolute WorldTransform
+# coordinates each frame.
+#
+# Layout types covered: None / Horizontal / Vertical / Stack.
+# Grid is reserved in the type but not implemented (RUICS hasn't
+# implemented it either; the music player doesn't need it).
+import core
+import string
+
+# The screen-level container the root node measures against. main.rae
+# updates these via `setLayoutScreenSize` whenever the window size
+# changes; layoutSystem reads them off these globals so it doesn't
+# have to thread them through every call.
+let screenWidth: Float = 600.0
+let screenHeight: Float = 1300.0
+
+func setLayoutScreenSize(w: Float, h: Float) {
+  # Globals can't be reassigned cross-module from a function in Rae
+  # today, so this is mostly a marker; main.rae writes directly to
+  # `screenWidth` / `screenHeight` once that lands. Until then,
+  # layoutSystem's defaults of 600x1300 match the music player target.
+  let unusedW: Float = w
+  let unusedH: Float = h
+}
+
+# -----------------------------------------------------------------
+# Helpers
+# -----------------------------------------------------------------
+
+# Returns true if `entity` should participate in layout. Inactive
+# nodes are filtered per RUICS § 7.3 — they don't contribute to
+# parent measurement or placement.
+func layoutActive(world: view UiWorld, entity: Int) ret Bool {
+  if componentHas(this: world.actives, entity: entity) is false {
+    ret true
+  }
+  let a: Active = componentGet(this: world.actives, entity: entity)
+  ret a.value
+}
+
+# Resolve a single axis given an authored Size, Rect-fallback, and a
+# parent-supplied content extent. See RUICS § 7.4 — `resolveAxis`.
+#
+# `rectVal` is `Rect.w` or `Rect.h` depending on which axis we're on.
+# `measuredVal` is the bottom-up MeasuredSize for that axis (0 if the
+# node hasn't been measured yet).
+# `parentAvail` is the parent's content size on this axis, or -1.0 if
+# unknown (in which case Fill falls back to rectVal).
+func resolveAxisFromSize(
+  axis: SizeAxis
+  rectVal: Float
+  measuredVal: Float
+  parentAvail: Float
+  hasMeasured: Bool
+  hasParentAvail: Bool
+) ret Float {
+  let result: Float = rectVal
+  if axis.mode is SizeMode.Fixed {
+    result = rectVal
+  }
+  if axis.mode is SizeMode.Fill {
+    if hasParentAvail {
+      result = parentAvail
+    } else {
+      result = rectVal
+    }
+  }
+  if axis.mode is SizeMode.Hug {
+    if hasMeasured {
+      result = measuredVal
+    } else {
+      result = rectVal
+    }
+  }
+  # Apply optional min/max clamps. -1 is the "no clamp" sentinel
+  # (see components.rae's SizeAxis docstring).
+  if axis.min >= 0 {
+    let minF: Float = axis.min.toFloat()
+    if result < minF {
+      result = minF
+    }
+  }
+  if axis.max >= 0 {
+    let maxF: Float = axis.max.toFloat()
+    if result > maxF {
+      result = maxF
+    }
+  }
+  ret result
+}
+
+# Apply Constraints (independent of Size) — width clamp.
+func applyConstraintsW(world: view UiWorld, entity: Int, w: Float) ret Float {
+  if componentHas(this: world.constraints, entity: entity) is false {
+    ret w
+  }
+  let c: Constraints = componentGet(this: world.constraints, entity: entity)
+  let r: Float = w
+  if c.hasMinW {
+    if r < c.minW {
+      r = c.minW
+    }
+  }
+  if c.hasMaxW {
+    if r > c.maxW {
+      r = c.maxW
+    }
+  }
+  ret r
+}
+
+func applyConstraintsH(world: view UiWorld, entity: Int, h: Float) ret Float {
+  if componentHas(this: world.constraints, entity: entity) is false {
+    ret h
+  }
+  let c: Constraints = componentGet(this: world.constraints, entity: entity)
+  let r: Float = h
+  if c.hasMinH {
+    if r < c.minH {
+      r = c.minH
+    }
+  }
+  if c.hasMaxH {
+    if r > c.maxH {
+      r = c.maxH
+    }
+  }
+  ret r
+}
+
+# Authored Padding, defaulted to all-zeros if absent.
+func entityPadding(world: view UiWorld, entity: Int) ret Insets {
+  if componentHas(this: world.paddings, entity: entity) is false {
+    ret Insets { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
+  }
+  let p: Padding = componentGet(this: world.paddings, entity: entity)
+  ret p.insets
+}
+
+func entityRect(world: view UiWorld, entity: Int) ret Rect {
+  if componentHas(this: world.rects, entity: entity) is false {
+    ret Rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }
+  }
+  let r: Rect = componentGet(this: world.rects, entity: entity)
+  ret r
+}
+
+func entitySize(world: view UiWorld, entity: Int) ret Size {
+  if componentHas(this: world.sizes, entity: entity) is false {
+    ret defaultSize()
+  }
+  let s: Size = componentGet(this: world.sizes, entity: entity)
+  ret s
+}
+
+func entityLayout(world: view UiWorld, entity: Int) ret Layout {
+  if componentHas(this: world.layouts, entity: entity) is false {
+    ret defaultLayout()
+  }
+  let l: Layout = componentGet(this: world.layouts, entity: entity)
+  ret l
+}
+
+# Returns the entity's explicit Offset.delta, or zero.
+func entityOffset(world: view UiWorld, entity: Int) ret Vec2 {
+  if componentHas(this: world.offsets, entity: entity) is false {
+    ret Vec2 { x: 0.0, y: 0.0 }
+  }
+  let o: Offset = componentGet(this: world.offsets, entity: entity)
+  ret o.delta
+}
+
+# Returns the active children of `entity` in declaration order. List
+# is fresh; safe for the caller to mutate if needed.
+func activeChildren(world: view UiWorld, entity: Int) ret List(Int) {
+  let out: List(Int) = createList(initialCap: 4)
+  if componentHas(this: world.childrens, entity: entity) is false {
+    ret out
+  }
+  let ch: Children = componentGet(this: world.childrens, entity: entity)
+  let n: Int = ch.ids.length
+  let i: Int = 0
+  loop i < n {
+    let cid: Int = ch.ids.get(index: i)
+    if layoutActive(world: world, entity: cid) {
+      out.add(value: cid)
+    }
+    i = i + 1
+  }
+  ret out
+}
+
+# -----------------------------------------------------------------
+# Phase 1 — Measure
+#
+# Bottom-up. For Hug-sized nodes, MeasuredSize is the layout sum of
+# active children + padding. For non-container or non-Hug nodes,
+# MeasuredSize is the authored rect (set so the parent's measure
+# can still fall back to a real number).
+# -----------------------------------------------------------------
+
+func measureSubtree(world: mod UiWorld, entity: Int) {
+  let kids: List(Int) = activeChildren(world: world, entity: entity)
+  let n: Int = kids.length
+  let i: Int = 0
+  loop i < n {
+    let cid: Int = kids.get(index: i)
+    measureSubtree(world: world, entity: cid)
+    i = i + 1
+  }
+
+  # Compute the container's measured size from its children.
+  let layout: Layout = entityLayout(world: world, entity: entity)
+  let pad: Insets = entityPadding(world: world, entity: entity)
+  let rect: Rect = entityRect(world: world, entity: entity)
+
+  let measuredW: Float = rect.w
+  let measuredH: Float = rect.h
+
+  if n > 0 {
+    let sumMain: Float = 0.0
+    let maxCross: Float = 0.0
+    let j: Int = 0
+    loop j < n {
+      let cid: Int = kids.get(index: j)
+      let cw: Float = childMeasuredW(world: world, entity: cid)
+      let ch: Float = childMeasuredH(world: world, entity: cid)
+      if layout.kind is LayoutType.Horizontal {
+        sumMain = sumMain + cw
+        if ch > maxCross {
+          maxCross = ch
+        }
+      } else {
+        if layout.kind is LayoutType.Vertical {
+          sumMain = sumMain + ch
+          if cw > maxCross {
+            maxCross = cw
+          }
+        } else {
+          # Stack / None: max child extents on both axes.
+          if cw > sumMain {
+            sumMain = cw
+          }
+          if ch > maxCross {
+            maxCross = ch
+          }
+        }
+      }
+      j = j + 1
+    }
+    if layout.kind is LayoutType.Horizontal {
+      let gapTotal: Float = layout.gap * (n - 1).toFloat()
+      if gapTotal < 0.0 {
+        gapTotal = 0.0
+      }
+      measuredW = sumMain + gapTotal + pad.l + pad.r
+      measuredH = maxCross + pad.t + pad.b
+    }
+    if layout.kind is LayoutType.Vertical {
+      let gapTotal: Float = layout.gap * (n - 1).toFloat()
+      if gapTotal < 0.0 {
+        gapTotal = 0.0
+      }
+      measuredH = sumMain + gapTotal + pad.t + pad.b
+      measuredW = maxCross + pad.l + pad.r
+    }
+    if layout.kind is LayoutType.Stack {
+      measuredW = sumMain + pad.l + pad.r
+      measuredH = maxCross + pad.t + pad.b
+    }
+    if layout.kind is LayoutType.None {
+      # `Layout: None` falls back to max child extents per RUICS § 7.5.
+      measuredW = sumMain + pad.l + pad.r
+      measuredH = maxCross + pad.t + pad.b
+    }
+  } else {
+    # Leaf nodes: their authored rect IS their measure.
+    measuredW = rect.w
+    measuredH = rect.h
+  }
+
+  measuredW = applyConstraintsW(world: world, entity: entity, w: measuredW)
+  measuredH = applyConstraintsH(world: world, entity: entity, h: measuredH)
+
+  let ms: MeasuredSize = { w: measuredW, h: measuredH }
+  componentSet(this: world.measuredSizes, entity: entity, data: ms)
+}
+
+# Helper — return the resolved measured width for `entity`. Hug
+# nodes use their MeasuredSize; Fill nodes use their authored rect
+# (parent will overwrite during compute pass anyway); Fixed uses rect.
+func childMeasuredW(world: view UiWorld, entity: Int) ret Float {
+  let size: Size = entitySize(world: world, entity: entity)
+  let rect: Rect = entityRect(world: world, entity: entity)
+  let measuredW: Float = rect.w
+  if componentHas(this: world.measuredSizes, entity: entity) {
+    let ms: MeasuredSize = componentGet(this: world.measuredSizes, entity: entity)
+    measuredW = ms.w
+  }
+  ret resolveAxisFromSize(
+    axis: size.w
+    rectVal: rect.w
+    measuredVal: measuredW
+    parentAvail: 0.0
+    hasMeasured: true
+    hasParentAvail: false
+  )
+}
+
+func childMeasuredH(world: view UiWorld, entity: Int) ret Float {
+  let size: Size = entitySize(world: world, entity: entity)
+  let rect: Rect = entityRect(world: world, entity: entity)
+  let measuredH: Float = rect.h
+  if componentHas(this: world.measuredSizes, entity: entity) {
+    let ms: MeasuredSize = componentGet(this: world.measuredSizes, entity: entity)
+    measuredH = ms.h
+  }
+  ret resolveAxisFromSize(
+    axis: size.h
+    rectVal: rect.h
+    measuredVal: measuredH
+    parentAvail: 0.0
+    hasMeasured: true
+    hasParentAvail: false
+  )
+}
+
+# -----------------------------------------------------------------
+# Phase 2 — Compute
+#
+# Top-down. Each call decides this entity's own ComputedRect (in
+# parent-content-local coordinates), then places its children inside
+# the resulting content box.
+# -----------------------------------------------------------------
+
+# Resolve own size given the parent's content box. parentAvailW / H
+# are -1.0 when unknown (Fill then falls back to authored rect).
+func resolveOwnSize(
+  world: view UiWorld
+  entity: Int
+  parentAvailW: Float
+  parentAvailH: Float
+  hasParentAvail: Bool
+) ret Vec2 {
+  let size: Size = entitySize(world: world, entity: entity)
+  let rect: Rect = entityRect(world: world, entity: entity)
+  let measuredW: Float = rect.w
+  let measuredH: Float = rect.h
+  if componentHas(this: world.measuredSizes, entity: entity) {
+    let ms: MeasuredSize = componentGet(this: world.measuredSizes, entity: entity)
+    measuredW = ms.w
+    measuredH = ms.h
+  }
+  let w: Float = resolveAxisFromSize(
+    axis: size.w
+    rectVal: rect.w
+    measuredVal: measuredW
+    parentAvail: parentAvailW
+    hasMeasured: true
+    hasParentAvail: hasParentAvail
+  )
+  let h: Float = resolveAxisFromSize(
+    axis: size.h
+    rectVal: rect.h
+    measuredVal: measuredH
+    parentAvail: parentAvailH
+    hasMeasured: true
+    hasParentAvail: hasParentAvail
+  )
+  let cw: Float = applyConstraintsW(world: world, entity: entity, w: w)
+  let ch: Float = applyConstraintsH(world: world, entity: entity, h: h)
+  ret Vec2 { x: cw, y: ch }
+}
+
+# Compute and place `entity` and its children. localX/localY are the
+# entity's position relative to its parent's content origin. ownW/ownH
+# are the entity's already-resolved own size.
+func computeSubtree(
+  world: mod UiWorld
+  entity: Int
+  localX: Float
+  localY: Float
+  ownW: Float
+  ownH: Float
+) {
+  # Apply Offset (post-layout shift).
+  let off: Vec2 = entityOffset(world: world, entity: entity)
+  let cr: ComputedRect = {
+    x: localX + off.x
+    y: localY + off.y
+    w: ownW
+    h: ownH
+  }
+  componentSet(this: world.computedRects, entity: entity, data: cr)
+
+  let layout: Layout = entityLayout(world: world, entity: entity)
+  let pad: Insets = entityPadding(world: world, entity: entity)
+  let contentX: Float = pad.l
+  let contentY: Float = pad.t
+  let contentW: Float = ownW - pad.l - pad.r
+  let contentH: Float = ownH - pad.t - pad.b
+  if contentW < 0.0 {
+    contentW = 0.0
+  }
+  if contentH < 0.0 {
+    contentH = 0.0
+  }
+
+  let kids: List(Int) = activeChildren(world: world, entity: entity)
+  let n: Int = kids.length
+  if n is 0 {
+    ret
+  }
+
+  if layout.kind is LayoutType.Horizontal {
+    placeHorizontal(
+      world: world
+      kids: kids
+      contentX: contentX
+      contentY: contentY
+      contentW: contentW
+      contentH: contentH
+      gap: layout.gap
+      alignCross: layout.alignCross
+    )
+    ret
+  }
+  if layout.kind is LayoutType.Vertical {
+    placeVertical(
+      world: world
+      kids: kids
+      contentX: contentX
+      contentY: contentY
+      contentW: contentW
+      contentH: contentH
+      gap: layout.gap
+      alignCross: layout.alignCross
+    )
+    ret
+  }
+  if layout.kind is LayoutType.Stack {
+    placeStack(
+      world: world
+      kids: kids
+      contentX: contentX
+      contentY: contentY
+      contentW: contentW
+      contentH: contentH
+    )
+    ret
+  }
+  # None: each child uses its authored Rect.x/y as relative position
+  # inside the parent's padded content box.
+  let i: Int = 0
+  loop i < n {
+    let cid: Int = kids.get(index: i)
+    let crect: Rect = entityRect(world: world, entity: cid)
+    let resolved: Vec2 = resolveOwnSize(
+      world: world
+      entity: cid
+      parentAvailW: contentW
+      parentAvailH: contentH
+      hasParentAvail: true
+    )
+    computeSubtree(
+      world: world
+      entity: cid
+      localX: contentX + crect.x
+      localY: contentY + crect.y
+      ownW: resolved.x
+      ownH: resolved.y
+    )
+    i = i + 1
+  }
+}
+
+# -----------------------------------------------------------------
+# Container-specific placement
+# -----------------------------------------------------------------
+
+func placeHorizontal(
+  world: mod UiWorld
+  kids: view List(Int)
+  contentX: Float
+  contentY: Float
+  contentW: Float
+  contentH: Float
+  gap: Float
+  alignCross: AlignKind
+) {
+  let n: Int = kids.length
+  # Pass 1: sum widths of fixed/hug children, count Fill children.
+  let fixedSum: Float = 0.0
+  let fillCount: Int = 0
+  let i: Int = 0
+  loop i < n {
+    let cid: Int = kids.get(index: i)
+    let size: Size = entitySize(world: world, entity: cid)
+    if size.w.mode is SizeMode.Fill {
+      fillCount = fillCount + 1
+    } else {
+      let r: Vec2 = resolveOwnSize(
+        world: world
+        entity: cid
+        parentAvailW: contentW
+        parentAvailH: contentH
+        hasParentAvail: true
+      )
+      fixedSum = fixedSum + r.x
+    }
+    i = i + 1
+  }
+  let gapTotal: Float = gap * (n - 1).toFloat()
+  if gapTotal < 0.0 {
+    gapTotal = 0.0
+  }
+  let remaining: Float = contentW - fixedSum - gapTotal
+  if remaining < 0.0 {
+    remaining = 0.0
+  }
+  let fillSize: Float = 0.0
+  if fillCount > 0 {
+    fillSize = remaining / fillCount.toFloat()
+  }
+
+  # Pass 2: place children in order with gaps between.
+  let cursorX: Float = contentX
+  let j: Int = 0
+  loop j < n {
+    let cid: Int = kids.get(index: j)
+    let size: Size = entitySize(world: world, entity: cid)
+    let childW: Float = 0.0
+    if size.w.mode is SizeMode.Fill {
+      childW = fillSize
+    } else {
+      let r: Vec2 = resolveOwnSize(
+        world: world
+        entity: cid
+        parentAvailW: contentW
+        parentAvailH: contentH
+        hasParentAvail: true
+      )
+      childW = r.x
+    }
+    childW = applyConstraintsW(world: world, entity: cid, w: childW)
+    let childH: Float = 0.0
+    if size.h.mode is SizeMode.Fill {
+      childH = contentH
+    } else {
+      let r: Vec2 = resolveOwnSize(
+        world: world
+        entity: cid
+        parentAvailW: contentW
+        parentAvailH: contentH
+        hasParentAvail: true
+      )
+      childH = r.y
+    }
+    childH = applyConstraintsH(world: world, entity: cid, h: childH)
+
+    let crossY: Float = contentY
+    if alignCross is AlignKind.Center {
+      crossY = contentY + (contentH - childH) / 2.0
+    }
+    if alignCross is AlignKind.End {
+      crossY = contentY + contentH - childH
+    }
+
+    computeSubtree(
+      world: world
+      entity: cid
+      localX: cursorX
+      localY: crossY
+      ownW: childW
+      ownH: childH
+    )
+    cursorX = cursorX + childW + gap
+    j = j + 1
+  }
+}
+
+func placeVertical(
+  world: mod UiWorld
+  kids: view List(Int)
+  contentX: Float
+  contentY: Float
+  contentW: Float
+  contentH: Float
+  gap: Float
+  alignCross: AlignKind
+) {
+  let n: Int = kids.length
+  let fixedSum: Float = 0.0
+  let fillCount: Int = 0
+  let i: Int = 0
+  loop i < n {
+    let cid: Int = kids.get(index: i)
+    let size: Size = entitySize(world: world, entity: cid)
+    if size.h.mode is SizeMode.Fill {
+      fillCount = fillCount + 1
+    } else {
+      let r: Vec2 = resolveOwnSize(
+        world: world
+        entity: cid
+        parentAvailW: contentW
+        parentAvailH: contentH
+        hasParentAvail: true
+      )
+      fixedSum = fixedSum + r.y
+    }
+    i = i + 1
+  }
+  let gapTotal: Float = gap * (n - 1).toFloat()
+  if gapTotal < 0.0 {
+    gapTotal = 0.0
+  }
+  let remaining: Float = contentH - fixedSum - gapTotal
+  if remaining < 0.0 {
+    remaining = 0.0
+  }
+  let fillSize: Float = 0.0
+  if fillCount > 0 {
+    fillSize = remaining / fillCount.toFloat()
+  }
+
+  let cursorY: Float = contentY
+  let j: Int = 0
+  loop j < n {
+    let cid: Int = kids.get(index: j)
+    let size: Size = entitySize(world: world, entity: cid)
+    let childH: Float = 0.0
+    if size.h.mode is SizeMode.Fill {
+      childH = fillSize
+    } else {
+      let r: Vec2 = resolveOwnSize(
+        world: world
+        entity: cid
+        parentAvailW: contentW
+        parentAvailH: contentH
+        hasParentAvail: true
+      )
+      childH = r.y
+    }
+    childH = applyConstraintsH(world: world, entity: cid, h: childH)
+    let childW: Float = 0.0
+    if size.w.mode is SizeMode.Fill {
+      childW = contentW
+    } else {
+      let r: Vec2 = resolveOwnSize(
+        world: world
+        entity: cid
+        parentAvailW: contentW
+        parentAvailH: contentH
+        hasParentAvail: true
+      )
+      childW = r.x
+    }
+    childW = applyConstraintsW(world: world, entity: cid, w: childW)
+
+    let crossX: Float = contentX
+    if alignCross is AlignKind.Center {
+      crossX = contentX + (contentW - childW) / 2.0
+    }
+    if alignCross is AlignKind.End {
+      crossX = contentX + contentW - childW
+    }
+
+    computeSubtree(
+      world: world
+      entity: cid
+      localX: crossX
+      localY: cursorY
+      ownW: childW
+      ownH: childH
+    )
+    cursorY = cursorY + childH + gap
+    j = j + 1
+  }
+}
+
+func placeStack(
+  world: mod UiWorld
+  kids: view List(Int)
+  contentX: Float
+  contentY: Float
+  contentW: Float
+  contentH: Float
+) {
+  let n: Int = kids.length
+  let i: Int = 0
+  loop i < n {
+    let cid: Int = kids.get(index: i)
+    let resolved: Vec2 = resolveOwnSize(
+      world: world
+      entity: cid
+      parentAvailW: contentW
+      parentAvailH: contentH
+      hasParentAvail: true
+    )
+    let childW: Float = applyConstraintsW(world: world, entity: cid, w: resolved.x)
+    let childH: Float = applyConstraintsH(world: world, entity: cid, h: resolved.y)
+
+    # Default Stack alignment is centre on both axes; the per-child
+    # `Align` overrides it.
+    let alignX: AlignKind = AlignKind.Center
+    let alignY: AlignKind = AlignKind.Center
+    if componentHas(this: world.aligns, entity: cid) {
+      let a: Align = componentGet(this: world.aligns, entity: cid)
+      if a.hasX {
+        alignX = a.x
+      }
+      if a.hasY {
+        alignY = a.y
+      }
+    }
+
+    let cx: Float = contentX
+    if alignX is AlignKind.Center {
+      cx = contentX + (contentW - childW) / 2.0
+    }
+    if alignX is AlignKind.End {
+      cx = contentX + contentW - childW
+    }
+    let cy: Float = contentY
+    if alignY is AlignKind.Center {
+      cy = contentY + (contentH - childH) / 2.0
+    }
+    if alignY is AlignKind.End {
+      cy = contentY + contentH - childH
+    }
+
+    computeSubtree(
+      world: world
+      entity: cid
+      localX: cx
+      localY: cy
+      ownW: childW
+      ownH: childH
+    )
+    i = i + 1
+  }
+}
+
+# -----------------------------------------------------------------
+# Entry point — run the two phases over every layout root. Roots are
+# entities that are alive, have a Rect, and have no ParentLink.
+# -----------------------------------------------------------------
+
+func layoutSystem(world: mod UiWorld) {
+  let alive: view List(Int) => world.alive
+  let n: Int = alive.length
+  let i: Int = 0
+  loop i < n {
+    let e: Int = alive.get(index: i)
+    if componentHas(this: world.parentLinks, entity: e) is false {
+      if componentHas(this: world.rects, entity: e) {
+        # Phase 1: measure the subtree.
+        measureSubtree(world: world, entity: e)
+        # Phase 2: compute placement starting at (0, 0) with the
+        # screen as the parent content box.
+        let resolved: Vec2 = resolveOwnSize(
+          world: world
+          entity: e
+          parentAvailW: screenWidth
+          parentAvailH: screenHeight
+          hasParentAvail: true
+        )
+        computeSubtree(
+          world: world
+          entity: e
+          localX: 0.0
+          localY: 0.0
+          ownW: resolved.x
+          ownH: resolved.y
+        )
+      }
+    }
+    i = i + 1
+  }
+}
