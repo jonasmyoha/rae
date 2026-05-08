@@ -13,6 +13,7 @@
 import raylib
 import core
 import string
+import sys
 import ui/components
 import ui/ecs
 import ui/layout
@@ -386,6 +387,7 @@ func loadIcons(reg: mod TextureRegistry) {
 func main() {
   setConfigFlags(flags: 4)
   initWindow(width: 600, height: 1300, title: "Rae Mobile UI — Album")
+  setWindowPosition(x: 50, y: 50)
   setTargetFPS(fps: 60)
 
   loadFontInto(slot: fontSlot, path: "examples/98_mobile_ui/assets/Roboto-Regular.ttf", fontSize: 36)
@@ -397,12 +399,38 @@ func main() {
   layoutSystem(world: world)
   transformSystem(world: world)
 
+  # Screenshot mode (CHECKPOINT 9 regression watch). If
+  # `RAE_UI_SCREENSHOT` is set, render the scene a handful of times
+  # (raylib's first frame can be blank or partially undefined depending
+  # on driver) and take a screenshot, then exit. Used by the snapshot
+  # tooling so this example can produce a reproducible baseline image
+  # without needing a human to grab a window.
+  let screenshotPath: String = getEnv(name: "RAE_UI_SCREENSHOT")
   let bg: Color = { r: 32, g: 32, b: 36, a: 255 }
-  loop not windowShouldClose() {
-    beginDrawing()
-    clearBackground(color: bg)
-    renderSystem(world: world, reg: reg)
-    endDrawing()
+  if screenshotPath.length() > 0 {
+    # Self-screenshot mode. On most platforms `takeScreenshot` works
+    # fine; on macOS+Metal the back-buffer read sometimes returns the
+    # cleared bg instead of the drawn frame, so the snapshot tooling
+    # falls back to an external `screencapture -l <window-id>` call.
+    let warmupFrames: Int = 30
+    let f: Int = 0
+    loop f < warmupFrames {
+      beginDrawing()
+      clearBackground(color: bg)
+      renderSystem(world: world, reg: reg)
+      if f is (warmupFrames / 2) {
+        takeScreenshot(fileName: screenshotPath)
+      }
+      endDrawing()
+      f = f + 1
+    }
+  } else {
+    loop not windowShouldClose() {
+      beginDrawing()
+      clearBackground(color: bg)
+      renderSystem(world: world, reg: reg)
+      endDrawing()
+    }
   }
 
   textureUnloadAll(reg: reg)

@@ -674,6 +674,22 @@ static bool native_drawTextWithFont(struct VM* vm, VmNativeResult* out, const Va
     return true;
 }
 
+static bool native_takeScreenshot(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 1) {
+        fprintf(stderr, "error: takeScreenshot expects 1 arg (fileName), got %zu\n", count);
+        return false;
+    }
+    if (args[0].type != VAL_STRING) {
+        fprintf(stderr, "error: takeScreenshot expects fileName as string\n");
+        return false;
+    }
+    const char* fileName = (const char*)args[0].as.string_value.chars;
+    TakeScreenshot(fileName);
+    out->has_value = false;
+    return true;
+}
+
 /* Window/monitor natives — used by examples that want to pick a window
  * size relative to the user's display. */
 static bool native_getCurrentMonitor(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
@@ -769,6 +785,7 @@ bool vm_registry_register_raylib(VmRegistry* registry) {
     ok &= vm_registry_register_native(registry, "getScreenWidth", native_getScreenWidth, NULL);
     ok &= vm_registry_register_native(registry, "getScreenHeight", native_getScreenHeight, NULL);
     ok &= vm_registry_register_native(registry, "colorFromHSV", native_colorFromHSV, NULL);
+    ok &= vm_registry_register_native(registry, "takeScreenshot", native_takeScreenshot, NULL);
     ok &= vm_registry_register_native(registry, "loadFontInto", native_loadFontInto, NULL);
     ok &= vm_registry_register_native(registry, "unloadFontSlot", native_unloadFontSlot, NULL);
     ok &= vm_registry_register_native(registry, "drawTextWithFont", native_drawTextWithFont, NULL);

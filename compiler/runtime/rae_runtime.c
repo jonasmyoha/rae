@@ -928,6 +928,10 @@ Color rae_ext_colorFromHSV(double hue, double saturation, double value) {
     return ColorFromHSV((float)hue, (float)saturation, (float)value);
 }
 
+void rae_ext_takeScreenshot(rae_String fileName) {
+    TakeScreenshot((const char*)fileName.data);
+}
+
 void rae_ext_drawCylinder(Vector3 position, double radiusTop, double radiusBottom, double height, int64_t slices, Color color) {
     DrawCylinder(position, (float)radiusTop, (float)radiusBottom, (float)height, (int)slices, color);
 }
