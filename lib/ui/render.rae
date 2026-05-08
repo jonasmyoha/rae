@@ -1,0 +1,116 @@
+# Render system — RUICS § 9 in Rae form, *minimal* version.
+#
+# This is the Phase 1d "first user-visible milestone" painter: walks
+# the scene top-down (so painters' algorithm draws parents before
+# children) and paints any entity that has a `Shape: Rect` using
+# raylib's `drawRectangle`. Other Shape kinds (RoundedRect, Circle),
+# Sprites, and Text are deferred to Phase 1e (`lib/ui/render.rae`
+# extension in queue #44).
+#
+# Inputs:
+#   WorldTransform — absolute screen position + alpha + visibility,
+#                    written by transformSystem.
+#   ComputedRect   — local size used for the paint extent; we use w/h
+#                    from here rather than reconstructing it from
+#                    WorldTransform alone.
+#   Shape          — fill colour + kind (only Rect is painted).
+#
+# The render pass does NOT mutate the world; it only reads.
+import core
+import string
+import raylib
+
+# Compose the entity's effective alpha: WorldTransform.alpha is already
+# the multiplied chain alpha (see transform.rae). We just clamp it to
+# [0,1] and turn it into the [0,255] integer raylib expects.
+func renderAlpha255(world: view UiWorld, entity: Int) ret Int {
+  if componentHas(this: world.worldTransforms, entity: entity) is false {
+    ret 255
+  }
+  let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: entity)
+  let a: Float = wt.alpha
+  if a < 0.0 {
+    a = 0.0
+  }
+  if a > 1.0 {
+    a = 1.0
+  }
+  ret (a * 255.0).toInt()
+}
+
+# Paint a single entity if it carries a `Shape: Rect`.
+func paintEntity(world: view UiWorld, entity: Int) {
+  if componentHas(this: world.worldTransforms, entity: entity) is false {
+    ret
+  }
+  let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: entity)
+  if wt.visible is false {
+    ret
+  }
+  if wt.alpha <= 0.0 {
+    ret
+  }
+  if componentHas(this: world.shapes, entity: entity) is false {
+    ret
+  }
+  if componentHas(this: world.computedRects, entity: entity) is false {
+    ret
+  }
+  let cr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
+  let sh: Shape = componentGet(this: world.shapes, entity: entity)
+
+  # Phase 1d only paints Shape:Rect. RoundedRect/Circle are intentionally
+  # ignored here so the album scene shows the right structure even if
+  # the corners aren't rounded yet.
+  if sh.kind is ShapeKind.Rect {
+    let chain255: Int = renderAlpha255(world: world, entity: entity)
+    let combinedA: Int = (sh.fill.a * chain255) / 255
+    let col: Color = {
+      r: sh.fill.r
+      g: sh.fill.g
+      b: sh.fill.b
+      a: combinedA
+    }
+    drawRectangle(
+      x: wt.x
+      y: wt.y
+      width: cr.w
+      height: cr.h
+      color: col
+    )
+  }
+}
+
+# Recursive top-down walk. Painter's algorithm — parent before its
+# children, declaration order between siblings.
+func paintSubtree(world: view UiWorld, entity: Int) {
+  paintEntity(world: world, entity: entity)
+  if componentHas(this: world.childrens, entity: entity) is false {
+    ret
+  }
+  let ch: Children = componentGet(this: world.childrens, entity: entity)
+  let n: Int = ch.ids.length
+  let i: Int = 0
+  loop i < n {
+    let cid: Int = ch.ids.get(index: i)
+    paintSubtree(world: world, entity: cid)
+    i = i + 1
+  }
+}
+
+# Entry point. Walks every alive root (no ParentLink) that has a
+# WorldTransform and paints its subtree.
+func renderSystem(world: view UiWorld) {
+  let alive: view List(Int) => world.alive
+  let n: Int = alive.length
+  let i: Int = 0
+  loop i < n {
+    let e: Int = alive.get(index: i)
+    if componentHas(this: world.parentLinks, entity: e) is false {
+      if componentHas(this: world.worldTransforms, entity: e) {
+        paintSubtree(world: world, entity: e)
+      }
+    }
+    i = i + 1
+  }
+}
