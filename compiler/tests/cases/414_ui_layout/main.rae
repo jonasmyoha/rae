@@ -1,0 +1,142 @@
+import core
+import string
+import ui/components
+import ui/ecs
+import ui/layout
+import ui/transform
+
+# Build a small ECS world by hand and run layout + transform on it.
+# Tree:
+#
+#   Root  (Vertical, gap=10, padding=20, 400x600)
+#   ├── Header  (Horizontal, gap=10, alignCross=Center, 360x80)
+#   │     ├── IconA (40x40)
+#   │     └── IconB (40x40)
+#   ├── Body    (360x100)
+#   └── Footer  (360x100)
+#
+# Then dump each entity's ComputedRect and WorldTransform.
+
+func makeFixedSize() ret Size {
+  ret Size {
+    w: SizeAxis { mode: SizeMode.Fixed, min: -1, max: -1 }
+    h: SizeAxis { mode: SizeMode.Fixed, min: -1, max: -1 }
+  }
+}
+
+func setRectFixed(world: mod UiWorld, entity: Int, w: Float, h: Float) {
+  let r: Rect = { x: 0.0, y: 0.0, w: w, h: h }
+  componentSet(this: world.rects, entity: entity, data: r)
+  componentSet(this: world.sizes, entity: entity, data: makeFixedSize())
+}
+
+func setShapeRect(world: mod UiWorld, entity: Int, r: Int, g: Int, b: Int) {
+  let shape: Shape = {
+    kind: ShapeKind.Rect
+    fill: RgbaColor { r: r, g: g, b: b, a: 255 }
+    stroke: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
+    strokeWidth: 0.0
+    radius: 0.0
+  }
+  componentSet(this: world.shapes, entity: entity, data: shape)
+}
+
+func attachChildren(world: mod UiWorld, parent: Int, kids: view List(Int)) {
+  let copy: List(Int) = createList(Int)(initialCap: kids.length)
+  let i: Int = 0
+  loop i < kids.length {
+    let kid: Int = kids.get(index: i)
+    copy.add(value: kid)
+    let pl: ParentLink = { parent: parent }
+    componentSet(this: world.parentLinks, entity: kid, data: pl)
+    i = i + 1
+  }
+  let ch: Children = { ids: copy }
+  componentSet(this: world.childrens, entity: parent, data: ch)
+}
+
+func dumpEntity(world: view UiWorld, entity: Int, label: String) {
+  let cr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
+  let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: entity)
+  log("{label} cr=({cr.x},{cr.y},{cr.w},{cr.h}) wt=({wt.x},{wt.y}) alpha={wt.alpha} visible={wt.visible}")
+}
+
+func main() {
+  let world: UiWorld = createUiWorld()
+
+  let root: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: root, w: 400.0, h: 600.0)
+  let rootLayout: Layout = {
+    kind: LayoutType.Vertical
+    gap: 10.0
+    alignMain: AlignKind.Start
+    alignCross: AlignKind.Start
+    columns: 0
+    rowGap: 0.0
+    columnGap: 0.0
+  }
+  componentSet(this: world.layouts, entity: root, data: rootLayout)
+  let rootPad: Padding = { insets: Insets { l: 20.0, t: 20.0, r: 20.0, b: 20.0 } }
+  componentSet(this: world.paddings, entity: root, data: rootPad)
+
+  let header: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: header, w: 360.0, h: 80.0)
+  let headerLayout: Layout = {
+    kind: LayoutType.Horizontal
+    gap: 10.0
+    alignMain: AlignKind.Start
+    alignCross: AlignKind.Center
+    columns: 0
+    rowGap: 0.0
+    columnGap: 0.0
+  }
+  componentSet(this: world.layouts, entity: header, data: headerLayout)
+
+  let iconA: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: iconA, w: 40.0, h: 40.0)
+  setShapeRect(world: world, entity: iconA, r: 255, g: 0, b: 0)
+  let iconB: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: iconB, w: 40.0, h: 40.0)
+  setShapeRect(world: world, entity: iconB, r: 0, g: 255, b: 0)
+  let headerKids: List(Int) = createList(Int)(initialCap: 2)
+  headerKids.add(value: iconA)
+  headerKids.add(value: iconB)
+  attachChildren(world: world, parent: header, kids: headerKids)
+
+  let body: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: body, w: 360.0, h: 100.0)
+  setShapeRect(world: world, entity: body, r: 200, g: 200, b: 200)
+
+  let footer: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: footer, w: 360.0, h: 100.0)
+  setShapeRect(world: world, entity: footer, r: 100, g: 100, b: 100)
+
+  let rootKids: List(Int) = createList(Int)(initialCap: 3)
+  rootKids.add(value: header)
+  rootKids.add(value: body)
+  rootKids.add(value: footer)
+  attachChildren(world: world, parent: root, kids: rootKids)
+
+  log("alive = {aliveCount(world: world)}")
+
+  layoutSystem(world: world)
+  transformSystem(world: world)
+
+  log("--- positions ---")
+  dumpEntity(world: world, entity: root, label: "Root")
+  dumpEntity(world: world, entity: header, label: "  Header")
+  dumpEntity(world: world, entity: iconA, label: "    IconA")
+  dumpEntity(world: world, entity: iconB, label: "    IconB")
+  dumpEntity(world: world, entity: body, label: "  Body")
+  dumpEntity(world: world, entity: footer, label: "  Footer")
+
+  # Inactive subtree: set Header inactive and re-run transform.
+  log("--- toggle Header.Active=false ---")
+  let inactive: Active = { value: false }
+  componentSet(this: world.actives, entity: header, data: inactive)
+  transformSystem(world: world)
+  dumpEntity(world: world, entity: header, label: "  Header")
+  dumpEntity(world: world, entity: iconA, label: "    IconA")
+  dumpEntity(world: world, entity: iconB, label: "    IconB")
+  dumpEntity(world: world, entity: body, label: "  Body")
+}
