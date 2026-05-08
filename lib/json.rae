@@ -1,0 +1,679 @@
+# JSON tree parser. Returns a flat-pool JsonDoc rather than a recursive
+# JsonValue tree because the C backend currently mishandles structs that
+# recurse through `List(Self)` (segfault on compiled, fine on live).
+#
+# A JsonDoc holds three flat pools:
+#   values    every parsed value, in declaration order
+#   children  for arrays: ranges of indices into `values`
+#   fields    for objects: (key, valueIdx) pairs
+# A JsonValue refers into those pools via `rangeStart` + `rangeLen`.
+#
+# Helpers (`jsonField`, `jsonInt`, …) take both the doc and the value so
+# callers don't have to plumb pool indices manually.
+import string
+import math
+import core
+
+enum JsonKind {
+  Null
+  Bool
+  Number
+  String
+  Array
+  Object
+}
+
+type JsonField {
+  key: String
+  valueIdx: Int
+}
+
+type JsonValue {
+  kind: JsonKind
+  asBool: Bool
+  asNumber: Float
+  asString: String
+  # For Array: range in JsonDoc.children.
+  # For Object: range in JsonDoc.fields.
+  # For everything else: ignored.
+  rangeStart: Int
+  rangeLen: Int
+}
+
+type JsonDoc {
+  values: List(JsonValue)
+  children: List(Int)
+  fields: List(JsonField)
+  rootIdx: Int
+  ok: Bool
+  errorPos: Int
+}
+
+# Mutable parser cursor. `pos` is the byte/codepoint index into `source`
+# (JSON syntax is ASCII so byte == codepoint within the syntax).
+type JsonParser {
+  source: String
+  pos: Int
+  ok: Bool
+}
+
+# ---------- value constructors ----------
+
+func jsonNull() ret JsonValue {
+  ret JsonValue {
+    kind: JsonKind.Null
+    asBool: false
+    asNumber: 0.0
+    asString: ""
+    rangeStart: 0
+    rangeLen: 0
+  }
+}
+
+func jsonBoolValue(v: Bool) ret JsonValue {
+  ret JsonValue {
+    kind: JsonKind.Bool
+    asBool: v
+    asNumber: 0.0
+    asString: ""
+    rangeStart: 0
+    rangeLen: 0
+  }
+}
+
+func jsonNumberValue(v: Float) ret JsonValue {
+  ret JsonValue {
+    kind: JsonKind.Number
+    asBool: false
+    asNumber: v
+    asString: ""
+    rangeStart: 0
+    rangeLen: 0
+  }
+}
+
+func jsonStringValue(v: String) ret JsonValue {
+  ret JsonValue {
+    kind: JsonKind.String
+    asBool: false
+    asNumber: 0.0
+    asString: v
+    rangeStart: 0
+    rangeLen: 0
+  }
+}
+
+# ---------- pool primitives (raw buf calls; List.get returns RaeAny for struct types in compiled) ----------
+
+func valueAt(doc: view JsonDoc, idx: Int) ret JsonValue {
+  let v: JsonValue = rae_ext_rae_buf_get(buf: doc.values.data, index: idx)
+  ret v
+}
+
+func childAt(doc: view JsonDoc, idx: Int) ret Int {
+  let v: Int = rae_ext_rae_buf_get(buf: doc.children.data, index: idx)
+  ret v
+}
+
+func fieldAt(doc: view JsonDoc, idx: Int) ret JsonField {
+  let v: JsonField = rae_ext_rae_buf_get(buf: doc.fields.data, index: idx)
+  ret v
+}
+
+# ---------- public accessors ----------
+
+func jsonRoot(doc: view JsonDoc) ret JsonValue {
+  if doc.ok is false {
+    ret jsonNull()
+  }
+  ret valueAt(doc: doc, idx: doc.rootIdx)
+}
+
+func jsonInt(this: view JsonValue, fallback: Int) ret Int {
+  if this.kind is JsonKind.Number {
+    ret this.asNumber.toInt()
+  }
+  ret fallback
+}
+
+func jsonFloat(this: view JsonValue, fallback: Float) ret Float {
+  if this.kind is JsonKind.Number {
+    ret this.asNumber
+  }
+  ret fallback
+}
+
+func jsonString(this: view JsonValue, fallback: String) ret String {
+  if this.kind is JsonKind.String {
+    ret this.asString
+  }
+  ret fallback
+}
+
+func jsonBool(this: view JsonValue, fallback: Bool) ret Bool {
+  if this.kind is JsonKind.Bool {
+    ret this.asBool
+  }
+  ret fallback
+}
+
+func jsonArrayLen(this: view JsonValue) ret Int {
+  if this.kind is not JsonKind.Array {
+    ret 0
+  }
+  ret this.rangeLen
+}
+
+func jsonArrayAt(doc: view JsonDoc, this: view JsonValue, idx: Int) ret JsonValue {
+  if this.kind is not JsonKind.Array {
+    ret jsonNull()
+  }
+  if idx < 0 or idx >= this.rangeLen {
+    ret jsonNull()
+  }
+  let childIdx: Int = childAt(doc: doc, idx: this.rangeStart + idx)
+  ret valueAt(doc: doc, idx: childIdx)
+}
+
+func jsonObjectLen(this: view JsonValue) ret Int {
+  if this.kind is not JsonKind.Object {
+    ret 0
+  }
+  ret this.rangeLen
+}
+
+func jsonObjectKeyAt(doc: view JsonDoc, this: view JsonValue, idx: Int) ret String {
+  if this.kind is not JsonKind.Object {
+    ret ""
+  }
+  if idx < 0 or idx >= this.rangeLen {
+    ret ""
+  }
+  let f: JsonField = fieldAt(doc: doc, idx: this.rangeStart + idx)
+  ret f.key
+}
+
+func jsonObjectValueAt(doc: view JsonDoc, this: view JsonValue, idx: Int) ret JsonValue {
+  if this.kind is not JsonKind.Object {
+    ret jsonNull()
+  }
+  if idx < 0 or idx >= this.rangeLen {
+    ret jsonNull()
+  }
+  let f: JsonField = fieldAt(doc: doc, idx: this.rangeStart + idx)
+  ret valueAt(doc: doc, idx: f.valueIdx)
+}
+
+# Linear scan; objects in scene files are small. Returns the value's
+# index into doc.values, or -1 if missing. -1 is the "none" indicator
+# because `opt JsonValue` has historically been awkward in Rae and we
+# want this hot path to stay simple.
+func jsonField(doc: view JsonDoc, this: view JsonValue, key: String) ret Int {
+  if this.kind is not JsonKind.Object {
+    ret -1
+  }
+  let i: Int = 0
+  loop i < this.rangeLen {
+    let f: JsonField = fieldAt(doc: doc, idx: this.rangeStart + i)
+    if f.key.equals(other: key) {
+      ret f.valueIdx
+    }
+    i = i + 1
+  }
+  ret -1
+}
+
+# Resolve a value-pool index into a JsonValue (for callers chaining off
+# `jsonField`). Returns null-shaped if idx is out of range.
+func jsonValueAt(doc: view JsonDoc, idx: Int) ret JsonValue {
+  if idx < 0 or idx >= doc.values.length {
+    ret jsonNull()
+  }
+  ret valueAt(doc: doc, idx: idx)
+}
+
+# ---------- parser internals ----------
+
+func isWhitespace(c: Char32) ret Bool {
+  ret c is ' ' or c is '\t' or c is '\n' or c is '\r'
+}
+
+func isDigit(c: Char32) ret Bool {
+  # Live VM doesn't currently support range comparisons (`>=`, `<=`) on
+  # Char32 — equality is fine. List the ten digit codepoints explicitly
+  # so the parser works on both targets.
+  if c is '0' {
+    ret true
+  }
+  if c is '1' {
+    ret true
+  }
+  if c is '2' {
+    ret true
+  }
+  if c is '3' {
+    ret true
+  }
+  if c is '4' {
+    ret true
+  }
+  if c is '5' {
+    ret true
+  }
+  if c is '6' {
+    ret true
+  }
+  if c is '7' {
+    ret true
+  }
+  if c is '8' {
+    ret true
+  }
+  if c is '9' {
+    ret true
+  }
+  ret false
+}
+
+func skipWhitespace(p: mod JsonParser) {
+  loop p.pos < p.source.length() {
+    let c: Char32 = p.source.at(index: p.pos)
+    if isWhitespace(c: c) {
+      p.pos = p.pos + 1
+    } else {
+      ret
+    }
+  }
+}
+
+func peek(p: view JsonParser) ret Char32 {
+  if p.pos >= p.source.length() {
+    ret '\0'
+  }
+  ret p.source.at(index: p.pos)
+}
+
+func consume(p: mod JsonParser, c: Char32) ret Bool {
+  if peek(p: p) is c {
+    p.pos = p.pos + 1
+    ret true
+  }
+  ret false
+}
+
+func consumeKeyword(p: mod JsonParser, kw: String) ret Bool {
+  let len: Int = kw.length()
+  if p.pos + len > p.source.length() {
+    ret false
+  }
+  let slice: String = p.source.sub(start: p.pos, len: len)
+  if slice.equals(other: kw) {
+    p.pos = p.pos + len
+    ret true
+  }
+  ret false
+}
+
+# Push helpers take the three pools as separate `mod List(...)` rather
+# than `mod JsonDoc`. The Live VM currently doesn't propagate
+# modifications when you mutate a List that's a *field* of a `mod` struct
+# (the change is visible inside the callee but doesn't survive the
+# return). Mutating a List passed directly as `mod` works on both
+# targets, so we plumb the three lists through the parser explicitly.
+func pushValue(vals: mod List(JsonValue), v: JsonValue) ret Int {
+  let idx: Int = vals.length
+  vals.add(value: v)
+  ret idx
+}
+
+func pushChild(kids: mod List(Int), valueIdx: Int) ret Int {
+  let idx: Int = kids.length
+  kids.add(value: valueIdx)
+  ret idx
+}
+
+func pushField(fields: mod List(JsonField), key: String, valueIdx: Int) ret Int {
+  let idx: Int = fields.length
+  let f: JsonField = { key: key, valueIdx: valueIdx }
+  fields.add(value: f)
+  ret idx
+}
+
+# Parse a JSON string literal starting at `"`. Consumes through the
+# closing `"`. Backslash escapes recognised: `"`, `\`, `/`, `b`, `f`,
+# `n`, `r`, `t`. Unicode `\uXXXX` sequences are passed through as-is for
+# now (caller can normalise later if needed).
+func parseString(p: mod JsonParser) ret String {
+  if not consume(p: p, c: '"') {
+    p.ok = false
+    ret ""
+  }
+  let start: Int = p.pos
+  let result: String = ""
+  let chunkStart: Int = p.pos
+  loop p.pos < p.source.length() {
+    let c: Char32 = p.source.at(index: p.pos)
+    if c is '"' {
+      let chunk: String = p.source.sub(start: chunkStart, len: p.pos - chunkStart)
+      result = result.concat(other: chunk)
+      p.pos = p.pos + 1
+      ret result
+    }
+    if c is '\\' {
+      # Flush chunk before the escape.
+      let chunk: String = p.source.sub(start: chunkStart, len: p.pos - chunkStart)
+      result = result.concat(other: chunk)
+      p.pos = p.pos + 1
+      if p.pos >= p.source.length() {
+        p.ok = false
+        ret result
+      }
+      let esc: Char32 = p.source.at(index: p.pos)
+      let one: String = ""
+      if esc is '"' {
+        one = "\""
+      } else {
+        if esc is '\\' {
+          one = "\\"
+        } else {
+          if esc is '/' {
+            one = "/"
+          } else {
+            if esc is 'n' {
+              one = "\n"
+            } else {
+              if esc is 't' {
+                one = "\t"
+              } else {
+                if esc is 'r' {
+                  one = "\r"
+                } else {
+                  if esc is 'b' {
+                    one = "\u{0008}"
+                  } else {
+                    if esc is 'f' {
+                      one = "\u{000c}"
+                    } else {
+                      # \uXXXX or unknown: pass through as raw 1 byte
+                      # (good enough for ASCII-heavy scene files)
+                      one = p.source.sub(start: p.pos, len: 1)
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      result = result.concat(other: one)
+      p.pos = p.pos + 1
+      chunkStart = p.pos
+    } else {
+      p.pos = p.pos + 1
+    }
+  }
+  # Reached end of source without closing quote.
+  p.ok = false
+  ret result
+}
+
+# Consume a JSON number (int or float). `\-?\d+(\.\d+)?([eE][+-]?\d+)?`.
+func parseNumber(p: mod JsonParser) ret Float {
+  let start: Int = p.pos
+  if peek(p: p) is '-' {
+    p.pos = p.pos + 1
+  }
+  loop p.pos < p.source.length() and isDigit(c: peek(p: p)) {
+    p.pos = p.pos + 1
+  }
+  if peek(p: p) is '.' {
+    p.pos = p.pos + 1
+    loop p.pos < p.source.length() and isDigit(c: peek(p: p)) {
+      p.pos = p.pos + 1
+    }
+  }
+  if peek(p: p) is 'e' or peek(p: p) is 'E' {
+    p.pos = p.pos + 1
+    if peek(p: p) is '+' or peek(p: p) is '-' {
+      p.pos = p.pos + 1
+    }
+    loop p.pos < p.source.length() and isDigit(c: peek(p: p)) {
+      p.pos = p.pos + 1
+    }
+  }
+  if p.pos is start {
+    p.ok = false
+    ret 0.0
+  }
+  let lit: String = p.source.sub(start: start, len: p.pos - start)
+  ret lit.toFloat()
+}
+
+# parseValue mutates `p` and the three pools, and returns the
+# value-pool index of the parsed value. On failure marks `p.ok = false`
+# and returns -1. The pools are passed separately rather than as a
+# single `mod JsonDoc` because of the Live VM mod-struct-list quirk
+# noted on `pushValue`.
+func parseValue(
+  p: mod JsonParser
+  vals: mod List(JsonValue)
+  kids: mod List(Int)
+  fields: mod List(JsonField)
+) ret Int {
+  skipWhitespace(p)
+  if p.pos >= p.source.length() {
+    p.ok = false
+    ret -1
+  }
+  let c: Char32 = peek(p: p)
+
+  if c is '{' {
+    p.pos = p.pos + 1
+    skipWhitespace(p)
+    # Collect this object's fields into a *local* list and bulk-append
+    # to the shared `fields` pool only when the object closes. Without
+    # this, a nested object's fields would be interleaved into the outer
+    # object's range, and the start/len pair would no longer point at a
+    # contiguous slice.
+    let localFields: List(JsonField) = createList(JsonField)(initialCap: 4)
+    if peek(p: p) is '}' {
+      p.pos = p.pos + 1
+    } else {
+      loop true {
+        skipWhitespace(p)
+        let key: String = parseString(p)
+        if p.ok is false {
+          ret -1
+        }
+        skipWhitespace(p)
+        if not consume(p: p, c: ':') {
+          p.ok = false
+          ret -1
+        }
+        let valIdx: Int = parseValue(p, vals: vals, kids: kids, fields: fields)
+        if p.ok is false {
+          ret -1
+        }
+        let f: JsonField = { key: key, valueIdx: valIdx }
+        localFields.add(value: f)
+        skipWhitespace(p)
+        if consume(p: p, c: ',') {
+          # Continue, parse next field.
+        } else {
+          if consume(p: p, c: '}') {
+            # Exit loop by jumping out via a sentinel value of -2.
+            # Rae has no `break`, so we use a flag and re-check below.
+            p.pos = p.pos
+            let firstField: Int = fields.length
+            let count: Int = localFields.length
+            let i: Int = 0
+            loop i < count {
+              let f2: JsonField = rae_ext_rae_buf_get(buf: localFields.data, index: i)
+              fields.add(value: f2)
+              i = i + 1
+            }
+            let v: JsonValue = {
+              kind: JsonKind.Object
+              asBool: false
+              asNumber: 0.0
+              asString: ""
+              rangeStart: firstField
+              rangeLen: count
+            }
+            ret pushValue(vals: vals, v: v)
+          } else {
+            p.ok = false
+            ret -1
+          }
+        }
+      }
+    }
+    # Empty object: still bulk-append (no-op) and return.
+    let firstField: Int = fields.length
+    let v: JsonValue = {
+      kind: JsonKind.Object
+      asBool: false
+      asNumber: 0.0
+      asString: ""
+      rangeStart: firstField
+      rangeLen: 0
+    }
+    ret pushValue(vals: vals, v: v)
+  }
+
+  if c is '[' {
+    p.pos = p.pos + 1
+    skipWhitespace(p)
+    # Same trick as for objects — collect into a local list first so a
+    # nested array's children don't interleave with the outer array's.
+    let localKids: List(Int) = createList(initialCap: 4)
+    if peek(p: p) is ']' {
+      p.pos = p.pos + 1
+    } else {
+      loop true {
+        skipWhitespace(p)
+        let elemIdx: Int = parseValue(p, vals: vals, kids: kids, fields: fields)
+        if p.ok is false {
+          ret -1
+        }
+        localKids.add(value: elemIdx)
+        skipWhitespace(p)
+        if consume(p: p, c: ',') {
+          # Continue, parse next element.
+        } else {
+          if consume(p: p, c: ']') {
+            let firstChild: Int = kids.length
+            let count: Int = localKids.length
+            let i: Int = 0
+            loop i < count {
+              let kidIdx: Int = rae_ext_rae_buf_get(buf: localKids.data, index: i)
+              kids.add(value: kidIdx)
+              i = i + 1
+            }
+            let v: JsonValue = {
+              kind: JsonKind.Array
+              asBool: false
+              asNumber: 0.0
+              asString: ""
+              rangeStart: firstChild
+              rangeLen: count
+            }
+            ret pushValue(vals: vals, v: v)
+          } else {
+            p.ok = false
+            ret -1
+          }
+        }
+      }
+    }
+    let firstChild: Int = kids.length
+    let v: JsonValue = {
+      kind: JsonKind.Array
+      asBool: false
+      asNumber: 0.0
+      asString: ""
+      rangeStart: firstChild
+      rangeLen: 0
+    }
+    ret pushValue(vals: vals, v: v)
+  }
+
+  if c is '"' {
+    let s: String = parseString(p)
+    if p.ok is false {
+      ret -1
+    }
+    ret pushValue(vals: vals, v: jsonStringValue(v: s))
+  }
+
+  if c is 't' {
+    if consumeKeyword(p: p, kw: "true") {
+      ret pushValue(vals: vals, v: jsonBoolValue(v: true))
+    }
+    p.ok = false
+    ret -1
+  }
+
+  if c is 'f' {
+    if consumeKeyword(p: p, kw: "false") {
+      ret pushValue(vals: vals, v: jsonBoolValue(v: false))
+    }
+    p.ok = false
+    ret -1
+  }
+
+  if c is 'n' {
+    if consumeKeyword(p: p, kw: "null") {
+      ret pushValue(vals: vals, v: jsonNull())
+    }
+    p.ok = false
+    ret -1
+  }
+
+  if c is '-' or isDigit(c: c) {
+    let n: Float = parseNumber(p)
+    if p.ok is false {
+      ret -1
+    }
+    ret pushValue(vals: vals, v: jsonNumberValue(v: n))
+  }
+
+  p.ok = false
+  ret -1
+}
+
+# Parse a UTF-8 / ASCII JSON document. On error returns a doc with
+# `ok = false` and `errorPos` pointing at the first byte the parser
+# couldn't consume.
+func parseJson(source: String) ret JsonDoc {
+  let doc: JsonDoc = {
+    values: createList(JsonValue)(initialCap: 8)
+    children: createList(Int)(initialCap: 8)
+    fields: createList(JsonField)(initialCap: 8)
+    rootIdx: -1
+    ok: false
+    errorPos: 0
+  }
+  let p: JsonParser = { source: source, pos: 0, ok: true }
+  let rootIdx: Int = parseValue(
+    p
+    vals: doc.values
+    kids: doc.children
+    fields: doc.fields
+  )
+  skipWhitespace(p)
+  if p.ok is false {
+    doc.ok = false
+    doc.errorPos = p.pos
+    ret doc
+  }
+  if p.pos < source.length() {
+    # Trailing garbage after the root value.
+    doc.ok = false
+    doc.errorPos = p.pos
+    ret doc
+  }
+  doc.rootIdx = rootIdx
+  doc.ok = true
+  ret doc
+}

@@ -163,35 +163,69 @@ plumbing in exchange for keeping the scene model as data, not code.
 
 ### Adding a JSON tree parser
 
-`lib/json.rae` (new) provides:
+`lib/json.rae` (delivered in queue task #40) — recursive-descent JSON
+parser with a flat-pool layout. Initially designed with a recursive
+`JsonValue` containing `List(JsonValue)`, but the C backend currently
+segfaults on that shape (Live works), so the parser stores all values
+in three flat lists owned by a `JsonDoc`:
 
 ```rae
 enum JsonKind { Null, Bool, Number, String, Array, Object }
+
+type JsonField {
+  key: String
+  valueIdx: Int          # index into JsonDoc.values
+}
 
 type JsonValue {
   kind: JsonKind
   asBool: Bool
   asNumber: Float
   asString: String
-  asArray: List(JsonValue)
-  asObject: List(JsonField)
+  rangeStart: Int        # for Array: range in JsonDoc.children
+  rangeLen: Int          # for Object: range in JsonDoc.fields
 }
 
-type JsonField {
-  key: String
-  value: JsonValue
+type JsonDoc {
+  values: List(JsonValue)
+  children: List(Int)    # array element value-indices, contiguously
+  fields: List(JsonField) # object fields, contiguously
+  rootIdx: Int
+  ok: Bool
+  errorPos: Int
 }
 
-func parseJson(source: String) ret JsonValue
-func jsonField(this: view JsonValue, key: String) ret opt JsonValue
+func parseJson(source: String) ret JsonDoc
+func jsonRoot(doc: view JsonDoc) ret JsonValue
+func jsonField(doc: view JsonDoc, this: view JsonValue, key: String) ret Int  # -1 = missing
+func jsonValueAt(doc: view JsonDoc, idx: Int) ret JsonValue
+func jsonArrayLen(this: view JsonValue) ret Int
+func jsonArrayAt(doc: view JsonDoc, this: view JsonValue, idx: Int) ret JsonValue
+func jsonObjectLen(this: view JsonValue) ret Int
+func jsonObjectKeyAt(doc: view JsonDoc, this: view JsonValue, idx: Int) ret String
+func jsonObjectValueAt(doc: view JsonDoc, this: view JsonValue, idx: Int) ret JsonValue
 func jsonInt(this: view JsonValue, fallback: Int) ret Int
 func jsonFloat(this: view JsonValue, fallback: Float) ret Float
 func jsonString(this: view JsonValue, fallback: String) ret String
 func jsonBool(this: view JsonValue, fallback: Bool) ret Bool
 ```
 
-Hand-written recursive-descent parser, ~150 lines. Self-contained;
-doesn't touch the existing flat extract helpers.
+Two Rae-specific gotchas hit during implementation, worth flagging
+because they'll bite later phases:
+
+1. **Live VM doesn't propagate `mod struct.listField`.** Mutating a
+   list that's a *field* of a `mod` struct works inside the callee
+   but is invisible to the caller after return. Workaround: pass
+   each list as its own `mod List(...)` parameter. The parser does
+   this through `parseValue(p, vals: ..., kids: ..., fields: ...)`
+   instead of `parseValue(p, doc: doc)`.
+2. **Compiled C backend can't `&` a function-call rvalue passed as
+   `view T`.** Bind `jsonRoot(doc)` (or any `ret JsonValue`) to a
+   local first before passing to a `view JsonValue` helper. The
+   tests do this consistently.
+
+Both are real Rae bugs that should land in the queue once #40 is
+done, but neither blocks the parser shipping.
 
 ## Component inventory for the music player
 
