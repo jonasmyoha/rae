@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Snapshot the album scene to a PNG for regression watching.
+# Snapshot a music-player screen to a PNG for regression watching.
 #
 # Usage:
-#   examples/98_mobile_ui/snapshot.sh [output.png]
+#   examples/98_mobile_ui/snapshot.sh [output.png] [screen]
 #
-# Default output is `examples/98_mobile_ui/screenshots/album.png`.
+# `screen` is "album" (default) or "now-playing".
+# Default output is `examples/98_mobile_ui/screenshots/<screen>.png`.
 #
 # raylib's `TakeScreenshot` is unreliable on macOS+Metal in a fast
 # headless flow (the back-buffer read returns the cleared bg before
@@ -17,7 +18,8 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$REPO_ROOT"
 
-OUT="${1:-examples/98_mobile_ui/screenshots/album.png}"
+SCREEN="${2:-album}"
+OUT="${1:-examples/98_mobile_ui/screenshots/${SCREEN}.png}"
 mkdir -p "$(dirname "$OUT")"
 
 # Build the binary if it isn't already there.
@@ -37,8 +39,10 @@ if [[ ! -x "$APP" ]]; then
   rm -rf "$TMP"
 fi
 
-# Run the app in the background.
-"$APP" > /tmp/rae_album_run.log 2>&1 &
+# Run the app in the background, picking the starting screen via env.
+# `RAE_UI_SCREEN` ("album" / "now-playing") is read by the interactive
+# loop in main.rae.
+RAE_UI_SCREEN="$SCREEN" "$APP" > /tmp/rae_album_run.log 2>&1 &
 APP_PID=$!
 trap 'kill "$APP_PID" 2>/dev/null || true' EXIT
 
