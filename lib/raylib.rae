@@ -77,6 +77,20 @@ func drawRectangleLines(
   color: Color
 ) extern
 
+# Rounded rectangle. `roundness` is the corner radius as a fraction of
+# the smaller side (0.0 = square, 1.0 = pill). `segments` is the number
+# of triangle segments per corner — 8 to 12 looks crisp at typical UI
+# sizes; pass 0 to let raylib auto-pick.
+func drawRectangleRounded(
+  x: Float
+  y: Float
+  width: Float
+  height: Float
+  roundness: Float
+  segments: Int
+  color: Color
+) extern
+
 func drawCircle(x: Float, y: Float, radius: Float, color: Color) extern
 
 func drawCircleGradient(x: Int, y: Int, radius: Float, color1: Color, color2: Color) extern
@@ -92,6 +106,11 @@ func drawText(
   fontSize: Float
   color: Color
 ) extern
+
+# Default-font text width measurement, in pixels. Useful for `Hug` text
+# nodes that want to size themselves to their content. The custom-font
+# variant lives behind `measureTextWithFont` once the slot API needs it.
+func measureText(text: String, fontSize: Int) extern ret Int
 
 # Custom font support — addresses fonts by integer slot (0..7) instead of
 # exposing raylib's Font struct directly. Slots are global; load once and
