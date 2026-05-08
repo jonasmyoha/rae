@@ -1,0 +1,326 @@
+# ECS storage layer.
+#
+# Adapted from RUICS — see `rae/docs/royal-blush-ruics-ecs-reference.md`
+# § 2 — but with two Rae-specific quirks worked around:
+#
+# 1. The Live VM doesn't propagate mutations done through `mod struct`
+#    to inner `List` fields. Mutating-helper functions therefore alias
+#    the inner lists explicitly via `let foo: mod List(...) => this.foo`.
+#    With that trick, both targets agree.
+#
+# 2. The compiled C backend can't take `&` of an rvalue passed as
+#    `view T`. Read helpers return `T` by value, and callers should
+#    bind the result to a local before passing it on.
+#
+# Storage is intentionally simpler than the original sparse-set: a
+# linear scan in `componentIndexOf`. UI scenes never have more than a
+# couple of hundred entities and a few thousand components total, so
+# the constant factor doesn't matter. We can swap to an IntMap-backed
+# sparse set later without changing the public API.
+import core
+
+# Rae has no type aliases; `Entity` is just a marker comment.
+# Entity == Int across the UI library.
+
+# Non-generic helpers for the entity-id list. The C backend mis-mangles
+# generic method calls (`add`, `remove`) on a `List(Int)` field when
+# they appear *inside* a function generic over T — it substitutes T
+# into the inner specialisation. Routing through a non-generic helper
+# stops the substitution.
+func appendEntityList(lst: mod List(Int), value: Int) {
+  lst.add(value: value)
+}
+
+func popLastInt(lst: mod List(Int)) {
+  if lst.length is 0 {
+    ret
+  }
+  lst.remove(index: lst.length - 1)
+}
+
+# ----- ComponentTable -----
+
+type ComponentTable(T) {
+  denseEntities: List(Int)
+  denseData: List(T)
+}
+
+func createComponentTable(T)() ret ComponentTable(T) {
+  ret ComponentTable(T) {
+    denseEntities: createList(Int)(initialCap: 8)
+    denseData: createList(T)(initialCap: 8)
+  }
+}
+
+# Returns the dense index of `entity` in this table, or -1 if absent.
+#
+# `denseEntities` is `List(Int)`, but inside this generic function the
+# C backend currently mis-mangles `denseEntities.get(...)` as
+# `rae_get_<T>_<List<T>>_int64_t_` substituted with the outer T (so
+# `List(Int).get` becomes `List(Rect).get` when T=Rect). Bypass via
+# `rae_ext_rae_buf_get` which doesn't go through the generic dispatch.
+func componentIndexOf(T)(this: view ComponentTable(T), entity: Int) ret Int {
+  let n: Int = this.denseEntities.length
+  let i: Int = 0
+  loop i < n {
+    let e: Int = rae_ext_rae_buf_get(buf: this.denseEntities.data, index: i)
+    if e is entity {
+      ret i
+    }
+    i = i + 1
+  }
+  ret -1
+}
+
+func componentHas(T)(this: view ComponentTable(T), entity: Int) ret Bool {
+  ret componentIndexOf(this, entity: entity) >= 0
+}
+
+# Read the component for `entity`. Caller must check `componentHas`
+# first — if the component is missing, this returns whatever sits at
+# dense index 0 (or junk if the table is empty). The compromise is
+# deliberate: returning `opt T` for struct types triggers a separate
+# C-backend papercut that we don't want to step on for every component
+# access. The check-then-read pattern is:
+#
+#   if componentHas(table, entity: e) {
+#     let r: Rect = componentGet(table, entity: e)
+#     ...
+#   }
+func componentGet(T)(this: view ComponentTable(T), entity: Int) ret T {
+  let idx: Int = componentIndexOf(this, entity: entity)
+  let safeIdx: Int = idx
+  if safeIdx < 0 {
+    safeIdx = 0
+  }
+  let v: T = rae_ext_rae_buf_get(buf: this.denseData.data, index: safeIdx)
+  ret v
+}
+
+# Add or replace the component for `entity`. Internally aliases the
+# two inner lists so the mutation propagates on both targets.
+func componentSet(T)(this: mod ComponentTable(T), entity: Int, data: T) {
+  let entities: mod List(Int) => this.denseEntities
+  let datas: mod List(T) => this.denseData
+  let n: Int = entities.length
+  let i: Int = 0
+  loop i < n {
+    # `entities.get(...)` would mis-mangle inside this generic — see
+    # componentIndexOf comment.
+    let e: Int = rae_ext_rae_buf_get(buf: entities.data, index: i)
+    if e is entity {
+      rae_ext_rae_buf_set(buf: datas.data, index: i, value: data)
+      ret
+    }
+    i = i + 1
+  }
+  appendEntityList(lst: entities, value: entity)
+  datas.add(value: data)
+}
+
+# Swap-remove the component for `entity`. Order in the table is not
+# preserved (no callers depend on it).
+func componentRemove(T)(this: mod ComponentTable(T), entity: Int) {
+  let entities: mod List(Int) => this.denseEntities
+  let datas: mod List(T) => this.denseData
+  let idx: Int = componentIndexOf(T)(this: this, entity: entity)
+  if idx < 0 {
+    ret
+  }
+  let last: Int = entities.length - 1
+  if idx is not last {
+    let lastEntity: Int = rae_ext_rae_buf_get(buf: entities.data, index: last)
+    rae_ext_rae_buf_set(buf: entities.data, index: idx, value: lastEntity)
+    let lastData: T = rae_ext_rae_buf_get(buf: datas.data, index: last)
+    rae_ext_rae_buf_set(buf: datas.data, index: idx, value: lastData)
+  }
+  # Shrink length by 1. Use the non-generic helper for the int-list
+  # because `entities.remove(...)` would mis-mangle in this context.
+  popLastInt(lst: entities)
+  datas.remove(index: last)
+}
+
+func componentCount(T)(this: view ComponentTable(T)) ret Int {
+  ret this.denseEntities.length
+}
+
+# Iteration helper: returns the entity id at dense index `i`.
+func componentEntityAt(T)(this: view ComponentTable(T), i: Int) ret Int {
+  let e: Int = rae_ext_rae_buf_get(buf: this.denseEntities.data, index: i)
+  ret e
+}
+
+# Iteration helper: returns the component data at dense index `i`.
+func componentDataAt(T)(this: view ComponentTable(T), i: Int) ret T {
+  let v: T = rae_ext_rae_buf_get(buf: this.denseData.data, index: i)
+  ret v
+}
+
+# ----- UiWorld -----
+
+# UiWorld holds a ComponentTable per component type. The set is fixed
+# at compile time — there's no dynamic component registration in Rae
+# (no reflection, no first-class type ids), and that's fine: scenes are
+# composed of the exact set listed below, and adding a new component
+# kind costs one field here, one default-construct call, and one
+# dispatch arm in registry.rae.
+type UiWorld {
+  nextEntityId: Int
+  alive: List(Int)
+
+  # NodeId.id -> entity. Used for SceneInstance overrides.
+  nodeIds: StringMap(Int)
+
+  # ----- authored geometry/layout -----
+  rects: ComponentTable(Rect)
+  sizes: ComponentTable(Size)
+  layouts: ComponentTable(Layout)
+  paddings: ComponentTable(Padding)
+  margins: ComponentTable(Margin)
+  safeAreas: ComponentTable(SafeArea)
+  aligns: ComponentTable(Align)
+  offsets: ComponentTable(Offset)
+  constraints: ComponentTable(Constraints)
+  overflows: ComponentTable(OverflowPolicy)
+
+  # ----- authored visual/interaction -----
+  transforms: ComponentTable(TransformFx)
+  sprites: ComponentTable(Sprite)
+  texts: ComponentTable(Text)
+  shapes: ComponentTable(Shape)
+  shadows: ComponentTable(Shadow)
+  opacities: ComponentTable(Opacity)
+  pointerEvents: ComponentTable(PointerEvents)
+  hitAreas: ComponentTable(HitArea)
+  onClicks: ComponentTable(OnClick)
+  buttons: ComponentTable(Button)
+  actives: ComponentTable(Active)
+  editorVisibles: ComponentTable(EditorVisible)
+  editorLockeds: ComponentTable(EditorLocked)
+
+  # ----- authored identity/metadata -----
+  names: ComponentTable(Name)
+  primaryTypes: ComponentTable(PrimaryType)
+  nodeIdComponents: ComponentTable(NodeId)
+  sceneScopes: ComponentTable(SceneScope)
+  runtimeOnlys: ComponentTable(RuntimeOnly)
+
+  # ----- authored dynamic / data binding -----
+  sceneInstances: ComponentTable(SceneInstance)
+  imageSourceResolvers: ComponentTable(ImageSourceResolver)
+  textBindings: ComponentTable(TextBinding)
+  maskShapes: ComponentTable(MaskShape)
+  dataRequests: ComponentTable(DataRequest)
+  listViews: ComponentTable(ListView)
+
+  # ----- authored effects (declared so .raescene can carry them) -----
+  backgroundPans: ComponentTable(BackgroundPan)
+  carousels: ComponentTable(Carousel)
+  smokeFxs: ComponentTable(SmokeFx)
+  animFrames: ComponentTable(AnimFrames)
+  animTriggers: ComponentTable(AnimTrigger)
+  wobbleFxs: ComponentTable(WobbleFx)
+
+  # ----- hierarchy -----
+  childrens: ComponentTable(Children)
+
+  # ----- derived / runtime-only -----
+  measuredSizes: ComponentTable(MeasuredSize)
+  computedRects: ComponentTable(ComputedRect)
+  worldTransforms: ComponentTable(WorldTransform)
+  runtimeOffsets: ComponentTable(RuntimeOffset)
+  layoutScales: ComponentTable(LayoutScale)
+  safeInsets: ComponentTable(SafeInsets)
+  parentLinks: ComponentTable(ParentLink)
+  animStates: ComponentTable(AnimState)
+}
+
+func createUiWorld() ret UiWorld {
+  ret UiWorld {
+    nextEntityId: 1
+    alive: createList(Int)(initialCap: 32)
+    nodeIds: createStringMap(Int)(initialCap: 32)
+
+    rects: createComponentTable(Rect)()
+    sizes: createComponentTable(Size)()
+    layouts: createComponentTable(Layout)()
+    paddings: createComponentTable(Padding)()
+    margins: createComponentTable(Margin)()
+    safeAreas: createComponentTable(SafeArea)()
+    aligns: createComponentTable(Align)()
+    offsets: createComponentTable(Offset)()
+    constraints: createComponentTable(Constraints)()
+    overflows: createComponentTable(OverflowPolicy)()
+
+    transforms: createComponentTable(TransformFx)()
+    sprites: createComponentTable(Sprite)()
+    texts: createComponentTable(Text)()
+    shapes: createComponentTable(Shape)()
+    shadows: createComponentTable(Shadow)()
+    opacities: createComponentTable(Opacity)()
+    pointerEvents: createComponentTable(PointerEvents)()
+    hitAreas: createComponentTable(HitArea)()
+    onClicks: createComponentTable(OnClick)()
+    buttons: createComponentTable(Button)()
+    actives: createComponentTable(Active)()
+    editorVisibles: createComponentTable(EditorVisible)()
+    editorLockeds: createComponentTable(EditorLocked)()
+
+    names: createComponentTable(Name)()
+    primaryTypes: createComponentTable(PrimaryType)()
+    nodeIdComponents: createComponentTable(NodeId)()
+    sceneScopes: createComponentTable(SceneScope)()
+    runtimeOnlys: createComponentTable(RuntimeOnly)()
+
+    sceneInstances: createComponentTable(SceneInstance)()
+    imageSourceResolvers: createComponentTable(ImageSourceResolver)()
+    textBindings: createComponentTable(TextBinding)()
+    maskShapes: createComponentTable(MaskShape)()
+    dataRequests: createComponentTable(DataRequest)()
+    listViews: createComponentTable(ListView)()
+
+    backgroundPans: createComponentTable(BackgroundPan)()
+    carousels: createComponentTable(Carousel)()
+    smokeFxs: createComponentTable(SmokeFx)()
+    animFrames: createComponentTable(AnimFrames)()
+    animTriggers: createComponentTable(AnimTrigger)()
+    wobbleFxs: createComponentTable(WobbleFx)()
+
+    childrens: createComponentTable(Children)()
+
+    measuredSizes: createComponentTable(MeasuredSize)()
+    computedRects: createComponentTable(ComputedRect)()
+    worldTransforms: createComponentTable(WorldTransform)()
+    runtimeOffsets: createComponentTable(RuntimeOffset)()
+    layoutScales: createComponentTable(LayoutScale)()
+    safeInsets: createComponentTable(SafeInsets)()
+    parentLinks: createComponentTable(ParentLink)()
+    animStates: createComponentTable(AnimState)()
+  }
+}
+
+# Allocate a new entity id and mark it alive.
+func createEntity(world: mod UiWorld) ret Int {
+  let id: Int = world.nextEntityId
+  world.nextEntityId = id + 1
+  let alive: mod List(Int) => world.alive
+  alive.add(value: id)
+  ret id
+}
+
+func isAlive(world: view UiWorld, entity: Int) ret Bool {
+  let n: Int = world.alive.length
+  let i: Int = 0
+  loop i < n {
+    let e: Int = world.alive.get(index: i)
+    if e is entity {
+      ret true
+    }
+    i = i + 1
+  }
+  ret false
+}
+
+func aliveCount(world: view UiWorld) ret Int {
+  ret world.alive.length
+}

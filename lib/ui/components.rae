@@ -1,0 +1,556 @@
+# UI components — every type the .raescene format can name plus the
+# derived runtime types the layout / transform / render systems
+# populate. All plain data; no methods. The ECS storage in `ecs.rae`
+# parameterises ComponentTable(T) over each of these.
+#
+# Mirrors the inventory in
+# `rae/docs/royal-blush-ruics-ecs-reference.md` § 3 — see
+# `examples/98_mobile_ui/DESIGN.md` for the subset the music player
+# actually needs in phase 1.
+import raylib
+
+# -----------------------------------------------------------------
+# Sub-types and enums shared across components
+# -----------------------------------------------------------------
+
+enum SizeMode {
+  Fixed
+  Hug
+  Fill
+}
+
+# Per-axis sizing policy. `min` and `max` are signed; -1 means "no
+# clamp" since Rae lacks an inline `opt Int` literal.
+type SizeAxis {
+  mode: SizeMode
+  min: Int
+  max: Int
+}
+
+enum LayoutType {
+  None
+  Horizontal
+  Vertical
+  Grid
+  Stack
+}
+
+enum AlignKind {
+  Start
+  Center
+  End
+  SpaceBetween
+  Stretch
+}
+
+enum OverflowMode {
+  None
+  Clip
+  ScaleToFitY
+}
+
+enum ShapeKind {
+  Rect
+  RoundedRect
+  Circle
+}
+
+enum ScaleMode {
+  Fit
+  Fill
+  Stretch
+}
+
+enum WrapWidthMode {
+  None
+  NodeWidth
+}
+
+enum HitAreaKind {
+  Rect
+  RoundedRect
+}
+
+enum MaskKind {
+  Circle
+  RoundedRect
+}
+
+enum ResolverMode {
+  Fixed
+  Random
+  Hash
+  Direct
+}
+
+enum TextFormat {
+  Plain
+  Number
+  Percent1
+  Coins
+  HandRank
+}
+
+enum DataMode {
+  Top
+  AroundSelf
+}
+
+enum AccountIdSource {
+  None
+  ActiveAccountId
+}
+
+# A 4-sided box: padding, margin, etc.
+type Insets {
+  l: Float
+  t: Float
+  r: Float
+  b: Float
+}
+
+# 2D point used for offsets, pivots, anchors.
+type Vec2 {
+  x: Float
+  y: Float
+}
+
+# RGBA in 0..255 ints. Reuses raylib's Color so the render layer can
+# pass values through unchanged.
+type RgbaColor {
+  r: Int
+  g: Int
+  b: Int
+  a: Int
+}
+
+# Reused literal for "no value". Rae's opt T storage is awkward for
+# struct types right now, so most numeric-optional fields use a
+# sentinel (`min = -1`, `radius = -1.0`, etc.).
+
+# -----------------------------------------------------------------
+# Authored components (persisted in .raescene)
+# -----------------------------------------------------------------
+
+# Geometry / layout
+
+type Rect {
+  x: Float
+  y: Float
+  w: Float
+  h: Float
+}
+
+type Size {
+  w: SizeAxis
+  h: SizeAxis
+}
+
+type Layout {
+  kind: LayoutType
+  gap: Float
+  alignMain: AlignKind
+  alignCross: AlignKind
+  columns: Int
+  rowGap: Float
+  columnGap: Float
+}
+
+type Padding {
+  insets: Insets
+}
+
+type Margin {
+  insets: Insets
+}
+
+type SafeArea {
+  enabled: Bool
+  apply: Insets
+  extra: Insets
+}
+
+type Align {
+  x: AlignKind
+  y: AlignKind
+  hasX: Bool
+  hasY: Bool
+}
+
+type Offset {
+  delta: Vec2
+}
+
+type Constraints {
+  minW: Float
+  maxW: Float
+  minH: Float
+  maxH: Float
+  hasMinW: Bool
+  hasMaxW: Bool
+  hasMinH: Bool
+  hasMaxH: Bool
+}
+
+type OverflowPolicy {
+  mode: OverflowMode
+}
+
+# Visual / interaction
+
+type TransformFx {
+  scaleX: Float
+  scaleY: Float
+  rotation: Float
+  alpha: Float
+  visible: Bool
+  pivot: Vec2
+  anchor: Vec2
+}
+
+type Sprite {
+  textureKey: String
+  tint: RgbaColor
+  scaleMode: ScaleMode
+  tileScale: Vec2
+  nineSlice: Insets
+  hasNineSlice: Bool
+}
+
+type Text {
+  text: String
+  styleId: String
+  wrapWidthMode: WrapWidthMode
+}
+
+type Shape {
+  kind: ShapeKind
+  fill: RgbaColor
+  stroke: RgbaColor
+  strokeWidth: Float
+  radius: Float
+}
+
+type Shadow {
+  blur: Float
+}
+
+type Opacity {
+  value: Float
+}
+
+type PointerEvents {
+  enabled: Bool
+  cursor: String
+  blockChildren: Bool
+}
+
+type HitArea {
+  kind: HitAreaKind
+  radius: Float
+}
+
+type OnClick {
+  actionId: String
+  actionIdDouble: String
+  actionIdTriple: String
+  maxDelayMs: Int
+}
+
+type Button {
+  role: String
+}
+
+type Active {
+  value: Bool
+}
+
+type EditorVisible {
+  value: Bool
+}
+
+type EditorLocked {
+  value: Bool
+}
+
+# Identity / metadata
+
+type Name {
+  label: String
+}
+
+type PrimaryType {
+  typeName: String
+}
+
+type NodeId {
+  id: String
+}
+
+type SceneScope {
+  scope: String
+}
+
+type RuntimeOnly {
+  value: Bool
+}
+
+# Dynamic scene + data binding
+
+type SceneInstance {
+  sceneId: String
+  paramsJson: String
+}
+
+type ImageSourceResolver {
+  mode: ResolverMode
+  textureKeys: List(String)
+  seed: String
+  once: Bool
+  sharedHash: String
+}
+
+type TextBinding {
+  key: String
+  format: TextFormat
+  prefix: String
+  suffix: String
+}
+
+type MaskShape {
+  kind: MaskKind
+  sourceNodeId: String
+  radius: Float
+}
+
+type DataRequest {
+  endpoint: String
+  mode: DataMode
+  initialLimit: Int
+  aroundBefore: Int
+  aroundAfter: Int
+  pageLimit: Int
+  accountIdSource: AccountIdSource
+  itemsField: String
+  cursorBeforeField: String
+  cursorAfterField: String
+}
+
+type ListViewBinding {
+  nodeId: String
+  componentName: String
+  fieldName: String
+  itemField: String
+  prefix: String
+  suffix: String
+}
+
+type ListView {
+  itemSceneId: String
+  itemKeyField: String
+  itemHeight: Float
+  itemGap: Float
+  visibleItemCount: Int
+  overscanRows: Int
+  bindings: List(ListViewBinding)
+  loadingSceneId: String
+  emptySceneId: String
+  errorSceneId: String
+}
+
+# Effects / motion (declared so .raescene can carry them; runtime
+# systems for these arrive in later phases).
+
+type BackgroundPan {
+  speedX: Float
+  speedY: Float
+  amplitudeX: Float
+  amplitudeY: Float
+}
+
+type Carousel {
+  axis: AlignKind
+  swipeThreshold: Float
+  transitionDuration: Float
+  travelFactor: Float
+  previewScale: Float
+}
+
+type SmokeFx {
+  spawnIntervalMs: Float
+  jitter: Float
+  lifetimeMs: Float
+  driftX: Float
+  driftY: Float
+  scaleStart: Float
+  scaleEnd: Float
+  fadeMs: Float
+}
+
+type AnimFrames {
+  baseKey: String
+  frames: List(Int)
+  textureKeys: List(String)
+  fps: Float
+  loopForever: Bool
+  onEndTextureKey: String
+}
+
+type AnimTrigger {
+  event: String
+  actionId: String
+  restartOnTrigger: Bool
+}
+
+type WobbleFx {
+  amp: Float
+  freq: Float
+  secondAmp: Float
+  secondFreq: Float
+}
+
+# Hierarchy
+
+# Stored on the parent. Parent-link going the other way lives in the
+# derived ParentLink table below — `Children` is the authoritative
+# ordering, ParentLink is the cached upward pointer for traversal.
+type Children {
+  ids: List(Int)
+}
+
+# -----------------------------------------------------------------
+# Derived / runtime-only components
+# -----------------------------------------------------------------
+
+type MeasuredSize {
+  w: Float
+  h: Float
+}
+
+type ComputedRect {
+  x: Float
+  y: Float
+  w: Float
+  h: Float
+}
+
+type WorldTransform {
+  x: Float
+  y: Float
+  scaleX: Float
+  scaleY: Float
+  rotation: Float
+  alpha: Float
+  visible: Bool
+}
+
+type RuntimeOffset {
+  delta: Vec2
+}
+
+type LayoutScale {
+  scale: Float
+}
+
+type SafeInsets {
+  insets: Insets
+}
+
+type ParentLink {
+  parent: Int
+}
+
+type AnimState {
+  playing: Bool
+  elapsedMs: Float
+  frameIndex: Int
+}
+
+# -----------------------------------------------------------------
+# Default-value constructors for primitive components
+#
+# Authored .raescene files may omit fields. Phase 1c's deserialiser
+# starts from these defaults and overlays whatever the JSON specifies.
+# -----------------------------------------------------------------
+
+func defaultSizeAxis() ret SizeAxis {
+  ret SizeAxis { mode: SizeMode.Fixed, min: -1, max: -1 }
+}
+
+func defaultSize() ret Size {
+  ret Size { w: defaultSizeAxis(), h: defaultSizeAxis() }
+}
+
+func defaultInsets() ret Insets {
+  ret Insets { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
+}
+
+func defaultLayout() ret Layout {
+  ret Layout {
+    kind: LayoutType.None
+    gap: 0.0
+    alignMain: AlignKind.Start
+    alignCross: AlignKind.Start
+    columns: 0
+    rowGap: 0.0
+    columnGap: 0.0
+  }
+}
+
+func defaultPadding() ret Padding {
+  ret Padding { insets: defaultInsets() }
+}
+
+func defaultAlign() ret Align {
+  ret Align {
+    x: AlignKind.Start
+    y: AlignKind.Start
+    hasX: false
+    hasY: false
+  }
+}
+
+func defaultTransformFx() ret TransformFx {
+  ret TransformFx {
+    scaleX: 1.0
+    scaleY: 1.0
+    rotation: 0.0
+    alpha: 1.0
+    visible: true
+    pivot: Vec2 { x: 0.5, y: 0.5 }
+    anchor: Vec2 { x: 0.5, y: 0.5 }
+  }
+}
+
+func defaultSprite() ret Sprite {
+  ret Sprite {
+    textureKey: ""
+    tint: RgbaColor { r: 255, g: 255, b: 255, a: 255 }
+    scaleMode: ScaleMode.Fit
+    tileScale: Vec2 { x: 1.0, y: 1.0 }
+    nineSlice: defaultInsets()
+    hasNineSlice: false
+  }
+}
+
+func defaultText() ret Text {
+  ret Text { text: "", styleId: "", wrapWidthMode: WrapWidthMode.None }
+}
+
+func defaultShape() ret Shape {
+  ret Shape {
+    kind: ShapeKind.Rect
+    fill: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
+    stroke: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
+    strokeWidth: 0.0
+    radius: 0.0
+  }
+}
+
+func defaultActive() ret Active {
+  ret Active { value: true }
+}
+
+func defaultOpacity() ret Opacity {
+  ret Opacity { value: 1.0 }
+}
