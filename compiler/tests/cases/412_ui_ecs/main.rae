@@ -1,0 +1,79 @@
+import ui/ecs
+import ui/components
+import ui/registry
+
+func main() {
+  let world: UiWorld = createUiWorld()
+  log("alive at boot: {aliveCount(world: world)}")
+  log("known components: {registeredComponentCount()}")
+  let rectName: String = "Rect"
+  let wibbleName: String = "Wibble"
+  log("Rect known: {isKnownComponent(name: rectName)}")
+  log("Wibble known: {isKnownComponent(name: wibbleName)}")
+
+  # Allocate three entities.
+  let e1: Int = createEntity(world: world)
+  let e2: Int = createEntity(world: world)
+  let e3: Int = createEntity(world: world)
+  log("alive after 3 createEntity: {aliveCount(world: world)}")
+  log("e1={e1} e2={e2} e3={e3}")
+  log("e1 alive: {isAlive(world: world, entity: e1)}")
+  log("99 alive: {isAlive(world: world, entity: 99)}")
+
+  # Add a Rect to e1 and e3, but not e2.
+  let r1: Rect = { x: 0.0, y: 0.0, w: 100.0, h: 200.0 }
+  let r3: Rect = { x: 50.0, y: 50.0, w: 320.0, h: 240.0 }
+  componentSet(this: world.rects, entity: e1, data: r1)
+  componentSet(this: world.rects, entity: e3, data: r3)
+
+  log("rects.count: {componentCount(this: world.rects)}")
+  log("e1 hasRect: {componentHas(this: world.rects, entity: e1)}")
+  log("e2 hasRect: {componentHas(this: world.rects, entity: e2)}")
+  log("e3 hasRect: {componentHas(this: world.rects, entity: e3)}")
+
+  let got1: Rect = componentGet(this: world.rects, entity: e1)
+  log("e1 rect: {got1.x},{got1.y} {got1.w}x{got1.h}")
+  let got3: Rect = componentGet(this: world.rects, entity: e3)
+  log("e3 rect: {got3.x},{got3.y} {got3.w}x{got3.h}")
+
+  # Replace e1's rect.
+  let r1b: Rect = { x: 10.0, y: 20.0, w: 30.0, h: 40.0 }
+  componentSet(this: world.rects, entity: e1, data: r1b)
+  log("rects.count after replace: {componentCount(this: world.rects)}")
+  let got1b: Rect = componentGet(this: world.rects, entity: e1)
+  log("e1 rect after replace: {got1b.x},{got1b.y} {got1b.w}x{got1b.h}")
+
+  # Add a Text component to e2.
+  let t2: Text = { text: "hello", styleId: "h1", wrapWidthMode: WrapWidthMode.NodeWidth }
+  componentSet(this: world.texts, entity: e2, data: t2)
+  log("texts.count: {componentCount(this: world.texts)}")
+  let gotT: Text = componentGet(this: world.texts, entity: e2)
+  log("e2 text: '{gotT.text}' style={gotT.styleId}")
+
+  # Add an Active=false to e3 (default is true at construction time;
+  # this overrides).
+  let a3: Active = { value: false }
+  componentSet(this: world.actives, entity: e3, data: a3)
+  let gotA: Active = componentGet(this: world.actives, entity: e3)
+  log("e3 active: {gotA.value}")
+
+  # Iterate the rects table.
+  let rectN: Int = componentCount(this: world.rects)
+  let i: Int = 0
+  loop i < rectN {
+    let ent: Int = componentEntityAt(this: world.rects, i: i)
+    let r: Rect = componentDataAt(this: world.rects, i: i)
+    log("  rect[{i}] entity={ent} {r.w}x{r.h}")
+    i = i + 1
+  }
+
+  # Remove e3's rect, observe count.
+  componentRemove(this: world.rects, entity: e3)
+  log("rects.count after remove e3: {componentCount(this: world.rects)}")
+  log("e3 hasRect after remove: {componentHas(this: world.rects, entity: e3)}")
+  log("e1 hasRect after remove: {componentHas(this: world.rects, entity: e1)}")
+
+  # Defaults still useful.
+  let dt: TransformFx = defaultTransformFx()
+  log("default transform alpha: {dt.alpha} visible: {dt.visible}")
+}

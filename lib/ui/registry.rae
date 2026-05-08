@@ -1,0 +1,90 @@
+# Component registry — the bridge between component *names* (the
+# strings used in `.raescene` JSON keys) and per-component
+# deserialiser/applier code.
+#
+# In RUICS this is a runtime-mutable `Map<string, ComponentSpec>` with
+# closures attached. Rae has no first-class function references, so
+# the dispatch can't be a hashmap of callbacks; it's a single function
+# that switches on the name. The list of names is enumerated here for
+# documentation and future tooling (registry-driven inspector,
+# validation that a `.raescene` file doesn't reference unknown
+# components, etc.).
+#
+# Phase 1c (#42) will fill in `applyComponentByName` with actual JSON
+# deserialisation. For #41 the registry just exposes the catalogue and
+# offers a tiny smoke-test helper.
+import string
+import core
+
+# Build the canonical list of authored component names. Phase 1c uses
+# this to validate that every node's keys (other than `Children`) name
+# a real component.
+func registeredComponentNames() ret List(String) {
+  let names: List(String) = createList(String)(initialCap: 40)
+  # Geometry / layout
+  names.add(value: "Rect")
+  names.add(value: "Size")
+  names.add(value: "Layout")
+  names.add(value: "Padding")
+  names.add(value: "Margin")
+  names.add(value: "SafeArea")
+  names.add(value: "Align")
+  names.add(value: "Offset")
+  names.add(value: "Constraints")
+  names.add(value: "OverflowPolicy")
+  # Visual / interaction
+  names.add(value: "TransformFx")
+  names.add(value: "Sprite")
+  names.add(value: "Text")
+  names.add(value: "Shape")
+  names.add(value: "Shadow")
+  names.add(value: "Opacity")
+  names.add(value: "PointerEvents")
+  names.add(value: "HitArea")
+  names.add(value: "OnClick")
+  names.add(value: "Button")
+  names.add(value: "Active")
+  names.add(value: "EditorVisible")
+  names.add(value: "EditorLocked")
+  # Identity / metadata
+  names.add(value: "Name")
+  names.add(value: "PrimaryType")
+  names.add(value: "NodeId")
+  names.add(value: "SceneScope")
+  names.add(value: "RuntimeOnly")
+  # Dynamic / data binding
+  names.add(value: "SceneInstance")
+  names.add(value: "ImageSourceResolver")
+  names.add(value: "TextBinding")
+  names.add(value: "MaskShape")
+  names.add(value: "DataRequest")
+  names.add(value: "ListView")
+  # Effects
+  names.add(value: "BackgroundPan")
+  names.add(value: "Carousel")
+  names.add(value: "SmokeFx")
+  names.add(value: "AnimFrames")
+  names.add(value: "AnimTrigger")
+  names.add(value: "WobbleFx")
+  # Hierarchy is `Children` — handled specially by scene_loader, not
+  # treated as a component here.
+  ret names
+}
+
+func isKnownComponent(name: String) ret Bool {
+  let known: List(String) = registeredComponentNames()
+  let n: Int = known.length
+  let i: Int = 0
+  loop i < n {
+    let k: String = known.get(index: i)
+    if k.equals(other: name) {
+      ret true
+    }
+    i = i + 1
+  }
+  ret false
+}
+
+func registeredComponentCount() ret Int {
+  ret registeredComponentNames().length
+}
