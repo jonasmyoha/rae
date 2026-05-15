@@ -252,13 +252,13 @@ type StringMap(V) {
 }
 
 func createStringMap(V)(initialCap: Int) ret StringMap(V) {
-  ret StringMap(V) { data: rae_ext_rae_buf_alloc(size: initialCap, elemSize: sizeof(StringMapEntry(V))), length: 0, capacity: initialCap, isGrowing: false }
+  ret StringMap(V) { data: rae_ext_rae_buf_alloc(size: initialCap, elemSize: sizeof(StringMapEntry(V))()), length: 0, capacity: initialCap, isGrowing: false }
 }
 
 func set(V)(this: mod StringMap(V), k: String, value: V) {
   if this.capacity is 0 {
     this.capacity = 8
-    this.data = rae_ext_rae_buf_alloc(size: this.capacity, elemSize: sizeof(StringMapEntry(V)))
+    this.data = rae_ext_rae_buf_alloc(size: this.capacity, elemSize: sizeof(StringMapEntry(V))())
   }
   if not this.isGrowing and this.length * 2 > this.capacity {
     growStringMap(this)
@@ -382,7 +382,7 @@ func growStringMap(V)(this: mod StringMap(V)) {
   if this.capacity is 0 {
     this.capacity = 8
   }
-  this.data = rae_ext_rae_buf_alloc(size: this.capacity, elemSize: sizeof(StringMapEntry(V)))
+  this.data = rae_ext_rae_buf_alloc(size: this.capacity, elemSize: sizeof(StringMapEntry(V))())
   this.length = 0
   
   let i: Int = 0
@@ -418,7 +418,7 @@ type IntMap(V) {
 }
 
 func createInt64Map(V)(initialCap: Int) ret IntMap(V) {
-  ret IntMap(V) { data: rae_ext_rae_buf_alloc(size: initialCap, elemSize: sizeof(IntMapEntry(V))), length: 0, capacity: initialCap, isGrowing: false }
+  ret IntMap(V) { data: rae_ext_rae_buf_alloc(size: initialCap, elemSize: sizeof(IntMapEntry(V))()), length: 0, capacity: initialCap, isGrowing: false }
 }
 
 func createIntMap(V)(initialCap: Int) ret IntMap(V) {
@@ -428,7 +428,7 @@ func createIntMap(V)(initialCap: Int) ret IntMap(V) {
 func set(V)(this: mod IntMap(V), k: Int, value: V) {
   if this.capacity is 0 {
     this.capacity = 8
-    this.data = rae_ext_rae_buf_alloc(size: this.capacity, elemSize: sizeof(IntMapEntry(V)))
+    this.data = rae_ext_rae_buf_alloc(size: this.capacity, elemSize: sizeof(IntMapEntry(V))())
   }
   if not this.isGrowing and this.length * 2 > this.capacity {
     growInt64Map(this)
@@ -567,7 +567,7 @@ func growInt64Map(V)(this: mod IntMap(V)) {
   if this.capacity is 0 {
     this.capacity = 8
   }
-  this.data = rae_ext_rae_buf_alloc(size: this.capacity, elemSize: sizeof(IntMapEntry(V)))
+  this.data = rae_ext_rae_buf_alloc(size: this.capacity, elemSize: sizeof(IntMapEntry(V))())
   this.length = 0
   
   let i: Int = 0

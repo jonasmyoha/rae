@@ -180,6 +180,39 @@ static AstTypeRef* append_type_ref_list(AstTypeRef* head, AstTypeRef* node) {
   return head;
 }
 
+/* Synthesize an AstTypeRef from an AstExpr that *looks* like a type. The
+ * parser converts the first arg-list of `foo(T)(args)` into generic_args;
+ * each arg may be a plain ident (`T`) or a parameterized type encoded as
+ * a call expression (`StringMapEntry(V)` → AST_EXPR_CALL with an IDENT
+ * callee). Returns NULL when the shape doesn't match a type expression. */
+static AstTypeRef* expr_to_type_ref(Parser* parser, const AstExpr* e) {
+  if (!e) return NULL;
+  if (e->kind == AST_EXPR_IDENT) {
+    AstTypeRef* tr = parser_alloc(parser, sizeof(AstTypeRef));
+    tr->parts = parser_alloc(parser, sizeof(AstIdentifierPart));
+    tr->parts->text = e->as.ident;
+    tr->parts->next = NULL;
+    tr->generic_args = NULL;
+    tr->next = NULL;
+    return tr;
+  }
+  if (e->kind == AST_EXPR_CALL && e->as.call.callee && e->as.call.callee->kind == AST_EXPR_IDENT) {
+    AstTypeRef* tr = parser_alloc(parser, sizeof(AstTypeRef));
+    tr->parts = parser_alloc(parser, sizeof(AstIdentifierPart));
+    tr->parts->text = e->as.call.callee->as.ident;
+    tr->parts->next = NULL;
+    tr->next = NULL;
+    AstTypeRef* generics = NULL;
+    for (AstCallArg* a = e->as.call.args; a; a = a->next) {
+      AstTypeRef* sub = expr_to_type_ref(parser, a->value);
+      if (sub) generics = append_type_ref_list(generics, sub);
+    }
+    tr->generic_args = generics;
+    return tr;
+  }
+  return NULL;
+}
+
 static AstTypeRef* parse_type_ref(Parser* parser) {
   const Token* start_token = parser_peek(parser);
   AstTypeRef* type = parser_alloc(parser, sizeof(AstTypeRef));
@@ -763,20 +796,19 @@ static AstExpr* finish_call(Parser* parser, AstExpr* callee, const Token* start_
 
   // Check if followed by another '(', which means the first set were generics: foo(T)(args)
   if (parser_match(parser, TOK_LPAREN)) {
-    // Convert first set of args to generic_args
+    // Convert first set of args to generic_args. Each arg can be either a
+    // plain ident (`T`) or a parameterized type expressed as a call
+    // (`StringMapEntry(V)` → AST_EXPR_CALL with callee=IDENT, args=...).
+    // Recursive conversion handles arbitrary nesting like `Map(K, List(V))`.
     AstTypeRef* generic_head = NULL;
     for (AstCallArg* a = args; a; a = a->next) {
-        if (a->value->kind == AST_EXPR_IDENT) {
-            AstTypeRef* tr = parser_alloc(parser, sizeof(AstTypeRef));
-            tr->parts = parser_alloc(parser, sizeof(AstIdentifierPart));
-            tr->parts->text = a->value->as.ident;
-            tr->parts->next = NULL;
-            tr->generic_args = NULL;
-            tr->next = NULL;
+        AstTypeRef* tr = expr_to_type_ref(parser, a->value);
+        if (tr) {
             generic_head = append_type_ref_list(generic_head, tr);
-        } else {
-            // Complex types in generic calls not supported yet
         }
+        // else: silently drop — sema will complain about the resulting
+        // unresolved generic call. We choose not to error here so the
+        // parser keeps producing some AST for IDE/error-recovery use.
     }
     expr->as.call.generic_args = generic_head;
     expr->as.call.args = NULL; // Reset and parse value args
@@ -2017,6 +2049,15 @@ static AstTypeField* parse_type_fields(Parser* parser) {
   AstTypeField* head = NULL;
   while (!parser_check(parser, TOK_RBRACE) && !parser_check(parser, TOK_EOF)) {
     const Token* field_name = parser_consume_ident(parser, "expected field name");
+    if (!field_name) {
+      /* Recovery: skip the bogus token so we don't loop forever or
+       * deref NULL on `field_name->lexeme`. The error has already been
+       * reported by parser_consume_ident. */
+      if (!parser_check(parser, TOK_EOF) && !parser_check(parser, TOK_RBRACE)) {
+        parser_advance(parser);
+      }
+      continue;
+    }
     parser_consume(parser, TOK_COLON, "expected ':' after field name");
     AstTypeField* field = parser_alloc(parser, sizeof(AstTypeField));
     field->name = parser_copy_str(parser, field_name->lexeme);
@@ -2055,6 +2096,14 @@ static AstDecl* parse_type_declaration(Parser* parser) {
     if (!decl->as.type_decl.properties) {
       parser_error(parser, parser_peek(parser), "expected property after ':' in type declaration");
     }
+  }
+  /* Accept and skip a `pub` visibility marker before the body. Types
+   * are always cross-file visible in Rae right now, so this is a no-op
+   * — but users naturally write `type Foo pub { ... }` by analogy with
+   * `func bar() pub`, and the old parser segfaulted on it instead of
+   * just accepting or rejecting cleanly. */
+  if (parser_check(parser, TOK_KW_PUB)) {
+    parser_advance(parser);
   }
   parser_consume(parser, TOK_LBRACE, "expected '{' to start type body");
   decl->as.type_decl.fields = parse_type_fields(parser);

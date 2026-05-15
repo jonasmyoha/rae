@@ -108,9 +108,21 @@ func drawText(
 ) extern
 
 # Default-font text width measurement, in pixels. Useful for `Hug` text
-# nodes that want to size themselves to their content. The custom-font
-# variant lives behind `measureTextWithFont` once the slot API needs it.
+# nodes that want to size themselves to their content. Use the slot-
+# aware `measureTextWithFont` below when the text is rendered in a
+# custom font (icon glyphs etc.) — default-font measurement gives the
+# wrong width for codepoints the default font doesn't carry.
 func measureText(text: String, fontSize: Int) extern ret Int
+
+# Slot-aware companion to `drawTextWithFont`. Returns the rendered
+# width in pixels at `fontSize` with `spacing` between glyphs. Falls
+# back to default-font measurement when the slot isn't loaded.
+func measureTextWithFont(
+  slot: Int
+  text: String
+  fontSize: Float
+  spacing: Float
+) extern ret Int
 
 # Custom font support — addresses fonts by integer slot (0..7) instead of
 # exposing raylib's Font struct directly. Slots are global; load once and

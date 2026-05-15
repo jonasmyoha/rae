@@ -72,7 +72,17 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         const AstTypeRef* tr = expr->as.call.generic_args;
         if (!tr && expr->as.call.args) tr = infer_expr_type_ref(ctx, expr->as.call.args->value);
         if (tr) { fprintf(out, "sizeof("); emit_type_ref_as_c_type(ctx, tr, out, false); fprintf(out, ")"); }
-        else fprintf(out, "sizeof(RaeAny)");
+        else {
+            /* Falling back to RaeAny here is almost always wrong: it silently
+             * under- or over-allocates buffers and produces hard-to-find heap
+             * corruption (e.g. `createStringMap` for V=Int allocates 24-byte
+             * RaeAny slots while every reader uses the 32-byte entry stride).
+             * Warn loudly so callers know to write `sizeof(T)()` with the
+             * generic-arg form and an empty arg list, not `sizeof(T)`. */
+            fprintf(stderr, "[c_backend] warning: sizeof(...) at line %zu has no resolvable type argument; falling back to sizeof(RaeAny). Did you mean `sizeof(T)()`?\n",
+                    expr->line);
+            fprintf(out, "sizeof(RaeAny)");
+        }
         return true;
     }
 
