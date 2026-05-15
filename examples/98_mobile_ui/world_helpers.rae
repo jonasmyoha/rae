@@ -1,0 +1,133 @@
+# Thin wrappers around the ECS component-setter API for the music-player
+# demo. The Rae UI library exposes `componentSet(table, entity, data)`
+# but every call site here would otherwise have to spell out the full
+# struct literal for `Rect`, `Layout`, `Shape`, etc. — these helpers
+# keep the builder code readable.
+import core
+import string
+import ui/components
+import ui/ecs
+
+# Default Size — both axes Fixed. Most rows use Fixed sizes.
+func makeFixed() pub ret Size {
+  ret Size {
+    w: SizeAxis { mode: SizeMode.Fixed, min: -1, max: -1 }
+    h: SizeAxis { mode: SizeMode.Fixed, min: -1, max: -1 }
+  }
+}
+
+# Set a fixed-size rectangle on `entity` (the common case for
+# code-built UI nodes).
+func setRectFixed(world: mod UiWorld, entity: Int, w: Float, h: Float) pub {
+  let r: Rect = { x: 0.0, y: 0.0, w: w, h: h }
+  componentSet(this: world.rects, entity: entity, data: r)
+  componentSet(this: world.sizes, entity: entity, data: makeFixed())
+}
+
+# Fill on the cross-axis (height in a vertical layout). Used to push
+# following children to the far end of the parent's content box.
+func makeFillH() pub ret Size {
+  ret Size {
+    w: SizeAxis { mode: SizeMode.Fixed, min: -1, max: -1 }
+    h: SizeAxis { mode: SizeMode.Fill, min: -1, max: -1 }
+  }
+}
+
+func buildVerticalSpacer(world: mod UiWorld) pub ret Int {
+  let s: Int = createEntity(world: world)
+  let r: Rect = { x: 0.0, y: 0.0, w: 1.0, h: 1.0 }
+  componentSet(this: world.rects, entity: s, data: r)
+  componentSet(this: world.sizes, entity: s, data: makeFillH())
+  ret s
+}
+
+func setOnClick(world: mod UiWorld, entity: Int, actionId: String) pub {
+  let click: OnClick = {
+    actionId: actionId
+    actionIdDouble: ""
+    actionIdTriple: ""
+    maxDelayMs: 250
+  }
+  componentSet(this: world.onClicks, entity: entity, data: click)
+}
+
+func setShapeRect(world: mod UiWorld, entity: Int, fill: RgbaColor) pub {
+  let shape: Shape = {
+    kind: ShapeKind.Rect
+    fill: fill
+    stroke: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
+    strokeWidth: 0.0
+    radius: 0.0
+  }
+  componentSet(this: world.shapes, entity: entity, data: shape)
+}
+
+func setShapeRounded(world: mod UiWorld, entity: Int, fill: RgbaColor, radius: Float) pub {
+  let shape: Shape = {
+    kind: ShapeKind.RoundedRect
+    fill: fill
+    stroke: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
+    strokeWidth: 0.0
+    radius: radius
+  }
+  componentSet(this: world.shapes, entity: entity, data: shape)
+}
+
+func setSprite(world: mod UiWorld, entity: Int, key: String, tint: RgbaColor) pub {
+  let sp: Sprite = {
+    textureKey: key
+    tint: tint
+    scaleMode: ScaleMode.Fit
+    tileScale: Vec2 { x: 1.0, y: 1.0 }
+    nineSlice: Insets { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
+    hasNineSlice: false
+  }
+  componentSet(this: world.sprites, entity: entity, data: sp)
+}
+
+func setText(world: mod UiWorld, entity: Int, text: String, styleId: String) pub {
+  let t: Text = {
+    text: text
+    styleId: styleId
+    wrapWidthMode: WrapWidthMode.None
+  }
+  componentSet(this: world.texts, entity: entity, data: t)
+}
+
+func setLayout(
+  world: mod UiWorld
+  entity: Int
+  kind: LayoutType
+  gap: Float
+  alignCross: AlignKind
+) pub {
+  let lay: Layout = {
+    kind: kind
+    gap: gap
+    alignMain: AlignKind.Start
+    alignCross: alignCross
+    columns: 0
+    rowGap: 0.0
+    columnGap: 0.0
+  }
+  componentSet(this: world.layouts, entity: entity, data: lay)
+}
+
+func setPaddingAll(world: mod UiWorld, entity: Int, n: Float) pub {
+  let pad: Padding = { insets: Insets { l: n, t: n, r: n, b: n } }
+  componentSet(this: world.paddings, entity: entity, data: pad)
+}
+
+func attachChildren(world: mod UiWorld, parent: Int, kids: view List(Int)) pub {
+  let copy: List(Int) = createList(Int)(initialCap: kids.length)
+  let i: Int = 0
+  loop i < kids.length {
+    let kid: Int = kids.get(index: i)
+    copy.add(value: kid)
+    let pl: ParentLink = { parent: parent }
+    componentSet(this: world.parentLinks, entity: kid, data: pl)
+    i = i + 1
+  }
+  let ch: Children = { ids: copy }
+  componentSet(this: world.childrens, entity: parent, data: ch)
+}

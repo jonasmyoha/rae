@@ -1,0 +1,54 @@
+# The two screens the app can show, the function that builds a world
+# for a given one, and the input-event router that decides which screen
+# we should switch to next.
+import core
+import string
+import ui/ecs
+import ui/input
+
+enum Screen {
+  NowPlaying
+  Album
+}
+
+func buildScreenWorld(screen: Screen, scenes: view AlbumScenes) pub ret UiWorld {
+  if screen is Screen.Album {
+    ret buildAlbumWorld(scenes: scenes)
+  }
+  ret buildNowPlayingWorld(scenes: scenes)
+}
+
+# Drain every fired action and route into a target screen. Returns the
+# next screen — equal to `current` if no navigation action fired.
+func dispatchActions(input: view InputSystem, current: Screen) pub ret Screen {
+  let next: Screen = current
+  let n: Int = input.events.length
+  let i: Int = 0
+  loop i < n {
+    let ev: ActionEvent = rae_ext_rae_buf_get(buf: input.events.data, index: i)
+    let actionId: String = ev.actionId
+    log("[action] {actionId} (entity {ev.entity})")
+
+    let homeKey: String = "nav.home"
+    let libraryKey: String = "nav.library"
+    let backKey: String = "nav.back"
+    if actionId.equals(other: homeKey) {
+      next = Screen.NowPlaying
+    }
+    if actionId.equals(other: libraryKey) {
+      next = Screen.Album
+    }
+    if actionId.equals(other: backKey) {
+      # Back from now-playing returns to album; back from album returns
+      # to now-playing. There's no deeper history yet so they ping-pong.
+      if current is Screen.Album {
+        next = Screen.NowPlaying
+      } else {
+        next = Screen.Album
+      }
+    }
+
+    i = i + 1
+  }
+  ret next
+}
