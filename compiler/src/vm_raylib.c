@@ -632,7 +632,12 @@ static const int g_vm_font_codepoints[] = {
     80,  81,  82,  83,  84,  85,  86,  87,  88,  89,  90,  91,  92,  93,  94,  95,
     96,  97,  98,  99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111,
     112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126,
-    0x00B7, 0x2013, 0x2014, 0x2192, 0x2190, 0x2191, 0x2193, 0x2026
+    0x00B7, 0x2013, 0x2014, 0x2192, 0x2190, 0x2191, 0x2193, 0x2026,
+    /* Material Icons Outlined codepoints. See `lib/ui/icon_codepoints.rae`. */
+    0xe145, 0xe5c4, 0xe5cb, 0xe5cc, 0xe5cd, 0xf090, 0xe01d, 0xe5ce,
+    0xe5cf, 0xe87d, 0xe87e, 0xe88a, 0xe02e, 0xe02f, 0xe030, 0xe5d2,
+    0xeae1, 0xe034, 0xe037, 0xe03b, 0xe065, 0xe05f, 0xe03d, 0xe040,
+    0xe8b6, 0xe043, 0xe044, 0xe045, 0xe047, 0xe80e
 };
 #define VM_FONT_CODEPOINT_COUNT ((int)(sizeof(g_vm_font_codepoints)/sizeof(g_vm_font_codepoints[0])))
 
@@ -712,6 +717,36 @@ static bool native_drawTextWithFont(struct VM* vm, VmNativeResult* out, const Va
         DrawText(text, (int)x, (int)y, (int)fontSize, col);
     }
     out->has_value = false;
+    return true;
+}
+
+/* Slot-aware width measurement; companion to native_drawTextWithFont.
+ * MeasureText (the default-font measurer) returns the wrong width for
+ * codepoints not present in the default font (e.g. Material Icons),
+ * which puts those glyphs off-center inside their containers. */
+static bool native_measureTextWithFont(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 4) {
+        fprintf(stderr, "error: measureTextWithFont expects 4 args (slot, text, fontSize, spacing), got %zu\n", count);
+        return false;
+    }
+    int64_t slot = (args[0].type == VAL_FLOAT) ? (int64_t)args[0].as.float_value : args[0].as.int_value;
+    if (args[1].type != VAL_STRING) {
+        fprintf(stderr, "error: measureTextWithFont expects text as string\n");
+        return false;
+    }
+    const char* text = args[1].as.string_value.chars;
+    float fontSize = (args[2].type == VAL_FLOAT) ? (float)args[2].as.float_value : (float)args[2].as.int_value;
+    float spacing = (args[3].type == VAL_FLOAT) ? (float)args[3].as.float_value : (float)args[3].as.int_value;
+    int64_t width = 0;
+    if (slot >= 0 && slot < VM_FONT_SLOTS && g_vm_font_loaded[slot]) {
+        Vector2 sz = MeasureTextEx(g_vm_fonts[slot], text, fontSize, spacing);
+        width = (int64_t)sz.x;
+    } else {
+        width = (int64_t)MeasureText(text, (int)fontSize);
+    }
+    out->has_value = true;
+    out->value = value_int(width);
     return true;
 }
 
@@ -835,6 +870,7 @@ bool vm_registry_register_raylib(VmRegistry* registry) {
     ok &= vm_registry_register_native(registry, "loadFontInto", native_loadFontInto, NULL);
     ok &= vm_registry_register_native(registry, "unloadFontSlot", native_unloadFontSlot, NULL);
     ok &= vm_registry_register_native(registry, "drawTextWithFont", native_drawTextWithFont, NULL);
+    ok &= vm_registry_register_native(registry, "measureTextWithFont", native_measureTextWithFont, NULL);
     ok &= vm_registry_register_native(registry, "getCurrentMonitor", native_getCurrentMonitor, NULL);
     ok &= vm_registry_register_native(registry, "getMonitorWidth", native_getMonitorWidth, NULL);
     ok &= vm_registry_register_native(registry, "getMonitorHeight", native_getMonitorHeight, NULL);
