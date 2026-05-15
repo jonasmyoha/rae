@@ -180,20 +180,23 @@ for TARGET in "${TARGETS[@]}"; do
         "$BIN" run --target live --watch "$TMP_HOT_FILE" > "$TMP_OUTPUT_FILE" 2>&1 &
         HOT_PID=$!
         
-        # Wait for the watcher to produce at least one program output line.
+        # Wait for the watcher to produce two program output lines.
         # Full-suite runs can be slow enough that a fixed sleep races the
         # initial VM execution, especially on hot-reload tests with sleep().
         for _ in {1..50}; do
-            if [ "$(grep -v "^Watching '" "$TMP_OUTPUT_FILE" | wc -l | tr -d ' ')" -gt 0 ]; then
+            if [ "$(grep -v "^Watching '" "$TMP_OUTPUT_FILE" | wc -l | tr -d ' ')" -gt 1 ]; then
                 break
             fi
-            sleep 0.1
+            sleep 0.05
         done
         
         # Patch
         V2_FILE="${TEST_DIRNAME}/main_v2.rae"
         if [ -f "$V2_FILE" ]; then
             cp "$V2_FILE" "$TMP_HOT_FILE"
+            # The watcher currently tracks mtimes at whole-second granularity.
+            # Force a distinct timestamp so fast test runs cannot miss patches.
+            perl -e 'my $t = time() + 2; utime $t, $t, @ARGV' "$TMP_HOT_FILE"
         fi
         
         # Wait for patch and execution. This is intentionally output-driven:
