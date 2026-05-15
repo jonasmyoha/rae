@@ -1029,6 +1029,14 @@ bool register_default_natives(VmRegistry* registry, TickCounter* tick_counter) {
   ok = vm_registry_register_native(registry, "getEnv", native_rae_sys_get_env, NULL) && ok;
   ok = vm_registry_register_native(registry, "readFile", native_rae_sys_read_file, NULL) && ok;
   ok = vm_registry_register_native(registry, "writeFile", native_rae_sys_write_file, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_sys_exit", native_rae_sys_exit, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_sys_get_env", native_rae_sys_get_env, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_sys_read_file", native_rae_sys_read_file, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_sys_write_file", native_rae_sys_write_file, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_ext_rae_sys_exit", native_rae_sys_exit, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_ext_rae_sys_get_env", native_rae_sys_get_env, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_ext_rae_sys_read_file", native_rae_sys_read_file, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_ext_rae_sys_write_file", native_rae_sys_write_file, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_seed", native_rae_seed, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_random", native_rae_random, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_random_int", native_rae_random_int, NULL) && ok;

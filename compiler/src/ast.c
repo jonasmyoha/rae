@@ -316,7 +316,12 @@ static void dump_expr(const AstExpr* expr, FILE* out) {
       fputc('"', out);
       AstInterpPart* part = expr->as.interp.parts;
       while (part) {
-        if (part->value->kind == AST_EXPR_STRING) {
+        if (!part->value) {
+          /* Parser emitted a placeholder part after an error (e.g. empty
+           * `"{}"`). Dump a marker and continue rather than dereferencing
+           * a NULL `kind`. */
+          fputs("{<error>}", out);
+        } else if (part->value->kind == AST_EXPR_STRING) {
           print_str(out, part->value->as.string_lit);
         } else {
           fputs("{", out);

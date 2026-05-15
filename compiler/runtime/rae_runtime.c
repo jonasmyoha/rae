@@ -6,11 +6,17 @@
 #include <string.h>
 #include <time.h>
 #include <sys/time.h>
+#include <signal.h>
 
 #ifdef _WIN32
 #include <windows.h>
 #else
 #include <pthread.h>
+#endif
+
+#if defined(__APPLE__) || defined(__linux__) || defined(__GLIBC__)
+#include <execinfo.h>
+#define RAE_HAVE_BACKTRACE 1
 #endif
 
 #ifdef __APPLE__
@@ -19,6 +25,61 @@
 
 void rae_flush_stdout(void) {
   fflush(stdout);
+}
+
+/* Crash handler — runs on SIGSEGV / SIGBUS / SIGFPE / SIGABRT and prints a
+ * C-level backtrace to stderr before letting the signal kill the process.
+ * The backtrace points at compiler-emitted symbols, not Rae source lines,
+ * but it's a much better starting point than the kernel's silent kill.
+ * Re-raising the signal lets the OS still record the crash + dump core. */
+static void rae_crash_handler(int sig) {
+  const char* name = "signal";
+  switch (sig) {
+    case SIGSEGV: name = "SIGSEGV (invalid memory access)"; break;
+    case SIGBUS:  name = "SIGBUS (bus error / misaligned access)"; break;
+    case SIGFPE:  name = "SIGFPE (arithmetic error)"; break;
+    case SIGILL:  name = "SIGILL (illegal instruction)"; break;
+    case SIGABRT: name = "SIGABRT (abort)"; break;
+  }
+  /* Async-signal-safe path: write(2) only. */
+  const char* prefix = "\n[rae crash] caught ";
+  write(STDERR_FILENO, prefix, strlen(prefix));
+  write(STDERR_FILENO, name, strlen(name));
+  const char* suffix =
+    "\n[rae crash] C-level backtrace (Rae source lines are not in here;\n"
+    "[rae crash] cross-reference symbols via `atos` or `addr2line` on the\n"
+    "[rae crash] generated binary if you need the call site):\n";
+  write(STDERR_FILENO, suffix, strlen(suffix));
+#ifdef RAE_HAVE_BACKTRACE
+  void* frames[64];
+  int n = backtrace(frames, 64);
+  backtrace_symbols_fd(frames, n, STDERR_FILENO);
+#else
+  const char* msg = "[rae crash] (backtrace() not available on this platform)\n";
+  write(STDERR_FILENO, msg, strlen(msg));
+#endif
+  /* Exit with the conventional signal exit code so a parent process /
+   * supervisor sees a non-zero status and can restart. On macOS,
+   * `raise(sig)` after restoring SIG_DFL doesn't reliably terminate for
+   * synchronously-delivered SIGSEGV/SIGBUS, so we just `_exit` here. */
+  _exit(128 + sig);
+}
+
+__attribute__((constructor))
+static void rae_install_crash_handler(void) {
+  /* Skip if user explicitly disables (e.g. when running under a debugger
+   * that wants the raw signal). */
+  if (getenv("RAE_NO_CRASH_HANDLER")) return;
+  struct sigaction sa;
+  memset(&sa, 0, sizeof(sa));
+  sa.sa_handler = rae_crash_handler;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = SA_NODEFER | SA_RESETHAND;
+  sigaction(SIGSEGV, &sa, NULL);
+  sigaction(SIGBUS,  &sa, NULL);
+  sigaction(SIGFPE,  &sa, NULL);
+  sigaction(SIGILL,  &sa, NULL);
+  sigaction(SIGABRT, &sa, NULL);
 }
 
 rae_String rae_ext_rae_str_from_cstr(const void* s) {
@@ -768,21 +829,143 @@ int64_t rae_ext_rae_random_int(int64_t min, int64_t max) {
 
 double rae_ext_rae_int_to_float(int64_t v) { return (double)v; }
 int64_t rae_ext_rae_float_to_int(double v) { return (int64_t)v; }
+/* Debug-only bounds checking for rae_buf_get/set. Compiled in when the
+ * binary is built with `-DRAE_DEBUG_BOUNDS`. Tracks (ptr -> count, elem_size)
+ * in a small open-addressed hash; on every get/set the entry is looked up
+ * and the index range-checked. On miss (buffer not allocated via this
+ * runtime, e.g. raylib-owned), the check is skipped. */
+#ifdef RAE_DEBUG_BOUNDS
+
+#define RAE_BR_CAP 4096   /* must be power of two */
+typedef struct {
+  void*   ptr;
+  int64_t count;
+  int64_t elem_size;
+} RaeBufRecord;
+static RaeBufRecord g_buf_records[RAE_BR_CAP];
+static int g_buf_records_inited = 0;
+
+static size_t rae_buf_slot(void* ptr) {
+  uintptr_t k = (uintptr_t)ptr;
+  k ^= k >> 16;
+  k *= 0x9E3779B97F4A7C15ULL;
+  k ^= k >> 32;
+  return (size_t)(k & (RAE_BR_CAP - 1));
+}
+
+static void rae_buf_record_set(void* ptr, int64_t count, int64_t elem_size) {
+  if (!ptr) return;
+  if (!g_buf_records_inited) {
+    memset(g_buf_records, 0, sizeof(g_buf_records));
+    g_buf_records_inited = 1;
+  }
+  size_t s = rae_buf_slot(ptr);
+  for (size_t i = 0; i < RAE_BR_CAP; i++) {
+    size_t idx = (s + i) & (RAE_BR_CAP - 1);
+    if (g_buf_records[idx].ptr == NULL || g_buf_records[idx].ptr == ptr) {
+      g_buf_records[idx].ptr = ptr;
+      g_buf_records[idx].count = count;
+      g_buf_records[idx].elem_size = elem_size;
+      return;
+    }
+  }
+  /* Table full — silently drop. Caller loses the bounds check for this
+   * one allocation; everything else still works. */
+}
+
+static void rae_buf_record_clear(void* ptr) {
+  if (!ptr || !g_buf_records_inited) return;
+  size_t s = rae_buf_slot(ptr);
+  for (size_t i = 0; i < RAE_BR_CAP; i++) {
+    size_t idx = (s + i) & (RAE_BR_CAP - 1);
+    if (g_buf_records[idx].ptr == ptr) {
+      g_buf_records[idx].ptr = NULL;
+      g_buf_records[idx].count = 0;
+      g_buf_records[idx].elem_size = 0;
+      return;
+    }
+    if (g_buf_records[idx].ptr == NULL) return;
+  }
+}
+
+static int rae_buf_record_lookup(void* ptr, int64_t* count_out, int64_t* elem_size_out) {
+  if (!ptr || !g_buf_records_inited) return 0;
+  size_t s = rae_buf_slot(ptr);
+  for (size_t i = 0; i < RAE_BR_CAP; i++) {
+    size_t idx = (s + i) & (RAE_BR_CAP - 1);
+    if (g_buf_records[idx].ptr == ptr) {
+      *count_out = g_buf_records[idx].count;
+      *elem_size_out = g_buf_records[idx].elem_size;
+      return 1;
+    }
+    if (g_buf_records[idx].ptr == NULL) return 0;
+  }
+  return 0;
+}
+
+static void rae_buf_check(const char* fn, void* buf, int64_t index, int64_t elem_size) {
+  int64_t count = 0;
+  int64_t recorded_elem = 0;
+  if (!rae_buf_record_lookup(buf, &count, &recorded_elem)) {
+    /* Not from rae_ext_rae_buf_alloc — skip. */
+    return;
+  }
+  if (elem_size != recorded_elem) {
+    fprintf(stderr,
+      "\n[rae debug] %s(buf=%p, index=%lld) elem_size=%lld but allocated elem_size=%lld\n",
+      fn, buf, (long long)index, (long long)elem_size, (long long)recorded_elem);
+    fflush(stderr);
+    abort();
+  }
+  if (index < 0 || index >= count) {
+    fprintf(stderr,
+      "\n[rae debug] %s(buf=%p) out-of-bounds: index=%lld, length=%lld (elem_size=%lld)\n",
+      fn, buf, (long long)index, (long long)count, (long long)elem_size);
+    fflush(stderr);
+    abort();
+  }
+}
+
+#define RAE_BR_REGISTER(ptr, count, elem_size) rae_buf_record_set((ptr), (count), (elem_size))
+#define RAE_BR_UNREGISTER(ptr)                 rae_buf_record_clear((ptr))
+#define RAE_BR_CHECK(fn, buf, index, elem_size) rae_buf_check((fn), (buf), (index), (elem_size))
+#define RAE_BR_CHECK_ANY(fn, buf, index)        rae_buf_check((fn), (buf), (index), (int64_t)sizeof(RaeAny))
+
+#else  /* !RAE_DEBUG_BOUNDS */
+
+#define RAE_BR_REGISTER(ptr, count, elem_size) ((void)0)
+#define RAE_BR_UNREGISTER(ptr)                 ((void)0)
+#define RAE_BR_CHECK(fn, buf, index, elem_size) ((void)0)
+#define RAE_BR_CHECK_ANY(fn, buf, index)        ((void)0)
+
+#endif
+
 void* rae_ext_rae_buf_alloc(int64_t count, int64_t elem_size) {
   if (count <= 0) return NULL;
-  return calloc((size_t)count, (size_t)elem_size);
+  void* p = calloc((size_t)count, (size_t)elem_size);
+  RAE_BR_REGISTER(p, count, elem_size);
+  return p;
 }
 
 void rae_ext_rae_buf_free(void* buf) {
-  if (buf) free(buf);
+  if (buf) {
+    RAE_BR_UNREGISTER(buf);
+    free(buf);
+  }
 }
 
 void* rae_ext_rae_buf_resize(void* buf, int64_t new_count, int64_t elem_size) {
   if (new_count <= 0) {
-    if (buf) free(buf);
+    if (buf) {
+      RAE_BR_UNREGISTER(buf);
+      free(buf);
+    }
     return NULL;
   }
-  return realloc(buf, (size_t)new_count * (size_t)elem_size);
+  RAE_BR_UNREGISTER(buf);
+  void* p = realloc(buf, (size_t)new_count * (size_t)elem_size);
+  RAE_BR_REGISTER(p, new_count, elem_size);
+  return p;
 }
 
 void rae_ext_rae_buf_copy(void* src, int64_t src_off, void* dst, int64_t dst_off, int64_t len, int64_t elem_size) {
@@ -792,21 +975,25 @@ void rae_ext_rae_buf_copy(void* src, int64_t src_off, void* dst, int64_t dst_off
 
 void rae_ext_rae_buf_set(void* buf, int64_t index, int64_t elem_size, const void* value) {
   if (!buf || !value) return;
+  RAE_BR_CHECK("rae_buf_set", buf, index, elem_size);
   memcpy((char*)buf + (index * elem_size), value, (size_t)elem_size);
 }
 
 void rae_ext_rae_buf_get(void* buf, int64_t index, int64_t elem_size, void* out_val) {
   if (!buf || !out_val) return;
+  RAE_BR_CHECK("rae_buf_get", buf, index, elem_size);
   memcpy(out_val, (char*)buf + (index * elem_size), (size_t)elem_size);
 }
 
 void rae_ext_rae_buf_set_any(void* buf, int64_t index, RaeAny value) {
   if (!buf) return;
+  RAE_BR_CHECK_ANY("rae_buf_set_any", buf, index);
   ((RaeAny*)buf)[index] = value;
 }
 
 RaeAny rae_ext_rae_buf_get_any(void* buf, int64_t index) {
   if (!buf) return (RaeAny){0};
+  RAE_BR_CHECK_ANY("rae_buf_get_any", buf, index);
   return ((RaeAny*)buf)[index];
 }
 
@@ -1026,7 +1213,41 @@ static const int g_rae_font_codepoints[] = {
     0x2190, /* ← left arrow */
     0x2191, /* ↑ up arrow */
     0x2193, /* ↓ down arrow */
-    0x2026  /* … horizontal ellipsis */
+    0x2026, /* … horizontal ellipsis */
+    /* Material Icons Outlined codepoints used by `lib/ui/icon_codepoints.rae`.
+     * Body fonts (e.g. Roboto) won't have glyphs for these — they bake as
+     * `notdef` boxes, but no caller writes these codepoints to a body font
+     * slot. The icon-font slot picks them up. */
+    0xe145, /* add */
+    0xe5c4, /* arrow_back */
+    0xe5cb, /* chevron_left */
+    0xe5cc, /* chevron_right */
+    0xe5cd, /* close */
+    0xf090, /* download */
+    0xe01d, /* equalizer */
+    0xe5ce, /* expand_less */
+    0xe5cf, /* expand_more */
+    0xe87d, /* favorite */
+    0xe87e, /* favorite_border */
+    0xe88a, /* home */
+    0xe02e, /* library_add */
+    0xe02f, /* library_books */
+    0xe030, /* library_music */
+    0xe5d2, /* menu */
+    0xeae1, /* more_horiz */
+    0xe034, /* pause */
+    0xe037, /* play_arrow */
+    0xe03b, /* playlist_add */
+    0xe065, /* playlist_add_check */
+    0xe05f, /* playlist_play */
+    0xe03d, /* queue_music */
+    0xe040, /* repeat */
+    0xe8b6, /* search */
+    0xe043, /* shuffle */
+    0xe044, /* skip_next */
+    0xe045, /* skip_previous */
+    0xe047, /* stop */
+    0xe80e  /* whatshot */
 };
 #define RAE_FONT_CODEPOINT_COUNT ((int)(sizeof(g_rae_font_codepoints)/sizeof(g_rae_font_codepoints[0])))
 
@@ -1078,5 +1299,27 @@ void rae_ext_drawTextWithFont(int64_t slot, rae_String text, double x, double y,
         /* Fallback: default font — keeps text on screen if the TTF is missing. */
         DrawText((const char*)text.data, (int)x, (int)y, (int)fontSize, color);
     }
+}
+
+/* Slot-aware width measurement. Companion to `drawTextWithFont` — needed
+ * to center icon glyphs correctly, since the Material Icons font has
+ * private-use codepoints (e.g. 0xE037 = play_arrow) that aren't in the
+ * default font. Plain `MeasureText` would return the default-font's
+ * notdef width instead of the actual rendered glyph width, putting the
+ * icon visibly off-center inside its container.
+ * Returns the rendered width in pixels at `fontSize` with `spacing`
+ * between glyphs. Falls back to the default font's measurement when
+ * the slot isn't loaded, matching `drawTextWithFont`'s fallback. */
+int64_t rae_ext_measureTextWithFont(int64_t slot, rae_String text, double fontSize, double spacing) {
+    if (slot >= 0 && slot < RAE_FONT_SLOTS && g_rae_font_loaded[slot]) {
+        Vector2 sz = MeasureTextEx(
+            g_rae_fonts[slot],
+            (const char*)text.data,
+            (float)fontSize,
+            (float)spacing
+        );
+        return (int64_t)sz.x;
+    }
+    return (int64_t)MeasureText((const char*)text.data, (int)fontSize);
 }
 #endif
