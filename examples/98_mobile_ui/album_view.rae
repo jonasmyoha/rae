@@ -1,0 +1,327 @@
+# Album-screen builders (reference: `screens/music_player_screen_2.png`).
+# The album view is mostly built in code rather than via a `.raescene`
+# file because the layout — small thumb + title block + actions row +
+# Play/Shuffle pills, then the scrollable track list — is unique to
+# this one screen.
+import core
+import string
+import ui/components
+import ui/ecs
+import ui/scene
+import ui/scene_instance
+
+# Top bar for the album view: back arrow on the left, search magnifier
+# on the right. No middle title text. The Stack layout combined with
+# per-child Align lets us pin one child to Start and another to End.
+func buildAlbumTopBar(world: mod UiWorld) pub ret Int {
+  let bar: Int = createEntity(world: world)
+  let barW: Float = screenW - outerPad * 2.0
+  setRectFixed(world: world, entity: bar, w: barW, h: topBarH)
+  let layStack: LayoutType = LayoutType.Stack
+  setLayout(world: world, entity: bar, kind: layStack, gap: 0.0, alignCross: AlignKind.Center)
+
+  let backBtn: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: backBtn, w: 32.0, h: 32.0)
+  setSprite(world: world, entity: backBtn, key: "mat:arrow_back", tint: iconTint)
+  setOnClick(world: world, entity: backBtn, actionId: "nav.back")
+  let alignLeft: Align = {
+    x: AlignKind.Start
+    y: AlignKind.Center
+    hasX: true
+    hasY: true
+  }
+  componentSet(this: world.aligns, entity: backBtn, data: alignLeft)
+
+  let searchBtn: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: searchBtn, w: 32.0, h: 32.0)
+  setSprite(world: world, entity: searchBtn, key: "mat:search", tint: iconTint)
+  setOnClick(world: world, entity: searchBtn, actionId: "nav.search")
+  let alignRight: Align = {
+    x: AlignKind.End
+    y: AlignKind.Center
+    hasX: true
+    hasY: true
+  }
+  componentSet(this: world.aligns, entity: searchBtn, data: alignRight)
+
+  let kids: List(Int) = createList(Int)(initialCap: 2)
+  kids.add(value: backBtn)
+  kids.add(value: searchBtn)
+  attachChildren(world: world, parent: bar, kids: kids)
+  ret bar
+}
+
+# Album hero: small thumb on the left, a vertical title block on the
+# right with caption / h1 / artist.
+func buildAlbumHero(world: mod UiWorld) pub ret Int {
+  let row: Int = createEntity(world: world)
+  let rowW: Float = screenW - outerPad * 2.0
+  setRectFixed(world: world, entity: row, w: rowW, h: heroBlockH)
+  setLayout(world: world, entity: row, kind: LayoutType.Horizontal, gap: 16.0, alignCross: AlignKind.Center)
+
+  let thumb: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: thumb, w: albumThumbSize, h: albumThumbSize)
+  setSprite(world: world, entity: thumb, key: "albumCover", tint: imageTintColor)
+
+  let info: Int = createEntity(world: world)
+  let infoW: Float = rowW - albumThumbSize - 16.0
+  setRectFixed(world: world, entity: info, w: infoW, h: heroBlockH)
+  setLayout(world: world, entity: info, kind: LayoutType.Vertical, gap: 2.0, alignCross: AlignKind.Start)
+
+  let caption: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: caption, w: infoW, h: 20.0)
+  setText(world: world, entity: caption, text: "Album · 8 songs · 2012", styleId: "albumCaption")
+
+  let title: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: title, w: infoW, h: 44.0)
+  setText(world: world, entity: title, text: "Charcoal", styleId: "h1")
+
+  let artist: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: artist, w: infoW, h: 22.0)
+  setText(world: world, entity: artist, text: "Brambles", styleId: "muted")
+
+  let infoKids: List(Int) = createList(Int)(initialCap: 3)
+  infoKids.add(value: caption)
+  infoKids.add(value: title)
+  infoKids.add(value: artist)
+  attachChildren(world: world, parent: info, kids: infoKids)
+
+  let rowKids: List(Int) = createList(Int)(initialCap: 2)
+  rowKids.add(value: thumb)
+  rowKids.add(value: info)
+  attachChildren(world: world, parent: row, kids: rowKids)
+  ret row
+}
+
+# Three small action buttons (add to playlist, download, more).
+func buildActionsRow(world: mod UiWorld) pub ret Int {
+  let row: Int = createEntity(world: world)
+  let rowW: Float = screenW - outerPad * 2.0
+  setRectFixed(world: world, entity: row, w: rowW, h: actionsRowH)
+  setLayout(world: world, entity: row, kind: LayoutType.Horizontal, gap: 12.0, alignCross: AlignKind.Center)
+
+  let addBtn: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: addBtn, w: 36.0, h: 36.0)
+  setSprite(world: world, entity: addBtn, key: "mat:playlist_add", tint: iconTint)
+
+  let downloadBtn: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: downloadBtn, w: 36.0, h: 36.0)
+  setSprite(world: world, entity: downloadBtn, key: "mat:download", tint: iconTint)
+
+  let moreBtn: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: moreBtn, w: 36.0, h: 36.0)
+  setSprite(world: world, entity: moreBtn, key: "mat:more_horiz", tint: iconTint)
+
+  let kids: List(Int) = createList(Int)(initialCap: 3)
+  kids.add(value: addBtn)
+  kids.add(value: downloadBtn)
+  kids.add(value: moreBtn)
+  attachChildren(world: world, parent: row, kids: kids)
+  ret row
+}
+
+# Black `Play` pill + outline `Shuffle` pill, 50/50 split.
+func buildPillsRow(world: mod UiWorld) pub ret Int {
+  let row: Int = createEntity(world: world)
+  let rowW: Float = screenW - outerPad * 2.0
+  setRectFixed(world: world, entity: row, w: rowW, h: pillsRowH)
+  setLayout(world: world, entity: row, kind: LayoutType.Horizontal, gap: 12.0, alignCross: AlignKind.Center)
+
+  let pillW: Float = (rowW - 12.0) / 2.0
+
+  let playPill: Int = buildPill(
+    world: world
+    w: pillW
+    h: pillsRowH
+    fill: darkPillColor
+    iconKey: "mat:play_arrow"
+    iconTint: lightTextColor
+    label: "Play"
+    labelStyle: "pillLabel"
+  )
+  let shufflePill: Int = buildShufflePill(
+    world: world
+    w: pillW
+    h: pillsRowH
+    iconKey: "mat:shuffle"
+    label: "Shuffle"
+  )
+
+  let kids: List(Int) = createList(Int)(initialCap: 2)
+  kids.add(value: playPill)
+  kids.add(value: shufflePill)
+  attachChildren(world: world, parent: row, kids: kids)
+  ret row
+}
+
+# Helper for a filled pill with an icon and a label, both centered.
+func buildPill(
+  world: mod UiWorld
+  w: Float
+  h: Float
+  fill: RgbaColor
+  iconKey: String
+  iconTint: RgbaColor
+  label: String
+  labelStyle: String
+) pub ret Int {
+  let pill: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: pill, w: w, h: h)
+  setShapeRounded(world: world, entity: pill, fill: fill, radius: h / 2.0)
+  setLayout(world: world, entity: pill, kind: LayoutType.Stack, gap: 0.0, alignCross: AlignKind.Center)
+
+  let inner: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: inner, w: w * 0.5, h: h - 16.0)
+  setLayout(world: world, entity: inner, kind: LayoutType.Horizontal, gap: 8.0, alignCross: AlignKind.Center)
+
+  let icon: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: icon, w: 22.0, h: 22.0)
+  setSprite(world: world, entity: icon, key: iconKey, tint: iconTint)
+
+  let lbl: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: lbl, w: 80.0, h: 22.0)
+  setText(world: world, entity: lbl, text: label, styleId: labelStyle)
+
+  let innerKids: List(Int) = createList(Int)(initialCap: 2)
+  innerKids.add(value: icon)
+  innerKids.add(value: lbl)
+  attachChildren(world: world, parent: inner, kids: innerKids)
+
+  let pillKids: List(Int) = createList(Int)(initialCap: 1)
+  pillKids.add(value: inner)
+  attachChildren(world: world, parent: pill, kids: pillKids)
+  ret pill
+}
+
+# Outline-style shuffle pill — currently rendered with a surface fill
+# (no stroke support yet in `Shape`), which visually reads as "outline"
+# against the lighter surrounding bg.
+func buildShufflePill(
+  world: mod UiWorld
+  w: Float
+  h: Float
+  iconKey: String
+  label: String
+) pub ret Int {
+  ret buildPill(
+    world: world
+    w: w
+    h: h
+    fill: surfaceColor
+    iconKey: iconKey
+    iconTint: iconTint
+    label: label
+    labelStyle: "primary"
+  )
+}
+
+# Five `track-row.raescene` mounts with per-row title/index/subtitle
+# overrides driving the same authored scene each row.
+func buildTrackList(world: mod UiWorld, trackScene: view Scene) pub ret Int {
+  let list: Int = createEntity(world: world)
+  let n: Int = trackRowCount
+  let listH: Float = trackRowH * n.toFloat() + trackGap * (n - 1).toFloat()
+  setRectFixed(world: world, entity: list, w: screenW - outerPad * 2.0, h: listH)
+  let layV: LayoutType = LayoutType.Vertical
+  let alignS: AlignKind = AlignKind.Start
+  setLayout(world: world, entity: list, kind: layV, gap: trackGap, alignCross: alignS)
+
+  let titles: List(String) = createList(String)(initialCap: trackRowCount)
+  titles.add(value: "To Speak Of Solitude")
+  titles.add(value: "Unsayable")
+  titles.add(value: "In The Androgynous Dark")
+  titles.add(value: "Salt Photographs")
+  titles.add(value: "Pink And Golden Billows")
+  let durations: List(String) = createList(String)(initialCap: trackRowCount)
+  durations.add(value: "4:21")
+  durations.add(value: "2:52")
+  durations.add(value: "4:43")
+  durations.add(value: "6:54")
+  durations.add(value: "2:58")
+
+  let rows: List(Int) = createList(Int)(initialCap: trackRowCount)
+  let i: Int = 0
+  loop i < trackRowCount {
+    let row: Int = createEntity(world: world)
+    setRectFixed(world: world, entity: row, w: screenW - outerPad * 2.0, h: trackRowH)
+
+    let overrides: List(SceneOverride) = emptyOverrides()
+    let label: String = (i + 1).toString()
+    if i < 9 {
+      label = "0".concat(other: label)
+    }
+    let title: String = titles.get(index: i)
+    let dur: String = durations.get(index: i)
+    let dot: String = " · "
+    let subtitle: String = "Brambles".concat(other: dot).concat(other: dur)
+    let idxId: String = "IdxText"
+    let titleId: String = "TitleText"
+    let subtitleId: String = "SubtitleText"
+    addTextOverride(list: overrides, nodeId: idxId, value: label)
+    addTextOverride(list: overrides, nodeId: titleId, value: title)
+    addTextOverride(list: overrides, nodeId: subtitleId, value: subtitle)
+
+    let rowLabel: String = "track-row"
+    let mounted: Int = mountOrError(
+      world: world
+      mountEntity: row
+      scene: trackScene
+      sceneLabel: rowLabel
+      overrides: overrides
+    )
+    rows.add(value: row)
+    i = i + 1
+  }
+  attachChildren(world: world, parent: list, kids: rows)
+  ret list
+}
+
+# Compose the whole album world: top bar / hero / actions / pills /
+# track list / mini-player / nav-tabs.
+func buildAlbumWorld(scenes: view AlbumScenes) pub ret UiWorld {
+  let world: UiWorld = createUiWorld()
+
+  let root: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: root, w: screenW, h: screenH)
+  setShapeRect(world: world, entity: root, fill: surfaceColor)
+  let layV: LayoutType = LayoutType.Vertical
+  let alignS: AlignKind = AlignKind.Start
+  setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
+  setPaddingAll(world: world, entity: root, n: outerPad)
+
+  let topBar: Int = buildAlbumTopBar(world: world)
+  let hero: Int = buildAlbumHero(world: world)
+  let actionsRow: Int = buildActionsRow(world: world)
+  let pillsRow: Int = buildPillsRow(world: world)
+  let trackList: Int = buildTrackList(world: world, trackScene: scenes.trackRow)
+  let spacer: Int = buildVerticalSpacer(world: world)
+  let miniLabelAl: String = "mini-player"
+  let miniPlayer: Int = buildSimpleSceneInstance(
+    world: world
+    scene: scenes.miniPlayer
+    w: screenW - outerPad * 2.0
+    h: miniPlayerH
+    label: miniLabelAl
+  )
+  let navLabelAl: String = "nav-tabs"
+  let navTabs: Int = buildSimpleSceneInstance(
+    world: world
+    scene: scenes.navTabs
+    w: screenW - outerPad * 2.0
+    h: navTabsH
+    label: navLabelAl
+  )
+
+  let kids: List(Int) = createList(Int)(initialCap: 8)
+  kids.add(value: topBar)
+  kids.add(value: hero)
+  kids.add(value: actionsRow)
+  kids.add(value: pillsRow)
+  kids.add(value: trackList)
+  kids.add(value: spacer)
+  kids.add(value: miniPlayer)
+  kids.add(value: navTabs)
+  attachChildren(world: world, parent: root, kids: kids)
+
+  ret world
+}

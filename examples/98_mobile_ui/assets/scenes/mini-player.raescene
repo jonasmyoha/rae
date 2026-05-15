@@ -5,35 +5,47 @@
   "root": "MiniPlayer",
   "nodes": {
     "MiniPlayer": {
-      "Layout": {"type": "Horizontal", "gap": 16, "alignCross": "Center"},
-      "Padding": {"l": 24, "t": 12, "r": 24, "b": 12},
-      "Shape": {"kind": "RoundedRect", "radius": 28, "fill": {"r": 30, "g": 30, "b": 36, "a": 255}},
-      "Children": ["ShuffleBtn", "PrevBtn", "PlayBtn", "NextBtn", "RepeatBtn"]
+      "Layout": {"type": "Horizontal", "gap": 12, "alignCross": "Center"},
+      "Padding": {"l": 8, "t": 8, "r": 16, "b": 8},
+      "Shape": {"kind": "RoundedRect", "radius": 32, "fill": {"r": 30, "g": 30, "b": 36, "a": 255}},
+      "Children": ["MiniThumb", "MiniTitleBlock", "MiniSpacer", "MiniHeartBtn", "MiniPlayCircle"]
     },
-    "ShuffleBtn": {
-      "Rect": {"x": 0, "y": 0, "w": 40, "h": 40},
-      "Sprite": {"textureKey": "icon-shuffle"},
-      "OnClick": {"actionId": "playback.shuffle"}
+    "MiniThumb": {
+      "Rect": {"x": 0, "y": 0, "w": 56, "h": 56},
+      "Sprite": {"textureKey": "albumCover", "tint": {"r": 255, "g": 255, "b": 255, "a": 255}}
     },
-    "PrevBtn": {
-      "Rect": {"x": 0, "y": 0, "w": 48, "h": 48},
-      "Sprite": {"textureKey": "icon-skip-prev"},
-      "OnClick": {"actionId": "playback.prev"}
+    "MiniTitleBlock": {
+      "Rect": {"x": 0, "y": 0, "w": 240, "h": 48},
+      "Layout": {"type": "Vertical", "gap": 2, "alignCross": "Start"},
+      "Children": ["MiniTitle", "MiniArtist"]
     },
-    "PlayBtn": {
-      "Rect": {"x": 0, "y": 0, "w": 64, "h": 64},
-      "Sprite": {"textureKey": "icon-play"},
-      "OnClick": {"actionId": "playback.toggle"}
+    "MiniTitle": {
+      "Rect": {"x": 0, "y": 0, "w": 240, "h": 24},
+      "Text": {"text": "Unsayable", "styleId": "miniTitle"}
     },
-    "NextBtn": {
-      "Rect": {"x": 0, "y": 0, "w": 48, "h": 48},
-      "Sprite": {"textureKey": "icon-skip-next"},
-      "OnClick": {"actionId": "playback.next"}
+    "MiniArtist": {
+      "Rect": {"x": 0, "y": 0, "w": 240, "h": 18},
+      "Text": {"text": "Brambles", "styleId": "miniMuted"}
     },
-    "RepeatBtn": {
-      "Rect": {"x": 0, "y": 0, "w": 40, "h": 40},
-      "Sprite": {"textureKey": "icon-repeat"},
-      "OnClick": {"actionId": "playback.repeat"}
+    "MiniSpacer": {
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 1},
+      "Size": {"w": {"mode": "Fill"}, "h": {"mode": "Fixed"}}
+    },
+    "MiniHeartBtn": {
+      "Rect": {"x": 0, "y": 0, "w": 28, "h": 28},
+      "Sprite": {"textureKey": "mat:favorite_border", "tint": {"r": 246, "g": 246, "b": 248, "a": 255}},
+      "OnClick": {"actionId": "playback.like"}
+    },
+    "MiniPlayCircle": {
+      "Rect": {"x": 0, "y": 0, "w": 44, "h": 44},
+      "Shape": {"kind": "Circle", "fill": {"r": 246, "g": 246, "b": 248, "a": 255}, "radius": 22},
+      "Layout": {"type": "Stack", "gap": 0, "alignCross": "Center"},
+      "OnClick": {"actionId": "playback.toggle"},
+      "Children": ["MiniPlayIcon"]
+    },
+    "MiniPlayIcon": {
+      "Rect": {"x": 0, "y": 0, "w": 22, "h": 22},
+      "Sprite": {"textureKey": "mat:play_arrow", "tint": {"r": 22, "g": 22, "b": 28, "a": 255}}
     }
   }
 }

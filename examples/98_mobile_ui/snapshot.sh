@@ -22,10 +22,17 @@ SCREEN="${2:-album}"
 OUT="${1:-examples/98_mobile_ui/screenshots/${SCREEN}.png}"
 mkdir -p "$(dirname "$OUT")"
 
-# Build the binary if it isn't already there.
+# Build the binary if it isn't already there. Set RAE_DEBUG_BOUNDS=1 in
+# the environment to compile with the runtime's per-access bounds checks
+# on `rae_buf_get/set` (handy for chasing scene-mount crashes).
 APP="/tmp/rae_album_app"
+EXTRA_CFLAGS=""
+if [[ -n "${RAE_DEBUG_BOUNDS:-}" ]]; then
+  EXTRA_CFLAGS="-DRAE_DEBUG_BOUNDS -O0 -g"
+  APP="/tmp/rae_album_app_dbg"
+fi
 if [[ ! -x "$APP" ]]; then
-  echo "Building rae compiler + album app..."
+  echo "Building rae compiler + album app${RAE_DEBUG_BOUNDS:+ (debug-bounds)}..."
   (cd compiler && make build > /dev/null)
   TMP=$(mktemp -d)
   compiler/bin/rae build \
@@ -35,6 +42,7 @@ if [[ ! -x "$APP" ]]; then
     --out "$TMP/out.c" > /dev/null
   gcc -O2 -o "$APP" "$TMP/out.c" "$TMP/rae_runtime.c" \
     -I"$TMP" -I/opt/homebrew/include -L/opt/homebrew/lib -DRAE_HAS_RAYLIB \
+    $EXTRA_CFLAGS \
     -lraylib -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL
   rm -rf "$TMP"
 fi
@@ -47,7 +55,7 @@ APP_PID=$!
 trap 'kill "$APP_PID" 2>/dev/null || true' EXIT
 
 # Give raylib time to initialise the window and render a stable frame.
-sleep 2
+sleep 4
 
 # Ask AppleScript for the window's position and size, then crop.
 WIN_INFO=$(osascript <<EOF

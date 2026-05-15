@@ -25,9 +25,17 @@
 import core
 import string
 import raylib
+import ui/icon_codepoints
 
 # Default text font slot; matches `loadFontInto(slot: 0, ...)`.
 let defaultFontSlot: Int = 0
+
+# Icon font slot. Loaded with `MaterialIconsOutlined-Regular.otf` (or
+# similar) by the host app. Sprite.textureKey values prefixed with
+# `"mat:"` route through this slot via `drawTextWithFont`.
+let iconFontSlot: Int = 1
+
+let matPrefix: String = "mat:"
 
 # Compose the entity's effective alpha into a [0,255] integer for
 # raylib. WorldTransform.alpha is already the multiplied chain alpha
@@ -116,11 +124,55 @@ func paintShape(world: view UiWorld, entity: Int, wt: view WorldTransform, cr: v
 
 func paintSprite(reg: view TextureRegistry, world: view UiWorld, entity: Int, wt: view WorldTransform, cr: view ComputedRect, chain255: Int) {
   let sp: Sprite = componentGet(this: world.sprites, entity: entity)
-  if textureHas(reg: reg, key: sp.textureKey) is false {
+  let key: String = sp.textureKey
+  let tint: Color = toRaylibColor(c: sp.tint, chain255: chain255)
+
+  # `mat:<icon_name>` routes through the Material Icons font slot.
+  # The whole sprite box is treated as the glyph cell; the icon is
+  # drawn centred at a font size matching the smaller side of the box.
+  let mp: String = matPrefix
+  if key.startsWith(prefix: mp) {
+    let prefixLen: Int = mp.length()
+    let keyLen: Int = key.length()
+    let iconName: String = key.sub(start: prefixLen, len: keyLen - prefixLen)
+    let glyph: String = iconText(name: iconName)
+    if glyph.length() is 0 {
+      ret
+    }
+    let smaller: Float = cr.w
+    if cr.h < smaller {
+      smaller = cr.h
+    }
+    # Material glyphs sit on a roughly em-square; rendering at the box
+    # size lines up with their baked padding. We must measure with the
+    # icon font slot (not the default font) because Material codepoints
+    # like 0xE037 aren't in the default font — measuring there would
+    # return the notdef width and the icon would land off-center.
+    let fontSize: Float = smaller
+    let glyphW: Int = measureTextWithFont(
+      slot: iconFontSlot
+      text: glyph
+      fontSize: fontSize
+      spacing: 0.0
+    )
+    let centerOffsetX: Float = (cr.w - glyphW.toFloat()) / 2.0
+    let centerOffsetY: Float = (cr.h - fontSize) / 2.0
+    drawTextWithFont(
+      slot: iconFontSlot
+      text: glyph
+      x: wt.x + centerOffsetX
+      y: wt.y + centerOffsetY
+      fontSize: fontSize
+      spacing: 0.0
+      color: tint
+    )
     ret
   }
-  let tex: Texture = textureGet(reg: reg, key: sp.textureKey)
-  let tint: Color = toRaylibColor(c: sp.tint, chain255: chain255)
+
+  if textureHas(reg: reg, key: key) is false {
+    ret
+  }
+  let tex: Texture = textureGet(reg: reg, key: key)
 
   # ScaleMode.Fit/Fill/Stretch — for Phase 1e we treat all three the
   # same: scale the texture so its longer edge fills the box. Proper
@@ -164,6 +216,13 @@ func textStyleSize(styleId: String) ret Float {
   let h2: String = "h2"
   let body: String = "body"
   let caption: String = "caption"
+  let miniTitle: String = "miniTitle"
+  let miniMuted: String = "miniMuted"
+  let topBarTitle: String = "topBarTitle"
+  let albumCaption: String = "albumCaption"
+  let pillLabel: String = "pillLabel"
+  let trackTitle: String = "trackTitle"
+  let trackMuted: String = "trackMuted"
   if styleId.equals(other: h1) {
     ret 36.0
   }
@@ -173,6 +232,27 @@ func textStyleSize(styleId: String) ret Float {
   if styleId.equals(other: caption) {
     ret 16.0
   }
+  if styleId.equals(other: miniTitle) {
+    ret 18.0
+  }
+  if styleId.equals(other: miniMuted) {
+    ret 14.0
+  }
+  if styleId.equals(other: topBarTitle) {
+    ret 18.0
+  }
+  if styleId.equals(other: albumCaption) {
+    ret 14.0
+  }
+  if styleId.equals(other: pillLabel) {
+    ret 18.0
+  }
+  if styleId.equals(other: trackTitle) {
+    ret 20.0
+  }
+  if styleId.equals(other: trackMuted) {
+    ret 14.0
+  }
   ret 20.0
 }
 
@@ -180,6 +260,13 @@ func textStyleColor(styleId: String, chain255: Int) ret Color {
   let mute: String = "muted"
   let caption: String = "caption"
   let primary: String = "primary"
+  let miniTitle: String = "miniTitle"
+  let miniMuted: String = "miniMuted"
+  let topBarTitle: String = "topBarTitle"
+  let albumCaption: String = "albumCaption"
+  let pillLabelLight: String = "pillLabel"
+  let trackTitle: String = "trackTitle"
+  let trackMuted: String = "trackMuted"
   if styleId.equals(other: mute) {
     let muted: RgbaColor = { r: 130, g: 130, b: 140, a: 255 }
     ret toRaylibColor(c: muted, chain255: chain255)
@@ -187,6 +274,34 @@ func textStyleColor(styleId: String, chain255: Int) ret Color {
   if styleId.equals(other: caption) {
     let cap: RgbaColor = { r: 140, g: 140, b: 150, a: 255 }
     ret toRaylibColor(c: cap, chain255: chain255)
+  }
+  if styleId.equals(other: miniTitle) {
+    let lightOnDark: RgbaColor = { r: 246, g: 246, b: 248, a: 255 }
+    ret toRaylibColor(c: lightOnDark, chain255: chain255)
+  }
+  if styleId.equals(other: miniMuted) {
+    let dim: RgbaColor = { r: 170, g: 170, b: 180, a: 255 }
+    ret toRaylibColor(c: dim, chain255: chain255)
+  }
+  if styleId.equals(other: topBarTitle) {
+    let dark: RgbaColor = { r: 30, g: 30, b: 36, a: 255 }
+    ret toRaylibColor(c: dark, chain255: chain255)
+  }
+  if styleId.equals(other: albumCaption) {
+    let cap: RgbaColor = { r: 140, g: 140, b: 150, a: 255 }
+    ret toRaylibColor(c: cap, chain255: chain255)
+  }
+  if styleId.equals(other: pillLabelLight) {
+    let lightOnDark: RgbaColor = { r: 246, g: 246, b: 248, a: 255 }
+    ret toRaylibColor(c: lightOnDark, chain255: chain255)
+  }
+  if styleId.equals(other: trackTitle) {
+    let dark: RgbaColor = { r: 30, g: 30, b: 36, a: 255 }
+    ret toRaylibColor(c: dark, chain255: chain255)
+  }
+  if styleId.equals(other: trackMuted) {
+    let dim: RgbaColor = { r: 140, g: 140, b: 150, a: 255 }
+    ret toRaylibColor(c: dim, chain255: chain255)
   }
   let dark: RgbaColor = { r: 30, g: 30, b: 36, a: 255 }
   if styleId.equals(other: primary) {

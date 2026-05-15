@@ -1,0 +1,60 @@
+# Now-playing screen world. The middle slot mounts the
+# `music-player-now-playing.raescene` directly; the bottom mini-player
+# and nav-tabs are the same scene files the album view uses.
+import core
+import ui/components
+import ui/ecs
+import ui/scene
+import ui/scene_instance
+
+func buildNowPlayingWorld(scenes: view AlbumScenes) pub ret UiWorld {
+  let world: UiWorld = createUiWorld()
+
+  let root: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: root, w: screenW, h: screenH)
+  setShapeRect(world: world, entity: root, fill: surfaceColor)
+  let layV: LayoutType = LayoutType.Vertical
+  let alignS: AlignKind = AlignKind.Start
+  setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
+  setPaddingAll(world: world, entity: root, n: outerPad)
+
+  # The now-playing scene fills whatever's left after the bottom bars.
+  let bottomGap: Float = outerGap * 2.0
+  let npH: Float = screenH - outerPad * 2.0 - miniPlayerH - navTabsH - bottomGap
+  let np: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: np, w: screenW - outerPad * 2.0, h: npH)
+  let noOverrides: List(SceneOverride) = emptyOverrides()
+  let npLabel: String = "music-player-now-playing"
+  let mounted: Int = mountOrError(
+    world: world
+    mountEntity: np
+    scene: scenes.nowPlaying
+    sceneLabel: npLabel
+    overrides: noOverrides
+  )
+
+  let miniLabel: String = "mini-player"
+  let miniPlayer: Int = buildSimpleSceneInstance(
+    world: world
+    scene: scenes.miniPlayer
+    w: screenW - outerPad * 2.0
+    h: miniPlayerH
+    label: miniLabel
+  )
+  let navLabel: String = "nav-tabs"
+  let navTabs: Int = buildSimpleSceneInstance(
+    world: world
+    scene: scenes.navTabs
+    w: screenW - outerPad * 2.0
+    h: navTabsH
+    label: navLabel
+  )
+
+  let kids: List(Int) = createList(Int)(initialCap: 3)
+  kids.add(value: np)
+  kids.add(value: miniPlayer)
+  kids.add(value: navTabs)
+  attachChildren(world: world, parent: root, kids: kids)
+
+  ret world
+}
