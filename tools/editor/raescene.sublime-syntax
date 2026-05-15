@@ -1,0 +1,109 @@
+%YAML 1.2
+---
+# Rae Scene (`.raescene`) — JSON with Rae-UI semantic colouring.
+#
+# Files are strict JSON but carry meaning from the Rae UI runtime:
+#   * Top-level keys (`type`, `version`, `sceneId`, `root`, `nodes`) are
+#     scene-format directives.
+#   * Capitalised object keys like `Layout`, `Shape`, `Sprite`, … are
+#     authored *components* (see `lib/ui/registry.rae` for the
+#     canonical list).
+#   * Some string values (`"Horizontal"`, `"RoundedRect"`, `"Center"`,
+#     …) are enum members for the surrounding component's fields.
+# This grammar colours all three classes distinctly so a `.raescene`
+# file reads with the same vocabulary as a `.rae` file in the same
+# editor theme.
+name: Rae Scene
+file_extensions: [raescene]
+scope: source.raescene
+
+contexts:
+  main:
+    - include: comments
+    - include: scene_directive_keys
+    - include: component_keys
+    - include: object_keys
+    - include: enum_values
+    - include: strings
+    - include: literal_constants
+    - include: numbers
+    - include: punctuation
+
+  comments:
+    # Strict JSON has no comments, but JSON-with-Comments (used by
+    # VSCode settings and friends) is convenient when hand-authoring
+    # scenes. Accept both `//` line and `/* */` block forms.
+    - match: '//.*$'
+      scope: comment.line.double-slash.raescene
+    - match: '/\*'
+      scope: punctuation.definition.comment.raescene
+      push: block_comment
+
+  block_comment:
+    - meta_scope: comment.block.raescene
+    - match: '\*/'
+      pop: true
+
+  # Top-level scene metadata keys.
+  scene_directive_keys:
+    - match: '"(type|version|sceneId|root|nodes)"\s*(:)'
+      captures:
+        1: keyword.control.raescene
+        2: punctuation.separator.key-value.raescene
+
+  # Component names — must match `registeredComponentNames()` in
+  # `lib/ui/registry.rae`. Update both lists together when adding a new
+  # component. `Children` is the one non-component key that gets the
+  # same colour so the structural hierarchy reads consistently.
+  component_keys:
+    - match: '"(Rect|Size|Layout|Padding|Margin|SafeArea|Align|Offset|Constraints|OverflowPolicy|TransformFx|Sprite|Text|Shape|Shadow|Opacity|PointerEvents|HitArea|OnClick|Button|Active|EditorVisible|EditorLocked|Name|PrimaryType|NodeId|SceneScope|RuntimeOnly|SceneInstance|ImageSourceResolver|TextBinding|MaskShape|DataRequest|ListView|BackgroundPan|Carousel|SmokeFx|AnimFrames|AnimTrigger|WobbleFx|Children)"\s*(:)'
+      captures:
+        1: storage.type.raescene
+        2: punctuation.separator.key-value.raescene
+
+  # Any other quoted key followed by `:` — typically the field names
+  # inside a component bag (`"x"`, `"w"`, `"fill"`, `"radius"`, …).
+  object_keys:
+    - match: '("(?:\\.|[^"\\])*")\s*(:)'
+      captures:
+        1: variable.parameter.raescene
+        2: punctuation.separator.key-value.raescene
+
+  # Enum string values — must mirror the `parse…` functions in
+  # `lib/ui/registry.rae`. Keys are matched above first, so these only
+  # match in value position. Unrecognised string values fall through to
+  # `strings:` below and render as plain string literals.
+  enum_values:
+    - match: '"(Hug|Fill|Fixed|Horizontal|Vertical|Grid|Stack|None|Center|End|SpaceBetween|Stretch|Start|RoundedRect|Circle|Rect|Fit|NodeWidth|Random|Hash|Direct|Number|Percent1|Coins|HandRank|Plain|Scene)"'
+      scope: constant.language.enum.raescene
+
+  strings:
+    - match: '"'
+      scope: punctuation.definition.string.begin.raescene
+      push: string_body
+
+  string_body:
+    - meta_scope: string.quoted.double.raescene
+    - match: '\\.'
+      scope: constant.character.escape.raescene
+    - match: '"'
+      scope: punctuation.definition.string.end.raescene
+      pop: true
+
+  literal_constants:
+    - match: '\b(true|false|null)\b'
+      scope: constant.language.raescene
+
+  numbers:
+    - match: '-?\b\d+(\.\d+)?([eE][+-]?\d+)?\b'
+      scope: constant.numeric.raescene
+
+  punctuation:
+    - match: '[\{\}]'
+      scope: punctuation.section.dictionary.raescene
+    - match: '[\[\]]'
+      scope: punctuation.section.array.raescene
+    - match: ','
+      scope: punctuation.separator.raescene
+    - match: ':'
+      scope: punctuation.separator.key-value.raescene
