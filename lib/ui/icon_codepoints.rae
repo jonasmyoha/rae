@@ -1,0 +1,144 @@
+# Material Icons (Round) — codepoint lookup.
+#
+# Pairs with `examples/98_mobile_ui/assets/MaterialIconsRound-Regular.otf`
+# (Apache 2.0). Loaded into a font slot at startup; the renderer
+# detects a `mat:<name>` prefix on `Sprite.textureKey`, looks up the
+# codepoint here, and draws the glyph via `drawTextWithFont`.
+#
+# Codepoints are identical across all four Material Icons style fonts
+# (Outlined, Round, Sharp, Two Tone, plus the original filled), so the
+# table doesn't need to change when swapping fonts — only the loaded
+# font slot changes which glyph art renders.
+# Add new icons here AND mirror them into the runtime's
+# `g_rae_font_codepoints` / VM's `g_vm_font_codepoints` arrays so the
+# atlas bakes the corresponding glyph.
+import core
+import string
+
+# Returns the UTF-8 string for a Material Icons Outlined glyph by
+# name. Unknown names return an empty string — the renderer treats
+# zero-length text as a no-op, so unrecognised icons silently disappear
+# rather than crashing or rendering a fallback.
+func iconText(name: String) ret String {
+  let arrowBack: String = "arrow_back"
+  if name.equals(other: arrowBack) {
+    ret "\u{e5c4}"
+  }
+  let moreHoriz: String = "more_horiz"
+  if name.equals(other: moreHoriz) {
+    ret "\u{eae1}"
+  }
+  let playArrow: String = "play_arrow"
+  if name.equals(other: playArrow) {
+    ret "\u{e037}"
+  }
+  let pause: String = "pause"
+  if name.equals(other: pause) {
+    ret "\u{e034}"
+  }
+  let stop: String = "stop"
+  if name.equals(other: stop) {
+    ret "\u{e047}"
+  }
+  let skipPrev: String = "skip_previous"
+  if name.equals(other: skipPrev) {
+    ret "\u{e045}"
+  }
+  let skipNext: String = "skip_next"
+  if name.equals(other: skipNext) {
+    ret "\u{e044}"
+  }
+  let shuffle: String = "shuffle"
+  if name.equals(other: shuffle) {
+    ret "\u{e043}"
+  }
+  let repeat: String = "repeat"
+  if name.equals(other: repeat) {
+    ret "\u{e040}"
+  }
+  let favorite: String = "favorite"
+  if name.equals(other: favorite) {
+    ret "\u{e87d}"
+  }
+  let favoriteBorder: String = "favorite_border"
+  if name.equals(other: favoriteBorder) {
+    ret "\u{e87e}"
+  }
+  let add: String = "add"
+  if name.equals(other: add) {
+    ret "\u{e145}"
+  }
+  let download: String = "download"
+  if name.equals(other: download) {
+    ret "\u{f090}"
+  }
+  let search: String = "search"
+  if name.equals(other: search) {
+    ret "\u{e8b6}"
+  }
+  let home: String = "home"
+  if name.equals(other: home) {
+    ret "\u{e88a}"
+  }
+  let libraryMusic: String = "library_music"
+  if name.equals(other: libraryMusic) {
+    ret "\u{e030}"
+  }
+  let libraryBooks: String = "library_books"
+  if name.equals(other: libraryBooks) {
+    ret "\u{e02f}"
+  }
+  let libraryAdd: String = "library_add"
+  if name.equals(other: libraryAdd) {
+    ret "\u{e02e}"
+  }
+  let whatshot: String = "whatshot"
+  if name.equals(other: whatshot) {
+    ret "\u{e80e}"
+  }
+  let equalizer: String = "equalizer"
+  if name.equals(other: equalizer) {
+    ret "\u{e01d}"
+  }
+  let queueMusic: String = "queue_music"
+  if name.equals(other: queueMusic) {
+    ret "\u{e03d}"
+  }
+  let playlistAdd: String = "playlist_add"
+  if name.equals(other: playlistAdd) {
+    ret "\u{e03b}"
+  }
+  let playlistAddCheck: String = "playlist_add_check"
+  if name.equals(other: playlistAddCheck) {
+    ret "\u{e065}"
+  }
+  let playlistPlay: String = "playlist_play"
+  if name.equals(other: playlistPlay) {
+    ret "\u{e05f}"
+  }
+  let menu: String = "menu"
+  if name.equals(other: menu) {
+    ret "\u{e5d2}"
+  }
+  let close: String = "close"
+  if name.equals(other: close) {
+    ret "\u{e5cd}"
+  }
+  let chevronLeft: String = "chevron_left"
+  if name.equals(other: chevronLeft) {
+    ret "\u{e5cb}"
+  }
+  let chevronRight: String = "chevron_right"
+  if name.equals(other: chevronRight) {
+    ret "\u{e5cc}"
+  }
+  let expandLess: String = "expand_less"
+  if name.equals(other: expandLess) {
+    ret "\u{e5ce}"
+  }
+  let expandMore: String = "expand_more"
+  if name.equals(other: expandMore) {
+    ret "\u{e5cf}"
+  }
+  ret ""
+}

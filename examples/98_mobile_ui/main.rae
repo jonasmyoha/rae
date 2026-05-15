@@ -1,472 +1,47 @@
-# Music-player album scene — Phase 1f demo.
+# Mobile-UI demo entrypoint. The actual work — scene loading, world
+# building, screen routing — lives in sibling `.rae` files in this same
+# directory, which Rae auto-imports because they share the project
+# root. This file owns only the program's lifecycle: window setup, font
+# loading, the main render/dispatch loop, and teardown.
 #
-# Builds the album-screen layout (music_player_screen_2.png) by
-# composing three reusable `.raescene` fragments:
-#   * `track-row.raescene`  — one per song, mounted 5×.
-#   * `mini-player.raescene` — bottom playback controls.
-#   * `nav-tabs.raescene`    — bottom tab navigation.
-# Top bar / hero / title block are still built in code; converting
-# those is a Phase 2 cleanup.
-#
-# This is the milestone where the scene-driven UI runtime composes
-# real authored scenes via `SceneInstance` mounting + per-node
-# overrides.
+# Architecture (all files in this folder are auto-imported):
+#   * config.rae           — layout, palette, asset paths
+#   * world_helpers.rae    — ECS component-setter shorthands
+#   * scene_loader.rae     — parse the four .raescene files into an AlbumScenes
+#   * scene_mount.rae      — mountOrError + visible error sentinel
+#   * album_view.rae       — album-screen builders, including buildAlbumWorld
+#   * now_playing_view.rae — buildNowPlayingWorld
+#   * screen_router.rae    — Screen enum, buildScreenWorld, dispatchActions
+#   * asset_loader.rae     — loadTextures (album-cover JPG)
 import raylib
 import core
 import string
 import sys
-import json
-import ui/components
 import ui/ecs
-import ui/registry
 import ui/layout
 import ui/transform
 import ui/render
 import ui/textures
-import ui/scene
-import ui/scene_instance
 import ui/input
 
-# ----- size constants kept central so tweaking the layout is easy -----
-# screenH chosen so the whole stack fits in macOS's available window
-# height (1117 desktop minus chrome ≈ 1079). The actual raylib window
-# may be shorter on smaller displays.
-let screenW: Float = 600.0
-let screenH: Float = 1079.0
-let outerPad: Float = 20.0
-let outerGap: Float = 12.0
-
-let topBarH: Float = 56.0
-let heroH: Float = 380.0
-let titleH: Float = 80.0
-let trackRowH: Float = 56.0
-let trackGap: Float = 6.0
-let trackRowCount: Int = 5
-let miniPlayerH: Float = 80.0
-let navTabsH: Float = 56.0
-
-let fontSlot: Int = 0
-
-# Colour palette mirrors the screen reference's monochrome look.
-let surfaceColor: RgbaColor = { r: 246, g: 246, b: 248, a: 255 }
-let heroColor: RgbaColor = { r: 70, g: 70, b: 80, a: 255 }
-let iconTint: RgbaColor = { r: 30, g: 30, b: 36, a: 255 }
-
-# Scene asset paths.
-let trackRowPath: String = "examples/98_mobile_ui/assets/scenes/track-row.raescene"
-let navTabsPath: String = "examples/98_mobile_ui/assets/scenes/nav-tabs.raescene"
-let miniPlayerPath: String = "examples/98_mobile_ui/assets/scenes/mini-player.raescene"
-let nowPlayingPath: String = "examples/98_mobile_ui/assets/scenes/music-player-now-playing.raescene"
-
-enum Screen {
-  NowPlaying
-  Album
-}
-
-# ----- helpers --------------------------------------------------------
-
-func makeFixed() ret Size {
-  ret Size {
-    w: SizeAxis { mode: SizeMode.Fixed, min: -1, max: -1 }
-    h: SizeAxis { mode: SizeMode.Fixed, min: -1, max: -1 }
-  }
-}
-
-func setRectFixed(world: mod UiWorld, entity: Int, w: Float, h: Float) {
-  let r: Rect = { x: 0.0, y: 0.0, w: w, h: h }
-  componentSet(this: world.rects, entity: entity, data: r)
-  componentSet(this: world.sizes, entity: entity, data: makeFixed())
-}
-
-func setShapeRect(world: mod UiWorld, entity: Int, fill: RgbaColor) {
-  let shape: Shape = {
-    kind: ShapeKind.Rect
-    fill: fill
-    stroke: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
-    strokeWidth: 0.0
-    radius: 0.0
-  }
-  componentSet(this: world.shapes, entity: entity, data: shape)
-}
-
-func setShapeRounded(world: mod UiWorld, entity: Int, fill: RgbaColor, radius: Float) {
-  let shape: Shape = {
-    kind: ShapeKind.RoundedRect
-    fill: fill
-    stroke: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
-    strokeWidth: 0.0
-    radius: radius
-  }
-  componentSet(this: world.shapes, entity: entity, data: shape)
-}
-
-func setSprite(world: mod UiWorld, entity: Int, key: String, tint: RgbaColor) {
-  let sp: Sprite = {
-    textureKey: key
-    tint: tint
-    scaleMode: ScaleMode.Fit
-    tileScale: Vec2 { x: 1.0, y: 1.0 }
-    nineSlice: Insets { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
-    hasNineSlice: false
-  }
-  componentSet(this: world.sprites, entity: entity, data: sp)
-}
-
-func setText(world: mod UiWorld, entity: Int, text: String, styleId: String) {
-  let t: Text = {
-    text: text
-    styleId: styleId
-    wrapWidthMode: WrapWidthMode.None
-  }
-  componentSet(this: world.texts, entity: entity, data: t)
-}
-
-func setLayout(
-  world: mod UiWorld
-  entity: Int
-  kind: LayoutType
-  gap: Float
-  alignCross: AlignKind
-) {
-  let lay: Layout = {
-    kind: kind
-    gap: gap
-    alignMain: AlignKind.Start
-    alignCross: alignCross
-    columns: 0
-    rowGap: 0.0
-    columnGap: 0.0
-  }
-  componentSet(this: world.layouts, entity: entity, data: lay)
-}
-
-func setPaddingAll(world: mod UiWorld, entity: Int, n: Float) {
-  let pad: Padding = { insets: Insets { l: n, t: n, r: n, b: n } }
-  componentSet(this: world.paddings, entity: entity, data: pad)
-}
-
-func attachChildren(world: mod UiWorld, parent: Int, kids: view List(Int)) {
-  let copy: List(Int) = createList(Int)(initialCap: kids.length)
-  let i: Int = 0
-  loop i < kids.length {
-    let kid: Int = kids.get(index: i)
-    copy.add(value: kid)
-    let pl: ParentLink = { parent: parent }
-    componentSet(this: world.parentLinks, entity: kid, data: pl)
-    i = i + 1
-  }
-  let ch: Children = { ids: copy }
-  componentSet(this: world.childrens, entity: parent, data: ch)
-}
-
-# ----- scene asset loading --------------------------------------------
-
-# Compiled-target shortcut: at the C level, `rae_ext_rae_sys_read_file`
-# returns `rae_String` directly. Declaring a non-opt extern with the
-# same C name skips the C backend's double-unbox bug for `opt String`
-# returns. Empty string on miss.
-func rae_ext_rae_sys_read_file(path: String) extern ret String
-
-func loadSceneFile(path: String) ret Scene {
-  let content: String = rae_ext_rae_sys_read_file(path: path)
-  ret parseScene(source: content)
-}
-
-# Pack all loaded scenes into a single struct so we avoid storing Scene
-# values in a List — the C backend treats `List(Scene)` element gets
-# as a struct-copy through `rae_ext_rae_buf_get` which corrupts the
-# nested JsonDoc list pointers on subsequent accesses. Three named
-# fields side-step the whole issue.
-type AlbumScenes {
-  trackRow: Scene
-  navTabs: Scene
-  miniPlayer: Scene
-  nowPlaying: Scene
-}
-
-func loadAllScenes() ret AlbumScenes {
-  ret AlbumScenes {
-    trackRow: loadSceneFile(path: trackRowPath)
-    navTabs: loadSceneFile(path: navTabsPath)
-    miniPlayer: loadSceneFile(path: miniPlayerPath)
-    nowPlaying: loadSceneFile(path: nowPlayingPath)
-  }
-}
-
-# ----- inline section builders (top bar + hero + title block) ---------
-
-func buildTopBar(world: mod UiWorld) ret Int {
-  let bar: Int = createEntity(world: world)
-  setRectFixed(world: world, entity: bar, w: screenW - outerPad * 2.0, h: topBarH)
-  let layH: LayoutType = LayoutType.Horizontal
-  let alignC: AlignKind = AlignKind.Center
-  setLayout(world: world, entity: bar, kind: layH, gap: 16.0, alignCross: alignC)
-
-  let backBtn: Int = createEntity(world: world)
-  setRectFixed(world: world, entity: backBtn, w: 40.0, h: 40.0)
-  setSprite(world: world, entity: backBtn, key: "icon-back", tint: iconTint)
-
-  let title: Int = createEntity(world: world)
-  setRectFixed(world: world, entity: title, w: 320.0, h: 40.0)
-  setText(world: world, entity: title, text: "ALBUM", styleId: "muted")
-
-  let moreBtn: Int = createEntity(world: world)
-  setRectFixed(world: world, entity: moreBtn, w: 40.0, h: 40.0)
-  setSprite(world: world, entity: moreBtn, key: "icon-more", tint: iconTint)
-
-  let kids: List(Int) = createList(Int)(initialCap: 3)
-  kids.add(value: backBtn)
-  kids.add(value: title)
-  kids.add(value: moreBtn)
-  attachChildren(world: world, parent: bar, kids: kids)
-  ret bar
-}
-
-func buildHero(world: mod UiWorld) ret Int {
-  let hero: Int = createEntity(world: world)
-  setRectFixed(world: world, entity: hero, w: screenW - outerPad * 2.0, h: heroH)
-  setShapeRounded(world: world, entity: hero, fill: heroColor, radius: 24.0)
-  ret hero
-}
-
-func buildTitleBlock(world: mod UiWorld) ret Int {
-  let block: Int = createEntity(world: world)
-  setRectFixed(world: world, entity: block, w: screenW - outerPad * 2.0, h: titleH)
-  let layV: LayoutType = LayoutType.Vertical
-  let alignS: AlignKind = AlignKind.Start
-  setLayout(world: world, entity: block, kind: layV, gap: 4.0, alignCross: alignS)
-
-  let h1: Int = createEntity(world: world)
-  setRectFixed(world: world, entity: h1, w: 400.0, h: 44.0)
-  setText(world: world, entity: h1, text: "Charcoal", styleId: "h1")
-
-  let sub: Int = createEntity(world: world)
-  setRectFixed(world: world, entity: sub, w: 400.0, h: 24.0)
-  setText(world: world, entity: sub, text: "", styleId: "muted")
-
-  let kids: List(Int) = createList(Int)(initialCap: 2)
-  kids.add(value: h1)
-  kids.add(value: sub)
-  attachChildren(world: world, parent: block, kids: kids)
-  ret block
-}
-
-# ----- scene-instance section builders --------------------------------
-
-# Build the track list as five SceneInstances of `track-row.raescene`,
-# each with overrides for index / title / duration so the same authored
-# scene drives every row.
-func buildTrackList(world: mod UiWorld, trackScene: view Scene) ret Int {
-  let list: Int = createEntity(world: world)
-  let n: Int = trackRowCount
-  let listH: Float = trackRowH * n.toFloat() + trackGap * (n - 1).toFloat()
-  setRectFixed(world: world, entity: list, w: screenW - outerPad * 2.0, h: listH)
-  let layV: LayoutType = LayoutType.Vertical
-  let alignS: AlignKind = AlignKind.Start
-  setLayout(world: world, entity: list, kind: layV, gap: trackGap, alignCross: alignS)
-
-  let titles: List(String) = createList(String)(initialCap: trackRowCount)
-  titles.add(value: "Charcoal")
-  titles.add(value: "Embers")
-  titles.add(value: "Slow Burn")
-  titles.add(value: "Smoke Signals")
-  titles.add(value: "Afterglow")
-  let durations: List(String) = createList(String)(initialCap: trackRowCount)
-  durations.add(value: "3:24")
-  durations.add(value: "4:12")
-  durations.add(value: "5:01")
-  durations.add(value: "3:48")
-  durations.add(value: "4:36")
-
-  let rows: List(Int) = createList(Int)(initialCap: trackRowCount)
-  let i: Int = 0
-  loop i < trackRowCount {
-    let row: Int = createEntity(world: world)
-    setRectFixed(world: world, entity: row, w: screenW - outerPad * 2.0, h: trackRowH)
-
-    let overrides: List(SceneOverride) = emptyOverrides()
-    let label: String = (i + 1).toString()
-    let title: String = titles.get(index: i)
-    let dur: String = durations.get(index: i)
-    let idxId: String = "IdxText"
-    let titleId: String = "TitleText"
-    let durId: String = "DurText"
-    addTextOverride(list: overrides, nodeId: idxId, value: label)
-    addTextOverride(list: overrides, nodeId: titleId, value: title)
-    addTextOverride(list: overrides, nodeId: durId, value: dur)
-
-    let mounted: Int = mountSceneInstance(
-      world: world
-      mountEntity: row
-      scene: trackScene
-      overrides: overrides
-    )
-    rows.add(value: row)
-    i = i + 1
-  }
-  attachChildren(world: world, parent: list, kids: rows)
-  ret list
-}
-
-# Mount a scene under a fresh entity sized w x h. No overrides.
-func buildSimpleSceneInstance(
-  world: mod UiWorld
-  scene: view Scene
-  w: Float
-  h: Float
-) ret Int {
-  let mount: Int = createEntity(world: world)
-  setRectFixed(world: world, entity: mount, w: w, h: h)
-  let noOverrides: List(SceneOverride) = emptyOverrides()
-  let mounted: Int = mountSceneInstance(
-    world: world
-    mountEntity: mount
-    scene: scene
-    overrides: noOverrides
-  )
-  ret mount
-}
-
-# Build the now-playing screen world. Same outer chrome (mini-player +
-# nav-tabs at the bottom) as the album view, but the middle slot
-# mounts the now-playing scene instead of the topbar/hero/title/list
-# stack.
-func buildNowPlayingWorld(scenes: view AlbumScenes) ret UiWorld {
-  let world: UiWorld = createUiWorld()
-
-  let root: Int = createEntity(world: world)
-  setRectFixed(world: world, entity: root, w: screenW, h: screenH)
-  setShapeRect(world: world, entity: root, fill: surfaceColor)
-  let layV: LayoutType = LayoutType.Vertical
-  let alignS: AlignKind = AlignKind.Start
-  setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
-  setPaddingAll(world: world, entity: root, n: outerPad)
-
-  # The now-playing scene fills whatever's left after the bottom bars.
-  let bottomGap: Float = outerGap * 2.0
-  let npH: Float = screenH - outerPad * 2.0 - miniPlayerH - navTabsH - bottomGap
-  let np: Int = createEntity(world: world)
-  setRectFixed(world: world, entity: np, w: screenW - outerPad * 2.0, h: npH)
-  let noOverrides: List(SceneOverride) = emptyOverrides()
-  let mounted: Int = mountSceneInstance(
-    world: world
-    mountEntity: np
-    scene: scenes.nowPlaying
-    overrides: noOverrides
-  )
-
-  let miniPlayer: Int = buildSimpleSceneInstance(
-    world: world
-    scene: scenes.miniPlayer
-    w: screenW - outerPad * 2.0
-    h: miniPlayerH
-  )
-  let navTabs: Int = buildSimpleSceneInstance(
-    world: world
-    scene: scenes.navTabs
-    w: screenW - outerPad * 2.0
-    h: navTabsH
-  )
-
-  let kids: List(Int) = createList(Int)(initialCap: 3)
-  kids.add(value: np)
-  kids.add(value: miniPlayer)
-  kids.add(value: navTabs)
-  attachChildren(world: world, parent: root, kids: kids)
-
-  ret world
-}
-
-func buildScreenWorld(screen: Screen, scenes: view AlbumScenes) ret UiWorld {
-  if screen is Screen.Album {
-    ret buildAlbumWorld(scenes: scenes)
-  }
-  ret buildNowPlayingWorld(scenes: scenes)
-}
-
-func buildAlbumWorld(scenes: view AlbumScenes) ret UiWorld {
-  let world: UiWorld = createUiWorld()
-
-  let root: Int = createEntity(world: world)
-  setRectFixed(world: world, entity: root, w: screenW, h: screenH)
-  setShapeRect(world: world, entity: root, fill: surfaceColor)
-  let layV: LayoutType = LayoutType.Vertical
-  let alignS: AlignKind = AlignKind.Start
-  setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
-  setPaddingAll(world: world, entity: root, n: outerPad)
-
-  let topBar: Int = buildTopBar(world: world)
-  let hero: Int = buildHero(world: world)
-  let titleBlock: Int = buildTitleBlock(world: world)
-  let trackList: Int = buildTrackList(world: world, trackScene: scenes.trackRow)
-  let miniPlayer: Int = buildSimpleSceneInstance(
-    world: world
-    scene: scenes.miniPlayer
-    w: screenW - outerPad * 2.0
-    h: miniPlayerH
-  )
-  let navTabs: Int = buildSimpleSceneInstance(
-    world: world
-    scene: scenes.navTabs
-    w: screenW - outerPad * 2.0
-    h: navTabsH
-  )
-
-  let kids: List(Int) = createList(Int)(initialCap: 6)
-  kids.add(value: topBar)
-  kids.add(value: hero)
-  kids.add(value: titleBlock)
-  kids.add(value: trackList)
-  kids.add(value: miniPlayer)
-  kids.add(value: navTabs)
-  attachChildren(world: world, parent: root, kids: kids)
-
-  ret world
-}
-
-# ----- texture loader -------------------------------------------------
-
-# Register all 14 placeholder icons. Paths are relative to the cwd at
-# launch time — the example expects to be run from the repo root.
-func loadIcons(reg: mod TextureRegistry) {
-  let base: String = "examples/98_mobile_ui/assets/icons/"
-  let names: List(String) = createList(String)(initialCap: 14)
-  names.add(value: "icon-back")
-  names.add(value: "icon-search")
-  names.add(value: "icon-more")
-  names.add(value: "icon-heart")
-  names.add(value: "icon-add")
-  names.add(value: "icon-play")
-  names.add(value: "icon-pause")
-  names.add(value: "icon-skip-prev")
-  names.add(value: "icon-skip-next")
-  names.add(value: "icon-shuffle")
-  names.add(value: "icon-repeat")
-  names.add(value: "icon-tab-home")
-  names.add(value: "icon-tab-search")
-  names.add(value: "icon-tab-library")
-  let i: Int = 0
-  loop i < names.length {
-    let n: String = names.get(index: i)
-    let path: String = base.concat(other: n).concat(other: ".png")
-    let loaded: Texture = textureLoad(reg: reg, key: n, path: path)
-    i = i + 1
-  }
-}
-
 func main() {
-  setConfigFlags(flags: 4)
+  # FLAG_WINDOW_RESIZABLE (4) | FLAG_MSAA_4X_HINT (32) = 36. MSAA turns
+  # on 4x multisampling so raylib's triangulated circles / rounded rects
+  # don't render with jagged edges. Must be set BEFORE initWindow;
+  # ignored otherwise. Rae has no bitwise `|` yet, so we precompute.
+  setConfigFlags(flags: 36)
   let winW: Float = screenW
   let winH: Float = screenH
   initWindow(width: winW.toInt(), height: winH.toInt(), title: "Rae Mobile UI — Album")
   setWindowPosition(x: 50, y: 50)
   setTargetFPS(fps: 60)
 
-  loadFontInto(slot: fontSlot, path: "examples/98_mobile_ui/assets/Roboto-Regular.ttf", fontSize: 36)
+  loadFontInto(slot: robotoFontSlot, path: robotoFontPath, fontSize: 36)
+  loadFontInto(slot: materialIconFontSlot, path: materialIconFontPath, fontSize: 64)
 
   let scenes: AlbumScenes = loadAllScenes()
   let texReg: TextureRegistry = createTextureRegistry()
-  loadIcons(reg: texReg)
+  loadTextures(reg: texReg)
 
   let screenshotEnv: String = getEnv(name: "RAE_UI_SCREENSHOT")
   let bg: Color = { r: 32, g: 32, b: 36, a: 255 }
@@ -482,6 +57,7 @@ func main() {
     if screenEnv.equals(other: nowKey) {
       screen = Screen.NowPlaying
     }
+
     let world: UiWorld = buildScreenWorld(screen: screen, scenes: scenes)
     layoutSystem(world: world)
     transformSystem(world: world)
@@ -501,9 +77,7 @@ func main() {
     # Interactive mode: outer loop owns the world for the *current*
     # screen; the inner loop runs frames until either the user closes
     # the window or a `dispatchActions` call returns a different
-    # screen, at which point the outer loop re-builds the world. This
-    # is the "loadScene + prepareLayoutRootForLoad-style root reuse"
-    # pattern flattened into a Rae-friendly two-loop structure.
+    # screen, at which point the outer loop re-builds the world.
     let startScreenEnv: String = getEnv(name: "RAE_UI_SCREEN")
     let albumKey: String = "album"
     let currentScreen: Screen = Screen.NowPlaying
@@ -539,41 +113,7 @@ func main() {
   }
 
   textureUnloadAll(reg: texReg)
-  unloadFontSlot(slot: fontSlot)
+  unloadFontSlot(slot: robotoFontSlot)
+  unloadFontSlot(slot: materialIconFontSlot)
   closeWindow()
-}
-
-# Drain every fired action and route into a target screen. Returns the
-# next screen — equal to `current` if no navigation action fired.
-func dispatchActions(input: view InputSystem, current: Screen) ret Screen {
-  let next: Screen = current
-  let n: Int = input.events.length
-  let i: Int = 0
-  loop i < n {
-    let ev: ActionEvent = rae_ext_rae_buf_get(buf: input.events.data, index: i)
-    let actionId: String = ev.actionId
-    log("[action] {actionId} (entity {ev.entity})")
-
-    let homeKey: String = "nav.home"
-    let libraryKey: String = "nav.library"
-    let backKey: String = "nav.back"
-    if actionId.equals(other: homeKey) {
-      next = Screen.NowPlaying
-    }
-    if actionId.equals(other: libraryKey) {
-      next = Screen.Album
-    }
-    if actionId.equals(other: backKey) {
-      # Back from now-playing returns to album; back from album returns
-      # to now-playing. There's no deeper history yet so they ping-pong.
-      if current is Screen.Album {
-        next = Screen.NowPlaying
-      } else {
-        next = Screen.Album
-      }
-    }
-
-    i = i + 1
-  }
-  ret next
 }
