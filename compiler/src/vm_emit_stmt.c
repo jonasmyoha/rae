@@ -52,6 +52,11 @@ bool emit_lvalue_ref(BytecodeCompiler* compiler, const AstExpr* expr, bool is_mo
             return true;
         }
      else if (expr->kind == AST_EXPR_MEMBER) {
+        if (!is_mod && expr->as.member.object &&
+            expr->as.member.object->kind == AST_EXPR_IDENT &&
+            compiler_find_local(compiler, expr->as.member.object->as.ident) < 0) {
+            return compile_expr(compiler, expr);
+        }
         if (!emit_lvalue_ref(compiler, expr->as.member.object, is_mod)) return false;
         
         Str obj_type_raw = vm_infer_expr_type(compiler, expr->as.member.object);
@@ -731,4 +736,3 @@ bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
     }
   }
 }
-

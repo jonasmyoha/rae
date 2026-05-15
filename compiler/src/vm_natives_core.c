@@ -682,7 +682,7 @@ static bool native_rae_sys_get_env(struct VM* vm,
   rae_String res = rae_ext_rae_sys_get_env(name);
   out_result->has_value = true;
   if (res.data) out_result->value = value_string_take(res.data, (size_t)res.len);
-  else out_result->value = value_none();
+  else out_result->value = value_string_copy("", 0);
   return true;
 }
 
