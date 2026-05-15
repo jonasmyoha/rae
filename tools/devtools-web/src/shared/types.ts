@@ -36,9 +36,20 @@ export type ServerInfoMessage = {
   exampleCategories?: ExampleCategory[];
 };
 
+/** Coarse classification used by the devtools UI to decide which
+ * viewer to show when a file is clicked. The server tags every file
+ * during scan; the client doesn't re-derive from the extension. */
+export type ExampleFileKind = "text" | "image" | "font" | "binary";
+
 export type ExampleFileDescriptor = {
   path: string;
   name: string;
+  /** "text" => readable source view; "image" => inline <img>;
+   * "font" / "binary" => filesize + download link. */
+  kind: ExampleFileKind;
+  /** Bytes; populated for non-text files so the binary viewer can
+   * show a size hint without an extra round trip. */
+  size?: number;
 };
 
 export type ExampleActionDescriptor = {

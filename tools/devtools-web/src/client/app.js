@@ -1563,22 +1563,59 @@ function renderExampleFiles(example) {
     exampleFilesList.innerHTML = `<p class="test-list-empty">No files in this example yet.</p>`;
     return;
   }
+
+  // Group by directory prefix so the listing reads as a shallow tree.
+  // Server already sorts text > image > font, then by path within each
+  // kind, so directory clusters fall in a sensible order without us
+  // re-sorting here. Files at the example root are grouped under "".
+  const groups = new Map();
+  for (const file of example.files) {
+    const slash = file.path.lastIndexOf("/");
+    const dir = slash >= 0 ? file.path.slice(0, slash) : "";
+    if (!groups.has(dir)) groups.set(dir, []);
+    groups.get(dir).push(file);
+  }
+
   const fragment = document.createDocumentFragment();
-  example.files.forEach((file) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = `example-file-btn${
-      selectedExampleFile === file.path ? " is-active" : ""
-    }`;
-    button.textContent = file.name;
-    button.addEventListener("click", () => {
-      selectedExampleFile = file.path;
-      renderExampleFiles(example);
-      loadExampleSource(file.path);
-    });
-    fragment.appendChild(button);
-  });
+  for (const [dir, files] of groups) {
+    if (dir.length > 0) {
+      const header = document.createElement("div");
+      header.className = "example-file-dir";
+      header.textContent = dir + "/";
+      fragment.appendChild(header);
+    }
+    for (const file of files) {
+      const button = document.createElement("button");
+      button.type = "button";
+      const indented = dir.length > 0 ? " is-indented" : "";
+      const kind = file.kind || "text";
+      button.className = `example-file-btn example-file-kind-${kind}${indented}${
+        selectedExampleFile === file.path ? " is-active" : ""
+      }`;
+      const icon = exampleFileIcon(kind);
+      const sizeHint =
+        kind !== "text" && typeof file.size === "number"
+          ? ` <span class="example-file-size">${formatBytes(file.size)}</span>`
+          : "";
+      button.innerHTML = `<span class="example-file-icon">${icon}</span><span class="example-file-name">${escapeHtml(
+        file.name
+      )}</span>${sizeHint}`;
+      button.addEventListener("click", () => {
+        selectedExampleFile = file.path;
+        renderExampleFiles(example);
+        loadExampleSource(file.path);
+      });
+      fragment.appendChild(button);
+    }
+  }
   exampleFilesList.appendChild(fragment);
+}
+
+function exampleFileIcon(kind) {
+  if (kind === "image") return "🖼";
+  if (kind === "font") return "𝐀";
+  if (kind === "binary") return "📦";
+  return "📄";
 }
 
 function renderExampleTargetButtons(example) {
@@ -2286,6 +2323,43 @@ async function loadExampleSource(path) {
   if (!exampleSourceCode || !path) return;
   exampleSourceTitle.textContent = path;
   exampleSourceCode.innerHTML = "<code>Loading source…</code>";
+
+  // Branch on the file kind reported by the server. Text files keep
+  // the existing highlight-and-show flow; image / font / binary files
+  // render a non-editable viewer (no `/api/examples/source` round
+  // trip because the bytes aren't UTF-8).
+  const example = getSelectedExample();
+  const descriptor = example?.files?.find((f) => f.path === path);
+  const kind = descriptor?.kind || "text";
+
+  if (kind === "image") {
+    const url = `/api/examples/asset?path=${encodeURIComponent(path)}`;
+    const sizeHint =
+      typeof descriptor?.size === "number" ? ` · ${formatBytes(descriptor.size)}` : "";
+    exampleSourceCode.innerHTML = `<div class="example-asset-viewer"><img alt="${escapeHtml(
+      path
+    )}" src="${url}" /><p class="example-asset-meta">${escapeHtml(path)}${sizeHint}</p></div>`;
+    // Image files have no editor mode — keep the editor visually
+    // out of the way if it's currently showing.
+    if (exampleEditor) exampleEditor.value = "";
+    return;
+  }
+
+  if (kind === "font" || kind === "binary") {
+    const url = `/api/examples/asset?path=${encodeURIComponent(path)}`;
+    const sizeHint =
+      typeof descriptor?.size === "number" ? formatBytes(descriptor.size) : "?";
+    exampleSourceCode.innerHTML = `<div class="example-asset-viewer"><p class="example-asset-binary">${escapeHtml(
+      kind === "font" ? "Font asset" : "Binary asset"
+    )} · ${sizeHint}</p><p class="example-asset-meta">${escapeHtml(
+      path
+    )}</p><p class="example-asset-actions"><a href="${url}" download="${escapeHtml(
+      descriptor?.name || path
+    )}">Download</a></p></div>`;
+    if (exampleEditor) exampleEditor.value = "";
+    return;
+  }
+
   try {
     const response = await fetch(`/api/examples/source?path=${encodeURIComponent(path)}`);
     if (!response.ok) {
@@ -2293,9 +2367,18 @@ async function loadExampleSource(path) {
     }
     const data = await response.json();
     const contents = data.contents ?? "";
-    const isRae = path.toLowerCase().endsWith(".rae");
-    const isPack = path.toLowerCase().endsWith(".raepack");
-    const highlighted = (isRae || isPack) ? highlightRae(contents, isPack) : escapeHtml(contents);
+    const lower = path.toLowerCase();
+    const isRae = lower.endsWith(".rae");
+    const isPack = lower.endsWith(".raepack");
+    const isScene = lower.endsWith(".raescene");
+    let highlighted;
+    if (isScene) {
+      highlighted = highlightRaescene(contents);
+    } else if (isRae || isPack) {
+      highlighted = highlightRae(contents, isPack);
+    } else {
+      highlighted = escapeHtml(contents);
+    }
     exampleSourceCode.innerHTML = `<code>${highlighted}</code>`;
     if (exampleEditMode && exampleEditor) {
       exampleEditor.value = contents;
@@ -3111,6 +3194,128 @@ function highlightRae(code, isPack = false) {
     result = result.split(p.id).join(replacement);
   }
 
+  return result;
+}
+
+// Highlighter for `.raescene` files. They're strict JSON but carry
+// Rae-UI semantics — object keys like `Layout` / `Shape` / `Sprite`
+// are authored components, and certain string values like
+// `"Horizontal"` / `"RoundedRect"` are enum members. The lists below
+// MUST stay in sync with `lib/ui/registry.rae`:
+//   * RAESCENE_COMPONENTS  ← `registeredComponentNames()` + "Children"
+//   * RAESCENE_ENUMS       ← values matched by every `parse…` helper
+// Adding a new component is a manual cross-edit; this file plus the
+// two TextMate-style grammars under `rae/tools/editor/`. See README.
+const RAESCENE_SCENE_KEYS = ["type", "version", "sceneId", "root", "nodes"];
+const RAESCENE_COMPONENTS = [
+  "Rect", "Size", "Layout", "Padding", "Margin", "SafeArea",
+  "Align", "Offset", "Constraints", "OverflowPolicy",
+  "TransformFx", "Sprite", "Text", "Shape", "Shadow", "Opacity",
+  "PointerEvents", "HitArea", "OnClick", "Button", "Active",
+  "EditorVisible", "EditorLocked",
+  "Name", "PrimaryType", "NodeId", "SceneScope", "RuntimeOnly",
+  "SceneInstance", "ImageSourceResolver", "TextBinding",
+  "MaskShape", "DataRequest", "ListView",
+  "BackgroundPan", "Carousel", "SmokeFx", "AnimFrames",
+  "AnimTrigger", "WobbleFx",
+  "Children"
+];
+const RAESCENE_ENUMS = [
+  // SizeMode
+  "Hug", "Fill", "Fixed",
+  // LayoutType
+  "Horizontal", "Vertical", "Grid", "Stack", "None",
+  // AlignKind
+  "Center", "End", "SpaceBetween", "Stretch", "Start",
+  // ShapeKind / HitAreaKind / MaskKind
+  "RoundedRect", "Circle", "Rect",
+  // ScaleMode
+  "Fit",
+  // WrapWidthMode
+  "NodeWidth",
+  // ResolverMode
+  "Random", "Hash", "Direct",
+  // TextFormat
+  "Number", "Percent1", "Coins", "HandRank", "Plain",
+  // The `type` field's canonical value.
+  "Scene"
+];
+
+function highlightRaescene(code) {
+  // `escapeHtml` runs first so user-supplied text can't break the
+  // surrounding HTML. That means by the time the regex passes run,
+  // every original `"` has become `&quot;`. All quote-matching
+  // patterns below operate on the escaped form.
+  const escaped = escapeHtml(code);
+  // Pre-compute once so the closures don't re-allocate it.
+  const Q = "&quot;";
+  // Body of a JSON string: any character that isn't part of a quote
+  // entity, with `\\X` escapes treated as a single unit so `\"`
+  // doesn't accidentally close the string.
+  const STR_BODY = "(?:\\\\.|(?!&quot;).)*";
+
+  const placeholders = [];
+  const addPlaceholder = (match, type) => {
+    const id = `___PH_${placeholders.length}___`;
+    placeholders.push({ id, text: match, type });
+    return id;
+  };
+
+  let result = escaped;
+
+  // A. Comments. JSON-with-comments is convenient when hand-authoring;
+  // strict-JSON files just won't match either form.
+  result = result.replace(/\/\*[\s\S]*?\*\//g, (m) => addPlaceholder(m, "tok-comment"));
+  result = result.replace(/\/\/.*$/gm, (m) => addPlaceholder(m, "tok-comment"));
+
+  // B. Quoted KEYS (followed by a colon). Distinguish three classes:
+  // scene-directive keys (`"type"`, `"version"`, …) → keyword,
+  // component keys (`"Layout"`, `"Shape"`, …) → type,
+  // everything else → parameter.
+  const sceneKeyRegex = new RegExp(
+    `(${Q}(?:${RAESCENE_SCENE_KEYS.join("|")})${Q})(\\s*:)`,
+    "g"
+  );
+  result = result.replace(sceneKeyRegex, (m, key, colon) =>
+    `${addPlaceholder(key, "tok-keyword")}${colon}`
+  );
+
+  const componentKeyRegex = new RegExp(
+    `(${Q}(?:${RAESCENE_COMPONENTS.join("|")})${Q})(\\s*:)`,
+    "g"
+  );
+  result = result.replace(componentKeyRegex, (m, key, colon) =>
+    `${addPlaceholder(key, "tok-type")}${colon}`
+  );
+
+  // Catch-all object keys: any quoted string immediately followed by
+  // `:`.
+  const anyKeyRegex = new RegExp(`(${Q}${STR_BODY}${Q})(\\s*:)`, "g");
+  result = result.replace(anyKeyRegex, (m, key, colon) =>
+    `${addPlaceholder(key, "tok-parameter")}${colon}`
+  );
+
+  // C. Enum string VALUES — these are quoted strings (no colon
+  // following). Keys were already consumed above into placeholders, so
+  // what's left here is a value position.
+  const enumValueRegex = new RegExp(`${Q}(?:${RAESCENE_ENUMS.join("|")})${Q}`, "g");
+  result = result.replace(enumValueRegex, (m) => addPlaceholder(m, "tok-enum-member"));
+
+  // D. Any remaining quoted strings — generic string values.
+  const stringRegex = new RegExp(`${Q}${STR_BODY}${Q}`, "g");
+  result = result.replace(stringRegex, (m) => addPlaceholder(m, "tok-string"));
+
+  // E. true / false / null and numbers.
+  result = result.replace(/\b(true|false|null)\b/g, (m) => addPlaceholder(m, "tok-number"));
+  result = result.replace(/-?\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b/g, (m) =>
+    addPlaceholder(m, "tok-number")
+  );
+
+  for (let i = placeholders.length - 1; i >= 0; i--) {
+    const p = placeholders[i];
+    const replacement = `<span class="${p.type}">${p.text}</span>`;
+    result = result.split(p.id).join(replacement);
+  }
   return result;
 }
 
