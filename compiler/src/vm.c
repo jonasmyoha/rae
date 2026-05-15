@@ -189,6 +189,24 @@ static CallFrame* vm_current_frame(VM* vm) {
   return &vm->call_stack[vm->call_stack_top - 1];
 }
 
+static const char* vm_value_type_name(ValueType type) {
+  switch (type) {
+    case VAL_INT: return "Int";
+    case VAL_FLOAT: return "Float";
+    case VAL_BOOL: return "Bool";
+    case VAL_STRING: return "String";
+    case VAL_CHAR: return "Char";
+    case VAL_NONE: return "none";
+    case VAL_OBJECT: return "object";
+    case VAL_ARRAY: return "array";
+    case VAL_BUFFER: return "buffer";
+    case VAL_REF: return "ref";
+    case VAL_ID: return "id";
+    case VAL_KEY: return "key";
+  }
+  return "unknown";
+}
+
 VMResult vm_run(VM* vm, Chunk* chunk) {
   if (!vm || !chunk) return VM_RUNTIME_ERROR;
   
@@ -227,6 +245,8 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         }
     }
 
+    size_t instruction_offset = (size_t)(vm->ip - chunk->code);
+    int instruction_line = instruction_offset < chunk->code_count ? chunk->lines[instruction_offset] : 0;
     uint8_t instruction = *vm->ip++;
     switch (instruction) {
       case OP_CONSTANT: {
@@ -378,7 +398,9 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         
         VmNativeResult result = {.has_value = false};
         if (!entry->callback(vm, &result, args, arg_count, entry->user_data)) {
-          diag_error(NULL, 0, 0, "native function reported failure");
+          char buffer[160];
+          snprintf(buffer, sizeof(buffer), "native function reported failure: %s", symbol.as.string_value.chars);
+          diag_error(NULL, 0, 0, buffer);
           return VM_RUNTIME_ERROR;
         }
         
@@ -566,7 +588,10 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
                 vm_push(vm, value_int(res));
             }
         } else {
-          diag_error(NULL, 0, 0, "arithmetic operands must be numbers");
+          char buffer[160];
+          snprintf(buffer, sizeof(buffer), "arithmetic operands must be numbers, got %s and %s",
+                   vm_value_type_name(lhs.type), vm_value_type_name(rhs.type));
+          diag_error(NULL, instruction_line, 0, buffer);
           return VM_RUNTIME_ERROR;
         }
         break;
@@ -673,8 +698,8 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
           vm_push(vm, value_none());
         } else if (target->type != VAL_OBJECT) {
           char buf[128];
-          snprintf(buf, sizeof(buf), "GET_FIELD on non-object (got type %d)", target->type);
-          diag_error(NULL, 0, 0, buf);
+          snprintf(buf, sizeof(buf), "GET_FIELD on non-object (got %s)", vm_value_type_name(target->type));
+          diag_error(NULL, instruction_line, 0, buf);
           value_free(&obj_val);
           return VM_RUNTIME_ERROR;
         } else if (field_index >= target->as.object_value.field_count) {
