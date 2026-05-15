@@ -5,68 +5,120 @@
   "root": "NowPlaying",
   "nodes": {
     "NowPlaying": {
-      "Layout": {"type": "Vertical", "gap": 16, "alignCross": "Start"},
-      "Padding": {"l": 20, "t": 20, "r": 20, "b": 20},
+      "Layout": {"type": "Vertical", "gap": 18, "alignCross": "Center"},
+      "Padding": {"l": 20, "t": 16, "r": 20, "b": 16},
       "Shape": {"kind": "Rect", "fill": {"r": 246, "g": 246, "b": 248, "a": 255}},
-      "Children": ["TopBar", "Hero", "TrackInfo", "ProgressBar", "TimeLabels"]
+      "Children": ["TopBar", "Hero", "TitleRow", "ProgressBar", "TimeLabels", "Controls"]
     },
 
     "TopBar": {
-      "Rect": {"x": 0, "y": 0, "w": 560, "h": 56},
+      "Rect": {"x": 0, "y": 0, "w": 520, "h": 40},
       "Layout": {"type": "Horizontal", "gap": 16, "alignCross": "Center"},
-      "Children": ["BackBtn", "BarTitle", "MoreBtn"]
+      "Children": ["BackBtn", "BarTitle", "QueueBtn"]
     },
     "BackBtn": {
-      "Rect": {"x": 0, "y": 0, "w": 40, "h": 40},
-      "Sprite": {"textureKey": "icon-back"},
+      "Rect": {"x": 0, "y": 0, "w": 32, "h": 32},
+      "Sprite": {"textureKey": "mat:expand_more", "tint": {"r": 30, "g": 30, "b": 36, "a": 255}},
       "OnClick": {"actionId": "nav.back"}
     },
     "BarTitle": {
-      "Rect": {"x": 0, "y": 0, "w": 380, "h": 40},
-      "Text": {"text": "NOW PLAYING", "styleId": "muted"}
+      "Rect": {"x": 0, "y": 0, "w": 392, "h": 32},
+      "Text": {"text": "Now Playing", "styleId": "primary"}
     },
-    "MoreBtn": {
-      "Rect": {"x": 0, "y": 0, "w": 40, "h": 40},
-      "Sprite": {"textureKey": "icon-more"},
-      "OnClick": {"actionId": "nav.more"}
+    "QueueBtn": {
+      "Rect": {"x": 0, "y": 0, "w": 32, "h": 32},
+      "Sprite": {"textureKey": "mat:queue_music", "tint": {"r": 30, "g": 30, "b": 36, "a": 255}},
+      "OnClick": {"actionId": "nav.queue"}
     },
 
     "Hero": {
-      "Rect": {"x": 0, "y": 0, "w": 560, "h": 480},
-      "Shape": {"kind": "RoundedRect", "radius": 28, "fill": {"r": 70, "g": 70, "b": 80, "a": 255}}
+      "Rect": {"x": 0, "y": 0, "w": 320, "h": 320},
+      "Sprite": {"textureKey": "albumCover", "tint": {"r": 255, "g": 255, "b": 255, "a": 255}}
     },
 
-    "TrackInfo": {
-      "Rect": {"x": 0, "y": 0, "w": 560, "h": 96},
-      "Layout": {"type": "Vertical", "gap": 4, "alignCross": "Start"},
+    "TitleRow": {
+      "Rect": {"x": 0, "y": 0, "w": 520, "h": 64},
+      "Layout": {"type": "Horizontal", "gap": 16, "alignCross": "Center"},
+      "Children": ["HeartBtn", "TitleBlock", "TitleMoreBtn"]
+    },
+    "HeartBtn": {
+      "Rect": {"x": 0, "y": 0, "w": 32, "h": 32},
+      "Sprite": {"textureKey": "mat:favorite_border", "tint": {"r": 30, "g": 30, "b": 36, "a": 255}},
+      "OnClick": {"actionId": "playback.like"}
+    },
+    "TitleBlock": {
+      "Rect": {"x": 0, "y": 0, "w": 392, "h": 64},
+      "Layout": {"type": "Vertical", "gap": 2, "alignCross": "Center"},
       "Children": ["TrackTitle", "TrackArtist"]
     },
     "TrackTitle": {
-      "Rect": {"x": 0, "y": 0, "w": 480, "h": 48},
-      "Text": {"text": "Charcoal", "styleId": "h1"}
+      "Rect": {"x": 0, "y": 0, "w": 392, "h": 40},
+      "Text": {"text": "Unsayable", "styleId": "h1"}
     },
     "TrackArtist": {
-      "Rect": {"x": 0, "y": 0, "w": 480, "h": 32},
-      "Text": {"text": "", "styleId": "muted"}
+      "Rect": {"x": 0, "y": 0, "w": 392, "h": 22},
+      "Text": {"text": "Brambles", "styleId": "muted"}
+    },
+    "TitleMoreBtn": {
+      "Rect": {"x": 0, "y": 0, "w": 32, "h": 32},
+      "Sprite": {"textureKey": "mat:more_horiz", "tint": {"r": 30, "g": 30, "b": 36, "a": 255}},
+      "OnClick": {"actionId": "track.more"}
     },
 
     "ProgressBar": {
-      "Rect": {"x": 0, "y": 0, "w": 560, "h": 6},
-      "Shape": {"kind": "RoundedRect", "radius": 3, "fill": {"r": 200, "g": 200, "b": 210, "a": 255}}
+      "Rect": {"x": 0, "y": 0, "w": 520, "h": 4},
+      "Shape": {"kind": "RoundedRect", "radius": 2, "fill": {"r": 200, "g": 200, "b": 210, "a": 255}}
     },
 
     "TimeLabels": {
-      "Rect": {"x": 0, "y": 0, "w": 560, "h": 28},
-      "Layout": {"type": "Horizontal", "gap": 16, "alignCross": "Center"},
+      "Rect": {"x": 0, "y": 0, "w": 520, "h": 20},
+      "Layout": {"type": "None"},
       "Children": ["TimeNow", "TimeTotal"]
     },
     "TimeNow": {
-      "Rect": {"x": 0, "y": 0, "w": 80, "h": 24},
-      "Text": {"text": "1:14", "styleId": "caption"}
+      "Rect": {"x": 0, "y": 0, "w": 60, "h": 18},
+      "Text": {"text": "1:04", "styleId": "caption"}
     },
     "TimeTotal": {
-      "Rect": {"x": 0, "y": 0, "w": 80, "h": 24},
-      "Text": {"text": "3:24", "styleId": "caption"}
+      "Rect": {"x": 460, "y": 0, "w": 60, "h": 18},
+      "Text": {"text": "2:52", "styleId": "caption"}
+    },
+
+    "Controls": {
+      "Rect": {"x": 0, "y": 0, "w": 520, "h": 80},
+      "Layout": {"type": "Horizontal", "gap": 32, "alignCross": "Center"},
+      "Children": ["ShuffleBtn", "PrevBtn", "PlayCircle", "NextBtn", "RepeatBtn"]
+    },
+    "ShuffleBtn": {
+      "Rect": {"x": 0, "y": 0, "w": 28, "h": 28},
+      "Sprite": {"textureKey": "mat:shuffle", "tint": {"r": 30, "g": 30, "b": 36, "a": 255}},
+      "OnClick": {"actionId": "playback.shuffle"}
+    },
+    "PrevBtn": {
+      "Rect": {"x": 0, "y": 0, "w": 36, "h": 36},
+      "Sprite": {"textureKey": "mat:skip_previous", "tint": {"r": 30, "g": 30, "b": 36, "a": 255}},
+      "OnClick": {"actionId": "playback.prev"}
+    },
+    "PlayCircle": {
+      "Rect": {"x": 0, "y": 0, "w": 72, "h": 72},
+      "Shape": {"kind": "Circle", "fill": {"r": 22, "g": 22, "b": 28, "a": 255}, "radius": 36},
+      "Layout": {"type": "Stack", "gap": 0, "alignCross": "Center"},
+      "OnClick": {"actionId": "playback.toggle"},
+      "Children": ["PlayIcon"]
+    },
+    "PlayIcon": {
+      "Rect": {"x": 0, "y": 0, "w": 32, "h": 32},
+      "Sprite": {"textureKey": "mat:play_arrow", "tint": {"r": 246, "g": 246, "b": 248, "a": 255}}
+    },
+    "NextBtn": {
+      "Rect": {"x": 0, "y": 0, "w": 36, "h": 36},
+      "Sprite": {"textureKey": "mat:skip_next", "tint": {"r": 30, "g": 30, "b": 36, "a": 255}},
+      "OnClick": {"actionId": "playback.next"}
+    },
+    "RepeatBtn": {
+      "Rect": {"x": 0, "y": 0, "w": 28, "h": 28},
+      "Sprite": {"textureKey": "mat:repeat", "tint": {"r": 30, "g": 30, "b": 36, "a": 255}},
+      "OnClick": {"actionId": "playback.repeat"}
     }
   }
 }

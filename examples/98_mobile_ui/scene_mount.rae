@@ -1,0 +1,84 @@
+# Scene-mount helpers with a visible-failure sentinel. `mountOrError`
+# wraps `mountSceneInstance` so a `-1` return (parse failure, missing
+# root, etc.) turns into a bright red rectangle on screen plus a log
+# entry — instead of producing a half-built subtree that renders as
+# the background clear color (the "grey screen of death").
+import core
+import string
+import ui/components
+import ui/ecs
+import ui/registry
+import ui/scene
+import ui/scene_instance
+
+# Decorate `entity` as a glaring red error block with a label. Used
+# when scene mounting fails. Caller has already set the entity's Rect/Size.
+func paintErrorBlock(world: mod UiWorld, entity: Int, label: String) pub {
+  let red: RgbaColor = { r: 220, g: 32, b: 48, a: 255 }
+  let shape: Shape = {
+    kind: ShapeKind.RoundedRect
+    fill: red
+    stroke: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
+    strokeWidth: 0.0
+    radius: 8.0
+  }
+  componentSet(this: world.shapes, entity: entity, data: shape)
+
+  let txt: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: txt, w: 480.0, h: 32.0)
+  let prefix: String = "Scene mount failed: "
+  let msg: String = prefix.concat(other: label)
+  setText(world: world, entity: txt, text: msg, styleId: "primary")
+
+  let kids: List(Int) = createList(Int)(initialCap: 1)
+  kids.add(value: txt)
+  attachChildren(world: world, parent: entity, kids: kids)
+}
+
+# Mount a scene under `mountEntity`. On failure log + paint the entity
+# as a sentinel error block and return the mount entity (callers expect
+# a non-negative id).
+func mountOrError(
+  world: mod UiWorld
+  mountEntity: Int
+  scene: view Scene
+  sceneLabel: String
+  overrides: view List(SceneOverride)
+) pub ret Int {
+  let result: Int = mountSceneInstance(
+    world: world
+    mountEntity: mountEntity
+    scene: scene
+    overrides: overrides
+  )
+  if result < 0 {
+    let label: String = sceneLabel
+    log("[scene-error] mount failed for {label} (entity {mountEntity}, scene.ok={scene.ok}, scene.errorMsg={scene.errorMsg})")
+    paintErrorBlock(world: world, entity: mountEntity, label: label)
+    ret mountEntity
+  }
+  ret result
+}
+
+# Mount a scene under a fresh entity sized w x h. No overrides. `label`
+# is a short human-readable name used in error logs / on the sentinel
+# error block when mounting fails.
+func buildSimpleSceneInstance(
+  world: mod UiWorld
+  scene: view Scene
+  w: Float
+  h: Float
+  label: String
+) pub ret Int {
+  let mount: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: mount, w: w, h: h)
+  let noOverrides: List(SceneOverride) = emptyOverrides()
+  let mounted: Int = mountOrError(
+    world: world
+    mountEntity: mount
+    scene: scene
+    sceneLabel: label
+    overrides: noOverrides
+  )
+  ret mount
+}
