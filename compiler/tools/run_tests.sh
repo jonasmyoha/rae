@@ -113,11 +113,19 @@ for TARGET in "${TARGETS[@]}"; do
         esac
         # C backend only handles 'run' or 'build' commands in this loop
         case "${CMD_ARGS[0]}" in
+            hot-reload) RUN_THIS=0 ;;
             lex|parse|format|pack) RUN_THIS=0 ;; 
         esac
     fi
 
     if [ $RUN_THIS -eq 0 ]; then
+        continue
+    fi
+
+    # Hot-reload is a Live-only mode. The special harness below always
+    # invokes `run --target live --watch`, so running it in the compiled
+    # target loop is redundant and can be flaky under full-suite load.
+    if [ "$TARGET" = "compiled" ] && [ "${CMD_ARGS[0]}" = "hot-reload" ]; then
         continue
     fi
 
@@ -172,8 +180,15 @@ for TARGET in "${TARGETS[@]}"; do
         "$BIN" run --target live --watch "$TMP_HOT_FILE" > "$TMP_OUTPUT_FILE" 2>&1 &
         HOT_PID=$!
         
-        # Wait for initial run
-        sleep 2
+        # Wait for the watcher to produce at least one program output line.
+        # Full-suite runs can be slow enough that a fixed sleep races the
+        # initial VM execution, especially on hot-reload tests with sleep().
+        for _ in {1..50}; do
+            if [ "$(grep -v "^Watching '" "$TMP_OUTPUT_FILE" | wc -l | tr -d ' ')" -gt 0 ]; then
+                break
+            fi
+            sleep 0.1
+        done
         
         # Patch
         V2_FILE="${TEST_DIRNAME}/main_v2.rae"
@@ -181,8 +196,15 @@ for TARGET in "${TARGETS[@]}"; do
             cp "$V2_FILE" "$TMP_HOT_FILE"
         fi
         
-        # Wait for patch and execution
-        sleep 5
+        # Wait for patch and execution. This is intentionally output-driven:
+        # the watcher may compile or poll slowly under full-suite load.
+        for _ in {1..100}; do
+            if grep -q "\[hot-patch\]" "$TMP_OUTPUT_FILE"; then
+                break
+            fi
+            sleep 0.1
+        done
+        sleep 1
         
         # Cleanup
         kill $HOT_PID || true
