@@ -16,8 +16,10 @@ import { BuildRunner } from "./build";
 import { StatsStore } from "./stats";
 import { readTestTree, readTestFile } from "./testFiles";
 import {
+  contentTypeForAsset,
   listExamples,
   listSimulatedDownloads,
+  readExampleAsset,
   readExampleFile,
   resolveExampleAction,
   writeExampleFile
@@ -191,6 +193,29 @@ const server = Bun.serve<SocketData>({
         return new Response(JSON.stringify({ error: "Unable to read example file" }), {
           status: 400
         });
+      }
+    }
+
+    if (url.pathname === "/api/examples/asset" && req.method === "GET") {
+      const relativePath = url.searchParams.get("path");
+      if (!relativePath) {
+        return new Response("Missing path", { status: 400 });
+      }
+      try {
+        const bytes = await readExampleAsset(examplesRoot, relativePath);
+        // Bun's `Response` accepts a Node Buffer at runtime, but the
+        // TS lib types in this project narrow `BodyInit` so that
+        // neither Buffer nor Uint8Array is accepted. Cast through
+        // `BodyInit` keeps the Response shape honest and the cast is
+        // localised to the one call that needs it.
+        return new Response(bytes as unknown as BodyInit, {
+          headers: {
+            "Content-Type": contentTypeForAsset(relativePath),
+            "Cache-Control": "no-cache"
+          }
+        });
+      } catch (error) {
+        return new Response("Unable to read example asset", { status: 400 });
       }
     }
 

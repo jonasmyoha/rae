@@ -5,8 +5,74 @@ import path from "node:path";
 import type {
   ExampleActionDescriptor,
   ExampleDescriptor,
-  ExampleFileDescriptor
+  ExampleFileDescriptor,
+  ExampleFileKind
 } from "../shared/types";
+
+/** Extension → viewer kind. Anything in `TEXT_EXTENSIONS` is fetched
+ * as UTF-8 and rendered with `highlightRae` (most types degrade
+ * gracefully to plain monospace). Image and font lists drive the
+ * inline image viewer and the "download asset" fallback. Anything
+ * not in any of these lists is considered out-of-scope and silently
+ * filtered out of the listing — keeps caches, `.DS_Store`, etc. out. */
+const TEXT_EXTENSIONS = new Set([
+  ".rae",
+  ".raescene",
+  ".md",
+  ".raepack",
+  ".json",
+  ".txt",
+  ".toml",
+  ".yaml",
+  ".yml",
+  ".glsl",
+  ".frag",
+  ".vert",
+  ".sh"
+]);
+
+const IMAGE_EXTENSIONS = new Set([
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".webp",
+  ".bmp",
+  ".svg"
+]);
+
+const FONT_EXTENSIONS = new Set([".otf", ".ttf", ".woff", ".woff2"]);
+
+function classifyExtension(ext: string): ExampleFileKind | null {
+  if (TEXT_EXTENSIONS.has(ext)) return "text";
+  if (IMAGE_EXTENSIONS.has(ext)) return "image";
+  if (FONT_EXTENSIONS.has(ext)) return "font";
+  return null;
+}
+
+const IMAGE_CONTENT_TYPE: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".bmp": "image/bmp",
+  ".svg": "image/svg+xml"
+};
+
+const FONT_CONTENT_TYPE: Record<string, string> = {
+  ".otf": "font/otf",
+  ".ttf": "font/ttf",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2"
+};
+
+export function contentTypeForAsset(relativePath: string): string {
+  const ext = path.extname(relativePath).toLowerCase();
+  return (
+    IMAGE_CONTENT_TYPE[ext] ?? FONT_CONTENT_TYPE[ext] ?? "application/octet-stream"
+  );
+}
 
 type ExampleMetadata = {
   name?: string;
@@ -137,7 +203,9 @@ function makeSingleFileExample(relativePath: string): ExampleDescriptor {
     id: relativePath.replace(/\.rae$/, ""),
     name: relativePath.replace(/\.rae$/, ""),
     entry: relativePath,
-    files: [{ path: relativePath, name: relativePath }] satisfies ExampleFileDescriptor[]
+    files: [
+      { path: relativePath, name: relativePath, kind: "text" }
+    ] satisfies ExampleFileDescriptor[]
   };
 }
 
@@ -182,12 +250,10 @@ async function collectExampleFiles(
   const entries = await safeReadDir(root);
   const files: ExampleFileDescriptor[] = [];
 
-  const ALLOWED_EXTENSIONS = [".rae", ".md", ".raepack", ".json", ".txt"];
-
   for (const entry of entries) {
     if (entry.name.startsWith(".")) continue;
     if (entry.name === "devtools.json") continue;
-    
+
     const relativePath = path.join(relativeBase, entry.name);
     const fullPath = path.join(root, entry.name);
 
@@ -199,13 +265,40 @@ async function collectExampleFiles(
 
     if (entry.isFile()) {
       const ext = path.extname(entry.name).toLowerCase();
-      if (ALLOWED_EXTENSIONS.includes(ext)) {
-        files.push({ path: relativePath, name: entry.name });
+      const kind = classifyExtension(ext);
+      if (!kind) continue;
+      const descriptor: ExampleFileDescriptor = {
+        path: relativePath,
+        name: entry.name,
+        kind
+      };
+      if (kind !== "text") {
+        try {
+          const st = await stat(fullPath);
+          descriptor.size = st.size;
+        } catch {
+          // Best-effort: leave size undefined if stat fails.
+        }
       }
+      files.push(descriptor);
     }
   }
 
-  return files.sort((a, b) => a.path.localeCompare(b.path));
+  // Sort: text files first, then images, then fonts. Within each
+  // group, sort by path so directories cluster. Keeps the source
+  // files at the top of the list where the user looks for them.
+  const groupOrder: Record<ExampleFileKind, number> = {
+    text: 0,
+    image: 1,
+    font: 2,
+    binary: 3
+  };
+  return files.sort((a, b) => {
+    const ga = groupOrder[a.kind];
+    const gb = groupOrder[b.kind];
+    if (ga !== gb) return ga - gb;
+    return a.path.localeCompare(b.path);
+  });
 }
 
 async function safeReadDir(dir: string) {
@@ -220,6 +313,17 @@ async function safeReadDir(dir: string) {
 export async function readExampleFile(root: string, relativePath: string): Promise<string> {
   const safePath = sanitizePath(root, relativePath);
   return readFile(safePath, "utf8");
+}
+
+/** Read an example asset as raw bytes — used for images and fonts
+ * that the in-browser viewer renders inline. The path is sanitized
+ * to stay inside the examples root so a crafted query can't escape. */
+export async function readExampleAsset(
+  root: string,
+  relativePath: string
+): Promise<Buffer> {
+  const safePath = sanitizePath(root, relativePath);
+  return readFile(safePath);
 }
 
 export async function writeExampleFile(root: string, relativePath: string, contents: string) {
