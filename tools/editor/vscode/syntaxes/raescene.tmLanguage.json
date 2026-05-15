@@ -1,0 +1,84 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmLanguage.json",
+  "name": "Rae Scene",
+  "scopeName": "source.raescene",
+  "fileTypes": ["raescene"],
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#scene_directive_keys" },
+    { "include": "#component_keys" },
+    { "include": "#object_keys" },
+    { "include": "#enum_values" },
+    { "include": "#strings" },
+    { "include": "#literal_constants" },
+    { "include": "#numbers" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.raescene",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.raescene",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "scene_directive_keys": {
+      "match": "\"(type|version|sceneId|root|nodes)\"\\s*(:)",
+      "captures": {
+        "1": { "name": "keyword.control.raescene" },
+        "2": { "name": "punctuation.separator.key-value.raescene" }
+      }
+    },
+    "component_keys": {
+      "match": "\"(Rect|Size|Layout|Padding|Margin|SafeArea|Align|Offset|Constraints|OverflowPolicy|TransformFx|Sprite|Text|Shape|Shadow|Opacity|PointerEvents|HitArea|OnClick|Button|Active|EditorVisible|EditorLocked|Name|PrimaryType|NodeId|SceneScope|RuntimeOnly|SceneInstance|ImageSourceResolver|TextBinding|MaskShape|DataRequest|ListView|BackgroundPan|Carousel|SmokeFx|AnimFrames|AnimTrigger|WobbleFx|Children)\"\\s*(:)",
+      "captures": {
+        "1": { "name": "storage.type.raescene" },
+        "2": { "name": "punctuation.separator.key-value.raescene" }
+      }
+    },
+    "object_keys": {
+      "match": "(\"(?:\\\\.|[^\"\\\\])*\")\\s*(:)",
+      "captures": {
+        "1": { "name": "variable.parameter.raescene" },
+        "2": { "name": "punctuation.separator.key-value.raescene" }
+      }
+    },
+    "enum_values": {
+      "match": "\"(Hug|Fill|Fixed|Horizontal|Vertical|Grid|Stack|None|Center|End|SpaceBetween|Stretch|Start|RoundedRect|Circle|Rect|Fit|NodeWidth|Random|Hash|Direct|Number|Percent1|Coins|HandRank|Plain|Scene)\"",
+      "name": "constant.language.enum.raescene"
+    },
+    "strings": {
+      "name": "string.quoted.double.raescene",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.raescene",
+          "match": "\\\\."
+        }
+      ]
+    },
+    "literal_constants": {
+      "name": "constant.language.raescene",
+      "match": "\\b(true|false|null)\\b"
+    },
+    "numbers": {
+      "name": "constant.numeric.raescene",
+      "match": "-?\\b\\d+(\\.\\d+)?([eE][+-]?\\d+)?\\b"
+    },
+    "punctuation": {
+      "patterns": [
+        { "name": "punctuation.section.dictionary.raescene", "match": "[\\{\\}]" },
+        { "name": "punctuation.section.array.raescene", "match": "[\\[\\]]" },
+        { "name": "punctuation.separator.raescene", "match": "," },
+        { "name": "punctuation.separator.key-value.raescene", "match": ":" }
+      ]
+    }
+  }
+}

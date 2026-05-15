@@ -22,11 +22,13 @@ fi
 
 echo "Installing Rae editor support..."
 
-# 1. Sublime Text
+# 1. Sublime Text — install both .rae and .raescene grammars.
 if [ -d "$(dirname "$SUBLIME_USER_DIR")" ]; then
     mkdir -p "$SUBLIME_USER_DIR"
     cp "$EDITOR_DIR/rae.sublime-syntax" "$SUBLIME_USER_DIR/"
+    cp "$EDITOR_DIR/raescene.sublime-syntax" "$SUBLIME_USER_DIR/"
     echo "  - Sublime Text syntax installed to: $SUBLIME_USER_DIR"
+    echo "    (rae.sublime-syntax + raescene.sublime-syntax)"
 else
     echo "  - Sublime Text not found or path different, skipping."
 fi
