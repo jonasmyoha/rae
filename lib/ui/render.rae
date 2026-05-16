@@ -57,15 +57,15 @@ func renderAlpha255(world: view UiWorld, entity: Int) ret Int {
 
 # Apply the chain alpha to a `RgbaColor` and return a raylib `Color`.
 func toRaylibColor(c: RgbaColor, chain255: Int) ret Color {
-  let combinedA: Int = chain255
-  ret Color { r: 30, g: 30, b: 36, a: combinedA }
+  let combinedA: Int = (c.a * chain255) / 255
+  ret Color { r: c.r, g: c.g, b: c.b, a: combinedA }
 }
 
 # Paint Shape variants on `entity` using the world transform / size
 # already on it. Caller has already verified visibility + alpha > 0.
 func paintShape(world: view UiWorld, entity: Int, wt: view WorldTransform, cr: view ComputedRect, chain255: Int) {
   let sh: Shape = componentGet(this: world.shapes, entity: entity)
-  let fill: Color = { r: 246, g: 246, b: 248, a: chain255 }
+  let fill: Color = toRaylibColor(c: sh.fill, chain255: chain255)
 
   if sh.kind is ShapeKind.Rect {
     drawRectangle(
