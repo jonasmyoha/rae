@@ -207,6 +207,23 @@ static const char* vm_value_type_name(ValueType type) {
   return "unknown";
 }
 
+static const char* vm_chunk_debug_name(const Chunk* chunk, size_t offset) {
+  if (!chunk || chunk->functions_count == 0) {
+    return "<top-level>";
+  }
+
+  const char* name = "<top-level>";
+  size_t best_offset = 0;
+  for (size_t i = 0; i < chunk->functions_count; ++i) {
+    FunctionDebugInfo* info = &chunk->functions[i];
+    if (info->offset <= offset && info->offset >= best_offset) {
+      name = info->name ? info->name : "<function>";
+      best_offset = info->offset;
+    }
+  }
+  return name;
+}
+
 VMResult vm_run(VM* vm, Chunk* chunk) {
   if (!vm || !chunk) return VM_RUNTIME_ERROR;
   
@@ -445,7 +462,11 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         Value val = vm_pop(vm);
         if (frame->locals[slot].type == VAL_REF) {
           if (frame->locals[slot].as.ref_value.kind == REF_VIEW) {
-            diag_error(NULL, 0, 0, "cannot assign to a read-only 'view' reference");
+            char buffer[192];
+            snprintf(buffer, sizeof(buffer),
+                     "cannot assign to a read-only 'view' reference (chunk %s, bytecode offset %zu)",
+                     vm_chunk_debug_name(chunk, instruction_offset), instruction_offset);
+            diag_error(NULL, instruction_line, 0, buffer);
             value_free(&val);
             return VM_RUNTIME_ERROR;
           }
