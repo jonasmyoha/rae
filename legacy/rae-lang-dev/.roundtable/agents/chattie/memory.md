@@ -27,3 +27,9 @@
   - clear or avoid reusing stale `decl_link`/resolved-type state,
   - rerun call resolution per specialization before C emission,
   - then fix the 1-2 remaining emitter bugs.
+- 2026-05-16 mobile UI regression: commit `64cc50b` fixed Live by flattening UI colors and removing a rounded shape, but this regressed the MGMT cover/dark colors and bottom play-area background.
+- Current Live failure now reports `cannot assign to a read-only 'view' reference`; next fix should restore visual code first, then debug VM view assignment/root cause instead of masking UI component reads.
+- Ownership recommendation: Chattie should fix own regression; Clo can advise only if the VM lvalue/view semantics need compiler-level repair.
+- Duplicate roundtable prompt confirms the same decision: restore mobile UI visuals, then fix Live VM view/reference semantics rather than using UI workarounds.
+- Implemented handoff plan: restored `toRaylibColor`, restored `setShapeRounded` in mobile UI pills, and added VM read-only view diagnostic context (`chunk main`, bytecode offset, source line).
+- Verification: sequential `snapshot.sh` Compiled captures show real MGMT colors and rounded mini-player backgrounds; Live still deferred but now reports `examples/98_mobile_ui/main.rae:100` / bytecode offset `29559`; full `make test` passed.
