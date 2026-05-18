@@ -676,10 +676,14 @@ bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       free(arg_types);
 
       // Compile the receiver ('this')
-      
-      // We need to decide whether to pass the receiver as a reference or a value.
-      // For now, in the VM, we often prefer mod reference for potential mutation
-      // unless it's a primitive.
+      //
+      // We push a mod-ref so the method can mutate the receiver in place
+      // (`add(this: mod List(T), ...)` etc.). When the receiver is a member
+      // access like `reg.entries.add(...)`, naïve `compile_expr` would emit
+      // OP_GET_FIELD which value-copies the field — mutations inside the
+      // method then operate on the copy and silently fail to propagate
+      // back to the parent object. emit_lvalue_ref produces a real
+      // OP_MOD_FIELD ref instead, keeping the mutation path live.
       if (receiver->kind == AST_EXPR_IDENT) {
           int slot = compiler_find_local(compiler, receiver->as.ident);
           if (slot >= 0) {
@@ -689,6 +693,8 @@ bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
           } else {
               if (!compile_expr(compiler, receiver)) return false;
           }
+      } else if (receiver->kind == AST_EXPR_MEMBER) {
+          if (!emit_lvalue_ref(compiler, receiver, true)) return false;
       } else {
           if (!compile_expr(compiler, receiver)) return false;
           // If receiver is an rvalue, we might still need to wrap it if the func expects a ref
