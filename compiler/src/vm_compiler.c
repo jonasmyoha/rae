@@ -150,30 +150,17 @@ FunctionEntry* function_table_find(FunctionTable* table, Str name) {
 }
 
 bool vm_is_primitive_type(Str type_name) {
-  return str_eq_cstr(type_name, "Int64") ||
-         str_eq_cstr(type_name, "Int") ||
-         str_eq_cstr(type_name, "Float64") ||
-         str_eq_cstr(type_name, "Float") ||
-         str_eq_cstr(type_name, "Bool") ||
-         str_eq_cstr(type_name, "Char") ||
-         str_eq_cstr(type_name, "Char32") ||
-         str_eq_cstr(type_name, "String") ||
-         str_eq_cstr(type_name, "Array") ||
-         str_eq_cstr(type_name, "Buffer") ||
+  return str_eq_cstr(type_name, "Int64") || 
+         str_eq_cstr(type_name, "Int") || 
+         str_eq_cstr(type_name, "Float64") || 
+         str_eq_cstr(type_name, "Float") || 
+         str_eq_cstr(type_name, "Bool") || 
+         str_eq_cstr(type_name, "Char") || 
+         str_eq_cstr(type_name, "Char32") || 
+         str_eq_cstr(type_name, "String") || 
+         str_eq_cstr(type_name, "Array") || 
+         str_eq_cstr(type_name, "Buffer") || 
          str_eq_cstr(type_name, "Any");
-}
-
-// True for any type that should flow through the Live ABI as a value rather
-// than an implicit view reference. Primitives are always value-typed; user
-// enums are value-typed too (operates on resolved/post-monomorphisation names,
-// so a raw generic `T` is never seen here). Without this, `func f(s: Screen)`
-// would receive `Screen` as a `view` ref and the caller's slot would carry a
-// `VAL_REF{REF_VIEW}` — which then trips the read-only diagnostic on the next
-// `OP_SET_LOCAL` to the same slot.
-bool vm_is_value_type(CompilerContext* ctx, Str type_name) {
-  if (vm_is_primitive_type(type_name)) return true;
-  if (ctx && enum_table_find(&ctx->enums, type_name)) return true;
-  return false;
 }
 
 Str strip_generics(Str type_name) {
@@ -451,9 +438,9 @@ int enum_entry_find_member(const EnumEntry* entry, Str name) {
   return -1;
 }
 
-static Str get_type_name_with_refs(CompilerContext* ctx, const AstTypeRef* type) {
+static Str get_type_name_with_refs(const AstTypeRef* type) {
     if (!type) return (Str){0};
-
+    
     char buffer[256];
     int offset = 0;
     Str base = get_base_type_name(type);
@@ -464,9 +451,8 @@ static Str get_type_name_with_refs(CompilerContext* ctx, const AstTypeRef* type)
         offset += snprintf(buffer + offset, sizeof(buffer) - offset, "mod ");
     } else if (type->is_val) {
         offset += snprintf(buffer + offset, sizeof(buffer) - offset, "val ");
-    } else if (!vm_is_value_type(ctx, base)) {
-        // Semantically view by default for non-value types (structs, lists,
-        // maps, etc). Primitives and user enums pass by value.
+    } else if (!vm_is_primitive_type(base)) {
+        // Semantically view by default for non-primitives
         offset += snprintf(buffer + offset, sizeof(buffer) - offset, "view ");
     }
     
@@ -547,7 +533,7 @@ bool collect_metadata(CompilerContext* ctx, const char* file_path, const AstModu
 
           }
 
-          param_types[i] = get_type_name_with_refs(ctx, p->type);
+          param_types[i] = get_type_name_with_refs(p->type);
 
           p = p->next;
 
@@ -571,7 +557,7 @@ bool collect_metadata(CompilerContext* ctx, const char* file_path, const AstModu
 
           }
 
-          return_type = get_type_name_with_refs(ctx, decl->as.func_decl.returns->type);
+          return_type = get_type_name_with_refs(decl->as.func_decl.returns->type);
 
       }
 
@@ -1252,7 +1238,7 @@ bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr, bool is_spawn
         } else {
             // Fallback for non-extern calls without full signature (shouldn't happen with entry)
             Str arg_type = vm_infer_expr_type(compiler, arg->value);
-            if (arg_type.len > 0 && !vm_is_value_type(compiler->compiler_ctx, arg_type)) {
+            if (arg_type.len > 0 && !vm_is_primitive_type(arg_type)) {
                 is_ref_param = true;
             }
         }
@@ -1282,7 +1268,7 @@ bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr, bool is_spawn
             }
         } else {
             Str arg_type = vm_infer_expr_type(compiler, arg->value);
-            if (arg_type.len > 0 && !vm_is_value_type(compiler->compiler_ctx, arg_type)) {
+            if (arg_type.len > 0 && !vm_is_primitive_type(arg_type)) {
                 is_ref_param = true;
             }
         }
@@ -1426,8 +1412,8 @@ static bool compile_function(BytecodeCompiler* compiler, const AstDecl* decl) {
         } else {
             bool is_val = param->type->is_val;
             bool is_explicit_view = param->type->is_view;
-            bool is_value = vm_is_value_type(compiler->compiler_ctx, type_name);
-            is_ptr = (is_mod || is_explicit_view || (!is_val && !is_value));
+            bool is_primitive = vm_is_primitive_type(type_name);
+            is_ptr = (is_mod || is_explicit_view || (!is_val && !is_primitive));
         }
     }
 
