@@ -138,6 +138,50 @@ func addSpriteOverride(list: mod List(SceneOverride), nodeId: String, value: Str
   )
 }
 
+# Sprite tint override. Encodes the colour as `"r,g,b,a"` because the
+# override value channel is currently a plain String — applyOverride
+# parses the four numeric components back out.
+func addSpriteTintOverride(list: mod List(SceneOverride), nodeId: String, r: Int, g: Int, b: Int, a: Int) {
+  let spriteKey: String = "Sprite"
+  let tintField: String = "tint"
+  let comma: String = ","
+  let value: String = r.toString().concat(other: comma).concat(other: g.toString()).concat(other: comma).concat(other: b.toString()).concat(other: comma).concat(other: a.toString())
+  addOverride(
+    list: list
+    nodeId: nodeId
+    componentName: spriteKey
+    fieldName: tintField
+    value: value
+  )
+}
+
+# Text styleId override (e.g. swap "tabInactive" -> "tabActive").
+func addTextStyleOverride(list: mod List(SceneOverride), nodeId: String, value: String) {
+  let textKey: String = "Text"
+  let styleField: String = "styleId"
+  addOverride(
+    list: list
+    nodeId: nodeId
+    componentName: textKey
+    fieldName: styleField
+    value: value
+  )
+}
+
+# OnClick actionId override. Used when a scene declares a placeholder
+# action and the host wants to bind a real one at mount time.
+func addOnClickActionOverride(list: mod List(SceneOverride), nodeId: String, value: String) {
+  let onClickKey: String = "OnClick"
+  let actionField: String = "actionId"
+  addOverride(
+    list: list
+    nodeId: nodeId
+    componentName: onClickKey
+    fieldName: actionField
+    value: value
+  )
+}
+
 # -----------------------------------------------------------------
 # Mount logic
 # -----------------------------------------------------------------
@@ -310,10 +354,43 @@ func mountSceneInstance(
 # Other field types are no-ops — the caller is expected not to pass
 # overrides for unsupported fields. Extending this is a per-field
 # addition; the dispatch is just a name match.
+# Parse `"r,g,b,a"` into an RgbaColor. The override channel is a plain
+# String so colours encode as comma-separated ints. Missing components
+# default to 255 (alpha) / 0 (rgb). Uses `rae_str_to_i64` directly
+# rather than the `String.toInt()` method because the C backend's
+# method-overload resolution currently confuses `String.toInt` with
+# `Float.toInt` when chained off `List(String).get`.
+func parseRgbaString(s: view String) ret RgbaColor {
+  let comma: String = ","
+  let parts: List(String) = s.split(sep: comma)
+  let r: Int = 0
+  let g: Int = 0
+  let b: Int = 0
+  let a: Int = 255
+  if parts.length > 0 {
+    let rs: String = parts.get(index: 0)
+    r = rae_str_to_i64(s: rs)
+  }
+  if parts.length > 1 {
+    let gs: String = parts.get(index: 1)
+    g = rae_str_to_i64(s: gs)
+  }
+  if parts.length > 2 {
+    let bs: String = parts.get(index: 2)
+    b = rae_str_to_i64(s: bs)
+  }
+  if parts.length > 3 {
+    let as: String = parts.get(index: 3)
+    a = rae_str_to_i64(s: as)
+  }
+  ret RgbaColor { r: r, g: g, b: b, a: a }
+}
+
 func applyOverride(world: mod UiWorld, entity: Int, override: view SceneOverride) {
   let textKey: String = "Text"
   let spriteKey: String = "Sprite"
   let activeKey: String = "Active"
+  let onClickKey: String = "OnClick"
 
   if override.componentName.equals(other: textKey) {
     let textField: String = "text"
@@ -323,6 +400,19 @@ func applyOverride(world: mod UiWorld, entity: Int, override: view SceneOverride
         let updated: Text = {
           text: override.valueString
           styleId: cur.styleId
+          wrapWidthMode: cur.wrapWidthMode
+        }
+        componentSet(this: world.texts, entity: entity, data: updated)
+      }
+      ret
+    }
+    let styleField: String = "styleId"
+    if override.fieldName.equals(other: styleField) {
+      if componentHas(this: world.texts, entity: entity) {
+        let cur: Text = componentGet(this: world.texts, entity: entity)
+        let updated: Text = {
+          text: cur.text
+          styleId: override.valueString
           wrapWidthMode: cur.wrapWidthMode
         }
         componentSet(this: world.texts, entity: entity, data: updated)
@@ -345,6 +435,40 @@ func applyOverride(world: mod UiWorld, entity: Int, override: view SceneOverride
           hasNineSlice: cur.hasNineSlice
         }
         componentSet(this: world.sprites, entity: entity, data: updated)
+      }
+      ret
+    }
+    let tintField: String = "tint"
+    if override.fieldName.equals(other: tintField) {
+      if componentHas(this: world.sprites, entity: entity) {
+        let cur: Sprite = componentGet(this: world.sprites, entity: entity)
+        let newTint: RgbaColor = parseRgbaString(s: override.valueString)
+        let updated: Sprite = {
+          textureKey: cur.textureKey
+          tint: newTint
+          scaleMode: cur.scaleMode
+          tileScale: cur.tileScale
+          nineSlice: cur.nineSlice
+          hasNineSlice: cur.hasNineSlice
+        }
+        componentSet(this: world.sprites, entity: entity, data: updated)
+      }
+    }
+    ret
+  }
+
+  if override.componentName.equals(other: onClickKey) {
+    let actionField: String = "actionId"
+    if override.fieldName.equals(other: actionField) {
+      if componentHas(this: world.onClicks, entity: entity) {
+        let cur: OnClick = componentGet(this: world.onClicks, entity: entity)
+        let updated: OnClick = {
+          actionId: override.valueString
+          actionIdDouble: cur.actionIdDouble
+          actionIdTriple: cur.actionIdTriple
+          maxDelayMs: cur.maxDelayMs
+        }
+        componentSet(this: world.onClicks, entity: entity, data: updated)
       }
     }
     ret
