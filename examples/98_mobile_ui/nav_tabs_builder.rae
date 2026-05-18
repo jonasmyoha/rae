@@ -1,0 +1,127 @@
+# Bottom nav-tabs, built in code instead of from a `.raescene`. Code is
+# the easier home for this row because the active tab needs to know
+# which screen is currently visible, and the override system doesn't
+# yet support styleId / tint changes.
+#
+# Layout: a single horizontal row split into 4 equal-width tabs. Each
+# tab is a vertical column with an icon on top and a label below; the
+# whole tab carries an `OnClick` action that the screen router handles
+# (`nav.home`, `nav.library`, …) — see `screen_router.rae`.
+import core
+import string
+import ui/components
+import ui/ecs
+
+let tabActiveColor: RgbaColor = { r: 30, g: 30, b: 36, a: 255 }
+let tabInactiveColor: RgbaColor = { r: 130, g: 130, b: 140, a: 255 }
+
+# Build a single nav tab. `active` toggles both the icon tint and the
+# label style; everything else is positional.
+func buildNavTab(
+  world: mod UiWorld
+  w: Float
+  iconKey: String
+  label: String
+  actionId: String
+  active: Bool
+) pub ret Int {
+  let tab: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: tab, w: w, h: navTabsH)
+  setLayout(world: world, entity: tab, kind: LayoutType.Vertical, gap: 4.0, alignCross: AlignKind.Center)
+  setOnClick(world: world, entity: tab, actionId: actionId)
+
+  let tint: RgbaColor = tabInactiveColor
+  if active {
+    tint = tabActiveColor
+  }
+
+  let icon: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: icon, w: 24.0, h: 24.0)
+  setSprite(world: world, entity: icon, key: iconKey, tint: tint)
+
+  let lbl: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: lbl, w: w, h: 16.0)
+  let style: String = "tabInactive"
+  if active {
+    style = "tabActive"
+  }
+  setText(world: world, entity: lbl, text: label, styleId: style)
+
+  let kids: List(Int) = createList(Int)(initialCap: 2)
+  kids.add(value: icon)
+  kids.add(value: lbl)
+  attachChildren(world: world, parent: tab, kids: kids)
+  ret tab
+}
+
+# Bottom nav row for the current screen. The screen's enum value
+# decides which tab renders as active. Home/Search/Library/Profile —
+# only Home and Library actually switch screens today; Search/Profile
+# are placeholders that the router currently no-ops.
+func buildNavTabsForScreen(world: mod UiWorld, activeTab: Screen) pub ret Int {
+  let bar: Int = createEntity(world: world)
+  let barW: Float = screenW - outerPad * 2.0
+  setRectFixed(world: world, entity: bar, w: barW, h: navTabsH)
+  setLayout(world: world, entity: bar, kind: LayoutType.Horizontal, gap: 0.0, alignCross: AlignKind.Center)
+
+  let tabW: Float = barW / 4.0
+
+  let homeActive: Bool = activeTab is Screen.NowPlaying
+  let libraryActive: Bool = activeTab is Screen.Album
+
+  let homeKey: String = "mat:home"
+  let homeLabel: String = "Home"
+  let homeAction: String = "nav.home"
+  let homeTab: Int = buildNavTab(
+    world: world
+    w: tabW
+    iconKey: homeKey
+    label: homeLabel
+    actionId: homeAction
+    active: homeActive
+  )
+
+  let searchKey: String = "mat:search"
+  let searchLabel: String = "Search"
+  let searchAction: String = "nav.search"
+  let searchTab: Int = buildNavTab(
+    world: world
+    w: tabW
+    iconKey: searchKey
+    label: searchLabel
+    actionId: searchAction
+    active: false
+  )
+
+  let libraryKey: String = "mat:library_music"
+  let libraryLabel: String = "Library"
+  let libraryAction: String = "nav.library"
+  let libraryTab: Int = buildNavTab(
+    world: world
+    w: tabW
+    iconKey: libraryKey
+    label: libraryLabel
+    actionId: libraryAction
+    active: libraryActive
+  )
+
+  let profileKey: String = "mat:person"
+  let profileLabel: String = "Profile"
+  let profileAction: String = "nav.profile"
+  let profileTab: Int = buildNavTab(
+    world: world
+    w: tabW
+    iconKey: profileKey
+    label: profileLabel
+    actionId: profileAction
+    active: false
+  )
+
+  let kids: List(Int) = createList(Int)(initialCap: 4)
+  kids.add(value: homeTab)
+  kids.add(value: searchTab)
+  kids.add(value: libraryTab)
+  kids.add(value: profileTab)
+  attachChildren(world: world, parent: bar, kids: kids)
+  ret bar
+}
