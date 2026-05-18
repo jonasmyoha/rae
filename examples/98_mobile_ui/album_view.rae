@@ -10,9 +10,11 @@ import ui/ecs
 import ui/scene
 import ui/scene_instance
 
-# Top bar for the album view: back arrow on the left, search magnifier
-# on the right. No middle title text. The Stack layout combined with
-# per-child Align lets us pin one child to Start and another to End.
+# Top bar for the album view: page title on the left, search magnifier
+# on the right. No back-arrow — global navigation is the bottom
+# nav-tabs (see `nav_tabs_builder.rae`). The Stack layout combined with
+# per-child Align lets us pin the title to Start and the search icon to
+# End in a single bar.
 func buildAlbumTopBar(world: mod UiWorld) pub ret Int {
   let bar: Int = createEntity(world: world)
   let barW: Float = screenW - outerPad * 2.0
@@ -20,17 +22,17 @@ func buildAlbumTopBar(world: mod UiWorld) pub ret Int {
   let layStack: LayoutType = LayoutType.Stack
   setLayout(world: world, entity: bar, kind: layStack, gap: 0.0, alignCross: AlignKind.Center)
 
-  let backBtn: Int = createEntity(world: world)
-  setRectFixed(world: world, entity: backBtn, w: 32.0, h: 32.0)
-  setSprite(world: world, entity: backBtn, key: "mat:arrow_back", tint: iconTint)
-  setOnClick(world: world, entity: backBtn, actionId: "nav.back")
+  let title: Int = createEntity(world: world)
+  let titleW: Float = barW - 32.0 - 16.0
+  setRectFixed(world: world, entity: title, w: titleW, h: 32.0)
+  setText(world: world, entity: title, text: "Library", styleId: "topBarTitle")
   let alignLeft: Align = {
     x: AlignKind.Start
     y: AlignKind.Center
     hasX: true
     hasY: true
   }
-  componentSet(this: world.aligns, entity: backBtn, data: alignLeft)
+  componentSet(this: world.aligns, entity: title, data: alignLeft)
 
   let searchBtn: Int = createEntity(world: world)
   setRectFixed(world: world, entity: searchBtn, w: 32.0, h: 32.0)
@@ -45,7 +47,7 @@ func buildAlbumTopBar(world: mod UiWorld) pub ret Int {
   componentSet(this: world.aligns, entity: searchBtn, data: alignRight)
 
   let kids: List(Int) = createList(Int)(initialCap: 2)
-  kids.add(value: backBtn)
+  kids.add(value: title)
   kids.add(value: searchBtn)
   attachChildren(world: world, parent: bar, kids: kids)
   ret bar
@@ -304,14 +306,7 @@ func buildAlbumWorld(scenes: view AlbumScenes) pub ret UiWorld {
     h: miniPlayerH
     label: miniLabelAl
   )
-  let navLabelAl: String = "nav-tabs"
-  let navTabs: Int = buildSimpleSceneInstance(
-    world: world
-    scene: scenes.navTabs
-    w: contentW
-    h: navTabsH
-    label: navLabelAl
-  )
+  let navTabs: Int = buildNavTabsForScreen(world: world, activeTab: Screen.Album)
 
   let kids: List(Int) = createList(Int)(initialCap: 8)
   kids.add(value: topBar)
