@@ -43,6 +43,7 @@ bool str_matches(Str a, Str b);
 bool is_stdlib_module(Str name);
 bool is_module_import(BytecodeCompiler* compiler, Str name);
 bool vm_is_primitive_type(Str type_name);
+bool vm_is_value_type(CompilerContext* ctx, Str type_name);
 Str strip_generics(Str type_name);
 Str get_base_type_name_str(Str type_name);
 bool vm_types_match(Str entry_type_raw, Str call_type_raw);
