@@ -943,7 +943,18 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         }
         Value obj = value_object(field_count, type_name);
         for (int i = (int)field_count - 1; i >= 0; --i) {
-          obj.as.object_value.fields[i] = vm_pop(vm);
+          Value field = vm_pop(vm);
+          // A struct literal stores VALUES in its fields, never references —
+          // otherwise refs to the constructor's caller-local arguments
+          // outlive the caller's frame and dangle. Deref any VAL_REF here
+          // so e.g. `Shape { fill: fill }` where `fill` is a view param
+          // stores a self-contained value, not a ref into freed storage.
+          while (field.type == VAL_REF) {
+            Value deref = value_copy(field.as.ref_value.target);
+            value_free(&field);
+            field = deref;
+          }
+          obj.as.object_value.fields[i] = field;
         }
         vm_push(vm, obj);
         break;
