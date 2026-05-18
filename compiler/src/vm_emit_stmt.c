@@ -141,13 +141,15 @@ bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
       }
 
       if (!stmt->as.let_stmt.value) {
-        // Automatically initialize to default value
+        // Automatically initialize to default value. OP_BIND_LOCAL frees
+        // and replaces the slot directly without going through the
+        // reference-aware OP_SET_LOCAL path — `let` is initialization,
+        // not assignment-through-reference.
         if (!emit_default_value(compiler, stmt->as.let_stmt.type, (int)stmt->line)) {
           return false;
         }
-        emit_op(compiler, OP_SET_LOCAL, (int)stmt->line);
+        emit_op(compiler, OP_BIND_LOCAL, (int)stmt->line);
         emit_uint32(compiler, (uint32_t)slot, (int)stmt->line);
-        emit_op(compiler, OP_POP, (int)stmt->line);
       } else if (stmt->as.let_stmt.is_bind) {
           if (!stmt->as.let_stmt.type || 
               (!stmt->as.let_stmt.type->is_view && 
@@ -232,11 +234,15 @@ bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
             return false;
           }
           compiler->expected_type = saved_expected;
-          emit_op(compiler, OP_SET_LOCAL, (int)stmt->line);
+          // `let x: T = expr` is initialization, not assignment-through-ref.
+          // OP_BIND_LOCAL frees the slot and installs the fresh value
+          // directly. Closes a class of bug where a slot reused from a
+          // previous scope still holds a VAL_REF{REF_VIEW} and would
+          // otherwise trip vm.c:464's read-only diagnostic.
+          emit_op(compiler, OP_BIND_LOCAL, (int)stmt->line);
           emit_uint32(compiler, (uint32_t)slot, (int)stmt->line);
-          emit_op(compiler, OP_POP, (int)stmt->line);
       }
-      
+
       return true;
     }
     case AST_STMT_EXPR:
