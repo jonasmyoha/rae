@@ -1247,7 +1247,8 @@ static const int g_rae_font_codepoints[] = {
     0xe044, /* skip_next */
     0xe045, /* skip_previous */
     0xe047, /* stop */
-    0xe80e  /* whatshot */
+    0xe80e, /* whatshot */
+    0xe7fd  /* person */
 };
 #define RAE_FONT_CODEPOINT_COUNT ((int)(sizeof(g_rae_font_codepoints)/sizeof(g_rae_font_codepoints[0])))
 
