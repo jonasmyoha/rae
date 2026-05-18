@@ -1,33 +1,31 @@
-# Bottom nav-tabs, built in code instead of from a `.raescene`. Code is
-# the easier home for this row because the active tab needs to know
-# which screen is currently visible, and the override system doesn't
-# yet support styleId / tint changes.
+# Bottom nav-tabs row. Each tab is an instance of
+# `nav-tab.raescene` — a reusable button scene containing an icon
+# and a label inside a container that carries the `OnClick`. The
+# scene declares placeholder defaults (`mat:home`, grey tint,
+# "Tab", styleId "tabInactive", action "nav.unset") and we apply
+# per-instance overrides at mount time to set the real icon key,
+# label text, tint, styleId, and action.
 #
-# Layout: a single horizontal row split into 4 equal-width tabs. Each
-# tab is a vertical column with an icon on top and a label below. The
-# tab parent AND each visible child (icon + label) carry the same
-# `OnClick` so the hit-test reliably finds an OnClick wherever the user
-# taps — the recursive hit-test returns the deepest OnClick first.
+# Active-tab styling stays in code (one tab is "active" based on
+# `currentScreen`) because the override system is the cleanest place
+# to vary state-dependent styling: the same scene file describes
+# both the active and inactive look, and overrides decide which.
 import core
 import string
 import raylib
 import ui/components
 import ui/ecs
+import ui/scene
+import ui/scene_instance
 
-let tabActiveColor: RgbaColor = { r: 30, g: 30, b: 36, a: 255 }
-let tabInactiveColor: RgbaColor = { r: 130, g: 130, b: 140, a: 255 }
 let tabIconSize: Float = 32.0
-let tabLabelH: Float = 18.0
-let tabLabelFontSize: Float = 14.0
-let tabLabelHPadding: Float = 4.0
 
-# Build a single nav tab. `active` toggles both the icon tint and the
-# label style; everything else is positional. The label rect is sized
-# to the actual measured text so `alignCross: Center` of the parent
-# Vertical layout puts it visually centred — using a tab-wide rect
-# would left-align the text inside the rect.
-func buildNavTab(
+# Mount one nav-tab scene as a child of the bar. `active` picks the
+# active or inactive icon tint and label style; everything else is
+# per-instance.
+func mountNavTab(
   world: mod UiWorld
+  scene: view Scene
   w: Float
   iconKey: String
   label: String
@@ -36,62 +34,61 @@ func buildNavTab(
 ) pub ret Int {
   let tab: Int = createEntity(world: world)
   setRectFixed(world: world, entity: tab, w: w, h: navTabsH)
-  setLayout(world: world, entity: tab, kind: LayoutType.Vertical, gap: 6.0, alignCross: AlignKind.Center)
-  setOnClick(world: world, entity: tab, actionId: actionId)
 
-  let tint: RgbaColor = tabInactiveColor
+  let overrides: List(SceneOverride) = emptyOverrides()
+  let iconNode: String = "Icon"
+  let labelNode: String = "Label"
+  let rootNode: String = "TabRoot"
+
+  addSpriteOverride(list: overrides, nodeId: iconNode, value: iconKey)
+  addTextOverride(list: overrides, nodeId: labelNode, value: label)
+  addOnClickActionOverride(list: overrides, nodeId: rootNode, value: actionId)
+
   if active {
-    tint = tabActiveColor
+    addSpriteTintOverride(list: overrides, nodeId: iconNode, r: 30, g: 30, b: 36, a: 255)
+    let activeStyle: String = "tabActive"
+    addTextStyleOverride(list: overrides, nodeId: labelNode, value: activeStyle)
+  } else {
+    addSpriteTintOverride(list: overrides, nodeId: iconNode, r: 130, g: 130, b: 140, a: 255)
+    let inactiveStyle: String = "tabInactive"
+    addTextStyleOverride(list: overrides, nodeId: labelNode, value: inactiveStyle)
   }
 
-  let icon: Int = createEntity(world: world)
-  setRectFixed(world: world, entity: icon, w: tabIconSize, h: tabIconSize)
-  setSprite(world: world, entity: icon, key: iconKey, tint: tint)
-  setOnClick(world: world, entity: icon, actionId: actionId)
-
-  let style: String = "tabInactive"
-  if active {
-    style = "tabActive"
-  }
-  let measured: Int = measureTextWithFont(
-    slot: 0
-    text: label
-    fontSize: tabLabelFontSize
-    spacing: 1.0
+  let sceneLabel: String = "nav-tab"
+  let mounted: Int = mountOrError(
+    world: world
+    mountEntity: tab
+    scene: scene
+    sceneLabel: sceneLabel
+    overrides: overrides
   )
-  let labelW: Float = measured.toFloat() + tabLabelHPadding * 2.0
-  let lbl: Int = createEntity(world: world)
-  setRectFixed(world: world, entity: lbl, w: labelW, h: tabLabelH)
-  setText(world: world, entity: lbl, text: label, styleId: style)
-  setOnClick(world: world, entity: lbl, actionId: actionId)
-
-  let kids: List(Int) = createList(Int)(initialCap: 2)
-  kids.add(value: icon)
-  kids.add(value: lbl)
-  attachChildren(world: world, parent: tab, kids: kids)
   ret tab
 }
 
-# Bottom nav row for the current screen. The screen's enum value
-# decides which tab renders as active. Home/Search/Library/Profile —
-# only Home and Library actually switch screens today; Search/Profile
-# are placeholders that the router currently no-ops.
-func buildNavTabsForScreen(world: mod UiWorld, activeTab: Screen) pub ret Int {
+# Bottom nav row for the current screen. `activeTab` picks which of
+# the four tabs renders with the active styling. Home and Library
+# actually switch screens; Search and Profile are placeholders the
+# router currently no-ops.
+func buildNavTabsForScreen(
+  world: mod UiWorld
+  activeTab: Screen
+  scenes: view AlbumScenes
+) pub ret Int {
   let bar: Int = createEntity(world: world)
   let barW: Float = screenW - outerPad * 2.0
   setRectFixed(world: world, entity: bar, w: barW, h: navTabsH)
   setLayout(world: world, entity: bar, kind: LayoutType.Horizontal, gap: 0.0, alignCross: AlignKind.Center)
 
   let tabW: Float = barW / 4.0
-
   let homeActive: Bool = activeTab is Screen.NowPlaying
   let libraryActive: Bool = activeTab is Screen.Album
 
   let homeKey: String = "mat:home"
   let homeLabel: String = "Home"
   let homeAction: String = "nav.home"
-  let homeTab: Int = buildNavTab(
+  let homeTab: Int = mountNavTab(
     world: world
+    scene: scenes.navTab
     w: tabW
     iconKey: homeKey
     label: homeLabel
@@ -102,8 +99,9 @@ func buildNavTabsForScreen(world: mod UiWorld, activeTab: Screen) pub ret Int {
   let searchKey: String = "mat:search"
   let searchLabel: String = "Search"
   let searchAction: String = "nav.search"
-  let searchTab: Int = buildNavTab(
+  let searchTab: Int = mountNavTab(
     world: world
+    scene: scenes.navTab
     w: tabW
     iconKey: searchKey
     label: searchLabel
@@ -114,8 +112,9 @@ func buildNavTabsForScreen(world: mod UiWorld, activeTab: Screen) pub ret Int {
   let libraryKey: String = "mat:library_music"
   let libraryLabel: String = "Library"
   let libraryAction: String = "nav.library"
-  let libraryTab: Int = buildNavTab(
+  let libraryTab: Int = mountNavTab(
     world: world
+    scene: scenes.navTab
     w: tabW
     iconKey: libraryKey
     label: libraryLabel
@@ -126,8 +125,9 @@ func buildNavTabsForScreen(world: mod UiWorld, activeTab: Screen) pub ret Int {
   let profileKey: String = "mat:person"
   let profileLabel: String = "Profile"
   let profileAction: String = "nav.profile"
-  let profileTab: Int = buildNavTab(
+  let profileTab: Int = mountNavTab(
     world: world
+    scene: scenes.navTab
     w: tabW
     iconKey: profileKey
     label: profileLabel
