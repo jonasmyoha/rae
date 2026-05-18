@@ -328,6 +328,24 @@ func textStyleColor(styleId: String, chain255: Int) ret Color {
   ret toRaylibColor(c: dark, chain255: chain255)
 }
 
+# Horizontally-centered styles: the renderer measures the glyph run
+# and offsets the draw position so the text sits in the middle of its
+# rect. Most styles stay left-aligned because the layout system
+# already places the rect itself; the explicit-center styles below are
+# for cases where the rect is wider than the text (e.g. tab labels
+# that share a fixed-width container with a centred icon above).
+func textStyleIsCentered(styleId: String) ret Bool {
+  let tabActive: String = "tabActive"
+  if styleId.equals(other: tabActive) {
+    ret true
+  }
+  let tabInactive: String = "tabInactive"
+  if styleId.equals(other: tabInactive) {
+    ret true
+  }
+  ret false
+}
+
 func paintText(world: view UiWorld, entity: Int, wt: view WorldTransform, cr: view ComputedRect, chain255: Int) {
   let tx: Text = componentGet(this: world.texts, entity: entity)
   let txt: String = tx.text
@@ -336,11 +354,23 @@ func paintText(world: view UiWorld, entity: Int, wt: view WorldTransform, cr: vi
   }
   let size: Float = textStyleSize(styleId: tx.styleId)
   let col: Color = textStyleColor(styleId: tx.styleId, chain255: chain255)
+  let drawX: Float = wt.x
+  let drawY: Float = wt.y
+  if textStyleIsCentered(styleId: tx.styleId) {
+    let measured: Int = measureTextWithFont(
+      slot: defaultFontSlot
+      text: txt
+      fontSize: size
+      spacing: 1.0
+    )
+    drawX = wt.x + (cr.w - measured.toFloat()) / 2.0
+    drawY = wt.y + (cr.h - size) / 2.0
+  }
   drawTextWithFont(
     slot: defaultFontSlot
     text: txt
-    x: wt.x
-    y: wt.y
+    x: drawX
+    y: drawY
     fontSize: size
     spacing: 1.0
     color: col
