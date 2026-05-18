@@ -4,19 +4,28 @@
 # yet support styleId / tint changes.
 #
 # Layout: a single horizontal row split into 4 equal-width tabs. Each
-# tab is a vertical column with an icon on top and a label below; the
-# whole tab carries an `OnClick` action that the screen router handles
-# (`nav.home`, `nav.library`, …) — see `screen_router.rae`.
+# tab is a vertical column with an icon on top and a label below. The
+# tab parent AND each visible child (icon + label) carry the same
+# `OnClick` so the hit-test reliably finds an OnClick wherever the user
+# taps — the recursive hit-test returns the deepest OnClick first.
 import core
 import string
+import raylib
 import ui/components
 import ui/ecs
 
 let tabActiveColor: RgbaColor = { r: 30, g: 30, b: 36, a: 255 }
 let tabInactiveColor: RgbaColor = { r: 130, g: 130, b: 140, a: 255 }
+let tabIconSize: Float = 32.0
+let tabLabelH: Float = 18.0
+let tabLabelFontSize: Float = 14.0
+let tabLabelHPadding: Float = 4.0
 
 # Build a single nav tab. `active` toggles both the icon tint and the
-# label style; everything else is positional.
+# label style; everything else is positional. The label rect is sized
+# to the actual measured text so `alignCross: Center` of the parent
+# Vertical layout puts it visually centred — using a tab-wide rect
+# would left-align the text inside the rect.
 func buildNavTab(
   world: mod UiWorld
   w: Float
@@ -27,7 +36,7 @@ func buildNavTab(
 ) pub ret Int {
   let tab: Int = createEntity(world: world)
   setRectFixed(world: world, entity: tab, w: w, h: navTabsH)
-  setLayout(world: world, entity: tab, kind: LayoutType.Vertical, gap: 4.0, alignCross: AlignKind.Center)
+  setLayout(world: world, entity: tab, kind: LayoutType.Vertical, gap: 6.0, alignCross: AlignKind.Center)
   setOnClick(world: world, entity: tab, actionId: actionId)
 
   let tint: RgbaColor = tabInactiveColor
@@ -36,16 +45,25 @@ func buildNavTab(
   }
 
   let icon: Int = createEntity(world: world)
-  setRectFixed(world: world, entity: icon, w: 24.0, h: 24.0)
+  setRectFixed(world: world, entity: icon, w: tabIconSize, h: tabIconSize)
   setSprite(world: world, entity: icon, key: iconKey, tint: tint)
+  setOnClick(world: world, entity: icon, actionId: actionId)
 
-  let lbl: Int = createEntity(world: world)
-  setRectFixed(world: world, entity: lbl, w: w, h: 16.0)
   let style: String = "tabInactive"
   if active {
     style = "tabActive"
   }
+  let measured: Int = measureTextWithFont(
+    slot: 0
+    text: label
+    fontSize: tabLabelFontSize
+    spacing: 1.0
+  )
+  let labelW: Float = measured.toFloat() + tabLabelHPadding * 2.0
+  let lbl: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: lbl, w: labelW, h: tabLabelH)
   setText(world: world, entity: lbl, text: label, styleId: style)
+  setOnClick(world: world, entity: lbl, actionId: actionId)
 
   let kids: List(Int) = createList(Int)(initialCap: 2)
   kids.add(value: icon)
