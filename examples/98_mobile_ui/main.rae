@@ -91,12 +91,17 @@ func main() {
     let heroDuration: Float = 0.45
     let pendingSrc: Bool = false
     let pendingDst: Bool = false
-    # Visualise every entity that owns an `OnClick` as a magenta
-    # outline. Lets you spot misaligned hit-rects (e.g. an icon glyph
-    # rendered visually above its rect — taps would miss). Flip off
-    # for production snapshots.
+    # Visualise every entity that owns an `OnClick` as an outline.
+    # Hovered rects highlight in `debugHoverColor` so you can see at
+    # a glance which (if any) clickable lives under the cursor.
+    # A crosshair at the input-system's reported mouse position is
+    # drawn on top — if it doesn't sit under the OS cursor, the input
+    # and rendering coordinate systems disagree. Flip off for
+    # production snapshots.
     let debugRects: Bool = true
     let debugRectColor: Color = { r: 255, g: 0, b: 255, a: 200 }
+    let debugHoverColor: Color = { r: 0, g: 220, b: 80, a: 255 }
+    let debugCursorColor: Color = { r: 255, g: 220, b: 0, a: 255 }
     loop running {
       let world: UiWorld = buildScreenWorld(screen: currentScreen, scenes: scenes)
       layoutSystem(world: world)
@@ -161,7 +166,16 @@ func main() {
             }
           }
           if debugRects {
-            renderDebugClickRects(world: world, color: debugRectColor)
+            let mx: Float = getMouseX().toFloat()
+            let my: Float = getMouseY().toFloat()
+            renderDebugClickRects(
+              world: world
+              idleColor: debugRectColor
+              hoverColor: debugHoverColor
+              mouseX: mx
+              mouseY: my
+            )
+            renderDebugMouseCursor(mouseX: mx, mouseY: my, color: debugCursorColor)
           }
           endDrawing()
 
