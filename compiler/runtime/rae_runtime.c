@@ -1172,6 +1172,8 @@ rae_Bool rae_ext_isMouseButtonReleased(int64_t button) { return IsMouseButtonRel
 void rae_ext_setMouseScale(double scaleX, double scaleY) { SetMouseScale((float)scaleX, (float)scaleY); }
 int64_t rae_ext_getScreenWidth(void) { return (int64_t)GetScreenWidth(); }
 int64_t rae_ext_getScreenHeight(void) { return (int64_t)GetScreenHeight(); }
+int64_t rae_ext_getRenderWidth(void) { return (int64_t)GetRenderWidth(); }
+int64_t rae_ext_getRenderHeight(void) { return (int64_t)GetRenderHeight(); }
 int64_t rae_ext_getCurrentMonitor(void) { return (int64_t)GetCurrentMonitor(); }
 int64_t rae_ext_getMonitorWidth(int64_t monitor) { return (int64_t)GetMonitorWidth((int)monitor); }
 int64_t rae_ext_getMonitorHeight(int64_t monitor) { return (int64_t)GetMonitorHeight((int)monitor); }

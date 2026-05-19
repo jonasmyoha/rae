@@ -16,6 +16,20 @@ static bool native_getScreenHeight(struct VM* vm, VmNativeResult* out, const Val
     return true;
 }
 
+static bool native_getRenderWidth(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data; (void)args; (void)count;
+    out->has_value = true;
+    out->value = value_int(GetRenderWidth());
+    return true;
+}
+
+static bool native_getRenderHeight(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data; (void)args; (void)count;
+    out->has_value = true;
+    out->value = value_int(GetRenderHeight());
+    return true;
+}
+
 static bool native_initWindow(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
     if (count != 3) {
@@ -876,6 +890,8 @@ bool vm_registry_register_raylib(VmRegistry* registry) {
     ok &= vm_registry_register_native(registry, "getTime", native_getTime, NULL);
     ok &= vm_registry_register_native(registry, "getScreenWidth", native_getScreenWidth, NULL);
     ok &= vm_registry_register_native(registry, "getScreenHeight", native_getScreenHeight, NULL);
+    ok &= vm_registry_register_native(registry, "getRenderWidth", native_getRenderWidth, NULL);
+    ok &= vm_registry_register_native(registry, "getRenderHeight", native_getRenderHeight, NULL);
     ok &= vm_registry_register_native(registry, "colorFromHSV", native_colorFromHSV, NULL);
     ok &= vm_registry_register_native(registry, "takeScreenshot", native_takeScreenshot, NULL);
     ok &= vm_registry_register_native(registry, "loadFontInto", native_loadFontInto, NULL);
