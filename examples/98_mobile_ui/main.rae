@@ -91,6 +91,12 @@ func main() {
     let heroDuration: Float = 0.45
     let pendingSrc: Bool = false
     let pendingDst: Bool = false
+    # Visualise every entity that owns an `OnClick` as a magenta
+    # outline. Lets you spot misaligned hit-rects (e.g. an icon glyph
+    # rendered visually above its rect — taps would miss). Flip off
+    # for production snapshots.
+    let debugRects: Bool = true
+    let debugRectColor: Color = { r: 255, g: 0, b: 255, a: 200 }
     loop running {
       let world: UiWorld = buildScreenWorld(screen: currentScreen, scenes: scenes)
       layoutSystem(world: world)
@@ -153,6 +159,9 @@ func main() {
                 pendingSrc = false
               }
             }
+          }
+          if debugRects {
+            renderDebugClickRects(world: world, color: debugRectColor)
           }
           endDrawing()
 
