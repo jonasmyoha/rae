@@ -1169,6 +1169,7 @@ int64_t rae_ext_getMouseY(void) { return (int64_t)GetMouseY(); }
 rae_Bool rae_ext_isMouseButtonDown(int64_t button) { return IsMouseButtonDown((int)button); }
 rae_Bool rae_ext_isMouseButtonPressed(int64_t button) { return IsMouseButtonPressed((int)button); }
 rae_Bool rae_ext_isMouseButtonReleased(int64_t button) { return IsMouseButtonReleased((int)button); }
+void rae_ext_setMouseScale(double scaleX, double scaleY) { SetMouseScale((float)scaleX, (float)scaleY); }
 int64_t rae_ext_getScreenWidth(void) { return (int64_t)GetScreenWidth(); }
 int64_t rae_ext_getScreenHeight(void) { return (int64_t)GetScreenHeight(); }
 int64_t rae_ext_getCurrentMonitor(void) { return (int64_t)GetCurrentMonitor(); }

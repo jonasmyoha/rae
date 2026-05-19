@@ -36,6 +36,13 @@ func main() {
   initWindow(width: winW.toInt(), height: winH.toInt(), title: "Rae Mobile UI — Album")
   setWindowPosition(x: 50, y: 50)
   setTargetFPS(fps: 60)
+  # raylib applies an automatic `Mouse.scale = screen / display`
+  # whenever the window size differs from the monitor — but our
+  # window IS at requested size, so the scaling just compresses
+  # mouse coords toward the top of the window. Force it back to
+  # identity so getMouseX/getMouseY agree with the rendering
+  # coordinate system.
+  setMouseScale(scaleX: 1.0, scaleY: 1.0)
 
   loadFontInto(slot: robotoFontSlot, path: robotoFontPath, fontSize: 36)
   loadFontInto(slot: materialIconFontSlot, path: materialIconFontPath, fontSize: 64)
