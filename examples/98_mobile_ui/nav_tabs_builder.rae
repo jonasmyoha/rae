@@ -42,7 +42,16 @@ func mountNavTab(
 
   addSpriteOverride(list: overrides, nodeId: iconNode, value: iconKey)
   addTextOverride(list: overrides, nodeId: labelNode, value: label)
+  # Give every visible child the SAME action — the hit-test returns
+  # the deepest entity that owns an OnClick, and the icon and label
+  # are leaves above the root in the hit order. Without OnClick on
+  # them, an icon-area tap returns -1 from those leaves and falls
+  # through to TabRoot, which usually works but has been flaky on
+  # certain layouts; setting OnClick on each clickable visual makes
+  # the click target unambiguous.
   addOnClickActionOverride(list: overrides, nodeId: rootNode, value: actionId)
+  addOnClickActionOverride(list: overrides, nodeId: iconNode, value: actionId)
+  addOnClickActionOverride(list: overrides, nodeId: labelNode, value: actionId)
 
   if active {
     addSpriteTintOverride(list: overrides, nodeId: iconNode, r: 30, g: 30, b: 36, a: 255)
