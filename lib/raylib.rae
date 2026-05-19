@@ -194,6 +194,19 @@ func isMouseButtonPressed(button: Int) extern ret Bool
 
 func isMouseButtonReleased(button: Int) extern ret Bool
 
+# Override raylib's automatic mouse-coordinate scaling.
+#
+# raylib applies `Mouse.scale = screen_size / display_size` whenever
+# the requested window size differs from the monitor size. For
+# fullscreen apps that render at a non-native resolution this is the
+# right thing to do, but for a regular windowed app it compresses
+# mouse coords toward 0 — by the bottom of a 1079 px window on an
+# 1117 px display the y-coord is off by ~40 px. Calling
+# `setMouseScale(1.0, 1.0)` after `initWindow` disables the
+# scaling so `getMouseX`/`getMouseY` report cursor positions in the
+# same coordinate space as `drawRectangle` and friends.
+func setMouseScale(scaleX: Float, scaleY: Float) extern
+
 func getScreenWidth() extern ret Int
 
 func getScreenHeight() extern ret Int
