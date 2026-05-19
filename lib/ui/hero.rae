@@ -1,0 +1,259 @@
+# Hero (shared-element) transitions — RUICS Phase 1h.
+#
+# When the host swaps from one screen's `UiWorld` to another, any
+# entity carrying a `HeroWidget` with the same `key` on both screens
+# can be visually animated between the two layouts instead of popping
+# in and out. The system owns ONE in-flight animation at a time and
+# renders a single overlay sprite at an interpolated rect, so the
+# transition costs one extra draw call per frame, not a duplicated
+# entity tree.
+#
+# Lifecycle, driven by the host:
+#
+#   1. `captureHeroSource(anim, oldWorld, key)` — just before
+#       discarding the old world, read out the hero's current
+#       worldTransform + computedRect + sprite. The sprite info
+#       (textureKey / tint) is what the overlay later draws.
+#   2. Build the new world.
+#   3. `captureHeroTarget(anim, newWorld, key)` — read the hero's
+#       new worldTransform + computedRect after layout/transform have
+#       run.
+#   4. `startHeroTransition(anim, key, durationSeconds, now)` — flip
+#       the anim to active.
+#   5. Per frame, while `updateHeroAnim(anim, now)` returns true:
+#        - `setHeroVisible(world, key, false)` to hide the new
+#          world's hero entity (the overlay paints it).
+#        - `renderSystem(world, reg)` as usual.
+#        - `renderHeroOverlay(anim, reg, now)` on top.
+#      When the anim ends, `setHeroVisible(world, key, true)`.
+#
+# Easing is a cubic smoothstep — smooth in, smooth out. Linear is
+# jarring for shared-element transitions because the eye notices the
+# constant velocity at the endpoints.
+import core
+import string
+import raylib
+
+# In-flight transition state. Owned by the host. Reset between
+# transitions by overwriting; only one transition runs at a time.
+type HeroAnim {
+  active: Bool
+  key: String
+  textureKey: String
+  tintR: Int
+  tintG: Int
+  tintB: Int
+  tintA: Int
+  startTime: Float
+  duration: Float
+  srcX: Float
+  srcY: Float
+  srcW: Float
+  srcH: Float
+  dstX: Float
+  dstY: Float
+  dstW: Float
+  dstH: Float
+}
+
+func createHeroAnim() pub ret HeroAnim {
+  ret HeroAnim {
+    active: false
+    key: ""
+    textureKey: ""
+    tintR: 255
+    tintG: 255
+    tintB: 255
+    tintA: 255
+    startTime: 0.0
+    duration: 0.0
+    srcX: 0.0
+    srcY: 0.0
+    srcW: 0.0
+    srcH: 0.0
+    dstX: 0.0
+    dstY: 0.0
+    dstW: 0.0
+    dstH: 0.0
+  }
+}
+
+# Linear scan through the heroWidgets table — there are at most a
+# handful of hero widgets per screen, so a sparse-set lookup would
+# be over-engineered. Returns -1 if no match.
+func findHeroEntity(world: view UiWorld, key: String) pub ret Int {
+  let n: Int = componentCount(this: world.heroWidgets)
+  let i: Int = 0
+  loop i < n {
+    let e: Int = componentEntityAt(this: world.heroWidgets, i: i)
+    let hw: HeroWidget = componentDataAt(this: world.heroWidgets, i: i)
+    if hw.key.equals(other: key) {
+      ret e
+    }
+    i = i + 1
+  }
+  ret -1
+}
+
+func captureHeroSource(anim: mod HeroAnim, world: view UiWorld, key: String) pub ret Bool {
+  let e: Int = findHeroEntity(world: world, key: key)
+  if e < 0 {
+    ret false
+  }
+  if componentHas(this: world.worldTransforms, entity: e) is false {
+    ret false
+  }
+  if componentHas(this: world.computedRects, entity: e) is false {
+    ret false
+  }
+  let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: e)
+  let cr: ComputedRect = componentGet(this: world.computedRects, entity: e)
+  anim.srcX = wt.x
+  anim.srcY = wt.y
+  anim.srcW = cr.w
+  anim.srcH = cr.h
+  if componentHas(this: world.sprites, entity: e) {
+    let sp: Sprite = componentGet(this: world.sprites, entity: e)
+    anim.textureKey = sp.textureKey
+    anim.tintR = sp.tint.r
+    anim.tintG = sp.tint.g
+    anim.tintB = sp.tint.b
+    anim.tintA = sp.tint.a
+  }
+  ret true
+}
+
+func captureHeroTarget(anim: mod HeroAnim, world: view UiWorld, key: String) pub ret Bool {
+  let e: Int = findHeroEntity(world: world, key: key)
+  if e < 0 {
+    ret false
+  }
+  if componentHas(this: world.worldTransforms, entity: e) is false {
+    ret false
+  }
+  if componentHas(this: world.computedRects, entity: e) is false {
+    ret false
+  }
+  let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: e)
+  let cr: ComputedRect = componentGet(this: world.computedRects, entity: e)
+  anim.dstX = wt.x
+  anim.dstY = wt.y
+  anim.dstW = cr.w
+  anim.dstH = cr.h
+  ret true
+}
+
+func startHeroTransition(anim: mod HeroAnim, key: String, durationSec: Float, now: Float) pub {
+  anim.active = true
+  anim.key = key
+  anim.startTime = now
+  anim.duration = durationSec
+}
+
+# Toggle the hero entity's WorldTransform.visible. Used to hide the
+# entity in the destination world while the overlay paints it, then
+# to restore visibility once the transition lands.
+func setHeroVisible(world: mod UiWorld, key: String, visible: Bool) pub {
+  let e: Int = findHeroEntity(world: world, key: key)
+  if e < 0 {
+    ret
+  }
+  if componentHas(this: world.worldTransforms, entity: e) is false {
+    ret
+  }
+  let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: e)
+  let updated: WorldTransform = {
+    x: wt.x
+    y: wt.y
+    alpha: wt.alpha
+    visible: visible
+  }
+  componentSet(this: world.worldTransforms, entity: e, data: updated)
+}
+
+# Cubic smoothstep: `t² · (3 − 2t)`. Linear-in-the-middle, soft at
+# both endpoints. Cheap, no `pow`/`exp` needed.
+func smoothstep(t: Float) pub ret Float {
+  if t <= 0.0 {
+    ret 0.0
+  }
+  if t >= 1.0 {
+    ret 1.0
+  }
+  ret t * t * (3.0 - 2.0 * t)
+}
+
+func heroLerp(a: Float, b: Float, t: Float) ret Float {
+  ret a + (b - a) * t
+}
+
+# Step the animation against the wall clock. Returns true while the
+# transition still has frames left to render. When it returns false
+# the host should put the new world back into its normal state
+# (set the hero's visible to true and stop calling renderHeroOverlay).
+func updateHeroAnim(anim: mod HeroAnim, now: Float) pub ret Bool {
+  if anim.active is false {
+    ret false
+  }
+  let elapsed: Float = now - anim.startTime
+  if elapsed >= anim.duration {
+    anim.active = false
+    ret false
+  }
+  ret true
+}
+
+# Paint the hero at its interpolated rect. Designed to be called AFTER
+# `renderSystem` so the overlay sits on top of the destination
+# world's render. Single draw call, no extra entities allocated.
+func renderHeroOverlay(anim: view HeroAnim, reg: view TextureRegistry, now: Float) pub {
+  if anim.active is false {
+    ret
+  }
+  let raw: Float = (now - anim.startTime) / anim.duration
+  let t: Float = smoothstep(t: raw)
+  let x: Float = heroLerp(a: anim.srcX, b: anim.dstX, t: t)
+  let y: Float = heroLerp(a: anim.srcY, b: anim.dstY, t: t)
+  let w: Float = heroLerp(a: anim.srcW, b: anim.dstW, t: t)
+  let h: Float = heroLerp(a: anim.srcH, b: anim.dstH, t: t)
+  if textureHas(reg: reg, key: anim.textureKey) is false {
+    ret
+  }
+  let tex: Texture = textureGet(reg: reg, key: anim.textureKey)
+
+  # Mirror paintSprite's contain-fit scaling so the texture's aspect
+  # is preserved while it fills the interpolated rect.
+  let scaleX: Float = 1.0
+  let scaleY: Float = 1.0
+  if tex.width > 0 {
+    scaleX = w / tex.width.toFloat()
+  }
+  if tex.height > 0 {
+    scaleY = h / tex.height.toFloat()
+  }
+  let scale: Float = scaleX
+  if scaleY < scale {
+    scale = scaleY
+  }
+  if scale <= 0.0 {
+    scale = 1.0
+  }
+  let drawW: Float = tex.width.toFloat() * scale
+  let drawH: Float = tex.height.toFloat() * scale
+  let offX: Float = (w - drawW) / 2.0
+  let offY: Float = (h - drawH) / 2.0
+
+  let tint: Color = {
+    r: anim.tintR
+    g: anim.tintG
+    b: anim.tintB
+    a: anim.tintA
+  }
+  drawTextureEx(
+    texture: tex
+    pos: Vector2 { x: x + offX, y: y + offY }
+    rotation: 0.0
+    scale: scale
+    tint: tint
+  )
+}
