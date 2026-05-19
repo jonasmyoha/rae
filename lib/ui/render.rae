@@ -447,9 +447,19 @@ func renderSystem(world: view UiWorld, reg: view TextureRegistry) {
 # Debug overlay — outlines every entity that has an `OnClick`. Useful
 # for spotting click-target / visible-glyph mismatches: an icon glyph
 # that visually sits above its hit-rect won't fire taps, but the
-# outline reveals exactly where the hit-rect actually is. Draw AFTER
+# outline reveals exactly where the hit-rect actually is. Rects that
+# contain the current mouse position render in `hoverColor` instead
+# of `idleColor` so you can see at a glance which (if any) target is
+# under the cursor. Pass the same mouse coords that the input system
+# polls so the visual matches what hit-test would do. Draw AFTER
 # `renderSystem` so the outlines sit on top of the rendered UI.
-func renderDebugClickRects(world: view UiWorld, color: Color) pub {
+func renderDebugClickRects(
+  world: view UiWorld
+  idleColor: Color
+  hoverColor: Color
+  mouseX: Float
+  mouseY: Float
+) pub {
   let nClicks: Int = componentCount(this: world.onClicks)
   let i: Int = 0
   loop i < nClicks {
@@ -459,16 +469,56 @@ func renderDebugClickRects(world: view UiWorld, color: Color) pub {
         let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: e)
         if wt.visible {
           let cr: ComputedRect = componentGet(this: world.computedRects, entity: e)
+          let inside: Bool = true
+          if mouseX < wt.x {
+            inside = false
+          }
+          if mouseY < wt.y {
+            inside = false
+          }
+          if mouseX > wt.x + cr.w {
+            inside = false
+          }
+          if mouseY > wt.y + cr.h {
+            inside = false
+          }
+          let col: Color = idleColor
+          if inside {
+            col = hoverColor
+          }
           drawRectangleLines(
             x: wt.x
             y: wt.y
             width: cr.w
             height: cr.h
-            color: color
+            color: col
           )
         }
       }
     }
     i = i + 1
   }
+}
+
+# Debug overlay — draw a crosshair at (mouseX, mouseY) so we can see
+# exactly where the input system thinks the cursor is. If this
+# crosshair doesn't sit under the OS mouse cursor on screen, there's
+# a coord-system mismatch between rendering and input.
+func renderDebugMouseCursor(mouseX: Float, mouseY: Float, color: Color) pub {
+  let size: Float = 12.0
+  let half: Float = size / 2.0
+  drawRectangle(
+    x: mouseX - half
+    y: mouseY - 1.0
+    width: size
+    height: 2.0
+    color: color
+  )
+  drawRectangle(
+    x: mouseX - 1.0
+    y: mouseY - half
+    width: 2.0
+    height: size
+    color: color
+  )
 }
