@@ -18,6 +18,7 @@ import core
 import string
 import sys
 import ui/ecs
+import ui/hero
 import ui/layout
 import ui/transform
 import ui/render
@@ -85,10 +86,29 @@ func main() {
       currentScreen = Screen.Album
     }
     let running: Bool = true
+    let anim: HeroAnim = createHeroAnim()
+    let heroKey: String = "albumCover"
+    let heroDuration: Float = 0.45
+    let pendingSrc: Bool = false
+    let pendingDst: Bool = false
     loop running {
       let world: UiWorld = buildScreenWorld(screen: currentScreen, scenes: scenes)
       layoutSystem(world: world)
       transformSystem(world: world)
+
+      # Pick up the destination half of an in-flight transition: the
+      # previous world wrote pendingDst=true and stashed the source
+      # rect. Now that the new world has been laid out, capture the
+      # target rect and kick the animation.
+      if pendingDst {
+        let captured: Bool = captureHeroTarget(anim: anim, world: world, key: heroKey)
+        if captured {
+          let now: Float = getTime()
+          startHeroTransition(anim: anim, key: heroKey, durationSec: heroDuration, now: now)
+          setHeroVisible(world: world, key: heroKey, visible: false)
+        }
+        pendingDst = false
+      }
 
       let input: InputSystem = createInputSystem()
       let switching: Bool = false
@@ -99,12 +119,31 @@ func main() {
           updateInputSystem(input: input, world: world)
           let nextScreen: Screen = dispatchActions(input: input, current: currentScreen)
           if nextScreen is not currentScreen {
+            # Capture the hero's current rect BEFORE we discard
+            # this world. The outer loop will rebuild and the new
+            # iteration uses pendingDst to finish the setup.
+            let gotSrc: Bool = captureHeroSource(anim: anim, world: world, key: heroKey)
+            pendingSrc = gotSrc
+            pendingDst = gotSrc
             currentScreen = nextScreen
             switching = true
           } else {
+            let now: Float = getTime()
+            let animating: Bool = updateHeroAnim(anim: anim, now: now)
             beginDrawing()
             clearBackground(color: bg)
             renderSystem(world: world, reg: texReg)
+            if animating {
+              renderHeroOverlay(anim: anim, reg: texReg, now: now)
+            } else {
+              if pendingSrc {
+                # Animation just finished — restore the destination
+                # hero entity's visibility so paintSprite resumes
+                # drawing it as part of the world.
+                setHeroVisible(world: world, key: heroKey, visible: true)
+                pendingSrc = false
+              }
+            }
             endDrawing()
           }
         }
