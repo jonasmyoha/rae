@@ -457,6 +457,16 @@ static bool native_isMouseButtonReleased(struct VM* vm, VmNativeResult* out, con
     return true;
 }
 
+static bool native_setMouseScale(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 2) { fprintf(stderr, "error: setMouseScale expects 2 args, got %zu\n", count); return false; }
+    float sx = (float)((args[0].type == VAL_FLOAT) ? args[0].as.float_value : args[0].as.int_value);
+    float sy = (float)((args[1].type == VAL_FLOAT) ? args[1].as.float_value : args[1].as.int_value);
+    SetMouseScale(sx, sy);
+    out->has_value = false;
+    return true;
+}
+
 static bool native_drawCube(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
     if (count != 10) {
@@ -862,6 +872,7 @@ bool vm_registry_register_raylib(VmRegistry* registry) {
     ok &= vm_registry_register_native(registry, "isMouseButtonDown", native_isMouseButtonDown, NULL);
     ok &= vm_registry_register_native(registry, "isMouseButtonPressed", native_isMouseButtonPressed, NULL);
     ok &= vm_registry_register_native(registry, "isMouseButtonReleased", native_isMouseButtonReleased, NULL);
+    ok &= vm_registry_register_native(registry, "setMouseScale", native_setMouseScale, NULL);
     ok &= vm_registry_register_native(registry, "getTime", native_getTime, NULL);
     ok &= vm_registry_register_native(registry, "getScreenWidth", native_getScreenWidth, NULL);
     ok &= vm_registry_register_native(registry, "getScreenHeight", native_getScreenHeight, NULL);
