@@ -52,6 +52,7 @@ func registeredComponentNames() ret List(String) {
   names.add(value: "Active")
   names.add(value: "EditorVisible")
   names.add(value: "EditorLocked")
+  names.add(value: "HeroWidget")
   # Identity / metadata
   names.add(value: "Name")
   names.add(value: "PrimaryType")
@@ -470,6 +471,14 @@ func deserName(doc: view JsonDoc, val: view JsonValue) ret Name {
   ret Name { label: optString(doc: doc, container: val, key: "label", fallback: "") }
 }
 
+func deserHeroWidget(doc: view JsonDoc, val: view JsonValue) ret HeroWidget {
+  # `key` is reserved in Rae, so it can't appear directly after a
+  # type-prefixed struct literal in `ret`. Bind to a typed local first.
+  let k: String = optString(doc: doc, container: val, key: "key", fallback: "")
+  let r: HeroWidget = { key: k }
+  ret r
+}
+
 func deserPrimaryType(doc: view JsonDoc, val: view JsonValue) ret PrimaryType {
   ret PrimaryType { typeName: optString(doc: doc, container: val, key: "typeName", fallback: "") }
 }
@@ -608,6 +617,10 @@ func applyComponentByName(
   }
   if name.equals(other: "MaskShape") {
     componentSet(this: world.maskShapes, entity: entity, data: deserMaskShape(doc: doc, val: val))
+    ret
+  }
+  if name.equals(other: "HeroWidget") {
+    componentSet(this: world.heroWidgets, entity: entity, data: deserHeroWidget(doc: doc, val: val))
     ret
   }
   # Unknown / not-yet-handled components are ignored. The scene loader
