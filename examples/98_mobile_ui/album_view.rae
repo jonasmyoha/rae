@@ -64,6 +64,9 @@ func buildAlbumHero(world: mod UiWorld) pub ret Int {
   let thumb: Int = createEntity(world: world)
   setRectFixed(world: world, entity: thumb, w: albumThumbSize, h: albumThumbSize)
   setSprite(world: world, entity: thumb, key: "albumCover", tint: imageTintColor)
+  let heroKey: String = "albumCover"
+  let hero: HeroWidget = { key: heroKey }
+  componentSet(this: world.heroWidgets, entity: thumb, data: hero)
 
   let info: Int = createEntity(world: world)
   let infoW: Float = rowW - albumThumbSize - 16.0
