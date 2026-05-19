@@ -184,9 +184,16 @@ func updateInputSystem(input: mod InputSystem, world: view UiWorld) {
       if hit is input.pressedEntity {
         if componentHas(this: world.onClicks, entity: hit) {
           let oc: OnClick = componentGet(this: world.onClicks, entity: hit)
+          log("[click] FIRE action={oc.actionId} entity={hit}")
           appendActionEvent(input: input, entity: hit, actionId: oc.actionId)
+        } else {
+          log("[click] DROP entity={hit} has_no_onclick")
         }
+      } else {
+        log("[click] DROP press/release entity mismatch press={input.pressedEntity} release={hit}")
       }
+    } else {
+      log("[click] DROP release hit=-1 (no entity under cursor)")
     }
     input.pressedEntity = inputNoEntity
   }
