@@ -443,3 +443,32 @@ func renderSystem(world: view UiWorld, reg: view TextureRegistry) {
     i = i + 1
   }
 }
+
+# Debug overlay — outlines every entity that has an `OnClick`. Useful
+# for spotting click-target / visible-glyph mismatches: an icon glyph
+# that visually sits above its hit-rect won't fire taps, but the
+# outline reveals exactly where the hit-rect actually is. Draw AFTER
+# `renderSystem` so the outlines sit on top of the rendered UI.
+func renderDebugClickRects(world: view UiWorld, color: Color) pub {
+  let nClicks: Int = componentCount(this: world.onClicks)
+  let i: Int = 0
+  loop i < nClicks {
+    let e: Int = componentEntityAt(this: world.onClicks, i: i)
+    if componentHas(this: world.worldTransforms, entity: e) {
+      if componentHas(this: world.computedRects, entity: e) {
+        let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: e)
+        if wt.visible {
+          let cr: ComputedRect = componentGet(this: world.computedRects, entity: e)
+          drawRectangleLines(
+            x: wt.x
+            y: wt.y
+            width: cr.w
+            height: cr.h
+            color: color
+          )
+        }
+      }
+    }
+    i = i + 1
+  }
+}
