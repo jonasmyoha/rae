@@ -70,19 +70,25 @@ func pointInEntity(world: view UiWorld, entity: Int, x: Float, y: Float) ret Boo
     ret false
   }
   let cr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
+  let inside: Bool = true
   if x < wt.x {
-    ret false
+    inside = false
   }
   if y < wt.y {
-    ret false
+    inside = false
   }
   if x > wt.x + cr.w {
-    ret false
+    inside = false
   }
   if y > wt.y + cr.h {
-    ret false
+    inside = false
   }
-  ret true
+  # Only log entities with OnClick — that's what we care about for
+  # click diagnostics. Skips the spam of every layout/text rect.
+  if componentHas(this: world.onClicks, entity: entity) {
+    log("[hit] e={entity} wt=({wt.x},{wt.y}) cr=({cr.w}x{cr.h}) inside={inside}")
+  }
+  ret inside
 }
 
 # Hit-test recursion. Visits children in reverse declaration order so
@@ -174,17 +180,26 @@ func updateInputSystem(input: mod InputSystem, world: view UiWorld) {
 
   if pressed {
     input.pressedEntity = hitTest(world: world, x: mx, y: my)
+    log("[click] press x={mx} y={my} entity={input.pressedEntity}")
   }
 
   if released {
     let hit: Int = hitTest(world: world, x: mx, y: my)
+    log("[click] release x={mx} y={my} entity={hit} press={input.pressedEntity}")
     if hit is not inputNoEntity {
       if hit is input.pressedEntity {
         if componentHas(this: world.onClicks, entity: hit) {
           let oc: OnClick = componentGet(this: world.onClicks, entity: hit)
+          log("[click] FIRE action={oc.actionId} entity={hit}")
           appendActionEvent(input: input, entity: hit, actionId: oc.actionId)
+        } else {
+          log("[click] DROP entity={hit} has_no_onclick")
         }
+      } else {
+        log("[click] DROP mismatch press={input.pressedEntity} release={hit}")
       }
+    } else {
+      log("[click] DROP release_hit=-1")
     }
     input.pressedEntity = inputNoEntity
   }
