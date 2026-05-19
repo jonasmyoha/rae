@@ -174,10 +174,12 @@ func updateInputSystem(input: mod InputSystem, world: view UiWorld) {
 
   if pressed {
     input.pressedEntity = hitTest(world: world, x: mx, y: my)
+    log("[click] press x={mx} y={my} entity={input.pressedEntity}")
   }
 
   if released {
     let hit: Int = hitTest(world: world, x: mx, y: my)
+    log("[click] release x={mx} y={my} entity={hit} press={input.pressedEntity}")
     if hit is not inputNoEntity {
       if hit is input.pressedEntity {
         if componentHas(this: world.onClicks, entity: hit) {
