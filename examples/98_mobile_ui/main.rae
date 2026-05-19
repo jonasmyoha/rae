@@ -119,14 +119,23 @@ func main() {
           updateInputSystem(input: input, world: world)
           let nextScreen: Screen = dispatchActions(input: input, current: currentScreen)
 
-          # Draw the frame BEFORE handling any screen change. raylib
-          # only advances its edge-triggered mouse state inside
-          # `endDrawing()`'s PollInputEvents, so skipping a frame on
-          # the screen-change tick leaves the just-handled release
-          # visible again on the new world's first
-          # `updateInputSystem` call — that bogus release then
-          # consumes the user's next real click. Drawing the frame
-          # here keeps raylib's mouse edges in sync with our loop.
+          # Decide screen change BEFORE drawing, but always draw the
+          # frame afterwards. raylib only advances its edge-triggered
+          # mouse state inside `endDrawing()`'s PollInputEvents, so
+          # *every* iteration must reach endDrawing — otherwise a
+          # stale "released" edge survives into the next world's
+          # first updateInputSystem call and consumes the next click.
+          let willSwitch: Bool = nextScreen is not currentScreen
+          if willSwitch {
+            # Capture the hero rect on the OUTGOING world (this one).
+            # transform/layout aren't going to change inside this
+            # frame, so reading now or after the draw gives the same
+            # rect; reading first keeps the draw + switch grouped.
+            let gotSrc: Bool = captureHeroSource(anim: anim, world: world, key: heroKey)
+            pendingSrc = gotSrc
+            pendingDst = gotSrc
+          }
+
           let now: Float = getTime()
           let animating: Bool = updateHeroAnim(anim: anim, now: now)
           beginDrawing()
@@ -136,22 +145,18 @@ func main() {
             renderHeroOverlay(anim: anim, reg: texReg, now: now)
           } else {
             if pendingSrc {
-              # Animation just finished — restore the destination
-              # hero entity's visibility so paintSprite resumes
-              # drawing it as part of the world.
-              setHeroVisible(world: world, key: heroKey, visible: true)
-              pendingSrc = false
+              if willSwitch is false {
+                # Animation just finished — restore the destination
+                # hero entity's visibility so paintSprite resumes
+                # drawing it as part of the world.
+                setHeroVisible(world: world, key: heroKey, visible: true)
+                pendingSrc = false
+              }
             }
           }
           endDrawing()
 
-          if nextScreen is not currentScreen {
-            # Capture the hero's current rect BEFORE we discard
-            # this world. The outer loop will rebuild and the new
-            # iteration uses pendingDst to finish the setup.
-            let gotSrc: Bool = captureHeroSource(anim: anim, world: world, key: heroKey)
-            pendingSrc = gotSrc
-            pendingDst = gotSrc
+          if willSwitch {
             currentScreen = nextScreen
             switching = true
           }
