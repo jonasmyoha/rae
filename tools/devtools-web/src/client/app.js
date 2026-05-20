@@ -1403,8 +1403,7 @@ function renderExampleList() {
       button.className = `example-card${selectedExampleId === example.id ? " is-active" : ""}`;
       if (example.hidden) button.classList.add("is-hidden-example");
       
-      // Clean name (remove number prefix for display)
-      const displayName = example.name.replace(/^\d+[_]/, '').replace(/_/g, ' ');
+      const displayName = formatExampleName(example.name);
       const targetSummary = describeExampleTargets(example);
       const hiddenBadge = example.hidden ? ' <span class="badge pending" style="font-size: 0.6rem; vertical-align: middle;">HIDDEN</span>' : '';
       
@@ -1526,7 +1525,7 @@ function renderExampleDetail() {
     return;
   }
 
-  exampleTitle.textContent = example.name;
+  exampleTitle.textContent = formatExampleName(example.name);
   const details = [`Entry: ${example.entry}`];
   const targetSummary = describeExampleTargets(example);
   if (targetSummary) {
@@ -3448,6 +3447,18 @@ function describeExampleTargets(example) {
   const targets = getExampleTargetIds(example);
   if (!targets.length) return "No targets";
   return targets.join(", ");
+}
+
+// Render an example's display name. devtools.json `name` fields are
+// authored in sentence case ("Code hot reload demo"); examples without
+// metadata fall back to the directory id like "27_file_locking", so we
+// strip the numeric prefix, swap underscores for spaces, and uppercase
+// the first letter to keep "File locking" consistent with the rest.
+function formatExampleName(rawName) {
+  if (typeof rawName !== "string" || rawName.length === 0) return rawName;
+  const stripped = rawName.replace(/^\d+[_]/, "").replace(/_/g, " ");
+  if (stripped.length === 0) return stripped;
+  return stripped.charAt(0).toUpperCase() + stripped.slice(1);
 }
 function setBuildStatus(label, modifierClass, targetLabel) {
   buildStatusChip.textContent = targetLabel ? `${label} · ${targetLabel}` : label;
