@@ -5,7 +5,8 @@
 #   examples/98_mobile_ui/snapshot.sh [output.png] [screen]
 #
 # `screen` is "album" (default) or "now-playing".
-# Default output is `examples/98_mobile_ui/screenshots/<screen>.png`.
+# Default output is `examples/98_mobile_ui/temp/screenshots/<screen>.png`.
+# The `temp/` directory is gitignored — see the project `.gitignore`.
 #
 # Set `RAE_UI_TARGET=live` to snapshot via the Live bytecode VM instead
 # of the Compiled C build. Useful for catching Live-only regressions
@@ -25,7 +26,7 @@ cd "$REPO_ROOT"
 
 SCREEN="${2:-album}"
 TARGET="${RAE_UI_TARGET:-compiled}"
-OUT="${1:-examples/98_mobile_ui/screenshots/${SCREEN}.png}"
+OUT="${1:-examples/98_mobile_ui/temp/screenshots/${SCREEN}.png}"
 mkdir -p "$(dirname "$OUT")"
 
 if [[ "$TARGET" == "live" ]]; then

@@ -322,6 +322,7 @@ rae_Bool rae_ext_rae_sys_delete(rae_String path);
 rae_Bool rae_ext_rae_sys_exists(rae_String path);
 rae_Bool rae_ext_rae_sys_lock_file(rae_String path);
 rae_Bool rae_ext_rae_sys_unlock_file(rae_String path);
+double rae_ext_rae_sys_file_mtime(rae_String path);
 
 rae_String rae_ext_rae_str_i64(int64_t v);
 rae_String rae_ext_rae_str_i64_ptr(const int64_t* v);
