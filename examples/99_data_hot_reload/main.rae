@@ -1,20 +1,20 @@
 # Data hot-reload example.
 #
-# `lib/ui/hot_reload.rae` is named after its first user (the UI scene
-# system in 98_mobile_ui), but the watcher itself is data-agnostic —
-# any file on disk can be tracked and any data shape can be re-parsed.
-# This example demonstrates the API on a plain text "config" file with
-# no raylib involved.
+# `lib/file_watch.rae` is a generic primitive — it detects on-disk
+# mtime changes and signals the app. What to do about that signal
+# (re-parse JSON, recompile, reload a shader, ...) is the caller's
+# job. This example demonstrates the "data hot reload" use case on
+# a plain text "config" file with no raylib involved.
 #
-# Game loops would normally call `checkForChanges` once per frame. Here
-# we simulate a 6-tick loop, write a new config at tick 2, and watch
-# the watcher fire exactly once on tick 3. `getTime` is supplied
-# manually so the example is deterministic — in a real app you'd pass
-# `getTime()` from raylib (or any other monotonic clock).
+# Game loops would normally call `checkForChanges` once per frame.
+# Here we simulate a 6-tick loop, write a new config after tick 2,
+# and watch the watcher fire exactly once on tick 3. `getTime` is
+# supplied manually so the example is deterministic — in a real app
+# you'd pass `getTime()` from raylib (or any other monotonic clock).
 import core
 import string
 import sys
-import ui/hot_reload
+import file_watch
 
 # Sidestep a known C-backend bug where comparing `opt String` against
 # `none` lowers to a type-mismatched `rae_ext_rae_str_eq` call. Same
@@ -32,10 +32,10 @@ func loadConfig(path: String) ret String {
 }
 
 func main() {
-  let configPath: String = "/tmp/rae_hot_reload_example_99.cfg"
+  let configPath: String = "/tmp/rae_data_hot_reload_example_99.cfg"
 
   # Seed the file before constructing the watcher so the initial
-  # snapshot is accurate. createHotReload reads each file's mtime
+  # snapshot is accurate. createFileWatcher reads each file's mtime
   # right away and treats that as the baseline — the first check
   # never spuriously fires.
   writeFile(path: configPath, content: "color=red")
@@ -43,7 +43,7 @@ func main() {
 
   let paths: List(String) = createList(String)(initialCap: 1)
   paths.add(value: configPath)
-  let hr: HotReload = createHotReload(
+  let watcher: FileWatcher = createFileWatcher(
     paths: paths
     enabled: true
     intervalSec: 0.0
@@ -57,7 +57,7 @@ func main() {
   let tick: Int = 0
   let now: Float = 0.0
   loop tick < 6 {
-    if checkForChanges(hr: hr, now: now) {
+    if checkForChanges(watcher: watcher, now: now) {
       log("tick {tick}: reloaded -> {loadConfig(path: configPath)}")
     } else {
       log("tick {tick}: idle")
