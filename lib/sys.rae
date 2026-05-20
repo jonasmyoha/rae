@@ -17,6 +17,8 @@ func rae_sys_lock_file(path: String) extern ret Bool
 
 func rae_sys_unlock_file(path: String) extern ret Bool
 
+func rae_sys_file_mtime(path: String) extern ret Float
+
 func rae_crypto_argon2i(password: String, salt: String, nb_blocks: Int, nb_iterations: Int, hash_buf: Any, hash_len: Int) extern
 
 func rae_crypto_lock(key: Any, nonce: Any, plain: Any, plain_len: Int, mac: Any, cipher: Any) extern
@@ -57,6 +59,14 @@ func lockFile(path: String) ret Bool {
 
 func unlockFile(path: String) ret Bool {
   ret rae_sys_unlock_file(path: path)
+}
+
+# Last modification time of `path` in seconds since the Unix epoch
+# (sub-second precision on platforms that support nanosecond stat).
+# Returns 0.0 if `path` does not exist or stat fails — callers should
+# treat 0.0 as "missing / unknown" rather than a real timestamp.
+func fileModTime(path: String) ret Float {
+  ret rae_sys_file_mtime(path: path)
 }
 
 func encrypt(key: Any, nonce: Any, plain: Any, len: Int, mac: Any, cipher: Any) {

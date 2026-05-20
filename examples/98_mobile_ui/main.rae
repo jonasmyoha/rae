@@ -19,6 +19,7 @@ import string
 import sys
 import ui/ecs
 import ui/hero
+import ui/hot_reload
 import ui/layout
 import ui/transform
 import ui/render
@@ -39,12 +40,33 @@ func main() {
   # Reset raylib's implicit `Mouse.scale` so getMouseX/Y return
   # cursor positions in the same coordinate space the renderer uses.
   setMouseScale(scaleX: 1.0, scaleY: 1.0)
-  # Diagnostic at boot: print every dimension raylib knows. If
-  # screen vs render differ on the y-axis, that's where the
-  # cursor-vs-render offset comes from.
-  log("[boot] requested screen={winW}x{winH}")
-  log("[boot] getScreenWidth={getScreenWidth()} getScreenHeight={getScreenHeight()}")
-  log("[boot] getRenderWidth={getRenderWidth()} getRenderHeight={getRenderHeight()}")
+
+  # macOS silently clamps any window that doesn't fit in the available
+  # content area (monitor height − menu bar − title bar − dock chrome).
+  # When that happens raylib's framebuffer keeps the requested size but
+  # the actual window is smaller, so cursor coords (in the clamped
+  # space) no longer line up with the rendering. Avoid the clamp by
+  # capping our window height to a safe fraction of the monitor and
+  # resizing ourselves to match — raylib only learns the real monitor
+  # geometry after `initWindow`, so this has to run here.
+  let chromeBudget: Int = 100
+  let monitor: Int = getCurrentMonitor()
+  let monitorH: Int = getMonitorHeight(monitor: monitor)
+  let safeMaxH: Int = monitorH - chromeBudget
+  let reqW: Int = winW.toInt()
+  let reqH: Int = winH.toInt()
+  log("[boot] requested screen={reqW}x{reqH} monitorH={monitorH} safeMaxH={safeMaxH}")
+  if reqH > safeMaxH {
+    # Shrink both axes by the same factor so the iPhone-15-Pro aspect
+    # ratio set in config.rae survives the clamp.
+    let scale: Float = safeMaxH.toFloat() / winH
+    screenH = winH * scale
+    screenW = winW * scale
+    let newH: Float = screenH
+    let newW: Float = screenW
+    setWindowSize(width: newW.toInt(), height: newH.toInt())
+    log("[boot] clamped to {newW.toInt()}x{newH.toInt()} to fit monitor chrome")
+  }
 
   loadFontInto(slot: robotoFontSlot, path: robotoFontPath, fontSize: 36)
   loadFontInto(slot: materialIconFontSlot, path: materialIconFontPath, fontSize: 64)
@@ -94,6 +116,25 @@ func main() {
     if startScreenEnv.equals(other: albumKey) {
       currentScreen = Screen.Album
     }
+
+    # Hot-reload: poll every watched `.raescene` file for mtime changes
+    # each frame (throttled to 4 Hz). When a file changes, re-parse all
+    # scenes and force an outer-loop world rebuild on the same route.
+    # Flip `hotReloadEnabled` to false to ship a build that skips the
+    # poll entirely.
+    let hotReloadEnabled: Bool = true
+    let watchedPaths: List(String) = createList(String)(initialCap: 8)
+    watchedPaths.add(value: trackRowPath)
+    watchedPaths.add(value: navTabsPath)
+    watchedPaths.add(value: navTabPath)
+    watchedPaths.add(value: miniPlayerPath)
+    watchedPaths.add(value: nowPlayingPath)
+    let hot: HotReload = createHotReload(
+      paths: watchedPaths
+      enabled: hotReloadEnabled
+      intervalSec: 0.25
+    )
+
     let running: Bool = true
     let anim: HeroAnim = createHeroAnim()
     let heroKey: String = "albumCover"
@@ -191,6 +232,17 @@ func main() {
           if willSwitch {
             currentScreen = nextScreen
             switching = true
+          } else {
+            # No screen change requested — but check the watched scene
+            # files. If any changed on disk, re-parse the scenes and
+            # force the outer loop to rebuild the world on the same
+            # route. Skipping this branch when `willSwitch` is true
+            # avoids a double rebuild on the same frame.
+            if checkForChanges(hr: hot, now: getTime()) {
+              scenes = loadAllScenes()
+              switching = true
+              log("[hot-reload] scene file changed, rebuilding world")
+            }
           }
         }
       }

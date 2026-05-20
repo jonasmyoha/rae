@@ -437,6 +437,7 @@ func computeSubtree(
       contentW: contentW
       contentH: contentH
       gap: layout.gap
+      alignMain: layout.alignMain
       alignCross: layout.alignCross
     )
     ret
@@ -450,6 +451,7 @@ func computeSubtree(
       contentW: contentW
       contentH: contentH
       gap: layout.gap
+      alignMain: layout.alignMain
       alignCross: layout.alignCross
     )
     ret
@@ -502,6 +504,7 @@ func placeHorizontal(
   contentW: Float
   contentH: Float
   gap: Float
+  alignMain: AlignKind
   alignCross: AlignKind
 ) {
   let n: Int = kids.length
@@ -539,8 +542,31 @@ func placeHorizontal(
     fillSize = remaining / fillCount.toFloat()
   }
 
+  # alignMain distributes the leftover main-axis slack when no child is
+  # `Fill` (Fills already consume slack, so alignment is a no-op then).
+  #   Start         — slack on the right (default)
+  #   Center        — half slack on each side
+  #   End           — slack on the left
+  #   SpaceBetween  — slack split evenly between children, on top of
+  #                   the configured `gap` (no slack at the ends)
+  let startOffset: Float = 0.0
+  let extraGap: Float = 0.0
+  if fillCount is 0 {
+    if alignMain is AlignKind.Center {
+      startOffset = remaining / 2.0
+    }
+    if alignMain is AlignKind.End {
+      startOffset = remaining
+    }
+    if alignMain is AlignKind.SpaceBetween {
+      if n > 1 {
+        extraGap = remaining / (n - 1).toFloat()
+      }
+    }
+  }
+
   # Pass 2: place children in order with gaps between.
-  let cursorX: Float = contentX
+  let cursorX: Float = contentX + startOffset
   let j: Int = 0
   loop j < n {
     let cid: Int = kids.get(index: j)
@@ -590,7 +616,7 @@ func placeHorizontal(
       ownW: childW
       ownH: childH
     )
-    cursorX = cursorX + childW + gap
+    cursorX = cursorX + childW + gap + extraGap
     j = j + 1
   }
 }
@@ -603,6 +629,7 @@ func placeVertical(
   contentW: Float
   contentH: Float
   gap: Float
+  alignMain: AlignKind
   alignCross: AlignKind
 ) {
   let n: Int = kids.length
@@ -639,7 +666,24 @@ func placeVertical(
     fillSize = remaining / fillCount.toFloat()
   }
 
-  let cursorY: Float = contentY
+  # See `placeHorizontal` — same `alignMain` distribution, vertical axis.
+  let startOffset: Float = 0.0
+  let extraGap: Float = 0.0
+  if fillCount is 0 {
+    if alignMain is AlignKind.Center {
+      startOffset = remaining / 2.0
+    }
+    if alignMain is AlignKind.End {
+      startOffset = remaining
+    }
+    if alignMain is AlignKind.SpaceBetween {
+      if n > 1 {
+        extraGap = remaining / (n - 1).toFloat()
+      }
+    }
+  }
+
+  let cursorY: Float = contentY + startOffset
   let j: Int = 0
   loop j < n {
     let cid: Int = kids.get(index: j)
@@ -689,7 +733,7 @@ func placeVertical(
       ownW: childW
       ownH: childH
     )
-    cursorY = cursorY + childH + gap
+    cursorY = cursorY + childH + gap + extraGap
     j = j + 1
   }
 }
