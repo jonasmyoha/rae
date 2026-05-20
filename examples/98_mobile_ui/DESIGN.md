@@ -154,7 +154,7 @@ A Rae-native scene file would let the compiler type-check component
 data at parse time, which is real value. But:
 
 - it forks from the reference doc the user pointed at,
-- it can't be hot-reloaded without recompiling the whole module,
+- it can't be data-hot-reloaded without recompiling the whole module,
 - it can't be patched by an editor without touching the AST,
 - it kills the override mechanism (which is structural by design).
 
@@ -538,10 +538,13 @@ one-line change to `loadScene(world, sceneId: "music-player-now-playing")`.
    `Sprite.textureKey`), loaded lazily from `assets/`. That's a
    `lib/ui/textures.rae` module — added in phase 1e.
 
-2. **Hot-reload**: `.raescene` files are pure data. Watching them and
-   re-loading on change should be straightforward — `prepareLayoutRootForLoad`
-   in RUICS is the model. Not in phase 1, but it's free if we keep the
-   scene loader idempotent.
+2. **Data hot reload**: `.raescene` files are pure data. Watching them
+   and re-loading on change should be straightforward —
+   `prepareLayoutRootForLoad` in RUICS is the model. Not in phase 1,
+   but it's free if we keep the scene loader idempotent. (See
+   `lib/file_watch.rae` for the primitive and `examples/99_data_hot_reload`
+   for a standalone demo. Distinct from *code* hot reload — that's the
+   VM patching story in `examples/23_code_hot_reload`.)
 
 3. **Coordinate space**: raylib uses pixel coordinates with origin
    top-left. Authored scenes assume the same. No translation needed
@@ -669,8 +672,9 @@ app; they're each a backlog item.
    linear list and the example hand-codes the icon name list. A
    `manifest.raescene` (or just JSON) would let the asset list live
    alongside the rest of the scene authoring.
-8. **Hot-reload of `.raescene`.** Worth wiring before the workout app
-   so iterating layouts doesn't require a recompile.
+8. **Data hot reload of `.raescene`.** Done — see `lib/file_watch.rae`
+   plus the integration in this app's `main.rae`. Iterating layouts
+   no longer requires a recompile.
 9. **macOS+Metal `TakeScreenshot`** returns the cleared back buffer in
    a fast headless flow; documented in `snapshot.sh`. Long-term fix
    is to render to an off-screen `RenderTexture` and `ExportImage`
