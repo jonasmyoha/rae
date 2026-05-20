@@ -1,4 +1,4 @@
-# Code Hybrid Hot Reload Demo
+# Code hybrid hot reload demo
 
 The Hybrid target's flavor of **code hot reload**: a compiled C host
 embeds the Live VM and accepts new bytecode chunks delivered at
