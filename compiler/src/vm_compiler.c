@@ -919,8 +919,13 @@ bool emit_function_call(BytecodeCompiler* compiler, FunctionEntry* entry, int li
     return emit_native_call(compiler, entry->name, arg_count, line, column);
   }
   emit_op(compiler, OP_CALL, line);
-  if (compiler->chunk->code_count > UINT16_MAX) {
-    diag_error(compiler->file_path, line, column, "VM bytecode exceeds 64KB limit");
+  // OP_CALL emits a uint32 patch offset and the VM reads it with
+  // `read_uint32`, so the bytecode format supports any offset up to
+  // UINT32_MAX. Keep the check as a sanity guard against a runaway
+  // chunk, but at the format's actual limit rather than the legacy
+  // 16-bit one.
+  if (compiler->chunk->code_count > UINT32_MAX - 8) {
+    diag_error(compiler->file_path, line, column, "VM bytecode exceeds 4GB limit");
     compiler->had_error = true;
     return false;
   }

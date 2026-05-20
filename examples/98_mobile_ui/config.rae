@@ -3,10 +3,13 @@
 # place to edit. Auto-imported by every other file in this project.
 
 # ----- screen + spacing ---------------------------------------------
-# screenH chosen so the whole stack fits in macOS's available window
-# height (1117 desktop minus chrome ≈ 1079). The actual raylib window
-# may be shorter on smaller displays.
-let screenW: Float = 600.0
+# Window dimensions in iPhone 15 Pro logical aspect (393×852, 19.5:9 ≈
+# 2.168 tall/wide), scaled up to ~1079 tall for a roomy demo on macOS.
+# `main.rae` may shrink both axes proportionally at runtime to fit
+# inside `monitorHeight - chrome`: macOS silently clamps a window that
+# doesn't fit and the clamp desyncs cursor coords from rendering.
+# Treat as a maximum; the layout reads the runtime values.
+let screenW: Float = 498.0
 let screenH: Float = 1079.0
 let outerPad: Float = 20.0
 let outerGap: Float = 12.0

@@ -6,6 +6,7 @@
 #include <string.h>
 #include <time.h>
 #include <sys/time.h>
+#include <sys/stat.h>
 #include <signal.h>
 
 #ifdef _WIN32
@@ -712,6 +713,19 @@ rae_Bool rae_ext_rae_sys_unlock_file(rae_String path) {
     flock(fd, LOCK_UN);
     close(fd);
     return true;
+}
+
+double rae_ext_rae_sys_file_mtime(rae_String path) {
+    if (!path.data) return 0.0;
+    struct stat st;
+    if (stat((const char*)path.data, &st) != 0) return 0.0;
+#if defined(__APPLE__)
+    return (double)st.st_mtimespec.tv_sec + (double)st.st_mtimespec.tv_nsec / 1.0e9;
+#elif defined(__linux__)
+    return (double)st.st_mtim.tv_sec + (double)st.st_mtim.tv_nsec / 1.0e9;
+#else
+    return (double)st.st_mtime;
+#endif
 }
 
 rae_String rae_ext_rae_str_i64(int64_t v) {

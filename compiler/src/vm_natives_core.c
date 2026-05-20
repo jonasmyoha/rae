@@ -721,6 +721,22 @@ static bool native_rae_sys_write_file(struct VM* vm,
   return true;
 }
 
+static bool native_rae_sys_file_mtime(struct VM* vm,
+                                       VmNativeResult* out_result,
+                                       const Value* args,
+                                       size_t arg_count,
+                                       void* user_data) {
+  (void)vm; (void)user_data;
+  if (arg_count != 1) return false;
+  const Value* path_val = deref_value(&args[0]);
+  if (path_val->type != VAL_STRING) return false;
+  rae_String path = { path_val->as.string_value.chars, path_val->as.string_value.length };
+  double mt = rae_ext_rae_sys_file_mtime(path);
+  out_result->has_value = true;
+  out_result->value = value_float(mt);
+  return true;
+}
+
 
 
 
@@ -1037,6 +1053,9 @@ bool register_default_natives(VmRegistry* registry, TickCounter* tick_counter) {
   ok = vm_registry_register_native(registry, "rae_ext_rae_sys_get_env", native_rae_sys_get_env, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_ext_rae_sys_read_file", native_rae_sys_read_file, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_ext_rae_sys_write_file", native_rae_sys_write_file, NULL) && ok;
+  ok = vm_registry_register_native(registry, "fileModTime", native_rae_sys_file_mtime, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_sys_file_mtime", native_rae_sys_file_mtime, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_ext_rae_sys_file_mtime", native_rae_sys_file_mtime, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_seed", native_rae_seed, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_random", native_rae_random, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_random_int", native_rae_random_int, NULL) && ok;
