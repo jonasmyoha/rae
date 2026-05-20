@@ -20,7 +20,7 @@
 import core
 import string
 import sys
-import ui/hot_reload
+import file_watch
 
 # Sidestep a C-backend bug where `opt String` returns compare against
 # `none` via type-mismatched `rae_ext_rae_str_eq`. Same workaround as
@@ -43,29 +43,29 @@ func main() {
 
   let paths: List(String) = createList(String)(initialCap: 1)
   paths.add(value: path)
-  let hr: HotReload = createHotReload(
+  let watcher: FileWatcher = createFileWatcher(
     paths: paths
     enabled: true
     intervalSec: 0.0
   )
 
-  let r1: Bool = checkForChanges(hr: hr, now: 100.0)
+  let r1: Bool = checkForChanges(watcher: watcher, now: 100.0)
   log("no-change: changed={r1} content={readContent(path: path)}")
 
   writeFile(path: path, content: "v2-longer-content")
 
-  let r2: Bool = checkForChanges(hr: hr, now: 101.0)
+  let r2: Bool = checkForChanges(watcher: watcher, now: 101.0)
   log("after-edit: changed={r2} content={readContent(path: path)}")
 
-  let r3: Bool = checkForChanges(hr: hr, now: 102.0)
+  let r3: Bool = checkForChanges(watcher: watcher, now: 102.0)
   log("after-refresh: changed={r3} content={readContent(path: path)}")
 
-  let off: HotReload = createHotReload(
+  let off: FileWatcher = createFileWatcher(
     paths: paths
     enabled: false
     intervalSec: 0.0
   )
   writeFile(path: path, content: "v3-different-again")
-  let r4: Bool = checkForChanges(hr: off, now: 103.0)
+  let r4: Bool = checkForChanges(watcher: off, now: 103.0)
   log("disabled: changed={r4} content={readContent(path: path)}")
 }
