@@ -1,8 +1,17 @@
-# Album-screen builders (reference: `screens/music_player_screen_2.png`).
-# The album view is mostly built in code rather than via a `.raescene`
-# file because the layout — small thumb + title block + actions row +
-# Play/Shuffle pills, then the scrollable track list — is unique to
-# this one screen.
+# Album-screen world composition (reference: `screens/music_player_screen_2.png`).
+#
+# The static album header — top bar, hero block, action buttons,
+# play/shuffle pills — lives in `assets/scenes/album.raescene` and
+# is mounted as a single sub-tree. Only the genuinely-dynamic
+# pieces stay code-driven: the per-track-row loop, the bottom
+# spacer, the mini-player scene mount, and the nav-tabs builder.
+#
+# Trade-off recap (the previous version was 100% code-driven): a
+# scene file gets free data hot reload via `lib/file_watch.rae`,
+# theme tokens via `"$tokenName"`, and a cleaner separation
+# between layout authoring and runtime composition. The downside
+# would be that scenes can't yet express "N children driven by a
+# data list" — which is why the track-row loop stays in code.
 import core
 import string
 import ui/components
@@ -10,218 +19,38 @@ import ui/ecs
 import ui/scene
 import ui/scene_instance
 
-# Top bar for the album view: page title on the left, search magnifier
-# on the right. No back-arrow — global navigation is the bottom
-# nav-tabs (see `nav_tabs_builder.rae`). The Stack layout combined with
-# per-child Align lets us pin the title to Start and the search icon to
-# End in a single bar.
-func buildAlbumTopBar(world: mod UiWorld) pub ret Int {
-  let bar: Int = createEntity(world: world)
-  let barW: Float = screenW - outerPad * 2.0
-  setRectFixed(world: world, entity: bar, w: barW, h: topBarH)
-  let layStack: LayoutType = LayoutType.Stack
-  setLayout(world: world, entity: bar, kind: layStack, gap: 0.0, alignCross: AlignKind.Center)
-
-  let title: Int = createEntity(world: world)
-  let titleW: Float = barW - 32.0 - 16.0
-  setRectFixed(world: world, entity: title, w: titleW, h: 32.0)
-  setText(world: world, entity: title, text: "Library", styleId: "topBarTitle")
-  let alignLeft: Align = {
-    x: AlignKind.Start
-    y: AlignKind.Center
-    hasX: true
-    hasY: true
-  }
-  componentSet(this: world.aligns, entity: title, data: alignLeft)
-
-  let searchBtn: Int = createEntity(world: world)
-  setRectFixed(world: world, entity: searchBtn, w: 32.0, h: 32.0)
-  setSprite(world: world, entity: searchBtn, key: "mat:search", tint: iconTint)
-  setOnClick(world: world, entity: searchBtn, actionId: "nav.search")
-  let alignRight: Align = {
-    x: AlignKind.End
-    y: AlignKind.Center
-    hasX: true
-    hasY: true
-  }
-  componentSet(this: world.aligns, entity: searchBtn, data: alignRight)
-
-  let kids: List(Int) = createList(Int)(initialCap: 2)
-  kids.add(value: title)
-  kids.add(value: searchBtn)
-  attachChildren(world: world, parent: bar, kids: kids)
-  ret bar
+# Height of the album header scene: top bar (48) + hero (96) +
+# actions (44) + pills (56) + 3 inter-row gaps of `outerGap` (12).
+# Kept in sync with `album.raescene`'s authored row heights —
+# editing one without the other will mis-place the track list.
+func albumHeaderHeight() ret Float {
+  let rowSum: Float = topBarH + heroBlockH + actionsRowH + pillsRowH
+  let gaps: Float = outerGap * 3.0
+  ret rowSum + gaps
 }
 
-# Album hero: small thumb on the left, a vertical title block on the
-# right with caption / h1 / artist.
-func buildAlbumHero(world: mod UiWorld) pub ret Int {
-  let row: Int = createEntity(world: world)
-  let rowW: Float = screenW - outerPad * 2.0
-  setRectFixed(world: world, entity: row, w: rowW, h: heroBlockH)
-  setLayout(world: world, entity: row, kind: LayoutType.Horizontal, gap: 16.0, alignCross: AlignKind.Center)
-
-  let thumb: Int = createEntity(world: world)
-  setRectFixed(world: world, entity: thumb, w: albumThumbSize, h: albumThumbSize)
-  setSprite(world: world, entity: thumb, key: "albumCover", tint: imageTintColor)
-  let heroKey: String = "albumCover"
-  let hero: HeroWidget = { key: heroKey }
-  componentSet(this: world.heroWidgets, entity: thumb, data: hero)
-
-  let info: Int = createEntity(world: world)
-  let infoW: Float = rowW - albumThumbSize - 16.0
-  setRectFixed(world: world, entity: info, w: infoW, h: heroBlockH)
-  setLayout(world: world, entity: info, kind: LayoutType.Vertical, gap: 2.0, alignCross: AlignKind.Start)
-
-  let caption: Int = createEntity(world: world)
-  setRectFixed(world: world, entity: caption, w: infoW, h: 20.0)
-  setText(world: world, entity: caption, text: "Album · 8 songs · 2012", styleId: "albumCaption")
-
-  let title: Int = createEntity(world: world)
-  setRectFixed(world: world, entity: title, w: infoW, h: 44.0)
-  setText(world: world, entity: title, text: "Charcoal", styleId: "h1")
-
-  let artist: Int = createEntity(world: world)
-  setRectFixed(world: world, entity: artist, w: infoW, h: 22.0)
-  setText(world: world, entity: artist, text: "Brambles", styleId: "muted")
-
-  let infoKids: List(Int) = createList(Int)(initialCap: 3)
-  infoKids.add(value: caption)
-  infoKids.add(value: title)
-  infoKids.add(value: artist)
-  attachChildren(world: world, parent: info, kids: infoKids)
-
-  let rowKids: List(Int) = createList(Int)(initialCap: 2)
-  rowKids.add(value: thumb)
-  rowKids.add(value: info)
-  attachChildren(world: world, parent: row, kids: rowKids)
-  ret row
-}
-
-# Three small action buttons (add to playlist, download, more).
-func buildActionsRow(world: mod UiWorld) pub ret Int {
-  let row: Int = createEntity(world: world)
-  let rowW: Float = screenW - outerPad * 2.0
-  setRectFixed(world: world, entity: row, w: rowW, h: actionsRowH)
-  setLayout(world: world, entity: row, kind: LayoutType.Horizontal, gap: 12.0, alignCross: AlignKind.Center)
-
-  let addBtn: Int = createEntity(world: world)
-  setRectFixed(world: world, entity: addBtn, w: 36.0, h: 36.0)
-  setSprite(world: world, entity: addBtn, key: "mat:playlist_add", tint: iconTint)
-
-  let downloadBtn: Int = createEntity(world: world)
-  setRectFixed(world: world, entity: downloadBtn, w: 36.0, h: 36.0)
-  setSprite(world: world, entity: downloadBtn, key: "mat:download", tint: iconTint)
-
-  let moreBtn: Int = createEntity(world: world)
-  setRectFixed(world: world, entity: moreBtn, w: 36.0, h: 36.0)
-  setSprite(world: world, entity: moreBtn, key: "mat:more_horiz", tint: iconTint)
-
-  let kids: List(Int) = createList(Int)(initialCap: 3)
-  kids.add(value: addBtn)
-  kids.add(value: downloadBtn)
-  kids.add(value: moreBtn)
-  attachChildren(world: world, parent: row, kids: kids)
-  ret row
-}
-
-# Black `Play` pill + outline `Shuffle` pill, 50/50 split.
-func buildPillsRow(world: mod UiWorld) pub ret Int {
-  let row: Int = createEntity(world: world)
-  let rowW: Float = screenW - outerPad * 2.0
-  setRectFixed(world: world, entity: row, w: rowW, h: pillsRowH)
-  setLayout(world: world, entity: row, kind: LayoutType.Horizontal, gap: 12.0, alignCross: AlignKind.Center)
-
-  let pillW: Float = (rowW - 12.0) / 2.0
-
-  let playPill: Int = buildPill(
+# Mount the album header scene on a fresh entity sized to the
+# screen's content width.
+func buildAlbumHeader(world: mod UiWorld, scene: view Scene) pub ret Int {
+  let header: Int = createEntity(world: world)
+  let w: Float = screenW - outerPad * 2.0
+  setRectFixed(world: world, entity: header, w: w, h: albumHeaderHeight())
+  let noOverrides: List(SceneOverride) = emptyOverrides()
+  let label: String = "album"
+  let mounted: Int = mountOrError(
     world: world
-    w: pillW
-    h: pillsRowH
-    fill: darkPillColor
-    iconKey: "mat:play_arrow"
-    iconTint: lightTextColor
-    label: "Play"
-    labelStyle: "pillLabel"
+    mountEntity: header
+    scene: scene
+    sceneLabel: label
+    overrides: noOverrides
   )
-  let shufflePill: Int = buildShufflePill(
-    world: world
-    w: pillW
-    h: pillsRowH
-    iconKey: "mat:shuffle"
-    label: "Shuffle"
-  )
-
-  let kids: List(Int) = createList(Int)(initialCap: 2)
-  kids.add(value: playPill)
-  kids.add(value: shufflePill)
-  attachChildren(world: world, parent: row, kids: kids)
-  ret row
-}
-
-# Helper for a filled pill with an icon and a label, both centered.
-func buildPill(
-  world: mod UiWorld
-  w: Float
-  h: Float
-  fill: RgbaColor
-  iconKey: String
-  iconTint: RgbaColor
-  label: String
-  labelStyle: String
-) pub ret Int {
-  let pill: Int = createEntity(world: world)
-  setRectFixed(world: world, entity: pill, w: w, h: h)
-  setShapeRounded(world: world, entity: pill, fill: fill, radius: h / 2.0)
-  setLayout(world: world, entity: pill, kind: LayoutType.Stack, gap: 0.0, alignCross: AlignKind.Center)
-
-  let inner: Int = createEntity(world: world)
-  setRectFixed(world: world, entity: inner, w: w * 0.5, h: h - 16.0)
-  setLayout(world: world, entity: inner, kind: LayoutType.Horizontal, gap: 8.0, alignCross: AlignKind.Center)
-
-  let icon: Int = createEntity(world: world)
-  setRectFixed(world: world, entity: icon, w: 22.0, h: 22.0)
-  setSprite(world: world, entity: icon, key: iconKey, tint: iconTint)
-
-  let lbl: Int = createEntity(world: world)
-  setRectFixed(world: world, entity: lbl, w: 80.0, h: 22.0)
-  setText(world: world, entity: lbl, text: label, styleId: labelStyle)
-
-  let innerKids: List(Int) = createList(Int)(initialCap: 2)
-  innerKids.add(value: icon)
-  innerKids.add(value: lbl)
-  attachChildren(world: world, parent: inner, kids: innerKids)
-
-  let pillKids: List(Int) = createList(Int)(initialCap: 1)
-  pillKids.add(value: inner)
-  attachChildren(world: world, parent: pill, kids: pillKids)
-  ret pill
-}
-
-# Outline-style shuffle pill — currently rendered with a surface fill
-# (no stroke support yet in `Shape`), which visually reads as "outline"
-# against the lighter surrounding bg.
-func buildShufflePill(
-  world: mod UiWorld
-  w: Float
-  h: Float
-  iconKey: String
-  label: String
-) pub ret Int {
-  ret buildPill(
-    world: world
-    w: w
-    h: h
-    fill: surfaceColor
-    iconKey: iconKey
-    iconTint: iconTint
-    label: label
-    labelStyle: "primary"
-  )
+  ret header
 }
 
 # Five `track-row.raescene` mounts with per-row title/index/subtitle
-# overrides driving the same authored scene each row.
+# overrides driving the same authored scene each row. This stays
+# code-driven because the scene format doesn't yet express a
+# data-driven list of N children.
 func buildTrackList(world: mod UiWorld, trackScene: view Scene) pub ret Int {
   let list: Int = createEntity(world: world)
   let n: Int = trackRowCount
@@ -281,8 +110,8 @@ func buildTrackList(world: mod UiWorld, trackScene: view Scene) pub ret Int {
   ret list
 }
 
-# Compose the whole album world: top bar / hero / actions / pills /
-# track list / mini-player / nav-tabs.
+# Compose the whole album world: header scene + track list / spacer /
+# mini-player / nav-tabs as code-attached siblings around it.
 func buildAlbumWorld(scenes: view AlbumScenes) pub ret UiWorld {
   let world: UiWorld = createUiWorld()
   let contentW: Float = screenW - outerPad * 2.0
@@ -295,10 +124,7 @@ func buildAlbumWorld(scenes: view AlbumScenes) pub ret UiWorld {
   setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
   setPaddingAll(world: world, entity: root, n: outerPad)
 
-  let topBar: Int = buildAlbumTopBar(world: world)
-  let hero: Int = buildAlbumHero(world: world)
-  let actionsRow: Int = buildActionsRow(world: world)
-  let pillsRow: Int = buildPillsRow(world: world)
+  let header: Int = buildAlbumHeader(world: world, scene: scenes.album)
   let trackList: Int = buildTrackList(world: world, trackScene: scenes.trackRow)
   let spacer: Int = buildVerticalSpacer(world: world)
   let miniLabelAl: String = "mini-player"
@@ -311,11 +137,8 @@ func buildAlbumWorld(scenes: view AlbumScenes) pub ret UiWorld {
   )
   let navTabs: Int = buildNavTabsForScreen(world: world, activeTab: Screen.Album, scenes: scenes)
 
-  let kids: List(Int) = createList(Int)(initialCap: 8)
-  kids.add(value: topBar)
-  kids.add(value: hero)
-  kids.add(value: actionsRow)
-  kids.add(value: pillsRow)
+  let kids: List(Int) = createList(Int)(initialCap: 5)
+  kids.add(value: header)
   kids.add(value: trackList)
   kids.add(value: spacer)
   kids.add(value: miniPlayer)
