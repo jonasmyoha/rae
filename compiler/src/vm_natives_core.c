@@ -737,6 +737,19 @@ static bool native_rae_sys_file_mtime(struct VM* vm,
   return true;
 }
 
+static bool native_rae_sys_rss_kb(struct VM* vm,
+                                   VmNativeResult* out_result,
+                                   const Value* args,
+                                   size_t arg_count,
+                                   void* user_data) {
+  (void)vm; (void)args; (void)user_data;
+  if (arg_count != 0) return false;
+  int64_t rss = rae_ext_rae_sys_rss_kb();
+  out_result->has_value = true;
+  out_result->value = value_int(rss);
+  return true;
+}
+
 
 
 
@@ -1056,6 +1069,9 @@ bool register_default_natives(VmRegistry* registry, TickCounter* tick_counter) {
   ok = vm_registry_register_native(registry, "fileModTime", native_rae_sys_file_mtime, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_sys_file_mtime", native_rae_sys_file_mtime, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_ext_rae_sys_file_mtime", native_rae_sys_file_mtime, NULL) && ok;
+  ok = vm_registry_register_native(registry, "processRssKb", native_rae_sys_rss_kb, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_sys_rss_kb", native_rae_sys_rss_kb, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_ext_rae_sys_rss_kb", native_rae_sys_rss_kb, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_seed", native_rae_seed, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_random", native_rae_random, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_random_int", native_rae_random_int, NULL) && ok;
