@@ -64,16 +64,25 @@ func lightTheme() pub ret Theme {
   }
 }
 
-# Default dark theme — dark surface, light text, accent flipped so
-# the play pill reads as the bright element against a dark page.
+# Default dark theme. Choices worth explaining:
+#  - `surface` sits near pure black so highlights on top read crisply.
+#  - `textPrimary` is near-white for body copy; `textMuted` is bumped
+#    lighter than the light theme's muted so the contrast against
+#    the dark surface still meets WCAG.
+#  - `surfaceAlt` *flips* — in light theme it's a dark accent panel
+#    on a light page; in dark theme it's a light card on a near-black
+#    page. This keeps `accentText`-based text legible on either
+#    surfaceAlt without an extra "onSurfaceAlt" slot.
+#  - `accent` / `accentText` likewise flip so the play pill reads as
+#    the brightest element in both themes.
 func darkTheme() pub ret Theme {
   ret Theme {
     mode: ThemeMode.Dark
     palette: ThemePalette {
-      surface: RgbaColor { r: 18, g: 18, b: 24, a: 255 }
-      surfaceAlt: RgbaColor { r: 36, g: 36, b: 44, a: 255 }
-      textPrimary: RgbaColor { r: 236, g: 236, b: 240, a: 255 }
-      textMuted: RgbaColor { r: 140, g: 140, b: 150, a: 255 }
+      surface: RgbaColor { r: 10, g: 10, b: 14, a: 255 }
+      surfaceAlt: RgbaColor { r: 220, g: 220, b: 224, a: 255 }
+      textPrimary: RgbaColor { r: 248, g: 248, b: 250, a: 255 }
+      textMuted: RgbaColor { r: 170, g: 170, b: 180, a: 255 }
       outline: RgbaColor { r: 60, g: 60, b: 70, a: 255 }
       accent: RgbaColor { r: 246, g: 246, b: 248, a: 255 }
       accentText: RgbaColor { r: 22, g: 22, b: 28, a: 255 }

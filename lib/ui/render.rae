@@ -26,6 +26,7 @@ import core
 import string
 import raylib
 import ui/icon_codepoints
+import ui/theme
 
 # Default text font slot; matches `loadFontInto(slot: 0, ...)`.
 let defaultFontSlot: Int = 0
@@ -265,6 +266,12 @@ func textStyleSize(styleId: String) ret Float {
 }
 
 func textStyleColor(styleId: String, chain255: Int) ret Color {
+  # Map each authored style id to the theme palette so light <->
+  # dark flips on text are automatic. The label "on surfaceAlt"
+  # below means the panel underneath this text is the surfaceAlt
+  # color (e.g., the mini-player pill) — those styles read the
+  # accentText slot since accentText is sized as "contrast against
+  # accent / a darker chunk" in both themes.
   let mute: String = "muted"
   let caption: String = "caption"
   let primary: String = "primary"
@@ -275,57 +282,55 @@ func textStyleColor(styleId: String, chain255: Int) ret Color {
   let pillLabelLight: String = "pillLabel"
   let trackTitle: String = "trackTitle"
   let trackMuted: String = "trackMuted"
+  let tabActive: String = "tabActive"
+  let tabInactive: String = "tabInactive"
+
   if styleId.equals(other: mute) {
-    let muted: RgbaColor = { r: 130, g: 130, b: 140, a: 255 }
-    ret toRaylibColor(c: muted, chain255: chain255)
+    ret toRaylibColor(c: themeColorByName(name: "textMuted"), chain255: chain255)
   }
   if styleId.equals(other: caption) {
-    let cap: RgbaColor = { r: 140, g: 140, b: 150, a: 255 }
-    ret toRaylibColor(c: cap, chain255: chain255)
+    ret toRaylibColor(c: themeColorByName(name: "textMuted"), chain255: chain255)
   }
-  if styleId.equals(other: miniTitle) {
-    let lightOnDark: RgbaColor = { r: 246, g: 246, b: 248, a: 255 }
-    ret toRaylibColor(c: lightOnDark, chain255: chain255)
-  }
-  if styleId.equals(other: miniMuted) {
-    let dim: RgbaColor = { r: 170, g: 170, b: 180, a: 255 }
-    ret toRaylibColor(c: dim, chain255: chain255)
+  if styleId.equals(other: primary) {
+    ret toRaylibColor(c: themeColorByName(name: "textPrimary"), chain255: chain255)
   }
   if styleId.equals(other: topBarTitle) {
-    let dark: RgbaColor = { r: 30, g: 30, b: 36, a: 255 }
-    ret toRaylibColor(c: dark, chain255: chain255)
+    ret toRaylibColor(c: themeColorByName(name: "textPrimary"), chain255: chain255)
   }
   if styleId.equals(other: albumCaption) {
-    let cap: RgbaColor = { r: 140, g: 140, b: 150, a: 255 }
-    ret toRaylibColor(c: cap, chain255: chain255)
-  }
-  if styleId.equals(other: pillLabelLight) {
-    let lightOnDark: RgbaColor = { r: 246, g: 246, b: 248, a: 255 }
-    ret toRaylibColor(c: lightOnDark, chain255: chain255)
+    ret toRaylibColor(c: themeColorByName(name: "textMuted"), chain255: chain255)
   }
   if styleId.equals(other: trackTitle) {
-    let dark: RgbaColor = { r: 30, g: 30, b: 36, a: 255 }
-    ret toRaylibColor(c: dark, chain255: chain255)
+    ret toRaylibColor(c: themeColorByName(name: "textPrimary"), chain255: chain255)
   }
   if styleId.equals(other: trackMuted) {
-    let dim: RgbaColor = { r: 140, g: 140, b: 150, a: 255 }
-    ret toRaylibColor(c: dim, chain255: chain255)
+    ret toRaylibColor(c: themeColorByName(name: "textMuted"), chain255: chain255)
   }
-  let tabActive: String = "tabActive"
   if styleId.equals(other: tabActive) {
-    let darkA: RgbaColor = { r: 30, g: 30, b: 36, a: 255 }
-    ret toRaylibColor(c: darkA, chain255: chain255)
+    ret toRaylibColor(c: themeColorByName(name: "textPrimary"), chain255: chain255)
   }
-  let tabInactive: String = "tabInactive"
   if styleId.equals(other: tabInactive) {
-    let dimT: RgbaColor = { r: 130, g: 130, b: 140, a: 255 }
-    ret toRaylibColor(c: dimT, chain255: chain255)
+    ret toRaylibColor(c: themeColorByName(name: "textMuted"), chain255: chain255)
   }
-  let dark: RgbaColor = { r: 30, g: 30, b: 36, a: 255 }
-  if styleId.equals(other: primary) {
-    ret toRaylibColor(c: dark, chain255: chain255)
+  # "On surfaceAlt" styles. surfaceAlt is the contrasting panel
+  # (the mini-player pill). In light theme it's dark, so its text
+  # is light; in dark theme it stays dark-ish too, so its text is
+  # still light. We piggy-back on `accentText` for the primary
+  # label — its job is exactly "high-contrast against a dark
+  # chunk" in both themes.
+  if styleId.equals(other: miniTitle) {
+    ret toRaylibColor(c: themeColorByName(name: "accentText"), chain255: chain255)
   }
-  ret toRaylibColor(c: dark, chain255: chain255)
+  if styleId.equals(other: miniMuted) {
+    ret toRaylibColor(c: themeColorByName(name: "textMuted"), chain255: chain255)
+  }
+  # Pill labels sit on top of the `$accent` shape — `$accentText`
+  # is the dual.
+  if styleId.equals(other: pillLabelLight) {
+    ret toRaylibColor(c: themeColorByName(name: "accentText"), chain255: chain255)
+  }
+  # Fallback: treat unknown style ids as primary text.
+  ret toRaylibColor(c: themeColorByName(name: "textPrimary"), chain255: chain255)
 }
 
 # Horizontally-centered styles: the renderer measures the glyph run
