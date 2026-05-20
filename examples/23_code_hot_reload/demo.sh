@@ -1,5 +1,6 @@
 #!/bin/bash
-# Hot reload demo script for Rae
+# Code hot reload demo script for Rae.
+# (Not data hot reload — for that see examples/99_data_hot_reload.)
 
 EXAMPLE_DIR=$(cd "$(dirname "$0")" && pwd)
 MAIN_RAE="$EXAMPLE_DIR/main.rae"
@@ -15,7 +16,7 @@ else
   exit 1
 fi
 
-echo "🚀 Starting Hot Reload Demo..."
+echo "🚀 Starting Code Hot Reload Demo..."
 echo "1. Launching watcher in background..."
 $COMPILER run --watch "$MAIN_RAE" &
 WATCHER_PID=$!
