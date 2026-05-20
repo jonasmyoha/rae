@@ -22,6 +22,9 @@
 
 #ifdef __APPLE__
 #include <mach/mach_time.h>
+#include <mach/mach.h>
+#include <mach/task.h>
+#include <mach/task_info.h>
 #endif
 
 void rae_flush_stdout(void) {
@@ -713,6 +716,33 @@ rae_Bool rae_ext_rae_sys_unlock_file(rae_String path) {
     flock(fd, LOCK_UN);
     close(fd);
     return true;
+}
+
+int64_t rae_ext_rae_sys_rss_kb(void) {
+#ifdef __APPLE__
+    struct mach_task_basic_info info;
+    mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
+    if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO,
+                  (task_info_t)&info, &count) == KERN_SUCCESS) {
+        return (int64_t)(info.resident_size / 1024);
+    }
+    return -1;
+#elif defined(__linux__)
+    FILE* f = fopen("/proc/self/status", "r");
+    if (!f) return -1;
+    char line[256];
+    int64_t rss = -1;
+    while (fgets(line, sizeof(line), f)) {
+        if (strncmp(line, "VmRSS:", 6) == 0) {
+            rss = atoll(line + 6);
+            break;
+        }
+    }
+    fclose(f);
+    return rss;
+#else
+    return -1;
+#endif
 }
 
 double rae_ext_rae_sys_file_mtime(rae_String path) {
