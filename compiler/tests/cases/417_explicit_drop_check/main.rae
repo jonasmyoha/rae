@@ -1,0 +1,58 @@
+# Explicit-drop regression guard. Pairs with 416_memory_leak_check.
+#
+# Same allocation pattern as 416, but each iteration explicitly
+# calls `xs.drop()` before returning. This proves the Stage 1
+# stdlib `drop()` primitive in `lib/core.rae` actually releases
+# the Buffer to the allocator — so when Stage 2's codegen starts
+# emitting `drop()` calls automatically, we know the underlying
+# stdlib machinery it's calling into is correct.
+#
+# Expected: `verdict: OK` on BOTH targets.
+#  - Live (bytecode VM) passes because the VM already reclaims
+#    dropped values; the extra `drop()` call is redundant but
+#    safe.
+#  - Compiled (C backend) passes only because `drop()` is being
+#    called explicitly. Remove the `.drop()` line and 417 turns
+#    into 416 — see `compiler/tests/cases/416_memory_leak_check`.
+#
+# If this test ever starts failing, `drop()` on `List(T)` in
+# `lib/core.rae` is broken — fix that before anything else.
+import core
+import string
+import sys
+
+func transientAllocation(cap: Int) {
+  let xs: List(Int) = createList(Int)(initialCap: cap)
+  let i: Int = 0
+  loop i < cap {
+    xs.add(value: i)
+    i = i + 1
+  }
+  xs.drop()
+}
+
+func main() {
+  let cap: Int = 1024
+  let iterations: Int = 5000
+
+  transientAllocation(cap: cap)
+  let baselineKb: Int = processRssKb()
+
+  let i: Int = 0
+  loop i < iterations {
+    transientAllocation(cap: cap)
+    i = i + 1
+  }
+  let finalKb: Int = processRssKb()
+  let growthKb: Int = finalKb - baselineKb
+
+  let thresholdKb: Int = 5000
+
+  log("iterations: {iterations}")
+  log("growth_kb: {growthKb}")
+  if growthKb > thresholdKb {
+    log("verdict: LEAK")
+  } else {
+    log("verdict: OK")
+  }
+}
