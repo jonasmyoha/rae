@@ -1,0 +1,73 @@
+# Data hot-reload example.
+#
+# `lib/ui/hot_reload.rae` is named after its first user (the UI scene
+# system in 98_mobile_ui), but the watcher itself is data-agnostic —
+# any file on disk can be tracked and any data shape can be re-parsed.
+# This example demonstrates the API on a plain text "config" file with
+# no raylib involved.
+#
+# Game loops would normally call `checkForChanges` once per frame. Here
+# we simulate a 6-tick loop, write a new config at tick 2, and watch
+# the watcher fire exactly once on tick 3. `getTime` is supplied
+# manually so the example is deterministic — in a real app you'd pass
+# `getTime()` from raylib (or any other monotonic clock).
+import core
+import string
+import sys
+import ui/hot_reload
+
+# Sidestep a known C-backend bug where comparing `opt String` against
+# `none` lowers to a type-mismatched `rae_ext_rae_str_eq` call. Same
+# pattern as `examples/98_mobile_ui/scene_loader.rae`: declare the
+# extern with a non-opt return so we get a plain `rae_String` (empty
+# on miss).
+func rae_ext_rae_sys_read_file(path: String) extern ret String
+
+func loadConfig(path: String) ret String {
+  let contents: String = rae_ext_rae_sys_read_file(path: path)
+  if contents.length() is 0 {
+    ret "<missing>"
+  }
+  ret contents
+}
+
+func main() {
+  let configPath: String = "/tmp/rae_hot_reload_example_99.cfg"
+
+  # Seed the file before constructing the watcher so the initial
+  # snapshot is accurate. createHotReload reads each file's mtime
+  # right away and treats that as the baseline — the first check
+  # never spuriously fires.
+  writeFile(path: configPath, content: "color=red")
+  log("startup config: {loadConfig(path: configPath)}")
+
+  let paths: List(String) = createList(String)(initialCap: 1)
+  paths.add(value: configPath)
+  let hr: HotReload = createHotReload(
+    paths: paths
+    enabled: true
+    intervalSec: 0.0
+  )
+
+  # Simulate a frame loop. The watcher runs at the top of each frame.
+  # After frame 2 we "edit" the config from outside the program
+  # (writeFile stands in for whatever the user's editor would do);
+  # the next frame should pick that up. We log every tick so the
+  # expected output reads top-to-bottom.
+  let tick: Int = 0
+  let now: Float = 0.0
+  loop tick < 6 {
+    if checkForChanges(hr: hr, now: now) {
+      log("tick {tick}: reloaded -> {loadConfig(path: configPath)}")
+    } else {
+      log("tick {tick}: idle")
+    }
+    if tick is 2 {
+      writeFile(path: configPath, content: "color=blue volume=42")
+    }
+    tick = tick + 1
+    now = now + 1.0
+  }
+
+  log("done")
+}
