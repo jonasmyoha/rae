@@ -73,15 +73,15 @@ func main() {
   loadFontInto(slot: materialIconFontSlot, path: materialIconFontPath, fontSize: 64)
 
   # Theme is picked from `RAE_UI_THEME` ("dark" / "light"); default is
-  # light. Setting the theme BEFORE `loadAllScenes` matters — scenes
+  # dark. Setting the theme BEFORE `loadAllScenes` matters — scenes
   # resolve their `"$tokenName"` colors against `currentTheme()` at
   # parse time, so the theme has to be in place first.
   let themeEnv: String = getEnv(name: "RAE_UI_THEME")
-  let darkKey: String = "dark"
-  if themeEnv.equals(other: darkKey) {
-    setActiveTheme(theme: darkTheme())
-  } else {
+  let lightKey: String = "light"
+  if themeEnv.equals(other: lightKey) {
     setActiveTheme(theme: lightTheme())
+  } else {
+    setActiveTheme(theme: darkTheme())
   }
   syncColorsFromTheme()
 
