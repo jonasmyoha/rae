@@ -16,7 +16,7 @@ else
   exit 1
 fi
 
-echo "🚀 Starting Code Hot Reload Demo..."
+echo "🚀 Starting code hot reload demo..."
 echo "1. Launching watcher in background..."
 $COMPILER run --watch "$MAIN_RAE" &
 WATCHER_PID=$!
