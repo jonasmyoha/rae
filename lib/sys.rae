@@ -19,6 +19,8 @@ func rae_sys_unlock_file(path: String) extern ret Bool
 
 func rae_sys_file_mtime(path: String) extern ret Float
 
+func rae_sys_rss_kb() extern ret Int
+
 func rae_crypto_argon2i(password: String, salt: String, nb_blocks: Int, nb_iterations: Int, hash_buf: Any, hash_len: Int) extern
 
 func rae_crypto_lock(key: Any, nonce: Any, plain: Any, plain_len: Int, mac: Any, cipher: Any) extern
@@ -67,6 +69,15 @@ func unlockFile(path: String) ret Bool {
 # treat 0.0 as "missing / unknown" rather than a real timestamp.
 func fileModTime(path: String) ret Float {
   ret rae_sys_file_mtime(path: path)
+}
+
+# Current process's resident set size (RSS) in KB, reported by the
+# kernel. Useful for memory-leak regression tests and runtime
+# health checks. Returns -1 if the platform isn't supported.
+# Implementation: `task_info(MACH_TASK_BASIC_INFO)` on macOS,
+# `/proc/self/status` VmRSS line on Linux.
+func processRssKb() ret Int {
+  ret rae_sys_rss_kb()
 }
 
 func encrypt(key: Any, nonce: Any, plain: Any, len: Int, mac: Any, cipher: Any) {

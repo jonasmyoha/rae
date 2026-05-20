@@ -1,0 +1,72 @@
+# Memory-leak regression test.
+#
+# Rae values bound to a `let` are supposed to be reachable only for
+# the lifetime of that binding; once the binding goes out of scope
+# (function return, loop iteration end, block exit), any heap
+# storage they own should be released back to the allocator.
+#
+# Today that doesn't happen in the Compiled (C backend) target —
+# `createList(T)`, `createStringMap(V)`, and friends `malloc` their
+# backing `Buffer(T)` storage and nothing ever calls the matching
+# free. The Live (bytecode VM) target reclaims via its managed
+# value system. This test exposes the gap by allocating a moderate
+# amount of heap data in a loop and checking the process's RSS
+# grew less than a threshold; today the Compiled run fails, the
+# Live run passes.
+#
+# When language-level scope-exit deallocation lands, this test
+# starts passing on both targets and becomes a regression guard.
+#
+# Implementation note: we measure RSS via `processRssKb()` (a thin
+# wrapper over macOS `task_info(MACH_TASK_BASIC_INFO)` / Linux
+# `/proc/self/status` VmRSS) rather than an alloc/free counter so
+# leaks from any path — JsonDoc, string pool, future allocators —
+# count too, not just the buf_alloc family.
+import core
+import string
+import sys
+
+# Allocate a fresh List of `cap` Ints inside a fresh function scope.
+# The caller's binding is gone once we return, so a working
+# scope-exit dealloc would free the Buffer here. Currently it
+# doesn't, so each call leaves cap*8 bytes pinned.
+func transientAllocation(cap: Int) {
+  let xs: List(Int) = createList(Int)(initialCap: cap)
+  let i: Int = 0
+  loop i < cap {
+    xs.add(value: i)
+    i = i + 1
+  }
+}
+
+func main() {
+  let cap: Int = 1024
+  let iterations: Int = 5000
+
+  # Warm up once so any one-time startup allocations (font / string
+  # pool / loader scratch) settle BEFORE we record the baseline.
+  transientAllocation(cap: cap)
+  let baselineKb: Int = processRssKb()
+
+  let i: Int = 0
+  loop i < iterations {
+    transientAllocation(cap: cap)
+    i = i + 1
+  }
+  let finalKb: Int = processRssKb()
+  let growthKb: Int = finalKb - baselineKb
+
+  # Threshold sized well above any plausible OS bookkeeping noise
+  # (page allocator slack, malloc arenas) but well below the
+  # expected leak — 5000 iterations × 8 KB per list = 40 MB
+  # minimum if every allocation is retained.
+  let thresholdKb: Int = 5000
+
+  log("iterations: {iterations}")
+  log("growth_kb: {growthKb}")
+  if growthKb > thresholdKb {
+    log("verdict: LEAK")
+  } else {
+    log("verdict: OK")
+  }
+}
