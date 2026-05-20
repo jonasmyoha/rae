@@ -1,0 +1,85 @@
+# Polling-based file watcher used to drive UI hot reload.
+#
+# How a Rae UI app uses this:
+#   1. Build a `List(String)` of asset paths to watch (e.g. every
+#      `.raescene` the app loads).
+#   2. Call `createHotReload(paths, enabled, intervalSec)` once, after
+#      the asset paths are known. The snapshot records each file's
+#      current mtime so the first check is quiet.
+#   3. Once per frame, call `checkForChanges(hr, getTime())`. It is
+#      internally throttled by `intervalSec`, so calling every frame
+#      is fine — most calls early-return.
+#   4. When it returns `true`, the host should: re-parse the affected
+#      data (e.g. `scenes = loadAllScenes()`), discard the current
+#      `UiWorld`, and rebuild from the preserved route. The Rae GC
+#      reclaims the dropped world's memory on the next collection.
+#
+# Both Compiled (C backend) and Live (bytecode VM) targets call into
+# the same `fileModTime` native, so the system behaves identically.
+import core
+import string
+import sys
+
+type WatchEntry {
+  path: String
+  lastMtime: Float
+}
+
+type HotReload {
+  enabled: Bool
+  entries: List(WatchEntry)
+  intervalSec: Float
+  lastCheck: Float
+}
+
+# Take a snapshot of the current mtimes for every path. Subsequent
+# `checkForChanges` calls compare against this baseline, so the first
+# poll after construction does not spuriously fire.
+func createHotReload(paths: view List(String), enabled: Bool, intervalSec: Float) ret HotReload {
+  let entries: List(WatchEntry) = createList(WatchEntry)(initialCap: paths.length)
+  let i: Int = 0
+  loop i < paths.length {
+    let p: String = paths.get(index: i)
+    let mt: Float = fileModTime(path: p)
+    let entry: WatchEntry = { path: p, lastMtime: mt }
+    entries.add(value: entry)
+    i = i + 1
+  }
+  ret HotReload {
+    enabled: enabled
+    entries: entries
+    intervalSec: intervalSec
+    lastCheck: 0.0 - intervalSec
+  }
+}
+
+# Returns true if any watched file's mtime changed since the previous
+# poll. Throttled — calls within `intervalSec` of the last check are
+# free (return false). On `true`, the stored mtimes are refreshed so
+# the next call is quiet until the next on-disk edit.
+func checkForChanges(hr: mod HotReload, now: Float) ret Bool {
+  if hr.enabled is false {
+    ret false
+  }
+  if now - hr.lastCheck < hr.intervalSec {
+    ret false
+  }
+  hr.lastCheck = now
+  let changed: Bool = false
+  let i: Int = 0
+  loop i < hr.entries.length {
+    # Read via the raw buffer accessor: `List(T).get` returns `opt T`,
+    # which the C backend lowers to `RaeAny` and can't be re-typed back
+    # to a struct without a runtime tag check. The pattern matches
+    # `lib/ui/scene.rae:sceneNodeIndex`.
+    let entry: WatchEntry = rae_ext_rae_buf_get(buf: hr.entries.data, index: i)
+    let mt: Float = fileModTime(path: entry.path)
+    if mt is not entry.lastMtime {
+      let updated: WatchEntry = { path: entry.path, lastMtime: mt }
+      rae_ext_rae_buf_set(buf: hr.entries.data, index: i, value: updated)
+      changed = true
+    }
+    i = i + 1
+  }
+  ret changed
+}
