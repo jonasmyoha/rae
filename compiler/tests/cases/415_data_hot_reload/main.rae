@@ -1,25 +1,45 @@
-# Unit test for the `lib/ui/hot_reload.rae` polling file watcher.
+# Unit test for the data hot-reload polling watcher.
 #
-# The library is generic: it watches any file path and reports when
-# its mtime changes. We test by writing two distinct contents to a
-# scratch file in /tmp, calling `checkForChanges` in between, and
-# confirming the expected boolean for each scenario:
-#   1. fresh watcher -> no change
-#   2. after edit    -> change detected, true
-#   3. immediate re-check -> mtimes refreshed, false
-#   4. enabled=false -> always false even after a real edit
+# A real reload cycle has two steps:
+#   1. `checkForChanges` notices a watched file's mtime moved.
+#   2. The app re-reads the file and the new bytes are visible.
 #
-# A test-time `now` value bypasses the real clock; we pass strictly
-# increasing values so the `intervalSec` throttle never fires.
+# This test exercises both: each scenario logs the boolean return AND
+# the content the app would have on disk at that moment. If the
+# watcher fired but the file content lagged (caching, fd weirdness,
+# etc.), the content check would catch it.
+#
+# Scenarios:
+#   - fresh watcher after seeding the file -> no change, baseline content
+#   - edit + re-check                       -> change detected, content advances
+#   - immediate re-check                    -> mtimes refreshed, no change
+#   - enabled=false                         -> never fires, even after a real edit
+#
+# `now` is supplied manually so the example is deterministic and the
+# `intervalSec` throttle never kicks in.
 import core
 import string
 import sys
 import ui/hot_reload
 
+# Sidestep a C-backend bug where `opt String` returns compare against
+# `none` via type-mismatched `rae_ext_rae_str_eq`. Same workaround as
+# examples/98_mobile_ui/scene_loader.rae and examples/99_data_hot_reload.
+func rae_ext_rae_sys_read_file(path: String) extern ret String
+
+func readContent(path: String) ret String {
+  let c: String = rae_ext_rae_sys_read_file(path: path)
+  if c.length() is 0 {
+    ret "<missing>"
+  }
+  ret c
+}
+
 func main() {
-  let path: String = "/tmp/rae_hot_reload_test_415.txt"
+  let path: String = "/tmp/rae_data_hot_reload_test_415.txt"
 
   writeFile(path: path, content: "v1")
+  log("initial: {readContent(path: path)}")
 
   let paths: List(String) = createList(String)(initialCap: 1)
   paths.add(value: path)
@@ -30,15 +50,15 @@ func main() {
   )
 
   let r1: Bool = checkForChanges(hr: hr, now: 100.0)
-  log("no-change: {r1}")
+  log("no-change: changed={r1} content={readContent(path: path)}")
 
   writeFile(path: path, content: "v2-longer-content")
 
   let r2: Bool = checkForChanges(hr: hr, now: 101.0)
-  log("after-edit: {r2}")
+  log("after-edit: changed={r2} content={readContent(path: path)}")
 
   let r3: Bool = checkForChanges(hr: hr, now: 102.0)
-  log("after-refresh: {r3}")
+  log("after-refresh: changed={r3} content={readContent(path: path)}")
 
   let off: HotReload = createHotReload(
     paths: paths
@@ -47,5 +67,5 @@ func main() {
   )
   writeFile(path: path, content: "v3-different-again")
   let r4: Bool = checkForChanges(hr: off, now: 103.0)
-  log("disabled: {r4}")
+  log("disabled: changed={r4} content={readContent(path: path)}")
 }
