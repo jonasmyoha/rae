@@ -1,4 +1,4 @@
-# Code Hot Reload Example
+# Code hot reload example
 
 Demonstrates Rae's ability to hot reload **code** at runtime in Live
 mode — the VM picks up edits to a `.rae` source file and re-executes
