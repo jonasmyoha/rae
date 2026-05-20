@@ -1,0 +1,51 @@
+# Unit test for the `lib/ui/hot_reload.rae` polling file watcher.
+#
+# The library is generic: it watches any file path and reports when
+# its mtime changes. We test by writing two distinct contents to a
+# scratch file in /tmp, calling `checkForChanges` in between, and
+# confirming the expected boolean for each scenario:
+#   1. fresh watcher -> no change
+#   2. after edit    -> change detected, true
+#   3. immediate re-check -> mtimes refreshed, false
+#   4. enabled=false -> always false even after a real edit
+#
+# A test-time `now` value bypasses the real clock; we pass strictly
+# increasing values so the `intervalSec` throttle never fires.
+import core
+import string
+import sys
+import ui/hot_reload
+
+func main() {
+  let path: String = "/tmp/rae_hot_reload_test_415.txt"
+
+  writeFile(path: path, content: "v1")
+
+  let paths: List(String) = createList(String)(initialCap: 1)
+  paths.add(value: path)
+  let hr: HotReload = createHotReload(
+    paths: paths
+    enabled: true
+    intervalSec: 0.0
+  )
+
+  let r1: Bool = checkForChanges(hr: hr, now: 100.0)
+  log("no-change: {r1}")
+
+  writeFile(path: path, content: "v2-longer-content")
+
+  let r2: Bool = checkForChanges(hr: hr, now: 101.0)
+  log("after-edit: {r2}")
+
+  let r3: Bool = checkForChanges(hr: hr, now: 102.0)
+  log("after-refresh: {r3}")
+
+  let off: HotReload = createHotReload(
+    paths: paths
+    enabled: false
+    intervalSec: 0.0
+  )
+  writeFile(path: path, content: "v3-different-again")
+  let r4: Bool = checkForChanges(hr: off, now: 103.0)
+  log("disabled: {r4}")
+}
