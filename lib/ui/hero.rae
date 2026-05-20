@@ -27,9 +27,12 @@
 #        - `renderHeroOverlay(anim, reg, now)` on top.
 #      When the anim ends, `setHeroVisible(world, key, true)`.
 #
-# Easing is a cubic smoothstep — smooth in, smooth out. Linear is
-# jarring for shared-element transitions because the eye notices the
-# constant velocity at the endpoints.
+# Easing is a quintic smoothstep ("smootherstep") — flat first AND
+# second derivatives at both endpoints, so the hero settles into its
+# rest position with no perceptible velocity. Linear is jarring for
+# shared-element transitions because the eye notices the constant
+# velocity at the endpoints; plain cubic smoothstep is OK but still
+# feels slightly snappy at the seams.
 import core
 import string
 import raylib
@@ -172,7 +175,8 @@ func setHeroVisible(world: mod UiWorld, key: String, visible: Bool) pub {
 }
 
 # Cubic smoothstep: `t² · (3 − 2t)`. Linear-in-the-middle, soft at
-# both endpoints. Cheap, no `pow`/`exp` needed.
+# both endpoints. Cheap, no `pow`/`exp` needed. Kept for callers that
+# specifically want the cubic flavor.
 func smoothstep(t: Float) pub ret Float {
   if t <= 0.0 {
     ret 0.0
@@ -181,6 +185,23 @@ func smoothstep(t: Float) pub ret Float {
     ret 1.0
   }
   ret t * t * (3.0 - 2.0 * t)
+}
+
+# Quintic smoothstep ("smootherstep"): `6t⁵ − 15t⁴ + 10t³`. First and
+# second derivatives are zero at both endpoints, so motion eases in
+# and out more gently than cubic — better for hero transitions where
+# the eye fixates on the moving element.
+func smootherstep(t: Float) pub ret Float {
+  if t <= 0.0 {
+    ret 0.0
+  }
+  if t >= 1.0 {
+    ret 1.0
+  }
+  let t3: Float = t * t * t
+  let t4: Float = t3 * t
+  let t5: Float = t4 * t
+  ret 6.0 * t5 - 15.0 * t4 + 10.0 * t3
 }
 
 func heroLerp(a: Float, b: Float, t: Float) ret Float {
@@ -211,7 +232,7 @@ func renderHeroOverlay(anim: view HeroAnim, reg: view TextureRegistry, now: Floa
     ret
   }
   let raw: Float = (now - anim.startTime) / anim.duration
-  let t: Float = smoothstep(t: raw)
+  let t: Float = smootherstep(t: raw)
   let x: Float = heroLerp(a: anim.srcX, b: anim.dstX, t: t)
   let y: Float = heroLerp(a: anim.srcY, b: anim.dstY, t: t)
   let w: Float = heroLerp(a: anim.srcW, b: anim.dstW, t: t)

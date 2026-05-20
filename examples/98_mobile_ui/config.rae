@@ -1,6 +1,7 @@
 # Layout, palette, and asset-path constants for the music-player demo.
 # Kept in one file so tweaking the look or repointing assets is a single
 # place to edit. Auto-imported by every other file in this project.
+import ui/theme
 
 # ----- screen + spacing ---------------------------------------------
 # Window dimensions in iPhone 15 Pro logical aspect (393×852, 19.5:9 ≈
@@ -26,14 +27,34 @@ let trackRowCount: Int = 5
 let miniPlayerH: Float = 80.0
 let navTabsH: Float = 80.0
 
-# ----- palette (monochrome-ish, mirrors the screen reference) -------
+# ----- palette --------------------------------------------------------
+# These constants hold the current theme's color values. Call
+# `syncColorsFromTheme()` after `setActiveTheme(...)` to push fresh
+# values in — the world is then rebuilt and every code-driven and
+# scene-driven widget picks up the new colors. Initial values match
+# `lightTheme()` so the app boots looking right even if a caller
+# never calls `syncColorsFromTheme`.
 let surfaceColor: RgbaColor = { r: 246, g: 246, b: 248, a: 255 }
-let heroColor: RgbaColor = { r: 70, g: 70, b: 80, a: 255 }
+let heroColor: RgbaColor = { r: 130, g: 130, b: 140, a: 255 }
 let iconTint: RgbaColor = { r: 30, g: 30, b: 36, a: 255 }
 let darkPillColor: RgbaColor = { r: 22, g: 22, b: 28, a: 255 }
 let outlineColor: RgbaColor = { r: 200, g: 200, b: 210, a: 255 }
 let lightTextColor: RgbaColor = { r: 246, g: 246, b: 248, a: 255 }
 let imageTintColor: RgbaColor = { r: 255, g: 255, b: 255, a: 255 }
+
+# Copy palette values out of the active theme into the lets above.
+# Call this once after `setActiveTheme(...)` and again whenever the
+# user toggles the theme at runtime; the next `buildScreenWorld`
+# then reads the refreshed colors.
+func syncColorsFromTheme() {
+  surfaceColor = themeColorByName(name: "surface")
+  heroColor = themeColorByName(name: "textMuted")
+  iconTint = themeColorByName(name: "textPrimary")
+  darkPillColor = themeColorByName(name: "accent")
+  outlineColor = themeColorByName(name: "outline")
+  lightTextColor = themeColorByName(name: "accentText")
+  imageTintColor = themeColorByName(name: "imageTint")
+}
 
 # ----- asset paths --------------------------------------------------
 let trackRowPath: String = "examples/98_mobile_ui/assets/scenes/track-row.raescene"
