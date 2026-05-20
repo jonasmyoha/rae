@@ -17,9 +17,9 @@ import raylib
 import core
 import string
 import sys
+import file_watch
 import ui/ecs
 import ui/hero
-import ui/hot_reload
 import ui/layout
 import ui/transform
 import ui/render
@@ -117,21 +117,21 @@ func main() {
       currentScreen = Screen.Album
     }
 
-    # Hot-reload: poll every watched `.raescene` file for mtime changes
-    # each frame (throttled to 4 Hz). When a file changes, re-parse all
-    # scenes and force an outer-loop world rebuild on the same route.
-    # Flip `hotReloadEnabled` to false to ship a build that skips the
-    # poll entirely.
-    let hotReloadEnabled: Bool = true
+    # Data hot reload: poll every watched `.raescene` file for mtime
+    # changes each frame (throttled to 4 Hz). When a file changes,
+    # re-parse all scenes and force an outer-loop world rebuild on
+    # the same route. Flip `dataHotReloadEnabled` to false to ship a
+    # build that skips the poll entirely.
+    let dataHotReloadEnabled: Bool = true
     let watchedPaths: List(String) = createList(String)(initialCap: 8)
     watchedPaths.add(value: trackRowPath)
     watchedPaths.add(value: navTabsPath)
     watchedPaths.add(value: navTabPath)
     watchedPaths.add(value: miniPlayerPath)
     watchedPaths.add(value: nowPlayingPath)
-    let hot: HotReload = createHotReload(
+    let watcher: FileWatcher = createFileWatcher(
       paths: watchedPaths
-      enabled: hotReloadEnabled
+      enabled: dataHotReloadEnabled
       intervalSec: 0.25
     )
 
@@ -238,10 +238,10 @@ func main() {
             # force the outer loop to rebuild the world on the same
             # route. Skipping this branch when `willSwitch` is true
             # avoids a double rebuild on the same frame.
-            if checkForChanges(hr: hot, now: getTime()) {
+            if checkForChanges(watcher: watcher, now: getTime()) {
               scenes = loadAllScenes()
               switching = true
-              log("[hot-reload] scene file changed, rebuilding world")
+              log("[data-hot-reload] scene file changed, rebuilding world")
             }
           }
         }

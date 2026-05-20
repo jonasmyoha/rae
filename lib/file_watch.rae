@@ -1,21 +1,25 @@
-# Polling-based file watcher used to drive UI hot reload.
+# Polling file watcher. A primitive that detects on-disk mtime changes;
+# what to do about a change (re-parse scene JSON, recompile bytecode,
+# swap a function table, reload a shader, ...) is the caller's job.
 #
-# How a Rae UI app uses this:
-#   1. Build a `List(String)` of asset paths to watch (e.g. every
-#      `.raescene` the app loads).
-#   2. Call `createHotReload(paths, enabled, intervalSec)` once, after
-#      the asset paths are known. The snapshot records each file's
-#      current mtime so the first check is quiet.
-#   3. Once per frame, call `checkForChanges(hr, getTime())`. It is
-#      internally throttled by `intervalSec`, so calling every frame
-#      is fine — most calls early-return.
-#   4. When it returns `true`, the host should: re-parse the affected
-#      data (e.g. `scenes = loadAllScenes()`), discard the current
-#      `UiWorld`, and rebuild from the preserved route. The Rae GC
-#      reclaims the dropped world's memory on the next collection.
+# The classic use case is *data hot reload* — see `examples/98_mobile_ui`
+# (live `.raescene` editing) and `examples/99_data_hot_reload` (any
+# config file) — but the same primitive could equally back a *code
+# hot reload* trigger by pointing it at `.rae` sources.
+#
+# How callers wire it in:
+#   1. Build a `List(String)` of paths to watch.
+#   2. Call `createFileWatcher(paths, enabled, intervalSec)` once after
+#      the paths are known. The snapshot records each file's mtime so
+#      the first check is quiet.
+#   3. Once per frame, call `checkForChanges(watcher, getTime())`. It is
+#      throttled by `intervalSec`, so calling every frame is cheap —
+#      most calls early-return.
+#   4. When it returns `true`, the caller does whatever reload makes
+#      sense: re-parse a JSON file, recompile, etc.
 #
 # Both Compiled (C backend) and Live (bytecode VM) targets call into
-# the same `fileModTime` native, so the system behaves identically.
+# the same `fileModTime` native, so the watcher behaves identically.
 import core
 import string
 import sys
@@ -25,7 +29,7 @@ type WatchEntry {
   lastMtime: Float
 }
 
-type HotReload {
+type FileWatcher {
   enabled: Bool
   entries: List(WatchEntry)
   intervalSec: Float
@@ -35,7 +39,7 @@ type HotReload {
 # Take a snapshot of the current mtimes for every path. Subsequent
 # `checkForChanges` calls compare against this baseline, so the first
 # poll after construction does not spuriously fire.
-func createHotReload(paths: view List(String), enabled: Bool, intervalSec: Float) ret HotReload {
+func createFileWatcher(paths: view List(String), enabled: Bool, intervalSec: Float) ret FileWatcher {
   let entries: List(WatchEntry) = createList(WatchEntry)(initialCap: paths.length)
   let i: Int = 0
   loop i < paths.length {
@@ -45,7 +49,7 @@ func createHotReload(paths: view List(String), enabled: Bool, intervalSec: Float
     entries.add(value: entry)
     i = i + 1
   }
-  ret HotReload {
+  ret FileWatcher {
     enabled: enabled
     entries: entries
     intervalSec: intervalSec
@@ -57,26 +61,26 @@ func createHotReload(paths: view List(String), enabled: Bool, intervalSec: Float
 # poll. Throttled — calls within `intervalSec` of the last check are
 # free (return false). On `true`, the stored mtimes are refreshed so
 # the next call is quiet until the next on-disk edit.
-func checkForChanges(hr: mod HotReload, now: Float) ret Bool {
-  if hr.enabled is false {
+func checkForChanges(watcher: mod FileWatcher, now: Float) ret Bool {
+  if watcher.enabled is false {
     ret false
   }
-  if now - hr.lastCheck < hr.intervalSec {
+  if now - watcher.lastCheck < watcher.intervalSec {
     ret false
   }
-  hr.lastCheck = now
+  watcher.lastCheck = now
   let changed: Bool = false
   let i: Int = 0
-  loop i < hr.entries.length {
+  loop i < watcher.entries.length {
     # Read via the raw buffer accessor: `List(T).get` returns `opt T`,
     # which the C backend lowers to `RaeAny` and can't be re-typed back
     # to a struct without a runtime tag check. The pattern matches
     # `lib/ui/scene.rae:sceneNodeIndex`.
-    let entry: WatchEntry = rae_ext_rae_buf_get(buf: hr.entries.data, index: i)
+    let entry: WatchEntry = rae_ext_rae_buf_get(buf: watcher.entries.data, index: i)
     let mt: Float = fileModTime(path: entry.path)
     if mt is not entry.lastMtime {
       let updated: WatchEntry = { path: entry.path, lastMtime: mt }
-      rae_ext_rae_buf_set(buf: hr.entries.data, index: i, value: updated)
+      rae_ext_rae_buf_set(buf: watcher.entries.data, index: i, value: updated)
       changed = true
     }
     i = i + 1
