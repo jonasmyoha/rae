@@ -138,6 +138,23 @@ func length(T)(this: view List(T)) ret Int {
   ret this.length
 }
 
+# Release the List's backing Buffer to the allocator. After `drop`,
+# the List's `data` pointer is dangling and the List must not be
+# used. Call when the List is about to go out of scope (until the
+# compiler emits this automatically — see docs/scope-exit-dealloc.md).
+#
+# Stage 1 limitation: when `T` is itself a heap-owning type
+# (another List, a Map, a struct that owns a Buffer), this `drop`
+# does NOT recurse into the elements. The recursive form lands in
+# Stage 2.1; for now this matches the use sites in the music-player
+# example, where `T` is always a value type or a struct with no
+# heap fields of its own.
+func drop(T)(this: mod List(T)) {
+  rae_ext_rae_buf_free(buf: this.data)
+  this.length = 0
+  this.capacity = 0
+}
+
 func swap(T)(this: mod List(T), i: Int, j: Int) {
   let temp: T = rae_ext_rae_buf_get(buf: this.data, index: i)
   rae_ext_rae_buf_set(buf: this.data, index: i, value: rae_ext_rae_buf_get(buf: this.data, index: j))
@@ -403,6 +420,16 @@ func free(V)(this: mod StringMap(V)) {
   this.capacity = 0
 }
 
+# Canonical scope-exit dealloc name per docs/scope-exit-dealloc.md.
+# Same body as `free()`. Once Stage 2 codegen lands and starts
+# emitting `drop()` calls automatically, `free()` becomes dead and
+# can be removed in a cleanup pass.
+func drop(V)(this: mod StringMap(V)) {
+  rae_ext_rae_buf_free(buf: this.data)
+  this.length = 0
+  this.capacity = 0
+}
+
 # -- IntMap Implementation --
 type IntMapEntry(V) {
   k: Int
@@ -583,6 +610,13 @@ func growInt64Map(V)(this: mod IntMap(V)) {
 }
 
 func free(V)(this: mod IntMap(V)) {
+  rae_ext_rae_buf_free(buf: this.data)
+  this.length = 0
+  this.capacity = 0
+}
+
+# Canonical scope-exit dealloc name — see `drop(V)(StringMap(V))`.
+func drop(V)(this: mod IntMap(V)) {
   rae_ext_rae_buf_free(buf: this.data)
   this.length = 0
   this.capacity = 0
