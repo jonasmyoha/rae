@@ -21,6 +21,7 @@
 import string
 import core
 import json
+import ui/theme
 
 # Build the canonical list of authored component names. Phase 1c uses
 # this to validate that every node's keys (other than `Children`) name
@@ -300,6 +301,21 @@ func deserVec2(doc: view JsonDoc, val: view JsonValue) ret Vec2 {
 }
 
 func deserRgba(doc: view JsonDoc, val: view JsonValue) ret RgbaColor {
+  # Theme token form: scene authors can write `"fill": "$surface"`
+  # instead of `"fill": {r:..,g:..,b:..,a:..}` to pick a color from
+  # the current `activeTheme` in `lib/ui/theme.rae`. Strings without
+  # a leading `$` fall through to RGBA defaults so a typo in the
+  # token name doesn't silently swallow the color — see also
+  # `themeColorByName`, which returns magenta for unknown tokens.
+  let empty: String = ""
+  let asStr: String = jsonString(this: val, fallback: empty)
+  if asStr.length() > 0 {
+    let dollar: String = "$"
+    if asStr.startsWith(prefix: dollar) {
+      let token: String = asStr.sub(start: 1, len: asStr.length() - 1)
+      ret themeColorByName(name: token)
+    }
+  }
   let r: Int = optInt(doc: doc, container: val, key: "r", fallback: 0)
   let g: Int = optInt(doc: doc, container: val, key: "g", fallback: 0)
   let b: Int = optInt(doc: doc, container: val, key: "b", fallback: 0)
