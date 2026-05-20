@@ -1,0 +1,141 @@
+# Theme infrastructure for the UI stdlib — dark and light palettes
+# wrapped in a struct, plus a module-level "active theme" that the
+# scene parser consults when it sees a token color like `"$surface"`
+# in place of an `{r, g, b, a}` JSON object.
+#
+# How to use:
+#
+#   * Call `setActiveTheme(darkTheme())` (or `lightTheme()`) BEFORE
+#     `loadAllScenes()`. Scenes resolve `"$tokenName"` colors against
+#     the current `activeTheme` at parse time.
+#   * `themeColorByName(name)` exposes the lookup directly for
+#     code-driven UI that wants the same semantic slots.
+#   * To switch themes at runtime, set the active theme and re-parse
+#     the scene files (the data hot-reload path already does the
+#     world rebuild; pointing it at the theme handle gives free
+#     theme switching without restart).
+#
+# The palette is deliberately small — eight semantic slots that
+# cover everything the music-player example uses. Apps that need
+# more colors should compose their own palette structs over this.
+import core
+import string
+import ui/components
+
+enum ThemeMode {
+  Light
+  Dark
+}
+
+# Semantic color slots. Names describe the *role* (surface, accent,
+# outline) not the *value*, so dark and light themes can plug in
+# very different RGBA values for the same slot without callers caring.
+type ThemePalette {
+  surface: RgbaColor
+  surfaceAlt: RgbaColor
+  textPrimary: RgbaColor
+  textMuted: RgbaColor
+  outline: RgbaColor
+  accent: RgbaColor
+  accentText: RgbaColor
+  imageTint: RgbaColor
+}
+
+type Theme {
+  mode: ThemeMode
+  palette: ThemePalette
+}
+
+# Default light theme — mirrors the original mobile-UI palette from
+# before the theme system landed.
+func lightTheme() pub ret Theme {
+  ret Theme {
+    mode: ThemeMode.Light
+    palette: ThemePalette {
+      surface: RgbaColor { r: 246, g: 246, b: 248, a: 255 }
+      surfaceAlt: RgbaColor { r: 30, g: 30, b: 36, a: 255 }
+      textPrimary: RgbaColor { r: 30, g: 30, b: 36, a: 255 }
+      textMuted: RgbaColor { r: 130, g: 130, b: 140, a: 255 }
+      outline: RgbaColor { r: 200, g: 200, b: 210, a: 255 }
+      accent: RgbaColor { r: 22, g: 22, b: 28, a: 255 }
+      accentText: RgbaColor { r: 246, g: 246, b: 248, a: 255 }
+      imageTint: RgbaColor { r: 255, g: 255, b: 255, a: 255 }
+    }
+  }
+}
+
+# Default dark theme — dark surface, light text, accent flipped so
+# the play pill reads as the bright element against a dark page.
+func darkTheme() pub ret Theme {
+  ret Theme {
+    mode: ThemeMode.Dark
+    palette: ThemePalette {
+      surface: RgbaColor { r: 18, g: 18, b: 24, a: 255 }
+      surfaceAlt: RgbaColor { r: 36, g: 36, b: 44, a: 255 }
+      textPrimary: RgbaColor { r: 236, g: 236, b: 240, a: 255 }
+      textMuted: RgbaColor { r: 140, g: 140, b: 150, a: 255 }
+      outline: RgbaColor { r: 60, g: 60, b: 70, a: 255 }
+      accent: RgbaColor { r: 246, g: 246, b: 248, a: 255 }
+      accentText: RgbaColor { r: 22, g: 22, b: 28, a: 255 }
+      imageTint: RgbaColor { r: 255, g: 255, b: 255, a: 255 }
+    }
+  }
+}
+
+# Module-level current theme. Mutated via `setActiveTheme`. Default
+# is the light palette inlined as a literal — using `lightTheme()` as
+# the initializer here would forward-reference the function from the
+# C codegen's perspective and fail to compile in the Compiled target.
+let activeTheme: Theme = Theme {
+  mode: ThemeMode.Light
+  palette: ThemePalette {
+    surface: RgbaColor { r: 246, g: 246, b: 248, a: 255 }
+    surfaceAlt: RgbaColor { r: 30, g: 30, b: 36, a: 255 }
+    textPrimary: RgbaColor { r: 30, g: 30, b: 36, a: 255 }
+    textMuted: RgbaColor { r: 130, g: 130, b: 140, a: 255 }
+    outline: RgbaColor { r: 200, g: 200, b: 210, a: 255 }
+    accent: RgbaColor { r: 22, g: 22, b: 28, a: 255 }
+    accentText: RgbaColor { r: 246, g: 246, b: 248, a: 255 }
+    imageTint: RgbaColor { r: 255, g: 255, b: 255, a: 255 }
+  }
+}
+
+func setActiveTheme(theme: Theme) pub {
+  activeTheme = theme
+}
+
+func currentTheme() pub ret Theme {
+  ret activeTheme
+}
+
+# Resolve a token name (no leading `$`) to a palette color. Unknown
+# names fall back to a vivid magenta sentinel so missing tokens are
+# obvious in the rendered output rather than silently transparent.
+func themeColorByName(name: String) pub ret RgbaColor {
+  let p: ThemePalette = activeTheme.palette
+  if name.equals(other: "surface") {
+    ret p.surface
+  }
+  if name.equals(other: "surfaceAlt") {
+    ret p.surfaceAlt
+  }
+  if name.equals(other: "textPrimary") {
+    ret p.textPrimary
+  }
+  if name.equals(other: "textMuted") {
+    ret p.textMuted
+  }
+  if name.equals(other: "outline") {
+    ret p.outline
+  }
+  if name.equals(other: "accent") {
+    ret p.accent
+  }
+  if name.equals(other: "accentText") {
+    ret p.accentText
+  }
+  if name.equals(other: "imageTint") {
+    ret p.imageTint
+  }
+  ret RgbaColor { r: 255, g: 0, b: 255, a: 255 }
+}

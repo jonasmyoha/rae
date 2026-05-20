@@ -21,6 +21,7 @@ import file_watch
 import ui/ecs
 import ui/hero
 import ui/layout
+import ui/theme
 import ui/transform
 import ui/render
 import ui/textures
@@ -70,6 +71,19 @@ func main() {
 
   loadFontInto(slot: robotoFontSlot, path: robotoFontPath, fontSize: 36)
   loadFontInto(slot: materialIconFontSlot, path: materialIconFontPath, fontSize: 64)
+
+  # Theme is picked from `RAE_UI_THEME` ("dark" / "light"); default is
+  # light. Setting the theme BEFORE `loadAllScenes` matters — scenes
+  # resolve their `"$tokenName"` colors against `currentTheme()` at
+  # parse time, so the theme has to be in place first.
+  let themeEnv: String = getEnv(name: "RAE_UI_THEME")
+  let darkKey: String = "dark"
+  if themeEnv.equals(other: darkKey) {
+    setActiveTheme(theme: darkTheme())
+  } else {
+    setActiveTheme(theme: lightTheme())
+  }
+  syncColorsFromTheme()
 
   let scenes: AlbumScenes = loadAllScenes()
   let texReg: TextureRegistry = createTextureRegistry()
@@ -138,9 +152,17 @@ func main() {
     let running: Bool = true
     let anim: HeroAnim = createHeroAnim()
     let heroKey: String = "albumCover"
-    let heroDuration: Float = 0.45
+    let heroDuration: Float = 0.30
     let pendingSrc: Bool = false
     let pendingDst: Bool = false
+    # `transitionArmed` defers `startHeroTransition` from the outer
+    # rebuild block until the first inner-loop frame. If we started
+    # the clock in the outer loop, the 5–20 ms of world rebuild +
+    # layout + transform would already have ticked off by the time
+    # the first frame runs, so `t` at the first overlay draw would
+    # be ~0.05 instead of 0 — a small but visible jump from where
+    # the outgoing hero sat.
+    let transitionArmed: Bool = false
     # Visualise every entity that owns an `OnClick` as an outline.
     # Hovered rects highlight in `debugHoverColor` so you can see at
     # a glance which (if any) clickable lives under the cursor.
@@ -160,13 +182,14 @@ func main() {
       # Pick up the destination half of an in-flight transition: the
       # previous world wrote pendingDst=true and stashed the source
       # rect. Now that the new world has been laid out, capture the
-      # target rect and kick the animation.
+      # target rect and hide the destination hero so the overlay can
+      # paint it. We DON'T start the clock here — that waits until
+      # the first frame actually runs (see `transitionArmed` below).
       if pendingDst {
         let captured: Bool = captureHeroTarget(anim: anim, world: world, key: heroKey)
         if captured {
-          let now: Float = getTime()
-          startHeroTransition(anim: anim, key: heroKey, durationSec: heroDuration, now: now)
           setHeroVisible(world: world, key: heroKey, visible: false)
+          transitionArmed = true
         }
         pendingDst = false
       }
@@ -179,6 +202,25 @@ func main() {
         } else {
           updateInputSystem(input: input, world: world)
           let nextScreen: Screen = dispatchActions(input: input, current: currentScreen)
+
+          # Theme toggle: press T to swap between light and dark.
+          # raylib KEY_T is 84. Re-parse scenes so their token colors
+          # bind against the new theme, then force a world rebuild via
+          # `switching = true` — same code path as data hot reload.
+          let keyT: Int = 84
+          if isKeyPressed(key: keyT) {
+            let cur: Theme = currentTheme()
+            if cur.mode is ThemeMode.Light {
+              setActiveTheme(theme: darkTheme())
+              log("[theme] -> dark")
+            } else {
+              setActiveTheme(theme: lightTheme())
+              log("[theme] -> light")
+            }
+            syncColorsFromTheme()
+            scenes = loadAllScenes()
+            switching = true
+          }
 
           # Decide screen change BEFORE drawing, but always draw the
           # frame afterwards. raylib only advances its edge-triggered
@@ -198,22 +240,33 @@ func main() {
           }
 
           let now: Float = getTime()
+          # If a transition was armed by the outer rebuild, this is
+          # the first frame that will draw it — start the clock here
+          # so `t = 0` at the moment the first overlay actually paints.
+          if transitionArmed {
+            startHeroTransition(anim: anim, key: heroKey, durationSec: heroDuration, now: now)
+            transitionArmed = false
+          }
           let animating: Bool = updateHeroAnim(anim: anim, now: now)
+          # End-of-animation fix: if the anim just turned off this
+          # frame, unhide the destination hero entity BEFORE
+          # `renderSystem` runs. Doing it after the render (the
+          # earlier flow) meant one frame painted with neither the
+          # overlay nor the entity — a visible flicker on the
+          # landing edge.
+          if animating is false {
+            if pendingSrc {
+              if willSwitch is false {
+                setHeroVisible(world: world, key: heroKey, visible: true)
+                pendingSrc = false
+              }
+            }
+          }
           beginDrawing()
           clearBackground(color: bg)
           renderSystem(world: world, reg: texReg)
           if animating {
             renderHeroOverlay(anim: anim, reg: texReg, now: now)
-          } else {
-            if pendingSrc {
-              if willSwitch is false {
-                # Animation just finished — restore the destination
-                # hero entity's visibility so paintSprite resumes
-                # drawing it as part of the world.
-                setHeroVisible(world: world, key: heroKey, visible: true)
-                pendingSrc = false
-              }
-            }
           }
           if debugRects {
             let mx: Float = getMouseX().toFloat()
