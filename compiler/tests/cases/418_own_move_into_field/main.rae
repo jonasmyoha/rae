@@ -1,0 +1,37 @@
+# Test A from docs/ownership-model.md — minimal `own` move into a
+# struct field.
+#
+# Two things to verify:
+#   1. The contents are accessible through the struct after the
+#      move, i.e. `own list` doesn't somehow clear the buffer.
+#   2. No crash on exit. Auto-drop sees `list` is moved (the
+#      `local_moved` bit is set by the `own list` expression) and
+#      skips dropping its buffer; the buffer is now reachable only
+#      through `box.contents` so a future struct-field-aware drop
+#      pass (Layer 5) will release it. Today that pass doesn't
+#      exist, so the buffer "leaks" at process exit — but that's
+#      what `exit` is for, and it's better than a use-after-free.
+import core
+import string
+
+type Box {
+  contents: List(Int)
+}
+
+func main() {
+  let list: List(Int) = createList(Int)(initialCap: 4)
+  list.add(value: 10)
+  list.add(value: 20)
+  list.add(value: 30)
+
+  # Ownership transfer: the freshly-built list moves into the struct
+  # field. `list` must not be auto-dropped at end-of-main; the
+  # `own` keyword on the field initializer is what tells the
+  # compiler to suppress the drop.
+  let box: Box = { contents: own list }
+
+  log("box.length: {box.contents.length}")
+  log("box[0]: {box.contents.get(index: 0)}")
+  log("box[1]: {box.contents.get(index: 1)}")
+  log("box[2]: {box.contents.get(index: 2)}")
+}
