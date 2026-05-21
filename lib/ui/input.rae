@@ -96,7 +96,7 @@ func hitTestEntity(world: view UiWorld, entity: Int, x: Float, y: Float) ret Int
 
   # Children first, in reverse declaration order.
   if componentHas(this: world.childrens, entity: entity) {
-    let ch: Children = componentGet(this: world.childrens, entity: entity)
+    let ch: view Children => componentView(this: world.childrens, entity: entity)
     let n: Int = ch.ids.length
     let i: Int = n - 1
     loop i >= 0 {
@@ -181,7 +181,7 @@ func updateInputSystem(input: mod InputSystem, world: view UiWorld) {
     if hit is not inputNoEntity {
       if hit is input.pressedEntity {
         if componentHas(this: world.onClicks, entity: hit) {
-          let oc: OnClick = componentGet(this: world.onClicks, entity: hit)
+          let oc: view OnClick => componentView(this: world.onClicks, entity: hit)
           appendActionEvent(input: input, entity: hit, actionId: oc.actionId)
         }
       }

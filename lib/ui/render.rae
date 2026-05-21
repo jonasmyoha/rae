@@ -124,7 +124,7 @@ func paintShape(world: view UiWorld, entity: Int, wt: view WorldTransform, cr: v
 }
 
 func paintSprite(reg: view TextureRegistry, world: view UiWorld, entity: Int, wt: view WorldTransform, cr: view ComputedRect, chain255: Int) {
-  let sp: Sprite = componentGet(this: world.sprites, entity: entity)
+  let sp: view Sprite => componentView(this: world.sprites, entity: entity)
   let key: String = sp.textureKey
   let tint: Color = toRaylibColor(c: sp.tint, chain255: chain255)
 
@@ -352,7 +352,7 @@ func textStyleIsCentered(styleId: String) ret Bool {
 }
 
 func paintText(world: view UiWorld, entity: Int, wt: view WorldTransform, cr: view ComputedRect, chain255: Int) {
-  let tx: Text = componentGet(this: world.texts, entity: entity)
+  let tx: view Text => componentView(this: world.texts, entity: entity)
   let txt: String = tx.text
   if txt.length() is 0 {
     ret
@@ -421,7 +421,7 @@ func paintSubtree(world: view UiWorld, reg: view TextureRegistry, entity: Int) {
   if componentHas(this: world.childrens, entity: entity) is false {
     ret
   }
-  let ch: Children = componentGet(this: world.childrens, entity: entity)
+  let ch: view Children => componentView(this: world.childrens, entity: entity)
   let n: Int = ch.ids.length
   let i: Int = 0
   loop i < n {
