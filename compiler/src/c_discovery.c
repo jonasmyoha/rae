@@ -198,6 +198,19 @@ static void discover_specializations_stmt_impl(CFuncContext* ctx, const AstStmt*
                         const char* mn = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type);
                         ctx->local_types[ctx->local_count] = str_from_cstr(mn); ctx->local_count++;
                     }
+                    // Stage 2 scope-exit dealloc (docs/scope-exit-dealloc.md):
+                    // pre-register the `drop()` overload for any heap-owning
+                    // let so the specialised drop function is emitted BEFORE
+                    // the function that will call it (specialised functions
+                    // come first in the output).
+                    if (type && is_drop_target_type(type)) {
+                        Str loc_base = get_base_type_name(type);
+                        const AstFuncDecl* drop_fd = find_drop_overload_for(ctx, loc_base);
+                        const AstTypeRef* elem_type = type->generic_args;
+                        if (drop_fd && elem_type) {
+                            register_function_specialization(ctx->compiler_ctx, drop_fd, elem_type);
+                        }
+                    }
                 }
                 break;
             case AST_STMT_ASSIGN:

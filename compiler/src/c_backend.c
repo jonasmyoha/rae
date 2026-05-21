@@ -665,23 +665,29 @@ bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* 
       fprintf(out, "RAE_UNUSED static %s %s(", rt, mangled); emit_param_list(&tctx, f->params, out, false); fprintf(out, ") {\n");
   }
 
-  for (const AstParam* p = f->params; p; p = p->next) { 
-      if (tctx.local_count < 256) { 
-          tctx.locals[tctx.local_count] = p->name; 
-          tctx.local_type_refs[tctx.local_count] = p->type; 
+  for (const AstParam* p = f->params; p; p = p->next) {
+      if (tctx.local_count < 256) {
+          tctx.locals[tctx.local_count] = p->name;
+          tctx.local_type_refs[tctx.local_count] = p->type;
           const char* tn = rae_mangle_type_specialized(ctx, NULL, NULL, p->type);
-          tctx.local_types[tctx.local_count] = str_from_cstr(tn); 
-          tctx.local_count++; 
-      } 
+          tctx.local_types[tctx.local_count] = str_from_cstr(tn);
+          tctx.local_count++;
+      }
   }
-  
+  // Stage 2 dealloc: track where params end so a future Stage 3 hook
+  // (once move detection lands) can drop only function-declared lets.
+  size_t first_let_idx = tctx.local_count;
+  (void)first_let_idx; // emit_implicit_drops_for_body intentionally
+                      // un-called here — see docs/scope-exit-dealloc.md
+                      // section "Why Stage 2 ships disabled".
+
   if (f->body) { for (AstStmt* s = f->body->first; s; s = s->next) emit_stmt(&tctx, s, out); }
 
   // Emit any remaining defers at function end
   if (tctx.defer_stack.count > 0) emit_defers(&tctx, 0, out);
 
   if (is_main) fprintf(out, "  return 0;\n}\n\n");
-  else fprintf(out, "}\n\n"); 
+  else fprintf(out, "}\n\n");
   return true;
 }
 
@@ -704,6 +710,8 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
   if (g_emitted_spec_func_count < 4096) g_emitted_spec_funcs[g_emitted_spec_func_count++] = mangled;
   fprintf(out, "RAE_UNUSED static %s %s(", rt, mangled); emit_param_list(&tctx, f->params, out, false); fprintf(out, ") {\n");
   for (const AstParam* p = f->params; p; p = p->next) { if (tctx.local_count < 256) { tctx.locals[tctx.local_count] = p->name; tctx.local_type_refs[tctx.local_count] = p->type; tctx.local_types[tctx.local_count] = str_from_cstr(rae_mangle_type_specialized(ctx, gp_src, args, p->type)); tctx.local_count++; } }
+  // Stage 2 dealloc: see emit_function above. Helpers exist;
+  // auto-drop call deferred to Stage 3 (move detection).
   if (f->body) { for (AstStmt* s = f->body->first; s; s = s->next) emit_stmt(&tctx, s, out); }
   fprintf(out, "}\n\n"); return true;
 }

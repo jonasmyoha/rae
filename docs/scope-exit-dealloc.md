@@ -1,6 +1,8 @@
 # Scope-exit deallocation
 
-Status: **design + Stage 1 (stdlib drop API) implemented**.
+Status: **design + Stage 1 (stdlib drop API) implemented; Stage 2
+helpers/scaffolding landed but auto-drop call sites are still
+commented out pending Stage 3 (move detection)**.
 Owner: Rae compiler team.
 Tracking test: `compiler/tests/cases/416_memory_leak_check`.
 
@@ -80,7 +82,65 @@ heap-owning, `drop` must iterate and recursively drop each element
 before freeing the buffer. Today `T` is always a value type in the
 98_mobile_ui codebase, so we ship the simple form first.
 
-### Layer 3 — Codegen: emit `drop()` at scope exit 🚧 Stage 2
+### Layer 3 — Codegen: emit `drop()` at scope exit ⚠️ Stage 2 scaffolded, disabled
+
+**Why Stage 2 ships disabled** (the lesson the prototype taught):
+
+Attempting auto-drop without move detection triggers a double-free
+the moment a function moves its local into a containing struct or
+out via `ret`. Example from the music-UI codebase:
+
+```rae
+func attachChildren(world: mod UiWorld, parent: Int, kids: view List(Int)) {
+  let copy: List(Int) = createList(Int)(initialCap: kids.length)
+  ...
+  let ch: Children = { ids: copy }                 // copy's data is now
+  componentSet(this: world.childrens, ...,         // also held by ch.ids
+               data: ch)                           // (struct copy doesn't
+}                                                  // deep-clone the buffer)
+// Auto-drop at end-of-body frees copy.data → the world's
+// Children.ids.data dangles → next access reads garbage.
+```
+
+The Stage 2 prototype enabling auto-drop produced 4 such regressions
+across `411_json_parser`, `412_ui_ecs`, `413_scene_loader`,
+`414_ui_layout` — every test that builds a heap-owning struct,
+hands it to a container, and exits. Without knowing which locals
+*transferred ownership* and which still own their storage, we can't
+safely emit drops.
+
+**What landed (Stage 2 scaffolding):**
+
+- `c_stmt.c::emit_implicit_drops_for_body(ctx, out, first_let_index)` —
+  the per-scope drop emitter. LIFO walk, skips params, skips
+  `view`/`mod` borrows, registers and emits the specialised drop
+  symbol for each heap-owning local. Compiles fine; not currently
+  called from anywhere.
+- `c_stmt.c::is_drop_target_type(type)` and `find_drop_overload_for(...)` —
+  shared helpers used by both the emit pass and the discovery pass.
+- `c_discovery.c` registers the `drop()` specialisation alongside
+  each heap-owning `let` so the specialised drop function lands in
+  the output BEFORE any caller (specialised functions are emitted
+  first; without pre-registration, the auto-drop call would forward-
+  reference an as-yet-undeclared symbol).
+- `c_stmt.c::emit_if` / `emit_loop` save/restore `ctx->local_count`
+  around block bodies — independently useful correctness fix
+  (lexical scoping for the locals table) and a prerequisite for
+  Stage 2's eventual block-scoped drop emission.
+
+**What's missing (Stage 3 work):**
+
+The two call sites in `c_backend.c::emit_function` and
+`emit_specialized_function` have been intentionally left commented
+out with a pointer back to this doc. The hooks read:
+
+```c
+size_t first_let_idx = tctx.local_count;
+(void)first_let_idx; // emit_implicit_drops_for_body intentionally
+                    // un-called here — see this doc.
+```
+
+Re-enabling auto-drop becomes a two-line change once Stage 3 lands.
 
 The C backend (`compiler/src/c_stmt.c`) gains an "implicit drop"
 pass that runs at every scope exit:
