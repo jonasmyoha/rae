@@ -46,6 +46,31 @@ bool is_drop_target_type(const AstTypeRef* type) {
   return false;
 }
 
+// Layer 5 (docs/scope-exit-dealloc.md) — does the type transitively
+// own heap storage? A type owns heap if:
+//   - it's a leaf heap-owning stdlib container (is_drop_target_type),
+//   - or it's a user-defined struct with at least one field whose
+//     type owns heap.
+// `depth` guards against runaway recursion if the type graph ever
+// has a cycle (Rae structs are value types so this shouldn't happen,
+// but the cap is cheap insurance).
+bool type_owns_heap_storage(CompilerContext* cctx, const AstModule* module,
+                            const AstTypeRef* type, int depth) {
+  if (!type || depth > 32) return false;
+  if (type->is_view || type->is_mod) return false;
+  if (is_drop_target_type(type)) return true;
+  Str base = get_base_type_name(type);
+  // c_struct (raylib Color / Vector2 / etc.) and primitives never
+  // own Rae-allocated heap storage.
+  const AstDecl* d = find_type_decl(NULL, module, base);
+  if (!d || d->kind != AST_DECL_TYPE) return false;
+  if (has_property(d->as.type_decl.properties, "c_struct")) return false;
+  for (const AstTypeField* f = d->as.type_decl.fields; f; f = f->next) {
+    if (type_owns_heap_storage(cctx, module, f->type, depth + 1)) return true;
+  }
+  return false;
+}
+
 // Locate the `drop` generic-function overload whose receiver type's
 // base name matches `container_base` ("List" / "StringMap" / "IntMap").
 // Returns NULL if no overload exists — callers silently skip the drop
@@ -111,20 +136,37 @@ bool emit_implicit_drops_for_body(CFuncContext* ctx, FILE* out,
   for (size_t i = ctx->local_count; i > first_let_index; i--) {
     size_t idx = i - 1;
     const AstTypeRef* type = ctx->local_type_refs[idx];
-    if (!is_drop_target_type(type)) continue;
-    // Skip moves — ownership transferred to a caller / container.
+    if (!type) continue;
+    if (type->is_view || type->is_mod) continue;
     if (ctx->local_moved[idx]) continue;
-    const AstTypeRef* elem_type = type->generic_args;
-    if (!elem_type) continue;
-    Str loc_base = get_base_type_name(type);
-    const AstFuncDecl* drop_fd = find_drop_overload_for(ctx, loc_base);
-    if (!drop_fd) continue;
-    register_function_specialization(ctx->compiler_ctx, drop_fd, elem_type);
-    const char* drop_name =
-        rae_mangle_specialized_function(ctx->compiler_ctx, drop_fd, elem_type);
+    // Skip cheap value types — they own no heap and don't need a
+    // drop call.
+    if (!type_owns_heap_storage(ctx->compiler_ctx, ctx->module, type, 0)) {
+      continue;
+    }
     Str name = ctx->locals[idx];
-    fprintf(out, "  %s(&%.*s);\n", drop_name,
-            (int)name.len, name.data);
+    if (is_drop_target_type(type)) {
+      // Stdlib container (List / StringMap / IntMap) — call the
+      // user-defined generic `drop(T)` from lib/core.rae.
+      const AstTypeRef* elem_type = type->generic_args;
+      if (!elem_type) continue;
+      Str loc_base = get_base_type_name(type);
+      const AstFuncDecl* drop_fd = find_drop_overload_for(ctx, loc_base);
+      if (!drop_fd) continue;
+      register_function_specialization(ctx->compiler_ctx, drop_fd, elem_type);
+      const char* drop_name =
+          rae_mangle_specialized_function(ctx->compiler_ctx, drop_fd, elem_type);
+      fprintf(out, "  %s(&%.*s);\n", drop_name,
+              (int)name.len, name.data);
+    } else {
+      // Layer 5 (synthesised per-struct drop fns) is deferred — see
+      // c_backend.c for context. For now, user-struct lets that
+      // transitively own heap leak their heap at scope exit; the
+      // alternative (Layer 5 partial implementation) tripped the
+      // mangler on real-world struct graphs. Containers (the `if`
+      // branch above) still auto-drop normally.
+      continue;
+    }
   }
   return true;
 }
