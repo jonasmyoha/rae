@@ -1,6 +1,7 @@
 /* arena.c - Bump allocator implementation */
 
 #include "arena.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
@@ -34,16 +35,25 @@ Arena* arena_create(size_t capacity) {
 
 void* arena_alloc(Arena* a, size_t size) {
   assert(a != NULL);
-  
+
   size_t aligned_size = align_up(size, ARENA_ALIGN);
-  
+
   if (a->used + aligned_size > a->capacity) {
-    return NULL;
+    // Abort with a clear message rather than return NULL. Callers
+    // (mangler, sema, codegen) historically didn't null-check, and
+    // a silent NULL leads to a memcpy crash deep in the mangler with
+    // no useful trace. If you hit this, either: (a) the program
+    // genuinely needs a bigger arena (bump the size at the call
+    // site in main.c), or (b) there's an O(N^2) allocation pattern
+    // somewhere that should be cached/avoided.
+    fprintf(stderr, "arena_alloc: out of space (request=%zu, used=%zu, cap=%zu)\n",
+            size, a->used, a->capacity);
+    abort();
   }
-  
+
   void* ptr = a->buffer + a->used;
   a->used += aligned_size;
-  
+
   memset(ptr, 0, size);
   return ptr;
 }
