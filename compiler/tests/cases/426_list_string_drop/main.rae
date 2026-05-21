@@ -1,0 +1,48 @@
+# Stage 3 leak guard: List(String) must drop its element Strings
+# when the list is dropped. Before Stage 3 the synthesised
+# drop(T)(List(T)) just freed the backing buffer, leaving every
+# heap-allocated String it contained dangling. With Stage 3, the
+# specialisation iterates and calls rae_ext_rae_str_free on each
+# element (which checks is_owned, so literal entries are a safe
+# no-op).
+#
+# We fill each transient list with concat-allocated Strings so
+# every element is is_owned=1, drop the list, and assert RSS
+# growth stays bounded over many iterations.
+#
+# This guards the leaf case. Cascade through struct fields
+# (e.g. List(Struct{name: String})) waits on Stage 4 deep-copy
+# semantics — see docs/scope-exit-dealloc.md.
+import core
+import string
+import sys
+
+func transientList() {
+  let xs: List(String) = createList(String, initialCap: 16)
+  let base: String = "node-"
+  let i: Int = 0
+  loop i < 16 {
+    let suffix: String = i.toString()
+    let n: String = base.concat(other: suffix)
+    xs.add(value: own n)
+    i = i + 1
+  }
+}
+
+func main() {
+  transientList()
+  let baselineKb: Int = processRssKb()
+  let iterations: Int = 5000
+  let i: Int = 0
+  loop i < iterations {
+    transientList()
+    i = i + 1
+  }
+  let growthKb: Int = processRssKb() - baselineKb
+  log("iterations: {iterations}")
+  if growthKb > 5000 {
+    log("verdict: LEAK")
+  } else {
+    log("verdict: OK")
+  }
+}
