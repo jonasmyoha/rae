@@ -77,6 +77,34 @@ const AstFuncDecl* find_drop_overload_for(
 // every `ret`. Functions that early-return therefore leak whatever
 // heap-owning lets were live at the ret. Move-detection at ret paths
 // lands in Stage 3 — see docs/scope-exit-dealloc.md.
+// Stage 3 move tracking (docs/ownership-model.md). Find the local
+// named `name` and flip its moved bit so emit_implicit_drops_for_body
+// skips it. LIFO scan matches Rae's shadowing rule (latest binding
+// wins on name collisions).
+void mark_local_moved_by_name(CFuncContext* ctx, Str name) {
+  if (!ctx) return;
+  for (int i = (int)ctx->local_count - 1; i >= 0; i--) {
+    if (str_eq(ctx->locals[i], name)) {
+      ctx->local_moved[i] = true;
+      return;
+    }
+  }
+}
+
+// Convenience wrapper: if `expr` is a bare identifier referring to a
+// local, mark it moved. Anything else (call, member access, literal,
+// compound expression) is a no-op — only direct local references
+// are owned by a binding the caller is tracking.
+void mark_expr_moved_if_local(CFuncContext* ctx, const AstExpr* expr) {
+  if (!ctx || !expr) return;
+  if (expr->kind == AST_EXPR_IDENT) {
+    mark_local_moved_by_name(ctx, expr->as.ident);
+  } else if (expr->kind == AST_EXPR_OWN) {
+    // Explicit `own x` always tries to move whatever's inside.
+    mark_expr_moved_if_local(ctx, expr->as.unary.operand);
+  }
+}
+
 bool emit_implicit_drops_for_body(CFuncContext* ctx, FILE* out,
                                   size_t first_let_index) {
   if (!ctx || !out) return false;
@@ -84,6 +112,8 @@ bool emit_implicit_drops_for_body(CFuncContext* ctx, FILE* out,
     size_t idx = i - 1;
     const AstTypeRef* type = ctx->local_type_refs[idx];
     if (!is_drop_target_type(type)) continue;
+    // Skip moves — ownership transferred to a caller / container.
+    if (ctx->local_moved[idx]) continue;
     const AstTypeRef* elem_type = type->generic_args;
     if (!elem_type) continue;
     Str loc_base = get_base_type_name(type);
@@ -328,6 +358,18 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             break;
         }
         case AST_STMT_RET: {
+            // Stage 3 move tracking: returning an owned local moves
+            // it out of the function. Mark it so the end-of-body drop
+            // pass — which fires *after* this point in code order if
+            // ret is the last statement — skips it. Conservative: if
+            // the ret value is a compound expression (call, struct
+            // ctor wrapping our local, etc.), only the top-level
+            // ident gets marked here; that's fine because end-of-body
+            // is unreachable after `return` in C so the locals stay
+            // alive long enough.
+            if (stmt->as.ret_stmt.values && stmt->as.ret_stmt.values->value) {
+                mark_expr_moved_if_local(ctx, stmt->as.ret_stmt.values->value);
+            }
             if (ctx->defer_stack.count > 0) {
                 // Has defers — emit them before returning
                 if (stmt->as.ret_stmt.values) {
