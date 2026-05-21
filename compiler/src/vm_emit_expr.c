@@ -12,6 +12,7 @@
 #include <stdint.h>
 
 #include "diag.h"
+#include "mangler.h"
 #include "sema.h"
 #include "str.h"
 #include "vm.h"
@@ -660,6 +661,32 @@ bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
                   }
                   return emit_native_call(compiler, str_from_cstr("rae_from_binary"), 2, (int)expr->line, (int)expr->column);
               }
+          }
+      }
+
+      // Dot-call on a type (new generic-call syntax): `Type.fn(...)`
+      // lowers to `fn(Type, ...)` so the regular call path's type-arg
+      // hoist (compile_call) picks it up. Mirrors c_expr.c's lowering.
+      // Placed after fromJson/fromBinary so those built-ins still win.
+      if (receiver->kind == AST_EXPR_IDENT) {
+          Str rname = receiver->as.ident;
+          bool obj_is_type = rname.len > 0
+              && compiler_find_local(compiler, rname) < 0
+              && !is_module_import(compiler, rname)
+              && (is_primitive_type(rname)
+                  || type_table_find(&compiler->compiler_ctx->types, rname) != NULL);
+          if (obj_is_type) {
+              AstExpr* synth_call = arena_alloc(compiler->compiler_ctx->ast_arena, sizeof(AstExpr));
+              *synth_call = (AstExpr){.kind = AST_EXPR_CALL, .line = expr->line, .column = expr->column};
+              synth_call->as.call.callee = arena_alloc(compiler->compiler_ctx->ast_arena, sizeof(AstExpr));
+              synth_call->as.call.callee->kind = AST_EXPR_IDENT;
+              synth_call->as.call.callee->as.ident = method_name;
+              AstCallArg* type_arg = arena_alloc(compiler->compiler_ctx->ast_arena, sizeof(AstCallArg));
+              type_arg->name = (Str){0};
+              type_arg->value = (AstExpr*)receiver;
+              type_arg->next = expr->as.method_call.args;
+              synth_call->as.call.args = type_arg;
+              return compile_call(compiler, synth_call, false);
           }
       }
 
