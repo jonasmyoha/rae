@@ -162,6 +162,7 @@ static AstTypeRef* parse_type_ref_from_ident(Parser* parser, const Token* ident_
   type->is_view = false;
   type->is_mod = false;
   type->is_val = false;
+  type->is_own = false;
   type->is_id = false;
   type->is_key = false;
   type->parts = make_identifier_part(parser, ident_token->lexeme);
@@ -222,21 +223,24 @@ static AstTypeRef* parse_type_ref(Parser* parser) {
   type->is_view = false;
   type->is_mod = false;
   type->is_val = false;
+  type->is_own = false;
   type->is_id = false;
   type->is_key = false;
   type->generic_args = NULL;
   type->next = NULL;
-  
+
   if (parser_match(parser, TOK_KW_OPT)) {
     type->is_opt = true;
   }
-  
+
   if (parser_match(parser, TOK_KW_VIEW)) {
     type->is_view = true;
   } else if (parser_match(parser, TOK_KW_MOD)) {
     type->is_mod = true;
   } else if (parser_match(parser, TOK_KW_VAL)) {
     type->is_val = true;
+  } else if (parser_match(parser, TOK_KW_OWN)) {
+    type->is_own = true;
   }
   
   if (parser_match(parser, TOK_KW_ID)) {
@@ -593,7 +597,7 @@ static bool token_is_ident(const Token* token, const char* text) {
 }
 
 static bool is_unary_operator(TokenKind kind) {
-  return kind == TOK_MINUS || kind == TOK_KW_NOT || kind == TOK_KW_SPAWN || kind == TOK_INC || kind == TOK_DEC || kind == TOK_KW_VIEW || kind == TOK_KW_MOD;
+  return kind == TOK_MINUS || kind == TOK_KW_NOT || kind == TOK_KW_SPAWN || kind == TOK_INC || kind == TOK_DEC || kind == TOK_KW_VIEW || kind == TOK_KW_MOD || kind == TOK_KW_OWN;
 }
 
 static BinaryInfo get_binary_info(TokenKind kind) {
@@ -1452,6 +1456,16 @@ static AstExpr* parse_postfix(Parser* parser) {
 static AstExpr* parse_unary(Parser* parser) {
   if (is_unary_operator(parser_peek(parser)->kind)) {
     const Token* op_token = parser_advance(parser);
+    // `own EXPR` is a separate AST node (AST_EXPR_OWN) rather than a
+    // unary op — see docs/ownership-model.md. The wrapper signals
+    // "consume / move this value" to the C codegen's move-detection
+    // pass; the inner expression evaluates normally.
+    if (op_token->kind == TOK_KW_OWN) {
+      AstExpr* operand = parse_unary(parser);
+      AstExpr* expr = new_expr(parser, AST_EXPR_OWN, op_token);
+      expr->as.unary.operand = operand;
+      return expr;
+    }
     AstExpr* operand = parse_unary(parser);
     AstExpr* expr = new_expr(parser, AST_EXPR_UNARY, op_token);
     expr->as.unary.operand = operand;

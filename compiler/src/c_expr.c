@@ -290,6 +290,14 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         fprintf(out, "rae_any(("); emit_expr(ctx, expr->as.unary.operand, out, PREC_LOWEST, false, box_suppress); fprintf(out, "))");
         break;
     }
+    case AST_EXPR_OWN: {
+        // `own x` — emit the inner expression's value as usual. The
+        // ownership-transfer marker is consumed by the move-tracking
+        // pass (Phase C of docs/ownership-model.md); at C level it's
+        // a no-op pass-through.
+        emit_expr(ctx, expr->as.unary.operand, out, parent_prec, is_lvalue, suppress_deref);
+        break;
+    }
     case AST_EXPR_UNBOX: {
         if (expr->resolved_type) {
             // Check if the operand already returns the concrete type (not RaeAny)
