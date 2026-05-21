@@ -767,7 +767,9 @@ static AstExpr* finish_call(Parser* parser, AstExpr* callee, const Token* start_
     
     // Check if it looks like a named argument: Identifier (or keyword) followed by ':'
     TokenKind k = parser_peek(parser)->kind;
-    bool is_ident_like = (k == TOK_IDENT || k == TOK_KW_ID || k == TOK_KW_KEY);
+    // TOK_KW_TYPE is allowed here so `createList(type: Int, ...)` parses
+    // — `type:` is the named spelling of the generic type argument.
+    bool is_ident_like = (k == TOK_IDENT || k == TOK_KW_ID || k == TOK_KW_KEY || k == TOK_KW_TYPE);
     bool is_named_arg = is_ident_like && parser_check_at(parser, 1, TOK_COLON);
 
     if (arg_idx == 0 && !is_named_arg) {
@@ -775,7 +777,14 @@ static AstExpr* finish_call(Parser* parser, AstExpr* callee, const Token* start_
         arg->name = (Str){0};
         arg->value = parse_expression(parser);
     } else {
-        const Token* name = parser_consume_ident(parser, "expected argument name (subsequent arguments must be named)");
+        // Accept `type:` (TOK_KW_TYPE) as a named-arg label so the new
+        // generic-call spelling `createList(type: Int, ...)` parses.
+        const Token* name = NULL;
+        if (parser_peek(parser)->kind == TOK_KW_TYPE) {
+            name = parser_advance(parser);
+        } else {
+            name = parser_consume_ident(parser, "expected argument name (subsequent arguments must be named)");
+        }
         parser_consume(parser, TOK_COLON, "expected ':' after argument name");
         arg->name = parser_copy_str(parser, name->lexeme);
         arg->value = parse_expression(parser);
@@ -798,50 +807,27 @@ static AstExpr* finish_call(Parser* parser, AstExpr* callee, const Token* start_
   parser_consume(parser, TOK_RPAREN, "expected ')' after arguments");
   expr->as.call.args = args;
 
-  // Check if followed by another '(', which means the first set were generics: foo(T)(args)
-  if (parser_match(parser, TOK_LPAREN)) {
-    // Convert first set of args to generic_args. Each arg can be either a
-    // plain ident (`T`) or a parameterized type expressed as a call
-    // (`StringMapEntry(V)` → AST_EXPR_CALL with callee=IDENT, args=...).
-    // Recursive conversion handles arbitrary nesting like `Map(K, List(V))`.
-    AstTypeRef* generic_head = NULL;
-    for (AstCallArg* a = args; a; a = a->next) {
-        AstTypeRef* tr = expr_to_type_ref(parser, a->value);
-        if (tr) {
-            generic_head = append_type_ref_list(generic_head, tr);
-        }
-        // else: silently drop — sema will complain about the resulting
-        // unresolved generic call. We choose not to error here so the
-        // parser keeps producing some AST for IDE/error-recovery use.
-    }
-    expr->as.call.generic_args = generic_head;
-    expr->as.call.args = NULL; // Reset and parse value args
-
-    if (!parser_match(parser, TOK_RPAREN)) {
-      AstCallArg* val_args = NULL;
-      size_t val_idx = 0;
-      do {
-        AstCallArg* arg = parser_alloc(parser, sizeof(AstCallArg));
-        TokenKind k = parser_peek(parser)->kind;
-        bool is_ident_like = (k == TOK_IDENT || k == TOK_KW_ID || k == TOK_KW_KEY);
-        bool is_named_arg = is_ident_like && parser_check_at(parser, 1, TOK_COLON);
-
-        if (val_idx == 0 && !is_named_arg) {
-            arg->name = (Str){0};
-            arg->value = parse_expression(parser);
-        } else {
-            const Token* name = parser_consume_ident(parser, "expected argument name");
-            parser_consume(parser, TOK_COLON, "expected ':' after argument name");
-            arg->name = parser_copy_str(parser, name->lexeme);
-            arg->value = parse_expression(parser);
-        }
-        val_args = append_call_arg(val_args, arg);
-        val_idx++;
-        if (parser_check(parser, TOK_RPAREN)) break;
-        parser_consume_comma(parser, false, "argument list");
-      } while (true);
-      parser_consume(parser, TOK_RPAREN, "expected ')' after arguments");
-      expr->as.call.args = val_args;
+  // Legacy `name(T)(args)` double-paren generic-call syntax is no
+  // longer accepted. Type arguments now share the regular argument
+  // list — three accepted spellings:
+  //
+  //   createList(type: String, initialCap: 4)
+  //   createList(String, initialCap: 4)
+  //   String.createList(initialCap: 4)
+  //
+  // See c_backend.c::hoist_type_arg_if_present.
+  if (parser_check(parser, TOK_LPAREN)) {
+    const Token* lp = parser_peek(parser);
+    parser_error(parser, lp,
+        "double-paren generic call `foo(T)(args)` is no longer supported — pass the type as a regular argument: `foo(T, args)`, `foo(type: T, args)`, or `T.foo(args)`");
+    // Best-effort recovery: skip the trailing `(...)` so we keep
+    // parsing the rest of the file.
+    parser_advance(parser);
+    int depth = 1;
+    while (depth > 0 && !parser_check(parser, TOK_EOF)) {
+        if (parser_match(parser, TOK_LPAREN)) { depth++; continue; }
+        if (parser_match(parser, TOK_RPAREN)) { depth--; continue; }
+        parser_advance(parser);
     }
   }
 
@@ -1385,7 +1371,9 @@ static AstExpr* parse_postfix(Parser* parser) {
             
             // Check if it looks like a named argument: Identifier (or keyword) followed by ':'
             TokenKind k = parser_peek(parser)->kind;
-            bool is_ident_like = (k == TOK_IDENT || k == TOK_KW_ID || k == TOK_KW_KEY);
+            // TOK_KW_TYPE is allowed here so `createList(type: Int, ...)` parses
+    // — `type:` is the named spelling of the generic type argument.
+    bool is_ident_like = (k == TOK_IDENT || k == TOK_KW_ID || k == TOK_KW_KEY || k == TOK_KW_TYPE);
             bool is_named_arg = is_ident_like && parser_check_at(parser, 1, TOK_COLON);
 
             if (arg_idx == 0 && !is_named_arg) {
@@ -1393,7 +1381,12 @@ static AstExpr* parse_postfix(Parser* parser) {
                 arg->name = (Str){0};
                 arg->value = parse_expression(parser);
             } else {
-                const Token* arg_name = parser_consume_ident(parser, "expected argument name (subsequent arguments must be named)");
+                const Token* arg_name = NULL;
+                if (parser_peek(parser)->kind == TOK_KW_TYPE) {
+                    arg_name = parser_advance(parser);
+                } else {
+                    arg_name = parser_consume_ident(parser, "expected argument name (subsequent arguments must be named)");
+                }
                 parser_consume(parser, TOK_COLON, "expected ':' after argument name");
                 arg->name = parser_copy_str(parser, arg_name->lexeme);
                 arg->value = parse_expression(parser);

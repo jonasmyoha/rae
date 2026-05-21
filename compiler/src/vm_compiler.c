@@ -1,5 +1,6 @@
 #include "vm_compiler.h"
 #include "vm_compiler_internal.h"
+#include "mangler.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -1036,7 +1037,94 @@ bool emit_spawn_call(BytecodeCompiler* compiler, FunctionEntry* entry, int line,
   return true;
 }
 
+// VM-side mirror of c_backend.c::try_as_type_arg / hoist_type_arg_if_present.
+// New generic-call syntax accepts a type as the first positional arg
+// or as the named `type:` arg. Both spellings get hoisted into
+// `expr->as.call.generic_args` here so the rest of the VM resolution
+// path sees the same shape the legacy `name(T)(args)` form produced.
+static bool vm_name_is_type(BytecodeCompiler* compiler, Str name) {
+    if (name.len == 0) return false;
+    if (compiler_find_local(compiler, name) >= 0) return false;
+    if (is_primitive_type(name)) return true;
+    if (type_table_find(&compiler->compiler_ctx->types, name) != NULL) return true;
+    // Inside a generic function body, the bound generic param is also
+    // a valid type expression — e.g. `createIntMap(V)` body calls
+    // `createInt64Map(V, initialCap: …)` where V resolves to a type.
+    if (compiler->current_function && compiler->current_function->generic_params) {
+        for (const AstIdentifierPart* gp = compiler->current_function->generic_params; gp; gp = gp->next) {
+            if (str_eq(gp->text, name)) return true;
+        }
+    }
+    return false;
+}
+
+static AstTypeRef* vm_try_as_type_arg(BytecodeCompiler* compiler, const AstExpr* val) {
+    if (!val) return NULL;
+    Str name = {0}; AstCallArg* nested = NULL;
+    if (val->kind == AST_EXPR_IDENT) {
+        name = val->as.ident;
+    } else if (val->kind == AST_EXPR_CALL && val->as.call.callee
+               && val->as.call.callee->kind == AST_EXPR_IDENT) {
+        name = val->as.call.callee->as.ident;
+        nested = val->as.call.args;
+    } else {
+        return NULL;
+    }
+    if (!vm_name_is_type(compiler, name)) return NULL;
+    AstIdentifierPart* part = arena_alloc(compiler->compiler_ctx->ast_arena, sizeof(AstIdentifierPart));
+    *part = (AstIdentifierPart){.text = name};
+    AstTypeRef* tr = arena_alloc(compiler->compiler_ctx->ast_arena, sizeof(AstTypeRef));
+    *tr = (AstTypeRef){.parts = part};
+    if (nested) {
+        AstTypeRef* head = NULL; AstTypeRef* tail = NULL;
+        for (AstCallArg* a = nested; a; a = a->next) {
+            AstTypeRef* inner = vm_try_as_type_arg(compiler, a->value);
+            if (!inner) return NULL;
+            if (!head) head = inner; else tail->next = inner;
+            tail = inner;
+        }
+        tr->generic_args = head;
+    }
+    return tr;
+}
+
+static const AstExpr* vm_hoist_type_arg(BytecodeCompiler* compiler, const AstExpr* expr) {
+    if (!expr || expr->kind != AST_EXPR_CALL) return expr;
+    if (expr->as.call.generic_args) return expr;
+    if (!expr->as.call.args) return expr;
+
+    AstCallArg* type_arg_node = NULL;
+    for (AstCallArg* a = expr->as.call.args; a; a = a->next) {
+        if (a->name.len > 0 && str_eq_cstr(a->name, "type")) { type_arg_node = a; break; }
+    }
+    if (!type_arg_node && expr->as.call.args->name.len == 0) {
+        type_arg_node = expr->as.call.args;
+    }
+    if (!type_arg_node) return expr;
+
+    AstTypeRef* tr = vm_try_as_type_arg(compiler, type_arg_node->value);
+    if (!tr) return expr;
+
+    AstCallArg* new_head = NULL; AstCallArg* new_tail = NULL;
+    for (AstCallArg* a = expr->as.call.args; a; a = a->next) {
+        if (a == type_arg_node) continue;
+        AstCallArg* node = arena_alloc(compiler->compiler_ctx->ast_arena, sizeof(AstCallArg));
+        *node = *a; node->next = NULL;
+        if (!new_head) new_head = node; else new_tail->next = node;
+        new_tail = node;
+    }
+    AstExpr* new_expr = arena_alloc(compiler->compiler_ctx->ast_arena, sizeof(AstExpr));
+    *new_expr = *expr;
+    new_expr->as.call.generic_args = tr;
+    new_expr->as.call.args = new_head;
+    return new_expr;
+}
+
 bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr, bool is_spawn) {
+  // Normalise new generic-call syntax (positional or `type:` named
+  // type arg) into the legacy `generic_args` shape.
+  expr = vm_hoist_type_arg(compiler, expr);
+
   if (expr->is_builtin_sizeof) {
       // In the VM, all values are currently 8 bytes (union part).
       emit_constant(compiler, value_int(8), (int)expr->line);
@@ -1044,7 +1132,7 @@ bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr, bool is_spawn
   }
 
   if (expr->as.call.callee->kind != AST_EXPR_IDENT) {
-  
+
     diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
                "VM currently only supports direct function calls");
     compiler->had_error = true;

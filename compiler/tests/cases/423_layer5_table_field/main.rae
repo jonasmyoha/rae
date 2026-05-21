@@ -22,10 +22,10 @@ func transientWorld() {
   # binding can't be safely auto-dropped until stdlib aliasing is
   # cleaned up. See c_backend_internal.h::local_struct_owns_heap.
   let w: MiniWorld = {
-    rects: createComponentTable(Rect)()
-    sizes: createComponentTable(Size)()
-    childrens: createComponentTable(Children)()
-    actives: createComponentTable(Active)()
+    rects: createComponentTable(Rect)
+    sizes: createComponentTable(Size)
+    childrens: createComponentTable(Children)
+    actives: createComponentTable(Active)
   }
   let r: Rect = { x: 0.0, y: 0.0, w: 100.0, h: 100.0 }
   componentSet(this: w.rects, entity: 1, data: r)

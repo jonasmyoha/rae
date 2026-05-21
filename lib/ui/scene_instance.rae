@@ -57,8 +57,8 @@ type SceneRegistry {
 
 func createSceneRegistry() ret SceneRegistry {
   ret SceneRegistry {
-    ids: createList(String)(initialCap: 8)
-    scenes: createList(Scene)(initialCap: 8)
+    ids: createList(String, initialCap: 8)
+    scenes: createList(Scene, initialCap: 8)
   }
 }
 
@@ -93,7 +93,7 @@ func sceneRegistryHas(reg: view SceneRegistry, key: String) ret Bool {
 # -----------------------------------------------------------------
 
 func emptyOverrides() ret List(SceneOverride) {
-  ret createList(SceneOverride)(initialCap: 4)
+  ret createList(SceneOverride, initialCap: 4)
 }
 
 func addOverride(
@@ -249,7 +249,7 @@ func mountSceneInstance(
 
   # Pass 1: allocate entities. The scene's root maps to `mountEntity`;
   # every other node gets a fresh entity.
-  let entitiesByNodeIndex: List(Int) = createList(Int)(initialCap: nodeCount)
+  let entitiesByNodeIndex: List(Int) = createList(Int, initialCap: nodeCount)
   let nodeIdsMap: mod StringMap(Int) => world.nodeIds
   let i: Int = 0
   loop i < nodeCount {
@@ -310,7 +310,7 @@ func mountSceneInstance(
     let parentEntity: Int = entitiesByNodeIndex.get(index: p)
     let kn: Int = node.childrenIds.length
     if kn > 0 {
-      let kids: List(Int) = createList(Int)(initialCap: kn)
+      let kids: List(Int) = createList(Int, initialCap: kn)
       let q: Int = 0
       loop q < kn {
         let childId: String = node.childrenIds.get(index: q)
