@@ -132,6 +132,95 @@ rae_String rae_string_copy(rae_String src) {
   return (rae_String){buf, src.len, src.len + 1, 1};
 }
 
+// ---- String temp pool ----
+//
+// Statement-scope cleanup of heap allocations from compiler-emitted
+// concat/interpolation chains. See header for the contract.
+//
+// Single-threaded today; if/when Rae grows real threading, this
+// becomes per-thread state. The C11 _Thread_local keyword exists
+// but we avoid it here to keep the runtime portable to compilers
+// that don't ship it cleanly (the Live VM target also uses this
+// file).
+#define RAE_STRING_POOL_MAX 4096
+static void* g_rae_string_pool[RAE_STRING_POOL_MAX];
+static int g_rae_string_pool_count = 0;
+
+void rae_string_pool_register(void* ptr) {
+  if (!ptr) return;
+  if (g_rae_string_pool_count >= RAE_STRING_POOL_MAX) return;
+  g_rae_string_pool[g_rae_string_pool_count++] = ptr;
+}
+
+int rae_string_pool_mark(void) {
+  return g_rae_string_pool_count;
+}
+
+void rae_string_pool_flush(int saved) {
+  if (saved < 0) saved = 0;
+  if (saved > g_rae_string_pool_count) return;  // nothing to flush
+  for (int i = g_rae_string_pool_count - 1; i >= saved; i--) {
+    if (g_rae_string_pool[i]) free(g_rae_string_pool[i]);
+    g_rae_string_pool[i] = NULL;
+  }
+  g_rae_string_pool_count = saved;
+}
+
+void rae_string_pool_remove(void* ptr) {
+  if (!ptr) return;
+  // Linear scan from the top — the entry we want to detach is
+  // almost always the most recently registered one (a binding
+  // taking the result of the just-emitted interpolation).
+  for (int i = g_rae_string_pool_count - 1; i >= 0; i--) {
+    if (g_rae_string_pool[i] == ptr) {
+      // Compact: swap with last, drop count by 1.
+      g_rae_string_pool[i] = g_rae_string_pool[g_rae_string_pool_count - 1];
+      g_rae_string_pool_count--;
+      return;
+    }
+  }
+}
+
+rae_String rae_ext_rae_str_interp(int n, ...) {
+  if (n <= 0) return (rae_String){NULL, 0, 0, 0};
+  va_list args;
+  // Collect parts.
+  enum { MAX_PARTS = 64 };
+  if (n > MAX_PARTS) n = MAX_PARTS;
+  rae_String parts[MAX_PARTS];
+  int64_t total = 0;
+  va_start(args, n);
+  for (int i = 0; i < n; i++) {
+    parts[i] = va_arg(args, rae_String);
+    total += parts[i].len;
+  }
+  va_end(args);
+
+  uint8_t* buf = (total > 0) ? malloc((size_t)total + 1) : NULL;
+  if (buf) {
+    int64_t pos = 0;
+    for (int i = 0; i < n; i++) {
+      if (parts[i].data && parts[i].len > 0) {
+        memcpy(buf + pos, parts[i].data, (size_t)parts[i].len);
+        pos += parts[i].len;
+      }
+    }
+    buf[total] = '\0';
+  }
+
+  // Free any owned input — these are compiler-generated temporaries
+  // (e.g. rae_ext_rae_str_i64 results). Borrowed inputs (literals,
+  // rae_string_borrow-wrapped identifiers) are is_owned=0 and a
+  // no-op here.
+  for (int i = 0; i < n; i++) {
+    if (parts[i].is_owned && parts[i].data) free(parts[i].data);
+  }
+
+  rae_String result = {buf, total, total + 1, 1};
+  rae_string_pool_register(buf);
+  return result;
+}
+
 static int64_t g_tick_counter = 0;
 
 int64_t rae_ext_nextTick(void) {
@@ -846,10 +935,16 @@ rae_String rae_ext_rae_str_any(RaeAny v) {
         case RAE_TYPE_FLOAT64: return rae_ext_rae_str_f64(v.as.f);
         case RAE_TYPE_FLOAT32: return rae_ext_rae_str_f64(v.as.f);
         case RAE_TYPE_BOOL:    return rae_ext_rae_str_bool(v.as.b);
-        case RAE_TYPE_STRING:  return v.as.s;
+        // Extracting a String from a RaeAny is a read, not an
+        // ownership transfer — the RaeAny boxed a copy of someone
+        // else's String (e.g. a list element). Always return a
+        // borrowed view (is_owned=0) so a consumer like
+        // rae_ext_rae_str_interp doesn't free the storage that
+        // still belongs to the original owner.
+        case RAE_TYPE_STRING:  return rae_string_borrow(v.as.s);
         case RAE_TYPE_CHAR:    return rae_ext_rae_str_char((uint32_t)v.as.i);
-        case RAE_TYPE_NONE:    return (rae_String){(uint8_t*)"none", 4};
-        default:               return (rae_String){(uint8_t*)"", 0};
+        case RAE_TYPE_NONE:    return (rae_String){(uint8_t*)"none", 4, 0, 0};
+        default:               return (rae_String){(uint8_t*)"", 0, 0, 0};
     }
 }
 

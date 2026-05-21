@@ -773,6 +773,16 @@ bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* 
   // inline during emit_stmt (AST_EXPR_OWN, AST_STMT_RET).
   size_t first_let_idx = tctx.local_count;
 
+  // Stage 4: per-function string-temp-pool guard. Catches any
+  // pool registrations from `rae_ext_rae_str_interp` that escape
+  // their containing statement (e.g. `let n: Int = "{i}".length()`
+  // where the interp result lives long enough to be read but isn't
+  // captured by any String binding). The expression-statement and
+  // String-let wrappers handle the common cases inline; this is
+  // the safety net so the global pool doesn't grow unbounded
+  // across long-running call chains.
+  fprintf(out, "  int __rae_spm_func = rae_string_pool_mark();\n");
+
   if (f->body) { for (AstStmt* s = f->body->first; s; s = s->next) emit_stmt(&tctx, s, out); }
 
   // Emit any remaining defers at function end
@@ -782,6 +792,8 @@ bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* 
   // drop heap-owning lets at end-of-body fallthrough. Move-tracking
   // skip-rules live in emit_implicit_drops_for_body itself.
   emit_implicit_drops_for_body(&tctx, out, first_let_idx);
+
+  fprintf(out, "  rae_string_pool_flush(__rae_spm_func);\n");
 
   if (is_main) fprintf(out, "  return 0;\n}\n\n");
   else fprintf(out, "}\n\n");
@@ -919,8 +931,11 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
 
   // Stage 2 + 3: see emit_function above.
   size_t first_let_idx = tctx.local_count;
+  // Stage 4: per-function string-temp-pool guard. See emit_function.
+  fprintf(out, "  int __rae_spm_func = rae_string_pool_mark();\n");
   if (f->body) { for (AstStmt* s = f->body->first; s; s = s->next) emit_stmt(&tctx, s, out); }
   emit_implicit_drops_for_body(&tctx, out, first_let_idx);
+  fprintf(out, "  rae_string_pool_flush(__rae_spm_func);\n");
   fprintf(out, "}\n\n"); return true;
 }
 
