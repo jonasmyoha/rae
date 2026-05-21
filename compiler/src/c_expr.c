@@ -382,6 +382,21 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             } else {
                 ctx->has_expected_type = false;
             }
+            // Stage 3 move tracking (continued): a struct-literal
+            // field initialised from a bare local of heap-owning
+            // type moves the local's heap into the new struct. The
+            // local must be skipped by end-of-scope auto-drop to
+            // avoid double-free (the same heap is now reachable
+            // via the new struct's field). Mirrors the same logic
+            // for function args and `target.field = src` assigns.
+            if (f->value && f->value->kind == AST_EXPR_IDENT && field_tr) {
+                const AstTypeRef* val_tr = infer_expr_type_ref(ctx, f->value);
+                if (val_tr && !(val_tr->is_view || val_tr->is_mod) &&
+                    !(field_tr->is_view || field_tr->is_mod) &&
+                    type_owns_heap_storage(ctx->compiler_ctx, ctx->module, val_tr, 0)) {
+                    mark_expr_moved_if_local(ctx, f->value);
+                }
+            }
             emit_expr(ctx, f->value, out, PREC_LOWEST, false, false);
             if (f->next) fprintf(out, ", ");
         }

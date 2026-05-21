@@ -1,0 +1,39 @@
+# Layer 5 smoke test: plain owned struct containing a List(Int).
+# When the local goes out of scope, the synthesised drop must
+# release the List's backing Buffer. We verify by running the
+# allocate-and-drop cycle many times and observing that RSS does
+# not grow (cf. test 416 for the same pattern at the List level).
+
+import core
+import sys
+
+type Box {
+  contents: List(Int)
+}
+
+func transientBox() {
+  let box: Box = { contents: createList(Int)(initialCap: 1024) }
+  let i: Int = 0
+  loop i < 1024 {
+    box.contents.add(value: i)
+    i = i + 1
+  }
+}
+
+func main() {
+  transientBox()
+  let baselineKb: Int = processRssKb()
+  let iterations: Int = 5000
+  let i: Int = 0
+  loop i < iterations {
+    transientBox()
+    i = i + 1
+  }
+  let growthKb: Int = processRssKb() - baselineKb
+  log("iterations: {iterations}")
+  if growthKb > 5000 {
+    log("verdict: LEAK")
+  } else {
+    log("verdict: OK")
+  }
+}

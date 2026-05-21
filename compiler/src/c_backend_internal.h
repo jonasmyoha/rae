@@ -74,11 +74,17 @@ typedef struct {
   // Layer 5 (docs/scope-exit-dealloc.md) ownership gate: true when
   // a user-struct let was constructed in place (struct literal or
   // auto-init) and so genuinely owns its heap. False for call-result
-  // bindings — even if the callee returns plain T, our runtime
+  // bindings — even if the callee returns plain `T`, our runtime
   // doesn't deep-copy structs, so the binding's heap pointers alias
-  // someone else's storage and auto-drop would double-free. The
-  // long-term fix is making `=` deep-copy for heap-owning T;
-  // until then this flag is the conservative gate.
+  // someone else's storage and auto-drop would double-free.
+  //
+  // Per the language design (docs/ownership-model.md) plain `T`
+  // returns SHOULD own — this gate is a transitional measure until
+  // stdlib APIs that currently return shallow aliases (sceneNodeAt,
+  // componentGet on heap-owning T, JsonDoc helpers, ...) get
+  // migrated to `view T` returns. Once they're migrated, this gate
+  // becomes unnecessary and Layer 5 can fire on all owning struct
+  // lets unconditionally.
   bool local_struct_owns_heap[256];
   size_t local_count;
   bool returns_value;

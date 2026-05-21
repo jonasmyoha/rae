@@ -882,17 +882,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   }
 
   // Layer 5 (docs/scope-exit-dealloc.md) — synthesised per-struct
-  // drop fns — remains deferred. An in-progress prototype that
-  // emits rae_drop_struct_<MangledType> for non-generic heap-owning
-  // structs trips the existing spec-emission pipeline's mangler on
-  // 98_mobile_ui (~480+ drop specialisations registered, one in
-  // that long tail crashes inside rae_mangle_specialized_function;
-  // smaller test programs work). The fix needs deeper changes to
-  // how synthesised drops register / route through the spec list.
-  // Below is the prototype, kept compiled-out behind a constant so
-  // future work can flip it back on for benchmarking.
-  if (0) {
-  // For every non-generic user struct that transitively
+  // drop fns. For every non-generic user struct that transitively
   // owns heap (a field whose type is List / StringMap / IntMap, or
   // another heap-owning struct), emit
   //
@@ -979,15 +969,17 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     }
   }
   if (drop_entry_count > 0) fprintf(out, "\n");
-  fprintf(stderr, "[layer5] %zu drop entries\n", drop_entry_count);
-  for (size_t z = 0; z < drop_entry_count; z++) {
-    fprintf(stderr, "  [%zu] %s\n", z, drop_entries[z].mangled);
-    fflush(stderr);
-  }
+  // Re-run discovery so the drop specialisations we just registered
+  // (e.g. `drop(T)(this: mod ComponentTable(T))` for each T) get
+  // their bodies walked and their own nested specs (e.g.
+  // `drop(List(T))` inside ComponentTable's drop body) registered
+  // BEFORE the spec-emission pipeline writes call sites. Without
+  // this re-discovery, those nested calls go out as undeclared
+  // C functions because the prototype comes later in the output.
+  collect_type_refs_module(ctx);
   // Bodies — reverse field order so LIFO drop matches construction.
   for (size_t i = 0; i < drop_entry_count; i++) {
     const StructDropEntry* e = &drop_entries[i];
-    fprintf(stderr, "[layer5/body] [%zu] %s\n", i, e->mangled); fflush(stderr);
     fprintf(out, "RAE_UNUSED static void rae_drop_struct_%s(%s* this) {\n",
             e->mangled, e->mangled);
     const AstIdentifierPart* gp = e->decl->as.type_decl.generic_params;
@@ -1036,7 +1028,6 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     }
     fprintf(out, "}\n\n");
   }
-  } // end Layer 5 prototype gate (compiled-out)
 
   // Emit top-level `let` globals as static C variables. We bundle every
   // imported module into one translation unit, so plain `static` works
@@ -1106,18 +1097,21 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
 
   // Bodies for specialized functions (iterative — emitting may discover new specializations)
   // First: emit ALL prototypes from discovery pass (may include ones found during iterative discovery)
+  //
+  // `register_function_specialization` dedupes by (decl, concrete_args)
+  // tuple, so entries in `specialized_funcs` are unique. The previous
+  // implementation re-mangled every previous entry on every iteration
+  // (O(N²) mangle calls) to dedup on name, which was redundant and
+  // exhausted the arena on large modules (~480 specs × ~480 dedup
+  // mangles × ~70-byte names = many megabytes of arena allocations).
+  // If two different decls ever do produce the same mangled name,
+  // that's a mangler bug worth surfacing as a C link error rather
+  // than papering over here.
   for (size_t i = 0; i < ctx->specialized_func_count; i++) {
       const AstFuncDecl* pf = ctx->specialized_funcs[i].decl;
       const AstTypeRef* pa = ctx->specialized_funcs[i].concrete_args;
       if (pf->is_extern) continue;
       const char* pm = rae_mangle_specialized_function(ctx, pf, pa);
-      // Check if already prototyped (avoid duplicates)
-      bool already_proto = false;
-      for (size_t j = 0; j < i; j++) {
-          const char* prev = rae_mangle_specialized_function(ctx, ctx->specialized_funcs[j].decl, ctx->specialized_funcs[j].concrete_args);
-          if (strcmp(pm, prev) == 0) { already_proto = true; break; }
-      }
-      if (already_proto) continue;
       const AstIdentifierPart* pgp = pf->generic_params;
       if (!pgp && pf->generic_template && pf->generic_template->kind == AST_DECL_FUNC) pgp = pf->generic_template->as.func_decl.generic_params;
       CFuncContext ptctx = {.compiler_ctx = ctx, .module = module, .generic_params = pgp, .generic_args = pa};
