@@ -212,8 +212,21 @@ End of instructions.
 SUMU AI is a voice-first desktop AI assistant app for running project tools and agent workflows.
 
 ## QUEUE.md
-`QUEUE.md` is managed by SUMU for queued project tasks.
+`QUEUE.md` is the shared task list for this project. The assistant
+(you, running through SUMU) is the one that implements queue items
+— so you are also expected to **add** new items when the user
+identifies follow-up work that doesn't fit the current turn.
+
 - SUMU may create this file when queue features are used.
-- SUMU updates queue item status markers, including `[>sumu]` for in-progress and `[x]` for done.
-- Keep manual edits simple to avoid merge conflicts with SUMU updates.
+- SUMU updates queue item status markers — `[>sumu]` (or
+  `[>claude]`) for in-progress and `[x]` for done. Leave those
+  markers to SUMU; you don't need to update them yourself.
+- **You may freely append new items.** Use the next unused numeric
+  id, the `[ ]` unchecked marker, and keep each item to a single
+  line so SUMU's regex-style edits don't fight you. Example:
+
+    `- [ ] #196 Implement docs/ownership-model.md: …`
+
+- Keep manual edits simple (single-line items, no multi-line
+  formatting) to avoid merge conflicts with SUMU's status updates.
 
