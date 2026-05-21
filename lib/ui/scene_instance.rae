@@ -399,7 +399,7 @@ func applyOverride(world: mod UiWorld, entity: Int, override: view SceneOverride
     let textField: String = "text"
     if override.fieldName.equals(other: textField) {
       if componentHas(this: world.texts, entity: entity) {
-        let cur: Text = componentGet(this: world.texts, entity: entity)
+        let cur: view Text => componentView(this: world.texts, entity: entity)
         let updated: Text = {
           text: override.valueString
           styleId: cur.styleId
@@ -412,7 +412,7 @@ func applyOverride(world: mod UiWorld, entity: Int, override: view SceneOverride
     let styleField: String = "styleId"
     if override.fieldName.equals(other: styleField) {
       if componentHas(this: world.texts, entity: entity) {
-        let cur: Text = componentGet(this: world.texts, entity: entity)
+        let cur: view Text => componentView(this: world.texts, entity: entity)
         let updated: Text = {
           text: cur.text
           styleId: override.valueString
@@ -428,7 +428,7 @@ func applyOverride(world: mod UiWorld, entity: Int, override: view SceneOverride
     let textureField: String = "textureKey"
     if override.fieldName.equals(other: textureField) {
       if componentHas(this: world.sprites, entity: entity) {
-        let cur: Sprite = componentGet(this: world.sprites, entity: entity)
+        let cur: view Sprite => componentView(this: world.sprites, entity: entity)
         let updated: Sprite = {
           textureKey: override.valueString
           tint: cur.tint
@@ -444,7 +444,7 @@ func applyOverride(world: mod UiWorld, entity: Int, override: view SceneOverride
     let tintField: String = "tint"
     if override.fieldName.equals(other: tintField) {
       if componentHas(this: world.sprites, entity: entity) {
-        let cur: Sprite = componentGet(this: world.sprites, entity: entity)
+        let cur: view Sprite => componentView(this: world.sprites, entity: entity)
         let newTint: RgbaColor = parseRgbaString(s: override.valueString)
         let updated: Sprite = {
           textureKey: cur.textureKey
@@ -464,7 +464,7 @@ func applyOverride(world: mod UiWorld, entity: Int, override: view SceneOverride
     let actionField: String = "actionId"
     if override.fieldName.equals(other: actionField) {
       if componentHas(this: world.onClicks, entity: entity) {
-        let cur: OnClick = componentGet(this: world.onClicks, entity: entity)
+        let cur: view OnClick => componentView(this: world.onClicks, entity: entity)
         let updated: OnClick = {
           actionId: override.valueString
           actionIdDouble: cur.actionIdDouble

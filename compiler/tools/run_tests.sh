@@ -117,15 +117,6 @@ for TARGET in "${TARGETS[@]}"; do
             lex|parse|format|pack) RUN_THIS=0 ;;
         esac
     fi
-    # Tests that exercise compiled-only features (currently: view T
-    # bindings whose RHS is a function call returning view T, which
-    # the VM target's lvalue check rejects). When VM-side support for
-    # `ret view <call>` lands these can be removed from the skip list.
-    if [ "$TARGET" = "live" ] && [ -z "$TEST_NAME_FILTER" ]; then
-        case "$TEST_NAME" in
-            420_*) RUN_THIS=0 ;;
-        esac
-    fi
 
     if [ $RUN_THIS -eq 0 ]; then
         continue
