@@ -34,6 +34,7 @@ typedef struct AstTypeRef {
   bool is_view;
   bool is_mod;
   bool is_val;
+  bool is_own; // Ownership-transfer parameter mode — see docs/ownership-model.md
   bool is_id;
   bool is_key;
   size_t line;
@@ -134,7 +135,8 @@ typedef enum {
   AST_EXPR_COLLECTION_LITERAL,
   AST_EXPR_INTERP,
   AST_EXPR_BOX,
-  AST_EXPR_UNBOX
+  AST_EXPR_UNBOX,
+  AST_EXPR_OWN
 } AstExprKind;
 
 typedef struct AstInterpPart {

@@ -981,6 +981,13 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
             break;
         case AST_EXPR_BOX: sema_analyze_expr(ctx, module, symbols, expr->as.unary.operand); break;
         case AST_EXPR_UNBOX: sema_analyze_expr(ctx, module, symbols, expr->as.unary.operand); break;
+        case AST_EXPR_OWN:
+            // `own x` ownership-transfer marker. Type is the inner expression's
+            // type; sema runs through. Stage 3 of docs/scope-exit-dealloc.md
+            // adds the move-tracking + use-after-move check.
+            sema_analyze_expr(ctx, module, symbols, expr->as.unary.operand);
+            if (expr->as.unary.operand) expr->resolved_type = expr->as.unary.operand->resolved_type;
+            break;
         case AST_EXPR_OBJECT: if (expr->as.object_literal.type) expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, expr->as.object_literal.type); for (AstObjectField* f = expr->as.object_literal.fields; f; f = f->next) sema_analyze_expr(ctx, module, symbols, f->value); break;
         case AST_EXPR_INTERP: {
             AstInterpPart* part = expr->as.interp.parts;
