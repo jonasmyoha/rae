@@ -159,11 +159,22 @@ bool emit_implicit_drops_for_body(CFuncContext* ctx, FILE* out,
       fprintf(out, "  %s(&%.*s);\n", drop_name,
               (int)name.len, name.data);
     } else {
-      // Layer 5 (synthesised per-struct drop fns) remains deferred
-      // — see c_backend.c. The `local_struct_owns_heap` flag is set
-      // here so this branch can flip back on once Layer 5 emission
-      // is stable; today it's a no-op.
-      continue;
+      // Layer 5 — user struct that transitively owns heap. Gate:
+      // only fire when the binding genuinely owns its heap (struct
+      // literal `{ ... }` or auto-init). Call-result bindings
+      // shallow-alias caller-owned heap (stdlib hasn't been fully
+      // migrated to `view T` returns yet); auto-dropping those
+      // would corrupt the original. See `local_struct_owns_heap`
+      // in c_backend_internal.h for the migration roadmap.
+      // Generic-instance structs (Stack(Int) etc.) are also
+      // skipped: those need a user-defined `drop(T)` overload
+      // mirroring ComponentTable's pattern in lib/ui/ecs.rae.
+      if (!ctx->local_struct_owns_heap[idx]) continue;
+      if (type->generic_args) continue;
+      const char* struct_mangled = rae_mangle_type_specialized(
+          ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type);
+      fprintf(out, "  rae_drop_struct_%s(&%.*s);\n", struct_mangled,
+              (int)name.len, name.data);
     }
   }
   return true;
@@ -182,12 +193,14 @@ static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     if (stmt->as.if_stmt.then_block) {
         for (const AstStmt* s = stmt->as.if_stmt.then_block->first; s; s = s->next) emit_stmt(ctx, s, out);
     }
+    emit_implicit_drops_for_body(ctx, out, saved_locals_then);
     ctx->local_count = saved_locals_then;
     fprintf(out, "  }");
     if (stmt->as.if_stmt.else_block) {
         fprintf(out, " else {\n");
         size_t saved_locals_else = ctx->local_count;
         for (const AstStmt* s = stmt->as.if_stmt.else_block->first; s; s = s->next) emit_stmt(ctx, s, out);
+        emit_implicit_drops_for_body(ctx, out, saved_locals_else);
         ctx->local_count = saved_locals_else;
         fprintf(out, "  }\n");
     } else {
@@ -219,6 +232,7 @@ static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     if (stmt->as.loop_stmt.body) {
         for (const AstStmt* s = stmt->as.loop_stmt.body->first; s; s = s->next) emit_stmt(ctx, s, out);
     }
+    emit_implicit_drops_for_body(ctx, out, saved_locals);
     ctx->local_count = saved_locals;
     fprintf(out, "  }\n");
     return true;
@@ -379,10 +393,9 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 ctx->locals[ctx->local_count] = stmt->as.let_stmt.name;
                 ctx->local_types[ctx->local_count] = str_from_cstr(tn);
                 ctx->local_type_refs[ctx->local_count] = stmt->as.let_stmt.type;
-                // Layer 5 ownership gate: the binding genuinely owns
-                // its heap only when constructed in-place (struct
-                // literal) or auto-initialised (zero value). Calls
-                // and other expressions return shallow aliases.
+                // Layer 5 transitional gate: only struct literal or
+                // auto-init bindings genuinely own their heap (no
+                // alias risk). See c_backend_internal.h.
                 const AstExpr* init = stmt->as.let_stmt.value;
                 ctx->local_struct_owns_heap[ctx->local_count] =
                     (init == NULL) || (init->kind == AST_EXPR_OBJECT);
@@ -391,6 +404,23 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             break;
         }
         case AST_STMT_ASSIGN: {
+            // Stage 3 move tracking (continued): a field assignment
+            // `target.field = src` where src is a bare local of a
+            // heap-owning type moves src's heap into the target. The
+            // local must be skipped by end-of-scope auto-drop so we
+            // don't double-free the heap (now reachable via both
+            // src and target.field). Mirrors the move detection on
+            // `own x`, `ret x`, and bare-ident arg passing.
+            if (stmt->as.assign_stmt.target &&
+                stmt->as.assign_stmt.target->kind == AST_EXPR_MEMBER &&
+                stmt->as.assign_stmt.value &&
+                stmt->as.assign_stmt.value->kind == AST_EXPR_IDENT) {
+                const AstTypeRef* vtr = infer_expr_type_ref(ctx, stmt->as.assign_stmt.value);
+                if (vtr && !(vtr->is_view || vtr->is_mod) &&
+                    type_owns_heap_storage(ctx->compiler_ctx, ctx->module, vtr, 0)) {
+                    mark_expr_moved_if_local(ctx, stmt->as.assign_stmt.value);
+                }
+            }
             fprintf(out, "  ");
             // Check if assigning to a mod ref variable (e.g. rx = 10 where rx is rae_Mod_Int64)
             const AstTypeRef* target_tr = infer_expr_type_ref(ctx, stmt->as.assign_stmt.target);
