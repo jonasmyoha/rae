@@ -52,6 +52,18 @@ func createComponentTable(T)() ret ComponentTable(T) {
   }
 }
 
+# Release both backing Lists. Called by the synthesised
+# rae_drop_struct_UiWorld when its enclosing UiWorld goes out of
+# scope — see docs/scope-exit-dealloc.md Layer 5. ComponentTable is a
+# generic type so Layer 5's auto-collect can't synthesise a per-T
+# drop_struct (the mangler trips on element types like AnimState that
+# nothing else in the program ever touched); writing the drop
+# explicitly here is the supported workaround.
+func drop(T)(this: mod ComponentTable(T)) {
+  drop(this.denseData)
+  drop(this.denseEntities)
+}
+
 # Returns the dense index of `entity` in this table, or -1 if absent.
 #
 # `denseEntities` is `List(Int)`, but inside this generic function the
