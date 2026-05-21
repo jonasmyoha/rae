@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 #include <wchar.h>
 
 #ifdef __GNUC__
@@ -338,6 +339,50 @@ RAE_UNUSED static inline void rae_string_drop(rae_String* s) {
   s->capacity = 0;
   s->is_owned = 0;
 }
+
+// Borrow constructor: take an existing rae_String and return a
+// borrowed view (is_owned=0). Used by codegen to wrap identifier
+// refs that get fed into rae_ext_rae_str_interp, so the helper
+// doesn't free the user's local at the end of the interpolation.
+RAE_UNUSED static inline rae_String rae_string_borrow(rae_String s) {
+  return (rae_String){s.data, s.len, 0, 0};
+}
+
+// String temp pool — used for statement-scope cleanup of heap
+// allocations that the language semantically wants gone at the
+// end of the statement (interpolation results, intermediate concat
+// allocations created by compiler-emitted helpers).
+//
+// Codegen contract:
+//   - emit_stmt wraps each potentially-temp-producing statement
+//     with `int __m = rae_string_pool_mark(); ... rae_string_pool_flush(__m);`
+//   - rae_ext_rae_str_interp registers its result before returning
+//     (so the flush sweeps it up)
+//   - let/assign/struct-init that captures a registered result
+//     wraps with rae_string_pool_take(expr) to detach the entry
+//     and keep ownership in the captured binding.
+//
+// Sized for ~hundreds of nested temps per statement; statements
+// that genuinely exceed this still won't crash — extra registrations
+// are silently dropped (which means they'll leak, the conservative
+// failure mode).
+void rae_string_pool_register(void* ptr);
+int rae_string_pool_mark(void);
+void rae_string_pool_flush(int saved);
+void rae_string_pool_remove(void* ptr);
+RAE_UNUSED static inline rae_String rae_string_pool_take(rae_String s) {
+  rae_string_pool_remove(s.data);
+  return s;
+}
+
+// N-way interpolation/concat helper. `n` is the number of
+// rae_String parts; each is passed via varargs. Concatenates all
+// parts into a single owned heap String, frees each part whose
+// is_owned=1 (so compiler-emitted temps in the chain — e.g.
+// `rae_ext_rae_str_i64` results — get cleaned up here), and
+// registers the returned String with the temp pool for
+// statement-scope cleanup.
+rae_String rae_ext_rae_str_interp(int n, ...);
 
 rae_String rae_ext_rae_str_concat(rae_String a, rae_String b);
 rae_String rae_ext_rae_str_concat_cstr(rae_String a, rae_String b); // Legacy/helper name

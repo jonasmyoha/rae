@@ -438,45 +438,57 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         break;
     }
     case AST_EXPR_INTERP: {
+        // Stage 4: interpolation lowers to a single varargs runtime
+        // call that concatenates all parts into one owned String,
+        // frees any owned input parts (the str_i64/str_f64/etc.
+        // conversions that produce heap data), and registers the
+        // result with the per-statement string pool. The result
+        // gets flushed at end-of-statement unless a let/assign/etc.
+        // explicitly takes ownership via rae_string_pool_take(...).
+        //
+        // For each part:
+        //   - AST_EXPR_STRING (literal)  → emit as borrowed (is_owned=0)
+        //   - AST_EXPR_IDENT of String   → wrap with rae_string_borrow
+        //                                  to clear is_owned (the local
+        //                                  still owns the data; we don't
+        //                                  want str_interp to free it)
+        //   - everything else            → emit_to_string_expr, which
+        //                                  produces an owned heap result
+        //                                  that str_interp consumes.
         AstInterpPart* part = expr->as.interp.parts;
-        if (!part) { fprintf(out, "(rae_String){(uint8_t*)\"\", 0}"); break; }
-        // Count parts to determine nesting
+        if (!part) { fprintf(out, "(rae_String){(uint8_t*)\"\", 0, 0, 0}"); break; }
         int count = 0;
         for (AstInterpPart* p = part; p; p = p->next) count++;
-        if (count == 1) {
-            // Single part - just emit as string
-            if (part->value->kind == AST_EXPR_STRING) {
-                emit_expr(ctx, part->value, out, PREC_LOWEST, false, false);
-            } else {
-                emit_to_string_expr(ctx, part->value, out);
-            }
-        } else {
-            // Multiple parts - nest rae_ext_rae_str_concat calls
-            // Build: concat(concat(concat(part1, str(part2)), str(part3)), str(part4))
-            int opens = 0;
-            bool first = true;
-            for (AstInterpPart* p = part; p; p = p->next) {
-                if (first) { first = false; continue; }
-                fprintf(out, "rae_ext_rae_str_concat(");
-                opens++;
-            }
-            // Emit first part
-            if (part->value->kind == AST_EXPR_STRING) {
-                emit_expr(ctx, part->value, out, PREC_LOWEST, false, false);
-            } else {
-                emit_to_string_expr(ctx, part->value, out);
-            }
-            // Emit remaining parts
-            for (AstInterpPart* p = part->next; p; p = p->next) {
-                fprintf(out, ", ");
-                if (p->value->kind == AST_EXPR_STRING) {
+
+        fprintf(out, "rae_ext_rae_str_interp(%d", count);
+        for (AstInterpPart* p = part; p; p = p->next) {
+            fprintf(out, ", ");
+            if (p->value->kind == AST_EXPR_STRING) {
+                emit_expr(ctx, p->value, out, PREC_LOWEST, false, false);
+            } else if (p->value->kind == AST_EXPR_IDENT) {
+                // Identifier reference — wrap in rae_string_borrow so
+                // str_interp does NOT free the user's local at the end
+                // of interpolation. Skip the wrap when the identifier
+                // is `opt String` (a RaeAny in C, not a rae_String) or
+                // any view/mod ref — the standard emit_to_string_expr
+                // path through `rae_ext_rae_str(...)` handles those
+                // via _Generic dispatch.
+                const AstTypeRef* ptr = infer_expr_type_ref(ctx, p->value);
+                Str pbase = get_base_type_name(ptr);
+                bool plain_string = ptr && !ptr->is_opt && !ptr->is_view && !ptr->is_mod
+                                    && str_eq_cstr(pbase, "String");
+                if (plain_string) {
+                    fprintf(out, "rae_string_borrow(");
                     emit_expr(ctx, p->value, out, PREC_LOWEST, false, false);
+                    fprintf(out, ")");
                 } else {
                     emit_to_string_expr(ctx, p->value, out);
                 }
-                fprintf(out, ")");
+            } else {
+                emit_to_string_expr(ctx, p->value, out);
             }
         }
+        fprintf(out, ")");
         break;
     }
     case AST_EXPR_MATCH: {
