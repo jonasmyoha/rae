@@ -17,6 +17,13 @@ static void discover_specializations_stmt_impl(CFuncContext* ctx, const AstStmt*
 
 static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr* expr) {
     if (!expr) return;
+    // Normalise the new generic-call syntax so the spec-registration
+    // logic below sees `generic_args` populated, same as the legacy
+    // double-paren form. See c_backend.c::hoist_type_arg_if_present.
+    if (expr->kind == AST_EXPR_CALL) {
+        AstExpr* hoisted = hoist_type_arg_if_present(ctx, expr);
+        if (hoisted) expr = hoisted;
+    }
     switch (expr->kind) {
         case AST_EXPR_CALL: {
             const AstExpr* callee = expr->as.call.callee;
@@ -96,6 +103,29 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
             break;
         }
         case AST_EXPR_METHOD_CALL: {
+            // Dot-call on a type (new generic-call syntax): `Type.fn(...)`
+            // is treated as `fn(Type, ...)` for discovery so the generic
+            // spec gets registered. Mirrors c_expr.c's lowering.
+            if (expr->as.method_call.object && expr->as.method_call.object->kind == AST_EXPR_IDENT) {
+                Str obj_name = expr->as.method_call.object->as.ident;
+                bool obj_has_local = get_local_type_ref(ctx, obj_name) != NULL;
+                bool obj_is_type = !obj_has_local && obj_name.len > 0 &&
+                    (is_primitive_type(obj_name) || (ctx->module && find_type_decl(ctx, ctx->module, obj_name) != NULL));
+                if (obj_is_type) {
+                    AstExpr* synth_call = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstExpr));
+                    *synth_call = (AstExpr){.kind = AST_EXPR_CALL, .line = expr->line, .column = expr->column};
+                    synth_call->as.call.callee = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstExpr));
+                    synth_call->as.call.callee->kind = AST_EXPR_IDENT;
+                    synth_call->as.call.callee->as.ident = expr->as.method_call.method_name;
+                    AstCallArg* type_arg = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstCallArg));
+                    type_arg->name = (Str){0};
+                    type_arg->value = expr->as.method_call.object;
+                    type_arg->next = expr->as.method_call.args;
+                    synth_call->as.call.args = type_arg;
+                    discover_specializations_expr_impl(ctx, synth_call);
+                    break;
+                }
+            }
             uint16_t param_count = 1; for (const AstCallArg* a = expr->as.method_call.args; a; a = a->next) param_count++;
             Str obj_type = infer_expr_type(ctx, expr->as.method_call.object);
             const AstFuncDecl* d = find_function_overload(ctx->module, ctx, expr->as.method_call.method_name, &obj_type, param_count, true, expr);

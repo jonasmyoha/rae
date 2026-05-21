@@ -37,7 +37,7 @@ type List(T) {
 }
 
 func createList(T)(initialCap: Int) ret List(T) {
-  ret List(T) { data: rae_ext_rae_buf_alloc(size: initialCap, elemSize: sizeof(T)()), length: 0, capacity: initialCap }
+  ret List(T) { data: rae_ext_rae_buf_alloc(size: initialCap, elemSize: sizeof(T)), length: 0, capacity: initialCap }
 }
 
 func grow(T)(this: mod List(T)) {
@@ -45,14 +45,14 @@ func grow(T)(this: mod List(T)) {
   if newCap is 0 {
     newCap = 4
   }
-  let newData: Buffer(T) = rae_ext_rae_buf_alloc(size: newCap, elemSize: sizeof(T)())
+  let newData: Buffer(T) = rae_ext_rae_buf_alloc(size: newCap, elemSize: sizeof(T))
   rae_ext_rae_buf_copy(
     src: this.data
     src_off: 0
     dst: newData
     dst_off: 0
     len: this.length
-    elemSize: sizeof(T)()
+    elemSize: sizeof(T)
   )
   rae_ext_rae_buf_free(buf: this.data)
   this.data = newData
@@ -269,13 +269,13 @@ type StringMap(V) {
 }
 
 func createStringMap(V)(initialCap: Int) ret StringMap(V) {
-  ret StringMap(V) { data: rae_ext_rae_buf_alloc(size: initialCap, elemSize: sizeof(StringMapEntry(V))()), length: 0, capacity: initialCap, isGrowing: false }
+  ret StringMap(V) { data: rae_ext_rae_buf_alloc(size: initialCap, elemSize: sizeof(StringMapEntry(V))), length: 0, capacity: initialCap, isGrowing: false }
 }
 
 func set(V)(this: mod StringMap(V), k: String, value: V) {
   if this.capacity is 0 {
     this.capacity = 8
-    this.data = rae_ext_rae_buf_alloc(size: this.capacity, elemSize: sizeof(StringMapEntry(V))())
+    this.data = rae_ext_rae_buf_alloc(size: this.capacity, elemSize: sizeof(StringMapEntry(V)))
   }
   if not this.isGrowing and this.length * 2 > this.capacity {
     growStringMap(this)
@@ -399,7 +399,7 @@ func growStringMap(V)(this: mod StringMap(V)) {
   if this.capacity is 0 {
     this.capacity = 8
   }
-  this.data = rae_ext_rae_buf_alloc(size: this.capacity, elemSize: sizeof(StringMapEntry(V))())
+  this.data = rae_ext_rae_buf_alloc(size: this.capacity, elemSize: sizeof(StringMapEntry(V)))
   this.length = 0
   
   let i: Int = 0
@@ -445,17 +445,17 @@ type IntMap(V) {
 }
 
 func createInt64Map(V)(initialCap: Int) ret IntMap(V) {
-  ret IntMap(V) { data: rae_ext_rae_buf_alloc(size: initialCap, elemSize: sizeof(IntMapEntry(V))()), length: 0, capacity: initialCap, isGrowing: false }
+  ret IntMap(V) { data: rae_ext_rae_buf_alloc(size: initialCap, elemSize: sizeof(IntMapEntry(V))), length: 0, capacity: initialCap, isGrowing: false }
 }
 
 func createIntMap(V)(initialCap: Int) ret IntMap(V) {
-  ret createInt64Map(V)(initialCap: initialCap)
+  ret createInt64Map(V, initialCap: initialCap)
 }
 
 func set(V)(this: mod IntMap(V), k: Int, value: V) {
   if this.capacity is 0 {
     this.capacity = 8
-    this.data = rae_ext_rae_buf_alloc(size: this.capacity, elemSize: sizeof(IntMapEntry(V))())
+    this.data = rae_ext_rae_buf_alloc(size: this.capacity, elemSize: sizeof(IntMapEntry(V)))
   }
   if not this.isGrowing and this.length * 2 > this.capacity {
     growInt64Map(this)
@@ -594,7 +594,7 @@ func growInt64Map(V)(this: mod IntMap(V)) {
   if this.capacity is 0 {
     this.capacity = 8
   }
-  this.data = rae_ext_rae_buf_alloc(size: this.capacity, elemSize: sizeof(IntMapEntry(V))())
+  this.data = rae_ext_rae_buf_alloc(size: this.capacity, elemSize: sizeof(IntMapEntry(V)))
   this.length = 0
   
   let i: Int = 0
@@ -615,7 +615,7 @@ func free(V)(this: mod IntMap(V)) {
   this.capacity = 0
 }
 
-# Canonical scope-exit dealloc name — see `drop(V)(StringMap(V))`.
+# Canonical scope-exit dealloc name — see `drop(V, StringMap(V))`.
 func drop(V)(this: mod IntMap(V)) {
   rae_ext_rae_buf_free(buf: this.data)
   this.length = 0

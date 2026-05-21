@@ -475,7 +475,7 @@ func parseValue(
     # this, a nested object's fields would be interleaved into the outer
     # object's range, and the start/len pair would no longer point at a
     # contiguous slice.
-    let localFields: List(JsonField) = createList(JsonField)(initialCap: 4)
+    let localFields: List(JsonField) = createList(JsonField, initialCap: 4)
     if peek(p: p) is '}' {
       p.pos = p.pos + 1
     } else {
@@ -647,9 +647,9 @@ func parseValue(
 # couldn't consume.
 func parseJson(source: String) ret JsonDoc {
   let doc: JsonDoc = {
-    values: createList(JsonValue)(initialCap: 8)
-    children: createList(Int)(initialCap: 8)
-    fields: createList(JsonField)(initialCap: 8)
+    values: createList(JsonValue, initialCap: 8)
+    children: createList(Int, initialCap: 8)
+    fields: createList(JsonField, initialCap: 8)
     rootIdx: -1
     ok: false
     errorPos: 0

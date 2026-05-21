@@ -112,6 +112,13 @@ Str get_local_type_name(CFuncContext* ctx, Str name);
 const AstTypeRef* get_local_type_ref(CFuncContext* ctx, Str name);
 bool func_has_return_value(const AstFuncDecl* func);
 
+// -- Generic-call type-arg hoisting (shared by discovery + emission) --
+// `createList(String, initialCap: 4)` / `createList(type: String, …)` /
+// `String.createList(…)` all park `String` in the regular arg list;
+// these helpers move it into `expr->as.call.generic_args`.
+AstTypeRef* try_as_type_arg(CFuncContext* ctx, const AstExpr* val);
+AstExpr* hoist_type_arg_if_present(CFuncContext* ctx, const AstExpr* expr);
+
 // -- Decl lookup --
 const AstDecl* find_type_decl(CFuncContext* ctx, const AstModule* module, Str name);
 const AstDecl* find_enum_decl(CFuncContext* ctx, const AstModule* module, Str name);
