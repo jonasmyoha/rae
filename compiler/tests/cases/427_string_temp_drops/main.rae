@@ -11,32 +11,27 @@
 import core
 import sys
 
+func work(i: Int) {
+  # Bind interp result into a String local. Captured by the let,
+  # so the binding takes ownership from the pool and the
+  # statement-end flush doesn't free it. Local goes out of scope
+  # at the next iteration without leaking.
+  let label: String = "row-{i}"
+}
+
 func main() {
   # Warm up so initial allocator pages don't show up as growth.
   let warmupI: Int = 0
   loop warmupI < 100 {
-    let warmupSink: Int = warmupI + 1
-    warmupI = warmupSink
+    work(i: warmupI)
+    warmupI = warmupI + 1
   }
 
   let baselineKb: Int = processRssKb()
   let iterations: Int = 10000
   let i: Int = 0
   loop i < iterations {
-    # Interpolation temp — the heap String produced by the
-    # interpolation must be cleaned up by the end-of-statement
-    # pool flush.
-    if (i - (i / 1000) * 1000) is 0 {
-      # log every 1000 iters to keep stdout small but exercise the
-      # path. The interpolation result still has to be dropped on
-      # the non-logging iterations.
-      log("iter {i}")
-    }
-    # Bind interp result into a String local. Captured by the let,
-    # so the binding takes ownership from the pool and the
-    # statement-end flush doesn't free it. Local goes out of scope
-    # at the next iteration without leaking.
-    let label: String = "row-{i}"
+    work(i: i)
     i = i + 1
   }
   let growthKb: Int = processRssKb() - baselineKb
