@@ -105,16 +105,25 @@ for TARGET in "${TARGETS[@]}"; do
             407_*|408_*|395_*)
                 RUN_THIS=0 ;;
             # Skip tests that don't have func main() (C backend expects a main)
-            000_*|100_*|101_*|102_*|103_*|104_*|105_*|340_*) 
+            000_*|100_*|101_*|102_*|103_*|104_*|105_*|340_*)
                 RUN_THIS=0 ;;
             # Skip tests known to have different output or no support in C yet
-            306_*|318_*|332_*|334_*|338_*|339_*|343_*|382_*|385_*) 
+            306_*|318_*|332_*|334_*|338_*|339_*|343_*|382_*|385_*)
                 RUN_THIS=0 ;;
         esac
         # C backend only handles 'run' or 'build' commands in this loop
         case "${CMD_ARGS[0]}" in
             hot-reload) RUN_THIS=0 ;;
-            lex|parse|format|pack) RUN_THIS=0 ;; 
+            lex|parse|format|pack) RUN_THIS=0 ;;
+        esac
+    fi
+    # Tests that exercise compiled-only features (currently: view T
+    # bindings whose RHS is a function call returning view T, which
+    # the VM target's lvalue check rejects). When VM-side support for
+    # `ret view <call>` lands these can be removed from the skip list.
+    if [ "$TARGET" = "live" ] && [ -z "$TEST_NAME_FILTER" ]; then
+        case "$TEST_NAME" in
+            420_*) RUN_THIS=0 ;;
         esac
     fi
 

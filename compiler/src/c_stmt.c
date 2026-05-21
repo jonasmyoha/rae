@@ -270,9 +270,38 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         const AstFuncDecl* vfd = val->decl_link ? &val->decl_link->as.func_decl : NULL;
                         if (vfd && vfd->returns && vfd->returns->type && (vfd->returns->type->is_view || vfd->returns->type->is_mod))
                             value_returns_ref = true;
+                        // Sema doesn't always populate decl_link on free-
+                        // function call sites — c_call.c re-resolves by
+                        // name from the all_decls list. Mirror that
+                        // lookup here so we can ask "does the call return
+                        // view T / mod T?".
+                        if (!value_returns_ref && val->kind == AST_EXPR_CALL && val->as.call.callee
+                            && val->as.call.callee->kind == AST_EXPR_IDENT) {
+                            Str callee = val->as.call.callee->as.ident;
+                            for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
+                                const AstDecl* d = ctx->compiler_ctx->all_decls[i];
+                                if (d->kind != AST_DECL_FUNC) continue;
+                                if (!str_eq(d->as.func_decl.name, callee)) continue;
+                                const AstFuncDecl* cfd = &d->as.func_decl;
+                                if (cfd->returns && cfd->returns->type
+                                    && (cfd->returns->type->is_view || cfd->returns->type->is_mod)) {
+                                    value_returns_ref = true;
+                                    break;
+                                }
+                            }
+                        }
                     }
                     if (value_returns_ref) {
-                        emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, false, false);
+                        // The call already returns a pointer; cast away
+                        // const so a `view T` binding (non-const C ptr)
+                        // accepts a `const T*` from a `ret view` callee.
+                        // Read-only invariant is upheld at the Rae level,
+                        // not at the C level — the binding type tells
+                        // emit_expr to refuse mutations.
+                        fprintf(out, "(");
+                        emit_type_ref_as_c_type(ctx, stmt->as.let_stmt.type, out, false);
+                        fprintf(out, ")");
+                        emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_UNARY, false, false);
                     } else {
                         fprintf(out, "&");
                         emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, false, true);
@@ -425,6 +454,11 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         fprintf(out, "("); emit_type_ref_as_c_type(ctx, ret_type, out, false);
                         fprintf(out, "){ .ptr = &"); emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, true, true);
                         fprintf(out, " }");
+                    } else if (is_ref_return) {
+                        // Non-primitive view/mod return: C type is a raw
+                        // pointer (T*), so take the address of the lvalue.
+                        fprintf(out, "&");
+                        emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_UNARY, true, true);
                     } else {
                         bool needs_any_wrap = ret_type && (ret_type->is_opt || str_eq_cstr(get_base_type_name(ret_type), "Any"));
                         bool val_is_box = stmt->as.ret_stmt.values->value->kind == AST_EXPR_BOX;
@@ -459,6 +493,11 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         fprintf(out, "("); emit_type_ref_as_c_type(ctx, ret_type, out, false);
                         fprintf(out, "){ .ptr = &"); emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, true, true);
                         fprintf(out, " }");
+                    } else if (is_ref_return) {
+                        // Non-primitive view/mod return: C type is a raw
+                        // pointer (T*), so take the address of the lvalue.
+                        fprintf(out, "&");
+                        emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_UNARY, true, true);
                     } else {
                         bool needs_any_wrap = ret_type && (ret_type->is_opt || str_eq_cstr(get_base_type_name(ret_type), "Any"));
                         bool val_is_box = stmt->as.ret_stmt.values->value->kind == AST_EXPR_BOX;
