@@ -357,6 +357,10 @@ static void dump_expr(const AstExpr* expr, FILE* out) {
       dump_expr(expr->as.unary.operand, out);
       fputc(')', out);
       break;
+    case AST_EXPR_OWN:
+      fputs("own ", out);
+      dump_expr(expr->as.unary.operand, out);
+      break;
   }
 }
 

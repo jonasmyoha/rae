@@ -158,8 +158,11 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
         }
         case AST_EXPR_BOX:
         case AST_EXPR_UNBOX:
-            // Sema wraps args being coerced to/from RaeAny; the inner expression may
-            // contain method calls whose specialisations must still be discovered.
+        case AST_EXPR_OWN:
+            // Sema wraps args being coerced to/from RaeAny; AST_EXPR_OWN
+            // marks a value as ownership-transferred. The inner expression
+            // may contain method calls whose specialisations must still be
+            // discovered, so walk through.
             discover_specializations_expr_impl(ctx, expr->as.unary.operand);
             break;
         case AST_EXPR_COLLECTION_LITERAL: {
