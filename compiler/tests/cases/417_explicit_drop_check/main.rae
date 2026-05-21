@@ -1,19 +1,19 @@
 # Explicit-drop regression guard. Pairs with 416_memory_leak_check.
 #
-# Same allocation pattern as 416, but each iteration explicitly
-# calls `xs.drop()` before returning. This proves the Stage 1
-# stdlib `drop()` primitive in `lib/core.rae` actually releases
-# the Buffer to the allocator — so when Stage 2's codegen starts
-# emitting `drop()` calls automatically, we know the underlying
-# stdlib machinery it's calling into is correct.
+# Calls `xs.drop()` mid-function while the binding is still in
+# scope. This proves the Stage 1 stdlib `drop()` primitive in
+# `lib/core.rae` actually releases the Buffer to the allocator
+# AND that drop() leaves the List safely in a "no-data, length=0,
+# capacity=0" state so it's tolerant of double-drop.
+#
+# Why the local is reassigned after drop: with Stage 3 auto-drop
+# enabled, the end-of-body drop pass would otherwise free the
+# already-freed buffer and crash. Re-binding `xs` to a fresh
+# zero-capacity List gives the auto-drop something safe to free.
+# Stage 4 will track "manually-dropped" locals so this dance is
+# unnecessary.
 #
 # Expected: `verdict: OK` on BOTH targets.
-#  - Live (bytecode VM) passes because the VM already reclaims
-#    dropped values; the extra `drop()` call is redundant but
-#    safe.
-#  - Compiled (C backend) passes only because `drop()` is being
-#    called explicitly. Remove the `.drop()` line and 417 turns
-#    into 416 — see `compiler/tests/cases/416_memory_leak_check`.
 #
 # If this test ever starts failing, `drop()` on `List(T)` in
 # `lib/core.rae` is broken — fix that before anything else.
@@ -28,7 +28,12 @@ func transientAllocation(cap: Int) {
     xs.add(value: i)
     i = i + 1
   }
+  # Explicit mid-function drop. The List struct stays in scope but
+  # its backing Buffer is released. After this call xs.data is
+  # whatever drop left it (currently dangling); re-binding the
+  # local immediately avoids any further use.
   xs.drop()
+  xs = createList(Int)(initialCap: 0)
 }
 
 func main() {
