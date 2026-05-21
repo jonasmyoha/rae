@@ -323,8 +323,11 @@ func mountSceneInstance(
         }
         q = q + 1
       }
-      let ch: Children = { ids: kids }
-      componentSet(this: world.childrens, entity: parentEntity, data: ch)
+      # Ownership transfer: the freshly-built `kids` list is wrapped
+      # in a Children struct and handed to the world's component
+      # table. Both transitions are `own` — see docs/ownership-model.md.
+      let ch: Children = { ids: own kids }
+      componentSet(this: world.childrens, entity: parentEntity, data: own ch)
     }
     p = p + 1
   }
