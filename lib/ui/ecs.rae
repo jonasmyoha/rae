@@ -47,8 +47,8 @@ type ComponentTable(T) {
 
 func createComponentTable(T)() ret ComponentTable(T) {
   ret ComponentTable(T) {
-    denseEntities: createList(Int)(initialCap: 256)
-    denseData: createList(T)(initialCap: 256)
+    denseEntities: createList(Int, initialCap: 256)
+    denseData: createList(T, initialCap: 256)
   }
 }
 
@@ -161,7 +161,7 @@ func componentSet(T)(this: mod ComponentTable(T), entity: Int, data: T) {
 func componentRemove(T)(this: mod ComponentTable(T), entity: Int) {
   let entities: mod List(Int) => this.denseEntities
   let datas: mod List(T) => this.denseData
-  let idx: Int = componentIndexOf(T)(this: this, entity: entity)
+  let idx: Int = componentIndexOf(T, this: this, entity: entity)
   if idx < 0 {
     ret
   }
@@ -277,65 +277,65 @@ type UiWorld {
 func createUiWorld() ret UiWorld {
   ret UiWorld {
     nextEntityId: 1
-    alive: createList(Int)(initialCap: 256)
-    nodeIds: createStringMap(Int)(initialCap: 128)
+    alive: createList(Int, initialCap: 256)
+    nodeIds: createStringMap(Int, initialCap: 128)
 
-    rects: createComponentTable(Rect)()
-    sizes: createComponentTable(Size)()
-    layouts: createComponentTable(Layout)()
-    paddings: createComponentTable(Padding)()
-    margins: createComponentTable(Margin)()
-    safeAreas: createComponentTable(SafeArea)()
-    aligns: createComponentTable(Align)()
-    offsets: createComponentTable(Offset)()
-    constraints: createComponentTable(Constraints)()
-    overflows: createComponentTable(OverflowPolicy)()
+    rects: createComponentTable(Rect)
+    sizes: createComponentTable(Size)
+    layouts: createComponentTable(Layout)
+    paddings: createComponentTable(Padding)
+    margins: createComponentTable(Margin)
+    safeAreas: createComponentTable(SafeArea)
+    aligns: createComponentTable(Align)
+    offsets: createComponentTable(Offset)
+    constraints: createComponentTable(Constraints)
+    overflows: createComponentTable(OverflowPolicy)
 
-    transforms: createComponentTable(TransformFx)()
-    sprites: createComponentTable(Sprite)()
-    texts: createComponentTable(Text)()
-    shapes: createComponentTable(Shape)()
-    shadows: createComponentTable(Shadow)()
-    opacities: createComponentTable(Opacity)()
-    pointerEvents: createComponentTable(PointerEvents)()
-    hitAreas: createComponentTable(HitArea)()
-    onClicks: createComponentTable(OnClick)()
-    buttons: createComponentTable(Button)()
-    actives: createComponentTable(Active)()
-    editorVisibles: createComponentTable(EditorVisible)()
-    editorLockeds: createComponentTable(EditorLocked)()
-    heroWidgets: createComponentTable(HeroWidget)()
+    transforms: createComponentTable(TransformFx)
+    sprites: createComponentTable(Sprite)
+    texts: createComponentTable(Text)
+    shapes: createComponentTable(Shape)
+    shadows: createComponentTable(Shadow)
+    opacities: createComponentTable(Opacity)
+    pointerEvents: createComponentTable(PointerEvents)
+    hitAreas: createComponentTable(HitArea)
+    onClicks: createComponentTable(OnClick)
+    buttons: createComponentTable(Button)
+    actives: createComponentTable(Active)
+    editorVisibles: createComponentTable(EditorVisible)
+    editorLockeds: createComponentTable(EditorLocked)
+    heroWidgets: createComponentTable(HeroWidget)
 
-    names: createComponentTable(Name)()
-    primaryTypes: createComponentTable(PrimaryType)()
-    nodeIdComponents: createComponentTable(NodeId)()
-    sceneScopes: createComponentTable(SceneScope)()
-    runtimeOnlys: createComponentTable(RuntimeOnly)()
+    names: createComponentTable(Name)
+    primaryTypes: createComponentTable(PrimaryType)
+    nodeIdComponents: createComponentTable(NodeId)
+    sceneScopes: createComponentTable(SceneScope)
+    runtimeOnlys: createComponentTable(RuntimeOnly)
 
-    sceneInstances: createComponentTable(SceneInstance)()
-    imageSourceResolvers: createComponentTable(ImageSourceResolver)()
-    textBindings: createComponentTable(TextBinding)()
-    maskShapes: createComponentTable(MaskShape)()
-    dataRequests: createComponentTable(DataRequest)()
-    listViews: createComponentTable(ListView)()
+    sceneInstances: createComponentTable(SceneInstance)
+    imageSourceResolvers: createComponentTable(ImageSourceResolver)
+    textBindings: createComponentTable(TextBinding)
+    maskShapes: createComponentTable(MaskShape)
+    dataRequests: createComponentTable(DataRequest)
+    listViews: createComponentTable(ListView)
 
-    backgroundPans: createComponentTable(BackgroundPan)()
-    carousels: createComponentTable(Carousel)()
-    smokeFxs: createComponentTable(SmokeFx)()
-    animFrames: createComponentTable(AnimFrames)()
-    animTriggers: createComponentTable(AnimTrigger)()
-    wobbleFxs: createComponentTable(WobbleFx)()
+    backgroundPans: createComponentTable(BackgroundPan)
+    carousels: createComponentTable(Carousel)
+    smokeFxs: createComponentTable(SmokeFx)
+    animFrames: createComponentTable(AnimFrames)
+    animTriggers: createComponentTable(AnimTrigger)
+    wobbleFxs: createComponentTable(WobbleFx)
 
-    childrens: createComponentTable(Children)()
+    childrens: createComponentTable(Children)
 
-    measuredSizes: createComponentTable(MeasuredSize)()
-    computedRects: createComponentTable(ComputedRect)()
-    worldTransforms: createComponentTable(WorldTransform)()
-    runtimeOffsets: createComponentTable(RuntimeOffset)()
-    layoutScales: createComponentTable(LayoutScale)()
-    safeInsets: createComponentTable(SafeInsets)()
-    parentLinks: createComponentTable(ParentLink)()
-    animStates: createComponentTable(AnimState)()
+    measuredSizes: createComponentTable(MeasuredSize)
+    computedRects: createComponentTable(ComputedRect)
+    worldTransforms: createComponentTable(WorldTransform)
+    runtimeOffsets: createComponentTable(RuntimeOffset)
+    layoutScales: createComponentTable(LayoutScale)
+    safeInsets: createComponentTable(SafeInsets)
+    parentLinks: createComponentTable(ParentLink)
+    animStates: createComponentTable(AnimState)
   }
 }
 

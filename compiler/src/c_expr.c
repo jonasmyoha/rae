@@ -229,6 +229,31 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                     }
                 }
             }
+            // Type-on-LHS dot-call (new generic-call syntax): `Type.fn(...)`
+            // where `Type` is a primitive or user-defined type and no local
+            // binding shadows it. Lowers to `fn(<type-arg>, args)` so the
+            // hoist pass in c_call.c picks Type up as the generic arg.
+            // Mirrors the three accepted spellings:
+            //   createList(type: String, initialCap: 4)
+            //   createList(String, initialCap: 4)
+            //   String.createList(initialCap: 4)
+            bool obj_is_type = !obj_has_value && obj_name.len > 0 &&
+                (is_primitive_type(obj_name) || (ctx->module && find_type_decl(ctx, ctx->module, obj_name) != NULL));
+            if (obj_is_type && fn_exists) {
+                AstExpr call = { .kind = AST_EXPR_CALL, .line = expr->line, .column = expr->column, .decl_link = expr->decl_link };
+                call.as.call.callee = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstExpr));
+                call.as.call.callee->kind = AST_EXPR_IDENT;
+                call.as.call.callee->as.ident = expr->as.method_call.method_name;
+                // Prepend the type as the first positional arg. The hoist
+                // pass in emit_call_expr will move it into generic_args.
+                AstCallArg* type_arg = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstCallArg));
+                type_arg->name = (Str){0};
+                type_arg->value = expr->as.method_call.object;
+                type_arg->next = expr->as.method_call.args;
+                call.as.call.args = type_arg;
+                call.as.call.generic_args = expr->as.method_call.generic_args;
+                emit_call_expr(ctx, &call, out); break;
+            }
             if (!obj_has_value && fn_exists) {
                 AstExpr call = { .kind = AST_EXPR_CALL, .line = expr->line, .column = expr->column, .decl_link = expr->decl_link };
                 call.as.call.callee = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstExpr));

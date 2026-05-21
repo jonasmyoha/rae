@@ -28,7 +28,7 @@ func loadScene(world: mod UiWorld, scene: view Scene) ret Int {
 
   # ---------- pass 1: allocate entities, populate nodeIds map ----------
   let nodeCount: Int = scene.nodes.length
-  let entitiesByNodeIndex: List(Int) = createList(Int)(initialCap: nodeCount)
+  let entitiesByNodeIndex: List(Int) = createList(Int, initialCap: nodeCount)
   let nodeIdsMap: mod StringMap(Int) => world.nodeIds
   let i: Int = 0
   loop i < nodeCount {
@@ -86,7 +86,7 @@ func loadScene(world: mod UiWorld, scene: view Scene) ret Int {
     let parentEntity: Int = entitiesByNodeIndex.get(index: p)
     let kn: Int = node.childrenIds.length
     if kn > 0 {
-      let kids: List(Int) = createList(Int)(initialCap: kn)
+      let kids: List(Int) = createList(Int, initialCap: kn)
       let q: Int = 0
       loop q < kn {
         let childId: String = node.childrenIds.get(index: q)
@@ -147,7 +147,7 @@ func dumpScene(world: view UiWorld, scene: view Scene) {
 # to `entity`. Order matches `registeredComponentNames()` for stable
 # diagnostic output.
 func componentNamesFor(world: view UiWorld, entity: Int) ret String {
-  let parts: List(String) = createList(String)(initialCap: 8)
+  let parts: List(String) = createList(String, initialCap: 8)
   if componentHas(this: world.rects, entity: entity) {
     parts.add(value: "Rect")
   }
