@@ -167,6 +167,13 @@ flushed by the same code that flushes user-written defers.
 
 ### Layer 4 — Move semantics (skip drop when ownership transfers)
 
+**Full design**: see `docs/ownership-model.md`. Summary: explicit
+`own` keyword in expression position (`{ ids: own copy }`) and as
+a parameter mode (`data: own T`). `=` always copies, never moves.
+`=>` borrows. Plain `T` parameters are `val T`. Move detection
+only fires on `own` constructs and `ret`, NOT on bare identifier
+references.
+
 Linear ownership tracking: a heap-owning binding has exactly one
 live owner. When ownership moves, the source's drop is suppressed.
 
