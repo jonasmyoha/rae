@@ -51,8 +51,13 @@ func attachChildren(world: mod UiWorld, parent: Int, kids: view List(Int)) {
     componentSet(this: world.parentLinks, entity: kid, data: pl)
     i = i + 1
   }
-  let ch: Children = { ids: copy }
-  componentSet(this: world.childrens, entity: parent, data: ch)
+  # `own copy` transfers ownership of the freshly-built list into
+  # the new Children struct — without this, auto-drop at scope exit
+  # would free the buffer the world is now holding. Same reason on
+  # `own ch` to componentSet, which stores the struct into the
+  # world's component table. See docs/ownership-model.md.
+  let ch: Children = { ids: own copy }
+  componentSet(this: world.childrens, entity: parent, data: own ch)
 }
 
 func dumpEntity(world: view UiWorld, entity: Int, label: String) {

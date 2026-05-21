@@ -65,6 +65,12 @@ typedef struct {
   const AstTypeRef* local_type_refs[256];
   bool local_is_ptr[256];
   bool local_is_mod[256];
+  // Stage 3 move tracking (docs/ownership-model.md). Set true when a
+  // local's value flows into an ownership-consuming context: `own x`
+  // expression, argument bound to an `own T` parameter, or returned
+  // from the function. Read by emit_implicit_drops_for_body to skip
+  // the auto-drop emission.
+  bool local_moved[256];
   size_t local_count;
   bool returns_value;
   size_t temp_counter;
@@ -136,6 +142,9 @@ bool emit_implicit_drops_for_body(CFuncContext* ctx, FILE* out,
 bool is_drop_target_type(const AstTypeRef* type);
 // Find the `drop` overload whose receiver-base matches `container_base`.
 const AstFuncDecl* find_drop_overload_for(CFuncContext* ctx, Str container_base);
+// Move tracking helpers (Stage 3 of docs/ownership-model.md).
+void mark_local_moved_by_name(CFuncContext* ctx, Str name);
+void mark_expr_moved_if_local(CFuncContext* ctx, const AstExpr* expr);
 
 // -- Discovery pass --
 void collect_type_refs_module(CompilerContext* ctx);
