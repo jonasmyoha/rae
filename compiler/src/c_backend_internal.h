@@ -126,6 +126,17 @@ void emit_opt_unbox_suffix(CFuncContext* ctx, const AstFuncDecl* fd, const AstTy
 bool emit_defers(CFuncContext* ctx, int min_depth, FILE* out);
 void pop_defers(CFuncContext* ctx, int depth);
 
+// -- Scope-exit dealloc (Stage 2; see docs/scope-exit-dealloc.md) --
+// Emit `drop()` calls for heap-owning lets in [first_let_index, local_count).
+// Anything before first_let_index is a parameter (owned by the caller) and
+// must be skipped.
+bool emit_implicit_drops_for_body(CFuncContext* ctx, FILE* out,
+                                  size_t first_let_index);
+// Predicate used by both the emit pass and the discovery pass.
+bool is_drop_target_type(const AstTypeRef* type);
+// Find the `drop` overload whose receiver-base matches `container_base`.
+const AstFuncDecl* find_drop_overload_for(CFuncContext* ctx, Str container_base);
+
 // -- Discovery pass --
 void collect_type_refs_module(CompilerContext* ctx);
 void discover_specializations_expr(CFuncContext* ctx, const AstExpr* expr);
