@@ -1,0 +1,50 @@
+# Layer 5 mid-size: a UiWorld-like struct with several
+# ComponentTable(T) fields. Drops must cascade Outer -> each
+# ComponentTable -> each table's inner Lists. Mirrors the shape
+# of UiWorld but small enough to triage if Layer 5 misbehaves.
+
+import core
+import sys
+import ui/ecs
+import ui/components
+
+type MiniWorld {
+  rects: ComponentTable(Rect)
+  sizes: ComponentTable(Size)
+  childrens: ComponentTable(Children)
+  actives: ComponentTable(Active)
+}
+
+func transientWorld() {
+  # Construct in place via struct literal — this is the form
+  # Layer 5 currently cascade-drops. Returning the world from a
+  # builder function would leak instead, because the call-result
+  # binding can't be safely auto-dropped until stdlib aliasing is
+  # cleaned up. See c_backend_internal.h::local_struct_owns_heap.
+  let w: MiniWorld = {
+    rects: createComponentTable(Rect)()
+    sizes: createComponentTable(Size)()
+    childrens: createComponentTable(Children)()
+    actives: createComponentTable(Active)()
+  }
+  let r: Rect = { x: 0.0, y: 0.0, w: 100.0, h: 100.0 }
+  componentSet(this: w.rects, entity: 1, data: r)
+}
+
+func main() {
+  transientWorld()
+  let baselineKb: Int = processRssKb()
+  let iterations: Int = 2000
+  let i: Int = 0
+  loop i < iterations {
+    transientWorld()
+    i = i + 1
+  }
+  let growthKb: Int = processRssKb() - baselineKb
+  log("iterations: {iterations}")
+  if growthKb > 5000 {
+    log("verdict: LEAK")
+  } else {
+    log("verdict: OK")
+  }
+}

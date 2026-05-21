@@ -195,7 +195,7 @@ static void mangle_type_recursive(CompilerContext* ctx, const struct AstIdentifi
 
 static void mangle_type_recursive_specialized(CompilerContext* ctx, const struct AstIdentifierPart* generic_params, const AstTypeRef* concrete_args, const AstTypeRef* type, char* buf, size_t* pos, size_t cap) {
     if (!type) { *pos += snprintf(buf + *pos, cap - *pos, "int64_t"); return; }
-    
+
     Str base = get_base_type_name(type);
     if (mangle_primitive_ref(type, base, buf, pos, cap)) return;
 
@@ -219,7 +219,7 @@ static void mangle_type_recursive_specialized(CompilerContext* ctx, const struct
         *pos += snprintf(buf + *pos, cap - *pos, "int64_t");
         return;
     }
-    
+
     if (generic_params) {
         const struct AstIdentifierPart* gp = generic_params;
         const AstTypeRef* arg = concrete_args;
@@ -351,17 +351,17 @@ const char* rae_mangle_function(CompilerContext* ctx, const AstFuncDecl* func) {
 const char* rae_mangle_specialized_function(CompilerContext* ctx, const AstFuncDecl* func, const AstTypeRef* concrete_args) {
     if (!func) return "unknown";
     if (!concrete_args) return rae_mangle_function(ctx, func);
-    
+
     char buf[2048]; size_t pos = 0;
     if (str_starts_with_cstr(func->name, "rae_")) pos = snprintf(buf, sizeof(buf), "%.*s_", (int)func->name.len, func->name.data);
     else pos = snprintf(buf, sizeof(buf), "rae_%.*s_", (int)func->name.len, func->name.data);
-    
+
     const AstIdentifierPart* gp = func->generic_params;
     if (!gp && func->generic_template && func->generic_template->kind == AST_DECL_FUNC) gp = func->generic_template->as.func_decl.generic_params;
 
     for (const AstTypeRef* a = concrete_args; a; a = a->next) { const char* mangled_arg = rae_mangle_type_specialized(ctx, NULL, NULL, a); pos += snprintf(buf + pos, sizeof(buf) - pos, "%s_", mangled_arg); }
     for (const AstParam* p = func->params; p; p = p->next) { const char* mangled_param = rae_mangle_type_specialized(ctx, gp, concrete_args, p->type); pos += snprintf(buf + pos, sizeof(buf) - pos, "%s_", mangled_param); }
-    
+
     char* result = arena_alloc(ctx->ast_arena, pos + 1); memcpy(result, buf, pos + 1);
     sanitize_mangled_name(result); return result;
 }

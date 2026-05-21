@@ -1,0 +1,42 @@
+# Layer 5 nested test: struct contains a struct that contains a
+# List. The synthesised drop for Outer must recursively call the
+# synthesised drop for Inner, which then calls the List's drop.
+
+import core
+import sys
+
+type Inner {
+  ids: List(Int)
+}
+
+type Outer {
+  label: Int
+  inside: Inner
+}
+
+func transientOuter() {
+  let o: Outer = { label: 1, inside: { ids: createList(Int)(initialCap: 512) } }
+  let i: Int = 0
+  loop i < 512 {
+    o.inside.ids.add(value: i)
+    i = i + 1
+  }
+}
+
+func main() {
+  transientOuter()
+  let baselineKb: Int = processRssKb()
+  let iterations: Int = 5000
+  let i: Int = 0
+  loop i < iterations {
+    transientOuter()
+    i = i + 1
+  }
+  let growthKb: Int = processRssKb() - baselineKb
+  log("iterations: {iterations}")
+  if growthKb > 5000 {
+    log("verdict: LEAK")
+  } else {
+    log("verdict: OK")
+  }
+}
