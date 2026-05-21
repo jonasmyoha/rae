@@ -87,24 +87,24 @@ static void rae_install_crash_handler(void) {
 }
 
 rae_String rae_ext_rae_str_from_cstr(const void* s) {
-  if (!s) return (rae_String){NULL, 0};
+  if (!s) return (rae_String){NULL, 0, 0, 0};
   int64_t len = (int64_t)strlen((const char*)s);
   uint8_t* data = malloc(len + 1);
   if (data) {
     memcpy(data, s, len);
     data[len] = '\0';
   }
-  return (rae_String){data, len};
+  return (rae_String){data, len, len + 1, 1};
 }
 
 rae_String rae_ext_rae_str_from_buf(const uint8_t* data, int64_t len) {
-  if (!data || len < 0) return (rae_String){NULL, 0};
+  if (!data || len < 0) return (rae_String){NULL, 0, 0, 0};
   uint8_t* buf = malloc(len + 1);
   if (buf) {
     memcpy(buf, data, len);
     buf[len] = '\0';
   }
-  return (rae_String){buf, len};
+  return (rae_String){buf, len, len + 1, 1};
 }
 
 void* rae_ext_rae_str_to_cstr(rae_String s) {
@@ -113,8 +113,23 @@ void* rae_ext_rae_str_to_cstr(rae_String s) {
   return (void*)s.data;
 }
 
+// Free heap memory only when this String owns it. Static literals
+// and borrowed views are passed in with is_owned=0 and are no-ops.
+// Safe to call on a "moved-from" String (data=NULL, is_owned=0).
 void rae_ext_rae_str_free(rae_String s) {
-  if (s.data) free(s.data);
+  if (s.is_owned && s.data) free(s.data);
+}
+
+// Deep-copy. Always returns an owned (heap) String, even when the
+// source is borrowed/literal. Use this anywhere Rae's `=` semantics
+// require a value copy of a String.
+rae_String rae_string_copy(rae_String src) {
+  if (!src.data || src.len <= 0) return (rae_String){NULL, 0, 0, 0};
+  uint8_t* buf = malloc((size_t)src.len + 1);
+  if (!buf) return (rae_String){NULL, 0, 0, 0};
+  memcpy(buf, src.data, (size_t)src.len);
+  buf[src.len] = '\0';
+  return (rae_String){buf, src.len, src.len + 1, 1};
 }
 
 static int64_t g_tick_counter = 0;
@@ -151,30 +166,30 @@ rae_String rae_ext_formatTimestamp(int64_t epoch_ms) {
   time_t secs = (time_t)(epoch_ms / 1000);
   struct tm tm_buf;
   struct tm* tm_p = gmtime_r(&secs, &tm_buf);
-  if (!tm_p) return (rae_String){NULL, 0};
+  if (!tm_p) return (rae_String){NULL, 0, 0, 0};
   char buf[32];
   int n = (int)strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", tm_p);
-  if (n <= 0) return (rae_String){NULL, 0};
+  if (n <= 0) return (rae_String){NULL, 0, 0, 0};
   uint8_t* data = malloc((size_t)n + 1);
-  if (!data) return (rae_String){NULL, 0};
+  if (!data) return (rae_String){NULL, 0, 0, 0};
   memcpy(data, buf, (size_t)n);
   data[n] = '\0';
-  return (rae_String){data, (int64_t)n};
+  return (rae_String){data, (int64_t)n, (int64_t)n + 1, 1};
 }
 
 rae_String rae_ext_formatDate(int64_t epoch_ms) {
   time_t secs = (time_t)(epoch_ms / 1000);
   struct tm tm_buf;
   struct tm* tm_p = gmtime_r(&secs, &tm_buf);
-  if (!tm_p) return (rae_String){NULL, 0};
+  if (!tm_p) return (rae_String){NULL, 0, 0, 0};
   char buf[16];
   int n = (int)strftime(buf, sizeof(buf), "%Y-%m-%d", tm_p);
-  if (n <= 0) return (rae_String){NULL, 0};
+  if (n <= 0) return (rae_String){NULL, 0, 0, 0};
   uint8_t* data = malloc((size_t)n + 1);
-  if (!data) return (rae_String){NULL, 0};
+  if (!data) return (rae_String){NULL, 0, 0, 0};
   memcpy(data, buf, (size_t)n);
   data[n] = '\0';
-  return (rae_String){data, (int64_t)n};
+  return (rae_String){data, (int64_t)n, (int64_t)n + 1, 1};
 }
 
 void rae_spawn(void* (*func)(void*), void* data) {
@@ -214,7 +229,7 @@ RaeAny rae_ext_json_get(const char* json, const char* field) {
         uint8_t* res = malloc(len + 1);
         memcpy(res, val_start, len);
         res[len] = '\0';
-        return (RaeAny){RAE_TYPE_STRING, false, false, {.s = {res, (int64_t)len}}};
+        return (RaeAny){RAE_TYPE_STRING, false, false, {.s = {res, (int64_t)len, (int64_t)len + 1, 1}}};
     } else if (*val_start == 't') {
         return (RaeAny){RAE_TYPE_BOOL, false, false, {.b = 1}};
     } else if (*val_start == 'f') {
@@ -243,7 +258,7 @@ RaeAny rae_ext_json_get(const char* json, const char* field) {
         uint8_t* res = malloc(len + 1);
         memcpy(res, val_start, len);
         res[len] = '\0';
-        return (RaeAny){RAE_TYPE_STRING, false, false, {.s = {res, (int64_t)len}}}; // We return objects as strings for now
+        return (RaeAny){RAE_TYPE_STRING, false, false, {.s = {res, (int64_t)len, (int64_t)len + 1, 1}}}; // We return objects as strings for now
     }
     
     return (RaeAny){RAE_TYPE_NONE, false, false, {0}};
@@ -496,7 +511,7 @@ rae_String rae_ext_rae_str_concat(rae_String a, rae_String b) {
     if (b.data) memcpy(result_data + len_a, b.data, len_b);
     result_data[len_a + len_b] = '\0';
   }
-  return (rae_String){result_data, len_a + len_b};
+  return (rae_String){result_data, len_a + len_b, len_a + len_b + 1, 1};
 }
 
 rae_String rae_ext_rae_str_concat_cstr(rae_String a, rae_String b) {
@@ -537,18 +552,18 @@ int64_t rae_ext_rae_str_hash(rae_String s) {
 }
 
 rae_String rae_ext_rae_str_sub(rae_String s, int64_t start, int64_t len) {
-  if (!s.data) return (rae_String){NULL, 0};
+  if (!s.data) return (rae_String){NULL, 0, 0, 0};
   if (start < 0) start = 0;
-  if (start >= s.len) return (rae_String){NULL, 0};
+  if (start >= s.len) return (rae_String){NULL, 0, 0, 0};
   if (start + len > s.len) len = s.len - start;
-  if (len <= 0) return (rae_String){NULL, 0};
-  
+  if (len <= 0) return (rae_String){NULL, 0, 0, 0};
+
   uint8_t* result_data = malloc((size_t)len + 1);
   if (result_data) {
     memcpy(result_data, s.data + start, (size_t)len);
     result_data[len] = '\0';
   }
-  return (rae_String){result_data, len};
+  return (rae_String){result_data, len, len + 1, 1};
 }
 
 rae_Bool rae_ext_rae_str_contains(rae_String s, rae_String sub) {
@@ -581,10 +596,10 @@ int64_t rae_ext_rae_str_index_of(rae_String s, rae_String sub) {
 }
 
 rae_String rae_ext_rae_str_trim(rae_String s) {
-  if (!s.data || s.len == 0) return (rae_String){NULL, 0};
+  if (!s.data || s.len == 0) return (rae_String){NULL, 0, 0, 0};
   int64_t start = 0;
   while (start < s.len && (s.data[start] == ' ' || s.data[start] == '\t' || s.data[start] == '\n' || s.data[start] == '\r')) start++;
-  if (start == s.len) return (rae_String){NULL, 0};
+  if (start == s.len) return (rae_String){NULL, 0, 0, 0};
   int64_t end = s.len - 1;
   while (end > start && (s.data[end] == ' ' || s.data[end] == '\t' || s.data[end] == '\n' || s.data[end] == '\r')) end--;
   return rae_ext_rae_str_sub(s, start, end - start + 1);
@@ -624,7 +639,7 @@ rae_String rae_ext_rae_io_read_line(void) {
   size_t len = 0;
   if (getline(&buffer, &len, stdin) == -1) {
     free(buffer);
-    return (rae_String){NULL, 0};
+    return (rae_String){NULL, 0, 0, 0};
   }
   // Remove newline
   size_t blen = strlen(buffer);
@@ -636,7 +651,7 @@ rae_String rae_ext_rae_io_read_line(void) {
       buffer[blen-1] = '\0';
       blen--;
   }
-  return (rae_String){(uint8_t*)buffer, (int64_t)blen};
+  return (rae_String){(uint8_t*)buffer, (int64_t)blen, (int64_t)len, 1};
 }
 
 rae_Char rae_ext_rae_io_read_char(void) {
@@ -649,15 +664,15 @@ void rae_ext_rae_sys_exit(int64_t code) {
 }
 
 rae_String rae_ext_rae_sys_get_env(rae_String name) {
-  if (!name.data) return (rae_String){NULL, 0};
+  if (!name.data) return (rae_String){NULL, 0, 0, 0};
   const char* val = getenv((const char*)name.data);
   return rae_ext_rae_str_from_cstr((void*)val);
 }
 
 rae_String rae_ext_rae_sys_read_file(rae_String path) {
-  if (!path.data) return (rae_String){NULL, 0};
+  if (!path.data) return (rae_String){NULL, 0, 0, 0};
   FILE* f = fopen((const char*)path.data, "rb");
-  if (!f) return (rae_String){NULL, 0};
+  if (!f) return (rae_String){NULL, 0, 0, 0};
   fseek(f, 0, SEEK_END);
   long len = ftell(f);
   fseek(f, 0, SEEK_SET);
@@ -667,7 +682,7 @@ rae_String rae_ext_rae_sys_read_file(rae_String path) {
     buffer[len] = '\0';
   }
   fclose(f);
-  return (rae_String){buffer, (int64_t)len};
+  return (rae_String){buffer, (int64_t)len, (int64_t)len + 1, 1};
 }
 
 rae_Bool rae_ext_rae_sys_write_file(rae_String path, rae_String content) {
@@ -1089,14 +1104,14 @@ rae_Bool rae_json_extract_bool(rae_String json, const char* key) {
 
 rae_String rae_json_extract_string(rae_String json, const char* key) {
     const char* v = rae_json_find_key((const char*)json.data, json.len, key);
-    if (!v || *v != '"') return (rae_String){NULL, 0};
+    if (!v || *v != '"') return (rae_String){NULL, 0, 0, 0};
     v++;
     const char* end = strchr(v, '"');
-    if (!end) return (rae_String){NULL, 0};
+    if (!end) return (rae_String){NULL, 0, 0, 0};
     int64_t len = (int64_t)(end - v);
     uint8_t* copy = (uint8_t*)malloc((size_t)len + 1);
     if (copy) { memcpy(copy, v, (size_t)len); copy[len] = 0; }
-    return (rae_String){copy, len};
+    return (rae_String){copy, len, len + 1, 1};
 }
 
 /* Crypto stub wrappers for C backend — actual crypto requires monocypher linkage */
