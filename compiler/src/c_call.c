@@ -398,6 +398,22 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         fprintf(out, "%s(", call_name);
         const AstCallArg* a = expr->as.call.args; const AstParam* p = fd->params;
         while (a) {
+            // Stage 3 move tracking (continued): a bare local ident passed
+            // as a plain-T parameter (i.e. neither `view T` nor `mod T`) is
+            // moved into the callee. Per the language design (plain T is
+            // owned), the caller must skip end-of-scope auto-drop of the
+            // local — the callee now owns the heap. Without this, calls
+            // like `nodesList.add(value: n)` get followed by an auto-drop
+            // of `n` even though `n`'s heap is now reachable via the list
+            // entry; the drop is a double-free.
+            if (p && p->type && !(p->type->is_view || p->type->is_mod) && a->value
+                && a->value->kind == AST_EXPR_IDENT) {
+                const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, a->value);
+                if (arg_tr && !(arg_tr->is_view || arg_tr->is_mod)
+                    && type_owns_heap_storage(ctx->compiler_ctx, ctx->module, arg_tr, 0)) {
+                    mark_expr_moved_if_local(ctx, a->value);
+                }
+            }
             bool needs_addr = false; bool needs_deref = false; bool needs_prim_wrap = false; bool needs_box = false;
             if (p && p->type && (p->type->is_view || p->type->is_mod)) {
                 const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, a->value);
