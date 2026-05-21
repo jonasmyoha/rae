@@ -38,6 +38,15 @@ func popLastInt(lst: mod List(Int)) {
   lst.remove(index: lst.length - 1)
 }
 
+# Drop a List(Int) from inside a function generic over T. Calling
+# `drop(lst)` directly there mis-mangles to `drop(T)(List(T))` (same
+# class of bug as `add` / `get` / `remove`). Routing through this
+# non-generic helper stops the substitution, so the call resolves to
+# `drop(Int)(List(Int))` — which is just `buf_free` on the Int buffer.
+func dropEntityList(lst: mod List(Int)) {
+  drop(lst)
+}
+
 # ----- ComponentTable -----
 
 type ComponentTable(T) {
@@ -61,7 +70,9 @@ func createComponentTable(T)() ret ComponentTable(T) {
 # explicitly here is the supported workaround.
 func drop(T)(this: mod ComponentTable(T)) {
   drop(this.denseData)
-  drop(this.denseEntities)
+  # See dropEntityList — calling `drop(this.denseEntities)` here would
+  # mis-mangle to drop(T)(List(T)) and reinterpret Int slots as T.
+  dropEntityList(lst: this.denseEntities)
 }
 
 # Returns the dense index of `entity` in this table, or -1 if absent.

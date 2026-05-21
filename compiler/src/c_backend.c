@@ -807,6 +807,95 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
   if (g_emitted_spec_func_count < 4096) g_emitted_spec_funcs[g_emitted_spec_func_count++] = mangled;
   fprintf(out, "RAE_UNUSED static %s %s(", rt, mangled); emit_param_list(&tctx, f->params, out, false); fprintf(out, ") {\n");
   for (const AstParam* p = f->params; p; p = p->next) { if (tctx.local_count < 256) { tctx.locals[tctx.local_count] = p->name; tctx.local_type_refs[tctx.local_count] = p->type; tctx.local_types[tctx.local_count] = str_from_cstr(rae_mangle_type_specialized(ctx, gp_src, args, p->type)); tctx.local_count++; } }
+
+  // Layer 5 element-drop synthesis: when the function is the stdlib
+  // `drop(T)(this: mod List(T))` (or StringMap / IntMap), inject a
+  // per-element drop loop BEFORE the template body's `buf_free`.
+  // The stdlib body only frees the backing buffer, so without this
+  // any heap a per-element T owns (a List, a StringMap, a nested
+  // struct that owns those) leaks. See test 425_list_element_drop.
+  //
+  // Conditions:
+  //   - function is named "drop"
+  //   - takes exactly one param `this`
+  //   - param type base is List / StringMap / IntMap
+  //   - the substituted element type transitively owns heap
+  if (f->body && str_eq_cstr(f->name, "drop") && f->params && !f->params->next
+      && f->params->type) {
+    Str pbase = get_base_type_name(f->params->type);
+    bool is_list = str_eq_cstr(pbase, "List");
+    bool is_smap = str_eq_cstr(pbase, "StringMap");
+    bool is_imap = str_eq_cstr(pbase, "IntMap");
+    if ((is_list || is_smap || is_imap) && args) {
+      // Element type T = args (single concrete type arg).
+      AstTypeRef* elem = (AstTypeRef*)args;
+      if (type_owns_heap_storage(ctx, m, elem, 0)) {
+        const char* elem_mangled = rae_mangle_type_specialized(ctx, NULL, NULL, elem);
+        Str ebase = get_base_type_name(elem);
+        bool elem_is_container = str_eq_cstr(ebase, "List") || str_eq_cstr(ebase, "StringMap") || str_eq_cstr(ebase, "IntMap");
+        // Find the per-T drop overload for nested containers.
+        const AstFuncDecl* nested_drop = NULL;
+        if (elem_is_container) {
+          for (size_t i = 0; i < ctx->all_decl_count; i++) {
+            const AstDecl* d = ctx->all_decls[i];
+            if (d->kind != AST_DECL_FUNC) continue;
+            if (!str_eq_cstr(d->as.func_decl.name, "drop")) continue;
+            if (!d->as.func_decl.generic_params) continue;
+            const AstParam* fp = d->as.func_decl.params;
+            if (!fp || !fp->type) continue;
+            Str fpb = get_base_type_name(fp->type);
+            if (str_eq(fpb, ebase)) { nested_drop = &d->as.func_decl; break; }
+          }
+        }
+        if (is_list) {
+          fprintf(out, "  for (int64_t __i = 0; __i < this->length; __i++) {\n");
+          fprintf(out, "    %s* __elem = (%s*)((char*)this->data + __i * sizeof(%s));\n",
+                  elem_mangled, elem_mangled, elem_mangled);
+          if (elem_is_container && nested_drop) {
+            const AstTypeRef* inner = elem->generic_args;
+            if (inner) {
+              register_function_specialization(ctx, nested_drop, inner);
+              const char* nested_fn = rae_mangle_specialized_function(ctx, nested_drop, inner);
+              fprintf(out, "    %s(__elem);\n", nested_fn);
+            }
+          } else if (!elem_is_container) {
+            // Heap-owning user struct (e.g. SceneNode { childrenIds: List(String) }).
+            fprintf(out, "    rae_drop_struct_%s(__elem);\n", elem_mangled);
+          }
+          fprintf(out, "  }\n");
+        } else if (is_smap || is_imap) {
+          // StringMap / IntMap entries are stored in a sparse buffer
+          // keyed by `occupied`. Only drop where occupied is true.
+          // Entry struct: { k: <Key>, value: V, occupied: Bool }
+          // The dense data is `Buffer(StringMapEntry(V))`. Iterate up
+          // to capacity, skip unoccupied. For now only drop entry.value
+          // (key Strings are skipped for the same reason single-let
+          // String locals are skipped — see test 425 follow-up).
+          const char* entry_struct = (is_smap) ? "rae_StringMapEntry" : "rae_IntMapEntry";
+          fprintf(out, "  {\n");
+          fprintf(out, "    char* __buf = (char*)this->data;\n");
+          fprintf(out, "    size_t __stride = sizeof(%s_%s);\n", entry_struct, elem_mangled);
+          fprintf(out, "    for (int64_t __i = 0; __i < this->capacity; __i++) {\n");
+          fprintf(out, "      %s_%s* __entry = (%s_%s*)(__buf + __i * __stride);\n",
+                  entry_struct, elem_mangled, entry_struct, elem_mangled);
+          fprintf(out, "      if (!__entry->occupied) continue;\n");
+          if (elem_is_container && nested_drop) {
+            const AstTypeRef* inner = elem->generic_args;
+            if (inner) {
+              register_function_specialization(ctx, nested_drop, inner);
+              const char* nested_fn = rae_mangle_specialized_function(ctx, nested_drop, inner);
+              fprintf(out, "      %s(&__entry->value);\n", nested_fn);
+            }
+          } else if (!elem_is_container) {
+            fprintf(out, "      rae_drop_struct_%s(&__entry->value);\n", elem_mangled);
+          }
+          fprintf(out, "    }\n");
+          fprintf(out, "  }\n");
+        }
+      }
+    }
+  }
+
   // Stage 2 + 3: see emit_function above.
   size_t first_let_idx = tctx.local_count;
   if (f->body) { for (AstStmt* s = f->body->first; s; s = s->next) emit_stmt(&tctx, s, out); }
