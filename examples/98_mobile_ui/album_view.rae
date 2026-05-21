@@ -60,20 +60,20 @@ func buildTrackList(world: mod UiWorld, trackScene: view Scene) pub ret Int {
   let alignS: AlignKind = AlignKind.Start
   setLayout(world: world, entity: list, kind: layV, gap: trackGap, alignCross: alignS)
 
-  let titles: List(String) = createList(String)(initialCap: trackRowCount)
+  let titles: List(String) = createList(String, initialCap: trackRowCount)
   titles.add(value: "To Speak Of Solitude")
   titles.add(value: "Unsayable")
   titles.add(value: "In The Androgynous Dark")
   titles.add(value: "Salt Photographs")
   titles.add(value: "Pink And Golden Billows")
-  let durations: List(String) = createList(String)(initialCap: trackRowCount)
+  let durations: List(String) = createList(String, initialCap: trackRowCount)
   durations.add(value: "4:21")
   durations.add(value: "2:52")
   durations.add(value: "4:43")
   durations.add(value: "6:54")
   durations.add(value: "2:58")
 
-  let rows: List(Int) = createList(Int)(initialCap: trackRowCount)
+  let rows: List(Int) = createList(Int, initialCap: trackRowCount)
   let i: Int = 0
   loop i < trackRowCount {
     let row: Int = createEntity(world: world)
@@ -137,7 +137,7 @@ func buildAlbumWorld(scenes: view AlbumScenes) pub ret UiWorld {
   )
   let navTabs: Int = buildNavTabsForScreen(world: world, activeTab: Screen.Album, scenes: scenes)
 
-  let kids: List(Int) = createList(Int)(initialCap: 5)
+  let kids: List(Int) = createList(Int, initialCap: 5)
   kids.add(value: header)
   kids.add(value: trackList)
   kids.add(value: spacer)

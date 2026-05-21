@@ -42,7 +42,7 @@ func setShapeRect(world: mod UiWorld, entity: Int, r: Int, g: Int, b: Int) {
 }
 
 func attachChildren(world: mod UiWorld, parent: Int, kids: view List(Int)) {
-  let copy: List(Int) = createList(Int)(initialCap: kids.length)
+  let copy: List(Int) = createList(Int, initialCap: kids.length)
   let i: Int = 0
   loop i < kids.length {
     let kid: Int = kids.get(index: i)
@@ -103,7 +103,7 @@ func main() {
   let iconB: Int = createEntity(world: world)
   setRectFixed(world: world, entity: iconB, w: 40.0, h: 40.0)
   setShapeRect(world: world, entity: iconB, r: 0, g: 255, b: 0)
-  let headerKids: List(Int) = createList(Int)(initialCap: 2)
+  let headerKids: List(Int) = createList(Int, initialCap: 2)
   headerKids.add(value: iconA)
   headerKids.add(value: iconB)
   attachChildren(world: world, parent: header, kids: headerKids)
@@ -116,7 +116,7 @@ func main() {
   setRectFixed(world: world, entity: footer, w: 360.0, h: 100.0)
   setShapeRect(world: world, entity: footer, r: 100, g: 100, b: 100)
 
-  let rootKids: List(Int) = createList(Int)(initialCap: 3)
+  let rootKids: List(Int) = createList(Int, initialCap: 3)
   rootKids.add(value: header)
   rootKids.add(value: body)
   rootKids.add(value: footer)

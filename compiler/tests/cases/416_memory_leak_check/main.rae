@@ -31,7 +31,7 @@ import sys
 # scope-exit dealloc would free the Buffer here. Currently it
 # doesn't, so each call leaves cap*8 bytes pinned.
 func transientAllocation(cap: Int) {
-  let xs: List(Int) = createList(Int)(initialCap: cap)
+  let xs: List(Int) = createList(Int, initialCap: cap)
   let i: Int = 0
   loop i < cap {
     xs.add(value: i)

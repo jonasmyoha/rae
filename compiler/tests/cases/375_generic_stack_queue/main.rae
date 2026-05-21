@@ -6,7 +6,7 @@ type Stack(T) {
 }
 
 func createStack(T)() ret Stack(T) {
-  ret Stack(T) { data: createList(T)(initialCap: 4) }
+  ret Stack(T) { data: createList(T, initialCap: 4) }
 }
 
 func push(T)(this: mod Stack(T), value: T) {
@@ -35,7 +35,7 @@ func size(T)(this: view Stack(T)) ret Int {
 
 func main() {
   # Stack(Int)
-  let si: Stack(Int) = createStack(Int)()
+  let si: Stack(Int) = createStack(Int)
   push(si, value: 10)
   push(si, value: 20)
   push(si, value: 30)
@@ -45,7 +45,7 @@ func main() {
   log("int size: {size(si)}")
 
   # Stack(String) — second instantiation of the same template
-  let ss: Stack(String) = createStack(String)()
+  let ss: Stack(String) = createStack(String)
   push(ss, value: "alpha")
   push(ss, value: "beta")
   log("str size: {size(ss)}")
@@ -54,6 +54,6 @@ func main() {
   log("str size: {size(ss)}")
 
   # Empty stack returns none from pop/peek
-  let empty: Stack(Int) = createStack(Int)()
+  let empty: Stack(Int) = createStack(Int)
   log("empty pop is none: {pop(empty) is none}")
 }

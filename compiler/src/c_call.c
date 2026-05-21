@@ -57,6 +57,11 @@ void emit_opt_unbox_suffix(CFuncContext* ctx, const AstFuncDecl* fd, const AstTy
 }
 
 bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
+    // Hoist a type argument out of the value-arg list if present —
+    // new generic-call syntax. See c_backend.c for the helper.
+    AstExpr* hoisted = hoist_type_arg_if_present(ctx, expr);
+    if (hoisted) expr = hoisted;
+
     Str name = {0};
     if (expr->as.call.callee->kind == AST_EXPR_IDENT) {
         name = expr->as.call.callee->as.ident;

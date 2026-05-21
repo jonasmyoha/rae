@@ -609,6 +609,100 @@ bool is_pointer_type(CFuncContext* ctx, Str name) {
 
 bool is_generic_param(const AstIdentifierPart* params, Str name) { const AstIdentifierPart* p = params; while (p) { if (str_eq(p->text, name)) return true; p = p->next; } return false; }
 
+// Try to interpret an argument expression as a compile-time type
+// argument. Returns the corresponding AstTypeRef* if the expression
+// names a known type (primitive like `Int` / `String`, a user-
+// declared `type ...`, or a parameterised type like `List(Int)`),
+// otherwise NULL. Shared between emission (c_call.c) and discovery
+// (c_discovery.c) so both passes see the same hoisted form of the
+// new generic-call syntax:
+//
+//   createList(String, initialCap: 4)        // positional type arg
+//   createList(type: String, initialCap: 4)  // named type arg
+//   String.createList(initialCap: 4)         // dot-call on type
+//
+// all hoist `String` into `expr->as.call.generic_args`.
+AstTypeRef* try_as_type_arg(CFuncContext* ctx, const AstExpr* val) {
+    if (!val) return NULL;
+    Str name = {0};
+    AstCallArg* nested_args = NULL;
+    if (val->kind == AST_EXPR_IDENT) {
+        name = val->as.ident;
+    } else if (val->kind == AST_EXPR_CALL && val->as.call.callee
+               && val->as.call.callee->kind == AST_EXPR_IDENT) {
+        name = val->as.call.callee->as.ident;
+        nested_args = val->as.call.args;
+    } else {
+        return NULL;
+    }
+    if (name.len == 0) return NULL;
+    // A local / global binding with the same name takes priority —
+    // `let String = 0; foo(String, ...)` passes a value, not a type.
+    if (get_local_type_ref(ctx, name)) return NULL;
+    bool is_type = is_primitive_type(name) || (ctx->module && find_type_decl(ctx, ctx->module, name) != NULL);
+    // Inside a generic function body, the bound generic param is also
+    // a valid type expression — e.g. `createIntMap(V)` body calls
+    // `createInt64Map(V, initialCap: …)` where V resolves to a type.
+    if (!is_type && ctx->generic_params) {
+        for (const AstIdentifierPart* gp = ctx->generic_params; gp; gp = gp->next) {
+            if (str_eq(gp->text, name)) { is_type = true; break; }
+        }
+    }
+    if (!is_type) return NULL;
+    AstIdentifierPart* part = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstIdentifierPart));
+    *part = (AstIdentifierPart){.text = name};
+    AstTypeRef* tr = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
+    *tr = (AstTypeRef){.parts = part};
+    if (nested_args) {
+        AstTypeRef* head = NULL; AstTypeRef* tail = NULL;
+        for (AstCallArg* na = nested_args; na; na = na->next) {
+            AstTypeRef* inner = try_as_type_arg(ctx, na->value);
+            if (!inner) return NULL;
+            if (!head) head = inner; else tail->next = inner;
+            tail = inner;
+        }
+        tr->generic_args = head;
+    }
+    return tr;
+}
+
+// Hoist a type argument out of the value-arg list into generic_args.
+// Returns a new AstExpr if the call had a hoistable type arg, or
+// NULL to signal "use expr as-is". Accepted positions:
+//   - first positional arg
+//   - any named arg called `type:`
+AstExpr* hoist_type_arg_if_present(CFuncContext* ctx, const AstExpr* expr) {
+    if (!expr || expr->kind != AST_EXPR_CALL) return NULL;
+    if (expr->as.call.generic_args) return NULL;
+    if (!expr->as.call.args) return NULL;
+
+    AstCallArg* type_arg_node = NULL;
+    for (AstCallArg* a = expr->as.call.args; a; a = a->next) {
+        if (a->name.len > 0 && str_eq_cstr(a->name, "type")) { type_arg_node = a; break; }
+    }
+    if (!type_arg_node && expr->as.call.args->name.len == 0) {
+        type_arg_node = expr->as.call.args;
+    }
+    if (!type_arg_node) return NULL;
+
+    AstTypeRef* tr = try_as_type_arg(ctx, type_arg_node->value);
+    if (!tr) return NULL;
+
+    AstCallArg* new_head = NULL; AstCallArg* new_tail = NULL;
+    for (AstCallArg* a = expr->as.call.args; a; a = a->next) {
+        if (a == type_arg_node) continue;
+        AstCallArg* node = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstCallArg));
+        *node = *a; node->next = NULL;
+        if (!new_head) new_head = node; else new_tail->next = node;
+        new_tail = node;
+    }
+    AstExpr* new_expr = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstExpr));
+    *new_expr = *expr;
+    new_expr->as.call.generic_args = tr;
+    new_expr->as.call.args = new_head;
+    return new_expr;
+}
+
 const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
     if (!expr) return NULL;
     // Cache primitive literal type-refs in static storage so callers can hold a
