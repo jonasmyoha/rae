@@ -828,10 +828,20 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
     bool is_imap = str_eq_cstr(pbase, "IntMap");
     if ((is_list || is_smap || is_imap) && args) {
       // Element type T = args (single concrete type arg).
+      //
+      // Predicate split: we use the strict predicate (no String) as
+      // the GATE — that's the set of elements that have a working
+      // drop chain (rae_drop_struct_<T> exists, or T is a List/Map).
+      // The one extra case Stage 3 enables is List(String) /
+      // Map(String): String element-drop calls rae_ext_rae_str_free
+      // directly (no drop_struct needed). Structs whose only heap is
+      // a String stay un-iterated for now — same leak status as
+      // before Stage 3, no crash.
       AstTypeRef* elem = (AstTypeRef*)args;
-      if (type_owns_heap_storage(ctx, m, elem, 0)) {
+      Str ebase = get_base_type_name(elem);
+      bool elem_is_string = str_eq_cstr(ebase, "String");
+      if (elem_is_string || type_owns_heap_storage(ctx, m, elem, 0)) {
         const char* elem_mangled = rae_mangle_type_specialized(ctx, NULL, NULL, elem);
-        Str ebase = get_base_type_name(elem);
         bool elem_is_container = str_eq_cstr(ebase, "List") || str_eq_cstr(ebase, "StringMap") || str_eq_cstr(ebase, "IntMap");
         // Find the per-T drop overload for nested containers.
         const AstFuncDecl* nested_drop = NULL;
@@ -851,7 +861,11 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
           fprintf(out, "  for (int64_t __i = 0; __i < this->length; __i++) {\n");
           fprintf(out, "    %s* __elem = (%s*)((char*)this->data + __i * sizeof(%s));\n",
                   elem_mangled, elem_mangled, elem_mangled);
-          if (elem_is_container && nested_drop) {
+          if (elem_is_string) {
+            // List(String) — call the string-free helper. is_owned
+            // check inside makes borrowed entries safe.
+            fprintf(out, "    rae_ext_rae_str_free(*__elem);\n");
+          } else if (elem_is_container && nested_drop) {
             const AstTypeRef* inner = elem->generic_args;
             if (inner) {
               register_function_specialization(ctx, nested_drop, inner);
@@ -879,7 +893,14 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
           fprintf(out, "      %s_%s* __entry = (%s_%s*)(__buf + __i * __stride);\n",
                   entry_struct, elem_mangled, entry_struct, elem_mangled);
           fprintf(out, "      if (!__entry->occupied) continue;\n");
-          if (elem_is_container && nested_drop) {
+          if (elem_is_string) {
+            // {Int,String}Map(String) — drop the value String. The
+            // key (for StringMap) is handled separately when /
+            // if we ever consider keys heap-owning; today
+            // StringMap keys are borrowed-from-caller and never
+            // owned by the map.
+            fprintf(out, "      rae_ext_rae_str_free(__entry->value);\n");
+          } else if (elem_is_container && nested_drop) {
             const AstTypeRef* inner = elem->generic_args;
             if (inner) {
               register_function_specialization(ctx, nested_drop, inner);
@@ -1094,6 +1115,10 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   StructDropEntry drop_entries[512];
   size_t drop_entry_count = 0;
   // Pass A — non-generic user structs that transitively own heap.
+  // Use the strict predicate (no String) so we don't synthesize a
+  // cascade for String-only structs whose Strings are likely aliased
+  // from a container they came out of (see scope-exit-dealloc.md
+  // Layer 5 deferred notes — full String cascade is Stage 4 work).
   for (size_t i = 0; i < ctx->all_decl_count && drop_entry_count < 512; i++) {
     const AstDecl* d = ctx->all_decls[i];
     if (d->kind != AST_DECL_TYPE) continue;
@@ -1175,6 +1200,15 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     for (size_t j = field_count; j > 0; j--) {
       const AstTypeField* f = fields[j - 1];
       AstTypeRef* concrete = (gp && ga) ? substitute_type_ref(ctx, gp, ga, f->type) : f->type;
+      // Use the strict predicate here: cascading String fields out of
+      // a struct that aliases container data (the common pattern is
+      // `let x: T = somethingThatReturnsT()` where T contains a
+      // String that lives in the source's heap) would double-free.
+      // String-field cascade is gated on Stage 4 / proper deep-copy
+      // on `=` — see docs/scope-exit-dealloc.md Layer 5 deferred
+      // notes. Until then, struct-stored Strings leak rather than
+      // crash. Container element drop (List(String) etc.) still
+      // works because ownership there is unambiguous.
       if (!type_owns_heap_storage(ctx, module, concrete, 0)) continue;
       Str fbase = get_base_type_name(concrete);
       // First: look for a generic `drop(T)(this: mod <base>(T))` in

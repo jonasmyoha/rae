@@ -54,6 +54,18 @@ bool is_drop_target_type(const AstTypeRef* type) {
 // `depth` guards against runaway recursion if the type graph ever
 // has a cycle (Rae structs are value types so this shouldn't happen,
 // but the cap is cheap insurance).
+// "Strict" heap-ownership: true only when the type transitively owns
+// container heap (List / StringMap / IntMap), not when its only heap
+// connection is a String field. Used by the local auto-drop pass to
+// avoid double-frees on the by-value-return-shallow-alias pattern —
+// e.g. `let r: JsonValue = jsonRoot(d)` shallow-copies asString.data
+// out of the doc's list, so freeing it on `r`'s scope exit would
+// double-free with the eventual drop of the JsonDoc list.
+//
+// The looser predicate `type_has_drop_target_field` (below) is true
+// when a String field is present and drives cascade emission inside
+// already-firing struct/element drops, where the ownership chain is
+// unambiguous (the container owns its elements).
 bool type_owns_heap_storage(CompilerContext* cctx, const AstModule* module,
                             const AstTypeRef* type, int depth) {
   if (!type || depth > 32) return false;
@@ -67,6 +79,27 @@ bool type_owns_heap_storage(CompilerContext* cctx, const AstModule* module,
   if (has_property(d->as.type_decl.properties, "c_struct")) return false;
   for (const AstTypeField* f = d->as.type_decl.fields; f; f = f->next) {
     if (type_owns_heap_storage(cctx, module, f->type, depth + 1)) return true;
+  }
+  return false;
+}
+
+// Permissive variant for cascade-drop sites — also true when a field
+// is a String or when any nested field is a String. Used by Layer 5
+// struct drop synthesis and List/Map element drop synthesis to decide
+// whether the struct needs cascade emission. Crucially NOT used by
+// the local auto-drop pass (see above).
+bool type_needs_cascade_drop(CompilerContext* cctx, const AstModule* module,
+                             const AstTypeRef* type, int depth) {
+  if (!type || depth > 32) return false;
+  if (type->is_view || type->is_mod) return false;
+  if (is_drop_target_type(type)) return true;
+  Str base = get_base_type_name(type);
+  if (str_eq_cstr(base, "String")) return true;
+  const AstDecl* d = find_type_decl(NULL, module, base);
+  if (!d || d->kind != AST_DECL_TYPE) return false;
+  if (has_property(d->as.type_decl.properties, "c_struct")) return false;
+  for (const AstTypeField* f = d->as.type_decl.fields; f; f = f->next) {
+    if (type_needs_cascade_drop(cctx, module, f->type, depth + 1)) return true;
   }
   return false;
 }

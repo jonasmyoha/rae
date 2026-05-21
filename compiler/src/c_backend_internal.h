@@ -169,6 +169,12 @@ const AstFuncDecl* find_drop_overload_for(CFuncContext* ctx, Str container_base)
 // for user structs with at least one heap-owning field.
 bool type_owns_heap_storage(CompilerContext* cctx, const AstModule* module,
                             const AstTypeRef* type, int depth);
+// Permissive variant — also considers String fields heap-needing.
+// Used by cascade-drop sites only (Layer 5 struct synthesis, List/Map
+// element drop). NOT by local auto-drop, which uses the strict form
+// above to avoid the shallow-alias double-free pattern.
+bool type_needs_cascade_drop(CompilerContext* cctx, const AstModule* module,
+                             const AstTypeRef* type, int depth);
 // Move tracking helpers (Stage 3 of docs/ownership-model.md).
 void mark_local_moved_by_name(CFuncContext* ctx, Str name);
 void mark_expr_moved_if_local(CFuncContext* ctx, const AstExpr* expr);
