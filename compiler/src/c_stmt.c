@@ -159,12 +159,10 @@ bool emit_implicit_drops_for_body(CFuncContext* ctx, FILE* out,
       fprintf(out, "  %s(&%.*s);\n", drop_name,
               (int)name.len, name.data);
     } else {
-      // Layer 5 (synthesised per-struct drop fns) is deferred — see
-      // c_backend.c for context. For now, user-struct lets that
-      // transitively own heap leak their heap at scope exit; the
-      // alternative (Layer 5 partial implementation) tripped the
-      // mangler on real-world struct graphs. Containers (the `if`
-      // branch above) still auto-drop normally.
+      // Layer 5 (synthesised per-struct drop fns) remains deferred
+      // — see c_backend.c. The `local_struct_owns_heap` flag is set
+      // here so this branch can flip back on once Layer 5 emission
+      // is stable; today it's a no-op.
       continue;
     }
   }
@@ -377,7 +375,19 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             }
             fprintf(out, ";\n");
             const char* tn = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, stmt->as.let_stmt.type);
-            if (ctx->local_count < 256) { ctx->locals[ctx->local_count] = stmt->as.let_stmt.name; ctx->local_types[ctx->local_count] = str_from_cstr(tn); ctx->local_type_refs[ctx->local_count] = stmt->as.let_stmt.type; ctx->local_count++; }
+            if (ctx->local_count < 256) {
+                ctx->locals[ctx->local_count] = stmt->as.let_stmt.name;
+                ctx->local_types[ctx->local_count] = str_from_cstr(tn);
+                ctx->local_type_refs[ctx->local_count] = stmt->as.let_stmt.type;
+                // Layer 5 ownership gate: the binding genuinely owns
+                // its heap only when constructed in-place (struct
+                // literal) or auto-initialised (zero value). Calls
+                // and other expressions return shallow aliases.
+                const AstExpr* init = stmt->as.let_stmt.value;
+                ctx->local_struct_owns_heap[ctx->local_count] =
+                    (init == NULL) || (init->kind == AST_EXPR_OBJECT);
+                ctx->local_count++;
+            }
             break;
         }
         case AST_STMT_ASSIGN: {
