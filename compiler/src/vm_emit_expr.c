@@ -857,7 +857,11 @@ bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
     }
     case AST_EXPR_BOX:
     case AST_EXPR_UNBOX:
-      // In current VM, values carry their own type tags, no-op conversion
+    case AST_EXPR_OWN:
+      // BOX/UNBOX: VM values carry their own type tags — no-op conversion.
+      // OWN: the ownership-transfer marker is meaningful only to the C
+      // backend (Phase C of docs/ownership-model.md). VM uses managed
+      // values, so move tracking is irrelevant here — emit the inner.
       return compile_expr(compiler, expr->as.unary.operand);
     default:
       diag_error(compiler->file_path, (int)expr->line, (int)expr->column,

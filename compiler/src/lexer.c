@@ -48,6 +48,7 @@ static const Keyword KEYWORDS[] = {
     {"pack", TOK_KW_PACK},   {"priv", TOK_KW_PRIV},    {"pub", TOK_KW_PUB},
     {"ret", TOK_KW_RET},     {"spawn", TOK_KW_SPAWN},  {"true", TOK_KW_TRUE},
     {"type", TOK_KW_TYPE},   {"view", TOK_KW_VIEW},    {"val", TOK_KW_VAL},
+    {"own", TOK_KW_OWN},
     {"defer", TOK_KW_DEFER}};
 
 static const char* const TOKEN_KIND_NAMES[] = {
@@ -72,6 +73,7 @@ static const char* const TOKEN_KIND_NAMES[] = {
     [TOK_KW_VIEW] = "TOK_VIEW",
     [TOK_KW_MOD] = "TOK_MOD",
     [TOK_KW_VAL] = "TOK_VAL",
+    [TOK_KW_OWN] = "TOK_OWN",
     [TOK_KW_OPT] = "TOK_OPT",
     [TOK_KW_ID] = "TOK_ID",
     [TOK_KW_KEY] = "TOK_KEY",
