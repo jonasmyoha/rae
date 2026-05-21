@@ -1,0 +1,28 @@
+# Test E from docs/ownership-model.md — return an owned local.
+#
+# Returning a heap-owning local must transfer ownership to the
+# caller. The callee's auto-drop must NOT free the buffer; the
+# caller can then read from it normally.
+#
+# Without the `ret <ident>` move-detection in c_stmt.c, this
+# program would double-free: `makeList` would auto-drop `inner`
+# at end-of-body, then the caller's `outer` would point at the
+# freed storage and crash on first access.
+import core
+import string
+
+func makeList() ret List(Int) {
+  let inner: List(Int) = createList(Int)(initialCap: 4)
+  inner.add(value: 100)
+  inner.add(value: 200)
+  inner.add(value: 300)
+  ret inner
+}
+
+func main() {
+  let outer: List(Int) = makeList()
+  log("len: {outer.length}")
+  log("a: {outer.get(index: 0)}")
+  log("b: {outer.get(index: 1)}")
+  log("c: {outer.get(index: 2)}")
+}
