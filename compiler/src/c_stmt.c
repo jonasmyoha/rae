@@ -20,17 +20,105 @@ static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static bool emit_match(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 
+// Stage 2 of scope-exit dealloc (see docs/scope-exit-dealloc.md).
+// Predicate: is the type something whose owning binding should
+// trigger a `drop()` call when it goes out of scope? Today this is
+// just the heap-owning stdlib containers; Stage 5 will extend it to
+// user structs that contain heap-owning fields.
+//
+// Public via c_backend_internal.h so the discovery pass can pre-
+// register the matching drop specialisation. If we only registered
+// during the emit pass, the drop specialisation would land in the
+// output AFTER its first call site (specialised functions are emitted
+// before the regular functions that use them), and the C compiler
+// would warn about an implicit declaration.
+bool is_drop_target_type(const AstTypeRef* type);
+const AstFuncDecl* find_drop_overload_for(CFuncContext* ctx, Str container_base);
+
+bool is_drop_target_type(const AstTypeRef* type) {
+  if (!type) return false;
+  // Borrows don't own — they're someone else's value.
+  if (type->is_view || type->is_mod) return false;
+  Str base = get_base_type_name(type);
+  if (str_eq_cstr(base, "List")) return true;
+  if (str_eq_cstr(base, "StringMap")) return true;
+  if (str_eq_cstr(base, "IntMap")) return true;
+  return false;
+}
+
+// Locate the `drop` generic-function overload whose receiver type's
+// base name matches `container_base` ("List" / "StringMap" / "IntMap").
+// Returns NULL if no overload exists — callers silently skip the drop
+// emission, which is the Stage 1 fallback (no double-free, just a leak).
+const AstFuncDecl* find_drop_overload_for(
+    CFuncContext* ctx, Str container_base) {
+  if (!ctx || !ctx->compiler_ctx) return NULL;
+  for (size_t j = 0; j < ctx->compiler_ctx->all_decl_count; j++) {
+    const AstDecl* d = ctx->compiler_ctx->all_decls[j];
+    if (d->kind != AST_DECL_FUNC) continue;
+    if (!str_eq_cstr(d->as.func_decl.name, "drop")) continue;
+    if (!d->as.func_decl.generic_params) continue;
+    const AstParam* first = d->as.func_decl.params;
+    if (!first || !first->type) continue;
+    Str dp_base = get_base_type_name(first->type);
+    if (str_eq(dp_base, container_base)) return &d->as.func_decl;
+  }
+  return NULL;
+}
+
+// Emit `drop(local);` calls for every heap-owning binding declared
+// from `first_let_index` (inclusive) onward. Anything before
+// `first_let_index` is a function parameter — those are owned by the
+// caller and must NOT be dropped here. Walk in reverse declaration
+// order so a drop never reads a local that's already been dropped
+// (LIFO matches how `defer` emits user-written cleanup).
+//
+// Stage 2 limitation: only called at end-of-body fallthrough, not at
+// every `ret`. Functions that early-return therefore leak whatever
+// heap-owning lets were live at the ret. Move-detection at ret paths
+// lands in Stage 3 — see docs/scope-exit-dealloc.md.
+bool emit_implicit_drops_for_body(CFuncContext* ctx, FILE* out,
+                                  size_t first_let_index) {
+  if (!ctx || !out) return false;
+  for (size_t i = ctx->local_count; i > first_let_index; i--) {
+    size_t idx = i - 1;
+    const AstTypeRef* type = ctx->local_type_refs[idx];
+    if (!is_drop_target_type(type)) continue;
+    const AstTypeRef* elem_type = type->generic_args;
+    if (!elem_type) continue;
+    Str loc_base = get_base_type_name(type);
+    const AstFuncDecl* drop_fd = find_drop_overload_for(ctx, loc_base);
+    if (!drop_fd) continue;
+    register_function_specialization(ctx->compiler_ctx, drop_fd, elem_type);
+    const char* drop_name =
+        rae_mangle_specialized_function(ctx->compiler_ctx, drop_fd, elem_type);
+    Str name = ctx->locals[idx];
+    fprintf(out, "  %s(&%.*s);\n", drop_name,
+            (int)name.len, name.data);
+  }
+  return true;
+}
+
 static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     fprintf(out, "  if (");
     emit_expr(ctx, stmt->as.if_stmt.condition, out, PREC_LOWEST, false, false);
     fprintf(out, ") {\n");
+    // Stage 2 scope tracking: save/restore local_count around each
+    // branch so lets declared inside the block don't pollute the
+    // outer scope's `ctx->locals` view. Without this, the end-of-body
+    // drop pass would try to drop names that the C compiler can't
+    // see (out-of-scope C identifiers).
+    size_t saved_locals_then = ctx->local_count;
     if (stmt->as.if_stmt.then_block) {
         for (const AstStmt* s = stmt->as.if_stmt.then_block->first; s; s = s->next) emit_stmt(ctx, s, out);
     }
+    ctx->local_count = saved_locals_then;
     fprintf(out, "  }");
     if (stmt->as.if_stmt.else_block) {
         fprintf(out, " else {\n");
+        size_t saved_locals_else = ctx->local_count;
         for (const AstStmt* s = stmt->as.if_stmt.else_block->first; s; s = s->next) emit_stmt(ctx, s, out);
+        ctx->local_count = saved_locals_else;
         fprintf(out, "  }\n");
     } else {
         fprintf(out, "\n");
@@ -40,6 +128,9 @@ static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
 
 static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     fprintf(out, "  for (");
+    // Save outer local_count so the loop's init-let + body-lets all
+    // disappear from the locals view when the loop ends.
+    size_t saved_locals = ctx->local_count;
     if (stmt->as.loop_stmt.init) {
         // Init stmt usually doesn't have a newline/indent in for loop
         if (stmt->as.loop_stmt.init->kind == AST_STMT_LET) {
@@ -58,6 +149,7 @@ static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     if (stmt->as.loop_stmt.body) {
         for (const AstStmt* s = stmt->as.loop_stmt.body->first; s; s = s->next) emit_stmt(ctx, s, out);
     }
+    ctx->local_count = saved_locals;
     fprintf(out, "  }\n");
     return true;
 }
