@@ -882,17 +882,161 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   }
 
   // Layer 5 (docs/scope-exit-dealloc.md) — synthesised per-struct
-  // drop fns — is deferred. A working prototype existed here but the
-  // forward-decl + specialisation interaction with the existing
-  // generic-mangler revealed enough sharp edges (substitution of
-  // generic args inside `drop(T)(this: mod List(T))` for elem types
-  // that hadn't been touched anywhere else in the program, leading
-  // to crashes deep in the mangler) that landing it safely needs a
-  // separate, deeper redesign of how the compiler routes specialised
-  // call sites through the spec list. Until then, struct-typed lets
-  // that own heap (UiWorld, JsonDoc, …) leak their heap when they go
-  // out of scope. Containers (List / StringMap / IntMap) still auto-
-  // drop via the Layer 1–4 path in c_stmt.c::emit_implicit_drops_for_body.
+  // drop fns — remains deferred. An in-progress prototype that
+  // emits rae_drop_struct_<MangledType> for non-generic heap-owning
+  // structs trips the existing spec-emission pipeline's mangler on
+  // 98_mobile_ui (~480+ drop specialisations registered, one in
+  // that long tail crashes inside rae_mangle_specialized_function;
+  // smaller test programs work). The fix needs deeper changes to
+  // how synthesised drops register / route through the spec list.
+  // Below is the prototype, kept compiled-out behind a constant so
+  // future work can flip it back on for benchmarking.
+  if (0) {
+  // For every non-generic user struct that transitively
+  // owns heap (a field whose type is List / StringMap / IntMap, or
+  // another heap-owning struct), emit
+  //
+  //   static void rae_drop_struct_<MangledType>(<MangledType>* this) {
+  //     rae_drop_<field1_drop>(&this->field1);
+  //     rae_drop_<field2_drop>(&this->field2);
+  //     ...
+  //   }
+  //
+  // c_stmt.c::emit_implicit_drops_for_body emits calls to these for
+  // any heap-owning user-struct local at end of function body, so
+  // dropping a UiWorld cascades through every ComponentTable, which
+  // in turn drops its internal sparse + dense Lists.
+  //
+  // Scope deliberately limited to non-generic structs for now. The
+  // generic-spec pass tripped the mangler on user struct types that
+  // hadn't been touched elsewhere (JsonValue, AnimState, …); landing
+  // that needs a separate refactor of how synthesised drops register
+  // with the spec list. Container fields use the existing per-T
+  // `drop(T)` from lib/core.rae, which already discovery-registers.
+  typedef struct {
+    const AstDecl* decl;
+    const AstTypeRef* type_ref;  // non-NULL when this is a generic specialisation
+    const char* mangled;
+  } StructDropEntry;
+  StructDropEntry drop_entries[512];
+  size_t drop_entry_count = 0;
+  // Pass A — non-generic user structs that transitively own heap.
+  for (size_t i = 0; i < ctx->all_decl_count && drop_entry_count < 512; i++) {
+    const AstDecl* d = ctx->all_decls[i];
+    if (d->kind != AST_DECL_TYPE) continue;
+    if (d->as.type_decl.generic_params) continue;
+    if (has_property(d->as.type_decl.properties, "c_struct")) continue;
+    AstIdentifierPart* part = malloc(sizeof(AstIdentifierPart));
+    *part = (AstIdentifierPart){.text = d->as.type_decl.name};
+    AstTypeRef* tr = malloc(sizeof(AstTypeRef));
+    *tr = (AstTypeRef){.parts = part};
+    if (!type_owns_heap_storage(ctx, module, tr, 0)) { free(tr); free(part); continue; }
+    const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, tr);
+    drop_entries[drop_entry_count++] = (StructDropEntry){.decl = d, .type_ref = tr, .mangled = mangled};
+  }
+  // (Generic-spec auto-collection is intentionally NOT done here.
+  // Synthesised `drop_struct` for generic-template structs trips the
+  // mangler on certain instantiations [JsonValue / AnimState in a
+  // ComponentTable]; landing it needs deeper changes. The user-
+  // visible workaround is writing an explicit `drop(T)(this: mod
+  // YourGeneric(T))` overload in stdlib, mirroring the one for
+  // `List(T)` in lib/core.rae — Pass C's field dispatch finds those
+  // automatically.)
+  // Forward declarations — each struct drop AND each container-drop
+  // we plan to call from the bodies. The container-drop forward
+  // decls also register the specialisations so the iterative spec-
+  // emission pass later in this function actually emits the body.
+  for (size_t i = 0; i < drop_entry_count; i++) {
+    fprintf(out, "RAE_UNUSED static void rae_drop_struct_%s(%s* this);\n",
+            drop_entries[i].mangled, drop_entries[i].mangled);
+  }
+  for (size_t i = 0; i < drop_entry_count; i++) {
+    const StructDropEntry* e = &drop_entries[i];
+    const AstIdentifierPart* gp = e->decl->as.type_decl.generic_params;
+    const AstTypeRef* ga = (e->type_ref && gp) ? e->type_ref->generic_args : NULL;
+    for (const AstTypeField* f = e->decl->as.type_decl.fields; f; f = f->next) {
+      AstTypeRef* concrete = (gp && ga) ? substitute_type_ref(ctx, gp, ga, f->type) : f->type;
+      if (!type_owns_heap_storage(ctx, module, concrete, 0)) continue;
+      Str fbase = get_base_type_name(concrete);
+      const AstFuncDecl* drop_fd = NULL;
+      for (size_t k = 0; k < ctx->all_decl_count; k++) {
+        const AstDecl* dd = ctx->all_decls[k];
+        if (dd->kind != AST_DECL_FUNC) continue;
+        if (!str_eq_cstr(dd->as.func_decl.name, "drop")) continue;
+        if (!dd->as.func_decl.generic_params) continue;
+        const AstParam* first = dd->as.func_decl.params;
+        if (!first || !first->type) continue;
+        Str dp_base = get_base_type_name(first->type);
+        if (str_eq(dp_base, fbase)) { drop_fd = &dd->as.func_decl; break; }
+      }
+      if (!drop_fd) continue;
+      const AstTypeRef* elem_type = concrete->generic_args;
+      if (!elem_type) continue;
+      register_function_specialization(ctx, drop_fd, elem_type);
+      const char* fn = rae_mangle_specialized_function(ctx, drop_fd, elem_type);
+      const char* container_mangled = rae_mangle_type_specialized(ctx, NULL, NULL, concrete);
+      fprintf(out, "RAE_UNUSED static void %s(%s* this);\n", fn, container_mangled);
+    }
+  }
+  if (drop_entry_count > 0) fprintf(out, "\n");
+  fprintf(stderr, "[layer5] %zu drop entries\n", drop_entry_count);
+  for (size_t z = 0; z < drop_entry_count; z++) {
+    fprintf(stderr, "  [%zu] %s\n", z, drop_entries[z].mangled);
+    fflush(stderr);
+  }
+  // Bodies — reverse field order so LIFO drop matches construction.
+  for (size_t i = 0; i < drop_entry_count; i++) {
+    const StructDropEntry* e = &drop_entries[i];
+    fprintf(stderr, "[layer5/body] [%zu] %s\n", i, e->mangled); fflush(stderr);
+    fprintf(out, "RAE_UNUSED static void rae_drop_struct_%s(%s* this) {\n",
+            e->mangled, e->mangled);
+    const AstIdentifierPart* gp = e->decl->as.type_decl.generic_params;
+    const AstTypeRef* ga = (e->type_ref && gp) ? e->type_ref->generic_args : NULL;
+    const AstTypeField* fields[256];
+    size_t field_count = 0;
+    for (const AstTypeField* f = e->decl->as.type_decl.fields; f && field_count < 256; f = f->next) {
+      fields[field_count++] = f;
+    }
+    for (size_t j = field_count; j > 0; j--) {
+      const AstTypeField* f = fields[j - 1];
+      AstTypeRef* concrete = (gp && ga) ? substitute_type_ref(ctx, gp, ga, f->type) : f->type;
+      if (!type_owns_heap_storage(ctx, module, concrete, 0)) continue;
+      Str fbase = get_base_type_name(concrete);
+      // First: look for a generic `drop(T)(this: mod <base>(T))` in
+      // user code or stdlib. Handles List / StringMap / IntMap (from
+      // lib/core.rae) AND user-supplied container drops (e.g. the
+      // explicit `drop(T)(this: mod ComponentTable(T))` in lib/ui/
+      // ecs.rae). Falls through to the nested-struct path if none.
+      const AstFuncDecl* drop_fd = NULL;
+      for (size_t k = 0; k < ctx->all_decl_count; k++) {
+        const AstDecl* dd = ctx->all_decls[k];
+        if (dd->kind != AST_DECL_FUNC) continue;
+        if (!str_eq_cstr(dd->as.func_decl.name, "drop")) continue;
+        if (!dd->as.func_decl.generic_params) continue;
+        const AstParam* first = dd->as.func_decl.params;
+        if (!first || !first->type) continue;
+        Str dp_base = get_base_type_name(first->type);
+        if (str_eq(dp_base, fbase)) { drop_fd = &dd->as.func_decl; break; }
+      }
+      if (drop_fd) {
+        const AstTypeRef* elem_type = concrete->generic_args;
+        if (!elem_type) continue;
+        const char* fn = rae_mangle_specialized_function(ctx, drop_fd, elem_type);
+        fprintf(out, "  %s(&this->%.*s);\n", fn,
+                (int)f->name.len, f->name.data);
+      } else {
+        // Nested non-generic user struct — recurse via synthesised
+        // rae_drop_struct_<MangledType> (which must itself be in
+        // drop_entries; we don't verify here, missing references
+        // surface as C link errors which is loud enough).
+        const char* fmangled = rae_mangle_type_specialized(ctx, NULL, NULL, concrete);
+        fprintf(out, "  rae_drop_struct_%s(&this->%.*s);\n", fmangled,
+                (int)f->name.len, f->name.data);
+      }
+    }
+    fprintf(out, "}\n\n");
+  }
+  } // end Layer 5 prototype gate (compiled-out)
 
   // Emit top-level `let` globals as static C variables. We bundle every
   // imported module into one translation unit, so plain `static` works

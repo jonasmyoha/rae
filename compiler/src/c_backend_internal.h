@@ -71,6 +71,15 @@ typedef struct {
   // from the function. Read by emit_implicit_drops_for_body to skip
   // the auto-drop emission.
   bool local_moved[256];
+  // Layer 5 (docs/scope-exit-dealloc.md) ownership gate: true when
+  // a user-struct let was constructed in place (struct literal or
+  // auto-init) and so genuinely owns its heap. False for call-result
+  // bindings — even if the callee returns plain T, our runtime
+  // doesn't deep-copy structs, so the binding's heap pointers alias
+  // someone else's storage and auto-drop would double-free. The
+  // long-term fix is making `=` deep-copy for heap-owning T;
+  // until then this flag is the conservative gate.
+  bool local_struct_owns_heap[256];
   size_t local_count;
   bool returns_value;
   size_t temp_counter;
