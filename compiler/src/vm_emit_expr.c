@@ -302,10 +302,19 @@ bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
           Str type_name = vm_get_local_type_name(compiler, operand->as.member.object->as.ident);
           TypeEntry* type = type_table_find(&compiler->compiler_ctx->types, type_name);
           int field_index = type_entry_find_field(type, operand->as.member.member);
-          
+
           emit_op(compiler, is_mod ? OP_MOD_FIELD : OP_VIEW_FIELD, (int)expr->line);
           emit_uint32(compiler, (uint32_t)field_index, (int)expr->line);
           return true;
+        } else if (operand->kind == AST_EXPR_CALL || operand->kind == AST_EXPR_METHOD_CALL) {
+          // VM target: `view/mod <call>` is allowed when the callee
+          // already returns a borrow — the VM's value system doesn't
+          // distinguish view/mod from a plain value, so we just compile
+          // the call and let the result flow through. The C backend
+          // handles the same form by taking the call's lvalue address.
+          // Used by lib/ui/ecs.rae componentView/componentMod and the
+          // `ret view rae_ext_rae_buf_get(...)` it relies on.
+          return compile_expr(compiler, operand);
         } else {
           diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "view/mod can only be applied to lvalues (identifiers or members)");
           compiler->had_error = true;
