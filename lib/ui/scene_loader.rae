@@ -32,7 +32,7 @@ func loadScene(world: mod UiWorld, scene: view Scene) ret Int {
   let nodeIdsMap: mod StringMap(Int) => world.nodeIds
   let i: Int = 0
   loop i < nodeCount {
-    let node: SceneNode = sceneNodeAt(this: scene, idx: i)
+    let node: view SceneNode => sceneNodeAt(this: scene, idx: i)
     let entity: Int = createEntity(world: world)
     appendIntListSL(lst: entitiesByNodeIndex, value: entity)
     nodeIdsMap.set(k: node.nodeId, value: entity)
@@ -43,7 +43,7 @@ func loadScene(world: mod UiWorld, scene: view Scene) ret Int {
   let docView: view JsonDoc => scene.doc
   let j: Int = 0
   loop j < nodeCount {
-    let node: SceneNode = sceneNodeAt(this: scene, idx: j)
+    let node: view SceneNode => sceneNodeAt(this: scene, idx: j)
     let entity: Int = entitiesByNodeIndex.get(index: j)
 
     # Always tag the entity with NodeId + Name (label = nodeId by default)
@@ -82,7 +82,7 @@ func loadScene(world: mod UiWorld, scene: view Scene) ret Int {
   # ---------- pass 3: hierarchy (Children + ParentLink) ----------
   let p: Int = 0
   loop p < nodeCount {
-    let node: SceneNode = sceneNodeAt(this: scene, idx: p)
+    let node: view SceneNode => sceneNodeAt(this: scene, idx: p)
     let parentEntity: Int = entitiesByNodeIndex.get(index: p)
     let kn: Int = node.childrenIds.length
     if kn > 0 {
@@ -122,7 +122,7 @@ func dumpScene(world: view UiWorld, scene: view Scene) {
   let n: Int = scene.nodes.length
   let i: Int = 0
   loop i < n {
-    let node: SceneNode = sceneNodeAt(this: scene, idx: i)
+    let node: view SceneNode => sceneNodeAt(this: scene, idx: i)
     let entityIdx: Int = sceneNodeIndex(this: scene, nodeId: node.nodeId)
     # Resolve via the world's nodeIds map (more authoritative than our
     # local list — covers later runtime additions too).
