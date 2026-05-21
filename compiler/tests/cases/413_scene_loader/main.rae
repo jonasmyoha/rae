@@ -83,7 +83,7 @@ func main() {
       log("AlbumRoot Layout: kind={lay.kind} gap={lay.gap} alignCross={lay.alignCross}")
     }
     if componentHas(this: world.childrens, entity: albumRootId) {
-      let ch: Children = componentGet(this: world.childrens, entity: albumRootId)
+      let ch: view Children => componentView(this: world.childrens, entity: albumRootId)
       log("AlbumRoot has {ch.ids.length} children")
     }
   }
@@ -93,9 +93,9 @@ func main() {
     log("BackBtn missing")
   } else {
     let backBtnId: Int = backBtnIdOpt
-    let oc: OnClick = componentGet(this: world.onClicks, entity: backBtnId)
+    let oc: view OnClick => componentView(this: world.onClicks, entity: backBtnId)
     log("BackBtn OnClick.actionId = {oc.actionId}")
-    let sp: Sprite = componentGet(this: world.sprites, entity: backBtnId)
+    let sp: view Sprite => componentView(this: world.sprites, entity: backBtnId)
     log("BackBtn Sprite.textureKey = {sp.textureKey}")
   }
 
