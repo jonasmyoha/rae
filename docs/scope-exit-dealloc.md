@@ -232,8 +232,37 @@ nested heap-owning field.
    function (createList, parseScene) survives the new codegen.
 5. **Stage 4 — Loop / block scopes**. Emit drops on each iteration
    end and each `}` exit.
-6. **Stage 5 — Struct field drops**. Synthesised per-type drop
-   functions; cascading recursion.
+6. 🚧 **Stage 5 — Struct field drops**. Synthesised per-type drop
+   functions; cascading recursion. **Status: deferred.** A working
+   implementation existed (see git history near 2026-05-21) that
+   collected every user struct transitively owning heap, emitted
+   `rae_drop_struct_<Type>` for each, and called the per-element
+   `drop(T)` overload for container fields. It tripped two distinct
+   problems that need a deeper redesign before relanding:
+
+   - **Aliasing.** `let ch: Children = componentGet(...)` shallow-
+     copies a struct that aliases world storage. Auto-dropping `ch`
+     on scope exit freed the storage the world still pointed at,
+     corrupting the heap. Gating Layer 5 to fire only on bindings
+     constructed in-place (struct literal / auto-init) sidesteps
+     this, but means the "transferred ownership of a return value"
+     case (createUiWorld, parseScene, …) still leaks.
+   - **Mangler interaction.** Calling `rae_mangle_specialized_function`
+     for `drop(T)` on every container-typed field of every struct
+     reachable in the program forced the mangler to specialise types
+     (JsonValue, AnimState, …) that no other call site had touched.
+     The substitution path through `mod List(T)` crashed inside
+     `mangle_type_recursive_specialized` for at least one such type.
+
+   The right next step is probably to (a) make the language-level
+   ownership model decide who drops a return value (caller-side
+   `let owned: T = own f()` and callee-side `ret own T`) so we
+   never auto-drop on bare call-result bindings, and (b) refactor
+   the spec-list emission so synthesised drops go through the same
+   discovery pass as regular calls, instead of being injected at the
+   end. Until then, struct lets that transitively own heap leak
+   their heap at scope exit. Containers (List/StringMap/IntMap)
+   still auto-drop via Layers 1–4.
 
 Each stage ships independently and the test suite enforces that
 the leak metric only ever goes down.
