@@ -97,6 +97,32 @@ func componentGet(T)(this: view ComponentTable(T), entity: Int) ret T {
   ret v
 }
 
+# Borrow a read-only reference into the table's storage. Use this
+# instead of `componentGet` whenever the component type transitively
+# owns heap (a List, a StringMap, a String — anything where a shallow
+# struct memcpy would alias the table's heap). The `view T` return
+# makes Rae treat the binding as a borrow: no auto-drop, no
+# ownership claim, just a window into the world's memory.
+func componentView(T)(this: view ComponentTable(T), entity: Int) ret view T {
+  let idx: Int = componentIndexOf(this, entity: entity)
+  let safeIdx: Int = idx
+  if safeIdx < 0 {
+    safeIdx = 0
+  }
+  ret view rae_ext_rae_buf_get(buf: this.denseData.data, index: safeIdx)
+}
+
+# Borrow a mutable reference into the table's storage. Mutating
+# through the returned ref writes directly to the component slot.
+func componentMod(T)(this: mod ComponentTable(T), entity: Int) ret mod T {
+  let idx: Int = componentIndexOf(this, entity: entity)
+  let safeIdx: Int = idx
+  if safeIdx < 0 {
+    safeIdx = 0
+  }
+  ret mod rae_ext_rae_buf_get(buf: this.denseData.data, index: safeIdx)
+}
+
 # Add or replace the component for `entity`. Internally aliases the
 # two inner lists so the mutation propagates on both targets.
 func componentSet(T)(this: mod ComponentTable(T), entity: Int, data: T) {
