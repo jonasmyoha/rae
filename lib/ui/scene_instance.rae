@@ -253,7 +253,7 @@ func mountSceneInstance(
   let nodeIdsMap: mod StringMap(Int) => world.nodeIds
   let i: Int = 0
   loop i < nodeCount {
-    let node: SceneNode = sceneNodeAt(this: scene, idx: i)
+    let node: view SceneNode => sceneNodeAt(this: scene, idx: i)
     let entity: Int = mountEntity
     if i is not rootIdx {
       entity = createEntity(world: world)
@@ -269,7 +269,7 @@ func mountSceneInstance(
   let docView: view JsonDoc => scene.doc
   let j: Int = 0
   loop j < nodeCount {
-    let node: SceneNode = sceneNodeAt(this: scene, idx: j)
+    let node: view SceneNode => sceneNodeAt(this: scene, idx: j)
     let entity: Int = entitiesByNodeIndex.get(index: j)
     let isRoot: Bool = j is rootIdx
 
@@ -306,7 +306,7 @@ func mountSceneInstance(
   # Pass 3: build hierarchy (Children + ParentLink).
   let p: Int = 0
   loop p < nodeCount {
-    let node: SceneNode = sceneNodeAt(this: scene, idx: p)
+    let node: view SceneNode => sceneNodeAt(this: scene, idx: p)
     let parentEntity: Int = entitiesByNodeIndex.get(index: p)
     let kn: Int = node.childrenIds.length
     if kn > 0 {

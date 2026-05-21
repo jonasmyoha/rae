@@ -159,17 +159,13 @@ bool emit_implicit_drops_for_body(CFuncContext* ctx, FILE* out,
       fprintf(out, "  %s(&%.*s);\n", drop_name,
               (int)name.len, name.data);
     } else {
-      // Layer 5 — user struct that transitively owns heap. Gate:
-      // only fire when the binding genuinely owns its heap (struct
-      // literal `{ ... }` or auto-init). Call-result bindings
-      // shallow-alias caller-owned heap (stdlib hasn't been fully
-      // migrated to `view T` returns yet); auto-dropping those
-      // would corrupt the original. See `local_struct_owns_heap`
-      // in c_backend_internal.h for the migration roadmap.
-      // Generic-instance structs (Stack(Int) etc.) are also
-      // skipped: those need a user-defined `drop(T)` overload
-      // mirroring ComponentTable's pattern in lib/ui/ecs.rae.
-      if (!ctx->local_struct_owns_heap[idx]) continue;
+      // Layer 5 — user struct that transitively owns heap. Per
+      // docs/ownership-model.md, plain `T` always owns. Stdlib
+      // functions that return shallow aliases must use `view T`
+      // (e.g. componentView, sceneNodeAt) so they don't land here.
+      // Generic-instance structs (Stack(Int), ComponentTable(T))
+      // still need user-defined `drop(T)` overloads — Layer 5 only
+      // synthesises `rae_drop_struct_` for non-generic structs.
       if (type->generic_args) continue;
       const char* struct_mangled = rae_mangle_type_specialized(
           ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type);
