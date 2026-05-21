@@ -142,6 +142,11 @@ bool emit_implicit_drops_for_body(CFuncContext* ctx, FILE* out,
 bool is_drop_target_type(const AstTypeRef* type);
 // Find the `drop` overload whose receiver-base matches `container_base`.
 const AstFuncDecl* find_drop_overload_for(CFuncContext* ctx, Str container_base);
+// Layer 5 (docs/scope-exit-dealloc.md): does the type transitively own
+// heap storage? Returns true for List/StringMap/IntMap directly, and
+// for user structs with at least one heap-owning field.
+bool type_owns_heap_storage(CompilerContext* cctx, const AstModule* module,
+                            const AstTypeRef* type, int depth);
 // Move tracking helpers (Stage 3 of docs/ownership-model.md).
 void mark_local_moved_by_name(CFuncContext* ctx, Str name);
 void mark_expr_moved_if_local(CFuncContext* ctx, const AstExpr* expr);

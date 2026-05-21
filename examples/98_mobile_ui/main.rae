@@ -92,6 +92,45 @@ func main() {
   let screenshotEnv: String = getEnv(name: "RAE_UI_SCREENSHOT")
   let bg: Color = { r: 32, g: 32, b: 36, a: 255 }
 
+  # Memory-stress mode: with `RAE_UI_STRESS_REBUILDS=1`, rebuilds the
+  # world `stressN` times in a tight loop (no input, no draw) and
+  # logs every 100 iterations so an external script can sample RSS
+  # against the printed iteration count. Used to verify that the
+  # Stage 3 auto-drop pipeline (docs/scope-exit-dealloc.md +
+  # docs/ownership-model.md) actually reclaims each world's heap
+  # storage at end-of-frame instead of leaking it permanently.
+  let stressEnv: String = getEnv(name: "RAE_UI_STRESS_REBUILDS")
+  if stressEnv.length() > 0 {
+    let stressN: Int = 50000
+    let stressI: Int = 0
+    let lastLog: Int = 0
+    # Warm-up rebuild so font / texture / scene-loader one-shots don't
+    # land in the baseline.
+    let warm: UiWorld = buildScreenWorld(screen: Screen.Album, scenes: scenes)
+    layoutSystem(world: warm)
+    transformSystem(world: warm)
+    let baselineKb: Int = processRssKb()
+    log("[stress] baseline rss_kb={baselineKb}")
+    loop stressI < stressN {
+      let stressScreen: Screen = Screen.Album
+      if (stressI - (stressI / 2) * 2) is 1 {
+        stressScreen = Screen.NowPlaying
+      }
+      let sworld: UiWorld = buildScreenWorld(screen: stressScreen, scenes: scenes)
+      layoutSystem(world: sworld)
+      transformSystem(world: sworld)
+      stressI = stressI + 1
+      if stressI - lastLog >= 5000 {
+        let nowKb: Int = processRssKb()
+        log("[stress] iter {stressI} rss_kb={nowKb} growth_kb={nowKb - baselineKb}")
+        lastLog = stressI
+      }
+    }
+    let finalKb: Int = processRssKb()
+    log("[stress] done {stressN} rebuilds rss_kb={finalKb} growth_kb={finalKb - baselineKb}")
+    closeWindow()
+    ret
+  }
   if screenshotEnv.length() > 0 {
     # Screenshot mode: pick the screen via `RAE_UI_SCREEN` env var
     # ("now-playing" / "album"), default to album to match the existing
