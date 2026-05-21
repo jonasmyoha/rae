@@ -291,10 +291,12 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         break;
     }
     case AST_EXPR_OWN: {
-        // `own x` — emit the inner expression's value as usual. The
-        // ownership-transfer marker is consumed by the move-tracking
-        // pass (Phase C of docs/ownership-model.md); at C level it's
-        // a no-op pass-through.
+        // `own x` — explicit ownership transfer. Mark the local moved
+        // so emit_implicit_drops_for_body skips it, then emit the
+        // inner expression's value as usual. At the C level the
+        // wrapper is a pass-through; the bit lives in
+        // ctx->local_moved.
+        mark_expr_moved_if_local(ctx, expr->as.unary.operand);
         emit_expr(ctx, expr->as.unary.operand, out, parent_prec, is_lvalue, suppress_deref);
         break;
     }
