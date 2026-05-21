@@ -193,8 +193,16 @@ bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
           } else {
               // Fallback: compile as value
               if (!compile_expr(compiler, stmt->as.let_stmt.value)) return false;
-              
+
               bool already_ref = false;
+              // When the callee declared `ret view T` / `ret mod T` but
+              // its body is `ret view <call>` over a native that returns
+              // a value (e.g. componentView -> rae_ext_rae_buf_get), the
+              // VM gets a real struct on the stack instead of a VAL_REF.
+              // Detect this and wrap: stash the value in a hidden backing
+              // slot, then push a REF to that slot so subsequent field/
+              // method accesses through the binding see a proper REF.
+              bool returns_ref_but_value = false;
               if (stmt->as.let_stmt.value->kind == AST_EXPR_CALL) {
                   const AstExpr* callee = stmt->as.let_stmt.value->as.call.callee;
                   if (callee->kind == AST_EXPR_IDENT) {
@@ -202,6 +210,7 @@ bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
                       FunctionEntry* entry = function_table_find(&compiler->compiler_ctx->functions, name);
                       if (entry && entry->returns_ref) {
                           already_ref = true;
+                          if (!entry->is_extern) returns_ref_but_value = true;
                       }
                   }
               } else if (stmt->as.let_stmt.value->kind == AST_EXPR_METHOD_CALL) {
@@ -214,14 +223,36 @@ bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
                   }
                   if (entry && entry->returns_ref) {
                       already_ref = true;
+                      if (!entry->is_extern) returns_ref_but_value = true;
                   }
               } else if (stmt->as.let_stmt.value->kind == AST_EXPR_NONE) {
                   already_ref = true;
               }
-              
+
               if (!already_ref) {
                   diag_error(compiler->file_path, (int)stmt->line, (int)stmt->column, "cannot bind reference (=>) to a value; RHS must be a reference or a function returning one");
                   return false;
+              }
+
+              if (returns_ref_but_value) {
+                  // Allocate a hidden temp local to back the borrow,
+                  // store the call result there, and replace the
+                  // top-of-stack value with a REF to that temp.
+                  char temp_name[64];
+                  snprintf(temp_name, sizeof(temp_name), "__view_temp_%zu_%zu",
+                           stmt->line, stmt->column);
+                  int backing = compiler_add_local(
+                      compiler, str_from_cstr(temp_name), type_name, false, false);
+                  if (backing < 0) return false;
+                  if (!compiler_ensure_local_capacity(
+                          compiler, compiler->local_count, (int)stmt->line)) {
+                      return false;
+                  }
+                  emit_op(compiler, OP_BIND_LOCAL, (int)stmt->line);
+                  emit_uint32(compiler, (uint32_t)backing, (int)stmt->line);
+                  bool want_mod = stmt->as.let_stmt.type && stmt->as.let_stmt.type->is_mod;
+                  emit_op(compiler, want_mod ? OP_MOD_LOCAL : OP_VIEW_LOCAL, (int)stmt->line);
+                  emit_uint32(compiler, (uint32_t)backing, (int)stmt->line);
               }
           }
           emit_op(compiler, OP_BIND_LOCAL, (int)stmt->line);
