@@ -881,6 +881,19 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       fprintf(out, "  return __out;\n}\n\n");
   }
 
+  // Layer 5 (docs/scope-exit-dealloc.md) — synthesised per-struct
+  // drop fns — is deferred. A working prototype existed here but the
+  // forward-decl + specialisation interaction with the existing
+  // generic-mangler revealed enough sharp edges (substitution of
+  // generic args inside `drop(T)(this: mod List(T))` for elem types
+  // that hadn't been touched anywhere else in the program, leading
+  // to crashes deep in the mangler) that landing it safely needs a
+  // separate, deeper redesign of how the compiler routes specialised
+  // call sites through the spec list. Until then, struct-typed lets
+  // that own heap (UiWorld, JsonDoc, …) leak their heap when they go
+  // out of scope. Containers (List / StringMap / IntMap) still auto-
+  // drop via the Layer 1–4 path in c_stmt.c::emit_implicit_drops_for_body.
+
   // Emit top-level `let` globals as static C variables. We bundle every
   // imported module into one translation unit, so plain `static` works
   // (no need for extern/header). Initialised lets get their initialiser
