@@ -276,7 +276,18 @@ static bool emit_match(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
 bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     if (!stmt) return true;
     switch (stmt->kind) {
-        case AST_STMT_EXPR: emit_expr(ctx, stmt->as.expr_stmt, out, PREC_LOWEST, false, false); fprintf(out, ";\n"); break;
+        case AST_STMT_EXPR: {
+            // Stage 4: wrap with string-pool mark/flush. `rae_ext_rae_str_interp`
+            // registers each interp result; flush at the end of this expression
+            // statement cleans up any temps the expression created (the common
+            // case: `log("iter {i}")` where the interp result is consumed by log
+            // and never bound). Bindings (let/assign/ret) detach captured
+            // results via `rae_string_pool_take` so this flush doesn't free them.
+            fprintf(out, "  { int __rae_spm = rae_string_pool_mark(); ");
+            emit_expr(ctx, stmt->as.expr_stmt, out, PREC_LOWEST, false, false);
+            fprintf(out, "; rae_string_pool_flush(__rae_spm); }\n");
+            break;
+        }
         case AST_STMT_LET: {
             fprintf(out, "  ");
             emit_type_ref_as_c_type(ctx, stmt->as.let_stmt.type, out, false);
@@ -409,7 +420,22 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     }
                 }
                 if (needs_box) fprintf(out, "rae_any((");
+                // Stage 4: if the let captures a String, detach any temp-pool
+                // entry the RHS produced so the subsequent statement-end
+                // flush doesn't free the binding's data. `rae_string_pool_take`
+                // is a no-op when the pointer isn't actually in the pool, so
+                // it's safe to wrap unconditionally for any non-borrow String
+                // let.
+                bool wrap_str_take = false;
+                if (stmt->as.let_stmt.type
+                    && !stmt->as.let_stmt.type->is_view
+                    && !stmt->as.let_stmt.type->is_mod) {
+                    Str lbase = get_base_type_name(stmt->as.let_stmt.type);
+                    if (str_eq_cstr(lbase, "String")) wrap_str_take = true;
+                }
+                if (wrap_str_take) fprintf(out, "rae_string_pool_take(");
                 emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, false, false);
+                if (wrap_str_take) fprintf(out, ")");
                 if (needs_box) fprintf(out, "))");
                 ctx->has_expected_type = false;
             } else {
@@ -490,7 +516,18 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     emit_type_ref_as_c_type(ctx, target_tr, out, true);
                     fprintf(out, ")");
                 }
+                // Stage 4: see the matching block in AST_STMT_LET — if the
+                // assignment target is a String, detach any pool entry from
+                // the RHS so the surrounding statement flush doesn't free
+                // the binding's data.
+                bool wrap_str_take_a = false;
+                if (target_tr && !target_tr->is_view && !target_tr->is_mod) {
+                    Str tbase = get_base_type_name(target_tr);
+                    if (str_eq_cstr(tbase, "String")) wrap_str_take_a = true;
+                }
+                if (wrap_str_take_a) fprintf(out, "rae_string_pool_take(");
                 emit_expr(ctx, stmt->as.assign_stmt.value, out, PREC_LOWEST, false, false);
+                if (wrap_str_take_a) fprintf(out, ")");
                 ctx->has_expected_type = had_exp;
                 ctx->expected_type = saved_exp;
             }
