@@ -1,0 +1,50 @@
+# Focused leak test: List(T) where T transitively owns heap.
+#
+# Before Layer 5 element-drop synthesis, `drop(T)(List(T))` just
+# called `buf_free(this.data)` — so per-element heap (e.g. a List
+# inside each struct) leaked. This test fills many transient
+# `List(Foo)` lists, each Foo carrying its own `List(Int)`, drops
+# them, and asserts RSS growth stays bounded.
+#
+# String fields inside elements are intentionally NOT covered here
+# — `rae_drop_String` (literal-vs-heap distinction) is a separate
+# follow-up; see docs/scope-exit-dealloc.md Layer 5 "deferred"
+# notes. A future test will guard that path.
+import core
+import sys
+
+type Foo {
+  ids: List(Int)
+}
+
+func transientList() {
+  let xs: List(Foo) = createList(Foo, initialCap: 64)
+  let i: Int = 0
+  loop i < 64 {
+    let inner: List(Int) = createList(Int, initialCap: 4)
+    inner.add(value: i)
+    inner.add(value: i + 1)
+    inner.add(value: i + 2)
+    let f: Foo = { ids: own inner }
+    xs.add(value: own f)
+    i = i + 1
+  }
+}
+
+func main() {
+  transientList()
+  let baselineKb: Int = processRssKb()
+  let iterations: Int = 5000
+  let i: Int = 0
+  loop i < iterations {
+    transientList()
+    i = i + 1
+  }
+  let growthKb: Int = processRssKb() - baselineKb
+  log("iterations: {iterations}")
+  if growthKb > 5000 {
+    log("verdict: LEAK")
+  } else {
+    log("verdict: OK")
+  }
+}
