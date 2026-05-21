@@ -24,9 +24,27 @@ typedef bool rae_Bool;
 typedef int8_t rae_Bool;
 #endif
 
+// Rae's owned-vs-borrowed String. `data` is the UTF-8 byte buffer
+// (we keep it NUL-terminated in heap-allocated strings for cheap
+// interop with C string APIs, but length is the source of truth).
+//
+// Ownership model (see docs/scope-exit-dealloc.md Layer 5 + the
+// String-ownership design):
+//   - is_owned == 0: borrowed / static literal. `drop` must NOT free.
+//                    capacity is meaningless (kept 0).
+//   - is_owned == 1: owned heap allocation made with malloc.
+//                    `drop` frees `data`. `capacity` is the malloc'd
+//                    size (in bytes, including the trailing NUL).
+//
+// Positional initializers like `(rae_String){p, n}` from generated
+// C still work — C99 zero-fills the remaining fields, giving
+// {data=p, len=n, capacity=0, is_owned=0}. That's the correct shape
+// for a borrowed literal, which is what those sites mean.
 typedef struct {
   uint8_t* data;
   int64_t len;
+  int64_t capacity;
+  int8_t is_owned;
 } rae_String;
 
 typedef enum {
@@ -288,7 +306,38 @@ void rae_ext_rae_log_stream_list_typed(void* data, int64_t length, int64_t capac
 rae_String rae_ext_rae_str_from_cstr(const void* s);
 rae_String rae_ext_rae_str_from_buf(const uint8_t* data, int64_t len);
 void* rae_ext_rae_str_to_cstr(rae_String s);
+// Free `s.data` only when `s.is_owned`. Safe to call on borrowed
+// strings / static literals — those are no-ops. Codegen calls this
+// from auto-emitted scope-exit drops AND from explicit `drop(s)`.
 void rae_ext_rae_str_free(rae_String s);
+
+// Deep-copy: returns an independently-owned String with freshly
+// malloc'd data. Used by codegen wherever Rae semantics call for
+// a value copy: `let b: String = a`, struct field init with a
+// String, pass-by-value into a `String` (not `view String`) param.
+rae_String rae_string_copy(rae_String src);
+
+// Construct a borrowed/literal String. data must outlive the
+// returned struct (typically because it's a static literal or a
+// pool entry the compiler emitted). is_owned=0, capacity=0.
+RAE_UNUSED static inline rae_String rae_string_from_literal(const uint8_t* data, int64_t len) {
+  return (rae_String){(uint8_t*)data, len, 0, 0};
+}
+
+// Pointer-form drop. Existing `rae_ext_rae_str_free` takes by value
+// for legacy ABI reasons; the auto-drop pass prefers pointer form
+// so it can clear is_owned to prevent double-free if a drop site
+// gets reached twice through some path.
+RAE_UNUSED static inline void rae_string_drop(rae_String* s) {
+  if (!s) return;
+  if (s->is_owned && s->data) {
+    free(s->data);
+  }
+  s->data = NULL;
+  s->len = 0;
+  s->capacity = 0;
+  s->is_owned = 0;
+}
 
 rae_String rae_ext_rae_str_concat(rae_String a, rae_String b);
 rae_String rae_ext_rae_str_concat_cstr(rae_String a, rae_String b); // Legacy/helper name
@@ -343,7 +392,7 @@ rae_String rae_ext_rae_str_any(RaeAny v); // String-format any boxed value (incl
 RAE_UNUSED static rae_String rae_json_build(const char* s, int64_t len) {
     uint8_t* copy = (uint8_t*)malloc((size_t)len + 1);
     if (copy) { memcpy(copy, s, (size_t)len); copy[len] = 0; }
-    return (rae_String){copy, len};
+    return (rae_String){copy, len, len + 1, 1};
 }
 int64_t rae_json_extract_int(rae_String json, const char* key);
 double rae_json_extract_float(rae_String json, const char* key);
