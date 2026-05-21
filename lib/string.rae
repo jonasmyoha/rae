@@ -38,51 +38,56 @@ func toCStr(this: String) ret Buffer(Any) {
 
 func rae_ext_rae_str_at(s: String, index: Int) extern ret Char32
 
-func at(this: String, index: Int) ret Char32 {
+func at(this: view String, index: Int) ret Char32 {
     ret rae_ext_rae_str_at(s: this, index: index)
 }
 
-func length(this: String) ret Int {
+# Stage 5: read-only String helpers take `view String` so callers
+# never have to pay a deep-copy at the call site. The externs they
+# wrap still take `rae_String` by value at the C level; the codegen
+# auto-derefs the view when emitting the call.
+
+func length(this: view String) ret Int {
   ret rae_str_len(s: this)
 }
 
-func compare(this: String, other: String) ret Int {
+func compare(this: view String, other: view String) ret Int {
   ret rae_str_compare(a: this, b: other)
 }
 
-func equals(this: String, other: String) ret Bool {
+func equals(this: view String, other: view String) ret Bool {
   ret rae_str_eq(a: this, b: other)
 }
 
-func hash(this: String) ret Int {
+func hash(this: view String) ret Int {
   ret rae_str_hash(s: this)
 }
 
-func concat(this: String, other: String) ret String {
+func concat(this: view String, other: view String) ret String {
   ret rae_str_concat(a: this, b: other)
 }
 
-func sub(this: String, start: Int, len: Int) ret String {
+func sub(this: view String, start: Int, len: Int) ret String {
   ret rae_str_sub(s: this, start: start, len: len)
 }
 
-func contains(this: String, sub: String) ret Bool {
+func contains(this: view String, sub: view String) ret Bool {
   ret rae_str_contains(s: this, sub: sub)
 }
 
-func startsWith(this: String, prefix: String) ret Bool {
+func startsWith(this: view String, prefix: view String) ret Bool {
   ret rae_str_starts_with(s: this, prefix: prefix)
 }
 
-func endsWith(this: String, suffix: String) ret Bool {
+func endsWith(this: view String, suffix: view String) ret Bool {
   ret rae_str_ends_with(s: this, suffix: suffix)
 }
 
-func indexOf(this: String, sub: String) ret Int {
+func indexOf(this: view String, sub: view String) ret Int {
   ret rae_str_index_of(s: this, sub: sub)
 }
 
-func trim(this: String) ret String {
+func trim(this: view String) ret String {
   ret rae_str_trim(s: this)
 }
 
@@ -130,10 +135,10 @@ func join(this: view List(String), sep: String) ret String {
   ret result
 }
 
-func toFloat(this: String) ret Float {
+func toFloat(this: view String) ret Float {
   ret rae_str_to_f64(s: this)
 }
 
-func toInt(this: String) ret Int {
+func toInt(this: view String) ret Int {
   ret rae_str_to_i64(s: this)
 }
