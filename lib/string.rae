@@ -28,6 +28,18 @@ func rae_str_to_i64(s: String) extern ret Int
 func rae_ext_rae_str_from_cstr(s: view Buffer(Any)) extern ret String
 func rae_ext_rae_str_to_cstr(s: String) extern ret Buffer(Any)
 
+# Deep-copy a String into a fresh owned heap allocation. Use this
+# in any accessor that would otherwise return a shallow alias of
+# someone else's storage — see jsonString in lib/json.rae for the
+# canonical case. The result is always is_owned=1, so the caller
+# can safely store it in a binding/struct field and rely on cascade
+# drop to free it without double-freeing the source.
+func rae_ext_rae_string_copy(s: view String) extern ret String
+
+func stringCopy(s: view String) ret String {
+  ret rae_ext_rae_string_copy(s: s)
+}
+
 func fromCStr(s: view Buffer(Any)) ret String {
     ret rae_ext_rae_str_from_cstr(s: s)
 }

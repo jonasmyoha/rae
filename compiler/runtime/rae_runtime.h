@@ -318,6 +318,16 @@ void rae_ext_rae_str_free(rae_String s);
 // String, pass-by-value into a `String` (not `view String`) param.
 rae_String rae_string_copy(rae_String src);
 
+// Rae extern alias for rae_string_copy — Rae's extern resolution
+// expects the C symbol to share the `func ...` declaration name,
+// and `rae_ext_rae_string_copy` is what lib/string.rae declares.
+// Takes a `view String` (rae_View_String in C) so the Rae signature
+// matches; derefs and forwards.
+RAE_UNUSED static inline rae_String rae_ext_rae_string_copy(rae_View_String src) {
+  if (!src.ptr) return (rae_String){NULL, 0, 0, 0};
+  return rae_string_copy(*src.ptr);
+}
+
 // Construct a borrowed/literal String. data must outlive the
 // returned struct (typically because it's a static literal or a
 // pool entry the compiler emitted). is_owned=0, capacity=0.

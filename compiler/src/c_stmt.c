@@ -425,7 +425,9 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 // flush doesn't free the binding's data. `rae_string_pool_take`
                 // is a no-op when the pointer isn't actually in the pool, so
                 // it's safe to wrap unconditionally for any non-borrow String
-                // let.
+                // let. Deep-copy-on-`=` and auto-drop for String locals are
+                // future work — they need every early-return path to flush
+                // pools and run implicit drops, which isn't wired up yet.
                 bool wrap_str_take = false;
                 if (stmt->as.let_stmt.type
                     && !stmt->as.let_stmt.type->is_view
@@ -516,10 +518,8 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     emit_type_ref_as_c_type(ctx, target_tr, out, true);
                     fprintf(out, ")");
                 }
-                // Stage 4: see the matching block in AST_STMT_LET — if the
-                // assignment target is a String, detach any pool entry from
-                // the RHS so the surrounding statement flush doesn't free
-                // the binding's data.
+                // Stage 4: pool_take for String-typed reassign RHS so
+                // the statement flush doesn't free what we just stored.
                 bool wrap_str_take_a = false;
                 if (target_tr && !target_tr->is_view && !target_tr->is_mod) {
                     Str tbase = get_base_type_name(target_tr);
