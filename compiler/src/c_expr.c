@@ -422,7 +422,21 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                     mark_expr_moved_if_local(ctx, f->value);
                 }
             }
+            // Stage 8 pairing: struct-literal String field needs
+            // pool_take so the surrounding scope's flush doesn't free
+            // the heap that the field now references. Without this,
+            // any field initialised from a String-returning function
+            // (which Stage 8 leaves in the pool) gets its heap swept
+            // out from under the struct's field, surfacing as random
+            // String values appearing under the wrong field name.
+            bool wrap_str_take_field = false;
+            if (field_tr && !field_tr->is_view && !field_tr->is_mod && !field_tr->is_opt) {
+                Str fbase = get_base_type_name(field_tr);
+                if (str_eq_cstr(fbase, "String")) wrap_str_take_field = true;
+            }
+            if (wrap_str_take_field) fprintf(out, "rae_string_pool_take(");
             emit_expr(ctx, f->value, out, PREC_LOWEST, false, false);
+            if (wrap_str_take_field) fprintf(out, ")");
             if (f->next) fprintf(out, ", ");
         }
         ctx->has_expected_type = saved_has_exp;
