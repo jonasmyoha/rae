@@ -87,6 +87,13 @@ typedef struct {
   // lets unconditionally.
   bool local_struct_owns_heap[256];
   size_t local_count;
+  // Stage 7 early-return cleanup: the index in `locals[]` after which
+  // entries are this function's `let` bindings (i.e. NOT parameters).
+  // emit_function records this right after the parameter list; the
+  // ret-stmt epilogue uses it to know which range of locals to drop
+  // before each return. Set to (size_t)-1 when not inside a function
+  // body emit.
+  size_t func_first_let_idx;
   bool returns_value;
   size_t temp_counter;
   AstTypeRef expected_type;

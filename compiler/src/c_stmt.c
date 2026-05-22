@@ -536,95 +536,89 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
         }
         case AST_STMT_RET: {
             // Stage 3 move tracking: returning an owned local moves
-            // it out of the function. Mark it so the end-of-body drop
-            // pass — which fires *after* this point in code order if
-            // ret is the last statement — skips it. Conservative: if
-            // the ret value is a compound expression (call, struct
-            // ctor wrapping our local, etc.), only the top-level
-            // ident gets marked here; that's fine because end-of-body
-            // is unreachable after `return` in C so the locals stay
-            // alive long enough.
+            // it out of the function. mark_expr_moved tells the drop
+            // pass below to skip its auto-drop.
             if (stmt->as.ret_stmt.values && stmt->as.ret_stmt.values->value) {
                 mark_expr_moved_if_local(ctx, stmt->as.ret_stmt.values->value);
             }
-            if (ctx->defer_stack.count > 0) {
-                // Has defers — emit them before returning
-                if (stmt->as.ret_stmt.values) {
-                    // Store return value in temp, emit defers, then return temp
-                    const char* rt = c_return_type(ctx, ctx->func_decl);
-                    fprintf(out, "  %s __ret_val = ", rt);
-                    const AstTypeRef* ret_type = ctx->func_decl && ctx->func_decl->returns ? ctx->func_decl->returns->type : NULL;
-                    bool is_ref_return = ret_type && (ret_type->is_view || ret_type->is_mod);
-                    bool is_prim_ref_return = is_ref_return && is_primitive_type(get_base_type_name(ret_type));
-                    if (is_prim_ref_return) {
-                        fprintf(out, "("); emit_type_ref_as_c_type(ctx, ret_type, out, false);
-                        fprintf(out, "){ .ptr = &"); emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, true, true);
-                        fprintf(out, " }");
-                    } else if (is_ref_return) {
-                        // Non-primitive view/mod return: C type is a raw
-                        // pointer (T*), so take the address of the lvalue.
-                        fprintf(out, "&");
-                        emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_UNARY, true, true);
-                    } else {
-                        bool needs_any_wrap = ret_type && (ret_type->is_opt || str_eq_cstr(get_base_type_name(ret_type), "Any"));
-                        bool val_is_box = stmt->as.ret_stmt.values->value->kind == AST_EXPR_BOX;
-                        if (needs_any_wrap && !val_is_box) { fprintf(out, "rae_any(("); emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, false, false); fprintf(out, "))"); }
-                        else emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, false, false);
-                    }
-                    fprintf(out, ";\n");
-                    emit_defers(ctx, 0, out);
-                    fprintf(out, "  return __ret_val;\n");
+
+            // Stage 7 cleanup epilogue: every ret runs the same drops +
+            // pool flush that fallthrough end-of-body runs. Without
+            // this, parsing-heavy functions (parseScene, deserOnClick,
+            // …) that always return via early `ret` skip the cleanup
+            // and leak every heap String they alloc'd during the call.
+            //
+            // Shape:
+            //   { RetT __ret_val = <value>;                       // before drops
+            //     __ret_val = rae_string_pool_take(__ret_val);    // String returns only
+            //     defers
+            //     emit_implicit_drops_for_body(...)               // dropped locals
+            //     rae_string_pool_flush(__rae_spm_func);          // pool sweep
+            //     return __ret_val; }
+            //
+            // The pool_take detaches the return value from the temp
+            // pool so the subsequent flush doesn't free what the caller
+            // is about to receive. Move tracking above keeps the drop
+            // pass from freeing a local whose data IS the return value.
+            const AstTypeRef* ret_type = ctx->func_decl && ctx->func_decl->returns ? ctx->func_decl->returns->type : NULL;
+            bool has_value = stmt->as.ret_stmt.values && stmt->as.ret_stmt.values->value;
+            bool is_main_fn = ctx->func_decl && str_eq_cstr(ctx->func_decl->name, "main");
+
+            fprintf(out, "  {\n");
+
+            if (has_value) {
+                const char* rt = c_return_type(ctx, ctx->func_decl);
+                fprintf(out, "    %s __ret_val = ", rt);
+                bool is_ref_return = ret_type && (ret_type->is_view || ret_type->is_mod);
+                bool is_prim_ref_return = is_ref_return && is_primitive_type(get_base_type_name(ret_type));
+                if (is_prim_ref_return) {
+                    fprintf(out, "("); emit_type_ref_as_c_type(ctx, ret_type, out, false);
+                    fprintf(out, "){ .ptr = &"); emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, true, true);
+                    fprintf(out, " }");
+                } else if (is_ref_return) {
+                    fprintf(out, "&");
+                    emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_UNARY, true, true);
                 } else {
-                    // Bare return
-                    emit_defers(ctx, 0, out);
-                    fprintf(out, "  return ");
-                    if (ctx->func_decl && str_eq_cstr(ctx->func_decl->name, "main")) fprintf(out, "0");
-                    else {
-                        const AstTypeRef* ret_type = ctx->func_decl && ctx->func_decl->returns ? ctx->func_decl->returns->type : NULL;
-                        if (ret_type) {
-                            if (ret_type->is_opt) fprintf(out, "rae_any_none()");
-                            else emit_auto_init(ctx, ret_type, out);
-                        }
-                    }
-                    fprintf(out, ";\n");
-                }
-            } else {
-                // No defers — direct return
-                fprintf(out, "  return ");
-                if (stmt->as.ret_stmt.values) {
-                    const AstTypeRef* ret_type = ctx->func_decl && ctx->func_decl->returns ? ctx->func_decl->returns->type : NULL;
-                    bool is_ref_return = ret_type && (ret_type->is_view || ret_type->is_mod);
-                    bool is_prim_ref_return = is_ref_return && is_primitive_type(get_base_type_name(ret_type));
-                    if (is_prim_ref_return) {
-                        fprintf(out, "("); emit_type_ref_as_c_type(ctx, ret_type, out, false);
-                        fprintf(out, "){ .ptr = &"); emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, true, true);
-                        fprintf(out, " }");
-                    } else if (is_ref_return) {
-                        // Non-primitive view/mod return: C type is a raw
-                        // pointer (T*), so take the address of the lvalue.
-                        fprintf(out, "&");
-                        emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_UNARY, true, true);
-                    } else {
-                        bool needs_any_wrap = ret_type && (ret_type->is_opt || str_eq_cstr(get_base_type_name(ret_type), "Any"));
-                        bool val_is_box = stmt->as.ret_stmt.values->value->kind == AST_EXPR_BOX;
-                        if (needs_any_wrap && !val_is_box) { fprintf(out, "rae_any(("); emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, false, false); fprintf(out, "))"); }
-                        else emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, false, false);
-                    }
-                } else {
-                    if (ctx->func_decl && str_eq_cstr(ctx->func_decl->name, "main")) fprintf(out, "0");
-                    else {
-                        const AstTypeRef* ret_type = ctx->func_decl && ctx->func_decl->returns ? ctx->func_decl->returns->type : NULL;
-                        if (ret_type) {
-                            if (ret_type->is_opt) fprintf(out, "rae_any_none()");
-                            else emit_auto_init(ctx, ret_type, out);
-                        }
-                    }
+                    bool needs_any_wrap = ret_type && (ret_type->is_opt || str_eq_cstr(get_base_type_name(ret_type), "Any"));
+                    bool val_is_box = stmt->as.ret_stmt.values->value->kind == AST_EXPR_BOX;
+                    if (needs_any_wrap && !val_is_box) { fprintf(out, "rae_any(("); emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, false, false); fprintf(out, "))"); }
+                    else emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, false, false);
                 }
                 fprintf(out, ";\n");
+
+                // String return: detach from pool so the flush doesn't
+                // free the heap the caller is about to claim. Skip for
+                // `opt String` (the C type is RaeAny, not rae_String)
+                // and for view/mod refs (which are pointer wrappers).
+                if (ret_type && !ret_type->is_view && !ret_type->is_mod && !ret_type->is_opt) {
+                    Str rbase = get_base_type_name(ret_type);
+                    if (str_eq_cstr(rbase, "String")) {
+                        fprintf(out, "    __ret_val = rae_string_pool_take(__ret_val);\n");
+                    }
+                }
             }
+
+            if (ctx->defer_stack.count > 0) emit_defers(ctx, 0, out);
+            if (ctx->func_first_let_idx != (size_t)-1) {
+                emit_implicit_drops_for_body(ctx, out, ctx->func_first_let_idx);
+            }
+            fprintf(out, "    rae_string_pool_flush(__rae_spm_func);\n");
+
+            if (has_value) {
+                fprintf(out, "    return __ret_val;\n");
+            } else if (is_main_fn) {
+                fprintf(out, "    return 0;\n");
+            } else if (ret_type) {
+                fprintf(out, "    return ");
+                if (ret_type->is_opt) fprintf(out, "rae_any_none()");
+                else emit_auto_init(ctx, ret_type, out);
+                fprintf(out, ";\n");
+            } else {
+                fprintf(out, "    return;\n");
+            }
+            fprintf(out, "  }\n");
             break;
-        } 
-            break;
+        }
         case AST_STMT_IF: emit_if(ctx, stmt, out); break;
         case AST_STMT_LOOP: emit_loop(ctx, stmt, out); break;
         case AST_STMT_MATCH: {
