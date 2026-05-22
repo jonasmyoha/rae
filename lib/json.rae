@@ -143,11 +143,17 @@ func jsonFloat(this: view JsonValue, fallback: Float) ret Float {
   ret fallback
 }
 
-func jsonString(this: view JsonValue, fallback: String) ret String {
+func jsonString(this: view JsonValue, fallback: view String) ret String {
+  # Deep-copy on the way out: `this.asString` aliases the JsonDoc's
+  # internal storage, and the fallback aliases the caller's local.
+  # Returning either as-is would make the caller's binding (or any
+  # struct field it lands in) share heap ownership with the source,
+  # which conflicts with cascade-drop. The independent copy means
+  # callers can drop their result freely without double-freeing.
   if this.kind is JsonKind.String {
-    ret this.asString
+    ret rae_ext_rae_string_copy(s: this.asString)
   }
-  ret fallback
+  ret rae_ext_rae_string_copy(s: fallback)
 }
 
 func jsonBool(this: view JsonValue, fallback: Bool) ret Bool {
