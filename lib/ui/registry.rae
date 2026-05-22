@@ -119,10 +119,13 @@ func optInt(doc: view JsonDoc, container: view JsonValue, key: String, fallback:
   ret jsonInt(this: v, fallback: fallback)
 }
 
-func optString(doc: view JsonDoc, container: view JsonValue, key: String, fallback: String) ret String {
+func optString(doc: view JsonDoc, container: view JsonValue, key: String, fallback: view String) ret String {
+  # Always return an independently-owned String (see jsonString
+  # for the why) so callers can hand the result to a struct field
+  # and rely on cascade drop to free it.
   let idx: Int = jsonField(doc: doc, this: container, key: key)
   if idx < 0 {
-    ret fallback
+    ret rae_ext_rae_string_copy(s: fallback)
   }
   let v: JsonValue = jsonValueAt(doc: doc, idx: idx)
   ret jsonString(this: v, fallback: fallback)

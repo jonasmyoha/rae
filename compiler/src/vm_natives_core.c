@@ -431,6 +431,25 @@ static bool native_rae_str_sub(struct VM* vm,
   return true;
 }
 
+// Deep-copy a String value into a fresh VM string. Mirrors the
+// rae_ext_rae_string_copy runtime helper used by the Compiled
+// target; lib/string.rae's stringCopy wraps both.
+static bool native_rae_string_copy(struct VM* vm,
+                                   VmNativeResult* out_result,
+                                   const Value* args,
+                                   size_t arg_count,
+                                   void* user_data) {
+  (void)vm; (void)user_data;
+  if (arg_count != 1) return false;
+  const Value* s_val = deref_value(&args[0]);
+  if (s_val->type != VAL_STRING) return false;
+  rae_String s = { s_val->as.string_value.chars, s_val->as.string_value.length };
+  rae_String res = rae_string_copy(s);
+  out_result->has_value = true;
+  out_result->value = value_string_take(res.data, (size_t)res.len);
+  return true;
+}
+
 static bool native_rae_str_contains(struct VM* vm,
                                      VmNativeResult* out_result,
                                      const Value* args,
@@ -1044,6 +1063,7 @@ bool register_default_natives(VmRegistry* registry, TickCounter* tick_counter) {
   ok = vm_registry_register_native(registry, "rae_str_at", native_rae_str_at, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_ext_rae_str_at", native_rae_str_at, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_ext_rae_str_from_cstr", native_rae_str_from_cstr, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_ext_rae_string_copy", native_rae_string_copy, NULL) && ok;
   ok = vm_registry_register_native(registry, "sizeof", native_sizeof, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_ext_rae_str_to_cstr", native_rae_str_to_cstr, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_str_to_f64", native_rae_str_to_f64, NULL) && ok;
