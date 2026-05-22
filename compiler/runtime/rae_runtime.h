@@ -385,6 +385,25 @@ RAE_UNUSED static inline rae_String rae_string_pool_take(rae_String s) {
   return s;
 }
 
+// Re-register an owned String return value into the caller's pool.
+// Used at the tail of String-returning function ret-epilogues: after
+// `pool_take(__ret_val)` detaches the result from the callee pool and
+// `pool_flush(__rae_spm_func)` sweeps callee-scope temps, this puts
+// the surviving return value back into the pool so the *caller's*
+// surrounding mark/flush can sweep it if the caller doesn't take
+// ownership (typical for nested `concat(concat(a,b), c)` chains
+// where the inner concat's heap would otherwise dangle).
+//
+// Guarded on is_owned + data so literal/borrowed/NULL returns don't
+// pollute the pool. is_owned=0 inputs (literal-backed Strings, view
+// returns) are correctly a no-op here.
+RAE_UNUSED static inline rae_String rae_string_pool_register_owned(rae_String s) {
+  if (s.is_owned && s.data) {
+    rae_string_pool_register(s.data);
+  }
+  return s;
+}
+
 // N-way interpolation/concat helper. `n` is the number of
 // rae_String parts; each is passed via varargs. Concatenates all
 // parts into a single owned heap String, frees each part whose
