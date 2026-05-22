@@ -1,37 +1,27 @@
-# Stage 8: ret-epilogue re-register for String returns. After Stage 7
-# every `ret String` did pool_take(__ret_val) then pool_flush. That
-# left __ret_val detached from any pool. When the result was bound
-# (`let s = make()`) or used in an interp/expr-stmt with a surrounding
-# mark/flush, str_free / the caller's flush cleaned up. But chained
-# `.concat()` calls (which lower to nested rae_concat_view_String)
-# had no way to free the *inner* concat result — it was returned
-# owned, used as a view-String arg, and dangled.
-#
-# Stage 8 adds a `pool_register_owned(__ret_val)` at the tail of every
-# String-returning ret-epilogue: the survivor goes back into the
-# caller's pool so the caller's mark/flush (or pool_take if the caller
-# binds) handles it. This test covers each ownership path the change
-# touches.
+# Stage 8 + `+` operator coverage: every Stage 7 ret-epilogue for a
+# String return now ends in `pool_register_owned(__ret_val)`, so
+# String-returning calls that are used as arguments to other
+# String-returning calls get cleaned up by the caller's surrounding
+# mark/flush. This test also covers the user-facing `+` operator on
+# String which lowers to the same rae_ext_rae_str_concat /
+# rae_str_concat path that `.concat(other: ...)` uses.
 import core
 import string
 import sys
 
-# Case 1: basic concat to let
-func basic(a: view String, b: view String) ret String {
-  ret a.concat(other: b)
+# Case 1: simplest `+`
+func plus2(a: view String, b: view String) ret String {
+  ret a + b
 }
 
-# Case 2: 2-level nested concat (the mobile-UI subtitle pattern)
-func nested2(a: view String, b: view String, c: view String) ret String {
-  let ab: String = a.concat(other: b)
-  ret ab.concat(other: c)
+# Case 2: nested 2-level `+`
+func plus3(a: view String, b: view String, c: view String) ret String {
+  ret a + b + c
 }
 
-# Case 3: 3-level nested concat
-func nested3(a: view String, b: view String, c: view String, d: view String) ret String {
-  let ab: String = a.concat(other: b)
-  let abc: String = ab.concat(other: c)
-  ret abc.concat(other: d)
+# Case 3: nested 3-level `+`
+func plus4(a: view String, b: view String, c: view String, d: view String) ret String {
+  ret a + b + c + d
 }
 
 # Case 4: literal-backed return — pool_register_owned guard must
@@ -40,52 +30,69 @@ func returnLiteral() ret String {
   ret "literal"
 }
 
-# Case 5: struct field initialised from a String-returning call.
-# Stage 8's pairing fix at c_expr.c wraps the field RHS in pool_take
-# so the surrounding flush doesn't free what the struct now owns.
+# Case 5: `.concat()` method still works and produces the same shape.
+func concatMethod(a: view String, b: view String) ret String {
+  ret a.concat(other: b)
+}
+
+# Case 6: struct field initialised from a String-returning `+` call.
 type Holder {
   msg: String
 }
 
 func makeHolder(label: view String) ret Holder {
-  let h: Holder = { msg: basic(a: "prefix-", b: label) }
+  let h: Holder = { msg: "prefix-" + label }
   ret h
 }
 
 func main() {
-  # Case 1: bind
-  let s1: String = basic(a: "Hello ", b: "World")
-  log("basic: {s1}")
+  # Case 1: `+` lowered to concat helper
+  let s1: String = plus2(a: "Hello ", b: "World")
+  log("plus2: {s1}")
 
-  # Case 2: 2-level
-  let s2: String = nested2(a: "1", b: "2", c: "3")
-  log("nested2: {s2}")
+  # Case 2: 2-level nested
+  let s2: String = plus3(a: "1", b: "2", c: "3")
+  log("plus3: {s2}")
 
-  # Case 3: 3-level
-  let s3: String = nested3(a: "a", b: "b", c: "c", d: "d")
-  log("nested3: {s3}")
+  # Case 3: 3-level nested
+  let s3: String = plus4(a: "a", b: "b", c: "c", d: "d")
+  log("plus4: {s3}")
 
   # Case 4: literal-backed
   let s4: String = returnLiteral()
   log("literal: {s4}")
 
-  # Case 5: struct-field init from String-returning call
+  # Case 5: `.concat()` equivalence
+  let s5: String = concatMethod(a: "foo", b: "bar")
+  log("concat: {s5}")
+
+  # Case 6: struct field init from `+`
   let h: Holder = makeHolder(label: "X")
   log("holder: {h.msg}")
 
-  # Case 6: the leak guard — RGBA-style chain that motivated Stage 8.
-  # Before the fix this leaked 3+ concat results per iteration. With
-  # the fix the slope should stay bounded.
+  # Case 7: `+` directly at call site (expr-stmt)
+  log("expr: {plus2(a: "A", b: "B")}")
+
+  # Case 8: `+` with toString in chain — the exact mobile-UI RGBA
+  # pattern that motivated the whole investigation.
+  let r: Int = 30
+  let g: Int = 40
+  let b: Int = 50
+  let av: Int = 255
+  let rgba: String = r.toString() + "," + g.toString() + "," + b.toString() + "," + av.toString()
+  log("rgba: {rgba}")
+
+  # Case 9: leak guard — 10k iterations of the nested `+` chain
+  # must not show linear String growth.
   let baselineKb: Int = processRssKb()
   let iterations: Int = 10000
   let i: Int = 0
   loop i < iterations {
-    let r: Int = 30
-    let g: Int = 40
-    let b: Int = 50
-    let av: Int = 255
-    let comma: String = ","
-    let rgba: String = r.toString().concat(other: comma).concat(other: g.toString()).concat(other: comma).concat(other: b.toString()).concat(other: comma).concat(other: av.toString())
+    let r2: Int = 30
+    let g2: Int = 40
+    let b2: Int = 50
+    let a2: Int = 255
+    let rgba2: String = r2.toString() + "," + g2.toString() + "," + b2.toString() + "," + a2.toString()
     i = i + 1
   }
   let growthKb: Int = processRssKb() - baselineKb
