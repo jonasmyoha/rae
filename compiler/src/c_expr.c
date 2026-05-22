@@ -37,6 +37,32 @@ static void emit_to_string_expr(CFuncContext* ctx, const AstExpr* operand, FILE*
     }
 }
 
+// Does this expression evaluate to a `String` (or `view String` after
+// the existing IDENT-deref) value? Used to drive the `+` → concat
+// lowering — infer_expr_type_ref doesn't always pin .toString() /
+// .concat() return types, so check shape first and fall back to type
+// inference. The recursion through nested `+` lets chains like
+// `a + b + c + d` resolve top-down without re-inferring at every node.
+static bool expr_is_string_typed(CFuncContext* ctx, const AstExpr* e) {
+    if (!e) return false;
+    if (e->kind == AST_EXPR_STRING) return true;
+    if (e->kind == AST_EXPR_INTERP) return true;
+    if (e->kind == AST_EXPR_METHOD_CALL) {
+        if (str_eq_cstr(e->as.method_call.method_name, "toString")) return true;
+        if (str_eq_cstr(e->as.method_call.method_name, "concat")) return true;
+    }
+    if (e->kind == AST_EXPR_BINARY && e->as.binary.op == AST_BIN_ADD) {
+        return expr_is_string_typed(ctx, e->as.binary.lhs) &&
+               expr_is_string_typed(ctx, e->as.binary.rhs);
+    }
+    const AstTypeRef* tr = infer_expr_type_ref(ctx, e);
+    if (tr) {
+        Str b = get_base_type_name(tr);
+        if (str_eq_cstr(b, "String")) return true;
+    }
+    return false;
+}
+
 bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_prec, bool is_lvalue, bool suppress_deref) {
   if (!expr) return true;
   switch (expr->kind) {
@@ -108,6 +134,32 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
           ctx->suppress_opt_unbox = saved_unbox;
           break;
       }
+      // String concatenation: `lhs + rhs` lowers to a direct runtime
+      // call when both sides are String (any combination of owned
+      // String and view String). Mirrors what `.concat(other: ...)`
+      // produces, so DX-friendly `dir + "/" + fileName` is equivalent
+      // to the explicit method form. The runtime helper takes
+      // rae_String by value; view-String identifiers already emit as
+      // `(*x.ptr)` via the IDENT path above, so no extra wrapping is
+      // needed here. After #197 the helper pool-registers its result
+      // and after #198 the surrounding flush / pool_take handles
+      // ownership, so nested chains like `(a + b) + c` don't leak.
+      // Cross-type concat (e.g. `"count: " + count`) is deliberately
+      // NOT supported — the user is expected to write `"count: " +
+      // count.toString()` or, better, the interp form `"count: {count}"`.
+      if (expr->as.binary.op == AST_BIN_ADD) {
+          if (expr_is_string_typed(ctx, expr->as.binary.lhs) &&
+              expr_is_string_typed(ctx, expr->as.binary.rhs)) {
+              fprintf(out, "rae_ext_rae_str_concat(");
+              emit_expr(ctx, expr->as.binary.lhs, out, PREC_LOWEST, false, false);
+              fprintf(out, ", ");
+              emit_expr(ctx, expr->as.binary.rhs, out, PREC_LOWEST, false, false);
+              fprintf(out, ")");
+              ctx->suppress_opt_unbox = saved_unbox;
+              break;
+          }
+      }
+
       // Float modulo: emit fmod(a, b) instead of a % b
       if (expr->as.binary.op == AST_BIN_MOD) {
           bool lhs_float = expr->as.binary.lhs->kind == AST_EXPR_FLOAT;
