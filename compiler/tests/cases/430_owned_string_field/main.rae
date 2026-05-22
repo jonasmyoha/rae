@@ -1,0 +1,89 @@
+# Phase 2 of the ownership-safe container model: struct-literal
+# String field semantics. The contract:
+#
+#   1. `let p: T = { field: src }` where field type is `String` →
+#      deep-copy `src` into `p.field`. p owns its copy. Dropping p
+#      does NOT free the caller's src.
+#
+#   2. `let p: T = { field: own src }` → move src into p.field. Source
+#      marked moved so its drop is skipped. p owns; original is dead.
+#
+#   3. `type T { field: view String }` → borrow. Field stores a non-
+#      owning view of src; dropping p must not free src.
+#
+# Before this work, struct-literal String fields shallow-aliased the
+# RHS, which let auto-drop double-free or use-after-free across the
+# caller/callee boundary (e.g. JsonParser{source: source} in
+# lib/json.rae).
+import core
+import string
+import sys
+
+type Parser {
+  source: String
+  pos: Int
+}
+
+# Case 1: bare-ident RHS → deep-copy. Both `src` and `p.source` must
+# stay alive through the function; the test prints both after building
+# p and after a hypothetical drop boundary.
+func caseDeepCopy() {
+  let src: String = "hello {1}"   # owned heap from interp
+  let p: Parser = { source: src, pos: 0 }
+  # Both must read correctly — independent allocations.
+  log("case1.src: {src}")
+  log("case1.p:   {p.source}")
+}
+
+# Case 2: caller→callee chain. The struct-literal inside the callee
+# must NOT free the caller's String when p goes out of scope.
+func makeParser(source: String) ret Parser {
+  let p: Parser = { source: source, pos: 0 }
+  ret p
+}
+
+func caseCallerCallee() {
+  let callerSrc: String = "fixture {2}"
+  let p: Parser = makeParser(source: callerSrc)
+  log("case2.src: {callerSrc}")
+  log("case2.p:   {p.source}")
+}
+
+# Silent variant for the stress loop — same caller→callee chain
+# without the log spam so the leak guard runs cleanly.
+func stressIter() {
+  let s: String = "stress {1}"
+  let p: Parser = makeParser(source: s)
+}
+
+# Case 3: literal-backed RHS → still deep-copies (safe no-op for
+# is_owned=0 sources via rae_string_copy fallback).
+func caseLiteralRhs() {
+  let p: Parser = { source: "literal-{3}", pos: 0 }
+  log("case3.p:   {p.source}")
+}
+
+func main() {
+  caseDeepCopy()
+  caseCallerCallee()
+  caseLiteralRhs()
+
+  # Stress harness: 5k iterations with the same struct-literal
+  # caller/callee chain that previously double-freed once String
+  # field drops were enabled. Verifies the new copy semantics are
+  # safe to run repeatedly.
+  let baselineKb: Int = processRssKb()
+  let iterations: Int = 5000
+  let i: Int = 0
+  loop i < iterations {
+    stressIter()
+    i = i + 1
+  }
+  let growthKb: Int = processRssKb() - baselineKb
+  log("iterations: {iterations}")
+  if growthKb > 2000 {
+    log("verdict: LEAK")
+  } else {
+    log("verdict: OK")
+  }
+}
