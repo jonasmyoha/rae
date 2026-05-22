@@ -1143,13 +1143,17 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   StructDropEntry drop_entries[512];
   size_t drop_entry_count = 0;
   // Pass A — non-generic user structs that transitively own heap.
-  // Use the strict predicate (no String) — Stage 6 attempted to
-  // re-enable cascade for String-only structs by making the alias-
-  // prone accessors (jsonString, optString) deep-copy, but a residual
-  // double-free in test 413's Scene drop remained (still investigating).
-  // The Stage 3 element-drop for List(String) / Map(String) keeps
-  // working because container ownership is unambiguous; struct-field
-  // String cascade waits on a deeper fix.
+  // Use the strict predicate (no String) — Stage 6/9 both attempted
+  // to re-enable cascade for String-only structs but the value-typed
+  // struct extraction path (e.g. `let v: JsonValue = valueAt(doc, i)`
+  // returns a shallow copy of a list element) creates aliased Strings.
+  // The local's auto-drop then double-frees a heap the list still
+  // owns. Resolving this needs a deep-copy on container extraction
+  // (or a different ownership policy for value-typed struct accesses).
+  // Until then, only structs that transitively contain a List/Map
+  // get drop_struct; bare-String fields keep their pre-Stage-6
+  // leak status — no crash, just a known leak path tracked under
+  // mem-stats counters as outstanding concat/json_extract bytes.
   for (size_t i = 0; i < ctx->all_decl_count && drop_entry_count < 512; i++) {
     const AstDecl* d = ctx->all_decls[i];
     if (d->kind != AST_DECL_TYPE) continue;
@@ -1231,8 +1235,8 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     for (size_t j = field_count; j > 0; j--) {
       const AstTypeField* f = fields[j - 1];
       AstTypeRef* concrete = (gp && ga) ? substitute_type_ref(ctx, gp, ga, f->type) : f->type;
-      // Stage 6 struct-field String cascade is gated on the strict
-      // predicate (no String) for now — see Pass A comment.
+      // Stage 6/9 struct-field String cascade is gated on the strict
+      // predicate (no String) — see Pass A comment.
       if (!type_owns_heap_storage(ctx, module, concrete, 0)) continue;
       Str fbase = get_base_type_name(concrete);
       // First: look for a generic `drop(T)(this: mod <base>(T))` in
@@ -1266,6 +1270,100 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
         fprintf(out, "  rae_drop_struct_%s(&this->%.*s);\n", fmangled,
                 (int)f->name.len, f->name.data);
       }
+    }
+    fprintf(out, "}\n\n");
+  }
+
+  // Phase 1: synthesise `rae_deep_copy_struct_<T>(dst, src)` for every
+  // non-generic user struct that transitively contains owned heap (the
+  // permissive predicate — includes String-only structs).
+  //
+  // Body shape:
+  //   static void rae_deep_copy_struct_<T>(<T>* dst, const <T>* src) {
+  //     dst->primitive_field = src->primitive_field;
+  //     dst->string_field    = rae_string_copy(src->string_field);
+  //     rae_deep_copy_struct_<U>(&dst->user_struct_field, &src->user_struct_field);
+  //     // List<U> / StringMap<U> / IntMap<U>: TODO Phase 1.5 — for
+  //     // now shallow-copy. List/Map deep-copy needs per-T helpers
+  //     // (rae_deep_copy_list_<U>) that this pass does not yet emit.
+  //     dst->container_field = src->container_field;
+  //   }
+  //
+  // No callers in this phase — the helper is RAE_UNUSED. Phase 2 wires
+  // it into the let-stmt codegen for `let T = expr` where expr is a
+  // container extraction (buf_get / .get / valueAt / bare-ident copy).
+  //
+  // Re-use the drop_entries collected above but extend the gate to
+  // include string-only structs (permissive predicate). Recompute
+  // entries here so we don't have to thread two parallel lists.
+  StructDropEntry copy_entries[512];
+  size_t copy_entry_count = 0;
+  for (size_t i = 0; i < ctx->all_decl_count && copy_entry_count < 512; i++) {
+    const AstDecl* d = ctx->all_decls[i];
+    if (d->kind != AST_DECL_TYPE) continue;
+    if (d->as.type_decl.generic_params) continue;
+    if (has_property(d->as.type_decl.properties, "c_struct")) continue;
+    AstIdentifierPart* part = malloc(sizeof(AstIdentifierPart));
+    *part = (AstIdentifierPart){.text = d->as.type_decl.name};
+    AstTypeRef* tr = malloc(sizeof(AstTypeRef));
+    *tr = (AstTypeRef){.parts = part};
+    if (!type_needs_cascade_drop(ctx, module, tr, 0)) { free(tr); free(part); continue; }
+    const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, tr);
+    copy_entries[copy_entry_count++] = (StructDropEntry){.decl = d, .type_ref = tr, .mangled = mangled};
+  }
+  // Forward decls.
+  for (size_t i = 0; i < copy_entry_count; i++) {
+    fprintf(out, "RAE_UNUSED static void rae_deep_copy_struct_%s(%s* dst, const %s* src);\n",
+            copy_entries[i].mangled, copy_entries[i].mangled, copy_entries[i].mangled);
+  }
+  if (copy_entry_count > 0) fprintf(out, "\n");
+  // Bodies — field order matters less for copy than drop, but emit in
+  // declaration order for readability.
+  for (size_t i = 0; i < copy_entry_count; i++) {
+    const StructDropEntry* e = &copy_entries[i];
+    fprintf(out, "RAE_UNUSED static void rae_deep_copy_struct_%s(%s* dst, const %s* src) {\n",
+            e->mangled, e->mangled, e->mangled);
+    for (const AstTypeField* f = e->decl->as.type_decl.fields; f; f = f->next) {
+      const AstTypeRef* ft = f->type;
+      Str fbase = ft ? get_base_type_name(ft) : (Str){0};
+      // View/mod fields are non-owning references — shallow-copy the
+      // wrapper (pointer copy).
+      if (ft && (ft->is_view || ft->is_mod)) {
+        fprintf(out, "  dst->%.*s = src->%.*s;\n",
+                (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
+        continue;
+      }
+      // String — call the existing deep-copy runtime helper. The is_owned
+      // bit is left as the canonical "1" because rae_string_copy always
+      // returns an owned heap.
+      if (str_eq_cstr(fbase, "String")) {
+        fprintf(out, "  dst->%.*s = rae_string_copy(src->%.*s);\n",
+                (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
+        continue;
+      }
+      // Nested non-generic user struct that itself needs cascade drop —
+      // recurse. Forward decls above cover the call.
+      if (ft && !ft->is_view && !ft->is_mod && !ft->is_opt
+          && type_needs_cascade_drop(ctx, module, (AstTypeRef*)ft, 0)) {
+        const AstDecl* fd = find_type_decl(NULL, module, fbase);
+        bool is_user_struct = fd && fd->kind == AST_DECL_TYPE
+            && !has_property(fd->as.type_decl.properties, "c_struct")
+            && !fd->as.type_decl.generic_params;
+        if (is_user_struct) {
+          const char* fmangled = rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)ft);
+          fprintf(out, "  rae_deep_copy_struct_%s(&dst->%.*s, &src->%.*s);\n",
+                  fmangled, (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
+          continue;
+        }
+      }
+      // Phase 1 fallback for containers / opt / primitives: shallow C
+      // assignment. Containers (List / StringMap / IntMap) and opt T
+      // (RaeAny) are handled by Phase 1.5 once per-T list/map deep-copy
+      // helpers exist; until then this assignment shares the backing
+      // buffer between dst and src, which is correct for Phase 1's
+      // restricted callers (string-only structs).
+      fprintf(out, "  dst->%.*s = src->%.*s;\n",
+              (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
     }
     fprintf(out, "}\n\n");
   }
