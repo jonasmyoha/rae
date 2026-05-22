@@ -19,6 +19,26 @@
 #include "vm_chunk.h"
 #include "vm_value.h"
 
+// Mirror of c_expr.c::expr_is_string_typed for the Live VM. vm_infer
+// doesn't pin .toString() / .concat() return types, so detect by
+// shape first and fall back to the inferred name.
+static bool vm_expr_is_string_typed(BytecodeCompiler* compiler, const AstExpr* e) {
+    if (!e) return false;
+    if (e->kind == AST_EXPR_STRING) return true;
+    if (e->kind == AST_EXPR_INTERP) return true;
+    if (e->kind == AST_EXPR_METHOD_CALL) {
+        if (str_eq_cstr(e->as.method_call.method_name, "toString")) return true;
+        if (str_eq_cstr(e->as.method_call.method_name, "concat")) return true;
+    }
+    if (e->kind == AST_EXPR_BINARY && e->as.binary.op == AST_BIN_ADD) {
+        return vm_expr_is_string_typed(compiler, e->as.binary.lhs) &&
+               vm_expr_is_string_typed(compiler, e->as.binary.rhs);
+    }
+    Str t = vm_infer_expr_type(compiler, e);
+    if (str_eq_cstr(t, "String")) return true;
+    return false;
+}
+
 bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
   if (!expr) {
     return false;
@@ -218,6 +238,27 @@ bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
           return true;
         }
         default:
+          // String concatenation: `lhs + rhs` where both sides are
+          // String (any combination of owned / view String) lowers
+          // to the same rae_str_concat native that interpolation
+          // uses, matching the Compiled target. Cross-type concat
+          // (e.g. `"count: " + count`) deliberately falls through to
+          // OP_ADD, which the VM rejects at runtime — users should
+          // write `"count: " + count.toString()` or `"count: {count}"`.
+          if (expr->as.binary.op == AST_BIN_ADD) {
+            if (vm_expr_is_string_typed(compiler, expr->as.binary.lhs) &&
+                vm_expr_is_string_typed(compiler, expr->as.binary.rhs)) {
+              if (!compile_expr(compiler, expr->as.binary.lhs)) return false;
+              if (!compile_expr(compiler, expr->as.binary.rhs)) return false;
+              emit_op(compiler, OP_NATIVE_CALL, (int)expr->line);
+              const char* concat_name = "rae_str_concat";
+              Str concat_str = str_from_cstr(concat_name);
+              uint32_t concat_idx = chunk_add_constant(compiler->chunk, value_string_copy(concat_str.data, concat_str.len));
+              emit_uint32(compiler, concat_idx, (int)expr->line);
+              emit_byte(compiler, 2, (int)expr->line);
+              return true;
+            }
+          }
           if (!compile_expr(compiler, expr->as.binary.lhs)) {
             return false;
           }
