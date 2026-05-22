@@ -413,6 +413,12 @@ int64_t rae_ext_rae_str_to_i64(rae_String s);
 rae_String rae_ext_rae_io_read_line(void);
 rae_Char rae_ext_rae_io_read_char(void);
 
+/* Diagnostics: dump cumulative alloc/free counters to stderr.
+ * No-op unless RAE_MEM_STATS=1 was set in the environment. Used to
+ * isolate which allocation class (string body, List/Map buffer, ...)
+ * is leaking when residual RSS growth is small but linear. */
+void rae_ext_rae_mem_stats_dump(void);
+
 void rae_ext_rae_seed(int64_t seed);
 double rae_ext_rae_random(void);
 int64_t rae_ext_rae_random_int(int64_t min, int64_t max);
