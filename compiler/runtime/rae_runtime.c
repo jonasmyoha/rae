@@ -93,33 +93,76 @@ static void rae_install_crash_handler(void) {
 
 /* ---- Allocation stats (opt-in via RAE_MEM_STATS=1) ----
  *
- * Counts allocations and frees by class so a stress run can tell
- * whether residual RSS growth is a real Rae leak (one allocation
- * class with outstanding > 0 that grows linearly) or malloc-arena
- * retention (outstanding ~= 0). Counters are unconditionally bumped
- * (cost = one int64 add per alloc/free); they are printed at process
- * exit only when the env var is set.
- *
- * "str" = rae_String body bytes (the heap behind rae_String.data).
- * "buf" = rae_ext_rae_buf_* allocations (List<T>/Map backing arenas).
+ * Tracks String body and List/Map buf allocations *per call site* so
+ * a stress run can pinpoint which helper produces the strings that
+ * never get freed. Per-site counters are gated on g_mem_stats_enabled
+ * so disabled runs pay zero overhead. When enabled, a side hash
+ * table maps ptr → site so the three free paths (str_free, str_interp
+ * owned-input cleanup, pool_flush) can attribute back to the alloc
+ * site. Output goes to stderr at process exit (atexit) and on demand
+ * via rae_ext_rae_mem_stats_dump().
  */
-static int64_t g_mem_str_alloc_n;
-static int64_t g_mem_str_alloc_b;
-static int64_t g_mem_str_free_n;
-static int64_t g_mem_str_free_b;
+
+typedef enum {
+  RAE_SITE_FROM_CSTR = 0,
+  RAE_SITE_FROM_BUF,
+  RAE_SITE_COPY,
+  RAE_SITE_INTERP,
+  RAE_SITE_CONCAT,
+  RAE_SITE_SUB,
+  RAE_SITE_INT_TO_STR,
+  RAE_SITE_FLOAT_TO_STR,
+  RAE_SITE_BOOL_TO_STR,
+  RAE_SITE_CHAR_TO_STR,
+  RAE_SITE_STR_STRING,    /* rae_ext_rae_str_string deep-copy */
+  RAE_SITE_FORMAT_TS,
+  RAE_SITE_FORMAT_DATE,
+  RAE_SITE_READ_LINE,
+  RAE_SITE_READ_FILE,
+  RAE_SITE_JSON_GET_STR,
+  RAE_SITE_JSON_GET_OBJ,
+  RAE_SITE_JSON_EXTRACT,
+  RAE_SITE_UNKNOWN,       /* ptr seen at free time that wasn't tracked */
+  RAE_SITE__COUNT
+} RaeMemSite;
+
+static const char* const g_rae_site_names[RAE_SITE__COUNT] = {
+  "from_cstr", "from_buf", "copy", "interp", "concat", "sub",
+  "int_to_str", "float_to_str", "bool_to_str", "char_to_str",
+  "str_string", "format_ts", "format_date", "read_line", "read_file",
+  "json_get_str", "json_get_obj", "json_extract", "unknown"
+};
+
+static int64_t g_mem_site_alloc_n[RAE_SITE__COUNT];
+static int64_t g_mem_site_alloc_b[RAE_SITE__COUNT];
+static int64_t g_mem_site_free_n[RAE_SITE__COUNT];
+static int64_t g_mem_site_free_b[RAE_SITE__COUNT];
+
 static int64_t g_mem_buf_alloc_n;
 static int64_t g_mem_buf_alloc_b;
 static int64_t g_mem_buf_free_n;
 static int64_t g_mem_buf_free_b;
 static int64_t g_mem_buf_resize_n;
-static int64_t g_mem_string_copy_n;
+
 static int64_t g_mem_pool_register_n;
-static int64_t g_mem_pool_take_n;
 static int64_t g_mem_pool_remove_n;
 static int64_t g_mem_pool_flush_calls;
 static int64_t g_mem_pool_flush_freed;
 
 static int g_mem_stats_enabled = 0;
+
+/* Side hash table: ptr → site. Allocated only when mem-stats is on.
+ * 4M slots sized for ~2M outstanding allocations (peak observed in
+ * the 20K mobile-UI stress is ~1.2M). Two parallel arrays keep the
+ * key array dense (better cache behaviour for the probe scan). */
+#define RAE_MEM_HASH_BITS 22
+#define RAE_MEM_HASH_N    (1u << RAE_MEM_HASH_BITS)
+#define RAE_MEM_HASH_MASK (RAE_MEM_HASH_N - 1)
+
+static void**   g_mem_hash_keys;   /* NULL = empty slot */
+static uint8_t* g_mem_hash_sites;  /* parallel array, valid when key != NULL */
+static int64_t  g_mem_hash_size;   /* current occupancy */
+static int64_t  g_mem_hash_full_drops; /* allocs we couldn't tag because table was full */
 
 static int64_t rae_malloc_size_safe(void* p) {
   if (!p) return 0;
@@ -132,27 +175,138 @@ static int64_t rae_malloc_size_safe(void* p) {
 #endif
 }
 
+static inline uint32_t rae_mem_hash_ix(void* ptr) {
+  uintptr_t x = (uintptr_t)ptr;
+  /* Mix high and low bits — malloc returns 16-byte aligned blocks on
+   * macOS, so the low 4 bits are usually 0; shifting + xor avoids
+   * clustering on the bottom of the table. */
+  x ^= x >> 33;
+  x *= 0xff51afd7ed558ccdULL;
+  x ^= x >> 33;
+  return (uint32_t)(x & RAE_MEM_HASH_MASK);
+}
+
+/* Insert ptr → site. If table is full, the lookup at free time will
+ * miss and the free is attributed to RAE_SITE_UNKNOWN; we track the
+ * drop count so we can warn about under-attribution. */
+static void rae_mem_hash_insert(void* ptr, uint8_t site) {
+  if (!ptr || !g_mem_hash_keys) return;
+  /* Cap load factor at ~75% to keep linear probing snappy. */
+  if (g_mem_hash_size * 4 >= (int64_t)RAE_MEM_HASH_N * 3) {
+    g_mem_hash_full_drops++;
+    return;
+  }
+  uint32_t ix = rae_mem_hash_ix(ptr);
+  for (uint32_t i = 0; i < RAE_MEM_HASH_N; i++) {
+    uint32_t k = (ix + i) & RAE_MEM_HASH_MASK;
+    if (g_mem_hash_keys[k] == NULL) {
+      g_mem_hash_keys[k] = ptr;
+      g_mem_hash_sites[k] = site;
+      g_mem_hash_size++;
+      return;
+    }
+    if (g_mem_hash_keys[k] == ptr) {
+      /* Reinsert (e.g. realloc returned same ptr) — overwrite site. */
+      g_mem_hash_sites[k] = site;
+      return;
+    }
+  }
+  g_mem_hash_full_drops++;
+}
+
+/* Lookup + remove. Returns the site that was recorded, or
+ * RAE_SITE_UNKNOWN if the ptr wasn't tracked. Linear probing requires
+ * the standard tombstone dance: on delete, walk forward and re-insert
+ * any contiguous keys whose natural slot might lie before the gap. */
+static uint8_t rae_mem_hash_remove(void* ptr) {
+  if (!ptr || !g_mem_hash_keys) return RAE_SITE_UNKNOWN;
+  uint32_t ix = rae_mem_hash_ix(ptr);
+  for (uint32_t i = 0; i < RAE_MEM_HASH_N; i++) {
+    uint32_t k = (ix + i) & RAE_MEM_HASH_MASK;
+    if (g_mem_hash_keys[k] == NULL) return RAE_SITE_UNKNOWN;
+    if (g_mem_hash_keys[k] == ptr) {
+      uint8_t site = g_mem_hash_sites[k];
+      g_mem_hash_keys[k] = NULL;
+      g_mem_hash_size--;
+      /* Compact the cluster so later lookups don't get stuck on the
+       * gap. Walk forward; for each contiguous key whose natural
+       * index is <= our hole, move it into the hole. */
+      uint32_t hole = k;
+      for (uint32_t j = 1; j < RAE_MEM_HASH_N; j++) {
+        uint32_t kk = (hole + j) & RAE_MEM_HASH_MASK;
+        if (g_mem_hash_keys[kk] == NULL) break;
+        uint32_t nat = rae_mem_hash_ix(g_mem_hash_keys[kk]);
+        /* Does the natural slot lie in the range (hole, kk] going
+         * forward? If not, moving the entry into the hole is safe. */
+        uint32_t dist_hole = (kk - hole) & RAE_MEM_HASH_MASK;
+        uint32_t dist_nat  = (kk - nat) & RAE_MEM_HASH_MASK;
+        if (dist_nat >= dist_hole) {
+          g_mem_hash_keys[hole]  = g_mem_hash_keys[kk];
+          g_mem_hash_sites[hole] = g_mem_hash_sites[kk];
+          g_mem_hash_keys[kk]    = NULL;
+          hole = kk;
+        }
+      }
+      return site;
+    }
+  }
+  return RAE_SITE_UNKNOWN;
+}
+
+static inline void rae_mem_str_tag(void* ptr, int64_t bytes, uint8_t site) {
+  if (!g_mem_stats_enabled) return;
+  g_mem_site_alloc_n[site]++;
+  g_mem_site_alloc_b[site] += bytes;
+  rae_mem_hash_insert(ptr, site);
+}
+
+static inline void rae_mem_str_untag(void* ptr, int64_t bytes_hint) {
+  if (!g_mem_stats_enabled) return;
+  uint8_t site = rae_mem_hash_remove(ptr);
+  g_mem_site_free_n[site]++;
+  /* Prefer the explicit byte count (capacity from the rae_String);
+   * fall back to malloc_size for the pool_flush path that only has
+   * a ptr. */
+  int64_t bytes = bytes_hint > 0 ? bytes_hint : rae_malloc_size_safe(ptr);
+  g_mem_site_free_b[site] += bytes;
+}
+
 static void rae_mem_stats_print(void) {
   if (!g_mem_stats_enabled) return;
-  int64_t str_out_n = g_mem_str_alloc_n - g_mem_str_free_n;
-  int64_t str_out_b = g_mem_str_alloc_b - g_mem_str_free_b;
-  int64_t buf_out_n = g_mem_buf_alloc_n - g_mem_buf_free_n;
-  int64_t buf_out_b = g_mem_buf_alloc_b - g_mem_buf_free_b;
+  int64_t tot_an = 0, tot_ab = 0, tot_fn = 0, tot_fb = 0;
+  for (int i = 0; i < RAE_SITE__COUNT; i++) {
+    tot_an += g_mem_site_alloc_n[i];
+    tot_ab += g_mem_site_alloc_b[i];
+    tot_fn += g_mem_site_free_n[i];
+    tot_fb += g_mem_site_free_b[i];
+  }
   fprintf(stderr, "\n[rae mem-stats] cumulative since process start:\n");
-  fprintf(stderr, "  string  alloc=%lld (%lld B)  free=%lld (%lld B)  outstanding=%lld (%lld B)\n",
-    (long long)g_mem_str_alloc_n, (long long)g_mem_str_alloc_b,
-    (long long)g_mem_str_free_n,  (long long)g_mem_str_free_b,
-    (long long)str_out_n, (long long)str_out_b);
-  fprintf(stderr, "  buf     alloc=%lld (%lld B)  free=%lld (%lld B)  outstanding=%lld (%lld B)  resize=%lld\n",
+  for (int i = 0; i < RAE_SITE__COUNT; i++) {
+    if (g_mem_site_alloc_n[i] == 0 && g_mem_site_free_n[i] == 0) continue;
+    int64_t out_n = g_mem_site_alloc_n[i] - g_mem_site_free_n[i];
+    int64_t out_b = g_mem_site_alloc_b[i] - g_mem_site_free_b[i];
+    fprintf(stderr, "  [mem:string:%-13s] alloc=%lld free=%lld outstanding=%lld bytes=%lld (alloc_b=%lld free_b=%lld)\n",
+      g_rae_site_names[i],
+      (long long)g_mem_site_alloc_n[i], (long long)g_mem_site_free_n[i],
+      (long long)out_n, (long long)out_b,
+      (long long)g_mem_site_alloc_b[i], (long long)g_mem_site_free_b[i]);
+  }
+  fprintf(stderr, "  [mem:string:TOTAL          ] alloc=%lld free=%lld outstanding=%lld bytes=%lld\n",
+    (long long)tot_an, (long long)tot_fn,
+    (long long)(tot_an - tot_fn), (long long)(tot_ab - tot_fb));
+  fprintf(stderr, "  [mem:buf               ] alloc=%lld (%lld B) free=%lld (%lld B) outstanding=%lld (%lld B) resize=%lld\n",
     (long long)g_mem_buf_alloc_n, (long long)g_mem_buf_alloc_b,
     (long long)g_mem_buf_free_n,  (long long)g_mem_buf_free_b,
-    (long long)buf_out_n, (long long)buf_out_b,
+    (long long)(g_mem_buf_alloc_n - g_mem_buf_free_n),
+    (long long)(g_mem_buf_alloc_b - g_mem_buf_free_b),
     (long long)g_mem_buf_resize_n);
-  fprintf(stderr, "  string_copy calls=%lld\n", (long long)g_mem_string_copy_n);
-  fprintf(stderr, "  pool    register=%lld take=%lld remove=%lld  flush_calls=%lld flush_freed=%lld\n",
-    (long long)g_mem_pool_register_n, (long long)g_mem_pool_take_n,
-    (long long)g_mem_pool_remove_n,
+  fprintf(stderr, "  [mem:pool              ] register=%lld remove=%lld flush_calls=%lld flush_freed=%lld\n",
+    (long long)g_mem_pool_register_n, (long long)g_mem_pool_remove_n,
     (long long)g_mem_pool_flush_calls, (long long)g_mem_pool_flush_freed);
+  if (g_mem_hash_full_drops) {
+    fprintf(stderr, "  [mem:hash              ] WARNING: %lld allocations dropped (table full) — per-site free counts under-report by this much\n",
+      (long long)g_mem_hash_full_drops);
+  }
   fflush(stderr);
 }
 
@@ -161,6 +315,16 @@ static void rae_install_mem_stats(void) {
   const char* v = getenv("RAE_MEM_STATS");
   if (v && v[0] && v[0] != '0') {
     g_mem_stats_enabled = 1;
+    g_mem_hash_keys  = (void**)  calloc(RAE_MEM_HASH_N, sizeof(void*));
+    g_mem_hash_sites = (uint8_t*)calloc(RAE_MEM_HASH_N, sizeof(uint8_t));
+    if (!g_mem_hash_keys || !g_mem_hash_sites) {
+      fprintf(stderr, "[rae mem-stats] WARNING: failed to allocate %lu-slot hash table; per-site free attribution disabled\n",
+        (unsigned long)RAE_MEM_HASH_N);
+      free(g_mem_hash_keys);
+      free(g_mem_hash_sites);
+      g_mem_hash_keys = NULL;
+      g_mem_hash_sites = NULL;
+    }
     atexit(rae_mem_stats_print);
   }
 }
@@ -173,27 +337,39 @@ void rae_ext_rae_mem_stats_dump(void) {
   rae_mem_stats_print();
 }
 
-rae_String rae_ext_rae_str_from_cstr(const void* s) {
-  if (!s) return (rae_String){NULL, 0, 0, 0};
-  int64_t len = (int64_t)strlen((const char*)s);
-  uint8_t* data = malloc(len + 1);
-  if (data) {
-    memcpy(data, s, len);
-    data[len] = '\0';
-    g_mem_str_alloc_n++; g_mem_str_alloc_b += len + 1;
-  }
-  return (rae_String){data, len, len + 1, 1};
-}
-
-rae_String rae_ext_rae_str_from_buf(const uint8_t* data, int64_t len) {
+/* Internal helpers: allocate a String body with a known call-site
+ * tag. The toString helpers (str_i64/str_f64/str_bool/str_char) use
+ * these so their allocations don't all get bucketed under "from_buf"
+ * or "from_cstr". */
+static rae_String rae_str_from_buf_impl(const uint8_t* data, int64_t len, uint8_t site) {
   if (!data || len < 0) return (rae_String){NULL, 0, 0, 0};
   uint8_t* buf = malloc(len + 1);
   if (buf) {
     memcpy(buf, data, len);
     buf[len] = '\0';
-    g_mem_str_alloc_n++; g_mem_str_alloc_b += len + 1;
+    rae_mem_str_tag(buf, len + 1, site);
   }
   return (rae_String){buf, len, len + 1, 1};
+}
+
+static rae_String rae_str_from_cstr_impl(const char* s, uint8_t site) {
+  if (!s) return (rae_String){NULL, 0, 0, 0};
+  int64_t len = (int64_t)strlen(s);
+  uint8_t* data = malloc(len + 1);
+  if (data) {
+    memcpy(data, s, len);
+    data[len] = '\0';
+    rae_mem_str_tag(data, len + 1, site);
+  }
+  return (rae_String){data, len, len + 1, 1};
+}
+
+rae_String rae_ext_rae_str_from_cstr(const void* s) {
+  return rae_str_from_cstr_impl((const char*)s, RAE_SITE_FROM_CSTR);
+}
+
+rae_String rae_ext_rae_str_from_buf(const uint8_t* data, int64_t len) {
+  return rae_str_from_buf_impl(data, len, RAE_SITE_FROM_BUF);
 }
 
 void* rae_ext_rae_str_to_cstr(rae_String s) {
@@ -211,7 +387,7 @@ void* rae_ext_rae_str_to_cstr(rae_String s) {
 void rae_ext_rae_str_free(rae_String s) {
   if (s.is_owned && s.data) {
     rae_string_pool_remove(s.data);
-    g_mem_str_free_n++; g_mem_str_free_b += s.capacity > 0 ? s.capacity : s.len + 1;
+    rae_mem_str_untag(s.data, s.capacity > 0 ? s.capacity : s.len + 1);
     free(s.data);
   }
 }
@@ -225,8 +401,7 @@ rae_String rae_string_copy(rae_String src) {
   if (!buf) return (rae_String){NULL, 0, 0, 0};
   memcpy(buf, src.data, (size_t)src.len);
   buf[src.len] = '\0';
-  g_mem_string_copy_n++;
-  g_mem_str_alloc_n++; g_mem_str_alloc_b += src.len + 1;
+  rae_mem_str_tag(buf, src.len + 1, RAE_SITE_COPY);
   return (rae_String){buf, src.len, src.len + 1, 1};
 }
 
@@ -261,7 +436,9 @@ void rae_string_pool_flush(int saved) {
   g_mem_pool_flush_calls++;
   for (int i = g_rae_string_pool_count - 1; i >= saved; i--) {
     if (g_rae_string_pool[i]) {
-      g_mem_str_free_n++; g_mem_str_free_b += rae_malloc_size_safe(g_rae_string_pool[i]);
+      /* The pool only knows the ptr; the hash lookup recovers the
+       * site and rae_malloc_size_safe gives us the byte count. */
+      rae_mem_str_untag(g_rae_string_pool[i], 0);
       g_mem_pool_flush_freed++;
       free(g_rae_string_pool[i]);
     }
@@ -311,7 +488,7 @@ rae_String rae_ext_rae_str_interp(int n, ...) {
       }
     }
     buf[total] = '\0';
-    g_mem_str_alloc_n++; g_mem_str_alloc_b += total + 1;
+    rae_mem_str_tag(buf, total + 1, RAE_SITE_INTERP);
   }
 
   // Free any owned input — these are compiler-generated temporaries
@@ -323,7 +500,7 @@ rae_String rae_ext_rae_str_interp(int n, ...) {
   for (int i = 0; i < n; i++) {
     if (parts[i].is_owned && parts[i].data) {
       rae_string_pool_remove(parts[i].data);
-      g_mem_str_free_n++; g_mem_str_free_b += parts[i].capacity > 0 ? parts[i].capacity : parts[i].len + 1;
+      rae_mem_str_untag(parts[i].data, parts[i].capacity > 0 ? parts[i].capacity : parts[i].len + 1);
       free(parts[i].data);
     }
   }
@@ -375,7 +552,7 @@ rae_String rae_ext_formatTimestamp(int64_t epoch_ms) {
   if (!data) return (rae_String){NULL, 0, 0, 0};
   memcpy(data, buf, (size_t)n);
   data[n] = '\0';
-  g_mem_str_alloc_n++; g_mem_str_alloc_b += n + 1;
+  rae_mem_str_tag(data, n + 1, RAE_SITE_FORMAT_TS);
   return (rae_String){data, (int64_t)n, (int64_t)n + 1, 1};
 }
 
@@ -391,7 +568,7 @@ rae_String rae_ext_formatDate(int64_t epoch_ms) {
   if (!data) return (rae_String){NULL, 0, 0, 0};
   memcpy(data, buf, (size_t)n);
   data[n] = '\0';
-  g_mem_str_alloc_n++; g_mem_str_alloc_b += n + 1;
+  rae_mem_str_tag(data, n + 1, RAE_SITE_FORMAT_DATE);
   return (rae_String){data, (int64_t)n, (int64_t)n + 1, 1};
 }
 
@@ -432,7 +609,7 @@ RaeAny rae_ext_json_get(const char* json, const char* field) {
         uint8_t* res = malloc(len + 1);
         memcpy(res, val_start, len);
         res[len] = '\0';
-        g_mem_str_alloc_n++; g_mem_str_alloc_b += (int64_t)len + 1;
+        rae_mem_str_tag(res, (int64_t)len + 1, RAE_SITE_JSON_GET_STR);
         return (RaeAny){RAE_TYPE_STRING, false, false, {.s = {res, (int64_t)len, (int64_t)len + 1, 1}}};
     } else if (*val_start == 't') {
         return (RaeAny){RAE_TYPE_BOOL, false, false, {.b = 1}};
@@ -462,7 +639,7 @@ RaeAny rae_ext_json_get(const char* json, const char* field) {
         uint8_t* res = malloc(len + 1);
         memcpy(res, val_start, len);
         res[len] = '\0';
-        g_mem_str_alloc_n++; g_mem_str_alloc_b += (int64_t)len + 1;
+        rae_mem_str_tag(res, (int64_t)len + 1, RAE_SITE_JSON_GET_OBJ);
         return (RaeAny){RAE_TYPE_STRING, false, false, {.s = {res, (int64_t)len, (int64_t)len + 1, 1}}}; // We return objects as strings for now
     }
     
@@ -715,7 +892,7 @@ rae_String rae_ext_rae_str_concat(rae_String a, rae_String b) {
     if (a.data) memcpy(result_data, a.data, len_a);
     if (b.data) memcpy(result_data + len_a, b.data, len_b);
     result_data[len_a + len_b] = '\0';
-    g_mem_str_alloc_n++; g_mem_str_alloc_b += len_a + len_b + 1;
+    rae_mem_str_tag(result_data, len_a + len_b + 1, RAE_SITE_CONCAT);
   }
   return (rae_String){result_data, len_a + len_b, len_a + len_b + 1, 1};
 }
@@ -768,7 +945,7 @@ rae_String rae_ext_rae_str_sub(rae_String s, int64_t start, int64_t len) {
   if (result_data) {
     memcpy(result_data, s.data + start, (size_t)len);
     result_data[len] = '\0';
-    g_mem_str_alloc_n++; g_mem_str_alloc_b += len + 1;
+    rae_mem_str_tag(result_data, len + 1, RAE_SITE_SUB);
   }
   return (rae_String){result_data, len, len + 1, 1};
 }
@@ -858,7 +1035,7 @@ rae_String rae_ext_rae_io_read_line(void) {
       buffer[blen-1] = '\0';
       blen--;
   }
-  g_mem_str_alloc_n++; g_mem_str_alloc_b += (int64_t)len;
+  rae_mem_str_tag(buffer, (int64_t)len, RAE_SITE_READ_LINE);
   return (rae_String){(uint8_t*)buffer, (int64_t)blen, (int64_t)len, 1};
 }
 
@@ -888,7 +1065,7 @@ rae_String rae_ext_rae_sys_read_file(rae_String path) {
   if (buffer) {
     fread(buffer, 1, (size_t)len, f);
     buffer[len] = '\0';
-    g_mem_str_alloc_n++; g_mem_str_alloc_b += (int64_t)len + 1;
+    rae_mem_str_tag(buffer, (int64_t)len + 1, RAE_SITE_READ_FILE);
   }
   fclose(f);
   return (rae_String){buffer, (int64_t)len, (int64_t)len + 1, 1};
@@ -985,7 +1162,7 @@ double rae_ext_rae_sys_file_mtime(rae_String path) {
 rae_String rae_ext_rae_str_i64(int64_t v) {
   char buffer[32];
   int len = snprintf(buffer, 32, "%lld", (long long)v);
-  return rae_ext_rae_str_from_buf((uint8_t*)buffer, len);
+  return rae_str_from_buf_impl((uint8_t*)buffer, len, RAE_SITE_INT_TO_STR);
 }
 
 rae_String rae_ext_rae_str_i64_ptr(const int64_t* v) {
@@ -995,7 +1172,7 @@ rae_String rae_ext_rae_str_i64_ptr(const int64_t* v) {
 rae_String rae_ext_rae_str_f64(double v) {
   char buffer[32];
   int len = snprintf(buffer, 32, "%g", v);
-  return rae_ext_rae_str_from_buf((uint8_t*)buffer, len);
+  return rae_str_from_buf_impl((uint8_t*)buffer, len, RAE_SITE_FLOAT_TO_STR);
 }
 
 rae_String rae_ext_rae_str_f64_ptr(const double* v) {
@@ -1003,7 +1180,7 @@ rae_String rae_ext_rae_str_f64_ptr(const double* v) {
 }
 
 rae_String rae_ext_rae_str_bool(rae_Bool v) {
-  return rae_ext_rae_str_from_cstr(v ? "true" : "false");
+  return rae_str_from_cstr_impl(v ? "true" : "false", RAE_SITE_BOOL_TO_STR);
 }
 
 rae_String rae_ext_rae_str_bool_ptr(const rae_Bool* v) {
@@ -1033,7 +1210,7 @@ rae_String rae_ext_rae_str_char(uint32_t v) {
     len = 4;
   }
   buffer[len] = '\0';
-  return rae_ext_rae_str_from_buf(buffer, len);
+  return rae_str_from_buf_impl(buffer, len, RAE_SITE_CHAR_TO_STR);
 }
 
 rae_String rae_ext_rae_str_char_ptr(const uint32_t* v) {
@@ -1041,7 +1218,7 @@ rae_String rae_ext_rae_str_char_ptr(const uint32_t* v) {
 }
 
 rae_String rae_ext_rae_str_string(rae_String s) {
-    return rae_ext_rae_str_from_buf(s.data, s.len);
+    return rae_str_from_buf_impl(s.data, s.len, RAE_SITE_STR_STRING);
 }
 
 rae_String rae_ext_rae_str_any(RaeAny v) {
@@ -1338,7 +1515,7 @@ rae_String rae_json_extract_string(rae_String json, const char* key) {
     uint8_t* copy = (uint8_t*)malloc((size_t)len + 1);
     if (copy) {
       memcpy(copy, v, (size_t)len); copy[len] = 0;
-      g_mem_str_alloc_n++; g_mem_str_alloc_b += len + 1;
+      rae_mem_str_tag(copy, len + 1, RAE_SITE_JSON_EXTRACT);
     }
     return (rae_String){copy, len, len + 1, 1};
 }
