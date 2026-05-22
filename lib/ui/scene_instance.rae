@@ -144,8 +144,13 @@ func addSpriteOverride(list: mod List(SceneOverride), nodeId: String, value: Str
 func addSpriteTintOverride(list: mod List(SceneOverride), nodeId: String, r: Int, g: Int, b: Int, a: Int) {
   let spriteKey: String = "Sprite"
   let tintField: String = "tint"
-  let comma: String = ","
-  let value: String = r.toString().concat(other: comma).concat(other: g.toString()).concat(other: comma).concat(other: b.toString()).concat(other: comma).concat(other: a.toString())
+  # Interpolation is one alloc instead of seven; the nested .concat()
+  # form here used to leak ~6 intermediate concat results per call
+  # because each level's inner result escaped its caller's pool. The
+  # rae_ext_rae_str_interp helper allocates one owned result and frees
+  # each owned input (the toString conversions) in a single cleanup
+  # loop, so this form has zero outstanding allocations per call.
+  let value: String = "{r},{g},{b},{a}"
   addOverride(
     list: list
     nodeId: nodeId
