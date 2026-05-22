@@ -474,21 +474,63 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                     mark_expr_moved_if_local(ctx, f->value);
                 }
             }
-            // Stage 8 pairing: struct-literal String field needs
-            // pool_take so the surrounding scope's flush doesn't free
-            // the heap that the field now references. Without this,
-            // any field initialised from a String-returning function
-            // (which Stage 8 leaves in the pool) gets its heap swept
-            // out from under the struct's field, surfacing as random
-            // String values appearing under the wrong field name.
-            bool wrap_str_take_field = false;
-            if (field_tr && !field_tr->is_view && !field_tr->is_mod && !field_tr->is_opt) {
+            // Ownership-safe String field init:
+            //
+            //   { f: src }           — `f: String` field gets a
+            //                          fresh deep-copy via
+            //                          rae_string_copy. `src` is
+            //                          unchanged and still owns its
+            //                          heap; the struct owns the
+            //                          new copy. Dropping the struct
+            //                          cannot free the caller's src.
+            //
+            //   { f: own src }       — explicit move. AST_EXPR_OWN's
+            //                          emit marks `src` (when an
+            //                          IDENT) as moved and forwards
+            //                          the inner value. We wrap with
+            //                          pool_take to detach a pool-
+            //                          registered RHS (e.g. concat
+            //                          result) so the surrounding
+            //                          flush doesn't sweep it; locals
+            //                          aren't in the pool so the take
+            //                          is a no-op for them. The struct
+            //                          field now exclusively owns the
+            //                          heap.
+            //
+            //   `f: view String`     — borrow. Pass the value through;
+            //                          the field holds a non-owning
+            //                          view and dropping the struct
+            //                          must not free the source.
+            //
+            // The previous Stage 8 behaviour of pool_take-only for
+            // non-own RHS caused a chain of shallow aliases (the
+            // JsonParser{ source: source } pattern) that auto-drop
+            // could double-free once String field drops are enabled.
+            // Deep-copy here gives every owned-String struct field a
+            // private heap so the field's drop is always safe.
+            bool field_is_owned_string = false;
+            bool field_is_view_string  = false;
+            if (field_tr && !field_tr->is_mod && !field_tr->is_opt) {
                 Str fbase = get_base_type_name(field_tr);
-                if (str_eq_cstr(fbase, "String")) wrap_str_take_field = true;
+                if (str_eq_cstr(fbase, "String")) {
+                    if (field_tr->is_view) field_is_view_string = true;
+                    else                   field_is_owned_string = true;
+                }
             }
-            if (wrap_str_take_field) fprintf(out, "rae_string_pool_take(");
-            emit_expr(ctx, f->value, out, PREC_LOWEST, false, false);
-            if (wrap_str_take_field) fprintf(out, ")");
+            bool rhs_is_own = (f->value && f->value->kind == AST_EXPR_OWN);
+            if (field_is_owned_string && rhs_is_own) {
+                fprintf(out, "rae_string_pool_take(");
+                emit_expr(ctx, f->value, out, PREC_LOWEST, false, false);
+                fprintf(out, ")");
+            } else if (field_is_owned_string) {
+                fprintf(out, "rae_string_copy(");
+                emit_expr(ctx, f->value, out, PREC_LOWEST, false, false);
+                fprintf(out, ")");
+            } else {
+                // View String / non-String fields — pass-through.
+                (void)field_is_view_string;
+                emit_expr(ctx, f->value, out, PREC_LOWEST, false, false);
+            }
             if (f->next) fprintf(out, ", ");
         }
         ctx->has_expected_type = saved_has_exp;
