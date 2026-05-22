@@ -116,8 +116,14 @@ void* rae_ext_rae_str_to_cstr(rae_String s) {
 // Free heap memory only when this String owns it. Static literals
 // and borrowed views are passed in with is_owned=0 and are no-ops.
 // Safe to call on a "moved-from" String (data=NULL, is_owned=0).
+// Also unregisters from the temp pool — without this a subsequent
+// pool flush in the same statement would double-free a heap we
+// already returned to the allocator.
 void rae_ext_rae_str_free(rae_String s) {
-  if (s.is_owned && s.data) free(s.data);
+  if (s.is_owned && s.data) {
+    rae_string_pool_remove(s.data);
+    free(s.data);
+  }
 }
 
 // Deep-copy. Always returns an owned (heap) String, even when the
@@ -211,9 +217,14 @@ rae_String rae_ext_rae_str_interp(int n, ...) {
   // Free any owned input — these are compiler-generated temporaries
   // (e.g. rae_ext_rae_str_i64 results). Borrowed inputs (literals,
   // rae_string_borrow-wrapped identifiers) are is_owned=0 and a
-  // no-op here.
+  // no-op here. The pool_remove keeps the temp-pool in sync so a
+  // later flush doesn't double-free a heap we already returned to
+  // the allocator.
   for (int i = 0; i < n; i++) {
-    if (parts[i].is_owned && parts[i].data) free(parts[i].data);
+    if (parts[i].is_owned && parts[i].data) {
+      rae_string_pool_remove(parts[i].data);
+      free(parts[i].data);
+    }
   }
 
   rae_String result = {buf, total, total + 1, 1};
