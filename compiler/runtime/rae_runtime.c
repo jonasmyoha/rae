@@ -25,6 +25,11 @@
 #include <mach/mach.h>
 #include <mach/task.h>
 #include <mach/task_info.h>
+#include <malloc/malloc.h>
+#endif
+
+#if defined(__linux__) || defined(__GLIBC__)
+#include <malloc.h>
 #endif
 
 void rae_flush_stdout(void) {
@@ -86,6 +91,88 @@ static void rae_install_crash_handler(void) {
   sigaction(SIGABRT, &sa, NULL);
 }
 
+/* ---- Allocation stats (opt-in via RAE_MEM_STATS=1) ----
+ *
+ * Counts allocations and frees by class so a stress run can tell
+ * whether residual RSS growth is a real Rae leak (one allocation
+ * class with outstanding > 0 that grows linearly) or malloc-arena
+ * retention (outstanding ~= 0). Counters are unconditionally bumped
+ * (cost = one int64 add per alloc/free); they are printed at process
+ * exit only when the env var is set.
+ *
+ * "str" = rae_String body bytes (the heap behind rae_String.data).
+ * "buf" = rae_ext_rae_buf_* allocations (List<T>/Map backing arenas).
+ */
+static int64_t g_mem_str_alloc_n;
+static int64_t g_mem_str_alloc_b;
+static int64_t g_mem_str_free_n;
+static int64_t g_mem_str_free_b;
+static int64_t g_mem_buf_alloc_n;
+static int64_t g_mem_buf_alloc_b;
+static int64_t g_mem_buf_free_n;
+static int64_t g_mem_buf_free_b;
+static int64_t g_mem_buf_resize_n;
+static int64_t g_mem_string_copy_n;
+static int64_t g_mem_pool_register_n;
+static int64_t g_mem_pool_take_n;
+static int64_t g_mem_pool_remove_n;
+static int64_t g_mem_pool_flush_calls;
+static int64_t g_mem_pool_flush_freed;
+
+static int g_mem_stats_enabled = 0;
+
+static int64_t rae_malloc_size_safe(void* p) {
+  if (!p) return 0;
+#if defined(__APPLE__)
+  return (int64_t)malloc_size(p);
+#elif defined(__linux__) || defined(__GLIBC__)
+  return (int64_t)malloc_usable_size(p);
+#else
+  return 0;
+#endif
+}
+
+static void rae_mem_stats_print(void) {
+  if (!g_mem_stats_enabled) return;
+  int64_t str_out_n = g_mem_str_alloc_n - g_mem_str_free_n;
+  int64_t str_out_b = g_mem_str_alloc_b - g_mem_str_free_b;
+  int64_t buf_out_n = g_mem_buf_alloc_n - g_mem_buf_free_n;
+  int64_t buf_out_b = g_mem_buf_alloc_b - g_mem_buf_free_b;
+  fprintf(stderr, "\n[rae mem-stats] cumulative since process start:\n");
+  fprintf(stderr, "  string  alloc=%lld (%lld B)  free=%lld (%lld B)  outstanding=%lld (%lld B)\n",
+    (long long)g_mem_str_alloc_n, (long long)g_mem_str_alloc_b,
+    (long long)g_mem_str_free_n,  (long long)g_mem_str_free_b,
+    (long long)str_out_n, (long long)str_out_b);
+  fprintf(stderr, "  buf     alloc=%lld (%lld B)  free=%lld (%lld B)  outstanding=%lld (%lld B)  resize=%lld\n",
+    (long long)g_mem_buf_alloc_n, (long long)g_mem_buf_alloc_b,
+    (long long)g_mem_buf_free_n,  (long long)g_mem_buf_free_b,
+    (long long)buf_out_n, (long long)buf_out_b,
+    (long long)g_mem_buf_resize_n);
+  fprintf(stderr, "  string_copy calls=%lld\n", (long long)g_mem_string_copy_n);
+  fprintf(stderr, "  pool    register=%lld take=%lld remove=%lld  flush_calls=%lld flush_freed=%lld\n",
+    (long long)g_mem_pool_register_n, (long long)g_mem_pool_take_n,
+    (long long)g_mem_pool_remove_n,
+    (long long)g_mem_pool_flush_calls, (long long)g_mem_pool_flush_freed);
+  fflush(stderr);
+}
+
+__attribute__((constructor))
+static void rae_install_mem_stats(void) {
+  const char* v = getenv("RAE_MEM_STATS");
+  if (v && v[0] && v[0] != '0') {
+    g_mem_stats_enabled = 1;
+    atexit(rae_mem_stats_print);
+  }
+}
+
+/* Exposed so Rae code can sample the counters mid-run (e.g. the
+ * 98_mobile_ui stress loop can print stats at iter 5k / 50k / 100k
+ * and compute outstanding-allocations slope per window). No-op when
+ * mem-stats is disabled. */
+void rae_ext_rae_mem_stats_dump(void) {
+  rae_mem_stats_print();
+}
+
 rae_String rae_ext_rae_str_from_cstr(const void* s) {
   if (!s) return (rae_String){NULL, 0, 0, 0};
   int64_t len = (int64_t)strlen((const char*)s);
@@ -93,6 +180,7 @@ rae_String rae_ext_rae_str_from_cstr(const void* s) {
   if (data) {
     memcpy(data, s, len);
     data[len] = '\0';
+    g_mem_str_alloc_n++; g_mem_str_alloc_b += len + 1;
   }
   return (rae_String){data, len, len + 1, 1};
 }
@@ -103,6 +191,7 @@ rae_String rae_ext_rae_str_from_buf(const uint8_t* data, int64_t len) {
   if (buf) {
     memcpy(buf, data, len);
     buf[len] = '\0';
+    g_mem_str_alloc_n++; g_mem_str_alloc_b += len + 1;
   }
   return (rae_String){buf, len, len + 1, 1};
 }
@@ -122,6 +211,7 @@ void* rae_ext_rae_str_to_cstr(rae_String s) {
 void rae_ext_rae_str_free(rae_String s) {
   if (s.is_owned && s.data) {
     rae_string_pool_remove(s.data);
+    g_mem_str_free_n++; g_mem_str_free_b += s.capacity > 0 ? s.capacity : s.len + 1;
     free(s.data);
   }
 }
@@ -135,6 +225,8 @@ rae_String rae_string_copy(rae_String src) {
   if (!buf) return (rae_String){NULL, 0, 0, 0};
   memcpy(buf, src.data, (size_t)src.len);
   buf[src.len] = '\0';
+  g_mem_string_copy_n++;
+  g_mem_str_alloc_n++; g_mem_str_alloc_b += src.len + 1;
   return (rae_String){buf, src.len, src.len + 1, 1};
 }
 
@@ -155,6 +247,7 @@ static int g_rae_string_pool_count = 0;
 void rae_string_pool_register(void* ptr) {
   if (!ptr) return;
   if (g_rae_string_pool_count >= RAE_STRING_POOL_MAX) return;
+  g_mem_pool_register_n++;
   g_rae_string_pool[g_rae_string_pool_count++] = ptr;
 }
 
@@ -165,8 +258,13 @@ int rae_string_pool_mark(void) {
 void rae_string_pool_flush(int saved) {
   if (saved < 0) saved = 0;
   if (saved > g_rae_string_pool_count) return;  // nothing to flush
+  g_mem_pool_flush_calls++;
   for (int i = g_rae_string_pool_count - 1; i >= saved; i--) {
-    if (g_rae_string_pool[i]) free(g_rae_string_pool[i]);
+    if (g_rae_string_pool[i]) {
+      g_mem_str_free_n++; g_mem_str_free_b += rae_malloc_size_safe(g_rae_string_pool[i]);
+      g_mem_pool_flush_freed++;
+      free(g_rae_string_pool[i]);
+    }
     g_rae_string_pool[i] = NULL;
   }
   g_rae_string_pool_count = saved;
@@ -174,6 +272,7 @@ void rae_string_pool_flush(int saved) {
 
 void rae_string_pool_remove(void* ptr) {
   if (!ptr) return;
+  g_mem_pool_remove_n++;
   // Linear scan from the top — the entry we want to detach is
   // almost always the most recently registered one (a binding
   // taking the result of the just-emitted interpolation).
@@ -212,6 +311,7 @@ rae_String rae_ext_rae_str_interp(int n, ...) {
       }
     }
     buf[total] = '\0';
+    g_mem_str_alloc_n++; g_mem_str_alloc_b += total + 1;
   }
 
   // Free any owned input — these are compiler-generated temporaries
@@ -223,6 +323,7 @@ rae_String rae_ext_rae_str_interp(int n, ...) {
   for (int i = 0; i < n; i++) {
     if (parts[i].is_owned && parts[i].data) {
       rae_string_pool_remove(parts[i].data);
+      g_mem_str_free_n++; g_mem_str_free_b += parts[i].capacity > 0 ? parts[i].capacity : parts[i].len + 1;
       free(parts[i].data);
     }
   }
@@ -274,6 +375,7 @@ rae_String rae_ext_formatTimestamp(int64_t epoch_ms) {
   if (!data) return (rae_String){NULL, 0, 0, 0};
   memcpy(data, buf, (size_t)n);
   data[n] = '\0';
+  g_mem_str_alloc_n++; g_mem_str_alloc_b += n + 1;
   return (rae_String){data, (int64_t)n, (int64_t)n + 1, 1};
 }
 
@@ -289,6 +391,7 @@ rae_String rae_ext_formatDate(int64_t epoch_ms) {
   if (!data) return (rae_String){NULL, 0, 0, 0};
   memcpy(data, buf, (size_t)n);
   data[n] = '\0';
+  g_mem_str_alloc_n++; g_mem_str_alloc_b += n + 1;
   return (rae_String){data, (int64_t)n, (int64_t)n + 1, 1};
 }
 
@@ -329,6 +432,7 @@ RaeAny rae_ext_json_get(const char* json, const char* field) {
         uint8_t* res = malloc(len + 1);
         memcpy(res, val_start, len);
         res[len] = '\0';
+        g_mem_str_alloc_n++; g_mem_str_alloc_b += (int64_t)len + 1;
         return (RaeAny){RAE_TYPE_STRING, false, false, {.s = {res, (int64_t)len, (int64_t)len + 1, 1}}};
     } else if (*val_start == 't') {
         return (RaeAny){RAE_TYPE_BOOL, false, false, {.b = 1}};
@@ -358,6 +462,7 @@ RaeAny rae_ext_json_get(const char* json, const char* field) {
         uint8_t* res = malloc(len + 1);
         memcpy(res, val_start, len);
         res[len] = '\0';
+        g_mem_str_alloc_n++; g_mem_str_alloc_b += (int64_t)len + 1;
         return (RaeAny){RAE_TYPE_STRING, false, false, {.s = {res, (int64_t)len, (int64_t)len + 1, 1}}}; // We return objects as strings for now
     }
     
@@ -610,6 +715,7 @@ rae_String rae_ext_rae_str_concat(rae_String a, rae_String b) {
     if (a.data) memcpy(result_data, a.data, len_a);
     if (b.data) memcpy(result_data + len_a, b.data, len_b);
     result_data[len_a + len_b] = '\0';
+    g_mem_str_alloc_n++; g_mem_str_alloc_b += len_a + len_b + 1;
   }
   return (rae_String){result_data, len_a + len_b, len_a + len_b + 1, 1};
 }
@@ -662,6 +768,7 @@ rae_String rae_ext_rae_str_sub(rae_String s, int64_t start, int64_t len) {
   if (result_data) {
     memcpy(result_data, s.data + start, (size_t)len);
     result_data[len] = '\0';
+    g_mem_str_alloc_n++; g_mem_str_alloc_b += len + 1;
   }
   return (rae_String){result_data, len, len + 1, 1};
 }
@@ -751,6 +858,7 @@ rae_String rae_ext_rae_io_read_line(void) {
       buffer[blen-1] = '\0';
       blen--;
   }
+  g_mem_str_alloc_n++; g_mem_str_alloc_b += (int64_t)len;
   return (rae_String){(uint8_t*)buffer, (int64_t)blen, (int64_t)len, 1};
 }
 
@@ -780,6 +888,7 @@ rae_String rae_ext_rae_sys_read_file(rae_String path) {
   if (buffer) {
     fread(buffer, 1, (size_t)len, f);
     buffer[len] = '\0';
+    g_mem_str_alloc_n++; g_mem_str_alloc_b += (int64_t)len + 1;
   }
   fclose(f);
   return (rae_String){buffer, (int64_t)len, (int64_t)len + 1, 1};
@@ -1108,12 +1217,14 @@ static void rae_buf_check(const char* fn, void* buf, int64_t index, int64_t elem
 void* rae_ext_rae_buf_alloc(int64_t count, int64_t elem_size) {
   if (count <= 0) return NULL;
   void* p = calloc((size_t)count, (size_t)elem_size);
+  if (p) { g_mem_buf_alloc_n++; g_mem_buf_alloc_b += count * elem_size; }
   RAE_BR_REGISTER(p, count, elem_size);
   return p;
 }
 
 void rae_ext_rae_buf_free(void* buf) {
   if (buf) {
+    g_mem_buf_free_n++; g_mem_buf_free_b += rae_malloc_size_safe(buf);
     RAE_BR_UNREGISTER(buf);
     free(buf);
   }
@@ -1122,13 +1233,22 @@ void rae_ext_rae_buf_free(void* buf) {
 void* rae_ext_rae_buf_resize(void* buf, int64_t new_count, int64_t elem_size) {
   if (new_count <= 0) {
     if (buf) {
+      g_mem_buf_free_n++; g_mem_buf_free_b += rae_malloc_size_safe(buf);
       RAE_BR_UNREGISTER(buf);
       free(buf);
     }
     return NULL;
   }
+  /* realloc accounting: model as free(old) + alloc(new). The
+   * outstanding count stays balanced (one free, one alloc per call),
+   * which lets a leak-class hunt distinguish "buffers we forgot to
+   * free" from "buffers we keep resizing". */
+  int64_t old_bytes = buf ? rae_malloc_size_safe(buf) : 0;
   RAE_BR_UNREGISTER(buf);
   void* p = realloc(buf, (size_t)new_count * (size_t)elem_size);
+  if (buf) { g_mem_buf_free_n++; g_mem_buf_free_b += old_bytes; }
+  if (p)   { g_mem_buf_alloc_n++; g_mem_buf_alloc_b += new_count * elem_size; }
+  g_mem_buf_resize_n++;
   RAE_BR_REGISTER(p, new_count, elem_size);
   return p;
 }
@@ -1216,7 +1336,10 @@ rae_String rae_json_extract_string(rae_String json, const char* key) {
     if (!end) return (rae_String){NULL, 0, 0, 0};
     int64_t len = (int64_t)(end - v);
     uint8_t* copy = (uint8_t*)malloc((size_t)len + 1);
-    if (copy) { memcpy(copy, v, (size_t)len); copy[len] = 0; }
+    if (copy) {
+      memcpy(copy, v, (size_t)len); copy[len] = 0;
+      g_mem_str_alloc_n++; g_mem_str_alloc_b += len + 1;
+    }
     return (rae_String){copy, len, len + 1, 1};
 }
 
