@@ -420,12 +420,22 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 }
             }
             bool needs_addr = false; bool needs_deref = false; bool needs_prim_wrap = false; bool needs_box = false;
+            // When both param and arg are view/mod refs of the same
+            // wrapped type (e.g. `view String` -> `view String`), the
+            // arg is already a ref wrapper at the C level. Skip the
+            // identifier-deref that emit_expr normally applies, so we
+            // pass the wrapper through as-is. Without this the emit
+            // produces `(*x.ptr)` (a rae_String) where the callee
+            // expects a `rae_View_String` and the C compiler rejects it.
+            bool pass_view_through = false;
             if (p && p->type && (p->type->is_view || p->type->is_mod)) {
                 const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, a->value);
                 if (!(arg_tr && (arg_tr->is_view || arg_tr->is_mod))) {
                     Str base = get_base_type_name(p->type);
                     if (is_primitive_type(base) && !str_eq_cstr(base, "Buffer") && !str_eq_cstr(base, "Any")) needs_prim_wrap = true;
                     else if (!str_eq_cstr(base, "Buffer") && !str_eq_cstr(base, "Any")) needs_addr = true;
+                } else {
+                    pass_view_through = true;
                 }
             }
             if (p && p->type && fd->is_extern && !(p->type->is_view || p->type->is_mod)) {
@@ -478,7 +488,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 const AstTypeRef* arg_tr2 = infer_expr_type_ref(ctx, a->value);
                 bool is_prim_ref = arg_tr2 && (arg_tr2->is_view || arg_tr2->is_mod) && is_primitive_type(get_base_type_name(arg_tr2));
                 fprintf(out, "rae_any(("); emit_expr(ctx, a->value, out, PREC_LOWEST, false, is_prim_ref); fprintf(out, "))");
-            } else emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
+            } else emit_expr(ctx, a->value, out, PREC_LOWEST, false, pass_view_through);
             if (needs_deref) fprintf(out, ")");
             if (needs_prim_wrap) fprintf(out, "} }");
             ctx->has_expected_type = had_exp; ctx->expected_type = saved_exp;
