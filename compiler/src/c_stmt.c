@@ -604,6 +604,24 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             }
             fprintf(out, "    rae_string_pool_flush(__rae_spm_func);\n");
 
+            // Stage 8: re-register an owned String return into the
+            // caller's pool so nested call chains (e.g.
+            // `concat(concat(a, b), c)`) don't dangle. The inner
+            // `concat` would otherwise return owned heap detached
+            // from any pool; the outer call reads the bytes via view
+            // String and never frees the inner. Re-registering after
+            // the callee's flush puts the result back in the active
+            // pool, where the *caller's* surrounding mark/flush (let,
+            // assign, expr-stmt, ret) sweeps it if no `pool_take`
+            // claims it. `pool_register_owned` is a no-op for
+            // literal-backed / view / NULL returns.
+            if (has_value && ret_type && !ret_type->is_view && !ret_type->is_mod && !ret_type->is_opt) {
+                Str rbase2 = get_base_type_name(ret_type);
+                if (str_eq_cstr(rbase2, "String")) {
+                    fprintf(out, "    __ret_val = rae_string_pool_register_owned(__ret_val);\n");
+                }
+            }
+
             if (has_value) {
                 fprintf(out, "    return __ret_val;\n");
             } else if (is_main_fn) {
