@@ -80,14 +80,19 @@ func buildTrackList(world: mod UiWorld, trackScene: view Scene) pub ret Int {
     setRectFixed(world: world, entity: row, w: screenW - outerPad * 2.0, h: trackRowH)
 
     let overrides: List(SceneOverride) = emptyOverrides()
-    let label: String = (i + 1).toString()
-    if i < 9 {
-      label = "0".concat(other: label)
+    let n: Int = i + 1
+    # Interpolation produces a single owned String — no intermediate
+    # concat results to leak. Two-digit zero-pad is handled inline so
+    # the row label still reads "01"…"10" rather than "1"…"10".
+    let label: String = ""
+    if n < 10 {
+      label = "0{n}"
+    } else {
+      label = "{n}"
     }
     let title: String = titles.get(index: i)
     let dur: String = durations.get(index: i)
-    let dot: String = " · "
-    let subtitle: String = "Brambles".concat(other: dot).concat(other: dur)
+    let subtitle: String = "Brambles · {dur}"
     let idxId: String = "IdxText"
     let titleId: String = "TitleText"
     let subtitleId: String = "SubtitleText"
