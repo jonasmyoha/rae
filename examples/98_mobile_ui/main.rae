@@ -101,7 +101,13 @@ func main() {
   # storage at end-of-frame instead of leaking it permanently.
   let stressEnv: String = getEnv(name: "RAE_UI_STRESS_REBUILDS")
   if stressEnv.length() > 0 {
+    # Stress run length is overridable via env so we can do slope
+    # checks across 50K / 100K / 200K windows without recompiling.
+    let stressNEnv: String = getEnv(name: "RAE_UI_STRESS_N")
     let stressN: Int = 50000
+    if stressNEnv.length() > 0 {
+      stressN = stressNEnv.toInt()
+    }
     let stressI: Int = 0
     let lastLog: Int = 0
     # Warm-up rebuild so font / texture / scene-loader one-shots don't
@@ -128,6 +134,16 @@ func main() {
     }
     let finalKb: Int = processRssKb()
     log("[stress] done {stressN} rebuilds rss_kb={finalKb} growth_kb={finalKb - baselineKb}")
+    # Optional pause-before-exit so external tooling (macOS `leaks`,
+    # `vmmap`, Activity Monitor) can inspect the live process state
+    # after stress completes but before the OS frees everything.
+    let pauseEnv: String = getEnv(name: "RAE_UI_STRESS_PAUSE")
+    if pauseEnv.length() > 0 {
+      log("[stress] paused for inspection (Ctrl+C to exit) — find pid via `pgrep -fl rae_compiled` and run `leaks <pid>` / `vmmap <pid>`")
+      loop true {
+        sleep(ms: 1000)
+      }
+    }
     closeWindow()
     ret
   }
