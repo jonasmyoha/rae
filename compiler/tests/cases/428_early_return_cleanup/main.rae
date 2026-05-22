@@ -1,0 +1,70 @@
+# Stage 7 leak guard + correctness checks for the early-return
+# cleanup epilogue. Each ret must:
+#   1. Drop in-scope owned String locals.
+#   2. Detach the return value from the string pool so the flush
+#      doesn't free what the caller is about to claim.
+#   3. Keep the returned String alive (no use-after-free).
+#   4. No-op safely on literal-backed Strings (is_owned=0).
+import core
+import string
+import sys
+
+# Case 1 + 5: early-ret returning interpolation result;
+# literal-backed return on the other branch.
+func make(flag: Bool) ret String {
+  if flag {
+    ret "hello {1}"
+  }
+  ret "bye {2}"
+}
+
+# Case 3 + 4: a local owned String (`tmp`) constructed before the
+# early ret. `tmp` must be dropped on every ret path; the returned
+# value must survive the cleanup.
+func makeWithTemp(flag: Bool) ret String {
+  let tmp: String = "tmp {1}"
+  if flag {
+    ret "result {2}"
+  }
+  ret "other {3}"
+}
+
+# Case 4: explicit `ret own s` returning the local. Move tracking
+# must skip the auto-drop of `s` so the caller's value survives.
+func makeOwned() ret String {
+  let s: String = "hello {1}"
+  ret own s
+}
+
+# Case 5: literal-backed String, no heap involved.
+func makeLiteral() ret String {
+  ret "hello"
+}
+
+func main() {
+  log("hello: {make(flag: true)}")
+  log("bye: {make(flag: false)}")
+  log("result: {makeWithTemp(flag: true)}")
+  log("tmp_path: {makeWithTemp(flag: false)}")
+  log("moved: {makeOwned()}")
+  log("literal: {makeLiteral()}")
+
+  # Loop case 2: call the early-ret-with-interp function many
+  # times. Without Stage 7's flush+drops on every ret, the
+  # `tmp` String allocated per call would leak. Assert bounded
+  # RSS growth.
+  let baselineKb: Int = processRssKb()
+  let iterations: Int = 5000
+  let i: Int = 0
+  loop i < iterations {
+    let r: String = makeWithTemp(flag: true)
+    i = i + 1
+  }
+  let growthKb: Int = processRssKb() - baselineKb
+  log("iterations: {iterations}")
+  if growthKb > 2000 {
+    log("verdict: LEAK")
+  } else {
+    log("verdict: OK")
+  }
+}
