@@ -749,7 +749,7 @@ Str infer_expr_type(CFuncContext* ctx, const AstExpr* expr) {
 
 bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* f, FILE* out, const struct VmRegistry* r, bool ray) {
   if (f->is_extern || str_starts_with_cstr(f->name, "rae_ext_")) return true;
-  CFuncContext tctx = {.compiler_ctx = ctx, .module = m, .func_decl = f, .uses_raylib = ray, .registry = r};
+  CFuncContext tctx = {.compiler_ctx = ctx, .module = m, .func_decl = f, .uses_raylib = ray, .registry = r, .func_first_let_idx = (size_t)-1};
   const char* rt = c_return_type(&tctx, f); const char* mangled = rae_mangle_function(ctx, f);
   
   bool is_main = str_eq_cstr(f->name, "main");
@@ -772,6 +772,9 @@ bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* 
   // fire on lets the function itself declared. Move detection runs
   // inline during emit_stmt (AST_EXPR_OWN, AST_STMT_RET).
   size_t first_let_idx = tctx.local_count;
+  // Stage 7: stash on the context so the ret-stmt epilogue can drop
+  // the same range of locals before each return (not just fallthrough).
+  tctx.func_first_let_idx = first_let_idx;
 
   // Stage 4: per-function string-temp-pool guard. Catches any
   // pool registrations from `rae_ext_rae_str_interp` that escape
@@ -810,7 +813,7 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
   // function body produces -Wreturn-type warnings.
   if (f->is_extern) return true;
   const AstIdentifierPart* gp_src = f->generic_params; if (!gp_src && f->generic_template) gp_src = f->generic_template->as.func_decl.generic_params;
-  CFuncContext tctx = {.compiler_ctx = ctx, .module = m, .func_decl = f, .uses_raylib = ray, .registry = r, .generic_params = gp_src, .generic_args = args};
+  CFuncContext tctx = {.compiler_ctx = ctx, .module = m, .func_decl = f, .uses_raylib = ray, .registry = r, .generic_params = gp_src, .generic_args = args, .func_first_let_idx = (size_t)-1};
   const char* rt = c_return_type(&tctx, f); const char* mangled = rae_mangle_specialized_function(ctx, f, args);
   // Dedup check: skip if already emitted
   for (size_t i = 0; i < g_emitted_spec_func_count; i++) {
@@ -940,6 +943,7 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
 
   // Stage 2 + 3: see emit_function above.
   size_t first_let_idx = tctx.local_count;
+  tctx.func_first_let_idx = first_let_idx;
   // Stage 4: per-function string-temp-pool guard. See emit_function.
   fprintf(out, "  int __rae_spm_func = rae_string_pool_mark();\n");
   if (f->body) { for (AstStmt* s = f->body->first; s; s = s->next) emit_stmt(&tctx, s, out); }
