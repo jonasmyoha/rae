@@ -348,6 +348,11 @@ static rae_String rae_str_from_buf_impl(const uint8_t* data, int64_t len, uint8_
     memcpy(buf, data, len);
     buf[len] = '\0';
     rae_mem_str_tag(buf, len + 1, site);
+    /* Register with the temp pool so the statement-end / function-end
+     * flush sweeps results that the caller doesn't take ownership of.
+     * Matches the str_interp contract — pool_take detaches the entry
+     * when a binding captures the result, so this never double-frees. */
+    rae_string_pool_register(buf);
   }
   return (rae_String){buf, len, len + 1, 1};
 }
@@ -360,6 +365,7 @@ static rae_String rae_str_from_cstr_impl(const char* s, uint8_t site) {
     memcpy(data, s, len);
     data[len] = '\0';
     rae_mem_str_tag(data, len + 1, site);
+    rae_string_pool_register(data);
   }
   return (rae_String){data, len, len + 1, 1};
 }
@@ -893,6 +899,13 @@ rae_String rae_ext_rae_str_concat(rae_String a, rae_String b) {
     if (b.data) memcpy(result_data + len_a, b.data, len_b);
     result_data[len_a + len_b] = '\0';
     rae_mem_str_tag(result_data, len_a + len_b + 1, RAE_SITE_CONCAT);
+    /* Register with the temp pool, matching the str_interp contract.
+     * Callers that bind the result (let / assign / ret) detach via
+     * rae_string_pool_take; transient uses (foo(a + b) at expr-stmt
+     * scope) get swept by the surrounding mark/flush. Without this
+     * line, every concat result whose owner doesn't explicitly call
+     * str_free leaks until process exit. */
+    rae_string_pool_register(result_data);
   }
   return (rae_String){result_data, len_a + len_b, len_a + len_b + 1, 1};
 }
