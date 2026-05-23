@@ -528,7 +528,19 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                 }
             }
             bool rhs_is_own = (f->value && f->value->kind == AST_EXPR_OWN);
-            if (field_is_owned_string && rhs_is_own) {
+            // RHS is a call / interp / non-aliasing expression: the
+            // value is an owned heap with no other live reference, so
+            // we can MOVE (pool_take) instead of deep-copying. Saves
+            // one allocation per struct-literal String field when the
+            // field is initialised from a function return — e.g.
+            // `Name { label: optString(...) }` would otherwise leak
+            // the optString result.
+            bool rhs_is_owning_temp = f->value && (
+                f->value->kind == AST_EXPR_CALL ||
+                f->value->kind == AST_EXPR_METHOD_CALL ||
+                f->value->kind == AST_EXPR_INTERP ||
+                f->value->kind == AST_EXPR_BINARY);
+            if (field_is_owned_string && (rhs_is_own || rhs_is_owning_temp)) {
                 fprintf(out, "rae_string_pool_take(");
                 emit_expr(ctx, f->value, out, PREC_LOWEST, false, false);
                 fprintf(out, ")");
