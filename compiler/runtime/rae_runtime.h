@@ -339,10 +339,16 @@ RAE_UNUSED static inline rae_String rae_string_from_literal(const uint8_t* data,
 // for legacy ABI reasons; the auto-drop pass prefers pointer form
 // so it can clear is_owned to prevent double-free if a drop site
 // gets reached twice through some path.
+void rae_ext_rae_str_free(rae_String s);
 RAE_UNUSED static inline void rae_string_drop(rae_String* s) {
   if (!s) return;
   if (s->is_owned && s->data) {
-    free(s->data);
+    // Route through rae_ext_rae_str_free so the temp pool is kept
+    // in sync (pool_remove) and mem-stats sees the free (untag).
+    // Without this, a String dropped via cascade looks like a
+    // permanent leak under RAE_MEM_STATS=1 and a subsequent pool
+    // flush would double-free the same heap.
+    rae_ext_rae_str_free(*s);
   }
   s->data = NULL;
   s->len = 0;
