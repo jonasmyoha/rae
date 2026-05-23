@@ -855,17 +855,16 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
       AstTypeRef* elem = (AstTypeRef*)args;
       Str ebase = get_base_type_name(elem);
       bool elem_is_string = str_eq_cstr(ebase, "String");
-      // STRICT element-needs-drop, same as pre-Phase-3. PERMISSIVE
-      // iteration of String-only element structs (e.g. List<Name>)
-      // would close the residual mobile-UI leak, but two patterns
-      // in lib/json.rae do an alias-extract+cross-list-move that
-      // shares String storage between two Lists (parseObject's
-      // localFields → fields bulk-copy). Without a deep-copy at
-      // that move site or per-T list drop variants, iterating
-      // elements crashes test 411. Leak status: same as
-      // pre-Phase-3 for List<String-only-struct>.
+      // Phase 3 follow-up: PERMISSIVE element iteration so List<T>
+      // with String-only-struct T (Name, NodeId, JsonField, …) drops
+      // each element's Strings. Paired with:
+      //   - Phase 2 deep-copying String fields at struct literal init
+      //   - struct `_alias` drop variant skipping List/Map fields
+      //     when element T needs cascade drop
+      //   - lib/json.rae parseObject manual `localFields.length = 0`
+      //     after bulk-transfer to suppress double-iteration
       bool elem_needs_drop = elem_is_string ||
-          type_owns_heap_storage(ctx, m, elem, 0);
+          type_needs_cascade_drop(ctx, m, elem, 0);
       // StringMap always needs an entry iteration because its keys
       // are Strings and must be freed regardless of whether the value
       // type is heap-owning (e.g. StringMap(Int) — keys like "AlbumRoot"
