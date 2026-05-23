@@ -85,9 +85,10 @@ bool type_owns_heap_storage(CompilerContext* cctx, const AstModule* module,
 
 // Permissive variant for cascade-drop sites — also true when a field
 // is a String or when any nested field is a String. Used by Layer 5
-// struct drop synthesis and List/Map element drop synthesis to decide
-// whether the struct needs cascade emission. Crucially NOT used by
-// the local auto-drop pass (see above).
+// struct drop synthesis, List/Map element drop synthesis, and (since
+// Phase 3) the local auto-drop pass. The alias-safety gate moved to
+// `local_struct_owns_heap` in emit_implicit_drops_for_body so this
+// predicate can stay purely structural.
 bool type_needs_cascade_drop(CompilerContext* cctx, const AstModule* module,
                              const AstTypeRef* type, int depth) {
   if (!type || depth > 32) return false;
@@ -122,6 +123,107 @@ const AstFuncDecl* find_drop_overload_for(
     if (str_eq(dp_base, container_base)) return &d->as.func_decl;
   }
   return NULL;
+}
+
+// Classifies a function as alias-returning by walking its body for
+// any return path that yields a buf_get-flavoured alias. Used at
+// let-stmt time so `let v = call()` knows whether to mark v as
+// owning (full cascade drop) or aliasing (skip String drops).
+//
+// A function returns an alias when ANY of these patterns reach a ret:
+//
+//   ret <ident>            where ident is bound by `let` to one of
+//                          the aliasing forms.
+//   ret <aliasing_call>    a direct call whose callee is itself
+//                          alias-returning (transitive) or a
+//                          buf_get intrinsic.
+//
+// Aliasing let-init forms:
+//   let x = buf_get(...) / __buf_get(...) / rae_ext_rae_buf_get(...)
+//   let x = <call to alias-returning user function>
+//   let x = <other ident> (shallow copy — pure pass-through)
+//
+// Recursion has a depth cap + visited-set so mutually-recursive
+// helpers don't infinite-loop. The result is conservative — a false
+// "owning" leaks (no crash), a false "alias" causes the Phase 2
+// String-copy in struct literals to leak (also no crash).
+#define RAE_ALIAS_VISIT_MAX 32
+typedef struct { const AstFuncDecl* fns[RAE_ALIAS_VISIT_MAX]; int n; } AliasVisit;
+static bool visit_seen(AliasVisit* v, const AstFuncDecl* fd) {
+  for (int i = 0; i < v->n; i++) if (v->fns[i] == fd) return true;
+  return false;
+}
+static bool visit_push(AliasVisit* v, const AstFuncDecl* fd) {
+  if (v->n >= RAE_ALIAS_VISIT_MAX) return false;
+  v->fns[v->n++] = fd; return true;
+}
+static bool call_is_aliasing(CompilerContext* cctx, const AstExpr* call, AliasVisit* v);
+static bool stmt_block_returns_alias_v(CompilerContext* cctx, const AstStmt* first, AliasVisit* v);
+static bool func_returns_alias_v(CompilerContext* cctx, const AstFuncDecl* fd, AliasVisit* v);
+static const AstStmt* find_let_for_ident(const AstStmt* scope_start, Str name) {
+  for (const AstStmt* s = scope_start; s; s = s->next) {
+    if (s->kind == AST_STMT_LET && str_eq(s->as.let_stmt.name, name)) return s;
+  }
+  return NULL;
+}
+static bool let_init_is_aliasing(CompilerContext* cctx, const AstStmt* let_s, AliasVisit* v) {
+  if (!let_s) return false;
+  const AstExpr* val = let_s->as.let_stmt.value;
+  if (!val) return false;
+  if (val->kind == AST_EXPR_IDENT) return true; // bare-ident copy → alias
+  if (val->kind == AST_EXPR_CALL) return call_is_aliasing(cctx, val, v);
+  return false;
+}
+static bool call_is_aliasing(CompilerContext* cctx, const AstExpr* call, AliasVisit* v) {
+  const AstExpr* callee = call->as.call.callee;
+  if (!callee || callee->kind != AST_EXPR_IDENT) return false;
+  Str cn = callee->as.ident;
+  if (str_eq_cstr(cn, "rae_ext_rae_buf_get") ||
+      str_eq_cstr(cn, "__buf_get") ||
+      str_eq_cstr(cn, "rae_ext___buf_get")) return true;
+  // User function: recurse on its body.
+  for (size_t k = 0; k < cctx->all_decl_count; k++) {
+    const AstDecl* d = cctx->all_decls[k];
+    if (d->kind != AST_DECL_FUNC) continue;
+    if (!str_eq(d->as.func_decl.name, cn)) continue;
+    return func_returns_alias_v(cctx, &d->as.func_decl, v);
+  }
+  return false;
+}
+static bool stmt_block_returns_alias_v(CompilerContext* cctx, const AstStmt* first, AliasVisit* v) {
+  for (const AstStmt* s = first; s; s = s->next) {
+    if (s->kind == AST_STMT_RET) {
+      const AstReturnArg* vs = s->as.ret_stmt.values;
+      if (vs && vs->value) {
+        const AstExpr* rv = vs->value;
+        if (rv->kind == AST_EXPR_IDENT) {
+          const AstStmt* ls = find_let_for_ident(first, rv->as.ident);
+          if (let_init_is_aliasing(cctx, ls, v)) return true;
+        } else if (rv->kind == AST_EXPR_CALL) {
+          if (call_is_aliasing(cctx, rv, v)) return true;
+        }
+      }
+    } else if (s->kind == AST_STMT_IF) {
+      if (s->as.if_stmt.then_block &&
+          stmt_block_returns_alias_v(cctx, s->as.if_stmt.then_block->first, v)) return true;
+      if (s->as.if_stmt.else_block &&
+          stmt_block_returns_alias_v(cctx, s->as.if_stmt.else_block->first, v)) return true;
+    } else if (s->kind == AST_STMT_LOOP) {
+      if (s->as.loop_stmt.body &&
+          stmt_block_returns_alias_v(cctx, s->as.loop_stmt.body->first, v)) return true;
+    }
+  }
+  return false;
+}
+static bool func_returns_alias_v(CompilerContext* cctx, const AstFuncDecl* fd, AliasVisit* v) {
+  if (!fd || !fd->body) return false;
+  if (visit_seen(v, fd)) return false; // recursive call — assume owning to avoid infinite alias
+  if (!visit_push(v, fd)) return false;
+  return stmt_block_returns_alias_v(cctx, fd->body->first, v);
+}
+bool rae_func_returns_alias(CompilerContext* cctx, const AstFuncDecl* fd) {
+  AliasVisit v = {0};
+  return func_returns_alias_v(cctx, fd, &v);
 }
 
 // Emit `drop(local);` calls for every heap-owning binding declared
@@ -173,11 +275,25 @@ bool emit_implicit_drops_for_body(CFuncContext* ctx, FILE* out,
     if (type->is_view || type->is_mod) continue;
     if (ctx->local_moved[idx]) continue;
     // Skip cheap value types — they own no heap and don't need a
-    // drop call.
-    if (!type_owns_heap_storage(ctx->compiler_ctx, ctx->module, type, 0)) {
+    // drop call. Permissive predicate so String-only owning structs
+    // are eligible too — alias safety is gated by local_struct_owns_heap
+    // below.
+    if (!type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, type, 0)) {
       continue;
     }
     Str name = ctx->locals[idx];
+    Str tbase = get_base_type_name(type);
+    if (str_eq_cstr(tbase, "String")) {
+      // String locals don't have a synthesised rae_drop_struct_ —
+      // call the runtime helper directly. Only drop when the local
+      // uniquely owns its heap (auto-init or struct-literal copy);
+      // String-typed call results may alias the callee's storage.
+      if (ctx->local_struct_owns_heap[idx]) {
+        fprintf(out, "  rae_string_drop(&%.*s);\n",
+                (int)name.len, name.data);
+      }
+      continue;
+    }
     if (is_drop_target_type(type)) {
       // Stdlib container (List / StringMap / IntMap) — call the
       // user-defined generic `drop(T)` from lib/core.rae.
@@ -192,17 +308,21 @@ bool emit_implicit_drops_for_body(CFuncContext* ctx, FILE* out,
       fprintf(out, "  %s(&%.*s);\n", drop_name,
               (int)name.len, name.data);
     } else {
-      // Layer 5 — user struct that transitively owns heap. Per
-      // docs/ownership-model.md, plain `T` always owns. Stdlib
-      // functions that return shallow aliases must use `view T`
-      // (e.g. componentView, sceneNodeAt) so they don't land here.
-      // Generic-instance structs (Stack(Int), ComponentTable(T))
-      // still need user-defined `drop(T)` overloads — Layer 5 only
-      // synthesises `rae_drop_struct_` for non-generic structs.
+      // Layer 5 + Phase 3 — user struct that transitively needs
+      // cascade drop. Two variants are synthesised in c_backend.c:
+      //   rae_drop_struct_<T>       — full cascade (drops String fields).
+      //   rae_drop_struct_<T>_alias — strict cascade (skips Strings).
+      // Pick by local ownership: struct-literal/auto-init locals
+      // uniquely own (full); call-result and bare-ident-copy locals
+      // may alias the source (alias variant). Generic-instance
+      // structs (Stack(Int), ComponentTable(T)) still need user-
+      // defined `drop(T)` overloads — Pass A only synthesises
+      // rae_drop_struct_ helpers for non-generic structs.
       if (type->generic_args) continue;
       const char* struct_mangled = rae_mangle_type_specialized(
           ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type);
-      fprintf(out, "  rae_drop_struct_%s(&%.*s);\n", struct_mangled,
+      const char* suffix = ctx->local_struct_owns_heap[idx] ? "" : "_alias";
+      fprintf(out, "  rae_drop_struct_%s%s(&%.*s);\n", struct_mangled, suffix,
               (int)name.len, name.data);
     }
   }
@@ -450,12 +570,73 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 ctx->locals[ctx->local_count] = stmt->as.let_stmt.name;
                 ctx->local_types[ctx->local_count] = str_from_cstr(tn);
                 ctx->local_type_refs[ctx->local_count] = stmt->as.let_stmt.type;
-                // Layer 5 transitional gate: only struct literal or
-                // auto-init bindings genuinely own their heap (no
-                // alias risk). See c_backend_internal.h.
+                // Phase 3 ownership classification — does this binding
+                // uniquely own its heap, or does it shallow-alias
+                // someone else's storage? Used by emit_implicit_drops
+                // to pick between the full and `_alias` cascade-drop
+                // variants synthesised in c_backend.c.
+                //
+                //   own (full drop):
+                //     - auto-init (`let x: T`)
+                //     - struct literal (`let x: T = {...}`)
+                //     - call result — callees that return plain T
+                //       went through the Stage 7 ret-epilogue which
+                //       transfers ownership (pool_take, move-track on
+                //       `ret x`). The bare exceptions are container
+                //       extractors that alias into their argument —
+                //       see below.
+                //
+                //   alias (strict drop, skip Strings):
+                //     - bare-ident copy (`let x: T = y`) — shallow
+                //       copies the C struct, aliasing y's heap.
+                //     - call to a known extractor: rae_ext_rae_buf_get
+                //       (List/Map slot extraction), valueAt (JsonDoc
+                //       list element), componentGet (ECS component
+                //       table). These return into a value-typed slot
+                //       owned by the first arg's storage.
                 const AstExpr* init = stmt->as.let_stmt.value;
-                ctx->local_struct_owns_heap[ctx->local_count] =
-                    (init == NULL) || (init->kind == AST_EXPR_OBJECT);
+                bool owns = (init == NULL) || (init->kind == AST_EXPR_OBJECT);
+                if (!owns && init && init->kind == AST_EXPR_CALL) {
+                  const AstExpr* callee = init->as.call.callee;
+                  if (callee && callee->kind == AST_EXPR_IDENT) {
+                    Str cn = callee->as.ident;
+                    bool is_buf_get =
+                        str_eq_cstr(cn, "rae_ext_rae_buf_get") ||
+                        str_eq_cstr(cn, "__buf_get") ||
+                        str_eq_cstr(cn, "rae_ext___buf_get");
+                    if (is_buf_get) {
+                      owns = false;
+                    } else {
+                      // Inspect the callee's body to see whether it
+                      // returns an alias (a local initialised from
+                      // buf_get / list.get / similar) or an owned
+                      // value (struct literal / new call / pool_take).
+                      // Default to owning — only flip to alias when
+                      // we find a clear `ret <local>` whose local was
+                      // initialised from a known aliasing source.
+                      // This avoids the Stage-6 whitelist treadmill
+                      // (jsonRoot / jsonString deep-copy but match the
+                      // earlier "view T first param" signature).
+                      owns = true;
+                      for (size_t k = 0; k < ctx->compiler_ctx->all_decl_count; k++) {
+                        const AstDecl* d = ctx->compiler_ctx->all_decls[k];
+                        if (d->kind != AST_DECL_FUNC) continue;
+                        if (!str_eq(d->as.func_decl.name, cn)) continue;
+                        // Walk the body looking for `ret <ident>` whose
+                        // <ident> was let-init from buf_get. This is the
+                        // accessor pattern (valueAt, fieldAt, jsonArrayAt).
+                        // Only handles the top-level body — inlined ret
+                        // expressions inside if/loop are also walked.
+                        if (!d->as.func_decl.body) break;
+                        owns = !rae_func_returns_alias(ctx->compiler_ctx, &d->as.func_decl);
+                        break;
+                      }
+                    }
+                  } else {
+                    owns = true;
+                  }
+                }
+                ctx->local_struct_owns_heap[ctx->local_count] = owns;
                 ctx->local_count++;
             }
             break;
@@ -474,7 +655,7 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 stmt->as.assign_stmt.value->kind == AST_EXPR_IDENT) {
                 const AstTypeRef* vtr = infer_expr_type_ref(ctx, stmt->as.assign_stmt.value);
                 if (vtr && !(vtr->is_view || vtr->is_mod) &&
-                    type_owns_heap_storage(ctx->compiler_ctx, ctx->module, vtr, 0)) {
+                    type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, vtr, 0)) {
                     mark_expr_moved_if_local(ctx, stmt->as.assign_stmt.value);
                 }
             }

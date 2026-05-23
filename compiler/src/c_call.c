@@ -191,6 +191,18 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         fprintf(out, ") + ("); emit_expr(ctx, arg->next->value, out, PREC_LOWEST, false, false);
         fprintf(out, ") * sizeof("); EMIT_ELEM_TYPE(); fprintf(out, ") )) = ");
         const AstExpr* val_expr = arg->next->next->value;
+        // Move-tracking: a bare local of heap-owning type stored into a
+        // Buffer slot is consumed by the store — the buffer slot now
+        // owns the heap. Skip the local's end-of-scope auto-drop.
+        // Without this, the cascade drop on the local double-frees
+        // the heap the buffer is about to reach via its element drop.
+        if (val_expr && val_expr->kind == AST_EXPR_IDENT) {
+            const AstTypeRef* vtr = infer_expr_type_ref(ctx, val_expr);
+            if (vtr && !(vtr->is_view || vtr->is_mod)
+                && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, vtr, 0)) {
+                mark_expr_moved_if_local(ctx, val_expr);
+            }
+        }
         bool target_is_any = (elem_t && elem_t->kind == TYPE_ANY)
             || (elem_t && str_eq_cstr(elem_t->name, "Any"))
             || (elem_tr && str_eq_cstr(get_base_type_name(elem_tr), "Any"));
@@ -209,7 +221,21 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             if (needs_struct_cast) {
                 fprintf(out, "("); EMIT_ELEM_TYPE(); fprintf(out, ")");
             }
+            // Propagate the buffer element type as expected_type so a
+            // struct-literal value picks up its struct_decl and Phase 2
+            // deep-copies String fields (e.g. StringMapEntry's `k`).
+            // Without this the struct literal sees no expected type
+            // and emits shallow `.k = keyCopy` — the local's heap then
+            // dangles when the caller drops keyCopy.
+            bool had_exp = ctx->has_expected_type;
+            AstTypeRef saved_exp = ctx->expected_type;
+            if (elem_tr) {
+                ctx->expected_type = *elem_tr;
+                ctx->has_expected_type = true;
+            }
             emit_expr(ctx, val_expr, out, PREC_LOWEST, false, false);
+            ctx->has_expected_type = had_exp;
+            ctx->expected_type = saved_exp;
         }
         return true;
     }
@@ -415,7 +441,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 && a->value->kind == AST_EXPR_IDENT) {
                 const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, a->value);
                 if (arg_tr && !(arg_tr->is_view || arg_tr->is_mod)
-                    && type_owns_heap_storage(ctx->compiler_ctx, ctx->module, arg_tr, 0)) {
+                    && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, arg_tr, 0)) {
                     mark_expr_moved_if_local(ctx, a->value);
                 }
             }
