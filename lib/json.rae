@@ -518,6 +518,15 @@ func parseValue(
               fields.add(value: f2)
               i = i + 1
             }
+            # Bulk-transfer hand-off: the byte-copies above made
+            # `fields` the canonical owner of every JsonField.key
+            # heap. Clearing `localFields.length` makes its eventual
+            # drop iteration skip every slot, so we don't double-free
+            # the Strings. The backing buffer is still freed by the
+            # per-T list drop. See the matching note in c_backend.c
+            # on why the per-T element iteration stays STRICT until
+            # cross-list ownership transfer has a proper primitive.
+            localFields.length = 0
             let v: JsonValue = {
               kind: JsonKind.Object
               asBool: false
