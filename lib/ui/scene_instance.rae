@@ -407,30 +407,26 @@ func applyOverride(world: mod UiWorld, entity: Int, override: view SceneOverride
   let activeKey: String = "Active"
   let onClickKey: String = "OnClick"
 
+  # Field-assign via componentMod instead of read-build-replace via
+  # componentSet. The struct-field String reassign drop in c_stmt.c
+  # frees the previous heap before the new one lands, so each
+  # override updates exactly the named field without leaking the
+  # rest of the component's String state.
+
   if override.componentName.equals(other: textKey) {
     let textField: String = "text"
     if override.fieldName.equals(other: textField) {
       if componentHas(this: world.texts, entity: entity) {
-        let cur: view Text => componentView(this: world.texts, entity: entity)
-        let updated: Text = {
-          text: override.valueString
-          styleId: cur.styleId
-          wrapWidthMode: cur.wrapWidthMode
-        }
-        componentSet(this: world.texts, entity: entity, data: updated)
+        let cur: mod Text => componentMod(this: world.texts, entity: entity)
+        cur.text = override.valueString
       }
       ret
     }
     let styleField: String = "styleId"
     if override.fieldName.equals(other: styleField) {
       if componentHas(this: world.texts, entity: entity) {
-        let cur: view Text => componentView(this: world.texts, entity: entity)
-        let updated: Text = {
-          text: cur.text
-          styleId: override.valueString
-          wrapWidthMode: cur.wrapWidthMode
-        }
-        componentSet(this: world.texts, entity: entity, data: updated)
+        let cur: mod Text => componentMod(this: world.texts, entity: entity)
+        cur.styleId = override.valueString
       }
     }
     ret
@@ -440,33 +436,16 @@ func applyOverride(world: mod UiWorld, entity: Int, override: view SceneOverride
     let textureField: String = "textureKey"
     if override.fieldName.equals(other: textureField) {
       if componentHas(this: world.sprites, entity: entity) {
-        let cur: view Sprite => componentView(this: world.sprites, entity: entity)
-        let updated: Sprite = {
-          textureKey: override.valueString
-          tint: cur.tint
-          scaleMode: cur.scaleMode
-          tileScale: cur.tileScale
-          nineSlice: cur.nineSlice
-          hasNineSlice: cur.hasNineSlice
-        }
-        componentSet(this: world.sprites, entity: entity, data: updated)
+        let cur: mod Sprite => componentMod(this: world.sprites, entity: entity)
+        cur.textureKey = override.valueString
       }
       ret
     }
     let tintField: String = "tint"
     if override.fieldName.equals(other: tintField) {
       if componentHas(this: world.sprites, entity: entity) {
-        let cur: view Sprite => componentView(this: world.sprites, entity: entity)
-        let newTint: RgbaColor = parseRgbaString(s: override.valueString)
-        let updated: Sprite = {
-          textureKey: cur.textureKey
-          tint: newTint
-          scaleMode: cur.scaleMode
-          tileScale: cur.tileScale
-          nineSlice: cur.nineSlice
-          hasNineSlice: cur.hasNineSlice
-        }
-        componentSet(this: world.sprites, entity: entity, data: updated)
+        let cur: mod Sprite => componentMod(this: world.sprites, entity: entity)
+        cur.tint = parseRgbaString(s: override.valueString)
       }
     }
     ret
@@ -476,14 +455,8 @@ func applyOverride(world: mod UiWorld, entity: Int, override: view SceneOverride
     let actionField: String = "actionId"
     if override.fieldName.equals(other: actionField) {
       if componentHas(this: world.onClicks, entity: entity) {
-        let cur: view OnClick => componentView(this: world.onClicks, entity: entity)
-        let updated: OnClick = {
-          actionId: override.valueString
-          actionIdDouble: cur.actionIdDouble
-          actionIdTriple: cur.actionIdTriple
-          maxDelayMs: cur.maxDelayMs
-        }
-        componentSet(this: world.onClicks, entity: entity, data: updated)
+        let cur: mod OnClick => componentMod(this: world.onClicks, entity: entity)
+        cur.actionId = override.valueString
       }
     }
     ret
