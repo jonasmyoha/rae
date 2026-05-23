@@ -604,7 +604,18 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 //       table). These return into a value-typed slot
                 //       owned by the first arg's storage.
                 const AstExpr* init = stmt->as.let_stmt.value;
-                bool owns = (init == NULL) || (init->kind == AST_EXPR_OBJECT);
+                bool owns = (init == NULL)
+                    || (init->kind == AST_EXPR_OBJECT)
+                    // Method calls are always classified owning: the
+                    // most common shape `p.x.method(...)` lowers to a
+                    // free-function call internally and returns a
+                    // fresh value (e.g. String.sub returns owned).
+                    // The only aliasing extractors users write at the
+                    // ident-callee level (valueAt/fieldAt) are handled
+                    // by the body-inspection branch below.
+                    || (init->kind == AST_EXPR_METHOD_CALL)
+                    || (init->kind == AST_EXPR_INTERP)
+                    || (init->kind == AST_EXPR_BINARY);
                 if (!owns && init && init->kind == AST_EXPR_CALL) {
                   const AstExpr* callee = init->as.call.callee;
                   if (callee && callee->kind == AST_EXPR_IDENT) {
