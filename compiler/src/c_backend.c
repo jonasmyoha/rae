@@ -769,8 +769,11 @@ bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* 
       }
   }
   // Stage 2 + 3: track where params end so end-of-body drops only
-  // fire on lets the function itself declared. Move detection runs
-  // inline during emit_stmt (AST_EXPR_OWN, AST_STMT_RET).
+  // fire on lets the function itself declared. Auto-dropping
+  // parameters would close more leaks but currently double-frees
+  // through code paths where the same heap is reachable via two
+  // names (caller's struct field passed as plain T, etc.) — see
+  // test 413 failure notes.
   size_t first_let_idx = tctx.local_count;
   // Stage 7: stash on the context so the ret-stmt epilogue can drop
   // the same range of locals before each return (not just fallthrough).
@@ -792,8 +795,9 @@ bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* 
   if (tctx.defer_stack.count > 0) emit_defers(&tctx, 0, out);
 
   // Stage 2 + 3 (docs/scope-exit-dealloc.md, docs/ownership-model.md):
-  // drop heap-owning lets at end-of-body fallthrough. Move-tracking
-  // skip-rules live in emit_implicit_drops_for_body itself.
+  // drop heap-owning lets at end-of-body fallthrough, then plain-T
+  // parameters that own heap. Move-tracking skip-rules cover
+  // anything the function passed onward.
   emit_implicit_drops_for_body(&tctx, out, first_let_idx);
 
   fprintf(out, "  rae_string_pool_flush(__rae_spm_func);\n");
