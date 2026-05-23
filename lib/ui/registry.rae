@@ -435,9 +435,12 @@ func deserText(doc: view JsonDoc, val: view JsonValue) ret Text {
   let txt: String = optString(doc: doc, container: val, key: "text", fallback: "")
   let style: String = optString(doc: doc, container: val, key: "styleId", fallback: "")
   let wrapStr: String = optString(doc: doc, container: val, key: "wrapWidthMode", fallback: "None")
+  # `own`: each local is consumed by the returned struct, no further
+  # uses. Avoids the wasted Phase 2 deep-copy + auto-drop pair that
+  # would otherwise allocate one extra heap per field per call.
   ret Text {
-    text: txt
-    styleId: style
+    text: own txt
+    styleId: own style
     wrapWidthMode: parseWrapWidthMode(s: wrapStr)
   }
 }
@@ -494,7 +497,7 @@ func deserHeroWidget(doc: view JsonDoc, val: view JsonValue) ret HeroWidget {
   # `key` is reserved in Rae, so it can't appear directly after a
   # type-prefixed struct literal in `ret`. Bind to a typed local first.
   let k: String = optString(doc: doc, container: val, key: "key", fallback: "")
-  let r: HeroWidget = { key: k }
+  let r: HeroWidget = { key: own k }
   ret r
 }
 
@@ -507,7 +510,7 @@ func deserNodeId(doc: view JsonDoc, val: view JsonValue) ret NodeId {
   # type-prefixed struct literal in `ret`. Drop the type prefix by
   # binding to a typed local first, then return the local.
   let nid: String = optString(doc: doc, container: val, key: "id", fallback: "")
-  let r: NodeId = { id: nid }
+  let r: NodeId = { id: own nid }
   ret r
 }
 
@@ -516,7 +519,7 @@ func deserSceneInstance(doc: view JsonDoc, val: view JsonValue) ret SceneInstanc
   # passes a string here; full param/override application is phase 1f.
   let sid: String = optString(doc: doc, container: val, key: "sceneId", fallback: "")
   ret SceneInstance {
-    sceneId: sid
+    sceneId: own sid
     paramsJson: ""
   }
 }
@@ -529,10 +532,10 @@ func deserTextBinding(doc: view JsonDoc, val: view JsonValue) ret TextBinding {
   let bs: String = optString(doc: doc, container: val, key: "suffix", fallback: "")
   let bf: TextFormat = parseTextFormat(s: formatStr)
   let r: TextBinding = {
-    key: bk
+    key: own bk
     format: bf
-    prefix: bp
-    suffix: bs
+    prefix: own bp
+    suffix: own bs
   }
   ret r
 }
