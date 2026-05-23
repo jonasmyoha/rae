@@ -1,0 +1,109 @@
+# Coverage for Rae's four ownership modes interacting with cascade
+# drop. Each scenario both prints observable output (for the diff
+# check) and exercises a non-trivial heap path so the implicit
+# auto-drop pipeline runs through it.
+import core
+import string
+import sys
+
+type User {
+  name: String
+  age: Int
+}
+
+type Group {
+  leader: User
+  members: List(User)
+}
+
+# === plain T return (owning) ===
+func makeUser(uName: String, uAge: Int) ret User {
+  ret User { name: uName, age: uAge }
+}
+
+# === view T param (borrow) ===
+func userLabel(u: view User) ret String {
+  ret "{u.name}/{u.age}"
+}
+
+# === mod T param (mutating borrow) ===
+func bumpAge(u: mod User) {
+  u.age = u.age + 1
+}
+
+# === plain T param + ret (consume + reproduce) ===
+func relabel(u: User, suffix: String) ret User {
+  ret User { name: u.name.concat(other: suffix), age: u.age }
+}
+
+# Plain T param consumes the caller's value. The caller's
+# move-tracking should skip the source's auto-drop.
+func recordMember(g: mod Group, m: User) {
+  g.members.add(value: m)
+}
+
+func runScenarios(verbose: Bool) {
+  let u1: User = makeUser(uName: "Ada", uAge: 36)
+  bumpAge(u: u1)
+  if verbose {
+    log("u1 = {userLabel(u: u1)}")
+  }
+
+  let u2: User = makeUser(uName: "Grace", uAge: 85)
+  let u3: User = relabel(u: u2, suffix: "-OG")
+  if verbose {
+    log("u3 = {userLabel(u: u3)}")
+  }
+
+  let label: String = "explicit-".concat(other: "move")
+  let u4: User = { name: own label, age: 21 }
+  if verbose {
+    log("u4 = {userLabel(u: u4)}")
+  }
+
+  let label2: String = "shared-".concat(other: "label")
+  let u5: User = { name: label2, age: 18 }
+  if verbose {
+    log("u5 = {userLabel(u: u5)}")
+    log("label2 still alive: {label2}")
+  }
+
+  let lead: User = { name: "Bob", age: 50 }
+  let ms: List(User) = createList(User, initialCap: 2)
+  let g: Group = { leader: lead, members: ms }
+  recordMember(g: g, m: makeUser(uName: "Sam", uAge: 24))
+  recordMember(g: g, m: makeUser(uName: "Tom", uAge: 25))
+  if verbose {
+    log("group leader = {userLabel(u: g.leader)}")
+    log("group size = {g.members.length}")
+  }
+}
+
+func stress() {
+  let warmups: Int = 100
+  let i: Int = 0
+  loop i < warmups {
+    runScenarios(verbose: false)
+    i = i + 1
+  }
+  let baselineKb: Int = processRssKb()
+  let iterations: Int = 1000
+  i = 0
+  loop i < iterations {
+    runScenarios(verbose: false)
+    i = i + 1
+  }
+  let finalKb: Int = processRssKb()
+  let growthKb: Int = finalKb - baselineKb
+  log("iterations: {iterations}")
+  if growthKb < 5000 {
+    log("verdict: OK")
+  } else {
+    log("verdict: LEAK growth_kb={growthKb}")
+  }
+}
+
+func main() {
+  runScenarios(verbose: true)
+  stress()
+}
