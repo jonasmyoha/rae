@@ -637,6 +637,21 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                   }
                 }
                 ctx->local_struct_owns_heap[ctx->local_count] = owns;
+                // Alias-clearing for String locals from aliasing inits:
+                // a buf_get-flavoured RHS hands back a String value
+                // whose is_owned bit was inherited from the container
+                // (since list elements are owned by the buffer). The
+                // local doesn't actually own that heap — clear the
+                // bit so a later auto-drop / reassign drop becomes a
+                // no-op and the canonical owner (the list) cleans up.
+                if (!owns && stmt->as.let_stmt.type
+                    && !stmt->as.let_stmt.type->is_view
+                    && !stmt->as.let_stmt.type->is_mod
+                    && str_eq_cstr(get_base_type_name(stmt->as.let_stmt.type), "String")) {
+                  Str ln = stmt->as.let_stmt.name;
+                  fprintf(out, "  %.*s.is_owned = 0;\n",
+                          (int)ln.len, ln.data);
+                }
                 ctx->local_count++;
             }
             break;
@@ -685,32 +700,52 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 }
                 emit_expr(ctx, stmt->as.assign_stmt.value, out, PREC_LOWEST, false, false);
             } else {
-                emit_expr(ctx, stmt->as.assign_stmt.target, out, PREC_LOWEST, true, false);
-                fprintf(out, " = ");
-                // Propagate target type as expected so opt T returns get unboxed
-                // (e.g. `total = total + l.get(...)` where total: Int).
                 bool had_exp = ctx->has_expected_type;
                 AstTypeRef saved_exp = ctx->expected_type;
                 if (target_tr) { ctx->expected_type = *target_tr; ctx->has_expected_type = true; }
-                // For struct literal assignments, add compound literal cast if missing
-                if (stmt->as.assign_stmt.value->kind == AST_EXPR_OBJECT &&
-                    !stmt->as.assign_stmt.value->as.object_literal.type && target_tr) {
-                    fprintf(out, "(");
-                    emit_type_ref_as_c_type(ctx, target_tr, out, true);
-                    fprintf(out, ")");
+                // String local reassignment: drop the previous heap
+                // before storing the new one, or it leaks. RHS may
+                // reference the target (e.g. `s = s.concat(other)`),
+                // so evaluate RHS into a temp first, then drop, then
+                // pool_take the new heap. Safe even when target was
+                // aliasing a list buffer thanks to the let-stmt's
+                // is_owned-clearing pass — rae_string_drop no-ops on
+                // is_owned=0 entries.
+                bool is_string_local_reassign =
+                    target_tr && !target_tr->is_view && !target_tr->is_mod
+                    && stmt->as.assign_stmt.target->kind == AST_EXPR_IDENT
+                    && str_eq_cstr(get_base_type_name(target_tr), "String");
+                if (is_string_local_reassign) {
+                    Str tname = stmt->as.assign_stmt.target->as.ident;
+                    int tmpn = ctx->temp_counter++;
+                    fprintf(out, "{ rae_String __asg%d = ", tmpn);
+                    emit_expr(ctx, stmt->as.assign_stmt.value, out, PREC_LOWEST, false, false);
+                    fprintf(out, "; rae_string_drop(&%.*s); %.*s = rae_string_pool_take(__asg%d); }",
+                            (int)tname.len, tname.data,
+                            (int)tname.len, tname.data,
+                            tmpn);
+                    ctx->has_expected_type = had_exp;
+                    ctx->expected_type = saved_exp;
+                } else {
+                    emit_expr(ctx, stmt->as.assign_stmt.target, out, PREC_LOWEST, true, false);
+                    fprintf(out, " = ");
+                    if (stmt->as.assign_stmt.value->kind == AST_EXPR_OBJECT &&
+                        !stmt->as.assign_stmt.value->as.object_literal.type && target_tr) {
+                        fprintf(out, "(");
+                        emit_type_ref_as_c_type(ctx, target_tr, out, true);
+                        fprintf(out, ")");
+                    }
+                    bool wrap_str_take_a = false;
+                    if (target_tr && !target_tr->is_view && !target_tr->is_mod) {
+                        Str tbase = get_base_type_name(target_tr);
+                        if (str_eq_cstr(tbase, "String")) wrap_str_take_a = true;
+                    }
+                    if (wrap_str_take_a) fprintf(out, "rae_string_pool_take(");
+                    emit_expr(ctx, stmt->as.assign_stmt.value, out, PREC_LOWEST, false, false);
+                    if (wrap_str_take_a) fprintf(out, ")");
+                    ctx->has_expected_type = had_exp;
+                    ctx->expected_type = saved_exp;
                 }
-                // Stage 4: pool_take for String-typed reassign RHS so
-                // the statement flush doesn't free what we just stored.
-                bool wrap_str_take_a = false;
-                if (target_tr && !target_tr->is_view && !target_tr->is_mod) {
-                    Str tbase = get_base_type_name(target_tr);
-                    if (str_eq_cstr(tbase, "String")) wrap_str_take_a = true;
-                }
-                if (wrap_str_take_a) fprintf(out, "rae_string_pool_take(");
-                emit_expr(ctx, stmt->as.assign_stmt.value, out, PREC_LOWEST, false, false);
-                if (wrap_str_take_a) fprintf(out, ")");
-                ctx->has_expected_type = had_exp;
-                ctx->expected_type = saved_exp;
             }
             fprintf(out, ";\n");
             break;
