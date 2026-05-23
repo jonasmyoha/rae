@@ -731,10 +731,18 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 // aliasing a list buffer thanks to the let-stmt's
                 // is_owned-clearing pass — rae_string_drop no-ops on
                 // is_owned=0 entries.
-                bool is_string_local_reassign =
-                    target_tr && !target_tr->is_view && !target_tr->is_mod
-                    && stmt->as.assign_stmt.target->kind == AST_EXPR_IDENT
+                bool target_is_string = target_tr
+                    && !target_tr->is_view && !target_tr->is_mod
                     && str_eq_cstr(get_base_type_name(target_tr), "String");
+                bool is_string_local_reassign = target_is_string
+                    && stmt->as.assign_stmt.target->kind == AST_EXPR_IDENT;
+                // Struct-field String reassign: `s.text = newVal` drops
+                // the previous heap held by s.text first, then takes
+                // the new one. Closes the per-iter leak in the ECS
+                // applyOverride-style replace pattern where each call
+                // overwrote a String field without releasing the old.
+                bool is_string_field_reassign = target_is_string
+                    && stmt->as.assign_stmt.target->kind == AST_EXPR_MEMBER;
                 if (is_string_local_reassign) {
                     Str tname = stmt->as.assign_stmt.target->as.ident;
                     int tmpn = ctx->temp_counter++;
@@ -744,6 +752,38 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                             (int)tname.len, tname.data,
                             (int)tname.len, tname.data,
                             tmpn);
+                    ctx->has_expected_type = had_exp;
+                    ctx->expected_type = saved_exp;
+                } else if (is_string_field_reassign) {
+                    // Evaluate RHS into a temp first so it doesn't read
+                    // the slot we're about to drop. Then take a stable
+                    // address of the target via &, drop it, store the
+                    // new value through the same address.
+                    //
+                    // Phase-2-style RHS classification: CALL / INTERP /
+                    // BINARY produce a freshly-owned temp — pool_take
+                    // transfers it. IDENT / MEMBER potentially alias
+                    // another live owner — deep-copy via rae_string_copy
+                    // so the field gets a private heap.
+                    const AstExpr* rhs = stmt->as.assign_stmt.value;
+                    bool rhs_owning_temp = rhs && (
+                        rhs->kind == AST_EXPR_CALL ||
+                        rhs->kind == AST_EXPR_METHOD_CALL ||
+                        rhs->kind == AST_EXPR_INTERP ||
+                        rhs->kind == AST_EXPR_BINARY ||
+                        rhs->kind == AST_EXPR_OWN);
+                    int tmpn = ctx->temp_counter++;
+                    fprintf(out, "{ rae_String __asg%d = ", tmpn);
+                    emit_expr(ctx, rhs, out, PREC_LOWEST, false, false);
+                    fprintf(out, "; rae_String* __asgp%d = &(", tmpn);
+                    emit_expr(ctx, stmt->as.assign_stmt.target, out, PREC_LOWEST, true, false);
+                    if (rhs_owning_temp) {
+                        fprintf(out, "); rae_string_drop(__asgp%d); *__asgp%d = rae_string_pool_take(__asg%d); }",
+                                tmpn, tmpn, tmpn);
+                    } else {
+                        fprintf(out, "); rae_String __asgc%d = rae_string_copy(__asg%d); rae_string_drop(__asgp%d); *__asgp%d = __asgc%d; }",
+                                tmpn, tmpn, tmpn, tmpn, tmpn);
+                    }
                     ctx->has_expected_type = had_exp;
                     ctx->expected_type = saved_exp;
                 } else {
