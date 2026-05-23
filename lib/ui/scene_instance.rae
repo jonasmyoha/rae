@@ -103,11 +103,18 @@ func addOverride(
   fieldName: String
   value: String
 ) {
+  # `own` opts each param into move semantics: Phase 2 would
+  # normally deep-copy String fields at struct-literal init, but
+  # since we pass them straight through to the stored override,
+  # the copy is wasted work — moving transfers the param's heap
+  # directly into the struct field. Without `own`, each call
+  # leaks 4 String heaps (the originals stay alive while the
+  # deep-copies become the list's canonical owners).
   let o: SceneOverride = {
-    nodeId: nodeId
-    componentName: componentName
-    fieldName: fieldName
-    valueString: value
+    nodeId: own nodeId
+    componentName: own componentName
+    fieldName: own fieldName
+    valueString: own value
   }
   list.add(value: o)
 }
