@@ -186,6 +186,16 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 ? ctx->generic_args->resolved_type
                 : sema_resolve_type(ctx->compiler_ctx, (AstTypeRef*)ctx->generic_args);
         }
+        // Pre-drop on slot was attempted to close the applyOverride
+        // leak (replace-mode buf_set in componentSet leaves the old
+        // component's Strings unreleased). Reverted because the
+        // swap(T) pattern in lib/core.rae uses buf_set for byte-copy
+        // moves: `slot[i] = slot[j]; slot[j] = tmp;` where tmp was
+        // taken from slot[i] before. Pre-dropping slot[i] frees its
+        // Strings, then slot[i] aliases slot[j]'s, then pre-drop of
+        // slot[j] crashes on the already-freed alias.
+        // Closing the applyOverride leak needs a different angle —
+        // see memory note project-mobile-ui-leak.
         fprintf(out, "(*("); EMIT_ELEM_TYPE();
         fprintf(out, "*)( (char*)("); emit_expr(ctx, arg->value, out, PREC_LOWEST, false, false);
         fprintf(out, ") + ("); emit_expr(ctx, arg->next->value, out, PREC_LOWEST, false, false);
