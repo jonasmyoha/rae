@@ -855,7 +855,20 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
       AstTypeRef* elem = (AstTypeRef*)args;
       Str ebase = get_base_type_name(elem);
       bool elem_is_string = str_eq_cstr(ebase, "String");
-      bool elem_needs_drop = elem_is_string || type_owns_heap_storage(ctx, m, elem, 0);
+      // Element drop uses the STRICT predicate (no String) for the
+      // gate, same as pre-Phase 3. The element-cascade for structs
+      // with String fields runs inside rae_drop_struct_<T> which is
+      // called per element when elem_needs_drop fires. Flipping this
+      // to permissive caused parseJson re-entries to crash — the
+      // single per-T `drop(T)(this: mod List(T))` overload doesn't
+      // know whether its caller is the owning or alias variant, so
+      // unconditionally dropping element Strings is unsafe whenever
+      // an aliasing path eventually reaches this drop. See test
+      // 411_json_parser for the canonical reproduction. The leak
+      // accepted here: List<UserStruct-with-Strings> drops the
+      // buffer but not the elements' Strings — same as pre-Phase-3.
+      bool elem_needs_drop = elem_is_string ||
+          type_owns_heap_storage(ctx, m, elem, 0);
       // StringMap always needs an entry iteration because its keys
       // are Strings and must be freed regardless of whether the value
       // type is heap-owning (e.g. StringMap(Int) — keys like "AlbumRoot"
@@ -1142,18 +1155,22 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   } StructDropEntry;
   StructDropEntry drop_entries[512];
   size_t drop_entry_count = 0;
-  // Pass A — non-generic user structs that transitively own heap.
-  // Use the strict predicate (no String) — Stage 6/9 both attempted
-  // to re-enable cascade for String-only structs but the value-typed
-  // struct extraction path (e.g. `let v: JsonValue = valueAt(doc, i)`
-  // returns a shallow copy of a list element) creates aliased Strings.
-  // The local's auto-drop then double-frees a heap the list still
-  // owns. Resolving this needs a deep-copy on container extraction
-  // (or a different ownership policy for value-typed struct accesses).
-  // Until then, only structs that transitively contain a List/Map
-  // get drop_struct; bare-String fields keep their pre-Stage-6
-  // leak status — no crash, just a known leak path tracked under
-  // mem-stats counters as outstanding concat/json_extract bytes.
+  // Pass A — non-generic user structs that transitively need cascade
+  // drop. Uses the permissive predicate (includes String fields), so
+  // string-only structs (e.g. SceneNode, StringMapEntry, Theme tokens
+  // synthesised by parsers) also get a rae_drop_struct_<T> helper.
+  // The synthesised body drops every owned heap field — Lists/Maps
+  // via their generic drop overloads, Strings via rae_string_drop, and
+  // nested user structs via recursion.
+  //
+  // Call-site gating: emit_implicit_drops_for_body only invokes this
+  // for locals whose `local_struct_owns_heap` flag is set (struct
+  // literal init or auto-init). Container extraction lets
+  // (`let v: T = list.get(i)`) and bare-ident copies are flagged as
+  // aliasing and skip the cascade — they keep their pre-Phase-3 leak
+  // status. Function-call results are conservatively aliasing too;
+  // callees that genuinely transfer ownership need to return into
+  // a struct literal at the call site to trigger cascade today.
   for (size_t i = 0; i < ctx->all_decl_count && drop_entry_count < 512; i++) {
     const AstDecl* d = ctx->all_decls[i];
     if (d->kind != AST_DECL_TYPE) continue;
@@ -1163,7 +1180,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     *part = (AstIdentifierPart){.text = d->as.type_decl.name};
     AstTypeRef* tr = malloc(sizeof(AstTypeRef));
     *tr = (AstTypeRef){.parts = part};
-    if (!type_owns_heap_storage(ctx, module, tr, 0)) { free(tr); free(part); continue; }
+    if (!type_needs_cascade_drop(ctx, module, tr, 0)) { free(tr); free(part); continue; }
     const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, tr);
     drop_entries[drop_entry_count++] = (StructDropEntry){.decl = d, .type_ref = tr, .mangled = mangled};
   }
@@ -1179,8 +1196,21 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   // we plan to call from the bodies. The container-drop forward
   // decls also register the specialisations so the iterative spec-
   // emission pass later in this function actually emits the body.
+  // Phase 3: we emit TWO drop variants per struct:
+  //   rae_drop_struct_<T>       — full cascade (drops String fields too).
+  //                               Used for struct-literal/auto-init locals
+  //                               that uniquely own their heap.
+  //   rae_drop_struct_<T>_alias — strict cascade (skips String fields,
+  //                               keeps List/Map drops). Used for
+  //                               call-result locals whose String fields
+  //                               might alias the callee's storage.
+  // The strict variant preserves the pre-Phase-3 leak/no-crash invariant
+  // for call-result locals; the full variant closes the Phase 2
+  // struct-literal-String leak. Nested-struct recursion stays in mode.
   for (size_t i = 0; i < drop_entry_count; i++) {
     fprintf(out, "RAE_UNUSED static void rae_drop_struct_%s(%s* this);\n",
+            drop_entries[i].mangled, drop_entries[i].mangled);
+    fprintf(out, "RAE_UNUSED static void rae_drop_struct_%s_alias(%s* this);\n",
             drop_entries[i].mangled, drop_entries[i].mangled);
   }
   for (size_t i = 0; i < drop_entry_count; i++) {
@@ -1189,8 +1219,11 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     const AstTypeRef* ga = (e->type_ref && gp) ? e->type_ref->generic_args : NULL;
     for (const AstTypeField* f = e->decl->as.type_decl.fields; f; f = f->next) {
       AstTypeRef* concrete = (gp && ga) ? substitute_type_ref(ctx, gp, ga, f->type) : f->type;
-      if (!type_owns_heap_storage(ctx, module, concrete, 0)) continue;
+      if (!type_needs_cascade_drop(ctx, module, concrete, 0)) continue;
       Str fbase = get_base_type_name(concrete);
+      // String fields go through the runtime helper rae_string_drop —
+      // no forward decl needed for that path.
+      if (str_eq_cstr(fbase, "String")) continue;
       const AstFuncDecl* drop_fd = NULL;
       for (size_t k = 0; k < ctx->all_decl_count; k++) {
         const AstDecl* dd = ctx->all_decls[k];
@@ -1221,10 +1254,13 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   // C functions because the prototype comes later in the output.
   collect_type_refs_module(ctx);
   // Bodies — reverse field order so LIFO drop matches construction.
+  // Emits both `rae_drop_struct_<T>` (full) and
+  // `rae_drop_struct_<T>_alias` (skip String fields) in a single
+  // walk. `is_alias` flips the String/recursive branch behaviour;
+  // List/Map drops are identical in both modes (the container owns
+  // its elements regardless of how the enclosing struct was bound).
   for (size_t i = 0; i < drop_entry_count; i++) {
     const StructDropEntry* e = &drop_entries[i];
-    fprintf(out, "RAE_UNUSED static void rae_drop_struct_%s(%s* this) {\n",
-            e->mangled, e->mangled);
     const AstIdentifierPart* gp = e->decl->as.type_decl.generic_params;
     const AstTypeRef* ga = (e->type_ref && gp) ? e->type_ref->generic_args : NULL;
     const AstTypeField* fields[256];
@@ -1232,46 +1268,55 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     for (const AstTypeField* f = e->decl->as.type_decl.fields; f && field_count < 256; f = f->next) {
       fields[field_count++] = f;
     }
-    for (size_t j = field_count; j > 0; j--) {
-      const AstTypeField* f = fields[j - 1];
-      AstTypeRef* concrete = (gp && ga) ? substitute_type_ref(ctx, gp, ga, f->type) : f->type;
-      // Stage 6/9 struct-field String cascade is gated on the strict
-      // predicate (no String) — see Pass A comment.
-      if (!type_owns_heap_storage(ctx, module, concrete, 0)) continue;
-      Str fbase = get_base_type_name(concrete);
-      // First: look for a generic `drop(T)(this: mod <base>(T))` in
-      // user code or stdlib. Handles List / StringMap / IntMap (from
-      // lib/core.rae) AND user-supplied container drops (e.g. the
-      // explicit `drop(T)(this: mod ComponentTable(T))` in lib/ui/
-      // ecs.rae). Falls through to the nested-struct path if none.
-      const AstFuncDecl* drop_fd = NULL;
-      for (size_t k = 0; k < ctx->all_decl_count; k++) {
-        const AstDecl* dd = ctx->all_decls[k];
-        if (dd->kind != AST_DECL_FUNC) continue;
-        if (!str_eq_cstr(dd->as.func_decl.name, "drop")) continue;
-        if (!dd->as.func_decl.generic_params) continue;
-        const AstParam* first = dd->as.func_decl.params;
-        if (!first || !first->type) continue;
-        Str dp_base = get_base_type_name(first->type);
-        if (str_eq(dp_base, fbase)) { drop_fd = &dd->as.func_decl; break; }
+    for (int is_alias = 0; is_alias < 2; is_alias++) {
+      fprintf(out, "RAE_UNUSED static void rae_drop_struct_%s%s(%s* this) {\n",
+              e->mangled, is_alias ? "_alias" : "", e->mangled);
+      for (size_t j = field_count; j > 0; j--) {
+        const AstTypeField* f = fields[j - 1];
+        AstTypeRef* concrete = (gp && ga) ? substitute_type_ref(ctx, gp, ga, f->type) : f->type;
+        if (!type_needs_cascade_drop(ctx, module, concrete, 0)) continue;
+        Str fbase = get_base_type_name(concrete);
+        if (str_eq_cstr(fbase, "String")) {
+          // Alias variant: skip — the String might be a view into the
+          // callee's storage and double-free would crash.
+          if (is_alias) continue;
+          fprintf(out, "  rae_string_drop(&this->%.*s);\n",
+                  (int)f->name.len, f->name.data);
+          continue;
+        }
+        // First: look for a generic `drop(T)(this: mod <base>(T))` in
+        // user code or stdlib. Handles List / StringMap / IntMap (from
+        // lib/core.rae) AND user-supplied container drops (e.g. the
+        // explicit `drop(T)(this: mod ComponentTable(T))` in lib/ui/
+        // ecs.rae). Falls through to the nested-struct path if none.
+        const AstFuncDecl* drop_fd = NULL;
+        for (size_t k = 0; k < ctx->all_decl_count; k++) {
+          const AstDecl* dd = ctx->all_decls[k];
+          if (dd->kind != AST_DECL_FUNC) continue;
+          if (!str_eq_cstr(dd->as.func_decl.name, "drop")) continue;
+          if (!dd->as.func_decl.generic_params) continue;
+          const AstParam* first = dd->as.func_decl.params;
+          if (!first || !first->type) continue;
+          Str dp_base = get_base_type_name(first->type);
+          if (str_eq(dp_base, fbase)) { drop_fd = &dd->as.func_decl; break; }
+        }
+        if (drop_fd) {
+          const AstTypeRef* elem_type = concrete->generic_args;
+          if (!elem_type) continue;
+          const char* fn = rae_mangle_specialized_function(ctx, drop_fd, elem_type);
+          fprintf(out, "  %s(&this->%.*s);\n", fn,
+                  (int)f->name.len, f->name.data);
+        } else {
+          // Nested non-generic user struct — recurse via the matching
+          // mode (full -> full, alias -> alias).
+          const char* fmangled = rae_mangle_type_specialized(ctx, NULL, NULL, concrete);
+          fprintf(out, "  rae_drop_struct_%s%s(&this->%.*s);\n", fmangled,
+                  is_alias ? "_alias" : "",
+                  (int)f->name.len, f->name.data);
+        }
       }
-      if (drop_fd) {
-        const AstTypeRef* elem_type = concrete->generic_args;
-        if (!elem_type) continue;
-        const char* fn = rae_mangle_specialized_function(ctx, drop_fd, elem_type);
-        fprintf(out, "  %s(&this->%.*s);\n", fn,
-                (int)f->name.len, f->name.data);
-      } else {
-        // Nested non-generic user struct — recurse via synthesised
-        // rae_drop_struct_<MangledType> (which must itself be in
-        // drop_entries; we don't verify here, missing references
-        // surface as C link errors which is loud enough).
-        const char* fmangled = rae_mangle_type_specialized(ctx, NULL, NULL, concrete);
-        fprintf(out, "  rae_drop_struct_%s(&this->%.*s);\n", fmangled,
-                (int)f->name.len, f->name.data);
-      }
+      fprintf(out, "}\n\n");
     }
-    fprintf(out, "}\n\n");
   }
 
   // Phase 1: synthesise `rae_deep_copy_struct_<T>(dst, src)` for every
