@@ -255,6 +255,11 @@ func rae_str_hash(s: String) extern ret Int
 
 func rae_str_eq(a: String, b: String) extern ret Bool
 
+# Deep-copy a String — declared here so `StringMap.set` can own its
+# keys without relying on lib/string.rae (which itself imports
+# core). Maps to the same runtime helper as `string.stringCopy`.
+func rae_ext_rae_string_copy(s: view String) extern ret String
+
 type StringMapEntry(V) {
   k: String
   value: V
@@ -288,7 +293,15 @@ func set(V)(this: mod StringMap(V), k: String, value: V) {
   loop true {
     let entry: StringMapEntry(V) = rae_ext_rae_buf_get(buf: this.data, index: idx)
     if not entry.occupied {
-      rae_ext_rae_buf_set(buf: this.data, index: idx, value: { k: k, value: value, occupied: true })
+      # Deep-copy the key so the map owns its own heap copy. Without
+      # this, world.nodeIds-style maps shallow-alias the caller's
+      # `k` (e.g. scene.nodes[i].nodeId) and the map's drop frees
+      # those pointers, corrupting the source storage on the next
+      # rebuild. The struct-literal codegen's per-field deep-copy
+      # (Phase 2) does this automatically for non-generic structs
+      # but not yet for generic StringMapEntry(V).
+      let keyCopy: String = rae_ext_rae_string_copy(s: k)
+      rae_ext_rae_buf_set(buf: this.data, index: idx, value: { k: keyCopy, value: value, occupied: true })
       this.length = this.length + 1
       ret
     }
