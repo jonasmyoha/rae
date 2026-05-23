@@ -1,0 +1,159 @@
+# Rae ownership model — runnable showcase.
+#
+# This example walks through the four ownership flavours Rae uses
+# for heap-backed values (Strings, Lists, StringMaps, …) and shows
+# what each one does at scope exit. Run it under `--target compiled`
+# to see cascade drops fire automatically; everything is also live-
+# safe on the bytecode VM.
+#
+#  1. Plain `T`       — owning. The binding uniquely holds the heap.
+#                       Scope exit cascade-drops it.
+#  2. `own T`         — explicit move (in args / struct fields).
+#                       Source is marked moved; no double-free.
+#  3. `view T`        — non-owning borrow. Read-only at the Rae level;
+#                       binding never drops the source.
+#  4. `mod T`         — mutating borrow. Same drop semantics as `view`.
+#
+# Plus the two flavours of struct-literal String field init:
+#
+#  - `{ k: src }`     — Phase 2 deep-copy: source stays alive, struct
+#                       owns an independent copy.
+#  - `{ k: own src }` — move: source is consumed, struct takes over.
+#
+# The final block stress-tests the cascade drop pipeline so an RSS
+# check can verify there's no per-iteration leak.
+
+import core
+import string
+import sys
+
+type Profile {
+  name: String
+  email: String
+}
+
+type Team {
+  lead: Profile
+  members: List(Profile)
+  motto: String
+}
+
+# Plain `T` parameter — the callee owns the value. Caller's move
+# tracking will skip the source's auto-drop.
+func summarise(p: Profile) ret String {
+  ret "{p.name} <{p.email}>"
+}
+
+# `view T` parameter — borrow. Caller's source survives.
+func format(p: view Profile) ret String {
+  ret "{p.name} <{p.email}>"
+}
+
+# `mod T` parameter — mutating borrow.
+func renameProfile(p: mod Profile, newName: String) {
+  p.name = newName
+}
+
+func makeTeam(leadName: String, leadEmail: String, motto: String) ret Team {
+  let lead: Profile = { name: leadName, email: leadEmail }
+  let members: List(Profile) = createList(Profile, initialCap: 4)
+  ret Team {
+    lead: lead
+    members: members
+    motto: motto
+  }
+}
+
+func scenario1_borrowVsTake() {
+  log("=== 1. borrow vs take ===")
+  let p: Profile = { name: "Ada", email: "ada@rae" }
+  # `format` borrows — `p` is still alive after the call.
+  log(format(p: p))
+  log("after format, p.name = {p.name}")
+  # `summarise` consumes — caller's move-tracking skips p's auto-drop.
+  # We rebind p before consuming so the post-call block can keep going.
+  let q: Profile = { name: "Grace", email: "grace@rae" }
+  log(summarise(p: q))
+  # `q` is gone (moved into summarise) — referencing it here would
+  # be a use-after-move at the Rae level. The example just stops
+  # touching q.
+  log("scenario 1 done")
+}
+
+func scenario2_ownMove() {
+  log("=== 2. own keyword ===")
+  let label: String = "alpha-".concat(other: "explicit")
+  # `own label` opts into move semantics for the struct field init.
+  # The struct's `name` field steals the heap; `label` is dead after.
+  let p: Profile = { name: own label, email: "alpha@rae" }
+  log(format(p: p))
+  log("scenario 2 done")
+}
+
+func scenario3_deepCopyByDefault() {
+  log("=== 3. deep copy by default ===")
+  let label: String = "beta-".concat(other: "shared")
+  # No `own` — Phase 2 deep-copies `label` into `p.name`. `label`
+  # still owns its heap and stays usable.
+  let p: Profile = { name: label, email: "beta@rae" }
+  log("p.name = {p.name}")
+  log("label  = {label}")
+  log("scenario 3 done")
+}
+
+func scenario4_modBorrow() {
+  log("=== 4. mod borrow ===")
+  let p: Profile = { name: "Bob", email: "bob@rae" }
+  renameProfile(p: p, newName: "Robert")
+  log("after rename, p.name = {p.name}")
+  log("scenario 4 done")
+}
+
+func scenario5_cascadeDrop() {
+  log("=== 5. cascade drop stress ===")
+  # 5000 short-lived Teams. Each iteration mallocs ~6 Strings + one
+  # List buffer; cascade drop must free them all or RSS grows.
+  let warmups: Int = 100
+  let i: Int = 0
+  loop i < warmups {
+    let t: Team = makeTeam(
+      leadName: "warmup-{i}"
+      leadEmail: "w{i}@rae"
+      motto: "warming up"
+    )
+    if t.motto.length() < 0 {
+      log("never")
+    }
+    i = i + 1
+  }
+  let baselineKb: Int = processRssKb()
+  let iterations: Int = 5000
+  i = 0
+  loop i < iterations {
+    let t: Team = makeTeam(
+      leadName: "lead-{i}"
+      leadEmail: "{i}@rae"
+      motto: "iterate {i}"
+    )
+    if t.motto.length() < 0 {
+      log("never")
+    }
+    i = i + 1
+  }
+  let finalKb: Int = processRssKb()
+  let growthKb: Int = finalKb - baselineKb
+  log("iterations: {iterations}")
+  if growthKb < 5000 {
+    log("verdict: OK")
+  } else {
+    log("verdict: LEAK growth_kb={growthKb}")
+  }
+}
+
+func main() {
+  scenario1_borrowVsTake()
+  scenario2_ownMove()
+  scenario3_deepCopyByDefault()
+  scenario4_modBorrow()
+  scenario5_cascadeDrop()
+}
