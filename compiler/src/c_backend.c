@@ -768,12 +768,15 @@ bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* 
           tctx.local_count++;
       }
   }
-  // Stage 2 + 3: track where params end so end-of-body drops only
-  // fire on lets the function itself declared. Auto-dropping
-  // parameters would close more leaks but currently double-frees
-  // through code paths where the same heap is reachable via two
-  // names (caller's struct field passed as plain T, etc.) — see
-  // test 413 failure notes.
+  // Param auto-drop reverted again. Even the conservative String-only
+  // variant double-frees through chains like `parseScene(source) →
+  // parseJson(source)`: the caller's source gets marked moved (correct,
+  // ownership transferred), then parseJson's source param drop fires.
+  // But somewhere downstream a copy of source's pointer survives in
+  // doc/scene state (probably via a missed Phase 2 in a nested struct
+  // literal); when scene cascade-drops on the caller side it tries to
+  // free the same heap. Closing this needs the missing Phase 2 site
+  // identified — best done with a dedicated reproduction.
   size_t first_let_idx = tctx.local_count;
   // Stage 7: stash on the context so the ret-stmt epilogue can drop
   // the same range of locals before each return (not just fallthrough).
