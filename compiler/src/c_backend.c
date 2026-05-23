@@ -855,18 +855,15 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
       AstTypeRef* elem = (AstTypeRef*)args;
       Str ebase = get_base_type_name(elem);
       bool elem_is_string = str_eq_cstr(ebase, "String");
-      // Element drop uses the STRICT predicate (no String) for the
-      // gate, same as pre-Phase 3. The element-cascade for structs
-      // with String fields runs inside rae_drop_struct_<T> which is
-      // called per element when elem_needs_drop fires. Flipping this
-      // to permissive caused parseJson re-entries to crash — the
-      // single per-T `drop(T)(this: mod List(T))` overload doesn't
-      // know whether its caller is the owning or alias variant, so
-      // unconditionally dropping element Strings is unsafe whenever
-      // an aliasing path eventually reaches this drop. See test
-      // 411_json_parser for the canonical reproduction. The leak
-      // accepted here: List<UserStruct-with-Strings> drops the
-      // buffer but not the elements' Strings — same as pre-Phase-3.
+      // STRICT element-needs-drop, same as pre-Phase-3. PERMISSIVE
+      // iteration of String-only element structs (e.g. List<Name>)
+      // would close the residual mobile-UI leak, but two patterns
+      // in lib/json.rae do an alias-extract+cross-list-move that
+      // shares String storage between two Lists (parseObject's
+      // localFields → fields bulk-copy). Without a deep-copy at
+      // that move site or per-T list drop variants, iterating
+      // elements crashes test 411. Leak status: same as
+      // pre-Phase-3 for List<String-only-struct>.
       bool elem_needs_drop = elem_is_string ||
           type_owns_heap_storage(ctx, m, elem, 0);
       // StringMap always needs an entry iteration because its keys
@@ -1303,6 +1300,16 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
         if (drop_fd) {
           const AstTypeRef* elem_type = concrete->generic_args;
           if (!elem_type) continue;
+          // Alias variant: skip List/Map field drop when the element
+          // type has String fields. The per-T drop now iterates
+          // String elements; calling it in alias mode would double-
+          // free Strings shared with the source. Buffers leak in
+          // alias mode (same as the pre-Phase-3 status quo for
+          // value-typed-struct extraction).
+          if (is_alias
+              && type_needs_cascade_drop(ctx, module, (AstTypeRef*)elem_type, 0)) {
+            continue;
+          }
           const char* fn = rae_mangle_specialized_function(ctx, drop_fd, elem_type);
           fprintf(out, "  %s(&this->%.*s);\n", fn,
                   (int)f->name.len, f->name.data);
