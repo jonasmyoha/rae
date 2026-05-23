@@ -1,0 +1,85 @@
+# Mobile-UI-flavoured leak regression. Models the rebuild path that
+# examples/98_mobile_ui exercises every frame in stress mode:
+#   - Build a value-typed struct that owns a List of structs.
+#   - Each list element is a struct with String fields (the Phase 2
+#     deep-copy producer).
+#   - Drop the world at end-of-scope and verify RSS stays flat.
+#
+# Without Phase 3's full cascade variant, each iteration would leak
+# at least 4 Strings * 8 entities = 32 String heaps, ~256 KB/sec at
+# realistic frame rates. This test asserts that 5000 iterations grow
+# RSS by under 3 MB — well under what a typical compositor-style
+# leak would produce.
+import core
+import string
+import sys
+
+type Entity {
+  id: String
+  kind: String
+  active: Bool
+}
+
+type World {
+  entities: List(Entity)
+  rootId: String
+}
+
+func makeEntity(entId: String, entKind: String) ret Entity {
+  let e: Entity = { id: entId, kind: entKind, active: true }
+  ret e
+}
+
+func buildWorld() ret World {
+  let xs: List(Entity) = createList(Entity, initialCap: 8)
+  xs.add(value: makeEntity(entId: "root", entKind: "container"))
+  xs.add(value: makeEntity(entId: "header", entKind: "row"))
+  xs.add(value: makeEntity(entId: "title", entKind: "text"))
+  xs.add(value: makeEntity(entId: "subtitle", entKind: "text"))
+  xs.add(value: makeEntity(entId: "track-1", entKind: "track"))
+  xs.add(value: makeEntity(entId: "track-2", entKind: "track"))
+  xs.add(value: makeEntity(entId: "track-3", entKind: "track"))
+  xs.add(value: makeEntity(entId: "nav-tabs", entKind: "row"))
+  let w: World = { entities: xs, rootId: "root" }
+  ret w
+}
+
+func iterRebuild() {
+  let w: World = buildWorld()
+  # Read a field so the compiler can't dead-code the world.
+  if w.entities.length < 0 {
+    log("never")
+  }
+}
+
+func main() {
+  let warmups: Int = 200
+  let i: Int = 0
+  loop i < warmups {
+    iterRebuild()
+    i = i + 1
+  }
+  let baselineKb: Int = processRssKb()
+
+  # 5000 iterations × 8 entities × 2 String fields = 80k Strings.
+  # With Phase 3 cascade drop on List<Entity> elements, growth stays
+  # near zero (allocator slack only). The 3 MB threshold tolerates
+  # macOS magazine allocator slack and Linux glibc arena padding;
+  # the same shape of leak in pre-Phase-3 codegen would produce
+  # ~5-10 MB growth, comfortably failing.
+  let iterations: Int = 5000
+  i = 0
+  loop i < iterations {
+    iterRebuild()
+    i = i + 1
+  }
+  let finalKb: Int = processRssKb()
+  let growthKb: Int = finalKb - baselineKb
+
+  log("iterations: {iterations}")
+  if growthKb < 3000 {
+    log("verdict: OK")
+  } else {
+    log("verdict: LEAK growth_kb={growthKb}")
+  }
+}
