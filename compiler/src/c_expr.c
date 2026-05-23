@@ -470,8 +470,18 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                 const AstTypeRef* val_tr = infer_expr_type_ref(ctx, f->value);
                 if (val_tr && !(val_tr->is_view || val_tr->is_mod) &&
                     !(field_tr->is_view || field_tr->is_mod) &&
-                    type_owns_heap_storage(ctx->compiler_ctx, ctx->module, val_tr, 0)) {
-                    mark_expr_moved_if_local(ctx, f->value);
+                    type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, val_tr, 0)) {
+                    Str fbase_for_move = get_base_type_name(field_tr);
+                    // Phase 2 deep-copies bare String fields; the
+                    // source local stays alive. For nested struct
+                    // / List / Map fields we byte-copy at the C
+                    // level, so the source MUST be marked moved
+                    // to avoid double-free. Skip the move only when
+                    // the field is itself a plain String — Phase 2
+                    // handles that case.
+                    if (!str_eq_cstr(fbase_for_move, "String")) {
+                        mark_expr_moved_if_local(ctx, f->value);
+                    }
                 }
             }
             // Ownership-safe String field init:
