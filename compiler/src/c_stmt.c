@@ -201,6 +201,15 @@ static bool stmt_block_returns_alias_v(CompilerContext* cctx, const AstStmt* fir
           if (let_init_is_aliasing(cctx, ls, v)) return true;
         } else if (rv->kind == AST_EXPR_CALL) {
           if (call_is_aliasing(cctx, rv, v)) return true;
+        } else if (rv->kind == AST_EXPR_MEMBER
+                   && rv->as.member.object
+                   && rv->as.member.object->kind == AST_EXPR_IDENT) {
+          // `ret <ident>.<member>` where the ident was bound to an
+          // aliasing extraction is the canonical accessor return for
+          // String fields out of aliased structs (jsonObjectKeyAt's
+          // `ret f.key` where f = fieldAt(...) = buf_get alias).
+          const AstStmt* ls = find_let_for_ident(first, rv->as.member.object->as.ident);
+          if (let_init_is_aliasing(cctx, ls, v)) return true;
         }
       }
     } else if (s->kind == AST_STMT_IF) {
