@@ -27,6 +27,16 @@ func rae_ext_rae_buf_alloc(size: Int, elemSize: Int) extern ret Buffer(Any)
 func rae_ext_rae_buf_free(buf: Buffer(Any)) extern
 func rae_ext_rae_buf_copy(V)(src: Buffer(V), src_off: Int, dst: Buffer(V), dst_off: Int, len: Int, elemSize: Int) extern
 func rae_ext_rae_buf_set(V)(buf: mod Buffer(V), index: Int, value: V) extern
+
+# Drop the contents of `buf[index]` via the synthesised
+# rae_drop_struct_<V> (or rae_string_drop for V=String). The
+# compiler recognises this name as an intrinsic and emits the
+# right drop call for V; the slot is left in a stale-pointer state
+# that the caller must overwrite before anything else reads it.
+# Used by the "replace existing element" path of stdlib helpers
+# like StringMap.set / componentSet to avoid leaking the slot's
+# old String fields.
+func rae_ext_rae_buf_drop_at(V)(buf: mod Buffer(V), index: Int) extern
 func rae_ext_rae_buf_get(V)(buf: view Buffer(V), index: Int) extern ret V
 
 # -- Generic List Implementation (Rae-native) --
@@ -307,6 +317,13 @@ func set(V)(this: mod StringMap(V), k: String, value: V) {
     }
     if rae_str_eq(a: entry.k, b: k) {
       entry.value = value
+      # Drop the existing entry's owned-heap fields before overwriting
+      # the slot. Without this, replacing an existing map entry leaks
+      # whichever cascade-droppable fields V's struct (and the entry
+      # key) owns. `entry.value = value` already handled the value
+      # field via the field-assign drop, but the entry struct copy
+      # still aliases the key — drop the slot, then overwrite.
+      rae_ext_rae_buf_drop_at(buf: this.data, index: idx)
       rae_ext_rae_buf_set(buf: this.data, index: idx, value: entry)
       ret
     }
