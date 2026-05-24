@@ -783,20 +783,29 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 const AstExpr* init = stmt->as.let_stmt.value;
                 bool owns = (init == NULL)
                     || (init->kind == AST_EXPR_OBJECT)
-                    // Method calls are always classified owning: the
-                    // most common shape `p.x.method(...)` lowers to a
-                    // free-function call internally and returns a
-                    // fresh value (e.g. String.sub returns owned).
-                    // The only aliasing extractors users write at the
-                    // ident-callee level (valueAt/fieldAt) are handled
-                    // by the body-inspection branch below.
-                    || (init->kind == AST_EXPR_METHOD_CALL)
                     || (init->kind == AST_EXPR_INTERP)
                     || (init->kind == AST_EXPR_BINARY);
-                if (!owns && init && init->kind == AST_EXPR_CALL) {
-                  const AstExpr* callee = init->as.call.callee;
-                  if (callee && callee->kind == AST_EXPR_IDENT) {
-                    Str cn = callee->as.ident;
+                // Body-inspect both AST_EXPR_CALL and AST_EXPR_METHOD_CALL
+                // initializers. Method calls like `node.childrenIds.get(
+                // index: q)` lower to a free-function call internally and
+                // CAN be alias-returning (List.get / StringMap.get / etc.
+                // all `ret rae_ext_rae_buf_get(...)`). Previously method
+                // calls were classified owning unconditionally, which
+                // caused 413_scene_loader's pass-3 children loop to
+                // auto-drop the let-local at each iteration end — the
+                // local aliased the List slot, so freeing it freed the
+                // slot's data and the next iter read garbage.
+                Str cn = {0};
+                bool init_is_call = false;
+                if (init && init->kind == AST_EXPR_CALL && init->as.call.callee
+                    && init->as.call.callee->kind == AST_EXPR_IDENT) {
+                    cn = init->as.call.callee->as.ident;
+                    init_is_call = true;
+                } else if (init && init->kind == AST_EXPR_METHOD_CALL) {
+                    cn = init->as.method_call.method_name;
+                    init_is_call = true;
+                }
+                if (!owns && init_is_call) {
                     bool is_buf_get =
                         str_eq_cstr(cn, "rae_ext_rae_buf_get") ||
                         str_eq_cstr(cn, "__buf_get") ||
@@ -811,27 +820,20 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                       // Default to owning — only flip to alias when
                       // we find a clear `ret <local>` whose local was
                       // initialised from a known aliasing source.
-                      // This avoids the Stage-6 whitelist treadmill
-                      // (jsonRoot / jsonString deep-copy but match the
-                      // earlier "view T first param" signature).
+                      // For method calls, we look up by method name —
+                      // List.get / StringMap.get / IntMap.get all share
+                      // the name "get" but all return alias (buf_get
+                      // wrapper), so first-match is safe in practice.
                       owns = true;
                       for (size_t k = 0; k < ctx->compiler_ctx->all_decl_count; k++) {
                         const AstDecl* d = ctx->compiler_ctx->all_decls[k];
                         if (d->kind != AST_DECL_FUNC) continue;
                         if (!str_eq(d->as.func_decl.name, cn)) continue;
-                        // Walk the body looking for `ret <ident>` whose
-                        // <ident> was let-init from buf_get. This is the
-                        // accessor pattern (valueAt, fieldAt, jsonArrayAt).
-                        // Only handles the top-level body — inlined ret
-                        // expressions inside if/loop are also walked.
                         if (!d->as.func_decl.body) break;
                         owns = !rae_func_returns_alias(ctx->compiler_ctx, &d->as.func_decl);
                         break;
                       }
                     }
-                  } else {
-                    owns = true;
-                  }
                 }
                 ctx->local_struct_owns_heap[ctx->local_count] = owns;
                 // Alias-clearing for String locals from aliasing inits:
