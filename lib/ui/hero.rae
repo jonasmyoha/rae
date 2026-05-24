@@ -84,7 +84,7 @@ func createHeroAnim() pub ret HeroAnim {
 # Linear scan through the heroWidgets table — there are at most a
 # handful of hero widgets per screen, so a sparse-set lookup would
 # be over-engineered. Returns -1 if no match.
-func findHeroEntity(world: view UiWorld, key: String) pub ret Int {
+func findHeroEntity(world: view UiWorld, key: view String) pub ret Int {
   let n: Int = componentCount(this: world.heroWidgets)
   let i: Int = 0
   loop i < n {
@@ -98,7 +98,7 @@ func findHeroEntity(world: view UiWorld, key: String) pub ret Int {
   ret -1
 }
 
-func captureHeroSource(anim: mod HeroAnim, world: view UiWorld, key: String) pub ret Bool {
+func captureHeroSource(anim: mod HeroAnim, world: view UiWorld, key: view String) pub ret Bool {
   let e: Int = findHeroEntity(world: world, key: key)
   if e < 0 {
     ret false
@@ -126,7 +126,7 @@ func captureHeroSource(anim: mod HeroAnim, world: view UiWorld, key: String) pub
   ret true
 }
 
-func captureHeroTarget(anim: mod HeroAnim, world: view UiWorld, key: String) pub ret Bool {
+func captureHeroTarget(anim: mod HeroAnim, world: view UiWorld, key: view String) pub ret Bool {
   let e: Int = findHeroEntity(world: world, key: key)
   if e < 0 {
     ret false
@@ -146,7 +146,7 @@ func captureHeroTarget(anim: mod HeroAnim, world: view UiWorld, key: String) pub
   ret true
 }
 
-func startHeroTransition(anim: mod HeroAnim, key: String, durationSec: Float, now: Float) pub {
+func startHeroTransition(anim: mod HeroAnim, key: own String, durationSec: Float, now: Float) pub {
   anim.active = true
   anim.key = key
   anim.startTime = now
@@ -156,7 +156,7 @@ func startHeroTransition(anim: mod HeroAnim, key: String, durationSec: Float, no
 # Toggle the hero entity's WorldTransform.visible. Used to hide the
 # entity in the destination world while the overlay paints it, then
 # to restore visibility once the transition lands.
-func setHeroVisible(world: mod UiWorld, key: String, visible: Bool) pub {
+func setHeroVisible(world: mod UiWorld, key: view String, visible: Bool) pub {
   let e: Int = findHeroEntity(world: world, key: key)
   if e < 0 {
     ret
