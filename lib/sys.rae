@@ -31,35 +31,35 @@ func exit(code: Int) {
   rae_sys_exit(code: code)
 }
 
-func getEnv(name: String) ret String {
+func getEnv(name: view String) ret String {
   ret rae_sys_get_env(name: name)
 }
 
-func readFile(path: String) ret opt String {
+func readFile(path: view String) ret opt String {
   ret rae_sys_read_file(path: path)
 }
 
-func writeFile(path: String, content: String) ret Bool {
+func writeFile(path: view String, content: view String) ret Bool {
   ret rae_sys_write_file(path: path, content: content)
 }
 
-func rename(oldPath: String, newPath: String) ret Bool {
+func rename(oldPath: view String, newPath: view String) ret Bool {
   ret rae_sys_rename(oldPath: oldPath, newPath: newPath)
 }
 
-func delete(path: String) ret Bool {
+func delete(path: view String) ret Bool {
   ret rae_sys_delete(path: path)
 }
 
-func exists(path: String) ret Bool {
+func exists(path: view String) ret Bool {
   ret rae_sys_exists(path: path)
 }
 
-func lockFile(path: String) ret Bool {
+func lockFile(path: view String) ret Bool {
   ret rae_sys_lock_file(path: path)
 }
 
-func unlockFile(path: String) ret Bool {
+func unlockFile(path: view String) ret Bool {
   ret rae_sys_unlock_file(path: path)
 }
 
@@ -67,7 +67,7 @@ func unlockFile(path: String) ret Bool {
 # (sub-second precision on platforms that support nanosecond stat).
 # Returns 0.0 if `path` does not exist or stat fails — callers should
 # treat 0.0 as "missing / unknown" rather than a real timestamp.
-func fileModTime(path: String) ret Float {
+func fileModTime(path: view String) ret Float {
   ret rae_sys_file_mtime(path: path)
 }
 
@@ -80,6 +80,10 @@ func processRssKb() ret Int {
   ret rae_sys_rss_kb()
 }
 
+# The crypto helpers take raw Buffer(Any) pointers; the C ABI is
+# `void*` and adding `view` here breaks the conversion through
+# rae_any(). Leave bare until the buffer helpers grow proper
+# Buffer(T) types we can annotate.
 func encrypt(key: Any, nonce: Any, plain: Any, len: Int, mac: Any, cipher: Any) {
   rae_crypto_lock(key: key, nonce: nonce, plain: plain, plain_len: len, mac: mac, cipher: cipher)
 }
