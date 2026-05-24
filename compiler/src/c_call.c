@@ -591,13 +591,37 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 }
                 ctx->expected_type = *p_substituted; ctx->has_expected_type = true;
             }
+            // Pool-take owning-temp String/heap args: when a caller
+            // passes a CALL/INTERP/BINARY result (pool-registered
+            // owned heap) to a plain-T cascade-drop param, the
+            // surrounding statement's pool_flush would free the
+            // heap right after the call returns — but by then the
+            // callee has stored it in a container and the list's
+            // element drop becomes a double-free. pool_take detaches
+            // the heap from the pool before the call so the callee
+            // claims a stable pointer.
+            bool wrap_pool_take_arg = false;
+            if (p && p->type && !(p->type->is_view || p->type->is_mod)
+                && a->value
+                && (a->value->kind == AST_EXPR_CALL ||
+                    a->value->kind == AST_EXPR_METHOD_CALL ||
+                    a->value->kind == AST_EXPR_INTERP ||
+                    a->value->kind == AST_EXPR_BINARY)) {
+                const AstTypeRef* arg_tr2 = infer_expr_type_ref(ctx, a->value);
+                if (arg_tr2 && !(arg_tr2->is_view || arg_tr2->is_mod)
+                    && str_eq_cstr(get_base_type_name(arg_tr2), "String")) {
+                    wrap_pool_take_arg = true;
+                }
+            }
             if (needs_addr) fprintf(out, "&");
             if (needs_deref) fprintf(out, "(*");
+            if (wrap_pool_take_arg) fprintf(out, "rae_string_pool_take(");
             if (needs_box) {
                 const AstTypeRef* arg_tr2 = infer_expr_type_ref(ctx, a->value);
                 bool is_prim_ref = arg_tr2 && (arg_tr2->is_view || arg_tr2->is_mod) && is_primitive_type(get_base_type_name(arg_tr2));
                 fprintf(out, "rae_any(("); emit_expr(ctx, a->value, out, PREC_LOWEST, false, is_prim_ref); fprintf(out, "))");
             } else emit_expr(ctx, a->value, out, PREC_LOWEST, false, pass_view_through);
+            if (wrap_pool_take_arg) fprintf(out, ")");
             if (needs_deref) fprintf(out, ")");
             if (needs_prim_wrap) fprintf(out, "} }");
             ctx->has_expected_type = had_exp; ctx->expected_type = saved_exp;
