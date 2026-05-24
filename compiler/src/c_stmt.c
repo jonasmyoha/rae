@@ -404,6 +404,53 @@ void mark_expr_moved_if_local(CFuncContext* ctx, const AstExpr* expr) {
   }
 }
 
+// Stage C (docs/ownership-model.md): emit cascade drops for `own T`
+// parameters at end of scope. Called alongside emit_implicit_drops_-
+// for_body — the former handles let-locals, this handles params.
+// Move-tracking (local_moved[]) skips drops for params that were
+// returned or transferred onward.
+bool emit_implicit_drops_for_own_params(CFuncContext* ctx, FILE* out,
+                                        size_t first_let_index) {
+  if (!ctx || !out) return false;
+  if (first_let_index == (size_t)-1) return true;
+  for (size_t i = first_let_index; i > 0; i--) {
+    size_t idx = i - 1;
+    const AstTypeRef* type = ctx->local_type_refs[idx];
+    if (!type) continue;
+    if (!type->is_own) continue;
+    if (ctx->local_moved[idx]) continue;
+    if (!type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, type, 0)) {
+      continue;
+    }
+    Str name = ctx->locals[idx];
+    Str tbase = get_base_type_name(type);
+    if (str_eq_cstr(tbase, "String")) {
+      fprintf(out, "  rae_string_drop(&%.*s);\n",
+              (int)name.len, name.data);
+      continue;
+    }
+    if (is_drop_target_type(type)) {
+      const AstTypeRef* elem_type = type->generic_args;
+      if (!elem_type) continue;
+      Str loc_base = get_base_type_name(type);
+      const AstFuncDecl* drop_fd = find_drop_overload_for(ctx, loc_base);
+      if (!drop_fd) continue;
+      register_function_specialization(ctx->compiler_ctx, drop_fd, elem_type);
+      const char* drop_name =
+          rae_mangle_specialized_function(ctx->compiler_ctx, drop_fd, elem_type);
+      fprintf(out, "  %s(&%.*s);\n", drop_name,
+              (int)name.len, name.data);
+      continue;
+    }
+    if (type->generic_args) continue;
+    const char* struct_mangled = rae_mangle_type_specialized(
+        ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type);
+    fprintf(out, "  rae_drop_struct_%s(&%.*s);\n", struct_mangled,
+            (int)name.len, name.data);
+  }
+  return true;
+}
+
 bool emit_implicit_drops_for_body(CFuncContext* ctx, FILE* out,
                                   size_t first_let_index) {
   if (!ctx || !out) return false;
@@ -1007,6 +1054,7 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             if (ctx->defer_stack.count > 0) emit_defers(ctx, 0, out);
             if (ctx->func_first_let_idx != (size_t)-1) {
                 emit_implicit_drops_for_body(ctx, out, ctx->func_first_let_idx);
+                emit_implicit_drops_for_own_params(ctx, out, ctx->func_first_let_idx);
             }
             fprintf(out, "    rae_string_pool_flush(__rae_spm_func);\n");
 

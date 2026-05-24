@@ -765,6 +765,13 @@ bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* 
           tctx.local_type_refs[tctx.local_count] = p->type;
           const char* tn = rae_mangle_type_specialized(ctx, NULL, NULL, p->type);
           tctx.local_types[tctx.local_count] = str_from_cstr(tn);
+          // Stage C: `own T` parameter — callee receives ownership and
+          // is responsible for end-of-scope cascade drop. Mark the
+          // slot as uniquely owning so emit_implicit_drops_for_params
+          // picks the full (non-alias) drop variant.
+          if (p->type && p->type->is_own) {
+              tctx.local_struct_owns_heap[tctx.local_count] = true;
+          }
           tctx.local_count++;
       }
   }
@@ -801,10 +808,10 @@ bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* 
   if (tctx.defer_stack.count > 0) emit_defers(&tctx, 0, out);
 
   // Stage 2 + 3 (docs/scope-exit-dealloc.md, docs/ownership-model.md):
-  // drop heap-owning lets at end-of-body fallthrough, then plain-T
-  // parameters that own heap. Move-tracking skip-rules cover
-  // anything the function passed onward.
+  // drop heap-owning lets at end-of-body fallthrough, then `own T`
+  // parameters that haven't been moved onward.
   emit_implicit_drops_for_body(&tctx, out, first_let_idx);
+  emit_implicit_drops_for_own_params(&tctx, out, first_let_idx);
 
   fprintf(out, "  rae_string_pool_flush(__rae_spm_func);\n");
 
@@ -831,7 +838,18 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
   }
   if (g_emitted_spec_func_count < 4096) g_emitted_spec_funcs[g_emitted_spec_func_count++] = mangled;
   fprintf(out, "RAE_UNUSED static %s %s(", rt, mangled); emit_param_list(&tctx, f->params, out, false); fprintf(out, ") {\n");
-  for (const AstParam* p = f->params; p; p = p->next) { if (tctx.local_count < 256) { tctx.locals[tctx.local_count] = p->name; tctx.local_type_refs[tctx.local_count] = p->type; tctx.local_types[tctx.local_count] = str_from_cstr(rae_mangle_type_specialized(ctx, gp_src, args, p->type)); tctx.local_count++; } }
+  for (const AstParam* p = f->params; p; p = p->next) {
+      if (tctx.local_count < 256) {
+          tctx.locals[tctx.local_count] = p->name;
+          tctx.local_type_refs[tctx.local_count] = p->type;
+          tctx.local_types[tctx.local_count] = str_from_cstr(rae_mangle_type_specialized(ctx, gp_src, args, p->type));
+          // Stage C: `own T` param — callee owns; mark for end-of-scope drop.
+          if (p->type && p->type->is_own) {
+              tctx.local_struct_owns_heap[tctx.local_count] = true;
+          }
+          tctx.local_count++;
+      }
+  }
 
   // Layer 5 element-drop synthesis: when the function is the stdlib
   // `drop(T)(this: mod List(T))` (or StringMap / IntMap), inject a
@@ -967,6 +985,7 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
   fprintf(out, "  int __rae_spm_func = rae_string_pool_mark();\n");
   if (f->body) { for (AstStmt* s = f->body->first; s; s = s->next) emit_stmt(&tctx, s, out); }
   emit_implicit_drops_for_body(&tctx, out, first_let_idx);
+  emit_implicit_drops_for_own_params(&tctx, out, first_let_idx);
   fprintf(out, "  rae_string_pool_flush(__rae_spm_func);\n");
   fprintf(out, "}\n\n"); return true;
 }
