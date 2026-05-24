@@ -993,17 +993,18 @@ static bool native_rae_ext_rae_buf_drop_at(struct VM* vm, VmNativeResult* out_re
   return true;
 }
 
-// Mem-stats outstanding count — VM stub. mem-stats is a C-backend-
-// only diagnostic; the bytecode VM has its own managed Values. This
-// native exists so leak-regression tests that call
-// `rae_ext_rae_mem_stats_outstanding` link in Live mode, but the
-// returned count is always 0 (the VM doesn't track per-site String
-// allocations). Tests should treat 0 as "no leak detectable in
-// Live mode" and skip the leak assertion under that target.
+// Mem-stats outstanding count — Live-mode reporter. Returns the
+// aggregate outstanding Value allocations across String / Key /
+// Object / Array / Buffer kinds. Same RAE_MEM_STATS=1 flag controls
+// the cumulative dump at process exit. Lets the same leak-regression
+// tests that work in Compiled mode also take a mid-run snapshot in
+// Live mode. Coarser-grained than the C runtime's per-call-site
+// String counters but adequate as a first leak signal.
+extern int64_t vm_value_outstanding_total(void);
 static bool native_rae_ext_rae_mem_stats_outstanding(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
   (void)vm; (void)args; (void)arg_count; (void)user_data;
   out_result->has_value = true;
-  out_result->value = value_int(0);
+  out_result->value = value_int(vm_value_outstanding_total());
   return true;
 }
 
