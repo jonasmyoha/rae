@@ -1,0 +1,72 @@
+# Precise leak test: list.add(value: makeStruct(...)) with String fields.
+#
+# This is the exact pattern the mobile UI scene loader uses on every
+# rebuild (e.g. xs.add(value: makeEntity(...)) where makeEntity
+# returns a struct with String fields). Before the c_call.c
+# pool_take fix, the call-result struct's String fields were
+# pool-registered, then the outer statement's pool_flush would free
+# the heaps even though the list had taken ownership. That produced
+# either a crash on list-drop or silent leaks.
+#
+# We count outstanding String allocations directly via the mem-stats
+# native instead of inferring leaks from RSS.
+import core
+import string
+import sys
+
+type Entity {
+  id: String
+  kind: String
+  active: Bool
+}
+
+func rae_ext_rae_mem_stats_outstanding() extern ret Int
+
+func makeEntity(entId: String, entKind: String) ret Entity {
+  let e: Entity = { id: entId, kind: entKind, active: true }
+  ret e
+}
+
+func buildList() {
+  let xs: List(Entity) = createList(Entity, initialCap: 4)
+  # Concat-result String fields exercise the pool_take fix: the
+  # concat heap is pool-registered, then add() stores the struct
+  # (including its String field) into the list. Without pool_take
+  # on the makeEntity call site, the surrounding statement's
+  # pool_flush would free those heaps and crash on list drop.
+  xs.add(value: makeEntity(entId: "id-".concat(other: "root"),
+                           entKind: "kind-".concat(other: "container")))
+  xs.add(value: makeEntity(entId: "id-".concat(other: "title"),
+                           entKind: "kind-".concat(other: "text")))
+  xs.add(value: makeEntity(entId: "id-".concat(other: "track"),
+                           entKind: "kind-".concat(other: "row")))
+  if xs.length < 0 {
+    log("never")
+  }
+}
+
+func main() {
+  let warmups: Int = 50
+  let i: Int = 0
+  loop i < warmups {
+    buildList()
+    i = i + 1
+  }
+  let baseline: Int = rae_ext_rae_mem_stats_outstanding()
+
+  let iterations: Int = 5000
+  i = 0
+  loop i < iterations {
+    buildList()
+    i = i + 1
+  }
+  let final: Int = rae_ext_rae_mem_stats_outstanding()
+  let leaked: Int = final - baseline
+
+  log("iterations: {iterations}")
+  if leaked < 100 {
+    log("verdict: OK")
+  } else {
+    log("verdict: LEAK outstanding={leaked}")
+  }
+}
