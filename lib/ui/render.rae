@@ -57,7 +57,7 @@ func renderAlpha255(world: view UiWorld, entity: Int) ret Int {
 }
 
 # Apply the chain alpha to a `RgbaColor` and return a raylib `Color`.
-func toRaylibColor(c: RgbaColor, chain255: Int) ret Color {
+func toRaylibColor(c: view RgbaColor, chain255: Int) ret Color {
   let combinedA: Int = (c.a * chain255) / 255
   ret Color { r: c.r, g: c.g, b: c.b, a: combinedA }
 }
@@ -509,7 +509,7 @@ func renderDebugClickRects(
 # exactly where the input system thinks the cursor is. If this
 # crosshair doesn't sit under the OS mouse cursor on screen, there's
 # a coord-system mismatch between rendering and input.
-func renderDebugMouseCursor(mouseX: Float, mouseY: Float, color: Color) pub {
+func renderDebugMouseCursor(mouseX: Float, mouseY: Float, color: view Color) pub {
   let size: Float = 12.0
   let half: Float = size / 2.0
   drawRectangle(
