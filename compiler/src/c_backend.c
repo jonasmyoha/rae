@@ -768,18 +768,18 @@ bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* 
           tctx.local_count++;
       }
   }
-  // Param auto-drop: tried two flavours, reverted both.
-  //   - Full auto-drop (any cascade-heap T param): broke test 413
-  //     when caller passes struct.field (no local to mark moved).
-  //   - String-only auto-drop: broke test 430 case2 — Phase 2's
-  //     deep-copy-on-struct-field-init expects the caller's source
-  //     to stay alive after the call. Move-tracking marks the
-  //     caller's local moved at compile time but the runtime data
-  //     still flows through, and the test reads it after the call.
-  //     Param drop frees that data, callerSrc dangles, garbage.
-  // Closing this needs either a sound-move sema check (use-after-
-  // move error) or a move-aware Phase 2 that doesn't deep-copy
-  // when the source is a function parameter consumed once.
+  // Param auto-drop: tried three flavours, all reverted.
+  // - Full auto-drop (any cascade-heap T param): test 413 crashes
+  //   when caller passes struct.field (no local to mark moved).
+  // - String-only auto-drop: test 430 case2 expects callerSrc to
+  //   stay readable after passing to a function. Move tracking is
+  //   compile-time only, so the runtime heap is freed under the
+  //   caller's feet.
+  // - String-only auto-drop + caller-side rae_string_copy: closes
+  //   434 / 435 leak class AND keeps 430 case2's value semantics —
+  //   but parseScene→parseJson chain has hidden alias somewhere
+  //   that still crashes test 413 during scene drop. Diagnostic
+  //   work continues (see project-mobile-ui-leak memory note).
   size_t first_let_idx = tctx.local_count;
   // Stage 7: stash on the context so the ret-stmt epilogue can drop
   // the same range of locals before each return (not just fallthrough).
