@@ -972,6 +972,27 @@ static bool native_rae_ext_rae_buf_set(struct VM* vm, VmNativeResult* out_result
   return true;
 }
 
+// Live-mode counterpart to the C-backend buf_drop_at intrinsic.
+// The bytecode VM's Value type already manages its own heap (string
+// refs, lists, etc.), so the cascade drop the C backend needs is a
+// no-op here — we just free the slot's Value so the subsequent
+// buf_set on the same index doesn't leak it.
+static bool native_rae_ext_rae_buf_drop_at(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
+  (void)vm; (void)user_data; (void)arg_count;
+  const Value* buf_val = deref_value(&args[0]);
+  const Value* index = deref_value(&args[1]);
+  if (buf_val->type != VAL_BUFFER || index->type != VAL_INT) {
+      return false;
+  }
+  ValueBuffer* vb = buf_val->as.buffer_value;
+  if ((size_t)index->as.int_value < vb->count) {
+      value_free(&vb->items[index->as.int_value]);
+      vb->items[index->as.int_value].type = VAL_NONE;
+  }
+  out_result->has_value = false;
+  return true;
+}
+
 static bool native_rae_ext_rae_buf_get(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
   (void)vm; (void)user_data;
   const Value* buf_val = deref_value(&args[0]);
@@ -1102,6 +1123,7 @@ bool register_default_natives(VmRegistry* registry, TickCounter* tick_counter) {
   ok = vm_registry_register_native(registry, "rae_ext_rae_buf_copy", native_rae_ext_rae_buf_copy, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_ext_rae_buf_set", native_rae_ext_rae_buf_set, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_ext_rae_buf_get", native_rae_ext_rae_buf_get, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_ext_rae_buf_drop_at", native_rae_ext_rae_buf_drop_at, NULL) && ok;
 
   ok = vm_registry_register_native(registry, "sin", native_rae_math_sin, NULL) && ok;
   ok = vm_registry_register_native(registry, "cos", native_rae_math_cos, NULL) && ok;
