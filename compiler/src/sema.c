@@ -5,6 +5,8 @@
 #include "mangler.h"
 #include "c_backend.h"
 #include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
 
 typedef struct Symbol Symbol;
 struct Symbol {
@@ -588,6 +590,64 @@ static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTab
             }
             TypeInfo* current_return_type = type_get_void(ctx->type_registry);
             if (decl->as.func_decl.returns) current_return_type = sema_resolve_type_internal(ctx, module, symbols, decl->as.func_decl.returns->type);
+            // Stage B.1: optional strict-mode check. When
+            // RAE_STRICT_PARAM_MODES=1 is set, emit a warning for any
+            // function parameter that lacks an explicit ownership
+            // mode (view/mod/copy/own) — except primitives where the
+            // value-copy semantics are unambiguous. Also warn that
+            // `val T` is deprecated in favour of `copy T`. Externs
+            // are skipped: their parameter lists describe the FFI
+            // shape, not Rae's ownership model.
+            //
+            // The warning is informational (no error_count bump) so
+            // existing code keeps compiling. Once the migration to
+            // explicit modes is done, future stages will promote
+            // this to a hard error.
+            static int s_strict_param_modes = -1;
+            if (s_strict_param_modes < 0) {
+                const char* env = getenv("RAE_STRICT_PARAM_MODES");
+                s_strict_param_modes = (env && env[0] && env[0] != '0') ? 1 : 0;
+            }
+            if (s_strict_param_modes && !decl->as.func_decl.is_extern) {
+                for (AstParam* p2 = decl->as.func_decl.params; p2; p2 = p2->next) {
+                    if (!p2->type) continue;
+                    AstTypeRef* pt = p2->type;
+                    if (pt->is_val) {
+                        Str base = (pt->parts) ? pt->parts->text : (Str){0};
+                        fprintf(stderr,
+                            "%s:%zu:%zu: warning: parameter '%.*s' uses deprecated 'val %.*s'; use 'copy %.*s' instead\n",
+                            module && module->file_path ? module->file_path : "<unknown>",
+                            pt->line, pt->column,
+                            (int)p2->name.len, p2->name.data,
+                            (int)base.len, base.data,
+                            (int)base.len, base.data);
+                        continue;
+                    }
+                    bool has_mode = pt->is_view || pt->is_mod || pt->is_own || pt->is_copy;
+                    if (has_mode) continue;
+                    // Skip primitives where pass-by-value is the only
+                    // sensible semantics. String is *not* in this
+                    // list — it's heap-owning and the param-mode
+                    // ambiguity is exactly what we want callers to
+                    // resolve.
+                    Str base = (pt->parts) ? pt->parts->text : (Str){0};
+                    bool is_prim = str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int8") ||
+                                   str_eq_cstr(base, "Int16") || str_eq_cstr(base, "Int32") ||
+                                   str_eq_cstr(base, "Int64") || str_eq_cstr(base, "UInt") ||
+                                   str_eq_cstr(base, "UInt8") || str_eq_cstr(base, "UInt16") ||
+                                   str_eq_cstr(base, "UInt32") || str_eq_cstr(base, "UInt64") ||
+                                   str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float32") ||
+                                   str_eq_cstr(base, "Float64") || str_eq_cstr(base, "Bool") ||
+                                   str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32");
+                    if (is_prim) continue;
+                    fprintf(stderr,
+                        "%s:%zu:%zu: warning: parameter '%.*s' is bare '%.*s' — use one of view/copy/mod/own to make ownership explicit\n",
+                        module && module->file_path ? module->file_path : "<unknown>",
+                        pt->line, pt->column,
+                        (int)p2->name.len, p2->name.data,
+                        (int)base.len, base.data);
+                }
+            }
             AstParam* param = decl->as.func_decl.params;
             while (param) {
                 TypeInfo* t = sema_resolve_type_internal(ctx, module, symbols, param->type);
