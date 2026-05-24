@@ -14,6 +14,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+// From c_stmt.c — counts identifier references to `name` in the
+// body of `fd`. Used by Phase 2 deep-copy to decide whether a
+// parameter source can be moved (count==1) or must be copied
+// (count>=2).
+extern int rae_func_count_param_refs(const AstFuncDecl* fd, Str name);
+
 // Emit "rae_ext_rae_str(X)" for primitives, "rae_to_str_<Type>_(&X)" for user
 // structs. The _Generic-based macro can't be extended from generated code,
 // so user types route through the per-type function emitted in c_backend.c.
@@ -540,10 +546,39 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                 f->value->kind == AST_EXPR_METHOD_CALL ||
                 f->value->kind == AST_EXPR_INTERP ||
                 f->value->kind == AST_EXPR_BINARY);
+            // Detect "RHS is a function parameter used exactly
+            // once". Parameters live in locals[0..func_first_let_idx).
+            // Phase 2 deep-copy on a SINGLE-USE parameter can safely
+            // MOVE the heap into the struct field — there's no later
+            // read of the param. Multi-use params must deep-copy so
+            // the source stays readable after this struct literal.
+            bool rhs_is_param_ident = false;
+            if (f->value && f->value->kind == AST_EXPR_IDENT &&
+                ctx->func_first_let_idx != (size_t)-1 &&
+                ctx->func_decl && ctx->func_decl->body) {
+                Str name = f->value->as.ident;
+                for (size_t li = 0; li < ctx->func_first_let_idx; li++) {
+                    if (str_eq(ctx->locals[li], name)) {
+                        int n = rae_func_count_param_refs(ctx->func_decl, name);
+                        if (n == 1) rhs_is_param_ident = true;
+                        break;
+                    }
+                }
+            }
             if (field_is_owned_string && (rhs_is_own || rhs_is_owning_temp)) {
                 fprintf(out, "rae_string_pool_take(");
                 emit_expr(ctx, f->value, out, PREC_LOWEST, false, false);
                 fprintf(out, ")");
+            } else if (field_is_owned_string && rhs_is_param_ident) {
+                // Move-when-safe: the parameter's heap is NOT owned
+                // by anything visible after this function returns
+                // (the caller passed it owning-temp via pool_take,
+                // or it's borrowed/literal — checked at runtime).
+                // Transfer ownership into the field; deep-copy only
+                // when the source is still pool-registered.
+                fprintf(out, "rae_string_move_or_copy(&(");
+                emit_expr(ctx, f->value, out, PREC_LOWEST, false, false);
+                fprintf(out, "))");
             } else if (field_is_owned_string) {
                 fprintf(out, "rae_string_copy(");
                 emit_expr(ctx, f->value, out, PREC_LOWEST, false, false);
