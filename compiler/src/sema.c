@@ -8,6 +8,12 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+// Origin-file of the function currently being analyzed. Set/restored
+// in sema_analyze_decl's AST_DECL_FUNC arm; read by the call-site
+// check that forbids raw rae_ext_rae_buf_set with cascade-drop element
+// types outside stdlib. NULL = unknown / top-level scope.
+static const char* s_current_decl_origin = NULL;
+
 typedef struct Symbol Symbol;
 struct Symbol {
     Str name;
@@ -683,8 +689,11 @@ static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTab
                 param = param->next;
             }
             if (decl->as.func_decl.body) {
+                const char* saved_origin = s_current_decl_origin;
+                s_current_decl_origin = decl->origin_file;
                 AstStmt* stmt = decl->as.func_decl.body->first;
                 while (stmt) { sema_analyze_stmt(ctx, module, symbols, stmt, current_return_type); stmt = stmt->next; }
+                s_current_decl_origin = saved_origin;
             }
             symbol_table_pop_scope(symbols);
             break;
@@ -884,6 +893,36 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                         if (resolved->as.func_decl.returns) expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, resolved->as.func_decl.returns->type);
                         AstParam* p = resolved->as.func_decl.params; AstCallArg* a = expr->as.call.args;
                         while (p && a) { TypeInfo* pt = sema_resolve_type_internal(ctx, module, symbols, p->type); ensure_type_match(ctx, pt, &a->value); p = p->next; a = a->next; }
+                        // Forbid raw rae_ext_rae_buf_set with a cascade-drop V
+                        // outside of stdlib. Stdlib (lib/core.rae and friends)
+                        // pairs each raw set with a rae_ext_rae_buf_drop_at or
+                        // knows the slot is freshly initialised; user code
+                        // can't be trusted with the slot-drop contract.
+                        // The "is in stdlib?" check uses the *enclosing*
+                        // function's origin_file, not module->file_path,
+                        // because the merged AstModule only remembers one
+                        // file but the call may live inside a stdlib body
+                        // (including a specialization of a stdlib generic).
+                        if (str_eq_cstr(name, "rae_ext_rae_buf_set")) {
+                            const char* origin = s_current_decl_origin;
+                            bool in_stdlib = origin && strstr(origin, "/lib/") != NULL;
+                            if (!in_stdlib) {
+                                AstParam* vp = resolved->as.func_decl.params;
+                                if (vp) vp = vp->next;
+                                if (vp) vp = vp->next;
+                                if (vp && vp->type
+                                    && type_needs_cascade_drop(ctx, module, vp->type, 0)) {
+                                    Str vbase = (vp->type->parts) ? vp->type->parts->text : (Str){"<unknown>", 9};
+                                    char buffer[320];
+                                    snprintf(buffer, sizeof(buffer),
+                                        "raw rae_ext_rae_buf_set with cascade-drop element type '%.*s' is not allowed in user code (it would leak the existing slot's owned fields); use a stdlib helper like List.set / StringMap.set instead",
+                                        (int)vbase.len, vbase.data);
+                                    const char* err_file = origin ? origin : (module ? module->file_path : NULL);
+                                    diag_error(err_file, (int)expr->line, (int)expr->column, buffer);
+                                    if (module) module->had_error = true;
+                                }
+                            }
+                        }
                     }
                 }
             }
