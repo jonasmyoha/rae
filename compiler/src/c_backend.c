@@ -768,15 +768,18 @@ bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* 
           tctx.local_count++;
       }
   }
-  // Param auto-drop reverted again. Even the conservative String-only
-  // variant double-frees through chains like `parseScene(source) →
-  // parseJson(source)`: the caller's source gets marked moved (correct,
-  // ownership transferred), then parseJson's source param drop fires.
-  // But somewhere downstream a copy of source's pointer survives in
-  // doc/scene state (probably via a missed Phase 2 in a nested struct
-  // literal); when scene cascade-drops on the caller side it tries to
-  // free the same heap. Closing this needs the missing Phase 2 site
-  // identified — best done with a dedicated reproduction.
+  // Param auto-drop: tried two flavours, reverted both.
+  //   - Full auto-drop (any cascade-heap T param): broke test 413
+  //     when caller passes struct.field (no local to mark moved).
+  //   - String-only auto-drop: broke test 430 case2 — Phase 2's
+  //     deep-copy-on-struct-field-init expects the caller's source
+  //     to stay alive after the call. Move-tracking marks the
+  //     caller's local moved at compile time but the runtime data
+  //     still flows through, and the test reads it after the call.
+  //     Param drop frees that data, callerSrc dangles, garbage.
+  // Closing this needs either a sound-move sema check (use-after-
+  // move error) or a move-aware Phase 2 that doesn't deep-copy
+  // when the source is a function parameter consumed once.
   size_t first_let_idx = tctx.local_count;
   // Stage 7: stash on the context so the ret-stmt epilogue can drop
   // the same range of locals before each return (not just fallthrough).
