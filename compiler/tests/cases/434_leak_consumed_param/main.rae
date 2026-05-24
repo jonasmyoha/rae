@@ -1,0 +1,65 @@
+# Focused leak test: a function whose only use of its String param
+# is to store it (via Phase 2 deep-copy) into a struct literal field,
+# then return without that struct escaping.
+#
+# Pattern:
+#   func consume(name: String) {
+#     let f: Foo = { name: name }     # Phase 2 deep-copies name
+#     # f goes out of scope here — its String field IS dropped
+#     # via the synthesised rae_drop_struct_Foo. The param `name`
+#     # heap should also be dropped at function end so the caller's
+#     # transferred heap doesn't leak.
+#   }
+#
+# Uses mem-stats outstanding count directly (RSS is too noisy to
+# catch the ~6 bytes/iter leak). Test only runs under RAE_MEM_STATS=1
+# in the compiled target; in Live mode it always reports 0
+# (the bytecode VM manages its own Values, no per-site counters).
+import core
+import string
+import sys
+
+func rae_ext_rae_mem_stats_outstanding() extern ret Int
+
+type Foo {
+  name: String
+}
+
+func consume(name: String) {
+  let f: Foo = { name: name }
+  if f.name.length() < 0 {
+    log("never")
+  }
+}
+
+func main() {
+  let warmups: Int = 50
+  let i: Int = 0
+  loop i < warmups {
+    let s: String = "warmup-".concat(other: "x")
+    consume(name: s)
+    i = i + 1
+  }
+  let baseline: Int = rae_ext_rae_mem_stats_outstanding()
+
+  let iterations: Int = 5000
+  i = 0
+  loop i < iterations {
+    let s: String = "msg-".concat(other: "x")
+    consume(name: s)
+    i = i + 1
+  }
+  let final: Int = rae_ext_rae_mem_stats_outstanding()
+  let leaked: Int = final - baseline
+
+  log("iterations: {iterations}")
+  # Allow a tiny slop for one-shot interp/log allocations made
+  # by the test infrastructure itself. The leak this catches is
+  # ~1 allocation per call to consume, so 5000 iter * 1 = 5000
+  # outstanding under the param-leak bug.
+  if leaked < 100 {
+    log("verdict: OK")
+  } else {
+    log("verdict: LEAK outstanding={leaked}")
+  }
+}
