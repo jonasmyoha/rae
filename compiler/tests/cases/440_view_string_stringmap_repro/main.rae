@@ -1,0 +1,77 @@
+# Focused reproduction of the parseScene → view-String regression
+# in 413_scene_loader. Mirrors the exact call-chain shape of
+# lib/ui/scene_loader.rae's pass-3 children loop:
+#
+#   for parent-node p:
+#     for child-index q in p.childrenIds:
+#       let childId: String = p.childrenIds.get(index: q)
+#       let idx: Int = sceneNodeIndex(scene, view childId)
+#       ... do work with idx ...
+#
+# The view-String arg is wrapped at the call site as
+# `(rae_View_String){ .ptr = (rae_String[]){childId} }`. When this
+# pattern is exercised in a nested loop with multiple compound-
+# literal call sites per iteration, the temp's data ptr and length
+# fields appear to be read from different temps mid-iteration —
+# torn-read of the rae_String struct.
+import core
+import string
+
+type Node {
+  nodeId: String
+  childIds: List(String)
+}
+
+# Read-only helper modeled exactly after sceneNodeIndex: iterates
+# all nodes and matches by view String.
+func nodeIndex(nodes: view List(Node), target: view String) ret Int {
+  let n: Int = nodes.length
+  let i: Int = 0
+  loop i < n {
+    let nd: Node = rae_ext_rae_buf_get(buf: nodes.data, index: i)
+    if nd.nodeId.equals(other: target) {
+      ret i
+    }
+    i = i + 1
+  }
+  ret -1
+}
+
+func main() {
+  let nodes: List(Node) = createList(Node, initialCap: 4)
+
+  let rootKids: List(String) = createList(String, initialCap: 3)
+  rootKids.add(value: "Alpha")
+  rootKids.add(value: "Beta")
+  rootKids.add(value: "Gamma")
+  nodes.add(value: { nodeId: "Root", childIds: own rootKids })
+
+  let alphaKids: List(String) = createList(String, initialCap: 1)
+  alphaKids.add(value: "Delta")
+  nodes.add(value: { nodeId: "Alpha", childIds: own alphaKids })
+
+  let emptyKidsB: List(String) = createList(String, initialCap: 0)
+  nodes.add(value: { nodeId: "Beta", childIds: own emptyKidsB })
+
+  let emptyKidsG: List(String) = createList(String, initialCap: 0)
+  nodes.add(value: { nodeId: "Gamma", childIds: own emptyKidsG })
+
+  let emptyKidsD: List(String) = createList(String, initialCap: 0)
+  nodes.add(value: { nodeId: "Delta", childIds: own emptyKidsD })
+
+  # Pass: for each parent, look up its children via view-String.
+  # Mirrors scene_loader's pass-3 loop.
+  let p: Int = 0
+  loop p < nodes.length {
+    let parent: Node = rae_ext_rae_buf_get(buf: nodes.data, index: p)
+    let kn: Int = parent.childIds.length
+    let q: Int = 0
+    loop q < kn {
+      let childId: String = parent.childIds.get(index: q)
+      let idx: Int = nodeIndex(nodes: nodes, target: childId)
+      log("parent={parent.nodeId} child={childId} idx={idx}")
+      q = q + 1
+    }
+    p = p + 1
+  }
+}
