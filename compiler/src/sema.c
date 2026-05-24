@@ -625,13 +625,13 @@ static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTab
                     }
                     bool has_mode = pt->is_view || pt->is_mod || pt->is_own || pt->is_copy;
                     if (has_mode) continue;
-                    // Skip primitives where pass-by-value is the only
-                    // sensible semantics. String is *not* in this
-                    // list — it's heap-owning and the param-mode
-                    // ambiguity is exactly what we want callers to
-                    // resolve.
+                    // Skip cases where the value-semantics are
+                    // unambiguous: built-in primitives, enums (which
+                    // resolve to an int kind), and Any (passed as a
+                    // tagged union, not a heap-owning thing). String,
+                    // List, Map, user structs all stay warning-eligible.
                     Str base = (pt->parts) ? pt->parts->text : (Str){0};
-                    bool is_prim = str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int8") ||
+                    bool is_prim_name = str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int8") ||
                                    str_eq_cstr(base, "Int16") || str_eq_cstr(base, "Int32") ||
                                    str_eq_cstr(base, "Int64") || str_eq_cstr(base, "UInt") ||
                                    str_eq_cstr(base, "UInt8") || str_eq_cstr(base, "UInt16") ||
@@ -639,7 +639,26 @@ static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTab
                                    str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float32") ||
                                    str_eq_cstr(base, "Float64") || str_eq_cstr(base, "Bool") ||
                                    str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32");
-                    if (is_prim) continue;
+                    if (is_prim_name) continue;
+                    // Resolve to catch Any. The per-param loop below
+                    // will resolve again, which is wasted work but
+                    // keeps this diagnostic isolated.
+                    TypeInfo* resolved = sema_resolve_type_internal(ctx, module, symbols, pt);
+                    if (resolved && (
+                        resolved->kind == TYPE_INT ||
+                        resolved->kind == TYPE_FLOAT ||
+                        resolved->kind == TYPE_BOOL ||
+                        resolved->kind == TYPE_CHAR ||
+                        resolved->kind == TYPE_ANY)) continue;
+                    // Enum types are user decls that lower to ints.
+                    // Look up the type name in the symbol table and
+                    // skip if it's an AST_DECL_ENUM.
+                    {
+                        Symbol* type_sym = symbol_table_lookup(symbols, base);
+                        if (type_sym && type_sym->decl && type_sym->decl->kind == AST_DECL_ENUM) {
+                            continue;
+                        }
+                    }
                     fprintf(stderr,
                         "%s:%zu:%zu: warning: parameter '%.*s' is bare '%.*s' — use one of view/copy/mod/own to make ownership explicit\n",
                         module && module->file_path ? module->file_path : "<unknown>",
