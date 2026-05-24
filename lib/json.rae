@@ -326,7 +326,7 @@ func consumeKeyword(p: mod JsonParser, kw: String) ret Bool {
 # (the change is visible inside the callee but doesn't survive the
 # return). Mutating a List passed directly as `mod` works on both
 # targets, so we plumb the three lists through the parser explicitly.
-func pushValue(vals: mod List(JsonValue), v: JsonValue) ret Int {
+func pushValue(vals: mod List(JsonValue), v: own JsonValue) ret Int {
   let idx: Int = vals.length
   vals.add(value: v)
   ret idx

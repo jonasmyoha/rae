@@ -81,11 +81,26 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         const AstTypeRef* tr = infer_expr_type_ref(ctx, expr);
         bool is_prim_ref = is_primitive_ref(ctx, tr);
         bool is_ptr = is_pointer_type(ctx, expr->as.ident);
-        
+        // `view T` / `mod T` for a non-primitive non-Buffer/List/Any
+        // type lowers to a raw `T*` at the C level. When the IDENT
+        // is read as a value (not an lvalue and no upstream
+        // suppress_deref), emit `(*name)` so the c_struct or user-
+        // struct field reads see a `T`, not a `T*`. Matches the
+        // behaviour for List/Buffer pointer IDENTs below.
+        bool is_struct_view = false;
+        if (tr && (tr->is_view || tr->is_mod) && !is_prim_ref) {
+            Str vb = get_base_type_name(tr);
+            if (!str_eq_cstr(vb, "Buffer") && !str_eq_cstr(vb, "List") && !str_eq_cstr(vb, "Any")) {
+                is_struct_view = true;
+            }
+        }
+
         if (is_prim_ref && !is_lvalue && !suppress_deref) {
             fprintf(out, "(*%.*s.ptr)", (int)expr->as.ident.len, expr->as.ident.data);
+        } else if (is_struct_view && !is_lvalue && !suppress_deref) {
+            fprintf(out, "(*%.*s)", (int)expr->as.ident.len, expr->as.ident.data);
         } else if (is_ptr && !is_lvalue && !suppress_deref) {
-            // Check if it's a Buffer or List - they are pointers but shouldn't be dereferenced here 
+            // Check if it's a Buffer or List - they are pointers but shouldn't be dereferenced here
             // if we are just passing them or accessing members via ->
             Str base = get_base_type_name(tr);
             if (str_eq_cstr(base, "Buffer") || str_eq_cstr(base, "List")) {
@@ -586,7 +601,26 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             } else {
                 // View String / non-String fields — pass-through.
                 (void)field_is_view_string;
-                emit_expr(ctx, f->value, out, PREC_LOWEST, false, false);
+                // Value-T field receiving a `view T` IDENT source
+                // (e.g. `.fill = fillParam` where fillParam is `view
+                // RgbaColor`): the IDENT emits as `rae_RgbaColor*`
+                // for non-primitive views (is_primitive_ref returns
+                // false), but the field wants a value. Auto-deref
+                // here so c_struct / user-struct view params can be
+                // forwarded into struct literals without callers
+                // having to drop the `view`.
+                bool needs_view_deref = false;
+                if (field_tr && !field_tr->is_view && !field_tr->is_mod
+                    && f->value && f->value->kind == AST_EXPR_IDENT) {
+                    const AstTypeRef* rhs_tr = infer_expr_type_ref(ctx, f->value);
+                    if (rhs_tr && (rhs_tr->is_view || rhs_tr->is_mod)
+                        && !is_primitive_ref(ctx, rhs_tr)) {
+                        needs_view_deref = true;
+                    }
+                }
+                if (needs_view_deref) fprintf(out, "(*");
+                emit_expr(ctx, f->value, out, PREC_LOWEST, false, needs_view_deref);
+                if (needs_view_deref) fprintf(out, ")");
             }
             if (f->next) fprintf(out, ", ");
         }
