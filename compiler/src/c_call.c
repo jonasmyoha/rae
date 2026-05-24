@@ -509,8 +509,68 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             call_name = rae_mangle_function(ctx->compiler_ctx, fd);
         }
 
+        // Stage C+ fix for view-T call args: hoist `(T[]){expr}`
+        // compound-literal temps into NAMED stack locals declared
+        // BEFORE the call, via a statement-expression that wraps
+        // the entire call. The previous compound-literal form
+        // (rae_View_T){ .ptr = (T[]){expr} } had a torn-read
+        // pathology — when multiple call sites with view-T args
+        // share an enclosing block (e.g. a children loop with
+        // multiple sceneNodeIndex calls), the compound-literal
+        // temps could overlap stack slots and read data/length
+        // from different sources mid-iteration. See test 440 and
+        // the 413_scene_loader history.
+        //
+        // The named-temp form `rae_String __rae_pw_N = expr;
+        // callee((View){.ptr = &__rae_pw_N});` gives each arg a
+        // distinct stack slot whose lifetime matches the SE block.
+        // The SE evaluates to the call's return value, so nested
+        // calls compose cleanly: each call's temps live until its
+        // own SE ends, by which time the call has consumed them.
+        enum { RAE_MAX_PRIM_WRAP = 32 };
+        int wrap_idx[RAE_MAX_PRIM_WRAP];
+        for (int wi = 0; wi < RAE_MAX_PRIM_WRAP; wi++) wrap_idx[wi] = -1;
+        int wrap_count = 0;
+        int wrap_base = ctx->temp_counter;
+        {
+            const AstCallArg* sa = expr->as.call.args;
+            const AstParam* sp = fd->params;
+            int ai = 0;
+            while (sa && ai < RAE_MAX_PRIM_WRAP) {
+                if (sp && sp->type && (sp->type->is_view || sp->type->is_mod)) {
+                    const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, sa->value);
+                    if (!(arg_tr && (arg_tr->is_view || arg_tr->is_mod))) {
+                        Str pbase = get_base_type_name(sp->type);
+                        if (is_primitive_type(pbase)
+                            && !str_eq_cstr(pbase, "Buffer")
+                            && !str_eq_cstr(pbase, "Any")) {
+                            wrap_idx[ai] = wrap_count++;
+                        }
+                    }
+                }
+                ai++; sa = sa->next; if (sp) sp = sp->next;
+            }
+        }
+        bool use_se_wrap = wrap_count > 0;
+        if (use_se_wrap) {
+            ctx->temp_counter += wrap_count;
+            fprintf(out, "(__extension__ ({ ");
+            const AstCallArg* sa = expr->as.call.args;
+            const AstParam* sp = fd->params;
+            int ai = 0;
+            while (sa) {
+                if (ai < RAE_MAX_PRIM_WRAP && wrap_idx[ai] >= 0) {
+                    emit_type_ref_as_c_type(ctx, sp->type, out, true);
+                    fprintf(out, " __rae_pw_%d = ", wrap_base + wrap_idx[ai]);
+                    emit_expr(ctx, sa->value, out, PREC_LOWEST, false, false);
+                    fprintf(out, "; ");
+                }
+                ai++; sa = sa->next; if (sp) sp = sp->next;
+            }
+        }
         fprintf(out, "%s(", call_name);
         const AstCallArg* a = expr->as.call.args; const AstParam* p = fd->params;
+        int arg_index = 0;
         while (a) {
             // Stage 3 move tracking (continued): a bare local ident passed
             // as a plain-T parameter (i.e. neither `view T` nor `mod T`) is
@@ -573,7 +633,23 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 if (param_is_any) needs_box = true;
             }
 
-            if (needs_prim_wrap) {
+            // When SE-wrap is active (see the hoist block above the
+            // args loop), the arg expression has already been
+            // evaluated into __rae_pw_N. Emit the view wrapper that
+            // points at the named temp, then skip emit_expr below.
+            bool use_hoisted_temp = use_se_wrap
+                && arg_index < RAE_MAX_PRIM_WRAP
+                && wrap_idx[arg_index] >= 0;
+            if (use_hoisted_temp) {
+                fprintf(out, "(");
+                emit_type_ref_as_c_type(ctx, p->type, out, false);
+                fprintf(out, "){ .ptr = &__rae_pw_%d }",
+                        wrap_base + wrap_idx[arg_index]);
+                // Fall through to the suffix bookkeeping at the end
+                // of this iteration without invoking the original
+                // prim_wrap / pool_take / box / emit_expr path.
+                needs_prim_wrap = false;
+            } else if (needs_prim_wrap) {
                 fprintf(out, "("); emit_type_ref_as_c_type(ctx, p->type, out, false);
                 fprintf(out, "){ .ptr = ("); emit_type_ref_as_c_type(ctx, p->type, out, true); fprintf(out, "[]){");
             }
@@ -631,7 +707,12 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     a->value->kind == AST_EXPR_BINARY ||
                     a->value->kind == AST_EXPR_INTERP ||
                     a->value->kind == AST_EXPR_OBJECT);
-            if (needs_rvalue_temp) {
+            if (use_hoisted_temp) {
+                /* Arg already emitted as `(View){.ptr=&__rae_pw_N}`
+                 * above; the value lives in the hoisted temp. Skip
+                 * the rvalue-temp / addr / deref / box / emit_expr
+                 * branches below. */
+            } else if (needs_rvalue_temp) {
                 // Emit the base value type (strip view/mod) so the
                 // statement-expression temp is the right C type for
                 // the by-value rvalue. The outer `&` then matches
@@ -663,9 +744,13 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             ctx->has_expected_type = had_exp; ctx->expected_type = saved_exp;
             if (a->next) fprintf(out, ", ");
             a = a->next; if (p) p = p->next;
+            arg_index++;
         }
         fprintf(out, ")");
         if (!fd->is_extern && !ctx->suppress_opt_unbox) emit_opt_unbox_suffix(ctx, fd, concrete, out);
+        if (use_se_wrap) {
+            fprintf(out, "; }))");
+        }
         return true;
     }
 
