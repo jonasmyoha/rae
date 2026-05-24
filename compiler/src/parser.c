@@ -163,6 +163,7 @@ static AstTypeRef* parse_type_ref_from_ident(Parser* parser, const Token* ident_
   type->is_mod = false;
   type->is_val = false;
   type->is_own = false;
+  type->is_copy = false;
   type->is_id = false;
   type->is_key = false;
   type->parts = make_identifier_part(parser, ident_token->lexeme);
@@ -224,6 +225,7 @@ static AstTypeRef* parse_type_ref(Parser* parser) {
   type->is_mod = false;
   type->is_val = false;
   type->is_own = false;
+  type->is_copy = false;
   type->is_id = false;
   type->is_key = false;
   type->generic_args = NULL;
@@ -233,6 +235,11 @@ static AstTypeRef* parse_type_ref(Parser* parser) {
     type->is_opt = true;
   }
 
+  // Parameter-mode prefix. Stage A: parse `copy T` as an explicit
+  // synonym for bare `T` — same downstream semantics, but the
+  // is_copy bit lets future stages distinguish "author asked for a
+  // fresh owned copy" from "author left it unspecified". Mutually
+  // exclusive with view/mod/val/own — caught later in sema.
   if (parser_match(parser, TOK_KW_VIEW)) {
     type->is_view = true;
   } else if (parser_match(parser, TOK_KW_MOD)) {
@@ -241,6 +248,8 @@ static AstTypeRef* parse_type_ref(Parser* parser) {
     type->is_val = true;
   } else if (parser_match(parser, TOK_KW_OWN)) {
     type->is_own = true;
+  } else if (parser_match(parser, TOK_KW_COPY)) {
+    type->is_copy = true;
   }
   
   if (parser_match(parser, TOK_KW_ID)) {

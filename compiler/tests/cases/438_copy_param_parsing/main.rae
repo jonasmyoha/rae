@@ -1,0 +1,33 @@
+# Stage A: `copy T` parameter mode is parseable and runs identically
+# to bare `T`. Stage A scope is annotation-only — codegen treats
+# `copy T` and bare `T` the same. Stages B/C/D will diverge the
+# semantics; this test pins the syntax-level guarantee.
+#
+# Exercises:
+#   - `copy String` param accepted by parser + sema
+#   - `copy Int` param accepted (primitive, equivalent to bare Int)
+#   - `copy T` mixed with `view T` in the same signature
+#   - Behavior identical: caller's local still readable after call
+import core
+import string
+
+func greet(name: copy String) ret String {
+  ret "hello, ".concat(other: name)
+}
+
+func sumWith(label: view String, x: copy Int, y: copy Int) ret String {
+  let s: Int = x + y
+  ret "{label}={s}"
+}
+
+func main() {
+  let n: String = "ada"
+  let g: String = greet(name: n)
+  log(g)
+  log("caller local still: {n}")
+
+  let lbl: String = "total"
+  let r: String = sumWith(label: lbl, x: 2, y: 40)
+  log(r)
+  log("label still: {lbl}")
+}
