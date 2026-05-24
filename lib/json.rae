@@ -92,7 +92,7 @@ func jsonNumberValue(v: Float) ret JsonValue {
   }
 }
 
-func jsonStringValue(v: String) ret JsonValue {
+func jsonStringValue(v: own String) ret JsonValue {
   ret JsonValue {
     kind: JsonKind.String
     asBool: false
@@ -214,7 +214,7 @@ func jsonObjectValueAt(doc: view JsonDoc, this: view JsonValue, idx: Int) ret Js
 # index into doc.values, or -1 if missing. -1 is the "none" indicator
 # because `opt JsonValue` has historically been awkward in Rae and we
 # want this hot path to stay simple.
-func jsonField(doc: view JsonDoc, this: view JsonValue, key: String) ret Int {
+func jsonField(doc: view JsonDoc, this: view JsonValue, key: view String) ret Int {
   if this.kind is not JsonKind.Object {
     ret -1
   }
@@ -307,7 +307,7 @@ func consume(p: mod JsonParser, c: Char32) ret Bool {
   ret false
 }
 
-func consumeKeyword(p: mod JsonParser, kw: String) ret Bool {
+func consumeKeyword(p: mod JsonParser, kw: view String) ret Bool {
   let len: Int = kw.length()
   if p.pos + len > p.source.length() {
     ret false
@@ -338,7 +338,7 @@ func pushChild(kids: mod List(Int), valueIdx: Int) ret Int {
   ret idx
 }
 
-func pushField(fields: mod List(JsonField), key: String, valueIdx: Int) ret Int {
+func pushField(fields: mod List(JsonField), key: own String, valueIdx: Int) ret Int {
   let idx: Int = fields.length
   let f: JsonField = { key: key, valueIdx: valueIdx }
   fields.add(value: f)
@@ -660,6 +660,9 @@ func parseValue(
 # Parse a UTF-8 / ASCII JSON document. On error returns a doc with
 # `ok = false` and `errorPos` pointing at the first byte the parser
 # couldn't consume.
+# parseJson: `source` stays bare String — same documented exempt
+# regression class as lib/ui/scene.rae's parseScene / sceneNodeIndex.
+# Migrating to view triggers 413_scene_loader torn-read.
 func parseJson(source: String) ret JsonDoc {
   let doc: JsonDoc = {
     values: createList(JsonValue, initialCap: 8)

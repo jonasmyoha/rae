@@ -68,12 +68,13 @@ func emptyScene() ret Scene {
 
 # Linear lookup of a SceneNode by id. Scenes are typically <100 nodes
 # so a hash map isn't worth it. Returns -1 if missing.
-# sceneNodeIndex: `nodeId` kept as bare String for now. Migrating
-# to `view String` regresses 413_scene_loader — three of five child
-# entities go missing from world.nodeIds after mount. Likely a
-# subtle interaction between the call-site compound-literal view
-# wrap and the downstream StringMap.set path. See discussion in
-# the param-modes investigation history. Defer until that's nailed.
+# sceneNodeIndex: nodeId stays bare String for now. The view-String
+# migration triggers a torn-read regression in 413_scene_loader where
+# the compound-literal `(rae_String[]){childId}` at call sites
+# inside scene_loader.rae's pass-3 children loop reads data ptr and
+# len from different temps mid-iteration. Reproduced; root cause not
+# yet identified. The 8 → 3 final-warning gap covers this plus
+# parseScene / parseJson which share the same call-chain shape.
 func sceneNodeIndex(this: view Scene, nodeId: String) ret Int {
   let n: Int = this.nodes.length
   let i: Int = 0
@@ -116,6 +117,12 @@ func extractChildrenIds(doc: view JsonDoc, nodeVal: view JsonValue) ret List(Str
 # Walk the parsed JSON, build SceneNodes, validate cross-references.
 # Returns a populated Scene on success; on any validation failure
 # returns a Scene with `ok = false` and `errorMsg` set.
+# parseScene: `source` stays bare String — shares the regression
+# class with sceneNodeIndex. parseScene passes source to parseJson
+# (which also takes bare String today) and reads source.length()
+# later. Migrating to view triggers the 413_scene_loader torn-read
+# regression. See lib/ui/scene.rae sceneNodeIndex comment + memory
+# note project-param-modes for details.
 func parseScene(source: String) ret Scene {
   let doc: JsonDoc = parseJson(source: source)
   let scene: Scene = emptyScene()
