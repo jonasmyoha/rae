@@ -68,6 +68,12 @@ func emptyScene() ret Scene {
 
 # Linear lookup of a SceneNode by id. Scenes are typically <100 nodes
 # so a hash map isn't worth it. Returns -1 if missing.
+# sceneNodeIndex: `nodeId` kept as bare String for now. Migrating
+# to `view String` regresses 413_scene_loader — three of five child
+# entities go missing from world.nodeIds after mount. Likely a
+# subtle interaction between the call-site compound-literal view
+# wrap and the downstream StringMap.set path. See discussion in
+# the param-modes investigation history. Defer until that's nailed.
 func sceneNodeIndex(this: view Scene, nodeId: String) ret Int {
   let n: Int = this.nodes.length
   let i: Int = 0
