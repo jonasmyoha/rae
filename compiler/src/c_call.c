@@ -613,17 +613,50 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     wrap_pool_take_arg = true;
                 }
             }
-            if (needs_addr) fprintf(out, "&");
-            if (needs_deref) fprintf(out, "(*");
-            if (wrap_pool_take_arg) fprintf(out, "rae_string_pool_take(");
-            if (needs_box) {
-                const AstTypeRef* arg_tr2 = infer_expr_type_ref(ctx, a->value);
-                bool is_prim_ref = arg_tr2 && (arg_tr2->is_view || arg_tr2->is_mod) && is_primitive_type(get_base_type_name(arg_tr2));
-                fprintf(out, "rae_any(("); emit_expr(ctx, a->value, out, PREC_LOWEST, false, is_prim_ref); fprintf(out, "))");
-            } else emit_expr(ctx, a->value, out, PREC_LOWEST, false, pass_view_through);
-            if (wrap_pool_take_arg) fprintf(out, ")");
-            if (needs_deref) fprintf(out, ")");
-            if (needs_prim_wrap) fprintf(out, "} }");
+            // C-struct rvalue-to-`view T` arg: `&themeColorByName(...)`
+            // is invalid C — `&` of an rvalue. Materialize the value
+            // into a GCC statement-expression temp and take its
+            // address there. Lets `view RgbaColor`, `view Color`,
+            // etc. accept call-result args without forcing the user
+            // to bind to a let-local first.
+            //
+            // Only kicks in when:
+            //   - we'd otherwise emit `&arg` (needs_addr)
+            //   - the arg is a fresh rvalue (call/method/binary/interp)
+            //   - we're not already wrapping with pool_take or boxing
+            bool needs_rvalue_temp = needs_addr && !needs_box && !wrap_pool_take_arg
+                && a->value && (
+                    a->value->kind == AST_EXPR_CALL ||
+                    a->value->kind == AST_EXPR_METHOD_CALL ||
+                    a->value->kind == AST_EXPR_BINARY ||
+                    a->value->kind == AST_EXPR_INTERP ||
+                    a->value->kind == AST_EXPR_OBJECT);
+            if (needs_rvalue_temp) {
+                // Emit the base value type (strip view/mod) so the
+                // statement-expression temp is the right C type for
+                // the by-value rvalue. The outer `&` then matches
+                // the callee's `T*` param.
+                AstTypeRef base_type = *p->type;
+                base_type.is_view = false;
+                base_type.is_mod = false;
+                fprintf(out, "(__extension__ ({ ");
+                emit_type_ref_as_c_type(ctx, &base_type, out, false);
+                fprintf(out, " __rae_rvarg = ");
+                emit_expr(ctx, a->value, out, PREC_LOWEST, false, pass_view_through);
+                fprintf(out, "; &__rae_rvarg; }))");
+            } else {
+                if (needs_addr) fprintf(out, "&");
+                if (needs_deref) fprintf(out, "(*");
+                if (wrap_pool_take_arg) fprintf(out, "rae_string_pool_take(");
+                if (needs_box) {
+                    const AstTypeRef* arg_tr2 = infer_expr_type_ref(ctx, a->value);
+                    bool is_prim_ref = arg_tr2 && (arg_tr2->is_view || arg_tr2->is_mod) && is_primitive_type(get_base_type_name(arg_tr2));
+                    fprintf(out, "rae_any(("); emit_expr(ctx, a->value, out, PREC_LOWEST, false, is_prim_ref); fprintf(out, "))");
+                } else emit_expr(ctx, a->value, out, PREC_LOWEST, false, pass_view_through);
+                if (wrap_pool_take_arg) fprintf(out, ")");
+                if (needs_deref) fprintf(out, ")");
+                if (needs_prim_wrap) fprintf(out, "} }");
+            }
             ctx->has_expected_type = had_exp; ctx->expected_type = saved_exp;
             if (a->next) fprintf(out, ", ");
             a = a->next; if (p) p = p->next;
