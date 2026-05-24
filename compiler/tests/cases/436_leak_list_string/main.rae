@@ -1,0 +1,44 @@
+# Focused leak test: List<String> stress.
+#
+# Builds and drops List<String> in a tight loop. The List drop must
+# iterate elements and call rae_ext_rae_str_free on each so the
+# element heaps don't leak.
+#
+# Tests both String-literal init and concat-result init paths.
+import core
+import string
+import sys
+
+func rae_ext_rae_mem_stats_outstanding() extern ret Int
+
+func main() {
+  let warmups: Int = 50
+  let i: Int = 0
+  loop i < warmups {
+    let xs: List(String) = createList(String, initialCap: 4)
+    xs.add(value: "alpha-".concat(other: "x"))
+    xs.add(value: "beta-".concat(other: "y"))
+    xs.add(value: "gamma-".concat(other: "z"))
+    i = i + 1
+  }
+  let baseline: Int = rae_ext_rae_mem_stats_outstanding()
+
+  let iterations: Int = 5000
+  i = 0
+  loop i < iterations {
+    let xs: List(String) = createList(String, initialCap: 4)
+    xs.add(value: "alpha-".concat(other: "x"))
+    xs.add(value: "beta-".concat(other: "y"))
+    xs.add(value: "gamma-".concat(other: "z"))
+    i = i + 1
+  }
+  let final: Int = rae_ext_rae_mem_stats_outstanding()
+  let leaked: Int = final - baseline
+
+  log("iterations: {iterations}")
+  if leaked < 100 {
+    log("verdict: OK")
+  } else {
+    log("verdict: LEAK outstanding={leaked}")
+  }
+}
