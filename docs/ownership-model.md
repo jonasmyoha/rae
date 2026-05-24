@@ -315,3 +315,50 @@ explicit ownership transfer. Preserve Rae's readability rule:
 
 Search for `Stage 2` / `Stage 3` in `c_backend.c`, `c_stmt.c`,
 and `c_discovery.c` to find every relevant location.
+
+## Parameter-mode rules (current, normative)
+
+These rules describe the state of the language as of the
+2026-05-25 alias-detection fix. They are enforced by
+`RAE_STRICT_PARAM_MODES=1`, which is the canonical build setting
+for new code.
+
+- **Function params must be explicit**: `view T`, `mod T`,
+  `copy T`, or `own T`. Choose the weakest mode that fits.
+- **Bare `T` params are no longer accepted under strict mode.**
+  They still parse for backwards compatibility but emit a
+  warning under strict mode and will become a hard error in a
+  future release. Migrate to `copy T` if you really want a
+  by-value copy.
+- **`view String` is the correct mode for read-only string
+  parsing APIs.** Examples: `parseJson(source: view String)`,
+  `parseScene(source: view String)`, `sceneNodeIndex(nodeId:
+  view String)`, `applyComponentByName(name: view String)`. Use
+  `own String` only if the function stores the string in a
+  struct it owns.
+- **Method-call receivers must preserve ownership / view
+  classification.** Method-call `let` initializers MUST NOT be
+  classified as owning by default: `let x: String =
+  obj.list.get(index: i)` aliases the slot, so auto-dropping `x`
+  at scope end would free the slot's data. The compiler now
+  body-inspects the resolved method via `rae_func_returns_alias`
+  to decide owning vs aliasing, the same way it already handles
+  ident-call initializers.
+- **View-T rvalue call args must use stable named temps,** not
+  fragile compound-literal wrappers. The old
+  `(rae_View_T){ .ptr = (T[]){expr} }` form had a torn-read
+  pathology under nested calls in the same enclosing block.
+  Codegen now hoists each view-T prim_wrap arg into a named
+  stack temp inside a statement expression that wraps the
+  entire call, so each arg has a distinct stack slot whose
+  lifetime matches the SE block.
+
+### Final verification numbers (2026-05-25)
+
+- Unit tests: **246 passed, 0 failed**
+- Example smoke tests: **49 passed, 0 failed**
+- `RAE_STRICT_PARAM_MODES=1` warnings on mobile UI build: **0**
+- Leak tests `43[1,3,4,5,6,7,9]` + `440`: green under
+  `RAE_MEM_STATS=1`, 0 outstanding allocations on exit
+- Mobile UI 20k-iteration stress: RSS plateau at ~5.5 MB (97%
+  reduction vs pre-Stage-3 baseline); no linear leak observed
