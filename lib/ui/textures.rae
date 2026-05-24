@@ -33,7 +33,7 @@ func createTextureRegistry() ret TextureRegistry {
 # Register and immediately load a texture. Returns the loaded Texture.
 # Does not deduplicate — callers should check `textureHas` first if a
 # key might be re-registered.
-func textureLoad(reg: mod TextureRegistry, key: String, path: String) ret Texture {
+func textureLoad(reg: mod TextureRegistry, key: own String, path: own String) ret Texture {
   let tex: Texture = loadTexture(fileName: path)
   let entry: TextureEntry = {
     key: key
@@ -45,7 +45,7 @@ func textureLoad(reg: mod TextureRegistry, key: String, path: String) ret Textur
 }
 
 # Find the index of `key` in the registry, or -1 if not present.
-func textureIndex(reg: view TextureRegistry, key: String) ret Int {
+func textureIndex(reg: view TextureRegistry, key: view String) ret Int {
   let n: Int = reg.entries.length
   let i: Int = 0
   loop i < n {
@@ -58,7 +58,7 @@ func textureIndex(reg: view TextureRegistry, key: String) ret Int {
   ret -1
 }
 
-func textureHas(reg: view TextureRegistry, key: String) ret Bool {
+func textureHas(reg: view TextureRegistry, key: view String) ret Bool {
   ret textureIndex(reg: reg, key: key) >= 0
 }
 
@@ -66,7 +66,7 @@ func textureHas(reg: view TextureRegistry, key: String) ret Bool {
 # raylib's `DrawTexture` on a zero-id texture is a no-op, so a missing
 # asset doesn't crash the program. Callers that need to detect this
 # should `textureHas` first.
-func textureGet(reg: view TextureRegistry, key: String) ret Texture {
+func textureGet(reg: view TextureRegistry, key: view String) ret Texture {
   let idx: Int = textureIndex(reg: reg, key: key)
   if idx < 0 {
     let empty: Texture = { id: 0, width: 0, height: 0, mipmaps: 0, format: 0 }
