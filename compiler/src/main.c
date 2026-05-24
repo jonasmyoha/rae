@@ -1734,7 +1734,12 @@ static AstModule merge_module_graph(const ModuleGraph* graph) {
   AstDecl* head = NULL;
   AstDecl* tail = NULL;
   for (ModuleNode* node = graph->head; node; node = node->next) {
-    
+    // Stamp each decl with its origin file so sema can answer "did
+    // this call come from stdlib?" after the merge — module->file_path
+    // alone only remembers the LAST file, not per-decl provenance.
+    for (AstDecl* d = node->module->decls; d; d = d->next) {
+      if (!d->origin_file) d->origin_file = node->module->file_path;
+    }
     // Copy the declaration list head
     AstDecl* current = node->module->decls;
     if (!head) {
@@ -1742,7 +1747,7 @@ static AstModule merge_module_graph(const ModuleGraph* graph) {
     } else {
       tail->next = current;
     }
-    
+
     // Find the new tail
     while (current->next) {
       current = current->next;

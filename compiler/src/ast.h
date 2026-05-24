@@ -349,6 +349,7 @@ struct AstDecl {
   TypeInfo* resolved_type; // The type this declaration represents (e.g. for functions, the func type)
   size_t line;
   size_t column;
+  const char* origin_file; // Source file the decl was parsed from (preserved through module merge + specialization). NULL until set.
   AstDecl* next;
   union {
     AstTypeDecl type_decl;
