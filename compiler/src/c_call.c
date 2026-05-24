@@ -95,6 +95,11 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     bool is_buf_get = str_eq_cstr(name, "rae_ext___buf_get") || str_eq_cstr(name, "__buf_get") || str_eq_cstr(name, "rae_ext_rae_buf_get");
     bool is_buf_set = str_eq_cstr(name, "rae_ext___buf_set") || str_eq_cstr(name, "__buf_set") || str_eq_cstr(name, "rae_ext_rae_buf_set");
     bool is_buf_copy = str_eq_cstr(name, "rae_ext___buf_copy") || str_eq_cstr(name, "__buf_copy") || str_eq_cstr(name, "rae_ext_rae_buf_copy");
+    // Drops the contents of a buffer slot via the synthesised
+    // rae_drop_struct_<T>. Lets generic Rae code (e.g. componentSet's
+    // replace path) free a slot's heap before overwriting it without
+    // the alias-pitfalls of an unconditional buf_set pre-drop.
+    bool is_buf_drop_at = str_eq_cstr(name, "rae_ext_rae_buf_drop_at");
 
     // Helpers: emit the buffer element type (prefer AstTypeRef if available, fall back to TypeInfo).
     #define EMIT_ELEM_TYPE() do { \
@@ -246,6 +251,74 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             emit_expr(ctx, val_expr, out, PREC_LOWEST, false, false);
             ctx->has_expected_type = had_exp;
             ctx->expected_type = saved_exp;
+        }
+        return true;
+    }
+
+    if (is_buf_drop_at) {
+        // rae_ext_rae_buf_drop_at(V)(buf: mod Buffer(V), index: Int)
+        // Drops slot `buf[index]` via the synthesised rae_drop_struct_<V>
+        // (or rae_string_drop for V=String). Element type is resolved
+        // the same way buf_get/buf_set resolve it.
+        const AstCallArg* arg = expr->as.call.args;
+        if (!arg || !arg->next) return false;
+        AstTypeRef* elem_tr = NULL;
+        {
+            const AstTypeRef* buf_tr = infer_expr_type_ref(ctx, arg->value);
+            if (buf_tr) {
+                AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)buf_tr);
+                Str base = get_base_type_name(sub);
+                if (str_eq_cstr(base, "Buffer") && sub->generic_args) {
+                    elem_tr = sub->generic_args;
+                }
+            }
+        }
+        if (!elem_tr) {
+            // Can't resolve element type — emit nothing (best-effort).
+            fprintf(out, "(void)0");
+            return true;
+        }
+        Str ebase = get_base_type_name(elem_tr);
+        bool elem_is_string = str_eq_cstr(ebase, "String");
+        // Only emit a drop when the element actually needs cascade
+        // drop. Otherwise this is a no-op for primitives / c_struct.
+        bool elem_needs = elem_is_string ||
+            type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, elem_tr, 0);
+        if (!elem_needs) {
+            fprintf(out, "(void)0");
+            return true;
+        }
+        // Pass A only synthesises rae_drop_struct_<T> for NON-GENERIC
+        // user structs. If V is a generic-instance struct
+        // (StringMapEntry(V), JsonField, …), no helper exists — fall
+        // back to no-op rather than emit an undeclared call. This
+        // preserves the existing leak for generic-instance slots but
+        // keeps the build healthy. Closing the rest requires Pass A
+        // to also synthesise specialised drop helpers.
+        if (!elem_is_string) {
+            const AstDecl* elem_decl = find_type_decl(NULL, ctx->module, ebase);
+            bool has_synth_drop = elem_decl
+                && elem_decl->kind == AST_DECL_TYPE
+                && !elem_decl->as.type_decl.generic_params
+                && !has_property(elem_decl->as.type_decl.properties, "c_struct");
+            if (!has_synth_drop) {
+                fprintf(out, "(void)0");
+                return true;
+            }
+        }
+        const char* elem_mangled = elem_is_string
+            ? "rae_String"
+            : rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, elem_tr);
+        fprintf(out, "({ %s* __bd = (%s*)( (char*)(",
+                elem_mangled, elem_mangled);
+        emit_expr(ctx, arg->value, out, PREC_LOWEST, false, false);
+        fprintf(out, ") + (");
+        emit_expr(ctx, arg->next->value, out, PREC_LOWEST, false, false);
+        fprintf(out, ") * sizeof(%s) ); ", elem_mangled);
+        if (elem_is_string) {
+            fprintf(out, "rae_string_drop(__bd); })");
+        } else {
+            fprintf(out, "rae_drop_struct_%s(__bd); })", elem_mangled);
         }
         return true;
     }
