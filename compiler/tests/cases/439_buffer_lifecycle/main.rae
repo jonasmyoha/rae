@@ -1,0 +1,53 @@
+# Stress List buffer create/drop in a tight loop to characterise the
+# buffer-leak class. The mobile UI 5k+ stress reports a constant 18
+# outstanding bufs regardless of iteration count — that's persistent
+# app state (ECS component tables, texture/theme registries), not a
+# per-iteration leak. This test removes the app entirely and runs a
+# pure container-build/drop loop, asserting that outstanding stays
+# at a SMALL constant across iteration counts.
+#
+# Uses mem_stats_outstanding for a String-bucket sanity check; the
+# buffer numbers are inspected via the cumulative stderr dump under
+# RAE_MEM_STATS=1 (the per-site native only covers Strings today).
+import core
+import string
+import sys
+
+func rae_ext_rae_mem_stats_outstanding() extern ret Int
+
+func buildAndDrop() {
+  let xs: List(Int) = createList(Int, initialCap: 8)
+  xs.add(value: 1)
+  xs.add(value: 2)
+  xs.add(value: 3)
+  xs.add(value: 4)
+  if xs.length < 0 {
+    log("never")
+  }
+}
+
+func main() {
+  let warmups: Int = 50
+  let i: Int = 0
+  loop i < warmups {
+    buildAndDrop()
+    i = i + 1
+  }
+  let baseline: Int = rae_ext_rae_mem_stats_outstanding()
+
+  let iterations: Int = 5000
+  i = 0
+  loop i < iterations {
+    buildAndDrop()
+    i = i + 1
+  }
+  let final: Int = rae_ext_rae_mem_stats_outstanding()
+  let leaked: Int = final - baseline
+
+  log("iterations: {iterations}")
+  if leaked < 100 {
+    log("verdict: OK")
+  } else {
+    log("verdict: LEAK outstanding={leaked}")
+  }
+}

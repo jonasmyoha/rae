@@ -4,6 +4,65 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Live-mode (VM) leak counters. Aggregate per Value kind — no per-
+// call-site tagging today (that's the next step if we need it). The
+// numbers are surfaced through native_rae_ext_rae_mem_stats_outstanding
+// so the same `RAE_MEM_STATS=1` runtime test pattern works in both
+// Live and Compiled mode.
+//
+// Counters are file-static; single-threaded today (matches the rest
+// of the runtime).
+static int64_t g_vm_string_alloc_n = 0;
+static int64_t g_vm_string_free_n  = 0;
+static int64_t g_vm_key_alloc_n    = 0;
+static int64_t g_vm_key_free_n     = 0;
+static int64_t g_vm_object_alloc_n = 0;
+static int64_t g_vm_object_free_n  = 0;
+static int64_t g_vm_array_alloc_n  = 0;
+static int64_t g_vm_array_free_n   = 0;
+static int64_t g_vm_buffer_alloc_n = 0;
+static int64_t g_vm_buffer_free_n  = 0;
+
+int64_t vm_value_outstanding_total(void) {
+  int64_t out = 0;
+  out += g_vm_string_alloc_n - g_vm_string_free_n;
+  out += g_vm_key_alloc_n    - g_vm_key_free_n;
+  out += g_vm_object_alloc_n - g_vm_object_free_n;
+  out += g_vm_array_alloc_n  - g_vm_array_free_n;
+  out += g_vm_buffer_alloc_n - g_vm_buffer_free_n;
+  return out;
+}
+
+void vm_value_dump_mem_stats(void) {
+  fprintf(stderr, "[rae vm mem-stats] cumulative since process start:\n");
+  fprintf(stderr, "  [vm:string ] alloc=%lld free=%lld outstanding=%lld\n",
+    (long long)g_vm_string_alloc_n, (long long)g_vm_string_free_n,
+    (long long)(g_vm_string_alloc_n - g_vm_string_free_n));
+  fprintf(stderr, "  [vm:key    ] alloc=%lld free=%lld outstanding=%lld\n",
+    (long long)g_vm_key_alloc_n, (long long)g_vm_key_free_n,
+    (long long)(g_vm_key_alloc_n - g_vm_key_free_n));
+  fprintf(stderr, "  [vm:object ] alloc=%lld free=%lld outstanding=%lld\n",
+    (long long)g_vm_object_alloc_n, (long long)g_vm_object_free_n,
+    (long long)(g_vm_object_alloc_n - g_vm_object_free_n));
+  fprintf(stderr, "  [vm:array  ] alloc=%lld free=%lld outstanding=%lld\n",
+    (long long)g_vm_array_alloc_n, (long long)g_vm_array_free_n,
+    (long long)(g_vm_array_alloc_n - g_vm_array_free_n));
+  fprintf(stderr, "  [vm:buffer ] alloc=%lld free=%lld outstanding=%lld\n",
+    (long long)g_vm_buffer_alloc_n, (long long)g_vm_buffer_free_n,
+    (long long)(g_vm_buffer_alloc_n - g_vm_buffer_free_n));
+  fprintf(stderr, "  [vm:TOTAL  ] outstanding=%lld\n",
+    (long long)vm_value_outstanding_total());
+  fflush(stderr);
+}
+
+__attribute__((constructor))
+static void vm_value_install_mem_stats(void) {
+  const char* v = getenv("RAE_MEM_STATS");
+  if (v && v[0] && v[0] != '0') {
+    atexit(vm_value_dump_mem_stats);
+  }
+}
+
 Value value_int(int64_t v) {
   Value value = {.type = VAL_INT};
   value.as.int_value = v;
@@ -35,6 +94,7 @@ Value value_string_copy(const char* data, size_t length) {
   if (value.as.string_value.chars) {
     memcpy(value.as.string_value.chars, data, length);
     value.as.string_value.chars[length] = '\0';
+    g_vm_string_alloc_n++;
   }
   return value;
 }
@@ -45,6 +105,7 @@ Value value_string_take(uint8_t* data, size_t length) {
   value.as.string_value.length = (int64_t)length;
   if (value.as.string_value.chars) {
     value.as.string_value.chars[length] = '\0';
+    g_vm_string_alloc_n++;
   }
   return value;
 }
@@ -63,6 +124,7 @@ Value value_object(size_t field_count, const char* type_name) {
     for (size_t i = 0; i < field_count; i++) {
       value.as.object_value.fields[i] = value_none();
     }
+    g_vm_object_alloc_n++;
   }
   return value;
 }
@@ -78,6 +140,7 @@ Value value_array(size_t count) {
         value.as.array_value->items[i].type = VAL_NONE;
       }
     }
+    g_vm_array_alloc_n++;
   }
   return value;
 }
@@ -95,6 +158,7 @@ Value value_buffer(size_t capacity) {
         value.as.buffer_value->items[i].type = VAL_NONE;
       }
     }
+    g_vm_buffer_alloc_n++;
   }
   return value;
 }
@@ -138,6 +202,7 @@ Value value_key_copy(const char* data, size_t length) {
   if (value.as.key_value.chars) {
     memcpy(value.as.key_value.chars, data, length);
     value.as.key_value.chars[length] = '\0';
+    g_vm_key_alloc_n++;
   }
   return value;
 }
@@ -241,7 +306,7 @@ Value value_from_binary(const Value* buffer, const char* type_name, VmFieldNames
 
 Value value_copy(const Value* value) {
   if (!value) return value_none();
-  
+
   Value copy = *value;
   switch (value->type) {
     case VAL_STRING:
@@ -249,6 +314,7 @@ Value value_copy(const Value* value) {
         copy.as.string_value.chars = malloc(value->as.string_value.length + 1);
         memcpy(copy.as.string_value.chars, value->as.string_value.chars, value->as.string_value.length);
         copy.as.string_value.chars[value->as.string_value.length] = '\0';
+        g_vm_string_alloc_n++;
       }
       break;
     case VAL_KEY:
@@ -256,6 +322,7 @@ Value value_copy(const Value* value) {
         copy.as.key_value.chars = malloc(value->as.key_value.length + 1);
         memcpy(copy.as.key_value.chars, value->as.key_value.chars, value->as.key_value.length);
         copy.as.key_value.chars[value->as.key_value.length] = '\0';
+        g_vm_key_alloc_n++;
       }
       break;
     case VAL_OBJECT:
@@ -264,6 +331,7 @@ Value value_copy(const Value* value) {
         for (size_t i = 0; i < value->as.object_value.field_count; i++) {
           copy.as.object_value.fields[i] = value_copy(&value->as.object_value.fields[i]);
         }
+        g_vm_object_alloc_n++;
       }
       copy.as.object_value.type_name = value->as.object_value.type_name ? strdup(value->as.object_value.type_name) : NULL;
       break;
@@ -275,6 +343,7 @@ Value value_copy(const Value* value) {
         for (size_t i = 0; i < value->as.array_value->count; i++) {
           copy.as.array_value->items[i] = value_copy(&value->as.array_value->items[i]);
         }
+        g_vm_array_alloc_n++;
       }
       break;
     case VAL_BUFFER:
@@ -298,16 +367,19 @@ void value_free(Value* value) {
     free(value->as.string_value.chars);
     value->as.string_value.chars = NULL;
     value->as.string_value.length = 0;
+    g_vm_string_free_n++;
   } else if (value->type == VAL_KEY && value->as.key_value.chars) {
     free(value->as.key_value.chars);
     value->as.key_value.chars = NULL;
     value->as.key_value.length = 0;
+    g_vm_key_free_n++;
   } else if (value->type == VAL_OBJECT) {
     if (value->as.object_value.fields) {
       for (size_t i = 0; i < value->as.object_value.field_count; ++i) {
         value_free(&value->as.object_value.fields[i]);
       }
       free(value->as.object_value.fields);
+      g_vm_object_free_n++;
     }
     if (value->as.object_value.type_name) {
       free(value->as.object_value.type_name);
@@ -322,6 +394,7 @@ void value_free(Value* value) {
     }
     free(va->items);
     free(va);
+    g_vm_array_free_n++;
     value->as.array_value = NULL;
   } else if (value->type == VAL_BUFFER && value->as.buffer_value) {
     ValueBuffer* vb = value->as.buffer_value;
@@ -332,6 +405,7 @@ void value_free(Value* value) {
       }
       free(vb->items);
       free(vb);
+      g_vm_buffer_free_n++;
     }
     value->as.buffer_value = NULL;
   } else if (value->type == VAL_REF) {
