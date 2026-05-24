@@ -1,0 +1,64 @@
+# Focused leak test: constructor-style function. Takes ownership of
+# a String, deep-copies it into a returned struct, and the struct
+# escapes back to the caller.
+#
+# This shape *should not leak* under the current semantics: the
+# caller catches the returned struct, drops it at scope exit, and
+# the deep-copy inside the struct flows through that cascade. The
+# original caller-passed String (still owned by the caller's local)
+# is also dropped at the caller's scope exit.
+#
+# It IS leaking today because the function parameter heap (the
+# caller's `s` that was transferred via move-tracking) never gets
+# freed inside the constructor — same root cause as 434, just
+# shaped slightly differently. This test catches that.
+import core
+import string
+import sys
+
+func rae_ext_rae_mem_stats_outstanding() extern ret Int
+
+type Foo {
+  name: String
+}
+
+func makeFoo(name: String) ret Foo {
+  ret Foo { name: name }
+}
+
+func main() {
+  # Warmup
+  let warmups: Int = 50
+  let i: Int = 0
+  loop i < warmups {
+    let s: String = "warmup-".concat(other: "x")
+    let f: Foo = makeFoo(name: s)
+    if f.name.length() < 0 {
+      log("never")
+    }
+    i = i + 1
+  }
+  let baseline: Int = rae_ext_rae_mem_stats_outstanding()
+
+  let iterations: Int = 5000
+  i = 0
+  loop i < iterations {
+    let s: String = "msg-".concat(other: "x")
+    let f: Foo = makeFoo(name: s)
+    if f.name.length() < 0 {
+      log("never")
+    }
+    i = i + 1
+  }
+  let final: Int = rae_ext_rae_mem_stats_outstanding()
+  let leaked: Int = final - baseline
+
+  log("iterations: {iterations}")
+  # Allow a tiny slop for one-shot allocations made by the test
+  # infrastructure itself.
+  if leaked < 100 {
+    log("verdict: OK")
+  } else {
+    log("verdict: LEAK outstanding={leaked}")
+  }
+}
