@@ -484,6 +484,23 @@ void rae_string_pool_remove(void* ptr) {
   }
 }
 
+// Returns 1 if ptr is currently in the statement-scope String temp
+// pool, 0 otherwise. Used by rae_string_move_or_copy to decide
+// whether a Phase 2 struct-field init can MOVE the source heap or
+// must COPY it. A source whose heap is NOT in the pool was either
+// pool_take'd by the caller (owning-temp arg detached) or is a
+// borrowed/literal-backed value — either way, moving is safe and
+// avoids one allocation. A source in the pool will be flushed by
+// the caller's surrounding pool_flush, so the callee must deep-
+// copy to give its struct field a private heap.
+int rae_string_pool_contains(void* ptr) {
+  if (!ptr) return 0;
+  for (int i = g_rae_string_pool_count - 1; i >= 0; i--) {
+    if (g_rae_string_pool[i] == ptr) return 1;
+  }
+  return 0;
+}
+
 rae_String rae_ext_rae_str_interp(int n, ...) {
   if (n <= 0) return (rae_String){NULL, 0, 0, 0};
   va_list args;
