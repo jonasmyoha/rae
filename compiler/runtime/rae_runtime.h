@@ -386,9 +386,37 @@ void rae_string_pool_register(void* ptr);
 int rae_string_pool_mark(void);
 void rae_string_pool_flush(int saved);
 void rae_string_pool_remove(void* ptr);
+int rae_string_pool_contains(void* ptr);
 RAE_UNUSED static inline rae_String rae_string_pool_take(rae_String s) {
   rae_string_pool_remove(s.data);
   return s;
+}
+
+// Phase 2 struct-field deep-copy with move-when-safe optimization.
+// When the source is an owned heap that is NOT in the temp pool
+// (e.g. a function parameter received via caller-side pool_take, or
+// a value already moved out of the pool), we can transfer ownership
+// to the new struct field instead of allocating a fresh heap. The
+// source is zeroed out so the original variable no longer aliases
+// the heap.
+//
+// When the source IS in the pool, the caller's surrounding flush
+// will free it — so we MUST deep-copy here to give the struct
+// field a private heap that survives the flush.
+//
+// Borrowed/literal sources (is_owned=0) and NULL sources fall
+// through to rae_string_copy, which handles them correctly.
+RAE_UNUSED static inline rae_String rae_string_move_or_copy(rae_String* src) {
+  if (src && src->is_owned && src->data &&
+      !rae_string_pool_contains(src->data)) {
+    rae_String moved = *src;
+    src->data = NULL;
+    src->len = 0;
+    src->capacity = 0;
+    src->is_owned = 0;
+    return moved;
+  }
+  return rae_string_copy(src ? *src : (rae_String){NULL, 0, 0, 0});
 }
 
 // Re-register an owned String return value into the caller's pool.
