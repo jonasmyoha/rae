@@ -16,8 +16,8 @@ type Group {
   members: List(User)
 }
 
-# === plain T return (owning) ===
-func makeUser(uName: String, uAge: Int) ret User {
+# === own T return (owning) ===
+func makeUser(uName: own String, uAge: Int) ret User {
   ret User { name: uName, age: uAge }
 }
 
@@ -31,14 +31,15 @@ func bumpAge(u: mod User) {
   u.age = u.age + 1
 }
 
-# === plain T param + ret (consume + reproduce) ===
-func relabel(u: User, suffix: String) ret User {
+# === own T param + ret (consume + reproduce) ===
+func relabel(u: own User, suffix: view String) ret User {
   ret User { name: u.name.concat(other: suffix), age: u.age }
 }
 
-# Plain T param consumes the caller's value. The caller's
-# move-tracking should skip the source's auto-drop.
-func recordMember(g: mod Group, m: User) {
+# own T param consumes the caller's value. The caller's move-tracking
+# should skip the source's auto-drop; the callee owns now and stores
+# the User into the group's member list.
+func recordMember(g: mod Group, m: own User) {
   g.members.add(value: m)
 }
 
