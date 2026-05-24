@@ -62,7 +62,7 @@ func createSceneRegistry() ret SceneRegistry {
   }
 }
 
-func registerScene(reg: mod SceneRegistry, key: String, scene: Scene) {
+func registerScene(reg: mod SceneRegistry, key: own String, scene: own Scene) {
   let idsList: mod List(String) => reg.ids
   let scenesList: mod List(Scene) => reg.scenes
   idsList.add(value: key)
@@ -70,7 +70,7 @@ func registerScene(reg: mod SceneRegistry, key: String, scene: Scene) {
 }
 
 # Returns the index of `key` in the registry, or -1 if not present.
-func sceneRegistryIndex(reg: view SceneRegistry, key: String) ret Int {
+func sceneRegistryIndex(reg: view SceneRegistry, key: view String) ret Int {
   let n: Int = reg.ids.length
   let i: Int = 0
   loop i < n {
@@ -83,7 +83,7 @@ func sceneRegistryIndex(reg: view SceneRegistry, key: String) ret Int {
   ret -1
 }
 
-func sceneRegistryHas(reg: view SceneRegistry, key: String) ret Bool {
+func sceneRegistryHas(reg: view SceneRegistry, key: view String) ret Bool {
   ret sceneRegistryIndex(reg: reg, key: key) >= 0
 }
 
@@ -98,10 +98,10 @@ func emptyOverrides() ret List(SceneOverride) {
 
 func addOverride(
   list: mod List(SceneOverride)
-  nodeId: String
-  componentName: String
-  fieldName: String
-  value: String
+  nodeId: own String
+  componentName: own String
+  fieldName: own String
+  value: own String
 ) {
   # `own` opts each param into move semantics: Phase 2 would
   # normally deep-copy String fields at struct-literal init, but
@@ -120,35 +120,35 @@ func addOverride(
 }
 
 # Shorthand for the most common case: text replacement on a Text node.
-func addTextOverride(list: mod List(SceneOverride), nodeId: String, value: String) {
+func addTextOverride(list: mod List(SceneOverride), nodeId: own String, value: own String) {
   let textKey: String = "Text"
   let textField: String = "text"
   addOverride(
     list: list
-    nodeId: nodeId
-    componentName: textKey
-    fieldName: textField
-    value: value
+    nodeId: own nodeId
+    componentName: own textKey
+    fieldName: own textField
+    value: own value
   )
 }
 
 # Shorthand for swapping a sprite's textureKey.
-func addSpriteOverride(list: mod List(SceneOverride), nodeId: String, value: String) {
+func addSpriteOverride(list: mod List(SceneOverride), nodeId: own String, value: own String) {
   let spriteKey: String = "Sprite"
   let spriteField: String = "textureKey"
   addOverride(
     list: list
-    nodeId: nodeId
-    componentName: spriteKey
-    fieldName: spriteField
-    value: value
+    nodeId: own nodeId
+    componentName: own spriteKey
+    fieldName: own spriteField
+    value: own value
   )
 }
 
 # Sprite tint override. Encodes the colour as `"r,g,b,a"` because the
 # override value channel is currently a plain String — applyOverride
 # parses the four numeric components back out.
-func addSpriteTintOverride(list: mod List(SceneOverride), nodeId: String, r: Int, g: Int, b: Int, a: Int) {
+func addSpriteTintOverride(list: mod List(SceneOverride), nodeId: own String, r: Int, g: Int, b: Int, a: Int) {
   let spriteKey: String = "Sprite"
   let tintField: String = "tint"
   # Interpolation is one alloc instead of seven; the nested .concat()
@@ -160,37 +160,37 @@ func addSpriteTintOverride(list: mod List(SceneOverride), nodeId: String, r: Int
   let value: String = "{r},{g},{b},{a}"
   addOverride(
     list: list
-    nodeId: nodeId
-    componentName: spriteKey
-    fieldName: tintField
-    value: value
+    nodeId: own nodeId
+    componentName: own spriteKey
+    fieldName: own tintField
+    value: own value
   )
 }
 
 # Text styleId override (e.g. swap "tabInactive" -> "tabActive").
-func addTextStyleOverride(list: mod List(SceneOverride), nodeId: String, value: String) {
+func addTextStyleOverride(list: mod List(SceneOverride), nodeId: own String, value: own String) {
   let textKey: String = "Text"
   let styleField: String = "styleId"
   addOverride(
     list: list
-    nodeId: nodeId
-    componentName: textKey
-    fieldName: styleField
-    value: value
+    nodeId: own nodeId
+    componentName: own textKey
+    fieldName: own styleField
+    value: own value
   )
 }
 
 # OnClick actionId override. Used when a scene declares a placeholder
 # action and the host wants to bind a real one at mount time.
-func addOnClickActionOverride(list: mod List(SceneOverride), nodeId: String, value: String) {
+func addOnClickActionOverride(list: mod List(SceneOverride), nodeId: own String, value: own String) {
   let onClickKey: String = "OnClick"
   let actionField: String = "actionId"
   addOverride(
     list: list
-    nodeId: nodeId
-    componentName: onClickKey
-    fieldName: actionField
-    value: value
+    nodeId: own nodeId
+    componentName: own onClickKey
+    fieldName: own actionField
+    value: own value
   )
 }
 
@@ -202,7 +202,7 @@ func addOnClickActionOverride(list: mod List(SceneOverride), nodeId: String, val
 # the scene is mounted (geometry/placement live on the parent of the
 # scene; the scene contributes its inner layout, padding, visuals, and
 # behaviour). RUICS § 6.4.
-func isPlacementComponent(name: String) ret Bool {
+func isPlacementComponent(name: view String) ret Bool {
   if name.equals(other: "Rect") {
     ret true
   }
