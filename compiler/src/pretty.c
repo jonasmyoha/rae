@@ -186,6 +186,8 @@ static void pp_write_type(PrettyPrinter* pp, const AstTypeRef* type) {
   if (type->is_view) pp_write(pp, "view ");
   if (type->is_mod) pp_write(pp, "mod ");
   if (type->is_val) pp_write(pp, "val ");
+  if (type->is_own) pp_write(pp, "own ");
+  if (type->is_copy) pp_write(pp, "copy ");
   if (type->is_id) pp_write(pp, "id ");
   if (type->is_key) pp_write(pp, "key ");
   
