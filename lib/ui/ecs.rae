@@ -158,6 +158,14 @@ func componentSet(T)(this: mod ComponentTable(T), entity: Int, data: T) {
     # componentIndexOf comment.
     let e: Int = rae_ext_rae_buf_get(buf: entities.data, index: i)
     if e is entity {
+      # Drop the existing slot before overwriting. Without this the
+      # old component's heap-owning fields (Strings, Lists) leak
+      # every time a scene override or live mutation replaces an
+      # existing component. `buf_drop_at` calls the synthesised
+      # cascade drop for T (rae_drop_struct_<T> or rae_string_drop),
+      # then we overwrite immediately so the stale pointers don't
+      # outlive the cycle.
+      rae_ext_rae_buf_drop_at(buf: datas.data, index: i)
       rae_ext_rae_buf_set(buf: datas.data, index: i, value: data)
       ret
     }
