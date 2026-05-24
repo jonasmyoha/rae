@@ -1,19 +1,18 @@
-# Focused reproduction of the parseScene → view-String regression
-# in 413_scene_loader. Mirrors the exact call-chain shape of
-# lib/ui/scene_loader.rae's pass-3 children loop:
+# Strong reproduction of the view-String compound-literal torn-read
+# regression that previously blocked sceneNodeIndex/parseScene/
+# parseJson migration to `view String`. Mirrors scene_loader's
+# pass-3 children loop exactly: Buffer-backed nodes, List<String>
+# childIds per node, repeated view-String calls to a helper inside
+# a loop, with sibling structs of different nodeId lengths.
 #
-#   for parent-node p:
-#     for child-index q in p.childrenIds:
-#       let childId: String = p.childrenIds.get(index: q)
-#       let idx: Int = sceneNodeIndex(scene, view childId)
-#       ... do work with idx ...
+# Pre-fix symptom (compound-literal view-wrap):
+#   the temp's data ptr and length get read from different
+#   compound-literal temps in the same enclosing block. Children
+#   "TopBar" (len 6) gets the data pointer from a sibling's
+#   "PlayBtn" — equals returns false even when the value should
+#   match.
 #
-# The view-String arg is wrapped at the call site as
-# `(rae_View_String){ .ptr = (rae_String[]){childId} }`. When this
-# pattern is exercised in a nested loop with multiple compound-
-# literal call sites per iteration, the temp's data ptr and length
-# fields appear to be read from different temps mid-iteration —
-# torn-read of the rae_String struct.
+# Test asserts EXACT string identity, not just length.
 import core
 import string
 
@@ -22,8 +21,6 @@ type Node {
   childIds: List(String)
 }
 
-# Read-only helper modeled exactly after sceneNodeIndex: iterates
-# all nodes and matches by view String.
 func nodeIndex(nodes: view List(Node), target: view String) ret Int {
   let n: Int = nodes.length
   let i: Int = 0
@@ -38,39 +35,62 @@ func nodeIndex(nodes: view List(Node), target: view String) ret Int {
 }
 
 func main() {
-  let nodes: List(Node) = createList(Node, initialCap: 4)
+  let nodes: List(Node) = createList(Node, initialCap: 8)
 
-  let rootKids: List(String) = createList(String, initialCap: 3)
-  rootKids.add(value: "Alpha")
-  rootKids.add(value: "Beta")
-  rootKids.add(value: "Gamma")
-  nodes.add(value: { nodeId: "Root", childIds: own rootKids })
+  # Build 5 nodes with siblings of different lengths to maximize
+  # chance of torn-read pattern.
+  let rootKids: List(String) = createList(String, initialCap: 4)
+  rootKids.add(value: "TopBar")
+  rootKids.add(value: "AlbumHero")
+  rootKids.add(value: "PlayBtn")
+  nodes.add(value: { nodeId: "AlbumRoot", childIds: own rootKids })
 
-  let alphaKids: List(String) = createList(String, initialCap: 1)
-  alphaKids.add(value: "Delta")
-  nodes.add(value: { nodeId: "Alpha", childIds: own alphaKids })
+  let topKids: List(String) = createList(String, initialCap: 1)
+  topKids.add(value: "BackBtn")
+  nodes.add(value: { nodeId: "TopBar", childIds: own topKids })
 
-  let emptyKidsB: List(String) = createList(String, initialCap: 0)
-  nodes.add(value: { nodeId: "Beta", childIds: own emptyKidsB })
+  let backKids: List(String) = createList(String, initialCap: 0)
+  nodes.add(value: { nodeId: "BackBtn", childIds: own backKids })
 
-  let emptyKidsG: List(String) = createList(String, initialCap: 0)
-  nodes.add(value: { nodeId: "Gamma", childIds: own emptyKidsG })
+  let heroKids: List(String) = createList(String, initialCap: 0)
+  nodes.add(value: { nodeId: "AlbumHero", childIds: own heroKids })
 
-  let emptyKidsD: List(String) = createList(String, initialCap: 0)
-  nodes.add(value: { nodeId: "Delta", childIds: own emptyKidsD })
+  let playKids: List(String) = createList(String, initialCap: 0)
+  nodes.add(value: { nodeId: "PlayBtn", childIds: own playKids })
 
-  # Pass: for each parent, look up its children via view-String.
-  # Mirrors scene_loader's pass-3 loop.
+  # Build a parallel map of nodeId → index, mirroring world.nodeIds.
+  let map: StringMap(Int) = createStringMap(Int, initialCap: 16)
+  let s: Int = 0
+  loop s < nodes.length {
+    let nd: Node = rae_ext_rae_buf_get(buf: nodes.data, index: s)
+    map.set(k: nd.nodeId, value: s)
+    s = s + 1
+  }
+
+  # Pass mirroring scene_loader pass 3 EXACTLY: nested loop, view-
+  # String helper, componentSet-like side effect, all in the same
+  # enclosing block.
   let p: Int = 0
   loop p < nodes.length {
     let parent: Node = rae_ext_rae_buf_get(buf: nodes.data, index: p)
     let kn: Int = parent.childIds.length
-    let q: Int = 0
-    loop q < kn {
-      let childId: String = parent.childIds.get(index: q)
-      let idx: Int = nodeIndex(nodes: nodes, target: childId)
-      log("parent={parent.nodeId} child={childId} idx={idx}")
-      q = q + 1
+    if kn > 0 {
+      let kidsAssembly: List(Int) = createList(Int, initialCap: kn)
+      let q: Int = 0
+      loop q < kn {
+        let childId: String = parent.childIds.get(index: q)
+        # Two view-String calls per iter, mirroring the multiple-wrap
+        # pattern (nodeIndex + map.get).
+        let idx: Int = nodeIndex(nodes: nodes, target: childId)
+        let entityOpt: opt Int = map.get(k: childId)
+        let entityVal: Int = -1
+        if entityOpt is not none {
+          entityVal = entityOpt
+        }
+        log("parent={parent.nodeId} child=[{childId}] childLen={childId.length()} nodeIndex={idx} mapEntity={entityVal}")
+        kidsAssembly.add(value: idx)
+        q = q + 1
+      }
     }
     p = p + 1
   }

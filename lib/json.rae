@@ -660,10 +660,7 @@ func parseValue(
 # Parse a UTF-8 / ASCII JSON document. On error returns a doc with
 # `ok = false` and `errorPos` pointing at the first byte the parser
 # couldn't consume.
-# parseJson: `source` stays bare String — same documented exempt
-# regression class as lib/ui/scene.rae's parseScene / sceneNodeIndex.
-# Migrating to view triggers 413_scene_loader torn-read.
-func parseJson(source: String) ret JsonDoc {
+func parseJson(source: view String) ret JsonDoc {
   let doc: JsonDoc = {
     values: createList(JsonValue, initialCap: 8)
     children: createList(Int, initialCap: 8)
