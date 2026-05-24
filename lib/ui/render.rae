@@ -212,7 +212,7 @@ func paintSprite(reg: view TextureRegistry, world: view UiWorld, entity: Int, wt
 # Resolve a Text node's font size / colour from its style id. Phase 1e
 # uses a small built-in stylesheet for the music player; once Phase
 # 1f's `Style` component lands, this routes through that table instead.
-func textStyleSize(styleId: String) ret Float {
+func textStyleSize(styleId: view String) ret Float {
   let h1: String = "h1"
   let h2: String = "h2"
   let body: String = "body"
@@ -265,7 +265,7 @@ func textStyleSize(styleId: String) ret Float {
   ret 20.0
 }
 
-func textStyleColor(styleId: String, chain255: Int) ret Color {
+func textStyleColor(styleId: view String, chain255: Int) ret Color {
   # Map each authored style id to the theme palette so light <->
   # dark flips on text are automatic. The label "on surfaceAlt"
   # below means the panel underneath this text is the surfaceAlt
@@ -339,7 +339,7 @@ func textStyleColor(styleId: String, chain255: Int) ret Color {
 # already places the rect itself; the explicit-center styles below are
 # for cases where the rect is wider than the text (e.g. tab labels
 # that share a fixed-width container with a centred icon above).
-func textStyleIsCentered(styleId: String) ret Bool {
+func textStyleIsCentered(styleId: view String) ret Bool {
   let tabActive: String = "tabActive"
   if styleId.equals(other: tabActive) {
     ret true

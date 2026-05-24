@@ -79,7 +79,7 @@ func registeredComponentNames() ret List(String) {
   ret names
 }
 
-func isKnownComponent(name: String) ret Bool {
+func isKnownComponent(name: view String) ret Bool {
   let known: List(String) = registeredComponentNames()
   let n: Int = known.length
   let i: Int = 0
@@ -101,7 +101,7 @@ func registeredComponentCount() ret Int {
 # Helpers — JSON value extraction with sensible defaults
 # -----------------------------------------------------------------
 
-func optFloat(doc: view JsonDoc, container: view JsonValue, key: String, fallback: Float) ret Float {
+func optFloat(doc: view JsonDoc, container: view JsonValue, key: view String, fallback: Float) ret Float {
   let idx: Int = jsonField(doc: doc, this: container, key: key)
   if idx < 0 {
     ret fallback
@@ -110,7 +110,7 @@ func optFloat(doc: view JsonDoc, container: view JsonValue, key: String, fallbac
   ret jsonFloat(this: v, fallback: fallback)
 }
 
-func optInt(doc: view JsonDoc, container: view JsonValue, key: String, fallback: Int) ret Int {
+func optInt(doc: view JsonDoc, container: view JsonValue, key: view String, fallback: Int) ret Int {
   let idx: Int = jsonField(doc: doc, this: container, key: key)
   if idx < 0 {
     ret fallback
@@ -119,7 +119,7 @@ func optInt(doc: view JsonDoc, container: view JsonValue, key: String, fallback:
   ret jsonInt(this: v, fallback: fallback)
 }
 
-func optString(doc: view JsonDoc, container: view JsonValue, key: String, fallback: view String) ret String {
+func optString(doc: view JsonDoc, container: view JsonValue, key: view String, fallback: view String) ret String {
   # Always return an independently-owned String (see jsonString
   # for the why) so callers can hand the result to a struct field
   # and rely on cascade drop to free it.
@@ -131,7 +131,7 @@ func optString(doc: view JsonDoc, container: view JsonValue, key: String, fallba
   ret jsonString(this: v, fallback: fallback)
 }
 
-func optBool(doc: view JsonDoc, container: view JsonValue, key: String, fallback: Bool) ret Bool {
+func optBool(doc: view JsonDoc, container: view JsonValue, key: view String, fallback: Bool) ret Bool {
   let idx: Int = jsonField(doc: doc, this: container, key: key)
   if idx < 0 {
     ret fallback
@@ -149,7 +149,7 @@ func optBool(doc: view JsonDoc, container: view JsonValue, key: String, fallback
 # Live-VM corner.
 # -----------------------------------------------------------------
 
-func parseSizeMode(s: String) ret SizeMode {
+func parseSizeMode(s: view String) ret SizeMode {
   let hugStr: String = "Hug"
   let fillStr: String = "Fill"
   if s.equals(other: hugStr) {
@@ -161,7 +161,7 @@ func parseSizeMode(s: String) ret SizeMode {
   ret SizeMode.Fixed
 }
 
-func parseLayoutType(s: String) ret LayoutType {
+func parseLayoutType(s: view String) ret LayoutType {
   let h: String = "Horizontal"
   let v: String = "Vertical"
   let g: String = "Grid"
@@ -181,7 +181,7 @@ func parseLayoutType(s: String) ret LayoutType {
   ret LayoutType.None
 }
 
-func parseAlignKind(s: String) ret AlignKind {
+func parseAlignKind(s: view String) ret AlignKind {
   let c: String = "Center"
   let e: String = "End"
   let sb: String = "SpaceBetween"
@@ -201,7 +201,7 @@ func parseAlignKind(s: String) ret AlignKind {
   ret AlignKind.Start
 }
 
-func parseShapeKind(s: String) ret ShapeKind {
+func parseShapeKind(s: view String) ret ShapeKind {
   let rr: String = "RoundedRect"
   let c: String = "Circle"
   if s.equals(other: rr) {
@@ -213,7 +213,7 @@ func parseShapeKind(s: String) ret ShapeKind {
   ret ShapeKind.Rect
 }
 
-func parseScaleMode(s: String) ret ScaleMode {
+func parseScaleMode(s: view String) ret ScaleMode {
   let fi: String = "Fill"
   let st: String = "Stretch"
   if s.equals(other: fi) {
@@ -225,7 +225,7 @@ func parseScaleMode(s: String) ret ScaleMode {
   ret ScaleMode.Fit
 }
 
-func parseWrapWidthMode(s: String) ret WrapWidthMode {
+func parseWrapWidthMode(s: view String) ret WrapWidthMode {
   let nw: String = "NodeWidth"
   if s.equals(other: nw) {
     ret WrapWidthMode.NodeWidth
@@ -233,7 +233,7 @@ func parseWrapWidthMode(s: String) ret WrapWidthMode {
   ret WrapWidthMode.None
 }
 
-func parseHitAreaKind(s: String) ret HitAreaKind {
+func parseHitAreaKind(s: view String) ret HitAreaKind {
   let rr: String = "RoundedRect"
   if s.equals(other: rr) {
     ret HitAreaKind.RoundedRect
@@ -241,7 +241,7 @@ func parseHitAreaKind(s: String) ret HitAreaKind {
   ret HitAreaKind.Rect
 }
 
-func parseMaskKind(s: String) ret MaskKind {
+func parseMaskKind(s: view String) ret MaskKind {
   let rr: String = "RoundedRect"
   if s.equals(other: rr) {
     ret MaskKind.RoundedRect
@@ -249,7 +249,7 @@ func parseMaskKind(s: String) ret MaskKind {
   ret MaskKind.Circle
 }
 
-func parseResolverMode(s: String) ret ResolverMode {
+func parseResolverMode(s: view String) ret ResolverMode {
   let r: String = "Random"
   let h: String = "Hash"
   let d: String = "Direct"
@@ -265,7 +265,7 @@ func parseResolverMode(s: String) ret ResolverMode {
   ret ResolverMode.Fixed
 }
 
-func parseTextFormat(s: String) ret TextFormat {
+func parseTextFormat(s: view String) ret TextFormat {
   let n: String = "Number"
   let p: String = "Percent1"
   let c: String = "Coins"

@@ -44,7 +44,7 @@ func fromCStr(s: view Buffer(Any)) ret String {
     ret rae_ext_rae_str_from_cstr(s: s)
 }
 
-func toCStr(this: String) ret Buffer(Any) {
+func toCStr(this: view String) ret Buffer(Any) {
     ret rae_ext_rae_str_to_cstr(s: this)
 }
 
@@ -103,7 +103,7 @@ func trim(this: view String) ret String {
   ret rae_str_trim(s: this)
 }
 
-func split(this: String, sep: String) ret List(String) {
+func split(this: view String, sep: view String) ret List(String) {
   let result: List(String) = createList(String, initialCap: 4)
   if sep.length() is 0 {
     add(result, value: this)
@@ -126,7 +126,7 @@ func split(this: String, sep: String) ret List(String) {
   ret result
 }
 
-func replace(this: String, old: String, new: String) ret String {
+func replace(this: view String, old: view String, new: view String) ret String {
   if old.length() is 0 {
     ret this
   }
@@ -134,7 +134,7 @@ func replace(this: String, old: String, new: String) ret String {
   ret parts.join(sep: new)
 }
 
-func join(this: view List(String), sep: String) ret String {
+func join(this: view List(String), sep: view String) ret String {
   if this.length is 0 {
     ret ""
   }
