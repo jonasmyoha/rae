@@ -648,11 +648,14 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 if (needs_addr) fprintf(out, "&");
                 if (needs_deref) fprintf(out, "(*");
                 if (wrap_pool_take_arg) fprintf(out, "rae_string_pool_take(");
+                // When we wrap with `(*...)` ourselves, suppress the
+                // IDENT-level struct-view auto-deref to avoid `(*(*x))`.
+                bool emit_suppress_deref = pass_view_through || needs_deref;
                 if (needs_box) {
                     const AstTypeRef* arg_tr2 = infer_expr_type_ref(ctx, a->value);
                     bool is_prim_ref = arg_tr2 && (arg_tr2->is_view || arg_tr2->is_mod) && is_primitive_type(get_base_type_name(arg_tr2));
                     fprintf(out, "rae_any(("); emit_expr(ctx, a->value, out, PREC_LOWEST, false, is_prim_ref); fprintf(out, "))");
-                } else emit_expr(ctx, a->value, out, PREC_LOWEST, false, pass_view_through);
+                } else emit_expr(ctx, a->value, out, PREC_LOWEST, false, emit_suppress_deref);
                 if (wrap_pool_take_arg) fprintf(out, ")");
                 if (needs_deref) fprintf(out, ")");
                 if (needs_prim_wrap) fprintf(out, "} }");
