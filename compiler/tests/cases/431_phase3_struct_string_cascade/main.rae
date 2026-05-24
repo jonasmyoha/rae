@@ -24,7 +24,7 @@ type Owned {
 # Builds a fresh owned struct via struct literal. Phase 2 deep-copies
 # the bare-ident RHS, Phase 3's full cascade then frees both copies
 # at end of scope.
-func buildOwned(srcA: String, srcB: String) ret Owned {
+func buildOwned(srcA: own String, srcB: own String) ret Owned {
   ret Owned {
     a: srcA
     b: srcB
@@ -50,7 +50,7 @@ func iterOwned() {
 # Builds an Owned, passes it to a function that consumes ownership
 # via plain-T parameter, and confirms move-tracking skips the auto-
 # drop on the caller side (no double-free with the buf-stored copy).
-func consumeOwned(p: Owned) {
+func consumeOwned(p: own Owned) {
   if p.a.length() < 0 {
     log("never")
   }

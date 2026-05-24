@@ -167,6 +167,10 @@ void pop_defers(CFuncContext* ctx, int depth);
 // must be skipped.
 bool emit_implicit_drops_for_body(CFuncContext* ctx, FILE* out,
                                   size_t first_let_index);
+// Stage C: emit cascade drops for `own T` parameters in [0, first_let_index).
+// Move-tracking skips drops for params that were returned or transferred.
+bool emit_implicit_drops_for_own_params(CFuncContext* ctx, FILE* out,
+                                        size_t first_let_index);
 // Predicate used by both the emit pass and the discovery pass.
 bool is_drop_target_type(const AstTypeRef* type);
 // Find the `drop` overload whose receiver-base matches `container_base`.
