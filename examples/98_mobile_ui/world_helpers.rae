@@ -119,21 +119,21 @@ func setPaddingAll(world: mod UiWorld, entity: Int, n: Float) pub {
 }
 
 func attachChildren(world: mod UiWorld, parent: Int, kids: view List(Int)) pub {
-  let copy: List(Int) = createList(Int, initialCap: kids.length)
+  let kidsCopy: List(Int) = createList(Int, initialCap: kids.length)
   let i: Int = 0
   loop i < kids.length {
     let kid: Int = kids.get(index: i)
-    copy.add(value: kid)
+    kidsCopy.add(value: kid)
     let pl: ParentLink = { parent: parent }
     componentSet(this: world.parentLinks, entity: kid, data: pl)
     i = i + 1
   }
-  # `own copy` transfers ownership of the freshly-built list into
+  # `own kidsCopy` transfers ownership of the freshly-built list into
   # the new Children struct. Without this, Stage 3 auto-drop at
   # scope exit would free the buffer that the world is now holding
   # through `Children.ids`. Same on `own ch` to componentSet, which
   # stores the struct into the world's component table.
   # See `docs/ownership-model.md`.
-  let ch: Children = { ids: own copy }
+  let ch: Children = { ids: own kidsCopy }
   componentSet(this: world.childrens, entity: parent, data: own ch)
 }
