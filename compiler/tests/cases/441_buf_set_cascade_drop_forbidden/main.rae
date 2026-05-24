@@ -1,0 +1,13 @@
+# Verifies that raw rae_ext_rae_buf_set with a cascade-drop element
+# type (String in this case) is rejected at sema time when called
+# from user code. Stdlib (lib/core.rae and friends) is exempt
+# because it pairs each raw set with rae_ext_rae_buf_drop_at when
+# the slot may already be initialised, or knows the slot is
+# fresh — user code can't be trusted with that contract.
+import core
+
+func main() {
+  let buf: Buffer(String) = rae_ext_rae_buf_alloc(size: 4, elemSize: sizeof(String))
+  let s: String = "hello"
+  rae_ext_rae_buf_set(buf: buf, index: 0, value: s)
+}
