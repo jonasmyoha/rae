@@ -228,9 +228,22 @@ for TARGET in "${TARGETS[@]}"; do
     fi
 
     if [ $SKIP_EXEC -eq 0 ]; then
+        # Leak-class tests (43[1-9]_*) opt into RAE_MEM_STATS=1 so the
+        # mem_stats_outstanding native returns real counts. Without
+        # this the native is a 0-stub in Live mode (and reads zero in
+        # Compiled mode too since RAE_MEM_STATS gates the side-hash),
+        # so leak regressions silently pass. The atexit dump lines
+        # are filtered out before stdout comparison so the expected.txt
+        # stays simple.
+        ENABLE_MEM_STATS=0
+        case "$TEST_NAME" in
+            43[1-9]_*) ENABLE_MEM_STATS=1 ;;
+        esac
         # For parse/lex/format, we want to capture both stdout and stderr to see errors + any partial results
         if [[ "${CMD_ARGS[0]}" =~ ^(parse|lex|format)$ ]]; then
             CMD_STDOUT=$("$BIN" "${CMD_RUN_ARGS[@]}" 2>&1 || true)
+        elif [ $ENABLE_MEM_STATS -eq 1 ]; then
+            CMD_STDOUT=$(RAE_MEM_STATS=1 "$BIN" "${CMD_RUN_ARGS[@]}" 2>&1 | grep -Ev '^\[rae (vm )?mem-stats\]|^  \[(mem|vm):' || true)
         else
             CMD_STDOUT=$("$BIN" "${CMD_RUN_ARGS[@]}" 2>&1 || true)
         fi
