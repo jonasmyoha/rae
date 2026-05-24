@@ -905,7 +905,14 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                         // (including a specialization of a stdlib generic).
                         if (str_eq_cstr(name, "rae_ext_rae_buf_set")) {
                             const char* origin = s_current_decl_origin;
-                            bool in_stdlib = origin && strstr(origin, "/lib/") != NULL;
+                            // Match both absolute paths ("/.../lib/...") and
+                            // relative paths starting with "lib/". The latter
+                            // is what shows up when the compiler is launched
+                            // from the project root by build tooling rather
+                            // than via realpath.
+                            bool in_stdlib = origin && (
+                                strstr(origin, "/lib/") != NULL
+                                || strncmp(origin, "lib/", 4) == 0);
                             if (!in_stdlib) {
                                 AstParam* vp = resolved->as.func_decl.params;
                                 if (vp) vp = vp->next;
