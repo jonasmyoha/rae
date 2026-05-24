@@ -993,6 +993,20 @@ static bool native_rae_ext_rae_buf_drop_at(struct VM* vm, VmNativeResult* out_re
   return true;
 }
 
+// Mem-stats outstanding count — VM stub. mem-stats is a C-backend-
+// only diagnostic; the bytecode VM has its own managed Values. This
+// native exists so leak-regression tests that call
+// `rae_ext_rae_mem_stats_outstanding` link in Live mode, but the
+// returned count is always 0 (the VM doesn't track per-site String
+// allocations). Tests should treat 0 as "no leak detectable in
+// Live mode" and skip the leak assertion under that target.
+static bool native_rae_ext_rae_mem_stats_outstanding(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
+  (void)vm; (void)args; (void)arg_count; (void)user_data;
+  out_result->has_value = true;
+  out_result->value = value_int(0);
+  return true;
+}
+
 static bool native_rae_ext_rae_buf_get(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
   (void)vm; (void)user_data;
   const Value* buf_val = deref_value(&args[0]);
@@ -1124,6 +1138,7 @@ bool register_default_natives(VmRegistry* registry, TickCounter* tick_counter) {
   ok = vm_registry_register_native(registry, "rae_ext_rae_buf_set", native_rae_ext_rae_buf_set, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_ext_rae_buf_get", native_rae_ext_rae_buf_get, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_ext_rae_buf_drop_at", native_rae_ext_rae_buf_drop_at, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_ext_rae_mem_stats_outstanding", native_rae_ext_rae_mem_stats_outstanding, NULL) && ok;
 
   ok = vm_registry_register_native(registry, "sin", native_rae_math_sin, NULL) && ok;
   ok = vm_registry_register_native(registry, "cos", native_rae_math_cos, NULL) && ok;

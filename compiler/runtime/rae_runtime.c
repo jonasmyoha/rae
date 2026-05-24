@@ -337,6 +337,21 @@ void rae_ext_rae_mem_stats_dump(void) {
   rae_mem_stats_print();
 }
 
+/* Returns the total outstanding String allocation count (alloc -
+ * free) across all sites. Lets leak-regression tests measure exact
+ * heap state instead of indirect RSS, which is noisy when the
+ * mem-stats side-hash table is itself allocated. Returns 0 when
+ * mem-stats is disabled. */
+int64_t rae_ext_rae_mem_stats_outstanding(void) {
+  if (!g_mem_stats_enabled) return 0;
+  int64_t total = 0;
+  for (int i = 0; i < RAE_SITE__COUNT; i++) {
+    if (i == RAE_SITE_UNKNOWN) continue;
+    total += g_mem_site_alloc_n[i] - g_mem_site_free_n[i];
+  }
+  return total;
+}
+
 /* Internal helpers: allocate a String body with a known call-site
  * tag. The toString helpers (str_i64/str_f64/str_bool/str_char) use
  * these so their allocations don't all get bucketed under "from_buf"
