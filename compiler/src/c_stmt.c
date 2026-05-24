@@ -235,6 +235,136 @@ bool rae_func_returns_alias(CompilerContext* cctx, const AstFuncDecl* fd) {
   return func_returns_alias_v(cctx, fd, &v);
 }
 
+// Count identifier references to `name` in an expression subtree.
+// Used by Phase 2 deep-copy to decide whether a parameter source can
+// be moved into a struct field (count==1, this is the only use) or
+// must be deep-copied (count>=2, the param is read again later).
+static int count_ident_refs_expr(const AstExpr* e, Str name);
+static int count_ident_refs_stmt(const AstStmt* s, Str name);
+static int count_ident_refs_block(const AstBlock* b, Str name) {
+  if (!b) return 0;
+  int total = 0;
+  for (const AstStmt* s = b->first; s; s = s->next) {
+    total += count_ident_refs_stmt(s, name);
+  }
+  return total;
+}
+static int count_ident_refs_args(const AstCallArg* a, Str name) {
+  int total = 0;
+  for (; a; a = a->next) total += count_ident_refs_expr(a->value, name);
+  return total;
+}
+static int count_ident_refs_expr(const AstExpr* e, Str name) {
+  if (!e) return 0;
+  switch (e->kind) {
+    case AST_EXPR_IDENT:
+      return str_eq(e->as.ident, name) ? 1 : 0;
+    case AST_EXPR_BINARY:
+      return count_ident_refs_expr(e->as.binary.lhs, name) +
+             count_ident_refs_expr(e->as.binary.rhs, name);
+    case AST_EXPR_UNARY:
+      return count_ident_refs_expr(e->as.unary.operand, name);
+    case AST_EXPR_CALL:
+      return count_ident_refs_expr(e->as.call.callee, name) +
+             count_ident_refs_args(e->as.call.args, name);
+    case AST_EXPR_METHOD_CALL:
+      return count_ident_refs_expr(e->as.method_call.object, name) +
+             count_ident_refs_args(e->as.method_call.args, name);
+    case AST_EXPR_MEMBER:
+      return count_ident_refs_expr(e->as.member.object, name);
+    case AST_EXPR_OBJECT: {
+      int total = 0;
+      for (const AstObjectField* f = e->as.object_literal.fields; f; f = f->next) {
+        total += count_ident_refs_expr(f->value, name);
+      }
+      return total;
+    }
+    case AST_EXPR_LIST: {
+      int total = 0;
+      for (const AstExprList* l = e->as.list; l; l = l->next) {
+        total += count_ident_refs_expr(l->value, name);
+      }
+      return total;
+    }
+    case AST_EXPR_INDEX:
+      return count_ident_refs_expr(e->as.index.target, name) +
+             count_ident_refs_expr(e->as.index.index, name);
+    case AST_EXPR_COLLECTION_LITERAL: {
+      int total = 0;
+      for (const AstCollectionElement* el = e->as.collection.elements; el; el = el->next) {
+        total += count_ident_refs_expr(el->value, name);
+      }
+      return total;
+    }
+    case AST_EXPR_INTERP: {
+      int total = 0;
+      for (const AstInterpPart* p = e->as.interp.parts; p; p = p->next) {
+        total += count_ident_refs_expr(p->value, name);
+      }
+      return total;
+    }
+    case AST_EXPR_MATCH: {
+      int total = count_ident_refs_expr(e->as.match_expr.subject, name);
+      for (const AstMatchArm* a = e->as.match_expr.arms; a; a = a->next) {
+        total += count_ident_refs_expr(a->pattern, name);
+        total += count_ident_refs_expr(a->value, name);
+      }
+      return total;
+    }
+    case AST_EXPR_BOX:
+    case AST_EXPR_UNBOX:
+    case AST_EXPR_OWN:
+      return count_ident_refs_expr(e->as.unary.operand, name);
+    default:
+      return 0;
+  }
+}
+static int count_ident_refs_stmt(const AstStmt* s, Str name) {
+  if (!s) return 0;
+  switch (s->kind) {
+    case AST_STMT_LET:
+      return count_ident_refs_expr(s->as.let_stmt.value, name);
+    case AST_STMT_DESTRUCT:
+      return count_ident_refs_expr(s->as.destruct_stmt.call, name);
+    case AST_STMT_EXPR:
+      return count_ident_refs_expr(s->as.expr_stmt, name);
+    case AST_STMT_RET: {
+      int total = 0;
+      for (const AstReturnArg* r = s->as.ret_stmt.values; r; r = r->next) {
+        total += count_ident_refs_expr(r->value, name);
+      }
+      return total;
+    }
+    case AST_STMT_IF:
+      return count_ident_refs_expr(s->as.if_stmt.condition, name) +
+             count_ident_refs_block(s->as.if_stmt.then_block, name) +
+             count_ident_refs_block(s->as.if_stmt.else_block, name);
+    case AST_STMT_LOOP:
+      return count_ident_refs_stmt(s->as.loop_stmt.init, name) +
+             count_ident_refs_expr(s->as.loop_stmt.condition, name) +
+             count_ident_refs_expr(s->as.loop_stmt.increment, name) +
+             count_ident_refs_block(s->as.loop_stmt.body, name);
+    case AST_STMT_MATCH: {
+      int total = count_ident_refs_expr(s->as.match_stmt.subject, name);
+      for (const AstMatchCase* c = s->as.match_stmt.cases; c; c = c->next) {
+        total += count_ident_refs_expr(c->pattern, name);
+        total += count_ident_refs_block(c->block, name);
+      }
+      return total;
+    }
+    case AST_STMT_ASSIGN:
+      return count_ident_refs_expr(s->as.assign_stmt.target, name) +
+             count_ident_refs_expr(s->as.assign_stmt.value, name);
+    case AST_STMT_DEFER:
+      return count_ident_refs_block(s->as.defer_stmt.block, name);
+  }
+  return 0;
+}
+int rae_func_count_param_refs(const AstFuncDecl* fd, Str name) {
+  if (!fd || !fd->body) return 0;
+  return count_ident_refs_block(fd->body, name);
+}
+
 // Emit `drop(local);` calls for every heap-owning binding declared
 // from `first_let_index` (inclusive) onward. Anything before
 // `first_let_index` is a function parameter — those are owned by the
