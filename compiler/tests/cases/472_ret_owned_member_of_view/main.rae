@@ -1,0 +1,28 @@
+# Stage 4: returning a `member access` on a `view` receiver must
+# deep-copy at the return site. `ret h.items` where `h: view Holder`
+# would otherwise shallow-alias the caller's `b` to the same buffer
+# as the original `xs` (via the Holder), causing a triple-owner
+# situation and a double-free at scope end.
+#
+# After Stage 4: `b` is an independent buffer. Mutating `b` doesn't
+# affect `xs` or `h.items`, and dropping all three at scope end is
+# safe.
+import core
+import sys
+
+type Holder { items: List(Int) }
+
+func first(h: view Holder) ret List(Int) { ret h.items }
+
+func main() {
+  let xs: List(Int) = createList(Int, initialCap: 4)
+  xs.add(value: 1)
+  xs.add(value: 2)
+  let h: Holder = { items: xs }
+  let b: List(Int) = first(h: h)
+  b.add(value: 99)
+  log("xs.length = {xs.length}")
+  log("h.items.length = {h.items.length}")
+  log("b.length = {b.length}")
+  log("b[2] = {b.get(index: 2)}")
+}

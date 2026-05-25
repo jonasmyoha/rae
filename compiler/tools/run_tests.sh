@@ -118,12 +118,16 @@ for TARGET in "${TARGETS[@]}"; do
         esac
     fi
     # Live mode does not yet implement `copy T` parameter deep-copy
-    # semantics (Stage 3 wired only the compiled backend). Tests 460+
-    # assert post-call buffer independence which the live VM cannot
-    # honour today; gate them to the compiled target for now.
+    # (Stage 3) or owning-return deep-copy (Stage 4) semantics — these
+    # are wired only in the compiled backend. Tests 460-464 (copy T
+    # param) and 471/474 (Stage 4 return-from-alias-source) assert
+    # buffer independence that the live VM cannot honour today; gate
+    # them to the compiled target for now. (470, 472, 473, 475 work
+    # in Live too because their semantics happen to match the VM's
+    # implicit deep-copy-on-store behaviour for those shapes.)
     if [ "$TARGET" = "live" ] && [ -z "$TEST_NAME_FILTER" ]; then
         case "$TEST_NAME" in
-            460_*|461_*|462_*|463_*|464_*)
+            460_*|461_*|462_*|463_*|464_*|471_*|474_*)
                 RUN_THIS=0 ;;
         esac
     fi
