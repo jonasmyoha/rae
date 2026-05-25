@@ -1,0 +1,23 @@
+# Stage 3: `copy List(String)` parameter mode must deep-copy
+# recursively — both the backing buffer AND each String element.
+# Otherwise the callee's drop frees the caller's heap-owned String
+# data.
+import core
+import string
+import sys
+
+func tagAndCount(names: copy List(String)) ret Int {
+  names.add(value: "callee-tag")
+  ret names.length
+}
+
+func main() {
+  let names: List(String) = createList(String, initialCap: 4)
+  names.add(value: "alice")
+  names.add(value: "bob")
+  let n: Int = tagAndCount(names: names)
+  log("callee saw n = {n}")
+  log("caller names.length = {names.length}")
+  log("caller names[0] = {names.get(index: 0)}")
+  log("caller names[1] = {names.get(index: 1)}")
+}

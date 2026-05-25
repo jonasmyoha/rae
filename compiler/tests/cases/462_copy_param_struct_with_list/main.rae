@@ -1,0 +1,25 @@
+# Stage 3: `copy Bag` where Bag is a user struct with a List field
+# must recursively deep-copy the struct AND its List buffer.
+import core
+import sys
+
+type Bag {
+  name: String
+  items: List(Int)
+}
+
+func swell(b: copy Bag) ret Int {
+  b.items.add(value: 99)
+  ret b.items.length
+}
+
+func main() {
+  let inner: List(Int) = createList(Int, initialCap: 4)
+  inner.add(value: 1)
+  inner.add(value: 2)
+  let bag: Bag = { name: "satchel", items: inner }
+  let n: Int = swell(b: bag)
+  log("callee saw items.length = {n}")
+  log("caller bag.items.length = {bag.items.length}")
+  log("caller bag.items[0] = {bag.items.get(index: 0)}")
+}
