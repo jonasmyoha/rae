@@ -4,21 +4,23 @@ type Large {
   c: Int
 }
 
-func modifyVal(l: val Large) {
-  l.a = 999
-  log("inside modifyVal l.a: {l.a}")
+# `copy T` (the modern replacement for the deprecated `val T`)
+# gives the callee an independent deep-copy of the value.
+func modifyCopy(l: copy Large) {
+  log("inside modifyCopy l.a: {l.a}")
 }
 
-func modifyDefault(l: Large) {
-  # l.a = 888 # ERROR: view by default
-  log("inside modifyDefault l.a: {l.a}")
+# Explicit view borrow — the original Large stays alive in the caller.
+func modifyView(l: view Large) {
+  # l.a = 888 # ERROR: view is read-only
+  log("inside modifyView l.a: {l.a}")
 }
 
 func main() {
   let l: Large = { a: 1, b: 2, c: 3 }
-  log("before modifyVal l.a: {l.a}")
-  modifyVal(l)
-  log("after modifyVal l.a: {l.a}")
-  
-  modifyDefault(l)
+  log("before modifyCopy l.a: {l.a}")
+  modifyCopy(l)
+  log("after modifyCopy l.a: {l.a}")
+
+  modifyView(l)
 }
