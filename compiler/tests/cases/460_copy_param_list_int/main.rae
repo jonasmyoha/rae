@@ -1,0 +1,26 @@
+# Stage 3 (Stage A of copy-T enforcement): `copy List(Int)` parameter
+# mode must trigger a deep copy at the call site so the callee gets
+# its own independent buffer.
+#
+# Before this wiring, passing a List into a `copy List(Int)` parameter
+# shallow-aliased the caller's buffer. A mutation in the callee was
+# visible in the caller, and scope-exit dropped the buffer twice
+# (caller + callee), producing a double-free.
+import core
+import sys
+
+func mutateLocally(items: copy List(Int)) {
+  items.add(value: 99)
+  log("callee items.length = {items.length}")
+}
+
+func main() {
+  let xs: List(Int) = createList(Int, initialCap: 4)
+  xs.add(value: 1)
+  xs.add(value: 2)
+  xs.add(value: 3)
+  mutateLocally(items: xs)
+  log("caller xs.length = {xs.length}")
+  log("caller xs[0] = {xs.get(index: 0)}")
+  log("caller xs[2] = {xs.get(index: 2)}")
+}

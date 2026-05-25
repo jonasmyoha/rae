@@ -443,7 +443,9 @@ bool emit_implicit_drops_for_own_params(CFuncContext* ctx, FILE* out,
     size_t idx = i - 1;
     const AstTypeRef* type = ctx->local_type_refs[idx];
     if (!type) continue;
-    if (!type->is_own) continue;
+    // Stage C drops `own T` params; Stage 3 also drops `copy T`
+    // params — the callee owns the deep copy the caller paid for.
+    if (!(type->is_own || type->is_copy)) continue;
     if (ctx->local_moved[idx]) continue;
     if (!type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, type, 0)) {
       continue;

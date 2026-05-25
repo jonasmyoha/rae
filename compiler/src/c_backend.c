@@ -769,7 +769,11 @@ bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* 
           // is responsible for end-of-scope cascade drop. Mark the
           // slot as uniquely owning so emit_implicit_drops_for_params
           // picks the full (non-alias) drop variant.
-          if (p->type && p->type->is_own) {
+          //
+          // Stage 3 (`copy T`): callee gets a fresh deep copy paid for
+          // at the call site. It owns the heap and must drop at scope
+          // end, same as `own T`.
+          if (p->type && (p->type->is_own || p->type->is_copy)) {
               tctx.local_struct_owns_heap[tctx.local_count] = true;
           }
           tctx.local_count++;
@@ -844,7 +848,9 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
           tctx.local_type_refs[tctx.local_count] = p->type;
           tctx.local_types[tctx.local_count] = str_from_cstr(rae_mangle_type_specialized(ctx, gp_src, args, p->type));
           // Stage C: `own T` param — callee owns; mark for end-of-scope drop.
-          if (p->type && p->type->is_own) {
+          // Stage 3: `copy T` param — callee owns the deep-copied
+          // value the caller paid for; same drop responsibility.
+          if (p->type && (p->type->is_own || p->type->is_copy)) {
               tctx.local_struct_owns_heap[tctx.local_count] = true;
           }
           tctx.local_count++;

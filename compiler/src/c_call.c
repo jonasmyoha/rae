@@ -7,6 +7,7 @@
 
 #include "c_backend.h"
 #include "c_backend_internal.h"
+#include "diag.h"
 #include "mangler.h"
 #include "sema.h"
 #include "str.h"
@@ -580,7 +581,13 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             // like `nodesList.add(value: n)` get followed by an auto-drop
             // of `n` even though `n`'s heap is now reachable via the list
             // entry; the drop is a double-free.
-            if (p && p->type && !(p->type->is_view || p->type->is_mod) && a->value
+            //
+            // Stage 3 (copy T): `copy T` params do NOT move; the caller
+            // pays for a deep copy below and keeps full ownership of its
+            // local. Skip the move-mark so the caller's end-of-scope
+            // drop still fires.
+            if (p && p->type && !(p->type->is_view || p->type->is_mod)
+                && !p->type->is_copy && a->value
                 && a->value->kind == AST_EXPR_IDENT) {
                 const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, a->value);
                 if (arg_tr && !(arg_tr->is_view || arg_tr->is_mod)
@@ -713,6 +720,90 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     wrap_deep_copy_arg = true;
                 }
             }
+            // === Stage 3: `copy T` parameter deep-copy ===
+            //
+            // The author wrote `copy T` to request: "the callee gets a
+            // private, independent value; the caller keeps its own
+            // unchanged." When the arg is an aliasing expression
+            // (IDENT / MEMBER / INDEX) of a heap-owning type, we
+            // synthesise the copy at the call site:
+            //
+            //   String           → rae_string_copy(arg)
+            //   List(E) / Maps   → statement-expression temp +
+            //                      rae_deep_copy_<MangledT>(&__cpy, &arg)
+            //   user struct      → same statement-expression pattern
+            //                      (only non-generic structs today —
+            //                      generics have no synthesised helper yet)
+            //
+            // Fresh rvalues (CALL / METHOD_CALL / INTERP / BINARY /
+            // OBJECT) skip the wrap: the rvalue already owns a fresh
+            // heap allocation, the callee just takes it. For String
+            // rvalues, the existing `wrap_pool_take_arg` above already
+            // detaches the heap from the per-statement temp pool so the
+            // callee can keep it across the surrounding pool_flush.
+            //
+            // If the param is `copy T` but T has no deep-copy helper we
+            // can call (e.g. generic-instance struct, c_struct), this
+            // is a compile-time error — silently shallow-aliasing is
+            // exactly what `copy T` exists to prevent.
+            int copy_arg_kind = 0; // 0=none, 1=rae_string_copy, 2=rae_deep_copy_<T>
+            if (!wrap_pool_take_arg && !wrap_deep_copy_arg && !use_hoisted_temp
+                && p && p->type && p->type->is_copy
+                && !(p->type->is_view || p->type->is_mod || p->type->is_own)
+                && a->value
+                && (a->value->kind == AST_EXPR_IDENT
+                    || a->value->kind == AST_EXPR_MEMBER
+                    || a->value->kind == AST_EXPR_INDEX)) {
+                // Use the param type as the deep-copy target type so we
+                // honour the user's declared shape even if the arg's
+                // inferred type is slightly different (e.g. a generic
+                // template substitution).
+                AstTypeRef* p_target = p->type;
+                if (fd->generic_params && concrete) {
+                    p_target = substitute_type_ref(ctx->compiler_ctx,
+                        fd->generic_params, concrete, p->type);
+                } else if (fd->specialization_args && fd->generic_template
+                        && fd->generic_template->kind == AST_DECL_FUNC) {
+                    p_target = substitute_type_ref(ctx->compiler_ctx,
+                        fd->generic_template->as.func_decl.generic_params,
+                        fd->specialization_args, p->type);
+                }
+                if (p_target
+                    && type_needs_deep_copy(ctx->compiler_ctx, ctx->module,
+                                            p_target, 0)) {
+                    Str pbase_copy = get_base_type_name(p_target);
+                    if (str_eq_cstr(pbase_copy, "String")) {
+                        copy_arg_kind = 1;
+                    } else {
+                        bool is_container =
+                            str_eq_cstr(pbase_copy, "List") ||
+                            str_eq_cstr(pbase_copy, "StringMap") ||
+                            str_eq_cstr(pbase_copy, "IntMap");
+                        bool is_user_struct = false;
+                        if (!is_container) {
+                            const AstDecl* td = find_type_decl(ctx,
+                                ctx->module, pbase_copy);
+                            is_user_struct = td
+                                && td->kind == AST_DECL_TYPE
+                                && !has_property(td->as.type_decl.properties,
+                                                 "c_struct")
+                                && !td->as.type_decl.generic_params;
+                        }
+                        if (is_container || is_user_struct) {
+                            copy_arg_kind = 2;
+                        } else {
+                            char msg[256];
+                            snprintf(msg, sizeof(msg),
+                                "cannot copy owning argument for parameter of type '%.*s' because deep-copy is not implemented; use 'view T' to borrow or 'own T' to move",
+                                (int)pbase_copy.len, pbase_copy.data);
+                            diag_error(ctx->module ? ctx->module->file_path
+                                                   : "<unknown>",
+                                       (int)expr->line, (int)expr->column,
+                                       msg);
+                        }
+                    }
+                }
+            }
             // C-struct rvalue-to-`view T` arg: `&themeColorByName(...)`
             // is invalid C — `&` of an rvalue. Materialize the value
             // into a GCC statement-expression temp and take its
@@ -749,11 +840,29 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 fprintf(out, " __rae_rvarg = ");
                 emit_expr(ctx, a->value, out, PREC_LOWEST, false, pass_view_through);
                 fprintf(out, "; &__rae_rvarg; }))");
+            } else if (copy_arg_kind == 2) {
+                // `copy T` deep-copy of a container / user struct
+                // aliasing source. Emit a GCC statement-expression
+                // that declares a temp of the param's mangled C type,
+                // calls the synthesised rae_deep_copy_<T> helper, and
+                // evaluates to the temp. The callee receives a fully
+                // independent value and is responsible for end-of-scope
+                // cascade drop (see emit_implicit_drops_for_own_params,
+                // which now also drops `is_copy` param slots).
+                const char* tn_dc = rae_mangle_type_specialized(
+                    ctx->compiler_ctx, ctx->generic_params,
+                    ctx->generic_args, p->type);
+                int tmp_id = ctx->temp_counter++;
+                fprintf(out, "(__extension__ ({ %s __cpy%d; rae_deep_copy_%s(&__cpy%d, &(",
+                        tn_dc, tmp_id, tn_dc, tmp_id);
+                emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
+                fprintf(out, ")); __cpy%d; }))", tmp_id);
             } else {
                 if (needs_addr) fprintf(out, "&");
                 if (needs_deref) fprintf(out, "(*");
                 if (wrap_pool_take_arg) fprintf(out, "rae_string_pool_take(");
                 if (wrap_deep_copy_arg) fprintf(out, "rae_string_copy(");
+                if (copy_arg_kind == 1) fprintf(out, "rae_string_copy(");
                 // When we wrap with `(*...)` ourselves, suppress the
                 // IDENT-level struct-view auto-deref to avoid `(*(*x))`.
                 bool emit_suppress_deref = pass_view_through || needs_deref;
@@ -762,6 +871,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     bool is_prim_ref = arg_tr2 && (arg_tr2->is_view || arg_tr2->is_mod) && is_primitive_type(get_base_type_name(arg_tr2));
                     fprintf(out, "rae_any(("); emit_expr(ctx, a->value, out, PREC_LOWEST, false, is_prim_ref); fprintf(out, "))");
                 } else emit_expr(ctx, a->value, out, PREC_LOWEST, false, emit_suppress_deref);
+                if (copy_arg_kind == 1) fprintf(out, ")");
                 if (wrap_deep_copy_arg) fprintf(out, ")");
                 if (wrap_pool_take_arg) fprintf(out, ")");
                 if (needs_deref) fprintf(out, ")");
