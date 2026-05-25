@@ -11,11 +11,11 @@ func rae_int_to_float(i: Int) extern ret Float
 
 func rae_float_to_int(f: Float) extern ret Int
 
-func toFloat(this: Int) ret Float {
+func toFloat(this: view Int) ret Float {
   ret rae_int_to_float(i: this)
 }
 
-func toInt(this: Float) ret Int {
+func toInt(this: view Float) ret Int {
   ret rae_float_to_int(f: this)
 }
 
@@ -46,7 +46,7 @@ type List(T) {
   capacity: Int
 }
 
-func createList(T)(initialCap: Int) ret List(T) {
+func createList(T)(initialCap: view Int) ret List(T) {
   ret List(T) { data: rae_ext_rae_buf_alloc(size: initialCap, elemSize: sizeof(T)), length: 0, capacity: initialCap }
 }
 
@@ -69,7 +69,7 @@ func grow(T)(this: mod List(T)) {
   this.capacity = newCap
 }
 
-func add(T)(this: mod List(T), value: T) {
+func add(T)(this: mod List(T), value: own T) {
   if this.length is this.capacity {
     grow(this)
   }
@@ -77,21 +77,21 @@ func add(T)(this: mod List(T), value: T) {
   this.length = this.length + 1
 }
 
-func get(T)(this: view List(T), index: Int) ret opt T {
+func get(T)(this: view List(T), index: view Int) ret opt T {
   if index < 0 or index >= this.length {
     ret none
   }
   ret rae_ext_rae_buf_get(buf: this.data, index: index)
 }
 
-func set(T)(this: mod List(T), index: Int, value: T) {
+func set(T)(this: mod List(T), index: view Int, value: own T) {
   if index < 0 or index >= this.length {
     ret
   }
   rae_ext_rae_buf_set(buf: this.data, index: index, value: value)
 }
 
-func insert(T)(this: mod List(T), index: Int, value: T) {
+func insert(T)(this: mod List(T), index: view Int, value: own T) {
   if index < 0 or index > this.length {
     ret
   }
@@ -122,7 +122,7 @@ func pop(T)(this: mod List(T)) ret T {
   ret val
 }
 
-func remove(T)(this: mod List(T), index: Int) {
+func remove(T)(this: mod List(T), index: view Int) {
   if index < 0 or index >= this.length {
     ret
   }
@@ -165,7 +165,7 @@ func drop(T)(this: mod List(T)) {
   this.capacity = 0
 }
 
-func swap(T)(this: mod List(T), i: Int, j: Int) {
+func swap(T)(this: mod List(T), i: view Int, j: view Int) {
   let temp: T = rae_ext_rae_buf_get(buf: this.data, index: i)
   rae_ext_rae_buf_set(buf: this.data, index: i, value: rae_ext_rae_buf_get(buf: this.data, index: j))
   rae_ext_rae_buf_set(buf: this.data, index: j, value: temp)
@@ -229,7 +229,7 @@ func isEmpty(T)(this: view List(T)) ret Bool {
 }
 
 # Linear search for `value`. Works for any T where `is` is defined.
-func contains(T)(this: view List(T), value: T) ret Bool {
+func contains(T)(this: view List(T), value: view T) ret Bool {
   let i: Int = 0
   loop i < this.length {
     let cur: T = rae_ext_rae_buf_get(buf: this.data, index: i)
@@ -242,7 +242,7 @@ func contains(T)(this: view List(T), value: T) ret Bool {
 }
 
 # Returns the first index of `value`, or -1 if not found.
-func indexOf(T)(this: view List(T), value: T) ret Int {
+func indexOf(T)(this: view List(T), value: view T) ret Int {
   let i: Int = 0
   loop i < this.length {
     let cur: T = rae_ext_rae_buf_get(buf: this.data, index: i)
@@ -283,11 +283,11 @@ type StringMap(V) {
   isGrowing: Bool
 }
 
-func createStringMap(V)(initialCap: Int) ret StringMap(V) {
+func createStringMap(V)(initialCap: view Int) ret StringMap(V) {
   ret StringMap(V) { data: rae_ext_rae_buf_alloc(size: initialCap, elemSize: sizeof(StringMapEntry(V))), length: 0, capacity: initialCap, isGrowing: false }
 }
 
-func set(V)(this: mod StringMap(V), k: String, value: V) {
+func set(V)(this: mod StringMap(V), k: view String, value: own V) {
   if this.capacity is 0 {
     this.capacity = 8
     this.data = rae_ext_rae_buf_alloc(size: this.capacity, elemSize: sizeof(StringMapEntry(V)))
@@ -331,7 +331,7 @@ func set(V)(this: mod StringMap(V), k: String, value: V) {
   }
 }
 
-func get(V)(this: view StringMap(V), k: String) ret opt V {
+func get(V)(this: view StringMap(V), k: view String) ret opt V {
   if this.capacity is 0 {
     ret none
   }
@@ -356,7 +356,7 @@ func get(V)(this: view StringMap(V), k: String) ret opt V {
   }
 }
 
-func has(V)(this: view StringMap(V), k: String) ret Bool {
+func has(V)(this: view StringMap(V), k: view String) ret Bool {
   match get(this, k: k) {
     case none {
       ret false
@@ -367,7 +367,7 @@ func has(V)(this: view StringMap(V), k: String) ret Bool {
   }
 }
 
-func remove(V)(this: mod StringMap(V), k: String) {
+func remove(V)(this: mod StringMap(V), k: view String) {
   if this.capacity is 0 {
     ret
   }
@@ -474,15 +474,15 @@ type IntMap(V) {
   isGrowing: Bool
 }
 
-func createInt64Map(V)(initialCap: Int) ret IntMap(V) {
+func createInt64Map(V)(initialCap: view Int) ret IntMap(V) {
   ret IntMap(V) { data: rae_ext_rae_buf_alloc(size: initialCap, elemSize: sizeof(IntMapEntry(V))), length: 0, capacity: initialCap, isGrowing: false }
 }
 
-func createIntMap(V)(initialCap: Int) ret IntMap(V) {
+func createIntMap(V)(initialCap: view Int) ret IntMap(V) {
   ret createInt64Map(V, initialCap: initialCap)
 }
 
-func set(V)(this: mod IntMap(V), k: Int, value: V) {
+func set(V)(this: mod IntMap(V), k: view Int, value: own V) {
   if this.capacity is 0 {
     this.capacity = 8
     this.data = rae_ext_rae_buf_alloc(size: this.capacity, elemSize: sizeof(IntMapEntry(V)))
@@ -512,7 +512,7 @@ func set(V)(this: mod IntMap(V), k: Int, value: V) {
   }
 }
 
-func get(V)(this: view IntMap(V), k: Int) ret opt V {
+func get(V)(this: view IntMap(V), k: view Int) ret opt V {
   if this.capacity is 0 {
     ret none
   }
@@ -537,7 +537,7 @@ func get(V)(this: view IntMap(V), k: Int) ret opt V {
   }
 }
 
-func has(V)(this: view IntMap(V), k: Int) ret Bool {
+func has(V)(this: view IntMap(V), k: view Int) ret Bool {
   if this.capacity is 0 {
     ret false
   }
@@ -562,7 +562,7 @@ func has(V)(this: view IntMap(V), k: Int) ret Bool {
   }
 }
 
-func remove(V)(this: mod IntMap(V), k: Int) {
+func remove(V)(this: mod IntMap(V), k: view Int) {
   if this.capacity is 0 {
     ret
   }

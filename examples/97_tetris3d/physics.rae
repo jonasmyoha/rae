@@ -5,7 +5,7 @@ import raylib
 # Returns 1 if the cell at (x, y) is solid (locked block or out of
 # bounds on the sides / bottom). Above the well (y < 0) is treated as
 # empty so a piece can spawn there.
-func isOccupied(w: view World, x: Int, y: Int) ret Int {
+func isOccupied(w: view World, x: view Int, y: view Int) ret Int {
   if x < 0 or x >= gridWidth or y >= gridHeight {
     ret 1
   }
@@ -18,7 +18,7 @@ func isOccupied(w: view World, x: Int, y: Int) ret Int {
   ret 0
 }
 
-func canMove(w: view World, dx: Int, dy: Int, dr: Int) ret Int {
+func canMove(w: view World, dx: view Int, dy: view Int, dr: view Int) ret Int {
   let cp: view Piece => w.currentPiece
   let newX: Int = cp.x + dx
   let newY: Int = cp.y + dy

@@ -5,7 +5,7 @@ type List2Generic(T) {
   capacity: Int
 }
 
-func createList2Generic(T)(initialCap: Int) ret List2Generic(T) {
+func createList2Generic(T)(initialCap: view Int) ret List2Generic(T) {
   ret List2Generic(T) { data: __buf_alloc(size: initialCap), length: 0, capacity: initialCap }
 }
 
@@ -35,7 +35,7 @@ func add(T)(this: mod List2Generic(T), value: T) {
   this.length = this.length + 1
 }
 
-func get(T)(this: view List2Generic(T), index: Int) ret T {
+func get(T)(this: view List2Generic(T), index: view Int) ret T {
   ret __buf_get(buf: this.data, index: index)
 }
 

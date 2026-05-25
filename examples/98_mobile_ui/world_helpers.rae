@@ -18,7 +18,7 @@ func makeFixed() pub ret Size {
 
 # Set a fixed-size rectangle on `entity` (the common case for
 # code-built UI nodes).
-func setRectFixed(world: mod UiWorld, entity: Int, w: Float, h: Float) pub {
+func setRectFixed(world: mod UiWorld, entity: view Int, w: view Float, h: view Float) pub {
   let r: Rect = { x: 0.0, y: 0.0, w: w, h: h }
   componentSet(this: world.rects, entity: entity, data: r)
   componentSet(this: world.sizes, entity: entity, data: makeFixed())
@@ -41,7 +41,7 @@ func buildVerticalSpacer(world: mod UiWorld) pub ret Int {
   ret s
 }
 
-func setOnClick(world: mod UiWorld, entity: Int, actionId: own String) pub {
+func setOnClick(world: mod UiWorld, entity: view Int, actionId: own String) pub {
   let click: OnClick = {
     actionId: actionId
     actionIdDouble: ""
@@ -51,7 +51,7 @@ func setOnClick(world: mod UiWorld, entity: Int, actionId: own String) pub {
   componentSet(this: world.onClicks, entity: entity, data: click)
 }
 
-func setShapeRect(world: mod UiWorld, entity: Int, fill: view RgbaColor) pub {
+func setShapeRect(world: mod UiWorld, entity: view Int, fill: view RgbaColor) pub {
   let shape: Shape = {
     kind: ShapeKind.Rect
     fill: fill
@@ -62,7 +62,7 @@ func setShapeRect(world: mod UiWorld, entity: Int, fill: view RgbaColor) pub {
   componentSet(this: world.shapes, entity: entity, data: shape)
 }
 
-func setShapeRounded(world: mod UiWorld, entity: Int, fill: view RgbaColor, radius: Float) pub {
+func setShapeRounded(world: mod UiWorld, entity: view Int, fill: view RgbaColor, radius: view Float) pub {
   let shape: Shape = {
     kind: ShapeKind.RoundedRect
     fill: fill
@@ -73,7 +73,7 @@ func setShapeRounded(world: mod UiWorld, entity: Int, fill: view RgbaColor, radi
   componentSet(this: world.shapes, entity: entity, data: shape)
 }
 
-func setSprite(world: mod UiWorld, entity: Int, key: own String, tint: view RgbaColor) pub {
+func setSprite(world: mod UiWorld, entity: view Int, key: own String, tint: view RgbaColor) pub {
   let sp: Sprite = {
     textureKey: key
     tint: tint
@@ -85,7 +85,7 @@ func setSprite(world: mod UiWorld, entity: Int, key: own String, tint: view Rgba
   componentSet(this: world.sprites, entity: entity, data: sp)
 }
 
-func setText(world: mod UiWorld, entity: Int, text: own String, styleId: own String) pub {
+func setText(world: mod UiWorld, entity: view Int, text: own String, styleId: own String) pub {
   let t: Text = {
     text: text
     styleId: styleId
@@ -96,9 +96,9 @@ func setText(world: mod UiWorld, entity: Int, text: own String, styleId: own Str
 
 func setLayout(
   world: mod UiWorld
-  entity: Int
+  entity: view Int
   kind: LayoutType
-  gap: Float
+  gap: view Float
   alignCross: AlignKind
 ) pub {
   let lay: Layout = {
@@ -113,12 +113,12 @@ func setLayout(
   componentSet(this: world.layouts, entity: entity, data: lay)
 }
 
-func setPaddingAll(world: mod UiWorld, entity: Int, n: Float) pub {
+func setPaddingAll(world: mod UiWorld, entity: view Int, n: view Float) pub {
   let pad: Padding = { insets: Insets { l: n, t: n, r: n, b: n } }
   componentSet(this: world.paddings, entity: entity, data: pad)
 }
 
-func attachChildren(world: mod UiWorld, parent: Int, kids: view List(Int)) pub {
+func attachChildren(world: mod UiWorld, parent: view Int, kids: view List(Int)) pub {
   let kidsCopy: List(Int) = createList(Int, initialCap: kids.length)
   let i: Int = 0
   loop i < kids.length {
