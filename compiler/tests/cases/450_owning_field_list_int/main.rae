@@ -1,0 +1,30 @@
+# Stage 2 — owning field deep-copy: List(Int).
+# `let h: Holder = { items: xs }` where Holder.items is List(Int)
+# MUST deep-copy xs into h.items. Mutating xs after the literal
+# must not change h.items. Before this wiring the field was a
+# shallow alias of xs's buffer and auto-drop double-freed it.
+import core
+import sys
+
+type Holder {
+  items: List(Int)
+}
+
+func main() {
+  let xs: List(Int) = createList(Int, initialCap: 2)
+  xs.add(value: 1)
+  xs.add(value: 2)
+  let h: Holder = { items: xs }
+  # Force xs to grow past its initial capacity. If h.items shares
+  # the backing buffer with xs, this realloc would either leave
+  # h.items pointing at freed memory OR set up a double-free at
+  # scope end. With deep-copy, the buffers are independent.
+  xs.add(value: 3)
+  xs.add(value: 4)
+  xs.add(value: 99)
+  log("xs.length = {xs.length}")
+  log("h.items.length = {h.items.length}")
+  log("xs[4] = {xs.get(index: 4)}")
+  log("h.items[0] = {h.items.get(index: 0)}")
+  log("h.items[1] = {h.items.get(index: 1)}")
+}

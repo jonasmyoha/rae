@@ -6,6 +6,7 @@
 
 #include "c_backend.h"
 #include "c_backend_internal.h"
+#include "diag.h"
 #include "mangler.h"
 #include "sema.h"
 #include "str.h"
@@ -480,32 +481,42 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             } else {
                 ctx->has_expected_type = false;
             }
-            // Stage 3 move tracking (continued): a struct-literal
-            // field initialised from a bare local of heap-owning
-            // type moves the local's heap into the new struct. The
-            // local must be skipped by end-of-scope auto-drop to
-            // avoid double-free (the same heap is now reachable
-            // via the new struct's field). Mirrors the same logic
-            // for function args and `target.field = src` assigns.
-            if (f->value && f->value->kind == AST_EXPR_IDENT && field_tr) {
-                const AstTypeRef* val_tr = infer_expr_type_ref(ctx, f->value);
-                if (val_tr && !(val_tr->is_view || val_tr->is_mod) &&
-                    !(field_tr->is_view || field_tr->is_mod) &&
-                    type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, val_tr, 0)) {
-                    Str fbase_for_move = get_base_type_name(field_tr);
-                    // Phase 2 deep-copies bare String fields; the
-                    // source local stays alive. For nested struct
-                    // / List / Map fields we byte-copy at the C
-                    // level, so the source MUST be marked moved
-                    // to avoid double-free. Skip the move only when
-                    // the field is itself a plain String — Phase 2
-                    // handles that case.
-                    if (!str_eq_cstr(fbase_for_move, "String")) {
-                        mark_expr_moved_if_local(ctx, f->value);
-                    }
-                }
-            }
-            // Ownership-safe String field init:
+            // Stage 2 (owning field deep-copy):
+            //
+            // Before Stage 2, a bare IDENT source for a non-String
+            // owning field (List/Map/struct) was handled by MARKING
+            // the source local as moved (mark_expr_moved_if_local
+            // below) and emitting the bare ident — a shallow byte
+            // copy. That left h.<field> aliasing the source's heap
+            // and made any later mutation of either side a use-
+            // after-free or double-free hazard.
+            //
+            // The Stage 2 rule (matching Stage 1's let-stmt rule):
+            //   - `field: ident` where the field's type needs deep
+            //     copy → DEEP-COPY. Source stays live and unchanged;
+            //     the field gets a private heap. No move-track.
+            //   - `field: own ident`                → MOVE (handled
+            //     by AST_EXPR_OWN's own emit which marks the source
+            //     and forwards the bare value).
+            //   - `field: ident` for a view-T field → BORROW
+            //     (pass-through; no copy, no move).
+            //
+            // The String special-case is preserved further below.
+            // For containers and nested owning structs we emit a
+            // statement-expression that allocates a temp, calls the
+            // synthesised rae_deep_copy_<MangledFieldType>, and
+            // evaluates to the temp. The helpers are synthesised in
+            // c_backend.c for every discovered List(E)/StringMap(V)/
+            // IntMap(V) specialisation plus every non-generic user
+            // struct that transitively owns heap.
+            //
+            // Also extends Stage 1's source-side handling from
+            // IDENT-only to {IDENT, MEMBER, INDEX} since member-
+            // access (`o.field`) and index (`xs.get(i)` style) are
+            // structural aliases too.
+            //
+            // No move-track at this site. The source local is left
+            // alive and end-of-scope auto-drop frees its own heap.
             //
             //   { f: src }           — `f: String` field gets a
             //                          fresh deep-copy via
@@ -580,7 +591,76 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                     }
                 }
             }
-            if (field_is_owned_string && (rhs_is_own || rhs_is_owning_temp)) {
+            // Stage 2: deep-copy non-String owning fields when the
+            // RHS is an aliasing expression (IDENT / MEMBER / INDEX).
+            // `own ident` keeps the move path. Owning-temp rvalues
+            // (call / method-call / binary / interp / object) own
+            // their heap with no other live ref — pass-through.
+            bool rhs_is_aliasing = f->value && (
+                f->value->kind == AST_EXPR_IDENT ||
+                f->value->kind == AST_EXPR_MEMBER ||
+                f->value->kind == AST_EXPR_INDEX);
+            bool field_needs_deep_copy_nonstring = false;
+            if (field_tr
+                && !field_tr->is_view && !field_tr->is_mod && !field_tr->is_opt
+                && !field_is_owned_string && !field_is_view_string
+                && rhs_is_aliasing && !rhs_is_own
+                && type_needs_deep_copy(ctx->compiler_ctx, ctx->module,
+                                        (AstTypeRef*)field_tr, 0)) {
+                Str fbase = get_base_type_name(field_tr);
+                // Only emit deep-copy when a synthesised helper exists
+                // for the field's type. The helpers cover:
+                //   - non-generic user structs (rae_deep_copy_<T>)
+                //   - List(E) / StringMap(V) / IntMap(V)
+                // If the type doesn't match those shapes we fall
+                // through to the legacy pass-through (today no other
+                // owning type can pass type_needs_deep_copy anyway —
+                // see classifier in c_stmt.c).
+                bool is_container = str_eq_cstr(fbase, "List") ||
+                                    str_eq_cstr(fbase, "StringMap") ||
+                                    str_eq_cstr(fbase, "IntMap");
+                bool is_user_struct = false;
+                if (!is_container) {
+                    const AstDecl* fd = find_type_decl(ctx, ctx->module, fbase);
+                    is_user_struct = fd && fd->kind == AST_DECL_TYPE
+                        && !has_property(fd->as.type_decl.properties, "c_struct")
+                        && !fd->as.type_decl.generic_params;
+                }
+                if (is_container || is_user_struct) {
+                    field_needs_deep_copy_nonstring = true;
+                } else {
+                    // Stage 2 hard error: an owning field type we can't
+                    // synthesise a deep-copy helper for. Today none
+                    // exist (the classifier returns false otherwise),
+                    // but this future-proofs the path so a new owning
+                    // type can't silently shallow-alias.
+                    char msg[256];
+                    snprintf(msg, sizeof(msg),
+                        "cannot copy owning field '%.*s' of type '%.*s' because deep-copy is not implemented; use `own` to move or `view` to borrow",
+                        (int)f->name.len, f->name.data,
+                        (int)fbase.len, fbase.data);
+                    diag_error(ctx->module ? ctx->module->file_path : "<unknown>",
+                               (int)expr->line, (int)expr->column, msg);
+                }
+            }
+
+            if (field_needs_deep_copy_nonstring) {
+                // Emit a GCC statement-expression: declare a temp of
+                // the field's mangled C type, call rae_deep_copy_<T>,
+                // evaluate to the temp. Mirrors the pattern Stage 1
+                // uses for `let b: T = a` in c_stmt.c. The synthesised
+                // helper allocates a fresh backing buffer / recursive
+                // sub-copies so the field's heap is independent of
+                // the source.
+                const char* tn_dc = rae_mangle_type_specialized(
+                    ctx->compiler_ctx, ctx->generic_params,
+                    ctx->generic_args, (AstTypeRef*)field_tr);
+                int tmp_id = ctx->temp_counter++;
+                fprintf(out, "(__extension__ ({ %s __fdc%d; rae_deep_copy_%s(&__fdc%d, &(",
+                        tn_dc, tmp_id, tn_dc, tmp_id);
+                emit_expr(ctx, f->value, out, PREC_LOWEST, false, false);
+                fprintf(out, ")); __fdc%d; }))", tmp_id);
+            } else if (field_is_owned_string && (rhs_is_own || rhs_is_owning_temp)) {
                 fprintf(out, "rae_string_pool_take(");
                 emit_expr(ctx, f->value, out, PREC_LOWEST, false, false);
                 fprintf(out, ")");
