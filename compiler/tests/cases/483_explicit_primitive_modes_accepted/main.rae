@@ -1,0 +1,21 @@
+# Stage 6: All four parameter modes (view/copy/mod/own) MUST be
+# accepted on primitive types. The body verifies each mode is
+# usable as a value; write-back semantics for `mod` primitive
+# args at the call site are exercised in 352/353 (where a
+# previously-declared `mod Int` local supplies the reference).
+func f(a: view Int, b: copy Bool, c: copy Float, d: own Int) ret Int {
+  let total: Int = 0
+  if b {
+    total = a
+  } else {
+    total = d
+  }
+  let localC: Float = c + 1.0
+  ret total + localC.toInt()
+}
+
+func main() {
+  let x: Int = 42
+  log("result={f(a: x, b: true, c: 1.0, d: own 7)}")
+  log("result-else={f(a: x, b: false, c: 1.0, d: own 7)}")
+}

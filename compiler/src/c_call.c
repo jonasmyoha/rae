@@ -542,9 +542,36 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, sa->value);
                     if (!(arg_tr && (arg_tr->is_view || arg_tr->is_mod))) {
                         Str pbase = get_base_type_name(sp->type);
+                        // Stage 6: `view` on a numeric primitive is
+                        // pass-by-value at the C level — no temp/wrap
+                        // needed. Only `mod` and view/mod String need
+                        // a stack slot + ref wrapper. Substitute
+                        // generics so view T(=Int) is also recognised.
+                        Str pbase_concrete = pbase;
+                        if (fd->generic_params && concrete) {
+                            const AstIdentifierPart* gp2 = fd->generic_params;
+                            const AstTypeRef* ga2 = concrete;
+                            while (gp2 && ga2) {
+                                if (str_eq(gp2->text, pbase)) {
+                                    pbase_concrete = get_base_type_name(ga2);
+                                    break;
+                                }
+                                gp2 = gp2->next; ga2 = ga2->next;
+                            }
+                        }
+                        bool concrete_is_num_prim = str_eq_cstr(pbase_concrete, "Int") || str_eq_cstr(pbase_concrete, "Int64") ||
+                            str_eq_cstr(pbase_concrete, "Float") || str_eq_cstr(pbase_concrete, "Float64") ||
+                            str_eq_cstr(pbase_concrete, "Bool") || str_eq_cstr(pbase_concrete, "Char") || str_eq_cstr(pbase_concrete, "Char32");
+                        bool is_num_prim = (is_primitive_type(pbase)
+                            && !str_eq_cstr(pbase, "String")
+                            && !str_eq_cstr(pbase, "Buffer")
+                            && !str_eq_cstr(pbase, "Any")) || concrete_is_num_prim;
+                        bool view_is_value = is_num_prim
+                            && sp->type->is_view && !sp->type->is_mod;
                         if (is_primitive_type(pbase)
                             && !str_eq_cstr(pbase, "Buffer")
-                            && !str_eq_cstr(pbase, "Any")) {
+                            && !str_eq_cstr(pbase, "Any")
+                            && !view_is_value) {
                             wrap_idx[ai] = wrap_count++;
                         }
                     }
@@ -606,12 +633,53 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             bool pass_view_through = false;
             if (p && p->type && (p->type->is_view || p->type->is_mod)) {
                 const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, a->value);
+                Str base = get_base_type_name(p->type);
+                // Stage 6: `view` on a numeric primitive is pass-by-value
+                // at the C level (same lowering as bare T). Only `mod`
+                // and `view String` still need the ref wrapper.
+                // For generic param T bound to a concrete primitive
+                // (e.g. T=Int in a List(Int) call), check the concrete
+                // type too.
+                Str base_concrete = base;
+                if (fd->generic_params && concrete) {
+                    const AstIdentifierPart* gp = fd->generic_params;
+                    const AstTypeRef* ga = concrete;
+                    while (gp && ga) {
+                        if (str_eq(gp->text, base)) {
+                            base_concrete = get_base_type_name(ga);
+                            break;
+                        }
+                        gp = gp->next; ga = ga->next;
+                    }
+                }
+                bool concrete_is_num_prim = !str_eq_cstr(base_concrete, "String")
+                    && !str_eq_cstr(base_concrete, "Buffer")
+                    && !str_eq_cstr(base_concrete, "Any")
+                    && (str_eq_cstr(base_concrete, "Int") || str_eq_cstr(base_concrete, "Int64") ||
+                        str_eq_cstr(base_concrete, "Float") || str_eq_cstr(base_concrete, "Float64") ||
+                        str_eq_cstr(base_concrete, "Bool") || str_eq_cstr(base_concrete, "Char") ||
+                        str_eq_cstr(base_concrete, "Char32"));
+                bool is_num_prim = (is_primitive_type(base)
+                    && !str_eq_cstr(base, "Buffer")
+                    && !str_eq_cstr(base, "Any")
+                    && !str_eq_cstr(base, "String")) || concrete_is_num_prim;
+                bool view_is_value = is_num_prim && p->type->is_view && !p->type->is_mod;
                 if (!(arg_tr && (arg_tr->is_view || arg_tr->is_mod))) {
-                    Str base = get_base_type_name(p->type);
-                    if (is_primitive_type(base) && !str_eq_cstr(base, "Buffer") && !str_eq_cstr(base, "Any")) needs_prim_wrap = true;
+                    if (view_is_value) {
+                        // No wrap needed; emit the arg as a plain value.
+                    } else if (is_primitive_type(base) && !str_eq_cstr(base, "Buffer") && !str_eq_cstr(base, "Any")) needs_prim_wrap = true;
                     else if (!str_eq_cstr(base, "Buffer") && !str_eq_cstr(base, "Any")) needs_addr = true;
                 } else {
-                    pass_view_through = true;
+                    if (view_is_value) {
+                        // Arg is `view T` or `mod T` (a ref wrapper) but
+                        // the callee expects a plain primitive — deref
+                        // through .ptr. The IDENT path already emits
+                        // `(*x.ptr)` when suppress_deref is false, so
+                        // leaving pass_view_through=false routes through
+                        // that branch.
+                    } else {
+                        pass_view_through = true;
+                    }
                 }
             }
             if (p && p->type && fd->is_extern && !(p->type->is_view || p->type->is_mod)) {
@@ -849,9 +917,23 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 // independent value and is responsible for end-of-scope
                 // cascade drop (see emit_implicit_drops_for_own_params,
                 // which now also drops `is_copy` param slots).
+                // Stage 6: when the callee is generic, substitute the
+                // callee's generic params with the call's concrete args
+                // BEFORE mangling, so `copy T` becomes e.g. `copy Score`
+                // and rae_deep_copy_rae_T becomes rae_deep_copy_rae_Score.
+                AstTypeRef* p_type_for_dc = p->type;
+                if (fd->generic_params && concrete) {
+                    p_type_for_dc = substitute_type_ref(ctx->compiler_ctx,
+                        fd->generic_params, concrete, p->type);
+                } else if (fd->specialization_args && fd->generic_template
+                           && fd->generic_template->kind == AST_DECL_FUNC) {
+                    p_type_for_dc = substitute_type_ref(ctx->compiler_ctx,
+                        fd->generic_template->as.func_decl.generic_params,
+                        fd->specialization_args, p->type);
+                }
                 const char* tn_dc = rae_mangle_type_specialized(
                     ctx->compiler_ctx, ctx->generic_params,
-                    ctx->generic_args, p->type);
+                    ctx->generic_args, p_type_for_dc);
                 int tmp_id = ctx->temp_counter++;
                 fprintf(out, "(__extension__ ({ %s __cpy%d; rae_deep_copy_%s(&__cpy%d, &(",
                         tn_dc, tmp_id, tn_dc, tmp_id);

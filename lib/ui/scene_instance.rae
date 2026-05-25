@@ -148,7 +148,7 @@ func addSpriteOverride(list: mod List(SceneOverride), nodeId: own String, value:
 # Sprite tint override. Encodes the colour as `"r,g,b,a"` because the
 # override value channel is currently a plain String — applyOverride
 # parses the four numeric components back out.
-func addSpriteTintOverride(list: mod List(SceneOverride), nodeId: own String, r: Int, g: Int, b: Int, a: Int) {
+func addSpriteTintOverride(list: mod List(SceneOverride), nodeId: own String, r: view Int, g: view Int, b: view Int, a: view Int) {
   let spriteKey: String = "Sprite"
   let tintField: String = "tint"
   # Interpolation is one alloc instead of seven; the nested .concat()
@@ -227,7 +227,7 @@ func isPlacementComponent(name: view String) ret Bool {
   ret false
 }
 
-func appendIntListSI(lst: mod List(Int), value: Int) {
+func appendIntListSI(lst: mod List(Int), value: view Int) {
   lst.add(value: value)
 }
 
@@ -246,7 +246,7 @@ func appendIntListSI(lst: mod List(Int), value: Int) {
 # - `overrides` is applied last, after the whole subtree is built.
 func mountSceneInstance(
   world: mod UiWorld
-  mountEntity: Int
+  mountEntity: view Int
   scene: view Scene
   overrides: view List(SceneOverride)
 ) ret Int {
@@ -401,7 +401,7 @@ func parseRgbaString(s: view String) ret RgbaColor {
   ret RgbaColor { r: r, g: g, b: b, a: a }
 }
 
-func applyOverride(world: mod UiWorld, entity: Int, override: view SceneOverride) {
+func applyOverride(world: mod UiWorld, entity: view Int, override: view SceneOverride) {
   let textKey: String = "Text"
   let spriteKey: String = "Sprite"
   let activeKey: String = "Active"

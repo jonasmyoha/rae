@@ -91,7 +91,28 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         bool is_struct_view = false;
         if (tr && (tr->is_view || tr->is_mod) && !is_prim_ref) {
             Str vb = get_base_type_name(tr);
-            if (!str_eq_cstr(vb, "Buffer") && !str_eq_cstr(vb, "List") && !str_eq_cstr(vb, "Any")) {
+            // Stage 6: view-on-numeric-primitive is pass-by-value at the
+            // C level (not a struct view), so the IDENT should be read
+            // directly without dereferencing. Only non-primitive views
+            // are real `T*` references. When the param is a generic T
+            // bound to a concrete primitive (e.g. T=Int in a List(Int)
+            // specialisation), check the substituted base too.
+            Str vb_concrete = vb;
+            if (ctx->generic_params && ctx->generic_args) {
+                const AstIdentifierPart* gp = ctx->generic_params;
+                const AstTypeRef* ga = ctx->generic_args;
+                while (gp && ga) {
+                    if (str_eq(gp->text, vb)) {
+                        vb_concrete = get_base_type_name(ga);
+                        break;
+                    }
+                    gp = gp->next; ga = ga->next;
+                }
+            }
+            bool is_num_prim = str_eq_cstr(vb_concrete, "Int") || str_eq_cstr(vb_concrete, "Int64") ||
+                str_eq_cstr(vb_concrete, "Float") || str_eq_cstr(vb_concrete, "Float64") ||
+                str_eq_cstr(vb_concrete, "Bool") || str_eq_cstr(vb_concrete, "Char") || str_eq_cstr(vb_concrete, "Char32");
+            if (!str_eq_cstr(vb, "Buffer") && !str_eq_cstr(vb, "List") && !str_eq_cstr(vb, "Any") && !is_num_prim) {
                 is_struct_view = true;
             }
         }
@@ -695,7 +716,13 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                     const AstTypeRef* rhs_tr = infer_expr_type_ref(ctx, f->value);
                     if (rhs_tr && (rhs_tr->is_view || rhs_tr->is_mod)
                         && !is_primitive_ref(ctx, rhs_tr)) {
-                        needs_view_deref = true;
+                        // Stage 6: view-on-numeric-primitive is a value at
+                        // the C level, not a pointer — no deref needed.
+                        Str rhs_base = get_base_type_name(rhs_tr);
+                        bool rhs_is_num_prim = str_eq_cstr(rhs_base, "Int") || str_eq_cstr(rhs_base, "Int64") ||
+                            str_eq_cstr(rhs_base, "Float") || str_eq_cstr(rhs_base, "Float64") ||
+                            str_eq_cstr(rhs_base, "Bool") || str_eq_cstr(rhs_base, "Char") || str_eq_cstr(rhs_base, "Char32");
+                        if (!rhs_is_num_prim) needs_view_deref = true;
                     }
                 }
                 if (needs_view_deref) fprintf(out, "(*");

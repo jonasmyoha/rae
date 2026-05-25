@@ -146,7 +146,7 @@ func captureHeroTarget(anim: mod HeroAnim, world: view UiWorld, key: view String
   ret true
 }
 
-func startHeroTransition(anim: mod HeroAnim, key: own String, durationSec: Float, now: Float) pub {
+func startHeroTransition(anim: mod HeroAnim, key: own String, durationSec: view Float, now: view Float) pub {
   anim.active = true
   anim.key = key
   anim.startTime = now
@@ -156,7 +156,7 @@ func startHeroTransition(anim: mod HeroAnim, key: own String, durationSec: Float
 # Toggle the hero entity's WorldTransform.visible. Used to hide the
 # entity in the destination world while the overlay paints it, then
 # to restore visibility once the transition lands.
-func setHeroVisible(world: mod UiWorld, key: view String, visible: Bool) pub {
+func setHeroVisible(world: mod UiWorld, key: view String, visible: view Bool) pub {
   let e: Int = findHeroEntity(world: world, key: key)
   if e < 0 {
     ret
@@ -177,7 +177,7 @@ func setHeroVisible(world: mod UiWorld, key: view String, visible: Bool) pub {
 # Cubic smoothstep: `t² · (3 − 2t)`. Linear-in-the-middle, soft at
 # both endpoints. Cheap, no `pow`/`exp` needed. Kept for callers that
 # specifically want the cubic flavor.
-func smoothstep(t: Float) pub ret Float {
+func smoothstep(t: view Float) pub ret Float {
   if t <= 0.0 {
     ret 0.0
   }
@@ -191,7 +191,7 @@ func smoothstep(t: Float) pub ret Float {
 # second derivatives are zero at both endpoints, so motion eases in
 # and out more gently than cubic — better for hero transitions where
 # the eye fixates on the moving element.
-func smootherstep(t: Float) pub ret Float {
+func smootherstep(t: view Float) pub ret Float {
   if t <= 0.0 {
     ret 0.0
   }
@@ -204,7 +204,7 @@ func smootherstep(t: Float) pub ret Float {
   ret 6.0 * t5 - 15.0 * t4 + 10.0 * t3
 }
 
-func heroLerp(a: Float, b: Float, t: Float) ret Float {
+func heroLerp(a: view Float, b: view Float, t: view Float) ret Float {
   ret a + (b - a) * t
 }
 
@@ -212,7 +212,7 @@ func heroLerp(a: Float, b: Float, t: Float) ret Float {
 # transition still has frames left to render. When it returns false
 # the host should put the new world back into its normal state
 # (set the hero's visible to true and stop calling renderHeroOverlay).
-func updateHeroAnim(anim: mod HeroAnim, now: Float) pub ret Bool {
+func updateHeroAnim(anim: mod HeroAnim, now: view Float) pub ret Bool {
   if anim.active is false {
     ret false
   }
@@ -227,7 +227,7 @@ func updateHeroAnim(anim: mod HeroAnim, now: Float) pub ret Bool {
 # Paint the hero at its interpolated rect. Designed to be called AFTER
 # `renderSystem` so the overlay sits on top of the destination
 # world's render. Single draw call, no extra entities allocated.
-func renderHeroOverlay(anim: view HeroAnim, reg: view TextureRegistry, now: Float) pub {
+func renderHeroOverlay(anim: view HeroAnim, reg: view TextureRegistry, now: view Float) pub {
   if anim.active is false {
     ret
   }

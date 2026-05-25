@@ -41,7 +41,7 @@ let matPrefix: String = "mat:"
 # Compose the entity's effective alpha into a [0,255] integer for
 # raylib. WorldTransform.alpha is already the multiplied chain alpha
 # (see transform.rae); we just clamp + scale here.
-func renderAlpha255(world: view UiWorld, entity: Int) ret Int {
+func renderAlpha255(world: view UiWorld, entity: view Int) ret Int {
   if componentHas(this: world.worldTransforms, entity: entity) is false {
     ret 255
   }
@@ -57,14 +57,14 @@ func renderAlpha255(world: view UiWorld, entity: Int) ret Int {
 }
 
 # Apply the chain alpha to a `RgbaColor` and return a raylib `Color`.
-func toRaylibColor(c: view RgbaColor, chain255: Int) ret Color {
+func toRaylibColor(c: view RgbaColor, chain255: view Int) ret Color {
   let combinedA: Int = (c.a * chain255) / 255
   ret Color { r: c.r, g: c.g, b: c.b, a: combinedA }
 }
 
 # Paint Shape variants on `entity` using the world transform / size
 # already on it. Caller has already verified visibility + alpha > 0.
-func paintShape(world: view UiWorld, entity: Int, wt: view WorldTransform, cr: view ComputedRect, chain255: Int) {
+func paintShape(world: view UiWorld, entity: view Int, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int) {
   let sh: Shape = componentGet(this: world.shapes, entity: entity)
   let fill: Color = toRaylibColor(c: sh.fill, chain255: chain255)
 
@@ -123,7 +123,7 @@ func paintShape(world: view UiWorld, entity: Int, wt: view WorldTransform, cr: v
   }
 }
 
-func paintSprite(reg: view TextureRegistry, world: view UiWorld, entity: Int, wt: view WorldTransform, cr: view ComputedRect, chain255: Int) {
+func paintSprite(reg: view TextureRegistry, world: view UiWorld, entity: view Int, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int) {
   let sp: view Sprite => componentView(this: world.sprites, entity: entity)
   let key: String = sp.textureKey
   let tint: Color = toRaylibColor(c: sp.tint, chain255: chain255)
@@ -265,7 +265,7 @@ func textStyleSize(styleId: view String) ret Float {
   ret 20.0
 }
 
-func textStyleColor(styleId: view String, chain255: Int) ret Color {
+func textStyleColor(styleId: view String, chain255: view Int) ret Color {
   # Map each authored style id to the theme palette so light <->
   # dark flips on text are automatic. The label "on surfaceAlt"
   # below means the panel underneath this text is the surfaceAlt
@@ -351,7 +351,7 @@ func textStyleIsCentered(styleId: view String) ret Bool {
   ret false
 }
 
-func paintText(world: view UiWorld, entity: Int, wt: view WorldTransform, cr: view ComputedRect, chain255: Int) {
+func paintText(world: view UiWorld, entity: view Int, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int) {
   let tx: view Text => componentView(this: world.texts, entity: entity)
   let txt: String = tx.text
   if txt.length() is 0 {
@@ -386,7 +386,7 @@ func paintText(world: view UiWorld, entity: Int, wt: view WorldTransform, cr: vi
 # text/sprites layer on top of Shape backgrounds correctly when an
 # entity carries multiple visual components (e.g. a button background
 # + label).
-func paintEntity(world: view UiWorld, reg: view TextureRegistry, entity: Int) {
+func paintEntity(world: view UiWorld, reg: view TextureRegistry, entity: view Int) {
   if componentHas(this: world.worldTransforms, entity: entity) is false {
     ret
   }
@@ -416,7 +416,7 @@ func paintEntity(world: view UiWorld, reg: view TextureRegistry, entity: Int) {
 
 # Recursive top-down walk. Painter's algorithm — parent before its
 # children, declaration order between siblings.
-func paintSubtree(world: view UiWorld, reg: view TextureRegistry, entity: Int) {
+func paintSubtree(world: view UiWorld, reg: view TextureRegistry, entity: view Int) {
   paintEntity(world: world, reg: reg, entity: entity)
   if componentHas(this: world.childrens, entity: entity) is false {
     ret
@@ -462,8 +462,8 @@ func renderDebugClickRects(
   world: view UiWorld
   idleColor: view Color
   hoverColor: view Color
-  mouseX: Float
-  mouseY: Float
+  mouseX: view Float
+  mouseY: view Float
 ) pub {
   let nClicks: Int = componentCount(this: world.onClicks)
   let i: Int = 0
@@ -509,7 +509,7 @@ func renderDebugClickRects(
 # exactly where the input system thinks the cursor is. If this
 # crosshair doesn't sit under the OS mouse cursor on screen, there's
 # a coord-system mismatch between rendering and input.
-func renderDebugMouseCursor(mouseX: Float, mouseY: Float, color: view Color) pub {
+func renderDebugMouseCursor(mouseX: view Float, mouseY: view Float, color: view Color) pub {
   let size: Float = 12.0
   let half: Float = size / 2.0
   drawRectangle(

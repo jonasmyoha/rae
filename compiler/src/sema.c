@@ -122,6 +122,8 @@ AstTypeRef* substitute_type_ref(CompilerContext* ctx, const AstIdentifierPart* g
                 result->resolved_type = NULL;
                 if (type->is_view) result->is_view = true;
                 if (type->is_mod) result->is_mod = true;
+                if (type->is_own) result->is_own = true;
+                if (type->is_copy) result->is_copy = true;
                 if (type->is_opt) result->is_opt = true;
                 return result;
             }
@@ -596,9 +598,9 @@ static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTab
             }
             TypeInfo* current_return_type = type_get_void(ctx->type_registry);
             if (decl->as.func_decl.returns) current_return_type = sema_resolve_type_internal(ctx, module, symbols, decl->as.func_decl.returns->type);
-            // Stage 5 (Memory-safety overhaul): bare-T non-primitive
-            // parameters are a hard compile error. Every non-extern
-            // function parameter must use an explicit ownership mode:
+            // Stage 6 (Memory-safety overhaul): bare parameter types
+            // are a hard compile error for every non-extern function.
+            // Every parameter must use an explicit ownership mode:
             //   view T  — read-only borrow (callee may not mutate)
             //   mod T   — mutating borrow (callee may mutate in place)
             //   copy T  — independent deep copy (callee owns its copy)
@@ -608,10 +610,20 @@ static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTab
             // suggestion to use `copy T`.
             //
             // Externs are skipped: their parameter lists describe the
-            // FFI shape, not Rae's ownership model. Primitives
-            // (Int/Float/Bool/Char/Char32 + various widths), enums,
-            // and `Any` are allowed bare because their value-semantics
-            // are unambiguous.
+            // FFI/ABI shape, not Rae's ownership model.
+            //
+            // `Any` parameters are also allowed bare: Any is a tagged
+            // union value type (not an owning heap thing on its own)
+            // and is conventionally passed by value at the source
+            // level. The four modes carry no extra information for
+            // Any, so requiring one would just be noise.
+            //
+            // For primitives (Int/Float/Bool/Char/...) the backend is
+            // free to lower view/copy/mod/own to identical pass-by-
+            // value machine code — but the source-level annotation
+            // still expresses intent (read-only vs fresh-copy vs
+            // mutable borrow vs consume), which matters when a
+            // function later changes to a non-primitive type.
             if (!decl->as.func_decl.is_extern) {
                 // After merge + generic specialization, module->file_path
                 // is whichever file was merged last — not the file the
@@ -637,35 +649,16 @@ static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTab
                     }
                     bool has_mode = pt->is_view || pt->is_mod || pt->is_own || pt->is_copy;
                     if (has_mode) continue;
-                    // Skip cases where the value-semantics are
-                    // unambiguous: built-in primitives, enums (which
-                    // resolve to an int kind), and Any (passed as a
-                    // tagged union, not a heap-owning thing). String,
-                    // List, Map, user structs all become hard errors.
+                    // Any and enum types are bare-allowed: they're
+                    // value-types (tagged union / int tag) with no
+                    // heap ownership of their own, so the four modes
+                    // don't carry useful extra information. This
+                    // matches Stage 5's behaviour and keeps enum-only
+                    // signatures (e.g. `alignMain: AlignKind`) clean.
                     Str base = (pt->parts) ? pt->parts->text : (Str){0};
-                    bool is_prim_name = str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int8") ||
-                                   str_eq_cstr(base, "Int16") || str_eq_cstr(base, "Int32") ||
-                                   str_eq_cstr(base, "Int64") || str_eq_cstr(base, "UInt") ||
-                                   str_eq_cstr(base, "UInt8") || str_eq_cstr(base, "UInt16") ||
-                                   str_eq_cstr(base, "UInt32") || str_eq_cstr(base, "UInt64") ||
-                                   str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float32") ||
-                                   str_eq_cstr(base, "Float64") || str_eq_cstr(base, "Bool") ||
-                                   str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32") ||
-                                   str_eq_cstr(base, "Any");
-                    if (is_prim_name) continue;
-                    // Resolve to catch Any. The per-param loop below
-                    // will resolve again, which is wasted work but
-                    // keeps this diagnostic isolated.
+                    if (str_eq_cstr(base, "Any")) continue;
                     TypeInfo* resolved = sema_resolve_type_internal(ctx, module, symbols, pt);
-                    if (resolved && (
-                        resolved->kind == TYPE_INT ||
-                        resolved->kind == TYPE_FLOAT ||
-                        resolved->kind == TYPE_BOOL ||
-                        resolved->kind == TYPE_CHAR ||
-                        resolved->kind == TYPE_ANY)) continue;
-                    // Enum types are user decls that lower to ints.
-                    // Look up the type name in the symbol table and
-                    // skip if it's an AST_DECL_ENUM.
+                    if (resolved && resolved->kind == TYPE_ANY) continue;
                     {
                         Symbol* type_sym = symbol_table_lookup(symbols, base);
                         if (type_sym && type_sym->decl && type_sym->decl->kind == AST_DECL_ENUM) {
@@ -674,13 +667,8 @@ static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTab
                     }
                     char buffer[256];
                     snprintf(buffer, sizeof(buffer),
-                        "parameter '%.*s' is bare '%.*s' — use one of 'view %.*s', 'mod %.*s', 'copy %.*s', or 'own %.*s' to make ownership explicit",
-                        (int)p2->name.len, p2->name.data,
-                        (int)base.len, base.data,
-                        (int)base.len, base.data,
-                        (int)base.len, base.data,
-                        (int)base.len, base.data,
-                        (int)base.len, base.data);
+                        "parameter '%.*s' must specify view/copy/mod/own; bare parameter types are not allowed",
+                        (int)p2->name.len, p2->name.data);
                     diag_error(err_file, (int)pt->line, (int)pt->column, buffer);
                     module->had_error = true;
                 }

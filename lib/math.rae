@@ -39,7 +39,7 @@ func PI() ret Float {
   ret 3.14159265358979323846
 }
 
-func seed(n: Int) {
+func seed(n: view Int) {
   rae_seed(n: n)
 }
 
@@ -47,53 +47,53 @@ func random() ret Float {
   ret rae_random()
 }
 
-func random(min: Int, max: Int) ret Int {
+func random(min: view Int, max: view Int) ret Int {
   ret rae_random_int(min: min, max: max)
 }
 
-func abs(n: Int) ret Int {
+func abs(n: view Int) ret Int {
   if n < 0 {
     ret -n
   }
   ret n
 }
 
-func abs(n: Float) ret Float {
+func abs(n: view Float) ret Float {
   if n < 0.0 {
     ret -n
   }
   ret n
 }
 
-func min(a: Int, b: Int) ret Int {
+func min(a: view Int, b: view Int) ret Int {
   if a < b {
     ret a
   }
   ret b
 }
 
-func min(a: Float, b: Float) ret Float {
+func min(a: view Float, b: view Float) ret Float {
   if a < b {
     ret a
   }
   ret b
 }
 
-func max(a: Int, b: Int) ret Int {
+func max(a: view Int, b: view Int) ret Int {
   if a > b {
     ret a
   }
   ret b
 }
 
-func max(a: Float, b: Float) ret Float {
+func max(a: view Float, b: view Float) ret Float {
   if a > b {
     ret a
   }
   ret b
 }
 
-func clamp(val: Int, low: Int, high: Int) ret Int {
+func clamp(val: view Int, low: view Int, high: view Int) ret Int {
   if val < low {
     ret low
   }
@@ -103,7 +103,7 @@ func clamp(val: Int, low: Int, high: Int) ret Int {
   ret val
 }
 
-func clamp(val: Float, low: Float, high: Float) ret Float {
+func clamp(val: view Float, low: view Float, high: view Float) ret Float {
   if val < low {
     ret low
   }
@@ -113,16 +113,16 @@ func clamp(val: Float, low: Float, high: Float) ret Float {
   ret val
 }
 
-func lerp(a: Float, b: Float, t: Float) ret Float {
+func lerp(a: view Float, b: view Float, t: view Float) ret Float {
   ret a + (b - a) * t
 }
 
-func randomFloat(min: Float, max: Float) ret Float {
+func randomFloat(min: view Float, max: view Float) ret Float {
   ret min + rae_random() * (max - min)
 }
 
 # Alias: prefer the explicit `randomInt` name in new code. The existing
 # overloaded `random(min, max)` stays for backward compatibility.
-func randomInt(min: Int, max: Int) ret Int {
+func randomInt(min: view Int, max: view Int) ret Int {
   ret rae_random_int(min: min, max: max)
 }

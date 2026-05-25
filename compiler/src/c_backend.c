@@ -146,9 +146,17 @@ bool is_primitive_ref(CFuncContext* ctx, const AstTypeRef* tr) {
     Str base = get_base_type_name(tr);
     // Buffer and List are already pointers — no wrapper struct
     if (str_eq_cstr(base, "Buffer") || str_eq_cstr(base, "List") || str_eq_cstr(base, "Any")) return false;
-    if (str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int64") || str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float64") ||
-        str_eq_cstr(base, "Bool") || str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32") || str_eq_cstr(base, "String") ||
-        tr->is_id || tr->is_key) return true;
+    // Stage 6: for plain numeric/bool/char primitives, `view T` lowers
+    // to the same pass-by-value machine code as bare T — the source-
+    // level `view` is semantic intent only. Only `mod T` keeps a true
+    // reference wrapper, because the callee must write back through
+    // the pointer. String stays a ref under view/mod because it is
+    // heap-owning at the language level (the ref avoids deep copies).
+    bool is_num_prim = str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int64") ||
+        str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float64") ||
+        str_eq_cstr(base, "Bool") || str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32");
+    if (is_num_prim) return tr->is_mod;
+    if (str_eq_cstr(base, "String") || tr->is_id || tr->is_key) return true;
     return false;
 }
 
@@ -517,6 +525,20 @@ bool emit_param_list(CFuncContext* ctx, const AstParam* params, FILE* out, bool 
     if (p->type) {
         bool is_mod = p->type->is_mod, is_val = p->type->is_val, is_view = p->type->is_view;
         Str base = get_base_type_name(p->type);
+        // Stage 6: `view`/`copy`/`own` on a numeric primitive lowers
+        // to the same plain pass-by-value type as bare T. Only `mod`
+        // on a numeric primitive needs the ref wrapper. String stays
+        // a ref under view/mod because String owns heap.
+        bool is_num_prim = is_primitive_type(base)
+            && !str_eq_cstr(base, "String")
+            && !str_eq_cstr(base, "Buffer")
+            && !str_eq_cstr(base, "Any");
+        bool view_or_mod = is_view || is_mod;
+        if (is_num_prim && view_or_mod && !is_mod) {
+            // view-on-primitive collapses to bare T at the C level.
+            is_view = false;
+            view_or_mod = false;
+        }
         bool is_ptr = is_extern ? (is_mod || is_view) : (is_mod || is_view || (!is_val && !is_primitive_type(base) && !(ctx->uses_raylib && is_raylib_builtin_type(base))));
         if (is_view && !is_ptr && !str_eq_cstr(base, "String")) fprintf(out, "const ");
         CFuncContext p_ctx = *ctx; AstTypeRef p_type = *p->type; p_type.is_view = is_view; p_type.is_mod = is_mod;
