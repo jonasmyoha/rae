@@ -1,0 +1,26 @@
+# Stage 3: passing a fresh rvalue (call result) to a `copy T` param
+# must NOT trigger an extra rae_deep_copy. The rvalue already owns
+# a freshly allocated heap; the callee just takes ownership. The
+# only buffer the call site allocates is the one inside `factory`.
+#
+# We verify this indirectly: the callee mutates and reports length;
+# its drop runs at scope end with no leak.
+import core
+import sys
+
+func factory() ret List(Int) {
+  let xs: List(Int) = createList(Int, initialCap: 4)
+  xs.add(value: 10)
+  xs.add(value: 20)
+  ret xs
+}
+
+func consume(items: copy List(Int)) ret Int {
+  items.add(value: 30)
+  ret items.length
+}
+
+func main() {
+  let n: Int = consume(items: factory())
+  log("consume returned {n}")
+}

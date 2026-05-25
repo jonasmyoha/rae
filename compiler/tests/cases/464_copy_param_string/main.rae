@@ -1,0 +1,16 @@
+# Stage 3: `copy String` parameter mode triggers rae_string_copy at
+# the call site, giving the callee a private heap. Caller's String
+# stays readable after the call.
+import core
+import string
+
+func appendBang(s: copy String) ret String {
+  ret "{s}!"
+}
+
+func main() {
+  let name: String = "ada"
+  let greeting: String = appendBang(s: name)
+  log(greeting)
+  log("caller name still: {name}")
+}
