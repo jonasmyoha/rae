@@ -1,0 +1,23 @@
+# Owning-let deep-copy: user struct containing List(Int).
+# `let h2: Holder = h1` MUST deep-copy h1, including the nested
+# List(Int) buffer. Mutating h2.xs must not affect h1.xs.
+import core
+import sys
+
+type Holder {
+  label: String
+  xs: List(Int)
+}
+
+func main() {
+  let xs1: List(Int) = createList(Int, initialCap: 2)
+  xs1.add(value: 10)
+  xs1.add(value: 20)
+  let h1: Holder = { label: "first", xs: own xs1 }
+  let h2: Holder = h1
+  h2.xs.add(value: 99)
+  log("h1.xs.length = {h1.xs.length}")
+  log("h2.xs.length = {h2.xs.length}")
+  log("h1.label = {h1.label}")
+  log("h2.label = {h2.label}")
+}

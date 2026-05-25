@@ -1354,28 +1354,32 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     }
   }
 
-  // Phase 1: synthesise `rae_deep_copy_struct_<T>(dst, src)` for every
-  // non-generic user struct that transitively contains owned heap (the
-  // permissive predicate — includes String-only structs).
+  // Phase 1+2: synthesise deep-copy helpers.
   //
-  // Body shape:
-  //   static void rae_deep_copy_struct_<T>(<T>* dst, const <T>* src) {
-  //     dst->primitive_field = src->primitive_field;
-  //     dst->string_field    = rae_string_copy(src->string_field);
-  //     rae_deep_copy_struct_<U>(&dst->user_struct_field, &src->user_struct_field);
-  //     // List<U> / StringMap<U> / IntMap<U>: TODO Phase 1.5 — for
-  //     // now shallow-copy. List/Map deep-copy needs per-T helpers
-  //     // (rae_deep_copy_list_<U>) that this pass does not yet emit.
-  //     dst->container_field = src->container_field;
-  //   }
+  // Two function families, both named with `rae_deep_copy_<MangledType>`
+  // (no `_struct_`/`_list_` distinction in the name — keeps callers
+  // type-agnostic):
   //
-  // No callers in this phase — the helper is RAE_UNUSED. Phase 2 wires
-  // it into the let-stmt codegen for `let T = expr` where expr is a
-  // container extraction (buf_get / .get / valueAt / bare-ident copy).
+  //   For non-generic user structs (T):
+  //     static void rae_deep_copy_<T>(<T>* dst, const <T>* src)
   //
-  // Re-use the drop_entries collected above but extend the gate to
-  // include string-only structs (permissive predicate). Recompute
-  // entries here so we don't have to thread two parallel lists.
+  //   For container specializations (List(E), StringMap(V), IntMap(V)):
+  //     static void rae_deep_copy_<List_E>(<List_E>* dst, const <List_E>* src)
+  //
+  // The struct variant walks fields, dispatching per-field type:
+  //   - String        → rae_string_copy
+  //   - user struct U → recursive rae_deep_copy_<U>
+  //   - List/Map      → recursive rae_deep_copy_<container_type>
+  //   - view/mod      → pointer copy
+  //   - primitive     → plain assignment
+  //
+  // The container variant allocates a fresh buffer, then walks the
+  // src elements/entries deep-copying each.
+  //
+  // Used by c_stmt.c's let-stmt deep-copy path (`let b: T = a` where
+  // `a` is a bare identifier and T needs deep copy).
+
+  // Pass A: collect struct entries (permissive — string-only structs included).
   StructDropEntry copy_entries[512];
   size_t copy_entry_count = 0;
   for (size_t i = 0; i < ctx->all_decl_count && copy_entry_count < 512; i++) {
@@ -1391,62 +1395,198 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, tr);
     copy_entries[copy_entry_count++] = (StructDropEntry){.decl = d, .type_ref = tr, .mangled = mangled};
   }
-  // Forward decls.
+
+  // Pass B: collect container specializations (List / StringMap / IntMap)
+  // from the discovered generic_types list. Only collect ones whose
+  // element type transitively needs deep copy OR which are StringMap
+  // (because StringMap keys are heap-owned Strings that must always
+  // be copied when the map is duplicated).
+  typedef struct {
+    const AstTypeRef* type_ref;   // List(E) / StringMap(V) / IntMap(V)
+    const char* mangled;          // rae_List_<E>, rae_StringMap_<V>, rae_IntMap_<V>
+    int kind;                     // 0=list, 1=smap, 2=imap
+  } ContainerCopyEntry;
+  ContainerCopyEntry container_entries[512];
+  size_t container_entry_count = 0;
+  for (size_t i = 0; i < ctx->generic_type_count && container_entry_count < 512; i++) {
+    const AstTypeRef* gt = ctx->generic_types[i];
+    if (!gt || gt->is_view || gt->is_mod) continue;
+    Str gb = get_base_type_name(gt);
+    bool is_list = str_eq_cstr(gb, "List");
+    bool is_smap = str_eq_cstr(gb, "StringMap");
+    bool is_imap = str_eq_cstr(gb, "IntMap");
+    if (!is_list && !is_smap && !is_imap) continue;
+    if (!gt->generic_args) continue;
+    // Dedup by mangled name.
+    const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)gt);
+    bool seen = false;
+    for (size_t k = 0; k < container_entry_count; k++) {
+      if (strcmp(container_entries[k].mangled, mangled) == 0) { seen = true; break; }
+    }
+    if (seen) continue;
+    container_entries[container_entry_count].type_ref = gt;
+    container_entries[container_entry_count].mangled = mangled;
+    container_entries[container_entry_count].kind = is_list ? 0 : (is_smap ? 1 : 2);
+    container_entry_count++;
+  }
+
+  // Forward decls — structs first, then containers.
   for (size_t i = 0; i < copy_entry_count; i++) {
-    fprintf(out, "RAE_UNUSED static void rae_deep_copy_struct_%s(%s* dst, const %s* src);\n",
+    fprintf(out, "RAE_UNUSED static void rae_deep_copy_%s(%s* dst, const %s* src);\n",
             copy_entries[i].mangled, copy_entries[i].mangled, copy_entries[i].mangled);
   }
-  if (copy_entry_count > 0) fprintf(out, "\n");
-  // Bodies — field order matters less for copy than drop, but emit in
-  // declaration order for readability.
+  for (size_t i = 0; i < container_entry_count; i++) {
+    fprintf(out, "RAE_UNUSED static void rae_deep_copy_%s(%s* dst, const %s* src);\n",
+            container_entries[i].mangled, container_entries[i].mangled, container_entries[i].mangled);
+  }
+  // Legacy compat alias — older codegen paths and tests may still refer
+  // to `rae_deep_copy_struct_<T>`. Keep the alias so we don't break them
+  // while migrating callers to the unified name. (Marked RAE_UNUSED.)
+  for (size_t i = 0; i < copy_entry_count; i++) {
+    fprintf(out, "#define rae_deep_copy_struct_%s rae_deep_copy_%s\n",
+            copy_entries[i].mangled, copy_entries[i].mangled);
+  }
+  if (copy_entry_count > 0 || container_entry_count > 0) fprintf(out, "\n");
+
+  // Helper: emit a single per-field copy statement for a struct deep-copy
+  // body, dispatching on the field's concrete type.
+  #define EMIT_FIELD_COPY(dst_expr, src_expr, ft, fbase) do { \
+      if ((ft) && ((ft)->is_view || (ft)->is_mod)) { \
+        fprintf(out, "  %s = %s;\n", (dst_expr), (src_expr)); \
+        break; \
+      } \
+      if (str_eq_cstr((fbase), "String")) { \
+        fprintf(out, "  %s = rae_string_copy(%s);\n", (dst_expr), (src_expr)); \
+        break; \
+      } \
+      bool _f_is_list = str_eq_cstr((fbase), "List"); \
+      bool _f_is_smap = str_eq_cstr((fbase), "StringMap"); \
+      bool _f_is_imap = str_eq_cstr((fbase), "IntMap"); \
+      if ((_f_is_list || _f_is_smap || _f_is_imap) && (ft) && (ft)->generic_args) { \
+        const char* _fmangled = rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)(ft)); \
+        fprintf(out, "  rae_deep_copy_%s(&%s, &%s);\n", _fmangled, (dst_expr), (src_expr)); \
+        break; \
+      } \
+      if ((ft) && !(ft)->is_view && !(ft)->is_mod && !(ft)->is_opt \
+          && type_needs_deep_copy(ctx, module, (AstTypeRef*)(ft), 0)) { \
+        const AstDecl* _fd = find_type_decl(NULL, module, (fbase)); \
+        bool _is_user_struct = _fd && _fd->kind == AST_DECL_TYPE \
+            && !has_property(_fd->as.type_decl.properties, "c_struct") \
+            && !_fd->as.type_decl.generic_params; \
+        if (_is_user_struct) { \
+          const char* _fm = rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)(ft)); \
+          fprintf(out, "  rae_deep_copy_%s(&%s, &%s);\n", _fm, (dst_expr), (src_expr)); \
+          break; \
+        } \
+      } \
+      fprintf(out, "  %s = %s;\n", (dst_expr), (src_expr)); \
+  } while (0)
+
+  // Struct bodies.
   for (size_t i = 0; i < copy_entry_count; i++) {
     const StructDropEntry* e = &copy_entries[i];
-    fprintf(out, "RAE_UNUSED static void rae_deep_copy_struct_%s(%s* dst, const %s* src) {\n",
+    fprintf(out, "RAE_UNUSED static void rae_deep_copy_%s(%s* dst, const %s* src) {\n",
             e->mangled, e->mangled, e->mangled);
     for (const AstTypeField* f = e->decl->as.type_decl.fields; f; f = f->next) {
       const AstTypeRef* ft = f->type;
       Str fbase = ft ? get_base_type_name(ft) : (Str){0};
-      // View/mod fields are non-owning references — shallow-copy the
-      // wrapper (pointer copy).
-      if (ft && (ft->is_view || ft->is_mod)) {
-        fprintf(out, "  dst->%.*s = src->%.*s;\n",
-                (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
-        continue;
-      }
-      // String — call the existing deep-copy runtime helper. The is_owned
-      // bit is left as the canonical "1" because rae_string_copy always
-      // returns an owned heap.
-      if (str_eq_cstr(fbase, "String")) {
-        fprintf(out, "  dst->%.*s = rae_string_copy(src->%.*s);\n",
-                (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
-        continue;
-      }
-      // Nested non-generic user struct that itself needs cascade drop —
-      // recurse. Forward decls above cover the call.
-      if (ft && !ft->is_view && !ft->is_mod && !ft->is_opt
-          && type_needs_cascade_drop(ctx, module, (AstTypeRef*)ft, 0)) {
-        const AstDecl* fd = find_type_decl(NULL, module, fbase);
-        bool is_user_struct = fd && fd->kind == AST_DECL_TYPE
-            && !has_property(fd->as.type_decl.properties, "c_struct")
-            && !fd->as.type_decl.generic_params;
-        if (is_user_struct) {
-          const char* fmangled = rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)ft);
-          fprintf(out, "  rae_deep_copy_struct_%s(&dst->%.*s, &src->%.*s);\n",
-                  fmangled, (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
-          continue;
-        }
-      }
-      // Phase 1 fallback for containers / opt / primitives: shallow C
-      // assignment. Containers (List / StringMap / IntMap) and opt T
-      // (RaeAny) are handled by Phase 1.5 once per-T list/map deep-copy
-      // helpers exist; until then this assignment shares the backing
-      // buffer between dst and src, which is correct for Phase 1's
-      // restricted callers (string-only structs).
-      fprintf(out, "  dst->%.*s = src->%.*s;\n",
-              (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
+      char dst_expr[128];
+      char src_expr[128];
+      snprintf(dst_expr, sizeof(dst_expr), "dst->%.*s", (int)f->name.len, f->name.data);
+      snprintf(src_expr, sizeof(src_expr), "src->%.*s", (int)f->name.len, f->name.data);
+      EMIT_FIELD_COPY(dst_expr, src_expr, ft, fbase);
     }
     fprintf(out, "}\n\n");
   }
+
+  // Container bodies. For List(E): allocate a fresh buffer sized to
+  // src->capacity, then iterate elements deep-copying each. For
+  // StringMap(V) / IntMap(V): allocate a fresh sparse buffer, iterate
+  // entries, copy occupied ones with key (Strings deep-copied).
+  for (size_t i = 0; i < container_entry_count; i++) {
+    const ContainerCopyEntry* e = &container_entries[i];
+    const AstTypeRef* elem = e->type_ref->generic_args;
+    if (!elem) continue;
+    Str ebase = get_base_type_name(elem);
+    const char* elem_mangled = rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)elem);
+    bool elem_is_string = str_eq_cstr(ebase, "String");
+    bool elem_is_list = str_eq_cstr(ebase, "List");
+    bool elem_is_smap = str_eq_cstr(ebase, "StringMap");
+    bool elem_is_imap = str_eq_cstr(ebase, "IntMap");
+    bool elem_is_container = elem_is_list || elem_is_smap || elem_is_imap;
+    bool elem_needs_deep = elem_is_string || elem_is_container ||
+        type_needs_deep_copy(ctx, module, (AstTypeRef*)elem, 0);
+
+    fprintf(out, "RAE_UNUSED static void rae_deep_copy_%s(%s* dst, const %s* src) {\n",
+            e->mangled, e->mangled, e->mangled);
+
+    if (e->kind == 0) {
+      // List(E): allocate buffer, copy elements.
+      fprintf(out, "  dst->length = src->length;\n");
+      fprintf(out, "  dst->capacity = src->capacity;\n");
+      fprintf(out, "  if (src->capacity > 0) {\n");
+      fprintf(out, "    dst->data = (%s*)rae_ext_rae_buf_alloc(src->capacity, sizeof(%s));\n",
+              elem_mangled, elem_mangled);
+      if (!elem_needs_deep) {
+        // POD path — bulk copy.
+        fprintf(out, "    if (src->length > 0) memcpy(dst->data, src->data, (size_t)src->length * sizeof(%s));\n",
+                elem_mangled);
+      } else {
+        fprintf(out, "    for (int64_t __i = 0; __i < src->length; __i++) {\n");
+        if (elem_is_string) {
+          fprintf(out, "      dst->data[__i] = rae_string_copy(src->data[__i]);\n");
+        } else if (elem_is_container) {
+          fprintf(out, "      rae_deep_copy_%s(&dst->data[__i], &src->data[__i]);\n", elem_mangled);
+        } else {
+          // User struct element.
+          fprintf(out, "      rae_deep_copy_%s(&dst->data[__i], &src->data[__i]);\n", elem_mangled);
+        }
+        fprintf(out, "    }\n");
+      }
+      fprintf(out, "  } else {\n");
+      fprintf(out, "    dst->data = NULL;\n");
+      fprintf(out, "  }\n");
+    } else {
+      // StringMap / IntMap — sparse buffer of entries.
+      // Entry struct: rae_StringMapEntry_<V> { k: rae_String, value: V, occupied: rae_Bool }
+      // or rae_IntMapEntry_<V> { k: int64_t, value: V, occupied: rae_Bool }
+      const char* entry_struct = (e->kind == 1) ? "rae_StringMapEntry" : "rae_IntMapEntry";
+      fprintf(out, "  dst->length = src->length;\n");
+      fprintf(out, "  dst->capacity = src->capacity;\n");
+      fprintf(out, "  if (src->capacity > 0) {\n");
+      fprintf(out, "    size_t __stride = sizeof(%s_%s);\n", entry_struct, elem_mangled);
+      fprintf(out, "    dst->data = rae_ext_rae_buf_alloc(src->capacity, (int64_t)__stride);\n");
+      fprintf(out, "    memcpy(dst->data, src->data, (size_t)src->capacity * __stride);\n");
+      // Now deep-copy keys (if smap) and values (if needed) per occupied slot.
+      fprintf(out, "    char* __sbuf = (char*)src->data;\n");
+      fprintf(out, "    char* __dbuf = (char*)dst->data;\n");
+      fprintf(out, "    for (int64_t __i = 0; __i < src->capacity; __i++) {\n");
+      fprintf(out, "      %s_%s* __se = (%s_%s*)(__sbuf + __i * __stride);\n",
+              entry_struct, elem_mangled, entry_struct, elem_mangled);
+      fprintf(out, "      %s_%s* __de = (%s_%s*)(__dbuf + __i * __stride);\n",
+              entry_struct, elem_mangled, entry_struct, elem_mangled);
+      fprintf(out, "      if (!__se->occupied) continue;\n");
+      if (e->kind == 1) {
+        // StringMap — copy key.
+        fprintf(out, "      __de->k = rae_string_copy(__se->k);\n");
+      }
+      // Copy value per element type.
+      if (elem_is_string) {
+        fprintf(out, "      __de->value = rae_string_copy(__se->value);\n");
+      } else if (elem_is_container) {
+        fprintf(out, "      rae_deep_copy_%s(&__de->value, &__se->value);\n", elem_mangled);
+      } else if (elem_needs_deep) {
+        fprintf(out, "      rae_deep_copy_%s(&__de->value, &__se->value);\n", elem_mangled);
+      }
+      // POD value: already copied by the bulk memcpy above.
+      fprintf(out, "    }\n");
+      fprintf(out, "  } else {\n");
+      fprintf(out, "    dst->data = NULL;\n");
+      fprintf(out, "  }\n");
+    }
+    fprintf(out, "}\n\n");
+  }
+  #undef EMIT_FIELD_COPY
 
   // Emit top-level `let` globals as static C variables. We bundle every
   // imported module into one translation unit, so plain `static` works
