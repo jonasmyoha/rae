@@ -1,0 +1,20 @@
+# Owning-let deep-copy: List(Int).
+# `let b: List(Int) = a` MUST deep-copy the buffer. Mutating b
+# must not affect a. Before the deep-copy wiring landed this
+# would shallow-alias a's buffer and either crash on double-free
+# or show stale data from the other binding.
+import core
+import sys
+
+func main() {
+  let a: List(Int) = createList(Int, initialCap: 4)
+  a.add(value: 1)
+  a.add(value: 2)
+  a.add(value: 3)
+  let b: List(Int) = a
+  b.add(value: 99)
+  log("a.length = {a.length}")
+  log("b.length = {b.length}")
+  log("a[0] = {a.get(index: 0)}")
+  log("b[3] = {b.get(index: 3)}")
+}
