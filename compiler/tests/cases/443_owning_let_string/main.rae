@@ -1,0 +1,16 @@
+# Owning-let deep-copy: `let b: String = a` MUST deep-copy.
+# Both a and b should be independent owners — without deep copy,
+# the binding shallow-aliases a's heap and the per-local
+# auto-drop double-frees at scope end. This test would crash
+# with libmalloc "pointer being freed was not allocated" before
+# the deep-copy wiring landed.
+import core
+import sys
+
+func main() {
+  let a: String = "hello-".concat(other: "world")
+  let b: String = a
+  log("a = {a}")
+  log("b = {b}")
+  log("done")
+}
