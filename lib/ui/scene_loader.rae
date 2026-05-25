@@ -17,7 +17,7 @@ import json
 # function. Same workaround as the ones in ecs.rae — needed when the
 # caller is itself inside a generic body, but kept available here
 # anyway for symmetry.
-func appendIntListSL(lst: mod List(Int), value: Int) {
+func appendIntListSL(lst: mod List(Int), value: view Int) {
   lst.add(value: value)
 }
 
@@ -146,7 +146,7 @@ func dumpScene(world: view UiWorld, scene: view Scene) {
 # Returns a comma-separated list of authored component names attached
 # to `entity`. Order matches `registeredComponentNames()` for stable
 # diagnostic output.
-func componentNamesFor(world: view UiWorld, entity: Int) ret String {
+func componentNamesFor(world: view UiWorld, entity: view Int) ret String {
   let parts: List(String) = createList(String, initialCap: 8)
   if componentHas(this: world.rects, entity: entity) {
     parts.add(value: "Rect")
