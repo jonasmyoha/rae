@@ -1,0 +1,13 @@
+# Stage 5 of the memory-safety overhaul: bare non-primitive function
+# parameters are rejected by sema. Every owning-type parameter must
+# carry an explicit ownership mode: view / mod / copy / own.
+import core
+
+func foo(items: List(Int)) {
+  log("len={items.length()}")
+}
+
+func main() {
+  let xs: List(Int) = createList(Int, initialCap: 4)
+  foo(items: xs)
+}
