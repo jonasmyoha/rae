@@ -53,6 +53,7 @@ static int get_instruction_len(uint8_t op) {
         case OP_SET_FIELD: return 5;
         case OP_CONSTRUCT: return 9;
         case OP_BIND_LOCAL: return 5;
+        case OP_BIND_LOCAL_VALUE: return 5;
         case OP_BIND_FIELD: return 5;
         case OP_REF_VIEW: return 1;
         case OP_REF_MOD: return 1;

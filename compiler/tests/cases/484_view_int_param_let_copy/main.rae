@@ -1,0 +1,20 @@
+# VM parity (post-Stage 6): `let entity: Int = view_int_param`
+# must COPY (value semantics) so the new local is an owning Int,
+# not a read-only alias to the caller's view. The let target's
+# declared type — bare `Int` — picks binding mode, not the RHS.
+# The follow-up reassign must succeed.
+#
+# Reproduces the original bug only when the caller passes an
+# *identifier* (which is lowered to OP_VIEW_LOCAL at the call
+# site and arrives as a VAL_REF{REF_VIEW} in the callee). A
+# literal argument would push a raw Int and hide the bug.
+func incr(start: view Int) ret Int {
+  let n: Int = start
+  n = n + 1
+  ret n
+}
+
+func main() {
+  let x: Int = 41
+  log("result={incr(start: x)}")
+}

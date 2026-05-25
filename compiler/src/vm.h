@@ -63,7 +63,15 @@ typedef enum {
   OP_GET_GLOBAL = 0x40,
   OP_SET_GLOBAL = 0x41,
   OP_GET_GLOBAL_INIT_BIT = 0x42,
-  OP_SET_GLOBAL_INIT_BIT = 0x43
+  OP_SET_GLOBAL_INIT_BIT = 0x43,
+
+  /* Like OP_BIND_LOCAL, but if the popped value is a VAL_REF it is
+     dereferenced first. Used by `let x: T = expr` (non-bind, `=`)
+     so the new local always owns a value, even when the RHS resolves
+     to a view/mod reference (e.g. `view Int` param). The explicit
+     `=>` bind path keeps OP_BIND_LOCAL so the slot can intentionally
+     hold a VAL_REF. */
+  OP_BIND_LOCAL_VALUE = 0x44
 } OpCode;
 
 typedef enum {
