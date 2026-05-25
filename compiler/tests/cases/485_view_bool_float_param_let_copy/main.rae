@@ -1,0 +1,22 @@
+# VM parity (post-Stage 6): same shape as 484, exercising `view Bool`
+# and `view Float` to confirm the let-init copy is uniform across all
+# primitive types — the let target's declared type picks binding mode,
+# not the RHS.
+func flipB(start: view Bool) ret Bool {
+  let b: Bool = start
+  b = b is false
+  ret b
+}
+
+func bumpF(start: view Float) ret Float {
+  let f: Float = start
+  f = f + 1.5
+  ret f
+}
+
+func main() {
+  let yes: Bool = true
+  let pi: Float = 3.5
+  log("bool={flipB(start: yes)}")
+  log("float={bumpF(start: pi)}")
+}
