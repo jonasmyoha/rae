@@ -1,0 +1,42 @@
+# Repro for the SIGABRT in rae_drop_struct_rae_UiWorld observed when
+# the user clicks a nav-tab in 98_mobile_ui.
+#
+# Hypothesis: appendActionEvent copies oc.actionId by SHALLOW alias
+# instead of deep-copying. When the InputSystem drops (its events
+# list cascade-drops each ActionEvent's actionId), the same heap
+# bytes are freed. Then when the world drops, the OnClick's actionId
+# field tries to free the same bytes again — double-free, libmalloc
+# aborts with "pointer being freed was not allocated".
+#
+# Shape matches the real path:
+#   - one entity with an OnClick whose actionId is a long-enough
+#     String to be heap-allocated (short strings might be inlined)
+#   - input has an ActionEvent referencing that actionId
+#   - input drops first (inner scope), world drops second (outer)
+import core
+import string
+import ui/ecs
+import ui/components
+import ui/input
+
+func main() {
+  let world: UiWorld = createUiWorld()
+  let entity: Int = createEntity(world: world)
+  let oc: OnClick = {
+    actionId: "playback.toggle.long.string"
+    actionIdDouble: ""
+    actionIdTriple: ""
+    maxDelayMs: 0
+  }
+  componentSet(this: world.onClicks, entity: entity, data: oc)
+
+  if true {
+    let input: InputSystem = createInputSystem()
+    let ocView: view OnClick => componentView(this: world.onClicks, entity: entity)
+    appendActionEvent(input: input, entity: entity, actionId: ocView.actionId)
+    log("appended action event; input has {input.events.length} events")
+  }
+  # `input` dropped here. Now we drop `world` at end of main —
+  # if appendActionEvent aliased the actionId, this is a double-free.
+  log("about to drop world")
+}
