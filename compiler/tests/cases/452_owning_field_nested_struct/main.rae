@@ -1,0 +1,28 @@
+# Stage 2 — owning field deep-copy: nested struct with a member-
+# access RHS. `let o2: Outer = { inner: o1.inner }` must deep-copy
+# Inner — including its List(String) — so that mutations to o2 do
+# not affect o1, and dropping either does not double-free the
+# other's heap. Extends Stage 2's IDENT source handling to MEMBER.
+import core
+import sys
+
+type Inner {
+  names: List(String)
+}
+
+type Outer {
+  inner: Inner
+}
+
+func main() {
+  let names1: List(String) = createList(String, initialCap: 2)
+  names1.add(value: "one")
+  names1.add(value: "two")
+  let o1: Outer = { inner: { names: own names1 } }
+  let o2: Outer = { inner: o1.inner }
+  o2.inner.names.add(value: "three")
+  log("o1.inner.names.length = {o1.inner.names.length}")
+  log("o2.inner.names.length = {o2.inner.names.length}")
+  log("o1.inner.names[0] = {o1.inner.names.get(index: 0)}")
+  log("o2.inner.names[2] = {o2.inner.names.get(index: 2)}")
+}
