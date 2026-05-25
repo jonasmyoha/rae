@@ -11,7 +11,7 @@ import sys
 
 # Case 1 + 5: early-ret returning interpolation result;
 # literal-backed return on the other branch.
-func make(flag: Bool) ret String {
+func make(flag: view Bool) ret String {
   if flag {
     ret "hello {1}"
   }
@@ -21,7 +21,7 @@ func make(flag: Bool) ret String {
 # Case 3 + 4: a local owned String (`tmp`) constructed before the
 # early ret. `tmp` must be dropped on every ret path; the returned
 # value must survive the cleanup.
-func makeWithTemp(flag: Bool) ret String {
+func makeWithTemp(flag: view Bool) ret String {
   let tmp: String = "tmp {1}"
   if flag {
     ret "result {2}"

@@ -318,19 +318,27 @@ and `c_discovery.c` to find every relevant location.
 
 ## Parameter-mode rules (current, normative)
 
-These rules describe the state of the language as of Stage 5 of
+These rules describe the state of the language as of Stage 6 of
 the memory-safety overhaul. They are enforced unconditionally by
 sema — no env flag, no opt-in.
 
-- **Function params must be explicit**: `view T`, `mod T`,
-  `copy T`, or `own T`. Choose the weakest mode that fits.
-- **Bare `T` params are no longer accepted. Hard error since
-  Stage 5.** The diagnostic names the parameter and the type
-  and suggests all four explicit modes. Primitives
-  (`Int`/`Int8…64`/`UInt…`/`Float…`/`Bool`/`Char`/`Char32`),
-  enums, and `Any` are still allowed bare because their value
-  semantics are unambiguous; externs are also skipped because
-  their parameter lists describe FFI shape, not Rae ownership.
+- **Every non-extern function parameter must be explicit**:
+  `view T`, `mod T`, `copy T`, or `own T`. There is no primitive
+  exemption — `view Int` is required even though the C backend
+  lowers it to the same pass-by-value machine code as a bare
+  `Int` would. Modes are *source-level semantic intent*, not
+  ABI.
+- This gives Rae a uniform refactoring story: replacing a
+  primitive parameter type with a richer struct doesn't change
+  the parameter-mode declaration. `view Bool` and
+  `view Visibility` share the same syntax.
+- **Bare `T` params are no longer accepted. Hard compile error
+  since Stage 5; extended to all types including primitives in
+  Stage 6.** The diagnostic names the parameter and recommends
+  the four explicit modes. `Any` and enums also require explicit
+  modes (Stage 6 narrowed earlier exemptions). Externs are
+  skipped because their parameter lists describe FFI shape, not
+  Rae ownership.
 - **The legacy `val T` syntax is also a hard error** with a
   "use `copy T` instead" suggestion. `val` was deprecated when
   `copy` landed in Stage 3.
@@ -357,16 +365,27 @@ sema — no env flag, no opt-in.
   entire call, so each arg has a distinct stack slot whose
   lifetime matches the SE block.
 
-### Final verification numbers (2026-05-25, Stage 5)
+### Final verification numbers (2026-05-25, Stage 6)
 
-- Unit tests: **310 passed, 0 failed** (includes new
-  `480_bare_T_param_rejected` and `481_bare_val_param_rejected`
-  negative tests asserting the new sema error)
+- Unit tests: **313 passed, 0 failed** (includes new
+  `482_bare_primitive_param_rejected` and
+  `483_explicit_primitive_modes_accepted` tests asserting Stage 6)
 - Example smoke tests: **50 passed, 0 failed**
 - Bare-T / `val T` warnings anywhere in the codebase: **0**
-  (the language no longer accepts them, so we no longer rely on
-  a strict env flag)
-- Leak tests `43[1,3,4,5,6,7,9]` + `440`: green under
-  `RAE_MEM_STATS=1`, 0 outstanding allocations on exit
-- Mobile UI 20k-iteration stress: RSS plateau at ~6.0 MB (97%
-  reduction vs pre-Stage-3 baseline); no linear leak observed
+  (the language no longer accepts them)
+- Leak tests `43[1,3,4,5,6,7,9]` + `440` + `442` + `460`-`464` +
+  `470`-`475`: green under `RAE_MEM_STATS=1`, 0 outstanding
+- Mobile UI 20k-iteration stress: RSS plateau at ~5.8 MB, flat
+  from iter 5k onwards, no linear leak
+
+### Stage 6 implementation notes
+
+- The migration also corrected a class of `copy T` ↔ `own T`
+  mix-ups in container `set`/`add`/`insert` operations
+  (`List(T).add`, `StringMap(V).set`, `IntMap(V).set`,
+  `componentSet`). These functions STORE the value into a
+  container, so `own T` is the semantic intent — `copy T` would
+  cause a double deep-copy at the call site (caller pays for one
+  copy, callee Stage 1 deep-copies again on field-init) which
+  showed up as a sustained ~3 KB/1000-iter leak in the mobile UI
+  stress test.

@@ -27,7 +27,7 @@ func rae_crypto_lock(key: Any, nonce: Any, plain: Any, plain_len: Int, mac: Any,
 
 func rae_crypto_unlock(key: Any, nonce: Any, mac: Any, cipher: Any, cipher_len: Int, plain: Any) extern ret Int
 
-func exit(code: Int) {
+func exit(code: view Int) {
   rae_sys_exit(code: code)
 }
 
@@ -84,10 +84,10 @@ func processRssKb() ret Int {
 # `void*` and adding `view` here breaks the conversion through
 # rae_any(). Leave bare until the buffer helpers grow proper
 # Buffer(T) types we can annotate.
-func encrypt(key: Any, nonce: Any, plain: Any, len: Int, mac: Any, cipher: Any) {
+func encrypt(key: Any, nonce: Any, plain: Any, len: view Int, mac: Any, cipher: Any) {
   rae_crypto_lock(key: key, nonce: nonce, plain: plain, plain_len: len, mac: mac, cipher: cipher)
 }
 
-func decrypt(key: Any, nonce: Any, mac: Any, cipher: Any, len: Int, plain: Any) ret Bool {
+func decrypt(key: Any, nonce: Any, mac: Any, cipher: Any, len: view Int, plain: Any) ret Bool {
   ret rae_crypto_unlock(key: key, nonce: nonce, mac: mac, cipher: cipher, cipher_len: len, plain: plain) is 0
 }

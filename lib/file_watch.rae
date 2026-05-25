@@ -39,7 +39,7 @@ type FileWatcher {
 # Take a snapshot of the current mtimes for every path. Subsequent
 # `checkForChanges` calls compare against this baseline, so the first
 # poll after construction does not spuriously fire.
-func createFileWatcher(paths: view List(String), enabled: Bool, intervalSec: Float) ret FileWatcher {
+func createFileWatcher(paths: view List(String), enabled: view Bool, intervalSec: view Float) ret FileWatcher {
   let entries: List(WatchEntry) = createList(WatchEntry, initialCap: paths.length)
   let i: Int = 0
   loop i < paths.length {
@@ -61,7 +61,7 @@ func createFileWatcher(paths: view List(String), enabled: Bool, intervalSec: Flo
 # poll. Throttled — calls within `intervalSec` of the last check are
 # free (return false). On `true`, the stored mtimes are refreshed so
 # the next call is quiet until the next on-disk edit.
-func checkForChanges(watcher: mod FileWatcher, now: Float) ret Bool {
+func checkForChanges(watcher: mod FileWatcher, now: view Float) ret Bool {
   if watcher.enabled is false {
     ret false
   }

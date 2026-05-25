@@ -19,7 +19,7 @@ import core
 import string
 
 # Returns the active flag for entity; defaults to true if no Active.
-func transformActive(world: view UiWorld, entity: Int) ret Bool {
+func transformActive(world: view UiWorld, entity: view Int) ret Bool {
   if componentHas(this: world.actives, entity: entity) is false {
     ret true
   }
@@ -27,7 +27,7 @@ func transformActive(world: view UiWorld, entity: Int) ret Bool {
   ret a.value
 }
 
-func transformOpacity(world: view UiWorld, entity: Int) ret Float {
+func transformOpacity(world: view UiWorld, entity: view Int) ret Float {
   if componentHas(this: world.opacities, entity: entity) is false {
     ret 1.0
   }
@@ -35,7 +35,7 @@ func transformOpacity(world: view UiWorld, entity: Int) ret Float {
   ret o.value
 }
 
-func transformFxOf(world: view UiWorld, entity: Int) ret TransformFx {
+func transformFxOf(world: view UiWorld, entity: view Int) ret TransformFx {
   if componentHas(this: world.transforms, entity: entity) is false {
     ret defaultTransformFx()
   }
@@ -43,7 +43,7 @@ func transformFxOf(world: view UiWorld, entity: Int) ret TransformFx {
   ret t
 }
 
-func computedRectOf(world: view UiWorld, entity: Int) ret ComputedRect {
+func computedRectOf(world: view UiWorld, entity: view Int) ret ComputedRect {
   if componentHas(this: world.computedRects, entity: entity) is false {
     ret ComputedRect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }
   }
@@ -59,11 +59,11 @@ func computedRectOf(world: view UiWorld, entity: Int) ret ComputedRect {
 # hides the whole subtree even if a descendant has Active=true).
 func composeTransform(
   world: mod UiWorld
-  entity: Int
-  parentX: Float
-  parentY: Float
-  parentAlpha: Float
-  parentVisible: Bool
+  entity: view Int
+  parentX: view Float
+  parentY: view Float
+  parentAlpha: view Float
+  parentVisible: view Bool
 ) {
   let cr: ComputedRect = computedRectOf(world: world, entity: entity)
   let fx: TransformFx = transformFxOf(world: world, entity: entity)

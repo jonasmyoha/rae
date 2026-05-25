@@ -45,7 +45,7 @@ type Game {
   maxLockTimer: Int
 }
 
-func getModernColor(index: Int) ret Color {
+func getModernColor(index: view Int) ret Color {
   # I - Cyan
   if index is 1 {
     ret Color { r: 100, g: 230, b: 255, a: 255 }
@@ -102,7 +102,7 @@ func getKindId(kind: TetrominoKind) ret Int {
 }
 
 # Returns 1 if cell at (x, y) is occupied or out of bounds
-func isOccupied(g: view Game, x: Int, y: Int) ret Int {
+func isOccupied(g: view Game, x: view Int, y: view Int) ret Int {
   if x < 0 or x >= g.width or y >= g.height {
     ret 1
   }
@@ -117,7 +117,7 @@ func isOccupied(g: view Game, x: Int, y: Int) ret Int {
 }
 
 # Simple shape definitions (4x4 max)
-func getShapeCell(kind: TetrominoKind, rot: Int, px: Int, py: Int) ret Int {
+func getShapeCell(kind: TetrominoKind, rot: view Int, px: view Int, py: view Int) ret Int {
   if kind is TetrominoKind.I {
     if rot is 0 or rot is 2 {
       if px is 1 {
@@ -240,7 +240,7 @@ func getShapeCell(kind: TetrominoKind, rot: Int, px: Int, py: Int) ret Int {
   ret 0
 }
 
-func canMove(g: view Game, dx: Int, dy: Int, dr: Int) ret Int {
+func canMove(g: view Game, dx: view Int, dy: view Int, dr: view Int) ret Int {
   let cp: view Piece => g.currentPiece
   let pos: view Pos => cp.pos
   let newX: Int = pos.x + dx

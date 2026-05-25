@@ -5,7 +5,7 @@ type List2Int {
   capacity: Int
 }
 
-func createList2Int(initialCap: Int) ret List2Int {
+func createList2Int(initialCap: view Int) ret List2Int {
   ret List2Int { data: __buf_alloc(size: initialCap), length: 0, capacity: initialCap }
 }
 
@@ -27,7 +27,7 @@ func grow(this: mod List2Int) {
   this.capacity = newCap
 }
 
-func add(this: mod List2Int, value: Int) {
+func add(this: mod List2Int, value: view Int) {
   if this.length is this.capacity {
     grow(this)
   }
@@ -35,7 +35,7 @@ func add(this: mod List2Int, value: Int) {
   this.length = this.length + 1
 }
 
-func get(this: view List2Int, index: Int) ret Int {
+func get(this: view List2Int, index: view Int) ret Int {
   ret __buf_get(buf: this.data, index: index)
 }
 

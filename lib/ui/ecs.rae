@@ -27,7 +27,7 @@ import core
 # they appear *inside* a function generic over T — it substitutes T
 # into the inner specialisation. Routing through a non-generic helper
 # stops the substitution.
-func appendEntityList(lst: mod List(Int), value: Int) {
+func appendEntityList(lst: mod List(Int), value: view Int) {
   lst.add(value: value)
 }
 
@@ -82,7 +82,7 @@ func drop(T)(this: mod ComponentTable(T)) {
 # `rae_get_<T>_<List<T>>_int64_t_` substituted with the outer T (so
 # `List(Int).get` becomes `List(Rect).get` when T=Rect). Bypass via
 # `rae_ext_rae_buf_get` which doesn't go through the generic dispatch.
-func componentIndexOf(T)(this: view ComponentTable(T), entity: Int) ret Int {
+func componentIndexOf(T)(this: view ComponentTable(T), entity: view Int) ret Int {
   let n: Int = this.denseEntities.length
   let i: Int = 0
   loop i < n {
@@ -95,7 +95,7 @@ func componentIndexOf(T)(this: view ComponentTable(T), entity: Int) ret Int {
   ret -1
 }
 
-func componentHas(T)(this: view ComponentTable(T), entity: Int) ret Bool {
+func componentHas(T)(this: view ComponentTable(T), entity: view Int) ret Bool {
   ret componentIndexOf(this, entity: entity) >= 0
 }
 
@@ -110,7 +110,7 @@ func componentHas(T)(this: view ComponentTable(T), entity: Int) ret Bool {
 #     let r: Rect = componentGet(table, entity: e)
 #     ...
 #   }
-func componentGet(T)(this: view ComponentTable(T), entity: Int) ret T {
+func componentGet(T)(this: view ComponentTable(T), entity: view Int) ret T {
   let idx: Int = componentIndexOf(this, entity: entity)
   let safeIdx: Int = idx
   if safeIdx < 0 {
@@ -126,7 +126,7 @@ func componentGet(T)(this: view ComponentTable(T), entity: Int) ret T {
 # struct memcpy would alias the table's heap). The `view T` return
 # makes Rae treat the binding as a borrow: no auto-drop, no
 # ownership claim, just a window into the world's memory.
-func componentView(T)(this: view ComponentTable(T), entity: Int) ret view T {
+func componentView(T)(this: view ComponentTable(T), entity: view Int) ret view T {
   let idx: Int = componentIndexOf(this, entity: entity)
   let safeIdx: Int = idx
   if safeIdx < 0 {
@@ -137,7 +137,7 @@ func componentView(T)(this: view ComponentTable(T), entity: Int) ret view T {
 
 # Borrow a mutable reference into the table's storage. Mutating
 # through the returned ref writes directly to the component slot.
-func componentMod(T)(this: mod ComponentTable(T), entity: Int) ret mod T {
+func componentMod(T)(this: mod ComponentTable(T), entity: view Int) ret mod T {
   let idx: Int = componentIndexOf(this, entity: entity)
   let safeIdx: Int = idx
   if safeIdx < 0 {
@@ -148,7 +148,7 @@ func componentMod(T)(this: mod ComponentTable(T), entity: Int) ret mod T {
 
 # Add or replace the component for `entity`. Internally aliases the
 # two inner lists so the mutation propagates on both targets.
-func componentSet(T)(this: mod ComponentTable(T), entity: Int, data: T) {
+func componentSet(T)(this: mod ComponentTable(T), entity: view Int, data: own T) {
   let entities: mod List(Int) => this.denseEntities
   let datas: mod List(T) => this.denseData
   let n: Int = entities.length
@@ -177,7 +177,7 @@ func componentSet(T)(this: mod ComponentTable(T), entity: Int, data: T) {
 
 # Swap-remove the component for `entity`. Order in the table is not
 # preserved (no callers depend on it).
-func componentRemove(T)(this: mod ComponentTable(T), entity: Int) {
+func componentRemove(T)(this: mod ComponentTable(T), entity: view Int) {
   let entities: mod List(Int) => this.denseEntities
   let datas: mod List(T) => this.denseData
   let idx: Int = componentIndexOf(T, this: this, entity: entity)
@@ -202,13 +202,13 @@ func componentCount(T)(this: view ComponentTable(T)) ret Int {
 }
 
 # Iteration helper: returns the entity id at dense index `i`.
-func componentEntityAt(T)(this: view ComponentTable(T), i: Int) ret Int {
+func componentEntityAt(T)(this: view ComponentTable(T), i: view Int) ret Int {
   let e: Int = rae_ext_rae_buf_get(buf: this.denseEntities.data, index: i)
   ret e
 }
 
 # Iteration helper: returns the component data at dense index `i`.
-func componentDataAt(T)(this: view ComponentTable(T), i: Int) ret T {
+func componentDataAt(T)(this: view ComponentTable(T), i: view Int) ret T {
   let v: T = rae_ext_rae_buf_get(buf: this.denseData.data, index: i)
   ret v
 }
@@ -367,7 +367,7 @@ func createEntity(world: mod UiWorld) ret Int {
   ret id
 }
 
-func isAlive(world: view UiWorld, entity: Int) ret Bool {
+func isAlive(world: view UiWorld, entity: view Int) ret Bool {
   let n: Int = world.alive.length
   let i: Int = 0
   loop i < n {

@@ -6,13 +6,13 @@
 import raylib
 
 # Convert (gridX, gridY) to world Vector3 centred on the cell.
-func cellPos(gx: Int, gy: Int) ret Vector3 {
+func cellPos(gx: view Int, gy: view Int) ret Vector3 {
   let cx: Float = gx.toFloat() + 0.5
   let cy: Float = (0.0 - gy.toFloat()) - 0.5
   ret Vector3 { x: cx, y: cy, z: 0.0 }
 }
 
-func drawBlock(gx: Int, gy: Int, kindId: Int, flash: Float) {
+func drawBlock(gx: view Int, gy: view Int, kindId: view Int, flash: view Float) {
   let pos: Vector3 = cellPos(gx: gx, gy: gy)
   let col: Color = kindColor(id: kindId)
   # Lock-flash: brighten colour briefly when a piece just locks.
