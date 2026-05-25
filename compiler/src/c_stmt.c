@@ -105,6 +105,32 @@ bool type_needs_cascade_drop(CompilerContext* cctx, const AstModule* module,
   return false;
 }
 
+// Deep-copy classifier — see header. Structurally identical to
+// `type_needs_cascade_drop` but kept as a separate function so the two
+// concerns can diverge as the language evolves (e.g. a future hashtable
+// type might own heap but be intentionally non-copyable, in which case
+// it would stay true for cascade-drop but become false for deep-copy).
+//
+// Today the predicates agree on every type we ship.
+bool type_needs_deep_copy(CompilerContext* cctx, const AstModule* module,
+                          const AstTypeRef* type, int depth) {
+  if (!type || depth > 32) return false;
+  if (type->is_view || type->is_mod) return false;
+  if (is_drop_target_type(type)) return true;
+  Str base = get_base_type_name(type);
+  if (str_eq_cstr(base, "String")) return true;
+  // Any / RaeAny is an opaque box — shallow assignment is fine because
+  // the heap (if any) is reference-counted at the value level.
+  if (str_eq_cstr(base, "Any") || str_eq_cstr(base, "RaeAny")) return false;
+  const AstDecl* d = find_type_decl(NULL, module, base);
+  if (!d || d->kind != AST_DECL_TYPE) return false;
+  if (has_property(d->as.type_decl.properties, "c_struct")) return false;
+  for (const AstTypeField* f = d->as.type_decl.fields; f; f = f->next) {
+    if (type_needs_deep_copy(cctx, module, f->type, depth + 1)) return true;
+  }
+  return false;
+}
+
 // Locate the `drop` generic-function overload whose receiver type's
 // base name matches `container_base` ("List" / "StringMap" / "IntMap").
 // Returns NULL if no overload exists — callers silently skip the drop
@@ -595,6 +621,12 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             break;
         }
         case AST_STMT_LET: {
+            // Tracks whether the RHS was wrapped in rae_string_copy /
+            // rae_deep_copy_<T>. The post-init ownership classifier
+            // below uses this to mark the local as owning (since the
+            // copy gave it private heap), overriding the default
+            // bare-ident-IDENT-aliases-source classification.
+            bool let_did_deep_copy = false;
             fprintf(out, "  ");
             emit_type_ref_as_c_type(ctx, stmt->as.let_stmt.type, out, false);
             fprintf(out, " %.*s = ", (int)stmt->as.let_stmt.name.len, stmt->as.let_stmt.name.data);
@@ -741,9 +773,80 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     Str lbase = get_base_type_name(stmt->as.let_stmt.type);
                     if (str_eq_cstr(lbase, "String")) wrap_str_take = true;
                 }
-                if (wrap_str_take) fprintf(out, "rae_string_pool_take(");
-                emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, false, false);
-                if (wrap_str_take) fprintf(out, ")");
+
+                // === Owning-let deep-copy ===
+                //
+                // Rule: Rae must never silently shallow-copy an owning
+                // value. `let b: T = a` where `a` is a bare identifier
+                // (no `own`, no `view`) MUST deep-copy if T owns heap.
+                // Without this the binding shallow-aliases `a`'s
+                // backing buffer/string and the implicit auto-drop
+                // double-frees at scope end.
+                //
+                // The init is `a` (bare ident, not wrapped in `own`)
+                // when init->kind == AST_EXPR_IDENT. `own a` parses as
+                // AST_EXPR_OWN { operand: IDENT(a) }, which keeps the
+                // move-semantics path (no copy).
+                //
+                // String IDENT case is handled by the special
+                // wrap_str_take/rae_string_copy hand-off below — the
+                // pool_take wrapper is replaced with rae_string_copy
+                // since the ident's storage is still live in its
+                // owner.
+                //
+                // Container & user-struct cases are emitted as a
+                // statement-expression: declare a temp, call
+                // rae_deep_copy_<T>, evaluate to the temp.
+                bool deep_copy_ident = false;
+                bool deep_copy_string_ident = false;
+                if (stmt->as.let_stmt.type
+                    && !stmt->as.let_stmt.type->is_view
+                    && !stmt->as.let_stmt.type->is_mod
+                    && !stmt->as.let_stmt.type->is_opt
+                    && stmt->as.let_stmt.value->kind == AST_EXPR_IDENT
+                    && type_needs_deep_copy(ctx->compiler_ctx, ctx->module,
+                                            stmt->as.let_stmt.type, 0)) {
+                    Str lbase = get_base_type_name(stmt->as.let_stmt.type);
+                    if (str_eq_cstr(lbase, "String")) {
+                        deep_copy_string_ident = true;
+                    } else {
+                        deep_copy_ident = true;
+                    }
+                }
+
+                if (deep_copy_string_ident) {
+                    // `let b: String = a` — deep copy via rae_string_copy.
+                    // Replaces the pool_take wrapper which would only
+                    // detach (and the ident's storage isn't in the pool
+                    // anyway, so pool_take is a no-op alias). Without
+                    // the copy, `b` shallow-aliases `a`'s string heap
+                    // and the per-local auto-drop at scope end double-
+                    // frees.
+                    fprintf(out, "rae_string_copy(");
+                    emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, false, false);
+                    fprintf(out, ")");
+                    let_did_deep_copy = true;
+                } else if (deep_copy_ident) {
+                    // Container or user-struct deep copy via
+                    // statement-expression. The synthesised helper
+                    // `rae_deep_copy_<MangledT>` is forward-declared at
+                    // the top of the compilation unit (see
+                    // c_backend.c's copy_entries / container_entries
+                    // emission).
+                    const char* tn_dc = rae_mangle_type_specialized(
+                        ctx->compiler_ctx, ctx->generic_params,
+                        ctx->generic_args, stmt->as.let_stmt.type);
+                    int tmp_id = ctx->temp_counter++;
+                    fprintf(out, "(__extension__ ({ %s __dc%d; rae_deep_copy_%s(&__dc%d, &(",
+                            tn_dc, tmp_id, tn_dc, tmp_id);
+                    emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, false, false);
+                    fprintf(out, ")); __dc%d; }))", tmp_id);
+                    let_did_deep_copy = true;
+                } else {
+                    if (wrap_str_take) fprintf(out, "rae_string_pool_take(");
+                    emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, false, false);
+                    if (wrap_str_take) fprintf(out, ")");
+                }
                 if (needs_box) fprintf(out, "))");
                 ctx->has_expected_type = false;
             } else {
@@ -785,6 +888,13 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     || (init->kind == AST_EXPR_OBJECT)
                     || (init->kind == AST_EXPR_INTERP)
                     || (init->kind == AST_EXPR_BINARY);
+                // Owning-let deep-copy path (above): when we wrapped the
+                // bare-ident RHS in rae_string_copy / rae_deep_copy_<T>,
+                // the binding now owns its own private heap and must
+                // run the full drop chain at scope end.
+                if (let_did_deep_copy) {
+                  owns = true;
+                }
                 // Body-inspect both AST_EXPR_CALL and AST_EXPR_METHOD_CALL
                 // initializers. Method calls like `node.childrenIds.get(
                 // index: q)` lower to a free-function call internally and
@@ -843,7 +953,10 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 // local doesn't actually own that heap — clear the
                 // bit so a later auto-drop / reassign drop becomes a
                 // no-op and the canonical owner (the list) cleans up.
-                if (!owns && stmt->as.let_stmt.type
+                //
+                // Skip the clear if we deep-copied (rae_string_copy
+                // returns is_owned=1 and the heap really is private).
+                if (!owns && !let_did_deep_copy && stmt->as.let_stmt.type
                     && !stmt->as.let_stmt.type->is_view
                     && !stmt->as.let_stmt.type->is_mod
                     && str_eq_cstr(get_base_type_name(stmt->as.let_stmt.type), "String")) {
