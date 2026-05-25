@@ -492,7 +492,37 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         }
         Value value = vm_pop(vm);
         value_free(&frame->locals[slot]);
-        frame->locals[slot] = value; 
+        frame->locals[slot] = value;
+        break;
+      }
+      case OP_BIND_LOCAL_VALUE: {
+        // Like OP_BIND_LOCAL, but derefs VAL_REF so the new local owns a
+        // value instead of aliasing the source. Used for `let x: T = expr`
+        // when the let does NOT use the `=>` bind syntax — so the new
+        // local must be a fresh owning value even if the RHS happens to
+        // be a `view T` / `mod T` reference (e.g. a `view Int` param).
+        // The explicit `=>` bind path keeps OP_BIND_LOCAL.
+        uint32_t slot = read_uint32(vm);
+        CallFrame* frame = vm_current_frame(vm);
+        if (!frame) {
+          diag_error(NULL, 0, 0, "VM local access outside of function");
+          return VM_RUNTIME_ERROR;
+        }
+        if (slot >= 256) {
+          diag_error(NULL, 0, 0, "VM local slot out of range");
+          return VM_RUNTIME_ERROR;
+        }
+        Value value = vm_pop(vm);
+        if (value.type == VAL_REF) {
+          // Deep-copy the underlying target so the new local owns its
+          // bytes. Then free the ref wrapper (no-op for VAL_REF in
+          // value_free, but kept for symmetry / future-proofing).
+          Value resolved = value_copy(value.as.ref_value.target);
+          value_free(&value);
+          value = resolved;
+        }
+        value_free(&frame->locals[slot]);
+        frame->locals[slot] = value;
         break;
       }
       case OP_ALLOC_LOCAL: {

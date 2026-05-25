@@ -1,0 +1,13 @@
+# VM parity: even after the let-init copy fix, the explicit `=>`
+# view-binding syntax still produces a read-only alias. Mutating
+# through that alias MUST remain a diagnostic — this preserves the
+# safety property the migration relies on.
+func foo(x: view Int) {
+  let r: view Int => x
+  r = 99
+}
+
+func main() {
+  let v: Int = 5
+  foo(x: v)
+}

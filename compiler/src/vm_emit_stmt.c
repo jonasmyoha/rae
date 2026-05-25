@@ -266,11 +266,23 @@ bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
           }
           compiler->expected_type = saved_expected;
           // `let x: T = expr` is initialization, not assignment-through-ref.
-          // OP_BIND_LOCAL frees the slot and installs the fresh value
-          // directly. Closes a class of bug where a slot reused from a
-          // previous scope still holds a VAL_REF{REF_VIEW} and would
-          // otherwise trip vm.c:464's read-only diagnostic.
-          emit_op(compiler, OP_BIND_LOCAL, (int)stmt->line);
+          // OP_BIND_LOCAL_VALUE frees the slot and installs the fresh
+          // value, deref'ing if the RHS happens to be a VAL_REF
+          // (which happens for `let x: T = view_param`, where the
+          // call-site emitted OP_VIEW_LOCAL). The let target's
+          // declared type — bare `T` here — picks binding mode, not
+          // the RHS: this branch is reached only when the source
+          // form is `=`, not `=>`. The `=>` bind path above keeps
+          // OP_BIND_LOCAL so the slot intentionally holds a VAL_REF.
+          //
+          // Closes two classes of bug:
+          //   - A slot reused from a previous scope still holds a
+          //     VAL_REF{REF_VIEW} (the original Layer B fix).
+          //   - The RHS is a VAL_REF (post-Stage 6: stdlib params like
+          //     `entity: Int` migrated to `entity: view Int`, and code
+          //     like `let entity: Int = mountEntity` would otherwise
+          //     bind the local as an alias to the read-only view).
+          emit_op(compiler, OP_BIND_LOCAL_VALUE, (int)stmt->line);
           emit_uint32(compiler, (uint32_t)slot, (int)stmt->line);
       }
 
