@@ -266,8 +266,13 @@ func mountSceneInstance(
   let i: Int = 0
   loop i < nodeCount {
     let node: view SceneNode => sceneNodeAt(this: scene, idx: i)
-    let entity: Int = mountEntity
-    if i is not rootIdx {
+    # Init from a literal so the Live VM treats `entity` as a fresh
+    # Int local; init-from-`view Int` currently binds (rather than
+    # copies) and would block the reassignment below.
+    let entity: Int = 0
+    if i is rootIdx {
+      entity = mountEntity
+    } else {
       entity = createEntity(world: world)
     }
     appendIntListSI(lst: entitiesByNodeIndex, value: entity)
