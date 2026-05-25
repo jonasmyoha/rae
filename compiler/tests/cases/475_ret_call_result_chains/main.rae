@@ -1,0 +1,29 @@
+# Stage 4: returning a call result of an owning type must not
+# introduce a spurious extra copy. The inner call's return is
+# already a freshly-owned heap allocation; the outer call's `ret`
+# just transfers it. Only one buffer is allocated end-to-end (plus
+# the one created inside the factory).
+#
+# Indirectly verifies the rvalue-source skip path: a CALL ret-value
+# is NOT an alias source, so Stage 4 must not wrap it.
+import core
+import sys
+
+func factory() ret List(Int) {
+  let xs: List(Int) = createList(Int, initialCap: 4)
+  xs.add(value: 1)
+  xs.add(value: 2)
+  xs.add(value: 3)
+  ret xs
+}
+
+func wrapper() ret List(Int) {
+  ret factory()
+}
+
+func main() {
+  let b: List(Int) = wrapper()
+  log("b.length = {b.length}")
+  log("b[0] = {b.get(index: 0)}")
+  log("b[2] = {b.get(index: 2)}")
+}

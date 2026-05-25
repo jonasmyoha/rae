@@ -1,0 +1,22 @@
+# Stage 4: returning an owning List that the function built up
+# locally must move (not copy) the buffer to the caller. The local
+# is marked moved (Stage 3) so its scope-exit drop is skipped; the
+# caller's binding takes over the allocation. Exactly one alloc,
+# exactly one drop — no double-free.
+import core
+import sys
+
+func factory() ret List(Int) {
+  let xs: List(Int) = createList(Int, initialCap: 4)
+  xs.add(value: 10)
+  xs.add(value: 20)
+  xs.add(value: 30)
+  ret xs
+}
+
+func main() {
+  let b: List(Int) = factory()
+  log("b.length = {b.length}")
+  log("b[0] = {b.get(index: 0)}")
+  log("b[2] = {b.get(index: 2)}")
+}
