@@ -1,0 +1,24 @@
+# Stage 4: returning an owning user struct (carrying List/String
+# fields) from a `view` receiver must deep-copy the whole tree so
+# the caller's binding is independent of the source's storage.
+# Without Stage 4, returning `h` shallow-aliases h.items.data; the
+# caller's auto-drop frees the buffer and so does the source's
+# auto-drop at scope end.
+import core
+import sys
+
+type Wrap { items: List(Int) }
+
+func clone(w: view Wrap) ret Wrap { ret w }
+
+func main() {
+  let xs: List(Int) = createList(Int, initialCap: 4)
+  xs.add(value: 7)
+  xs.add(value: 8)
+  let a: Wrap = { items: xs }
+  let b: Wrap = clone(w: a)
+  b.items.add(value: 99)
+  log("a.items.length = {a.items.length}")
+  log("b.items.length = {b.items.length}")
+  log("b.items[2] = {b.items.get(index: 2)}")
+}

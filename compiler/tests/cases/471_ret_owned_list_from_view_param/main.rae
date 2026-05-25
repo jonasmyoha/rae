@@ -1,0 +1,24 @@
+# Stage 4: returning an owning List type when the source is a
+# `view List(E)` parameter must deep-copy at the return site.
+# Without the copy, the caller's binding and the original storage
+# share the buffer — caller's scope-exit drop + original drop =
+# double-free.
+#
+# The mutation on `b` after the call must not leak back into `a`:
+# the buffers are independent.
+import core
+import sys
+
+func first(xs: view List(Int)) ret List(Int) { ret xs }
+
+func main() {
+  let a: List(Int) = createList(Int, initialCap: 4)
+  a.add(value: 1)
+  a.add(value: 2)
+  let b: List(Int) = first(xs: a)
+  b.add(value: 99)
+  log("a.length = {a.length}")
+  log("b.length = {b.length}")
+  log("a[0] = {a.get(index: 0)}")
+  log("b[2] = {b.get(index: 2)}")
+}
