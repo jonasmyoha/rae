@@ -1,0 +1,18 @@
+# Owning-let deep-copy: List(String).
+# `let b: List(String) = a` MUST deep-copy the buffer AND each
+# String element. Both lists should own independent String heaps;
+# both should drop cleanly with zero outstanding allocations.
+import core
+import sys
+
+func main() {
+  let a: List(String) = createList(String, initialCap: 2)
+  a.add(value: "alpha")
+  a.add(value: "beta")
+  let b: List(String) = a
+  b.add(value: "gamma")
+  log("a.length = {a.length}")
+  log("b.length = {b.length}")
+  log("a[0] = {a.get(index: 0)}")
+  log("b[2] = {b.get(index: 2)}")
+}
