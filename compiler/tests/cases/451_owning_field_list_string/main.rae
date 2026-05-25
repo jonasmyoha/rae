@@ -1,0 +1,27 @@
+# Stage 2 — owning field deep-copy: List(String).
+# `let h: Holder = { names: xs }` where Holder.names is List(String).
+# MUST recursively deep-copy: a fresh backing buffer, and a fresh
+# rae_string_copy of every element. Mutating xs after the literal
+# must leave h.names completely untouched, including its Strings.
+import core
+import sys
+
+type Holder {
+  names: List(String)
+}
+
+func main() {
+  let xs: List(String) = createList(String, initialCap: 2)
+  xs.add(value: "alpha")
+  xs.add(value: "beta")
+  let h: Holder = { names: xs }
+  # Mutate xs — both adding new elements and replacing existing
+  # ones — to check that h.names didn't share the buffer.
+  xs.add(value: "gamma")
+  xs.add(value: "delta")
+  log("xs.length = {xs.length}")
+  log("h.names.length = {h.names.length}")
+  log("xs[0] = {xs.get(index: 0)}")
+  log("h.names[0] = {h.names.get(index: 0)}")
+  log("h.names[1] = {h.names.get(index: 1)}")
+}

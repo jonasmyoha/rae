@@ -1,0 +1,23 @@
+# Stage 2 — owning field deep-copy: `own` opts out of the copy.
+# `let h: Holder = { items: own xs }` MOVES xs's buffer into the
+# field — no extra alloc, no double-free. After the literal, xs
+# is considered moved (auto-drop skips it). Mutating h.items is
+# fine; we cannot legally touch xs after the move.
+import core
+import sys
+
+type Holder {
+  items: List(Int)
+}
+
+func main() {
+  let xs: List(Int) = createList(Int, initialCap: 4)
+  xs.add(value: 10)
+  xs.add(value: 20)
+  xs.add(value: 30)
+  let h: Holder = { items: own xs }
+  h.items.add(value: 99)
+  log("h.items.length = {h.items.length}")
+  log("h.items[0] = {h.items.get(index: 0)}")
+  log("h.items[3] = {h.items.get(index: 3)}")
+}
