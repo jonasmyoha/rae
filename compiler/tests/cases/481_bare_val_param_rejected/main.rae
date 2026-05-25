@@ -1,0 +1,14 @@
+# Stage 5: the legacy `val T` parameter syntax is rejected by sema
+# with a suggestion to use the modern `copy T` mode instead.
+type Box {
+  x: Int
+}
+
+func take(b: val Box) {
+  log("x={b.x}")
+}
+
+func main() {
+  let b: Box = { x: 7 }
+  take(b: b)
+}

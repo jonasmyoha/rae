@@ -318,18 +318,22 @@ and `c_discovery.c` to find every relevant location.
 
 ## Parameter-mode rules (current, normative)
 
-These rules describe the state of the language as of the
-2026-05-25 alias-detection fix. They are enforced by
-`RAE_STRICT_PARAM_MODES=1`, which is the canonical build setting
-for new code.
+These rules describe the state of the language as of Stage 5 of
+the memory-safety overhaul. They are enforced unconditionally by
+sema — no env flag, no opt-in.
 
 - **Function params must be explicit**: `view T`, `mod T`,
   `copy T`, or `own T`. Choose the weakest mode that fits.
-- **Bare `T` params are no longer accepted under strict mode.**
-  They still parse for backwards compatibility but emit a
-  warning under strict mode and will become a hard error in a
-  future release. Migrate to `copy T` if you really want a
-  by-value copy.
+- **Bare `T` params are no longer accepted. Hard error since
+  Stage 5.** The diagnostic names the parameter and the type
+  and suggests all four explicit modes. Primitives
+  (`Int`/`Int8…64`/`UInt…`/`Float…`/`Bool`/`Char`/`Char32`),
+  enums, and `Any` are still allowed bare because their value
+  semantics are unambiguous; externs are also skipped because
+  their parameter lists describe FFI shape, not Rae ownership.
+- **The legacy `val T` syntax is also a hard error** with a
+  "use `copy T` instead" suggestion. `val` was deprecated when
+  `copy` landed in Stage 3.
 - **`view String` is the correct mode for read-only string
   parsing APIs.** Examples: `parseJson(source: view String)`,
   `parseScene(source: view String)`, `sceneNodeIndex(nodeId:
@@ -353,12 +357,16 @@ for new code.
   entire call, so each arg has a distinct stack slot whose
   lifetime matches the SE block.
 
-### Final verification numbers (2026-05-25)
+### Final verification numbers (2026-05-25, Stage 5)
 
-- Unit tests: **246 passed, 0 failed**
-- Example smoke tests: **49 passed, 0 failed**
-- `RAE_STRICT_PARAM_MODES=1` warnings on mobile UI build: **0**
+- Unit tests: **310 passed, 0 failed** (includes new
+  `480_bare_T_param_rejected` and `481_bare_val_param_rejected`
+  negative tests asserting the new sema error)
+- Example smoke tests: **50 passed, 0 failed**
+- Bare-T / `val T` warnings anywhere in the codebase: **0**
+  (the language no longer accepts them, so we no longer rely on
+  a strict env flag)
 - Leak tests `43[1,3,4,5,6,7,9]` + `440`: green under
   `RAE_MEM_STATS=1`, 0 outstanding allocations on exit
-- Mobile UI 20k-iteration stress: RSS plateau at ~5.5 MB (97%
+- Mobile UI 20k-iteration stress: RSS plateau at ~6.0 MB (97%
   reduction vs pre-Stage-3 baseline); no linear leak observed

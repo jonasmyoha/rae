@@ -37,7 +37,7 @@ func caseDeepCopy() {
 
 # Case 2: caller→callee chain. The struct-literal inside the callee
 # must NOT free the caller's String when p goes out of scope.
-func makeParser(source: String) ret Parser {
+func makeParser(source: own String) ret Parser {
   let p: Parser = { source: source, pos: 0 }
   ret p
 }
