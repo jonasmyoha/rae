@@ -70,7 +70,7 @@ func jsonNull() ret JsonValue {
   }
 }
 
-func jsonBoolValue(v: Bool) ret JsonValue {
+func jsonBoolValue(v: view Bool) ret JsonValue {
   ret JsonValue {
     kind: JsonKind.Bool
     asBool: v
@@ -81,7 +81,7 @@ func jsonBoolValue(v: Bool) ret JsonValue {
   }
 }
 
-func jsonNumberValue(v: Float) ret JsonValue {
+func jsonNumberValue(v: view Float) ret JsonValue {
   ret JsonValue {
     kind: JsonKind.Number
     asBool: false
@@ -105,17 +105,17 @@ func jsonStringValue(v: own String) ret JsonValue {
 
 # ---------- pool primitives (raw buf calls; List.get returns RaeAny for struct types in compiled) ----------
 
-func valueAt(doc: view JsonDoc, idx: Int) ret JsonValue {
+func valueAt(doc: view JsonDoc, idx: view Int) ret JsonValue {
   let v: JsonValue = rae_ext_rae_buf_get(buf: doc.values.data, index: idx)
   ret v
 }
 
-func childAt(doc: view JsonDoc, idx: Int) ret Int {
+func childAt(doc: view JsonDoc, idx: view Int) ret Int {
   let v: Int = rae_ext_rae_buf_get(buf: doc.children.data, index: idx)
   ret v
 }
 
-func fieldAt(doc: view JsonDoc, idx: Int) ret JsonField {
+func fieldAt(doc: view JsonDoc, idx: view Int) ret JsonField {
   let v: JsonField = rae_ext_rae_buf_get(buf: doc.fields.data, index: idx)
   ret v
 }
@@ -129,14 +129,14 @@ func jsonRoot(doc: view JsonDoc) ret JsonValue {
   ret valueAt(doc: doc, idx: doc.rootIdx)
 }
 
-func jsonInt(this: view JsonValue, fallback: Int) ret Int {
+func jsonInt(this: view JsonValue, fallback: view Int) ret Int {
   if this.kind is JsonKind.Number {
     ret this.asNumber.toInt()
   }
   ret fallback
 }
 
-func jsonFloat(this: view JsonValue, fallback: Float) ret Float {
+func jsonFloat(this: view JsonValue, fallback: view Float) ret Float {
   if this.kind is JsonKind.Number {
     ret this.asNumber
   }
@@ -156,7 +156,7 @@ func jsonString(this: view JsonValue, fallback: view String) ret String {
   ret rae_ext_rae_string_copy(s: fallback)
 }
 
-func jsonBool(this: view JsonValue, fallback: Bool) ret Bool {
+func jsonBool(this: view JsonValue, fallback: view Bool) ret Bool {
   if this.kind is JsonKind.Bool {
     ret this.asBool
   }
@@ -170,7 +170,7 @@ func jsonArrayLen(this: view JsonValue) ret Int {
   ret this.rangeLen
 }
 
-func jsonArrayAt(doc: view JsonDoc, this: view JsonValue, idx: Int) ret JsonValue {
+func jsonArrayAt(doc: view JsonDoc, this: view JsonValue, idx: view Int) ret JsonValue {
   if this.kind is not JsonKind.Array {
     ret jsonNull()
   }
@@ -188,7 +188,7 @@ func jsonObjectLen(this: view JsonValue) ret Int {
   ret this.rangeLen
 }
 
-func jsonObjectKeyAt(doc: view JsonDoc, this: view JsonValue, idx: Int) ret String {
+func jsonObjectKeyAt(doc: view JsonDoc, this: view JsonValue, idx: view Int) ret String {
   if this.kind is not JsonKind.Object {
     ret ""
   }
@@ -199,7 +199,7 @@ func jsonObjectKeyAt(doc: view JsonDoc, this: view JsonValue, idx: Int) ret Stri
   ret f.key
 }
 
-func jsonObjectValueAt(doc: view JsonDoc, this: view JsonValue, idx: Int) ret JsonValue {
+func jsonObjectValueAt(doc: view JsonDoc, this: view JsonValue, idx: view Int) ret JsonValue {
   if this.kind is not JsonKind.Object {
     ret jsonNull()
   }
@@ -231,7 +231,7 @@ func jsonField(doc: view JsonDoc, this: view JsonValue, key: view String) ret In
 
 # Resolve a value-pool index into a JsonValue (for callers chaining off
 # `jsonField`). Returns null-shaped if idx is out of range.
-func jsonValueAt(doc: view JsonDoc, idx: Int) ret JsonValue {
+func jsonValueAt(doc: view JsonDoc, idx: view Int) ret JsonValue {
   if idx < 0 or idx >= doc.values.length {
     ret jsonNull()
   }
@@ -240,11 +240,11 @@ func jsonValueAt(doc: view JsonDoc, idx: Int) ret JsonValue {
 
 # ---------- parser internals ----------
 
-func isWhitespace(c: Char32) ret Bool {
+func isWhitespace(c: view Char32) ret Bool {
   ret c is ' ' or c is '\t' or c is '\n' or c is '\r'
 }
 
-func isDigit(c: Char32) ret Bool {
+func isDigit(c: view Char32) ret Bool {
   # Live VM doesn't currently support range comparisons (`>=`, `<=`) on
   # Char32 — equality is fine. List the ten digit codepoints explicitly
   # so the parser works on both targets.
@@ -299,7 +299,7 @@ func peek(p: view JsonParser) ret Char32 {
   ret p.source.at(index: p.pos)
 }
 
-func consume(p: mod JsonParser, c: Char32) ret Bool {
+func consume(p: mod JsonParser, c: view Char32) ret Bool {
   if peek(p: p) is c {
     p.pos = p.pos + 1
     ret true
@@ -332,13 +332,13 @@ func pushValue(vals: mod List(JsonValue), v: own JsonValue) ret Int {
   ret idx
 }
 
-func pushChild(kids: mod List(Int), valueIdx: Int) ret Int {
+func pushChild(kids: mod List(Int), valueIdx: view Int) ret Int {
   let idx: Int = kids.length
   kids.add(value: valueIdx)
   ret idx
 }
 
-func pushField(fields: mod List(JsonField), key: own String, valueIdx: Int) ret Int {
+func pushField(fields: mod List(JsonField), key: own String, valueIdx: view Int) ret Int {
   let idx: Int = fields.length
   let f: JsonField = { key: key, valueIdx: valueIdx }
   fields.add(value: f)

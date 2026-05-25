@@ -101,7 +101,7 @@ func registeredComponentCount() ret Int {
 # Helpers — JSON value extraction with sensible defaults
 # -----------------------------------------------------------------
 
-func optFloat(doc: view JsonDoc, container: view JsonValue, key: view String, fallback: Float) ret Float {
+func optFloat(doc: view JsonDoc, container: view JsonValue, key: view String, fallback: view Float) ret Float {
   let idx: Int = jsonField(doc: doc, this: container, key: key)
   if idx < 0 {
     ret fallback
@@ -110,7 +110,7 @@ func optFloat(doc: view JsonDoc, container: view JsonValue, key: view String, fa
   ret jsonFloat(this: v, fallback: fallback)
 }
 
-func optInt(doc: view JsonDoc, container: view JsonValue, key: view String, fallback: Int) ret Int {
+func optInt(doc: view JsonDoc, container: view JsonValue, key: view String, fallback: view Int) ret Int {
   let idx: Int = jsonField(doc: doc, this: container, key: key)
   if idx < 0 {
     ret fallback
@@ -131,7 +131,7 @@ func optString(doc: view JsonDoc, container: view JsonValue, key: view String, f
   ret jsonString(this: v, fallback: fallback)
 }
 
-func optBool(doc: view JsonDoc, container: view JsonValue, key: view String, fallback: Bool) ret Bool {
+func optBool(doc: view JsonDoc, container: view JsonValue, key: view String, fallback: view Bool) ret Bool {
   let idx: Int = jsonField(doc: doc, this: container, key: key)
   if idx < 0 {
     ret fallback
@@ -556,7 +556,7 @@ func deserMaskShape(doc: view JsonDoc, val: view JsonValue) ret MaskShape {
 
 func applyComponentByName(
   world: mod UiWorld
-  entity: Int
+  entity: view Int
   name: view String
   doc: view JsonDoc
   val: view JsonValue

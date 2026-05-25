@@ -58,7 +58,7 @@ func createInputSystem() ret InputSystem {
 # Returns true if the point (x, y) is inside the entity's
 # `WorldTransform`+`ComputedRect` bounds. Skips entities without one
 # of those, or with `WorldTransform.visible == false`.
-func pointInEntity(world: view UiWorld, entity: Int, x: Float, y: Float) ret Bool {
+func pointInEntity(world: view UiWorld, entity: view Int, x: view Float, y: view Float) ret Bool {
   if componentHas(this: world.worldTransforms, entity: entity) is false {
     ret false
   }
@@ -89,7 +89,7 @@ func pointInEntity(world: view UiWorld, entity: Int, x: Float, y: Float) ret Boo
 # the visually-topmost child (last painted) wins. Returns the deepest
 # hit entity that has an `OnClick` component, or -1 if nothing under
 # (x, y) handles clicks.
-func hitTestEntity(world: view UiWorld, entity: Int, x: Float, y: Float) ret Int {
+func hitTestEntity(world: view UiWorld, entity: view Int, x: view Float, y: view Float) ret Int {
   if pointInEntity(world: world, entity: entity, x: x, y: y) is false {
     ret inputNoEntity
   }
@@ -118,7 +118,7 @@ func hitTestEntity(world: view UiWorld, entity: Int, x: Float, y: Float) ret Int
 
 # Walk every alive root and return the topmost entity at (x, y) that
 # carries `OnClick`.
-func hitTest(world: view UiWorld, x: Float, y: Float) ret Int {
+func hitTest(world: view UiWorld, x: view Float, y: view Float) ret Int {
   let alive: view List(Int) => world.alive
   let n: Int = alive.length
   let i: Int = n - 1
@@ -136,7 +136,7 @@ func hitTest(world: view UiWorld, x: Float, y: Float) ret Int {
 }
 
 # Append an `ActionEvent` to the input system's queue.
-func appendActionEvent(input: mod InputSystem, entity: Int, actionId: own String) {
+func appendActionEvent(input: mod InputSystem, entity: view Int, actionId: own String) {
   let events: mod List(ActionEvent) => input.events
   let ev: ActionEvent = { entity: entity, actionId: actionId }
   events.add(value: ev)

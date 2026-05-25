@@ -20,8 +20,8 @@ func movementSystem(pos: mod PaddleTransform, vel: view Velocity) {
 func bounceSystem(
   pos: view PaddleTransform
   vel: mod Velocity
-  radius: Float
-  height: Float
+  radius: view Float
+  height: view Float
 ) {
   if pos.y < radius {
     vel.dy = 4.0
@@ -35,9 +35,9 @@ func paddleCollisionSystem(
   bPos: view PaddleTransform
   bVel: mod Velocity
   pPos: view PaddleTransform
-  pWidth: Float
-  pHeight: Float
-  isLeft: Int
+  pWidth: view Float
+  pHeight: view Float
+  isLeft: view Int
 ) {
   if isLeft is 1 {
     if bPos.x - 10.0 < pPos.x + pWidth {
@@ -66,9 +66,9 @@ func paddleCollisionSystem(
 
 func paddleInputSystem(
   pos: mod PaddleTransform
-  speed: Float
-  height: Float
-  pHeight: Float
+  speed: view Float
+  height: view Float
+  pHeight: view Float
 ) {
   # W (87) / Up (265)
   if isKeyDown(key: 87) {
@@ -93,7 +93,7 @@ func paddleInputSystem(
   }
 }
 
-func drawUISystem(p1Score: Int, p2Score: Int, winner: Int) {
+func drawUISystem(p1Score: view Int, p2Score: view Int, winner: view Int) {
   let green: Color = { r: 25, g: 245, b: 220, a: 255 }
   let orange: Color = { r: 255, g: 145, b: 0, a: 255 }
   drawText(

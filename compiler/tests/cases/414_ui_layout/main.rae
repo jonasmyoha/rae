@@ -24,13 +24,13 @@ func makeFixedSize() ret Size {
   }
 }
 
-func setRectFixed(world: mod UiWorld, entity: Int, w: Float, h: Float) {
+func setRectFixed(world: mod UiWorld, entity: view Int, w: view Float, h: view Float) {
   let r: Rect = { x: 0.0, y: 0.0, w: w, h: h }
   componentSet(this: world.rects, entity: entity, data: r)
   componentSet(this: world.sizes, entity: entity, data: makeFixedSize())
 }
 
-func setShapeRect(world: mod UiWorld, entity: Int, r: Int, g: Int, b: Int) {
+func setShapeRect(world: mod UiWorld, entity: view Int, r: view Int, g: view Int, b: view Int) {
   let shape: Shape = {
     kind: ShapeKind.Rect
     fill: RgbaColor { r: r, g: g, b: b, a: 255 }
@@ -41,7 +41,7 @@ func setShapeRect(world: mod UiWorld, entity: Int, r: Int, g: Int, b: Int) {
   componentSet(this: world.shapes, entity: entity, data: shape)
 }
 
-func attachChildren(world: mod UiWorld, parent: Int, kids: view List(Int)) {
+func attachChildren(world: mod UiWorld, parent: view Int, kids: view List(Int)) {
   let kidsCopy: List(Int) = createList(Int, initialCap: kids.length)
   let i: Int = 0
   loop i < kids.length {
@@ -60,7 +60,7 @@ func attachChildren(world: mod UiWorld, parent: Int, kids: view List(Int)) {
   componentSet(this: world.childrens, entity: parent, data: own ch)
 }
 
-func dumpEntity(world: view UiWorld, entity: Int, label: view String) {
+func dumpEntity(world: view UiWorld, entity: view Int, label: view String) {
   let cr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
   let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: entity)
   log("{label} cr=({cr.x},{cr.y},{cr.w},{cr.h}) wt=({wt.x},{wt.y}) alpha={wt.alpha} visible={wt.visible}")

@@ -17,7 +17,7 @@ type Group {
 }
 
 # === own T return (owning) ===
-func makeUser(uName: own String, uAge: Int) ret User {
+func makeUser(uName: own String, uAge: view Int) ret User {
   ret User { name: uName, age: uAge }
 }
 
@@ -43,7 +43,7 @@ func recordMember(g: mod Group, m: own User) {
   g.members.add(value: m)
 }
 
-func runScenarios(verbose: Bool) {
+func runScenarios(verbose: view Bool) {
   let u1: User = makeUser(uName: "Ada", uAge: 36)
   bumpAge(u: u1)
   if verbose {

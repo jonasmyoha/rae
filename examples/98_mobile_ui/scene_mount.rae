@@ -13,7 +13,7 @@ import ui/scene_instance
 
 # Decorate `entity` as a glaring red error block with a label. Used
 # when scene mounting fails. Caller has already set the entity's Rect/Size.
-func paintErrorBlock(world: mod UiWorld, entity: Int, label: view String) pub {
+func paintErrorBlock(world: mod UiWorld, entity: view Int, label: view String) pub {
   let red: RgbaColor = { r: 220, g: 32, b: 48, a: 255 }
   let shape: Shape = {
     kind: ShapeKind.RoundedRect
@@ -40,7 +40,7 @@ func paintErrorBlock(world: mod UiWorld, entity: Int, label: view String) pub {
 # a non-negative id).
 func mountOrError(
   world: mod UiWorld
-  mountEntity: Int
+  mountEntity: view Int
   scene: view Scene
   sceneLabel: view String
   overrides: view List(SceneOverride)
@@ -66,8 +66,8 @@ func mountOrError(
 func buildSimpleSceneInstance(
   world: mod UiWorld
   scene: view Scene
-  w: Float
-  h: Float
+  w: view Float
+  h: view Float
   label: view String
 ) pub ret Int {
   let mount: Int = createEntity(world: world)
