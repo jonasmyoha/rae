@@ -1,0 +1,19 @@
+# Stage 4: returning an owning `String` from a `view String`
+# parameter must deep-copy at the return site (via rae_string_copy)
+# so the caller's binding owns an independent heap allocation.
+#
+# We force a heap-owned source via concatenation so the literal-
+# backed fast path is not exercised. Without Stage 4 the caller's
+# drop would collide with the original's drop.
+import core
+import sys
+
+func first(s: view String) ret String { ret s }
+
+func main() {
+  let raw: String = "hel" + "lo"
+  let a: String = raw
+  let b: String = first(s: a)
+  log("a = {a}")
+  log("b = {b}")
+}
