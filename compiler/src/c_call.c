@@ -689,6 +689,30 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     wrap_pool_take_arg = true;
                 }
             }
+            // Deep-copy member-access String args going into an `own
+            // String` parameter. AST_EXPR_MEMBER reads through to
+            // potentially-shared storage (e.g. `ocView->actionId` —
+            // the field is owned by the world's OnClick component,
+            // not by the caller). For `own T` the callee will move_or_copy
+            // and steal the parameter's data, leaving the original
+            // aliased; when the world later drops the same heap is
+            // freed twice. Deep-copying at the call site gives the
+            // callee a private heap to take ownership of.
+            //
+            // Restricted to `own T`: bare/copy/view params don't
+            // steal, so duplicating their arg here would just leak
+            // (bare-T params don't auto-drop the parameter slot).
+            bool wrap_deep_copy_arg = false;
+            if (!wrap_pool_take_arg && !use_hoisted_temp
+                && p && p->type && p->type->is_own
+                && !(p->type->is_view || p->type->is_mod)
+                && a->value && a->value->kind == AST_EXPR_MEMBER) {
+                const AstTypeRef* arg_tr3 = infer_expr_type_ref(ctx, a->value);
+                if (arg_tr3 && !(arg_tr3->is_view || arg_tr3->is_mod)
+                    && str_eq_cstr(get_base_type_name(arg_tr3), "String")) {
+                    wrap_deep_copy_arg = true;
+                }
+            }
             // C-struct rvalue-to-`view T` arg: `&themeColorByName(...)`
             // is invalid C — `&` of an rvalue. Materialize the value
             // into a GCC statement-expression temp and take its
@@ -729,6 +753,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 if (needs_addr) fprintf(out, "&");
                 if (needs_deref) fprintf(out, "(*");
                 if (wrap_pool_take_arg) fprintf(out, "rae_string_pool_take(");
+                if (wrap_deep_copy_arg) fprintf(out, "rae_string_copy(");
                 // When we wrap with `(*...)` ourselves, suppress the
                 // IDENT-level struct-view auto-deref to avoid `(*(*x))`.
                 bool emit_suppress_deref = pass_view_through || needs_deref;
@@ -737,6 +762,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     bool is_prim_ref = arg_tr2 && (arg_tr2->is_view || arg_tr2->is_mod) && is_primitive_type(get_base_type_name(arg_tr2));
                     fprintf(out, "rae_any(("); emit_expr(ctx, a->value, out, PREC_LOWEST, false, is_prim_ref); fprintf(out, "))");
                 } else emit_expr(ctx, a->value, out, PREC_LOWEST, false, emit_suppress_deref);
+                if (wrap_deep_copy_arg) fprintf(out, ")");
                 if (wrap_pool_take_arg) fprintf(out, ")");
                 if (needs_deref) fprintf(out, ")");
                 if (needs_prim_wrap) fprintf(out, "} }");
