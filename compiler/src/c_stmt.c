@@ -1141,18 +1141,128 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 fprintf(out, "    %s __ret_val = ", rt);
                 bool is_ref_return = ret_type && (ret_type->is_view || ret_type->is_mod);
                 bool is_prim_ref_return = is_ref_return && is_primitive_type(get_base_type_name(ret_type));
+
+                // === Stage 4: return-by-deep-copy for owning types ===
+                //
+                // When the function's declared return type owns heap and
+                // the returned expression is an *alias source* — e.g.
+                // an IDENT bound to a `view`/`mod` parameter, or a
+                // member/index access whose receiver could still be
+                // owning at scope-exit — we must deep-copy so the
+                // caller gets an independent buffer. Without this, the
+                // caller's local and the original storage both drop the
+                // same heap at scope end → double-free.
+                //
+                // Cases that DON'T need wrapping (already correct):
+                //   - Fresh rvalues (CALL/METHOD_CALL/BINARY/INTERP/
+                //     OBJECT/CONCAT) — the value is already a freshly
+                //     owned heap, just transfer.
+                //   - IDENT bound to an owning local / own / copy
+                //     parameter — Stage 3's mark_expr_moved_if_local
+                //     above already flagged it; the implicit-drop pass
+                //     skips it. The buffer transfers to the caller.
+                //   - Explicit `own X` at the return site — operand
+                //     gets its move mark via mark_expr_moved_if_local
+                //     recursion; no copy needed.
+                const AstExpr* ret_val = stmt->as.ret_stmt.values->value;
+                bool wrap_ret_string_copy = false;
+                bool wrap_ret_deep_copy = false;
+                bool src_is_pointer_ident = false; // view List / view Buffer ident
+                if (ret_type
+                    && !ret_type->is_view && !ret_type->is_mod && !ret_type->is_opt
+                    && ret_val->kind != AST_EXPR_OWN
+                    && type_needs_deep_copy(ctx->compiler_ctx, ctx->module,
+                                            ret_type, 0)) {
+                    bool is_alias_source = false;
+                    if (ret_val->kind == AST_EXPR_IDENT) {
+                        // Only wrap when the IDENT refers to a
+                        // borrow (view/mod) — owning local /
+                        // own param / copy param are move-tracked
+                        // above and transfer ownership cleanly.
+                        Str name = ret_val->as.ident;
+                        for (int i = (int)ctx->local_count - 1; i >= 0; i--) {
+                            if (str_eq(ctx->locals[i], name)) {
+                                const AstTypeRef* lt = ctx->local_type_refs[i];
+                                if (lt && (lt->is_view || lt->is_mod)) {
+                                    is_alias_source = true;
+                                    Str lb = get_base_type_name(lt);
+                                    // view List(E) / view Buffer
+                                    // lower to a raw T* at the C
+                                    // level — the IDENT itself is
+                                    // the pointer we hand to
+                                    // rae_deep_copy_<T>.
+                                    if (str_eq_cstr(lb, "List") || str_eq_cstr(lb, "Buffer")) {
+                                        src_is_pointer_ident = true;
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                    } else if (ret_val->kind == AST_EXPR_MEMBER
+                               || ret_val->kind == AST_EXPR_INDEX) {
+                        // Member/index access aliases through the
+                        // container; whether the container is view/
+                        // mod or owning, the container's scope-exit
+                        // drop would collide with the caller's drop
+                        // of the returned buffer. Always wrap.
+                        is_alias_source = true;
+                    }
+                    if (is_alias_source) {
+                        Str rbase_dc = get_base_type_name(ret_type);
+                        if (str_eq_cstr(rbase_dc, "String")) {
+                            wrap_ret_string_copy = true;
+                        } else {
+                            wrap_ret_deep_copy = true;
+                        }
+                    }
+                }
+
                 if (is_prim_ref_return) {
                     fprintf(out, "("); emit_type_ref_as_c_type(ctx, ret_type, out, false);
-                    fprintf(out, "){ .ptr = &"); emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, true, true);
+                    fprintf(out, "){ .ptr = &"); emit_expr(ctx, ret_val, out, PREC_LOWEST, true, true);
                     fprintf(out, " }");
                 } else if (is_ref_return) {
                     fprintf(out, "&");
-                    emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_UNARY, true, true);
+                    emit_expr(ctx, ret_val, out, PREC_UNARY, true, true);
+                } else if (wrap_ret_string_copy) {
+                    // String alias source — deep-copy via rae_string_copy
+                    // so the caller's binding owns an independent heap.
+                    fprintf(out, "rae_string_copy(");
+                    emit_expr(ctx, ret_val, out, PREC_LOWEST, false, false);
+                    fprintf(out, ")");
+                } else if (wrap_ret_deep_copy) {
+                    // Container / user-struct alias source — deep-copy
+                    // via the synthesised rae_deep_copy_<T> helper.
+                    // Statement-expression: declare a temp of the
+                    // return C type, run the helper, evaluate to the
+                    // temp. The temp is detached storage; caller takes
+                    // ownership.
+                    const char* tn_dc = rae_mangle_type_specialized(
+                        ctx->compiler_ctx, ctx->generic_params,
+                        ctx->generic_args, ret_type);
+                    int tmp_id = ctx->temp_counter++;
+                    fprintf(out, "(__extension__ ({ %s __rdc%d; rae_deep_copy_%s(&__rdc%d, ",
+                            tn_dc, tmp_id, tn_dc, tmp_id);
+                    if (src_is_pointer_ident) {
+                        // view List/Buffer IDENT is already a T*.
+                        // emit_expr with suppress_deref=true keeps
+                        // it as the bare pointer name.
+                        emit_expr(ctx, ret_val, out, PREC_LOWEST, false, true);
+                    } else {
+                        // Other forms: emit_expr produces an lvalue
+                        // of T (member/index, owning-local IDENT,
+                        // view-non-List struct IDENT auto-derefs to
+                        // `(*name)`). Take its address.
+                        fprintf(out, "&(");
+                        emit_expr(ctx, ret_val, out, PREC_LOWEST, false, false);
+                        fprintf(out, ")");
+                    }
+                    fprintf(out, "); __rdc%d; }))", tmp_id);
                 } else {
                     bool needs_any_wrap = ret_type && (ret_type->is_opt || str_eq_cstr(get_base_type_name(ret_type), "Any"));
-                    bool val_is_box = stmt->as.ret_stmt.values->value->kind == AST_EXPR_BOX;
-                    if (needs_any_wrap && !val_is_box) { fprintf(out, "rae_any(("); emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, false, false); fprintf(out, "))"); }
-                    else emit_expr(ctx, stmt->as.ret_stmt.values->value, out, PREC_LOWEST, false, false);
+                    bool val_is_box = ret_val->kind == AST_EXPR_BOX;
+                    if (needs_any_wrap && !val_is_box) { fprintf(out, "rae_any(("); emit_expr(ctx, ret_val, out, PREC_LOWEST, false, false); fprintf(out, "))"); }
+                    else emit_expr(ctx, ret_val, out, PREC_LOWEST, false, false);
                 }
                 fprintf(out, ";\n");
 
