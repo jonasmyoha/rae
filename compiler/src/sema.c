@@ -596,37 +596,43 @@ static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTab
             }
             TypeInfo* current_return_type = type_get_void(ctx->type_registry);
             if (decl->as.func_decl.returns) current_return_type = sema_resolve_type_internal(ctx, module, symbols, decl->as.func_decl.returns->type);
-            // Stage B.1: optional strict-mode check. When
-            // RAE_STRICT_PARAM_MODES=1 is set, emit a warning for any
-            // function parameter that lacks an explicit ownership
-            // mode (view/mod/copy/own) — except primitives where the
-            // value-copy semantics are unambiguous. Also warn that
-            // `val T` is deprecated in favour of `copy T`. Externs
-            // are skipped: their parameter lists describe the FFI
-            // shape, not Rae's ownership model.
+            // Stage 5 (Memory-safety overhaul): bare-T non-primitive
+            // parameters are a hard compile error. Every non-extern
+            // function parameter must use an explicit ownership mode:
+            //   view T  — read-only borrow (callee may not mutate)
+            //   mod T   — mutating borrow (callee may mutate in place)
+            //   copy T  — independent deep copy (callee owns its copy)
+            //   own T   — takes ownership (caller's binding is moved)
             //
-            // The warning is informational (no error_count bump) so
-            // existing code keeps compiling. Once the migration to
-            // explicit modes is done, future stages will promote
-            // this to a hard error.
-            static int s_strict_param_modes = -1;
-            if (s_strict_param_modes < 0) {
-                const char* env = getenv("RAE_STRICT_PARAM_MODES");
-                s_strict_param_modes = (env && env[0] && env[0] != '0') ? 1 : 0;
-            }
-            if (s_strict_param_modes && !decl->as.func_decl.is_extern) {
+            // The legacy `val T` syntax is also rejected here with a
+            // suggestion to use `copy T`.
+            //
+            // Externs are skipped: their parameter lists describe the
+            // FFI shape, not Rae's ownership model. Primitives
+            // (Int/Float/Bool/Char/Char32 + various widths), enums,
+            // and `Any` are allowed bare because their value-semantics
+            // are unambiguous.
+            if (!decl->as.func_decl.is_extern) {
+                // After merge + generic specialization, module->file_path
+                // is whichever file was merged last — not the file the
+                // decl actually came from. Prefer decl->origin_file when
+                // available so the diagnostic points at the right source.
+                const char* err_file = decl->origin_file
+                    ? decl->origin_file
+                    : (module && module->file_path ? module->file_path : "<unknown>");
                 for (AstParam* p2 = decl->as.func_decl.params; p2; p2 = p2->next) {
                     if (!p2->type) continue;
                     AstTypeRef* pt = p2->type;
                     if (pt->is_val) {
                         Str base = (pt->parts) ? pt->parts->text : (Str){0};
-                        fprintf(stderr,
-                            "%s:%zu:%zu: warning: parameter '%.*s' uses deprecated 'val %.*s'; use 'copy %.*s' instead\n",
-                            module && module->file_path ? module->file_path : "<unknown>",
-                            pt->line, pt->column,
+                        char buffer[256];
+                        snprintf(buffer, sizeof(buffer),
+                            "parameter '%.*s' uses deprecated 'val %.*s'; use 'copy %.*s' instead",
                             (int)p2->name.len, p2->name.data,
                             (int)base.len, base.data,
                             (int)base.len, base.data);
+                        diag_error(err_file, (int)pt->line, (int)pt->column, buffer);
+                        module->had_error = true;
                         continue;
                     }
                     bool has_mode = pt->is_view || pt->is_mod || pt->is_own || pt->is_copy;
@@ -635,7 +641,7 @@ static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTab
                     // unambiguous: built-in primitives, enums (which
                     // resolve to an int kind), and Any (passed as a
                     // tagged union, not a heap-owning thing). String,
-                    // List, Map, user structs all stay warning-eligible.
+                    // List, Map, user structs all become hard errors.
                     Str base = (pt->parts) ? pt->parts->text : (Str){0};
                     bool is_prim_name = str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int8") ||
                                    str_eq_cstr(base, "Int16") || str_eq_cstr(base, "Int32") ||
@@ -644,7 +650,8 @@ static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTab
                                    str_eq_cstr(base, "UInt32") || str_eq_cstr(base, "UInt64") ||
                                    str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float32") ||
                                    str_eq_cstr(base, "Float64") || str_eq_cstr(base, "Bool") ||
-                                   str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32");
+                                   str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32") ||
+                                   str_eq_cstr(base, "Any");
                     if (is_prim_name) continue;
                     // Resolve to catch Any. The per-param loop below
                     // will resolve again, which is wasted work but
@@ -665,12 +672,17 @@ static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTab
                             continue;
                         }
                     }
-                    fprintf(stderr,
-                        "%s:%zu:%zu: warning: parameter '%.*s' is bare '%.*s' — use one of view/copy/mod/own to make ownership explicit\n",
-                        module && module->file_path ? module->file_path : "<unknown>",
-                        pt->line, pt->column,
+                    char buffer[256];
+                    snprintf(buffer, sizeof(buffer),
+                        "parameter '%.*s' is bare '%.*s' — use one of 'view %.*s', 'mod %.*s', 'copy %.*s', or 'own %.*s' to make ownership explicit",
                         (int)p2->name.len, p2->name.data,
+                        (int)base.len, base.data,
+                        (int)base.len, base.data,
+                        (int)base.len, base.data,
+                        (int)base.len, base.data,
                         (int)base.len, base.data);
+                    diag_error(err_file, (int)pt->line, (int)pt->column, buffer);
+                    module->had_error = true;
                 }
             }
             AstParam* param = decl->as.func_decl.params;

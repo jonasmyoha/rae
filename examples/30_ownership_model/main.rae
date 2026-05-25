@@ -38,9 +38,9 @@ type Team {
   motto: String
 }
 
-# Plain `T` parameter — the callee owns the value. Caller's move
-# tracking will skip the source's auto-drop.
-func summarise(p: Profile) ret String {
+# `own T` parameter — the callee takes ownership of the value.
+# Caller's move tracking will skip the source's auto-drop.
+func summarise(p: own Profile) ret String {
   ret "{p.name} <{p.email}>"
 }
 
@@ -49,12 +49,13 @@ func format(p: view Profile) ret String {
   ret "{p.name} <{p.email}>"
 }
 
-# `mod T` parameter — mutating borrow.
-func renameProfile(p: mod Profile, newName: String) {
+# `mod T` parameter — mutating borrow. `newName` is consumed and
+# moved into the profile's String field.
+func renameProfile(p: mod Profile, newName: own String) {
   p.name = newName
 }
 
-func makeTeam(leadName: String, leadEmail: String, motto: String) ret Team {
+func makeTeam(leadName: own String, leadEmail: own String, motto: own String) ret Team {
   let lead: Profile = { name: leadName, email: leadEmail }
   let members: List(Profile) = createList(Profile, initialCap: 4)
   ret Team {
