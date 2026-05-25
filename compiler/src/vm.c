@@ -73,6 +73,29 @@ static Value* vm_peek(VM* vm, size_t distance) {
   return vm->stack_top - 1 - distance;
 }
 
+// True when copying this Value is a trivial bitwise copy — no heap
+// allocation in value_copy and no recursive free in value_free. Used to
+// short-circuit VAL_REF wrapping at view-borrow sites for primitives
+// (Int / Float / Bool / Char / None / ID / enum reified as Int): the
+// callee never observes a difference between a `view Int` ref and the
+// raw Int, but the VM avoids ref-then-deref churn entirely.
+//
+// Strings, objects, arrays, and buffers are deliberately NOT pod —
+// copying them allocates, so we keep the VAL_REF indirection there.
+static inline bool value_is_pod(const Value* v) {
+  switch (v->type) {
+    case VAL_INT:
+    case VAL_FLOAT:
+    case VAL_BOOL:
+    case VAL_CHAR:
+    case VAL_NONE:
+    case VAL_ID:
+      return true;
+    default:
+      return false;
+  }
+}
+
 static bool value_is_truthy(const Value* value) {
   switch (value->type) {
     case VAL_BOOL:
@@ -883,13 +906,37 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         CallFrame* frame = vm_current_frame(vm);
         if (!frame) return VM_RUNTIME_ERROR;
         if (slot >= 256) return VM_RUNTIME_ERROR;
-        Value* target = &frame->locals[slot];
-        
+        Value* slot_val = &frame->locals[slot];
+
+        // Hot-path optimisation: view-of-primitive where the local slot
+        // directly holds a primitive (NOT a VAL_REF chain ending in
+        // one) pushes a by-value copy instead of allocating a VAL_REF
+        // wrapper. The callee can't tell the difference (view is
+        // read-only and the bytes are identical), and we avoid the
+        // per-call ref-then-deref churn that was dominating Live-mode
+        // CPU in the mobile UI hot loop.
+        //
+        // Constraints:
+        //  - Only for OP_VIEW_LOCAL — OP_MOD_LOCAL must keep VAL_REF so
+        //    writes flow back to the caller slot.
+        //  - Only when the slot directly contains a pod. If the slot
+        //    holds a VAL_REF that happens to point at a pod, that's a
+        //    deliberate aliasing path (e.g. the let-bind backing-slot
+        //    trick in vm_emit_stmt.c that supports
+        //    `let r: view T => fn()`) and collapsing the chain would
+        //    silently degrade view-bind to value-bind. Test
+        //    336_return_view_ref_alias guards this.
+        if (instruction == OP_VIEW_LOCAL && value_is_pod(slot_val)) {
+          vm_push(vm, *slot_val);
+          break;
+        }
+
+        Value* target = slot_val;
         // Resolve pointer chain: if slot already holds a reference, point to its target.
         while (target->type == VAL_REF) {
           target = target->as.ref_value.target;
         }
-        
+
         if (target->type == VAL_NONE) {
           vm_push(vm, value_none());
         } else {
@@ -901,29 +948,29 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
       case OP_MOD_FIELD: {
         uint32_t index = read_uint32(vm);
         Value obj_val = vm_pop(vm);
-        
+
         if (obj_val.type != VAL_REF) {
             // Cannot take reference to a temporary (literal or result of expr)
             value_free(&obj_val);
             diag_error(NULL, 0, 0, "cannot take reference to a temporary value");
             return VM_RUNTIME_ERROR;
         }
-        
+
         Value* target_obj = obj_val.as.ref_value.target;
         while (target_obj->type == VAL_REF) {
             target_obj = target_obj->as.ref_value.target;
         }
-        
+
         if (target_obj->type != VAL_OBJECT || index >= target_obj->as.object_value.field_count) {
             value_free(&obj_val);
             return VM_RUNTIME_ERROR;
         }
-        
+
         Value* field_target = &target_obj->as.object_value.fields[index];
         vm_push(vm, value_ref(field_target, instruction == OP_MOD_FIELD ? REF_MOD : REF_VIEW));
-        
+
         if (obj_val.type != VAL_REF) {
-            value_free(&obj_val); 
+            value_free(&obj_val);
         }
         break;
       }
