@@ -11,16 +11,29 @@ enum Screen {
   Album
 }
 
-func buildScreenWorld(screen: Screen, scenes: view AlbumScenes) pub ret UiWorld {
+func buildScreenWorld(screen: Screen, scenes: view AlbumScenes, playback: view PlaybackState) pub ret UiWorld {
   if screen is Screen.Album {
-    ret buildAlbumWorld(scenes: scenes)
+    ret buildAlbumWorld(scenes: scenes, playback: playback)
   }
-  ret buildNowPlayingWorld(scenes: scenes)
+  ret buildNowPlayingWorld(scenes: scenes, playback: playback)
+}
+
+# Material icon key for the play button in the current state. Used by
+# both view builders to pick the right sprite override at mount time
+# (so the first frame already shows the right icon), and again per-frame
+# in the main loop after the state flips.
+func playbackIconKey(playback: view PlaybackState) pub ret String {
+  if playback.isPlaying {
+    ret "mat:pause"
+  }
+  ret "mat:play_arrow"
 }
 
 # Drain every fired action and route into a target screen. Returns the
 # next screen — equal to `current` if no navigation action fired.
-func dispatchActions(input: view InputSystem, current: Screen) pub ret Screen {
+# Also handles `playback.toggle` (fired by both play buttons), which
+# mutates `playback.isPlaying` in place — no screen change for that one.
+func dispatchActions(input: view InputSystem, current: Screen, playback: mod PlaybackState) pub ret Screen {
   let next: Screen = current
   let n: Int = input.events.length
   let i: Int = 0
@@ -32,6 +45,7 @@ func dispatchActions(input: view InputSystem, current: Screen) pub ret Screen {
     let homeKey: String = "nav.home"
     let libraryKey: String = "nav.library"
     let backKey: String = "nav.back"
+    let playbackToggleKey: String = "playback.toggle"
     if actionId.equals(other: homeKey) {
       next = Screen.NowPlaying
     }
@@ -46,6 +60,9 @@ func dispatchActions(input: view InputSystem, current: Screen) pub ret Screen {
       } else {
         next = Screen.Album
       }
+    }
+    if actionId.equals(other: playbackToggleKey) {
+      togglePlayback(state: playback)
     }
 
     i = i + 1
