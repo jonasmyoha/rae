@@ -349,13 +349,44 @@ bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
           emit_uint32(compiler, (uint32_t)field_index, (int)expr->line);
           return true;
         } else if (operand->kind == AST_EXPR_CALL || operand->kind == AST_EXPR_METHOD_CALL) {
-          // VM target: `view/mod <call>` is allowed when the callee
-          // already returns a borrow — the VM's value system doesn't
-          // distinguish view/mod from a plain value, so we just compile
-          // the call and let the result flow through. The C backend
-          // handles the same form by taking the call's lvalue address.
-          // Used by lib/ui/ecs.rae componentView/componentMod and the
-          // `ret view rae_ext_rae_buf_get(...)` it relies on.
+          // Special case: `view/mod rae_ext_rae_buf_get(buf, idx)` is the
+          // primitive used by componentView / componentMod and any other
+          // borrow-into-Buffer pattern. The C backend inlines buf_get as
+          // `*((T*)((char*)buf + i*sizeof(T)))`, which is an lvalue — so
+          // `mod buf_get(...)` flows straight through as a writable
+          // borrow into buffer storage. The VM's native equivalent
+          // value_copies the slot, which silently loses any subsequent
+          // writes (e.g. scene-instance overrides on Sprite.textureKey
+          // disappeared because applyOverride wrote to a detached copy).
+          //
+          // Emit OP_BUF_REF instead: push a VAL_REF aliasing the
+          // buffer's items[idx], with kind = REF_MOD / REF_VIEW. The
+          // existing backing-slot trick in vm_emit_stmt.c (let-bind for
+          // `let cur: mod T => fn()`) stashes the returned VAL_REF in a
+          // hidden temp and re-borrows from there, so reads and writes
+          // both chain through the ref to the real buffer slot.
+          if (operand->kind == AST_EXPR_CALL &&
+              operand->as.call.callee &&
+              operand->as.call.callee->kind == AST_EXPR_IDENT) {
+            Str cname = operand->as.call.callee->as.ident;
+            if (str_eq_cstr(cname, "rae_ext_rae_buf_get") ||
+                str_eq_cstr(cname, "rae_ext___buf_get") ||
+                str_eq_cstr(cname, "__buf_get")) {
+              const AstCallArg* a = operand->as.call.args;
+              if (a && a->next) {
+                if (!compile_expr(compiler, a->value)) return false;
+                if (!compile_expr(compiler, a->next->value)) return false;
+                emit_op(compiler, OP_BUF_REF, (int)expr->line);
+                // 1-byte kind tag: 0 = REF_VIEW, 1 = REF_MOD.
+                emit_op(compiler, is_mod ? 1 : 0, (int)expr->line);
+                return true;
+              }
+            }
+          }
+          // Default: `view/mod <call>` falls through to the regular
+          // call. The VM's value system doesn't distinguish view/mod
+          // from a plain value, so the call result flows through and
+          // the caller's backing-slot trick handles ref-bind cases.
           return compile_expr(compiler, operand);
         } else {
           diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "view/mod can only be applied to lvalues (identifiers or members)");

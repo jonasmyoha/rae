@@ -58,7 +58,16 @@ typedef enum {
   OP_BUF_COPY = 0x34,
   OP_BUF_LEN = 0x35,
   OP_BUF_RESIZE = 0x36,
-  
+  /* Push a VAL_REF aliasing `&buf->items[index]`. Used by
+     componentMod/componentView (`ret mod/view rae_ext_rae_buf_get(...)`)
+     so writes through the resulting borrow land directly in the
+     buffer's backing storage. The C backend handles the same form by
+     inlining buf_get as `*((T*)((char*)buf + i*sizeof(T)))`, which is
+     already an lvalue; the VM previously had no way to express this
+     and produced a detached value-copy, silently losing all writes
+     (e.g. scene-instance overrides on Sprite.textureKey). */
+  OP_BUF_REF = 0x37,
+
   /* Globals */
   OP_GET_GLOBAL = 0x40,
   OP_SET_GLOBAL = 0x41,
