@@ -262,6 +262,18 @@ func textStyleSize(styleId: view String) ret Float {
   if styleId.equals(other: tabInactive) {
     ret 14.0
   }
+  # Styles owned by lib/ui/debug.rae's reusable in-app debug UI. The
+  # "D" letter on the floating button needs to render large enough to
+  # read at a glance; the menu label sits at 16 pt to match iOS's
+  # default setting-row text.
+  let debugButton: String = "debugButton"
+  if styleId.equals(other: debugButton) {
+    ret 24.0
+  }
+  let debugMenuLabel: String = "debugMenuLabel"
+  if styleId.equals(other: debugMenuLabel) {
+    ret 16.0
+  }
   ret 20.0
 }
 
@@ -329,6 +341,20 @@ func textStyleColor(styleId: view String, chain255: view Int) ret Color {
   if styleId.equals(other: pillLabelLight) {
     ret toRaylibColor(c: themeColorByName(name: "accentText"), chain255: chain255)
   }
+  # Debug-UI styles render against fixed (theme-independent) panels —
+  # the amber button and the dark menu backdrop — so the text colour
+  # is hard-coded to maintain contrast regardless of which theme the
+  # host app set. See lib/ui/debug.rae.
+  let debugButton: String = "debugButton"
+  if styleId.equals(other: debugButton) {
+    let dark: RgbaColor = { r: 24, g: 24, b: 28, a: 255 }
+    ret toRaylibColor(c: dark, chain255: chain255)
+  }
+  let debugMenuLabel: String = "debugMenuLabel"
+  if styleId.equals(other: debugMenuLabel) {
+    let light: RgbaColor = { r: 246, g: 246, b: 248, a: 255 }
+    ret toRaylibColor(c: light, chain255: chain255)
+  }
   # Fallback: treat unknown style ids as primary text.
   ret toRaylibColor(c: themeColorByName(name: "textPrimary"), chain255: chain255)
 }
@@ -346,6 +372,11 @@ func textStyleIsCentered(styleId: view String) ret Bool {
   }
   let tabInactive: String = "tabInactive"
   if styleId.equals(other: tabInactive) {
+    ret true
+  }
+  # Debug button: the "D" glyph sits centred inside the amber circle.
+  let debugButton: String = "debugButton"
+  if styleId.equals(other: debugButton) {
     ret true
   }
   ret false
