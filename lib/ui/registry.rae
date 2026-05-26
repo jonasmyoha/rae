@@ -54,6 +54,7 @@ func registeredComponentNames() ret List(String) {
   names.add(value: "EditorVisible")
   names.add(value: "EditorLocked")
   names.add(value: "HeroWidget")
+  names.add(value: "DebugAnchor")
   # Identity / metadata
   names.add(value: "Name")
   names.add(value: "PrimaryType")
@@ -501,6 +502,14 @@ func deserHeroWidget(doc: view JsonDoc, val: view JsonValue) ret HeroWidget {
   ret r
 }
 
+func deserDebugAnchor(doc: view JsonDoc, val: view JsonValue) ret DebugAnchor {
+  # `DebugAnchor` is a presence-tag — its mere existence on an entity
+  # (plus a `Rect` on the same entity) is what `addDebugLayer` looks
+  # for. The `value` field is just a placeholder so Rae's nonzero-field
+  # struct requirement is satisfied; nothing reads it.
+  ret DebugAnchor { value: true }
+}
+
 func deserPrimaryType(doc: view JsonDoc, val: view JsonValue) ret PrimaryType {
   ret PrimaryType { typeName: optString(doc: doc, container: val, key: "typeName", fallback: "") }
 }
@@ -643,6 +652,10 @@ func applyComponentByName(
   }
   if name.equals(other: "HeroWidget") {
     componentSet(this: world.heroWidgets, entity: entity, data: deserHeroWidget(doc: doc, val: val))
+    ret
+  }
+  if name.equals(other: "DebugAnchor") {
+    componentSet(this: world.debugAnchors, entity: entity, data: deserDebugAnchor(doc: doc, val: val))
     ret
   }
   # Unknown / not-yet-handled components are ignored. The scene loader
