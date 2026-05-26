@@ -113,7 +113,8 @@ func main() {
     let lastLog: Int = 0
     # Warm-up rebuild so font / texture / scene-loader one-shots don't
     # land in the baseline.
-    let warm: UiWorld = buildScreenWorld(screen: Screen.Album, scenes: scenes)
+    let stressPlayback: PlaybackState = createPlaybackState()
+    let warm: UiWorld = buildScreenWorld(screen: Screen.Album, scenes: scenes, playback: stressPlayback)
     layoutSystem(world: warm)
     transformSystem(world: warm)
     let baselineKb: Int = processRssKb()
@@ -123,7 +124,7 @@ func main() {
       if (stressI - (stressI / 2) * 2) is 1 {
         stressScreen = Screen.NowPlaying
       }
-      let sworld: UiWorld = buildScreenWorld(screen: stressScreen, scenes: scenes)
+      let sworld: UiWorld = buildScreenWorld(screen: stressScreen, scenes: scenes, playback: stressPlayback)
       layoutSystem(world: sworld)
       transformSystem(world: sworld)
       stressI = stressI + 1
@@ -160,9 +161,24 @@ func main() {
       screen = Screen.NowPlaying
     }
 
-    let world: UiWorld = buildScreenWorld(screen: screen, scenes: scenes)
+    # Screenshot mode picks up `RAE_UI_PLAYING=1` so we can capture
+    # frames where the play button is in the pause state and the
+    # progress bar is partway filled. `RAE_UI_PROGRESS` (0.0..1.0)
+    # forces an exact progress value for deterministic snapshots.
+    let shotPlayback: PlaybackState = createPlaybackState()
+    let playingEnv: String = getEnv(name: "RAE_UI_PLAYING")
+    if playingEnv.length() > 0 {
+      shotPlayback.isPlaying = true
+    }
+    let progressEnv: String = getEnv(name: "RAE_UI_PROGRESS")
+    if progressEnv.length() > 0 {
+      let pf: Float = progressEnv.toFloat()
+      shotPlayback.elapsedSec = shotPlayback.durationSec * pf
+    }
+    let world: UiWorld = buildScreenWorld(screen: screen, scenes: scenes, playback: shotPlayback)
     layoutSystem(world: world)
     transformSystem(world: world)
+    applyPlaybackToWorld(world: world, state: shotPlayback)
     let warmupFrames: Int = 30
     let f: Int = 0
     loop f < warmupFrames {
@@ -244,6 +260,11 @@ func main() {
     # raescene). Drop the anchor and the debug UI disappears.
     let debug: DebugSystem = createDebugSystem()
     setDebugScreenSize(debug: debug, w: screenW, h: screenH)
+    # Mock playback state — survives world rebuilds so the play/pause
+    # toggle and the per-second progress tick keep their values across
+    # screen switches and theme/data hot reloads. Both play buttons
+    # fire `playback.toggle`; `dispatchActions` mutates this in place.
+    let playback: PlaybackState = createPlaybackState()
     # Snapshot helper: `RAE_UI_DEBUG_MENU=open` pre-opens the menu so
     # the snapshot.sh tooling can capture the menu state without
     # needing to script a click. `=labels` pre-enables the FPS / mem
@@ -257,13 +278,18 @@ func main() {
     }
 
     loop running {
-      let world: UiWorld = buildScreenWorld(screen: currentScreen, scenes: scenes)
+      let world: UiWorld = buildScreenWorld(screen: currentScreen, scenes: scenes, playback: playback)
       # Layer the reusable debug-UI entities (button + optional menu
       # overlay) onto the freshly-built world BEFORE layout runs so
       # they participate in measure/place like any other entity.
       addDebugLayer(world: world, debug: debug)
       layoutSystem(world: world)
       transformSystem(world: world)
+      # Initial playback overlay: set the progress-fill width to
+      # match the current `elapsedSec / durationSec` so the first
+      # frame of the rebuilt world doesn't flash an empty bar before
+      # the inner-loop's per-frame `applyPlaybackToWorld` kicks in.
+      applyPlaybackToWorld(world: world, state: playback)
 
       # Pick up the destination half of an in-flight transition: the
       # previous world wrote pendingDst=true and stashed the source
@@ -287,7 +313,7 @@ func main() {
           running = false
         } else {
           updateInputSystem(input: input, world: world)
-          let nextScreen: Screen = dispatchActions(input: input, current: currentScreen)
+          let nextScreen: Screen = dispatchActions(input: input, current: currentScreen, playback: playback)
 
           # In-app debug UI: process any debug.* action that fired
           # this frame. `dispatchDebugAction` toggles the persistent
@@ -342,6 +368,12 @@ func main() {
           }
 
           let now: Float = getTime()
+          # Advance playback elapsed-time (no-op when paused) and
+          # write the current state into the freshly-laid-out world.
+          # This covers the play/pause icon swap AND the per-frame
+          # progress-fill width tick.
+          advancePlayback(state: playback, now: now)
+          applyPlaybackToWorld(world: world, state: playback)
           # If a transition was armed by the outer rebuild, this is
           # the first frame that will draw it — start the clock here
           # so `t = 0` at the moment the first overlay actually paints.
