@@ -1,0 +1,638 @@
+# Reusable in-app debug UI for any Rae UI app.
+#
+# What this module provides:
+#   1. A floating "D" button (amber circle) the user can tap to open a
+#      debug menu.
+#   2. A modal-style overlay menu with two iOS-style switches:
+#        - "Dark theme"      -> toggles between `lightTheme()` and
+#                               `darkTheme()` (lib/ui/theme.rae).
+#        - "FPS / mem labels" -> toggles a small read-out anchored just
+#                               above the button.
+#   3. The read-out itself: two text lines `fps: 60` / `mem: 5.5 MB`,
+#      drawn directly via raylib (no ECS entities) so they don't
+#      intercept clicks.
+#
+# Usage from a host app (≤ 5 lines of glue):
+#
+#     let debug: DebugSystem = createDebugSystem()         # once, before the loop
+#     ...
+#     addDebugLayer(world: world, debug: debug)            # after buildScreenWorld
+#     ...
+#     # Inside the input/event handling block:
+#     let debugChanged: Bool = dispatchDebugAction(input: input, debug: debug)
+#     if debugChanged { switching = true }                 # force a world rebuild
+#     ...
+#     # Inside the draw block, after renderSystem:
+#     updateAndRenderDebugOverlay(debug: debug, now: getTime())
+#
+# Optional: a host can also tap into `recordDebugFrame(debug, now)`
+# manually if it does the per-frame draw work itself, but
+# `updateAndRenderDebugOverlay` already does that.
+#
+# Adding the debug UI to a new app is just:
+#     - one `let debug: DebugSystem = createDebugSystem()`,
+#     - one `addDebugLayer(world, debug)` per rebuild,
+#     - one `dispatchDebugAction(input, debug)` per frame,
+#     - one `updateAndRenderDebugOverlay(debug, getTime())` per frame.
+#
+# Design notes:
+#   - The button + menu live in the ECS so they participate in the
+#     normal hit-test/render path. State (open? labels-on?) lives in
+#     `DebugSystem`, which persists across world rebuilds.
+#   - The FPS/mem labels are *not* ECS entities. They are drawn from
+#     `updateAndRenderDebugOverlay` after `renderSystem` returns. This
+#     keeps them out of the hit-test (they can't swallow clicks meant
+#     for the button below them) and avoids re-creating them every
+#     frame just to update the text.
+#   - Toggling any state forces a world rebuild via the bool returned
+#     from `dispatchDebugAction`. That re-runs `addDebugLayer` with the
+#     new state, which adds / removes the overlay entities.
+#   - Action ids are namespaced `debug.*` so they don't collide with
+#     host-app actions.
+import core
+import string
+import raylib
+import sys
+import ui/components
+import ui/ecs
+import ui/theme
+
+# ----- action ids ----------------------------------------------------
+
+let debugActionToggleMenu: String = "debug.toggleMenu"
+let debugActionToggleTheme: String = "debug.toggleTheme"
+let debugActionToggleLabels: String = "debug.toggleLabels"
+let debugActionDismiss: String = "debug.dismiss"
+
+# ----- colors (immutable; not theme-driven, the debug UI should look
+# the same regardless of which theme the host app picked) -------------
+
+func debugAmberColor() ret RgbaColor {
+  ret RgbaColor { r: 255, g: 191, b: 0, a: 255 }
+}
+
+func debugBackdropColor() ret RgbaColor {
+  ret RgbaColor { r: 0, g: 0, b: 0, a: 160 }
+}
+
+func debugMenuFillColor() ret RgbaColor {
+  ret RgbaColor { r: 24, g: 24, b: 28, a: 240 }
+}
+
+func debugMenuTextColor() ret RgbaColor {
+  ret RgbaColor { r: 246, g: 246, b: 248, a: 255 }
+}
+
+func debugSwitchOnColor() ret RgbaColor {
+  ret RgbaColor { r: 52, g: 199, b: 89, a: 255 }
+}
+
+func debugSwitchOffColor() ret RgbaColor {
+  ret RgbaColor { r: 120, g: 120, b: 128, a: 200 }
+}
+
+func debugSwitchKnobColor() ret RgbaColor {
+  ret RgbaColor { r: 255, g: 255, b: 255, a: 255 }
+}
+
+# ----- DebugSystem ---------------------------------------------------
+
+# Layout constants (in logical points). Tweaked once in the example;
+# the host can override by reading + mutating `debug` after create.
+type DebugSystem {
+  # User-facing state.
+  menuOpen: Bool
+  showLabels: Bool
+
+  # Placement of the button. Anchored to the bottom-right by default,
+  # but the host is free to overwrite these before adding the layer.
+  buttonX: Float
+  buttonY: Float
+  buttonSize: Float
+
+  # Screen extents in logical points. Used to size and position the
+  # full-screen backdrop when the menu is open. Default matches the
+  # iPhone-15-Pro logical size; the host should overwrite via
+  # `setDebugScreenSize` if its window is a different size.
+  screenW: Float
+  screenH: Float
+
+  # Rolling FPS buffer: timestamps of the last few frames. Trimmed to
+  # the most recent `fpsWindowSec` worth of samples each call.
+  fpsTimes: List(Float)
+  fpsWindowSec: Float
+
+  # Cached output of the most recent `updateAndRenderDebugOverlay` so
+  # other code (tests, snapshots) can read them back without recomputing.
+  lastFps: Float
+  lastRssKb: Int
+}
+
+func createDebugSystem() pub ret DebugSystem {
+  # Default placement: bottom-right corner, leaving an 18 px margin so
+  # the button doesn't kiss the screen edge. The host can overwrite
+  # buttonX/Y before the first addDebugLayer call.
+  let defaultSize: Float = 44.0
+  ret DebugSystem {
+    menuOpen: false
+    showLabels: false
+    buttonX: 420.0
+    buttonY: 980.0
+    buttonSize: defaultSize
+    screenW: 498.0
+    screenH: 1079.0
+    fpsTimes: createList(Float, initialCap: 256)
+    fpsWindowSec: 3.0
+    lastFps: 0.0
+    lastRssKb: 0
+  }
+}
+
+# Tell the debug system how big the host's screen is. The backdrop
+# overlay sized to (w, h) so the menu darkens exactly the visible
+# region and the panel centres inside it.
+func setDebugScreenSize(debug: mod DebugSystem, w: view Float, h: view Float) pub {
+  debug.screenW = w
+  debug.screenH = h
+}
+
+# Reposition the debug button. Caller passes the desired top-left
+# corner in screen-logical coordinates. Convenience wrapper that
+# keeps DebugSystem creation a single line at boot.
+func setDebugButtonPosition(debug: mod DebugSystem, x: view Float, y: view Float) pub {
+  debug.buttonX = x
+  debug.buttonY = y
+}
+
+# ----- FPS tracking --------------------------------------------------
+
+# Drop timestamps older than `now - fpsWindowSec` from the front of the
+# rolling buffer. Cheap linear scan; the buffer is bounded by the frame
+# rate * window size (≈ 180 entries at 60 fps / 3 s).
+func pruneFpsBuffer(debug: mod DebugSystem, now: view Float) {
+  let cutoff: Float = now - debug.fpsWindowSec
+  let times: mod List(Float) => debug.fpsTimes
+  loop times.length > 0 {
+    let oldest: Float = times.get(index: 0)
+    if oldest >= cutoff {
+      ret
+    }
+    times.remove(index: 0)
+  }
+}
+
+# Record a frame timestamp + refresh fps/rss caches. Called once per
+# frame by `updateAndRenderDebugOverlay`.
+func recordDebugFrame(debug: mod DebugSystem, now: view Float) pub {
+  let times: mod List(Float) => debug.fpsTimes
+  times.add(value: now)
+  pruneFpsBuffer(debug: debug, now: now)
+
+  # FPS == count / window-actually-used. Using the elapsed range of
+  # the buffer (newest - oldest) gives a more honest reading at startup
+  # when the buffer hasn't filled yet than dividing by `fpsWindowSec`.
+  let n: Int = debug.fpsTimes.length
+  let fps: Float = 0.0
+  if n >= 2 {
+    let oldest: Float = debug.fpsTimes.get(index: 0)
+    let span: Float = now - oldest
+    if span > 0.0 {
+      fps = (n - 1).toFloat() / span
+    }
+  }
+  debug.lastFps = fps
+  debug.lastRssKb = processRssKb()
+}
+
+# Read the most recent measurement (set by `recordDebugFrame`).
+func currentDebugFPS(debug: view DebugSystem) pub ret Float {
+  ret debug.lastFps
+}
+
+# ----- entity builders -----------------------------------------------
+
+# All the debug-UI entities are *parentless roots* so they layer on
+# top of the host's main world tree without participating in its
+# layout. They use `Offset` to position themselves in screen-logical
+# coordinates.
+
+func setOffset(world: mod UiWorld, entity: view Int, x: view Float, y: view Float) {
+  let off: Offset = { delta: Vec2 { x: x, y: y } }
+  componentSet(this: world.offsets, entity: entity, data: off)
+}
+
+func setFixedRect(world: mod UiWorld, entity: view Int, w: view Float, h: view Float) {
+  let r: Rect = { x: 0.0, y: 0.0, w: w, h: h }
+  componentSet(this: world.rects, entity: entity, data: r)
+  let s: Size = {
+    w: SizeAxis { mode: SizeMode.Fixed, min: -1, max: -1 }
+    h: SizeAxis { mode: SizeMode.Fixed, min: -1, max: -1 }
+  }
+  componentSet(this: world.sizes, entity: entity, data: s)
+}
+
+func setCircleShape(world: mod UiWorld, entity: view Int, fill: view RgbaColor) {
+  let sh: Shape = {
+    kind: ShapeKind.Circle
+    fill: fill
+    stroke: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
+    strokeWidth: 0.0
+    radius: 0.0
+  }
+  componentSet(this: world.shapes, entity: entity, data: sh)
+}
+
+func setRectShape(world: mod UiWorld, entity: view Int, fill: view RgbaColor) {
+  let sh: Shape = {
+    kind: ShapeKind.Rect
+    fill: fill
+    stroke: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
+    strokeWidth: 0.0
+    radius: 0.0
+  }
+  componentSet(this: world.shapes, entity: entity, data: sh)
+}
+
+func setRoundedShape(world: mod UiWorld, entity: view Int, fill: view RgbaColor, radius: view Float) {
+  let sh: Shape = {
+    kind: ShapeKind.RoundedRect
+    fill: fill
+    stroke: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
+    strokeWidth: 0.0
+    radius: radius
+  }
+  componentSet(this: world.shapes, entity: entity, data: sh)
+}
+
+func setDebugText(world: mod UiWorld, entity: view Int, text: own String, styleId: own String) {
+  let t: Text = {
+    text: text
+    styleId: styleId
+    wrapWidthMode: WrapWidthMode.None
+  }
+  componentSet(this: world.texts, entity: entity, data: t)
+}
+
+func setOnClickAction(world: mod UiWorld, entity: view Int, actionId: own String) {
+  let oc: OnClick = {
+    actionId: actionId
+    actionIdDouble: ""
+    actionIdTriple: ""
+    maxDelayMs: 250
+  }
+  componentSet(this: world.onClicks, entity: entity, data: oc)
+}
+
+func setStackLayout(world: mod UiWorld, entity: view Int) {
+  let lay: Layout = {
+    kind: LayoutType.Stack
+    gap: 0.0
+    alignMain: AlignKind.Center
+    alignCross: AlignKind.Center
+    columns: 0
+    rowGap: 0.0
+    columnGap: 0.0
+  }
+  componentSet(this: world.layouts, entity: entity, data: lay)
+}
+
+func setVerticalLayout(world: mod UiWorld, entity: view Int, gap: view Float) {
+  let lay: Layout = {
+    kind: LayoutType.Vertical
+    gap: gap
+    alignMain: AlignKind.Start
+    alignCross: AlignKind.Stretch
+    columns: 0
+    rowGap: 0.0
+    columnGap: 0.0
+  }
+  componentSet(this: world.layouts, entity: entity, data: lay)
+}
+
+func setHorizontalLayout(world: mod UiWorld, entity: view Int, gap: view Float, alignCross: AlignKind) {
+  let lay: Layout = {
+    kind: LayoutType.Horizontal
+    gap: gap
+    alignMain: AlignKind.Start
+    alignCross: alignCross
+    columns: 0
+    rowGap: 0.0
+    columnGap: 0.0
+  }
+  componentSet(this: world.layouts, entity: entity, data: lay)
+}
+
+func dbgSetPaddingAll(world: mod UiWorld, entity: view Int, n: view Float) {
+  # Prefixed with `dbg` to avoid name-collision with the same-named
+  # helper users tend to write in their own world-builder modules.
+  let pad: Padding = { insets: Insets { l: n, t: n, r: n, b: n } }
+  componentSet(this: world.paddings, entity: entity, data: pad)
+}
+
+func attachKids(world: mod UiWorld, parent: view Int, kids: view List(Int)) {
+  let kidsCopy: List(Int) = createList(Int, initialCap: kids.length)
+  let i: Int = 0
+  loop i < kids.length {
+    let k: Int = kids.get(index: i)
+    kidsCopy.add(value: k)
+    let pl: ParentLink = { parent: parent }
+    componentSet(this: world.parentLinks, entity: k, data: pl)
+    i = i + 1
+  }
+  let ch: Children = { ids: own kidsCopy }
+  componentSet(this: world.childrens, entity: parent, data: own ch)
+}
+
+# Build the floating debug button: a parentless root with a Stack
+# layout containing a "D" text glyph. Sized `buttonSize` × `buttonSize`,
+# positioned at (buttonX, buttonY) via Offset.
+func buildDebugButton(world: mod UiWorld, debug: view DebugSystem) ret Int {
+  let btn: Int = createEntity(world: world)
+  setFixedRect(world: world, entity: btn, w: debug.buttonSize, h: debug.buttonSize)
+  setOffset(world: world, entity: btn, x: debug.buttonX, y: debug.buttonY)
+  setCircleShape(world: world, entity: btn, fill: debugAmberColor())
+  setStackLayout(world: world, entity: btn)
+  let actionId: String = debugActionToggleMenu
+  setOnClickAction(world: world, entity: btn, actionId: actionId)
+
+  let label: Int = createEntity(world: world)
+  let labelW: Float = debug.buttonSize
+  let labelH: Float = debug.buttonSize
+  setFixedRect(world: world, entity: label, w: labelW, h: labelH)
+  let dStr: String = "D"
+  let styleId: String = "debugButton"
+  setDebugText(world: world, entity: label, text: dStr, styleId: styleId)
+
+  let kids: List(Int) = createList(Int, initialCap: 1)
+  kids.add(value: label)
+  attachKids(world: world, parent: btn, kids: kids)
+  ret btn
+}
+
+# Build one row of the menu: a label on the left, an iOS-style switch
+# (pill + circle knob) on the right. The pill carries the OnClick so a
+# tap anywhere on the row toggles. Returns the row entity (parentless).
+func buildSwitchRow(
+  world: mod UiWorld
+  labelText: own String
+  actionId: own String
+  on: view Bool
+  width: view Float
+) ret Int {
+  let row: Int = createEntity(world: world)
+  setFixedRect(world: world, entity: row, w: width, h: 56.0)
+  let smallGap: Float = 12.0
+  setHorizontalLayout(world: world, entity: row, gap: smallGap, alignCross: AlignKind.Center)
+
+  let label: Int = createEntity(world: world)
+  setFixedRect(world: world, entity: label, w: width - 80.0, h: 24.0)
+  let labelStyle: String = "debugMenuLabel"
+  setDebugText(world: world, entity: label, text: labelText, styleId: labelStyle)
+
+  # iOS switch: an outer rounded pill (color depends on `on`) with a
+  # white circle knob nudged left/right.
+  let pill: Int = createEntity(world: world)
+  setFixedRect(world: world, entity: pill, w: 56.0, h: 32.0)
+  let pillFill: RgbaColor = debugSwitchOffColor()
+  if on {
+    pillFill = debugSwitchOnColor()
+  }
+  setRoundedShape(world: world, entity: pill, fill: pillFill, radius: 16.0)
+  setStackLayout(world: world, entity: pill)
+  setOnClickAction(world: world, entity: pill, actionId: actionId)
+
+  let knob: Int = createEntity(world: world)
+  setFixedRect(world: world, entity: knob, w: 26.0, h: 26.0)
+  setCircleShape(world: world, entity: knob, fill: debugSwitchKnobColor())
+  # Nudge the knob left (off) or right (on). The pill is 56 wide and
+  # the knob is 26 wide; the knob centre travels 30/2 = 15 px each way
+  # from the pill centre. Offset is post-layout so the Stack layout's
+  # centring is preserved on the other axis.
+  let knobOff: Float = -12.0
+  if on {
+    knobOff = 12.0
+  }
+  setOffset(world: world, entity: knob, x: knobOff, y: 0.0)
+
+  let pillKids: List(Int) = createList(Int, initialCap: 1)
+  pillKids.add(value: knob)
+  attachKids(world: world, parent: pill, kids: pillKids)
+
+  let rowKids: List(Int) = createList(Int, initialCap: 2)
+  rowKids.add(value: label)
+  rowKids.add(value: pill)
+  attachKids(world: world, parent: row, kids: rowKids)
+  ret row
+}
+
+# Build the menu overlay: a full-screen translucent backdrop that
+# intercepts clicks (tapping outside the menu closes it), with a
+# centred panel of switch rows on top.
+func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret Int {
+  # Backdrop: covers the entire screen (sized to the host's reported
+  # screen extents — see `setDebugScreenSize`). Has OnClick so taps
+  # anywhere outside the centred panel close the menu.
+  let backdrop: Int = createEntity(world: world)
+  setFixedRect(world: world, entity: backdrop, w: debug.screenW, h: debug.screenH)
+  setOffset(world: world, entity: backdrop, x: 0.0, y: 0.0)
+  setRectShape(world: world, entity: backdrop, fill: debugBackdropColor())
+  let dismissId: String = debugActionDismiss
+  setOnClickAction(world: world, entity: backdrop, actionId: dismissId)
+  setStackLayout(world: world, entity: backdrop)
+
+  # Menu panel: centred on the screen at a comfortable size.
+  let panelW: Float = 340.0
+  let panelH: Float = 200.0
+  let panel: Int = createEntity(world: world)
+  setFixedRect(world: world, entity: panel, w: panelW, h: panelH)
+  setRoundedShape(world: world, entity: panel, fill: debugMenuFillColor(), radius: 16.0)
+  setVerticalLayout(world: world, entity: panel, gap: 12.0)
+  dbgSetPaddingAll(world: world, entity: panel, n: 20.0)
+
+  let themeLabel: String = "Dark theme"
+  let themeAction: String = debugActionToggleTheme
+  let themeOn: Bool = currentTheme().mode is ThemeMode.Dark
+  let themeRow: Int = buildSwitchRow(
+    world: world
+    labelText: themeLabel
+    actionId: themeAction
+    on: themeOn
+    width: panelW - 40.0
+  )
+
+  let labelsLabel: String = "FPS / mem labels"
+  let labelsAction: String = debugActionToggleLabels
+  let labelsRow: Int = buildSwitchRow(
+    world: world
+    labelText: labelsLabel
+    actionId: labelsAction
+    on: debug.showLabels
+    width: panelW - 40.0
+  )
+
+  let rows: List(Int) = createList(Int, initialCap: 2)
+  rows.add(value: themeRow)
+  rows.add(value: labelsRow)
+  attachKids(world: world, parent: panel, kids: rows)
+
+  let backdropKids: List(Int) = createList(Int, initialCap: 1)
+  backdropKids.add(value: panel)
+  attachKids(world: world, parent: backdrop, kids: backdropKids)
+  ret backdrop
+}
+
+# Attach the debug button (always) and the menu overlay (when open) to
+# `world`. Call this once per world build, after the host's own
+# `buildScreenWorld` has populated the rest of the tree.
+func addDebugLayer(world: mod UiWorld, debug: view DebugSystem) pub {
+  # The button is always added. Menu is conditional.
+  let btn: Int = buildDebugButton(world: world, debug: debug)
+  if debug.menuOpen {
+    let menu: Int = buildDebugMenuOverlay(world: world, debug: debug)
+  }
+}
+
+# ----- input dispatch ------------------------------------------------
+
+# Walk `input.events` looking for the `debug.*` action ids. Mutates
+# `debug` in place. Returns true if any debug-state change happened
+# (callers should treat the return value as "force a world rebuild").
+func dispatchDebugAction(input: view InputSystem, debug: mod DebugSystem) pub ret Bool {
+  let changed: Bool = false
+  let n: Int = input.events.length
+  let i: Int = 0
+  loop i < n {
+    let ev: ActionEvent = rae_ext_rae_buf_get(buf: input.events.data, index: i)
+    let actionId: String = ev.actionId
+
+    if actionId.equals(other: debugActionToggleMenu) {
+      debug.menuOpen = debug.menuOpen is false
+      changed = true
+    }
+    if actionId.equals(other: debugActionDismiss) {
+      if debug.menuOpen {
+        debug.menuOpen = false
+        changed = true
+      }
+    }
+    if actionId.equals(other: debugActionToggleTheme) {
+      let cur: Theme = currentTheme()
+      if cur.mode is ThemeMode.Dark {
+        setActiveTheme(theme: lightTheme())
+      } else {
+        setActiveTheme(theme: darkTheme())
+      }
+      changed = true
+    }
+    if actionId.equals(other: debugActionToggleLabels) {
+      debug.showLabels = debug.showLabels is false
+      changed = true
+    }
+
+    i = i + 1
+  }
+  ret changed
+}
+
+# Returns true if `actionId` is one of the debug-namespaced actions.
+# Host dispatchers can use this to skip their own routing for events
+# that already went through `dispatchDebugAction`.
+func isDebugAction(actionId: view String) pub ret Bool {
+  if actionId.equals(other: debugActionToggleMenu) {
+    ret true
+  }
+  if actionId.equals(other: debugActionDismiss) {
+    ret true
+  }
+  if actionId.equals(other: debugActionToggleTheme) {
+    ret true
+  }
+  if actionId.equals(other: debugActionToggleLabels) {
+    ret true
+  }
+  ret false
+}
+
+# ----- per-frame overlay drawing -------------------------------------
+
+# Format `kb` (in KB) into a `"X.Y MB"` string. The raw value is too
+# noisy to read directly; rounding to one decimal of MB matches what
+# Activity Monitor / `ps -o rss` displays for a typical mobile-UI app.
+func formatMemMB(kb: view Int) ret String {
+  # Multiply by 10 before dividing so we keep one decimal place without
+  # importing the math module. 5520 KB -> 5520*10 / 1024 = 53 -> "5.3 MB".
+  let tenths: Int = (kb * 10) / 1024
+  let whole: Int = tenths / 10
+  let frac: Int = tenths - whole * 10
+  ret "{whole}.{frac} MB"
+}
+
+func formatFps(fps: view Float) ret String {
+  # Round to nearest integer. Sub-1 fps and weird startup values just
+  # show "0" / "1" — that's fine for an at-a-glance read-out.
+  let rounded: Int = (fps + 0.5).toInt()
+  if rounded < 0 {
+    rounded = 0
+  }
+  ret "fps: {rounded}"
+}
+
+# Draw the two text lines (FPS + mem) anchored just above the debug
+# button. Called from `updateAndRenderDebugOverlay` when labels are on.
+# These are drawn outside the ECS so they don't intercept clicks.
+func drawDebugLabels(debug: view DebugSystem) {
+  let fpsText: String = formatFps(fps: debug.lastFps)
+  let memText: String = "mem: {formatMemMB(kb: debug.lastRssKb)}"
+
+  # Stack the labels vertically. Each line is ~16 px tall at fontSize
+  # 14. Anchor the BOTTOM of the lower line just above the button.
+  let fontSize: Float = 14.0
+  let lineH: Float = 16.0
+  let gap: Float = 4.0
+  let memY: Float = debug.buttonY - lineH - gap
+  let fpsY: Float = memY - lineH - 2.0
+
+  # Right-align so the labels visually hang off the right edge of the
+  # button. The button itself sits at (buttonX, buttonY) with width
+  # `buttonSize`, so the right edge is buttonX + buttonSize.
+  let rightEdge: Float = debug.buttonX + debug.buttonSize
+  let fpsW: Int = measureText(text: fpsText, fontSize: fontSize.toInt())
+  let memW: Int = measureText(text: memText, fontSize: fontSize.toInt())
+  let fpsX: Float = rightEdge - fpsW.toFloat()
+  let memX: Float = rightEdge - memW.toFloat()
+
+  # Use the host's loaded font slot 0 (Roboto in 98_mobile_ui). Falls
+  # back to raylib's default font if no slot is loaded — see
+  # `lib/raylib.rae` notes on `drawTextWithFont`.
+  let col: Color = { r: 255, g: 191, b: 0, a: 255 }
+  drawTextWithFont(
+    slot: 0
+    text: fpsText
+    x: fpsX
+    y: fpsY
+    fontSize: fontSize
+    spacing: 1.0
+    color: col
+  )
+  drawTextWithFont(
+    slot: 0
+    text: memText
+    x: memX
+    y: memY
+    fontSize: fontSize
+    spacing: 1.0
+    color: col
+  )
+}
+
+# Per-frame entry point. Records the frame timestamp (for FPS), reads
+# RSS, and draws the labels if enabled. Call this AFTER renderSystem
+# (and after any hero overlay) so the labels paint on top of the host
+# UI. The button itself is drawn by renderSystem because it lives in
+# the ECS world.
+func updateAndRenderDebugOverlay(debug: mod DebugSystem, now: view Float) pub {
+  recordDebugFrame(debug: debug, now: now)
+  if debug.showLabels {
+    drawDebugLabels(debug: debug)
+  }
+}

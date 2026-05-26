@@ -26,6 +26,7 @@ import ui/transform
 import ui/render
 import ui/textures
 import ui/input
+import ui/debug
 
 func main() {
   # FLAG_WINDOW_RESIZABLE (4) | FLAG_MSAA_4X_HINT (32) = 36. MSAA turns
@@ -230,8 +231,38 @@ func main() {
     let debugRectColor: Color = { r: 255, g: 0, b: 255, a: 200 }
     let debugHoverColor: Color = { r: 0, g: 220, b: 80, a: 255 }
     let debugCursorColor: Color = { r: 255, g: 220, b: 0, a: 255 }
+
+    # In-app debug UI lives in `lib/ui/debug.rae`. The DebugSystem
+    # struct persists across world rebuilds (menu-open / labels-on
+    # state, plus the FPS rolling buffer) — re-create only once at
+    # startup, then call addDebugLayer per rebuild and the per-frame
+    # overlay/dispatch hooks inside the inner loop. See the module
+    # docstring for the full ≤5-line integration recipe.
+    let debug: DebugSystem = createDebugSystem()
+    setDebugScreenSize(debug: debug, w: screenW, h: screenH)
+    setDebugButtonPosition(
+      debug: debug
+      x: screenW - 64.0
+      y: screenH - miniPlayerH - navTabsH - outerPad * 2.0 - 96.0
+    )
+    # Snapshot helper: `RAE_UI_DEBUG_MENU=open` pre-opens the menu so
+    # the snapshot.sh tooling can capture the menu state without
+    # needing to script a click. `=labels` pre-enables the FPS / mem
+    # read-out for the same reason.
+    let debugMenuEnv: String = getEnv(name: "RAE_UI_DEBUG_MENU")
+    if debugMenuEnv.equals(other: "open") {
+      debug.menuOpen = true
+    }
+    if debugMenuEnv.equals(other: "labels") {
+      debug.showLabels = true
+    }
+
     loop running {
       let world: UiWorld = buildScreenWorld(screen: currentScreen, scenes: scenes)
+      # Layer the reusable debug-UI entities (button + optional menu
+      # overlay) onto the freshly-built world BEFORE layout runs so
+      # they participate in measure/place like any other entity.
+      addDebugLayer(world: world, debug: debug)
       layoutSystem(world: world)
       transformSystem(world: world)
 
@@ -258,6 +289,22 @@ func main() {
         } else {
           updateInputSystem(input: input, world: world)
           let nextScreen: Screen = dispatchActions(input: input, current: currentScreen)
+
+          # In-app debug UI: process any debug.* action that fired
+          # this frame. `dispatchDebugAction` toggles the persistent
+          # DebugSystem state in place; a true return means at least
+          # one state bit flipped, so we need to rebuild the world
+          # (the menu and switch knobs are ECS entities, not direct
+          # raylib draws) and re-parse scenes if the theme was the
+          # piece that changed (scene `$tokenName` colors bind at
+          # parse time). Re-parsing on every state change is cheap
+          # and avoids special-casing.
+          let debugChanged: Bool = dispatchDebugAction(input: input, debug: debug)
+          if debugChanged {
+            syncColorsFromTheme()
+            scenes = loadAllScenes()
+            switching = true
+          }
 
           # Theme toggle: press T to swap between light and dark.
           # raylib KEY_T is 84. Re-parse scenes so their token colors
@@ -336,6 +383,11 @@ func main() {
             )
             renderDebugMouseCursor(mouseX: mx, mouseY: my, color: debugCursorColor)
           }
+          # Reusable debug overlay: records the frame timestamp for
+          # the rolling FPS window + draws the FPS / mem read-out
+          # (when the in-app toggle is on). Drawn last so the labels
+          # paint on top of everything else.
+          updateAndRenderDebugOverlay(debug: debug, now: now)
           endDrawing()
 
           if willSwitch {
