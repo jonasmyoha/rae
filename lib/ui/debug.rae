@@ -129,15 +129,16 @@ type DebugSystem {
 }
 
 func createDebugSystem() pub ret DebugSystem {
-  # Default placement: bottom-right corner, leaving an 18 px margin so
-  # the button doesn't kiss the screen edge. The host can overwrite
-  # buttonX/Y before the first addDebugLayer call.
+  # Default placement: top-left corner with a 16 px margin. These are
+  # only used when the scene's DebugAnchor doesn't carry usable rect
+  # data; the normal path is for `applyDebugAnchor` to overwrite
+  # buttonX/Y/Size from the authored Rect before each rebuild.
   let defaultSize: Float = 44.0
   ret DebugSystem {
     menuOpen: false
     showLabels: false
-    buttonX: 420.0
-    buttonY: 980.0
+    buttonX: 16.0
+    buttonY: 16.0
     buttonSize: defaultSize
     screenW: 498.0
     screenH: 1079.0
@@ -481,11 +482,58 @@ func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret Int 
   ret backdrop
 }
 
+# Scan `world` for an entity carrying a `DebugAnchor` + `Rect`. The
+# anchor's authored Rect supplies the button's absolute screen-space
+# position and size; the anchor entity itself renders nothing (no
+# Shape / Sprite / Text). Returns true and writes (x, y, w, h) into
+# `debug.buttonX/Y/Size` if an anchor was found, false otherwise.
+#
+# An app opts in to the debug UI by dropping a `"DebugAnchor": {}` line
+# onto any node in one of its .raescene files. The mere presence of the
+# component is what enables the debug layer — no programmatic call
+# needed. Drop the line, lose the button.
+func applyDebugAnchor(world: view UiWorld, debug: mod DebugSystem) ret Bool {
+  let anchors: view ComponentTable(DebugAnchor) => world.debugAnchors
+  let n: Int = componentCount(this: anchors)
+  if n is 0 {
+    ret false
+  }
+  # Walk the dense table; pick the first anchor that also carries a
+  # `Rect`. Multiple anchors aren't an error (the last legal one wins)
+  # but apps should keep it to one.
+  let i: Int = 0
+  loop i < n {
+    let e: Int = componentEntityAt(this: anchors, i: i)
+    if componentHas(this: world.rects, entity: e) {
+      let r: Rect = componentGet(this: world.rects, entity: e)
+      debug.buttonX = r.x
+      debug.buttonY = r.y
+      # Width and height should match; the button is a circle, so use
+      # `w` as the canonical edge. If `w` is zero (anchor authored with
+      # only x/y), fall back to whatever was on the DebugSystem already.
+      if r.w > 0.0 {
+        debug.buttonSize = r.w
+      }
+      ret true
+    }
+    i = i + 1
+  }
+  ret false
+}
+
 # Attach the debug button (always) and the menu overlay (when open) to
 # `world`. Call this once per world build, after the host's own
 # `buildScreenWorld` has populated the rest of the tree.
-func addDebugLayer(world: mod UiWorld, debug: view DebugSystem) pub {
-  # The button is always added. Menu is conditional.
+#
+# The button is opt-in: only built if a `DebugAnchor` component is
+# present somewhere in the world (typically authored in a .raescene).
+# When the anchor is absent, this is a no-op and the app reverts to
+# its non-debug self.
+func addDebugLayer(world: mod UiWorld, debug: mod DebugSystem) pub {
+  let hasAnchor: Bool = applyDebugAnchor(world: world, debug: debug)
+  if hasAnchor is false {
+    ret
+  }
   let btn: Int = buildDebugButton(world: world, debug: debug)
   if debug.menuOpen {
     let menu: Int = buildDebugMenuOverlay(world: world, debug: debug)
@@ -577,29 +625,33 @@ func formatFps(fps: view Float) ret String {
   ret "fps: {rounded}"
 }
 
-# Draw the two text lines (FPS + mem) anchored just above the debug
+# Draw the two text lines (FPS + mem) anchored just BELOW the debug
 # button. Called from `updateAndRenderDebugOverlay` when labels are on.
 # These are drawn outside the ECS so they don't intercept clicks.
+#
+# The button now sits in the top-left corner (driven by the .raescene
+# DebugAnchor), so the labels are left-aligned just below the button.
+# In the previous bottom-right layout the labels rendered above the
+# button instead; the geometry flipped when the button moved.
 func drawDebugLabels(debug: view DebugSystem) {
   let fpsText: String = formatFps(fps: debug.lastFps)
   let memText: String = "mem: {formatMemMB(kb: debug.lastRssKb)}"
 
-  # Stack the labels vertically. Each line is ~16 px tall at fontSize
-  # 14. Anchor the BOTTOM of the lower line just above the button.
+  # Stack the labels vertically below the button. Each line is ~16 px
+  # tall at fontSize 14. The first line starts just under the button's
+  # bottom edge.
   let fontSize: Float = 14.0
   let lineH: Float = 16.0
   let gap: Float = 4.0
-  let memY: Float = debug.buttonY - lineH - gap
-  let fpsY: Float = memY - lineH - 2.0
+  let bottomEdge: Float = debug.buttonY + debug.buttonSize
+  let fpsY: Float = bottomEdge + gap
+  let memY: Float = fpsY + lineH + 2.0
 
-  # Right-align so the labels visually hang off the right edge of the
-  # button. The button itself sits at (buttonX, buttonY) with width
-  # `buttonSize`, so the right edge is buttonX + buttonSize.
-  let rightEdge: Float = debug.buttonX + debug.buttonSize
-  let fpsW: Int = measureText(text: fpsText, fontSize: fontSize.toInt())
-  let memW: Int = measureText(text: memText, fontSize: fontSize.toInt())
-  let fpsX: Float = rightEdge - fpsW.toFloat()
-  let memX: Float = rightEdge - memW.toFloat()
+  # Left-align so the labels visually hang off the left edge of the
+  # button.
+  let leftEdge: Float = debug.buttonX
+  let fpsX: Float = leftEdge
+  let memX: Float = leftEdge
 
   # Use the host's loaded font slot 0 (Roboto in 98_mobile_ui). Falls
   # back to raylib's default font if no slot is loaded — see
