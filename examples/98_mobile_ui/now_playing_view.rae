@@ -7,7 +7,7 @@ import ui/ecs
 import ui/scene
 import ui/scene_instance
 
-func buildNowPlayingWorld(scenes: view AlbumScenes) pub ret UiWorld {
+func buildNowPlayingWorld(scenes: view AlbumScenes, playback: view PlaybackState) pub ret UiWorld {
   let world: UiWorld = createUiWorld()
 
   let root: Int = createEntity(world: world)
@@ -23,23 +23,32 @@ func buildNowPlayingWorld(scenes: view AlbumScenes) pub ret UiWorld {
   let npH: Float = screenH - outerPad * 2.0 - miniPlayerH - navTabsH - bottomGap
   let np: Int = createEntity(world: world)
   setRectFixed(world: world, entity: np, w: screenW - outerPad * 2.0, h: npH)
-  let noOverrides: List(SceneOverride) = emptyOverrides()
+
+  # Initial play/pause icon override so the very first rendered frame
+  # already shows the right glyph. The per-frame inner loop applies
+  # the same swap whenever `isPlaying` flips after that.
+  let npOverrides: List(SceneOverride) = emptyOverrides()
+  let playIconId: String = "PlayIcon"
+  let iconKey: String = playbackIconKey(playback: playback)
+  addSpriteOverride(list: npOverrides, nodeId: playIconId, value: iconKey)
+
   let npLabel: String = "music-player-now-playing"
   let mounted: Int = mountOrError(
     world: world
     mountEntity: np
     scene: scenes.nowPlaying
     sceneLabel: npLabel
-    overrides: noOverrides
+    overrides: npOverrides
   )
 
   let miniLabel: String = "mini-player"
-  let miniPlayer: Int = buildSimpleSceneInstance(
+  let miniPlayer: Int = buildMiniPlayerInstance(
     world: world
     scene: scenes.miniPlayer
     w: screenW - outerPad * 2.0
     h: miniPlayerH
     label: miniLabel
+    playback: playback
   )
   let navTabs: Int = buildNavTabsForScreen(world: world, activeTab: Screen.NowPlaying, scenes: scenes)
 
@@ -50,4 +59,32 @@ func buildNowPlayingWorld(scenes: view AlbumScenes) pub ret UiWorld {
   attachChildren(world: world, parent: root, kids: kids)
 
   ret world
+}
+
+# Mini-player mount that applies the play/pause icon override on
+# `MiniPlayIcon` based on the current playback state. Same shape as
+# `buildSimpleSceneInstance` from scene_mount.rae, but with the
+# overrides list pre-populated.
+func buildMiniPlayerInstance(
+  world: mod UiWorld
+  scene: view Scene
+  w: view Float
+  h: view Float
+  label: view String
+  playback: view PlaybackState
+) pub ret Int {
+  let mount: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: mount, w: w, h: h)
+  let overrides: List(SceneOverride) = emptyOverrides()
+  let miniIconId: String = "MiniPlayIcon"
+  let iconKey: String = playbackIconKey(playback: playback)
+  addSpriteOverride(list: overrides, nodeId: miniIconId, value: iconKey)
+  let mounted: Int = mountOrError(
+    world: world
+    mountEntity: mount
+    scene: scene
+    sceneLabel: label
+    overrides: overrides
+  )
+  ret mount
 }

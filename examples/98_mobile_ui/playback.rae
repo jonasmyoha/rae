@@ -1,0 +1,168 @@
+# Mock playback state shared across screens.
+#
+# Both the big circular play button on the now-playing screen and the
+# small one in the mini-player on the album screen fire the same
+# `playback.toggle` action. We carry one `PlaybackState` through the
+# outer loop in `main.rae`, mutate it from `dispatchActions`, and read
+# it back when building the per-frame icon override + progress fill.
+#
+# Time advance is driven by the inner loop sampling `getTime()` and
+# computing a delta against the previous frame's sample, so we don't
+# need `getFrameTime()` from raylib. When `isPlaying` is true the
+# delta accumulates into `elapsedSec`; when paused, we still update
+# the `prevTime` floor (so the next resume doesn't replay the entire
+# pause interval in one tick) but leave `elapsedSec` alone.
+#
+# At `elapsedSec >= durationSec` we wrap back to 0 and keep playing —
+# auto-loop is the demo-friendly choice. A future pass could expose a
+# `loopMode` enum (Once / Loop) if a real player wires this up.
+import core
+import string
+import ui/components
+import ui/ecs
+
+type PlaybackState pub {
+  isPlaying: Bool
+  elapsedSec: Float
+  durationSec: Float
+  # `prevTime` is the `getTime()` reading the previous frame produced.
+  # `< 0.0` means "first frame" — the inner loop primes it before the
+  # first advance call. Storing the previous frame sample here rather
+  # than computing a delta inside main.rae keeps the state struct
+  # self-contained.
+  prevTime: Float
+}
+
+func createPlaybackState() pub ret PlaybackState {
+  ret PlaybackState {
+    isPlaying: false
+    elapsedSec: 0.0
+    durationSec: 20.0
+    prevTime: -1.0
+  }
+}
+
+# Flip the play/pause flag. Called by `dispatchActions` when either
+# play button fires its `playback.toggle` action.
+func togglePlayback(state: mod PlaybackState) pub {
+  if state.isPlaying {
+    state.isPlaying = false
+  } else {
+    state.isPlaying = true
+  }
+}
+
+# Advance `elapsedSec` by the delta against the last sampled frame.
+# Called every frame in the inner loop, regardless of play state, so
+# `prevTime` always tracks the most recent sample (this avoids a giant
+# jump on the first resume after a long pause). When `elapsedSec`
+# reaches `durationSec` we wrap back to 0 and keep playing — the
+# demo-friendly choice, see file-header note.
+func advancePlayback(state: mod PlaybackState, now: view Float) pub {
+  let dt: Float = 0.0
+  if state.prevTime >= 0.0 {
+    dt = now - state.prevTime
+  }
+  state.prevTime = now
+  if state.isPlaying {
+    state.elapsedSec = state.elapsedSec + dt
+    if state.elapsedSec >= state.durationSec {
+      # Wrap. Subtract instead of zero so a very large `dt` doesn't
+      # lose the carry — though in practice dt is well under 1s.
+      state.elapsedSec = state.elapsedSec - state.durationSec
+      if state.elapsedSec < 0.0 {
+        state.elapsedSec = 0.0
+      }
+    }
+  }
+}
+
+# Progress in [0, 1]. Clamped so the rendered fill width can never
+# overshoot the track width when `dt` momentarily pushes elapsedSec
+# past durationSec before the wrap check kicks in.
+func playbackProgress(state: view PlaybackState) pub ret Float {
+  if state.durationSec <= 0.0 {
+    ret 0.0
+  }
+  let p: Float = state.elapsedSec / state.durationSec
+  if p < 0.0 {
+    ret 0.0
+  }
+  if p > 1.0 {
+    ret 1.0
+  }
+  ret p
+}
+
+# Per-frame world refresh: look up `PlayIcon`, `MiniPlayIcon`,
+# `ProgressBar`, and `ProgressFill` by node id in the current world and
+# update their components to reflect `state`. Tolerant of missing nodes
+# — the album screen has no `PlayIcon`/`ProgressBar`/`ProgressFill`,
+# only `MiniPlayIcon`; the now-playing screen has all four.
+#
+# Icon updates mutate `Sprite.textureKey` directly (saves rebuilding
+# the override list each frame). Progress-fill width is set on the
+# `ProgressFill` entity's `ComputedRect.w` — bypassing layout works
+# because `paintShape` reads ComputedRect, not the authored Rect.
+func applyPlaybackToWorld(world: mod UiWorld, state: view PlaybackState) pub {
+  let iconKey: String = playbackIconKey(playback: state)
+
+  # Big play button on the now-playing screen.
+  let playIconKey: String = "PlayIcon"
+  let playIconEntityOpt: opt Int = world.nodeIds.get(k: playIconKey)
+  if playIconEntityOpt is none {
+  } else {
+    let playIconEntity: Int = playIconEntityOpt
+    if componentHas(this: world.sprites, entity: playIconEntity) {
+      let sp: mod Sprite => componentMod(this: world.sprites, entity: playIconEntity)
+      sp.textureKey = iconKey
+    }
+  }
+
+  # Mini-player play button (present on both screens).
+  let miniIconKey: String = "MiniPlayIcon"
+  let miniIconEntityOpt: opt Int = world.nodeIds.get(k: miniIconKey)
+  if miniIconEntityOpt is none {
+  } else {
+    let miniIconEntity: Int = miniIconEntityOpt
+    if componentHas(this: world.sprites, entity: miniIconEntity) {
+      let sp: mod Sprite => componentMod(this: world.sprites, entity: miniIconEntity)
+      sp.textureKey = iconKey
+    }
+  }
+
+  # Progress fill width: read the parent track's authored width from
+  # its ComputedRect (layout has already filled it in), then scale by
+  # progress and write to the fill's ComputedRect. We also bump the
+  # fill's authored Rect so that any subsequent layout pass (a screen
+  # rebuild leaves both in sync from scratch anyway, but mid-life
+  # layout reflows would otherwise reset the fill width to whatever
+  # was last authored).
+  let trackKey: String = "ProgressBar"
+  let trackEntityOpt: opt Int = world.nodeIds.get(k: trackKey)
+  let fillKey: String = "ProgressFill"
+  let fillEntityOpt: opt Int = world.nodeIds.get(k: fillKey)
+  if trackEntityOpt is none {
+  } else {
+    if fillEntityOpt is none {
+    } else {
+      let trackEntity: Int = trackEntityOpt
+      let fillEntity: Int = fillEntityOpt
+      let trackW: Float = 0.0
+      if componentHas(this: world.computedRects, entity: trackEntity) {
+        let tcr: ComputedRect = componentGet(this: world.computedRects, entity: trackEntity)
+        trackW = tcr.w
+      }
+      let p: Float = playbackProgress(state: state)
+      let fillW: Float = trackW * p
+      if componentHas(this: world.computedRects, entity: fillEntity) {
+        let fcr: mod ComputedRect => componentMod(this: world.computedRects, entity: fillEntity)
+        fcr.w = fillW
+      }
+      if componentHas(this: world.rects, entity: fillEntity) {
+        let fr: mod Rect => componentMod(this: world.rects, entity: fillEntity)
+        fr.w = fillW
+      }
+    }
+  }
+}
