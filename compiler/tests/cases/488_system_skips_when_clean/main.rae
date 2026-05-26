@@ -1,0 +1,41 @@
+# A consumer system caches the last seen generation of its input
+# ComponentTable and short-circuits when nothing has changed. This
+# is the pattern the mobile-UI layout/render skip paths use.
+import core
+import ui/components
+import ui/ecs
+
+type LayoutCache {
+  seenRectGen: Int
+  runs: Int
+}
+
+func runLayoutIfDirty(cache: mod LayoutCache, rects: view ComponentTable(Rect)) ret Bool {
+  let now: Int = componentTableGeneration(Rect, this: rects)
+  if now is cache.seenRectGen {
+    ret false
+  }
+  cache.seenRectGen = now
+  cache.runs = cache.runs + 1
+  ret true
+}
+
+func main() {
+  let rects: ComponentTable(Rect) = createComponentTable(Rect)
+  let cache: LayoutCache = { seenRectGen: -1, runs: 0 }
+
+  let r1: Rect = { x: 0.0, y: 0.0, w: 10.0, h: 10.0 }
+  componentSet(Rect, this: rects, entity: 1, data: r1)
+
+  let did1: Bool = runLayoutIfDirty(cache: cache, rects: rects)
+  log("first={did1} runs={cache.runs}")
+
+  let did2: Bool = runLayoutIfDirty(cache: cache, rects: rects)
+  log("idle={did2} runs={cache.runs}")
+
+  let r2: Rect = { x: 5.0, y: 5.0, w: 20.0, h: 20.0 }
+  componentSet(Rect, this: rects, entity: 1, data: r2)
+
+  let did3: Bool = runLayoutIfDirty(cache: cache, rects: rects)
+  log("after-mut={did3} runs={cache.runs}")
+}
