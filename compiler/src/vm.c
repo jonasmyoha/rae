@@ -1062,12 +1062,12 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
       case OP_BUF_GET: {
         Value idx_val = vm_pop(vm);
         Value buf_val = vm_pop(vm);
-        
+
         Value* resolved_buf = &buf_val;
         while (resolved_buf->type == VAL_REF) {
             resolved_buf = resolved_buf->as.ref_value.target;
         }
-        
+
         if (resolved_buf->type != VAL_BUFFER || idx_val.type != VAL_INT) {
           diag_error(NULL, 0, 0, "OP_BUF_GET invalid arguments");
           value_free(&buf_val); value_free(&idx_val);
@@ -1082,6 +1082,39 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         }
         Value res = value_copy(&vb->items[idx]);
         vm_push(vm, res);
+        value_free(&buf_val); value_free(&idx_val);
+        break;
+      }
+      case OP_BUF_REF: {
+        // Aliasing buf_get: push a VAL_REF directly into the buffer's
+        // backing storage so writes through the borrow are visible.
+        // Mirrors the C backend's inlined `*((T*)((char*)buf + i*sz))`
+        // lvalue. The next byte is a 1-byte kind (REF_VIEW or REF_MOD).
+        uint8_t kind_byte = *vm->ip++;
+        ReferenceKind kind = (kind_byte == 0) ? REF_VIEW : REF_MOD;
+        Value idx_val = vm_pop(vm);
+        Value buf_val = vm_pop(vm);
+        Value* resolved_buf = &buf_val;
+        while (resolved_buf->type == VAL_REF) {
+            resolved_buf = resolved_buf->as.ref_value.target;
+        }
+        if (resolved_buf->type != VAL_BUFFER || idx_val.type != VAL_INT) {
+          diag_error(NULL, 0, 0, "OP_BUF_REF invalid arguments");
+          value_free(&buf_val); value_free(&idx_val);
+          return VM_RUNTIME_ERROR;
+        }
+        ValueBuffer* vb = resolved_buf->as.buffer_value;
+        int64_t idx = idx_val.as.int_value;
+        if (idx < 0 || (size_t)idx >= vb->count) {
+          diag_error(NULL, 0, 0, "OP_BUF_REF out of bounds");
+          value_free(&buf_val); value_free(&idx_val);
+          return VM_RUNTIME_ERROR;
+        }
+        // The buffer's items array is heap-stable for the lifetime of
+        // the buffer (capacity grows by realloc, but no shrink during
+        // a borrow's lifetime under typical componentMod use). The
+        // VAL_REF points directly at the slot.
+        vm_push(vm, value_ref(&vb->items[idx], kind));
         value_free(&buf_val); value_free(&idx_val);
         break;
       }
