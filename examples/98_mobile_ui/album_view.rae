@@ -117,7 +117,7 @@ func buildTrackList(world: mod UiWorld, trackScene: view Scene) pub ret Int {
 
 # Compose the whole album world: header scene + track list / spacer /
 # mini-player / nav-tabs as code-attached siblings around it.
-func buildAlbumWorld(scenes: view AlbumScenes) pub ret UiWorld {
+func buildAlbumWorld(scenes: view AlbumScenes, playback: view PlaybackState) pub ret UiWorld {
   let world: UiWorld = createUiWorld()
   let contentW: Float = screenW - outerPad * 2.0
 
@@ -133,12 +133,13 @@ func buildAlbumWorld(scenes: view AlbumScenes) pub ret UiWorld {
   let trackList: Int = buildTrackList(world: world, trackScene: scenes.trackRow)
   let spacer: Int = buildVerticalSpacer(world: world)
   let miniLabelAl: String = "mini-player"
-  let miniPlayer: Int = buildSimpleSceneInstance(
+  let miniPlayer: Int = buildMiniPlayerInstance(
     world: world
     scene: scenes.miniPlayer
     w: contentW
     h: miniPlayerH
     label: miniLabelAl
+    playback: playback
   )
   let navTabs: Int = buildNavTabsForScreen(world: world, activeTab: Screen.Album, scenes: scenes)
 
