@@ -146,3 +146,93 @@ func transformSystem(world: mod UiWorld) {
     i = i + 1
   }
 }
+
+# Per-call cache for `transformSystemIfDirty`. Stores the generation
+# of every ComponentTable that transformSystem reads. When all of them
+# match the cached values, the whole walk + write-back to
+# `worldTransforms` can be skipped — the output would be identical.
+#
+# `entityCount` snapshots `alive.length` (no per-frame generation on a
+# raw List, so we fall back to a structural fingerprint that's
+# good-enough for the UI's "no entities created or destroyed without
+# also touching a component table" invariant).
+#
+# Initial -1 sentinels guarantee the first call always runs.
+type TransformCache {
+  computedRectsGen: Int
+  activesGen: Int
+  opacitiesGen: Int
+  transformsGen: Int
+  childrensGen: Int
+  parentLinksGen: Int
+  entityCount: Int
+}
+
+func createTransformCache() pub ret TransformCache {
+  ret TransformCache {
+    computedRectsGen: -1
+    activesGen: -1
+    opacitiesGen: -1
+    transformsGen: -1
+    childrensGen: -1
+    parentLinksGen: -1
+    entityCount: -1
+  }
+}
+
+# Runs transformSystem only when at least one input table has bumped
+# its generation since the last call (or the alive-entity count
+# changed). Returns true when the system actually ran, false when the
+# cached worldTransforms output is still valid.
+#
+# Conservative-but-correct: never skips when in doubt. The 6 component
+# tables here cover every read inside `composeTransform`; we don't
+# track `world.worldTransforms` itself because we're the only writer
+# and any external mutation would still be observable through one of
+# the other tables (e.g. setHeroVisible reads computedRects first).
+func transformSystemIfDirty(world: mod UiWorld, cache: mod TransformCache) pub ret Bool {
+  let crGen: Int = componentTableGeneration(ComputedRect, this: world.computedRects)
+  let acGen: Int = componentTableGeneration(Active, this: world.actives)
+  let opGen: Int = componentTableGeneration(Opacity, this: world.opacities)
+  let txGen: Int = componentTableGeneration(TransformFx, this: world.transforms)
+  let chGen: Int = componentTableGeneration(Children, this: world.childrens)
+  let plGen: Int = componentTableGeneration(ParentLink, this: world.parentLinks)
+  let entityCount: Int = world.alive.length
+
+  let dirty: Bool = false
+  if crGen is not cache.computedRectsGen {
+    dirty = true
+  }
+  if acGen is not cache.activesGen {
+    dirty = true
+  }
+  if opGen is not cache.opacitiesGen {
+    dirty = true
+  }
+  if txGen is not cache.transformsGen {
+    dirty = true
+  }
+  if chGen is not cache.childrensGen {
+    dirty = true
+  }
+  if plGen is not cache.parentLinksGen {
+    dirty = true
+  }
+  if entityCount is not cache.entityCount {
+    dirty = true
+  }
+
+  if dirty is false {
+    ret false
+  }
+
+  transformSystem(world: world)
+  cache.computedRectsGen = crGen
+  cache.activesGen = acGen
+  cache.opacitiesGen = opGen
+  cache.transformsGen = txGen
+  cache.childrensGen = chGen
+  cache.parentLinksGen = plGen
+  cache.entityCount = entityCount
+  ret true
+}
