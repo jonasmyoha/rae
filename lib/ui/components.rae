@@ -283,6 +283,18 @@ type HeroWidget {
   key: String
 }
 
+# `DebugAnchor` marks an entity as the placement slot for the in-app
+# debug button (see `lib/ui/debug.rae`). The button itself is BUILT
+# programmatically by `addDebugLayer`, but its position + size come
+# from the anchor entity's own `Rect`. Putting a `DebugAnchor` on a
+# node in a .raescene is what OPTS the app in to the debug UI — drop
+# the line, lose the button (and the menu it opens). The `value`
+# field is just a presence-tag (Rae has no zero-field structs); it's
+# not read.
+type DebugAnchor {
+  value: Bool
+}
+
 # Identity / metadata
 
 type Name {

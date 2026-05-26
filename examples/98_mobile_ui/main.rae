@@ -238,13 +238,12 @@ func main() {
     # startup, then call addDebugLayer per rebuild and the per-frame
     # overlay/dispatch hooks inside the inner loop. See the module
     # docstring for the full ≤5-line integration recipe.
+    #
+    # The button's position is now driven by a `DebugAnchor` component
+    # in the .raescene file (album.raescene, music-player-now-playing.
+    # raescene). Drop the anchor and the debug UI disappears.
     let debug: DebugSystem = createDebugSystem()
     setDebugScreenSize(debug: debug, w: screenW, h: screenH)
-    setDebugButtonPosition(
-      debug: debug
-      x: screenW - 64.0
-      y: screenH - miniPlayerH - navTabsH - outerPad * 2.0 - 96.0
-    )
     # Snapshot helper: `RAE_UI_DEBUG_MENU=open` pre-opens the menu so
     # the snapshot.sh tooling can capture the menu state without
     # needing to script a click. `=labels` pre-enables the FPS / mem
