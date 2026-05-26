@@ -52,12 +52,23 @@ func dropEntityList(lst: mod List(Int)) {
 type ComponentTable(T) {
   denseEntities: List(Int)
   denseData: List(T)
+
+  # Monotonic counter that bumps once per mutation. Consumer systems
+  # (layout, transform, render) can cache the last seen generation and
+  # short-circuit work when nothing has changed. Per-table granularity
+  # is intentional: it's cheap (one Int field, one add per mutation),
+  # simple (no per-entity bookkeeping), and good enough for layout/
+  # render skip paths where any change typically invalidates the whole
+  # downstream pass anyway. Eagerly bumped on componentMod even if the
+  # caller only reads — over-eager is safe; missing a mutation is not.
+  generation: Int
 }
 
 func createComponentTable(T)() ret ComponentTable(T) {
   ret ComponentTable(T) {
     denseEntities: createList(Int, initialCap: 256)
     denseData: createList(T, initialCap: 256)
+    generation: 0
   }
 }
 
@@ -143,6 +154,11 @@ func componentMod(T)(this: mod ComponentTable(T), entity: view Int) ret mod T {
   if safeIdx < 0 {
     safeIdx = 0
   }
+  # Eager bump: we can't observe whether the caller actually mutates
+  # through the returned `mod T` ref, so assume they will. Over-eager
+  # generation bumps just cause an extra rerun downstream; missing a
+  # mutation would cause stale cached output.
+  this.generation = this.generation + 1
   ret mod rae_ext_rae_buf_get(buf: this.denseData.data, index: safeIdx)
 }
 
@@ -167,12 +183,14 @@ func componentSet(T)(this: mod ComponentTable(T), entity: view Int, data: own T)
       # outlive the cycle.
       rae_ext_rae_buf_drop_at(buf: datas.data, index: i)
       rae_ext_rae_buf_set(buf: datas.data, index: i, value: data)
+      this.generation = this.generation + 1
       ret
     }
     i = i + 1
   }
   appendEntityList(lst: entities, value: entity)
   datas.add(value: data)
+  this.generation = this.generation + 1
 }
 
 # Swap-remove the component for `entity`. Order in the table is not
@@ -182,6 +200,8 @@ func componentRemove(T)(this: mod ComponentTable(T), entity: view Int) {
   let datas: mod List(T) => this.denseData
   let idx: Int = componentIndexOf(T, this: this, entity: entity)
   if idx < 0 {
+    # Missing entity is a no-op; don't bump generation so consumers
+    # aren't woken by spurious removes.
     ret
   }
   let last: Int = entities.length - 1
@@ -195,10 +215,18 @@ func componentRemove(T)(this: mod ComponentTable(T), entity: view Int) {
   # because `entities.remove(...)` would mis-mangle in this context.
   popLastInt(lst: entities)
   datas.remove(index: last)
+  this.generation = this.generation + 1
 }
 
 func componentCount(T)(this: view ComponentTable(T)) ret Int {
   ret this.denseEntities.length
+}
+
+# Public accessor for the table's monotonic generation counter.
+# Consumer systems should cache the value returned here and skip work
+# when it hasn't changed since the last successful run.
+func componentTableGeneration(T)(this: view ComponentTable(T)) pub ret Int {
+  ret this.generation
 }
 
 # Iteration helper: returns the entity id at dense index `i`.
