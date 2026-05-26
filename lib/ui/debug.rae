@@ -126,6 +126,13 @@ type DebugSystem {
   # other code (tests, snapshots) can read them back without recomputing.
   lastFps: Float
   lastRssKb: Int
+
+  # Monotonically increasing frame counter, bumped once per call to
+  # `updateAndRenderDebugOverlay`. Used by the FPS label's "alive"
+  # blink — a 4×4 amber square that toggles visibility every other
+  # frame so you can eyeball at a glance that the labels are actually
+  # being repainted.
+  frameTick: Int
 }
 
 func createDebugSystem() pub ret DebugSystem {
@@ -146,6 +153,7 @@ func createDebugSystem() pub ret DebugSystem {
     fpsWindowSec: 3.0
     lastFps: 0.0
     lastRssKb: 0
+    frameTick: 0
   }
 }
 
@@ -666,6 +674,23 @@ func drawDebugLabels(debug: view DebugSystem) {
     spacing: 1.0
     color: col
   )
+  # Tiny 4×4 amber square next to the FPS line. Drawn every other
+  # frame so it flashes — confirms at-a-glance that the labels are
+  # actively being repainted (a frozen blink == a frozen render loop).
+  # Position: just to the right of "fps: NN", vertically centred on
+  # the text baseline.
+  let blinkParity: Int = debug.frameTick - (debug.frameTick / 2) * 2
+  if blinkParity is 0 {
+    let blinkX: Float = fpsX + 64.0
+    let blinkY: Float = fpsY + 6.0
+    drawRectangle(
+      x: blinkX
+      y: blinkY
+      width: 4.0
+      height: 4.0
+      color: col
+    )
+  }
   drawTextWithFont(
     slot: 0
     text: memText
@@ -684,6 +709,7 @@ func drawDebugLabels(debug: view DebugSystem) {
 # the ECS world.
 func updateAndRenderDebugOverlay(debug: mod DebugSystem, now: view Float) pub {
   recordDebugFrame(debug: debug, now: now)
+  debug.frameTick = debug.frameTick + 1
   if debug.showLabels {
     drawDebugLabels(debug: debug)
   }
