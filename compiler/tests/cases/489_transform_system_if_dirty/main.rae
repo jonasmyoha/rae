@@ -1,0 +1,46 @@
+# transformSystemIfDirty: runs the transform walk when at least one
+# input ComponentTable has bumped its generation, skips otherwise.
+# Proves the integration point used by examples/98_mobile_ui/main.rae.
+import core
+import string
+import ui/components
+import ui/ecs
+import ui/layout
+import ui/transform
+
+func main() {
+  let world: UiWorld = createUiWorld()
+  let root: Int = createEntity(world: world)
+  let r: Rect = { x: 0.0, y: 0.0, w: 200.0, h: 100.0 }
+  componentSet(this: world.rects, entity: root, data: r)
+  let sz: Size = {
+    w: SizeAxis { mode: SizeMode.Fixed, min: -1, max: -1 }
+    h: SizeAxis { mode: SizeMode.Fixed, min: -1, max: -1 }
+  }
+  componentSet(this: world.sizes, entity: root, data: sz)
+
+  layoutSystem(world: world)
+
+  let cache: TransformCache = createTransformCache()
+
+  # First call: cache is fresh (-1 sentinels), inputs have non-sentinel
+  # generations from the layout pass, so dirty=true → runs.
+  let firstRan: Bool = transformSystemIfDirty(world: world, cache: cache)
+  log("first-ran={firstRan}")
+
+  # Second call: nothing has mutated the inputs since the cache was
+  # updated, so dirty=false → skips. The expensive `composeTransform`
+  # walk is bypassed entirely.
+  let secondRan: Bool = transformSystemIfDirty(world: world, cache: cache)
+  log("second-ran={secondRan}")
+
+  # Touching an input table (Active here) flips the cache to dirty.
+  let inactive: Active = { value: false }
+  componentSet(this: world.actives, entity: root, data: inactive)
+  let thirdRan: Bool = transformSystemIfDirty(world: world, cache: cache)
+  log("after-mut-ran={thirdRan}")
+
+  # And the next call after that re-skips.
+  let fourthRan: Bool = transformSystemIfDirty(world: world, cache: cache)
+  log("idle-again-ran={fourthRan}")
+}
