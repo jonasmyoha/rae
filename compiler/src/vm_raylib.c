@@ -7,6 +7,7 @@
 #include <GL/gl.h>
 #endif
 #include <stdio.h>
+#include <stdlib.h>
 
 /* GLFW wait-events bindings. raylib bundles GLFW statically inside
  * libraylib.a; the dynamic libraylib.dylib does NOT export these
@@ -29,10 +30,13 @@ extern void glfwSetWindowCloseCallback(GLFWwindow* w, GLFWwindowclosefun cb);
 extern void glfwSetWindowShouldClose(GLFWwindow* w, int value);
 
 static void vm_glfw_close_waker(GLFWwindow* w) {
-    fprintf(stderr, "[close-waker] fired (w=%p)\n", (void*)w);
+    /* macOS GLFW quirk: red-X click invokes this callback but the
+     * wait-events main loop doesn't reliably wake from it. Just
+     * exit() — see matching comment in rae_runtime.c. */
+    fprintf(stderr, "[close-waker] fired (w=%p) — exiting\n", (void*)w);
     fflush(stderr);
     glfwSetWindowShouldClose(w, 1);
-    glfwPostEmptyEvent();
+    exit(0);
 }
 
 static bool native_getScreenWidth(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {

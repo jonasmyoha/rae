@@ -1714,10 +1714,25 @@ extern void glfwSetWindowCloseCallback(GLFWwindow* w, GLFWwindowclosefun cb);
 extern void glfwSetWindowShouldClose(GLFWwindow* w, int value);
 
 static void rae_glfw_close_waker(GLFWwindow* w) {
-  fprintf(stderr, "[close-waker] fired (w=%p)\n", (void*)w);
+  /* macOS quirk: clicking the red-X invokes this delegate-driven
+   * callback (we see it fire in stderr), but `glfwPostEmptyEvent`
+   * from inside the delegate does NOT reliably wake the
+   * `glfwWaitEventsTimeout` blocked in `nextEventMatchingMask` — and
+   * the wait's own timeout doesn't fire either while the close path
+   * is pending. So the window appeared "stuck open" until the user
+   * clicked again somewhere in the app to generate an event the
+   * wait would actually return from.
+   *
+   * Fix: exit the process directly from the callback. The OS
+   * reclaims the GL context, GPU textures, and any other resources;
+   * we lose the explicit `closeWindow` / texture-unload calls but
+   * those are best-effort hygiene anyway. The diagnostic print is
+   * kept so future investigations into a different macOS path don't
+   * have to be re-instrumented. */
+  fprintf(stderr, "[close-waker] fired (w=%p) — exiting\n", (void*)w);
   fflush(stderr);
   glfwSetWindowShouldClose(w, 1);
-  glfwPostEmptyEvent();
+  exit(0);
 }
 
 void rae_ext_waitEventsTimeout(double seconds) { glfwWaitEventsTimeout(seconds); }
