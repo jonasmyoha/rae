@@ -54,10 +54,13 @@ elif [[ "$TARGET" == "compiled" ]]; then
       --project examples/98_mobile_ui \
       --entry examples/98_mobile_ui/main.rae \
       --out "$TMP/out.c" > /dev/null
+    # Link raylib statically so GLFW symbols bundled in libraylib.a
+    # (glfwWaitEventsTimeout, glfwPostEmptyEvent, ...) resolve. The
+    # shared libraylib.dylib does not export those.
     gcc -O2 -o "$APP" "$TMP/out.c" "$TMP/rae_runtime.c" \
       -I"$TMP" -I/opt/homebrew/include -L/opt/homebrew/lib -DRAE_HAS_RAYLIB \
       $EXTRA_CFLAGS \
-      -lraylib -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL
+      /opt/homebrew/lib/libraylib.a -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL
     rm -rf "$TMP"
   fi
   APP_CMD=("$APP")

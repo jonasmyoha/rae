@@ -5,7 +5,10 @@ MODE ?= DEV_FAST
 
 CC = gcc
 COMMON_CFLAGS = -std=c11 -Wall -Wextra -Wpedantic -O0 -g
-LDFLAGS = -lraylib -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL -L/opt/homebrew/lib
+# Link raylib statically so the GLFW symbols bundled inside libraylib.a
+# (glfwWaitEventsTimeout, glfwPostEmptyEvent, ...) are resolvable.
+# The shared library libraylib.dylib does not export them.
+LDFLAGS = /opt/homebrew/lib/libraylib.a -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL -L/opt/homebrew/lib
 COMMON_CFLAGS += -I/opt/homebrew/include -I../third_party/tinyexpr
 
 ifeq ($(MODE), CI_STRICT)
