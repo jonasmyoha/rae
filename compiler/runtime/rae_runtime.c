@@ -1737,6 +1737,19 @@ void rae_ext_setWindowSize(int64_t width, int64_t height) { SetWindowSize((int)w
 void rae_ext_setWindowPosition(int64_t x, int64_t y) { SetWindowPosition((int)x, (int)y); }
 Texture rae_ext_loadTexture(rae_String fileName) { return LoadTexture((const char*)fileName.data); }
 void rae_ext_unloadTexture(Texture texture) { UnloadTexture(texture); }
+Texture rae_ext_captureAndBlurBackdrop(int64_t blurSize) {
+  /* Frosted-glass backdrop helper for modal UI: grab the back buffer,
+   * run a Gaussian blur over it on the CPU, upload as a Texture, and
+   * release the temporary Image. The blur radius `blurSize` is in
+   * pixels — ~10 reads as soft "vibrancy" on a typical mobile-sized
+   * window. Cost is dominated by ImageBlurGaussian which is O(width *
+   * height * blurSize). Designed for one-shot calls on modal open. */
+  Image img = LoadImageFromScreen();
+  ImageBlurGaussian(&img, (int)blurSize);
+  Texture tex = LoadTextureFromImage(img);
+  UnloadImage(img);
+  return tex;
+}
 void rae_ext_drawTexture(Texture texture, double x, double y, Color tint) { DrawTexture(texture, (int)x, (int)y, tint); }
 void rae_ext_drawTextureEx(Texture texture, Vector2 pos, double rotation, double scale, Color tint) { DrawTextureEx(texture, pos, (float)rotation, (float)scale, tint); }
 int64_t rae_ext_measureText(rae_String text, int64_t fontSize) { return (int64_t)MeasureText((const char*)text.data, (int)fontSize); }
