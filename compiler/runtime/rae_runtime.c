@@ -1586,6 +1586,10 @@ void rae_ext_rae_crypto_argon2i(rae_String password, rae_String salt, int64_t nb
 #include <raylib.h>
 #include <rlgl.h>
 #if defined(__APPLE__)
+/* Apple deprecated the entire OpenGL framework in 10.14 in favour
+ * of Metal, but the symbols still link and work. raylib itself goes
+ * through OpenGL → Metal under the hood here. Silence the noise. */
+#define GL_SILENCE_DEPRECATION 1
 #include <OpenGL/gl3.h>
 #else
 #include <GL/gl.h>
