@@ -180,6 +180,27 @@ static bool native_unloadTexture(struct VM* vm, VmNativeResult* out, const Value
     return true;
 }
 
+static bool native_captureAndBlurBackdrop(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 1) {
+        fprintf(stderr, "error: captureAndBlurBackdrop expects 1 arg, got %zu\n", count);
+        return false;
+    }
+    int blurSize = (args[0].type == VAL_FLOAT) ? (int)args[0].as.float_value : (int)args[0].as.int_value;
+    Image img = LoadImageFromScreen();
+    ImageBlurGaussian(&img, blurSize);
+    Texture t = LoadTextureFromImage(img);
+    UnloadImage(img);
+    out->has_value = true;
+    out->value = value_object(5, "Texture");
+    out->value.as.object_value.fields[0] = value_int((int64_t)t.id);
+    out->value.as.object_value.fields[1] = value_int((int64_t)t.width);
+    out->value.as.object_value.fields[2] = value_int((int64_t)t.height);
+    out->value.as.object_value.fields[3] = value_int((int64_t)t.mipmaps);
+    out->value.as.object_value.fields[4] = value_int((int64_t)t.format);
+    return true;
+}
+
 static bool native_drawTexture(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
     if (count != 11) {
@@ -931,6 +952,7 @@ bool vm_registry_register_raylib(VmRegistry* registry) {
     ok &= vm_registry_register_native(registry, "clearBackground", native_clearBackground, NULL);
     ok &= vm_registry_register_native(registry, "loadTexture", native_loadTexture, NULL);
     ok &= vm_registry_register_native(registry, "unloadTexture", native_unloadTexture, NULL);
+    ok &= vm_registry_register_native(registry, "captureAndBlurBackdrop", native_captureAndBlurBackdrop, NULL);
     ok &= vm_registry_register_native(registry, "drawTexture", native_drawTexture, NULL);
     ok &= vm_registry_register_native(registry, "drawTextureEx", native_drawTextureEx, NULL);
     ok &= vm_registry_register_native(registry, "drawRectangle", native_drawRectangle, NULL);

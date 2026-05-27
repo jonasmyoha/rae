@@ -99,6 +99,39 @@ func textureLoadBatch(
   }
 }
 
+# Register an already-loaded Texture under `key`. If `key` is already
+# present, the previous texture is unloaded and the slot is replaced
+# in place. Used for textures created at runtime (e.g. screen captures
+# from `captureAndBlurBackdrop`) where there is no on-disk path. The
+# `path` field is set to the empty string for these entries.
+func textureRegisterDirect(reg: mod TextureRegistry, key: own String, tex: view Texture) pub {
+  let idx: Int = textureIndex(reg: reg, key: key)
+  if idx >= 0 {
+    let old: TextureEntry = rae_ext_rae_buf_get(buf: reg.entries.data, index: idx)
+    unloadTexture(texture: old.texture)
+    reg.entries.remove(index: idx)
+  }
+  let emptyPath: String = ""
+  let entry: TextureEntry = {
+    key: key
+    texture: tex
+    path: emptyPath
+  }
+  reg.entries.add(value: entry)
+}
+
+# Remove and unload the texture registered under `key`. No-op when
+# `key` is not present.
+func textureRemove(reg: mod TextureRegistry, key: view String) pub {
+  let idx: Int = textureIndex(reg: reg, key: key)
+  if idx < 0 {
+    ret
+  }
+  let e: TextureEntry = rae_ext_rae_buf_get(buf: reg.entries.data, index: idx)
+  unloadTexture(texture: e.texture)
+  reg.entries.remove(index: idx)
+}
+
 # Release every loaded texture and clear the registry. Call before
 # `closeWindow()` so raylib doesn't leak GPU memory.
 func textureUnloadAll(reg: mod TextureRegistry) {

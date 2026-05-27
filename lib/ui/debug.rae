@@ -136,6 +136,30 @@ type DebugSystem {
   # Always-on whenever the debug system is mounted; not gated by
   # the FPS/mem labels toggle.
   heartbeatX: Float
+
+  # True when the host has captured + registered the blurred screen
+  # backdrop in its TextureRegistry under `debugBlurBackdropKey()`.
+  # When set, `buildDebugMenuOverlay` paints the menu backdrop as a
+  # darkened blurred-screen sprite instead of a flat translucent
+  # rect — the "frosted glass" look common in modern mobile UIs.
+  # The host is responsible for calling `captureAndBlurBackdrop` +
+  # `textureRegisterDirect` on menu-open (and `textureRemove` on
+  # menu-close); the debug module just consumes the flag.
+  hasBlur: Bool
+}
+
+# Registry key the debug overlay looks up the blurred-screen sprite
+# under. Host code that wires the frosted-glass backdrop must call
+# `textureRegisterDirect(reg, key, tex)` with this exact key.
+func debugBlurBackdropKey() pub ret String {
+  ret "debug.blurBackdrop"
+}
+
+# Tell the debug system whether the host has the blurred backdrop
+# texture registered right now. `buildDebugMenuOverlay` consults this
+# on the next world rebuild.
+func setDebugHasBlur(debug: mod DebugSystem, value: view Bool) pub {
+  debug.hasBlur = value
 }
 
 func createDebugSystem() pub ret DebugSystem {
@@ -143,7 +167,7 @@ func createDebugSystem() pub ret DebugSystem {
   # only used when the scene's DebugAnchor doesn't carry usable rect
   # data; the normal path is for `applyDebugAnchor` to overwrite
   # buttonX/Y/Size from the authored Rect before each rebuild.
-  let defaultSize: Float = 44.0
+  let defaultSize: Float = 22.0
   ret DebugSystem {
     menuOpen: false
     showLabels: false
@@ -157,6 +181,7 @@ func createDebugSystem() pub ret DebugSystem {
     lastFps: 0.0
     lastRssKb: 0
     heartbeatX: 0.0
+    hasBlur: false
   }
 }
 
@@ -281,6 +306,24 @@ func setRectShape(world: mod UiWorld, entity: view Int, fill: view RgbaColor) {
     radius: 0.0
   }
   componentSet(this: world.shapes, entity: entity, data: sh)
+}
+
+# Attach a fullscreen Sprite to `entity` for the frosted-glass menu
+# backdrop. The texture is looked up by `key` in the host's
+# TextureRegistry at render time. `tint` is multiplied onto the
+# sampled blur — pass a darkened-gray (e.g. rgb 110/110/110) to dim
+# the underlying scene without losing its colors, the way the iOS
+# vibrancy effect does.
+func setBackdropSprite(world: mod UiWorld, entity: view Int, key: own String, tint: view RgbaColor) pub {
+  let sp: Sprite = {
+    textureKey: key
+    tint: tint
+    scaleMode: ScaleMode.Stretch
+    tileScale: Vec2 { x: 1.0, y: 1.0 }
+    nineSlice: Insets { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
+    hasNineSlice: false
+  }
+  componentSet(this: world.sprites, entity: entity, data: sp)
 }
 
 func setRoundedShape(world: mod UiWorld, entity: view Int, fill: view RgbaColor, radius: view Float) {
@@ -462,17 +505,39 @@ func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret Int 
   # Backdrop: covers the entire screen (sized to the host's reported
   # screen extents — see `setDebugScreenSize`). Has OnClick so taps
   # anywhere outside the centred panel close the menu.
+  #
+  # Two visual modes:
+  #   * Frosted glass (`debug.hasBlur` set by host): the Shape stays
+  #     transparent and a Sprite over it samples the registered
+  #     blurred-screen texture with a darkened gray tint — that's the
+  #     iOS-style vibrancy look.
+  #   * Solid translucent (default): a single dark rect. Used when
+  #     the host has not (yet) registered a blur capture, or when
+  #     the host opts out of the screen-capture cost.
   let backdrop: Int = createEntity(world: world)
   setFixedRect(world: world, entity: backdrop, w: debug.screenW, h: debug.screenH)
   setOffset(world: world, entity: backdrop, x: 0.0, y: 0.0)
-  setRectShape(world: world, entity: backdrop, fill: debugBackdropColor())
+  if debug.hasBlur {
+    let invisible: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
+    setRectShape(world: world, entity: backdrop, fill: invisible)
+    # ~43% brightness tint — darkens the blur enough to read white
+    # panel text against it while still letting colors show through.
+    let blurTint: RgbaColor = { r: 110, g: 110, b: 110, a: 255 }
+    let blurKey: String = debugBlurBackdropKey()
+    setBackdropSprite(world: world, entity: backdrop, key: blurKey, tint: blurTint)
+  } else {
+    setRectShape(world: world, entity: backdrop, fill: debugBackdropColor())
+  }
   let dismissId: String = debugActionDismiss
   setOnClickAction(world: world, entity: backdrop, actionId: dismissId)
   setStackLayout(world: world, entity: backdrop)
 
-  # Menu panel: centred on the screen at a comfortable size.
-  let panelW: Float = 340.0
-  let panelH: Float = 200.0
+  # Menu panel: centred on the screen, sized as a full-bleed sheet so
+  # there's room for many future debug controls without needing to
+  # redesign. Wide enough that switch rows breathe and tall enough
+  # that the panel feels like a settings sheet, not a tooltip.
+  let panelW: Float = debug.screenW * 0.86
+  let panelH: Float = debug.screenH * 0.72
   let panel: Int = createEntity(world: world)
   setFixedRect(world: world, entity: panel, w: panelW, h: panelH)
   # Generous corner radius — matches the modern iOS / macOS look
