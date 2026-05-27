@@ -28,9 +28,15 @@
 # advancing or the user is currently dragging.
 let frameTimeoutSec: Float = 0.016
 
-# File-watcher poll cadence. Hot-reload of .raescene / module files
-# needs the loop to wake roughly twice per second to check mtimes.
-let watcherPollSec: Float = 0.5
+# File-watcher poll cadence. The watcher itself only needs ~0.5 s
+# precision, but this also bounds the worst-case input latency when
+# the user is idle and `glfwWaitEventsTimeout` for some reason isn't
+# woken by an OS event (observed on macOS for mouse clicks and the
+# red-X close button — the close case is now patched via
+# `installWindowCloseWaker`, the click case is not). 50 ms is short
+# enough that an unwoken click is imperceptible (well under typical
+# 100 ms click-and-release) and 20 wakes/sec idle still costs ~0% CPU.
+let watcherPollSec: Float = 0.05
 
 # Safety wake when truly idle. The loop blocks for at most this long
 # even when nothing else is happening — guarantees a periodic repaint

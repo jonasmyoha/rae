@@ -39,6 +39,11 @@ func main() {
   let winH: Float = screenH
   initWindow(width: winW.toInt(), height: winH.toInt(), title: "Rae Mobile UI — Album")
   setWindowPosition(x: 50, y: 50)
+  # Hook the OS close button so it wakes the wait-events loop. macOS
+  # GLFW marks WindowShouldClose=TRUE on red-X click but does NOT
+  # post an empty event; without this hook the loop sleeps until
+  # some other event arrives. See lib/raylib.rae for details.
+  installWindowCloseWaker()
   # No setTargetFPS: the inner loop blocks in glfwWaitEventsTimeout
   # (see lib/ui/event_loop.rae) and naturally caps animation at
   # ~60 Hz via `frameTimeoutSec`. raylib's frame-pacing is bypassed.
@@ -108,6 +113,15 @@ func main() {
     autoExitSec = autoExitEnv.toFloat()
   }
   let bootTime: Float = getTime()
+
+  # `RAE_UI_WAIT_TRACE=1` logs every `waitEventsTimeout` call whose
+  # actual sleep duration exceeded 5 ms, along with the timeout we
+  # asked for. If the wait keeps sleeping the full timeout on
+  # iterations where a click was supposed to land, GLFW isn't waking
+  # us on input events; if `dt` is small and the timeout is small,
+  # the input latency lives downstream of the wait.
+  let waitTraceEnv: String = getEnv(name: "RAE_UI_WAIT_TRACE")
+  let waitTraceEnabled: Bool = waitTraceEnv.length() > 0
 
   # Memory-stress mode: with `RAE_UI_STRESS_REBUILDS=1`, rebuilds the
   # world `stressN` times in a tight loop (no input, no draw) and
@@ -374,7 +388,14 @@ func main() {
             timeout = 0.001
           }
         }
+        let preWait: Float = getTime()
         waitEventsTimeout(seconds: timeout)
+        if waitTraceEnabled {
+          let waitDt: Float = getTime() - preWait
+          if waitDt > 0.005 {
+            log("[wait] dt={waitDt} timeout={timeout}")
+          }
+        }
         if windowShouldClose() {
           running = false
         } else if autoExitSec > 0.0 and getTime() - bootTime > autoExitSec {
