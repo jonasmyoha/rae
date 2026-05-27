@@ -528,7 +528,13 @@ func main() {
           # the rolling FPS window + draws the FPS / mem read-out
           # (when the in-app toggle is on). Drawn last so the labels
           # paint on top of everything else.
-          updateAndRenderDebugOverlay(debug: debug, now: now)
+          # Pass `active` (the dirty-detection signal that drove the
+          # 60 vs 5 fps choice above) so the debug heartbeat reflects
+          # real per-frame ECS work, not just raw frame rate. A frozen
+          # heartbeat with a still-ticking FPS label means the loop
+          # is alive but the dirty-detection is short-circuiting all
+          # the work.
+          updateAndRenderDebugOverlay(debug: debug, now: now, didRealWork: active)
           endDrawing()
           forceRender = false
           # Bump the cache again *after* render so any per-frame writes
