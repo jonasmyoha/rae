@@ -2,6 +2,9 @@
 #include <raylib.h>
 #include <rlgl.h>
 #if defined(__APPLE__)
+/* Apple deprecated OpenGL in 10.14; symbols still work via Metal
+ * under the hood. Silence the deprecation warnings. */
+#define GL_SILENCE_DEPRECATION 1
 #include <OpenGL/gl3.h>
 #else
 #include <GL/gl.h>
