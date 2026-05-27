@@ -298,6 +298,17 @@ func main() {
       layoutSystemIfDirty(world: world, cache: layoutCache)
       let transformCache: TransformCache = createTransformCache()
       transformSystemIfDirty(world: world, cache: transformCache)
+      # `renderCache` controls idle frame-skipping: when no visual
+      # ComponentTable has bumped its generation since the last frame
+      # (and no input event landed this frame, and the heartbeat isn't
+      # gating us), we skip the whole `beginDrawing -> renderSystem ->
+      # endDrawing` block and `sleep(16 ms)` instead to throttle to
+      # ~60 Hz. The first frame after a world rebuild always renders
+      # because `forceRender` starts true and `renderCache` starts at
+      # -1 sentinels (so the first dirty-check always trips dirty too).
+      let renderCache: RenderCache = createRenderCache()
+      let forceRender: Bool = true
+      let lastPressed: Int = -1
       # Initial playback overlay: set the progress-fill width to
       # match the current `elapsedSec / durationSec` so the first
       # frame of the rebuilt world doesn't flash an empty bar before
@@ -381,12 +392,24 @@ func main() {
           }
 
           let now: Float = getTime()
-          # Advance playback elapsed-time (no-op when paused) and
-          # write the current state into the freshly-laid-out world.
-          # This covers the play/pause icon swap AND the per-frame
-          # progress-fill width tick.
+          # Advance playback elapsed-time. `advancePlayback` is a no-op
+          # for `elapsedSec` when paused but always updates `prevTime`,
+          # so a long idle-paused stretch followed by a resume doesn't
+          # apply a giant `dt` carry. Cheap (no ECS writes), safe to
+          # call every frame including idle ones.
           advancePlayback(state: playback, now: now)
-          applyPlaybackToWorld(world: world, state: playback)
+          # `applyPlaybackToWorld` writes the play/pause icon Sprite
+          # and the ProgressFill ComputedRect/Rect via `componentMod`,
+          # which eagerly bumps the table generation even when the
+          # values are unchanged. To preserve idle frame-skipping we
+          # only call it when something downstream actually needs to
+          # change: when playing (elapsedSec moved), when input fired
+          # an event (a play/pause toggle may have flipped isPlaying),
+          # or on the first frame after a world rebuild (the freshly
+          # laid-out world needs the initial icon/fill written).
+          if forceRender or playback.isPlaying or input.events.length > 0 {
+            applyPlaybackToWorld(world: world, state: playback)
+          }
           # If a transition was armed by the outer rebuild, this is
           # the first frame that will draw it — start the clock here
           # so `t = 0` at the moment the first overlay actually paints.
@@ -409,30 +432,87 @@ func main() {
               }
             }
           }
-          beginDrawing()
-          clearBackground(color: bg)
-          renderSystem(world: world, reg: texReg)
-          if animating {
-            renderHeroOverlay(anim: anim, reg: texReg, now: now)
+          # Idle frame-skip decision. Render when:
+          #   - first frame after a world rebuild (`forceRender`)
+          #   - any tracked visual ComponentTable has bumped its
+          #     generation (covered by `renderCacheDirty`)
+          #   - input produced an ActionEvent this frame (clicks need
+          #     a visual update for press/hover feedback)
+          #   - pressed-entity transition (hover state changed)
+          #   - hero transition is mid-flight (overlay paints each frame)
+          #   - debug heartbeat / labels are on (heartbeat needs to
+          #     advance every frame; the labels read live fps/rss)
+          # If none of those is true, skip the whole begin/render/end
+          # block and `sleep(16 ms)` to throttle to ~60 Hz. raylib's
+          # implicit vsync wait lives inside `endDrawing`, so skipping
+          # the draw block also skips the wait.
+          let shouldRender: Bool = forceRender
+          if shouldRender is false {
+            if renderCacheDirty(world: world, cache: renderCache) {
+              shouldRender = true
+            }
           }
-          if debugRects {
-            let mx: Float = getMouseX().toFloat()
-            let my: Float = getMouseY().toFloat()
-            renderDebugClickRects(
-              world: world
-              idleColor: debugRectColor
-              hoverColor: debugHoverColor
-              mouseX: mx
-              mouseY: my
-            )
-            renderDebugMouseCursor(mouseX: mx, mouseY: my, color: debugCursorColor)
+          if shouldRender is false {
+            if input.events.length > 0 {
+              shouldRender = true
+            }
           }
-          # Reusable debug overlay: records the frame timestamp for
-          # the rolling FPS window + draws the FPS / mem read-out
-          # (when the in-app toggle is on). Drawn last so the labels
-          # paint on top of everything else.
-          updateAndRenderDebugOverlay(debug: debug, now: now)
-          endDrawing()
+          if shouldRender is false {
+            if input.pressedEntity is not lastPressed {
+              shouldRender = true
+            }
+          }
+          if shouldRender is false {
+            if animating {
+              shouldRender = true
+            }
+          }
+          if shouldRender is false {
+            if debug.showLabels {
+              shouldRender = true
+            }
+          }
+          lastPressed = input.pressedEntity
+
+          if shouldRender {
+            beginDrawing()
+            clearBackground(color: bg)
+            renderSystem(world: world, reg: texReg)
+            if animating {
+              renderHeroOverlay(anim: anim, reg: texReg, now: now)
+            }
+            if debugRects {
+              let mx: Float = getMouseX().toFloat()
+              let my: Float = getMouseY().toFloat()
+              renderDebugClickRects(
+                world: world
+                idleColor: debugRectColor
+                hoverColor: debugHoverColor
+                mouseX: mx
+                mouseY: my
+              )
+              renderDebugMouseCursor(mouseX: mx, mouseY: my, color: debugCursorColor)
+            }
+            # Reusable debug overlay: records the frame timestamp for
+            # the rolling FPS window + draws the FPS / mem read-out
+            # (when the in-app toggle is on). Drawn last so the labels
+            # paint on top of everything else.
+            updateAndRenderDebugOverlay(debug: debug, now: now)
+            endDrawing()
+            forceRender = false
+            # `renderCacheDirty` already updated the cache to the
+            # post-render generation snapshot above. Bump it again
+            # *after* render so any per-frame writes by the playback
+            # tick or hero overlay (both of which mutate component
+            # tables) are reflected in the cache and don't trigger
+            # an unnecessary re-render next frame.
+            renderCacheDirty(world: world, cache: renderCache)
+          } else {
+            # ~60 Hz throttle. `windowShouldClose` (called at the top
+            # of the next iteration) pumps raylib's event queue as a
+            # side effect, so mouse/keyboard state stays current.
+            sleep(ms: 16)
+          }
 
           if willSwitch {
             currentScreen = nextScreen
