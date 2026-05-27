@@ -177,6 +177,23 @@ func endMode3D() extern
 
 func setTargetFPS(fps: Int) extern
 
+# GLFW wait-events bindings. The current thread blocks until an OS
+# event (input, window, etc.) arrives or `seconds` elapses. Must be
+# called only after `initWindow()` — GLFW must be initialised.
+# Pass `0.0` to poll once and return immediately; pass a small value
+# (e.g. `0.016`) to cap the wait to one animation frame.
+func waitEventsTimeout(seconds: Float) extern
+
+# Block until a window/input event arrives. No timeout. Use this only
+# when the app has no running animations; otherwise prefer the
+# timeout-bounded form so animation frames can advance.
+func waitEvents() extern
+
+# Wakes any thread currently blocked in `waitEvents` /
+# `waitEventsTimeout`. Safe to call from any thread (but Rae is
+# single-threaded today, so practical use is limited).
+func postEmptyEvent() extern
+
 func isKeyDown(key: Int) extern ret Bool
 
 func isKeyPressed(key: Int) extern ret Bool

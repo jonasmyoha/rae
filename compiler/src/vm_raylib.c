@@ -2,6 +2,16 @@
 #include <raylib.h>
 #include <stdio.h>
 
+/* GLFW wait-events bindings. raylib bundles GLFW statically in
+ * libraylib.a; the dynamic libraylib.dylib does not export these
+ * symbols, so the build links the static archive directly.
+ * No GLFW header is available on the include path (Homebrew's raylib
+ * formula does not ship glfw3.h); declare the prototypes locally.
+ * All three must be called only after InitWindow() has run. */
+extern void glfwWaitEventsTimeout(double timeout);
+extern void glfwWaitEvents(void);
+extern void glfwPostEmptyEvent(void);
+
 static bool native_getScreenWidth(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data; (void)args; (void)count;
     out->has_value = true;
@@ -402,6 +412,40 @@ static bool native_setTargetFPS(struct VM* vm, VmNativeResult* out, const Value*
     }
     int fps = (args[0].type == VAL_FLOAT) ? (int)args[0].as.float_value : (int)args[0].as.int_value;
     SetTargetFPS(fps);
+    out->has_value = false;
+    return true;
+}
+
+static bool native_waitEventsTimeout(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 1) {
+        fprintf(stderr, "error: waitEventsTimeout expects 1 arg, got %zu\n", count);
+        return false;
+    }
+    double seconds = (args[0].type == VAL_FLOAT) ? args[0].as.float_value : (double)args[0].as.int_value;
+    glfwWaitEventsTimeout(seconds);
+    out->has_value = false;
+    return true;
+}
+
+static bool native_waitEvents(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data; (void)args;
+    if (count != 0) {
+        fprintf(stderr, "error: waitEvents expects 0 args, got %zu\n", count);
+        return false;
+    }
+    glfwWaitEvents();
+    out->has_value = false;
+    return true;
+}
+
+static bool native_postEmptyEvent(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data; (void)args;
+    if (count != 0) {
+        fprintf(stderr, "error: postEmptyEvent expects 0 args, got %zu\n", count);
+        return false;
+    }
+    glfwPostEmptyEvent();
     out->has_value = false;
     return true;
 }
@@ -879,6 +923,9 @@ bool vm_registry_register_raylib(VmRegistry* registry) {
     ok &= vm_registry_register_native(registry, "beginMode3D", native_beginMode3D, NULL);
     ok &= vm_registry_register_native(registry, "endMode3D", native_endMode3D, NULL);
     ok &= vm_registry_register_native(registry, "setTargetFPS", native_setTargetFPS, NULL);
+    ok &= vm_registry_register_native(registry, "waitEventsTimeout", native_waitEventsTimeout, NULL);
+    ok &= vm_registry_register_native(registry, "waitEvents", native_waitEvents, NULL);
+    ok &= vm_registry_register_native(registry, "postEmptyEvent", native_postEmptyEvent, NULL);
     ok &= vm_registry_register_native(registry, "isKeyDown", native_isKeyDown, NULL);
     ok &= vm_registry_register_native(registry, "isKeyPressed", native_isKeyPressed, NULL);
     ok &= vm_registry_register_native(registry, "getMouseX", native_getMouseX, NULL);
