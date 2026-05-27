@@ -1669,6 +1669,20 @@ void rae_ext_drawText(rae_String text, double x, double y, double fontSize, Colo
 rae_Bool rae_ext_windowShouldClose(void) { return WindowShouldClose(); }
 void rae_ext_closeWindow(void) { CloseWindow(); }
 void rae_ext_setTargetFPS(int64_t fps) { SetTargetFPS((int)fps); }
+
+/* GLFW wait-events bindings. raylib bundles GLFW statically inside
+ * libraylib.a; the dynamic libraylib.dylib does NOT export these
+ * symbols, so the build links the static archive directly.
+ * No GLFW header is on the include path (Homebrew's raylib formula
+ * does not ship glfw3.h); declare the prototypes locally instead.
+ * All three must be called only after initWindow() has run -- GLFW
+ * must be initialised. */
+extern void glfwWaitEventsTimeout(double timeout);
+extern void glfwWaitEvents(void);
+extern void glfwPostEmptyEvent(void);
+void rae_ext_waitEventsTimeout(double seconds) { glfwWaitEventsTimeout(seconds); }
+void rae_ext_waitEvents(void) { glfwWaitEvents(); }
+void rae_ext_postEmptyEvent(void) { glfwPostEmptyEvent(); }
 void rae_ext_beginDrawing(void) { BeginDrawing(); }
 void rae_ext_endDrawing(void) { EndDrawing(); }
 void rae_ext_clearBackground(Color color) { ClearBackground(color); }
