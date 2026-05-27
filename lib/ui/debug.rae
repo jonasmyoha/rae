@@ -696,23 +696,32 @@ func drawDebugLabels(debug: view DebugSystem) {
 # (and after any hero overlay) so the labels paint on top of the host
 # UI. The button itself is drawn by renderSystem because it lives in
 # the ECS world.
-func updateAndRenderDebugOverlay(debug: mod DebugSystem, now: view Float) pub {
+func updateAndRenderDebugOverlay(debug: mod DebugSystem, now: view Float, didRealWork: view Bool) pub {
   recordDebugFrame(debug: debug, now: now)
   if debug.showLabels {
     drawDebugLabels(debug: debug)
-    drawDebugHeartbeat(debug: debug)
+    drawDebugHeartbeat(debug: debug, didRealWork: didRealWork)
   }
 }
 
 # 4×4 amber square that crawls left-to-right along the top edge of
-# the screen, one pixel per call. Wraps off-screen at the right and
-# re-enters from x=-4 so the motion is smooth. Gated by the FPS/mem
-# labels toggle — so the user can hide all debug pixel-overlay
-# noise with a single switch and still keep the debug button mounted.
-func drawDebugHeartbeat(debug: mod DebugSystem) {
-  debug.heartbeatX = debug.heartbeatX + 1.0
-  if debug.heartbeatX > debug.screenW {
-    debug.heartbeatX = -4.0
+# the screen. ADVANCES only on frames the host reports as "real
+# work" (e.g. dirty-detection said the ECS world actually changed
+# this frame). On idle/cached frames the square stays put — so the
+# motion of the square mirrors the rate of meaningful per-frame
+# work, not the raw frame rate. A frozen square with a non-zero
+# FPS label means "the loop is running but the dirty-detection
+# is short-circuiting everything"; a moving square means the
+# host is actually re-rendering changed content.
+#
+# Wraps off-screen at the right and re-enters from x=-4 so the
+# motion is smooth. Gated by the FPS/mem labels toggle.
+func drawDebugHeartbeat(debug: mod DebugSystem, didRealWork: view Bool) {
+  if didRealWork {
+    debug.heartbeatX = debug.heartbeatX + 1.0
+    if debug.heartbeatX > debug.screenW {
+      debug.heartbeatX = -4.0
+    }
   }
   let amber: Color = { r: 255, g: 191, b: 0, a: 255 }
   drawRectangle(
