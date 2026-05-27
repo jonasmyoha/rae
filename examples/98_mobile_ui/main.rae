@@ -610,7 +610,11 @@ func main() {
             # Must happen BEFORE `endDrawing` — after swap, the back
             # buffer is no longer the just-rendered frame.
             if debug.menuOpen and prevMenuOpen is false {
-              let blurTex: Texture = captureAndBlurBackdrop(blurSize: 12)
+              let blurTex: Texture = captureAndBlurBackdrop(blurSize: 4)
+              let texId: Int = blurTex.id
+              let texW: Int = blurTex.width
+              let texH: Int = blurTex.height
+              log("[blur] captured tex id={texId} size={texW}x{texH}")
               let blurKey: String = debugBlurBackdropKey()
               textureRegisterDirect(reg: texReg, key: blurKey, tex: blurTex)
               setDebugHasBlur(debug: debug, value: true)

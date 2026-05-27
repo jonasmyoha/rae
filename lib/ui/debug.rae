@@ -518,11 +518,15 @@ func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret Int 
   setFixedRect(world: world, entity: backdrop, w: debug.screenW, h: debug.screenH)
   setOffset(world: world, entity: backdrop, x: 0.0, y: 0.0)
   if debug.hasBlur {
+    # Frosted-glass: draw the captured blur at full brightness via the
+    # Sprite (white tint = no multiplicative darkening — important on
+    # dark themes where multiplying by a gray tint collapses the whole
+    # image toward black and the blur stops being visible). Darkening
+    # is applied as a translucent rect sibling that paints AFTER the
+    # blur in tree order (see the child added below).
     let invisible: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
     setRectShape(world: world, entity: backdrop, fill: invisible)
-    # ~43% brightness tint — darkens the blur enough to read white
-    # panel text against it while still letting colors show through.
-    let blurTint: RgbaColor = { r: 110, g: 110, b: 110, a: 255 }
+    let blurTint: RgbaColor = { r: 255, g: 255, b: 255, a: 255 }
     let blurKey: String = debugBlurBackdropKey()
     setBackdropSprite(world: world, entity: backdrop, key: blurKey, tint: blurTint)
   } else {
