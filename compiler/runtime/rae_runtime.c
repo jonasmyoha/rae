@@ -1584,6 +1584,12 @@ void rae_ext_rae_crypto_argon2i(rae_String password, rae_String salt, int64_t nb
 #ifdef RAE_HAS_RAYLIB
 /* Raylib wrappers for C backend */
 #include <raylib.h>
+#include <rlgl.h>
+#if defined(__APPLE__)
+#include <OpenGL/gl3.h>
+#else
+#include <GL/gl.h>
+#endif
 
 void rae_ext_initWindow(int64_t width, int64_t height, rae_String title) {
     InitWindow((int)width, (int)height, (const char*)title.data);
@@ -1692,19 +1698,23 @@ extern void glfwWaitEventsTimeout(double timeout);
 extern void glfwWaitEvents(void);
 extern void glfwPostEmptyEvent(void);
 
-/* Window-close callback: GLFW on macOS sets WindowShouldClose=TRUE
- * when the user clicks the red X, but does NOT post an empty event,
- * so any thread blocked in glfwWaitEvents{,Timeout} keeps sleeping
- * until some unrelated event arrives. Hook the callback to post one
- * ourselves so the wait returns immediately and the next loop
- * iteration sees windowShouldClose() == true and exits cleanly. */
+/* Window-close callback: by default raylib's own callback sets
+ * CORE.Window.shouldClose=TRUE when the user clicks the red X. We
+ * override it with this waker so the wait-events main loop wakes up
+ * immediately on close. The override needs to do BOTH jobs raylib's
+ * default does PLUS post an empty event:
+ *   1. glfwSetWindowShouldClose so raylib's WindowShouldClose() picks
+ *      it up on the next call.
+ *   2. glfwPostEmptyEvent so glfwWaitEventsTimeout returns now instead
+ *      of waiting out the rest of its timeout. */
 typedef struct GLFWwindow GLFWwindow;
 typedef void (*GLFWwindowclosefun)(GLFWwindow*);
 extern GLFWwindow* glfwGetCurrentContext(void);
 extern void glfwSetWindowCloseCallback(GLFWwindow* w, GLFWwindowclosefun cb);
+extern void glfwSetWindowShouldClose(GLFWwindow* w, int value);
 
 static void rae_glfw_close_waker(GLFWwindow* w) {
-  (void)w;
+  glfwSetWindowShouldClose(w, 1);
   glfwPostEmptyEvent();
 }
 
@@ -1743,7 +1753,18 @@ Texture rae_ext_captureAndBlurBackdrop(int64_t blurSize) {
    * release the temporary Image. The blur radius `blurSize` is in
    * pixels — ~10 reads as soft "vibrancy" on a typical mobile-sized
    * window. Cost is dominated by ImageBlurGaussian which is O(width *
-   * height * blurSize). Designed for one-shot calls on modal open. */
+   * height * blurSize). Designed for one-shot calls on modal open.
+   *
+   * IMPORTANT: raylib batches draw calls in CPU buffers and only
+   * flushes them to the GPU at end-of-frame (or when the batch fills
+   * up). Calling `LoadImageFromScreen` while draws are still pending
+   * returns stale framebuffer contents — usually just the most
+   * recent ClearBackground color, which is why the captured image
+   * looks like a uniform dark block. Fix: force a flush + GPU sync
+   * before the read. Same workaround `examples/98_mobile_ui/snapshot.sh`
+   * documents for the related `TakeScreenshot` path on macOS+Metal. */
+  rlDrawRenderBatchActive();
+  glFinish();
   Image img = LoadImageFromScreen();
   ImageBlurGaussian(&img, (int)blurSize);
   Texture tex = LoadTextureFromImage(img);
