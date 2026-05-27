@@ -1,28 +1,16 @@
 #include "vm_raylib.h"
 #include <raylib.h>
 #include <stdio.h>
-#include <time.h>
-#include <dlfcn.h>
 
-/* GLFW wait-events bindings. Same dlsym-at-first-call pattern as the
- * Compiled-backend runtime (compiler/runtime/rae_runtime.c) for the
- * same reason: the dylib variant of raylib doesn't export GLFW
- * symbols, so the link must not depend on them at static-link time.
- * If the symbols can't be resolved at runtime, the wait collapses
- * to nanosleep (no wake-on-input, but no crash). */
-typedef void (*vm_glfw_wait_timeout_fn)(double);
-typedef void (*vm_glfw_void_fn)(void);
-static vm_glfw_wait_timeout_fn s_vm_glfw_wait_timeout = NULL;
-static vm_glfw_void_fn         s_vm_glfw_wait        = NULL;
-static vm_glfw_void_fn         s_vm_glfw_post_empty  = NULL;
-static int                     s_vm_glfw_probed      = 0;
-static void vm_glfw_probe(void) {
-    if (s_vm_glfw_probed) return;
-    s_vm_glfw_probed = 1;
-    s_vm_glfw_wait_timeout = (vm_glfw_wait_timeout_fn)dlsym(RTLD_DEFAULT, "glfwWaitEventsTimeout");
-    s_vm_glfw_wait         = (vm_glfw_void_fn)        dlsym(RTLD_DEFAULT, "glfwWaitEvents");
-    s_vm_glfw_post_empty   = (vm_glfw_void_fn)        dlsym(RTLD_DEFAULT, "glfwPostEmptyEvent");
-}
+/* GLFW wait-events bindings. raylib bundles GLFW statically inside
+ * libraylib.a; the dynamic libraylib.dylib does NOT export these
+ * symbols. The compiler/Makefile links libraylib.a directly so these
+ * symbols resolve in the rae driver binary. Any external launcher
+ * embedding the VM must do the same — see the matching comment in
+ * compiler/runtime/rae_runtime.c. */
+extern void glfwWaitEventsTimeout(double timeout);
+extern void glfwWaitEvents(void);
+extern void glfwPostEmptyEvent(void);
 
 static bool native_getScreenWidth(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data; (void)args; (void)count;
@@ -435,15 +423,7 @@ static bool native_waitEventsTimeout(struct VM* vm, VmNativeResult* out, const V
         return false;
     }
     double seconds = (args[0].type == VAL_FLOAT) ? args[0].as.float_value : (double)args[0].as.int_value;
-    vm_glfw_probe();
-    if (s_vm_glfw_wait_timeout) {
-        s_vm_glfw_wait_timeout(seconds);
-    } else if (seconds > 0.0) {
-        struct timespec ts;
-        ts.tv_sec = (time_t)seconds;
-        ts.tv_nsec = (long)((seconds - (double)ts.tv_sec) * 1.0e9);
-        nanosleep(&ts, NULL);
-    }
+    glfwWaitEventsTimeout(seconds);
     out->has_value = false;
     return true;
 }
@@ -454,13 +434,7 @@ static bool native_waitEvents(struct VM* vm, VmNativeResult* out, const Value* a
         fprintf(stderr, "error: waitEvents expects 0 args, got %zu\n", count);
         return false;
     }
-    vm_glfw_probe();
-    if (s_vm_glfw_wait) {
-        s_vm_glfw_wait();
-    } else {
-        struct timespec ts = { 0, 16 * 1000 * 1000 };
-        nanosleep(&ts, NULL);
-    }
+    glfwWaitEvents();
     out->has_value = false;
     return true;
 }
@@ -471,10 +445,7 @@ static bool native_postEmptyEvent(struct VM* vm, VmNativeResult* out, const Valu
         fprintf(stderr, "error: postEmptyEvent expects 0 args, got %zu\n", count);
         return false;
     }
-    vm_glfw_probe();
-    if (s_vm_glfw_post_empty) {
-        s_vm_glfw_post_empty();
-    }
+    glfwPostEmptyEvent();
     out->has_value = false;
     return true;
 }
