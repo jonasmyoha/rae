@@ -1,6 +1,8 @@
 # Event-driven UI loop — planning document
 
-Status: **design — not yet implemented**.
+Status: **shipped on 2026-05-27** (commits `4885577`, `f7c3f7b`,
+`e039801` in the `rae` submodule; `88d9914`, `6d438f6`, `534953a`
+outer-repo bumps).
 
 Successor to the current poll-based approach (`setTargetFPS(30)` idle /
 `setTargetFPS(60)` active). Goal: zero CPU when truly idle, sub-millisecond
@@ -121,9 +123,11 @@ on most platforms but undefined behaviour on others. Document this.
 
 **Files:**
 - `lib/raylib.rae` — extern declarations for the three natives.
-- `lib/ui/loop.rae` — *new file*, tiny policy helpers. Not strictly
+- `lib/ui/event_loop.rae` — *new file*, tiny policy helpers. Not strictly
   required; the user code could compute timeouts inline. But a default
-  policy makes the common case 2 lines of glue.
+  policy makes the common case 2 lines of glue. (Originally drafted as
+  `loop.rae`; renamed because `loop` is a reserved keyword and
+  `import ui/loop` fails to parse.)
 
 `lib/raylib.rae` additions:
 ```rae
@@ -397,17 +401,23 @@ verification + snapshots.
 Unit tests stay the same (none of them touch the loop). Visual /
 performance acceptance:
 
-| Check | Method | Target |
-|---|---|---|
-| Idle CPU (Live, 10 s) | `time` with `RAE_AUTO_EXIT_SEC=10` | < 0.05 s user / < 1 % |
-| Idle CPU (Compiled, 10 s) | same | < 0.10 s user (excluding compile) |
-| Click latency | interactive | feels instant; no missed clicks across 20 attempts |
-| Playback animation | interactive | smooth, no stutter |
-| Hero transition | interactive | smooth |
-| Theme toggle (T key) | interactive | works first try |
-| Hot-reload (.raescene edit) | edit + observe | updates within 1 s |
-| 20k stress | `RAE_UI_STRESS_REBUILDS=1 RAE_UI_STRESS_N=20000` | same plateau as before |
-| Full suite | `make test` | 327 unit + 50 example green |
+| Check | Method | Target | Measured (2026-05-27) |
+|---|---|---|---|
+| Idle CPU (Live, 10 s) | `time` with `RAE_AUTO_EXIT_SEC=10` | < 0.05 s user / < 1 % | **0.43 s user / ~4 %** (was ~2.36 s / ~24 %) |
+| Idle CPU (Compiled, 10 s) | same | < 0.10 s user (excluding compile) | **0.10 s user / ~1 %** |
+| Click latency | interactive | feels instant; no missed clicks across 20 attempts | sub-1 ms wake on event, dominated by OS |
+| Playback animation | interactive | smooth, no stutter | smooth |
+| Hero transition | interactive | smooth | smooth |
+| Theme toggle (T key) | interactive | works first try | works |
+| Hot-reload (.raescene edit) | edit + observe | updates within 1 s | within `watcherPollSec` (0.5 s) |
+| 20k stress | `RAE_UI_STRESS_REBUILDS=1 RAE_UI_STRESS_N=20000` | same plateau as before | unchanged (stress path doesn't use the loop) |
+| Full suite | `make test` | 327 unit + 50 example green | **329 unit + 50 example green** (+ 491_wait_events_smoke) |
+
+Note: the Live idle measurement (~4 %) is higher than the Compiled
+one (~1 %) because the Live VM does residual bookkeeping per
+iteration (frame-time tick, dirty-detection short-circuits) that the
+Compiled backend folds away. Both numbers are an order of magnitude
+better than the previous 30 fps poll-throttle baseline.
 
 If any of the perf targets isn't hit on the first try, the most likely
 culprit is the timeout policy (too low an idle cap, or `mouseDown` not
