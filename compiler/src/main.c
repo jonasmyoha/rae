@@ -2317,7 +2317,10 @@ static int run_compiled_file(const RunOptions* run_opts, const char* project_roo
       }
   }
 
-  snprintf(cmd, sizeof(cmd), "gcc -std=c11 -O2 -w %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib -lraylib -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL %s %s/rae_runtime.c%s -o %s",
+  // Link raylib statically so GLFW symbols bundled in libraylib.a
+  // (glfwWaitEventsTimeout, glfwPostEmptyEvent, ...) are resolvable.
+  // The shared libraylib.dylib does not export them.
+  snprintf(cmd, sizeof(cmd), "gcc -std=c11 -O2 -w %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib /opt/homebrew/lib/libraylib.a -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL %s %s/rae_runtime.c%s -o %s",
            raylib_define, runtime_dir, temp_c, runtime_dir, extra_c_files, temp_bin);
   
   if (system(cmd) != 0) {
