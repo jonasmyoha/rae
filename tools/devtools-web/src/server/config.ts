@@ -64,7 +64,13 @@ const DEFAULT_TARGETS: TargetConfig[] = [
     buildCommand: "cd compiler && make",
     cleanCommand: "cd compiler && make clean",
     rebuildCommand: "cd compiler && make clean && make",
-    exampleRunCommand: "./compiler/bin/rae build --target compiled --project {{ENTRY_DIR}} --emit-c --out {{OUTDIR}}/out.c {{ENTRY}} && gcc -O2 -o {{OUTDIR}}/app {{OUTDIR}}/out.c {{OUTDIR}}/rae_runtime.c third_party/raylib/rae_raylib.c -I{{OUTDIR}} -Ithird_party/raylib -I/opt/homebrew/include -L/opt/homebrew/lib -lraylib -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL && {{OUTDIR}}/app",
+    // Link raylib STATICALLY (libraylib.a, not -lraylib) so the
+    // bundled GLFW symbols (glfwWaitEventsTimeout etc., used by the
+    // event-driven UI loop in lib/ui/event_loop.rae) are present in
+    // the final binary. The shared library libraylib.dylib does NOT
+    // export those symbols. Same fix as compiler/Makefile and
+    // compiler/src/main.c.
+    exampleRunCommand: "./compiler/bin/rae build --target compiled --project {{ENTRY_DIR}} --emit-c --out {{OUTDIR}}/out.c {{ENTRY}} && gcc -O2 -o {{OUTDIR}}/app {{OUTDIR}}/out.c {{OUTDIR}}/rae_runtime.c third_party/raylib/rae_raylib.c -I{{OUTDIR}} -Ithird_party/raylib -I/opt/homebrew/include /opt/homebrew/lib/libraylib.a -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL && {{OUTDIR}}/app",
     exampleBuildCommand: "./compiler/bin/rae build --target compiled --project {{ENTRY_DIR}} --emit-c --out {{OUTDIR}} {{ENTRY}}"
   },
   {
