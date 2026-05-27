@@ -12,6 +12,21 @@ extern void glfwWaitEventsTimeout(double timeout);
 extern void glfwWaitEvents(void);
 extern void glfwPostEmptyEvent(void);
 
+/* Window-close callback waker — see matching comment in
+ * compiler/runtime/rae_runtime.c. macOS GLFW marks
+ * WindowShouldClose=TRUE for the red X click but doesn't post an
+ * empty event, so the wait_events main loop never returns until an
+ * unrelated event arrives. */
+typedef struct GLFWwindow GLFWwindow;
+typedef void (*GLFWwindowclosefun)(GLFWwindow*);
+extern GLFWwindow* glfwGetCurrentContext(void);
+extern void glfwSetWindowCloseCallback(GLFWwindow* w, GLFWwindowclosefun cb);
+
+static void vm_glfw_close_waker(GLFWwindow* w) {
+    (void)w;
+    glfwPostEmptyEvent();
+}
+
 static bool native_getScreenWidth(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data; (void)args; (void)count;
     out->has_value = true;
@@ -446,6 +461,18 @@ static bool native_postEmptyEvent(struct VM* vm, VmNativeResult* out, const Valu
         return false;
     }
     glfwPostEmptyEvent();
+    out->has_value = false;
+    return true;
+}
+
+static bool native_installWindowCloseWaker(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data; (void)args;
+    if (count != 0) {
+        fprintf(stderr, "error: installWindowCloseWaker expects 0 args, got %zu\n", count);
+        return false;
+    }
+    GLFWwindow* w = glfwGetCurrentContext();
+    if (w) glfwSetWindowCloseCallback(w, vm_glfw_close_waker);
     out->has_value = false;
     return true;
 }
@@ -926,6 +953,7 @@ bool vm_registry_register_raylib(VmRegistry* registry) {
     ok &= vm_registry_register_native(registry, "waitEventsTimeout", native_waitEventsTimeout, NULL);
     ok &= vm_registry_register_native(registry, "waitEvents", native_waitEvents, NULL);
     ok &= vm_registry_register_native(registry, "postEmptyEvent", native_postEmptyEvent, NULL);
+    ok &= vm_registry_register_native(registry, "installWindowCloseWaker", native_installWindowCloseWaker, NULL);
     ok &= vm_registry_register_native(registry, "isKeyDown", native_isKeyDown, NULL);
     ok &= vm_registry_register_native(registry, "isKeyPressed", native_isKeyPressed, NULL);
     ok &= vm_registry_register_native(registry, "getMouseX", native_getMouseX, NULL);
