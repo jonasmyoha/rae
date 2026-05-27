@@ -472,10 +472,15 @@ func main() {
           #   - input produced an ActionEvent this frame
           #   - pressed-entity transition (hover state changed)
           #   - hero transition is mid-flight
+          #   - mouse button is currently held down (catches the
+          #     release edge reliably on the next frame)
           #
-          # Idle rate (5 fps) otherwise — the GPU still vsync's per
-          # render, but raylib's targetFPS wait collapses 12 frames'
-          # worth of CPU into one.
+          # Idle rate (30 fps) otherwise — at 30 fps the poll gap is
+          # ~33 ms, short enough that fast mouse clicks (typically
+          # 50-100 ms) keep the button down across at least one poll.
+          # raylib only reads input state when we ask, so the idle
+          # rate is effectively our minimum input-polling frequency.
+          # At the previous 5 fps the 200 ms gap dropped most clicks.
           #
           # NOTE: showLabels is NOT in this list. The heartbeat is the
           # real-work indicator (drawn only when active fires). Forcing
@@ -501,13 +506,21 @@ func main() {
               active = true
             }
           }
+          if active is false {
+            # While the user is holding the mouse button, stay at 60 fps
+            # so we catch the release transition (which is what fires
+            # the action event) on the very next frame.
+            if isMouseButtonDown(button: mouseButtonLeft) {
+              active = true
+            }
+          }
           lastPressed = input.pressedEntity
 
           # Only call setTargetFPS when the rate actually CHANGES —
           # raylib's setTargetFPS prints "INFO: TIMER: Target time per
           # frame: …" on every call, so calling it every frame spams
           # stdout. `lastTargetFps` carries the rate across iterations.
-          let desiredFps: Int = 5
+          let desiredFps: Int = 30
           if active {
             desiredFps = 60
           }
