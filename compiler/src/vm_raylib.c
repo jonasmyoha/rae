@@ -1,5 +1,11 @@
 #include "vm_raylib.h"
 #include <raylib.h>
+#include <rlgl.h>
+#if defined(__APPLE__)
+#include <OpenGL/gl3.h>
+#else
+#include <GL/gl.h>
+#endif
 #include <stdio.h>
 
 /* GLFW wait-events bindings. raylib bundles GLFW statically inside
@@ -13,17 +19,17 @@ extern void glfwWaitEvents(void);
 extern void glfwPostEmptyEvent(void);
 
 /* Window-close callback waker — see matching comment in
- * compiler/runtime/rae_runtime.c. macOS GLFW marks
- * WindowShouldClose=TRUE for the red X click but doesn't post an
- * empty event, so the wait_events main loop never returns until an
- * unrelated event arrives. */
+ * compiler/runtime/rae_runtime.c. Must do BOTH jobs raylib's default
+ * does PLUS post an empty event: set the should-close flag AND wake
+ * the wait. */
 typedef struct GLFWwindow GLFWwindow;
 typedef void (*GLFWwindowclosefun)(GLFWwindow*);
 extern GLFWwindow* glfwGetCurrentContext(void);
 extern void glfwSetWindowCloseCallback(GLFWwindow* w, GLFWwindowclosefun cb);
+extern void glfwSetWindowShouldClose(GLFWwindow* w, int value);
 
 static void vm_glfw_close_waker(GLFWwindow* w) {
-    (void)w;
+    glfwSetWindowShouldClose(w, 1);
     glfwPostEmptyEvent();
 }
 
@@ -187,6 +193,11 @@ static bool native_captureAndBlurBackdrop(struct VM* vm, VmNativeResult* out, co
         return false;
     }
     int blurSize = (args[0].type == VAL_FLOAT) ? (int)args[0].as.float_value : (int)args[0].as.int_value;
+    /* Flush pending raylib draws + GPU sync before reading the back
+     * buffer — otherwise LoadImageFromScreen returns the clear color
+     * on macOS+Metal. See matching comment in rae_runtime.c. */
+    rlDrawRenderBatchActive();
+    glFinish();
     Image img = LoadImageFromScreen();
     ImageBlurGaussian(&img, blurSize);
     Texture t = LoadTextureFromImage(img);
