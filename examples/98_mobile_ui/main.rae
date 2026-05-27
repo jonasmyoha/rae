@@ -452,87 +452,89 @@ func main() {
               }
             }
           }
-          # Idle frame-skip decision. Render when:
-          #   - first frame after a world rebuild (`forceRender`)
-          #   - any tracked visual ComponentTable has bumped its
-          #     generation (covered by `renderCacheDirty`)
-          #   - input produced an ActionEvent this frame (clicks need
-          #     a visual update for press/hover feedback)
+          # Battery-saver: dynamic target-FPS instead of frame-skip.
+          # The earlier `sleep(16)` skip path froze raylib's event
+          # pump (window beach-balled) because `sleep` blocks the
+          # main thread without dispatching Cocoa events. So we
+          # always call begin/render/endDrawing (which DOES pump
+          # events via glfwPollEvents inside endDrawing) and instead
+          # throttle the frame rate via `setTargetFPS` based on
+          # whether anything's changing.
+          #
+          # Active rate (60 fps) when ANY of these:
+          #   - first frame after world rebuild (`forceRender`)
+          #   - tracked visual ComponentTable bumped (`renderCacheDirty`)
+          #   - input produced an ActionEvent this frame
           #   - pressed-entity transition (hover state changed)
-          #   - hero transition is mid-flight (overlay paints each frame)
-          #   - debug heartbeat / labels are on (heartbeat needs to
-          #     advance every frame; the labels read live fps/rss)
-          # If none of those is true, skip the whole begin/render/end
-          # block and `sleep(16 ms)` to throttle to ~60 Hz. raylib's
-          # implicit vsync wait lives inside `endDrawing`, so skipping
-          # the draw block also skips the wait.
-          let shouldRender: Bool = forceRender
-          if shouldRender is false {
+          #   - hero transition is mid-flight
+          #   - debug heartbeat needs to advance (showLabels on)
+          #
+          # Idle rate (5 fps) otherwise — the GPU still vsync's per
+          # render, but raylib's targetFPS wait collapses 12 frames'
+          # worth of CPU into one.
+          let active: Bool = forceRender
+          if active is false {
             if renderCacheDirty(world: world, cache: renderCache) {
-              shouldRender = true
+              active = true
             }
           }
-          if shouldRender is false {
+          if active is false {
             if input.events.length > 0 {
-              shouldRender = true
+              active = true
             }
           }
-          if shouldRender is false {
+          if active is false {
             if input.pressedEntity is not lastPressed {
-              shouldRender = true
+              active = true
             }
           }
-          if shouldRender is false {
+          if active is false {
             if animating {
-              shouldRender = true
+              active = true
             }
           }
-          if shouldRender is false {
+          if active is false {
             if debug.showLabels {
-              shouldRender = true
+              active = true
             }
           }
           lastPressed = input.pressedEntity
 
-          if shouldRender {
-            beginDrawing()
-            clearBackground(color: bg)
-            renderSystem(world: world, reg: texReg)
-            if animating {
-              renderHeroOverlay(anim: anim, reg: texReg, now: now)
-            }
-            if debugRects {
-              let mx: Float = getMouseX().toFloat()
-              let my: Float = getMouseY().toFloat()
-              renderDebugClickRects(
-                world: world
-                idleColor: debugRectColor
-                hoverColor: debugHoverColor
-                mouseX: mx
-                mouseY: my
-              )
-              renderDebugMouseCursor(mouseX: mx, mouseY: my, color: debugCursorColor)
-            }
-            # Reusable debug overlay: records the frame timestamp for
-            # the rolling FPS window + draws the FPS / mem read-out
-            # (when the in-app toggle is on). Drawn last so the labels
-            # paint on top of everything else.
-            updateAndRenderDebugOverlay(debug: debug, now: now)
-            endDrawing()
-            forceRender = false
-            # `renderCacheDirty` already updated the cache to the
-            # post-render generation snapshot above. Bump it again
-            # *after* render so any per-frame writes by the playback
-            # tick or hero overlay (both of which mutate component
-            # tables) are reflected in the cache and don't trigger
-            # an unnecessary re-render next frame.
-            renderCacheDirty(world: world, cache: renderCache)
+          if active {
+            setTargetFPS(fps: 60)
           } else {
-            # ~60 Hz throttle. `windowShouldClose` (called at the top
-            # of the next iteration) pumps raylib's event queue as a
-            # side effect, so mouse/keyboard state stays current.
-            sleep(ms: 16)
+            setTargetFPS(fps: 5)
           }
+
+          beginDrawing()
+          clearBackground(color: bg)
+          renderSystem(world: world, reg: texReg)
+          if animating {
+            renderHeroOverlay(anim: anim, reg: texReg, now: now)
+          }
+          if debugRects {
+            let mx: Float = getMouseX().toFloat()
+            let my: Float = getMouseY().toFloat()
+            renderDebugClickRects(
+              world: world
+              idleColor: debugRectColor
+              hoverColor: debugHoverColor
+              mouseX: mx
+              mouseY: my
+            )
+            renderDebugMouseCursor(mouseX: mx, mouseY: my, color: debugCursorColor)
+          }
+          # Reusable debug overlay: records the frame timestamp for
+          # the rolling FPS window + draws the FPS / mem read-out
+          # (when the in-app toggle is on). Drawn last so the labels
+          # paint on top of everything else.
+          updateAndRenderDebugOverlay(debug: debug, now: now)
+          endDrawing()
+          forceRender = false
+          # Bump the cache again *after* render so any per-frame writes
+          # by the playback tick / hero overlay are reflected and
+          # don't trigger an unnecessary "active" promotion next frame.
+          renderCacheDirty(world: world, cache: renderCache)
 
           if willSwitch {
             currentScreen = nextScreen
