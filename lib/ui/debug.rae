@@ -126,6 +126,16 @@ type DebugSystem {
   # other code (tests, snapshots) can read them back without recomputing.
   lastFps: Float
   lastRssKb: Int
+
+  # Render-heartbeat indicator: a 4×4 amber square that advances 1
+  # pixel right per call to `updateAndRenderDebugOverlay`. Starts at
+  # x=0 along the top edge (y=0), wraps back to x=-4 once it slides
+  # past the right edge so the re-entry is smooth. If you see it
+  # frozen, the render loop has stalled — different from the (FPS)
+  # label which only proves *that* the label system is alive.
+  # Always-on whenever the debug system is mounted; not gated by
+  # the FPS/mem labels toggle.
+  heartbeatX: Float
 }
 
 func createDebugSystem() pub ret DebugSystem {
@@ -146,6 +156,7 @@ func createDebugSystem() pub ret DebugSystem {
     fpsWindowSec: 3.0
     lastFps: 0.0
     lastRssKb: 0
+    heartbeatX: 0.0
   }
 }
 
@@ -690,4 +701,25 @@ func updateAndRenderDebugOverlay(debug: mod DebugSystem, now: view Float) pub {
   if debug.showLabels {
     drawDebugLabels(debug: debug)
   }
+  drawDebugHeartbeat(debug: debug)
+}
+
+# 4×4 amber square that crawls left-to-right along the top edge of
+# the screen, one pixel per call. Wraps off-screen at the right and
+# re-enters from x=-4 so the motion is smooth. Always-on whenever
+# the debug system is mounted — a continuous "rendering is alive"
+# heartbeat that's distinct from the FPS-label toggle.
+func drawDebugHeartbeat(debug: mod DebugSystem) {
+  debug.heartbeatX = debug.heartbeatX + 1.0
+  if debug.heartbeatX > debug.screenW {
+    debug.heartbeatX = -4.0
+  }
+  let amber: Color = { r: 255, g: 191, b: 0, a: 255 }
+  drawRectangle(
+    x: debug.heartbeatX
+    y: 0.0
+    width: 4.0
+    height: 4.0
+    color: amber
+  )
 }
