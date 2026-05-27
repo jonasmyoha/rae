@@ -838,3 +838,135 @@ func layoutSystem(world: mod UiWorld) {
     i = i + 1
   }
 }
+
+# -----------------------------------------------------------------
+# layoutSystemIfDirty — generation-skip wrapper around layoutSystem.
+#
+# Mirrors `transformSystemIfDirty` in transform.rae. Tracks the
+# table-level generation counter of every ComponentTable that the
+# layout pass READS from. When none has bumped since the last call,
+# the whole measure+compute walk (and its writes to `measuredSizes` /
+# `computedRects`) can be skipped — the output would be identical.
+#
+# Input tables (mutated by the user / scene loader, READ by layout):
+#   rects, sizes, layouts, paddings, offsets, constraints,
+#   actives, aligns, childrens, parentLinks
+#
+# Output tables (WRITTEN by layout) are deliberately NOT in the cache
+#   measuredSizes  — written inside phase 1
+#   computedRects  — written inside phase 2
+# Tracking these would cause the cache to instantly re-dirty itself
+# on every call, because the first call bumps their generations.
+#
+# `entityCount` snapshots `alive.length` — no generation on the raw
+# alive List, so we fall back to the same structural fingerprint
+# transformSystemIfDirty uses (UI never creates/destroys entities
+# without also touching at least one component table, but tracking
+# the count explicitly is cheap and conservative).
+#
+# Initial -1 sentinels guarantee the first call always runs.
+type LayoutCache {
+  rectsGen: Int
+  sizesGen: Int
+  layoutsGen: Int
+  paddingsGen: Int
+  offsetsGen: Int
+  constraintsGen: Int
+  activesGen: Int
+  alignsGen: Int
+  childrensGen: Int
+  parentLinksGen: Int
+  entityCount: Int
+}
+
+func createLayoutCache() pub ret LayoutCache {
+  ret LayoutCache {
+    rectsGen: -1
+    sizesGen: -1
+    layoutsGen: -1
+    paddingsGen: -1
+    offsetsGen: -1
+    constraintsGen: -1
+    activesGen: -1
+    alignsGen: -1
+    childrensGen: -1
+    parentLinksGen: -1
+    entityCount: -1
+  }
+}
+
+# Runs `layoutSystem` only when at least one input table has bumped
+# its generation since the last call (or the alive-entity count
+# changed). Returns true when the system actually ran, false when the
+# cached measuredSizes/computedRects output is still valid.
+#
+# Granularity is at the SYSTEM level: this wrapper either runs the
+# entire layoutSystem once or skips it entirely. It does NOT short-
+# circuit any of the inner measure/compute iterations — those run to
+# convergence as before each time the wrapper actually fires.
+func layoutSystemIfDirty(world: mod UiWorld, cache: mod LayoutCache) pub ret Bool {
+  let rGen: Int = componentTableGeneration(Rect, this: world.rects)
+  let szGen: Int = componentTableGeneration(Size, this: world.sizes)
+  let lyGen: Int = componentTableGeneration(Layout, this: world.layouts)
+  let pdGen: Int = componentTableGeneration(Padding, this: world.paddings)
+  let ofGen: Int = componentTableGeneration(Offset, this: world.offsets)
+  let cnGen: Int = componentTableGeneration(Constraints, this: world.constraints)
+  let acGen: Int = componentTableGeneration(Active, this: world.actives)
+  let alGen: Int = componentTableGeneration(Align, this: world.aligns)
+  let chGen: Int = componentTableGeneration(Children, this: world.childrens)
+  let plGen: Int = componentTableGeneration(ParentLink, this: world.parentLinks)
+  let entityCount: Int = world.alive.length
+
+  let dirty: Bool = false
+  if rGen is not cache.rectsGen {
+    dirty = true
+  }
+  if szGen is not cache.sizesGen {
+    dirty = true
+  }
+  if lyGen is not cache.layoutsGen {
+    dirty = true
+  }
+  if pdGen is not cache.paddingsGen {
+    dirty = true
+  }
+  if ofGen is not cache.offsetsGen {
+    dirty = true
+  }
+  if cnGen is not cache.constraintsGen {
+    dirty = true
+  }
+  if acGen is not cache.activesGen {
+    dirty = true
+  }
+  if alGen is not cache.alignsGen {
+    dirty = true
+  }
+  if chGen is not cache.childrensGen {
+    dirty = true
+  }
+  if plGen is not cache.parentLinksGen {
+    dirty = true
+  }
+  if entityCount is not cache.entityCount {
+    dirty = true
+  }
+
+  if dirty is false {
+    ret false
+  }
+
+  layoutSystem(world: world)
+  cache.rectsGen = rGen
+  cache.sizesGen = szGen
+  cache.layoutsGen = lyGen
+  cache.paddingsGen = pdGen
+  cache.offsetsGen = ofGen
+  cache.constraintsGen = cnGen
+  cache.activesGen = acGen
+  cache.alignsGen = alGen
+  cache.childrensGen = chGen
+  cache.parentLinksGen = plGen
+  cache.entityCount = entityCount
+  ret true
+}

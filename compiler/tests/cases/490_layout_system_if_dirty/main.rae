@@ -1,0 +1,47 @@
+# layoutSystemIfDirty: runs the measure+compute walk when at least
+# one input ComponentTable has bumped its generation, skips otherwise.
+# Mirrors test 489 but exercises the layout wrapper instead of the
+# transform one. Proves the integration point used by
+# examples/98_mobile_ui/main.rae.
+import core
+import string
+import ui/components
+import ui/ecs
+import ui/layout
+
+func main() {
+  let world: UiWorld = createUiWorld()
+  let root: Int = createEntity(world: world)
+  let r: Rect = { x: 0.0, y: 0.0, w: 200.0, h: 100.0 }
+  componentSet(this: world.rects, entity: root, data: r)
+  let sz: Size = {
+    w: SizeAxis { mode: SizeMode.Fixed, min: -1, max: -1 }
+    h: SizeAxis { mode: SizeMode.Fixed, min: -1, max: -1 }
+  }
+  componentSet(this: world.sizes, entity: root, data: sz)
+
+  let cache: LayoutCache = createLayoutCache()
+
+  # First call: cache is fresh (-1 sentinels), inputs have non-sentinel
+  # generations from the componentSet calls above, so dirty=true → runs.
+  let firstRan: Bool = layoutSystemIfDirty(world: world, cache: cache)
+  log("first-ran={firstRan}")
+
+  # Second call: nothing has mutated the inputs since the cache was
+  # updated, so dirty=false → skips. The expensive two-phase
+  # measure/compute walk is bypassed entirely. Crucially, the system's
+  # OWN writes to `measuredSizes` / `computedRects` are NOT tracked by
+  # the cache, so they don't re-dirty it.
+  let secondRan: Bool = layoutSystemIfDirty(world: world, cache: cache)
+  log("second-ran={secondRan}")
+
+  # Touching an input table (Active here) flips the cache to dirty.
+  let inactive: Active = { value: false }
+  componentSet(this: world.actives, entity: root, data: inactive)
+  let thirdRan: Bool = layoutSystemIfDirty(world: world, cache: cache)
+  log("after-mut-ran={thirdRan}")
+
+  # And the next call after that re-skips.
+  let fourthRan: Bool = layoutSystemIfDirty(world: world, cache: cache)
+  log("idle-again-ran={fourthRan}")
+}
