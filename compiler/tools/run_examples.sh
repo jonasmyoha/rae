@@ -30,11 +30,14 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
     if "$BIN" build --target compiled --emit-c --project "$PROJECT_DIR" --out "$TMP_OUT/out.c" "$EXAMPLE_FILE" > "$TMP_OUT/emit.log" 2>&1; then
       # Attempt full compilation
       # Note: we include Raylib flags since many examples use it.
+      # Link raylib statically so GLFW symbols bundled in libraylib.a
+      # (glfwWaitEventsTimeout, glfwPostEmptyEvent, ...) resolve. The
+      # shared libraylib.dylib does not export those.
       if gcc -O2 -o "$TMP_OUT/app" "$TMP_OUT/out.c" "$TMP_OUT/rae_runtime.c" \
          $([ -f "$TMP_OUT/monocypher.c" ] && echo "$TMP_OUT/monocypher.c") \
          $(ls "$PROJECT_DIR"/*.c 2>/dev/null | grep -v "rae_runtime.c" | grep -v "main_compiled.c" || true) \
          -I"$TMP_OUT" -I/opt/homebrew/include -L/opt/homebrew/lib -DRAE_HAS_RAYLIB \
-         -lraylib -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL > "$TMP_OUT/link.log" 2>&1; then
+         /opt/homebrew/lib/libraylib.a -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL > "$TMP_OUT/link.log" 2>&1; then
         echo "PASS: $EXAMPLE_NAME"
         ((PASSED++))
       else

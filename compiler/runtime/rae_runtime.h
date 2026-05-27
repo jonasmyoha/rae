@@ -581,6 +581,14 @@ void rae_ext_setConfigFlags(int64_t flags);
 rae_Bool rae_ext_windowShouldClose(void);
 void rae_ext_closeWindow(void);
 void rae_ext_setTargetFPS(int64_t fps);
+/* GLFW wait-events bindings. Block the thread until an OS event arrives
+ * or the timeout (in seconds) elapses; the negative-timeout case is
+ * an unbounded wait -- prefer waitEvents() for that intent.
+ * postEmptyEvent() wakes any thread currently blocked in a wait.
+ * Must be called after initWindow(). */
+void rae_ext_waitEventsTimeout(double seconds);
+void rae_ext_waitEvents(void);
+void rae_ext_postEmptyEvent(void);
 void rae_ext_beginDrawing(void);
 void rae_ext_endDrawing(void);
 void rae_ext_clearBackground(Color color);
