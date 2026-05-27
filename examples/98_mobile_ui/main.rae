@@ -27,6 +27,7 @@ import ui/render
 import ui/textures
 import ui/input
 import ui/debug
+import ui/event_loop
 
 func main() {
   # FLAG_WINDOW_RESIZABLE (4) | FLAG_MSAA_4X_HINT (32) = 36. MSAA turns
@@ -38,7 +39,9 @@ func main() {
   let winH: Float = screenH
   initWindow(width: winW.toInt(), height: winH.toInt(), title: "Rae Mobile UI — Album")
   setWindowPosition(x: 50, y: 50)
-  setTargetFPS(fps: 60)
+  # No setTargetFPS: the inner loop blocks in glfwWaitEventsTimeout
+  # (see lib/ui/event_loop.rae) and naturally caps animation at
+  # ~60 Hz via `frameTimeoutSec`. raylib's frame-pacing is bypassed.
   # Reset raylib's implicit `Mouse.scale` so getMouseX/Y return
   # cursor positions in the same coordinate space the renderer uses.
   setMouseScale(scaleX: 1.0, scaleY: 1.0)
@@ -322,11 +325,6 @@ func main() {
       let renderCache: RenderCache = createRenderCache()
       let forceRender: Bool = true
       let lastPressed: Int = -1
-      # Sentinel -1 forces the first frame to call setTargetFPS so
-      # raylib actually applies our target. We track it explicitly
-      # to avoid calling setTargetFPS every frame (raylib logs each
-      # call as "INFO: TIMER: Target time per frame: …" — spammy).
-      let lastTargetFps: Int = -1
       # Initial playback overlay: set the progress-fill width to
       # match the current `elapsedSec / durationSec` so the first
       # frame of the rebuilt world doesn't flash an empty bar before
@@ -351,6 +349,32 @@ func main() {
       let input: InputSystem = createInputSystem()
       let switching: Bool = false
       loop running and switching is false {
+        # Event-driven wait. Block the thread until an OS event (mouse,
+        # key, window) arrives or our policy-chosen timeout elapses.
+        # `nextWaitTimeoutSec` (lib/ui/event_loop.rae) picks the
+        # smallest of: one frame when animating, one frame while the
+        # mouse button is held, the watcher poll cadence otherwise, or
+        # the safety cap when truly idle. Idle CPU goes to ~0 because
+        # the OS suspends us in nanosleep instead of busy-polling.
+        let timeout: Float = nextWaitTimeoutSec(
+          animating: anim.active or playback.isPlaying
+          mouseDown: isMouseButtonDown(button: mouseButtonLeft)
+          pollWatcher: true
+        )
+        # When RAE_AUTO_EXIT_SEC is set, clamp the wait so the deadline
+        # actually fires on time — otherwise an idle iteration could
+        # sleep for `idleCapSec` (30 s) past the requested exit time.
+        if autoExitSec > 0.0 {
+          let elapsed: Float = getTime() - bootTime
+          let remaining: Float = autoExitSec - elapsed
+          if remaining < timeout {
+            timeout = remaining
+          }
+          if timeout < 0.001 {
+            timeout = 0.001
+          }
+        }
+        waitEventsTimeout(seconds: timeout)
         if windowShouldClose() {
           running = false
         } else if autoExitSec > 0.0 and getTime() - bootTime > autoExitSec {
@@ -516,54 +540,47 @@ func main() {
           }
           lastPressed = input.pressedEntity
 
-          # Only call setTargetFPS when the rate actually CHANGES —
-          # raylib's setTargetFPS prints "INFO: TIMER: Target time per
-          # frame: …" on every call, so calling it every frame spams
-          # stdout. `lastTargetFps` carries the rate across iterations.
-          let desiredFps: Int = 30
+          # Event-driven render gate. With wait-events, the loop only
+          # iterates when something happened (an OS event arrived or a
+          # timeout fired), so the dirty-detection plumbing above
+          # actually controls whether we redraw — not just how often we
+          # set a target FPS. Skip the whole begin/render/endDrawing
+          # block when nothing visible has changed.
           if active {
-            desiredFps = 60
+            beginDrawing()
+            clearBackground(color: bg)
+            renderSystem(world: world, reg: texReg)
+            if animating {
+              renderHeroOverlay(anim: anim, reg: texReg, now: now)
+            }
+            if debugRects {
+              let mx: Float = getMouseX().toFloat()
+              let my: Float = getMouseY().toFloat()
+              renderDebugClickRects(
+                world: world
+                idleColor: debugRectColor
+                hoverColor: debugHoverColor
+                mouseX: mx
+                mouseY: my
+              )
+              renderDebugMouseCursor(mouseX: mx, mouseY: my, color: debugCursorColor)
+            }
+            # Reusable debug overlay: records the frame timestamp for
+            # the rolling FPS window + draws the FPS / mem read-out
+            # (when the in-app toggle is on). Drawn last so the labels
+            # paint on top of everything else.
+            # Pass `active` (the dirty-detection signal that drove the
+            # render gate) so the debug heartbeat reflects real per-
+            # frame ECS work, not just raw frame rate.
+            updateAndRenderDebugOverlay(debug: debug, now: now, didRealWork: active)
+            endDrawing()
+            forceRender = false
+            # Bump the cache again *after* render so any per-frame
+            # writes by the playback tick / hero overlay are reflected
+            # and don't trigger an unnecessary "active" promotion next
+            # frame.
+            renderCacheDirty(world: world, cache: renderCache)
           }
-          if desiredFps is not lastTargetFps {
-            setTargetFPS(fps: desiredFps)
-            lastTargetFps = desiredFps
-          }
-
-          beginDrawing()
-          clearBackground(color: bg)
-          renderSystem(world: world, reg: texReg)
-          if animating {
-            renderHeroOverlay(anim: anim, reg: texReg, now: now)
-          }
-          if debugRects {
-            let mx: Float = getMouseX().toFloat()
-            let my: Float = getMouseY().toFloat()
-            renderDebugClickRects(
-              world: world
-              idleColor: debugRectColor
-              hoverColor: debugHoverColor
-              mouseX: mx
-              mouseY: my
-            )
-            renderDebugMouseCursor(mouseX: mx, mouseY: my, color: debugCursorColor)
-          }
-          # Reusable debug overlay: records the frame timestamp for
-          # the rolling FPS window + draws the FPS / mem read-out
-          # (when the in-app toggle is on). Drawn last so the labels
-          # paint on top of everything else.
-          # Pass `active` (the dirty-detection signal that drove the
-          # 60 vs 5 fps choice above) so the debug heartbeat reflects
-          # real per-frame ECS work, not just raw frame rate. A frozen
-          # heartbeat with a still-ticking FPS label means the loop
-          # is alive but the dirty-detection is short-circuiting all
-          # the work.
-          updateAndRenderDebugOverlay(debug: debug, now: now, didRealWork: active)
-          endDrawing()
-          forceRender = false
-          # Bump the cache again *after* render so any per-frame writes
-          # by the playback tick / hero overlay are reflected and
-          # don't trigger an unnecessary "active" promotion next frame.
-          renderCacheDirty(world: world, cache: renderCache)
 
           if willSwitch {
             currentScreen = nextScreen
