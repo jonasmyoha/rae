@@ -283,17 +283,19 @@ func main() {
       # overlay) onto the freshly-built world BEFORE layout runs so
       # they participate in measure/place like any other entity.
       addDebugLayer(world: world, debug: debug)
-      layoutSystem(world: world)
-      # `transformSystemIfDirty` consults the table-level generation
-      # counters on the world's ComponentTables (introduced in the
-      # same series as this call) and skips the whole walk when none
-      # of the inputs has changed since the cache was last refreshed.
-      # The cache is fresh per outer rebuild (new world = new
-      # ComponentTable objects whose counters start at 0), so the
-      # first call here always runs. The skip path engages if anything
-      # later in this iteration calls `transformSystemIfDirty` again
-      # without first touching one of the input tables — for example,
-      # a future per-frame re-transform safety net.
+      # `layoutSystemIfDirty` + `transformSystemIfDirty` consult the
+      # table-level generation counters on the world's ComponentTables
+      # (introduced in the same series as these calls) and skip the
+      # whole walk when none of the inputs has changed since the cache
+      # was last refreshed. Both caches are fresh per outer rebuild
+      # (new world = new ComponentTable objects whose counters start
+      # at 0), so the first call here always runs. The skip path
+      # engages if anything later in this iteration calls either
+      # `*IfDirty` helper again without first touching one of the
+      # input tables — for example, a future per-frame re-layout /
+      # re-transform safety net.
+      let layoutCache: LayoutCache = createLayoutCache()
+      layoutSystemIfDirty(world: world, cache: layoutCache)
       let transformCache: TransformCache = createTransformCache()
       transformSystemIfDirty(world: world, cache: transformCache)
       # Initial playback overlay: set the progress-fill width to
