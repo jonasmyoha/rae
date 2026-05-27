@@ -1,0 +1,64 @@
+# Event-driven UI loop policy helpers.
+#
+# Companion to the GLFW wait-events natives in lib/raylib.rae. The
+# main loop in a Rae UI app typically goes:
+#
+#   loop running {
+#     let timeout: Float = nextWaitTimeoutSec(
+#       animating:   playback.isPlaying or heroIsAnimating(anim)
+#       mouseDown:   isMouseButtonDown(button: mouseButtonLeft)
+#       pollWatcher: true
+#     )
+#     waitEventsTimeout(seconds: timeout)
+#     if windowShouldClose() { running = false }
+#     else { ...input -> render... }
+#   }
+#
+# The app owns the actual loop (because every app has slightly
+# different structure: stress mode, screenshot mode, multi-screen
+# navigation, hot-reload, ...). This module owns only the timeout
+# *policy* primitive — the smallest of the four named signals wins,
+# because the loop should wake whenever the soonest event fires.
+#
+# Apps with unusual cadence requirements can compute their own Float
+# and call `waitEventsTimeout` directly; this helper covers the 95%
+# case.
+
+# One 60 Hz animation frame. The right wait when an animation is
+# advancing or the user is currently dragging.
+let frameTimeoutSec: Float = 0.016
+
+# File-watcher poll cadence. Hot-reload of .raescene / module files
+# needs the loop to wake roughly twice per second to check mtimes.
+let watcherPollSec: Float = 0.5
+
+# Safety wake when truly idle. The loop blocks for at most this long
+# even when nothing else is happening — guarantees a periodic repaint
+# in case dirty detection misses a transition, and bounds the file-
+# watcher's worst-case detection latency. 30 s is generous enough that
+# the wake costs ~zero CPU but tight enough for diagnostics.
+let idleCapSec: Float = 30.0
+
+# Pick the smallest of the four named signals. The smallest timeout
+# wins because the loop must wake on whichever fires first.
+#
+#   animating   → a transition / playback / drag-in-progress needs a
+#                 frame soon. Returns one frame-time (~16 ms).
+#   mouseDown   → user is holding the mouse button; we want to catch
+#                 release smoothly without depending on the OS event.
+#                 Same one-frame cadence.
+#   pollWatcher → file-watch needs a poll within `watcherPollSec`.
+#   else        → truly idle; wake at `idleCapSec` as a safety net.
+#
+# Returns seconds-to-wait. Caller passes the result to
+# `waitEventsTimeout`.
+func nextWaitTimeoutSec(
+  animating: view Bool
+  mouseDown: view Bool
+  pollWatcher: view Bool
+) ret Float {
+  if animating { ret frameTimeoutSec }
+  if mouseDown { ret frameTimeoutSec }
+  if pollWatcher { ret watcherPollSec }
+  ret idleCapSec
+}
