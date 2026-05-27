@@ -1672,70 +1672,29 @@ void rae_ext_setTargetFPS(int64_t fps) { SetTargetFPS((int)fps); }
 
 /* GLFW wait-events bindings. raylib bundles GLFW statically inside
  * libraylib.a; the dynamic libraylib.dylib does NOT export these
- * symbols. The repo's own build paths (Makefile, tools/run_examples.sh,
- * snapshot.sh, the `rae build`/`rae run` emitted gcc command) link
- * libraylib.a explicitly so the symbols resolve.
+ * symbols. ALL build paths must link libraylib.a directly:
+ *   - compiler/Makefile (the rae driver binary)
+ *   - compiler/src/main.c (the gcc command rae emits when running
+ *     a Compiled-target program)
+ *   - compiler/tools/run_examples.sh
+ *   - examples/98_mobile_ui/snapshot.sh
+ *   - rae-devtools-web/src/server/config.ts (the IDE-style runner)
  *
- * External launchers (e.g. SUMU AI's "Compiled (C backend)" runner)
- * may pass `-lraylib` (the dylib) and miss the GLFW symbols entirely.
- * We resolve the three GLFW functions via dlsym at first call so the
- * link succeeds even when only the dylib is on the line. If the
- * symbols aren't found, fall back to plain nanosleep: input latency
- * degrades from "wake on event" back to "wake at timeout", but the
- * app keeps running. */
-#include <time.h>
-#include <dlfcn.h>
+ * If you're adding a new launcher: link `/opt/homebrew/lib/libraylib.a`
+ * directly, NOT `-lraylib`. The dynamic library is missing the GLFW
+ * symbols we need for the event-driven UI loop.
+ *
+ * No GLFW header is on the include path (Homebrew's raylib formula
+ * does not ship glfw3.h); declare the prototypes locally. All three
+ * should be called only after initWindow() has run — GLFW must be
+ * initialised by then. */
+extern void glfwWaitEventsTimeout(double timeout);
+extern void glfwWaitEvents(void);
+extern void glfwPostEmptyEvent(void);
 
-typedef void (*glfw_wait_timeout_fn)(double);
-typedef void (*glfw_void_fn)(void);
-
-static glfw_wait_timeout_fn s_glfw_wait_timeout = NULL;
-static glfw_void_fn         s_glfw_wait        = NULL;
-static glfw_void_fn         s_glfw_post_empty  = NULL;
-static int                  s_glfw_probed      = 0;
-
-static void rae_glfw_probe(void) {
-  if (s_glfw_probed) return;
-  s_glfw_probed = 1;
-  /* RTLD_DEFAULT searches the main program + already-loaded libs.
-   * Works when GLFW symbols are in libraylib.a (statically linked
-   * into the binary) AND the loader has marked them as global
-   * extern. The repo's build path satisfies this; the SUMU dylib
-   * path does not (no symbols exposed -> NULL pointers -> fallback). */
-  s_glfw_wait_timeout = (glfw_wait_timeout_fn)dlsym(RTLD_DEFAULT, "glfwWaitEventsTimeout");
-  s_glfw_wait         = (glfw_void_fn)        dlsym(RTLD_DEFAULT, "glfwWaitEvents");
-  s_glfw_post_empty   = (glfw_void_fn)        dlsym(RTLD_DEFAULT, "glfwPostEmptyEvent");
-}
-
-void rae_ext_waitEventsTimeout(double seconds) {
-  rae_glfw_probe();
-  if (s_glfw_wait_timeout) {
-    s_glfw_wait_timeout(seconds);
-    return;
-  }
-  if (seconds <= 0.0) return;
-  struct timespec ts;
-  ts.tv_sec = (time_t)seconds;
-  ts.tv_nsec = (long)((seconds - (double)ts.tv_sec) * 1.0e9);
-  nanosleep(&ts, NULL);
-}
-
-void rae_ext_waitEvents(void) {
-  rae_glfw_probe();
-  if (s_glfw_wait) {
-    s_glfw_wait();
-    return;
-  }
-  struct timespec ts = { 0, 16 * 1000 * 1000 };  /* 16 ms */
-  nanosleep(&ts, NULL);
-}
-
-void rae_ext_postEmptyEvent(void) {
-  rae_glfw_probe();
-  if (s_glfw_post_empty) {
-    s_glfw_post_empty();
-  }
-}
+void rae_ext_waitEventsTimeout(double seconds) { glfwWaitEventsTimeout(seconds); }
+void rae_ext_waitEvents(void) { glfwWaitEvents(); }
+void rae_ext_postEmptyEvent(void) { glfwPostEmptyEvent(); }
 void rae_ext_beginDrawing(void) { BeginDrawing(); }
 void rae_ext_endDrawing(void) { EndDrawing(); }
 void rae_ext_clearBackground(Color color) { ClearBackground(color); }
