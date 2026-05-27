@@ -195,9 +195,24 @@ func pruneFpsBuffer(debug: mod DebugSystem, now: view Float) {
 
 # Record a frame timestamp + refresh fps/rss caches. Called once per
 # frame by `updateAndRenderDebugOverlay`.
-func recordDebugFrame(debug: mod DebugSystem, now: view Float) pub {
-  let times: mod List(Float) => debug.fpsTimes
-  times.add(value: now)
+#
+# Only timestamps where the host did *real work* are added to the
+# rolling buffer (the `didRealWork` flag — same signal that drives
+# the heartbeat advance). That makes the displayed fps a "render
+# fps" / "real-work rate" rather than a "raw loop fps":
+#
+#   - 60 during animations / interaction (loop runs at active rate)
+#   - drops toward 0 as the buffer ages out when the loop goes idle
+#     (cached frames present the same content; nothing new rendered)
+#
+# Pruning + lastFps recompute always run, so the displayed value
+# refreshes every frame even while the buffer is shrinking on idle —
+# you see the number decay naturally instead of freezing.
+func recordDebugFrame(debug: mod DebugSystem, now: view Float, didRealWork: view Bool) pub {
+  if didRealWork {
+    let times: mod List(Float) => debug.fpsTimes
+    times.add(value: now)
+  }
   pruneFpsBuffer(debug: debug, now: now)
 
   # FPS == count / window-actually-used. Using the elapsed range of
@@ -697,7 +712,7 @@ func drawDebugLabels(debug: view DebugSystem) {
 # UI. The button itself is drawn by renderSystem because it lives in
 # the ECS world.
 func updateAndRenderDebugOverlay(debug: mod DebugSystem, now: view Float, didRealWork: view Bool) pub {
-  recordDebugFrame(debug: debug, now: now)
+  recordDebugFrame(debug: debug, now: now, didRealWork: didRealWork)
   if debug.showLabels {
     drawDebugLabels(debug: debug)
     drawDebugHeartbeat(debug: debug, didRealWork: didRealWork)
