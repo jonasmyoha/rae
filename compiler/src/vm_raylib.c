@@ -29,6 +29,8 @@ extern void glfwSetWindowCloseCallback(GLFWwindow* w, GLFWwindowclosefun cb);
 extern void glfwSetWindowShouldClose(GLFWwindow* w, int value);
 
 static void vm_glfw_close_waker(GLFWwindow* w) {
+    fprintf(stderr, "[close-waker] fired (w=%p)\n", (void*)w);
+    fflush(stderr);
     glfwSetWindowShouldClose(w, 1);
     glfwPostEmptyEvent();
 }
@@ -504,7 +506,13 @@ static bool native_installWindowCloseWaker(struct VM* vm, VmNativeResult* out, c
         return false;
     }
     GLFWwindow* w = glfwGetCurrentContext();
-    if (w) glfwSetWindowCloseCallback(w, vm_glfw_close_waker);
+    if (w) {
+        glfwSetWindowCloseCallback(w, vm_glfw_close_waker);
+        fprintf(stderr, "[close-waker] installed for window %p\n", (void*)w);
+    } else {
+        fprintf(stderr, "[close-waker] FAILED: no current GLFW context\n");
+    }
+    fflush(stderr);
     out->has_value = false;
     return true;
 }

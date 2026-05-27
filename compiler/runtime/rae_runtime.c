@@ -1714,6 +1714,8 @@ extern void glfwSetWindowCloseCallback(GLFWwindow* w, GLFWwindowclosefun cb);
 extern void glfwSetWindowShouldClose(GLFWwindow* w, int value);
 
 static void rae_glfw_close_waker(GLFWwindow* w) {
+  fprintf(stderr, "[close-waker] fired (w=%p)\n", (void*)w);
+  fflush(stderr);
   glfwSetWindowShouldClose(w, 1);
   glfwPostEmptyEvent();
 }
@@ -1723,7 +1725,13 @@ void rae_ext_waitEvents(void) { glfwWaitEvents(); }
 void rae_ext_postEmptyEvent(void) { glfwPostEmptyEvent(); }
 void rae_ext_installWindowCloseWaker(void) {
   GLFWwindow* w = glfwGetCurrentContext();
-  if (w) glfwSetWindowCloseCallback(w, rae_glfw_close_waker);
+  if (w) {
+    glfwSetWindowCloseCallback(w, rae_glfw_close_waker);
+    fprintf(stderr, "[close-waker] installed for window %p\n", (void*)w);
+  } else {
+    fprintf(stderr, "[close-waker] FAILED: no current GLFW context\n");
+  }
+  fflush(stderr);
 }
 void rae_ext_beginDrawing(void) { BeginDrawing(); }
 void rae_ext_endDrawing(void) { EndDrawing(); }
