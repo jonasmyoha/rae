@@ -51,6 +51,16 @@ func loadTexture(fileName: String) extern ret Texture
 
 func unloadTexture(texture: Texture) extern
 
+# Capture the current back-buffer, run a Gaussian blur over it on the
+# CPU, and upload the result as a Texture. The temporary Image is
+# unloaded internally so callers only need to manage the returned
+# Texture (call `unloadTexture` when done). `blurSize` is the
+# Gaussian radius in pixels; ~10 reads as a soft frosted-glass look.
+# Must be called between `beginDrawing`/`endDrawing` cycles — typically
+# right after `endDrawing` returns, so the back buffer holds the just-
+# rendered frame.
+func captureAndBlurBackdrop(blurSize: Int) extern ret Texture
+
 func drawTexture(texture: Texture, x: Float, y: Float, tint: Color) extern
 
 func drawTextureEx(

@@ -253,6 +253,10 @@ func main() {
     )
 
     let running: Bool = true
+    # Tracks the previous frame's `debug.menuOpen` so the loop can
+    # detect open/close transitions and manage the blurred-backdrop
+    # texture lifecycle (capture on open, unload on close).
+    let prevMenuOpen: Bool = false
     let anim: HeroAnim = createHeroAnim()
     let heroKey: String = "albumCover"
     let heroDuration: Float = 0.30
@@ -594,6 +598,23 @@ func main() {
             # render gate) so the debug heartbeat reflects real per-
             # frame ECS work, not just raw frame rate.
             updateAndRenderDebugOverlay(debug: debug, now: now, didRealWork: active)
+            # Frosted-glass backdrop: when the debug menu just opened
+            # this frame, the current back buffer holds the un-menued
+            # screen (the world rebuild with menu hasn't happened yet —
+            # that's queued via `switching=true`). Grab it, run a
+            # Gaussian blur, and register it as the named backdrop
+            # texture. The next world rebuild's `buildDebugMenuOverlay`
+            # sees `debug.hasBlur` and paints the backdrop as a sprite
+            # over that texture instead of a flat translucent rect.
+            #
+            # Must happen BEFORE `endDrawing` — after swap, the back
+            # buffer is no longer the just-rendered frame.
+            if debug.menuOpen and prevMenuOpen is false {
+              let blurTex: Texture = captureAndBlurBackdrop(blurSize: 12)
+              let blurKey: String = debugBlurBackdropKey()
+              textureRegisterDirect(reg: texReg, key: blurKey, tex: blurTex)
+              setDebugHasBlur(debug: debug, value: true)
+            }
             endDrawing()
             forceRender = false
             # Bump the cache again *after* render so any per-frame
@@ -618,6 +639,18 @@ func main() {
               log("[data-hot-reload] scene file changed, rebuilding world")
             }
           }
+
+          # Frosted-glass cleanup: when the menu just closed, drop the
+          # captured blur texture so the GPU memory comes back. The
+          # backdrop entity in the just-built world no longer uses it
+          # (because `debug.hasBlur` flips off), so it's safe to
+          # release immediately.
+          if debug.menuOpen is false and prevMenuOpen {
+            let blurKey: String = debugBlurBackdropKey()
+            textureRemove(reg: texReg, key: blurKey)
+            setDebugHasBlur(debug: debug, value: false)
+          }
+          prevMenuOpen = debug.menuOpen
         }
       }
     }
