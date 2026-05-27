@@ -194,6 +194,15 @@ func waitEvents() extern
 # single-threaded today, so practical use is limited).
 func postEmptyEvent() extern
 
+# Install a GLFW window-close callback that also calls
+# `postEmptyEvent` so a wait-events main loop wakes immediately when
+# the user clicks the OS close button (macOS red X / Linux/Windows
+# close icon). Without this, GLFW marks `windowShouldClose` but does
+# NOT post an empty event on macOS, so the wait keeps sleeping until
+# some unrelated event arrives (mouse move into the window, key
+# press, etc.). Call once after `initWindow`.
+func installWindowCloseWaker() extern
+
 func isKeyDown(key: Int) extern ret Bool
 
 func isKeyPressed(key: Int) extern ret Bool

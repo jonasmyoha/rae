@@ -1692,9 +1692,29 @@ extern void glfwWaitEventsTimeout(double timeout);
 extern void glfwWaitEvents(void);
 extern void glfwPostEmptyEvent(void);
 
+/* Window-close callback: GLFW on macOS sets WindowShouldClose=TRUE
+ * when the user clicks the red X, but does NOT post an empty event,
+ * so any thread blocked in glfwWaitEvents{,Timeout} keeps sleeping
+ * until some unrelated event arrives. Hook the callback to post one
+ * ourselves so the wait returns immediately and the next loop
+ * iteration sees windowShouldClose() == true and exits cleanly. */
+typedef struct GLFWwindow GLFWwindow;
+typedef void (*GLFWwindowclosefun)(GLFWwindow*);
+extern GLFWwindow* glfwGetCurrentContext(void);
+extern void glfwSetWindowCloseCallback(GLFWwindow* w, GLFWwindowclosefun cb);
+
+static void rae_glfw_close_waker(GLFWwindow* w) {
+  (void)w;
+  glfwPostEmptyEvent();
+}
+
 void rae_ext_waitEventsTimeout(double seconds) { glfwWaitEventsTimeout(seconds); }
 void rae_ext_waitEvents(void) { glfwWaitEvents(); }
 void rae_ext_postEmptyEvent(void) { glfwPostEmptyEvent(); }
+void rae_ext_installWindowCloseWaker(void) {
+  GLFWwindow* w = glfwGetCurrentContext();
+  if (w) glfwSetWindowCloseCallback(w, rae_glfw_close_waker);
+}
 void rae_ext_beginDrawing(void) { BeginDrawing(); }
 void rae_ext_endDrawing(void) { EndDrawing(); }
 void rae_ext_clearBackground(Color color) { ClearBackground(color); }
