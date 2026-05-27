@@ -93,6 +93,19 @@ func main() {
   let screenshotEnv: String = getEnv(name: "RAE_UI_SCREENSHOT")
   let bg: Color = { r: 32, g: 32, b: 36, a: 255 }
 
+  # Self-terminate after `RAE_AUTO_EXIT_SEC` seconds of wall-clock
+  # uptime. Used by automated test runs (and agents) so the binary
+  # exits cleanly on its own instead of needing an external SIGKILL
+  # that GUI/raylib apps don't observe through the windowing event
+  # loop. Empty / unset / <= 0 means "run forever" (normal mode).
+  # Example: `RAE_AUTO_EXIT_SEC=30 rae run --target compiled ...`
+  let autoExitEnv: String = getEnv(name: "RAE_AUTO_EXIT_SEC")
+  let autoExitSec: Float = 0.0
+  if autoExitEnv.length() > 0 {
+    autoExitSec = autoExitEnv.toFloat()
+  }
+  let bootTime: Float = getTime()
+
   # Memory-stress mode: with `RAE_UI_STRESS_REBUILDS=1`, rebuilds the
   # world `stressN` times in a tight loop (no input, no draw) and
   # logs every 100 iterations so an external script can sample RSS
@@ -334,6 +347,13 @@ func main() {
       let switching: Bool = false
       loop running and switching is false {
         if windowShouldClose() {
+          running = false
+        } else if autoExitSec > 0.0 and getTime() - bootTime > autoExitSec {
+          # RAE_AUTO_EXIT_SEC fired — clean self-shutdown so test
+          # harnesses don't leave orphaned binaries owning the GPU
+          # context. Falls through to the texture/font/window
+          # teardown at the bottom of main().
+          log("[auto-exit] reached {autoExitSec}s wall-clock; shutting down")
           running = false
         } else {
           updateInputSystem(input: input, world: world)
