@@ -178,17 +178,16 @@ func setDebugButtonPosition(debug: mod DebugSystem, x: view Float, y: view Float
 
 # ----- FPS tracking --------------------------------------------------
 
-# Drop timestamps older than `now - fpsWindowSec` from the front of the
-# rolling buffer. Cheap linear scan; the buffer is bounded by the frame
-# rate * window size (≈ 180 entries at 60 fps / 3 s).
-func pruneFpsBuffer(debug: mod DebugSystem, now: view Float) {
-  let cutoff: Float = now - debug.fpsWindowSec
+# Trim the FPS buffer to its most recent N timestamps. We sample by
+# *count*, not by time window: when the loop goes idle, the buffer
+# stops growing but the existing samples stay, so `lastFps` holds
+# the rate of the most recent burst of activity instead of decaying
+# to 0. The heartbeat already tells you whether activity is happening
+# *now*; the FPS label tells you the rate it ran at when it last did.
+func pruneFpsBuffer(debug: mod DebugSystem) {
+  let capN: Int = 16
   let times: mod List(Float) => debug.fpsTimes
-  loop times.length > 0 {
-    let oldest: Float = times.get(index: 0)
-    if oldest >= cutoff {
-      ret
-    }
+  loop times.length > capN {
     times.remove(index: 0)
   }
 }
@@ -198,31 +197,35 @@ func pruneFpsBuffer(debug: mod DebugSystem, now: view Float) {
 #
 # Only timestamps where the host did *real work* are added to the
 # rolling buffer (the `didRealWork` flag — same signal that drives
-# the heartbeat advance). That makes the displayed fps a "render
-# fps" / "real-work rate" rather than a "raw loop fps":
+# the heartbeat advance). The buffer is capped at 16 entries by
+# *count* (not by time). When idle, the buffer freezes at the last
+# 16 active timestamps and `lastFps` stays at whatever rate was
+# running before the loop went idle. That's intentional: the label
+# answers "what rate was the host rendering at when it was active?"
+# (stable) rather than "how many real-work frames happened in the
+# last 3 s?" (decays to 0 during cached frames).
 #
-#   - 60 during animations / interaction (loop runs at active rate)
-#   - drops toward 0 as the buffer ages out when the loop goes idle
-#     (cached frames present the same content; nothing new rendered)
-#
-# Pruning + lastFps recompute always run, so the displayed value
-# refreshes every frame even while the buffer is shrinking on idle —
-# you see the number decay naturally instead of freezing.
+# The frame-skipping itself is reflected in the heartbeat — when the
+# heartbeat is frozen, the loop is idle even though the FPS label
+# still shows the last active rate.
 func recordDebugFrame(debug: mod DebugSystem, now: view Float, didRealWork: view Bool) pub {
   if didRealWork {
     let times: mod List(Float) => debug.fpsTimes
     times.add(value: now)
+    pruneFpsBuffer(debug: debug)
   }
-  pruneFpsBuffer(debug: debug, now: now)
 
-  # FPS == count / window-actually-used. Using the elapsed range of
-  # the buffer (newest - oldest) gives a more honest reading at startup
-  # when the buffer hasn't filled yet than dividing by `fpsWindowSec`.
+  # FPS == count / span across the buffer. Using the elapsed range
+  # of the buffer (newest - oldest) gives a more honest reading at
+  # startup when the buffer hasn't filled yet. When idle, the
+  # buffer is frozen so this returns the same number every call —
+  # exactly what we want.
   let n: Int = debug.fpsTimes.length
   let fps: Float = 0.0
   if n >= 2 {
     let oldest: Float = debug.fpsTimes.get(index: 0)
-    let span: Float = now - oldest
+    let newest: Float = debug.fpsTimes.get(index: n - 1)
+    let span: Float = newest - oldest
     if span > 0.0 {
       fps = (n - 1).toFloat() / span
     }
