@@ -44,6 +44,14 @@ func main() {
   # post an empty event; without this hook the loop sleeps until
   # some other event arrives. See lib/raylib.rae for details.
   installWindowCloseWaker()
+  # Opt out of macOS App Nap. The wait-events loop has ~0% idle CPU,
+  # which is exactly what App Nap targets — once engaged the OS
+  # throttles event delivery for minutes at a time and the app
+  # appears hung until the user scrolls (high-frequency events
+  # break the throttle). Diagnosed via `sample <pid>` showing
+  # rbs_acquire_appnap_assertion on the main loop. See
+  # lib/raylib.rae for the binding.
+  disableAppNap()
   # No setTargetFPS: the inner loop blocks in glfwWaitEventsTimeout
   # (see lib/ui/event_loop.rae) and naturally caps animation at
   # ~60 Hz via `frameTimeoutSec`. raylib's frame-pacing is bypassed.
