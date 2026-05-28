@@ -10,6 +10,8 @@
 #include <time.h>
 #include <unistd.h>
 #include <poll.h>
+#include <signal.h>
+#include <sys/wait.h>
 #include <stdint.h>
 #include <ctype.h>
 #include <limits.h>
@@ -146,7 +148,8 @@ static bool build_c_backend_output(const char* entry_file,
                                    const char* project_root,
                                    const char* out_file,
                                    bool no_implicit,
-                                   bool* out_uses_raylib);
+                                   bool* out_uses_raylib,
+                                   WatchSources* out_sources);
 static bool build_vm_output(const char* entry_file,
                                const char* project_root,
                                const char* out_path,
@@ -165,6 +168,7 @@ typedef struct {
 static void watch_state_init(WatchState* state, const char* fallback_path);
 static void watch_state_free(WatchState* state);
 static bool watch_state_apply_sources(WatchState* state, WatchSources* new_sources);
+static const char* watch_state_poll_change(WatchState* state);
 static int run_vm_file(const RunOptions* run_opts, const char* project_root);
 static int run_compiled_file(const RunOptions* run_opts, const char* project_root);
 static int run_vm_watch(const RunOptions* run_opts, const char* project_root);
@@ -1786,6 +1790,12 @@ static void print_usage(const char* prog) {
           "                  Options: --entry <file>, --project <dir>, --out <file>\n");
   fprintf(stderr,
           "                           --target <live|compiled|hybrid>, --profile <dev|release>\n");
+  fprintf(stderr,
+          "  watch <file>    Compiled hot-reload supervisor. Builds and runs <file>,\n");
+  fprintf(stderr,
+          "                  rebuilds + restarts on source changes. The running app\n");
+  fprintf(stderr,
+          "                  can preserve state across reloads via lib/hot_reload.\n");
 }
 
 static void dump_tokens(const TokenList* tokens) {
@@ -2000,7 +2010,8 @@ static bool build_c_backend_output(const char* entry_file,
                                    const char* project_root,
                                    const char* out_file,
                                    bool no_implicit,
-                                   bool* out_uses_raylib) {
+                                   bool* out_uses_raylib,
+                                   WatchSources* out_sources) {
   diag_reset();
   Arena* arena = arena_create(16 * 1024 * 1024);
   if (!arena) {
@@ -2015,6 +2026,16 @@ static bool build_c_backend_output(const char* entry_file,
     module_graph_free(&graph);
     arena_destroy(arena);
     return false;
+  }
+  WatchSources collected_sources;
+  watch_sources_init(&collected_sources);
+  if (out_sources) {
+    if (!module_graph_collect_watch_sources(&graph, &collected_sources)) {
+      watch_sources_clear(&collected_sources);
+      module_graph_free(&graph);
+      arena_destroy(arena);
+      return false;
+    }
   }
   
   AstModule merged = merge_module_graph(&graph);
@@ -2064,6 +2085,10 @@ static bool build_c_backend_output(const char* entry_file,
   vm_registry_free(&registry);
   module_graph_free(&graph);
   arena_destroy(arena);
+  if (ok && out_sources) {
+    watch_sources_move(out_sources, &collected_sources);
+  }
+  watch_sources_clear(&collected_sources);
   return ok;
 }
 
@@ -2270,71 +2295,400 @@ static int run_vm_file(const RunOptions* run_opts, const char* project_root) {
   return (result == VM_RUNTIME_OK || result == VM_RUNTIME_TIMEOUT) ? 0 : 1;
 }
 
+// Invoke GCC to link a Rae-generated `.c` (produced by build_c_backend_output)
+// into a runnable binary. Picks up companion `.c` files next to the entry
+// `.rae` (excluding the runtime + previous compiled outputs), and links
+// raylib statically so the GLFW symbols bundled in libraylib.a are
+// resolvable.
+//
+// Shared by `rae run --target compiled` and `rae watch`. Returns true on
+// success; on failure, prints to stderr and returns false. The caller owns
+// the .c file (we don't unlink it here).
+static bool gcc_link_c_to_binary(const char* entry_rae_file,
+                                 const char* c_path,
+                                 const char* out_bin,
+                                 bool uses_raylib) {
+  char runtime_dir[PATH_MAX];
+  snprintf(runtime_dir, sizeof(runtime_dir), "%s", RAE_RUNTIME_SOURCE_DIR);
+
+  const char* raylib_define = uses_raylib ? "-DRAE_HAS_RAYLIB" : "";
+
+  char extra_c_files[PATH_MAX * 4] = {0};
+  {
+    char src_dir[PATH_MAX];
+    snprintf(src_dir, sizeof(src_dir), "%s", entry_rae_file);
+    char* last_sep = strrchr(src_dir, '/');
+    if (last_sep) *last_sep = '\0'; else snprintf(src_dir, sizeof(src_dir), ".");
+    DIR* d = opendir(src_dir);
+    if (d) {
+      struct dirent* ent;
+      size_t pos = 0;
+      while ((ent = readdir(d)) != NULL) {
+        size_t nlen = strlen(ent->d_name);
+        if (nlen > 2 && strcmp(ent->d_name + nlen - 2, ".c") == 0 &&
+            strcmp(ent->d_name, "rae_runtime.c") != 0 && strcmp(ent->d_name, "monocypher.c") != 0 &&
+            strncmp(ent->d_name, "rae_compiled_", 13) != 0 && strcmp(ent->d_name, "out.c") != 0) {
+          pos += snprintf(extra_c_files + pos, sizeof(extra_c_files) - pos, " %s/%s", src_dir, ent->d_name);
+        }
+      }
+      closedir(d);
+    }
+  }
+
+  char cmd[PATH_MAX * 4];
+  snprintf(cmd, sizeof(cmd), "gcc -std=c11 -O2 -w %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib /opt/homebrew/lib/libraylib.a -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL %s %s/rae_runtime.c%s -o %s",
+           raylib_define, runtime_dir, c_path, runtime_dir, extra_c_files, out_bin);
+
+  if (system(cmd) != 0) {
+    fprintf(stderr, "error: failed to compile C output\n");
+    return false;
+  }
+  return true;
+}
+
 static int run_compiled_file(const RunOptions* run_opts, const char* project_root) {
   const char* file_path = run_opts->input_path;
   char temp_c[PATH_MAX];
   char temp_bin[PATH_MAX];
-  
+
   const char* tmp_dir = getenv("TMPDIR");
   if (!tmp_dir) tmp_dir = "/tmp";
-  
+
   snprintf(temp_c, sizeof(temp_c), "%s/rae_compiled_%d.c", tmp_dir, getpid());
   snprintf(temp_bin, sizeof(temp_bin), "%s/rae_compiled_%d.bin", tmp_dir, getpid());
 
   bool uses_raylib = false;
-  if (!build_c_backend_output(file_path, project_root, temp_c, run_opts->no_implicit, &uses_raylib)) {
+  if (!build_c_backend_output(file_path, project_root, temp_c, run_opts->no_implicit, &uses_raylib, NULL)) {
     return 1;
   }
 
-  // Compile with GCC
-  char cmd[PATH_MAX * 4];
-  // Determine runtime directory
-  char runtime_dir[PATH_MAX];
-  snprintf(runtime_dir, sizeof(runtime_dir), "%s", RAE_RUNTIME_SOURCE_DIR);
-  
-  const char* raylib_define = uses_raylib ? "-DRAE_HAS_RAYLIB" : "";
-
-  // Find .c files next to the source .rae file
-  char extra_c_files[PATH_MAX * 4] = {0};
-  {
-      char src_dir[PATH_MAX];
-      snprintf(src_dir, sizeof(src_dir), "%s", file_path);
-      char* last_sep = strrchr(src_dir, '/');
-      if (last_sep) *last_sep = '\0'; else snprintf(src_dir, sizeof(src_dir), ".");
-      DIR* d = opendir(src_dir);
-      if (d) {
-          struct dirent* ent;
-          size_t pos = 0;
-          while ((ent = readdir(d)) != NULL) {
-              size_t nlen = strlen(ent->d_name);
-              if (nlen > 2 && strcmp(ent->d_name + nlen - 2, ".c") == 0 &&
-                  strcmp(ent->d_name, "rae_runtime.c") != 0 && strcmp(ent->d_name, "monocypher.c") != 0 &&
-                  strncmp(ent->d_name, "rae_compiled_", 13) != 0 && strcmp(ent->d_name, "out.c") != 0) {
-                  pos += snprintf(extra_c_files + pos, sizeof(extra_c_files) - pos, " %s/%s", src_dir, ent->d_name);
-              }
-          }
-          closedir(d);
-      }
-  }
-
-  // Link raylib statically so GLFW symbols bundled in libraylib.a
-  // (glfwWaitEventsTimeout, glfwPostEmptyEvent, ...) are resolvable.
-  // The shared libraylib.dylib does not export them.
-  snprintf(cmd, sizeof(cmd), "gcc -std=c11 -O2 -w %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib /opt/homebrew/lib/libraylib.a -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL %s %s/rae_runtime.c%s -o %s",
-           raylib_define, runtime_dir, temp_c, runtime_dir, extra_c_files, temp_bin);
-  
-  if (system(cmd) != 0) {
-    fprintf(stderr, "error: failed to compile C output\n");
+  if (!gcc_link_c_to_binary(file_path, temp_c, temp_bin, uses_raylib)) {
     unlink(temp_c);
     return 1;
   }
 
   int result = system(temp_bin);
-  
+
   unlink(temp_c);
   unlink(temp_bin);
-  
+
   return (result == 0) ? 0 : 1;
+}
+
+/* ===================================================================
+ * `rae watch` — Phase 3 compiled-mode hot-reload supervisor.
+ *
+ * High-level shape (see docs/hot-reload-plan.md §4 / §7):
+ *
+ *   1. Build the entry .rae to `.rae/build/app` and fork+exec it.
+ *   2. Snapshot mtimes of the transitive source set via WatchState.
+ *   3. Loop: poll mtimes; on a change, rebuild into a side-path
+ *      (`.rae/build/app.new`). If that fails, leave the running
+ *      child alone — failed builds must not break the dev loop.
+ *      If it succeeds, write `.rae/reload.signal` with verb "reload",
+ *      wait for the child to exit (it should, after seeing the
+ *      signal via lib/hot_reload `pollReloadSignal`), atomically
+ *      rename the new binary into place, and fork+exec a new child.
+ *   4. SIGINT / SIGTERM: kill the child and exit.
+ *
+ * Phase 3 deliberately leaves out: content-addressed binaries,
+ * previous/current symlink fallback, health-window checks
+ * (Phase 4); Live-mode under the same supervisor (Phase 5).
+ * The state-file (.rae/state.json) is never touched by the
+ * supervisor — apps own that via the stdlib `lib/hot_reload`
+ * helpers, and it survives the binary swap because we never
+ * delete it.
+ * =================================================================== */
+
+extern char g_rae_executable_path[PATH_MAX];
+
+static volatile sig_atomic_t g_watch_stop = 0;
+static void watch_sigint_handler(int sig) {
+  (void)sig;
+  g_watch_stop = 1;
+}
+
+// Recursively scan `dir` for `*.rae` files, adding each to `sources`.
+// Bounded to a reasonable depth to avoid runaway on symlink loops.
+static void watch_collect_rae_sources(const char* dir, WatchSources* sources, int depth) {
+  if (depth > 12) return;
+  DIR* d = opendir(dir);
+  if (!d) return;
+  struct dirent* ent;
+  while ((ent = readdir(d)) != NULL) {
+    if (ent->d_name[0] == '.') continue;
+    if (strcmp(ent->d_name, "build") == 0) continue;
+    if (strcmp(ent->d_name, "node_modules") == 0) continue;
+    char child[PATH_MAX];
+    snprintf(child, sizeof(child), "%s/%s", dir, ent->d_name);
+    struct stat st;
+    if (stat(child, &st) != 0) continue;
+    if (S_ISDIR(st.st_mode)) {
+      watch_collect_rae_sources(child, sources, depth + 1);
+    } else if (S_ISREG(st.st_mode)) {
+      size_t nlen = strlen(ent->d_name);
+      if (nlen > 4 && strcmp(ent->d_name + nlen - 4, ".rae") == 0) {
+        watch_sources_add_file(sources, child);
+      }
+    }
+  }
+  closedir(d);
+}
+
+// Build the entry .rae to a C source via a fresh `rae build` subprocess.
+// Returns true on success; on failure prints a build-error tag (the
+// subprocess's stderr is inherited so the actual error is visible above).
+static bool watch_subprocess_emit_c(const char* entry, const char* project_root, const char* out_c) {
+  if (!g_rae_executable_path[0]) {
+    fprintf(stderr, "rae watch: cannot locate rae binary path (argv[0] was empty)\n");
+    return false;
+  }
+  char cmd[PATH_MAX * 4];
+  snprintf(cmd, sizeof(cmd),
+           "%s build --target compiled --emit-c --out %s --project %s %s",
+           g_rae_executable_path, out_c, project_root, entry);
+  int rc = system(cmd);
+  return rc == 0;
+}
+
+// mkdir -p equivalent. The runtime's rae_ext_rae_sys_make_dir only
+// creates one level; the supervisor needs nested ".rae/build".
+static bool ensure_directory_p(const char* path) {
+  if (!path || !*path) return false;
+  char tmp[PATH_MAX];
+  snprintf(tmp, sizeof(tmp), "%s", path);
+  size_t len = strlen(tmp);
+  if (len == 0) return false;
+  if (tmp[len-1] == '/') tmp[len-1] = '\0';
+  for (char* p = tmp + 1; *p; ++p) {
+    if (*p == '/') {
+      *p = '\0';
+      if (mkdir(tmp, 0755) != 0 && errno != EEXIST) return false;
+      *p = '/';
+    }
+  }
+  if (mkdir(tmp, 0755) != 0 && errno != EEXIST) return false;
+  return true;
+}
+
+// Atomically write "<verb> <build_id> <epoch-ms>" + newline to
+// `<dotrae>/reload.signal`. Children see the mtime advance on the
+// next `pollReloadSignal` poll.
+static bool watch_write_reload_signal(const char* dotrae_dir,
+                                      const char* verb,
+                                      const char* build_id) {
+  char path[PATH_MAX];
+  snprintf(path, sizeof(path), "%s/reload.signal", dotrae_dir);
+  char tmp[PATH_MAX];
+  snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+  FILE* f = fopen(tmp, "wb");
+  if (!f) return false;
+  long long ts_ms = (long long)time(NULL) * 1000;
+  fprintf(f, "%s %s %lld\n", verb, build_id, ts_ms);
+  fclose(f);
+  if (rename(tmp, path) != 0) { unlink(tmp); return false; }
+  return true;
+}
+
+// Poll waitpid until the child exits or timeout_ms elapses.
+static bool watch_wait_for_exit(pid_t pid, int timeout_ms, int* out_status) {
+  int slept = 0;
+  const int step = 50;
+  while (slept < timeout_ms) {
+    int status = 0;
+    pid_t r = waitpid(pid, &status, WNOHANG);
+    if (r == pid) {
+      if (out_status) *out_status = status;
+      return true;
+    }
+    if (r < 0) return false;
+    sys_sleep_ms(step);
+    slept += step;
+  }
+  return false;
+}
+
+static pid_t watch_spawn_child(const char* bin_path) {
+  pid_t pid = fork();
+  if (pid < 0) {
+    fprintf(stderr, "rae watch: fork failed (%s)\n", strerror(errno));
+    return -1;
+  }
+  if (pid == 0) {
+    execl(bin_path, bin_path, (char*)NULL);
+    fprintf(stderr, "rae watch: execl(%s) failed (%s)\n", bin_path, strerror(errno));
+    _exit(127);
+  }
+  return pid;
+}
+
+static int run_watch_supervisor(const RunOptions* run_opts, const char* project_root) {
+  const char* entry = run_opts->input_path;
+
+  if (!ensure_directory_p(".rae/build")) {
+    fprintf(stderr, "rae watch: could not create .rae/build directory\n");
+    return 1;
+  }
+
+  // Use an absolute path for the binary so the rename-swap and the
+  // child's execl don't depend on cwd surviving any future changes.
+  char bin_path[PATH_MAX];
+  {
+    char* cwd = getcwd(NULL, 0);
+    if (cwd) {
+      snprintf(bin_path, sizeof(bin_path), "%s/.rae/build/app", cwd);
+      free(cwd);
+    } else {
+      snprintf(bin_path, sizeof(bin_path), ".rae/build/app");
+    }
+  }
+
+  const char* c_path = ".rae/build/app.c";
+
+  // Determine the source-watch root: the project root if the
+  // discovery found a repo, otherwise the directory of the entry.
+  char watch_root[PATH_MAX];
+  if (project_root && project_root[0]) {
+    snprintf(watch_root, sizeof(watch_root), "%s", project_root);
+  } else {
+    snprintf(watch_root, sizeof(watch_root), "%s", entry);
+    char* slash = strrchr(watch_root, '/');
+    if (slash) *slash = '\0'; else snprintf(watch_root, sizeof(watch_root), ".");
+  }
+
+  printf("rae watch: building %s ...\n", entry);
+  fflush(stdout);
+  if (!watch_subprocess_emit_c(entry, project_root, c_path)) {
+    fprintf(stderr, "rae watch: initial build failed\n");
+    return 1;
+  }
+  // The subprocess can't tell us whether the program uses raylib, so
+  // always link with it on. raylib is bundled and linking it for a
+  // program that doesn't use it just costs a few KB of unused code.
+  if (!gcc_link_c_to_binary(entry, c_path, bin_path, true)) {
+    fprintf(stderr, "rae watch: initial link failed\n");
+    return 1;
+  }
+
+  WatchSources sources;
+  watch_sources_init(&sources);
+  watch_collect_rae_sources(watch_root, &sources, 0);
+
+  WatchState ws;
+  watch_state_init(&ws, entry);
+  watch_state_apply_sources(&ws, &sources);
+
+  struct sigaction sa;
+  memset(&sa, 0, sizeof(sa));
+  sa.sa_handler = watch_sigint_handler;
+  sa.sa_flags = SA_RESTART;
+  sigaction(SIGINT, &sa, NULL);
+  sigaction(SIGTERM, &sa, NULL);
+
+  pid_t child = watch_spawn_child(bin_path);
+  if (child < 0) {
+    watch_state_free(&ws);
+    return 1;
+  }
+  printf("rae watch: pid=%d running %s\n", (int)child, bin_path);
+  fflush(stdout);
+
+  long long build_seq = 0;
+
+  while (!g_watch_stop) {
+    sys_sleep_ms(150);
+
+    // Reap the child if it exited on its own (panic, normal exit, etc.)
+    if (child > 0) {
+      int status = 0;
+      pid_t r = waitpid(child, &status, WNOHANG);
+      if (r == child) {
+        if (WIFEXITED(status)) {
+          printf("rae watch: child exited (code %d)\n", WEXITSTATUS(status));
+        } else if (WIFSIGNALED(status)) {
+          printf("rae watch: child killed (signal %d)\n", WTERMSIG(status));
+        }
+        fflush(stdout);
+        // Don't auto-restart on an unsolicited exit; the next code
+        // change will rebuild and respawn.
+        child = -1;
+      }
+    }
+
+    const char* changed = watch_state_poll_change(&ws);
+    if (!changed) continue;
+
+    printf("rae watch: change in %s, rebuilding ...\n", changed);
+    fflush(stdout);
+
+    const char* new_c = ".rae/build/app.new.c";
+    char new_bin[PATH_MAX];
+    snprintf(new_bin, sizeof(new_bin), "%s.new", bin_path);
+
+    bool ok = watch_subprocess_emit_c(entry, project_root, new_c);
+    if (ok) {
+      ok = gcc_link_c_to_binary(entry, new_c, new_bin, true);
+    }
+
+    // Refresh the watched-source set either way: a new file might
+    // have appeared even on a failed build.
+    WatchSources new_sources;
+    watch_sources_init(&new_sources);
+    watch_collect_rae_sources(watch_root, &new_sources, 0);
+    watch_state_apply_sources(&ws, &new_sources);
+
+    if (!ok) {
+      fprintf(stderr, "rae watch: build failed; keeping running app\n");
+      fflush(stderr);
+      unlink(new_c);
+      unlink(new_bin);
+      continue;
+    }
+
+    build_seq += 1;
+    char build_id[64];
+    snprintf(build_id, sizeof(build_id), "b%lld", build_seq);
+
+    if (child > 0) {
+      watch_write_reload_signal(".rae", "reload", build_id);
+      int wait_status = 0;
+      if (!watch_wait_for_exit(child, 2000, &wait_status)) {
+        fprintf(stderr, "rae watch: child didn't exit in 2s, forcing\n");
+        kill(child, SIGTERM);
+        sys_sleep_ms(300);
+        if (waitpid(child, &wait_status, WNOHANG) != child) {
+          kill(child, SIGKILL);
+          waitpid(child, &wait_status, 0);
+        }
+      }
+      child = -1;
+    }
+
+    if (rename(new_bin, bin_path) != 0) {
+      fprintf(stderr, "rae watch: failed to swap binary (%s)\n", strerror(errno));
+      unlink(new_c);
+      break;
+    }
+    unlink(new_c);
+
+    child = watch_spawn_child(bin_path);
+    if (child < 0) break;
+    printf("rae watch: pid=%d running new build (%s)\n", (int)child, build_id);
+    fflush(stdout);
+  }
+
+  printf("rae watch: shutting down\n");
+  fflush(stdout);
+  if (child > 0) {
+    kill(child, SIGTERM);
+    if (!watch_wait_for_exit(child, 1000, NULL)) {
+      kill(child, SIGKILL);
+      waitpid(child, NULL, 0);
+    }
+  }
+
+  watch_state_free(&ws);
+  return 0;
 }
 
 static int run_command(const char* cmd, int argc, char** argv) {
@@ -2347,14 +2701,15 @@ static int run_command(const char* cmd, int argc, char** argv) {
   bool is_run = (strcmp(cmd, "run") == 0);
   bool is_build = (strcmp(cmd, "build") == 0);
   bool is_pack = (strcmp(cmd, "pack") == 0);
+  bool is_watch = (strcmp(cmd, "watch") == 0);
 
   const char* project_root = NULL;
   char repo_root[PATH_MAX];
   char project_path[PATH_MAX];
 
-  if (is_run || is_build) {
+  if (is_run || is_build || is_watch) {
       const char* input_path = NULL;
-      if (is_run) {
+      if (is_run || is_watch) {
           RunOptions run_opts;
           if (parse_run_args(argc, argv, &run_opts)) input_path = run_opts.input_path;
       } else {
@@ -2420,6 +2775,15 @@ static int run_command(const char* cmd, int argc, char** argv) {
                         return run_compiled_file(&adjusted_opts, final_root);
                       }
                       return run_opts.watch ? run_vm_watch(&adjusted_opts, final_root) : run_vm_file(&adjusted_opts, final_root);
+              } else if (is_watch) {
+                      RunOptions run_opts;
+                      if (!parse_run_args(argc, argv, &run_opts)) {
+                        print_usage(cmd);
+                        return 1;
+                      }
+                      const char* final_root = run_opts.project_path ? run_opts.project_path : project_root;
+                      if (!final_root) final_root = ".";
+                      return run_watch_supervisor(&run_opts, final_root);
               } else if (is_pack) {    PackOptions pack_opts;
     if (!parse_pack_args(argc, argv, &pack_opts)) {
       print_usage(cmd);
@@ -2461,7 +2825,8 @@ static int run_command(const char* cmd, int argc, char** argv) {
                                       final_root,
                                       build_opts.out_path,
                                       build_opts.no_implicit,
-                                      &dummy_uses_raylib) ?
+                                      &dummy_uses_raylib,
+                                      NULL) ?
                    0 :
                    1;
       case BUILD_TARGET_HYBRID:
@@ -2555,15 +2920,33 @@ static int run_command(const char* cmd, int argc, char** argv) {
   return diag_error_count() > 0 ? 1 : 0;
 }
 
+// Absolute path to the rae executable, captured at process start.
+// The watch supervisor shells out to a fresh `rae build` subprocess for
+// each rebuild so the compiler runs in a clean address space (parts of
+// c_backend / mangler keep arena-backed pointers in module-level state
+// that don't survive arena_destroy between in-process builds; the
+// subprocess approach side-steps that bug while we work on the fix).
+char g_rae_executable_path[PATH_MAX] = {0};
+
 int main(int argc, char** argv) {
   if (argc < 2) {
     print_usage(argv[0]);
     return 1;
   }
 
+  if (argv[0]) {
+    char resolved[PATH_MAX];
+    if (realpath(argv[0], resolved)) {
+      strncpy(g_rae_executable_path, resolved, sizeof(g_rae_executable_path) - 1);
+    } else {
+      strncpy(g_rae_executable_path, argv[0], sizeof(g_rae_executable_path) - 1);
+    }
+  }
+
   const char* cmd = argv[1];
   if ((strcmp(cmd, "lex") == 0 || strcmp(cmd, "parse") == 0 || strcmp(cmd, "format") == 0 ||
-       strcmp(cmd, "run") == 0 || strcmp(cmd, "pack") == 0 || strcmp(cmd, "build") == 0)) {
+       strcmp(cmd, "run") == 0 || strcmp(cmd, "pack") == 0 || strcmp(cmd, "build") == 0 ||
+       strcmp(cmd, "watch") == 0)) {
     return run_command(argv[1], argc - 2, argv + 2);
   }
 

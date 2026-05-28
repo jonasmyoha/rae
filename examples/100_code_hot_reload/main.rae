@@ -1,0 +1,83 @@
+# 100_code_hot_reload — minimal demo of Phase 3 supervised hot reload.
+#
+# Run with:  rae watch examples/100_code_hot_reload/main.rae
+#
+# What happens:
+#   1. `rae watch` builds main.rae, fork+execs it, watches its source.
+#   2. This app reads any prior state from .rae/state.json into `count`,
+#      then prints a banner and runs an idle loop polling the
+#      `.rae/reload.signal` file every ~150 ms.
+#   3. When you edit any line in this file (or print one of the
+#      messages below), the supervisor rebuilds, writes verb=reload,
+#      and waits for the app to exit.
+#   4. The app sees the reload verb, persists `count+1` to
+#      `.rae/state.json`, and exits 0.
+#   5. The supervisor swaps the binary and exec's the new build.
+#   6. The new run sees `count` was N+1 — proof that state survived
+#      the code swap.
+#
+# Edit anything below (e.g. change "Hello" to "Hola") and watch the
+# counter increment across rebuilds without losing it.
+
+import core
+import string
+import sys
+import hot_reload
+
+# Quick atoi for our trivially-formatted state. The state-file body
+# is just an integer here; a real app would use lib/json.
+func parseIntOrZero(s: view String) ret Int {
+  let digits: String = "0123456789"
+  let n: Int = s.length()
+  let i: Int = 0
+  let acc: Int = 0
+  loop i < n {
+    let ch: String = s.sub(start: i, len: 1)
+    let d: Int = digits.indexOf(sub: ch)
+    if d < 0 {
+      ret acc
+    }
+    acc = acc * 10 + d
+    i = i + 1
+  }
+  ret acc
+}
+
+func main() {
+  # ---- Restore prior state ------------------------------------------
+  let prior: String = readHotReloadState()
+  let count: Int = 0
+  if prior.length() > 0 {
+    count = parseIntOrZero(s: prior.trim())
+    clearHotReloadState()
+    log("[restored] COUNT={count}")
+  } else {
+    log("[fresh boot] count=0")
+  }
+
+  log("Hello from build #{count}! Edit me to reload!.")
+
+  # ---- Loop watching for the supervisor's signal ---------------------
+  let w: ReloadSignalWatcher = createReloadSignalWatcher()
+  let ticks: Int = 0
+  loop true {
+    sleep(ms: 150)
+    let sig: ReloadSignal = pollReloadSignal(w: w)
+    if sig.verb is ReloadVerb.Reload {
+      let next: Int = count + 1
+      let body: String = "{next}"
+      writeHotReloadState(state: body)
+      log("[reload] persisting count={next}, exiting")
+      exit(code: 0)
+    }
+    if sig.verb is ReloadVerb.Restart {
+      log("[restart] clearing state, exiting")
+      clearHotReloadState()
+      exit(code: 0)
+    }
+    ticks = ticks + 1
+    if ticks % 40 is 0 {
+      log("...still running (count={count}, {ticks} ticks)")
+    }
+  }
+}
