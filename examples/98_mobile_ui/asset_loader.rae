@@ -52,13 +52,22 @@ func refreshProfileCovers(reg: mod TextureRegistry) pub ret List(File) {
       let isJpeg: Bool = ext.equals(other: "jpeg")
       let isPng: Bool = ext.equals(other: "png")
       if isJpg or isJpeg or isPng {
-        let key: String = profileFileKey(file: f)
+        # Force a deep copy of the String fields into fresh locals
+        # before constructing the owned File for `result`. Without
+        # this, `result.add(value: f)` ends up sharing String
+        # pointers with `entries`, and when `entries` drops at
+        # function return the textures in the registry still
+        # resolve fine but the names in `result` go dangling.
+        let copiedName: String = f.name
+        let copiedFolder: String = f.folder
+        let key: String = "profile.{copiedName}"
         if textureHas(reg: reg, key: key) is false {
-          let p: String = f.path()
+          let p: String = "{copiedFolder}/{copiedName}"
           let t: Texture = textureLoad(reg: reg, key: key, path: p)
-          log("[profile] loaded cover {f.name}")
+          log("[profile] loaded cover {copiedName}")
         }
-        result.add(value: f)
+        let owned: File = { name: copiedName, folder: copiedFolder }
+        result.add(value: owned)
       }
     }
     i = i + 1
