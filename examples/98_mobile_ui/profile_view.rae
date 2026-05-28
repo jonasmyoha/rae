@@ -42,23 +42,40 @@ func setProfileCircleShape(world: mod UiWorld, entity: view Int, fill: view Rgba
 let avatarSize: Float = 120.0
 let avatarIconSize: Float = 80.0
 
-func buildAvatar(world: mod UiWorld) ret Int {
+func buildAvatar(world: mod UiWorld, reg: view TextureRegistry) ret Int {
   let avatar: Int = createEntity(world: world)
   setRectFixed(world: world, entity: avatar, w: avatarSize, h: avatarSize)
-  let accentBg: RgbaColor = darkPillColor
-  setProfileCircleShape(world: world, entity: avatar, fill: accentBg)
-  let layS: LayoutType = LayoutType.Stack
-  let alignC: AlignKind = AlignKind.Center
-  setLayout(world: world, entity: avatar, kind: layS, gap: 0.0, alignCross: alignC)
 
-  let icon: Int = createEntity(world: world)
-  setRectFixed(world: world, entity: icon, w: avatarIconSize, h: avatarIconSize)
-  let personKey: String = "mat:person"
-  setSprite(world: world, entity: icon, key: personKey, tint: lightTextColor)
+  let avatarKey: String = profileAvatarKey()
+  if textureHas(reg: reg, key: avatarKey) {
+    # Real profile picture — circle-cropped at load time
+    # (`loadCircleCroppedTexture`). Draw it as a regular Sprite;
+    # the alpha mask on the underlying texture handles the round
+    # shape. No background Shape needed because the cropped
+    # corners are transparent.
+    let whiteTint: RgbaColor = { r: 255, g: 255, b: 255, a: 255 }
+    setSprite(world: world, entity: avatar, key: avatarKey, tint: whiteTint)
+  } else {
+    # Placeholder for accounts without a photo: amber-tinted Circle
+    # Shape with the `mat:person` glyph centered. Same render path
+    # as the original avatar — the renderer can't mask a Sprite to
+    # a circle yet, but a Circle Shape draws fine, and the icon
+    # sits centred above it via Stack layout.
+    let accentBg: RgbaColor = darkPillColor
+    setProfileCircleShape(world: world, entity: avatar, fill: accentBg)
+    let layS: LayoutType = LayoutType.Stack
+    let alignC: AlignKind = AlignKind.Center
+    setLayout(world: world, entity: avatar, kind: layS, gap: 0.0, alignCross: alignC)
 
-  let kids: List(Int) = createList(Int, initialCap: 1)
-  kids.add(value: icon)
-  attachChildren(world: world, parent: avatar, kids: kids)
+    let icon: Int = createEntity(world: world)
+    setRectFixed(world: world, entity: icon, w: avatarIconSize, h: avatarIconSize)
+    let personKey: String = "mat:person"
+    setSprite(world: world, entity: icon, key: personKey, tint: lightTextColor)
+
+    let kids: List(Int) = createList(Int, initialCap: 1)
+    kids.add(value: icon)
+    attachChildren(world: world, parent: avatar, kids: kids)
+  }
   ret avatar
 }
 
@@ -253,18 +270,18 @@ func buildProfileBody(world: mod UiWorld, reg: view TextureRegistry, scrollY: vi
   let off: Offset = { delta: Vec2 { x: 0.0, y: scrollY } }
   componentSet(this: world.offsets, entity: body, data: off)
 
-  let avatar: Int = buildAvatar(world: world)
+  let avatar: Int = buildAvatar(world: world, reg: reg)
 
   let handle: Int = createEntity(world: world)
   setRectFixed(world: world, entity: handle, w: bodyW, h: 28.0)
   let handleStyle: String = "topBarTitle"
-  let handleText: String = "@rae_designer"
+  let handleText: String = "@violet.tapes"
   setText(world: world, entity: handle, text: handleText, styleId: handleStyle)
 
   let bio: Int = createEntity(world: world)
   setRectFixed(world: world, entity: bio, w: bodyW, h: 18.0)
   let bioStyle: String = "muted"
-  let bioText: String = "UI demos written in Rae · he/him"
+  let bioText: String = "indie pop · dream-punk · playlist nerd 🌙✨🎧"
   setText(world: world, entity: bio, text: bioText, styleId: bioStyle)
 
   let stats: Int = buildStatsRow(world: world)
