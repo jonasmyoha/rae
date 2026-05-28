@@ -485,6 +485,7 @@ rae_String rae_ext_rae_sys_list_dir(rae_String folder);
 /* captureAndBlurRegion and loadCircleCroppedTexture are declared
  * in the raylib.h-scope helper block above (RAE_HAS_RAYLIB);
  * see implementations in rae_runtime.c. */
+void rae_ext_disableAppNap(void);
 rae_Bool rae_ext_rae_sys_write_file(rae_String path, rae_String content);
 rae_Bool rae_ext_rae_sys_rename(rae_String oldPath, rae_String newPath);
 rae_Bool rae_ext_rae_sys_delete(rae_String path);
