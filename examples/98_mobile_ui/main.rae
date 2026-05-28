@@ -235,10 +235,14 @@ func main() {
     # screen, at which point the outer loop re-builds the world.
     let startScreenEnv: String = getEnv(name: "RAE_UI_SCREEN")
     let albumKey: String = "album"
+    let searchKey: String = "search"
     let profileKey: String = "profile"
     let currentScreen: Screen = Screen.NowPlaying
     if startScreenEnv.equals(other: albumKey) {
       currentScreen = Screen.Album
+    }
+    if startScreenEnv.equals(other: searchKey) {
+      currentScreen = Screen.Search
     }
     if startScreenEnv.equals(other: profileKey) {
       currentScreen = Screen.Profile
