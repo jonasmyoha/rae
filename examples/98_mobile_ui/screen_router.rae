@@ -10,6 +10,7 @@ import ui/input
 enum Screen {
   NowPlaying
   Album
+  Search
   Profile
 }
 
@@ -22,6 +23,9 @@ func buildScreenWorld(
 ) pub ret UiWorld {
   if screen is Screen.Album {
     ret buildAlbumWorld(scenes: scenes, playback: playback, reg: texReg)
+  }
+  if screen is Screen.Search {
+    ret buildSearchWorld(scenes: scenes, playback: playback, reg: texReg)
   }
   if screen is Screen.Profile {
     ret buildProfileWorld(scenes: scenes, reg: texReg, playback: playback, scrollY: scrollY)
@@ -55,6 +59,7 @@ func dispatchActions(input: view InputSystem, current: Screen, playback: mod Pla
 
     let homeKey: String = "nav.home"
     let libraryKey: String = "nav.library"
+    let searchKey: String = "nav.search"
     let profileKey: String = "nav.profile"
     let backKey: String = "nav.back"
     let playbackToggleKey: String = "playback.toggle"
@@ -63,6 +68,9 @@ func dispatchActions(input: view InputSystem, current: Screen, playback: mod Pla
     }
     if actionId.equals(other: libraryKey) {
       next = Screen.Album
+    }
+    if actionId.equals(other: searchKey) {
+      next = Screen.Search
     }
     if actionId.equals(other: profileKey) {
       next = Screen.Profile
