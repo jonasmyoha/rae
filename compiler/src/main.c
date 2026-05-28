@@ -2471,6 +2471,18 @@ static bool ensure_directory_p(const char* path) {
   return true;
 }
 
+// Atomic file write via tmp + rename.
+static bool watch_write_file_atomic(const char* path, const char* body) {
+  char tmp[PATH_MAX];
+  snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+  FILE* f = fopen(tmp, "wb");
+  if (!f) return false;
+  fputs(body, f);
+  fclose(f);
+  if (rename(tmp, path) != 0) { unlink(tmp); return false; }
+  return true;
+}
+
 // Atomically write "<verb> <build_id> <epoch-ms>" + newline to
 // `<dotrae>/reload.signal`. Children see the mtime advance on the
 // next `pollReloadSignal` poll.
@@ -2479,15 +2491,28 @@ static bool watch_write_reload_signal(const char* dotrae_dir,
                                       const char* build_id) {
   char path[PATH_MAX];
   snprintf(path, sizeof(path), "%s/reload.signal", dotrae_dir);
-  char tmp[PATH_MAX];
-  snprintf(tmp, sizeof(tmp), "%s.tmp", path);
-  FILE* f = fopen(tmp, "wb");
-  if (!f) return false;
+  char body[256];
   long long ts_ms = (long long)time(NULL) * 1000;
-  fprintf(f, "%s %s %lld\n", verb, build_id, ts_ms);
-  fclose(f);
-  if (rename(tmp, path) != 0) { unlink(tmp); return false; }
-  return true;
+  snprintf(body, sizeof(body), "%s %s %lld\n", verb, build_id, ts_ms);
+  return watch_write_file_atomic(path, body);
+}
+
+// Phase 6: surface the last build's outcome to the running app via a
+// well-known file. Apps read it with `lib/hot_reload.readBuildStatus`.
+//
+// Format (newline-separated):
+//   line 1: "ok" or "error"
+//   line 2: short message (e.g. build id, or a one-line error tag)
+static bool watch_write_build_status(const char* dotrae_dir,
+                                     bool ok,
+                                     const char* message) {
+  char path[PATH_MAX];
+  snprintf(path, sizeof(path), "%s/build.status", dotrae_dir);
+  char body[1024];
+  snprintf(body, sizeof(body), "%s\n%s\n",
+           ok ? "ok" : "error",
+           message ? message : "");
+  return watch_write_file_atomic(path, body);
 }
 
 // Poll waitpid until the child exits or timeout_ms elapses.
@@ -2522,31 +2547,86 @@ static pid_t watch_spawn_child(const char* bin_path) {
   return pid;
 }
 
+// Phase 5: Live-mode child is the `rae` binary itself running the entry
+// via the bytecode VM. The Live VM hot-recompiles on its own; the
+// supervisor still drives the reload-signal protocol so the same
+// app-side state contract (saveState → exit → loadState) works
+// identically across targets.
+static pid_t watch_spawn_live_child(const char* rae_exe,
+                                    const char* entry,
+                                    const char* project_root) {
+  pid_t pid = fork();
+  if (pid < 0) {
+    fprintf(stderr, "rae watch: fork failed (%s)\n", strerror(errno));
+    return -1;
+  }
+  if (pid == 0) {
+    // execl: rae run --target live --project <root> <entry>
+    if (project_root && project_root[0]) {
+      execl(rae_exe, rae_exe, "run", "--target", "live",
+            "--project", project_root, entry, (char*)NULL);
+    } else {
+      execl(rae_exe, rae_exe, "run", "--target", "live",
+            entry, (char*)NULL);
+    }
+    fprintf(stderr, "rae watch: execl(%s run ...) failed (%s)\n",
+            rae_exe, strerror(errno));
+    _exit(127);
+  }
+  return pid;
+}
+
+// Monotonic wall clock in milliseconds. Used for the health window
+// (whether a freshly-spawned child has survived long enough to
+// promote its build to last-known-good).
+static long long watch_now_ms(void) {
+  struct timeval tv;
+  gettimeofday(&tv, NULL);
+  return (long long)tv.tv_sec * 1000 + (long long)tv.tv_usec / 1000;
+}
+
+// Wrapper around `kill child + waitpid` with a grace period. SIGTERM
+// first, escalate to SIGKILL if the child doesn't go within `grace_ms`.
+static void watch_kill_child(pid_t pid, int grace_ms) {
+  if (pid <= 0) return;
+  kill(pid, SIGTERM);
+  if (!watch_wait_for_exit(pid, grace_ms, NULL)) {
+    kill(pid, SIGKILL);
+    waitpid(pid, NULL, 0);
+  }
+}
+
+// Build the entry into a fresh per-build directory `.rae/build/build-N/`.
+// On success the binary lives at `<dir>/app`. The C output sits next to it
+// so failures are inspectable. Returns true on full success (emit + link).
+static bool watch_build_into_dir(const char* entry,
+                                 const char* project_root,
+                                 const char* build_dir,
+                                 char out_bin_path[PATH_MAX]) {
+  if (!ensure_directory_p(build_dir)) return false;
+  char c_path[PATH_MAX];
+  snprintf(c_path, sizeof(c_path), "%s/app.c", build_dir);
+  snprintf(out_bin_path, PATH_MAX, "%s/app", build_dir);
+
+  if (!watch_subprocess_emit_c(entry, project_root, c_path)) return false;
+  // Pessimistic: link with raylib on. raylib is bundled with the
+  // toolchain and a few unused KB is fine; in exchange the supervisor
+  // doesn't need to plumb the uses-raylib flag through the subprocess.
+  if (!gcc_link_c_to_binary(entry, c_path, out_bin_path, true)) return false;
+  return true;
+}
+
 static int run_watch_supervisor(const RunOptions* run_opts, const char* project_root) {
   const char* entry = run_opts->input_path;
+  bool is_live = (run_opts->target == BUILD_TARGET_LIVE);
 
   if (!ensure_directory_p(".rae/build")) {
     fprintf(stderr, "rae watch: could not create .rae/build directory\n");
     return 1;
   }
 
-  // Use an absolute path for the binary so the rename-swap and the
-  // child's execl don't depend on cwd surviving any future changes.
-  char bin_path[PATH_MAX];
-  {
-    char* cwd = getcwd(NULL, 0);
-    if (cwd) {
-      snprintf(bin_path, sizeof(bin_path), "%s/.rae/build/app", cwd);
-      free(cwd);
-    } else {
-      snprintf(bin_path, sizeof(bin_path), ".rae/build/app");
-    }
-  }
-
-  const char* c_path = ".rae/build/app.c";
-
-  // Determine the source-watch root: the project root if the
-  // discovery found a repo, otherwise the directory of the entry.
+  // Watch-root: the project root if we found one, otherwise the entry's
+  // directory. Source discovery globs recursively under here.
   char watch_root[PATH_MAX];
   if (project_root && project_root[0]) {
     snprintf(watch_root, sizeof(watch_root), "%s", project_root);
@@ -2556,28 +2636,54 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
     if (slash) *slash = '\0'; else snprintf(watch_root, sizeof(watch_root), ".");
   }
 
-  printf("rae watch: building %s ...\n", entry);
-  fflush(stdout);
-  if (!watch_subprocess_emit_c(entry, project_root, c_path)) {
-    fprintf(stderr, "rae watch: initial build failed\n");
-    return 1;
-  }
-  // The subprocess can't tell us whether the program uses raylib, so
-  // always link with it on. raylib is bundled and linking it for a
-  // program that doesn't use it just costs a few KB of unused code.
-  if (!gcc_link_c_to_binary(entry, c_path, bin_path, true)) {
-    fprintf(stderr, "rae watch: initial link failed\n");
-    return 1;
+  // Absolute path to cwd for build-dir construction below.
+  char cwd_abs[PATH_MAX];
+  if (!getcwd(cwd_abs, sizeof(cwd_abs))) {
+    snprintf(cwd_abs, sizeof(cwd_abs), ".");
   }
 
+  // ---- Initial build ----
+  long long build_seq = 0;
+  char current_bin[PATH_MAX] = {0};
+  char previous_bin[PATH_MAX] = {0};   // last-known-good (compiled-mode only)
+  char build_id[64] = "b0";
+
+  printf("rae watch: target=%s entry=%s\n",
+         is_live ? "live" : "compiled", entry);
+  fflush(stdout);
+
+  if (is_live) {
+    // Live mode: the VM compiles on each spawn; nothing to pre-build.
+    // Just confirm the file resolves.
+    if (!file_exists(entry)) {
+      fprintf(stderr, "rae watch: entry file '%s' not found\n", entry);
+      return 1;
+    }
+    watch_write_build_status(".rae", true, "live");
+  } else {
+    build_seq = 1;
+    snprintf(build_id, sizeof(build_id), "b%lld", build_seq);
+    char build_dir[PATH_MAX];
+    snprintf(build_dir, sizeof(build_dir), "%s/.rae/build/build-%lld", cwd_abs, build_seq);
+    printf("rae watch: building %s (%s) ...\n", entry, build_id);
+    fflush(stdout);
+    if (!watch_build_into_dir(entry, project_root, build_dir, current_bin)) {
+      fprintf(stderr, "rae watch: initial build failed\n");
+      watch_write_build_status(".rae", false, "initial build failed");
+      return 1;
+    }
+    watch_write_build_status(".rae", true, build_id);
+  }
+
+  // ---- Source-set watcher ----
   WatchSources sources;
   watch_sources_init(&sources);
   watch_collect_rae_sources(watch_root, &sources, 0);
-
   WatchState ws;
   watch_state_init(&ws, entry);
   watch_state_apply_sources(&ws, &sources);
 
+  // ---- Signal handlers ----
   struct sigaction sa;
   memset(&sa, 0, sizeof(sa));
   sa.sa_handler = watch_sigint_handler;
@@ -2585,33 +2691,69 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
   sigaction(SIGINT, &sa, NULL);
   sigaction(SIGTERM, &sa, NULL);
 
-  pid_t child = watch_spawn_child(bin_path);
+  // ---- Spawn first child + arm health window ----
+  pid_t child = is_live
+    ? watch_spawn_live_child(g_rae_executable_path, entry, project_root)
+    : watch_spawn_child(current_bin);
   if (child < 0) {
     watch_state_free(&ws);
     return 1;
   }
-  printf("rae watch: pid=%d running %s\n", (int)child, bin_path);
-  fflush(stdout);
+  long long spawn_t = watch_now_ms();
+  // Health window: if the child dies non-zero within this many ms of
+  // spawn, treat the build as bad and (compiled only) fall back to
+  // the previous-good binary.
+  const long long HEALTH_MS = 2000;
+  long long health_until = spawn_t + HEALTH_MS;
+  bool current_promoted = false;  // becomes true once child survives window
 
-  long long build_seq = 0;
+  printf("rae watch: pid=%d running %s\n",
+         (int)child, is_live ? entry : current_bin);
+  fflush(stdout);
 
   while (!g_watch_stop) {
     sys_sleep_ms(150);
 
-    // Reap the child if it exited on its own (panic, normal exit, etc.)
+    // ---- Reap child if it exited on its own ----
     if (child > 0) {
       int status = 0;
       pid_t r = waitpid(child, &status, WNOHANG);
       if (r == child) {
+        int code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+        long long now = watch_now_ms();
+        bool in_window = (now < health_until);
+        bool bad = (code != 0);
+
         if (WIFEXITED(status)) {
-          printf("rae watch: child exited (code %d)\n", WEXITSTATUS(status));
+          printf("rae watch: child exited (code %d)\n", code);
         } else if (WIFSIGNALED(status)) {
           printf("rae watch: child killed (signal %d)\n", WTERMSIG(status));
         }
         fflush(stdout);
-        // Don't auto-restart on an unsolicited exit; the next code
-        // change will rebuild and respawn.
         child = -1;
+
+        // Phase 4: bad exit inside the health window → fall back.
+        if (!is_live && in_window && bad && previous_bin[0]) {
+          fprintf(stderr,
+                  "rae watch: new build unhealthy; falling back to previous-good\n");
+          fflush(stderr);
+          watch_write_build_status(".rae", false, "binary unhealthy; reverted");
+          // Restore previous as current.
+          strncpy(current_bin, previous_bin, sizeof(current_bin) - 1);
+          current_bin[sizeof(current_bin) - 1] = '\0';
+          previous_bin[0] = '\0';
+          child = watch_spawn_child(current_bin);
+          if (child < 0) break;
+          spawn_t = watch_now_ms();
+          health_until = spawn_t + HEALTH_MS;
+          current_promoted = true;   // previous was already good
+          printf("rae watch: pid=%d running fallback %s\n", (int)child, current_bin);
+          fflush(stdout);
+        }
+        // Otherwise: don't auto-restart; wait for a source change.
+      } else if (!current_promoted && watch_now_ms() >= health_until) {
+        // Child survived the window → promote.
+        current_promoted = true;
       }
     }
 
@@ -2621,71 +2763,75 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
     printf("rae watch: change in %s, rebuilding ...\n", changed);
     fflush(stdout);
 
-    const char* new_c = ".rae/build/app.new.c";
-    char new_bin[PATH_MAX];
-    snprintf(new_bin, sizeof(new_bin), "%s.new", bin_path);
-
-    bool ok = watch_subprocess_emit_c(entry, project_root, new_c);
-    if (ok) {
-      ok = gcc_link_c_to_binary(entry, new_c, new_bin, true);
-    }
-
-    // Refresh the watched-source set either way: a new file might
+    // Refresh the watched-source set every cycle: a new file might
     // have appeared even on a failed build.
     WatchSources new_sources;
     watch_sources_init(&new_sources);
     watch_collect_rae_sources(watch_root, &new_sources, 0);
     watch_state_apply_sources(&ws, &new_sources);
 
-    if (!ok) {
-      fprintf(stderr, "rae watch: build failed; keeping running app\n");
-      fflush(stderr);
-      unlink(new_c);
-      unlink(new_bin);
-      continue;
+    char new_bin[PATH_MAX] = {0};
+    if (is_live) {
+      // Live: no compile step here. The VM JITs at spawn; if the
+      // source is broken the new child will fail and we'll learn
+      // about it via the health window. Optimistic build.status.
+      watch_write_build_status(".rae", true, "live");
+    } else {
+      build_seq += 1;
+      snprintf(build_id, sizeof(build_id), "b%lld", build_seq);
+      char build_dir[PATH_MAX];
+      snprintf(build_dir, sizeof(build_dir),
+               "%s/.rae/build/build-%lld", cwd_abs, build_seq);
+
+      if (!watch_build_into_dir(entry, project_root, build_dir, new_bin)) {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "build %s failed", build_id);
+        fprintf(stderr, "rae watch: build failed; keeping running app\n");
+        fflush(stderr);
+        watch_write_build_status(".rae", false, msg);
+        continue;
+      }
+      watch_write_build_status(".rae", true, build_id);
     }
 
-    build_seq += 1;
-    char build_id[64];
-    snprintf(build_id, sizeof(build_id), "b%lld", build_seq);
-
+    // Tell the running child to save state and exit.
     if (child > 0) {
       watch_write_reload_signal(".rae", "reload", build_id);
       int wait_status = 0;
       if (!watch_wait_for_exit(child, 2000, &wait_status)) {
         fprintf(stderr, "rae watch: child didn't exit in 2s, forcing\n");
-        kill(child, SIGTERM);
-        sys_sleep_ms(300);
-        if (waitpid(child, &wait_status, WNOHANG) != child) {
-          kill(child, SIGKILL);
-          waitpid(child, &wait_status, 0);
-        }
+        fflush(stderr);
+        watch_kill_child(child, 300);
       }
       child = -1;
     }
 
-    if (rename(new_bin, bin_path) != 0) {
-      fprintf(stderr, "rae watch: failed to swap binary (%s)\n", strerror(errno));
-      unlink(new_c);
-      break;
+    // Promote the previously-running binary to last-known-good (if it
+    // survived its own health window). The new bin becomes current.
+    if (!is_live) {
+      if (current_promoted && current_bin[0]) {
+        strncpy(previous_bin, current_bin, sizeof(previous_bin) - 1);
+        previous_bin[sizeof(previous_bin) - 1] = '\0';
+      }
+      strncpy(current_bin, new_bin, sizeof(current_bin) - 1);
+      current_bin[sizeof(current_bin) - 1] = '\0';
     }
-    unlink(new_c);
 
-    child = watch_spawn_child(bin_path);
+    // Spawn the new child.
+    child = is_live
+      ? watch_spawn_live_child(g_rae_executable_path, entry, project_root)
+      : watch_spawn_child(current_bin);
     if (child < 0) break;
+    spawn_t = watch_now_ms();
+    health_until = spawn_t + HEALTH_MS;
+    current_promoted = false;
     printf("rae watch: pid=%d running new build (%s)\n", (int)child, build_id);
     fflush(stdout);
   }
 
   printf("rae watch: shutting down\n");
   fflush(stdout);
-  if (child > 0) {
-    kill(child, SIGTERM);
-    if (!watch_wait_for_exit(child, 1000, NULL)) {
-      kill(child, SIGKILL);
-      waitpid(child, NULL, 0);
-    }
-  }
+  watch_kill_child(child, 1000);
 
   watch_state_free(&ws);
   return 0;
