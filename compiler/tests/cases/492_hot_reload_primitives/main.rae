@@ -121,4 +121,29 @@ func main() {
 
   let okDel: Bool = delete(path: statePath)
   log("clear: deleted={okDel} exists={exists(path: statePath)}")
+
+  # ---- BuildStatus parsing (Phase 6) ----------------------------------
+  # The supervisor writes `.rae/build.status` as two newline-separated
+  # lines. Drive `parseBuildStatus` directly so the test doesn't depend
+  # on the on-disk file.
+  let bs1: BuildStatus = parseBuildStatus(raw: "ok\nb4\n")
+  log("bs1: present={bs1.present} ok={bs1.ok} msg={bs1.message}")
+
+  let bs2: BuildStatus = parseBuildStatus(raw: "error\nbuild b5 failed\n")
+  log("bs2: present={bs2.present} ok={bs2.ok} msg={bs2.message}")
+
+  let bs3: BuildStatus = parseBuildStatus(raw: "ok\nlive\n")
+  log("bs3: present={bs3.present} ok={bs3.ok} msg={bs3.message}")
+
+  # Missing trailing newline + no message line.
+  let bs4: BuildStatus = parseBuildStatus(raw: "ok")
+  log("bs4: present={bs4.present} ok={bs4.ok} msg={bs4.message}")
+
+  # Empty input → not present.
+  let bs5: BuildStatus = parseBuildStatus(raw: "")
+  log("bs5: present={bs5.present} ok={bs5.ok} msg={bs5.message}")
+
+  # Anything other than "ok" on the first line is treated as failure.
+  let bs6: BuildStatus = parseBuildStatus(raw: "garbage\nwhatever")
+  log("bs6: present={bs6.present} ok={bs6.ok} msg={bs6.message}")
 }
