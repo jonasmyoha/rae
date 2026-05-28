@@ -144,7 +144,8 @@ func main() {
     # Warm-up rebuild so font / texture / scene-loader one-shots don't
     # land in the baseline.
     let stressPlayback: PlaybackState = createPlaybackState()
-    let warm: UiWorld = buildScreenWorld(screen: Screen.Album, scenes: scenes, playback: stressPlayback)
+    let stressScroll: Float = 0.0
+    let warm: UiWorld = buildScreenWorld(screen: Screen.Album, scenes: scenes, playback: stressPlayback, scrollY: stressScroll)
     layoutSystem(world: warm)
     transformSystem(world: warm)
     let baselineKb: Int = processRssKb()
@@ -154,7 +155,7 @@ func main() {
       if (stressI - (stressI / 2) * 2) is 1 {
         stressScreen = Screen.NowPlaying
       }
-      let sworld: UiWorld = buildScreenWorld(screen: stressScreen, scenes: scenes, playback: stressPlayback)
+      let sworld: UiWorld = buildScreenWorld(screen: stressScreen, scenes: scenes, playback: stressPlayback, scrollY: stressScroll)
       layoutSystem(world: sworld)
       transformSystem(world: sworld)
       stressI = stressI + 1
@@ -186,9 +187,13 @@ func main() {
     # the snapshot tooling falls back to `screencapture -R` on macOS.
     let screenEnv: String = getEnv(name: "RAE_UI_SCREEN")
     let nowKey: String = "now-playing"
+    let profileKeyEnv: String = "profile"
     let screen: Screen = Screen.Album
     if screenEnv.equals(other: nowKey) {
       screen = Screen.NowPlaying
+    }
+    if screenEnv.equals(other: profileKeyEnv) {
+      screen = Screen.Profile
     }
 
     # Screenshot mode picks up `RAE_UI_PLAYING=1` so we can capture
@@ -205,7 +210,8 @@ func main() {
       let pf: Float = progressEnv.toFloat()
       shotPlayback.elapsedSec = shotPlayback.durationSec * pf
     }
-    let world: UiWorld = buildScreenWorld(screen: screen, scenes: scenes, playback: shotPlayback)
+    let shotScroll: Float = 0.0
+    let world: UiWorld = buildScreenWorld(screen: screen, scenes: scenes, playback: shotPlayback, scrollY: shotScroll)
     layoutSystem(world: world)
     transformSystem(world: world)
     applyPlaybackToWorld(world: world, state: shotPlayback)
@@ -311,8 +317,15 @@ func main() {
       debug.showLabels = true
     }
 
+    # Vertical scroll offset for the Profile screen. Accumulated each
+    # frame from `getMouseWheelMove`; reset to 0 on screen switch.
+    # Stored as a *negative* value when scrolled — `Offset.delta.y =
+    # scrollY` then shifts the scroll-body up by `-scrollY` pixels,
+    # bringing later rows of the cover grid into view.
+    let profileScrollY: Float = 0.0
+
     loop running {
-      let world: UiWorld = buildScreenWorld(screen: currentScreen, scenes: scenes, playback: playback)
+      let world: UiWorld = buildScreenWorld(screen: currentScreen, scenes: scenes, playback: playback, scrollY: profileScrollY)
       # Layer the reusable debug-UI entities (button + optional menu
       # overlay) onto the freshly-built world BEFORE layout runs so
       # they participate in measure/place like any other entity.
@@ -630,6 +643,9 @@ func main() {
 
           if willSwitch {
             currentScreen = nextScreen
+            # Reset scroll on screen change so the new screen always
+            # starts at the top.
+            profileScrollY = 0.0
             switching = true
           } else {
             # No screen change requested — but check the watched scene
@@ -641,6 +657,33 @@ func main() {
               scenes = loadAllScenes()
               switching = true
               log("[data-hot-reload] scene file changed, rebuilding world")
+            }
+          }
+
+          # Profile-screen wheel scroll. Read the wheel each frame; when
+          # the user scrolls, adjust `profileScrollY` and trigger an
+          # outer-loop rebuild so the Offset on the scroll-body picks
+          # up the new value. Wheel deltas are in raylib's "ticks"
+          # (typically ±1 per detent); we scale to pixels so one detent
+          # moves about a third of a tile.
+          if currentScreen is Screen.Profile {
+            let wheel: Float = getMouseWheelMove()
+            if wheel > 0.001 or wheel < -0.001 {
+              let pixelsPerTick: Float = 48.0
+              # Wheel-up means "scroll content down" on macOS; flip
+              # sign so positive wheel produces a more-negative
+              # scrollY (= content shifts up).
+              profileScrollY = profileScrollY + wheel * pixelsPerTick
+              if profileScrollY > 0.0 {
+                profileScrollY = 0.0
+              }
+              # Clamp on the bottom side too: roughly one full screen
+              # worth of scroll covers the 13-cover grid.
+              let minScroll: Float = -800.0
+              if profileScrollY < minScroll {
+                profileScrollY = minScroll
+              }
+              switching = true
             }
           }
 

@@ -9,11 +9,20 @@ import ui/input
 enum Screen {
   NowPlaying
   Album
+  Profile
 }
 
-func buildScreenWorld(screen: Screen, scenes: view AlbumScenes, playback: view PlaybackState) pub ret UiWorld {
+func buildScreenWorld(
+  screen: Screen
+  scenes: view AlbumScenes
+  playback: view PlaybackState
+  scrollY: view Float
+) pub ret UiWorld {
   if screen is Screen.Album {
     ret buildAlbumWorld(scenes: scenes, playback: playback)
+  }
+  if screen is Screen.Profile {
+    ret buildProfileWorld(scenes: scenes, scrollY: scrollY)
   }
   ret buildNowPlayingWorld(scenes: scenes, playback: playback)
 }
@@ -44,6 +53,7 @@ func dispatchActions(input: view InputSystem, current: Screen, playback: mod Pla
 
     let homeKey: String = "nav.home"
     let libraryKey: String = "nav.library"
+    let profileKey: String = "nav.profile"
     let backKey: String = "nav.back"
     let playbackToggleKey: String = "playback.toggle"
     if actionId.equals(other: homeKey) {
@@ -51,6 +61,9 @@ func dispatchActions(input: view InputSystem, current: Screen, playback: mod Pla
     }
     if actionId.equals(other: libraryKey) {
       next = Screen.Album
+    }
+    if actionId.equals(other: profileKey) {
+      next = Screen.Profile
     }
     if actionId.equals(other: backKey) {
       # Back from now-playing returns to album; back from album returns

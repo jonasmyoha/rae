@@ -1,14 +1,57 @@
 # Bitmap-asset loading. Icons go through the Material Symbols font
-# slot, not the texture registry, so the only bitmap right now is the
-# album cover. Keep this in its own file so adding more bitmaps later
-# is a focused edit.
+# slot, not the texture registry. We pre-register:
+#   * "albumCover"   — the now-playing / library cover hero image.
+#   * "profile.0..N" — every JPG in `assets/album_art` for the
+#                     profile-page grid; the first one is also the
+#                     `albumCover` so the album view stays consistent.
+# Keys are referenced from .raescene files and from `profile_view.rae`.
 import core
 import string
 import raylib
 import ui/textures
 
+# Source-of-truth list of grid covers (relative paths, in display
+# order). Update this list when adding / removing files in
+# `assets/album_art/`. Length is the grid item count.
+func profileCoverPaths() pub ret List(String) {
+  let xs: List(String) = createList(String, initialCap: 16)
+  xs.add(value: "examples/98_mobile_ui/assets/album_art/02_mgmt.jpg")
+  xs.add(value: "examples/98_mobile_ui/assets/album_art/03_robyn_honey.jpg")
+  xs.add(value: "examples/98_mobile_ui/assets/album_art/070_shake.jpg")
+  xs.add(value: "examples/98_mobile_ui/assets/album_art/charlie_xcx-brat.jpg")
+  xs.add(value: "examples/98_mobile_ui/assets/album_art/charlie_xcx-wuthering_heights.jpg")
+  xs.add(value: "examples/98_mobile_ui/assets/album_art/mitski_puberty.jpg")
+  xs.add(value: "examples/98_mobile_ui/assets/album_art/royksopp.jpg")
+  xs.add(value: "examples/98_mobile_ui/assets/album_art/0a0e3d624607223c.jpg")
+  xs.add(value: "examples/98_mobile_ui/assets/album_art/0b565d026739e252.jpg")
+  xs.add(value: "examples/98_mobile_ui/assets/album_art/0bc5029d5a044e83.jpg")
+  xs.add(value: "examples/98_mobile_ui/assets/album_art/0c12656488bf97e3.jpg")
+  xs.add(value: "examples/98_mobile_ui/assets/album_art/0e32aca9d2a3377d.jpg")
+  xs.add(value: "examples/98_mobile_ui/assets/album_art/1a2a28ee342c5404.jpg")
+  ret xs
+}
+
+# Texture-registry key under which cover at `index` is registered.
+# Used by both the loader and `profile_view.rae` to look the sprite
+# back up at render time.
+func profileCoverKey(index: view Int) pub ret String {
+  ret "profile.{index}"
+}
+
 func loadTextures(reg: mod TextureRegistry) pub {
   let coverKey: String = "albumCover"
   let coverPath: String = "examples/98_mobile_ui/assets/album_art/02_mgmt.jpg"
   let loaded: Texture = textureLoad(reg: reg, key: coverKey, path: coverPath)
+
+  # Register every grid cover under its own key. The first one is the
+  # same JPG as `albumCover` above; raylib reloads the bitmap here but
+  # the cost is one-off at startup.
+  let paths: List(String) = profileCoverPaths()
+  let i: Int = 0
+  loop i < paths.length {
+    let path: String = paths.get(index: i)
+    let key: String = profileCoverKey(index: i)
+    let t: Texture = textureLoad(reg: reg, key: key, path: path)
+    i = i + 1
+  }
 }
