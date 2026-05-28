@@ -808,6 +808,72 @@ static bool native_rae_sys_rss_kb(struct VM* vm,
   return true;
 }
 
+static bool native_rae_sys_exists(struct VM* vm,
+                                   VmNativeResult* out_result,
+                                   const Value* args,
+                                   size_t arg_count,
+                                   void* user_data) {
+  (void)vm; (void)user_data;
+  if (arg_count != 1) return false;
+  const Value* path_val = deref_value(&args[0]);
+  if (path_val->type != VAL_STRING) return false;
+  rae_String path = { path_val->as.string_value.chars, path_val->as.string_value.length };
+  bool ok = rae_ext_rae_sys_exists(path);
+  out_result->has_value = true;
+  out_result->value = value_bool(ok);
+  return true;
+}
+
+static bool native_rae_sys_delete(struct VM* vm,
+                                   VmNativeResult* out_result,
+                                   const Value* args,
+                                   size_t arg_count,
+                                   void* user_data) {
+  (void)vm; (void)user_data;
+  if (arg_count != 1) return false;
+  const Value* path_val = deref_value(&args[0]);
+  if (path_val->type != VAL_STRING) return false;
+  rae_String path = { path_val->as.string_value.chars, path_val->as.string_value.length };
+  bool ok = rae_ext_rae_sys_delete(path);
+  out_result->has_value = true;
+  out_result->value = value_bool(ok);
+  return true;
+}
+
+static bool native_rae_sys_rename(struct VM* vm,
+                                   VmNativeResult* out_result,
+                                   const Value* args,
+                                   size_t arg_count,
+                                   void* user_data) {
+  (void)vm; (void)user_data;
+  if (arg_count != 2) return false;
+  const Value* old_val = deref_value(&args[0]);
+  const Value* new_val = deref_value(&args[1]);
+  if (old_val->type != VAL_STRING || new_val->type != VAL_STRING) return false;
+  rae_String oldPath = { old_val->as.string_value.chars, old_val->as.string_value.length };
+  rae_String newPath = { new_val->as.string_value.chars, new_val->as.string_value.length };
+  bool ok = rae_ext_rae_sys_rename(oldPath, newPath);
+  out_result->has_value = true;
+  out_result->value = value_bool(ok);
+  return true;
+}
+
+static bool native_rae_sys_make_dir(struct VM* vm,
+                                     VmNativeResult* out_result,
+                                     const Value* args,
+                                     size_t arg_count,
+                                     void* user_data) {
+  (void)vm; (void)user_data;
+  if (arg_count != 1) return false;
+  const Value* path_val = deref_value(&args[0]);
+  if (path_val->type != VAL_STRING) return false;
+  rae_String path = { path_val->as.string_value.chars, path_val->as.string_value.length };
+  bool ok = rae_ext_rae_sys_make_dir(path);
+  out_result->has_value = true;
+  out_result->value = value_bool(ok);
+  return true;
+}
+
 
 
 
@@ -1171,6 +1237,18 @@ bool register_default_natives(VmRegistry* registry, TickCounter* tick_counter) {
   ok = vm_registry_register_native(registry, "processRssKb", native_rae_sys_rss_kb, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_sys_rss_kb", native_rae_sys_rss_kb, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_ext_rae_sys_rss_kb", native_rae_sys_rss_kb, NULL) && ok;
+  ok = vm_registry_register_native(registry, "exists", native_rae_sys_exists, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_sys_exists", native_rae_sys_exists, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_ext_rae_sys_exists", native_rae_sys_exists, NULL) && ok;
+  ok = vm_registry_register_native(registry, "delete", native_rae_sys_delete, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_sys_delete", native_rae_sys_delete, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_ext_rae_sys_delete", native_rae_sys_delete, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rename", native_rae_sys_rename, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_sys_rename", native_rae_sys_rename, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_ext_rae_sys_rename", native_rae_sys_rename, NULL) && ok;
+  ok = vm_registry_register_native(registry, "makeDir", native_rae_sys_make_dir, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_sys_make_dir", native_rae_sys_make_dir, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_ext_rae_sys_make_dir", native_rae_sys_make_dir, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_seed", native_rae_seed, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_random", native_rae_random, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_random_int", native_rae_random_int, NULL) && ok;
