@@ -626,15 +626,17 @@ func applyDebugAnchor(world: view UiWorld, debug: mod DebugSystem) ret Bool {
 # `world`. Call this once per world build, after the host's own
 # `buildScreenWorld` has populated the rest of the tree.
 #
-# The button is opt-in: only built if a `DebugAnchor` component is
-# present somewhere in the world (typically authored in a .raescene).
-# When the anchor is absent, this is a no-op and the app reverts to
-# its non-debug self.
+# The button renders unconditionally — it's a parentless root with
+# its own `Offset`, independent of whatever layout each screen uses.
+# A scene-authored `DebugAnchor` rect is treated as an optional
+# *override*: if present it repositions the button (or resizes it);
+# if absent, the button uses the defaults stamped into the
+# `DebugSystem` at creation (top-left corner, 22 px square — see
+# `createDebugSystem`).
 func addDebugLayer(world: mod UiWorld, debug: mod DebugSystem) pub {
+  # Anchor lookup is best-effort: it picks up per-screen overrides
+  # if a scene declared one, but the button renders either way.
   let hasAnchor: Bool = applyDebugAnchor(world: world, debug: debug)
-  if hasAnchor is false {
-    ret
-  }
   let btn: Int = buildDebugButton(world: world, debug: debug)
   if debug.menuOpen {
     let menu: Int = buildDebugMenuOverlay(world: world, debug: debug)
