@@ -562,6 +562,13 @@ static bool native_getMouseY(struct VM* vm, VmNativeResult* out, const Value* ar
     return true;
 }
 
+static bool native_getMouseWheelMove(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data; (void)args; (void)count;
+    out->has_value = true;
+    out->value = value_float((double)GetMouseWheelMove());
+    return true;
+}
+
 static bool native_isMouseButtonDown(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
     if (count != 1) { fprintf(stderr, "error: isMouseButtonDown expects 1 arg, got %zu\n", count); return false; }
@@ -1006,6 +1013,7 @@ bool vm_registry_register_raylib(VmRegistry* registry) {
     ok &= vm_registry_register_native(registry, "isKeyPressed", native_isKeyPressed, NULL);
     ok &= vm_registry_register_native(registry, "getMouseX", native_getMouseX, NULL);
     ok &= vm_registry_register_native(registry, "getMouseY", native_getMouseY, NULL);
+    ok &= vm_registry_register_native(registry, "getMouseWheelMove", native_getMouseWheelMove, NULL);
     ok &= vm_registry_register_native(registry, "isMouseButtonDown", native_isMouseButtonDown, NULL);
     ok &= vm_registry_register_native(registry, "isMouseButtonPressed", native_isMouseButtonPressed, NULL);
     ok &= vm_registry_register_native(registry, "isMouseButtonReleased", native_isMouseButtonReleased, NULL);
