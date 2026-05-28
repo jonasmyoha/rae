@@ -112,12 +112,22 @@ func buildNavTabsForScreen(
   scenes: view AlbumScenes
 ) pub ret Int {
   let bar: Int = createEntity(world: world)
-  let barW: Float = screenW - outerPad * 2.0
+  # Full-bleed: bar spans the entire screen width with no outerPad
+  # margin. The dark background paints behind the four tabs all the
+  # way to both screen edges, the way iOS tab bars do.
+  let barW: Float = screenW
   setRectFixed(world: world, entity: bar, w: barW, h: navTabsH)
+  # Solid dark backdrop just behind the tab icons — visible against
+  # both light and dark page surfaces without depending on a theme
+  # token. ~rgb(18,18,24) reads as a clear bar on the dark theme
+  # and as a near-black strip on the light theme.
+  let barBg: RgbaColor = { r: 18, g: 18, b: 24, a: 255 }
+  setShapeRect(world: world, entity: bar, fill: barBg)
   setLayout(world: world, entity: bar, kind: LayoutType.Horizontal, gap: 0.0, alignCross: AlignKind.Center)
 
   let tabW: Float = barW / 4.0
   let homeActive: Bool = activeTab is Screen.NowPlaying
+  let searchActive: Bool = activeTab is Screen.Search
   let libraryActive: Bool = activeTab is Screen.Album
   let profileActive: Bool = activeTab is Screen.Profile
 
@@ -144,7 +154,7 @@ func buildNavTabsForScreen(
     iconKey: searchKey
     label: searchLabel
     actionId: searchAction
-    active: false
+    active: searchActive
   )
 
   let libraryKey: String = "mat:library_music"
@@ -201,51 +211,31 @@ func mountBottomDockOverlay(
   playback: view PlaybackState
   reg: view TextureRegistry
 ) pub ret Int {
-  let dockW: Float = screenW - outerPad * 2.0
-  let dockH: Float = miniPlayerH + navTabsH
-  let dock: Int = createEntity(world: world)
-  setRectFixed(world: world, entity: dock, w: dockW, h: dockH)
-
-  # Background. Two layers:
-  #   1. A visible base tint (lighter-than-surface on dark themes,
-  #      darker-than-surface on light themes) so the bar reads as a
-  #      separate tray even before the blur sprite kicks in.
-  #   2. A frosted-glass Sprite that samples the region of the
-  #      previous frame's framebuffer directly behind the dock,
-  #      blurred. The host updates this texture under
-  #      `dockBlurKey()` after each render — until that happens,
-  #      `textureGet` returns a zero-id texture which `paintSprite`
-  #      skips, so only the base tint shows.
-  let baseTint: RgbaColor = { r: 40, g: 40, b: 50, a: 220 }
-  setShapeRect(world: world, entity: dock, fill: baseTint)
-  let blurKey: String = dockBlurKey()
-  if textureHas(reg: reg, key: blurKey) {
-    let whiteTint: RgbaColor = { r: 255, g: 255, b: 255, a: 220 }
-    setDockSprite(world: world, entity: dock, key: blurKey, tint: whiteTint)
-  }
-
-  let layV: LayoutType = LayoutType.Vertical
-  let alignS: AlignKind = AlignKind.Start
-  setLayout(world: world, entity: dock, kind: layV, gap: 0.0, alignCross: alignS)
-
+  # Now-playing / mini-player floats above the nav bar — with the
+  # content-area margins (outerPad on each side) so it visually
+  # belongs to the page, not to the chrome.
+  let miniW: Float = screenW - outerPad * 2.0
   let miniLabel: String = "mini-player"
   let mini: Int = buildMiniPlayerInstance(
     world: world
     scene: scenes.miniPlayer
-    w: dockW
+    w: miniW
     h: miniPlayerH
     label: miniLabel
     playback: playback
   )
+  let miniX: Float = outerPad
+  let miniY: Float = screenH - navTabsH - miniPlayerH
+  let miniOff: Offset = { delta: Vec2 { x: miniX, y: miniY } }
+  componentSet(this: world.offsets, entity: mini, data: miniOff)
+
+  # Nav-tabs bar is full-bleed across the screen bottom edge. The
+  # solid dark background is set inside `buildNavTabsForScreen` and
+  # only covers the row of tab icons — it deliberately does NOT
+  # extend up under the mini-player.
   let bar: Int = buildNavTabsForScreen(world: world, activeTab: activeTab, scenes: scenes)
-
-  let kids: List(Int) = createList(Int, initialCap: 2)
-  kids.add(value: mini)
-  kids.add(value: bar)
-  attachChildren(world: world, parent: dock, kids: kids)
-
-  let bottomY: Float = screenH - outerPad - dockH
-  let off: Offset = { delta: Vec2 { x: outerPad, y: bottomY } }
-  componentSet(this: world.offsets, entity: dock, data: off)
-  ret dock
+  let barY: Float = screenH - navTabsH
+  let barOff: Offset = { delta: Vec2 { x: 0.0, y: barY } }
+  componentSet(this: world.offsets, entity: bar, data: barOff)
+  ret bar
 }
