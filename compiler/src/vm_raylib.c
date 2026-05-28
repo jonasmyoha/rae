@@ -575,6 +575,19 @@ static bool native_postEmptyEvent(struct VM* vm, VmNativeResult* out, const Valu
     return true;
 }
 
+extern void rae_ext_disableAppNap(void);
+
+static bool native_disableAppNap(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data; (void)args;
+    if (count != 0) {
+        fprintf(stderr, "error: disableAppNap expects 0 args, got %zu\n", count);
+        return false;
+    }
+    rae_ext_disableAppNap();
+    out->has_value = false;
+    return true;
+}
+
 static bool native_installWindowCloseWaker(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data; (void)args;
     if (count != 0) {
@@ -1080,6 +1093,7 @@ bool vm_registry_register_raylib(VmRegistry* registry) {
     ok &= vm_registry_register_native(registry, "waitEvents", native_waitEvents, NULL);
     ok &= vm_registry_register_native(registry, "postEmptyEvent", native_postEmptyEvent, NULL);
     ok &= vm_registry_register_native(registry, "installWindowCloseWaker", native_installWindowCloseWaker, NULL);
+    ok &= vm_registry_register_native(registry, "disableAppNap", native_disableAppNap, NULL);
     ok &= vm_registry_register_native(registry, "isKeyDown", native_isKeyDown, NULL);
     ok &= vm_registry_register_native(registry, "isKeyPressed", native_isKeyPressed, NULL);
     ok &= vm_registry_register_native(registry, "getMouseX", native_getMouseX, NULL);
