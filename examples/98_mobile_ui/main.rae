@@ -328,8 +328,29 @@ func main() {
     # scrollY` then shifts the scroll-body up by `-scrollY` pixels,
     # bringing later rows of the cover grid into view.
     let profileScrollY: Float = 0.0
+    # Tracks the previous outer-iteration's screen so we can detect
+    # transitions INTO Profile and refresh the cover-art folder
+    # exactly once on entry (not on every scroll-triggered rebuild).
+    let prevScreen: Screen = currentScreen
+    let firstFrame: Bool = true
 
     loop running {
+      # Refresh cover textures only on transition into the Profile
+      # screen — initial mount or coming from a different screen.
+      # Scroll-triggered rebuilds (also outer-loop iterations) leave
+      # `prevScreen == Screen.Profile`, so they skip the filesystem
+      # scan entirely.
+      if currentScreen is Screen.Profile {
+        let enteringProfile: Bool = firstFrame
+        if prevScreen is not Screen.Profile {
+          enteringProfile = true
+        }
+        if enteringProfile {
+          refreshProfileCovers(reg: texReg)
+        }
+      }
+      firstFrame = false
+
       let world: UiWorld = buildScreenWorld(screen: currentScreen, scenes: scenes, playback: playback, texReg: texReg, scrollY: profileScrollY)
       # Layer the reusable debug-UI entities (button + optional menu
       # overlay) onto the freshly-built world BEFORE layout runs so
@@ -705,6 +726,10 @@ func main() {
           prevMenuOpen = debug.menuOpen
         }
       }
+      # End of inner-loop iteration. Update `prevScreen` once per
+      # outer rebuild so the next iteration's profile-entry check
+      # compares against the screen we just rendered.
+      prevScreen = currentScreen
     }
   }
 
