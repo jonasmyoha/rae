@@ -17,8 +17,32 @@ import ui/components
 import ui/ecs
 import ui/scene
 import ui/scene_instance
+import ui/textures
 
 let tabIconSize: Float = 32.0
+
+# Registry key the dock looks up its frosted-glass blur backdrop
+# under. The host (`main.rae`) writes a fresh blurred screenshot
+# of the dock region after every render; this is the lookup.
+func dockBlurKey() pub ret String {
+  ret "nav.dockBlur"
+}
+
+# Attach a fullscreen Sprite to `entity` (used for the blurred-
+# backdrop texture). Mirrors `setBackdropSprite` from
+# `lib/ui/debug.rae`; kept local so this module doesn't depend
+# on the debug stdlib.
+func setDockSprite(world: mod UiWorld, entity: view Int, key: own String, tint: view RgbaColor) {
+  let sp: Sprite = {
+    textureKey: key
+    tint: tint
+    scaleMode: ScaleMode.Stretch
+    tileScale: Vec2 { x: 1.0, y: 1.0 }
+    nineSlice: Insets { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
+    hasNineSlice: false
+  }
+  componentSet(this: world.sprites, entity: entity, data: sp)
+}
 
 # Mount one nav-tab scene as a child of the bar. `active` picks the
 # active or inactive icon tint and label style; everything else is
@@ -158,23 +182,70 @@ func buildNavTabsForScreen(
   ret bar
 }
 
-# Mount the nav bar as a screen-level overlay: a parentless root
-# positioned at a fixed (outerPad, screenH - navTabsH - outerPad)
-# via `Offset`, independent of whatever layout each screen uses
-# above it. Every screen calls this exactly once at the end of its
-# `build*World` and gets the same bar in the same place — no need
-# to insert it as the last child of a Vertical-layout root, no need
-# for a spacer to push it down, and no per-screen height accounting
-# to keep it from overlapping content. Returns the bar entity in
-# case the caller wants to override anything.
-func mountNavBarOverlay(
+# Mount the bottom "dock" (mini-player + nav-tabs) as a screen-level
+# overlay: a single parentless root containing both bars stacked
+# vertically, positioned via `Offset` at a fixed bottom of the
+# screen. Every screen calls this exactly once at the end of its
+# `build*World`. The dock owns:
+#   * a darker rounded-rect background so the bar visually
+#     separates from page content,
+#   * the mini-player instance (so the play/pause state lives in
+#     one place across screens — no more position-jumping between
+#     Album and NowPlaying),
+#   * the four nav-tabs row beneath it.
+# Returns the dock entity.
+func mountBottomDockOverlay(
   world: mod UiWorld
   activeTab: Screen
   scenes: view AlbumScenes
+  playback: view PlaybackState
+  reg: view TextureRegistry
 ) pub ret Int {
+  let dockW: Float = screenW - outerPad * 2.0
+  let dockH: Float = miniPlayerH + navTabsH
+  let dock: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: dock, w: dockW, h: dockH)
+
+  # Background. Two layers:
+  #   1. A visible base tint (lighter-than-surface on dark themes,
+  #      darker-than-surface on light themes) so the bar reads as a
+  #      separate tray even before the blur sprite kicks in.
+  #   2. A frosted-glass Sprite that samples the region of the
+  #      previous frame's framebuffer directly behind the dock,
+  #      blurred. The host updates this texture under
+  #      `dockBlurKey()` after each render — until that happens,
+  #      `textureGet` returns a zero-id texture which `paintSprite`
+  #      skips, so only the base tint shows.
+  let baseTint: RgbaColor = { r: 40, g: 40, b: 50, a: 220 }
+  setShapeRect(world: world, entity: dock, fill: baseTint)
+  let blurKey: String = dockBlurKey()
+  if textureHas(reg: reg, key: blurKey) {
+    let whiteTint: RgbaColor = { r: 255, g: 255, b: 255, a: 220 }
+    setDockSprite(world: world, entity: dock, key: blurKey, tint: whiteTint)
+  }
+
+  let layV: LayoutType = LayoutType.Vertical
+  let alignS: AlignKind = AlignKind.Start
+  setLayout(world: world, entity: dock, kind: layV, gap: 0.0, alignCross: alignS)
+
+  let miniLabel: String = "mini-player"
+  let mini: Int = buildMiniPlayerInstance(
+    world: world
+    scene: scenes.miniPlayer
+    w: dockW
+    h: miniPlayerH
+    label: miniLabel
+    playback: playback
+  )
   let bar: Int = buildNavTabsForScreen(world: world, activeTab: activeTab, scenes: scenes)
-  let bottomY: Float = screenH - navTabsH - outerPad
+
+  let kids: List(Int) = createList(Int, initialCap: 2)
+  kids.add(value: mini)
+  kids.add(value: bar)
+  attachChildren(world: world, parent: dock, kids: kids)
+
+  let bottomY: Float = screenH - outerPad - dockH
   let off: Offset = { delta: Vec2 { x: outerPad, y: bottomY } }
-  componentSet(this: world.offsets, entity: bar, data: off)
-  ret bar
+  componentSet(this: world.offsets, entity: dock, data: off)
+  ret dock
 }
