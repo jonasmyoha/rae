@@ -287,6 +287,10 @@ func buildProfileBody(world: mod UiWorld, reg: view TextureRegistry, scrollY: vi
   let stats: Int = buildStatsRow(world: world)
   let grid: Int = buildCoverGrid(world: world, reg: reg)
 
+  # No trailing spacer is needed — body has no clipping, so the
+  # "comfortable scroll bottom" (1-2 rows of empty space below the
+  # last row before the dock) is controlled entirely by the
+  # `minScroll` clamp in `main.rae`'s wheel handler.
   let kids: List(Int) = createList(Int, initialCap: 5)
   kids.add(value: avatar)
   kids.add(value: handle)
