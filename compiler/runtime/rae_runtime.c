@@ -1846,6 +1846,38 @@ int64_t rae_ext_getMonitorHeight(int64_t monitor) { return (int64_t)GetMonitorHe
 void rae_ext_setWindowSize(int64_t width, int64_t height) { SetWindowSize((int)width, (int)height); }
 void rae_ext_setWindowPosition(int64_t x, int64_t y) { SetWindowPosition((int)x, (int)y); }
 Texture rae_ext_loadTexture(rae_String fileName) { return LoadTexture((const char*)fileName.data); }
+
+Texture rae_ext_loadCircleCroppedTexture(rae_String fileName) {
+  /* Load `fileName`, force RGBA, and zero the alpha channel of every
+   * pixel outside an inscribed circle. Used by the mobile UI for
+   * "profile picture"-style round avatars without needing a
+   * fragment-shader pipeline. The smaller of width/height bounds
+   * the circle so rectangular sources still produce a centered
+   * circular crop. */
+  Image img = LoadImage((const char*)fileName.data);
+  if (img.data == NULL) {
+    return (Texture){0};
+  }
+  ImageFormat(&img, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
+  float cx = (float)img.width / 2.0f;
+  float cy = (float)img.height / 2.0f;
+  float r = (img.width < img.height ? (float)img.width : (float)img.height) / 2.0f;
+  float r2 = r * r;
+  unsigned char* data = (unsigned char*)img.data;
+  for (int y = 0; y < img.height; y++) {
+    for (int x = 0; x < img.width; x++) {
+      float dx = (float)x + 0.5f - cx;
+      float dy = (float)y + 0.5f - cy;
+      float d2 = dx * dx + dy * dy;
+      if (d2 > r2) {
+        data[(y * img.width + x) * 4 + 3] = 0;
+      }
+    }
+  }
+  Texture tex = LoadTextureFromImage(img);
+  UnloadImage(img);
+  return tex;
+}
 void rae_ext_unloadTexture(Texture texture) { UnloadTexture(texture); }
 Texture rae_ext_captureAndBlurRegion(double x, double y, double w, double h, int64_t blurSize) {
   /* Frosted-glass for a sub-region of the screen — used by the

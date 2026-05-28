@@ -49,6 +49,12 @@ func clearBackground(color: Color) extern
 
 func loadTexture(fileName: String) extern ret Texture
 
+# Load a square / rect image and zero the alpha of every pixel
+# outside the inscribed circle. Returns a Texture suitable for
+# round-avatar use. Rectangular sources still produce a centered
+# circular crop (the inscribed circle's radius = min(w,h)/2).
+func loadCircleCroppedTexture(fileName: String) extern ret Texture
+
 func unloadTexture(texture: Texture) extern
 
 # Capture the current back-buffer, run a Gaussian blur over it on the
