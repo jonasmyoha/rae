@@ -117,7 +117,7 @@ func buildTrackList(world: mod UiWorld, trackScene: view Scene) pub ret Int {
 
 # Compose the whole album world: header scene + track list / spacer /
 # mini-player / nav-tabs as code-attached siblings around it.
-func buildAlbumWorld(scenes: view AlbumScenes, playback: view PlaybackState) pub ret UiWorld {
+func buildAlbumWorld(scenes: view AlbumScenes, playback: view PlaybackState, reg: view TextureRegistry) pub ret UiWorld {
   let world: UiWorld = createUiWorld()
   let contentW: Float = screenW - outerPad * 2.0
 
@@ -132,25 +132,23 @@ func buildAlbumWorld(scenes: view AlbumScenes, playback: view PlaybackState) pub
   let header: Int = buildAlbumHeader(world: world, scene: scenes.album)
   let trackList: Int = buildTrackList(world: world, trackScene: scenes.trackRow)
   let spacer: Int = buildVerticalSpacer(world: world)
-  let miniLabelAl: String = "mini-player"
-  let miniPlayer: Int = buildMiniPlayerInstance(
-    world: world
-    scene: scenes.miniPlayer
-    w: contentW
-    h: miniPlayerH
-    label: miniLabelAl
-    playback: playback
-  )
-  let kids: List(Int) = createList(Int, initialCap: 4)
+
+  let kids: List(Int) = createList(Int, initialCap: 3)
   kids.add(value: header)
   kids.add(value: trackList)
   kids.add(value: spacer)
-  kids.add(value: miniPlayer)
   attachChildren(world: world, parent: root, kids: kids)
 
-  # Nav bar mounts as a parentless overlay — same call/position
-  # across every screen, no per-screen layout accounting.
-  let navTabs: Int = mountNavBarOverlay(world: world, activeTab: Screen.Album, scenes: scenes)
+  # Bottom dock (mini-player + nav-tabs) mounts as a parentless
+  # overlay so the same code/position is shared across screens —
+  # the player no longer "jumps" when switching to / from Library.
+  let dock: Int = mountBottomDockOverlay(
+    world: world
+    activeTab: Screen.Album
+    scenes: scenes
+    playback: playback
+    reg: reg
+  )
 
   ret world
 }

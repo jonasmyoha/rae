@@ -307,6 +307,7 @@ func buildProfileTopBar(world: mod UiWorld) ret Int {
 func buildProfileWorld(
   scenes: view AlbumScenes
   reg: view TextureRegistry
+  playback: view PlaybackState
   scrollY: view Float
 ) pub ret UiWorld {
   let world: UiWorld = createUiWorld()
@@ -332,10 +333,15 @@ func buildProfileWorld(
   kids.add(value: body)
   attachChildren(world: world, parent: root, kids: kids)
 
-  # Nav bar mounts as a parentless overlay (same as Album +
-  # NowPlaying). No need for a spacer to push it down — the bar
-  # has its own absolute position via `Offset`.
-  let navTabs: Int = mountNavBarOverlay(world: world, activeTab: Screen.Profile, scenes: scenes)
+  # Bottom dock (mini-player + nav-tabs). Same call across every
+  # screen — see nav_tabs_builder.rae.
+  let dock: Int = mountBottomDockOverlay(
+    world: world
+    activeTab: Screen.Profile
+    scenes: scenes
+    playback: playback
+    reg: reg
+  )
 
   ret world
 }

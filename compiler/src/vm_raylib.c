@@ -195,6 +195,37 @@ static bool native_unloadTexture(struct VM* vm, VmNativeResult* out, const Value
     return true;
 }
 
+static bool native_captureAndBlurRegion(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 5) {
+        fprintf(stderr, "error: captureAndBlurRegion expects 5 args (x,y,w,h,blurSize), got %zu\n", count);
+        return false;
+    }
+    double x = (args[0].type == VAL_FLOAT) ? args[0].as.float_value : (double)args[0].as.int_value;
+    double y = (args[1].type == VAL_FLOAT) ? args[1].as.float_value : (double)args[1].as.int_value;
+    double w = (args[2].type == VAL_FLOAT) ? args[2].as.float_value : (double)args[2].as.int_value;
+    double h = (args[3].type == VAL_FLOAT) ? args[3].as.float_value : (double)args[3].as.int_value;
+    int blurSize = (args[4].type == VAL_FLOAT) ? (int)args[4].as.float_value : (int)args[4].as.int_value;
+    rlDrawRenderBatchActive();
+    glFinish();
+    Image full = LoadImageFromScreen();
+    Vector2 scale = GetWindowScaleDPI();
+    Rectangle crop = { (float)x * scale.x, (float)y * scale.y, (float)w * scale.x, (float)h * scale.y };
+    Image region = ImageFromImage(full, crop);
+    UnloadImage(full);
+    ImageBlurGaussian(&region, blurSize);
+    Texture t = LoadTextureFromImage(region);
+    UnloadImage(region);
+    out->has_value = true;
+    out->value = value_object(5, "Texture");
+    out->value.as.object_value.fields[0] = value_int((int64_t)t.id);
+    out->value.as.object_value.fields[1] = value_int((int64_t)t.width);
+    out->value.as.object_value.fields[2] = value_int((int64_t)t.height);
+    out->value.as.object_value.fields[3] = value_int((int64_t)t.mipmaps);
+    out->value.as.object_value.fields[4] = value_int((int64_t)t.format);
+    return true;
+}
+
 static bool native_captureAndBlurBackdrop(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
     if (count != 1) {
@@ -986,6 +1017,7 @@ bool vm_registry_register_raylib(VmRegistry* registry) {
     ok &= vm_registry_register_native(registry, "loadTexture", native_loadTexture, NULL);
     ok &= vm_registry_register_native(registry, "unloadTexture", native_unloadTexture, NULL);
     ok &= vm_registry_register_native(registry, "captureAndBlurBackdrop", native_captureAndBlurBackdrop, NULL);
+    ok &= vm_registry_register_native(registry, "captureAndBlurRegion", native_captureAndBlurRegion, NULL);
     ok &= vm_registry_register_native(registry, "drawTexture", native_drawTexture, NULL);
     ok &= vm_registry_register_native(registry, "drawTextureEx", native_drawTextureEx, NULL);
     ok &= vm_registry_register_native(registry, "drawRectangle", native_drawRectangle, NULL);

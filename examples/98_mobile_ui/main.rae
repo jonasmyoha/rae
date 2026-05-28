@@ -328,28 +328,22 @@ func main() {
     # scrollY` then shifts the scroll-body up by `-scrollY` pixels,
     # bringing later rows of the cover grid into view.
     let profileScrollY: Float = 0.0
-    # Tracks the previous outer-iteration's screen so we can detect
-    # transitions INTO Profile and refresh the cover-art folder
-    # exactly once on entry (not on every scroll-triggered rebuild).
-    let prevScreen: Screen = currentScreen
-    let firstFrame: Bool = true
+    # `true` while the Profile screen's cover textures are loaded
+    # into the registry. Flips false the moment we leave the screen
+    # so the next entry re-scans the folder (picking up renamed /
+    # added / removed files). Scroll-triggered rebuilds stay on
+    # Profile, so the flag remains `true` and the scan is skipped.
+    let profileLoaded: Bool = false
 
     loop running {
-      # Refresh cover textures only on transition into the Profile
-      # screen — initial mount or coming from a different screen.
-      # Scroll-triggered rebuilds (also outer-loop iterations) leave
-      # `prevScreen == Screen.Profile`, so they skip the filesystem
-      # scan entirely.
       if currentScreen is Screen.Profile {
-        let enteringProfile: Bool = firstFrame
-        if prevScreen is not Screen.Profile {
-          enteringProfile = true
-        }
-        if enteringProfile {
+        if profileLoaded is false {
           refreshProfileCovers(reg: texReg)
+          profileLoaded = true
         }
+      } else {
+        profileLoaded = false
       }
-      firstFrame = false
 
       let world: UiWorld = buildScreenWorld(screen: currentScreen, scenes: scenes, playback: playback, texReg: texReg, scrollY: profileScrollY)
       # Layer the reusable debug-UI entities (button + optional menu
@@ -658,6 +652,32 @@ func main() {
               textureRegisterDirect(reg: texReg, key: blurKey, tex: blurTex)
               setDebugHasBlur(debug: debug, value: true)
             }
+
+            # Frosted-glass dock background. Capture the region of
+            # the back buffer behind the bottom dock NOW (before
+            # endDrawing swaps), blur it, and register it under
+            # `dockBlurKey()`. The NEXT outer rebuild's
+            # `mountBottomDockOverlay` then paints that texture as
+            # the dock backdrop — so the bar reflects whatever was
+            # rendered behind it on the previous frame.
+            #
+            # Cost: one CPU blur + one texture upload per active
+            # frame. Idle frames (no input, no animation) skip the
+            # whole block via the `active` gate above.
+            let dockBlurX: Float = outerPad
+            let dockBlurH: Float = miniPlayerH + navTabsH
+            let dockBlurY: Float = screenH - outerPad - dockBlurH
+            let dockBlurW: Float = screenW - outerPad * 2.0
+            let dockBlurTex: Texture = captureAndBlurRegion(
+              x: dockBlurX
+              y: dockBlurY
+              w: dockBlurW
+              h: dockBlurH
+              blurSize: 12
+            )
+            let dockKey: String = dockBlurKey()
+            textureRegisterDirect(reg: texReg, key: dockKey, tex: dockBlurTex)
+
             endDrawing()
             forceRender = false
             # Bump the cache again *after* render so any per-frame
@@ -726,10 +746,6 @@ func main() {
           prevMenuOpen = debug.menuOpen
         }
       }
-      # End of inner-loop iteration. Update `prevScreen` once per
-      # outer rebuild so the next iteration's profile-entry check
-      # compares against the screen we just rendered.
-      prevScreen = currentScreen
     }
   }
 
