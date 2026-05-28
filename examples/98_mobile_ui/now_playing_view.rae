@@ -7,7 +7,7 @@ import ui/ecs
 import ui/scene
 import ui/scene_instance
 
-func buildNowPlayingWorld(scenes: view AlbumScenes, playback: view PlaybackState) pub ret UiWorld {
+func buildNowPlayingWorld(scenes: view AlbumScenes, playback: view PlaybackState, reg: view TextureRegistry) pub ret UiWorld {
   let world: UiWorld = createUiWorld()
 
   let root: Int = createEntity(world: world)
@@ -41,23 +41,19 @@ func buildNowPlayingWorld(scenes: view AlbumScenes, playback: view PlaybackState
     overrides: npOverrides
   )
 
-  let miniLabel: String = "mini-player"
-  let miniPlayer: Int = buildMiniPlayerInstance(
-    world: world
-    scene: scenes.miniPlayer
-    w: screenW - outerPad * 2.0
-    h: miniPlayerH
-    label: miniLabel
-    playback: playback
-  )
-  let kids: List(Int) = createList(Int, initialCap: 2)
+  let kids: List(Int) = createList(Int, initialCap: 1)
   kids.add(value: np)
-  kids.add(value: miniPlayer)
   attachChildren(world: world, parent: root, kids: kids)
 
-  # Nav bar as a parentless overlay — see album_view.rae for the
-  # rationale (same call shape across every screen).
-  let navTabs: Int = mountNavBarOverlay(world: world, activeTab: Screen.NowPlaying, scenes: scenes)
+  # Bottom dock (mini-player + nav-tabs). Shared across screens —
+  # see nav_tabs_builder.rae.
+  let dock: Int = mountBottomDockOverlay(
+    world: world
+    activeTab: Screen.NowPlaying
+    scenes: scenes
+    playback: playback
+    reg: reg
+  )
 
   ret world
 }

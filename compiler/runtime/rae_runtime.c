@@ -1847,6 +1847,31 @@ void rae_ext_setWindowSize(int64_t width, int64_t height) { SetWindowSize((int)w
 void rae_ext_setWindowPosition(int64_t x, int64_t y) { SetWindowPosition((int)x, (int)y); }
 Texture rae_ext_loadTexture(rae_String fileName) { return LoadTexture((const char*)fileName.data); }
 void rae_ext_unloadTexture(Texture texture) { UnloadTexture(texture); }
+Texture rae_ext_captureAndBlurRegion(double x, double y, double w, double h, int64_t blurSize) {
+  /* Frosted-glass for a sub-region of the screen — used by the
+   * mobile UI's bottom dock so only the bar area is blurred (the
+   * "vibrancy" effect), not the whole window like the modal-blur
+   * helper below. `x/y/w/h` are in *logical* coordinates; we scale
+   * by GetWindowScaleDPI() to crop the right physical-pixel rect
+   * from `LoadImageFromScreen`. */
+  rlDrawRenderBatchActive();
+  glFinish();
+  Image full = LoadImageFromScreen();
+  Vector2 scale = GetWindowScaleDPI();
+  Rectangle crop = {
+    (float)x * scale.x,
+    (float)y * scale.y,
+    (float)w * scale.x,
+    (float)h * scale.y
+  };
+  Image region = ImageFromImage(full, crop);
+  UnloadImage(full);
+  ImageBlurGaussian(&region, (int)blurSize);
+  Texture tex = LoadTextureFromImage(region);
+  UnloadImage(region);
+  return tex;
+}
+
 Texture rae_ext_captureAndBlurBackdrop(int64_t blurSize) {
   /* Frosted-glass backdrop helper for modal UI: grab the back buffer,
    * run a Gaussian blur over it on the CPU, upload as a Texture, and
