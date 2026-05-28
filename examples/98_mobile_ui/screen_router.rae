@@ -17,14 +17,14 @@ func buildScreenWorld(
   screen: Screen
   scenes: view AlbumScenes
   playback: view PlaybackState
-  profileCovers: view List(File)
+  texReg: mod TextureRegistry
   scrollY: view Float
 ) pub ret UiWorld {
   if screen is Screen.Album {
     ret buildAlbumWorld(scenes: scenes, playback: playback)
   }
   if screen is Screen.Profile {
-    ret buildProfileWorld(scenes: scenes, covers: profileCovers, scrollY: scrollY)
+    ret buildProfileWorld(scenes: scenes, reg: texReg, scrollY: scrollY)
   }
   ret buildNowPlayingWorld(scenes: scenes, playback: playback)
 }
