@@ -74,10 +74,14 @@ func mountNavTab(
   ret tab
 }
 
-# Bottom nav row for the current screen. `activeTab` picks which of
-# the four tabs renders with the active styling. Home and Library
-# actually switch screens; Search and Profile are placeholders the
-# router currently no-ops.
+# Build the bottom nav bar for the current screen as a normal
+# parented row. Returns the bar entity; the caller decides whether
+# to attach it as a child (legacy) or mount it as a parentless
+# overlay (preferred — see `mountNavBarOverlay`).
+#
+# `activeTab` picks which of the four tabs renders with the active
+# styling. Home, Library, and Profile actually switch screens;
+# Search is still a placeholder that the router no-ops.
 func buildNavTabsForScreen(
   world: mod UiWorld
   activeTab: Screen
@@ -91,6 +95,7 @@ func buildNavTabsForScreen(
   let tabW: Float = barW / 4.0
   let homeActive: Bool = activeTab is Screen.NowPlaying
   let libraryActive: Bool = activeTab is Screen.Album
+  let profileActive: Bool = activeTab is Screen.Profile
 
   let homeKey: String = "mat:home"
   let homeLabel: String = "Home"
@@ -141,7 +146,7 @@ func buildNavTabsForScreen(
     iconKey: profileKey
     label: profileLabel
     actionId: profileAction
-    active: false
+    active: profileActive
   )
 
   let kids: List(Int) = createList(Int, initialCap: 4)
@@ -150,5 +155,26 @@ func buildNavTabsForScreen(
   kids.add(value: libraryTab)
   kids.add(value: profileTab)
   attachChildren(world: world, parent: bar, kids: kids)
+  ret bar
+}
+
+# Mount the nav bar as a screen-level overlay: a parentless root
+# positioned at a fixed (outerPad, screenH - navTabsH - outerPad)
+# via `Offset`, independent of whatever layout each screen uses
+# above it. Every screen calls this exactly once at the end of its
+# `build*World` and gets the same bar in the same place — no need
+# to insert it as the last child of a Vertical-layout root, no need
+# for a spacer to push it down, and no per-screen height accounting
+# to keep it from overlapping content. Returns the bar entity in
+# case the caller wants to override anything.
+func mountNavBarOverlay(
+  world: mod UiWorld
+  activeTab: Screen
+  scenes: view AlbumScenes
+) pub ret Int {
+  let bar: Int = buildNavTabsForScreen(world: world, activeTab: activeTab, scenes: scenes)
+  let bottomY: Float = screenH - navTabsH - outerPad
+  let off: Offset = { delta: Vec2 { x: outerPad, y: bottomY } }
+  componentSet(this: world.offsets, entity: bar, data: off)
   ret bar
 }
