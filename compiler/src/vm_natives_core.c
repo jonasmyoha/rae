@@ -540,6 +540,28 @@ static bool native_rae_str_trim(struct VM* vm, VmNativeResult* out_result, const
 
 }
 
+static bool native_rae_str_to_lower(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
+
+  (void)vm; (void)user_data;
+
+  if (arg_count != 1) return false;
+
+  const Value* s_val = deref_value(&args[0]);
+
+  if (s_val->type != VAL_STRING) return false;
+
+  rae_String s = { s_val->as.string_value.chars, s_val->as.string_value.length };
+
+  rae_String lower = rae_ext_rae_str_to_lower(s);
+
+  out_result->has_value = true;
+
+  out_result->value = value_string_take(lower.data, (size_t)lower.len);
+
+  return true;
+
+}
+
 
 
 static bool native_rae_str_at(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
@@ -699,6 +721,23 @@ static bool native_rae_sys_get_env(struct VM* vm,
   if (name_val->type != VAL_STRING) return false;
   rae_String name = { name_val->as.string_value.chars, name_val->as.string_value.length };
   rae_String res = rae_ext_rae_sys_get_env(name);
+  out_result->has_value = true;
+  if (res.data) out_result->value = value_string_take(res.data, (size_t)res.len);
+  else out_result->value = value_string_copy("", 0);
+  return true;
+}
+
+static bool native_rae_sys_list_dir(struct VM* vm,
+                                     VmNativeResult* out_result,
+                                     const Value* args,
+                                     size_t arg_count,
+                                     void* user_data) {
+  (void)vm; (void)user_data;
+  if (arg_count != 1) return false;
+  const Value* folder_val = deref_value(&args[0]);
+  if (folder_val->type != VAL_STRING) return false;
+  rae_String folder = { folder_val->as.string_value.chars, folder_val->as.string_value.length };
+  rae_String res = rae_ext_rae_sys_list_dir(folder);
   out_result->has_value = true;
   if (res.data) out_result->value = value_string_take(res.data, (size_t)res.len);
   else out_result->value = value_string_copy("", 0);
@@ -1096,6 +1135,7 @@ bool register_default_natives(VmRegistry* registry, TickCounter* tick_counter) {
   ok = vm_registry_register_native(registry, "rae_str_ends_with", native_rae_str_ends_with, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_str_index_of", native_rae_str_index_of, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_str_trim", native_rae_str_trim, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_str_to_lower", native_rae_str_to_lower, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_str_at", native_rae_str_at, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_ext_rae_str_at", native_rae_str_at, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_ext_rae_str_from_cstr", native_rae_str_from_cstr, NULL) && ok;
@@ -1125,6 +1165,9 @@ bool register_default_natives(VmRegistry* registry, TickCounter* tick_counter) {
   ok = vm_registry_register_native(registry, "fileModTime", native_rae_sys_file_mtime, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_sys_file_mtime", native_rae_sys_file_mtime, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_ext_rae_sys_file_mtime", native_rae_sys_file_mtime, NULL) && ok;
+  ok = vm_registry_register_native(registry, "listDirNative", native_rae_sys_list_dir, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_sys_list_dir", native_rae_sys_list_dir, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_ext_rae_sys_list_dir", native_rae_sys_list_dir, NULL) && ok;
   ok = vm_registry_register_native(registry, "processRssKb", native_rae_sys_rss_kb, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_sys_rss_kb", native_rae_sys_rss_kb, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_ext_rae_sys_rss_kb", native_rae_sys_rss_kb, NULL) && ok;

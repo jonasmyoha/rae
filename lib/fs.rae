@@ -1,0 +1,151 @@
+# Filesystem primitives.
+#
+# Companion to `lib/sys.rae`'s read/write helpers — `fs` is about
+# *discovery* (what files exist where), `sys` is about *content*
+# (what's in them). Pair them for the common pattern:
+#
+#   let entries: List(File) = listDir(folder: "assets/album_art")
+#   let i: Int = 0
+#   loop i < entries.length {
+#     let f: File = entries.get(index: i)
+#     if f.extension().equals(other: "jpg") {
+#       let bytes: opt String = readFile(path: f.path())
+#       ...
+#     }
+#     i = i + 1
+#   }
+#
+# Design notes (Rae style):
+#   * `File` is a value type with just (`name`, `folder`). Anything
+#     derived — full path, extension, stem — is a method, so callers
+#     read at the call site instead of storing redundant fields.
+#   * `listDir` is non-recursive on purpose. Walking subtrees is
+#     a different concern with different ergonomics (depth limits,
+#     symlink handling) and would force every caller to handle
+#     entries from multiple directories in one list. A future
+#     `walkDir` can layer on top.
+#   * No `Directory` type. A folder is just a String path; everything
+#     interesting (its contents, whether it exists, when it changed)
+#     is already covered by `listDir`, `sys.exists`, `sys.fileModTime`.
+#   * Errors are represented as empty results (empty list, empty
+#     string) rather than thrown exceptions. Callers wanting to
+#     distinguish "missing folder" from "empty folder" should pair
+#     `listDir` with `sys.exists` first.
+
+import core
+import string
+
+# ----- File -----------------------------------------------------------
+
+# A single directory entry. Construct via `listDir`, not by hand —
+# the canonical (folder, name) split is what keeps `path()`,
+# `extension()`, and `stem()` consistent across absolute and
+# relative folder strings.
+type File {
+  # Base name with extension: "track.jpg".
+  name: String
+
+  # Parent directory, no trailing slash: "examples/foo/bar".
+  folder: String
+}
+
+# Full path "{folder}/{name}". The string most callers want next
+# — feed it to `readFile`, `loadTexture`, etc.
+func path(this: view File) ret String {
+  ret "{this.folder}/{this.name}"
+}
+
+# Lowercased extension without the leading dot, or "" when there
+# is no extension. "TRACK.JPG" -> "jpg", "no_ext" -> "".
+# Multiple dots: only the last segment counts ("archive.tar.gz"
+# returns "gz"); callers needing the longer-form ext can use
+# `stem()` to peel.
+func extension(this: view File) ret String {
+  let dot: Int = this.name.lastIndexOf(sub: ".")
+  if dot < 0 {
+    ret ""
+  }
+  let nameLen: Int = this.name.length()
+  let raw: String = this.name.sub(start: dot + 1, len: nameLen - dot - 1)
+  ret raw.toLower()
+}
+
+# Base name without the trailing extension: "track.jpg" -> "track".
+# Files without an extension are returned unchanged.
+func stem(this: view File) ret String {
+  let dot: Int = this.name.lastIndexOf(sub: ".")
+  if dot < 0 {
+    ret this.name
+  }
+  ret this.name.sub(start: 0, len: dot)
+}
+
+# True if `name` starts with a dot. Hidden files like `.DS_Store`
+# come through `listDir` like any other entry (the native only
+# filters `.` and `..`); use this to suppress them at the
+# call site.
+func isHidden(this: view File) ret Bool {
+  ret this.name.startsWith(prefix: ".")
+}
+
+# True if this file's extension matches `ext` case-insensitively.
+# Pass `ext` without the leading dot.
+func hasExtension(this: view File, ext: view String) ret Bool {
+  ret this.extension().equals(other: ext.toLower())
+}
+
+# ----- listDir --------------------------------------------------------
+
+# Native: returns the directory's entries as a "\n"-separated string
+# (no trailing newline), or "" on error / empty. `.` and `..` are
+# filtered by the native; everything else passes through, including
+# hidden files starting with `.` and broken symlinks.
+func rae_sys_list_dir(folder: String) extern ret String
+
+# Scan `folder` for direct children. Non-recursive. Returns an
+# empty list when the folder doesn't exist, can't be read, or is
+# empty — callers that need to tell those apart should call
+# `sys.exists` first.
+#
+# Order: whatever the OS returns. macOS APFS yields insertion
+# order; Linux ext4 typically yields hash-bucket order. Don't
+# rely on either — sort the result if your UI needs stable
+# ordering.
+func listDir(folder: own String) pub ret List(File) {
+  let raw: String = rae_sys_list_dir(folder: folder)
+  let lines: List(String) = raw.split(sep: "\n")
+  let result: List(File) = createList(File, initialCap: lines.length)
+  let i: Int = 0
+  loop i < lines.length {
+    let n: String = lines.get(index: i)
+    if n.length() > 0 {
+      let entry: File = { name: n, folder: folder }
+      result.add(value: entry)
+    }
+    i = i + 1
+  }
+  ret result
+}
+
+# Convenience: `listDir(folder)` then keep only entries with the
+# matching (case-insensitive) extension. Equivalent to a manual
+# loop with `f.hasExtension(ext)`, but as a one-liner.
+#
+# Implementation note: the C backend's generic `List(T).get` returns
+# `opt T` for user-struct T and doesn't auto-coerce to T in scalar
+# contexts. We hit the underlying buf-get directly here, the same
+# workaround the example code uses (see screen_router.rae and the
+# track-row loop in album_view.rae).
+func listDirByExt(folder: own String, ext: view String) pub ret List(File) {
+  let all: List(File) = listDir(folder: folder)
+  let result: List(File) = createList(File, initialCap: all.length)
+  let i: Int = 0
+  loop i < all.length {
+    let f: File = rae_ext_rae_buf_get(buf: all.data, index: i)
+    if f.hasExtension(ext: ext) {
+      result.add(value: f)
+    }
+    i = i + 1
+  }
+  ret result
+}
