@@ -61,6 +61,20 @@ func unloadTexture(texture: Texture) extern
 # rendered frame.
 func captureAndBlurBackdrop(blurSize: Int) extern ret Texture
 
+# Same as `captureAndBlurBackdrop` but for a sub-region. `x/y/w/h`
+# are in logical (DPI-independent) coordinates; the implementation
+# scales internally by `GetWindowScaleDPI()` before reading from
+# the framebuffer. Useful for "frosted glass" overlay bars that
+# should only blur the area directly behind them, not the whole
+# screen (which the modal-backdrop variant does).
+func captureAndBlurRegion(
+  x: Float
+  y: Float
+  w: Float
+  h: Float
+  blurSize: Int
+) extern ret Texture
+
 func drawTexture(texture: Texture, x: Float, y: Float, tint: Color) extern
 
 func drawTextureEx(
