@@ -653,30 +653,16 @@ func main() {
               setDebugHasBlur(debug: debug, value: true)
             }
 
-            # Frosted-glass dock background. Capture the region of
-            # the back buffer behind the bottom dock NOW (before
-            # endDrawing swaps), blur it, and register it under
-            # `dockBlurKey()`. The NEXT outer rebuild's
-            # `mountBottomDockOverlay` then paints that texture as
-            # the dock backdrop — so the bar reflects whatever was
-            # rendered behind it on the previous frame.
-            #
-            # Cost: one CPU blur + one texture upload per active
-            # frame. Idle frames (no input, no animation) skip the
-            # whole block via the `active` gate above.
-            let dockBlurX: Float = outerPad
-            let dockBlurH: Float = miniPlayerH + navTabsH
-            let dockBlurY: Float = screenH - outerPad - dockBlurH
-            let dockBlurW: Float = screenW - outerPad * 2.0
-            let dockBlurTex: Texture = captureAndBlurRegion(
-              x: dockBlurX
-              y: dockBlurY
-              w: dockBlurW
-              h: dockBlurH
-              blurSize: 12
-            )
-            let dockKey: String = dockBlurKey()
-            textureRegisterDirect(reg: texReg, key: dockKey, tex: dockBlurTex)
+            # (Per-frame dock blur capture removed: two issues fed
+            # each other. The capture included the previously-
+            # rendered dock with its own blur, so the blur intensity
+            # grew with each frame; and `textureRegisterDirect`'s
+            # remove+add path tripped a `List.remove` cascade-drop
+            # gap that corrupted other registry entries' key
+            # strings, crashing the next Profile rebuild. The dock
+            # falls back to its solid base tint for now; blur will
+            # come back later with a capture-on-screen-change
+            # design and a safer in-place registry update.)
 
             endDrawing()
             forceRender = false
