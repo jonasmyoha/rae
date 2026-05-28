@@ -50,13 +50,14 @@ func buildNowPlayingWorld(scenes: view AlbumScenes, playback: view PlaybackState
     label: miniLabel
     playback: playback
   )
-  let navTabs: Int = buildNavTabsForScreen(world: world, activeTab: Screen.NowPlaying, scenes: scenes)
-
-  let kids: List(Int) = createList(Int, initialCap: 3)
+  let kids: List(Int) = createList(Int, initialCap: 2)
   kids.add(value: np)
   kids.add(value: miniPlayer)
-  kids.add(value: navTabs)
   attachChildren(world: world, parent: root, kids: kids)
+
+  # Nav bar as a parentless overlay — see album_view.rae for the
+  # rationale (same call shape across every screen).
+  let navTabs: Int = mountNavBarOverlay(world: world, activeTab: Screen.NowPlaying, scenes: scenes)
 
   ret world
 }

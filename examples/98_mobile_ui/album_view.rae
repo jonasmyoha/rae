@@ -141,15 +141,16 @@ func buildAlbumWorld(scenes: view AlbumScenes, playback: view PlaybackState) pub
     label: miniLabelAl
     playback: playback
   )
-  let navTabs: Int = buildNavTabsForScreen(world: world, activeTab: Screen.Album, scenes: scenes)
-
-  let kids: List(Int) = createList(Int, initialCap: 5)
+  let kids: List(Int) = createList(Int, initialCap: 4)
   kids.add(value: header)
   kids.add(value: trackList)
   kids.add(value: spacer)
   kids.add(value: miniPlayer)
-  kids.add(value: navTabs)
   attachChildren(world: world, parent: root, kids: kids)
+
+  # Nav bar mounts as a parentless overlay — same call/position
+  # across every screen, no per-screen layout accounting.
+  let navTabs: Int = mountNavBarOverlay(world: world, activeTab: Screen.Album, scenes: scenes)
 
   ret world
 }
