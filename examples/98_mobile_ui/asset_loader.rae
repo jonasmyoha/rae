@@ -1,57 +1,68 @@
 # Bitmap-asset loading. Icons go through the Material Symbols font
-# slot, not the texture registry. We pre-register:
-#   * "albumCover"   — the now-playing / library cover hero image.
-#   * "profile.0..N" — every JPG in `assets/album_art` for the
-#                     profile-page grid; the first one is also the
-#                     `albumCover` so the album view stays consistent.
-# Keys are referenced from .raescene files and from `profile_view.rae`.
+# slot, not the texture registry. The startup loader only handles
+# the `albumCover` hero. Profile-page covers come from a runtime
+# directory scan (see `refreshProfileCovers` below) so the user can
+# add or remove files in `assets/album_art/` without rebuilding the
+# loader list.
 import core
 import string
 import raylib
+import fs
 import ui/textures
 
-# Source-of-truth list of grid covers (relative paths, in display
-# order). Update this list when adding / removing files in
-# `assets/album_art/`. Length is the grid item count.
-func profileCoverPaths() pub ret List(String) {
-  let xs: List(String) = createList(String, initialCap: 16)
-  xs.add(value: "examples/98_mobile_ui/assets/album_art/02_mgmt.jpg")
-  xs.add(value: "examples/98_mobile_ui/assets/album_art/03_robyn_honey.jpg")
-  xs.add(value: "examples/98_mobile_ui/assets/album_art/070_shake.jpg")
-  xs.add(value: "examples/98_mobile_ui/assets/album_art/charlie_xcx-brat.jpg")
-  xs.add(value: "examples/98_mobile_ui/assets/album_art/charlie_xcx-wuthering_heights.jpg")
-  xs.add(value: "examples/98_mobile_ui/assets/album_art/mitski_puberty.jpg")
-  xs.add(value: "examples/98_mobile_ui/assets/album_art/royksopp.jpg")
-  xs.add(value: "examples/98_mobile_ui/assets/album_art/0a0e3d624607223c.jpg")
-  xs.add(value: "examples/98_mobile_ui/assets/album_art/0b565d026739e252.jpg")
-  xs.add(value: "examples/98_mobile_ui/assets/album_art/0bc5029d5a044e83.jpg")
-  xs.add(value: "examples/98_mobile_ui/assets/album_art/0c12656488bf97e3.jpg")
-  xs.add(value: "examples/98_mobile_ui/assets/album_art/0e32aca9d2a3377d.jpg")
-  xs.add(value: "examples/98_mobile_ui/assets/album_art/1a2a28ee342c5404.jpg")
-  ret xs
-}
+let albumArtFolder: String = "examples/98_mobile_ui/assets/album_art"
 
-# Texture-registry key under which cover at `index` is registered.
-# Used by both the loader and `profile_view.rae` to look the sprite
-# back up at render time.
-func profileCoverKey(index: view Int) pub ret String {
-  ret "profile.{index}"
+# Registry key the profile grid uses for a given file. Using the
+# full filename (not an index) keeps the key stable across folder
+# changes — a renamed file gets a fresh slot, a moved file just
+# disappears from the next refresh.
+func profileFileKey(file: view File) pub ret String {
+  ret "profile.{file.name}"
 }
 
 func loadTextures(reg: mod TextureRegistry) pub {
   let coverKey: String = "albumCover"
   let coverPath: String = "examples/98_mobile_ui/assets/album_art/02_mgmt.jpg"
   let loaded: Texture = textureLoad(reg: reg, key: coverKey, path: coverPath)
+}
 
-  # Register every grid cover under its own key. The first one is the
-  # same JPG as `albumCover` above; raylib reloads the bitmap here but
-  # the cost is one-off at startup.
-  let paths: List(String) = profileCoverPaths()
+# Scan the album-art folder, load any JPG/PNG covers not yet
+# registered, and return the resulting list of `File` entries to
+# the caller. Called on every transition into the Profile screen,
+# so adding / removing a file in the folder shows up the next time
+# the screen opens.
+#
+# Stale entries from a previous scan stay registered (textures
+# already in VRAM) — they're harmless because nothing references
+# them. A future cleanup pass could compare and unload, but for
+# the demo's ~13 covers the memory cost is negligible.
+func refreshProfileCovers(reg: mod TextureRegistry) pub ret List(File) {
+  let folder: String = albumArtFolder
+  let entries: List(File) = listDir(folder: folder)
+  let result: List(File) = createList(File, initialCap: entries.length)
   let i: Int = 0
-  loop i < paths.length {
-    let path: String = paths.get(index: i)
-    let key: String = profileCoverKey(index: i)
-    let t: Texture = textureLoad(reg: reg, key: key, path: path)
+  loop i < entries.length {
+    # buf_get rather than `.get(index:)` — Compiled-mode codegen
+    # for `List(UserStruct).get` returns an opt T that doesn't
+    # auto-unwrap. See the matching note in lib/fs.rae.
+    let f: File = rae_ext_rae_buf_get(buf: entries.data, index: i)
+    if f.isHidden() is false {
+      let ext: String = f.extension()
+      let isJpg: Bool = ext.equals(other: "jpg")
+      let isJpeg: Bool = ext.equals(other: "jpeg")
+      let isPng: Bool = ext.equals(other: "png")
+      if isJpg or isJpeg or isPng {
+        let key: String = profileFileKey(file: f)
+        if textureHas(reg: reg, key: key) is false {
+          let p: String = f.path()
+          let t: Texture = textureLoad(reg: reg, key: key, path: p)
+          log("[profile] loaded cover {f.name}")
+        }
+        result.add(value: f)
+      }
+    }
     i = i + 1
   }
+  log("[profile] {result.length} covers available")
+  ret result
 }

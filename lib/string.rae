@@ -21,6 +21,8 @@ func rae_str_index_of(s: String, sub: String) extern ret Int
 
 func rae_str_trim(s: String) extern ret String
 
+func rae_str_to_lower(s: String) extern ret String
+
 func rae_str_to_f64(s: String) extern ret Float
 
 func rae_str_to_i64(s: String) extern ret Int
@@ -97,6 +99,39 @@ func endsWith(this: view String, suffix: view String) ret Bool {
 
 func indexOf(this: view String, sub: view String) ret Int {
   ret rae_str_index_of(s: this, sub: sub)
+}
+
+# Right-most occurrence of `sub` inside `this`, or -1 if not found.
+# Implemented in pure Rae so we don't need a parallel C native: scan
+# left-to-right via `indexOf` keeping the most-recent hit. O(n*m)
+# worst case which is fine for typical "find the last dot in a
+# filename" usage.
+func lastIndexOf(this: view String, sub: view String) ret Int {
+  let needleLen: Int = sub.length()
+  if needleLen is 0 {
+    ret -1
+  }
+  let n: Int = this.length()
+  if needleLen > n {
+    ret -1
+  }
+  let result: Int = -1
+  let pos: Int = 0
+  loop pos <= n - needleLen {
+    let tail: String = this.sub(start: pos, len: n - pos)
+    let found: Int = tail.indexOf(sub: sub)
+    if found is -1 {
+      ret result
+    }
+    result = pos + found
+    pos = result + 1
+  }
+  ret result
+}
+
+# ASCII lowercase conversion. Non-ASCII bytes pass through unchanged.
+func toLower(this: view String) ret String {
+  ret rae_str_to_lower(s: this)
 }
 
 func trim(this: view String) ret String {
