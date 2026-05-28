@@ -1759,6 +1759,7 @@ rae_Bool rae_ext_isKeyDown(int64_t key) { return IsKeyDown((int)key); }
 rae_Bool rae_ext_isKeyPressed(int64_t key) { return IsKeyPressed((int)key); }
 int64_t rae_ext_getMouseX(void) { return (int64_t)GetMouseX(); }
 int64_t rae_ext_getMouseY(void) { return (int64_t)GetMouseY(); }
+double rae_ext_getMouseWheelMove(void) { return (double)GetMouseWheelMove(); }
 rae_Bool rae_ext_isMouseButtonDown(int64_t button) { return IsMouseButtonDown((int)button); }
 rae_Bool rae_ext_isMouseButtonPressed(int64_t button) { return IsMouseButtonPressed((int)button); }
 rae_Bool rae_ext_isMouseButtonReleased(int64_t button) { return IsMouseButtonReleased((int)button); }
