@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 #include <time.h>
 #include <sys/time.h>
 #include <sys/stat.h>
@@ -1152,6 +1153,14 @@ rae_Bool rae_ext_rae_sys_rename(rae_String oldPath, rae_String newPath) {
 rae_Bool rae_ext_rae_sys_delete(rae_String path) {
     if (!path.data) return false;
     return remove((const char*)path.data) == 0;
+}
+
+rae_Bool rae_ext_rae_sys_make_dir(rae_String path) {
+    if (!path.data) return false;
+    // mkdir(2) returns -1 with EEXIST when the dir already exists; we
+    // treat that as success so callers can use this idempotently.
+    if (mkdir((const char*)path.data, 0755) == 0) return true;
+    return errno == EEXIST;
 }
 
 #include <sys/file.h> // For flock

@@ -489,6 +489,7 @@ void rae_ext_disableAppNap(void);
 rae_Bool rae_ext_rae_sys_write_file(rae_String path, rae_String content);
 rae_Bool rae_ext_rae_sys_rename(rae_String oldPath, rae_String newPath);
 rae_Bool rae_ext_rae_sys_delete(rae_String path);
+rae_Bool rae_ext_rae_sys_make_dir(rae_String path);
 rae_Bool rae_ext_rae_sys_exists(rae_String path);
 rae_Bool rae_ext_rae_sys_lock_file(rae_String path);
 rae_Bool rae_ext_rae_sys_unlock_file(rae_String path);
