@@ -24,6 +24,22 @@ func loadTextures(reg: mod TextureRegistry) pub {
   let coverKey: String = "albumCover"
   let coverPath: String = "examples/98_mobile_ui/assets/album_art/02_mgmt.jpg"
   let loaded: Texture = textureLoad(reg: reg, key: coverKey, path: coverPath)
+
+  # Profile avatar — pre-circle-cropped at load time so the renderer
+  # doesn't need a mask shader. Use the last album cover in folder
+  # order as a stand-in "user photo"; missing this key (e.g. if the
+  # cover file isn't there) falls back to the placeholder
+  # mat:person icon in `profile_view.rae`.
+  let avatarKey: String = profileAvatarKey()
+  let avatarPath: String = "examples/98_mobile_ui/assets/album_art/royksopp.jpg"
+  let avatar: Texture = loadCircleCroppedTexture(fileName: avatarPath)
+  textureRegisterDirect(reg: reg, key: avatarKey, tex: avatar)
+}
+
+# Registry key the profile screen looks up the circular avatar
+# under. Centralised so both the loader and the view agree.
+func profileAvatarKey() pub ret String {
+  ret "profile.userAvatar"
 }
 
 # Scan the album-art folder and load any JPG/PNG covers not yet
