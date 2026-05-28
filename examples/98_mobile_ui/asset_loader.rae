@@ -26,20 +26,24 @@ func loadTextures(reg: mod TextureRegistry) pub {
   let loaded: Texture = textureLoad(reg: reg, key: coverKey, path: coverPath)
 }
 
-# Scan the album-art folder, load any JPG/PNG covers not yet
-# registered, and return the resulting list of `File` entries to
-# the caller. Called on every transition into the Profile screen,
-# so adding / removing a file in the folder shows up the next time
-# the screen opens.
+# Scan the album-art folder and load any JPG/PNG covers not yet
+# registered into the TextureRegistry. Idempotent — re-runs only
+# load files that aren't already there.
 #
-# Stale entries from a previous scan stay registered (textures
-# already in VRAM) — they're harmless because nothing references
-# them. A future cleanup pass could compare and unload, but for
-# the demo's ~13 covers the memory cost is negligible.
-func refreshProfileCovers(reg: mod TextureRegistry) pub ret List(File) {
+# The host (`main.rae`) calls this once on transition INTO the
+# Profile screen, not on every world rebuild. The grid then reads
+# back from the registry (single source of truth) — no `List(File)`
+# returned here, no per-frame filesystem scan, no ownership
+# gymnastics across the function boundary.
+#
+# Stale entries from previous scans stay registered (textures
+# already in VRAM) — they're harmless because the registry-based
+# grid only renders keys that still exist. A future pass could
+# unload covers whose source file disappeared.
+func refreshProfileCovers(reg: mod TextureRegistry) pub {
   let folder: String = albumArtFolder
   let entries: List(File) = listDir(folder: folder)
-  let result: List(File) = createList(File, initialCap: entries.length)
+  let loaded: Int = 0
   let i: Int = 0
   loop i < entries.length {
     # buf_get rather than `.get(index:)` — Compiled-mode codegen
@@ -52,26 +56,22 @@ func refreshProfileCovers(reg: mod TextureRegistry) pub ret List(File) {
       let isJpeg: Bool = ext.equals(other: "jpeg")
       let isPng: Bool = ext.equals(other: "png")
       if isJpg or isJpeg or isPng {
-        # Force a deep copy of the String fields into fresh locals
-        # before constructing the owned File for `result`. Without
-        # this, `result.add(value: f)` ends up sharing String
-        # pointers with `entries`, and when `entries` drops at
-        # function return the textures in the registry still
-        # resolve fine but the names in `result` go dangling.
+        # Deep-copy the String fields into fresh locals before
+        # constructing the texture key / path strings, otherwise
+        # they share storage with `entries` and would dangle when
+        # `entries` drops at function return. See
+        # [[project-list-struct-ownership]] in memory for context.
         let copiedName: String = f.name
         let copiedFolder: String = f.folder
         let key: String = "profile.{copiedName}"
         if textureHas(reg: reg, key: key) is false {
           let p: String = "{copiedFolder}/{copiedName}"
           let t: Texture = textureLoad(reg: reg, key: key, path: p)
-          log("[profile] loaded cover {copiedName}")
+          loaded = loaded + 1
         }
-        let owned: File = { name: copiedName, folder: copiedFolder }
-        result.add(value: owned)
       }
     }
     i = i + 1
   }
-  log("[profile] {result.length} covers available")
-  ret result
+  log("[profile] refreshed covers — {loaded} new")
 }
