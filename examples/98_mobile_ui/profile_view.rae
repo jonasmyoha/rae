@@ -134,26 +134,45 @@ func gridTileSize() ret Float {
   ret (avail - gapTotal) / cols.toFloat()
 }
 
-# Build one image tile sprite for the given file. The texture key
-# is derived from the file name (see `profileFileKey` in
-# `asset_loader.rae`) — the host registers the texture before
-# `buildProfileWorld` runs, so the sprite always resolves.
-func buildCoverTile(world: mod UiWorld, file: view File, reg: view TextureRegistry) ret Int {
+# Collect the texture-registry keys that belong to the profile
+# grid. Iterating the registry directly makes it the single source
+# of truth: the host calls `refreshProfileCovers` once on Profile
+# screen entry to load textures, and every subsequent rebuild
+# (e.g. on scroll) reads back from this same registry without
+# touching the filesystem again.
+func collectProfileCoverKeys(reg: view TextureRegistry) ret List(String) {
+  let entries: view List(TextureEntry) => reg.entries
+  let result: List(String) = createList(String, initialCap: entries.length)
+  let prefix: String = "profile."
+  let i: Int = 0
+  loop i < entries.length {
+    # buf_get: `.get` on List(UserStruct) returns an opt T that
+    # the C backend doesn't auto-unwrap. See lib/fs.rae note.
+    let e: TextureEntry = rae_ext_rae_buf_get(buf: entries.data, index: i)
+    if e.key.startsWith(prefix: prefix) {
+      let copied: String = e.key
+      result.add(value: copied)
+    }
+    i = i + 1
+  }
+  ret result
+}
+
+# Build one image tile sprite for the given texture key.
+func buildCoverTile(world: mod UiWorld, key: own String) ret Int {
   let tile: Int = createEntity(world: world)
   let size: Float = gridTileSize()
   setRectFixed(world: world, entity: tile, w: size, h: size)
-  let key: String = profileFileKey(file: file)
   setSprite(world: world, entity: tile, key: key, tint: imageTintColor)
   ret tile
 }
 
 # Build a single horizontal row of up to `gridColumns` covers
-# starting at `startIndex`. Returns the row entity.
+# starting at `startIndex` into the key list.
 func buildCoverGridRow(
   world: mod UiWorld
-  covers: view List(File)
+  keys: view List(String)
   startIndex: view Int
-  reg: view TextureRegistry
 ) ret Int {
   let row: Int = createEntity(world: world)
   let rowW: Float = screenW - outerPad * 2.0
@@ -165,15 +184,13 @@ func buildCoverGridRow(
 
   let kids: List(Int) = createList(Int, initialCap: gridColumns)
   let cols: Int = gridColumns
-  let total: Int = covers.length
+  let total: Int = keys.length
   let col: Int = 0
   loop col < cols {
     let i: Int = startIndex + col
     if i < total {
-      # buf_get: Compiled-mode `.get` on List(UserStruct) returns
-      # an opt T that doesn't auto-unwrap; see lib/fs.rae note.
-      let f: File = rae_ext_rae_buf_get(buf: covers.data, index: i)
-      let tile: Int = buildCoverTile(world: world, file: f, reg: reg)
+      let key: String = keys.get(index: i)
+      let tile: Int = buildCoverTile(world: world, key: key)
       kids.add(value: tile)
     }
     col = col + 1
@@ -182,11 +199,13 @@ func buildCoverGridRow(
   ret row
 }
 
-# Compose the full 3-column grid over the provided covers.
-func buildCoverGrid(world: mod UiWorld, covers: view List(File), reg: view TextureRegistry) ret Int {
+# Compose the full 3-column grid over keys collected from the
+# TextureRegistry.
+func buildCoverGrid(world: mod UiWorld, reg: view TextureRegistry) ret Int {
+  let keys: List(String) = collectProfileCoverKeys(reg: reg)
   let grid: Int = createEntity(world: world)
   let cols: Int = gridColumns
-  let total: Int = covers.length
+  let total: Int = keys.length
   let tileH: Float = gridTileSize()
   # rows = ceil(total / cols)
   let rows: Int = (total + cols - 1) / cols
@@ -201,7 +220,7 @@ func buildCoverGrid(world: mod UiWorld, covers: view List(File), reg: view Textu
   let i: Int = 0
   loop i < rows {
     let startIndex: Int = i * cols
-    let row: Int = buildCoverGridRow(world: world, covers: covers, startIndex: startIndex, reg: reg)
+    let row: Int = buildCoverGridRow(world: world, keys: keys, startIndex: startIndex)
     rowKids.add(value: row)
     i = i + 1
   }
@@ -216,7 +235,7 @@ func buildCoverGrid(world: mod UiWorld, covers: view List(File), reg: view Textu
 # past the screen edge — but the host applies `scrollY` as an
 # `Offset.delta.y` so the user can wheel-scroll the column up to
 # bring later rows into view.
-func buildProfileBody(world: mod UiWorld, covers: view List(File), reg: view TextureRegistry, scrollY: view Float) ret Int {
+func buildProfileBody(world: mod UiWorld, reg: view TextureRegistry, scrollY: view Float) ret Int {
   let body: Int = createEntity(world: world)
   let bodyW: Float = screenW - outerPad * 2.0
   # Height matches the visible content area (between top bar and
@@ -249,7 +268,7 @@ func buildProfileBody(world: mod UiWorld, covers: view List(File), reg: view Tex
   setText(world: world, entity: bio, text: bioText, styleId: bioStyle)
 
   let stats: Int = buildStatsRow(world: world)
-  let grid: Int = buildCoverGrid(world: world, covers: covers, reg: reg)
+  let grid: Int = buildCoverGrid(world: world, reg: reg)
 
   let kids: List(Int) = createList(Int, initialCap: 5)
   kids.add(value: avatar)
@@ -287,7 +306,7 @@ func buildProfileTopBar(world: mod UiWorld) ret Int {
 
 func buildProfileWorld(
   scenes: view AlbumScenes
-  reg: mod TextureRegistry
+  reg: view TextureRegistry
   scrollY: view Float
 ) pub ret UiWorld {
   let world: UiWorld = createUiWorld()
@@ -300,23 +319,23 @@ func buildProfileWorld(
   setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
   setPaddingAll(world: world, entity: root, n: outerPad)
 
-  # Refresh the cover list inline. Crossing this `List(File)` across
-  # a function boundary triggers a deep-copy gap — the buffer is
-  # cloned but the inner String fields aren't, so by the time the
-  # grid iterates, the names point at freed memory. Building the
-  # list and consuming it in the same function keeps everything
-  # on the same stack frame.
-  let covers: List(File) = refreshProfileCovers(reg: reg)
+  # No directory scan here — the grid reads back from the texture
+  # registry. The host (`main.rae`) is responsible for calling
+  # `refreshProfileCovers(reg)` exactly once when transitioning into
+  # the Profile screen, so a scroll-triggered rebuild stays cheap.
 
   let topBar: Int = buildProfileTopBar(world: world)
-  let body: Int = buildProfileBody(world: world, covers: covers, reg: reg, scrollY: scrollY)
-  let navTabs: Int = buildNavTabsForScreen(world: world, activeTab: Screen.Profile, scenes: scenes)
+  let body: Int = buildProfileBody(world: world, reg: reg, scrollY: scrollY)
 
-  let kids: List(Int) = createList(Int, initialCap: 3)
+  let kids: List(Int) = createList(Int, initialCap: 2)
   kids.add(value: topBar)
   kids.add(value: body)
-  kids.add(value: navTabs)
   attachChildren(world: world, parent: root, kids: kids)
+
+  # Nav bar mounts as a parentless overlay (same as Album +
+  # NowPlaying). No need for a spacer to push it down — the bar
+  # has its own absolute position via `Offset`.
+  let navTabs: Int = mountNavBarOverlay(world: world, activeTab: Screen.Profile, scenes: scenes)
 
   ret world
 }
