@@ -1,0 +1,124 @@
+# Unit test for `lib/hot_reload` Phase 2 primitives.
+#
+# Covers:
+#   1. parseReloadVerb mapping for known/unknown tokens
+#   2. ReloadSignalWatcher debounce + verb extraction across the
+#      `data`, `reload`, `restart`, and unknown-verb paths
+#   3. Atomic state-file round-trip via the underlying primitive
+#      (the helper's path is hardcoded to `.rae/state.json`, which
+#      we don't want to pollute from a test; the test exercises
+#      the same building block at a /tmp path instead)
+#
+# Strategy: we never construct an `.rae/` directory. The signal
+# watcher is built by hand with a /tmp path so we drive the exact
+# same `pollReloadSignal` code without depending on the default
+# location. Each writeFile is followed by a short sleep so the
+# nanosecond-resolution mtime advances reliably.
+
+import core
+import string
+import sys
+import hot_reload
+
+func describeVerb(v: view Int) ret String {
+  match v {
+    case ReloadVerb.None {
+      ret "None"
+    }
+    case ReloadVerb.Data {
+      ret "Data"
+    }
+    case ReloadVerb.Reload {
+      ret "Reload"
+    }
+    case ReloadVerb.Restart {
+      ret "Restart"
+    }
+  }
+  ret "?"
+}
+
+func bump() {
+  sleep(ms: 20)
+}
+
+func main() {
+  # ---- parseReloadVerb ------------------------------------------------
+  let vData: Int = parseReloadVerb(token: "data")
+  let vReload: Int = parseReloadVerb(token: "reload")
+  let vRestart: Int = parseReloadVerb(token: "restart")
+  let vJunk: Int = parseReloadVerb(token: "junk")
+  let vEmpty: Int = parseReloadVerb(token: "")
+  log("parse data={describeVerb(v: vData)}")
+  log("parse reload={describeVerb(v: vReload)}")
+  log("parse restart={describeVerb(v: vRestart)}")
+  log("parse junk={describeVerb(v: vJunk)}")
+  log("parse empty={describeVerb(v: vEmpty)}")
+
+  # ---- pollReloadSignal end-to-end ------------------------------------
+  let sigPath: String = "/tmp/rae_hot_reload_test_492.signal"
+  if exists(path: sigPath) {
+    delete(path: sigPath)
+  }
+
+  let w: ReloadSignalWatcher = {
+    path: sigPath
+    lastMtime: 0.0
+  }
+
+  # Missing file -> None.
+  let s1: ReloadSignal = pollReloadSignal(w: w)
+  log("missing: verb={describeVerb(v: s1.verb)}")
+
+  # First write: reload abc 1234.
+  writeFile(path: sigPath, content: "reload abc 1234\n")
+  bump()
+  let s2: ReloadSignal = pollReloadSignal(w: w)
+  log("reload: verb={describeVerb(v: s2.verb)} build={s2.buildId} ts={s2.timestampMs}")
+
+  # Same file, mtime unchanged -> None (debounce works).
+  let s3: ReloadSignal = pollReloadSignal(w: w)
+  log("idle: verb={describeVerb(v: s3.verb)}")
+
+  # New write: restart.
+  writeFile(path: sigPath, content: "restart def 5678")
+  bump()
+  let s4: ReloadSignal = pollReloadSignal(w: w)
+  log("restart: verb={describeVerb(v: s4.verb)} build={s4.buildId}")
+
+  # New write: data verb (in-process reload trigger).
+  writeFile(path: sigPath, content: "data xyz 9999")
+  bump()
+  let s5: ReloadSignal = pollReloadSignal(w: w)
+  log("data: verb={describeVerb(v: s5.verb)} build={s5.buildId}")
+
+  # Unrecognized verb: mtime bumped, verb=None, watcher not wedged.
+  writeFile(path: sigPath, content: "garbage 0 0")
+  bump()
+  let s6: ReloadSignal = pollReloadSignal(w: w)
+  log("garbage: verb={describeVerb(v: s6.verb)}")
+
+  # Next valid write still detected after a bad one.
+  writeFile(path: sigPath, content: "reload r2 2222")
+  bump()
+  let s7: ReloadSignal = pollReloadSignal(w: w)
+  log("recovered: verb={describeVerb(v: s7.verb)} build={s7.buildId}")
+
+  delete(path: sigPath)
+
+  # ---- state-file round-trip pattern ---------------------------------
+  # The helper hard-codes `.rae/state.json`; exercise the same I/O
+  # path through the underlying primitive at /tmp so the test doesn't
+  # touch the workspace.
+  let statePath: String = "/tmp/rae_hot_reload_test_492.state"
+  if exists(path: statePath) {
+    delete(path: statePath)
+  }
+
+  writeFile(path: statePath, content: "screen=profile;scroll=420")
+  let restored: String = rae_ext_rae_sys_read_file(path: statePath)
+  log("state: {restored}")
+
+  let okDel: Bool = delete(path: statePath)
+  log("clear: deleted={okDel} exists={exists(path: statePath)}")
+}
