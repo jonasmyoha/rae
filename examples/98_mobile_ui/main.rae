@@ -709,9 +709,14 @@ func main() {
               if profileScrollY > 0.0 {
                 profileScrollY = 0.0
               }
-              # Clamp on the bottom side too: roughly one full screen
-              # worth of scroll covers the 13-cover grid.
-              let minScroll: Float = -800.0
+              # Clamp on the bottom side. Sized so the last grid
+              # row clears the bottom dock with ~1 row of empty
+              # space below it (typical mobile "comfortable scroll
+              # bottom"). For 27 covers / 3 cols = 9 rows at
+              # ~154 px pitch: grid bottom at body-local y ≈ 1656,
+              # screen y ≈ 1736; dock top at 899 — so scrollY ≤
+              # -(1736 - 899 + ~150) ≈ -990.
+              let minScroll: Float = -1050.0
               if profileScrollY < minScroll {
                 profileScrollY = minScroll
               }
