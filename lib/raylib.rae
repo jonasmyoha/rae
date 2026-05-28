@@ -233,6 +233,17 @@ func postEmptyEvent() extern
 # press, etc.). Call once after `initWindow`.
 func installWindowCloseWaker() extern
 
+# Opt this process out of macOS App Nap. Without this, apps with
+# low idle CPU — exactly what an event-driven wait-events loop
+# achieves — get throttled by RunningBoardServices after a few
+# minutes; events keep arriving in bursts (scroll, drag) but
+# discrete clicks get coalesced and the app feels "hung". Goes
+# through `objc_msgSend` to call
+# `[[NSProcessInfo processInfo] beginActivityWithOptions:reason:]`
+# and stashes the returned activity for the process lifetime.
+# No-op on non-macOS targets.
+func disableAppNap() extern
+
 func isKeyDown(key: Int) extern ret Bool
 
 func isKeyPressed(key: Int) extern ret Bool
