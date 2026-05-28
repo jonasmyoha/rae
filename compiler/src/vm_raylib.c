@@ -177,6 +177,44 @@ static bool native_loadTexture(struct VM* vm, VmNativeResult* out, const Value* 
     return true;
 }
 
+static bool native_loadCircleCroppedTexture(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 1 || args[0].type != VAL_STRING) {
+        fprintf(stderr, "error: loadCircleCroppedTexture expects 1 string arg, got %zu\n", count);
+        return false;
+    }
+    Image img = LoadImage(args[0].as.string_value.chars);
+    Texture t = {0};
+    if (img.data != NULL) {
+        ImageFormat(&img, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
+        float cx = (float)img.width / 2.0f;
+        float cy = (float)img.height / 2.0f;
+        float r = (img.width < img.height ? (float)img.width : (float)img.height) / 2.0f;
+        float r2 = r * r;
+        unsigned char* data2 = (unsigned char*)img.data;
+        for (int y = 0; y < img.height; y++) {
+            for (int x = 0; x < img.width; x++) {
+                float dx = (float)x + 0.5f - cx;
+                float dy = (float)y + 0.5f - cy;
+                float d2 = dx * dx + dy * dy;
+                if (d2 > r2) {
+                    data2[(y * img.width + x) * 4 + 3] = 0;
+                }
+            }
+        }
+        t = LoadTextureFromImage(img);
+        UnloadImage(img);
+    }
+    out->has_value = true;
+    out->value = value_object(5, "Texture");
+    out->value.as.object_value.fields[0] = value_int((int64_t)t.id);
+    out->value.as.object_value.fields[1] = value_int((int64_t)t.width);
+    out->value.as.object_value.fields[2] = value_int((int64_t)t.height);
+    out->value.as.object_value.fields[3] = value_int((int64_t)t.mipmaps);
+    out->value.as.object_value.fields[4] = value_int((int64_t)t.format);
+    return true;
+}
+
 static bool native_unloadTexture(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
     if (count != 5) {
@@ -1015,6 +1053,7 @@ bool vm_registry_register_raylib(VmRegistry* registry) {
     ok &= vm_registry_register_native(registry, "endDrawing", native_endDrawing, NULL);
     ok &= vm_registry_register_native(registry, "clearBackground", native_clearBackground, NULL);
     ok &= vm_registry_register_native(registry, "loadTexture", native_loadTexture, NULL);
+    ok &= vm_registry_register_native(registry, "loadCircleCroppedTexture", native_loadCircleCroppedTexture, NULL);
     ok &= vm_registry_register_native(registry, "unloadTexture", native_unloadTexture, NULL);
     ok &= vm_registry_register_native(registry, "captureAndBlurBackdrop", native_captureAndBlurBackdrop, NULL);
     ok &= vm_registry_register_native(registry, "captureAndBlurRegion", native_captureAndBlurRegion, NULL);
