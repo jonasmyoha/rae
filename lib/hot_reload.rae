@@ -52,6 +52,10 @@ func hotReloadSignalPath() pub ret String {
   ret ".rae/reload.signal"
 }
 
+func hotReloadBuildStatusPath() pub ret String {
+  ret ".rae/build.status"
+}
+
 # ----- state file -----------------------------------------------------
 
 # Native shortcut: `lib/sys.readFile` returns `opt String`, but the
@@ -126,6 +130,85 @@ func createReloadSignalWatcher() pub ret ReloadSignalWatcher {
     path: p
     lastMtime: mt
   }
+}
+
+# ----- build status ---------------------------------------------------
+#
+# Phase 6: the supervisor (`rae watch`) writes `.rae/build.status`
+# atomically after every build attempt. Apps can poll this file to
+# render a "compile error" / "reloading" overlay, surface the last
+# failure to the developer, or block a re-render until the next
+# successful build.
+#
+# File format (one line per field, supervisor side):
+#
+#     line 1: "ok" or "error"
+#     line 2: short message (e.g. "b3", "build b4 failed", "live")
+#
+# Both lines may be missing if no supervisor is running — in that
+# case `readBuildStatus()` returns a `BuildStatus` with
+# `present=false` so the app can distinguish "no supervisor" from
+# "supervisor + last build ok".
+
+type BuildStatus {
+  # True iff `.rae/build.status` exists. False means no supervisor
+  # has reported anything yet (e.g. app launched standalone, or
+  # supervisor hasn't completed its first build).
+  present: Bool
+
+  # True iff the last reported build succeeded. Meaningless when
+  # `present` is false.
+  ok: Bool
+
+  # Free-form one-line message the supervisor attached to the last
+  # outcome — typically a build id ("b4"), an error summary
+  # ("build b3 failed"), or "live" for the Live target.
+  message: String
+}
+
+func emptyBuildStatus() ret BuildStatus {
+  ret BuildStatus {
+    present: false
+    ok: false
+    message: ""
+  }
+}
+
+# Parse the two-line build-status format the supervisor writes.
+# Empty input → `present=false`. Exposed for tests; production
+# code calls `readBuildStatus()` to also handle the file-missing
+# case.
+func parseBuildStatus(raw: view String) pub ret BuildStatus {
+  if raw.length() is 0 {
+    ret emptyBuildStatus()
+  }
+  let lines: List(String) = raw.split(sep: "\n")
+  if lines.length is 0 {
+    ret emptyBuildStatus()
+  }
+  let kind: String = lines.get(index: 0).trim()
+  let okFlag: Bool = kind.equals(other: "ok")
+  let msg: String = ""
+  if lines.length > 1 {
+    msg = lines.get(index: 1).trim()
+  }
+  ret BuildStatus {
+    present: true
+    ok: okFlag
+    message: msg
+  }
+}
+
+# Read the current build status from `.rae/build.status`. Cheap
+# (single file read); callers can poll this every frame or every
+# few frames as they prefer.
+func readBuildStatus() pub ret BuildStatus {
+  let path: String = hotReloadBuildStatusPath()
+  if exists(path: path) is false {
+    ret emptyBuildStatus()
+  }
+  let raw: String = rae_ext_rae_sys_read_file(path: path)
+  ret parseBuildStatus(raw: raw)
 }
 
 func parseReloadVerb(token: view String) ret ReloadVerb {

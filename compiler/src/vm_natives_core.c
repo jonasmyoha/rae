@@ -761,6 +761,28 @@ static bool native_rae_sys_read_file(struct VM* vm,
   return true;
 }
 
+// String-returning variant. The C runtime returns an empty rae_String
+// when the file doesn't exist; honour that contract in Live too so
+// callers using `extern ret String` (i.e. bypassing opt) get a real
+// (empty) string rather than `none`. Used by lib/hot_reload to dodge
+// a known opt-String comparison bug. See lib/file_watch.rae note.
+static bool native_rae_sys_read_file_or_empty(struct VM* vm,
+                                              VmNativeResult* out_result,
+                                              const Value* args,
+                                              size_t arg_count,
+                                              void* user_data) {
+  (void)vm; (void)user_data;
+  if (arg_count != 1) return false;
+  const Value* path_val = deref_value(&args[0]);
+  if (path_val->type != VAL_STRING) return false;
+  rae_String path = { path_val->as.string_value.chars, path_val->as.string_value.length };
+  rae_String res = rae_ext_rae_sys_read_file(path);
+  out_result->has_value = true;
+  if (res.data) out_result->value = value_string_take(res.data, (size_t)res.len);
+  else out_result->value = value_string_copy("", 0);
+  return true;
+}
+
 static bool native_rae_sys_write_file(struct VM* vm,
                                        VmNativeResult* out_result,
                                        const Value* args,
@@ -1226,7 +1248,7 @@ bool register_default_natives(VmRegistry* registry, TickCounter* tick_counter) {
   ok = vm_registry_register_native(registry, "rae_sys_write_file", native_rae_sys_write_file, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_ext_rae_sys_exit", native_rae_sys_exit, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_ext_rae_sys_get_env", native_rae_sys_get_env, NULL) && ok;
-  ok = vm_registry_register_native(registry, "rae_ext_rae_sys_read_file", native_rae_sys_read_file, NULL) && ok;
+  ok = vm_registry_register_native(registry, "rae_ext_rae_sys_read_file", native_rae_sys_read_file_or_empty, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_ext_rae_sys_write_file", native_rae_sys_write_file, NULL) && ok;
   ok = vm_registry_register_native(registry, "fileModTime", native_rae_sys_file_mtime, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_sys_file_mtime", native_rae_sys_file_mtime, NULL) && ok;
