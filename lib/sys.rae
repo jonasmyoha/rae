@@ -11,6 +11,8 @@ func rae_sys_rename(oldPath: String, newPath: String) extern ret Bool
 
 func rae_sys_delete(path: String) extern ret Bool
 
+func rae_sys_make_dir(path: String) extern ret Bool
+
 func rae_sys_exists(path: String) extern ret Bool
 
 func rae_sys_lock_file(path: String) extern ret Bool
@@ -49,6 +51,14 @@ func rename(oldPath: view String, newPath: view String) ret Bool {
 
 func delete(path: view String) ret Bool {
   ret rae_sys_delete(path: path)
+}
+
+# Create a single directory at `path` with mode 0755. Idempotent —
+# returns true if the directory already exists. Does NOT create
+# intermediate parents (no `mkdir -p`); call this once per level if
+# you need a nested path.
+func makeDir(path: view String) ret Bool {
+  ret rae_sys_make_dir(path: path)
 }
 
 func exists(path: view String) ret Bool {
