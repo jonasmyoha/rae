@@ -340,6 +340,28 @@ func main() {
     # scrollY` then shifts the scroll-body up by `-scrollY` pixels,
     # bringing later rows of the cover grid into view.
     let profileScrollY: Float = 0.0
+    # iOS-style drag scrolling state. The wheel handler further down
+    # also writes `profileScrollY`; these locals add touch/mouse-drag
+    # support with the same physics: 1:1 finger tracking during the
+    # drag, momentum scroll on release, exponential decay.
+    let dragPrevDown: Bool = false
+    let dragMouseY: Float = 0.0
+    let dragStartX: Float = 0.0
+    let dragStartY: Float = 0.0
+    # `dragActive` flips true only once movement crosses the click-vs-
+    # drag threshold. A press that releases below the threshold fires
+    # a normal click; once `dragActive` flips, the release-click is
+    # suppressed via `dragJustReleased`.
+    let dragActive: Bool = false
+    # Last-3-frames rolling buffer of per-frame y-deltas. Averaged at
+    # release-time to give the momentum-fling an initial velocity
+    # less twitchy than the single last frame.
+    let dragDelta0: Float = 0.0
+    let dragDelta1: Float = 0.0
+    let dragDelta2: Float = 0.0
+    # Momentum velocity in px-per-frame. Decayed each frame after
+    # release by `dragFriction`; cleared when scroll hits a bound.
+    let scrollVelocity: Float = 0.0
     # `true` while the Profile screen's cover textures are loaded
     # into the registry. Flips false the moment we leave the screen
     # so the next entry re-scans the folder (picking up renamed /
@@ -456,7 +478,118 @@ func main() {
           running = false
         } else {
           updateInputSystem(input: input, world: world)
-          let nextScreen: Screen = dispatchActions(input: input, current: currentScreen, playback: playback)
+
+          # iOS-style drag-to-scroll + click vs drag separation.
+          # Runs only on the Profile screen (the only scrollable
+          # screen today). Logic:
+          #   * On mouse-down: capture start position, kill any
+          #     in-flight momentum.
+          #   * While the mouse is held and movement crosses a small
+          #     threshold: enter `dragActive`, then track 1:1 — each
+          #     per-frame y-delta is added directly to
+          #     `profileScrollY`, with the same hard clamps the
+          #     wheel path uses.
+          #   * On release after `dragActive`: compute an initial
+          #     momentum velocity as the average of the last three
+          #     frames' deltas, and set `dragJustReleased` so the
+          #     release-click is suppressed (otherwise the user's
+          #     last finger position would also fire whatever tab /
+          #     button / cover-tile happens to be under it).
+          #   * Each frame after release: apply `scrollVelocity * 1`
+          #     to `profileScrollY` and decay velocity by friction.
+          #     Stops cleanly at the clamp bounds.
+          # Wheel-scroll behaviour further down is left intact — both
+          # drivers write the same `profileScrollY`.
+          let dragJustReleased: Bool = false
+          if currentScreen is Screen.Profile {
+            let curMouseX: Float = getMouseX().toFloat()
+            let curMouseY: Float = getMouseY().toFloat()
+            let curMouseDown: Bool = isMouseButtonDown(button: mouseButtonLeft)
+            let dragThreshold: Float = 6.0
+            let dragFriction: Float = 0.95
+            let dragMinVel: Float = 0.3
+            let scrollMin: Float = -1050.0
+            if curMouseDown {
+              if dragPrevDown is false {
+                dragStartX = curMouseX
+                dragStartY = curMouseY
+                dragActive = false
+                scrollVelocity = 0.0
+                dragDelta0 = 0.0
+                dragDelta1 = 0.0
+                dragDelta2 = 0.0
+              } else {
+                let dxFromStart: Float = curMouseX - dragStartX
+                let dyFromStart: Float = curMouseY - dragStartY
+                if dragActive is false {
+                  let distSq: Float = dxFromStart * dxFromStart + dyFromStart * dyFromStart
+                  if distSq > dragThreshold * dragThreshold {
+                    dragActive = true
+                  }
+                }
+                if dragActive {
+                  let deltaY: Float = curMouseY - dragMouseY
+                  profileScrollY = profileScrollY + deltaY
+                  if profileScrollY > 0.0 {
+                    profileScrollY = 0.0
+                  }
+                  if profileScrollY < scrollMin {
+                    profileScrollY = scrollMin
+                  }
+                  dragDelta2 = dragDelta1
+                  dragDelta1 = dragDelta0
+                  dragDelta0 = deltaY
+                  switching = true
+                }
+              }
+            } else {
+              if dragPrevDown {
+                if dragActive {
+                  scrollVelocity = (dragDelta0 + dragDelta1 + dragDelta2) / 3.0
+                  dragJustReleased = true
+                }
+                dragActive = false
+              }
+              # Momentum step
+              let absVel: Float = scrollVelocity
+              if absVel < 0.0 {
+                absVel = 0.0 - absVel
+              }
+              if absVel > dragMinVel {
+                profileScrollY = profileScrollY + scrollVelocity
+                if profileScrollY > 0.0 {
+                  profileScrollY = 0.0
+                  scrollVelocity = 0.0
+                }
+                if profileScrollY < scrollMin {
+                  profileScrollY = scrollMin
+                  scrollVelocity = 0.0
+                }
+                scrollVelocity = scrollVelocity * dragFriction
+                switching = true
+              } else {
+                scrollVelocity = 0.0
+              }
+            }
+            dragMouseY = curMouseY
+            dragPrevDown = curMouseDown
+          } else {
+            # Leaving Profile resets all drag/momentum state so the
+            # next entry starts clean.
+            dragPrevDown = false
+            dragActive = false
+            scrollVelocity = 0.0
+          }
+
+          # Skip dispatch on the single frame where a drag just
+          # ended — the release-click would otherwise hit whatever
+          # is under the finger (a tab, a cover tile, the play
+          # button…). Wheel scrolling never sets `dragJustReleased`,
+          # so this only fires after an actual drag gesture.
+          let nextScreen: Screen = currentScreen
+          if dragJustReleased is false {
+            nextScreen = dispatchActions(input: input, current: currentScreen, playback: playback)
+          }
 
           # In-app debug UI: process any debug.* action that fired
           # this frame. `dispatchDebugAction` toggles the persistent
@@ -467,7 +600,10 @@ func main() {
           # piece that changed (scene `$tokenName` colors bind at
           # parse time). Re-parsing on every state change is cheap
           # and avoids special-casing.
-          let debugChanged: Bool = dispatchDebugAction(input: input, debug: debug)
+          let debugChanged: Bool = false
+          if dragJustReleased is false {
+            debugChanged = dispatchDebugAction(input: input, debug: debug)
+          }
           if debugChanged {
             syncColorsFromTheme()
             scenes = loadAllScenes()
