@@ -8,6 +8,7 @@
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <signal.h>
+#include <dirent.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -1024,6 +1025,24 @@ int64_t rae_ext_rae_str_index_of(rae_String s, rae_String sub) {
   return (int64_t)(p - (const char*)s.data);
 }
 
+rae_String rae_ext_rae_str_to_lower(rae_String s) {
+  if (!s.data || s.len == 0) return (rae_String){NULL, 0, 0, 0};
+  uint8_t* out = malloc(s.len + 1);
+  if (!out) return (rae_String){NULL, 0, 0, 0};
+  for (int64_t i = 0; i < s.len; i++) {
+    uint8_t c = s.data[i];
+    if (c >= 'A' && c <= 'Z') {
+      out[i] = c + ('a' - 'A');
+    } else {
+      out[i] = c;
+    }
+  }
+  out[s.len] = '\0';
+  rae_mem_str_tag(out, s.len + 1, RAE_SITE_CONCAT);
+  rae_string_pool_register(out);
+  return (rae_String){out, s.len, s.len + 1, 1};
+}
+
 rae_String rae_ext_rae_str_trim(rae_String s) {
   if (!s.data || s.len == 0) return (rae_String){NULL, 0, 0, 0};
   int64_t start = 0;
@@ -1189,6 +1208,59 @@ int64_t rae_ext_rae_sys_rss_kb(void) {
 #else
     return -1;
 #endif
+}
+
+/* Non-recursive directory scan. Returns a newline-separated list of
+ * entry names (excluding "." and ".."), or the empty string when the
+ * directory can't be opened. Caller-side `lib/fs.rae::listDir` splits
+ * this back into `List(File)`. Names are returned in the order the
+ * OS yields them — POSIX makes no guarantee, and APFS in particular
+ * returns entries in insertion order rather than sorted. */
+rae_String rae_ext_rae_sys_list_dir(rae_String folder) {
+  if (!folder.data) return (rae_String){NULL, 0, 0, 0};
+  DIR* dir = opendir((const char*)folder.data);
+  if (!dir) return (rae_String){NULL, 0, 0, 0};
+
+  /* Grow a heap buffer as we append entries with '\n' separators.
+   * Keeps the function single-pass (no readdir count then re-read). */
+  size_t cap = 256;
+  size_t len = 0;
+  uint8_t* buf = malloc(cap);
+  if (!buf) { closedir(dir); return (rae_String){NULL, 0, 0, 0}; }
+
+  struct dirent* entry;
+  while ((entry = readdir(dir)) != NULL) {
+    const char* name = entry->d_name;
+    if (name[0] == '.' && (name[1] == '\0' || (name[1] == '.' && name[2] == '\0'))) {
+      continue; /* skip . and .. */
+    }
+    size_t nameLen = strlen(name);
+    size_t need = len + nameLen + 1; /* +1 for separator newline */
+    if (need > cap) {
+      while (need > cap) cap *= 2;
+      uint8_t* grown = realloc(buf, cap);
+      if (!grown) { free(buf); closedir(dir); return (rae_String){NULL, 0, 0, 0}; }
+      buf = grown;
+    }
+    if (len > 0) {
+      buf[len++] = '\n';
+    }
+    memcpy(buf + len, name, nameLen);
+    len += nameLen;
+  }
+  closedir(dir);
+
+  if (len == 0) { free(buf); return (rae_String){NULL, 0, 0, 0}; }
+
+  /* Null-terminate and register with the string pool so the caller's
+   * Rae-side `let raw: String = ...` gets the same lifetime semantics
+   * as any other owning String. */
+  uint8_t* finalBuf = realloc(buf, len + 1);
+  if (!finalBuf) finalBuf = buf;
+  finalBuf[len] = '\0';
+  rae_mem_str_tag(finalBuf, len + 1, RAE_SITE_CONCAT);
+  rae_string_pool_register(finalBuf);
+  return (rae_String){finalBuf, (int64_t)len, (int64_t)(len + 1), 1};
 }
 
 double rae_ext_rae_sys_file_mtime(rae_String path) {

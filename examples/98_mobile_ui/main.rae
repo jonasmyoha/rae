@@ -145,7 +145,8 @@ func main() {
     # land in the baseline.
     let stressPlayback: PlaybackState = createPlaybackState()
     let stressScroll: Float = 0.0
-    let warm: UiWorld = buildScreenWorld(screen: Screen.Album, scenes: scenes, playback: stressPlayback, scrollY: stressScroll)
+    let stressCovers: List(File) = createList(File, initialCap: 0)
+    let warm: UiWorld = buildScreenWorld(screen: Screen.Album, scenes: scenes, playback: stressPlayback, profileCovers: stressCovers, scrollY: stressScroll)
     layoutSystem(world: warm)
     transformSystem(world: warm)
     let baselineKb: Int = processRssKb()
@@ -155,7 +156,7 @@ func main() {
       if (stressI - (stressI / 2) * 2) is 1 {
         stressScreen = Screen.NowPlaying
       }
-      let sworld: UiWorld = buildScreenWorld(screen: stressScreen, scenes: scenes, playback: stressPlayback, scrollY: stressScroll)
+      let sworld: UiWorld = buildScreenWorld(screen: stressScreen, scenes: scenes, playback: stressPlayback, profileCovers: stressCovers, scrollY: stressScroll)
       layoutSystem(world: sworld)
       transformSystem(world: sworld)
       stressI = stressI + 1
@@ -211,7 +212,11 @@ func main() {
       shotPlayback.elapsedSec = shotPlayback.durationSec * pf
     }
     let shotScroll: Float = 0.0
-    let world: UiWorld = buildScreenWorld(screen: screen, scenes: scenes, playback: shotPlayback, scrollY: shotScroll)
+    let shotCovers: List(File) = createList(File, initialCap: 0)
+    if screen is Screen.Profile {
+      shotCovers = refreshProfileCovers(reg: texReg)
+    }
+    let world: UiWorld = buildScreenWorld(screen: screen, scenes: scenes, playback: shotPlayback, profileCovers: shotCovers, scrollY: shotScroll)
     layoutSystem(world: world)
     transformSystem(world: world)
     applyPlaybackToWorld(world: world, state: shotPlayback)
@@ -323,9 +328,17 @@ func main() {
     # scrollY` then shifts the scroll-body up by `-scrollY` pixels,
     # bringing later rows of the cover grid into view.
     let profileScrollY: Float = 0.0
+    # Album-cover entries for the Profile grid. Re-scanned by
+    # `refreshProfileCovers` (asset_loader.rae) every time the user
+    # enters the Profile screen — so dropping a new file into
+    # `assets/album_art/` shows up the next time the screen opens.
+    let profileCovers: List(File) = createList(File, initialCap: 16)
 
     loop running {
-      let world: UiWorld = buildScreenWorld(screen: currentScreen, scenes: scenes, playback: playback, scrollY: profileScrollY)
+      if currentScreen is Screen.Profile {
+        profileCovers = refreshProfileCovers(reg: texReg)
+      }
+      let world: UiWorld = buildScreenWorld(screen: currentScreen, scenes: scenes, playback: playback, profileCovers: profileCovers, scrollY: profileScrollY)
       # Layer the reusable debug-UI entities (button + optional menu
       # overlay) onto the freshly-built world BEFORE layout runs so
       # they participate in measure/place like any other entity.

@@ -17,6 +17,7 @@
 # when scrollY changes — no per-frame mutation needed.
 import core
 import string
+import fs
 import ui/components
 import ui/ecs
 import ui/layout
@@ -133,12 +134,15 @@ func gridTileSize() ret Float {
   ret (avail - gapTotal) / cols.toFloat()
 }
 
-# Build one image tile (rounded-corner sprite of the cover at index).
-func buildCoverTile(world: mod UiWorld, coverIndex: view Int) ret Int {
+# Build one image tile sprite for the given file. The texture key
+# is derived from the file name (see `profileFileKey` in
+# `asset_loader.rae`) — the host registers the texture before
+# `buildProfileWorld` runs, so the sprite always resolves.
+func buildCoverTile(world: mod UiWorld, file: view File) ret Int {
   let tile: Int = createEntity(world: world)
   let size: Float = gridTileSize()
   setRectFixed(world: world, entity: tile, w: size, h: size)
-  let key: String = profileCoverKey(index: coverIndex)
+  let key: String = profileFileKey(file: file)
   setSprite(world: world, entity: tile, key: key, tint: imageTintColor)
   ret tile
 }
@@ -147,8 +151,8 @@ func buildCoverTile(world: mod UiWorld, coverIndex: view Int) ret Int {
 # starting at `startIndex`. Returns the row entity.
 func buildCoverGridRow(
   world: mod UiWorld
+  covers: view List(File)
   startIndex: view Int
-  totalCovers: view Int
 ) ret Int {
   let row: Int = createEntity(world: world)
   let rowW: Float = screenW - outerPad * 2.0
@@ -159,11 +163,16 @@ func buildCoverGridRow(
   setLayout(world: world, entity: row, kind: layH, gap: gridTileGap, alignCross: alignS)
 
   let kids: List(Int) = createList(Int, initialCap: gridColumns)
+  let cols: Int = gridColumns
+  let total: Int = covers.length
   let col: Int = 0
-  loop col < gridColumns {
+  loop col < cols {
     let i: Int = startIndex + col
-    if i < totalCovers {
-      let tile: Int = buildCoverTile(world: world, coverIndex: i)
+    if i < total {
+      # buf_get: Compiled-mode `.get` on List(UserStruct) returns
+      # an opt T that doesn't auto-unwrap; see lib/fs.rae note.
+      let f: File = rae_ext_rae_buf_get(buf: covers.data, index: i)
+      let tile: Int = buildCoverTile(world: world, file: f)
       kids.add(value: tile)
     }
     col = col + 1
@@ -172,14 +181,14 @@ func buildCoverGridRow(
   ret row
 }
 
-# Compose the full 3-column grid over every registered cover.
-func buildCoverGrid(world: mod UiWorld) ret Int {
+# Compose the full 3-column grid over the provided covers.
+func buildCoverGrid(world: mod UiWorld, covers: view List(File)) ret Int {
   let grid: Int = createEntity(world: world)
-  let paths: List(String) = profileCoverPaths()
-  let total: Int = paths.length
+  let cols: Int = gridColumns
+  let total: Int = covers.length
   let tileH: Float = gridTileSize()
-  # rows = ceil(total / gridColumns)
-  let rows: Int = (total + gridColumns - 1) / gridColumns
+  # rows = ceil(total / cols)
+  let rows: Int = (total + cols - 1) / cols
   let gridH: Float = tileH * rows.toFloat() + gridTileGap * (rows - 1).toFloat()
   let gridW: Float = screenW - outerPad * 2.0
   setRectFixed(world: world, entity: grid, w: gridW, h: gridH)
@@ -190,8 +199,8 @@ func buildCoverGrid(world: mod UiWorld) ret Int {
   let rowKids: List(Int) = createList(Int, initialCap: rows)
   let i: Int = 0
   loop i < rows {
-    let startIndex: Int = i * gridColumns
-    let row: Int = buildCoverGridRow(world: world, startIndex: startIndex, totalCovers: total)
+    let startIndex: Int = i * cols
+    let row: Int = buildCoverGridRow(world: world, covers: covers, startIndex: startIndex)
     rowKids.add(value: row)
     i = i + 1
   }
@@ -206,7 +215,7 @@ func buildCoverGrid(world: mod UiWorld) ret Int {
 # past the screen edge — but the host applies `scrollY` as an
 # `Offset.delta.y` so the user can wheel-scroll the column up to
 # bring later rows into view.
-func buildProfileBody(world: mod UiWorld, scrollY: view Float) ret Int {
+func buildProfileBody(world: mod UiWorld, covers: view List(File), scrollY: view Float) ret Int {
   let body: Int = createEntity(world: world)
   let bodyW: Float = screenW - outerPad * 2.0
   # Height matches the visible content area (between top bar and
@@ -239,7 +248,7 @@ func buildProfileBody(world: mod UiWorld, scrollY: view Float) ret Int {
   setText(world: world, entity: bio, text: bioText, styleId: bioStyle)
 
   let stats: Int = buildStatsRow(world: world)
-  let grid: Int = buildCoverGrid(world: world)
+  let grid: Int = buildCoverGrid(world: world, covers: covers)
 
   let kids: List(Int) = createList(Int, initialCap: 5)
   kids.add(value: avatar)
@@ -275,7 +284,11 @@ func buildProfileTopBar(world: mod UiWorld) ret Int {
 
 # --- public entrypoint -------------------------------------------------
 
-func buildProfileWorld(scenes: view AlbumScenes, scrollY: view Float) pub ret UiWorld {
+func buildProfileWorld(
+  scenes: view AlbumScenes
+  covers: view List(File)
+  scrollY: view Float
+) pub ret UiWorld {
   let world: UiWorld = createUiWorld()
 
   let root: Int = createEntity(world: world)
@@ -287,7 +300,7 @@ func buildProfileWorld(scenes: view AlbumScenes, scrollY: view Float) pub ret Ui
   setPaddingAll(world: world, entity: root, n: outerPad)
 
   let topBar: Int = buildProfileTopBar(world: world)
-  let body: Int = buildProfileBody(world: world, scrollY: scrollY)
+  let body: Int = buildProfileBody(world: world, covers: covers, scrollY: scrollY)
   let navTabs: Int = buildNavTabsForScreen(world: world, activeTab: Screen.Profile, scenes: scenes)
 
   let kids: List(Int) = createList(Int, initialCap: 3)
