@@ -2687,7 +2687,15 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
   struct sigaction sa;
   memset(&sa, 0, sizeof(sa));
   sa.sa_handler = watch_sigint_handler;
-  sa.sa_flags = SA_RESTART;
+  // Intentionally NOT SA_RESTART: we want the sleep / waitpid in
+  // the supervisor loop to return EINTR on signal so g_watch_stop
+  // is checked promptly. With SA_RESTART, a SIGTERM arriving
+  // during the 150 ms sleep gets swallowed until the sleep
+  // naturally completes — which made the devtools Stop button
+  // appear to do nothing for up to a frame at a time, and could
+  // hang indefinitely if the loop happened to be in a longer
+  // wait (waitpid grace window).
+  sa.sa_flags = 0;
   sigaction(SIGINT, &sa, NULL);
   sigaction(SIGTERM, &sa, NULL);
 
@@ -2731,6 +2739,19 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
         }
         fflush(stdout);
         child = -1;
+
+        // Clean exit outside the health window = user closed the
+        // window / app finished. Exit the supervisor too so the
+        // devtools doesn't have to. The old behaviour was to sit
+        // idle waiting for source changes, which orphaned the
+        // process under launchd and made the devtools' Stop button
+        // ineffective.
+        if (!in_window && WIFEXITED(status) && code == 0) {
+          printf("rae watch: child finished cleanly, shutting down supervisor\n");
+          fflush(stdout);
+          g_watch_stop = 1;
+          continue;
+        }
 
         // Phase 4: bad exit inside the health window → fall back.
         if (!is_live && in_window && bad && previous_bin[0]) {
