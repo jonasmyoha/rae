@@ -493,6 +493,8 @@ func renderDebugClickRects(
   world: view UiWorld
   idleColor: view Color
   hoverColor: view Color
+  pressColor: view Color
+  pressed: view Bool
   mouseX: view Float
   mouseY: view Float
 ) pub {
@@ -521,6 +523,13 @@ func renderDebugClickRects(
           let col: Color = idleColor
           if inside {
             col = hoverColor
+            # Mouse button held while hovering: distinct "armed" tint
+            # so the user can see at a glance that a click on this
+            # rect would land. Mirrors the press-tracking the input
+            # system does internally (pressedEntity).
+            if pressed {
+              col = pressColor
+            }
           }
           drawRectangleLines(
             x: wt.x
@@ -530,8 +539,11 @@ func renderDebugClickRects(
             color: col
           )
           # Hovered rect: tiny label at the top-LEFT corner showing
-          # the rect's absolute position and size. ASCII-only ('x' as
-          # the multiplier instead of the U+00D7 multiply sign — the
+          # the entity id, absolute position, and size. Entity id is
+          # the leading `#N` so the leading number is unambiguous
+          # (otherwise the bare x coordinate can read as an opaque
+          # large value before you spot the ',y' after it). ASCII-
+          # only ('x' as the multiplier instead of U+00D7 — the
           # host's font atlas is typically built from a small glyph
           # set and U+00D7 renders as '?' fallback). Drawn with font
           # slot 0; falls back to raylib's default when the slot
@@ -541,7 +553,7 @@ func renderDebugClickRects(
             let iy: Int = wt.y.toInt()
             let iw: Int = cr.w.toInt()
             let ih: Int = cr.h.toInt()
-            let dimText: String = "{ix},{iy} {iw}x{ih}"
+            let dimText: String = "#{e} {ix},{iy} {iw}x{ih}"
             let dimSize: Float = 11.0
             let dimSpacing: Float = 0.5
             # Anchor inside the top-left corner with a small inset so
