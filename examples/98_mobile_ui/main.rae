@@ -339,6 +339,10 @@ func main() {
     # just unpacks it for the renderer below.
     let debugRectColor: Color = { r: 0, g: 220, b: 255, a: 200 }
     let debugHoverColor: Color = { r: 255, g: 0, b: 220, a: 255 }
+    # Yellow "armed" tint when the user has the mouse button held
+    # over a clickable — visualises the click landing site exactly
+    # the way `pressedEntity` tracks it internally.
+    let debugPressColor: Color = { r: 255, g: 220, b: 0, a: 255 }
     let debugCursorColor: Color = { r: 255, g: 220, b: 0, a: 255 }
 
     # In-app debug UI lives in `lib/ui/debug.rae`. The DebugSystem
@@ -1007,10 +1011,13 @@ func main() {
             if debug.showInputOutlines {
               let mx: Float = getMouseX().toFloat()
               let my: Float = getMouseY().toFloat()
+              let pressedNow: Bool = isMouseButtonDown(button: mouseButtonLeft)
               renderDebugClickRects(
                 world: world
                 idleColor: debugRectColor
                 hoverColor: debugHoverColor
+                pressColor: debugPressColor
+                pressed: pressedNow
                 mouseX: mx
                 mouseY: my
               )
