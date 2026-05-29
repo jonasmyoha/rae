@@ -22,7 +22,7 @@
       "cleanCommand": "cd compiler && make clean",
       "rebuildCommand": "cd compiler && make clean && make",
       "exampleRunCommand": "./compiler/bin/rae run --project {{ENTRY_DIR}} {{ENTRY}}",
-      "exampleWatchCommand": "./compiler/bin/rae run --project {{ENTRY_DIR}} --watch {{ENTRY}}",
+      "exampleWatchCommand": "./compiler/bin/rae watch --target live --project {{ENTRY_DIR}} {{ENTRY}}",
       "exampleBuildCommand": "./compiler/bin/rae build --target live --project {{ENTRY_DIR}} --out {{OUTDIR}} {{ENTRY}}"
     },
     {
@@ -33,6 +33,7 @@
       "cleanCommand": "cd compiler && make clean",
       "rebuildCommand": "cd compiler && make clean && make",
       "exampleRunCommand": "./compiler/bin/rae build --target compiled --project {{ENTRY_DIR}} --emit-c --out {{OUTDIR}}/out.c {{ENTRY}} && gcc -O2 -o {{OUTDIR}}/app {{OUTDIR}}/out.c {{OUTDIR}}/rae_runtime.c third_party/raylib/rae_raylib.c third_party/tinyexpr/rae_tinyexpr.c $(ls {{ENTRY_DIR}}/*.c 2>/dev/null | grep -v \"out.c\" | grep -v \"rae_runtime.c\" || true) -I{{OUTDIR}} -Ithird_party/raylib -Ithird_party/tinyexpr -I/opt/homebrew/include -DRAE_HAS_RAYLIB /opt/homebrew/lib/libraylib.a -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL && {{OUTDIR}}/app",
+      "exampleWatchCommand": "./compiler/bin/rae watch --target compiled --project {{ENTRY_DIR}} {{ENTRY}}",
       "exampleBuildCommand": "./compiler/bin/rae build --target compiled --project {{ENTRY_DIR}} --emit-c --out {{OUTDIR}} {{ENTRY}}"
     },
     {
