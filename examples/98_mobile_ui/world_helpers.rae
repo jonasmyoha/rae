@@ -51,6 +51,19 @@ func setOnClick(world: mod UiWorld, entity: view Int, actionId: own String) pub 
   componentSet(this: world.onClicks, entity: entity, data: click)
 }
 
+# Tag `entity` as a hero source/destination keyed by `key`. The hero
+# system finds matching keys across an old/new world pair on screen
+# change and animates position + size between the two. Texture key
+# doubles as the hero key here so each album cover image gets a
+# unique, content-addressed hero identifier without needing a
+# separate albumId mapping.
+func setHeroWidget(world: mod UiWorld, entity: view Int, key: own String) pub {
+  let hw: HeroWidget = {
+    key: key
+  }
+  componentSet(this: world.heroWidgets, entity: entity, data: hw)
+}
+
 func setShapeRect(world: mod UiWorld, entity: view Int, fill: view RgbaColor) pub {
   let shape: Shape = {
     kind: ShapeKind.Rect

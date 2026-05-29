@@ -299,7 +299,13 @@ func main() {
     # texture lifecycle (capture on open, unload on close).
     let prevMenuOpen: Bool = false
     let anim: HeroAnim = createHeroAnim()
-    let heroKey: String = "albumCover"
+    # App-mutable cross-screen state. `currentAlbumKey` tracks the
+    # texture key of whichever album cover the user is "in" — the
+    # static `albumCover` default until they tap a Profile tile, at
+    # which point dispatchActions stores that tile's textureKey here
+    # and the hero rebind below propagates it into Album / NowPlaying.
+    # Hero animations always use this current value as their key.
+    let appState: AppState = createAppState()
     let heroDuration: Float = 0.30
     let pendingSrc: Bool = false
     let pendingDst: Bool = false
@@ -408,6 +414,15 @@ func main() {
       }
 
       let world: UiWorld = buildScreenWorld(screen: currentScreen, scenes: scenes, playback: playback, texReg: texReg, scrollY: profileScrollY)
+      # Rebind any scene-authored `"albumCover"` placeholder hero +
+      # sprite to the user's current album. This is what lets the
+      # hero animation system find matching keys at Profile (where
+      # tiles use their own texture key) and at Album / NowPlaying
+      # (which author the placeholder and get renamed here).
+      # Always runs — the default `currentAlbumKey` is already the
+      # profile-side key, so the static Album / NowPlaying scenes
+      # adopt it from launch.
+      rebindHero(world: world, fromKey: "albumCover", toKey: appState.currentAlbumKey)
       # Layer the reusable debug-UI entities (button + optional menu
       # overlay) onto the freshly-built world BEFORE layout runs so
       # they participate in measure/place like any other entity.
@@ -451,9 +466,9 @@ func main() {
       # paint it. We DON'T start the clock here — that waits until
       # the first frame actually runs (see `transitionArmed` below).
       if pendingDst {
-        let captured: Bool = captureHeroTarget(anim: anim, world: world, key: heroKey)
+        let captured: Bool = captureHeroTarget(anim: anim, world: world, key: appState.currentAlbumKey)
         if captured {
-          setHeroVisible(world: world, key: heroKey, visible: false)
+          setHeroVisible(world: world, key: appState.currentAlbumKey, visible: false)
           transitionArmed = true
         }
         pendingDst = false
@@ -701,7 +716,13 @@ func main() {
           # so this only fires after an actual drag gesture.
           let nextScreen: Screen = currentScreen
           if dragJustReleased is false {
-            nextScreen = dispatchActions(input: input, current: currentScreen, playback: playback)
+            nextScreen = dispatchActions(
+              input: input
+              current: currentScreen
+              playback: playback
+              state: appState
+              world: world
+            )
           }
 
           # In-app debug UI: process any debug.* action that fired
@@ -754,7 +775,7 @@ func main() {
             # transform/layout aren't going to change inside this
             # frame, so reading now or after the draw gives the same
             # rect; reading first keeps the draw + switch grouped.
-            let gotSrc: Bool = captureHeroSource(anim: anim, world: world, key: heroKey)
+            let gotSrc: Bool = captureHeroSource(anim: anim, world: world, key: appState.currentAlbumKey)
             pendingSrc = gotSrc
             pendingDst = gotSrc
           }
@@ -782,7 +803,7 @@ func main() {
           # the first frame that will draw it — start the clock here
           # so `t = 0` at the moment the first overlay actually paints.
           if transitionArmed {
-            startHeroTransition(anim: anim, key: heroKey, durationSec: heroDuration, now: now)
+            startHeroTransition(anim: anim, key: appState.currentAlbumKey, durationSec: heroDuration, now: now)
             transitionArmed = false
           }
           let animating: Bool = updateHeroAnim(anim: anim, now: now)
@@ -795,7 +816,7 @@ func main() {
           if animating is false {
             if pendingSrc {
               if willSwitch is false {
-                setHeroVisible(world: world, key: heroKey, visible: true)
+                setHeroVisible(world: world, key: appState.currentAlbumKey, visible: true)
                 pendingSrc = false
               }
             }
