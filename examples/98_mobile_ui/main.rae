@@ -18,6 +18,7 @@ import core
 import string
 import sys
 import file_watch
+import hot_reload
 import ui/ecs
 import ui/hero
 import ui/layout
@@ -256,6 +257,22 @@ func main() {
       currentScreen = Screen.Profile
     }
 
+    # Phase 3-6 hot-reload restore. If `.rae/state.json` exists from a
+    # previous run (the supervisor signalled `reload`, the app saved
+    # state via saveStateAndExit, the supervisor swapped binaries),
+    # apply the saved screen + profile scroll so this new build picks
+    # up where the previous one left off. Defaults pass through
+    # untouched when nothing is saved.
+    let restoredDefault: RestoredState = {
+      screen: currentScreen
+      scrollY: 0.0
+    }
+    let restored: RestoredState = loadRestoredState(fallback: restoredDefault)
+    currentScreen = restored.screen
+    # `profileScrollY` itself is declared further down; the restored
+    # value is carried in `restored.scrollY` until the inner loop's
+    # init block reads it back.
+
     # Data hot reload: poll every watched `.raescene` file for mtime
     # changes each frame (throttled to 4 Hz). When a file changes,
     # re-parse all scenes and force an outer-loop world rebuild on
@@ -339,7 +356,17 @@ func main() {
     # Stored as a *negative* value when scrolled — `Offset.delta.y =
     # scrollY` then shifts the scroll-body up by `-scrollY` pixels,
     # bringing later rows of the cover grid into view.
-    let profileScrollY: Float = 0.0
+    #
+    # Initial value comes from `restored.scrollY` (defaulting to 0.0)
+    # so a `rae watch` reload that landed on Profile preserves the
+    # user's vertical position.
+    let profileScrollY: Float = restored.scrollY
+
+    # Hot-reload signal watcher. The supervisor writes a fresh signal
+    # to `.rae/reload.signal` on every successful rebuild; the inner
+    # loop polls this once per frame and, on verb=Reload, snapshots
+    # state and exits 0 so the supervisor can swap in the new build.
+    let reloadWatcher: ReloadSignalWatcher = createReloadSignalWatcher()
     # iOS-style drag scrolling state. The wheel handler further down
     # also writes `profileScrollY`; these locals add touch/mouse-drag
     # support with the same physics: 1:1 finger tracking during the
@@ -477,6 +504,16 @@ func main() {
           log("[auto-exit] reached {autoExitSec}s wall-clock; shutting down")
           running = false
         } else {
+          # Hot-reload poll. If `rae watch` signalled a fresh build,
+          # snapshot route + scroll into .rae/state.json and exit 0.
+          # The supervisor sees the clean exit, swaps in the new
+          # binary, and the next boot will hit `loadRestoredState`
+          # above and resume on the same screen at the same scroll.
+          let sig: ReloadSignal = pollReloadSignal(w: reloadWatcher)
+          if sig.verb is ReloadVerb.Reload {
+            saveStateAndExit(screen: currentScreen, scrollY: profileScrollY)
+          }
+
           updateInputSystem(input: input, world: world)
 
           # iOS-style drag-to-scroll + click vs drag separation.
