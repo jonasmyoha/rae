@@ -801,6 +801,14 @@ func main() {
               state: appState
               world: world
             )
+          } else {
+            # Diagnostic: drag-release path skipped dispatch. If you
+            # see this while doing what feels like a click, the
+            # gesture was reclassified as a drag (see dragThreshold).
+            if input.events.length > 0 {
+              let dropped: Int = input.events.length
+              log("[dispatch] dragJustReleased=true, dropping {dropped} pending event(s)")
+            }
           }
 
           # In-app debug UI: process any debug.* action that fired
