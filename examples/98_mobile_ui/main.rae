@@ -407,18 +407,26 @@ func main() {
     # Momentum velocity in px-per-frame. Decayed each frame after
     # release by `dragFriction`; cleared when scroll hits a bound.
     let scrollVelocity: Float = 0.0
-    # Pressed-entity id preserved across outer-loop world rebuilds.
-    # The rubber-band spring sets `switching = true` on every step
-    # while the scroll is out of bounds, which rebuilds the world
-    # AND the InputSystem (line below). Without preserving this id,
-    # a press at frame N goes into InputSystem A, A is destroyed,
-    # and the release at frame N+1 lands in a fresh InputSystem B
-    # whose pressedEntity defaults to -1 — so the release-vs-press
-    # match in `updateInputSystem` fails and the click is dropped.
-    # Symptom: scroll a few times to the bottom of Profile, then no
-    # tile click registers (`pressed=-1` in the loop trace, even
-    # though the click hits a visible tile in the rebuilt world).
-    let savedPressedEntity: Int = -1
+    # Single InputSystem for the whole app lifetime.
+    #
+    # Conceptual split: `UiWorld` is the renderable tree, rebuilt
+    # freely on any state change (every rubber-band spring step
+    # rebuilds it, for example). `InputSystem` is application input
+    # state — a press that's still being held has to outlive any
+    # number of world rebuilds that happen between it and the
+    # eventual release. Per-frame fields (`pointer`, `events`) get
+    # reset / refilled by `updateInputSystem` each frame, so persist-
+    # ing the struct only carries over what genuinely should live
+    # across frames: the `pressedEntity` id of the currently-held
+    # press.
+    #
+    # Entity ids are stable across rebuilds within the same screen
+    # (assigned in deterministic order during world build), so a
+    # press on tile 25 in the outgoing world resolves to the same
+    # tile in the incoming one. `input.pressedEntity = -1` is reset
+    # on screen change below so a stale id doesn't bleed across
+    # screens with unrelated entity layouts.
+    let input: InputSystem = createInputSystem()
     # `true` while the Profile screen's cover textures are loaded
     # into the registry. Flips false the moment we leave the screen
     # so the next entry re-scans the folder (picking up renamed /
@@ -497,15 +505,9 @@ func main() {
         pendingDst = false
       }
 
-      let input: InputSystem = createInputSystem()
-      # Restore the saved press across the world rebuild — see the
-      # `savedPressedEntity` declaration comment above for why.
-      # Entity ids are assigned in deterministic order during world
-      # build, so a Profile tile that was pressed in the outgoing
-      # world has the same id in the incoming one (so long as the
-      # screen / tile count hasn't changed — both paths reset
-      # `savedPressedEntity` to -1).
-      input.pressedEntity = savedPressedEntity
+      # The `input` system lives in the function scope above this
+      # loop — see its declaration comment for why it has to outlive
+      # world rebuilds.
       let switching: Bool = false
       loop running and switching is false {
         # Event-driven wait. Block the thread until an OS event (mouse,
@@ -593,11 +595,6 @@ func main() {
           }
 
           updateInputSystem(input: input, world: world)
-          # Snapshot for the next outer rebuild (see savedPressedEntity).
-          # `updateInputSystem` resets `pressedEntity` to -1 on release,
-          # so this naturally clears the saved state once a click cycle
-          # completes — only a still-held press survives a rebuild.
-          savedPressedEntity = input.pressedEntity
 
           # iOS-style scroll physics for the Profile screen. Drag,
           # trackpad/wheel, momentum, and rubber-band overshoot all
@@ -1023,9 +1020,9 @@ func main() {
             # starts at the top.
             profileScrollY = 0.0
             # Entity ids on the new screen are unrelated to the
-            # outgoing one; drop any held-press snapshot so the next
+            # outgoing one; drop any held-press id so the next
             # screen's release doesn't accidentally match a stale id.
-            savedPressedEntity = -1
+            input.pressedEntity = -1
             switching = true
           } else {
             # No screen change requested — but check the watched scene
