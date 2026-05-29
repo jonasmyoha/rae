@@ -133,6 +133,17 @@ func main() {
   let waitTraceEnv: String = getEnv(name: "RAE_UI_WAIT_TRACE")
   let waitTraceEnabled: Bool = waitTraceEnv.length() > 0
 
+  # `RAE_UI_DEBUG_LOOP=1`: per-frame trace of the inner-loop state.
+  # Use when the app appears stuck: relaunch with the env var set,
+  # reproduce, capture the last ~50 lines from the supervisor
+  # terminal. Each frame logs: heartbeat (screen, scroll state,
+  # which animation flags drove the timeout), the wait result
+  # (requested vs actual duration), input event count, dispatch
+  # outcomes, and the render-vs-skip decision.
+  let loopDebugEnv: String = getEnv(name: "RAE_UI_DEBUG_LOOP")
+  let loopDebugEnabled: Bool = loopDebugEnv.length() > 0
+  let loopDebugFrame: Int = 0
+
   # Memory-stress mode: with `RAE_UI_STRESS_REBUILDS=1`, rebuilds the
   # world `stressN` times in a tight loop (no input, no draw) and
   # logs every 100 iterations so an external script can sample RSS
@@ -503,6 +514,16 @@ func main() {
           mouseDown: isMouseButtonDown(button: mouseButtonLeft)
           pollWatcher: true
         )
+        # Heartbeat: prints once per frame BEFORE the wait. If this
+        # line stops appearing in the log, the loop has stalled
+        # inside the inner body (not in waitEventsTimeout). If it
+        # keeps printing but UI doesn't update, the input or render
+        # branch below is being skipped — check the post-wait line.
+        if loopDebugEnabled {
+          loopDebugFrame = loopDebugFrame + 1
+          let mouseDown: Bool = isMouseButtonDown(button: mouseButtonLeft)
+          log("[loop {loopDebugFrame}] screen={screenToInt(s: currentScreen)} scrollY={profileScrollY} vel={scrollVelocity} animA={anim.active} animP={playback.isPlaying} animS={scrollAnimating} mouse={mouseDown} timeout={timeout}")
+        }
         # When RAE_AUTO_EXIT_SEC is set, clamp the wait so the deadline
         # actually fires on time — otherwise an idle iteration could
         # sleep for `idleCapSec` (30 s) past the requested exit time.
@@ -518,11 +539,18 @@ func main() {
         }
         let preWait: Float = getTime()
         waitEventsTimeout(seconds: timeout)
+        let waitDt: Float = getTime() - preWait
         if waitTraceEnabled {
-          let waitDt: Float = getTime() - preWait
           if waitDt > 0.005 {
             log("[wait] dt={waitDt} timeout={timeout}")
           }
+        }
+        # Post-wait trace. If dt ≈ timeout the wait ran to its full
+        # cap (no OS event woke us) — diagnostic for "stuck on
+        # idle". If dt < timeout an OS event woke us early, which
+        # is what we want most of the time.
+        if loopDebugEnabled {
+          log("[loop {loopDebugFrame}] wait dt={waitDt}")
         }
         if windowShouldClose() {
           running = false
@@ -879,6 +907,15 @@ func main() {
             }
           }
           lastPressed = input.pressedEntity
+
+          # Render decision trace: prints whether we'll paint this
+          # frame and why. If `active=false` repeatedly while the UI
+          # is visibly frozen, the bug is in the dirty signals; if
+          # `active=true` but the UI is frozen, the bug is downstream
+          # in renderSystem / endDrawing.
+          if loopDebugEnabled {
+            log("[loop {loopDebugFrame}] input.events={input.events.length} pressed={input.pressedEntity} animating={animating} active={active}")
+          }
 
           # Event-driven render gate. With wait-events, the loop only
           # iterates when something happened (an OS event arrived or a
