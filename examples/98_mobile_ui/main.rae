@@ -1,3 +1,4 @@
+# rae: max-lines 1200
 # Mobile-UI demo entrypoint. The actual work — scene loading, world
 # building, screen routing — lives in sibling `.rae` files in this same
 # directory, which Rae auto-imports because they share the project
@@ -468,8 +469,22 @@ func main() {
         # mouse button is held, the watcher poll cadence otherwise, or
         # the safety cap when truly idle. Idle CPU goes to ~0 because
         # the OS suspends us in nanosleep instead of busy-polling.
+        # Treat in-flight scroll momentum / spring as an animation so
+        # the event loop wakes at frame cadence (~16 ms) instead of
+        # the file-watcher's idle poll (50 ms / ~20 fps). Otherwise
+        # the spring-back after release renders chunky because the
+        # physics step only runs once per OS event wake.
+        let scrollAnimating: Bool = false
+        let scrollOOB: Bool = profileScrollY > 0.0 or profileScrollY < -1050.0
+        let velAbs: Float = scrollVelocity
+        if velAbs < 0.0 {
+          velAbs = 0.0 - velAbs
+        }
+        if velAbs > 0.05 or scrollOOB {
+          scrollAnimating = true
+        }
         let timeout: Float = nextWaitTimeoutSec(
-          animating: anim.active or playback.isPlaying
+          animating: anim.active or playback.isPlaying or scrollAnimating
           mouseDown: isMouseButtonDown(button: mouseButtonLeft)
           pollWatcher: true
         )
@@ -516,38 +531,46 @@ func main() {
 
           updateInputSystem(input: input, world: world)
 
-          # iOS-style drag-to-scroll + click vs drag separation.
-          # Runs only on the Profile screen (the only scrollable
-          # screen today). Logic:
-          #   * On mouse-down: capture start position, kill any
-          #     in-flight momentum.
-          #   * While the mouse is held and movement crosses a small
-          #     threshold: enter `dragActive`, then track 1:1 — each
-          #     per-frame y-delta is added directly to
-          #     `profileScrollY`, with the same hard clamps the
-          #     wheel path uses.
-          #   * On release after `dragActive`: compute an initial
-          #     momentum velocity as the average of the last three
-          #     frames' deltas, and set `dragJustReleased` so the
-          #     release-click is suppressed (otherwise the user's
-          #     last finger position would also fire whatever tab /
-          #     button / cover-tile happens to be under it).
-          #   * Each frame after release: apply `scrollVelocity * 1`
-          #     to `profileScrollY` and decay velocity by friction.
-          #     Stops cleanly at the clamp bounds.
-          # Wheel-scroll behaviour further down is left intact — both
-          # drivers write the same `profileScrollY`.
+          # iOS-style scroll physics for the Profile screen. Drag,
+          # trackpad/wheel, momentum, and rubber-band overshoot all
+          # feed one position+velocity state (profileScrollY +
+          # scrollVelocity). Pure math lives in scroll_physics.rae.
+          #
+          # Behaviour summary:
+          #   * Drag inside bounds:   1:1 finger tracking.
+          #   * Drag past a bound:    rubber-banded (UIScrollView
+          #     formula — finger movement starts 1:1 and slows
+          #     asymptotically with overshoot).
+          #   * Release after drag:   initial velocity = recent
+          #     finger speed (pickReleaseVelocity), then drift
+          #     with friction; on entering an overshoot region,
+          #     spring back to the bound — preserving incoming
+          #     velocity so a flick that overshoots smoothly
+          #     decelerates into the bounce.
+          #   * Wheel / trackpad:     handled in the dedicated
+          #     block further down, with the same rubber-band on
+          #     deltas when past a bound. Wheel kicks the same
+          #     spring-back code via the physics step below when
+          #     the user lets go.
+          #   * dragJustReleased gate keeps the release-click from
+          #     firing on whatever's under the cursor (tab, tile,
+          #     play button).
           let dragJustReleased: Bool = false
           if currentScreen is Screen.Profile {
             let curMouseX: Float = getMouseX().toFloat()
             let curMouseY: Float = getMouseY().toFloat()
             let curMouseDown: Bool = isMouseButtonDown(button: mouseButtonLeft)
             let dragThreshold: Float = 6.0
-            let dragFriction: Float = 0.95
-            let dragMinVel: Float = 0.3
             let scrollMin: Float = -1050.0
+            let scrollMax: Float = 0.0
+            # Rubber-band reference dimension — tunes how stretchy
+            # the overshoot feels. iOS uses ~viewport height.
+            let rubberDim: Float = screenH
+
             if curMouseDown {
               if dragPrevDown is false {
+                # New press. Capture origin + kill any in-flight
+                # momentum/spring so the finger takes over instantly.
                 dragStartX = curMouseX
                 dragStartY = curMouseY
                 dragActive = false
@@ -565,47 +588,100 @@ func main() {
                   }
                 }
                 if dragActive {
-                  let deltaY: Float = curMouseY - dragMouseY
-                  profileScrollY = profileScrollY + deltaY
-                  if profileScrollY > 0.0 {
-                    profileScrollY = 0.0
-                  }
-                  if profileScrollY < scrollMin {
-                    profileScrollY = scrollMin
-                  }
+                  let rawDelta: Float = curMouseY - dragMouseY
+                  # Rubber-band the delta if past a bound; 1:1
+                  # otherwise. No hard clamp — visual overshoot is
+                  # the whole point.
+                  let eff: Float = dampedDelta(
+                    current: profileScrollY
+                    delta: rawDelta
+                    low: scrollMin
+                    high: scrollMax
+                    dim: rubberDim
+                  )
+                  profileScrollY = profileScrollY + eff
                   dragDelta2 = dragDelta1
                   dragDelta1 = dragDelta0
-                  dragDelta0 = deltaY
+                  dragDelta0 = eff
                   switching = true
                 }
               }
             } else {
               if dragPrevDown {
                 if dragActive {
-                  scrollVelocity = (dragDelta0 + dragDelta1 + dragDelta2) / 3.0
+                  # iOS "velocity at lift": pick the most recent
+                  # meaningful frame delta, not a 3-frame average
+                  # — averaging underestimated when the finger
+                  # paused before release, which is what made the
+                  # spring feel jerky on the old path.
+                  scrollVelocity = pickReleaseVelocity(
+                    d0: dragDelta0
+                    d1: dragDelta1
+                    d2: dragDelta2
+                  )
                   dragJustReleased = true
                 }
                 dragActive = false
               }
-              # Momentum step
-              let absVel: Float = scrollVelocity
-              if absVel < 0.0 {
-                absVel = 0.0 - absVel
-              }
-              if absVel > dragMinVel {
-                profileScrollY = profileScrollY + scrollVelocity
-                if profileScrollY > 0.0 {
-                  profileScrollY = 0.0
-                  scrollVelocity = 0.0
-                }
+
+              # Physics step. Out of bounds → spring toward the
+              # nearest edge, preserving incoming velocity. In
+              # bounds with non-trivial velocity → exponential
+              # momentum decay (drift). A drift step that exits
+              # the range naturally lands in the spring branch
+              # on the next frame — no discrete handoff.
+              let isOOB: Bool = profileScrollY > scrollMax or profileScrollY < scrollMin
+              if isOOB {
+                let target: Float = scrollMax
                 if profileScrollY < scrollMin {
-                  profileScrollY = scrollMin
+                  target = scrollMin
+                }
+                # Critically-damped spring (ζ = 1.0). Settles at the
+                # bound without oscillating past it. ζ = friction /
+                # (2 * sqrt(tension)) — with tension 0.08, critical
+                # friction is 2 * sqrt(0.08) ≈ 0.566. The previous
+                # 0.30 was visibly under-damped, which is what made
+                # the spring read as bouncing "back down from the
+                # top" instead of stopping cleanly at the edge.
+                let tension: Float = 0.08
+                let friction: Float = 0.56
+                scrollVelocity = springStepVelocity(
+                  pos: profileScrollY
+                  velocity: scrollVelocity
+                  target: target
+                  tension: tension
+                  friction: friction
+                )
+                profileScrollY = profileScrollY + scrollVelocity
+                # Settle test: snap to target when both displacement
+                # and velocity are below subpixel threshold so we
+                # don't trail off in floating-point noise.
+                let displ: Float = profileScrollY - target
+                let absD: Float = displ
+                if absD < 0.0 {
+                  absD = 0.0 - absD
+                }
+                let absV: Float = scrollVelocity
+                if absV < 0.0 {
+                  absV = 0.0 - absV
+                }
+                if absD < 0.5 and absV < 0.1 {
+                  profileScrollY = target
                   scrollVelocity = 0.0
                 }
-                scrollVelocity = scrollVelocity * dragFriction
                 switching = true
               } else {
-                scrollVelocity = 0.0
+                let absVel: Float = scrollVelocity
+                if absVel < 0.0 {
+                  absVel = 0.0 - absVel
+                }
+                if absVel > 0.3 {
+                  profileScrollY = profileScrollY + scrollVelocity
+                  scrollVelocity = scrollVelocity * 0.97
+                  switching = true
+                } else {
+                  scrollVelocity = 0.0
+                }
               }
             }
             dragMouseY = curMouseY
@@ -877,12 +953,13 @@ func main() {
             }
           }
 
-          # Profile-screen wheel scroll. Read the wheel each frame; when
-          # the user scrolls, adjust `profileScrollY` and trigger an
-          # outer-loop rebuild so the Offset on the scroll-body picks
-          # up the new value. Wheel deltas are in raylib's "ticks"
-          # (typically ±1 per detent); we scale to pixels so one detent
-          # moves about a third of a tile.
+          # Profile-screen wheel / 2-finger trackpad scroll. Shares
+          # the same rubber-band-when-OOB damping the drag path
+          # uses, so a trackpad scroll that overshoots looks
+          # identical to a finger-drag overshoot. Spring-back is
+          # driven by the drag block's physics step on subsequent
+          # frames when the wheel goes idle (the spring branch
+          # runs as long as mouse is up and the position is OOB).
           if currentScreen is Screen.Profile {
             let wheel: Float = getMouseWheelMove()
             if wheel > 0.001 or wheel < -0.001 {
@@ -890,21 +967,23 @@ func main() {
               # Wheel-up means "scroll content down" on macOS; flip
               # sign so positive wheel produces a more-negative
               # scrollY (= content shifts up).
-              profileScrollY = profileScrollY + wheel * pixelsPerTick
-              if profileScrollY > 0.0 {
-                profileScrollY = 0.0
-              }
-              # Clamp on the bottom side. Sized so the last grid
-              # row clears the bottom dock with ~1 row of empty
-              # space below it (typical mobile "comfortable scroll
-              # bottom"). For 27 covers / 3 cols = 9 rows at
-              # ~154 px pitch: grid bottom at body-local y ≈ 1656,
-              # screen y ≈ 1736; dock top at 899 — so scrollY ≤
-              # -(1736 - 899 + ~150) ≈ -990.
-              let minScroll: Float = -1050.0
-              if profileScrollY < minScroll {
-                profileScrollY = minScroll
-              }
+              let rawDelta: Float = wheel * pixelsPerTick
+              # Damp the delta when already past a bound so further
+              # wheel input produces diminishing motion. Range
+              # constants matched to the grid; see drag block.
+              let wheelMin: Float = -1050.0
+              let wheelMax: Float = 0.0
+              let eff: Float = dampedDelta(
+                current: profileScrollY
+                delta: rawDelta
+                low: wheelMin
+                high: wheelMax
+                dim: screenH
+              )
+              profileScrollY = profileScrollY + eff
+              # Wheel input cancels any in-flight momentum/spring;
+              # the user is now driving directly.
+              scrollVelocity = 0.0
               switching = true
             }
           }
