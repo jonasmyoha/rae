@@ -643,7 +643,17 @@ func main() {
             let curMouseX: Float = getMouseX().toFloat()
             let curMouseY: Float = getMouseY().toFloat()
             let curMouseDown: Bool = isMouseButtonDown(button: mouseButtonLeft)
-            let dragThreshold: Float = 6.0
+            # Tap-vs-drag activation distance. Higher than the previous
+            # 6 px because once `dragActive` flips true, the release-
+            # click is unconditionally skipped (see `dragJustReleased`
+            # below). 6 px was tight enough that natural hand tremor
+            # during a click crossed it — the press would land on a
+            # tile, the user would release, and no `OnClick` would
+            # fire because the gesture had been reclassified as a
+            # drag. ~10 pt matches the iOS UIPanGestureRecognizer
+            # default and leaves comfortable headroom for deliberate
+            # swipes.
+            let dragThreshold: Float = 10.0
             let scrollMin: Float = -1050.0
             let scrollMax: Float = 0.0
             # Rubber-band reference dimension — tunes how stretchy
