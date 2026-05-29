@@ -428,6 +428,13 @@ func main() {
     # on screen change below so a stale id doesn't bleed across
     # screens with unrelated entity layouts.
     let input: InputSystem = createInputSystem()
+    # Entity id under the cursor on the previous render-gate check.
+    # Only used when `debug.showInputOutlines` is on: a frame re-
+    # renders only when the hovered entity *changes*, so a still
+    # cursor over the same target stays at 0 fps. Persists across
+    # world rebuilds (entity ids are stable while the screen layout
+    # is) so the first frame after a rebuild doesn't false-trigger.
+    let lastHoveredEntity: Int = -1
     # `true` while the Profile screen's cover textures are loaded
     # into the registry. Flips false the moment we leave the screen
     # so the next entry re-scans the folder (picking up renamed /
@@ -929,17 +936,26 @@ func main() {
               active = true
             }
           }
+          # Input-outline debug overlay: re-render only when the
+          # hovered OnClick entity *changes*, not every frame the
+          # overlay is on. Idle cursor / cursor parked over the same
+          # rect stays at 0 fps; crossing a rect boundary triggers
+          # one re-render so the highlight follows. We always compute
+          # `currentHovered` when the toggle is on so the per-frame
+          # comparison below is meaningful; the hitTest walk is cheap
+          # (linear over OnClick entities).
+          let currentHovered: Int = -1
+          if debug.showInputOutlines {
+            let outlineMx: Float = getMouseX().toFloat()
+            let outlineMy: Float = getMouseY().toFloat()
+            currentHovered = hitTest(world: world, x: outlineMx, y: outlineMy)
+          }
           if active is false {
-            # While the input-outline debug overlay is on, force a
-            # render on every loop tick so the hovered-rect highlight
-            # follows mouse movement (raylib only emits a wake-up on
-            # button events, not pure motion — without this the
-            # hover would only update when the world rebuilds for
-            # some other reason).
-            if debug.showInputOutlines {
+            if currentHovered is not lastHoveredEntity {
               active = true
             }
           }
+          lastHoveredEntity = currentHovered
           lastPressed = input.pressedEntity
 
           # Render decision trace: prints whether we'll paint this
