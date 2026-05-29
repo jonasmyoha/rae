@@ -62,6 +62,7 @@ import ui/theme
 let debugActionToggleMenu: String = "debug.toggleMenu"
 let debugActionToggleTheme: String = "debug.toggleTheme"
 let debugActionToggleLabels: String = "debug.toggleLabels"
+let debugActionToggleInputOutlines: String = "debug.toggleInputOutlines"
 let debugActionDismiss: String = "debug.dismiss"
 
 # ----- colors (immutable; not theme-driven, the debug UI should look
@@ -103,6 +104,10 @@ type DebugSystem {
   # User-facing state.
   menuOpen: Bool
   showLabels: Bool
+  # Draw cyan / magenta outlines around every OnClick entity in the
+  # world; hovered rects swap colour and gain a small `x,y w×h` label
+  # at the top-right corner. Toggle from the debug menu.
+  showInputOutlines: Bool
 
   # Placement of the button. Anchored to the bottom-right by default,
   # but the host is free to overwrite these before adding the layer.
@@ -171,6 +176,7 @@ func createDebugSystem() pub ret DebugSystem {
   ret DebugSystem {
     menuOpen: false
     showLabels: false
+    showInputOutlines: false
     buttonX: 16.0
     buttonY: 16.0
     buttonSize: defaultSize
@@ -456,6 +462,11 @@ func buildSwitchRow(
   setFixedRect(world: world, entity: row, w: width, h: 56.0)
   let smallGap: Float = 12.0
   setHorizontalLayout(world: world, entity: row, gap: smallGap, alignCross: AlignKind.Center)
+  # OnClick on the ROW (not the pill) so the entire row — label + gap
+  # + pill — is a single tap target. Hit-test walks children first
+  # and only falls back to the parent when no child carries an
+  # OnClick, so the label still routes its tap through the row.
+  setOnClickAction(world: world, entity: row, actionId: actionId)
 
   let label: Int = createEntity(world: world)
   setFixedRect(world: world, entity: label, w: width - 80.0, h: 24.0)
@@ -463,7 +474,8 @@ func buildSwitchRow(
   setDebugText(world: world, entity: label, text: labelText, styleId: labelStyle)
 
   # iOS switch: an outer rounded pill (color depends on `on`) with a
-  # white circle knob nudged left/right.
+  # white circle knob nudged left/right. Visual only — the row above
+  # owns the OnClick.
   let pill: Int = createEntity(world: world)
   setFixedRect(world: world, entity: pill, w: 56.0, h: 32.0)
   let pillFill: RgbaColor = debugSwitchOffColor()
@@ -472,7 +484,6 @@ func buildSwitchRow(
   }
   setRoundedShape(world: world, entity: pill, fill: pillFill, radius: 16.0)
   setStackLayout(world: world, entity: pill)
-  setOnClickAction(world: world, entity: pill, actionId: actionId)
 
   let knob: Int = createEntity(world: world)
   setFixedRect(world: world, entity: knob, w: 26.0, h: 26.0)
@@ -572,9 +583,20 @@ func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret Int 
     width: panelW - 40.0
   )
 
-  let rows: List(Int) = createList(Int, initialCap: 2)
+  let outlinesLabel: String = "Input outlines"
+  let outlinesAction: String = debugActionToggleInputOutlines
+  let outlinesRow: Int = buildSwitchRow(
+    world: world
+    labelText: outlinesLabel
+    actionId: outlinesAction
+    on: debug.showInputOutlines
+    width: panelW - 40.0
+  )
+
+  let rows: List(Int) = createList(Int, initialCap: 3)
   rows.add(value: themeRow)
   rows.add(value: labelsRow)
+  rows.add(value: outlinesRow)
   attachKids(world: world, parent: panel, kids: rows)
 
   let backdropKids: List(Int) = createList(Int, initialCap: 1)
@@ -679,6 +701,10 @@ func dispatchDebugAction(input: view InputSystem, debug: mod DebugSystem) pub re
       debug.showLabels = debug.showLabels is false
       changed = true
     }
+    if actionId.equals(other: debugActionToggleInputOutlines) {
+      debug.showInputOutlines = debug.showInputOutlines is false
+      changed = true
+    }
 
     i = i + 1
   }
@@ -699,6 +725,9 @@ func isDebugAction(actionId: view String) pub ret Bool {
     ret true
   }
   if actionId.equals(other: debugActionToggleLabels) {
+    ret true
+  }
+  if actionId.equals(other: debugActionToggleInputOutlines) {
     ret true
   }
   ret false
