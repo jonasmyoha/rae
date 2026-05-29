@@ -129,8 +129,15 @@ func dispatchActions(
       # then route into the Album screen.
       if componentHas(this: world.sprites, entity: ev.entity) {
         let sp: Sprite = componentGet(this: world.sprites, entity: ev.entity)
-        let copied: String = sp.textureKey
-        state.currentAlbumKey = copied
+        # Force a fresh String allocation via interpolation. A direct
+        # `state.currentAlbumKey = sp.textureKey` (or via a let-copy)
+        # aliases the source String, which is owned by the current
+        # world's Sprite table; the world drops on the next rebuild
+        # and the aliased pointer dangles. The dangling key is then
+        # written into the next world by `rebindHero`, corrupting
+        # the Sprite / HeroWidget tables. Symptom: every click on
+        # the destination Album screen returns pressed=-1.
+        state.currentAlbumKey = "{sp.textureKey}"
       }
       next = Screen.Album
     }
