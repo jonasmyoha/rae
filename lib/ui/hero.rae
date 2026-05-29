@@ -175,38 +175,52 @@ func setHeroVisible(world: mod UiWorld, key: view String, visible: view Bool) pu
 }
 
 # Rename every HeroWidget whose key is `fromKey` to `toKey`, and
-# also rename matching `Sprite.textureKey` so the visible image
-# stays consistent through the transition. Use to bind a static
-# scene-authored hero placeholder (`"albumCover"`) to whichever
-# concrete cover the user is currently viewing, so the same
-# hero key resolves at both source and destination.
+# independently rename every Sprite whose `textureKey` is `fromKey`
+# to `toKey`. Use to bind a static scene-authored placeholder
+# (`"albumCover"`) to whichever concrete cover the user is
+# currently viewing — both hero entities (Album/NowPlaying cover
+# block) AND non-hero entities that show the same cover (e.g. the
+# mini-player thumbnail) update in one pass.
+#
+# The two walks are independent: a Sprite doesn't need to carry
+# HeroWidget to be rebound, and vice versa.
 func rebindHero(world: mod UiWorld, fromKey: view String, toKey: view String) pub {
-  let n: Int = componentCount(this: world.heroWidgets)
+  # 1) Rename HeroWidget keys.
+  let nh: Int = componentCount(this: world.heroWidgets)
   let i: Int = 0
-  loop i < n {
+  loop i < nh {
     let e: Int = componentEntityAt(this: world.heroWidgets, i: i)
     let hw: HeroWidget = componentDataAt(this: world.heroWidgets, i: i)
     if hw.key.equals(other: fromKey) {
       let copied: String = toKey
       let renamed: HeroWidget = { key: copied }
       componentSet(this: world.heroWidgets, entity: e, data: renamed)
-      if componentHas(this: world.sprites, entity: e) {
-        let sp: Sprite = componentGet(this: world.sprites, entity: e)
-        if sp.textureKey.equals(other: fromKey) {
-          let copiedTex: String = toKey
-          let nsp: Sprite = {
-            textureKey: copiedTex
-            tint: sp.tint
-            scaleMode: sp.scaleMode
-            tileScale: sp.tileScale
-            nineSlice: sp.nineSlice
-            hasNineSlice: sp.hasNineSlice
-          }
-          componentSet(this: world.sprites, entity: e, data: nsp)
-        }
-      }
     }
     i = i + 1
+  }
+
+  # 2) Rename Sprite.textureKey on every entity (independent of
+  #    HeroWidget). Catches both the hero entity's Sprite AND any
+  #    other widget (mini-player, headers, etc.) that shows the
+  #    same cover.
+  let ns: Int = componentCount(this: world.sprites)
+  let j: Int = 0
+  loop j < ns {
+    let se: Int = componentEntityAt(this: world.sprites, i: j)
+    let sp: Sprite = componentDataAt(this: world.sprites, i: j)
+    if sp.textureKey.equals(other: fromKey) {
+      let copiedTex: String = toKey
+      let nsp: Sprite = {
+        textureKey: copiedTex
+        tint: sp.tint
+        scaleMode: sp.scaleMode
+        tileScale: sp.tileScale
+        nineSlice: sp.nineSlice
+        hasNineSlice: sp.hasNineSlice
+      }
+      componentSet(this: world.sprites, entity: se, data: nsp)
+    }
+    j = j + 1
   }
 }
 
