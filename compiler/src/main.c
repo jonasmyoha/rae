@@ -2404,7 +2404,16 @@ extern char g_rae_executable_path[PATH_MAX];
 
 static volatile sig_atomic_t g_watch_stop = 0;
 static void watch_sigint_handler(int sig) {
-  (void)sig;
+  // Diagnostic line so the devtools / terminal log shows the
+  // signal actually reached us. Plain printf is NOT async-signal-
+  // safe; use write() to a small fixed buffer so this is safe
+  // inside a signal handler. Choosing stderr so it interleaves
+  // with the supervisor's main-loop trace.
+  const char* msg = "rae watch: SIGINT received, stopping\n";
+  if (sig == SIGTERM) msg = "rae watch: SIGTERM received, stopping\n";
+  if (sig == SIGHUP)  msg = "rae watch: SIGHUP received, stopping\n";
+  ssize_t _w = write(STDERR_FILENO, msg, strlen(msg));
+  (void)_w;
   g_watch_stop = 1;
 }
 
@@ -2698,6 +2707,11 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
   sa.sa_flags = 0;
   sigaction(SIGINT, &sa, NULL);
   sigaction(SIGTERM, &sa, NULL);
+  // SIGHUP is sent when a controlling terminal closes — or when the
+  // devtools server process that owns our pseudo-tty / pipe dies.
+  // Treat it the same as SIGTERM so a devtools restart cleanly takes
+  // us with it instead of orphaning us under launchd.
+  sigaction(SIGHUP, &sa, NULL);
 
   // ---- Spawn first child + arm health window ----
   pid_t child = is_live
@@ -2856,7 +2870,14 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
   watch_kill_child(child, 1000);
 
   watch_state_free(&ws);
-  return 0;
+  // _exit (not return / not exit) so no atexit handler can keep
+  // the supervisor alive past this point. The OS reclaims any
+  // remaining state. Without this, a hung atexit handler in the
+  // shared rae_runtime would leave the supervisor visible to ps
+  // but unkillable via the devtools Stop button.
+  fflush(stdout);
+  fflush(stderr);
+  _exit(0);
 }
 
 static int run_command(const char* cmd, int argc, char** argv) {
