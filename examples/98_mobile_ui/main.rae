@@ -1,4 +1,4 @@
-# rae: max-lines 1200
+# rae: max-lines 1300
 # Mobile-UI demo entrypoint. The actual work — scene loading, world
 # building, screen routing — lives in sibling `.rae` files in this same
 # directory, which Rae auto-imports because they share the project
@@ -1173,14 +1173,29 @@ func main() {
             }
           }
 
-          # Frosted-glass cleanup: when the menu just closed, drop the
-          # captured blur texture so the GPU memory comes back. The
-          # backdrop entity in the just-built world no longer uses it
-          # (because `debug.hasBlur` flips off), so it's safe to
-          # release immediately.
+          # Frosted-glass cleanup on menu close.
+          #
+          # Previously called `textureRemove(reg, blurKey)` here to
+          # release ~7.6 MB of GPU memory. That tripped the same
+          # `List.remove` cascade-drop gap on `List(TextureEntry)`
+          # that the dock-blur capture path hit — every entry's
+          # key String aliases through the table, so dropping the
+          # removed entry frees memory that's still referenced by
+          # surviving entries. The downstream symptom (caught by
+          # the press/release diagnostic) is that the next world
+          # rebuild reads garbage for tile texture keys, the grid
+          # ends up with no clickable entities, and every click
+          # afterward returns `hit=-1` from `hitTest`.
+          #
+          # Leave the texture in the registry until shutdown
+          # (`textureUnloadAll` at process exit). The blur backdrop
+          # itself stops being drawn the next world rebuild
+          # because `debug.hasBlur` flips false below, so the only
+          # cost is the GPU memory staying live until exit — fine
+          # for an in-app debug overlay. The next menu open can
+          # replace the slot in place rather than calling remove +
+          # add.
           if debug.menuOpen is false and prevMenuOpen {
-            let blurKey: String = debugBlurBackdropKey()
-            textureRemove(reg: texReg, key: blurKey)
             setDebugHasBlur(debug: debug, value: false)
           }
           prevMenuOpen = debug.menuOpen
