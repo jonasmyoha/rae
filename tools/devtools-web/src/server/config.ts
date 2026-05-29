@@ -53,7 +53,13 @@ const DEFAULT_TARGETS: TargetConfig[] = [
     cleanCommand: "cd compiler && make clean",
     rebuildCommand: "cd compiler && make clean && make",
     exampleRunCommand: "./compiler/bin/rae run --project {{ENTRY_DIR}} {{ENTRY}}",
-    exampleWatchCommand: "./compiler/bin/rae run --project {{ENTRY_DIR}} --watch {{ENTRY}}",
+    // `rae watch --target live`: drives the Phase 3-6 hot-reload
+    // supervisor. Apps that use `lib/hot_reload` get state
+    // preservation across rebuilds; apps that don't get a clean
+    // SIGTERM + relaunch. Surfaces `.rae/build.status` either way.
+    // Replaces the older `rae run --watch` in-VM reload path so
+    // both watch buttons go through the same protocol.
+    exampleWatchCommand: "./compiler/bin/rae watch --target live --project {{ENTRY_DIR}} {{ENTRY}}",
     exampleBuildCommand: "./compiler/bin/rae build --target live --project {{ENTRY_DIR}} --out {{OUTDIR}} {{ENTRY}}"
   },
   {
@@ -71,6 +77,14 @@ const DEFAULT_TARGETS: TargetConfig[] = [
     // export those symbols. Same fix as compiler/Makefile and
     // compiler/src/main.c.
     exampleRunCommand: "./compiler/bin/rae build --target compiled --project {{ENTRY_DIR}} --emit-c --out {{OUTDIR}}/out.c {{ENTRY}} && gcc -O2 -o {{OUTDIR}}/app {{OUTDIR}}/out.c {{OUTDIR}}/rae_runtime.c third_party/raylib/rae_raylib.c -I{{OUTDIR}} -Ithird_party/raylib -I/opt/homebrew/include /opt/homebrew/lib/libraylib.a -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL && {{OUTDIR}}/app",
+    // `rae watch --target compiled`: supervisor builds each
+    // rebuild into a fresh `.rae/build/build-N/` directory, swaps
+    // binaries on successful build, falls back to the previous
+    // good binary if the new one dies non-zero within a 2 s
+    // health window. Slower per-cycle than --target live because
+    // of the gcc step, but exercises the production code path
+    // (real native binary, real linker) and the fallback logic.
+    exampleWatchCommand: "./compiler/bin/rae watch --target compiled --project {{ENTRY_DIR}} {{ENTRY}}",
     exampleBuildCommand: "./compiler/bin/rae build --target compiled --project {{ENTRY_DIR}} --emit-c --out {{OUTDIR}} {{ENTRY}}"
   },
   {
