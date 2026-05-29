@@ -807,6 +807,38 @@ func drawDebugLabels(debug: view DebugSystem) {
     spacing: 1.0
     color: col
   )
+
+  # Third line, only when input-outline debug mode is on: mouse
+  # button bitfield (bit 0 = left, bit 1 = right, bit 2 = middle).
+  # Useful next to the outline overlay when chasing why a click is
+  # or isn't reaching a target — at a glance you see the button
+  # state the input layer is actually polling.
+  if debug.showInputOutlines {
+    let lb: Int = 0
+    if isMouseButtonDown(button: 0) {
+      lb = 1
+    }
+    let rb: Int = 0
+    if isMouseButtonDown(button: 1) {
+      rb = 2
+    }
+    let mb: Int = 0
+    if isMouseButtonDown(button: 2) {
+      mb = 4
+    }
+    let buttons: Int = lb + rb + mb
+    let btnText: String = "btn: {buttons}"
+    let btnY: Float = memY + lineH + 2.0
+    drawTextWithFont(
+      slot: 0
+      text: btnText
+      x: leftEdge
+      y: btnY
+      fontSize: fontSize
+      spacing: 1.0
+      color: col
+    )
+  }
 }
 
 # Per-frame entry point. Records the frame timestamp (for FPS), reads
