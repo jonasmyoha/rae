@@ -328,16 +328,17 @@ func main() {
     # be ~0.05 instead of 0 — a small but visible jump from where
     # the outgoing hero sat.
     let transitionArmed: Bool = false
-    # Visualise every entity that owns an `OnClick` as an outline.
-    # Hovered rects highlight in `debugHoverColor` so you can see at
-    # a glance which (if any) clickable lives under the cursor.
-    # A crosshair at the input-system's reported mouse position is
-    # drawn on top — if it doesn't sit under the OS cursor, the input
-    # and rendering coordinate systems disagree. Flip off for
-    # production snapshots.
-    let debugRects: Bool = false
-    let debugRectColor: Color = { r: 255, g: 0, b: 255, a: 200 }
-    let debugHoverColor: Color = { r: 0, g: 220, b: 80, a: 255 }
+    # Visualise every entity that owns an `OnClick` as an outline,
+    # plus a crosshair at the input-system's reported mouse position.
+    # Cyan for idle outlines, magenta for the rect currently under
+    # the cursor (high-contrast against typical UI palettes; the
+    # hovered rect also gets a small `x,y w×h` label at its top-right
+    # corner — see `renderDebugClickRects`). The toggle is driven by
+    # the in-app debug menu's "Input outlines" switch:
+    # `debug.showInputOutlines` is the source of truth; this local
+    # just unpacks it for the renderer below.
+    let debugRectColor: Color = { r: 0, g: 220, b: 255, a: 200 }
+    let debugHoverColor: Color = { r: 255, g: 0, b: 220, a: 255 }
     let debugCursorColor: Color = { r: 255, g: 220, b: 0, a: 255 }
 
     # In-app debug UI lives in `lib/ui/debug.rae`. The DebugSystem
@@ -928,6 +929,17 @@ func main() {
               active = true
             }
           }
+          if active is false {
+            # While the input-outline debug overlay is on, force a
+            # render on every loop tick so the hovered-rect highlight
+            # follows mouse movement (raylib only emits a wake-up on
+            # button events, not pure motion — without this the
+            # hover would only update when the world rebuilds for
+            # some other reason).
+            if debug.showInputOutlines {
+              active = true
+            }
+          }
           lastPressed = input.pressedEntity
 
           # Render decision trace: prints whether we'll paint this
@@ -952,7 +964,7 @@ func main() {
             if animating {
               renderHeroOverlay(anim: anim, reg: texReg, now: now)
             }
-            if debugRects {
+            if debug.showInputOutlines {
               let mx: Float = getMouseX().toFloat()
               let my: Float = getMouseY().toFloat()
               renderDebugClickRects(

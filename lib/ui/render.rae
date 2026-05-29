@@ -529,6 +529,39 @@ func renderDebugClickRects(
             height: cr.h
             color: col
           )
+          # Hovered rect: tiny label at the top-right corner showing
+          # the rect's absolute position and size. Drawn with the
+          # host's font slot 0; falls back to raylib's default when
+          # the slot isn't loaded (see `drawTextWithFont`).
+          if inside {
+            let ix: Int = wt.x.toInt()
+            let iy: Int = wt.y.toInt()
+            let iw: Int = cr.w.toInt()
+            let ih: Int = cr.h.toInt()
+            let dimText: String = "{ix},{iy} {iw}×{ih}"
+            let dimSize: Float = 11.0
+            let dimSpacing: Float = 0.5
+            let measured: Int = measureTextWithFont(
+              slot: 0
+              text: dimText
+              fontSize: dimSize
+              spacing: dimSpacing
+            )
+            # Anchor the label to the top-right corner of the rect.
+            # 4 px padding pulls it inside the corner so the text
+            # doesn't sit flush against the outline stroke.
+            let labelX: Float = wt.x + cr.w - measured.toFloat() - 4.0
+            let labelY: Float = wt.y + 2.0
+            drawTextWithFont(
+              slot: 0
+              text: dimText
+              x: labelX
+              y: labelY
+              fontSize: dimSize
+              spacing: dimSpacing
+              color: col
+            )
+          }
         }
       }
     }
