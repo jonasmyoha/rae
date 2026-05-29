@@ -176,10 +176,27 @@ func collectProfileCoverKeys(reg: view TextureRegistry) ret List(String) {
 }
 
 # Build one image tile sprite for the given texture key.
+#
+# Each tile carries a HeroWidget keyed by its texture so the hero
+# animation system can morph this tile to/from the Album / Now-
+# Playing screens when the cover is also visible there (after a
+# rebind in main.rae — the scenes themselves still author the
+# placeholder "albumCover" key and get renamed at world-build time
+# to whichever cover the user is currently viewing).
+#
+# Each tile also takes click input via `actionId: "album.open"`.
+# `dispatchActions` reads the clicked tile's Sprite to recover the
+# texture key, stores it as the active album, and switches to the
+# Album screen. The hero transition then naturally finds this tile
+# as source / destination.
 func buildCoverTile(world: mod UiWorld, key: own String) ret Int {
   let tile: Int = createEntity(world: world)
   let size: Float = gridTileSize()
   setRectFixed(world: world, entity: tile, w: size, h: size)
+  let copiedForHero: String = key
+  setHeroWidget(world: world, entity: tile, key: copiedForHero)
+  let albumOpen: String = "album.open"
+  setOnClick(world: world, entity: tile, actionId: albumOpen)
   setSprite(world: world, entity: tile, key: key, tint: imageTintColor)
   ret tile
 }
@@ -281,7 +298,7 @@ func buildProfileBody(world: mod UiWorld, reg: view TextureRegistry, scrollY: vi
   let bio: Int = createEntity(world: world)
   setRectFixed(world: world, entity: bio, w: bodyW, h: 18.0)
   let bioStyle: String = "muted"
-  let bioText: String = "indie pop · dream-punk · playlist nerd 🌙✨🎧"
+  let bioText: String = "indie pop · dream-punk · playlist lover 🌙✨🎧"
   setText(world: world, entity: bio, text: bioText, styleId: bioStyle)
 
   let stats: Int = buildStatsRow(world: world)

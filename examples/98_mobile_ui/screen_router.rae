@@ -44,11 +44,45 @@ func playbackIconKey(playback: view PlaybackState) pub ret String {
   ret "mat:play_arrow"
 }
 
+# App-side state the dispatcher both reads and writes. Carries the
+# active album cover key so the hero animation system knows which
+# Profile-grid texture maps to "the album we're currently looking
+# at" on the Album / NowPlaying screens.
+type AppState {
+  # Texture key of the album cover the user is currently viewing.
+  # The Album / NowPlaying scenes still author the placeholder
+  # `"albumCover"` key in their `.raescene` JSON; main.rae calls
+  # `rebindHero(world, "albumCover", state.currentAlbumKey)` after
+  # building those worlds so the hero animation finds matching
+  # keys on both ends of a transition.
+  currentAlbumKey: String
+}
+
+func createAppState() pub ret AppState {
+  # Default to the profile-grid texture key for MGMT — the album
+  # the static Album / NowPlaying scenes currently visualise.
+  # This makes navigation from those screens to Profile (or vice
+  # versa) hero-animate against the matching grid tile from
+  # launch, even before the user has tapped any tile. The texture
+  # is preloaded under both `albumCover` (scene placeholder) and
+  # `profile.02_mgmt.jpg` (grid key) by `loadTextures`.
+  ret AppState {
+    currentAlbumKey: "profile.02_mgmt.jpg"
+  }
+}
+
 # Drain every fired action and route into a target screen. Returns the
 # next screen — equal to `current` if no navigation action fired.
-# Also handles `playback.toggle` (fired by both play buttons), which
-# mutates `playback.isPlaying` in place — no screen change for that one.
-func dispatchActions(input: view InputSystem, current: Screen, playback: mod PlaybackState) pub ret Screen {
+# Also handles `playback.toggle` (fired by both play buttons) and
+# `album.open` (fired by Profile grid tiles), which mutate
+# `playback.isPlaying` and `state.currentAlbumKey` in place.
+func dispatchActions(
+  input: view InputSystem
+  current: Screen
+  playback: mod PlaybackState
+  state: mod AppState
+  world: view UiWorld
+) pub ret Screen {
   let next: Screen = current
   let n: Int = input.events.length
   let i: Int = 0
@@ -63,6 +97,7 @@ func dispatchActions(input: view InputSystem, current: Screen, playback: mod Pla
     let profileKey: String = "nav.profile"
     let backKey: String = "nav.back"
     let playbackToggleKey: String = "playback.toggle"
+    let albumOpenKey: String = "album.open"
     if actionId.equals(other: homeKey) {
       next = Screen.NowPlaying
     }
@@ -86,6 +121,18 @@ func dispatchActions(input: view InputSystem, current: Screen, playback: mod Pla
     }
     if actionId.equals(other: playbackToggleKey) {
       togglePlayback(state: playback)
+    }
+    if actionId.equals(other: albumOpenKey) {
+      # Profile tile click. The tile's own Sprite.textureKey is the
+      # stable identifier for that album cover. Copy it into app
+      # state so the Album / NowPlaying hero rebind picks it up,
+      # then route into the Album screen.
+      if componentHas(this: world.sprites, entity: ev.entity) {
+        let sp: Sprite = componentGet(this: world.sprites, entity: ev.entity)
+        let copied: String = sp.textureKey
+        state.currentAlbumKey = copied
+      }
+      next = Screen.Album
     }
 
     i = i + 1
