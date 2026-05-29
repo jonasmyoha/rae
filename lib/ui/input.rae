@@ -174,17 +174,27 @@ func updateInputSystem(input: mod InputSystem, world: view UiWorld) {
 
   if pressed {
     input.pressedEntity = hitTest(world: world, x: mx, y: my)
+    log("[input] press at ({mx},{my}) -> pressedEntity={input.pressedEntity}")
   }
 
   if released {
     let hit: Int = hitTest(world: world, x: mx, y: my)
+    log("[input] release at ({mx},{my}) -> hit={hit} pressed={input.pressedEntity}")
     if hit is not inputNoEntity {
       if hit is input.pressedEntity {
         if componentHas(this: world.onClicks, entity: hit) {
           let oc: view OnClick => componentView(this: world.onClicks, entity: hit)
+          let aid: String = oc.actionId
+          log("[input] fire {aid} on entity {hit}")
           appendActionEvent(input: input, entity: hit, actionId: oc.actionId)
+        } else {
+          log("[input] release matched press but entity has no OnClick (impossible?)")
         }
+      } else {
+        log("[input] release hit {hit} != pressed {input.pressedEntity} - drop")
       }
+    } else {
+      log("[input] release hit nothing - drop")
     }
     input.pressedEntity = inputNoEntity
   }
