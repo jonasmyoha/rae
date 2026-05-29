@@ -1877,7 +1877,16 @@ static void rae_glfw_close_waker(GLFWwindow* w) {
   fprintf(stderr, "[close-waker] fired (w=%p) — exiting\n", (void*)w);
   fflush(stderr);
   glfwSetWindowShouldClose(w, 1);
-  exit(0);
+  // `_exit`, not `exit`: skip atexit handlers. raylib / GLFW
+  // cleanup (CloseWindow, glfwTerminate) can hang waiting on the
+  // GL context / GPU sync, and any user-registered atexit hook is
+  // run on a thread that may already hold locks acquired in the
+  // delegate-driven close path. The OS reclaims the GL context,
+  // textures, fds, and process memory regardless. Without this,
+  // the app process can stay alive after the window is gone,
+  // which in turn keeps the rae watch supervisor waiting and
+  // makes the devtools Stop button look broken.
+  _exit(0);
 }
 
 void rae_ext_waitEventsTimeout(double seconds) { glfwWaitEventsTimeout(seconds); }
