@@ -435,6 +435,12 @@ func main() {
     # world rebuilds (entity ids are stable while the screen layout
     # is) so the first frame after a rebuild doesn't false-trigger.
     let lastHoveredEntity: Int = -1
+    # Mouse-button bitfield (bit 0 left, bit 1 right, bit 2 middle)
+    # from the previous render-gate check. Used to trigger a single
+    # re-render whenever any button transitions, so the debug
+    # overlay's "btn:" read-out updates promptly without forcing a
+    # full 60 fps loop.
+    let lastMouseBtns: Int = 0
     # `true` while the Profile screen's cover textures are loaded
     # into the registry. Flips false the moment we leave the screen
     # so the next entry re-scans the folder (picking up renamed /
@@ -945,17 +951,35 @@ func main() {
           # comparison below is meaningful; the hitTest walk is cheap
           # (linear over OnClick entities).
           let currentHovered: Int = -1
+          let currentMouseBtns: Int = 0
           if debug.showInputOutlines {
             let outlineMx: Float = getMouseX().toFloat()
             let outlineMy: Float = getMouseY().toFloat()
             currentHovered = hitTest(world: world, x: outlineMx, y: outlineMy)
+            # Same bitfield layout as the "btn:" label below (see
+            # drawDebugLabels): bit 0 left, bit 1 right, bit 2 middle.
+            if isMouseButtonDown(button: 0) {
+              currentMouseBtns = currentMouseBtns + 1
+            }
+            if isMouseButtonDown(button: 1) {
+              currentMouseBtns = currentMouseBtns + 2
+            }
+            if isMouseButtonDown(button: 2) {
+              currentMouseBtns = currentMouseBtns + 4
+            }
           }
           if active is false {
             if currentHovered is not lastHoveredEntity {
               active = true
             }
           }
+          if active is false {
+            if currentMouseBtns is not lastMouseBtns {
+              active = true
+            }
+          }
           lastHoveredEntity = currentHovered
+          lastMouseBtns = currentMouseBtns
           lastPressed = input.pressedEntity
 
           # Render decision trace: prints whether we'll paint this
