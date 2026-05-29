@@ -192,7 +192,13 @@ func rebindHero(world: mod UiWorld, fromKey: view String, toKey: view String) pu
     let e: Int = componentEntityAt(this: world.heroWidgets, i: i)
     let hw: HeroWidget = componentDataAt(this: world.heroWidgets, i: i)
     if hw.key.equals(other: fromKey) {
-      let copied: String = toKey
+      # Force a fresh String allocation via interpolation. A direct
+      # `let copied: String = toKey` (toKey is `view String`) can
+      # alias the caller's String storage instead of deep-copying;
+      # the aliased pointer is then written into the world's table
+      # and dangles on the next rebuild, corrupting the HeroWidget
+      # / Sprite tables. Symptom: clicks return pressed=-1.
+      let copied: String = "{toKey}"
       let renamed: HeroWidget = { key: copied }
       componentSet(this: world.heroWidgets, entity: e, data: renamed)
     }
@@ -209,7 +215,9 @@ func rebindHero(world: mod UiWorld, fromKey: view String, toKey: view String) pu
     let se: Int = componentEntityAt(this: world.sprites, i: j)
     let sp: Sprite = componentDataAt(this: world.sprites, i: j)
     if sp.textureKey.equals(other: fromKey) {
-      let copiedTex: String = toKey
+      # Same defensive fresh-allocation pattern as the HeroWidget
+      # loop above. See that comment for the rationale.
+      let copiedTex: String = "{toKey}"
       let nsp: Sprite = {
         textureKey: copiedTex
         tint: sp.tint
