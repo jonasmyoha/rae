@@ -1,4 +1,4 @@
-# rae: max-lines 1200
+# rae: max-lines 1250
 # Mobile-UI demo entrypoint. The actual work — scene loading, world
 # building, screen routing — lives in sibling `.rae` files in this same
 # directory, which Rae auto-imports because they share the project
@@ -961,6 +961,25 @@ func main() {
             # so we catch the release transition (which is what fires
             # the action event) on the very next frame.
             if isMouseButtonDown(button: mouseButtonLeft) {
+              active = true
+            }
+          }
+          if active is false {
+            # Force a render on any input edge this frame, even when
+            # the click landed on empty space and produced no
+            # `input.events` entry. raylib only advances its
+            # edge-triggered mouse state inside `endDrawing`'s
+            # PollInputEvents; if we skip render here, the released
+            # edge stays "true" and `isMouseButtonReleased()` keeps
+            # firing on every subsequent frame until something else
+            # (a scroll-induced rebuild, a press) forces a render.
+            # That manifested in the press/release trace as one press
+            # followed by hundreds of phantom releases at drifting
+            # cursor positions — every mouse-motion event woke the
+            # loop, `updateInputSystem` saw the stuck edge, and we
+            # spammed "release hit nothing" until the user actually
+            # did something that forced a frame.
+            if input.pointer.pressed or input.pointer.released {
               active = true
             }
           }
