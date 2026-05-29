@@ -107,22 +107,9 @@ func textureLoadBatch(
 func textureRegisterDirect(reg: mod TextureRegistry, key: own String, tex: view Texture) pub {
   let idx: Int = textureIndex(reg: reg, key: key)
   if idx >= 0 {
-    # In-place swap rather than `entries.remove(idx)` + `entries.add(...)`.
-    # `List.remove` on `List(TextureEntry)` cascades a drop into the
-    # removed entry's owned String fields (`key`, `path`), and those
-    # share aliased heap with surviving entries — see the comment on
-    # the host-side `textureRemove` call. Unload the old GPU texture,
-    # then overwrite the slot with the new entry (preserving the
-    # existing key String storage so we never touch the aliased heap).
     let old: TextureEntry = rae_ext_rae_buf_get(buf: reg.entries.data, index: idx)
     unloadTexture(texture: old.texture)
-    let updated: TextureEntry = {
-      key: old.key
-      texture: tex
-      path: old.path
-    }
-    rae_ext_rae_buf_set(buf: reg.entries.data, index: idx, value: updated)
-    ret
+    reg.entries.remove(index: idx)
   }
   let emptyPath: String = ""
   let entry: TextureEntry = {
