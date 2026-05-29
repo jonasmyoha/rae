@@ -2776,17 +2776,26 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
           continue;
         }
 
-        // Any other unsolicited child death — clean exit, crash,
-        // post-window failure — shuts down the supervisor too. The
-        // supervisor is a host process: when the app it wraps is
-        // gone, the supervisor should be gone too. Source-change
-        // rebuilds kill their own child via `watch_wait_for_exit`
-        // outside this branch, so we only land here when the user
-        // closed the window or the app died on its own.
-        printf("rae watch: child gone, shutting down supervisor\n");
-        fflush(stdout);
-        g_watch_stop = 1;
-        continue;
+        // Post-window unsolicited death: the app ran for > HEALTH_MS
+        // and then exited (either the user closed the window or it
+        // crashed mid-session). Shut down the supervisor so we don't
+        // leave a host process orphaned after the user is clearly
+        // done with the run. Source-change rebuilds kill their own
+        // child via `watch_wait_for_exit` outside this branch, so we
+        // only land here on unsolicited death.
+        if (!in_window) {
+          printf("rae watch: child gone, shutting down supervisor\n");
+          fflush(stdout);
+          g_watch_stop = 1;
+          continue;
+        }
+
+        // Clean (or unfallable-back) exit INSIDE the health window:
+        // short-running CLI pattern — `01_hello` prints something
+        // and returns 0 in well under 2 s. The user asked for
+        // `rae watch` to keep monitoring sources and re-run on
+        // edit, so don't shut down here; idle until a source change
+        // triggers the next build.
       } else if (!current_promoted && watch_now_ms() >= health_until) {
         // Child survived the window → promote.
         current_promoted = true;
