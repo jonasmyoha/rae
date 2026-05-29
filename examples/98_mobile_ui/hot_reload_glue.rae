@@ -1,0 +1,149 @@
+# Hot-reload state preservation for the mobile UI demo.
+#
+# Wires the app to the Phase 2-6 hot-reload protocol so that
+# editing any source file while running under `rae watch` keeps
+# the user's route + Profile scroll position across rebuilds.
+# Without this, every reload restarts on the NowPlaying screen
+# and any vertical scroll in Profile is lost.
+#
+# Persisted state shape (one line, semicolon-separated key=value):
+#
+#   "screen=<n>;scroll=<int-y>"
+#
+#   screen — Screen enum as int (see screenToInt below)
+#   scroll — profileScrollY rounded to an integer; the scroll is
+#            already pixel-quantised in practice so fractional
+#            precision isn't worth the Float-to-String hassle
+#
+# Anything we don't recognise is ignored: a future addition can
+# extend the schema without breaking older saved state.
+
+import core
+import string
+import sys
+import hot_reload
+# The Screen enum lives in `screen_router.rae` in this same example
+# directory. Sibling files in a project root auto-merge into the
+# same module — no explicit import needed (and an explicit one
+# breaks the live-VM module resolver).
+
+# What `loadRestoredState` returns and `saveStateAndExit` consumes.
+# A plain value type so callers can construct a default and pass it
+# in / read fields out.
+type RestoredState {
+  screen: Screen
+  scrollY: Float
+}
+
+# Minimal positive-integer parser — same trick as the
+# `100_code_hot_reload` demo. `s` may have a leading `-`; callers
+# strip that themselves before calling (it's only used for scroll,
+# which can be negative).
+func parseUInt(s: view String) ret Int {
+  let digits: String = "0123456789"
+  let n: Int = s.length()
+  let i: Int = 0
+  let acc: Int = 0
+  loop i < n {
+    let ch: String = s.sub(start: i, len: 1)
+    let d: Int = digits.indexOf(sub: ch)
+    if d < 0 {
+      ret acc
+    }
+    acc = acc * 10 + d
+    i = i + 1
+  }
+  ret acc
+}
+
+# Signed parse: handles a leading `-`. Used for scroll position
+# (clamped negative in the running app).
+func parseSignedInt(s: view String) ret Int {
+  if s.length() is 0 {
+    ret 0
+  }
+  let first: String = s.sub(start: 0, len: 1)
+  if first.equals(other: "-") {
+    let body: String = s.sub(start: 1, len: s.length() - 1)
+    ret 0 - parseUInt(s: body)
+  }
+  ret parseUInt(s: s)
+}
+
+# Screen <-> Int. The enum's literal ordinal is the same value the
+# C backend emits and the VM uses, but encoding it explicitly here
+# means a future reordering of the enum doesn't silently corrupt
+# saved state.
+func screenToInt(s: view Screen) ret Int {
+  if s is Screen.NowPlaying { ret 0 }
+  if s is Screen.Album      { ret 1 }
+  if s is Screen.Search     { ret 2 }
+  if s is Screen.Profile    { ret 3 }
+  ret 0
+}
+
+func intToScreen(n: view Int) ret Screen {
+  if n is 1 { ret Screen.Album }
+  if n is 2 { ret Screen.Search }
+  if n is 3 { ret Screen.Profile }
+  ret Screen.NowPlaying
+}
+
+# Build a default state. Callers pass this in to loadRestoredState
+# so a missing or partial state file leaves the running app on its
+# own startup defaults.
+func defaultRestoredState() pub ret RestoredState {
+  ret RestoredState {
+    screen: Screen.NowPlaying
+    scrollY: 0.0
+  }
+}
+
+# Read `.rae/state.json` (if present), parse the semicolon-form,
+# fill any unset fields from `fallback`, and clear the file so a
+# clean (non-watch) launch doesn't redundantly restore stale data.
+# Returns the same object as `fallback` if there's nothing to
+# restore.
+func loadRestoredState(fallback: view RestoredState) pub ret RestoredState {
+  let prior: String = readHotReloadState()
+  if prior.length() is 0 {
+    ret fallback
+  }
+  let result: RestoredState = {
+    screen: fallback.screen
+    scrollY: fallback.scrollY
+  }
+  let trimmed: String = prior.trim()
+  let parts: List(String) = trimmed.split(sep: ";")
+  let i: Int = 0
+  loop i < parts.length {
+    let kv: String = parts.get(index: i)
+    let eq: Int = kv.indexOf(sub: "=")
+    if eq > 0 {
+      let key: String = kv.sub(start: 0, len: eq)
+      let val: String = kv.sub(start: eq + 1, len: kv.length() - eq - 1)
+      if key.equals(other: "screen") {
+        result.screen = intToScreen(n: parseSignedInt(s: val))
+      }
+      if key.equals(other: "scroll") {
+        result.scrollY = parseSignedInt(s: val).toFloat()
+      }
+    }
+    i = i + 1
+  }
+  clearHotReloadState()
+  ret result
+}
+
+# Serialise the snapshot and exit(0). Called from the main loop
+# when `pollReloadSignal` returns verb=Reload — the supervisor is
+# waiting for a clean exit so it can swap binaries and spawn the
+# next build, which will read this file via `loadRestoredState`.
+func saveStateAndExit(screen: view Screen, scrollY: view Float) pub {
+  let sNum: Int = screenToInt(s: screen)
+  let yInt: Int = scrollY.toInt()
+  let snap: String = "screen={sNum};scroll={yInt}"
+  writeHotReloadState(state: snap)
+  log("[hot-reload] saved screen={sNum} scroll={yInt}, exiting")
+  exit(code: 0)
+}
