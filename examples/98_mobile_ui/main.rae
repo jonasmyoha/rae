@@ -1045,7 +1045,20 @@ func main() {
           # frames when the wheel goes idle (the spring branch
           # runs as long as mouse is up and the position is OOB).
           if currentScreen is Screen.Profile {
-            let wheel: Float = getMouseWheelMove()
+            # Ignore wheel/trackpad events while the user is holding
+            # the mouse button. macOS keeps sending momentum-scroll
+            # events for ~0.5–1.5 s after the user lifts fingers from
+            # the trackpad — if those land while the user is mid-
+            # click (between press and release), they shift the
+            # world's scrollY and the release hit-test sees a tile
+            # that's no longer under the cursor, so the click is
+            # silently dropped. A click is a deliberate interaction
+            # with the content; treat residual momentum as cancelled.
+            let wheelMouseDown: Bool = isMouseButtonDown(button: mouseButtonLeft)
+            let wheel: Float = 0.0
+            if wheelMouseDown is false {
+              wheel = getMouseWheelMove()
+            }
             if wheel > 0.001 or wheel < -0.001 {
               let pixelsPerTick: Float = 48.0
               # Wheel-up means "scroll content down" on macOS; flip
@@ -1065,9 +1078,20 @@ func main() {
                 dim: screenH
               )
               profileScrollY = profileScrollY + eff
-              # Wheel input cancels any in-flight momentum/spring;
-              # the user is now driving directly.
-              scrollVelocity = 0.0
+              # Use the wheel delta itself as the new velocity. The
+              # OS sends trackpad / mouse-wheel events asynchronously,
+              # often spread across many frames during a single user
+              # gesture (macOS momentum decay can run 0.5–1.5 s past
+              # the user's actual lift). If we reset velocity to 0
+              # here, the spring (in the drag block above) has to re-
+              # bootstrap from rest on every event, which fights the
+              # wheel deltas and the user sees pos lurching back and
+              # forth across the bound — what reads visually as the
+              # rubber band "bouncing multiple times." Treating wheel
+              # as a velocity contribution carries the natural decay
+              # forward into the spring instead, matching how drag
+              # uses `pickReleaseVelocity` for a single smooth bounce.
+              scrollVelocity = eff
               switching = true
             }
           }
