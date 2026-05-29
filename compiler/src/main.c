@@ -2740,20 +2740,9 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
         fflush(stdout);
         child = -1;
 
-        // Clean exit outside the health window = user closed the
-        // window / app finished. Exit the supervisor too so the
-        // devtools doesn't have to. The old behaviour was to sit
-        // idle waiting for source changes, which orphaned the
-        // process under launchd and made the devtools' Stop button
-        // ineffective.
-        if (!in_window && WIFEXITED(status) && code == 0) {
-          printf("rae watch: child finished cleanly, shutting down supervisor\n");
-          fflush(stdout);
-          g_watch_stop = 1;
-          continue;
-        }
-
         // Phase 4: bad exit inside the health window → fall back.
+        // The supervisor stays alive only in this one case (try the
+        // previous-good binary instead of shutting down).
         if (!is_live && in_window && bad && previous_bin[0]) {
           fprintf(stderr,
                   "rae watch: new build unhealthy; falling back to previous-good\n");
@@ -2770,8 +2759,20 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
           current_promoted = true;   // previous was already good
           printf("rae watch: pid=%d running fallback %s\n", (int)child, current_bin);
           fflush(stdout);
+          continue;
         }
-        // Otherwise: don't auto-restart; wait for a source change.
+
+        // Any other unsolicited child death — clean exit, crash,
+        // post-window failure — shuts down the supervisor too. The
+        // supervisor is a host process: when the app it wraps is
+        // gone, the supervisor should be gone too. Source-change
+        // rebuilds kill their own child via `watch_wait_for_exit`
+        // outside this branch, so we only land here when the user
+        // closed the window or the app died on its own.
+        printf("rae watch: child gone, shutting down supervisor\n");
+        fflush(stdout);
+        g_watch_stop = 1;
+        continue;
       } else if (!current_promoted && watch_now_ms() >= health_until) {
         // Child survived the window → promote.
         current_promoted = true;
