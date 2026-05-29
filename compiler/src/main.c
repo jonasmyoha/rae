@@ -1954,7 +1954,7 @@ static bool compile_file_chunk(const char* file_path,
                                bool no_implicit,
                                VmRegistry* registry,
                                bool is_patch) {
-  Arena* arena = arena_create(16 * 1024 * 1024);
+  Arena* arena = arena_create(64 * 1024 * 1024);
   if (!arena) {
     diag_fatal("could not allocate arena");
   }
@@ -2013,7 +2013,7 @@ static bool build_c_backend_output(const char* entry_file,
                                    bool* out_uses_raylib,
                                    WatchSources* out_sources) {
   diag_reset();
-  Arena* arena = arena_create(16 * 1024 * 1024);
+  Arena* arena = arena_create(64 * 1024 * 1024);
   if (!arena) {
     diag_fatal("could not allocate arena");
   }
@@ -2103,7 +2103,7 @@ static bool build_vm_output(const char* entry_file,
   if (!ensure_parent_directory(out_path)) {
     return false;
   }
-  Arena* arena = arena_create(16 * 1024 * 1024);
+  Arena* arena = arena_create(64 * 1024 * 1024);
   if (!arena) {
     diag_fatal("could not allocate arena");
   }
@@ -2191,7 +2191,7 @@ static bool build_hybrid_output(const char* entry_file,
   }
   free(entry_stem);
 
-  Arena* arena = arena_create(16 * 1024 * 1024);
+  Arena* arena = arena_create(64 * 1024 * 1024);
   if (!arena) {
     diag_fatal("could not allocate arena");
   }
@@ -2996,7 +2996,7 @@ static int run_command(const char* cmd, int argc, char** argv) {
     fprintf(stderr, "error: could not read file '%s'\n", file_path);
     return 1;
   }
-  arena = arena_create(16 * 1024 * 1024);
+  arena = arena_create(64 * 1024 * 1024);
   if (!arena) {
     free(source);
     diag_fatal("could not allocate arena");
