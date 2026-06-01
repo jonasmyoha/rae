@@ -583,7 +583,18 @@ func main() {
         # the spring-back after release renders chunky because the
         # physics step only runs once per OS event wake.
         let scrollAnimating: Bool = false
-        let scrollOOB: Bool = profileScrollY > 0.0 or profileScrollY < -1050.0
+        # Out-of-bounds check needs the active screen's scroll
+        # floor — Profile uses the static -1050 grid baseline,
+        # Album derives from the active track count. Wrong floor
+        # → the spring physics never fires to bring overshoot
+        # back, leaving the user looking at an empty scrolled
+        # region after a flick.
+        let scrollFloor: Float = -1050.0
+        if currentScreen is Screen.Album {
+          let albumForOOB: Album = activeAlbum(state: appState)
+          scrollFloor = albumScrollMin(album: albumForOOB)
+        }
+        let scrollOOB: Bool = profileScrollY > 0.0 or profileScrollY < scrollFloor
         let velAbs: Float = scrollVelocity
         if velAbs < 0.0 {
           velAbs = 0.0 - velAbs
@@ -681,7 +692,18 @@ func main() {
           #     firing on whatever's under the cursor (tab, tile,
           #     play button).
           let dragJustReleased: Bool = false
+          # Both Profile (album-cover grid) and Album (track list)
+          # screens scroll. Each rebuilds with the same
+          # `profileScrollY` value — bounds change per screen, but
+          # the wheel / drag / spring physics is identical.
+          let scrollOnThisScreen: Bool = false
           if currentScreen is Screen.Profile {
+            scrollOnThisScreen = true
+          }
+          if currentScreen is Screen.Album {
+            scrollOnThisScreen = true
+          }
+          if scrollOnThisScreen {
             let curMouseX: Float = getMouseX().toFloat()
             let curMouseY: Float = getMouseY().toFloat()
             let curMouseDown: Bool = isMouseButtonDown(button: mouseButtonLeft)
@@ -696,7 +718,16 @@ func main() {
             # default and leaves comfortable headroom for deliberate
             # swipes.
             let dragThreshold: Float = 10.0
+            # Per-screen scroll clamp. Profile keeps a fixed
+            # baseline (matches the static 24-album grid height);
+            # Album derives the clamp from the active album's
+            # track count so it stops exactly when the last track
+            # row sits above the dock.
             let scrollMin: Float = -1050.0
+            if currentScreen is Screen.Album {
+              let albumForScroll: Album = activeAlbum(state: appState)
+              scrollMin = albumScrollMin(album: albumForScroll)
+            }
             let scrollMax: Float = 0.0
             # Rubber-band reference dimension — tunes how stretchy
             # the overshoot feels. iOS uses ~viewport height.
