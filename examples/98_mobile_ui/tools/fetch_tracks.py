@@ -76,7 +76,7 @@ def main():
     )
     print(f"Enriching {len(stems)} albums...", file=sys.stderr)
 
-    counts = {"ok": 0, "no_url": 0, "no_tracks": 0}
+    counts = {"ok": 0, "synthesized": 0, "manual_skip": 0}
     for i, stem in enumerate(stems, 1):
         path = os.path.join(ALBUMS_DIR, stem, "album.json")
         if not os.path.isfile(path):
@@ -84,22 +84,52 @@ def main():
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
 
-        cid = collection_id_from_url(data.get("albumUrl", ""))
-        if not cid:
-            data["tracks"] = []
-            data["albumDurationMs"] = 0
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-                f.write("\n")
-            counts["no_url"] += 1
-            print(f"[{i}/{len(stems)}] {stem}: no albumUrl", file=sys.stderr)
+        # Hand-edited albums opt out with `"manualTracks": true`.
+        # iTunes either doesn't have them (BRAT was pulled, Inevitable
+        # End isn't on US iTunes, aftercare is unreleased) or matched
+        # the wrong record, so the curated tracklist on disk is the
+        # source of truth and a re-fetch would clobber it.
+        if data.get("manualTracks") is True:
+            counts["manual_skip"] += 1
+            print(f"[{i}/{len(stems)}] {stem}: manual tracks (skip)", file=sys.stderr)
             continue
 
-        try:
-            tracks = lookup_tracks(cid)
-        except Exception as e:
-            print(f"[{i}/{len(stems)}] {stem}: lookup failed — {e}", file=sys.stderr)
-            tracks = []
+        tracks = []
+        cid = collection_id_from_url(data.get("albumUrl", ""))
+        if cid:
+            try:
+                tracks = lookup_tracks(cid)
+            except Exception as e:
+                print(f"[{i}/{len(stems)}] {stem}: lookup failed — {e}", file=sys.stderr)
+                tracks = []
+
+        # Synthesis fallback: iTunes occasionally accepts an album in
+        # the catalogue but refuses to serve its tracks (region locks,
+        # pre-release, distribution status). For singles especially,
+        # the album name *is* the track name, so we can still produce
+        # something useful — one row with the album title (minus the
+        # trailing "- Single" / "- EP" boilerplate). Duration unknown
+        # → 0; the UI renders "0:00" which is honest about the gap.
+        synthesized = False
+        if not tracks and data.get("album"):
+            album_title = re.sub(
+                r"\s*[-–—]\s*(Single|EP)\s*$",
+                "",
+                data["album"],
+                flags=re.I,
+            ).strip()
+            count = max(1, int(data.get("trackCount") or 1))
+            # We only synthesize the first track meaningfully; if the
+            # claimed count is >1 the remaining rows would be "Track
+            # 2", "Track 3" placeholders, which is more noise than
+            # signal. Stop at one and trust the user to flag the
+            # short list.
+            tracks = [{
+                "number": 1,
+                "title": album_title or data["album"],
+                "durationMs": 0,
+            }]
+            synthesized = True
 
         total_ms = sum(t["durationMs"] for t in tracks)
         data["tracks"] = tracks
@@ -109,7 +139,13 @@ def main():
             json.dump(data, f, indent=2, ensure_ascii=False)
             f.write("\n")
 
-        if tracks:
+        if synthesized:
+            counts["synthesized"] += 1
+            print(
+                f"[{i}/{len(stems)}] {stem}: synthesized 1 track from album name",
+                file=sys.stderr,
+            )
+        else:
             secs = total_ms // 1000
             print(
                 f"[{i}/{len(stems)}] {stem}: {len(tracks)} tracks, "
@@ -117,15 +153,12 @@ def main():
                 file=sys.stderr,
             )
             counts["ok"] += 1
-        else:
-            counts["no_tracks"] += 1
-            print(f"[{i}/{len(stems)}] {stem}: no tracks returned", file=sys.stderr)
 
         time.sleep(0.4)
 
     print(
-        f"\nDone. ok: {counts['ok']}  no_url: {counts['no_url']}  "
-        f"no_tracks: {counts['no_tracks']}",
+        f"\nDone. ok: {counts['ok']}  synthesized: {counts['synthesized']}  "
+        f"manual_skip: {counts['manual_skip']}",
         file=sys.stderr,
     )
 
