@@ -648,8 +648,26 @@ func main() {
         if velAbs > 0.05 or scrollOOB {
           scrollAnimating = true
         }
+        # Suppress the playback-driven 60Hz animation gate while
+        # the user is actively wheel-scrolling. Each rebuild cost
+        # ~30-50 ms on the Album screen (25-track MB tracklists);
+        # at 60Hz that ate the frame budget and the next wheel
+        # event couldn't be sampled / acted on until the previous
+        # frame's full render+rebuild finished. Result: scroll
+        # dropped to ~2 fps the moment playback started.
+        # The progress bar pauses for ~250 ms after the last wheel
+        # tick (visually imperceptible at a 200-second track), then
+        # resumes ticking once scrolling settles.
+        let scrollActiveTimeSec: Float = getTime() - lastWheelTime
+        let recentlyScrolling: Bool = scrollActiveTimeSec < 0.25
+        let playbackAnimating: Bool = false
+        if playback.isPlaying {
+          if recentlyScrolling is false {
+            playbackAnimating = true
+          }
+        }
         let timeout: Float = nextWaitTimeoutSec(
-          animating: anim.active or playback.isPlaying or scrollAnimating
+          animating: anim.active or playbackAnimating or scrollAnimating
           mouseDown: isMouseButtonDown(button: mouseButtonLeft)
           pollWatcher: true
         )
@@ -1043,7 +1061,26 @@ func main() {
           # an event (a play/pause toggle may have flipped isPlaying),
           # or on the first frame after a world rebuild (the freshly
           # laid-out world needs the initial icon/fill written).
-          if forceRender or playback.isPlaying or input.events.length > 0 {
+          #
+          # ALSO skipped while the user is actively wheel-scrolling
+          # (last wheel tick < 250 ms ago) — see the matching gate
+          # near `nextWaitTimeoutSec` above. Each call here bumps
+          # the Sprite + ComputedRect table generations, which
+          # marks the render cache dirty, which forces a full
+          # render. Doing that 60×/sec on top of wheel-driven
+          # rebuilds blew the frame budget and the scroll dropped
+          # to ~2 fps.
+          let applyPlaybackFrame: Bool = false
+          if forceRender or input.events.length > 0 {
+            applyPlaybackFrame = true
+          }
+          if playback.isPlaying {
+            let wheelAgeSec: Float = now - lastWheelTime
+            if wheelAgeSec >= 0.25 {
+              applyPlaybackFrame = true
+            }
+          }
+          if applyPlaybackFrame {
             applyPlaybackToWorld(world: world, state: playback)
           }
           # If a transition was armed by the outer rebuild, this is
