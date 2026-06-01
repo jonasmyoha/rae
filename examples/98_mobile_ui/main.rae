@@ -1,4 +1,4 @@
-# rae: max-lines 1350
+# rae: max-lines 1300
 # Mobile-UI demo entrypoint. The actual work — scene loading, world
 # building, screen routing — lives in sibling `.rae` files in this same
 # directory, which Rae auto-imports because they share the project
@@ -1226,7 +1226,6 @@ func main() {
                 high: wheelMax
                 dim: screenH
               )
-              let preCapY: Float = profileScrollY
               profileScrollY = profileScrollY + eff
               # Hard cap on how far past the bound the wheel can
               # push. dampedDelta's rubber-band slope only reaches
@@ -1235,12 +1234,13 @@ func main() {
               # ~0.5–1.5 s after the user lifts their fingers. Each
               # event still pushes a small (damped) amount even at
               # large overshoots, and across hundreds of momentum
-              # events that accumulates into a huge stretch.
-              # Capping overshoot here gives a single, bounded
-              # rubber-band feel: stretch up to the cap, ignore
-              # further wheel push past it, and spring back from
-              # the same predictable displacement regardless of
-              # how hard the user flicked.
+              # events that accumulates into a huge stretch — which
+              # then has to spring back over a correspondingly long
+              # duration. Capping overshoot here gives a single,
+              # bounded rubber-band feel: stretch up to the cap,
+              # ignore further wheel push past it, and spring back
+              # from the same predictable displacement regardless
+              # of how hard the user flicked.
               let wheelMaxOver: Float = 120.0
               let wheelOverMin: Float = wheelMin - wheelMaxOver
               let wheelOverMax: Float = wheelMax + wheelMaxOver
@@ -1253,32 +1253,16 @@ func main() {
               # Velocity stays at 0 during wheel scrolling — the
               # wheel block itself drives `profileScrollY` each
               # event, and the spring/momentum paths above are
-              # gated on `wheelQuiet` so they don't fight the
-              # wheel. When the spring eventually takes over, it
+              # gated on `wheelQuiet` so they don't fire (and
+              # don't fight the wheel) until 50 ms after the last
+              # event. When the spring eventually takes over, it
               # bootstraps from rest with the current (bounded)
               # displacement.
               scrollVelocity = 0.0
-              # Mark the wheel-active timestamp ONLY when the
-              # event actually moved the position. Once the cap
-              # clamps every event to zero net motion, the OS
-              # momentum tail (which keeps firing events for ~1.5 s
-              # after finger lift) would otherwise hold the spring
-              # off indefinitely — position pinned at the cap until
-              # the OS finally goes quiet. The visible symptom was
-              # "stretch held at the bound for a second, then
-              # snapped back." With this check, the very first
-              # event that lands against the cap stops updating the
-              # timer; 50 ms later the spring fires and pulls back
-              # while macOS is still happily delivering momentum
-              # events into a clamped void.
-              let movedBy: Float = profileScrollY - preCapY
-              let absMoved: Float = movedBy
-              if absMoved < 0.0 {
-                absMoved = 0.0 - absMoved
-              }
-              if absMoved > 0.5 {
-                lastWheelTime = getTime()
-              }
+              # Mark the wheel-active timestamp so the
+              # spring/momentum branches above know to stay out
+              # of the way until the OS-delivered momentum stops.
+              lastWheelTime = getTime()
               switching = true
             }
           }
