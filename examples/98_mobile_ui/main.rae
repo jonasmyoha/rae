@@ -756,23 +756,22 @@ func main() {
                 if profileScrollY < scrollMin {
                   target = scrollMin
                 }
-                # Near-critically-damped spring (ζ ≈ 1.0). Returns
-                # to the bound without oscillating past it.
-                # ζ = friction / (2 * sqrt(tension)); with tension
-                # 0.20 the critical friction is 2 * sqrt(0.20) ≈
-                # 0.894, so friction 0.89 keeps us a hair under
-                # critical (no visible overshoot).
+                # Near-critically-damped spring (ζ ≈ 0.99). Soft
+                # enough that a small drag-release overshoot (~50 px)
+                # eases back smoothly rather than snapping — that
+                # gentle feel was the original tuning the user
+                # liked. ζ = friction / (2 * sqrt(tension)); with
+                # tension 0.08 the critical friction is 2*sqrt(0.08)
+                # ≈ 0.566, so friction 0.56 keeps us a hair under
+                # critical (no visible oscillation).
                 #
-                # The stiffer values here (tension 0.20 vs the
-                # earlier 0.08, friction 0.89 vs 0.56) more than
-                # halve the spring's settling time. With the old
-                # values, a 250 px overshoot from a fast trackpad
-                # flick took ~330 ms to settle visibly; with these
-                # it takes ~150 ms. The bounce now feels independent
-                # of how hard you flicked rather than scaling with
-                # the overshoot magnitude.
-                let tension: Float = 0.20
-                let friction: Float = 0.89
+                # We don't try to scale this spring up to compensate
+                # for big two-finger-scroll overshoots — instead the
+                # wheel block caps overshoot magnitude, so the spring
+                # always starts from a predictably-small displacement.
+                # See `wheelMaxOver` in the wheel handler.
+                let tension: Float = 0.08
+                let friction: Float = 0.56
                 scrollVelocity = springStepVelocity(
                   pos: profileScrollY
                   velocity: scrollVelocity
@@ -793,16 +792,15 @@ func main() {
                 if absV < 0.0 {
                   absV = 0.0 - absV
                 }
-                # Snap zone — 3 px and 1 px/frame are well below
-                # human perception (sub-pixel chase on a 60 Hz
-                # display), so cutting the asymptotic tail there
-                # makes the bounce read as "done" the moment the
-                # eye stops following motion. Previously the
-                # 0.5/0.1 threshold chased the tail to the floor,
-                # which gave a perceptibly long settle for any
-                # large initial displacement even though the
-                # exponential envelope itself was decaying fast.
-                if absD < 3.0 and absV < 1.0 {
+                # Snap zone — 1 px and ⅓ px/frame is just below
+                # human perception on a 60 Hz display, so cutting
+                # the asymptotic tail there removes the perceptibly-
+                # slow final approach without introducing any
+                # visible jump. The earlier 0.5/0.1 chased the tail
+                # to half a pixel, which felt "still bouncing"
+                # because the eye couldn't see the difference
+                # between displ=0.5 and displ=0.
+                if absD < 1.0 and absV < 0.3 {
                   profileScrollY = target
                   scrollVelocity = 0.0
                 }
@@ -1229,16 +1227,37 @@ func main() {
                 dim: screenH
               )
               profileScrollY = profileScrollY + eff
+              # Hard cap on how far past the bound the wheel can
+              # push. dampedDelta's rubber-band slope only reaches
+              # 0 at `over == rubberDim == screenH = 1017`, and
+              # macOS keeps delivering trackpad momentum events for
+              # ~0.5–1.5 s after the user lifts their fingers. Each
+              # event still pushes a small (damped) amount even at
+              # large overshoots, and across hundreds of momentum
+              # events that accumulates into a huge stretch — which
+              # then has to spring back over a correspondingly long
+              # duration. Capping overshoot here gives a single,
+              # bounded rubber-band feel: stretch up to the cap,
+              # ignore further wheel push past it, and spring back
+              # from the same predictable displacement regardless
+              # of how hard the user flicked.
+              let wheelMaxOver: Float = 120.0
+              let wheelOverMin: Float = wheelMin - wheelMaxOver
+              let wheelOverMax: Float = wheelMax + wheelMaxOver
+              if profileScrollY < wheelOverMin {
+                profileScrollY = wheelOverMin
+              }
+              if profileScrollY > wheelOverMax {
+                profileScrollY = wheelOverMax
+              }
               # Velocity stays at 0 during wheel scrolling — the
               # wheel block itself drives `profileScrollY` each
               # event, and the spring/momentum paths above are
               # gated on `wheelQuiet` so they don't fire (and
               # don't fight the wheel) until 50 ms after the last
               # event. When the spring eventually takes over, it
-              # bootstraps from rest with the current displacement,
-              # which under our (near-)critical damping gives one
-              # smooth bounce-back instead of the visible "5
-              # bounces" tug-of-war the previous design produced.
+              # bootstraps from rest with the current (bounded)
+              # displacement.
               scrollVelocity = 0.0
               # Mark the wheel-active timestamp so the
               # spring/momentum branches above know to stay out
