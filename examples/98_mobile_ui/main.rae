@@ -1,4 +1,4 @@
-# rae: max-lines 1400
+# rae: max-lines 1500
 # Mobile-UI demo entrypoint. The actual work — scene loading, world
 # building, screen routing — lives in sibling `.rae` files in this same
 # directory, which Rae auto-imports because they share the project
@@ -440,6 +440,18 @@ func main() {
     # gives a single smooth bounce-back instead of the visible
     # tug-of-war the previous design produced.
     let lastWheelTime: Float = 0.0 - 1.0
+
+    # Active-album / track cache. Recomputing these from
+    # `state.albums` on every inner-loop iteration cost ~2 fps
+    # during wheel scroll on MB-backed albums (15-25 tracks each
+    # = a deep copy of an Album with all its String fields). The
+    # outer loop refreshes the cache only when the user has
+    # actually changed album or track; the inner loop reads the
+    # cached scroll bound directly.
+    let cachedAlbumStem: String = ""
+    let cachedTrackIndex: Int = 0 - 1
+    let cachedTrackDurMs: Int = 0
+    let cachedAlbumScrollFloor: Float = 0.0
     # Single InputSystem for the whole app lifetime.
     #
     # Conceptual split: `UiWorld` is the renderable tree, rebuilt
@@ -491,15 +503,32 @@ func main() {
         profileLoaded = false
       }
 
-      # Sync the progress-bar duration to whichever track the user
-      # is on. The active track may have changed since last rebuild
-      # (album switch reset `currentTrackIndex` to 0; future Next /
-      # Prev buttons will bump it). A zero-duration track (unmatched
-      # album) keeps a positive fallback so `playbackProgress`
-      # doesn't divide-by-zero.
-      let activeAlbumForDur: Album = activeAlbum(state: appState)
-      let activeTrackForDur: Track = trackAt(album: activeAlbumForDur, idx: appState.currentTrackIndex)
-      let trackDurSec: Float = activeTrackForDur.durationMs.toFloat() / 1000.0
+      # Cache the active-album bounds + active-track duration so
+      # the hot inner-loop heartbeat doesn't deep-copy a 15-25
+      # track Album every frame. `activeAlbum(state)` and
+      # `trackAt(album, ...)` both return by value, which means
+      # cloning every Track and every String field of the active
+      # album — fine for the demo's old 1-5 track entries, but
+      # the MusicBrainz fetch backed many albums with 15-25
+      # tracks and the per-frame copy turned wheel scroll into
+      # ~2 fps. Recompute only when stem or track index actually
+      # changes — at that point the user has navigated, so one
+      # extra deep copy is fine.
+      let stemChanged: Bool = appState.currentAlbumStem.equals(other: cachedAlbumStem) is false
+      let trackChanged: Bool = appState.currentTrackIndex is not cachedTrackIndex
+      if stemChanged or trackChanged {
+        let activeAlbumNow: Album = activeAlbum(state: appState)
+        let activeTrackNow: Track = trackAt(album: activeAlbumNow, idx: appState.currentTrackIndex)
+        cachedTrackDurMs = activeTrackNow.durationMs
+        cachedAlbumScrollFloor = albumScrollMin(album: activeAlbumNow)
+        # Fresh allocation so the cached stem doesn't alias
+        # `appState.currentAlbumStem`'s heap (which gets dropped
+        # on the next assignment to `currentAlbumStem` from
+        # `dispatchActions`).
+        cachedAlbumStem = "{appState.currentAlbumStem}"
+        cachedTrackIndex = appState.currentTrackIndex
+      }
+      let trackDurSec: Float = cachedTrackDurMs.toFloat() / 1000.0
       if trackDurSec > 0.0 {
         playback.durationSec = trackDurSec
       }
@@ -607,8 +636,9 @@ func main() {
         }
         if currentScreen is Screen.Album {
           scrollOnThisScreen = true
-          let albumForBounds: Album = activeAlbum(state: appState)
-          scrollFloor = albumScrollMin(album: albumForBounds)
+          # Cached at the outer-loop level — see the
+          # `cachedAlbumStem` block above for why.
+          scrollFloor = cachedAlbumScrollFloor
         }
         let scrollOOB: Bool = profileScrollY > 0.0 or profileScrollY < scrollFloor
         let velAbs: Float = scrollVelocity
