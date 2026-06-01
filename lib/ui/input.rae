@@ -89,12 +89,27 @@ func pointInEntity(world: view UiWorld, entity: view Int, x: view Float, y: view
 # the visually-topmost child (last painted) wins. Returns the deepest
 # hit entity that has an `OnClick` component, or -1 if nothing under
 # (x, y) handles clicks.
+#
+# We do NOT bail when the click is outside the visited entity's own
+# `WorldTransform`+`ComputedRect` bounds. That would be a useful
+# optimisation if children were always contained within their parent
+# — but they aren't: scroll containers (and any layout that overflows
+# its declared box) routinely place children outside the parent's
+# bounding rect. Pruning on the parent there would silently drop
+# clicks on perfectly-visible children. The bounds check belongs to
+# `pointInEntity` below at the OnClick leaf, where the entity's own
+# rect is the actual click target, never an ancestor's.
+#
+# Performance: with the bail removed we walk every entity in the
+# subtree on every click. For UI worlds of a few hundred entities
+# that's well under a millisecond; not measurable in any human-
+# perceivable way. If a future world genuinely needs the pruning,
+# the right answer is to track per-entity "subtree bounds" during
+# layout (union of own bounds + every descendant's bounds) and check
+# those — not the entity's own visual bounds.
 func hitTestEntity(world: view UiWorld, entity: view Int, x: view Float, y: view Float) ret Int {
-  if pointInEntity(world: world, entity: entity, x: x, y: y) is false {
-    ret inputNoEntity
-  }
-
-  # Children first, in reverse declaration order.
+  # Children first, in reverse declaration order — visually-topmost
+  # child wins. Recurse regardless of own bounds (see comment above).
   if componentHas(this: world.childrens, entity: entity) {
     let ch: view Children => componentView(this: world.childrens, entity: entity)
     let n: Int = ch.ids.length
@@ -109,15 +124,25 @@ func hitTestEntity(world: view UiWorld, entity: view Int, x: view Float, y: view
     }
   }
 
-  # Self.
+  # Self: only register a hit if this entity actually carries an
+  # `OnClick` AND its own rect contains the cursor. `pointInEntity`
+  # also checks `wt.visible`, so subtrees that the TransformSystem
+  # marked invisible (inactive ancestor, hidden hero target during
+  # a transition, etc.) won't fire.
   if componentHas(this: world.onClicks, entity: entity) {
-    ret entity
+    if pointInEntity(world: world, entity: entity, x: x, y: y) {
+      ret entity
+    }
   }
   ret inputNoEntity
 }
 
 # Walk every alive root and return the topmost entity at (x, y) that
-# carries `OnClick`.
+# carries `OnClick`. Reverse-iterates the alive list so roots created
+# later (typically: overlays added on top of the main UI) get first
+# crack at consuming the click. `hitTestEntity` then walks each root's
+# subtree without pruning on intermediate ancestor bounds — see its
+# comment.
 func hitTest(world: view UiWorld, x: view Float, y: view Float) ret Int {
   let alive: view List(Int) => world.alive
   let n: Int = alive.length
