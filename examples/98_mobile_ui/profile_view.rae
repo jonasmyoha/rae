@@ -272,11 +272,25 @@ func buildCoverGrid(world: mod UiWorld, reg: view TextureRegistry) ret Int {
 func buildProfileBody(world: mod UiWorld, reg: view TextureRegistry, scrollY: view Float) ret Int {
   let body: Int = createEntity(world: world)
   let bodyW: Float = screenW - outerPad * 2.0
-  # Height matches the visible content area (between top bar and
-  # nav tabs). The Vertical layout below positions children inside
-  # this rect, but children may extend past `bodyH` and that's fine
-  # for our scrolled-grid case.
-  let bodyH: Float = screenH - topBarH - navTabsH - outerGap * 4.0 - outerPad * 2.0
+  # Body height has to encompass ALL of its scrollable children, not
+  # just the visible viewport. `hitTestEntity` (lib/ui/input.rae)
+  # bails early if the click point isn't inside the entity's own
+  # bounds before recursing into children — so if we sized the body
+  # to the viewport (`screenH - topBarH - …` ≈ 800 px), then once
+  # the user scrolled the body's `Offset` past one screen, the
+  # body's bounds slid off the bottom of the visible region and
+  # every click below the (now-shifted) body bound returned `-1`,
+  # even on tiles that were still on screen. The visible symptom
+  # was "scroll more than ~1 screen, then clicks on grid tiles stop
+  # registering, even though `renderDebugClickRects` still shows
+  # the outline turn yellow on press." renderDebugClickRects
+  # iterates the OnClick table directly so it never hit the bug.
+  #
+  # Size the body to a generous upper bound that exceeds anything
+  # the grid will produce (~100 rows × tile height + slack). The
+  # body has no Shape and isn't rendered, so the inflated bounds
+  # are invisible — they only matter for hit-test recursion.
+  let bodyH: Float = 10000.0
   setRectFixed(world: world, entity: body, w: bodyW, h: bodyH)
   let layV: LayoutType = LayoutType.Vertical
   let alignC: AlignKind = AlignKind.Center
