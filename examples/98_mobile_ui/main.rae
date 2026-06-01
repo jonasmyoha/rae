@@ -583,16 +583,32 @@ func main() {
         # the spring-back after release renders chunky because the
         # physics step only runs once per OS event wake.
         let scrollAnimating: Bool = false
-        # Out-of-bounds check needs the active screen's scroll
-        # floor — Profile uses the static -1050 grid baseline,
-        # Album derives from the active track count. Wrong floor
-        # → the spring physics never fires to bring overshoot
-        # back, leaving the user looking at an empty scrolled
-        # region after a flick.
-        let scrollFloor: Float = -1050.0
+        # Per-frame scroll gating + bounds. Both Profile (album-
+        # cover grid) and Album (track list) are scrollable, and
+        # all three physics blocks below (OOB redraw heartbeat,
+        # drag + momentum + spring, wheel/trackpad) read the same
+        # two values:
+        #   scrollOnThisScreen — whether the current screen has a
+        #                        scrollable body at all.
+        #   scrollFloor        — the most-negative scrollY the
+        #                        user is allowed to reach.
+        #                        Profile uses a static grid baseline;
+        #                        Album derives from the active
+        #                        album's track count.
+        # Wrong floor → spring physics never fires to bring overshoot
+        # back; missing gate → wheel input is silently dropped on
+        # the affected screen. Compute once here and let every
+        # downstream block read these locals.
+        let scrollOnThisScreen: Bool = false
+        let scrollFloor: Float = 0.0
+        if currentScreen is Screen.Profile {
+          scrollOnThisScreen = true
+          scrollFloor = 0.0 - 1050.0
+        }
         if currentScreen is Screen.Album {
-          let albumForOOB: Album = activeAlbum(state: appState)
-          scrollFloor = albumScrollMin(album: albumForOOB)
+          scrollOnThisScreen = true
+          let albumForBounds: Album = activeAlbum(state: appState)
+          scrollFloor = albumScrollMin(album: albumForBounds)
         }
         let scrollOOB: Bool = profileScrollY > 0.0 or profileScrollY < scrollFloor
         let velAbs: Float = scrollVelocity
@@ -692,17 +708,10 @@ func main() {
           #     firing on whatever's under the cursor (tab, tile,
           #     play button).
           let dragJustReleased: Bool = false
-          # Both Profile (album-cover grid) and Album (track list)
-          # screens scroll. Each rebuilds with the same
-          # `profileScrollY` value — bounds change per screen, but
-          # the wheel / drag / spring physics is identical.
-          let scrollOnThisScreen: Bool = false
-          if currentScreen is Screen.Profile {
-            scrollOnThisScreen = true
-          }
-          if currentScreen is Screen.Album {
-            scrollOnThisScreen = true
-          }
+          # `scrollOnThisScreen` was computed once at the top of
+          # this loop iteration — same value the wheel block and
+          # the OOB redraw heartbeat use. Keep them in sync by
+          # not re-deriving locally here.
           if scrollOnThisScreen {
             let curMouseX: Float = getMouseX().toFloat()
             let curMouseY: Float = getMouseY().toFloat()
@@ -718,16 +727,10 @@ func main() {
             # default and leaves comfortable headroom for deliberate
             # swipes.
             let dragThreshold: Float = 10.0
-            # Per-screen scroll clamp. Profile keeps a fixed
-            # baseline (matches the static 24-album grid height);
-            # Album derives the clamp from the active album's
-            # track count so it stops exactly when the last track
-            # row sits above the dock.
-            let scrollMin: Float = -1050.0
-            if currentScreen is Screen.Album {
-              let albumForScroll: Album = activeAlbum(state: appState)
-              scrollMin = albumScrollMin(album: albumForScroll)
-            }
+            # Scroll clamp comes from the per-frame `scrollFloor`
+            # at the top of the inner loop — single source of
+            # truth for Profile vs Album vs any future screen.
+            let scrollMin: Float = scrollFloor
             let scrollMax: Float = 0.0
             # Rubber-band reference dimension — tunes how stretchy
             # the overshoot feels. iOS uses ~viewport height.
@@ -1261,14 +1264,15 @@ func main() {
             }
           }
 
-          # Profile-screen wheel / 2-finger trackpad scroll. Shares
-          # the same rubber-band-when-OOB damping the drag path
-          # uses, so a trackpad scroll that overshoots looks
-          # identical to a finger-drag overshoot. Spring-back is
-          # driven by the drag block's physics step on subsequent
-          # frames when the wheel goes idle (the spring branch
-          # runs as long as mouse is up and the position is OOB).
-          if currentScreen is Screen.Profile {
+          # Wheel / 2-finger trackpad scroll. Fires on any
+          # scrollable screen (Profile, Album) — gated on the
+          # same `scrollOnThisScreen` flag the drag block uses.
+          # Shares the rubber-band-when-OOB damping with the drag
+          # path so a trackpad overshoot looks identical to a
+          # finger-drag overshoot. Spring-back is driven by the
+          # drag block's physics step on subsequent frames when
+          # the wheel goes idle.
+          if scrollOnThisScreen {
             # Ignore wheel/trackpad events while the user is holding
             # the mouse button. macOS keeps sending momentum-scroll
             # events for ~0.5–1.5 s after the user lifts fingers from
@@ -1290,9 +1294,11 @@ func main() {
               # scrollY (= content shifts up).
               let rawDelta: Float = wheel * pixelsPerTick
               # Damp the delta when already past a bound so further
-              # wheel input produces diminishing motion. Range
-              # constants matched to the grid; see drag block.
-              let wheelMin: Float = -1050.0
+              # wheel input produces diminishing motion. Bounds
+              # come from the same per-frame `scrollFloor` the
+              # drag block uses — switching screens / albums
+              # automatically retunes the rubber band.
+              let wheelMin: Float = scrollFloor
               let wheelMax: Float = 0.0
               let eff: Float = dampedDelta(
                 current: profileScrollY
