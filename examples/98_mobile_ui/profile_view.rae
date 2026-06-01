@@ -151,25 +151,21 @@ func gridTileSize() ret Float {
   ret (avail - gapTotal) / cols.toFloat()
 }
 
-# Collect the texture-registry keys that belong to the profile
-# grid. Iterating the registry directly makes it the single source
-# of truth: the host calls `refreshProfileCovers` once on Profile
-# screen entry to load textures, and every subsequent rebuild
-# (e.g. on scroll) reads back from this same registry without
-# touching the filesystem again.
-func collectProfileCoverKeys(reg: view TextureRegistry) ret List(String) {
-  let entries: view List(TextureEntry) => reg.entries
-  let result: List(String) = createList(String, initialCap: entries.length)
-  let prefix: String = "profile."
+# Collect the album-cover texture keys for every parsed album.
+# The album list (loaded once at boot from `albumsFolder`) is the
+# single source of truth — the loader registers each cover under
+# its stem key, and we just hand those stems back here.
+func collectProfileCoverKeys(albums: view List(Album)) ret List(String) {
+  let result: List(String) = createList(String, initialCap: albums.length)
   let i: Int = 0
-  loop i < entries.length {
-    # buf_get: `.get` on List(UserStruct) returns an opt T that
-    # the C backend doesn't auto-unwrap. See lib/fs.rae note.
-    let e: TextureEntry = rae_ext_rae_buf_get(buf: entries.data, index: i)
-    if e.key.startsWith(prefix: prefix) {
-      let copied: String = e.key
-      result.add(value: copied)
-    }
+  loop i < albums.length {
+    let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: i)
+    # Fresh String allocation — `a.stem` is owned by `albums`,
+    # which outlives this list, but downstream consumers (the
+    # cover-tile builder) need their own copy to avoid sharing
+    # the per-Album heap.
+    let copied: String = "{a.stem}"
+    result.add(value: copied)
     i = i + 1
   }
   ret result
@@ -233,10 +229,10 @@ func buildCoverGridRow(
   ret row
 }
 
-# Compose the full 3-column grid over keys collected from the
-# TextureRegistry.
-func buildCoverGrid(world: mod UiWorld, reg: view TextureRegistry) ret Int {
-  let keys: List(String) = collectProfileCoverKeys(reg: reg)
+# Compose the full 3-column grid over keys derived from the
+# album list (one tile per parsed album).
+func buildCoverGrid(world: mod UiWorld, albums: view List(Album)) ret Int {
+  let keys: List(String) = collectProfileCoverKeys(albums: albums)
   let grid: Int = createEntity(world: world)
   let cols: Int = gridColumns
   let total: Int = keys.length
@@ -269,7 +265,7 @@ func buildCoverGrid(world: mod UiWorld, reg: view TextureRegistry) ret Int {
 # past the screen edge — but the host applies `scrollY` as an
 # `Offset.delta.y` so the user can wheel-scroll the column up to
 # bring later rows into view.
-func buildProfileBody(world: mod UiWorld, reg: view TextureRegistry, scrollY: view Float) ret Int {
+func buildProfileBody(world: mod UiWorld, reg: view TextureRegistry, albums: view List(Album), scrollY: view Float) ret Int {
   let body: Int = createEntity(world: world)
   let bodyW: Float = screenW - outerPad * 2.0
   # Height matches the visible content area (between top bar and
@@ -304,7 +300,7 @@ func buildProfileBody(world: mod UiWorld, reg: view TextureRegistry, scrollY: vi
   setText(world: world, entity: bio, text: bioText, styleId: bioStyle)
 
   let stats: Int = buildStatsRow(world: world)
-  let grid: Int = buildCoverGrid(world: world, reg: reg)
+  let grid: Int = buildCoverGrid(world: world, albums: albums)
 
   # No trailing spacer is needed — body has no clipping, so the
   # "comfortable scroll bottom" (1-2 rows of empty space below the
@@ -347,9 +343,11 @@ func buildProfileTopBar(world: mod UiWorld) ret Int {
 func buildProfileWorld(
   scenes: view AlbumScenes
   reg: view TextureRegistry
+  state: view AppState
   playback: view PlaybackState
   scrollY: view Float
 ) pub ret UiWorld {
+  let albums: view List(Album) => state.albums
   let world: UiWorld = createUiWorld()
 
   let root: Int = createEntity(world: world)
@@ -366,7 +364,7 @@ func buildProfileWorld(
   # the Profile screen, so a scroll-triggered rebuild stays cheap.
 
   let topBar: Int = buildProfileTopBar(world: world)
-  let body: Int = buildProfileBody(world: world, reg: reg, scrollY: scrollY)
+  let body: Int = buildProfileBody(world: world, reg: reg, albums: albums, scrollY: scrollY)
 
   let kids: List(Int) = createList(Int, initialCap: 2)
   kids.add(value: topBar)
@@ -380,6 +378,7 @@ func buildProfileWorld(
     activeTab: Screen.Profile
     scenes: scenes
     playback: playback
+    state: state
     reg: reg
   )
 

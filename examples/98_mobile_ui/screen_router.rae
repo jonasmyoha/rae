@@ -18,19 +18,20 @@ func buildScreenWorld(
   screen: Screen
   scenes: view AlbumScenes
   playback: view PlaybackState
+  state: view AppState
   texReg: view TextureRegistry
   scrollY: view Float
 ) pub ret UiWorld {
   if screen is Screen.Album {
-    ret buildAlbumWorld(scenes: scenes, playback: playback, reg: texReg)
+    ret buildAlbumWorld(scenes: scenes, playback: playback, state: state, reg: texReg)
   }
   if screen is Screen.Search {
-    ret buildSearchWorld(scenes: scenes, playback: playback, reg: texReg)
+    ret buildSearchWorld(scenes: scenes, playback: playback, state: state, reg: texReg)
   }
   if screen is Screen.Profile {
-    ret buildProfileWorld(scenes: scenes, reg: texReg, playback: playback, scrollY: scrollY)
+    ret buildProfileWorld(scenes: scenes, reg: texReg, state: state, playback: playback, scrollY: scrollY)
   }
-  ret buildNowPlayingWorld(scenes: scenes, playback: playback, reg: texReg)
+  ret buildNowPlayingWorld(scenes: scenes, playback: playback, state: state, reg: texReg)
 }
 
 # Material icon key for the play button in the current state. Used by
@@ -44,31 +45,67 @@ func playbackIconKey(playback: view PlaybackState) pub ret String {
   ret "mat:play_arrow"
 }
 
-# App-side state the dispatcher both reads and writes. Carries the
-# active album cover key so the hero animation system knows which
-# Profile-grid texture maps to "the album we're currently looking
-# at" on the Album / NowPlaying screens.
-type AppState {
-  # Texture key of the album cover the user is currently viewing.
-  # The Album / NowPlaying scenes still author the placeholder
-  # `"albumCover"` key in their `.raescene` JSON; main.rae calls
-  # `rebindHero(world, "albumCover", state.currentAlbumKey)` after
-  # building those worlds so the hero animation finds matching
-  # keys on both ends of a transition.
-  currentAlbumKey: String
+# App-side state the dispatcher both reads and writes. Owns the
+# parsed album list (loaded once at boot from `albumsFolder`) and
+# tracks which album the user is currently inside.
+#
+# Texture-registry keys for album covers are exactly the album
+# `stem`, so `state.currentAlbumStem` doubles as the hero-rebind
+# target: scenes author the placeholder `"albumCover"` key and
+# main.rae calls `rebindHero(world, "albumCover", state.currentAlbumStem)`
+# after building Album / NowPlaying worlds.
+type AppState pub {
+  albums: List(Album)
+  # Stem of the album the user is currently viewing. Matches one
+  # entry's `Album.stem`. Empty string before the first
+  # `loadAllAlbums` call.
+  currentAlbumStem: String
+  # Active track within the current album (0-based, clamped to
+  # the track count at use sites). Drives the NowPlaying / mini-
+  # player text overrides and the playback position.
+  currentTrackIndex: Int
 }
 
-func createAppState() pub ret AppState {
-  # Default to the profile-grid texture key for MGMT — the album
-  # the static Album / NowPlaying scenes currently visualise.
-  # This makes navigation from those screens to Profile (or vice
-  # versa) hero-animate against the matching grid tile from
-  # launch, even before the user has tapped any tile. The texture
-  # is preloaded under both `albumCover` (scene placeholder) and
-  # `profile.02_mgmt.jpg` (grid key) by `loadTextures`.
-  ret AppState {
-    currentAlbumKey: "profile.02_mgmt.jpg"
+func createAppState(albums: own List(Album)) pub ret AppState {
+  # Default the active stem to the first album in the list — the
+  # static Album / NowPlaying scenes hero-animate against whatever
+  # cover the Profile grid has at that index, and the user's first
+  # tap on a tile overwrites it. Empty list → empty stem (the
+  # placeholder cover sticks around).
+  let firstStem: String = ""
+  if albums.length > 0 {
+    let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: 0)
+    firstStem = "{a.stem}"
   }
+  ret AppState {
+    albums: albums
+    currentAlbumStem: firstStem
+    currentTrackIndex: 0
+  }
+}
+
+# Helper for view-building paths that need the active album as a
+# concrete Album value (rather than chasing the index through
+# `state.albums` themselves). Returns a stub Album when the stem
+# isn't found — caller can still render the row but every field
+# will be empty.
+func activeAlbum(state: view AppState) pub ret Album {
+  let idx: Int = findAlbumIndex(albums: state.albums, stem: state.currentAlbumStem)
+  if idx < 0 {
+    let empty: String = ""
+    ret Album {
+      stem: empty
+      artist: empty
+      album: empty
+      year: 0
+      genre: empty
+      status: empty
+      coverPath: empty
+      tracks: createList(Track, initialCap: 0)
+      totalDurationMs: 0
+    }
+  }
+  ret rae_ext_rae_buf_get(buf: state.albums.data, index: idx)
 }
 
 # Drain every fired action and route into a target screen. Returns the
@@ -123,21 +160,24 @@ func dispatchActions(
       togglePlayback(state: playback)
     }
     if actionId.equals(other: albumOpenKey) {
-      # Profile tile click. The tile's own Sprite.textureKey is the
-      # stable identifier for that album cover. Copy it into app
-      # state so the Album / NowPlaying hero rebind picks it up,
-      # then route into the Album screen.
+      # Profile tile click. The tile's Sprite.textureKey IS the
+      # album stem (see `albumCoverKey` in asset_loader.rae), so
+      # we can copy it straight into state. Tapping a fresh album
+      # also rewinds the active track to 0 — opening "Currents"
+      # shouldn't drop the playhead at track 7 just because the
+      # previous album had a track 7.
       if componentHas(this: world.sprites, entity: ev.entity) {
         let sp: Sprite = componentGet(this: world.sprites, entity: ev.entity)
         # Force a fresh String allocation via interpolation. A direct
-        # `state.currentAlbumKey = sp.textureKey` (or via a let-copy)
+        # `state.currentAlbumStem = sp.textureKey` (or via a let-copy)
         # aliases the source String, which is owned by the current
         # world's Sprite table; the world drops on the next rebuild
         # and the aliased pointer dangles. The dangling key is then
         # written into the next world by `rebindHero`, corrupting
         # the Sprite / HeroWidget tables. Symptom: every click on
         # the destination Album screen returns pressed=-1.
-        state.currentAlbumKey = "{sp.textureKey}"
+        state.currentAlbumStem = "{sp.textureKey}"
+        state.currentTrackIndex = 0
       }
       next = Screen.Album
     }
