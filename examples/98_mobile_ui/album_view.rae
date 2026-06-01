@@ -2,16 +2,12 @@
 #
 # The static album header — top bar, hero block, action buttons,
 # play/shuffle pills — lives in `assets/scenes/album.raescene` and
-# is mounted as a single sub-tree. Only the genuinely-dynamic
-# pieces stay code-driven: the per-track-row loop, the bottom
-# spacer, the mini-player scene mount, and the nav-tabs builder.
-#
-# Trade-off recap (the previous version was 100% code-driven): a
-# scene file gets free data hot reload via `lib/file_watch.rae`,
-# theme tokens via `"$tokenName"`, and a cleaner separation
-# between layout authoring and runtime composition. The downside
-# would be that scenes can't yet express "N children driven by a
-# data list" — which is why the track-row loop stays in code.
+# is mounted as a single sub-tree. Caption / Title / Artist + the
+# hero thumb texture are overridden at mount time so the same
+# scene visualises whichever album `state.currentAlbumStem` is
+# pointing at. The track-row loop, mini-player mount, and nav-tabs
+# stay code-driven because the scene format doesn't yet express
+# a data-driven list of N children.
 import core
 import string
 import ui/components
@@ -29,70 +25,105 @@ func albumHeaderHeight() ret Float {
   ret rowSum + gaps
 }
 
-# Mount the album header scene on a fresh entity sized to the
-# screen's content width.
-func buildAlbumHeader(world: mod UiWorld, scene: view Scene) pub ret Int {
+# "Album · 11 songs · 2016" or fall back to "Album" when fields
+# are missing. Empty year and zero tracks produce "Album · -- songs".
+func albumCaption(album: view Album) ret String {
+  let n: Int = album.tracks.length
+  let tracksPart: String = ""
+  if n > 0 {
+    tracksPart = " · {n} songs"
+  }
+  let yearPart: String = ""
+  if album.year > 0 {
+    yearPart = " · {album.year}"
+  }
+  ret "Album{tracksPart}{yearPart}"
+}
+
+# Mount the album header scene with overrides driven by the active
+# album: HeroThumb sprite → stem-keyed texture (via the existing
+# hero rebind in main.rae), HeroCaption / HeroTitle / HeroArtist
+# text → album fields.
+func buildAlbumHeader(world: mod UiWorld, scene: view Scene, album: view Album) ret Int {
   let header: Int = createEntity(world: world)
   let w: Float = screenW - outerPad * 2.0
   setRectFixed(world: world, entity: header, w: w, h: albumHeaderHeight())
-  let noOverrides: List(SceneOverride) = emptyOverrides()
+
+  let overrides: List(SceneOverride) = emptyOverrides()
+  let captionId: String = "HeroCaption"
+  let titleId: String = "HeroTitle"
+  let artistId: String = "HeroArtist"
+  # Fresh String allocations so the override list owns its heap
+  # independent of `album`.
+  let captionText: String = albumCaption(album: album)
+  let titleText: String = "{album.album}"
+  let artistText: String = "{album.artist}"
+  addTextOverride(list: overrides, nodeId: captionId, value: captionText)
+  addTextOverride(list: overrides, nodeId: titleId, value: titleText)
+  addTextOverride(list: overrides, nodeId: artistId, value: artistText)
+
   let label: String = "album"
   let mounted: Int = mountOrError(
     world: world
     mountEntity: header
     scene: scene
     sceneLabel: label
-    overrides: noOverrides
+    overrides: overrides
   )
   ret header
 }
 
-# Five `track-row.raescene` mounts with per-row title/index/subtitle
-# overrides driving the same authored scene each row. This stays
-# code-driven because the scene format doesn't yet express a
-# data-driven list of N children.
-func buildTrackList(world: mod UiWorld, trackScene: view Scene) pub ret Int {
+# Track-row mounts driven by the active album's tracks. Each row
+# takes a (number, title, "{artist} · {duration}") triple. We cap
+# the visible row count at `trackRowCount` to preserve the layout
+# height the header currently assumes — overflow into a scrollable
+# region is future work. Empty `album.tracks` → no rows mounted
+# (the spacer fills the gap).
+func buildTrackList(world: mod UiWorld, trackScene: view Scene, album: view Album) pub ret Int {
   let list: Int = createEntity(world: world)
-  let n: Int = trackRowCount
-  let listH: Float = trackRowH * n.toFloat() + trackGap * (n - 1).toFloat()
+  let total: Int = album.tracks.length
+  let cap: Int = trackRowCount
+  let n: Int = total
+  if n > cap {
+    n = cap
+  }
+  # `n` may be 0 (unmatched album with no tracks) — the rect still
+  # has positive height to keep the spacer below it from collapsing
+  # the layout into the dock.
+  let visible: Int = n
+  if visible < 1 {
+    visible = 1
+  }
+  let listH: Float = trackRowH * visible.toFloat() + trackGap * (visible - 1).toFloat()
   setRectFixed(world: world, entity: list, w: screenW - outerPad * 2.0, h: listH)
   let layV: LayoutType = LayoutType.Vertical
   let alignS: AlignKind = AlignKind.Start
   setLayout(world: world, entity: list, kind: layV, gap: trackGap, alignCross: alignS)
 
-  let titles: List(String) = createList(String, initialCap: trackRowCount)
-  titles.add(value: "To Speak Of Solitude")
-  titles.add(value: "Unsayable")
-  titles.add(value: "In The Androgynous Dark")
-  titles.add(value: "Salt Photographs")
-  titles.add(value: "Pink And Golden Billows")
-  let durations: List(String) = createList(String, initialCap: trackRowCount)
-  durations.add(value: "4:21")
-  durations.add(value: "2:52")
-  durations.add(value: "4:43")
-  durations.add(value: "6:54")
-  durations.add(value: "2:58")
-
   let rows: List(Int) = createList(Int, initialCap: trackRowCount)
   let i: Int = 0
-  loop i < trackRowCount {
+  loop i < n {
+    let t: Track = rae_ext_rae_buf_get(buf: album.tracks.data, index: i)
     let row: Int = createEntity(world: world)
     setRectFixed(world: world, entity: row, w: screenW - outerPad * 2.0, h: trackRowH)
 
     let overrides: List(SceneOverride) = emptyOverrides()
-    let n: Int = i + 1
-    # Interpolation produces a single owned String — no intermediate
-    # concat results to leak. Two-digit zero-pad is handled inline so
-    # the row label still reads "01"…"10" rather than "1"…"10".
-    let label: String = ""
-    if n < 10 {
-      label = "0{n}"
-    } else {
-      label = "{n}"
+    # Two-digit zero-padded row index. Prefer `t.number` when the
+    # album has explicit track numbers (iTunes returns them);
+    # fall back to position + 1 for albums without.
+    let num: Int = t.number
+    if num <= 0 {
+      num = i + 1
     }
-    let title: String = titles.get(index: i)
-    let dur: String = durations.get(index: i)
-    let subtitle: String = "Brambles · {dur}"
+    let label: String = ""
+    if num < 10 {
+      label = "0{num}"
+    } else {
+      label = "{num}"
+    }
+    let dur: String = formatDurationMs(ms: t.durationMs)
+    let title: String = "{t.title}"
+    let subtitle: String = "{album.artist} · {dur}"
     let idxId: String = "IdxText"
     let titleId: String = "TitleText"
     let subtitleId: String = "SubtitleText"
@@ -116,10 +147,13 @@ func buildTrackList(world: mod UiWorld, trackScene: view Scene) pub ret Int {
 }
 
 # Compose the whole album world: header scene + track list / spacer /
-# mini-player / nav-tabs as code-attached siblings around it.
-func buildAlbumWorld(scenes: view AlbumScenes, playback: view PlaybackState, reg: view TextureRegistry) pub ret UiWorld {
+# mini-player / nav-tabs as code-attached siblings around it. Pulls
+# the active album from `state` once so all the data-driven pieces
+# below stay consistent within a single rebuild.
+func buildAlbumWorld(scenes: view AlbumScenes, playback: view PlaybackState, state: view AppState, reg: view TextureRegistry) pub ret UiWorld {
   let world: UiWorld = createUiWorld()
   let contentW: Float = screenW - outerPad * 2.0
+  let album: Album = activeAlbum(state: state)
 
   let root: Int = createEntity(world: world)
   setRectFixed(world: world, entity: root, w: screenW, h: screenH)
@@ -129,8 +163,8 @@ func buildAlbumWorld(scenes: view AlbumScenes, playback: view PlaybackState, reg
   setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
   setPaddingAll(world: world, entity: root, n: outerPad)
 
-  let header: Int = buildAlbumHeader(world: world, scene: scenes.album)
-  let trackList: Int = buildTrackList(world: world, trackScene: scenes.trackRow)
+  let header: Int = buildAlbumHeader(world: world, scene: scenes.album, album: album)
+  let trackList: Int = buildTrackList(world: world, trackScene: scenes.trackRow, album: album)
   let spacer: Int = buildVerticalSpacer(world: world)
 
   let kids: List(Int) = createList(Int, initialCap: 3)
@@ -147,6 +181,7 @@ func buildAlbumWorld(scenes: view AlbumScenes, playback: view PlaybackState, reg
     activeTab: Screen.Album
     scenes: scenes
     playback: playback
+    state: state
     reg: reg
   )
 

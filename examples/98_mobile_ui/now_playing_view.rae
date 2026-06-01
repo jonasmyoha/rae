@@ -1,14 +1,35 @@
 # Now-playing screen world. The middle slot mounts the
 # `music-player-now-playing.raescene` directly; the bottom mini-player
 # and nav-tabs are the same scene files the album view uses.
+#
+# All scene-text placeholders ("Unsayable", "Brambles", "1:04", …)
+# are overridden at mount time from the active album + active
+# track in `AppState` so the screen reflects what the user is
+# actually playing.
 import core
+import string
 import ui/components
 import ui/ecs
 import ui/scene
 import ui/scene_instance
 
-func buildNowPlayingWorld(scenes: view AlbumScenes, playback: view PlaybackState, reg: view TextureRegistry) pub ret UiWorld {
+# "1:04 / 2:52" — current playback position + active track duration,
+# both formatted M:SS. Lets the time-labels overrides be built in one
+# place (both this screen and the mini-player call it).
+func nowPlayingTimes(playback: view PlaybackState, track: view Track) ret List(String) {
+  let elapsedMs: Int = (playback.elapsedSec * 1000.0).toInt()
+  let nowStr: String = formatDurationMs(ms: elapsedMs)
+  let totalStr: String = formatDurationMs(ms: track.durationMs)
+  let pair: List(String) = createList(String, initialCap: 2)
+  pair.add(value: nowStr)
+  pair.add(value: totalStr)
+  ret pair
+}
+
+func buildNowPlayingWorld(scenes: view AlbumScenes, playback: view PlaybackState, state: view AppState, reg: view TextureRegistry) pub ret UiWorld {
   let world: UiWorld = createUiWorld()
+  let album: Album = activeAlbum(state: state)
+  let track: Track = trackAt(album: album, idx: state.currentTrackIndex)
 
   let root: Int = createEntity(world: world)
   setRectFixed(world: world, entity: root, w: screenW, h: screenH)
@@ -24,13 +45,34 @@ func buildNowPlayingWorld(scenes: view AlbumScenes, playback: view PlaybackState
   let np: Int = createEntity(world: world)
   setRectFixed(world: world, entity: np, w: screenW - outerPad * 2.0, h: npH)
 
-  # Initial play/pause icon override so the very first rendered frame
-  # already shows the right glyph. The per-frame inner loop applies
-  # the same swap whenever `isPlaying` flips after that.
   let npOverrides: List(SceneOverride) = emptyOverrides()
+  # Play / pause glyph for the very first rendered frame; the inner
+  # loop swaps it again whenever `isPlaying` flips after that.
   let playIconId: String = "PlayIcon"
   let iconKey: String = playbackIconKey(playback: playback)
   addSpriteOverride(list: npOverrides, nodeId: playIconId, value: iconKey)
+
+  # Track title / artist text. Empty album → empty overrides; the
+  # scene's authored placeholders show through. Same for missing
+  # tracks (`trackAt` returns the empty stub).
+  let titleId: String = "TrackTitle"
+  let artistId: String = "TrackArtist"
+  let titleText: String = "{track.title}"
+  let artistText: String = "{album.artist}"
+  addTextOverride(list: npOverrides, nodeId: titleId, value: titleText)
+  addTextOverride(list: npOverrides, nodeId: artistId, value: artistText)
+
+  # Current position / track duration. The inner-loop progress-bar
+  # update doesn't touch the time labels — they're refreshed on
+  # every world rebuild. Snappier than per-frame DOM edits and
+  # accurate enough for a 1-second clock display.
+  let times: List(String) = nowPlayingTimes(playback: playback, track: track)
+  let nowStr: String = times.get(index: 0)
+  let totalStr: String = times.get(index: 1)
+  let timeNowId: String = "TimeNow"
+  let timeTotalId: String = "TimeTotal"
+  addTextOverride(list: npOverrides, nodeId: timeNowId, value: nowStr)
+  addTextOverride(list: npOverrides, nodeId: timeTotalId, value: totalStr)
 
   let npLabel: String = "music-player-now-playing"
   let mounted: Int = mountOrError(
@@ -52,16 +94,17 @@ func buildNowPlayingWorld(scenes: view AlbumScenes, playback: view PlaybackState
     activeTab: Screen.NowPlaying
     scenes: scenes
     playback: playback
+    state: state
     reg: reg
   )
 
   ret world
 }
 
-# Mini-player mount that applies the play/pause icon override on
-# `MiniPlayIcon` based on the current playback state. Same shape as
-# `buildSimpleSceneInstance` from scene_mount.rae, but with the
-# overrides list pre-populated.
+# Mini-player mount that applies the play/pause icon, track title,
+# and artist overrides from the current playback + app state. Same
+# shape as `buildSimpleSceneInstance` from scene_mount.rae but with
+# the data-driven overrides list pre-populated.
 func buildMiniPlayerInstance(
   world: mod UiWorld
   scene: view Scene
@@ -69,13 +112,25 @@ func buildMiniPlayerInstance(
   h: view Float
   label: view String
   playback: view PlaybackState
+  state: view AppState
 ) pub ret Int {
   let mount: Int = createEntity(world: world)
   setRectFixed(world: world, entity: mount, w: w, h: h)
+  let album: Album = activeAlbum(state: state)
+  let track: Track = trackAt(album: album, idx: state.currentTrackIndex)
+
   let overrides: List(SceneOverride) = emptyOverrides()
   let miniIconId: String = "MiniPlayIcon"
   let iconKey: String = playbackIconKey(playback: playback)
   addSpriteOverride(list: overrides, nodeId: miniIconId, value: iconKey)
+
+  let miniTitleId: String = "MiniTitle"
+  let miniArtistId: String = "MiniArtist"
+  let titleText: String = "{track.title}"
+  let artistText: String = "{album.artist}"
+  addTextOverride(list: overrides, nodeId: miniTitleId, value: titleText)
+  addTextOverride(list: overrides, nodeId: miniArtistId, value: artistText)
+
   let mounted: Int = mountOrError(
     world: world
     mountEntity: mount

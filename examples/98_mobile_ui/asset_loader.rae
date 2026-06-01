@@ -1,107 +1,76 @@
-# Bitmap-asset loading. Icons go through the Material Symbols font
-# slot, not the texture registry. The startup loader only handles
-# the `albumCover` hero. Profile-page covers come from a runtime
-# directory scan (see `refreshProfileCovers` below) so the user can
-# add or remove files in `assets/album_art/` without rebuilding the
-# loader list.
+# Bitmap-asset loading. Driven by the album list produced by
+# `album_loader.rae` — every album's `cover.jpg` becomes a texture
+# under the registry key `<stem>`. Material icons go through the
+# font atlas, not the texture registry, so they're not touched here.
+#
+# The avatar uses the album cover at `avatarAlbumStem` (see
+# `config.rae`) circle-cropped at load time. Missing → placeholder.
 import core
 import string
 import raylib
 import fs
 import ui/textures
 
-let albumArtFolder: String = "examples/98_mobile_ui/assets/album_art"
-
-# Registry key the profile grid uses for a given file. Using the
-# full filename (not an index) keeps the key stable across folder
-# changes — a renamed file gets a fresh slot, a moved file just
-# disappears from the next refresh.
-func profileFileKey(file: view File) pub ret String {
-  ret "profile.{file.name}"
+# Registry key the texture for an album cover lives under. The stem
+# is the stable identity — it survives folder reshuffles and tracks
+# the same album across renames. Centralised so the grid, the hero
+# rebind path, and the loader all agree.
+func albumCoverKey(stem: view String) pub ret String {
+  ret "{stem}"
 }
 
-func loadTextures(reg: mod TextureRegistry) pub {
-  let coverKey: String = "albumCover"
-  let coverPath: String = "examples/98_mobile_ui/assets/album_art/02_mgmt.jpg"
-  let loaded: Texture = textureLoad(reg: reg, key: coverKey, path: coverPath)
-
-  # Also load the SAME file under the `profile.*` key the grid uses,
-  # so the hero animation can rebind Album / NowPlaying covers to
-  # the Profile-side key from launch (before the user has ever
-  # visited Profile, which is when `refreshProfileCovers` normally
-  # registers `profile.*` entries). Cheap — same JPG, just a second
-  # registry slot pointing at the same content.
-  let profileKey: String = "profile.02_mgmt.jpg"
-  let profileLoaded: Texture = textureLoad(reg: reg, key: profileKey, path: coverPath)
-
-  # Profile avatar — pre-circle-cropped at load time so the renderer
-  # doesn't need a mask shader. The crop is purely an in-memory
-  # alpha-mask of the loaded Image (see `loadCircleCroppedTexture`
-  # in `compiler/runtime/rae_runtime.c`); the source JPG on disk
-  # is never modified. Missing this key (e.g. if the file isn't
-  # there) falls back to the placeholder mat:person icon in
-  # `profile_view.rae`.
-  let avatarKey: String = profileAvatarKey()
-  let avatarPath: String = "examples/98_mobile_ui/assets/album_art/55b2873edcc12e97.jpg"
-  let avatar: Texture = loadCircleCroppedTexture(fileName: avatarPath)
-  textureRegisterDirect(reg: reg, key: avatarKey, tex: avatar)
-}
-
-# Registry key the profile screen looks up the circular avatar
-# under. Centralised so both the loader and the view agree.
-# Lives under a `user.*` namespace (not `profile.*`) so it does
-# NOT match the cover-grid filter in `collectProfileCoverKeys`
-# — otherwise the avatar would show up as the first grid tile.
+# Registry key for the circular profile avatar. Lives under a
+# `user.*` namespace so iteration over album-cover keys (which use
+# the bare stem) never picks it up by accident.
 func profileAvatarKey() pub ret String {
   ret "user.avatar"
 }
 
-# Scan the album-art folder and load any JPG/PNG covers not yet
-# registered into the TextureRegistry. Idempotent — re-runs only
-# load files that aren't already there.
-#
-# The host (`main.rae`) calls this once on transition INTO the
-# Profile screen, not on every world rebuild. The grid then reads
-# back from the registry (single source of truth) — no `List(File)`
-# returned here, no per-frame filesystem scan, no ownership
-# gymnastics across the function boundary.
-#
-# Stale entries from previous scans stay registered (textures
-# already in VRAM) — they're harmless because the registry-based
-# grid only renders keys that still exist. A future pass could
-# unload covers whose source file disappeared.
-func refreshProfileCovers(reg: mod TextureRegistry) pub {
-  let folder: String = albumArtFolder
-  let entries: List(File) = listDir(folder: folder)
-  let loaded: Int = 0
+# Load every album's `cover.jpg` into the texture registry under
+# its stem key. Idempotent — covers already loaded are skipped.
+# Called once at boot from `main.rae` after `loadAllAlbums`.
+func loadAlbumCovers(reg: mod TextureRegistry, albums: view List(Album)) pub {
   let i: Int = 0
-  loop i < entries.length {
-    # buf_get rather than `.get(index:)` — Compiled-mode codegen
-    # for `List(UserStruct).get` returns an opt T that doesn't
-    # auto-unwrap. See the matching note in lib/fs.rae.
-    let f: File = rae_ext_rae_buf_get(buf: entries.data, index: i)
-    if f.isHidden() is false {
-      let ext: String = f.extension()
-      let isJpg: Bool = ext.equals(other: "jpg")
-      let isJpeg: Bool = ext.equals(other: "jpeg")
-      let isPng: Bool = ext.equals(other: "png")
-      if isJpg or isJpeg or isPng {
-        # Deep-copy the String fields into fresh locals before
-        # constructing the texture key / path strings, otherwise
-        # they share storage with `entries` and would dangle when
-        # `entries` drops at function return. See
-        # [[project-list-struct-ownership]] in memory for context.
-        let copiedName: String = f.name
-        let copiedFolder: String = f.folder
-        let key: String = "profile.{copiedName}"
-        if textureHas(reg: reg, key: key) is false {
-          let p: String = "{copiedFolder}/{copiedName}"
-          let t: Texture = textureLoad(reg: reg, key: key, path: p)
-          loaded = loaded + 1
-        }
-      }
+  let loaded: Int = 0
+  loop i < albums.length {
+    let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: i)
+    let key: String = albumCoverKey(stem: a.stem)
+    if textureHas(reg: reg, key: key) is false {
+      # Two fresh String allocations — neither aliases `a`'s storage,
+      # so the cover keeps loading even if `albums` is dropped before
+      # the next refresh.
+      let copiedKey: String = key
+      let copiedPath: String = a.coverPath
+      let t: Texture = textureLoad(reg: reg, key: copiedKey, path: copiedPath)
+      loaded = loaded + 1
     }
     i = i + 1
   }
-  log("[profile] refreshed covers — {loaded} new")
+  log("[asset_loader] loaded {loaded} album covers")
+}
+
+# Load the circular profile avatar from whichever album stem
+# `config.rae` points at. Falls back silently (the placeholder
+# mat:person glyph in `profile_view.rae` kicks in) when the album
+# isn't present.
+func loadAvatar(reg: mod TextureRegistry, albums: view List(Album)) pub {
+  let avatarStem: String = avatarAlbumStem
+  let idx: Int = findAlbumIndex(albums: albums, stem: avatarStem)
+  if idx < 0 {
+    log("[asset_loader] avatar album stem '{avatarStem}' not found — using placeholder")
+    ret
+  }
+  let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: idx)
+  let avatarKey: String = profileAvatarKey()
+  let avatarPath: String = a.coverPath
+  let avatar: Texture = loadCircleCroppedTexture(fileName: avatarPath)
+  textureRegisterDirect(reg: reg, key: avatarKey, tex: avatar)
+}
+
+# Aggregate boot loader. Pass the parsed album list (from
+# `loadAllAlbums(albumsFolder)`); every cover registers under its
+# stem, and the avatar gets loaded under `user.avatar`.
+func loadAllTextures(reg: mod TextureRegistry, albums: view List(Album)) pub {
+  loadAlbumCovers(reg: reg, albums: albums)
+  loadAvatar(reg: reg, albums: albums)
 }

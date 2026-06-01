@@ -1,4 +1,4 @@
-# rae: max-lines 1300
+# rae: max-lines 1400
 # Mobile-UI demo entrypoint. The actual work — scene loading, world
 # building, screen routing — lives in sibling `.rae` files in this same
 # directory, which Rae auto-imports because they share the project
@@ -13,7 +13,8 @@
 #   * album_view.rae       — album-screen builders, including buildAlbumWorld
 #   * now_playing_view.rae — buildNowPlayingWorld
 #   * screen_router.rae    — Screen enum, buildScreenWorld, dispatchActions
-#   * asset_loader.rae     — loadTextures (album-cover JPG)
+#   * album_loader.rae     — Album / Track structs + loadAllAlbums (album.json)
+#   * asset_loader.rae     — loadAllTextures (per-album cover.jpg + avatar)
 import raylib
 import core
 import string
@@ -106,7 +107,27 @@ func main() {
 
   let scenes: AlbumScenes = loadAllScenes()
   let texReg: TextureRegistry = createTextureRegistry()
-  loadTextures(reg: texReg)
+  # Album catalogue + per-cover textures. Both come from
+  # `assets/albums/<stem>/{album.json,cover.jpg}` — no path is
+  # hard-coded here. The album list is then moved into `appState`
+  # so view builders and the dispatcher can reach it without
+  # re-reading the filesystem. `appState` is created here (rather
+  # than next to the main-loop init) because the stress and
+  # screenshot blocks below both want a populated state to drive
+  # `buildScreenWorld`.
+  let albums: List(Album) = loadAllAlbums(folder: albumsFolder)
+  loadAllTextures(reg: texReg, albums: albums)
+  let appState: AppState = createAppState(albums: albums)
+  # Mock playback state — survives world rebuilds; both the album
+  # mini-player and the now-playing screen mutate it through
+  # `dispatchActions`. Created here so `restoreAppState` below can
+  # populate `elapsedSec` + `isPlaying` from `state.json` before
+  # the screenshot / stress / main loop branches.
+  let playback: PlaybackState = createPlaybackState()
+  # Hydrate album/track/position from `state.json` if present.
+  # Missing file or stale fields fall back silently to the
+  # defaults `createAppState` / `createPlaybackState` set above.
+  restoreAppState(state: appState, playback: playback, path: stateFilePath)
 
   let screenshotEnv: String = getEnv(name: "RAE_UI_SCREENSHOT")
   let bg: Color = { r: 32, g: 32, b: 36, a: 255 }
@@ -167,7 +188,7 @@ func main() {
     let stressPlayback: PlaybackState = createPlaybackState()
     let stressScroll: Float = 0.0
     let stressTexReg: TextureRegistry = createTextureRegistry()
-    let warm: UiWorld = buildScreenWorld(screen: Screen.Album, scenes: scenes, playback: stressPlayback, texReg: stressTexReg, scrollY: stressScroll)
+    let warm: UiWorld = buildScreenWorld(screen: Screen.Album, scenes: scenes, playback: stressPlayback, state: appState, texReg: stressTexReg, scrollY: stressScroll)
     layoutSystem(world: warm)
     transformSystem(world: warm)
     let baselineKb: Int = processRssKb()
@@ -177,7 +198,7 @@ func main() {
       if (stressI - (stressI / 2) * 2) is 1 {
         stressScreen = Screen.NowPlaying
       }
-      let sworld: UiWorld = buildScreenWorld(screen: stressScreen, scenes: scenes, playback: stressPlayback, texReg: stressTexReg, scrollY: stressScroll)
+      let sworld: UiWorld = buildScreenWorld(screen: stressScreen, scenes: scenes, playback: stressPlayback, state: appState, texReg: stressTexReg, scrollY: stressScroll)
       layoutSystem(world: sworld)
       transformSystem(world: sworld)
       stressI = stressI + 1
@@ -233,7 +254,7 @@ func main() {
       shotPlayback.elapsedSec = shotPlayback.durationSec * pf
     }
     let shotScroll: Float = 0.0
-    let world: UiWorld = buildScreenWorld(screen: screen, scenes: scenes, playback: shotPlayback, texReg: texReg, scrollY: shotScroll)
+    let world: UiWorld = buildScreenWorld(screen: screen, scenes: scenes, playback: shotPlayback, state: appState, texReg: texReg, scrollY: shotScroll)
     layoutSystem(world: world)
     transformSystem(world: world)
     applyPlaybackToWorld(world: world, state: shotPlayback)
@@ -310,13 +331,11 @@ func main() {
     # texture lifecycle (capture on open, unload on close).
     let prevMenuOpen: Bool = false
     let anim: HeroAnim = createHeroAnim()
-    # App-mutable cross-screen state. `currentAlbumKey` tracks the
-    # texture key of whichever album cover the user is "in" — the
-    # static `albumCover` default until they tap a Profile tile, at
-    # which point dispatchActions stores that tile's textureKey here
-    # and the hero rebind below propagates it into Album / NowPlaying.
-    # Hero animations always use this current value as their key.
-    let appState: AppState = createAppState()
+    # `appState` is created earlier (next to the albums load) so
+    # both the stress and screenshot blocks can use it. Hero
+    # animations always use `appState.currentAlbumStem` as the key
+    # (texture keys equal stems — see `albumCoverKey` in
+    # `asset_loader.rae`).
     let heroDuration: Float = 0.30
     let pendingSrc: Bool = false
     let pendingDst: Bool = false
@@ -357,11 +376,9 @@ func main() {
     # raescene). Drop the anchor and the debug UI disappears.
     let debug: DebugSystem = createDebugSystem()
     setDebugScreenSize(debug: debug, w: screenW, h: screenH)
-    # Mock playback state — survives world rebuilds so the play/pause
-    # toggle and the per-second progress tick keep their values across
-    # screen switches and theme/data hot reloads. Both play buttons
-    # fire `playback.toggle`; `dispatchActions` mutates this in place.
-    let playback: PlaybackState = createPlaybackState()
+    # `playback` is created near the top of `main` so the state-file
+    # restore can populate `elapsedSec` / `isPlaying` before any of
+    # the screenshot / stress / main-loop branches read it.
     # Snapshot helper: `RAE_UI_DEBUG_MENU=open` pre-opens the menu so
     # the snapshot.sh tooling can capture the menu state without
     # needing to script a click. `=labels` pre-enables the FPS / mem
@@ -464,25 +481,39 @@ func main() {
     let profileLoaded: Bool = false
 
     loop running {
+      # Covers were loaded at boot via `loadAllTextures`, so no
+      # per-screen rescan is needed. `profileLoaded` is left for
+      # any future incremental refresh (e.g. a "rescan" debug
+      # button) — currently a no-op.
       if currentScreen is Screen.Profile {
-        if profileLoaded is false {
-          refreshProfileCovers(reg: texReg)
-          profileLoaded = true
-        }
+        profileLoaded = true
       } else {
         profileLoaded = false
       }
 
-      let world: UiWorld = buildScreenWorld(screen: currentScreen, scenes: scenes, playback: playback, texReg: texReg, scrollY: profileScrollY)
+      # Sync the progress-bar duration to whichever track the user
+      # is on. The active track may have changed since last rebuild
+      # (album switch reset `currentTrackIndex` to 0; future Next /
+      # Prev buttons will bump it). A zero-duration track (unmatched
+      # album) keeps a positive fallback so `playbackProgress`
+      # doesn't divide-by-zero.
+      let activeAlbumForDur: Album = activeAlbum(state: appState)
+      let activeTrackForDur: Track = trackAt(album: activeAlbumForDur, idx: appState.currentTrackIndex)
+      let trackDurSec: Float = activeTrackForDur.durationMs.toFloat() / 1000.0
+      if trackDurSec > 0.0 {
+        playback.durationSec = trackDurSec
+      }
+
+      let world: UiWorld = buildScreenWorld(screen: currentScreen, scenes: scenes, playback: playback, state: appState, texReg: texReg, scrollY: profileScrollY)
       # Rebind any scene-authored `"albumCover"` placeholder hero +
       # sprite to the user's current album. This is what lets the
       # hero animation system find matching keys at Profile (where
       # tiles use their own texture key) and at Album / NowPlaying
       # (which author the placeholder and get renamed here).
-      # Always runs — the default `currentAlbumKey` is already the
+      # Always runs — the default `currentAlbumStem` is already the
       # profile-side key, so the static Album / NowPlaying scenes
       # adopt it from launch.
-      rebindHero(world: world, fromKey: "albumCover", toKey: appState.currentAlbumKey)
+      rebindHero(world: world, fromKey: "albumCover", toKey: appState.currentAlbumStem)
       # Layer the reusable debug-UI entities (button + optional menu
       # overlay) onto the freshly-built world BEFORE layout runs so
       # they participate in measure/place like any other entity.
@@ -526,9 +557,9 @@ func main() {
       # paint it. We DON'T start the clock here — that waits until
       # the first frame actually runs (see `transitionArmed` below).
       if pendingDst {
-        let captured: Bool = captureHeroTarget(anim: anim, world: world, key: appState.currentAlbumKey)
+        let captured: Bool = captureHeroTarget(anim: anim, world: world, key: appState.currentAlbumStem)
         if captured {
-          setHeroVisible(world: world, key: appState.currentAlbumKey, visible: false)
+          setHeroVisible(world: world, key: appState.currentAlbumStem, visible: false)
           transitionArmed = true
         }
         pendingDst = false
@@ -864,6 +895,19 @@ func main() {
             }
           }
 
+          # Persist UI state after every dispatched action. `dispatch
+          # Actions` may have flipped `playback.isPlaying`, swapped
+          # the active album, or reset the track index — write the
+          # result to `state.json` so a next launch resumes here.
+          # Cheap: one open / one write per gesture; we don't save
+          # per-frame elapsed-time updates because the action-driven
+          # cadence is already accurate enough for resume-from-pause.
+          if input.events.length > 0 {
+            if dragJustReleased is false {
+              saveAppState(path: stateFilePath, state: appState, playback: playback)
+            }
+          }
+
           # In-app debug UI: process any debug.* action that fired
           # this frame. `dispatchDebugAction` toggles the persistent
           # DebugSystem state in place; a true return means at least
@@ -914,7 +958,7 @@ func main() {
             # transform/layout aren't going to change inside this
             # frame, so reading now or after the draw gives the same
             # rect; reading first keeps the draw + switch grouped.
-            let gotSrc: Bool = captureHeroSource(anim: anim, world: world, key: appState.currentAlbumKey)
+            let gotSrc: Bool = captureHeroSource(anim: anim, world: world, key: appState.currentAlbumStem)
             pendingSrc = gotSrc
             pendingDst = gotSrc
           }
@@ -942,7 +986,7 @@ func main() {
           # the first frame that will draw it — start the clock here
           # so `t = 0` at the moment the first overlay actually paints.
           if transitionArmed {
-            startHeroTransition(anim: anim, key: appState.currentAlbumKey, durationSec: heroDuration, now: now)
+            startHeroTransition(anim: anim, key: appState.currentAlbumStem, durationSec: heroDuration, now: now)
             transitionArmed = false
           }
           let animating: Bool = updateHeroAnim(anim: anim, now: now)
@@ -955,7 +999,7 @@ func main() {
           if animating is false {
             if pendingSrc {
               if willSwitch is false {
-                setHeroVisible(world: world, key: appState.currentAlbumKey, visible: true)
+                setHeroVisible(world: world, key: appState.currentAlbumStem, visible: true)
                 pendingSrc = false
               }
             }
