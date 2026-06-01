@@ -650,17 +650,6 @@ func main() {
           #     firing on whatever's under the cursor (tab, tile,
           #     play button).
           let dragJustReleased: Bool = false
-          # Flag set by the spring branch when it fires a spring
-          # step this frame. The wheel block (further down the
-          # iteration) checks this and skips any incoming events —
-          # otherwise macOS-delivered momentum events that arrive
-          # while the spring is bringing position back from the
-          # cap would push it away again, the spring would stop
-          # firing, the position would drift back to the cap, the
-          # spring would re-arm, … the visible result being
-          # multiple bounces. Once the spring commits to a return
-          # we want it to land cleanly.
-          let springRanThisFrame: Bool = false
           if currentScreen is Screen.Profile {
             let curMouseX: Float = getMouseX().toFloat()
             let curMouseY: Float = getMouseY().toFloat()
@@ -816,12 +805,6 @@ func main() {
                   scrollVelocity = 0.0
                 }
                 switching = true
-                # Tell the wheel block (later in this iteration)
-                # not to touch `profileScrollY`. Once the spring
-                # is en route to the bound, OS-delivered momentum
-                # events would otherwise undo its work frame by
-                # frame.
-                springRanThisFrame = true
                 }
                 # else: wheel is actively scrolling — let the wheel
                 # block (further down the iteration) drive `pos`.
@@ -1222,15 +1205,7 @@ func main() {
             # with the content; treat residual momentum as cancelled.
             let wheelMouseDown: Bool = isMouseButtonDown(button: mouseButtonLeft)
             let wheel: Float = 0.0
-            # Three gates on accepting wheel events:
-            #   - mouse must not be held (clicks should not be
-            #     interrupted by OS momentum events arriving
-            #     between press and release, see earlier commit).
-            #   - the spring must not be in flight (otherwise the
-            #     committed spring-back would tug-of-war with
-            #     macOS's lingering trackpad momentum tail, the
-            #     visible result being multiple bounces).
-            if wheelMouseDown is false and springRanThisFrame is false {
+            if wheelMouseDown is false {
               wheel = getMouseWheelMove()
             }
             if wheel > 0.001 or wheel < -0.001 {
