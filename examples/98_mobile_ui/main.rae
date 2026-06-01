@@ -1,4 +1,4 @@
-# rae: max-lines 1250
+# rae: max-lines 1300
 # Mobile-UI demo entrypoint. The actual work — scene loading, world
 # building, screen routing — lives in sibling `.rae` files in this same
 # directory, which Rae auto-imports because they share the project
@@ -412,6 +412,17 @@ func main() {
     # Momentum velocity in px-per-frame. Decayed each frame after
     # release by `dragFriction`; cleared when scroll hits a bound.
     let scrollVelocity: Float = 0.0
+    # Wall-clock seconds at which a wheel/trackpad event last fired.
+    # The spring branch (mouse-up, OOB) gates on `now - lastWheelTime`:
+    # while wheel input is recent (e.g. macOS is still delivering
+    # momentum events from a two-finger flick, which keeps arriving
+    # for ~0.5–1.5 s past finger lift), the spring stays out of the
+    # way so wheel + spring don't fight over `profileScrollY` every
+    # frame. Once the wheel goes idle the spring runs as before —
+    # starting from the velocity left by the last wheel tick, which
+    # gives a single smooth bounce-back instead of the visible
+    # tug-of-war the previous design produced.
+    let lastWheelTime: Float = 0.0 - 1.0
     # Single InputSystem for the whole app lifetime.
     #
     # Conceptual split: `UiWorld` is the renderable tree, rebuilt
@@ -723,8 +734,24 @@ func main() {
               # momentum decay (drift). A drift step that exits
               # the range naturally lands in the spring branch
               # on the next frame — no discrete handoff.
+              #
+              # Suppress the spring while wheel/trackpad momentum
+              # events are still arriving — macOS keeps delivering
+              # them for ~0.5–1.5 s after the user lifts their
+              # fingers, and if the spring runs concurrently the
+              # two systems fight over `profileScrollY` every
+              # frame, producing the visible "5 bounces" symptom
+              # the user reported. Once the wheel goes idle
+              # (50 ms with no event) the spring takes over, using
+              # the last wheel tick's velocity as its initial
+              # condition — one smooth bounce-back, mirroring the
+              # drag path's `pickReleaseVelocity` handoff.
+              let nowSec: Float = getTime()
+              let wheelIdleSec: Float = nowSec - lastWheelTime
+              let wheelQuiet: Bool = wheelIdleSec > 0.05
               let isOOB: Bool = profileScrollY > scrollMax or profileScrollY < scrollMin
               if isOOB {
+                if wheelQuiet {
                 let target: Float = scrollMax
                 if profileScrollY < scrollMin {
                   target = scrollMin
@@ -763,17 +790,28 @@ func main() {
                   scrollVelocity = 0.0
                 }
                 switching = true
-              } else {
-                let absVel: Float = scrollVelocity
-                if absVel < 0.0 {
-                  absVel = 0.0 - absVel
                 }
-                if absVel > 0.3 {
-                  profileScrollY = profileScrollY + scrollVelocity
-                  scrollVelocity = scrollVelocity * 0.97
-                  switching = true
-                } else {
-                  scrollVelocity = 0.0
+                # else: wheel is actively scrolling — let the wheel
+                # block (further down the iteration) drive `pos`.
+                # Spring would only fight it and produce the
+                # "5 bounces" visual.
+              } else {
+                # In-bounds momentum decay (drag-release fling).
+                # Same wheel-quiet gate so wheel + decay don't
+                # double-apply velocity to `profileScrollY` during
+                # an active trackpad scroll.
+                if wheelQuiet {
+                  let absVel: Float = scrollVelocity
+                  if absVel < 0.0 {
+                    absVel = 0.0 - absVel
+                  }
+                  if absVel > 0.3 {
+                    profileScrollY = profileScrollY + scrollVelocity
+                    scrollVelocity = scrollVelocity * 0.97
+                    switching = true
+                  } else {
+                    scrollVelocity = 0.0
+                  }
                 }
               }
             }
@@ -1174,20 +1212,21 @@ func main() {
                 dim: screenH
               )
               profileScrollY = profileScrollY + eff
-              # Use the wheel delta itself as the new velocity. The
-              # OS sends trackpad / mouse-wheel events asynchronously,
-              # often spread across many frames during a single user
-              # gesture (macOS momentum decay can run 0.5–1.5 s past
-              # the user's actual lift). If we reset velocity to 0
-              # here, the spring (in the drag block above) has to re-
-              # bootstrap from rest on every event, which fights the
-              # wheel deltas and the user sees pos lurching back and
-              # forth across the bound — what reads visually as the
-              # rubber band "bouncing multiple times." Treating wheel
-              # as a velocity contribution carries the natural decay
-              # forward into the spring instead, matching how drag
-              # uses `pickReleaseVelocity` for a single smooth bounce.
-              scrollVelocity = eff
+              # Velocity stays at 0 during wheel scrolling — the
+              # wheel block itself drives `profileScrollY` each
+              # event, and the spring/momentum paths above are
+              # gated on `wheelQuiet` so they don't fire (and
+              # don't fight the wheel) until 50 ms after the last
+              # event. When the spring eventually takes over, it
+              # bootstraps from rest with the current displacement,
+              # which under our (near-)critical damping gives one
+              # smooth bounce-back instead of the visible "5
+              # bounces" tug-of-war the previous design produced.
+              scrollVelocity = 0.0
+              # Mark the wheel-active timestamp so the
+              # spring/momentum branches above know to stay out
+              # of the way until the OS-delivered momentum stops.
+              lastWheelTime = getTime()
               switching = true
             }
           }
