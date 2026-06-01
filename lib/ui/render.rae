@@ -334,7 +334,14 @@ func textStyleColor(styleId: view String, chain255: view Int) ret Color {
     ret toRaylibColor(c: themeColorByName(name: "accentText"), chain255: chain255)
   }
   if styleId.equals(other: miniMuted) {
-    ret toRaylibColor(c: themeColorByName(name: "textMuted"), chain255: chain255)
+    # Hard-coded dark grey rather than `textMuted` because the mini-
+    # player background is the brand cyan `#76e1e1` (`surfaceAlt`,
+    # identical in both themes), and `textMuted` (light grey) is
+    # near-invisible on cyan. Sits one step lighter than
+    # `accentText` (near-black) so it still reads "muted" against
+    # the title above it.
+    let mutedOnAccent: RgbaColor = { r: 64, g: 64, b: 76, a: 255 }
+    ret toRaylibColor(c: mutedOnAccent, chain255: chain255)
   }
   # Pill labels sit on top of the `$accent` shape — `$accentText`
   # is the dual.
