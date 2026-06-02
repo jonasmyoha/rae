@@ -204,6 +204,57 @@ func buildNavTabsForScreen(
 #     Album and NowPlaying),
 #   * the four nav-tabs row beneath it.
 # Returns the dock entity.
+# Floating back button. Top-left corner, semi-transparent dark
+# circle with a chevron-left icon. Mounted parentless (offset-
+# positioned) so it floats above whatever content is below.
+# Fires `nav.back` which `dispatchActions` turns into a
+# `popSubPage`.
+#
+# Returns the button entity, or -1 when no sub-page is open
+# (caller can ignore the return).
+func mountBackButtonOverlay(world: mod UiWorld, state: view AppState) pub ret Int {
+  if isSubPage(state: state) is false {
+    ret 0 - 1
+  }
+  let size: Float = 56.0
+  let margin: Float = 16.0
+  let btn: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: btn, w: size, h: size)
+  # Slightly transparent dark fill so background content stays
+  # legible underneath. Alpha 180 ≈ 70 % opaque — readable
+  # contrast in both light and dark themes.
+  let bg: RgbaColor = { r: 22, g: 22, b: 28, a: 180 }
+  let stroke: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
+  let sh: Shape = {
+    kind: ShapeKind.Circle
+    fill: bg
+    stroke: stroke
+    strokeWidth: 0.0
+    radius: 0.0
+  }
+  componentSet(this: world.shapes, entity: btn, data: sh)
+  let layS: LayoutType = LayoutType.Stack
+  let alignC: AlignKind = AlignKind.Center
+  setLayout(world: world, entity: btn, kind: layS, gap: 0.0, alignCross: alignC)
+  let backAction: String = "nav.back"
+  setOnClick(world: world, entity: btn, actionId: backAction)
+
+  let iconSize: Float = 32.0
+  let icon: Int = createEntity(world: world)
+  setRectFixed(world: world, entity: icon, w: iconSize, h: iconSize)
+  let iconKey: String = "mat:chevron_left"
+  let iconTintC: RgbaColor = { r: 246, g: 246, b: 248, a: 255 }
+  setSprite(world: world, entity: icon, key: iconKey, tint: iconTintC)
+
+  let kids: List(Int) = createList(Int, initialCap: 1)
+  kids.add(value: icon)
+  attachChildren(world: world, parent: btn, kids: kids)
+
+  let off: Offset = { delta: Vec2 { x: margin, y: margin } }
+  componentSet(this: world.offsets, entity: btn, data: off)
+  ret btn
+}
+
 func mountBottomDockOverlay(
   world: mod UiWorld
   activeTab: Screen
