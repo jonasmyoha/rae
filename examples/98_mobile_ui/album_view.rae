@@ -131,6 +131,13 @@ func buildTrackList(world: mod UiWorld, trackScene: view Scene, album: view Albu
       sceneLabel: rowLabel
       overrides: overrides
     )
+    # Whole-row click → push NowPlaying as a sub-page for THIS
+    # track. The track index is encoded into the actionId
+    # (`song.open.N`) — no per-row ComponentTable. Children with
+    # their own OnClick (e.g. MoreBtn → track.more) still win
+    # the hit-test, because `hitTestEntity` walks children first.
+    let songOpenAction: String = "song.open.{i}"
+    setOnClick(world: world, entity: row, actionId: songOpenAction)
     rows.add(value: row)
     i = i + 1
   }
@@ -207,7 +214,7 @@ func buildAlbumWorld(scenes: view AlbumScenes, playback: view PlaybackState, sta
   # the player no longer "jumps" when switching to / from Library.
   let dock: Int = mountBottomDockOverlay(
     world: world
-    activeTab: Screen.Album
+    activeTab: state.tab
     scenes: scenes
     playback: playback
     state: state
