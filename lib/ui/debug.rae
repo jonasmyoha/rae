@@ -775,10 +775,11 @@ func formatFps(fps: view Float) ret String {
 # button. Called from `updateAndRenderDebugOverlay` when labels are on.
 # These are drawn outside the ECS so they don't intercept clicks.
 #
-# The button now sits in the top-left corner (driven by the .raescene
-# DebugAnchor), so the labels are left-aligned just below the button.
-# In the previous bottom-right layout the labels rendered above the
-# button instead; the geometry flipped when the button moved.
+# Alignment follows the button's screen position: a button in the
+# left half of the screen left-aligns labels under it; a button in
+# the right half right-aligns them so they hang off the button's
+# right edge instead of running off-screen. Right-alignment needs a
+# per-line text measurement because each line has a different width.
 func drawDebugLabels(debug: view DebugSystem) {
   let fpsText: String = formatFps(fps: debug.lastFps)
   let memText: String = "mem: {formatMemMB(kb: debug.lastRssKb)}"
@@ -793,11 +794,32 @@ func drawDebugLabels(debug: view DebugSystem) {
   let fpsY: Float = bottomEdge + gap
   let memY: Float = fpsY + lineH + 2.0
 
-  # Left-align so the labels visually hang off the left edge of the
-  # button.
-  let leftEdge: Float = debug.buttonX
-  let fpsX: Float = leftEdge
-  let memX: Float = leftEdge
+  # Pick alignment based on which half of the screen the button is
+  # in. Centre point of the button vs. centre point of the screen.
+  let buttonCx: Float = debug.buttonX + debug.buttonSize * 0.5
+  let screenCx: Float = debug.screenW * 0.5
+  let rightAligned: Bool = buttonCx > screenCx
+  let fpsX: Float = debug.buttonX
+  let memX: Float = debug.buttonX
+  if rightAligned {
+    # Right edge of the button — labels grow LEFT from here.
+    let rightEdge: Float = debug.buttonX + debug.buttonSize
+    let spacing: Float = 1.0
+    let fpsW: Int = measureTextWithFont(
+      slot: 0
+      text: fpsText
+      fontSize: fontSize
+      spacing: spacing
+    )
+    let memW: Int = measureTextWithFont(
+      slot: 0
+      text: memText
+      fontSize: fontSize
+      spacing: spacing
+    )
+    fpsX = rightEdge - fpsW.toFloat()
+    memX = rightEdge - memW.toFloat()
+  }
 
   # Use the host's loaded font slot 0 (Roboto in 98_mobile_ui). Falls
   # back to raylib's default font if no slot is loaded — see
@@ -843,10 +865,21 @@ func drawDebugLabels(debug: view DebugSystem) {
     let buttons: Int = lb + rb + mb
     let btnText: String = "btn: {buttons}"
     let btnY: Float = memY + lineH + 2.0
+    let btnX: Float = debug.buttonX
+    if rightAligned {
+      let rightEdge: Float = debug.buttonX + debug.buttonSize
+      let btnW: Int = measureTextWithFont(
+        slot: 0
+        text: btnText
+        fontSize: fontSize
+        spacing: 1.0
+      )
+      btnX = rightEdge - btnW.toFloat()
+    }
     drawTextWithFont(
       slot: 0
       text: btnText
-      x: leftEdge
+      x: btnX
       y: btnY
       fontSize: fontSize
       spacing: 1.0
