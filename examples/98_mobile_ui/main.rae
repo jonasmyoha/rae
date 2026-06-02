@@ -279,15 +279,15 @@ func main() {
     let albumKey: String = "album"
     let searchKey: String = "search"
     let profileKey: String = "profile"
-    let currentScreen: Screen = Screen.NowPlaying
+    let startScreen: Screen = Screen.NowPlaying
     if startScreenEnv.equals(other: albumKey) {
-      currentScreen = Screen.Album
+      startScreen = Screen.Album
     }
     if startScreenEnv.equals(other: searchKey) {
-      currentScreen = Screen.Search
+      startScreen = Screen.Search
     }
     if startScreenEnv.equals(other: profileKey) {
-      currentScreen = Screen.Profile
+      startScreen = Screen.Profile
     }
 
     # Phase 3-6 hot-reload restore. If `.rae/state.json` exists from a
@@ -297,11 +297,15 @@ func main() {
     # up where the previous one left off. Defaults pass through
     # untouched when nothing is saved.
     let restoredDefault: RestoredState = {
-      screen: currentScreen
+      screen: startScreen
       scrollY: 0.0
     }
     let restored: RestoredState = loadRestoredState(fallback: restoredDefault)
-    currentScreen = restored.screen
+    # Seed the active TAB from the restored screen. Sub-page stack
+    # starts empty (sub-pages don't survive across launches —
+    # rebooting always returns to the tab's base page).
+    appState.tab = restored.screen
+    let currentScreen: Screen = visibleScreen(state: appState)
     # `profileScrollY` itself is declared further down; the restored
     # value is carried in `restored.scrollY` until the inner loop's
     # init block reads it back.
