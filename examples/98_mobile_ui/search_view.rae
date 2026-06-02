@@ -157,10 +157,12 @@ func buildSearchWorld(
   kids.add(value: recent)
   attachChildren(world: world, parent: root, kids: kids)
 
-  # Shared bottom dock (mini-player + nav-tabs).
+  # Shared bottom dock (mini-player + nav-tabs). The highlight
+  # always reflects `state.tab` — sub-pages keep their parent
+  # tab selected (Profile → Album sub-page still shows Profile).
   let dock: Int = mountBottomDockOverlay(
     world: world
-    activeTab: Screen.Search
+    activeTab: state.tab
     scenes: scenes
     playback: playback
     state: state

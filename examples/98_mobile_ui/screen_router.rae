@@ -64,6 +64,24 @@ type AppState pub {
   # the track count at use sites). Drives the NowPlaying / mini-
   # player text overrides and the playback position.
   currentTrackIndex: Int
+  # Which of the four bottom-nav tabs is currently active. Drives
+  # the highlight in `nav_tabs_builder.buildNavTabsForScreen`.
+  # Stays put while the user drills into sub-pages — so navigating
+  # Profile → Album (sub-page) → NowPlaying (sub-page) keeps the
+  # Profile tab highlighted.
+  tab: Screen
+  # Stack of sub-pages layered on top of the tab's base screen.
+  # Empty → the tab's own page is visible (the four base pages
+  # for the four tabs). Non-empty → the top entry is visible
+  # and a floating back button is shown. `dispatchActions` pushes
+  # for album.open / song.open and pops for nav.back.
+  #
+  # Stored as `List(Int)` (Screen ordinals via `screenToInt` /
+  # `intToScreen`) because the C backend's deep-copy synthesis
+  # for `List(EnumType)` is incomplete — it emits unknown-type
+  # references for the per-Enum deep-copy helper. Wrapping at
+  # the push/pop sites costs one int convert each way.
+  subPageStack: List(Int)
 }
 
 func createAppState(albums: own List(Album)) pub ret AppState {
@@ -81,7 +99,56 @@ func createAppState(albums: own List(Album)) pub ret AppState {
     albums: albums
     currentAlbumStem: firstStem
     currentTrackIndex: 0
+    tab: Screen.NowPlaying
+    subPageStack: createList(Int, initialCap: 4)
   }
+}
+
+# Screen the user currently sees. Top of `subPageStack` if any
+# sub-pages are open, else the active tab's base page. Convert
+# the Int ordinal back to Screen via `intToScreen`.
+func visibleScreen(state: view AppState) pub ret Screen {
+  let n: Int = state.subPageStack.length
+  if n > 0 {
+    let top: Int = n - 1
+    let code: Int = rae_ext_rae_buf_get(buf: state.subPageStack.data, index: top)
+    ret intToScreen(n: code)
+  }
+  ret state.tab
+}
+
+# True when a sub-page is open (something on the stack). Used by
+# the view builders to decide whether to mount the floating
+# back-button overlay.
+func isSubPage(state: view AppState) pub ret Bool {
+  ret state.subPageStack.length > 0
+}
+
+# Push `screen` onto the sub-page stack. Mutates state in place.
+# Used by `album.open` (push Album) and `song.open` (push
+# NowPlaying).
+func pushSubPage(state: mod AppState, screen: view Screen) pub {
+  let code: Int = screenToInt(s: screen)
+  state.subPageStack.add(value: code)
+}
+
+# Pop the top of the sub-page stack. No-op when the stack is
+# empty (the user can't go back from a tab's base page).
+# Screen is an enum with no heap fields, so the length-truncate
+# trick is safe — no per-entry drop required.
+func popSubPage(state: mod AppState) pub {
+  let n: Int = state.subPageStack.length
+  if n > 0 {
+    state.subPageStack.length = n - 1
+  }
+}
+
+# Switch the active bottom-nav tab. Clears the sub-page stack —
+# tapping a tab always returns the user to that tab's home page,
+# never to whatever sub-page was open last.
+func setTab(state: mod AppState, tab: view Screen) pub {
+  state.tab = tab
+  state.subPageStack.length = 0
 }
 
 # Helper for view-building paths that need the active album as a
@@ -108,11 +175,34 @@ func activeAlbum(state: view AppState) pub ret Album {
   ret rae_ext_rae_buf_get(buf: state.albums.data, index: idx)
 }
 
-# Drain every fired action and route into a target screen. Returns the
-# next screen — equal to `current` if no navigation action fired.
-# Also handles `playback.toggle` (fired by both play buttons) and
-# `album.open` (fired by Profile grid tiles), which mutate
-# `playback.isPlaying` and `state.currentAlbumKey` in place.
+# Drain every fired action; mutate `state` (tab + sub-page stack)
+# and `playback` accordingly. Returns the visible screen after
+# all actions have been processed — the inner-loop caller compares
+# this against the previously-shown screen to decide whether to
+# rebuild the world.
+#
+# Action vocabulary:
+#   nav.home / nav.library / nav.search / nav.profile
+#       Bottom-nav tap. Sets `state.tab` and clears the sub-page
+#       stack so the new tab always shows its base page.
+#   album.open
+#       Profile-grid cover tap. Pushes Album as a sub-page on top
+#       of the current tab — `state.tab` is NOT changed, so the
+#       bottom-nav highlight stays on Profile. The clicked tile's
+#       Sprite.textureKey is the album stem (see `albumCoverKey`
+#       in asset_loader.rae); copy it to `state.currentAlbumStem`
+#       and rewind the active track.
+#   song.open
+#       Album track-row tap. Pushes NowPlaying as a sub-page on
+#       top of the current stack. The row's entity carries a
+#       `TrackIndex` component so the dispatcher can read which
+#       track was tapped.
+#   nav.back
+#       Floating back-button tap. Pops the top of the sub-page
+#       stack; no-op when no sub-pages are open.
+#   playback.toggle
+#       Play / pause toggle (both the big circle and the mini-
+#       player share this id).
 func dispatchActions(
   input: view InputSystem
   current: Screen
@@ -120,7 +210,6 @@ func dispatchActions(
   state: mod AppState
   world: view UiWorld
 ) pub ret Screen {
-  let next: Screen = current
   let n: Int = input.events.length
   let i: Int = 0
   loop i < n {
@@ -135,37 +224,33 @@ func dispatchActions(
     let backKey: String = "nav.back"
     let playbackToggleKey: String = "playback.toggle"
     let albumOpenKey: String = "album.open"
+    let songOpenPrefix: String = "song.open."
     if actionId.equals(other: homeKey) {
-      next = Screen.NowPlaying
+      let s: Screen = Screen.NowPlaying
+      setTab(state: state, tab: s)
     }
     if actionId.equals(other: libraryKey) {
-      next = Screen.Album
+      let s: Screen = Screen.Album
+      setTab(state: state, tab: s)
     }
     if actionId.equals(other: searchKey) {
-      next = Screen.Search
+      let s: Screen = Screen.Search
+      setTab(state: state, tab: s)
     }
     if actionId.equals(other: profileKey) {
-      next = Screen.Profile
+      let s: Screen = Screen.Profile
+      setTab(state: state, tab: s)
     }
     if actionId.equals(other: backKey) {
-      # Back from now-playing returns to album; back from album returns
-      # to now-playing. There's no deeper history yet so they ping-pong.
-      if current is Screen.Album {
-        next = Screen.NowPlaying
-      } else {
-        next = Screen.Album
-      }
+      popSubPage(state: state)
     }
     if actionId.equals(other: playbackToggleKey) {
       togglePlayback(state: playback)
     }
     if actionId.equals(other: albumOpenKey) {
-      # Profile tile click. The tile's Sprite.textureKey IS the
-      # album stem (see `albumCoverKey` in asset_loader.rae), so
-      # we can copy it straight into state. Tapping a fresh album
-      # also rewinds the active track to 0 — opening "Currents"
-      # shouldn't drop the playhead at track 7 just because the
-      # previous album had a track 7.
+      # Profile-grid tile click. Push Album onto the sub-page
+      # stack so the user stays on the Profile tab visually
+      # while drilling into an album.
       if componentHas(this: world.sprites, entity: ev.entity) {
         let sp: Sprite = componentGet(this: world.sprites, entity: ev.entity)
         # Force a fresh String allocation via interpolation. A direct
@@ -179,10 +264,27 @@ func dispatchActions(
         state.currentAlbumStem = "{sp.textureKey}"
         state.currentTrackIndex = 0
       }
-      next = Screen.Album
+      let s: Screen = Screen.Album
+      pushSubPage(state: state, screen: s)
+    }
+    if actionId.startsWith(prefix: songOpenPrefix) {
+      # Track-row click in the Album view. The actionId is
+      # `song.open.N` where N is the track index — encoded into
+      # the actionId because adding a per-row ComponentTable for
+      # one Int isn't worth the lib/ui churn. Parse the suffix
+      # after the prefix; reject negatives just in case.
+      let prefixLen: Int = songOpenPrefix.length()
+      let actionLen: Int = actionId.length()
+      let suffix: String = actionId.sub(start: prefixLen, len: actionLen - prefixLen)
+      let idx: Int = suffix.toInt()
+      if idx >= 0 {
+        state.currentTrackIndex = idx
+      }
+      let s: Screen = Screen.NowPlaying
+      pushSubPage(state: state, screen: s)
     }
 
     i = i + 1
   }
-  ret next
+  ret visibleScreen(state: state)
 }
