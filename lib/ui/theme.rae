@@ -37,7 +37,15 @@ type ThemePalette {
   textMuted: RgbaColor
   outline: RgbaColor
   accent: RgbaColor
+  # High-contrast text/icon color on top of `accent` / `surfaceAlt`
+  # (typically the play-pill / mini-player background).
   accentText: RgbaColor
+  # Muted secondary text/icon color on the same accent background.
+  # Sits one step softer than `accentText` so a title/subtitle pair
+  # on the brand-colored panel keeps its hierarchy without losing
+  # contrast. Needed because the global `textMuted` is tuned for
+  # the page surface, not the accent panel.
+  accentTextMuted: RgbaColor
   imageTint: RgbaColor
 }
 
@@ -62,6 +70,7 @@ func lightTheme() pub ret Theme {
       outline: RgbaColor { r: 200, g: 200, b: 210, a: 255 }
       accent: RgbaColor { r: 118, g: 225, b: 225, a: 255 }
       accentText: RgbaColor { r: 22, g: 22, b: 28, a: 255 }
+      accentTextMuted: RgbaColor { r: 64, g: 64, b: 76, a: 255 }
       imageTint: RgbaColor { r: 255, g: 255, b: 255, a: 255 }
     }
   }
@@ -72,22 +81,28 @@ func lightTheme() pub ret Theme {
 #  - `textPrimary` is near-white for body copy; `textMuted` is bumped
 #    lighter than the light theme's muted so the contrast against
 #    the dark surface still meets WCAG.
-#  - `accent` and `surfaceAlt` share the brand teal (#76e1e1, same
-#    as rae-devtools-web's `--accent`) so the play pill and the
-#    mini-player carry the project's identity color in both themes.
-#  - `accentText` stays dark in both themes — teal is light enough
-#    that dark text reads cleanly on it.
+#  - `accent` and `surfaceAlt` use a darker, slightly greener teal
+#    (#48b498 ≈ rgb 72,180,152) — the light-theme brand teal
+#    (#76e1e1) was too bluish-bright against the near-black
+#    surface. Different palette per mode keeps brand identity
+#    recognisable while letting each theme tune contrast for its
+#    own background.
+#  - `accentText` is white in dark theme — the darker accent panel
+#    needs light text on top, where the light theme's pale teal
+#    panel needed dark text. `accentTextMuted` follows the same
+#    flip (light grey for dark mode, dark grey for light mode).
 func darkTheme() pub ret Theme {
   ret Theme {
     mode: ThemeMode.Dark
     palette: ThemePalette {
       surface: RgbaColor { r: 10, g: 10, b: 14, a: 255 }
-      surfaceAlt: RgbaColor { r: 118, g: 225, b: 225, a: 255 }
+      surfaceAlt: RgbaColor { r: 72, g: 180, b: 152, a: 255 }
       textPrimary: RgbaColor { r: 248, g: 248, b: 250, a: 255 }
       textMuted: RgbaColor { r: 170, g: 170, b: 180, a: 255 }
       outline: RgbaColor { r: 60, g: 60, b: 70, a: 255 }
-      accent: RgbaColor { r: 118, g: 225, b: 225, a: 255 }
-      accentText: RgbaColor { r: 22, g: 22, b: 28, a: 255 }
+      accent: RgbaColor { r: 72, g: 180, b: 152, a: 255 }
+      accentText: RgbaColor { r: 248, g: 248, b: 250, a: 255 }
+      accentTextMuted: RgbaColor { r: 224, g: 232, b: 228, a: 255 }
       imageTint: RgbaColor { r: 255, g: 255, b: 255, a: 255 }
     }
   }
@@ -107,6 +122,7 @@ let activeTheme: Theme = Theme {
     outline: RgbaColor { r: 200, g: 200, b: 210, a: 255 }
     accent: RgbaColor { r: 118, g: 225, b: 225, a: 255 }
     accentText: RgbaColor { r: 22, g: 22, b: 28, a: 255 }
+    accentTextMuted: RgbaColor { r: 64, g: 64, b: 76, a: 255 }
     imageTint: RgbaColor { r: 255, g: 255, b: 255, a: 255 }
   }
 }
@@ -144,6 +160,9 @@ func themeColorByName(name: view String) pub ret RgbaColor {
   }
   if name.equals(other: "accentText") {
     ret p.accentText
+  }
+  if name.equals(other: "accentTextMuted") {
+    ret p.accentTextMuted
   }
   if name.equals(other: "imageTint") {
     ret p.imageTint
