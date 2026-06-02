@@ -220,6 +220,9 @@ func buildAlbumWorld(scenes: view AlbumScenes, playback: view PlaybackState, sta
     state: state
     reg: reg
   )
+  # Floating back button overlays on top of everything when the
+  # user has drilled into a sub-page. No-op on tab base pages.
+  let back: Int = mountBackButtonOverlay(world: world, state: state)
 
   ret world
 }
