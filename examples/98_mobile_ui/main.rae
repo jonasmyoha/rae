@@ -375,11 +375,15 @@ func main() {
     # overlay/dispatch hooks inside the inner loop. See the module
     # docstring for the full ≤5-line integration recipe.
     #
-    # The button's position is now driven by a `DebugAnchor` component
-    # in the .raescene file (album.raescene, music-player-now-playing.
-    # raescene). Drop the anchor and the debug UI disappears.
+    # The button lives in the top-right corner on every screen.
+    # Earlier per-scene `DebugAnchor` placements were dropped
+    # (album.raescene, music-player-now-playing.raescene) so the
+    # button position stays consistent regardless of which view
+    # the user is on or how deep into the sub-page stack.
     let debug: DebugSystem = createDebugSystem()
     setDebugScreenSize(debug: debug, w: screenW, h: screenH)
+    let debugMargin: Float = 16.0
+    setDebugButtonTopRight(debug: debug, margin: debugMargin)
     # `playback` is created near the top of `main` so the state-file
     # restore can populate `elapsedSec` / `isPlaying` before any of
     # the screenshot / stress / main-loop branches read it.
