@@ -167,6 +167,20 @@ func setDebugHasBlur(debug: mod DebugSystem, value: view Bool) pub {
   debug.hasBlur = value
 }
 
+# Pin the debug button to the top-right corner. Reads `screenW`
+# from the DebugSystem (call `setDebugScreenSize` first) and
+# inset by `margin` pixels from both the right edge and the top.
+#
+# Use this when the app wants the same button position on every
+# screen — calling this once after `createDebugSystem` /
+# `setDebugScreenSize` overrides the default top-left placement
+# and the per-scene `DebugAnchor` lookup (which still runs on
+# every world rebuild, but no-ops when no scene declares one).
+func setDebugButtonTopRight(debug: mod DebugSystem, margin: view Float) pub {
+  debug.buttonX = debug.screenW - debug.buttonSize - margin
+  debug.buttonY = margin
+}
+
 func createDebugSystem() pub ret DebugSystem {
   # Default placement: top-left corner with a 16 px margin. These are
   # only used when the scene's DebugAnchor doesn't carry usable rect
