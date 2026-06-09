@@ -17,21 +17,25 @@ func main() {
   let r1: Rect = { x: 1.0, y: 2.0, w: 10.0, h: 10.0 }
   let r2: Rect = { x: 3.0, y: 4.0, w: 20.0, h: 20.0 }
   let r3: Rect = { x: 5.0, y: 6.0, w: 30.0, h: 30.0 }
-  componentSet(Rect, this: tab, entity: 1, data: r1)
-  componentSet(Rect, this: tab, entity: 2, data: r2)
-  componentSet(Rect, this: tab, entity: 3, data: r3)
+  let e1: EntityId = entityId(v: 1)
+  let e2: EntityId = entityId(v: 2)
+  let e3: EntityId = entityId(v: 3)
+  let e99: EntityId = entityId(v: 99)
+  componentSet(Rect, this: tab, entity: e1, data: r1)
+  componentSet(Rect, this: tab, entity: e2, data: r2)
+  componentSet(Rect, this: tab, entity: e3, data: r3)
   log("after-3-sets={componentTableGeneration(Rect, this: tab)}")
 
-  let got: Rect = componentGet(Rect, this: tab, entity: 1)
+  let got: Rect = componentGet(Rect, this: tab, entity: e1)
   log("get-no-bump={componentTableGeneration(Rect, this: tab)}")
 
   # mod-borrow bumps eagerly even if caller only reads
-  let m: mod Rect => componentMod(Rect, this: tab, entity: 2)
+  let m: mod Rect => componentMod(Rect, this: tab, entity: e2)
   log("mod-bumps={componentTableGeneration(Rect, this: tab)}")
 
-  componentRemove(Rect, this: tab, entity: 1)
+  componentRemove(Rect, this: tab, entity: e1)
   log("remove-bumps={componentTableGeneration(Rect, this: tab)}")
 
-  componentRemove(Rect, this: tab, entity: 99)
+  componentRemove(Rect, this: tab, entity: e99)
   log("remove-missing-no-bump={componentTableGeneration(Rect, this: tab)}")
 }

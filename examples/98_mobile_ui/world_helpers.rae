@@ -18,7 +18,7 @@ func makeFixed() pub ret Size {
 
 # Set a fixed-size rectangle on `entity` (the common case for
 # code-built UI nodes).
-func setRectFixed(world: mod UiWorld, entity: view Int, w: view Float, h: view Float) pub {
+func setRectFixed(world: mod UiWorld, entity: view EntityId, w: view Float, h: view Float) pub {
   let r: Rect = { x: 0.0, y: 0.0, w: w, h: h }
   componentSet(this: world.rects, entity: entity, data: r)
   componentSet(this: world.sizes, entity: entity, data: makeFixed())
@@ -33,15 +33,15 @@ func makeFillH() pub ret Size {
   }
 }
 
-func buildVerticalSpacer(world: mod UiWorld) pub ret Int {
-  let s: Int = createEntity(world: world)
+func buildVerticalSpacer(world: mod UiWorld) pub ret EntityId {
+  let s: EntityId = createEntity(world: world)
   let r: Rect = { x: 0.0, y: 0.0, w: 1.0, h: 1.0 }
   componentSet(this: world.rects, entity: s, data: r)
   componentSet(this: world.sizes, entity: s, data: makeFillH())
   ret s
 }
 
-func setOnClick(world: mod UiWorld, entity: view Int, actionId: own String) pub {
+func setOnClick(world: mod UiWorld, entity: view EntityId, actionId: own String) pub {
   let click: OnClick = {
     actionId: actionId
     actionIdDouble: ""
@@ -57,14 +57,14 @@ func setOnClick(world: mod UiWorld, entity: view Int, actionId: own String) pub 
 # doubles as the hero key here so each album cover image gets a
 # unique, content-addressed hero identifier without needing a
 # separate albumId mapping.
-func setHeroWidget(world: mod UiWorld, entity: view Int, key: own String) pub {
+func setHeroWidget(world: mod UiWorld, entity: view EntityId, key: own String) pub {
   let hw: HeroWidget = {
     key: key
   }
   componentSet(this: world.heroWidgets, entity: entity, data: hw)
 }
 
-func setShapeRect(world: mod UiWorld, entity: view Int, fill: view RgbaColor) pub {
+func setShapeRect(world: mod UiWorld, entity: view EntityId, fill: view RgbaColor) pub {
   let shape: Shape = {
     kind: ShapeKind.Rect
     fill: fill
@@ -75,7 +75,7 @@ func setShapeRect(world: mod UiWorld, entity: view Int, fill: view RgbaColor) pu
   componentSet(this: world.shapes, entity: entity, data: shape)
 }
 
-func setShapeRounded(world: mod UiWorld, entity: view Int, fill: view RgbaColor, radius: view Float) pub {
+func setShapeRounded(world: mod UiWorld, entity: view EntityId, fill: view RgbaColor, radius: view Float) pub {
   let shape: Shape = {
     kind: ShapeKind.RoundedRect
     fill: fill
@@ -86,7 +86,7 @@ func setShapeRounded(world: mod UiWorld, entity: view Int, fill: view RgbaColor,
   componentSet(this: world.shapes, entity: entity, data: shape)
 }
 
-func setSprite(world: mod UiWorld, entity: view Int, key: own String, tint: view RgbaColor) pub {
+func setSprite(world: mod UiWorld, entity: view EntityId, key: own String, tint: view RgbaColor) pub {
   let sp: Sprite = {
     textureKey: key
     tint: tint
@@ -98,7 +98,7 @@ func setSprite(world: mod UiWorld, entity: view Int, key: own String, tint: view
   componentSet(this: world.sprites, entity: entity, data: sp)
 }
 
-func setText(world: mod UiWorld, entity: view Int, text: own String, styleId: own String) pub {
+func setText(world: mod UiWorld, entity: view EntityId, text: own String, styleId: own String) pub {
   let t: Text = {
     text: text
     styleId: styleId
@@ -109,7 +109,7 @@ func setText(world: mod UiWorld, entity: view Int, text: own String, styleId: ow
 
 func setLayout(
   world: mod UiWorld
-  entity: view Int
+  entity: view EntityId
   kind: LayoutType
   gap: view Float
   alignCross: AlignKind
@@ -126,16 +126,16 @@ func setLayout(
   componentSet(this: world.layouts, entity: entity, data: lay)
 }
 
-func setPaddingAll(world: mod UiWorld, entity: view Int, n: view Float) pub {
+func setPaddingAll(world: mod UiWorld, entity: view EntityId, n: view Float) pub {
   let pad: Padding = { insets: Insets { l: n, t: n, r: n, b: n } }
   componentSet(this: world.paddings, entity: entity, data: pad)
 }
 
-func attachChildren(world: mod UiWorld, parent: view Int, kids: view List(Int)) pub {
-  let kidsCopy: List(Int) = createList(Int, initialCap: kids.length)
+func attachChildren(world: mod UiWorld, parent: view EntityId, kids: view List(EntityId)) pub {
+  let kidsCopy: List(EntityId) = createList(EntityId, initialCap: kids.length)
   let i: Int = 0
   loop i < kids.length {
-    let kid: Int = kids.get(index: i)
+    let kid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
     kidsCopy.add(value: kid)
     let pl: Parent = { parent: parent }
     componentSet(this: world.parents, entity: kid, data: pl)

@@ -19,7 +19,7 @@ import core
 import string
 
 # Returns the active flag for entity; defaults to true if no Active.
-func transformActive(world: view UiWorld, entity: view Int) ret Bool {
+func transformActive(world: view UiWorld, entity: view EntityId) ret Bool {
   if componentHas(this: world.actives, entity: entity) is false {
     ret true
   }
@@ -27,7 +27,7 @@ func transformActive(world: view UiWorld, entity: view Int) ret Bool {
   ret a.value
 }
 
-func transformOpacity(world: view UiWorld, entity: view Int) ret Float {
+func transformOpacity(world: view UiWorld, entity: view EntityId) ret Float {
   if componentHas(this: world.opacities, entity: entity) is false {
     ret 1.0
   }
@@ -35,7 +35,7 @@ func transformOpacity(world: view UiWorld, entity: view Int) ret Float {
   ret o.value
 }
 
-func transformFxOf(world: view UiWorld, entity: view Int) ret TransformFx {
+func transformFxOf(world: view UiWorld, entity: view EntityId) ret TransformFx {
   if componentHas(this: world.transforms, entity: entity) is false {
     ret defaultTransformFx()
   }
@@ -43,7 +43,7 @@ func transformFxOf(world: view UiWorld, entity: view Int) ret TransformFx {
   ret t
 }
 
-func computedRectOf(world: view UiWorld, entity: view Int) ret ComputedRect {
+func computedRectOf(world: view UiWorld, entity: view EntityId) ret ComputedRect {
   if componentHas(this: world.computedRects, entity: entity) is false {
     ret ComputedRect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }
   }
@@ -59,7 +59,7 @@ func computedRectOf(world: view UiWorld, entity: view Int) ret ComputedRect {
 # hides the whole subtree even if a descendant has Active=true).
 func composeTransform(
   world: mod UiWorld
-  entity: view Int
+  entity: view EntityId
   parentX: view Float
   parentY: view Float
   parentAlpha: view Float
@@ -110,7 +110,7 @@ func composeTransform(
   let n: Int = ch.ids.length
   let i: Int = 0
   loop i < n {
-    let cid: Int = ch.ids.get(index: i)
+    let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
     composeTransform(
       world: world
       entity: cid
@@ -126,11 +126,11 @@ func composeTransform(
 # Walk every alive root (no Parent, has ComputedRect) and compose
 # WorldTransforms for the whole subtree.
 func transformSystem(world: mod UiWorld) {
-  let alive: view List(Int) => world.alive
+  let alive: view List(EntityId) => world.alive
   let n: Int = alive.length
   let i: Int = 0
   loop i < n {
-    let e: Int = alive.get(index: i)
+    let e: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: i)
     if componentHas(this: world.parents, entity: e) is false {
       if componentHas(this: world.computedRects, entity: e) {
         composeTransform(

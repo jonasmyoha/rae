@@ -2,7 +2,7 @@
 # reference into the table's storage, not a shallow-copy alias. The
 # binding type `view T` prevents auto-drop and prevents the
 # heap-corruption that the old `componentGet(...) ret T` shape could
-# cause for heap-owning component types (Children has a List(Int)).
+# cause for heap-owning component types (Children has a List(EntityId)).
 #
 # Successful run prints the three ids twice (once via componentView,
 # once via direct world access) and exits cleanly. A regression
@@ -15,12 +15,12 @@ import ui/components
 
 func main() {
   let world: UiWorld = createUiWorld()
-  let parent: Int = createEntity(world: world)
+  let parent: EntityId = createEntity(world: world)
 
-  let kids: List(Int) = createList(Int, initialCap: 3)
-  kids.add(value: 100)
-  kids.add(value: 200)
-  kids.add(value: 300)
+  let kids: List(EntityId) = createList(EntityId, initialCap: 3)
+  kids.add(value: entityId(v: 100))
+  kids.add(value: entityId(v: 200))
+  kids.add(value: entityId(v: 300))
 
   # Build Children in place so the heap is genuinely owned by the
   # struct literal, then transfer ownership of `kids` into the field.
@@ -30,15 +30,21 @@ func main() {
   # Read back via componentView — borrow, no copy, no auto-drop.
   let chv: view Children => componentView(this: world.childrens, entity: parent)
   log("via componentView:")
-  log("  [0]={chv.ids.get(index: 0)}")
-  log("  [1]={chv.ids.get(index: 1)}")
-  log("  [2]={chv.ids.get(index: 2)}")
+  let chv0: EntityId = rae_ext_rae_buf_get(buf: chv.ids.data, index: 0)
+  let chv1: EntityId = rae_ext_rae_buf_get(buf: chv.ids.data, index: 1)
+  let chv2: EntityId = rae_ext_rae_buf_get(buf: chv.ids.data, index: 2)
+  log("  [0]={chv0.value}")
+  log("  [1]={chv1.value}")
+  log("  [2]={chv2.value}")
 
   # Second read pretending we lost the first ref — value should still
   # be intact (no corruption from the first borrow going out of scope).
-  let chv2: view Children => componentView(this: world.childrens, entity: parent)
+  let chv2v: view Children => componentView(this: world.childrens, entity: parent)
   log("second read:")
-  log("  [0]={chv2.ids.get(index: 0)}")
-  log("  [1]={chv2.ids.get(index: 1)}")
-  log("  [2]={chv2.ids.get(index: 2)}")
+  let r0: EntityId = rae_ext_rae_buf_get(buf: chv2v.ids.data, index: 0)
+  let r1: EntityId = rae_ext_rae_buf_get(buf: chv2v.ids.data, index: 1)
+  let r2: EntityId = rae_ext_rae_buf_get(buf: chv2v.ids.data, index: 2)
+  log("  [0]={r0.value}")
+  log("  [1]={r1.value}")
+  log("  [2]={r2.value}")
 }

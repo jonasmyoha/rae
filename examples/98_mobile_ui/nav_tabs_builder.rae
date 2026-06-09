@@ -32,7 +32,7 @@ func dockBlurKey() pub ret String {
 # backdrop texture). Mirrors `setBackdropSprite` from
 # `lib/ui/debug.rae`; kept local so this module doesn't depend
 # on the debug stdlib.
-func setDockSprite(world: mod UiWorld, entity: view Int, key: own String, tint: view RgbaColor) {
+func setDockSprite(world: mod UiWorld, entity: view EntityId, key: own String, tint: view RgbaColor) {
   let sp: Sprite = {
     textureKey: key
     tint: tint
@@ -55,8 +55,8 @@ func mountNavTab(
   label: own String
   actionId: own String
   active: view Bool
-) pub ret Int {
-  let tab: Int = createEntity(world: world)
+) pub ret EntityId {
+  let tab: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: tab, w: w, h: navTabsH)
 
   let overrides: List(SceneOverride) = emptyOverrides()
@@ -88,7 +88,7 @@ func mountNavTab(
   }
 
   let sceneLabel: String = "nav-tab"
-  let mounted: Int = mountOrError(
+  let mounted: EntityId = mountOrError(
     world: world
     mountEntity: tab
     scene: scene
@@ -110,8 +110,8 @@ func buildNavTabsForScreen(
   world: mod UiWorld
   activeTab: Screen
   scenes: view AlbumScenes
-) pub ret Int {
-  let bar: Int = createEntity(world: world)
+) pub ret EntityId {
+  let bar: EntityId = createEntity(world: world)
   # Full-bleed: bar spans the entire screen width with no outerPad
   # margin. The dark background paints behind the four tabs all the
   # way to both screen edges, the way iOS tab bars do.
@@ -134,7 +134,7 @@ func buildNavTabsForScreen(
   let homeKey: String = "mat:home"
   let homeLabel: String = "Home"
   let homeAction: String = "nav.home"
-  let homeTab: Int = mountNavTab(
+  let homeTab: EntityId = mountNavTab(
     world: world
     scene: scenes.navTab
     w: tabW
@@ -147,7 +147,7 @@ func buildNavTabsForScreen(
   let searchKey: String = "mat:search"
   let searchLabel: String = "Search"
   let searchAction: String = "nav.search"
-  let searchTab: Int = mountNavTab(
+  let searchTab: EntityId = mountNavTab(
     world: world
     scene: scenes.navTab
     w: tabW
@@ -160,7 +160,7 @@ func buildNavTabsForScreen(
   let libraryKey: String = "mat:library_music"
   let libraryLabel: String = "Library"
   let libraryAction: String = "nav.library"
-  let libraryTab: Int = mountNavTab(
+  let libraryTab: EntityId = mountNavTab(
     world: world
     scene: scenes.navTab
     w: tabW
@@ -173,7 +173,7 @@ func buildNavTabsForScreen(
   let profileKey: String = "mat:person"
   let profileLabel: String = "Profile"
   let profileAction: String = "nav.profile"
-  let profileTab: Int = mountNavTab(
+  let profileTab: EntityId = mountNavTab(
     world: world
     scene: scenes.navTab
     w: tabW
@@ -183,7 +183,7 @@ func buildNavTabsForScreen(
     active: profileActive
   )
 
-  let kids: List(Int) = createList(Int, initialCap: 4)
+  let kids: List(EntityId) = createList(EntityId, initialCap: 4)
   kids.add(value: homeTab)
   kids.add(value: searchTab)
   kids.add(value: libraryTab)
@@ -212,13 +212,13 @@ func buildNavTabsForScreen(
 #
 # Returns the button entity, or -1 when no sub-page is open
 # (caller can ignore the return).
-func mountBackButtonOverlay(world: mod UiWorld, state: view AppState) pub ret Int {
+func mountBackButtonOverlay(world: mod UiWorld, state: view AppState) pub ret EntityId {
   if isSubPage(state: state) is false {
-    ret 0 - 1
+    ret noEntity()
   }
   let size: Float = 56.0
   let margin: Float = 16.0
-  let btn: Int = createEntity(world: world)
+  let btn: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: btn, w: size, h: size)
   # Slightly transparent dark fill so background content stays
   # legible underneath. Alpha 180 ≈ 70 % opaque — readable
@@ -240,13 +240,13 @@ func mountBackButtonOverlay(world: mod UiWorld, state: view AppState) pub ret In
   setOnClick(world: world, entity: btn, actionId: backAction)
 
   let iconSize: Float = 32.0
-  let icon: Int = createEntity(world: world)
+  let icon: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: icon, w: iconSize, h: iconSize)
   let iconKey: String = "mat:chevron_left"
   let iconTintC: RgbaColor = { r: 246, g: 246, b: 248, a: 255 }
   setSprite(world: world, entity: icon, key: iconKey, tint: iconTintC)
 
-  let kids: List(Int) = createList(Int, initialCap: 1)
+  let kids: List(EntityId) = createList(EntityId, initialCap: 1)
   kids.add(value: icon)
   attachChildren(world: world, parent: btn, kids: kids)
 
@@ -262,13 +262,13 @@ func mountBottomDockOverlay(
   playback: view PlaybackState
   state: view AppState
   reg: view TextureRegistry
-) pub ret Int {
+) pub ret EntityId {
   # Now-playing / mini-player floats above the nav bar — with the
   # content-area margins (outerPad on each side) so it visually
   # belongs to the page, not to the chrome.
   let miniW: Float = screenW - outerPad * 2.0
   let miniLabel: String = "mini-player"
-  let mini: Int = buildMiniPlayerInstance(
+  let mini: EntityId = buildMiniPlayerInstance(
     world: world
     scene: scenes.miniPlayer
     w: miniW
@@ -286,7 +286,7 @@ func mountBottomDockOverlay(
   # solid dark background is set inside `buildNavTabsForScreen` and
   # only covers the row of tab icons — it deliberately does NOT
   # extend up under the mini-player.
-  let bar: Int = buildNavTabsForScreen(world: world, activeTab: activeTab, scenes: scenes)
+  let bar: EntityId = buildNavTabsForScreen(world: world, activeTab: activeTab, scenes: scenes)
   let barY: Float = screenH - navTabsH
   let barOff: Offset = { delta: Vec2 { x: 0.0, y: barY } }
   componentSet(this: world.offsets, entity: bar, data: barOff)
