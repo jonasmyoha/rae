@@ -19,8 +19,55 @@
 # sparse set later without changing the public API.
 import core
 
-# Rae has no type aliases; `Entity` is just a marker comment.
-# Entity == Int across the UI library.
+# Entity identifier — a value-type wrapper around `Int`.
+#
+# Stored, passed, and compared by value (single-field struct → no
+# heap, copied as bytes). All ECS APIs in this module take/return
+# `EntityId` rather than bare `Int` so a function signature makes
+# the semantic role explicit: "this parameter is an entity handle,
+# not a count or an array index."
+#
+# Construction goes through the helpers below — `entityId(n)` to
+# wrap a known Int and `noEntity()` for the canonical "no entity"
+# sentinel (id = -1). Authors comparing two ids use `eq(a, b)`
+# rather than `a is b` because Rae's `is` on struct values doesn't
+# do field-wise equality.
+#
+# A future `wrap` modifier (deferred — see id/key removal commit
+# 568a7f1) will make `e.value` automatic at use sites and let the
+# struct be passed where a bare Int is expected. Until then, code
+# that needs the inner integer (logging, arithmetic, mapping to
+# external IDs) reads `.value` explicitly.
+type EntityId pub {
+  value: Int
+}
+
+# Canonical "no entity" sentinel. Returned by lookups that miss,
+# stored in fields that haven't been wired up yet, etc.
+func noEntity() pub ret EntityId {
+  ret EntityId { value: 0 - 1 }
+}
+
+# Wrap a known integer entity index as an EntityId. Used at the
+# few seams where entity ids cross from bare-Int land (boot
+# defaults, deserialised state, debug logs) into the typed ECS.
+func entityId(v: view Int) pub ret EntityId {
+  ret EntityId { value: v }
+}
+
+# True when both ids refer to the same entity. Use this rather
+# than `==` / `is` on the struct values — Rae's `is` on user
+# structs doesn't compare field-by-field, so `e1 is e2` is not
+# what you want for entity comparison.
+func eq(this: view EntityId, other: view EntityId) pub ret Bool {
+  ret this.value is other.value
+}
+
+# True when this id is the `noEntity()` sentinel. Handy at hit-
+# test sites where -1 means "nothing under the cursor".
+func isNone(this: view EntityId) pub ret Bool {
+  ret this.value < 0
+}
 
 # Non-generic helpers for the entity-id list. The C backend mis-mangles
 # generic method calls (`add`, `remove`) on a `List(Int)` field when
