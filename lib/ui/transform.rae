@@ -123,7 +123,7 @@ func composeTransform(
   }
 }
 
-# Walk every alive root (no ParentLink, has ComputedRect) and compose
+# Walk every alive root (no Parent, has ComputedRect) and compose
 # WorldTransforms for the whole subtree.
 func transformSystem(world: mod UiWorld) {
   let alive: view List(Int) => world.alive
@@ -131,7 +131,7 @@ func transformSystem(world: mod UiWorld) {
   let i: Int = 0
   loop i < n {
     let e: Int = alive.get(index: i)
-    if componentHas(this: world.parentLinks, entity: e) is false {
+    if componentHas(this: world.parents, entity: e) is false {
       if componentHas(this: world.computedRects, entity: e) {
         composeTransform(
           world: world
@@ -164,7 +164,7 @@ type TransformCache {
   opacitiesGen: Int
   transformsGen: Int
   childrensGen: Int
-  parentLinksGen: Int
+  parentsGen: Int
   entityCount: Int
 }
 
@@ -175,7 +175,7 @@ func createTransformCache() pub ret TransformCache {
     opacitiesGen: -1
     transformsGen: -1
     childrensGen: -1
-    parentLinksGen: -1
+    parentsGen: -1
     entityCount: -1
   }
 }
@@ -196,7 +196,7 @@ func transformSystemIfDirty(world: mod UiWorld, cache: mod TransformCache) pub r
   let opGen: Int = componentTableGeneration(Opacity, this: world.opacities)
   let txGen: Int = componentTableGeneration(TransformFx, this: world.transforms)
   let chGen: Int = componentTableGeneration(Children, this: world.childrens)
-  let plGen: Int = componentTableGeneration(ParentLink, this: world.parentLinks)
+  let plGen: Int = componentTableGeneration(Parent, this: world.parents)
   let entityCount: Int = world.alive.length
 
   let dirty: Bool = false
@@ -215,7 +215,7 @@ func transformSystemIfDirty(world: mod UiWorld, cache: mod TransformCache) pub r
   if chGen is not cache.childrensGen {
     dirty = true
   }
-  if plGen is not cache.parentLinksGen {
+  if plGen is not cache.parentsGen {
     dirty = true
   }
   if entityCount is not cache.entityCount {
@@ -232,7 +232,7 @@ func transformSystemIfDirty(world: mod UiWorld, cache: mod TransformCache) pub r
   cache.opacitiesGen = opGen
   cache.transformsGen = txGen
   cache.childrensGen = chGen
-  cache.parentLinksGen = plGen
+  cache.parentsGen = plGen
   cache.entityCount = entityCount
   ret true
 }
