@@ -1514,9 +1514,7 @@ static bool compile_function(BytecodeCompiler* compiler, const AstDecl* decl) {
     bool is_mod = false;
     if (param->type) {
         is_mod = param->type->is_mod;
-        if (param->type->is_id || param->type->is_key) {
-            is_ptr = false;
-        } else {
+        {
             bool is_val = param->type->is_val;
             bool is_explicit_view = param->type->is_view;
             bool is_value = vm_is_value_type(compiler->compiler_ctx, type_name);

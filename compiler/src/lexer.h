@@ -35,8 +35,6 @@ typedef enum {
   TOK_KW_OWN,
   TOK_KW_COPY,
   TOK_KW_OPT,
-  TOK_KW_ID,
-  TOK_KW_KEY,
   TOK_KW_IF,
   TOK_KW_ELSE,
   TOK_KW_ENUM,

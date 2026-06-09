@@ -10,18 +10,13 @@ func main() {
   let p2: Point = p1
   p2.x = 30
   # Prints 10
-  # 2. Borrow Type
   log(p1.x)
+  # 2. Borrow Type (mutable view)
   let r: mod Point => p1
   r.y = 50
   # Prints 50
-  # 3. Identity Types
   log(p1.y)
-  let pid: id Point = 1
-  let pkey: key Point = "point_001"
-  # 4. Borrow
-  log(pid)
-  log(pkey)
+  # 3. Borrow Type (read-only view)
   let r2: view Point => p1
   log(r2.x)
 }

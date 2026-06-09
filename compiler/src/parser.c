@@ -92,7 +92,7 @@ static const Token* parser_consume(Parser* parser, TokenKind kind, const char* m
 }
 
 static bool is_ident_like(TokenKind kind) {
-  return kind == TOK_IDENT || kind == TOK_KW_ID || kind == TOK_KW_KEY || kind == TOK_KW_VAL;
+  return kind == TOK_IDENT || kind == TOK_KW_VAL;
 }
 
 static bool looks_like_ident(Parser* parser) {
@@ -164,8 +164,6 @@ static AstTypeRef* parse_type_ref_from_ident(Parser* parser, const Token* ident_
   type->is_val = false;
   type->is_own = false;
   type->is_copy = false;
-  type->is_id = false;
-  type->is_key = false;
   type->parts = make_identifier_part(parser, ident_token->lexeme);
   type->generic_args = NULL; // For now, no generic args from simple ident
   type->next = NULL;
@@ -226,8 +224,6 @@ static AstTypeRef* parse_type_ref(Parser* parser) {
   type->is_val = false;
   type->is_own = false;
   type->is_copy = false;
-  type->is_id = false;
-  type->is_key = false;
   type->generic_args = NULL;
   type->next = NULL;
 
@@ -251,13 +247,7 @@ static AstTypeRef* parse_type_ref(Parser* parser) {
   } else if (parser_match(parser, TOK_KW_COPY)) {
     type->is_copy = true;
   }
-  
-  if (parser_match(parser, TOK_KW_ID)) {
-    type->is_id = true;
-  } else if (parser_match(parser, TOK_KW_KEY)) {
-    type->is_key = true;
-  }
-  
+
   AstIdentifierPart* parts_head = NULL;
   AstIdentifierPart* parts_tail = NULL;
   bool consumed_base = false;
@@ -778,7 +768,7 @@ static AstExpr* finish_call(Parser* parser, AstExpr* callee, const Token* start_
     TokenKind k = parser_peek(parser)->kind;
     // TOK_KW_TYPE is allowed here so `createList(type: Int, ...)` parses
     // — `type:` is the named spelling of the generic type argument.
-    bool is_ident_like = (k == TOK_IDENT || k == TOK_KW_ID || k == TOK_KW_KEY || k == TOK_KW_TYPE);
+    bool is_ident_like = (k == TOK_IDENT || k == TOK_KW_TYPE);
     bool is_named_arg = is_ident_like && parser_check_at(parser, 1, TOK_COLON);
 
     if (arg_idx == 0 && !is_named_arg) {
@@ -1196,8 +1186,6 @@ static AstExpr* parse_primary(Parser* parser) {
   // If not a typed object literal, proceed with other primary expressions
   switch (token->kind) {
     case TOK_KW_VAL:
-    case TOK_KW_ID:
-    case TOK_KW_KEY:
     case TOK_IDENT: {
       parser_advance(parser); // Already peeked and confirmed not a typed object literal
       AstExpr* expr = new_expr(parser, AST_EXPR_IDENT, token);
@@ -1382,7 +1370,7 @@ static AstExpr* parse_postfix(Parser* parser) {
             TokenKind k = parser_peek(parser)->kind;
             // TOK_KW_TYPE is allowed here so `createList(type: Int, ...)` parses
     // — `type:` is the named spelling of the generic type argument.
-    bool is_ident_like = (k == TOK_IDENT || k == TOK_KW_ID || k == TOK_KW_KEY || k == TOK_KW_TYPE);
+    bool is_ident_like = (k == TOK_IDENT || k == TOK_KW_TYPE);
             bool is_named_arg = is_ident_like && parser_check_at(parser, 1, TOK_COLON);
 
             if (arg_idx == 0 && !is_named_arg) {

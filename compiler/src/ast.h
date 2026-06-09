@@ -36,8 +36,6 @@ typedef struct AstTypeRef {
   bool is_val;
   bool is_own; // Ownership-transfer parameter mode — see docs/ownership-model.md
   bool is_copy; // Independent owned copy. Stage A is annotation-only — codegen treats it identically to bare T. Stages B/C/D will make this the canonical "callee gets a fresh owned value" parameter mode.
-  bool is_id;
-  bool is_key;
   size_t line;
   size_t column;
   struct AstTypeRef* generic_args; // Head of a linked list of AstTypeRef for generic arguments
