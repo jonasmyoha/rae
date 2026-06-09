@@ -5,7 +5,7 @@
 #    in `world.nodeIds` so children can resolve.
 # 2. apply each node's component bag via `applyComponentByName`. The
 #    "Children" key is special-cased and skipped here.
-# 3. build `Children` and `ParentLink` components — done last so all
+# 3. build `Children` and `Parent` components — done last so all
 #    entities are guaranteed allocated when we resolve childIds.
 #
 # Returns the root entity id, or -1 if the scene wasn't ok.
@@ -79,7 +79,7 @@ func loadScene(world: mod UiWorld, scene: view Scene) ret Int {
     j = j + 1
   }
 
-  # ---------- pass 3: hierarchy (Children + ParentLink) ----------
+  # ---------- pass 3: hierarchy (Children + Parent) ----------
   let p: Int = 0
   loop p < nodeCount {
     let node: view SceneNode => sceneNodeAt(this: scene, idx: p)
@@ -94,8 +94,8 @@ func loadScene(world: mod UiWorld, scene: view Scene) ret Int {
         if childIdx >= 0 {
           let childEntity: Int = entitiesByNodeIndex.get(index: childIdx)
           appendIntListSL(lst: kids, value: childEntity)
-          let pl: ParentLink = { parent: parentEntity }
-          componentSet(this: world.parentLinks, entity: childEntity, data: pl)
+          let pl: Parent = { parent: parentEntity }
+          componentSet(this: world.parents, entity: childEntity, data: pl)
         }
         q = q + 1
       }
@@ -132,8 +132,8 @@ func dumpScene(world: view UiWorld, scene: view Scene) {
     } else {
       let entity: Int = entityOpt
       let parentStr: String = "(root)"
-      if componentHas(this: world.parentLinks, entity: entity) {
-        let pl: ParentLink = componentGet(this: world.parentLinks, entity: entity)
+      if componentHas(this: world.parents, entity: entity) {
+        let pl: Parent = componentGet(this: world.parents, entity: entity)
         parentStr = "parent=ent{pl.parent}"
       }
       let comps: String = componentNamesFor(world: world, entity: entity)

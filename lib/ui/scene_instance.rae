@@ -315,7 +315,7 @@ func mountSceneInstance(
     j = j + 1
   }
 
-  # Pass 3: build hierarchy (Children + ParentLink).
+  # Pass 3: build hierarchy (Children + Parent).
   let p: Int = 0
   loop p < nodeCount {
     let node: view SceneNode => sceneNodeAt(this: scene, idx: p)
@@ -330,8 +330,8 @@ func mountSceneInstance(
         if childIdx >= 0 {
           let childEntity: Int = entitiesByNodeIndex.get(index: childIdx)
           appendIntListSI(lst: kids, value: childEntity)
-          let pl: ParentLink = { parent: parentEntity }
-          componentSet(this: world.parentLinks, entity: childEntity, data: pl)
+          let pl: Parent = { parent: parentEntity }
+          componentSet(this: world.parents, entity: childEntity, data: pl)
         }
         q = q + 1
       }
