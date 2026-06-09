@@ -1274,6 +1274,28 @@ func main() {
             # render gate) so the debug heartbeat reflects real per-
             # frame ECS work, not just raw frame rate.
             updateAndRenderDebugOverlay(debug: debug, now: now, didRealWork: active)
+            # App version label: right-aligned with the debug button,
+            # one line above it. White so it reads against any theme.
+            let versionText: String = "{appVersion}"
+            let versionFontSize: Float = 12.0
+            let versionW: Int = measureTextWithFont(
+              slot: robotoFontSlot
+              text: versionText
+              fontSize: versionFontSize
+              spacing: 0.0
+            )
+            let versionX: Float = debug.buttonX + debug.buttonSize - versionW.toFloat()
+            let versionY: Float = debug.buttonY - versionFontSize - 2.0
+            let versionColor: Color = { r: 255, g: 255, b: 255, a: 255 }
+            drawTextWithFont(
+              slot: robotoFontSlot
+              text: versionText
+              x: versionX
+              y: versionY
+              fontSize: versionFontSize
+              spacing: 0.0
+              color: versionColor
+            )
             # Frosted-glass backdrop: when the debug menu just opened
             # this frame, the current back buffer holds the un-menued
             # screen (the world rebuild with menu hasn't happened yet —
