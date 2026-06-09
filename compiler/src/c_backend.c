@@ -156,7 +156,7 @@ bool is_primitive_ref(CFuncContext* ctx, const AstTypeRef* tr) {
         str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float64") ||
         str_eq_cstr(base, "Bool") || str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32");
     if (is_num_prim) return tr->is_mod;
-    if (str_eq_cstr(base, "String") || tr->is_id || tr->is_key) return true;
+    if (str_eq_cstr(base, "String")) return true;
     return false;
 }
 
@@ -425,9 +425,6 @@ bool emit_string_literal(FILE* out, Str literal) {
 
 bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* out, bool skip_ptr) {
   if (!type) { fprintf(out, "int64_t"); return true; }
-  // Identity types: always emit underlying primitive regardless of resolved_type
-  if (type->is_id) { bool is_ptr = (type->is_view || type->is_mod) && !skip_ptr; fprintf(out, "int64_t"); if (is_ptr) fprintf(out, "*"); return true; }
-  if (type->is_key) { bool is_ptr = (type->is_view || type->is_mod) && !skip_ptr; fprintf(out, "rae_String"); if (is_ptr) fprintf(out, "*"); return true; }
     if (type->resolved_type) {
       TypeInfo* t = type->resolved_type; bool is_ptr = (type->is_view || type->is_mod) && !skip_ptr;
       if (t->kind == TYPE_GENERIC_PARAM && ctx && ctx->generic_params && ctx->generic_args) {
@@ -470,8 +467,6 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
   }
   if (!type->parts) { fprintf(out, "int64_t"); return true; }
   bool is_ptr = (type->is_view || type->is_mod) && !skip_ptr;
-  if (type->is_id) { fprintf(out, "int64_t"); if (is_ptr) fprintf(out, "*"); return true; }
-  if (type->is_key) { fprintf(out, "rae_String"); if (is_ptr) fprintf(out, "*"); return true; }
   if (type->is_opt) { fprintf(out, "RaeAny"); if (is_ptr) fprintf(out, "*"); return true; }
   Str base = type->parts->text; bool is_mod = type->is_mod;
   if (str_eq_cstr(base, "Int64") || str_eq_cstr(base, "Int")) { if (is_ptr) fprintf(out, "rae_%s_Int64", is_mod ? "Mod" : "View"); else fprintf(out, "int64_t"); return true; }
@@ -556,8 +551,6 @@ const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func) {
   if (func->returns && func->returns->type) {
     AstTypeRef* tr = func->returns->type; if (tr->is_opt) return "RaeAny";
     bool is_view = tr->is_view, is_mod = tr->is_mod, is_ptr = is_view || is_mod;
-    if (tr->is_id) return is_ptr ? "int64_t*" : "int64_t";
-    if (tr->is_key) return is_ptr ? "rae_String*" : "rae_String";
     Str base = get_base_type_name(tr);
     // Check if return type is an enum — emit as int64_t
     if (ctx && ctx->module) {
