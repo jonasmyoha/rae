@@ -26,7 +26,7 @@ import ui/layout
 
 # Local circle shape helper. world_helpers.rae only exposes the rect /
 # rounded-rect variants; the avatar needs a true `ShapeKind.Circle`.
-func setProfileCircleShape(world: mod UiWorld, entity: view Int, fill: view RgbaColor) {
+func setProfileCircleShape(world: mod UiWorld, entity: view EntityId, fill: view RgbaColor) {
   let sh: Shape = {
     kind: ShapeKind.Circle
     fill: fill
@@ -42,8 +42,8 @@ func setProfileCircleShape(world: mod UiWorld, entity: view Int, fill: view Rgba
 let avatarSize: Float = 120.0
 let avatarIconSize: Float = 80.0
 
-func buildAvatar(world: mod UiWorld, reg: view TextureRegistry) ret Int {
-  let avatar: Int = createEntity(world: world)
+func buildAvatar(world: mod UiWorld, reg: view TextureRegistry) ret EntityId {
+  let avatar: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: avatar, w: avatarSize, h: avatarSize)
 
   let avatarKey: String = profileAvatarKey()
@@ -67,12 +67,12 @@ func buildAvatar(world: mod UiWorld, reg: view TextureRegistry) ret Int {
     let alignC: AlignKind = AlignKind.Center
     setLayout(world: world, entity: avatar, kind: layS, gap: 0.0, alignCross: alignC)
 
-    let icon: Int = createEntity(world: world)
+    let icon: EntityId = createEntity(world: world)
     setRectFixed(world: world, entity: icon, w: avatarIconSize, h: avatarIconSize)
     let personKey: String = "mat:person"
     setSprite(world: world, entity: icon, key: personKey, tint: lightTextColor)
 
-    let kids: List(Int) = createList(Int, initialCap: 1)
+    let kids: List(EntityId) = createList(EntityId, initialCap: 1)
     kids.add(value: icon)
     attachChildren(world: world, parent: avatar, kids: kids)
   }
@@ -80,8 +80,8 @@ func buildAvatar(world: mod UiWorld, reg: view TextureRegistry) ret Int {
 }
 
 # Helper: build a single stat column (big number + small label).
-func buildStatColumn(world: mod UiWorld, value: own String, label: own String) ret Int {
-  let col: Int = createEntity(world: world)
+func buildStatColumn(world: mod UiWorld, value: own String, label: own String) ret EntityId {
+  let col: EntityId = createEntity(world: world)
   let colW: Float = 100.0
   let colH: Float = 56.0
   setRectFixed(world: world, entity: col, w: colW, h: colH)
@@ -89,25 +89,25 @@ func buildStatColumn(world: mod UiWorld, value: own String, label: own String) r
   let alignC: AlignKind = AlignKind.Center
   setLayout(world: world, entity: col, kind: layV, gap: 2.0, alignCross: alignC)
 
-  let valueText: Int = createEntity(world: world)
+  let valueText: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: valueText, w: colW, h: 28.0)
   let valueStyle: String = "topBarTitle"
   setText(world: world, entity: valueText, text: value, styleId: valueStyle)
 
-  let labelText: Int = createEntity(world: world)
+  let labelText: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: labelText, w: colW, h: 18.0)
   let labelStyle: String = "muted"
   setText(world: world, entity: labelText, text: label, styleId: labelStyle)
 
-  let kids: List(Int) = createList(Int, initialCap: 2)
+  let kids: List(EntityId) = createList(EntityId, initialCap: 2)
   kids.add(value: valueText)
   kids.add(value: labelText)
   attachChildren(world: world, parent: col, kids: kids)
   ret col
 }
 
-func buildStatsRow(world: mod UiWorld) ret Int {
-  let row: Int = createEntity(world: world)
+func buildStatsRow(world: mod UiWorld) ret EntityId {
+  let row: EntityId = createEntity(world: world)
   let rowW: Float = screenW - outerPad * 2.0
   let rowH: Float = 60.0
   setRectFixed(world: world, entity: row, w: rowW, h: rowH)
@@ -122,11 +122,11 @@ func buildStatsRow(world: mod UiWorld) ret Int {
   let likes: String = "98.1K"
   let likesLabel: String = "Likes"
 
-  let followersCol: Int = buildStatColumn(world: world, value: followers, label: followersLabel)
-  let followingCol: Int = buildStatColumn(world: world, value: following, label: followingLabel)
-  let likesCol: Int = buildStatColumn(world: world, value: likes, label: likesLabel)
+  let followersCol: EntityId = buildStatColumn(world: world, value: followers, label: followersLabel)
+  let followingCol: EntityId = buildStatColumn(world: world, value: following, label: followingLabel)
+  let likesCol: EntityId = buildStatColumn(world: world, value: likes, label: likesLabel)
 
-  let kids: List(Int) = createList(Int, initialCap: 3)
+  let kids: List(EntityId) = createList(EntityId, initialCap: 3)
   kids.add(value: followersCol)
   kids.add(value: followingCol)
   kids.add(value: likesCol)
@@ -185,8 +185,8 @@ func collectProfileCoverKeys(albums: view List(Album)) ret List(String) {
 # texture key, stores it as the active album, and switches to the
 # Album screen. The hero transition then naturally finds this tile
 # as source / destination.
-func buildCoverTile(world: mod UiWorld, key: own String) ret Int {
-  let tile: Int = createEntity(world: world)
+func buildCoverTile(world: mod UiWorld, key: own String) ret EntityId {
+  let tile: EntityId = createEntity(world: world)
   let size: Float = gridTileSize()
   setRectFixed(world: world, entity: tile, w: size, h: size)
   let copiedForHero: String = key
@@ -203,8 +203,8 @@ func buildCoverGridRow(
   world: mod UiWorld
   keys: view List(String)
   startIndex: view Int
-) ret Int {
-  let row: Int = createEntity(world: world)
+) ret EntityId {
+  let row: EntityId = createEntity(world: world)
   let rowW: Float = screenW - outerPad * 2.0
   let tileH: Float = gridTileSize()
   setRectFixed(world: world, entity: row, w: rowW, h: tileH)
@@ -212,7 +212,7 @@ func buildCoverGridRow(
   let alignS: AlignKind = AlignKind.Start
   setLayout(world: world, entity: row, kind: layH, gap: gridTileGap, alignCross: alignS)
 
-  let kids: List(Int) = createList(Int, initialCap: gridColumns)
+  let kids: List(EntityId) = createList(EntityId, initialCap: gridColumns)
   let cols: Int = gridColumns
   let total: Int = keys.length
   let col: Int = 0
@@ -220,7 +220,7 @@ func buildCoverGridRow(
     let i: Int = startIndex + col
     if i < total {
       let key: String = keys.get(index: i)
-      let tile: Int = buildCoverTile(world: world, key: key)
+      let tile: EntityId = buildCoverTile(world: world, key: key)
       kids.add(value: tile)
     }
     col = col + 1
@@ -231,9 +231,9 @@ func buildCoverGridRow(
 
 # Compose the full 3-column grid over keys derived from the
 # album list (one tile per parsed album).
-func buildCoverGrid(world: mod UiWorld, albums: view List(Album)) ret Int {
+func buildCoverGrid(world: mod UiWorld, albums: view List(Album)) ret EntityId {
   let keys: List(String) = collectProfileCoverKeys(albums: albums)
-  let grid: Int = createEntity(world: world)
+  let grid: EntityId = createEntity(world: world)
   let cols: Int = gridColumns
   let total: Int = keys.length
   let tileH: Float = gridTileSize()
@@ -246,11 +246,11 @@ func buildCoverGrid(world: mod UiWorld, albums: view List(Album)) ret Int {
   let alignS: AlignKind = AlignKind.Start
   setLayout(world: world, entity: grid, kind: layV, gap: gridTileGap, alignCross: alignS)
 
-  let rowKids: List(Int) = createList(Int, initialCap: rows)
+  let rowKids: List(EntityId) = createList(EntityId, initialCap: rows)
   let i: Int = 0
   loop i < rows {
     let startIndex: Int = i * cols
-    let row: Int = buildCoverGridRow(world: world, keys: keys, startIndex: startIndex)
+    let row: EntityId = buildCoverGridRow(world: world, keys: keys, startIndex: startIndex)
     rowKids.add(value: row)
     i = i + 1
   }
@@ -265,8 +265,8 @@ func buildCoverGrid(world: mod UiWorld, albums: view List(Album)) ret Int {
 # past the screen edge — but the host applies `scrollY` as an
 # `Offset.delta.y` so the user can wheel-scroll the column up to
 # bring later rows into view.
-func buildProfileBody(world: mod UiWorld, reg: view TextureRegistry, albums: view List(Album), scrollY: view Float) ret Int {
-  let body: Int = createEntity(world: world)
+func buildProfileBody(world: mod UiWorld, reg: view TextureRegistry, albums: view List(Album), scrollY: view Float) ret EntityId {
+  let body: EntityId = createEntity(world: world)
   let bodyW: Float = screenW - outerPad * 2.0
   # Height matches the visible content area (between top bar and
   # nav tabs). The Vertical layout below positions children inside
@@ -285,28 +285,28 @@ func buildProfileBody(world: mod UiWorld, reg: view TextureRegistry, albums: vie
   let off: Offset = { delta: Vec2 { x: 0.0, y: scrollY } }
   componentSet(this: world.offsets, entity: body, data: off)
 
-  let avatar: Int = buildAvatar(world: world, reg: reg)
+  let avatar: EntityId = buildAvatar(world: world, reg: reg)
 
-  let handle: Int = createEntity(world: world)
+  let handle: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: handle, w: bodyW, h: 28.0)
   let handleStyle: String = "topBarTitle"
   let handleText: String = "@violet.tapes"
   setText(world: world, entity: handle, text: handleText, styleId: handleStyle)
 
-  let bio: Int = createEntity(world: world)
+  let bio: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: bio, w: bodyW, h: 18.0)
   let bioStyle: String = "muted"
   let bioText: String = "indie pop · dream-punk · playlist lover 🌙✨🎧"
   setText(world: world, entity: bio, text: bioText, styleId: bioStyle)
 
-  let stats: Int = buildStatsRow(world: world)
-  let grid: Int = buildCoverGrid(world: world, albums: albums)
+  let stats: EntityId = buildStatsRow(world: world)
+  let grid: EntityId = buildCoverGrid(world: world, albums: albums)
 
   # No trailing spacer is needed — body has no clipping, so the
   # "comfortable scroll bottom" (1-2 rows of empty space below the
   # last row before the dock) is controlled entirely by the
   # `minScroll` clamp in `main.rae`'s wheel handler.
-  let kids: List(Int) = createList(Int, initialCap: 5)
+  let kids: List(EntityId) = createList(EntityId, initialCap: 5)
   kids.add(value: avatar)
   kids.add(value: handle)
   kids.add(value: bio)
@@ -318,21 +318,21 @@ func buildProfileBody(world: mod UiWorld, reg: view TextureRegistry, albums: vie
 
 # --- top bar ----------------------------------------------------------
 
-func buildProfileTopBar(world: mod UiWorld) ret Int {
-  let bar: Int = createEntity(world: world)
+func buildProfileTopBar(world: mod UiWorld) ret EntityId {
+  let bar: EntityId = createEntity(world: world)
   let w: Float = screenW - outerPad * 2.0
   setRectFixed(world: world, entity: bar, w: w, h: topBarH)
   let layH: LayoutType = LayoutType.Horizontal
   let alignC: AlignKind = AlignKind.Center
   setLayout(world: world, entity: bar, kind: layH, gap: 16.0, alignCross: alignC)
 
-  let title: Int = createEntity(world: world)
+  let title: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: title, w: w, h: 32.0)
   let titleStyle: String = "topBarTitle"
   let titleText: String = "Profile"
   setText(world: world, entity: title, text: titleText, styleId: titleStyle)
 
-  let kids: List(Int) = createList(Int, initialCap: 1)
+  let kids: List(EntityId) = createList(EntityId, initialCap: 1)
   kids.add(value: title)
   attachChildren(world: world, parent: bar, kids: kids)
   ret bar
@@ -350,7 +350,7 @@ func buildProfileWorld(
   let albums: view List(Album) => state.albums
   let world: UiWorld = createUiWorld()
 
-  let root: Int = createEntity(world: world)
+  let root: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: root, w: screenW, h: screenH)
   setShapeRect(world: world, entity: root, fill: surfaceColor)
   let layV: LayoutType = LayoutType.Vertical
@@ -363,17 +363,17 @@ func buildProfileWorld(
   # `refreshProfileCovers(reg)` exactly once when transitioning into
   # the Profile screen, so a scroll-triggered rebuild stays cheap.
 
-  let topBar: Int = buildProfileTopBar(world: world)
-  let body: Int = buildProfileBody(world: world, reg: reg, albums: albums, scrollY: scrollY)
+  let topBar: EntityId = buildProfileTopBar(world: world)
+  let body: EntityId = buildProfileBody(world: world, reg: reg, albums: albums, scrollY: scrollY)
 
-  let kids: List(Int) = createList(Int, initialCap: 2)
+  let kids: List(EntityId) = createList(EntityId, initialCap: 2)
   kids.add(value: topBar)
   kids.add(value: body)
   attachChildren(world: world, parent: root, kids: kids)
 
   # Bottom dock (mini-player + nav-tabs). Same call across every
   # screen — see nav_tabs_builder.rae.
-  let dock: Int = mountBottomDockOverlay(
+  let dock: EntityId = mountBottomDockOverlay(
     world: world
     activeTab: state.tab
     scenes: scenes
@@ -381,7 +381,7 @@ func buildProfileWorld(
     state: state
     reg: reg
   )
-  let back: Int = mountBackButtonOverlay(world: world, state: state)
+  let back: EntityId = mountBackButtonOverlay(world: world, state: state)
 
   ret world
 }

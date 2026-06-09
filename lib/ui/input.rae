@@ -20,7 +20,7 @@ import raylib
 
 # Internal: left mouse button.
 let mouseButtonLeft: Int = 0
-let inputNoEntity: Int = -1
+let inputNoEntity: EntityId = { value: 0 - 1 }
 
 type PointerState {
   x: Float
@@ -31,13 +31,13 @@ type PointerState {
 }
 
 type ActionEvent {
-  entity: Int
+  entity: EntityId
   actionId: String
 }
 
 type InputSystem {
   pointer: PointerState
-  pressedEntity: Int
+  pressedEntity: EntityId
   events: List(ActionEvent)
 }
 
@@ -50,7 +50,7 @@ func createInputSystem() ret InputSystem {
       pressed: false
       released: false
     }
-    pressedEntity: inputNoEntity
+    pressedEntity: noEntity()
     events: createList(ActionEvent, initialCap: 8)
   }
 }
@@ -58,7 +58,7 @@ func createInputSystem() ret InputSystem {
 # Returns true if the point (x, y) is inside the entity's
 # `WorldTransform`+`ComputedRect` bounds. Skips entities without one
 # of those, or with `WorldTransform.visible == false`.
-func pointInEntity(world: view UiWorld, entity: view Int, x: view Float, y: view Float) ret Bool {
+func pointInEntity(world: view UiWorld, entity: view EntityId, x: view Float, y: view Float) ret Bool {
   if componentHas(this: world.worldTransforms, entity: entity) is false {
     ret false
   }
@@ -107,7 +107,7 @@ func pointInEntity(world: view UiWorld, entity: view Int, x: view Float, y: view
 # the right answer is to track per-entity "subtree bounds" during
 # layout (union of own bounds + every descendant's bounds) and check
 # those — not the entity's own visual bounds.
-func hitTestEntity(world: view UiWorld, entity: view Int, x: view Float, y: view Float) ret Int {
+func hitTestEntity(world: view UiWorld, entity: view EntityId, x: view Float, y: view Float) ret EntityId {
   # Children first, in reverse declaration order — visually-topmost
   # child wins. Recurse regardless of own bounds (see comment above).
   if componentHas(this: world.childrens, entity: entity) {
@@ -115,9 +115,9 @@ func hitTestEntity(world: view UiWorld, entity: view Int, x: view Float, y: view
     let n: Int = ch.ids.length
     let i: Int = n - 1
     loop i >= 0 {
-      let cid: Int = ch.ids.get(index: i)
-      let hit: Int = hitTestEntity(world: world, entity: cid, x: x, y: y)
-      if hit is not inputNoEntity {
+      let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
+      let hit: EntityId = hitTestEntity(world: world, entity: cid, x: x, y: y)
+      if isNone(this: hit) is false {
         ret hit
       }
       i = i - 1
@@ -143,15 +143,15 @@ func hitTestEntity(world: view UiWorld, entity: view Int, x: view Float, y: view
 # crack at consuming the click. `hitTestEntity` then walks each root's
 # subtree without pruning on intermediate ancestor bounds — see its
 # comment.
-func hitTest(world: view UiWorld, x: view Float, y: view Float) ret Int {
-  let alive: view List(Int) => world.alive
+func hitTest(world: view UiWorld, x: view Float, y: view Float) ret EntityId {
+  let alive: view List(EntityId) => world.alive
   let n: Int = alive.length
   let i: Int = n - 1
   loop i >= 0 {
-    let e: Int = alive.get(index: i)
+    let e: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: i)
     if componentHas(this: world.parents, entity: e) is false {
-      let hit: Int = hitTestEntity(world: world, entity: e, x: x, y: y)
-      if hit is not inputNoEntity {
+      let hit: EntityId = hitTestEntity(world: world, entity: e, x: x, y: y)
+      if isNone(this: hit) is false {
         ret hit
       }
     }
@@ -161,7 +161,7 @@ func hitTest(world: view UiWorld, x: view Float, y: view Float) ret Int {
 }
 
 # Append an `ActionEvent` to the input system's queue.
-func appendActionEvent(input: mod InputSystem, entity: view Int, actionId: own String) {
+func appendActionEvent(input: mod InputSystem, entity: view EntityId, actionId: own String) {
   let events: mod List(ActionEvent) => input.events
   let ev: ActionEvent = { entity: entity, actionId: actionId }
   events.add(value: ev)
@@ -199,24 +199,24 @@ func updateInputSystem(input: mod InputSystem, world: view UiWorld) {
 
   if pressed {
     input.pressedEntity = hitTest(world: world, x: mx, y: my)
-    log("[input] press at ({mx},{my}) -> pressedEntity={input.pressedEntity}")
+    log("[input] press at ({mx},{my}) -> pressedEntity={input.pressedEntity.value}")
   }
 
   if released {
-    let hit: Int = hitTest(world: world, x: mx, y: my)
-    log("[input] release at ({mx},{my}) -> hit={hit} pressed={input.pressedEntity}")
-    if hit is not inputNoEntity {
-      if hit is input.pressedEntity {
+    let hit: EntityId = hitTest(world: world, x: mx, y: my)
+    log("[input] release at ({mx},{my}) -> hit={hit.value} pressed={input.pressedEntity.value}")
+    if isNone(this: hit) is false {
+      if hit.value is input.pressedEntity.value {
         if componentHas(this: world.onClicks, entity: hit) {
           let oc: view OnClick => componentView(this: world.onClicks, entity: hit)
           let aid: String = oc.actionId
-          log("[input] fire {aid} on entity {hit}")
+          log("[input] fire {aid} on entity {hit.value}")
           appendActionEvent(input: input, entity: hit, actionId: oc.actionId)
         } else {
           log("[input] release matched press but entity has no OnClick (impossible?)")
         }
       } else {
-        log("[input] release hit {hit} != pressed {input.pressedEntity} - drop")
+        log("[input] release hit {hit.value} != pressed {input.pressedEntity.value} - drop")
       }
     } else {
       log("[input] release hit nothing - drop")

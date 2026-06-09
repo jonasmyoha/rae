@@ -291,12 +291,12 @@ func currentDebugFPS(debug: view DebugSystem) pub ret Float {
 # layout. They use `Offset` to position themselves in screen-logical
 # coordinates.
 
-func setOffset(world: mod UiWorld, entity: view Int, x: view Float, y: view Float) {
+func setOffset(world: mod UiWorld, entity: view EntityId, x: view Float, y: view Float) {
   let off: Offset = { delta: Vec2 { x: x, y: y } }
   componentSet(this: world.offsets, entity: entity, data: off)
 }
 
-func setFixedRect(world: mod UiWorld, entity: view Int, w: view Float, h: view Float) {
+func setFixedRect(world: mod UiWorld, entity: view EntityId, w: view Float, h: view Float) {
   let r: Rect = { x: 0.0, y: 0.0, w: w, h: h }
   componentSet(this: world.rects, entity: entity, data: r)
   let s: Size = {
@@ -306,7 +306,7 @@ func setFixedRect(world: mod UiWorld, entity: view Int, w: view Float, h: view F
   componentSet(this: world.sizes, entity: entity, data: s)
 }
 
-func setCircleShape(world: mod UiWorld, entity: view Int, fill: view RgbaColor) {
+func setCircleShape(world: mod UiWorld, entity: view EntityId, fill: view RgbaColor) {
   let sh: Shape = {
     kind: ShapeKind.Circle
     fill: fill
@@ -317,7 +317,7 @@ func setCircleShape(world: mod UiWorld, entity: view Int, fill: view RgbaColor) 
   componentSet(this: world.shapes, entity: entity, data: sh)
 }
 
-func setRectShape(world: mod UiWorld, entity: view Int, fill: view RgbaColor) {
+func setRectShape(world: mod UiWorld, entity: view EntityId, fill: view RgbaColor) {
   let sh: Shape = {
     kind: ShapeKind.Rect
     fill: fill
@@ -334,7 +334,7 @@ func setRectShape(world: mod UiWorld, entity: view Int, fill: view RgbaColor) {
 # sampled blur — pass a darkened-gray (e.g. rgb 110/110/110) to dim
 # the underlying scene without losing its colors, the way the iOS
 # vibrancy effect does.
-func setBackdropSprite(world: mod UiWorld, entity: view Int, key: own String, tint: view RgbaColor) pub {
+func setBackdropSprite(world: mod UiWorld, entity: view EntityId, key: own String, tint: view RgbaColor) pub {
   let sp: Sprite = {
     textureKey: key
     tint: tint
@@ -346,7 +346,7 @@ func setBackdropSprite(world: mod UiWorld, entity: view Int, key: own String, ti
   componentSet(this: world.sprites, entity: entity, data: sp)
 }
 
-func setRoundedShape(world: mod UiWorld, entity: view Int, fill: view RgbaColor, radius: view Float) {
+func setRoundedShape(world: mod UiWorld, entity: view EntityId, fill: view RgbaColor, radius: view Float) {
   let sh: Shape = {
     kind: ShapeKind.RoundedRect
     fill: fill
@@ -357,7 +357,7 @@ func setRoundedShape(world: mod UiWorld, entity: view Int, fill: view RgbaColor,
   componentSet(this: world.shapes, entity: entity, data: sh)
 }
 
-func setDebugText(world: mod UiWorld, entity: view Int, text: own String, styleId: own String) {
+func setDebugText(world: mod UiWorld, entity: view EntityId, text: own String, styleId: own String) {
   let t: Text = {
     text: text
     styleId: styleId
@@ -366,7 +366,7 @@ func setDebugText(world: mod UiWorld, entity: view Int, text: own String, styleI
   componentSet(this: world.texts, entity: entity, data: t)
 }
 
-func setOnClickAction(world: mod UiWorld, entity: view Int, actionId: own String) {
+func setOnClickAction(world: mod UiWorld, entity: view EntityId, actionId: own String) {
   let oc: OnClick = {
     actionId: actionId
     actionIdDouble: ""
@@ -376,7 +376,7 @@ func setOnClickAction(world: mod UiWorld, entity: view Int, actionId: own String
   componentSet(this: world.onClicks, entity: entity, data: oc)
 }
 
-func setStackLayout(world: mod UiWorld, entity: view Int) {
+func setStackLayout(world: mod UiWorld, entity: view EntityId) {
   let lay: Layout = {
     kind: LayoutType.Stack
     gap: 0.0
@@ -389,7 +389,7 @@ func setStackLayout(world: mod UiWorld, entity: view Int) {
   componentSet(this: world.layouts, entity: entity, data: lay)
 }
 
-func setVerticalLayout(world: mod UiWorld, entity: view Int, gap: view Float) {
+func setVerticalLayout(world: mod UiWorld, entity: view EntityId, gap: view Float) {
   let lay: Layout = {
     kind: LayoutType.Vertical
     gap: gap
@@ -402,7 +402,7 @@ func setVerticalLayout(world: mod UiWorld, entity: view Int, gap: view Float) {
   componentSet(this: world.layouts, entity: entity, data: lay)
 }
 
-func setHorizontalLayout(world: mod UiWorld, entity: view Int, gap: view Float, alignCross: AlignKind) {
+func setHorizontalLayout(world: mod UiWorld, entity: view EntityId, gap: view Float, alignCross: AlignKind) {
   let lay: Layout = {
     kind: LayoutType.Horizontal
     gap: gap
@@ -415,18 +415,18 @@ func setHorizontalLayout(world: mod UiWorld, entity: view Int, gap: view Float, 
   componentSet(this: world.layouts, entity: entity, data: lay)
 }
 
-func dbgSetPaddingAll(world: mod UiWorld, entity: view Int, n: view Float) {
+func dbgSetPaddingAll(world: mod UiWorld, entity: view EntityId, n: view Float) {
   # Prefixed with `dbg` to avoid name-collision with the same-named
   # helper users tend to write in their own world-builder modules.
   let pad: Padding = { insets: Insets { l: n, t: n, r: n, b: n } }
   componentSet(this: world.paddings, entity: entity, data: pad)
 }
 
-func attachKids(world: mod UiWorld, parent: view Int, kids: view List(Int)) {
-  let kidsCopy: List(Int) = createList(Int, initialCap: kids.length)
+func attachKids(world: mod UiWorld, parent: view EntityId, kids: view List(EntityId)) {
+  let kidsCopy: List(EntityId) = createList(EntityId, initialCap: kids.length)
   let i: Int = 0
   loop i < kids.length {
-    let k: Int = kids.get(index: i)
+    let k: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
     kidsCopy.add(value: k)
     let pl: Parent = { parent: parent }
     componentSet(this: world.parents, entity: k, data: pl)
@@ -439,8 +439,8 @@ func attachKids(world: mod UiWorld, parent: view Int, kids: view List(Int)) {
 # Build the floating debug button: a parentless root with a Stack
 # layout containing a "D" text glyph. Sized `buttonSize` × `buttonSize`,
 # positioned at (buttonX, buttonY) via Offset.
-func buildDebugButton(world: mod UiWorld, debug: view DebugSystem) ret Int {
-  let btn: Int = createEntity(world: world)
+func buildDebugButton(world: mod UiWorld, debug: view DebugSystem) ret EntityId {
+  let btn: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: btn, w: debug.buttonSize, h: debug.buttonSize)
   setOffset(world: world, entity: btn, x: debug.buttonX, y: debug.buttonY)
   setCircleShape(world: world, entity: btn, fill: debugAmberColor())
@@ -448,7 +448,7 @@ func buildDebugButton(world: mod UiWorld, debug: view DebugSystem) ret Int {
   let actionId: String = debugActionToggleMenu
   setOnClickAction(world: world, entity: btn, actionId: actionId)
 
-  let label: Int = createEntity(world: world)
+  let label: EntityId = createEntity(world: world)
   let labelW: Float = debug.buttonSize
   let labelH: Float = debug.buttonSize
   setFixedRect(world: world, entity: label, w: labelW, h: labelH)
@@ -456,7 +456,7 @@ func buildDebugButton(world: mod UiWorld, debug: view DebugSystem) ret Int {
   let styleId: String = "debugButton"
   setDebugText(world: world, entity: label, text: dStr, styleId: styleId)
 
-  let kids: List(Int) = createList(Int, initialCap: 1)
+  let kids: List(EntityId) = createList(EntityId, initialCap: 1)
   kids.add(value: label)
   attachKids(world: world, parent: btn, kids: kids)
   ret btn
@@ -471,8 +471,8 @@ func buildSwitchRow(
   actionId: own String
   on: view Bool
   width: view Float
-) ret Int {
-  let row: Int = createEntity(world: world)
+) ret EntityId {
+  let row: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: row, w: width, h: 56.0)
   let smallGap: Float = 12.0
   setHorizontalLayout(world: world, entity: row, gap: smallGap, alignCross: AlignKind.Center)
@@ -482,7 +482,7 @@ func buildSwitchRow(
   # OnClick, so the label still routes its tap through the row.
   setOnClickAction(world: world, entity: row, actionId: actionId)
 
-  let label: Int = createEntity(world: world)
+  let label: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: label, w: width - 80.0, h: 24.0)
   let labelStyle: String = "debugMenuLabel"
   setDebugText(world: world, entity: label, text: labelText, styleId: labelStyle)
@@ -490,7 +490,7 @@ func buildSwitchRow(
   # iOS switch: an outer rounded pill (color depends on `on`) with a
   # white circle knob nudged left/right. Visual only — the row above
   # owns the OnClick.
-  let pill: Int = createEntity(world: world)
+  let pill: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: pill, w: 56.0, h: 32.0)
   let pillFill: RgbaColor = debugSwitchOffColor()
   if on {
@@ -499,7 +499,7 @@ func buildSwitchRow(
   setRoundedShape(world: world, entity: pill, fill: pillFill, radius: 16.0)
   setStackLayout(world: world, entity: pill)
 
-  let knob: Int = createEntity(world: world)
+  let knob: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: knob, w: 26.0, h: 26.0)
   setCircleShape(world: world, entity: knob, fill: debugSwitchKnobColor())
   # Nudge the knob left (off) or right (on). The pill is 56 wide and
@@ -512,11 +512,11 @@ func buildSwitchRow(
   }
   setOffset(world: world, entity: knob, x: knobOff, y: 0.0)
 
-  let pillKids: List(Int) = createList(Int, initialCap: 1)
+  let pillKids: List(EntityId) = createList(EntityId, initialCap: 1)
   pillKids.add(value: knob)
   attachKids(world: world, parent: pill, kids: pillKids)
 
-  let rowKids: List(Int) = createList(Int, initialCap: 2)
+  let rowKids: List(EntityId) = createList(EntityId, initialCap: 2)
   rowKids.add(value: label)
   rowKids.add(value: pill)
   attachKids(world: world, parent: row, kids: rowKids)
@@ -526,7 +526,7 @@ func buildSwitchRow(
 # Build the menu overlay: a full-screen translucent backdrop that
 # intercepts clicks (tapping outside the menu closes it), with a
 # centred panel of switch rows on top.
-func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret Int {
+func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret EntityId {
   # Backdrop: covers the entire screen (sized to the host's reported
   # screen extents — see `setDebugScreenSize`). Has OnClick so taps
   # anywhere outside the centred panel close the menu.
@@ -539,7 +539,7 @@ func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret Int 
   #   * Solid translucent (default): a single dark rect. Used when
   #     the host has not (yet) registered a blur capture, or when
   #     the host opts out of the screen-capture cost.
-  let backdrop: Int = createEntity(world: world)
+  let backdrop: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: backdrop, w: debug.screenW, h: debug.screenH)
   setOffset(world: world, entity: backdrop, x: 0.0, y: 0.0)
   if debug.hasBlur {
@@ -567,7 +567,7 @@ func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret Int 
   # that the panel feels like a settings sheet, not a tooltip.
   let panelW: Float = debug.screenW * 0.86
   let panelH: Float = debug.screenH * 0.72
-  let panel: Int = createEntity(world: world)
+  let panel: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: panel, w: panelW, h: panelH)
   # Generous corner radius — matches the modern iOS / macOS look
   # where dialog corners are bold and continuous rather than the
@@ -579,7 +579,7 @@ func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret Int 
   let themeLabel: String = "Dark theme"
   let themeAction: String = debugActionToggleTheme
   let themeOn: Bool = currentTheme().mode is ThemeMode.Dark
-  let themeRow: Int = buildSwitchRow(
+  let themeRow: EntityId = buildSwitchRow(
     world: world
     labelText: themeLabel
     actionId: themeAction
@@ -589,7 +589,7 @@ func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret Int 
 
   let labelsLabel: String = "FPS / mem labels"
   let labelsAction: String = debugActionToggleLabels
-  let labelsRow: Int = buildSwitchRow(
+  let labelsRow: EntityId = buildSwitchRow(
     world: world
     labelText: labelsLabel
     actionId: labelsAction
@@ -599,7 +599,7 @@ func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret Int 
 
   let outlinesLabel: String = "Input outlines"
   let outlinesAction: String = debugActionToggleInputOutlines
-  let outlinesRow: Int = buildSwitchRow(
+  let outlinesRow: EntityId = buildSwitchRow(
     world: world
     labelText: outlinesLabel
     actionId: outlinesAction
@@ -607,13 +607,13 @@ func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret Int 
     width: panelW - 40.0
   )
 
-  let rows: List(Int) = createList(Int, initialCap: 3)
+  let rows: List(EntityId) = createList(EntityId, initialCap: 3)
   rows.add(value: themeRow)
   rows.add(value: labelsRow)
   rows.add(value: outlinesRow)
   attachKids(world: world, parent: panel, kids: rows)
 
-  let backdropKids: List(Int) = createList(Int, initialCap: 1)
+  let backdropKids: List(EntityId) = createList(EntityId, initialCap: 1)
   backdropKids.add(value: panel)
   attachKids(world: world, parent: backdrop, kids: backdropKids)
   ret backdrop
@@ -640,7 +640,7 @@ func applyDebugAnchor(world: view UiWorld, debug: mod DebugSystem) ret Bool {
   # but apps should keep it to one.
   let i: Int = 0
   loop i < n {
-    let e: Int = componentEntityAt(this: anchors, i: i)
+    let e: EntityId = componentEntityAt(this: anchors, i: i)
     if componentHas(this: world.rects, entity: e) {
       let r: Rect = componentGet(this: world.rects, entity: e)
       debug.buttonX = r.x
@@ -673,9 +673,9 @@ func addDebugLayer(world: mod UiWorld, debug: mod DebugSystem) pub {
   # Anchor lookup is best-effort: it picks up per-screen overrides
   # if a scene declared one, but the button renders either way.
   let hasAnchor: Bool = applyDebugAnchor(world: world, debug: debug)
-  let btn: Int = buildDebugButton(world: world, debug: debug)
+  let btn: EntityId = buildDebugButton(world: world, debug: debug)
   if debug.menuOpen {
-    let menu: Int = buildDebugMenuOverlay(world: world, debug: debug)
+    let menu: EntityId = buildDebugMenuOverlay(world: world, debug: debug)
   }
 }
 
