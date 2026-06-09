@@ -112,7 +112,8 @@ func applyPlaybackToWorld(world: mod UiWorld, state: view PlaybackState) pub {
   let playIconEntityOpt: opt Int = world.nodeIds.get(k: playIconKey)
   if playIconEntityOpt is none {
   } else {
-    let playIconEntity: Int = playIconEntityOpt
+    let playIconRaw: Int = playIconEntityOpt
+    let playIconEntity: EntityId = entityId(v: playIconRaw)
     if componentHas(this: world.sprites, entity: playIconEntity) {
       let sp: mod Sprite => componentMod(this: world.sprites, entity: playIconEntity)
       sp.textureKey = iconKey
@@ -124,7 +125,8 @@ func applyPlaybackToWorld(world: mod UiWorld, state: view PlaybackState) pub {
   let miniIconEntityOpt: opt Int = world.nodeIds.get(k: miniIconKey)
   if miniIconEntityOpt is none {
   } else {
-    let miniIconEntity: Int = miniIconEntityOpt
+    let miniIconRaw: Int = miniIconEntityOpt
+    let miniIconEntity: EntityId = entityId(v: miniIconRaw)
     if componentHas(this: world.sprites, entity: miniIconEntity) {
       let sp: mod Sprite => componentMod(this: world.sprites, entity: miniIconEntity)
       sp.textureKey = iconKey
@@ -146,8 +148,10 @@ func applyPlaybackToWorld(world: mod UiWorld, state: view PlaybackState) pub {
   } else {
     if fillEntityOpt is none {
     } else {
-      let trackEntity: Int = trackEntityOpt
-      let fillEntity: Int = fillEntityOpt
+      let trackRaw: Int = trackEntityOpt
+      let fillRaw: Int = fillEntityOpt
+      let trackEntity: EntityId = entityId(v: trackRaw)
+      let fillEntity: EntityId = entityId(v: fillRaw)
       let trackW: Float = 0.0
       if componentHas(this: world.computedRects, entity: trackEntity) {
         let tcr: ComputedRect = componentGet(this: world.computedRects, entity: trackEntity)

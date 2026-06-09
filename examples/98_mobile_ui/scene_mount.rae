@@ -13,7 +13,7 @@ import ui/scene_instance
 
 # Decorate `entity` as a glaring red error block with a label. Used
 # when scene mounting fails. Caller has already set the entity's Rect/Size.
-func paintErrorBlock(world: mod UiWorld, entity: view Int, label: view String) pub {
+func paintErrorBlock(world: mod UiWorld, entity: view EntityId, label: view String) pub {
   let red: RgbaColor = { r: 220, g: 32, b: 48, a: 255 }
   let shape: Shape = {
     kind: ShapeKind.RoundedRect
@@ -24,13 +24,13 @@ func paintErrorBlock(world: mod UiWorld, entity: view Int, label: view String) p
   }
   componentSet(this: world.shapes, entity: entity, data: shape)
 
-  let txt: Int = createEntity(world: world)
+  let txt: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: txt, w: 480.0, h: 32.0)
   let prefix: String = "Scene mount failed: "
   let msg: String = prefix.concat(other: label)
   setText(world: world, entity: txt, text: msg, styleId: "primary")
 
-  let kids: List(Int) = createList(Int, initialCap: 1)
+  let kids: List(EntityId) = createList(EntityId, initialCap: 1)
   kids.add(value: txt)
   attachChildren(world: world, parent: entity, kids: kids)
 }
@@ -40,20 +40,20 @@ func paintErrorBlock(world: mod UiWorld, entity: view Int, label: view String) p
 # a non-negative id).
 func mountOrError(
   world: mod UiWorld
-  mountEntity: view Int
+  mountEntity: view EntityId
   scene: view Scene
   sceneLabel: view String
   overrides: view List(SceneOverride)
-) pub ret Int {
-  let result: Int = mountSceneInstance(
+) pub ret EntityId {
+  let result: EntityId = mountSceneInstance(
     world: world
     mountEntity: mountEntity
     scene: scene
     overrides: overrides
   )
-  if result < 0 {
+  if isNone(this: result) {
     let label: String = sceneLabel
-    log("[scene-error] mount failed for {label} (entity {mountEntity}, scene.ok={scene.ok}, scene.errorMsg={scene.errorMsg})")
+    log("[scene-error] mount failed for {label} (entity {mountEntity.value}, scene.ok={scene.ok}, scene.errorMsg={scene.errorMsg})")
     paintErrorBlock(world: world, entity: mountEntity, label: label)
     ret mountEntity
   }
@@ -69,11 +69,11 @@ func buildSimpleSceneInstance(
   w: view Float
   h: view Float
   label: view String
-) pub ret Int {
-  let mount: Int = createEntity(world: world)
+) pub ret EntityId {
+  let mount: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: mount, w: w, h: h)
   let noOverrides: List(SceneOverride) = emptyOverrides()
-  let mounted: Int = mountOrError(
+  let mounted: EntityId = mountOrError(
     world: world
     mountEntity: mount
     scene: scene
