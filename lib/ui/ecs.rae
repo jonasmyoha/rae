@@ -70,34 +70,35 @@ func isNone(this: view EntityId) pub ret Bool {
 }
 
 # Non-generic helpers for the entity-id list. The C backend mis-mangles
-# generic method calls (`add`, `remove`) on a `List(Int)` field when
-# they appear *inside* a function generic over T — it substitutes T
-# into the inner specialisation. Routing through a non-generic helper
-# stops the substitution.
-func appendEntityList(lst: mod List(Int), value: view Int) {
+# generic method calls (`add`, `remove`) on a `List(EntityId)` field
+# when they appear *inside* a function generic over T — it substitutes
+# T into the inner specialisation. Routing through a non-generic
+# helper stops the substitution.
+func appendEntityList(lst: mod List(EntityId), value: view EntityId) {
   lst.add(value: value)
 }
 
-func popLastInt(lst: mod List(Int)) {
+func popLastEntity(lst: mod List(EntityId)) {
   if lst.length is 0 {
     ret
   }
   lst.remove(index: lst.length - 1)
 }
 
-# Drop a List(Int) from inside a function generic over T. Calling
+# Drop a List(EntityId) from inside a function generic over T. Calling
 # `drop(lst)` directly there mis-mangles to `drop(T)(List(T))` (same
 # class of bug as `add` / `get` / `remove`). Routing through this
 # non-generic helper stops the substitution, so the call resolves to
-# `drop(Int)(List(Int))` — which is just `buf_free` on the Int buffer.
-func dropEntityList(lst: mod List(Int)) {
+# `drop(EntityId)(List(EntityId))` — which is just `buf_free` on the
+# EntityId buffer (no per-element heap to drop, EntityId is value-type).
+func dropEntityList(lst: mod List(EntityId)) {
   drop(lst)
 }
 
 # ----- ComponentTable -----
 
 type ComponentTable(T) {
-  denseEntities: List(Int)
+  denseEntities: List(EntityId)
   denseData: List(T)
 
   # Monotonic counter that bumps once per mutation. Consumer systems
@@ -113,7 +114,7 @@ type ComponentTable(T) {
 
 func createComponentTable(T)() ret ComponentTable(T) {
   ret ComponentTable(T) {
-    denseEntities: createList(Int, initialCap: 256)
+    denseEntities: createList(EntityId, initialCap: 256)
     denseData: createList(T, initialCap: 256)
     generation: 0
   }
@@ -135,17 +136,18 @@ func drop(T)(this: mod ComponentTable(T)) {
 
 # Returns the dense index of `entity` in this table, or -1 if absent.
 #
-# `denseEntities` is `List(Int)`, but inside this generic function the
-# C backend currently mis-mangles `denseEntities.get(...)` as
-# `rae_get_<T>_<List<T>>_int64_t_` substituted with the outer T (so
-# `List(Int).get` becomes `List(Rect).get` when T=Rect). Bypass via
-# `rae_ext_rae_buf_get` which doesn't go through the generic dispatch.
-func componentIndexOf(T)(this: view ComponentTable(T), entity: view Int) ret Int {
+# `denseEntities` is `List(EntityId)`, but inside this generic
+# function the C backend currently mis-mangles `denseEntities.get(...)`
+# as `rae_get_<T>_<List<T>>_EntityId_` substituted with the outer T
+# (so `List(EntityId).get` becomes `List(Rect).get` when T=Rect).
+# Bypass via `rae_ext_rae_buf_get` which doesn't go through the
+# generic dispatch.
+func componentIndexOf(T)(this: view ComponentTable(T), entity: view EntityId) ret Int {
   let n: Int = this.denseEntities.length
   let i: Int = 0
   loop i < n {
-    let e: Int = rae_ext_rae_buf_get(buf: this.denseEntities.data, index: i)
-    if e is entity {
+    let e: EntityId = rae_ext_rae_buf_get(buf: this.denseEntities.data, index: i)
+    if e.value is entity.value {
       ret i
     }
     i = i + 1
@@ -153,7 +155,7 @@ func componentIndexOf(T)(this: view ComponentTable(T), entity: view Int) ret Int
   ret -1
 }
 
-func componentHas(T)(this: view ComponentTable(T), entity: view Int) ret Bool {
+func componentHas(T)(this: view ComponentTable(T), entity: view EntityId) ret Bool {
   ret componentIndexOf(this, entity: entity) >= 0
 }
 
@@ -168,7 +170,7 @@ func componentHas(T)(this: view ComponentTable(T), entity: view Int) ret Bool {
 #     let r: Rect = componentGet(table, entity: e)
 #     ...
 #   }
-func componentGet(T)(this: view ComponentTable(T), entity: view Int) ret T {
+func componentGet(T)(this: view ComponentTable(T), entity: view EntityId) ret T {
   let idx: Int = componentIndexOf(this, entity: entity)
   let safeIdx: Int = idx
   if safeIdx < 0 {
@@ -184,7 +186,7 @@ func componentGet(T)(this: view ComponentTable(T), entity: view Int) ret T {
 # struct memcpy would alias the table's heap). The `view T` return
 # makes Rae treat the binding as a borrow: no auto-drop, no
 # ownership claim, just a window into the world's memory.
-func componentView(T)(this: view ComponentTable(T), entity: view Int) ret view T {
+func componentView(T)(this: view ComponentTable(T), entity: view EntityId) ret view T {
   let idx: Int = componentIndexOf(this, entity: entity)
   let safeIdx: Int = idx
   if safeIdx < 0 {
@@ -195,7 +197,7 @@ func componentView(T)(this: view ComponentTable(T), entity: view Int) ret view T
 
 # Borrow a mutable reference into the table's storage. Mutating
 # through the returned ref writes directly to the component slot.
-func componentMod(T)(this: mod ComponentTable(T), entity: view Int) ret mod T {
+func componentMod(T)(this: mod ComponentTable(T), entity: view EntityId) ret mod T {
   let idx: Int = componentIndexOf(this, entity: entity)
   let safeIdx: Int = idx
   if safeIdx < 0 {
@@ -211,16 +213,16 @@ func componentMod(T)(this: mod ComponentTable(T), entity: view Int) ret mod T {
 
 # Add or replace the component for `entity`. Internally aliases the
 # two inner lists so the mutation propagates on both targets.
-func componentSet(T)(this: mod ComponentTable(T), entity: view Int, data: own T) {
-  let entities: mod List(Int) => this.denseEntities
+func componentSet(T)(this: mod ComponentTable(T), entity: view EntityId, data: own T) {
+  let entities: mod List(EntityId) => this.denseEntities
   let datas: mod List(T) => this.denseData
   let n: Int = entities.length
   let i: Int = 0
   loop i < n {
     # `entities.get(...)` would mis-mangle inside this generic — see
     # componentIndexOf comment.
-    let e: Int = rae_ext_rae_buf_get(buf: entities.data, index: i)
-    if e is entity {
+    let e: EntityId = rae_ext_rae_buf_get(buf: entities.data, index: i)
+    if e.value is entity.value {
       # Drop the existing slot before overwriting. Without this the
       # old component's heap-owning fields (Strings, Lists) leak
       # every time a scene override or live mutation replaces an
@@ -242,8 +244,8 @@ func componentSet(T)(this: mod ComponentTable(T), entity: view Int, data: own T)
 
 # Swap-remove the component for `entity`. Order in the table is not
 # preserved (no callers depend on it).
-func componentRemove(T)(this: mod ComponentTable(T), entity: view Int) {
-  let entities: mod List(Int) => this.denseEntities
+func componentRemove(T)(this: mod ComponentTable(T), entity: view EntityId) {
+  let entities: mod List(EntityId) => this.denseEntities
   let datas: mod List(T) => this.denseData
   let idx: Int = componentIndexOf(T, this: this, entity: entity)
   if idx < 0 {
@@ -253,14 +255,14 @@ func componentRemove(T)(this: mod ComponentTable(T), entity: view Int) {
   }
   let last: Int = entities.length - 1
   if idx is not last {
-    let lastEntity: Int = rae_ext_rae_buf_get(buf: entities.data, index: last)
+    let lastEntity: EntityId = rae_ext_rae_buf_get(buf: entities.data, index: last)
     rae_ext_rae_buf_set(buf: entities.data, index: idx, value: lastEntity)
     let lastData: T = rae_ext_rae_buf_get(buf: datas.data, index: last)
     rae_ext_rae_buf_set(buf: datas.data, index: idx, value: lastData)
   }
-  # Shrink length by 1. Use the non-generic helper for the int-list
+  # Shrink length by 1. Use the non-generic helper for the entity-list
   # because `entities.remove(...)` would mis-mangle in this context.
-  popLastInt(lst: entities)
+  popLastEntity(lst: entities)
   datas.remove(index: last)
   this.generation = this.generation + 1
 }
@@ -277,8 +279,8 @@ func componentTableGeneration(T)(this: view ComponentTable(T)) pub ret Int {
 }
 
 # Iteration helper: returns the entity id at dense index `i`.
-func componentEntityAt(T)(this: view ComponentTable(T), i: view Int) ret Int {
-  let e: Int = rae_ext_rae_buf_get(buf: this.denseEntities.data, index: i)
+func componentEntityAt(T)(this: view ComponentTable(T), i: view Int) ret EntityId {
+  let e: EntityId = rae_ext_rae_buf_get(buf: this.denseEntities.data, index: i)
   ret e
 }
 
@@ -297,10 +299,14 @@ func componentDataAt(T)(this: view ComponentTable(T), i: view Int) ret T {
 # kind costs one field here, one default-construct call, and one
 # dispatch arm in registry.rae.
 type UiWorld {
+  # Monotonic counter for entity-id allocation. Stays bare `Int`
+  # because it's a counter, not a handle — `createEntity` wraps the
+  # current value into an EntityId on the way out.
   nextEntityId: Int
-  alive: List(Int)
+  alive: List(EntityId)
 
-  # NodeId.id -> entity. Used for SceneInstance overrides.
+  # NodeId.id -> entity (stored as `Int` since Rae's `opt T` for struct
+  # T currently miscompiles on unwrap; callers wrap with `entityId()`).
   nodeIds: StringMap(Int)
 
   # ----- authored geometry/layout -----
@@ -372,7 +378,7 @@ type UiWorld {
 func createUiWorld() ret UiWorld {
   ret UiWorld {
     nextEntityId: 1
-    alive: createList(Int, initialCap: 256)
+    alive: createList(EntityId, initialCap: 256)
     nodeIds: createStringMap(Int, initialCap: 128)
 
     rects: createComponentTable(Rect)
@@ -436,20 +442,21 @@ func createUiWorld() ret UiWorld {
 }
 
 # Allocate a new entity id and mark it alive.
-func createEntity(world: mod UiWorld) ret Int {
+func createEntity(world: mod UiWorld) ret EntityId {
   let id: Int = world.nextEntityId
   world.nextEntityId = id + 1
-  let alive: mod List(Int) => world.alive
-  alive.add(value: id)
-  ret id
+  let e: EntityId = { value: id }
+  let alive: mod List(EntityId) => world.alive
+  alive.add(value: e)
+  ret e
 }
 
-func isAlive(world: view UiWorld, entity: view Int) ret Bool {
+func isAlive(world: view UiWorld, entity: view EntityId) ret Bool {
   let n: Int = world.alive.length
   let i: Int = 0
   loop i < n {
-    let e: Int = world.alive.get(index: i)
-    if e is entity {
+    let e: EntityId = rae_ext_rae_buf_get(buf: world.alive.data, index: i)
+    if e.value is entity.value {
       ret true
     }
     i = i + 1

@@ -486,7 +486,7 @@ func main() {
     # cursor over the same target stays at 0 fps. Persists across
     # world rebuilds (entity ids are stable while the screen layout
     # is) so the first frame after a rebuild doesn't false-trigger.
-    let lastHoveredEntity: Int = -1
+    let lastHoveredEntity: EntityId = noEntity()
     # Mouse-button bitfield (bit 0 left, bit 1 right, bit 2 middle)
     # from the previous render-gate check. Used to trigger a single
     # re-render whenever any button transitions, so the debug
@@ -580,7 +580,7 @@ func main() {
       # -1 sentinels (so the first dirty-check always trips dirty too).
       let renderCache: RenderCache = createRenderCache()
       let forceRender: Bool = true
-      let lastPressed: Int = -1
+      let lastPressed: EntityId = noEntity()
       # Initial playback overlay: set the progress-fill width to
       # match the current `elapsedSec / durationSec` so the first
       # frame of the rebuilt world doesn't flash an empty bar before
@@ -1153,7 +1153,7 @@ func main() {
             }
           }
           if active is false {
-            if input.pressedEntity is not lastPressed {
+            if input.pressedEntity.value is not lastPressed.value {
               active = true
             }
           }
@@ -1197,7 +1197,7 @@ func main() {
           # `currentHovered` when the toggle is on so the per-frame
           # comparison below is meaningful; the hitTest walk is cheap
           # (linear over OnClick entities).
-          let currentHovered: Int = -1
+          let currentHovered: EntityId = noEntity()
           let currentMouseBtns: Int = 0
           if debug.showInputOutlines {
             let outlineMx: Float = getMouseX().toFloat()
@@ -1216,7 +1216,7 @@ func main() {
             }
           }
           if active is false {
-            if currentHovered is not lastHoveredEntity {
+            if currentHovered.value is not lastHoveredEntity.value {
               active = true
             }
           }
@@ -1235,7 +1235,7 @@ func main() {
           # `active=true` but the UI is frozen, the bug is downstream
           # in renderSystem / endDrawing.
           if loopDebugEnabled {
-            log("[loop {loopDebugFrame}] input.events={input.events.length} pressed={input.pressedEntity} animating={animating} active={active}")
+            log("[loop {loopDebugFrame}] input.events={input.events.length} pressed={input.pressedEntity.value} animating={animating} active={active}")
           }
 
           # Event-driven render gate. With wait-events, the loop only
@@ -1324,7 +1324,7 @@ func main() {
             # Entity ids on the new screen are unrelated to the
             # outgoing one; drop any held-press id so the next
             # screen's release doesn't accidentally match a stale id.
-            input.pressedEntity = -1
+            input.pressedEntity = noEntity()
             switching = true
           } else {
             # No screen change requested — but check the watched scene

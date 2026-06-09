@@ -227,12 +227,12 @@ func isPlacementComponent(name: view String) ret Bool {
   ret false
 }
 
-func appendIntListSI(lst: mod List(Int), value: view Int) {
+func appendEntityListSI(lst: mod List(EntityId), value: view EntityId) {
   lst.add(value: value)
 }
 
 # Mount `scene` under `mountEntity`. Returns `mountEntity` on success,
-# or -1 if the scene wasn't ok.
+# or noEntity() if the scene wasn't ok.
 #
 # Behaviour:
 # - The scene's root node's components (excluding placement) are
@@ -246,32 +246,32 @@ func appendIntListSI(lst: mod List(Int), value: view Int) {
 # - `overrides` is applied last, after the whole subtree is built.
 func mountSceneInstance(
   world: mod UiWorld
-  mountEntity: view Int
+  mountEntity: view EntityId
   scene: view Scene
   overrides: view List(SceneOverride)
-) ret Int {
+) ret EntityId {
   if scene.ok is false {
-    ret -1
+    ret noEntity()
   }
   let nodeCount: Int = scene.nodes.length
   let rootIdx: Int = sceneNodeIndex(this: scene, nodeId: scene.rootNodeId)
   if rootIdx < 0 {
-    ret -1
+    ret noEntity()
   }
 
   # Pass 1: allocate entities. The scene's root maps to `mountEntity`;
   # every other node gets a fresh entity.
-  let entitiesByNodeIndex: List(Int) = createList(Int, initialCap: nodeCount)
+  let entitiesByNodeIndex: List(EntityId) = createList(EntityId, initialCap: nodeCount)
   let nodeIdsMap: mod StringMap(Int) => world.nodeIds
   let i: Int = 0
   loop i < nodeCount {
     let node: view SceneNode => sceneNodeAt(this: scene, idx: i)
-    let entity: Int = mountEntity
+    let entity: EntityId = mountEntity
     if i is not rootIdx {
       entity = createEntity(world: world)
     }
-    appendIntListSI(lst: entitiesByNodeIndex, value: entity)
-    nodeIdsMap.set(k: node.nodeId, value: entity)
+    appendEntityListSI(lst: entitiesByNodeIndex, value: entity)
+    nodeIdsMap.set(k: node.nodeId, value: entity.value)
     i = i + 1
   }
 
@@ -282,7 +282,7 @@ func mountSceneInstance(
   let j: Int = 0
   loop j < nodeCount {
     let node: view SceneNode => sceneNodeAt(this: scene, idx: j)
-    let entity: Int = entitiesByNodeIndex.get(index: j)
+    let entity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: j)
     let isRoot: Bool = j is rootIdx
 
     let bag: JsonValue = jsonValueAt(doc: docView, idx: node.componentsValueIdx)
@@ -319,17 +319,17 @@ func mountSceneInstance(
   let p: Int = 0
   loop p < nodeCount {
     let node: view SceneNode => sceneNodeAt(this: scene, idx: p)
-    let parentEntity: Int = entitiesByNodeIndex.get(index: p)
+    let parentEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: p)
     let kn: Int = node.childrenIds.length
     if kn > 0 {
-      let kids: List(Int) = createList(Int, initialCap: kn)
+      let kids: List(EntityId) = createList(EntityId, initialCap: kn)
       let q: Int = 0
       loop q < kn {
         let childId: String = node.childrenIds.get(index: q)
         let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
         if childIdx >= 0 {
-          let childEntity: Int = entitiesByNodeIndex.get(index: childIdx)
-          appendIntListSI(lst: kids, value: childEntity)
+          let childEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: childIdx)
+          appendEntityListSI(lst: kids, value: childEntity)
           let pl: Parent = { parent: parentEntity }
           componentSet(this: world.parents, entity: childEntity, data: pl)
         }
@@ -351,7 +351,7 @@ func mountSceneInstance(
     let o: SceneOverride = rae_ext_rae_buf_get(buf: overrides.data, index: oi)
     let nodeIdx: Int = sceneNodeIndex(this: scene, nodeId: o.nodeId)
     if nodeIdx >= 0 {
-      let targetEntity: Int = entitiesByNodeIndex.get(index: nodeIdx)
+      let targetEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: nodeIdx)
       applyOverride(world: world, entity: targetEntity, override: o)
     }
     oi = oi + 1
@@ -401,7 +401,7 @@ func parseRgbaString(s: view String) ret RgbaColor {
   ret RgbaColor { r: r, g: g, b: b, a: a }
 }
 
-func applyOverride(world: mod UiWorld, entity: view Int, override: view SceneOverride) {
+func applyOverride(world: mod UiWorld, entity: view EntityId, override: view SceneOverride) {
   let textKey: String = "Text"
   let spriteKey: String = "Sprite"
   let activeKey: String = "Active"

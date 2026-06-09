@@ -13,29 +13,29 @@ import string
 import core
 import json
 
-# Minimal helper: append an Int to a List(Int) via a non-generic
+# Minimal helper: append an EntityId to a List(EntityId) via a non-generic
 # function. Same workaround as the ones in ecs.rae — needed when the
 # caller is itself inside a generic body, but kept available here
 # anyway for symmetry.
-func appendIntListSL(lst: mod List(Int), value: view Int) {
+func appendEntityListSL(lst: mod List(EntityId), value: view EntityId) {
   lst.add(value: value)
 }
 
-func loadScene(world: mod UiWorld, scene: view Scene) ret Int {
+func loadScene(world: mod UiWorld, scene: view Scene) ret EntityId {
   if scene.ok is false {
-    ret -1
+    ret noEntity()
   }
 
   # ---------- pass 1: allocate entities, populate nodeIds map ----------
   let nodeCount: Int = scene.nodes.length
-  let entitiesByNodeIndex: List(Int) = createList(Int, initialCap: nodeCount)
+  let entitiesByNodeIndex: List(EntityId) = createList(EntityId, initialCap: nodeCount)
   let nodeIdsMap: mod StringMap(Int) => world.nodeIds
   let i: Int = 0
   loop i < nodeCount {
     let node: view SceneNode => sceneNodeAt(this: scene, idx: i)
-    let entity: Int = createEntity(world: world)
-    appendIntListSL(lst: entitiesByNodeIndex, value: entity)
-    nodeIdsMap.set(k: node.nodeId, value: entity)
+    let entity: EntityId = createEntity(world: world)
+    appendEntityListSL(lst: entitiesByNodeIndex, value: entity)
+    nodeIdsMap.set(k: node.nodeId, value: entity.value)
     i = i + 1
   }
 
@@ -44,7 +44,7 @@ func loadScene(world: mod UiWorld, scene: view Scene) ret Int {
   let j: Int = 0
   loop j < nodeCount {
     let node: view SceneNode => sceneNodeAt(this: scene, idx: j)
-    let entity: Int = entitiesByNodeIndex.get(index: j)
+    let entity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: j)
 
     # Always tag the entity with NodeId + Name (label = nodeId by default)
     # so the dump and overrides can identify it without reading the
@@ -83,17 +83,17 @@ func loadScene(world: mod UiWorld, scene: view Scene) ret Int {
   let p: Int = 0
   loop p < nodeCount {
     let node: view SceneNode => sceneNodeAt(this: scene, idx: p)
-    let parentEntity: Int = entitiesByNodeIndex.get(index: p)
+    let parentEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: p)
     let kn: Int = node.childrenIds.length
     if kn > 0 {
-      let kids: List(Int) = createList(Int, initialCap: kn)
+      let kids: List(EntityId) = createList(EntityId, initialCap: kn)
       let q: Int = 0
       loop q < kn {
         let childId: String = node.childrenIds.get(index: q)
         let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
         if childIdx >= 0 {
-          let childEntity: Int = entitiesByNodeIndex.get(index: childIdx)
-          appendIntListSL(lst: kids, value: childEntity)
+          let childEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: childIdx)
+          appendEntityListSL(lst: kids, value: childEntity)
           let pl: Parent = { parent: parentEntity }
           componentSet(this: world.parents, entity: childEntity, data: pl)
         }
@@ -108,9 +108,9 @@ func loadScene(world: mod UiWorld, scene: view Scene) ret Int {
   # Root entity = the entity allocated for `scene.rootNodeId`.
   let rootIdx: Int = sceneNodeIndex(this: scene, nodeId: scene.rootNodeId)
   if rootIdx < 0 {
-    ret -1
+    ret noEntity()
   }
-  let rootEntity: Int = entitiesByNodeIndex.get(index: rootIdx)
+  let rootEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: rootIdx)
   ret rootEntity
 }
 
@@ -130,14 +130,15 @@ func dumpScene(world: view UiWorld, scene: view Scene) {
     if entityOpt is none {
       log("  [{node.nodeId}] (not in world.nodeIds — skipped)")
     } else {
-      let entity: Int = entityOpt
+      let entityRaw: Int = entityOpt
+      let entity: EntityId = entityId(v: entityRaw)
       let parentStr: String = "(root)"
       if componentHas(this: world.parents, entity: entity) {
         let pl: Parent = componentGet(this: world.parents, entity: entity)
-        parentStr = "parent=ent{pl.parent}"
+        parentStr = "parent=ent{pl.parent.value}"
       }
       let comps: String = componentNamesFor(world: world, entity: entity)
-      log("  [{node.nodeId}] ent={entity} {parentStr} comps=[{comps}]")
+      log("  [{node.nodeId}] ent={entity.value} {parentStr} comps=[{comps}]")
     }
     i = i + 1
   }
@@ -146,7 +147,7 @@ func dumpScene(world: view UiWorld, scene: view Scene) {
 # Returns a comma-separated list of authored component names attached
 # to `entity`. Order matches `registeredComponentNames()` for stable
 # diagnostic output.
-func componentNamesFor(world: view UiWorld, entity: view Int) ret String {
+func componentNamesFor(world: view UiWorld, entity: view EntityId) ret String {
   let parts: List(String) = createList(String, initialCap: 8)
   if componentHas(this: world.rects, entity: entity) {
     parts.add(value: "Rect")
