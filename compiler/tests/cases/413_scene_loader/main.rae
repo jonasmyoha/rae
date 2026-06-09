@@ -59,8 +59,8 @@ func main() {
   }
 
   let world: UiWorld = createUiWorld()
-  let rootEntity: Int = loadScene(world: world, scene: scene)
-  log("rootEntity = {rootEntity}")
+  let rootEntity: EntityId = loadScene(world: world, scene: scene)
+  log("rootEntity = {rootEntity.value}")
   log("alive = {aliveCount(world: world)}")
   log("nodeIds map size = {world.nodeIds.length}")
 
@@ -73,7 +73,8 @@ func main() {
   if albumRootIdOpt is none {
     log("AlbumRoot missing")
   } else {
-    let albumRootId: Int = albumRootIdOpt
+    let albumRootRaw: Int = albumRootIdOpt
+    let albumRootId: EntityId = entityId(v: albumRootRaw)
     if componentHas(this: world.rects, entity: albumRootId) {
       let r: Rect = componentGet(this: world.rects, entity: albumRootId)
       log("AlbumRoot Rect: {r.x},{r.y} {r.w}x{r.h}")
@@ -92,7 +93,8 @@ func main() {
   if backBtnIdOpt is none {
     log("BackBtn missing")
   } else {
-    let backBtnId: Int = backBtnIdOpt
+    let backBtnRaw: Int = backBtnIdOpt
+    let backBtnId: EntityId = entityId(v: backBtnRaw)
     let oc: view OnClick => componentView(this: world.onClicks, entity: backBtnId)
     log("BackBtn OnClick.actionId = {oc.actionId}")
     let sp: view Sprite => componentView(this: world.sprites, entity: backBtnId)
@@ -103,7 +105,8 @@ func main() {
   if playBtnIdOpt is none {
     log("PlayBtn missing")
   } else {
-    let playBtnId: Int = playBtnIdOpt
+    let playBtnRaw: Int = playBtnIdOpt
+    let playBtnId: EntityId = entityId(v: playBtnRaw)
     let sh: Shape = componentGet(this: world.shapes, entity: playBtnId)
     log("PlayBtn Shape.kind={sh.kind} radius={sh.radius}")
     log("PlayBtn Shape.fill.r={sh.fill.r} a={sh.fill.a}")

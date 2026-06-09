@@ -44,8 +44,8 @@ func albumCaption(album: view Album) ret String {
 # album: HeroThumb sprite → stem-keyed texture (via the existing
 # hero rebind in main.rae), HeroCaption / HeroTitle / HeroArtist
 # text → album fields.
-func buildAlbumHeader(world: mod UiWorld, scene: view Scene, album: view Album) ret Int {
-  let header: Int = createEntity(world: world)
+func buildAlbumHeader(world: mod UiWorld, scene: view Scene, album: view Album) ret EntityId {
+  let header: EntityId = createEntity(world: world)
   let w: Float = screenW - outerPad * 2.0
   setRectFixed(world: world, entity: header, w: w, h: albumHeaderHeight())
 
@@ -63,7 +63,7 @@ func buildAlbumHeader(world: mod UiWorld, scene: view Scene, album: view Album) 
   addTextOverride(list: overrides, nodeId: artistId, value: artistText)
 
   let label: String = "album"
-  let mounted: Int = mountOrError(
+  let mounted: EntityId = mountOrError(
     world: world
     mountEntity: header
     scene: scene
@@ -79,8 +79,8 @@ func buildAlbumHeader(world: mod UiWorld, scene: view Scene, album: view Album) 
 # be revealed by wheel/drag. Empty `album.tracks` → no rows
 # mounted (a 1-row-tall placeholder rect keeps the spacer below
 # from collapsing the layout into the dock).
-func buildTrackList(world: mod UiWorld, trackScene: view Scene, album: view Album) pub ret Int {
-  let list: Int = createEntity(world: world)
+func buildTrackList(world: mod UiWorld, trackScene: view Scene, album: view Album) pub ret EntityId {
+  let list: EntityId = createEntity(world: world)
   let n: Int = album.tracks.length
   let visible: Int = n
   if visible < 1 {
@@ -92,11 +92,11 @@ func buildTrackList(world: mod UiWorld, trackScene: view Scene, album: view Albu
   let alignS: AlignKind = AlignKind.Start
   setLayout(world: world, entity: list, kind: layV, gap: trackGap, alignCross: alignS)
 
-  let rows: List(Int) = createList(Int, initialCap: trackRowCount)
+  let rows: List(EntityId) = createList(EntityId, initialCap: trackRowCount)
   let i: Int = 0
   loop i < n {
     let t: Track = rae_ext_rae_buf_get(buf: album.tracks.data, index: i)
-    let row: Int = createEntity(world: world)
+    let row: EntityId = createEntity(world: world)
     setRectFixed(world: world, entity: row, w: screenW - outerPad * 2.0, h: trackRowH)
 
     let overrides: List(SceneOverride) = emptyOverrides()
@@ -124,7 +124,7 @@ func buildTrackList(world: mod UiWorld, trackScene: view Scene, album: view Albu
     addTextOverride(list: overrides, nodeId: subtitleId, value: subtitle)
 
     let rowLabel: String = "track-row"
-    let mounted: Int = mountOrError(
+    let mounted: EntityId = mountOrError(
       world: world
       mountEntity: row
       scene: trackScene
@@ -183,7 +183,7 @@ func buildAlbumWorld(scenes: view AlbumScenes, playback: view PlaybackState, sta
   let contentW: Float = screenW - outerPad * 2.0
   let album: Album = activeAlbum(state: state)
 
-  let root: Int = createEntity(world: world)
+  let root: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: root, w: screenW, h: screenH)
   setShapeRect(world: world, entity: root, fill: surfaceColor)
   let layV: LayoutType = LayoutType.Vertical
@@ -199,11 +199,11 @@ func buildAlbumWorld(scenes: view AlbumScenes, playback: view PlaybackState, sta
   let off: Offset = { delta: Vec2 { x: 0.0, y: scrollY } }
   componentSet(this: world.offsets, entity: root, data: off)
 
-  let header: Int = buildAlbumHeader(world: world, scene: scenes.album, album: album)
-  let trackList: Int = buildTrackList(world: world, trackScene: scenes.trackRow, album: album)
-  let spacer: Int = buildVerticalSpacer(world: world)
+  let header: EntityId = buildAlbumHeader(world: world, scene: scenes.album, album: album)
+  let trackList: EntityId = buildTrackList(world: world, trackScene: scenes.trackRow, album: album)
+  let spacer: EntityId = buildVerticalSpacer(world: world)
 
-  let kids: List(Int) = createList(Int, initialCap: 3)
+  let kids: List(EntityId) = createList(EntityId, initialCap: 3)
   kids.add(value: header)
   kids.add(value: trackList)
   kids.add(value: spacer)
@@ -212,7 +212,7 @@ func buildAlbumWorld(scenes: view AlbumScenes, playback: view PlaybackState, sta
   # Bottom dock (mini-player + nav-tabs) mounts as a parentless
   # overlay so the same code/position is shared across screens —
   # the player no longer "jumps" when switching to / from Library.
-  let dock: Int = mountBottomDockOverlay(
+  let dock: EntityId = mountBottomDockOverlay(
     world: world
     activeTab: state.tab
     scenes: scenes
@@ -222,7 +222,7 @@ func buildAlbumWorld(scenes: view AlbumScenes, playback: view PlaybackState, sta
   )
   # Floating back button overlays on top of everything when the
   # user has drilled into a sub-page. No-op on tab base pages.
-  let back: Int = mountBackButtonOverlay(world: world, state: state)
+  let back: EntityId = mountBackButtonOverlay(world: world, state: state)
 
   ret world
 }

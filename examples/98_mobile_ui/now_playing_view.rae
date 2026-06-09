@@ -31,7 +31,7 @@ func buildNowPlayingWorld(scenes: view AlbumScenes, playback: view PlaybackState
   let album: Album = activeAlbum(state: state)
   let track: Track = trackAt(album: album, idx: state.currentTrackIndex)
 
-  let root: Int = createEntity(world: world)
+  let root: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: root, w: screenW, h: screenH)
   setShapeRect(world: world, entity: root, fill: surfaceColor)
   let layV: LayoutType = LayoutType.Vertical
@@ -42,7 +42,7 @@ func buildNowPlayingWorld(scenes: view AlbumScenes, playback: view PlaybackState
   # The now-playing scene fills whatever's left after the bottom bars.
   let bottomGap: Float = outerGap * 2.0
   let npH: Float = screenH - outerPad * 2.0 - miniPlayerH - navTabsH - bottomGap
-  let np: Int = createEntity(world: world)
+  let np: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: np, w: screenW - outerPad * 2.0, h: npH)
 
   let npOverrides: List(SceneOverride) = emptyOverrides()
@@ -75,7 +75,7 @@ func buildNowPlayingWorld(scenes: view AlbumScenes, playback: view PlaybackState
   addTextOverride(list: npOverrides, nodeId: timeTotalId, value: totalStr)
 
   let npLabel: String = "music-player-now-playing"
-  let mounted: Int = mountOrError(
+  let mounted: EntityId = mountOrError(
     world: world
     mountEntity: np
     scene: scenes.nowPlaying
@@ -83,13 +83,13 @@ func buildNowPlayingWorld(scenes: view AlbumScenes, playback: view PlaybackState
     overrides: npOverrides
   )
 
-  let kids: List(Int) = createList(Int, initialCap: 1)
+  let kids: List(EntityId) = createList(EntityId, initialCap: 1)
   kids.add(value: np)
   attachChildren(world: world, parent: root, kids: kids)
 
   # Bottom dock (mini-player + nav-tabs). Shared across screens —
   # see nav_tabs_builder.rae.
-  let dock: Int = mountBottomDockOverlay(
+  let dock: EntityId = mountBottomDockOverlay(
     world: world
     activeTab: state.tab
     scenes: scenes
@@ -97,7 +97,7 @@ func buildNowPlayingWorld(scenes: view AlbumScenes, playback: view PlaybackState
     state: state
     reg: reg
   )
-  let back: Int = mountBackButtonOverlay(world: world, state: state)
+  let back: EntityId = mountBackButtonOverlay(world: world, state: state)
 
   ret world
 }
@@ -114,8 +114,8 @@ func buildMiniPlayerInstance(
   label: view String
   playback: view PlaybackState
   state: view AppState
-) pub ret Int {
-  let mount: Int = createEntity(world: world)
+) pub ret EntityId {
+  let mount: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: mount, w: w, h: h)
   let album: Album = activeAlbum(state: state)
   let track: Track = trackAt(album: album, idx: state.currentTrackIndex)
@@ -132,7 +132,7 @@ func buildMiniPlayerInstance(
   addTextOverride(list: overrides, nodeId: miniTitleId, value: titleText)
   addTextOverride(list: overrides, nodeId: miniArtistId, value: artistText)
 
-  let mounted: Int = mountOrError(
+  let mounted: EntityId = mountOrError(
     world: world
     mountEntity: mount
     scene: scene

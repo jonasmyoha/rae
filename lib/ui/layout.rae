@@ -46,7 +46,7 @@ func setLayoutScreenSize(w: view Float, h: view Float) {
 # Returns true if `entity` should participate in layout. Inactive
 # nodes are filtered per RUICS § 7.3 — they don't contribute to
 # parent measurement or placement.
-func layoutActive(world: view UiWorld, entity: view Int) ret Bool {
+func layoutActive(world: view UiWorld, entity: view EntityId) ret Bool {
   if componentHas(this: world.actives, entity: entity) is false {
     ret true
   }
@@ -106,7 +106,7 @@ func resolveAxisFromSize(
 }
 
 # Apply Constraints (independent of Size) — width clamp.
-func applyConstraintsW(world: view UiWorld, entity: view Int, w: view Float) ret Float {
+func applyConstraintsW(world: view UiWorld, entity: view EntityId, w: view Float) ret Float {
   if componentHas(this: world.constraints, entity: entity) is false {
     ret w
   }
@@ -125,7 +125,7 @@ func applyConstraintsW(world: view UiWorld, entity: view Int, w: view Float) ret
   ret r
 }
 
-func applyConstraintsH(world: view UiWorld, entity: view Int, h: view Float) ret Float {
+func applyConstraintsH(world: view UiWorld, entity: view EntityId, h: view Float) ret Float {
   if componentHas(this: world.constraints, entity: entity) is false {
     ret h
   }
@@ -145,7 +145,7 @@ func applyConstraintsH(world: view UiWorld, entity: view Int, h: view Float) ret
 }
 
 # Authored Padding, defaulted to all-zeros if absent.
-func entityPadding(world: view UiWorld, entity: view Int) ret Insets {
+func entityPadding(world: view UiWorld, entity: view EntityId) ret Insets {
   if componentHas(this: world.paddings, entity: entity) is false {
     ret Insets { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
   }
@@ -153,7 +153,7 @@ func entityPadding(world: view UiWorld, entity: view Int) ret Insets {
   ret p.insets
 }
 
-func entityRect(world: view UiWorld, entity: view Int) ret Rect {
+func entityRect(world: view UiWorld, entity: view EntityId) ret Rect {
   if componentHas(this: world.rects, entity: entity) is false {
     ret Rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }
   }
@@ -161,7 +161,7 @@ func entityRect(world: view UiWorld, entity: view Int) ret Rect {
   ret r
 }
 
-func entitySize(world: view UiWorld, entity: view Int) ret Size {
+func entitySize(world: view UiWorld, entity: view EntityId) ret Size {
   if componentHas(this: world.sizes, entity: entity) is false {
     ret defaultSize()
   }
@@ -169,7 +169,7 @@ func entitySize(world: view UiWorld, entity: view Int) ret Size {
   ret s
 }
 
-func entityLayout(world: view UiWorld, entity: view Int) ret Layout {
+func entityLayout(world: view UiWorld, entity: view EntityId) ret Layout {
   if componentHas(this: world.layouts, entity: entity) is false {
     ret defaultLayout()
   }
@@ -178,7 +178,7 @@ func entityLayout(world: view UiWorld, entity: view Int) ret Layout {
 }
 
 # Returns the entity's explicit Offset.delta, or zero.
-func entityOffset(world: view UiWorld, entity: view Int) ret Vec2 {
+func entityOffset(world: view UiWorld, entity: view EntityId) ret Vec2 {
   if componentHas(this: world.offsets, entity: entity) is false {
     ret Vec2 { x: 0.0, y: 0.0 }
   }
@@ -188,8 +188,8 @@ func entityOffset(world: view UiWorld, entity: view Int) ret Vec2 {
 
 # Returns the active children of `entity` in declaration order. List
 # is fresh; safe for the caller to mutate if needed.
-func activeChildren(world: view UiWorld, entity: view Int) ret List(Int) {
-  let out: List(Int) = createList(initialCap: 4)
+func activeChildren(world: view UiWorld, entity: view EntityId) ret List(EntityId) {
+  let out: List(EntityId) = createList(EntityId, initialCap: 4)
   if componentHas(this: world.childrens, entity: entity) is false {
     ret out
   }
@@ -197,7 +197,7 @@ func activeChildren(world: view UiWorld, entity: view Int) ret List(Int) {
   let n: Int = ch.ids.length
   let i: Int = 0
   loop i < n {
-    let cid: Int = ch.ids.get(index: i)
+    let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
     if layoutActive(world: world, entity: cid) {
       out.add(value: cid)
     }
@@ -215,12 +215,12 @@ func activeChildren(world: view UiWorld, entity: view Int) ret List(Int) {
 # can still fall back to a real number).
 # -----------------------------------------------------------------
 
-func measureSubtree(world: mod UiWorld, entity: view Int) {
-  let kids: List(Int) = activeChildren(world: world, entity: entity)
+func measureSubtree(world: mod UiWorld, entity: view EntityId) {
+  let kids: List(EntityId) = activeChildren(world: world, entity: entity)
   let n: Int = kids.length
   let i: Int = 0
   loop i < n {
-    let cid: Int = kids.get(index: i)
+    let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
     measureSubtree(world: world, entity: cid)
     i = i + 1
   }
@@ -238,7 +238,7 @@ func measureSubtree(world: mod UiWorld, entity: view Int) {
     let maxCross: Float = 0.0
     let j: Int = 0
     loop j < n {
-      let cid: Int = kids.get(index: j)
+      let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: j)
       let cw: Float = childMeasuredW(world: world, entity: cid)
       let ch: Float = childMeasuredH(world: world, entity: cid)
       if layout.kind is LayoutType.Horizontal {
@@ -305,7 +305,7 @@ func measureSubtree(world: mod UiWorld, entity: view Int) {
 # Helper — return the resolved measured width for `entity`. Hug
 # nodes use their MeasuredSize; Fill nodes use their authored rect
 # (parent will overwrite during compute pass anyway); Fixed uses rect.
-func childMeasuredW(world: view UiWorld, entity: view Int) ret Float {
+func childMeasuredW(world: view UiWorld, entity: view EntityId) ret Float {
   let size: Size = entitySize(world: world, entity: entity)
   let rect: Rect = entityRect(world: world, entity: entity)
   let measuredW: Float = rect.w
@@ -323,7 +323,7 @@ func childMeasuredW(world: view UiWorld, entity: view Int) ret Float {
   )
 }
 
-func childMeasuredH(world: view UiWorld, entity: view Int) ret Float {
+func childMeasuredH(world: view UiWorld, entity: view EntityId) ret Float {
   let size: Size = entitySize(world: world, entity: entity)
   let rect: Rect = entityRect(world: world, entity: entity)
   let measuredH: Float = rect.h
@@ -353,7 +353,7 @@ func childMeasuredH(world: view UiWorld, entity: view Int) ret Float {
 # are -1.0 when unknown (Fill then falls back to authored rect).
 func resolveOwnSize(
   world: view UiWorld
-  entity: view Int
+  entity: view EntityId
   parentAvailW: view Float
   parentAvailH: view Float
   hasParentAvail: view Bool
@@ -393,7 +393,7 @@ func resolveOwnSize(
 # are the entity's already-resolved own size.
 func computeSubtree(
   world: mod UiWorld
-  entity: view Int
+  entity: view EntityId
   localX: view Float
   localY: view Float
   ownW: view Float
@@ -422,7 +422,7 @@ func computeSubtree(
     contentH = 0.0
   }
 
-  let kids: List(Int) = activeChildren(world: world, entity: entity)
+  let kids: List(EntityId) = activeChildren(world: world, entity: entity)
   let n: Int = kids.length
   if n is 0 {
     ret
@@ -471,7 +471,7 @@ func computeSubtree(
   # inside the parent's padded content box.
   let i: Int = 0
   loop i < n {
-    let cid: Int = kids.get(index: i)
+    let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
     let crect: Rect = entityRect(world: world, entity: cid)
     let resolved: Vec2 = resolveOwnSize(
       world: world
@@ -498,7 +498,7 @@ func computeSubtree(
 
 func placeHorizontal(
   world: mod UiWorld
-  kids: view List(Int)
+  kids: view List(EntityId)
   contentX: view Float
   contentY: view Float
   contentW: view Float
@@ -513,7 +513,7 @@ func placeHorizontal(
   let fillCount: Int = 0
   let i: Int = 0
   loop i < n {
-    let cid: Int = kids.get(index: i)
+    let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
     let size: Size = entitySize(world: world, entity: cid)
     if size.w.mode is SizeMode.Fill {
       fillCount = fillCount + 1
@@ -569,7 +569,7 @@ func placeHorizontal(
   let cursorX: Float = contentX + startOffset
   let j: Int = 0
   loop j < n {
-    let cid: Int = kids.get(index: j)
+    let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: j)
     let size: Size = entitySize(world: world, entity: cid)
     let childW: Float = 0.0
     if size.w.mode is SizeMode.Fill {
@@ -623,7 +623,7 @@ func placeHorizontal(
 
 func placeVertical(
   world: mod UiWorld
-  kids: view List(Int)
+  kids: view List(EntityId)
   contentX: view Float
   contentY: view Float
   contentW: view Float
@@ -637,7 +637,7 @@ func placeVertical(
   let fillCount: Int = 0
   let i: Int = 0
   loop i < n {
-    let cid: Int = kids.get(index: i)
+    let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
     let size: Size = entitySize(world: world, entity: cid)
     if size.h.mode is SizeMode.Fill {
       fillCount = fillCount + 1
@@ -686,7 +686,7 @@ func placeVertical(
   let cursorY: Float = contentY + startOffset
   let j: Int = 0
   loop j < n {
-    let cid: Int = kids.get(index: j)
+    let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: j)
     let size: Size = entitySize(world: world, entity: cid)
     let childH: Float = 0.0
     if size.h.mode is SizeMode.Fill {
@@ -740,7 +740,7 @@ func placeVertical(
 
 func placeStack(
   world: mod UiWorld
-  kids: view List(Int)
+  kids: view List(EntityId)
   contentX: view Float
   contentY: view Float
   contentW: view Float
@@ -749,7 +749,7 @@ func placeStack(
   let n: Int = kids.length
   let i: Int = 0
   loop i < n {
-    let cid: Int = kids.get(index: i)
+    let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
     let resolved: Vec2 = resolveOwnSize(
       world: world
       entity: cid
@@ -807,11 +807,11 @@ func placeStack(
 # -----------------------------------------------------------------
 
 func layoutSystem(world: mod UiWorld) {
-  let alive: view List(Int) => world.alive
+  let alive: view List(EntityId) => world.alive
   let n: Int = alive.length
   let i: Int = 0
   loop i < n {
-    let e: Int = alive.get(index: i)
+    let e: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: i)
     if componentHas(this: world.parents, entity: e) is false {
       if componentHas(this: world.rects, entity: e) {
         # Phase 1: measure the subtree.

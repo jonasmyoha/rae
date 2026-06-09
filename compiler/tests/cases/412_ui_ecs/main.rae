@@ -12,13 +12,14 @@ func main() {
   log("Wibble known: {isKnownComponent(name: wibbleName)}")
 
   # Allocate three entities.
-  let e1: Int = createEntity(world: world)
-  let e2: Int = createEntity(world: world)
-  let e3: Int = createEntity(world: world)
+  let e1: EntityId = createEntity(world: world)
+  let e2: EntityId = createEntity(world: world)
+  let e3: EntityId = createEntity(world: world)
   log("alive after 3 createEntity: {aliveCount(world: world)}")
-  log("e1={e1} e2={e2} e3={e3}")
+  log("e1={e1.value} e2={e2.value} e3={e3.value}")
   log("e1 alive: {isAlive(world: world, entity: e1)}")
-  log("99 alive: {isAlive(world: world, entity: 99)}")
+  let probe99: EntityId = entityId(v: 99)
+  log("99 alive: {isAlive(world: world, entity: probe99)}")
 
   # Add a Rect to e1 and e3, but not e2.
   let r1: Rect = { x: 0.0, y: 0.0, w: 100.0, h: 200.0 }
@@ -61,9 +62,9 @@ func main() {
   let rectN: Int = componentCount(this: world.rects)
   let i: Int = 0
   loop i < rectN {
-    let ent: Int = componentEntityAt(this: world.rects, i: i)
+    let ent: EntityId = componentEntityAt(this: world.rects, i: i)
     let r: Rect = componentDataAt(this: world.rects, i: i)
-    log("  rect[{i}] entity={ent} {r.w}x{r.h}")
+    log("  rect[{i}] entity={ent.value} {r.w}x{r.h}")
     i = i + 1
   }
 
