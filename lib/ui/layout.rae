@@ -803,7 +803,7 @@ func placeStack(
 
 # -----------------------------------------------------------------
 # Entry point — run the two phases over every layout root. Roots are
-# entities that are alive, have a Rect, and have no ParentLink.
+# entities that are alive, have a Rect, and have no Parent.
 # -----------------------------------------------------------------
 
 func layoutSystem(world: mod UiWorld) {
@@ -812,7 +812,7 @@ func layoutSystem(world: mod UiWorld) {
   let i: Int = 0
   loop i < n {
     let e: Int = alive.get(index: i)
-    if componentHas(this: world.parentLinks, entity: e) is false {
+    if componentHas(this: world.parents, entity: e) is false {
       if componentHas(this: world.rects, entity: e) {
         # Phase 1: measure the subtree.
         measureSubtree(world: world, entity: e)
@@ -850,7 +850,7 @@ func layoutSystem(world: mod UiWorld) {
 #
 # Input tables (mutated by the user / scene loader, READ by layout):
 #   rects, sizes, layouts, paddings, offsets, constraints,
-#   actives, aligns, childrens, parentLinks
+#   actives, aligns, childrens, parents
 #
 # Output tables (WRITTEN by layout) are deliberately NOT in the cache
 #   measuredSizes  — written inside phase 1
@@ -875,7 +875,7 @@ type LayoutCache {
   activesGen: Int
   alignsGen: Int
   childrensGen: Int
-  parentLinksGen: Int
+  parentsGen: Int
   entityCount: Int
 }
 
@@ -890,7 +890,7 @@ func createLayoutCache() pub ret LayoutCache {
     activesGen: -1
     alignsGen: -1
     childrensGen: -1
-    parentLinksGen: -1
+    parentsGen: -1
     entityCount: -1
   }
 }
@@ -914,7 +914,7 @@ func layoutSystemIfDirty(world: mod UiWorld, cache: mod LayoutCache) pub ret Boo
   let acGen: Int = componentTableGeneration(Active, this: world.actives)
   let alGen: Int = componentTableGeneration(Align, this: world.aligns)
   let chGen: Int = componentTableGeneration(Children, this: world.childrens)
-  let plGen: Int = componentTableGeneration(ParentLink, this: world.parentLinks)
+  let plGen: Int = componentTableGeneration(Parent, this: world.parents)
   let entityCount: Int = world.alive.length
 
   let dirty: Bool = false
@@ -945,7 +945,7 @@ func layoutSystemIfDirty(world: mod UiWorld, cache: mod LayoutCache) pub ret Boo
   if chGen is not cache.childrensGen {
     dirty = true
   }
-  if plGen is not cache.parentLinksGen {
+  if plGen is not cache.parentsGen {
     dirty = true
   }
   if entityCount is not cache.entityCount {
@@ -966,7 +966,7 @@ func layoutSystemIfDirty(world: mod UiWorld, cache: mod LayoutCache) pub ret Boo
   cache.activesGen = acGen
   cache.alignsGen = alGen
   cache.childrensGen = chGen
-  cache.parentLinksGen = plGen
+  cache.parentsGen = plGen
   cache.entityCount = entityCount
   ret true
 }

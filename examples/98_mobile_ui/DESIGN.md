@@ -274,7 +274,7 @@ The minimum component set needed to render both screens:
 | `RuntimeOffset` | future Wobble/BackgroundPan |
 | `LayoutScale` | `OverflowPolicy.scaleToFitY` |
 | `SafeInsets` | `SafeAreaSystem` |
-| `ParentLink` | `HierarchySystem` (see below) |
+| `Parent` | `HierarchySystem` (see below) |
 
 Listed components are roughly two thirds of RUICS's full inventory.
 Drop `Carousel`, `BackgroundPan`, `SmokeFx`, `AnimFrames`/`AnimTrigger`,
@@ -291,7 +291,7 @@ lib/ui/
   scene.rae              # .raescene JSON → in-memory Scene (untyped tree)
   scene_loader.rae       # Scene → ECS entities + components
   scene_instance.rae     # SceneInstance mount, params, overrides
-  hierarchy.rae          # ParentLink + Children traversal helpers
+  hierarchy.rae          # Parent + Children traversal helpers
   layout.rae             # measureSubtree + computeSubtree
   transform.rae          # TransformSystem
   text_measure.rae       # Hug-text measurement (raylib measureText)
