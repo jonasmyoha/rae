@@ -127,18 +127,17 @@ static Str get_base_type_name(const AstTypeRef* type) {
 }
 
 static bool mangle_primitive_ref(const AstTypeRef* type, Str base, char* buf, size_t* pos, size_t cap) {
-    bool is_prim = str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int64") || 
+    bool is_prim = str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int64") ||
                    str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float64") ||
-                   str_eq_cstr(base, "Bool") || str_eq_cstr(base, "String") || 
-                   str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32") ||
-                   type->is_id || type->is_key;
-    
+                   str_eq_cstr(base, "Bool") || str_eq_cstr(base, "String") ||
+                   str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32");
+
     if (is_prim && (type->is_view || type->is_mod)) {
         *pos += snprintf(buf + *pos, cap - *pos, "rae_%s_", type->is_mod ? "Mod" : "View");
-        if (str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int64") || type->is_id) *pos += snprintf(buf + *pos, cap - *pos, "Int64");
+        if (str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int64")) *pos += snprintf(buf + *pos, cap - *pos, "Int64");
         else if (str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float64")) *pos += snprintf(buf + *pos, cap - *pos, "Float64");
         else if (str_eq_cstr(base, "Bool")) *pos += snprintf(buf + *pos, cap - *pos, "Bool");
-        else if (str_eq_cstr(base, "String") || type->is_key) *pos += snprintf(buf + *pos, cap - *pos, "String");
+        else if (str_eq_cstr(base, "String")) *pos += snprintf(buf + *pos, cap - *pos, "String");
         else if (str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32")) *pos += snprintf(buf + *pos, cap - *pos, "Char");
         return true;
     }

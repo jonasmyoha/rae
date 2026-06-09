@@ -62,9 +62,7 @@ static void dump_type_ref(const AstTypeRef* type, FILE* out) {
   if (type->is_opt) fputs("opt ", out);
   if (type->is_view) fputs("view ", out);
   if (type->is_mod) fputs("mod ", out);
-  if (type->is_id) fputs("id ", out);
-  if (type->is_key) fputs("key ", out);
-  
+
   if (!type->parts) {
     fputs("<base?>", out);
   } else {
