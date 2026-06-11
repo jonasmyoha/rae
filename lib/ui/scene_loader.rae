@@ -22,6 +22,15 @@ func appendEntityListSL(lst: mod List(EntityId), value: view EntityId) {
 }
 
 func loadScene(world: mod UiWorld, scene: view Scene) ret EntityId {
+  ret loadSceneIntoPage(world: world, scene: scene, pageId: "")
+}
+
+# Same as `loadScene` but writes nodeIds under a `pageId/`-prefixed key
+# in `world.nodeIds`. Use `pageId: ""` for the unscoped path (the
+# default rebuild-only flow). The scene's root entity is returned and
+# also tagged with `PageRoot { id: pageId }` when `pageId` is non-empty,
+# so `pageOf(world, entity)` can walk back up to find the owning page.
+func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view String) pub ret EntityId {
   if scene.ok is false {
     ret noEntity()
   }
@@ -35,7 +44,12 @@ func loadScene(world: mod UiWorld, scene: view Scene) ret EntityId {
     let node: view SceneNode => sceneNodeAt(this: scene, idx: i)
     let entity: EntityId = createEntity(world: world)
     appendEntityListSL(lst: entitiesByNodeIndex, value: entity)
-    nodeIdsMap.set(k: node.nodeId, value: entity.value)
+    if pageId.length() is 0 {
+      nodeIdsMap.set(k: node.nodeId, value: entity.value)
+    } else {
+      let key: String = pageScopedKey(pageId: pageId, nodeId: node.nodeId)
+      nodeIdsMap.set(k: key, value: entity.value)
+    }
     i = i + 1
   }
 
@@ -111,6 +125,12 @@ func loadScene(world: mod UiWorld, scene: view Scene) ret EntityId {
     ret noEntity()
   }
   let rootEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: rootIdx)
+  if pageId.length() > 0 {
+    let copiedId: String = ""
+    copiedId = copiedId.concat(other: pageId)
+    let pr: PageRoot = { id: own copiedId }
+    componentSet(this: world.pageRoots, entity: rootEntity, data: own pr)
+  }
   ret rootEntity
 }
 
