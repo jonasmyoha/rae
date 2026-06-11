@@ -337,6 +337,7 @@ type UiWorld {
   editorLockeds: ComponentTable(EditorLocked)
   heroWidgets: ComponentTable(HeroWidget)
   debugAnchors: ComponentTable(DebugAnchor)
+  pageRoots: ComponentTable(PageRoot)
 
   # ----- authored identity/metadata -----
   names: ComponentTable(Name)
@@ -407,6 +408,7 @@ func createUiWorld() ret UiWorld {
     editorLockeds: createComponentTable(EditorLocked)
     heroWidgets: createComponentTable(HeroWidget)
     debugAnchors: createComponentTable(DebugAnchor)
+    pageRoots: createComponentTable(PageRoot)
 
     names: createComponentTable(Name)
     primaryTypes: createComponentTable(PrimaryType)
@@ -466,4 +468,76 @@ func isAlive(world: view UiWorld, entity: view EntityId) ret Bool {
 
 func aliveCount(world: view UiWorld) ret Int {
   ret world.alive.length
+}
+
+# ----- PageRoot helpers ----------------------------------------------
+#
+# `PageRoot` (defined in ui/components.rae) marks the top of a page
+# subtree. Two resident pages can author the same `NodeId` (e.g.
+# "PlayIcon") without colliding because callers prefix lookups by the
+# owning page's id: the key stored in `world.nodeIds` is the result of
+# `pageScopedKey(pageId, nodeId)`. An empty `pageId` writes the bare
+# nodeId — that's the unscoped path the rebuild-only flow uses today.
+
+# Compose a page-scoped key for `world.nodeIds`. The convention is
+# `"<pageId>/<nodeId>"`. Empty `pageId` returns `nodeId` unchanged so
+# old call sites that never opted into pages keep working.
+func pageScopedKey(pageId: view String, nodeId: view String) pub ret String {
+  if pageId.length() is 0 {
+    let k: String = ""
+    k = k.concat(other: nodeId)
+    ret k
+  }
+  let sep: String = "/"
+  let k: String = ""
+  k = k.concat(other: pageId)
+  k = k.concat(other: sep)
+  k = k.concat(other: nodeId)
+  ret k
+}
+
+# Resolve a nodeId scoped to a specific page. Returns the underlying
+# raw Int (Rae's opt-struct unwrap miscompiles for struct T, so we
+# keep `world.nodeIds` as `StringMap(Int)` and callers wrap with
+# `entityId()` when they need the typed handle).
+func findNodeInPage(world: view UiWorld, pageId: view String, nodeId: view String) pub ret opt Int {
+  let k: String = pageScopedKey(pageId: pageId, nodeId: nodeId)
+  ret world.nodeIds.get(k: k)
+}
+
+# Walk Parent up from `entity` until we hit a `PageRoot`, then return
+# its id. Returns an empty string when no ancestor is a page root —
+# callers should treat that as "no page" / unscoped.
+func pageOf(world: view UiWorld, entity: view EntityId) pub ret String {
+  let cur: EntityId = entity
+  loop true {
+    if componentHas(this: world.pageRoots, entity: cur) {
+      let r: PageRoot = componentGet(this: world.pageRoots, entity: cur)
+      ret r.id
+    }
+    if componentHas(this: world.parents, entity: cur) is false {
+      ret ""
+    }
+    let pl: Parent = componentGet(this: world.parents, entity: cur)
+    cur = pl.parent
+  }
+  ret ""
+}
+
+# Find the entity carrying `PageRoot{id: pageId}`, or `noEntity()`
+# if no resident page has that id. Linear scan over the table —
+# fine because the number of resident pages stays small (single
+# digits in practice).
+func findPageRootEntity(world: view UiWorld, pageId: view String) pub ret EntityId {
+  let n: Int = componentCount(this: world.pageRoots)
+  let i: Int = 0
+  loop i < n {
+    let e: EntityId = componentEntityAt(this: world.pageRoots, i: i)
+    let r: PageRoot = componentDataAt(this: world.pageRoots, i: i)
+    if r.id.equals(other: pageId) {
+      ret e
+    }
+    i = i + 1
+  }
+  ret noEntity()
 }

@@ -295,6 +295,17 @@ type DebugAnchor {
   value: Bool
 }
 
+# Marks an entity as the root of a page subtree. The `id` is the
+# stable page identifier (e.g. "now-playing", "album:beaches") used to
+# scope nodeIds in `world.nodeIds` under a `"<id>/<nodeId>"` prefix so
+# two resident pages can author the same nodeId without colliding.
+# Descendants belong to the page implicitly via the Parent chain —
+# walk up with `pageOf(world, entity)` to find which page owns an
+# entity. There should be exactly one PageRoot per page subtree.
+type PageRoot {
+  id: String
+}
+
 # Identity / metadata
 
 type Name {
