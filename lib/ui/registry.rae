@@ -55,6 +55,7 @@ func registeredComponentNames() ret List(String) {
   names.add(value: "EditorLocked")
   names.add(value: "HeroWidget")
   names.add(value: "DebugAnchor")
+  names.add(value: "PageRoot")
   # Identity / metadata
   names.add(value: "Name")
   names.add(value: "PrimaryType")
@@ -510,6 +511,12 @@ func deserDebugAnchor(doc: view JsonDoc, val: view JsonValue) ret DebugAnchor {
   ret DebugAnchor { value: true }
 }
 
+func deserPageRoot(doc: view JsonDoc, val: view JsonValue) ret PageRoot {
+  let id: String = optString(doc: doc, container: val, key: "id", fallback: "")
+  let r: PageRoot = { id: own id }
+  ret r
+}
+
 func deserPrimaryType(doc: view JsonDoc, val: view JsonValue) ret PrimaryType {
   ret PrimaryType { typeName: optString(doc: doc, container: val, key: "typeName", fallback: "") }
 }
@@ -656,6 +663,10 @@ func applyComponentByName(
   }
   if name.equals(other: "DebugAnchor") {
     componentSet(this: world.debugAnchors, entity: entity, data: deserDebugAnchor(doc: doc, val: val))
+    ret
+  }
+  if name.equals(other: "PageRoot") {
+    componentSet(this: world.pageRoots, entity: entity, data: deserPageRoot(doc: doc, val: val))
     ret
   }
   # Unknown / not-yet-handled components are ignored. The scene loader

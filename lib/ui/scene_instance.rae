@@ -250,6 +250,26 @@ func mountSceneInstance(
   scene: view Scene
   overrides: view List(SceneOverride)
 ) ret EntityId {
+  ret mountSceneInstanceIntoPage(
+    world: world
+    mountEntity: mountEntity
+    scene: scene
+    overrides: overrides
+    pageId: ""
+  )
+}
+
+# Same as `mountSceneInstance` but writes nodeIds under a `pageId/`
+# prefix and tags `mountEntity` with `PageRoot { id: pageId }` (when
+# `pageId` is non-empty). Empty `pageId` is the unscoped path that
+# matches the legacy rebuild flow.
+func mountSceneInstanceIntoPage(
+  world: mod UiWorld
+  mountEntity: view EntityId
+  scene: view Scene
+  overrides: view List(SceneOverride)
+  pageId: view String
+) pub ret EntityId {
   if scene.ok is false {
     ret noEntity()
   }
@@ -271,8 +291,20 @@ func mountSceneInstance(
       entity = createEntity(world: world)
     }
     appendEntityListSI(lst: entitiesByNodeIndex, value: entity)
-    nodeIdsMap.set(k: node.nodeId, value: entity.value)
+    if pageId.length() is 0 {
+      nodeIdsMap.set(k: node.nodeId, value: entity.value)
+    } else {
+      let key: String = pageScopedKey(pageId: pageId, nodeId: node.nodeId)
+      nodeIdsMap.set(k: key, value: entity.value)
+    }
     i = i + 1
+  }
+
+  if pageId.length() > 0 {
+    let copiedId: String = ""
+    copiedId = copiedId.concat(other: pageId)
+    let pr: PageRoot = { id: own copiedId }
+    componentSet(this: world.pageRoots, entity: mountEntity, data: own pr)
   }
 
   # Pass 2: apply components. For the scene's root node we skip
