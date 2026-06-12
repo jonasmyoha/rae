@@ -306,6 +306,18 @@ type PageRoot {
   id: String
 }
 
+# Per-page scroll position. Lives on the entity that owns the scroll
+# behaviour (typically the page root or a scrollable body inside it)
+# so a persistent UiWorld can preserve scroll across page switches —
+# the scroll position survives as long as the entity does. The
+# scrolling system reads `.y` and applies it as an `Offset.delta.y`
+# (or uses it directly in layout). `velocity` is the per-frame
+# momentum, retained so a fling continues across a render dip.
+type ScrollState {
+  y: Float
+  velocity: Float
+}
+
 # Identity / metadata
 
 type Name {
