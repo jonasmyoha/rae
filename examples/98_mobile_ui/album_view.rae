@@ -45,9 +45,7 @@ func albumCaption(album: view Album) ret String {
 # hero rebind in main.rae), HeroCaption / HeroTitle / HeroArtist
 # text → album fields.
 func buildAlbumHeader(world: mod UiWorld, scene: view Scene, album: view Album) ret EntityId {
-  let header: EntityId = createEntity(world: world)
   let w: Float = screenW - outerPad * 2.0
-  setRectFixed(world: world, entity: header, w: w, h: albumHeaderHeight())
 
   let overrides: List(SceneOverride) = emptyOverrides()
   let captionId: String = "HeroCaption"
@@ -62,13 +60,20 @@ func buildAlbumHeader(world: mod UiWorld, scene: view Scene, album: view Album) 
   addTextOverride(list: overrides, nodeId: titleId, value: titleText)
   addTextOverride(list: overrides, nodeId: artistId, value: artistText)
 
+  # Mount the album scene as a resident page. Album nodeIds get
+  # scoped under "album/..." so they can't collide with other
+  # screens' nodeIds (e.g. when persistent UiWorld keeps multiple
+  # pages mounted at once).
+  let pageId: String = "album"
   let label: String = "album"
-  let mounted: EntityId = mountOrError(
+  let header: EntityId = mountPageOrError(
     world: world
-    mountEntity: header
+    pageId: pageId
     scene: scene
-    sceneLabel: label
     overrides: overrides
+    w: w
+    h: albumHeaderHeight()
+    sceneLabel: label
   )
   ret header
 }

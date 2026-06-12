@@ -514,9 +514,10 @@ func applyOverride(world: mod UiWorld, entity: view EntityId, override: view Sce
 # and writes every node's id under the `"<pageId>/<nodeId>"` key so
 # two pages can coexist without colliding on shared nodeIds.
 #
-# Returns the page-root entity. The caller usually pins it for
-# subsequent `setPageActive` / `unmountPage` calls, or looks it up
-# later via `findPageRootEntity(world, pageId)`.
+# Returns the page-root entity on success, or `noEntity()` when the
+# scene wasn't parseable / had no root — no entity is created in that
+# case. App-level callers usually want the `mountPageOrError`-style
+# wrapper that paints a visible failure sentinel.
 #
 # Calling `mountPage` twice with the same id is the caller's bug —
 # we don't dedup. Use `findPageRootEntity` to gate idempotently.
@@ -528,6 +529,9 @@ func mountPage(
   w: view Float
   h: view Float
 ) pub ret EntityId {
+  if scene.ok is false {
+    ret noEntity()
+  }
   let root: EntityId = createEntity(world: world)
   let r: Rect = { x: 0.0, y: 0.0, w: w, h: h }
   componentSet(this: world.rects, entity: root, data: r)
@@ -544,9 +548,10 @@ func mountPage(
     pageId: pageId
   )
   if isNone(this: mounted) {
-    # Mount failed; mountSceneInstanceIntoPage skipped the PageRoot
-    # tag because it bailed early. Tag root ourselves so the page is
-    # still discoverable and `unmountPage` works on the husk.
+    # Scene parsed but had no root node. `mountSceneInstanceIntoPage`
+    # bailed before tagging — we created the entity, so leave the
+    # PageRoot tag on the husk so a later `findPageRootEntity` /
+    # `unmountPage` can still see it.
     let copiedId: String = ""
     copiedId = copiedId.concat(other: pageId)
     let pr: PageRoot = { id: own copiedId }
