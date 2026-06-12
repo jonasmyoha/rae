@@ -56,6 +56,7 @@ func registeredComponentNames() ret List(String) {
   names.add(value: "HeroWidget")
   names.add(value: "DebugAnchor")
   names.add(value: "PageRoot")
+  names.add(value: "ScrollState")
   # Identity / metadata
   names.add(value: "Name")
   names.add(value: "PrimaryType")
@@ -517,6 +518,12 @@ func deserPageRoot(doc: view JsonDoc, val: view JsonValue) ret PageRoot {
   ret r
 }
 
+func deserScrollState(doc: view JsonDoc, val: view JsonValue) ret ScrollState {
+  let y: Float = optFloat(doc: doc, container: val, key: "y", fallback: 0.0)
+  let velocity: Float = optFloat(doc: doc, container: val, key: "velocity", fallback: 0.0)
+  ret ScrollState { y: y, velocity: velocity }
+}
+
 func deserPrimaryType(doc: view JsonDoc, val: view JsonValue) ret PrimaryType {
   ret PrimaryType { typeName: optString(doc: doc, container: val, key: "typeName", fallback: "") }
 }
@@ -667,6 +674,10 @@ func applyComponentByName(
   }
   if name.equals(other: "PageRoot") {
     componentSet(this: world.pageRoots, entity: entity, data: deserPageRoot(doc: doc, val: val))
+    ret
+  }
+  if name.equals(other: "ScrollState") {
+    componentSet(this: world.scrollStates, entity: entity, data: deserScrollState(doc: doc, val: val))
     ret
   }
   # Unknown / not-yet-handled components are ignored. The scene loader

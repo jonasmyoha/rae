@@ -285,6 +285,18 @@ func buildProfileBody(world: mod UiWorld, reg: view TextureRegistry, albums: vie
   let off: Offset = { delta: Vec2 { x: 0.0, y: scrollY } }
   componentSet(this: world.offsets, entity: body, data: off)
 
+  # Tag the body as the profile page and record the scroll state in
+  # the world. main.rae still owns the authoritative `profileScrollY`
+  # mirror; this duplication exists so a future slice can flip the
+  # main loop to read scrollY directly from the world (component) and
+  # the mirror gets removed.
+  let copiedId: String = ""
+  copiedId = copiedId.concat(other: profilePageId)
+  let pr: PageRoot = { id: own copiedId }
+  componentSet(this: world.pageRoots, entity: body, data: own pr)
+  let scroll: ScrollState = { y: scrollY, velocity: 0.0 }
+  componentSet(this: world.scrollStates, entity: body, data: scroll)
+
   let avatar: EntityId = buildAvatar(world: world, reg: reg)
 
   let handle: EntityId = createEntity(world: world)
