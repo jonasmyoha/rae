@@ -1,4 +1,4 @@
-# rae: max-lines 1600
+# rae: max-lines 1700
 # Mobile-UI demo entrypoint. The actual work — scene loading, world
 # building, screen routing — lives in sibling `.rae` files in this same
 # directory, which Rae auto-imports because they share the project
@@ -343,6 +343,15 @@ func main() {
     let heroDuration: Float = 0.30
     let pendingSrc: Bool = false
     let pendingDst: Bool = false
+    # Page id of the destination hero entity that was hidden via
+    # `setHeroVisibleOnPage(...false)` when the animation started.
+    # Used by the end-of-animation cleanup to unhide the *same*
+    # entity — the non-scoped `setHeroVisible` walks every page and
+    # picks the first match, which on a multi-page persistent world
+    # is usually NOT the page we just hid (e.g. profile tile with
+    # the same key gets re-shown while the album header hero stays
+    # invisible → "turns black" on landing).
+    let pendingHeroTargetPageId: String = ""
     # `transitionArmed` defers `startHeroTransition` from the outer
     # rebuild block until the first inner-loop frame. If we started
     # the clock in the outer loop, the 5–20 ms of world rebuild +
@@ -1121,7 +1130,17 @@ func main() {
           if animating is false {
             if pendingSrc {
               if willSwitch is false {
-                setHeroVisible(world: world, key: appState.currentAlbumStem, visible: true)
+                # Use the page-scoped unhide so we re-show the exact
+                # entity we hid in the willSwitch arming block. The
+                # non-scoped variant picks the first match across
+                # every page and would leave the real target hidden
+                # (paints black) on multi-page persistent worlds.
+                if pendingHeroTargetPageId.length > 0 {
+                  setHeroVisibleOnPage(world: world, pageId: pendingHeroTargetPageId, key: appState.currentAlbumStem, visible: true)
+                } else {
+                  setHeroVisible(world: world, key: appState.currentAlbumStem, visible: true)
+                }
+                pendingHeroTargetPageId = ""
                 pendingSrc = false
               }
             }
@@ -1431,6 +1450,7 @@ func main() {
                 setHeroVisibleOnPage(world: world, pageId: incomingPageId, key: heroKey, visible: false)
                 startHeroTransition(anim: anim, key: heroKey, durationSec: heroDuration, now: getTime())
                 pendingSrc = true
+                pendingHeroTargetPageId = "{incomingPageId}"
               }
             }
 
