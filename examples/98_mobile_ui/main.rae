@@ -1390,11 +1390,19 @@ func main() {
               unmountPage(world: world, pageId: nowPlayingPageId)
               let freshNP: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: appState)
               rebindHero(world: world, fromKey: "albumCover", toKey: appState.currentAlbumStem)
+              # The freshly-mounted pages have no Active component →
+              # they default to active=true and would render on top
+              # of the incoming page. Explicitly deactivate them; the
+              # `setPageActive(incoming, true)` below re-activates
+              # whichever page is the actual destination.
+              setPageActive(world: world, pageId: albumPageId, active: false)
+              setPageActive(world: world, pageId: nowPlayingPageId, active: false)
             } else {
               if trackChangedNow {
                 unmountPage(world: world, pageId: nowPlayingPageId)
                 let freshNP: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: appState)
                 rebindHero(world: world, fromKey: "albumCover", toKey: appState.currentAlbumStem)
+                setPageActive(world: world, pageId: nowPlayingPageId, active: false)
               }
             }
 
