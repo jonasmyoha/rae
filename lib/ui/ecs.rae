@@ -623,3 +623,177 @@ func updateScrollOffset(world: mod UiWorld, target: view EntityId, scrollY: view
     s.y = scrollY
   }
 }
+
+# Drop `entity` from every ComponentTable in `world` AND from the
+# `world.alive` list. Each `componentRemove` is a no-op when the
+# entity isn't in that table, so the per-call cost is just a hash
+# probe. Cascade-drop on each removed value frees heap fields owned
+# by the component (Strings, Lists). Sibling-tables that store
+# `EntityId` references to this entity (e.g. another `Parent`
+# pointing here) are NOT cleared — the standard subtree-walking
+# unmount path destroys children before parents so this isn't an
+# issue in the supported usage pattern.
+func destroyEntity(world: mod UiWorld, entity: view EntityId) pub {
+  # Geometry / layout
+  componentRemove(this: world.rects, entity: entity)
+  componentRemove(this: world.sizes, entity: entity)
+  componentRemove(this: world.layouts, entity: entity)
+  componentRemove(this: world.paddings, entity: entity)
+  componentRemove(this: world.margins, entity: entity)
+  componentRemove(this: world.safeAreas, entity: entity)
+  componentRemove(this: world.aligns, entity: entity)
+  componentRemove(this: world.offsets, entity: entity)
+  componentRemove(this: world.constraints, entity: entity)
+  componentRemove(this: world.overflows, entity: entity)
+  componentRemove(this: world.transforms, entity: entity)
+  # Visual
+  componentRemove(this: world.sprites, entity: entity)
+  componentRemove(this: world.texts, entity: entity)
+  componentRemove(this: world.shapes, entity: entity)
+  componentRemove(this: world.shadows, entity: entity)
+  componentRemove(this: world.opacities, entity: entity)
+  componentRemove(this: world.pointerEvents, entity: entity)
+  componentRemove(this: world.hitAreas, entity: entity)
+  componentRemove(this: world.onClicks, entity: entity)
+  componentRemove(this: world.buttons, entity: entity)
+  componentRemove(this: world.actives, entity: entity)
+  componentRemove(this: world.editorVisibles, entity: entity)
+  componentRemove(this: world.editorLockeds, entity: entity)
+  componentRemove(this: world.heroWidgets, entity: entity)
+  componentRemove(this: world.debugAnchors, entity: entity)
+  componentRemove(this: world.pageRoots, entity: entity)
+  componentRemove(this: world.scrollStates, entity: entity)
+  # Identity / metadata
+  componentRemove(this: world.names, entity: entity)
+  componentRemove(this: world.primaryTypes, entity: entity)
+  componentRemove(this: world.nodeIdComponents, entity: entity)
+  componentRemove(this: world.sceneScopes, entity: entity)
+  componentRemove(this: world.runtimeOnlys, entity: entity)
+  # Dynamic / data binding
+  componentRemove(this: world.sceneInstances, entity: entity)
+  componentRemove(this: world.imageSourceResolvers, entity: entity)
+  componentRemove(this: world.textBindings, entity: entity)
+  componentRemove(this: world.maskShapes, entity: entity)
+  componentRemove(this: world.dataRequests, entity: entity)
+  componentRemove(this: world.listViews, entity: entity)
+  # Effects / motion
+  componentRemove(this: world.backgroundPans, entity: entity)
+  componentRemove(this: world.carousels, entity: entity)
+  componentRemove(this: world.smokeFxs, entity: entity)
+  componentRemove(this: world.animFrames, entity: entity)
+  componentRemove(this: world.animTriggers, entity: entity)
+  componentRemove(this: world.wobbleFxs, entity: entity)
+  # Hierarchy (Children must come AFTER all other tables — its
+  # cascade-drop frees the List(EntityId) buffer, and we want to
+  # release that buffer last in case anything earlier introspected
+  # the child set).
+  componentRemove(this: world.childrens, entity: entity)
+  componentRemove(this: world.parents, entity: entity)
+  # Derived / runtime-only
+  componentRemove(this: world.measuredSizes, entity: entity)
+  componentRemove(this: world.computedRects, entity: entity)
+  componentRemove(this: world.worldTransforms, entity: entity)
+  componentRemove(this: world.runtimeOffsets, entity: entity)
+  componentRemove(this: world.layoutScales, entity: entity)
+  componentRemove(this: world.safeInsets, entity: entity)
+  componentRemove(this: world.animStates, entity: entity)
+  # Finally: drop the alive-list entry. Linear scan over
+  # world.alive (typically a few hundred entries).
+  let alive: mod List(EntityId) => world.alive
+  let n: Int = alive.length
+  let i: Int = 0
+  loop i < n {
+    let e: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: i)
+    if e.value is entity.value {
+      alive.remove(index: i)
+      ret
+    }
+    i = i + 1
+  }
+}
+
+# Recursively destroy `root` and every descendant via the Children
+# chain. Children are destroyed before parents so the parent's
+# Children list (cleared as part of its own destroyEntity) doesn't
+# alias entities that have already been removed from `alive`. The
+# tree is read once into a list before any destruction starts, so
+# mutating the world during the walk is safe.
+func destroyEntitySubtree(world: mod UiWorld, root: view EntityId) pub {
+  let collected: List(EntityId) = createList(EntityId, initialCap: 32)
+  collectSubtreeEntities(world: world, root: root, out: collected)
+  # Destroy in reverse (children before parents).
+  let n: Int = collected.length
+  let i: Int = n - 1
+  loop i >= 0 {
+    let e: EntityId = rae_ext_rae_buf_get(buf: collected.data, index: i)
+    destroyEntity(world: world, entity: e)
+    i = i - 1
+  }
+}
+
+# Helper: append `root` then recurse into its children, depth-first.
+# The output list ends up in pre-order (parent before its children
+# in the list), which is why `destroyEntitySubtree` walks it in
+# reverse.
+func collectSubtreeEntities(world: view UiWorld, root: view EntityId, out: mod List(EntityId)) {
+  out.add(value: root)
+  if componentHas(this: world.childrens, entity: root) is false {
+    ret
+  }
+  let ch: view Children => componentView(this: world.childrens, entity: root)
+  let n: Int = ch.ids.length
+  let i: Int = 0
+  loop i < n {
+    let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
+    collectSubtreeEntities(world: world, root: cid, out: out)
+    i = i + 1
+  }
+}
+
+# Unmount a resident page: find its PageRoot, destroy the whole
+# subtree, and sweep `world.nodeIds` for keys with the `"<pageId>/"`
+# prefix so a future page with the same id starts clean. No-op when
+# no page with that id is mounted.
+func unmountPage(world: mod UiWorld, pageId: view String) pub {
+  let root: EntityId = findPageRootEntity(world: world, pageId: pageId)
+  if isNone(this: root) {
+    ret
+  }
+  destroyEntitySubtree(world: world, root: root)
+  # Sweep nodeIds keyed under `"<pageId>/"`. The pageOf walk
+  # already knows about nested PageRoot ancestors but we only
+  # remove the directly-named prefix here; nested pages that share
+  # an ancestor with this page get cleaned by their own unmount.
+  #
+  # Iterates the StringMap's raw buffer directly instead of calling
+  # `keys()` — the generic `keys(V)` doesn't monomorphise cleanly
+  # in the C backend when V is a non-trivial type (the inner
+  # `createList(V)` substitution leaks the type variable). Two
+  # passes: collect matching keys, then remove. Removing during
+  # iteration would shift entries under the cursor.
+  let prefix: String = ""
+  prefix = prefix.concat(other: pageId)
+  let sep: String = "/"
+  prefix = prefix.concat(other: sep)
+  let cap: Int = world.nodeIds.capacity
+  let matches: List(String) = createList(String, initialCap: 8)
+  let i: Int = 0
+  loop i < cap {
+    let entry: StringMapEntry(Int) = rae_ext_rae_buf_get(buf: world.nodeIds.data, index: i)
+    if entry.occupied {
+      if entry.k.startsWith(prefix: prefix) {
+        let kCopy: String = ""
+        kCopy = kCopy.concat(other: entry.k)
+        matches.add(value: own kCopy)
+      }
+    }
+    i = i + 1
+  }
+  let m: Int = matches.length
+  let j: Int = 0
+  loop j < m {
+    let k: String = matches.get(index: j)
+    world.nodeIds.remove(k: k)
+    j = j + 1
+  }
+}

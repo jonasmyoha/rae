@@ -220,6 +220,10 @@ func mountBackButtonOverlay(world: mod UiWorld, state: view AppState) pub ret En
   let margin: Float = 16.0
   let btn: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: btn, w: size, h: size)
+  let copiedId: String = ""
+  copiedId = copiedId.concat(other: backButtonPageId)
+  let pr: PageRoot = { id: own copiedId }
+  componentSet(this: world.pageRoots, entity: btn, data: own pr)
   # Slightly transparent dark fill so background content stays
   # legible underneath. Alpha 180 ≈ 70 % opaque — readable
   # contrast in both light and dark themes.
@@ -255,6 +259,24 @@ func mountBackButtonOverlay(world: mod UiWorld, state: view AppState) pub ret En
   ret btn
 }
 
+func mountNavTabsBar(
+  world: mod UiWorld
+  activeTab: Screen
+  scenes: view AlbumScenes
+) pub ret EntityId {
+  let bar: EntityId = buildNavTabsForScreen(world: world, activeTab: activeTab, scenes: scenes)
+  let barY: Float = screenH - navTabsH
+  let barOff: Offset = { delta: Vec2 { x: 0.0, y: barY } }
+  componentSet(this: world.offsets, entity: bar, data: barOff)
+  # Tag as a page so `unmountPage(world, navTabsPageId)` can find
+  # and rebuild it on tab change without tearing down the world.
+  let copiedId: String = ""
+  copiedId = copiedId.concat(other: navTabsPageId)
+  let pr: PageRoot = { id: own copiedId }
+  componentSet(this: world.pageRoots, entity: bar, data: own pr)
+  ret bar
+}
+
 func mountBottomDockOverlay(
   world: mod UiWorld
   activeTab: Screen
@@ -286,9 +308,6 @@ func mountBottomDockOverlay(
   # solid dark background is set inside `buildNavTabsForScreen` and
   # only covers the row of tab icons — it deliberately does NOT
   # extend up under the mini-player.
-  let bar: EntityId = buildNavTabsForScreen(world: world, activeTab: activeTab, scenes: scenes)
-  let barY: Float = screenH - navTabsH
-  let barOff: Offset = { delta: Vec2 { x: 0.0, y: barY } }
-  componentSet(this: world.offsets, entity: bar, data: barOff)
+  let bar: EntityId = mountNavTabsBar(world: world, activeTab: activeTab, scenes: scenes)
   ret bar
 }
