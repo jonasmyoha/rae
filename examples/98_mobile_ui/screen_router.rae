@@ -34,6 +34,65 @@ func buildScreenWorld(
   ret buildNowPlayingWorld(scenes: scenes, playback: playback, state: state, reg: texReg)
 }
 
+# Maps a Screen to the PageRoot id used for its mount. Symmetric to
+# the `mountXxxPage` calls in each screen builder.
+func pageIdForScreen(screen: Screen) pub ret String {
+  if screen is Screen.Album {
+    ret albumPageId
+  }
+  if screen is Screen.Search {
+    ret searchPageId
+  }
+  if screen is Screen.Profile {
+    ret profilePageId
+  }
+  ret nowPlayingPageId
+}
+
+# Persistent-world entrypoint: one UiWorld with ALL four screen pages
+# mounted, plus the shared dock + back-button overlays. Initially
+# only the page matching `state.tab` / `visibleScreen` is `Active`
+# — the others are mounted-but-hidden. Subsequent screen changes
+# flip `Active` via `setPageActive` instead of tearing the world
+# down. Data changes (album / track) still trigger a full rebuild
+# until slice 4b.3 introduces per-page invalidation.
+func buildAppWorld(
+  scenes: view AlbumScenes
+  playback: view PlaybackState
+  state: view AppState
+  texReg: view TextureRegistry
+  scrollY: view Float
+) pub ret UiWorld {
+  let world: UiWorld = createUiWorld()
+  let albumPage: EntityId = mountAlbumPage(world: world, scenes: scenes, state: state, scrollY: scrollY)
+  let nowPlayingPage: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: state)
+  let profilePage: EntityId = mountProfilePage(world: world, reg: texReg, state: state, scrollY: scrollY)
+  let searchPage: EntityId = mountSearchPage(world: world)
+
+  # Visibility: only the currently-visible screen is Active=true.
+  let visible: Screen = visibleScreen(state: state)
+  let activeAlbum: Active = { value: visible is Screen.Album }
+  let activeNowPlaying: Active = { value: visible is Screen.NowPlaying }
+  let activeProfile: Active = { value: visible is Screen.Profile }
+  let activeSearch: Active = { value: visible is Screen.Search }
+  componentSet(this: world.actives, entity: albumPage, data: activeAlbum)
+  componentSet(this: world.actives, entity: nowPlayingPage, data: activeNowPlaying)
+  componentSet(this: world.actives, entity: profilePage, data: activeProfile)
+  componentSet(this: world.actives, entity: searchPage, data: activeSearch)
+
+  # Shared overlays — always Active.
+  let dock: EntityId = mountBottomDockOverlay(
+    world: world
+    activeTab: state.tab
+    scenes: scenes
+    playback: playback
+    state: state
+    reg: texReg
+  )
+  let back: EntityId = mountBackButtonOverlay(world: world, state: state)
+  ret world
+}
+
 # Material icon key for the play button in the current state. Used by
 # both view builders to pick the right sprite override at mount time
 # (so the first frame already shows the right icon), and again per-frame
