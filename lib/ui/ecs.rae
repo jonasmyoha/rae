@@ -578,3 +578,34 @@ func isPageActive(world: view UiWorld, pageId: view String) pub ret Bool {
   let a: Active = componentGet(this: world.actives, entity: root)
   ret a.value
 }
+
+# Return the first entity in the world carrying a ScrollState — the
+# convention is that a freshly built world has at most one such
+# entity, marking the screen's scroll-target subtree. `noEntity()`
+# when no scroll target is present (e.g. screens that don't scroll).
+func findScrollTarget(world: view UiWorld) pub ret EntityId {
+  let n: Int = componentCount(this: world.scrollStates)
+  if n is 0 {
+    ret noEntity()
+  }
+  ret componentEntityAt(this: world.scrollStates, i: 0)
+}
+
+# Mutate the scroll target's Offset.delta.y AND its ScrollState.y
+# in place. The Offset bump propagates through layoutSystemIfDirty
+# and transformSystemIfDirty into a re-rendered frame without
+# tearing down and rebuilding the world. No-op when `target` is
+# `noEntity()` or carries neither component.
+func updateScrollOffset(world: mod UiWorld, target: view EntityId, scrollY: view Float) pub {
+  if isNone(this: target) {
+    ret
+  }
+  if componentHas(this: world.offsets, entity: target) {
+    let off: mod Offset => componentMod(this: world.offsets, entity: target)
+    off.delta.y = scrollY
+  }
+  if componentHas(this: world.scrollStates, entity: target) {
+    let s: mod ScrollState => componentMod(this: world.scrollStates, entity: target)
+    s.y = scrollY
+  }
+}
