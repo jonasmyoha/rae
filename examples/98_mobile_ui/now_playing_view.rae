@@ -42,8 +42,7 @@ func buildNowPlayingWorld(scenes: view AlbumScenes, playback: view PlaybackState
   # The now-playing scene fills whatever's left after the bottom bars.
   let bottomGap: Float = outerGap * 2.0
   let npH: Float = screenH - outerPad * 2.0 - miniPlayerH - navTabsH - bottomGap
-  let np: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: np, w: screenW - outerPad * 2.0, h: npH)
+  let npW: Float = screenW - outerPad * 2.0
 
   let npOverrides: List(SceneOverride) = emptyOverrides()
   # Play / pause glyph for the very first rendered frame; the inner
@@ -74,13 +73,19 @@ func buildNowPlayingWorld(scenes: view AlbumScenes, playback: view PlaybackState
   addTextOverride(list: npOverrides, nodeId: timeNowId, value: nowStr)
   addTextOverride(list: npOverrides, nodeId: timeTotalId, value: totalStr)
 
+  # Mount as a resident page so PlayIcon/ProgressBar/ProgressFill
+  # nodeIds live under "now-playing/..." and playback.rae's
+  # per-frame lookups can resolve them via `findNodeInPage`.
+  let npPageId: String = nowPlayingPageId
   let npLabel: String = "music-player-now-playing"
-  let mounted: EntityId = mountOrError(
+  let np: EntityId = mountPageOrError(
     world: world
-    mountEntity: np
+    pageId: npPageId
     scene: scenes.nowPlaying
-    sceneLabel: npLabel
     overrides: npOverrides
+    w: npW
+    h: npH
+    sceneLabel: npLabel
   )
 
   let kids: List(EntityId) = createList(EntityId, initialCap: 1)
@@ -115,8 +120,6 @@ func buildMiniPlayerInstance(
   playback: view PlaybackState
   state: view AppState
 ) pub ret EntityId {
-  let mount: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: mount, w: w, h: h)
   let album: Album = activeAlbum(state: state)
   let track: Track = trackAt(album: album, idx: state.currentTrackIndex)
 
@@ -132,12 +135,19 @@ func buildMiniPlayerInstance(
   addTextOverride(list: overrides, nodeId: miniTitleId, value: titleText)
   addTextOverride(list: overrides, nodeId: miniArtistId, value: artistText)
 
-  let mounted: EntityId = mountOrError(
+  # Scope the mini-player under its own page so MiniPlayIcon resolves
+  # via `findNodeInPage(world, "mini-player", "MiniPlayIcon")`. The
+  # mini-player is mounted as part of the bottom dock on every screen;
+  # only one is resident at any moment so the page id is a constant.
+  let miniPageId: String = miniPlayerPageId
+  let mount: EntityId = mountPageOrError(
     world: world
-    mountEntity: mount
+    pageId: miniPageId
     scene: scene
-    sceneLabel: label
     overrides: overrides
+    w: w
+    h: h
+    sceneLabel: label
   )
   ret mount
 }
