@@ -98,8 +98,45 @@ func findHeroEntity(world: view UiWorld, key: view String) pub ret EntityId {
   ret noEntity()
 }
 
+# Find a HeroWidget with the given key whose owning PageRoot
+# ancestor matches `pageId`. In a persistent UiWorld with all
+# pages mounted, the same hero key (e.g. an album stem) lives on
+# multiple pages — the source's page, the target's page, and
+# every profile-grid tile that shows the same cover. `findHeroEntity`
+# alone returns the first match in the table, which is unstable
+# across screen changes; this scoped lookup is what hero capture
+# uses to pick the right entity for the source vs target page.
+func findHeroEntityOnPage(world: view UiWorld, pageId: view String, key: view String) pub ret EntityId {
+  let n: Int = componentCount(this: world.heroWidgets)
+  let i: Int = 0
+  loop i < n {
+    let e: EntityId = componentEntityAt(this: world.heroWidgets, i: i)
+    let hw: HeroWidget = componentDataAt(this: world.heroWidgets, i: i)
+    if hw.key.equals(other: key) {
+      let p: String = pageOf(world: world, entity: e)
+      if p.equals(other: pageId) {
+        ret e
+      }
+    }
+    i = i + 1
+  }
+  ret noEntity()
+}
+
 func captureHeroSource(anim: mod HeroAnim, world: view UiWorld, key: view String) pub ret Bool {
   let e: EntityId = findHeroEntity(world: world, key: key)
+  ret captureHeroSourceFromEntity(anim: anim, world: world, e: e)
+}
+
+# Page-scoped source capture — picks the hero whose owning PageRoot
+# matches `pageId`, then samples its WorldTransform / ComputedRect.
+# Returns `false` when no hero with that key lives on that page.
+func captureHeroSourceOnPage(anim: mod HeroAnim, world: view UiWorld, pageId: view String, key: view String) pub ret Bool {
+  let e: EntityId = findHeroEntityOnPage(world: world, pageId: pageId, key: key)
+  ret captureHeroSourceFromEntity(anim: anim, world: world, e: e)
+}
+
+func captureHeroSourceFromEntity(anim: mod HeroAnim, world: view UiWorld, e: view EntityId) ret Bool {
   if isNone(this: e) {
     ret false
   }
@@ -128,6 +165,16 @@ func captureHeroSource(anim: mod HeroAnim, world: view UiWorld, key: view String
 
 func captureHeroTarget(anim: mod HeroAnim, world: view UiWorld, key: view String) pub ret Bool {
   let e: EntityId = findHeroEntity(world: world, key: key)
+  ret captureHeroTargetFromEntity(anim: anim, world: world, e: e)
+}
+
+# Page-scoped target capture — symmetric with `captureHeroSourceOnPage`.
+func captureHeroTargetOnPage(anim: mod HeroAnim, world: view UiWorld, pageId: view String, key: view String) pub ret Bool {
+  let e: EntityId = findHeroEntityOnPage(world: world, pageId: pageId, key: key)
+  ret captureHeroTargetFromEntity(anim: anim, world: world, e: e)
+}
+
+func captureHeroTargetFromEntity(anim: mod HeroAnim, world: view UiWorld, e: view EntityId) ret Bool {
   if isNone(this: e) {
     ret false
   }
@@ -155,23 +202,33 @@ func startHeroTransition(anim: mod HeroAnim, key: own String, durationSec: view 
 
 # Toggle the hero entity's WorldTransform.visible. Used to hide the
 # entity in the destination world while the overlay paints it, then
-# to restore visibility once the transition lands.
+# to restore visibility once the transition lands. Mutates the
+# existing WorldTransform in place so scaleX / scaleY / rotation are
+# preserved — the previous form built a partial struct literal that
+# silently zeroed the missing fields, killing the entity's scale.
 func setHeroVisible(world: mod UiWorld, key: view String, visible: view Bool) pub {
   let e: EntityId = findHeroEntity(world: world, key: key)
+  setHeroVisibleForEntity(world: world, e: e, visible: visible)
+}
+
+# Page-scoped version — flips visibility on the hero matching `key`
+# under the given `pageId` only. With multiple pages mounted, two
+# hero entities can share the same key (e.g. album page + now-playing
+# page both have the rebound cover); this picks the right one.
+func setHeroVisibleOnPage(world: mod UiWorld, pageId: view String, key: view String, visible: view Bool) pub {
+  let e: EntityId = findHeroEntityOnPage(world: world, pageId: pageId, key: key)
+  setHeroVisibleForEntity(world: world, e: e, visible: visible)
+}
+
+func setHeroVisibleForEntity(world: mod UiWorld, e: view EntityId, visible: view Bool) {
   if isNone(this: e) {
     ret
   }
   if componentHas(this: world.worldTransforms, entity: e) is false {
     ret
   }
-  let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: e)
-  let updated: WorldTransform = {
-    x: wt.x
-    y: wt.y
-    alpha: wt.alpha
-    visible: visible
-  }
-  componentSet(this: world.worldTransforms, entity: e, data: updated)
+  let wt: mod WorldTransform => componentMod(this: world.worldTransforms, entity: e)
+  wt.visible = visible
 }
 
 # Rename every HeroWidget whose key is `fromKey` to `toKey`, and
