@@ -1412,10 +1412,28 @@ func main() {
               let newBack: EntityId = mountBackButtonOverlay(world: world, state: appState)
 
               currentScreen = nextScreen
-              # Reset scroll on screen change so the new screen always
-              # starts at the top.
-              profileScrollY = 0.0
+              # Persistent per-page scroll: read the new page's
+              # stored ScrollState.y instead of resetting to 0. The
+              # entity survived the screen change (we only flipped
+              # Active), so its `ScrollState.y` reflects wherever the
+              # user left it. Non-scrolling pages have no ScrollState
+              # → findScrollTarget returns noEntity → we still
+              # default to 0.0.
               scrollTarget = findScrollTarget(world: world)
+              if isNone(this: scrollTarget) {
+                profileScrollY = 0.0
+              } else {
+                if componentHas(this: world.scrollStates, entity: scrollTarget) {
+                  let s: ScrollState = componentGet(this: world.scrollStates, entity: scrollTarget)
+                  profileScrollY = s.y
+                } else {
+                  profileScrollY = 0.0
+                }
+              }
+              # Kill any in-flight spring/momentum velocity from the
+              # outgoing page — fresh interactions on the new page
+              # shouldn't inherit a fling we were finishing elsewhere.
+              scrollVelocity = 0.0
               updateScrollOffset(world: world, target: scrollTarget, scrollY: profileScrollY)
               # Entity ids on the new screen are unrelated to the
               # outgoing one; drop any held-press id so the next
