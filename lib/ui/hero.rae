@@ -200,12 +200,12 @@ func startHeroTransition(anim: mod HeroAnim, key: own String, durationSec: view 
   anim.duration = durationSec
 }
 
-# Toggle the hero entity's WorldTransform.visible. Used to hide the
-# entity in the destination world while the overlay paints it, then
-# to restore visibility once the transition lands. Mutates the
-# existing WorldTransform in place so scaleX / scaleY / rotation are
-# preserved — the previous form built a partial struct literal that
-# silently zeroed the missing fields, killing the entity's scale.
+# Toggle the hero entity's visibility for the duration of the hero
+# overlay paint. Mutates the entity's `Active` component (the
+# upstream input to the transform pass), NOT its WorldTransform —
+# WorldTransform.visible is recomputed from Active/fx/parent every
+# `transformSystemIfDirty` call, so writing to it directly would be
+# stomped on the next frame. Active is what owners actually control.
 func setHeroVisible(world: mod UiWorld, key: view String, visible: view Bool) pub {
   let e: EntityId = findHeroEntity(world: world, key: key)
   setHeroVisibleForEntity(world: world, e: e, visible: visible)
@@ -224,11 +224,8 @@ func setHeroVisibleForEntity(world: mod UiWorld, e: view EntityId, visible: view
   if isNone(this: e) {
     ret
   }
-  if componentHas(this: world.worldTransforms, entity: e) is false {
-    ret
-  }
-  let wt: mod WorldTransform => componentMod(this: world.worldTransforms, entity: e)
-  wt.visible = visible
+  let a: Active = { value: visible }
+  componentSet(this: world.actives, entity: e, data: a)
 }
 
 # Rename every HeroWidget whose key is `fromKey` to `toKey`, and
