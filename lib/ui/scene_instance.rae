@@ -286,7 +286,10 @@ func mountSceneInstanceIntoPage(
   let i: Int = 0
   loop i < nodeCount {
     let node: view SceneNode => sceneNodeAt(this: scene, idx: i)
-    let entity: EntityId = mountEntity
+    # Explicit struct construction (not `let entity: EntityId =
+    # mountEntity`) — the Live VM treats the latter as a view-ref
+    # bind and then refuses the reassignment on the next branch.
+    let entity: EntityId = { value: mountEntity.value }
     if i is not rootIdx {
       entity = createEntity(world: world)
     }
@@ -504,4 +507,50 @@ func applyOverride(world: mod UiWorld, entity: view EntityId, override: view Sce
     }
     ret
   }
+}
+
+# Mount `scene` as a resident page identified by `pageId`. Creates a
+# fresh root entity sized `w` x `h`, tags it with PageRoot{id: pageId},
+# and writes every node's id under the `"<pageId>/<nodeId>"` key so
+# two pages can coexist without colliding on shared nodeIds.
+#
+# Returns the page-root entity. The caller usually pins it for
+# subsequent `setPageActive` / `unmountPage` calls, or looks it up
+# later via `findPageRootEntity(world, pageId)`.
+#
+# Calling `mountPage` twice with the same id is the caller's bug —
+# we don't dedup. Use `findPageRootEntity` to gate idempotently.
+func mountPage(
+  world: mod UiWorld
+  pageId: own String
+  scene: view Scene
+  overrides: view List(SceneOverride)
+  w: view Float
+  h: view Float
+) pub ret EntityId {
+  let root: EntityId = createEntity(world: world)
+  let r: Rect = { x: 0.0, y: 0.0, w: w, h: h }
+  componentSet(this: world.rects, entity: root, data: r)
+  let size: Size = {
+    w: SizeAxis { mode: SizeMode.Fixed, min: -1, max: -1 }
+    h: SizeAxis { mode: SizeMode.Fixed, min: -1, max: -1 }
+  }
+  componentSet(this: world.sizes, entity: root, data: size)
+  let mounted: EntityId = mountSceneInstanceIntoPage(
+    world: world
+    mountEntity: root
+    scene: scene
+    overrides: overrides
+    pageId: pageId
+  )
+  if isNone(this: mounted) {
+    # Mount failed; mountSceneInstanceIntoPage skipped the PageRoot
+    # tag because it bailed early. Tag root ourselves so the page is
+    # still discoverable and `unmountPage` works on the husk.
+    let copiedId: String = ""
+    copiedId = copiedId.concat(other: pageId)
+    let pr: PageRoot = { id: own copiedId }
+    componentSet(this: world.pageRoots, entity: root, data: own pr)
+  }
+  ret root
 }
