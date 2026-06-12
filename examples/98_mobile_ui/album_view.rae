@@ -203,6 +203,11 @@ func buildAlbumWorld(scenes: view AlbumScenes, playback: view PlaybackState, sta
   # content (no exposed un-painted area when overscrolling).
   let off: Offset = { delta: Vec2 { x: 0.0, y: scrollY } }
   componentSet(this: world.offsets, entity: root, data: off)
+  # Tag the scroll-target entity with ScrollState so main.rae's
+  # in-place scroll path (`findScrollTarget`) can locate it without
+  # plumbing the root entity back out through the build pipeline.
+  let scroll: ScrollState = { y: scrollY, velocity: 0.0 }
+  componentSet(this: world.scrollStates, entity: root, data: scroll)
 
   let header: EntityId = buildAlbumHeader(world: world, scene: scenes.album, album: album)
   let trackList: EntityId = buildTrackList(world: world, trackScene: scenes.trackRow, album: album)

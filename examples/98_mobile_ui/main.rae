@@ -570,6 +570,12 @@ func main() {
       layoutSystemIfDirty(world: world, cache: layoutCache)
       let transformCache: TransformCache = createTransformCache()
       transformSystemIfDirty(world: world, cache: transformCache)
+      # Find the scroll-target entity for this world. Scroll handlers
+      # mutate this entity's Offset + ScrollState in place every frame
+      # — that's what lets wheel/drag/momentum/spring run WITHOUT
+      # tearing the world down on each tick. `noEntity()` is fine; the
+      # `updateScrollOffset` helper is a no-op for it.
+      let scrollTarget: EntityId = findScrollTarget(world: world)
       # `renderCache` controls idle frame-skipping: when no visual
       # ComponentTable has bumped its generation since the last frame
       # (and no input event landed this frame, and the heartbeat isn't
@@ -828,7 +834,11 @@ func main() {
                   dragDelta2 = dragDelta1
                   dragDelta1 = dragDelta0
                   dragDelta0 = eff
-                  switching = true
+                  # In-place: mutate the scroll target's Offset +
+                  # ScrollState instead of triggering a full rebuild.
+                  # `layoutSystemIfDirty` picks up the offset bump on
+                  # the next inner-loop iteration's render pass.
+                  updateScrollOffset(world: world, target: scrollTarget, scrollY: profileScrollY)
                 }
               }
             } else {
@@ -925,7 +935,7 @@ func main() {
                   profileScrollY = target
                   scrollVelocity = 0.0
                 }
-                switching = true
+                updateScrollOffset(world: world, target: scrollTarget, scrollY: profileScrollY)
                 }
                 # else: wheel is actively scrolling — let the wheel
                 # block (further down the iteration) drive `pos`.
@@ -944,7 +954,7 @@ func main() {
                   if absVel > 0.3 {
                     profileScrollY = profileScrollY + scrollVelocity
                     scrollVelocity = scrollVelocity * 0.97
-                    switching = true
+                    updateScrollOffset(world: world, target: scrollTarget, scrollY: profileScrollY)
                   } else {
                     scrollVelocity = 0.0
                   }
@@ -1141,6 +1151,18 @@ func main() {
           # NOTE: showLabels is NOT in this list. The heartbeat is the
           # real-work indicator (drawn only when active fires). Forcing
           # active whenever labels are on would defeat the purpose.
+
+          # Re-run layout + transform if any tracked component changed
+          # since last frame (scroll handlers mutate Offset in place).
+          # Both short-circuit when no input table generation bumped,
+          # so the steady-state cost is one generation read per
+          # tracked table. Runs BEFORE the active check so a scroll-
+          # only frame still ends up dirty downstream — Offset mutate
+          # → layout reruns → ComputedRect bumps → transform reruns →
+          # WorldTransform bumps → renderCacheDirty trips → active.
+          layoutSystemIfDirty(world: world, cache: layoutCache)
+          transformSystemIfDirty(world: world, cache: transformCache)
+
           let active: Bool = forceRender
           if active is false {
             if renderCacheDirty(world: world, cache: renderCache) {
@@ -1441,7 +1463,7 @@ func main() {
               # spring/momentum branches above know to stay out
               # of the way until the OS-delivered momentum stops.
               lastWheelTime = getTime()
-              switching = true
+              updateScrollOffset(world: world, target: scrollTarget, scrollY: profileScrollY)
             }
           }
 
