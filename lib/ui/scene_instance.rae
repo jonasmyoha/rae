@@ -260,9 +260,11 @@ func mountSceneInstance(
 }
 
 # Same as `mountSceneInstance` but writes nodeIds under a `pageId/`
-# prefix and tags `mountEntity` with `PageRoot { id: pageId }` (when
-# `pageId` is non-empty). Empty `pageId` is the unscoped path that
-# matches the legacy rebuild flow.
+# prefix so the scene's nodeIds don't collide with other resident
+# pages. Empty `pageId` is the unscoped path that matches the
+# legacy rebuild flow. Does NOT tag `mountEntity` as a PageRoot —
+# scoping and page-root tagging are separate concerns; the caller
+# typically tags an enclosing entity. `mountPage` does both at once.
 func mountSceneInstanceIntoPage(
   world: mod UiWorld
   mountEntity: view EntityId
@@ -303,12 +305,8 @@ func mountSceneInstanceIntoPage(
     i = i + 1
   }
 
-  if pageId.length() > 0 {
-    let copiedId: String = ""
-    copiedId = copiedId.concat(other: pageId)
-    let pr: PageRoot = { id: own copiedId }
-    componentSet(this: world.pageRoots, entity: mountEntity, data: own pr)
-  }
+  # NOTE: tagging mountEntity with PageRoot moved out of here in
+  # slice 4b — callers tag explicitly when they own the page.
 
   # Pass 2: apply components. For the scene's root node we skip
   # placement components — those belong to the mount entity. Other
@@ -547,15 +545,13 @@ func mountPage(
     overrides: overrides
     pageId: pageId
   )
-  if isNone(this: mounted) {
-    # Scene parsed but had no root node. `mountSceneInstanceIntoPage`
-    # bailed before tagging — we created the entity, so leave the
-    # PageRoot tag on the husk so a later `findPageRootEntity` /
-    # `unmountPage` can still see it.
-    let copiedId: String = ""
-    copiedId = copiedId.concat(other: pageId)
-    let pr: PageRoot = { id: own copiedId }
-    componentSet(this: world.pageRoots, entity: root, data: own pr)
-  }
+  # Tag the page root explicitly — `mountSceneInstanceIntoPage` only
+  # scopes nodeIds, leaving the page-root tagging to callers like us.
+  # The tag goes on the husk even on mount-failure so a later
+  # `findPageRootEntity` / `unmountPage` can still see it.
+  let copiedId: String = ""
+  copiedId = copiedId.concat(other: pageId)
+  let pr: PageRoot = { id: own copiedId }
+  componentSet(this: world.pageRoots, entity: root, data: own pr)
   ret root
 }
