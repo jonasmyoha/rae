@@ -60,21 +60,24 @@ func buildAlbumHeader(world: mod UiWorld, scene: view Scene, album: view Album) 
   addTextOverride(list: overrides, nodeId: titleId, value: titleText)
   addTextOverride(list: overrides, nodeId: artistId, value: artistText)
 
-  # Mount the album scene as a resident page. Album nodeIds get
-  # scoped under "album/..." so they can't collide with other
-  # screens' nodeIds (e.g. when persistent UiWorld keeps multiple
-  # pages mounted at once).
-  let pageId: String = albumPageId
+  # Scope the album scene's nodeIds under "album/" so they don't
+  # collide with sibling pages, but don't tag the header itself as
+  # a PageRoot — the album SCREEN root carries `PageRoot{"album"}`
+  # in the persistent-world model.
+  let header: EntityId = createEntity(world: world)
+  setRectFixed(world: world, entity: header, w: w, h: albumHeaderHeight())
   let label: String = "album"
-  let header: EntityId = mountPageOrError(
+  let mounted: EntityId = mountSceneInstanceIntoPage(
     world: world
-    pageId: pageId
+    mountEntity: header
     scene: scene
     overrides: overrides
-    w: w
-    h: albumHeaderHeight()
-    sceneLabel: label
+    pageId: albumPageId
   )
+  if isNone(this: mounted) {
+    log("[scene-error] album header mount failed (scene.ok={scene.ok})")
+    paintErrorBlock(world: world, entity: header, label: label)
+  }
   ret header
 }
 
@@ -183,9 +186,16 @@ func albumScrollMin(album: view Album) pub ret Float {
 # mini-player / nav-tabs as code-attached siblings around it. Pulls
 # the active album from `state` once so all the data-driven pieces
 # below stay consistent within a single rebuild.
-func buildAlbumWorld(scenes: view AlbumScenes, playback: view PlaybackState, state: view AppState, reg: view TextureRegistry, scrollY: view Float) pub ret UiWorld {
-  let world: UiWorld = createUiWorld()
-  let contentW: Float = screenW - outerPad * 2.0
+# Persistent-world entrypoint. Mounts the album page (screen root
+# tagged `PageRoot{"album"}`, ScrollState for the scrolling
+# behaviour, header + track-list + spacer children). Does NOT mount
+# dock / back overlays — those are app-level chrome.
+func mountAlbumPage(
+  world: mod UiWorld
+  scenes: view AlbumScenes
+  state: view AppState
+  scrollY: view Float
+) pub ret EntityId {
   let album: Album = activeAlbum(state: state)
 
   let root: EntityId = createEntity(world: world)
@@ -195,17 +205,14 @@ func buildAlbumWorld(scenes: view AlbumScenes, playback: view PlaybackState, sta
   let alignS: AlignKind = AlignKind.Start
   setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
   setPaddingAll(world: world, entity: root, n: outerPad)
-  # Wheel/drag scroll: shift the whole root by `scrollY` (clamped
-  # to `[albumScrollMin, 0]` by the host). The dock overlay is
-  # parentless so it stays pinned to the bottom — only the album
-  # content scrolls. `setShapeRect` above paints `surfaceColor`
-  # across the shifted root, so the background follows the
-  # content (no exposed un-painted area when overscrolling).
+
+  let copiedId: String = ""
+  copiedId = copiedId.concat(other: albumPageId)
+  let pr: PageRoot = { id: own copiedId }
+  componentSet(this: world.pageRoots, entity: root, data: own pr)
+
   let off: Offset = { delta: Vec2 { x: 0.0, y: scrollY } }
   componentSet(this: world.offsets, entity: root, data: off)
-  # Tag the scroll-target entity with ScrollState so main.rae's
-  # in-place scroll path (`findScrollTarget`) can locate it without
-  # plumbing the root entity back out through the build pipeline.
   let scroll: ScrollState = { y: scrollY, velocity: 0.0 }
   componentSet(this: world.scrollStates, entity: root, data: scroll)
 
@@ -219,9 +226,12 @@ func buildAlbumWorld(scenes: view AlbumScenes, playback: view PlaybackState, sta
   kids.add(value: spacer)
   attachChildren(world: world, parent: root, kids: kids)
 
-  # Bottom dock (mini-player + nav-tabs) mounts as a parentless
-  # overlay so the same code/position is shared across screens —
-  # the player no longer "jumps" when switching to / from Library.
+  ret root
+}
+
+func buildAlbumWorld(scenes: view AlbumScenes, playback: view PlaybackState, state: view AppState, reg: view TextureRegistry, scrollY: view Float) pub ret UiWorld {
+  let world: UiWorld = createUiWorld()
+  let page: EntityId = mountAlbumPage(world: world, scenes: scenes, state: state, scrollY: scrollY)
   let dock: EntityId = mountBottomDockOverlay(
     world: world
     activeTab: state.tab
@@ -230,9 +240,6 @@ func buildAlbumWorld(scenes: view AlbumScenes, playback: view PlaybackState, sta
     state: state
     reg: reg
   )
-  # Floating back button overlays on top of everything when the
-  # user has drilled into a sub-page. No-op on tab base pages.
   let back: EntityId = mountBackButtonOverlay(world: world, state: state)
-
   ret world
 }

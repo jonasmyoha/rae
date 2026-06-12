@@ -26,8 +26,12 @@ func nowPlayingTimes(playback: view PlaybackState, track: view Track) ret List(S
   ret pair
 }
 
-func buildNowPlayingWorld(scenes: view AlbumScenes, playback: view PlaybackState, state: view AppState, reg: view TextureRegistry) pub ret UiWorld {
-  let world: UiWorld = createUiWorld()
+func mountNowPlayingPage(
+  world: mod UiWorld
+  scenes: view AlbumScenes
+  playback: view PlaybackState
+  state: view AppState
+) pub ret EntityId {
   let album: Album = activeAlbum(state: state)
   let track: Track = trackAt(album: album, idx: state.currentTrackIndex)
 
@@ -39,21 +43,23 @@ func buildNowPlayingWorld(scenes: view AlbumScenes, playback: view PlaybackState
   setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
   setPaddingAll(world: world, entity: root, n: outerPad)
 
+  let copiedId: String = ""
+  copiedId = copiedId.concat(other: nowPlayingPageId)
+  let pr: PageRoot = { id: own copiedId }
+  componentSet(this: world.pageRoots, entity: root, data: own pr)
+
   # The now-playing scene fills whatever's left after the bottom bars.
   let bottomGap: Float = outerGap * 2.0
   let npH: Float = screenH - outerPad * 2.0 - miniPlayerH - navTabsH - bottomGap
   let npW: Float = screenW - outerPad * 2.0
+  let np: EntityId = createEntity(world: world)
+  setRectFixed(world: world, entity: np, w: npW, h: npH)
 
   let npOverrides: List(SceneOverride) = emptyOverrides()
-  # Play / pause glyph for the very first rendered frame; the inner
-  # loop swaps it again whenever `isPlaying` flips after that.
   let playIconId: String = "PlayIcon"
   let iconKey: String = playbackIconKey(playback: playback)
   addSpriteOverride(list: npOverrides, nodeId: playIconId, value: iconKey)
 
-  # Track title / artist text. Empty album → empty overrides; the
-  # scene's authored placeholders show through. Same for missing
-  # tracks (`trackAt` returns the empty stub).
   let titleId: String = "TrackTitle"
   let artistId: String = "TrackArtist"
   let titleText: String = "{track.title}"
@@ -61,10 +67,6 @@ func buildNowPlayingWorld(scenes: view AlbumScenes, playback: view PlaybackState
   addTextOverride(list: npOverrides, nodeId: titleId, value: titleText)
   addTextOverride(list: npOverrides, nodeId: artistId, value: artistText)
 
-  # Current position / track duration. The inner-loop progress-bar
-  # update doesn't touch the time labels — they're refreshed on
-  # every world rebuild. Snappier than per-frame DOM edits and
-  # accurate enough for a 1-second clock display.
   let times: List(String) = nowPlayingTimes(playback: playback, track: track)
   let nowStr: String = times.get(index: 0)
   let totalStr: String = times.get(index: 1)
@@ -73,27 +75,32 @@ func buildNowPlayingWorld(scenes: view AlbumScenes, playback: view PlaybackState
   addTextOverride(list: npOverrides, nodeId: timeNowId, value: nowStr)
   addTextOverride(list: npOverrides, nodeId: timeTotalId, value: totalStr)
 
-  # Mount as a resident page so PlayIcon/ProgressBar/ProgressFill
-  # nodeIds live under "now-playing/..." and playback.rae's
-  # per-frame lookups can resolve them via `findNodeInPage`.
-  let npPageId: String = nowPlayingPageId
+  # Scope-only mount: the PlayIcon / ProgressBar / ProgressFill
+  # nodeIds get the "now-playing/..." prefix without re-tagging
+  # the np entity. The page-root tag lives on the screen root above.
   let npLabel: String = "music-player-now-playing"
-  let np: EntityId = mountPageOrError(
+  let mounted: EntityId = mountSceneInstanceIntoPage(
     world: world
-    pageId: npPageId
+    mountEntity: np
     scene: scenes.nowPlaying
     overrides: npOverrides
-    w: npW
-    h: npH
-    sceneLabel: npLabel
+    pageId: nowPlayingPageId
   )
+  if isNone(this: mounted) {
+    log("[scene-error] now-playing mount failed (scene.ok={scenes.nowPlaying.ok})")
+    paintErrorBlock(world: world, entity: np, label: npLabel)
+  }
 
   let kids: List(EntityId) = createList(EntityId, initialCap: 1)
   kids.add(value: np)
   attachChildren(world: world, parent: root, kids: kids)
 
-  # Bottom dock (mini-player + nav-tabs). Shared across screens —
-  # see nav_tabs_builder.rae.
+  ret root
+}
+
+func buildNowPlayingWorld(scenes: view AlbumScenes, playback: view PlaybackState, state: view AppState, reg: view TextureRegistry) pub ret UiWorld {
+  let world: UiWorld = createUiWorld()
+  let page: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: state)
   let dock: EntityId = mountBottomDockOverlay(
     world: world
     activeTab: state.tab
@@ -103,7 +110,6 @@ func buildNowPlayingWorld(scenes: view AlbumScenes, playback: view PlaybackState
     reg: reg
   )
   let back: EntityId = mountBackButtonOverlay(world: world, state: state)
-
   ret world
 }
 

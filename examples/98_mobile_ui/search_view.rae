@@ -131,14 +131,7 @@ func buildSearchTopBar(world: mod UiWorld) ret EntityId {
 
 # --- public entrypoint ------------------------------------------------
 
-func buildSearchWorld(
-  scenes: view AlbumScenes
-  playback: view PlaybackState
-  state: view AppState
-  reg: view TextureRegistry
-) pub ret UiWorld {
-  let world: UiWorld = createUiWorld()
-
+func mountSearchPage(world: mod UiWorld) pub ret EntityId {
   let root: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: root, w: screenW, h: screenH)
   setShapeRect(world: world, entity: root, fill: surfaceColor)
@@ -146,6 +139,11 @@ func buildSearchWorld(
   let alignS: AlignKind = AlignKind.Start
   setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
   setPaddingAll(world: world, entity: root, n: outerPad)
+
+  let copiedId: String = ""
+  copiedId = copiedId.concat(other: searchPageId)
+  let pr: PageRoot = { id: own copiedId }
+  componentSet(this: world.pageRoots, entity: root, data: own pr)
 
   let topBar: EntityId = buildSearchTopBar(world: world)
   let field: EntityId = buildSearchField(world: world)
@@ -157,9 +155,17 @@ func buildSearchWorld(
   kids.add(value: recent)
   attachChildren(world: world, parent: root, kids: kids)
 
-  # Shared bottom dock (mini-player + nav-tabs). The highlight
-  # always reflects `state.tab` — sub-pages keep their parent
-  # tab selected (Profile → Album sub-page still shows Profile).
+  ret root
+}
+
+func buildSearchWorld(
+  scenes: view AlbumScenes
+  playback: view PlaybackState
+  state: view AppState
+  reg: view TextureRegistry
+) pub ret UiWorld {
+  let world: UiWorld = createUiWorld()
+  let page: EntityId = mountSearchPage(world: world)
   let dock: EntityId = mountBottomDockOverlay(
     world: world
     activeTab: state.tab
@@ -169,6 +175,5 @@ func buildSearchWorld(
     reg: reg
   )
   let back: EntityId = mountBackButtonOverlay(world: world, state: state)
-
   ret world
 }
