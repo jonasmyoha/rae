@@ -107,9 +107,10 @@ func playbackProgress(state: view PlaybackState) pub ret Float {
 func applyPlaybackToWorld(world: mod UiWorld, state: view PlaybackState) pub {
   let iconKey: String = playbackIconKey(playback: state)
 
-  # Big play button on the now-playing screen.
+  # Big play button on the now-playing screen — scoped lookup under
+  # the now-playing page. Absent (returns none) on other screens.
   let playIconKey: String = "PlayIcon"
-  let playIconEntityOpt: opt Int = world.nodeIds.get(k: playIconKey)
+  let playIconEntityOpt: opt Int = findNodeInPage(world: world, pageId: nowPlayingPageId, nodeId: playIconKey)
   if playIconEntityOpt is none {
   } else {
     let playIconRaw: Int = playIconEntityOpt
@@ -120,9 +121,11 @@ func applyPlaybackToWorld(world: mod UiWorld, state: view PlaybackState) pub {
     }
   }
 
-  # Mini-player play button (present on both screens).
+  # Mini-player play button — scoped under the mini-player page. The
+  # mini-player is mounted as part of the bottom dock on every screen,
+  # so this should always resolve while the dock is on screen.
   let miniIconKey: String = "MiniPlayIcon"
-  let miniIconEntityOpt: opt Int = world.nodeIds.get(k: miniIconKey)
+  let miniIconEntityOpt: opt Int = findNodeInPage(world: world, pageId: miniPlayerPageId, nodeId: miniIconKey)
   if miniIconEntityOpt is none {
   } else {
     let miniIconRaw: Int = miniIconEntityOpt
@@ -141,9 +144,9 @@ func applyPlaybackToWorld(world: mod UiWorld, state: view PlaybackState) pub {
   # layout reflows would otherwise reset the fill width to whatever
   # was last authored).
   let trackKey: String = "ProgressBar"
-  let trackEntityOpt: opt Int = world.nodeIds.get(k: trackKey)
+  let trackEntityOpt: opt Int = findNodeInPage(world: world, pageId: nowPlayingPageId, nodeId: trackKey)
   let fillKey: String = "ProgressFill"
-  let fillEntityOpt: opt Int = world.nodeIds.get(k: fillKey)
+  let fillEntityOpt: opt Int = findNodeInPage(world: world, pageId: nowPlayingPageId, nodeId: fillKey)
   if trackEntityOpt is none {
   } else {
     if fillEntityOpt is none {
