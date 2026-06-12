@@ -1,0 +1,92 @@
+# Exercise the page-lifecycle primitives: mountPage tags the root,
+# scopes nodeIds, and setPageActive flips visibility without tearing
+# the subtree down. Two pages with overlapping nodeIds prove the
+# scoping actually keeps lookups separate.
+import json
+import string
+import core
+import ui/components
+import ui/ecs
+import ui/registry
+import ui/scene
+import ui/scene_instance
+
+func tinyScene(rootId: view String) ret String {
+  let s: String = ""
+  s = s.concat(other: "\{")
+  s = s.concat(other: "\"type\":\"Scene\",")
+  s = s.concat(other: "\"version\":2,")
+  s = s.concat(other: "\"sceneId\":\"")
+  s = s.concat(other: rootId)
+  s = s.concat(other: "\",")
+  s = s.concat(other: "\"root\":\"Root\",")
+  s = s.concat(other: "\"nodes\":\{")
+  s = s.concat(other: "\"Root\":\{")
+  s = s.concat(other: "\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":400\},")
+  s = s.concat(other: "\"Children\":[\"Body\"]")
+  s = s.concat(other: "\},")
+  s = s.concat(other: "\"Body\":\{")
+  s = s.concat(other: "\"Text\":\{\"text\":\"hi\",\"styleId\":\"body\"\}")
+  s = s.concat(other: "\}")
+  s = s.concat(other: "\}\}")
+  ret s
+}
+
+func main() {
+  let world: UiWorld = createUiWorld()
+
+  let sceneA: Scene = parseScene(source: tinyScene(rootId: "sceneA"))
+  let sceneB: Scene = parseScene(source: tinyScene(rootId: "sceneB"))
+  log("sceneA.ok={sceneA.ok} sceneB.ok={sceneB.ok}")
+
+  let noOverrides: List(SceneOverride) = emptyOverrides()
+
+  # Mount two pages with overlapping nodeIds ("Root" and "Body" both
+  # appear in each). Without scoping the second mount would clobber
+  # the first's entries.
+  let pageA: String = "page-a"
+  let pageB: String = "page-b"
+  let rootA: EntityId = mountPage(world: world, pageId: pageA, scene: sceneA, overrides: noOverrides, w: 300.0, h: 400.0)
+  let rootB: EntityId = mountPage(world: world, pageId: pageB, scene: sceneB, overrides: noOverrides, w: 300.0, h: 400.0)
+  log("rootA={rootA.value} rootB={rootB.value}")
+
+  # Page-root discovery
+  let foundA: EntityId = findPageRootEntity(world: world, pageId: pageA)
+  let foundB: EntityId = findPageRootEntity(world: world, pageId: pageB)
+  let foundNone: EntityId = findPageRootEntity(world: world, pageId: "missing")
+  log("foundA={foundA.value} foundB={foundB.value} foundNone.isNone={isNone(this: foundNone)}")
+
+  # Scoped lookups resolve to the per-page Body entity.
+  let bodyAOpt: opt Int = findNodeInPage(world: world, pageId: pageA, nodeId: "Body")
+  let bodyBOpt: opt Int = findNodeInPage(world: world, pageId: pageB, nodeId: "Body")
+  if bodyAOpt is none {
+    log("bodyA missing")
+  } else {
+    let v: Int = bodyAOpt
+    log("bodyA={v}")
+  }
+  if bodyBOpt is none {
+    log("bodyB missing")
+  } else {
+    let v: Int = bodyBOpt
+    log("bodyB={v}")
+  }
+
+  # pageOf walks Parent up from the Body entity back to its PageRoot.
+  let bodyARawOpt: opt Int = findNodeInPage(world: world, pageId: pageA, nodeId: "Body")
+  let bodyARaw: Int = bodyARawOpt
+  let bodyAEntity: EntityId = entityId(v: bodyARaw)
+  let owningPage: String = pageOf(world: world, entity: bodyAEntity)
+  log("pageOf(bodyA)={owningPage}")
+
+  # Active default + toggle
+  log("isPageActive(A) initial={isPageActive(world: world, pageId: pageA)}")
+  setPageActive(world: world, pageId: pageA, active: true)
+  setPageActive(world: world, pageId: pageB, active: false)
+  log("isPageActive(A)={isPageActive(world: world, pageId: pageA)} isPageActive(B)={isPageActive(world: world, pageId: pageB)}")
+
+  # An id with no resident page is a no-op (no crash, no mutation).
+  let ghostId: String = "ghost"
+  setPageActive(world: world, pageId: ghostId, active: true)
+  log("ghost active={isPageActive(world: world, pageId: ghostId)}")
+}
