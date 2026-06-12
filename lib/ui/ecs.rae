@@ -509,7 +509,10 @@ func findNodeInPage(world: view UiWorld, pageId: view String, nodeId: view Strin
 # its id. Returns an empty string when no ancestor is a page root —
 # callers should treat that as "no page" / unscoped.
 func pageOf(world: view UiWorld, entity: view EntityId) pub ret String {
-  let cur: EntityId = entity
+  # Explicit construction (not `let cur: EntityId = entity`) — the
+  # Live VM treats the latter as a view-ref bind and then refuses
+  # the reassignment inside the loop.
+  let cur: EntityId = { value: entity.value }
   loop true {
     if componentHas(this: world.pageRoots, entity: cur) {
       let r: PageRoot = componentGet(this: world.pageRoots, entity: cur)
@@ -519,7 +522,7 @@ func pageOf(world: view UiWorld, entity: view EntityId) pub ret String {
       ret ""
     }
     let pl: Parent = componentGet(this: world.parents, entity: cur)
-    cur = pl.parent
+    cur = { value: pl.parent.value }
   }
   ret ""
 }
@@ -540,4 +543,36 @@ func findPageRootEntity(world: view UiWorld, pageId: view String) pub ret Entity
     i = i + 1
   }
   ret noEntity()
+}
+
+# Flip the `Active` component on the page identified by `pageId`. A
+# no-op when no resident page has that id. Layout, render, and input
+# already respect Active via `layoutActive` — toggling it on a
+# PageRoot effectively shows/hides the whole page subtree without
+# tearing it down. This is the primary mechanism for switching
+# screens in a persistent UiWorld.
+func setPageActive(world: mod UiWorld, pageId: view String, active: view Bool) pub {
+  let root: EntityId = findPageRootEntity(world: world, pageId: pageId)
+  if isNone(this: root) {
+    ret
+  }
+  let a: Active = { value: active }
+  componentSet(this: world.actives, entity: root, data: a)
+}
+
+# Returns whether `pageId` is currently active (or `false` if no
+# such page is mounted, or its Active component is missing — the
+# default treatment for a freshly mounted page is "active", matching
+# `defaultActive()`, but explicit absence reads as inactive here so
+# callers don't get a confusing true for a page they haven't tagged).
+func isPageActive(world: view UiWorld, pageId: view String) pub ret Bool {
+  let root: EntityId = findPageRootEntity(world: world, pageId: pageId)
+  if isNone(this: root) {
+    ret false
+  }
+  if componentHas(this: world.actives, entity: root) is false {
+    ret false
+  }
+  let a: Active = componentGet(this: world.actives, entity: root)
+  ret a.value
 }
