@@ -1368,36 +1368,60 @@ func main() {
           }
 
           if willSwitch {
-            # Persistent-world screen change (slice 4b.3): the four
-            # screen pages are already mounted via `buildAppWorld`,
-            # so we just flip Active on the outgoing/incoming page
-            # roots. The nav-tabs bar and the back-button overlay
-            # bake their state at mount time (`activeTab` Sprite
-            # tints, isSubPage gate), so we unmount and re-mount
-            # those overlays so the highlight and back-button
-            # visibility match the new state. The mini-player keeps
-            # its entities (its content changes per-frame via
-            # `applyPlaybackToWorld`, not per screen).
-            let outgoingPageId: String = pageIdForScreen(screen: currentScreen)
-            let incomingPageId: String = pageIdForScreen(screen: nextScreen)
-            setPageActive(world: world, pageId: outgoingPageId, active: false)
-            setPageActive(world: world, pageId: incomingPageId, active: true)
+            # Data change detection (slice 4b.4): album.open and
+            # song.open mutate `currentAlbumStem` / `currentTrackIndex`
+            # AS WELL AS pushing a sub-page. The album / now-playing
+            # pages were mounted with the OLD data — their overrides
+            # (HeroTitle, HeroArtist, track-row list, time labels…)
+            # are baked in. A simple Active flip would activate a
+            # page showing stale content. Until slice 4b.4 narrows
+            # this to per-page unmount + re-mount, we fall back to
+            # the full-world rebuild path: `switching = true` makes
+            # the outer loop re-call `buildAppWorld`, which re-mounts
+            # every page with the current `appState`. Hero animation
+            # still works because `captureHeroSource` above sets
+            # `pendingSrc` / `pendingDst`, and the post-rebuild
+            # block (line 609) picks up the destination capture.
+            let stemChangedNow: Bool = appState.currentAlbumStem.equals(other: cachedAlbumStem) is false
+            let trackChangedNow: Bool = appState.currentTrackIndex is not cachedTrackIndex
+            let dataChanged: Bool = stemChangedNow or trackChangedNow
+            if dataChanged {
+              currentScreen = nextScreen
+              profileScrollY = 0.0
+              input.pressedEntity = noEntity()
+              switching = true
+            } else {
+              # Persistent-world screen change (slice 4b.3): the four
+              # screen pages are already mounted via `buildAppWorld`,
+              # so we just flip Active on the outgoing/incoming page
+              # roots. The nav-tabs bar and the back-button overlay
+              # bake their state at mount time (`activeTab` Sprite
+              # tints, isSubPage gate), so we unmount and re-mount
+              # those overlays so the highlight and back-button
+              # visibility match the new state. The mini-player keeps
+              # its entities (its content changes per-frame via
+              # `applyPlaybackToWorld`, not per screen).
+              let outgoingPageId: String = pageIdForScreen(screen: currentScreen)
+              let incomingPageId: String = pageIdForScreen(screen: nextScreen)
+              setPageActive(world: world, pageId: outgoingPageId, active: false)
+              setPageActive(world: world, pageId: incomingPageId, active: true)
 
-            unmountPage(world: world, pageId: navTabsPageId)
-            let newBar: EntityId = mountNavTabsBar(world: world, activeTab: appState.tab, scenes: scenes)
-            unmountPage(world: world, pageId: backButtonPageId)
-            let newBack: EntityId = mountBackButtonOverlay(world: world, state: appState)
+              unmountPage(world: world, pageId: navTabsPageId)
+              let newBar: EntityId = mountNavTabsBar(world: world, activeTab: appState.tab, scenes: scenes)
+              unmountPage(world: world, pageId: backButtonPageId)
+              let newBack: EntityId = mountBackButtonOverlay(world: world, state: appState)
 
-            currentScreen = nextScreen
-            # Reset scroll on screen change so the new screen always
-            # starts at the top.
-            profileScrollY = 0.0
-            scrollTarget = findScrollTarget(world: world)
-            updateScrollOffset(world: world, target: scrollTarget, scrollY: profileScrollY)
-            # Entity ids on the new screen are unrelated to the
-            # outgoing one; drop any held-press id so the next
-            # screen's release doesn't accidentally match a stale id.
-            input.pressedEntity = noEntity()
+              currentScreen = nextScreen
+              # Reset scroll on screen change so the new screen always
+              # starts at the top.
+              profileScrollY = 0.0
+              scrollTarget = findScrollTarget(world: world)
+              updateScrollOffset(world: world, target: scrollTarget, scrollY: profileScrollY)
+              # Entity ids on the new screen are unrelated to the
+              # outgoing one; drop any held-press id so the next
+              # screen's release doesn't accidentally match a stale id.
+              input.pressedEntity = noEntity()
+            }
           } else {
             # No screen change requested — but check the watched scene
             # files. If any changed on disk, re-parse the scenes and
