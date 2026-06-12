@@ -1,4 +1,4 @@
-# rae: max-lines 1500
+# rae: max-lines 1600
 # Mobile-UI demo entrypoint. The actual work — scene loading, world
 # building, screen routing — lives in sibling `.rae` files in this same
 # directory, which Rae auto-imports because they share the project
@@ -541,7 +541,14 @@ func main() {
         playback.durationSec = trackDurSec
       }
 
-      let world: UiWorld = buildScreenWorld(screen: currentScreen, scenes: scenes, playback: playback, state: appState, texReg: texReg, scrollY: profileScrollY)
+      # Persistent-world build: mounts all four screen pages plus the
+      # shared dock + back overlays in one world. Only the page that
+      # matches `visibleScreen(appState)` has Active=true; the others
+      # are mounted-but-hidden so a later setPageActive flip can
+      # switch screens without a full world teardown (slice 4b.3).
+      # For now this build still happens on every `switching = true`
+      # — screen changes, theme toggle, hot reload, debug menu.
+      let world: UiWorld = buildAppWorld(scenes: scenes, playback: playback, state: appState, texReg: texReg, scrollY: profileScrollY)
       # Rebind any scene-authored `"albumCover"` placeholder hero +
       # sprite to the user's current album. This is what lets the
       # hero animation system find matching keys at Profile (where
@@ -1369,6 +1376,12 @@ func main() {
             # outgoing one; drop any held-press id so the next
             # screen's release doesn't accidentally match a stale id.
             input.pressedEntity = noEntity()
+            # NOTE (slice 4b.2): every page is already mounted in the
+            # world (`buildAppWorld`) and `Active` reflects the
+            # visible screen. We still rebuild on screen change for
+            # now so the dock's nav-tab highlight refreshes — slice
+            # 4b.3 adds `unmountPage` and the dock re-mount so this
+            # branch can finally switch via `setPageActive` alone.
             switching = true
           } else {
             # No screen change requested — but check the watched scene
