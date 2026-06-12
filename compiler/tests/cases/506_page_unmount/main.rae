@@ -1,0 +1,82 @@
+# Round-trip mountPage + unmountPage: a re-mount under the same id
+# should resolve nodeIds to the NEW entity ids and the previous
+# subtree's entities should be gone from `world.alive`.
+import json
+import string
+import core
+import ui/components
+import ui/ecs
+import ui/registry
+import ui/scene
+import ui/scene_instance
+
+func tinyScene(rootId: view String) ret String {
+  let s: String = ""
+  s = s.concat(other: "\{")
+  s = s.concat(other: "\"type\":\"Scene\",")
+  s = s.concat(other: "\"version\":2,")
+  s = s.concat(other: "\"sceneId\":\"")
+  s = s.concat(other: rootId)
+  s = s.concat(other: "\",")
+  s = s.concat(other: "\"root\":\"Root\",")
+  s = s.concat(other: "\"nodes\":\{")
+  s = s.concat(other: "\"Root\":\{")
+  s = s.concat(other: "\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":400\},")
+  s = s.concat(other: "\"Children\":[\"Body\",\"Footer\"]")
+  s = s.concat(other: "\},")
+  s = s.concat(other: "\"Body\":\{")
+  s = s.concat(other: "\"Text\":\{\"text\":\"hi\",\"styleId\":\"body\"\}")
+  s = s.concat(other: "\},")
+  s = s.concat(other: "\"Footer\":\{")
+  s = s.concat(other: "\"Text\":\{\"text\":\"footer\",\"styleId\":\"body\"\}")
+  s = s.concat(other: "\}")
+  s = s.concat(other: "\}\}")
+  ret s
+}
+
+func main() {
+  let world: UiWorld = createUiWorld()
+  let pageId: String = "demo"
+  let noOverrides: List(SceneOverride) = emptyOverrides()
+
+  # First mount.
+  let scene1: Scene = parseScene(source: tinyScene(rootId: "demo"))
+  let r1: EntityId = mountPage(world: world, pageId: pageId, scene: scene1, overrides: noOverrides, w: 300.0, h: 400.0)
+  log("alive after mount-1: {aliveCount(world: world)}")
+  let bodyOpt1: opt Int = findNodeInPage(world: world, pageId: pageId, nodeId: "Body")
+  if bodyOpt1 is none {
+    log("body-1 missing")
+  } else {
+    let v: Int = bodyOpt1
+    log("body-1: {v}")
+  }
+
+  # Unmount; entities for Root/Body/Footer should be gone from alive.
+  unmountPage(world: world, pageId: pageId)
+  log("alive after unmount: {aliveCount(world: world)}")
+  let bodyOptGone: opt Int = findNodeInPage(world: world, pageId: pageId, nodeId: "Body")
+  if bodyOptGone is none {
+    log("body after unmount: none")
+  } else {
+    let v: Int = bodyOptGone
+    log("body after unmount: {v} (leaked!)")
+  }
+  let foundGone: EntityId = findPageRootEntity(world: world, pageId: pageId)
+  log("page-root after unmount isNone: {isNone(this: foundGone)}")
+
+  # Second mount under the same id. Fresh entity ids.
+  let scene2: Scene = parseScene(source: tinyScene(rootId: "demo"))
+  let r2: EntityId = mountPage(world: world, pageId: pageId, scene: scene2, overrides: noOverrides, w: 300.0, h: 400.0)
+  log("alive after mount-2: {aliveCount(world: world)}")
+  let bodyOpt2: opt Int = findNodeInPage(world: world, pageId: pageId, nodeId: "Body")
+  if bodyOpt2 is none {
+    log("body-2 missing")
+  } else {
+    let v: Int = bodyOpt2
+    log("body-2: {v}")
+  }
+
+  # The second mount's root should NOT be the same entity id as the
+  # first (createEntity is monotonic).
+  log("roots different: {r1.value is not r2.value}")
+}
