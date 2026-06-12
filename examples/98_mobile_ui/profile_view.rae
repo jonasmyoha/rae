@@ -285,15 +285,9 @@ func buildProfileBody(world: mod UiWorld, reg: view TextureRegistry, albums: vie
   let off: Offset = { delta: Vec2 { x: 0.0, y: scrollY } }
   componentSet(this: world.offsets, entity: body, data: off)
 
-  # Tag the body as the profile page and record the scroll state in
-  # the world. main.rae still owns the authoritative `profileScrollY`
-  # mirror; this duplication exists so a future slice can flip the
-  # main loop to read scrollY directly from the world (component) and
-  # the mirror gets removed.
-  let copiedId: String = ""
-  copiedId = copiedId.concat(other: profilePageId)
-  let pr: PageRoot = { id: own copiedId }
-  componentSet(this: world.pageRoots, entity: body, data: own pr)
+  # Body owns the scroll behaviour — `findScrollTarget(world)` returns
+  # the first entity carrying ScrollState. PageRoot{"profile"} lives
+  # on the screen root, not here (see `mountProfilePage`).
   let scroll: ScrollState = { y: scrollY, velocity: 0.0 }
   componentSet(this: world.scrollStates, entity: body, data: scroll)
 
@@ -352,15 +346,18 @@ func buildProfileTopBar(world: mod UiWorld) ret EntityId {
 
 # --- public entrypoint -------------------------------------------------
 
-func buildProfileWorld(
-  scenes: view AlbumScenes
+# Persistent-world entrypoint. Mounts the profile page into `world`
+# and returns the page-root entity. Tagged with `PageRoot{"profile"}`
+# so `findPageRootEntity(world, profilePageId)` can locate it for
+# Active toggles, unmounts, scoped lookups. Does NOT mount dock or
+# back-button — those are app-level overlays mounted once.
+func mountProfilePage(
+  world: mod UiWorld
   reg: view TextureRegistry
   state: view AppState
-  playback: view PlaybackState
   scrollY: view Float
-) pub ret UiWorld {
+) pub ret EntityId {
   let albums: view List(Album) => state.albums
-  let world: UiWorld = createUiWorld()
 
   let root: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: root, w: screenW, h: screenH)
@@ -370,10 +367,10 @@ func buildProfileWorld(
   setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
   setPaddingAll(world: world, entity: root, n: outerPad)
 
-  # No directory scan here — the grid reads back from the texture
-  # registry. The host (`main.rae`) is responsible for calling
-  # `refreshProfileCovers(reg)` exactly once when transitioning into
-  # the Profile screen, so a scroll-triggered rebuild stays cheap.
+  let copiedId: String = ""
+  copiedId = copiedId.concat(other: profilePageId)
+  let pr: PageRoot = { id: own copiedId }
+  componentSet(this: world.pageRoots, entity: root, data: own pr)
 
   let topBar: EntityId = buildProfileTopBar(world: world)
   let body: EntityId = buildProfileBody(world: world, reg: reg, albums: albums, scrollY: scrollY)
@@ -383,8 +380,22 @@ func buildProfileWorld(
   kids.add(value: body)
   attachChildren(world: world, parent: root, kids: kids)
 
-  # Bottom dock (mini-player + nav-tabs). Same call across every
-  # screen — see nav_tabs_builder.rae.
+  ret root
+}
+
+# Legacy single-screen entrypoint — kept so `buildScreenWorld` still
+# works while the persistent-world flip is partial. Creates a fresh
+# world, mounts the profile page, mounts the shared dock + back
+# overlays, returns the world.
+func buildProfileWorld(
+  scenes: view AlbumScenes
+  reg: view TextureRegistry
+  state: view AppState
+  playback: view PlaybackState
+  scrollY: view Float
+) pub ret UiWorld {
+  let world: UiWorld = createUiWorld()
+  let page: EntityId = mountProfilePage(world: world, reg: reg, state: state, scrollY: scrollY)
   let dock: EntityId = mountBottomDockOverlay(
     world: world
     activeTab: state.tab
@@ -394,6 +405,5 @@ func buildProfileWorld(
     reg: reg
   )
   let back: EntityId = mountBackButtonOverlay(world: world, state: state)
-
   ret world
 }
