@@ -220,12 +220,33 @@ func setHeroVisibleOnPage(world: mod UiWorld, pageId: view String, key: view Str
   setHeroVisibleForEntity(world: world, e: e, visible: visible)
 }
 
+# Hide via TransformFx.visible — the upstream input that the
+# transform pass routes into WorldTransform.visible (which the
+# render walk reads). Layout doesn't gate on fx.visible, so the
+# entity STAYS in the layout flow (its slot keeps its size, its
+# siblings don't shift) — only the paint is skipped. Mutating
+# Active here would have removed the entity from layout entirely.
+# Mutating WorldTransform.visible would get stomped on the next
+# transform pass since it's a derived field.
 func setHeroVisibleForEntity(world: mod UiWorld, e: view EntityId, visible: view Bool) {
   if isNone(this: e) {
     ret
   }
-  let a: Active = { value: visible }
-  componentSet(this: world.actives, entity: e, data: a)
+  if componentHas(this: world.transforms, entity: e) {
+    let fx: mod TransformFx => componentMod(this: world.transforms, entity: e)
+    fx.visible = visible
+  } else {
+    let fx: TransformFx = {
+      scaleX: 1.0
+      scaleY: 1.0
+      rotation: 0.0
+      alpha: 1.0
+      visible: visible
+      pivot: Vec2 { x: 0.5, y: 0.5 }
+      anchor: Vec2 { x: 0.5, y: 0.5 }
+    }
+    componentSet(this: world.transforms, entity: e, data: fx)
+  }
 }
 
 # Rename every HeroWidget whose key is `fromKey` to `toKey`, and
