@@ -579,16 +579,30 @@ func isPageActive(world: view UiWorld, pageId: view String) pub ret Bool {
   ret a.value
 }
 
-# Return the first entity in the world carrying a ScrollState — the
-# convention is that a freshly built world has at most one such
-# entity, marking the screen's scroll-target subtree. `noEntity()`
-# when no scroll target is present (e.g. screens that don't scroll).
+# Return the scroll-target entity for the currently active page.
+# Iterates `world.scrollStates` (at most one per scrollable page —
+# typically one or two total) and picks the first whose owning
+# PageRoot ancestor is Active=true. Falls back to the first
+# scrollState entity if no PageRoot is found (legacy single-page
+# worlds). Returns `noEntity()` when nothing scrolls.
 func findScrollTarget(world: view UiWorld) pub ret EntityId {
   let n: Int = componentCount(this: world.scrollStates)
   if n is 0 {
     ret noEntity()
   }
-  ret componentEntityAt(this: world.scrollStates, i: 0)
+  let i: Int = 0
+  let fallback: EntityId = componentEntityAt(this: world.scrollStates, i: 0)
+  loop i < n {
+    let e: EntityId = componentEntityAt(this: world.scrollStates, i: i)
+    let pid: String = pageOf(world: world, entity: e)
+    if pid.length() > 0 {
+      if isPageActive(world: world, pageId: pid) {
+        ret e
+      }
+    }
+    i = i + 1
+  }
+  ret fallback
 }
 
 # Mutate the scroll target's Offset.delta.y AND its ScrollState.y
