@@ -88,7 +88,7 @@ func handleScreenSwitch(
     unmountPage(world: world, pageId: albumPageId)
     let freshAlbum: EntityId = mountAlbumPage(world: world, scenes: scenes, state: appState, scrollY: 0.0)
     # Tracks depend on the album too — re-mount NowPlaying.
-    unmountPage(world: world, pageId: nowPlayingPageId)
+    unmountPage(world: world, pageId: playerPageId)
     let freshNP: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: appState)
     rebindHero(world: world, fromKey: "albumCover", toKey: appState.currentAlbumStem)
     # Freshly-mounted pages have no Active component → default to
@@ -96,13 +96,13 @@ func handleScreenSwitch(
     # Explicitly deactivate; setPageActive(incoming, true) below
     # re-activates whichever page is the real destination.
     setPageActive(world: world, pageId: albumPageId, active: false)
-    setPageActive(world: world, pageId: nowPlayingPageId, active: false)
+    setPageActive(world: world, pageId: playerPageId, active: false)
   } else {
     if trackChangedNow {
-      unmountPage(world: world, pageId: nowPlayingPageId)
+      unmountPage(world: world, pageId: playerPageId)
       let freshNP: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: appState)
       rebindHero(world: world, fromKey: "albumCover", toKey: appState.currentAlbumStem)
-      setPageActive(world: world, pageId: nowPlayingPageId, active: false)
+      setPageActive(world: world, pageId: playerPageId, active: false)
     }
   }
 

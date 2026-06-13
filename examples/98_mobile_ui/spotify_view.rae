@@ -80,27 +80,44 @@ func updateNodeText(world: mod UiWorld, pageId: view String, nodeId: view String
   cur.text = "{value}"
 }
 
-# Walk every Sprite with `textureKey == fromKey` and re-bind to
-# `toKey`. Mirrors lib/ui/hero.rae's rebindHero but as a standalone
-# helper so we can swap covers between local-album and Spotify modes
-# without touching hero state.
-func rebindSpriteTextureKey(world: mod UiWorld, fromKey: view String, toKey: view String) {
+# Page-scoped Sprite.textureKey rebind. Walks every Sprite whose
+# textureKey == `fromKey`, then checks the entity's PageRoot ancestor.
+# Only rewrites when the ancestor is in `pageIds`. This is critical:
+# the Library grid is a wall of Sprites that all carry the SAME stem
+# as their textureKey (one tile per album), and a global rebind would
+# wipe the user's whole library cover wall the moment Spotify started
+# a track. Constrain to "player" + "mini-player" so only the two
+# widgets that actually represent "what's playing right now" follow
+# the Spotify cover.
+func rebindCoverOnPages(world: mod UiWorld, fromKey: view String, toKey: view String, pageIds: view List(String)) {
   let n: Int = componentCount(this: world.sprites)
   let i: Int = 0
   loop i < n {
     let e: EntityId = componentEntityAt(this: world.sprites, i: i)
     let sp: Sprite = componentDataAt(this: world.sprites, i: i)
     if sp.textureKey.equals(other: fromKey) {
-      let copiedTex: String = "{toKey}"
-      let nsp: Sprite = {
-        textureKey: copiedTex
-        tint: sp.tint
-        scaleMode: sp.scaleMode
-        tileScale: sp.tileScale
-        nineSlice: sp.nineSlice
-        hasNineSlice: sp.hasNineSlice
+      let p: String = pageOf(world: world, entity: e)
+      let allowed: Bool = false
+      let k: Int = 0
+      loop k < pageIds.length {
+        let want: String = pageIds.get(index: k)
+        if p.equals(other: want) {
+          allowed = true
+        }
+        k = k + 1
       }
-      componentSet(this: world.sprites, entity: e, data: nsp)
+      if allowed {
+        let copiedTex: String = "{toKey}"
+        let nsp: Sprite = {
+          textureKey: copiedTex
+          tint: sp.tint
+          scaleMode: sp.scaleMode
+          tileScale: sp.tileScale
+          nineSlice: sp.nineSlice
+          hasNineSlice: sp.hasNineSlice
+        }
+        componentSet(this: world.sprites, entity: e, data: nsp)
+      }
     }
     i = i + 1
   }
@@ -140,15 +157,16 @@ func refreshSpotifyArt(state: view SpotifyState, track: view SpotifyTrack, reg: 
   ret true
 }
 
-# Rebind every Sprite that currently shows the user's local
-# `appState.currentAlbumStem` cover to point at `state.artKey`. Used
-# on the first Spotify track change to redirect the now-playing /
-# mini-player cover Sprites away from their initial local-album
-# binding. Subsequent track changes don't need this — the texture
-# content under `state.artKey` is replaced in place, so anything
-# already bound to that key updates automatically.
+# Rebind ONLY the cover sprites on the player + mini-player pages —
+# never the Library grid. The grid tiles also carry the album stem
+# as their textureKey; without this scope filter, a global walk would
+# replace every Library tile with the current Spotify track's art
+# (the exact "library grid is being clobbered" bug the user hit).
 func rebindAlbumCoversToSpotify(world: mod UiWorld, currentStem: view String, artKey: view String) {
-  rebindSpriteTextureKey(world: world, fromKey: currentStem, toKey: artKey)
+  let pages: List(String) = createList(String, cap: 2)
+  pages.add(value: playerPageId)
+  pages.add(value: miniPlayerPageId)
+  rebindCoverOnPages(world: world, fromKey: currentStem, toKey: artKey, pageIds: pages)
 }
 
 # Per-frame entry point. Cheap when disabled / when not enough time
@@ -197,7 +215,7 @@ func pollSpotify(
   }
   # Text updates run every poll — cheap, and handles the "user
   # paused/resumed in Spotify directly" case without extra logic.
-  let nowPlayingPage: String = "now-playing"
+  let nowPlayingPage: String = "player"
   updateNodeText(world: world, pageId: nowPlayingPage, nodeId: "TrackTitle", value: track.trackName)
   updateNodeText(world: world, pageId: nowPlayingPage, nodeId: "TrackArtist", value: track.artistName)
   let miniPage: String = "mini-player"

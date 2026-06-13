@@ -347,7 +347,7 @@ func buildProfileTopBar(world: mod UiWorld) ret EntityId {
 
 # Persistent-world entrypoint. Mounts the profile page into `world`
 # and returns the page-root entity. Tagged with `PageRoot{"profile"}`
-# so `findPageRootEntity(world, profilePageId)` can locate it for
+# so `findPageRootEntity(world, libraryPageId)` can locate it for
 # Active toggles, unmounts, scoped lookups. Does NOT mount dock or
 # back-button — those are app-level overlays mounted once.
 func mountProfilePage(
@@ -367,7 +367,7 @@ func mountProfilePage(
   setPaddingAll(world: world, entity: root, n: outerPad)
 
   let copiedId: String = ""
-  copiedId = copiedId.concat(other: profilePageId)
+  copiedId = copiedId.concat(other: libraryPageId)
   let pr: PageRoot = { id: own copiedId }
   componentSet(this: world.pageRoots, entity: root, data: own pr)
 
