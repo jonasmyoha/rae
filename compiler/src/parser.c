@@ -811,26 +811,18 @@ static AstExpr* finish_call(Parser* parser, AstExpr* callee, const Token* start_
     size_t prev_index = parser->index;
     AstCallArg* arg = parser_alloc(parser, sizeof(AstCallArg));
     
-    // Check if it looks like a named argument: Identifier (or keyword) followed by ':'
+    // Named argument: identifier followed by ':'. Generic type arguments
+    // are spelled with the param's actual name (`T:`) or positionally,
+    // not via a magic `type:` keyword.
     TokenKind k = parser_peek(parser)->kind;
-    // TOK_KW_TYPE is allowed here so `createList(type: Int, ...)` parses
-    // — `type:` is the named spelling of the generic type argument.
-    bool is_ident_like = (k == TOK_IDENT || k == TOK_KW_TYPE);
-    bool is_named_arg = is_ident_like && parser_check_at(parser, 1, TOK_COLON);
+    bool is_named_arg = (k == TOK_IDENT) && parser_check_at(parser, 1, TOK_COLON);
 
     if (arg_idx == 0 && !is_named_arg) {
         // Positional first argument
         arg->name = (Str){0};
         arg->value = parse_expression(parser);
     } else {
-        // Accept `type:` (TOK_KW_TYPE) as a named-arg label so the new
-        // generic-call spelling `createList(type: Int, ...)` parses.
-        const Token* name = NULL;
-        if (parser_peek(parser)->kind == TOK_KW_TYPE) {
-            name = parser_advance(parser);
-        } else {
-            name = parser_consume_ident(parser, "expected argument name (subsequent arguments must be named)");
-        }
+        const Token* name = parser_consume_ident(parser, "expected argument name (subsequent arguments must be named)");
         parser_consume(parser, TOK_COLON, "expected ':' after argument name");
         arg->name = parser_copy_str(parser, name->lexeme);
         arg->value = parse_expression(parser);
@@ -1413,24 +1405,18 @@ static AstExpr* parse_postfix(Parser* parser) {
           do {
             AstCallArg* arg = parser_alloc(parser, sizeof(AstCallArg));
             
-            // Check if it looks like a named argument: Identifier (or keyword) followed by ':'
+            // Named argument: identifier followed by ':'. Generic type
+            // arguments are spelled with the param's actual name (`T:`)
+            // or positionally, not via a magic `type:` keyword.
             TokenKind k = parser_peek(parser)->kind;
-            // TOK_KW_TYPE is allowed here so `createList(type: Int, ...)` parses
-    // — `type:` is the named spelling of the generic type argument.
-    bool is_ident_like = (k == TOK_IDENT || k == TOK_KW_TYPE);
-            bool is_named_arg = is_ident_like && parser_check_at(parser, 1, TOK_COLON);
+            bool is_named_arg = (k == TOK_IDENT) && parser_check_at(parser, 1, TOK_COLON);
 
             if (arg_idx == 0 && !is_named_arg) {
                 // Positional first argument
                 arg->name = (Str){0};
                 arg->value = parse_expression(parser);
             } else {
-                const Token* arg_name = NULL;
-                if (parser_peek(parser)->kind == TOK_KW_TYPE) {
-                    arg_name = parser_advance(parser);
-                } else {
-                    arg_name = parser_consume_ident(parser, "expected argument name (subsequent arguments must be named)");
-                }
+                const Token* arg_name = parser_consume_ident(parser, "expected argument name (subsequent arguments must be named)");
                 parser_consume(parser, TOK_COLON, "expected ':' after argument name");
                 arg->name = parser_copy_str(parser, arg_name->lexeme);
                 arg->value = parse_expression(parser);
