@@ -21,6 +21,10 @@ import sys/spotify
 import raylib
 import ui/ecs
 import ui/textures
+# PlaybackState lives in examples/98_mobile_ui/playback.rae — auto-imported
+# from the same project directory. We mutate it here to sync the local
+# mock's `isPlaying` from Spotify's reported state so the play-button
+# icon (driven by `applyPlaybackToWorld(world, playback)`) matches reality.
 
 # Per-app-instance state for the Spotify display layer. One instance
 # lives in main.rae for the whole app lifetime.
@@ -129,13 +133,34 @@ func refreshSpotifyArt(state: view SpotifyState, track: view SpotifyTrack, reg: 
   ret true
 }
 
+# Rebind every Sprite that currently shows the user's local
+# `appState.currentAlbumStem` cover to point at `state.artKey`. Used
+# on the first Spotify track change to redirect the now-playing /
+# mini-player cover Sprites away from their initial local-album
+# binding. Subsequent track changes don't need this — the texture
+# content under `state.artKey` is replaced in place, so anything
+# already bound to that key updates automatically.
+func rebindAlbumCoversToSpotify(world: mod UiWorld, currentStem: view String, artKey: view String) {
+  rebindSpriteTextureKey(world: world, fromKey: currentStem, toKey: artKey)
+}
+
 # Per-frame entry point. Cheap when disabled / when not enough time
-# has passed for a re-poll. When it does poll: updates text, on track
-# change downloads art + swaps the cover Sprite's textureKey.
+# has passed for a re-poll. When it does poll:
+#   * mirrors Spotify's actual play/pause state into `playback.isPlaying`
+#     so the play-button icon stays in sync,
+#   * updates NowPlaying / mini-player title + artist text,
+#   * on track change: downloads art and (first time) rebinds the
+#     album-cover Sprites to the spotify-current texture key.
+#
+# `currentAlbumStem` is the user's currently-shown local album stem —
+# used as the source key for the FIRST rebind (since the cover Sprites
+# initially carry that stem as their textureKey).
 func pollSpotify(
   state: mod SpotifyState
   world: mod UiWorld
   reg: mod TextureRegistry
+  playback: mod PlaybackState
+  currentAlbumStem: view String
   now: view Float
 ) pub {
   if state.enabled is false {
@@ -147,6 +172,15 @@ func pollSpotify(
   }
   state.lastPollSec = now
   let track: SpotifyTrack = spotifyCurrent()
+  # Mirror Spotify's actual state into the local playback mock so the
+  # play-button icon (driven by applyPlaybackToWorld → playback.isPlaying)
+  # matches the real player. The user pausing/resuming in Spotify
+  # directly will now flip the icon on the next poll.
+  let playingKey: String = "playing"
+  let nowPlaying: Bool = track.state.equals(other: playingKey)
+  if playback.isPlaying is not nowPlaying {
+    playback.isPlaying = nowPlaying
+  }
   # Text updates run every poll — cheap, and handles the "user
   # paused/resumed in Spotify directly" case without extra logic.
   let nowPlayingPage: String = "now-playing"
@@ -160,18 +194,17 @@ func pollSpotify(
   # polls for the same track during playback).
   let changed: Bool = track.trackId.equals(other: state.lastTrackId) is false
   if changed {
-    let priorKey: String = "{state.lastTrackId}"
+    let firstTime: Bool = state.lastTrackId.length() is 0
     state.lastTrackId = "{track.trackId}"
     let artOk: Bool = refreshSpotifyArt(state: state, track: track, reg: reg)
     if artOk {
-      # Swap every Sprite whose textureKey still references the prior
-      # cover (the album-stem placeholder on first run, or the previous
-      # spotify-current binding) over to the new "spotify-current"
-      # texture. The texture content is already replaced under the
-      # same key, so this only matters on the FIRST track change —
-      # subsequent track changes paint into the same key automatically.
-      if priorKey.length() > 0 {
-        rebindSpriteTextureKey(world: world, fromKey: priorKey, toKey: state.artKey)
+      if firstTime {
+        # FIRST track change: cover Sprites still carry the user's
+        # local album stem as their textureKey. Rebind them to the
+        # spotify-current texture key one time. Subsequent track
+        # changes need no rebind because we replace the texture
+        # CONTENT under the same key.
+        rebindAlbumCoversToSpotify(world: world, currentStem: currentAlbumStem, artKey: state.artKey)
       }
     }
   }

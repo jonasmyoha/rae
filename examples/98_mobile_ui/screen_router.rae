@@ -313,23 +313,29 @@ func dispatchActions(
       popSubPage(state: state)
     }
     if actionId.equals(other: playbackToggleKey) {
-      togglePlayback(state: playback)
       if spotifyEnabled {
-        # Drive the real player from its actual reported state — not
-        # the local mirror, which may be stale on first frame. The
-        # cache is updated by the 1Hz pollSpotify; this read is just a
-        # cheap getter against that cache (no extra osascript call).
+        # Spotify owns the play-state. Use the cached state to flip
+        # to the opposite; the 1Hz pollSpotify then mirrors the new
+        # state back into playback.isPlaying so the icon updates.
+        # Force a fresh refresh first so the decision sees the most
+        # recent state (e.g. user paused in Spotify directly seconds
+        # ago — last poll may have been up to 1s stale).
+        spotifyRefresh()
         let curState: String = spotifyState()
         let playingKey: String = "playing"
+        log("[spotify] toggle: state={curState}")
         if curState.equals(other: playingKey) {
           spotifyPause()
         } else {
           spotifyPlay()
         }
+      } else {
+        togglePlayback(state: playback)
       }
     }
     if actionId.equals(other: playbackNextKey) {
       if spotifyEnabled {
+        log("[spotify] next")
         spotifyNext()
       }
       # Local mock has no per-screen "next track" concept yet —
@@ -337,6 +343,7 @@ func dispatchActions(
     }
     if actionId.equals(other: playbackPrevKey) {
       if spotifyEnabled {
+        log("[spotify] previous")
         spotifyPrevious()
       }
     }
