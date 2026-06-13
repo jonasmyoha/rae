@@ -2269,6 +2269,8 @@ typedef struct {
     char* artistName;
     char* albumName;
     char* artworkUrl;
+    double positionSec;     /* player position in seconds, 0 when stopped */
+    double durationSec;     /* track duration in seconds, 0 when unknown */
 } RaeSpotifyCache;
 static RaeSpotifyCache g_spotify_cache = {0};
 
@@ -2324,13 +2326,15 @@ void rae_ext_spotifyRefresh(void) {
         "tell application \"Spotify\"",
         "  set playerState to player state as text",
         "  if playerState is \"stopped\" then",
-        "    return playerState & \"||\" & \"\" & \"||\" & \"\" & \"||\" & \"\" & \"||\" & \"\" & \"||\" & \"\"",
+        "    return playerState & \"||\" & \"\" & \"||\" & \"\" & \"||\" & \"\" & \"||\" & \"\" & \"||\" & \"\" & \"||\" & \"0\" & \"||\" & \"0\"",
         "  end if",
         "  set trackId to \"\"",
         "  set trackName to \"\"",
         "  set artistName to \"\"",
         "  set albumName to \"\"",
         "  set artworkUrl to \"\"",
+        "  set posSec to 0",
+        "  set durMs to 0",
         "  try",
         "    set trackId to id of current track",
         "  end try",
@@ -2346,7 +2350,13 @@ void rae_ext_spotifyRefresh(void) {
         "  try",
         "    set artworkUrl to artwork url of current track",
         "  end try",
-        "  return playerState & \"||\" & trackId & \"||\" & trackName & \"||\" & artistName & \"||\" & albumName & \"||\" & artworkUrl",
+        "  try",
+        "    set posSec to player position",
+        "  end try",
+        "  try",
+        "    set durMs to duration of current track",
+        "  end try",
+        "  return playerState & \"||\" & trackId & \"||\" & trackName & \"||\" & artistName & \"||\" & albumName & \"||\" & artworkUrl & \"||\" & (posSec as text) & \"||\" & (durMs as text)",
         "end tell",
         NULL
     };
@@ -2360,17 +2370,41 @@ void rae_ext_spotifyRefresh(void) {
         &g_spotify_cache.albumName,
         &g_spotify_cache.artworkUrl,
     };
+    /* Reset everything before re-filling so a failure leaves a known-empty cache. */
     for (int i = 0; i < 6; i++) {
         rae_spotify_cache_set_field(slots[i], "", 0);
     }
+    g_spotify_cache.positionSec = 0.0;
+    g_spotify_cache.durationSec = 0.0;
     if (n < 0) return;
     char* p = buf;
+    /* Parse 6 string fields. */
     for (int i = 0; i < 6; i++) {
         char* sep = strstr(p, "||");
         size_t len = sep ? (size_t)(sep - p) : strlen(p);
         rae_spotify_cache_set_field(slots[i], p, len);
         if (!sep) break;
         p = sep + 2;
+    }
+    /* Parse the trailing position + duration (numeric). The strstr walk
+     * above leaves p pointing past the last "||" of the strings if every
+     * separator was found. Re-walk from the buffer start to be safe. */
+    {
+        char* q = buf;
+        for (int i = 0; i < 6; i++) {
+            char* sep = strstr(q, "||");
+            if (!sep) { q = NULL; break; }
+            q = sep + 2;
+        }
+        if (q) {
+            char* sep = strstr(q, "||");
+            if (sep) {
+                *sep = '\0';
+                g_spotify_cache.positionSec = atof(q);
+                char* d = sep + 2;
+                g_spotify_cache.durationSec = atof(d) / 1000.0;
+            }
+        }
     }
 }
 
@@ -2380,6 +2414,8 @@ rae_String rae_ext_spotifyTrackName(void)   { return rae_cstr_to_owned_rae_strin
 rae_String rae_ext_spotifyArtistName(void)  { return rae_cstr_to_owned_rae_string(g_spotify_cache.artistName); }
 rae_String rae_ext_spotifyAlbumName(void)   { return rae_cstr_to_owned_rae_string(g_spotify_cache.albumName); }
 rae_String rae_ext_spotifyArtworkUrl(void)  { return rae_cstr_to_owned_rae_string(g_spotify_cache.artworkUrl); }
+double rae_ext_spotifyPosition(void)        { return g_spotify_cache.positionSec; }
+double rae_ext_spotifyDuration(void)        { return g_spotify_cache.durationSec; }
 
 rae_Bool rae_ext_spotifyFetchArtwork(rae_String url, rae_String outPath) {
     if (!url.data || url.len == 0 || !outPath.data || outPath.len == 0) return false;
@@ -2490,6 +2526,8 @@ rae_String rae_ext_spotifyTrackName(void)  { return (rae_String){NULL, 0, 0, 0};
 rae_String rae_ext_spotifyArtistName(void) { return (rae_String){NULL, 0, 0, 0}; }
 rae_String rae_ext_spotifyAlbumName(void)  { return (rae_String){NULL, 0, 0, 0}; }
 rae_String rae_ext_spotifyArtworkUrl(void) { return (rae_String){NULL, 0, 0, 0}; }
+double rae_ext_spotifyPosition(void)       { return 0.0; }
+double rae_ext_spotifyDuration(void)       { return 0.0; }
 rae_Bool rae_ext_spotifyFetchArtwork(rae_String url, rae_String outPath) { (void)url; (void)outPath; return false; }
 rae_String rae_ext_itunesSearchArtworkUrl(rae_String term) { (void)term; return (rae_String){NULL, 0, 0, 0}; }
 
