@@ -772,11 +772,10 @@ func main() {
               }
             }
           }
-          # Spotify-mode poll — no-op when RAE_UI_SPOTIFY isn't set,
-          # and rate-limited internally to ~1Hz. On track change this
-          # downloads the album art (Spotify → iTunes fallback) and
-          # rebinds the cover Sprite's textureKey.
-          pollSpotify(state: spotifyState, world: world, reg: texReg, now: now)
+          # Spotify-mode poll (no-op when RAE_UI_SPOTIFY unset; 1Hz
+          # internal rate-limit). Syncs playback state, text fields,
+          # and album art. See examples/98_mobile_ui/spotify_view.rae.
+          pollSpotify(state: spotifyState, world: world, reg: texReg, playback: playback, currentAlbumStem: appState.currentAlbumStem, now: now)
 
           # Frame-gate decision: ask `decideActive` whether anything
           # changed that warrants a full begin/render/endDrawing this
