@@ -3,6 +3,8 @@
 # we should switch to next.
 import core
 import fs
+import sys
+import sys/spotify
 import ui/ecs
 import ui/input
 
@@ -281,8 +283,16 @@ func dispatchActions(
     let profileKey: String = "nav.profile"
     let backKey: String = "nav.back"
     let playbackToggleKey: String = "playback.toggle"
+    let playbackNextKey: String = "playback.next"
+    let playbackPrevKey: String = "playback.prev"
     let albumOpenKey: String = "album.open"
     let songOpenPrefix: String = "song.open."
+    # When RAE_UI_SPOTIFY=1 is set, transport buttons drive the local
+    # Spotify desktop app instead of (or in addition to) the mock
+    # playback state. See lib/sys/spotify.rae. Cheap to read here —
+    # dispatchActions only runs when input events fired this frame.
+    let spotifyEnv: String = getEnv(name: "RAE_UI_SPOTIFY")
+    let spotifyEnabled: Bool = spotifyEnv.length() > 0
     if actionId.equals(other: homeKey) {
       let s: Screen = Screen.NowPlaying
       setTab(state: state, tab: s)
@@ -304,6 +314,31 @@ func dispatchActions(
     }
     if actionId.equals(other: playbackToggleKey) {
       togglePlayback(state: playback)
+      if spotifyEnabled {
+        # Drive the real player from its actual reported state — not
+        # the local mirror, which may be stale on first frame. The
+        # cache is updated by the 1Hz pollSpotify; this read is just a
+        # cheap getter against that cache (no extra osascript call).
+        let curState: String = spotifyState()
+        let playingKey: String = "playing"
+        if curState.equals(other: playingKey) {
+          spotifyPause()
+        } else {
+          spotifyPlay()
+        }
+      }
+    }
+    if actionId.equals(other: playbackNextKey) {
+      if spotifyEnabled {
+        spotifyNext()
+      }
+      # Local mock has no per-screen "next track" concept yet —
+      # the Spotify mode is the only consumer for now.
+    }
+    if actionId.equals(other: playbackPrevKey) {
+      if spotifyEnabled {
+        spotifyPrevious()
+      }
     }
     if actionId.equals(other: albumOpenKey) {
       # Profile-grid tile click. Push Album onto the sub-page

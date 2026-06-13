@@ -126,6 +126,14 @@ func main() {
   # defaults `createAppState` / `createPlaybackState` set above.
   restoreAppState(state: appState, playback: playback, path: stateFilePath)
 
+  # Spotify-mode integration. Only enabled when RAE_UI_SPOTIFY=1.
+  # See examples/98_mobile_ui/spotify_view.rae + lib/sys/spotify.rae.
+  let spotifyState: SpotifyState = createSpotifyState()
+  if spotifyState.enabled {
+    log("[spotify] enabled — driving local Spotify desktop app via AppleScript")
+    spotifyLaunch()
+  }
+
   let screenshotEnv: String = getEnv(name: "RAE_UI_SCREENSHOT")
   let bg: Color = { r: 32, g: 32, b: 36, a: 255 }
 
@@ -764,6 +772,12 @@ func main() {
               }
             }
           }
+          # Spotify-mode poll — no-op when RAE_UI_SPOTIFY isn't set,
+          # and rate-limited internally to ~1Hz. On track change this
+          # downloads the album art (Spotify → iTunes fallback) and
+          # rebinds the cover Sprite's textureKey.
+          pollSpotify(state: spotifyState, world: world, reg: texReg, now: now)
+
           # Frame-gate decision: ask `decideActive` whether anything
           # changed that warrants a full begin/render/endDrawing this
           # frame. Inputs: forceRender, dirty caches, input events,

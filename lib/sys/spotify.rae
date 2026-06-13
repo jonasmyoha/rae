@@ -1,0 +1,102 @@
+# Local Spotify desktop-app bridge (macOS). Drives the running Spotify
+# desktop app via AppleScript through `osascript`. No credentials, no
+# SDK, no HTTP auth — pure local automation, the same approach SUMU AI
+# uses.
+#
+# Requires:
+#   * macOS
+#   * Spotify desktop app installed (call `spotifyLaunch()` once at
+#     boot to open it if it isn't already)
+#   * One-time "Automation" permission — macOS prompts the first time
+#     the program tries to control Spotify
+#
+# This module is opt-in: `import sys/spotify` explicitly. It is NOT
+# auto-loaded.
+#
+# Compiled-only. The Live VM does not yet register the underlying C
+# natives, so calling these from `--target live` will fail to link at
+# the VM bytecode level. Use `--target compiled` (or `rae run` /
+# `rae watch` which both default to compiled for raylib examples).
+#
+# Usage (typical poll loop):
+#
+#     import sys/spotify
+#     let t: SpotifyTrack = spotifyCurrent()
+#     if t.state.equals(other: "playing") {
+#       log("now playing: {t.trackName} — {t.artistName}")
+#     }
+#
+# Search-and-play (future): not exposed yet. The C bridge can grow a
+# `spotifyPlayQuery(q: String)` extern that translates to
+# `spotify:search:<q>` via osascript when needed.
+import core
+
+# A snapshot of Spotify's "now playing" state. All fields are owned
+# String copies — safe to drop without affecting the cache.
+type SpotifyTrack pub {
+  # "playing" | "paused" | "stopped" | "" (when Spotify isn't running
+  # or the Automation permission hasn't been granted yet).
+  state: String
+  # Spotify track id, e.g. "spotify:track:6rqhFgbbKwnb9MLmUQDhG6".
+  trackId: String
+  trackName: String
+  artistName: String
+  albumName: String
+  # `https://i.scdn.co/image/...` from Spotify directly. Empty when
+  # the current item is a local file / podcast / advert — use the
+  # iTunes fallback (`itunesSearchArtworkUrl`) in that case.
+  artworkUrl: String
+}
+
+# Transport controls. All four launch Spotify if it isn't running yet
+# (because AppleScript's `tell application "Spotify" to play` does it
+# implicitly). No return value — failures (e.g. permission denied) are
+# silent at this layer; the next `spotifyCurrent()` snapshot will
+# reveal the unchanged state.
+func spotifyLaunch() extern
+func spotifyPlay() extern
+func spotifyPause() extern
+func spotifyNext() extern
+func spotifyPrevious() extern
+
+# Per-poll snapshot. Runs ONE osascript invocation and caches the six
+# fields; the field getters below read from that cache without re-
+# forking osascript. Call this at the start of each poll, then read
+# fields freely.
+func spotifyRefresh() extern
+func spotifyState() extern ret String
+func spotifyTrackId() extern ret String
+func spotifyTrackName() extern ret String
+func spotifyArtistName() extern ret String
+func spotifyAlbumName() extern ret String
+func spotifyArtworkUrl() extern ret String
+
+# Convenience: refresh + snapshot into a `SpotifyTrack` value. The
+# struct's String fields are independent owned copies of the cache,
+# so dropping the snapshot doesn't disturb the cache.
+func spotifyCurrent() ret SpotifyTrack {
+  spotifyRefresh()
+  ret SpotifyTrack {
+    state: spotifyState()
+    trackId: spotifyTrackId()
+    trackName: spotifyTrackName()
+    artistName: spotifyArtistName()
+    albumName: spotifyAlbumName()
+    artworkUrl: spotifyArtworkUrl()
+  }
+}
+
+# Download an artwork URL to a local file. Uses curl, follows redirects,
+# fails fast (`-sLf`). Returns true on HTTP 2xx + file written, false
+# otherwise. Used for both Spotify's CDN URL and the iTunes fallback.
+func spotifyFetchArtwork(url: view String, outPath: view String) extern ret Bool
+
+# iTunes Search API fallback for album art. Queries
+# https://itunes.apple.com/search?term=<term>&entity=song&limit=1,
+# extracts `artworkUrl100`, and upscales the URL to 600x600 the way
+# SUMU does. Returns the upscaled URL on success, or "" if iTunes
+# returned no result (or the network is down).
+#
+# `term` should be artist + " " + track name. Example:
+#     itunesSearchArtworkUrl(term: "Charli XCX brat")
+func itunesSearchArtworkUrl(term: view String) extern ret String
