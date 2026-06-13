@@ -35,31 +35,31 @@ func nodeIndex(nodes: view List(Node), target: view String) ret Int {
 }
 
 func main() {
-  let nodes: List(Node) = createList(Node, initialCap: 8)
+  let nodes: List(Node) = createList(Node, cap: 8)
 
   # Build 5 nodes with siblings of different lengths to maximize
   # chance of torn-read pattern.
-  let rootKids: List(String) = createList(String, initialCap: 4)
+  let rootKids: List(String) = createList(String, cap: 4)
   rootKids.add(value: "TopBar")
   rootKids.add(value: "AlbumHero")
   rootKids.add(value: "PlayBtn")
   nodes.add(value: { nodeId: "AlbumRoot", childIds: own rootKids })
 
-  let topKids: List(String) = createList(String, initialCap: 1)
+  let topKids: List(String) = createList(String, cap: 1)
   topKids.add(value: "BackBtn")
   nodes.add(value: { nodeId: "TopBar", childIds: own topKids })
 
-  let backKids: List(String) = createList(String, initialCap: 0)
+  let backKids: List(String) = createList(String, cap: 0)
   nodes.add(value: { nodeId: "BackBtn", childIds: own backKids })
 
-  let heroKids: List(String) = createList(String, initialCap: 0)
+  let heroKids: List(String) = createList(String, cap: 0)
   nodes.add(value: { nodeId: "AlbumHero", childIds: own heroKids })
 
-  let playKids: List(String) = createList(String, initialCap: 0)
+  let playKids: List(String) = createList(String, cap: 0)
   nodes.add(value: { nodeId: "PlayBtn", childIds: own playKids })
 
   # Build a parallel map of nodeId → index, mirroring world.nodeIds.
-  let map: StringMap(Int) = createStringMap(Int, initialCap: 16)
+  let map: StringMap(Int) = createStringMap(Int, cap: 16)
   let s: Int = 0
   loop s < nodes.length {
     let nd: Node = rae_ext_rae_buf_get(buf: nodes.data, index: s)
@@ -75,7 +75,7 @@ func main() {
     let parent: Node = rae_ext_rae_buf_get(buf: nodes.data, index: p)
     let kn: Int = parent.childIds.length
     if kn > 0 {
-      let kidsAssembly: List(Int) = createList(Int, initialCap: kn)
+      let kidsAssembly: List(Int) = createList(Int, cap: kn)
       let q: Int = 0
       loop q < kn {
         let childId: String = parent.childIds.get(index: q)

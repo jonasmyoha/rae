@@ -42,7 +42,7 @@ func setShapeRect(world: mod UiWorld, entity: view EntityId, r: view Int, g: vie
 }
 
 func attachChildren(world: mod UiWorld, parent: view EntityId, kids: view List(EntityId)) {
-  let kidsCopy: List(EntityId) = createList(EntityId, initialCap: kids.length)
+  let kidsCopy: List(EntityId) = createList(EntityId, cap: kids.length)
   let i: Int = 0
   loop i < kids.length {
     let kid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
@@ -103,7 +103,7 @@ func main() {
   let iconB: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: iconB, w: 40.0, h: 40.0)
   setShapeRect(world: world, entity: iconB, r: 0, g: 255, b: 0)
-  let headerKids: List(EntityId) = createList(EntityId, initialCap: 2)
+  let headerKids: List(EntityId) = createList(EntityId, cap: 2)
   headerKids.add(value: iconA)
   headerKids.add(value: iconB)
   attachChildren(world: world, parent: header, kids: headerKids)
@@ -116,7 +116,7 @@ func main() {
   setRectFixed(world: world, entity: footer, w: 360.0, h: 100.0)
   setShapeRect(world: world, entity: footer, r: 100, g: 100, b: 100)
 
-  let rootKids: List(EntityId) = createList(EntityId, initialCap: 3)
+  let rootKids: List(EntityId) = createList(EntityId, cap: 3)
   rootKids.add(value: header)
   rootKids.add(value: body)
   rootKids.add(value: footer)

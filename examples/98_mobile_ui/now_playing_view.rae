@@ -19,7 +19,7 @@ func nowPlayingTimes(playback: view PlaybackState, track: view Track) ret List(S
   let elapsedMs: Int = (playback.elapsedSec * 1000.0).toInt()
   let nowStr: String = formatDurationMs(ms: elapsedMs)
   let totalStr: String = formatDurationMs(ms: track.durationMs)
-  let pair: List(String) = createList(String, initialCap: 2)
+  let pair: List(String) = createList(String, cap: 2)
   pair.add(value: nowStr)
   pair.add(value: totalStr)
   ret pair
@@ -90,7 +90,7 @@ func mountNowPlayingPage(
     paintErrorBlock(world: world, entity: np, label: npLabel)
   }
 
-  let kids: List(EntityId) = createList(EntityId, initialCap: 1)
+  let kids: List(EntityId) = createList(EntityId, cap: 1)
   kids.add(value: np)
   attachChildren(world: world, parent: root, kids: kids)
 

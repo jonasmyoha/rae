@@ -1093,17 +1093,12 @@ static const AstExpr* vm_hoist_type_arg(BytecodeCompiler* compiler, const AstExp
     if (expr->as.call.generic_args) return expr;
     if (!expr->as.call.args) return expr;
 
-    AstCallArg* type_arg_node = NULL;
-    for (AstCallArg* a = expr->as.call.args; a; a = a->next) {
-        if (a->name.len > 0 && str_eq_cstr(a->name, "type")) { type_arg_node = a; break; }
-    }
-    if (!type_arg_node && expr->as.call.args->name.len == 0) {
-        type_arg_node = expr->as.call.args;
-    }
-    if (!type_arg_node) return expr;
-
-    AstTypeRef* tr = vm_try_as_type_arg(compiler, type_arg_node->value);
+    // Type-arg slot recognised by shape, not by hard-coded name. See
+    // c_backend.c::hoist_type_arg_if_present for the same logic; the VM
+    // mirrors it so both backends accept the same call spellings.
+    AstTypeRef* tr = vm_try_as_type_arg(compiler, expr->as.call.args->value);
     if (!tr) return expr;
+    AstCallArg* type_arg_node = expr->as.call.args;
 
     AstCallArg* new_head = NULL; AstCallArg* new_tail = NULL;
     for (AstCallArg* a = expr->as.call.args; a; a = a->next) {

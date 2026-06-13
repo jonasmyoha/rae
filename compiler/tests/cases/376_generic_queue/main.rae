@@ -1,23 +1,23 @@
 # Generic Queue(T) — FIFO ordering, exercising user-defined generics with
 # a different access pattern from the Stack(T) test.
 
-type Queue(T) {
+type Queue(T: type) {
   data: List(T)
   head: Int
 }
 
-func createQueue(T)() ret Queue(T) {
+func createQueue(T: type) ret Queue(T) {
   ret Queue(T) {
-    data: createList(T, initialCap: 4)
+    data: createList(T, cap: 4)
     head: 0
   }
 }
 
-func enqueue(T)(this: mod Queue(T), value: T) {
+func enqueue(T: type, this: mod Queue(T), value: T) {
   add(this.data, value: value)
 }
 
-func dequeue(T)(this: mod Queue(T)) ret opt T {
+func dequeue(T: type, this: mod Queue(T)) ret opt T {
   if this.head >= this.data.length {
     ret none
   }
@@ -26,7 +26,7 @@ func dequeue(T)(this: mod Queue(T)) ret opt T {
   ret v
 }
 
-func qsize(T)(this: view Queue(T)) ret Int {
+func qsize(T: type, this: view Queue(T)) ret Int {
   ret this.data.length - this.head
 }
 

@@ -450,7 +450,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 emit_expr(ctx, arg_val, out, PREC_LOWEST, false, false);
                 fprintf(out, ").data, ("); emit_expr(ctx, arg_val, out, PREC_LOWEST, false, false);
                 fprintf(out, ").length, ("); emit_expr(ctx, arg_val, out, PREC_LOWEST, false, false);
-                fprintf(out, ").capacity, %d)", elem_kind); return true;
+                fprintf(out, ").cap, %d)", elem_kind); return true;
             }
         }
 

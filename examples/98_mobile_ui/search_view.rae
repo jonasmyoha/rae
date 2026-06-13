@@ -45,7 +45,7 @@ func buildSearchField(world: mod UiWorld) ret EntityId {
   let placeholderStyle: String = "muted"
   setText(world: world, entity: placeholder, text: placeholderText, styleId: placeholderStyle)
 
-  let kids: List(EntityId) = createList(EntityId, initialCap: 2)
+  let kids: List(EntityId) = createList(EntityId, cap: 2)
   kids.add(value: icon)
   kids.add(value: placeholder)
   attachChildren(world: world, parent: field, kids: kids)
@@ -71,7 +71,7 @@ func buildRecentRow(world: mod UiWorld, term: own String) ret EntityId {
   let labelStyle: String = "trackTitle"
   setText(world: world, entity: label, text: term, styleId: labelStyle)
 
-  let kids: List(EntityId) = createList(EntityId, initialCap: 1)
+  let kids: List(EntityId) = createList(EntityId, cap: 1)
   kids.add(value: label)
   attachChildren(world: world, parent: row, kids: kids)
   ret row
@@ -97,7 +97,7 @@ func buildRecentSection(world: mod UiWorld) ret EntityId {
   let row2: EntityId = buildRecentRow(world: world, term: "charli xcx · brat")
   let row3: EntityId = buildRecentRow(world: world, term: "indie pop 2024")
 
-  let kids: List(EntityId) = createList(EntityId, initialCap: 4)
+  let kids: List(EntityId) = createList(EntityId, cap: 4)
   kids.add(value: header)
   kids.add(value: row1)
   kids.add(value: row2)
@@ -122,7 +122,7 @@ func buildSearchTopBar(world: mod UiWorld) ret EntityId {
   let titleText: String = "Search"
   setText(world: world, entity: title, text: titleText, styleId: titleStyle)
 
-  let kids: List(EntityId) = createList(EntityId, initialCap: 1)
+  let kids: List(EntityId) = createList(EntityId, cap: 1)
   kids.add(value: title)
   attachChildren(world: world, parent: bar, kids: kids)
   ret bar
@@ -148,7 +148,7 @@ func mountSearchPage(world: mod UiWorld) pub ret EntityId {
   let field: EntityId = buildSearchField(world: world)
   let recent: EntityId = buildRecentSection(world: world)
 
-  let kids: List(EntityId) = createList(EntityId, initialCap: 3)
+  let kids: List(EntityId) = createList(EntityId, cap: 3)
   kids.add(value: topBar)
   kids.add(value: field)
   kids.add(value: recent)

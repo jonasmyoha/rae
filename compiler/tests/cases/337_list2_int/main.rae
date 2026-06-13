@@ -2,20 +2,20 @@
 type List2Int {
   data: Buffer(Int)
   length: Int
-  capacity: Int
+  cap: Int
 }
 
-func createList2Int(initialCap: view Int) ret List2Int {
+func createList2Int(cap: view Int) ret List2Int {
   ret List2Int {
-    data: __buf_alloc(size: initialCap)
+    data: __buf_alloc(size: cap)
     length: 0
-    capacity: initialCap
+    cap: cap
   }
 }
 
 func add(this: mod List2Int, value: view Int) {
-  if this.length is this.capacity {
-    let newCap: Int = this.capacity * 2
+  if this.length is this.cap {
+    let newCap: Int = this.cap * 2
     if newCap is 0 {
       newCap = 4
     }
@@ -29,7 +29,7 @@ func add(this: mod List2Int, value: view Int) {
     )
     __buf_free(buf: this.data)
     this.data = newData
-    this.capacity = newCap
+    this.cap = newCap
   }
   __buf_set(buf: this.data, index: this.length, value: value)
   this.length = this.length + 1
@@ -40,7 +40,7 @@ func get(this: view List2Int, index: view Int) ret Int {
 }
 
 func main() {
-  let list: List2Int = createList2Int(initialCap: 2)
+  let list: List2Int = createList2Int(cap: 2)
   add(this: list, value: 100)
   add(this: list, value: 200)
   add(this: list, value: 300)

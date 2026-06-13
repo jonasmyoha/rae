@@ -1,19 +1,19 @@
 # Generic Stack(T) and Queue(T) — a small demo that user-defined generic
 # types and functions monomorphise correctly across multiple instantiations.
 
-type Stack(T) {
+type Stack(T: type) {
   data: List(T)
 }
 
-func createStack(T)() ret Stack(T) {
-  ret Stack(T) { data: createList(T, initialCap: 4) }
+func createStack(T: type) ret Stack(T) {
+  ret Stack(T) { data: createList(T, cap: 4) }
 }
 
-func push(T)(this: mod Stack(T), value: T) {
+func push(T: type, this: mod Stack(T), value: T) {
   add(this.data, value: value)
 }
 
-func pop(T)(this: mod Stack(T)) ret opt T {
+func pop(T: type, this: mod Stack(T)) ret opt T {
   if this.data.length is 0 {
     ret none
   }
@@ -22,14 +22,14 @@ func pop(T)(this: mod Stack(T)) ret opt T {
   ret last
 }
 
-func peek(T)(this: view Stack(T)) ret opt T {
+func peek(T: type, this: view Stack(T)) ret opt T {
   if this.data.length is 0 {
     ret none
   }
   ret get(this.data, index: this.data.length - 1)
 }
 
-func size(T)(this: view Stack(T)) ret Int {
+func size(T: type, this: view Stack(T)) ret Int {
   ret this.data.length
 }
 
