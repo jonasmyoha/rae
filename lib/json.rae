@@ -10,9 +10,8 @@
 #
 # Helpers (`jsonField`, `jsonInt`, …) take both the doc and the value so
 # callers don't have to plumb pool indices manually.
-import string
-import math
 import core
+import char
 
 enum JsonKind {
   Null
@@ -239,52 +238,13 @@ func jsonValueAt(doc: view JsonDoc, idx: view Int) ret JsonValue {
 }
 
 # ---------- parser internals ----------
-
-func isWhitespace(c: view Char32) ret Bool {
-  ret c is ' ' or c is '\t' or c is '\n' or c is '\r'
-}
-
-func isDigit(c: view Char32) ret Bool {
-  # Live VM doesn't currently support range comparisons (`>=`, `<=`) on
-  # Char32 — equality is fine. List the ten digit codepoints explicitly
-  # so the parser works on both targets.
-  if c is '0' {
-    ret true
-  }
-  if c is '1' {
-    ret true
-  }
-  if c is '2' {
-    ret true
-  }
-  if c is '3' {
-    ret true
-  }
-  if c is '4' {
-    ret true
-  }
-  if c is '5' {
-    ret true
-  }
-  if c is '6' {
-    ret true
-  }
-  if c is '7' {
-    ret true
-  }
-  if c is '8' {
-    ret true
-  }
-  if c is '9' {
-    ret true
-  }
-  ret false
-}
+# `isWhitespace` / `isDigit` predicates live in lib/char.rae now and
+# are auto-loaded. Use UFCS-style `c.isWhitespace()` / `c.isDigit()`.
 
 func skipWhitespace(p: mod JsonParser) {
   loop p.pos < p.source.length() {
     let c: Char32 = p.source.at(index: p.pos)
-    if isWhitespace(c: c) {
+    if c.isWhitespace() {
       p.pos = p.pos + 1
     } else {
       ret
@@ -429,12 +389,12 @@ func parseNumber(p: mod JsonParser) ret Float {
   if peek(p: p) is '-' {
     p.pos = p.pos + 1
   }
-  loop p.pos < p.source.length() and isDigit(c: peek(p: p)) {
+  loop p.pos < p.source.length() and peek(p: p).isDigit() {
     p.pos = p.pos + 1
   }
   if peek(p: p) is '.' {
     p.pos = p.pos + 1
-    loop p.pos < p.source.length() and isDigit(c: peek(p: p)) {
+    loop p.pos < p.source.length() and peek(p: p).isDigit() {
       p.pos = p.pos + 1
     }
   }
@@ -443,7 +403,7 @@ func parseNumber(p: mod JsonParser) ret Float {
     if peek(p: p) is '+' or peek(p: p) is '-' {
       p.pos = p.pos + 1
     }
-    loop p.pos < p.source.length() and isDigit(c: peek(p: p)) {
+    loop p.pos < p.source.length() and peek(p: p).isDigit() {
       p.pos = p.pos + 1
     }
   }
@@ -645,7 +605,7 @@ func parseValue(
     ret -1
   }
 
-  if c is '-' or isDigit(c: c) {
+  if c is '-' or c.isDigit() {
     let n: Float = parseNumber(p)
     if p.ok is false {
       ret -1
