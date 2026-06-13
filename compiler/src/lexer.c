@@ -469,19 +469,11 @@ TokenList lexer_tokenize(Arena* arena,
                                .had_error = false,
                            };
                          
-                           size_t max_lines = 1000;
-                           
-                           // Check for directives in the first few lines
-                           if (length > 10 && source[0] == '#') {
-                               const char* directive = strstr(source, "# rae: max-lines");
-                               if (directive && (size_t)(directive - source) < 200) {
-                                   char* end;
-                                   long val = strtol(directive + 16, &end, 10);
-                                   if (val > 0) {
-                                       max_lines = (size_t)val;
-                                   }
-                               }
-                           }
+                           // Hard cap: every Rae source file MUST stay under 1000
+                           // lines. There is intentionally NO override directive — when
+                           // a file approaches the cap, split it into smaller, domain-
+                           // specific modules. See CLAUDE.md "File size limit".
+                           const size_t max_lines = 1000;
                          
                            TokenBuffer buffer = {0};
                          
@@ -505,7 +497,7 @@ TokenList lexer_tokenize(Arena* arena,
                              }
                          
                              if (lexer.line > max_lines) {
-                                 lexer_error(&lexer, lexer.line, lexer.column, "file exceeds maximum allowed line count of %zu. Use '# rae: max-lines <N>' at the top of the file to increase this limit.", max_lines);
+                                 lexer_error(&lexer, lexer.line, lexer.column, "file exceeds the hard cap of %zu lines. The cap is not overridable — split this file into smaller domain-specific modules.", max_lines);
                                  // We only report this once, so we could break or continue. 
                                  // Break to avoid flooding with the same error if it continues.
                                  Str lexeme = str_from_buf(source + lexer.index, 0);
