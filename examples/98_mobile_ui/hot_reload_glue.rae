@@ -73,18 +73,18 @@ func parseSignedInt(s: view String) ret Int {
 # means a future reordering of the enum doesn't silently corrupt
 # saved state.
 func screenToInt(s: view Screen) ret Int {
-  if s is Screen.NowPlaying { ret 0 }
+  if s is Screen.Player { ret 0 }
   if s is Screen.Album      { ret 1 }
   if s is Screen.Search     { ret 2 }
-  if s is Screen.Profile    { ret 3 }
+  if s is Screen.Library    { ret 3 }
   ret 0
 }
 
 func intToScreen(n: view Int) ret Screen {
   if n is 1 { ret Screen.Album }
   if n is 2 { ret Screen.Search }
-  if n is 3 { ret Screen.Profile }
-  ret Screen.NowPlaying
+  if n is 3 { ret Screen.Library }
+  ret Screen.Player
 }
 
 # Build a default state. Callers pass this in to loadRestoredState
@@ -92,7 +92,7 @@ func intToScreen(n: view Int) ret Screen {
 # own startup defaults.
 func defaultRestoredState() pub ret RestoredState {
   ret RestoredState {
-    screen: Screen.NowPlaying
+    screen: Screen.Player
     scrollY: 0.0
   }
 }

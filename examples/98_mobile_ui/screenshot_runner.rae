@@ -3,7 +3,7 @@
 # `takeScreenshot` partway through, then rets back to main which falls
 # through to teardown.
 #
-# Picks the screen via `RAE_UI_SCREEN` ("now-playing", "album", "profile";
+# Picks the screen via `RAE_UI_SCREEN` ("player", "album", "profile";
 # default album). Picks up `RAE_UI_PLAYING=1` and `RAE_UI_PROGRESS` (0..1)
 # so the snapshot tool can capture deterministic frames where the play
 # button is in the pause state and the progress bar is partway filled.
@@ -23,14 +23,14 @@ func runScreenshotMode(
   }
 
   let screenEnv: String = getEnv(name: "RAE_UI_SCREEN")
-  let nowKey: String = "now-playing"
+  let nowKey: String = "player"
   let profileKeyEnv: String = "profile"
   let screen: Screen = Screen.Album
   if screenEnv.equals(other: nowKey) {
-    screen = Screen.NowPlaying
+    screen = Screen.Player
   }
   if screenEnv.equals(other: profileKeyEnv) {
-    screen = Screen.Profile
+    screen = Screen.Library
   }
 
   let shotPlayback: PlaybackState = createPlaybackState()
