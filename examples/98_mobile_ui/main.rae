@@ -1,4 +1,3 @@
-# rae: max-lines 1700
 # Mobile-UI demo entrypoint. The actual work — scene loading, world
 # building, screen routing — lives in sibling `.rae` files in this same
 # directory, which Rae auto-imports because they share the project
@@ -165,112 +164,14 @@ func main() {
   let loopDebugEnabled: Bool = loopDebugEnv.length() > 0
   let loopDebugFrame: Int = 0
 
-  # Memory-stress mode: with `RAE_UI_STRESS_REBUILDS=1`, rebuilds the
-  # world `stressN` times in a tight loop (no input, no draw) and
-  # logs every 100 iterations so an external script can sample RSS
-  # against the printed iteration count. Used to verify that the
-  # Stage 3 auto-drop pipeline (docs/scope-exit-dealloc.md +
-  # docs/ownership-model.md) actually reclaims each world's heap
-  # storage at end-of-frame instead of leaking it permanently.
-  let stressEnv: String = getEnv(name: "RAE_UI_STRESS_REBUILDS")
-  if stressEnv.length() > 0 {
-    # Stress run length is overridable via env so we can do slope
-    # checks across 50K / 100K / 200K windows without recompiling.
-    let stressNEnv: String = getEnv(name: "RAE_UI_STRESS_N")
-    let stressN: Int = 50000
-    if stressNEnv.length() > 0 {
-      stressN = stressNEnv.toInt()
-    }
-    let stressI: Int = 0
-    let lastLog: Int = 0
-    # Warm-up rebuild so font / texture / scene-loader one-shots don't
-    # land in the baseline.
-    let stressPlayback: PlaybackState = createPlaybackState()
-    let stressScroll: Float = 0.0
-    let stressTexReg: TextureRegistry = createTextureRegistry()
-    let warm: UiWorld = buildScreenWorld(screen: Screen.Album, scenes: scenes, playback: stressPlayback, state: appState, texReg: stressTexReg, scrollY: stressScroll)
-    layoutSystem(world: warm)
-    transformSystem(world: warm)
-    let baselineKb: Int = processRssKb()
-    log("[stress] baseline rss_kb={baselineKb}")
-    loop stressI < stressN {
-      let stressScreen: Screen = Screen.Album
-      if (stressI - (stressI / 2) * 2) is 1 {
-        stressScreen = Screen.NowPlaying
-      }
-      let sworld: UiWorld = buildScreenWorld(screen: stressScreen, scenes: scenes, playback: stressPlayback, state: appState, texReg: stressTexReg, scrollY: stressScroll)
-      layoutSystem(world: sworld)
-      transformSystem(world: sworld)
-      stressI = stressI + 1
-      if stressI - lastLog >= 5000 {
-        let nowKb: Int = processRssKb()
-        log("[stress] iter {stressI} rss_kb={nowKb} growth_kb={nowKb - baselineKb}")
-        lastLog = stressI
-      }
-    }
-    let finalKb: Int = processRssKb()
-    log("[stress] done {stressN} rebuilds rss_kb={finalKb} growth_kb={finalKb - baselineKb}")
-    # Optional pause-before-exit so external tooling (macOS `leaks`,
-    # `vmmap`, Activity Monitor) can inspect the live process state
-    # after stress completes but before the OS frees everything.
-    let pauseEnv: String = getEnv(name: "RAE_UI_STRESS_PAUSE")
-    if pauseEnv.length() > 0 {
-      log("[stress] paused for inspection (Ctrl+C to exit) — find pid via `pgrep -fl rae_compiled` and run `leaks <pid>` / `vmmap <pid>`")
-      loop true {
-        sleep(ms: 1000)
-      }
-    }
-    closeWindow()
+  # Memory-stress and screenshot modes both terminate after their run
+  # (closeWindow / falls through to teardown). Implementations live in
+  # `stress_runner.rae` and `screenshot_runner.rae` so this file only
+  # owns the interactive lifecycle.
+  if runStressMode(scenes: scenes, appState: appState) {
     ret
   }
-  if screenshotEnv.length() > 0 {
-    # Screenshot mode: pick the screen via `RAE_UI_SCREEN` env var
-    # ("now-playing" / "album"), default to album to match the existing
-    # baseline. Render a few frames and self-screenshot via raylib —
-    # the snapshot tooling falls back to `screencapture -R` on macOS.
-    let screenEnv: String = getEnv(name: "RAE_UI_SCREEN")
-    let nowKey: String = "now-playing"
-    let profileKeyEnv: String = "profile"
-    let screen: Screen = Screen.Album
-    if screenEnv.equals(other: nowKey) {
-      screen = Screen.NowPlaying
-    }
-    if screenEnv.equals(other: profileKeyEnv) {
-      screen = Screen.Profile
-    }
-
-    # Screenshot mode picks up `RAE_UI_PLAYING=1` so we can capture
-    # frames where the play button is in the pause state and the
-    # progress bar is partway filled. `RAE_UI_PROGRESS` (0.0..1.0)
-    # forces an exact progress value for deterministic snapshots.
-    let shotPlayback: PlaybackState = createPlaybackState()
-    let playingEnv: String = getEnv(name: "RAE_UI_PLAYING")
-    if playingEnv.length() > 0 {
-      shotPlayback.isPlaying = true
-    }
-    let progressEnv: String = getEnv(name: "RAE_UI_PROGRESS")
-    if progressEnv.length() > 0 {
-      let pf: Float = progressEnv.toFloat()
-      shotPlayback.elapsedSec = shotPlayback.durationSec * pf
-    }
-    let shotScroll: Float = 0.0
-    let world: UiWorld = buildScreenWorld(screen: screen, scenes: scenes, playback: shotPlayback, state: appState, texReg: texReg, scrollY: shotScroll)
-    layoutSystem(world: world)
-    transformSystem(world: world)
-    applyPlaybackToWorld(world: world, state: shotPlayback)
-    let warmupFrames: Int = 30
-    let f: Int = 0
-    loop f < warmupFrames {
-      beginDrawing()
-      clearBackground(color: bg)
-      renderSystem(world: world, reg: texReg)
-      if f is (warmupFrames / 2) {
-        takeScreenshot(fileName: screenshotEnv)
-      }
-      endDrawing()
-      f = f + 1
-    }
-  } else {
+  if runScreenshotMode(scenes: scenes, appState: appState, texReg: texReg, bg: bg) is false {
     # Interactive mode: outer loop owns the world for the *current*
     # screen; the inner loop runs frames until either the user closes
     # the window or a `dispatchActions` call returns a different
@@ -306,7 +207,7 @@ func main() {
     # rebooting always returns to the tab's base page).
     appState.tab = restored.screen
     let currentScreen: Screen = visibleScreen(state: appState)
-    # `profileScrollY` itself is declared further down; the restored
+    # `scrollFsm.scrollY` itself is declared further down; the restored
     # value is carried in `restored.scrollY` until the inner loop's
     # init block reads it back.
 
@@ -417,46 +318,17 @@ func main() {
     # Initial value comes from `restored.scrollY` (defaulting to 0.0)
     # so a `rae watch` reload that landed on Profile preserves the
     # user's vertical position.
-    let profileScrollY: Float = restored.scrollY
+    # All scroll/drag/momentum/spring state lives in one FSM, defined
+    # in `scroll_input.rae`. The two physics functions (drag, wheel)
+    # mutate it and the inner loop reads `scrollFsm.scrollY` to drive
+    # ECS Offset / save-state / debug logging.
+    let scrollFsm: ScrollFsm = createScrollFsm(initialScrollY: restored.scrollY)
 
     # Hot-reload signal watcher. The supervisor writes a fresh signal
     # to `.rae/reload.signal` on every successful rebuild; the inner
     # loop polls this once per frame and, on verb=Reload, snapshots
     # state and exits 0 so the supervisor can swap in the new build.
     let reloadWatcher: ReloadSignalWatcher = createReloadSignalWatcher()
-    # iOS-style drag scrolling state. The wheel handler further down
-    # also writes `profileScrollY`; these locals add touch/mouse-drag
-    # support with the same physics: 1:1 finger tracking during the
-    # drag, momentum scroll on release, exponential decay.
-    let dragPrevDown: Bool = false
-    let dragMouseY: Float = 0.0
-    let dragStartX: Float = 0.0
-    let dragStartY: Float = 0.0
-    # `dragActive` flips true only once movement crosses the click-vs-
-    # drag threshold. A press that releases below the threshold fires
-    # a normal click; once `dragActive` flips, the release-click is
-    # suppressed via `dragJustReleased`.
-    let dragActive: Bool = false
-    # Last-3-frames rolling buffer of per-frame y-deltas. Averaged at
-    # release-time to give the momentum-fling an initial velocity
-    # less twitchy than the single last frame.
-    let dragDelta0: Float = 0.0
-    let dragDelta1: Float = 0.0
-    let dragDelta2: Float = 0.0
-    # Momentum velocity in px-per-frame. Decayed each frame after
-    # release by `dragFriction`; cleared when scroll hits a bound.
-    let scrollVelocity: Float = 0.0
-    # Wall-clock seconds at which a wheel/trackpad event last fired.
-    # The spring branch (mouse-up, OOB) gates on `now - lastWheelTime`:
-    # while wheel input is recent (e.g. macOS is still delivering
-    # momentum events from a two-finger flick, which keeps arriving
-    # for ~0.5–1.5 s past finger lift), the spring stays out of the
-    # way so wheel + spring don't fight over `profileScrollY` every
-    # frame. Once the wheel goes idle the spring runs as before —
-    # starting from the velocity left by the last wheel tick, which
-    # gives a single smooth bounce-back instead of the visible
-    # tug-of-war the previous design produced.
-    let lastWheelTime: Float = 0.0 - 1.0
 
     # Active-album / track cache. Recomputing these from
     # `state.albums` on every inner-loop iteration cost ~2 fps
@@ -469,25 +341,11 @@ func main() {
     let cachedTrackIndex: Int = 0 - 1
     let cachedTrackDurMs: Int = 0
     let cachedAlbumScrollFloor: Float = 0.0
-    # Single InputSystem for the whole app lifetime.
-    #
-    # Conceptual split: `UiWorld` is the renderable tree, rebuilt
-    # freely on any state change (every rubber-band spring step
-    # rebuilds it, for example). `InputSystem` is application input
-    # state — a press that's still being held has to outlive any
-    # number of world rebuilds that happen between it and the
-    # eventual release. Per-frame fields (`pointer`, `events`) get
-    # reset / refilled by `updateInputSystem` each frame, so persist-
-    # ing the struct only carries over what genuinely should live
-    # across frames: the `pressedEntity` id of the currently-held
-    # press.
-    #
-    # Entity ids are stable across rebuilds within the same screen
-    # (assigned in deterministic order during world build), so a
-    # press on tile 25 in the outgoing world resolves to the same
-    # tile in the incoming one. `input.pressedEntity = -1` is reset
-    # on screen change below so a stale id doesn't bleed across
-    # screens with unrelated entity layouts.
+    # Single InputSystem for the app lifetime — outlives world
+    # rebuilds so a held press carries `pressedEntity` across them.
+    # `updateInputSystem` refills the per-frame fields each tick.
+    # Cleared explicitly on screen change so a stale id from the
+    # outgoing screen doesn't bleed into the new one.
     let input: InputSystem = createInputSystem()
     # Entity id under the cursor on the previous render-gate check.
     # Only used when `debug.showInputOutlines` is on: a frame re-
@@ -557,7 +415,7 @@ func main() {
       # switch screens without a full world teardown (slice 4b.3).
       # For now this build still happens on every `switching = true`
       # — screen changes, theme toggle, hot reload, debug menu.
-      let world: UiWorld = buildAppWorld(scenes: scenes, playback: playback, state: appState, texReg: texReg, scrollY: profileScrollY)
+      let world: UiWorld = buildAppWorld(scenes: scenes, playback: playback, state: appState, texReg: texReg, scrollY: scrollFsm.scrollY)
       # Rebind any scene-authored `"albumCover"` placeholder hero +
       # sprite to the user's current album. This is what lets the
       # hero animation system find matching keys at Profile (where
@@ -642,22 +500,10 @@ func main() {
         # the spring-back after release renders chunky because the
         # physics step only runs once per OS event wake.
         let scrollAnimating: Bool = false
-        # Per-frame scroll gating + bounds. Both Profile (album-
-        # cover grid) and Album (track list) are scrollable, and
-        # all three physics blocks below (OOB redraw heartbeat,
-        # drag + momentum + spring, wheel/trackpad) read the same
-        # two values:
-        #   scrollOnThisScreen — whether the current screen has a
-        #                        scrollable body at all.
-        #   scrollFloor        — the most-negative scrollY the
-        #                        user is allowed to reach.
-        #                        Profile uses a static grid baseline;
-        #                        Album derives from the active
-        #                        album's track count.
-        # Wrong floor → spring physics never fires to bring overshoot
-        # back; missing gate → wheel input is silently dropped on
-        # the affected screen. Compute once here and let every
-        # downstream block read these locals.
+        # Per-frame scroll bounds. Both Profile (cover grid) and Album
+        # (track list) scroll; the OOB heartbeat, drag/spring, and wheel
+        # blocks all read these. Wrong floor → spring never settles;
+        # missing gate → wheel silently dropped.
         let scrollOnThisScreen: Bool = false
         let scrollFloor: Float = 0.0
         if currentScreen is Screen.Profile {
@@ -670,8 +516,8 @@ func main() {
           # `cachedAlbumStem` block above for why.
           scrollFloor = cachedAlbumScrollFloor
         }
-        let scrollOOB: Bool = profileScrollY > 0.0 or profileScrollY < scrollFloor
-        let velAbs: Float = scrollVelocity
+        let scrollOOB: Bool = scrollFsm.scrollY > 0.0 or scrollFsm.scrollY < scrollFloor
+        let velAbs: Float = scrollFsm.velocity
         if velAbs < 0.0 {
           velAbs = 0.0 - velAbs
         }
@@ -688,7 +534,7 @@ func main() {
         # The progress bar pauses for ~250 ms after the last wheel
         # tick (visually imperceptible at a 200-second track), then
         # resumes ticking once scrolling settles.
-        let scrollActiveTimeSec: Float = getTime() - lastWheelTime
+        let scrollActiveTimeSec: Float = getTime() - scrollFsm.lastWheelTime
         let recentlyScrolling: Bool = scrollActiveTimeSec < 0.25
         let playbackAnimating: Bool = false
         if playback.isPlaying {
@@ -709,7 +555,7 @@ func main() {
         if loopDebugEnabled {
           loopDebugFrame = loopDebugFrame + 1
           let mouseDown: Bool = isMouseButtonDown(button: mouseButtonLeft)
-          log("[loop {loopDebugFrame}] screen={screenToInt(s: currentScreen)} scrollY={profileScrollY} vel={scrollVelocity} animA={anim.active} animP={playback.isPlaying} animS={scrollAnimating} mouse={mouseDown} timeout={timeout}")
+          log("[loop {loopDebugFrame}] screen={screenToInt(s: currentScreen)} scrollY={scrollFsm.scrollY} vel={scrollFsm.velocity} animA={anim.active} animP={playback.isPlaying} animS={scrollAnimating} mouse={mouseDown} timeout={timeout}")
         }
         # When RAE_AUTO_EXIT_SEC is set, clamp the wait so the deadline
         # actually fires on time — otherwise an idle iteration could
@@ -756,236 +602,24 @@ func main() {
           # above and resume on the same screen at the same scroll.
           let sig: ReloadSignal = pollReloadSignal(w: reloadWatcher)
           if sig.verb is ReloadVerb.Reload {
-            saveStateAndExit(screen: currentScreen, scrollY: profileScrollY)
+            saveStateAndExit(screen: currentScreen, scrollY: scrollFsm.scrollY)
           }
 
           updateInputSystem(input: input, world: world)
 
-          # iOS-style scroll physics for the Profile screen. Drag,
-          # trackpad/wheel, momentum, and rubber-band overshoot all
-          # feed one position+velocity state (profileScrollY +
-          # scrollVelocity). Pure math lives in scroll_physics.rae.
-          #
-          # Behaviour summary:
-          #   * Drag inside bounds:   1:1 finger tracking.
-          #   * Drag past a bound:    rubber-banded (UIScrollView
-          #     formula — finger movement starts 1:1 and slows
-          #     asymptotically with overshoot).
-          #   * Release after drag:   initial velocity = recent
-          #     finger speed (pickReleaseVelocity), then drift
-          #     with friction; on entering an overshoot region,
-          #     spring back to the bound — preserving incoming
-          #     velocity so a flick that overshoots smoothly
-          #     decelerates into the bounce.
-          #   * Wheel / trackpad:     handled in the dedicated
-          #     block further down, with the same rubber-band on
-          #     deltas when past a bound. Wheel kicks the same
-          #     spring-back code via the physics step below when
-          #     the user lets go.
-          #   * dragJustReleased gate keeps the release-click from
-          #     firing on whatever's under the cursor (tab, tile,
-          #     play button).
-          let dragJustReleased: Bool = false
-          # `scrollOnThisScreen` was computed once at the top of
-          # this loop iteration — same value the wheel block and
-          # the OOB redraw heartbeat use. Keep them in sync by
-          # not re-deriving locally here.
-          if scrollOnThisScreen {
-            let curMouseX: Float = getMouseX().toFloat()
-            let curMouseY: Float = getMouseY().toFloat()
-            let curMouseDown: Bool = isMouseButtonDown(button: mouseButtonLeft)
-            # Tap-vs-drag activation distance. Higher than the previous
-            # 6 px because once `dragActive` flips true, the release-
-            # click is unconditionally skipped (see `dragJustReleased`
-            # below). 6 px was tight enough that natural hand tremor
-            # during a click crossed it — the press would land on a
-            # tile, the user would release, and no `OnClick` would
-            # fire because the gesture had been reclassified as a
-            # drag. ~10 pt matches the iOS UIPanGestureRecognizer
-            # default and leaves comfortable headroom for deliberate
-            # swipes.
-            let dragThreshold: Float = 10.0
-            # Scroll clamp comes from the per-frame `scrollFloor`
-            # at the top of the inner loop — single source of
-            # truth for Profile vs Album vs any future screen.
-            let scrollMin: Float = scrollFloor
-            let scrollMax: Float = 0.0
-            # Rubber-band reference dimension — tunes how stretchy
-            # the overshoot feels. iOS uses ~viewport height.
-            let rubberDim: Float = screenH
+          # Drag + momentum + spring-back physics for Profile / Album.
+          # Implementation in scroll_input.rae — see ScrollFsm. Returns
+          # true on the frame a drag just ended so the dispatch below
+          # skips the release-click on whatever's under the cursor.
+          let dragJustReleased: Bool = applyDragPhysics(
+            fsm: scrollFsm
+            world: world
+            scrollTarget: scrollTarget
+            scrollOnThisScreen: scrollOnThisScreen
+            scrollFloor: scrollFloor
+            rubberDim: screenH
+          )
 
-            if curMouseDown {
-              if dragPrevDown is false {
-                # New press. Capture origin + kill any in-flight
-                # momentum/spring so the finger takes over instantly.
-                dragStartX = curMouseX
-                dragStartY = curMouseY
-                dragActive = false
-                scrollVelocity = 0.0
-                dragDelta0 = 0.0
-                dragDelta1 = 0.0
-                dragDelta2 = 0.0
-              } else {
-                let dxFromStart: Float = curMouseX - dragStartX
-                let dyFromStart: Float = curMouseY - dragStartY
-                if dragActive is false {
-                  let distSq: Float = dxFromStart * dxFromStart + dyFromStart * dyFromStart
-                  if distSq > dragThreshold * dragThreshold {
-                    dragActive = true
-                  }
-                }
-                if dragActive {
-                  let rawDelta: Float = curMouseY - dragMouseY
-                  # Rubber-band the delta if past a bound; 1:1
-                  # otherwise. No hard clamp — visual overshoot is
-                  # the whole point.
-                  let eff: Float = dampedDelta(
-                    current: profileScrollY
-                    delta: rawDelta
-                    low: scrollMin
-                    high: scrollMax
-                    dim: rubberDim
-                  )
-                  profileScrollY = profileScrollY + eff
-                  dragDelta2 = dragDelta1
-                  dragDelta1 = dragDelta0
-                  dragDelta0 = eff
-                  # In-place: mutate the scroll target's Offset +
-                  # ScrollState instead of triggering a full rebuild.
-                  # `layoutSystemIfDirty` picks up the offset bump on
-                  # the next inner-loop iteration's render pass.
-                  updateScrollOffset(world: world, target: scrollTarget, scrollY: profileScrollY)
-                }
-              }
-            } else {
-              if dragPrevDown {
-                if dragActive {
-                  # iOS "velocity at lift": pick the most recent
-                  # meaningful frame delta, not a 3-frame average
-                  # — averaging underestimated when the finger
-                  # paused before release, which is what made the
-                  # spring feel jerky on the old path.
-                  scrollVelocity = pickReleaseVelocity(
-                    d0: dragDelta0
-                    d1: dragDelta1
-                    d2: dragDelta2
-                  )
-                  dragJustReleased = true
-                }
-                dragActive = false
-              }
-
-              # Physics step. Out of bounds → spring toward the
-              # nearest edge, preserving incoming velocity. In
-              # bounds with non-trivial velocity → exponential
-              # momentum decay (drift). A drift step that exits
-              # the range naturally lands in the spring branch
-              # on the next frame — no discrete handoff.
-              #
-              # Suppress the spring while wheel/trackpad momentum
-              # events are still arriving — macOS keeps delivering
-              # them for ~0.5–1.5 s after the user lifts their
-              # fingers, and if the spring runs concurrently the
-              # two systems fight over `profileScrollY` every
-              # frame, producing the visible "5 bounces" symptom
-              # the user reported. Once the wheel goes idle
-              # (50 ms with no event) the spring takes over, using
-              # the last wheel tick's velocity as its initial
-              # condition — one smooth bounce-back, mirroring the
-              # drag path's `pickReleaseVelocity` handoff.
-              let nowSec: Float = getTime()
-              let wheelIdleSec: Float = nowSec - lastWheelTime
-              let wheelQuiet: Bool = wheelIdleSec > 0.05
-              let isOOB: Bool = profileScrollY > scrollMax or profileScrollY < scrollMin
-              if isOOB {
-                if wheelQuiet {
-                let target: Float = scrollMax
-                if profileScrollY < scrollMin {
-                  target = scrollMin
-                }
-                # Near-critically-damped spring (ζ ≈ 0.99). Soft
-                # enough that a small drag-release overshoot (~50 px)
-                # eases back smoothly rather than snapping — that
-                # gentle feel was the original tuning the user
-                # liked. ζ = friction / (2 * sqrt(tension)); with
-                # tension 0.08 the critical friction is 2*sqrt(0.08)
-                # ≈ 0.566, so friction 0.56 keeps us a hair under
-                # critical (no visible oscillation).
-                #
-                # We don't try to scale this spring up to compensate
-                # for big two-finger-scroll overshoots — instead the
-                # wheel block caps overshoot magnitude, so the spring
-                # always starts from a predictably-small displacement.
-                # See `wheelMaxOver` in the wheel handler.
-                let tension: Float = 0.08
-                let friction: Float = 0.56
-                scrollVelocity = springStepVelocity(
-                  pos: profileScrollY
-                  velocity: scrollVelocity
-                  target: target
-                  tension: tension
-                  friction: friction
-                )
-                profileScrollY = profileScrollY + scrollVelocity
-                # Settle test: snap to target when both displacement
-                # and velocity are below subpixel threshold so we
-                # don't trail off in floating-point noise.
-                let displ: Float = profileScrollY - target
-                let absD: Float = displ
-                if absD < 0.0 {
-                  absD = 0.0 - absD
-                }
-                let absV: Float = scrollVelocity
-                if absV < 0.0 {
-                  absV = 0.0 - absV
-                }
-                # Snap zone — 1 px and ⅓ px/frame is just below
-                # human perception on a 60 Hz display, so cutting
-                # the asymptotic tail there removes the perceptibly-
-                # slow final approach without introducing any
-                # visible jump. The earlier 0.5/0.1 chased the tail
-                # to half a pixel, which felt "still bouncing"
-                # because the eye couldn't see the difference
-                # between displ=0.5 and displ=0.
-                if absD < 1.0 and absV < 0.3 {
-                  profileScrollY = target
-                  scrollVelocity = 0.0
-                }
-                updateScrollOffset(world: world, target: scrollTarget, scrollY: profileScrollY)
-                }
-                # else: wheel is actively scrolling — let the wheel
-                # block (further down the iteration) drive `pos`.
-                # Spring would only fight it and produce the
-                # "5 bounces" visual.
-              } else {
-                # In-bounds momentum decay (drag-release fling).
-                # Same wheel-quiet gate so wheel + decay don't
-                # double-apply velocity to `profileScrollY` during
-                # an active trackpad scroll.
-                if wheelQuiet {
-                  let absVel: Float = scrollVelocity
-                  if absVel < 0.0 {
-                    absVel = 0.0 - absVel
-                  }
-                  if absVel > 0.3 {
-                    profileScrollY = profileScrollY + scrollVelocity
-                    scrollVelocity = scrollVelocity * 0.97
-                    updateScrollOffset(world: world, target: scrollTarget, scrollY: profileScrollY)
-                  } else {
-                    scrollVelocity = 0.0
-                  }
-                }
-              }
-            }
-            dragMouseY = curMouseY
-            dragPrevDown = curMouseDown
-          } else {
-            # Leaving Profile resets all drag/momentum state so the
-            # next entry starts clean.
-            dragPrevDown = false
-            dragActive = false
-            scrollVelocity = 0.0
-          }
 
           # Skip dispatch on the single frame where a drag just
           # ended — the release-click would otherwise hit whatever
@@ -1082,30 +716,17 @@ func main() {
           # apply a giant `dt` carry. Cheap (no ECS writes), safe to
           # call every frame including idle ones.
           advancePlayback(state: playback, now: now)
-          # `applyPlaybackToWorld` writes the play/pause icon Sprite
-          # and the ProgressFill ComputedRect/Rect via `componentMod`,
-          # which eagerly bumps the table generation even when the
-          # values are unchanged. To preserve idle frame-skipping we
-          # only call it when something downstream actually needs to
-          # change: when playing (elapsedSec moved), when input fired
-          # an event (a play/pause toggle may have flipped isPlaying),
-          # or on the first frame after a world rebuild (the freshly
-          # laid-out world needs the initial icon/fill written).
-          #
-          # ALSO skipped while the user is actively wheel-scrolling
-          # (last wheel tick < 250 ms ago) — see the matching gate
-          # near `nextWaitTimeoutSec` above. Each call here bumps
-          # the Sprite + ComputedRect table generations, which
-          # marks the render cache dirty, which forces a full
-          # render. Doing that 60×/sec on top of wheel-driven
-          # rebuilds blew the frame budget and the scroll dropped
-          # to ~2 fps.
+          # `applyPlaybackToWorld` bumps Sprite + ComputedRect generations
+          # unconditionally — gate it on real change (playing tick, input
+          # event, or first frame) to preserve idle frame-skipping.
+          # Skipped during active wheel scroll: 60×/sec dirtying on top of
+          # wheel-driven rebuilds blew the frame budget (~2 fps regression).
           let applyPlaybackFrame: Bool = false
           if forceRender or input.events.length > 0 {
             applyPlaybackFrame = true
           }
           if playback.isPlaying {
-            let wheelAgeSec: Float = now - lastWheelTime
+            let wheelAgeSec: Float = now - scrollFsm.lastWheelTime
             if wheelAgeSec >= 0.25 {
               applyPlaybackFrame = true
             }
@@ -1135,7 +756,7 @@ func main() {
                 # non-scoped variant picks the first match across
                 # every page and would leave the real target hidden
                 # (paints black) on multi-page persistent worlds.
-                if pendingHeroTargetPageId.length > 0 {
+                if pendingHeroTargetPageId.length() > 0 {
                   setHeroVisibleOnPage(world: world, pageId: pendingHeroTargetPageId, key: appState.currentAlbumStem, visible: true)
                 } else {
                   setHeroVisible(world: world, key: appState.currentAlbumStem, visible: true)
@@ -1145,34 +766,11 @@ func main() {
               }
             }
           }
-          # Battery-saver: dynamic target-FPS instead of frame-skip.
-          # The earlier `sleep(16)` skip path froze raylib's event
-          # pump (window beach-balled) because `sleep` blocks the
-          # main thread without dispatching Cocoa events. So we
-          # always call begin/render/endDrawing (which DOES pump
-          # events via glfwPollEvents inside endDrawing) and instead
-          # throttle the frame rate via `setTargetFPS` based on
-          # whether anything's changing.
-          #
-          # Active rate (60 fps) when ANY of these:
-          #   - first frame after world rebuild (`forceRender`)
-          #   - tracked visual ComponentTable bumped (`renderCacheDirty`)
-          #   - input produced an ActionEvent this frame
-          #   - pressed-entity transition (hover state changed)
-          #   - hero transition is mid-flight
-          #   - mouse button is currently held down (catches the
-          #     release edge reliably on the next frame)
-          #
-          # Idle rate (30 fps) otherwise — at 30 fps the poll gap is
-          # ~33 ms, short enough that fast mouse clicks (typically
-          # 50-100 ms) keep the button down across at least one poll.
-          # raylib only reads input state when we ask, so the idle
-          # rate is effectively our minimum input-polling frequency.
-          # At the previous 5 fps the 200 ms gap dropped most clicks.
-          #
-          # NOTE: showLabels is NOT in this list. The heartbeat is the
-          # real-work indicator (drawn only when active fires). Forcing
-          # active whenever labels are on would defeat the purpose.
+          # Frame-gate decision: ask `decideActive` whether anything
+          # changed that warrants a full begin/render/endDrawing this
+          # frame. Inputs: forceRender, dirty caches, input events,
+          # hover/button changes for the debug-outline overlay. See
+          # render_decide.rae for the full list.
 
           # Re-run layout + transform if any tracked component changed
           # since last frame (scroll handlers mutate Offset in place).
@@ -1185,90 +783,20 @@ func main() {
           layoutSystemIfDirty(world: world, cache: layoutCache)
           transformSystemIfDirty(world: world, cache: transformCache)
 
-          let active: Bool = forceRender
-          if active is false {
-            if renderCacheDirty(world: world, cache: renderCache) {
-              active = true
-            }
-          }
-          if active is false {
-            if input.events.length > 0 {
-              active = true
-            }
-          }
-          if active is false {
-            if input.pressedEntity.value is not lastPressed.value {
-              active = true
-            }
-          }
-          if active is false {
-            if animating {
-              active = true
-            }
-          }
-          if active is false {
-            # While the user is holding the mouse button, stay at 60 fps
-            # so we catch the release transition (which is what fires
-            # the action event) on the very next frame.
-            if isMouseButtonDown(button: mouseButtonLeft) {
-              active = true
-            }
-          }
-          if active is false {
-            # Force a render on any input edge this frame, even when
-            # the click landed on empty space and produced no
-            # `input.events` entry. raylib only advances its
-            # edge-triggered mouse state inside `endDrawing`'s
-            # PollInputEvents; if we skip render here, the released
-            # edge stays "true" and `isMouseButtonReleased()` keeps
-            # firing on every subsequent frame until something else
-            # (a scroll-induced rebuild, a press) forces a render.
-            # That manifested in the press/release trace as one press
-            # followed by hundreds of phantom releases at drifting
-            # cursor positions — every mouse-motion event woke the
-            # loop, `updateInputSystem` saw the stuck edge, and we
-            # spammed "release hit nothing" until the user actually
-            # did something that forced a frame.
-            if input.pointer.pressed or input.pointer.released {
-              active = true
-            }
-          }
-          # Input-outline debug overlay: re-render only when the
-          # hovered OnClick entity *changes*, not every frame the
-          # overlay is on. Idle cursor / cursor parked over the same
-          # rect stays at 0 fps; crossing a rect boundary triggers
-          # one re-render so the highlight follows. We always compute
-          # `currentHovered` when the toggle is on so the per-frame
-          # comparison below is meaningful; the hitTest walk is cheap
-          # (linear over OnClick entities).
-          let currentHovered: EntityId = noEntity()
-          let currentMouseBtns: Int = 0
-          if debug.showInputOutlines {
-            let outlineMx: Float = getMouseX().toFloat()
-            let outlineMy: Float = getMouseY().toFloat()
-            currentHovered = hitTest(world: world, x: outlineMx, y: outlineMy)
-            # Same bitfield layout as the "btn:" label below (see
-            # drawDebugLabels): bit 0 left, bit 1 right, bit 2 middle.
-            if isMouseButtonDown(button: 0) {
-              currentMouseBtns = currentMouseBtns + 1
-            }
-            if isMouseButtonDown(button: 1) {
-              currentMouseBtns = currentMouseBtns + 2
-            }
-            if isMouseButtonDown(button: 2) {
-              currentMouseBtns = currentMouseBtns + 4
-            }
-          }
-          if active is false {
-            if currentHovered.value is not lastHoveredEntity.value {
-              active = true
-            }
-          }
-          if active is false {
-            if currentMouseBtns is not lastMouseBtns {
-              active = true
-            }
-          }
+          let activeDecision: RenderActiveDecision = decideActive(
+            world: world
+            renderCache: renderCache
+            input: input
+            debug: debug
+            forceRender: forceRender
+            animating: animating
+            prevPressed: lastPressed
+            prevHovered: lastHoveredEntity
+            prevMouseBtns: lastMouseBtns
+          )
+          let active: Bool = activeDecision.active
+          let currentHovered: EntityId = activeDecision.currentHovered
+          let currentMouseBtns: Int = activeDecision.currentMouseBtns
           lastHoveredEntity = currentHovered
           lastMouseBtns = currentMouseBtns
           lastPressed = input.pressedEntity
@@ -1382,210 +910,59 @@ func main() {
             renderCacheDirty(world: world, cache: renderCache)
           }
 
-          if willSwitch {
-            # Persistent-world screen change (slice 4b.3 + 4c). Two
-            # sub-paths: data-changed (album.open or song.open)
-            # re-mounts the affected page in place; data-unchanged
-            # (tab tap or back) just flips Active.
-            let outgoingPageId: String = pageIdForScreen(screen: currentScreen)
-            let incomingPageId: String = pageIdForScreen(screen: nextScreen)
-            let stemChangedNow: Bool = appState.currentAlbumStem.equals(other: cachedAlbumStem) is false
-            let trackChangedNow: Bool = appState.currentTrackIndex is not cachedTrackIndex
-
-            # Per-page re-mount on data change (slice 4c). The old
-            # rebuild path was tearing down EVERY page on album.open
-            # / song.open, wiping ProfileScroll across the
-            # round-trip. Now we destroy just the affected page's
-            # entities and re-mount it with the current state — the
-            # other pages (Profile, Search, the dock, scroll
-            # positions) survive untouched. `unmountPage` already
-            # sweeps the page's scoped nodeIds.
-            if stemChangedNow {
-              unmountPage(world: world, pageId: albumPageId)
-              let freshAlbum: EntityId = mountAlbumPage(world: world, scenes: scenes, state: appState, scrollY: 0.0)
-              # Track-content depends on the album too, so the
-              # now-playing page is stale even when only the album
-              # changed. Re-mount it with the new album's tracks.
-              unmountPage(world: world, pageId: nowPlayingPageId)
-              let freshNP: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: appState)
-              rebindHero(world: world, fromKey: "albumCover", toKey: appState.currentAlbumStem)
-              # The freshly-mounted pages have no Active component →
-              # they default to active=true and would render on top
-              # of the incoming page. Explicitly deactivate them; the
-              # `setPageActive(incoming, true)` below re-activates
-              # whichever page is the actual destination.
-              setPageActive(world: world, pageId: albumPageId, active: false)
-              setPageActive(world: world, pageId: nowPlayingPageId, active: false)
-            } else {
-              if trackChangedNow {
-                unmountPage(world: world, pageId: nowPlayingPageId)
-                let freshNP: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: appState)
-                rebindHero(world: world, fromKey: "albumCover", toKey: appState.currentAlbumStem)
-                setPageActive(world: world, pageId: nowPlayingPageId, active: false)
-              }
-            }
-
-            setPageActive(world: world, pageId: outgoingPageId, active: false)
-            setPageActive(world: world, pageId: incomingPageId, active: true)
-
-            unmountPage(world: world, pageId: navTabsPageId)
-            let newBar: EntityId = mountNavTabsBar(world: world, activeTab: appState.tab, scenes: scenes)
-            unmountPage(world: world, pageId: backButtonPageId)
-            let newBack: EntityId = mountBackButtonOverlay(world: world, state: appState)
-
-            # Hero animation (slice 4c). Both source and target now
-            # live in the SAME world (the persistent UiWorld); we
-            # capture them back-to-back, page-scoped, so the lookup
-            # picks the right entity on each side. The intermediate
-            # `layoutSystemIfDirty` + `transformSystemIfDirty` flush
-            # is what gives the freshly-mounted target page a valid
-            # WorldTransform before we read its rect.
-            let heroKey: String = appState.currentAlbumStem
-            let gotSrc: Bool = captureHeroSourceOnPage(anim: anim, world: world, pageId: outgoingPageId, key: heroKey)
-            if gotSrc {
-              layoutSystemIfDirty(world: world, cache: layoutCache)
-              transformSystemIfDirty(world: world, cache: transformCache)
-              let gotDst: Bool = captureHeroTargetOnPage(anim: anim, world: world, pageId: incomingPageId, key: heroKey)
-              if gotDst {
-                setHeroVisibleOnPage(world: world, pageId: incomingPageId, key: heroKey, visible: false)
-                startHeroTransition(anim: anim, key: heroKey, durationSec: heroDuration, now: getTime())
-                pendingSrc = true
-                pendingHeroTargetPageId = "{incomingPageId}"
-              }
-            }
-
-            currentScreen = nextScreen
-            # Refresh outer-loop caches that used to be updated by
-            # the rebuild path — we no longer go through the outer
-            # loop's top-of-iteration data-change block.
-            if stemChangedNow or trackChangedNow {
-              let activeAlbumNow: Album = activeAlbum(state: appState)
-              let activeTrackNow: Track = trackAt(album: activeAlbumNow, idx: appState.currentTrackIndex)
-              cachedTrackDurMs = activeTrackNow.durationMs
-              cachedAlbumScrollFloor = albumScrollMin(album: activeAlbumNow)
-              cachedAlbumStem = "{appState.currentAlbumStem}"
-              cachedTrackIndex = appState.currentTrackIndex
-              let trackDurSec2: Float = cachedTrackDurMs.toFloat() / 1000.0
-              if trackDurSec2 > 0.0 {
-                playback.durationSec = trackDurSec2
-              }
-            }
-            # Persistent per-page scroll: read the new page's
-            # ScrollState.y. Entities survive screen changes (and
-            # page re-mounts re-seed scrollY=0 on the new entity).
-            scrollTarget = findScrollTarget(world: world)
-            if isNone(this: scrollTarget) {
-              profileScrollY = 0.0
-            } else {
-              if componentHas(this: world.scrollStates, entity: scrollTarget) {
-                let s: ScrollState = componentGet(this: world.scrollStates, entity: scrollTarget)
-                profileScrollY = s.y
-              } else {
-                profileScrollY = 0.0
-              }
-            }
-            scrollVelocity = 0.0
-            updateScrollOffset(world: world, target: scrollTarget, scrollY: profileScrollY)
-            # Entity ids on the new screen are unrelated to the
-            # outgoing one; drop any held-press id so the next
-            # screen's release doesn't accidentally match a stale id.
-            input.pressedEntity = noEntity()
-          } else {
-            # No screen change requested — but check the watched scene
-            # files. If any changed on disk, re-parse the scenes and
-            # force the outer loop to rebuild the world on the same
-            # route. Skipping this branch when `willSwitch` is true
-            # avoids a double rebuild on the same frame.
-            if checkForChanges(watcher: watcher, now: getTime()) {
-              scenes = loadAllScenes()
-              switching = true
-              log("[data-hot-reload] scene file changed, rebuilding world")
-            }
+          # Persistent-world screen-switch (slice 4b.3 + 4c) — implementation
+          # in screen_switch.rae. On willSwitch=true: per-page re-mount + hero
+          # arming + Active flip. On willSwitch=false: hot-reload watcher poll
+          # that may set switching=true to force an outer rebuild.
+          let switchResult: ScreenSwitchResult = handleScreenSwitch(
+            world: world
+            scenes: scenes
+            playback: playback
+            appState: appState
+            anim: anim
+            layoutCache: layoutCache
+            transformCache: transformCache
+            input: input
+            scrollFsm: scrollFsm
+            watcher: watcher
+            willSwitch: willSwitch
+            currentScreen: currentScreen
+            nextScreen: nextScreen
+            scrollTarget: scrollTarget
+            cachedAlbumStem: cachedAlbumStem
+            cachedTrackIndex: cachedTrackIndex
+            cachedTrackDurMs: cachedTrackDurMs
+            cachedAlbumScrollFloor: cachedAlbumScrollFloor
+            heroDuration: heroDuration
+            prevPendingSrc: pendingSrc
+            prevPendingHeroTargetPageId: pendingHeroTargetPageId
+          )
+          currentScreen = switchResult.newScreen
+          scrollTarget = switchResult.newScrollTarget
+          cachedTrackDurMs = switchResult.cachedTrackDurMs
+          cachedAlbumScrollFloor = switchResult.cachedAlbumScrollFloor
+          cachedAlbumStem = "{switchResult.cachedAlbumStem}"
+          cachedTrackIndex = switchResult.cachedTrackIndex
+          if switchResult.switching {
+            switching = true
           }
+          pendingSrc = switchResult.pendingSrc
+          pendingHeroTargetPageId = "{switchResult.pendingHeroTargetPageId}"
 
-          # Wheel / 2-finger trackpad scroll. Fires on any
-          # scrollable screen (Profile, Album) — gated on the
-          # same `scrollOnThisScreen` flag the drag block uses.
-          # Shares the rubber-band-when-OOB damping with the drag
-          # path so a trackpad overshoot looks identical to a
-          # finger-drag overshoot. Spring-back is driven by the
-          # drag block's physics step on subsequent frames when
-          # the wheel goes idle.
-          if scrollOnThisScreen {
-            # Ignore wheel/trackpad events while the user is holding
-            # the mouse button. macOS keeps sending momentum-scroll
-            # events for ~0.5–1.5 s after the user lifts fingers from
-            # the trackpad — if those land while the user is mid-
-            # click (between press and release), they shift the
-            # world's scrollY and the release hit-test sees a tile
-            # that's no longer under the cursor, so the click is
-            # silently dropped. A click is a deliberate interaction
-            # with the content; treat residual momentum as cancelled.
-            let wheelMouseDown: Bool = isMouseButtonDown(button: mouseButtonLeft)
-            let wheel: Float = 0.0
-            if wheelMouseDown is false {
-              wheel = getMouseWheelMove()
-            }
-            if wheel > 0.001 or wheel < -0.001 {
-              let pixelsPerTick: Float = 48.0
-              # Wheel-up means "scroll content down" on macOS; flip
-              # sign so positive wheel produces a more-negative
-              # scrollY (= content shifts up).
-              let rawDelta: Float = wheel * pixelsPerTick
-              # Damp the delta when already past a bound so further
-              # wheel input produces diminishing motion. Bounds
-              # come from the same per-frame `scrollFloor` the
-              # drag block uses — switching screens / albums
-              # automatically retunes the rubber band.
-              let wheelMin: Float = scrollFloor
-              let wheelMax: Float = 0.0
-              let eff: Float = dampedDelta(
-                current: profileScrollY
-                delta: rawDelta
-                low: wheelMin
-                high: wheelMax
-                dim: screenH
-              )
-              profileScrollY = profileScrollY + eff
-              # Hard cap on how far past the bound the wheel can
-              # push. dampedDelta's rubber-band slope only reaches
-              # 0 at `over == rubberDim == screenH = 1017`, and
-              # macOS keeps delivering trackpad momentum events for
-              # ~0.5–1.5 s after the user lifts their fingers. Each
-              # event still pushes a small (damped) amount even at
-              # large overshoots, and across hundreds of momentum
-              # events that accumulates into a huge stretch — which
-              # then has to spring back over a correspondingly long
-              # duration. Capping overshoot here gives a single,
-              # bounded rubber-band feel: stretch up to the cap,
-              # ignore further wheel push past it, and spring back
-              # from the same predictable displacement regardless
-              # of how hard the user flicked.
-              let wheelMaxOver: Float = 120.0
-              let wheelOverMin: Float = wheelMin - wheelMaxOver
-              let wheelOverMax: Float = wheelMax + wheelMaxOver
-              if profileScrollY < wheelOverMin {
-                profileScrollY = wheelOverMin
-              }
-              if profileScrollY > wheelOverMax {
-                profileScrollY = wheelOverMax
-              }
-              # Velocity stays at 0 during wheel scrolling — the
-              # wheel block itself drives `profileScrollY` each
-              # event, and the spring/momentum paths above are
-              # gated on `wheelQuiet` so they don't fire (and
-              # don't fight the wheel) until 50 ms after the last
-              # event. When the spring eventually takes over, it
-              # bootstraps from rest with the current (bounded)
-              # displacement.
-              scrollVelocity = 0.0
-              # Mark the wheel-active timestamp so the
-              # spring/momentum branches above know to stay out
-              # of the way until the OS-delivered momentum stops.
-              lastWheelTime = getTime()
-              updateScrollOffset(world: world, target: scrollTarget, scrollY: profileScrollY)
-            }
-          }
+
+          # Mouse-wheel / trackpad scroll. Implementation in
+          # scroll_input.rae — rubber-bands past bounds and hard-caps
+          # overshoot to 120 px. The drag-block's spring path takes
+          # over once `scrollFsm.lastWheelTime` is 50 ms stale.
+          applyWheelScroll(
+            fsm: scrollFsm
+            world: world
+            scrollTarget: scrollTarget
+            scrollOnThisScreen: scrollOnThisScreen
+            scrollFloor: scrollFloor
+            rubberDim: screenH
+          )
+
 
           # Frosted-glass cleanup: when the menu just closed, drop the
           # captured blur texture so the GPU memory comes back. The
