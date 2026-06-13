@@ -2331,6 +2331,65 @@ void rae_ext_spotifyPrevious(void) {
     if (rc != 0) fprintf(stderr, "[spotify-c] previous failed (osascript rc=%d)\n", rc);
 }
 
+/* Play a specific Spotify URI directly. Accepts spotify:track:<id>,
+ * spotify:album:<id>, spotify:playlist:<id>, etc. Used when the local
+ * album.json carries an explicit Spotify URI. */
+void rae_ext_spotifyPlayUri(rae_String uri) {
+    if (!uri.data || uri.len == 0) return;
+    fprintf(stderr, "[spotify-c] play uri=%.*s\n", (int)uri.len, (const char*)uri.data);
+    char* uri_c = malloc((size_t)uri.len + 1);
+    if (!uri_c) return;
+    memcpy(uri_c, uri.data, (size_t)uri.len); uri_c[uri.len] = '\0';
+    char script[1024];
+    snprintf(script, sizeof(script), "tell application \"Spotify\" to play track \"%s\"", uri_c);
+    free(uri_c);
+    const char* lines[] = { script, NULL };
+    int rc = rae_osascript_run(lines);
+    if (rc != 0) fprintf(stderr, "[spotify-c] play uri failed (osascript rc=%d)\n", rc);
+}
+
+/* Search-and-play: feed the query string to Spotify's search URI scheme,
+ * wait briefly for the search panel to populate, then issue `play`. This
+ * is the AppleScript equivalent of the user typing into the search box
+ * and pressing the play button — Spotify auto-plays the top hit when
+ * the search loads with focus on it.
+ *
+ * The query is URL-encoded inline (alphanumerics + a few safe chars
+ * pass through; everything else %xx). Quotes are escaped for the
+ * AppleScript string literal. */
+void rae_ext_spotifyPlayQuery(rae_String query) {
+    if (!query.data || query.len == 0) return;
+    fprintf(stderr, "[spotify-c] play query=%.*s\n", (int)query.len, (const char*)query.data);
+    /* URL-encode the query into the URI buffer. */
+    char encoded[1024];
+    size_t off = 0;
+    static const char hex[] = "0123456789ABCDEF";
+    for (size_t i = 0; i < (size_t)query.len && off + 3 < sizeof(encoded); i++) {
+        unsigned char c = (unsigned char)query.data[i];
+        int safe = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                   (c >= '0' && c <= '9') || c == '-' || c == '_' ||
+                   c == '.' || c == '~';
+        if (safe) encoded[off++] = (char)c;
+        else { encoded[off++] = '%'; encoded[off++] = hex[c >> 4]; encoded[off++] = hex[c & 0xF]; }
+    }
+    encoded[off] = '\0';
+    /* Build a multi-line AppleScript block — open the search URI, wait
+     * for Spotify to load it, then play. The delay is empirical: 0.4 s
+     * is enough on a warm app to land on the top hit reliably. */
+    char open_line[1280];
+    snprintf(open_line, sizeof(open_line),
+        "tell application \"Spotify\" to open location \"spotify:search:%s\"",
+        encoded);
+    const char* lines[] = {
+        open_line,
+        "delay 0.4",
+        "tell application \"Spotify\" to play",
+        NULL
+    };
+    int rc = rae_osascript_run(lines);
+    if (rc != 0) fprintf(stderr, "[spotify-c] play query failed (osascript rc=%d)\n", rc);
+}
+
 void rae_ext_spotifyRefresh(void) {
     static const char* lines[] = {
         "tell application \"Spotify\"",
@@ -2538,6 +2597,8 @@ rae_String rae_ext_spotifyAlbumName(void)  { return (rae_String){NULL, 0, 0, 0};
 rae_String rae_ext_spotifyArtworkUrl(void) { return (rae_String){NULL, 0, 0, 0}; }
 double rae_ext_spotifyPosition(void)       { return 0.0; }
 double rae_ext_spotifyDuration(void)       { return 0.0; }
+void rae_ext_spotifyPlayUri(rae_String uri) { (void)uri; }
+void rae_ext_spotifyPlayQuery(rae_String query) { (void)query; }
 rae_Bool rae_ext_spotifyFetchArtwork(rae_String url, rae_String outPath) { (void)url; (void)outPath; return false; }
 rae_String rae_ext_itunesSearchArtworkUrl(rae_String term) { (void)term; return (rae_String){NULL, 0, 0, 0}; }
 
