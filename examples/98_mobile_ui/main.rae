@@ -636,13 +636,7 @@ func main() {
           # so this only fires after an actual drag gesture.
           let nextScreen: Screen = currentScreen
           if dragJustReleased is false {
-            nextScreen = dispatchActions(
-              input: input
-              current: currentScreen
-              playback: playback
-              state: appState
-              world: world
-            )
+            nextScreen = dispatchActions(input: input, current: currentScreen, playback: playback, state: appState, world: world, spotifyEnabled: spotifyState.enabled)
           } else {
             # Diagnostic: drag-release path skipped dispatch. If you
             # see this while doing what feels like a click, the

@@ -269,6 +269,7 @@ func dispatchActions(
   playback: mod PlaybackState
   state: mod AppState
   world: view UiWorld
+  spotifyEnabled: view Bool
 ) pub ret Screen {
   let n: Int = input.events.length
   let i: Int = 0
@@ -287,12 +288,9 @@ func dispatchActions(
     let playbackPrevKey: String = "playback.prev"
     let albumOpenKey: String = "album.open"
     let songOpenPrefix: String = "song.open."
-    # When RAE_UI_SPOTIFY=1 is set, transport buttons drive the local
-    # Spotify desktop app instead of (or in addition to) the mock
-    # playback state. See lib/sys/spotify.rae. Cheap to read here —
-    # dispatchActions only runs when input events fired this frame.
-    let spotifyEnv: String = getEnv(name: "RAE_UI_SPOTIFY")
-    let spotifyEnabled: Bool = spotifyEnv.length() > 0
+    # `spotifyEnabled` is passed in from main.rae (lives on the
+    # long-lived SpotifyState) so both sides agree on the source of
+    # truth. ON by default; disabled by RAE_UI_NO_SPOTIFY=1 at boot.
     if actionId.equals(other: homeKey) {
       let s: Screen = Screen.NowPlaying
       setTab(state: state, tab: s)
