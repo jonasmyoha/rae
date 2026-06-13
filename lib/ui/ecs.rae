@@ -97,7 +97,7 @@ func dropEntityList(lst: mod List(EntityId)) {
 
 # ----- ComponentTable -----
 
-type ComponentTable(T) {
+type ComponentTable(T: type) {
   denseEntities: List(EntityId)
   denseData: List(T)
 
@@ -112,10 +112,10 @@ type ComponentTable(T) {
   generation: Int
 }
 
-func createComponentTable(T)() ret ComponentTable(T) {
+func createComponentTable(T: type) ret ComponentTable(T) {
   ret ComponentTable(T) {
-    denseEntities: createList(EntityId, initialCap: 256)
-    denseData: createList(T, initialCap: 256)
+    denseEntities: createList(EntityId, cap: 256)
+    denseData: createList(T, cap: 256)
     generation: 0
   }
 }
@@ -127,7 +127,7 @@ func createComponentTable(T)() ret ComponentTable(T) {
 # drop_struct (the mangler trips on element types like AnimState that
 # nothing else in the program ever touched); writing the drop
 # explicitly here is the supported workaround.
-func drop(T)(this: mod ComponentTable(T)) {
+func drop(T: type, this: mod ComponentTable(T)) {
   drop(this.denseData)
   # See dropEntityList — calling `drop(this.denseEntities)` here would
   # mis-mangle to drop(T)(List(T)) and reinterpret Int slots as T.
@@ -142,7 +142,7 @@ func drop(T)(this: mod ComponentTable(T)) {
 # (so `List(EntityId).get` becomes `List(Rect).get` when T=Rect).
 # Bypass via `rae_ext_rae_buf_get` which doesn't go through the
 # generic dispatch.
-func componentIndexOf(T)(this: view ComponentTable(T), entity: view EntityId) ret Int {
+func componentIndexOf(T: type, this: view ComponentTable(T), entity: view EntityId) ret Int {
   let n: Int = this.denseEntities.length
   let i: Int = 0
   loop i < n {
@@ -155,7 +155,7 @@ func componentIndexOf(T)(this: view ComponentTable(T), entity: view EntityId) re
   ret -1
 }
 
-func componentHas(T)(this: view ComponentTable(T), entity: view EntityId) ret Bool {
+func componentHas(T: type, this: view ComponentTable(T), entity: view EntityId) ret Bool {
   ret componentIndexOf(this, entity: entity) >= 0
 }
 
@@ -170,7 +170,7 @@ func componentHas(T)(this: view ComponentTable(T), entity: view EntityId) ret Bo
 #     let r: Rect = componentGet(table, entity: e)
 #     ...
 #   }
-func componentGet(T)(this: view ComponentTable(T), entity: view EntityId) ret T {
+func componentGet(T: type, this: view ComponentTable(T), entity: view EntityId) ret T {
   let idx: Int = componentIndexOf(this, entity: entity)
   let safeIdx: Int = idx
   if safeIdx < 0 {
@@ -186,7 +186,7 @@ func componentGet(T)(this: view ComponentTable(T), entity: view EntityId) ret T 
 # struct memcpy would alias the table's heap). The `view T` return
 # makes Rae treat the binding as a borrow: no auto-drop, no
 # ownership claim, just a window into the world's memory.
-func componentView(T)(this: view ComponentTable(T), entity: view EntityId) ret view T {
+func componentView(T: type, this: view ComponentTable(T), entity: view EntityId) ret view T {
   let idx: Int = componentIndexOf(this, entity: entity)
   let safeIdx: Int = idx
   if safeIdx < 0 {
@@ -197,7 +197,7 @@ func componentView(T)(this: view ComponentTable(T), entity: view EntityId) ret v
 
 # Borrow a mutable reference into the table's storage. Mutating
 # through the returned ref writes directly to the component slot.
-func componentMod(T)(this: mod ComponentTable(T), entity: view EntityId) ret mod T {
+func componentMod(T: type, this: mod ComponentTable(T), entity: view EntityId) ret mod T {
   let idx: Int = componentIndexOf(this, entity: entity)
   let safeIdx: Int = idx
   if safeIdx < 0 {
@@ -213,7 +213,7 @@ func componentMod(T)(this: mod ComponentTable(T), entity: view EntityId) ret mod
 
 # Add or replace the component for `entity`. Internally aliases the
 # two inner lists so the mutation propagates on both targets.
-func componentSet(T)(this: mod ComponentTable(T), entity: view EntityId, data: own T) {
+func componentSet(T: type, this: mod ComponentTable(T), entity: view EntityId, data: own T) {
   let entities: mod List(EntityId) => this.denseEntities
   let datas: mod List(T) => this.denseData
   let n: Int = entities.length
@@ -244,7 +244,7 @@ func componentSet(T)(this: mod ComponentTable(T), entity: view EntityId, data: o
 
 # Swap-remove the component for `entity`. Order in the table is not
 # preserved (no callers depend on it).
-func componentRemove(T)(this: mod ComponentTable(T), entity: view EntityId) {
+func componentRemove(T: type, this: mod ComponentTable(T), entity: view EntityId) {
   let entities: mod List(EntityId) => this.denseEntities
   let datas: mod List(T) => this.denseData
   let idx: Int = componentIndexOf(T, this: this, entity: entity)
@@ -267,25 +267,25 @@ func componentRemove(T)(this: mod ComponentTable(T), entity: view EntityId) {
   this.generation = this.generation + 1
 }
 
-func componentCount(T)(this: view ComponentTable(T)) ret Int {
+func componentCount(T: type, this: view ComponentTable(T)) ret Int {
   ret this.denseEntities.length
 }
 
 # Public accessor for the table's monotonic generation counter.
 # Consumer systems should cache the value returned here and skip work
 # when it hasn't changed since the last successful run.
-func componentTableGeneration(T)(this: view ComponentTable(T)) pub ret Int {
+func componentTableGeneration(T: type, this: view ComponentTable(T)) pub ret Int {
   ret this.generation
 }
 
 # Iteration helper: returns the entity id at dense index `i`.
-func componentEntityAt(T)(this: view ComponentTable(T), i: view Int) ret EntityId {
+func componentEntityAt(T: type, this: view ComponentTable(T), i: view Int) ret EntityId {
   let e: EntityId = rae_ext_rae_buf_get(buf: this.denseEntities.data, index: i)
   ret e
 }
 
 # Iteration helper: returns the component data at dense index `i`.
-func componentDataAt(T)(this: view ComponentTable(T), i: view Int) ret T {
+func componentDataAt(T: type, this: view ComponentTable(T), i: view Int) ret T {
   let v: T = rae_ext_rae_buf_get(buf: this.denseData.data, index: i)
   ret v
 }
@@ -380,8 +380,8 @@ type UiWorld {
 func createUiWorld() ret UiWorld {
   ret UiWorld {
     nextEntityId: 1
-    alive: createList(EntityId, initialCap: 256)
-    nodeIds: createStringMap(Int, initialCap: 128)
+    alive: createList(EntityId, cap: 256)
+    nodeIds: createStringMap(Int, cap: 128)
 
     rects: createComponentTable(Rect)
     sizes: createComponentTable(Size)
@@ -719,7 +719,7 @@ func destroyEntity(world: mod UiWorld, entity: view EntityId) pub {
 # tree is read once into a list before any destruction starts, so
 # mutating the world during the walk is safe.
 func destroyEntitySubtree(world: mod UiWorld, root: view EntityId) pub {
-  let collected: List(EntityId) = createList(EntityId, initialCap: 32)
+  let collected: List(EntityId) = createList(EntityId, cap: 32)
   collectSubtreeEntities(world: world, root: root, out: collected)
   # Destroy in reverse (children before parents).
   let n: Int = collected.length
@@ -775,8 +775,8 @@ func unmountPage(world: mod UiWorld, pageId: view String) pub {
   prefix = prefix.concat(other: pageId)
   let sep: String = "/"
   prefix = prefix.concat(other: sep)
-  let cap: Int = world.nodeIds.capacity
-  let matches: List(String) = createList(String, initialCap: 8)
+  let cap: Int = world.nodeIds.cap
+  let matches: List(String) = createList(String, cap: 8)
   let i: Int = 0
   loop i < cap {
     let entry: StringMapEntry(Int) = rae_ext_rae_buf_get(buf: world.nodeIds.data, index: i)

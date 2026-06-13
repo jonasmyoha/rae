@@ -56,8 +56,8 @@ type SceneRegistry {
 
 func createSceneRegistry() ret SceneRegistry {
   ret SceneRegistry {
-    ids: createList(String, initialCap: 8)
-    scenes: createList(Scene, initialCap: 8)
+    ids: createList(String, cap: 8)
+    scenes: createList(Scene, cap: 8)
   }
 }
 
@@ -92,7 +92,7 @@ func sceneRegistryHas(reg: view SceneRegistry, key: view String) ret Bool {
 # -----------------------------------------------------------------
 
 func emptyOverrides() ret List(SceneOverride) {
-  ret createList(SceneOverride, initialCap: 4)
+  ret createList(SceneOverride, cap: 4)
 }
 
 func addOverride(
@@ -282,7 +282,7 @@ func mountSceneInstanceIntoPage(
 
   # Pass 1: allocate entities. The scene's root maps to `mountEntity`;
   # every other node gets a fresh entity.
-  let entitiesByNodeIndex: List(EntityId) = createList(EntityId, initialCap: nodeCount)
+  let entitiesByNodeIndex: List(EntityId) = createList(EntityId, cap: nodeCount)
   let nodeIdsMap: mod StringMap(Int) => world.nodeIds
   let i: Int = 0
   loop i < nodeCount {
@@ -354,7 +354,7 @@ func mountSceneInstanceIntoPage(
     let parentEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: p)
     let kn: Int = node.childrenIds.length
     if kn > 0 {
-      let kids: List(EntityId) = createList(EntityId, initialCap: kn)
+      let kids: List(EntityId) = createList(EntityId, cap: kn)
       let q: Int = 0
       loop q < kn {
         let childId: String = node.childrenIds.get(index: q)
