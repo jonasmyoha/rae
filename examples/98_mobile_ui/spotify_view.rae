@@ -203,6 +203,15 @@ func pollSpotify(
   let miniPage: String = "mini-player"
   updateNodeText(world: world, pageId: miniPage, nodeId: "MiniTitle", value: track.trackName)
   updateNodeText(world: world, pageId: miniPage, nodeId: "MiniArtist", value: track.artistName)
+  # Sync the M:SS time labels too. The scene mount path baked these
+  # from the LOCAL track at boot, so without this refresh they show
+  # the wrong duration in Spotify mode.
+  let posMs: Int = (pos * 1000.0).toInt()
+  let durMs: Int = (dur * 1000.0).toInt()
+  let nowStr: String = formatDurationMs(ms: posMs)
+  let totalStr: String = formatDurationMs(ms: durMs)
+  updateNodeText(world: world, pageId: nowPlayingPage, nodeId: "TimeNow", value: nowStr)
+  updateNodeText(world: world, pageId: nowPlayingPage, nodeId: "TimeTotal", value: totalStr)
   # Track-change → re-fetch artwork. Compare trackId, not artworkUrl
   # (Spotify sometimes reports a slightly different art URL between
   # polls for the same track during playback).
