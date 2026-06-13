@@ -1,0 +1,28 @@
+# `cap: N` is the initial allocation hint; `cap: 0` is a deliberate
+# "no allocation" mode. Both must behave identically once growth
+# kicks in — exercise both paths against Live VM and Compiled C.
+func main() {
+  # cap: 0 ("no cap") — first add must trigger a growth.
+  let zero: List(Int) = createList(Int, cap: 0)
+  log("zero.start len={zero.length} cap={zero.cap}")
+  zero.add(value: 10)
+  log("zero.add1 len={zero.length} cap={zero.cap}")
+  zero.add(value: 20)
+  zero.add(value: 30)
+  log("zero.add3 len={zero.length} cap={zero.cap}")
+  log("zero.get0={zero.get(index: 0)} zero.get2={zero.get(index: 2)}")
+
+  # cap: 8 — pre-allocated; the first 8 adds must not regrow.
+  let pre: List(Int) = createList(Int, cap: 8)
+  log("pre.start len={pre.length} cap={pre.cap}")
+  let i: Int = 0
+  loop i < 8 {
+    pre.add(value: i * 100)
+    i = i + 1
+  }
+  log("pre.fill8 len={pre.length} cap={pre.cap}")
+  # 9th element forces a regrow — doubling policy → cap should be 16.
+  pre.add(value: 999)
+  log("pre.grow len={pre.length} cap={pre.cap}")
+  log("pre.last={pre.get(index: 8)}")
+}

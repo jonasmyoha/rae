@@ -22,7 +22,7 @@ import string
 import sys
 
 func transientAllocation(cap: view Int) {
-  let xs: List(Int) = createList(Int, initialCap: cap)
+  let xs: List(Int) = createList(Int, cap: cap)
   let i: Int = 0
   loop i < cap {
     xs.add(value: i)
@@ -33,7 +33,7 @@ func transientAllocation(cap: view Int) {
   # whatever drop left it (currently dangling); re-binding the
   # local immediately avoids any further use.
   xs.drop()
-  xs = createList(Int, initialCap: 0)
+  xs = createList(Int, cap: 0)
 }
 
 func main() {

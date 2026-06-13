@@ -188,7 +188,7 @@ func entityOffset(world: view UiWorld, entity: view EntityId) ret Vec2 {
 # Returns the active children of `entity` in declaration order. List
 # is fresh; safe for the caller to mutate if needed.
 func activeChildren(world: view UiWorld, entity: view EntityId) ret List(EntityId) {
-  let out: List(EntityId) = createList(EntityId, initialCap: 4)
+  let out: List(EntityId) = createList(EntityId, cap: 4)
   if componentHas(this: world.childrens, entity: entity) is false {
     ret out
   }
