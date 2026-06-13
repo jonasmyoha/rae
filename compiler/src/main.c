@@ -1427,13 +1427,15 @@ static bool module_graph_load_module(ModuleGraph* graph,
     *hash_out ^= module_hash + 0x9e3779b97f4a7c15ull + (*hash_out << 6) + (*hash_out >> 2);
   }
 
+  // Default mode: every stdlib module (core, string, math, io, sys, char)
+  // is auto-loaded unless this file opts out via `import "nostdlib"` or
+  // the compiler was invoked with `--no-implicit`. The old trigger-
+  // symbol scanner (needs_math, needs_string, …) was a brittle
+  // hand-picked allowlist — e.g. it caught `.concat()` and `.sub()` but
+  // not `.length()` or `.equals()`, forcing every caller of those to
+  // write an explicit `import string`. Dead-code elimination at the C
+  // backend / VM mangler level handles the unused-symbol cost.
   bool use_stdlib = true;
-  bool needs_core = false;
-  bool needs_math = false;
-  bool needs_io = false;
-  bool needs_string = false;
-  bool needs_sys = false;
-
   {
     TokenList tokens = lexer_tokenize(graph->arena, file_path, source, file_size, true);
     if (tokens.had_error) {
@@ -1462,90 +1464,32 @@ static bool module_graph_load_module(ModuleGraph* graph,
                 }
             }
         }
-        
-        if (t->kind == TOK_IDENT) {
-            Str s = t->lexeme;
-            if (str_eq_cstr(s, "List") || str_eq_cstr(s, "add") || str_eq_cstr(s, "createList") || str_eq_cstr(s, "nextTick") || str_eq_cstr(s, "nowMs") || str_eq_cstr(s, "toFloat")) needs_core = true;
-            if (str_eq_cstr(s, "abs") || str_eq_cstr(s, "min") || str_eq_cstr(s, "max") || str_eq_cstr(s, "clamp") || str_eq_cstr(s, "random") || str_eq_cstr(s, "seed") || str_eq_cstr(s, "randomInt")) needs_math = true;
-            if (str_eq_cstr(s, "log") || str_eq_cstr(s, "logS") || str_eq_cstr(s, "readLine") || str_eq_cstr(s, "readChar")) needs_io = true;
-            if (str_eq_cstr(s, "exit") || str_eq_cstr(s, "readFile") || str_eq_cstr(s, "writeFile") || str_eq_cstr(s, "getEnv") || str_eq_cstr(s, "sleepMs")) needs_sys = true;
-            if (str_eq_cstr(s, "compare") || str_eq_cstr(s, "toInt") || str_eq_cstr(s, "toFloat") || str_eq_cstr(s, "concat") || str_eq_cstr(s, "sub") || str_eq_cstr(s, "contains")) needs_string = true;
-        }
     }
   }
 
   ModuleStack frame = {.module_path = module_path, .next = stack};
-  if (use_stdlib && (!module_path || (strcmp(module_path, "core") != 0 && 
-                                      strcmp(module_path, "math") != 0 &&
-                                      strcmp(module_path, "io") != 0 &&
-                                      strcmp(module_path, "string") != 0 &&
-                                      strcmp(module_path, "sys") != 0))) {
-    
-    // Load core if needed or if implicitly allowed
-    if ((needs_core || !no_implicit) && 
-        !module_graph_has_module(graph, "core") && 
-        !module_stack_contains(&frame, "core")) {
-        char* core_file = try_resolve_lib_module(graph->root_path, "core");
-        if (core_file) {
-          if (!module_graph_load_module(graph, "core", core_file, &frame, hash_out, no_implicit)) {
-            free(core_file);
-            return false;
-          }
-          free(core_file);
-        }
-    }
-
-    // Conditionally load others if needed (even if no_implicit is set, if they are clearly needed by trigger symbols)
-    if (needs_math && 
-        !module_graph_has_module(graph, "math") && 
-        !module_stack_contains(&frame, "math")) {
-        char* math_file = try_resolve_lib_module(graph->root_path, "math");
-        if (math_file) {
-          if (!module_graph_load_module(graph, "math", math_file, &frame, hash_out, no_implicit)) {
-            free(math_file);
-            return false;
-          }
-          free(math_file);
-        }
-    }
-
-    if (needs_io && 
-        !module_graph_has_module(graph, "io") && 
-        !module_stack_contains(&frame, "io")) {
-        char* io_file = try_resolve_lib_module(graph->root_path, "io");
-        if (io_file) {
-          if (!module_graph_load_module(graph, "io", io_file, &frame, hash_out, no_implicit)) {
-            free(io_file);
-            return false;
-          }
-          free(io_file);
-        }
-    }
-
-    if (needs_string && 
-        !module_graph_has_module(graph, "string") && 
-        !module_stack_contains(&frame, "string")) {
-        char* string_file = try_resolve_lib_module(graph->root_path, "string");
-        if (string_file) {
-          if (!module_graph_load_module(graph, "string", string_file, &frame, hash_out, no_implicit)) {
-            free(string_file);
-            return false;
-          }
-          free(string_file);
-        }
-    }
-
-    if (needs_sys && 
-        !module_graph_has_module(graph, "sys") && 
-        !module_stack_contains(&frame, "sys")) {
-        char* sys_file = try_resolve_lib_module(graph->root_path, "sys");
-        if (sys_file) {
-          if (!module_graph_load_module(graph, "sys", sys_file, &frame, hash_out, no_implicit)) {
-            free(sys_file);
-            return false;
-          }
-          free(sys_file);
-        }
+  // Auto-load every stdlib module unless this file is itself one of them
+  // (the self-exclude list below prevents cycles — e.g. lib/string.rae
+  // depends on lib/core.rae but lib/core.rae must NOT auto-load
+  // lib/string.rae). All other files get the full stdlib for free.
+  if (use_stdlib && !no_implicit &&
+      (!module_path || (strcmp(module_path, "core") != 0 &&
+                        strcmp(module_path, "math") != 0 &&
+                        strcmp(module_path, "io") != 0 &&
+                        strcmp(module_path, "string") != 0 &&
+                        strcmp(module_path, "sys") != 0))) {
+    static const char* stdlib_modules[] = { "core", "string", "math", "io", "sys" };
+    for (size_t i = 0; i < sizeof(stdlib_modules) / sizeof(stdlib_modules[0]); i++) {
+      const char* name = stdlib_modules[i];
+      if (module_graph_has_module(graph, name)) continue;
+      if (module_stack_contains(&frame, name)) continue;
+      char* path = try_resolve_lib_module(graph->root_path, name);
+      if (!path) continue;
+      if (!module_graph_load_module(graph, name, path, &frame, hash_out, no_implicit)) {
+        free(path);
+        return false;
+      }
+      free(path);
     }
   }
 
