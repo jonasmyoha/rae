@@ -1,0 +1,173 @@
+# Persistent-world screen-switch handler. Called from the inner loop
+# once per frame after `dispatchActions` has chosen `nextScreen`:
+#   * willSwitch=true  → unmount the affected pages, re-mount with
+#                        fresh data, re-bind heroes, capture hero
+#                        rects, arm the transition, flip Active.
+#   * willSwitch=false → poll the hot-reload watcher and possibly
+#                        force an outer rebuild.
+#
+# Returns a `ScreenSwitchResult` the caller copies back into its
+# locals — `currentScreen`, cached album/track values, scrollTarget,
+# hero pending flags, and the outer-rebuild `switching` signal.
+
+type ScreenSwitchResult pub {
+  newScreen: Screen
+  newScrollTarget: EntityId
+  cachedTrackDurMs: Int
+  cachedAlbumScrollFloor: Float
+  cachedAlbumStem: String
+  cachedTrackIndex: Int
+  switching: Bool
+  pendingSrc: Bool
+  pendingHeroTargetPageId: String
+}
+
+func handleScreenSwitch(
+  world: mod UiWorld
+  scenes: mod AlbumScenes
+  playback: mod PlaybackState
+  appState: mod AppState
+  anim: mod HeroAnim
+  layoutCache: mod LayoutCache
+  transformCache: mod TransformCache
+  input: mod InputSystem
+  scrollFsm: mod ScrollFsm
+  watcher: mod FileWatcher
+  willSwitch: view Bool
+  currentScreen: view Screen
+  nextScreen: view Screen
+  scrollTarget: view EntityId
+  cachedAlbumStem: view String
+  cachedTrackIndex: view Int
+  cachedTrackDurMs: view Int
+  cachedAlbumScrollFloor: view Float
+  heroDuration: view Float
+  prevPendingSrc: view Bool
+  prevPendingHeroTargetPageId: view String
+) ret ScreenSwitchResult {
+  let result: ScreenSwitchResult = {
+    newScreen: currentScreen
+    newScrollTarget: scrollTarget
+    cachedTrackDurMs: cachedTrackDurMs
+    cachedAlbumScrollFloor: cachedAlbumScrollFloor
+    cachedAlbumStem: "{cachedAlbumStem}"
+    cachedTrackIndex: cachedTrackIndex
+    switching: false
+    pendingSrc: prevPendingSrc
+    pendingHeroTargetPageId: "{prevPendingHeroTargetPageId}"
+  }
+
+  if willSwitch is false {
+    # No screen change requested — poll the watched scene files.
+    # If any changed on disk, re-parse the scenes and force the outer
+    # loop to rebuild the world on the same route. Skipping this when
+    # willSwitch=true avoids a double rebuild on the same frame.
+    if checkForChanges(watcher: watcher, now: getTime()) {
+      scenes = loadAllScenes()
+      result.switching = true
+      log("[data-hot-reload] scene file changed, rebuilding world")
+    }
+    ret result
+  }
+
+  # Persistent-world screen change (slice 4b.3 + 4c). Two sub-paths:
+  # data-changed (album.open / song.open) re-mounts the affected
+  # page in place; data-unchanged (tab tap or back) just flips Active.
+  let outgoingPageId: String = pageIdForScreen(screen: currentScreen)
+  let incomingPageId: String = pageIdForScreen(screen: nextScreen)
+  let stemChangedNow: Bool = appState.currentAlbumStem.equals(other: cachedAlbumStem) is false
+  let trackChangedNow: Bool = appState.currentTrackIndex is not cachedTrackIndex
+
+  # Per-page re-mount on data change. The old rebuild path tore down
+  # every page on album.open / song.open, wiping ProfileScroll across
+  # the round-trip. Now we destroy just the affected page's entities
+  # and re-mount with the current state — Profile / Search / dock /
+  # scroll positions survive. `unmountPage` already sweeps the page's
+  # scoped nodeIds.
+  if stemChangedNow {
+    unmountPage(world: world, pageId: albumPageId)
+    let freshAlbum: EntityId = mountAlbumPage(world: world, scenes: scenes, state: appState, scrollY: 0.0)
+    # Tracks depend on the album too — re-mount NowPlaying.
+    unmountPage(world: world, pageId: nowPlayingPageId)
+    let freshNP: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: appState)
+    rebindHero(world: world, fromKey: "albumCover", toKey: appState.currentAlbumStem)
+    # Freshly-mounted pages have no Active component → default to
+    # active=true and would render on top of the incoming page.
+    # Explicitly deactivate; setPageActive(incoming, true) below
+    # re-activates whichever page is the real destination.
+    setPageActive(world: world, pageId: albumPageId, active: false)
+    setPageActive(world: world, pageId: nowPlayingPageId, active: false)
+  } else {
+    if trackChangedNow {
+      unmountPage(world: world, pageId: nowPlayingPageId)
+      let freshNP: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: appState)
+      rebindHero(world: world, fromKey: "albumCover", toKey: appState.currentAlbumStem)
+      setPageActive(world: world, pageId: nowPlayingPageId, active: false)
+    }
+  }
+
+  setPageActive(world: world, pageId: outgoingPageId, active: false)
+  setPageActive(world: world, pageId: incomingPageId, active: true)
+
+  unmountPage(world: world, pageId: navTabsPageId)
+  let newBar: EntityId = mountNavTabsBar(world: world, activeTab: appState.tab, scenes: scenes)
+  unmountPage(world: world, pageId: backButtonPageId)
+  let newBack: EntityId = mountBackButtonOverlay(world: world, state: appState)
+
+  # Hero animation. Both source and target live in the same persistent
+  # world; capture them back-to-back, page-scoped, so the lookup picks
+  # the right entity on each side. The intermediate layout+transform
+  # flush gives the freshly-mounted target page a valid WorldTransform
+  # before we read its rect.
+  let heroKey: String = appState.currentAlbumStem
+  let gotSrc: Bool = captureHeroSourceOnPage(anim: anim, world: world, pageId: outgoingPageId, key: heroKey)
+  if gotSrc {
+    layoutSystemIfDirty(world: world, cache: layoutCache)
+    transformSystemIfDirty(world: world, cache: transformCache)
+    let gotDst: Bool = captureHeroTargetOnPage(anim: anim, world: world, pageId: incomingPageId, key: heroKey)
+    if gotDst {
+      setHeroVisibleOnPage(world: world, pageId: incomingPageId, key: heroKey, visible: false)
+      startHeroTransition(anim: anim, key: heroKey, durationSec: heroDuration, now: getTime())
+      result.pendingSrc = true
+      result.pendingHeroTargetPageId = "{incomingPageId}"
+    }
+  }
+
+  result.newScreen = nextScreen
+  # Refresh outer-loop caches that used to be updated by the rebuild
+  # path — we no longer go through the outer loop's data-change block.
+  if stemChangedNow or trackChangedNow {
+    let activeAlbumNow: Album = activeAlbum(state: appState)
+    let activeTrackNow: Track = trackAt(album: activeAlbumNow, idx: appState.currentTrackIndex)
+    result.cachedTrackDurMs = activeTrackNow.durationMs
+    result.cachedAlbumScrollFloor = albumScrollMin(album: activeAlbumNow)
+    result.cachedAlbumStem = "{appState.currentAlbumStem}"
+    result.cachedTrackIndex = appState.currentTrackIndex
+    let trackDurSec2: Float = result.cachedTrackDurMs.toFloat() / 1000.0
+    if trackDurSec2 > 0.0 {
+      playback.durationSec = trackDurSec2
+    }
+  }
+  # Persistent per-page scroll: read the new page's ScrollState.y.
+  # Entities survive screen changes; page re-mounts re-seed scrollY=0
+  # on the new entity.
+  result.newScrollTarget = findScrollTarget(world: world)
+  if isNone(this: result.newScrollTarget) {
+    scrollFsm.scrollY = 0.0
+  } else {
+    if componentHas(this: world.scrollStates, entity: result.newScrollTarget) {
+      let s: ScrollState = componentGet(this: world.scrollStates, entity: result.newScrollTarget)
+      scrollFsm.scrollY = s.y
+    } else {
+      scrollFsm.scrollY = 0.0
+    }
+  }
+  scrollFsm.velocity = 0.0
+  updateScrollOffset(world: world, target: result.newScrollTarget, scrollY: scrollFsm.scrollY)
+  # Entity ids on the new screen are unrelated to the outgoing one;
+  # drop any held-press id so the next screen's release doesn't
+  # accidentally match a stale id.
+  input.pressedEntity = noEntity()
+
+  ret result
+}
