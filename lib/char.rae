@@ -1,0 +1,175 @@
+# Char32 predicate and conversion stdlib.
+#
+# `Char32` is a 32-bit Unicode codepoint — the type `String.at(i)` returns
+# and what `'a'`-style char literals produce. These helpers work on the
+# ASCII subrange; multi-byte / non-ASCII codepoints get the obvious
+# "false" answer for the ASCII-specific predicates (isDigit etc.) and
+# round-trip unchanged through toLower / toUpper.
+#
+# Usage: `import char` to bring these into scope. Unlike `string`/`math`/
+# `io`/`sys`, this module is NOT auto-loaded — adding it to the auto-load
+# chain currently trips an infinite-recursion bug in `type_mangle_recursive`
+# during hot-reload error recovery (see test 399). When that's fixed, add
+# "char" to the stdlib_modules array in compiler/src/main.c.
+#
+# Implementation note: every predicate enumerates the equality cases
+# rather than using a single `>= '0' and <= '9'` because the Live VM
+# does not yet support range comparisons (`>=`, `<=`) on Char32 — only
+# equality. See lib/json.rae's `isDigit` for the original reason. Once
+# the VM gains range ops on Char32, fold these back into ranges.
+
+func isDigit(this: view Char32) ret Bool {
+  if this is '0' { ret true }
+  if this is '1' { ret true }
+  if this is '2' { ret true }
+  if this is '3' { ret true }
+  if this is '4' { ret true }
+  if this is '5' { ret true }
+  if this is '6' { ret true }
+  if this is '7' { ret true }
+  if this is '8' { ret true }
+  if this is '9' { ret true }
+  ret false
+}
+
+func isWhitespace(this: view Char32) ret Bool {
+  if this is ' '  { ret true }
+  if this is '\t' { ret true }
+  if this is '\n' { ret true }
+  if this is '\r' { ret true }
+  ret false
+}
+
+func isUpper(this: view Char32) ret Bool {
+  if this is 'A' { ret true }
+  if this is 'B' { ret true }
+  if this is 'C' { ret true }
+  if this is 'D' { ret true }
+  if this is 'E' { ret true }
+  if this is 'F' { ret true }
+  if this is 'G' { ret true }
+  if this is 'H' { ret true }
+  if this is 'I' { ret true }
+  if this is 'J' { ret true }
+  if this is 'K' { ret true }
+  if this is 'L' { ret true }
+  if this is 'M' { ret true }
+  if this is 'N' { ret true }
+  if this is 'O' { ret true }
+  if this is 'P' { ret true }
+  if this is 'Q' { ret true }
+  if this is 'R' { ret true }
+  if this is 'S' { ret true }
+  if this is 'T' { ret true }
+  if this is 'U' { ret true }
+  if this is 'V' { ret true }
+  if this is 'W' { ret true }
+  if this is 'X' { ret true }
+  if this is 'Y' { ret true }
+  if this is 'Z' { ret true }
+  ret false
+}
+
+func isLower(this: view Char32) ret Bool {
+  if this is 'a' { ret true }
+  if this is 'b' { ret true }
+  if this is 'c' { ret true }
+  if this is 'd' { ret true }
+  if this is 'e' { ret true }
+  if this is 'f' { ret true }
+  if this is 'g' { ret true }
+  if this is 'h' { ret true }
+  if this is 'i' { ret true }
+  if this is 'j' { ret true }
+  if this is 'k' { ret true }
+  if this is 'l' { ret true }
+  if this is 'm' { ret true }
+  if this is 'n' { ret true }
+  if this is 'o' { ret true }
+  if this is 'p' { ret true }
+  if this is 'q' { ret true }
+  if this is 'r' { ret true }
+  if this is 's' { ret true }
+  if this is 't' { ret true }
+  if this is 'u' { ret true }
+  if this is 'v' { ret true }
+  if this is 'w' { ret true }
+  if this is 'x' { ret true }
+  if this is 'y' { ret true }
+  if this is 'z' { ret true }
+  ret false
+}
+
+func isLetter(this: view Char32) ret Bool {
+  if isUpper(this: this) { ret true }
+  if isLower(this: this) { ret true }
+  ret false
+}
+
+func isAlnum(this: view Char32) ret Bool {
+  if isLetter(this: this) { ret true }
+  if isDigit(this: this) { ret true }
+  ret false
+}
+
+# ASCII case folding. Non-ASCII (or already-lower / already-upper)
+# codepoints pass through unchanged.
+func toLower(this: view Char32) ret Char32 {
+  if this is 'A' { ret 'a' }
+  if this is 'B' { ret 'b' }
+  if this is 'C' { ret 'c' }
+  if this is 'D' { ret 'd' }
+  if this is 'E' { ret 'e' }
+  if this is 'F' { ret 'f' }
+  if this is 'G' { ret 'g' }
+  if this is 'H' { ret 'h' }
+  if this is 'I' { ret 'i' }
+  if this is 'J' { ret 'j' }
+  if this is 'K' { ret 'k' }
+  if this is 'L' { ret 'l' }
+  if this is 'M' { ret 'm' }
+  if this is 'N' { ret 'n' }
+  if this is 'O' { ret 'o' }
+  if this is 'P' { ret 'p' }
+  if this is 'Q' { ret 'q' }
+  if this is 'R' { ret 'r' }
+  if this is 'S' { ret 's' }
+  if this is 'T' { ret 't' }
+  if this is 'U' { ret 'u' }
+  if this is 'V' { ret 'v' }
+  if this is 'W' { ret 'w' }
+  if this is 'X' { ret 'x' }
+  if this is 'Y' { ret 'y' }
+  if this is 'Z' { ret 'z' }
+  ret this
+}
+
+func toUpper(this: view Char32) ret Char32 {
+  if this is 'a' { ret 'A' }
+  if this is 'b' { ret 'B' }
+  if this is 'c' { ret 'C' }
+  if this is 'd' { ret 'D' }
+  if this is 'e' { ret 'E' }
+  if this is 'f' { ret 'F' }
+  if this is 'g' { ret 'G' }
+  if this is 'h' { ret 'H' }
+  if this is 'i' { ret 'I' }
+  if this is 'j' { ret 'J' }
+  if this is 'k' { ret 'K' }
+  if this is 'l' { ret 'L' }
+  if this is 'm' { ret 'M' }
+  if this is 'n' { ret 'N' }
+  if this is 'o' { ret 'O' }
+  if this is 'p' { ret 'P' }
+  if this is 'q' { ret 'Q' }
+  if this is 'r' { ret 'R' }
+  if this is 's' { ret 'S' }
+  if this is 't' { ret 'T' }
+  if this is 'u' { ret 'U' }
+  if this is 'v' { ret 'V' }
+  if this is 'w' { ret 'W' }
+  if this is 'x' { ret 'X' }
+  if this is 'y' { ret 'Y' }
+  if this is 'z' { ret 'Z' }
+  ret this
+}
