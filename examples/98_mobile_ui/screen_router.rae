@@ -9,10 +9,18 @@ import ui/ecs
 import ui/input
 
 enum Screen {
-  NowPlaying
+  # `Library` is the album-grid (formerly "Profile"). It's the user's
+  # local catalog of music to play.
+  Library
+  # `Album` is the sub-page showing one album's track list. Reached by
+  # tapping a Library grid tile.
   Album
+  # `Player` is the sub-page showing the currently-playing track with
+  # full controls. Reached by tapping a track row OR by tapping the
+  # mini-player at the bottom of any screen. Formerly "NowPlaying".
+  Player
+  # Placeholder search screen.
   Search
-  Profile
 }
 
 func buildScreenWorld(
@@ -29,7 +37,7 @@ func buildScreenWorld(
   if screen is Screen.Search {
     ret buildSearchWorld(scenes: scenes, playback: playback, state: state, reg: texReg)
   }
-  if screen is Screen.Profile {
+  if screen is Screen.Library {
     ret buildProfileWorld(scenes: scenes, reg: texReg, state: state, playback: playback, scrollY: scrollY)
   }
   ret buildNowPlayingWorld(scenes: scenes, playback: playback, state: state, reg: texReg)
@@ -44,10 +52,10 @@ func pageIdForScreen(screen: Screen) pub ret String {
   if screen is Screen.Search {
     ret searchPageId
   }
-  if screen is Screen.Profile {
-    ret profilePageId
+  if screen is Screen.Library {
+    ret libraryPageId
   }
-  ret nowPlayingPageId
+  ret playerPageId
 }
 
 # Persistent-world entrypoint: one UiWorld with ALL four screen pages
@@ -73,8 +81,8 @@ func buildAppWorld(
   # Visibility: only the currently-visible screen is Active=true.
   let visible: Screen = visibleScreen(state: state)
   let activeAlbum: Active = { value: visible is Screen.Album }
-  let activeNowPlaying: Active = { value: visible is Screen.NowPlaying }
-  let activeProfile: Active = { value: visible is Screen.Profile }
+  let activeNowPlaying: Active = { value: visible is Screen.Player }
+  let activeProfile: Active = { value: visible is Screen.Library }
   let activeSearch: Active = { value: visible is Screen.Search }
   componentSet(this: world.actives, entity: albumPage, data: activeAlbum)
   componentSet(this: world.actives, entity: nowPlayingPage, data: activeNowPlaying)
@@ -159,7 +167,7 @@ func createAppState(albums: own List(Album)) pub ret AppState {
     albums: albums
     currentAlbumStem: firstStem
     currentTrackIndex: 0
-    tab: Screen.NowPlaying
+    tab: Screen.Player
     subPageStack: createList(Int, cap: 4)
   }
 }
@@ -295,7 +303,7 @@ func dispatchActions(
     # tabs. NowPlaying is NOT a tab — it's a sub-page opened by
     # tapping the mini-player at the bottom of any screen.
     if actionId.equals(other: libraryKey) {
-      let s: Screen = Screen.Profile
+      let s: Screen = Screen.Library
       setTab(state: state, tab: s)
     }
     if actionId.equals(other: searchKey) {
@@ -305,7 +313,7 @@ func dispatchActions(
     if actionId.equals(other: nowPlayingKey) {
       # Mini-player tap. Open the full NowPlaying view as a sub-page
       # over whatever tab the user is currently on.
-      let s: Screen = Screen.NowPlaying
+      let s: Screen = Screen.Player
       pushSubPage(state: state, screen: s)
     }
     if actionId.equals(other: backKey) {
@@ -390,7 +398,7 @@ func dispatchActions(
         log("[spotify] play track query={q}")
         spotifyPlayQuery(query: q)
       }
-      let s: Screen = Screen.NowPlaying
+      let s: Screen = Screen.Player
       pushSubPage(state: state, screen: s)
     }
 

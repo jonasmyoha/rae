@@ -109,7 +109,7 @@ func applyPlaybackToWorld(world: mod UiWorld, state: view PlaybackState) pub {
   # Big play button on the now-playing screen — scoped lookup under
   # the now-playing page. Absent (returns none) on other screens.
   let playIconKey: String = "PlayIcon"
-  let playIconEntityOpt: opt Int = findNodeInPage(world: world, pageId: nowPlayingPageId, nodeId: playIconKey)
+  let playIconEntityOpt: opt Int = findNodeInPage(world: world, pageId: playerPageId, nodeId: playIconKey)
   if playIconEntityOpt is none {
   } else {
     let playIconRaw: Int = playIconEntityOpt
@@ -143,9 +143,9 @@ func applyPlaybackToWorld(world: mod UiWorld, state: view PlaybackState) pub {
   # layout reflows would otherwise reset the fill width to whatever
   # was last authored).
   let trackKey: String = "ProgressBar"
-  let trackEntityOpt: opt Int = findNodeInPage(world: world, pageId: nowPlayingPageId, nodeId: trackKey)
+  let trackEntityOpt: opt Int = findNodeInPage(world: world, pageId: playerPageId, nodeId: trackKey)
   let fillKey: String = "ProgressFill"
-  let fillEntityOpt: opt Int = findNodeInPage(world: world, pageId: nowPlayingPageId, nodeId: fillKey)
+  let fillEntityOpt: opt Int = findNodeInPage(world: world, pageId: playerPageId, nodeId: fillKey)
   if trackEntityOpt is none {
   } else {
     if fillEntityOpt is none {

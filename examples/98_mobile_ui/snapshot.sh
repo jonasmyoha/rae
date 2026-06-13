@@ -4,7 +4,7 @@
 # Usage:
 #   examples/98_mobile_ui/snapshot.sh [output.png] [screen]
 #
-# `screen` is "album" (default) or "now-playing".
+# `screen` is "album" (default) or "player".
 # Default output is `examples/98_mobile_ui/temp/screenshots/<screen>.png`.
 # The `temp/` directory is gitignored — see the project `.gitignore`.
 #
@@ -70,7 +70,7 @@ else
 fi
 
 # Run the app in the background, picking the starting screen via env.
-# `RAE_UI_SCREEN` ("album" / "now-playing") is read by the interactive
+# `RAE_UI_SCREEN` ("album" / "player") is read by the interactive
 # loop in main.rae.
 RAE_UI_SCREEN="$SCREEN" "${APP_CMD[@]}" > /tmp/rae_album_run.log 2>&1 &
 APP_PID=$!
