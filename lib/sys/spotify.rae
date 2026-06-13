@@ -59,6 +59,18 @@ func spotifyPause() extern
 func spotifyNext() extern
 func spotifyPrevious() extern
 
+# Play a specific Spotify URI directly. Accepts the full URI form
+# Spotify hands out — spotify:track:<id>, spotify:album:<id>,
+# spotify:playlist:<id>. Use this when the local catalog has a URI
+# stored (e.g. annotated album.json).
+func spotifyPlayUri(uri: view String) extern
+
+# Search-and-play. Opens Spotify's search panel for `query` and
+# plays the top hit. Use when the local catalog has only a free-form
+# label (artist + track / artist + album). The query is URL-encoded
+# inside the C bridge; pass plain text, no escaping required.
+func spotifyPlayQuery(query: view String) extern
+
 # Per-poll snapshot. Runs ONE osascript invocation and caches the six
 # fields; the field getters below read from that cache without re-
 # forking osascript. Call this at the start of each poll, then read

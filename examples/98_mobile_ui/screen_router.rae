@@ -278,10 +278,9 @@ func dispatchActions(
     let actionId: String = ev.actionId
     log("[action] {actionId} (entity {ev.entity})")
 
-    let homeKey: String = "nav.home"
     let libraryKey: String = "nav.library"
     let searchKey: String = "nav.search"
-    let profileKey: String = "nav.profile"
+    let nowPlayingKey: String = "nav.nowPlaying"
     let backKey: String = "nav.back"
     let playbackToggleKey: String = "playback.toggle"
     let playbackNextKey: String = "playback.next"
@@ -291,21 +290,23 @@ func dispatchActions(
     # `spotifyEnabled` is passed in from main.rae (lives on the
     # long-lived SpotifyState) so both sides agree on the source of
     # truth. ON by default; disabled by RAE_UI_NO_SPOTIFY=1 at boot.
-    if actionId.equals(other: homeKey) {
-      let s: Screen = Screen.NowPlaying
-      setTab(state: state, tab: s)
-    }
+    #
+    # Tab structure: Library / Search / Profile are the three base
+    # tabs. NowPlaying is NOT a tab — it's a sub-page opened by
+    # tapping the mini-player at the bottom of any screen.
     if actionId.equals(other: libraryKey) {
-      let s: Screen = Screen.Album
+      let s: Screen = Screen.Profile
       setTab(state: state, tab: s)
     }
     if actionId.equals(other: searchKey) {
       let s: Screen = Screen.Search
       setTab(state: state, tab: s)
     }
-    if actionId.equals(other: profileKey) {
-      let s: Screen = Screen.Profile
-      setTab(state: state, tab: s)
+    if actionId.equals(other: nowPlayingKey) {
+      # Mini-player tap. Open the full NowPlaying view as a sub-page
+      # over whatever tab the user is currently on.
+      let s: Screen = Screen.NowPlaying
+      pushSubPage(state: state, screen: s)
     }
     if actionId.equals(other: backKey) {
       popSubPage(state: state)
@@ -346,21 +347,26 @@ func dispatchActions(
       }
     }
     if actionId.equals(other: albumOpenKey) {
-      # Profile-grid tile click. Push Album onto the sub-page
-      # stack so the user stays on the Profile tab visually
-      # while drilling into an album.
+      # Library-grid tile click. Two effects:
+      #  1) (Spotify mode) tell Spotify to start playing this album
+      #     by searching for "<artist> <album-title>" and playing the
+      #     top hit. Spotify is the playback source of truth.
+      #  2) Push the Album track-list onto the sub-page stack so the
+      #     user can navigate into it visually.
       if componentHas(this: world.sprites, entity: ev.entity) {
         let sp: Sprite = componentGet(this: world.sprites, entity: ev.entity)
-        # Force a fresh String allocation via interpolation. A direct
-        # `state.currentAlbumStem = sp.textureKey` (or via a let-copy)
-        # aliases the source String, which is owned by the current
-        # world's Sprite table; the world drops on the next rebuild
-        # and the aliased pointer dangles. The dangling key is then
-        # written into the next world by `rebindHero`, corrupting
-        # the Sprite / HeroWidget tables. Symptom: every click on
-        # the destination Album screen returns pressed=-1.
+        # Fresh String allocation via interpolation — see the long
+        # comment that used to live here. The Sprite's textureKey is
+        # owned by the current world's Sprite table; dropping the
+        # world drops the storage. Interpolation forces a copy.
         state.currentAlbumStem = "{sp.textureKey}"
         state.currentTrackIndex = 0
+      }
+      if spotifyEnabled {
+        let album: Album = activeAlbum(state: state)
+        let q: String = "{album.artist} {album.album}"
+        log("[spotify] play album query={q}")
+        spotifyPlayQuery(query: q)
       }
       let s: Screen = Screen.Album
       pushSubPage(state: state, screen: s)
@@ -369,14 +375,20 @@ func dispatchActions(
       # Track-row click in the Album view. The actionId is
       # `song.open.N` where N is the track index — encoded into
       # the actionId because adding a per-row ComponentTable for
-      # one Int isn't worth the lib/ui churn. Parse the suffix
-      # after the prefix; reject negatives just in case.
+      # one Int isn't worth the lib/ui churn.
       let prefixLen: Int = songOpenPrefix.length()
       let actionLen: Int = actionId.length()
       let suffix: String = actionId.sub(start: prefixLen, len: actionLen - prefixLen)
       let idx: Int = suffix.toInt()
       if idx >= 0 {
         state.currentTrackIndex = idx
+      }
+      if spotifyEnabled {
+        let album: Album = activeAlbum(state: state)
+        let track: Track = trackAt(album: album, idx: state.currentTrackIndex)
+        let q: String = "{album.artist} {track.title}"
+        log("[spotify] play track query={q}")
+        spotifyPlayQuery(query: q)
       }
       let s: Screen = Screen.NowPlaying
       pushSubPage(state: state, screen: s)

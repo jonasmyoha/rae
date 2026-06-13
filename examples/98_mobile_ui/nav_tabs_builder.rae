@@ -124,23 +124,25 @@ func buildNavTabsForScreen(
   setShapeRect(world: world, entity: bar, fill: barBg)
   setLayout(world: world, entity: bar, kind: LayoutType.Horizontal, gap: 0.0, alignCross: AlignKind.Center)
 
-  let tabW: Float = barW / 4.0
-  let homeActive: Bool = activeTab is Screen.NowPlaying
+  # Two base tabs: Library / Search. NowPlaying is NOT a tab here —
+  # it's reached by tapping the mini-player above this bar. Profile
+  # was dropped because it duplicated the Library grid; reintroduce
+  # later with real user-account / settings content.
+  let tabW: Float = barW / 2.0
+  let libraryActive: Bool = activeTab is Screen.Profile
   let searchActive: Bool = activeTab is Screen.Search
-  let libraryActive: Bool = activeTab is Screen.Album
-  let profileActive: Bool = activeTab is Screen.Profile
 
-  let homeKey: String = "mat:home"
-  let homeLabel: String = "Home"
-  let homeAction: String = "nav.home"
-  let homeTab: EntityId = mountNavTab(
+  let libraryKey: String = "mat:library_music"
+  let libraryLabel: String = "Library"
+  let libraryAction: String = "nav.library"
+  let libraryTab: EntityId = mountNavTab(
     world: world
     scene: scenes.navTab
     w: tabW
-    iconKey: homeKey
-    label: homeLabel
-    actionId: homeAction
-    active: homeActive
+    iconKey: libraryKey
+    label: libraryLabel
+    actionId: libraryAction
+    active: libraryActive
   )
 
   let searchKey: String = "mat:search"
@@ -156,37 +158,9 @@ func buildNavTabsForScreen(
     active: searchActive
   )
 
-  let libraryKey: String = "mat:library_music"
-  let libraryLabel: String = "Library"
-  let libraryAction: String = "nav.library"
-  let libraryTab: EntityId = mountNavTab(
-    world: world
-    scene: scenes.navTab
-    w: tabW
-    iconKey: libraryKey
-    label: libraryLabel
-    actionId: libraryAction
-    active: libraryActive
-  )
-
-  let profileKey: String = "mat:person"
-  let profileLabel: String = "Profile"
-  let profileAction: String = "nav.profile"
-  let profileTab: EntityId = mountNavTab(
-    world: world
-    scene: scenes.navTab
-    w: tabW
-    iconKey: profileKey
-    label: profileLabel
-    actionId: profileAction
-    active: profileActive
-  )
-
-  let kids: List(EntityId) = createList(EntityId, cap: 4)
-  kids.add(value: homeTab)
-  kids.add(value: searchTab)
+  let kids: List(EntityId) = createList(EntityId, cap: 2)
   kids.add(value: libraryTab)
-  kids.add(value: profileTab)
+  kids.add(value: searchTab)
   attachChildren(world: world, parent: bar, kids: kids)
   ret bar
 }
