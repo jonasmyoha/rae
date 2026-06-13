@@ -84,7 +84,7 @@ bool emit_type_recursive(CompilerContext* ctx, const AstModule* m, const AstType
         CFuncContext tctx = {0}; tctx.compiler_ctx = ctx; tctx.module = m; tctx.uses_raylib = ray;
         fprintf(out, "  ");
         emit_type_ref_as_c_type(&tctx, type->generic_args, out, false);
-        fprintf(out, "* data;\n  int64_t length;\n  int64_t capacity;\n};\n\n");
+        fprintf(out, "* data;\n  int64_t length;\n  int64_t cap;\n};\n\n");
     } else {
         const AstDecl* d = find_type_decl(NULL, m, base);
         // If we found a specialized version, use the generic template instead
@@ -691,17 +691,20 @@ AstExpr* hoist_type_arg_if_present(CFuncContext* ctx, const AstExpr* expr) {
     if (expr->as.call.generic_args) return NULL;
     if (!expr->as.call.args) return NULL;
 
+    // Type-arg slot recognised by shape, not by hard-coded name. The
+    // first argument — positional OR named — whose value parses as a
+    // type identifier is hoisted to `generic_args`. This covers all
+    // three accepted call spellings:
+    //   createList(T: Int, cap: 4)      — named, using the param's name
+    //   createList(type: Int, cap: 4)   — legacy keyword spelling
+    //   createList(Int, cap: 4)         — positional
     AstCallArg* type_arg_node = NULL;
-    for (AstCallArg* a = expr->as.call.args; a; a = a->next) {
-        if (a->name.len > 0 && str_eq_cstr(a->name, "type")) { type_arg_node = a; break; }
-    }
-    if (!type_arg_node && expr->as.call.args->name.len == 0) {
-        type_arg_node = expr->as.call.args;
+    AstTypeRef* tr = NULL;
+    if (expr->as.call.args) {
+        tr = try_as_type_arg(ctx, expr->as.call.args->value);
+        if (tr) type_arg_node = expr->as.call.args;
     }
     if (!type_arg_node) return NULL;
-
-    AstTypeRef* tr = try_as_type_arg(ctx, type_arg_node->value);
-    if (!tr) return NULL;
 
     AstCallArg* new_head = NULL; AstCallArg* new_tail = NULL;
     for (AstCallArg* a = expr->as.call.args; a; a = a->next) {
@@ -968,7 +971,7 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
           fprintf(out, "  {\n");
           fprintf(out, "    char* __buf = (char*)this->data;\n");
           fprintf(out, "    size_t __stride = sizeof(%s_%s);\n", entry_struct, elem_mangled);
-          fprintf(out, "    for (int64_t __i = 0; __i < this->capacity; __i++) {\n");
+          fprintf(out, "    for (int64_t __i = 0; __i < this->cap; __i++) {\n");
           fprintf(out, "      %s_%s* __entry = (%s_%s*)(__buf + __i * __stride);\n",
                   entry_struct, elem_mangled, entry_struct, elem_mangled);
           fprintf(out, "      if (!__entry->occupied) continue;\n");
@@ -1544,9 +1547,9 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     if (e->kind == 0) {
       // List(E): allocate buffer, copy elements.
       fprintf(out, "  dst->length = src->length;\n");
-      fprintf(out, "  dst->capacity = src->capacity;\n");
-      fprintf(out, "  if (src->capacity > 0) {\n");
-      fprintf(out, "    dst->data = (%s*)rae_ext_rae_buf_alloc(src->capacity, sizeof(%s));\n",
+      fprintf(out, "  dst->cap = src->cap;\n");
+      fprintf(out, "  if (src->cap > 0) {\n");
+      fprintf(out, "    dst->data = (%s*)rae_ext_rae_buf_alloc(src->cap, sizeof(%s));\n",
               elem_mangled, elem_mangled);
       if (!elem_needs_deep) {
         // POD path — bulk copy.
@@ -1573,15 +1576,15 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       // or rae_IntMapEntry_<V> { k: int64_t, value: V, occupied: rae_Bool }
       const char* entry_struct = (e->kind == 1) ? "rae_StringMapEntry" : "rae_IntMapEntry";
       fprintf(out, "  dst->length = src->length;\n");
-      fprintf(out, "  dst->capacity = src->capacity;\n");
-      fprintf(out, "  if (src->capacity > 0) {\n");
+      fprintf(out, "  dst->cap = src->cap;\n");
+      fprintf(out, "  if (src->cap > 0) {\n");
       fprintf(out, "    size_t __stride = sizeof(%s_%s);\n", entry_struct, elem_mangled);
-      fprintf(out, "    dst->data = rae_ext_rae_buf_alloc(src->capacity, (int64_t)__stride);\n");
-      fprintf(out, "    memcpy(dst->data, src->data, (size_t)src->capacity * __stride);\n");
+      fprintf(out, "    dst->data = rae_ext_rae_buf_alloc(src->cap, (int64_t)__stride);\n");
+      fprintf(out, "    memcpy(dst->data, src->data, (size_t)src->cap * __stride);\n");
       // Now deep-copy keys (if smap) and values (if needed) per occupied slot.
       fprintf(out, "    char* __sbuf = (char*)src->data;\n");
       fprintf(out, "    char* __dbuf = (char*)dst->data;\n");
-      fprintf(out, "    for (int64_t __i = 0; __i < src->capacity; __i++) {\n");
+      fprintf(out, "    for (int64_t __i = 0; __i < src->cap; __i++) {\n");
       fprintf(out, "      %s_%s* __se = (%s_%s*)(__sbuf + __i * __stride);\n",
               entry_struct, elem_mangled, entry_struct, elem_mangled);
       fprintf(out, "      %s_%s* __de = (%s_%s*)(__dbuf + __i * __stride);\n",

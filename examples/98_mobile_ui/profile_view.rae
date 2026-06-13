@@ -71,7 +71,7 @@ func buildAvatar(world: mod UiWorld, reg: view TextureRegistry) ret EntityId {
     let personKey: String = "mat:person"
     setSprite(world: world, entity: icon, key: personKey, tint: lightTextColor)
 
-    let kids: List(EntityId) = createList(EntityId, initialCap: 1)
+    let kids: List(EntityId) = createList(EntityId, cap: 1)
     kids.add(value: icon)
     attachChildren(world: world, parent: avatar, kids: kids)
   }
@@ -98,7 +98,7 @@ func buildStatColumn(world: mod UiWorld, value: own String, label: own String) r
   let labelStyle: String = "muted"
   setText(world: world, entity: labelText, text: label, styleId: labelStyle)
 
-  let kids: List(EntityId) = createList(EntityId, initialCap: 2)
+  let kids: List(EntityId) = createList(EntityId, cap: 2)
   kids.add(value: valueText)
   kids.add(value: labelText)
   attachChildren(world: world, parent: col, kids: kids)
@@ -125,7 +125,7 @@ func buildStatsRow(world: mod UiWorld) ret EntityId {
   let followingCol: EntityId = buildStatColumn(world: world, value: following, label: followingLabel)
   let likesCol: EntityId = buildStatColumn(world: world, value: likes, label: likesLabel)
 
-  let kids: List(EntityId) = createList(EntityId, initialCap: 3)
+  let kids: List(EntityId) = createList(EntityId, cap: 3)
   kids.add(value: followersCol)
   kids.add(value: followingCol)
   kids.add(value: likesCol)
@@ -155,7 +155,7 @@ func gridTileSize() ret Float {
 # single source of truth — the loader registers each cover under
 # its stem key, and we just hand those stems back here.
 func collectProfileCoverKeys(albums: view List(Album)) ret List(String) {
-  let result: List(String) = createList(String, initialCap: albums.length)
+  let result: List(String) = createList(String, cap: albums.length)
   let i: Int = 0
   loop i < albums.length {
     let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: i)
@@ -211,7 +211,7 @@ func buildCoverGridRow(
   let alignS: AlignKind = AlignKind.Start
   setLayout(world: world, entity: row, kind: layH, gap: gridTileGap, alignCross: alignS)
 
-  let kids: List(EntityId) = createList(EntityId, initialCap: gridColumns)
+  let kids: List(EntityId) = createList(EntityId, cap: gridColumns)
   let cols: Int = gridColumns
   let total: Int = keys.length
   let col: Int = 0
@@ -245,7 +245,7 @@ func buildCoverGrid(world: mod UiWorld, albums: view List(Album)) ret EntityId {
   let alignS: AlignKind = AlignKind.Start
   setLayout(world: world, entity: grid, kind: layV, gap: gridTileGap, alignCross: alignS)
 
-  let rowKids: List(EntityId) = createList(EntityId, initialCap: rows)
+  let rowKids: List(EntityId) = createList(EntityId, cap: rows)
   let i: Int = 0
   loop i < rows {
     let startIndex: Int = i * cols
@@ -311,7 +311,7 @@ func buildProfileBody(world: mod UiWorld, reg: view TextureRegistry, albums: vie
   # "comfortable scroll bottom" (1-2 rows of empty space below the
   # last row before the dock) is controlled entirely by the
   # `minScroll` clamp in `main.rae`'s wheel handler.
-  let kids: List(EntityId) = createList(EntityId, initialCap: 5)
+  let kids: List(EntityId) = createList(EntityId, cap: 5)
   kids.add(value: avatar)
   kids.add(value: handle)
   kids.add(value: bio)
@@ -337,7 +337,7 @@ func buildProfileTopBar(world: mod UiWorld) ret EntityId {
   let titleText: String = "Profile"
   setText(world: world, entity: title, text: titleText, styleId: titleStyle)
 
-  let kids: List(EntityId) = createList(EntityId, initialCap: 1)
+  let kids: List(EntityId) = createList(EntityId, cap: 1)
   kids.add(value: title)
   attachChildren(world: world, parent: bar, kids: kids)
   ret bar
@@ -374,7 +374,7 @@ func mountProfilePage(
   let topBar: EntityId = buildProfileTopBar(world: world)
   let body: EntityId = buildProfileBody(world: world, reg: reg, albums: albums, scrollY: scrollY)
 
-  let kids: List(EntityId) = createList(EntityId, initialCap: 2)
+  let kids: List(EntityId) = createList(EntityId, cap: 2)
   kids.add(value: topBar)
   kids.add(value: body)
   attachChildren(world: world, parent: root, kids: kids)

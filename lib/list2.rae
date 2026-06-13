@@ -2,15 +2,15 @@
 type List2 {
   data: Buffer(Any)
   length: Int
-  capacity: Int
+  cap: Int
 }
 
-func createList2(initialCap: view Int) ret List2 {
-  ret List2 { data: __buf_alloc(size: initialCap), length: 0, capacity: initialCap }
+func createList2(cap: view Int) ret List2 {
+  ret List2 { data: __buf_alloc(size: cap), length: 0, cap: cap }
 }
 
 func grow(this: mod List2) {
-  let newCap: Int = this.capacity * 2
+  let newCap: Int = this.cap * 2
   if newCap is 0 {
     newCap = 4
   }
@@ -24,11 +24,11 @@ func grow(this: mod List2) {
   )
   __buf_free(buf: this.data)
   this.data = newData
-  this.capacity = newCap
+  this.cap = newCap
 }
 
 func add(this: mod List2, value: Any) {
-  if this.length is this.capacity {
+  if this.length is this.cap {
     grow(this)
   }
   __buf_set(buf: this.data, index: this.length, value: value)

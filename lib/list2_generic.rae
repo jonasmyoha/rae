@@ -1,16 +1,16 @@
 # Generic List2 implementation for Rae
-type List2Generic(T) {
+type List2Generic(T: type) {
   data: Buffer(T)
   length: Int
-  capacity: Int
+  cap: Int
 }
 
-func createList2Generic(T)(initialCap: view Int) ret List2Generic(T) {
-  ret List2Generic(T) { data: __buf_alloc(size: initialCap), length: 0, capacity: initialCap }
+func createList2Generic(T: type, cap: view Int) ret List2Generic(T) {
+  ret List2Generic(T) { data: __buf_alloc(size: cap), length: 0, cap: cap }
 }
 
-func grow(T)(this: mod List2Generic(T)) {
-  let newCap: Int = this.capacity * 2
+func grow(T: type, this: mod List2Generic(T)) {
+  let newCap: Int = this.cap * 2
   if newCap is 0 {
     newCap = 4
   }
@@ -24,21 +24,21 @@ func grow(T)(this: mod List2Generic(T)) {
   )
   __buf_free(buf: this.data)
   this.data = newData
-  this.capacity = newCap
+  this.cap = newCap
 }
 
-func add(T)(this: mod List2Generic(T), value: T) {
-  if this.length is this.capacity {
+func add(T: type, this: mod List2Generic(T), value: T) {
+  if this.length is this.cap {
     grow(this)
   }
   __buf_set(buf: this.data, index: this.length, value: value)
   this.length = this.length + 1
 }
 
-func get(T)(this: view List2Generic(T), index: view Int) ret T {
+func get(T: type, this: view List2Generic(T), index: view Int) ret T {
   ret __buf_get(buf: this.data, index: index)
 }
 
-func length(T)(this: view List2Generic(T)) ret Int {
+func length(T: type, this: view List2Generic(T)) ret Int {
   ret this.length
 }
