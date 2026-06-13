@@ -172,14 +172,21 @@ func pollSpotify(
   }
   state.lastPollSec = now
   let track: SpotifyTrack = spotifyCurrent()
+  let pos: Float = spotifyPosition()
+  let dur: Float = spotifyDuration()
   # Mirror Spotify's actual state into the local playback mock so the
-  # play-button icon (driven by applyPlaybackToWorld → playback.isPlaying)
-  # matches the real player. The user pausing/resuming in Spotify
-  # directly will now flip the icon on the next poll.
+  # play-button icon (applyPlaybackToWorld → playback.isPlaying) and the
+  # progress bar / playhead readout (driven by elapsedSec / durationSec)
+  # match the real player. Includes "user paused in Spotify directly"
+  # and "user skipped tracks in Spotify" — both flip within 1Hz here.
   let playingKey: String = "playing"
   let nowPlaying: Bool = track.state.equals(other: playingKey)
   if playback.isPlaying is not nowPlaying {
     playback.isPlaying = nowPlaying
+  }
+  playback.elapsedSec = pos
+  if dur > 0.0 {
+    playback.durationSec = dur
   }
   # Text updates run every poll — cheap, and handles the "user
   # paused/resumed in Spotify directly" case without extra logic.
@@ -194,18 +201,14 @@ func pollSpotify(
   # polls for the same track during playback).
   let changed: Bool = track.trackId.equals(other: state.lastTrackId) is false
   if changed {
-    let firstTime: Bool = state.lastTrackId.length() is 0
     state.lastTrackId = "{track.trackId}"
-    let artOk: Bool = refreshSpotifyArt(state: state, track: track, reg: reg)
-    if artOk {
-      if firstTime {
-        # FIRST track change: cover Sprites still carry the user's
-        # local album stem as their textureKey. Rebind them to the
-        # spotify-current texture key one time. Subsequent track
-        # changes need no rebind because we replace the texture
-        # CONTENT under the same key.
-        rebindAlbumCoversToSpotify(world: world, currentStem: currentAlbumStem, artKey: state.artKey)
-      }
-    }
+    refreshSpotifyArt(state: state, track: track, reg: reg)
   }
+  # Re-bind the cover Sprites every poll, not just on first track
+  # change. Each screen switch (or hot-reload rebuild) re-runs
+  # `rebindHero(world, "albumCover", appState.currentAlbumStem)` which
+  # snaps the cover textureKey back to the local-album stem. Doing the
+  # Spotify rebind on every tick survives those rebuilds — and the
+  # walk is O(N sprites), trivially cheap.
+  rebindAlbumCoversToSpotify(world: world, currentStem: currentAlbumStem, artKey: state.artKey)
 }
