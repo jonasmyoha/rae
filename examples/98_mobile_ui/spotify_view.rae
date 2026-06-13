@@ -46,8 +46,15 @@ type SpotifyState pub {
 }
 
 func createSpotifyState() pub ret SpotifyState {
-  let env: String = getEnv(name: "RAE_UI_SPOTIFY")
-  let enabled: Bool = env.length() > 0
+  # Spotify mode is ON by default on the assumption that this is what
+  # the user actually wants from a music-player example on macOS. Opt
+  # OUT with RAE_UI_NO_SPOTIFY=1 (snapshot tests, no-network builds,
+  # systems without Spotify installed). Previously this was opt-IN via
+  # RAE_UI_SPOTIFY=1, but launchers (SUMU, IDE wrappers) don't always
+  # propagate ad-hoc env vars, so the feature silently no-op'd for
+  # users who didn't run from a manually-prepared shell.
+  let optOut: String = getEnv(name: "RAE_UI_NO_SPOTIFY")
+  let enabled: Bool = optOut.length() is 0
   ret SpotifyState {
     enabled: enabled
     lastPollSec: 0.0 - 1.0
