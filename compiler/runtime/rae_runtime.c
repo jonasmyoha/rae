@@ -2294,31 +2294,41 @@ static rae_String rae_cstr_to_owned_rae_string(const char* s) {
 }
 
 void rae_ext_spotifyLaunch(void) {
+    fprintf(stderr, "[spotify-c] launch\n");
     static const char* lines[] = {
         "tell application \"Spotify\" to if it is not running then launch",
         NULL
     };
-    rae_osascript_run(lines);
+    int rc = rae_osascript_run(lines);
+    if (rc != 0) fprintf(stderr, "[spotify-c] launch failed (osascript rc=%d)\n", rc);
 }
 
 void rae_ext_spotifyPlay(void) {
+    fprintf(stderr, "[spotify-c] play\n");
     static const char* lines[] = { "tell application \"Spotify\" to play", NULL };
-    rae_osascript_run(lines);
+    int rc = rae_osascript_run(lines);
+    if (rc != 0) fprintf(stderr, "[spotify-c] play failed (osascript rc=%d) — Spotify not running or Automation permission denied?\n", rc);
 }
 
 void rae_ext_spotifyPause(void) {
+    fprintf(stderr, "[spotify-c] pause\n");
     static const char* lines[] = { "tell application \"Spotify\" to pause", NULL };
-    rae_osascript_run(lines);
+    int rc = rae_osascript_run(lines);
+    if (rc != 0) fprintf(stderr, "[spotify-c] pause failed (osascript rc=%d)\n", rc);
 }
 
 void rae_ext_spotifyNext(void) {
+    fprintf(stderr, "[spotify-c] next\n");
     static const char* lines[] = { "tell application \"Spotify\" to next track", NULL };
-    rae_osascript_run(lines);
+    int rc = rae_osascript_run(lines);
+    if (rc != 0) fprintf(stderr, "[spotify-c] next failed (osascript rc=%d)\n", rc);
 }
 
 void rae_ext_spotifyPrevious(void) {
+    fprintf(stderr, "[spotify-c] previous\n");
     static const char* lines[] = { "tell application \"Spotify\" to previous track", NULL };
-    rae_osascript_run(lines);
+    int rc = rae_osascript_run(lines);
+    if (rc != 0) fprintf(stderr, "[spotify-c] previous failed (osascript rc=%d)\n", rc);
 }
 
 void rae_ext_spotifyRefresh(void) {
