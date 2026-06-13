@@ -38,7 +38,7 @@ type FileWatcher {
 # `checkForChanges` calls compare against this baseline, so the first
 # poll after construction does not spuriously fire.
 func createFileWatcher(paths: view List(String), enabled: view Bool, intervalSec: view Float) ret FileWatcher {
-  let entries: List(WatchEntry) = createList(WatchEntry, initialCap: paths.length)
+  let entries: List(WatchEntry) = createList(WatchEntry, cap: paths.length)
   let i: Int = 0
   loop i < paths.length {
     let p: String = paths.get(index: i)

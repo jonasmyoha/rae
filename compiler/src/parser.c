@@ -180,39 +180,6 @@ static AstTypeRef* append_type_ref_list(AstTypeRef* head, AstTypeRef* node) {
   return head;
 }
 
-/* Synthesize an AstTypeRef from an AstExpr that *looks* like a type. The
- * parser converts the first arg-list of `foo(T)(args)` into generic_args;
- * each arg may be a plain ident (`T`) or a parameterized type encoded as
- * a call expression (`StringMapEntry(V)` → AST_EXPR_CALL with an IDENT
- * callee). Returns NULL when the shape doesn't match a type expression. */
-static AstTypeRef* expr_to_type_ref(Parser* parser, const AstExpr* e) {
-  if (!e) return NULL;
-  if (e->kind == AST_EXPR_IDENT) {
-    AstTypeRef* tr = parser_alloc(parser, sizeof(AstTypeRef));
-    tr->parts = parser_alloc(parser, sizeof(AstIdentifierPart));
-    tr->parts->text = e->as.ident;
-    tr->parts->next = NULL;
-    tr->generic_args = NULL;
-    tr->next = NULL;
-    return tr;
-  }
-  if (e->kind == AST_EXPR_CALL && e->as.call.callee && e->as.call.callee->kind == AST_EXPR_IDENT) {
-    AstTypeRef* tr = parser_alloc(parser, sizeof(AstTypeRef));
-    tr->parts = parser_alloc(parser, sizeof(AstIdentifierPart));
-    tr->parts->text = e->as.call.callee->as.ident;
-    tr->parts->next = NULL;
-    tr->next = NULL;
-    AstTypeRef* generics = NULL;
-    for (AstCallArg* a = e->as.call.args; a; a = a->next) {
-      AstTypeRef* sub = expr_to_type_ref(parser, a->value);
-      if (sub) generics = append_type_ref_list(generics, sub);
-    }
-    tr->generic_args = generics;
-    return tr;
-  }
-  return NULL;
-}
-
 static AstTypeRef* parse_type_ref(Parser* parser) {
   const Token* start_token = parser_peek(parser);
   AstTypeRef* type = parser_alloc(parser, sizeof(AstTypeRef));
@@ -465,16 +432,64 @@ static AstParam* append_param(AstParam* head, AstParam* node) {
   return head;
 }
 
-static AstParam* parse_param(Parser* parser) {
+// Parse one entry of the unified parameter list. Both runtime parameters
+// (`name: view T`, etc.) and generic type parameters (`T: type`) share the
+// same surface syntax; the discriminator is whether the token after `:` is
+// the `type` keyword.
+//
+// For a type parameter, `*out_is_type_param` is set to true and the returned
+// AstParam carries just the name (type = NULL). The caller routes it into
+// the enclosing decl's `generic_params` sidecar instead of the regular
+// `params` list, which preserves the existing AST shape every sema /
+// mangler / codegen reader already understands.
+static AstParam* parse_param(Parser* parser, bool* out_is_type_param) {
+  *out_is_type_param = false;
   const Token* name = parser_consume_ident(parser, "expected parameter name");
+  // Friendly diagnostic for the stale `(T)(args)` syntax: a bare identifier
+  // followed by `,` or `)` is the old generic-param spelling. Catch it
+  // here instead of letting `parse_type_ref` produce a cryptic
+  // "expected type" further along.
+  TokenKind nk = parser_peek(parser)->kind;
+  if (nk == TOK_COMMA || nk == TOK_RPAREN) {
+    parser_error(parser, name,
+      "stale generic syntax: a parameter must have a type — write "
+      "`T: type` for a generic type parameter, or `name: T` for a "
+      "value parameter (the old `func name(T)(...)` form is gone)");
+    AstParam* param = parser_alloc(parser, sizeof(AstParam));
+    param->name = parser_copy_str(parser, name->lexeme);
+    param->type = NULL;
+    param->next = NULL;
+    *out_is_type_param = true; // treat as type-param to keep parsing in sync
+    return param;
+  }
   parser_consume(parser, TOK_COLON, "expected ':' after parameter name");
+  if (parser_peek(parser)->kind == TOK_KW_TYPE) {
+    parser_advance(parser); // consume `type`
+    *out_is_type_param = true;
+    AstParam* param = parser_alloc(parser, sizeof(AstParam));
+    param->name = parser_copy_str(parser, name->lexeme);
+    param->type = NULL;
+    param->next = NULL;
+    return param;
+  }
   AstParam* param = parser_alloc(parser, sizeof(AstParam));
   param->name = parser_copy_str(parser, name->lexeme);
   param->type = parse_type_ref(parser);
+  param->next = NULL;
   return param;
 }
 
-static AstParam* parse_param_list(Parser* parser) {
+// Parse the unified `(...)` parameter list. `*out_generic_params` collects
+// the names of `T: type` entries (in source order); the returned list is
+// only value params. `out_generic_params` may be NULL when the caller is
+// known not to allow type params (currently no such caller; both func and
+// type decls accept type params).
+//
+// Constraint: type params must appear before any value param. Mixing — or
+// putting a type param after a value param — is a parser error so the
+// reader can rely on "type params come first" without an extra pass.
+static AstParam* parse_param_list(Parser* parser, AstIdentifierPart** out_generic_params) {
+  if (out_generic_params) *out_generic_params = NULL;
   const Token* start = parser_consume(parser, TOK_LPAREN, "expected '(' after function name");
   if (parser_match(parser, TOK_RPAREN)) {
     return NULL;
@@ -497,8 +512,29 @@ static AstParam* parse_param_list(Parser* parser) {
   bool multiline = end ? is_multiline(start, end) : false;
 
   AstParam* head = NULL;
+  AstIdentifierPart* gp_head = NULL;
+  AstIdentifierPart* gp_tail = NULL;
+  bool seen_value_param = false;
   for (;;) {
-    head = append_param(head, parse_param(parser));
+    const Token* slot_start = parser_peek(parser);
+    bool is_type_param = false;
+    AstParam* p = parse_param(parser, &is_type_param);
+    if (is_type_param) {
+      if (seen_value_param) {
+        parser_error(parser, slot_start,
+          "type parameters (`T: type`) must come before value parameters");
+      }
+      AstIdentifierPart* node = make_identifier_part(parser, p->name);
+      if (!gp_head) {
+        gp_head = gp_tail = node;
+      } else {
+        gp_tail->next = node;
+        gp_tail = node;
+      }
+    } else {
+      seen_value_param = true;
+      head = append_param(head, p);
+    }
     if (parser_check(parser, TOK_RPAREN)) {
       parser_advance(parser);
       check_no_trailing_comma(parser, "parameter list");
@@ -509,6 +545,17 @@ static AstParam* parse_param_list(Parser* parser) {
       check_no_trailing_comma(parser, "parameter list");
       break;
     }
+  }
+  if (out_generic_params) *out_generic_params = gp_head;
+  // Reject the legacy `(T)(args)` double-paren form. Type parameters now
+  // live in the unified param list; a second `(` right after the closer is
+  // a stale spelling — surface it with a friendly message rather than the
+  // cryptic "expected ret" that would otherwise follow.
+  if (parser_check(parser, TOK_LPAREN)) {
+    parser_error(parser, parser_peek(parser),
+      "stale generic syntax: type parameters now live in the regular "
+      "parameter list — write `func name(T: type, ...)` instead of "
+      "`func name(T)(...)`");
   }
   return head;
 }
@@ -1547,40 +1594,6 @@ static AstReturnArg* parse_return_values(Parser* parser) {
   return head;
 }
 
-static AstIdentifierPart* parse_generic_params(Parser* parser) {
-  if (!parser_check(parser, TOK_LPAREN)) return NULL;
-  
-  if (parser_peek_at(parser, 1)->kind == TOK_RPAREN) return NULL; // () is params
-  
-  // Check if it looks like a parameter list: (name: type) or (name: type, ...)
-  // Generic params are just (T) or (T, U)
-  for (size_t i = 1; i < parser->count - parser->index; i++) {
-    TokenKind k = parser_peek_at(parser, i)->kind;
-    if (k == TOK_COLON) return NULL; // Found a colon, definitely regular params
-    if (k == TOK_RPAREN) break; // End of list, no colon found yet
-    if (k == TOK_EOF) break;
-  }
-
-  parser_advance(parser); // Consume (
-  AstIdentifierPart* head = NULL;
-  AstIdentifierPart* tail = NULL;
-  do {
-    const Token* name = parser_consume_ident(parser, "expected generic type parameter name");
-    AstIdentifierPart* node = make_identifier_part(parser, name->lexeme);
-    if (!head) {
-      head = tail = node;
-    } else {
-      tail->next = node;
-      tail = node;
-    }
-    if (parser_check(parser, TOK_RPAREN)) break;
-    parser_consume(parser, TOK_COMMA, "expected ',' or ')' in generic parameter list");
-    if (parser_check(parser, TOK_RPAREN)) break;
-  } while (true);
-  parser_consume(parser, TOK_RPAREN, "expected ')' after generic parameter list");
-  return head;
-}
-
 static AstMatchCase* append_match_case(AstMatchCase* head, AstMatchCase* node) {
   if (!head) {
     return node;
@@ -2094,7 +2107,19 @@ static AstDecl* parse_type_declaration(Parser* parser) {
   decl->line = type_token->line;
   decl->column = type_token->column;
   decl->as.type_decl.name = parser_copy_str(parser, name->lexeme);
-  decl->as.type_decl.generic_params = parse_generic_params(parser); // Parse generic params
+  // Unified generic / parameter list. Type declarations only accept type
+  // parameters (`T: type`); a value parameter here is a parse error so the
+  // diagnostic surfaces at the right location instead of failing later.
+  AstIdentifierPart* td_generic_params = NULL;
+  if (parser_check(parser, TOK_LPAREN)) {
+    AstParam* value_params = parse_param_list(parser, &td_generic_params);
+    if (value_params) {
+      parser_error(parser, parser_peek(parser),
+        "type declarations only accept type parameters (`T: type`); "
+        "value parameters belong on functions");
+    }
+  }
+  decl->as.type_decl.generic_params = td_generic_params;
   if (parser_match(parser, TOK_COLON)) {
     decl->as.type_decl.properties = parse_type_properties(parser);
     if (!decl->as.type_decl.properties) {
@@ -2124,8 +2149,12 @@ static AstDecl* parse_func_declaration(Parser* parser, bool is_extern) {
   decl->line = func_token->line;
   decl->column = func_token->column;
   decl->as.func_decl.name = parser_copy_str(parser, name_token->lexeme);
-  decl->as.func_decl.generic_params = parse_generic_params(parser);
-  decl->as.func_decl.params = parse_param_list(parser);
+  // Unified parameter list — type parameters (`T: type`) come first, then
+  // value parameters. The parser routes type params into `generic_params`
+  // for compatibility with the existing sema / mangler / codegen readers.
+  AstIdentifierPart* fn_generic_params = NULL;
+  decl->as.func_decl.params = parse_param_list(parser, &fn_generic_params);
+  decl->as.func_decl.generic_params = fn_generic_params;
   
   // Parse zero or more modifiers (extern, priv, spawn, etc.)
   AstProperty* props_head = NULL;

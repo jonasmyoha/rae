@@ -194,7 +194,7 @@ func createDebugSystem() pub ret DebugSystem {
     buttonSize: defaultSize
     screenW: 498.0
     screenH: 1079.0
-    fpsTimes: createList(Float, initialCap: 256)
+    fpsTimes: createList(Float, cap: 256)
     fpsWindowSec: 3.0
     lastFps: 0.0
     lastRssKb: 0
@@ -421,7 +421,7 @@ func dbgSetPaddingAll(world: mod UiWorld, entity: view EntityId, n: view Float) 
 }
 
 func attachKids(world: mod UiWorld, parent: view EntityId, kids: view List(EntityId)) {
-  let kidsCopy: List(EntityId) = createList(EntityId, initialCap: kids.length)
+  let kidsCopy: List(EntityId) = createList(EntityId, cap: kids.length)
   let i: Int = 0
   loop i < kids.length {
     let k: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
@@ -454,7 +454,7 @@ func buildDebugButton(world: mod UiWorld, debug: view DebugSystem) ret EntityId 
   let styleId: String = "debugButton"
   setDebugText(world: world, entity: label, text: dStr, styleId: styleId)
 
-  let kids: List(EntityId) = createList(EntityId, initialCap: 1)
+  let kids: List(EntityId) = createList(EntityId, cap: 1)
   kids.add(value: label)
   attachKids(world: world, parent: btn, kids: kids)
   ret btn
@@ -510,11 +510,11 @@ func buildSwitchRow(
   }
   setOffset(world: world, entity: knob, x: knobOff, y: 0.0)
 
-  let pillKids: List(EntityId) = createList(EntityId, initialCap: 1)
+  let pillKids: List(EntityId) = createList(EntityId, cap: 1)
   pillKids.add(value: knob)
   attachKids(world: world, parent: pill, kids: pillKids)
 
-  let rowKids: List(EntityId) = createList(EntityId, initialCap: 2)
+  let rowKids: List(EntityId) = createList(EntityId, cap: 2)
   rowKids.add(value: label)
   rowKids.add(value: pill)
   attachKids(world: world, parent: row, kids: rowKids)
@@ -605,13 +605,13 @@ func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret Enti
     width: panelW - 40.0
   )
 
-  let rows: List(EntityId) = createList(EntityId, initialCap: 3)
+  let rows: List(EntityId) = createList(EntityId, cap: 3)
   rows.add(value: themeRow)
   rows.add(value: labelsRow)
   rows.add(value: outlinesRow)
   attachKids(world: world, parent: panel, kids: rows)
 
-  let backdropKids: List(EntityId) = createList(EntityId, initialCap: 1)
+  let backdropKids: List(EntityId) = createList(EntityId, cap: 1)
   backdropKids.add(value: panel)
   attachKids(world: world, parent: backdrop, kids: backdropKids)
   ret backdrop

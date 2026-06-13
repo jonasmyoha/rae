@@ -36,7 +36,7 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
 
   # ---------- pass 1: allocate entities, populate nodeIds map ----------
   let nodeCount: Int = scene.nodes.length
-  let entitiesByNodeIndex: List(EntityId) = createList(EntityId, initialCap: nodeCount)
+  let entitiesByNodeIndex: List(EntityId) = createList(EntityId, cap: nodeCount)
   let nodeIdsMap: mod StringMap(Int) => world.nodeIds
   let i: Int = 0
   loop i < nodeCount {
@@ -99,7 +99,7 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
     let parentEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: p)
     let kn: Int = node.childrenIds.length
     if kn > 0 {
-      let kids: List(EntityId) = createList(EntityId, initialCap: kn)
+      let kids: List(EntityId) = createList(EntityId, cap: kn)
       let q: Int = 0
       loop q < kn {
         let childId: String = node.childrenIds.get(index: q)
@@ -167,7 +167,7 @@ func dumpScene(world: view UiWorld, scene: view Scene) {
 # to `entity`. Order matches `registeredComponentNames()` for stable
 # diagnostic output.
 func componentNamesFor(world: view UiWorld, entity: view EntityId) ret String {
-  let parts: List(String) = createList(String, initialCap: 8)
+  let parts: List(String) = createList(String, cap: 8)
   if componentHas(this: world.rects, entity: entity) {
     parts.add(value: "Rect")
   }
