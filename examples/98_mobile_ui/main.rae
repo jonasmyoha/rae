@@ -188,7 +188,7 @@ func main() {
     let albumKey: String = "album"
     let searchKey: String = "search"
     let profileKey: String = "profile"
-    let startScreen: Screen = Screen.NowPlaying
+    let startScreen: Screen = Screen.Player
     if startScreenEnv.equals(other: albumKey) {
       startScreen = Screen.Album
     }
@@ -196,7 +196,7 @@ func main() {
       startScreen = Screen.Search
     }
     if startScreenEnv.equals(other: profileKey) {
-      startScreen = Screen.Profile
+      startScreen = Screen.Library
     }
 
     # Phase 3-6 hot-reload restore. If `.rae/state.json` exists from a
@@ -380,7 +380,7 @@ func main() {
       # per-screen rescan is needed. `profileLoaded` is left for
       # any future incremental refresh (e.g. a "rescan" debug
       # button) — currently a no-op.
-      if currentScreen is Screen.Profile {
+      if currentScreen is Screen.Library {
         profileLoaded = true
       } else {
         profileLoaded = false
@@ -514,7 +514,7 @@ func main() {
         # missing gate → wheel silently dropped.
         let scrollOnThisScreen: Bool = false
         let scrollFloor: Float = 0.0
-        if currentScreen is Screen.Profile {
+        if currentScreen is Screen.Library {
           scrollOnThisScreen = true
           scrollFloor = 0.0 - 1050.0
         }
