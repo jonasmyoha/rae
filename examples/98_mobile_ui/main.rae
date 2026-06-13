@@ -126,12 +126,14 @@ func main() {
   # defaults `createAppState` / `createPlaybackState` set above.
   restoreAppState(state: appState, playback: playback, path: stateFilePath)
 
-  # Spotify-mode integration. Only enabled when RAE_UI_SPOTIFY=1.
-  # See examples/98_mobile_ui/spotify_view.rae + lib/sys/spotify.rae.
+  # Spotify-mode integration. ON by default; opt out with
+  # RAE_UI_NO_SPOTIFY=1. See examples/98_mobile_ui/spotify_view.rae.
   let spotifyState: SpotifyState = createSpotifyState()
   if spotifyState.enabled {
-    log("[spotify] enabled — driving local Spotify desktop app via AppleScript")
+    log("[spotify] ON — driving local Spotify via AppleScript. RAE_UI_NO_SPOTIFY=1 disables.")
     spotifyLaunch()
+  } else {
+    log("[spotify] OFF (RAE_UI_NO_SPOTIFY set)")
   }
 
   let screenshotEnv: String = getEnv(name: "RAE_UI_SCREENSHOT")
