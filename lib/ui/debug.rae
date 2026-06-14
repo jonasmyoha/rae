@@ -672,8 +672,13 @@ func addDebugLayer(world: mod UiWorld, debug: mod DebugSystem) pub {
   # if a scene declared one, but the button renders either way.
   let hasAnchor: Bool = applyDebugAnchor(world: world, debug: debug)
   let btn: EntityId = buildDebugButton(world: world, debug: debug)
+  # Debug button + (optional) menu sit on the topmost plane so app
+  # chrome (dock, back-button, dialogs) never paints over them.
+  let debugLayerId: String = "debug"
+  setLayerById(world: world, entity: btn, id: debugLayerId)
   if debug.menuOpen {
     let menu: EntityId = buildDebugMenuOverlay(world: world, debug: debug)
+    setLayerById(world: world, entity: menu, id: debugLayerId)
   }
 }
 

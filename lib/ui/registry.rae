@@ -53,6 +53,9 @@ func registeredComponentNames() ret List(String) {
   names.add(value: "EditorVisible")
   names.add(value: "EditorLocked")
   names.add(value: "HeroWidget")
+  names.add(value: "CornerRadius")
+  names.add(value: "LayerRoot")
+  names.add(value: "LayerRef")
   names.add(value: "DebugAnchor")
   names.add(value: "PageRoot")
   names.add(value: "ScrollState")
@@ -503,6 +506,17 @@ func deserHeroWidget(doc: view JsonDoc, val: view JsonValue) ret HeroWidget {
   ret r
 }
 
+func deserCornerRadius(doc: view JsonDoc, val: view JsonValue) ret CornerRadius {
+  let r: Float = optFloat(doc: doc, container: val, key: "radius", fallback: 0.0)
+  ret CornerRadius { radius: r }
+}
+
+func deserLayerRoot(doc: view JsonDoc, val: view JsonValue) ret LayerRoot {
+  let id: String = optString(doc: doc, container: val, key: "id", fallback: "")
+  let ord: Int = optInt(doc: doc, container: val, key: "order", fallback: 0)
+  ret LayerRoot { id: own id, order: ord }
+}
+
 func deserDebugAnchor(doc: view JsonDoc, val: view JsonValue) ret DebugAnchor {
   # `DebugAnchor` is a presence-tag — its mere existence on an entity
   # (plus a `Rect` on the same entity) is what `addDebugLayer` looks
@@ -665,6 +679,14 @@ func applyComponentByName(
   }
   if name.equals(other: "HeroWidget") {
     componentSet(this: world.heroWidgets, entity: entity, data: deserHeroWidget(doc: doc, val: val))
+    ret
+  }
+  if name.equals(other: "CornerRadius") {
+    componentSet(this: world.cornerRadiuses, entity: entity, data: deserCornerRadius(doc: doc, val: val))
+    ret
+  }
+  if name.equals(other: "LayerRoot") {
+    componentSet(this: world.layerRoots, entity: entity, data: deserLayerRoot(doc: doc, val: val))
     ret
   }
   if name.equals(other: "DebugAnchor") {

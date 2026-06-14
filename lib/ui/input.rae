@@ -143,12 +143,19 @@ func hitTestEntity(world: view UiWorld, entity: view EntityId, x: view Float, y:
 # subtree without pruning on intermediate ancestor bounds — see its
 # comment.
 func hitTest(world: view UiWorld, x: view Float, y: view Float) ret EntityId {
-  let alive: view List(EntityId) => world.alive
-  let n: Int = alive.length
+  # Walk roots top-down by Layer order — overlays (higher-order
+  # layers) get first crack at the click. `collectPaintableRoots`
+  # gives the same ordering the renderer uses; we iterate it in
+  # reverse so the last-painted (= top-most) root is hit-tested
+  # first. Without this the dock (a high-layer overlay) would lose
+  # all taps to the album page underneath it, even though the dock
+  # is what's visible.
+  let roots: List(EntityId) = collectPaintableRoots(world: world)
+  let n: Int = roots.length
   let i: Int = n - 1
   loop i >= 0 {
-    let e: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: i)
-    if componentHas(this: world.parents, entity: e) is false {
+    let e: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: i)
+    if componentHas(this: world.layerRoots, entity: e) is false {
       let hit: EntityId = hitTestEntity(world: world, entity: e, x: x, y: y)
       if isNone(this: hit) is false {
         ret hit

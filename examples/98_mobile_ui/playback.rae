@@ -30,6 +30,14 @@ type PlaybackState pub {
   # than computing a delta inside main.rae keeps the state struct
   # self-contained.
   prevTime: Float
+  # The actually-playing track. Distinct from `AppState.currentAlbumStem`
+  # / `AppState.currentTrackIndex` which represent *browsed* state —
+  # those move with the user's navigation even when nothing is playing.
+  # These two only change when the user explicitly starts a song
+  # (`song.open.N`). Empty stem + index -1 means nothing playing —
+  # the album track-list won't highlight any row.
+  playingAlbumStem: String
+  playingTrackIndex: Int
 }
 
 func createPlaybackState() pub ret PlaybackState {
@@ -38,6 +46,8 @@ func createPlaybackState() pub ret PlaybackState {
     elapsedSec: 0.0
     durationSec: 20.0
     prevTime: -1.0
+    playingAlbumStem: ""
+    playingTrackIndex: 0 - 1
   }
 }
 

@@ -9,18 +9,30 @@ import ui/ecs
 import ui/input
 
 enum Screen {
-  # `Library` is the album-grid (formerly "Profile"). It's the user's
-  # local catalog of music to play.
+  # The four bottom-nav tabs follow. Order matters: it must match
+  # `hot_reload_glue.screenToInt` / `intToScreen` so saved state.json
+  # ordinals keep restoring correctly after a code rebuild.
+  #
+  # `Home` is the discovery / landing tab — large 2-column grid of
+  # albums with a friendly greeting. Where the app boots.
+  Home
+  # `Library` is the dense 3-column album grid — the user's full
+  # catalog of music to play. Formerly mis-shared with Profile.
   Library
-  # `Album` is the sub-page showing one album's track list. Reached by
-  # tapping a Library grid tile.
+  # `Album` is the sub-page showing one album's track list. Reached
+  # by tapping any Home or Library cover tile. NOT a tab.
   Album
   # `Player` is the sub-page showing the currently-playing track with
   # full controls. Reached by tapping a track row OR by tapping the
-  # mini-player at the bottom of any screen. Formerly "NowPlaying".
+  # mini-player at the bottom of any screen. NOT a tab.
   Player
-  # Placeholder search screen.
+  # `Search` — placeholder tab for now. Will host a query-against-
+  # catalogue UI later.
   Search
+  # `Profile` is the user / account / Spotify-status / settings tab.
+  # Genuinely the user-info screen — no longer pretending to be the
+  # library grid.
+  Profile
 }
 
 func buildScreenWorld(
@@ -31,6 +43,9 @@ func buildScreenWorld(
   texReg: view TextureRegistry
   scrollY: view Float
 ) pub ret UiWorld {
+  if screen is Screen.Home {
+    ret buildHomeWorld(scenes: scenes, reg: texReg, state: state, playback: playback, scrollY: scrollY)
+  }
   if screen is Screen.Album {
     ret buildAlbumWorld(scenes: scenes, playback: playback, state: state, reg: texReg, scrollY: scrollY)
   }
@@ -38,6 +53,9 @@ func buildScreenWorld(
     ret buildSearchWorld(scenes: scenes, playback: playback, state: state, reg: texReg)
   }
   if screen is Screen.Library {
+    ret buildLibraryWorld(scenes: scenes, reg: texReg, state: state, playback: playback, scrollY: scrollY)
+  }
+  if screen is Screen.Profile {
     ret buildProfileWorld(scenes: scenes, reg: texReg, state: state, playback: playback, scrollY: scrollY)
   }
   ret buildNowPlayingWorld(scenes: scenes, playback: playback, state: state, reg: texReg)
@@ -46,6 +64,9 @@ func buildScreenWorld(
 # Maps a Screen to the PageRoot id used for its mount. Symmetric to
 # the `mountXxxPage` calls in each screen builder.
 func pageIdForScreen(screen: Screen) pub ret String {
+  if screen is Screen.Home {
+    ret homePageId
+  }
   if screen is Screen.Album {
     ret albumPageId
   }
@@ -54,6 +75,9 @@ func pageIdForScreen(screen: Screen) pub ret String {
   }
   if screen is Screen.Library {
     ret libraryPageId
+  }
+  if screen is Screen.Profile {
+    ret profilePageId
   }
   ret playerPageId
 }
@@ -73,21 +97,31 @@ func buildAppWorld(
   scrollY: view Float
 ) pub ret UiWorld {
   let world: UiWorld = createUiWorld()
-  let albumPage: EntityId = mountAlbumPage(world: world, scenes: scenes, state: state, scrollY: scrollY)
+  # Layer stack first — overlay-mount sites below assume the named
+  # layer entities ("content" / "dock" / "back-button" / "dialog" /
+  # "debug") already exist and look them up by id.
+  createStandardLayers(world: world)
+  let homePage: EntityId = mountHomePage(world: world, state: state, scrollY: scrollY)
+  let libraryPage: EntityId = mountLibraryPage(world: world, state: state, scrollY: scrollY)
+  let albumPage: EntityId = mountAlbumPage(world: world, scenes: scenes, state: state, playback: playback, scrollY: scrollY)
   let nowPlayingPage: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: state)
   let profilePage: EntityId = mountProfilePage(world: world, reg: texReg, state: state, scrollY: scrollY)
   let searchPage: EntityId = mountSearchPage(world: world)
 
   # Visibility: only the currently-visible screen is Active=true.
   let visible: Screen = visibleScreen(state: state)
+  let activeHome: Active = { value: visible is Screen.Home }
+  let activeLibrary: Active = { value: visible is Screen.Library }
   let activeAlbum: Active = { value: visible is Screen.Album }
   let activeNowPlaying: Active = { value: visible is Screen.Player }
-  let activeProfile: Active = { value: visible is Screen.Library }
   let activeSearch: Active = { value: visible is Screen.Search }
+  let activeProfile: Active = { value: visible is Screen.Profile }
+  componentSet(this: world.actives, entity: homePage, data: activeHome)
+  componentSet(this: world.actives, entity: libraryPage, data: activeLibrary)
   componentSet(this: world.actives, entity: albumPage, data: activeAlbum)
   componentSet(this: world.actives, entity: nowPlayingPage, data: activeNowPlaying)
-  componentSet(this: world.actives, entity: profilePage, data: activeProfile)
   componentSet(this: world.actives, entity: searchPage, data: activeSearch)
+  componentSet(this: world.actives, entity: profilePage, data: activeProfile)
 
   # Shared overlays — always Active.
   let dock: EntityId = mountBottomDockOverlay(
@@ -167,7 +201,7 @@ func createAppState(albums: own List(Album)) pub ret AppState {
     albums: albums
     currentAlbumStem: firstStem
     currentTrackIndex: 0
-    tab: Screen.Player
+    tab: Screen.Home
     subPageStack: createList(Int, cap: 4)
   }
 }
@@ -286,8 +320,10 @@ func dispatchActions(
     let actionId: String = ev.actionId
     log("[action] {actionId} (entity {ev.entity})")
 
+    let homeKey: String = "nav.home"
     let libraryKey: String = "nav.library"
     let searchKey: String = "nav.search"
+    let profileKey: String = "nav.profile"
     let nowPlayingKey: String = "nav.nowPlaying"
     let backKey: String = "nav.back"
     let playbackToggleKey: String = "playback.toggle"
@@ -299,15 +335,24 @@ func dispatchActions(
     # long-lived SpotifyState) so both sides agree on the source of
     # truth. ON by default; disabled by RAE_UI_NO_SPOTIFY=1 at boot.
     #
-    # Tab structure: Library / Search / Profile are the three base
-    # tabs. NowPlaying is NOT a tab — it's a sub-page opened by
-    # tapping the mini-player at the bottom of any screen.
+    # Tab structure: Home / Library / Search / Profile are the four
+    # bottom-nav tabs. Album + Player are sub-pages — Album reached by
+    # tapping any cover tile on Home or Library, Player by tapping a
+    # track row or the mini-player.
+    if actionId.equals(other: homeKey) {
+      let s: Screen = Screen.Home
+      setTab(state: state, tab: s)
+    }
     if actionId.equals(other: libraryKey) {
       let s: Screen = Screen.Library
       setTab(state: state, tab: s)
     }
     if actionId.equals(other: searchKey) {
       let s: Screen = Screen.Search
+      setTab(state: state, tab: s)
+    }
+    if actionId.equals(other: profileKey) {
+      let s: Screen = Screen.Profile
       setTab(state: state, tab: s)
     }
     if actionId.equals(other: nowPlayingKey) {
@@ -355,35 +400,28 @@ func dispatchActions(
       }
     }
     if actionId.equals(other: albumOpenKey) {
-      # Library-grid tile click. Two effects:
-      #  1) (Spotify mode) tell Spotify to start playing this album
-      #     by searching for "<artist> <album-title>" and playing the
-      #     top hit. Spotify is the playback source of truth.
-      #  2) Push the Album track-list onto the sub-page stack so the
-      #     user can navigate into it visually.
+      # Tile click — open the album's track list as a sub-page.
+      # NOT a play action: in a real music player tapping a cover
+      # navigates to the album's contents; the user picks which song
+      # to play from there.
       if componentHas(this: world.sprites, entity: ev.entity) {
         let sp: Sprite = componentGet(this: world.sprites, entity: ev.entity)
-        # Fresh String allocation via interpolation — see the long
-        # comment that used to live here. The Sprite's textureKey is
-        # owned by the current world's Sprite table; dropping the
-        # world drops the storage. Interpolation forces a copy.
+        # Fresh String allocation via interpolation — the Sprite's
+        # textureKey is owned by the world's Sprite table, which the
+        # world drops when it rebuilds. Interpolation forces a copy.
         state.currentAlbumStem = "{sp.textureKey}"
         state.currentTrackIndex = 0
-      }
-      if spotifyEnabled {
-        let album: Album = activeAlbum(state: state)
-        let q: String = "{album.artist} {album.album}"
-        log("[spotify] play album query={q}")
-        spotifyPlayQuery(query: q)
       }
       let s: Screen = Screen.Album
       pushSubPage(state: state, screen: s)
     }
     if actionId.startsWith(prefix: songOpenPrefix) {
-      # Track-row click in the Album view. The actionId is
-      # `song.open.N` where N is the track index — encoded into
-      # the actionId because adding a per-row ComponentTable for
-      # one Int isn't worth the lib/ui churn.
+      # Track-row click in the Album view. Real music players just
+      # start playing the song — no view change. The mini-player at
+      # the bottom reflects what's playing; the user can tap that to
+      # open the full Player sub-page if they want it. This way
+      # browsing an album and trying tracks doesn't yank the user
+      # out of the track list.
       let prefixLen: Int = songOpenPrefix.length()
       let actionLen: Int = actionId.length()
       let suffix: String = actionId.sub(start: prefixLen, len: actionLen - prefixLen)
@@ -391,6 +429,13 @@ func dispatchActions(
       if idx >= 0 {
         state.currentTrackIndex = idx
       }
+      # Mark this track as actually playing — the album view reads
+      # these two fields to decide which row to highlight. Without
+      # this, opening an album would highlight whichever index was
+      # last browsed (typically 0 after `album.open`).
+      playback.playingAlbumStem = "{state.currentAlbumStem}"
+      playback.playingTrackIndex = state.currentTrackIndex
+      playback.isPlaying = true
       if spotifyEnabled {
         let album: Album = activeAlbum(state: state)
         let track: Track = trackAt(album: album, idx: state.currentTrackIndex)
@@ -398,8 +443,6 @@ func dispatchActions(
         log("[spotify] play track query={q}")
         spotifyPlayQuery(query: q)
       }
-      let s: Screen = Screen.Player
-      pushSubPage(state: state, screen: s)
     }
 
     i = i + 1

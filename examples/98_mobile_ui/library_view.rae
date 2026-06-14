@@ -1,0 +1,242 @@
+# Library-screen world composition. The local album catalogue rendered
+# as a 3-column grid of cover tiles. Each tile is tappable and routes
+# through `album.open` to push the Album sub-page.
+#
+# This is the "your music to play" screen — distinct from the Home
+# tab (a more curated, larger-tile landing layout) and from the
+# Profile tab (user account / settings / Spotify connection info).
+#
+# Vertical scroll comes from the host's `scrollY` parameter, which is
+# applied as an `Offset.delta.y` on the scrollable body. The body
+# owns the `ScrollState` so the scroll FSM can mutate it in place
+# without a rebuild.
+import core
+import fs
+import ui/components
+import ui/ecs
+import ui/layout
+
+# Grid metrics. 3 columns of compact album tiles. Sizing derived from
+# screen width so the side margins and inter-tile gaps add up cleanly.
+let libraryGridColumns: Int = 3
+let libraryGridTileGap: Float = 4.0
+
+func libraryGridTileSize() ret Float {
+  # Locals copy the module-level constants because the C backend
+  # mis-codegens `.toFloat()` invoked directly on a module-level
+  # `let` (drops the receiver — observed 2026-05-28).
+  let cols: Int = libraryGridColumns
+  let avail: Float = screenW - outerPad * 2.0
+  let gapTotal: Float = libraryGridTileGap * (cols - 1).toFloat()
+  ret (avail - gapTotal) / cols.toFloat()
+}
+
+# Collect the album-cover texture keys for every parsed album. The
+# album list (loaded once at boot from `albumsFolder`) is the single
+# source of truth — the loader registers each cover under its stem
+# key, and we just hand those stems back here.
+func collectLibraryCoverKeys(albums: view List(Album)) pub ret List(String) {
+  let result: List(String) = createList(String, cap: albums.length)
+  let i: Int = 0
+  loop i < albums.length {
+    let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: i)
+    # Fresh String allocation — `a.stem` is owned by `albums`,
+    # which outlives this list, but downstream consumers (the
+    # cover-tile builder) need their own copy to avoid sharing
+    # the per-Album heap.
+    let copied: String = "{a.stem}"
+    result.add(value: copied)
+    i = i + 1
+  }
+  ret result
+}
+
+# Build one image tile for the given texture key and size.
+#
+# Each tile carries a HeroWidget keyed by its texture so the hero
+# animation system can morph this tile to/from the Album / Player
+# screens when the cover is also visible there.
+#
+# Tiles take click input via `actionId: "album.open"`.
+# `dispatchActions` reads the clicked tile's Sprite to recover the
+# texture key, stores it as the active album, and pushes the Album
+# sub-page. The hero transition then naturally finds this tile as
+# source / destination. Public so `home_view.rae` can reuse it.
+func buildLibraryCoverTile(world: mod UiWorld, key: own String, size: view Float) pub ret EntityId {
+  let tile: EntityId = createEntity(world: world)
+  setRectFixed(world: world, entity: tile, w: size, h: size)
+  let copiedForHero: String = key
+  setHeroWidget(world: world, entity: tile, key: copiedForHero)
+  let albumOpen: String = "album.open"
+  setOnClick(world: world, entity: tile, actionId: albumOpen)
+  setSprite(world: world, entity: tile, key: key, tint: imageTintColor)
+  ret tile
+}
+
+# Build a single horizontal row of up to `libraryGridColumns` covers
+# starting at `startIndex` into the key list.
+func buildLibraryGridRow(
+  world: mod UiWorld
+  keys: view List(String)
+  startIndex: view Int
+) ret EntityId {
+  let row: EntityId = createEntity(world: world)
+  let rowW: Float = screenW - outerPad * 2.0
+  let tileH: Float = libraryGridTileSize()
+  setRectFixed(world: world, entity: row, w: rowW, h: tileH)
+  let layH: LayoutType = LayoutType.Horizontal
+  let alignS: AlignKind = AlignKind.Start
+  setLayout(world: world, entity: row, kind: layH, gap: libraryGridTileGap, alignCross: alignS)
+
+  let kids: List(EntityId) = createList(EntityId, cap: libraryGridColumns)
+  let cols: Int = libraryGridColumns
+  let total: Int = keys.length
+  let col: Int = 0
+  loop col < cols {
+    let i: Int = startIndex + col
+    if i < total {
+      let key: String = keys.get(index: i)
+      let tile: EntityId = buildLibraryCoverTile(world: world, key: key, size: tileH)
+      kids.add(value: tile)
+    }
+    col = col + 1
+  }
+  attachChildren(world: world, parent: row, kids: kids)
+  ret row
+}
+
+# Compose the full 3-column grid over keys derived from the album list
+# (one tile per parsed album).
+func buildLibraryCoverGrid(world: mod UiWorld, albums: view List(Album)) ret EntityId {
+  let keys: List(String) = collectLibraryCoverKeys(albums: albums)
+  let grid: EntityId = createEntity(world: world)
+  let cols: Int = libraryGridColumns
+  let total: Int = keys.length
+  let tileH: Float = libraryGridTileSize()
+  # rows = ceil(total / cols)
+  let rows: Int = (total + cols - 1) / cols
+  let gridH: Float = tileH * rows.toFloat() + libraryGridTileGap * (rows - 1).toFloat()
+  let gridW: Float = screenW - outerPad * 2.0
+  setRectFixed(world: world, entity: grid, w: gridW, h: gridH)
+  let layV: LayoutType = LayoutType.Vertical
+  let alignS: AlignKind = AlignKind.Start
+  setLayout(world: world, entity: grid, kind: layV, gap: libraryGridTileGap, alignCross: alignS)
+
+  let rowKids: List(EntityId) = createList(EntityId, cap: rows)
+  let i: Int = 0
+  loop i < rows {
+    let startIndex: Int = i * cols
+    let row: EntityId = buildLibraryGridRow(world: world, keys: keys, startIndex: startIndex)
+    rowKids.add(value: row)
+    i = i + 1
+  }
+  attachChildren(world: world, parent: grid, kids: rowKids)
+  ret grid
+}
+
+# Scrollable body. We can't clip rendering yet so the grid extends
+# past the screen edge — but the host applies `scrollY` as an
+# `Offset.delta.y` so the user can wheel-scroll the column up to
+# bring later rows into view.
+func buildLibraryBody(world: mod UiWorld, albums: view List(Album), scrollY: view Float) ret EntityId {
+  let body: EntityId = createEntity(world: world)
+  let bodyW: Float = screenW - outerPad * 2.0
+  let bodyH: Float = screenH - topBarH - navTabsH - outerGap * 4.0 - outerPad * 2.0
+  setRectFixed(world: world, entity: body, w: bodyW, h: bodyH)
+  let layV: LayoutType = LayoutType.Vertical
+  let alignC: AlignKind = AlignKind.Center
+  setLayout(world: world, entity: body, kind: layV, gap: outerGap, alignCross: alignC)
+  let off: Offset = { delta: Vec2 { x: 0.0, y: scrollY } }
+  componentSet(this: world.offsets, entity: body, data: off)
+
+  # Body owns the scroll behaviour — `findScrollTarget(world)` returns
+  # the first entity carrying ScrollState. PageRoot{libraryPageId}
+  # lives on the screen root, not here (see `mountLibraryPage`).
+  let scroll: ScrollState = { y: scrollY, velocity: 0.0 }
+  componentSet(this: world.scrollStates, entity: body, data: scroll)
+
+  let grid: EntityId = buildLibraryCoverGrid(world: world, albums: albums)
+  let kids: List(EntityId) = createList(EntityId, cap: 1)
+  kids.add(value: grid)
+  attachChildren(world: world, parent: body, kids: kids)
+  ret body
+}
+
+func buildLibraryTopBar(world: mod UiWorld) ret EntityId {
+  let bar: EntityId = createEntity(world: world)
+  let w: Float = screenW - outerPad * 2.0
+  setRectFixed(world: world, entity: bar, w: w, h: topBarH)
+  let layH: LayoutType = LayoutType.Horizontal
+  let alignC: AlignKind = AlignKind.Center
+  setLayout(world: world, entity: bar, kind: layH, gap: 16.0, alignCross: alignC)
+
+  let title: EntityId = createEntity(world: world)
+  setRectFixed(world: world, entity: title, w: w, h: 32.0)
+  let titleStyle: String = "topBarTitle"
+  let titleText: String = "Your Library"
+  setText(world: world, entity: title, text: titleText, styleId: titleStyle)
+
+  let kids: List(EntityId) = createList(EntityId, cap: 1)
+  kids.add(value: title)
+  attachChildren(world: world, parent: bar, kids: kids)
+  ret bar
+}
+
+# Persistent-world entrypoint. Mounts the library page into `world`
+# and returns the page-root entity. Tagged with `PageRoot{libraryPageId}`
+# so `findPageRootEntity(world, libraryPageId)` can locate it for
+# Active toggles, unmounts, scoped lookups.
+func mountLibraryPage(
+  world: mod UiWorld
+  state: view AppState
+  scrollY: view Float
+) pub ret EntityId {
+  let albums: view List(Album) => state.albums
+
+  let root: EntityId = createEntity(world: world)
+  setRectFixed(world: world, entity: root, w: screenW, h: screenH)
+  let layV: LayoutType = LayoutType.Vertical
+  let alignS: AlignKind = AlignKind.Start
+  setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
+  setPaddingAll(world: world, entity: root, n: outerPad)
+
+  let copiedId: String = ""
+  copiedId = copiedId.concat(other: libraryPageId)
+  let pr: PageRoot = { id: own copiedId }
+  componentSet(this: world.pageRoots, entity: root, data: own pr)
+
+  let topBar: EntityId = buildLibraryTopBar(world: world)
+  let body: EntityId = buildLibraryBody(world: world, albums: albums, scrollY: scrollY)
+
+  let kids: List(EntityId) = createList(EntityId, cap: 2)
+  kids.add(value: topBar)
+  kids.add(value: body)
+  attachChildren(world: world, parent: root, kids: kids)
+
+  ret root
+}
+
+# Legacy single-screen entrypoint — kept so `buildScreenWorld` still
+# works while the persistent-world flip is partial. Creates a fresh
+# world, mounts the library page, mounts the shared dock + back
+# overlays, returns the world.
+func buildLibraryWorld(
+  scenes: view AlbumScenes
+  reg: view TextureRegistry
+  state: view AppState
+  playback: view PlaybackState
+  scrollY: view Float
+) pub ret UiWorld {
+  let world: UiWorld = createUiWorld()
+  let page: EntityId = mountLibraryPage(world: world, state: state, scrollY: scrollY)
+  let dock: EntityId = mountBottomDockOverlay(
+    world: world
+    activeTab: state.tab
+    scenes: scenes
+    playback: playback
+    state: state
+    reg: reg
+  )
+  let back: EntityId = mountBackButtonOverlay(world: world, state: state)
+  ret world
+}
