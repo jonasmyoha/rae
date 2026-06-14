@@ -443,8 +443,17 @@ static bool native_drawGradientRect(struct VM* vm, VmNativeResult* out, const Va
     SetShaderValue(g_vm_gradient_shader, g_vm_grad_loc_to, to, SHADER_UNIFORM_VEC4);
     SetShaderValue(g_vm_gradient_shader, g_vm_grad_loc_angle, &angleRad, SHADER_UNIFORM_FLOAT);
     BeginShaderMode(g_vm_gradient_shader);
-    Rectangle rec = { (float)x, (float)y, (float)w, (float)h };
-    DrawRectangleRec(rec, WHITE);
+    /* Explicit UV quad — see rae_runtime.c for the rationale. */
+    rlSetTexture(rlGetTextureIdDefault());
+    rlBegin(RL_QUADS);
+      rlColor4ub(255, 255, 255, 255);
+      rlNormal3f(0.0f, 0.0f, 1.0f);
+      rlTexCoord2f(0.0f, 0.0f); rlVertex2f((float)x,       (float)y);
+      rlTexCoord2f(0.0f, 1.0f); rlVertex2f((float)x,       (float)(y + h));
+      rlTexCoord2f(1.0f, 1.0f); rlVertex2f((float)(x + w), (float)(y + h));
+      rlTexCoord2f(1.0f, 0.0f); rlVertex2f((float)(x + w), (float)y);
+    rlEnd();
+    rlSetTexture(0);
     EndShaderMode();
     out->has_value = false;
     return true;
