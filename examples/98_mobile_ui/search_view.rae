@@ -106,28 +106,6 @@ func buildRecentSection(world: mod UiWorld) ret EntityId {
   ret section
 }
 
-# --- top bar ---------------------------------------------------------
-
-func buildSearchTopBar(world: mod UiWorld) ret EntityId {
-  let bar: EntityId = createEntity(world: world)
-  let w: Float = screenW - outerPad * 2.0
-  setRectFixed(world: world, entity: bar, w: w, h: topBarH)
-  let layH: LayoutType = LayoutType.Horizontal
-  let alignC: AlignKind = AlignKind.Center
-  setLayout(world: world, entity: bar, kind: layH, gap: 16.0, alignCross: alignC)
-
-  let title: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: title, w: w, h: 32.0)
-  let titleStyle: String = "topBarTitle"
-  let titleText: String = "Search"
-  setText(world: world, entity: title, text: titleText, styleId: titleStyle)
-
-  let kids: List(EntityId) = createList(EntityId, cap: 1)
-  kids.add(value: title)
-  attachChildren(world: world, parent: bar, kids: kids)
-  ret bar
-}
-
 # --- public entrypoint ------------------------------------------------
 
 func mountSearchPage(world: mod UiWorld) pub ret EntityId {
@@ -143,7 +121,7 @@ func mountSearchPage(world: mod UiWorld) pub ret EntityId {
   let pr: PageRoot = { id: own copiedId }
   componentSet(this: world.pageRoots, entity: root, data: own pr)
 
-  let topBar: EntityId = buildSearchTopBar(world: world)
+  let topBar: EntityId = buildPageTopBar(world: world, title: "Search")
   let field: EntityId = buildSearchField(world: world)
   let recent: EntityId = buildRecentSection(world: world)
 
