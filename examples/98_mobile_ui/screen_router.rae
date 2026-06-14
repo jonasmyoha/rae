@@ -537,6 +537,7 @@ func dispatchActions(
         playedAt: getTime()
       }
       recordPlay(history: state.playHistory, entry: own histEntry)
+      saveHistoryToJson(history: state.playHistory, path: historyFilePath)
       if spotifyEnabled {
         let q: String = "{histAlbum.artist} {histTrack.title}"
         log("[spotify] play track query={q}")

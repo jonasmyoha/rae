@@ -122,6 +122,11 @@ func main() {
   # Missing file or stale fields fall back silently to the
   # defaults `createAppState` / `createPlaybackState` set above.
   restoreAppState(state: appState, playback: playback, path: stateFilePath)
+  # Persisted recently-played. Restored entries with a
+  # `spotify-art:` textureKey get their CDN artwork re-downloaded
+  # so the History thumbs paint real covers across launches.
+  restoreHistory(history: appState.playHistory, path: historyFilePath)
+  refetchHistoryArt(history: appState.playHistory, reg: texReg)
 
   # Spotify-mode integration. ON by default; opt out with
   # RAE_UI_NO_SPOTIFY=1. See examples/98_mobile_ui/spotify_view.rae.
