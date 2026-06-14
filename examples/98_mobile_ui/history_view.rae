@@ -58,9 +58,11 @@ func historyHasLocalArt(entry: view PlayHistoryEntry) pub ret Bool {
   ret entry.albumStem.length() > 0
 }
 
-# Build a single 56x56 thumb entity. Local-catalog match → sprite
-# bound to the album stem (same texture key as the library tiles);
-# Spotify-only → empty sprite with surface tint as a placeholder.
+# Build a single thumb entity. Local-catalog match → sprite bound
+# to the album stem (same texture key as the library tiles);
+# Spotify-only → a visible placeholder rect filled with the theme's
+# `textMuted` color (mid-gray in both light and dark themes — the
+# previous `surface` choice was invisible against the page bg).
 func buildHistoryThumb(world: mod UiWorld, entry: view PlayHistoryEntry, size: view Float) ret EntityId {
   let thumb: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: thumb, w: size, h: size)
@@ -70,12 +72,12 @@ func buildHistoryThumb(world: mod UiWorld, entry: view PlayHistoryEntry, size: v
     let key: String = "{entry.albumStem}"
     setSprite(world: world, entity: thumb, key: key, tint: imageTintColor)
   } else {
-    let surface: String = "surface"
-    let tint: RgbaColor = themeColorByName(name: surface)
+    let mutedName: String = "textMuted"
+    let fill: RgbaColor = themeColorByName(name: mutedName)
     let transparent: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
     let sp: Shape = {
       kind: ShapeKind.RoundedRect
-      fill: tint
+      fill: fill
       stroke: transparent
       strokeWidth: 0.0
       radius: 8.0

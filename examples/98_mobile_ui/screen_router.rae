@@ -177,6 +177,35 @@ func buildAppWorld(
   ret world
 }
 
+# Re-mount Home / History in place when `playHistory` has grown
+# since the last frame and one of them is the currently-visible
+# screen. Catches the case where pollSpotify (or a `song.open.N`
+# tap from another screen) appends an entry — the user shouldn't
+# have to tab-switch to see it. Cheap: the entries.length compare
+# short-circuits when nothing changed.
+func refreshHistoryViewsIfNeeded(
+  world: mod UiWorld
+  state: view AppState
+  visible: view Screen
+  cachedLen: view Int
+) pub ret Int {
+  let n: Int = state.playHistory.entries.length
+  if n is cachedLen {
+    ret cachedLen
+  }
+  if visible is Screen.Home {
+    unmountPage(world: world, pageId: homePageId)
+    let h: EntityId = mountHomePage(world: world, state: state, scrollY: 0.0)
+    setPageActive(world: world, pageId: homePageId, active: true)
+  }
+  if visible is Screen.History {
+    unmountPage(world: world, pageId: historyPageId)
+    let h: EntityId = mountHistoryPage(world: world, state: state, scrollY: 0.0)
+    setPageActive(world: world, pageId: historyPageId, active: true)
+  }
+  ret n
+}
+
 # Material icon key for the play button in the current state. Used by
 # both view builders to pick the right sprite override at mount time
 # (so the first frame already shows the right icon), and again per-frame
