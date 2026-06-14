@@ -437,6 +437,48 @@ func paintText(world: view UiWorld, entity: view EntityId, wt: view WorldTransfo
   )
 }
 
+# BackdropImage paint — draws the entity's referenced texture at the
+# entity's full bounds. Used for frosted-glass / blurred-backdrop
+# effects where a host capture-and-blurs the framebuffer into a
+# texture and points the BackdropImage at the key. Silently no-ops
+# when the texture key isn't registered (first-frame race before the
+# host's first capture lands).
+func paintBackdropImage(reg: view TextureRegistry, world: view UiWorld, entity: view EntityId, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int) {
+  let bi: BackdropImage = componentGet(this: world.backdropImages, entity: entity)
+  let key: String = bi.textureKey
+  if textureHas(reg: reg, key: key) is false {
+    ret
+  }
+  let tex: Texture = textureGet(reg: reg, key: key)
+  let scaleX: Float = 1.0
+  let scaleY: Float = 1.0
+  if tex.width > 0 {
+    scaleX = cr.w / tex.width.toFloat()
+  }
+  if tex.height > 0 {
+    scaleY = cr.h / tex.height.toFloat()
+  }
+  let scale: Float = scaleX
+  if scaleY > scale {
+    scale = scaleY
+  }
+  if scale <= 0.0 {
+    scale = 1.0
+  }
+  let drawW: Float = tex.width.toFloat() * scale
+  let drawH: Float = tex.height.toFloat() * scale
+  let offX: Float = (cr.w - drawW) / 2.0
+  let offY: Float = (cr.h - drawH) / 2.0
+  let white: Color = { r: 255, g: 255, b: 255, a: chain255 }
+  drawTextureEx(
+    texture: tex
+    pos: Vector2 { x: wt.x + offX, y: wt.y + offY }
+    rotation: 0.0
+    scale: scale
+    tint: white
+  )
+}
+
 # GradientFill paint. One atomic `drawGradientRect` — the shader does
 # the gradient + rounded-rect mask + AA in one fragment program. Reads
 # the entity's CornerRadius if present (defaults to 0 = sharp). Same
@@ -500,6 +542,9 @@ func paintEntity(world: view UiWorld, reg: view TextureRegistry, entity: view En
     if componentHas(this: world.shapes, entity: entity) {
       paintShape(world: world, entity: entity, wt: wt, cr: cr, chain255: chain255)
     }
+  }
+  if componentHas(this: world.backdropImages, entity: entity) {
+    paintBackdropImage(reg: reg, world: world, entity: entity, wt: wt, cr: cr, chain255: chain255)
   }
   if componentHas(this: world.sprites, entity: entity) {
     paintSprite(reg: reg, world: world, entity: entity, wt: wt, cr: cr, chain255: chain255)
