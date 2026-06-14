@@ -297,14 +297,22 @@ func mountBottomDockOverlay(
   reg: view TextureRegistry
 ) pub ret EntityId {
   let dock: EntityId = createEntity(world: world)
-  let dockH: Float = miniPlayerH + navTabsH
+  # The dock's *visual* area extends `dockBgExtend` pixels above the
+  # mini-player + nav-tabs band so the gradient backdrop fades out
+  # above the widgets, overlapping page content underneath. The
+  # children themselves still sit in the original bottom band — a
+  # matching top Padding pushes the Vertical layout down by the
+  # same amount.
+  let dockBgExtend: Float = 100.0
+  let dockH: Float = miniPlayerH + navTabsH + dockBgExtend
   setRectFixed(world: world, entity: dock, w: screenW, h: dockH)
   let layV: LayoutType = LayoutType.Vertical
   let alignC: AlignKind = AlignKind.Center
   setLayout(world: world, entity: dock, kind: layV, gap: 0.0, alignCross: alignC)
-  # Position the whole dock at the bottom of the screen via a single
-  # Offset. The children below get their positions from Vertical
-  # layout inside the dock — no individual Offsets needed.
+  let dockPad: Padding = { insets: Insets { l: 0.0, t: dockBgExtend, r: 0.0, b: 0.0 } }
+  componentSet(this: world.paddings, entity: dock, data: dockPad)
+  # Position the whole dock so its bottom edge hits `screenH` — same
+  # bottom alignment as before, just extended upward by dockBgExtend.
   let dockOff: Offset = { delta: Vec2 { x: 0.0, y: screenH - dockH } }
   componentSet(this: world.offsets, entity: dock, data: dockOff)
   let copiedId: String = ""
