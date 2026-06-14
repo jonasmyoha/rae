@@ -2147,8 +2147,22 @@ void rae_ext_drawGradientRect(
   SetShaderValue(g_rae_gradient_shader, g_rae_grad_loc_to, to, SHADER_UNIFORM_VEC4);
   SetShaderValue(g_rae_gradient_shader, g_rae_grad_loc_angle, &angleRad, SHADER_UNIFORM_FLOAT);
   BeginShaderMode(g_rae_gradient_shader);
-  Rectangle rec = { (float)x, (float)y, (float)w, (float)h };
-  DrawRectangleRec(rec, WHITE);
+  /* Emit a textured quad with explicit 0..1 UVs. `DrawRectangleRec`
+   * samples raylib's tiny `shapes` white-pixel texture so fragTexCoord
+   * is effectively constant — the shader's gradient + SDF corner mask
+   * both need fragTexCoord to span 0..1 across the rect. Hand-rolling
+   * the quad guarantees it. */
+  Texture2D white = (Texture2D){ rlGetTextureIdDefault(), 1, 1, 1, 7 };
+  rlSetTexture(white.id);
+  rlBegin(RL_QUADS);
+    rlColor4ub(255, 255, 255, 255);
+    rlNormal3f(0.0f, 0.0f, 1.0f);
+    rlTexCoord2f(0.0f, 0.0f); rlVertex2f((float)x,            (float)y);
+    rlTexCoord2f(0.0f, 1.0f); rlVertex2f((float)x,            (float)(y + h));
+    rlTexCoord2f(1.0f, 1.0f); rlVertex2f((float)(x + w),      (float)(y + h));
+    rlTexCoord2f(1.0f, 0.0f); rlVertex2f((float)(x + w),      (float)y);
+  rlEnd();
+  rlSetTexture(0);
   EndShaderMode();
 }
 Texture rae_ext_captureAndBlurRegion(double x, double y, double w, double h, int64_t blurSize) {
