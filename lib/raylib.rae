@@ -63,6 +63,13 @@ func loadRoundedCroppedTexture(fileName: String, radius: Float) extern ret Textu
 
 func unloadTexture(texture: Texture) extern
 
+# Raylib trace-log levels — pass to `raylibSetLogLevel` to control
+# console noise. `LOG_INFO`=3, `LOG_WARNING`=4, `LOG_ERROR`=5,
+# `LOG_NONE`=7. Drop to WARNING at boot to suppress per-frame
+# `TEXTURE: [ID N] Texture loaded successfully` spam from blur
+# textures that re-allocate every frame.
+func raylibSetLogLevel(level: Int) extern
+
 # Bracket a `drawTextureEx` (or any textured draw) with these two
 # calls to render the texture clipped to a rounded rectangle. Width
 # and height are the on-screen draw rect; radius is the corner

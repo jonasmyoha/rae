@@ -2026,6 +2026,15 @@ Texture rae_ext_loadRoundedCroppedTexture(rae_String fileName, double radius) {
 }
 void rae_ext_unloadTexture(Texture texture) { UnloadTexture(texture); }
 
+/* Silence raylib's INFO/DEBUG logs (TEXTURE / SHADER / GL / ...).
+ * Per-frame texture churn — e.g. the dock's frosted-glass blur
+ * updating its cached texture every frame — otherwise floods the
+ * terminal with "TEXTURE: [ID N] Texture loaded successfully" lines.
+ * Pass `LOG_WARNING` (4) at boot to keep only warnings and errors. */
+void rae_ext_raylibSetLogLevel(int64_t level) {
+  SetTraceLogLevel((int)level);
+}
+
 /* Rounded textured rect via a fragment shader. One global Shader,
  * lazy-loaded on first use, used to mask any sprite with a non-zero
  * corner radius at draw time. Pass the on-screen sprite size + the
