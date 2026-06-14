@@ -72,6 +72,27 @@ func unloadTexture(texture: Texture) extern
 func roundedSpriteBegin(width: Float, height: Float, radius: Float) extern
 func roundedSpriteEnd() extern
 
+# Draw a rounded rectangle filled with a linear gradient. One atomic
+# call — shader does the gradient + corner-rounding + AA. Angle is in
+# degrees (0=L→R, 90=T→B). Pass radius=0 for a non-rounded gradient
+# rect. Colors are RGBA 0..255.
+func drawGradientRect(
+  x: Float
+  y: Float
+  w: Float
+  h: Float
+  radius: Float
+  fromR: Int
+  fromG: Int
+  fromB: Int
+  fromA: Int
+  toR: Int
+  toG: Int
+  toB: Int
+  toA: Int
+  angleDeg: Float
+) extern
+
 # Capture the current back-buffer, run a Gaussian blur over it on the
 # CPU, and upload the result as a Texture. The temporary Image is
 # unloaded internally so callers only need to manage the returned
