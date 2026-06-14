@@ -132,21 +132,29 @@ func rebindCoverOnPages(world: mod UiWorld, fromKey: view String, toKey: view St
 # track change. We unconditionally remove the previous registration
 # first so loadTexture's malloc isn't shadowed by a stale entry.
 # Fetch artwork for one play-history entry and register it under a
-# trackId-derived key. Returns the textureKey on success, "" on
-# failure. Skips the network round-trip when the key is already
-# registered — replaying the same track keeps reusing one file.
+# URL-derived key. Returns the textureKey on success, "" on failure.
+#
+# Key is `spotify-art:<image-hash>` where <image-hash> is the last
+# path segment of the artwork URL (Spotify CDN URLs end with a
+# 40-char content hash, distinct per cover). Distinct covers for the
+# same Spotify trackId — e.g., the single vs the album version of
+# the same song — therefore land under distinct keys, which lets the
+# play-history dedup keep them as separate entries.
+#
+# Skips the network round-trip when the key is already registered.
 func loadHistoryEntryArt(track: view SpotifyTrack, reg: mod TextureRegistry) pub ret String {
-  if track.trackId.length() is 0 {
-    ret ""
-  }
-  let key: String = "spotify-art:{track.trackId}"
-  if textureHas(reg: reg, key: key) {
-    ret key
-  }
   if track.artworkUrl.length() is 0 {
     ret ""
   }
-  let outPath: String = "/tmp/rae_spotify_art_{track.trackId}.jpg"
+  let imageHash: String = artworkUrlImageHash(url: track.artworkUrl)
+  if imageHash.length() is 0 {
+    ret ""
+  }
+  let key: String = "spotify-art:{imageHash}"
+  if textureHas(reg: reg, key: key) {
+    ret key
+  }
+  let outPath: String = "/tmp/rae_spotify_art_{imageHash}.jpg"
   let ok: Bool = spotifyFetchArtwork(url: track.artworkUrl, outPath: outPath)
   if ok is false {
     ret ""
@@ -155,6 +163,20 @@ func loadHistoryEntryArt(track: view SpotifyTrack, reg: mod TextureRegistry) pub
   let keyForReg: String = "{key}"
   textureRegisterDirect(reg: reg, key: own keyForReg, tex: tex)
   ret key
+}
+
+# Extract the last path segment of an artwork URL. Spotify URLs are
+# `https://i.scdn.co/image/<hash>` so this returns `<hash>`. Falls
+# back to the whole URL when no `/` is present (defensive — never
+# observed in practice).
+func artworkUrlImageHash(url: view String) ret String {
+  let slash: String = "/"
+  let i: Int = url.lastIndexOf(sub: slash)
+  if i < 0 {
+    ret "{url}"
+  }
+  let n: Int = url.length()
+  ret url.sub(start: i + 1, len: n - i - 1)
 }
 
 func refreshSpotifyArt(state: view SpotifyState, track: view SpotifyTrack, reg: mod TextureRegistry) ret Bool {
@@ -274,15 +296,18 @@ func pollSpotify(
         trackName: track.trackName
         artistName: track.artistName
       )
-      # Pick the texture key for the history row's thumb. Local
-      # match → reuse the stem (already loaded at boot). No match
-      # → fetch the Spotify URL into a per-trackId texture so the
-      # thumb shows the real cover instead of a grey placeholder.
-      let texKey: String = ""
-      if stem.length() > 0 {
-        texKey = "{stem}"
-      } else {
-        texKey = loadHistoryEntryArt(track: track, reg: reg)
+      # Always key the thumb on the artwork URL (not the local
+      # stem) for Spotify-recorded entries. Spotify plays the same
+      # song from different albums with different cover URLs — if
+      # we shortcut to the local stem, both plays collapse to the
+      # same textureKey and the history dedup drops one of them.
+      # Falls back to the local stem only when Spotify provides no
+      # artwork URL (rare; podcasts, local files).
+      let texKey: String = loadHistoryEntryArt(track: track, reg: reg)
+      if texKey.length() is 0 {
+        if stem.length() > 0 {
+          texKey = "{stem}"
+        }
       }
       let entry: PlayHistoryEntry = {
         trackName: "{track.trackName}"
