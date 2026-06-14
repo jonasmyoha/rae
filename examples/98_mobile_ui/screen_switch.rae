@@ -129,6 +129,18 @@ func handleScreenSwitch(
   }
 
   setPageActive(world: world, pageId: outgoingPageId, active: false)
+  # Re-mount Home / History on entry so the "Recently played" row
+  # and the full History list reflect every song.open / pollSpotify
+  # event recorded while the user was elsewhere. Cheap (single
+  # mount) and the boot-mounted instance has stale empty data.
+  if nextScreen is Screen.Home {
+    unmountPage(world: world, pageId: homePageId)
+    let freshHome: EntityId = mountHomePage(world: world, state: appState, scrollY: 0.0)
+  }
+  if nextScreen is Screen.History {
+    unmountPage(world: world, pageId: historyPageId)
+    let freshHist: EntityId = mountHistoryPage(world: world, state: appState, scrollY: 0.0)
+  }
   setPageActive(world: world, pageId: incomingPageId, active: true)
 
   # Nav-tabs bar lives as a child of the bottom dock. Unmount destroys
