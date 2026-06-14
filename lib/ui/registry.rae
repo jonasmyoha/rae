@@ -54,6 +54,7 @@ func registeredComponentNames() ret List(String) {
   names.add(value: "EditorLocked")
   names.add(value: "HeroWidget")
   names.add(value: "CornerRadius")
+  names.add(value: "GradientFill")
   names.add(value: "LayerRoot")
   names.add(value: "LayerRef")
   names.add(value: "DebugAnchor")
@@ -511,6 +512,22 @@ func deserCornerRadius(doc: view JsonDoc, val: view JsonValue) ret CornerRadius 
   ret CornerRadius { radius: r }
 }
 
+func deserGradientFill(doc: view JsonDoc, val: view JsonValue) ret GradientFill {
+  let fromIdx: Int = jsonField(doc: doc, this: val, key: "from")
+  let toIdx: Int = jsonField(doc: doc, this: val, key: "to")
+  let zero: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
+  let fromCol: RgbaColor = zero
+  let toCol: RgbaColor = zero
+  if fromIdx >= 0 {
+    fromCol = deserRgba(doc: doc, val: jsonValueAt(doc: doc, idx: fromIdx))
+  }
+  if toIdx >= 0 {
+    toCol = deserRgba(doc: doc, val: jsonValueAt(doc: doc, idx: toIdx))
+  }
+  let angle: Float = optFloat(doc: doc, container: val, key: "angle", fallback: 90.0)
+  ret GradientFill { from: fromCol, to: toCol, angle: angle }
+}
+
 func deserLayerRoot(doc: view JsonDoc, val: view JsonValue) ret LayerRoot {
   let id: String = optString(doc: doc, container: val, key: "id", fallback: "")
   let ord: Int = optInt(doc: doc, container: val, key: "order", fallback: 0)
@@ -683,6 +700,10 @@ func applyComponentByName(
   }
   if name.equals(other: "CornerRadius") {
     componentSet(this: world.cornerRadiuses, entity: entity, data: deserCornerRadius(doc: doc, val: val))
+    ret
+  }
+  if name.equals(other: "GradientFill") {
+    componentSet(this: world.gradientFills, entity: entity, data: deserGradientFill(doc: doc, val: val))
     ret
   }
   if name.equals(other: "LayerRoot") {

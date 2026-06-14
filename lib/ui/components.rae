@@ -294,6 +294,18 @@ type CornerRadius {
   radius: Float
 }
 
+# Linear gradient fill. Renderer paints a rect from `from` to `to`
+# along the direction `angle` (degrees — 0=left→right, 90=top→bottom,
+# 180=right→left, 270=bottom→top). Pair with `CornerRadius` to get a
+# rounded gradient pill. One fragment shader handles size, angle, and
+# rounding in one draw — no pre-baked variants. Takes precedence over
+# any `Shape.fill` on the same entity.
+type GradientFill {
+  from: RgbaColor
+  to: RgbaColor
+  angle: Float
+}
+
 # A layer is a real entity. `LayerRoot` is what makes one — it carries
 # the layer's stable id (used for lookup from app code) and its paint
 # order (ascending = painted on top of lower orders, hit-tested
