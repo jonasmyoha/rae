@@ -20,6 +20,22 @@ import ui/textures
 
 let tabIconSize: Float = 32.0
 
+# Texture-registry key for the nav-tab band's frosted-glass blur.
+# The host renders content first, captures the strip of pixels behind
+# the nav-tabs, blurs them, registers under this key. The nav-tabs
+# bar's `BackdropImage` then samples it. Constant so producer and
+# consumer can't drift apart.
+func tabBlurTextureKey() pub ret String {
+  ret "dock.tabBlur"
+}
+
+# Screen-pixel y-coordinate of the top of the nav-tabs band. The
+# blur capture region runs from this y down by `navTabsH`. Computed
+# from `screenH`/`navTabsH` so it tracks the dock's actual layout.
+func tabBlurCaptureY() pub ret Float {
+  ret screenH - navTabsH
+}
+
 # Registry key the dock looks up its frosted-glass blur backdrop
 # under. The host (`main.rae`) writes a fresh blurred screenshot
 # of the dock region after every render; this is the lookup.
@@ -116,8 +132,15 @@ func buildNavTabsForScreen(
   # way to both screen edges, the way iOS tab bars do.
   let barW: Float = screenW
   setRectFixed(world: world, entity: bar, w: barW, h: navTabsH)
-  # No bar background — the dock entity's `GradientFill` paints the
-  # full bottom-bar area and shows through behind the tab icons.
+  # Frosted-glass backdrop: paint a captured-and-blurred snapshot of
+  # whatever's behind the bar before the tab icons paint on top. The
+  # host (main.rae's per-frame render) is responsible for splitting
+  # the render around the dock layer and registering the freshly
+  # captured texture under `tabBlurTextureKey()`. Missing texture =
+  # silent no-op, so a first frame before the first capture just
+  # shows the dock's shadow gradient through with no blur — no crash.
+  let blurBg: BackdropImage = { textureKey: tabBlurTextureKey() }
+  componentSet(this: world.backdropImages, entity: bar, data: blurBg)
   setLayout(world: world, entity: bar, kind: LayoutType.Horizontal, gap: 0.0, alignCross: AlignKind.Center)
 
   # Four base tabs: Home / Library / Search / Profile. Player is
