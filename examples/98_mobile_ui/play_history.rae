@@ -76,17 +76,24 @@ func historyMatchLocalStem(albums: view List(Album), trackName: view String, art
   ret ""
 }
 
-# Push an entry onto the history. De-duplicates against the most-
-# recent entry (same trackName + artistName) so a single track that
-# the poll picks up several times in a row doesn't flood the list.
-# When the cap is hit the oldest entry gets removed.
+# Push an entry onto the history. De-duplicates only against the
+# most-recent entry where trackName + artistName + textureKey ALL
+# match — so a single track that pollSpotify picks up several
+# times in a row collapses, but a re-listen of the same-titled
+# song from a different album (different cover) still gets its
+# own row. The textureKey check is "same album cover" as far as
+# the UI is concerned: Spotify entries key by trackId (so a
+# single vs. a compilation appearance differs), and local entries
+# key by album stem.
 func recordPlay(history: mod PlayHistory, entry: own PlayHistoryEntry) pub {
   let n: Int = history.entries.length
   if n > 0 {
     let last: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: n - 1)
     if last.trackName.equals(other: entry.trackName) {
       if last.artistName.equals(other: entry.artistName) {
-        ret
+        if last.textureKey.equals(other: entry.textureKey) {
+          ret
+        }
       }
     }
   }
