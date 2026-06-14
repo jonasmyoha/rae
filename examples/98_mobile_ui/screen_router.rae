@@ -184,6 +184,10 @@ type AppState pub {
   # references for the per-Enum deep-copy helper. Wrapping at
   # the push/pop sites costs one int convert each way.
   subPageStack: List(Int)
+  # Append-only log of what the user (or Spotify) has played this
+  # session. Feeds the "Recently played" row on Home and the full
+  # History sub-page. See `play_history.rae` for the schema.
+  playHistory: PlayHistory
 }
 
 func createAppState(albums: own List(Album)) pub ret AppState {
@@ -203,6 +207,7 @@ func createAppState(albums: own List(Album)) pub ret AppState {
     currentTrackIndex: 0
     tab: Screen.Home
     subPageStack: createList(Int, cap: 4)
+    playHistory: createPlayHistory(cap: 100)
   }
 }
 
@@ -436,10 +441,23 @@ func dispatchActions(
       playback.playingAlbumStem = "{state.currentAlbumStem}"
       playback.playingTrackIndex = state.currentTrackIndex
       playback.isPlaying = true
+      # Record the pick in play history so Home's "Recently played"
+      # row + the History sub-page see it. Stem is already known
+      # (local-catalog tap), no fuzzy match needed.
+      let histAlbum: Album = activeAlbum(state: state)
+      let histTrack: Track = trackAt(album: histAlbum, idx: state.currentTrackIndex)
+      let histEntry: PlayHistoryEntry = {
+        trackName: "{histTrack.title}"
+        artistName: "{histAlbum.artist}"
+        albumName: "{histAlbum.album}"
+        albumStem: "{state.currentAlbumStem}"
+        artworkUrl: ""
+        durationSec: histTrack.durationMs.toFloat() / 1000.0
+        playedAt: getTime()
+      }
+      recordPlay(history: state.playHistory, entry: own histEntry)
       if spotifyEnabled {
-        let album: Album = activeAlbum(state: state)
-        let track: Track = trackAt(album: album, idx: state.currentTrackIndex)
-        let q: String = "{album.artist} {track.title}"
+        let q: String = "{histAlbum.artist} {histTrack.title}"
         log("[spotify] play track query={q}")
         spotifyPlayQuery(query: q)
       }
