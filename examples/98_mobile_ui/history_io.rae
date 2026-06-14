@@ -38,45 +38,34 @@ let historyFilePath: String = "examples/98_mobile_ui/temp/play_history.json"
 # Externs are already declared in playback_state_io.rae; reuse those.
 
 # Escape a string for embedding inside a JSON `"..."` literal.
-# Order matters — escape backslashes first, then quotes, otherwise
-# the freshly-added backslashes from quote-escaping would
-# themselves get double-escaped.
+# Builds the result by walking each character so the caller never
+# ends up with a String that aliases its input — the equivalent
+# String.replace pipeline produced thumbs/values that pointed back
+# into the live `content` accumulator after a few iterations
+# (suspect alias return path in lib/string.replace when the pattern
+# isn't found).
 func jsonEscape(s: view String) ret String {
+  let out: String = ""
+  let i: Int = 0
+  let n: Int = s.length()
   let bs: String = "\\"
+  let q: String = "\""
   let bsbs: String = "\\\\"
-  let q: String = "\""
   let bsq: String = "\\\""
-  let r: String = "{s}"
-  r = r.replace(old: bs, new: bsbs)
-  r = r.replace(old: q, new: bsq)
-  ret r
-}
-
-# Append one `"key": "value"` line to `content`. `trailing` is the
-# punctuation that follows the value — a comma between fields,
-# empty after the last field of the entry object.
-func appendStringField(content: own String, key: view String, value: view String, trailing: view String) ret String {
-  let q: String = "\""
-  let colon: String = ":"
-  let nl: String = "\n"
-  let esc: String = jsonEscape(s: value)
-  let r: String = content
-  r = r.concat(other: "      ").concat(other: q).concat(other: key).concat(other: q)
-  r = r.concat(other: colon).concat(other: " ").concat(other: q).concat(other: esc).concat(other: q)
-  r = r.concat(other: trailing).concat(other: nl)
-  ret r
-}
-
-func appendFloatField(content: own String, key: view String, value: view Float, trailing: view String) ret String {
-  let q: String = "\""
-  let colon: String = ":"
-  let nl: String = "\n"
-  let vStr: String = "{value}"
-  let r: String = content
-  r = r.concat(other: "      ").concat(other: q).concat(other: key).concat(other: q)
-  r = r.concat(other: colon).concat(other: " ").concat(other: vStr)
-  r = r.concat(other: trailing).concat(other: nl)
-  ret r
+  loop i < n {
+    let ch: String = s.sub(start: i, len: 1)
+    if ch.equals(other: bs) {
+      out = out.concat(other: bsbs)
+    } else {
+      if ch.equals(other: q) {
+        out = out.concat(other: bsq)
+      } else {
+        out = out.concat(other: ch)
+      }
+    }
+    i = i + 1
+  }
+  ret out
 }
 
 # Serialise the whole entries list to JSON and overwrite `path`.
@@ -100,21 +89,33 @@ func saveHistoryToJson(history: view PlayHistory, path: view String) pub {
   content = content.concat(other: "  ").concat(other: q).concat(other: "entries").concat(other: q)
   content = content.concat(other: colon).concat(other: " ").concat(other: openBracket).concat(other: nl)
 
+  let comma: String = ","
   let n: Int = history.entries.length
   let i: Int = 0
   loop i < n {
     let e: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: i)
+    # Deep-copy each owned-String field into a fresh local so the
+    # interpolated builder below never references the list's heap
+    # storage through `e.fieldName`. The `"{e.field}"` interpolation
+    # syntax forces a fresh allocation per field.
+    let tn: String = jsonEscape(s: e.trackName)
+    let an: String = jsonEscape(s: e.artistName)
+    let alb: String = jsonEscape(s: e.albumName)
+    let stem: String = jsonEscape(s: e.albumStem)
+    let url: String = jsonEscape(s: e.artworkUrl)
+    let tk: String = jsonEscape(s: e.textureKey)
+    let durStr: String = "{e.durationSec}"
+    let atStr: String = "{e.playedAt}"
+
     content = content.concat(other: "    ").concat(other: openBrace).concat(other: nl)
-    let comma: String = ","
-    content = appendStringField(content: own content, key: "trackName", value: e.trackName, trailing: comma)
-    content = appendStringField(content: own content, key: "artistName", value: e.artistName, trailing: comma)
-    content = appendStringField(content: own content, key: "albumName", value: e.albumName, trailing: comma)
-    content = appendStringField(content: own content, key: "albumStem", value: e.albumStem, trailing: comma)
-    content = appendStringField(content: own content, key: "artworkUrl", value: e.artworkUrl, trailing: comma)
-    content = appendStringField(content: own content, key: "textureKey", value: e.textureKey, trailing: comma)
-    content = appendFloatField(content: own content, key: "durationSec", value: e.durationSec, trailing: comma)
-    let last: String = ""
-    content = appendFloatField(content: own content, key: "playedAt", value: e.playedAt, trailing: last)
+    content = content.concat(other: "      ").concat(other: q).concat(other: "trackName").concat(other: q).concat(other: colon).concat(other: " ").concat(other: q).concat(other: tn).concat(other: q).concat(other: comma).concat(other: nl)
+    content = content.concat(other: "      ").concat(other: q).concat(other: "artistName").concat(other: q).concat(other: colon).concat(other: " ").concat(other: q).concat(other: an).concat(other: q).concat(other: comma).concat(other: nl)
+    content = content.concat(other: "      ").concat(other: q).concat(other: "albumName").concat(other: q).concat(other: colon).concat(other: " ").concat(other: q).concat(other: alb).concat(other: q).concat(other: comma).concat(other: nl)
+    content = content.concat(other: "      ").concat(other: q).concat(other: "albumStem").concat(other: q).concat(other: colon).concat(other: " ").concat(other: q).concat(other: stem).concat(other: q).concat(other: comma).concat(other: nl)
+    content = content.concat(other: "      ").concat(other: q).concat(other: "artworkUrl").concat(other: q).concat(other: colon).concat(other: " ").concat(other: q).concat(other: url).concat(other: q).concat(other: comma).concat(other: nl)
+    content = content.concat(other: "      ").concat(other: q).concat(other: "textureKey").concat(other: q).concat(other: colon).concat(other: " ").concat(other: q).concat(other: tk).concat(other: q).concat(other: comma).concat(other: nl)
+    content = content.concat(other: "      ").concat(other: q).concat(other: "durationSec").concat(other: q).concat(other: colon).concat(other: " ").concat(other: durStr).concat(other: comma).concat(other: nl)
+    content = content.concat(other: "      ").concat(other: q).concat(other: "playedAt").concat(other: q).concat(other: colon).concat(other: " ").concat(other: atStr).concat(other: nl)
     content = content.concat(other: "    ").concat(other: closeBrace)
     if i < n - 1 {
       content = content.concat(other: comma)

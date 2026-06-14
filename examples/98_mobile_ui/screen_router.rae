@@ -537,11 +537,7 @@ func dispatchActions(
         playedAt: getTime()
       }
       recordPlay(history: state.playHistory, entry: own histEntry)
-      # saveHistoryToJson disabled — crashes in cascade-drop of the
-      # `let e: PlayHistoryEntry = rae_ext_rae_buf_get(...)` read at
-      # save time. Tracking compiler-level fix; persistence will be
-      # re-enabled once the List(Struct(String)) get-then-drop seam
-      # is solid.
+      saveHistoryToJson(history: state.playHistory, path: historyFilePath)
       if spotifyEnabled {
         let q: String = "{histAlbum.artist} {histTrack.title}"
         log("[spotify] play track query={q}")
