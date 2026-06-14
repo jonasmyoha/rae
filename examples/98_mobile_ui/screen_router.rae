@@ -177,6 +177,35 @@ func buildAppWorld(
   ret world
 }
 
+# Shared page-top-bar builder. Every top-level screen (Home, Library,
+# Search, Profile, History) wants the same look: a full-width bar with
+# a single centered title in the `pageTitle` style — bigger and bolder
+# than the old per-view `topBarTitle`, and centered by the renderer
+# (see lib/ui/render.rae's `textStyleIsCentered`).
+#
+# Callers pass the visible label; the helper allocates the bar +
+# title entities, sets the layout, and returns the bar entity ready
+# to drop into a page's vertical column of children.
+func buildPageTopBar(world: mod UiWorld, title: view String) pub ret EntityId {
+  let bar: EntityId = createEntity(world: world)
+  let w: Float = screenW - outerPad * 2.0
+  setRectFixed(world: world, entity: bar, w: w, h: topBarH)
+  let layH: LayoutType = LayoutType.Horizontal
+  let alignC: AlignKind = AlignKind.Center
+  setLayout(world: world, entity: bar, kind: layH, gap: 0.0, alignCross: alignC)
+
+  let titleE: EntityId = createEntity(world: world)
+  setRectFixed(world: world, entity: titleE, w: w, h: topBarH)
+  let style: String = "pageTitle"
+  let text: String = "{title}"
+  setText(world: world, entity: titleE, text: own text, styleId: own style)
+
+  let kids: List(EntityId) = createList(EntityId, cap: 1)
+  kids.add(value: titleE)
+  attachChildren(world: world, parent: bar, kids: kids)
+  ret bar
+}
+
 # Re-mount Home / History in place when `playHistory` has grown
 # since the last frame and one of them is the currently-visible
 # screen. Catches the case where pollSpotify (or a `song.open.N`
