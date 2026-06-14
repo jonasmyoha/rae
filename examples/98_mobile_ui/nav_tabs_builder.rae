@@ -324,15 +324,23 @@ func mountBottomDockOverlay(
   # created the named layer entities at boot.
   let dockLayerId: String = "dock"
   setLayerById(world: world, entity: dock, id: dockLayerId)
-  # Sharp-cornered vertical gradient as the dock's backdrop — pastel
-  # red at the top fades to pastel blue at the bottom. Sits behind
-  # the mini-player pill (which keeps its own rounded gradient) and
-  # behind the nav-tabs (whose own dark fill is dropped below so the
-  # gradient shows through).
-  let dockBgFrom: RgbaColor = { r: 255, g: 179, b: 186, a: 255 }
-  let dockBgTo: RgbaColor = { r: 186, g: 225, b: 255, a: 255 }
-  let dockBg: GradientFill = { from: dockBgFrom, to: dockBgTo, angle: 90.0 }
-  componentSet(this: world.gradientFills, entity: dock, data: dockBg)
+  # Vertical shadow gradient — fully transparent at the top, fading
+  # into a slightly-translucent dark blue-tinted shadow at the
+  # bottom. Casts a soft shadow onto page content directly above the
+  # menubar (the 100-px extension is fully transparent at its top
+  # edge so it doesn't clip the page hard). The mini-player pill and
+  # nav-tabs paint on top of this with their own opaque visuals.
+  let shadowTop: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
+  let shadowBottom: RgbaColor = { r: 18, g: 26, b: 56, a: 200 }
+  let shadowGrad: GradientFill = { from: shadowTop, to: shadowBottom, angle: 90.0 }
+  componentSet(this: world.gradientFills, entity: dock, data: shadowGrad)
+  # Register the dock under the "menubar shadow" nodeId so the
+  # shadow can be looked up / mutated independently later. Scoped
+  # under the dock page (`PageRoot{"dock"}`) so the key is
+  # "dock/menubar shadow".
+  let shadowNodeId: String = "menubar shadow"
+  let shadowKey: String = pageScopedKey(pageId: dockPageId, nodeId: shadowNodeId)
+  world.nodeIds.set(k: shadowKey, value: dock.value)
 
   # Mini-player: indented by outerPad on each side. Vertical layout
   # with alignCross=Center centers it inside the full-width dock.
