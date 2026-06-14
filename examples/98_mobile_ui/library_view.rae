@@ -162,26 +162,6 @@ func buildLibraryBody(world: mod UiWorld, albums: view List(Album), scrollY: vie
   ret body
 }
 
-func buildLibraryTopBar(world: mod UiWorld) ret EntityId {
-  let bar: EntityId = createEntity(world: world)
-  let w: Float = screenW - outerPad * 2.0
-  setRectFixed(world: world, entity: bar, w: w, h: topBarH)
-  let layH: LayoutType = LayoutType.Horizontal
-  let alignC: AlignKind = AlignKind.Center
-  setLayout(world: world, entity: bar, kind: layH, gap: 16.0, alignCross: alignC)
-
-  let title: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: title, w: w, h: 32.0)
-  let titleStyle: String = "topBarTitle"
-  let titleText: String = "Your Library"
-  setText(world: world, entity: title, text: titleText, styleId: titleStyle)
-
-  let kids: List(EntityId) = createList(EntityId, cap: 1)
-  kids.add(value: title)
-  attachChildren(world: world, parent: bar, kids: kids)
-  ret bar
-}
-
 # Persistent-world entrypoint. Mounts the library page into `world`
 # and returns the page-root entity. Tagged with `PageRoot{libraryPageId}`
 # so `findPageRootEntity(world, libraryPageId)` can locate it for
@@ -205,7 +185,7 @@ func mountLibraryPage(
   let pr: PageRoot = { id: own copiedId }
   componentSet(this: world.pageRoots, entity: root, data: own pr)
 
-  let topBar: EntityId = buildLibraryTopBar(world: world)
+  let topBar: EntityId = buildPageTopBar(world: world, title: "Your Library")
   let body: EntityId = buildLibraryBody(world: world, albums: albums, scrollY: scrollY)
 
   let kids: List(EntityId) = createList(EntityId, cap: 2)

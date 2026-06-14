@@ -261,6 +261,10 @@ func textStyleSize(styleId: view String) ret Float {
   if styleId.equals(other: topBarTitle) {
     ret 18.0
   }
+  let pageTitle: String = "pageTitle"
+  if styleId.equals(other: pageTitle) {
+    ret 28.0
+  }
   if styleId.equals(other: albumCaption) {
     ret 14.0
   }
@@ -326,6 +330,10 @@ func textStyleColor(styleId: view String, chain255: view Int) ret Color {
     ret toRaylibColor(c: themeColorByName(name: "textPrimary"), chain255: chain255)
   }
   if styleId.equals(other: topBarTitle) {
+    ret toRaylibColor(c: themeColorByName(name: "textPrimary"), chain255: chain255)
+  }
+  let pageTitle: String = "pageTitle"
+  if styleId.equals(other: pageTitle) {
     ret toRaylibColor(c: themeColorByName(name: "textPrimary"), chain255: chain255)
   }
   if styleId.equals(other: albumCaption) {
@@ -399,10 +407,11 @@ func textStyleIsCentered(styleId: view String) ret Bool {
     ret true
   }
   # Debug button: the "D" glyph sits centred inside the amber circle.
+  # `pageTitle` also centers — every top-level screen's title bar.
   let debugButton: String = "debugButton"
-  if styleId.equals(other: debugButton) {
-    ret true
-  }
+  if styleId.equals(other: debugButton) { ret true }
+  let pageTitle: String = "pageTitle"
+  if styleId.equals(other: pageTitle) { ret true }
   ret false
 }
 
