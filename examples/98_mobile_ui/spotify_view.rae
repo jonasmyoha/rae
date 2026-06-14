@@ -295,7 +295,8 @@ func pollSpotify(
         playedAt: now
       }
       recordPlay(history: appState.playHistory, entry: own entry)
-      saveHistoryToJson(history: appState.playHistory, path: historyFilePath)
+      # Disk persistence disabled here too — see screen_router.rae's
+      # song.open.N handler for the underlying cascade-drop issue.
     }
   }
   # Re-bind the cover Sprites every poll, not just on first track
