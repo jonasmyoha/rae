@@ -437,6 +437,38 @@ func paintText(world: view UiWorld, entity: view EntityId, wt: view WorldTransfo
   )
 }
 
+# GradientFill paint. One atomic `drawGradientRect` — the shader does
+# the gradient + rounded-rect mask + AA in one fragment program. Reads
+# the entity's CornerRadius if present (defaults to 0 = sharp). Same
+# inherited-alpha multiplication as `paintShape` so opacity chains
+# work the same way.
+func paintGradientFill(world: view UiWorld, entity: view EntityId, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int) {
+  let gf: view GradientFill => componentView(this: world.gradientFills, entity: entity)
+  let radius: Float = 0.0
+  if componentHas(this: world.cornerRadiuses, entity: entity) {
+    let crData: CornerRadius = componentGet(this: world.cornerRadiuses, entity: entity)
+    radius = crData.radius
+  }
+  let fa: Int = (gf.from.a.toFloat() * chain255.toFloat() / 255.0).toInt()
+  let ta: Int = (gf.to.a.toFloat() * chain255.toFloat() / 255.0).toInt()
+  drawGradientRect(
+    x: wt.x
+    y: wt.y
+    w: cr.w
+    h: cr.h
+    radius: radius
+    fromR: gf.from.r
+    fromG: gf.from.g
+    fromB: gf.from.b
+    fromA: fa
+    toR: gf.to.r
+    toG: gf.to.g
+    toB: gf.to.b
+    toA: ta
+    angleDeg: gf.angle
+  )
+}
+
 # Paint a single entity. Order: Shape (background) → Sprite → Text, so
 # text/sprites layer on top of Shape backgrounds correctly when an
 # entity carries multiple visual components (e.g. a button background
@@ -458,8 +490,16 @@ func paintEntity(world: view UiWorld, reg: view TextureRegistry, entity: view En
   let cr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
   let chain255: Int = renderAlpha255(world: world, entity: entity)
 
-  if componentHas(this: world.shapes, entity: entity) {
-    paintShape(world: world, entity: entity, wt: wt, cr: cr, chain255: chain255)
+  # `GradientFill` takes precedence over a solid `Shape.fill` — the
+  # gradient shader does its own rounded-rect alpha mask off the
+  # entity's `CornerRadius` (or 0 if absent), so this single call
+  # replaces both the shape and corner-rounding paths.
+  if componentHas(this: world.gradientFills, entity: entity) {
+    paintGradientFill(world: world, entity: entity, wt: wt, cr: cr, chain255: chain255)
+  } else {
+    if componentHas(this: world.shapes, entity: entity) {
+      paintShape(world: world, entity: entity, wt: wt, cr: cr, chain255: chain255)
+    }
   }
   if componentHas(this: world.sprites, entity: entity) {
     paintSprite(reg: reg, world: world, entity: entity, wt: wt, cr: cr, chain255: chain255)

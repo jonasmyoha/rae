@@ -360,6 +360,96 @@ static bool native_roundedSpriteEnd(struct VM* vm, VmNativeResult* out, const Va
     return true;
 }
 
+/* VM mirror of `rae_ext_drawGradientRect`. See rae_runtime.c for the
+ * design notes. */
+static Shader g_vm_gradient_shader = {0};
+static int g_vm_grad_loc_size = -1;
+static int g_vm_grad_loc_radius = -1;
+static int g_vm_grad_loc_from = -1;
+static int g_vm_grad_loc_to = -1;
+static int g_vm_grad_loc_angle = -1;
+static int g_vm_gradient_loaded = 0;
+static void vm_gradient_shader_ensure(void) {
+    if (g_vm_gradient_loaded) return;
+    const char* fs =
+        "#version 330\n"
+        "in vec2 fragTexCoord;\n"
+        "in vec4 fragColor;\n"
+        "out vec4 finalColor;\n"
+        "uniform vec2 uSize;\n"
+        "uniform float uRadius;\n"
+        "uniform vec4 uFrom;\n"
+        "uniform vec4 uTo;\n"
+        "uniform float uAngleRad;\n"
+        "float sdRoundRect(vec2 p, vec2 b, float r) {\n"
+        "  vec2 q = abs(p) - b + vec2(r);\n"
+        "  return min(max(q.x, q.y), 0.0) + length(max(q, vec2(0.0))) - r;\n"
+        "}\n"
+        "void main() {\n"
+        "  vec2 dir = vec2(cos(uAngleRad), sin(uAngleRad));\n"
+        "  vec2 p = fragTexCoord - vec2(0.5);\n"
+        "  float t = clamp(dot(p, dir) + 0.5, 0.0, 1.0);\n"
+        "  vec4 c = mix(uFrom, uTo, t);\n"
+        "  vec2 pp = (fragTexCoord - vec2(0.5)) * uSize;\n"
+        "  float d = sdRoundRect(pp, uSize * 0.5, uRadius);\n"
+        "  float aa = clamp(0.5 - d, 0.0, 1.0);\n"
+        "  c.a *= aa * fragColor.a;\n"
+        "  finalColor = c;\n"
+        "}\n";
+    g_vm_gradient_shader = LoadShaderFromMemory(NULL, fs);
+    g_vm_grad_loc_size = GetShaderLocation(g_vm_gradient_shader, "uSize");
+    g_vm_grad_loc_radius = GetShaderLocation(g_vm_gradient_shader, "uRadius");
+    g_vm_grad_loc_from = GetShaderLocation(g_vm_gradient_shader, "uFrom");
+    g_vm_grad_loc_to = GetShaderLocation(g_vm_gradient_shader, "uTo");
+    g_vm_grad_loc_angle = GetShaderLocation(g_vm_gradient_shader, "uAngleRad");
+    g_vm_gradient_loaded = 1;
+}
+
+static double vm_arg_num(const Value* a) {
+    return (a->type == VAL_FLOAT) ? a->as.float_value : (double)a->as.int_value;
+}
+
+static bool native_drawGradientRect(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    /* Args: x, y, w, h, radius, r1,g1,b1,a1, r2,g2,b2,a2, angleDeg → 14. */
+    if (count != 14) {
+        fprintf(stderr, "error: drawGradientRect expects 14 args (x,y,w,h,radius,from(4),to(4),angleDeg), got %zu\n", count);
+        return false;
+    }
+    vm_gradient_shader_ensure();
+    double x = vm_arg_num(&args[0]);
+    double y = vm_arg_num(&args[1]);
+    double w = vm_arg_num(&args[2]);
+    double h = vm_arg_num(&args[3]);
+    double radius = vm_arg_num(&args[4]);
+    float size[2] = { (float)w, (float)h };
+    float fr = (float)radius;
+    float from[4] = {
+        (float)args[5].as.int_value / 255.0f,
+        (float)args[6].as.int_value / 255.0f,
+        (float)args[7].as.int_value / 255.0f,
+        (float)args[8].as.int_value / 255.0f
+    };
+    float to[4] = {
+        (float)args[9].as.int_value / 255.0f,
+        (float)args[10].as.int_value / 255.0f,
+        (float)args[11].as.int_value / 255.0f,
+        (float)args[12].as.int_value / 255.0f
+    };
+    float angleRad = (float)(vm_arg_num(&args[13]) * 3.14159265358979 / 180.0);
+    SetShaderValue(g_vm_gradient_shader, g_vm_grad_loc_size, size, SHADER_UNIFORM_VEC2);
+    SetShaderValue(g_vm_gradient_shader, g_vm_grad_loc_radius, &fr, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(g_vm_gradient_shader, g_vm_grad_loc_from, from, SHADER_UNIFORM_VEC4);
+    SetShaderValue(g_vm_gradient_shader, g_vm_grad_loc_to, to, SHADER_UNIFORM_VEC4);
+    SetShaderValue(g_vm_gradient_shader, g_vm_grad_loc_angle, &angleRad, SHADER_UNIFORM_FLOAT);
+    BeginShaderMode(g_vm_gradient_shader);
+    Rectangle rec = { (float)x, (float)y, (float)w, (float)h };
+    DrawRectangleRec(rec, WHITE);
+    EndShaderMode();
+    out->has_value = false;
+    return true;
+}
+
 static bool native_captureAndBlurRegion(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
     if (count != 5) {
@@ -1200,6 +1290,7 @@ bool vm_registry_register_raylib(VmRegistry* registry) {
     ok &= vm_registry_register_native(registry, "unloadTexture", native_unloadTexture, NULL);
     ok &= vm_registry_register_native(registry, "roundedSpriteBegin", native_roundedSpriteBegin, NULL);
     ok &= vm_registry_register_native(registry, "roundedSpriteEnd", native_roundedSpriteEnd, NULL);
+    ok &= vm_registry_register_native(registry, "drawGradientRect", native_drawGradientRect, NULL);
     ok &= vm_registry_register_native(registry, "captureAndBlurBackdrop", native_captureAndBlurBackdrop, NULL);
     ok &= vm_registry_register_native(registry, "captureAndBlurRegion", native_captureAndBlurRegion, NULL);
     ok &= vm_registry_register_native(registry, "drawTexture", native_drawTexture, NULL);

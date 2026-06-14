@@ -2079,6 +2079,78 @@ void rae_ext_roundedSpriteBegin(double width, double height, double radius) {
 void rae_ext_roundedSpriteEnd(void) {
   EndShaderMode();
 }
+
+/* Gradient rounded-rect: shader fills the alpha-masked rounded box
+ * with a linear gradient from `from` to `to` along the given angle
+ * (degrees — 0=L→R, 90=T→B). Pair with `CornerRadius` in scenes
+ * via the `GradientFill` ECS component. Single atomic call;
+ * lazy-loads its shader on first use. */
+static Shader g_rae_gradient_shader = {0};
+static int g_rae_grad_loc_size = -1;
+static int g_rae_grad_loc_radius = -1;
+static int g_rae_grad_loc_from = -1;
+static int g_rae_grad_loc_to = -1;
+static int g_rae_grad_loc_angle = -1;
+static int g_rae_gradient_loaded = 0;
+
+static void rae_gradient_shader_ensure(void) {
+  if (g_rae_gradient_loaded) return;
+  const char* fs =
+    "#version 330\n"
+    "in vec2 fragTexCoord;\n"
+    "in vec4 fragColor;\n"
+    "out vec4 finalColor;\n"
+    "uniform vec2 uSize;\n"
+    "uniform float uRadius;\n"
+    "uniform vec4 uFrom;\n"
+    "uniform vec4 uTo;\n"
+    "uniform float uAngleRad;\n"
+    "float sdRoundRect(vec2 p, vec2 b, float r) {\n"
+    "  vec2 q = abs(p) - b + vec2(r);\n"
+    "  return min(max(q.x, q.y), 0.0) + length(max(q, vec2(0.0))) - r;\n"
+    "}\n"
+    "void main() {\n"
+    "  vec2 dir = vec2(cos(uAngleRad), sin(uAngleRad));\n"
+    "  vec2 p = fragTexCoord - vec2(0.5);\n"
+    "  float t = clamp(dot(p, dir) + 0.5, 0.0, 1.0);\n"
+    "  vec4 c = mix(uFrom, uTo, t);\n"
+    "  vec2 pp = (fragTexCoord - vec2(0.5)) * uSize;\n"
+    "  float d = sdRoundRect(pp, uSize * 0.5, uRadius);\n"
+    "  float aa = clamp(0.5 - d, 0.0, 1.0);\n"
+    "  c.a *= aa * fragColor.a;\n"
+    "  finalColor = c;\n"
+    "}\n";
+  g_rae_gradient_shader = LoadShaderFromMemory(NULL, fs);
+  g_rae_grad_loc_size = GetShaderLocation(g_rae_gradient_shader, "uSize");
+  g_rae_grad_loc_radius = GetShaderLocation(g_rae_gradient_shader, "uRadius");
+  g_rae_grad_loc_from = GetShaderLocation(g_rae_gradient_shader, "uFrom");
+  g_rae_grad_loc_to = GetShaderLocation(g_rae_gradient_shader, "uTo");
+  g_rae_grad_loc_angle = GetShaderLocation(g_rae_gradient_shader, "uAngleRad");
+  g_rae_gradient_loaded = 1;
+}
+
+void rae_ext_drawGradientRect(
+    double x, double y, double w, double h, double radius,
+    int64_t r1, int64_t g1, int64_t b1, int64_t a1,
+    int64_t r2, int64_t g2, int64_t b2, int64_t a2,
+    double angleDeg
+) {
+  rae_gradient_shader_ensure();
+  float size[2] = { (float)w, (float)h };
+  float fr = (float)radius;
+  float from[4] = { (float)r1 / 255.0f, (float)g1 / 255.0f, (float)b1 / 255.0f, (float)a1 / 255.0f };
+  float to[4]   = { (float)r2 / 255.0f, (float)g2 / 255.0f, (float)b2 / 255.0f, (float)a2 / 255.0f };
+  float angleRad = (float)(angleDeg * 3.14159265358979 / 180.0);
+  SetShaderValue(g_rae_gradient_shader, g_rae_grad_loc_size, size, SHADER_UNIFORM_VEC2);
+  SetShaderValue(g_rae_gradient_shader, g_rae_grad_loc_radius, &fr, SHADER_UNIFORM_FLOAT);
+  SetShaderValue(g_rae_gradient_shader, g_rae_grad_loc_from, from, SHADER_UNIFORM_VEC4);
+  SetShaderValue(g_rae_gradient_shader, g_rae_grad_loc_to, to, SHADER_UNIFORM_VEC4);
+  SetShaderValue(g_rae_gradient_shader, g_rae_grad_loc_angle, &angleRad, SHADER_UNIFORM_FLOAT);
+  BeginShaderMode(g_rae_gradient_shader);
+  Rectangle rec = { (float)x, (float)y, (float)w, (float)h };
+  DrawRectangleRec(rec, WHITE);
+  EndShaderMode();
+}
 Texture rae_ext_captureAndBlurRegion(double x, double y, double w, double h, int64_t blurSize) {
   /* Frosted-glass for a sub-region of the screen — used by the
    * mobile UI's bottom dock so only the bar area is blurred (the
