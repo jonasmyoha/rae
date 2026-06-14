@@ -185,6 +185,7 @@ func pollSpotify(
   world: mod UiWorld
   reg: mod TextureRegistry
   playback: mod PlaybackState
+  appState: mod AppState
   currentAlbumStem: view String
   now: view Float
 ) pub {
@@ -237,6 +238,27 @@ func pollSpotify(
   if changed {
     state.lastTrackId = "{track.trackId}"
     refreshSpotifyArt(state: state, track: track, reg: reg)
+    # Append to play history. Skip empty / stopped frames where
+    # trackName is blank; the local-stem match lets the history
+    # row reuse local cover textures when the user happens to be
+    # playing something from the catalog through Spotify directly.
+    if track.trackName.length() > 0 {
+      let stem: String = historyMatchLocalStem(
+        albums: appState.albums
+        trackName: track.trackName
+        artistName: track.artistName
+      )
+      let entry: PlayHistoryEntry = {
+        trackName: "{track.trackName}"
+        artistName: "{track.artistName}"
+        albumName: "{track.albumName}"
+        albumStem: own stem
+        artworkUrl: "{track.artworkUrl}"
+        durationSec: dur
+        playedAt: now
+      }
+      recordPlay(history: appState.playHistory, entry: own entry)
+    }
   }
   # Re-bind the cover Sprites every poll, not just on first track
   # change. Each screen switch (or hot-reload rebuild) re-runs
