@@ -179,26 +179,6 @@ func buildHistoryBody(world: mod UiWorld, history: view PlayHistory, scrollY: vi
   ret body
 }
 
-func buildHistoryTopBar(world: mod UiWorld) ret EntityId {
-  let bar: EntityId = createEntity(world: world)
-  let w: Float = screenW - outerPad * 2.0
-  setRectFixed(world: world, entity: bar, w: w, h: topBarH)
-  let layH: LayoutType = LayoutType.Horizontal
-  let alignC: AlignKind = AlignKind.Center
-  setLayout(world: world, entity: bar, kind: layH, gap: 16.0, alignCross: alignC)
-
-  let title: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: title, w: w, h: 32.0)
-  let titleStyle: String = "topBarTitle"
-  let titleText: String = "Recently played"
-  setText(world: world, entity: title, text: titleText, styleId: titleStyle)
-
-  let kids: List(EntityId) = createList(EntityId, cap: 1)
-  kids.add(value: title)
-  attachChildren(world: world, parent: bar, kids: kids)
-  ret bar
-}
-
 func mountHistoryPage(
   world: mod UiWorld
   state: view AppState
@@ -216,7 +196,7 @@ func mountHistoryPage(
   let pr: PageRoot = { id: own copiedId }
   componentSet(this: world.pageRoots, entity: root, data: own pr)
 
-  let topBar: EntityId = buildHistoryTopBar(world: world)
+  let topBar: EntityId = buildPageTopBar(world: world, title: "Recently played")
   let body: EntityId = buildHistoryBody(world: world, history: state.playHistory, scrollY: scrollY)
 
   let kids: List(EntityId) = createList(EntityId, cap: 2)
