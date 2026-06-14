@@ -503,24 +503,10 @@ func main() {
         # the spring-back after release renders chunky because the
         # physics step only runs once per OS event wake.
         let scrollAnimating: Bool = false
-        # Per-frame scroll bounds. Wrong floor → spring never settles;
-        # missing screen-gate → wheel silently dropped.
-        let scrollOnThisScreen: Bool = false
-        let scrollFloor: Float = 0.0
-        if currentScreen is Screen.Home {
-          scrollOnThisScreen = true
-          scrollFloor = homeScrollMin(albums: appState.albums)
-        }
-        if currentScreen is Screen.Library {
-          scrollOnThisScreen = true
-          scrollFloor = 0.0 - 1050.0
-        }
-        if currentScreen is Screen.Album {
-          scrollOnThisScreen = true
-          # Cached at the outer-loop level — see the
-          # `cachedAlbumStem` block above for why.
-          scrollFloor = cachedAlbumScrollFloor
-        }
+        # Per-frame scroll bounds. Wrong floor → spring never settles.
+        let sb: ScrollBounds = scrollBoundsForScreen(screen: currentScreen, appState: appState, cachedAlbumScrollFloor: cachedAlbumScrollFloor)
+        let scrollOnThisScreen: Bool = sb.scrollable
+        let scrollFloor: Float = sb.floor
         let scrollOOB: Bool = scrollFsm.scrollY > 0.0 or scrollFsm.scrollY < scrollFloor
         let velAbs: Float = scrollFsm.velocity
         if velAbs < 0.0 {

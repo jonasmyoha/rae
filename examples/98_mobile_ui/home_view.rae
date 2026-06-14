@@ -30,22 +30,28 @@ func homeGridTileSize() ret Float {
 # Total vertical extent of the Home page content (subtitle row +
 # cover grid). Used by the scroll clamp so the user can pull the
 # bottom rows into view without over-scrolling past them.
-func homeContentHeight(albums: view List(Album)) pub ret Float {
+func homeContentHeight(albums: view List(Album), hasRecent: view Bool) pub ret Float {
   let cols: Int = homeGridColumns
   let total: Int = albums.length
   let rows: Int = (total + cols - 1) / cols
   let tileH: Float = homeGridTileSize()
   let gridH: Float = tileH * rows.toFloat() + homeGridTileGap * (rows - 1).toFloat()
   let subH: Float = 22.0
-  ret subH + outerGap + gridH
+  let recentH: Float = 0.0
+  if hasRecent {
+    # 28 (header) + outerGap + thumb-size + outerGap (gap to grid).
+    recentH = 28.0 + outerGap + recentlyPlayedThumbSize + outerGap
+  }
+  ret subH + outerGap + recentH + gridH
 }
 
 # Scroll-floor clamp for the Home page — `-(overflow)` so wheel/drag
 # stops when the last grid row hits the dock. Zero when the content
 # already fits the viewport.
-func homeScrollMin(albums: view List(Album)) pub ret Float {
+func homeScrollMin(albums: view List(Album), history: view PlayHistory) pub ret Float {
   let viewport: Float = screenH - outerPad * 2.0 - miniPlayerH - navTabsH - outerGap
-  let content: Float = homeContentHeight(albums: albums)
+  let hasRecent: Bool = history.entries.length > 0
+  let content: Float = homeContentHeight(albums: albums, hasRecent: hasRecent)
   let overflow: Float = content - viewport
   if overflow <= 0.0 {
     ret 0.0
@@ -110,7 +116,7 @@ func buildHomeCoverGrid(world: mod UiWorld, albums: view List(Album)) ret Entity
   ret grid
 }
 
-func buildHomeBody(world: mod UiWorld, albums: view List(Album), scrollY: view Float) ret EntityId {
+func buildHomeBody(world: mod UiWorld, albums: view List(Album), history: view PlayHistory, scrollY: view Float) ret EntityId {
   let body: EntityId = createEntity(world: world)
   let bodyW: Float = screenW - outerPad * 2.0
   let bodyH: Float = screenH - topBarH - navTabsH - outerGap * 4.0 - outerPad * 2.0
@@ -132,8 +138,19 @@ func buildHomeBody(world: mod UiWorld, albums: view List(Album), scrollY: view F
 
   let grid: EntityId = buildHomeCoverGrid(world: world, albums: albums)
 
-  let kids: List(EntityId) = createList(EntityId, cap: 2)
+  let hasRecent: Bool = history.entries.length > 0
+  let kidsCap: Int = 2
+  if hasRecent {
+    kidsCap = 4
+  }
+  let kids: List(EntityId) = createList(EntityId, cap: kidsCap)
   kids.add(value: sub)
+  if hasRecent {
+    let recentHeader: EntityId = buildRecentlyPlayedHeader(world: world)
+    let recentStrip: EntityId = buildRecentlyPlayedStrip(world: world, history: history)
+    kids.add(value: recentHeader)
+    kids.add(value: recentStrip)
+  }
   kids.add(value: grid)
   attachChildren(world: world, parent: body, kids: kids)
   ret body
@@ -182,7 +199,7 @@ func mountHomePage(
   componentSet(this: world.pageRoots, entity: root, data: own pr)
 
   let topBar: EntityId = buildHomeTopBar(world: world)
-  let body: EntityId = buildHomeBody(world: world, albums: albums, scrollY: scrollY)
+  let body: EntityId = buildHomeBody(world: world, albums: albums, history: state.playHistory, scrollY: scrollY)
 
   let kids: List(EntityId) = createList(EntityId, cap: 2)
   kids.add(value: topBar)
