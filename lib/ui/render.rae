@@ -664,14 +664,30 @@ func renderSystem(world: view UiWorld, reg: view TextureRegistry) {
   # Painter's algorithm with LayerRef-aware sorting. Roots paint in
   # ascending layer order so overlays (higher-order layers) sit on
   # top of page content.
+  let allRangeLow: Int = 0 - 1000000
+  let allRangeHi: Int = 1000000
+  renderSystemLayerRange(world: world, reg: reg, minOrder: allRangeLow, maxOrder: allRangeHi)
+}
+
+# Same painter walk as `renderSystem` but only paints roots whose
+# Layer order falls inside `[minOrder, maxOrder)`. Lets a host
+# interleave work between layers — e.g. capturing the framebuffer
+# after content paints (layer 0..99) but before the dock paints
+# (layer 100+) so a `captureAndBlurRegion` doesn't include the very
+# overlay it's meant to sit behind.
+func renderSystemLayerRange(world: view UiWorld, reg: view TextureRegistry, minOrder: view Int, maxOrder: view Int) pub {
   let roots: List(EntityId) = collectPaintableRoots(world: world)
   let m: Int = roots.length
   let p: Int = 0
   loop p < m {
     let root: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: p)
-    # Layer-root entities themselves carry no visual — skip them.
     if componentHas(this: world.layerRoots, entity: root) is false {
-      paintSubtree(world: world, reg: reg, entity: root)
+      let ord: Int = entityLayerOrder(world: world, entity: root)
+      if ord >= minOrder {
+        if ord < maxOrder {
+          paintSubtree(world: world, reg: reg, entity: root)
+        }
+      }
     }
     p = p + 1
   }
