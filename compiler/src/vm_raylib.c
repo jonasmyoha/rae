@@ -279,6 +279,17 @@ static bool native_loadRoundedCroppedTexture(struct VM* vm, VmNativeResult* out,
     return true;
 }
 
+static bool native_raylibSetLogLevel(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 1) {
+        fprintf(stderr, "error: raylibSetLogLevel expects 1 int arg, got %zu\n", count);
+        return false;
+    }
+    SetTraceLogLevel((int)args[0].as.int_value);
+    out->has_value = false;
+    return true;
+}
+
 static bool native_unloadTexture(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
     if (count != 5) {
@@ -1297,6 +1308,7 @@ bool vm_registry_register_raylib(VmRegistry* registry) {
     ok &= vm_registry_register_native(registry, "loadCircleCroppedTexture", native_loadCircleCroppedTexture, NULL);
     ok &= vm_registry_register_native(registry, "loadRoundedCroppedTexture", native_loadRoundedCroppedTexture, NULL);
     ok &= vm_registry_register_native(registry, "unloadTexture", native_unloadTexture, NULL);
+    ok &= vm_registry_register_native(registry, "raylibSetLogLevel", native_raylibSetLogLevel, NULL);
     ok &= vm_registry_register_native(registry, "roundedSpriteBegin", native_roundedSpriteBegin, NULL);
     ok &= vm_registry_register_native(registry, "roundedSpriteEnd", native_roundedSpriteEnd, NULL);
     ok &= vm_registry_register_native(registry, "drawGradientRect", native_drawGradientRect, NULL);

@@ -35,6 +35,7 @@ func main() {
   # don't render with jagged edges. Must be set BEFORE initWindow;
   # ignored otherwise. Rae has no bitwise `|` yet, so we precompute.
   setConfigFlags(flags: 36)
+  raylibSetLogLevel(level: 4)  # LOG_WARNING — silence per-frame TEXTURE/SHADER INFO spam
   let winW: Float = screenW
   let winH: Float = screenH
   initWindow(width: winW.toInt(), height: winH.toInt(), title: "Rae Mobile UI — Album")
@@ -44,13 +45,9 @@ func main() {
   # post an empty event; without this hook the loop sleeps until
   # some other event arrives. See lib/raylib.rae for details.
   installWindowCloseWaker()
-  # Opt out of macOS App Nap. The wait-events loop has ~0% idle CPU,
-  # which is exactly what App Nap targets — once engaged the OS
-  # throttles event delivery for minutes at a time and the app
-  # appears hung until the user scrolls (high-frequency events
-  # break the throttle). Diagnosed via `sample <pid>` showing
-  # rbs_acquire_appnap_assertion on the main loop. See
-  # lib/raylib.rae for the binding.
+  # macOS App Nap throttles the wait-events loop because it sits at
+  # ~0% idle CPU; opt out so the app doesn't appear hung. See
+  # `disableAppNap` decl in lib/raylib.rae.
   disableAppNap()
   # No setTargetFPS: the inner loop blocks in glfwWaitEventsTimeout
   # (see lib/ui/event_loop.rae) and naturally caps animation at
@@ -824,13 +821,15 @@ func main() {
           if active {
             beginDrawing()
             clearBackground(color: bg)
-            # Two-phase render around the dock layer (order 100):
-            # phase 1 paints content < 100, capture+blur the nav-tab
-            # band into `tabBlurTextureKey()`, phase 2 paints dock +
-            # overlays on top of the fresh blur.
+            # Two-phase render around dock layer (100): paint content,
+            # capture+blur nav-tab band, paint dock+overlays. Skip the
+            # blur when the debug menu's full-screen blur is up so two
+            # blurs don't sample each other (topmost wins anyway).
             renderSystemLayerRange(world: world, reg: texReg, minOrder: 0 - 1000000, maxOrder: 100)
-            let blurTex: Texture = captureAndBlurRegion(x: 0.0, y: tabBlurCaptureY(), w: screenW, h: navTabsH, blurSize: 16)
-            textureRegisterDirect(reg: texReg, key: tabBlurTextureKey(), tex: blurTex)
+            if debug.menuOpen is false {
+              let blurTex: Texture = captureAndBlurRegion(x: 0.0, y: tabBlurCaptureY(), w: screenW, h: navTabsH, blurSize: 16)
+              textureRegisterDirect(reg: texReg, key: tabBlurTextureKey(), tex: blurTex)
+            }
             renderSystemLayerRange(world: world, reg: texReg, minOrder: 100, maxOrder: 1000000)
             if animating {
               renderHeroOverlay(anim: anim, reg: texReg, now: now)
