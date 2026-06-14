@@ -137,7 +137,12 @@ func main() {
   }
 
   let screenshotEnv: String = getEnv(name: "RAE_UI_SCREENSHOT")
-  let bg: Color = { r: 32, g: 32, b: 36, a: 255 }
+  # GL clear color follows the theme surface so scrolled-past-page
+  # content reveals the same colour as the page, not a hard-coded
+  # dark grey. Recomputed on every outer rebuild — including theme
+  # toggles, which trigger a rebuild via `switching = true`.
+  let bgSurface: RgbaColor = surfaceColor
+  let bg: Color = { r: bgSurface.r, g: bgSurface.g, b: bgSurface.b, a: bgSurface.a }
 
   # Self-terminate after `RAE_AUTO_EXIT_SEC` seconds of wall-clock
   # uptime. Used by automated test runs (and agents) so the binary
@@ -185,19 +190,12 @@ func main() {
     # the window or a `dispatchActions` call returns a different
     # screen, at which point the outer loop re-builds the world.
     let startScreenEnv: String = getEnv(name: "RAE_UI_SCREEN")
-    let albumKey: String = "album"
-    let searchKey: String = "search"
-    let profileKey: String = "profile"
-    let startScreen: Screen = Screen.Player
-    if startScreenEnv.equals(other: albumKey) {
-      startScreen = Screen.Album
-    }
-    if startScreenEnv.equals(other: searchKey) {
-      startScreen = Screen.Search
-    }
-    if startScreenEnv.equals(other: profileKey) {
-      startScreen = Screen.Library
-    }
+    let startScreen: Screen = Screen.Home
+    if startScreenEnv.equals(other: "library") { startScreen = Screen.Library }
+    if startScreenEnv.equals(other: "album")   { startScreen = Screen.Album }
+    if startScreenEnv.equals(other: "player")  { startScreen = Screen.Player }
+    if startScreenEnv.equals(other: "search")  { startScreen = Screen.Search }
+    if startScreenEnv.equals(other: "profile") { startScreen = Screen.Profile }
 
     # Phase 3-6 hot-reload restore. If `.rae/state.json` exists from a
     # previous run (the supervisor signalled `reload`, the app saved

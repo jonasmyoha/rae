@@ -50,14 +50,22 @@ func buildAlbumHeader(world: mod UiWorld, scene: view Scene, album: view Album) 
   let captionId: String = "HeroCaption"
   let titleId: String = "HeroTitle"
   let artistId: String = "HeroArtist"
+  let barTitleId: String = "BarTitle"
   # Fresh String allocations so the override list owns its heap
   # independent of `album`.
   let captionText: String = albumCaption(album: album)
   let titleText: String = "{album.album}"
   let artistText: String = "{album.artist}"
+  # Top-bar label is blank — the floating back-button overlay
+  # (top-left chevron-left circle) is the only "go back" affordance.
+  # The album's own title sits below in the hero block, so there's
+  # nothing to put up here; a parent-tab name like "Library" would
+  # lie when the album was opened from Home/Search.
+  let barTitleText: String = ""
   addTextOverride(list: overrides, nodeId: captionId, value: captionText)
   addTextOverride(list: overrides, nodeId: titleId, value: titleText)
   addTextOverride(list: overrides, nodeId: artistId, value: artistText)
+  addTextOverride(list: overrides, nodeId: barTitleId, value: barTitleText)
 
   # Scope the album scene's nodeIds under "album/" so they don't
   # collide with sibling pages, but don't tag the header itself as
@@ -86,7 +94,7 @@ func buildAlbumHeader(world: mod UiWorld, scene: view Scene, album: view Album) 
 # be revealed by wheel/drag. Empty `album.tracks` → no rows
 # mounted (a 1-row-tall placeholder rect keeps the spacer below
 # from collapsing the layout into the dock).
-func buildTrackList(world: mod UiWorld, trackScene: view Scene, album: view Album) pub ret EntityId {
+func buildTrackList(world: mod UiWorld, trackScene: view Scene, album: view Album, playback: view PlaybackState) pub ret EntityId {
   let list: EntityId = createEntity(world: world)
   let n: Int = album.tracks.length
   let visible: Int = n
@@ -138,6 +146,28 @@ func buildTrackList(world: mod UiWorld, trackScene: view Scene, album: view Albu
       sceneLabel: rowLabel
       overrides: overrides
     )
+    # Highlight the row only when this exact (album, track) is the
+    # one actually playing. `playback.playingAlbumStem` is empty
+    # before any song starts, so a freshly-opened album with no
+    # playback shows zero highlight. After the user picks a song,
+    # the matching row gets a rounded-rect accent-filled Shape.
+    let isPlayingRow: Bool = false
+    if playback.playingAlbumStem.equals(other: album.stem) {
+      if i is playback.playingTrackIndex {
+        isPlayingRow = true
+      }
+    }
+    if isPlayingRow {
+      let pillFill: RgbaColor = darkPillColor
+      let pill: Shape = {
+        kind: ShapeKind.RoundedRect
+        fill: pillFill
+        stroke: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
+        strokeWidth: 0.0
+        radius: 18.0
+      }
+      componentSet(this: world.shapes, entity: row, data: pill)
+    }
     # Whole-row click → push NowPlaying as a sub-page for THIS
     # track. The track index is encoded into the actionId
     # (`song.open.N`) — no per-row ComponentTable. Children with
@@ -193,13 +223,13 @@ func mountAlbumPage(
   world: mod UiWorld
   scenes: view AlbumScenes
   state: view AppState
+  playback: view PlaybackState
   scrollY: view Float
 ) pub ret EntityId {
   let album: Album = activeAlbum(state: state)
 
   let root: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: root, w: screenW, h: screenH)
-  setShapeRect(world: world, entity: root, fill: surfaceColor)
   let layV: LayoutType = LayoutType.Vertical
   let alignS: AlignKind = AlignKind.Start
   setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
@@ -216,7 +246,7 @@ func mountAlbumPage(
   componentSet(this: world.scrollStates, entity: root, data: scroll)
 
   let header: EntityId = buildAlbumHeader(world: world, scene: scenes.album, album: album)
-  let trackList: EntityId = buildTrackList(world: world, trackScene: scenes.trackRow, album: album)
+  let trackList: EntityId = buildTrackList(world: world, trackScene: scenes.trackRow, album: album, playback: playback)
   let spacer: EntityId = buildVerticalSpacer(world: world)
 
   let kids: List(EntityId) = createList(EntityId, cap: 3)
@@ -230,7 +260,7 @@ func mountAlbumPage(
 
 func buildAlbumWorld(scenes: view AlbumScenes, playback: view PlaybackState, state: view AppState, reg: view TextureRegistry, scrollY: view Float) pub ret UiWorld {
   let world: UiWorld = createUiWorld()
-  let page: EntityId = mountAlbumPage(world: world, scenes: scenes, state: state, scrollY: scrollY)
+  let page: EntityId = mountAlbumPage(world: world, scenes: scenes, state: state, playback: playback, scrollY: scrollY)
   let dock: EntityId = mountBottomDockOverlay(
     world: world
     activeTab: state.tab

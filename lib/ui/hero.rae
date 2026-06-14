@@ -183,6 +183,25 @@ func captureHeroTargetFromEntity(anim: mod HeroAnim, world: view UiWorld, e: vie
   if componentHas(this: world.computedRects, entity: e) is false {
     ret false
   }
+  # Don't animate between two heroes that paint different textures.
+  # Both the source's Sprite (captured into `anim.textureKey` above)
+  # and the target's Sprite must reference the same registry key —
+  # otherwise the user sees one cover slide into position, then snap
+  # to a different cover at the endpoint (e.g. brat → poker face).
+  # Source-side textures rebound for Spotify mode are the common
+  # cause: the Library tile still shows the album stem while the
+  # player-page cover got rebound to `spotify-current`, so source
+  # and target heroes share the same key string but paint different
+  # images. Bail here and the caller skips `startHeroTransition`,
+  # so the screen change is instant instead of jarring.
+  if anim.textureKey.length() > 0 {
+    if componentHas(this: world.sprites, entity: e) {
+      let sp: view Sprite => componentView(this: world.sprites, entity: e)
+      if sp.textureKey.equals(other: anim.textureKey) is false {
+        ret false
+      }
+    }
+  }
   let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: e)
   let cr: ComputedRect = componentGet(this: world.computedRects, entity: e)
   anim.dstX = wt.x

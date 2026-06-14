@@ -57,11 +57,69 @@ func handleScreenSwitch(
     pendingHeroTargetPageId: "{prevPendingHeroTargetPageId}"
   }
 
+  let outgoingPageId: String = pageIdForScreen(screen: currentScreen)
+  let incomingPageId: String = pageIdForScreen(screen: nextScreen)
+  let stemChangedNow: Bool = appState.currentAlbumStem.equals(other: cachedAlbumStem) is false
+  let trackChangedNow: Bool = appState.currentTrackIndex is not cachedTrackIndex
+
+  # Per-page re-mount on data change. Runs regardless of whether a
+  # screen change is happening — tapping a track row inside an album
+  # changes `currentTrackIndex` but keeps the visible screen the same,
+  # and we still need to re-mount the album page so the track-row
+  # highlight follows the user's selection. Stem change implies the
+  # tracks (and hence the highlight target) are new too.
+  if stemChangedNow {
+    unmountPage(world: world, pageId: albumPageId)
+    let freshAlbum: EntityId = mountAlbumPage(world: world, scenes: scenes, state: appState, playback: playback, scrollY: 0.0)
+    unmountPage(world: world, pageId: playerPageId)
+    let freshNP: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: appState)
+    rebindHero(world: world, fromKey: "albumCover", toKey: appState.currentAlbumStem)
+    # Dock stays mounted; update its cover thumb directly to the new
+    # album stem so the bottom widget tracks the user's choice.
+    updateMiniPlayerCover(world: world, stem: appState.currentAlbumStem)
+    # Freshly-mounted pages have no Active component → default to
+    # active=true. Explicitly deactivate; the `setPageActive(incoming,
+    # true)` call below re-activates whichever page is the real
+    # destination on a willSwitch=true frame.
+    setPageActive(world: world, pageId: albumPageId, active: false)
+    setPageActive(world: world, pageId: playerPageId, active: false)
+  } else {
+    if trackChangedNow {
+      # Album page re-mounts so the now-playing row gets its highlight
+      # Shape; Player page re-mounts so its hero / title reflects the
+      # new track. Preserve the album's current scroll position across
+      # the re-mount — the user picked a track from a specific row, so
+      # snapping back to the top would yank the list out from under
+      # them.
+      let preservedScrollY: Float = scrollFsm.scrollY
+      unmountPage(world: world, pageId: albumPageId)
+      let freshAlbum: EntityId = mountAlbumPage(world: world, scenes: scenes, state: appState, playback: playback, scrollY: preservedScrollY)
+      unmountPage(world: world, pageId: playerPageId)
+      let freshNP: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: appState)
+      rebindHero(world: world, fromKey: "albumCover", toKey: appState.currentAlbumStem)
+      setPageActive(world: world, pageId: albumPageId, active: false)
+      setPageActive(world: world, pageId: playerPageId, active: false)
+    }
+  }
+
   if willSwitch is false {
-    # No screen change requested — poll the watched scene files.
-    # If any changed on disk, re-parse the scenes and force the outer
-    # loop to rebuild the world on the same route. Skipping this when
-    # willSwitch=true avoids a double rebuild on the same frame.
+    # No screen change requested — refresh outer-loop caches if the
+    # data changed in place, then poll the hot-reload watcher.
+    if stemChangedNow or trackChangedNow {
+      let activeAlbumNow1: Album = activeAlbum(state: appState)
+      let activeTrackNow1: Track = trackAt(album: activeAlbumNow1, idx: appState.currentTrackIndex)
+      result.cachedTrackDurMs = activeTrackNow1.durationMs
+      result.cachedAlbumScrollFloor = albumScrollMin(album: activeAlbumNow1)
+      result.cachedAlbumStem = "{appState.currentAlbumStem}"
+      result.cachedTrackIndex = appState.currentTrackIndex
+      # The current page is still active — re-mount above cleared
+      # its Active state, restore it so the page actually renders.
+      setPageActive(world: world, pageId: outgoingPageId, active: true)
+      # Scroll target was just destroyed by `unmountPage`; point the
+      # FSM at the freshly-mounted page's ScrollState so wheel/drag
+      # keeps working on the new album entity.
+      result.newScrollTarget = findScrollTarget(world: world)
+    }
     if checkForChanges(watcher: watcher, now: getTime()) {
       scenes = loadAllScenes()
       result.switching = true
@@ -70,47 +128,22 @@ func handleScreenSwitch(
     ret result
   }
 
-  # Persistent-world screen change (slice 4b.3 + 4c). Two sub-paths:
-  # data-changed (album.open / song.open) re-mounts the affected
-  # page in place; data-unchanged (tab tap or back) just flips Active.
-  let outgoingPageId: String = pageIdForScreen(screen: currentScreen)
-  let incomingPageId: String = pageIdForScreen(screen: nextScreen)
-  let stemChangedNow: Bool = appState.currentAlbumStem.equals(other: cachedAlbumStem) is false
-  let trackChangedNow: Bool = appState.currentTrackIndex is not cachedTrackIndex
-
-  # Per-page re-mount on data change. The old rebuild path tore down
-  # every page on album.open / song.open, wiping ProfileScroll across
-  # the round-trip. Now we destroy just the affected page's entities
-  # and re-mount with the current state — Profile / Search / dock /
-  # scroll positions survive. `unmountPage` already sweeps the page's
-  # scoped nodeIds.
-  if stemChangedNow {
-    unmountPage(world: world, pageId: albumPageId)
-    let freshAlbum: EntityId = mountAlbumPage(world: world, scenes: scenes, state: appState, scrollY: 0.0)
-    # Tracks depend on the album too — re-mount NowPlaying.
-    unmountPage(world: world, pageId: playerPageId)
-    let freshNP: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: appState)
-    rebindHero(world: world, fromKey: "albumCover", toKey: appState.currentAlbumStem)
-    # Freshly-mounted pages have no Active component → default to
-    # active=true and would render on top of the incoming page.
-    # Explicitly deactivate; setPageActive(incoming, true) below
-    # re-activates whichever page is the real destination.
-    setPageActive(world: world, pageId: albumPageId, active: false)
-    setPageActive(world: world, pageId: playerPageId, active: false)
-  } else {
-    if trackChangedNow {
-      unmountPage(world: world, pageId: playerPageId)
-      let freshNP: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: appState)
-      rebindHero(world: world, fromKey: "albumCover", toKey: appState.currentAlbumStem)
-      setPageActive(world: world, pageId: playerPageId, active: false)
-    }
-  }
-
   setPageActive(world: world, pageId: outgoingPageId, active: false)
   setPageActive(world: world, pageId: incomingPageId, active: true)
 
+  # Nav-tabs bar lives as a child of the bottom dock. Unmount destroys
+  # the old bar's subtree; the new bar is built and re-attached as
+  # the dock's second child (mini-player stays as the first). One
+  # mutation of `Children` on the dock; the mini-player entity is
+  # never touched.
   unmountPage(world: world, pageId: navTabsPageId)
   let newBar: EntityId = mountNavTabsBar(world: world, activeTab: appState.tab, scenes: scenes)
+  let dock: EntityId = findPageRootEntity(world: world, pageId: dockPageId)
+  let mini: EntityId = findPageRootEntity(world: world, pageId: miniPlayerPageId)
+  let dockKids: List(EntityId) = createList(EntityId, cap: 2)
+  dockKids.add(value: mini)
+  dockKids.add(value: newBar)
+  attachChildren(world: world, parent: dock, kids: dockKids)
   unmountPage(world: world, pageId: backButtonPageId)
   let newBack: EntityId = mountBackButtonOverlay(world: world, state: appState)
 
