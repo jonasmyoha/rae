@@ -815,14 +815,13 @@ func main() {
             beginDrawing()
             clearBackground(color: bg)
             # Two-phase render around dock layer (100): paint content,
-            # capture+blur nav-tab band, paint dock+overlays. Skip the
-            # blur when the debug menu's full-screen blur is up so two
-            # blurs don't sample each other (topmost wins anyway).
+            # (formerly capture+blur nav-tab band), paint dock+overlays.
+            # Blur disabled — suspect captureAndBlurRegion side-effects
+            # corrupt subsequent sprite render state, leaving mini-player
+            # thumb / Home Recently-played thumbs grey. Re-enable when
+            # the GL-state issue is traced; nav-tabs render unblurred
+            # (BackdropImage falls back when its texture is missing).
             renderSystemLayerRange(world: world, reg: texReg, minOrder: 0 - 1000000, maxOrder: 100)
-            if debug.menuOpen is false {
-              let blurTex: Texture = captureAndBlurRegion(x: 0.0, y: tabBlurCaptureY(), w: screenW, h: navTabsH, blurSize: 16)
-              textureRegisterDirect(reg: texReg, key: tabBlurTextureKey(), tex: blurTex)
-            }
             renderSystemLayerRange(world: world, reg: texReg, minOrder: 100, maxOrder: 1000000)
             if animating {
               renderHeroOverlay(anim: anim, reg: texReg, now: now)
