@@ -122,10 +122,11 @@ func main() {
   # Missing file or stale fields fall back silently to the
   # defaults `createAppState` / `createPlaybackState` set above.
   restoreAppState(state: appState, playback: playback, path: stateFilePath)
-  # History persistence disabled — the save path crashes inside the
-  # cascade-drop of a `let e: PlayHistoryEntry = rae_ext_rae_buf_get(...)`
-  # read. See examples/98_mobile_ui/history_io.rae for the WIP plumbing
-  # we'll re-enable once the List(Struct(String)) issue is sorted.
+  # Persisted recently-played. Restored entries with a
+  # `spotify-art:` textureKey get their CDN artwork re-downloaded
+  # so the History thumbs paint real covers across launches.
+  restoreHistory(history: appState.playHistory, path: historyFilePath)
+  refetchHistoryArt(history: appState.playHistory, reg: texReg)
 
   # Spotify-mode integration. ON by default; opt out with
   # RAE_UI_NO_SPOTIFY=1. See examples/98_mobile_ui/spotify_view.rae.
