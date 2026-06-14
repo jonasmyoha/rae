@@ -33,6 +33,38 @@ enum Screen {
   # Genuinely the user-info screen — no longer pretending to be the
   # library grid.
   Profile
+  # `History` is the full play-history sub-page. Pushed from a tap
+  # on the "Recently played" header on Home. NOT a tab.
+  History
+}
+
+# Per-screen scroll bounds. `scrollable=false` means wheel / drag
+# is dropped on that screen. `floor` is the most-negative scrollY
+# the page allows. main.rae's per-frame scroll bounds block is a
+# thin wrapper around this.
+type ScrollBounds pub {
+  scrollable: Bool
+  floor: Float
+}
+
+func scrollBoundsForScreen(
+  screen: view Screen
+  appState: view AppState
+  cachedAlbumScrollFloor: view Float
+) pub ret ScrollBounds {
+  if screen is Screen.Home {
+    ret ScrollBounds { scrollable: true, floor: homeScrollMin(albums: appState.albums, history: appState.playHistory) }
+  }
+  if screen is Screen.Library {
+    ret ScrollBounds { scrollable: true, floor: 0.0 - 1050.0 }
+  }
+  if screen is Screen.Album {
+    ret ScrollBounds { scrollable: true, floor: cachedAlbumScrollFloor }
+  }
+  if screen is Screen.History {
+    ret ScrollBounds { scrollable: true, floor: historyScrollMin(history: appState.playHistory) }
+  }
+  ret ScrollBounds { scrollable: false, floor: 0.0 }
 }
 
 func buildScreenWorld(
@@ -58,6 +90,9 @@ func buildScreenWorld(
   if screen is Screen.Profile {
     ret buildProfileWorld(scenes: scenes, reg: texReg, state: state, playback: playback, scrollY: scrollY)
   }
+  if screen is Screen.History {
+    ret buildHistoryWorld(scenes: scenes, reg: texReg, state: state, playback: playback, scrollY: scrollY)
+  }
   ret buildNowPlayingWorld(scenes: scenes, playback: playback, state: state, reg: texReg)
 }
 
@@ -78,6 +113,9 @@ func pageIdForScreen(screen: Screen) pub ret String {
   }
   if screen is Screen.Profile {
     ret profilePageId
+  }
+  if screen is Screen.History {
+    ret historyPageId
   }
   ret playerPageId
 }
@@ -107,6 +145,7 @@ func buildAppWorld(
   let nowPlayingPage: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: state)
   let profilePage: EntityId = mountProfilePage(world: world, reg: texReg, state: state, scrollY: scrollY)
   let searchPage: EntityId = mountSearchPage(world: world)
+  let historyPage: EntityId = mountHistoryPage(world: world, state: state, scrollY: scrollY)
 
   # Visibility: only the currently-visible screen is Active=true.
   let visible: Screen = visibleScreen(state: state)
@@ -116,12 +155,14 @@ func buildAppWorld(
   let activeNowPlaying: Active = { value: visible is Screen.Player }
   let activeSearch: Active = { value: visible is Screen.Search }
   let activeProfile: Active = { value: visible is Screen.Profile }
+  let activeHistory: Active = { value: visible is Screen.History }
   componentSet(this: world.actives, entity: homePage, data: activeHome)
   componentSet(this: world.actives, entity: libraryPage, data: activeLibrary)
   componentSet(this: world.actives, entity: albumPage, data: activeAlbum)
   componentSet(this: world.actives, entity: nowPlayingPage, data: activeNowPlaying)
   componentSet(this: world.actives, entity: searchPage, data: activeSearch)
   componentSet(this: world.actives, entity: profilePage, data: activeProfile)
+  componentSet(this: world.actives, entity: historyPage, data: activeHistory)
 
   # Shared overlays — always Active.
   let dock: EntityId = mountBottomDockOverlay(
@@ -336,6 +377,8 @@ func dispatchActions(
     let playbackPrevKey: String = "playback.prev"
     let albumOpenKey: String = "album.open"
     let songOpenPrefix: String = "song.open."
+    let navHistoryKey: String = "nav.history"
+    let historyReplayPrefix: String = "history.replay."
     # `spotifyEnabled` is passed in from main.rae (lives on the
     # long-lived SpotifyState) so both sides agree on the source of
     # truth. ON by default; disabled by RAE_UI_NO_SPOTIFY=1 at boot.
@@ -364,6 +407,13 @@ func dispatchActions(
       # Mini-player tap. Open the full NowPlaying view as a sub-page
       # over whatever tab the user is currently on.
       let s: Screen = Screen.Player
+      pushSubPage(state: state, screen: s)
+    }
+    if actionId.equals(other: navHistoryKey) {
+      # "Recently played" header tap on Home. Open the full History
+      # sub-page over the current tab — same push semantics as
+      # `album.open` / `nav.nowPlaying`.
+      let s: Screen = Screen.History
       pushSubPage(state: state, screen: s)
     }
     if actionId.equals(other: backKey) {
@@ -460,6 +510,46 @@ func dispatchActions(
         let q: String = "{histAlbum.artist} {histTrack.title}"
         log("[spotify] play track query={q}")
         spotifyPlayQuery(query: q)
+      }
+    }
+    if actionId.startsWith(prefix: historyReplayPrefix) {
+      # Recently-played thumb / History row tap. Suffix is the index
+      # in `state.playHistory.entries` (0 = oldest). Local-catalog
+      # entries also flip `state.currentAlbumStem` / track index so
+      # the Album page would land on the right row if opened.
+      let pfx: Int = historyReplayPrefix.length()
+      let aLen: Int = actionId.length()
+      let suf: String = actionId.sub(start: pfx, len: aLen - pfx)
+      let idx: Int = suf.toInt()
+      let total: Int = state.playHistory.entries.length
+      if idx >= 0 and idx < total {
+        let e: PlayHistoryEntry = rae_ext_rae_buf_get(buf: state.playHistory.entries.data, index: idx)
+        if e.albumStem.length() > 0 {
+          state.currentAlbumStem = "{e.albumStem}"
+          let aIdx: Int = findAlbumIndex(albums: state.albums, stem: e.albumStem)
+          if aIdx >= 0 {
+            let a: Album = rae_ext_rae_buf_get(buf: state.albums.data, index: aIdx)
+            let tn: Int = a.tracks.length
+            let tj: Int = 0
+            loop tj < tn {
+              let t: Track = rae_ext_rae_buf_get(buf: a.tracks.data, index: tj)
+              if t.title.equals(other: e.trackName) {
+                state.currentTrackIndex = tj
+                tj = tn
+              } else {
+                tj = tj + 1
+              }
+            }
+          }
+        }
+        playback.playingAlbumStem = "{e.albumStem}"
+        playback.playingTrackIndex = state.currentTrackIndex
+        playback.isPlaying = true
+        if spotifyEnabled {
+          let q: String = "{e.artistName} {e.trackName}"
+          log("[spotify] history-replay query={q}")
+          spotifyPlayQuery(query: q)
+        }
       }
     }
 
