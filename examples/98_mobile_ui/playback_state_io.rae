@@ -163,5 +163,17 @@ func restoreAppState(state: mod AppState, playback: mod PlaybackState, path: vie
     playback.isPlaying = jsonBool(this: jsonValueAt(doc: doc, idx: playingFieldIdx), fallback: false)
   }
 
+  # Seed the "actually playing" pair from the restored snapshot so the
+  # album-listing row highlight follows the user across launches. The
+  # JSON schema is "browse-shaped" (currentAlbumStem / currentTrackIndex
+  # only) — pre-split those were the playing values too, so copying
+  # them here preserves the historical meaning. Skipped when
+  # isPlaying=false: a paused-at-shutdown session shouldn't pretend
+  # a track is playing on the next launch.
+  if playback.isPlaying {
+    playback.playingAlbumStem = "{state.currentAlbumStem}"
+    playback.playingTrackIndex = state.currentTrackIndex
+  }
+
   log("[state] restored from {path}: stem={state.currentAlbumStem} track={state.currentTrackIndex} ms={(playback.elapsedSec * 1000.0).toInt()} playing={playback.isPlaying}")
 }
