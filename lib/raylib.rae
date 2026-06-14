@@ -55,7 +55,22 @@ func loadTexture(fileName: String) extern ret Texture
 # circular crop (the inscribed circle's radius = min(w,h)/2).
 func loadCircleCroppedTexture(fileName: String) extern ret Texture
 
+# Load an image and zero the alpha of every pixel outside the rounded
+# rectangle of the given corner radius. Same pre-baked-mask pattern as
+# `loadCircleCroppedTexture` — the renderer can then `DrawTexture` with
+# no per-frame clipping logic, just on the rounded silhouette.
+func loadRoundedCroppedTexture(fileName: String, radius: Float) extern ret Texture
+
 func unloadTexture(texture: Texture) extern
+
+# Bracket a `drawTextureEx` (or any textured draw) with these two
+# calls to render the texture clipped to a rounded rectangle. Width
+# and height are the on-screen draw rect; radius is the corner
+# radius, all three in pixels. One fragment shader masks the alpha
+# at the curve with one-pixel smoothstep AA — no pre-baked variants,
+# any size, any radius, any texture.
+func roundedSpriteBegin(width: Float, height: Float, radius: Float) extern
+func roundedSpriteEnd() extern
 
 # Capture the current back-buffer, run a Gaussian blur over it on the
 # CPU, and upload the result as a Texture. The temporary Image is
