@@ -306,6 +306,16 @@ type GradientFill {
   angle: Float
 }
 
+# Texture painted at the entity's full bounds BEFORE its children
+# paint, so it acts as a backdrop for the subtree. Same registry as
+# `Sprite.textureKey`; missing textures silently render nothing.
+# Used for frosted-glass backdrops where the host captures and blurs
+# the framebuffer just before the entity paints, registers the result
+# under a known key, and the BackdropImage points at it.
+type BackdropImage {
+  textureKey: String
+}
+
 # A layer is a real entity. `LayerRoot` is what makes one — it carries
 # the layer's stable id (used for lookup from app code) and its paint
 # order (ascending = painted on top of lower orders, hit-tested

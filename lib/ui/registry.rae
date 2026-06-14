@@ -55,6 +55,7 @@ func registeredComponentNames() ret List(String) {
   names.add(value: "HeroWidget")
   names.add(value: "CornerRadius")
   names.add(value: "GradientFill")
+  names.add(value: "BackdropImage")
   names.add(value: "LayerRoot")
   names.add(value: "LayerRef")
   names.add(value: "DebugAnchor")
@@ -512,6 +513,11 @@ func deserCornerRadius(doc: view JsonDoc, val: view JsonValue) ret CornerRadius 
   ret CornerRadius { radius: r }
 }
 
+func deserBackdropImage(doc: view JsonDoc, val: view JsonValue) ret BackdropImage {
+  let k: String = optString(doc: doc, container: val, key: "textureKey", fallback: "")
+  ret BackdropImage { textureKey: own k }
+}
+
 func deserGradientFill(doc: view JsonDoc, val: view JsonValue) ret GradientFill {
   let fromIdx: Int = jsonField(doc: doc, this: val, key: "from")
   let toIdx: Int = jsonField(doc: doc, this: val, key: "to")
@@ -704,6 +710,10 @@ func applyComponentByName(
   }
   if name.equals(other: "GradientFill") {
     componentSet(this: world.gradientFills, entity: entity, data: deserGradientFill(doc: doc, val: val))
+    ret
+  }
+  if name.equals(other: "BackdropImage") {
+    componentSet(this: world.backdropImages, entity: entity, data: deserBackdropImage(doc: doc, val: val))
     ret
   }
   if name.equals(other: "LayerRoot") {
