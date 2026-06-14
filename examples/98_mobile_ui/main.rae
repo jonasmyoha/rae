@@ -503,12 +503,14 @@ func main() {
         # the spring-back after release renders chunky because the
         # physics step only runs once per OS event wake.
         let scrollAnimating: Bool = false
-        # Per-frame scroll bounds. Both Profile (cover grid) and Album
-        # (track list) scroll; the OOB heartbeat, drag/spring, and wheel
-        # blocks all read these. Wrong floor → spring never settles;
-        # missing gate → wheel silently dropped.
+        # Per-frame scroll bounds. Wrong floor → spring never settles;
+        # missing screen-gate → wheel silently dropped.
         let scrollOnThisScreen: Bool = false
         let scrollFloor: Float = 0.0
+        if currentScreen is Screen.Home {
+          scrollOnThisScreen = true
+          scrollFloor = homeScrollMin(albums: appState.albums)
+        }
         if currentScreen is Screen.Library {
           scrollOnThisScreen = true
           scrollFloor = 0.0 - 1050.0
