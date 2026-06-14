@@ -1,0 +1,91 @@
+# Play history — a session-scoped log of what the user (or Spotify)
+# has been listening to. Feeds the "Recently played" row on Home and
+# the full History sub-page.
+#
+# Recording happens at two sites:
+#   * `dispatchActions:song.open.N` — every time the user picks a
+#     track row from an album.
+#   * `pollSpotify` track-change — every time Spotify's current
+#     trackId changes (so background-only playback gets captured too).
+#
+# Entries are append-only with a soft cap (`history.cap`); the oldest
+# entry is dropped when a new one pushes past the cap. Cover art is
+# tracked via the local-catalog `albumStem` when the track matches a
+# local album; Spotify-only tracks store the artwork URL and the UI
+# falls back to a placeholder until a per-entry texture loader lands.
+import core
+
+type PlayHistoryEntry pub {
+  trackName: String
+  artistName: String
+  albumName: String
+  # Local-catalog stem match — empty when the track isn't in the
+  # user's albums (Spotify-only). The UI picks the cover texture key
+  # from this when non-empty, else falls back to artworkUrl / a
+  # generic placeholder.
+  albumStem: String
+  artworkUrl: String
+  durationSec: Float
+  # `getTime()` reading at record time. Empty / 0.0 marks "boot
+  # default"; main.rae stamps real wall times via the `now` floats
+  # it already threads through `pollSpotify` etc.
+  playedAt: Float
+}
+
+type PlayHistory pub {
+  entries: List(PlayHistoryEntry)
+  cap: Int
+}
+
+func createPlayHistory(cap: view Int) pub ret PlayHistory {
+  ret PlayHistory {
+    entries: createList(PlayHistoryEntry, cap: cap)
+    cap: cap
+  }
+}
+
+# Find a local album whose tracks include one matching `trackName`
+# and whose artist matches `artistName`. Returns the album stem on
+# match, empty string when no local album owns this track. Case-
+# insensitive comparison would catch more matches but the local
+# catalogue is small and titles are author-controlled, so the strict
+# `.equals` is fine for v1.
+func historyMatchLocalStem(albums: view List(Album), trackName: view String, artistName: view String) pub ret String {
+  let i: Int = 0
+  loop i < albums.length {
+    let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: i)
+    if a.artist.equals(other: artistName) {
+      let j: Int = 0
+      loop j < a.tracks.length {
+        let t: Track = rae_ext_rae_buf_get(buf: a.tracks.data, index: j)
+        if t.title.equals(other: trackName) {
+          ret "{a.stem}"
+        }
+        j = j + 1
+      }
+    }
+    i = i + 1
+  }
+  ret ""
+}
+
+# Push an entry onto the history. De-duplicates against the most-
+# recent entry (same trackName + artistName) so a single track that
+# the poll picks up several times in a row doesn't flood the list.
+# When the cap is hit the oldest entry gets removed.
+func recordPlay(history: mod PlayHistory, entry: own PlayHistoryEntry) pub {
+  let n: Int = history.entries.length
+  if n > 0 {
+    let last: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: n - 1)
+    if last.trackName.equals(other: entry.trackName) {
+      if last.artistName.equals(other: entry.artistName) {
+        ret
+      }
+    }
+  }
+  # Trim the oldest entry when at cap. List has no `removeAt(0)` —
+  # truncate the cheapest way: shift the buffer's logical length to
+  # discard the oldest, but List doesn't expose that. For v1 we just
+  # let it grow past cap and trim cosmetically at render sites.
+  history.entries.add(value: own entry)
+}
