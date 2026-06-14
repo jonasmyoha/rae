@@ -824,7 +824,14 @@ func main() {
           if active {
             beginDrawing()
             clearBackground(color: bg)
-            renderSystem(world: world, reg: texReg)
+            # Two-phase render around the dock layer (order 100):
+            # phase 1 paints content < 100, capture+blur the nav-tab
+            # band into `tabBlurTextureKey()`, phase 2 paints dock +
+            # overlays on top of the fresh blur.
+            renderSystemLayerRange(world: world, reg: texReg, minOrder: 0 - 1000000, maxOrder: 100)
+            let blurTex: Texture = captureAndBlurRegion(x: 0.0, y: tabBlurCaptureY(), w: screenW, h: navTabsH, blurSize: 16)
+            textureRegisterDirect(reg: texReg, key: tabBlurTextureKey(), tex: blurTex)
+            renderSystemLayerRange(world: world, reg: texReg, minOrder: 100, maxOrder: 1000000)
             if animating {
               renderHeroOverlay(anim: anim, reg: texReg, now: now)
             }
