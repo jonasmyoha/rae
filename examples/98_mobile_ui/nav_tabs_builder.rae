@@ -116,12 +116,8 @@ func buildNavTabsForScreen(
   # way to both screen edges, the way iOS tab bars do.
   let barW: Float = screenW
   setRectFixed(world: world, entity: bar, w: barW, h: navTabsH)
-  # Solid dark backdrop just behind the tab icons — visible against
-  # both light and dark page surfaces without depending on a theme
-  # token. ~rgb(18,18,24) reads as a clear bar on the dark theme
-  # and as a near-black strip on the light theme.
-  let barBg: RgbaColor = { r: 18, g: 18, b: 24, a: 255 }
-  setShapeRect(world: world, entity: bar, fill: barBg)
+  # No bar background — the dock entity's `GradientFill` paints the
+  # full bottom-bar area and shows through behind the tab icons.
   setLayout(world: world, entity: bar, kind: LayoutType.Horizontal, gap: 0.0, alignCross: AlignKind.Center)
 
   # Four base tabs: Home / Library / Search / Profile. Player is
@@ -320,6 +316,15 @@ func mountBottomDockOverlay(
   # created the named layer entities at boot.
   let dockLayerId: String = "dock"
   setLayerById(world: world, entity: dock, id: dockLayerId)
+  # Sharp-cornered vertical gradient as the dock's backdrop — pastel
+  # red at the top fades to pastel blue at the bottom. Sits behind
+  # the mini-player pill (which keeps its own rounded gradient) and
+  # behind the nav-tabs (whose own dark fill is dropped below so the
+  # gradient shows through).
+  let dockBgFrom: RgbaColor = { r: 255, g: 179, b: 186, a: 255 }
+  let dockBgTo: RgbaColor = { r: 186, g: 225, b: 255, a: 255 }
+  let dockBg: GradientFill = { from: dockBgFrom, to: dockBgTo, angle: 90.0 }
+  componentSet(this: world.gradientFills, entity: dock, data: dockBg)
 
   # Mini-player: indented by outerPad on each side. Vertical layout
   # with alignCross=Center centers it inside the full-width dock.
