@@ -344,6 +344,7 @@ func main() {
     let cachedTrackIndex: Int = 0 - 1
     let cachedTrackDurMs: Int = 0
     let cachedAlbumScrollFloor: Float = 0.0
+    let cachedHistoryLen: Int = 0
     # Single InputSystem for the app lifetime — outlives world
     # rebuilds so a held press carries `pressedEntity` across them.
     # `updateInputSystem` refills the per-frame fields each tick.
@@ -642,6 +643,10 @@ func main() {
               saveAppState(path: stateFilePath, state: appState, playback: playback)
             }
           }
+
+          # song.open / pollSpotify just may have grown playHistory;
+          # re-mount Home/History in place if so. No-op otherwise.
+          cachedHistoryLen = refreshHistoryViewsIfNeeded(world: world, state: appState, visible: currentScreen, cachedLen: cachedHistoryLen)
 
           # In-app debug UI: process any debug.* action that fired
           # this frame. `dispatchDebugAction` toggles the persistent
