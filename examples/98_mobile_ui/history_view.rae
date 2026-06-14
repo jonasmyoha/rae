@@ -51,25 +51,25 @@ func historyScrollMin(history: view PlayHistory) pub ret Float {
   ret 0.0 - overflow
 }
 
-# True when the entry has a usable local-catalog texture key. Used
-# by both the History rows and the Home preview row to decide
-# whether to set a sprite or leave a placeholder rect.
-func historyHasLocalArt(entry: view PlayHistoryEntry) pub ret Bool {
-  ret entry.albumStem.length() > 0
+# True when the entry has a textureKey the registry can paint.
+# Local entries set it to the album stem; Spotify entries set it
+# to the per-trackId key registered by `loadHistoryEntryArt`. Empty
+# → placeholder fallback.
+func historyHasArt(entry: view PlayHistoryEntry) pub ret Bool {
+  ret entry.textureKey.length() > 0
 }
 
-# Build a single thumb entity. Local-catalog match → sprite bound
-# to the album stem (same texture key as the library tiles);
-# Spotify-only → a visible placeholder rect filled with the theme's
-# `textMuted` color (mid-gray in both light and dark themes — the
-# previous `surface` choice was invisible against the page bg).
+# Build a single thumb entity. Has-art → sprite bound to the
+# entry's stored textureKey (album stem for local, "spotify-art:<id>"
+# for Spotify). No-art → a visible placeholder rect filled with the
+# theme's `textMuted` color.
 func buildHistoryThumb(world: mod UiWorld, entry: view PlayHistoryEntry, size: view Float) ret EntityId {
   let thumb: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: thumb, w: size, h: size)
   let cr: CornerRadius = { radius: 8.0 }
   componentSet(this: world.cornerRadiuses, entity: thumb, data: cr)
-  if historyHasLocalArt(entry: entry) {
-    let key: String = "{entry.albumStem}"
+  if historyHasArt(entry: entry) {
+    let key: String = "{entry.textureKey}"
     setSprite(world: world, entity: thumb, key: key, tint: imageTintColor)
   } else {
     let mutedName: String = "textMuted"

@@ -20,11 +20,18 @@ type PlayHistoryEntry pub {
   artistName: String
   albumName: String
   # Local-catalog stem match — empty when the track isn't in the
-  # user's albums (Spotify-only). The UI picks the cover texture key
-  # from this when non-empty, else falls back to artworkUrl / a
-  # generic placeholder.
+  # user's albums (Spotify-only). Drives the local-vs-Spotify path
+  # in `history.replay.N`; rendering uses `textureKey` directly.
   albumStem: String
   artworkUrl: String
+  # Texture registry key the History row's thumb uses. For local
+  # entries this is the album stem (already loaded by
+  # `loadAllTextures` at boot). For Spotify entries the recorder
+  # calls `loadHistoryEntryArt` to fetch the artwork to a per-
+  # trackId file, registers it, and stores the key here. Empty
+  # when no art was loaded — `buildHistoryThumb` falls back to a
+  # placeholder Shape.
+  textureKey: String
   durationSec: Float
   # `getTime()` reading at record time. Empty / 0.0 marks "boot
   # default"; main.rae stamps real wall times via the `now` floats

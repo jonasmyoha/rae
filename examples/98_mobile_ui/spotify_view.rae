@@ -131,6 +131,32 @@ func rebindCoverOnPages(world: mod UiWorld, fromKey: view String, toKey: view St
 # Caller is responsible for not calling this on every frame — only on
 # track change. We unconditionally remove the previous registration
 # first so loadTexture's malloc isn't shadowed by a stale entry.
+# Fetch artwork for one play-history entry and register it under a
+# trackId-derived key. Returns the textureKey on success, "" on
+# failure. Skips the network round-trip when the key is already
+# registered — replaying the same track keeps reusing one file.
+func loadHistoryEntryArt(track: view SpotifyTrack, reg: mod TextureRegistry) pub ret String {
+  if track.trackId.length() is 0 {
+    ret ""
+  }
+  let key: String = "spotify-art:{track.trackId}"
+  if textureHas(reg: reg, key: key) {
+    ret key
+  }
+  if track.artworkUrl.length() is 0 {
+    ret ""
+  }
+  let outPath: String = "/tmp/rae_spotify_art_{track.trackId}.jpg"
+  let ok: Bool = spotifyFetchArtwork(url: track.artworkUrl, outPath: outPath)
+  if ok is false {
+    ret ""
+  }
+  let tex: Texture = loadTexture(fileName: outPath)
+  let keyForReg: String = "{key}"
+  textureRegisterDirect(reg: reg, key: own keyForReg, tex: tex)
+  ret key
+}
+
 func refreshSpotifyArt(state: view SpotifyState, track: view SpotifyTrack, reg: mod TextureRegistry) ret Bool {
   let outPath: String = "/tmp/rae_spotify_art.jpg"
   let primaryOk: Bool = false
@@ -248,12 +274,23 @@ func pollSpotify(
         trackName: track.trackName
         artistName: track.artistName
       )
+      # Pick the texture key for the history row's thumb. Local
+      # match → reuse the stem (already loaded at boot). No match
+      # → fetch the Spotify URL into a per-trackId texture so the
+      # thumb shows the real cover instead of a grey placeholder.
+      let texKey: String = ""
+      if stem.length() > 0 {
+        texKey = "{stem}"
+      } else {
+        texKey = loadHistoryEntryArt(track: track, reg: reg)
+      }
       let entry: PlayHistoryEntry = {
         trackName: "{track.trackName}"
         artistName: "{track.artistName}"
         albumName: "{track.albumName}"
         albumStem: own stem
         artworkUrl: "{track.artworkUrl}"
+        textureKey: own texKey
         durationSec: dur
         playedAt: now
       }
