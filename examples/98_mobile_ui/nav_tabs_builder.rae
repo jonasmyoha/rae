@@ -124,13 +124,28 @@ func buildNavTabsForScreen(
   setShapeRect(world: world, entity: bar, fill: barBg)
   setLayout(world: world, entity: bar, kind: LayoutType.Horizontal, gap: 0.0, alignCross: AlignKind.Center)
 
-  # Two base tabs: Library / Search. NowPlaying is NOT a tab here —
-  # it's reached by tapping the mini-player above this bar. Profile
-  # was dropped because it duplicated the Library grid; reintroduce
-  # later with real user-account / settings content.
-  let tabW: Float = barW / 2.0
+  # Four base tabs: Home / Library / Search / Profile. Player is
+  # NOT a tab — it's reached by tapping the mini-player above this
+  # bar. Album is also NOT a tab — it's a sub-page opened by tapping
+  # any cover.
+  let tabW: Float = barW / 4.0
+  let homeActive: Bool = activeTab is Screen.Home
   let libraryActive: Bool = activeTab is Screen.Library
   let searchActive: Bool = activeTab is Screen.Search
+  let profileActive: Bool = activeTab is Screen.Profile
+
+  let homeKey: String = "mat:home"
+  let homeLabel: String = "Home"
+  let homeAction: String = "nav.home"
+  let homeTab: EntityId = mountNavTab(
+    world: world
+    scene: scenes.navTab
+    w: tabW
+    iconKey: homeKey
+    label: homeLabel
+    actionId: homeAction
+    active: homeActive
+  )
 
   let libraryKey: String = "mat:library_music"
   let libraryLabel: String = "Library"
@@ -158,9 +173,24 @@ func buildNavTabsForScreen(
     active: searchActive
   )
 
-  let kids: List(EntityId) = createList(EntityId, cap: 2)
+  let profileKey: String = "mat:person"
+  let profileLabel: String = "Profile"
+  let profileAction: String = "nav.profile"
+  let profileTab: EntityId = mountNavTab(
+    world: world
+    scene: scenes.navTab
+    w: tabW
+    iconKey: profileKey
+    label: profileLabel
+    actionId: profileAction
+    active: profileActive
+  )
+
+  let kids: List(EntityId) = createList(EntityId, cap: 4)
+  kids.add(value: homeTab)
   kids.add(value: libraryTab)
   kids.add(value: searchTab)
+  kids.add(value: profileTab)
   attachChildren(world: world, parent: bar, kids: kids)
   ret bar
 }
@@ -229,20 +259,23 @@ func mountBackButtonOverlay(world: mod UiWorld, state: view AppState) pub ret En
 
   let off: Offset = { delta: Vec2 { x: margin, y: margin } }
   componentSet(this: world.offsets, entity: btn, data: off)
+  # Back button sits on its own layer above the dock — page content
+  # can't paint over it, and the dock can't paint over it either.
+  let backLayerId: String = "back-button"
+  setLayerById(world: world, entity: btn, id: backLayerId)
   ret btn
 }
 
+# Build the nav-tabs bar as a dock child. Same Rect / Layout / styling
+# as before but WITHOUT a parentless Offset — the dock's Vertical
+# layout positions it. PageRoot tag stays so `unmountPage(navTabsPageId)`
+# can find and destroy just this subtree when the user switches tabs.
 func mountNavTabsBar(
   world: mod UiWorld
   activeTab: Screen
   scenes: view AlbumScenes
 ) pub ret EntityId {
   let bar: EntityId = buildNavTabsForScreen(world: world, activeTab: activeTab, scenes: scenes)
-  let barY: Float = screenH - navTabsH
-  let barOff: Offset = { delta: Vec2 { x: 0.0, y: barY } }
-  componentSet(this: world.offsets, entity: bar, data: barOff)
-  # Tag as a page so `unmountPage(world, navTabsPageId)` can find
-  # and rebuild it on tab change without tearing down the world.
   let copiedId: String = ""
   copiedId = copiedId.concat(other: navTabsPageId)
   let pr: PageRoot = { id: own copiedId }
@@ -250,6 +283,15 @@ func mountNavTabsBar(
   ret bar
 }
 
+# The bottom dock — a single parent entity that owns the mini-player
+# AND the nav-tabs bar as its children. The user reads them as one
+# toolbar at the bottom; the ECS treats them as one structural unit
+# so the mini-player can't drift independently of the nav-tabs.
+#
+# Tagged `PageRoot{"dock"}` so `findPageRootEntity(world, dockPageId)`
+# can locate it from any screen-switch site (where we re-attach a
+# fresh nav-tabs bar with new active styling, keeping the existing
+# mini-player as the first child).
 func mountBottomDockOverlay(
   world: mod UiWorld
   activeTab: Screen
@@ -258,9 +300,29 @@ func mountBottomDockOverlay(
   state: view AppState
   reg: view TextureRegistry
 ) pub ret EntityId {
-  # Now-playing / mini-player floats above the nav bar — with the
-  # content-area margins (outerPad on each side) so it visually
-  # belongs to the page, not to the chrome.
+  let dock: EntityId = createEntity(world: world)
+  let dockH: Float = miniPlayerH + navTabsH
+  setRectFixed(world: world, entity: dock, w: screenW, h: dockH)
+  let layV: LayoutType = LayoutType.Vertical
+  let alignC: AlignKind = AlignKind.Center
+  setLayout(world: world, entity: dock, kind: layV, gap: 0.0, alignCross: alignC)
+  # Position the whole dock at the bottom of the screen via a single
+  # Offset. The children below get their positions from Vertical
+  # layout inside the dock — no individual Offsets needed.
+  let dockOff: Offset = { delta: Vec2 { x: 0.0, y: screenH - dockH } }
+  componentSet(this: world.offsets, entity: dock, data: dockOff)
+  let copiedId: String = ""
+  copiedId = copiedId.concat(other: dockPageId)
+  let pr: PageRoot = { id: own copiedId }
+  componentSet(this: world.pageRoots, entity: dock, data: own pr)
+  # Place the dock on the "dock" layer so it always paints (and
+  # hit-tests) above page content. App is responsible for having
+  # created the named layer entities at boot.
+  let dockLayerId: String = "dock"
+  setLayerById(world: world, entity: dock, id: dockLayerId)
+
+  # Mini-player: indented by outerPad on each side. Vertical layout
+  # with alignCross=Center centers it inside the full-width dock.
   let miniW: Float = screenW - outerPad * 2.0
   let miniLabel: String = "mini-player"
   let mini: EntityId = buildMiniPlayerInstance(
@@ -272,15 +334,14 @@ func mountBottomDockOverlay(
     playback: playback
     state: state
   )
-  let miniX: Float = outerPad
-  let miniY: Float = screenH - navTabsH - miniPlayerH
-  let miniOff: Offset = { delta: Vec2 { x: miniX, y: miniY } }
-  componentSet(this: world.offsets, entity: mini, data: miniOff)
 
-  # Nav-tabs bar is full-bleed across the screen bottom edge. The
-  # solid dark background is set inside `buildNavTabsForScreen` and
-  # only covers the row of tab icons — it deliberately does NOT
-  # extend up under the mini-player.
+  # Nav-tabs bar: full screen width, solid dark backdrop. The bar's
+  # own builder sets its Rect to screenW × navTabsH.
   let bar: EntityId = mountNavTabsBar(world: world, activeTab: activeTab, scenes: scenes)
-  ret bar
+
+  let kids: List(EntityId) = createList(EntityId, cap: 2)
+  kids.add(value: mini)
+  kids.add(value: bar)
+  attachChildren(world: world, parent: dock, kids: kids)
+  ret dock
 }

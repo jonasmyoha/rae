@@ -1,29 +1,26 @@
-# Profile-screen world composition (TikTok-inspired layout):
-#   * Top bar with the user handle.
-#   * Centered circular avatar (Circle Shape behind a `mat:person`
-#     glyph — the renderer can't mask a Sprite to a circle yet, so
-#     we fake it with a colored disk + icon).
-#   * Display name + bio.
-#   * Three stats columns: Followers / Following / Likes.
-#   * A 3-column grid of every album cover registered under
-#     `profileCoverKey(i)` in `asset_loader.rae`. The grid is built
-#     as nested vertical-of-horizontals because RUICS Grid layout
-#     isn't implemented yet (lib/ui/layout.rae line 21 comment).
-#   * Bottom nav-tabs.
+# Profile-tab world composition. The user-account screen:
+#   * top bar "Profile"
+#   * circular avatar
+#   * display name + bio
+#   * Spotify-connection card — live status of the remote player
+#     ("Playing 'Track' by 'Artist'", "Paused", or "Not connected")
+#   * three small stat columns (library counts, total tracks, etc.)
+#   * settings list — placeholder rows with chevrons
 #
-# Vertical scroll comes from the host's `scrollY` parameter, which
-# is applied as an Offset.delta.y to the scrollable region. The
-# host (main.rae) reads `getMouseWheelMove` and forces a rebuild
-# when scrollY changes — no per-frame mutation needed.
+# This used to be the same screen as Library (one big "profile +
+# albums" pile). The catalogue is its own Library tab now; this
+# screen is purely about the user and their connection to Spotify.
+#
+# Like the Library page, the body owns a `ScrollState` so the
+# settings list can scroll if it overflows.
 import core
 import fs
+import sys/spotify
 import ui/components
 import ui/ecs
 import ui/layout
 
-# --- helpers -----------------------------------------------------------
-
-# Local circle shape helper. world_helpers.rae only exposes the rect /
+# Local circle shape helper — world_helpers.rae only exposes rect /
 # rounded-rect variants; the avatar needs a true `ShapeKind.Circle`.
 func setProfileCircleShape(world: mod UiWorld, entity: view EntityId, fill: view RgbaColor) {
   let sh: Shape = {
@@ -36,30 +33,21 @@ func setProfileCircleShape(world: mod UiWorld, entity: view EntityId, fill: view
   componentSet(this: world.shapes, entity: entity, data: sh)
 }
 
-# --- avatar -----------------------------------------------------------
+let profileAvatarSize: Float = 120.0
+let profileAvatarIconSize: Float = 80.0
 
-let avatarSize: Float = 120.0
-let avatarIconSize: Float = 80.0
-
-func buildAvatar(world: mod UiWorld, reg: view TextureRegistry) ret EntityId {
+func buildProfileAvatar(world: mod UiWorld, reg: view TextureRegistry) ret EntityId {
   let avatar: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: avatar, w: avatarSize, h: avatarSize)
+  setRectFixed(world: world, entity: avatar, w: profileAvatarSize, h: profileAvatarSize)
 
   let avatarKey: String = profileAvatarKey()
   if textureHas(reg: reg, key: avatarKey) {
     # Real profile picture — circle-cropped at load time
-    # (`loadCircleCroppedTexture`). Draw it as a regular Sprite;
-    # the alpha mask on the underlying texture handles the round
-    # shape. No background Shape needed because the cropped
-    # corners are transparent.
+    # (`loadCircleCroppedTexture`). The alpha mask on the underlying
+    # texture handles the round shape; no background Shape needed.
     let whiteTint: RgbaColor = { r: 255, g: 255, b: 255, a: 255 }
     setSprite(world: world, entity: avatar, key: avatarKey, tint: whiteTint)
   } else {
-    # Placeholder for accounts without a photo: amber-tinted Circle
-    # Shape with the `mat:person` glyph centered. Same render path
-    # as the original avatar — the renderer can't mask a Sprite to
-    # a circle yet, but a Circle Shape draws fine, and the icon
-    # sits centred above it via Stack layout.
     let accentBg: RgbaColor = darkPillColor
     setProfileCircleShape(world: world, entity: avatar, fill: accentBg)
     let layS: LayoutType = LayoutType.Stack
@@ -67,7 +55,7 @@ func buildAvatar(world: mod UiWorld, reg: view TextureRegistry) ret EntityId {
     setLayout(world: world, entity: avatar, kind: layS, gap: 0.0, alignCross: alignC)
 
     let icon: EntityId = createEntity(world: world)
-    setRectFixed(world: world, entity: icon, w: avatarIconSize, h: avatarIconSize)
+    setRectFixed(world: world, entity: icon, w: profileAvatarIconSize, h: profileAvatarIconSize)
     let personKey: String = "mat:person"
     setSprite(world: world, entity: icon, key: personKey, tint: lightTextColor)
 
@@ -78,10 +66,10 @@ func buildAvatar(world: mod UiWorld, reg: view TextureRegistry) ret EntityId {
   ret avatar
 }
 
-# Helper: build a single stat column (big number + small label).
-func buildStatColumn(world: mod UiWorld, value: own String, label: own String) ret EntityId {
+# Stat column: big number on top, small label below.
+func buildProfileStatColumn(world: mod UiWorld, value: own String, label: own String) ret EntityId {
   let col: EntityId = createEntity(world: world)
-  let colW: Float = 100.0
+  let colW: Float = 110.0
   let colH: Float = 56.0
   setRectFixed(world: world, entity: col, w: colW, h: colH)
   let layV: LayoutType = LayoutType.Vertical
@@ -105,7 +93,9 @@ func buildStatColumn(world: mod UiWorld, value: own String, label: own String) r
   ret col
 }
 
-func buildStatsRow(world: mod UiWorld) ret EntityId {
+# Library-stats row. Pulls live counts from the album catalogue so the
+# numbers stay honest — no fake follower counts.
+func buildProfileStatsRow(world: mod UiWorld, state: view AppState) ret EntityId {
   let row: EntityId = createEntity(world: world)
   let rowW: Float = screenW - outerPad * 2.0
   let rowH: Float = 60.0
@@ -114,183 +104,176 @@ func buildStatsRow(world: mod UiWorld) ret EntityId {
   let alignC: AlignKind = AlignKind.Center
   setLayout(world: world, entity: row, kind: layH, gap: 24.0, alignCross: alignC)
 
-  let followers: String = "12.3K"
-  let followersLabel: String = "Followers"
-  let following: String = "248"
-  let followingLabel: String = "Following"
-  let likes: String = "98.1K"
-  let likesLabel: String = "Likes"
+  let albumCount: Int = state.albums.length
+  let trackCount: Int = 0
+  let totalMs: Int = 0
+  let i: Int = 0
+  loop i < albumCount {
+    let a: Album = rae_ext_rae_buf_get(buf: state.albums.data, index: i)
+    trackCount = trackCount + a.tracks.length
+    totalMs = totalMs + a.totalDurationMs
+    i = i + 1
+  }
+  let totalHours: Int = totalMs / 3600000
+  let albumsStr: String = "{albumCount}"
+  let tracksStr: String = "{trackCount}"
+  let hoursStr: String = "{totalHours}h"
+  let albumsLabel: String = "Albums"
+  let tracksLabel: String = "Tracks"
+  let hoursLabel: String = "Listening"
 
-  let followersCol: EntityId = buildStatColumn(world: world, value: followers, label: followersLabel)
-  let followingCol: EntityId = buildStatColumn(world: world, value: following, label: followingLabel)
-  let likesCol: EntityId = buildStatColumn(world: world, value: likes, label: likesLabel)
+  let albumsCol: EntityId = buildProfileStatColumn(world: world, value: albumsStr, label: albumsLabel)
+  let tracksCol: EntityId = buildProfileStatColumn(world: world, value: tracksStr, label: tracksLabel)
+  let hoursCol: EntityId = buildProfileStatColumn(world: world, value: hoursStr, label: hoursLabel)
 
   let kids: List(EntityId) = createList(EntityId, cap: 3)
-  kids.add(value: followersCol)
-  kids.add(value: followingCol)
-  kids.add(value: likesCol)
+  kids.add(value: albumsCol)
+  kids.add(value: tracksCol)
+  kids.add(value: hoursCol)
   attachChildren(world: world, parent: row, kids: kids)
   ret row
 }
 
-# --- album cover grid -------------------------------------------------
-
-# Grid metrics. 3 columns; tile edge derived from screen width so
-# both side margins and inter-tile gaps add up cleanly.
-let gridColumns: Int = 3
-let gridTileGap: Float = 4.0
-
-func gridTileSize() ret Float {
-  # Locals copy the module-level constants because the C backend
-  # mis-codegens `.toFloat()` invoked directly on a module-level
-  # `let` (drops the receiver — observed 2026-05-28).
-  let cols: Int = gridColumns
-  let avail: Float = screenW - outerPad * 2.0
-  let gapTotal: Float = gridTileGap * (cols - 1).toFloat()
-  ret (avail - gapTotal) / cols.toFloat()
-}
-
-# Collect the album-cover texture keys for every parsed album.
-# The album list (loaded once at boot from `albumsFolder`) is the
-# single source of truth — the loader registers each cover under
-# its stem key, and we just hand those stems back here.
-func collectProfileCoverKeys(albums: view List(Album)) ret List(String) {
-  let result: List(String) = createList(String, cap: albums.length)
-  let i: Int = 0
-  loop i < albums.length {
-    let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: i)
-    # Fresh String allocation — `a.stem` is owned by `albums`,
-    # which outlives this list, but downstream consumers (the
-    # cover-tile builder) need their own copy to avoid sharing
-    # the per-Album heap.
-    let copied: String = "{a.stem}"
-    result.add(value: copied)
-    i = i + 1
-  }
-  ret result
-}
-
-# Build one image tile sprite for the given texture key.
-#
-# Each tile carries a HeroWidget keyed by its texture so the hero
-# animation system can morph this tile to/from the Album / Now-
-# Playing screens when the cover is also visible there (after a
-# rebind in main.rae — the scenes themselves still author the
-# placeholder "albumCover" key and get renamed at world-build time
-# to whichever cover the user is currently viewing).
-#
-# Each tile also takes click input via `actionId: "album.open"`.
-# `dispatchActions` reads the clicked tile's Sprite to recover the
-# texture key, stores it as the active album, and switches to the
-# Album screen. The hero transition then naturally finds this tile
-# as source / destination.
-func buildCoverTile(world: mod UiWorld, key: own String) ret EntityId {
-  let tile: EntityId = createEntity(world: world)
-  let size: Float = gridTileSize()
-  setRectFixed(world: world, entity: tile, w: size, h: size)
-  let copiedForHero: String = key
-  setHeroWidget(world: world, entity: tile, key: copiedForHero)
-  let albumOpen: String = "album.open"
-  setOnClick(world: world, entity: tile, actionId: albumOpen)
-  setSprite(world: world, entity: tile, key: key, tint: imageTintColor)
-  ret tile
-}
-
-# Build a single horizontal row of up to `gridColumns` covers
-# starting at `startIndex` into the key list.
-func buildCoverGridRow(
-  world: mod UiWorld
-  keys: view List(String)
-  startIndex: view Int
-) ret EntityId {
-  let row: EntityId = createEntity(world: world)
-  let rowW: Float = screenW - outerPad * 2.0
-  let tileH: Float = gridTileSize()
-  setRectFixed(world: world, entity: row, w: rowW, h: tileH)
-  let layH: LayoutType = LayoutType.Horizontal
-  let alignS: AlignKind = AlignKind.Start
-  setLayout(world: world, entity: row, kind: layH, gap: gridTileGap, alignCross: alignS)
-
-  let kids: List(EntityId) = createList(EntityId, cap: gridColumns)
-  let cols: Int = gridColumns
-  let total: Int = keys.length
-  let col: Int = 0
-  loop col < cols {
-    let i: Int = startIndex + col
-    if i < total {
-      let key: String = keys.get(index: i)
-      let tile: EntityId = buildCoverTile(world: world, key: key)
-      kids.add(value: tile)
-    }
-    col = col + 1
-  }
-  attachChildren(world: world, parent: row, kids: kids)
-  ret row
-}
-
-# Compose the full 3-column grid over keys derived from the
-# album list (one tile per parsed album).
-func buildCoverGrid(world: mod UiWorld, albums: view List(Album)) ret EntityId {
-  let keys: List(String) = collectProfileCoverKeys(albums: albums)
-  let grid: EntityId = createEntity(world: world)
-  let cols: Int = gridColumns
-  let total: Int = keys.length
-  let tileH: Float = gridTileSize()
-  # rows = ceil(total / cols)
-  let rows: Int = (total + cols - 1) / cols
-  let gridH: Float = tileH * rows.toFloat() + gridTileGap * (rows - 1).toFloat()
-  let gridW: Float = screenW - outerPad * 2.0
-  setRectFixed(world: world, entity: grid, w: gridW, h: gridH)
+# "Connected to Spotify" card. Shows live status from the C bridge so
+# the user can confirm at a glance whether playback is routed to a
+# real Spotify desktop session. Reads `RAE_UI_NO_SPOTIFY` directly
+# rather than threading the flag through every builder.
+func buildSpotifyStatusCard(world: mod UiWorld) ret EntityId {
+  let optOut: String = getEnv(name: "RAE_UI_NO_SPOTIFY")
+  let spotifyEnabled: Bool = optOut.length() is 0
+  let card: EntityId = createEntity(world: world)
+  let cardW: Float = screenW - outerPad * 2.0
+  let cardH: Float = 84.0
+  setRectFixed(world: world, entity: card, w: cardW, h: cardH)
+  let bg: RgbaColor = { r: 30, g: 200, b: 130, a: 255 }
+  setShapeRect(world: world, entity: card, fill: bg)
   let layV: LayoutType = LayoutType.Vertical
   let alignS: AlignKind = AlignKind.Start
-  setLayout(world: world, entity: grid, kind: layV, gap: gridTileGap, alignCross: alignS)
+  setLayout(world: world, entity: card, kind: layV, gap: 4.0, alignCross: alignS)
+  setPaddingAll(world: world, entity: card, n: 14.0)
 
-  let rowKids: List(EntityId) = createList(EntityId, cap: rows)
-  let i: Int = 0
-  loop i < rows {
-    let startIndex: Int = i * cols
-    let row: EntityId = buildCoverGridRow(world: world, keys: keys, startIndex: startIndex)
-    rowKids.add(value: row)
-    i = i + 1
+  let title: EntityId = createEntity(world: world)
+  setRectFixed(world: world, entity: title, w: cardW - 28.0, h: 24.0)
+  let titleStyle: String = "topBarTitle"
+  let titleText: String = "Spotify"
+  setText(world: world, entity: title, text: titleText, styleId: titleStyle)
+
+  let line: EntityId = createEntity(world: world)
+  setRectFixed(world: world, entity: line, w: cardW - 28.0, h: 22.0)
+  let bodyStyle: String = "trackArtist"
+  let line1: String = ""
+  if spotifyEnabled is false {
+    line1 = "Disabled (RAE_UI_NO_SPOTIFY=1)"
+  } else {
+    spotifyRefresh()
+    let st: String = spotifyState()
+    let playingKey: String = "playing"
+    let pausedKey: String = "paused"
+    if st.equals(other: playingKey) {
+      let trk: String = spotifyTrackName()
+      let art: String = spotifyArtistName()
+      line1 = "Playing '{trk}' — {art}"
+    } else {
+      if st.equals(other: pausedKey) {
+        line1 = "Paused"
+      } else {
+        line1 = "Not running"
+      }
+    }
   }
-  attachChildren(world: world, parent: grid, kids: rowKids)
-  ret grid
+  setText(world: world, entity: line, text: line1, styleId: bodyStyle)
+
+  let kids: List(EntityId) = createList(EntityId, cap: 2)
+  kids.add(value: title)
+  kids.add(value: line)
+  attachChildren(world: world, parent: card, kids: kids)
+  ret card
 }
 
-# --- scrollable content region ----------------------------------------
+# One settings row — icon on the left, label center, chevron right.
+# Inert for now (no actionId) — placeholder rows that visually
+# complete the screen without pretending to work.
+func buildSettingsRow(world: mod UiWorld, iconKey: own String, label: own String) ret EntityId {
+  let row: EntityId = createEntity(world: world)
+  let rowW: Float = screenW - outerPad * 2.0
+  let rowH: Float = 56.0
+  setRectFixed(world: world, entity: row, w: rowW, h: rowH)
+  let layH: LayoutType = LayoutType.Horizontal
+  let alignC: AlignKind = AlignKind.Center
+  setLayout(world: world, entity: row, kind: layH, gap: 14.0, alignCross: alignC)
+  setPaddingAll(world: world, entity: row, n: 8.0)
 
-# The "scroll viewport" contains everything between the top bar and
-# the bottom nav. We can't clip rendering yet so the grid extends
-# past the screen edge — but the host applies `scrollY` as an
-# `Offset.delta.y` so the user can wheel-scroll the column up to
-# bring later rows into view.
-func buildProfileBody(world: mod UiWorld, reg: view TextureRegistry, albums: view List(Album), scrollY: view Float) ret EntityId {
+  let iconSize: Float = 28.0
+  let icon: EntityId = createEntity(world: world)
+  setRectFixed(world: world, entity: icon, w: iconSize, h: iconSize)
+  setSprite(world: world, entity: icon, key: iconKey, tint: iconTint)
+
+  let labelW: Float = rowW - iconSize - 14.0 - 24.0 - 14.0 - 16.0
+  let labelEnt: EntityId = createEntity(world: world)
+  setRectFixed(world: world, entity: labelEnt, w: labelW, h: 24.0)
+  let labelStyle: String = "trackTitle"
+  setText(world: world, entity: labelEnt, text: label, styleId: labelStyle)
+
+  let chev: EntityId = createEntity(world: world)
+  setRectFixed(world: world, entity: chev, w: 24.0, h: 24.0)
+  let chevKey: String = "mat:chevron_right"
+  let chevTint: RgbaColor = heroColor
+  setSprite(world: world, entity: chev, key: chevKey, tint: chevTint)
+
+  let kids: List(EntityId) = createList(EntityId, cap: 3)
+  kids.add(value: icon)
+  kids.add(value: labelEnt)
+  kids.add(value: chev)
+  attachChildren(world: world, parent: row, kids: kids)
+  ret row
+}
+
+func buildSettingsList(world: mod UiWorld) ret EntityId {
+  let list: EntityId = createEntity(world: world)
+  let listW: Float = screenW - outerPad * 2.0
+  let rowH: Float = 56.0
+  let gap: Float = 4.0
+  let rowCount: Int = 4
+  let listH: Float = rowH * rowCount.toFloat() + gap * (rowCount - 1).toFloat()
+  setRectFixed(world: world, entity: list, w: listW, h: listH)
+  let layV: LayoutType = LayoutType.Vertical
+  let alignS: AlignKind = AlignKind.Start
+  setLayout(world: world, entity: list, kind: layV, gap: gap, alignCross: alignS)
+
+  let r1: EntityId = buildSettingsRow(world: world, iconKey: "mat:tune", label: "Audio quality")
+  let r2: EntityId = buildSettingsRow(world: world, iconKey: "mat:equalizer", label: "Equalizer")
+  let r3: EntityId = buildSettingsRow(world: world, iconKey: "mat:person", label: "Account")
+  let r4: EntityId = buildSettingsRow(world: world, iconKey: "mat:logout", label: "Sign out")
+
+  let kids: List(EntityId) = createList(EntityId, cap: 4)
+  kids.add(value: r1)
+  kids.add(value: r2)
+  kids.add(value: r3)
+  kids.add(value: r4)
+  attachChildren(world: world, parent: list, kids: kids)
+  ret list
+}
+
+func buildProfileBody(
+  world: mod UiWorld
+  reg: view TextureRegistry
+  state: view AppState
+  scrollY: view Float
+) ret EntityId {
   let body: EntityId = createEntity(world: world)
   let bodyW: Float = screenW - outerPad * 2.0
-  # Height matches the visible content area (between top bar and
-  # nav tabs). The Vertical layout below positions children inside
-  # this rect, but children may extend past `bodyH` and that's fine
-  # for our scrolled-grid case — `hitTestEntity` walks descendants
-  # regardless of the container's own bounds, so an overflowing
-  # child is still reachable.
   let bodyH: Float = screenH - topBarH - navTabsH - outerGap * 4.0 - outerPad * 2.0
   setRectFixed(world: world, entity: body, w: bodyW, h: bodyH)
   let layV: LayoutType = LayoutType.Vertical
   let alignC: AlignKind = AlignKind.Center
   setLayout(world: world, entity: body, kind: layV, gap: outerGap, alignCross: alignC)
-  # Push the whole body up by `scrollY` so subsequent rows of the
-  # grid scroll into view. Negative scrollY means "content has been
-  # pulled up"; the host clamps to a non-positive value.
   let off: Offset = { delta: Vec2 { x: 0.0, y: scrollY } }
   componentSet(this: world.offsets, entity: body, data: off)
 
-  # Body owns the scroll behaviour — `findScrollTarget(world)` returns
-  # the first entity carrying ScrollState. PageRoot{"profile"} lives
-  # on the screen root, not here (see `mountProfilePage`).
   let scroll: ScrollState = { y: scrollY, velocity: 0.0 }
   componentSet(this: world.scrollStates, entity: body, data: scroll)
 
-  let avatar: EntityId = buildAvatar(world: world, reg: reg)
+  let avatar: EntityId = buildProfileAvatar(world: world, reg: reg)
 
   let handle: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: handle, w: bodyW, h: 28.0)
@@ -301,27 +284,23 @@ func buildProfileBody(world: mod UiWorld, reg: view TextureRegistry, albums: vie
   let bio: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: bio, w: bodyW, h: 18.0)
   let bioStyle: String = "muted"
-  let bioText: String = "indie pop · dream-punk · playlist lover 🌙✨🎧"
+  let bioText: String = "indie pop · dream-punk · playlist lover"
   setText(world: world, entity: bio, text: bioText, styleId: bioStyle)
 
-  let stats: EntityId = buildStatsRow(world: world)
-  let grid: EntityId = buildCoverGrid(world: world, albums: albums)
+  let card: EntityId = buildSpotifyStatusCard(world: world)
+  let stats: EntityId = buildProfileStatsRow(world: world, state: state)
+  let settings: EntityId = buildSettingsList(world: world)
 
-  # No trailing spacer is needed — body has no clipping, so the
-  # "comfortable scroll bottom" (1-2 rows of empty space below the
-  # last row before the dock) is controlled entirely by the
-  # `minScroll` clamp in `main.rae`'s wheel handler.
-  let kids: List(EntityId) = createList(EntityId, cap: 5)
+  let kids: List(EntityId) = createList(EntityId, cap: 6)
   kids.add(value: avatar)
   kids.add(value: handle)
   kids.add(value: bio)
+  kids.add(value: card)
   kids.add(value: stats)
-  kids.add(value: grid)
+  kids.add(value: settings)
   attachChildren(world: world, parent: body, kids: kids)
   ret body
 }
-
-# --- top bar ----------------------------------------------------------
 
 func buildProfileTopBar(world: mod UiWorld) ret EntityId {
   let bar: EntityId = createEntity(world: world)
@@ -343,36 +322,28 @@ func buildProfileTopBar(world: mod UiWorld) ret EntityId {
   ret bar
 }
 
-# --- public entrypoint -------------------------------------------------
-
 # Persistent-world entrypoint. Mounts the profile page into `world`
-# and returns the page-root entity. Tagged with `PageRoot{"profile"}`
-# so `findPageRootEntity(world, libraryPageId)` can locate it for
-# Active toggles, unmounts, scoped lookups. Does NOT mount dock or
-# back-button — those are app-level overlays mounted once.
+# and returns the page-root entity. Tagged with `PageRoot{profilePageId}`.
 func mountProfilePage(
   world: mod UiWorld
   reg: view TextureRegistry
   state: view AppState
   scrollY: view Float
 ) pub ret EntityId {
-  let albums: view List(Album) => state.albums
-
   let root: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: root, w: screenW, h: screenH)
-  setShapeRect(world: world, entity: root, fill: surfaceColor)
   let layV: LayoutType = LayoutType.Vertical
   let alignS: AlignKind = AlignKind.Start
   setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
   setPaddingAll(world: world, entity: root, n: outerPad)
 
   let copiedId: String = ""
-  copiedId = copiedId.concat(other: libraryPageId)
+  copiedId = copiedId.concat(other: profilePageId)
   let pr: PageRoot = { id: own copiedId }
   componentSet(this: world.pageRoots, entity: root, data: own pr)
 
   let topBar: EntityId = buildProfileTopBar(world: world)
-  let body: EntityId = buildProfileBody(world: world, reg: reg, albums: albums, scrollY: scrollY)
+  let body: EntityId = buildProfileBody(world: world, reg: reg, state: state, scrollY: scrollY)
 
   let kids: List(EntityId) = createList(EntityId, cap: 2)
   kids.add(value: topBar)
@@ -382,10 +353,9 @@ func mountProfilePage(
   ret root
 }
 
-# Legacy single-screen entrypoint — kept so `buildScreenWorld` still
-# works while the persistent-world flip is partial. Creates a fresh
-# world, mounts the profile page, mounts the shared dock + back
-# overlays, returns the world.
+# Legacy single-screen entrypoint used by `buildScreenWorld` /
+# `runScreenshotMode`. Mounts the profile page + shared dock + back
+# overlays into a fresh world.
 func buildProfileWorld(
   scenes: view AlbumScenes
   reg: view TextureRegistry

@@ -215,6 +215,70 @@ static bool native_loadCircleCroppedTexture(struct VM* vm, VmNativeResult* out, 
     return true;
 }
 
+static bool native_loadRoundedCroppedTexture(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 2 || args[0].type != VAL_STRING) {
+        fprintf(stderr, "error: loadRoundedCroppedTexture expects (string, float), got %zu args\n", count);
+        return false;
+    }
+    double radiusArg = (args[1].type == VAL_FLOAT) ? args[1].as.float_value : (double)args[1].as.int_value;
+    Image img = LoadImage(args[0].as.string_value.chars);
+    Texture t = {0};
+    if (img.data != NULL) {
+        ImageFormat(&img, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
+        /* Same thumbnail downscale as the C runtime — see the
+         * `rae_ext_loadRoundedCroppedTexture` comment for the
+         * display-pixel intent of `radius`. */
+        const int thumbMax = 64;
+        int origMaxSide = (img.width > img.height) ? img.width : img.height;
+        if (origMaxSide > thumbMax) {
+            float k = (float)thumbMax / (float)origMaxSide;
+            int newW = (int)((float)img.width * k);
+            int newH = (int)((float)img.height * k);
+            if (newW < 1) newW = 1;
+            if (newH < 1) newH = 1;
+            ImageResize(&img, newW, newH);
+        }
+        float r = (float)radiusArg;
+        if (r < 0.0f) r = 0.0f;
+        float maxR = (img.width < img.height ? (float)img.width : (float)img.height) / 2.0f;
+        if (r > maxR) r = maxR;
+        float r2 = r * r;
+        float w1 = (float)img.width - 1.0f;
+        float h1 = (float)img.height - 1.0f;
+        unsigned char* data2 = (unsigned char*)img.data;
+        for (int y = 0; y < img.height; y++) {
+            for (int x = 0; x < img.width; x++) {
+                float fx = (float)x;
+                float fy = (float)y;
+                int inCorner = 0;
+                float cx = 0.0f, cy = 0.0f;
+                if (fx < r && fy < r) { inCorner = 1; cx = r; cy = r; }
+                else if (fx > w1 - r && fy < r) { inCorner = 1; cx = w1 - r; cy = r; }
+                else if (fx < r && fy > h1 - r) { inCorner = 1; cx = r; cy = h1 - r; }
+                else if (fx > w1 - r && fy > h1 - r) { inCorner = 1; cx = w1 - r; cy = h1 - r; }
+                if (inCorner) {
+                    float dx = fx - cx;
+                    float dy = fy - cy;
+                    if (dx * dx + dy * dy > r2) {
+                        data2[(y * img.width + x) * 4 + 3] = 0;
+                    }
+                }
+            }
+        }
+        t = LoadTextureFromImage(img);
+        UnloadImage(img);
+    }
+    out->has_value = true;
+    out->value = value_object(5, "Texture");
+    out->value.as.object_value.fields[0] = value_int((int64_t)t.id);
+    out->value.as.object_value.fields[1] = value_int((int64_t)t.width);
+    out->value.as.object_value.fields[2] = value_int((int64_t)t.height);
+    out->value.as.object_value.fields[3] = value_int((int64_t)t.mipmaps);
+    out->value.as.object_value.fields[4] = value_int((int64_t)t.format);
+    return true;
+}
+
 static bool native_unloadTexture(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
     if (count != 5) {
@@ -229,6 +293,69 @@ static bool native_unloadTexture(struct VM* vm, VmNativeResult* out, const Value
         .format = (int)args[4].as.int_value
     };
     UnloadTexture(t);
+    out->has_value = false;
+    return true;
+}
+
+/* See `rae_ext_roundedSpriteBegin` / `rae_ext_roundedSpriteEnd` in
+ * compiler/runtime/rae_runtime.c for the design notes. This is the
+ * VM-side mirror — one global shader, lazy-loaded on first use. */
+static Shader g_vm_rounded_shader = {0};
+static int g_vm_rounded_loc_size = -1;
+static int g_vm_rounded_loc_radius = -1;
+static int g_vm_rounded_loaded = 0;
+static void vm_rounded_shader_ensure(void) {
+    if (g_vm_rounded_loaded) return;
+    const char* fs =
+        "#version 330\n"
+        "in vec2 fragTexCoord;\n"
+        "in vec4 fragColor;\n"
+        "out vec4 finalColor;\n"
+        "uniform sampler2D texture0;\n"
+        "uniform vec4 colDiffuse;\n"
+        "uniform vec2 uSize;\n"
+        "uniform float uRadius;\n"
+        "float sdRoundRect(vec2 p, vec2 b, float r) {\n"
+        "  vec2 q = abs(p) - b + vec2(r);\n"
+        "  return min(max(q.x, q.y), 0.0) + length(max(q, vec2(0.0))) - r;\n"
+        "}\n"
+        "void main() {\n"
+        "  vec4 texel = texture(texture0, fragTexCoord);\n"
+        "  vec4 c = texel * colDiffuse * fragColor;\n"
+        "  vec2 p = (fragTexCoord - vec2(0.5)) * uSize;\n"
+        "  float d = sdRoundRect(p, uSize * 0.5, uRadius);\n"
+        "  float aa = clamp(0.5 - d, 0.0, 1.0);\n"
+        "  c.a *= aa;\n"
+        "  finalColor = c;\n"
+        "}\n";
+    g_vm_rounded_shader = LoadShaderFromMemory(NULL, fs);
+    g_vm_rounded_loc_size = GetShaderLocation(g_vm_rounded_shader, "uSize");
+    g_vm_rounded_loc_radius = GetShaderLocation(g_vm_rounded_shader, "uRadius");
+    g_vm_rounded_loaded = 1;
+}
+
+static bool native_roundedSpriteBegin(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 3) {
+        fprintf(stderr, "error: roundedSpriteBegin expects (width, height, radius), got %zu\n", count);
+        return false;
+    }
+    vm_rounded_shader_ensure();
+    double w = (args[0].type == VAL_FLOAT) ? args[0].as.float_value : (double)args[0].as.int_value;
+    double h = (args[1].type == VAL_FLOAT) ? args[1].as.float_value : (double)args[1].as.int_value;
+    double r = (args[2].type == VAL_FLOAT) ? args[2].as.float_value : (double)args[2].as.int_value;
+    float size[2] = { (float)w, (float)h };
+    float fr = (float)r;
+    SetShaderValue(g_vm_rounded_shader, g_vm_rounded_loc_size, size, SHADER_UNIFORM_VEC2);
+    SetShaderValue(g_vm_rounded_shader, g_vm_rounded_loc_radius, &fr, SHADER_UNIFORM_FLOAT);
+    BeginShaderMode(g_vm_rounded_shader);
+    out->has_value = false;
+    return true;
+}
+
+static bool native_roundedSpriteEnd(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data; (void)args; (void)count;
+    EndShaderMode();
     out->has_value = false;
     return true;
 }
@@ -868,7 +995,9 @@ static const int g_vm_font_codepoints[] = {
     0xe145, 0xe5c4, 0xe5cb, 0xe5cc, 0xe5cd, 0xf090, 0xe01d, 0xe5ce,
     0xe5cf, 0xe87d, 0xe87e, 0xe88a, 0xe02e, 0xe02f, 0xe030, 0xe5d2,
     0xeae1, 0xe034, 0xe037, 0xe03b, 0xe065, 0xe05f, 0xe03d, 0xe040,
-    0xe8b6, 0xe043, 0xe044, 0xe045, 0xe047, 0xe80e, 0xe7fd
+    0xe8b6, 0xe043, 0xe044, 0xe045, 0xe047, 0xe80e, 0xe7fd,
+    0xe429, /* tune */
+    0xe9ba  /* logout */
 };
 #define VM_FONT_CODEPOINT_COUNT ((int)(sizeof(g_vm_font_codepoints)/sizeof(g_vm_font_codepoints[0])))
 
@@ -1067,7 +1196,10 @@ bool vm_registry_register_raylib(VmRegistry* registry) {
     ok &= vm_registry_register_native(registry, "clearBackground", native_clearBackground, NULL);
     ok &= vm_registry_register_native(registry, "loadTexture", native_loadTexture, NULL);
     ok &= vm_registry_register_native(registry, "loadCircleCroppedTexture", native_loadCircleCroppedTexture, NULL);
+    ok &= vm_registry_register_native(registry, "loadRoundedCroppedTexture", native_loadRoundedCroppedTexture, NULL);
     ok &= vm_registry_register_native(registry, "unloadTexture", native_unloadTexture, NULL);
+    ok &= vm_registry_register_native(registry, "roundedSpriteBegin", native_roundedSpriteBegin, NULL);
+    ok &= vm_registry_register_native(registry, "roundedSpriteEnd", native_roundedSpriteEnd, NULL);
     ok &= vm_registry_register_native(registry, "captureAndBlurBackdrop", native_captureAndBlurBackdrop, NULL);
     ok &= vm_registry_register_native(registry, "captureAndBlurRegion", native_captureAndBlurRegion, NULL);
     ok &= vm_registry_register_native(registry, "drawTexture", native_drawTexture, NULL);

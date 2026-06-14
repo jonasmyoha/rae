@@ -36,7 +36,6 @@ func mountNowPlayingPage(
 
   let root: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: root, w: screenW, h: screenH)
-  setShapeRect(world: world, entity: root, fill: surfaceColor)
   let layV: LayoutType = LayoutType.Vertical
   let alignS: AlignKind = AlignKind.Start
   setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
@@ -116,6 +115,34 @@ func buildNowPlayingWorld(scenes: view AlbumScenes, playback: view PlaybackState
 # and artist overrides from the current playback + app state. Same
 # shape as `buildSimpleSceneInstance` from scene_mount.rae but with
 # the data-driven overrides list pre-populated.
+# Mutate the mini-player's cover thumb in place. Called from
+# `screen_switch` after the user picks a new album so the dock's
+# cover follows along without re-mounting the dock. Same Sprite
+# component mutation pattern as `pollSpotify`'s text updates.
+func updateMiniPlayerCover(world: mod UiWorld, stem: view String) pub {
+  let nodeKey: String = "MiniThumb"
+  let entityOpt: opt Int = findNodeInPage(world: world, pageId: miniPlayerPageId, nodeId: nodeKey)
+  if entityOpt is none {
+    ret
+  }
+  let raw: Int = entityOpt
+  let entity: EntityId = entityId(v: raw)
+  if componentHas(this: world.sprites, entity: entity) is false {
+    ret
+  }
+  let cur: Sprite = componentGet(this: world.sprites, entity: entity)
+  let copied: String = "{stem}"
+  let next: Sprite = {
+    textureKey: copied
+    tint: cur.tint
+    scaleMode: cur.scaleMode
+    tileScale: cur.tileScale
+    nineSlice: cur.nineSlice
+    hasNineSlice: cur.hasNineSlice
+  }
+  componentSet(this: world.sprites, entity: entity, data: next)
+}
+
 func buildMiniPlayerInstance(
   world: mod UiWorld
   scene: view Scene
@@ -132,6 +159,14 @@ func buildMiniPlayerInstance(
   let miniIconId: String = "MiniPlayIcon"
   let iconKey: String = playbackIconKey(playback: playback)
   addSpriteOverride(list: overrides, nodeId: miniIconId, value: iconKey)
+
+  # Cover thumb — set the actual album-stem texture key at mount time
+  # so the mini-player shows the right cover from the first frame.
+  # No rebindHero detour: the dock is mounted once and stays put, so
+  # the cover key has to be correct from the start.
+  let miniThumbId: String = "MiniThumb"
+  let thumbKey: String = "{state.currentAlbumStem}"
+  addSpriteOverride(list: overrides, nodeId: miniThumbId, value: thumbKey)
 
   let miniTitleId: String = "MiniTitle"
   let miniArtistId: String = "MiniArtist"

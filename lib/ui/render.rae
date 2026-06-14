@@ -199,6 +199,23 @@ func paintSprite(reg: view TextureRegistry, world: view UiWorld, entity: view En
   let offX: Float = (cr.w - drawW) / 2.0
   let offY: Float = (cr.h - drawH) / 2.0
 
+  # Rounded-corner clip via fragment shader. The texture is rendered
+  # at its natural size scaled to fit; the shader's `uSize` uniform
+  # is the same on-screen rect so the SDF works in matching units.
+  # No pre-baked variants — every (texture, size, radius) combo is
+  # handled live.
+  let useRounded: Bool = componentHas(this: world.cornerRadiuses, entity: entity)
+  let roundedRadius: Float = 0.0
+  if useRounded {
+    let crData: CornerRadius = componentGet(this: world.cornerRadiuses, entity: entity)
+    roundedRadius = crData.radius
+    if roundedRadius <= 0.0 {
+      useRounded = false
+    }
+  }
+  if useRounded {
+    roundedSpriteBegin(width: drawW, height: drawH, radius: roundedRadius)
+  }
   drawTextureEx(
     texture: tex
     pos: Vector2 { x: wt.x + offX, y: wt.y + offY }
@@ -206,6 +223,9 @@ func paintSprite(reg: view TextureRegistry, world: view UiWorld, entity: view En
     scale: scale
     tint: tint
   )
+  if useRounded {
+    roundedSpriteEnd()
+  }
 }
 
 # Resolve a Text node's font size / colour from its style id. Phase 1e
@@ -469,7 +489,95 @@ func paintSubtree(world: view UiWorld, reg: view TextureRegistry, entity: view E
 # Entry point. Walks every alive root (no Parent) that has a
 # WorldTransform and paints its subtree. Pass an empty
 # `TextureRegistry` if no Sprites are in use.
-func renderSystem(world: view UiWorld, reg: view TextureRegistry) {
+# Layer-root entity factory. Creates a parentless entity with a
+# `LayerRoot { id, order }` component — no Rect / Layout / Sprite,
+# just the label that `setLayerById` / `renderSystem` look up. Apps
+# call this once per named layer at boot, stash the returned ids in
+# whatever structure they like, and from then on tag overlay roots
+# with `setLayerById(world, entity, id)`.
+func createLayerEntity(world: mod UiWorld, id: own String, order: view Int) pub ret EntityId {
+  let e: EntityId = createEntity(world: world)
+  let lr: LayerRoot = { id: own id, order: order }
+  componentSet(this: world.layerRoots, entity: e, data: own lr)
+  ret e
+}
+
+# Set up the standard layer stack apps usually want:
+#   content (0)  ─ page content (default for roots without LayerRef)
+#   dock (100)   ─ persistent bottom toolbar
+#   back-button (200) ─ top-left back chevron overlay
+#   dialog (300) ─ modal popovers
+#   debug (400)  ─ debug button + menu, always on top
+# Apps that want a different stack can skip this and call
+# `createLayerEntity` per their own scheme.
+func createStandardLayers(world: mod UiWorld) pub {
+  let contentId: String = "content"
+  let dockId: String = "dock"
+  let backId: String = "back-button"
+  let dialogId: String = "dialog"
+  let debugId: String = "debug"
+  let content: EntityId = createLayerEntity(world: world, id: contentId, order: 0)
+  let dock: EntityId = createLayerEntity(world: world, id: dockId, order: 100)
+  let back: EntityId = createLayerEntity(world: world, id: backId, order: 200)
+  let dialog: EntityId = createLayerEntity(world: world, id: dialogId, order: 300)
+  let debug: EntityId = createLayerEntity(world: world, id: debugId, order: 400)
+}
+
+# Find the layer-root entity with the given id. O(n) over the layer
+# roots component table — n is the count of named layers (5-ish in
+# practice), so the cost is negligible compared to a per-frame walk
+# of the whole alive list.
+func findLayerEntity(world: view UiWorld, id: view String) pub ret EntityId {
+  let n: Int = componentCount(this: world.layerRoots)
+  let i: Int = 0
+  loop i < n {
+    let e: EntityId = componentEntityAt(this: world.layerRoots, i: i)
+    let lr: LayerRoot = componentDataAt(this: world.layerRoots, i: i)
+    if lr.id.equals(other: id) {
+      ret e
+    }
+    i = i + 1
+  }
+  ret noEntity()
+}
+
+# Stamp a `LayerRef` linking `entity` to the layer-root with `id`.
+# No-op when the layer doesn't exist — the entity stays on the
+# default content plane.
+func setLayerById(world: mod UiWorld, entity: view EntityId, id: view String) pub {
+  let layer: EntityId = findLayerEntity(world: world, id: id)
+  if isNone(this: layer) {
+    ret
+  }
+  let ref: LayerRef = { layer: layer }
+  componentSet(this: world.layerRefs, entity: entity, data: ref)
+}
+
+# Read the paint-order of the layer an entity belongs to. Falls back
+# to the content layer's order (or 0 when no content layer exists).
+func entityLayerOrder(world: view UiWorld, entity: view EntityId) ret Int {
+  if componentHas(this: world.layerRefs, entity: entity) {
+    let ref: LayerRef = componentGet(this: world.layerRefs, entity: entity)
+    if componentHas(this: world.layerRoots, entity: ref.layer) {
+      let lr: LayerRoot = componentGet(this: world.layerRoots, entity: ref.layer)
+      ret lr.order
+    }
+  }
+  # No LayerRef — use the content layer's order (typically 0).
+  let contentId: String = "content"
+  let content: EntityId = findLayerEntity(world: world, id: contentId)
+  if isNone(this: content) is false {
+    let lr: LayerRoot = componentGet(this: world.layerRoots, entity: content)
+    ret lr.order
+  }
+  ret 0
+}
+
+# Collect every parentless root with a WorldTransform, in ascending
+# Layer order. Used by both `renderSystem` (painter's algorithm) and
+# the input hit-test (which walks the result in reverse).
+func collectPaintableRoots(world: view UiWorld) ret List(EntityId) {
+  let roots: List(EntityId) = createList(EntityId, cap: 16)
   let alive: view List(EntityId) => world.alive
   let n: Int = alive.length
   let i: Int = 0
@@ -477,10 +585,55 @@ func renderSystem(world: view UiWorld, reg: view TextureRegistry) {
     let e: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: i)
     if componentHas(this: world.parents, entity: e) is false {
       if componentHas(this: world.worldTransforms, entity: e) {
-        paintSubtree(world: world, reg: reg, entity: e)
+        roots.add(value: e)
       }
     }
     i = i + 1
+  }
+  # Selection sort ascending by the entity's Layer order. Root count
+  # is small (a handful of screen pages + dock + back-button +
+  # debug), so O(n^2) is fine.
+  let m: Int = roots.length
+  let outer: Int = 0
+  loop outer < m {
+    let minIdx: Int = outer
+    let outerE: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: outer)
+    let minOrd: Int = entityLayerOrder(world: world, entity: outerE)
+    let inner: Int = outer + 1
+    loop inner < m {
+      let innerE: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: inner)
+      let ord: Int = entityLayerOrder(world: world, entity: innerE)
+      if ord < minOrd {
+        minIdx = inner
+        minOrd = ord
+      }
+      inner = inner + 1
+    }
+    if minIdx is not outer {
+      let a: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: outer)
+      let b: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: minIdx)
+      rae_ext_rae_buf_set(buf: roots.data, index: outer, value: b)
+      rae_ext_rae_buf_set(buf: roots.data, index: minIdx, value: a)
+    }
+    outer = outer + 1
+  }
+  ret roots
+}
+
+func renderSystem(world: view UiWorld, reg: view TextureRegistry) {
+  # Painter's algorithm with LayerRef-aware sorting. Roots paint in
+  # ascending layer order so overlays (higher-order layers) sit on
+  # top of page content.
+  let roots: List(EntityId) = collectPaintableRoots(world: world)
+  let m: Int = roots.length
+  let p: Int = 0
+  loop p < m {
+    let root: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: p)
+    # Layer-root entities themselves carry no visual — skip them.
+    if componentHas(this: world.layerRoots, entity: root) is false {
+      paintSubtree(world: world, reg: reg, entity: root)
+    }
+    p = p + 1
   }
 }
 

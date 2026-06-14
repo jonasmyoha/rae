@@ -283,6 +283,37 @@ type HeroWidget {
   key: String
 }
 
+# Marks a Sprite as rendering with rounded corners of the given pixel
+# radius. The renderer routes the lookup from `<textureKey>` to a
+# pre-baked variant registered under `<textureKey>.r<radius>` (see
+# `loadRoundedCroppedTexture` + the asset loader, which pre-bakes the
+# variants at boot). When the variant is missing the renderer falls
+# back to the un-rounded texture so a forgotten pre-bake doesn't
+# crash — it just shows square corners.
+type CornerRadius {
+  radius: Float
+}
+
+# A layer is a real entity. `LayerRoot` is what makes one — it carries
+# the layer's stable id (used for lookup from app code) and its paint
+# order (ascending = painted on top of lower orders, hit-tested
+# top-down). Layer-root entities don't have Rect / Layout / Sprite —
+# they're labels for grouping other roots.
+type LayerRoot pub {
+  id: String
+  order: Int
+}
+
+# Soft link from a root entity to the layer it lives on. The renderer
+# groups parentless roots by their `LayerRef.layer`, looks up each
+# group's `LayerRoot.order`, and paints in ascending order. Roots
+# without a `LayerRef` fall back to the content layer (lookup by
+# id `"content"`), so the default for ordinary screen pages stays
+# zero-config.
+type LayerRef pub {
+  layer: EntityId
+}
+
 # `DebugAnchor` marks an entity as the placement slot for the in-app
 # debug button (see `lib/ui/debug.rae`). The button itself is BUILT
 # programmatically by `addDebugLayer`, but its position + size come

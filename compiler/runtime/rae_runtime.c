@@ -1957,7 +1957,128 @@ Texture rae_ext_loadCircleCroppedTexture(rae_String fileName) {
   UnloadImage(img);
   return tex;
 }
+Texture rae_ext_loadRoundedCroppedTexture(rae_String fileName, double radius) {
+  /* Load `fileName`, force RGBA, downscale to a thumbnail-friendly
+   * size, then zero the alpha channel of every pixel outside the
+   * rounded-rectangle of the given corner radius. Pre-baking the
+   * alpha mask lets the renderer use plain `DrawTexture` with no
+   * clipping logic.
+   *
+   * Downscale matters: `radius` is intended as DISPLAY pixels (a
+   * scene file saying `"radius": 8` means "8 px at display size").
+   * Source covers are typically ~600x600 — baking only 8 pixels of
+   * curve on that source gives ~0.7 display pixels when the thumb
+   * renders at 56x56, indistinguishable from a sharp rectangle.
+   * Resizing to a 128-side image first makes the same 8-pixel curve
+   * map to ~3.5 display pixels, which reads as proper rounding. */
+  Image img = LoadImage((const char*)fileName.data);
+  if (img.data == NULL) {
+    return (Texture){0};
+  }
+  ImageFormat(&img, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
+  /* Downscale longest side to `thumbMax` while preserving aspect.
+   * 64 is small enough that even a small `radius` reads as proper
+   * rounding when the thumb renders at typical UI sizes (40-80 px),
+   * but big enough that the cover detail stays recognisable. */
+  const int thumbMax = 64;
+  int origMaxSide = (img.width > img.height) ? img.width : img.height;
+  if (origMaxSide > thumbMax) {
+    float k = (float)thumbMax / (float)origMaxSide;
+    int newW = (int)((float)img.width * k);
+    int newH = (int)((float)img.height * k);
+    if (newW < 1) newW = 1;
+    if (newH < 1) newH = 1;
+    ImageResize(&img, newW, newH);
+  }
+  float r = (float)radius;
+  if (r < 0.0f) r = 0.0f;
+  float maxR = (img.width < img.height ? (float)img.width : (float)img.height) / 2.0f;
+  if (r > maxR) r = maxR;
+  float r2 = r * r;
+  float w1 = (float)img.width - 1.0f;
+  float h1 = (float)img.height - 1.0f;
+  unsigned char* data = (unsigned char*)img.data;
+  for (int y = 0; y < img.height; y++) {
+    for (int x = 0; x < img.width; x++) {
+      /* Distance from this pixel to the nearest corner-center; if
+       * inside the radius, alpha stays; if outside AND we're inside
+       * the corner box, alpha is zeroed. */
+      float fx = (float)x;
+      float fy = (float)y;
+      int inCorner = 0;
+      float cx = 0.0f, cy = 0.0f;
+      if (fx < r && fy < r) { inCorner = 1; cx = r; cy = r; }
+      else if (fx > w1 - r && fy < r) { inCorner = 1; cx = w1 - r; cy = r; }
+      else if (fx < r && fy > h1 - r) { inCorner = 1; cx = r; cy = h1 - r; }
+      else if (fx > w1 - r && fy > h1 - r) { inCorner = 1; cx = w1 - r; cy = h1 - r; }
+      if (inCorner) {
+        float dx = fx - cx;
+        float dy = fy - cy;
+        if (dx * dx + dy * dy > r2) {
+          data[(y * img.width + x) * 4 + 3] = 0;
+        }
+      }
+    }
+  }
+  Texture tex = LoadTextureFromImage(img);
+  UnloadImage(img);
+  return tex;
+}
 void rae_ext_unloadTexture(Texture texture) { UnloadTexture(texture); }
+
+/* Rounded textured rect via a fragment shader. One global Shader,
+ * lazy-loaded on first use, used to mask any sprite with a non-zero
+ * corner radius at draw time. Pass the on-screen sprite size + the
+ * radius (both in pixels) before each draw; the shader computes a
+ * signed-distance value to a rounded-rect boundary and antialiases
+ * the alpha at the curve. */
+static Shader g_rae_rounded_shader = {0};
+static int g_rae_rounded_loc_size = -1;
+static int g_rae_rounded_loc_radius = -1;
+static int g_rae_rounded_loaded = 0;
+
+static void rae_rounded_shader_ensure(void) {
+  if (g_rae_rounded_loaded) return;
+  const char* fs =
+    "#version 330\n"
+    "in vec2 fragTexCoord;\n"
+    "in vec4 fragColor;\n"
+    "out vec4 finalColor;\n"
+    "uniform sampler2D texture0;\n"
+    "uniform vec4 colDiffuse;\n"
+    "uniform vec2 uSize;\n"
+    "uniform float uRadius;\n"
+    "float sdRoundRect(vec2 p, vec2 b, float r) {\n"
+    "  vec2 q = abs(p) - b + vec2(r);\n"
+    "  return min(max(q.x, q.y), 0.0) + length(max(q, vec2(0.0))) - r;\n"
+    "}\n"
+    "void main() {\n"
+    "  vec4 texel = texture(texture0, fragTexCoord);\n"
+    "  vec4 c = texel * colDiffuse * fragColor;\n"
+    "  vec2 p = (fragTexCoord - vec2(0.5)) * uSize;\n"
+    "  float d = sdRoundRect(p, uSize * 0.5, uRadius);\n"
+    "  float aa = clamp(0.5 - d, 0.0, 1.0);\n"
+    "  c.a *= aa;\n"
+    "  finalColor = c;\n"
+    "}\n";
+  g_rae_rounded_shader = LoadShaderFromMemory(NULL, fs);
+  g_rae_rounded_loc_size = GetShaderLocation(g_rae_rounded_shader, "uSize");
+  g_rae_rounded_loc_radius = GetShaderLocation(g_rae_rounded_shader, "uRadius");
+  g_rae_rounded_loaded = 1;
+}
+
+void rae_ext_roundedSpriteBegin(double width, double height, double radius) {
+  rae_rounded_shader_ensure();
+  float size[2] = { (float)width, (float)height };
+  float r = (float)radius;
+  SetShaderValue(g_rae_rounded_shader, g_rae_rounded_loc_size, size, SHADER_UNIFORM_VEC2);
+  SetShaderValue(g_rae_rounded_shader, g_rae_rounded_loc_radius, &r, SHADER_UNIFORM_FLOAT);
+  BeginShaderMode(g_rae_rounded_shader);
+}
+
+void rae_ext_roundedSpriteEnd(void) {
+  EndShaderMode();
+}
 Texture rae_ext_captureAndBlurRegion(double x, double y, double w, double h, int64_t blurSize) {
   /* Frosted-glass for a sub-region of the screen — used by the
    * mobile UI's bottom dock so only the bar area is blurred (the
@@ -2095,7 +2216,9 @@ static const int g_rae_font_codepoints[] = {
     0xe045, /* skip_previous */
     0xe047, /* stop */
     0xe80e, /* whatshot */
-    0xe7fd  /* person */
+    0xe7fd, /* person */
+    0xe429, /* tune */
+    0xe9ba  /* logout */
 };
 #define RAE_FONT_CODEPOINT_COUNT ((int)(sizeof(g_rae_font_codepoints)/sizeof(g_rae_font_codepoints[0])))
 
@@ -2360,30 +2483,51 @@ void rae_ext_spotifyPlayUri(rae_String uri) {
 void rae_ext_spotifyPlayQuery(rae_String query) {
     if (!query.data || query.len == 0) return;
     fprintf(stderr, "[spotify-c] play query=%.*s\n", (int)query.len, (const char*)query.data);
-    /* URL-encode the query into the URI buffer. */
-    char encoded[1024];
+    /* AppleScript-escape the raw query (NOT URL-encode): backslash and
+     * double-quote are the only metacharacters inside an AppleScript
+     * string literal. Everything else, including spaces and unicode,
+     * passes through verbatim — Spotify's `spotify:search:` URI handler
+     * accepts free-form text and resolves it to the top match. This is
+     * the same trick SUMU uses (apps/desktop/src-tauri/src/main.rs,
+     * `play_spotify` command). */
+    char escaped[2048];
     size_t off = 0;
-    static const char hex[] = "0123456789ABCDEF";
-    for (size_t i = 0; i < (size_t)query.len && off + 3 < sizeof(encoded); i++) {
-        unsigned char c = (unsigned char)query.data[i];
-        int safe = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-                   (c >= '0' && c <= '9') || c == '-' || c == '_' ||
-                   c == '.' || c == '~';
-        if (safe) encoded[off++] = (char)c;
-        else { encoded[off++] = '%'; encoded[off++] = hex[c >> 4]; encoded[off++] = hex[c & 0xF]; }
+    for (size_t i = 0; i < (size_t)query.len && off + 2 < sizeof(escaped); i++) {
+        char c = (char)query.data[i];
+        if (c == '\\' || c == '"') {
+            escaped[off++] = '\\';
+        }
+        escaped[off++] = c;
     }
-    encoded[off] = '\0';
-    /* Build a multi-line AppleScript block — open the search URI, wait
-     * for Spotify to load it, then play. The delay is empirical: 0.4 s
-     * is enough on a warm app to land on the top hit reliably. */
-    char open_line[1280];
-    snprintf(open_line, sizeof(open_line),
-        "tell application \"Spotify\" to open location \"spotify:search:%s\"",
-        encoded);
+    escaped[off] = '\0';
+    /* One atomic AppleScript: launch Spotify if needed, then have it
+     * play the search URI in a single `play track` call. No separate
+     * open + delay + play sequence — Spotify resolves the URI and
+     * starts the top hit inside this one tell-block, so there's nothing
+     * to race against.
+     *
+     * Frontmost-app capture/restore (next four lines) prevents Spotify
+     * from stealing focus from the user's current window — SUMU does
+     * the same thing via System Events. */
+    char launch_line[128];
+    char play_line[2160];
+    snprintf(launch_line, sizeof(launch_line),
+        "tell application \"Spotify\" to if it is not running then launch");
+    snprintf(play_line, sizeof(play_line),
+        "tell application \"Spotify\" to play track \"spotify:search:%s\"",
+        escaped);
     const char* lines[] = {
-        open_line,
-        "delay 0.4",
-        "tell application \"Spotify\" to play",
+        "set frontApp to \"\"",
+        "try",
+        "  tell application \"System Events\" to set frontApp to name of first application process whose frontmost is true",
+        "end try",
+        launch_line,
+        play_line,
+        "if frontApp is not \"\" and frontApp is not \"Spotify\" then",
+        "  try",
+        "    tell application frontApp to activate",
+        "  end try",
+        "end if",
         NULL
     };
     int rc = rae_osascript_run(lines);
