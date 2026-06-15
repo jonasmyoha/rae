@@ -50,9 +50,13 @@ func boolStr(b: view Bool) ret String {
 func saveAppState(path: view String, state: view AppState, playback: view PlaybackState) pub {
   let elapsedMs: Int = (playback.elapsedSec * 1000.0).toInt()
   let playingStr: String = boolStr(b: playback.isPlaying)
-  # Session-level state: which tab + visible screen the user was on,
-  # and the OS window's last-seen position. Restored on next launch
-  # so closing + reopening lands the user back where they were.
+  # Session route: which top-level tab + the OS window position.
+  # Sub-page state (Album / Player / History on top of the stack)
+  # is intentionally NOT persisted — restoring deep sub-pages
+  # across launches felt confusing in practice (e.g. boot landed
+  # the user on NowPlaying with no obvious way back to Home). The
+  # tab alone gives "open back to where you were" without any
+  # cross-launch route-restoration footguns.
   let tabOrdinal: Int = screenToInt(s: state.tab)
   let visibleOrdinal: Int = screenToInt(s: visibleScreen(state: state))
   let winX: Int = getWindowPositionX()
@@ -222,29 +226,17 @@ func restoreAppState(state: mod AppState, playback: mod PlaybackState, path: vie
     playback.playingTrackIndex = state.currentTrackIndex
   }
 
-  # Session-level: which tab the user last had selected, which screen
-  # they were last looking at (sub-pages get pushed back onto the
-  # stack so e.g. "I was in Album when I quit" survives), and the
-  # last-seen OS window position.
+  # Session route: restore the top-level tab and the window
+  # position. The "screen" field stays in the JSON for forward
+  # compatibility (and for the diagnostic log on save), but we
+  # deliberately do NOT push it onto the sub-page stack at
+  # restore — landing the user on a sub-page like NowPlaying with
+  # an empty back-stack underneath caused real navigation breakage.
   let tabKey: String = "tab"
   let tabFieldIdx: Int = jsonField(doc: doc, this: root, key: tabKey)
   if tabFieldIdx >= 0 {
     let tabOrd: Int = jsonInt(this: jsonValueAt(doc: doc, idx: tabFieldIdx), fallback: 4)
     state.tab = intToScreen(n: tabOrd)
-  }
-  let screenKey: String = "screen"
-  let screenFieldIdx: Int = jsonField(doc: doc, this: root, key: screenKey)
-  if screenFieldIdx >= 0 {
-    let screenOrd: Int = jsonInt(this: jsonValueAt(doc: doc, idx: screenFieldIdx), fallback: 0 - 1)
-    if screenOrd >= 0 {
-      let restoredScreen: Screen = intToScreen(n: screenOrd)
-      let tabOrd2: Int = screenToInt(s: state.tab)
-      if screenOrd is not tabOrd2 {
-        # Last visible was a sub-page (Album / Player / History);
-        # push it onto the empty stack so the user lands back on it.
-        pushSubPage(state: state, screen: restoredScreen)
-      }
-    }
   }
   let winXKey: String = "winX"
   let winXIdx: Int = jsonField(doc: doc, this: root, key: winXKey)
