@@ -1,0 +1,65 @@
+# Per-frame animation systems. Hosts grow as we add animated
+# components — for now: one system that drives `HoverScale.current`
+# toward its target.
+#
+# Each system follows the same shape:
+#   * Walks its ComponentTable.
+#   * Reads any per-frame context (the cursor-hit entity, the
+#     frame's `dt`).
+#   * Mutates the animated field in place.
+#   * Returns true if anything is still in flight (delta above an
+#     epsilon), so the host can keep the dirty-render pump going
+#     until the animation has settled.
+#
+# Permanent components, not one-shots — `HoverScale` lives on every
+# tile that wants the effect. Just change the target by adjusting
+# `restScale` / `hoverScale`; the system handles the rest.
+import core
+import ui/ecs
+import ui/components
+
+# Move `current` toward `target` by an exponential ease at `speed`
+# units per second. Snaps to `target` when `|target - current|` is
+# below `epsilon` so the system can stop reporting "in flight".
+func easeTowards(current: view Float, target: view Float, speed: view Float, dt: view Float, epsilon: view Float) ret Float {
+  let delta: Float = target - current
+  let absDelta: Float = delta
+  if absDelta < 0.0 {
+    absDelta = 0.0 - absDelta
+  }
+  if absDelta < epsilon {
+    ret target
+  }
+  let step: Float = dt * speed
+  if step > 1.0 {
+    step = 1.0
+  }
+  ret current + delta * step
+}
+
+# Step every HoverScale entity by one frame. `hovered` is the
+# topmost cursor-hit entity (use `noEntity()` when nothing is
+# hovered). Returns true if any entity is still animating.
+func hoverScaleSystem(world: mod UiWorld, hovered: view EntityId, dt: view Float) pub ret Bool {
+  let stillAnimating: Bool = false
+  let n: Int = componentCount(this: world.hoverScales)
+  let i: Int = 0
+  loop i < n {
+    let entity: EntityId = componentEntityAt(this: world.hoverScales, i: i)
+    let hs: HoverScale = componentGet(this: world.hoverScales, entity: entity)
+    let target: Float = hs.restScale
+    if entity.value is hovered.value {
+      target = hs.hoverScale
+    }
+    let next: Float = easeTowards(current: hs.current, target: target, speed: hs.speed, dt: dt, epsilon: 0.001)
+    if next is not hs.current {
+      hs.current = next
+      componentSet(this: world.hoverScales, entity: entity, data: hs)
+      if next is not target {
+        stillAnimating = true
+      }
+    }
+    i = i + 1
+  }
+  ret stillAnimating
+}
