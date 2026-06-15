@@ -90,8 +90,8 @@ func buildHomeGridRow(
   ret row
 }
 
-func buildHomeCoverGrid(world: mod UiWorld, albums: view List(Album)) ret EntityId {
-  let keys: List(String) = collectLibraryCoverKeys(albums: albums)
+func buildHomeCoverGrid(world: mod UiWorld, albums: view List(Album), library: view List(String)) ret EntityId {
+  let keys: List(String) = collectLibraryCoverKeys(albums: albums, library: library)
   let grid: EntityId = createEntity(world: world)
   let cols: Int = homeGridColumns
   let total: Int = keys.length
@@ -116,7 +116,7 @@ func buildHomeCoverGrid(world: mod UiWorld, albums: view List(Album)) ret Entity
   ret grid
 }
 
-func buildHomeBody(world: mod UiWorld, albums: view List(Album), history: view PlayHistory, scrollY: view Float) ret EntityId {
+func buildHomeBody(world: mod UiWorld, albums: view List(Album), library: view List(String), history: view PlayHistory, scrollY: view Float) ret EntityId {
   let body: EntityId = createEntity(world: world)
   let bodyW: Float = screenW - outerPad * 2.0
   let bodyH: Float = screenH - topBarH - navTabsH - outerGap * 4.0 - outerPad * 2.0
@@ -136,7 +136,7 @@ func buildHomeBody(world: mod UiWorld, albums: view List(Album), history: view P
   let subText: String = "Pick something to play"
   setText(world: world, entity: sub, text: subText, styleId: subStyle)
 
-  let grid: EntityId = buildHomeCoverGrid(world: world, albums: albums)
+  let grid: EntityId = buildHomeCoverGrid(world: world, albums: albums, library: library)
 
   let hasRecent: Bool = history.entries.length > 0
   let kidsCap: Int = 2
@@ -176,7 +176,7 @@ func mountHomePage(
   componentSet(this: world.pageRoots, entity: root, data: own pr)
 
   let topBar: EntityId = buildPageTopBar(world: world, title: "Good evening")
-  let body: EntityId = buildHomeBody(world: world, albums: albums, history: state.playHistory, scrollY: scrollY)
+  let body: EntityId = buildHomeBody(world: world, albums: albums, library: state.library, history: state.playHistory, scrollY: scrollY)
 
   let kids: List(EntityId) = createList(EntityId, cap: 2)
   kids.add(value: topBar)
