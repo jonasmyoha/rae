@@ -127,6 +127,11 @@ func main() {
   # so the History thumbs paint real covers across launches.
   restoreHistory(history: appState.playHistory, path: historyFilePath)
   refetchHistoryArt(history: appState.playHistory, reg: texReg)
+  # User library — first launch seeds it from the catalog so all
+  # albums are visible by default. Subsequent launches load the
+  # curated subset and stems that aren't in the catalog any more
+  # are dropped silently.
+  appState.library = loadLibraryFromJson(albums: appState.albums, path: libraryFilePath)
 
   # Spotify-mode integration. ON by default; opt out with
   # RAE_UI_NO_SPOTIFY=1. See examples/98_mobile_ui/spotify_view.rae.
