@@ -592,12 +592,52 @@ func deserNodeId(doc: view JsonDoc, val: view JsonValue) ret NodeId {
 }
 
 func deserSceneInstance(doc: view JsonDoc, val: view JsonValue) ret SceneInstance {
-  # `params` is preserved as raw JSON-ish text only when the user
-  # passes a string here; full param/override application is phase 1f.
+  # Reads the RUICS SceneInstance shape:
+  #   { "sceneId": "child-scene-id",
+  #     "params": { "overrides": [
+  #       { "nodeId": "X", "component": "Y", "field": "Z", "value": "..." }
+  #     ] } }
+  # `params.overrides` is a flat array of {nodeId, component, field,
+  # value} quadruples. Captured into four parallel String lists so a
+  # `componentGet(world.sceneInstances, e)` round-trip doesn't have to
+  # copy a List-of-structs (the C backend's struct-by-list-index
+  # path still corrupts those).
   let sid: String = optString(doc: doc, container: val, key: "sceneId", fallback: "")
+  let nodeIds: List(String) = createList(String, cap: 0)
+  let components: List(String) = createList(String, cap: 0)
+  let fields: List(String) = createList(String, cap: 0)
+  let values: List(String) = createList(String, cap: 0)
+
+  let paramsIdx: Int = jsonField(doc: doc, this: val, key: "params")
+  if paramsIdx >= 0 {
+    let paramsVal: JsonValue = jsonValueAt(doc: doc, idx: paramsIdx)
+    let overridesIdx: Int = jsonField(doc: doc, this: paramsVal, key: "overrides")
+    if overridesIdx >= 0 {
+      let arr: JsonValue = jsonValueAt(doc: doc, idx: overridesIdx)
+      let n: Int = jsonArrayLen(this: arr)
+      let i: Int = 0
+      loop i < n {
+        let elem: JsonValue = jsonArrayAt(doc: doc, this: arr, idx: i)
+        let empty: String = ""
+        let n2: String = optString(doc: doc, container: elem, key: "nodeId", fallback: empty)
+        let c2: String = optString(doc: doc, container: elem, key: "component", fallback: empty)
+        let f2: String = optString(doc: doc, container: elem, key: "field", fallback: empty)
+        let v2: String = optString(doc: doc, container: elem, key: "value", fallback: empty)
+        nodeIds.add(value: n2)
+        components.add(value: c2)
+        fields.add(value: f2)
+        values.add(value: v2)
+        i = i + 1
+      }
+    }
+  }
+
   ret SceneInstance {
     sceneId: own sid
-    paramsJson: ""
+    overrideNodeIds: own nodeIds
+    overrideComponents: own components
+    overrideFields: own fields
+    overrideValues: own values
   }
 }
 

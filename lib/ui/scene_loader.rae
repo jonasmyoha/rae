@@ -133,6 +133,73 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
   ret rootEntity
 }
 
+# Phase 1f scene-instance resolver.
+#
+# After `loadScene` materialises the top-level scene, any node that
+# carried a `SceneInstance` component now sits in the world with the
+# referenced child scene NOT yet mounted. This pass walks the
+# `sceneInstances` component table, looks each sceneId up in the
+# supplied `SceneRegistry`, and mounts the child via the existing
+# `mountSceneInstanceIntoPage` machinery — replaying the captured
+# `params.overrides[]` quadruples as `SceneOverride` entries.
+#
+# Recursive: a mounted child scene can itself carry `SceneInstance`
+# components on its descendants. We loop until a full pass mounts
+# nothing new, so nested instances resolve in O(depth) passes.
+#
+# `pageId` is forwarded to the inner mount so per-page nodeId scoping
+# stays consistent end-to-end.
+func resolveSceneInstances(
+  world: mod UiWorld
+  registry: view SceneRegistry
+  pageId: view String
+) pub {
+  let safety: Int = 0
+  loop safety < 32 {
+    let progressed: Bool = false
+    let n: Int = componentCount(this: world.sceneInstances)
+    let i: Int = 0
+    loop i < n {
+      let entity: EntityId = componentEntityAt(this: world.sceneInstances, i: i)
+      let inst: SceneInstance = componentGet(this: world.sceneInstances, entity: entity)
+      if inst.sceneId.length() > 0 {
+        let idx: Int = sceneRegistryIndex(reg: registry, key: inst.sceneId)
+        if idx >= 0 {
+          let scene: view Scene => sceneRegistryGet(reg: registry, idx: idx)
+          let overrides: List(SceneOverride) = createList(SceneOverride, cap: inst.overrideNodeIds.length)
+          let m: Int = inst.overrideNodeIds.length
+          let j: Int = 0
+          loop j < m {
+            let ov: SceneOverride = {
+              nodeId: inst.overrideNodeIds.get(index: j)
+              componentName: inst.overrideComponents.get(index: j)
+              fieldName: inst.overrideFields.get(index: j)
+              valueString: inst.overrideValues.get(index: j)
+            }
+            overrides.add(value: ov)
+            j = j + 1
+          }
+          mountSceneInstanceIntoPage(
+            world: world
+            mountEntity: entity
+            scene: scene
+            overrides: overrides
+            pageId: pageId
+          )
+          # Clear the marker so the next loop pass doesn't re-mount this entity.
+          componentRemove(this: world.sceneInstances, entity: entity)
+          progressed = true
+        }
+      }
+      i = i + 1
+    }
+    if progressed is false {
+      ret
+    }
+    safety = safety + 1
+  }
+}
+
 # Diagnostic helper used by tests and the eventual editor: dump the
 # entity list with its NodeId, parent, and the names of components
 # attached to it. Doesn't pretty-print component data — just the

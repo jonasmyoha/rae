@@ -86,6 +86,14 @@ func sceneRegistryHas(reg: view SceneRegistry, key: view String) ret Bool {
   ret sceneRegistryIndex(reg: reg, key: key) >= 0
 }
 
+# Return a view onto the i'th scene. Caller is responsible for bounds
+# checking via sceneRegistryIndex first. View-returning so callers
+# don't copy the underlying Scene struct (the JsonDoc pointers inside
+# don't survive a struct-by-list-index copy in the C backend).
+func sceneRegistryGet(reg: view SceneRegistry, idx: view Int) pub ret view Scene {
+  ret view rae_ext_rae_buf_get(buf: reg.scenes.data, index: idx)
+}
+
 # -----------------------------------------------------------------
 # Override builders — convenience wrappers so the hand-built scene
 # code reads as a list of small declarations.
