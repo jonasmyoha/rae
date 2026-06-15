@@ -106,7 +106,7 @@ func insert(T: type, this: mod List(T), index: view Int, value: own T) {
       dst: this.data
       dst_off: index + 1
       len: this.length - index
-      elemSize: 8
+      elemSize: sizeof(T)
     )
   }
   rae_ext_rae_buf_set(buf: this.data, index: index, value: value)
@@ -134,7 +134,7 @@ func remove(T: type, this: mod List(T), index: view Int) {
       dst: this.data
       dst_off: index
       len: this.length - index - 1
-      elemSize: 8
+      elemSize: sizeof(T)
     )
   }
   this.length = this.length - 1
