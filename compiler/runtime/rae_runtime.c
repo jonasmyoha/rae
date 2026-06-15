@@ -1854,9 +1854,14 @@ extern void glfwPostEmptyEvent(void);
  *      of waiting out the rest of its timeout. */
 typedef struct GLFWwindow GLFWwindow;
 typedef void (*GLFWwindowclosefun)(GLFWwindow*);
+typedef void (*GLFWmousebuttonfun)(GLFWwindow*, int, int, int);
 extern GLFWwindow* glfwGetCurrentContext(void);
 extern void glfwSetWindowCloseCallback(GLFWwindow* w, GLFWwindowclosefun cb);
 extern void glfwSetWindowShouldClose(GLFWwindow* w, int value);
+extern GLFWmousebuttonfun glfwSetMouseButtonCallback(GLFWwindow* w, GLFWmousebuttonfun cb);
+#define RAE_GLFW_PRESS 1
+#define RAE_GLFW_RELEASE 0
+#define RAE_GLFW_MOUSE_BUTTON_LEFT 0
 
 static void rae_glfw_close_waker(GLFWwindow* w) {
   /* macOS quirk: clicking the red-X invokes this delegate-driven
@@ -1887,6 +1892,56 @@ static void rae_glfw_close_waker(GLFWwindow* w) {
   // which in turn keeps the rae watch supervisor waiting and
   // makes the devtools Stop button look broken.
   _exit(0);
+}
+
+/* macOS click-drop workaround. raylib's IsMouseButtonPressed/Released
+ * are computed by comparing the previous poll's button state to the
+ * current poll's — if a press+release pair arrives between two polls
+ * (easy on macOS, where mouse-button events don't reliably wake
+ * glfwWaitEventsTimeout), the post-poll state is up→up with no edge
+ * and BOTH flags return false. The click vanishes.
+ *
+ * Fix: chain our own GLFW mouse-button callback below raylib's so we
+ * see every transition per-event rather than per-poll. Counters are
+ * single-threaded (GLFW callbacks fire on the main thread, same as
+ * the rest of the loop), so plain int suffices — no atomics. */
+static int g_mouse_press_pending = 0;
+static int g_mouse_release_pending = 0;
+static GLFWmousebuttonfun g_prev_mouse_button_cb = NULL;
+static int g_mouse_button_hook_installed = 0;
+
+static void rae_glfw_mouse_button_chain_cb(GLFWwindow* w, int button, int action, int mods) {
+  if (g_prev_mouse_button_cb) g_prev_mouse_button_cb(w, button, action, mods);
+  if (button == RAE_GLFW_MOUSE_BUTTON_LEFT) {
+    if (action == RAE_GLFW_PRESS) g_mouse_press_pending = 1;
+    else if (action == RAE_GLFW_RELEASE) g_mouse_release_pending = 1;
+  }
+}
+
+void rae_ext_installMouseButtonHook(void) {
+  if (g_mouse_button_hook_installed) return;
+  GLFWwindow* w = glfwGetCurrentContext();
+  if (!w) {
+    fprintf(stderr, "[mouse-hook] FAILED: no current GLFW context\n");
+    fflush(stderr);
+    return;
+  }
+  g_prev_mouse_button_cb = glfwSetMouseButtonCallback(w, rae_glfw_mouse_button_chain_cb);
+  g_mouse_button_hook_installed = 1;
+  fprintf(stderr, "[mouse-hook] installed (prev cb=%p)\n", (void*)g_prev_mouse_button_cb);
+  fflush(stderr);
+}
+
+rae_Bool rae_ext_mouseHookDrainPressed(void) {
+  int v = g_mouse_press_pending;
+  g_mouse_press_pending = 0;
+  return v != 0;
+}
+
+rae_Bool rae_ext_mouseHookDrainReleased(void) {
+  int v = g_mouse_release_pending;
+  g_mouse_release_pending = 0;
+  return v != 0;
 }
 
 void rae_ext_waitEventsTimeout(double seconds) { glfwWaitEventsTimeout(seconds); }
