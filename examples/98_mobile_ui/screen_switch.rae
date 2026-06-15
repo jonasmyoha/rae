@@ -141,6 +141,12 @@ func handleScreenSwitch(
     unmountPage(world: world, pageId: historyPageId)
     let freshHist: EntityId = mountHistoryPage(world: world, state: appState, scrollY: 0.0)
   }
+  if nextScreen is Screen.Library {
+    # Re-mount with the current library filter — albums removed
+    # via the bottom-sheet drop out of the grid here.
+    unmountPage(world: world, pageId: libraryPageId)
+    let freshLib: EntityId = mountLibraryPage(world: world, state: appState, scrollY: 0.0)
+  }
   setPageActive(world: world, pageId: incomingPageId, active: true)
 
   # Nav-tabs bar lives as a child of the bottom dock. Unmount destroys
