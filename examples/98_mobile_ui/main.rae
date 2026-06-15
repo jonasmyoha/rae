@@ -351,6 +351,7 @@ func main() {
     let cachedHistoryLen: Int = 0
     let cachedSheetEpoch: Int = 0
     let lastHoverAnimDirty: Bool = false
+    let lastFrameTime: Float = 0.0
     # Single InputSystem for the app lifetime — outlives world
     # rebuilds so a held press carries `pressedEntity` across them.
     # `updateInputSystem` refills the per-frame fields each tick.
@@ -794,10 +795,9 @@ func main() {
           let active: Bool = activeDecision.active
           let currentHovered: EntityId = activeDecision.currentHovered
           let currentMouseBtns: Int = activeDecision.currentMouseBtns
-          lastHoverAnimDirty = hoverScaleSystem(world: world, hovered: currentHovered, dt: 0.0167)
-          if lastHoverAnimDirty {
-            active = true
-          }
+          lastHoverAnimDirty = hoverScaleSystem(world: world, hovered: currentHovered, dt: now - lastFrameTime)
+          lastFrameTime = now
+          if lastHoverAnimDirty { active = true }
           lastHoveredEntity = currentHovered
           lastMouseBtns = currentMouseBtns
           lastPressed = input.pressedEntity
