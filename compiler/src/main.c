@@ -2388,6 +2388,47 @@ static void watch_collect_rae_sources(const char* dir, WatchSources* sources, in
   closedir(d);
 }
 
+// Walk companion `lib/` directories outside the watch root so edits
+// to imported stdlib modules (`lib/ui/*.rae`, etc.) trigger rebuilds.
+// `try_resolve_lib_module` probes the same locations at compile time;
+// without this, the supervisor's glob only saw the project dir and
+// silently dropped lib-side change events.
+//
+// Probes (each walked recursively if it exists):
+//   <cwd>/lib                  — repo-root lib when run from there
+//   <watch_root>/../lib        — sibling lib next to the example
+//   <watch_root>/../../lib     — grand-sibling lib (nested examples)
+//
+// Dedup happens inside watch_sources_add_file, so it's safe even when
+// these paths overlap with the project-root walk.
+static void watch_collect_companion_libs(const char* watch_root, WatchSources* sources) {
+  const char* candidates[3];
+  char cwd_lib[PATH_MAX];
+  char sibling_lib[PATH_MAX];
+  char grand_lib[PATH_MAX];
+
+  char cwd[PATH_MAX];
+  if (getcwd(cwd, sizeof(cwd))) {
+    snprintf(cwd_lib, sizeof(cwd_lib), "%s/lib", cwd);
+    candidates[0] = cwd_lib;
+  } else {
+    candidates[0] = NULL;
+  }
+
+  snprintf(sibling_lib, sizeof(sibling_lib), "%s/../lib", watch_root);
+  candidates[1] = sibling_lib;
+  snprintf(grand_lib, sizeof(grand_lib), "%s/../../lib", watch_root);
+  candidates[2] = grand_lib;
+
+  for (int i = 0; i < 3; i++) {
+    if (!candidates[i]) continue;
+    struct stat st;
+    if (stat(candidates[i], &st) != 0) continue;
+    if (!S_ISDIR(st.st_mode)) continue;
+    watch_collect_rae_sources(candidates[i], sources, 0);
+  }
+}
+
 // Build the entry .rae to a C source via a fresh `rae build` subprocess.
 // Returns true on success; on failure prints a build-error tag (the
 // subprocess's stderr is inherited so the actual error is visible above).
@@ -2632,6 +2673,7 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
   WatchSources sources;
   watch_sources_init(&sources);
   watch_collect_rae_sources(watch_root, &sources, 0);
+  watch_collect_companion_libs(watch_root, &sources);
   WatchState ws;
   watch_state_init(&ws, entry);
   watch_state_apply_sources(&ws, &sources);
@@ -2757,6 +2799,7 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
     WatchSources new_sources;
     watch_sources_init(&new_sources);
     watch_collect_rae_sources(watch_root, &new_sources, 0);
+    watch_collect_companion_libs(watch_root, &new_sources);
     watch_state_apply_sources(&ws, &new_sources);
 
     char new_bin[PATH_MAX] = {0};
