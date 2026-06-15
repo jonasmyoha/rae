@@ -34,3 +34,23 @@ let spaceS: Float = 8.0
 let spaceM: Float = 12.0
 let spaceL: Float = 16.0
 let spaceXL: Float = 24.0
+
+# Resolve a token name (`"spaceM"`, etc.) to its Float value. Used by
+# the scene deserializer so a .raescene file can write
+# `"gap": "spaceM"` instead of `"gap": 12`. Returns 0.0 + a stderr
+# log for unknown names — a visibly-collapsed gap makes typos obvious
+# without crashing the whole scene load.
+func spaceTokenValue(name: view String) pub ret Float {
+  let xs: String = "spaceXS"
+  let s: String = "spaceS"
+  let m: String = "spaceM"
+  let l: String = "spaceL"
+  let xl: String = "spaceXL"
+  if name.equals(other: xs) { ret spaceXS }
+  if name.equals(other: s) { ret spaceS }
+  if name.equals(other: m) { ret spaceM }
+  if name.equals(other: l) { ret spaceL }
+  if name.equals(other: xl) { ret spaceXL }
+  log("[spacing] unknown token: {name}")
+  ret 0.0
+}
