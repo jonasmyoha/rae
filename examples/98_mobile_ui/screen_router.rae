@@ -296,6 +296,9 @@ type AppState pub {
   # track rows / album pages. See `bottom_sheet.rae`. Not persisted
   # across launches; defaults to invisible.
   bottomSheet: BottomSheetState
+  # UI preferences (code-only flags — no settings UI yet). See
+  # `app_settings.rae`.
+  settings: AppSettings
 }
 
 func createAppState(albums: own List(Album)) pub ret AppState {
@@ -321,6 +324,7 @@ func createAppState(albums: own List(Album)) pub ret AppState {
     playHistory: createPlayHistory(cap: 100)
     library: createList(String, cap: 8)
     bottomSheet: createBottomSheetState()
+    settings: createAppSettings()
   }
 }
 
