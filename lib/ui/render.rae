@@ -588,7 +588,7 @@ func paintSubtree(world: view UiWorld, reg: view TextureRegistry, entity: view E
 # Conventional default font path. `rae init` drops a Roboto-Regular.ttf
 # here; apps without that file just keep the empty slot and raylib's
 # bitmap default kicks in (the visible-but-ugly baseline). Apps that
-# need a different face load it manually before calling bootstrapUi —
+# need a different face load it manually before calling initRaeUi —
 # the call sees the slot is already populated and bails.
 let raeDefaultUiFontPath: String = "assets/Roboto-Regular.ttf"
 let raeDefaultUiFontSize: Int = 36
@@ -602,7 +602,7 @@ let raeDefaultUiFontSlot: Int = 0
 # their main.rae each time the stdlib adds an installable.
 #
 # Safe to call multiple times — the body is idempotent.
-func bootstrapUi() pub {
+func initRaeUi() pub {
   if isFontSlotLoaded(slot: raeDefaultUiFontSlot) is false {
     loadFontInto(
       slot: raeDefaultUiFontSlot
