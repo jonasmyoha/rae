@@ -411,7 +411,14 @@ type RuntimeOnly {
 
 type SceneInstance {
   sceneId: String
-  paramsJson: String
+  # Per-field overrides captured at deserialization. Same shape as
+  # `lib/ui/scene_instance.rae`'s SceneOverride (nodeId + componentName
+  # + fieldName + valueString quadruple). The scene-loader's resolve
+  # pass reads these when mounting the referenced child scene.
+  overrideNodeIds: List(String)
+  overrideComponents: List(String)
+  overrideFields: List(String)
+  overrideValues: List(String)
 }
 
 type ImageSourceResolver {
