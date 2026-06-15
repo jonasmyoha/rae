@@ -66,15 +66,17 @@ func decideActive(
     }
   }
 
-  # Input-outline debug overlay: re-render only when the hovered
-  # OnClick entity or the held-button mask *changes*, so an idle
-  # cursor parked over the same rect doesn't peg fps.
-  let currentHovered: EntityId = noEntity()
+  # Hover-change detection. Always run hitTest — components with a
+  # visual effect on hover (HoverScale, etc.) need a re-render when
+  # the cursor enters or leaves their rect. The check below only
+  # marks dirty on entity TRANSITIONS, so an idle cursor parked over
+  # the same rect stays at 0 fps. Mouse-button bitfield is only
+  # mirrored when the debug overlay needs it.
+  let mx: Float = getMouseX().toFloat()
+  let my: Float = getMouseY().toFloat()
+  let currentHovered: EntityId = hitTest(world: world, x: mx, y: my)
   let currentMouseBtns: Int = 0
   if debug.showInputOutlines {
-    let outlineMx: Float = getMouseX().toFloat()
-    let outlineMy: Float = getMouseY().toFloat()
-    currentHovered = hitTest(world: world, x: outlineMx, y: outlineMy)
     # Same bitfield layout as drawDebugLabels' "btn:" read-out:
     # bit 0 left, bit 1 right, bit 2 middle.
     if isMouseButtonDown(button: 0) {
