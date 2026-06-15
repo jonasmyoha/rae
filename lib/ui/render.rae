@@ -302,12 +302,7 @@ func textStyleSize(styleId: view String) ret Float {
 }
 
 func textStyleColor(styleId: view String, chain255: view Int) ret Color {
-  # Map each authored style id to the theme palette so light <->
-  # dark flips on text are automatic. The label "on surfaceAlt"
-  # below means the panel underneath this text is the surfaceAlt
-  # color (e.g., the mini-player pill) — those styles read the
-  # accentText slot since accentText is sized as "contrast against
-  # accent / a darker chunk" in both themes.
+  # Style id → theme palette mapping (light/dark flips for free).
   let mute: String = "muted"
   let caption: String = "caption"
   let primary: String = "primary"
@@ -352,12 +347,7 @@ func textStyleColor(styleId: view String, chain255: view Int) ret Color {
   if styleId.equals(other: tabInactive) {
     ret toRaylibColor(c: themeColorByName(name: "textMuted"), chain255: chain255)
   }
-  # "On surfaceAlt" styles. surfaceAlt is the contrasting panel
-  # (the mini-player pill). In light theme it's dark, so its text
-  # is light; in dark theme it stays dark-ish too, so its text is
-  # still light. We piggy-back on `accentText` for the primary
-  # label — its job is exactly "high-contrast against a dark
-  # chunk" in both themes.
+  # "On surfaceAlt" styles read accentText for theme-correct contrast.
   if styleId.equals(other: miniTitle) {
     ret toRaylibColor(c: themeColorByName(name: "accentText"), chain255: chain255)
   }
@@ -562,7 +552,10 @@ func paintEntity(world: view UiWorld, reg: view TextureRegistry, entity: view En
 }
 
 # Recursive top-down walk. Painter's algorithm — parent before its
-# children, declaration order between siblings.
+# children, declaration order between siblings. Two-pass over the
+# children so any hover-popped sibling (HoverScale.current >
+# restScale) paints LAST, on top of the rest — without this a
+# scaled-up tile gets clipped by the next tile in declaration order.
 func paintSubtree(world: view UiWorld, reg: view TextureRegistry, entity: view EntityId) {
   paintEntity(world: world, reg: reg, entity: entity)
   if componentHas(this: world.childrens, entity: entity) is false {
@@ -573,8 +566,18 @@ func paintSubtree(world: view UiWorld, reg: view TextureRegistry, entity: view E
   let i: Int = 0
   loop i < n {
     let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
-    paintSubtree(world: world, reg: reg, entity: cid)
+    if isHoverPopped(world: world, entity: cid) is false {
+      paintSubtree(world: world, reg: reg, entity: cid)
+    }
     i = i + 1
+  }
+  let j: Int = 0
+  loop j < n {
+    let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: j)
+    if isHoverPopped(world: world, entity: cid) {
+      paintSubtree(world: world, reg: reg, entity: cid)
+    }
+    j = j + 1
   }
 }
 
