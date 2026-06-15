@@ -2408,6 +2408,11 @@ void rae_ext_unloadFontSlot(int64_t slot) {
     }
 }
 
+rae_Bool rae_ext_isFontSlotLoaded(int64_t slot) {
+    if (slot < 0 || slot >= RAE_FONT_SLOTS) return 0;
+    return g_rae_font_loaded[slot] ? 1 : 0;
+}
+
 void rae_ext_drawTextWithFont(int64_t slot, rae_String text, double x, double y, double fontSize, double spacing, Color color) {
     if (slot >= 0 && slot < RAE_FONT_SLOTS && g_rae_font_loaded[slot]) {
         DrawTextEx(
