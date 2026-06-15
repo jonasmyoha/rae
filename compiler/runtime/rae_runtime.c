@@ -1924,6 +1924,8 @@ int64_t rae_ext_getMonitorWidth(int64_t monitor) { return (int64_t)GetMonitorWid
 int64_t rae_ext_getMonitorHeight(int64_t monitor) { return (int64_t)GetMonitorHeight((int)monitor); }
 void rae_ext_setWindowSize(int64_t width, int64_t height) { SetWindowSize((int)width, (int)height); }
 void rae_ext_setWindowPosition(int64_t x, int64_t y) { SetWindowPosition((int)x, (int)y); }
+int64_t rae_ext_getWindowPositionX(void) { Vector2 p = GetWindowPosition(); return (int64_t)p.x; }
+int64_t rae_ext_getWindowPositionY(void) { Vector2 p = GetWindowPosition(); return (int64_t)p.y; }
 Texture rae_ext_loadTexture(rae_String fileName) { return LoadTexture((const char*)fileName.data); }
 
 Texture rae_ext_loadCircleCroppedTexture(rae_String fileName) {
