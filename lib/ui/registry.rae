@@ -21,6 +21,7 @@
 import core
 import json
 import ui/theme
+import ui/spacing
 
 # Build the canonical list of authored component names. Phase 1c uses
 # this to validate that every node's keys (other than `Children`) name
@@ -114,6 +115,26 @@ func optFloat(doc: view JsonDoc, container: view JsonValue, key: view String, fa
     ret fallback
   }
   let v: JsonValue = jsonValueAt(doc: doc, idx: idx)
+  ret jsonFloat(this: v, fallback: fallback)
+}
+
+# Same shape as optFloat but additionally accepts a string token name
+# resolved via `spaceTokenValue`. Use this for spacing-style fields
+# (gap, padding insets, margin insets) so .raescene authors can write
+# `"gap": "spaceM"` instead of remembering the pixel value. A numeric
+# JSON value still works unchanged — the string branch is the
+# extension, not a replacement.
+func optFloatOrToken(doc: view JsonDoc, container: view JsonValue, key: view String, fallback: view Float) ret Float {
+  let idx: Int = jsonField(doc: doc, this: container, key: key)
+  if idx < 0 {
+    ret fallback
+  }
+  let v: JsonValue = jsonValueAt(doc: doc, idx: idx)
+  let empty: String = ""
+  let asStr: String = jsonString(this: v, fallback: empty)
+  if asStr.length() > 0 {
+    ret spaceTokenValue(name: asStr)
+  }
   ret jsonFloat(this: v, fallback: fallback)
 }
 
@@ -297,10 +318,10 @@ func parseTextFormat(s: view String) ret TextFormat {
 # -----------------------------------------------------------------
 
 func deserInsets(doc: view JsonDoc, val: view JsonValue) ret Insets {
-  let l: Float = optFloat(doc: doc, container: val, key: "l", fallback: 0.0)
-  let t: Float = optFloat(doc: doc, container: val, key: "t", fallback: 0.0)
-  let r: Float = optFloat(doc: doc, container: val, key: "r", fallback: 0.0)
-  let b: Float = optFloat(doc: doc, container: val, key: "b", fallback: 0.0)
+  let l: Float = optFloatOrToken(doc: doc, container: val, key: "l", fallback: 0.0)
+  let t: Float = optFloatOrToken(doc: doc, container: val, key: "t", fallback: 0.0)
+  let r: Float = optFloatOrToken(doc: doc, container: val, key: "r", fallback: 0.0)
+  let b: Float = optFloatOrToken(doc: doc, container: val, key: "b", fallback: 0.0)
   ret Insets { l: l, t: t, r: r, b: b }
 }
 
@@ -376,12 +397,12 @@ func deserLayout(doc: view JsonDoc, val: view JsonValue) ret Layout {
   let alignCrossStr: String = optString(doc: doc, container: val, key: "alignCross", fallback: "Start")
   ret Layout {
     kind: parseLayoutType(s: typeStr)
-    gap: optFloat(doc: doc, container: val, key: "gap", fallback: 0.0)
+    gap: optFloatOrToken(doc: doc, container: val, key: "gap", fallback: 0.0)
     alignMain: parseAlignKind(s: alignMainStr)
     alignCross: parseAlignKind(s: alignCrossStr)
     columns: optInt(doc: doc, container: val, key: "columns", fallback: 0)
-    rowGap: optFloat(doc: doc, container: val, key: "rowGap", fallback: 0.0)
-    columnGap: optFloat(doc: doc, container: val, key: "columnGap", fallback: 0.0)
+    rowGap: optFloatOrToken(doc: doc, container: val, key: "rowGap", fallback: 0.0)
+    columnGap: optFloatOrToken(doc: doc, container: val, key: "columnGap", fallback: 0.0)
   }
 }
 
