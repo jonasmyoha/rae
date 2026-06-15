@@ -63,32 +63,38 @@ func historyHasArt(entry: view PlayHistoryEntry) pub ret Bool {
 # entry's stored textureKey (album stem for local, "spotify-art:<id>"
 # for Spotify). No-art → a visible placeholder rect filled with the
 # theme's `textMuted` color.
-func buildHistoryThumb(world: mod UiWorld, entry: view PlayHistoryEntry, size: view Float) ret EntityId {
+func buildHistoryThumb(world: mod UiWorld, entry: view PlayHistoryEntry, size: view Float, rounded: view Bool) ret EntityId {
   let thumb: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: thumb, w: size, h: size)
-  let cr: CornerRadius = { radius: 8.0 }
-  componentSet(this: world.cornerRadiuses, entity: thumb, data: cr)
+  if rounded {
+    let cr: CornerRadius = { radius: 8.0 }
+    componentSet(this: world.cornerRadiuses, entity: thumb, data: cr)
+  }
   if historyHasArt(entry: entry) {
     let key: String = "{entry.textureKey}"
     setSprite(world: world, entity: thumb, key: key, tint: imageTintColor)
-    setHoverScale(world: world, entity: thumb, scale: 1.08)
+    setHoverScale(world: world, entity: thumb, hoverScale: 1.08)
   } else {
     let mutedName: String = "textMuted"
     let fill: RgbaColor = themeColorByName(name: mutedName)
     let transparent: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
+    let radius: Float = 0.0
+    if rounded {
+      radius = 8.0
+    }
     let sp: Shape = {
       kind: ShapeKind.RoundedRect
       fill: fill
       stroke: transparent
       strokeWidth: 0.0
-      radius: 8.0
+      radius: radius
     }
     componentSet(this: world.shapes, entity: thumb, data: sp)
   }
   ret thumb
 }
 
-func buildHistoryRow(world: mod UiWorld, entry: view PlayHistoryEntry, entryIndex: view Int) ret EntityId {
+func buildHistoryRow(world: mod UiWorld, entry: view PlayHistoryEntry, entryIndex: view Int, rounded: view Bool) ret EntityId {
   let row: EntityId = createEntity(world: world)
   let w: Float = screenW - outerPad * 2.0
   setRectFixed(world: world, entity: row, w: w, h: historyRowH)
@@ -98,7 +104,7 @@ func buildHistoryRow(world: mod UiWorld, entry: view PlayHistoryEntry, entryInde
   let replayAction: String = "history.replay.{entryIndex}"
   setOnClick(world: world, entity: row, actionId: replayAction)
 
-  let thumb: EntityId = buildHistoryThumb(world: world, entry: entry, size: historyThumbSize)
+  let thumb: EntityId = buildHistoryThumb(world: world, entry: entry, size: historyThumbSize, rounded: rounded)
 
   let info: EntityId = createEntity(world: world)
   let infoW: Float = w - historyThumbSize - historyDurationW - 24.0
@@ -139,7 +145,7 @@ func buildHistoryRow(world: mod UiWorld, entry: view PlayHistoryEntry, entryInde
   ret row
 }
 
-func buildHistoryBody(world: mod UiWorld, history: view PlayHistory, scrollY: view Float) ret EntityId {
+func buildHistoryBody(world: mod UiWorld, history: view PlayHistory, rounded: view Bool, scrollY: view Float) ret EntityId {
   let body: EntityId = createEntity(world: world)
   let bodyW: Float = screenW - outerPad * 2.0
   let bodyH: Float = screenH - topBarH - navTabsH - outerGap * 4.0 - outerPad * 2.0
@@ -172,7 +178,7 @@ func buildHistoryBody(world: mod UiWorld, history: view PlayHistory, scrollY: vi
   let i: Int = n - 1
   loop i >= 0 {
     let e: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: i)
-    let row: EntityId = buildHistoryRow(world: world, entry: e, entryIndex: i)
+    let row: EntityId = buildHistoryRow(world: world, entry: e, entryIndex: i, rounded: rounded)
     rowKids.add(value: row)
     i = i - 1
   }
@@ -198,7 +204,7 @@ func mountHistoryPage(
   componentSet(this: world.pageRoots, entity: root, data: own pr)
 
   let topBar: EntityId = buildPageTopBar(world: world, title: "Recently played")
-  let body: EntityId = buildHistoryBody(world: world, history: state.playHistory, scrollY: scrollY)
+  let body: EntityId = buildHistoryBody(world: world, history: state.playHistory, rounded: state.settings.roundedAlbumCovers, scrollY: scrollY)
 
   let kids: List(EntityId) = createList(EntityId, cap: 2)
   kids.add(value: topBar)
@@ -235,7 +241,7 @@ func buildHistoryWorld(
 # `history.replay.N` with the *real* entries index baked in (so the
 # dispatcher logic stays index-stable whether the user taps from
 # Home or from the full History page).
-func buildRecentlyPlayedStrip(world: mod UiWorld, history: view PlayHistory) pub ret EntityId {
+func buildRecentlyPlayedStrip(world: mod UiWorld, history: view PlayHistory, rounded: view Bool) pub ret EntityId {
   let strip: EntityId = createEntity(world: world)
   let stripW: Float = screenW - outerPad * 2.0
   setRectFixed(world: world, entity: strip, w: stripW, h: recentlyPlayedThumbSize)
@@ -253,7 +259,7 @@ func buildRecentlyPlayedStrip(world: mod UiWorld, history: view PlayHistory) pub
   loop visual < kidsCount {
     let entryIdx: Int = n - 1 - visual
     let e: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: entryIdx)
-    let tile: EntityId = buildHistoryThumb(world: world, entry: e, size: recentlyPlayedThumbSize)
+    let tile: EntityId = buildHistoryThumb(world: world, entry: e, size: recentlyPlayedThumbSize, rounded: rounded)
     let replayAction: String = "history.replay.{entryIdx}"
     setOnClick(world: world, entity: tile, actionId: replayAction)
     kids.add(value: tile)
