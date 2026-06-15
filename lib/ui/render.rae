@@ -174,10 +174,7 @@ func paintSprite(reg: view TextureRegistry, world: view UiWorld, entity: view En
   }
   let tex: Texture = textureGet(reg: reg, key: key)
 
-  # ScaleMode.Fit/Fill/Stretch — for Phase 1e we treat all three the
-  # same: scale the texture so its longer edge fills the box. Proper
-  # per-mode behaviour lands once we implement nine-slice and ratio-
-  # aware fitting in Phase 1f.
+  # All ScaleMode variants: scale to longer edge of the box.
   let scaleX: Float = 1.0
   let scaleY: Float = 1.0
   if tex.width > 0 {
@@ -194,16 +191,23 @@ func paintSprite(reg: view TextureRegistry, world: view UiWorld, entity: view En
     scale = 1.0
   }
 
-  let drawW: Float = tex.width.toFloat() * scale
-  let drawH: Float = tex.height.toFloat() * scale
+  # HoverScale: cursor inside the rect → multiply draw size by `scale`
+  # and re-center. Binary toggle, no easing.
+  let hoverMul: Float = 1.0
+  if componentHas(this: world.hoverScales, entity: entity) {
+    let mx: Float = getMouseX().toFloat()
+    let my: Float = getMouseY().toFloat()
+    if mx >= wt.x and mx <= wt.x + cr.w and my >= wt.y and my <= wt.y + cr.h {
+      let hs: HoverScale = componentGet(this: world.hoverScales, entity: entity)
+      hoverMul = hs.scale
+    }
+  }
+  let drawW: Float = tex.width.toFloat() * scale * hoverMul
+  let drawH: Float = tex.height.toFloat() * scale * hoverMul
   let offX: Float = (cr.w - drawW) / 2.0
   let offY: Float = (cr.h - drawH) / 2.0
 
-  # Rounded-corner clip via fragment shader. The texture is rendered
-  # at its natural size scaled to fit; the shader's `uSize` uniform
-  # is the same on-screen rect so the SDF works in matching units.
-  # No pre-baked variants — every (texture, size, radius) combo is
-  # handled live.
+  # Rounded-corner clip via fragment shader (SDF; live per call).
   let useRounded: Bool = componentHas(this: world.cornerRadiuses, entity: entity)
   let roundedRadius: Float = 0.0
   if useRounded {
@@ -373,10 +377,7 @@ func textStyleColor(styleId: view String, chain255: view Int) ret Color {
   if styleId.equals(other: pillLabelLight) {
     ret toRaylibColor(c: themeColorByName(name: "accentText"), chain255: chain255)
   }
-  # Debug-UI styles render against fixed (theme-independent) panels —
-  # the amber button and the dark menu backdrop — so the text colour
-  # is hard-coded to maintain contrast regardless of which theme the
-  # host app set. See lib/ui/debug.rae.
+  # Debug-UI styles (theme-independent — see lib/ui/debug.rae).
   let debugButton: String = "debugButton"
   if styleId.equals(other: debugButton) {
     let dark: RgbaColor = { r: 24, g: 24, b: 28, a: 255 }
