@@ -56,33 +56,6 @@ func main() {
   # cursor positions in the same coordinate space the renderer uses.
   setMouseScale(scaleX: 1.0, scaleY: 1.0)
 
-  # macOS silently clamps any window that doesn't fit in the available
-  # content area (monitor height − menu bar − title bar − dock chrome).
-  # When that happens raylib's framebuffer keeps the requested size but
-  # the actual window is smaller, so cursor coords (in the clamped
-  # space) no longer line up with the rendering. Avoid the clamp by
-  # capping our window height to a safe fraction of the monitor and
-  # resizing ourselves to match — raylib only learns the real monitor
-  # geometry after `initWindow`, so this has to run here.
-  let chromeBudget: Int = 100
-  let monitor: Int = getCurrentMonitor()
-  let monitorH: Int = getMonitorHeight(monitor: monitor)
-  let safeMaxH: Int = monitorH - chromeBudget
-  let reqW: Int = winW.toInt()
-  let reqH: Int = winH.toInt()
-  log("[boot] requested screen={reqW}x{reqH} monitorH={monitorH} safeMaxH={safeMaxH}")
-  if reqH > safeMaxH {
-    # Shrink both axes by the same factor so the iPhone-15-Pro aspect
-    # ratio set in config.rae survives the clamp.
-    let scale: Float = safeMaxH.toFloat() / winH
-    screenH = winH * scale
-    screenW = winW * scale
-    let newH: Float = screenH
-    let newW: Float = screenW
-    setWindowSize(width: newW.toInt(), height: newH.toInt())
-    log("[boot] clamped to {newW.toInt()}x{newH.toInt()} to fit monitor chrome")
-  }
-
   loadFontInto(slot: robotoFontSlot, path: robotoFontPath, fontSize: 36)
   loadFontInto(slot: materialIconFontSlot, path: materialIconFontPath, fontSize: 64)
 
@@ -127,6 +100,31 @@ func main() {
   # curated subset and stems that aren't in the catalog any more
   # are dropped silently.
   appState.library = loadLibraryFromJson(albums: appState.albums, path: libraryFilePath)
+
+  # Clamp window height now that restoreAppState has moved the
+  # window to its persisted position. macOS silently clamps any
+  # window that doesn't fit in the available content area; raylib
+  # keeps the requested framebuffer size, so cursor coords (in
+  # the clamped space) drift from the rendering. Has to run after
+  # the restore — otherwise getCurrentMonitor reports the monitor
+  # the window was at boot, not where the user left it (the
+  # internal MacBook monitor when there's an external attached).
+  let chromeBudget: Int = 100
+  let monitor: Int = getCurrentMonitor()
+  let monitorH: Int = getMonitorHeight(monitor: monitor)
+  let safeMaxH: Int = monitorH - chromeBudget
+  let reqW: Int = winW.toInt()
+  let reqH: Int = winH.toInt()
+  log("[boot] requested screen={reqW}x{reqH} monitorH={monitorH} safeMaxH={safeMaxH}")
+  if reqH > safeMaxH {
+    let scale: Float = safeMaxH.toFloat() / winH
+    screenH = winH * scale
+    screenW = winW * scale
+    let newH: Float = screenH
+    let newW: Float = screenW
+    setWindowSize(width: newW.toInt(), height: newH.toInt())
+    log("[boot] clamped to {newW.toInt()}x{newH.toInt()} to fit monitor chrome")
+  }
 
   # Spotify-mode integration. ON by default; opt out with
   # RAE_UI_NO_SPOTIFY=1. See examples/98_mobile_ui/spotify_view.rae.
