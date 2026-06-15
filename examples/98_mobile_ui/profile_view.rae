@@ -102,7 +102,7 @@ func buildProfileStatsRow(world: mod UiWorld, state: view AppState) ret EntityId
   setRectFixed(world: world, entity: row, w: rowW, h: rowH)
   let layH: LayoutType = LayoutType.Horizontal
   let alignC: AlignKind = AlignKind.Center
-  setLayout(world: world, entity: row, kind: layH, gap: 24.0, alignCross: alignC)
+  setLayout(world: world, entity: row, kind: layH, gap: spaceXL, alignCross: alignC)
 
   let albumCount: Int = state.albums.length
   let trackCount: Int = 0
@@ -149,7 +149,10 @@ func buildSpotifyStatusCard(world: mod UiWorld) ret EntityId {
   setShapeRect(world: world, entity: card, fill: bg)
   let layV: LayoutType = LayoutType.Vertical
   let alignS: AlignKind = AlignKind.Start
-  setLayout(world: world, entity: card, kind: layV, gap: 4.0, alignCross: alignS)
+  setLayout(world: world, entity: card, kind: layV, gap: spaceXS, alignCross: alignS)
+  # 14 sits between spaceM (12) and spaceL (16) — deliberate non-token
+  # to fit the card chrome's exact 84-px height. Don't widen the scale
+  # for one site.
   setPaddingAll(world: world, entity: card, n: 14.0)
 
   let title: EntityId = createEntity(world: world)
@@ -200,8 +203,10 @@ func buildSettingsRow(world: mod UiWorld, iconKey: own String, label: own String
   setRectFixed(world: world, entity: row, w: rowW, h: rowH)
   let layH: LayoutType = LayoutType.Horizontal
   let alignC: AlignKind = AlignKind.Center
+  # Settings-row icon→label spacing stays at 14 (between spaceM and L)
+  # to match the hand-tuned 28-px icon size; don't widen the scale.
   setLayout(world: world, entity: row, kind: layH, gap: 14.0, alignCross: alignC)
-  setPaddingAll(world: world, entity: row, n: 8.0)
+  setPaddingAll(world: world, entity: row, n: spaceS)
 
   let iconSize: Float = 28.0
   let icon: EntityId = createEntity(world: world)

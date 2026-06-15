@@ -17,7 +17,7 @@ import ui/ecs
 import ui/layout
 
 let historyRowH: Float = 64.0
-let historyRowGap: Float = 8.0
+let historyRowGap: Float = 8.0  # spaceS
 let historyThumbSize: Float = 56.0
 let historyDurationW: Float = 56.0
 
@@ -100,7 +100,7 @@ func buildHistoryRow(world: mod UiWorld, entry: view PlayHistoryEntry, entryInde
   setRectFixed(world: world, entity: row, w: w, h: historyRowH)
   let layH: LayoutType = LayoutType.Horizontal
   let alignC: AlignKind = AlignKind.Center
-  setLayout(world: world, entity: row, kind: layH, gap: 12.0, alignCross: alignC)
+  setLayout(world: world, entity: row, kind: layH, gap: spaceM, alignCross: alignC)
   let replayAction: String = "history.replay.{entryIndex}"
   setOnClick(world: world, entity: row, actionId: replayAction)
 
@@ -111,7 +111,7 @@ func buildHistoryRow(world: mod UiWorld, entry: view PlayHistoryEntry, entryInde
   setRectFixed(world: world, entity: info, w: infoW, h: historyRowH)
   let layV: LayoutType = LayoutType.Vertical
   let alignS: AlignKind = AlignKind.Start
-  setLayout(world: world, entity: info, kind: layV, gap: 4.0, alignCross: alignS)
+  setLayout(world: world, entity: info, kind: layV, gap: spaceXS, alignCross: alignS)
 
   let title: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: title, w: infoW, h: 22.0)
@@ -247,7 +247,7 @@ func buildRecentlyPlayedStrip(world: mod UiWorld, history: view PlayHistory, rou
   setRectFixed(world: world, entity: strip, w: stripW, h: recentlyPlayedThumbSize)
   let layH: LayoutType = LayoutType.Horizontal
   let alignS: AlignKind = AlignKind.Start
-  setLayout(world: world, entity: strip, kind: layH, gap: 8.0, alignCross: alignS)
+  setLayout(world: world, entity: strip, kind: layH, gap: spaceS, alignCross: alignS)
 
   let n: Int = history.entries.length
   let kidsCount: Int = recentlyPlayedPreviewMax
