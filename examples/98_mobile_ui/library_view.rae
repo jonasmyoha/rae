@@ -31,21 +31,25 @@ func libraryGridTileSize() ret Float {
   ret (avail - gapTotal) / cols.toFloat()
 }
 
-# Collect the album-cover texture keys for every parsed album. The
-# album list (loaded once at boot from `albumsFolder`) is the single
-# source of truth — the loader registers each cover under its stem
-# key, and we just hand those stems back here.
-func collectLibraryCoverKeys(albums: view List(Album)) pub ret List(String) {
-  let result: List(String) = createList(String, cap: albums.length)
+# Collect the album-cover texture keys for albums currently in the
+# user's library. The catalog (`albums`) is the source of truth for
+# what exists on disk; `library` filters that down to what the user
+# wants to see in Home / Library views. Removing an album just
+# drops its stem from the library — covers + metadata stick around
+# in the catalog (history rows, search results, undo).
+func collectLibraryCoverKeys(albums: view List(Album), library: view List(String)) pub ret List(String) {
+  let result: List(String) = createList(String, cap: library.length)
   let i: Int = 0
   loop i < albums.length {
     let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: i)
-    # Fresh String allocation — `a.stem` is owned by `albums`,
-    # which outlives this list, but downstream consumers (the
-    # cover-tile builder) need their own copy to avoid sharing
-    # the per-Album heap.
-    let copied: String = "{a.stem}"
-    result.add(value: copied)
+    if isInLibrary(library: library, stem: a.stem) {
+      # Fresh String allocation — `a.stem` is owned by `albums`,
+      # which outlives this list, but downstream consumers (the
+      # cover-tile builder) need their own copy to avoid sharing
+      # the per-Album heap.
+      let copied: String = "{a.stem}"
+      result.add(value: copied)
+    }
     i = i + 1
   }
   ret result
@@ -106,9 +110,9 @@ func buildLibraryGridRow(
 }
 
 # Compose the full 3-column grid over keys derived from the album list
-# (one tile per parsed album).
-func buildLibraryCoverGrid(world: mod UiWorld, albums: view List(Album)) ret EntityId {
-  let keys: List(String) = collectLibraryCoverKeys(albums: albums)
+# (one tile per parsed album). `library` filters the catalog.
+func buildLibraryCoverGrid(world: mod UiWorld, albums: view List(Album), library: view List(String)) ret EntityId {
+  let keys: List(String) = collectLibraryCoverKeys(albums: albums, library: library)
   let grid: EntityId = createEntity(world: world)
   let cols: Int = libraryGridColumns
   let total: Int = keys.length
@@ -138,7 +142,7 @@ func buildLibraryCoverGrid(world: mod UiWorld, albums: view List(Album)) ret Ent
 # past the screen edge — but the host applies `scrollY` as an
 # `Offset.delta.y` so the user can wheel-scroll the column up to
 # bring later rows into view.
-func buildLibraryBody(world: mod UiWorld, albums: view List(Album), scrollY: view Float) ret EntityId {
+func buildLibraryBody(world: mod UiWorld, albums: view List(Album), library: view List(String), scrollY: view Float) ret EntityId {
   let body: EntityId = createEntity(world: world)
   let bodyW: Float = screenW - outerPad * 2.0
   let bodyH: Float = screenH - topBarH - navTabsH - outerGap * 4.0 - outerPad * 2.0
@@ -155,7 +159,7 @@ func buildLibraryBody(world: mod UiWorld, albums: view List(Album), scrollY: vie
   let scroll: ScrollState = { y: scrollY, velocity: 0.0 }
   componentSet(this: world.scrollStates, entity: body, data: scroll)
 
-  let grid: EntityId = buildLibraryCoverGrid(world: world, albums: albums)
+  let grid: EntityId = buildLibraryCoverGrid(world: world, albums: albums, library: library)
   let kids: List(EntityId) = createList(EntityId, cap: 1)
   kids.add(value: grid)
   attachChildren(world: world, parent: body, kids: kids)
@@ -186,7 +190,7 @@ func mountLibraryPage(
   componentSet(this: world.pageRoots, entity: root, data: own pr)
 
   let topBar: EntityId = buildPageTopBar(world: world, title: "Your Library")
-  let body: EntityId = buildLibraryBody(world: world, albums: albums, scrollY: scrollY)
+  let body: EntityId = buildLibraryBody(world: world, albums: albums, library: state.library, scrollY: scrollY)
 
   let kids: List(EntityId) = createList(EntityId, cap: 2)
   kids.add(value: topBar)
