@@ -287,6 +287,10 @@ type AppState pub {
   # session. Feeds the "Recently played" row on Home and the full
   # History sub-page. See `play_history.rae` for the schema.
   playHistory: PlayHistory
+  # Stems the user currently keeps in their library. Catalog albums
+  # missing from this list still exist (covers + metadata) but are
+  # hidden from Home / Library views. See `library_data.rae`.
+  library: List(String)
 }
 
 func createAppState(albums: own List(Album)) pub ret AppState {
@@ -300,6 +304,9 @@ func createAppState(albums: own List(Album)) pub ret AppState {
     let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: 0)
     firstStem = "{a.stem}"
   }
+  # Start with an empty library — main.rae's restoreLibrary call
+  # seeds it from the catalog on first launch or rebuilds from disk
+  # on subsequent ones.
   ret AppState {
     albums: albums
     currentAlbumStem: firstStem
@@ -307,6 +314,7 @@ func createAppState(albums: own List(Album)) pub ret AppState {
     tab: Screen.Home
     subPageStack: createList(Int, cap: 4)
     playHistory: createPlayHistory(cap: 100)
+    library: createList(String, cap: 8)
   }
 }
 
