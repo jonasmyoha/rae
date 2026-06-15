@@ -174,6 +174,7 @@ func buildAppWorld(
     reg: texReg
   )
   let back: EntityId = mountBackButtonOverlay(world: world, state: state)
+  addBottomSheetLayer(world: world, sheet: state.bottomSheet)
   ret world
 }
 
@@ -291,6 +292,10 @@ type AppState pub {
   # missing from this list still exist (covers + metadata) but are
   # hidden from Home / Library views. See `library_data.rae`.
   library: List(String)
+  # iOS-style action sheet — opened by the three-dots button on
+  # track rows / album pages. See `bottom_sheet.rae`. Not persisted
+  # across launches; defaults to invisible.
+  bottomSheet: BottomSheetState
 }
 
 func createAppState(albums: own List(Album)) pub ret AppState {
@@ -315,6 +320,7 @@ func createAppState(albums: own List(Album)) pub ret AppState {
     subPageStack: createList(Int, cap: 4)
     playHistory: createPlayHistory(cap: 100)
     library: createList(String, cap: 8)
+    bottomSheet: createBottomSheetState()
   }
 }
 
@@ -445,6 +451,10 @@ func dispatchActions(
     let songOpenPrefix: String = "song.open."
     let navHistoryKey: String = "nav.history"
     let historyReplayPrefix: String = "history.replay."
+    let trackMoreKey: String = "track.more"
+    let sheetDismissKey: String = "sheet.dismiss"
+    let sheetCancelKey: String = "sheet.cancel"
+    let libraryRemoveKey: String = "library.remove"
     # `spotifyEnabled` is passed in from main.rae (lives on the
     # long-lived SpotifyState) so both sides agree on the source of
     # truth. ON by default; disabled by RAE_UI_NO_SPOTIFY=1 at boot.
@@ -620,6 +630,31 @@ func dispatchActions(
           spotifyPlayQuery(query: q)
         }
       }
+    }
+    if actionId.equals(other: trackMoreKey) {
+      # Three-dots affordance on track rows / album header. Opens
+      # the bottom-sheet with the actions available for whatever
+      # album the user is currently in.
+      let acts: List(BottomSheetAction) = createList(BottomSheetAction, cap: 2)
+      acts.add(value: own mkSheetAction(label: "Remove from library", actionId: libraryRemoveKey))
+      acts.add(value: own mkSheetAction(label: "Cancel", actionId: sheetCancelKey))
+      openBottomSheet(sheet: state.bottomSheet, actions: own acts)
+    }
+    if actionId.equals(other: sheetDismissKey) {
+      closeBottomSheet(sheet: state.bottomSheet)
+    }
+    if actionId.equals(other: sheetCancelKey) {
+      closeBottomSheet(sheet: state.bottomSheet)
+    }
+    if actionId.equals(other: libraryRemoveKey) {
+      # Remove the active album from the curated library + persist.
+      # Catalog is untouched so the cover + metadata are still there
+      # for history rows etc. Close the sheet and pop the Album
+      # sub-page so the user lands back where they came from.
+      removeFromLibrary(library: state.library, stem: state.currentAlbumStem)
+      saveLibraryToJson(library: state.library, path: libraryFilePath)
+      closeBottomSheet(sheet: state.bottomSheet)
+      popSubPage(state: state)
     }
 
     i = i + 1

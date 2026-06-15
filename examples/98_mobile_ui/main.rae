@@ -101,14 +101,9 @@ func main() {
 
   let scenes: AlbumScenes = loadAllScenes()
   let texReg: TextureRegistry = createTextureRegistry()
-  # Album catalogue + per-cover textures. Both come from
-  # `assets/albums/<stem>/{album.json,cover.jpg}` — no path is
-  # hard-coded here. The album list is then moved into `appState`
-  # so view builders and the dispatcher can reach it without
-  # re-reading the filesystem. `appState` is created here (rather
-  # than next to the main-loop init) because the stress and
-  # screenshot blocks below both want a populated state to drive
-  # `buildScreenWorld`.
+  # Album catalogue + per-cover textures from
+  # `assets/albums/<stem>/`. `appState` is built here so the stress
+  # / screenshot blocks below see populated state.
   let albums: List(Album) = loadAllAlbums(folder: albumsFolder)
   loadAllTextures(reg: texReg, albums: albums)
   let appState: AppState = createAppState(albums: albums)
@@ -355,6 +350,7 @@ func main() {
     let cachedTrackDurMs: Int = 0
     let cachedAlbumScrollFloor: Float = 0.0
     let cachedHistoryLen: Int = 0
+    let cachedSheetEpoch: Int = 0
     # Single InputSystem for the app lifetime — outlives world
     # rebuilds so a held press carries `pressedEntity` across them.
     # `updateInputSystem` refills the per-frame fields each tick.
@@ -657,6 +653,7 @@ func main() {
           # song.open / pollSpotify just may have grown playHistory;
           # re-mount Home/History in place if so. No-op otherwise.
           cachedHistoryLen = refreshHistoryViewsIfNeeded(world: world, state: appState, visible: currentScreen, cachedLen: cachedHistoryLen)
+          cachedSheetEpoch = refreshBottomSheetIfNeeded(world: world, sheet: appState.bottomSheet, cachedEpoch: cachedSheetEpoch)
 
           # In-app debug UI: process any debug.* action that fired
           # this frame. `dispatchDebugAction` toggles the persistent
