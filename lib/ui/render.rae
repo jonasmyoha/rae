@@ -552,10 +552,11 @@ func paintEntity(world: view UiWorld, reg: view TextureRegistry, entity: view En
 }
 
 # Recursive top-down walk. Painter's algorithm — parent before its
-# children, then three passes over the children by hoverPaintRank:
-# normal-flow → easing-back → actively-hovered. The currently-
-# hovered tile always lands on top of any still-unhovering sibling
-# regardless of declaration order.
+# children, then three passes over the children by *subtree* hover
+# paint rank: normal-flow → contains-easing-back → contains-hovered.
+# Using the subtree max (not the child's own rank) lets a row that
+# contains the hovered tile float above sibling rows whose tiles
+# would otherwise overdraw the popped tile's vertical overflow.
 func paintSubtree(world: view UiWorld, reg: view TextureRegistry, entity: view EntityId) {
   paintEntity(world: world, reg: reg, entity: entity)
   if componentHas(this: world.childrens, entity: entity) is false {
@@ -568,7 +569,7 @@ func paintSubtree(world: view UiWorld, reg: view TextureRegistry, entity: view E
     let i: Int = 0
     loop i < n {
       let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
-      if hoverPaintRank(world: world, entity: cid) is pass {
+      if subtreeHoverPaintRank(world: world, entity: cid) is pass {
         paintSubtree(world: world, reg: reg, entity: cid)
       }
       i = i + 1
