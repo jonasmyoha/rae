@@ -85,6 +85,14 @@ func historyMatchLocalStem(albums: view List(Album), trackName: view String, art
 # the UI is concerned: Spotify entries key by trackId (so a
 # single vs. a compilation appearance differs), and local entries
 # key by album stem.
+#
+# The caller's `entry` carries Strings registered in the caller's
+# string-pool scope; when the caller's function exits, pool_flush
+# would free them and leave the list pointing at freed memory.
+# We sidestep that by rebuilding the entry through
+# `rae_ext_rae_string_copy`, which mallocs independent allocations
+# the pool doesn't track. The list then owns Strings that survive
+# any number of caller-side pool flushes.
 func recordPlay(history: mod PlayHistory, entry: own PlayHistoryEntry) pub {
   let n: Int = history.entries.length
   if n > 0 {
@@ -97,9 +105,15 @@ func recordPlay(history: mod PlayHistory, entry: own PlayHistoryEntry) pub {
       }
     }
   }
-  # Trim the oldest entry when at cap. List has no `removeAt(0)` —
-  # truncate the cheapest way: shift the buffer's logical length to
-  # discard the oldest, but List doesn't expose that. For v1 we just
-  # let it grow past cap and trim cosmetically at render sites.
-  history.entries.add(value: own entry)
+  let owned: PlayHistoryEntry = {
+    trackName: rae_ext_rae_string_copy(s: entry.trackName)
+    artistName: rae_ext_rae_string_copy(s: entry.artistName)
+    albumName: rae_ext_rae_string_copy(s: entry.albumName)
+    albumStem: rae_ext_rae_string_copy(s: entry.albumStem)
+    artworkUrl: rae_ext_rae_string_copy(s: entry.artworkUrl)
+    textureKey: rae_ext_rae_string_copy(s: entry.textureKey)
+    durationSec: entry.durationSec
+    playedAt: entry.playedAt
+  }
+  history.entries.add(value: own owned)
 }
