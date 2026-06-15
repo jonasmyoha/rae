@@ -28,6 +28,7 @@ import ui/textures
 import ui/input
 import ui/debug
 import ui/event_loop
+import ui/animation
 
 func main() {
   # FLAG_WINDOW_RESIZABLE (4) | FLAG_MSAA_4X_HINT (32) = 36. MSAA turns
@@ -349,6 +350,7 @@ func main() {
     let cachedAlbumScrollFloor: Float = 0.0
     let cachedHistoryLen: Int = 0
     let cachedSheetEpoch: Int = 0
+    let lastHoverAnimDirty: Bool = false
     # Single InputSystem for the app lifetime — outlives world
     # rebuilds so a held press carries `pressedEntity` across them.
     # `updateInputSystem` refills the per-frame fields each tick.
@@ -416,13 +418,8 @@ func main() {
         playback.durationSec = trackDurSec
       }
 
-      # Persistent-world build: mounts all four screen pages plus the
-      # shared dock + back overlays in one world. Only the page that
-      # matches `visibleScreen(appState)` has Active=true; the others
-      # are mounted-but-hidden so a later setPageActive flip can
-      # switch screens without a full world teardown (slice 4b.3).
-      # For now this build still happens on every `switching = true`
-      # — screen changes, theme toggle, hot reload, debug menu.
+      # Persistent-world build: mounts every screen page + dock /
+      # back overlays once; setPageActive flips visibility per nav.
       let world: UiWorld = buildAppWorld(scenes: scenes, playback: playback, state: appState, texReg: texReg, scrollY: scrollFsm.scrollY)
       # Rebind any scene-authored `"albumCover"` placeholder hero +
       # sprite to the user's current album. This is what lets the
@@ -539,7 +536,7 @@ func main() {
           }
         }
         let timeout: Float = nextWaitTimeoutSec(
-          animating: anim.active or playbackAnimating or scrollAnimating
+          animating: anim.active or playbackAnimating or scrollAnimating or lastHoverAnimDirty
           mouseDown: isMouseButtonDown(button: mouseButtonLeft)
           pollWatcher: true
         )
@@ -797,6 +794,10 @@ func main() {
           let active: Bool = activeDecision.active
           let currentHovered: EntityId = activeDecision.currentHovered
           let currentMouseBtns: Int = activeDecision.currentMouseBtns
+          lastHoverAnimDirty = hoverScaleSystem(world: world, hovered: currentHovered, dt: 0.0167)
+          if lastHoverAnimDirty {
+            active = true
+          }
           lastHoveredEntity = currentHovered
           lastMouseBtns = currentMouseBtns
           lastPressed = input.pressedEntity
