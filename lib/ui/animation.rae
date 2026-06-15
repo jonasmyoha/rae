@@ -37,16 +37,26 @@ func easeTowards(current: view Float, target: view Float, speed: view Float, dt:
   ret current + delta * step
 }
 
-# True when `entity` carries a HoverScale and is currently puffed
-# beyond its rest size (mid-hover or mid-unhover ease). The renderer
-# uses this to defer painting the popped child until after its
-# siblings so the scale-up isn't clipped by the next tile.
-func isHoverPopped(world: view UiWorld, entity: view EntityId) pub ret Bool {
+# Three-tier paint-rank a child carrying HoverScale gets in
+# paintSubtree's pass loop:
+#   0  — no HoverScale, or current is at rest (paints in normal flow)
+#   1  — popped, easing back toward rest (target = restScale)
+#   2  — popped, actively hovered (target = hoverScale)
+# Higher rank paints later (= on top). Rank-2 paints over rank-1 so a
+# newly-hovered tile beats a still-unhovering sibling regardless of
+# their order in the Children list.
+func hoverPaintRank(world: view UiWorld, entity: view EntityId) pub ret Int {
   if componentHas(this: world.hoverScales, entity: entity) is false {
-    ret false
+    ret 0
   }
   let hs: HoverScale = componentGet(this: world.hoverScales, entity: entity)
-  ret hs.current > hs.restScale
+  if hs.current <= hs.restScale {
+    ret 0
+  }
+  if hs.target >= hs.hoverScale {
+    ret 2
+  }
+  ret 1
 }
 
 # Step every HoverScale entity by one frame. `hovered` is the
@@ -77,8 +87,9 @@ func hoverScaleSystem(world: mod UiWorld, hovered: view EntityId, dt: view Float
       target = hs.hoverScale
     }
     let next: Float = easeTowards(current: hs.current, target: target, speed: hs.speed, dt: frameDt, epsilon: 0.001)
-    if next is not hs.current {
+    if next is not hs.current or target is not hs.target {
       hs.current = next
+      hs.target = target
       componentSet(this: world.hoverScales, entity: entity, data: hs)
       if next is not target {
         stillAnimating = true
