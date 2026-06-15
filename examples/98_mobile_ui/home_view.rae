@@ -64,6 +64,7 @@ func buildHomeGridRow(
   world: mod UiWorld
   keys: view List(String)
   startIndex: view Int
+  rounded: view Bool
 ) ret EntityId {
   let row: EntityId = createEntity(world: world)
   let rowW: Float = screenW - outerPad * 2.0
@@ -81,7 +82,7 @@ func buildHomeGridRow(
     let i: Int = startIndex + col
     if i < total {
       let key: String = keys.get(index: i)
-      let tile: EntityId = buildLibraryCoverTile(world: world, key: key, size: tileH)
+      let tile: EntityId = buildLibraryCoverTile(world: world, key: key, size: tileH, rounded: rounded)
       kids.add(value: tile)
     }
     col = col + 1
@@ -90,7 +91,7 @@ func buildHomeGridRow(
   ret row
 }
 
-func buildHomeCoverGrid(world: mod UiWorld, albums: view List(Album), library: view List(String)) ret EntityId {
+func buildHomeCoverGrid(world: mod UiWorld, albums: view List(Album), library: view List(String), rounded: view Bool) ret EntityId {
   let keys: List(String) = collectLibraryCoverKeys(albums: albums, library: library)
   let grid: EntityId = createEntity(world: world)
   let cols: Int = homeGridColumns
@@ -108,7 +109,7 @@ func buildHomeCoverGrid(world: mod UiWorld, albums: view List(Album), library: v
   let i: Int = 0
   loop i < rows {
     let startIndex: Int = i * cols
-    let row: EntityId = buildHomeGridRow(world: world, keys: keys, startIndex: startIndex)
+    let row: EntityId = buildHomeGridRow(world: world, keys: keys, startIndex: startIndex, rounded: rounded)
     rowKids.add(value: row)
     i = i + 1
   }
@@ -116,7 +117,7 @@ func buildHomeCoverGrid(world: mod UiWorld, albums: view List(Album), library: v
   ret grid
 }
 
-func buildHomeBody(world: mod UiWorld, albums: view List(Album), library: view List(String), history: view PlayHistory, scrollY: view Float) ret EntityId {
+func buildHomeBody(world: mod UiWorld, albums: view List(Album), library: view List(String), history: view PlayHistory, rounded: view Bool, scrollY: view Float) ret EntityId {
   let body: EntityId = createEntity(world: world)
   let bodyW: Float = screenW - outerPad * 2.0
   let bodyH: Float = screenH - topBarH - navTabsH - outerGap * 4.0 - outerPad * 2.0
@@ -136,7 +137,7 @@ func buildHomeBody(world: mod UiWorld, albums: view List(Album), library: view L
   let subText: String = "Pick something to play"
   setText(world: world, entity: sub, text: subText, styleId: subStyle)
 
-  let grid: EntityId = buildHomeCoverGrid(world: world, albums: albums, library: library)
+  let grid: EntityId = buildHomeCoverGrid(world: world, albums: albums, library: library, rounded: rounded)
 
   let hasRecent: Bool = history.entries.length > 0
   let kidsCap: Int = 2
@@ -147,7 +148,7 @@ func buildHomeBody(world: mod UiWorld, albums: view List(Album), library: view L
   kids.add(value: sub)
   if hasRecent {
     let recentHeader: EntityId = buildRecentlyPlayedHeader(world: world)
-    let recentStrip: EntityId = buildRecentlyPlayedStrip(world: world, history: history)
+    let recentStrip: EntityId = buildRecentlyPlayedStrip(world: world, history: history, rounded: rounded)
     kids.add(value: recentHeader)
     kids.add(value: recentStrip)
   }
@@ -176,7 +177,7 @@ func mountHomePage(
   componentSet(this: world.pageRoots, entity: root, data: own pr)
 
   let topBar: EntityId = buildPageTopBar(world: world, title: "Good evening")
-  let body: EntityId = buildHomeBody(world: world, albums: albums, library: state.library, history: state.playHistory, scrollY: scrollY)
+  let body: EntityId = buildHomeBody(world: world, albums: albums, library: state.library, history: state.playHistory, rounded: state.settings.roundedAlbumCovers, scrollY: scrollY)
 
   let kids: List(EntityId) = createList(EntityId, cap: 2)
   kids.add(value: topBar)
