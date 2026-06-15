@@ -191,19 +191,16 @@ func paintSprite(reg: view TextureRegistry, world: view UiWorld, entity: view En
     scale = 1.0
   }
 
-  # HoverScale: cursor inside the rect → multiply draw size by `scale`
-  # and re-center. Binary toggle, no easing.
+  # HoverScale: read the per-frame animated multiplier. The actual
+  # easing happens in lib/ui/animation.rae's hoverScaleSystem.
   let hoverMul: Float = 1.0
   if componentHas(this: world.hoverScales, entity: entity) {
-    let mx: Float = getMouseX().toFloat()
-    let my: Float = getMouseY().toFloat()
-    if mx >= wt.x and mx <= wt.x + cr.w and my >= wt.y and my <= wt.y + cr.h {
-      let hs: HoverScale = componentGet(this: world.hoverScales, entity: entity)
-      hoverMul = hs.scale
-    }
+    let hs: HoverScale = componentGet(this: world.hoverScales, entity: entity)
+    hoverMul = hs.current
   }
-  let drawW: Float = tex.width.toFloat() * scale * hoverMul
-  let drawH: Float = tex.height.toFloat() * scale * hoverMul
+  let drawScale: Float = scale * hoverMul
+  let drawW: Float = tex.width.toFloat() * drawScale
+  let drawH: Float = tex.height.toFloat() * drawScale
   let offX: Float = (cr.w - drawW) / 2.0
   let offY: Float = (cr.h - drawH) / 2.0
 
@@ -224,7 +221,7 @@ func paintSprite(reg: view TextureRegistry, world: view UiWorld, entity: view En
     texture: tex
     pos: Vector2 { x: wt.x + offX, y: wt.y + offY }
     rotation: 0.0
-    scale: scale
+    scale: drawScale
     tint: tint
   )
   if useRounded {
