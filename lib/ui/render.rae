@@ -588,33 +588,28 @@ func paintSubtree(world: view UiWorld, reg: view TextureRegistry, entity: view E
 # Conventional default font path. `rae init` drops a Roboto-Regular.ttf
 # here; apps without that file just keep the empty slot and raylib's
 # bitmap default kicks in (the visible-but-ugly baseline). Apps that
-# need a different face load it manually before the first
-# `renderSystem` call — the auto-load below sees the slot is already
-# loaded and bails.
+# need a different face load it manually before calling bootstrapUi —
+# the call sees the slot is already populated and bails.
 let raeDefaultUiFontPath: String = "assets/Roboto-Regular.ttf"
 let raeDefaultUiFontSize: Int = 36
 let raeDefaultUiFontSlot: Int = 0
 
-# Idempotent: tries the load once per process. The `tried` guard
-# stops us from re-attempting (and re-failing) the LoadFontEx call
-# every frame when the file is missing. `isFontSlotLoaded` covers
-# the case where the app loaded a font of its own first — we never
-# clobber it.
-let raeDefaultUiFontTried: Bool = false
-
-func ensureDefaultUiFont() pub {
-  if raeDefaultUiFontTried {
-    ret
+# One-shot host-side setup for the rae UI layer. Call once at boot,
+# after initWindow but before the first renderSystem call. Right now
+# the only thing this loads is the conventional Roboto default into
+# font slot 0; future defaults (icon font, theme bootstrap, debug
+# overlay registration) can chain in here so apps don't have to grow
+# their main.rae each time the stdlib adds an installable.
+#
+# Safe to call multiple times — the body is idempotent.
+func bootstrapUi() pub {
+  if isFontSlotLoaded(slot: raeDefaultUiFontSlot) is false {
+    loadFontInto(
+      slot: raeDefaultUiFontSlot
+      path: raeDefaultUiFontPath
+      fontSize: raeDefaultUiFontSize
+    )
   }
-  raeDefaultUiFontTried = true
-  if isFontSlotLoaded(slot: raeDefaultUiFontSlot) {
-    ret
-  }
-  loadFontInto(
-    slot: raeDefaultUiFontSlot
-    path: raeDefaultUiFontPath
-    fontSize: raeDefaultUiFontSize
-  )
 }
 
 func renderSystem(world: view UiWorld, reg: view TextureRegistry) {
@@ -633,11 +628,6 @@ func renderSystem(world: view UiWorld, reg: view TextureRegistry) {
 # (layer 100+) so a `captureAndBlurRegion` doesn't include the very
 # overlay it's meant to sit behind.
 func renderSystemLayerRange(world: view UiWorld, reg: view TextureRegistry, minOrder: view Int, maxOrder: view Int) pub {
-  # One-shot: if no font has been loaded into the default slot, try
-  # the conventional <cwd>/assets/Roboto-Regular.ttf path. The guard
-  # is in `ensureDefaultUiFont` itself; calling it every frame is a
-  # cheap if-Bool after the first iteration.
-  ensureDefaultUiFont()
   let roots: List(EntityId) = collectPaintableRoots(world: world)
   let m: Int = roots.length
   let p: Int = 0
