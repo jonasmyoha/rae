@@ -203,6 +203,11 @@ func measureTextWithFont(
 # isn't loaded, so a missing TTF doesn't blank out the screen.
 func loadFontInto(slot: Int, path: String, fontSize: Int) extern
 
+# Returns true when `slot` currently has a loaded font. Used by the
+# stdlib's auto-load to avoid clobbering a font the app already
+# loaded manually.
+func isFontSlotLoaded(slot: Int) extern ret Bool
+
 func unloadFontSlot(slot: Int) extern
 
 func drawTextWithFont(

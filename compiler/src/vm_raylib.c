@@ -1225,6 +1225,19 @@ static bool native_unloadFontSlot(struct VM* vm, VmNativeResult* out, const Valu
     return true;
 }
 
+static bool native_isFontSlotLoaded(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 1) {
+        fprintf(stderr, "error: isFontSlotLoaded expects 1 arg, got %zu\n", count);
+        return false;
+    }
+    int64_t slot = (args[0].type == VAL_FLOAT) ? (int64_t)args[0].as.float_value : args[0].as.int_value;
+    int loaded = (slot >= 0 && slot < VM_FONT_SLOTS && g_vm_font_loaded[slot]) ? 1 : 0;
+    out->has_value = true;
+    out->value = value_int(loaded);
+    return true;
+}
+
 static bool native_drawTextWithFont(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
     if (count != 10) {
@@ -1440,6 +1453,7 @@ bool vm_registry_register_raylib(VmRegistry* registry) {
     ok &= vm_registry_register_native(registry, "takeScreenshot", native_takeScreenshot, NULL);
     ok &= vm_registry_register_native(registry, "loadFontInto", native_loadFontInto, NULL);
     ok &= vm_registry_register_native(registry, "unloadFontSlot", native_unloadFontSlot, NULL);
+    ok &= vm_registry_register_native(registry, "isFontSlotLoaded", native_isFontSlotLoaded, NULL);
     ok &= vm_registry_register_native(registry, "drawTextWithFont", native_drawTextWithFont, NULL);
     ok &= vm_registry_register_native(registry, "measureTextWithFont", native_measureTextWithFont, NULL);
     ok &= vm_registry_register_native(registry, "getCurrentMonitor", native_getCurrentMonitor, NULL);
