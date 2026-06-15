@@ -1295,6 +1295,22 @@ static bool native_setWindowPosition(struct VM* vm, VmNativeResult* out, const V
     return true;
 }
 
+static bool native_getWindowPositionX(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)args; (void)count; (void)data;
+    Vector2 p = GetWindowPosition();
+    out->has_value = true;
+    out->value = (Value){.type = VAL_INT, .as.int_value = (int64_t)p.x};
+    return true;
+}
+
+static bool native_getWindowPositionY(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)args; (void)count; (void)data;
+    Vector2 p = GetWindowPosition();
+    out->has_value = true;
+    out->value = (Value){.type = VAL_INT, .as.int_value = (int64_t)p.y};
+    return true;
+}
+
 bool vm_registry_register_raylib(VmRegistry* registry) {
     bool ok = true;
     ok &= vm_registry_register_native(registry, "initWindow", native_initWindow, NULL);
@@ -1363,5 +1379,7 @@ bool vm_registry_register_raylib(VmRegistry* registry) {
     ok &= vm_registry_register_native(registry, "getMonitorHeight", native_getMonitorHeight, NULL);
     ok &= vm_registry_register_native(registry, "setWindowSize", native_setWindowSize, NULL);
     ok &= vm_registry_register_native(registry, "setWindowPosition", native_setWindowPosition, NULL);
+    ok &= vm_registry_register_native(registry, "getWindowPositionX", native_getWindowPositionX, NULL);
+    ok &= vm_registry_register_native(registry, "getWindowPositionY", native_getWindowPositionY, NULL);
     return ok;
 }

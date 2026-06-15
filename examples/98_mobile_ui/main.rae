@@ -990,6 +990,9 @@ func main() {
     }
   }
 
+  # Final snapshot — captures window-drag-only sessions where no
+  # dispatched action fired (and thus no in-loop save ran).
+  saveAppState(path: stateFilePath, state: appState, playback: playback)
   textureUnloadAll(reg: texReg)
   unloadFontSlot(slot: robotoFontSlot)
   unloadFontSlot(slot: materialIconFontSlot)
