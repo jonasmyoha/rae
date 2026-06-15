@@ -1648,14 +1648,17 @@ static bool module_graph_build(ModuleGraph* graph, const char* entry_file, uint6
       char core_path[PATH_MAX];
       snprintf(core_path, sizeof(core_path), "%s/lib/core.rae", graph->root_path);
       if (file_exists(core_path)) {
-          char* abs_core = realpath(core_path, NULL);
-          if (abs_core) {
-              char* core_module_path = derive_module_path(graph->root_path, abs_core);
-              if (core_module_path) {
-                  module_graph_load_module(graph, core_module_path, abs_core, NULL, hash_out, no_implicit);
-                  free(core_module_path);
-              }
-              free(abs_core);
+          // Don't realpath() here: when <project>/lib/ is a symlink
+          // into a sibling stdlib checkout (the rae-port pattern), the
+          // realpath resolves outside graph->root_path and
+          // derive_module_path then rejects it as "outside project
+          // root". The unresolved <project>/lib/core.rae path always
+          // sits inside root, which is what we need for the relative
+          // module-name derivation.
+          char* core_module_path = derive_module_path(graph->root_path, core_path);
+          if (core_module_path) {
+              module_graph_load_module(graph, core_module_path, core_path, NULL, hash_out, no_implicit);
+              free(core_module_path);
           }
       }
   }
