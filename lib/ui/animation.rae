@@ -37,6 +37,18 @@ func easeTowards(current: view Float, target: view Float, speed: view Float, dt:
   ret current + delta * step
 }
 
+# True when `entity` carries a HoverScale and is currently puffed
+# beyond its rest size (mid-hover or mid-unhover ease). The renderer
+# uses this to defer painting the popped child until after its
+# siblings so the scale-up isn't clipped by the next tile.
+func isHoverPopped(world: view UiWorld, entity: view EntityId) pub ret Bool {
+  if componentHas(this: world.hoverScales, entity: entity) is false {
+    ret false
+  }
+  let hs: HoverScale = componentGet(this: world.hoverScales, entity: entity)
+  ret hs.current > hs.restScale
+}
+
 # Step every HoverScale entity by one frame. `hovered` is the
 # topmost cursor-hit entity (use `noEntity()` when nothing is
 # hovered). Returns true if any entity is still animating.
