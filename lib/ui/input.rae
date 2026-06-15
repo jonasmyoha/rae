@@ -194,6 +194,21 @@ func updateInputSystem(input: mod InputSystem, world: view UiWorld) {
   let down: Bool = isMouseButtonDown(button: mouseButtonLeft)
   let pressed: Bool = isMouseButtonPressed(button: mouseButtonLeft)
   let released: Bool = isMouseButtonReleased(button: mouseButtonLeft)
+  # macOS click-drop workaround. raylib's pressed/released compares
+  # last poll's state to this poll's, so a press+release pair that
+  # landed between two polls collapses to up→up with no edges and the
+  # click is lost. OR in the GLFW per-event hook flags (installed by
+  # `installMouseButtonHook`) so the click is recovered. If the host
+  # didn't install the hook, both drains return false and the OR is a
+  # no-op — behaviour is identical to the pre-hook path.
+  let hookPressed: Bool = mouseHookDrainPressed()
+  let hookReleased: Bool = mouseHookDrainReleased()
+  if hookPressed {
+    pressed = true
+  }
+  if hookReleased {
+    released = true
+  }
 
   let nextPointer: PointerState = {
     x: mx

@@ -28,9 +28,31 @@ extern void glfwPostEmptyEvent(void);
  * the wait. */
 typedef struct GLFWwindow GLFWwindow;
 typedef void (*GLFWwindowclosefun)(GLFWwindow*);
+typedef void (*GLFWmousebuttonfun)(GLFWwindow*, int, int, int);
 extern GLFWwindow* glfwGetCurrentContext(void);
 extern void glfwSetWindowCloseCallback(GLFWwindow* w, GLFWwindowclosefun cb);
 extern void glfwSetWindowShouldClose(GLFWwindow* w, int value);
+extern GLFWmousebuttonfun glfwSetMouseButtonCallback(GLFWwindow* w, GLFWmousebuttonfun cb);
+#define VM_GLFW_PRESS 1
+#define VM_GLFW_RELEASE 0
+#define VM_GLFW_MOUSE_BUTTON_LEFT 0
+
+/* macOS click-drop workaround. See matching comment in
+ * compiler/runtime/rae_runtime.c. raylib's edge detection collapses
+ * press+release pairs that happen between two polls; chaining a GLFW
+ * callback below raylib's lets us see every transition. */
+static int g_vm_mouse_press_pending = 0;
+static int g_vm_mouse_release_pending = 0;
+static GLFWmousebuttonfun g_vm_prev_mouse_button_cb = NULL;
+static int g_vm_mouse_button_hook_installed = 0;
+
+static void vm_glfw_mouse_button_chain_cb(GLFWwindow* w, int button, int action, int mods) {
+    if (g_vm_prev_mouse_button_cb) g_vm_prev_mouse_button_cb(w, button, action, mods);
+    if (button == VM_GLFW_MOUSE_BUTTON_LEFT) {
+        if (action == VM_GLFW_PRESS) g_vm_mouse_press_pending = 1;
+        else if (action == VM_GLFW_RELEASE) g_vm_mouse_release_pending = 1;
+    }
+}
 
 static void vm_glfw_close_waker(GLFWwindow* w) {
     /* macOS GLFW quirk: red-X click invokes this callback but the
@@ -843,6 +865,49 @@ static bool native_installWindowCloseWaker(struct VM* vm, VmNativeResult* out, c
     return true;
 }
 
+static bool native_installMouseButtonHook(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data; (void)args;
+    if (count != 0) {
+        fprintf(stderr, "error: installMouseButtonHook expects 0 args, got %zu\n", count);
+        return false;
+    }
+    if (g_vm_mouse_button_hook_installed) {
+        out->has_value = false;
+        return true;
+    }
+    GLFWwindow* w = glfwGetCurrentContext();
+    if (!w) {
+        fprintf(stderr, "[mouse-hook] FAILED: no current GLFW context\n");
+        fflush(stderr);
+        out->has_value = false;
+        return true;
+    }
+    g_vm_prev_mouse_button_cb = glfwSetMouseButtonCallback(w, vm_glfw_mouse_button_chain_cb);
+    g_vm_mouse_button_hook_installed = 1;
+    fprintf(stderr, "[mouse-hook] installed (prev cb=%p)\n", (void*)g_vm_prev_mouse_button_cb);
+    fflush(stderr);
+    out->has_value = false;
+    return true;
+}
+
+static bool native_mouseHookDrainPressed(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data; (void)args; (void)count;
+    int v = g_vm_mouse_press_pending;
+    g_vm_mouse_press_pending = 0;
+    out->has_value = true;
+    out->value = value_int(v != 0 ? 1 : 0);
+    return true;
+}
+
+static bool native_mouseHookDrainReleased(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data; (void)args; (void)count;
+    int v = g_vm_mouse_release_pending;
+    g_vm_mouse_release_pending = 0;
+    out->has_value = true;
+    out->value = value_int(v != 0 ? 1 : 0);
+    return true;
+}
+
 static bool native_isKeyDown(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
     if (count != 1) {
@@ -1353,6 +1418,9 @@ bool vm_registry_register_raylib(VmRegistry* registry) {
     ok &= vm_registry_register_native(registry, "waitEvents", native_waitEvents, NULL);
     ok &= vm_registry_register_native(registry, "postEmptyEvent", native_postEmptyEvent, NULL);
     ok &= vm_registry_register_native(registry, "installWindowCloseWaker", native_installWindowCloseWaker, NULL);
+    ok &= vm_registry_register_native(registry, "installMouseButtonHook", native_installMouseButtonHook, NULL);
+    ok &= vm_registry_register_native(registry, "mouseHookDrainPressed", native_mouseHookDrainPressed, NULL);
+    ok &= vm_registry_register_native(registry, "mouseHookDrainReleased", native_mouseHookDrainReleased, NULL);
     ok &= vm_registry_register_native(registry, "disableAppNap", native_disableAppNap, NULL);
     ok &= vm_registry_register_native(registry, "isKeyDown", native_isKeyDown, NULL);
     ok &= vm_registry_register_native(registry, "isKeyPressed", native_isKeyPressed, NULL);
