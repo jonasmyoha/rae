@@ -311,20 +311,17 @@ func deserVec2(doc: view JsonDoc, val: view JsonValue) ret Vec2 {
 }
 
 func deserRgba(doc: view JsonDoc, val: view JsonValue) ret RgbaColor {
-  # Theme token form: scene authors can write `"fill": "$surface"`
+  # Theme token form: scene authors can write `"fill": "surface"`
   # instead of `"fill": {r:..,g:..,b:..,a:..}` to pick a color from
-  # the current `activeTheme` in `lib/ui/theme.rae`. Strings without
-  # a leading `$` fall through to RGBA defaults so a typo in the
-  # token name doesn't silently swallow the color — see also
-  # `themeColorByName`, which returns magenta for unknown tokens.
+  # the current `activeTheme` in `lib/ui/theme.rae`. The JSON shape
+  # already disambiguates — a literal color is an object, a token
+  # reference is a string — so no sigil is needed. Unknown token
+  # names render magenta via `themeColorByName` rather than failing
+  # silently, so typos are visible.
   let empty: String = ""
   let asStr: String = jsonString(this: val, fallback: empty)
   if asStr.length() > 0 {
-    let dollar: String = "$"
-    if asStr.startsWith(prefix: dollar) {
-      let token: String = asStr.sub(start: 1, len: asStr.length() - 1)
-      ret themeColorByName(name: token)
-    }
+    ret themeColorByName(name: asStr)
   }
   let r: Int = optInt(doc: doc, container: val, key: "r", fallback: 0)
   let g: Int = optInt(doc: doc, container: val, key: "g", fallback: 0)
