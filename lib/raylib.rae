@@ -276,6 +276,25 @@ func postEmptyEvent() extern
 # press, etc.). Call once after `initWindow`.
 func installWindowCloseWaker() extern
 
+# Install a GLFW mouse-button callback chained below raylib's. raylib's
+# `isMouseButtonPressed` / `isMouseButtonReleased` compare the previous
+# poll's state to the current poll's, so a press+release pair that
+# arrives between two polls (common on macOS, where mouse-button events
+# don't reliably wake `waitEventsTimeout` — the `watcherPollSec` cadence
+# is a partial workaround) is collapsed to up→up with no edges and the
+# click is lost. The hook sees each transition per-event, so callers
+# can OR `mouseHookDrainPressed` / `mouseHookDrainReleased` with
+# raylib's edges to recover the missed click. Call once after
+# `initWindow`.
+func installMouseButtonHook() extern
+
+# Returns true iff at least one left-mouse-button PRESS arrived since
+# the previous call, and resets the flag. Safe to call every frame.
+func mouseHookDrainPressed() extern ret Bool
+
+# Symmetric counterpart for RELEASE events.
+func mouseHookDrainReleased() extern ret Bool
+
 # Opt this process out of macOS App Nap. Without this, apps with
 # low idle CPU — exactly what an event-driven wait-events loop
 # achieves — get throttled by RunningBoardServices after a few
