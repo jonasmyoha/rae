@@ -294,13 +294,17 @@ type CornerRadius {
   radius: Float
 }
 
-# Hover-scale animation: when the cursor is inside the entity's
-# computed rect, the Sprite paint multiplies its draw size by
-# `scale` (and re-centers inside the rect). Cheap visual feedback
-# for grid tiles / list rows — no easings or state, just a
-# binary "is-hovered" snapshot the renderer checks per frame.
+# Hover-scale animation. Permanent component on entities that want
+# a hover-driven scale wiggle. `hoverScaleSystem` picks
+# `target = restScale` (cursor outside the rect) or `hoverScale`
+# (cursor inside) and eases `current` toward it each frame at
+# `speed` per second. Sprite paint reads `current` as a multiplier
+# — bumping it scales the rendered texture and re-centers it.
 type HoverScale {
-  scale: Float
+  restScale: Float
+  hoverScale: Float
+  speed: Float
+  current: Float
 }
 
 # Linear gradient fill. Renderer paints a rect from `from` to `to`
