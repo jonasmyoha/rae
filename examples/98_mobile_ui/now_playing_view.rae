@@ -46,9 +46,14 @@ func mountNowPlayingPage(
   let pr: PageRoot = { id: own copiedId }
   componentSet(this: world.pageRoots, entity: root, data: own pr)
 
-  # The now-playing scene fills whatever's left after the bottom bars.
+  # Top bar matches the other pages — shared centered-title helper
+  # so the look and back-button geometry line up across screens.
+  let topBar: EntityId = buildPageTopBar(world: world, title: "Now playing")
+
+  # The now-playing scene fills whatever's left after the top bar and
+  # the bottom bars.
   let bottomGap: Float = outerGap * 2.0
-  let npH: Float = screenH - outerPad * 2.0 - miniPlayerH - navTabsH - bottomGap
+  let npH: Float = screenH - outerPad * 2.0 - topBarH - outerGap - miniPlayerH - navTabsH - bottomGap
   let npW: Float = screenW - outerPad * 2.0
   let np: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: np, w: npW, h: npH)
@@ -89,7 +94,23 @@ func mountNowPlayingPage(
     paintErrorBlock(world: world, entity: np, label: npLabel)
   }
 
-  let kids: List(EntityId) = createList(EntityId, cap: 1)
+  # Gate the big album-cover corner radius on the same AppSettings
+  # flag that drives Library / Home / History. Matches the 12px
+  # radius the Album page's HeroThumb is authored with, so a hero
+  # transition between those screens lerps a constant radius.
+  if state.settings.roundedAlbumCovers {
+    let heroNodeId: String = "Hero"
+    let heroOpt: opt Int = findNodeInPage(world: world, pageId: playerPageId, nodeId: heroNodeId)
+    if heroOpt is some {
+      let raw: Int = heroOpt
+      let heroEntity: EntityId = entityId(v: raw)
+      let cr: CornerRadius = { radius: 12.0 }
+      componentSet(this: world.cornerRadiuses, entity: heroEntity, data: cr)
+    }
+  }
+
+  let kids: List(EntityId) = createList(EntityId, cap: 2)
+  kids.add(value: topBar)
   kids.add(value: np)
   attachChildren(world: world, parent: root, kids: kids)
 
