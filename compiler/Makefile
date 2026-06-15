@@ -69,11 +69,35 @@ OBJS += $(BUILD_DIR)/rae_tinyexpr.o $(BUILD_DIR)/monocypher.o
 TARGET = $(BIN_DIR)/rae
 TEST_RUNNER = tools/run_tests.sh
 
-.PHONY: all build test clean smoke
+.PHONY: all build test clean smoke install uninstall
 
 all: build
 
 build: $(TARGET)
+
+# `make install` — symlink the built rae binary into a PATH directory
+# so plain `rae init` / `rae watch` / etc. work from any shell. Defaults
+# to ~/.local/bin (per the XDG-ish convention shipped on modern macOS
+# / Linux dotfiles); override with `make install INSTALL_DIR=/usr/local/bin`.
+# Idempotent: re-running rebuilds the symlink to point at the current
+# bin/rae, picking up rebuilds automatically. The target itself depends
+# on `build` so a fresh `make install` builds first.
+INSTALL_DIR ?= $(HOME)/.local/bin
+INSTALL_LINK := $(INSTALL_DIR)/rae
+
+install: build
+	@mkdir -p $(INSTALL_DIR)
+	@ln -sfn $(abspath $(TARGET)) $(INSTALL_LINK)
+	@echo "linked $(INSTALL_LINK) -> $(abspath $(TARGET))"
+	@case ":$$PATH:" in \
+	  *":$(INSTALL_DIR):"*) echo "$(INSTALL_DIR) is on PATH; \`rae init\` should work now.";; \
+	  *) echo "WARNING: $(INSTALL_DIR) is NOT on your PATH. Add this to ~/.zshrc:"; \
+	     echo "  export PATH=\"$(INSTALL_DIR):\$$PATH\"";; \
+	esac
+
+uninstall:
+	@rm -f $(INSTALL_LINK)
+	@echo "removed $(INSTALL_LINK)"
 
 $(BIN_DIR)/rae: $(BUILD_DIR)/main.o $(BUILD_DIR)/arena.o $(BUILD_DIR)/str.o $(BUILD_DIR)/diag.o $(BUILD_DIR)/type.o $(BUILD_DIR)/sema.o $(BUILD_DIR)/lexer.o $(BUILD_DIR)/ast.o $(BUILD_DIR)/parser.o $(BUILD_DIR)/pretty.o $(BUILD_DIR)/c_backend.o $(BUILD_DIR)/c_call.o $(BUILD_DIR)/c_discovery.o $(BUILD_DIR)/c_expr.o $(BUILD_DIR)/c_stmt.o $(BUILD_DIR)/raepack.o $(BUILD_DIR)/vm_chunk.o $(BUILD_DIR)/vm_value.o $(BUILD_DIR)/vm.o $(BUILD_DIR)/vm_compiler.o $(BUILD_DIR)/vm_emit_expr.o $(BUILD_DIR)/vm_emit_stmt.o $(BUILD_DIR)/vm_natives_core.o $(BUILD_DIR)/vm_registry.o $(BUILD_DIR)/vm_raylib.o $(BUILD_DIR)/vm_tinyexpr.o $(BUILD_DIR)/mangler.o $(BUILD_DIR)/vm_monocypher.o $(BUILD_DIR)/rae_tinyexpr.o $(BUILD_DIR)/monocypher.o $(BUILD_DIR)/sys_thread.o $(BUILD_DIR)/vm_patch.o $(BUILD_DIR)/rae_runtime.o
 	@mkdir -p $(BIN_DIR)
