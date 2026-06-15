@@ -2,6 +2,7 @@
 # Kept in one file so tweaking the look or repointing assets is a single
 # place to edit. Auto-imported by every other file in this project.
 import ui/theme
+import ui/spacing
 
 # ----- screen + spacing ---------------------------------------------
 # Window dimensions in iPhone 15 Pro logical aspect (393×852, 19.5:9 ≈
@@ -12,8 +13,14 @@ import ui/theme
 # Treat as a maximum; the layout reads the runtime values.
 let screenW: Float = 498.0
 let screenH: Float = 1079.0
+# outerPad is the screen-edge inset — domain-specific, not a generic
+# spacing step. outerGap is the canonical "section gap" inside a
+# screen; its numeric value is spaceM, but the C backend can't
+# initialise a module-level `let` from another module-level `let`,
+# so we keep it as a literal and rely on the spaceM comment to
+# document the intent.
 let outerPad: Float = 20.0
-let outerGap: Float = 12.0
+let outerGap: Float = 12.0  # spaceM
 
 # ----- per-section heights ------------------------------------------
 let topBarH: Float = 48.0
@@ -22,7 +29,7 @@ let albumThumbSize: Float = 84.0
 let actionsRowH: Float = 44.0
 let pillsRowH: Float = 56.0
 let trackRowH: Float = 60.0
-let trackGap: Float = 4.0
+let trackGap: Float = 4.0  # spaceXS
 let trackRowCount: Int = 5
 let miniPlayerH: Float = 80.0
 let navTabsH: Float = 80.0
