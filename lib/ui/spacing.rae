@@ -1,0 +1,36 @@
+# Spacing scale — t-shirt sizes for gaps, margins, and inner paddings.
+#
+# Pick a token by INTENT, not by remembering "4" or "8":
+#
+#   spaceXS  — tight, related items (text + caption, icon + label)
+#   spaceS   — sibling controls (grid tiles, row gaps, list items)
+#   spaceM   — section gaps inside a screen (default "comfortable")
+#   spaceL   — generous inner padding (cards, sheets, search fields)
+#   spaceXL  — section separation that needs to read as a beat
+#
+# Conventions:
+# * Values map to a 4-px base step: 4 / 8 / 12 / 16 / 24. Multiples of 4
+#   keep things crisp on integer device pixels and play well with the
+#   layout pass's rounding.
+# * Use these for `setLayout(... gap: ...)`, `setPaddingAll(... n: ...)`,
+#   inter-element margins. Do NOT use them for domain dimensions
+#   (bar heights, icon sizes, button widths) — those stay as named
+#   constants in their owning module (`config.rae` for the mobile UI).
+# * `0.0` is still fine for explicitly NO gap. There's no `spaceNone`
+#   token because the intent is already obvious from a bare zero.
+# * If a one-off value doesn't match the scale (e.g. 14 in a card chrome),
+#   leave it as a local literal and add a comment — don't add a 6th
+#   token to fit one site. Five is the budget.
+# * Module-level `let` initialisers must be numeric literals (the C
+#   backend emits them as `static double x = ...` which gcc requires
+#   to be compile-time constant — it won't accept another `let`).
+#   For those sites keep the literal and put the token name in a
+#   trailing comment, e.g. `let trackGap: Float = 4.0  # spaceXS`.
+#   Function-body / call-site uses (gap: spaceM, n: spaceL) are fine.
+import core
+
+let spaceXS: Float = 4.0
+let spaceS: Float = 8.0
+let spaceM: Float = 12.0
+let spaceL: Float = 16.0
+let spaceXL: Float = 24.0
