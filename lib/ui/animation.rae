@@ -41,6 +41,19 @@ func easeTowards(current: view Float, target: view Float, speed: view Float, dt:
 # topmost cursor-hit entity (use `noEntity()` when nothing is
 # hovered). Returns true if any entity is still animating.
 func hoverScaleSystem(world: mod UiWorld, hovered: view EntityId, dt: view Float) pub ret Bool {
+  # Clamp the frame delta. When the event loop has been idle (the
+  # cursor sat still off-screen for several seconds, say), the
+  # very first tick after a mouse-move arrives with a huge dt and
+  # the ease snaps in one frame. Capping at 1/20 s caps the
+  # per-tick step at `speed/20` of the delta — feels right at
+  # speed=12 (60% of the remaining delta per frame max).
+  let frameDt: Float = dt
+  if frameDt > 0.05 {
+    frameDt = 0.05
+  }
+  if frameDt < 0.0 {
+    frameDt = 0.0
+  }
   let stillAnimating: Bool = false
   let n: Int = componentCount(this: world.hoverScales)
   let i: Int = 0
@@ -51,7 +64,7 @@ func hoverScaleSystem(world: mod UiWorld, hovered: view EntityId, dt: view Float
     if entity.value is hovered.value {
       target = hs.hoverScale
     }
-    let next: Float = easeTowards(current: hs.current, target: target, speed: hs.speed, dt: dt, epsilon: 0.001)
+    let next: Float = easeTowards(current: hs.current, target: target, speed: hs.speed, dt: frameDt, epsilon: 0.001)
     if next is not hs.current {
       hs.current = next
       componentSet(this: world.hoverScales, entity: entity, data: hs)
