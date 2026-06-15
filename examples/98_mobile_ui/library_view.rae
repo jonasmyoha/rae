@@ -66,7 +66,7 @@ func collectLibraryCoverKeys(albums: view List(Album), library: view List(String
 # texture key, stores it as the active album, and pushes the Album
 # sub-page. The hero transition then naturally finds this tile as
 # source / destination. Public so `home_view.rae` can reuse it.
-func buildLibraryCoverTile(world: mod UiWorld, key: own String, size: view Float) pub ret EntityId {
+func buildLibraryCoverTile(world: mod UiWorld, key: own String, size: view Float, rounded: view Bool) pub ret EntityId {
   let tile: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: tile, w: size, h: size)
   let copiedForHero: String = key
@@ -74,7 +74,11 @@ func buildLibraryCoverTile(world: mod UiWorld, key: own String, size: view Float
   let albumOpen: String = "album.open"
   setOnClick(world: world, entity: tile, actionId: albumOpen)
   setSprite(world: world, entity: tile, key: key, tint: imageTintColor)
-  setHoverScale(world: world, entity: tile, scale: 1.08)
+  if rounded {
+    let cr: CornerRadius = { radius: 12.0 }
+    componentSet(this: world.cornerRadiuses, entity: tile, data: cr)
+  }
+  setHoverScale(world: world, entity: tile, hoverScale: 1.08)
   ret tile
 }
 
@@ -84,6 +88,7 @@ func buildLibraryGridRow(
   world: mod UiWorld
   keys: view List(String)
   startIndex: view Int
+  rounded: view Bool
 ) ret EntityId {
   let row: EntityId = createEntity(world: world)
   let rowW: Float = screenW - outerPad * 2.0
@@ -101,7 +106,7 @@ func buildLibraryGridRow(
     let i: Int = startIndex + col
     if i < total {
       let key: String = keys.get(index: i)
-      let tile: EntityId = buildLibraryCoverTile(world: world, key: key, size: tileH)
+      let tile: EntityId = buildLibraryCoverTile(world: world, key: key, size: tileH, rounded: rounded)
       kids.add(value: tile)
     }
     col = col + 1
@@ -112,7 +117,7 @@ func buildLibraryGridRow(
 
 # Compose the full 3-column grid over keys derived from the album list
 # (one tile per parsed album). `library` filters the catalog.
-func buildLibraryCoverGrid(world: mod UiWorld, albums: view List(Album), library: view List(String)) ret EntityId {
+func buildLibraryCoverGrid(world: mod UiWorld, albums: view List(Album), library: view List(String), rounded: view Bool) ret EntityId {
   let keys: List(String) = collectLibraryCoverKeys(albums: albums, library: library)
   let grid: EntityId = createEntity(world: world)
   let cols: Int = libraryGridColumns
@@ -131,7 +136,7 @@ func buildLibraryCoverGrid(world: mod UiWorld, albums: view List(Album), library
   let i: Int = 0
   loop i < rows {
     let startIndex: Int = i * cols
-    let row: EntityId = buildLibraryGridRow(world: world, keys: keys, startIndex: startIndex)
+    let row: EntityId = buildLibraryGridRow(world: world, keys: keys, startIndex: startIndex, rounded: rounded)
     rowKids.add(value: row)
     i = i + 1
   }
@@ -143,7 +148,7 @@ func buildLibraryCoverGrid(world: mod UiWorld, albums: view List(Album), library
 # past the screen edge — but the host applies `scrollY` as an
 # `Offset.delta.y` so the user can wheel-scroll the column up to
 # bring later rows into view.
-func buildLibraryBody(world: mod UiWorld, albums: view List(Album), library: view List(String), scrollY: view Float) ret EntityId {
+func buildLibraryBody(world: mod UiWorld, albums: view List(Album), library: view List(String), rounded: view Bool, scrollY: view Float) ret EntityId {
   let body: EntityId = createEntity(world: world)
   let bodyW: Float = screenW - outerPad * 2.0
   let bodyH: Float = screenH - topBarH - navTabsH - outerGap * 4.0 - outerPad * 2.0
@@ -160,7 +165,7 @@ func buildLibraryBody(world: mod UiWorld, albums: view List(Album), library: vie
   let scroll: ScrollState = { y: scrollY, velocity: 0.0 }
   componentSet(this: world.scrollStates, entity: body, data: scroll)
 
-  let grid: EntityId = buildLibraryCoverGrid(world: world, albums: albums, library: library)
+  let grid: EntityId = buildLibraryCoverGrid(world: world, albums: albums, library: library, rounded: rounded)
   let kids: List(EntityId) = createList(EntityId, cap: 1)
   kids.add(value: grid)
   attachChildren(world: world, parent: body, kids: kids)
@@ -191,7 +196,7 @@ func mountLibraryPage(
   componentSet(this: world.pageRoots, entity: root, data: own pr)
 
   let topBar: EntityId = buildPageTopBar(world: world, title: "Your Library")
-  let body: EntityId = buildLibraryBody(world: world, albums: albums, library: state.library, scrollY: scrollY)
+  let body: EntityId = buildLibraryBody(world: world, albums: albums, library: state.library, rounded: state.settings.roundedAlbumCovers, scrollY: scrollY)
 
   let kids: List(EntityId) = createList(EntityId, cap: 2)
   kids.add(value: topBar)
