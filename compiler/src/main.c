@@ -16,6 +16,7 @@
 #include <ctype.h>
 #include <limits.h>
 #include <dirent.h>
+#include <setjmp.h>
 #ifndef RAE_RUNTIME_SOURCE_DIR
 #define RAE_RUNTIME_SOURCE_DIR "runtime"
 #endif
@@ -3475,6 +3476,64 @@ static void* watch_thread_func(void* arg) {
     return NULL;
 }
 
+/* Sema can crash (SIGSEGV) when re-analysing a module that contains
+ * parse-level garbage — see 399_code_hot_reload_error. The crash is a
+ * real bug in type_mangle_recursive's handling of partially-resolved
+ * TypeInfos, but on the hot-reload path we don't want the watcher to
+ * die: the user is just editing live source. We trap the signal,
+ * longjmp back here, and return false so the watch loop keeps running
+ * with the previous-good chunk. The existing rae_runtime.c crash
+ * handler is restored on the way out so any genuine crash in vm_run
+ * (or anywhere else) still produces a backtrace + exit. */
+static sigjmp_buf g_watch_compile_jmp;
+static volatile sig_atomic_t g_watch_compile_armed = 0;
+static void watch_compile_sigsegv(int sig) {
+  if (g_watch_compile_armed) {
+    g_watch_compile_armed = 0;
+    siglongjmp(g_watch_compile_jmp, sig);
+  }
+  /* Not armed (something else hit SIGSEGV) — restore default and
+   * re-raise so the OS can dump core. */
+  signal(sig, SIG_DFL);
+  raise(sig);
+}
+
+static bool compile_file_chunk_protected(const char* file_path,
+                                         Chunk* chunk,
+                                         uint64_t* out_hash,
+                                         WatchSources* watch_sources,
+                                         const char* project_root,
+                                         bool no_implicit,
+                                         VmRegistry* registry,
+                                         bool is_patch) {
+  struct sigaction prev_segv, prev_bus, sa;
+  memset(&sa, 0, sizeof(sa));
+  sa.sa_handler = watch_compile_sigsegv;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = SA_NODEFER;
+  sigaction(SIGSEGV, &sa, &prev_segv);
+  sigaction(SIGBUS,  &sa, &prev_bus);
+
+  bool ok;
+  if (sigsetjmp(g_watch_compile_jmp, 1) == 0) {
+    g_watch_compile_armed = 1;
+    ok = compile_file_chunk(file_path, chunk, out_hash, watch_sources,
+                            project_root, no_implicit, registry, is_patch);
+    g_watch_compile_armed = 0;
+  } else {
+    /* Caught SIGSEGV / SIGBUS inside compile_file_chunk. */
+    fprintf(stderr,
+            "%s: hot-reload skipped: unknown identifier or malformed "
+            "source crashed the compiler — staying on previous build\n",
+            file_path);
+    ok = false;
+  }
+
+  sigaction(SIGSEGV, &prev_segv, NULL);
+  sigaction(SIGBUS,  &prev_bus,  NULL);
+  return ok;
+}
+
 static int run_vm_watch(const RunOptions* run_opts, const char* project_root) {
   const char* file_path = run_opts->input_path;
   printf("Watching '%s' for changes (Ctrl+C to exit)\n", file_path);
@@ -3672,7 +3731,7 @@ static int run_vm_watch(const RunOptions* run_opts, const char* project_root) {
           WatchSources new_sources;
           watch_sources_init(&new_sources);
           
-          if (compile_file_chunk(file_path, &new_chunk, &new_hash, &new_sources, project_root, run_opts->no_implicit, &registry, true)) {
+          if (compile_file_chunk_protected(file_path, &new_chunk, &new_hash, &new_sources, project_root, run_opts->no_implicit, &registry, true)) {
               sys_mutex_lock(&ctx.mutex);
               bool patched = vm_hot_patch(vm, &new_chunk);
               vm->reload_requested = false;
