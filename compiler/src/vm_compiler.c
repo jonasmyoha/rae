@@ -751,6 +751,7 @@ int compiler_add_local(BytecodeCompiler* compiler, Str name, Str type_name, bool
   compiler->locals[compiler->local_count].needs_drop = false;
   compiler->locals[compiler->local_count].is_alias = false;
   compiler->locals[compiler->local_count].dropped = false;
+  compiler->locals[compiler->local_count].is_leaf_drop = false;
   compiler->local_count += 1;
   return (int)(compiler->local_count - 1);
 }
@@ -976,34 +977,48 @@ bool vm_emit_implicit_drops(BytecodeCompiler* compiler,
     if (compiler->locals[i].scope_depth < min_scope_depth) continue;
     if (exclude_slot >= 0 &&
         (int)compiler->locals[i].slot == exclude_slot) {
-      /* Treat as moved: mark dropped so a later return path doesn't
-       * fire it either. Mirrors the C backend's move-tracking on
-       * `ret <ident-local>`. */
-      compiler->locals[i].dropped = true;
+      /* Move-tracking: SKIP THIS DROP SITE for the returned local,
+       * but DO NOT mark `dropped = true` permanently. Earlier
+       * versions of this function flipped the flag here, but that
+       * caused a real control-flow hazard: if the SAME local is
+       * returned on one ret path and falls through to a different
+       * cleanup site on another, the compile-time flag would
+       * suppress cleanup on the second path even though only one
+       * path executes at runtime. The flag is meant to record "a
+       * drop WAS emitted; later cleanup walks must skip this
+       * slot" — moves are localized exclusions, not persistent. */
       continue;
     }
-    char buf[256];
-    Str tn = compiler->locals[i].type_name;
-    int n = snprintf(buf, sizeof(buf),
-                     "rae_vm_drop_struct_%.*s%s",
-                     (int)tn.len, tn.data,
-                     compiler->locals[i].is_alias ? "_alias" : "");
-    if (n <= 0 || n >= (int)sizeof(buf)) {
-      diag_error(compiler->file_path, line, 0,
-                 "drop helper name too long");
-      compiler->had_error = true;
-      return false;
+    if (compiler->locals[i].is_leaf_drop) {
+      /* Leaf cleanup — String / List / Buffer / StringMap / IntMap.
+       * No registry lookup; OP_DROP_LOCAL directly value_free's
+       * the slot. */
+      emit_op(compiler, OP_DROP_LOCAL, line);
+      emit_uint32(compiler, compiler->locals[i].slot, line);
+    } else {
+      char buf[256];
+      Str tn = compiler->locals[i].type_name;
+      int n = snprintf(buf, sizeof(buf),
+                       "rae_vm_drop_struct_%.*s%s",
+                       (int)tn.len, tn.data,
+                       compiler->locals[i].is_alias ? "_alias" : "");
+      if (n <= 0 || n >= (int)sizeof(buf)) {
+        diag_error(compiler->file_path, line, 0,
+                   "drop helper name too long");
+        compiler->had_error = true;
+        return false;
+      }
+      /* Push `mod` ref to the slot. drop_native_cb derefs it and
+       * runs the per-field cascade. */
+      emit_op(compiler, OP_MOD_LOCAL, line);
+      emit_uint32(compiler, compiler->locals[i].slot, line);
+      if (!emit_native_call(compiler, str_from_cstr(buf), 1, line, 0)) {
+        return false;
+      }
+      /* OP_NATIVE_CALL leaves the native's result on the stack
+       * (VAL_NONE for void); discard it. */
+      emit_op(compiler, OP_POP, line);
     }
-    /* Push `mod` ref to the slot. drop_native_cb derefs it and
-     * runs the per-field cascade. */
-    emit_op(compiler, OP_MOD_LOCAL, line);
-    emit_uint32(compiler, compiler->locals[i].slot, line);
-    if (!emit_native_call(compiler, str_from_cstr(buf), 1, line, 0)) {
-      return false;
-    }
-    /* OP_NATIVE_CALL leaves the native's result on the stack
-     * (VAL_NONE for void); discard it. */
-    emit_op(compiler, OP_POP, line);
     compiler->locals[i].dropped = true;
   }
   return true;
