@@ -438,10 +438,8 @@ func textStyleIsCentered(styleId: view String) ret Bool {
   ret false
 }
 
-# Subset of styleIds that get a soft 1-px down-right black drop-shadow
-# painted under them. Used by the mobile UI's now-playing + mini-player
-# track-title / artist labels so the text reads cleanly against album
-# covers behind the mini-player and against the dark NowPlaying surface.
+# Mobile UI's playing widgets (now-playing + mini-player titles/artists)
+# get a soft drop-shadow so they read against album-cover backgrounds.
 func textStyleHasShadow(styleId: view String) ret Bool {
   if styleId.equals(other: "h1") { ret true }
   if styleId.equals(other: "muted") { ret true }
@@ -450,11 +448,8 @@ func textStyleHasShadow(styleId: view String) ret Bool {
   ret false
 }
 
-# Right-aligned text: draw flush against the rect's right edge instead
-# of the default left edge. Currently used by NowPlaying's TimeTotal
-# label which sits at the right end of a SpaceBetween row and would
-# otherwise leave a visible gap between its glyphs and the right edge
-# of the progress bar.
+# NowPlaying's TimeTotal label needs to sit flush against the progress
+# bar's right edge — its containing SpaceBetween row leaves a gap.
 func textStyleIsRightAligned(styleId: view String) ret Bool {
   if styleId.equals(other: "timeTotal") { ret true }
   ret false
@@ -470,37 +465,44 @@ func paintText(world: view UiWorld, entity: view EntityId, wt: view WorldTransfo
   let col: Color = textStyleColor(styleId: tx.styleId, chain255: chain255)
   let drawX: Float = wt.x
   let drawY: Float = wt.y
-  if textStyleIsCentered(styleId: tx.styleId) {
+  # Alignment comes from either the styleId (legacy fixed-purpose
+  # ids) or the entity's Align component (`Center` / `End`). The
+  # latter lets .raescene authors get both box-placement and in-rect
+  # text alignment from one Align without scripting.
+  let centerX: Bool = textStyleIsCentered(styleId: tx.styleId)
+  let centerY: Bool = textStyleIsCentered(styleId: tx.styleId)
+  let rightAlignX: Bool = textStyleIsRightAligned(styleId: tx.styleId)
+  if componentHas(this: world.aligns, entity: entity) {
+    let al: Align = componentGet(this: world.aligns, entity: entity)
+    if al.hasX {
+      if al.x is AlignKind.Center { centerX = true }
+      if al.x is AlignKind.End { rightAlignX = true }
+    }
+    if al.hasY {
+      if al.y is AlignKind.Center { centerY = true }
+    }
+  }
+  if centerX or rightAlignX or centerY {
     let measured: Int = measureTextWithFont(
       slot: defaultFontSlot
       text: txt
       fontSize: size
       spacing: 1.0
     )
-    drawX = wt.x + (cr.w - measured.toFloat()) / 2.0
-    drawY = wt.y + (cr.h - size) / 2.0
+    if centerX {
+      drawX = wt.x + (cr.w - measured.toFloat()) / 2.0
+    }
+    if rightAlignX {
+      drawX = wt.x + cr.w - measured.toFloat()
+    }
+    if centerY {
+      drawY = wt.y + (cr.h - size) / 2.0
+    }
   }
-  if textStyleIsRightAligned(styleId: tx.styleId) {
-    let measured: Int = measureTextWithFont(
-      slot: defaultFontSlot
-      text: txt
-      fontSize: size
-      spacing: 1.0
-    )
-    drawX = wt.x + cr.w - measured.toFloat()
-  }
-  # Drop-shadow pass for styles that opt in. 9-sample blur: 1 center
-  # tap (heavier) + 8 ring taps in a circle of `blurRadius` (lighter).
-  # The ring samples cover the cardinal + diagonal directions in unit
-  # form so a single sin/cos table isn't needed — the diagonal taps
-  # use the precomputed 0.7071 (sqrt(2)/2). The ring fills out the
-  # silhouette of the shadow into a soft halo instead of a hard
-  # 1-pixel offset copy.
-  #
-  # shadowOff scales with font size (~6%, clamped to 1-3 px) and
-  # is the centre of the blur kernel. blurRadius is the kernel's
-  # outer ring — slightly wider than the offset so the halo is
-  # symmetric around the displaced shadow center.
+  # 9-sample drop-shadow: 1 centre tap (heavier) + 8 ring taps
+  # (lighter) on a circle of `blurRadius`. Diagonals use the
+  # precomputed sqrt(2)/2 ≈ 0.7071 so no per-glyph sin/cos. Smears
+  # the old single hard-offset shadow into a soft halo.
   if textStyleHasShadow(styleId: tx.styleId) {
     let shadowOff: Float = size * 0.06
     if shadowOff < 1.0 { shadowOff = 1.0 }
@@ -508,10 +510,7 @@ func paintText(world: view UiWorld, entity: view EntityId, wt: view WorldTransfo
     let blurRadius: Float = size * 0.09
     if blurRadius < 1.5 { blurRadius = 1.5 }
     if blurRadius > 4.0 { blurRadius = 4.0 }
-    # Centre weight 0.30, edge weight 0.10 — sum ≈ 1.1, close to the
-    # density of the old single hard shadow but smeared over a soft
-    # disc. Half-diagonal magnitude ≈ 0.7071 keeps the diagonal taps
-    # at the same euclidean distance as the cardinals.
+    # Centre weight 0.30, edge weight 0.10 (sum ≈ 1.1 matches old density).
     let cx: Float = drawX + shadowOff
     let cy: Float = drawY + shadowOff
     let aBase: Int = chain255 * 90 / 255
