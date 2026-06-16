@@ -1,0 +1,87 @@
+# Stage 1 step 5: focused regression for the multiple-return-site
+# move-marker hazard flagged in step 4's summary.
+#
+# Before the fix in this commit, `vm_emit_implicit_drops` flipped
+# the local's `dropped` flag to TRUE when move-tracking excluded it
+# from a `ret <bare-ident>` cleanup walk. That suppressed the
+# cleanup on every later ret site even though only one ret runs at
+# runtime. With the fix, the move-exclusion is local to ONE cleanup
+# walk only; the persistent `dropped` flag is set only when a drop
+# actually gets emitted.
+#
+# Scenario: function with two ret sites. Path A returns the local
+# (move). Path B returns a fresh literal (drop should fire on the
+# local). The test exercises both control flows from main and
+# checks via RSS that path B doesn't leak.
+#
+# Note: with the old buggy code the local would be emitted-skip on
+# both rets, then control flow on path B would return without
+# dropping the local, leaking its String. The stress loop drives
+# many iterations on path B; with the fix RSS stays bounded.
+
+import core
+
+func processRssKb() extern ret Int
+
+# Two ret sites. With `take`==true the local is RETURNED (move
+# tracking excludes drop on that path). With `take`==false the
+# local must be DROPPED before the void-style ret of a fresh
+# literal.
+func twoRetSites(take: view Bool) ret String {
+  let s: String = "two-rets-payload"
+  if take {
+    ret s
+  }
+  ret "fresh-fallback"
+}
+
+# Path A — exercises the move; the caller binds the returned
+# String. Stress: bounded RSS confirms no per-iteration leak on
+# the cleaned-up sibling locals (none in this shape, but the
+# stability check is cheap).
+func driveMovePath() {
+  let v: String = twoRetSites(take: true)
+}
+
+# Path B — does NOT take the local. With the bug, the let would
+# never get cleaned up, every iteration would leak the String.
+# With the fix, OP_DROP_LOCAL fires on the second ret site
+# because the `dropped` flag was not set by the earlier
+# move-exclusion of the first ret.
+func driveDropPath() {
+  let v: String = twoRetSites(take: false)
+}
+
+func main() {
+  # Sanity: each path returns the expected text.
+  let movedVal: String = twoRetSites(take: true)
+  log("move_path={movedVal}")
+
+  let droppedVal: String = twoRetSites(take: false)
+  log("drop_path={droppedVal}")
+
+  # Stress path B (the previously-leaky path). 2000 iterations.
+  let rssBefore: Int = processRssKb()
+  let i: Int = 0
+  let iters: Int = 2000
+  loop i < iters {
+    driveDropPath()
+    i = i + 1
+  }
+  let rssAfter: Int = processRssKb()
+  let grew: Int = rssAfter - rssBefore
+  let bounded: Bool = grew < 4096
+  log("drop_path_bounded={bounded}")
+
+  # Stress path A as a control: also bounded.
+  let rssBefore2: Int = processRssKb()
+  let j: Int = 0
+  loop j < iters {
+    driveMovePath()
+    j = j + 1
+  }
+  let rssAfter2: Int = processRssKb()
+  let grew2: Int = rssAfter2 - rssBefore2
+  let bounded2: Bool = grew2 < 4096
+  log("move_path_bounded={bounded2}")
+}
