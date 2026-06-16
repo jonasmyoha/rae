@@ -164,7 +164,7 @@ func parseTracks(doc: view JsonDoc, root: view JsonValue) ret List(Track) {
 # Build a stub Album for parse failures / missing files. Keeps the
 # `stem` + `coverPath` populated so the UI can still render the row
 # (and the user can see which entry needs fixing on disk).
-func stubAlbum(stem: own String, coverPath: own String) ret Album {
+func stubAlbum(stem: view String, coverPath: view String) ret Album {
   let empty: String = ""
   ret Album {
     stem: stem
@@ -180,7 +180,7 @@ func stubAlbum(stem: own String, coverPath: own String) ret Album {
 }
 
 # Parse a single album.json blob into an Album.
-func parseAlbum(source: view String, stem: own String, coverPath: own String) pub ret Album {
+func parseAlbum(source: view String, stem: view String, coverPath: view String) pub ret Album {
   let doc: JsonDoc = parseJson(source: source)
   if doc.ok is false {
     log("[album-loader] parse error in {stem}/album.json at byte {doc.errorPos}")
@@ -208,7 +208,7 @@ func parseAlbum(source: view String, stem: own String, coverPath: own String) pu
 
 # Load a single album by stem from disk. Convenience for the
 # "active album" path that reads one entry at a time.
-func loadAlbum(folder: view String, stem: own String) pub ret Album {
+func loadAlbum(folder: view String, stem: view String) pub ret Album {
   let copiedStem: String = stem
   let jsonPath: String = "{folder}/{copiedStem}/album.json"
   let coverPath: String = "{folder}/{copiedStem}/cover.jpg"
@@ -224,7 +224,7 @@ func loadAlbum(folder: view String, stem: own String) pub ret Album {
 # `album.json`. Order: whatever `listDir` returns (insertion order
 # on APFS). Callers can sort by stem / artist / year on the Rae
 # side if a stable display order is needed.
-func loadAllAlbums(folder: own String) pub ret List(Album) {
+func loadAllAlbums(folder: view String) pub ret List(Album) {
   let copiedFolder: String = folder
   let result: List(Album) = createList(Album, cap: 32)
   let entries: List(File) = listDir(folder: copiedFolder)
