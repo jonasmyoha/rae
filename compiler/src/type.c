@@ -299,8 +299,28 @@ TypeInfo* type_get_struct(TypeRegistry* r, AstDecl* decl, TypeInfo** args, size_
 
 // Utilities
 
-static void type_mangle_recursive(Arena* arena, TypeInfo* t, char* buf, size_t* pos, size_t cap) {
-    if (!t) return;
+static void type_mangle_recursive(Arena* arena, TypeInfo* t, char* buf, size_t* pos, size_t cap, int depth) {
+    if (!t || *pos + 32 >= cap) return;
+    /* Guard against pathological cycles. Sema produces a malformed
+     * TypeInfo when re-analyzing a module that contains a parse-
+     * level garbage token (the hot-reload-with-invalid-source path
+     * caught by 399_code_hot_reload_error). The previous version
+     * recursed forever and stack-overflowed. 32 levels is well
+     * past any genuine generic-spec nesting (List(List(Pair(...)))
+     * is depth 5-6 in practice). */
+    if (depth > 32) {
+        *pos += snprintf(buf + *pos, cap - *pos, "rae_cycle");
+        return;
+    }
+    /* Bad-kind guard: sema can construct a partially-initialized
+     * TypeInfo (zeroed memory) for an unresolved type name. Reading
+     * its `as.structure.*` fields would deref garbage. The valid
+     * enum range is TYPE_VOID..TYPE_GENERIC_PARAM; anything outside
+     * is a stale / uninitialised TypeInfo. */
+    if ((int)t->kind < 0 || (int)t->kind > (int)TYPE_GENERIC_PARAM) {
+        *pos += snprintf(buf + *pos, cap - *pos, "rae_unresolved");
+        return;
+    }
     switch (t->kind) {
         case TYPE_VOID: *pos += snprintf(buf + *pos, cap - *pos, "void"); break;
         case TYPE_INT: *pos += snprintf(buf + *pos, cap - *pos, "int64_t"); break;
@@ -312,11 +332,11 @@ static void type_mangle_recursive(Arena* arena, TypeInfo* t, char* buf, size_t* 
         case TYPE_OPT: *pos += snprintf(buf + *pos, cap - *pos, "RaeAny"); break;
         case TYPE_BUFFER:
             *pos += snprintf(buf + *pos, cap - *pos, "Buffer_");
-            type_mangle_recursive(arena, t->as.buffer.base, buf, pos, cap);
+            type_mangle_recursive(arena, t->as.buffer.base, buf, pos, cap, depth + 1);
             break;
         case TYPE_REF:
             *pos += snprintf(buf + *pos, cap - *pos, t->as.ref.is_mod ? "rae_Mod_" : "rae_View_");
-            type_mangle_recursive(arena, t->as.ref.base, buf, pos, cap);
+            type_mangle_recursive(arena, t->as.ref.base, buf, pos, cap, depth + 1);
             break;
         case TYPE_STRUCT: {
             Str base_name = t->name;
@@ -335,10 +355,19 @@ static void type_mangle_recursive(Arena* arena, TypeInfo* t, char* buf, size_t* 
             else if (str_eq_cstr(base_name, "Void")) *pos += snprintf(buf + *pos, cap - *pos, "void");
             else *pos += snprintf(buf + *pos, cap - *pos, "rae_%.*s", (int)base_name.len, base_name.data);
 
-            if (t->as.structure.generic_count > 0) {
+            if (t->as.structure.generic_count > 0 && t->as.structure.generic_args) {
                 *pos += snprintf(buf + *pos, cap - *pos, "_");
                 for (size_t i = 0; i < t->as.structure.generic_count; i++) {
-                    type_mangle_recursive(arena, t->as.structure.generic_args[i], buf, pos, cap);
+                    TypeInfo* arg = t->as.structure.generic_args[i];
+                    /* Sema can attach a self-referential TypeInfo for
+                     * generic args when the module contained a parse-
+                     * level garbage token (the 399 hot-reload-of-
+                     * invalid-source path). Break the cycle. */
+                    if (arg == t) {
+                        *pos += snprintf(buf + *pos, cap - *pos, "rae_self");
+                    } else {
+                        type_mangle_recursive(arena, arg, buf, pos, cap, depth + 1);
+                    }
                     if (i < t->as.structure.generic_count - 1) *pos += snprintf(buf + *pos, cap - *pos, "_");
                 }
             }
@@ -353,7 +382,7 @@ static void type_mangle_recursive(Arena* arena, TypeInfo* t, char* buf, size_t* 
 Str type_mangle_name(Arena* arena, TypeInfo* t) {
     char buf[1024];
     size_t pos = 0;
-    type_mangle_recursive(arena, t, buf, &pos, sizeof(buf));
+    type_mangle_recursive(arena, t, buf, &pos, sizeof(buf), 0);
     
     // Sanitize
     for (size_t i = 0; i < pos; i++) {
