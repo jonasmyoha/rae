@@ -15,6 +15,53 @@
 > Where this document gives a "preferred" or "natural" rule, that
 > reflects the current best guess only.
 
+## Rae's goal isn't Rust
+
+Before anything else, the goal Rae is aiming at:
+
+> Rae should automatically handle ordinary ownership cleanup, warn
+> or restrict obvious hazards, and allow explicit unsafe or manual
+> patterns when needed.
+
+Rae does **not** aim for Rust-level memory safety or
+compile-time proof that misuse is impossible. The goal is a
+pleasant, practical systems language that avoids leaks and
+cleanup mistakes when used properly, with helpful compiler and
+runtime support and sensible defaults.
+
+That framing matters because most of the open questions below
+have a "Rust-style" answer and a "looser, more ergonomic" answer.
+This document treats Rust as one comparison point, not the
+target. Specifically:
+
+* **Automatic structural drop** for `String`, `List`, buffers,
+  structs, and generic types is about preventing the ordinary
+  leak ("I forgot to free this") and reducing the amount of
+  cleanup the programmer has to write by hand. It is not about
+  proving the absence of leaks.
+* Rae does **not** need to prove that every resource has exactly
+  one owner at all times. It needs to make the common case work
+  and make the obvious mistakes hard.
+* `own`, `view`, and `mod` are useful **vocabulary and tooling**
+  for talking about who is currently responsible for a value.
+  They do not need to expand into a full Rust-style borrow checker.
+* Copying and moving still need understandable semantics —
+  especially to avoid accidental double cleanup of an external
+  resource — but the answer may be a mix of conventions,
+  warnings, limited compiler checks, explicit annotations, or
+  simple restrictions rather than complete static soundness.
+* Resource wrappers with custom drop may use **stronger rules**
+  than ordinary value types (for example, no implicit copy of a
+  texture handle), but Rae should preserve explicit escape
+  hatches for advanced or FFI code.
+* The language should prevent the common mistakes without making
+  every uncommon or potentially unsafe operation impossible. "Hard
+  to do by accident, possible to do on purpose" is the target.
+
+The rest of the document should be read with that in mind: when
+two paths exist and one is more permissive, the more permissive
+one is not automatically wrong.
+
 The key point is that Rae already has the beginnings of a destruction
 model, even if it does not yet expose “destructors” as a user-facing
 feature.
@@ -75,14 +122,25 @@ That applies even without files, fonts, sockets, or GPU objects.
 
 **Open**
 
+* **The general copy/move/assignment model for owned values.**
+  This is the real gating question. `own` / `view` / `mod`
+  provide vocabulary but do not by themselves answer:
+
+  ```rae
+  let a: Person = createPerson()
+  let b: Person = a
+  ```
+
+  This could mean move, deep copy, shallow alias, or compile
+  error. Rae needs a clear and ergonomic rule, but not
+  necessarily one that statically guarantees full memory
+  safety. Custom-drop types may add stricter rules on top of
+  whatever the general rule turns out to be. See the section
+  on copy / move policy below.
 * Whether user-defined custom drop becomes a first-class feature
   at all, or whether external resources are released through
   some other mechanism (handles + explicit close, capability
   objects, FFI shims).
-* Whether every type with custom drop must be move-only, or
-  whether Rae can categorise types more finely. **This is the
-  question that gates most of the others** — see "Does custom
-  drop require move-only types?".
 * Whether explicit clone / copy needs to be a language concept
   or can stay in user-land helper functions.
 * Drop order across fields and across local bindings (reverse
@@ -101,7 +159,11 @@ The rest of this document expands each of these.
 
 ## Structural drop (likely-required)
 
-The simplest model is fully compiler-generated structural cleanup.
+The case for this is **leak prevention and convenience**, not
+soundness. If `String` and `List(T)` already know how to clean
+themselves up at scope exit, hiding one of them inside a struct
+should not silently break that. The simplest model is fully
+compiler-generated structural cleanup.
 
 For every type, the compiler determines its drop behavior from its
 fields:
@@ -230,25 +292,30 @@ ship structural drop for owned data. That is a real option, not a
 strawman — for some kinds of resources, the "do nothing automatic,
 make the user write `close(x)`" rule is honest and easy to teach.
 
-## Does custom drop require move-only types? (open)
+## The copy / move / assignment model — the real gating question (open)
 
-Rust answers "yes": any type that implements `Drop` is `!Copy`,
-and assigning it to another binding is a move. That keeps cleanup
-sound — there is always exactly one owner who will eventually run
-the destructor. But it is also the source of most of Rust's
-syntactic weight: explicit `.clone()`, `&`, `&mut`, lifetime
-annotations.
+This is the question that gates most of the others, and it
+exists with or without custom drop:
 
-Rae does not have to copy that answer. The question is whether
-Rae's `own` / `view` / `mod` vocabulary already gives the compiler
-enough information to be more nuanced.
+```rae
+let a: Person = createPerson("Alice", ...)
+let b: Person = a       // move? deep copy? alias? error?
+```
 
-A plausible categorisation:
+Rae has to answer this for the existing built-ins — `String`,
+`List(T)`, structs containing them — even before custom drop
+enters the picture. Custom-drop types may add stricter rules on
+top, but they do not introduce a brand-new problem; they push on
+one Rae already has.
+
+The aim, per the framing at the top of this document, is **a clear
+and ergonomic rule**, not a statically-sound proof. Different
+categories of type can plausibly follow different rules:
 
 **1. Plain value types.** Fields are primitives, or other plain
-value types, recursively. Structural drop is a no-op. They are
-trivially copyable in every sense — `let b = a` produces an
-independent equal value.
+value types, recursively. Structural drop is a no-op. They behave
+like values everywhere — `let b = a` produces an independent
+equal value.
 
 ```rae
 type Color { r: Int  g: Int  b: Int  a: Int }
@@ -257,23 +324,18 @@ type Vec2  { x: Float  y: Float }
 
 **2. Owned-data types.** Fields contain or transitively contain
 owned heap data (`String`, `List`, buffers). Structural drop
-recurses through them. Copying these is **already** a careful
-question that Rae handles via `own` / `view` / `mod`:
-
-```rae
-let a: Person = createPerson("Alice", ...)
-let b: Person = a       // is this a move? a deep copy? aliasing?
-```
-
-The fact that Rae already needs an answer here means custom drop
-does not introduce a new copy-vs-move problem. It pushes on a
-question Rae was going to face for `String` and `List` anyway.
+recurses through them. `let b = a` could be deep-copy by default
+(predictable, but a perf footgun for large lists), move (a
+matches the underlying heap-ownership story), or aliased-with-a-
+warning (most permissive, easiest to misuse). `own` / `view` /
+`mod` are the vocabulary that lets the programmer be explicit
+when the default isn't what they want.
 
 **3. Resource-wrapper types.** A struct that uses a custom `drop`
 to release an external resource (file handle, GPU texture, OS
-socket). The handle inside is often a plain `Int`, so structural
-copying would silently duplicate ownership of the underlying
-resource:
+socket). The handle inside is often a plain `Int`, so a naive
+field-by-field copy would silently duplicate ownership of the
+underlying resource:
 
 ```rae
 type Texture { id: Int }
@@ -283,42 +345,51 @@ let a: Texture = loadTexture(path)
 let b: Texture = a          // both later try to unload id
 ```
 
-The category-3 case is where Rust-style move-only buys its keep.
-A category-1 type does not need it. A category-2 type might be
-fine with Rae's existing ownership system (because the underlying
-heap data is already handled by `own` / `view` semantics).
+For category-3 types, accidental copy is the obvious mistake that
+"sensible defaults" should prevent. The category-1 case has no
+such hazard. The category-2 case is mostly a performance and
+clarity question rather than a correctness one (the program won't
+double-free, but it might silently allocate when the programmer
+expected a move).
 
-This suggests several possible designs:
+Some design knobs that could appear, separately or in
+combination:
 
-* **A. One rule for all "needs drop" types.** Anything whose
-  structural or custom drop is non-trivial becomes move-only.
-  Simplest, most Rust-like. Cost: even mostly-plain types with one
-  `String` field lose implicit copy.
-* **B. Only types with *custom* drop become move-only.** Owned
-  data types stay under `own` / `view` / `mod`. Custom-drop types
-  get the stricter treatment because their hidden invariant
-  (`closeFile` runs exactly once) cannot be expressed via field
-  ownership alone.
-* **C. The categorisation is explicit.** A type marker like
-  `resource type Texture { … }` or a `noCopy` keyword forces the
-  classification rather than inferring it. Lets the user say
-  "this looks like an `Int`, but it is not."
-* **D. Custom drop without move-only is allowed**, but copying a
-  custom-drop type causes a defined no-op (e.g. only the last
-  owner runs drop, the rest are zeroed). Surprising; mentioned for
-  completeness, not recommended.
+* **A. One rule for everything.** Pick a single answer (e.g. move
+  by default) and apply it uniformly. Simple to teach. Cost: every
+  `Color` and `Vec2` loses implicit-copy ergonomics for no
+  benefit.
+* **B. Per-category defaults, all implicit.** Plain value types
+  copy; owned-data types do whatever the chosen general rule
+  says (move, deep-copy, alias-with-warning); custom-drop types
+  default to "no implicit copy." Most ergonomic; relies on the
+  compiler inferring the category.
+* **C. Explicit category marker.** A type-level annotation like
+  `resource type Texture { … }` or `noCopy` makes the
+  classification visible at the type declaration. Lets the user
+  say "this looks like an `Int`, but it is not."
+* **D. Lint, don't forbid.** Allow implicit copy of a custom-drop
+  type but emit a warning, and provide a syntactic opt-in to
+  silence it. Preserves an FFI escape hatch at the cost of
+  letting accidental copies compile.
+* **E. Compromise: implicit-copy of custom-drop types is an
+  error, but Rae provides an unambiguous escape hatch.** For
+  example, an explicit `Texture.unsafeAlias()` or `unsafe { let b
+  = a }` block. "Hard to do by accident, possible to do on
+  purpose" — matches the working principle at the top.
 
-The leading direction from the reasoning above is **B or C** —
-Rae's existing `own` / `view` / `mod` is already doing the work
-that Rust uses move semantics for, and inheriting Rust's blanket
-"any Drop means !Copy" rule may be unnecessary for owned-data
-types. But this is a real design question, not a settled one.
+There isn't a single right answer in advance of trying a few of
+these against real Rae code. None of them require Rae to
+guarantee static soundness; even the strictest option above only
+prevents the accidental case. Truly adversarial misuse remains
+the user's responsibility, as it would be in C.
 
-A related question: even under rule B or C, does Rae need an
-explicit `clone` concept for category-3 types, or can each resource
-type expose a domain-specific operation (`Texture.duplicate()`,
+A related question: regardless of which rule wins, does Rae need
+a language-wide `clone` concept, or can each resource type expose
+a domain-specific operation (`Texture.duplicate()`,
 `File.reopen()`) that allocates a fresh handle? The latter avoids
-naming a language-wide trait.
+naming a language-wide trait and is consistent with Rae's
+preference for explicit functions over generic machinery.
 
 ## Why this is different from `defer`
 
@@ -845,15 +916,24 @@ for graphics, audio, files, sockets, native handles, and C interop
 Rae may also benefit from the third, but it should not be used as
 a substitute for proper owned resource types (likely).
 
-The deepest principle is:
+Two principles, in order:
 
-> Cleanup should follow ownership whenever ownership exists.
+> Rae should automatically handle ordinary ownership cleanup, warn
+> or restrict obvious hazards, and allow explicit unsafe or manual
+> patterns when needed.
 
-When cleanup instead belongs to a temporary control-flow action,
-use `defer`.
+and
 
-That gives Rae a coherent model rather than choosing between
-“destructors everywhere” and “manual shutdown functions
-everywhere.” Whether each piece of that model actually ships, and
-in what shape, is still open — see the at-a-glance summary at the
-top.
+> Cleanup should follow ownership whenever ownership exists. When
+> cleanup instead belongs to a temporary control-flow action, use
+> `defer`.
+
+The first sets the safety bar — Rae is helpful and ergonomic, not
+proof-carrying. The second gives the model its shape: ownership
+goes with the value, paired control-flow goes with the scope.
+
+Together they let Rae avoid the false binary of "destructors
+everywhere" versus "manual shutdown functions everywhere," without
+adopting Rust's full borrow-checking apparatus. Whether each piece
+of that model actually ships, and in what shape, is still open —
+see the at-a-glance summary at the top.
