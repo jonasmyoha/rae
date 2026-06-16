@@ -59,6 +59,17 @@ typedef struct {
      * StringMap(V), IntMap(V). Mutually exclusive with the alias
      * variant since leaves don't have a FULL/ALIAS distinction. */
     bool is_leaf_drop;
+    /* Stage 1 step 6 — when `is_leaf_drop` is false and the let
+     * type is a generic struct specialization (e.g. Wrapper(String)),
+     * emission needs the mangler's spec-aware key, not just the
+     * bare type-decl name. Set at the let-stmt classification site
+     * to the helper short-name (mangler output minus the leading
+     * `rae_` prefix). NULL means "use bare `type_name` above"
+     * (legacy path for non-generic structs — preserved so the
+     * existing tests keep their expected helper names). The
+     * pointer is arena-allocated by the mangler so its lifetime is
+     * the whole compile. */
+    const char* helper_short_name;
   } locals[256];
   uint32_t local_count;
   uint32_t allocated_locals;
