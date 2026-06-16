@@ -1,0 +1,193 @@
+# Stage 1 step 4: VM reassignment cascade-drop + leaf-type audit.
+#
+# Live-only. Adds explicit pre-assignment cascade drop emission for
+# struct-typed local reassignment (`x = expr` where x is a
+# cascade-drop user struct local). Field reassignment and leaf-type
+# reassignment continue to rely on the runtime OP_SET_LOCAL /
+# OP_SET_FIELD value_free + value_copy path — both already
+# cleanup-correct, just not compiler-visible. See commit message
+# for the audit results.
+
+import core
+
+type Trivial {
+  x: Int
+  y: Int
+}
+
+type WithString {
+  name: String
+}
+
+type Inner {
+  text: String
+}
+
+type Outer {
+  inner: Inner
+  names: List(String)
+}
+
+func __raeVmDropCount(typeName: view String, isAlias: Bool) extern ret Int
+func processRssKb() extern ret Int
+
+func makeWithString(seed: view Int) ret WithString {
+  let w: WithString = { name: "from-call" }
+  ret w
+}
+
+# --- 1. Local struct reassignment fires FULL once at the
+# reassign site (and the second FULL at scope exit on the
+# replacement value). Trivial struct reassign incurs no helper
+# call (no helper synthesised for primitive-only structs).
+func scenarioReassignFull() {
+  let w: WithString = { name: "first" }
+  w = { name: "second" }
+}
+
+# --- 2. Self-assignment does not crash. OP_GET_LOCAL deep-copies
+# on read, so the RHS is already an independent value by the time
+# our explicit drop fires on the slot.
+func scenarioSelfAssign() {
+  let w: WithString = { name: "self" }
+  w = w
+}
+
+# --- 3. ALIAS-classified local reassign fires the _alias variant.
+func scenarioReassignAlias() {
+  let p: WithString = makeWithString(seed: 1)
+  p = makeWithString(seed: 2)
+}
+
+# --- 4. Trivial struct reassign incurs no extra cleanup call.
+# Trivial has no String/List/Map field, so no FULL/ALIAS helper
+# was synthesised — the reassign path emits no native call.
+func scenarioReassignTrivial() {
+  let t: Trivial = { x: 1, y: 2 }
+  t = { x: 3, y: 4 }
+}
+
+# --- 5. Bare-String reassignment cleanup runs entirely through
+# the runtime OP_SET_LOCAL value_free path. No explicit emission
+# (we deliberately skip leaf-type bindings in step 3's gate).
+# This scenario passes/fails based on whether the runtime cleanup
+# actually frees the old String — observable via no-crash + by
+# checking the second value reads correctly.
+func scenarioReassignBareString() ret String {
+  let s: String = "alpha"
+  s = "beta-replacement"
+  ret s
+}
+
+# --- 6. List(String) reassignment likewise via runtime cleanup.
+# Return the post-reassign length to confirm the new list is the
+# one observable.
+func scenarioReassignBareList() ret Int {
+  let xs: List(String) = createList(String, cap: 0)
+  xs = createList(String, cap: 4)
+  ret xs.length
+}
+
+# --- 7. Returned struct-field behavior pin: OP_GET_FIELD deep-
+# copies on read, so the let-bound copy is independent. Mutating
+# the source's field afterwards does NOT change the bound copy.
+func scenarioFieldReturnDeepCopy() ret String {
+  let outerLet: Outer = {
+    inner: { text: "original" }
+    names: createList(String, cap: 0)
+  }
+  let captured: Inner = outerLet.inner
+  outerLet.inner = { text: "mutated-after-capture" }
+  ret captured.text
+}
+
+# --- 8. Field reassignment with nested struct field. Runtime
+# OP_SET_FIELD's value_free handles the cleanup; we observe
+# correctness by reading back the new value.
+func scenarioFieldReassign() ret String {
+  let o: Outer = {
+    inner: { text: "field-original" }
+    names: createList(String, cap: 0)
+  }
+  o.inner = { text: "field-replaced" }
+  ret o.inner.text
+}
+
+func main() {
+  let withStringName: String = "WithString"
+  let trivialName: String = "Trivial"
+
+  # 1. Local struct reassign — FULL helper fires twice: once on
+  # the reassignment to drop the first value, once on scope exit
+  # to drop the replacement.
+  let s1Before: Int = __raeVmDropCount(withStringName, isAlias: false)
+  scenarioReassignFull()
+  let s1After: Int = __raeVmDropCount(withStringName, isAlias: false)
+  let s1Delta: Int = s1After - s1Before
+  log("reassign_full_delta={s1Delta}")
+
+  # 2. Self-assignment: no crash, FULL helper fires twice (once on
+  # reassign, once on scope exit).
+  let s2Before: Int = __raeVmDropCount(withStringName, isAlias: false)
+  scenarioSelfAssign()
+  let s2After: Int = __raeVmDropCount(withStringName, isAlias: false)
+  let s2Delta: Int = s2After - s2Before
+  log("self_assign_delta={s2Delta}")
+
+  # 3. ALIAS reassignment fires the _alias helper.
+  let s3FullBefore: Int = __raeVmDropCount(withStringName, isAlias: false)
+  let s3AliasBefore: Int = __raeVmDropCount(withStringName, isAlias: true)
+  scenarioReassignAlias()
+  let s3FullAfter: Int = __raeVmDropCount(withStringName, isAlias: false)
+  let s3AliasAfter: Int = __raeVmDropCount(withStringName, isAlias: true)
+  let s3FullDelta: Int = s3FullAfter - s3FullBefore
+  let s3AliasDelta: Int = s3AliasAfter - s3AliasBefore
+  log("alias_reassign_full_delta={s3FullDelta}")
+  log("alias_reassign_alias_delta={s3AliasDelta}")
+
+  # 4. Trivial struct reassign — no helper invocations of any kind
+  # (Trivial has no String/List/Map field, so vm_drop did not
+  # synthesise a helper for it).
+  let s4Full: Int = __raeVmDropCount(trivialName, isAlias: false)
+  let s4Alias: Int = __raeVmDropCount(trivialName, isAlias: true)
+  scenarioReassignTrivial()
+  let s4FullAfter: Int = __raeVmDropCount(trivialName, isAlias: false)
+  let s4AliasAfter: Int = __raeVmDropCount(trivialName, isAlias: true)
+  let s4FullDelta: Int = s4FullAfter - s4Full
+  let s4AliasDelta: Int = s4AliasAfter - s4Alias
+  log("trivial_full_delta={s4FullDelta}")
+  log("trivial_alias_delta={s4AliasDelta}")
+
+  # 5. Bare-String reassignment returns the replacement value.
+  let bareStr: String = scenarioReassignBareString()
+  log("bare_string_after_reassign={bareStr}")
+
+  # 6. Bare-List reassignment returns the replacement length.
+  let bareLen: Int = scenarioReassignBareList()
+  log("bare_list_after_reassign={bareLen}")
+
+  # 7. Field-return deep-copy pin. captured.text must still read
+  # "original" even after outerLet.inner is replaced.
+  let captured: String = scenarioFieldReturnDeepCopy()
+  log("captured_after_mutation={captured}")
+
+  # 8. Field reassignment via runtime path.
+  let fieldVal: String = scenarioFieldReassign()
+  log("field_reassign={fieldVal}")
+
+  # --- Stress: repeated struct reassignment must be RSS-bounded.
+  # Inside the scenario we reassign the same local 100 times per
+  # iteration; with explicit cascade drop the per-iteration heap
+  # is reclaimed.
+  let rssBefore: Int = processRssKb()
+  let i: Int = 0
+  let iters: Int = 2000
+  loop i < iters {
+    scenarioReassignFull()
+    i = i + 1
+  }
+  let rssAfter: Int = processRssKb()
+  let grew: Int = rssAfter - rssBefore
+  let bounded: Bool = grew < 4096
+  log("reassign_stress_bounded={bounded}")
+}
