@@ -1796,6 +1796,14 @@ void rae_ext_endMode3D(void) {
     EndMode3D();
 }
 
+void rae_ext_beginMode2D(Camera2D camera) {
+    BeginMode2D(camera);
+}
+
+void rae_ext_endMode2D(void) {
+    EndMode2D();
+}
+
 void rae_ext_drawRectangle(double x, double y, double width, double height, Color color) {
     DrawRectangle((int)x, (int)y, (int)width, (int)height, color);
 }

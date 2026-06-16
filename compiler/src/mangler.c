@@ -37,6 +37,8 @@ static const NativeMap RAYLIB_MAP[] = {
     {"drawGrid", "DrawGrid"},
     {"beginMode3D", "BeginMode3D"},
     {"endMode3D", "EndMode3D"},
+    {"beginMode2D", "BeginMode2D"},
+    {"endMode2D", "EndMode2D"},
     {NULL, NULL}
 };
 
@@ -103,11 +105,12 @@ bool is_primitive_type(Str type_name) {
 }
 
 bool is_raylib_builtin_type(Str type_name) {
-    return str_eq_cstr(type_name, "Vector2") || 
-           str_eq_cstr(type_name, "Vector3") || 
+    return str_eq_cstr(type_name, "Vector2") ||
+           str_eq_cstr(type_name, "Vector3") ||
            str_eq_cstr(type_name, "Color") ||
            str_eq_cstr(type_name, "Texture") ||
-           str_eq_cstr(type_name, "Camera3D");
+           str_eq_cstr(type_name, "Camera3D") ||
+           str_eq_cstr(type_name, "Camera2D");
 }
 
 static void sanitize_mangled_name(char* name) {
