@@ -300,6 +300,9 @@ func textStyleSize(styleId: view String) ret Float {
   if styleId.equals(other: debugMenuLabel) {
     ret 16.0
   }
+  # Right-aligned 16 pt label used by NowPlaying's TimeTotal node so
+  # the duration text sits flush against the progress bar's right edge.
+  if styleId.equals(other: "timeTotal") { ret 16.0 }
   # Royal Blush menu.* styleIds — authored in pixi's textStyles.ts for
   # the 1080-wide canvas. Hosts that scale-to-fit (Camera2D zoom = 0.5)
   # see these at half-size. Pixi sizes pulled from
@@ -403,6 +406,10 @@ func textStyleColor(styleId: view String, chain255: view Int) ret Color {
     let light: RgbaColor = { r: 246, g: 246, b: 248, a: 255 }
     ret toRaylibColor(c: light, chain255: chain255)
   }
+  # Caption-class right-aligned time label — matches `caption` colour.
+  if styleId.equals(other: "timeTotal") {
+    ret toRaylibColor(c: themeColorByName(name: "textMuted"), chain255: chain255)
+  }
   # Fallback: treat unknown style ids as primary text.
   ret toRaylibColor(c: themeColorByName(name: "textPrimary"), chain255: chain255)
 }
@@ -431,6 +438,28 @@ func textStyleIsCentered(styleId: view String) ret Bool {
   ret false
 }
 
+# Subset of styleIds that get a soft 1-px down-right black drop-shadow
+# painted under them. Used by the mobile UI's now-playing + mini-player
+# track-title / artist labels so the text reads cleanly against album
+# covers behind the mini-player and against the dark NowPlaying surface.
+func textStyleHasShadow(styleId: view String) ret Bool {
+  if styleId.equals(other: "h1") { ret true }
+  if styleId.equals(other: "muted") { ret true }
+  if styleId.equals(other: "miniTitle") { ret true }
+  if styleId.equals(other: "miniMuted") { ret true }
+  ret false
+}
+
+# Right-aligned text: draw flush against the rect's right edge instead
+# of the default left edge. Currently used by NowPlaying's TimeTotal
+# label which sits at the right end of a SpaceBetween row and would
+# otherwise leave a visible gap between its glyphs and the right edge
+# of the progress bar.
+func textStyleIsRightAligned(styleId: view String) ret Bool {
+  if styleId.equals(other: "timeTotal") { ret true }
+  ret false
+}
+
 func paintText(world: view UiWorld, entity: view EntityId, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int) {
   let tx: view Text => componentView(this: world.texts, entity: entity)
   let txt: String = tx.text
@@ -450,6 +479,39 @@ func paintText(world: view UiWorld, entity: view EntityId, wt: view WorldTransfo
     )
     drawX = wt.x + (cr.w - measured.toFloat()) / 2.0
     drawY = wt.y + (cr.h - size) / 2.0
+  }
+  if textStyleIsRightAligned(styleId: tx.styleId) {
+    let measured: Int = measureTextWithFont(
+      slot: defaultFontSlot
+      text: txt
+      fontSize: size
+      spacing: 1.0
+    )
+    drawX = wt.x + cr.w - measured.toFloat()
+  }
+  # Drop-shadow pass for styles that opt in. Same glyphs, offset by
+  # roughly 6% of the font size (clamped to 1-3 px) with a half-alpha
+  # near-black tint that picks up the entity's chained Active /
+  # Opacity alpha. Drawn FIRST so the real text paints on top.
+  if textStyleHasShadow(styleId: tx.styleId) {
+    let shadowOff: Float = size * 0.06
+    if shadowOff < 1.0 {
+      shadowOff = 1.0
+    }
+    if shadowOff > 3.0 {
+      shadowOff = 3.0
+    }
+    let shadowAlpha: Int = chain255 * 110 / 255
+    let shadow: Color = { r: 0, g: 0, b: 0, a: shadowAlpha }
+    drawTextWithFont(
+      slot: defaultFontSlot
+      text: txt
+      x: drawX + shadowOff
+      y: drawY + shadowOff
+      fontSize: size
+      spacing: 1.0
+      color: shadow
+    )
   }
   drawTextWithFont(
     slot: defaultFontSlot
