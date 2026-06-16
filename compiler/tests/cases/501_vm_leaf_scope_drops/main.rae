@@ -1,0 +1,155 @@
+# Stage 1 step 5: scope-exit cleanup for bare owned leaf locals.
+#
+# Live-only. Adds OP_DROP_LOCAL emission at block exit and before
+# ret for String / List(T) / Buffer(T) / StringMap(V) / IntMap(V)
+# locals. Reuses the same defer-before-drop ordering and the same
+# move-tracking (`ret <bare-ident>` excludes the slot) as the
+# user-struct path in commit b25efde.
+#
+# Each scenario constructs a leaf, optionally returns it, and we
+# observe end-to-end behaviour (correctness + bounded RSS).
+
+import core
+
+func processRssKb() extern ret Int
+
+# --- Per-leaf-type scope-exit tests. Each scenario allocates the
+# container in a callee; the implicit OP_DROP_LOCAL at scope-exit
+# must release it. The repeated-loop wrapper at the bottom verifies
+# RSS bound.
+func leafString() {
+  let s: String = "leaf-string-payload"
+}
+
+func leafListInt() {
+  let xs: List(Int) = createList(Int, cap: 8)
+}
+
+func leafListString() {
+  let xs: List(String) = createList(String, cap: 4)
+  xs.add(value: "one")
+  xs.add(value: "two")
+}
+
+func leafBuffer() {
+  let b: Buffer(Int) = rae_ext_rae_buf_alloc(size: 8, elemSize: 8)
+}
+
+func leafStringMap() {
+  let m: StringMap(Int) = createStringMap(cap: 4)
+  m.set(key: "k1", value: 10)
+  m.set(key: "k2", value: 20)
+}
+
+func leafIntMap() {
+  let m: IntMap(String) = createIntMap(cap: 4)
+  m.set(key: 1, value: "one")
+  m.set(key: 2, value: "two")
+}
+
+# --- Nested scopes: inner-block leaf cleaned at end of inner;
+# outer-block leaf survives until end of outer. No double-drop.
+func nestedScopes() {
+  let outerS: String = "outer-string"
+  if true {
+    let innerS: String = "inner-string"
+  }
+}
+
+# --- Early return: a non-returned leaf must be cleaned at the
+# `ret`, returned leaf must NOT be cleaned before return.
+func earlyReturnLeaf() ret String {
+  let kept: String = "kept-for-return"
+  let scratch: String = "scratch-dropped-at-ret"
+  if true {
+    ret kept
+  }
+  ret "unreachable"
+}
+
+# --- ret list[index] / ret obj.method() deep-copy pins.
+type Holder {
+  items: List(String)
+}
+
+func makeHolder() ret Holder {
+  let xs: List(String) = createList(String, cap: 4)
+  xs.add(value: "alpha")
+  xs.add(value: "beta")
+  let h: Holder = { items: xs }
+  ret h
+}
+
+# Pin: `ret list[index]` must return an independent copy. The
+# caller's binding survives the callee's scope-exit drop of the
+# whole Holder.
+func retListIndex() ret String {
+  let h: Holder = makeHolder()
+  ret h.items.get(index: 0)
+}
+
+# Pin: `ret obj.method()` likewise — the method-call result is
+# computed onto the stack BEFORE the callee returns, so its heap
+# is independent.
+func sampleMethod() ret String {
+  let payload: String = "method-payload"
+  ret payload
+}
+
+func retObjMethod() ret String {
+  ret sampleMethod()
+}
+
+# --- Repeated-loop memory stability: each iteration constructs +
+# scope-exits each leaf type. RSS must stay bounded.
+func stressIter() {
+  leafString()
+  leafListInt()
+  leafListString()
+  leafBuffer()
+  leafStringMap()
+  leafIntMap()
+}
+
+func main() {
+  # Sanity calls that simply must not crash.
+  leafString()
+  leafListInt()
+  leafListString()
+  leafBuffer()
+  leafStringMap()
+  leafIntMap()
+  nestedScopes()
+  log("leaves_ok=true")
+
+  # Early-return: the returned String must be readable in the
+  # caller, the discarded sibling must be cleaned up at the ret
+  # site.
+  let earlyVal: String = earlyReturnLeaf()
+  log("early_return={earlyVal}")
+
+  # `ret list[index]` pin.
+  let listIdx: String = retListIndex()
+  log("ret_list_index={listIdx}")
+
+  # `ret obj.method()` pin.
+  let methodCall: String = retObjMethod()
+  log("ret_method_call={methodCall}")
+
+  # --- Stress: 2000 iterations exercising every leaf type per
+  # iteration. With scope-exit drops the per-iteration heap is
+  # reclaimed; RSS must plateau. Threshold is generous (4 MB
+  # over 2000 iters) so this catches only "every iteration
+  # leaks every container" regressions.
+  let rssBefore: Int = processRssKb()
+  let i: Int = 0
+  let iters: Int = 2000
+  loop i < iters {
+    stressIter()
+    i = i + 1
+  }
+  let rssAfter: Int = processRssKb()
+  let grew: Int = rssAfter - rssBefore
+  let bounded: Bool = grew < 4096
+  log("stress_bounded={bounded}")
+}

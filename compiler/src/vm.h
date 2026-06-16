@@ -80,7 +80,19 @@ typedef enum {
      to a view/mod reference (e.g. `view Int` param). The explicit
      `=>` bind path keeps OP_BIND_LOCAL so the slot can intentionally
      hold a VAL_REF. */
-  OP_BIND_LOCAL_VALUE = 0x44
+  OP_BIND_LOCAL_VALUE = 0x44,
+
+  /* Stage 1 step 5 — scope-exit cleanup for bare owned leaf locals
+   * (String / List(T) / Buffer(T) / StringMap(V) / IntMap(V)).
+   * Reads the slot, walks one level of VAL_REF if the slot is a
+   * mod-ref, calls value_free on the underlying value, then leaves
+   * the slot in VAL_NONE. Reentrant-safe: a second OP_DROP_LOCAL
+   * on the same slot finds VAL_NONE and no-ops, so a hypothetical
+   * future slot-reuse cannot trip a double-free. Distinct from
+   * native-call-based drops (used for user-struct cascades) so
+   * leaf cleanup stays free of the registry lookup + descriptor
+   * indirection. */
+  OP_DROP_LOCAL = 0x45
 } OpCode;
 
 typedef enum {

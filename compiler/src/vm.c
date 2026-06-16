@@ -548,6 +548,37 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         frame->locals[slot] = value;
         break;
       }
+      case OP_DROP_LOCAL: {
+        /* Stage 1 step 5 — scope-exit cleanup for bare leaf locals.
+         * The slot may hold the value directly (typical) or a
+         * mod-ref into another frame's slot (rare — passed through
+         * `mod` parameter chains). View refs are non-owning so we
+         * never drop through them. After the free, the slot is
+         * VAL_NONE; a second OP_DROP_LOCAL on the same slot is a
+         * safe no-op. */
+        uint32_t slot = read_uint32(vm);
+        CallFrame* frame = vm_current_frame(vm);
+        if (!frame) {
+          diag_error(NULL, 0, 0, "VM local access outside of function");
+          return VM_RUNTIME_ERROR;
+        }
+        if (slot >= 256) {
+          diag_error(NULL, 0, 0, "VM local slot out of range");
+          return VM_RUNTIME_ERROR;
+        }
+        Value* target = &frame->locals[slot];
+        if (target->type == VAL_REF) {
+          if (target->as.ref_value.kind == REF_MOD
+              && target->as.ref_value.target) {
+            value_free(target->as.ref_value.target);
+          }
+          /* The ref itself is non-owning; just clear the slot. */
+          target->type = VAL_NONE;
+        } else {
+          value_free(target);
+        }
+        break;
+      }
       case OP_ALLOC_LOCAL: {
         uint32_t required = read_uint32(vm);
         CallFrame* frame = vm_current_frame(vm);
