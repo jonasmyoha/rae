@@ -631,6 +631,8 @@ void rae_ext_drawCylinder(Vector3 position, double radiusTop, double radiusBotto
 void rae_ext_drawGrid(int64_t slices, double spacing);
 void rae_ext_beginMode3D(Camera3D camera);
 void rae_ext_endMode3D(void);
+void rae_ext_beginMode2D(Camera2D camera);
+void rae_ext_endMode2D(void);
 Color rae_ext_colorFromHSV(double hue, double saturation, double value);
 void rae_ext_takeScreenshot(rae_String fileName);
 Texture rae_ext_loadTexture(rae_String fileName);
