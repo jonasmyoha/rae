@@ -270,12 +270,10 @@ Stop after step 1 if anything in this plan reads wrong.
 | `b25efde` | Wired scope-exit + early-return emission. Move-tracking on `ret <bare-ident>`. Tests 499. |
 | `173678d` | Reassignment cascade (explicit drop before `OP_SET_LOCAL` for user-struct locals) + runtime audit confirming leaf reassignment already cleans up via `value_free` + `value_copy`. Tests 500. |
 | `c5b42b2` | Scope-exit cleanup for bare leaf locals via `OP_DROP_LOCAL` (String, List(T), Buffer(T), StringMap(V), IntMap(V)). Fixed the multiple-return-site move-marker control-flow hazard (the `dropped` flag is no longer poisoned by the move-exclusion branch). Tests 501, 502. |
-| _(this commit)_ | Concrete generic struct specializations. `vm_compile_module` now drives the C backend's `discover_specializations_module` so `ctx->generic_types[]` is populated for the Live VM. `vm_drop_register_for_module` adds Pass 1b that walks the spec list and synthesises FULL/ALIAS descriptors per spec, using `rae_mangle_type_specialized` with the leading `rae_` prefix stripped for the helper key. `type_needs_cascade_drop` and `type_needs_deep_copy` now substitute generic params when recursing. The let-classifier probes the registry directly (instead of running a substitution-blind predicate), so non-generic structs, specs, leaves, and trivial specs all flow through one consistent gate. Tests 503. |
+| `0a3023e` | Concrete generic struct specializations (Live VM side). `vm_compile_module` now drives the C backend's `discover_specializations_module` so `ctx->generic_types[]` is populated for the Live VM. `vm_drop_register_for_module` adds Pass 1b that walks the spec list and synthesises FULL/ALIAS descriptors per spec, using `rae_mangle_type_specialized` with the leading `rae_` prefix stripped for the helper key. `type_needs_cascade_drop` and `type_needs_deep_copy` now substitute generic params when recursing. The let-classifier probes the registry directly (instead of running a substitution-blind predicate), so non-generic structs, specs, leaves, and trivial specs all flow through one consistent gate. Tests 503. |
+| _(this commit)_ | Concrete generic struct specializations on the **C backend** side. Closes the last semantic-equivalence gap: valid Rae source that uses `Wrapper(String)` / `Pair(...)` / similar now cascades identically under both targets. `c_backend.c` adds Pass A' to collect concrete specs from the same `ctx->generic_types[]` list (skipping leaf containers — they have their own per-T `drop(T)` mechanism). Each spec entry shares the existing `StructDropEntry` shape, so the existing body-emission loop (which was already substitution-aware via `gp` + `ga`) emits `rae_drop_struct_<MangledSpec>` and `..._alias` bodies for free. `c_stmt.c` drops its `if (type->generic_args) continue;` bailout so spec-typed locals get their helper called at scope exit. Stdlib generic containers (List / StringMap / IntMap) stay on the `is_drop_target_type` path that calls the user-defined `drop(T)` overload — only USER generic structs go through the new pass. Tests 504 (parity, runs on both targets). |
 
-After this last commit, every classification listed in section C
-of the original plan above is exercised by a Live-only test and
-matches the C backend's runtime behaviour. The "Generic-spec auto-
-collection" caveat that the C backend originally documented at
-`c_backend.c:1236` still applies on the C side; the VM goes
-further and DOES synthesise per-spec drop helpers, which is a
-net structural-drop improvement over the C backend.
+After step 7 the two backends apply structural drop with the same
+gate. The original `c_backend.c:1236` "Generic-spec auto-collection
+intentionally NOT done here" comment is no longer applicable and
+has been replaced by Pass A'.

@@ -112,11 +112,15 @@ That applies even without files, fonts, sockets, or GPU objects.
   `ret`, and before reassignment, in reverse binding order. `ret
   <bare-ident>` moves rather than drops. The C backend has done
   this since Phase 1–3 (May 2026); the Live VM caught up across
-  commits `e31bb9b` → step 6 (see
+  commits `e31bb9b` → step 7 (see
   `docs/structural-drop-stage1-plan.md` for the per-commit
   changelog). Both backends drop bare String/List/Buffer/Map
-  locals, non-generic user structs, and — on the VM side —
-  concrete generic struct specializations the module instantiates.
+  locals, non-generic user structs, and concrete generic struct
+  specializations the module instantiates — the same gate, the
+  same selection, the same FULL/ALIAS variant rules across Live
+  and Compiled. Valid Rae source has backend-equivalent cleanup
+  semantics; switching `--target` cannot change observable
+  ownership behaviour.
 
 **Likely**
 
