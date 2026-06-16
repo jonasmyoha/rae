@@ -25,6 +25,21 @@ type Camera3D: c_struct {
   projection: Int
 }
 
+# Camera2D — raylib's 2D view transform. Wrap a render call in
+# `beginMode2D(cam)` / `endMode2D()` to apply zoom + translation +
+# rotation to every draw inside. Royal Blush uses this to fit a
+# 1080×2280 logical canvas into a 540×1170 window via zoom=0.5.
+#
+# `zoom` should be 1.0 for no scaling. `offset` is the screen-space
+# pivot (target maps to this point). `target` is the world-space
+# point the camera centers on. `rotation` is degrees.
+type Camera2D: c_struct {
+  offset: Vector2
+  target: Vector2
+  rotation: Float
+  zoom: Float
+}
+
 type Texture: c_struct {
   id: Int
   width: Int
@@ -252,6 +267,10 @@ func drawGrid(slices: Int, spacing: Float) extern
 func beginMode3D(camera: Camera3D) extern
 
 func endMode3D() extern
+
+func beginMode2D(camera: Camera2D) extern
+
+func endMode2D() extern
 
 func setTargetFPS(fps: Int) extern
 
