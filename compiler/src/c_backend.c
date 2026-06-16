@@ -1233,14 +1233,65 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, tr);
     drop_entries[drop_entry_count++] = (StructDropEntry){.decl = d, .type_ref = tr, .mangled = mangled};
   }
-  // (Generic-spec auto-collection is intentionally NOT done here.
-  // Synthesised `drop_struct` for generic-template structs trips the
-  // mangler on certain instantiations [JsonValue / AnimState in a
-  // ComponentTable]; landing it needs deeper changes. The user-
-  // visible workaround is writing an explicit `drop(T)(this: mod
-  // YourGeneric(T))` overload in stdlib, mirroring the one for
-  // `List(T)` in lib/core.rae — Pass C's field dispatch finds those
-  // automatically.)
+  // Pass A' — concrete generic struct specializations from
+  // ctx->generic_types[] (populated by discover_specializations_module).
+  // Closes Stage 1's last gap: backend-dependent cleanup for valid
+  // Rae code (the Live VM already cascades these via vm_drop.c since
+  // commit 0a3023e; the C backend used to skip them, leaking the
+  // inner heap on locals of type `Wrapper(String)` / `Pair(String,
+  // List(String))` / etc.).
+  //
+  // Selection mirrors vm_drop's Pass 1b:
+  //   * skip leaf containers (List/StringMap/IntMap/Buffer/Box/Opt)
+  //     — they have their own per-T drop overload mechanism that
+  //     Pass C's field dispatch wires up.
+  //   * skip c_struct
+  //   * require the template to be a user generic struct
+  //   * require the SUBSTITUTED fields to cascade (avoids emitting
+  //     a helper for `Wrapper(Int)` whose only field is a primitive).
+  //   * dedup by mangled name to handle duplicate AstTypeRef
+  //     entries surfacing the same spec.
+  for (size_t gi = 0;
+       gi < ctx->generic_type_count && drop_entry_count < 512;
+       gi++) {
+    const AstTypeRef* gt = ctx->generic_types[gi];
+    if (!gt || gt->is_view || gt->is_mod) continue;
+    if (!gt->generic_args) continue;
+    Str gb = get_base_type_name(gt);
+    if (str_eq_cstr(gb, "List")
+        || str_eq_cstr(gb, "StringMap")
+        || str_eq_cstr(gb, "IntMap")
+        || str_eq_cstr(gb, "Buffer")
+        || str_eq_cstr(gb, "Box")
+        || str_eq_cstr(gb, "Opt")) continue;
+    const AstDecl* tdecl = NULL;
+    for (size_t k = 0; k < ctx->all_decl_count; k++) {
+      const AstDecl* d = ctx->all_decls[k];
+      if (d->kind != AST_DECL_TYPE) continue;
+      if (d->as.type_decl.specialization_args) continue;
+      if (!str_eq(d->as.type_decl.name, gb)) continue;
+      tdecl = d;
+      break;
+    }
+    if (!tdecl
+        || !tdecl->as.type_decl.generic_params
+        || has_property(tdecl->as.type_decl.properties, "c_struct")) continue;
+    if (!type_needs_cascade_drop(ctx, module, (AstTypeRef*)gt, 0)) continue;
+    const char* mangled =
+        rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)gt);
+    if (!mangled) continue;
+    bool seen = false;
+    for (size_t k = 0; k < drop_entry_count; k++) {
+      if (drop_entries[k].mangled
+          && strcmp(drop_entries[k].mangled, mangled) == 0) {
+        seen = true; break;
+      }
+    }
+    if (seen) continue;
+    drop_entries[drop_entry_count++] = (StructDropEntry){
+      .decl = tdecl, .type_ref = gt, .mangled = mangled,
+    };
+  }
   // Forward declarations — each struct drop AND each container-drop
   // we plan to call from the bodies. The container-drop forward
   // decls also register the specialisations so the iterative spec-
