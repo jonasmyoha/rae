@@ -100,6 +100,7 @@ func main() {
   # curated subset and stems that aren't in the catalog any more
   # are dropped silently.
   appState.library = loadLibraryFromJson(albums: appState.albums, path: libraryFilePath)
+  appState.liked = loadDefaultLiked()
 
   # Clamp window height now that restoreAppState has moved the
   # window to its persisted position. macOS silently clamps any
@@ -471,7 +472,7 @@ func main() {
       # match the current `elapsedSec / durationSec` so the first
       # frame of the rebuilt world doesn't flash an empty bar before
       # the inner-loop's per-frame `applyPlaybackToWorld` kicks in.
-      applyPlaybackToWorld(world: world, state: playback)
+      applyOverlaysToWorld(world: world, playback: playback, state: appState)
 
       # Pick up the destination half of an in-flight transition: the
       # previous world wrote pendingDst=true and stashed the source
@@ -725,7 +726,7 @@ func main() {
             }
           }
           if applyPlaybackFrame {
-            applyPlaybackToWorld(world: world, state: playback)
+            applyOverlaysToWorld(world: world, playback: playback, state: appState)
           }
           # If a transition was armed by the outer rebuild, this is
           # the first frame that will draw it — start the clock here
