@@ -1,0 +1,324 @@
+# Playlists — ordered curation lists of (albumStem, trackIndex) refs.
+#
+# Mirrors the existing `library_data` shape (JSON on disk, JSON parser
+# from lib/json, write-whole-file persistence). The only built-in
+# playlist for now is "Liked Songs" — the heart button on the mini-
+# player + now-playing screen toggles the currently-browsed track in
+# this list and persists.
+#
+# Schema (`assets/playlists/liked.json` ships the default):
+#
+#   {
+#     "id": "liked",
+#     "title": "Liked Songs",
+#     "tracks": [
+#       { "albumStem": "mitski-puberty", "trackIndex": 2 },
+#       ...
+#     ]
+#   }
+#
+# Two locations on disk:
+#   * `assets/playlists/<id>.json`  — read-only default ships with code.
+#   * `temp/playlists/<id>.json`    — user-mutated state, gitignored.
+#                                     loaded first; falls back to the
+#                                     asset if missing.
+
+import core
+import json
+import fs
+import sys
+import ui/components
+import ui/ecs
+
+let playlistsTempDir: String = "examples/98_mobile_ui/temp/playlists"
+let playlistsAssetDir: String = "examples/98_mobile_ui/assets/playlists"
+
+type PlaylistTrack pub {
+  albumStem: String
+  trackIndex: Int
+}
+
+type Playlist pub {
+  id: String
+  title: String
+  tracks: List(PlaylistTrack)
+}
+
+func createPlaylist(id: own String, title: own String) pub ret Playlist {
+  ret Playlist {
+    id: own id
+    title: own title
+    tracks: createList(PlaylistTrack, cap: 8)
+  }
+}
+
+# Return the index of the (stem, trackIndex) pair in `tracks`, or -1
+# if absent. Linear scan; even a heavy Liked playlist is small enough.
+func playlistFindTrack(playlist: view Playlist, stem: view String, trackIndex: view Int) pub ret Int {
+  let n: Int = playlist.tracks.length
+  let i: Int = 0
+  loop i < n {
+    let t: PlaylistTrack = rae_ext_rae_buf_get(buf: playlist.tracks.data, index: i)
+    if t.trackIndex is trackIndex {
+      if t.albumStem.equals(other: stem) {
+        ret i
+      }
+    }
+    i = i + 1
+  }
+  ret -1
+}
+
+func playlistContains(playlist: view Playlist, stem: view String, trackIndex: view Int) pub ret Bool {
+  ret playlistFindTrack(playlist: playlist, stem: stem, trackIndex: trackIndex) >= 0
+}
+
+# Toggle a track's membership. Returns `true` when the track is now
+# present (was added), `false` when it was removed.
+func playlistToggleTrack(playlist: mod Playlist, stem: view String, trackIndex: view Int) pub ret Bool {
+  let existing: Int = playlistFindTrack(playlist: playlist, stem: stem, trackIndex: trackIndex)
+  if existing >= 0 {
+    playlist.tracks.remove(index: existing)
+    ret false
+  }
+  let copiedStem: String = "{stem}"
+  let entry: PlaylistTrack = {
+    albumStem: own copiedStem
+    trackIndex: trackIndex
+  }
+  playlist.tracks.add(value: own entry)
+  ret true
+}
+
+# Path the user-mutable copy lives at.
+func playlistTempPath(id: view String) pub ret String {
+  let suffix: String = ".json"
+  ret "{playlistsTempDir}/{id}{suffix}"
+}
+
+# Default-ship asset path.
+func playlistAssetPath(id: view String) pub ret String {
+  let suffix: String = ".json"
+  ret "{playlistsAssetDir}/{id}{suffix}"
+}
+
+# Parse a single Playlist from its JSON source. Returns an empty
+# playlist (with the requested id) if parsing fails — callers can
+# treat a parse error the same as "fresh user state".
+func parsePlaylist(source: view String, id: view String) pub ret Playlist {
+  let doc: JsonDoc = parseJson(source: source)
+  let fallbackTitle: String = "Playlist"
+  if doc.ok is false {
+    log("[playlist] parse error in '{id}' at byte {doc.errorPos}")
+    let copiedId: String = "{id}"
+    ret createPlaylist(id: own copiedId, title: own fallbackTitle)
+  }
+  let root: JsonValue = jsonRoot(doc: doc)
+  let titleKey: String = "title"
+  let titleIdx: Int = jsonField(doc: doc, this: root, key: titleKey)
+  let titleVal: JsonValue = jsonValueAt(doc: doc, idx: titleIdx)
+  let title: String = jsonString(this: titleVal, fallback: fallbackTitle)
+
+  let copiedId: String = "{id}"
+  let pl: Playlist = createPlaylist(id: own copiedId, title: own title)
+
+  let tracksKey: String = "tracks"
+  let tracksIdx: Int = jsonField(doc: doc, this: root, key: tracksKey)
+  if tracksIdx < 0 {
+    ret pl
+  }
+  let tracksVal: JsonValue = jsonValueAt(doc: doc, idx: tracksIdx)
+  let n: Int = jsonArrayLen(this: tracksVal)
+  let i: Int = 0
+  loop i < n {
+    let entry: JsonValue = jsonArrayAt(doc: doc, this: tracksVal, idx: i)
+    let stemKey: String = "albumStem"
+    let stemFieldIdx: Int = jsonField(doc: doc, this: entry, key: stemKey)
+    let stemVal: JsonValue = jsonValueAt(doc: doc, idx: stemFieldIdx)
+    let emptyStem: String = ""
+    let stem: String = jsonString(this: stemVal, fallback: emptyStem)
+    let idxKey: String = "trackIndex"
+    let idxFieldIdx: Int = jsonField(doc: doc, this: entry, key: idxKey)
+    let idxVal: JsonValue = jsonValueAt(doc: doc, idx: idxFieldIdx)
+    let ti: Int = jsonInt(this: idxVal, fallback: 0)
+    if stem.length() > 0 {
+      let copiedStem: String = "{stem}"
+      let pt: PlaylistTrack = {
+        albumStem: own copiedStem
+        trackIndex: ti
+      }
+      pl.tracks.add(value: own pt)
+    }
+    i = i + 1
+  }
+  ret pl
+}
+
+# Load a playlist by id. Prefers the user-mutable copy under temp/;
+# falls back to the read-only asset default; finally creates an empty
+# one with the given title if neither exists. Same shape as
+# `loadLibraryFromJson` in library_data.rae.
+func loadPlaylist(id: view String, defaultTitle: view String) pub ret Playlist {
+  let tempPath: String = playlistTempPath(id: id)
+  let tempSource: String = rae_ext_rae_sys_read_file(path: tempPath)
+  if tempSource.length() > 0 {
+    log("[playlist] restored '{id}' from {tempPath}")
+    ret parsePlaylist(source: tempSource, id: id)
+  }
+  let assetPath: String = playlistAssetPath(id: id)
+  let assetSource: String = rae_ext_rae_sys_read_file(path: assetPath)
+  if assetSource.length() > 0 {
+    log("[playlist] using ship default for '{id}' at {assetPath}")
+    ret parsePlaylist(source: assetSource, id: id)
+  }
+  log("[playlist] no asset or temp for '{id}' — starting empty")
+  let copiedId: String = "{id}"
+  let copiedTitle: String = "{defaultTitle}"
+  ret createPlaylist(id: own copiedId, title: own copiedTitle)
+}
+
+# Convenience: load the canonical "Liked Songs" playlist. Same
+# id/title as the shipped asset default. Wraps `loadPlaylist` so
+# main.rae's boot block stays one line.
+func loadDefaultLiked() pub ret Playlist {
+  let id: String = "liked"
+  let title: String = "Liked Songs"
+  ret loadPlaylist(id: id, defaultTitle: title)
+}
+
+# Persist `playlist` to its user-mutable temp path. Hand-rolled JSON
+# emit — mirrors `saveLibraryToJson` / `saveHistoryToJson`. The schema
+# is small enough that a generic serialiser would be more code.
+func savePlaylist(playlist: view Playlist) pub {
+  makeDir(path: playlistsTempDir)
+  let path: String = playlistTempPath(id: playlist.id)
+  let openBrace: String = "\u{007B}"
+  let closeBrace: String = "\u{007D}"
+  let openBracket: String = "["
+  let closeBracket: String = "]"
+  let nl: String = "\n"
+  let q: String = "\""
+  let colon: String = ":"
+  let comma: String = ","
+
+  let content: String = ""
+  content = content.concat(other: openBrace).concat(other: nl)
+  content = content.concat(other: "  ").concat(other: q).concat(other: "id").concat(other: q)
+  content = content.concat(other: colon).concat(other: " ").concat(other: q).concat(other: playlist.id).concat(other: q).concat(other: comma).concat(other: nl)
+  content = content.concat(other: "  ").concat(other: q).concat(other: "title").concat(other: q)
+  content = content.concat(other: colon).concat(other: " ").concat(other: q).concat(other: playlist.title).concat(other: q).concat(other: comma).concat(other: nl)
+  content = content.concat(other: "  ").concat(other: q).concat(other: "tracks").concat(other: q)
+  content = content.concat(other: colon).concat(other: " ").concat(other: openBracket).concat(other: nl)
+  let n: Int = playlist.tracks.length
+  let i: Int = 0
+  loop i < n {
+    let t: PlaylistTrack = rae_ext_rae_buf_get(buf: playlist.tracks.data, index: i)
+    content = content.concat(other: "    ").concat(other: openBrace).concat(other: " ")
+    content = content.concat(other: q).concat(other: "albumStem").concat(other: q).concat(other: colon).concat(other: " ")
+    content = content.concat(other: q).concat(other: t.albumStem).concat(other: q).concat(other: comma).concat(other: " ")
+    content = content.concat(other: q).concat(other: "trackIndex").concat(other: q).concat(other: colon).concat(other: " ")
+    content = content.concat(other: "{t.trackIndex}").concat(other: " ").concat(other: closeBrace)
+    if i < n - 1 {
+      content = content.concat(other: comma)
+    }
+    content = content.concat(other: nl)
+    i = i + 1
+  }
+  content = content.concat(other: "  ").concat(other: closeBracket).concat(other: nl)
+  content = content.concat(other: closeBrace).concat(other: nl)
+  let ok: Bool = rae_ext_rae_sys_write_file(path: path, content: content)
+  if ok is false {
+    log("[playlist] save failed: {path}")
+  }
+}
+
+# Update both heart buttons (mini-player + now-playing) in `world`
+# to reflect the liked state of the currently-browsed track. Called
+# once per frame from main.rae's inner loop after dispatchActions
+# (the same place applyPlaybackToWorld runs). Cheap: two component
+# lookups + a couple of writes; no allocations.
+#
+# When the track is in `liked`:
+#   * sprite swaps to `mat:favorite` (filled glyph)
+#   * tint goes to a warm coral (`{r:250,g:80,b:110,a:255}`)
+# When not liked:
+#   * sprite reverts to `mat:favorite_border` (outline glyph)
+#   * tint reverts to the scene's authored colour (best approximation
+#     is white at full alpha — the renderer multiplies by the
+#     entity's Active/Opacity chain anyway).
+#
+# The currently-browsed track is `stem` + `trackIndex`. Pass empty
+# stem to skip (e.g. before any user navigation).
+func applyLikedToWorld(
+  world: mod UiWorld
+  liked: view Playlist
+  stem: view String
+  trackIndex: view Int
+) pub {
+  if stem.length() is 0 {
+    ret
+  }
+  let isLiked: Bool = playlistContains(playlist: liked, stem: stem, trackIndex: trackIndex)
+  # Warm coral / Spotify-ish like-red. Visibly distinct from the
+  # accentText / textPrimary the scenes author the outline heart in.
+  let likedTint: RgbaColor = { r: 250, g: 80, b: 110, a: 255 }
+  let unlikedTint: RgbaColor = { r: 255, g: 255, b: 255, a: 255 }
+  let nowPlayingPage: String = playerPageId
+  let nowPlayingNode: String = "HeartBtn"
+  applyLikedHeart(
+    world: world
+    pageId: nowPlayingPage
+    nodeId: nowPlayingNode
+    isLiked: isLiked
+    likedTint: likedTint
+    unlikedTint: unlikedTint
+  )
+  let miniPage: String = miniPlayerPageId
+  let miniNode: String = "MiniHeartBtn"
+  applyLikedHeart(
+    world: world
+    pageId: miniPage
+    nodeId: miniNode
+    isLiked: isLiked
+    likedTint: likedTint
+    unlikedTint: unlikedTint
+  )
+}
+
+# Per-frame fan-out: apply both the playback overlay (icons +
+# progress fill) and the liked-heart overlay in one call so main.rae's
+# render loop has a single per-frame line instead of two parallel ones.
+func applyOverlaysToWorld(world: mod UiWorld, playback: view PlaybackState, state: view AppState) pub {
+  applyPlaybackToWorld(world: world, state: playback)
+  applyLikedToWorld(world: world, liked: state.liked, stem: state.currentAlbumStem, trackIndex: state.currentTrackIndex)
+}
+
+# Per-page heart updater — shared between the two heart locations.
+# Skips silently when the page or node isn't mounted (e.g. the user
+# isn't currently looking at the now-playing screen).
+func applyLikedHeart(
+  world: mod UiWorld
+  pageId: view String
+  nodeId: view String
+  isLiked: view Bool
+  likedTint: view RgbaColor
+  unlikedTint: view RgbaColor
+) {
+  let entityOpt: opt Int = findNodeInPage(world: world, pageId: pageId, nodeId: nodeId)
+  if entityOpt is none {
+    ret
+  }
+  let raw: Int = entityOpt
+  let entity: EntityId = entityId(v: raw)
+  if componentHas(this: world.sprites, entity: entity) is false {
+    ret
+  }
+  let sp: mod Sprite => componentMod(this: world.sprites, entity: entity)
+  if isLiked {
+    sp.textureKey = "mat:favorite"
+    sp.tint = likedTint
+  } else {
+    sp.textureKey = "mat:favorite_border"
+    sp.tint = unlikedTint
+  }
+}
