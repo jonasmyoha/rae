@@ -606,8 +606,22 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                 Str name = f->value->as.ident;
                 for (size_t li = 0; li < ctx->func_first_let_idx; li++) {
                     if (str_eq(ctx->locals[li], name)) {
-                        int n = rae_func_count_param_refs(ctx->func_decl, name);
-                        if (n == 1) rhs_is_param_ident = true;
+                        /* Stage 3a — the move-when-safe path is only safe
+                         * for OWNING parameters. A `view T` / `mod T`
+                         * param is a borrow; the caller still owns the
+                         * underlying heap, so transferring it into the
+                         * field would cause a double-free at the
+                         * caller's scope-exit (see the mobile UI
+                         * `setText(text: view String)` repro). Restrict
+                         * the move to params whose declared type has
+                         * NO view/mod modifier. */
+                        const AstTypeRef* ptr = ctx->local_type_refs[li];
+                        bool is_owning_param =
+                            ptr && !ptr->is_view && !ptr->is_mod;
+                        if (is_owning_param) {
+                            int n = rae_func_count_param_refs(ctx->func_decl, name);
+                            if (n == 1) rhs_is_param_ident = true;
+                        }
                         break;
                     }
                 }
