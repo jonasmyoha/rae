@@ -292,6 +292,12 @@ type AppState pub {
   # missing from this list still exist (covers + metadata) but are
   # hidden from Home / Library views. See `library_data.rae`.
   library: List(String)
+  # The user's "Liked Songs" playlist. Just an ordered list of
+  # (albumStem, trackIndex) pairs the heart button toggles. The
+  # ship default lives at assets/playlists/liked.json; user
+  # mutations land in temp/playlists/liked.json. See
+  # `playlist_data.rae`.
+  liked: Playlist
   # iOS-style action sheet — opened by the three-dots button on
   # track rows / album pages. See `bottom_sheet.rae`. Not persisted
   # across launches; defaults to invisible.
@@ -315,6 +321,9 @@ func createAppState(albums: own List(Album)) pub ret AppState {
   # Start with an empty library — main.rae's restoreLibrary call
   # seeds it from the catalog on first launch or rebuilds from disk
   # on subsequent ones.
+  let likedId: String = "liked"
+  let likedTitle: String = "Liked Songs"
+  let liked: Playlist = createPlaylist(id: own likedId, title: own likedTitle)
   ret AppState {
     albums: albums
     currentAlbumStem: firstStem
@@ -323,6 +332,7 @@ func createAppState(albums: own List(Album)) pub ret AppState {
     subPageStack: createList(Int, cap: 4)
     playHistory: createPlayHistory(cap: 100)
     library: createList(String, cap: 8)
+    liked: own liked
     bottomSheet: createBottomSheetState()
     settings: createAppSettings()
   }
@@ -459,6 +469,7 @@ func dispatchActions(
     let sheetDismissKey: String = "sheet.dismiss"
     let sheetCancelKey: String = "sheet.cancel"
     let libraryRemoveKey: String = "library.remove"
+    let playbackLikeKey: String = "playback.like"
     # `spotifyEnabled` is passed in from main.rae (lives on the
     # long-lived SpotifyState) so both sides agree on the source of
     # truth. ON by default; disabled by RAE_UI_NO_SPOTIFY=1 at boot.
@@ -649,6 +660,25 @@ func dispatchActions(
     }
     if actionId.equals(other: sheetCancelKey) {
       closeBottomSheet(sheet: state.bottomSheet)
+    }
+    if actionId.equals(other: playbackLikeKey) {
+      # Heart button on mini-player + now-playing screen. Toggle the
+      # browsed track (state.currentAlbumStem + currentTrackIndex —
+      # what the user is staring at, not necessarily what's audibly
+      # playing) in the Liked Songs playlist and persist immediately.
+      # `applyLikedToWorld` (called per frame from main.rae) re-reads
+      # the membership and updates the heart sprite + tint, so the
+      # next frame's visual reflects the new state.
+      let stem: view String => state.currentAlbumStem
+      if stem.length() > 0 {
+        let added: Bool = playlistToggleTrack(playlist: state.liked, stem: stem, trackIndex: state.currentTrackIndex)
+        if added {
+          log("[liked] +{stem} track {state.currentTrackIndex}")
+        } else {
+          log("[liked] -{stem} track {state.currentTrackIndex}")
+        }
+        savePlaylist(playlist: state.liked)
+      }
     }
     if actionId.equals(other: libraryRemoveKey) {
       # Remove the active album from the curated library + persist.
