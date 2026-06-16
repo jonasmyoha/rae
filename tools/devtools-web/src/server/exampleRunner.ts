@@ -236,10 +236,10 @@ export class ExampleRunner {
 
   async stop(): Promise<void> {
     if (!this.activeRun) return;
-    
+
     const run = this.activeRun;
     const pid = run.process.pid;
-    
+
     if (!pid) {
       this.activeRun = null;
       return;
@@ -247,37 +247,60 @@ export class ExampleRunner {
 
     run.stopRequested = true;
 
+    // Belt-and-braces kill helper. The example may run under
+    // `shell: true` + `detached: true`, which makes pid both the
+    // shell pid AND the pgid leader. Most of the time the shell
+    // exec()s into the example (so pid IS the example), but the
+    // grandchild case (and orphaned-supervisor case after a window
+    // close) means we may need to send to both the direct pid and
+    // the pgid to be sure.
+    const sendSignal = (sig: NodeJS.Signals): void => {
+      try { process.kill(pid, sig); } catch (_) { /* gone */ }
+      try { process.kill(-pid, sig); } catch (_) { /* group gone */ }
+    };
+
     return new Promise<void>((resolve) => {
-      const timeout = setTimeout(() => {
+      const finish = () => {
+        clearTimeout(escalate);
+        clearTimeout(giveup);
+        this.activeRun = null;
+        resolve();
+      };
+
+      // Escalate to SIGKILL if the polite SIGTERM didn't take in
+      // 1.5 s. With our `rae watch` supervisor that handles
+      // SIGTERM cleanly, we normally never reach the escalation.
+      const escalate = setTimeout(() => {
         try {
           if (os.platform() === "win32") {
             spawn("taskkill", ["/pid", pid.toString(), "/f", "/t"]);
           } else {
-            process.kill(-pid, "SIGKILL");
+            sendSignal("SIGKILL");
           }
-        } catch (e) {
-          // ignore
-        }
-      }, 3000);
+        } catch (_) { /* ignore */ }
+      }, 1500);
 
-      run.process.on("close", () => {
-        clearTimeout(timeout);
-        this.activeRun = null;
-        resolve();
-      });
+      // Final give-up: in case the OS still hasn't reaped the
+      // process for some reason, don't hang the request forever.
+      const giveup = setTimeout(finish, 5000);
+
+      run.process.on("close", finish);
 
       try {
         if (os.platform() === "win32") {
           spawn("taskkill", ["/pid", pid.toString(), "/t"]);
         } else {
-          // Kill the entire process group
-          process.kill(-pid, "SIGINT");
+          // SIGTERM (not SIGINT) is the canonical "you should exit"
+          // signal — supervisors and apps both handle it, and it
+          // travels cleanly through shells. SIGINT can be eaten by
+          // foreground-group quirks. Send to both the direct pid
+          // (catches the orphaned-supervisor case where pgid lookup
+          // can fail) and to the pgid (catches the grandchild case).
+          sendSignal("SIGTERM");
         }
       } catch (error) {
-        console.warn("[examples] Failed to kill process group", error);
-        clearTimeout(timeout);
-        this.activeRun = null;
-        resolve();
+        console.warn("[examples] Failed to deliver SIGTERM", error);
+        finish();
       }
     });
   }
