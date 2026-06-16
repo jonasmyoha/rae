@@ -8,6 +8,7 @@
 #include "c_backend.h"
 #include "c_backend_internal.h"
 #include "mangler.h"
+#include "ownership.h"
 #include "sema.h"
 #include "str.h"
 
@@ -20,116 +21,11 @@ static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static bool emit_match(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 
-// Stage 2 of scope-exit dealloc (see docs/scope-exit-dealloc.md).
-// Predicate: is the type something whose owning binding should
-// trigger a `drop()` call when it goes out of scope? Today this is
-// just the heap-owning stdlib containers; Stage 5 will extend it to
-// user structs that contain heap-owning fields.
-//
-// Public via c_backend_internal.h so the discovery pass can pre-
-// register the matching drop specialisation. If we only registered
-// during the emit pass, the drop specialisation would land in the
-// output AFTER its first call site (specialised functions are emitted
-// before the regular functions that use them), and the C compiler
-// would warn about an implicit declaration.
-bool is_drop_target_type(const AstTypeRef* type);
+// Ownership classifiers (is_drop_target_type, type_owns_heap_storage,
+// type_needs_cascade_drop, type_needs_deep_copy) moved to
+// `ownership.{c,h}` so the Live VM emitter can share them with the C
+// backend. Behaviour preserved exactly — see Stage 1 plan.
 const AstFuncDecl* find_drop_overload_for(CFuncContext* ctx, Str container_base);
-
-bool is_drop_target_type(const AstTypeRef* type) {
-  if (!type) return false;
-  // Borrows don't own — they're someone else's value.
-  if (type->is_view || type->is_mod) return false;
-  Str base = get_base_type_name(type);
-  if (str_eq_cstr(base, "List")) return true;
-  if (str_eq_cstr(base, "StringMap")) return true;
-  if (str_eq_cstr(base, "IntMap")) return true;
-  return false;
-}
-
-// Layer 5 (docs/scope-exit-dealloc.md) — does the type transitively
-// own heap storage? A type owns heap if:
-//   - it's a leaf heap-owning stdlib container (is_drop_target_type),
-//   - or it's a user-defined struct with at least one field whose
-//     type owns heap.
-// `depth` guards against runaway recursion if the type graph ever
-// has a cycle (Rae structs are value types so this shouldn't happen,
-// but the cap is cheap insurance).
-// "Strict" heap-ownership: true only when the type transitively owns
-// container heap (List / StringMap / IntMap), not when its only heap
-// connection is a String field. Used by the local auto-drop pass to
-// avoid double-frees on the by-value-return-shallow-alias pattern —
-// e.g. `let r: JsonValue = jsonRoot(d)` shallow-copies asString.data
-// out of the doc's list, so freeing it on `r`'s scope exit would
-// double-free with the eventual drop of the JsonDoc list.
-//
-// The looser predicate `type_has_drop_target_field` (below) is true
-// when a String field is present and drives cascade emission inside
-// already-firing struct/element drops, where the ownership chain is
-// unambiguous (the container owns its elements).
-bool type_owns_heap_storage(CompilerContext* cctx, const AstModule* module,
-                            const AstTypeRef* type, int depth) {
-  if (!type || depth > 32) return false;
-  if (type->is_view || type->is_mod) return false;
-  if (is_drop_target_type(type)) return true;
-  Str base = get_base_type_name(type);
-  // c_struct (raylib Color / Vector2 / etc.) and primitives never
-  // own Rae-allocated heap storage.
-  const AstDecl* d = find_type_decl(NULL, module, base);
-  if (!d || d->kind != AST_DECL_TYPE) return false;
-  if (has_property(d->as.type_decl.properties, "c_struct")) return false;
-  for (const AstTypeField* f = d->as.type_decl.fields; f; f = f->next) {
-    if (type_owns_heap_storage(cctx, module, f->type, depth + 1)) return true;
-  }
-  return false;
-}
-
-// Permissive variant for cascade-drop sites — also true when a field
-// is a String or when any nested field is a String. Used by Layer 5
-// struct drop synthesis, List/Map element drop synthesis, and (since
-// Phase 3) the local auto-drop pass. The alias-safety gate moved to
-// `local_struct_owns_heap` in emit_implicit_drops_for_body so this
-// predicate can stay purely structural.
-bool type_needs_cascade_drop(CompilerContext* cctx, const AstModule* module,
-                             const AstTypeRef* type, int depth) {
-  if (!type || depth > 32) return false;
-  if (type->is_view || type->is_mod) return false;
-  if (is_drop_target_type(type)) return true;
-  Str base = get_base_type_name(type);
-  if (str_eq_cstr(base, "String")) return true;
-  const AstDecl* d = find_type_decl(NULL, module, base);
-  if (!d || d->kind != AST_DECL_TYPE) return false;
-  if (has_property(d->as.type_decl.properties, "c_struct")) return false;
-  for (const AstTypeField* f = d->as.type_decl.fields; f; f = f->next) {
-    if (type_needs_cascade_drop(cctx, module, f->type, depth + 1)) return true;
-  }
-  return false;
-}
-
-// Deep-copy classifier — see header. Structurally identical to
-// `type_needs_cascade_drop` but kept as a separate function so the two
-// concerns can diverge as the language evolves (e.g. a future hashtable
-// type might own heap but be intentionally non-copyable, in which case
-// it would stay true for cascade-drop but become false for deep-copy).
-//
-// Today the predicates agree on every type we ship.
-bool type_needs_deep_copy(CompilerContext* cctx, const AstModule* module,
-                          const AstTypeRef* type, int depth) {
-  if (!type || depth > 32) return false;
-  if (type->is_view || type->is_mod) return false;
-  if (is_drop_target_type(type)) return true;
-  Str base = get_base_type_name(type);
-  if (str_eq_cstr(base, "String")) return true;
-  // Any / RaeAny is an opaque box — shallow assignment is fine because
-  // the heap (if any) is reference-counted at the value level.
-  if (str_eq_cstr(base, "Any") || str_eq_cstr(base, "RaeAny")) return false;
-  const AstDecl* d = find_type_decl(NULL, module, base);
-  if (!d || d->kind != AST_DECL_TYPE) return false;
-  if (has_property(d->as.type_decl.properties, "c_struct")) return false;
-  for (const AstTypeField* f = d->as.type_decl.fields; f; f = f->next) {
-    if (type_needs_deep_copy(cctx, module, f->type, depth + 1)) return true;
-  }
-  return false;
-}
 
 // Locate the `drop` generic-function overload whose receiver type's
 // base name matches `container_base` ("List" / "StringMap" / "IntMap").
