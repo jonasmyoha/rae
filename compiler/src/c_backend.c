@@ -1242,7 +1242,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   // List(String))` / etc.).
   //
   // Selection mirrors vm_drop's Pass 1b:
-  //   * skip leaf containers (List/StringMap/IntMap/Buffer/Box/Opt)
+  //   * skip leaf containers (List/StringMap/IntMap/Buffer/Opt)
   //     — they have their own per-T drop overload mechanism that
   //     Pass C's field dispatch wires up.
   //   * skip c_struct
@@ -1251,6 +1251,11 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   //     a helper for `Wrapper(Int)` whose only field is a primitive).
   //   * dedup by mangled name to handle duplicate AstTypeRef
   //     entries surfacing the same spec.
+  //
+  // `Box(T)` used to be on the skip list as if it were a stdlib leaf
+  // container, but it isn't — there's no built-in Box and no per-T
+  // `drop(Box(T))` overload. Treating it as a regular user struct
+  // means `Box(String)` correctly gets a synthesised cascade drop.
   for (size_t gi = 0;
        gi < ctx->generic_type_count && drop_entry_count < 512;
        gi++) {
@@ -1262,7 +1267,6 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
         || str_eq_cstr(gb, "StringMap")
         || str_eq_cstr(gb, "IntMap")
         || str_eq_cstr(gb, "Buffer")
-        || str_eq_cstr(gb, "Box")
         || str_eq_cstr(gb, "Opt")) continue;
     const AstDecl* tdecl = NULL;
     for (size_t k = 0; k < ctx->all_decl_count; k++) {
