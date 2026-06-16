@@ -1,0 +1,93 @@
+# Stage 1 step 7: parity test for concrete generic struct
+# specialization drops across BOTH backends.
+#
+# Runs in Live AND compiled. Confirms that both backends cascade-
+# clean locals typed as concrete generic struct specs — Wrapper(String),
+# Pair(String, List(String)), Wrapper(Inner) — under repeated
+# construction and scope exit.
+#
+# Pre-step-7, the C backend explicitly skipped Pass A spec
+# synthesis (commented "Generic-spec auto-collection is
+# intentionally NOT done here") and c_stmt.c bailed out for
+# spec-typed locals with `if (type->generic_args) continue;`.
+# That made `Wrapper(String)` locals leak in compiled mode while
+# the Live VM cleaned them up — a real backend-divergent
+# semantic on valid Rae code. Step 7 added the C-side Pass A'
+# in c_backend.c and removed the spec bailout in c_stmt.c, so
+# the same source now cascade-cleans under either target.
+#
+# Calibration: each scenario constructs three spec-typed locals.
+# Each carries a 256-byte interpolated payload string. Over 5000
+# iterations a non-fix would leak roughly 5000 × ~1 KB ≈ 5 MB of
+# heap. The threshold (1024 KB) sits well below that floor but
+# above realistic allocator slack, so the assertion discriminates.
+
+import core
+import sys
+
+type Wrapper(T: type) {
+  value: T
+}
+
+type Pair(A: type, B: type) {
+  first: A
+  second: B
+}
+
+type Inner {
+  label: String
+}
+
+# Build a ~256-byte string via concatenation so the leak is visible
+# in RSS even at small iteration counts. log() and string ops both
+# pin the resulting bytes in `chars`, so a missing cascade drop
+# leaves real heap behind.
+func bigString(seed: view Int) ret String {
+  let base: String = "this-is-a-fairly-long-payload-string-meant-to-exceed-allocator-slack-thresholds-when-leaked"
+  let mid: String = "{base}-x{seed}-{base}"
+  ret mid
+}
+
+func scenarioWrapperString(seed: view Int) {
+  let w: Wrapper(String) = { value: bigString(seed: seed) }
+}
+
+func scenarioPair(seed: view Int) {
+  let p: Pair(String, List(String)) = {
+    first: bigString(seed: seed)
+    second: createList(String, cap: 0)
+  }
+}
+
+func scenarioNestedSpec(seed: view Int) {
+  let w: Wrapper(Inner) = { value: { label: bigString(seed: seed) } }
+}
+
+func main() {
+  # Warm allocator, then sample baseline.
+  let i: Int = 0
+  let warmup: Int = 200
+  loop i < warmup {
+    scenarioWrapperString(seed: i)
+    scenarioPair(seed: i)
+    scenarioNestedSpec(seed: i)
+    i = i + 1
+  }
+  let rssBefore: Int = processRssKb()
+
+  # Stress the cascade. Pre-step-7 in compiled mode this loop leaked
+  # ~5 MB. With the fix, growth should plateau near zero (a few
+  # hundred KB of allocator slack max).
+  let j: Int = 0
+  let iters: Int = 5000
+  loop j < iters {
+    scenarioWrapperString(seed: j)
+    scenarioPair(seed: j)
+    scenarioNestedSpec(seed: j)
+    j = j + 1
+  }
+  let rssAfter: Int = processRssKb()
+  let grew: Int = rssAfter - rssBefore
+  let bounded: Bool = grew < 1024
+  log("parity_bounded={bounded}")
+}
