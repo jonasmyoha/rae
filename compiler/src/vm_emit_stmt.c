@@ -770,6 +770,54 @@ bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
                 return false;
             }
             compiler->expected_type = saved_expected;
+            /* Stage 1 step 4 — explicit cascade drop on the OLD
+             * value before overwriting. Only emitted when the local
+             * is `needs_drop` (set at the let binding site by the
+             * same registered-helper gate the scope-exit pass
+             * uses). FULL vs ALIAS comes from the binding site
+             * (`is_alias`). Self-assignment safety: the RHS is
+             * already fully evaluated and sitting on top of the
+             * stack at this point, and OP_GET_LOCAL deep-copies on
+             * read, so dropping the slot here cannot touch heap
+             * that the new value still references.
+             *
+             * The runtime OP_SET_LOCAL also calls value_free on
+             * the slot; that is now redundant but reentrant-safe
+             * because our helper sets heap pointers to NULL. It
+             * stays as a defense-in-depth net (and is what handles
+             * leaf String/List/Map reassignment today — those
+             * types deliberately don't get an explicit emission
+             * in this commit; see commit message).
+             *
+             * After drop, mark the local as `dropped=true` so the
+             * scope-exit / ret cleanup pass does not fire on this
+             * slot again (the slot now contains the NEW value
+             * which will be cleaned up on its OWN scope exit by
+             * the slot's binding metadata when it re-flips
+             * `dropped=false` … but here we keep it as-is: the
+             * slot was reassigned and the NEW value's structural
+             * ownership matches the OLD binding's classification,
+             * so we DO want scope-exit to drop it again). Reset
+             * back to false for the next cleanup pass. */
+            if (compiler->locals[slot].needs_drop
+                && !compiler->locals[slot].dropped) {
+              char buf[256];
+              Str tn = compiler->locals[slot].type_name;
+              int n = snprintf(buf, sizeof(buf),
+                               "rae_vm_drop_struct_%.*s%s",
+                               (int)tn.len, tn.data,
+                               compiler->locals[slot].is_alias
+                                 ? "_alias" : "");
+              if (n > 0 && n < (int)sizeof(buf)) {
+                emit_op(compiler, OP_MOD_LOCAL, (int)stmt->line);
+                emit_uint32(compiler, (uint32_t)slot, (int)stmt->line);
+                if (!emit_native_call(compiler, str_from_cstr(buf),
+                                      1, (int)stmt->line, 0)) {
+                  return false;
+                }
+                emit_op(compiler, OP_POP, (int)stmt->line);
+              }
+            }
             emit_op(compiler, OP_SET_LOCAL, (int)stmt->line);
             emit_uint32(compiler, (uint32_t)slot, (int)stmt->line);
             emit_op(compiler, OP_POP, (int)stmt->line); // assigned value
