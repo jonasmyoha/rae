@@ -12,6 +12,7 @@
 
 #include "c_backend_internal.h" /* for has_property (AST utility) */
 #include "diag.h"
+#include "mangler.h"
 #include "ownership.h"
 #include "sema.h"
 #include "str.h"
@@ -323,10 +324,7 @@ bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
           && !stmt->as.let_stmt.is_bind
           && !stmt->as.let_stmt.type->is_view
           && !stmt->as.let_stmt.type->is_mod
-          && !stmt->as.let_stmt.type->is_opt
-          && type_needs_cascade_drop(compiler->compiler_ctx,
-                                     compiler->module,
-                                     stmt->as.let_stmt.type, 0)) {
+          && !stmt->as.let_stmt.type->is_opt) {
         Str base = get_base_type_name(stmt->as.let_stmt.type);
         bool is_leaf =
           str_eq_cstr(base, "String")
@@ -335,21 +333,46 @@ bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
           || str_eq_cstr(base, "StringMap")
           || str_eq_cstr(base, "IntMap");
         if (is_leaf) {
+          /* Leaf cascade is structural — `type_needs_cascade_drop`
+           * agrees and there's no helper to probe. */
           compiler->locals[slot].needs_drop = true;
           compiler->locals[slot].is_leaf_drop = true;
           compiler->locals[slot].is_alias = false;
         } else {
-          const AstDecl* tdecl = NULL;
-          for (size_t i = 0; i < compiler->compiler_ctx->all_decl_count; ++i) {
-            const AstDecl* d = compiler->compiler_ctx->all_decls[i];
-            if (d->kind != AST_DECL_TYPE) continue;
-            if (!str_eq(d->as.type_decl.name, base)) continue;
-            tdecl = d; break;
+          /* Stage 1 step 6 — non-generic AND specialization paths
+           * unified. Ask the mangler for a canonical key, strip the
+           * leading `rae_` prefix to match the registration naming
+           * convention, then probe the registry. If a helper is
+           * registered under `rae_vm_drop_struct_<short>`, this let
+           * is droppable; if not, no helper exists (template-only,
+           * c_struct, or trivial). This is the canonical
+           * helper-existence gate — it does NOT call the
+           * substitution-blind `type_needs_cascade_drop` predicate
+           * which would reject all generic specs. Examples handled
+           * by this one probe:
+           *   * `WithString` → short = "WithString"
+           *   * `Wrapper(String)` → short = "Wrapper_rae_String"
+           *   * `Pair(String, List(String))` → short = "Pair_rae_..."
+           *   * `Wrapper(Int)` → no helper registered → skip
+           *   * `StringMapEntry(V)` (template-internal) → no helper
+           *     → skip (only concrete specs get helpers). */
+          const char* mangled =
+            rae_mangle_type_specialized(compiler->compiler_ctx,
+                                        NULL, NULL,
+                                        stmt->as.let_stmt.type);
+          const char* short_name = mangled;
+          if (short_name && strncmp(short_name, "rae_", 4) == 0) {
+            short_name += 4;
           }
+          char probe[512];
+          int pn = short_name
+            ? snprintf(probe, sizeof(probe),
+                       "rae_vm_drop_struct_%s", short_name)
+            : -1;
           bool helper_exists =
-            tdecl != NULL
-            && tdecl->as.type_decl.generic_params == NULL
-            && !has_property(tdecl->as.type_decl.properties, "c_struct");
+            pn > 0 && pn < (int)sizeof(probe)
+            && compiler->registry
+            && vm_registry_find_native(compiler->registry, probe) != NULL;
           if (helper_exists) {
             compiler->locals[slot].needs_drop = true;
             bool is_struct_literal_init =
@@ -358,6 +381,10 @@ bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
             bool is_default_init = stmt->as.let_stmt.value == NULL;
             compiler->locals[slot].is_alias =
               !(is_struct_literal_init || is_default_init);
+            /* Stash the short-name so emission doesn't re-mangle.
+             * Mangler output is arena-allocated; pointer is valid
+             * for the lifetime of the compile. */
+            compiler->locals[slot].helper_short_name = short_name;
           }
         }
       }
@@ -827,13 +854,24 @@ bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
                 emit_op(compiler, OP_DROP_LOCAL, (int)stmt->line);
                 emit_uint32(compiler, (uint32_t)slot, (int)stmt->line);
               } else {
-                char buf[256];
-                Str tn = compiler->locals[slot].type_name;
-                int n = snprintf(buf, sizeof(buf),
-                                 "rae_vm_drop_struct_%.*s%s",
-                                 (int)tn.len, tn.data,
-                                 compiler->locals[slot].is_alias
-                                   ? "_alias" : "");
+                char buf[512];
+                const char* short_name =
+                  compiler->locals[slot].helper_short_name;
+                int n;
+                if (short_name) {
+                  n = snprintf(buf, sizeof(buf),
+                               "rae_vm_drop_struct_%s%s",
+                               short_name,
+                               compiler->locals[slot].is_alias
+                                 ? "_alias" : "");
+                } else {
+                  Str tn = compiler->locals[slot].type_name;
+                  n = snprintf(buf, sizeof(buf),
+                               "rae_vm_drop_struct_%.*s%s",
+                               (int)tn.len, tn.data,
+                               compiler->locals[slot].is_alias
+                                 ? "_alias" : "");
+                }
                 if (n > 0 && n < (int)sizeof(buf)) {
                   emit_op(compiler, OP_MOD_LOCAL, (int)stmt->line);
                   emit_uint32(compiler, (uint32_t)slot, (int)stmt->line);

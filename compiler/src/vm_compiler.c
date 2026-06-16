@@ -3,6 +3,14 @@
 #include "mangler.h"
 #include "vm_drop.h"
 
+/* Forward decl — declared in c_backend_internal.h but pulling that
+ * in clashes with vm_compiler.c's own `static find_type_decl` /
+ * `static has_property` helpers. */
+struct CompilerContext;
+struct AstModule;
+void discover_specializations_module(CompilerContext* ctx,
+                                     const AstModule* module);
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -752,6 +760,7 @@ int compiler_add_local(BytecodeCompiler* compiler, Str name, Str type_name, bool
   compiler->locals[compiler->local_count].is_alias = false;
   compiler->locals[compiler->local_count].dropped = false;
   compiler->locals[compiler->local_count].is_leaf_drop = false;
+  compiler->locals[compiler->local_count].helper_short_name = NULL;
   compiler->local_count += 1;
   return (int)(compiler->local_count - 1);
 }
@@ -996,12 +1005,21 @@ bool vm_emit_implicit_drops(BytecodeCompiler* compiler,
       emit_op(compiler, OP_DROP_LOCAL, line);
       emit_uint32(compiler, compiler->locals[i].slot, line);
     } else {
-      char buf[256];
-      Str tn = compiler->locals[i].type_name;
-      int n = snprintf(buf, sizeof(buf),
-                       "rae_vm_drop_struct_%.*s%s",
-                       (int)tn.len, tn.data,
-                       compiler->locals[i].is_alias ? "_alias" : "");
+      char buf[512];
+      const char* short_name = compiler->locals[i].helper_short_name;
+      int n;
+      if (short_name) {
+        n = snprintf(buf, sizeof(buf),
+                     "rae_vm_drop_struct_%s%s",
+                     short_name,
+                     compiler->locals[i].is_alias ? "_alias" : "");
+      } else {
+        Str tn = compiler->locals[i].type_name;
+        n = snprintf(buf, sizeof(buf),
+                     "rae_vm_drop_struct_%.*s%s",
+                     (int)tn.len, tn.data,
+                     compiler->locals[i].is_alias ? "_alias" : "");
+      }
       if (n <= 0 || n >= (int)sizeof(buf)) {
         diag_error(compiler->file_path, line, 0,
                    "drop helper name too long");
@@ -1649,11 +1667,18 @@ bool vm_compile_module(CompilerContext* ctx, const AstModule* module, Chunk* chu
     compiler.had_error = true;
   }
 
-  /* Stage 1 step 2: synthesise FULL + ALIAS cascade-drop natives for
-   * every non-generic user struct that needs cleanup. Registration
-   * only — the VM emitter does not yet invoke them at scope exit;
-   * tests reach into the registry to invoke them directly. */
+  /* Stage 1 step 2 + step 6: synthesise FULL + ALIAS cascade-drop
+   * natives for every non-generic user struct AND every concrete
+   * generic-struct specialization the module uses. The spec
+   * discovery comes from the C backend's existing
+   * `discover_specializations_module` pass, which populates
+   * `ctx->generic_types[]` by walking function bodies and call
+   * sites. Running it here makes the same source of truth available
+   * to the Live VM. The pass is idempotent — re-running it is a
+   * no-op because `register_generic_type` dedups by structural
+   * equality. */
   if (registry) {
+    discover_specializations_module(ctx, module);
     (void)vm_drop_register_for_module(ctx, module, registry);
   }
 
