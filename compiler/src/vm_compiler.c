@@ -745,6 +745,12 @@ int compiler_add_local(BytecodeCompiler* compiler, Str name, Str type_name, bool
   compiler->locals[compiler->local_count].type_name = type_name;
   compiler->locals[compiler->local_count].is_ptr = is_ptr;
   compiler->locals[compiler->local_count].is_mod = is_mod;
+  /* Stage 1 step 3 — defaults. let-stmt emission flips needs_drop /
+   * is_alias when the binding is value-owning and the type cascades. */
+  compiler->locals[compiler->local_count].scope_depth = compiler->scope_depth;
+  compiler->locals[compiler->local_count].needs_drop = false;
+  compiler->locals[compiler->local_count].is_alias = false;
+  compiler->locals[compiler->local_count].dropped = false;
   compiler->local_count += 1;
   return (int)(compiler->local_count - 1);
 }
@@ -956,6 +962,50 @@ bool emit_native_call(BytecodeCompiler* compiler, Str name, uint8_t arg_count, i
   uint32_t index = chunk_add_constant(compiler->chunk, sym_value);
   emit_uint32(compiler, index, line);
   emit_byte(compiler, arg_count, line);
+  return true;
+}
+
+bool vm_emit_implicit_drops(BytecodeCompiler* compiler,
+                            int min_scope_depth,
+                            int exclude_slot,
+                            int line) {
+  /* Reverse binding order — matches the C backend's LIFO drop. */
+  for (int i = (int)compiler->local_count - 1; i >= 0; --i) {
+    if (compiler->locals[i].dropped) continue;
+    if (!compiler->locals[i].needs_drop) continue;
+    if (compiler->locals[i].scope_depth < min_scope_depth) continue;
+    if (exclude_slot >= 0 &&
+        (int)compiler->locals[i].slot == exclude_slot) {
+      /* Treat as moved: mark dropped so a later return path doesn't
+       * fire it either. Mirrors the C backend's move-tracking on
+       * `ret <ident-local>`. */
+      compiler->locals[i].dropped = true;
+      continue;
+    }
+    char buf[256];
+    Str tn = compiler->locals[i].type_name;
+    int n = snprintf(buf, sizeof(buf),
+                     "rae_vm_drop_struct_%.*s%s",
+                     (int)tn.len, tn.data,
+                     compiler->locals[i].is_alias ? "_alias" : "");
+    if (n <= 0 || n >= (int)sizeof(buf)) {
+      diag_error(compiler->file_path, line, 0,
+                 "drop helper name too long");
+      compiler->had_error = true;
+      return false;
+    }
+    /* Push `mod` ref to the slot. drop_native_cb derefs it and
+     * runs the per-field cascade. */
+    emit_op(compiler, OP_MOD_LOCAL, line);
+    emit_uint32(compiler, compiler->locals[i].slot, line);
+    if (!emit_native_call(compiler, str_from_cstr(buf), 1, line, 0)) {
+      return false;
+    }
+    /* OP_NATIVE_CALL leaves the native's result on the stack
+     * (VAL_NONE for void); discard it. */
+    emit_op(compiler, OP_POP, line);
+    compiler->locals[i].dropped = true;
+  }
   return true;
 }
 
@@ -1442,7 +1492,19 @@ bool compile_block(BytecodeCompiler* compiler, const AstBlock* block) {
     success = false;
   }
   vm_pop_defers(compiler, compiler->scope_depth);
-  
+
+  /* Stage 1 step 3 — structural drops run AFTER defers. The choice
+   * matters: defers may invoke user code that observes the local's
+   * heap state (e.g. logging the contents), so running the cascade
+   * drop first would yield use-after-free in user-visible code.
+   * Defers-first matches the C backend's emission order (defers in
+   * c_stmt.c run before emit_implicit_drops_for_body). */
+  int last_line = block && block->first ? (int)block->first->line : 0;
+  if (!vm_emit_implicit_drops(compiler, compiler->scope_depth,
+                              /*exclude_slot=*/-1, last_line)) {
+    success = false;
+  }
+
   compiler->scope_depth--;
   return success;
 }

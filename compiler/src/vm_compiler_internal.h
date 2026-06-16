@@ -32,6 +32,20 @@ void patch_jump(BytecodeCompiler* compiler, uint32_t offset);
 bool vm_emit_defers(BytecodeCompiler* compiler, int min_depth);
 void vm_pop_defers(BytecodeCompiler* compiler, int depth);
 
+// Stage 1 step 3 — emit cascade-drop natives for live locals that
+// went out of scope. Walks `compiler->locals` in reverse binding
+// order; emits OP_MOD_LOCAL + OP_NATIVE_CALL + OP_POP for every
+// not-yet-dropped local with `needs_drop=true` and
+// `scope_depth >= min_scope_depth`. `exclude_slot` (pass -1 for
+// none) skips one specific slot — used by `ret <ident>` to avoid
+// dropping the local whose value is being returned. Locals it
+// touches are marked `dropped=true` so a later cleanup site
+// won't double-emit. Mirrors c_stmt.c's emit_implicit_drops_for_body.
+bool vm_emit_implicit_drops(BytecodeCompiler* compiler,
+                            int min_scope_depth,
+                            int exclude_slot,
+                            int line);
+
 // Native call shim.
 bool emit_native_call(BytecodeCompiler* compiler, Str name, uint8_t arg_count, int line, int column);
 

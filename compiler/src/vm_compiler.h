@@ -37,6 +37,21 @@ typedef struct {
     Str type_name; // Store type name for locals
     bool is_ptr;
     bool is_mod;
+    /* Stage 1 step 3 — structural drop tracking. Mirrors the C
+     * backend's per-local cascade-drop bookkeeping. `scope_depth`
+     * is the depth at which the local was bound; scope-exit drops
+     * fire on locals with depth >= the scope being left.
+     * `needs_drop` is true iff the type cascades AND the binding
+     * site genuinely owns the heap. `is_alias` picks the FULL vs
+     * ALIAS drop variant (alias for call-result lets and any
+     * binding shape that may share heap with the source).
+     * `dropped` flips to true once a scope-exit or return path
+     * has already emitted the drop, preventing double-frees if
+     * the local is in scope of multiple cleanup sites. */
+    int scope_depth;
+    bool needs_drop;
+    bool is_alias;
+    bool dropped;
   } locals[256];
   uint32_t local_count;
   uint32_t allocated_locals;

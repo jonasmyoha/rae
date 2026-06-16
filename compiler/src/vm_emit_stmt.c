@@ -10,7 +10,9 @@
 #include <string.h>
 #include <stdint.h>
 
+#include "c_backend_internal.h" /* for has_property (AST utility) */
 #include "diag.h"
+#include "ownership.h"
 #include "sema.h"
 #include "str.h"
 #include "vm.h"
@@ -298,6 +300,53 @@ bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
           emit_uint32(compiler, (uint32_t)slot, (int)stmt->line);
       }
 
+      /* Stage 1 step 3 — flag this local for scope-exit cascade
+       * drop if its type cascades AND the binding is value-owning
+       * (not a view/mod borrow) AND we actually have a registered
+       * helper to call. FULL vs ALIAS picks the variant:
+       *   FULL  — auto-init (no value) or struct literal (OBJECT)
+       *   ALIAS — anything else (call results, ident copies, …)
+       * Mirrors the C backend's `local_struct_owns_heap` gate plus
+       * the exact selection rules of vm_drop_register_for_module:
+       *   * non-generic user struct decl
+       *   * not c_struct (raylib etc.)
+       *   * type_needs_cascade_drop true
+       * Skipping these gates is what kept the C-stdlib (StringMap,
+       * IntMap, generic StringMapEntry, …) from blowing up with
+       * "native not registered" — those decls have generic_params
+       * and so no synthesised helper exists. */
+      if (slot >= 0
+          && stmt->as.let_stmt.type
+          && !stmt->as.let_stmt.is_bind
+          && !stmt->as.let_stmt.type->is_view
+          && !stmt->as.let_stmt.type->is_mod
+          && !stmt->as.let_stmt.type->is_opt
+          && type_needs_cascade_drop(compiler->compiler_ctx,
+                                     compiler->module,
+                                     stmt->as.let_stmt.type, 0)) {
+        Str base = get_base_type_name(stmt->as.let_stmt.type);
+        const AstDecl* tdecl = NULL;
+        for (size_t i = 0; i < compiler->compiler_ctx->all_decl_count; ++i) {
+          const AstDecl* d = compiler->compiler_ctx->all_decls[i];
+          if (d->kind != AST_DECL_TYPE) continue;
+          if (!str_eq(d->as.type_decl.name, base)) continue;
+          tdecl = d; break;
+        }
+        bool helper_exists =
+          tdecl != NULL
+          && tdecl->as.type_decl.generic_params == NULL
+          && !has_property(tdecl->as.type_decl.properties, "c_struct");
+        if (helper_exists) {
+          compiler->locals[slot].needs_drop = true;
+          bool is_struct_literal_init =
+            stmt->as.let_stmt.value
+            && stmt->as.let_stmt.value->kind == AST_EXPR_OBJECT;
+          bool is_default_init = stmt->as.let_stmt.value == NULL;
+          compiler->locals[slot].is_alias =
+            !(is_struct_literal_init || is_default_init);
+        }
+      }
+
       return true;
     }
     case AST_STMT_EXPR:
@@ -310,6 +359,14 @@ bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
       const AstReturnArg* arg = stmt->as.ret_stmt.values;
             if (!arg) {
               if (!vm_emit_defers(compiler, 0)) return false;
+              /* Stage 1 step 3 — drop every still-live owning local
+               * before the void return. No exclude_slot: no value
+               * is moving out. */
+              if (!vm_emit_implicit_drops(compiler, /*min=*/0,
+                                          /*exclude=*/-1,
+                                          (int)stmt->line)) {
+                return false;
+              }
               return emit_return(compiler, false, (int)stmt->line);
             }
             if (arg->next) {
@@ -356,6 +413,21 @@ bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
               return false;
             }
             if (!vm_emit_defers(compiler, 0)) return false;
+            /* Stage 1 step 3 — drop every live owning local before
+             * the return. Move-tracking exception: when the return
+             * value is a bare local identifier, skip dropping that
+             * specific slot — its heap is flowing to the caller and
+             * dropping here would either free it (caller use-after-
+             * free) or double-free (caller drops it too). */
+            int exclude_slot = -1;
+            if (arg->value && arg->value->kind == AST_EXPR_IDENT) {
+              exclude_slot = compiler_find_local(compiler, arg->value->as.ident);
+            }
+            if (!vm_emit_implicit_drops(compiler, /*min=*/0,
+                                        exclude_slot,
+                                        (int)stmt->line)) {
+              return false;
+            }
             return emit_return(compiler, true, (int)stmt->line);
     }
     case AST_STMT_IF: {
