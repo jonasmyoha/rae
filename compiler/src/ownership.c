@@ -9,8 +9,7 @@
 
 /* `has_property` and `find_type_decl` are AST utilities that
  * currently live in c_backend.c (declared in c_backend_internal.h).
- * They're pure walks of the AST — not C-backend-specific — but
- * relocating them is a polish step deferred to a future commit. */
+ * `substitute_type_ref` is in sema.h. */
 #include "c_backend_internal.h"
 
 bool is_drop_target_type(const AstTypeRef* type) {
@@ -44,7 +43,6 @@ bool type_owns_heap_storage(CompilerContext* cctx, const AstModule* module,
 
 bool type_needs_cascade_drop(CompilerContext* cctx, const AstModule* module,
                              const AstTypeRef* type, int depth) {
-  (void)cctx;
   if (!type || depth > 32) return false;
   if (type->is_view || type->is_mod) return false;
   if (is_drop_target_type(type)) return true;
@@ -53,15 +51,24 @@ bool type_needs_cascade_drop(CompilerContext* cctx, const AstModule* module,
   const AstDecl* d = find_type_decl(NULL, module, base);
   if (!d || d->kind != AST_DECL_TYPE) return false;
   if (has_property(d->as.type_decl.properties, "c_struct")) return false;
+  /* When `type` carries `generic_args` and the decl has matching
+   * `generic_params`, substitute on each field before recursing so
+   * a `Wrapper(String) { value: T }` reports cascade through T==String.
+   * Without this, generic specs always look trivial here. */
+  const AstIdentifierPart* gp = d->as.type_decl.generic_params;
+  const AstTypeRef* ga = type->generic_args;
   for (const AstTypeField* f = d->as.type_decl.fields; f; f = f->next) {
-    if (type_needs_cascade_drop(cctx, module, f->type, depth + 1)) return true;
+    AstTypeRef* concrete = f->type;
+    if (gp && ga) {
+      concrete = substitute_type_ref(cctx, gp, ga, f->type);
+    }
+    if (type_needs_cascade_drop(cctx, module, concrete, depth + 1)) return true;
   }
   return false;
 }
 
 bool type_needs_deep_copy(CompilerContext* cctx, const AstModule* module,
                           const AstTypeRef* type, int depth) {
-  (void)cctx;
   if (!type || depth > 32) return false;
   if (type->is_view || type->is_mod) return false;
   if (is_drop_target_type(type)) return true;
@@ -74,8 +81,14 @@ bool type_needs_deep_copy(CompilerContext* cctx, const AstModule* module,
   const AstDecl* d = find_type_decl(NULL, module, base);
   if (!d || d->kind != AST_DECL_TYPE) return false;
   if (has_property(d->as.type_decl.properties, "c_struct")) return false;
+  const AstIdentifierPart* gp = d->as.type_decl.generic_params;
+  const AstTypeRef* ga = type->generic_args;
   for (const AstTypeField* f = d->as.type_decl.fields; f; f = f->next) {
-    if (type_needs_deep_copy(cctx, module, f->type, depth + 1)) return true;
+    AstTypeRef* concrete = f->type;
+    if (gp && ga) {
+      concrete = substitute_type_ref(cctx, gp, ga, f->type);
+    }
+    if (type_needs_deep_copy(cctx, module, concrete, depth + 1)) return true;
   }
   return false;
 }

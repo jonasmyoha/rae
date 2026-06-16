@@ -1,0 +1,201 @@
+# Stage 1 step 6: VM cascade drop for concrete generic struct
+# specializations.
+#
+# Live-only. Closes the last Stage 1 parity gap. The C backend's
+# discover_specializations_module pass populates ctx->generic_types[]
+# with every concrete spec the module uses; vm_drop_register_for_module
+# now synthesizes FULL + ALIAS descriptors for each user-struct spec
+# the module instantiates. Naming uses rae_mangle_type_specialized
+# with the leading "rae_" prefix stripped so collisions are
+# impossible while keeping the helper-name ergonomic for the
+# non-generic case.
+
+import core
+
+func __raeVmDropCount(typeName: view String, isAlias: Bool) extern ret Int
+func processRssKb() extern ret Int
+
+# Generic struct with one type parameter, holding a String. Two
+# specs are exercised:
+#   * Wrapper(String)  — cascade-droppable (carries a heap String)
+#   * Wrapper(Int)     — trivial; NO helper synthesised
+type Wrapper(T: type) {
+  value: T
+}
+
+# Two-argument generic. Pair(String, List(String)) cascades through
+# both arguments.
+type Pair(A: type, B: type) {
+  first: A
+  second: B
+}
+
+# Nested generic spec: Wrapper(Inner) where Inner has its own
+# String field.
+type Inner {
+  label: String
+}
+
+# A non-generic struct that recurses through a generic spec.
+type GenericHolder {
+  one: Wrapper(String)
+}
+
+func makeWrapperString() ret Wrapper(String) {
+  let w: Wrapper(String) = { value: "wrapped-payload" }
+  ret w
+}
+
+func scenarioWrapperString() {
+  let w: Wrapper(String) = { value: "scope-payload" }
+}
+
+func scenarioWrapperInt() {
+  # Trivial spec — should NOT trigger a drop native call.
+  let w: Wrapper(Int) = { value: 42 }
+}
+
+func scenarioPair() {
+  let p: Pair(String, List(String)) = {
+    first: "pair-first"
+    second: createList(String, cap: 0)
+  }
+}
+
+func scenarioNestedSpec() {
+  let w: Wrapper(Inner) = { value: { label: "nested-inner" } }
+}
+
+func scenarioListOfWrapper() {
+  let xs: List(Wrapper(String)) = createList(Wrapper(String), cap: 0)
+  # Container leaf cleanup handles the List on scope exit; we are
+  # not testing element cascade here (that's exercised on each
+  # constructed Wrapper(String) used in other scenarios).
+}
+
+func scenarioAliasSpec() {
+  # Call-result let → ALIAS classification, _alias helper fires.
+  let p: Wrapper(String) = makeWrapperString()
+}
+
+func scenarioReassignSpec() {
+  let w: Wrapper(String) = { value: "first" }
+  w = { value: "second" }
+}
+
+func scenarioEarlyReturnSpec() ret Wrapper(String) {
+  let w: Wrapper(String) = { value: "returned" }
+  if true {
+    ret w
+  }
+  let unreached: Wrapper(String) = { value: "unreached" }
+  ret unreached
+}
+
+func scenarioGenericHolder() {
+  # GenericHolder contains Wrapper(String) as a nested field.
+  # GenericHolder's FULL drop must recurse into Wrapper(String).
+  let h: GenericHolder = {
+    one: { value: "held" }
+  }
+}
+
+func main() {
+  let wsName: String = "Wrapper_rae_String"
+  let wiName: String = "Wrapper_rae_Int"
+  let pairName: String = "Pair_rae_String_rae_List_rae_String"
+  let nestedName: String = "Wrapper_rae_Inner"
+  let listWsName: String = "List_rae_Wrapper_rae_String"
+  let holderName: String = "GenericHolder"
+
+  # 1. Wrapper(String) — FULL on scope exit.
+  let before1: Int = __raeVmDropCount(wsName, isAlias: false)
+  scenarioWrapperString()
+  let after1: Int = __raeVmDropCount(wsName, isAlias: false)
+  let d1: Int = after1 - before1
+  log("wrapper_string_full_delta={d1}")
+
+  # 2. Trivial spec Wrapper(Int) — no helper exists; -1.
+  let wi: Int = __raeVmDropCount(wiName, isAlias: false)
+  scenarioWrapperInt()
+  log("wrapper_int_full={wi}")
+
+  # 3. Two-arg generic Pair(String, List(String)) — FULL fires.
+  let before3: Int = __raeVmDropCount(pairName, isAlias: false)
+  scenarioPair()
+  let after3: Int = __raeVmDropCount(pairName, isAlias: false)
+  let d3: Int = after3 - before3
+  log("pair_full_delta={d3}")
+
+  # 4. Nested spec Wrapper(Inner) — FULL fires; Inner is reached via
+  # descriptor recursion so its descriptor's counter ALSO bumps.
+  let before4Outer: Int = __raeVmDropCount(nestedName, isAlias: false)
+  let innerName: String = "Inner"
+  let before4Inner: Int = __raeVmDropCount(innerName, isAlias: false)
+  scenarioNestedSpec()
+  let after4Outer: Int = __raeVmDropCount(nestedName, isAlias: false)
+  let after4Inner: Int = __raeVmDropCount(innerName, isAlias: false)
+  let d4Outer: Int = after4Outer - before4Outer
+  let d4Inner: Int = after4Inner - before4Inner
+  log("wrapper_inner_full_delta={d4Outer}")
+  log("inner_nested_delta={d4Inner}")
+
+  # 5. List(Wrapper(String)) — List itself is leaf (OP_DROP_LOCAL);
+  # the SPEC helper for List(Wrapper(String)) is NOT a struct-cascade
+  # helper, so __raeVmDropCount returns -1.
+  let listWs: Int = __raeVmDropCount(listWsName, isAlias: false)
+  scenarioListOfWrapper()
+  log("list_wrapper_string_native={listWs}")
+
+  # 6. ALIAS variant fires on call-result let.
+  let before6Full: Int = __raeVmDropCount(wsName, isAlias: false)
+  let before6Alias: Int = __raeVmDropCount(wsName, isAlias: true)
+  scenarioAliasSpec()
+  let after6Full: Int = __raeVmDropCount(wsName, isAlias: false)
+  let after6Alias: Int = __raeVmDropCount(wsName, isAlias: true)
+  let d6Full: Int = after6Full - before6Full
+  let d6Alias: Int = after6Alias - before6Alias
+  log("alias_spec_full_delta={d6Full}")
+  log("alias_spec_alias_delta={d6Alias}")
+
+  # 7. Reassignment fires FULL twice (reassign + scope-exit).
+  let before7: Int = __raeVmDropCount(wsName, isAlias: false)
+  scenarioReassignSpec()
+  let after7: Int = __raeVmDropCount(wsName, isAlias: false)
+  let d7: Int = after7 - before7
+  log("reassign_spec_delta={d7}")
+
+  # 8. Early return preserves the returned local — callee FULL delta 0.
+  let before8: Int = __raeVmDropCount(wsName, isAlias: false)
+  let returned: Wrapper(String) = scenarioEarlyReturnSpec()
+  let mid8: Int = __raeVmDropCount(wsName, isAlias: false)
+  let d8: Int = mid8 - before8
+  log("early_return_spec_delta={d8}")
+
+  # 9. Non-generic struct containing a generic spec field — FULL on
+  # GenericHolder, descriptor cascade reaches Wrapper(String).
+  let before9Outer: Int = __raeVmDropCount(holderName, isAlias: false)
+  let before9Inner: Int = __raeVmDropCount(wsName, isAlias: false)
+  scenarioGenericHolder()
+  let after9Outer: Int = __raeVmDropCount(holderName, isAlias: false)
+  let after9Inner: Int = __raeVmDropCount(wsName, isAlias: false)
+  let d9Outer: Int = after9Outer - before9Outer
+  let d9Inner: Int = after9Inner - before9Inner
+  log("holder_full_delta={d9Outer}")
+  log("holder_inner_delta={d9Inner}")
+
+  # 10. Stress: 2000 iters of struct-literal Wrapper(String) +
+  # Pair(String, List(String)). RSS must plateau.
+  let rssBefore: Int = processRssKb()
+  let i: Int = 0
+  let iters: Int = 2000
+  loop i < iters {
+    scenarioWrapperString()
+    scenarioPair()
+    i = i + 1
+  }
+  let rssAfter: Int = processRssKb()
+  let grew: Int = rssAfter - rssBefore
+  let bounded: Bool = grew < 4096
+  log("spec_stress_bounded={bounded}")
+}

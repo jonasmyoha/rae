@@ -105,13 +105,21 @@ That applies even without files, fonts, sockets, or GPU objects.
   because it is one level of indirection deeper.
 * Rae already has `own`, `view`, and `mod` to talk about who
   currently holds responsibility for a value.
+* **Implemented (Stage 1, both backends)** — the compiler
+  synthesises structural drop for user types that contain owned
+  fields. The base case for "this type needs cleanup" is "any
+  field needs cleanup." Cleanup fires at scope exit, before every
+  `ret`, and before reassignment, in reverse binding order. `ret
+  <bare-ident>` moves rather than drops. The C backend has done
+  this since Phase 1–3 (May 2026); the Live VM caught up across
+  commits `e31bb9b` → step 6 (see
+  `docs/structural-drop-stage1-plan.md` for the per-commit
+  changelog). Both backends drop bare String/List/Buffer/Map
+  locals, non-generic user structs, and — on the VM side —
+  concrete generic struct specializations the module instantiates.
 
 **Likely**
 
-* The compiler synthesises structural drop for user types that
-  contain owned fields. The user does not write it by hand.
-* The base case for "this type needs cleanup" is "any field needs
-  cleanup."
 * External resources (files, GPU handles, sockets) get their own
   release hook somehow — separate from structural drop.
 * `defer` (lexical, control-flow-scoped cleanup) earns its place
