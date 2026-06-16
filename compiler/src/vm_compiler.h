@@ -52,6 +52,13 @@ typedef struct {
     bool needs_drop;
     bool is_alias;
     bool dropped;
+    /* Stage 1 step 5 — when true, scope-exit / ret cleanup uses
+     * `OP_DROP_LOCAL slot` (value_free on the slot) instead of the
+     * native-call to a synthesised `rae_vm_drop_struct_<T>` helper.
+     * Set for bare leaf locals: String, List(T), Buffer(T),
+     * StringMap(V), IntMap(V). Mutually exclusive with the alias
+     * variant since leaves don't have a FULL/ALIAS distinction. */
+    bool is_leaf_drop;
   } locals[256];
   uint32_t local_count;
   uint32_t allocated_locals;
