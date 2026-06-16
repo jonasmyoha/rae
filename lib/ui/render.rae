@@ -489,29 +489,46 @@ func paintText(world: view UiWorld, entity: view EntityId, wt: view WorldTransfo
     )
     drawX = wt.x + cr.w - measured.toFloat()
   }
-  # Drop-shadow pass for styles that opt in. Same glyphs, offset by
-  # roughly 6% of the font size (clamped to 1-3 px) with a half-alpha
-  # near-black tint that picks up the entity's chained Active /
-  # Opacity alpha. Drawn FIRST so the real text paints on top.
+  # Drop-shadow pass for styles that opt in. 9-sample blur: 1 center
+  # tap (heavier) + 8 ring taps in a circle of `blurRadius` (lighter).
+  # The ring samples cover the cardinal + diagonal directions in unit
+  # form so a single sin/cos table isn't needed — the diagonal taps
+  # use the precomputed 0.7071 (sqrt(2)/2). The ring fills out the
+  # silhouette of the shadow into a soft halo instead of a hard
+  # 1-pixel offset copy.
+  #
+  # shadowOff scales with font size (~6%, clamped to 1-3 px) and
+  # is the centre of the blur kernel. blurRadius is the kernel's
+  # outer ring — slightly wider than the offset so the halo is
+  # symmetric around the displaced shadow center.
   if textStyleHasShadow(styleId: tx.styleId) {
     let shadowOff: Float = size * 0.06
-    if shadowOff < 1.0 {
-      shadowOff = 1.0
-    }
-    if shadowOff > 3.0 {
-      shadowOff = 3.0
-    }
-    let shadowAlpha: Int = chain255 * 110 / 255
-    let shadow: Color = { r: 0, g: 0, b: 0, a: shadowAlpha }
-    drawTextWithFont(
-      slot: defaultFontSlot
-      text: txt
-      x: drawX + shadowOff
-      y: drawY + shadowOff
-      fontSize: size
-      spacing: 1.0
-      color: shadow
-    )
+    if shadowOff < 1.0 { shadowOff = 1.0 }
+    if shadowOff > 3.0 { shadowOff = 3.0 }
+    let blurRadius: Float = size * 0.09
+    if blurRadius < 1.5 { blurRadius = 1.5 }
+    if blurRadius > 4.0 { blurRadius = 4.0 }
+    # Centre weight 0.30, edge weight 0.10 — sum ≈ 1.1, close to the
+    # density of the old single hard shadow but smeared over a soft
+    # disc. Half-diagonal magnitude ≈ 0.7071 keeps the diagonal taps
+    # at the same euclidean distance as the cardinals.
+    let cx: Float = drawX + shadowOff
+    let cy: Float = drawY + shadowOff
+    let aBase: Int = chain255 * 90 / 255
+    let aCtr: Int = aBase * 30 / 100
+    let aEdge: Int = aBase * 10 / 100
+    let shadowCtr: Color = { r: 0, g: 0, b: 0, a: aCtr }
+    let shadowEdge: Color = { r: 0, g: 0, b: 0, a: aEdge }
+    let d: Float = blurRadius * 0.7071
+    drawTextWithFont(slot: defaultFontSlot, text: txt, x: cx, y: cy, fontSize: size, spacing: 1.0, color: shadowCtr)
+    drawTextWithFont(slot: defaultFontSlot, text: txt, x: cx, y: cy - blurRadius, fontSize: size, spacing: 1.0, color: shadowEdge)
+    drawTextWithFont(slot: defaultFontSlot, text: txt, x: cx + d, y: cy - d, fontSize: size, spacing: 1.0, color: shadowEdge)
+    drawTextWithFont(slot: defaultFontSlot, text: txt, x: cx + blurRadius, y: cy, fontSize: size, spacing: 1.0, color: shadowEdge)
+    drawTextWithFont(slot: defaultFontSlot, text: txt, x: cx + d, y: cy + d, fontSize: size, spacing: 1.0, color: shadowEdge)
+    drawTextWithFont(slot: defaultFontSlot, text: txt, x: cx, y: cy + blurRadius, fontSize: size, spacing: 1.0, color: shadowEdge)
+    drawTextWithFont(slot: defaultFontSlot, text: txt, x: cx - d, y: cy + d, fontSize: size, spacing: 1.0, color: shadowEdge)
+    drawTextWithFont(slot: defaultFontSlot, text: txt, x: cx - blurRadius, y: cy, fontSize: size, spacing: 1.0, color: shadowEdge)
+    drawTextWithFont(slot: defaultFontSlot, text: txt, x: cx - d, y: cy - d, fontSize: size, spacing: 1.0, color: shadowEdge)
   }
   drawTextWithFont(
     slot: defaultFontSlot
