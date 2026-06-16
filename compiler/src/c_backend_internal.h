@@ -171,21 +171,12 @@ bool emit_implicit_drops_for_body(CFuncContext* ctx, FILE* out,
 // Move-tracking skips drops for params that were returned or transferred.
 bool emit_implicit_drops_for_own_params(CFuncContext* ctx, FILE* out,
                                         size_t first_let_index);
-// Predicate used by both the emit pass and the discovery pass.
-bool is_drop_target_type(const AstTypeRef* type);
+// Ownership classifiers (is_drop_target_type, type_owns_heap_storage,
+// type_needs_cascade_drop, type_needs_deep_copy) moved to
+// ownership.h so both backends can share them. c_backend.h already
+// pulls in ownership.h transitively.
 // Find the `drop` overload whose receiver-base matches `container_base`.
 const AstFuncDecl* find_drop_overload_for(CFuncContext* ctx, Str container_base);
-// Layer 5 (docs/scope-exit-dealloc.md): does the type transitively own
-// heap storage? Returns true for List/StringMap/IntMap directly, and
-// for user structs with at least one heap-owning field.
-bool type_owns_heap_storage(CompilerContext* cctx, const AstModule* module,
-                            const AstTypeRef* type, int depth);
-// Permissive variant — also considers String fields heap-needing.
-// Used by cascade-drop sites only (Layer 5 struct synthesis, List/Map
-// element drop). NOT by local auto-drop, which uses the strict form
-// above to avoid the shallow-alias double-free pattern.
-bool type_needs_cascade_drop(CompilerContext* cctx, const AstModule* module,
-                             const AstTypeRef* type, int depth);
 // Move tracking helpers (Stage 3 of docs/ownership-model.md).
 void mark_local_moved_by_name(CFuncContext* ctx, Str name);
 void mark_expr_moved_if_local(CFuncContext* ctx, const AstExpr* expr);

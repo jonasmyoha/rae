@@ -102,7 +102,7 @@ for TARGET in "${TARGETS[@]}"; do
     if [ "$TARGET" = "compiled" ] && [ -z "$TEST_NAME_FILTER" ]; then
         case "$TEST_NAME" in
             # Skip build tests that target live/hybrid specifically
-            407_*|408_*|395_*)
+            407_*|408_*|395_*|498_*)
                 RUN_THIS=0 ;;
             # Skip tests that don't have func main() (C backend expects a main)
             000_*|100_*|101_*|102_*|103_*|104_*|105_*)

@@ -1,0 +1,74 @@
+# Stage 1 step 2: Live VM cascade-drop helper synthesis.
+#
+# Exercises vm_drop_register_for_module: classification, naming,
+# and direct-invocation behaviour. Live-only test: the helpers do
+# not exist in the C backend symbol space. See the gate in
+# tools/run_tests.sh and docs/structural-drop-stage1-plan.md.
+
+# Trivial struct: only primitives. Must NOT get a drop helper.
+type Trivial {
+  x: Int
+  y: Int
+}
+
+# Struct with a String field. Must get both FULL and ALIAS helpers.
+type WithString {
+  name: String
+}
+
+# Nested struct: Outer.inner has Inner.text: String. Both layers
+# must be classified as cascade-droppable. The List(String) field
+# exercises the container-cascade classification.
+type Inner {
+  text: String
+}
+
+type Outer {
+  inner: Inner
+  names: List(String)
+}
+
+# Introspection native registered by vm_natives_core.c. Returns:
+#   -1  no helper registered under that name
+#   0+  invocation counter for the matching descriptor
+func __raeVmDropCount(typeName: view String, isAlias: Bool) extern ret Int
+
+# The shared VM drop callback is registered under per-type names.
+# Declared here as a plain extern so we can call one directly and
+# confirm it actually runs (Test 5).
+func rae_vm_drop_struct_WithString(this: mod WithString) extern
+
+func main() {
+  let trivialName: String = "Trivial"
+  let withStringName: String = "WithString"
+  let innerName: String = "Inner"
+  let outerName: String = "Outer"
+
+  # Test 2: Trivial gets no helper of either variant.
+  let trivialFull: Int = __raeVmDropCount(trivialName, isAlias: false)
+  let trivialAlias: Int = __raeVmDropCount(trivialName, isAlias: true)
+  log("trivial_full={trivialFull}")
+  log("trivial_alias={trivialAlias}")
+
+  # Test 3: WithString gets FULL and ALIAS.
+  let wsFull: Int = __raeVmDropCount(withStringName, isAlias: false)
+  let wsAlias: Int = __raeVmDropCount(withStringName, isAlias: true)
+  log("withstring_full={wsFull}")
+  log("withstring_alias={wsAlias}")
+
+  # Test 4: Nested struct (Outer + Inner) and List(String) classified.
+  let innerFull: Int = __raeVmDropCount(innerName, isAlias: false)
+  let outerFull: Int = __raeVmDropCount(outerName, isAlias: false)
+  let outerAlias: Int = __raeVmDropCount(outerName, isAlias: true)
+  log("inner_full={innerFull}")
+  log("outer_full={outerFull}")
+  log("outer_alias={outerAlias}")
+
+  # Test 5: Invoke a synthesised helper directly. The descriptor
+  # invocation counter goes from 0 to 1, and the call must not
+  # crash on a freshly-constructed Value.
+  let item: WithString = { name: "hello" }
+  rae_vm_drop_struct_WithString(item)
+  let afterCall: Int = __raeVmDropCount(withStringName, isAlias: false)
+  log("withstring_full_after_call={afterCall}")
+}
