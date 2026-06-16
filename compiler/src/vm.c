@@ -983,7 +983,13 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         if (obj_val.type != VAL_REF) {
             // Cannot take reference to a temporary (literal or result of expr)
             value_free(&obj_val);
-            diag_error(NULL, 0, 0, "cannot take reference to a temporary value");
+            char buf[256];
+            snprintf(buf, sizeof(buf),
+                "cannot take reference to a temporary value (chunk %s, op %s, bytecode offset %zu)",
+                vm_chunk_debug_name(chunk, instruction_offset),
+                instruction == OP_VIEW_FIELD ? "OP_VIEW_FIELD" : "OP_MOD_FIELD",
+                instruction_offset);
+            diag_error(NULL, instruction_line, 0, buf);
             return VM_RUNTIME_ERROR;
         }
 
