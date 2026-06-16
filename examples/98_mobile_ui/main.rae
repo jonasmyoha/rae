@@ -31,11 +31,9 @@ import ui/event_loop
 import ui/animation
 
 func main() {
-  # FLAG_WINDOW_RESIZABLE (4) | FLAG_MSAA_4X_HINT (32) = 36. MSAA turns
-  # on 4x multisampling so raylib's triangulated circles / rounded rects
-  # don't render with jagged edges. Must be set BEFORE initWindow;
-  # ignored otherwise. Rae has no bitwise `|` yet, so we precompute.
-  setConfigFlags(flags: 36)
+  # `RAE_UI_HEADLESS=1`: see headless.rae (HIDDEN+UNFOCUSED flags).
+  let isHeadless: Bool = headlessIsActive()
+  setConfigFlags(flags: headlessConfigFlags(headless: isHeadless))
   raylibSetLogLevel(level: 4)  # LOG_WARNING — silence per-frame TEXTURE/SHADER INFO spam
   let winW: Float = screenW
   let winH: Float = screenH
@@ -129,13 +127,15 @@ func main() {
   }
 
   # Spotify-mode integration. ON by default; opt out with
-  # RAE_UI_NO_SPOTIFY=1. See examples/98_mobile_ui/spotify_view.rae.
+  # RAE_UI_NO_SPOTIFY=1 or RAE_UI_HEADLESS=1 (would focus Spotify).
   let spotifyState: SpotifyState = createSpotifyState()
-  if spotifyState.enabled {
-    log("[spotify] ON — driving local Spotify via AppleScript. RAE_UI_NO_SPOTIFY=1 disables.")
+  let spotifyOn: Bool = spotifyState.enabled
+  if isHeadless { spotifyOn = false }
+  if spotifyOn {
+    log("[spotify] ON — driving local Spotify via AppleScript.")
     spotifyLaunch()
   } else {
-    log("[spotify] OFF (RAE_UI_NO_SPOTIFY set)")
+    log("[spotify] OFF (RAE_UI_NO_SPOTIFY or RAE_UI_HEADLESS)")
   }
 
   let screenshotEnv: String = getEnv(name: "RAE_UI_SCREENSHOT")
@@ -154,9 +154,8 @@ func main() {
   # Example: `RAE_AUTO_EXIT_SEC=30 rae run --target compiled ...`
   let autoExitEnv: String = getEnv(name: "RAE_AUTO_EXIT_SEC")
   let autoExitSec: Float = 0.0
-  if autoExitEnv.length() > 0 {
-    autoExitSec = autoExitEnv.toFloat()
-  }
+  if autoExitEnv.length() > 0 { autoExitSec = autoExitEnv.toFloat() }
+  autoExitSec = headlessApplyAutoExitDefault(headless: isHeadless, current: autoExitSec)
   let bootTime: Float = getTime()
 
   # `RAE_UI_WAIT_TRACE=1` logs every `waitEventsTimeout` call whose
