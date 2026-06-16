@@ -300,21 +300,24 @@ bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
           emit_uint32(compiler, (uint32_t)slot, (int)stmt->line);
       }
 
-      /* Stage 1 step 3 — flag this local for scope-exit cascade
-       * drop if its type cascades AND the binding is value-owning
-       * (not a view/mod borrow) AND we actually have a registered
-       * helper to call. FULL vs ALIAS picks the variant:
-       *   FULL  — auto-init (no value) or struct literal (OBJECT)
-       *   ALIAS — anything else (call results, ident copies, …)
-       * Mirrors the C backend's `local_struct_owns_heap` gate plus
-       * the exact selection rules of vm_drop_register_for_module:
-       *   * non-generic user struct decl
-       *   * not c_struct (raylib etc.)
-       *   * type_needs_cascade_drop true
-       * Skipping these gates is what kept the C-stdlib (StringMap,
-       * IntMap, generic StringMapEntry, …) from blowing up with
-       * "native not registered" — those decls have generic_params
-       * and so no synthesised helper exists. */
+      /* Stage 1 step 3 + step 5 — flag this local for scope-exit
+       * cleanup. Two paths converge here:
+       *
+       *   USER STRUCT  — needs a registered drop helper. Emit
+       *                  OP_MOD_LOCAL + OP_NATIVE_CALL. Variant
+       *                  (FULL/ALIAS) selected from binding-site.
+       *                  Gate: non-generic, non-c_struct user
+       *                  struct decl exists in ctx->all_decls.
+       *   LEAF         — String, List(T), Buffer(T), StringMap(V),
+       *                  IntMap(V). No helper needed; OP_DROP_LOCAL
+       *                  just value_free's the slot. No FULL/ALIAS
+       *                  distinction (leaves don't cascade through
+       *                  fields, value_free already walks
+       *                  containers fully).
+       *
+       * Both paths require: value-owning binding (not view/mod/opt),
+       * not the `=>` bind form, and type cascade-droppable per the
+       * backend-neutral predicate. */
       if (slot >= 0
           && stmt->as.let_stmt.type
           && !stmt->as.let_stmt.is_bind
@@ -325,25 +328,37 @@ bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
                                      compiler->module,
                                      stmt->as.let_stmt.type, 0)) {
         Str base = get_base_type_name(stmt->as.let_stmt.type);
-        const AstDecl* tdecl = NULL;
-        for (size_t i = 0; i < compiler->compiler_ctx->all_decl_count; ++i) {
-          const AstDecl* d = compiler->compiler_ctx->all_decls[i];
-          if (d->kind != AST_DECL_TYPE) continue;
-          if (!str_eq(d->as.type_decl.name, base)) continue;
-          tdecl = d; break;
-        }
-        bool helper_exists =
-          tdecl != NULL
-          && tdecl->as.type_decl.generic_params == NULL
-          && !has_property(tdecl->as.type_decl.properties, "c_struct");
-        if (helper_exists) {
+        bool is_leaf =
+          str_eq_cstr(base, "String")
+          || str_eq_cstr(base, "List")
+          || str_eq_cstr(base, "Buffer")
+          || str_eq_cstr(base, "StringMap")
+          || str_eq_cstr(base, "IntMap");
+        if (is_leaf) {
           compiler->locals[slot].needs_drop = true;
-          bool is_struct_literal_init =
-            stmt->as.let_stmt.value
-            && stmt->as.let_stmt.value->kind == AST_EXPR_OBJECT;
-          bool is_default_init = stmt->as.let_stmt.value == NULL;
-          compiler->locals[slot].is_alias =
-            !(is_struct_literal_init || is_default_init);
+          compiler->locals[slot].is_leaf_drop = true;
+          compiler->locals[slot].is_alias = false;
+        } else {
+          const AstDecl* tdecl = NULL;
+          for (size_t i = 0; i < compiler->compiler_ctx->all_decl_count; ++i) {
+            const AstDecl* d = compiler->compiler_ctx->all_decls[i];
+            if (d->kind != AST_DECL_TYPE) continue;
+            if (!str_eq(d->as.type_decl.name, base)) continue;
+            tdecl = d; break;
+          }
+          bool helper_exists =
+            tdecl != NULL
+            && tdecl->as.type_decl.generic_params == NULL
+            && !has_property(tdecl->as.type_decl.properties, "c_struct");
+          if (helper_exists) {
+            compiler->locals[slot].needs_drop = true;
+            bool is_struct_literal_init =
+              stmt->as.let_stmt.value
+              && stmt->as.let_stmt.value->kind == AST_EXPR_OBJECT;
+            bool is_default_init = stmt->as.let_stmt.value == NULL;
+            compiler->locals[slot].is_alias =
+              !(is_struct_literal_init || is_default_init);
+          }
         }
       }
 
@@ -801,21 +816,33 @@ bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
              * back to false for the next cleanup pass. */
             if (compiler->locals[slot].needs_drop
                 && !compiler->locals[slot].dropped) {
-              char buf[256];
-              Str tn = compiler->locals[slot].type_name;
-              int n = snprintf(buf, sizeof(buf),
-                               "rae_vm_drop_struct_%.*s%s",
-                               (int)tn.len, tn.data,
-                               compiler->locals[slot].is_alias
-                                 ? "_alias" : "");
-              if (n > 0 && n < (int)sizeof(buf)) {
-                emit_op(compiler, OP_MOD_LOCAL, (int)stmt->line);
+              if (compiler->locals[slot].is_leaf_drop) {
+                /* Leaf reassign — still goes through the runtime
+                 * OP_SET_LOCAL value_free path, but emit an
+                 * explicit OP_DROP_LOCAL beforehand so the
+                 * cleanup is visible in the bytecode and
+                 * symmetric with scope-exit. Reentrant-safe:
+                 * after OP_DROP_LOCAL the slot is VAL_NONE, so
+                 * OP_SET_LOCAL's value_free on it is a no-op. */
+                emit_op(compiler, OP_DROP_LOCAL, (int)stmt->line);
                 emit_uint32(compiler, (uint32_t)slot, (int)stmt->line);
-                if (!emit_native_call(compiler, str_from_cstr(buf),
-                                      1, (int)stmt->line, 0)) {
-                  return false;
+              } else {
+                char buf[256];
+                Str tn = compiler->locals[slot].type_name;
+                int n = snprintf(buf, sizeof(buf),
+                                 "rae_vm_drop_struct_%.*s%s",
+                                 (int)tn.len, tn.data,
+                                 compiler->locals[slot].is_alias
+                                   ? "_alias" : "");
+                if (n > 0 && n < (int)sizeof(buf)) {
+                  emit_op(compiler, OP_MOD_LOCAL, (int)stmt->line);
+                  emit_uint32(compiler, (uint32_t)slot, (int)stmt->line);
+                  if (!emit_native_call(compiler, str_from_cstr(buf),
+                                        1, (int)stmt->line, 0)) {
+                    return false;
+                  }
+                  emit_op(compiler, OP_POP, (int)stmt->line);
                 }
-                emit_op(compiler, OP_POP, (int)stmt->line);
               }
             }
             emit_op(compiler, OP_SET_LOCAL, (int)stmt->line);
