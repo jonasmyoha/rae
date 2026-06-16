@@ -95,16 +95,18 @@ func mountNowPlayingPage(
   }
 
   # Gate the big album-cover corner radius on the same AppSettings
-  # flag that drives Library / Home / History. Matches the 12px
-  # radius the Album page's HeroThumb is authored with, so a hero
-  # transition between those screens lerps a constant radius.
+  # flag that drives Library / Home / History. The Now Playing hero
+  # is the largest cover on screen so it gets a beefier 24px radius
+  # — visibly chunkier than the 12px used by the Album / Library /
+  # Home thumbs. Hero transitions between those screens still lerp
+  # the radius automatically (lib/ui/hero.rae interpolates it).
   if state.settings.roundedAlbumCovers {
     let heroNodeId: String = "Hero"
     let heroOpt: opt Int = findNodeInPage(world: world, pageId: playerPageId, nodeId: heroNodeId)
     if heroOpt is not none {
       let raw: Int = heroOpt
       let heroEntity: EntityId = entityId(v: raw)
-      let cr: CornerRadius = { radius: 12.0 }
+      let cr: CornerRadius = { radius: 24.0 }
       componentSet(this: world.cornerRadiuses, entity: heroEntity, data: cr)
     }
   }
