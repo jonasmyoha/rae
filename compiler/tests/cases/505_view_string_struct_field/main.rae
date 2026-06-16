@@ -1,0 +1,51 @@
+# Stage 3a: struct-literal field-init from a `view String` parameter
+# must deep-copy into the owning field.
+#
+# Before the fix in c_expr.c, the move-when-safe path treated any
+# single-use parameter as movable — including `view String` params.
+# The field's chars pointer aliased the borrow; cascade-drop on the
+# returned struct then double-freed against the caller's owner.
+# Found in mobile_ui by flipping `setText(text: own String)` →
+# `setText(text: view String)`: rae_drop_struct_rae_UiWorld aborted
+# in libmalloc.
+#
+# Now the move only fires for owning params; view/mod params force
+# rae_string_copy. Runs in BOTH targets to pin parity.
+
+import core
+import sys
+
+type Item {
+  label: String
+}
+
+# `view String` param — must NOT move into the field. The fix
+# detects the param's view modifier and emits rae_string_copy.
+func makeItem(label: view String) ret Item {
+  let it: Item = { label: label }
+  ret it
+}
+
+# Loop-stress: 4000 iterations of makeItem + scope-exit drop. Pre-
+# fix this aborted in libmalloc on the first iteration's drop;
+# post-fix it runs cleanly with bounded RSS.
+func main() {
+  let warm: String = "warmup-string-payload"
+  let i: Int = 0
+  let warmups: Int = 200
+  loop i < warmups {
+    let item: Item = makeItem(label: warm)
+    i = i + 1
+  }
+  let rssBefore: Int = processRssKb()
+  let j: Int = 0
+  let iters: Int = 4000
+  loop j < iters {
+    let item: Item = makeItem(label: warm)
+    j = j + 1
+  }
+  let rssAfter: Int = processRssKb()
+  let grew: Int = rssAfter - rssBefore
+  let bounded: Bool = grew < 1024
+  log("view_struct_field_bounded={bounded}")
+}
