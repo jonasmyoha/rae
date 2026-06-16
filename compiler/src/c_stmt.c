@@ -424,11 +424,15 @@ bool emit_implicit_drops_for_body(CFuncContext* ctx, FILE* out,
       //   rae_drop_struct_<T>_alias — strict cascade (skips Strings).
       // Pick by local ownership: struct-literal/auto-init locals
       // uniquely own (full); call-result and bare-ident-copy locals
-      // may alias the source (alias variant). Generic-instance
-      // structs (Stack(Int), ComponentTable(T)) still need user-
-      // defined `drop(T)` overloads — Pass A only synthesises
-      // rae_drop_struct_ helpers for non-generic structs.
-      if (type->generic_args) continue;
+      // may alias the source (alias variant).
+      //
+      // Stage 1 closure: spec-typed locals (Wrapper(String) etc.)
+      // also reach this branch. Pass A' in c_backend.c collects
+      // their `ctx->generic_types[]` entries into `drop_entries[]`
+      // and emits the synthesised helpers under the spec-mangled
+      // name. Generic user-defined containers (List/StringMap/
+      // IntMap) still go through the `is_drop_target_type` branch
+      // above because they have their own `drop(T)` overload.
       const char* struct_mangled = rae_mangle_type_specialized(
           ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type);
       const char* suffix = ctx->local_struct_owns_heap[idx] ? "" : "_alias";
