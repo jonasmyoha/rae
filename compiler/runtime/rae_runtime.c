@@ -1736,8 +1736,56 @@ void rae_ext_disableAppNap(void) {
 #include <GL/gl.h>
 #endif
 
+/* Phase 0 of the color-management plan (docs/color-management-plan.md).
+ *
+ * Raylib hands the OS a raw OpenGL framebuffer and walks away —
+ * macOS WindowServer then interprets those bytes through whatever
+ * the host display's profile is (Display P3 on every modern Mac).
+ * sRGB-encoded PNG content displayed as P3 looks visibly over-
+ * saturated, especially on stylised game art with bright primaries.
+ *
+ * The fix until the Metal backend lands is to tell macOS the
+ * window's framebuffer is sRGB. WindowServer then does the right
+ * sRGB → P3 conversion for free. Drives the existing Cocoa colour-
+ * management path that Preview, Safari and Chrome already use.
+ *
+ * Pure C, no Objective-C compiler step: routes through the objc
+ * runtime's C API (`objc_msgSend` etc.). Apple-only — non-Apple
+ * builds compile this away. */
+#ifdef __APPLE__
+#include <objc/objc.h>
+#include <objc/runtime.h>
+#include <objc/message.h>
+static void rae_macos_set_window_srgb(void) {
+    Class app_cls = objc_getClass("NSApplication");
+    if (!app_cls) return;
+    SEL shared_sel = sel_registerName("sharedApplication");
+    id app = ((id (*)(Class, SEL))objc_msgSend)(app_cls, shared_sel);
+    if (!app) return;
+    SEL windows_sel = sel_registerName("windows");
+    id windows = ((id (*)(id, SEL))objc_msgSend)(app, windows_sel);
+    if (!windows) return;
+    Class space_cls = objc_getClass("NSColorSpace");
+    if (!space_cls) return;
+    SEL srgb_sel = sel_registerName("sRGBColorSpace");
+    id srgb = ((id (*)(Class, SEL))objc_msgSend)(space_cls, srgb_sel);
+    if (!srgb) return;
+    SEL count_sel = sel_registerName("count");
+    SEL at_idx_sel = sel_registerName("objectAtIndex:");
+    SEL set_space_sel = sel_registerName("setColorSpace:");
+    unsigned long n = ((unsigned long (*)(id, SEL))objc_msgSend)(windows, count_sel);
+    for (unsigned long i = 0; i < n; i++) {
+        id w = ((id (*)(id, SEL, unsigned long))objc_msgSend)(windows, at_idx_sel, i);
+        if (w) ((void (*)(id, SEL, id))objc_msgSend)(w, set_space_sel, srgb);
+    }
+}
+#else
+static void rae_macos_set_window_srgb(void) { /* no-op on non-Apple */ }
+#endif
+
 void rae_ext_initWindow(int64_t width, int64_t height, rae_String title) {
     InitWindow((int)width, (int)height, (const char*)title.data);
+    rae_macos_set_window_srgb();
 }
 
 void rae_ext_setConfigFlags(int64_t flags) {
