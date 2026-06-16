@@ -1,0 +1,205 @@
+# Stage 1 step 3: VM scope-exit + early-return cascade-drop emission.
+#
+# Live-only. Builds on commit e31bb9b: the synthesised
+# rae_vm_drop_struct_<T>[_alias] natives are now invoked automatically
+# by the emitter at block-scope exit and before every ret, in
+# deterministic reverse binding order, with no double-drop and with
+# move-tracking on bare-ident returns. Defers run BEFORE structural
+# drops (matches the C backend order).
+#
+# Each scenario is its own subfunction so the lifetime of the locals
+# in that scenario is the function body. After every scenario we
+# query __raeVmDropCount and print a label so the harness diff
+# detects regressions per-axis. Counters are cumulative across the
+# whole program.
+
+import core
+
+type Trivial {
+  x: Int
+  y: Int
+}
+
+type WithString {
+  name: String
+}
+
+type Inner {
+  text: String
+}
+
+type Outer {
+  inner: Inner
+  names: List(String)
+}
+
+func __raeVmDropCount(typeName: view String, isAlias: Bool) extern ret Int
+func processRssKb() extern ret Int
+
+# --- Scenario 1: normal scope exit, FULL variant -----------------
+# Struct-literal init produces FULL ownership; scope exit must drop.
+func scenarioNormalScopeExit() {
+  let w: WithString = { name: "alpha" }
+}
+
+# --- Scenario 2: nested block exit, no double-drop ---------------
+# The inner block introduces a separate WithString. Scope-exit
+# emission must drop the inner one at end-of-inner-block, leave the
+# outer one for end-of-outer-block, and never double-drop either.
+func scenarioNestedBlocks() {
+  let outerW: WithString = { name: "outer" }
+  if true {
+    let innerW: WithString = { name: "inner" }
+  }
+}
+
+# --- Scenario 3: early return preserves the return value ---------
+# `ret w` is the source of the returned value. Scope-exit must NOT
+# drop w (move-tracking); the caller binds the returned struct to
+# a fresh local. Inside scenarioEarlyReturn, FULL on WithString
+# should fire 0 times (the only owning local is `w` and it is
+# returned).
+func scenarioEarlyReturn() ret WithString {
+  let w: WithString = { name: "returned" }
+  if true {
+    ret w
+  }
+  let unreached: WithString = { name: "unreached" }
+  ret unreached
+}
+
+# --- Scenario 4: nested struct (Inner inside Outer) --------------
+# Construct an Outer with an Inner. Scope-exit fires Outer's FULL
+# helper; the nested-field cascade reaches Inner via DROP_F_NESTED.
+# `__raeVmDropCount("Inner", false)` does NOT bump because Inner's
+# helper is invoked by Outer's body, not directly — the per-
+# descriptor `invocations` counter is bumped on the outer call.
+# This is the expected behaviour.
+func scenarioNestedStruct() {
+  let n: Outer = {
+    inner: { text: "nested-text" }
+    names: createList(String, cap: 0)
+  }
+}
+
+# --- Scenario 5: List(String) inside a struct -------------------
+# Helper constructs an Outer with a non-empty List(String) and
+# returns FULL ownership; caller binds with =, so move-tracking
+# fires and ownership transfers to the caller's local (which is
+# then ALIAS in the caller, because the RHS is a call).
+func makeOuterWithItems() ret Outer {
+  let it: Outer = {
+    inner: { text: "n5" }
+    names: createList(String, cap: 0)
+  }
+  ret it
+}
+
+func scenarioListStringInStruct() {
+  let n: Outer = makeOuterWithItems()
+}
+
+# --- Scenario 6: ALIAS variant selection ------------------------
+# `let p = pickWithString()` — RHS is a call. is_alias = true.
+# Scope-exit fires the _alias helper; counter on FULL stays put.
+func pickWithString() ret WithString {
+  let made: WithString = { name: "from-call" }
+  ret made
+}
+
+func scenarioAliasVariant() {
+  let p: WithString = pickWithString()
+}
+
+func main() {
+  let withStringName: String = "WithString"
+  let outerName: String = "Outer"
+  let innerName: String = "Inner"
+
+  # Scenario 1 — normal scope exit, FULL.
+  let s1Before: Int = __raeVmDropCount(withStringName, isAlias: false)
+  scenarioNormalScopeExit()
+  let s1After: Int = __raeVmDropCount(withStringName, isAlias: false)
+  let s1Delta: Int = s1After - s1Before
+  log("scenario1_full_delta={s1Delta}")
+
+  # Scenario 2 — nested blocks, no double-drop. Two distinct lets,
+  # one in each scope, so we expect exactly two FULL bumps.
+  let s2Before: Int = __raeVmDropCount(withStringName, isAlias: false)
+  scenarioNestedBlocks()
+  let s2After: Int = __raeVmDropCount(withStringName, isAlias: false)
+  let s2Delta: Int = s2After - s2Before
+  log("scenario2_full_delta={s2Delta}")
+
+  # Scenario 3 — early return preserves the value. Inside the callee
+  # the only FULL-classed local is `w`, which is returned and thus
+  # excluded from the drop sweep, so the FULL counter must not bump.
+  # `unreached` lives after the if-ret but is on the cold path; the
+  # emitter still emits drops in that path, but at runtime we never
+  # reach it. So no bumps observed.
+  let s3FullBefore: Int = __raeVmDropCount(withStringName, isAlias: false)
+  let s3AliasBefore: Int = __raeVmDropCount(withStringName, isAlias: true)
+  let returned: WithString = scenarioEarlyReturn()
+  let s3FullMid: Int = __raeVmDropCount(withStringName, isAlias: false)
+  let s3AliasMid: Int = __raeVmDropCount(withStringName, isAlias: true)
+  let s3FullDelta: Int = s3FullMid - s3FullBefore
+  let s3AliasDelta: Int = s3AliasMid - s3AliasBefore
+  log("scenario3_full_delta={s3FullDelta}")
+  log("scenario3_alias_delta={s3AliasDelta}")
+
+  # Scenario 4 — nested struct via Outer's FULL. Inner's counter
+  # stays put (nested cascade is via descriptor, not a separate
+  # native invocation).
+  let s4OuterBefore: Int = __raeVmDropCount(outerName, isAlias: false)
+  let s4InnerBefore: Int = __raeVmDropCount(innerName, isAlias: false)
+  scenarioNestedStruct()
+  let s4OuterAfter: Int = __raeVmDropCount(outerName, isAlias: false)
+  let s4InnerAfter: Int = __raeVmDropCount(innerName, isAlias: false)
+  let s4OuterDelta: Int = s4OuterAfter - s4OuterBefore
+  let s4InnerDelta: Int = s4InnerAfter - s4InnerBefore
+  log("scenario4_outer_full_delta={s4OuterDelta}")
+  log("scenario4_inner_full_delta={s4InnerDelta}")
+
+  # Scenario 5 — List(String) inside an Outer obtained via a call.
+  # Caller's local is ALIAS; counter on Outer.alias bumps once.
+  # FULL stays put.
+  let s5FullBefore: Int = __raeVmDropCount(outerName, isAlias: false)
+  let s5AliasBefore: Int = __raeVmDropCount(outerName, isAlias: true)
+  scenarioListStringInStruct()
+  let s5FullAfter: Int = __raeVmDropCount(outerName, isAlias: false)
+  let s5AliasAfter: Int = __raeVmDropCount(outerName, isAlias: true)
+  let s5FullDelta: Int = s5FullAfter - s5FullBefore
+  let s5AliasDelta: Int = s5AliasAfter - s5AliasBefore
+  log("scenario5_outer_full_delta={s5FullDelta}")
+  log("scenario5_outer_alias_delta={s5AliasDelta}")
+
+  # Scenario 6 — ALIAS variant fires on call-result let.
+  let s6FullBefore: Int = __raeVmDropCount(withStringName, isAlias: false)
+  let s6AliasBefore: Int = __raeVmDropCount(withStringName, isAlias: true)
+  scenarioAliasVariant()
+  let s6FullAfter: Int = __raeVmDropCount(withStringName, isAlias: false)
+  let s6AliasAfter: Int = __raeVmDropCount(withStringName, isAlias: true)
+  let s6FullDelta: Int = s6FullAfter - s6FullBefore
+  let s6AliasDelta: Int = s6AliasAfter - s6AliasBefore
+  log("scenario6_full_delta={s6FullDelta}")
+  log("scenario6_alias_delta={s6AliasDelta}")
+
+  # --- Stress: repeatedly create+drop a struct-literal Outer ----
+  # Each iteration constructs an Outer in place (struct literal -> FULL
+  # ownership). Scope-exit fires the FULL helper: the nested Inner
+  # struct's String is freed and the inline empty List(String) is
+  # freed. RSS should plateau after allocator warmup. Threshold is
+  # generous (4 MB over 2000 iterations) so we catch only the
+  # "every iteration leaks" regression, not allocator noise.
+  let rssBefore: Int = processRssKb()
+  let i: Int = 0
+  let iters: Int = 2000
+  loop i < iters {
+    scenarioNestedStruct()
+    i = i + 1
+  }
+  let rssAfter: Int = processRssKb()
+  let grew: Int = rssAfter - rssBefore
+  let bounded: Bool = grew < 4096
+  log("stress_bounded={bounded}")
+}
