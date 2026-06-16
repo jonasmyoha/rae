@@ -23,6 +23,7 @@
 #include "vm_value.h"
 #include "vm_raylib.h"
 #include "vm_tinyexpr.h"
+#include "vm_drop.h"
 #include "../runtime/rae_runtime.h"
 
 static const Value* deref_value(const Value* v);
@@ -817,6 +818,42 @@ static bool native_rae_sys_file_mtime(struct VM* vm,
   return true;
 }
 
+/* Stage 1 step 2 introspection — returns -1 if no
+ * `rae_vm_drop_struct_<typeName>[_alias]` is registered, else the
+ * descriptor's invocation counter. Lets the focused tests verify
+ * that vm_drop_register_for_module synthesised the expected
+ * helpers and that direct calls actually ran. */
+static bool native_rae_vm_drop_count(struct VM* vm,
+                                      VmNativeResult* out_result,
+                                      const Value* args,
+                                      size_t arg_count,
+                                      void* user_data) {
+  (void)user_data;
+  if (arg_count != 2 || !out_result) return false;
+  const Value* name_val = deref_value(&args[0]);
+  const Value* alias_val = deref_value(&args[1]);
+  if (!name_val || !alias_val) return false;
+  if (name_val->type != VAL_STRING) return false;
+  if (alias_val->type != VAL_BOOL) return false;
+  char buf[512];
+  int n = snprintf(buf, sizeof(buf),
+                   "rae_vm_drop_struct_%.*s%s",
+                   (int)name_val->as.string_value.length,
+                   (const char*)name_val->as.string_value.chars,
+                   alias_val->as.bool_value ? "_alias" : "");
+  if (n <= 0 || n >= (int)sizeof(buf)) return false;
+  int64_t result = -1;
+  if (vm && vm->registry) {
+    const VmNativeEntry* e = vm_registry_find_native(vm->registry, buf);
+    if (e && e->user_data) {
+      result = (int64_t)vm_drop_descriptor_invocations(e->user_data);
+    }
+  }
+  out_result->has_value = true;
+  out_result->value = value_int(result);
+  return true;
+}
+
 static bool native_rae_sys_rss_kb(struct VM* vm,
                                    VmNativeResult* out_result,
                                    const Value* args,
@@ -1259,6 +1296,8 @@ bool register_default_natives(VmRegistry* registry, TickCounter* tick_counter) {
   ok = vm_registry_register_native(registry, "processRssKb", native_rae_sys_rss_kb, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_sys_rss_kb", native_rae_sys_rss_kb, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_ext_rae_sys_rss_kb", native_rae_sys_rss_kb, NULL) && ok;
+  /* Stage 1 step 2 introspection — see native_rae_vm_drop_count. */
+  ok = vm_registry_register_native(registry, "__raeVmDropCount", native_rae_vm_drop_count, NULL) && ok;
   ok = vm_registry_register_native(registry, "exists", native_rae_sys_exists, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_sys_exists", native_rae_sys_exists, NULL) && ok;
   ok = vm_registry_register_native(registry, "rae_ext_rae_sys_exists", native_rae_sys_exists, NULL) && ok;

@@ -1,6 +1,7 @@
 #include "vm_compiler.h"
 #include "vm_compiler_internal.h"
 #include "mangler.h"
+#include "vm_drop.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -1569,6 +1570,14 @@ bool vm_compile_module(CompilerContext* ctx, const AstModule* module, Chunk* chu
   if (!collect_metadata(ctx, file_path, module, &ctx->functions, &ctx->types, &ctx->enums, registry)) {
     diag_error(file_path, 0, 0, "failed to prepare VM metadata");
     compiler.had_error = true;
+  }
+
+  /* Stage 1 step 2: synthesise FULL + ALIAS cascade-drop natives for
+   * every non-generic user struct that needs cleanup. Registration
+   * only — the VM emitter does not yet invoke them at scope exit;
+   * tests reach into the registry to invoke them directly. */
+  if (registry) {
+    (void)vm_drop_register_for_module(ctx, module, registry);
   }
 
   Str main_name = str_from_cstr("main");
