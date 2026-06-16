@@ -1,8 +1,19 @@
 # Drop semantics, destructors, and defer in Rae
 
-> Design notes on how cleanup should work in Rae — written before any
-> of this is implemented. Captures the reasoning so future
-> implementation has a coherent target rather than ad-hoc cases.
+> Design notes on how cleanup should work in Rae. Captures the
+> reasoning so future implementation has a coherent target rather
+> than ad-hoc cases.
+>
+> Three statuses are used throughout:
+>
+> * **Decided** — already a requirement or already in the language.
+> * **Likely** — the direction the reasoning points toward, but
+>   not committed to.
+> * **Open** — a real design question, with alternatives still on
+>   the table.
+>
+> Where this document gives a "preferred" or "natural" rule, that
+> reflects the current best guess only.
 
 The key point is that Rae already has the beginnings of a destruction
 model, even if it does not yet expose “destructors” as a user-facing
@@ -36,7 +47,59 @@ So Rae already needs this general compiler question:
 
 That applies even without files, fonts, sockets, or GPU objects.
 
-## Structural drop
+## At a glance: Decided / Likely / Open
+
+**Decided**
+
+* Owned built-in types (`String`, `List(T)`, buffers) must be
+  cleaned up when they die.
+* Cleanup must compose through user structs and generic
+  instantiations — a `String` inside a struct cannot leak just
+  because it is one level of indirection deeper.
+* Rae already has `own`, `view`, and `mod` to talk about who
+  currently holds responsibility for a value.
+
+**Likely**
+
+* The compiler synthesises structural drop for user types that
+  contain owned fields. The user does not write it by hand.
+* The base case for "this type needs cleanup" is "any field needs
+  cleanup."
+* External resources (files, GPU handles, sockets) get their own
+  release hook somehow — separate from structural drop.
+* `defer` (lexical, control-flow-scoped cleanup) earns its place
+  alongside drop rather than being subsumed by it.
+* The font case used as the trigger for this document is **not**
+  a great motivating example for adding destructors — see the
+  "font example revisited" section below.
+
+**Open**
+
+* Whether user-defined custom drop becomes a first-class feature
+  at all, or whether external resources are released through
+  some other mechanism (handles + explicit close, capability
+  objects, FFI shims).
+* Whether every type with custom drop must be move-only, or
+  whether Rae can categorise types more finely. **This is the
+  question that gates most of the others** — see "Does custom
+  drop require move-only types?".
+* Whether explicit clone / copy needs to be a language concept
+  or can stay in user-land helper functions.
+* Drop order across fields and across local bindings (reverse
+  declaration order, declaration order, or something else
+  entirely).
+* Whether custom drop runs before, after, or instead of the
+  automatic structural pass over a struct's fields.
+* Whether panic unwinds (running drops along the way) or aborts.
+* What custom drop is allowed to do (allocate, fail, panic,
+  await, return values, …).
+* The syntax for explicit early cleanup (`drop value`,
+  `value.drop()`, a stdlib function, …).
+* The order in which the above stages get implemented.
+
+The rest of this document expands each of these.
+
+## Structural drop (likely-required)
 
 The simplest model is fully compiler-generated structural cleanup.
 
@@ -106,7 +169,12 @@ let state: State = createState()
 That would make ownership depend accidentally on whether the
 container is directly bound or hidden inside another type.
 
-## User-defined cleanup is an extension of that model
+This is the part of the design that is hardest to argue against:
+Rae already has owned heap data behind `String` and `List(T)`, and
+already needs it to participate in struct ownership for the
+language to fit together.
+
+## User-defined cleanup as an extension of that model (likely)
 
 Now imagine:
 
@@ -152,8 +220,105 @@ to be an entirely separate mechanism. It can be one more source of
 a type’s drop behavior.
 
 The compiler already asks whether each field needs dropping. A
-user-defined `drop` simply makes the answer “yes” for types whose
-resource ownership is not visible from their field types.
+user-defined `drop` would simply make the answer “yes” for types
+whose resource ownership is not visible from their field types.
+
+Whether Rae actually adopts user-defined drop is itself open: an
+alternative is to leave external resources as plain handles plus
+manual close calls (with `defer` for short-lived scopes), and only
+ship structural drop for owned data. That is a real option, not a
+strawman — for some kinds of resources, the "do nothing automatic,
+make the user write `close(x)`" rule is honest and easy to teach.
+
+## Does custom drop require move-only types? (open)
+
+Rust answers "yes": any type that implements `Drop` is `!Copy`,
+and assigning it to another binding is a move. That keeps cleanup
+sound — there is always exactly one owner who will eventually run
+the destructor. But it is also the source of most of Rust's
+syntactic weight: explicit `.clone()`, `&`, `&mut`, lifetime
+annotations.
+
+Rae does not have to copy that answer. The question is whether
+Rae's `own` / `view` / `mod` vocabulary already gives the compiler
+enough information to be more nuanced.
+
+A plausible categorisation:
+
+**1. Plain value types.** Fields are primitives, or other plain
+value types, recursively. Structural drop is a no-op. They are
+trivially copyable in every sense — `let b = a` produces an
+independent equal value.
+
+```rae
+type Color { r: Int  g: Int  b: Int  a: Int }
+type Vec2  { x: Float  y: Float }
+```
+
+**2. Owned-data types.** Fields contain or transitively contain
+owned heap data (`String`, `List`, buffers). Structural drop
+recurses through them. Copying these is **already** a careful
+question that Rae handles via `own` / `view` / `mod`:
+
+```rae
+let a: Person = createPerson("Alice", ...)
+let b: Person = a       // is this a move? a deep copy? aliasing?
+```
+
+The fact that Rae already needs an answer here means custom drop
+does not introduce a new copy-vs-move problem. It pushes on a
+question Rae was going to face for `String` and `List` anyway.
+
+**3. Resource-wrapper types.** A struct that uses a custom `drop`
+to release an external resource (file handle, GPU texture, OS
+socket). The handle inside is often a plain `Int`, so structural
+copying would silently duplicate ownership of the underlying
+resource:
+
+```rae
+type Texture { id: Int }
+func drop(this: mod Texture) { unloadTexture(this.id) }
+
+let a: Texture = loadTexture(path)
+let b: Texture = a          // both later try to unload id
+```
+
+The category-3 case is where Rust-style move-only buys its keep.
+A category-1 type does not need it. A category-2 type might be
+fine with Rae's existing ownership system (because the underlying
+heap data is already handled by `own` / `view` semantics).
+
+This suggests several possible designs:
+
+* **A. One rule for all "needs drop" types.** Anything whose
+  structural or custom drop is non-trivial becomes move-only.
+  Simplest, most Rust-like. Cost: even mostly-plain types with one
+  `String` field lose implicit copy.
+* **B. Only types with *custom* drop become move-only.** Owned
+  data types stay under `own` / `view` / `mod`. Custom-drop types
+  get the stricter treatment because their hidden invariant
+  (`closeFile` runs exactly once) cannot be expressed via field
+  ownership alone.
+* **C. The categorisation is explicit.** A type marker like
+  `resource type Texture { … }` or a `noCopy` keyword forces the
+  classification rather than inferring it. Lets the user say
+  "this looks like an `Int`, but it is not."
+* **D. Custom drop without move-only is allowed**, but copying a
+  custom-drop type causes a defined no-op (e.g. only the last
+  owner runs drop, the rest are zeroed). Surprising; mentioned for
+  completeness, not recommended.
+
+The leading direction from the reasoning above is **B or C** —
+Rae's existing `own` / `view` / `mod` is already doing the work
+that Rust uses move semantics for, and inheriting Rust's blanket
+"any Drop means !Copy" rule may be unnecessary for owned-data
+types. But this is a real design question, not a settled one.
+
+A related question: even under rule B or C, does Rae need an
+explicit `clone` concept for category-3 types, or can each resource
+type expose a domain-specific operation (`Texture.duplicate()`,
+`File.reopen()`) that allocates a fresh handle? The latter avoids
+naming a language-wide trait.
 
 ## Why this is different from `defer`
 
@@ -291,68 +456,18 @@ view Texture
 own Texture
 ```
 
-rather than treating every external resource as an `Int`.
+rather than treating every external resource as an `Int`. Whether
+this should be enforced or only encouraged is open.
 
-## The dangerous part: copying
+## Drop order (open)
 
-User-defined destruction cannot be added safely unless Rae’s copy
-and move rules are clear.
+If Rae adopts user-visible drop semantics, it must specify an
+order. There are two main conventions and at least one hybrid:
 
-Consider:
-
-```rae
-let a: Texture = loadTexture(...)
-let b = a
-```
-
-If this copies the raw handle, both `a` and `b` may later call
-`unloadTexture` on the same GPU object.
-
-That causes double-free-like behavior.
-
-So resource-owning types must usually be one of:
-
-* move-only
-* explicitly cloneable
-* reference-counted
-* non-owning handle types
-* backed by some shared ownership mechanism
-
-Rae already has `own`, `view`, and `mod`, so it has useful
-vocabulary for this.
-
-A likely rule could be:
-
-> A type with custom drop is not implicitly copyable unless it also
-> defines an explicit clone operation.
-
-That is close to Rust’s logic, but Rae does not need to copy Rust’s
-syntax or complexity.
-
-For example:
-
-```rae
-let texture: own Texture = loadTexture(path)
-let moved: own Texture = texture
-```
-
-After the move, `texture` is no longer usable.
-
-But:
-
-```rae
-let reference: view Texture = moved
-```
-
-does not create another owner and therefore does not create another
-cleanup obligation.
-
-## Drop order matters
-
-Rae would need a precise drop order.
-
-Usually, fields should be dropped in reverse declaration order,
-mirroring stack unwinding:
+**Reverse declaration / reverse binding order.** Mirrors stack
+unwinding. Useful when later fields depend on earlier ones — a
+texture created from a device should be released before the
+device. Familiar to anyone coming from C++ or Rust.
 
 ```rae
 type Renderer {
@@ -362,40 +477,25 @@ type Renderer {
 }
 ```
 
-If later fields depend on earlier ones, reverse order means:
+Reverse order drops `texture`, then `pipeline`, then `device`.
 
-1. `texture`
-2. `pipeline`
-3. `device`
+**Declaration order.** Symmetric with construction. Easier to
+reason about visually but can release dependencies before
+dependents.
 
-That is often desirable because resources are commonly created in
-declaration order and should be destroyed in reverse creation
-order.
+**Compiler-determined dependency order.** Inspect the type graph
+and drop in a topological order. More automatic, harder to teach,
+needs more ceremony in the type system to be sound.
 
-But Rae must make this deterministic and documented.
+The reverse-declaration convention is probably the safest default
+to start from, but this is not yet decided. Whichever wins, it
+must be **deterministic and documented** — silent compiler
+freedom here is hostile to debugging.
 
-Local variables need an order too:
+## Custom drop relative to automatic field drop (open)
 
-```rae
-let device = createDevice()
-let texture = createTexture(device)
-```
-
-At scope exit:
-
-```text
-drop texture
-drop device
-```
-
-Again, reverse binding order is the natural rule.
-
-## Custom drop plus automatic field drop
-
-A crucial language-design choice is whether a custom drop function
-replaces or supplements automatic field dropping.
-
-Suppose:
+If a user provides a custom `drop` for a struct that also has
+ordinary owned fields:
 
 ```rae
 type Font {
@@ -408,43 +508,35 @@ func drop(this: mod Font) {
 }
 ```
 
-Should Rae also automatically drop `glyphs`?
+…how does the compiler combine the two cleanups?
 
-The safer ergonomic design is usually:
+**Option A: custom drop runs, then structural drop visits owned
+fields.** The user only writes the part that the compiler cannot
+infer. Ergonomic — no manual recursion over fields. Risk: the
+custom body might invalidate fields that structural drop then
+tries to use, causing double-free or undefined behaviour.
 
-1. run the user-defined cleanup body
-2. automatically drop owned fields afterward
+**Option B: custom drop replaces the structural pass entirely.**
+The user is responsible for releasing every owned field too. More
+control, much easier to get wrong as the type grows.
 
-That prevents users from needing to manually recurse through every
-field.
+**Option C: structural drop visits owned fields first, then
+custom drop runs.** Inverts A. The custom body sees fields that
+have already been cleared. Easier to reason about for some
+resource types, but counterintuitive when the custom body needs
+to read field values to release the external resource.
 
-Conceptually:
+**Option D: a marker per field opts out of automatic dropping.**
+Most flexible, most syntax to learn.
 
-```rae
-func generatedDropFont(this: mod Font) {
-  userDropFont(this)
-  drop(this.glyphs)
-}
-```
-
-However, there are complications.
-
-What if `unloadFont` also frees memory represented by `glyphs`?
-Then automatic field cleanup would double-free.
-
-That suggests Rae may need a distinction between:
-
-* ordinary owned fields, which are always recursively dropped
-* raw or externally managed fields, which are not
-* fields explicitly extracted or invalidated during custom drop
-
-A strong default should be that normal Rae-owned fields remain
-automatically managed. Custom drop should primarily release external
-resources not represented by ordinary Rae ownership.
+The most ergonomic default is probably A, but it has a real
+failure mode (custom body frees memory that structural drop then
+re-frees) that may push toward C or D. Open.
 
 ## Partial initialization
 
-This gets difficult during construction.
+Structural drop is also a constructor-failure problem, not just a
+scope-exit problem.
 
 Consider:
 
@@ -492,11 +584,10 @@ integrate with every exit path:
 * loop continue where scopes end
 * possibly panic or recoverable failure
 
-## What happens during panic?
+## Panic (open)
 
-This connects directly to Rae’s broader panic design.
-
-There are two broad models.
+This connects directly to Rae’s broader panic design, which has
+not been settled.
 
 ### Unwinding
 
@@ -531,84 +622,77 @@ Disadvantages:
 * no cleanup
 * unsuitable if Rae wants local recovery or subsystem restart
 
-Rae could support both:
+Rae could plausibly support both — ordinary `Result` propagation
+performing full cleanup, fatal panic aborting without cleanup — but
+even that is a design choice rather than a fact. For games and
+real-time systems, avoiding arbitrary destructor work in an audio
+callback or hard real-time section may matter greatly, which is an
+argument toward making "no unwind, no surprise work in destructors"
+the path the runtime is best at.
 
-* ordinary `Result` propagation performs full cleanup
-* fatal panic aborts without cleanup
-* a recoverable panic mechanism, if added, would unwind
+## Should custom drop be constrained? (proposals)
 
-For games and real-time systems, avoiding arbitrary destructor work
-in an audio callback or hard real-time section may matter greatly.
+If user-defined `drop` ships, the question of what it is allowed to
+do is itself open. Possible restrictions, all of which are
+proposals rather than commitments:
 
-## Destructors should probably not be general arbitrary magic
-
-There is a spectrum.
-
-At one extreme:
-
-```rae
-func drop(this: mod Thing) {
-  sendNetworkMessage()
-  saveDatabase()
-  spawnThread()
-  throwError()
-}
-```
-
-That creates unpredictable hidden behavior.
-
-At the other extreme, custom drop is constrained to simple,
-non-failing release operations.
-
-Rae could define strong rules:
-
-* `drop` cannot return a value
-* `drop` cannot fail with `Result`
-* `drop` cannot panic, or panic inside drop becomes fatal
+* `drop` cannot return a value.
+* `drop` cannot fail with `Result`.
+* `drop` cannot panic, or panic inside drop becomes fatal.
 * `drop` cannot move out ordinary fields except through special
-  operations
-* `drop` executes synchronously
+  operations.
+* `drop` executes synchronously.
 * `drop` should not allocate, perhaps as guidance rather than
-  enforcement
-* `drop` cannot be `async`
+  enforcement.
+* `drop` cannot be `async`.
 * `drop` is called exactly once for each fully initialized owned
-  value
+  value.
 
-These restrictions keep destruction understandable.
+Each of these has real trade-offs. Allowing `drop` to fail with
+`Result` would model many real situations (closing a database
+transaction, flushing a buffered writer) but creates the question
+of what to do with errors raised during stack unwinding. Allowing
+allocation is the difference between a clean RAII abstraction and
+one that cannot be used in low-memory cleanup paths.
 
-## Explicit destruction may still be needed
+The leaning is toward "drop is small, total, synchronous, and
+infallible" because that keeps destruction predictable, but Rae
+has not committed to any of these yet.
 
-Automatic scope-end drop should not prevent early cleanup.
+## Explicit early destruction (open syntax)
 
-For example:
-
-```rae
-let texture = loadTexture(path)
-
-// use texture
-
-drop texture
-
-// texture is now unusable
-```
-
-An explicit `drop texture` operation could end ownership early.
-
-This is useful for:
+Automatic scope-end drop should not prevent early cleanup. There
+are real reasons to end ownership before scope exit:
 
 * releasing large buffers before function exit
 * unlocking before performing expensive work
 * closing a file before renaming it
 * unloading GPU memory before loading replacements
 
-After explicit drop, the compiler must mark the value as consumed.
+What this looks like syntactically is open. Three possibilities:
 
-That aligns well with an ownership model:
+```rae
+drop texture           // keyword statement
+texture.drop()         // method call on the value
+sysDropOwned(texture)  // plain stdlib function
+```
+
+A keyword form mirrors `ret` / `let` and signals "the compiler
+treats this specially." A method form is cheaper to parse but
+overloads the method-call slot. A function form keeps the surface
+syntax small but loses the move-out signalling that the compiler
+needs to enforce "you cannot use `texture` after this."
+
+Whichever syntax wins, after explicit drop, the compiler must mark
+the value as consumed and reject further use:
 
 ```rae
 drop texture
 use(texture) // compile error
 ```
+
+That part — "explicit drop must invalidate the binding" — is
+likely. The spelling is open.
 
 ## `defer` is still useful
 
@@ -646,9 +730,9 @@ A good division is:
 
 They overlap, but neither fully replaces the other.
 
-## How this might fit Rae specifically
+## A possible staging (one ordering, not the ordering)
 
-A conservative Rae design could proceed in stages.
+If Rae does add this, an incremental rollout could look like:
 
 ### Stage 1: compiler-generated recursive drop
 
@@ -662,24 +746,25 @@ The compiler recursively drops:
 * structs containing droppable fields
 * generic specializations containing droppable types
 
-This is already needed to fix nested memory ownership correctly.
+This is already needed to fix nested memory ownership correctly,
+which is why "structural drop" sits under "decided / likely."
 
 ### Stage 2: explicit early `drop`
 
-Allow:
+Allow some form of:
 
 ```rae
 drop value
 ```
 
-This invokes the generated cleanup and consumes the value.
+(Syntax open per the section above.) This invokes the generated
+cleanup and consumes the value.
 
-### Stage 3: non-copyable owned resource types
+### Stage 3: a resolved copy / move story
 
-Introduce or infer a rule that types with resource ownership cannot
-be implicitly copied.
-
-This may already follow naturally from owned fields.
+Settle the question raised under "does custom drop require
+move-only types?". Until that lands, custom drop should not ship,
+because the soundness of user-defined cleanup depends on it.
 
 ### Stage 4: user-defined `drop`
 
@@ -691,16 +776,19 @@ func drop(this: mod Texture) {
 }
 ```
 
-The compiler combines that with automatic recursive field cleanup.
+The compiler combines that with automatic recursive field cleanup
+according to whichever ordering rule wins (the section above on
+"custom drop relative to automatic field drop").
 
 ### Stage 5: `defer`
 
 Add lexical cleanup for paired operations and cases that do not
 deserve a dedicated owned type.
 
-This ordering matters. `defer` is easier to implement in isolation,
-but recursive drop is more foundational to Rae’s existing ownership
-claims.
+This is **one** possible ordering. Other orderings make sense too —
+`defer` is the easiest of these to implement in isolation and
+could land first as a small win, even though structural drop is
+more foundational to Rae's existing ownership claims.
 
 ## The font example revisited
 
@@ -733,7 +821,7 @@ func renderPreview(path: String) {
 
 That is where value-based cleanup becomes meaningful.
 
-## Preferred Rae direction
+## Preferred Rae direction (working hypothesis)
 
 Three concepts, kept separate:
 
@@ -748,13 +836,14 @@ Defer:
     A lexical control-flow cleanup action.
 ```
 
-Rae definitely needs the first.
+Rae definitely needs the first (decided).
 
 Rae will probably eventually benefit from the second, especially
-for graphics, audio, files, sockets, native handles, and C interop.
+for graphics, audio, files, sockets, native handles, and C interop
+(likely).
 
-Rae may also benefit from the third, but it should not be used as a
-substitute for proper owned resource types.
+Rae may also benefit from the third, but it should not be used as
+a substitute for proper owned resource types (likely).
 
 The deepest principle is:
 
@@ -765,4 +854,6 @@ use `defer`.
 
 That gives Rae a coherent model rather than choosing between
 “destructors everywhere” and “manual shutdown functions
-everywhere.”
+everywhere.” Whether each piece of that model actually ships, and
+in what shape, is still open — see the at-a-glance summary at the
+top.
