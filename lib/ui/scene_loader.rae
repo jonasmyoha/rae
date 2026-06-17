@@ -35,20 +35,71 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
     ret noEntity()
   }
 
-  # ---------- pass 1: allocate entities, populate nodeIds map ----------
+  # ---------- pass 0: reachability from root ----------
+  # Compute the set of nodes reachable from `scene.rootNodeId` via
+  # `Children` references. Orphan nodes (authored in the file but
+  # never referenced) get skipped in subsequent passes — otherwise
+  # they'd allocate parentless entities that render at their absolute
+  # canvas coords. The pixi editor sometimes serialises a flattened
+  # copy of a SceneInstance's children alongside the SceneInstance
+  # itself; without this filter we mount both copies (once via the
+  # SceneInstance resolver, once as orphans here).
   let nodeCount: Int = scene.nodes.length
+  let reachable: List(Bool) = createList(Bool, cap: nodeCount)
+  let ri: Int = 0
+  loop ri < nodeCount {
+    reachable.add(value: false)
+    ri = ri + 1
+  }
+  let rootIdxR: Int = sceneNodeIndex(this: scene, nodeId: scene.rootNodeId)
+  if rootIdxR < 0 {
+    ret noEntity()
+  }
+  let stack: List(Int) = createList(Int, cap: 32)
+  stack.add(value: rootIdxR)
+  loop stack.length > 0 {
+    let popAt: Int = stack.length - 1
+    let cur: Int = stack.get(index: popAt)
+    stack.remove(index: popAt)
+    let alreadySeen: Bool = reachable.get(index: cur)
+    if alreadySeen is false {
+      reachable.set(index: cur, value: true)
+      let n: view SceneNode => sceneNodeAt(this: scene, idx: cur)
+      let cn: Int = n.childrenIds.length
+      let ci: Int = 0
+      loop ci < cn {
+        let childId: String = n.childrenIds.get(index: ci)
+        let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
+        if childIdx >= 0 {
+          stack.add(value: childIdx)
+        }
+        ci = ci + 1
+      }
+    }
+  }
+
+  # ---------- pass 1: allocate entities, populate nodeIds map ----------
+  # Non-reachable slots keep a noEntity() sentinel so later passes
+  # can detect + skip them while keeping the index-by-nodeIndex map
+  # intact for sceneNodeIndex lookups.
   let entitiesByNodeIndex: List(EntityId) = createList(EntityId, cap: nodeCount)
   let nodeIdsMap: mod StringMap(Int) => world.nodeIds
   let i: Int = 0
   loop i < nodeCount {
-    let node: view SceneNode => sceneNodeAt(this: scene, idx: i)
-    let entity: EntityId = createEntity(world: world)
-    appendEntityListSL(lst: entitiesByNodeIndex, value: entity)
-    if pageId.length() is 0 {
-      nodeIdsMap.set(k: node.nodeId, value: entity.value)
+    let isReachable: Bool = reachable.get(index: i)
+    if isReachable {
+      let node: view SceneNode => sceneNodeAt(this: scene, idx: i)
+      let entity: EntityId = createEntity(world: world)
+      appendEntityListSL(lst: entitiesByNodeIndex, value: entity)
+      if pageId.length() is 0 {
+        nodeIdsMap.set(k: node.nodeId, value: entity.value)
+      } else {
+        let key: String = pageScopedKey(pageId: pageId, nodeId: node.nodeId)
+        nodeIdsMap.set(k: key, value: entity.value)
+      }
     } else {
-      let key: String = pageScopedKey(pageId: pageId, nodeId: node.nodeId)
-      nodeIdsMap.set(k: key, value: entity.value)
+      let placeholder: EntityId = noEntity()
+      appendEntityListSL(lst: entitiesByNodeIndex, value: placeholder)
     }
     i = i + 1
   }
@@ -57,6 +108,10 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
   let docView: view JsonDoc => scene.doc
   let j: Int = 0
   loop j < nodeCount {
+    let jReach: Bool = reachable.get(index: j)
+    if jReach is false {
+      j = j + 1
+    } else {
     let node: view SceneNode => sceneNodeAt(this: scene, idx: j)
     let entity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: j)
 
@@ -91,11 +146,16 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
       }
     }
     j = j + 1
+    }
   }
 
   # ---------- pass 3: hierarchy (Children + Parent) ----------
   let p: Int = 0
   loop p < nodeCount {
+    let pReach: Bool = reachable.get(index: p)
+    if pReach is false {
+      p = p + 1
+    } else {
     let node: view SceneNode => sceneNodeAt(this: scene, idx: p)
     let parentEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: p)
     let kn: Int = node.childrenIds.length
@@ -117,6 +177,7 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
       componentSet(this: world.childrens, entity: parentEntity, data: ch)
     }
     p = p + 1
+    }
   }
 
   # Root entity = the entity allocated for `scene.rootNodeId`.
