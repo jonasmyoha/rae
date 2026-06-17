@@ -79,6 +79,11 @@ func clearBackground(color: Color) extern
 
 func loadTexture(fileName: String) extern ret Texture
 
+# Set a texture's GPU sampling filter. `filter` matches raylib's
+# TextureFilter enum: 0=POINT, 1=BILINEAR, 2=TRILINEAR. MSDF atlases
+# must use BILINEAR (1) or glyph edges stair-step badly.
+func setTextureFilter(texture: Texture, filter: Int) extern
+
 # Load a square / rect image and zero the alpha of every pixel
 # outside the inscribed circle. Returns a Texture suitable for
 # round-avatar use. Rectangular sources still produce a centered
