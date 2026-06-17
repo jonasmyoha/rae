@@ -48,6 +48,21 @@ type Texture: c_struct {
   format: Int
 }
 
+# raylib's Rectangle — x, y, width, height in float pixels.
+type Rectangle: c_struct {
+  x: Float
+  y: Float
+  width: Float
+  height: Float
+}
+
+# Source-rect + dest-rect + rotation pivot textured draw. The
+# canonical raylib call for atlas-based glyph rendering: `source`
+# picks a sub-region of `texture`, `dest` is where it lands, and
+# `origin` is the pivot point relative to dest (use 0,0 for the
+# standard top-left). Tint multiplies the sampled colour.
+func drawTexturePro(texture: Texture, source: Rectangle, dest: Rectangle, origin: Vector2, rotation: Float, tint: Color) extern
+
 func initWindow(width: Int, height: Int, title: String) extern
 
 func setConfigFlags(flags: Int) extern
