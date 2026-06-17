@@ -20,6 +20,7 @@ import file_watch
 import hot_reload
 import ui/ecs
 import ui/hero
+import ui/msdf
 import ui/layout
 import ui/theme
 import ui/transform
@@ -338,13 +339,9 @@ func main() {
     # state and exits 0 so the supervisor can swap in the new build.
     let reloadWatcher: ReloadSignalWatcher = createReloadSignalWatcher()
 
-    # Active-album / track cache. Recomputing these from
-    # `state.albums` on every inner-loop iteration cost ~2 fps
-    # during wheel scroll on MB-backed albums (15-25 tracks each
-    # = a deep copy of an Album with all its String fields). The
-    # outer loop refreshes the cache only when the user has
-    # actually changed album or track; the inner loop reads the
-    # cached scroll bound directly.
+    # Active-album / track cache — avoids per-frame deep copy of the
+    # whole Album (MusicBrainz-backed entries have 15-25 tracks of
+    # String fields). Refreshed only on album/track change.
     let cachedAlbumStem: String = ""
     let cachedTrackIndex: Int = 0 - 1
     let cachedTrackDurMs: Int = 0
@@ -353,31 +350,31 @@ func main() {
     let cachedSheetEpoch: Int = 0
     let lastHoverAnimDirty: Bool = false
     let lastFrameTime: Float = 0.0
-    # Single InputSystem for the app lifetime — outlives world
-    # rebuilds so a held press carries `pressedEntity` across them.
-    # `updateInputSystem` refills the per-frame fields each tick.
-    # Cleared explicitly on screen change so a stale id from the
-    # outgoing screen doesn't bleed into the new one.
+    # InputSystem outlives world rebuilds so a held press carries
+    # `pressedEntity` across them. Cleared on screen change.
     let input: InputSystem = createInputSystem()
-    # Entity id under the cursor on the previous render-gate check.
-    # Only used when `debug.showInputOutlines` is on: a frame re-
-    # renders only when the hovered entity *changes*, so a still
-    # cursor over the same target stays at 0 fps. Persists across
-    # world rebuilds (entity ids are stable while the screen layout
-    # is) so the first frame after a rebuild doesn't false-trigger.
+    # Last-hovered entity from the previous render-gate check
+    # (debug.showInputOutlines re-render trigger). Persists across
+    # world rebuilds (entity ids are stable while layout is).
     let lastHoveredEntity: EntityId = noEntity()
-    # Mouse-button bitfield (bit 0 left, bit 1 right, bit 2 middle)
-    # from the previous render-gate check. Used to trigger a single
-    # re-render whenever any button transitions, so the debug
-    # overlay's "btn:" read-out updates promptly without forcing a
-    # full 60 fps loop.
+    # Mouse-button bitfield (bit 0/1/2 = left/right/middle) from the
+    # previous gate check — promotes a re-render on any transition
+    # so the debug "btn:" readout updates without 60 fps polling.
     let lastMouseBtns: Int = 0
-    # `true` while the Profile screen's cover textures are loaded
-    # into the registry. Flips false the moment we leave the screen
-    # so the next entry re-scans the folder (picking up renamed /
-    # added / removed files). Scroll-triggered rebuilds stay on
-    # Profile, so the flag remains `true` and the scan is skipped.
+    # Profile-cover load flag (currently a no-op stub for future
+    # incremental rescan).
     let profileLoaded: Bool = false
+
+    # MSDF text — atlas loaded once, deep-copied into each rebuilt
+    # world by `enableUiMsdfShared` (no GPU re-upload). No outline /
+    # shadow tint here (alpha 0 disables those layers); the body glyph
+    # is the only thing drawn.
+    let robotoMsdf: MsdfFont = loadMsdfFont(jsonPath: robotoMsdfJsonPath, atlasPath: robotoMsdfAtlasPath)
+    let msdfNoTint: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
+    # Soft black drop-shadow, applied ONLY to opt-in styles
+    # (`shadowStylesOnly: true` -> `textStyleHasShadow`, which covers the
+    # mini-player's `miniTitle`/`miniMuted`). No outline anywhere.
+    let msdfShadow: RgbaColor = { r: 0, g: 0, b: 0, a: 140 }
 
     loop running {
       # Covers were loaded at boot via `loadAllTextures`, so no
@@ -423,6 +420,7 @@ func main() {
       # Persistent-world build: mounts every screen page + dock /
       # back overlays once; setPageActive flips visibility per nav.
       let world: UiWorld = buildAppWorld(scenes: scenes, playback: playback, state: appState, texReg: texReg, scrollY: scrollFsm.scrollY)
+      enableUiMsdfShared(world: world, font: robotoMsdf, outlineColor: msdfNoTint, outlineWidth: 0.0, shadowColor: msdfShadow, shadowOffsetX: 0.0, shadowOffsetY: 1.0, shadowSoftness: 1.0, shadowStylesOnly: true)
       # Rebind any scene-authored `"albumCover"` placeholder hero +
       # sprite to the user's current album. This is what lets the
       # hero animation system find matching keys at Profile (where

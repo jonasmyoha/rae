@@ -29,6 +29,156 @@ import core
 import json
 import raylib
 
+# Compiled-target shortcut: the C runtime returns `rae_String`
+# directly for `rae_ext_rae_sys_read_file`. Declaring the extern
+# under its raw C name skips the mangler's `rae_` prefix and the
+# opt String double-unbox quirk (same pattern as lib/hot_reload).
+func rae_ext_rae_sys_read_file(path: String) extern ret String
+
+# Per-world MSDF default-font slot. Apps call `enableUiMsdf(world, ...)`
+# once at boot to register a font + outline + shadow style; all `Text`
+# components subsequently rendered through `lib/ui/render`'s `paintText`
+# route into MSDF via `paintMsdfDispatch(world, ...)`. Module-level
+# state would have been cleaner but the C codegen can't put function
+# calls (createList for the glyph table) into static initialisers, so
+# we ride on `UiWorld`'s lazy `createUiWorld()` init instead.
+type MsdfState pub {
+  enabled: Bool
+  font: MsdfFont
+  outlineColor: RgbaColor
+  outlineWidth: Float
+  shadowColor: RgbaColor
+  shadowOffsetX: Float
+  shadowOffsetY: Float
+  shadowSoftness: Float
+  # When false (default), the shadow is drawn under every Text node.
+  # When true, the shadow is only applied to styles that opt in (the
+  # renderer decides via `textStyleHasShadow` and passes the result to
+  # `paintMsdfDispatch`). Lets one app (royalblush) shadow all display
+  # text while another (mobile UI) shadows only the mini-player.
+  shadowStylesOnly: Bool
+}
+
+func createMsdfState() pub ret MsdfState {
+  let zeroTex: Texture = { id: 0, width: 0, height: 0, mipmaps: 0, format: 0 }
+  let zeroColor: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
+  let stubGlyphs: List(MsdfGlyph) = createList(MsdfGlyph, cap: 0)
+  let stubFont: MsdfFont = {
+    texture: zeroTex
+    atlasWidth: 0.0, atlasHeight: 0.0, pxRange: 4.0, fontSize: 48.0
+    emSize: 1.0, lineHeight: 1.2, ascender: 0.9, descender: 0.0 - 0.2
+    glyphs: own stubGlyphs
+    yOriginBottom: true
+  }
+  ret MsdfState {
+    enabled: false
+    font: own stubFont
+    outlineColor: zeroColor
+    outlineWidth: 0.0
+    shadowColor: zeroColor
+    shadowOffsetX: 0.0, shadowOffsetY: 0.0
+    shadowSoftness: 1.0
+    shadowStylesOnly: false
+  }
+}
+
+# Register `font` as the world's MSDF default + the outline/shadow
+# style every subsequent text node should be drawn with. RgbaColor
+# uses 0-255 channels (alpha 0 disables that effect layer).
+# `outlineWidth` and `shadowSoftness` are in screen pixels; pass
+# softness 1.0 for sharp shadows, 4-8 for soft.
+func enableUiMsdf(
+  world: mod UiWorld
+  font: own MsdfFont
+  outlineColor: view RgbaColor
+  outlineWidth: view Float
+  shadowColor: view RgbaColor
+  shadowOffsetX: view Float
+  shadowOffsetY: view Float
+  shadowSoftness: view Float
+  shadowStylesOnly: view Bool
+) pub {
+  world.msdfState.font = own font
+  world.msdfState.outlineColor = outlineColor
+  world.msdfState.outlineWidth = outlineWidth
+  world.msdfState.shadowColor = shadowColor
+  world.msdfState.shadowOffsetX = shadowOffsetX
+  world.msdfState.shadowOffsetY = shadowOffsetY
+  world.msdfState.shadowSoftness = shadowSoftness
+  world.msdfState.shadowStylesOnly = shadowStylesOnly
+  world.msdfState.enabled = true
+}
+
+func isUiMsdfEnabled(world: view UiWorld) pub ret Bool { ret world.msdfState.enabled }
+
+# Same as `enableUiMsdf` but takes the font by `view` so it can be
+# reapplied after each world rebuild without transferring ownership.
+# Deep-copies the glyph list into the world's MsdfState (the Texture
+# handle is a raylib int — no GPU re-upload). Use this when the host
+# app rebuilds its UiWorld on data changes (e.g. 98_mobile_ui's
+# `buildAppWorld`) so a single `loadMsdfFont` survives many rebuilds.
+func enableUiMsdfShared(
+  world: mod UiWorld
+  font: view MsdfFont
+  outlineColor: view RgbaColor
+  outlineWidth: view Float
+  shadowColor: view RgbaColor
+  shadowOffsetX: view Float
+  shadowOffsetY: view Float
+  shadowSoftness: view Float
+  shadowStylesOnly: view Bool
+) pub {
+  world.msdfState.font = font
+  world.msdfState.outlineColor = outlineColor
+  world.msdfState.outlineWidth = outlineWidth
+  world.msdfState.shadowColor = shadowColor
+  world.msdfState.shadowOffsetX = shadowOffsetX
+  world.msdfState.shadowOffsetY = shadowOffsetY
+  world.msdfState.shadowSoftness = shadowSoftness
+  world.msdfState.shadowStylesOnly = shadowStylesOnly
+  world.msdfState.enabled = true
+}
+
+# Called from paintText for every Text node when MSDF is enabled.
+# Scales outline/shadow alphas by the entity's chained Active+Opacity
+# (so a fading entity fades its whole text — body + outline + shadow —
+# in lock-step), then delegates to drawMsdfText.
+func paintMsdfDispatch(
+  world: view UiWorld
+  text: view String
+  x: view Float
+  y: view Float
+  sizePx: view Float
+  color: view Color
+  chain255: view Int
+  applyShadow: view Bool
+) pub {
+  let s: view MsdfState => world.msdfState
+  let bodyTint: Color = { r: color.r, g: color.g, b: color.b, a: color.a }
+  let oc: Color = {
+    r: s.outlineColor.r, g: s.outlineColor.g, b: s.outlineColor.b
+    a: (s.outlineColor.a * chain255) / 255
+  }
+  # `applyShadow` is the renderer's per-style decision (see `paintText`).
+  # When false, drop the shadow layer for this node by zeroing its alpha.
+  let shadowAlpha: Int = 0
+  if applyShadow {
+    shadowAlpha = (s.shadowColor.a * chain255) / 255
+  }
+  let sc: Color = {
+    r: s.shadowColor.r, g: s.shadowColor.g, b: s.shadowColor.b
+    a: shadowAlpha
+  }
+  drawMsdfText(
+    font: s.font, text: text, x: x, y: y, sizePx: sizePx
+    color: bodyTint
+    outlineColor: oc, outlineWidth: s.outlineWidth
+    shadowColor: sc
+    shadowOffsetX: s.shadowOffsetX, shadowOffsetY: s.shadowOffsetY
+    shadowSoftness: s.shadowSoftness
+  )
+}
+
 # Per-glyph data extracted from the atlas's JSON sidecar.
 #
 # `planeBounds` are em-units relative to the baseline pen:
@@ -181,6 +331,10 @@ func loadMsdfFont(jsonPath: view String, atlasPath: view String) pub ret MsdfFon
   }
 
   let tex: Texture = loadTexture(fileName: atlasPath)
+  # MSDF decode requires bilinear sampling of the distance field —
+  # point sampling stair-steps every glyph edge. (raylib defaults
+  # loaded textures to POINT.)
+  setTextureFilter(texture: tex, filter: 1)
   ret MsdfFont {
     texture: tex
     atlasWidth: atlasW
@@ -230,52 +384,43 @@ func msdfMeasureText(font: view MsdfFont, text: view String, sizePx: view Float)
   ret total
 }
 
-# Draw `text` with the MTSDF pipeline. `(x, y)` is the top-left of
-# the rendered glyph block (visually — the cap-height row sits at
-# `y + ascender * sizePx - cap...`; close enough for v1). All effect
-# args take RGBA 0-255 colours; pass `{a:0}` to disable a layer.
-#
-# `outlineWidth` is in screen pixels (typical: 1-4).
-# `shadowOffset` is in screen pixels too (we convert to atlas-UV
-# inside this call so the shader's offset is in the same space the
-# atlas was sampled).
-# `shadowSoftness` is in screen pixels — 1 = hard edge, 4-8 = nice
-# blurred falloff.
-func drawMsdfText(
+# Render ONE pass of the glyph run at pen origin `(x, y)` with a single
+# fill colour and optional outline. The shader's own shadow layer is
+# disabled here (alpha 0) — drop-shadows are a second offset pass driven
+# by `drawMsdfText`, so they can't clip against a glyph's quad padding.
+# A `pxRange` lower than the atlas's native on-screen band widens the
+# antialiased edge — used to soften the shadow pass.
+func drawMsdfGlyphPass(
   font: view MsdfFont
   text: view String
   x: view Float
   y: view Float
-  sizePx: view Float
-  color: view Color
+  scale: view Float
+  pxRange: view Float
+  fillColor: view Color
   outlineColor: view Color
   outlineWidth: view Float
-  shadowColor: view Color
-  shadowOffsetX: view Float
-  shadowOffsetY: view Float
-  shadowSoftness: view Float
-) pub {
-  let scale: Float = sizePx / font.emSize
-  let pxRangeOnScreen: Float = font.pxRange * sizePx / font.fontSize
-  # Shadow offset in atlas-UV (the shader samples in that space).
-  let atlasFontPx: Float = font.fontSize
-  let shadowOffU: Float = shadowOffsetX / atlasFontPx * (sizePx / atlasFontPx)
-  let shadowOffV: Float = shadowOffsetY / atlasFontPx * (sizePx / atlasFontPx)
-  # Above is too fiddly — the cleanest mapping: shadowOffset in
-  # screen px → glyph-local em → atlas-uv. Atlas-uv per screen px is
-  # `(font.fontSize / sizePx) / font.atlasWidth` (horizontally) and
-  # similar for height. Recompute properly:
-  shadowOffU = shadowOffsetX * (font.fontSize / sizePx) / font.atlasWidth
-  shadowOffV = shadowOffsetY * (font.fontSize / sizePx) / font.atlasHeight
+) {
+  let zeroShadow: Color = { r: 0, g: 0, b: 0, a: 0 }
+  # Floor the distance-field range at 1.0 screen px. Below 1.0 the
+  # coverage `clamp(pxRange*(median-0.5)+0.5)` no longer reaches 0 in
+  # the glyph cell's background, so the whole cell fills with a faint
+  # box — the "dark rectangle" artifact, hit when a soft shadow divides
+  # an already-small pxRange (small text) below 1. At 1.0 the edge is
+  # crisp and the background is exactly 0.
+  let effPxRange: Float = pxRange
+  if effPxRange < 1.0 {
+    effPxRange = 1.0
+  }
   msdfBegin(
-    pxRange: pxRangeOnScreen
-    textColor: color
+    pxRange: effPxRange
+    textColor: fillColor
     outlineColor: outlineColor
     outlineWidth: outlineWidth
-    shadowColor: shadowColor
-    shadowOffX: shadowOffU
-    shadowOffY: shadowOffV
-    shadowSoftness: shadowSoftness
+    shadowColor: zeroShadow
+    shadowOffX: 0.0
+    shadowOffY: 0.0
+    shadowSoftness: 1.0
   )
   let baseline: Float = y + font.ascender * scale
   let cursor: Float = x
@@ -310,4 +455,76 @@ func drawMsdfText(
     i = i + 1
   }
   msdfEnd()
+}
+
+# Draw `text` with the MTSDF pipeline. `(x, y)` is the top-left of the
+# rendered glyph block. All effect args take RGBA 0-255 colours; pass
+# `{a:0}` to disable a layer.
+#
+# `outlineWidth` is in screen pixels (typical 1-4); it is clamped to the
+# distance field's representable band so a too-wide outline can't fill
+# the glyph cell with a dark box at small sizes.
+#
+# The drop-shadow is rendered as a SECOND pass of the glyph silhouettes,
+# offset by `(shadowOffsetX, shadowOffsetY)` screen px and drawn behind
+# the body. Doing it as a real offset pass (rather than sampling a
+# shifted texcoord inside each glyph's own quad) means it never clips
+# against the quad padding, so the shadow survives at small text sizes.
+# `shadowSoftness` (>= 1) widens the shadow's edge falloff.
+func drawMsdfText(
+  font: view MsdfFont
+  text: view String
+  x: view Float
+  y: view Float
+  sizePx: view Float
+  color: view Color
+  outlineColor: view Color
+  outlineWidth: view Float
+  shadowColor: view Color
+  shadowOffsetX: view Float
+  shadowOffsetY: view Float
+  shadowSoftness: view Float
+) pub {
+  let scale: Float = sizePx / font.emSize
+  let pxRangeOnScreen: Float = font.pxRange * sizePx / font.fontSize
+  # Clamp the outline to the distance field's representable band. The
+  # atlas only encodes signed distance out to `pxRange/2` atlas px from
+  # each glyph edge (`pxRangeOnScreen/2` on screen); a wider outline
+  # saturates coverage to 1 across the whole glyph cell — the "dark
+  # rectangle behind every glyph" artifact at small sizes. Large display
+  # text (big pxRangeOnScreen) keeps its full outline. A faint box
+  # starts as soon as `outlineWidth > pxRangeOnScreen/2 - 0.5` (the
+  # outline coverage stops returning to 0 in the cell background), so
+  # cap a touch below that to stay clean while using most of the band.
+  let maxOutline: Float = pxRangeOnScreen * 0.5 - 0.75
+  if maxOutline < 0.0 {
+    maxOutline = 0.0
+  }
+  let effOutlineWidth: Float = outlineWidth
+  if effOutlineWidth > maxOutline {
+    effOutlineWidth = maxOutline
+  }
+  let noOutline: Color = { r: 0, g: 0, b: 0, a: 0 }
+  # Shadow pass first (behind the body): the body silhouette in the
+  # shadow colour, offset, with a softened edge.
+  if shadowColor.a > 0 {
+    let soft: Float = shadowSoftness
+    if soft < 1.0 {
+      soft = 1.0
+    }
+    let shadowPxRange: Float = pxRangeOnScreen / soft
+    drawMsdfGlyphPass(
+      font: font, text: text
+      x: x + shadowOffsetX, y: y + shadowOffsetY
+      scale: scale, pxRange: shadowPxRange
+      fillColor: shadowColor, outlineColor: noOutline, outlineWidth: 0.0
+    )
+  }
+  # Body (+ outline) pass at the true position, on top of the shadow.
+  drawMsdfGlyphPass(
+    font: font, text: text
+    x: x, y: y
+    scale: scale, pxRange: pxRangeOnScreen
+    fillColor: color, outlineColor: outlineColor, outlineWidth: effOutlineWidth
+  )
 }

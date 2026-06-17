@@ -23,6 +23,7 @@
 # before drawing if they want a custom font; otherwise raylib's bitmap
 # default font is used.
 import core
+import ui/msdf
 import raylib
 import ui/icon_codepoints
 import ui/theme
@@ -465,10 +466,7 @@ func paintText(world: view UiWorld, entity: view EntityId, wt: view WorldTransfo
   let col: Color = textStyleColor(styleId: tx.styleId, chain255: chain255)
   let drawX: Float = wt.x
   let drawY: Float = wt.y
-  # Alignment comes from either the styleId (legacy fixed-purpose
-  # ids) or the entity's Align component (`Center` / `End`). The
-  # latter lets .raescene authors get both box-placement and in-rect
-  # text alignment from one Align without scripting.
+  # Alignment: styleId (legacy) or Align component (Center / End).
   let centerX: Bool = textStyleIsCentered(styleId: tx.styleId)
   let centerY: Bool = textStyleIsCentered(styleId: tx.styleId)
   let rightAlignX: Bool = textStyleIsRightAligned(styleId: tx.styleId)
@@ -499,10 +497,13 @@ func paintText(world: view UiWorld, entity: view EntityId, wt: view WorldTransfo
       drawY = wt.y + (cr.h - size) / 2.0
     }
   }
-  # 9-sample drop-shadow: 1 centre tap (heavier) + 8 ring taps
-  # (lighter) on a circle of `blurRadius`. Diagonals use the
-  # precomputed sqrt(2)/2 ≈ 0.7071 so no per-glyph sin/cos. Smears
-  # the old single hard-offset shadow into a soft halo.
+  if isUiMsdfEnabled(world: world) {
+    # Shadow gate: in `shadowStylesOnly` mode (mobile UI) only opt-in
+    # styles shadow; otherwise (royalblush) all text does.
+    let applyShadow: Bool = (world.msdfState.shadowStylesOnly is false) or textStyleHasShadow(styleId: tx.styleId)
+    paintMsdfDispatch(world: world, text: txt, x: drawX, y: drawY, sizePx: size, color: col, chain255: chain255, applyShadow: applyShadow)
+    ret
+  }
   if textStyleHasShadow(styleId: tx.styleId) {
     let shadowOff: Float = size * 0.06
     if shadowOff < 1.0 { shadowOff = 1.0 }
