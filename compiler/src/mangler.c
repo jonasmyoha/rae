@@ -110,7 +110,8 @@ bool is_raylib_builtin_type(Str type_name) {
            str_eq_cstr(type_name, "Color") ||
            str_eq_cstr(type_name, "Texture") ||
            str_eq_cstr(type_name, "Camera3D") ||
-           str_eq_cstr(type_name, "Camera2D");
+           str_eq_cstr(type_name, "Camera2D") ||
+           str_eq_cstr(type_name, "Rectangle");
 }
 
 static void sanitize_mangled_name(char* name) {
