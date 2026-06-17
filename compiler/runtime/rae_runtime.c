@@ -2324,6 +2324,10 @@ void rae_ext_msdfEnd(void) {
   EndShaderMode();
 }
 
+void rae_ext_drawTexturePro(Texture texture, Rectangle source, Rectangle dest, Vector2 origin, double rotation, Color tint) {
+  DrawTexturePro(texture, source, dest, origin, (float)rotation, tint);
+}
+
 /* Gradient rounded-rect: shader fills the alpha-masked rounded box
  * with a linear gradient from `from` to `to` along the given angle
  * (degrees — 0=L→R, 90=T→B). Pair with `CornerRadius` in scenes
