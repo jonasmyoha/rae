@@ -2202,6 +2202,128 @@ void rae_ext_roundedSpriteEnd(void) {
   EndShaderMode();
 }
 
+/* ---- MTSDF text shader -----------------------------------------------
+ *
+ * Multi-channel + true-distance signed-distance-field text. The atlas
+ * is generated offline by Chlumsky's `msdf-atlas-gen` (-type mtsdf).
+ * RGB carries the MSDF median-trick channels (clean reconstruction of
+ * sharp corners) and A carries the straight Euclidean distance — used
+ * for the outline + shadow bands so they don't develop the false
+ * intersections that pure RGB median has inside concave glyph features.
+ *
+ * `uPxRange` is the atlas's authored distanceRange (4 by default in
+ * gen-msdf.sh) scaled to on-screen pixels — caller passes
+ * `pxRange * onScreenSize / atlasFontSize`. It defines the anti-alias
+ * band width: 1 means hard pixels, larger = softer edges.
+ *
+ * Outline: bands the silhouette by an additional `uOutlineWidth` screen
+ * pixels around the body, painted in `uOutlineColor`.
+ *
+ * Shadow: re-samples the atlas at fragTexCoord - uShadowOffset (so a
+ * positive uShadowOffset is "shadow falls down-right"). `uShadowSoftness`
+ * widens the falloff in pixels — 1 = hard, 4-8 = nicely blurred. Shadow
+ * paints UNDER the outline + body.
+ *
+ * The shader composites in this order: shadow → outline → body. Each
+ * layer multiplies its coverage against the per-vertex `fragColor` (so
+ * the entity's Active/Opacity chain still fades the whole glyph). */
+static Shader g_rae_mtsdf_shader = {0};
+static int g_rae_mtsdf_loaded = 0;
+static int g_rae_mtsdf_loc_pxrange = -1;
+static int g_rae_mtsdf_loc_textColor = -1;
+static int g_rae_mtsdf_loc_outlineColor = -1;
+static int g_rae_mtsdf_loc_outlineWidth = -1;
+static int g_rae_mtsdf_loc_shadowColor = -1;
+static int g_rae_mtsdf_loc_shadowOffset = -1;
+static int g_rae_mtsdf_loc_shadowSoftness = -1;
+
+static void rae_mtsdf_shader_ensure(void) {
+  if (g_rae_mtsdf_loaded) return;
+  const char* fs =
+    "#version 330\n"
+    "in vec2 fragTexCoord;\n"
+    "in vec4 fragColor;\n"
+    "out vec4 finalColor;\n"
+    "uniform sampler2D texture0;\n"
+    "uniform vec4 colDiffuse;\n"
+    "uniform float uPxRange;\n"
+    "uniform vec4  uTextColor;\n"
+    "uniform vec4  uOutlineColor;\n"
+    "uniform float uOutlineWidth;\n"
+    "uniform vec4  uShadowColor;\n"
+    "uniform vec2  uShadowOffset;\n"
+    "uniform float uShadowSoftness;\n"
+    "float median3(float r, float g, float b) {\n"
+    "  return max(min(r,g), min(max(r,g), b));\n"
+    "}\n"
+    "float msdfDistPx(vec4 sample4) {\n"
+    "  return uPxRange * (median3(sample4.r, sample4.g, sample4.b) - 0.5);\n"
+    "}\n"
+    "void main() {\n"
+    "  vec4 atlasSample = texture(texture0, fragTexCoord);\n"
+    "  float bodyDist = msdfDistPx(atlasSample);\n"
+    "  float bodyCov  = clamp(bodyDist + 0.5, 0.0, 1.0);\n"
+    "  float outlineCov = 0.0;\n"
+    "  if (uOutlineWidth > 0.0 && uOutlineColor.a > 0.0) {\n"
+    "    float outlineEdge = -uOutlineWidth;\n"
+    "    float outlineTotal = clamp((bodyDist - outlineEdge) + 0.5, 0.0, 1.0);\n"
+    "    outlineCov = outlineTotal - bodyCov;\n"
+    "  }\n"
+    "  vec4 shadow = vec4(0.0);\n"
+    "  if (uShadowColor.a > 0.0) {\n"
+    "    vec4 sSample = texture(texture0, fragTexCoord - uShadowOffset);\n"
+    "    float sDist = msdfDistPx(sSample);\n"
+    "    float soft = max(uShadowSoftness, 1.0);\n"
+    "    float sCov = clamp(sDist / soft + 0.5, 0.0, 1.0);\n"
+    "    shadow = uShadowColor * sCov;\n"
+    "  }\n"
+    "  vec4 c = shadow;\n"
+    "  c = mix(c, uOutlineColor, outlineCov);\n"
+    "  c = mix(c, uTextColor,    bodyCov);\n"
+    "  finalColor = c * fragColor * colDiffuse;\n"
+    "}\n";
+  g_rae_mtsdf_shader = LoadShaderFromMemory(NULL, fs);
+  g_rae_mtsdf_loc_pxrange        = GetShaderLocation(g_rae_mtsdf_shader, "uPxRange");
+  g_rae_mtsdf_loc_textColor      = GetShaderLocation(g_rae_mtsdf_shader, "uTextColor");
+  g_rae_mtsdf_loc_outlineColor   = GetShaderLocation(g_rae_mtsdf_shader, "uOutlineColor");
+  g_rae_mtsdf_loc_outlineWidth   = GetShaderLocation(g_rae_mtsdf_shader, "uOutlineWidth");
+  g_rae_mtsdf_loc_shadowColor    = GetShaderLocation(g_rae_mtsdf_shader, "uShadowColor");
+  g_rae_mtsdf_loc_shadowOffset   = GetShaderLocation(g_rae_mtsdf_shader, "uShadowOffset");
+  g_rae_mtsdf_loc_shadowSoftness = GetShaderLocation(g_rae_mtsdf_shader, "uShadowSoftness");
+  g_rae_mtsdf_loaded = 1;
+}
+
+/* Caller passes: pxRange (in screen px — i.e. atlas pxrange * screen-
+ * size / atlas-font-size), the text/outline/shadow colors as 0-255
+ * RGBA, the outline width in screen px, shadow offset in texCoord
+ * units (atlas-uv space, NOT screen-px — Rae side knows the atlas
+ * dimensions and converts), and shadow softness in screen px. */
+void rae_ext_msdfBegin(double pxRange,
+                       Color textColor, Color outlineColor, double outlineWidth,
+                       Color shadowColor, double shadowOffX, double shadowOffY,
+                       double shadowSoftness) {
+  rae_mtsdf_shader_ensure();
+  float px = (float)pxRange;
+  float tc[4] = { textColor.r/255.0f, textColor.g/255.0f, textColor.b/255.0f, textColor.a/255.0f };
+  float oc[4] = { outlineColor.r/255.0f, outlineColor.g/255.0f, outlineColor.b/255.0f, outlineColor.a/255.0f };
+  float ow = (float)outlineWidth;
+  float sc[4] = { shadowColor.r/255.0f, shadowColor.g/255.0f, shadowColor.b/255.0f, shadowColor.a/255.0f };
+  float so[2] = { (float)shadowOffX, (float)shadowOffY };
+  float ss = (float)shadowSoftness;
+  SetShaderValue(g_rae_mtsdf_shader, g_rae_mtsdf_loc_pxrange,        &px, SHADER_UNIFORM_FLOAT);
+  SetShaderValue(g_rae_mtsdf_shader, g_rae_mtsdf_loc_textColor,      tc,  SHADER_UNIFORM_VEC4);
+  SetShaderValue(g_rae_mtsdf_shader, g_rae_mtsdf_loc_outlineColor,   oc,  SHADER_UNIFORM_VEC4);
+  SetShaderValue(g_rae_mtsdf_shader, g_rae_mtsdf_loc_outlineWidth,   &ow, SHADER_UNIFORM_FLOAT);
+  SetShaderValue(g_rae_mtsdf_shader, g_rae_mtsdf_loc_shadowColor,    sc,  SHADER_UNIFORM_VEC4);
+  SetShaderValue(g_rae_mtsdf_shader, g_rae_mtsdf_loc_shadowOffset,   so,  SHADER_UNIFORM_VEC2);
+  SetShaderValue(g_rae_mtsdf_shader, g_rae_mtsdf_loc_shadowSoftness, &ss, SHADER_UNIFORM_FLOAT);
+  BeginShaderMode(g_rae_mtsdf_shader);
+}
+
+void rae_ext_msdfEnd(void) {
+  EndShaderMode();
+}
+
 /* Gradient rounded-rect: shader fills the alpha-masked rounded box
  * with a linear gradient from `from` to `to` along the given angle
  * (degrees — 0=L→R, 90=T→B). Pair with `CornerRadius` in scenes
