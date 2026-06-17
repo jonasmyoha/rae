@@ -2039,6 +2039,17 @@ int64_t rae_ext_getWindowPositionX(void) { Vector2 p = GetWindowPosition(); retu
 int64_t rae_ext_getWindowPositionY(void) { Vector2 p = GetWindowPosition(); return (int64_t)p.y; }
 Texture rae_ext_loadTexture(rae_String fileName) { return LoadTexture((const char*)fileName.data); }
 
+/* Set the GPU sampling filter for a texture id. `filter` matches
+ * raylib's TextureFilter enum (0=POINT, 1=BILINEAR, 2=TRILINEAR, ...).
+ * MSDF/MTSDF atlases REQUIRE bilinear (1): the distance-field decode
+ * relies on the GPU interpolating distance values between texels;
+ * point sampling produces jagged, stair-stepped glyph edges. The
+ * filter is GL state keyed by texture id, so passing the Texture by
+ * value still affects the live texture. */
+void rae_ext_setTextureFilter(Texture texture, int64_t filter) {
+  SetTextureFilter(texture, (int)filter);
+}
+
 Texture rae_ext_loadCircleCroppedTexture(rae_String fileName) {
   /* Load `fileName`, force RGBA, and zero the alpha channel of every
    * pixel outside an inscribed circle. Used by the mobile UI for
@@ -2259,28 +2270,44 @@ static void rae_mtsdf_shader_ensure(void) {
     "float msdfDistPx(vec4 sample4) {\n"
     "  return uPxRange * (median3(sample4.r, sample4.g, sample4.b) - 0.5);\n"
     "}\n"
+    /* Composite one straight-alpha layer (color `srgb`, coverage-scaled
+     * alpha `sa`) over a PREMULTIPLIED accumulator. Working in
+     * premultiplied space is what kills the edge halo: the previous
+     * shader multiplied glyph RGB by coverage and then the alpha-blend
+     * stage multiplied by coverage again (coverage^2), darkening
+     * anti-aliased edges — invisible on dark UI, an obvious grey
+     * "outline" on light backgrounds. */
+    "vec4 overPremul(vec4 dst, vec3 srgb, float sa) {\n"
+    "  vec3 sp = srgb * sa;\n"
+    "  return vec4(sp + dst.rgb * (1.0 - sa), sa + dst.a * (1.0 - sa));\n"
+    "}\n"
     "void main() {\n"
     "  vec4 atlasSample = texture(texture0, fragTexCoord);\n"
     "  float bodyDist = msdfDistPx(atlasSample);\n"
     "  float bodyCov  = clamp(bodyDist + 0.5, 0.0, 1.0);\n"
     "  float outlineCov = 0.0;\n"
     "  if (uOutlineWidth > 0.0 && uOutlineColor.a > 0.0) {\n"
-    "    float outlineEdge = -uOutlineWidth;\n"
-    "    float outlineTotal = clamp((bodyDist - outlineEdge) + 0.5, 0.0, 1.0);\n"
-    "    outlineCov = outlineTotal - bodyCov;\n"
+    "    float outlineTotal = clamp((bodyDist + uOutlineWidth) + 0.5, 0.0, 1.0);\n"
+    "    outlineCov = clamp(outlineTotal - bodyCov, 0.0, 1.0);\n"
     "  }\n"
-    "  vec4 shadow = vec4(0.0);\n"
+    "  float shadowCov = 0.0;\n"
     "  if (uShadowColor.a > 0.0) {\n"
     "    vec4 sSample = texture(texture0, fragTexCoord - uShadowOffset);\n"
     "    float sDist = msdfDistPx(sSample);\n"
     "    float soft = max(uShadowSoftness, 1.0);\n"
-    "    float sCov = clamp(sDist / soft + 0.5, 0.0, 1.0);\n"
-    "    shadow = uShadowColor * sCov;\n"
+    "    shadowCov = clamp(sDist / soft + 0.5, 0.0, 1.0);\n"
     "  }\n"
-    "  vec4 c = shadow;\n"
-    "  c = mix(c, uOutlineColor, outlineCov);\n"
-    "  c = mix(c, uTextColor,    bodyCov);\n"
-    "  finalColor = c * fragColor * colDiffuse;\n"
+    /* Bottom-to-top: shadow, then outline ring, then body. */
+    "  vec4 acc = vec4(0.0);\n"
+    "  acc = overPremul(acc, uShadowColor.rgb,  uShadowColor.a  * shadowCov);\n"
+    "  acc = overPremul(acc, uOutlineColor.rgb, uOutlineColor.a * outlineCov);\n"
+    "  acc = overPremul(acc, uTextColor.rgb,    uTextColor.a    * bodyCov);\n"
+    /* Entity tint/fade (fragColor * colDiffuse) scales the whole
+     * premultiplied result so alpha and colour stay consistent. */
+    "  vec4 tint = fragColor * colDiffuse;\n"
+    "  acc.rgb *= tint.rgb;\n"
+    "  acc *= tint.a;\n"
+    "  finalColor = acc;\n"
     "}\n";
   g_rae_mtsdf_shader = LoadShaderFromMemory(NULL, fs);
   g_rae_mtsdf_loc_pxrange        = GetShaderLocation(g_rae_mtsdf_shader, "uPxRange");
@@ -2317,11 +2344,17 @@ void rae_ext_msdfBegin(double pxRange,
   SetShaderValue(g_rae_mtsdf_shader, g_rae_mtsdf_loc_shadowColor,    sc,  SHADER_UNIFORM_VEC4);
   SetShaderValue(g_rae_mtsdf_shader, g_rae_mtsdf_loc_shadowOffset,   so,  SHADER_UNIFORM_VEC2);
   SetShaderValue(g_rae_mtsdf_shader, g_rae_mtsdf_loc_shadowSoftness, &ss, SHADER_UNIFORM_FLOAT);
+  /* The fragment shader emits PREMULTIPLIED-alpha colour, so it must be
+   * composited with a premultiplied blend (GL_ONE, GL_ONE_MINUS_SRC_ALPHA).
+   * Using the default straight-alpha blend here would re-introduce the
+   * coverage^2 edge darkening this shader exists to avoid. */
+  BeginBlendMode(BLEND_ALPHA_PREMULTIPLY);
   BeginShaderMode(g_rae_mtsdf_shader);
 }
 
 void rae_ext_msdfEnd(void) {
   EndShaderMode();
+  EndBlendMode();
 }
 
 void rae_ext_drawTexturePro(Texture texture, Rectangle source, Rectangle dest, Vector2 origin, double rotation, Color tint) {
