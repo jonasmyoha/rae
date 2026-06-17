@@ -1,0 +1,313 @@
+# MSDF / MTSDF text rendering.
+#
+# Pixi-grade outlines and drop-shadows for game-UI text. Atlases are
+# generated offline by Chlumsky's `msdf-atlas-gen` (`-type mtsdf`);
+# the runtime side is one fragment shader (rae_runtime.c) plus this
+# module that:
+#
+#   * Loads the JSON sidecar produced by `msdf-atlas-gen`
+#     (atlas dimensions, distance range, per-glyph bounds + advance,
+#     line metrics).
+#   * Loads the PNG atlas via raylib's `loadTexture`.
+#   * Lays out a string left-to-right at a chosen pixel size,
+#     emitting one `drawTexturePro` per glyph with the MTSDF shader
+#     bound. Outline width, shadow tint/offset/softness are uniforms
+#     pushed once per text call by `msdfBegin`.
+#
+# Scope of v1:
+#   * ASCII (0x20-0x7e) — the only range our gen-msdf.sh script
+#     emits. Multi-byte UTF-8 needs a real iterator + multi-page
+#     atlas; that's a later commit.
+#   * Single line, no word-wrap.
+#   * Per-glyph linear scan for the codepoint lookup. 95 ASCII
+#     glyphs in the table, so it's O(n) but n is tiny; sort + binary
+#     search lands when we have multi-page Unicode fonts.
+#   * No kerning yet — the JSON has the pairs, we just ignore them.
+#     Slot for a follow-up.
+
+import core
+import json
+import raylib
+
+# Per-glyph data extracted from the atlas's JSON sidecar.
+#
+# `planeBounds` are em-units relative to the baseline pen:
+#   left/right    horizontal extents (left = bearing.x)
+#   bottom/top    vertical extents (top > 0 above baseline, bottom < 0 below)
+# `atlasBounds` are pixel coords inside the PNG atlas with origin at
+# the BOTTOM-LEFT (msdf-atlas-gen default). We flip in `drawMsdfText`
+# because raylib's texCoord origin is top-left.
+#
+# Glyphs that draw nothing (e.g. U+0020 space) have `hasBounds = false`
+# and only contribute their `advance` to the cursor.
+type MsdfGlyph pub {
+  unicode: Int
+  advance: Float
+  hasBounds: Bool
+  planeLeft: Float
+  planeBottom: Float
+  planeRight: Float
+  planeTop: Float
+  atlasLeft: Float
+  atlasBottom: Float
+  atlasRight: Float
+  atlasTop: Float
+}
+
+type MsdfFont pub {
+  texture: Texture
+  atlasWidth: Float
+  atlasHeight: Float
+  # Atlas authoring parameters — `pxRange` is the distance-field
+  # halfband in atlas pixels at the bake size (`fontSize`).
+  pxRange: Float
+  fontSize: Float
+  # Font metrics in em-units (multiply by the target pixel size to
+  # get on-screen heights).
+  emSize: Float
+  lineHeight: Float
+  ascender: Float
+  descender: Float
+  glyphs: List(MsdfGlyph)
+  # When the atlas JSON reports `yOrigin = "bottom"` (the
+  # msdf-atlas-gen default), atlasBounds.bottom < atlasBounds.top
+  # and we flip Y when computing the source rect.
+  yOriginBottom: Bool
+}
+
+# Read a Float field with a fallback. `jsonField` returns -1 when
+# absent so we test the index, not the value.
+func msdfFloatField(doc: view JsonDoc, obj: view JsonValue, key: view String, fallback: view Float) ret Float {
+  let idx: Int = jsonField(doc: doc, this: obj, key: key)
+  if idx < 0 {
+    ret fallback
+  }
+  let v: JsonValue = jsonValueAt(doc: doc, idx: idx)
+  ret jsonFloat(this: v, fallback: fallback)
+}
+
+# Parse a sub-object like `planeBounds` / `atlasBounds`. Both have
+# the same shape: `{left, bottom, right, top}` floats. Returns
+# `hasBounds = false` when the parent has no key with `subKey`
+# (spaces and other non-drawing glyphs omit both).
+func msdfReadBounds(
+  doc: view JsonDoc
+  parent: view JsonValue
+  subKey: view String
+  outLeft: mod Float
+  outBottom: mod Float
+  outRight: mod Float
+  outTop: mod Float
+) ret Bool {
+  let subIdx: Int = jsonField(doc: doc, this: parent, key: subKey)
+  if subIdx < 0 {
+    ret false
+  }
+  let sub: JsonValue = jsonValueAt(doc: doc, idx: subIdx)
+  outLeft = msdfFloatField(doc: doc, obj: sub, key: "left", fallback: 0.0)
+  outBottom = msdfFloatField(doc: doc, obj: sub, key: "bottom", fallback: 0.0)
+  outRight = msdfFloatField(doc: doc, obj: sub, key: "right", fallback: 0.0)
+  outTop = msdfFloatField(doc: doc, obj: sub, key: "top", fallback: 0.0)
+  ret true
+}
+
+# Parse the JSON sidecar and load the PNG atlas. Pass the two paths
+# explicitly — they're usually `<name>.mtsdf.json` + `<name>.mtsdf.png`
+# generated side-by-side by `tools/gen-msdf.sh` in the host app.
+func loadMsdfFont(jsonPath: view String, atlasPath: view String) pub ret MsdfFont {
+  let source: String = rae_ext_rae_sys_read_file(path: jsonPath)
+  let doc: JsonDoc = parseJson(source: source)
+  let root: JsonValue = jsonRoot(doc: doc)
+
+  let atlasIdx: Int = jsonField(doc: doc, this: root, key: "atlas")
+  let atlasJ: JsonValue = jsonValueAt(doc: doc, idx: atlasIdx)
+  let atlasW: Float = msdfFloatField(doc: doc, obj: atlasJ, key: "width", fallback: 0.0)
+  let atlasH: Float = msdfFloatField(doc: doc, obj: atlasJ, key: "height", fallback: 0.0)
+  let pxRange: Float = msdfFloatField(doc: doc, obj: atlasJ, key: "distanceRange", fallback: 4.0)
+  let fontSize: Float = msdfFloatField(doc: doc, obj: atlasJ, key: "size", fallback: 32.0)
+  let yOriginKey: String = "yOrigin"
+  let yOriginIdx: Int = jsonField(doc: doc, this: atlasJ, key: yOriginKey)
+  let yOriginBottom: Bool = true
+  if yOriginIdx >= 0 {
+    let yOriginV: JsonValue = jsonValueAt(doc: doc, idx: yOriginIdx)
+    let bottomKey: String = "bottom"
+    let topKey: String = "top"
+    let fallback: String = "bottom"
+    let yo: String = jsonString(this: yOriginV, fallback: fallback)
+    if yo.equals(other: topKey) {
+      yOriginBottom = false
+    }
+  }
+
+  let metricsIdx: Int = jsonField(doc: doc, this: root, key: "metrics")
+  let metricsJ: JsonValue = jsonValueAt(doc: doc, idx: metricsIdx)
+  let emSize: Float = msdfFloatField(doc: doc, obj: metricsJ, key: "emSize", fallback: 1.0)
+  let lineHeight: Float = msdfFloatField(doc: doc, obj: metricsJ, key: "lineHeight", fallback: 1.2)
+  let ascender: Float = msdfFloatField(doc: doc, obj: metricsJ, key: "ascender", fallback: 0.9)
+  let descender: Float = msdfFloatField(doc: doc, obj: metricsJ, key: "descender", fallback: 0.0 - 0.2)
+
+  let glyphsIdx: Int = jsonField(doc: doc, this: root, key: "glyphs")
+  let glyphsArr: JsonValue = jsonValueAt(doc: doc, idx: glyphsIdx)
+  let n: Int = jsonArrayLen(this: glyphsArr)
+  let glyphs: List(MsdfGlyph) = createList(MsdfGlyph, cap: n)
+  let i: Int = 0
+  loop i < n {
+    let entry: JsonValue = jsonArrayAt(doc: doc, this: glyphsArr, idx: i)
+    let unicodeIdx: Int = jsonField(doc: doc, this: entry, key: "unicode")
+    let unicodeV: JsonValue = jsonValueAt(doc: doc, idx: unicodeIdx)
+    let cp: Int = jsonInt(this: unicodeV, fallback: 0)
+    let advance: Float = msdfFloatField(doc: doc, obj: entry, key: "advance", fallback: 0.0)
+    let pl: Float = 0.0
+    let pb: Float = 0.0
+    let pr: Float = 0.0
+    let pt: Float = 0.0
+    let al: Float = 0.0
+    let ab: Float = 0.0
+    let ar: Float = 0.0
+    let at: Float = 0.0
+    let pkey: String = "planeBounds"
+    let akey: String = "atlasBounds"
+    let havePlane: Bool = msdfReadBounds(doc: doc, parent: entry, subKey: pkey, outLeft: pl, outBottom: pb, outRight: pr, outTop: pt)
+    let haveAtlas: Bool = msdfReadBounds(doc: doc, parent: entry, subKey: akey, outLeft: al, outBottom: ab, outRight: ar, outTop: at)
+    let g: MsdfGlyph = {
+      unicode: cp
+      advance: advance
+      hasBounds: havePlane and haveAtlas
+      planeLeft: pl, planeBottom: pb, planeRight: pr, planeTop: pt
+      atlasLeft: al, atlasBottom: ab, atlasRight: ar, atlasTop: at
+    }
+    glyphs.add(value: own g)
+    i = i + 1
+  }
+
+  let tex: Texture = loadTexture(fileName: atlasPath)
+  ret MsdfFont {
+    texture: tex
+    atlasWidth: atlasW
+    atlasHeight: atlasH
+    pxRange: pxRange
+    fontSize: fontSize
+    emSize: emSize
+    lineHeight: lineHeight
+    ascender: ascender
+    descender: descender
+    glyphs: own glyphs
+    yOriginBottom: yOriginBottom
+  }
+}
+
+# Linear scan — fine for the v1 ASCII range (≤ 95 entries). Returns
+# index, or -1 if not present.
+func msdfGlyphIndex(font: view MsdfFont, cp: view Int) ret Int {
+  let n: Int = font.glyphs.length
+  let i: Int = 0
+  loop i < n {
+    let g: MsdfGlyph = rae_ext_rae_buf_get(buf: font.glyphs.data, index: i)
+    if g.unicode is cp {
+      ret i
+    }
+    i = i + 1
+  }
+  ret -1
+}
+
+# Width of `text` in screen pixels at `sizePx` (sum of glyph advances).
+func msdfMeasureText(font: view MsdfFont, text: view String, sizePx: view Float) pub ret Float {
+  let scale: Float = sizePx / font.emSize
+  let total: Float = 0.0
+  let n: Int = text.length()
+  let i: Int = 0
+  loop i < n {
+    let c: Char32 = text.at(index: i)
+    let cp: Int = c.toInt()
+    let gi: Int = msdfGlyphIndex(font: font, cp: cp)
+    if gi >= 0 {
+      let g: MsdfGlyph = rae_ext_rae_buf_get(buf: font.glyphs.data, index: gi)
+      total = total + g.advance * scale
+    }
+    i = i + 1
+  }
+  ret total
+}
+
+# Draw `text` with the MTSDF pipeline. `(x, y)` is the top-left of
+# the rendered glyph block (visually — the cap-height row sits at
+# `y + ascender * sizePx - cap...`; close enough for v1). All effect
+# args take RGBA 0-255 colours; pass `{a:0}` to disable a layer.
+#
+# `outlineWidth` is in screen pixels (typical: 1-4).
+# `shadowOffset` is in screen pixels too (we convert to atlas-UV
+# inside this call so the shader's offset is in the same space the
+# atlas was sampled).
+# `shadowSoftness` is in screen pixels — 1 = hard edge, 4-8 = nice
+# blurred falloff.
+func drawMsdfText(
+  font: view MsdfFont
+  text: view String
+  x: view Float
+  y: view Float
+  sizePx: view Float
+  color: view Color
+  outlineColor: view Color
+  outlineWidth: view Float
+  shadowColor: view Color
+  shadowOffsetX: view Float
+  shadowOffsetY: view Float
+  shadowSoftness: view Float
+) pub {
+  let scale: Float = sizePx / font.emSize
+  let pxRangeOnScreen: Float = font.pxRange * sizePx / font.fontSize
+  # Shadow offset in atlas-UV (the shader samples in that space).
+  let atlasFontPx: Float = font.fontSize
+  let shadowOffU: Float = shadowOffsetX / atlasFontPx * (sizePx / atlasFontPx)
+  let shadowOffV: Float = shadowOffsetY / atlasFontPx * (sizePx / atlasFontPx)
+  # Above is too fiddly — the cleanest mapping: shadowOffset in
+  # screen px → glyph-local em → atlas-uv. Atlas-uv per screen px is
+  # `(font.fontSize / sizePx) / font.atlasWidth` (horizontally) and
+  # similar for height. Recompute properly:
+  shadowOffU = shadowOffsetX * (font.fontSize / sizePx) / font.atlasWidth
+  shadowOffV = shadowOffsetY * (font.fontSize / sizePx) / font.atlasHeight
+  msdfBegin(
+    pxRange: pxRangeOnScreen
+    textColor: color
+    outlineColor: outlineColor
+    outlineWidth: outlineWidth
+    shadowColor: shadowColor
+    shadowOffX: shadowOffU
+    shadowOffY: shadowOffV
+    shadowSoftness: shadowSoftness
+  )
+  let baseline: Float = y + font.ascender * scale
+  let cursor: Float = x
+  let n: Int = text.length()
+  let i: Int = 0
+  let origin: Vector2 = { x: 0.0, y: 0.0 }
+  let white: Color = { r: 255, g: 255, b: 255, a: 255 }
+  loop i < n {
+    let c: Char32 = text.at(index: i)
+    let cp: Int = c.toInt()
+    let gi: Int = msdfGlyphIndex(font: font, cp: cp)
+    if gi >= 0 {
+      let g: MsdfGlyph = rae_ext_rae_buf_get(buf: font.glyphs.data, index: gi)
+      if g.hasBounds {
+        let dstX: Float = cursor + g.planeLeft * scale
+        let dstY: Float = baseline - g.planeTop * scale
+        let dstW: Float = (g.planeRight - g.planeLeft) * scale
+        let dstH: Float = (g.planeTop - g.planeBottom) * scale
+        let srcX: Float = g.atlasLeft
+        let srcW: Float = g.atlasRight - g.atlasLeft
+        let srcY: Float = font.atlasHeight - g.atlasTop
+        let srcH: Float = g.atlasTop - g.atlasBottom
+        if font.yOriginBottom is false {
+          srcY = g.atlasTop
+        }
+        let src: Rectangle = { x: srcX, y: srcY, width: srcW, height: srcH }
+        let dst: Rectangle = { x: dstX, y: dstY, width: dstW, height: dstH }
+        drawTexturePro(texture: font.texture, source: src, dest: dst, origin: origin, rotation: 0.0, tint: white)
+      }
+      cursor = cursor + g.advance * scale
+    }
+    i = i + 1
+  }
+  msdfEnd()
+}
