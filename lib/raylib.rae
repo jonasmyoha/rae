@@ -94,6 +94,20 @@ func raylibSetLogLevel(level: Int) extern
 func roundedSpriteBegin(width: Float, height: Float, radius: Float) extern
 func roundedSpriteEnd() extern
 
+# Bracket a sequence of `drawTexturePro` calls against an MTSDF atlas
+# (see lib/ui/msdf.rae). The shader samples the atlas's RGB MSDF for
+# the glyph silhouette and its A channel for outline / shadow distance.
+#   * pxRange       — atlas's authored distanceRange scaled to on-screen
+#                     px (= atlas.pxRange * onScreenSize / atlas.fontSize)
+#   * textColor     — glyph fill (RGBA 0-255)
+#   * outlineColor  — outline band tint (a = 0 disables)
+#   * outlineWidth  — outline band thickness, screen px (0 disables)
+#   * shadowColor   — shadow tint (a = 0 disables)
+#   * shadowOffX/Y  — shadow displacement in atlas-UV space
+#   * shadowSoftness — falloff width in screen px (1 = hard)
+func msdfBegin(pxRange: Float, textColor: Color, outlineColor: Color, outlineWidth: Float, shadowColor: Color, shadowOffX: Float, shadowOffY: Float, shadowSoftness: Float) extern
+func msdfEnd() extern
+
 # Draw a rounded rectangle filled with a linear gradient. One atomic
 # call — shader does the gradient + corner-rounding + AA. Angle is in
 # degrees (0=L→R, 90=T→B). Pass radius=0 for a non-rounded gradient
