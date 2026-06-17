@@ -530,7 +530,17 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         // own SE ends, by which time the call has consumed them.
         enum { RAE_MAX_PRIM_WRAP = 32 };
         int wrap_idx[RAE_MAX_PRIM_WRAP];
-        for (int wi = 0; wi < RAE_MAX_PRIM_WRAP; wi++) wrap_idx[wi] = -1;
+        // For a numeric `mod` primitive arg, the hoisted temp must be
+        // copied BACK to the caller's lvalue after the call — otherwise
+        // the callee's writes land in the throwaway temp and are lost
+        // (silent no-op out-params). `wb_target[slot]` holds the lvalue
+        // AST node to assign back to, indexed by wrap slot; NULL = no
+        // write-back. Restricted to numeric primitives (Int/Float/Bool/
+        // Char — no heap, so a plain value copy-back is always safe) and
+        // addressable IDENT/MEMBER args. `mod String` and other heap
+        // types are intentionally excluded to avoid ownership hazards.
+        const AstExpr* wb_target[RAE_MAX_PRIM_WRAP];
+        for (int wi = 0; wi < RAE_MAX_PRIM_WRAP; wi++) { wrap_idx[wi] = -1; wb_target[wi] = NULL; }
         int wrap_count = 0;
         int wrap_base = ctx->temp_counter;
         {
@@ -572,7 +582,15 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                             && !str_eq_cstr(pbase, "Buffer")
                             && !str_eq_cstr(pbase, "Any")
                             && !view_is_value) {
-                            wrap_idx[ai] = wrap_count++;
+                            int slot = wrap_count++;
+                            wrap_idx[ai] = slot;
+                            // Numeric `mod` out-param → schedule a
+                            // copy-back to the caller's lvalue.
+                            if (sp->type->is_mod && is_num_prim && sa->value
+                                && (sa->value->kind == AST_EXPR_IDENT
+                                    || sa->value->kind == AST_EXPR_MEMBER)) {
+                                wb_target[slot] = sa->value;
+                            }
                         }
                     }
                 }
@@ -580,6 +598,12 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             }
         }
         bool use_se_wrap = wrap_count > 0;
+        bool has_writeback = false;
+        for (int w = 0; w < wrap_count && w < RAE_MAX_PRIM_WRAP; w++) {
+            if (wb_target[w]) { has_writeback = true; break; }
+        }
+        bool callee_returns_void = !fd->returns || !fd->returns->type;
+        bool wb_capture = has_writeback && !callee_returns_void;
         if (use_se_wrap) {
             ctx->temp_counter += wrap_count;
             fprintf(out, "(__extension__ ({ ");
@@ -595,6 +619,9 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 }
                 ai++; sa = sa->next; if (sp) sp = sp->next;
             }
+            // Capture the return value so the write-backs can run AFTER
+            // the call while the statement-expression still yields it.
+            if (wb_capture) fprintf(out, "__auto_type __rae_callret = ");
         }
         fprintf(out, "%s(", call_name);
         const AstCallArg* a = expr->as.call.args; const AstParam* p = fd->params;
@@ -967,7 +994,19 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         fprintf(out, ")");
         if (!fd->is_extern && !ctx->suppress_opt_unbox) emit_opt_unbox_suffix(ctx, fd, concrete, out);
         if (use_se_wrap) {
-            fprintf(out, "; }))");
+            if (has_writeback) {
+                fprintf(out, "; ");
+                for (int w = 0; w < wrap_count && w < RAE_MAX_PRIM_WRAP; w++) {
+                    if (wb_target[w]) {
+                        emit_expr(ctx, wb_target[w], out, PREC_LOWEST, false, false);
+                        fprintf(out, " = __rae_pw_%d; ", wrap_base + w);
+                    }
+                }
+                if (wb_capture) fprintf(out, "__rae_callret; ");
+                fprintf(out, "}))");
+            } else {
+                fprintf(out, "; }))");
+            }
         }
         return true;
     }
