@@ -1,0 +1,206 @@
+# Font rendering test example.
+#
+# Side-by-side comparison of Rae's two text paths, same Roboto face:
+#   * Bitmap — raylib LoadFontEx atlas (font slot 0), `drawTextWithFont`
+#   * MSDF   — distance-field atlas, `drawMsdfText` (lib/ui/msdf)
+#
+# It deliberately exercises the cases that have broken before so a
+# regression shows up at a glance:
+#   - sizes from tiny captions to big display text
+#   - many colours
+#   - light / dark / mid / saturated backgrounds (edge-halo test)
+#   - light-on-light and dark-on-dark (premultiplied-alpha test)
+#   - sharp + soft drop-shadows (clipping / dark-box test)
+#   - outlines of several widths (saturation / dark-box test)
+#
+# Run from the repo root (asset paths are relative to the cwd):
+#   compiler/bin/rae run examples/100_font_example/main.rae
+# Set RAE_FONT_SHOT=<name.png> to capture one frame and exit.
+
+import raylib
+import core
+import sys
+# `ui/msdf` itself only needs core/json/raylib for the calls this example
+# uses (loadMsdfFont / drawMsdfText), but its `enableUiMsdf*` helpers
+# reference `UiWorld` (ui/ecs) and `RgbaColor` (ui/components), so those
+# modules must be imported for the generated C types to be declared.
+import ui/components
+import ui/ecs
+import ui/msdf
+
+# --- small draw helpers -----------------------------------------------
+
+# Bitmap text via font slot 0 (Roboto TTF baked by `loadFontInto`).
+func bmp(s: view String, x: view Float, y: view Float, size: view Float, c: view Color) {
+  drawTextWithFont(slot: 0, text: s, x: x, y: y, fontSize: size, spacing: 1.0, color: c)
+}
+
+# MSDF text, body only (no outline, no shadow).
+func mtext(font: view MsdfFont, s: view String, x: view Float, y: view Float, size: view Float, c: view Color) {
+  let no: Color = { r: 0, g: 0, b: 0, a: 0 }
+  drawMsdfText(
+    font: font, text: s, x: x, y: y, sizePx: size, color: c
+    outlineColor: no, outlineWidth: 0.0
+    shadowColor: no, shadowOffsetX: 0.0, shadowOffsetY: 0.0, shadowSoftness: 1.0
+  )
+}
+
+# MSDF text with a drop-shadow.
+func mshadow(font: view MsdfFont, s: view String, x: view Float, y: view Float, size: view Float, c: view Color, sh: view Color, sx: view Float, sy: view Float, soft: view Float) {
+  let no: Color = { r: 0, g: 0, b: 0, a: 0 }
+  drawMsdfText(
+    font: font, text: s, x: x, y: y, sizePx: size, color: c
+    outlineColor: no, outlineWidth: 0.0
+    shadowColor: sh, shadowOffsetX: sx, shadowOffsetY: sy, shadowSoftness: soft
+  )
+}
+
+# MSDF text with an outline.
+func moutline(font: view MsdfFont, s: view String, x: view Float, y: view Float, size: view Float, c: view Color, ol: view Color, olw: view Float) {
+  let no: Color = { r: 0, g: 0, b: 0, a: 0 }
+  drawMsdfText(
+    font: font, text: s, x: x, y: y, sizePx: size, color: c
+    outlineColor: ol, outlineWidth: olw
+    shadowColor: no, shadowOffsetX: 0.0, shadowOffsetY: 0.0, shadowSoftness: 1.0
+  )
+}
+
+func panel(x: view Float, y: view Float, w: view Float, h: view Float, c: view Color) {
+  drawRectangle(x: x, y: y, width: w, height: h, color: c)
+}
+
+# Section header label (bitmap, so labels never depend on the path
+# under test).
+func header(s: view String, x: view Float, y: view Float) {
+  let accent: Color = { r: 120, g: 200, b: 255, a: 255 }
+  bmp(s: s, x: x, y: y, size: 16.0, c: accent)
+}
+
+func drawFrame(font: view MsdfFont) {
+  let white: Color = { r: 236, g: 239, b: 245, a: 255 }
+  let gray: Color = { r: 150, g: 154, b: 165, a: 255 }
+  let darkInk: Color = { r: 24, g: 26, b: 32, a: 255 }
+  let panelDark: Color = { r: 30, g: 33, b: 42, a: 255 }
+  let panelMid: Color = { r: 120, g: 122, b: 130, a: 255 }
+  let panelLight: Color = { r: 236, g: 237, b: 240, a: 255 }
+  let panelCyan: Color = { r: 90, g: 205, b: 220, a: 255 }
+  let shCol: Color = { r: 0, g: 0, b: 0, a: 175 }
+
+  # --- title ---------------------------------------------------------
+  mshadow(font: font, s: "Rae — Font Rendering Test", x: 32.0, y: 18.0, size: 40.0, c: white, sh: shCol, sx: 0.0, sy: 2.0, soft: 1.0)
+  bmp(s: "Roboto — Bitmap (raylib LoadFontEx) vs MSDF (distance field)", x: 34.0, y: 70.0, size: 16.0, c: gray)
+
+  # --- Block A: bitmap vs MSDF across sizes --------------------------
+  panel(x: 32.0, y: 98.0, w: 976.0, h: 196.0, c: panelDark)
+  header(s: "BITMAP", x: 70.0, y: 104.0)
+  header(s: "MSDF", x: 560.0, y: 104.0)
+  bmp(s: "Grumpy wizards 14", x: 60.0, y: 132.0, size: 14.0, c: white)
+  mtext(font: font, s: "Grumpy wizards 14", x: 560.0, y: 132.0, size: 14.0, c: white)
+  bmp(s: "Grumpy wizards 18", x: 60.0, y: 154.0, size: 18.0, c: white)
+  mtext(font: font, s: "Grumpy wizards 18", x: 560.0, y: 154.0, size: 18.0, c: white)
+  bmp(s: "Grumpy wizards 26", x: 60.0, y: 184.0, size: 26.0, c: white)
+  mtext(font: font, s: "Grumpy wizards 26", x: 560.0, y: 184.0, size: 26.0, c: white)
+  bmp(s: "Grumpy 40", x: 60.0, y: 226.0, size: 40.0, c: white)
+  mtext(font: font, s: "Grumpy 40", x: 560.0, y: 226.0, size: 40.0, c: white)
+
+  # --- Block B: colours (MSDF) ---------------------------------------
+  header(s: "Colours (MSDF)", x: 32.0, y: 302.0)
+  panel(x: 32.0, y: 324.0, w: 976.0, h: 56.0, c: panelMid)
+  let cRed: Color = { r: 235, g: 70, b: 70, a: 255 }
+  let cGreen: Color = { r: 70, g: 210, b: 110, a: 255 }
+  let cBlue: Color = { r: 90, g: 140, b: 255, a: 255 }
+  let cGold: Color = { r: 245, g: 205, b: 70, a: 255 }
+  mtext(font: font, s: "White", x: 48.0, y: 332.0, size: 30.0, c: white)
+  mtext(font: font, s: "Red", x: 210.0, y: 332.0, size: 30.0, c: cRed)
+  mtext(font: font, s: "Green", x: 320.0, y: 332.0, size: 30.0, c: cGreen)
+  mtext(font: font, s: "Blue", x: 480.0, y: 332.0, size: 30.0, c: cBlue)
+  mtext(font: font, s: "Gold", x: 610.0, y: 332.0, size: 30.0, c: cGold)
+  mtext(font: font, s: "Black", x: 740.0, y: 332.0, size: 30.0, c: darkInk)
+
+  # --- Block C: white MSDF on varied backgrounds ---------------------
+  header(s: "White MSDF on backgrounds (no edge halo)", x: 32.0, y: 396.0)
+  panel(x: 32.0, y: 418.0, w: 232.0, h: 72.0, c: panelDark)
+  panel(x: 272.0, y: 418.0, w: 232.0, h: 72.0, c: panelMid)
+  panel(x: 512.0, y: 418.0, w: 232.0, h: 72.0, c: panelLight)
+  panel(x: 752.0, y: 418.0, w: 256.0, h: 72.0, c: panelCyan)
+  mtext(font: font, s: "Sample", x: 52.0, y: 438.0, size: 28.0, c: white)
+  mtext(font: font, s: "Sample", x: 292.0, y: 438.0, size: 28.0, c: white)
+  mtext(font: font, s: "Sample", x: 532.0, y: 438.0, size: 28.0, c: white)
+  mtext(font: font, s: "Sample", x: 772.0, y: 438.0, size: 28.0, c: white)
+
+  # --- Block D: low-contrast edge cases ------------------------------
+  header(s: "Low-contrast (premultiplied-alpha test)", x: 32.0, y: 506.0)
+  panel(x: 32.0, y: 528.0, w: 472.0, h: 60.0, c: panelLight)
+  mtext(font: font, s: "Dark on light 0123", x: 52.0, y: 544.0, size: 26.0, c: darkInk)
+  panel(x: 536.0, y: 528.0, w: 472.0, h: 60.0, c: panelLight)
+  let nearWhite: Color = { r: 246, g: 247, b: 250, a: 255 }
+  mtext(font: font, s: "Light on light 0123", x: 556.0, y: 544.0, size: 26.0, c: nearWhite)
+
+  # --- Block E: shadows (MSDF) on a light panel ----------------------
+  header(s: "Drop-shadows (MSDF)", x: 32.0, y: 604.0)
+  panel(x: 32.0, y: 626.0, w: 976.0, h: 72.0, c: panelLight)
+  let softSh: Color = { r: 0, g: 0, b: 0, a: 150 }
+  mtext(font: font, s: "None", x: 56.0, y: 644.0, size: 34.0, c: darkInk)
+  mshadow(font: font, s: "Sharp", x: 320.0, y: 644.0, size: 34.0, c: darkInk, sh: shCol, sx: 0.0, sy: 2.0, soft: 1.0)
+  mshadow(font: font, s: "Soft", x: 620.0, y: 644.0, size: 34.0, c: darkInk, sh: softSh, sx: 0.0, sy: 2.0, soft: 3.0)
+
+  # --- Block F: outlines (MSDF) on a saturated panel -----------------
+  # Outline thickness is capped by the atlas `distanceRange` (4 here),
+  # which scales with text size — so the demo uses large text where a
+  # real outline fits. "Thick" requests more than the atlas can encode
+  # and is clamped to the band; a chunkier outline needs a wider-range
+  # re-bake.
+  header(s: "Outlines (MSDF) — large text so the outline has room", x: 32.0, y: 712.0)
+  let panelPlum: Color = { r: 70, g: 60, b: 120, a: 255 }
+  panel(x: 32.0, y: 734.0, w: 976.0, h: 108.0, c: panelPlum)
+  let olDark: Color = { r: 18, g: 14, b: 38, a: 255 }
+  mtext(font: font, s: "None", x: 50.0, y: 748.0, size: 72.0, c: white)
+  moutline(font: font, s: "Thin", x: 360.0, y: 748.0, size: 72.0, c: white, ol: olDark, olw: 1.5)
+  moutline(font: font, s: "Thick", x: 660.0, y: 748.0, size: 72.0, c: white, ol: olDark, olw: 8.0)
+
+  # --- Block G: tiny text + shadow (dark-box / clip test) ------------
+  header(s: "Small text + shadow (no dark boxes, no clipping)", x: 32.0, y: 862.0)
+  panel(x: 32.0, y: 884.0, w: 976.0, h: 54.0, c: panelLight)
+  mshadow(font: font, s: "10px tiny", x: 52.0, y: 896.0, size: 10.0, c: darkInk, sh: shCol, sx: 0.0, sy: 1.0, soft: 1.0)
+  mshadow(font: font, s: "13px small", x: 200.0, y: 894.0, size: 13.0, c: darkInk, sh: shCol, sx: 0.0, sy: 1.0, soft: 1.0)
+  mshadow(font: font, s: "16px caption", x: 380.0, y: 892.0, size: 16.0, c: darkInk, sh: shCol, sx: 0.0, sy: 1.0, soft: 1.0)
+  mshadow(font: font, s: "22px body", x: 620.0, y: 890.0, size: 22.0, c: darkInk, sh: shCol, sx: 0.0, sy: 2.0, soft: 1.0)
+}
+
+func main() {
+  let w: Int = 1040
+  let h: Int = 960
+  setConfigFlags(flags: 4)
+  raylibSetLogLevel(level: 4)
+  initWindow(width: w, height: h, title: "Rae — Font Rendering Test")
+  setTargetFPS(fps: 60)
+
+  # Bitmap font into slot 0 (baked at 32px; scaled to other sizes).
+  loadFontInto(slot: 0, path: "examples/100_font_example/assets/Roboto-Regular.ttf", fontSize: 32)
+  # MSDF font (one atlas, scales to any size).
+  let font: MsdfFont = loadMsdfFont(
+    jsonPath: "examples/100_font_example/assets/Roboto-Regular.mtsdf.json"
+    atlasPath: "examples/100_font_example/assets/Roboto-Regular.mtsdf.png"
+  )
+
+  let bg: Color = { r: 16, g: 18, b: 24, a: 255 }
+  let shotPath: String = getEnv(name: "RAE_FONT_SHOT")
+  let frame: Int = 0
+  loop not windowShouldClose() {
+    beginDrawing()
+    clearBackground(color: bg)
+    drawFrame(font: font)
+    endDrawing()
+    frame = frame + 1
+    if shotPath.length() > 0 {
+      if frame is 6 {
+        takeScreenshot(fileName: shotPath)
+      }
+      if frame is 9 {
+        closeWindow()
+        ret
+      }
+    }
+  }
+  closeWindow()
+}
