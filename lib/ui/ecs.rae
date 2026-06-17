@@ -18,6 +18,7 @@
 # the constant factor doesn't matter. We can swap to an IntMap-backed
 # sparse set later without changing the public API.
 import core
+import ui/msdf
 
 # Entity identifier — a value-type wrapper around `Int`.
 #
@@ -381,6 +382,11 @@ type UiWorld {
   safeInsets: ComponentTable(SafeInsets)
   parents: ComponentTable(Parent)
   animStates: ComponentTable(AnimState)
+
+  # MSDF / MTSDF text default-font slot. Off until the host calls
+  # lib/ui/msdf::enableUiMsdf. When enabled, paintText routes every
+  # Text node through the MSDF shader instead of the bitmap path.
+  msdfState: MsdfState
 }
 
 func createUiWorld() ret UiWorld {
@@ -454,6 +460,7 @@ func createUiWorld() ret UiWorld {
     safeInsets: createComponentTable(SafeInsets)
     parents: createComponentTable(Parent)
     animStates: createComponentTable(AnimState)
+    msdfState: createMsdfState()
   }
 }
 
