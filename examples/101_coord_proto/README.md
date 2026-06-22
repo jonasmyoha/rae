@@ -19,8 +19,12 @@ make -C examples/101_coord_proto run
 
 ## Controls
 
-- **SPACE** — toggle phone ⇄ desktop reference frame
-- **UP / DOWN** — raise / lower `unitScale` (design units per logical point) live
+On-screen buttons: **Phone** / **Desktop** select the reference frame;
+**−** / **+** change `unitScale`. Keyboard also works: **SPACE** toggles the
+frame, **UP/DOWN** change `unitScale`.
+
+Text is rendered with the Roboto TTF (font slot 0, bilinear-filtered), not
+raylib's default bitmap font.
 
 ## What to judge
 
