@@ -20,8 +20,24 @@ import ui/layout
 let homeGridColumns: Int = 2
 let homeGridTileGap: Float = 8.0  # spaceS
 
+# Responsive column count. Phone width keeps the authored base (2); as
+# the window widens toward desktop, add columns so tiles stay near their
+# phone size instead of stretching huge. Deterministic on screenW, so
+# every call site within a build agrees.
+func homeCols() ret Int {
+  let base: Int = homeGridColumns
+  let avail: Float = screenW - outerPad * 2.0
+  let target: Float = 220.0
+  let gap: Float = homeGridTileGap
+  let n: Int = ((avail + gap) / (target + gap)).toInt()
+  if n < base {
+    ret base
+  }
+  ret n
+}
+
 func homeGridTileSize() ret Float {
-  let cols: Int = homeGridColumns
+  let cols: Int = homeCols()
   let avail: Float = screenW - outerPad * 2.0
   let gapTotal: Float = homeGridTileGap * (cols - 1).toFloat()
   ret (avail - gapTotal) / cols.toFloat()
@@ -31,7 +47,7 @@ func homeGridTileSize() ret Float {
 # cover grid). Used by the scroll clamp so the user can pull the
 # bottom rows into view without over-scrolling past them.
 func homeContentHeight(albums: view List(Album), hasRecent: view Bool) pub ret Float {
-  let cols: Int = homeGridColumns
+  let cols: Int = homeCols()
   let total: Int = albums.length
   let rows: Int = (total + cols - 1) / cols
   let tileH: Float = homeGridTileSize()
@@ -75,7 +91,7 @@ func buildHomeGridRow(
   setLayout(world: world, entity: row, kind: layH, gap: homeGridTileGap, alignCross: alignS)
 
   let kids: List(EntityId) = createList(EntityId, cap: homeGridColumns)
-  let cols: Int = homeGridColumns
+  let cols: Int = homeCols()
   let total: Int = keys.length
   let col: Int = 0
   loop col < cols {
@@ -94,7 +110,7 @@ func buildHomeGridRow(
 func buildHomeCoverGrid(world: mod UiWorld, albums: view List(Album), library: view List(String), rounded: view Bool) ret EntityId {
   let keys: List(String) = collectLibraryCoverKeys(albums: albums, library: library)
   let grid: EntityId = createEntity(world: world)
-  let cols: Int = homeGridColumns
+  let cols: Int = homeCols()
   let total: Int = keys.length
   let tileH: Float = homeGridTileSize()
   let rows: Int = (total + cols - 1) / cols
