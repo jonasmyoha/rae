@@ -387,6 +387,14 @@ type UiWorld {
   # lib/ui/msdf::enableUiMsdf. When enabled, paintText routes every
   # Text node through the MSDF shader instead of the bitmap path.
   msdfState: MsdfState
+  # Layout root extent in design units — the content box the root
+  # node(s) measure against. Defaults to the legacy 600x1300 so
+  # existing callers/tests keep their behaviour; the app overwrites
+  # these from the live window size (see the frames coordinate plan,
+  # rae/docs/ui-coordinate-and-responsive-layout.md). Replaces the
+  # old disconnected module globals in layout.rae.
+  layoutW: Float
+  layoutH: Float
 }
 
 func createUiWorld() ret UiWorld {
@@ -461,6 +469,8 @@ func createUiWorld() ret UiWorld {
     parents: createComponentTable(Parent)
     animStates: createComponentTable(AnimState)
     msdfState: createMsdfState()
+    layoutW: 600.0
+    layoutH: 1300.0
   }
 }
 
