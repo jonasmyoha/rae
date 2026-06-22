@@ -23,11 +23,26 @@ let libraryGridTileGap: Float = 8.0  # spaceS
 # Inner gap between the four mini-covers of a playlist tile.
 let playlistCoverGap: Float = 3.0
 
+# Responsive column count — phone keeps the authored base (3); widen the
+# window and columns grow so tiles stay near their compact phone size.
+# Deterministic on screenW so all call sites agree within a build.
+func libraryCols() ret Int {
+  let base: Int = libraryGridColumns
+  let avail: Float = screenW - outerPad * 2.0
+  let target: Float = 150.0
+  let gap: Float = libraryGridTileGap
+  let n: Int = ((avail + gap) / (target + gap)).toInt()
+  if n < base {
+    ret base
+  }
+  ret n
+}
+
 func libraryGridTileSize() ret Float {
   # Locals copy the module-level constants because the C backend
   # mis-codegens `.toFloat()` invoked directly on a module-level
   # `let` (drops the receiver — observed 2026-05-28).
-  let cols: Int = libraryGridColumns
+  let cols: Int = libraryCols()
   let avail: Float = screenW - outerPad * 2.0
   let gapTotal: Float = libraryGridTileGap * (cols - 1).toFloat()
   ret (avail - gapTotal) / cols.toFloat()
@@ -176,7 +191,7 @@ func buildLibraryTileRow(
 # album. `library` filters the catalog; `liked` supplies the playlist
 # cover stems.
 func buildLibraryCoverGrid(world: mod UiWorld, albums: view List(Album), library: view List(String), liked: view Playlist, rounded: view Bool) ret EntityId {
-  let cols: Int = libraryGridColumns
+  let cols: Int = libraryCols()
   let tileH: Float = libraryGridTileSize()
 
   # First tile: the Liked playlist, drawn as a 2x2 cover grid.
