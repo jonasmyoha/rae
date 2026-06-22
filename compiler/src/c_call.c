@@ -332,7 +332,12 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         const AstCallArg* len_arg = dst_off_arg ? dst_off_arg->next : NULL;
         const AstCallArg* elem_size_arg = len_arg ? len_arg->next : NULL;
         if (src_arg && src_off_arg && dst_arg && dst_off_arg && len_arg) {
-            fprintf(out, "memcpy((char*)("); emit_expr(ctx, dst_arg->value, out, PREC_LOWEST, false, false);
+            // memmove, not memcpy: rae_ext_rae_buf_copy is used for in-place
+            // overlapping shifts (e.g. List.remove shifting elements down by
+            // one slot, dst = src - elemSize). memcpy on overlapping ranges
+            // is UB (ASan: memcpy-param-overlap); memmove is correct and is
+            // identical to memcpy when the ranges don't overlap.
+            fprintf(out, "memmove((char*)("); emit_expr(ctx, dst_arg->value, out, PREC_LOWEST, false, false);
             fprintf(out, ") + ("); emit_expr(ctx, dst_off_arg->value, out, PREC_LOWEST, false, false);
             fprintf(out, ") * ");
             if (elem_size_arg) emit_expr(ctx, elem_size_arg->value, out, PREC_LOWEST, false, false);
