@@ -220,3 +220,43 @@ func refetchHistoryArt(history: view PlayHistory, reg: mod TextureRegistry) pub 
     i = i + 1
   }
 }
+
+# Chunked, non-blocking variant for the interactive loop. Each network
+# fetch (spotifyFetchArtwork) blocks the main thread, so doing all of a
+# restored history's entries in one call freezes the UI (beach ball).
+# Process at most `budget` not-yet-loaded `spotify-art:` entries per
+# call, scanning MOST-RECENT FIRST so the visible "recently played"
+# thumbs fill in before the older tail. Returns true while entries
+# remain to fetch (the caller keeps the frame loop ticking). Idempotent
+# via `textureHas`; entries with a failed/empty url are skipped (and
+# count toward the budget so the scan makes progress).
+func refetchHistoryArtChunk(history: view PlayHistory, reg: mod TextureRegistry, budget: view Int) pub ret Bool {
+  let prefix: String = "spotify-art:"
+  let pLen: Int = prefix.length()
+  let n: Int = history.entries.length
+  let did: Int = 0
+  let i: Int = n - 1
+  loop i >= 0 {
+    if did >= budget {
+      ret true
+    }
+    let e: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: i)
+    if e.textureKey.startsWith(prefix: prefix) {
+      if textureHas(reg: reg, key: e.textureKey) is false {
+        if e.artworkUrl.length() > 0 {
+          let suffix: String = e.textureKey.sub(start: pLen, len: e.textureKey.length() - pLen)
+          let outPath: String = "/tmp/rae_spotify_art_{suffix}.jpg"
+          let ok: Bool = spotifyFetchArtwork(url: e.artworkUrl, outPath: outPath)
+          if ok {
+            let tex: Texture = loadTexture(fileName: outPath)
+            let keyForReg: String = "{e.textureKey}"
+            textureRegisterDirect(reg: reg, key: own keyForReg, tex: tex)
+          }
+          did = did + 1
+        }
+      }
+    }
+    i = i - 1
+  }
+  ret false
+}
