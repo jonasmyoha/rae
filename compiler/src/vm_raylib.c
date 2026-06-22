@@ -1347,6 +1347,18 @@ static bool native_getMonitorHeight(struct VM* vm, VmNativeResult* out, const Va
     return true;
 }
 
+static bool native_getMonitorRefreshRate(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 1) {
+        fprintf(stderr, "error: getMonitorRefreshRate expects 1 arg, got %zu\n", count);
+        return false;
+    }
+    int monitor = (args[0].type == VAL_FLOAT) ? (int)args[0].as.float_value : (int)args[0].as.int_value;
+    out->has_value = true;
+    out->value = value_int(GetMonitorRefreshRate(monitor));
+    return true;
+}
+
 static bool native_setWindowSize(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
     if (count != 2) {
@@ -1459,6 +1471,7 @@ bool vm_registry_register_raylib(VmRegistry* registry) {
     ok &= vm_registry_register_native(registry, "getCurrentMonitor", native_getCurrentMonitor, NULL);
     ok &= vm_registry_register_native(registry, "getMonitorWidth", native_getMonitorWidth, NULL);
     ok &= vm_registry_register_native(registry, "getMonitorHeight", native_getMonitorHeight, NULL);
+    ok &= vm_registry_register_native(registry, "getMonitorRefreshRate", native_getMonitorRefreshRate, NULL);
     ok &= vm_registry_register_native(registry, "setWindowSize", native_setWindowSize, NULL);
     ok &= vm_registry_register_native(registry, "setWindowPosition", native_setWindowPosition, NULL);
     ok &= vm_registry_register_native(registry, "getWindowPositionX", native_getWindowPositionX, NULL);

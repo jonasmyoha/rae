@@ -24,9 +24,24 @@
 # and call `waitEventsTimeout` directly; this helper covers the 95%
 # case.
 
-# One 60 Hz animation frame. The right wait when an animation is
-# advancing or the user is currently dragging.
+import raylib
+
+# Fallback animation frame (~60 Hz), used only if the display refresh
+# rate can't be read. `displayFrameSec` below is the real source.
 let frameTimeoutSec: Float = 0.016
+
+# One display frame in seconds, from the active monitor's refresh rate
+# (60 Hz -> 0.0167, 120 Hz -> 0.0083). Falls back to 60 Hz when the rate
+# is missing or implausible (<30 or >360 Hz). Call once after initWindow;
+# drives both the animation wait cadence and the render FPS cap so the
+# UI paces to the real display instead of a hard-coded 60.
+func displayFrameSec() pub ret Float {
+  let hz: Int = getMonitorRefreshRate(monitor: getCurrentMonitor())
+  if hz < 30 or hz > 360 {
+    ret 0.016667
+  }
+  ret 1.0 / hz.toFloat()
+}
 
 # File-watcher poll cadence. The watcher itself only needs ~0.5 s
 # precision, but this also bounds the worst-case input latency when
@@ -62,9 +77,10 @@ func nextWaitTimeoutSec(
   animating: view Bool
   mouseDown: view Bool
   pollWatcher: view Bool
+  frameSec: view Float
 ) ret Float {
-  if animating { ret frameTimeoutSec }
-  if mouseDown { ret frameTimeoutSec }
+  if animating { ret frameSec }
+  if mouseDown { ret frameSec }
   if pollWatcher { ret watcherPollSec }
   ret idleCapSec
 }
