@@ -96,6 +96,16 @@ func buildScreenWorld(
   ret buildNowPlayingWorld(scenes: scenes, playback: playback, state: state, reg: texReg)
 }
 
+# Set a freshly-built world's layout extent from the live window size
+# (in design units = window points * unitScale). This is what makes
+# layout track the real window instead of layout.rae's legacy 600x1300
+# defaults — the core of the coordinate-system fix. `screenW`/`screenH`
+# are kept in sync with the actual window by main.rae after initWindow.
+func applyViewportExtent(world: mod UiWorld) pub {
+  world.layoutW = screenW * unitScale
+  world.layoutH = screenH * unitScale
+}
+
 # Maps a Screen to the PageRoot id used for its mount. Symmetric to
 # the `mountXxxPage` calls in each screen builder.
 func pageIdForScreen(screen: Screen) pub ret String {
@@ -175,6 +185,7 @@ func buildAppWorld(
   )
   let back: EntityId = mountBackButtonOverlay(world: world, state: state)
   addBottomSheetLayer(world: world, sheet: state.bottomSheet)
+  applyViewportExtent(world: world)
   ret world
 }
 
@@ -298,6 +309,12 @@ type AppState pub {
   # mutations land in temp/playlists/liked.json. See
   # `playlist_data.rae`.
   liked: Playlist
+  # When true, the Album sub-page renders the playlist named by
+  # `currentPlaylistId` instead of `currentAlbumStem`'s album — the
+  # album view is DRY and drives both (see `buildCurrentCollection`).
+  # Set by `playlist.open`, cleared by `album.open` / tab switches.
+  viewingPlaylist: Bool
+  currentPlaylistId: String
   # iOS-style action sheet — opened by the three-dots button on
   # track rows / album pages. See `bottom_sheet.rae`. Not persisted
   # across launches; defaults to invisible.
@@ -333,6 +350,8 @@ func createAppState(albums: own List(Album)) pub ret AppState {
     playHistory: createPlayHistory(cap: 100)
     library: createList(String, cap: 8)
     liked: own liked
+    viewingPlaylist: false
+    currentPlaylistId: ""
     bottomSheet: createBottomSheetState()
     settings: createAppSettings()
   }
@@ -383,6 +402,8 @@ func popSubPage(state: mod AppState) pub {
 func setTab(state: mod AppState, tab: view Screen) pub {
   state.tab = tab
   state.subPageStack.length = 0
+  # Leaving for a tab home clears any open-playlist view state.
+  state.viewingPlaylist = false
 }
 
 # Helper for view-building paths that need the active album as a
@@ -437,6 +458,22 @@ func activeAlbum(state: view AppState) pub ret Album {
 #   playback.toggle
 #       Play / pause toggle (both the big circle and the mini-
 #       player share this id).
+
+# Build the `spotify:search:` query. Matches SUMU's working AppleScript
+# implementation exactly: a plain "<title> <artist>" string, title
+# first. That ordering biases Spotify's top hit onto the right song.
+#
+# Field operators (`track:` / `artist:` / `album:`) were tried and made
+# it WORSE through the `spotify:search:` URI — `play track` plays the
+# top result, the operators aren't ranked the way the search box ranks
+# them, and an `album:` clause that doesn't match Spotify's exact album
+# title (deluxe editions, remasters) drops the match entirely. `album`
+# is kept in the signature for callers but intentionally unused.
+func spotifySearchQuery(artist: view String, title: view String, album: view String) pub ret String {
+  let unused: Int = album.length()
+  ret "{title} {artist}"
+}
+
 func dispatchActions(
   input: view InputSystem
   current: Screen
@@ -462,7 +499,8 @@ func dispatchActions(
     let playbackNextKey: String = "playback.next"
     let playbackPrevKey: String = "playback.prev"
     let albumOpenKey: String = "album.open"
-    let songOpenPrefix: String = "song.open."
+    let playlistOpenPrefix: String = "playlist.open."
+    let songOpenRefPrefix: String = "song.openref."
     let navHistoryKey: String = "nav.history"
     let historyReplayPrefix: String = "history.replay."
     let trackMoreKey: String = "track.more"
@@ -558,27 +596,59 @@ func dispatchActions(
         state.currentAlbumStem = "{sp.textureKey}"
         state.currentTrackIndex = 0
       }
+      # An album cover always shows the album, never a playlist.
+      state.viewingPlaylist = false
       let s: Screen = Screen.Album
       pushSubPage(state: state, screen: s)
     }
-    if actionId.startsWith(prefix: songOpenPrefix) {
-      # Track-row click in the Album view. Real music players just
-      # start playing the song — no view change. The mini-player at
-      # the bottom reflects what's playing; the user can tap that to
-      # open the full Player sub-page if they want it. This way
-      # browsing an album and trying tracks doesn't yank the user
-      # out of the track list.
-      let prefixLen: Int = songOpenPrefix.length()
+    if actionId.startsWith(prefix: playlistOpenPrefix) {
+      # Playlist tile click in the Library — open it in the same
+      # sub-page the album view uses (DRY); `viewingPlaylist` flips the
+      # renderer to resolve the playlist. The id is encoded after the
+      # prefix ("playlist.open.liked"); default to "liked".
+      let pPrefixLen: Int = playlistOpenPrefix.length()
+      let pActionLen: Int = actionId.length()
+      let pid: String = "liked"
+      if pActionLen > pPrefixLen {
+        pid = actionId.sub(start: pPrefixLen, len: pActionLen - pPrefixLen)
+      }
+      state.currentPlaylistId = "{pid}"
+      state.viewingPlaylist = true
+      # Point the hero cover at the playlist's first cover so the
+      # shared album-scene header (which rebinds against
+      # currentAlbumStem) shows something representative.
+      let coverStems: List(String) = playlistCoverStems(playlist: state.liked, max: 1)
+      if coverStems.length > 0 {
+        state.currentAlbumStem = "{coverStems.get(index: 0)}"
+      }
+      state.currentTrackIndex = 0
+      let sp: Screen = Screen.Album
+      pushSubPage(state: state, screen: sp)
+    }
+    if actionId.startsWith(prefix: songOpenRefPrefix) {
+      # Track-row click in the album/playlist view. Real music players
+      # just start playing the song — no view change. The actionId
+      # encodes the song as `song.openref.<trackIndex>.<albumStem>`, so
+      # a playlist row whose song lives in a different album plays the
+      # right one (stems contain no '.').
+      let prefixLen: Int = songOpenRefPrefix.length()
       let actionLen: Int = actionId.length()
-      let suffix: String = actionId.sub(start: prefixLen, len: actionLen - prefixLen)
-      let idx: Int = suffix.toInt()
+      let rest: String = actionId.sub(start: prefixLen, len: actionLen - prefixLen)
+      let dot: Int = rest.indexOf(sub: ".")
+      let idx: Int = 0
+      if dot > 0 {
+        let idxStr: String = rest.sub(start: 0, len: dot)
+        idx = idxStr.toInt()
+        let stem: String = rest.sub(start: dot + 1, len: rest.length() - dot - 1)
+        # The playing song's album becomes the active stem so the
+        # mini-player / now-playing / history all resolve against it.
+        state.currentAlbumStem = "{stem}"
+      }
       if idx >= 0 {
         state.currentTrackIndex = idx
       }
-      # Mark this track as actually playing — the album view reads
-      # these two fields to decide which row to highlight. Without
-      # this, opening an album would highlight whichever index was
-      # last browsed (typically 0 after `album.open`).
+      # Mark this track as actually playing — the views read these two
+      # fields to decide which row to highlight.
       playback.playingAlbumStem = "{state.currentAlbumStem}"
       playback.playingTrackIndex = state.currentTrackIndex
       playback.isPlaying = true
@@ -607,7 +677,7 @@ func dispatchActions(
       recordPlay(history: state.playHistory, entry: own histEntry)
       saveHistoryToJson(history: state.playHistory, path: historyFilePath)
       if spotifyEnabled {
-        let q: String = "{histAlbum.artist} {histTrack.title}"
+        let q: String = spotifySearchQuery(artist: histAlbum.artist, title: histTrack.title, album: histAlbum.album)
         log("[spotify] play track query={q}")
         spotifyPlayQuery(query: q)
       }
@@ -649,7 +719,7 @@ func dispatchActions(
         # as the song.open path above.
         applyLikedToWorld(world: world, liked: state.liked, stem: state.currentAlbumStem, trackIndex: state.currentTrackIndex)
         if spotifyEnabled {
-          let q: String = "{e.artistName} {e.trackName}"
+          let q: String = spotifySearchQuery(artist: e.artistName, title: e.trackName, album: e.albumName)
           log("[spotify] history-replay query={q}")
           spotifyPlayQuery(query: q)
         }
