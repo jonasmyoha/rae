@@ -1715,10 +1715,34 @@ void rae_ext_disableAppNap(void) {
   }
   fflush(stderr);
 }
+
+/* Bring THIS process's window to the foreground:
+ * `[[NSApplication sharedApplication] activateIgnoringOtherApps:YES]`.
+ *
+ * Used after controlling Spotify (which can pull Spotify forward) so
+ * focus returns to our own window and clicks keep landing. We activate
+ * OURSELVES rather than "whatever was frontmost before the play": the
+ * latter (via System Events `set frontmost`) reliably hands focus to
+ * the launching app — SUMU when run from the dev tools — which drops us
+ * out of the foreground and macOS then demotes us to a background
+ * process (no Dock entry, unfocusable, dead close button). Activating
+ * self has no such failure mode. Pure objc_msgSend; no ObjC unit. */
+void rae_ext_activateSelf(void) {
+  Class appCls = objc_getClass("NSApplication");
+  if (!appCls) return;
+  SEL sharedSel = sel_registerName("sharedApplication");
+  void* app = ((void* (*)(Class, SEL))objc_msgSend)(appCls, sharedSel);
+  if (!app) return;
+  SEL actSel = sel_registerName("activateIgnoringOtherApps:");
+  ((void (*)(void*, SEL, signed char))objc_msgSend)(app, actSel, (signed char)1);
+}
 #else
 void rae_ext_disableAppNap(void) {
   /* No-op outside macOS — App Nap is a macOS-specific power
    * management feature. */
+}
+void rae_ext_activateSelf(void) {
+  /* No-op outside macOS. */
 }
 #endif
 
@@ -2028,6 +2052,7 @@ rae_Bool rae_ext_isMouseButtonReleased(int64_t button) { return IsMouseButtonRel
 void rae_ext_setMouseScale(double scaleX, double scaleY) { SetMouseScale((float)scaleX, (float)scaleY); }
 int64_t rae_ext_getScreenWidth(void) { return (int64_t)GetScreenWidth(); }
 int64_t rae_ext_getScreenHeight(void) { return (int64_t)GetScreenHeight(); }
+rae_Bool rae_ext_isWindowResized(void) { return IsWindowResized(); }
 int64_t rae_ext_getRenderWidth(void) { return (int64_t)GetRenderWidth(); }
 int64_t rae_ext_getRenderHeight(void) { return (int64_t)GetRenderHeight(); }
 int64_t rae_ext_getCurrentMonitor(void) { return (int64_t)GetCurrentMonitor(); }
@@ -2872,15 +2897,19 @@ void rae_ext_spotifyPlayQuery(rae_String query) {
         escaped[off++] = c;
     }
     escaped[off] = '\0';
-    /* One atomic AppleScript: launch Spotify if needed, then have it
-     * play the search URI in a single `play track` call. No separate
-     * open + delay + play sequence — Spotify resolves the URI and
-     * starts the top hit inside this one tell-block, so there's nothing
-     * to race against.
+    /* One atomic AppleScript: launch Spotify if needed, then play the
+     * search URI in a single `play track` call. `tell ... to play` /
+     * `launch` (never `activate`) drive Spotify via background Apple
+     * Events, like SUMU's play_spotify.
      *
-     * Frontmost-app capture/restore (next four lines) prevents Spotify
-     * from stealing focus from the user's current window — SUMU does
-     * the same thing via System Events. */
+     * Focus handling lives in C (`rae_ext_activateSelf` after the run),
+     * NOT in this AppleScript. We deliberately do NOT capture-and-
+     * restore "whatever was frontmost before the play" via System Events
+     * `set frontmost`: that hands focus to the launching app (SUMU when
+     * run from the dev tools), dropping our window out of the foreground
+     * — macOS then demotes us to a background process (no Dock entry,
+     * unfocusable, dead close button, launches behind SUMU). Re-asserting
+     * our OWN app instead has no such failure mode. */
     char launch_line[128];
     char play_line[2160];
     snprintf(launch_line, sizeof(launch_line),
@@ -2889,21 +2918,18 @@ void rae_ext_spotifyPlayQuery(rae_String query) {
         "tell application \"Spotify\" to play track \"spotify:search:%s\"",
         escaped);
     const char* lines[] = {
-        "set frontApp to \"\"",
-        "try",
-        "  tell application \"System Events\" to set frontApp to name of first application process whose frontmost is true",
-        "end try",
         launch_line,
         play_line,
-        "if frontApp is not \"\" and frontApp is not \"Spotify\" then",
-        "  try",
-        "    tell application frontApp to activate",
-        "  end try",
-        "end if",
         NULL
     };
     int rc = rae_osascript_run(lines);
     if (rc != 0) fprintf(stderr, "[spotify-c] play query failed (osascript rc=%d)\n", rc);
+    /* `tell ... to play` is a background Apple Event, but `launch` (and
+     * some Spotify configs) can pull Spotify to the front. Re-assert our
+     * own window so the user keeps clicking the rae UI instead of having
+     * focus stuck on Spotify. Activating SELF (not "the previous app")
+     * avoids handing focus to the launcher (SUMU) — see rae_ext_activateSelf. */
+    rae_ext_activateSelf();
 }
 
 void rae_ext_spotifyRefresh(void) {

@@ -89,6 +89,32 @@ func subtreeHoverPaintRank(world: view UiWorld, entity: view EntityId) pub ret I
   ret best
 }
 
+# True when `entity` is `ancestor` itself or sits anywhere below it in
+# the parent chain. Lets a hovered container (e.g. the Library's
+# playlist tile, which carries the OnClick) drive the HoverScale on its
+# child covers so the whole thumbnail scales as one — the hit-test only
+# ever reports the single OnClick entity, never its decorative children.
+# Depth-guarded against malformed cycles.
+func hoverScaleContains(world: view UiWorld, entity: view EntityId, ancestor: view EntityId) ret Bool {
+  if entity.value is ancestor.value {
+    ret true
+  }
+  let cur: EntityId = entity
+  let guard: Int = 0
+  loop guard < 64 {
+    if componentHas(this: world.parents, entity: cur) is false {
+      ret false
+    }
+    let p: Parent = componentGet(this: world.parents, entity: cur)
+    if p.parent.value is ancestor.value {
+      ret true
+    }
+    cur = p.parent
+    guard = guard + 1
+  }
+  ret false
+}
+
 # Step every HoverScale entity by one frame. `hovered` is the
 # topmost cursor-hit entity (use `noEntity()` when nothing is
 # hovered). Returns true if any entity is still animating.
@@ -113,7 +139,7 @@ func hoverScaleSystem(world: mod UiWorld, hovered: view EntityId, dt: view Float
     let entity: EntityId = componentEntityAt(this: world.hoverScales, i: i)
     let hs: HoverScale = componentGet(this: world.hoverScales, entity: entity)
     let target: Float = hs.restScale
-    if entity.value is hovered.value {
+    if hoverScaleContains(world: world, entity: entity, ancestor: hovered) {
       target = hs.hoverScale
     }
     let next: Float = easeTowards(current: hs.current, target: target, speed: hs.speed, dt: frameDt, epsilon: 0.001)

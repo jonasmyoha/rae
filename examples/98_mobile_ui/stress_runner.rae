@@ -38,6 +38,7 @@ func runStressMode(
   let stressScroll: Float = 0.0
   let stressTexReg: TextureRegistry = createTextureRegistry()
   let warm: UiWorld = buildScreenWorld(screen: Screen.Album, scenes: scenes, playback: stressPlayback, state: appState, texReg: stressTexReg, scrollY: stressScroll)
+  applyViewportExtent(world: warm)
   layoutSystem(world: warm)
   transformSystem(world: warm)
   let baselineKb: Int = processRssKb()
@@ -48,6 +49,7 @@ func runStressMode(
       stressScreen = Screen.Player
     }
     let sworld: UiWorld = buildScreenWorld(screen: stressScreen, scenes: scenes, playback: stressPlayback, state: appState, texReg: stressTexReg, scrollY: stressScroll)
+    applyViewportExtent(world: sworld)
     layoutSystem(world: sworld)
     transformSystem(world: sworld)
     stressI = stressI + 1

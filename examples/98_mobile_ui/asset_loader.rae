@@ -74,3 +74,37 @@ func loadAllTextures(reg: mod TextureRegistry, albums: view List(Album)) pub {
   loadAlbumCovers(reg: reg, albums: albums)
   loadAvatar(reg: reg, albums: albums)
 }
+
+# Progressive "cascade" loader for the interactive path. Loads up to
+# `budget` not-yet-present textures per call — album covers first, then
+# the avatar — so the window can appear and the UI run BEFORE any cover
+# is decoded, with covers streaming in over subsequent frames (covers
+# render as no-ops while their texture id is 0). Idempotent via
+# `textureHas`. Returns true while assets remain to load (the caller
+# keeps the frame rendering so freshly-loaded covers paint); false once
+# everything is present. Cheap when done: one `textureHas` scan.
+func cascadeAssets(reg: mod TextureRegistry, albums: view List(Album), budget: view Int) pub ret Bool {
+  let i: Int = 0
+  let loaded: Int = 0
+  loop i < albums.length {
+    if loaded >= budget {
+      ret true
+    }
+    let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: i)
+    let key: String = albumCoverKey(stem: a.stem)
+    if textureHas(reg: reg, key: key) is false {
+      let copiedKey: String = key
+      let copiedPath: String = a.coverPath
+      let t: Texture = textureLoad(reg: reg, key: copiedKey, path: copiedPath)
+      loaded = loaded + 1
+    }
+    i = i + 1
+  }
+  # All covers present — bring in the avatar last, then we're done.
+  let avatarKey: String = profileAvatarKey()
+  if textureHas(reg: reg, key: avatarKey) is false {
+    loadAvatar(reg: reg, albums: albums)
+    ret true
+  }
+  ret false
+}

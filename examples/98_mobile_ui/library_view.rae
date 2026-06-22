@@ -20,6 +20,8 @@ import ui/layout
 # screen width so the side margins and inter-tile gaps add up cleanly.
 let libraryGridColumns: Int = 3
 let libraryGridTileGap: Float = 8.0  # spaceS
+# Inner gap between the four mini-covers of a playlist tile.
+let playlistCoverGap: Float = 3.0
 
 func libraryGridTileSize() ret Float {
   # Locals copy the module-level constants because the C backend
@@ -82,32 +84,86 @@ func buildLibraryCoverTile(world: mod UiWorld, key: view String, size: view Floa
   ret tile
 }
 
-# Build a single horizontal row of up to `libraryGridColumns` covers
-# starting at `startIndex` into the key list.
-func buildLibraryGridRow(
+# Build a "playlist cover": a 2x2 grid of up to four album covers
+# packed into a single library-tile footprint, so a playlist reads
+# distinctly from the single-cover album tiles. Fewer than four covers
+# still lay out on the 2x2 grid — the remaining cells render as a dim
+# placeholder. Tapping fires `playlist.open` (see `dispatchActions`).
+func buildPlaylistCoverTile(world: mod UiWorld, coverStems: view List(String), size: view Float, rounded: view Bool) pub ret EntityId {
+  let tile: EntityId = createEntity(world: world)
+  setRectFixed(world: world, entity: tile, w: size, h: size)
+  let playlistOpen: String = "playlist.open.liked"
+  setOnClick(world: world, entity: tile, actionId: playlistOpen)
+  # Hover scale goes on the four cells, not this container (a layout
+  # parent draws nothing of its own). `hoverScaleSystem` propagates the
+  # tile's hover state down to them via `hoverScaleContains`, so the
+  # whole 2x2 thumbnail scales together — matching the album tiles.
+  let layV: LayoutType = LayoutType.Vertical
+  let alignS: AlignKind = AlignKind.Start
+  setLayout(world: world, entity: tile, kind: layV, gap: playlistCoverGap, alignCross: alignS)
+
+  let cell: Float = (size - playlistCoverGap) / 2.0
+  let placeholderFill: RgbaColor = { r: 58, g: 60, b: 70, a: 255 }
+
+  let rows: List(EntityId) = createList(EntityId, cap: 2)
+  let r: Int = 0
+  loop r < 2 {
+    let row: EntityId = createEntity(world: world)
+    setRectFixed(world: world, entity: row, w: size, h: cell)
+    let layH: LayoutType = LayoutType.Horizontal
+    setLayout(world: world, entity: row, kind: layH, gap: playlistCoverGap, alignCross: alignS)
+    let cells: List(EntityId) = createList(EntityId, cap: 2)
+    let c: Int = 0
+    loop c < 2 {
+      let idx: Int = r * 2 + c
+      let cellEntity: EntityId = createEntity(world: world)
+      setRectFixed(world: world, entity: cellEntity, w: cell, h: cell)
+      if idx < coverStems.length {
+        let key: String = coverStems.get(index: idx)
+        setSprite(world: world, entity: cellEntity, key: key, tint: imageTintColor)
+      } else {
+        setShapeRect(world: world, entity: cellEntity, fill: placeholderFill)
+      }
+      if rounded {
+        let cr: CornerRadius = { radius: 6.0 }
+        componentSet(this: world.cornerRadiuses, entity: cellEntity, data: cr)
+      }
+      setHoverScale(world: world, entity: cellEntity, hoverScale: 1.12)
+      cells.add(value: cellEntity)
+      c = c + 1
+    }
+    attachChildren(world: world, parent: row, kids: cells)
+    rows.add(value: row)
+    r = r + 1
+  }
+  attachChildren(world: world, parent: tile, kids: rows)
+  ret tile
+}
+
+# Build a single horizontal row from up to `cols` already-built tile
+# entities starting at `startIndex` into `tiles`.
+func buildLibraryTileRow(
   world: mod UiWorld
-  keys: view List(String)
+  tiles: view List(EntityId)
   startIndex: view Int
-  rounded: view Bool
+  cols: view Int
+  tileH: view Float
 ) ret EntityId {
   let row: EntityId = createEntity(world: world)
   let rowW: Float = screenW - outerPad * 2.0
-  let tileH: Float = libraryGridTileSize()
   setRectFixed(world: world, entity: row, w: rowW, h: tileH)
   let layH: LayoutType = LayoutType.Horizontal
   let alignS: AlignKind = AlignKind.Start
   setLayout(world: world, entity: row, kind: layH, gap: libraryGridTileGap, alignCross: alignS)
 
-  let kids: List(EntityId) = createList(EntityId, cap: libraryGridColumns)
-  let cols: Int = libraryGridColumns
-  let total: Int = keys.length
+  let kids: List(EntityId) = createList(EntityId, cap: cols)
+  let total: Int = tiles.length
   let col: Int = 0
   loop col < cols {
     let i: Int = startIndex + col
     if i < total {
-      let key: String = keys.get(index: i)
-      let tile: EntityId = buildLibraryCoverTile(world: world, key: key, size: tileH, rounded: rounded)
-      kids.add(value: tile)
+      let t: EntityId = rae_ext_rae_buf_get(buf: tiles.data, index: i)
+      kids.add(value: t)
     }
     col = col + 1
   }
@@ -115,16 +171,34 @@ func buildLibraryGridRow(
   ret row
 }
 
-# Compose the full 3-column grid over keys derived from the album list
-# (one tile per parsed album). `library` filters the catalog.
-func buildLibraryCoverGrid(world: mod UiWorld, albums: view List(Album), library: view List(String), rounded: view Bool) ret EntityId {
-  let keys: List(String) = collectLibraryCoverKeys(albums: albums, library: library)
-  let grid: EntityId = createEntity(world: world)
+# Compose the full 3-column grid: the "Liked" playlist's 2x2 cover
+# tile is always the first item, followed by one tile per library
+# album. `library` filters the catalog; `liked` supplies the playlist
+# cover stems.
+func buildLibraryCoverGrid(world: mod UiWorld, albums: view List(Album), library: view List(String), liked: view Playlist, rounded: view Bool) ret EntityId {
   let cols: Int = libraryGridColumns
-  let total: Int = keys.length
   let tileH: Float = libraryGridTileSize()
+
+  # First tile: the Liked playlist, drawn as a 2x2 cover grid.
+  let coverStems: List(String) = playlistCoverStems(playlist: liked, max: 4)
+  let playlistTile: EntityId = buildPlaylistCoverTile(world: world, coverStems: coverStems, size: tileH, rounded: rounded)
+
+  # Remaining tiles: one per library album.
+  let keys: List(String) = collectLibraryCoverKeys(albums: albums, library: library)
+  let tiles: List(EntityId) = createList(EntityId, cap: keys.length + 1)
+  tiles.add(value: playlistTile)
+  let k: Int = 0
+  loop k < keys.length {
+    let key: String = keys.get(index: k)
+    let tile: EntityId = buildLibraryCoverTile(world: world, key: key, size: tileH, rounded: rounded)
+    tiles.add(value: tile)
+    k = k + 1
+  }
+
+  let total: Int = tiles.length
   # rows = ceil(total / cols)
   let rows: Int = (total + cols - 1) / cols
+  let grid: EntityId = createEntity(world: world)
   let gridH: Float = tileH * rows.toFloat() + libraryGridTileGap * (rows - 1).toFloat()
   let gridW: Float = screenW - outerPad * 2.0
   setRectFixed(world: world, entity: grid, w: gridW, h: gridH)
@@ -136,7 +210,7 @@ func buildLibraryCoverGrid(world: mod UiWorld, albums: view List(Album), library
   let i: Int = 0
   loop i < rows {
     let startIndex: Int = i * cols
-    let row: EntityId = buildLibraryGridRow(world: world, keys: keys, startIndex: startIndex, rounded: rounded)
+    let row: EntityId = buildLibraryTileRow(world: world, tiles: tiles, startIndex: startIndex, cols: cols, tileH: tileH)
     rowKids.add(value: row)
     i = i + 1
   }
@@ -148,7 +222,7 @@ func buildLibraryCoverGrid(world: mod UiWorld, albums: view List(Album), library
 # past the screen edge — but the host applies `scrollY` as an
 # `Offset.delta.y` so the user can wheel-scroll the column up to
 # bring later rows into view.
-func buildLibraryBody(world: mod UiWorld, albums: view List(Album), library: view List(String), rounded: view Bool, scrollY: view Float) ret EntityId {
+func buildLibraryBody(world: mod UiWorld, albums: view List(Album), library: view List(String), liked: view Playlist, rounded: view Bool, scrollY: view Float) ret EntityId {
   let body: EntityId = createEntity(world: world)
   let bodyW: Float = screenW - outerPad * 2.0
   let bodyH: Float = screenH - topBarH - navTabsH - outerGap * 4.0 - outerPad * 2.0
@@ -165,7 +239,7 @@ func buildLibraryBody(world: mod UiWorld, albums: view List(Album), library: vie
   let scroll: ScrollState = { y: scrollY, velocity: 0.0 }
   componentSet(this: world.scrollStates, entity: body, data: scroll)
 
-  let grid: EntityId = buildLibraryCoverGrid(world: world, albums: albums, library: library, rounded: rounded)
+  let grid: EntityId = buildLibraryCoverGrid(world: world, albums: albums, library: library, liked: liked, rounded: rounded)
   let kids: List(EntityId) = createList(EntityId, cap: 1)
   kids.add(value: grid)
   attachChildren(world: world, parent: body, kids: kids)
@@ -196,7 +270,7 @@ func mountLibraryPage(
   componentSet(this: world.pageRoots, entity: root, data: own pr)
 
   let topBar: EntityId = buildPageTopBar(world: world, title: "Your Library")
-  let body: EntityId = buildLibraryBody(world: world, albums: albums, library: state.library, rounded: state.settings.roundedAlbumCovers, scrollY: scrollY)
+  let body: EntityId = buildLibraryBody(world: world, albums: albums, library: state.library, liked: state.liked, rounded: state.settings.roundedAlbumCovers, scrollY: scrollY)
 
   let kids: List(EntityId) = createList(EntityId, cap: 2)
   kids.add(value: topBar)
