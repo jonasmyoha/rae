@@ -937,6 +937,29 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 // overwrote a String field without releasing the old.
                 bool is_string_field_reassign = target_is_string
                     && stmt->as.assign_stmt.target->kind == AST_EXPR_MEMBER;
+                // Borrow -> owned heap-struct assignment: `dst = src`
+                // where dst is an owned (non-view/mod) struct that owns
+                // heap (List/String/etc. fields) and src is a borrow
+                // (`view`/`mod`). A borrow can't be moved, so a shallow
+                // copy would alias src's heap into dst — and when both
+                // owners drop, that heap is freed twice (the MsdfFont
+                // double-free seen on world rebuild / teardown:
+                // `world.msdfState.font = font` where font is view).
+                // Deep-copy instead, dropping dst's previous heap first.
+                // Mirrors the `let b: T = a` owning-let deep-copy path.
+                // String is handled by the dedicated cases above; the
+                // move case (bare owned local) is handled by the
+                // mark_expr_moved analysis earlier, so it never reaches
+                // here as a borrow.
+                const AstTypeRef* asg_val_tr =
+                    infer_expr_type_ref(ctx, stmt->as.assign_stmt.value);
+                bool value_is_borrow = asg_val_tr
+                    && (asg_val_tr->is_view || asg_val_tr->is_mod);
+                bool is_struct_deepcopy_from_borrow = value_is_borrow
+                    && !target_is_string
+                    && target_tr && !target_tr->is_view && !target_tr->is_mod
+                    && type_needs_deep_copy(ctx->compiler_ctx, ctx->module,
+                                            target_tr, 0);
                 if (is_string_local_reassign) {
                     Str tname = stmt->as.assign_stmt.target->as.ident;
                     int tmpn = ctx->temp_counter++;
@@ -978,6 +1001,28 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         fprintf(out, "); rae_String __asgc%d = rae_string_copy(__asg%d); rae_string_drop(__asgp%d); *__asgp%d = __asgc%d; }",
                                 tmpn, tmpn, tmpn, tmpn, tmpn);
                     }
+                    ctx->has_expected_type = had_exp;
+                    ctx->expected_type = saved_exp;
+                } else if (is_struct_deepcopy_from_borrow) {
+                    // { T __asg; rae_deep_copy_T(&__asg, &(src));
+                    //   T* __asgp = &(dst); rae_drop_struct_T(__asgp);
+                    //   *__asgp = __asg; }
+                    // Deep-copy src into a temp, then drop dst's old heap
+                    // and store the independent copy. Evaluate the copy
+                    // before dropping dst so a src that reads dst stays
+                    // valid. `&(src)` is well-formed: a borrow emits as a
+                    // deref lvalue (`(*font)`), so `&((*font))` is the ptr.
+                    const char* tn_dc = rae_mangle_type_specialized(
+                        ctx->compiler_ctx, ctx->generic_params,
+                        ctx->generic_args, target_tr);
+                    int tmpn = ctx->temp_counter++;
+                    fprintf(out, "{ %s __asg%d; rae_deep_copy_%s(&__asg%d, &(",
+                            tn_dc, tmpn, tn_dc, tmpn);
+                    emit_expr(ctx, stmt->as.assign_stmt.value, out, PREC_LOWEST, false, false);
+                    fprintf(out, ")); %s* __asgp%d = &(", tn_dc, tmpn);
+                    emit_expr(ctx, stmt->as.assign_stmt.target, out, PREC_LOWEST, true, false);
+                    fprintf(out, "); rae_drop_struct_%s(__asgp%d); *__asgp%d = __asg%d; }",
+                            tn_dc, tmpn, tmpn, tmpn);
                     ctx->has_expected_type = had_exp;
                     ctx->expected_type = saved_exp;
                 } else {
