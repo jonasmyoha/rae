@@ -369,6 +369,9 @@ func main() {
     # into the wait-timeout so the loop ticks at frame cadence (not the
     # 30s idle cap) while loading, making the cascade actually progress.
     let assetsLoading: Bool = true
+    # Last wall-clock time a frame was actually drawn — drives the FPS
+    # cap (uiTargetFrameSec) so event bursts don't over-render.
+    let lastRenderTime: Float = 0.0
 
     loop running {
       # Covers were loaded at boot via `loadAllTextures`, so no
@@ -824,12 +827,16 @@ func main() {
           # actually controls whether we redraw — not just how often we
           # set a target FPS. Skip the whole begin/render/endDrawing
           # block when nothing visible has changed.
-          if active {
+          # FPS cap: skip this render if the last one was less than
+          # uiTargetFrameSec ago. The change stays pending (renderCache
+          # isn't bumped) so the next wake re-trips `active` and draws it.
+          let frameDue: Bool = forceRender or (now - lastRenderTime) >= uiTargetFrameSec
+          if active and frameDue {
+            lastRenderTime = now
             beginDrawing()
             clearBackground(color: bg)
-            # HiDPI: FLAG_WINDOW_HIGHDPI gives a Retina framebuffer and
-            # raylib auto-scales point-coord drawing to fill it crisply —
-            # no camera/zoom needed (a zoom=dpr camera double-scaled it).
+            # HiDPI: FLAG_WINDOW_HIGHDPI Retina framebuffer; raylib
+            # auto-scales point drawing to fill it (no camera needed).
             # Two-phase render around dock layer (100): paint content,
             # (formerly capture+blur nav-tab band), paint dock+overlays.
             # Blur disabled — suspect captureAndBlurRegion side-effects
@@ -887,17 +894,10 @@ func main() {
               spacing: 0.0
               color: versionColor
             )
-            # Frosted-glass backdrop: when the debug menu just opened
-            # this frame, the current back buffer holds the un-menued
-            # screen (the world rebuild with menu hasn't happened yet —
-            # that's queued via `switching=true`). Grab it, run a
-            # Gaussian blur, and register it as the named backdrop
-            # texture. The next world rebuild's `buildDebugMenuOverlay`
-            # sees `debug.hasBlur` and paints the backdrop as a sprite
-            # over that texture instead of a flat translucent rect.
-            #
-            # Must happen BEFORE `endDrawing` — after swap, the back
-            # buffer is no longer the just-rendered frame.
+            # Frosted-glass backdrop: when the debug menu just opened,
+            # grab the just-rendered back buffer, blur it, and register
+            # it so the next rebuild's menu paints over it. Must run
+            # before endDrawing (after swap the buffer is gone).
             if debug.menuOpen and prevMenuOpen is false {
               let blurTex: Texture = captureAndBlurBackdrop(blurSize: 16)
               let texId: Int = blurTex.id
