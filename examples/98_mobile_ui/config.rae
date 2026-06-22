@@ -20,6 +20,17 @@ let screenH: Float = 1079.0
 # real window. Raise later (e.g. 3.0, Royal-Blush-style) once authored
 # values are rescaled to match. Layout extent = window(points) * unitScale.
 let unitScale: Float = 1.0
+# Render FPS cap = minimum seconds between renders. The event loop
+# wakes on every OS event (a trackpad fires hundreds/sec), so without a
+# cap it re-renders far more than the display shows. A render is skipped
+# if less than this elapsed since the last. Must sit just UNDER the
+# ~16 ms event-loop frame wait (frameTimeoutSec) so timeout-driven
+# frames still render every wake (a value >= the wait would drop every
+# other frame → ~31 fps). 0.014 caps the runaway event-spam case while
+# leaving the wait to pace steady output at ~60 fps. For a 120 Hz
+# display, lower both this and frameTimeoutSec (and ideally read the
+# real rate via a getMonitorRefreshRate binding — a follow-up).
+let uiTargetFrameSec: Float = 0.014
 # outerPad is the screen-edge inset — domain-specific, not a generic
 # spacing step. outerGap is the canonical "section gap" inside a
 # screen; its numeric value is spaceM, but the C backend can't
