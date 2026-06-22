@@ -2,20 +2,17 @@
 # See rae/docs/ui-coordinate-and-responsive-layout.md.
 #
 # Purpose: judge the *feel* of the design-unit convention before locking
-# `unitScale`. It does NOT exercise the ECS/frames machinery — it isolates
-# the one open question: are high-res design-unit numbers sane when the SAME
-# `200 du` button and a fixed `1080x1600` board appear in a phone frame
-# (1080x2280 du) and a desktop frame (5760x3240 du)?
+# `unitScale`. The SAME `200 du` button and a fixed `1080x1600 du` board
+# appear in a phone frame (1080x2280 du) and a desktop frame (5760x3240 du).
+# `unitScale` (design units per logical point) is deliberately SOFT — a
+# `let`, not a hard-coded 3 — so the "200 du = N pt" readout (the button's
+# physical size) can be tuned and judged.
 #
-# Controls:
-#   [SPACE]      toggle phone <-> desktop reference frame
-#   [UP]/[DOWN]  raise / lower unitScale (du per logical point) live
+# Text is drawn with the Roboto TTF (font slot 0) via `drawTextWithFont`,
+# NOT raylib's default bitmap font.
 #
-# `unitScale` is deliberately a soft `let`, not a hard-coded 3. Watch how
-# "200 du = N pt" changes as you tweak it — that readout is the physical
-# size of the button. The on-screen frame is fit-to-window ("editor
-# preview"); that preview scale is NOT the runtime renderScale, it just
-# lets the whole authoring frame be inspected at once.
+# Controls: on-screen buttons, plus keyboard [SPACE] frame / [UP][DOWN] scale.
+# Run:  make -C examples/101_coord_proto run
 
 import raylib
 
@@ -45,11 +42,51 @@ func currentFrame(s: view State) ret FrameDef {
   ret desktopFrame()
 }
 
+# Roboto text via font slot 0.
+func txt(s: view String, x: view Float, y: view Float, size: view Float, c: view Color) {
+  drawTextWithFont(slot: 0, text: s, x: x, y: y, fontSize: size, spacing: 1.0, color: c)
+}
+
+func inRect(mx: view Float, my: view Float, x: view Float, y: view Float, w: view Float, h: view Float) ret Bool {
+  if mx < x { ret false }
+  if my < y { ret false }
+  if mx > x + w { ret false }
+  if my > y + h { ret false }
+  ret true
+}
+
+# Draws a button; returns true if the cursor is over it (caller decides
+# click by AND-ing with the press edge).
+func button(label: view String, x: view Float, y: view Float, w: view Float, h: view Float, active: view Bool, mx: view Float, my: view Float) ret Bool {
+  let hover: Bool = inRect(mx: mx, my: my, x: x, y: y, w: w, h: h)
+  let bg: Color = { r: 52, g: 56, b: 66, a: 255 }
+  if active {
+    bg = Color { r: 70, g: 120, b: 205, a: 255 }
+  } else {
+    if hover {
+      bg = Color { r: 68, g: 74, b: 88, a: 255 }
+    }
+  }
+  drawRectangleRounded(x: x, y: y, width: w, height: h, roundness: 0.32, segments: 8, color: bg)
+  let tw: Int = measureTextWithFont(slot: 0, text: label, fontSize: 20.0, spacing: 1.0)
+  let tx: Float = x + (w - tw.toFloat()) / 2.0
+  txt(s: label, x: tx, y: y + h / 2.0 - 12.0, size: 20.0, c: Color { r: 244, g: 247, b: 252, a: 255 })
+  ret hover
+}
+
 func main() {
   # FLAG_WINDOW_RESIZABLE = 4
   setConfigFlags(flags: 4)
-  initWindow(width: 900, height: 760, title: "Rae coord prototype — frames & unitScale")
+  initWindow(width: 1000, height: 820, title: "Rae coord prototype — frames & unitScale")
   setTargetFPS(fps: 60)
+  # Load Roboto into slot 0. Try the cwd-local path first (running via
+  # `make -C examples/101_coord_proto run`), then the repo-root-relative
+  # path, so the real font is used regardless of where it's launched —
+  # a missing slot silently falls back to raylib's ugly default font.
+  loadFontInto(slot: 0, path: "assets/Roboto-Regular.ttf", fontSize: 48)
+  if isFontSlotLoaded(slot: 0) is false {
+    loadFontInto(slot: 0, path: "examples/101_coord_proto/assets/Roboto-Regular.ttf", fontSize: 48)
+  }
   let s: State = {
     frameIdx: 0
     unitScale: 3.0
@@ -57,29 +94,29 @@ func main() {
   loop not windowShouldClose() {
     tick(s)
   }
+  unloadFontSlot(slot: 0)
   closeWindow()
 }
 
 func tick(s: mod State) {
-  # --- input ----------------------------------------------------------
-  # KEY_SPACE = 32, KEY_UP = 265, KEY_DOWN = 264
+  # --- input (mouse + keyboard) --------------------------------------
+  let mx: Float = getMouseX().toFloat()
+  let my: Float = getMouseY().toFloat()
+  let pressed: Bool = isMouseButtonPressed(button: 0)
+
   if isKeyPressed(key: 32) {
-    if s.frameIdx is 0 {
-      s.frameIdx = 1
-    } else {
-      s.frameIdx = 0
-    }
+    if s.frameIdx is 0 { s.frameIdx = 1 } else { s.frameIdx = 0 }
   }
   if isKeyPressed(key: 265) {
-    s.unitScale = s.unitScale + 0.5
+    s.unitScale = s.unitScale + 1.0
   }
   if isKeyPressed(key: 264) {
-    if s.unitScale > 1.0 {
-      s.unitScale = s.unitScale - 0.5
-    }
+    if s.unitScale > 1.0 { s.unitScale = s.unitScale - 1.0 }
   }
 
   let frame: FrameDef = currentFrame(s: s)
+  let white: Color = { r: 236, g: 239, b: 246, a: 255 }
+  let dim: Color = { r: 158, g: 168, b: 184, a: 255 }
 
   # --- viewport facts -------------------------------------------------
   let ww: Float = getScreenWidth().toFloat()
@@ -87,104 +124,78 @@ func tick(s: mod State) {
   let rw: Float = getRenderWidth().toFloat()
   let dpr: Float = rw / ww
 
-  # Editor-preview fit: scale the whole authoring frame to fit under the
-  # HUD band. This is preview-only, distinct from runtime renderScale.
-  let hudH: Float = 150.0
+  beginDrawing()
+  clearBackground(color: Color { r: 22, g: 24, b: 30, a: 255 })
+
+  # --- control bar (clickable buttons) -------------------------------
+  let phoneActive: Bool = false
+  let deskActive: Bool = false
+  if s.frameIdx is 0 { phoneActive = true } else { deskActive = true }
+  let phoneHover: Bool = button(label: "Phone", x: 24.0, y: 16.0, w: 132.0, h: 46.0, active: phoneActive, mx: mx, my: my)
+  let deskHover: Bool = button(label: "Desktop", x: 164.0, y: 16.0, w: 132.0, h: 46.0, active: deskActive, mx: mx, my: my)
+  txt(s: "unitScale", x: 328.0, y: 28.0, size: 20.0, c: dim)
+  let minusHover: Bool = button(label: "-", x: 446.0, y: 16.0, w: 46.0, h: 46.0, active: false, mx: mx, my: my)
+  let usInt: Int = s.unitScale.toInt()
+  txt(s: "{usInt}", x: 506.0, y: 28.0, size: 22.0, c: white)
+  let plusHover: Bool = button(label: "+", x: 542.0, y: 16.0, w: 46.0, h: 46.0, active: false, mx: mx, my: my)
+
+  if pressed {
+    if phoneHover { s.frameIdx = 0 }
+    if deskHover { s.frameIdx = 1 }
+    if minusHover {
+      if s.unitScale > 1.0 { s.unitScale = s.unitScale - 1.0 }
+    }
+    if plusHover { s.unitScale = s.unitScale + 1.0 }
+  }
+
+  # --- readouts -------------------------------------------------------
+  let btnDu: Float = 200.0
+  let boardWdu: Float = 1080.0
+  let boardHdu: Float = 1600.0
+  let btnPt: Int = (btnDu / s.unitScale).toInt()
+  let boardPtW: Int = (boardWdu / s.unitScale).toInt()
+  let boardPtH: Int = (boardHdu / s.unitScale).toInt()
+  let areaW: Int = (ww * s.unitScale).toInt()
+  let areaH: Int = (wh * s.unitScale).toInt()
+  let frac: Int = (btnDu / frame.w * 100.0).toInt()
+  let wwInt: Int = ww.toInt()
+  let whInt: Int = wh.toInt()
+  txt(s: "frame {frame.name}  {frame.w.toInt()}x{frame.h.toInt()} du    window {wwInt}x{whInt} px", x: 24.0, y: 78.0, size: 19.0, c: dim)
+  txt(s: "200 du = {btnPt} pt        board 1080x1600 du = {boardPtW}x{boardPtH} pt        (200 du is {frac}% of this frame width)", x: 24.0, y: 104.0, size: 19.0, c: dim)
+  txt(s: "runtime layout area at this window x unitScale = {areaW}x{areaH} du  (area grows with the window; the unit stays fixed)", x: 24.0, y: 130.0, size: 19.0, c: dim)
+
+  # --- frame preview (fit-to-window; preview scale != renderScale) ----
+  let hudH: Float = 162.0
   let margin: Float = 24.0
   let availW: Float = ww - margin * 2.0
   let availH: Float = wh - hudH - margin
   let fitW: Float = availW / frame.w
   let fitH: Float = availH / frame.h
   let editorScale: Float = fitW
-  if fitH < fitW {
-    editorScale = fitH
-  }
+  if fitH < fitW { editorScale = fitH }
   let frameWpx: Float = frame.w * editorScale
   let frameHpx: Float = frame.h * editorScale
   let frameX: Float = (ww - frameWpx) / 2.0
   let frameY: Float = hudH
 
-  # --- draw -----------------------------------------------------------
-  beginDrawing()
-  clearBackground(color: Color { r: 24, g: 26, b: 32, a: 255 })
-
-  # frame outline (the authoring viewport rectangle)
-  drawRectangle(
-    x: frameX, y: frameY, width: frameWpx, height: frameHpx
-    color: Color { r: 38, g: 41, b: 50, a: 255 }
-  )
-  drawRectangleLines(
-    x: frameX, y: frameY, width: frameWpx, height: frameHpx
-    color: Color { r: 120, g: 130, b: 150, a: 255 }
-  )
+  drawRectangle(x: frameX, y: frameY, width: frameWpx, height: frameHpx, color: Color { r: 36, g: 39, b: 48, a: 255 })
+  drawRectangleLines(x: frameX, y: frameY, width: frameWpx, height: frameHpx, color: Color { r: 120, g: 130, b: 150, a: 255 })
 
   # fixed 1080x1600 du board, centred in the frame
-  let boardWdu: Float = 1080.0
-  let boardHdu: Float = 1600.0
   let boardXdu: Float = (frame.w - boardWdu) / 2.0
   let boardYdu: Float = (frame.h - boardHdu) / 2.0
   let boardX: Float = frameX + boardXdu * editorScale
   let boardY: Float = frameY + boardYdu * editorScale
-  drawRectangle(
-    x: boardX, y: boardY
-    width: boardWdu * editorScale, height: boardHdu * editorScale
-    color: Color { r: 60, g: 48, b: 80, a: 255 }
-  )
-  drawRectangleLines(
-    x: boardX, y: boardY
-    width: boardWdu * editorScale, height: boardHdu * editorScale
-    color: Color { r: 150, g: 120, b: 200, a: 255 }
-  )
-  drawText(
-    text: "GameBoard 1080x1600 du (fixed)"
-    x: boardX + 8.0, y: boardY + 8.0, fontSize: 18.0
-    color: Color { r: 190, g: 170, b: 220, a: 255 }
-  )
+  drawRectangle(x: boardX, y: boardY, width: boardWdu * editorScale, height: boardHdu * editorScale, color: Color { r: 58, g: 46, b: 78, a: 255 })
+  drawRectangleLines(x: boardX, y: boardY, width: boardWdu * editorScale, height: boardHdu * editorScale, color: Color { r: 150, g: 120, b: 200, a: 255 })
+  txt(s: "GameBoard 1080x1600 du (fixed)", x: boardX + 10.0, y: boardY + 10.0, size: 18.0, c: Color { r: 196, g: 176, b: 226, a: 255 })
 
-  # the SAME 200x200 du button, anchored 80,80 du inside the frame
-  let btnDu: Float = 200.0
+  # the SAME 200x200 du button, anchored at 80,80 du inside the frame
   let btnX: Float = frameX + 80.0 * editorScale
   let btnY: Float = frameY + 80.0 * editorScale
   let btnPx: Float = btnDu * editorScale
-  drawRectangleRounded(
-    x: btnX, y: btnY, width: btnPx, height: btnPx
-    roundness: 0.25, segments: 8
-    color: Color { r: 90, g: 150, b: 230, a: 255 }
-  )
-  drawText(
-    text: "200du"
-    x: btnX + 8.0, y: btnY + btnPx / 2.0 - 10.0, fontSize: 18.0
-    color: Color { r: 245, g: 248, b: 255, a: 255 }
-  )
+  drawRectangleRounded(x: btnX, y: btnY, width: btnPx, height: btnPx, roundness: 0.25, segments: 8, color: Color { r: 90, g: 150, b: 230, a: 255 })
+  txt(s: "200 du", x: btnX + 10.0, y: btnY + btnPx / 2.0 - 11.0, size: 18.0, c: Color { r: 245, g: 248, b: 255, a: 255 })
 
-  # --- HUD readouts (screen px) --------------------------------------
-  let white: Color = { r: 235, g: 238, b: 245, a: 255 }
-  let dim: Color = { r: 150, g: 160, b: 175, a: 255 }
-  drawText(
-    text: "Rae coord prototype   [SPACE] frame   [UP]/[DOWN] unitScale"
-    x: margin, y: 16.0, fontSize: 22.0, color: white
-  )
-  let btnPt: Int = (btnDu / s.unitScale).toInt()
-  let boardPtW: Int = (boardWdu / s.unitScale).toInt()
-  let boardPtH: Int = (boardHdu / s.unitScale).toInt()
-  let areaW: Int = (ww * s.unitScale).toInt()
-  let areaH: Int = (wh * s.unitScale).toInt()
-  let usInt: Int = s.unitScale.toInt()
-  let frac: Int = (btnDu / frame.w * 100.0).toInt()
-  let wwInt: Int = ww.toInt()
-  let whInt: Int = wh.toInt()
-  let dprInt: Int = (dpr * 100.0).toInt()
-  drawText(
-    text: "frame {frame.name}  {frame.w.toInt()}x{frame.h.toInt()} du    window {wwInt}x{whInt} px    dpr {dprInt}%"
-    x: margin, y: 52.0, fontSize: 20.0, color: dim
-  )
-  drawText(
-    text: "unitScale {usInt}  ->  200du = {btnPt} pt   board = {boardPtW}x{boardPtH} pt   (200du is {frac}% of this frame width)"
-    x: margin, y: 80.0, fontSize: 20.0, color: dim
-  )
-  drawText(
-    text: "runtime layout area at this window+unitScale = {areaW}x{areaH} du   (grows with window; the unit stays fixed)"
-    x: margin, y: 108.0, fontSize: 20.0, color: dim
-  )
   endDrawing()
 }
