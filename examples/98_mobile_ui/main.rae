@@ -373,6 +373,10 @@ func main() {
     # the animation wait + render cap. lastRenderTime drives that cap.
     let targetFrameSec: Float = displayFrameSec()
     let lastRenderTime: Float = 0.0
+    # Active-render window: any activity keeps the loop rendering at
+    # display cadence for 0.5s (then idle), so animation tails don't
+    # depend on dirty-detection and stutter. Idle = event-wait.
+    let renderUntil: Float = 0.0
 
     loop running {
       # Covers were loaded at boot via `loadAllTextures`, so no
@@ -515,16 +519,9 @@ func main() {
         if velAbs > 0.05 or scrollOOB {
           scrollAnimating = true
         }
-        # Suppress the playback-driven 60Hz animation gate while
-        # the user is actively wheel-scrolling. Each rebuild cost
-        # ~30-50 ms on the Album screen (25-track MB tracklists);
-        # at 60Hz that ate the frame budget and the next wheel
-        # event couldn't be sampled / acted on until the previous
-        # frame's full render+rebuild finished. Result: scroll
-        # dropped to ~2 fps the moment playback started.
-        # The progress bar pauses for ~250 ms after the last wheel
-        # tick (visually imperceptible at a 200-second track), then
-        # resumes ticking once scrolling settles.
+        # Suppress the playback-driven 60Hz animation gate while the
+        # user is wheel-scrolling (the per-frame playback tick competed
+        # with scroll). Progress resumes ~250ms after the last wheel tick.
         let scrollActiveTimeSec: Float = getTime() - scrollFsm.lastWheelTime
         let recentlyScrolling: Bool = scrollActiveTimeSec < 0.25
         let playbackAnimating: Bool = false
@@ -534,7 +531,7 @@ func main() {
           }
         }
         let timeout: Float = nextWaitTimeoutSec(
-          animating: anim.active or playbackAnimating or scrollAnimating or lastHoverAnimDirty or assetsLoading
+          animating: anim.active or playbackAnimating or scrollAnimating or lastHoverAnimDirty or assetsLoading or getTime() < renderUntil
           mouseDown: isMouseButtonDown(button: mouseButtonLeft)
           pollWatcher: true
           frameSec: targetFrameSec
@@ -771,9 +768,10 @@ func main() {
           # and album art. See examples/98_mobile_ui/spotify_view.rae.
           pollSpotify(state: spotifyState, world: world, reg: texReg, playback: playback, appState: appState, currentAlbumStem: appState.currentAlbumStem, now: now)
           # Stream covers + history art after first paint (non-blocking, a few/frame).
-          let loadingCovers: Bool = cascadeAssets(reg: texReg, albums: appState.albums, budget: 2)
-          let loadingArt: Bool = refetchHistoryArtChunk(history: appState.playHistory, reg: texReg, budget: 1)
-          let loadingAssets: Bool = loadingCovers or loadingArt
+          # Covers stream from disk. (History-art network refetch was
+          # removed from here — each fetch blocked ~140ms, pinning the
+          # whole app to ~7fps; needs a background thread instead.)
+          let loadingAssets: Bool = cascadeAssets(reg: texReg, albums: appState.albums, budget: 2)
           assetsLoading = loadingAssets
 
           # Frame-gate decision: ask `decideActive` whether anything
@@ -810,6 +808,8 @@ func main() {
           lastHoverAnimDirty = hoverScaleSystem(world: world, hovered: currentHovered, dt: now - lastFrameTime)
           lastFrameTime = now
           if lastHoverAnimDirty { active = true }
+          # Any activity this frame extends the active-render window.
+          if active { renderUntil = now + 0.5 }
           lastHoveredEntity = currentHovered
           lastMouseBtns = currentMouseBtns
           lastPressed = input.pressedEntity
@@ -832,7 +832,7 @@ func main() {
           # FPS cap: skip if <~1 display frame since last render (0.85 =
           # jitter headroom). Pending change re-trips active next wake.
           let frameDue: Bool = forceRender or (now - lastRenderTime) >= targetFrameSec * 0.85
-          if active and frameDue {
+          if (active or now < renderUntil) and frameDue {
             lastRenderTime = now
             beginDrawing()
             clearBackground(color: bg)
