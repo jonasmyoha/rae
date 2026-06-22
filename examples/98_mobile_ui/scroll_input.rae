@@ -45,6 +45,13 @@ type ScrollFsm pub {
   # Spring + momentum paths gate on `now - lastWheelTime > 0.05`
   # so they don't fight live wheel input.
   lastWheelTime: Float
+  # Wall-clock seconds of the last spring/momentum integration step.
+  # The step uses fixed per-frame increments tuned for ~60 Hz, but the
+  # event loop can iterate far faster during a trackpad event flood, so
+  # we gate the step to a fixed cadence (integrate at most once per
+  # ~16 ms regardless of loop rate). Kills the erratic multi-bounce at
+  # list ends. Drag-follow stays per-iteration for responsiveness.
+  lastStepSec: Float
 }
 
 func createScrollFsm(initialScrollY: view Float) ret ScrollFsm {
@@ -60,6 +67,7 @@ func createScrollFsm(initialScrollY: view Float) ret ScrollFsm {
     delta1: 0.0
     delta2: 0.0
     lastWheelTime: 0.0 - 1.0
+    lastStepSec: 0.0
   }
   ret f
 }
@@ -145,9 +153,14 @@ func applyDragPhysics(
     let nowSec: Float = getTime()
     let wheelIdleSec: Float = nowSec - fsm.lastWheelTime
     let wheelQuiet: Bool = wheelIdleSec > 0.05
+    # Fixed ~60 Hz integration cadence. The loop may iterate far faster
+    # (trackpad event flood), but the spring/momentum increments are
+    # tuned per-frame — stepping them every iteration overshoots and
+    # produces the erratic multi-bounce at list ends. Gate to ~16 ms.
+    let stepDue: Bool = (nowSec - fsm.lastStepSec) >= 0.014
     let isOOB: Bool = fsm.scrollY > scrollMax or fsm.scrollY < scrollMin
     if isOOB {
-      if wheelQuiet {
+      if wheelQuiet and stepDue {
         let target: Float = scrollMax
         if fsm.scrollY < scrollMin {
           target = scrollMin
@@ -179,11 +192,12 @@ func applyDragPhysics(
           fsm.scrollY = target
           fsm.velocity = 0.0
         }
+        fsm.lastStepSec = nowSec
         updateScrollOffset(world: world, target: scrollTarget, scrollY: fsm.scrollY)
       }
     } else {
       # In-bounds momentum decay (drag-release fling).
-      if wheelQuiet {
+      if wheelQuiet and stepDue {
         let absVel: Float = fsm.velocity
         if absVel < 0.0 {
           absVel = 0.0 - absVel
@@ -191,6 +205,7 @@ func applyDragPhysics(
         if absVel > 0.3 {
           fsm.scrollY = fsm.scrollY + fsm.velocity
           fsm.velocity = fsm.velocity * 0.97
+          fsm.lastStepSec = nowSec
           updateScrollOffset(world: world, target: scrollTarget, scrollY: fsm.scrollY)
         } else {
           fsm.velocity = 0.0
@@ -232,6 +247,17 @@ func applyWheelScroll(
   # macOS wheel-up = "scroll content down". Flip sign so positive
   # wheel produces a more-negative scrollY (= content shifts up).
   let rawDelta: Float = wheel * pixelsPerTick
+  # Clamp the per-call delta. getMouseWheelMove() accumulates between
+  # polls, so a slow frame (or a backlogged event burst) can return a
+  # single huge value that teleports the view. Cap it to a few ticks'
+  # worth so one call moves a bounded, predictable amount.
+  let wheelStepCap: Float = pixelsPerTick * 4.0
+  if rawDelta > wheelStepCap {
+    rawDelta = wheelStepCap
+  }
+  if rawDelta < 0.0 - wheelStepCap {
+    rawDelta = 0.0 - wheelStepCap
+  }
   let wheelMin: Float = scrollFloor
   let wheelMax: Float = 0.0
   let eff: Float = dampedDelta(
