@@ -37,11 +37,16 @@ func headlessIsActive() ret Bool {
 #   FLAG_WINDOW_HIDDEN    (128)
 #   FLAG_WINDOW_UNFOCUSED (2048)
 func headlessConfigFlags(headless: view Bool) ret Int {
+  # 36 = FLAG_WINDOW_RESIZABLE(4) | FLAG_MSAA_4X_HINT(32).
   let base: Int = 36
   if headless {
+    # HIDDEN(128)+UNFOCUSED(2048); no HiDPI so screenshots stay predictable.
     ret base + 128 + 2048
   }
-  ret base
+  # FLAG_WINDOW_HIGHDPI(8192): real Retina framebuffer. The render path
+  # wraps drawing in a zoom=dpr camera (hidpi.rae) so the point-based UI
+  # fills the high-res buffer crisply; layout + input stay in points.
+  ret base + 8192
 }
 
 # When headless, fall back to a 3 s auto-exit if the env var
