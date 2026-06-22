@@ -369,8 +369,9 @@ func main() {
     # into the wait-timeout so the loop ticks at frame cadence (not the
     # 30s idle cap) while loading, making the cascade actually progress.
     let assetsLoading: Bool = true
-    # Last wall-clock time a frame was actually drawn — drives the FPS
-    # cap (uiTargetFrameSec) so event bursts don't over-render.
+    # One display frame from the monitor refresh rate (60/120 Hz); paces
+    # the animation wait + render cap. lastRenderTime drives that cap.
+    let targetFrameSec: Float = displayFrameSec()
     let lastRenderTime: Float = 0.0
 
     loop running {
@@ -536,6 +537,7 @@ func main() {
           animating: anim.active or playbackAnimating or scrollAnimating or lastHoverAnimDirty or assetsLoading
           mouseDown: isMouseButtonDown(button: mouseButtonLeft)
           pollWatcher: true
+          frameSec: targetFrameSec
         )
         # Heartbeat: prints once per frame BEFORE the wait. If this
         # line stops appearing in the log, the loop has stalled
@@ -827,10 +829,9 @@ func main() {
           # actually controls whether we redraw — not just how often we
           # set a target FPS. Skip the whole begin/render/endDrawing
           # block when nothing visible has changed.
-          # FPS cap: skip this render if the last one was less than
-          # uiTargetFrameSec ago. The change stays pending (renderCache
-          # isn't bumped) so the next wake re-trips `active` and draws it.
-          let frameDue: Bool = forceRender or (now - lastRenderTime) >= uiTargetFrameSec
+          # FPS cap: skip if <~1 display frame since last render (0.85 =
+          # jitter headroom). Pending change re-trips active next wake.
+          let frameDue: Bool = forceRender or (now - lastRenderTime) >= targetFrameSec * 0.85
           if active and frameDue {
             lastRenderTime = now
             beginDrawing()

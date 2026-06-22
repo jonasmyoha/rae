@@ -2058,6 +2058,7 @@ int64_t rae_ext_getRenderHeight(void) { return (int64_t)GetRenderHeight(); }
 int64_t rae_ext_getCurrentMonitor(void) { return (int64_t)GetCurrentMonitor(); }
 int64_t rae_ext_getMonitorWidth(int64_t monitor) { return (int64_t)GetMonitorWidth((int)monitor); }
 int64_t rae_ext_getMonitorHeight(int64_t monitor) { return (int64_t)GetMonitorHeight((int)monitor); }
+int64_t rae_ext_getMonitorRefreshRate(int64_t monitor) { return (int64_t)GetMonitorRefreshRate((int)monitor); }
 void rae_ext_setWindowSize(int64_t width, int64_t height) { SetWindowSize((int)width, (int)height); }
 void rae_ext_setWindowPosition(int64_t x, int64_t y) { SetWindowPosition((int)x, (int)y); }
 int64_t rae_ext_getWindowPositionX(void) { Vector2 p = GetWindowPosition(); return (int64_t)p.x; }
