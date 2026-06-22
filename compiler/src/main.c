@@ -17,6 +17,9 @@
 #include <limits.h>
 #include <dirent.h>
 #include <setjmp.h>
+#ifdef __APPLE__
+#include <mach-o/dyld.h>  /* _NSGetExecutablePath — for compiler-relative stdlib */
+#endif
 #ifndef RAE_RUNTIME_SOURCE_DIR
 #define RAE_RUNTIME_SOURCE_DIR "runtime"
 #endif
@@ -1352,6 +1355,78 @@ static bool module_graph_collect_watch_sources(const ModuleGraph* graph, WatchSo
   return true;
 }
 
+// The compiler's own bundled stdlib directory, so any project can use
+// the single canonical stdlib without a per-project `lib/` symlink or
+// copy — the same way gcc finds its headers and rustc its sysroot.
+//
+// Resolution order (computed once, cached):
+//   1. $RAE_STDLIB (explicit override), if it contains core.rae.
+//   2. Relative to the `rae` executable: the binary lives at
+//      <repo>/compiler/bin/rae and the stdlib at <repo>/lib, so
+//      <exedir>/../../lib. We also probe <exedir>/../lib and
+//      <exedir>/lib so a relocated/installed binary still finds it.
+// Returns NULL when no directory containing core.rae is found.
+static const char* compiler_stdlib_dir(void) {
+  static char cached[PATH_MAX];
+  static int computed = 0;
+  if (computed) {
+    return cached[0] ? cached : NULL;
+  }
+  computed = 1;
+  cached[0] = '\0';
+
+  const char* env = getenv("RAE_STDLIB");
+  if (env && env[0]) {
+    char probe[PATH_MAX];
+    snprintf(probe, sizeof(probe), "%s/core.rae", env);
+    if (file_exists(probe)) {
+      snprintf(cached, sizeof(cached), "%s", env);
+      return cached;
+    }
+  }
+
+  char exe[PATH_MAX];
+#ifdef __APPLE__
+  uint32_t size = sizeof(exe);
+  if (_NSGetExecutablePath(exe, &size) != 0) {
+    return NULL;
+  }
+#elif defined(__linux__)
+  ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+  if (n <= 0) {
+    return NULL;
+  }
+  exe[n] = '\0';
+#else
+  return NULL;
+#endif
+  char real[PATH_MAX];
+  if (!realpath(exe, real)) {
+    snprintf(real, sizeof(real), "%s", exe);
+  }
+  char* slash = strrchr(real, '/');
+  if (!slash) {
+    return NULL;
+  }
+  *slash = '\0';  // `real` is now the executable's directory.
+
+  const char* suffixes[] = { "/../../lib", "/../lib", "/lib", NULL };
+  for (int i = 0; suffixes[i]; i++) {
+    char cand[PATH_MAX];
+    snprintf(cand, sizeof(cand), "%s%s", real, suffixes[i]);
+    char probe[PATH_MAX];
+    snprintf(probe, sizeof(probe), "%s/core.rae", cand);
+    if (file_exists(probe)) {
+      if (!realpath(cand, cached)) {
+        snprintf(cached, sizeof(cached), "%s", cand);
+      }
+      return cached;
+    }
+  }
+  cached[0] = '\0';
+  return NULL;
+}
+
 static char* try_resolve_lib_module(const char* root, const char* normalized) {
   // Check root/lib/normalized.rae
   if (root) {
@@ -1381,8 +1456,23 @@ static char* try_resolve_lib_module(const char* root, const char* normalized) {
       
       snprintf(b2, total_fallback, "lib/%s.rae", normalized);
       if (file_exists(b2)) return b2;
-      
+
       free(b2);
+  }
+
+  // Final fallback: the compiler's own bundled stdlib (relative to the
+  // `rae` binary, or $RAE_STDLIB). This is what lets a sibling project
+  // like royalblush-rae use the one stdlib without a `lib/` symlink —
+  // it only kicks in when the project doesn't ship its own stdlib.
+  const char* stdlib = compiler_stdlib_dir();
+  if (stdlib) {
+    size_t total = strlen(stdlib) + strlen(normalized) + 8; // "/" + ".rae"
+    char* b3 = malloc(total);
+    if (b3) {
+      snprintf(b3, total, "%s/%s.rae", stdlib, normalized);
+      if (file_exists(b3)) return b3;
+      free(b3);
+    }
   }
 
   return NULL;

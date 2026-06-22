@@ -24,26 +24,12 @@ func albumHeaderHeight() ret Float {
   ret rowSum + gaps
 }
 
-# "Album · 11 songs · 2016" or fall back to "Album" when fields
-# are missing. Empty year and zero tracks produce "Album · -- songs".
-func albumCaption(album: view Album) ret String {
-  let n: Int = album.tracks.length
-  let tracksPart: String = ""
-  if n > 0 {
-    tracksPart = " · {n} songs"
-  }
-  let yearPart: String = ""
-  if album.year > 0 {
-    yearPart = " · {album.year}"
-  }
-  ret "Album{tracksPart}{yearPart}"
-}
-
-# Mount the album header scene with overrides driven by the active
-# album: HeroThumb sprite → stem-keyed texture (via the existing
-# hero rebind in main.rae), HeroCaption / HeroTitle / HeroArtist
-# text → album fields.
-func buildAlbumHeader(world: mod UiWorld, scene: view Scene, album: view Album) ret EntityId {
+# Mount the header scene with overrides driven by a resolved
+# CollectionView: HeroThumb sprite → stem-keyed texture (via the
+# existing hero rebind in main.rae against `state.currentAlbumStem`),
+# HeroCaption / HeroTitle / HeroArtist text → the collection's fields.
+# Works the same for an album or a playlist — the caller resolves which.
+func buildAlbumHeader(world: mod UiWorld, scene: view Scene, title: view String, caption: view String, artist: view String) ret EntityId {
   let w: Float = screenW - outerPad * 2.0
 
   let overrides: List(SceneOverride) = emptyOverrides()
@@ -52,10 +38,10 @@ func buildAlbumHeader(world: mod UiWorld, scene: view Scene, album: view Album) 
   let artistId: String = "HeroArtist"
   let barTitleId: String = "BarTitle"
   # Fresh String allocations so the override list owns its heap
-  # independent of `album`.
-  let captionText: String = albumCaption(album: album)
-  let titleText: String = "{album.album}"
-  let artistText: String = "{album.artist}"
+  # independent of the caller's CollectionView.
+  let captionText: String = "{caption}"
+  let titleText: String = "{title}"
+  let artistText: String = "{artist}"
   # Top-bar label is blank — the floating back-button overlay
   # (top-left chevron-left circle) is the only "go back" affordance.
   # The album's own title sits below in the hero block, so there's
@@ -88,15 +74,18 @@ func buildAlbumHeader(world: mod UiWorld, scene: view Scene, album: view Album) 
   ret header
 }
 
-# Track-row mounts driven by the active album's tracks. Every
-# track in `album.tracks` gets a row — no count cap; the album
-# world applies a scroll offset to root so overflowing rows can
-# be revealed by wheel/drag. Empty `album.tracks` → no rows
-# mounted (a 1-row-tall placeholder rect keeps the spacer below
-# from collapsing the layout into the dock).
-func buildTrackList(world: mod UiWorld, trackScene: view Scene, album: view Album, playback: view PlaybackState) pub ret EntityId {
+# Track-row mounts driven by a resolved row list. Every CollectionRow
+# gets a row — no count cap; the page applies a scroll offset to root
+# so overflowing rows can be revealed by wheel/drag. Empty rows → a
+# 1-row-tall placeholder keeps the spacer below from collapsing the
+# layout into the dock.
+#
+# Each row carries its own (albumStem, trackIndex), so a playlist whose
+# songs span many albums plays each correctly — the click encodes both
+# as `song.openref.<trackIndex>.<albumStem>`.
+func buildTrackList(world: mod UiWorld, trackScene: view Scene, rows: view List(CollectionRow), playback: view PlaybackState) pub ret EntityId {
   let list: EntityId = createEntity(world: world)
-  let n: Int = album.tracks.length
+  let n: Int = rows.length
   let visible: Int = n
   if visible < 1 {
     visible = 1
@@ -107,18 +96,15 @@ func buildTrackList(world: mod UiWorld, trackScene: view Scene, album: view Albu
   let alignS: AlignKind = AlignKind.Start
   setLayout(world: world, entity: list, kind: layV, gap: trackGap, alignCross: alignS)
 
-  let rows: List(EntityId) = createList(EntityId, cap: trackRowCount)
+  let rowKids: List(EntityId) = createList(EntityId, cap: trackRowCount)
   let i: Int = 0
   loop i < n {
-    let t: Track = rae_ext_rae_buf_get(buf: album.tracks.data, index: i)
+    let cr: CollectionRow = rae_ext_rae_buf_get(buf: rows.data, index: i)
     let row: EntityId = createEntity(world: world)
     setRectFixed(world: world, entity: row, w: screenW - outerPad * 2.0, h: trackRowH)
 
     let overrides: List(SceneOverride) = emptyOverrides()
-    # Two-digit zero-padded row index. Prefer `t.number` when the
-    # album has explicit track numbers (iTunes returns them);
-    # fall back to position + 1 for albums without.
-    let num: Int = t.number
+    let num: Int = cr.number
     if num <= 0 {
       num = i + 1
     }
@@ -128,9 +114,8 @@ func buildTrackList(world: mod UiWorld, trackScene: view Scene, album: view Albu
     } else {
       label = "{num}"
     }
-    let dur: String = formatDurationMs(ms: t.durationMs)
-    let title: String = "{t.title}"
-    let subtitle: String = "{album.artist} · {dur}"
+    let title: String = "{cr.title}"
+    let subtitle: String = "{cr.subtitle}"
     let idxId: String = "IdxText"
     let titleId: String = "TitleText"
     let subtitleId: String = "SubtitleText"
@@ -146,14 +131,12 @@ func buildTrackList(world: mod UiWorld, trackScene: view Scene, album: view Albu
       sceneLabel: rowLabel
       overrides: overrides
     )
-    # Highlight the row only when this exact (album, track) is the
-    # one actually playing. `playback.playingAlbumStem` is empty
-    # before any song starts, so a freshly-opened album with no
-    # playback shows zero highlight. After the user picks a song,
-    # the matching row gets a rounded-rect accent-filled Shape.
+    # Highlight the row only when this exact (album, track) is the one
+    # actually playing — keyed on the row's own stem + index so it
+    # works for playlists spanning multiple albums.
     let isPlayingRow: Bool = false
-    if playback.playingAlbumStem.equals(other: album.stem) {
-      if i is playback.playingTrackIndex {
+    if playback.playingAlbumStem.equals(other: cr.albumStem) {
+      if cr.trackIndex is playback.playingTrackIndex {
         isPlayingRow = true
       }
     }
@@ -168,27 +151,26 @@ func buildTrackList(world: mod UiWorld, trackScene: view Scene, album: view Albu
       }
       componentSet(this: world.shapes, entity: row, data: pill)
     }
-    # Whole-row click → push NowPlaying as a sub-page for THIS
-    # track. The track index is encoded into the actionId
-    # (`song.open.N`) — no per-row ComponentTable. Children with
-    # their own OnClick (e.g. MoreBtn → track.more) still win
-    # the hit-test, because `hitTestEntity` walks children first.
-    let songOpenAction: String = "song.open.{i}"
+    # Whole-row click → start this exact song and reflect it in the
+    # mini-player. The album stem + track index are both encoded into
+    # the actionId (`song.openref.<idx>.<stem>`) so a playlist row plays
+    # the right album. Children with their own OnClick (e.g. MoreBtn)
+    # still win the hit-test (hitTestEntity walks children first).
+    let songOpenAction: String = "song.openref.{cr.trackIndex}.{cr.albumStem}"
     setOnClick(world: world, entity: row, actionId: songOpenAction)
-    rows.add(value: row)
+    rowKids.add(value: row)
     i = i + 1
   }
-  attachChildren(world: world, parent: list, kids: rows)
+  attachChildren(world: world, parent: list, kids: rowKids)
   ret list
 }
 
-# Total vertical content of the album view (album header + track
-# list with inter-row gaps). Used by `albumScrollMin` to compute
-# the clamp so the user can scroll far enough to reveal every
-# track but not infinitely past the end.
-func albumContentHeight(album: view Album) pub ret Float {
-  let n: Int = album.tracks.length
-  let visible: Int = n
+# Total vertical content of the view (header + track list with
+# inter-row gaps) for a given row count. Used by the scroll clamp so
+# the user can scroll far enough to reveal every row but not infinitely
+# past the end.
+func collectionContentHeight(rowCount: view Int) ret Float {
+  let visible: Int = rowCount
   if visible < 1 {
     visible = 1
   }
@@ -196,19 +178,40 @@ func albumContentHeight(album: view Album) pub ret Float {
   ret albumHeaderHeight() + outerGap + tracksH
 }
 
-# Album-screen scroll clamp. The viewport is everything between
-# the top padding and the bottom dock overlay (mini-player +
-# nav-tabs). Content shorter than viewport → 0 (no scroll). Else
-# `-(overflow)` so scrolling stops once the last track sits just
-# above the dock.
-func albumScrollMin(album: view Album) pub ret Float {
+# Scroll clamp for a given row count. The viewport is everything between
+# the top padding and the bottom dock overlay (mini-player + nav-tabs).
+# Content shorter than viewport → 0 (no scroll). Else `-(overflow)` so
+# scrolling stops once the last row sits just above the dock.
+func collectionScrollMin(rowCount: view Int) ret Float {
   let viewport: Float = screenH - outerPad * 2.0 - miniPlayerH - navTabsH - outerGap
-  let content: Float = albumContentHeight(album: album)
+  let content: Float = collectionContentHeight(rowCount: rowCount)
   let overflow: Float = content - viewport
   if overflow <= 0.0 {
     ret 0.0
   }
   ret 0.0 - overflow
+}
+
+# Resolve whichever collection the album sub-page should currently show
+# — the user's open playlist when `viewingPlaylist`, otherwise the
+# active album. The single branch point for album-vs-playlist; every
+# renderer downstream just consumes the CollectionView.
+func buildCurrentCollection(state: view AppState) pub ret CollectionView {
+  if state.viewingPlaylist {
+    # Only the built-in "liked" playlist exists today; a future
+    # playlist registry would resolve `state.currentPlaylistId` here.
+    ret collectionFromPlaylist(playlist: state.liked, albums: state.albums)
+  }
+  let album: Album = activeAlbum(state: state)
+  ret collectionFromAlbum(album: album)
+}
+
+# Scroll floor for the album sub-page given the current view (album or
+# playlist). Replaces the old album-only `albumScrollMin`; cached by
+# main.rae / screen_switch on stem/track change.
+func collectionScrollFloorForState(state: view AppState) pub ret Float {
+  let cv: CollectionView = buildCurrentCollection(state: state)
+  ret collectionScrollMin(rowCount: cv.rows.length)
 }
 
 # Compose the whole album world: header scene + track list / spacer /
@@ -226,7 +229,7 @@ func mountAlbumPage(
   playback: view PlaybackState
   scrollY: view Float
 ) pub ret EntityId {
-  let album: Album = activeAlbum(state: state)
+  let cv: CollectionView = buildCurrentCollection(state: state)
 
   let root: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: root, w: screenW, h: screenH)
@@ -245,8 +248,8 @@ func mountAlbumPage(
   let scroll: ScrollState = { y: scrollY, velocity: 0.0 }
   componentSet(this: world.scrollStates, entity: root, data: scroll)
 
-  let header: EntityId = buildAlbumHeader(world: world, scene: scenes.album, album: album)
-  let trackList: EntityId = buildTrackList(world: world, trackScene: scenes.trackRow, album: album, playback: playback)
+  let header: EntityId = buildAlbumHeader(world: world, scene: scenes.album, title: cv.title, caption: cv.caption, artist: cv.artist)
+  let trackList: EntityId = buildTrackList(world: world, trackScene: scenes.trackRow, rows: cv.rows, playback: playback)
   let spacer: EntityId = buildVerticalSpacer(world: world)
 
   let kids: List(EntityId) = createList(EntityId, cap: 3)
