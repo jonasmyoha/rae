@@ -40,12 +40,11 @@ func main() {
   let winH: Float = screenH
   initWindow(width: winW.toInt(), height: winH.toInt(), title: "Rae Mobile UI — Album")
   setWindowPosition(x: 50, y: 50)
-  # Hook the OS close button so it wakes the wait-events loop. macOS
-  # GLFW marks WindowShouldClose=TRUE on red-X click but does NOT
-  # post an empty event; without this hook the loop sleeps until
-  # some other event arrives. See lib/raylib.rae for details.
-  installWindowCloseWaker()
-  installMouseButtonHook()
+  # GLFW event callbacks DISABLED (jank experiment). Mouse falls back
+  # to raylib polling; red-X close to raylib WindowShouldClose (woken
+  # by the ~50 ms watcher poll). Re-enable both lines to restore.
+  # installWindowCloseWaker()
+  # installMouseButtonHook()
   # macOS App Nap throttles the wait-events loop because it sits at
   # ~0% idle CPU; opt out so the app doesn't appear hung. See
   # `disableAppNap` decl in lib/raylib.rae.
