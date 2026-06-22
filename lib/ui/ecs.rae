@@ -643,10 +643,13 @@ func updateScrollOffset(world: mod UiWorld, target: view EntityId, scrollY: view
   if isNone(this: target) {
     ret
   }
-  if componentHas(this: world.offsets, entity: target) {
-    let off: mod Offset => componentMod(this: world.offsets, entity: target)
-    off.delta.y = scrollY
-  }
+  # Scroll is a runtime translation, NOT a layout change: write
+  # RuntimeOffset (applied in transform, post-layout) instead of Offset
+  # (a layout input). This makes a scroll step rerun only the cheap
+  # transform pass — not the full layout — so scrolling stays smooth on
+  # large pages. The target's authored `Offset` base is left untouched.
+  let ro: RuntimeOffset = { delta: Vec2 { x: 0.0, y: scrollY } }
+  componentSet(this: world.runtimeOffsets, entity: target, data: own ro)
   if componentHas(this: world.scrollStates, entity: target) {
     let s: mod ScrollState => componentMod(this: world.scrollStates, entity: target)
     s.y = scrollY
