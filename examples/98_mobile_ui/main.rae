@@ -590,11 +590,15 @@ func main() {
           }
 
           updateInputSystem(input: input, world: world)
-          # NOTE: live-resize re-layout is deferred — forcing a world
-          # rebuild on resize exposed a double-free in the UiWorld drop
-          # (free_medium_botch) when moving between displays. Re-enable
-          # once that teardown/cascade-drop bug is fixed. Boot-time
-          # extent (real window size) still applies via applyViewportExtent.
+          # Live-window resize: sync screenW/H to the real window and
+          # rebuild so the layout extent, responsive grid columns, and
+          # nav reflow. The old-world drop on rebuild relies on the
+          # rae_ext_rae_buf_copy memmove fix (was a memcpy double-free).
+          if isWindowResized() {
+            screenW = getScreenWidth().toFloat()
+            screenH = getScreenHeight().toFloat()
+            switching = true
+          }
 
           # Drag + momentum + spring-back physics for Profile / Album.
           # Implementation in scroll_input.rae — see ScrollFsm. Returns
