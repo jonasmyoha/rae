@@ -634,12 +634,12 @@ func paintEntity(world: view UiWorld, reg: view TextureRegistry, entity: view En
     ret
   }
   let cr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
+  # Viewport cull: skip the paint (esp. text shaping) for entities fully off-screen — the big win for long scrolled lists (200+ rows). world.layoutW/H is the screen; 80px margin keeps edge shadows/partial rows.
+  if (wt.y + cr.h + 80.0 < 0.0) or (wt.y - 80.0 > world.layoutH) or (wt.x + cr.w + 80.0 < 0.0) or (wt.x - 80.0 > world.layoutW) { ret }
   let chain255: Int = renderAlpha255(world: world, entity: entity)
 
-  # `GradientFill` takes precedence over a solid `Shape.fill` — the
-  # gradient shader does its own rounded-rect alpha mask off the
-  # entity's `CornerRadius` (or 0 if absent), so this single call
-  # replaces both the shape and corner-rounding paths.
+  # GradientFill takes precedence over a solid Shape.fill (the gradient
+  # shader does its own rounded-rect alpha mask off CornerRadius).
   if componentHas(this: world.gradientFills, entity: entity) {
     paintGradientFill(world: world, entity: entity, wt: wt, cr: cr, chain255: chain255)
   } else {
