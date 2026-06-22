@@ -91,8 +91,8 @@ func main() {
   # Missing file or stale fields fall back silently to the
   # defaults `createAppState` / `createPlaybackState` set above.
   restoreAppState(state: appState, playback: playback, path: stateFilePath)
-  # Persisted recently-played. CDN artwork re-download is deferred to
-  # runDeferredBoot (post-paint) so it doesn't block startup.
+  # Persisted recently-played. CDN artwork is re-downloaded lazily in
+  # the loop (refetchHistoryArtChunk, a few/frame) so it never blocks.
   restoreHistory(history: appState.playHistory, path: historyFilePath)
   # User library — first launch seeds it from the catalog so all
   # albums are visible by default. Subsequent launches load the
@@ -132,7 +132,7 @@ func main() {
   let spotifyOn: Bool = spotifyState.enabled
   if isHeadless { spotifyOn = false }
   if spotifyOn {
-    log("[spotify] ON — launch deferred to post-paint (runDeferredBoot).")
+    log("[spotify] ON — launches lazily on first play (AppleScript play auto-launches).")
   } else {
     log("[spotify] OFF (RAE_UI_NO_SPOTIFY or RAE_UI_HEADLESS)")
   }
@@ -365,7 +365,10 @@ func main() {
     # (`shadowStylesOnly: true` -> `textStyleHasShadow`, which covers the
     # mini-player's `miniTitle`/`miniMuted`). No outline anywhere.
     let msdfShadow: RgbaColor = { r: 0, g: 0, b: 0, a: 140 }
-    let deferredBootDone: Bool = false
+    # True while album covers / history art are still streaming in. Fed
+    # into the wait-timeout so the loop ticks at frame cadence (not the
+    # 30s idle cap) while loading, making the cascade actually progress.
+    let assetsLoading: Bool = true
 
     loop running {
       # Covers were loaded at boot via `loadAllTextures`, so no
@@ -527,7 +530,7 @@ func main() {
           }
         }
         let timeout: Float = nextWaitTimeoutSec(
-          animating: anim.active or playbackAnimating or scrollAnimating or lastHoverAnimDirty
+          animating: anim.active or playbackAnimating or scrollAnimating or lastHoverAnimDirty or assetsLoading
           mouseDown: isMouseButtonDown(button: mouseButtonLeft)
           pollWatcher: true
         )
@@ -762,8 +765,11 @@ func main() {
           # internal rate-limit). Syncs playback state, text fields,
           # and album art. See examples/98_mobile_ui/spotify_view.rae.
           pollSpotify(state: spotifyState, world: world, reg: texReg, playback: playback, appState: appState, currentAlbumStem: appState.currentAlbumStem, now: now)
-          # Stream covers/avatar in after first paint (a few per frame).
-          let loadingAssets: Bool = cascadeAssets(reg: texReg, albums: appState.albums, budget: 3)
+          # Stream covers + history art after first paint (non-blocking, a few/frame).
+          let loadingCovers: Bool = cascadeAssets(reg: texReg, albums: appState.albums, budget: 2)
+          let loadingArt: Bool = refetchHistoryArtChunk(history: appState.playHistory, reg: texReg, budget: 1)
+          let loadingAssets: Bool = loadingCovers or loadingArt
+          assetsLoading = loadingAssets
 
           # Frame-gate decision: ask `decideActive` whether anything
           # changed that warrants a full begin/render/endDrawing this
@@ -913,9 +919,6 @@ func main() {
             # frame.
             renderCacheDirty(world: world, cache: renderCache)
           }
-          # One-shot heavy boot work, now that the first frame has painted.
-          deferredBootDone = runDeferredBoot(done: deferredBootDone, spotifyOn: spotifyOn, history: appState.playHistory, reg: texReg)
-
           # Persistent-world screen-switch (slice 4b.3 + 4c) — implementation
           # in screen_switch.rae. On willSwitch=true: per-page re-mount + hero
           # arming + Active flip. On willSwitch=false: hot-reload watcher poll
