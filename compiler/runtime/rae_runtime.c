@@ -2880,21 +2880,27 @@ void rae_ext_spotifyPlayUri(rae_String uri) {
 void rae_ext_spotifyPlayQuery(rae_String query) {
     if (!query.data || query.len == 0) return;
     fprintf(stderr, "[spotify-c] play query=%.*s\n", (int)query.len, (const char*)query.data);
-    /* AppleScript-escape the raw query (NOT URL-encode): backslash and
-     * double-quote are the only metacharacters inside an AppleScript
-     * string literal. Everything else, including spaces and unicode,
-     * passes through verbatim — Spotify's `spotify:search:` URI handler
-     * accepts free-form text and resolves it to the top match. This is
-     * the same trick SUMU uses (apps/desktop/src-tauri/src/main.rs,
-     * `play_spotify` command). */
+    /* URL-encode the query for the `spotify:search:` URI. A bare space
+     * (or any reserved/unsafe char) makes Spotify's URI handler stop at
+     * the first space: "Time to pretend MGMT" was being parsed as just
+     * "Time". Percent-encode everything outside the RFC 3986 unreserved
+     * set (A-Z a-z 0-9 - _ . ~) so the full multi-word query reaches
+     * Spotify. The encoded output contains no `"` or `\`, so it is also
+     * safe to drop straight into the AppleScript string literal below. */
+    static const char rae_hexdig[] = "0123456789ABCDEF";
     char escaped[2048];
     size_t off = 0;
-    for (size_t i = 0; i < (size_t)query.len && off + 2 < sizeof(escaped); i++) {
-        char c = (char)query.data[i];
-        if (c == '\\' || c == '"') {
-            escaped[off++] = '\\';
+    for (size_t i = 0; i < (size_t)query.len && off + 4 < sizeof(escaped); i++) {
+        unsigned char c = (unsigned char)query.data[i];
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+            (c >= '0' && c <= '9') ||
+            c == '-' || c == '_' || c == '.' || c == '~') {
+            escaped[off++] = (char)c;
+        } else {
+            escaped[off++] = '%';
+            escaped[off++] = rae_hexdig[c >> 4];
+            escaped[off++] = rae_hexdig[c & 0x0F];
         }
-        escaped[off++] = c;
     }
     escaped[off] = '\0';
     /* One atomic AppleScript: launch Spotify if needed, then play the
