@@ -816,12 +816,16 @@ func layoutSystem(world: mod UiWorld) {
         # Phase 1: measure the subtree.
         measureSubtree(world: world, entity: e)
         # Phase 2: compute placement starting at (0, 0) with the
-        # screen as the parent content box.
+        # screen as the parent content box. The root content box is
+        # the world's layout extent (set by the app from the live
+        # window size), not the legacy module globals — see
+        # rae/docs/ui-coordinate-and-responsive-layout.md. The globals
+        # survive only as the createUiWorld defaults (600x1300).
         let resolved: Vec2 = resolveOwnSize(
           world: world
           entity: e
-          parentAvailW: screenWidth
-          parentAvailH: screenHeight
+          parentAvailW: world.layoutW
+          parentAvailH: world.layoutH
           hasParentAvail: true
         )
         computeSubtree(
