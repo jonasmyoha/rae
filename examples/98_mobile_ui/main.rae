@@ -590,12 +590,11 @@ func main() {
           }
 
           updateInputSystem(input: input, world: world)
-          # Live-window coords: on resize, sync screenW/H + rebuild.
-          if isWindowResized() {
-            screenW = getScreenWidth().toFloat()
-            screenH = getScreenHeight().toFloat()
-            switching = true
-          }
+          # NOTE: live-resize re-layout is deferred — forcing a world
+          # rebuild on resize exposed a double-free in the UiWorld drop
+          # (free_medium_botch) when moving between displays. Re-enable
+          # once that teardown/cascade-drop bug is fixed. Boot-time
+          # extent (real window size) still applies via applyViewportExtent.
 
           # Drag + momentum + spring-back physics for Profile / Album.
           # Implementation in scroll_input.rae — see ScrollFsm. Returns
@@ -818,8 +817,9 @@ func main() {
           if active {
             beginDrawing()
             clearBackground(color: bg)
-            # HiDPI: scale point-coords up to the Retina framebuffer.
-            beginMode2D(camera: hidpiCamera())
+            # HiDPI: FLAG_WINDOW_HIGHDPI gives a Retina framebuffer and
+            # raylib auto-scales point-coord drawing to fill it crisply —
+            # no camera/zoom needed (a zoom=dpr camera double-scaled it).
             # Two-phase render around dock layer (100): paint content,
             # (formerly capture+blur nav-tab band), paint dock+overlays.
             # Blur disabled — suspect captureAndBlurRegion side-effects
@@ -877,8 +877,6 @@ func main() {
               spacing: 0.0
               color: versionColor
             )
-            # End HiDPI camera before any framebuffer-reading ops below.
-            endMode2D()
             # Frosted-glass backdrop: when the debug menu just opened
             # this frame, the current back buffer holds the un-menued
             # screen (the world rebuild with menu hasn't happened yet —

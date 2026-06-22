@@ -78,11 +78,7 @@ func runScreenshotMode(
   loop f < warmupFrames {
     beginDrawing()
     clearBackground(color: bg)
-    # Same HiDPI camera wrap as the interactive render path so captures
-    # are crisp (and correctly sized) when HIGHDPI is active.
-    beginMode2D(camera: hidpiCamera())
     renderSystem(world: world, reg: texReg)
-    endMode2D()
     if f is (warmupFrames / 2) {
       takeScreenshot(fileName: screenshotEnv)
     }
