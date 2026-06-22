@@ -1,3 +1,20 @@
+> **⚠️ SUPERSEDED (kept as implementation reference).**
+> The authoritative design is now
+> [`ui-coordinate-and-responsive-layout.md`](./ui-coordinate-and-responsive-layout.md)
+> (frames + shared entity graph + per-frame overrides + local `ScaleToFit`
+> game boards). That document absorbs this plan's coordinate and safe-area
+> model and extends it with named frames, reparenting, and the design-unit
+> (`unitScale`) convention.
+>
+> This file is **retained, not deleted**, because parts remain directly useful
+> as implementation reference for the new plan's later stages: the
+> `safeAreaSystem` / `entityPadding` code sketches (§2), the verbatim
+> device-preset table (§3), the render-to-texture phone-in-window mechanics
+> (§4), and the editor-camera phase (§5). Read those sections as concrete
+> "how", but treat the *architecture* (single scaled canvas, no frames) as
+> superseded. Heavy overlap with the new doc on §1 (coordinate systems) and
+> §2 (safe areas) — prefer the new doc where they disagree.
+
 # Rae UI — Viewport, Safe Area, and Device Simulation Plan
 
 ## Objectives
