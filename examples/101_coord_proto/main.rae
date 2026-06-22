@@ -1,0 +1,190 @@
+# Coordinate-unit prototype for the frames architecture.
+# See rae/docs/ui-coordinate-and-responsive-layout.md.
+#
+# Purpose: judge the *feel* of the design-unit convention before locking
+# `unitScale`. It does NOT exercise the ECS/frames machinery — it isolates
+# the one open question: are high-res design-unit numbers sane when the SAME
+# `200 du` button and a fixed `1080x1600` board appear in a phone frame
+# (1080x2280 du) and a desktop frame (5760x3240 du)?
+#
+# Controls:
+#   [SPACE]      toggle phone <-> desktop reference frame
+#   [UP]/[DOWN]  raise / lower unitScale (du per logical point) live
+#
+# `unitScale` is deliberately a soft `let`, not a hard-coded 3. Watch how
+# "200 du = N pt" changes as you tweak it — that readout is the physical
+# size of the button. The on-screen frame is fit-to-window ("editor
+# preview"); that preview scale is NOT the runtime renderScale, it just
+# lets the whole authoring frame be inspected at once.
+
+import raylib
+
+type FrameDef {
+  name: String
+  w: Float
+  h: Float
+}
+
+type State {
+  frameIdx: Int      # 0 = phone, 1 = desktop
+  unitScale: Float   # design units per logical point (SOFT — experiment)
+}
+
+func phoneFrame() ret FrameDef {
+  ret FrameDef { name: "PHONE", w: 1080.0, h: 2280.0 }
+}
+
+func desktopFrame() ret FrameDef {
+  ret FrameDef { name: "DESKTOP", w: 5760.0, h: 3240.0 }
+}
+
+func currentFrame(s: view State) ret FrameDef {
+  if s.frameIdx is 0 {
+    ret phoneFrame()
+  }
+  ret desktopFrame()
+}
+
+func main() {
+  # FLAG_WINDOW_RESIZABLE = 4
+  setConfigFlags(flags: 4)
+  initWindow(width: 900, height: 760, title: "Rae coord prototype — frames & unitScale")
+  setTargetFPS(fps: 60)
+  let s: State = {
+    frameIdx: 0
+    unitScale: 3.0
+  }
+  loop not windowShouldClose() {
+    tick(s)
+  }
+  closeWindow()
+}
+
+func tick(s: mod State) {
+  # --- input ----------------------------------------------------------
+  # KEY_SPACE = 32, KEY_UP = 265, KEY_DOWN = 264
+  if isKeyPressed(key: 32) {
+    if s.frameIdx is 0 {
+      s.frameIdx = 1
+    } else {
+      s.frameIdx = 0
+    }
+  }
+  if isKeyPressed(key: 265) {
+    s.unitScale = s.unitScale + 0.5
+  }
+  if isKeyPressed(key: 264) {
+    if s.unitScale > 1.0 {
+      s.unitScale = s.unitScale - 0.5
+    }
+  }
+
+  let frame: FrameDef = currentFrame(s: s)
+
+  # --- viewport facts -------------------------------------------------
+  let ww: Float = getScreenWidth().toFloat()
+  let wh: Float = getScreenHeight().toFloat()
+  let rw: Float = getRenderWidth().toFloat()
+  let dpr: Float = rw / ww
+
+  # Editor-preview fit: scale the whole authoring frame to fit under the
+  # HUD band. This is preview-only, distinct from runtime renderScale.
+  let hudH: Float = 150.0
+  let margin: Float = 24.0
+  let availW: Float = ww - margin * 2.0
+  let availH: Float = wh - hudH - margin
+  let fitW: Float = availW / frame.w
+  let fitH: Float = availH / frame.h
+  let editorScale: Float = fitW
+  if fitH < fitW {
+    editorScale = fitH
+  }
+  let frameWpx: Float = frame.w * editorScale
+  let frameHpx: Float = frame.h * editorScale
+  let frameX: Float = (ww - frameWpx) / 2.0
+  let frameY: Float = hudH
+
+  # --- draw -----------------------------------------------------------
+  beginDrawing()
+  clearBackground(color: Color { r: 24, g: 26, b: 32, a: 255 })
+
+  # frame outline (the authoring viewport rectangle)
+  drawRectangle(
+    x: frameX, y: frameY, width: frameWpx, height: frameHpx
+    color: Color { r: 38, g: 41, b: 50, a: 255 }
+  )
+  drawRectangleLines(
+    x: frameX, y: frameY, width: frameWpx, height: frameHpx
+    color: Color { r: 120, g: 130, b: 150, a: 255 }
+  )
+
+  # fixed 1080x1600 du board, centred in the frame
+  let boardWdu: Float = 1080.0
+  let boardHdu: Float = 1600.0
+  let boardXdu: Float = (frame.w - boardWdu) / 2.0
+  let boardYdu: Float = (frame.h - boardHdu) / 2.0
+  let boardX: Float = frameX + boardXdu * editorScale
+  let boardY: Float = frameY + boardYdu * editorScale
+  drawRectangle(
+    x: boardX, y: boardY
+    width: boardWdu * editorScale, height: boardHdu * editorScale
+    color: Color { r: 60, g: 48, b: 80, a: 255 }
+  )
+  drawRectangleLines(
+    x: boardX, y: boardY
+    width: boardWdu * editorScale, height: boardHdu * editorScale
+    color: Color { r: 150, g: 120, b: 200, a: 255 }
+  )
+  drawText(
+    text: "GameBoard 1080x1600 du (fixed)"
+    x: boardX + 8.0, y: boardY + 8.0, fontSize: 18.0
+    color: Color { r: 190, g: 170, b: 220, a: 255 }
+  )
+
+  # the SAME 200x200 du button, anchored 80,80 du inside the frame
+  let btnDu: Float = 200.0
+  let btnX: Float = frameX + 80.0 * editorScale
+  let btnY: Float = frameY + 80.0 * editorScale
+  let btnPx: Float = btnDu * editorScale
+  drawRectangleRounded(
+    x: btnX, y: btnY, width: btnPx, height: btnPx
+    roundness: 0.25, segments: 8
+    color: Color { r: 90, g: 150, b: 230, a: 255 }
+  )
+  drawText(
+    text: "200du"
+    x: btnX + 8.0, y: btnY + btnPx / 2.0 - 10.0, fontSize: 18.0
+    color: Color { r: 245, g: 248, b: 255, a: 255 }
+  )
+
+  # --- HUD readouts (screen px) --------------------------------------
+  let white: Color = { r: 235, g: 238, b: 245, a: 255 }
+  let dim: Color = { r: 150, g: 160, b: 175, a: 255 }
+  drawText(
+    text: "Rae coord prototype   [SPACE] frame   [UP]/[DOWN] unitScale"
+    x: margin, y: 16.0, fontSize: 22.0, color: white
+  )
+  let btnPt: Int = (btnDu / s.unitScale).toInt()
+  let boardPtW: Int = (boardWdu / s.unitScale).toInt()
+  let boardPtH: Int = (boardHdu / s.unitScale).toInt()
+  let areaW: Int = (ww * s.unitScale).toInt()
+  let areaH: Int = (wh * s.unitScale).toInt()
+  let usInt: Int = s.unitScale.toInt()
+  let frac: Int = (btnDu / frame.w * 100.0).toInt()
+  let wwInt: Int = ww.toInt()
+  let whInt: Int = wh.toInt()
+  let dprInt: Int = (dpr * 100.0).toInt()
+  drawText(
+    text: "frame {frame.name}  {frame.w.toInt()}x{frame.h.toInt()} du    window {wwInt}x{whInt} px    dpr {dprInt}%"
+    x: margin, y: 52.0, fontSize: 20.0, color: dim
+  )
+  drawText(
+    text: "unitScale {usInt}  ->  200du = {btnPt} pt   board = {boardPtW}x{boardPtH} pt   (200du is {frac}% of this frame width)"
+    x: margin, y: 80.0, fontSize: 20.0, color: dim
+  )
+  drawText(
+    text: "runtime layout area at this window+unitScale = {areaW}x{areaH} du   (grows with window; the unit stays fixed)"
+    x: margin, y: 108.0, fontSize: 20.0, color: dim
+  )
+  endDrawing()
+}
