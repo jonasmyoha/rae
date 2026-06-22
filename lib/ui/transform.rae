@@ -50,6 +50,18 @@ func computedRectOf(world: view UiWorld, entity: view EntityId) ret ComputedRect
   ret r
 }
 
+# Runtime-only translation applied in TRANSFORM (post-layout), not in
+# layout. Scrolling writes this instead of `Offset` so a scroll step
+# reruns only transform (a cheap translation of the subtree) and never
+# the full layout pass — the key to smooth scrolling. Absent → (0,0).
+func runtimeOffsetOf(world: view UiWorld, entity: view EntityId) ret Vec2 {
+  if componentHas(this: world.runtimeOffsets, entity: entity) is false {
+    ret Vec2 { x: 0.0, y: 0.0 }
+  }
+  let ro: RuntimeOffset = componentGet(this: world.runtimeOffsets, entity: entity)
+  ret ro.delta
+}
+
 # Compose `entity`'s WorldTransform from its parent's transform plus
 # its own ComputedRect / Opacity / TransformFx, then recurse into
 # children. `parentX`/`parentY` are absolute coordinates of the parent's
@@ -84,8 +96,11 @@ func composeTransform(
     alpha = 1.0
   }
 
-  let absX: Float = parentX + cr.x
-  let absY: Float = parentY + cr.y
+  # Add the runtime-only offset (scroll) here, in transform, so it
+  # never dirties layout. Shifts this entity and its whole subtree.
+  let ro: Vec2 = runtimeOffsetOf(world: world, entity: entity)
+  let absX: Float = parentX + cr.x + ro.x
+  let absY: Float = parentY + cr.y + ro.y
 
   let wt: WorldTransform = {
     x: absX
@@ -164,6 +179,7 @@ type TransformCache {
   transformsGen: Int
   childrensGen: Int
   parentsGen: Int
+  runtimeOffsetsGen: Int
   entityCount: Int
 }
 
@@ -175,6 +191,7 @@ func createTransformCache() pub ret TransformCache {
     transformsGen: -1
     childrensGen: -1
     parentsGen: -1
+    runtimeOffsetsGen: -1
     entityCount: -1
   }
 }
@@ -196,10 +213,14 @@ func transformSystemIfDirty(world: mod UiWorld, cache: mod TransformCache) pub r
   let txGen: Int = componentTableGeneration(TransformFx, this: world.transforms)
   let chGen: Int = componentTableGeneration(Children, this: world.childrens)
   let plGen: Int = componentTableGeneration(Parent, this: world.parents)
+  let roGen: Int = componentTableGeneration(RuntimeOffset, this: world.runtimeOffsets)
   let entityCount: Int = world.alive.length
 
   let dirty: Bool = false
   if crGen is not cache.computedRectsGen {
+    dirty = true
+  }
+  if roGen is not cache.runtimeOffsetsGen {
     dirty = true
   }
   if acGen is not cache.activesGen {
@@ -226,6 +247,7 @@ func transformSystemIfDirty(world: mod UiWorld, cache: mod TransformCache) pub r
   }
 
   transformSystem(world: world)
+  cache.runtimeOffsetsGen = roGen
   cache.computedRectsGen = crGen
   cache.activesGen = acGen
   cache.opacitiesGen = opGen
