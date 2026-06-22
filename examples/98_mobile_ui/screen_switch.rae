@@ -109,7 +109,7 @@ func handleScreenSwitch(
       let activeAlbumNow1: Album = activeAlbum(state: appState)
       let activeTrackNow1: Track = trackAt(album: activeAlbumNow1, idx: appState.currentTrackIndex)
       result.cachedTrackDurMs = activeTrackNow1.durationMs
-      result.cachedAlbumScrollFloor = albumScrollMin(album: activeAlbumNow1)
+      result.cachedAlbumScrollFloor = collectionScrollFloorForState(state: appState)
       result.cachedAlbumStem = "{appState.currentAlbumStem}"
       result.cachedTrackIndex = appState.currentTrackIndex
       # The current page is still active — re-mount above cleared
@@ -191,7 +191,7 @@ func handleScreenSwitch(
     let activeAlbumNow: Album = activeAlbum(state: appState)
     let activeTrackNow: Track = trackAt(album: activeAlbumNow, idx: appState.currentTrackIndex)
     result.cachedTrackDurMs = activeTrackNow.durationMs
-    result.cachedAlbumScrollFloor = albumScrollMin(album: activeAlbumNow)
+    result.cachedAlbumScrollFloor = collectionScrollFloorForState(state: appState)
     result.cachedAlbumStem = "{appState.currentAlbumStem}"
     result.cachedTrackIndex = appState.currentTrackIndex
     let trackDurSec2: Float = result.cachedTrackDurMs.toFloat() / 1000.0

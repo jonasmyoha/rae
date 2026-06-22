@@ -75,11 +75,11 @@ func main() {
 
   let scenes: AlbumScenes = loadAllScenes()
   let texReg: TextureRegistry = createTextureRegistry()
-  # Album catalogue + per-cover textures from
-  # `assets/albums/<stem>/`. `appState` is built here so the stress
-  # / screenshot blocks below see populated state.
+  # Album catalogue (cheap json parse). Per-cover textures are NOT
+  # loaded here — the interactive loop streams them in via
+  # `cascadeAssets` after first paint so the window appears instantly.
+  # `appState` is built here so state-dependent blocks below see it.
   let albums: List(Album) = loadAllAlbums(folder: albumsFolder)
-  loadAllTextures(reg: texReg, albums: albums)
   let appState: AppState = createAppState(albums: albums)
   # Mock playback state — survives world rebuilds; both the album
   # mini-player and the now-playing screen mutate it through
@@ -91,11 +91,9 @@ func main() {
   # Missing file or stale fields fall back silently to the
   # defaults `createAppState` / `createPlaybackState` set above.
   restoreAppState(state: appState, playback: playback, path: stateFilePath)
-  # Persisted recently-played. Restored entries with a
-  # `spotify-art:` textureKey get their CDN artwork re-downloaded
-  # so the History thumbs paint real covers across launches.
+  # Persisted recently-played. CDN artwork re-download is deferred to
+  # runDeferredBoot (post-paint) so it doesn't block startup.
   restoreHistory(history: appState.playHistory, path: historyFilePath)
-  refetchHistoryArt(history: appState.playHistory, reg: texReg)
   # User library — first launch seeds it from the catalog so all
   # albums are visible by default. Subsequent launches load the
   # curated subset and stems that aren't in the catalog any more
@@ -134,8 +132,7 @@ func main() {
   let spotifyOn: Bool = spotifyState.enabled
   if isHeadless { spotifyOn = false }
   if spotifyOn {
-    log("[spotify] ON — driving local Spotify via AppleScript.")
-    spotifyLaunch()
+    log("[spotify] ON — launch deferred to post-paint (runDeferredBoot).")
   } else {
     log("[spotify] OFF (RAE_UI_NO_SPOTIFY or RAE_UI_HEADLESS)")
   }
@@ -160,22 +157,15 @@ func main() {
   autoExitSec = headlessApplyAutoExitDefault(headless: isHeadless, current: autoExitSec)
   let bootTime: Float = getTime()
 
-  # `RAE_UI_WAIT_TRACE=1` logs every `waitEventsTimeout` call whose
-  # actual sleep duration exceeded 5 ms, along with the timeout we
-  # asked for. If the wait keeps sleeping the full timeout on
-  # iterations where a click was supposed to land, GLFW isn't waking
-  # us on input events; if `dt` is small and the timeout is small,
-  # the input latency lives downstream of the wait.
+  # `RAE_UI_WAIT_TRACE=1` logs every `waitEventsTimeout` whose actual
+  # sleep exceeded 5 ms vs the requested timeout — diagnoses GLFW not
+  # waking on input events vs latency downstream of the wait.
   let waitTraceEnv: String = getEnv(name: "RAE_UI_WAIT_TRACE")
   let waitTraceEnabled: Bool = waitTraceEnv.length() > 0
 
-  # `RAE_UI_DEBUG_LOOP=1`: per-frame trace of the inner-loop state.
-  # Use when the app appears stuck: relaunch with the env var set,
-  # reproduce, capture the last ~50 lines from the supervisor
-  # terminal. Each frame logs: heartbeat (screen, scroll state,
-  # which animation flags drove the timeout), the wait result
-  # (requested vs actual duration), input event count, dispatch
-  # outcomes, and the render-vs-skip decision.
+  # `RAE_UI_DEBUG_LOOP=1`: per-frame trace of the inner-loop state
+  # (screen, scroll, anim flags, wait result, input count, dispatch,
+  # render-vs-skip). Use when the app appears stuck.
   let loopDebugEnv: String = getEnv(name: "RAE_UI_DEBUG_LOOP")
   let loopDebugEnabled: Bool = loopDebugEnv.length() > 0
   let loopDebugFrame: Int = 0
@@ -375,6 +365,7 @@ func main() {
     # (`shadowStylesOnly: true` -> `textStyleHasShadow`, which covers the
     # mini-player's `miniTitle`/`miniMuted`). No outline anywhere.
     let msdfShadow: RgbaColor = { r: 0, g: 0, b: 0, a: 140 }
+    let deferredBootDone: Bool = false
 
     loop running {
       # Covers were loaded at boot via `loadAllTextures`, so no
@@ -404,7 +395,7 @@ func main() {
         let activeAlbumNow: Album = activeAlbum(state: appState)
         let activeTrackNow: Track = trackAt(album: activeAlbumNow, idx: appState.currentTrackIndex)
         cachedTrackDurMs = activeTrackNow.durationMs
-        cachedAlbumScrollFloor = albumScrollMin(album: activeAlbumNow)
+        cachedAlbumScrollFloor = collectionScrollFloorForState(state: appState)
         # Fresh allocation so the cached stem doesn't alias
         # `appState.currentAlbumStem`'s heap (which gets dropped
         # on the next assignment to `currentAlbumStem` from
@@ -599,6 +590,12 @@ func main() {
           }
 
           updateInputSystem(input: input, world: world)
+          # Live-window coords: on resize, sync screenW/H + rebuild.
+          if isWindowResized() {
+            screenW = getScreenWidth().toFloat()
+            screenH = getScreenHeight().toFloat()
+            switching = true
+          }
 
           # Drag + momentum + spring-back physics for Profile / Album.
           # Implementation in scroll_input.rae — see ScrollFsm. Returns
@@ -762,6 +759,8 @@ func main() {
           # internal rate-limit). Syncs playback state, text fields,
           # and album art. See examples/98_mobile_ui/spotify_view.rae.
           pollSpotify(state: spotifyState, world: world, reg: texReg, playback: playback, appState: appState, currentAlbumStem: appState.currentAlbumStem, now: now)
+          # Stream covers/avatar in after first paint (a few per frame).
+          let loadingAssets: Bool = cascadeAssets(reg: texReg, albums: appState.albums, budget: 3)
 
           # Frame-gate decision: ask `decideActive` whether anything
           # changed that warrants a full begin/render/endDrawing this
@@ -791,7 +790,7 @@ func main() {
             prevHovered: lastHoveredEntity
             prevMouseBtns: lastMouseBtns
           )
-          let active: Bool = activeDecision.active
+          let active: Bool = activeDecision.active or loadingAssets
           let currentHovered: EntityId = activeDecision.currentHovered
           let currentMouseBtns: Int = activeDecision.currentMouseBtns
           lastHoverAnimDirty = hoverScaleSystem(world: world, hovered: currentHovered, dt: now - lastFrameTime)
@@ -917,6 +916,8 @@ func main() {
             # frame.
             renderCacheDirty(world: world, cache: renderCache)
           }
+          # One-shot heavy boot work, now that the first frame has painted.
+          deferredBootDone = runDeferredBoot(done: deferredBootDone, spotifyOn: spotifyOn, history: appState.playHistory, reg: texReg)
 
           # Persistent-world screen-switch (slice 4b.3 + 4c) — implementation
           # in screen_switch.rae. On willSwitch=true: per-page re-mount + hero
