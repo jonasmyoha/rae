@@ -22,6 +22,10 @@ func runScreenshotMode(
   if screenshotEnv.length() is 0 {
     ret false
   }
+  # Boot no longer loads covers (the interactive path streams them in
+  # via cascadeAssets); a deterministic screenshot needs them all up
+  # front, so load synchronously here.
+  loadAllTextures(reg: texReg, albums: appState.albums)
 
   let screenEnv: String = getEnv(name: "RAE_UI_SCREEN")
   let nowKey: String = "player"
@@ -52,8 +56,20 @@ func runScreenshotMode(
     let pf: Float = progressEnv.toFloat()
     shotPlayback.elapsedSec = shotPlayback.durationSec * pf
   }
+  # `RAE_UI_PLAYLIST=1` renders the open-playlist variant of the Album
+  # sub-page (the DRY album view resolving the "liked" playlist).
+  let playlistEnv: String = getEnv(name: "RAE_UI_PLAYLIST")
+  if playlistEnv.length() > 0 {
+    appState.viewingPlaylist = true
+    appState.currentPlaylistId = "liked"
+    let coverStems: List(String) = playlistCoverStems(playlist: appState.liked, max: 1)
+    if coverStems.length > 0 {
+      appState.currentAlbumStem = "{coverStems.get(index: 0)}"
+    }
+  }
   let shotScroll: Float = 0.0
   let world: UiWorld = buildScreenWorld(screen: screen, scenes: scenes, playback: shotPlayback, state: appState, texReg: texReg, scrollY: shotScroll)
+  applyViewportExtent(world: world)
   layoutSystem(world: world)
   transformSystem(world: world)
   applyPlaybackToWorld(world: world, state: shotPlayback)
