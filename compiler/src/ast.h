@@ -284,6 +284,10 @@ struct AstStmt {
       AstExpr* increment;
       AstBlock* body;
       bool is_range;
+      bool is_parallel; // `parallelLoop` — data-parallel intent. Currently
+                        // compiled as a sequential loop on both backends;
+                        // real parallel execution lands with the C thread
+                        // runtime. Disjointness/capture checks are future.
     } loop_stmt;
     struct {
       AstExpr* subject;

@@ -58,6 +58,7 @@ typedef enum {
   TOK_KW_PRIV,
   TOK_KW_DEFER,
   TOK_KW_TASKSCOPE,
+  TOK_KW_PARALLELLOOP,
 
   /* Operators */
   TOK_ASSIGN,
