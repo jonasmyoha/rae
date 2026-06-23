@@ -15,17 +15,16 @@ Implemented so far (Live / bytecode VM only):
 - Type system: builtin `Task(T)` (`TYPE_TASK`); `spawn`→`Task(T)` typing;
   `Task(T)` annotations resolve; `Task(T).get(): T`.
 - **Capture safety:** a spawned function's `view`/`mod` params are rejected
-  unless scalar (Int/Float/Bool/Char) — borrowed String/List/struct/etc. is a
-  compile error (would alias the parent heap across threads; pass own/copy).
+  unless the borrowed type is a value type with no heap — scalars
+  (Int/Float/Bool/Char) and enums. Borrowed String/List/struct/Buffer/etc. is
+  a compile error (would alias the parent heap across threads; pass own/copy).
 - **Failure propagation:** a task that fails (worker runtime error) is recorded
   as `status=failed`; `task.get()` raises instead of returning a bogus result.
 
 Still TODO for the first milestone: make a bare `spawn f()` statement
 join-on-drop instead of leaking the discarded `TaskObj` (the VM's `OP_POP`
 doesn't free temporaries). Compiled (C) backend `spawn`, `Channel`,
-`taskScope`, and `parallelLoop` are unstarted. (Conservative note: `view`/`mod`
-of an *enum* is also currently rejected — enums are value types but not yet
-special-cased; pass own/copy.)
+`taskScope`, and `parallelLoop` are unstarted.
 
 The design came out of a roundtable (Chattie / Clo / Gem) plus a final
 maintainer pass. It deliberately diverges from the roundtable on two points:
