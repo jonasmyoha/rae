@@ -97,7 +97,13 @@ typedef enum {
   /* Task(T) synchronization. Pops a VAL_TASK from the stack, joins its
    * thread (once), and pushes a copy of the captured result. Emitted
    * for `task.get()`. No operands. */
-  OP_TASK_GET = 0x46
+  OP_TASK_GET = 0x46,
+
+  /* Pop the top of stack and value_free it (unlike OP_POP, which just
+   * discards the slot). Emitted for a discarded expression-statement
+   * result that owns a resource — currently a bare `spawn f()` whose
+   * Task must be joined-on-drop rather than leaked. No operands. */
+  OP_DROP_TOP = 0x47
 } OpCode;
 
 typedef enum {
