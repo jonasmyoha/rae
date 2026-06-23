@@ -1972,6 +1972,14 @@ static AstStmt* parse_statement(Parser* parser) {
   if (parser_match(parser, TOK_KW_LOOP)) {
     return parse_loop_statement(parser, parser_previous(parser));
   }
+  if (parser_match(parser, TOK_KW_PARALLELLOOP)) {
+    // Same grammar as `loop`; flagged parallel. Compiled as a sequential
+    // loop for now (real parallel execution lands with the C thread
+    // runtime). Reusing parse_loop_statement keeps one loop grammar.
+    AstStmt* s = parse_loop_statement(parser, parser_previous(parser));
+    if (s && s->kind == AST_STMT_LOOP) s->as.loop_stmt.is_parallel = true;
+    return s;
+  }
   if (parser_match(parser, TOK_KW_MATCH)) {
     return parse_match_statement(parser, parser_previous(parser));
   }
