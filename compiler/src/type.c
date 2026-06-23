@@ -80,6 +80,7 @@ static TypeInfo* find_interned(TypeRegistry* reg, uint64_t hash, TypeKind kind, 
                     break;
                 case TYPE_OPT:
                 case TYPE_BUFFER:
+                case TYPE_TASK:
                     if (curr->as.opt.base == *(TypeInfo**)key_data) match = true;
                     break;
                 case TYPE_GENERIC_PARAM:
@@ -244,6 +245,22 @@ TypeInfo* type_get_buffer(TypeRegistry* r, TypeInfo* base) {
     return t;
 }
 
+TypeInfo* type_get_task(TypeRegistry* r, TypeInfo* base) {
+    uint64_t h = hash_type(TYPE_TASK, &base, sizeof(base));
+    size_t idx = h % r->capacity;
+    TypeInfo* curr = r->buckets[idx];
+    while (curr) {
+        if (curr->kind == TYPE_TASK && curr->as.task.base == base) return curr;
+        curr = curr->next_interned;
+    }
+
+    TypeInfo* t = (TypeInfo*)arena_alloc(r->arena, sizeof(TypeInfo));
+    t->kind = TYPE_TASK;
+    t->as.task.base = base;
+    add_interned(r, h, t);
+    return t;
+}
+
 TypeInfo* type_get_generic_param(TypeRegistry* r, Str name) {
     uint64_t h = hash_type(TYPE_GENERIC_PARAM, name.data, name.len);
     size_t idx = h % r->capacity;
@@ -333,6 +350,10 @@ static void type_mangle_recursive(Arena* arena, TypeInfo* t, char* buf, size_t* 
         case TYPE_BUFFER:
             *pos += snprintf(buf + *pos, cap - *pos, "Buffer_");
             type_mangle_recursive(arena, t->as.buffer.base, buf, pos, cap, depth + 1);
+            break;
+        case TYPE_TASK:
+            *pos += snprintf(buf + *pos, cap - *pos, "Task_");
+            type_mangle_recursive(arena, t->as.task.base, buf, pos, cap, depth + 1);
             break;
         case TYPE_REF:
             *pos += snprintf(buf + *pos, cap - *pos, t->as.ref.is_mod ? "rae_Mod_" : "rae_View_");
