@@ -331,7 +331,12 @@ bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
           || str_eq_cstr(base, "List")
           || str_eq_cstr(base, "Buffer")
           || str_eq_cstr(base, "StringMap")
-          || str_eq_cstr(base, "IntMap");
+          || str_eq_cstr(base, "IntMap")
+          // A Task local is dropped at block exit too: value_free joins
+          // the thread (join-on-drop). Without this it would only be
+          // freed at function return (OP_RETURN's blanket local-free) or
+          // on slot reuse — correct but less timely.
+          || str_eq_cstr(base, "Task");
         if (is_leaf) {
           /* Leaf cascade is structural — `type_needs_cascade_drop`
            * agrees and there's no helper to probe. */
