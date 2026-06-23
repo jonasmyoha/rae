@@ -515,6 +515,7 @@ function describeTargets() {
   return CONFIG.targets.map((target) => ({
     id: target.id,
     label: target.label,
+    shortLabel: target.shortLabel,
     description: target.description,
     supportsTests: Boolean(target.testCommand),
     supportsBuilds: Boolean(target.buildCommand || target.cleanCommand || target.rebuildCommand),

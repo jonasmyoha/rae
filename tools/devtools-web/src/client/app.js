@@ -1646,8 +1646,10 @@ function renderExampleTargetButtons(example) {
       if (!action.enabled) return;
       const button = document.createElement("button");
       button.type = "button";
-      const targetLabel = target.id.charAt(0).toUpperCase() + target.id.slice(1).toLowerCase();
-      button.textContent = `${action.label} ${targetLabel.toLowerCase()}`;
+      // Prefer the target's shortLabel (e.g. "compiled release") so the
+      // button reads "Run compiled release"; fall back to the raw id.
+      const display = target.shortLabel ?? target.id;
+      button.textContent = `${action.label} ${display}`;
       if (action.secondary) {
         button.classList.add("secondary");
       }

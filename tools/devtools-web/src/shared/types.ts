@@ -12,6 +12,7 @@ export type ServerHeartbeatMessage = {
 export type TargetInfoMessage = {
   id: string;
   label: string;
+  shortLabel?: string;
   description?: string;
   supportsTests: boolean;
   supportsBuilds: boolean;
