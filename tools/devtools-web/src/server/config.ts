@@ -4,6 +4,9 @@ import path from "node:path";
 export type TargetConfig = {
   id: string;
   label: string;
+  // Short display name used for the per-example action buttons
+  // ("Run <shortLabel>" / "Watch <shortLabel>"). Falls back to the id.
+  shortLabel?: string;
   description?: string;
   testCommand?: string;
   buildCommand?: string;
