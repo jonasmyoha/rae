@@ -273,6 +273,16 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             case AST_UNARY_PRE_DEC: fprintf(out, "--"); emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, true, false); break;
             case AST_UNARY_POST_INC: emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, true, false); fprintf(out, "++"); break;
             case AST_UNARY_POST_DEC: emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, true, false); fprintf(out, "--"); break;
+            case AST_UNARY_SPAWN:
+                // The compiled (C) backend has no task runtime yet. Previously
+                // this fell through to `default` and emitted NOTHING — silently
+                // dropping the spawned call. Fail loudly instead until the C
+                // thread runtime (Task/Channel/parallel loops) is implemented.
+                diag_error(ctx->module ? ctx->module->file_path : "<unknown>",
+                           (int)expr->line, (int)expr->column,
+                           "spawn / Task is not yet supported in the compiled (C) backend; "
+                           "use --target live for now (compiled task runtime is planned)");
+                break;
             default: break;
         }
         break;
