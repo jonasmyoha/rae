@@ -355,6 +355,13 @@ Value value_copy(const Value* value) {
     case VAL_REF:
       // References themselves are copied (pointing to the same target)
       break;
+    case VAL_TASK:
+      // Shallow share, like Buffer: bump the ref count so the thread is
+      // joined+freed only when the LAST reference is dropped.
+      if (value->as.task_value) {
+        value->as.task_value->ref_count++;
+      }
+      break;
     default:
       break;
   }
@@ -411,6 +418,20 @@ void value_free(Value* value) {
   } else if (value->type == VAL_REF) {
     // Nothing to free for the reference itself, it's a weak pointer
     value->as.ref_value.target = NULL;
+  } else if (value->type == VAL_TASK && value->as.task_value) {
+    TaskObj* t = value->as.task_value;
+    if (t->ref_count > 0) t->ref_count--;
+    if (t->ref_count == 0) {
+      // Join-on-drop: dropping the last reference to a running task
+      // waits for it (never silently detaches). Idempotent via `joined`.
+      if (!t->joined) {
+        sys_thread_join(t->thread);
+        t->joined = true;
+      }
+      value_free(&t->result);
+      free(t);
+    }
+    value->as.task_value = NULL;
   }
   value->type = VAL_NONE;
 }
@@ -491,6 +512,9 @@ void value_print(const Value* value) {
         fwrite(value->as.key_value.chars, 1, value->as.key_value.length, stdout);
       }
       printf("\")");
+      break;
+    case VAL_TASK:
+      printf("<task>");
       break;
   }
 }
