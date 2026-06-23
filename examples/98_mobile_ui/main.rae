@@ -530,12 +530,12 @@ func main() {
             playbackAnimating = true
           }
         }
-        let timeout: Float = nextWaitTimeoutSec(
-          animating: anim.active or playbackAnimating or scrollAnimating or lastHoverAnimDirty or assetsLoading or getTime() < renderUntil
-          mouseDown: isMouseButtonDown(button: mouseButtonLeft)
-          pollWatcher: true
-          frameSec: targetFrameSec
-        )
+        # Interaction/transition motion → busy-render: poll (timeout 0), paint every frame as fast as the machine allows (no FPS cap). Playback alone stays on the throttled 60Hz path so a playing song doesn't peg a core. Idle → blocking event-wait (~0% CPU).
+        let busyAnimating: Bool = anim.active or scrollAnimating or lastHoverAnimDirty or assetsLoading or isMouseButtonDown(button: mouseButtonLeft)
+        let timeout: Float = 0.0
+        if busyAnimating is false {
+          timeout = nextWaitTimeoutSec(animating: playbackAnimating or getTime() < renderUntil, mouseDown: false, pollWatcher: true, frameSec: targetFrameSec)
+        }
         # Heartbeat: prints once per frame BEFORE the wait. If this
         # line stops appearing in the log, the loop has stalled
         # inside the inner body (not in waitEventsTimeout). If it
@@ -829,10 +829,10 @@ func main() {
           # actually controls whether we redraw — not just how often we
           # set a target FPS. Skip the whole begin/render/endDrawing
           # block when nothing visible has changed.
-          # FPS cap: skip if <~1 display frame since last render (0.85 =
-          # jitter headroom). Pending change re-trips active next wake.
-          let frameDue: Bool = forceRender or (now - lastRenderTime) >= targetFrameSec * 0.85
-          if (active or now < renderUntil) and frameDue {
+          # Busy-animating → render EVERY iteration (no cap). Idle →
+          # throttle to ~1 display frame (0.85 jitter headroom).
+          let frameDue: Bool = busyAnimating or forceRender or (now - lastRenderTime) >= targetFrameSec * 0.85
+          if (busyAnimating or active or now < renderUntil) and frameDue {
             lastRenderTime = now
             beginDrawing()
             clearBackground(color: bg)
