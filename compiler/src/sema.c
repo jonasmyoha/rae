@@ -879,8 +879,12 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                 if (expr->as.unary.operand->resolved_type) expr->resolved_type = type_get_ref(ctx->type_registry, expr->as.unary.operand->resolved_type, expr->as.unary.op == AST_UNARY_MOD);
             } else if (expr->as.unary.op == AST_UNARY_SPAWN) {
                 // `spawn f()` evaluates to a Task(T) where T is f's return
-                // type. Reading the result is the explicit `task.get()`.
-                if (expr->as.unary.operand->resolved_type) expr->resolved_type = type_get_task(ctx->type_registry, expr->as.unary.operand->resolved_type);
+                // type. Reading the result is the explicit `task.get()`. A
+                // void-returning callee still yields a Task (Task(void)) so a
+                // bare `spawn f()` statement is recognised and joined on drop.
+                TypeInfo* inner = expr->as.unary.operand->resolved_type;
+                if (!inner) inner = type_get_void(ctx->type_registry);
+                expr->resolved_type = type_get_task(ctx->type_registry, inner);
                 // Spawn-boundary capture safety. OP_SPAWN shallow-moves each
                 // argument onto the new thread, so a borrow (view/mod) of
                 // heap data would alias the parent across threads. Borrowed
