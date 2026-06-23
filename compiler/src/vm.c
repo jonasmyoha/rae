@@ -438,6 +438,13 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
           sys_thread_join(t->thread);
           t->joined = true;
         }
+        // Surface a failed task at the join point (status set by the
+        // worker before it exited; the join is the happens-before barrier).
+        if (t->status == 2) {
+          diag_error(NULL, 0, 0, "spawned task failed (error in task.get())");
+          value_free(&tv);
+          return VM_RUNTIME_ERROR;
+        }
         // Return a copy of the captured result; the task keeps ownership
         // of its slot until its last reference is dropped.
         Value out = value_copy(&t->result);
