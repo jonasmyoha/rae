@@ -1,8 +1,30 @@
 # Rae Concurrency & Threading — design
 
-Status: **design / not yet implemented** (a detached `spawn` prototype exists
-in the VM — see *Current state*). This document is the authoritative model;
-implement against it in the staged order under *Roadmap*.
+Status: **partially implemented** (VM / Live target). This document is the
+authoritative model; implement against it in the staged order under *Roadmap*.
+
+Implemented so far (Live / bytecode VM only):
+- `spawn f(args)` returns a joinable `Task(T)` (replaces the old detached,
+  result-discarding, handle-leaking prototype). `OP_SPAWN` allocates a
+  ref-counted `TaskObj`, runs a non-detached thread, and the spawned
+  function's return value is captured into the task's result slot.
+- `task.get()` (`OP_TASK_GET`): joins once, yields the result. Verified with
+  Int and String results (heap result moves correctly across threads) and
+  two concurrent tasks.
+- Dropping the last reference to a running task **joins it** (join-on-drop).
+- Type system: builtin `Task(T)` (`TYPE_TASK`); `spawn`→`Task(T)` typing;
+  `Task(T)` annotations resolve; `Task(T).get(): T`.
+
+Still TODO for the first milestone (see *Roadmap* step 2): surface task
+**failure** at `get()` (status is recorded but not raised); **reject unsafe
+captures** (spawn args must be `own`/`copy`, never `view`/`mod` of heap data);
+and make a bare `spawn f()` statement join-on-drop instead of leaking the
+discarded `TaskObj` (the VM's `OP_POP` doesn't free temporaries). Compiled (C)
+backend `spawn`, `Channel`, `taskScope`, and `parallelLoop` are unstarted.
+
+The design came out of a roundtable (Chattie / Clo / Gem) plus a final
+maintainer pass. It deliberately diverges from the roundtable on two points:
+**no implicit task→value coercion**, and **no early green-fiber VM scheduler**.
 
 The design came out of a roundtable (Chattie / Clo / Gem) plus a final
 maintainer pass. It deliberately diverges from the roundtable on two points:
