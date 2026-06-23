@@ -20,11 +20,15 @@ Implemented so far (Live / bytecode VM only):
   a compile error (would alias the parent heap across threads; pass own/copy).
 - **Failure propagation:** a task that fails (worker runtime error) is recorded
   as `status=failed`; `task.get()` raises instead of returning a bogus result.
+- **Bare-statement drop:** a discarded `spawn f()` statement joins on drop
+  (`OP_DROP_TOP`) rather than leaking/detaching — so bare spawn is synchronous;
+  fire-and-forget will require an explicit `detach` (not yet implemented).
 
-Still TODO for the first milestone: make a bare `spawn f()` statement
-join-on-drop instead of leaking the discarded `TaskObj` (the VM's `OP_POP`
-doesn't free temporaries). Compiled (C) backend `spawn`, `Channel`,
-`taskScope`, and `parallelLoop` are unstarted.
+The **first milestone is complete** for the Live VM. Remaining (roadmap steps
+3–5): a `let`-bound task that's never `get()`'d should also join at scope exit
+(scope-exit dealloc doesn't yet drop Task locals); Live `parallelLoop`
+(sequential); the Compiled (C) backend `spawn`/`Channel`/atomics + real
+parallel loops; and `taskScope`. None of these are started.
 
 The design came out of a roundtable (Chattie / Clo / Gem) plus a final
 maintainer pass. It deliberately diverges from the roundtable on two points:
