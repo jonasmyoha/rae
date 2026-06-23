@@ -24,11 +24,14 @@ Implemented so far (Live / bytecode VM only):
   (`OP_DROP_TOP`) rather than leaking/detaching — so bare spawn is synchronous;
   fire-and-forget will require an explicit `detach` (not yet implemented).
 
+- **Drop discipline:** a `let`-bound task is joined-on-drop at block scope
+  exit (`OP_DROP_LOCAL`), at function return (`OP_RETURN`), and on slot reuse —
+  so a never-`get()`'d task always joins, never leaks.
+
 The **first milestone is complete** for the Live VM. Remaining (roadmap steps
-3–5): a `let`-bound task that's never `get()`'d should also join at scope exit
-(scope-exit dealloc doesn't yet drop Task locals); Live `parallelLoop`
-(sequential); the Compiled (C) backend `spawn`/`Channel`/atomics + real
-parallel loops; and `taskScope`. None of these are started.
+3–5): Live `parallelLoop` (sequential); the Compiled (C) backend
+`spawn`/`Channel`/atomics + real parallel loops; and `taskScope`. None of these
+are started.
 
 The design came out of a roundtable (Chattie / Clo / Gem) plus a final
 maintainer pass. It deliberately diverges from the roundtable on two points:
