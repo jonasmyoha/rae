@@ -96,11 +96,42 @@ func dropEntityList(lst: mod List(EntityId)) {
   drop(lst)
 }
 
+# Non-generic List(Int) helpers for the sparse map (entity.value ->
+# dense index). Same rationale as the EntityId helpers: routing the
+# add/drop through a non-generic function stops the C backend from
+# substituting the outer T into the inner List(Int) specialisation when
+# these are touched from inside a function generic over T.
+func appendIntList(lst: mod List(Int), value: view Int) {
+  lst.add(value: value)
+}
+
+func dropIntList(lst: mod List(Int)) {
+  drop(lst)
+}
+
+# Grow `lst` (padding new slots with -1 = "absent") until `index` is a
+# valid, settable position. Used to size the sparse map up to a new
+# entity id before recording its dense index.
+func ensureIntSlots(lst: mod List(Int), index: view Int) {
+  loop lst.length <= index {
+    appendIntList(lst: lst, value: 0 - 1)
+  }
+}
+
 # ----- ComponentTable -----
 
 type ComponentTable(T: type) {
   denseEntities: List(EntityId)
   denseData: List(T)
+
+  # Sparse map: sparse[entity.value] = dense index of that entity's
+  # component, or -1 if absent / out of range. Turns componentIndexOf
+  # from an O(n) linear scan into O(1), which matters a lot once a
+  # scene has hundreds of entities (e.g. a 200+ row list): the per-
+  # frame layout/transform/render walks do ~a dozen lookups per entity,
+  # so a linear scan made each frame O(n^2). Maintained on set/remove;
+  # grown lazily (padded with -1) to cover the largest entity id seen.
+  sparse: List(Int)
 
   # Monotonic counter that bumps once per mutation. Consumer systems
   # (layout, transform, render) can cache the last seen generation and
@@ -117,6 +148,7 @@ func createComponentTable(T: type) ret ComponentTable(T) {
   ret ComponentTable(T) {
     denseEntities: createList(EntityId, cap: 256)
     denseData: createList(T, cap: 256)
+    sparse: createList(Int, cap: 256)
     generation: 0
   }
 }
@@ -133,6 +165,7 @@ func drop(T: type, this: mod ComponentTable(T)) {
   # See dropEntityList — calling `drop(this.denseEntities)` here would
   # mis-mangle to drop(T)(List(T)) and reinterpret Int slots as T.
   dropEntityList(lst: this.denseEntities)
+  dropIntList(lst: this.sparse)
 }
 
 # Returns the dense index of `entity` in this table, or -1 if absent.
@@ -144,14 +177,26 @@ func drop(T: type, this: mod ComponentTable(T)) {
 # Bypass via `rae_ext_rae_buf_get` which doesn't go through the
 # generic dispatch.
 func componentIndexOf(T: type, this: view ComponentTable(T), entity: view EntityId) ret Int {
-  let n: Int = this.denseEntities.length
-  let i: Int = 0
-  loop i < n {
-    let e: EntityId = rae_ext_rae_buf_get(buf: this.denseEntities.data, index: i)
-    if e.value is entity.value {
-      ret i
-    }
-    i = i + 1
+  # O(1) sparse lookup. `sparse[entity.value]` is the candidate dense
+  # index; we still validate the dense back-reference so a stale slot
+  # (left by a swap-remove of a *different* entity) can't false-hit.
+  let key: Int = entity.value
+  if key < 0 {
+    ret -1
+  }
+  if key >= this.sparse.length {
+    ret -1
+  }
+  let idx: Int = rae_ext_rae_buf_get(buf: this.sparse.data, index: key)
+  if idx < 0 {
+    ret -1
+  }
+  if idx >= this.denseEntities.length {
+    ret -1
+  }
+  let e: EntityId = rae_ext_rae_buf_get(buf: this.denseEntities.data, index: idx)
+  if e.value is key {
+    ret idx
   }
   ret -1
 }
@@ -215,56 +260,61 @@ func componentMod(T: type, this: mod ComponentTable(T), entity: view EntityId) r
 # Add or replace the component for `entity`. Internally aliases the
 # two inner lists so the mutation propagates on both targets.
 func componentSet(T: type, this: mod ComponentTable(T), entity: view EntityId, data: own T) {
-  let entities: mod List(EntityId) => this.denseEntities
-  let datas: mod List(T) => this.denseData
-  let n: Int = entities.length
-  let i: Int = 0
-  loop i < n {
-    # `entities.get(...)` would mis-mangle inside this generic — see
-    # componentIndexOf comment.
-    let e: EntityId = rae_ext_rae_buf_get(buf: entities.data, index: i)
-    if e.value is entity.value {
-      # Drop the existing slot before overwriting. Without this the
-      # old component's heap-owning fields (Strings, Lists) leak
-      # every time a scene override or live mutation replaces an
-      # existing component. `buf_drop_at` calls the synthesised
-      # cascade drop for T (rae_drop_struct_<T> or rae_string_drop),
-      # then we overwrite immediately so the stale pointers don't
-      # outlive the cycle.
-      rae_ext_rae_buf_drop_at(buf: datas.data, index: i)
-      rae_ext_rae_buf_set(buf: datas.data, index: i, value: data)
-      this.generation = this.generation + 1
-      ret
-    }
-    i = i + 1
+  let existing: Int = componentIndexOf(T, this: this, entity: entity)
+  if existing >= 0 {
+    # Drop the existing slot before overwriting. Without this the
+    # old component's heap-owning fields (Strings, Lists) leak
+    # every time a scene override or live mutation replaces an
+    # existing component. `buf_drop_at` calls the synthesised
+    # cascade drop for T (rae_drop_struct_<T> or rae_string_drop),
+    # then we overwrite immediately so the stale pointers don't
+    # outlive the cycle.
+    rae_ext_rae_buf_drop_at(buf: this.denseData.data, index: existing)
+    rae_ext_rae_buf_set(buf: this.denseData.data, index: existing, value: data)
+    this.generation = this.generation + 1
+    ret
   }
-  appendEntityList(lst: entities, value: entity)
-  datas.add(value: data)
+  # New entity: append to both dense lists and point its sparse slot at
+  # the new tail index.
+  let newIdx: Int = this.denseEntities.length
+  appendEntityList(lst: this.denseEntities, value: entity)
+  this.denseData.add(value: data)
+  let key: Int = entity.value
+  ensureIntSlots(lst: this.sparse, index: key)
+  rae_ext_rae_buf_set(buf: this.sparse.data, index: key, value: newIdx)
   this.generation = this.generation + 1
 }
 
 # Swap-remove the component for `entity`. Order in the table is not
 # preserved (no callers depend on it).
 func componentRemove(T: type, this: mod ComponentTable(T), entity: view EntityId) {
-  let entities: mod List(EntityId) => this.denseEntities
-  let datas: mod List(T) => this.denseData
   let idx: Int = componentIndexOf(T, this: this, entity: entity)
   if idx < 0 {
     # Missing entity is a no-op; don't bump generation so consumers
     # aren't woken by spurious removes.
     ret
   }
-  let last: Int = entities.length - 1
+  let removedKey: Int = entity.value
+  let last: Int = this.denseEntities.length - 1
   if idx is not last {
-    let lastEntity: EntityId = rae_ext_rae_buf_get(buf: entities.data, index: last)
-    rae_ext_rae_buf_set(buf: entities.data, index: idx, value: lastEntity)
-    let lastData: T = rae_ext_rae_buf_get(buf: datas.data, index: last)
-    rae_ext_rae_buf_set(buf: datas.data, index: idx, value: lastData)
+    let lastEntity: EntityId = rae_ext_rae_buf_get(buf: this.denseEntities.data, index: last)
+    rae_ext_rae_buf_set(buf: this.denseEntities.data, index: idx, value: lastEntity)
+    let lastData: T = rae_ext_rae_buf_get(buf: this.denseData.data, index: last)
+    rae_ext_rae_buf_set(buf: this.denseData.data, index: idx, value: lastData)
+    # The entity that was at `last` now lives at `idx`: repoint its
+    # sparse slot so future lookups find it.
+    rae_ext_rae_buf_set(buf: this.sparse.data, index: lastEntity.value, value: idx)
   }
   # Shrink length by 1. Use the non-generic helper for the entity-list
   # because `entities.remove(...)` would mis-mangle in this context.
-  popLastEntity(lst: entities)
-  datas.remove(index: last)
+  popLastEntity(lst: this.denseEntities)
+  this.denseData.remove(index: last)
+  # Mark the removed entity absent in the sparse map.
+  if removedKey >= 0 {
+    if removedKey < this.sparse.length {
+      rae_ext_rae_buf_set(buf: this.sparse.data, index: removedKey, value: 0 - 1)
+    }
+  }
   this.generation = this.generation + 1
 }
 
