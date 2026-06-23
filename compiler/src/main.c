@@ -55,6 +55,7 @@ typedef struct {
   bool watch;
   int timeout;
   int target;
+  int profile;
   bool no_implicit;
 } RunOptions;
 
@@ -227,6 +228,7 @@ static bool parse_run_args(int argc, char** argv, RunOptions* opts) {
   opts->project_path = NULL;
   opts->timeout = 0;
   opts->target = BUILD_TARGET_LIVE;
+  opts->profile = BUILD_PROFILE_RELEASE;
   opts->no_implicit = false;
 
   int i = 0;
@@ -235,6 +237,36 @@ static bool parse_run_args(int argc, char** argv, RunOptions* opts) {
     if (strcmp(arg, "--no-implicit") == 0) {
       opts->no_implicit = true;
       i += 1;
+      continue;
+    }
+    // Build profile for the compiled target: release (-O2 -DNDEBUG) or
+    // dev/debug (-O0 -g). Ignored by the live (bytecode) target. The
+    // `--release` / `--debug` aliases mirror the common convention.
+    if (strcmp(arg, "--release") == 0) {
+      opts->profile = BUILD_PROFILE_RELEASE;
+      i += 1;
+      continue;
+    }
+    if (strcmp(arg, "--debug") == 0) {
+      opts->profile = BUILD_PROFILE_DEV;
+      i += 1;
+      continue;
+    }
+    if (strcmp(arg, "--profile") == 0) {
+      if (i + 1 >= argc) {
+        fprintf(stderr, "error: --profile expects dev or release\n");
+        return false;
+      }
+      const char* value = argv[i + 1];
+      if (strcmp(value, "dev") == 0 || strcmp(value, "debug") == 0) {
+        opts->profile = BUILD_PROFILE_DEV;
+      } else if (strcmp(value, "release") == 0) {
+        opts->profile = BUILD_PROFILE_RELEASE;
+      } else {
+        fprintf(stderr, "error: unknown profile '%s' (expected dev|release)\n", value);
+        return false;
+      }
+      i += 2;
       continue;
     }
     if (strcmp(arg, "--watch") == 0 || strcmp(arg, "-w") == 0) {
@@ -1819,7 +1851,10 @@ static void print_usage(const char* prog) {
   fprintf(stderr, "  format <file>   Parse Rae source file and pretty-print it\n");
   fprintf(stderr, "  run [opts] <file>\n");
   fprintf(stderr, "                  Execute Rae source via the bytecode VM\n");
-  fprintf(stderr, "                  Options: --project <dir>, --watch\n");
+  fprintf(stderr, "                  Options: --project <dir>, --watch,\n");
+  fprintf(stderr, "                           --target <live|compiled>,\n");
+  fprintf(stderr, "                           --profile <dev|release> (or --debug/--release;\n");
+  fprintf(stderr, "                           compiled target: dev=-O0 -g, release=-O2 -DNDEBUG)\n");
   fprintf(stderr, "  pack <file>     Validate and summarize a .raepack file\n");
   fprintf(stderr, "                 (options: --json, --target <id>)\n");
   fprintf(stderr,
@@ -2351,11 +2386,17 @@ static int run_vm_file(const RunOptions* run_opts, const char* project_root) {
 static bool gcc_link_c_to_binary(const char* entry_rae_file,
                                  const char* c_path,
                                  const char* out_bin,
-                                 bool uses_raylib) {
+                                 bool uses_raylib,
+                                 int profile) {
   char runtime_dir[PATH_MAX];
   snprintf(runtime_dir, sizeof(runtime_dir), "%s", RAE_RUNTIME_SOURCE_DIR);
 
   const char* raylib_define = uses_raylib ? "-DRAE_HAS_RAYLIB" : "";
+  // release: optimize and strip asserts; dev/debug: no opt + symbols so
+  // a profiler/debugger reads the generated C and runtime cleanly.
+  const char* opt_flags = (profile == BUILD_PROFILE_DEV)
+                              ? "-O0 -g"
+                              : "-O2 -DNDEBUG";
 
   char extra_c_files[PATH_MAX * 4] = {0};
   {
@@ -2380,8 +2421,8 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
   }
 
   char cmd[PATH_MAX * 4];
-  snprintf(cmd, sizeof(cmd), "gcc -std=c11 -O2 -w %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib /opt/homebrew/lib/libraylib.a -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL %s %s/rae_runtime.c%s -o %s",
-           raylib_define, runtime_dir, c_path, runtime_dir, extra_c_files, out_bin);
+  snprintf(cmd, sizeof(cmd), "gcc -std=c11 %s -w %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib /opt/homebrew/lib/libraylib.a -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL %s %s/rae_runtime.c%s -o %s",
+           opt_flags, raylib_define, runtime_dir, c_path, runtime_dir, extra_c_files, out_bin);
 
   if (system(cmd) != 0) {
     fprintf(stderr, "error: failed to compile C output\n");
@@ -2406,7 +2447,7 @@ static int run_compiled_file(const RunOptions* run_opts, const char* project_roo
     return 1;
   }
 
-  if (!gcc_link_c_to_binary(file_path, temp_c, temp_bin, uses_raylib)) {
+  if (!gcc_link_c_to_binary(file_path, temp_c, temp_bin, uses_raylib, run_opts->profile)) {
     unlink(temp_c);
     return 1;
   }
@@ -2696,7 +2737,8 @@ static void watch_kill_child(pid_t pid, int grace_ms) {
 static bool watch_build_into_dir(const char* entry,
                                  const char* project_root,
                                  const char* build_dir,
-                                 char out_bin_path[PATH_MAX]) {
+                                 char out_bin_path[PATH_MAX],
+                                 int profile) {
   if (!ensure_directory_p(build_dir)) return false;
   char c_path[PATH_MAX];
   snprintf(c_path, sizeof(c_path), "%s/app.c", build_dir);
@@ -2706,7 +2748,7 @@ static bool watch_build_into_dir(const char* entry,
   // Pessimistic: link with raylib on. raylib is bundled with the
   // toolchain and a few unused KB is fine; in exchange the supervisor
   // doesn't need to plumb the uses-raylib flag through the subprocess.
-  if (!gcc_link_c_to_binary(entry, c_path, out_bin_path, true)) return false;
+  if (!gcc_link_c_to_binary(entry, c_path, out_bin_path, true, profile)) return false;
   return true;
 }
 
@@ -2761,7 +2803,7 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
     snprintf(build_dir, sizeof(build_dir), "%s/.rae/build/build-%lld", cwd_abs, build_seq);
     printf("rae watch: building %s (%s) ...\n", entry, build_id);
     fflush(stdout);
-    if (!watch_build_into_dir(entry, project_root, build_dir, current_bin)) {
+    if (!watch_build_into_dir(entry, project_root, build_dir, current_bin, run_opts->profile)) {
       fprintf(stderr, "rae watch: initial build failed\n");
       watch_write_build_status(".rae", false, "initial build failed");
       return 1;
@@ -2915,7 +2957,7 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
       snprintf(build_dir, sizeof(build_dir),
                "%s/.rae/build/build-%lld", cwd_abs, build_seq);
 
-      if (!watch_build_into_dir(entry, project_root, build_dir, new_bin)) {
+      if (!watch_build_into_dir(entry, project_root, build_dir, new_bin, run_opts->profile)) {
         char msg[128];
         snprintf(msg, sizeof(msg), "build %s failed", build_id);
         fprintf(stderr, "rae watch: build failed; keeping running app\n");
