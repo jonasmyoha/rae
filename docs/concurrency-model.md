@@ -27,11 +27,21 @@ Implemented so far (Live / bytecode VM only):
 - **Drop discipline:** a `let`-bound task is joined-on-drop at block scope
   exit (`OP_DROP_LOCAL`), at function return (`OP_RETURN`), and on slot reuse —
   so a never-`get()`'d task always joins, never leaks.
+- **`taskScope { }`** — structured-concurrency block. Desugars to a run-once
+  scope (`if true { }`), so tasks bound inside join at scope exit. (Non-escape
+  enforcement / cancel-on-error are future refinements.)
+- **`parallelLoop`** — reuses the `loop` grammar with a parallel flag. Compiled
+  as a **sequential** loop on both backends for now (per "Live parallelLoop
+  runs sequentially first"); real parallel execution awaits the C thread runtime.
+- **Compiled (C) backend** now **errors clearly** on `spawn`/`Task` (was a silent
+  drop) — directs to `--target live`.
 
-The **first milestone is complete** for the Live VM. Remaining (roadmap steps
-3–5): Live `parallelLoop` (sequential); the Compiled (C) backend
-`spawn`/`Channel`/atomics + real parallel loops; and `taskScope`. None of these
-are started.
+The **first milestone is complete** for the Live VM, and `taskScope` +
+`parallelLoop` exist (sequential). The large remaining piece is the **compiled
+(C) task runtime**: real OS-thread `spawn`/`Task`/`get`, `Channel`, atomics, and
+parallel `parallelLoop` over disjoint shards. Also future: explicit `detach`,
+`taskScope` cancel-on-error/non-escape enforcement, and `parallelLoop`
+disjointness checking (needed once it's actually parallel).
 
 The design came out of a roundtable (Chattie / Clo / Gem) plus a final
 maintainer pass. It deliberately diverges from the roundtable on two points:
