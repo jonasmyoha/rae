@@ -2024,6 +2024,14 @@ rae_Bool rae_ext_mouseHookDrainReleased(void) {
   return v != 0;
 }
 
+/* True once installMouseButtonHook has successfully chained the GLFW
+ * callback. Lets the input layer use the hook as the sole authoritative
+ * edge source and skip raylib's poll-to-poll edges entirely, while
+ * still falling back to polling for hosts that never install it. */
+rae_Bool rae_ext_mouseHookActive(void) {
+  return g_mouse_button_hook_installed != 0;
+}
+
 void rae_ext_waitEventsTimeout(double seconds) { glfwWaitEventsTimeout(seconds); }
 void rae_ext_waitEvents(void) { glfwWaitEvents(); }
 void rae_ext_postEmptyEvent(void) { glfwPostEmptyEvent(); }
