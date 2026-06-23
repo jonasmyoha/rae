@@ -877,6 +877,10 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
             if (expr->as.unary.op == AST_UNARY_NOT) expr->resolved_type = type_get_bool(ctx->type_registry);
             else if (expr->as.unary.op == AST_UNARY_VIEW || expr->as.unary.op == AST_UNARY_MOD) {
                 if (expr->as.unary.operand->resolved_type) expr->resolved_type = type_get_ref(ctx->type_registry, expr->as.unary.operand->resolved_type, expr->as.unary.op == AST_UNARY_MOD);
+            } else if (expr->as.unary.op == AST_UNARY_SPAWN) {
+                // `spawn f()` evaluates to a Task(T) where T is f's return
+                // type. Reading the result is the explicit `task.get()`.
+                if (expr->as.unary.operand->resolved_type) expr->resolved_type = type_get_task(ctx->type_registry, expr->as.unary.operand->resolved_type);
             } else if (expr->as.unary.operand->resolved_type) expr->resolved_type = expr->as.unary.operand->resolved_type;
             break;
         case AST_EXPR_CALL: {
@@ -973,6 +977,13 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
             while (marg) { sema_analyze_expr(ctx, module, symbols, marg->value); marg = marg->next; }
             if (expr->as.method_call.object->resolved_type) {
                 TypeInfo* t = expr->as.method_call.object->resolved_type; if (t->kind == TYPE_REF) t = t->as.ref.base;
+                // Built-in Task(T).get() : T. Waits for the task and yields
+                // its result. No user decl_link — the compiler emits
+                // OP_TASK_GET for a Task receiver with method "get".
+                if (t->kind == TYPE_TASK && str_eq_cstr(expr->as.method_call.method_name, "get")) {
+                    expr->resolved_type = t->as.task.base;
+                    break;
+                }
                 bool found = false;
                 for (size_t i = 0; i < ctx->methods.count; i++) {
                     MethodEntry* entry = &ctx->methods.entries[i];
@@ -1145,6 +1156,11 @@ static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* mod
             TypeInfo* arg = type_get_void(ctx->type_registry);
             if (type_ref->generic_args) arg = sema_resolve_type_internal(ctx, module, symbols, type_ref->generic_args);
             base = type_get_buffer(ctx->type_registry, arg);
+        }
+        else if (str_eq_cstr(name, "Task")) {
+            TypeInfo* arg = type_get_void(ctx->type_registry);
+            if (type_ref->generic_args) arg = sema_resolve_type_internal(ctx, module, symbols, type_ref->generic_args);
+            base = type_get_task(ctx->type_registry, arg);
         } else if (symbols) {
             Symbol* sym = symbol_table_lookup(symbols, name);
             if (sym && sym->type) {
