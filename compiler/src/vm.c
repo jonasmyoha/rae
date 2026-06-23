@@ -18,22 +18,26 @@ typedef struct {
   Value args[256];
   uint8_t arg_count;
   VmRegistry* registry;
+  TaskObj* task;   // result + status written here; owned by the Task value
 } SpawnData;
 
 static void* spawn_thread_wrapper(void* arg) {
   SpawnData* data = (SpawnData*)arg;
-  
+
   VM sub_vm;
   vm_init(&sub_vm);
   sub_vm.registry = data->registry;
-  
+  // Capture the spawned function's return value into the task's result
+  // slot (the top-frame OP_RETURN moves it here instead of freeing it).
+  sub_vm.result_capture = &data->task->result;
+
   // Set up initial frame
   sub_vm.call_stack_top = 1;
   CallFrame* frame = &sub_vm.call_stack[0];
   frame->return_ip = NULL;
   frame->slots = sub_vm.stack;
   frame->slot_count = data->arg_count;
-  
+
   // Note: we reversed them during pop, so we reverse them back during assign or vice versa
   for (int i = 0; i < data->arg_count; i++) {
     frame->locals[i] = data->args[data->arg_count - 1 - i];
@@ -41,11 +45,15 @@ static void* spawn_thread_wrapper(void* arg) {
   for (int i = data->arg_count; i < 256; i++) {
     frame->locals[i] = value_none();
   }
-  
+
   sub_vm.ip = data->chunk->code + data->target;
-  
-  vm_run(&sub_vm, data->chunk);
-  
+
+  VMResult rc = vm_run(&sub_vm, data->chunk);
+  // status: 1 completed, 2 failed. The result was already moved into
+  // data->task->result by the captured top-frame return (if any). The
+  // join in get()/drop is the happens-before barrier for this write.
+  data->task->status = (rc == VM_RUNTIME_OK) ? 1 : 2;
+
   vm_free(&sub_vm);
   free(data);
   return NULL;
@@ -116,6 +124,7 @@ static bool value_is_truthy(const Value* value) {
     case VAL_REF:
     case VAL_ID:
     case VAL_KEY:
+    case VAL_TASK:
       return true;
   }
   return false;
@@ -154,6 +163,9 @@ static bool values_equal(const Value* lhs, const Value* rhs) {
       if (lhs->as.key_value.length != rhs->as.key_value.length) return false;
       return memcmp(lhs->as.key_value.chars, rhs->as.key_value.chars,
                     lhs->as.key_value.length) == 0;
+    case VAL_TASK:
+      // Identity: two task handles are equal iff they share the object.
+      return lhs->as.task_value == rhs->as.task_value;
   }
   return false;
 }
@@ -170,6 +182,7 @@ void vm_init(VM* vm) {
   vm->timeout_seconds = 0;
   vm->start_time = 0;
   vm->reload_requested = false;
+  vm->result_capture = NULL;
 }
 
 void vm_free(VM* vm) {
@@ -226,6 +239,7 @@ static const char* vm_value_type_name(ValueType type) {
     case VAL_REF: return "ref";
     case VAL_ID: return "id";
     case VAL_KEY: return "key";
+    case VAL_TASK: return "Task";
   }
   return "unknown";
 }
@@ -374,26 +388,61 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
           return VM_RUNTIME_ERROR;
         }
         
+        // Allocate the task handle the caller will hold. Owns the thread
+        // and the result slot; ref-counted so value_copy/value_free can
+        // share it and join exactly once when the last reference drops.
+        TaskObj* task = malloc(sizeof(TaskObj));
+        task->result = value_none();
+        task->status = 0;     // running
+        task->joined = false;
+        task->ref_count = 1;
+
         SpawnData* data = malloc(sizeof(SpawnData));
         data->chunk = vm->chunk;
         data->target = target;
         data->arg_count = arg_count;
         data->registry = vm->registry;
-        
-        // Transfer arguments (pop from current VM, transfer to SpawnData)
+        data->task = task;
+
+        // Transfer arguments (pop from current VM, transfer to SpawnData).
+        // This is a shallow by-value move off the parent stack — safe only
+        // because the language restricts spawn captures to own/copy.
         for (int i = 0; i < arg_count; i++) {
           data->args[i] = vm_pop(vm);
         }
-        
-        sys_thread_t thread;
-        if (!sys_thread_create(&thread, spawn_thread_wrapper, data)) {
+
+        if (!sys_thread_create(&task->thread, spawn_thread_wrapper, data)) {
           diag_error(NULL, 0, 0, "failed to spawn thread");
-          // cleanup
           for (int i = 0; i < arg_count; i++) value_free(&data->args[i]);
           free(data);
+          free(task);
           return VM_RUNTIME_ERROR;
         }
-        // We don't join here, it runs detached (or we'll manage it later)
+        // Push the Task(T) handle. Joinable via OP_TASK_GET, or joined on
+        // drop (value_free). No longer detached.
+        Value task_val;
+        task_val.type = VAL_TASK;
+        task_val.as.task_value = task;
+        vm_push(vm, task_val);
+        break;
+      }
+      case OP_TASK_GET: {
+        Value tv = vm_pop(vm);
+        if (tv.type != VAL_TASK || !tv.as.task_value) {
+          diag_error(NULL, 0, 0, "task.get() on a non-task value");
+          value_free(&tv);
+          return VM_RUNTIME_ERROR;
+        }
+        TaskObj* t = tv.as.task_value;
+        if (!t->joined) {
+          sys_thread_join(t->thread);
+          t->joined = true;
+        }
+        // Return a copy of the captured result; the task keeps ownership
+        // of its slot until its last reference is dropped.
+        Value out = value_copy(&t->result);
+        value_free(&tv);   // drop this reference (joins+frees if it was last)
+        vm_push(vm, out);
         break;
       }
       case OP_NATIVE_CALL: {
@@ -1292,7 +1341,15 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
 
         if (vm->call_stack_top <= 1) {
           vm->call_stack_top = 0;
-          if (push_result) value_free(&result);
+          if (push_result) {
+            if (vm->result_capture) {
+              // Spawned task: move the return value into the task's
+              // result slot instead of discarding it.
+              *vm->result_capture = result;
+            } else {
+              value_free(&result);
+            }
+          }
           return VM_RUNTIME_OK;
         }
         CallFrame* frame = &vm->call_stack[--vm->call_stack_top];

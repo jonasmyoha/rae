@@ -92,7 +92,12 @@ typedef enum {
    * native-call-based drops (used for user-struct cascades) so
    * leaf cleanup stays free of the registry lookup + descriptor
    * indirection. */
-  OP_DROP_LOCAL = 0x45
+  OP_DROP_LOCAL = 0x45,
+
+  /* Task(T) synchronization. Pops a VAL_TASK from the stack, joins its
+   * thread (once), and pushes a copy of the captured result. Emitted
+   * for `task.get()`. No operands. */
+  OP_TASK_GET = 0x46
 } OpCode;
 
 typedef enum {
@@ -125,6 +130,11 @@ typedef struct VM {
   // Hot-Reload State
   volatile bool reload_requested;
   char pending_reload_path[1024]; // Path of the changed file
+
+  // When non-NULL, the top-frame OP_RETURN moves its result here instead
+  // of freeing it. Set by a spawned task's sub-VM so the task can capture
+  // the function's return value. NULL in the main VM.
+  Value* result_capture;
 } VM;
 
 void vm_init(VM* vm);
