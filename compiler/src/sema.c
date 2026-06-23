@@ -881,6 +881,32 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                 // `spawn f()` evaluates to a Task(T) where T is f's return
                 // type. Reading the result is the explicit `task.get()`.
                 if (expr->as.unary.operand->resolved_type) expr->resolved_type = type_get_task(ctx->type_registry, expr->as.unary.operand->resolved_type);
+                // Spawn-boundary capture safety. OP_SPAWN shallow-moves each
+                // argument onto the new thread, so a borrow (view/mod) of
+                // heap data would alias the parent across threads. Borrowed
+                // params are only safe for scalars (Int/Float/Bool/Char,
+                // which are copied by value); String/List/Map/struct/Buffer
+                // borrows are rejected — pass them as own or copy.
+                AstExpr* sp_call = expr->as.unary.operand;
+                if (sp_call && sp_call->kind == AST_EXPR_CALL && sp_call->decl_link &&
+                    sp_call->decl_link->kind == AST_DECL_FUNC) {
+                    for (AstParam* p = sp_call->decl_link->as.func_decl.params; p; p = p->next) {
+                        if (!p->type || !(p->type->is_view || p->type->is_mod)) continue;
+                        TypeInfo* bt = sema_resolve_type_internal(ctx, module, symbols, p->type);
+                        if (bt && bt->kind == TYPE_REF) bt = bt->as.ref.base;
+                        bool scalar = bt && (bt->kind == TYPE_INT || bt->kind == TYPE_FLOAT ||
+                                             bt->kind == TYPE_BOOL || bt->kind == TYPE_CHAR);
+                        if (!scalar) {
+                            char buf[256];
+                            snprintf(buf, sizeof(buf),
+                                "cannot spawn: parameter '%.*s' is a %s of non-scalar data, "
+                                "which would be shared across the task boundary; pass it as own or copy",
+                                (int)p->name.len, p->name.data, p->type->is_mod ? "mod" : "view");
+                            diag_error(module->file_path, (int)expr->line, (int)expr->column, buf);
+                            module->had_error = true;
+                        }
+                    }
+                }
             } else if (expr->as.unary.operand->resolved_type) expr->resolved_type = expr->as.unary.operand->resolved_type;
             break;
         case AST_EXPR_CALL: {
