@@ -46,6 +46,12 @@
       "exampleBuildCommand": "./compiler/bin/rae build --target compiled --profile dev --project {{ENTRY_DIR}} --emit-c --out {{OUTDIR}} {{ENTRY}}"
     },
     {
+      "id": "compiled-profiler",
+      "label": "Compiled (C backend, profiler)",
+      "shortLabel": "compiled profiler",
+      "exampleRunCommand": "./compiler/bin/rae build --target compiled --project {{ENTRY_DIR}} --emit-c --out {{OUTDIR}}/out.c {{ENTRY}} && gcc -O2 -g -o {{OUTDIR}}/app {{OUTDIR}}/out.c {{OUTDIR}}/rae_runtime.c third_party/raylib/rae_raylib.c third_party/tinyexpr/rae_tinyexpr.c $(ls {{ENTRY_DIR}}/*.c 2>/dev/null | grep -v \"out.c\" | grep -v \"rae_runtime.c\" || true) -I{{OUTDIR}} -Ithird_party/raylib -Ithird_party/tinyexpr -I/opt/homebrew/include -DRAE_HAS_RAYLIB /opt/homebrew/lib/libraylib.a -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL && ( {{OUTDIR}}/app & APP=$!; sleep 1; echo '[profiler] sampling for up to 60s — scroll/interact now; report at /tmp/rae-profile.txt'; sample $APP 60 -file /tmp/rae-profile.txt -mayDie >/dev/null 2>&1; wait $APP ); echo '[profiler] hotspot report written to /tmp/rae-profile.txt'"
+    },
+    {
       "id": "hybrid",
       "label": "Hybrid Dev",
       "testCommand": "cd compiler && TEST_TARGET=hybrid make test",
