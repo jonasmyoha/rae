@@ -884,9 +884,10 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                 // Spawn-boundary capture safety. OP_SPAWN shallow-moves each
                 // argument onto the new thread, so a borrow (view/mod) of
                 // heap data would alias the parent across threads. Borrowed
-                // params are only safe for scalars (Int/Float/Bool/Char,
-                // which are copied by value); String/List/Map/struct/Buffer
-                // borrows are rejected — pass them as own or copy.
+                // params are only safe for value types with no heap payload:
+                // scalars (Int/Float/Bool/Char) and enums (tagged integers),
+                // which the VM treats as value types. String/List/Map/struct/
+                // Buffer borrows are rejected — pass them as own or copy.
                 AstExpr* sp_call = expr->as.unary.operand;
                 if (sp_call && sp_call->kind == AST_EXPR_CALL && sp_call->decl_link &&
                     sp_call->decl_link->kind == AST_DECL_FUNC) {
@@ -896,7 +897,15 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                         if (bt && bt->kind == TYPE_REF) bt = bt->as.ref.base;
                         bool scalar = bt && (bt->kind == TYPE_INT || bt->kind == TYPE_FLOAT ||
                                              bt->kind == TYPE_BOOL || bt->kind == TYPE_CHAR);
-                        if (!scalar) {
+                        // Enums are value types (no heap), so a borrowed enum is
+                        // as safe as a borrowed scalar. Detect by the param's
+                        // type name resolving to an enum declaration.
+                        bool is_enum = false;
+                        if (!scalar && p->type->parts && p->type->parts->text.len > 0) {
+                            Symbol* tsym = symbol_table_lookup(symbols, p->type->parts->text);
+                            if (tsym && tsym->decl && tsym->decl->kind == AST_DECL_ENUM) is_enum = true;
+                        }
+                        if (!scalar && !is_enum) {
                             char buf[256];
                             snprintf(buf, sizeof(buf),
                                 "cannot spawn: parameter '%.*s' is a %s of non-scalar data, "
