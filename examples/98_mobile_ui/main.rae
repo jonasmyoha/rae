@@ -40,11 +40,11 @@ func main() {
   let winH: Float = screenH
   initWindow(width: winW.toInt(), height: winH.toInt(), title: "Rae Mobile UI — Album")
   setWindowPosition(x: 50, y: 50)
-  # GLFW event callbacks DISABLED (jank experiment). Mouse falls back
-  # to raylib polling; red-X close to raylib WindowShouldClose (woken
-  # by the ~50 ms watcher poll). Re-enable both lines to restore.
-  # installWindowCloseWaker()
-  # installMouseButtonHook()
+  # GLFW callbacks: close-waker wakes the loop on red-X; the mouse hook
+  # is the authoritative per-event click-edge source (input.rae takes
+  # press/release from it and skips raylib's poll edges when active).
+  installWindowCloseWaker()
+  installMouseButtonHook()
   # macOS App Nap throttles the wait-events loop because it sits at
   # ~0% idle CPU; opt out so the app doesn't appear hung. See
   # `disableAppNap` decl in lib/raylib.rae.

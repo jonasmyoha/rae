@@ -340,10 +340,12 @@ func installWindowCloseWaker() extern
 # arrives between two polls (common on macOS, where mouse-button events
 # don't reliably wake `waitEventsTimeout` — the `watcherPollSec` cadence
 # is a partial workaround) is collapsed to up→up with no edges and the
-# click is lost. The hook sees each transition per-event, so callers
-# can OR `mouseHookDrainPressed` / `mouseHookDrainReleased` with
-# raylib's edges to recover the missed click. Call once after
-# `initWindow`.
+# click is lost. The hook sees each transition per-event on the main
+# thread, independent of render/poll cadence, so it never misses an
+# edge. When installed it is the authoritative edge source: callers
+# take press/release SOLELY from the drains below (gated on
+# `mouseHookActive`), not OR'd with raylib's fragile poll edges. Call
+# once after `initWindow`.
 func installMouseButtonHook() extern
 
 # Returns true iff at least one left-mouse-button PRESS arrived since
@@ -352,6 +354,12 @@ func mouseHookDrainPressed() extern ret Bool
 
 # Symmetric counterpart for RELEASE events.
 func mouseHookDrainReleased() extern ret Bool
+
+# True once `installMouseButtonHook` has chained the GLFW callback.
+# Lets the input layer trust the drains as the sole edge source and
+# skip raylib's poll-to-poll edges, falling back to polling only on
+# hosts that never installed the hook.
+func mouseHookActive() extern ret Bool
 
 # Opt this process out of macOS App Nap. Without this, apps with
 # low idle CPU — exactly what an event-driven wait-events loop
