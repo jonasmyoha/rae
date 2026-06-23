@@ -681,6 +681,16 @@ bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
           return ok;
       }
 
+      // Built-in Task(T).get(): wait + retrieve. Compile the receiver
+      // (pushes the Task handle), then OP_TASK_GET joins it and pushes a
+      // copy of the captured result. No user function backs this.
+      if (str_eq_cstr(method_name, "get") && receiver->resolved_type &&
+          receiver->resolved_type->kind == TYPE_TASK) {
+          if (!compile_expr(compiler, receiver)) return false;
+          emit_op(compiler, OP_TASK_GET, (int)expr->line);
+          return true;
+      }
+
       // Handle built-in toString() for all types
       if (str_eq_cstr(method_name, "toString")) {
           if (!compile_expr(compiler, expr->as.method_call.object)) return false;
