@@ -1978,6 +1978,20 @@ static AstStmt* parse_statement(Parser* parser) {
   if (parser_match(parser, TOK_KW_DEFER)) {
     return parse_defer_statement(parser, parser_previous(parser));
   }
+  if (parser_match(parser, TOK_KW_TASKSCOPE)) {
+    // Structured concurrency block. Desugars to a run-once scope
+    // (`if true { ... }`): tasks bound inside join-on-drop at the
+    // scope's end. (Non-escape enforcement / cancel-on-error are future
+    // refinements; the scope + join-on-drop is the core guarantee.)
+    const Token* ts_token = parser_previous(parser);
+    AstStmt* stmt = new_stmt(parser, AST_STMT_IF, ts_token);
+    AstExpr* cond = new_expr(parser, AST_EXPR_BOOL, ts_token);
+    cond->as.boolean = true;
+    stmt->as.if_stmt.condition = cond;
+    stmt->as.if_stmt.then_block = parse_block(parser);
+    stmt->as.if_stmt.else_block = NULL;
+    return stmt;
+  }
   
   AstExpr* expr = parse_expression(parser);
   if (parser_match(parser, TOK_ASSIGN)) {
