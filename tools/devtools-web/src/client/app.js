@@ -1726,10 +1726,13 @@ function getTargetById(targetId) {
 }
 
 function getDefaultCompilerTargetIds() {
-  const defaults = ["live", "compiled"].filter((id) =>
-    availableTargets.some((target) => target.id === id)
-  );
-  if (defaults.length) return defaults;
+  // live + every compiled variant (compiled, compiled-debug,
+  // compiled-profiler, …) so newly added profiles surface as buttons
+  // automatically. Excludes hybrid, which stays opt-in per example.
+  const curated = availableTargets
+    .map((target) => target.id)
+    .filter((id) => id === "live" || id === "compiled" || id.startsWith("compiled-"));
+  if (curated.length) return curated;
   return availableTargets.map((target) => target.id);
 }
 
