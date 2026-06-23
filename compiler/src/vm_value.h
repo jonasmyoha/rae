@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "sys_thread.h"
+
 typedef enum {
   VAL_INT,
   VAL_FLOAT,
@@ -17,8 +19,16 @@ typedef enum {
   VAL_BUFFER,
   VAL_REF,
   VAL_ID,
-  VAL_KEY
+  VAL_KEY,
+  /* A concurrent task handle (Task(T)). Holds an OS thread plus the
+   * captured return value. Move-only at the language level, but the VM
+   * copies values freely, so the heap object is ref-counted (like
+   * ValueBuffer) and dropping the last reference JOINS the thread. */
+  VAL_TASK
 } ValueType;
+
+/* Defined after `Value` below, since it stores the result by value. */
+typedef struct TaskObj TaskObj;
 
 typedef struct {
   uint8_t* chars;
@@ -69,8 +79,22 @@ typedef struct Value {
     Reference ref_value;
     int64_t id_value;
     OwnedString key_value;
+    TaskObj* task_value;
   } as;
 } Value;
+
+/* Heap object behind a VAL_TASK. `ref_count` mirrors ValueBuffer's
+ * shallow-share-on-copy scheme. `status`: 0 running, 1 completed, 2
+ * failed. The thread is joined exactly once (guarded by `joined`),
+ * either explicitly at `task.get()` or implicitly when the last
+ * reference is dropped (join-on-drop — the design's safe default). */
+struct TaskObj {
+  sys_thread_t thread;
+  Value result;
+  int status;
+  bool joined;
+  size_t ref_count;
+};
 
 Value value_int(int64_t v);
 Value value_float(double v);

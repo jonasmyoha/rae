@@ -1499,9 +1499,11 @@ bool compile_call(BytecodeCompiler* compiler, const AstExpr* expr, bool is_spawn
   }
   
   if (is_spawn) {
+      // OP_SPAWN now pushes the Task(T) handle itself, so the spawn
+      // expression's value IS that task. (Previously it pushed nothing
+      // and we synthesised a `none` here.) A bare `spawn f()` statement
+      // pops the task, which joins it on drop.
       if (!emit_spawn_call(compiler, entry, (int)expr->line, (int)expr->column, (uint8_t)arg_count)) return false;
-      // Spawned calls don't return a value to the caller stack (immediately)
-      emit_constant(compiler, value_none(), (int)expr->line);
       return true;
   }
 
