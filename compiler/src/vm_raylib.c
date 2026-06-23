@@ -908,6 +908,13 @@ static bool native_mouseHookDrainReleased(struct VM* vm, VmNativeResult* out, co
     return true;
 }
 
+static bool native_mouseHookActive(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data; (void)args; (void)count;
+    out->has_value = true;
+    out->value = value_int(g_vm_mouse_button_hook_installed != 0 ? 1 : 0);
+    return true;
+}
+
 static bool native_isKeyDown(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
     (void)vm; (void)data;
     if (count != 1) {
@@ -1446,6 +1453,7 @@ bool vm_registry_register_raylib(VmRegistry* registry) {
     ok &= vm_registry_register_native(registry, "installMouseButtonHook", native_installMouseButtonHook, NULL);
     ok &= vm_registry_register_native(registry, "mouseHookDrainPressed", native_mouseHookDrainPressed, NULL);
     ok &= vm_registry_register_native(registry, "mouseHookDrainReleased", native_mouseHookDrainReleased, NULL);
+    ok &= vm_registry_register_native(registry, "mouseHookActive", native_mouseHookActive, NULL);
     ok &= vm_registry_register_native(registry, "disableAppNap", native_disableAppNap, NULL);
     ok &= vm_registry_register_native(registry, "isKeyDown", native_isKeyDown, NULL);
     ok &= vm_registry_register_native(registry, "isKeyPressed", native_isKeyPressed, NULL);
