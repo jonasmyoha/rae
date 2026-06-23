@@ -101,6 +101,33 @@ Compiler code should favor:
 
 ---
 
+## UI rendering loops & performance
+
+Hard-won lesson (full postmortem: `rae/docs/ui-render-loop-performance.md`):
+
+- **A wait-based (event-driven) loop cannot drive smooth continuous
+  animation; a busy render loop can.** A loop that sleeps in
+  `glfwWaitEventsTimeout` and only renders on wake must predict when to
+  wake — fine for discrete input, but it starves continuous motion
+  (scroll/drag/transitions). Tell-tale symptom: animation is choppy until
+  you wiggle the mouse, which floods wake-up events.
+- **For smooth animation, render in a busy loop** (poll with timeout `0`,
+  paint every iteration, no FPS cap). For an app that must also idle at
+  ~0% CPU, use a **hybrid**: busy-render while interacting/animating,
+  blocking event-wait when idle (see `examples/98_mobile_ui/main.rae`).
+  Games already do this — classic `setTargetFPS(n)` + busy
+  `loop not windowShouldClose()`.
+- Each app **owns its render loop** (`lib/ui` provides systems + the
+  `nextWaitTimeoutSec` policy, not the loop). If you add a new animation
+  source, feed it into the loop's "is animating" flag or it silently
+  starves to the watcher-poll rate.
+- **Keep per-frame work O(n), never O(n²).** ECS component lookups are
+  O(1) via a sparse set; never add nested per-entity scans to a per-frame
+  system. Optimization flags (`-O2`) cannot fix an algorithmic (O(n²)) or
+  scheduling (starved wake-loop) problem — profile before tuning `-O`.
+
+---
+
 ## SAY: spoken summaries (IMPORTANT)
 
 This project may be used with **voice-driven development**.  
