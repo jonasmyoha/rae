@@ -699,6 +699,13 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         vm_pop(vm);
         break;
       }
+      case OP_DROP_TOP: {
+        // Like OP_POP but frees the value. For a discarded `spawn f()`
+        // statement this drops the Task, which joins the thread.
+        Value v = vm_pop(vm);
+        value_free(&v);
+        break;
+      }
       case OP_ADD:
       case OP_SUB:
       case OP_MUL:
