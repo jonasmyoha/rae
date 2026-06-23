@@ -49,7 +49,7 @@ static const Keyword KEYWORDS[] = {
     {"ret", TOK_KW_RET},     {"spawn", TOK_KW_SPAWN},  {"true", TOK_KW_TRUE},
     {"type", TOK_KW_TYPE},   {"view", TOK_KW_VIEW},    {"val", TOK_KW_VAL},
     {"own", TOK_KW_OWN},     {"copy", TOK_KW_COPY},
-    {"defer", TOK_KW_DEFER}};
+    {"defer", TOK_KW_DEFER}, {"taskScope", TOK_KW_TASKSCOPE}};
 
 static const char* const TOKEN_KIND_NAMES[] = {
     [TOK_EOF] = "TOK_EOF",
@@ -70,6 +70,7 @@ static const char* const TOKEN_KIND_NAMES[] = {
     [TOK_KW_LET] = "TOK_LET",
     [TOK_KW_RET] = "TOK_RET",
     [TOK_KW_SPAWN] = "TOK_SPAWN",
+    [TOK_KW_TASKSCOPE] = "TOK_TASKSCOPE",
     [TOK_KW_VIEW] = "TOK_VIEW",
     [TOK_KW_MOD] = "TOK_MOD",
     [TOK_KW_VAL] = "TOK_VAL",

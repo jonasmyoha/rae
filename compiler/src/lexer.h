@@ -57,6 +57,7 @@ typedef enum {
   TOK_KW_PACK,
   TOK_KW_PRIV,
   TOK_KW_DEFER,
+  TOK_KW_TASKSCOPE,
 
   /* Operators */
   TOK_ASSIGN,
