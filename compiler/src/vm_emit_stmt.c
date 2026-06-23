@@ -395,7 +395,15 @@ bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
       if (!compile_expr(compiler, stmt->as.expr_stmt)) {
         return false;
       }
-      emit_op(compiler, OP_POP, (int)stmt->line);
+      // A discarded Task (e.g. a bare `spawn f()` statement) must be
+      // dropped-with-free so the thread is joined, not leaked. Plain
+      // OP_POP would discard the slot without freeing the TaskObj.
+      if (stmt->as.expr_stmt->resolved_type &&
+          stmt->as.expr_stmt->resolved_type->kind == TYPE_TASK) {
+        emit_op(compiler, OP_DROP_TOP, (int)stmt->line);
+      } else {
+        emit_op(compiler, OP_POP, (int)stmt->line);
+      }
       return true;
     case AST_STMT_RET: {
       const AstReturnArg* arg = stmt->as.ret_stmt.values;
