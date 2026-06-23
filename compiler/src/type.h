@@ -25,6 +25,7 @@ typedef enum {
     TYPE_FUNC, // Function type (for first-class functions)
     TYPE_ANY, // Type-erased Any
     TYPE_BUFFER, // Built-in Buffer(T)
+    TYPE_TASK, // Built-in Task(T) — a concurrent task handle
     TYPE_GENERIC_PARAM // T, U, V inside a generic definition
 } TypeKind;
 
@@ -56,6 +57,10 @@ struct TypeInfo {
         struct {
              TypeInfo* base;
         } buffer;
+
+        struct {
+             TypeInfo* base; // result type T of Task(T)
+        } task;
 
         struct {
              Str param_name; // e.g. "T"
@@ -99,6 +104,7 @@ TypeInfo* type_get_any(TypeRegistry* registry);
 TypeInfo* type_get_ref(TypeRegistry* registry, TypeInfo* base, bool is_mod);
 TypeInfo* type_get_opt(TypeRegistry* registry, TypeInfo* base);
 TypeInfo* type_get_buffer(TypeRegistry* registry, TypeInfo* base);
+TypeInfo* type_get_task(TypeRegistry* registry, TypeInfo* base);
 TypeInfo* type_get_struct(TypeRegistry* registry, struct AstDecl* decl, TypeInfo** args, size_t arg_count);
 TypeInfo* type_get_generic_param(TypeRegistry* registry, Str name);
 
