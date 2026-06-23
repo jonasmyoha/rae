@@ -515,7 +515,8 @@ func main() {
         if velAbs < 0.0 {
           velAbs = 0.0 - velAbs
         }
-        if velAbs > 0.05 or scrollOOB {
+        # Recent-wheel (0.25s) counts as animating: wheel scroll drives scrollY per-event with velocity==0, so without it the loop idles at the ~20Hz watcher poll between wheel events (still-mouse scroll caps ~20-34fps; mouse-move wakes masked it).
+        if velAbs > 0.05 or scrollOOB or ((getTime() - scrollFsm.lastWheelTime) < 0.25) {
           scrollAnimating = true
         }
         # Suppress the playback-driven 60Hz animation gate while the
