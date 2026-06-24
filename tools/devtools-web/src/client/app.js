@@ -2827,11 +2827,51 @@ function setActiveView(targetView) {
     renderWhyExamples();
   } else if (resolvedView === "examples") {
     startExamplesBackgroundAnimation();
+  } else if (resolvedView === "raytracer") {
+    renderRaytracerSection();
   }
-  
+
   if (resolvedView !== "examples") {
     stopExamplesBackgroundAnimation();
   }
+}
+
+// Raytracer sidebar section: a curated launcher for the raytracer step
+// examples (category "Raytracer"). Clicking a step selects it and hands off to
+// the existing Examples detail/run pane — no duplication of the run machinery.
+function renderRaytracerSection() {
+  const listEl = document.getElementById("raytracer-list");
+  if (!listEl) return;
+  const steps = examples
+    .filter((ex) => ex.category === "Raytracer")
+    .sort((a, b) => a.id.localeCompare(b.id));
+  if (!steps.length) {
+    listEl.innerHTML = `<p class="test-list-empty">No raytracer steps found.</p>`;
+    return;
+  }
+  listEl.innerHTML = "";
+  const fragment = document.createDocumentFragment();
+  steps.forEach((example) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "example-card";
+    const displayName = formatExampleName(example.name);
+    const desc = example.description ? `<p>${example.description}</p>` : `<p>${describeExampleTargets(example)}</p>`;
+    button.innerHTML = `<h4>${displayName}</h4>${desc}`;
+    button.addEventListener("click", () => {
+      if (exampleRunActive) stopExampleRun();
+      const previousId = selectedExampleId;
+      selectedExampleId = example.id;
+      if (previousId !== selectedExampleId) resetExampleArtifacts();
+      selectedExampleFile = example.files[0]?.path ?? null;
+      setActiveView("examples");
+      renderExampleList();
+      renderExampleDetail();
+      if (selectedExampleFile) loadExampleSource(selectedExampleFile);
+    });
+    fragment.appendChild(button);
+  });
+  listEl.appendChild(fragment);
 }
 
 function renderWhyExamples() {
