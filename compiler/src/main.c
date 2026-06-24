@@ -2198,8 +2198,20 @@ static bool build_vm_output(const char* entry_file,
   }
   AstModule merged = merge_module_graph(&graph);
 
-  CompilerContext ctx = {0};
-  ctx.ast_arena = arena;
+  CompilerContext ctx;
+  compiler_init(&ctx, arena);
+
+  // Semantic analysis must run before bytecode emission, exactly as the
+  // `run` path (compile_file_chunk) does. Without it, expression
+  // `resolved_type`s are never set, so compile-time builtin dispatch that
+  // keys on them — e.g. `Task(T).get()` needing `resolved_type == TYPE_TASK`
+  // — fails with a spurious "unknown method". `build --target live` was the
+  // gap (the example/VM-compile smoke gate exercises this path).
+  if (!sema_analyze_module(&ctx, &merged)) {
+    module_graph_free(&graph);
+    arena_destroy(arena);
+    return false;
+  }
 
   // We need a registry purely so globals get slots assigned during
   // bytecode emission — without it `vm_registry_ensure_global` is
