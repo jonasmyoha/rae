@@ -273,22 +273,50 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             case AST_UNARY_PRE_DEC: fprintf(out, "--"); emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, true, false); break;
             case AST_UNARY_POST_INC: emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, true, false); fprintf(out, "++"); break;
             case AST_UNARY_POST_DEC: emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, true, false); fprintf(out, "--"); break;
-            case AST_UNARY_SPAWN:
-                // The compiled (C) backend has no task runtime yet. Previously
-                // this fell through to `default` and emitted NOTHING — silently
-                // dropping the spawned call. Fail loudly instead until the C
-                // thread runtime (Task/Channel/parallel loops) is implemented.
-                diag_error(ctx->module ? ctx->module->file_path : "<unknown>",
-                           (int)expr->line, (int)expr->column,
-                           "spawn / Task is not yet supported in the compiled (C) backend; "
-                           "use --target live for now (compiled task runtime is planned)");
+            case AST_UNARY_SPAWN: {
+                // Compiled backend: run the call synchronously and wrap its
+                // result in an already-completed RaeTask. Observably correct
+                // (same result as Live); real OS-thread parallelism is a
+                // planned follow-up (needs per-function pthread thunks plus
+                // by-value copying of view/mod scalar args — in the C ABI a
+                // `view T` is a pointer, so a thread can't hold it directly).
+                TypeInfo* resT = (expr->resolved_type && expr->resolved_type->kind == TYPE_TASK)
+                                     ? expr->resolved_type->as.task.base : NULL;
+                bool is_void = !resT || resT->kind == TYPE_VOID;
+                fprintf(out, "({ RaeTask* __raet = rae_task_new(");
+                if (is_void) fprintf(out, "0");
+                else { fprintf(out, "sizeof("); emit_type_info_as_c_type(ctx, resT, out); fprintf(out, ")"); }
+                fprintf(out, "); ");
+                if (!is_void) { fprintf(out, "*("); emit_type_info_as_c_type(ctx, resT, out); fprintf(out, "*)__raet->result = "); }
+                emit_expr(ctx, expr->as.unary.operand, out, PREC_LOWEST, false, false);
+                fprintf(out, "; __raet->done = 1; __raet->joined = 1; __raet; })");
                 break;
+            }
             default: break;
         }
         break;
     }
     case AST_EXPR_CALL: emit_call_expr(ctx, expr, out); break;
     case AST_EXPR_METHOD_CALL: {
+        // Built-in Task(T).get(): join (no-op for a sequential task) and
+        // read the result buffer, cast back to T.
+        if (str_eq_cstr(expr->as.method_call.method_name, "get") &&
+            expr->as.method_call.object->resolved_type &&
+            expr->as.method_call.object->resolved_type->kind == TYPE_TASK) {
+            TypeInfo* resT = expr->as.method_call.object->resolved_type->as.task.base;
+            if (!resT || resT->kind == TYPE_VOID) {
+                fprintf(out, "(rae_task_await(");
+                emit_expr(ctx, expr->as.method_call.object, out, PREC_LOWEST, false, false);
+                fprintf(out, "), (void)0)");
+            } else {
+                fprintf(out, "(*(");
+                emit_type_info_as_c_type(ctx, resT, out);
+                fprintf(out, "*)rae_task_await(");
+                emit_expr(ctx, expr->as.method_call.object, out, PREC_LOWEST, false, false);
+                fprintf(out, "))");
+            }
+            break;
+        }
         // Built-in method: toString() → rae_ext_rae_str(object) or
         // rae_to_str_TYPE_(&object) for user structs.
         if (str_eq_cstr(expr->as.method_call.method_name, "toString") && !expr->as.method_call.args) {

@@ -22,6 +22,28 @@
 #define RAE_HAVE_BACKTRACE 1
 #endif
 
+/* ----- Task(T) runtime (compiled backend) ----------------------------- */
+/* A spawned task gets one RaeTask + one OS thread. The per-spawned-function
+ * thunk (emitted by the C backend) runs the function and stores its result
+ * into `result`; `rae_task_await` joins exactly once and hands back the
+ * buffer, which the get() call site casts to T. */
+RaeTask* rae_task_new(size_t result_size) {
+  RaeTask* t = (RaeTask*)malloc(sizeof(RaeTask));
+  t->result = result_size ? malloc(result_size) : NULL;
+  t->done = 0;
+  t->joined = 0;
+  return t;
+}
+
+void* rae_task_await(RaeTask* t) {
+  if (!t) return NULL;
+  if (!t->joined) {
+    pthread_join(t->thread, NULL);
+    t->joined = 1;
+  }
+  return t->result;
+}
+
 #ifdef __APPLE__
 #include <mach/mach_time.h>
 #include <mach/mach.h>
