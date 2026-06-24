@@ -15,27 +15,27 @@ enum Screen {
   #
   # `Home` is the discovery / landing tab — large 2-column grid of
   # albums with a friendly greeting. Where the app boots.
-  Home
+  home
   # `Library` is the dense 3-column album grid — the user's full
   # catalog of music to play. Formerly mis-shared with Profile.
-  Library
+  library
   # `Album` is the sub-page showing one album's track list. Reached
   # by tapping any Home or Library cover tile. NOT a tab.
-  Album
+  album
   # `Player` is the sub-page showing the currently-playing track with
   # full controls. Reached by tapping a track row OR by tapping the
   # mini-player at the bottom of any screen. NOT a tab.
-  Player
+  player
   # `Search` — placeholder tab for now. Will host a query-against-
   # catalogue UI later.
-  Search
+  search
   # `Profile` is the user / account / Spotify-status / settings tab.
   # Genuinely the user-info screen — no longer pretending to be the
   # library grid.
-  Profile
+  profile
   # `History` is the full play-history sub-page. Pushed from a tap
   # on the "Recently played" header on Home. NOT a tab.
-  History
+  history
 }
 
 # Per-screen scroll bounds. `scrollable=false` means wheel / drag
@@ -52,16 +52,16 @@ func scrollBoundsForScreen(
   appState: view AppState
   cachedAlbumScrollFloor: view Float
 ) pub ret ScrollBounds {
-  if screen is Screen.Home {
+  if screen is Screen.home {
     ret ScrollBounds { scrollable: true, floor: homeScrollMin(albums: appState.albums, history: appState.playHistory) }
   }
-  if screen is Screen.Library {
+  if screen is Screen.library {
     ret ScrollBounds { scrollable: true, floor: 0.0 - 1050.0 }
   }
-  if screen is Screen.Album {
+  if screen is Screen.album {
     ret ScrollBounds { scrollable: true, floor: cachedAlbumScrollFloor }
   }
-  if screen is Screen.History {
+  if screen is Screen.history {
     ret ScrollBounds { scrollable: true, floor: historyScrollMin(history: appState.playHistory) }
   }
   ret ScrollBounds { scrollable: false, floor: 0.0 }
@@ -75,22 +75,22 @@ func buildScreenWorld(
   texReg: view TextureRegistry
   scrollY: view Float
 ) pub ret UiWorld {
-  if screen is Screen.Home {
+  if screen is Screen.home {
     ret buildHomeWorld(scenes: scenes, reg: texReg, state: state, playback: playback, scrollY: scrollY)
   }
-  if screen is Screen.Album {
+  if screen is Screen.album {
     ret buildAlbumWorld(scenes: scenes, playback: playback, state: state, reg: texReg, scrollY: scrollY)
   }
-  if screen is Screen.Search {
+  if screen is Screen.search {
     ret buildSearchWorld(scenes: scenes, playback: playback, state: state, reg: texReg)
   }
-  if screen is Screen.Library {
+  if screen is Screen.library {
     ret buildLibraryWorld(scenes: scenes, reg: texReg, state: state, playback: playback, scrollY: scrollY)
   }
-  if screen is Screen.Profile {
+  if screen is Screen.profile {
     ret buildProfileWorld(scenes: scenes, reg: texReg, state: state, playback: playback, scrollY: scrollY)
   }
-  if screen is Screen.History {
+  if screen is Screen.history {
     ret buildHistoryWorld(scenes: scenes, reg: texReg, state: state, playback: playback, scrollY: scrollY)
   }
   ret buildNowPlayingWorld(scenes: scenes, playback: playback, state: state, reg: texReg)
@@ -109,22 +109,22 @@ func applyViewportExtent(world: mod UiWorld) pub {
 # Maps a Screen to the PageRoot id used for its mount. Symmetric to
 # the `mountXxxPage` calls in each screen builder.
 func pageIdForScreen(screen: Screen) pub ret String {
-  if screen is Screen.Home {
+  if screen is Screen.home {
     ret homePageId
   }
-  if screen is Screen.Album {
+  if screen is Screen.album {
     ret albumPageId
   }
-  if screen is Screen.Search {
+  if screen is Screen.search {
     ret searchPageId
   }
-  if screen is Screen.Library {
+  if screen is Screen.library {
     ret libraryPageId
   }
-  if screen is Screen.Profile {
+  if screen is Screen.profile {
     ret profilePageId
   }
-  if screen is Screen.History {
+  if screen is Screen.history {
     ret historyPageId
   }
   ret playerPageId
@@ -159,13 +159,13 @@ func buildAppWorld(
 
   # Visibility: only the currently-visible screen is Active=true.
   let visible: Screen = visibleScreen(state: state)
-  let activeHome: Active = { value: visible is Screen.Home }
-  let activeLibrary: Active = { value: visible is Screen.Library }
-  let activeAlbum: Active = { value: visible is Screen.Album }
-  let activeNowPlaying: Active = { value: visible is Screen.Player }
-  let activeSearch: Active = { value: visible is Screen.Search }
-  let activeProfile: Active = { value: visible is Screen.Profile }
-  let activeHistory: Active = { value: visible is Screen.History }
+  let activeHome: Active = { value: visible is Screen.home }
+  let activeLibrary: Active = { value: visible is Screen.library }
+  let activeAlbum: Active = { value: visible is Screen.album }
+  let activeNowPlaying: Active = { value: visible is Screen.player }
+  let activeSearch: Active = { value: visible is Screen.search }
+  let activeProfile: Active = { value: visible is Screen.profile }
+  let activeHistory: Active = { value: visible is Screen.history }
   componentSet(this: world.actives, entity: homePage, data: activeHome)
   componentSet(this: world.actives, entity: libraryPage, data: activeLibrary)
   componentSet(this: world.actives, entity: albumPage, data: activeAlbum)
@@ -202,8 +202,8 @@ func buildPageTopBar(world: mod UiWorld, title: view String) pub ret EntityId {
   let bar: EntityId = createEntity(world: world)
   let w: Float = screenW - outerPad * 2.0
   setRectFixed(world: world, entity: bar, w: w, h: topBarH)
-  let layH: LayoutType = LayoutType.Horizontal
-  let alignC: AlignKind = AlignKind.Center
+  let layH: LayoutType = LayoutType.horizontal
+  let alignC: AlignKind = AlignKind.center
   setLayout(world: world, entity: bar, kind: layH, gap: 0.0, alignCross: alignC)
 
   let titleE: EntityId = createEntity(world: world)
@@ -234,12 +234,12 @@ func refreshHistoryViewsIfNeeded(
   if n is cachedLen {
     ret cachedLen
   }
-  if visible is Screen.Home {
+  if visible is Screen.home {
     unmountPage(world: world, pageId: homePageId)
     let h: EntityId = mountHomePage(world: world, state: state, scrollY: 0.0)
     setPageActive(world: world, pageId: homePageId, active: true)
   }
-  if visible is Screen.History {
+  if visible is Screen.history {
     unmountPage(world: world, pageId: historyPageId)
     let h: EntityId = mountHistoryPage(world: world, state: state, scrollY: 0.0)
     setPageActive(world: world, pageId: historyPageId, active: true)
@@ -345,7 +345,7 @@ func createAppState(albums: own List(Album)) pub ret AppState {
     albums: albums
     currentAlbumStem: firstStem
     currentTrackIndex: 0
-    tab: Screen.Home
+    tab: Screen.home
     subPageStack: createList(Int, cap: 4)
     playHistory: createPlayHistory(cap: 100)
     library: createList(String, cap: 8)
@@ -517,32 +517,32 @@ func dispatchActions(
     # tapping any cover tile on Home or Library, Player by tapping a
     # track row or the mini-player.
     if actionId.equals(other: homeKey) {
-      let s: Screen = Screen.Home
+      let s: Screen = Screen.home
       setTab(state: state, tab: s)
     }
     if actionId.equals(other: libraryKey) {
-      let s: Screen = Screen.Library
+      let s: Screen = Screen.library
       setTab(state: state, tab: s)
     }
     if actionId.equals(other: searchKey) {
-      let s: Screen = Screen.Search
+      let s: Screen = Screen.search
       setTab(state: state, tab: s)
     }
     if actionId.equals(other: profileKey) {
-      let s: Screen = Screen.Profile
+      let s: Screen = Screen.profile
       setTab(state: state, tab: s)
     }
     if actionId.equals(other: nowPlayingKey) {
       # Mini-player tap. Open the full NowPlaying view as a sub-page
       # over whatever tab the user is currently on.
-      let s: Screen = Screen.Player
+      let s: Screen = Screen.player
       pushSubPage(state: state, screen: s)
     }
     if actionId.equals(other: navHistoryKey) {
       # "Recently played" header tap on Home. Open the full History
       # sub-page over the current tab — same push semantics as
       # `album.open` / `nav.nowPlaying`.
-      let s: Screen = Screen.History
+      let s: Screen = Screen.history
       pushSubPage(state: state, screen: s)
     }
     if actionId.equals(other: backKey) {
@@ -598,7 +598,7 @@ func dispatchActions(
       }
       # An album cover always shows the album, never a playlist.
       state.viewingPlaylist = false
-      let s: Screen = Screen.Album
+      let s: Screen = Screen.album
       pushSubPage(state: state, screen: s)
     }
     if actionId.startsWith(prefix: playlistOpenPrefix) {
@@ -622,7 +622,7 @@ func dispatchActions(
         state.currentAlbumStem = "{coverStems.get(index: 0)}"
       }
       state.currentTrackIndex = 0
-      let sp: Screen = Screen.Album
+      let sp: Screen = Screen.album
       pushSubPage(state: state, screen: sp)
     }
     if actionId.startsWith(prefix: songOpenRefPrefix) {

@@ -106,7 +106,7 @@ func addBottomSheetLayer(world: mod UiWorld, sheet: view BottomSheetState) pub {
   setRectFixed(world: world, entity: scrim, w: screenW, h: screenH)
   let scrimFill: RgbaColor = { r: 0, g: 0, b: 0, a: 140 }
   let scrimShape: Shape = {
-    kind: ShapeKind.Rect
+    kind: ShapeKind.rect
     fill: scrimFill
     stroke: transparent
     strokeWidth: 0.0
@@ -124,7 +124,7 @@ func addBottomSheetLayer(world: mod UiWorld, sheet: view BottomSheetState) pub {
   setRectFixed(world: world, entity: panel, w: panelW, h: panelH)
   let panelFill: RgbaColor = themeColorByName(name: "surface")
   let panelShape: Shape = {
-    kind: ShapeKind.RoundedRect
+    kind: ShapeKind.roundedRect
     fill: panelFill
     stroke: transparent
     strokeWidth: 0.0
@@ -133,8 +133,8 @@ func addBottomSheetLayer(world: mod UiWorld, sheet: view BottomSheetState) pub {
   componentSet(this: world.shapes, entity: panel, data: panelShape)
   let panelOff: Offset = { delta: Vec2 { x: 0.0, y: screenH - panelH } }
   componentSet(this: world.offsets, entity: panel, data: panelOff)
-  let layV: LayoutType = LayoutType.Vertical
-  let alignS: AlignKind = AlignKind.Start
+  let layV: LayoutType = LayoutType.vertical
+  let alignS: AlignKind = AlignKind.start
   setLayout(world: world, entity: panel, kind: layV, gap: spaceXS, alignCross: alignS)
   setPaddingAll(world: world, entity: panel, n: spaceXL)
 

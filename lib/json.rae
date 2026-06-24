@@ -14,12 +14,12 @@ import core
 import char
 
 enum JsonKind {
-  Null
-  Bool
-  Number
-  String
-  Array
-  Object
+  null
+  bool
+  number
+  string
+  array
+  object
 }
 
 type JsonField {
@@ -60,7 +60,7 @@ type JsonParser {
 
 func jsonNull() ret JsonValue {
   ret JsonValue {
-    kind: JsonKind.Null
+    kind: JsonKind.null
     asBool: false
     asNumber: 0.0
     asString: ""
@@ -71,7 +71,7 @@ func jsonNull() ret JsonValue {
 
 func jsonBoolValue(v: view Bool) ret JsonValue {
   ret JsonValue {
-    kind: JsonKind.Bool
+    kind: JsonKind.bool
     asBool: v
     asNumber: 0.0
     asString: ""
@@ -82,7 +82,7 @@ func jsonBoolValue(v: view Bool) ret JsonValue {
 
 func jsonNumberValue(v: view Float) ret JsonValue {
   ret JsonValue {
-    kind: JsonKind.Number
+    kind: JsonKind.number
     asBool: false
     asNumber: v
     asString: ""
@@ -93,7 +93,7 @@ func jsonNumberValue(v: view Float) ret JsonValue {
 
 func jsonStringValue(v: own String) ret JsonValue {
   ret JsonValue {
-    kind: JsonKind.String
+    kind: JsonKind.string
     asBool: false
     asNumber: 0.0
     asString: v
@@ -129,14 +129,14 @@ func jsonRoot(doc: view JsonDoc) ret JsonValue {
 }
 
 func jsonInt(this: view JsonValue, fallback: view Int) ret Int {
-  if this.kind is JsonKind.Number {
+  if this.kind is JsonKind.number {
     ret this.asNumber.toInt()
   }
   ret fallback
 }
 
 func jsonFloat(this: view JsonValue, fallback: view Float) ret Float {
-  if this.kind is JsonKind.Number {
+  if this.kind is JsonKind.number {
     ret this.asNumber
   }
   ret fallback
@@ -149,28 +149,28 @@ func jsonString(this: view JsonValue, fallback: view String) ret String {
   # struct field it lands in) share heap ownership with the source,
   # which conflicts with cascade-drop. The independent copy means
   # callers can drop their result freely without double-freeing.
-  if this.kind is JsonKind.String {
+  if this.kind is JsonKind.string {
     ret rae_ext_rae_string_copy(s: this.asString)
   }
   ret rae_ext_rae_string_copy(s: fallback)
 }
 
 func jsonBool(this: view JsonValue, fallback: view Bool) ret Bool {
-  if this.kind is JsonKind.Bool {
+  if this.kind is JsonKind.bool {
     ret this.asBool
   }
   ret fallback
 }
 
 func jsonArrayLen(this: view JsonValue) ret Int {
-  if this.kind is not JsonKind.Array {
+  if this.kind is not JsonKind.array {
     ret 0
   }
   ret this.rangeLen
 }
 
 func jsonArrayAt(doc: view JsonDoc, this: view JsonValue, idx: view Int) ret JsonValue {
-  if this.kind is not JsonKind.Array {
+  if this.kind is not JsonKind.array {
     ret jsonNull()
   }
   if idx < 0 or idx >= this.rangeLen {
@@ -181,14 +181,14 @@ func jsonArrayAt(doc: view JsonDoc, this: view JsonValue, idx: view Int) ret Jso
 }
 
 func jsonObjectLen(this: view JsonValue) ret Int {
-  if this.kind is not JsonKind.Object {
+  if this.kind is not JsonKind.object {
     ret 0
   }
   ret this.rangeLen
 }
 
 func jsonObjectKeyAt(doc: view JsonDoc, this: view JsonValue, idx: view Int) ret String {
-  if this.kind is not JsonKind.Object {
+  if this.kind is not JsonKind.object {
     ret ""
   }
   if idx < 0 or idx >= this.rangeLen {
@@ -199,7 +199,7 @@ func jsonObjectKeyAt(doc: view JsonDoc, this: view JsonValue, idx: view Int) ret
 }
 
 func jsonObjectValueAt(doc: view JsonDoc, this: view JsonValue, idx: view Int) ret JsonValue {
-  if this.kind is not JsonKind.Object {
+  if this.kind is not JsonKind.object {
     ret jsonNull()
   }
   if idx < 0 or idx >= this.rangeLen {
@@ -214,7 +214,7 @@ func jsonObjectValueAt(doc: view JsonDoc, this: view JsonValue, idx: view Int) r
 # because `opt JsonValue` has historically been awkward in Rae and we
 # want this hot path to stay simple.
 func jsonField(doc: view JsonDoc, this: view JsonValue, key: view String) ret Int {
-  if this.kind is not JsonKind.Object {
+  if this.kind is not JsonKind.object {
     ret -1
   }
   var i: Int = 0
@@ -488,7 +488,7 @@ func parseValue(
             # cross-list ownership transfer has a proper primitive.
             localFields.length = 0
             let v: JsonValue = {
-              kind: JsonKind.Object
+              kind: JsonKind.object
               asBool: false
               asNumber: 0.0
               asString: ""
@@ -506,7 +506,7 @@ func parseValue(
     # Empty object: still bulk-append (no-op) and return.
     let firstField: Int = fields.length
     let v: JsonValue = {
-      kind: JsonKind.Object
+      kind: JsonKind.object
       asBool: false
       asNumber: 0.0
       asString: ""
@@ -546,7 +546,7 @@ func parseValue(
               i = i + 1
             }
             let v: JsonValue = {
-              kind: JsonKind.Array
+              kind: JsonKind.array
               asBool: false
               asNumber: 0.0
               asString: ""
@@ -563,7 +563,7 @@ func parseValue(
     }
     let firstChild: Int = kids.length
     let v: JsonValue = {
-      kind: JsonKind.Array
+      kind: JsonKind.array
       asBool: false
       asNumber: 0.0
       asString: ""

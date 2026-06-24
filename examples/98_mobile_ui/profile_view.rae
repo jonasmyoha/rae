@@ -21,10 +21,10 @@ import ui/ecs
 import ui/layout
 
 # Local circle shape helper — world_helpers.rae only exposes rect /
-# rounded-rect variants; the avatar needs a true `ShapeKind.Circle`.
+# rounded-rect variants; the avatar needs a true `ShapeKind.circle`.
 func setProfileCircleShape(world: mod UiWorld, entity: view EntityId, fill: view RgbaColor) {
   let sh: Shape = {
-    kind: ShapeKind.Circle
+    kind: ShapeKind.circle
     fill: fill
     stroke: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
     strokeWidth: 0.0
@@ -50,8 +50,8 @@ func buildProfileAvatar(world: mod UiWorld, reg: view TextureRegistry) ret Entit
   } else {
     let accentBg: RgbaColor = darkPillColor
     setProfileCircleShape(world: world, entity: avatar, fill: accentBg)
-    let layS: LayoutType = LayoutType.Stack
-    let alignC: AlignKind = AlignKind.Center
+    let layS: LayoutType = LayoutType.stack
+    let alignC: AlignKind = AlignKind.center
     setLayout(world: world, entity: avatar, kind: layS, gap: 0.0, alignCross: alignC)
 
     let icon: EntityId = createEntity(world: world)
@@ -72,8 +72,8 @@ func buildProfileStatColumn(world: mod UiWorld, value: view String, label: view 
   let colW: Float = 110.0
   let colH: Float = 56.0
   setRectFixed(world: world, entity: col, w: colW, h: colH)
-  let layV: LayoutType = LayoutType.Vertical
-  let alignC: AlignKind = AlignKind.Center
+  let layV: LayoutType = LayoutType.vertical
+  let alignC: AlignKind = AlignKind.center
   setLayout(world: world, entity: col, kind: layV, gap: 2.0, alignCross: alignC)
 
   let valueText: EntityId = createEntity(world: world)
@@ -100,8 +100,8 @@ func buildProfileStatsRow(world: mod UiWorld, state: view AppState) ret EntityId
   let rowW: Float = screenW - outerPad * 2.0
   let rowH: Float = 60.0
   setRectFixed(world: world, entity: row, w: rowW, h: rowH)
-  let layH: LayoutType = LayoutType.Horizontal
-  let alignC: AlignKind = AlignKind.Center
+  let layH: LayoutType = LayoutType.horizontal
+  let alignC: AlignKind = AlignKind.center
   setLayout(world: world, entity: row, kind: layH, gap: spaceXL, alignCross: alignC)
 
   let albumCount: Int = state.albums.length
@@ -147,8 +147,8 @@ func buildSpotifyStatusCard(world: mod UiWorld) ret EntityId {
   setRectFixed(world: world, entity: card, w: cardW, h: cardH)
   let bg: RgbaColor = { r: 30, g: 200, b: 130, a: 255 }
   setShapeRect(world: world, entity: card, fill: bg)
-  let layV: LayoutType = LayoutType.Vertical
-  let alignS: AlignKind = AlignKind.Start
+  let layV: LayoutType = LayoutType.vertical
+  let alignS: AlignKind = AlignKind.start
   setLayout(world: world, entity: card, kind: layV, gap: spaceXS, alignCross: alignS)
   # 14 sits between spaceM (12) and spaceL (16) — deliberate non-token
   # to fit the card chrome's exact 84-px height. Don't widen the scale
@@ -201,8 +201,8 @@ func buildSettingsRow(world: mod UiWorld, iconKey: view String, label: view Stri
   let rowW: Float = screenW - outerPad * 2.0
   let rowH: Float = 56.0
   setRectFixed(world: world, entity: row, w: rowW, h: rowH)
-  let layH: LayoutType = LayoutType.Horizontal
-  let alignC: AlignKind = AlignKind.Center
+  let layH: LayoutType = LayoutType.horizontal
+  let alignC: AlignKind = AlignKind.center
   # Settings-row icon→label spacing stays at 14 (between spaceM and L)
   # to match the hand-tuned 28-px icon size; don't widen the scale.
   setLayout(world: world, entity: row, kind: layH, gap: 14.0, alignCross: alignC)
@@ -241,8 +241,8 @@ func buildSettingsList(world: mod UiWorld) ret EntityId {
   let rowCount: Int = 4
   let listH: Float = rowH * rowCount.toFloat() + gap * (rowCount - 1).toFloat()
   setRectFixed(world: world, entity: list, w: listW, h: listH)
-  let layV: LayoutType = LayoutType.Vertical
-  let alignS: AlignKind = AlignKind.Start
+  let layV: LayoutType = LayoutType.vertical
+  let alignS: AlignKind = AlignKind.start
   setLayout(world: world, entity: list, kind: layV, gap: gap, alignCross: alignS)
 
   let r1: EntityId = buildSettingsRow(world: world, iconKey: "mat:tune", label: "Audio quality")
@@ -269,8 +269,8 @@ func buildProfileBody(
   let bodyW: Float = screenW - outerPad * 2.0
   let bodyH: Float = screenH - topBarH - navTabsH - outerGap * 4.0 - outerPad * 2.0
   setRectFixed(world: world, entity: body, w: bodyW, h: bodyH)
-  let layV: LayoutType = LayoutType.Vertical
-  let alignC: AlignKind = AlignKind.Center
+  let layV: LayoutType = LayoutType.vertical
+  let alignC: AlignKind = AlignKind.center
   setLayout(world: world, entity: body, kind: layV, gap: outerGap, alignCross: alignC)
   let off: Offset = { delta: Vec2 { x: 0.0, y: scrollY } }
   componentSet(this: world.offsets, entity: body, data: off)
@@ -317,8 +317,8 @@ func mountProfilePage(
 ) pub ret EntityId {
   let root: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: root, w: screenW, h: screenH)
-  let layV: LayoutType = LayoutType.Vertical
-  let alignS: AlignKind = AlignKind.Start
+  let layV: LayoutType = LayoutType.vertical
+  let alignS: AlignKind = AlignKind.start
   setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
   setPaddingAll(world: world, entity: root, n: outerPad)
 

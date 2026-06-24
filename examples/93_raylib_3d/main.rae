@@ -1,6 +1,6 @@
 import raylib
 
-enum EntityKind { Cube, Sphere }
+enum EntityKind { cube, sphere }
 
 type Entity {
   kind: EntityKind
@@ -56,7 +56,7 @@ func drawEntity(e: view Entity, time: view Float) {
   let h: Float = (e.hue + time * 30.0) % 360.0
   let color: Color = colorFromHSV(hue: h, saturation: 0.4, value: 0.9)
   match e.kind {
-    case EntityKind.Cube {
+    case EntityKind.cube {
       drawCube(
         pos: e.currentPos
         width: e.size
@@ -72,7 +72,7 @@ func drawEntity(e: view Entity, time: view Float) {
         color: { r: 255, g: 255, b: 255, a: 100 }
       )
     }
-    case EntityKind.Sphere {
+    case EntityKind.sphere {
       drawSphere(centerPos: e.currentPos, radius: e.size * 0.6, color: color)
     }
   }
@@ -92,42 +92,42 @@ func main() {
     projection: 0
   }
   let e1: Entity = {
-    kind: EntityKind.Cube
+    kind: EntityKind.cube
     currentPos: { x: 0.0, y: 0.0, z: 0.0 }
     targetPos: { x: 0.0, y: 0.0, z: 0.0 }
     size: 0.0
     hue: 0.0
   }
   let e2: Entity = {
-    kind: EntityKind.Cube
+    kind: EntityKind.cube
     currentPos: { x: 0.0, y: 0.0, z: 0.0 }
     targetPos: { x: 0.0, y: 0.0, z: 0.0 }
     size: 0.0
     hue: 0.0
   }
   let e3: Entity = {
-    kind: EntityKind.Cube
+    kind: EntityKind.cube
     currentPos: { x: 0.0, y: 0.0, z: 0.0 }
     targetPos: { x: 0.0, y: 0.0, z: 0.0 }
     size: 0.0
     hue: 0.0
   }
   let e4: Entity = {
-    kind: EntityKind.Cube
+    kind: EntityKind.cube
     currentPos: { x: 0.0, y: 0.0, z: 0.0 }
     targetPos: { x: 0.0, y: 0.0, z: 0.0 }
     size: 0.0
     hue: 0.0
   }
   let e5: Entity = {
-    kind: EntityKind.Cube
+    kind: EntityKind.cube
     currentPos: { x: 0.0, y: 0.0, z: 0.0 }
     targetPos: { x: 0.0, y: 0.0, z: 0.0 }
     size: 0.0
     hue: 0.0
   }
   let e6: Entity = {
-    kind: EntityKind.Cube
+    kind: EntityKind.cube
     currentPos: { x: 0.0, y: 0.0, z: 0.0 }
     targetPos: { x: 0.0, y: 0.0, z: 0.0 }
     size: 0.0
@@ -135,7 +135,7 @@ func main() {
   }
   initEntity(
     e: e1
-    kind: EntityKind.Cube
+    kind: EntityKind.cube
     x: -5.0
     y: 2.0
     z: 0.0
@@ -144,7 +144,7 @@ func main() {
   )
   initEntity(
     e: e2
-    kind: EntityKind.Cube
+    kind: EntityKind.cube
     x: 5.0
     y: 5.0
     z: -5.0
@@ -153,7 +153,7 @@ func main() {
   )
   initEntity(
     e: e3
-    kind: EntityKind.Cube
+    kind: EntityKind.cube
     x: 0.0
     y: 8.0
     z: 5.0
@@ -162,7 +162,7 @@ func main() {
   )
   initEntity(
     e: e4
-    kind: EntityKind.Sphere
+    kind: EntityKind.sphere
     x: 8.0
     y: 3.0
     z: 8.0
@@ -171,7 +171,7 @@ func main() {
   )
   initEntity(
     e: e5
-    kind: EntityKind.Sphere
+    kind: EntityKind.sphere
     x: -8.0
     y: 1.0
     z: -8.0
@@ -180,7 +180,7 @@ func main() {
   )
   initEntity(
     e: e6
-    kind: EntityKind.Sphere
+    kind: EntityKind.sphere
     x: 3.0
     y: 6.0
     z: 2.0

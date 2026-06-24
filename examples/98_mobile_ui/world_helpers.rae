@@ -10,8 +10,8 @@ import ui/ecs
 # Default Size — both axes Fixed. Most rows use Fixed sizes.
 func makeFixed() pub ret Size {
   ret Size {
-    w: SizeAxis { mode: SizeMode.Fixed, min: -1, max: -1 }
-    h: SizeAxis { mode: SizeMode.Fixed, min: -1, max: -1 }
+    w: SizeAxis { mode: SizeMode.fixed, min: -1, max: -1 }
+    h: SizeAxis { mode: SizeMode.fixed, min: -1, max: -1 }
   }
 }
 
@@ -27,8 +27,8 @@ func setRectFixed(world: mod UiWorld, entity: view EntityId, w: view Float, h: v
 # following children to the far end of the parent's content box.
 func makeFillH() pub ret Size {
   ret Size {
-    w: SizeAxis { mode: SizeMode.Fixed, min: -1, max: -1 }
-    h: SizeAxis { mode: SizeMode.Fill, min: -1, max: -1 }
+    w: SizeAxis { mode: SizeMode.fixed, min: -1, max: -1 }
+    h: SizeAxis { mode: SizeMode.fill, min: -1, max: -1 }
   }
 }
 
@@ -65,7 +65,7 @@ func setHeroWidget(world: mod UiWorld, entity: view EntityId, key: own String) p
 
 func setShapeRect(world: mod UiWorld, entity: view EntityId, fill: view RgbaColor) pub {
   let shape: Shape = {
-    kind: ShapeKind.Rect
+    kind: ShapeKind.rect
     fill: fill
     stroke: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
     strokeWidth: 0.0
@@ -76,7 +76,7 @@ func setShapeRect(world: mod UiWorld, entity: view EntityId, fill: view RgbaColo
 
 func setShapeRounded(world: mod UiWorld, entity: view EntityId, fill: view RgbaColor, radius: view Float) pub {
   let shape: Shape = {
-    kind: ShapeKind.RoundedRect
+    kind: ShapeKind.roundedRect
     fill: fill
     stroke: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
     strokeWidth: 0.0
@@ -89,7 +89,7 @@ func setSprite(world: mod UiWorld, entity: view EntityId, key: own String, tint:
   let sp: Sprite = {
     textureKey: key
     tint: tint
-    scaleMode: ScaleMode.Fit
+    scaleMode: ScaleMode.fit
     tileScale: Vec2 { x: 1.0, y: 1.0 }
     nineSlice: Insets { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
     hasNineSlice: false
@@ -112,7 +112,7 @@ func setText(world: mod UiWorld, entity: view EntityId, text: view String, style
   let t: Text = {
     text: text
     styleId: styleId
-    wrapWidthMode: WrapWidthMode.None
+    wrapWidthMode: WrapWidthMode.none
   }
   componentSet(this: world.texts, entity: entity, data: t)
 }
@@ -127,7 +127,7 @@ func setLayout(
   let lay: Layout = {
     kind: kind
     gap: gap
-    alignMain: AlignKind.Start
+    alignMain: AlignKind.start
     alignCross: alignCross
     columns: 0
     rowGap: 0.0

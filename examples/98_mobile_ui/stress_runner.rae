@@ -37,16 +37,16 @@ func runStressMode(
   let stressPlayback: PlaybackState = createPlaybackState()
   let stressScroll: Float = 0.0
   let stressTexReg: TextureRegistry = createTextureRegistry()
-  let warm: UiWorld = buildScreenWorld(screen: Screen.Album, scenes: scenes, playback: stressPlayback, state: appState, texReg: stressTexReg, scrollY: stressScroll)
+  let warm: UiWorld = buildScreenWorld(screen: Screen.album, scenes: scenes, playback: stressPlayback, state: appState, texReg: stressTexReg, scrollY: stressScroll)
   applyViewportExtent(world: warm)
   layoutSystem(world: warm)
   transformSystem(world: warm)
   let baselineKb: Int = processRssKb()
   log("[stress] baseline rss_kb={baselineKb}")
   loop stressI < stressN {
-    var stressScreen: Screen = Screen.Album
+    var stressScreen: Screen = Screen.album
     if (stressI - (stressI / 2) * 2) is 1 {
-      stressScreen = Screen.Player
+      stressScreen = Screen.player
     }
     let sworld: UiWorld = buildScreenWorld(screen: stressScreen, scenes: scenes, playback: stressPlayback, state: appState, texReg: stressTexReg, scrollY: stressScroll)
     applyViewportExtent(world: sworld)
