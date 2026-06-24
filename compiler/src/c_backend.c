@@ -438,7 +438,11 @@ bool c_spawn_threadable(CFuncContext* ctx, const AstFuncDecl* f) {
     if (is_scalar) continue;                      // view-numeric is by value; own/copy/plain too
     bool is_enum = ctx && find_enum_decl(ctx, ctx->module, base) != NULL;
     if (is_enum && !p->type->is_view) continue;   // plain/own/copy enum = value; view-enum = pointer
-    return false;                                 // heap, view-enum, or unknown → sequential
+    // own/copy/plain String: the spawn site hands the worker a private
+    // rae_string_copy, so it owns a stable heap independent of the parent.
+    // view/mod String is a pointer wrapper into the parent → unsafe.
+    if (str_eq_cstr(base, "String") && !p->type->is_view && !p->type->is_mod) continue;
+    return false;                                 // heap aggregate, view-string, view-enum, or unknown → sequential
   }
   return true;
 }

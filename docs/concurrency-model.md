@@ -35,24 +35,34 @@ Implemented so far (Live / bytecode VM only):
   runs sequentially first"); real parallel execution awaits the C thread runtime.
 - **Compiled (C) backend** — `spawn`/`Task.get()`/`taskScope`/`parallelLoop`
   all run. Type-erased `RaeTask` runtime; `Task(T)` → `RaeTask*`.
-  - **Real OS threads (path 1)** when every param of the spawn target is
-    captured *by value* in the C ABI (scalar any-mode-but-`mod`; enum
-    plain/own/copy): a per-function pthread thunk packs args by value and
-    `pthread_create`s; `get()` joins. Verified: two `slow(view Int,…)` workers
-    run concurrently with correct results.
-  - **Sequential fallback** for heap args / `mod` / `view`-of-enum (those are
-    pointers/coercion-sensitive) — runs synchronously into a completed task.
+  - **Real OS threads** when every param of the spawn target is captured
+    safely for the worker:
+    - **path 1** — by-value params: scalar any-mode-but-`mod`; enum
+      plain/own/copy.
+    - **path 2** — `own`/`copy`/plain `String`: the spawn site hands the
+      worker a private `rae_string_copy` (the parent keeps and drops its own
+      original), so the worker owns a stable heap with no aliasing. Sidesteps
+      move-tracking and the statement temp-pool entirely. ASan/UBSan-clean.
+
+    A per-function pthread thunk packs the (by-value / copied) args and
+    `pthread_create`s; `get()` joins. Verified: two `slow(view Int,…)` and two
+    `greet(own String, view Int)` workers each run concurrently, correct
+    results, parent's source `String` intact afterward.
+  - **Sequential fallback** for heap *aggregate* args (`List`/`Map`/struct),
+    `mod`, `view`-of-`String`, and `view`-of-enum (those are pointers /
+    need deep-copy coercion) — runs synchronously into a completed task.
     Same observable result, just not parallel.
   - **Join-on-drop**: `rae_task_drop` joins+frees a `Task` local at scope exit
     so a worker can't outlive its scope. The String temp pool is `__thread`
     (concurrent workers no longer corrupt each other's interpolation).
 
 The **first milestone is complete** on both backends, and the compiled backend
-has **real parallelism for value-arg spawns**.
+has **real parallelism for value-arg and `String`-arg spawns**.
 
-Remaining: extend compiled threads to heap/`mod`/`view`-enum args (needs the
-call-arg coercion — move/deep-copy/deref — replicated into the thunk; until
-then they're correctly sequential); make `g_mem_*` mem-stat counters atomic
+Remaining: extend compiled threads to heap *aggregate* args (`List`/`Map`/
+struct — needs `rae_deep_copy_<T>` packed into the spawn site, the `String`
+slice generalized) and to `mod`/`view`-enum args (need deref/coercion in the
+thunk; until then they're correctly sequential); make `g_mem_*` counters atomic
 (currently a benign stats-only race under threads); `Channel`, atomics, truly
 parallel `parallelLoop` over disjoint shards; `detach`; `taskScope`
 cancel-on-error/non-escape; `parallelLoop` disjointness checking (once
