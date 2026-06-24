@@ -9,12 +9,15 @@
   **defocus blur** (aperture / depth-of-field), in **Blender Z-up** world space
   (see `../../docs/coordinate-system.md`).
 
-It is also the first **parallel** step. Each frame, a band of scanlines is
-split across **four `spawn renderBand(...)` workers** that run on real OS
-threads in the Compiled backend — each gets its own deep copy of the scene +
-camera and its own seeded RNG stream, so there is no shared mutable state. The
-image still fills in progressively, a band per frame, via the streaming
-texture.
+It is also the first **parallel** step. The screen is split into **four
+quadrants, one per worker thread** — each `spawn renderTile(...)` worker renders
+only its own quadrant, one small square tile at a time. So the four tiles in
+flight are always in four separate regions of the screen (Blender-style
+buckets), which makes the parallelism visible rather than four adjacent tiles
+that look like one block. Each worker runs on a real OS thread in the Compiled
+backend with its own deep copy of the scene + camera and its own seeded RNG
+stream, so there is no shared mutable state. The image fills in progressively
+via the streaming texture.
 
 ```bash
 rae run --target compiled main.rae   # recommended — real threads
