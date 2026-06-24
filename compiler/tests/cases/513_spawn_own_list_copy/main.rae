@@ -1,0 +1,35 @@
+# Threading test: path-2 deep-copy of an `own List(Int)` lvalue argument.
+# The spawn site deep-copies the caller's list for the worker, so the
+# caller keeps full ownership of its original — verified by reusing `data`
+# after the spawn. Deterministic on both backends (real threads in Compiled).
+import core
+
+func sumList(xs: own List(Int)) ret Int {
+    let total: Int = 0
+    let i: Int = 0
+    loop i < xs.length {
+        total = total + xs.get(index: i)
+        i = i + 1
+    }
+    ret total
+}
+
+func main() {
+    let data: List(Int) = createList(cap: 4)
+    data.add(value: 10)
+    data.add(value: 20)
+    data.add(value: 30)
+
+    # Pass the same lvalue list to two workers; each gets a private copy.
+    let ta: Task(Int) = spawn sumList(xs: data)
+    let tb: Task(Int) = spawn sumList(xs: data)
+    let a: Int = ta.get()
+    let b: Int = tb.get()
+
+    log("a={a}")
+    log("b={b}")
+    # The caller's original list is untouched (deep copy, not move): still
+    # usable and still length 3.
+    log("origLen={data.length}")
+    log("origSum={sumList(xs: data)}")
+}

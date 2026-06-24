@@ -1,0 +1,147 @@
+# End-to-end threading test: a 4-band multithreaded raytrace must produce
+# byte-identical output to the single-threaded reference. Each band worker
+# takes the scene by `own List(Float)` (a private deep copy) and returns its
+# rows as `List(Int)`; in the Compiled backend the workers run on real OS
+# threads. Output is deterministic (no timing, joins in fixed order), so it
+# is verified on both the Live and Compiled backends.
+import core
+import math
+
+func hitSphere(cx: view Float, cy: view Float, cz: view Float, r: view Float,
+               rdx: view Float, rdy: view Float, rdz: view Float) ret Float {
+    let a: Float = rdx * rdx + rdy * rdy + rdz * rdz
+    let halfB: Float = (0.0 - cx) * rdx + (0.0 - cy) * rdy + (0.0 - cz) * rdz
+    let c: Float = cx * cx + cy * cy + cz * cz - r * r
+    let disc: Float = halfB * halfB - a * c
+    if disc < 0.0 {
+        ret -1.0
+    }
+    ret (-halfB - sqrt(x: disc)) / a
+}
+
+func rayColor(scene: view List(Float), rdx: view Float, rdy: view Float, rdz: view Float) ret Int {
+    let best: Float = 1000000.0
+    let hitIdx: Int = -1
+    let count: Int = scene.length / 4
+    let k: Int = 0
+    loop k < count {
+        let b: Int = k * 4
+        let t: Float = hitSphere(cx: scene.get(index: b), cy: scene.get(index: b + 1),
+            cz: scene.get(index: b + 2), r: scene.get(index: b + 3),
+            rdx: rdx, rdy: rdy, rdz: rdz)
+        if t > 0.001 {
+            if t < best {
+                best = t
+                hitIdx = k
+            }
+        }
+        k = k + 1
+    }
+    let cr: Float = 0.0
+    let cg: Float = 0.0
+    let cb: Float = 0.0
+    if hitIdx >= 0 {
+        let b: Int = hitIdx * 4
+        let sr: Float = scene.get(index: b + 3)
+        cr = 0.5 * ((rdx * best - scene.get(index: b)) / sr + 1.0)
+        cg = 0.5 * ((rdy * best - scene.get(index: b + 1)) / sr + 1.0)
+        cb = 0.5 * ((rdz * best - scene.get(index: b + 2)) / sr + 1.0)
+    } else {
+        let len: Float = sqrt(x: rdx * rdx + rdy * rdy + rdz * rdz)
+        let tt: Float = 0.5 * (rdy / len + 1.0)
+        cr = (1.0 - tt) + tt * 0.5
+        cg = (1.0 - tt) + tt * 0.7
+        cb = (1.0 - tt) + tt * 1.0
+    }
+    let ir: Int = (255.99 * cr).toInt()
+    let ig: Int = (255.99 * cg).toInt()
+    let ib: Int = (255.99 * cb).toInt()
+    ret ir * 65536 + ig * 256 + ib
+}
+
+func renderBand(scene: own List(Float), width: view Int, height: view Int,
+                y0: view Int, y1: view Int) ret List(Int) {
+    let aspect: Float = width.toFloat() / height.toFloat()
+    let vw: Float = aspect * 2.0
+    let llx: Float = 0.0 - vw / 2.0
+    let out: List(Int) = createList(cap: (y1 - y0) * width)
+    let y: Int = y0
+    loop y < y1 {
+        let v: Float = (height - 1 - y).toFloat() / (height - 1).toFloat()
+        let x: Int = 0
+        loop x < width {
+            let u: Float = x.toFloat() / (width - 1).toFloat()
+            out.add(value: rayColor(scene: scene, rdx: llx + u * vw, rdy: -1.0 + v * 2.0, rdz: -1.0))
+            x = x + 1
+        }
+        y = y + 1
+    }
+    ret out
+}
+
+func checksum(buf: view List(Int)) ret Int {
+    let s: Int = 0
+    let i: Int = 0
+    loop i < buf.length {
+        s = (s + buf.get(index: i) % 1000003) % 1000003
+        i = i + 1
+    }
+    ret s
+}
+
+func buildScene() ret List(Float) {
+    let scene: List(Float) = createList(cap: 8)
+    scene.add(value: 0.0)
+    scene.add(value: 0.0)
+    scene.add(value: -1.0)
+    scene.add(value: 0.5)
+    scene.add(value: 0.0)
+    scene.add(value: -100.5)
+    scene.add(value: -1.0)
+    scene.add(value: 100.0)
+    ret scene
+}
+
+func appendBand(full: mod List(Int), part: view List(Int)) {
+    let j: Int = 0
+    loop j < part.length {
+        full.add(value: part.get(index: j))
+        j = j + 1
+    }
+}
+
+func main() {
+    let width: Int = 80
+    let height: Int = 60
+
+    let single: List(Int) = renderBand(scene: buildScene(), width: width, height: height, y0: 0, y1: height)
+    let cs1: Int = checksum(buf: single)
+
+    let r1: Int = height / 4
+    let r2: Int = height / 2
+    let r3: Int = height * 3 / 4
+    let ta: Task(List(Int)) = spawn renderBand(scene: buildScene(), width: width, height: height, y0: 0, y1: r1)
+    let tb: Task(List(Int)) = spawn renderBand(scene: buildScene(), width: width, height: height, y0: r1, y1: r2)
+    let tc: Task(List(Int)) = spawn renderBand(scene: buildScene(), width: width, height: height, y0: r2, y1: r3)
+    let td: Task(List(Int)) = spawn renderBand(scene: buildScene(), width: width, height: height, y0: r3, y1: height)
+
+    let full: List(Int) = createList(cap: width * height)
+    let pa: List(Int) = ta.get()
+    let pb: List(Int) = tb.get()
+    let pc: List(Int) = tc.get()
+    let pd: List(Int) = td.get()
+    appendBand(full: full, part: pa)
+    appendBand(full: full, part: pb)
+    appendBand(full: full, part: pc)
+    appendBand(full: full, part: pd)
+    let cs2: Int = checksum(buf: full)
+
+    log("pixels={full.length}")
+    log("single={cs1}")
+    log("multi={cs2}")
+    if cs1 is cs2 {
+        log("match=yes")
+    } else {
+        log("match=no")
+    }
+}
