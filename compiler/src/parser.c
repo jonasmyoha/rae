@@ -108,6 +108,27 @@ static const Token* parser_consume_ident(Parser* parser, const char* message) {
   return NULL;
 }
 
+// Like parser_consume_ident, but also accepts a keyword token as a name. Used
+// for places where a name is a VALUE label and keyword-ness is irrelevant:
+// enum case names and member-access names (so e.g. an enum case may be `none`
+// or `type`, and `Enum.none` resolves). Any token whose lexeme is a valid
+// identifier shape (a keyword's lexeme always is) is accepted.
+static const Token* parser_consume_name(Parser* parser, const char* message) {
+  const Token* t = parser_peek(parser);
+  if (is_ident_like(t->kind)) return parser_advance(parser);
+  if (t->lexeme.len > 0) {
+    char c0 = t->lexeme.data[0];
+    bool ok = (c0 >= 'a' && c0 <= 'z') || (c0 >= 'A' && c0 <= 'Z') || c0 == '_';
+    for (size_t i = 1; ok && i < t->lexeme.len; i++) {
+      char d = t->lexeme.data[i];
+      ok = (d >= 'a' && d <= 'z') || (d >= 'A' && d <= 'Z') || (d >= '0' && d <= '9') || d == '_';
+    }
+    if (ok) return parser_advance(parser);
+  }
+  parser_error(parser, t, message);
+  return NULL;
+}
+
 static void* parser_alloc(Parser* parser, size_t size) {
   void* result = arena_alloc(parser->arena, size);
   if (!result) {
@@ -1391,7 +1412,7 @@ static AstExpr* parse_postfix(Parser* parser) {
     }
     if (parser_match(parser, TOK_DOT)) {
   
-      const Token* name = parser_consume_ident(parser, "expected member name after '.'");
+      const Token* name = parser_consume_name(parser, "expected member name after '.'");
       // Check if it's a method call
       if (parser_match(parser, TOK_LPAREN)) {
 
@@ -2264,7 +2285,7 @@ static AstDecl* parse_enum_declaration(Parser* parser) {
   
   if (!parser_check(parser, TOK_RBRACE)) {
     do {
-      const Token* member_name = parser_consume_ident(parser, "expected enum member name");
+      const Token* member_name = parser_consume_name(parser, "expected enum member name");
       check_pascal_case(parser, member_name, "enum member");
       
       AstEnumMember* member = parser_alloc(parser, sizeof(AstEnumMember));

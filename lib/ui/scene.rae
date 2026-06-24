@@ -120,7 +120,7 @@ func parseScene(source: view String) ret Scene {
   }
 
   let root: JsonValue = jsonRoot(doc: doc)
-  if root.kind is not JsonKind.Object {
+  if root.kind is not JsonKind.object {
     scene.errorMsg = "scene root is not an object"
     ret scene
   }
@@ -180,7 +180,7 @@ func parseScene(source: view String) ret Scene {
     ret scene
   }
   let nodesVal: JsonValue = jsonValueAt(doc: doc, idx: nodesIdx)
-  if nodesVal.kind is not JsonKind.Object {
+  if nodesVal.kind is not JsonKind.object {
     scene.errorMsg = "\"nodes\" must be an object"
     ret scene
   }
@@ -192,7 +192,7 @@ func parseScene(source: view String) ret Scene {
   loop i < count {
     let nodeId: String = jsonObjectKeyAt(doc: doc, this: nodesVal, idx: i)
     let nodeVal: JsonValue = jsonObjectValueAt(doc: doc, this: nodesVal, idx: i)
-    if nodeVal.kind is not JsonKind.Object {
+    if nodeVal.kind is not JsonKind.object {
       scene.errorMsg = nodeId.concat(other: " is not an object")
       ret scene
     }

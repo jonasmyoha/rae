@@ -39,7 +39,7 @@ func hardDrop(w: mod World) {
 }
 
 func inputSystem(w: mod World) {
-  if w.state is GameState.GameOver {
+  if w.state is GameState.gameOver {
     if isKeyPressed(key: keyR) {
       initWorld(w)
     }
@@ -49,16 +49,16 @@ func inputSystem(w: mod World) {
   # P toggles between Playing and Paused. Handled BEFORE the
   # "skip-input-if-not-Playing" gate so the player can unpause.
   if isKeyPressed(key: keyP) {
-    if w.state is GameState.Playing {
-      w.state = GameState.Paused
+    if w.state is GameState.playing {
+      w.state = GameState.paused
     } else {
-      if w.state is GameState.Paused {
-        w.state = GameState.Playing
+      if w.state is GameState.paused {
+        w.state = GameState.playing
       }
     }
   }
 
-  if w.state is not GameState.Playing {
+  if w.state is not GameState.playing {
     ret
   }
 

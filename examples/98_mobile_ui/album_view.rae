@@ -92,8 +92,8 @@ func buildTrackList(world: mod UiWorld, trackScene: view Scene, rows: view List(
   }
   let listH: Float = trackRowH * visible.toFloat() + trackGap * (visible - 1).toFloat()
   setRectFixed(world: world, entity: list, w: screenW - outerPad * 2.0, h: listH)
-  let layV: LayoutType = LayoutType.Vertical
-  let alignS: AlignKind = AlignKind.Start
+  let layV: LayoutType = LayoutType.vertical
+  let alignS: AlignKind = AlignKind.start
   setLayout(world: world, entity: list, kind: layV, gap: trackGap, alignCross: alignS)
 
   let rowKids: List(EntityId) = createList(EntityId, cap: trackRowCount)
@@ -143,7 +143,7 @@ func buildTrackList(world: mod UiWorld, trackScene: view Scene, rows: view List(
     if isPlayingRow {
       let pillFill: RgbaColor = darkPillColor
       let pill: Shape = {
-        kind: ShapeKind.RoundedRect
+        kind: ShapeKind.roundedRect
         fill: pillFill
         stroke: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
         strokeWidth: 0.0
@@ -233,8 +233,8 @@ func mountAlbumPage(
 
   let root: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: root, w: screenW, h: screenH)
-  let layV: LayoutType = LayoutType.Vertical
-  let alignS: AlignKind = AlignKind.Start
+  let layV: LayoutType = LayoutType.vertical
+  let alignS: AlignKind = AlignKind.start
   setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
   setPaddingAll(world: world, entity: root, n: outerPad)
 

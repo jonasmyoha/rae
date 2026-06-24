@@ -22,8 +22,8 @@ import core
 import ui/components
 
 enum ThemeMode {
-  Light
-  Dark
+  light
+  dark
 }
 
 # Semantic color slots. Names describe the *role* (surface, accent,
@@ -60,7 +60,7 @@ type Theme {
 # dark text reads cleanly on it.
 func lightTheme() pub ret Theme {
   ret Theme {
-    mode: ThemeMode.Light
+    mode: ThemeMode.light
     palette: ThemePalette {
       surface: RgbaColor { r: 246, g: 246, b: 248, a: 255 }
       surfaceAlt: RgbaColor { r: 118, g: 225, b: 225, a: 255 }
@@ -92,7 +92,7 @@ func lightTheme() pub ret Theme {
 #    flip (light grey for dark mode, dark grey for light mode).
 func darkTheme() pub ret Theme {
   ret Theme {
-    mode: ThemeMode.Dark
+    mode: ThemeMode.dark
     palette: ThemePalette {
       surface: RgbaColor { r: 10, g: 10, b: 14, a: 255 }
       surfaceAlt: RgbaColor { r: 72, g: 180, b: 152, a: 255 }
@@ -112,7 +112,7 @@ func darkTheme() pub ret Theme {
 # the initializer here would forward-reference the function from the
 # C codegen's perspective and fail to compile in the Compiled target.
 var activeTheme: Theme = Theme {
-  mode: ThemeMode.Light
+  mode: ThemeMode.light
   palette: ThemePalette {
     surface: RgbaColor { r: 246, g: 246, b: 248, a: 255 }
     surfaceAlt: RgbaColor { r: 118, g: 225, b: 225, a: 255 }
