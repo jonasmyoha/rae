@@ -733,10 +733,18 @@ static void pp_print_block_body(PrettyPrinter* pp, const AstBlock* block) {
 
 static void pp_print_let_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
   pp_check_comments(pp, stmt->line);
-  pp_write(pp, "let ");
+  if (stmt->as.let_stmt.is_const) {
+    pp_write(pp, "const ");
+  } else if (stmt->as.let_stmt.is_var) {
+    pp_write(pp, "var ");
+  } else {
+    pp_write(pp, "let ");
+  }
   pp_write_str(pp, stmt->as.let_stmt.name);
-  pp_write(pp, ": ");
-  pp_write_type(pp, stmt->as.let_stmt.type);
+  if (stmt->as.let_stmt.type) {
+    pp_write(pp, ": ");
+    pp_write_type(pp, stmt->as.let_stmt.type);
+  }
   if (stmt->as.let_stmt.value) {
     if (stmt->as.let_stmt.is_bind) {
       pp_write(pp, " => ");
