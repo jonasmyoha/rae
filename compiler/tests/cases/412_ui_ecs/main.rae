@@ -12,9 +12,9 @@ func main() {
   log("Wibble known: {isKnownComponent(name: wibbleName)}")
 
   # Allocate three entities.
-  let e1: EntityId = createEntity(world: world)
-  let e2: EntityId = createEntity(world: world)
-  let e3: EntityId = createEntity(world: world)
+  var e1: EntityId = createEntity(world: world)
+  var e2: EntityId = createEntity(world: world)
+  var e3: EntityId = createEntity(world: world)
   log("alive after 3 createEntity: {aliveCount(world: world)}")
   log("e1={e1.value} e2={e2.value} e3={e3.value}")
   log("e1 alive: {isAlive(world: world, entity: e1)}")
@@ -60,7 +60,7 @@ func main() {
 
   # Iterate the rects table.
   let rectN: Int = componentCount(this: world.rects)
-  let i: Int = 0
+  var i: Int = 0
   loop i < rectN {
     let ent: EntityId = componentEntityAt(this: world.rects, i: i)
     let r: Rect = componentDataAt(this: world.rects, i: i)

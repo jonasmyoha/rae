@@ -21,7 +21,7 @@ func work(i: view Int) {
 
 func main() {
   # Warm up so initial allocator pages don't show up as growth.
-  let warmupI: Int = 0
+  var warmupI: Int = 0
   loop warmupI < 100 {
     work(i: warmupI)
     warmupI = warmupI + 1
@@ -29,7 +29,7 @@ func main() {
 
   let baselineKb: Int = processRssKb()
   let iterations: Int = 10000
-  let i: Int = 0
+  var i: Int = 0
   loop i < iterations {
     work(i: i)
     i = i + 1

@@ -91,14 +91,14 @@ func updateNodeText(world: mod UiWorld, pageId: view String, nodeId: view String
 # the Spotify cover.
 func rebindCoverOnPages(world: mod UiWorld, fromKey: view String, toKey: view String, pageIds: view List(String)) {
   let n: Int = componentCount(this: world.sprites)
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let e: EntityId = componentEntityAt(this: world.sprites, i: i)
     let sp: Sprite = componentDataAt(this: world.sprites, i: i)
     if sp.textureKey.equals(other: fromKey) {
       let p: String = pageOf(world: world, entity: e)
-      let allowed: Bool = false
-      let k: Int = 0
+      var allowed: Bool = false
+      var k: Int = 0
       loop k < pageIds.length {
         let want: String = pageIds.get(index: k)
         if p.equals(other: want) {
@@ -181,7 +181,7 @@ func artworkUrlImageHash(url: view String) ret String {
 
 func refreshSpotifyArt(state: view SpotifyState, track: view SpotifyTrack, reg: mod TextureRegistry) ret Bool {
   let outPath: String = "/tmp/rae_spotify_art.jpg"
-  let primaryOk: Bool = false
+  var primaryOk: Bool = false
   if track.artworkUrl.length() > 0 {
     primaryOk = spotifyFetchArtwork(url: track.artworkUrl, outPath: outPath)
   }
@@ -303,7 +303,7 @@ func pollSpotify(
       # same textureKey and the history dedup drops one of them.
       # Falls back to the local stem only when Spotify provides no
       # artwork URL (rare; podcasts, local files).
-      let texKey: String = loadHistoryEntryArt(track: track, reg: reg)
+      var texKey: String = loadHistoryEntryArt(track: track, reg: reg)
       if texKey.length() is 0 {
         if stem.length() > 0 {
           texKey = "{stem}"

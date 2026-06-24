@@ -35,14 +35,10 @@ func ceil(x: Float) extern ret Float
 
 func round(x: Float) extern ret Float
 
-func PI() ret Float {
-  ret 3.14159265358979323846
-}
-
-# Tau = 2*pi (one full turn in radians).
-func TAU() ret Float {
-  ret 6.28318530717958647692
-}
+# pi, and tau = 2*pi (one full turn in radians). Compile-time constants, used
+# directly (no call): `random() * tau`.
+const pi: Float = 3.14159265358979323846
+const tau: Float = pi * 2.0
 
 func seed(n: view Int) {
   rae_seed(n: n)

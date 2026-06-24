@@ -264,7 +264,7 @@ func recordDebugFrame(debug: mod DebugSystem, now: view Float, didRealWork: view
   # buffer is frozen so this returns the same number every call —
   # exactly what we want.
   let n: Int = debug.fpsTimes.length
-  let fps: Float = 0.0
+  var fps: Float = 0.0
   if n >= 2 {
     let oldest: Float = debug.fpsTimes.get(index: 0)
     let newest: Float = debug.fpsTimes.get(index: n - 1)
@@ -422,7 +422,7 @@ func dbgSetPaddingAll(world: mod UiWorld, entity: view EntityId, n: view Float) 
 
 func attachKids(world: mod UiWorld, parent: view EntityId, kids: view List(EntityId)) {
   let kidsCopy: List(EntityId) = createList(EntityId, cap: kids.length)
-  let i: Int = 0
+  var i: Int = 0
   loop i < kids.length {
     let k: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
     kidsCopy.add(value: k)
@@ -490,7 +490,7 @@ func buildSwitchRow(
   # owns the OnClick.
   let pill: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: pill, w: 56.0, h: 32.0)
-  let pillFill: RgbaColor = debugSwitchOffColor()
+  var pillFill: RgbaColor = debugSwitchOffColor()
   if on {
     pillFill = debugSwitchOnColor()
   }
@@ -504,7 +504,7 @@ func buildSwitchRow(
   # the knob is 26 wide; the knob centre travels 30/2 = 15 px each way
   # from the pill centre. Offset is post-layout so the Stack layout's
   # centring is preserved on the other axis.
-  let knobOff: Float = -12.0
+  var knobOff: Float = -12.0
   if on {
     knobOff = 12.0
   }
@@ -636,7 +636,7 @@ func applyDebugAnchor(world: view UiWorld, debug: mod DebugSystem) ret Bool {
   # Walk the dense table; pick the first anchor that also carries a
   # `Rect`. Multiple anchors aren't an error (the last legal one wins)
   # but apps should keep it to one.
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let e: EntityId = componentEntityAt(this: anchors, i: i)
     if componentHas(this: world.rects, entity: e) {
@@ -688,9 +688,9 @@ func addDebugLayer(world: mod UiWorld, debug: mod DebugSystem) pub {
 # `debug` in place. Returns true if any debug-state change happened
 # (callers should treat the return value as "force a world rebuild").
 func dispatchDebugAction(input: view InputSystem, debug: mod DebugSystem) pub ret Bool {
-  let changed: Bool = false
+  var changed: Bool = false
   let n: Int = input.events.length
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let ev: ActionEvent = rae_ext_rae_buf_get(buf: input.events.data, index: i)
     let actionId: String = ev.actionId
@@ -767,7 +767,7 @@ func formatMemMB(kb: view Int) ret String {
 func formatFps(fps: view Float) ret String {
   # Round to nearest integer. Sub-1 fps and weird startup values just
   # show "0" / "1" — that's fine for an at-a-glance read-out.
-  let rounded: Int = (fps + 0.5).toInt()
+  var rounded: Int = (fps + 0.5).toInt()
   if rounded < 0 {
     rounded = 0
   }
@@ -802,8 +802,8 @@ func drawDebugLabels(debug: view DebugSystem) {
   let buttonCx: Float = debug.buttonX + debug.buttonSize * 0.5
   let screenCx: Float = debug.screenW * 0.5
   let rightAligned: Bool = buttonCx > screenCx
-  let fpsX: Float = debug.buttonX
-  let memX: Float = debug.buttonX
+  var fpsX: Float = debug.buttonX
+  var memX: Float = debug.buttonX
   if rightAligned {
     # Right edge of the button — labels grow LEFT from here.
     let rightEdge: Float = debug.buttonX + debug.buttonSize
@@ -853,22 +853,22 @@ func drawDebugLabels(debug: view DebugSystem) {
   # or isn't reaching a target — at a glance you see the button
   # state the input layer is actually polling.
   if debug.showInputOutlines {
-    let lb: Int = 0
+    var lb: Int = 0
     if isMouseButtonDown(button: 0) {
       lb = 1
     }
-    let rb: Int = 0
+    var rb: Int = 0
     if isMouseButtonDown(button: 1) {
       rb = 2
     }
-    let mb: Int = 0
+    var mb: Int = 0
     if isMouseButtonDown(button: 2) {
       mb = 4
     }
     let buttons: Int = lb + rb + mb
     let btnText: String = "btn: {buttons}"
     let btnY: Float = memY + lineH + 2.0
-    let btnX: Float = debug.buttonX
+    var btnX: Float = debug.buttonX
     if rightAligned {
       let rightEdge: Float = debug.buttonX + debug.buttonSize
       let btnW: Int = measureTextWithFont(

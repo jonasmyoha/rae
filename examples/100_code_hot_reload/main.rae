@@ -27,8 +27,8 @@ import hot_reload
 func parseIntOrZero(s: view String) ret Int {
   let digits: String = "0123456789"
   let n: Int = s.length()
-  let i: Int = 0
-  let acc: Int = 0
+  var i: Int = 0
+  var acc: Int = 0
   loop i < n {
     let ch: String = s.sub(start: i, len: 1)
     let d: Int = digits.indexOf(sub: ch)
@@ -44,7 +44,7 @@ func parseIntOrZero(s: view String) ret Int {
 func main() {
   # ---- Restore prior state ------------------------------------------
   let prior: String = readHotReloadState()
-  let count: Int = 0
+  var count: Int = 0
   if prior.length() > 0 {
     count = parseIntOrZero(s: prior.trim())
     clearHotReloadState()
@@ -57,7 +57,7 @@ func main() {
 
   # ---- Loop watching for the supervisor's signal ---------------------
   let w: ReloadSignalWatcher = createReloadSignalWatcher()
-  let ticks: Int = 0
+  var ticks: Int = 0
   loop true {
     sleep(ms: 150)
     let sig: ReloadSignal = pollReloadSignal(w: w)

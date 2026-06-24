@@ -34,7 +34,7 @@ func decideActive(
   prevHovered: view EntityId
   prevMouseBtns: view Int
 ) ret RenderActiveDecision {
-  let active: Bool = forceRender
+  var active: Bool = forceRender
   if active is false {
     if renderCacheDirty(world: world, cache: renderCache) {
       active = true
@@ -75,7 +75,7 @@ func decideActive(
   let mx: Float = getMouseX().toFloat()
   let my: Float = getMouseY().toFloat()
   let currentHovered: EntityId = hitTest(world: world, x: mx, y: my)
-  let currentMouseBtns: Int = 0
+  var currentMouseBtns: Int = 0
   if debug.showInputOutlines {
     # Same bitfield layout as drawDebugLabels' "btn:" read-out:
     # bit 0 left, bit 1 right, bit 2 middle.

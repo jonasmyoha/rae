@@ -105,9 +105,9 @@ func buildProfileStatsRow(world: mod UiWorld, state: view AppState) ret EntityId
   setLayout(world: world, entity: row, kind: layH, gap: spaceXL, alignCross: alignC)
 
   let albumCount: Int = state.albums.length
-  let trackCount: Int = 0
-  let totalMs: Int = 0
-  let i: Int = 0
+  var trackCount: Int = 0
+  var totalMs: Int = 0
+  var i: Int = 0
   loop i < albumCount {
     let a: Album = rae_ext_rae_buf_get(buf: state.albums.data, index: i)
     trackCount = trackCount + a.tracks.length
@@ -164,7 +164,7 @@ func buildSpotifyStatusCard(world: mod UiWorld) ret EntityId {
   let line: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: line, w: cardW - 28.0, h: 22.0)
   let bodyStyle: String = "trackArtist"
-  let line1: String = ""
+  var line1: String = ""
   if spotifyEnabled is false {
     line1 = "Disabled (RAE_UI_NO_SPOTIFY=1)"
   } else {
@@ -322,7 +322,7 @@ func mountProfilePage(
   setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
   setPaddingAll(world: world, entity: root, n: outerPad)
 
-  let copiedId: String = ""
+  var copiedId: String = ""
   copiedId = copiedId.concat(other: profilePageId)
   let pr: PageRoot = { id: own copiedId }
   componentSet(this: world.pageRoots, entity: root, data: own pr)
