@@ -1,0 +1,230 @@
+# Multithreaded CPU raytracer — "Ray Tracing in One Weekend" style.
+#
+# A handful of spheres on an infinite ground plane, shaded by surface
+# normal (the iconic early-chapter image) over a sky gradient. The image
+# is split into four horizontal bands rendered IN PARALLEL: each band is a
+# `spawn renderBand(...)` worker that gets its OWN deep copy of the scene
+# and, in the Compiled backend, runs on a real OS thread. `get()` joins.
+#
+# The scene is a flat `List(Float)` (struct-of-arrays: [cx,cy,cz,r, ...]).
+# A primitive element type keeps the list unboxed across the thread
+# boundary, and the worker returns its rows as a `List(Int)` of packed
+# 0xRRGGBB pixels.
+#
+# Run (Compiled = real threads):  rae run --target compiled main.rae
+# Run (Live VM):                  rae run main.rae
+
+import core
+import math
+import raylib
+
+# ---- Render core (no raylib dependency — verified headlessly in tests) ----
+
+# nearest hit t in (0.001, big], or -1.0 for miss
+func hitSphere(cx: view Float, cy: view Float, cz: view Float, r: view Float,
+               rox: view Float, roy: view Float, roz: view Float,
+               rdx: view Float, rdy: view Float, rdz: view Float) ret Float {
+    let ocx: Float = rox - cx
+    let ocy: Float = roy - cy
+    let ocz: Float = roz - cz
+    let a: Float = rdx * rdx + rdy * rdy + rdz * rdz
+    let halfB: Float = ocx * rdx + ocy * rdy + ocz * rdz
+    let c: Float = ocx * ocx + ocy * ocy + ocz * ocz - r * r
+    let disc: Float = halfB * halfB - a * c
+    if disc < 0.0 {
+        ret -1.0
+    }
+    ret (-halfB - sqrt(x: disc)) / a
+}
+
+# Packed 0xRRGGBB colour for a primary ray. `scene` is the flat sphere array.
+func rayColor(scene: view List(Float), rox: view Float, roy: view Float, roz: view Float,
+              rdx: view Float, rdy: view Float, rdz: view Float) ret Int {
+    let best: Float = 1000000.0
+    let hitIdx: Int = -1
+    let count: Int = scene.length / 4
+    let k: Int = 0
+    loop k < count {
+        let b: Int = k * 4
+        let t: Float = hitSphere(
+            cx: scene.get(index: b), cy: scene.get(index: b + 1),
+            cz: scene.get(index: b + 2), r: scene.get(index: b + 3),
+            rox: rox, roy: roy, roz: roz, rdx: rdx, rdy: rdy, rdz: rdz)
+        if t > 0.001 {
+            if t < best {
+                best = t
+                hitIdx = k
+            }
+        }
+        k = k + 1
+    }
+    let cr: Float = 0.0
+    let cg: Float = 0.0
+    let cb: Float = 0.0
+    if hitIdx >= 0 {
+        # shade by surface normal, mapped from [-1,1] to [0,1]
+        let b: Int = hitIdx * 4
+        let scx: Float = scene.get(index: b)
+        let scy: Float = scene.get(index: b + 1)
+        let scz: Float = scene.get(index: b + 2)
+        let sr: Float = scene.get(index: b + 3)
+        let px: Float = rox + rdx * best
+        let py: Float = roy + rdy * best
+        let pz: Float = roz + rdz * best
+        cr = 0.5 * ((px - scx) / sr + 1.0)
+        cg = 0.5 * ((py - scy) / sr + 1.0)
+        cb = 0.5 * ((pz - scz) / sr + 1.0)
+    } else {
+        # sky gradient: white at the horizon, blue overhead
+        let len: Float = sqrt(x: rdx * rdx + rdy * rdy + rdz * rdz)
+        let tt: Float = 0.5 * (rdy / len + 1.0)
+        cr = (1.0 - tt) + tt * 0.5
+        cg = (1.0 - tt) + tt * 0.7
+        cb = (1.0 - tt) + tt * 1.0
+    }
+    let ir: Int = (255.99 * cr).toInt()
+    let ig: Int = (255.99 * cg).toInt()
+    let ib: Int = (255.99 * cb).toInt()
+    ret ir * 65536 + ig * 256 + ib
+}
+
+# Renders rows [y0, y1) and returns (y1-y0)*width packed pixels (top row first).
+# `scene` is `own` so every worker owns a private deep copy — in the Compiled
+# backend this lets the worker run on its own OS thread with no shared state.
+func renderBand(scene: own List(Float), width: view Int, height: view Int,
+                y0: view Int, y1: view Int) ret List(Int) {
+    let aspect: Float = width.toFloat() / height.toFloat()
+    let vh: Float = 2.0
+    let vw: Float = aspect * vh
+    let llx: Float = 0.0 - vw / 2.0
+    let lly: Float = 0.0 - vh / 2.0
+    let llz: Float = -1.0
+    let out: List(Int) = createList(cap: (y1 - y0) * width)
+    let y: Int = y0
+    loop y < y1 {
+        let v: Float = (height - 1 - y).toFloat() / (height - 1).toFloat()
+        let x: Int = 0
+        loop x < width {
+            let u: Float = x.toFloat() / (width - 1).toFloat()
+            let rdx: Float = llx + u * vw
+            let rdy: Float = lly + v * vh
+            out.add(value: rayColor(scene: scene, rox: 0.0, roy: 0.0, roz: 0.0, rdx: rdx, rdy: rdy, rdz: llz))
+            x = x + 1
+        }
+        y = y + 1
+    }
+    ret out
+}
+
+func buildScene() ret List(Float) {
+    let scene: List(Float) = createList(cap: 16)
+    # center sphere
+    scene.add(value: 0.0)
+    scene.add(value: 0.0)
+    scene.add(value: -1.0)
+    scene.add(value: 0.5)
+    # left sphere
+    scene.add(value: -1.1)
+    scene.add(value: 0.0)
+    scene.add(value: -1.2)
+    scene.add(value: 0.5)
+    # right sphere
+    scene.add(value: 1.1)
+    scene.add(value: 0.0)
+    scene.add(value: -1.2)
+    scene.add(value: 0.5)
+    # ground
+    scene.add(value: 0.0)
+    scene.add(value: -100.5)
+    scene.add(value: -1.0)
+    scene.add(value: 100.0)
+    ret scene
+}
+
+# Appends every pixel of one rendered band onto the full framebuffer, in order.
+func appendBand(full: mod List(Int), part: view List(Int)) {
+    let j: Int = 0
+    loop j < part.length {
+        full.add(value: part.get(index: j))
+        j = j + 1
+    }
+}
+
+# Renders the whole image across four parallel band workers and returns the
+# assembled width*height framebuffer of packed 0xRRGGBB pixels.
+func renderParallel(width: view Int, height: view Int) ret List(Int) {
+    let r1: Int = height / 4
+    let r2: Int = height / 2
+    let r3: Int = height * 3 / 4
+    let ta: Task(List(Int)) = spawn renderBand(scene: buildScene(), width: width, height: height, y0: 0, y1: r1)
+    let tb: Task(List(Int)) = spawn renderBand(scene: buildScene(), width: width, height: height, y0: r1, y1: r2)
+    let tc: Task(List(Int)) = spawn renderBand(scene: buildScene(), width: width, height: height, y0: r2, y1: r3)
+    let td: Task(List(Int)) = spawn renderBand(scene: buildScene(), width: width, height: height, y0: r3, y1: height)
+
+    let full: List(Int) = createList(cap: width * height)
+    # Bind each joined band to a local before borrowing it (a `view` of a
+    # call rvalue would dangle); then append in row order.
+    let pa: List(Int) = ta.get()
+    let pb: List(Int) = tb.get()
+    let pc: List(Int) = tc.get()
+    let pd: List(Int) = td.get()
+    appendBand(full: full, part: pa)
+    appendBand(full: full, part: pb)
+    appendBand(full: full, part: pc)
+    appendBand(full: full, part: pd)
+    ret full
+}
+
+# ---- raylib presentation ----
+
+func channelR(packed: view Int) ret Int { ret packed / 65536 % 256 }
+func channelG(packed: view Int) ret Int { ret packed / 256 % 256 }
+func channelB(packed: view Int) ret Int { ret packed % 256 }
+
+func main() {
+    let imgW: Int = 320
+    let imgH: Int = 240
+    let scale: Int = 3
+    let winW: Int = imgW * scale
+    let winH: Int = imgH * scale
+
+    let t0: Int = nowMs()
+    let frame: List(Int) = renderParallel(width: imgW, height: imgH)
+    let renderMs: Int = nowMs() - t0
+    log("Rendered {imgW}x{imgH} on 4 parallel band workers in {renderMs}ms")
+
+    initWindow(width: winW, height: winH, title: "Rae multithreaded raytracer")
+    setTargetFPS(fps: 60)
+
+    let fscale: Float = scale.toFloat()
+    loop not windowShouldClose() {
+        beginDrawing()
+        clearBackground(color: { r: 0, g: 0, b: 0, a: 255 })
+        # Blit the cached framebuffer as scaled pixel blocks.
+        let y: Int = 0
+        loop y < imgH {
+            let x: Int = 0
+            loop x < imgW {
+                let packed: Int = frame.get(index: y * imgW + x)
+                let col: Color = {
+                    r: channelR(packed: packed)
+                    g: channelG(packed: packed)
+                    b: channelB(packed: packed)
+                    a: 255
+                }
+                drawRectangle(
+                    x: x.toFloat() * fscale,
+                    y: y.toFloat() * fscale,
+                    width: fscale,
+                    height: fscale,
+                    color: col)
+                x = x + 1
+            }
+            y = y + 1
+        }
+        drawText(text: "Rae raytracer — 4 threads — {renderMs}ms",
+                 x: 10.0, y: 10.0, fontSize: 20.0, color: { r: 255, g: 255, b: 255, a: 255 })
+        endDrawing()
+    }
+    closeWindow()
+}
