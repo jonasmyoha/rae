@@ -1,15 +1,15 @@
 import raylib
 
-enum GameState { Menu, Playing, Paused, GameOver }
+enum GameState { menu, playing, paused, gameOver }
 
 enum TetrominoKind {
-  I
-  J
-  L
-  O
-  S
-  T
-  Z
+  i
+  j
+  l
+  o
+  s
+  t
+  z
 }
 
 type Pos {
@@ -78,22 +78,22 @@ func getModernColor(index: view Int) ret Color {
 }
 
 func getKindId(kind: TetrominoKind) ret Int {
-  if kind is TetrominoKind.I {
+  if kind is TetrominoKind.i {
     ret 1
   }
-  if kind is TetrominoKind.J {
+  if kind is TetrominoKind.j {
     ret 2
   }
-  if kind is TetrominoKind.L {
+  if kind is TetrominoKind.l {
     ret 3
   }
-  if kind is TetrominoKind.O {
+  if kind is TetrominoKind.o {
     ret 4
   }
-  if kind is TetrominoKind.S {
+  if kind is TetrominoKind.s {
     ret 5
   }
-  if kind is TetrominoKind.T {
+  if kind is TetrominoKind.t {
     ret 6
   }
   # Z
@@ -117,7 +117,7 @@ func isOccupied(g: view Game, x: view Int, y: view Int) ret Int {
 
 # Simple shape definitions (4x4 max)
 func getShapeCell(kind: TetrominoKind, rot: view Int, px: view Int, py: view Int) ret Int {
-  if kind is TetrominoKind.I {
+  if kind is TetrominoKind.i {
     if rot is 0 or rot is 2 {
       if px is 1 {
         ret 1
@@ -128,7 +128,7 @@ func getShapeCell(kind: TetrominoKind, rot: view Int, px: view Int, py: view Int
       }
     }
   } else {
-    if kind is TetrominoKind.J {
+    if kind is TetrominoKind.j {
       if rot is 0 {
         if px is 1 and py >= 0 and py <= 2 or px is 0 and py is 2 {
           ret 1
@@ -153,7 +153,7 @@ func getShapeCell(kind: TetrominoKind, rot: view Int, px: view Int, py: view Int
         }
       }
     } else {
-      if kind is TetrominoKind.L {
+      if kind is TetrominoKind.l {
         if rot is 0 {
           if px is 1 and py >= 0 and py <= 2 or px is 2 and py is 2 {
             ret 1
@@ -178,12 +178,12 @@ func getShapeCell(kind: TetrominoKind, rot: view Int, px: view Int, py: view Int
           }
         }
       } else {
-        if kind is TetrominoKind.O {
+        if kind is TetrominoKind.o {
           if px >= 1 and px <= 2 and py >= 1 and py <= 2 {
             ret 1
           }
         } else {
-          if kind is TetrominoKind.S {
+          if kind is TetrominoKind.s {
             if rot is 0 or rot is 2 {
               if py is 1 and px >= 1 and px <= 2 or py is 2 and px >= 0 and px <= 1 {
                 ret 1
@@ -194,7 +194,7 @@ func getShapeCell(kind: TetrominoKind, rot: view Int, px: view Int, py: view Int
               }
             }
           } else {
-            if kind is TetrominoKind.T {
+            if kind is TetrominoKind.t {
               if rot is 0 {
                 if py is 1 and px >= 0 and px <= 2 or px is 1 and py is 0 {
                   ret 1
@@ -219,7 +219,7 @@ func getShapeCell(kind: TetrominoKind, rot: view Int, px: view Int, py: view Int
                 }
               }
             } else {
-              if kind is TetrominoKind.Z {
+              if kind is TetrominoKind.z {
                 if rot is 0 or rot is 2 {
                   if py is 1 and px >= 0 and px <= 1 or py is 2 and px >= 1 and px <= 2 {
                     ret 1
@@ -342,24 +342,24 @@ func checkLines(g: mod Game) {
 func randomKind() ret TetrominoKind {
   let k: Int = random(min: 0, max: 6)
   if k is 0 {
-    ret TetrominoKind.I
+    ret TetrominoKind.i
   }
   if k is 1 {
-    ret TetrominoKind.J
+    ret TetrominoKind.j
   }
   if k is 2 {
-    ret TetrominoKind.L
+    ret TetrominoKind.l
   }
   if k is 3 {
-    ret TetrominoKind.O
+    ret TetrominoKind.o
   }
   if k is 4 {
-    ret TetrominoKind.S
+    ret TetrominoKind.s
   }
   if k is 5 {
-    ret TetrominoKind.T
+    ret TetrominoKind.t
   }
-  ret TetrominoKind.Z
+  ret TetrominoKind.z
 }
 
 func spawnPiece(g: mod Game) {
@@ -375,12 +375,12 @@ func spawnPiece(g: mod Game) {
   g.maxLockTimer = 0
   g.moveTimer = 0
   if canMove(g: g, dx: 0, dy: 0, dr: 0) is 0 {
-    g.state = GameState.GameOver
+    g.state = GameState.gameOver
   }
 }
 
 func initGame(g: mod Game) {
-  g.state = GameState.Playing
+  g.state = GameState.playing
   g.width = 10
   g.height = 20
   g.score = 0
@@ -540,7 +540,7 @@ func draw(g: view Game) {
     fontSize: fontSize
     color: Color { r: 200, g: 200, b: 255, a: 255 }
   )
-  if g.state is GameState.Paused {
+  if g.state is GameState.paused {
     # Soft Yellow
     drawText(
       text: "PAUSED"
@@ -550,7 +550,7 @@ func draw(g: view Game) {
       color: Color { r: 255, g: 255, b: 180, a: 255 }
     )
   }
-  if g.state is GameState.GameOver {
+  if g.state is GameState.gameOver {
     # Soft Red
     # Light Gray
     drawText(
@@ -572,7 +572,7 @@ func draw(g: view Game) {
 }
 
 func handleInput(g: mod Game) {
-  if g.state is not GameState.Playing {
+  if g.state is not GameState.playing {
     ret
   }
   let cp: mod Piece => g.currentPiece
@@ -675,12 +675,12 @@ func main() {
   initWindow(width: 600, height: 500, title: "Rae Tetris 2D")
   setTargetFPS(fps: 60)
   let g: Game = {
-    state: GameState.Menu
+    state: GameState.menu
     grid: createList(cap: 200)
     width: 0
     height: 0
-    currentPiece: { kind: TetrominoKind.I, pos: { x: 0, y: 0 }, rotation: 0 }
-    nextPieceKind: TetrominoKind.I
+    currentPiece: { kind: TetrominoKind.i, pos: { x: 0, y: 0 }, rotation: 0 }
+    nextPieceKind: TetrominoKind.i
     score: 0
     lines: 0
     level: 1
@@ -696,7 +696,7 @@ func main() {
   initGame(g)
   loop not windowShouldClose() {
     # Input: Global (Menu/GameOver)
-    if g.state is GameState.GameOver {
+    if g.state is GameState.gameOver {
       # R key
       if isKeyPressed(key: 82) {
         initGame(g)
@@ -705,16 +705,16 @@ func main() {
     # Input: Pause
     # P key
     if isKeyPressed(key: 80) {
-      if g.state is GameState.Playing {
-        g.state = GameState.Paused
+      if g.state is GameState.playing {
+        g.state = GameState.paused
       } else {
-        if g.state is GameState.Paused {
-          g.state = GameState.Playing
+        if g.state is GameState.paused {
+          g.state = GameState.playing
         }
       }
     }
     # early returns don't work yet, so gate it here.
-    if g.state is GameState.Playing {
+    if g.state is GameState.playing {
       handleInput(g)
     }
     draw(g)
