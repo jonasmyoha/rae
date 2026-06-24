@@ -601,6 +601,11 @@ void rae_ext_rae_crypto_argon2i(rae_String password, rae_String salt, int64_t nb
 #include <raylib.h>
 void rae_ext_initWindow(int64_t width, int64_t height, rae_String title);
 void rae_ext_setConfigFlags(int64_t flags);
+/* Streaming textures for CPU-rendered images. loadStreamTexture creates a
+ * blank RGBA8 texture; updateStreamTexture uploads `count` packed 0xRRGGBB
+ * Int pixels (expanded to opaque RGBA8). `pixels` is a Buffer(Int) (void*). */
+Texture rae_ext_loadStreamTexture(int64_t width, int64_t height);
+void rae_ext_updateStreamTexture(Texture texture, const int64_t* pixels, int64_t count);
 rae_Bool rae_ext_windowShouldClose(void);
 void rae_ext_closeWindow(void);
 void rae_ext_setTargetFPS(int64_t fps);
