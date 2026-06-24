@@ -15,12 +15,25 @@
 static const char* s_current_decl_origin = NULL;
 
 typedef struct Symbol Symbol;
+// Why a binding is immutable — drives a precise reassignment diagnostic.
+typedef enum {
+    BIND_MUTABLE = 0,   // var / regular
+    BIND_LET,           // immutable `let` binding
+    BIND_CONST,         // compile-time `const`
+    BIND_READONLY_REF   // read-only borrow (view param)
+} BindKind;
 struct Symbol {
     Str name;
     AstDecl* decl;
     TypeInfo* type;
     int scope_depth;
     bool is_immutable;
+    BindKind bind_kind;
+    // Folded value for `const` symbols (so later consts can reference them).
+    bool const_is_number;
+    bool const_is_float;
+    double const_d;
+    long long const_i;
     Symbol* next;
 };
 
@@ -40,15 +53,23 @@ static void symbol_table_pop_scope(SymbolTable* table) {
     table->current_depth--;
 }
 
-static void symbol_table_define(SymbolTable* table, Arena* arena, Str name, AstDecl* decl, TypeInfo* type, bool is_immutable) {
+static Symbol* symbol_table_define(SymbolTable* table, Arena* arena, Str name, AstDecl* decl, TypeInfo* type, bool is_immutable) {
     Symbol* sym = arena_alloc(arena, sizeof(Symbol));
     sym->name = name;
     sym->decl = decl;
     sym->type = type;
     sym->scope_depth = table->current_depth;
     sym->is_immutable = is_immutable;
+    // Default: an immutable symbol is a read-only borrow (view param) unless a
+    // caller refines it to BIND_LET / BIND_CONST.
+    sym->bind_kind = is_immutable ? BIND_READONLY_REF : BIND_MUTABLE;
+    sym->const_is_number = false;
+    sym->const_is_float = false;
+    sym->const_d = 0.0;
+    sym->const_i = 0;
     sym->next = table->head;
     table->head = sym;
+    return sym;
 }
 
 static Symbol* symbol_table_lookup(SymbolTable* table, Str name) {
@@ -59,6 +80,11 @@ static Symbol* symbol_table_lookup(SymbolTable* table, Str name) {
     }
     return NULL;
 }
+
+// Defined further down (near the statement analyzer); used earlier by the
+// module-level global/const decl analysis.
+static void sema_fold_const(CompilerContext* ctx, AstModule* module, SymbolTable* symbols,
+                            AstExpr* init, Symbol* sym, size_t line, size_t col);
 
 typedef struct InstantiationEntry {
     const char* file_path;
@@ -698,8 +724,132 @@ static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTab
             symbol_table_pop_scope(symbols);
             break;
         }
-        case AST_DECL_GLOBAL_LET: if (decl->as.let_decl.value) sema_analyze_expr(ctx, module, symbols, decl->as.let_decl.value); break;
+        case AST_DECL_GLOBAL_LET: {
+            if (decl->as.let_decl.value) sema_analyze_expr(ctx, module, symbols, decl->as.let_decl.value);
+            // Mark the already-registered global symbol's mutability, and fold a
+            // `const` initializer to a literal (decls are analyzed in source
+            // order, so a const may reference earlier consts).
+            Symbol* gs = symbol_table_lookup(symbols, decl->as.let_decl.name);
+            if (gs) {
+                bool immut = !decl->as.let_decl.is_var;
+                gs->is_immutable = immut;
+                if (decl->as.let_decl.is_const) {
+                    gs->bind_kind = BIND_CONST;
+                    sema_fold_const(ctx, module, symbols, decl->as.let_decl.value, gs, decl->line, decl->column);
+                } else {
+                    gs->bind_kind = immut ? BIND_LET : BIND_MUTABLE;
+                }
+            }
+            break;
+        }
         default: break;
+    }
+}
+
+// ---- Compile-time constant evaluation (for `const`) ----
+typedef struct {
+    bool ok;          // is this a valid compile-time constant expression?
+    bool numeric;     // ok AND a number we can fold (Int/Float). Non-numeric
+                      // consts (enum case, string, bool) are valid but left as-is.
+    bool is_float;
+    double d;
+    long long i;
+} ConstResult;
+
+static double cr_num(ConstResult r) { return r.is_float ? r.d : (double)r.i; }
+
+static ConstResult const_eval(SymbolTable* symbols, AstExpr* e) {
+    ConstResult fail = {0};
+    ConstResult ok_nonnum = { .ok = true };
+    if (!e) return fail;
+    switch (e->kind) {
+        case AST_EXPR_INTEGER: {
+            char buf[64]; size_t n = e->as.integer.len < 63 ? e->as.integer.len : 63;
+            memcpy(buf, e->as.integer.data, n); buf[n] = '\0';
+            return (ConstResult){ .ok = true, .numeric = true, .is_float = false, .i = strtoll(buf, NULL, 10) };
+        }
+        case AST_EXPR_FLOAT: {
+            char buf[64]; size_t n = e->as.floating.len < 63 ? e->as.floating.len : 63;
+            memcpy(buf, e->as.floating.data, n); buf[n] = '\0';
+            return (ConstResult){ .ok = true, .numeric = true, .is_float = true, .d = strtod(buf, NULL) };
+        }
+        case AST_EXPR_BOOL:
+        case AST_EXPR_STRING:
+            return ok_nonnum;  // valid const, not foldable arithmetic
+        case AST_EXPR_MEMBER:
+            // Enum case (e.g. RenderMode.pathTraced) — a compile-time value the
+            // backends already lower to a constant. Accept without folding.
+            return ok_nonnum;
+        case AST_EXPR_IDENT: {
+            Symbol* s = symbol_table_lookup(symbols, e->as.ident);
+            if (!s || s->bind_kind != BIND_CONST) return fail;
+            if (s->const_is_number) {
+                return (ConstResult){ .ok = true, .numeric = true, .is_float = s->const_is_float, .d = s->const_d, .i = s->const_i };
+            }
+            return ok_nonnum;
+        }
+        case AST_EXPR_UNARY: {
+            if (e->as.unary.op != AST_UNARY_NEG) return fail;
+            ConstResult r = const_eval(symbols, e->as.unary.operand);
+            if (!r.ok || !r.numeric) return fail;
+            if (r.is_float) return (ConstResult){ .ok=true, .numeric=true, .is_float=true, .d = -r.d };
+            return (ConstResult){ .ok=true, .numeric=true, .is_float=false, .i = -r.i };
+        }
+        case AST_EXPR_BINARY: {
+            ConstResult l = const_eval(symbols, e->as.binary.lhs);
+            ConstResult r = const_eval(symbols, e->as.binary.rhs);
+            if (!l.ok || !r.ok || !l.numeric || !r.numeric) return fail;
+            bool isf = l.is_float || r.is_float;
+            switch (e->as.binary.op) {
+                case AST_BIN_ADD: return isf ? (ConstResult){.ok=1,.numeric=1,.is_float=1,.d=cr_num(l)+cr_num(r)} : (ConstResult){.ok=1,.numeric=1,.i=l.i+r.i};
+                case AST_BIN_SUB: return isf ? (ConstResult){.ok=1,.numeric=1,.is_float=1,.d=cr_num(l)-cr_num(r)} : (ConstResult){.ok=1,.numeric=1,.i=l.i-r.i};
+                case AST_BIN_MUL: return isf ? (ConstResult){.ok=1,.numeric=1,.is_float=1,.d=cr_num(l)*cr_num(r)} : (ConstResult){.ok=1,.numeric=1,.i=l.i*r.i};
+                case AST_BIN_DIV:
+                    if (isf) { if (cr_num(r) == 0.0) return fail; return (ConstResult){.ok=1,.numeric=1,.is_float=1,.d=cr_num(l)/cr_num(r)}; }
+                    if (r.i == 0) return fail; return (ConstResult){.ok=1,.numeric=1,.i=l.i/r.i};
+                case AST_BIN_MOD:
+                    if (isf || r.i == 0) return fail; return (ConstResult){.ok=1,.numeric=1,.i=l.i % r.i};
+                default: return fail;
+            }
+        }
+        default:
+            return fail;
+    }
+}
+
+// Evaluate a `const` initializer; on success record the folded value on `sym`
+// and rewrite a numeric initializer into a literal node (so the backends emit a
+// plain literal — required because C `static const` initializers must be
+// constant expressions). On failure emit a clear diagnostic.
+static void sema_fold_const(CompilerContext* ctx, AstModule* module, SymbolTable* symbols,
+                            AstExpr* init, Symbol* sym, size_t line, size_t col) {
+    if (!init) return;
+    ConstResult r = const_eval(symbols, init);
+    if (!r.ok) {
+        diag_error(module->file_path, (int)line, (int)col,
+                   "'const' initializer must be evaluable at compile time (only literals, earlier constants, enum cases, and arithmetic on them are allowed)");
+        module->had_error = true;
+        return;
+    }
+    if (sym) {
+        sym->const_is_number = r.numeric;
+        sym->const_is_float = r.is_float;
+        sym->const_d = r.d;
+        sym->const_i = r.i;
+    }
+    if (r.numeric) {
+        char buf[64];
+        if (r.is_float) {
+            snprintf(buf, sizeof buf, "%.17g", r.d);
+            // ensure it reads as a float literal
+            if (!strpbrk(buf, ".eEnN")) { size_t l = strlen(buf); snprintf(buf + l, sizeof(buf) - l, ".0"); }
+            init->kind = AST_EXPR_FLOAT;
+            init->as.floating = str_dup_arena(ctx->ast_arena, str_from_cstr(buf));
+        } else {
+            snprintf(buf, sizeof buf, "%lld", r.i);
+            init->kind = AST_EXPR_INTEGER;
+            init->as.integer = str_dup_arena(ctx->ast_arena, str_from_cstr(buf));
+        }
     }
 }
 
@@ -715,7 +865,18 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                 if (!t && stmt->as.let_stmt.value->resolved_type) t = stmt->as.let_stmt.value->resolved_type;
                 if (t) ensure_type_match(ctx, t, &stmt->as.let_stmt.value);
             }
-            symbol_table_define(symbols, ctx->ast_arena, stmt->as.let_stmt.name, NULL, t, false);
+            // `let` and `const` are immutable bindings; only `var` may be
+            // reassigned. (Mutating the value a `let` points at — container
+            // methods, field/index writes — is unaffected; this only governs
+            // rebinding the local itself.)
+            bool immut = !stmt->as.let_stmt.is_var;
+            Symbol* sym = symbol_table_define(symbols, ctx->ast_arena, stmt->as.let_stmt.name, NULL, t, immut);
+            if (stmt->as.let_stmt.is_const) {
+                sym->bind_kind = BIND_CONST;
+                sema_fold_const(ctx, module, symbols, stmt->as.let_stmt.value, sym, stmt->line, stmt->column);
+            } else {
+                sym->bind_kind = immut ? BIND_LET : BIND_MUTABLE;
+            }
             break;
         }
         case AST_STMT_RET: {
@@ -813,18 +974,29 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
             if (stmt->as.assign_stmt.target->resolved_type) ensure_type_match(ctx, stmt->as.assign_stmt.target->resolved_type, &stmt->as.assign_stmt.value);
             // View restriction checks
             if (stmt->as.assign_stmt.target->kind == AST_EXPR_IDENT) {
+                // Rebinding the local itself: legal only for `var`.
                 Symbol* sym = symbol_table_lookup(symbols, stmt->as.assign_stmt.target->as.ident);
                 if (sym && sym->is_immutable) {
-                    char buffer[160];
-                    snprintf(buffer, sizeof(buffer), "cannot assign to read-only view identifier '%.*s'",
-                        (int)stmt->as.assign_stmt.target->as.ident.len, stmt->as.assign_stmt.target->as.ident.data);
+                    char buffer[200];
+                    int nl = (int)stmt->as.assign_stmt.target->as.ident.len;
+                    const char* nm = stmt->as.assign_stmt.target->as.ident.data;
+                    if (sym->bind_kind == BIND_CONST) {
+                        snprintf(buffer, sizeof(buffer), "cannot assign to constant '%.*s'", nl, nm);
+                    } else if (sym->bind_kind == BIND_LET) {
+                        snprintf(buffer, sizeof(buffer), "cannot reassign immutable 'let' binding '%.*s'; declare it with 'var' to allow reassignment", nl, nm);
+                    } else {
+                        snprintf(buffer, sizeof(buffer), "cannot assign to read-only view identifier '%.*s'", nl, nm);
+                    }
                     diag_error(module->file_path, (int)stmt->line, (int)stmt->column, buffer);
                     module->had_error = true;
                 }
             } else if (stmt->as.assign_stmt.target->kind == AST_EXPR_MEMBER &&
                        stmt->as.assign_stmt.target->as.member.object->kind == AST_EXPR_IDENT) {
+                // Mutating a FIELD. Only a read-only borrow (view param) forbids
+                // this — a `let`/`var` binding's value is mutable, only rebinding
+                // the local is governed by let/var.
                 Symbol* sym = symbol_table_lookup(symbols, stmt->as.assign_stmt.target->as.member.object->as.ident);
-                if (sym && sym->is_immutable) {
+                if (sym && sym->is_immutable && sym->bind_kind == BIND_READONLY_REF) {
                     char buffer[160];
                     snprintf(buffer, sizeof(buffer), "cannot mutate field of read-only view '%.*s'",
                         (int)stmt->as.assign_stmt.target->as.member.object->as.ident.len,
