@@ -39,30 +39,42 @@ Implemented so far (Live / bytecode VM only):
     safely for the worker:
     - **path 1** — by-value params: scalar any-mode-but-`mod`; enum
       plain/own/copy.
-    - **path 2** — `own`/`copy`/plain `String`: the spawn site hands the
-      worker a private `rae_string_copy` (the parent keeps and drops its own
-      original), so the worker owns a stable heap with no aliasing. Sidesteps
-      move-tracking and the statement temp-pool entirely. ASan/UBSan-clean.
+    - **path 2** — `own`/`copy`/plain heap args. The spawn site hands the
+      worker a private copy so it owns a stable heap with no aliasing (the
+      parent keeps and drops its own original). Sidesteps move-tracking and the
+      statement temp-pool entirely. ASan/UBSan-clean.
+      - `String` → `rae_string_copy(arg)`.
+      - heap aggregate (`List`/`Map` instance, or a non-generic non-`c_struct`
+        user struct that owns heap — anything with a `rae_deep_copy_<T>`
+        helper): an aliasing **lvalue** arg (`x` / `x.f` / `x[i]`) is
+        deep-copied at the spawn site; a fresh **rvalue** arg (call result /
+        object literal) already owns its heap and just moves to the worker.
+      The arg is emitted under the param's declared type so object/collection
+      literals get the right C compound-literal type.
 
     A per-function pthread thunk packs the (by-value / copied) args and
-    `pthread_create`s; `get()` joins. Verified: two `slow(view Int,…)` and two
-    `greet(own String, view Int)` workers each run concurrently, correct
-    results, parent's source `String` intact afterward.
-  - **Sequential fallback** for heap *aggregate* args (`List`/`Map`/struct),
-    `mod`, `view`-of-`String`, and `view`-of-enum (those are pointers /
-    need deep-copy coercion) — runs synchronously into a completed task.
-    Same observable result, just not parallel.
+    `pthread_create`s; `get()` joins. Verified concurrent + correct +
+    parent-intact, ASan/UBSan-clean: `greet(own String, view Int)`,
+    `joinNames(own List(String))`, `describe(own Person)` (struct w/ String
+    field), `sumList(own List(Int))`, and an object-literal rvalue arg.
+  - **Sequential fallback** for `mod`, `view`-of-`String`, `view`-of-enum,
+    `view`-of-aggregate (pointers into the parent), `c_struct`/generic-instance
+    struct args (no deep-copy helper), and POD-struct-by-value args — runs
+    synchronously into a completed task. Same observable result, not parallel.
   - **Join-on-drop**: `rae_task_drop` joins+frees a `Task` local at scope exit
     so a worker can't outlive its scope. The String temp pool is `__thread`
     (concurrent workers no longer corrupt each other's interpolation).
 
 The **first milestone is complete** on both backends, and the compiled backend
-has **real parallelism for value-arg and `String`-arg spawns**.
+has **real parallelism for value-arg and `own`/`copy`/plain heap-arg spawns**
+(`String`, `List`/`Map`, heap user structs).
 
-Remaining: extend compiled threads to heap *aggregate* args (`List`/`Map`/
-struct — needs `rae_deep_copy_<T>` packed into the spawn site, the `String`
-slice generalized) and to `mod`/`view`-enum args (need deref/coercion in the
-thunk; until then they're correctly sequential); make `g_mem_*` counters atomic
+Remaining: thread POD-struct-by-value args (trivially sound, just not wired);
+generalize nested-generic-rvalue spawn args (a *pre-existing* discovery gap —
+`f(createList())` fails to specialize whether or not it's spawned; use a
+let-binding); extend threads to `mod`/`view`-enum/`view`-aggregate args (need
+deref/coercion in the thunk; until then they're correctly sequential); make
+`g_mem_*` counters atomic
 (currently a benign stats-only race under threads); `Channel`, atomics, truly
 parallel `parallelLoop` over disjoint shards; `detach`; `taskScope`
 cancel-on-error/non-escape; `parallelLoop` disjointness checking (once
