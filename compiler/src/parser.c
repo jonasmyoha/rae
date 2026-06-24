@@ -585,9 +585,12 @@ static AstReturnItem* parse_return_clause(Parser* parser, bool multiline) {
     item->type = parse_type_ref(parser);
     head = append_return_item(head, item);
     
-    if (parser_check(parser, TOK_LBRACE) || parser_check(parser, TOK_EOF) || 
-        parser_check(parser, TOK_KW_FUNC) || parser_check(parser, TOK_KW_TYPE)) break;
-    
+    if (parser_check(parser, TOK_LBRACE) || parser_check(parser, TOK_EOF) ||
+        parser_check(parser, TOK_KW_FUNC) || parser_check(parser, TOK_KW_TYPE) ||
+        parser_check(parser, TOK_KW_ENUM) || parser_check(parser, TOK_KW_LET) ||
+        parser_check(parser, TOK_KW_VAR) || parser_check(parser, TOK_KW_CONST) ||
+        parser_check(parser, TOK_KW_EXTERN)) break;
+
     parser_consume_comma(parser, multiline, "return type list");
     if (parser_check(parser, TOK_LBRACE)) {
       check_no_trailing_comma(parser, "return type list");
@@ -2196,12 +2199,21 @@ static AstDecl* parse_func_declaration(Parser* parser, bool is_extern) {
     const Token* end_brace = NULL;
     for (size_t i = 0; i < parser->count - parser->index; i++) {
       const Token* t = parser_peek_at(parser, i);
-      if (t->kind == TOK_LBRACE || t->kind == TOK_EOF || t->kind == TOK_KW_FUNC || t->kind == TOK_KW_TYPE) {
+      // Stop at the body brace or at the start of the NEXT top-level
+      // declaration, so a bodyless (extern) function's return clause doesn't
+      // overshoot into a following enum / let / var / const / func / type.
+      if (t->kind == TOK_LBRACE || t->kind == TOK_EOF || t->kind == TOK_KW_FUNC || t->kind == TOK_KW_TYPE
+          || t->kind == TOK_KW_ENUM || t->kind == TOK_KW_LET || t->kind == TOK_KW_VAR
+          || t->kind == TOK_KW_CONST || t->kind == TOK_KW_EXTERN) {
         end_brace = t;
         break;
       }
     }
-    bool multiline_ret = end_brace ? is_multiline(ret_token, end_brace) : false;
+    // An extern function has no body, so its return clause ends with the
+    // signature line — never treat it as a multiline (tuple) return, otherwise
+    // the lookahead's terminator (the next decl, on a later line) makes it look
+    // multiline and it swallows the following declaration.
+    bool multiline_ret = (!is_extern && end_brace) ? is_multiline(ret_token, end_brace) : false;
     decl->as.func_decl.returns = parse_return_clause(parser, multiline_ret);
   }
   
