@@ -298,15 +298,15 @@ func setFixedRect(world: mod UiWorld, entity: view EntityId, w: view Float, h: v
   let r: Rect = { x: 0.0, y: 0.0, w: w, h: h }
   componentSet(this: world.rects, entity: entity, data: r)
   let s: Size = {
-    w: SizeAxis { mode: SizeMode.Fixed, min: -1, max: -1 }
-    h: SizeAxis { mode: SizeMode.Fixed, min: -1, max: -1 }
+    w: SizeAxis { mode: SizeMode.fixed, min: -1, max: -1 }
+    h: SizeAxis { mode: SizeMode.fixed, min: -1, max: -1 }
   }
   componentSet(this: world.sizes, entity: entity, data: s)
 }
 
 func setCircleShape(world: mod UiWorld, entity: view EntityId, fill: view RgbaColor) {
   let sh: Shape = {
-    kind: ShapeKind.Circle
+    kind: ShapeKind.circle
     fill: fill
     stroke: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
     strokeWidth: 0.0
@@ -317,7 +317,7 @@ func setCircleShape(world: mod UiWorld, entity: view EntityId, fill: view RgbaCo
 
 func setRectShape(world: mod UiWorld, entity: view EntityId, fill: view RgbaColor) {
   let sh: Shape = {
-    kind: ShapeKind.Rect
+    kind: ShapeKind.rect
     fill: fill
     stroke: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
     strokeWidth: 0.0
@@ -336,7 +336,7 @@ func setBackdropSprite(world: mod UiWorld, entity: view EntityId, key: own Strin
   let sp: Sprite = {
     textureKey: key
     tint: tint
-    scaleMode: ScaleMode.Stretch
+    scaleMode: ScaleMode.stretch
     tileScale: Vec2 { x: 1.0, y: 1.0 }
     nineSlice: Insets { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
     hasNineSlice: false
@@ -346,7 +346,7 @@ func setBackdropSprite(world: mod UiWorld, entity: view EntityId, key: own Strin
 
 func setRoundedShape(world: mod UiWorld, entity: view EntityId, fill: view RgbaColor, radius: view Float) {
   let sh: Shape = {
-    kind: ShapeKind.RoundedRect
+    kind: ShapeKind.roundedRect
     fill: fill
     stroke: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
     strokeWidth: 0.0
@@ -359,7 +359,7 @@ func setDebugText(world: mod UiWorld, entity: view EntityId, text: own String, s
   let t: Text = {
     text: text
     styleId: styleId
-    wrapWidthMode: WrapWidthMode.None
+    wrapWidthMode: WrapWidthMode.none
   }
   componentSet(this: world.texts, entity: entity, data: t)
 }
@@ -376,10 +376,10 @@ func setOnClickAction(world: mod UiWorld, entity: view EntityId, actionId: own S
 
 func setStackLayout(world: mod UiWorld, entity: view EntityId) {
   let lay: Layout = {
-    kind: LayoutType.Stack
+    kind: LayoutType.stack
     gap: 0.0
-    alignMain: AlignKind.Center
-    alignCross: AlignKind.Center
+    alignMain: AlignKind.center
+    alignCross: AlignKind.center
     columns: 0
     rowGap: 0.0
     columnGap: 0.0
@@ -389,10 +389,10 @@ func setStackLayout(world: mod UiWorld, entity: view EntityId) {
 
 func setVerticalLayout(world: mod UiWorld, entity: view EntityId, gap: view Float) {
   let lay: Layout = {
-    kind: LayoutType.Vertical
+    kind: LayoutType.vertical
     gap: gap
-    alignMain: AlignKind.Start
-    alignCross: AlignKind.Stretch
+    alignMain: AlignKind.start
+    alignCross: AlignKind.stretch
     columns: 0
     rowGap: 0.0
     columnGap: 0.0
@@ -402,9 +402,9 @@ func setVerticalLayout(world: mod UiWorld, entity: view EntityId, gap: view Floa
 
 func setHorizontalLayout(world: mod UiWorld, entity: view EntityId, gap: view Float, alignCross: AlignKind) {
   let lay: Layout = {
-    kind: LayoutType.Horizontal
+    kind: LayoutType.horizontal
     gap: gap
-    alignMain: AlignKind.Start
+    alignMain: AlignKind.start
     alignCross: alignCross
     columns: 0
     rowGap: 0.0
@@ -473,7 +473,7 @@ func buildSwitchRow(
   let row: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: row, w: width, h: 56.0)
   let smallGap: Float = 12.0
-  setHorizontalLayout(world: world, entity: row, gap: smallGap, alignCross: AlignKind.Center)
+  setHorizontalLayout(world: world, entity: row, gap: smallGap, alignCross: AlignKind.center)
   # OnClick on the ROW (not the pill) so the entire row — label + gap
   # + pill — is a single tap target. Hit-test walks children first
   # and only falls back to the parent when no child carries an
@@ -576,7 +576,7 @@ func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret Enti
 
   let themeLabel: String = "Dark theme"
   let themeAction: String = debugActionToggleTheme
-  let themeOn: Bool = currentTheme().mode is ThemeMode.Dark
+  let themeOn: Bool = currentTheme().mode is ThemeMode.dark
   let themeRow: EntityId = buildSwitchRow(
     world: world
     labelText: themeLabel
@@ -707,7 +707,7 @@ func dispatchDebugAction(input: view InputSystem, debug: mod DebugSystem) pub re
     }
     if actionId.equals(other: debugActionToggleTheme) {
       let cur: Theme = currentTheme()
-      if cur.mode is ThemeMode.Dark {
+      if cur.mode is ThemeMode.dark {
         setActiveTheme(theme: lightTheme())
       } else {
         setActiveTheme(theme: darkTheme())

@@ -27,8 +27,8 @@ func buildSearchField(world: mod UiWorld) ret EntityId {
   # "input chip" without depending on a theme token.
   let fieldBg: RgbaColor = { r: 36, g: 36, b: 42, a: 255 }
   setShapeRounded(world: world, entity: field, fill: fieldBg, radius: 18.0)
-  let layH: LayoutType = LayoutType.Horizontal
-  let alignC: AlignKind = AlignKind.Center
+  let layH: LayoutType = LayoutType.horizontal
+  let alignC: AlignKind = AlignKind.center
   setLayout(world: world, entity: field, kind: layH, gap: spaceM, alignCross: alignC)
   setPaddingAll(world: world, entity: field, n: spaceL)
 
@@ -62,8 +62,8 @@ func buildRecentRow(world: mod UiWorld, term: view String) ret EntityId {
   let rowW: Float = screenW - outerPad * 2.0
   let rowH: Float = 36.0
   setRectFixed(world: world, entity: row, w: rowW, h: rowH)
-  let layH: LayoutType = LayoutType.Horizontal
-  let alignC: AlignKind = AlignKind.Center
+  let layH: LayoutType = LayoutType.horizontal
+  let alignC: AlignKind = AlignKind.center
   setLayout(world: world, entity: row, kind: layH, gap: 0.0, alignCross: alignC)
 
   let label: EntityId = createEntity(world: world)
@@ -83,8 +83,8 @@ func buildRecentSection(world: mod UiWorld) ret EntityId {
   # Header + 3 rows of ~36 + outerGap between each (3 gaps).
   let h: Float = 28.0 + 36.0 * 3.0 + outerGap * 3.0
   setRectFixed(world: world, entity: section, w: w, h: h)
-  let layV: LayoutType = LayoutType.Vertical
-  let alignS: AlignKind = AlignKind.Start
+  let layV: LayoutType = LayoutType.vertical
+  let alignS: AlignKind = AlignKind.start
   setLayout(world: world, entity: section, kind: layV, gap: outerGap, alignCross: alignS)
 
   let header: EntityId = createEntity(world: world)
@@ -111,8 +111,8 @@ func buildRecentSection(world: mod UiWorld) ret EntityId {
 func mountSearchPage(world: mod UiWorld) pub ret EntityId {
   let root: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: root, w: screenW, h: screenH)
-  let layV: LayoutType = LayoutType.Vertical
-  let alignS: AlignKind = AlignKind.Start
+  let layV: LayoutType = LayoutType.vertical
+  let alignS: AlignKind = AlignKind.start
   setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
   setPaddingAll(world: world, entity: root, n: outerPad)
 

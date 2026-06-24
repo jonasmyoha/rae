@@ -61,14 +61,14 @@ func main() {
   loop true {
     sleep(ms: 150)
     let sig: ReloadSignal = pollReloadSignal(w: w)
-    if sig.verb is ReloadVerb.Reload {
+    if sig.verb is ReloadVerb.reload {
       let next: Int = count + 1
       let body: String = "{next}"
       writeHotReloadState(state: body)
       log("[reload] persisting count={next}, exiting")
       exit(code: 0)
     }
-    if sig.verb is ReloadVerb.Restart {
+    if sig.verb is ReloadVerb.restart {
       log("[restart] clearing state, exiting")
       clearHotReloadState()
       exit(code: 0)

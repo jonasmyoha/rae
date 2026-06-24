@@ -181,12 +181,12 @@ func parseSizeMode(s: view String) ret SizeMode {
   let hugStr: String = "Hug"
   let fillStr: String = "Fill"
   if s.equals(other: hugStr) {
-    ret SizeMode.Hug
+    ret SizeMode.hug
   }
   if s.equals(other: fillStr) {
-    ret SizeMode.Fill
+    ret SizeMode.fill
   }
-  ret SizeMode.Fixed
+  ret SizeMode.fixed
 }
 
 func parseLayoutType(s: view String) ret LayoutType {
@@ -195,18 +195,18 @@ func parseLayoutType(s: view String) ret LayoutType {
   let g: String = "Grid"
   let st: String = "Stack"
   if s.equals(other: h) {
-    ret LayoutType.Horizontal
+    ret LayoutType.horizontal
   }
   if s.equals(other: v) {
-    ret LayoutType.Vertical
+    ret LayoutType.vertical
   }
   if s.equals(other: g) {
-    ret LayoutType.Grid
+    ret LayoutType.grid
   }
   if s.equals(other: st) {
-    ret LayoutType.Stack
+    ret LayoutType.stack
   }
-  ret LayoutType.None
+  ret LayoutType.none
 }
 
 func parseAlignKind(s: view String) ret AlignKind {
@@ -215,66 +215,66 @@ func parseAlignKind(s: view String) ret AlignKind {
   let sb: String = "SpaceBetween"
   let str: String = "Stretch"
   if s.equals(other: c) {
-    ret AlignKind.Center
+    ret AlignKind.center
   }
   if s.equals(other: e) {
-    ret AlignKind.End
+    ret AlignKind.end
   }
   if s.equals(other: sb) {
-    ret AlignKind.SpaceBetween
+    ret AlignKind.spaceBetween
   }
   if s.equals(other: str) {
-    ret AlignKind.Stretch
+    ret AlignKind.stretch
   }
-  ret AlignKind.Start
+  ret AlignKind.start
 }
 
 func parseShapeKind(s: view String) ret ShapeKind {
   let rr: String = "RoundedRect"
   let c: String = "Circle"
   if s.equals(other: rr) {
-    ret ShapeKind.RoundedRect
+    ret ShapeKind.roundedRect
   }
   if s.equals(other: c) {
-    ret ShapeKind.Circle
+    ret ShapeKind.circle
   }
-  ret ShapeKind.Rect
+  ret ShapeKind.rect
 }
 
 func parseScaleMode(s: view String) ret ScaleMode {
   let fi: String = "Fill"
   let st: String = "Stretch"
   if s.equals(other: fi) {
-    ret ScaleMode.Fill
+    ret ScaleMode.fill
   }
   if s.equals(other: st) {
-    ret ScaleMode.Stretch
+    ret ScaleMode.stretch
   }
-  ret ScaleMode.Fit
+  ret ScaleMode.fit
 }
 
 func parseWrapWidthMode(s: view String) ret WrapWidthMode {
   let nw: String = "NodeWidth"
   if s.equals(other: nw) {
-    ret WrapWidthMode.NodeWidth
+    ret WrapWidthMode.nodeWidth
   }
-  ret WrapWidthMode.None
+  ret WrapWidthMode.none
 }
 
 func parseHitAreaKind(s: view String) ret HitAreaKind {
   let rr: String = "RoundedRect"
   if s.equals(other: rr) {
-    ret HitAreaKind.RoundedRect
+    ret HitAreaKind.roundedRect
   }
-  ret HitAreaKind.Rect
+  ret HitAreaKind.rect
 }
 
 func parseMaskKind(s: view String) ret MaskKind {
   let rr: String = "RoundedRect"
   if s.equals(other: rr) {
-    ret MaskKind.RoundedRect
+    ret MaskKind.roundedRect
   }
-  ret MaskKind.Circle
+  ret MaskKind.circle
 }
 
 func parseResolverMode(s: view String) ret ResolverMode {
@@ -282,15 +282,15 @@ func parseResolverMode(s: view String) ret ResolverMode {
   let h: String = "Hash"
   let d: String = "Direct"
   if s.equals(other: r) {
-    ret ResolverMode.Random
+    ret ResolverMode.random
   }
   if s.equals(other: h) {
-    ret ResolverMode.Hash
+    ret ResolverMode.hash
   }
   if s.equals(other: d) {
-    ret ResolverMode.Direct
+    ret ResolverMode.direct
   }
-  ret ResolverMode.Fixed
+  ret ResolverMode.fixed
 }
 
 func parseTextFormat(s: view String) ret TextFormat {
@@ -299,18 +299,18 @@ func parseTextFormat(s: view String) ret TextFormat {
   let c: String = "Coins"
   let h: String = "HandRank"
   if s.equals(other: n) {
-    ret TextFormat.Number
+    ret TextFormat.number
   }
   if s.equals(other: p) {
-    ret TextFormat.Percent1
+    ret TextFormat.percent1
   }
   if s.equals(other: c) {
-    ret TextFormat.Coins
+    ret TextFormat.coins
   }
   if s.equals(other: h) {
-    ret TextFormat.HandRank
+    ret TextFormat.handRank
   }
-  ret TextFormat.Plain
+  ret TextFormat.plain
 }
 
 # -----------------------------------------------------------------
@@ -417,8 +417,8 @@ func deserMargin(doc: view JsonDoc, val: view JsonValue) ret Margin {
 func deserAlign(doc: view JsonDoc, val: view JsonValue) ret Align {
   let xIdx: Int = jsonField(doc: doc, this: val, key: "x")
   let yIdx: Int = jsonField(doc: doc, this: val, key: "y")
-  var xK: AlignKind = AlignKind.Start
-  var yK: AlignKind = AlignKind.Start
+  var xK: AlignKind = AlignKind.start
+  var yK: AlignKind = AlignKind.start
   if xIdx >= 0 {
     let xv: JsonValue = jsonValueAt(doc: doc, idx: xIdx)
     let s: String = jsonString(this: xv, fallback: "Start")
