@@ -46,7 +46,7 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
   # SceneInstance resolver, once as orphans here).
   let nodeCount: Int = scene.nodes.length
   let reachable: List(Bool) = createList(Bool, cap: nodeCount)
-  let ri: Int = 0
+  var ri: Int = 0
   loop ri < nodeCount {
     reachable.add(value: false)
     ri = ri + 1
@@ -66,7 +66,7 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
       reachable.set(index: cur, value: true)
       let n: view SceneNode => sceneNodeAt(this: scene, idx: cur)
       let cn: Int = n.childrenIds.length
-      let ci: Int = 0
+      var ci: Int = 0
       loop ci < cn {
         let childId: String = n.childrenIds.get(index: ci)
         let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
@@ -84,7 +84,7 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
   # intact for sceneNodeIndex lookups.
   let entitiesByNodeIndex: List(EntityId) = createList(EntityId, cap: nodeCount)
   let nodeIdsMap: mod StringMap(Int) => world.nodeIds
-  let i: Int = 0
+  var i: Int = 0
   loop i < nodeCount {
     let isReachable: Bool = reachable.get(index: i)
     if isReachable {
@@ -106,7 +106,7 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
 
   # ---------- pass 2: apply components ----------
   let docView: view JsonDoc => scene.doc
-  let j: Int = 0
+  var j: Int = 0
   loop j < nodeCount {
     let jReach: Bool = reachable.get(index: j)
     if jReach is false {
@@ -126,7 +126,7 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
     # Walk the node's component bag in declaration order.
     let bag: JsonValue = jsonValueAt(doc: docView, idx: node.componentsValueIdx)
     let keyCount: Int = jsonObjectLen(this: bag)
-    let k: Int = 0
+    var k: Int = 0
     loop k < keyCount {
       let key: String = jsonObjectKeyAt(doc: docView, this: bag, idx: k)
       # Children is hierarchy, not a component — handled in pass 3.
@@ -150,7 +150,7 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
   }
 
   # ---------- pass 3: hierarchy (Children + Parent) ----------
-  let p: Int = 0
+  var p: Int = 0
   loop p < nodeCount {
     let pReach: Bool = reachable.get(index: p)
     if pReach is false {
@@ -161,7 +161,7 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
     let kn: Int = node.childrenIds.length
     if kn > 0 {
       let kids: List(EntityId) = createList(EntityId, cap: kn)
-      let q: Int = 0
+      var q: Int = 0
       loop q < kn {
         let childId: String = node.childrenIds.get(index: q)
         let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
@@ -187,7 +187,7 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
   }
   let rootEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: rootIdx)
   if pageId.length() > 0 {
-    let copiedId: String = ""
+    var copiedId: String = ""
     copiedId = copiedId.concat(other: pageId)
     let pr: PageRoot = { id: own copiedId }
     componentSet(this: world.pageRoots, entity: rootEntity, data: own pr)
@@ -216,11 +216,11 @@ func resolveSceneInstances(
   registry: view SceneRegistry
   pageId: view String
 ) pub {
-  let safety: Int = 0
+  var safety: Int = 0
   loop safety < 32 {
-    let progressed: Bool = false
+    var progressed: Bool = false
     let n: Int = componentCount(this: world.sceneInstances)
-    let i: Int = 0
+    var i: Int = 0
     loop i < n {
       let entity: EntityId = componentEntityAt(this: world.sceneInstances, i: i)
       let inst: SceneInstance = componentGet(this: world.sceneInstances, entity: entity)
@@ -230,7 +230,7 @@ func resolveSceneInstances(
           let scene: view Scene => sceneRegistryGet(reg: registry, idx: idx)
           let overrides: List(SceneOverride) = createList(SceneOverride, cap: inst.overrideNodeIds.length)
           let m: Int = inst.overrideNodeIds.length
-          let j: Int = 0
+          var j: Int = 0
           loop j < m {
             let ov: SceneOverride = {
               nodeId: inst.overrideNodeIds.get(index: j)
@@ -268,7 +268,7 @@ func resolveSceneInstances(
 # inventory. Stable order: by NodeId in scene.nodes.
 func dumpScene(world: view UiWorld, scene: view Scene) {
   let n: Int = scene.nodes.length
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let node: view SceneNode => sceneNodeAt(this: scene, idx: i)
     let entityIdx: Int = sceneNodeIndex(this: scene, nodeId: node.nodeId)
@@ -280,12 +280,12 @@ func dumpScene(world: view UiWorld, scene: view Scene) {
     } else {
       let entityRaw: Int = entityOpt
       let entity: EntityId = entityId(v: entityRaw)
-      let parentStr: String = "(root)"
+      var parentStr: String = "(root)"
       if componentHas(this: world.parents, entity: entity) {
         let pl: Parent = componentGet(this: world.parents, entity: entity)
         parentStr = "parent=ent{pl.parent.value}"
       }
-      let comps: String = componentNamesFor(world: world, entity: entity)
+      var comps: String = componentNamesFor(world: world, entity: entity)
       log("  [{node.nodeId}] ent={entity.value} {parentStr} comps=[{comps}]")
     }
     i = i + 1
@@ -355,8 +355,8 @@ func componentNamesFor(world: view UiWorld, entity: view EntityId) ret String {
     parts.add(value: "Children")
   }
   let comma: String = ","
-  let acc: String = ""
-  let i: Int = 0
+  var acc: String = ""
+  var i: Int = 0
   loop i < parts.length {
     let s: String = parts.get(index: i)
     if i is 0 {

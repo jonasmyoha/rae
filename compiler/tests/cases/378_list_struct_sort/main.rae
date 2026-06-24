@@ -12,10 +12,10 @@ type Score {
 # get / set / swap from core.rae).
 func sortScoresDesc(xs: mod List(Score)) {
   let n: Int = xs.length
-  let i: Int = 0
+  var i: Int = 0
   loop i < n - 1 {
-    let max: Int = i
-    let j: Int = i + 1
+    var max: Int = i
+    var j: Int = i + 1
     loop j < n {
       let a: Score = rae_ext_rae_buf_get(buf: xs.data, index: max)
       let b: Score = rae_ext_rae_buf_get(buf: xs.data, index: j)
@@ -44,7 +44,7 @@ func main() {
 
   sortScoresDesc(board)
 
-  let i: Int = 0
+  var i: Int = 0
   loop i < board.length {
     let s: Score = rae_ext_rae_buf_get(buf: board.data, index: i)
     log("{i + 1}. {s.name} {s.points}")

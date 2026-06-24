@@ -20,10 +20,10 @@ func hitSphere(cx: view Float, cy: view Float, cz: view Float, r: view Float,
 }
 
 func rayColor(scene: view List(Float), rdx: view Float, rdy: view Float, rdz: view Float) ret Int {
-    let best: Float = 1000000.0
-    let hitIdx: Int = -1
+    var best: Float = 1000000.0
+    var hitIdx: Int = -1
     let count: Int = scene.length / 4
-    let k: Int = 0
+    var k: Int = 0
     loop k < count {
         let b: Int = k * 4
         let t: Float = hitSphere(cx: scene.get(index: b), cy: scene.get(index: b + 1),
@@ -37,9 +37,9 @@ func rayColor(scene: view List(Float), rdx: view Float, rdy: view Float, rdz: vi
         }
         k = k + 1
     }
-    let cr: Float = 0.0
-    let cg: Float = 0.0
-    let cb: Float = 0.0
+    var cr: Float = 0.0
+    var cg: Float = 0.0
+    var cb: Float = 0.0
     if hitIdx >= 0 {
         let b: Int = hitIdx * 4
         let sr: Float = scene.get(index: b + 3)
@@ -65,10 +65,10 @@ func renderBand(scene: own List(Float), width: view Int, height: view Int,
     let vw: Float = aspect * 2.0
     let llx: Float = 0.0 - vw / 2.0
     let out: List(Int) = createList(cap: (y1 - y0) * width)
-    let y: Int = y0
+    var y: Int = y0
     loop y < y1 {
         let v: Float = (height - 1 - y).toFloat() / (height - 1).toFloat()
-        let x: Int = 0
+        var x: Int = 0
         loop x < width {
             let u: Float = x.toFloat() / (width - 1).toFloat()
             out.add(value: rayColor(scene: scene, rdx: llx + u * vw, rdy: -1.0 + v * 2.0, rdz: -1.0))
@@ -80,8 +80,8 @@ func renderBand(scene: own List(Float), width: view Int, height: view Int,
 }
 
 func checksum(buf: view List(Int)) ret Int {
-    let s: Int = 0
-    let i: Int = 0
+    var s: Int = 0
+    var i: Int = 0
     loop i < buf.length {
         s = (s + buf.get(index: i) % 1000003) % 1000003
         i = i + 1
@@ -103,7 +103,7 @@ func buildScene() ret List(Float) {
 }
 
 func appendBand(full: mod List(Int), part: view List(Int)) {
-    let j: Int = 0
+    var j: Int = 0
     loop j < part.length {
         full.add(value: part.get(index: j))
         j = j + 1
@@ -114,7 +114,7 @@ func main() {
     let width: Int = 80
     let height: Int = 60
 
-    let single: List(Int) = renderBand(scene: buildScene(), width: width, height: height, y0: 0, y1: height)
+    var single: List(Int) = renderBand(scene: buildScene(), width: width, height: height, y0: 0, y1: height)
     let cs1: Int = checksum(buf: single)
 
     let r1: Int = height / 4

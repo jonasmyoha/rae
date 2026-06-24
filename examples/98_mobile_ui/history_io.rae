@@ -45,8 +45,8 @@ let historyFilePath: String = "examples/98_mobile_ui/temp/play_history.json"
 # (suspect alias return path in lib/string.replace when the pattern
 # isn't found).
 func jsonEscape(s: view String) ret String {
-  let out: String = ""
-  let i: Int = 0
+  var out: String = ""
+  var i: Int = 0
   let n: Int = s.length()
   let bs: String = "\\"
   let q: String = "\""
@@ -84,14 +84,14 @@ func saveHistoryToJson(history: view PlayHistory, path: view String) pub {
   let q: String = "\""
   let colon: String = ":"
 
-  let content: String = ""
+  var content: String = ""
   content = content.concat(other: openBrace).concat(other: nl)
   content = content.concat(other: "  ").concat(other: q).concat(other: "entries").concat(other: q)
   content = content.concat(other: colon).concat(other: " ").concat(other: openBracket).concat(other: nl)
 
   let comma: String = ","
   let n: Int = history.entries.length
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let e: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: i)
     # Deep-copy each owned-String field into a fresh local so the
@@ -155,7 +155,7 @@ func restoreHistory(history: mod PlayHistory, path: view String) pub {
   }
   let entriesVal: JsonValue = jsonValueAt(doc: doc, idx: entriesIdx)
   let n: Int = jsonArrayLen(this: entriesVal)
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let v: JsonValue = jsonArrayAt(doc: doc, this: entriesVal, idx: i)
     let empty: String = ""
@@ -200,7 +200,7 @@ func refetchHistoryArt(history: view PlayHistory, reg: mod TextureRegistry) pub 
   let prefix: String = "spotify-art:"
   let pLen: Int = prefix.length()
   let n: Int = history.entries.length
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let e: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: i)
     if e.textureKey.startsWith(prefix: prefix) {
@@ -234,8 +234,8 @@ func refetchHistoryArtChunk(history: view PlayHistory, reg: mod TextureRegistry,
   let prefix: String = "spotify-art:"
   let pLen: Int = prefix.length()
   let n: Int = history.entries.length
-  let did: Int = 0
-  let i: Int = n - 1
+  var did: Int = 0
+  var i: Int = n - 1
   loop i >= 0 {
     if did >= budget {
       ret true

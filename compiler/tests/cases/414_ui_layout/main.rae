@@ -43,7 +43,7 @@ func setShapeRect(world: mod UiWorld, entity: view EntityId, r: view Int, g: vie
 
 func attachChildren(world: mod UiWorld, parent: view EntityId, kids: view List(EntityId)) {
   let kidsCopy: List(EntityId) = createList(EntityId, cap: kids.length)
-  let i: Int = 0
+  var i: Int = 0
   loop i < kids.length {
     let kid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
     kidsCopy.add(value: kid)
@@ -61,8 +61,8 @@ func attachChildren(world: mod UiWorld, parent: view EntityId, kids: view List(E
 }
 
 func dumpEntity(world: view UiWorld, entity: view EntityId, label: view String) {
-  let cr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
-  let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: entity)
+  var cr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
+  var wt: WorldTransform = componentGet(this: world.worldTransforms, entity: entity)
   log("{label} cr=({cr.x},{cr.y},{cr.w},{cr.h}) wt=({wt.x},{wt.y}) alpha={wt.alpha} visible={wt.visible}")
 }
 

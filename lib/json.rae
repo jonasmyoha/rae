@@ -217,7 +217,7 @@ func jsonField(doc: view JsonDoc, this: view JsonValue, key: view String) ret In
   if this.kind is not JsonKind.Object {
     ret -1
   }
-  let i: Int = 0
+  var i: Int = 0
   loop i < this.rangeLen {
     let f: JsonField = fieldAt(doc: doc, idx: this.rangeStart + i)
     if f.key.equals(other: key) {
@@ -315,8 +315,8 @@ func parseString(p: mod JsonParser) ret String {
     ret ""
   }
   let start: Int = p.pos
-  let result: String = ""
-  let chunkStart: Int = p.pos
+  var result: String = ""
+  var chunkStart: Int = p.pos
   loop p.pos < p.source.length() {
     let c: Char32 = p.source.at(index: p.pos)
     if c is '"' {
@@ -335,7 +335,7 @@ func parseString(p: mod JsonParser) ret String {
         ret result
       }
       let esc: Char32 = p.source.at(index: p.pos)
-      let one: String = ""
+      var one: String = ""
       if esc is '"' {
         one = "\""
       } else {
@@ -472,7 +472,7 @@ func parseValue(
             p.pos = p.pos
             let firstField: Int = fields.length
             let count: Int = localFields.length
-            let i: Int = 0
+            var i: Int = 0
             loop i < count {
               let f2: JsonField = rae_ext_rae_buf_get(buf: localFields.data, index: i)
               fields.add(value: f2)
@@ -539,7 +539,7 @@ func parseValue(
           if consume(p: p, c: ']') {
             let firstChild: Int = kids.length
             let count: Int = localKids.length
-            let i: Int = 0
+            var i: Int = 0
             loop i < count {
               let kidIdx: Int = rae_ext_rae_buf_get(buf: localKids.data, index: i)
               kids.add(value: kidIdx)

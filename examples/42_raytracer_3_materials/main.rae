@@ -38,7 +38,7 @@ func main() {
     let cam: Camera = buildCamera(pos: camPos, target: camTarget, vfovDeg: 45.0, aperture: 0.06, aspect: aspect)
 
     let fb: List(Int) = createList(cap: width * height)
-    let i: Int = 0
+    var i: Int = 0
     loop i < width * height {
         fb.add(value: 0)
         i = i + 1
@@ -61,18 +61,18 @@ func main() {
     let t1: Int = quadTotal(qw: rw, qh: tHt, tileSize: tileSize)
     let t2: Int = quadTotal(qw: lw, qh: bh, tileSize: tileSize)
     let t3: Int = quadTotal(qw: rw, qh: bh, tileSize: tileSize)
-    let n0: Int = 0
-    let n1: Int = 0
-    let n2: Int = 0
-    let n3: Int = 0
+    var n0: Int = 0
+    var n1: Int = 0
+    var n2: Int = 0
+    var n3: Int = 0
     let startMs: Int = nowMs()
-    let doneMs: Int = 0
+    var doneMs: Int = 0
     loop not windowShouldClose() {
         if n0 < t0 or n1 < t1 or n2 < t2 or n3 < t3 {
-            let c0: Int = n0
-            let c1: Int = n1
-            let c2: Int = n2
-            let c3: Int = n3
+            var c0: Int = n0
+            var c1: Int = n1
+            var c2: Int = n2
+            var c3: Int = n3
             if c0 >= t0 { c0 = t0 - 1 }
             if c1 >= t1 { c1 = t1 - 1 }
             if c2 >= t2 { c2 = t2 - 1 }
@@ -124,7 +124,7 @@ func main() {
         drawTextureEx(texture: tex, position: { x: 0.0, y: 0.0 }, rotation: 0.0, scale: dispScale, tint: { r: 255, g: 255, b: 255, a: 255 })
         let done: Int = n0 + n1 + n2 + n3
         let total: Int = t0 + t1 + t2 + t3
-        let pct: Int = done * 100 / total
+        var pct: Int = done * 100 / total
         if pct > 100 { pct = 100 }
         if doneMs > 0 {
             drawText(text: "step 3 | 4 threads, 1 per quadrant | {width}x{height} | done in {doneMs}ms",

@@ -115,8 +115,8 @@ func lastIndexOf(this: view String, sub: view String) ret Int {
   if needleLen > n {
     ret -1
   }
-  let result: Int = -1
-  let pos: Int = 0
+  var result: Int = -1
+  var pos: Int = 0
   loop pos <= n - needleLen {
     let tail: String = this.sub(start: pos, len: n - pos)
     let found: Int = tail.indexOf(sub: sub)
@@ -144,7 +144,7 @@ func split(this: view String, sep: view String) ret List(String) {
     add(result, value: this)
     ret result
   }
-  let remaining: String = this
+  var remaining: String = this
   loop true {
     let idx: Int = remaining.indexOf(sub: sep)
     if idx is -1 {
@@ -173,8 +173,8 @@ func join(this: view List(String), sep: view String) ret String {
   if this.length is 0 {
     ret ""
   }
-  let result: String = get(this, index: 0)
-  let i: Int = 1
+  var result: String = get(this, index: 0)
+  var i: Int = 1
   loop i < this.length {
     result = result.concat(other: sep).concat(other: get(this, index: i))
     i = i + 1

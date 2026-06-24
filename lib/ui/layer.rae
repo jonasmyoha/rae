@@ -47,7 +47,7 @@ func createStandardLayers(world: mod UiWorld) pub {
 # of the whole alive list.
 func findLayerEntity(world: view UiWorld, id: view String) pub ret EntityId {
   let n: Int = componentCount(this: world.layerRoots)
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let e: EntityId = componentEntityAt(this: world.layerRoots, i: i)
     let lr: LayerRoot = componentDataAt(this: world.layerRoots, i: i)
@@ -97,7 +97,7 @@ func collectPaintableRoots(world: view UiWorld) pub ret List(EntityId) {
   let roots: List(EntityId) = createList(EntityId, cap: 16)
   let alive: view List(EntityId) => world.alive
   let n: Int = alive.length
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let e: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: i)
     if componentHas(this: world.parents, entity: e) is false {
@@ -108,12 +108,12 @@ func collectPaintableRoots(world: view UiWorld) pub ret List(EntityId) {
     i = i + 1
   }
   let m: Int = roots.length
-  let outer: Int = 0
+  var outer: Int = 0
   loop outer < m {
-    let minIdx: Int = outer
+    var minIdx: Int = outer
     let outerE: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: outer)
-    let minOrd: Int = entityLayerOrder(world: world, entity: outerE)
-    let inner: Int = outer + 1
+    var minOrd: Int = entityLayerOrder(world: world, entity: outerE)
+    var inner: Int = outer + 1
     loop inner < m {
       let innerE: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: inner)
       let ord: Int = entityLayerOrder(world: world, entity: innerE)

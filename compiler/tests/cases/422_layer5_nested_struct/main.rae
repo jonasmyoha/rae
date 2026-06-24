@@ -16,7 +16,7 @@ type Outer {
 
 func transientOuter() {
   let o: Outer = { label: 1, inside: { ids: createList(Int, cap: 512) } }
-  let i: Int = 0
+  var i: Int = 0
   loop i < 512 {
     o.inside.ids.add(value: i)
     i = i + 1
@@ -27,7 +27,7 @@ func main() {
   transientOuter()
   let baselineKb: Int = processRssKb()
   let iterations: Int = 5000
-  let i: Int = 0
+  var i: Int = 0
   loop i < iterations {
     transientOuter()
     i = i + 1

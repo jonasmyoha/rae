@@ -26,12 +26,12 @@ func runStressMode(
   # Stress run length is overridable via env so we can do slope checks
   # across 50K / 100K / 200K windows without recompiling.
   let stressNEnv: String = getEnv(name: "RAE_UI_STRESS_N")
-  let stressN: Int = 50000
+  var stressN: Int = 50000
   if stressNEnv.length() > 0 {
     stressN = stressNEnv.toInt()
   }
-  let stressI: Int = 0
-  let lastLog: Int = 0
+  var stressI: Int = 0
+  var lastLog: Int = 0
   # Warm-up rebuild so font / texture / scene-loader one-shots don't land
   # in the baseline.
   let stressPlayback: PlaybackState = createPlaybackState()
@@ -44,7 +44,7 @@ func runStressMode(
   let baselineKb: Int = processRssKb()
   log("[stress] baseline rss_kb={baselineKb}")
   loop stressI < stressN {
-    let stressScreen: Screen = Screen.Album
+    var stressScreen: Screen = Screen.Album
     if (stressI - (stressI / 2) * 2) is 1 {
       stressScreen = Screen.Player
     }

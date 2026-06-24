@@ -5,7 +5,7 @@ import scene
 
 # A uniformly-distributed random unit vector (for diffuse scatter).
 func randomUnit() ret Vec3 {
-    let a: Float = random() * TAU()
+    let a: Float = random() * tau
     let z: Float = random() * 2.0 - 1.0
     let r: Float = sqrt(x: 1.0 - z * z)
     ret vec3(x: r * cos(x: a), y: r * sin(x: a), z: z)
@@ -28,9 +28,9 @@ func rayColor(world: view List(Sphere), ro: view Vec3, rd: view Vec3, depth: vie
     if depth <= 0 {
         ret vec3(x: 0.0, y: 0.0, z: 0.0)
     }
-    let best: Float = 1000000.0
-    let hitIdx: Int = -1
-    let i: Int = 0
+    var best: Float = 1000000.0
+    var hitIdx: Int = -1
+    var i: Int = 0
     loop i < world.length {
         let s: Sphere = world.at(index: i)
         let t: Float = hitSphere(s: s, ro: ro, rd: rd)
@@ -64,10 +64,10 @@ func renderRow(fb: mod List(Int), world: view List(Sphere), width: view Int, hei
     let llx: Float = 0.0 - vw / 2.0
     let ro: Vec3 = { x: 0.0, y: 0.0, z: 0.0 }
     let rowOff: Int = y * width
-    let x: Int = 0
+    var x: Int = 0
     loop x < width {
-        let acc: Vec3 = { x: 0.0, y: 0.0, z: 0.0 }
-        let sIdx: Int = 0
+        var acc: Vec3 = { x: 0.0, y: 0.0, z: 0.0 }
+        var sIdx: Int = 0
         loop sIdx < samples {
             let u: Float = (x.toFloat() + random()) / (width - 1).toFloat()
             let v: Float = ((height - 1 - y).toFloat() + random()) / (height - 1).toFloat()

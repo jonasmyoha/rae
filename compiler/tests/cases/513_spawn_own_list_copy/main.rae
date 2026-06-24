@@ -5,8 +5,8 @@
 import core
 
 func sumList(xs: own List(Int)) ret Int {
-    let total: Int = 0
-    let i: Int = 0
+    var total: Int = 0
+    var i: Int = 0
     loop i < xs.length {
         total = total + xs.get(index: i)
         i = i + 1
@@ -23,8 +23,8 @@ func main() {
     # Pass the same lvalue list to two workers; each gets a private copy.
     let ta: Task(Int) = spawn sumList(xs: data)
     let tb: Task(Int) = spawn sumList(xs: data)
-    let a: Int = ta.get()
-    let b: Int = tb.get()
+    var a: Int = ta.get()
+    var b: Int = tb.get()
 
     log("a={a}")
     log("b={b}")

@@ -22,7 +22,7 @@ let libraryFilePath: String = "examples/98_mobile_ui/temp/library.json"
 # users had before this feature.
 func librarySeedFromCatalog(albums: view List(Album)) pub ret List(String) {
   let lib: List(String) = createList(String, cap: albums.length)
-  let i: Int = 0
+  var i: Int = 0
   loop i < albums.length {
     let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: i)
     let copied: String = "{a.stem}"
@@ -36,7 +36,7 @@ func librarySeedFromCatalog(albums: view List(Album)) pub ret List(String) {
 # library is small (a few dozen entries at most for a phone-sized
 # music catalogue) so a hash map would be premature.
 func isInLibrary(library: view List(String), stem: view String) pub ret Bool {
-  let i: Int = 0
+  var i: Int = 0
   loop i < library.length {
     let s: String = library.get(index: i)
     if s.equals(other: stem) {
@@ -49,7 +49,7 @@ func isInLibrary(library: view List(String), stem: view String) pub ret Bool {
 
 # Remove `stem` from the library if present. No-op when missing.
 func removeFromLibrary(library: mod List(String), stem: view String) pub {
-  let i: Int = 0
+  var i: Int = 0
   loop i < library.length {
     let s: String = library.get(index: i)
     if s.equals(other: stem) {
@@ -82,12 +82,12 @@ func saveLibraryToJson(library: view List(String), path: view String) pub {
   let colon: String = ":"
   let comma: String = ","
 
-  let content: String = ""
+  var content: String = ""
   content = content.concat(other: openBrace).concat(other: nl)
   content = content.concat(other: "  ").concat(other: q).concat(other: "stems").concat(other: q)
   content = content.concat(other: colon).concat(other: " ").concat(other: openBracket).concat(other: nl)
   let n: Int = library.length
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let s: String = library.get(index: i)
     content = content.concat(other: "    ").concat(other: q).concat(other: s).concat(other: q)
@@ -131,7 +131,7 @@ func loadLibraryFromJson(albums: view List(Album), path: view String) pub ret Li
   let stemsVal: JsonValue = jsonValueAt(doc: doc, idx: stemsIdx)
   let n: Int = jsonArrayLen(this: stemsVal)
   let out: List(String) = createList(String, cap: n)
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let v: JsonValue = jsonArrayAt(doc: doc, this: stemsVal, idx: i)
     let empty: String = ""

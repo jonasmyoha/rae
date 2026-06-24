@@ -69,7 +69,7 @@ func emptyScene() ret Scene {
 # so a hash map isn't worth it. Returns -1 if missing.
 func sceneNodeIndex(this: view Scene, nodeId: view String) ret Int {
   let n: Int = this.nodes.length
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let node: view SceneNode => sceneNodeAt(this: this, idx: i)
     if node.nodeId.equals(other: nodeId) {
@@ -95,7 +95,7 @@ func extractChildrenIds(doc: view JsonDoc, nodeVal: view JsonValue) ret List(Str
   }
   let arr: JsonValue = jsonValueAt(doc: doc, idx: childrenIdx)
   let n: Int = jsonArrayLen(this: arr)
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let elem: JsonValue = jsonArrayAt(doc: doc, this: arr, idx: i)
     let empty: String = ""
@@ -188,7 +188,7 @@ func parseScene(source: view String) ret Scene {
   # First pass: build SceneNode entries.
   let nodesList: mod List(SceneNode) => scene.nodes
   let count: Int = jsonObjectLen(this: nodesVal)
-  let i: Int = 0
+  var i: Int = 0
   loop i < count {
     let nodeId: String = jsonObjectKeyAt(doc: doc, this: nodesVal, idx: i)
     let nodeVal: JsonValue = jsonObjectValueAt(doc: doc, this: nodesVal, idx: i)
@@ -218,11 +218,11 @@ func parseScene(source: view String) ret Scene {
 
   # Validate every Children entry resolves.
   let nN: Int = scene.nodes.length
-  let j: Int = 0
+  var j: Int = 0
   loop j < nN {
     let n: view SceneNode => sceneNodeAt(this: scene, idx: j)
     let kn: Int = n.childrenIds.length
-    let k: Int = 0
+    var k: Int = 0
     loop k < kn {
       let childId: String = n.childrenIds.get(index: k)
       if sceneNodeIndex(this: scene, nodeId: childId) < 0 {

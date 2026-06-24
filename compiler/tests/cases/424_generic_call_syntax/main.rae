@@ -6,20 +6,20 @@ import core
 func main() {
   # Form 1: named argument using the param's actual name.
   # `func createList(T: type, cap: view Int)` → named `T:`.
-  let a: List(Int) = createList(T: Int, cap: 4)
+  var a: List(Int) = createList(T: Int, cap: 4)
   a.add(value: 10)
   a.add(value: 20)
   log("a={a.length}:{a.get(index: 0)},{a.get(index: 1)}")
 
   # Form 2: positional first argument as type.
-  let b: List(String) = createList(String, cap: 4)
+  var b: List(String) = createList(String, cap: 4)
   b.add(value: "x")
   b.add(value: "y")
   b.add(value: "z")
   log("b={b.length}:{b.get(index: 0)},{b.get(index: 2)}")
 
   # Form 3: dot-call on the type.
-  let c: List(Float) = Float.createList(cap: 4)
+  var c: List(Float) = Float.createList(cap: 4)
   c.add(value: 1.5)
   c.add(value: 2.5)
   log("c={c.length}:{c.get(index: 1)}")

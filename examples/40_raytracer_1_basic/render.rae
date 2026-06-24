@@ -19,9 +19,9 @@ func hitSphere(s: view Sphere, ro: view Vec3, rd: view Vec3) ret Float {
 # Packed 0xRRGGBB colour for a primary ray: surface-normal shading on a hit,
 # a sky gradient (along +Z) on a miss.
 func rayColor(world: view List(Sphere), ro: view Vec3, rd: view Vec3) ret Int {
-    let best: Float = 1000000.0
-    let hitIdx: Int = -1
-    let i: Int = 0
+    var best: Float = 1000000.0
+    var hitIdx: Int = -1
+    var i: Int = 0
     loop i < world.length {
         let s: Sphere = world.at(index: i)
         let t: Float = hitSphere(s: s, ro: ro, rd: rd)
@@ -33,7 +33,7 @@ func rayColor(world: view List(Sphere), ro: view Vec3, rd: view Vec3) ret Int {
         }
         i = i + 1
     }
-    let col: Vec3 = { x: 0.0, y: 0.0, z: 0.0 }
+    var col: Vec3 = { x: 0.0, y: 0.0, z: 0.0 }
     if hitIdx >= 0 {
         let s: Sphere = world.at(index: hitIdx)
         let p: Vec3 = vadd(a: ro, b: vscale(a: rd, s: best))
@@ -60,7 +60,7 @@ func renderRow(fb: mod List(Int), world: view List(Sphere), width: view Int, hei
     let v: Float = (height - 1 - y).toFloat() / (height - 1).toFloat()
     let ro: Vec3 = { x: 0.0, y: 0.0, z: 0.0 }
     let rowOff: Int = y * width
-    let x: Int = 0
+    var x: Int = 0
     loop x < width {
         let u: Float = x.toFloat() / (width - 1).toFloat()
         let rd: Vec3 = { x: llx + u * vw, y: 1.0, z: -1.0 + v * 2.0 }

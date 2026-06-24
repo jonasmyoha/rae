@@ -3,7 +3,7 @@ import json
 # Build composite JSON via concat — `{` starts string interpolation in
 # Rae, so authoring object literals inline is awkward.
 func sampleObject() ret String {
-  let s: String = "\{"
+  var s: String = "\{"
   s = s.concat(other: "\"name\":\"Charcoal\",")
   s = s.concat(other: "\"songs\":8,")
   s = s.concat(other: "\"on\":true,")
@@ -15,7 +15,7 @@ func sampleObject() ret String {
 # A nested object so we can confirm parent ranges over a child object's
 # pool entries don't get aliased.
 func nestedObject() ret String {
-  let s: String = "\{"
+  var s: String = "\{"
   s = s.concat(other: "\"outer\":\{")
   s = s.concat(other: "\"inner\":[1,2,[3,4]]")
   s = s.concat(other: "\},")
@@ -82,7 +82,7 @@ func showObject() {
   let tagsIdx: Int = jsonField(doc: doc, this: root, key: "tags")
   let tagsVal: JsonValue = jsonValueAt(doc: doc, idx: tagsIdx)
   log("tags.len = {jsonArrayLen(this: tagsVal)}")
-  let i: Int = 0
+  var i: Int = 0
   loop i < jsonArrayLen(this: tagsVal) {
     let tagVal: JsonValue = jsonArrayAt(doc: doc, this: tagsVal, idx: i)
     log("  tags[{i}] = {jsonString(this: tagVal, fallback: qmark)}")
