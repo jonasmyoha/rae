@@ -1,0 +1,39 @@
+# Threading test: spawn workers that take `own String` + scalar args and
+# return `String`. Each worker gets a private copy of its String argument;
+# results are joined in a fixed order, so output is deterministic on both
+# the Live and Compiled backends (real OS threads in Compiled).
+import core
+
+func shout(name: own String, times: view Int) ret String {
+    let out: String = ""
+    let i: Int = 0
+    loop i < times {
+        out = out + name + "!"
+        i = i + 1
+    }
+    ret out
+}
+
+func square(n: view Int) ret Int {
+    ret n * n
+}
+
+func main() {
+    let who: String = "rae"
+    let ta: Task(String) = spawn shout(name: who, times: 2)
+    let tb: Task(String) = spawn shout(name: "go", times: 3)
+
+    let t1: Task(Int) = spawn square(n: 6)
+    let t2: Task(Int) = spawn square(n: 7)
+
+    let a: String = ta.get()
+    let b: String = tb.get()
+    let s1: Int = t1.get()
+    let s2: Int = t2.get()
+
+    log("a={a}")
+    log("b={b}")
+    log("squares={s1 + s2}")
+    # source String must survive (workers got a private copy)
+    log("who={who}")
+}
