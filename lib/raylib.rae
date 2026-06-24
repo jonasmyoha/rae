@@ -79,6 +79,14 @@ func clearBackground(color: Color) extern
 
 func loadTexture(fileName: String) extern ret Texture
 
+# Streaming textures for CPU-rendered images (raytracers, fractals, etc.).
+# `loadStreamTexture` makes a blank RGBA8 texture of the given size; each
+# frame, `updateStreamTexture` uploads `count` packed 0xRRGGBB pixels
+# (row-major, expanded to opaque RGBA8) so the image can be shown as it is
+# computed. Draw it with the usual drawTexture/drawTextureEx.
+func loadStreamTexture(width: Int, height: Int) extern ret Texture
+func updateStreamTexture(texture: Texture, pixels: view Buffer(Int), count: Int) extern
+
 # Set a texture's GPU sampling filter. `filter` matches raylib's
 # TextureFilter enum: 0=POINT, 1=BILINEAR, 2=TRILINEAR. MSDF atlases
 # must use BILINEAR (1) or glyph edges stair-step badly.
