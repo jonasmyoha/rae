@@ -33,15 +33,23 @@ Implemented so far (Live / bytecode VM only):
 - **`parallelLoop`** — reuses the `loop` grammar with a parallel flag. Compiled
   as a **sequential** loop on both backends for now (per "Live parallelLoop
   runs sequentially first"); real parallel execution awaits the C thread runtime.
-- **Compiled (C) backend** now **errors clearly** on `spawn`/`Task` (was a silent
-  drop) — directs to `--target live`.
+- **Compiled (C) backend** now runs `spawn`/`Task.get()` (and therefore
+  `taskScope`/`parallelLoop`) with **correct sequential semantics**: a
+  type-erased `RaeTask` runtime; `Task(T)` → `RaeTask*`; `spawn f(args)` runs
+  the call synchronously into an already-completed task; `get()` reads the
+  result. Same observable results as Live, not yet parallel.
 
-The **first milestone is complete** for the Live VM, and `taskScope` +
-`parallelLoop` exist (sequential). The large remaining piece is the **compiled
-(C) task runtime**: real OS-thread `spawn`/`Task`/`get`, `Channel`, atomics, and
-parallel `parallelLoop` over disjoint shards. Also future: explicit `detach`,
-`taskScope` cancel-on-error/non-escape enforcement, and `parallelLoop`
-disjointness checking (needed once it's actually parallel).
+The **first milestone is complete** on both backends — `spawn`/`Task`/`get`,
+`taskScope`, `parallelLoop` all compile and run (Live; Compiled sequential).
+
+Remaining: **real OS-thread parallelism in the compiled backend** — per-
+spawned-function pthread thunks (the runtime `RaeTask` + `pthread` join is
+already in place), with **by-value copying of `view`/`mod` scalar args** (in
+the C ABI a `view T` is a pointer, so a worker thread can't safely hold one).
+Then `Channel`, atomics, parallel `parallelLoop` over disjoint shards; and
+later `detach`, `taskScope` cancel-on-error/non-escape, and `parallelLoop`
+disjointness checking (needed once it's actually parallel). The Live VM could
+also gain real interleaving (cooperative scheduler) if needed.
 
 The design came out of a roundtable (Chattie / Clo / Gem) plus a final
 maintainer pass. It deliberately diverges from the roundtable on two points:
