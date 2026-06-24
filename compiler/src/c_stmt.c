@@ -384,6 +384,15 @@ bool emit_implicit_drops_for_body(CFuncContext* ctx, FILE* out,
     if (!type) continue;
     if (type->is_view || type->is_mod) continue;
     if (ctx->local_moved[idx]) continue;
+    // Task(T): join-on-drop. A Task is a RaeTask* (not a cascade-drop
+    // struct), so it'd be skipped below — handle it here. rae_task_drop
+    // joins (no-op if already get()'d) then frees, so a worker thread
+    // can't outlive its scope / be killed at process teardown.
+    if (str_eq_cstr(get_base_type_name(type), "Task")) {
+      fprintf(out, "  rae_task_drop(%.*s);\n",
+              (int)ctx->locals[idx].len, ctx->locals[idx].data);
+      continue;
+    }
     // Skip cheap value types — they own no heap and don't need a
     // drop call. Permissive predicate so String-only owning structs
     // are eligible too — alias safety is gated by local_struct_owns_heap
