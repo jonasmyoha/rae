@@ -146,6 +146,10 @@ bool emit_param_list(CFuncContext* ctx, const AstParam* params, FILE* out, bool 
  * mod; enum plain/own/copy). Heap args, `mod`, and `view`-of-enum are
  * pointers/coercion-sensitive and fall back to the sequential path. */
 bool c_spawn_threadable(CFuncContext* ctx, const AstFuncDecl* f);
+/* True when a non-view/mod param type is a heap aggregate (List/Map instance
+ * or non-generic non-c_struct heap user struct) with a guaranteed
+ * rae_deep_copy_<T> helper, so the spawn site can deep-copy it for a worker. */
+bool c_spawn_arg_deepcopy_aggregate(CFuncContext* ctx, const AstTypeRef* type);
 const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func);
 bool emit_string_literal(FILE* out, Str literal);
 bool emit_auto_init(CFuncContext* ctx, const AstTypeRef* type, FILE* out);
