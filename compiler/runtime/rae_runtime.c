@@ -44,6 +44,21 @@ void* rae_task_await(RaeTask* t) {
   return t->result;
 }
 
+/* Scope-exit drop (join-on-drop): a Task local that goes out of scope is
+ * joined so its worker can't outlive the scope (and isn't killed mid-run at
+ * process teardown), then freed. NOTE: the result buffer's own contents are
+ * not cascade-dropped here — a heap result that was never get()'d leaks its
+ * payload; acceptable for now (callers normally get() the result). */
+void rae_task_drop(RaeTask* t) {
+  if (!t) return;
+  if (!t->joined) {
+    pthread_join(t->thread, NULL);
+    t->joined = 1;
+  }
+  free(t->result);
+  free(t);
+}
+
 #ifdef __APPLE__
 #include <mach/mach_time.h>
 #include <mach/mach.h>
@@ -461,8 +476,13 @@ rae_String rae_string_copy(rae_String src) {
 // that don't ship it cleanly (the Live VM target also uses this
 // file).
 #define RAE_STRING_POOL_MAX 4096
-static void* g_rae_string_pool[RAE_STRING_POOL_MAX];
-static int g_rae_string_pool_count = 0;
+// Thread-local: each OS thread (main + spawned workers) gets its own
+// statement-scope String temp pool. Without this, concurrent workers doing
+// string interpolation/concat race on a shared pool and corrupt each other's
+// temporaries. A returned String is pool_remove'd (detached) before return,
+// so it survives the worker's pool flush and is safe to hand to the parent.
+static __thread void* g_rae_string_pool[RAE_STRING_POOL_MAX];
+static __thread int g_rae_string_pool_count = 0;
 
 void rae_string_pool_register(void* ptr) {
   if (!ptr) return;

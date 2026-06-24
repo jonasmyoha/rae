@@ -423,6 +423,26 @@ bool emit_string_literal(FILE* out, Str literal) {
   fprintf(out, "\", %lld}", (long long)literal.len); return true;
 }
 
+// Path-1 thread eligibility — see header. Every param must be passed by
+// value in the C ABI so a worker thread can safely own a copy.
+bool c_spawn_threadable(CFuncContext* ctx, const AstFuncDecl* f) {
+  if (!f || f->is_extern || f->generic_params || f->specialization_args) return false;
+  for (const AstParam* p = f->params; p; p = p->next) {
+    if (!p->type) return false;
+    if (p->type->is_mod) return false;            // mod = pointer into parent
+    Str base = get_base_type_name(p->type);
+    bool is_scalar = str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int64")
+                  || str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float64")
+                  || str_eq_cstr(base, "Bool")
+                  || str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32");
+    if (is_scalar) continue;                      // view-numeric is by value; own/copy/plain too
+    bool is_enum = ctx && find_enum_decl(ctx, ctx->module, base) != NULL;
+    if (is_enum && !p->type->is_view) continue;   // plain/own/copy enum = value; view-enum = pointer
+    return false;                                 // heap, view-enum, or unknown → sequential
+  }
+  return true;
+}
+
 bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* out, bool skip_ptr) {
   if (!type) { fprintf(out, "int64_t"); return true; }
     if (type->resolved_type) {
@@ -1732,6 +1752,36 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&tctx, f), mangled); emit_param_list(&tctx, f->params, out, false); fprintf(out, ");\n");
   }
   
+  // Path-1 spawn thunks: one per threadable function (all params passed by
+  // value, so a worker thread safely owns its copies). pthread needs a
+  // void*(*)(void*); the thunk unpacks the args struct, runs the function,
+  // stores the result into the task, and frees the struct. Over-emitted for
+  // every threadable function (RAE_UNUSED) to avoid a separate discovery pass.
+  for (size_t i = 0; i < ctx->all_decl_count; i++) {
+      const AstDecl* d = ctx->all_decls[i];
+      if (d->kind != AST_DECL_FUNC || str_eq_cstr(d->as.func_decl.name, "main")) continue;
+      const AstFuncDecl* f = &d->as.func_decl;
+      CFuncContext tctx = {.compiler_ctx = ctx, .module = module, .func_decl = f};
+      if (!c_spawn_threadable(&tctx, f)) continue;
+      const char* mangled = rae_mangle_function(ctx, f);
+      const char* rt = c_return_type(&tctx, f);
+      bool is_void = (strcmp(rt, "void") == 0);
+      fprintf(out, "typedef struct { ");
+      int pi = 0;
+      for (const AstParam* p = f->params; p; p = p->next, pi++) {
+          AstTypeRef vt = *p->type; vt.is_view = false; vt.is_mod = false;
+          emit_type_ref_as_c_type(&tctx, &vt, out, false);
+          fprintf(out, " f%d; ", pi);
+      }
+      fprintf(out, "RaeTask* __task; } __raespawn_args_%s;\n", mangled);
+      fprintf(out, "RAE_UNUSED static void* __raespawn_thunk_%s(void* __vp) {\n", mangled);
+      fprintf(out, "  __raespawn_args_%s* __a = (__raespawn_args_%s*)__vp;\n", mangled, mangled);
+      if (!is_void) fprintf(out, "  *(%s*)__a->__task->result = %s(", rt, mangled);
+      else fprintf(out, "  %s(", mangled);
+      for (int k = 0; k < pi; k++) { if (k) fprintf(out, ", "); fprintf(out, "__a->f%d", k); }
+      fprintf(out, ");\n  __a->__task->done = 1; free(__a); return ((void*)0);\n}\n");
+  }
+
   // Bodies for non-generic functions
   for (size_t i = 0; i < ctx->all_decl_count; i++) {
       const AstDecl* d = ctx->all_decls[i];
