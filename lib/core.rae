@@ -84,6 +84,14 @@ func get(T: type, this: view List(T), index: view Int) ret opt T {
   ret rae_ext_rae_buf_get(buf: this.data, index: index)
 }
 
+# Unchecked indexed access returning the element directly (not `opt T`). Use
+# when the index is known valid (e.g. hot loops over a list of structs) and you
+# don't want to unwrap an optional. No bounds check — the caller is
+# responsible. The checked counterpart is `get`, which returns `opt T`.
+func at(T: type, this: view List(T), index: view Int) ret T {
+  ret rae_ext_rae_buf_get(buf: this.data, index: index)
+}
+
 func set(T: type, this: mod List(T), index: view Int, value: own T) {
   if index < 0 or index >= this.length {
     ret
