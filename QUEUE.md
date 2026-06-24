@@ -70,3 +70,6 @@
 
 - [ ] Language: add real `const` declarations (compile-time, immutable). Today "constants" are zero-arg functions (e.g. `func PI()`/`func TAU()` in lib/math.rae) because Rae has no immutable value binding (`let` is reassignable). Proposed: `const NAME: Type = <const-expr>` at module (and local) scope; UPPER_SNAKE naming; const-expr folding (literals + ops on consts); reassignment is a compile error; folded/inlined in both backends (VM constant pool, C `static const`/literal). Then convert PI()/TAU() to `const PI`/`const TAU` and drop the call `()`.
 - [x] Compiler: spawn can now thread POD (cascade-drop-free) structs by value (was on the remaining list) — enables a by-value Camera struct in worker threads.
+
+- [x] Language: `let` (immutable) / `var` (mutable) / `const` (compile-time, folded) implemented; module-level const folds to literals; naming de-enforced in parser. See docs/naming-conventions.md.
+- [ ] Lint: optional compiler/linter WARNINGS for naming-convention violations (Types/enums PascalCase; functions/vars/consts/enum-cases camelCase). Must be warnings, not errors; exempt/suppressible for extern (C-binding) names. Needs a general warning framework first.
