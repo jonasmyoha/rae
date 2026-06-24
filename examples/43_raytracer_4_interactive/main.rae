@@ -1,321 +1,27 @@
 # Raytracer — Step 4: interactive camera + continuous progressive rendering.
 #
-# A different architecture from steps 1-3 (which render once). Here the image
-# is REFINED OVER TIME: every frame each pixel gets one more path-traced sample
-# added into a floating-point accumulation buffer, and the displayed image is
-# the running average. The longer you hold still, the cleaner it gets; the
-# moment you move the camera the accumulator is reset and it starts converging
-# again from the new view. This is the core loop of the rae_ui C++ raytracer.
+# A different architecture from steps 1-3 (which render once). Every frame each
+# pixel gets one more path-traced sample added into a float accumulation buffer
+# and the running average is shown, so the image refines while you hold still
+# and resets to converge anew when the camera moves (the rae_ui core loop).
 #
-# Controls (Blender Z-up world — see docs/coordinate-system.md):
-#   W / S        move forward / back        A / D   strafe left / right
-#   E / Q        move up / down (world +Z)   arrows  look (yaw / pitch)
-#   left-drag    mouse look
+# Controls (Blender Z-up — see docs/coordinate-system.md):
+#   W / S move fwd/back   A / D strafe   E / Q up/down (+Z)
+#   arrows look (yaw/pitch)   left-drag mouse look
 #
-# The per-frame sample pass is split across four band workers (real OS threads
-# in the Compiled backend). Internal resolution is modest so movement stays
-# interactive; it sharpens as samples accumulate (step 5 adds a quality toggle).
+# Modules: vec3, scene.rae, camera.rae, render.rae (sample worker + accumulate
+# / present helpers), and this window loop. Each sample pass is split across
+# four band workers (real OS threads). Internal resolution is modest so motion
+# stays interactive; it sharpens as samples accumulate.
 #
 #   rae run --target compiled main.rae   (recommended — real threads)
 
 import core
-import math
 import raylib
-
-type Vec3 {
-    x: Float
-    y: Float
-    z: Float
-}
-
-func vadd(a: view Vec3, b: view Vec3) ret Vec3 { ret Vec3 { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z } }
-func vsub(a: view Vec3, b: view Vec3) ret Vec3 { ret Vec3 { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z } }
-func vscale(a: view Vec3, s: view Float) ret Vec3 { ret Vec3 { x: a.x * s, y: a.y * s, z: a.z * s } }
-func vmul(a: view Vec3, b: view Vec3) ret Vec3 { ret Vec3 { x: a.x * b.x, y: a.y * b.y, z: a.z * b.z } }
-func vdot(a: view Vec3, b: view Vec3) ret Float { ret a.x * b.x + a.y * b.y + a.z * b.z }
-func vcross(a: view Vec3, b: view Vec3) ret Vec3 {
-    ret Vec3 { x: a.y * b.z - a.z * b.y, y: a.z * b.x - a.x * b.z, z: a.x * b.y - a.y * b.x }
-}
-func vlen(a: view Vec3) ret Float { ret sqrt(x: vdot(a: a, b: a)) }
-func vnorm(a: view Vec3) ret Vec3 {
-    let l: Float = vlen(a: a)
-    ret Vec3 { x: a.x / l, y: a.y / l, z: a.z / l }
-}
-
-func randomUnit() ret Vec3 {
-    let a: Float = random() * 6.2831853
-    let z: Float = random() * 2.0 - 1.0
-    let r: Float = sqrt(x: 1.0 - z * z)
-    ret Vec3 { x: r * cos(x: a), y: r * sin(x: a), z: z }
-}
-
-func vreflect(v: view Vec3, n: view Vec3) ret Vec3 {
-    let d: Float = 2.0 * vdot(a: v, b: n)
-    ret Vec3 { x: v.x - d * n.x, y: v.y - d * n.y, z: v.z - d * n.z }
-}
-
-func vrefract(uv: view Vec3, n: view Vec3, etaRatio: view Float) ret Vec3 {
-    let neg: Vec3 = { x: 0.0 - uv.x, y: 0.0 - uv.y, z: 0.0 - uv.z }
-    let cosT: Float = vdot(a: neg, b: n)
-    if cosT > 1.0 {
-        cosT = 1.0
-    }
-    let perp: Vec3 = {
-        x: etaRatio * (uv.x + cosT * n.x),
-        y: etaRatio * (uv.y + cosT * n.y),
-        z: etaRatio * (uv.z + cosT * n.z)
-    }
-    let k: Float = abs(n: 1.0 - vdot(a: perp, b: perp))
-    let pl: Float = 0.0 - sqrt(x: k)
-    ret Vec3 { x: perp.x + pl * n.x, y: perp.y + pl * n.y, z: perp.z + pl * n.z }
-}
-
-func schlick(cosine: view Float, refIdx: view Float) ret Float {
-    let r0: Float = (1.0 - refIdx) / (1.0 + refIdx)
-    r0 = r0 * r0
-    ret r0 + (1.0 - r0) * pow(base: 1.0 - cosine, exp: 5.0)
-}
-
-func hitSphere(cx: view Float, cy: view Float, cz: view Float, r: view Float,
-               rox: view Float, roy: view Float, roz: view Float,
-               rdx: view Float, rdy: view Float, rdz: view Float) ret Float {
-    let ocx: Float = rox - cx
-    let ocy: Float = roy - cy
-    let ocz: Float = roz - cz
-    let a: Float = rdx * rdx + rdy * rdy + rdz * rdz
-    let halfB: Float = ocx * rdx + ocy * rdy + ocz * rdz
-    let c: Float = ocx * ocx + ocy * ocy + ocz * ocz - r * r
-    let disc: Float = halfB * halfB - a * c
-    if disc < 0.0 {
-        ret -1.0
-    }
-    ret (-halfB - sqrt(x: disc)) / a
-}
-
-# Recursive path trace. Scene flat List(Float), 10 per sphere:
-# [cx,cy,cz, r, matType(0=diffuse,1=metal,2=glass), ar,ag,ab, fuzz, ior].
-func rayColor(scene: view List(Float), ro: view Vec3, rd: view Vec3, depth: view Int) ret Vec3 {
-    if depth <= 0 {
-        ret Vec3 { x: 0.0, y: 0.0, z: 0.0 }
-    }
-    let best: Float = 1000000.0
-    let hitIdx: Int = -1
-    let count: Int = scene.length / 10
-    let k: Int = 0
-    loop k < count {
-        let b: Int = k * 10
-        let t: Float = hitSphere(cx: scene.get(index: b), cy: scene.get(index: b + 1),
-            cz: scene.get(index: b + 2), r: scene.get(index: b + 3),
-            rox: ro.x, roy: ro.y, roz: ro.z, rdx: rd.x, rdy: rd.y, rdz: rd.z)
-        if t > 0.001 {
-            if t < best {
-                best = t
-                hitIdx = k
-            }
-        }
-        k = k + 1
-    }
-    if hitIdx < 0 {
-        let ud: Vec3 = vnorm(a: rd)
-        let tt: Float = 0.5 * (ud.z + 1.0)
-        ret Vec3 { x: (1.0 - tt) + tt * 0.5, y: (1.0 - tt) + tt * 0.7, z: (1.0 - tt) + tt * 1.0 }
-    }
-    let b: Int = hitIdx * 10
-    let sr: Float = scene.get(index: b + 3)
-    let p: Vec3 = { x: ro.x + rd.x * best, y: ro.y + rd.y * best, z: ro.z + rd.z * best }
-    let n: Vec3 = {
-        x: (p.x - scene.get(index: b)) / sr,
-        y: (p.y - scene.get(index: b + 1)) / sr,
-        z: (p.z - scene.get(index: b + 2)) / sr
-    }
-    let mat: Float = scene.get(index: b + 4)
-    let albedo: Vec3 = { x: scene.get(index: b + 5), y: scene.get(index: b + 6), z: scene.get(index: b + 7) }
-    let scatter: Vec3 = { x: 0.0, y: 0.0, z: 0.0 }
-    let atten: Vec3 = albedo
-    if mat < 0.5 {
-        let ru: Vec3 = randomUnit()
-        scatter = vadd(a: n, b: ru)
-    } else {
-        if mat < 1.5 {
-            let ud: Vec3 = vnorm(a: rd)
-            let refl: Vec3 = vreflect(v: ud, n: n)
-            let fuzz: Float = scene.get(index: b + 8)
-            let ru: Vec3 = randomUnit()
-            scatter = Vec3 { x: refl.x + fuzz * ru.x, y: refl.y + fuzz * ru.y, z: refl.z + fuzz * ru.z }
-            if vdot(a: scatter, b: n) <= 0.0 {
-                ret Vec3 { x: 0.0, y: 0.0, z: 0.0 }
-            }
-        } else {
-            atten = Vec3 { x: 1.0, y: 1.0, z: 1.0 }
-            let ior: Float = scene.get(index: b + 9)
-            let ud: Vec3 = vnorm(a: rd)
-            let frontN: Vec3 = n
-            let etaRatio: Float = 1.0 / ior
-            if vdot(a: ud, b: n) > 0.0 {
-                frontN = Vec3 { x: 0.0 - n.x, y: 0.0 - n.y, z: 0.0 - n.z }
-                etaRatio = ior
-            }
-            let negud: Vec3 = { x: 0.0 - ud.x, y: 0.0 - ud.y, z: 0.0 - ud.z }
-            let cosT: Float = vdot(a: negud, b: frontN)
-            if cosT > 1.0 {
-                cosT = 1.0
-            }
-            let sinT: Float = sqrt(x: 1.0 - cosT * cosT)
-            if etaRatio * sinT > 1.0 or schlick(cosine: cosT, refIdx: etaRatio) > random() {
-                scatter = vreflect(v: ud, n: frontN)
-            } else {
-                scatter = vrefract(uv: ud, n: frontN, etaRatio: etaRatio)
-            }
-        }
-    }
-    let bounced: Vec3 = rayColor(scene: scene, ro: p, rd: scatter, depth: depth - 1)
-    ret vmul(a: atten, b: bounced)
-}
-
-# Camera ray-gen params packed as a flat List(Float) (19 entries):
-#   [0..2] origin, [3..5] lowerLeft, [6..8] horizontal, [9..11] vertical,
-#   [12..14] right, [15..17] up, [18] lensRadius
-func buildCamera(px: view Float, py: view Float, pz: view Float, tx: view Float, ty: view Float, tz: view Float,
-                 vfovDeg: view Float, aperture: view Float, aspect: view Float) ret List(Float) {
-    let pos: Vec3 = { x: px, y: py, z: pz }
-    let target: Vec3 = { x: tx, y: ty, z: tz }
-    let worldUp: Vec3 = { x: 0.0, y: 0.0, z: 1.0 }
-    let fwd: Vec3 = vnorm(a: vsub(a: target, b: pos))
-    let right: Vec3 = vnorm(a: vcross(a: fwd, b: worldUp))
-    let up: Vec3 = vcross(a: right, b: fwd)
-    let focus: Float = 1.0
-    let theta: Float = vfovDeg * 3.14159265 / 180.0
-    let halfH: Float = tan(x: theta / 2.0)
-    let vpH: Float = 2.0 * halfH * focus
-    let vpW: Float = aspect * vpH
-    let horiz: Vec3 = vscale(a: right, s: vpW)
-    let vert: Vec3 = vscale(a: up, s: vpH)
-    let ll: Vec3 = {
-        x: pos.x + fwd.x * focus - horiz.x * 0.5 - vert.x * 0.5,
-        y: pos.y + fwd.y * focus - horiz.y * 0.5 - vert.y * 0.5,
-        z: pos.z + fwd.z * focus - horiz.z * 0.5 - vert.z * 0.5
-    }
-    let cam: List(Float) = createList(cap: 19)
-    cam.add(value: pos.x)
-    cam.add(value: pos.y)
-    cam.add(value: pos.z)
-    cam.add(value: ll.x)
-    cam.add(value: ll.y)
-    cam.add(value: ll.z)
-    cam.add(value: horiz.x)
-    cam.add(value: horiz.y)
-    cam.add(value: horiz.z)
-    cam.add(value: vert.x)
-    cam.add(value: vert.y)
-    cam.add(value: vert.z)
-    cam.add(value: right.x)
-    cam.add(value: right.y)
-    cam.add(value: right.z)
-    cam.add(value: up.x)
-    cam.add(value: up.y)
-    cam.add(value: up.z)
-    cam.add(value: aperture * 0.5)
-    ret cam
-}
-
-# One sample pass over rows [y0, y1): one path-traced sample per pixel,
-# returning (y1-y0)*width*3 linear-RGB floats (interleaved). Private deep copy
-# of scene + camera, own RNG seeded per (sampleIndex, band).
-func renderSampleBand(scene: own List(Float), cam: own List(Float), width: view Int, height: view Int,
-                      y0: view Int, y1: view Int, maxDepth: view Int, sampleIndex: view Int) ret List(Float) {
-    seed(n: sampleIndex * 2654435761 + y0 * 9781 + 1)
-    let ox: Float = cam.get(index: 0)
-    let oy: Float = cam.get(index: 1)
-    let oz: Float = cam.get(index: 2)
-    let lensR: Float = cam.get(index: 18)
-    let out: List(Float) = createList(cap: (y1 - y0) * width * 3)
-    let y: Int = y0
-    loop y < y1 {
-        let x: Int = 0
-        loop x < width {
-            let u: Float = (x.toFloat() + random()) / (width - 1).toFloat()
-            let v: Float = ((height - 1 - y).toFloat() + random()) / (height - 1).toFloat()
-            let rox: Float = ox
-            let roy: Float = oy
-            let roz: Float = oz
-            if lensR > 0.0 {
-                let da: Float = random() * 6.2831853
-                let dr: Float = lensR * sqrt(x: random())
-                let ldx: Float = dr * cos(x: da)
-                let ldy: Float = dr * sin(x: da)
-                rox = ox + cam.get(index: 12) * ldx + cam.get(index: 15) * ldy
-                roy = oy + cam.get(index: 13) * ldx + cam.get(index: 16) * ldy
-                roz = oz + cam.get(index: 14) * ldx + cam.get(index: 17) * ldy
-            }
-            let dirx: Float = cam.get(index: 3) + u * cam.get(index: 6) + v * cam.get(index: 9) - rox
-            let diry: Float = cam.get(index: 4) + u * cam.get(index: 7) + v * cam.get(index: 10) - roy
-            let dirz: Float = cam.get(index: 5) + u * cam.get(index: 8) + v * cam.get(index: 11) - roz
-            let ro: Vec3 = { x: rox, y: roy, z: roz }
-            let dir: Vec3 = { x: dirx, y: diry, z: dirz }
-            let col: Vec3 = rayColor(scene: scene, ro: ro, rd: dir, depth: maxDepth)
-            out.add(value: col.x)
-            out.add(value: col.y)
-            out.add(value: col.z)
-            x = x + 1
-        }
-        y = y + 1
-    }
-    ret out
-}
-
-# Add (or, on the first sample after a reset, overwrite) a band's contribution
-# into the float accumulator at the band's row offset.
-func mergeBand(accum: mod List(Float), band: view List(Float), off: view Int, overwrite: view Bool) {
-    let i: Int = 0
-    loop i < band.length {
-        if overwrite {
-            accum.set(index: off + i, value: band.get(index: i))
-        } else {
-            accum.set(index: off + i, value: accum.get(index: off + i) + band.get(index: i))
-        }
-        i = i + 1
-    }
-}
-
-func clampf(x: view Float) ret Float {
-    if x < 0.0 {
-        ret 0.0
-    }
-    if x > 1.0 {
-        ret 1.0
-    }
-    ret x
-}
-
-# Average the accumulator over sampleCount, gamma-correct, pack into fb.
-func buildDisplay(fb: mod List(Int), accum: view List(Float), pixels: view Int, sampleCount: view Int) {
-    let inv: Float = 1.0 / sampleCount.toFloat()
-    let p: Int = 0
-    loop p < pixels {
-        let base: Int = p * 3
-        let r: Float = sqrt(x: clampf(x: accum.get(index: base) * inv))
-        let g: Float = sqrt(x: clampf(x: accum.get(index: base + 1) * inv))
-        let b: Float = sqrt(x: clampf(x: accum.get(index: base + 2) * inv))
-        let ir: Int = (255.99 * r).toInt()
-        let ig: Int = (255.99 * g).toInt()
-        let ib: Int = (255.99 * b).toInt()
-        fb.set(index: p, value: ir * 65536 + ig * 256 + ib)
-        p = p + 1
-    }
-}
-
-func buildScene() ret List(Float) {
-    let s: List(Float) = createList(cap: 40)
-    s.add(value: 0.0)  s.add(value: 1.0)  s.add(value: -100.5)  s.add(value: 100.0)
-    s.add(value: 0.0)  s.add(value: 0.8)  s.add(value: 0.8)  s.add(value: 0.0)  s.add(value: 0.0)  s.add(value: 0.0)
-    s.add(value: 0.0)  s.add(value: 1.0)  s.add(value: 0.0)  s.add(value: 0.5)
-    s.add(value: 0.0)  s.add(value: 0.1)  s.add(value: 0.2)  s.add(value: 0.5)  s.add(value: 0.0)  s.add(value: 0.0)
-    s.add(value: -1.0)  s.add(value: 1.0)  s.add(value: 0.0)  s.add(value: 0.5)
-    s.add(value: 2.0)  s.add(value: 1.0)  s.add(value: 1.0)  s.add(value: 1.0)  s.add(value: 0.0)  s.add(value: 1.5)
-    s.add(value: 1.0)  s.add(value: 1.0)  s.add(value: 0.0)  s.add(value: 0.5)
-    s.add(value: 1.0)  s.add(value: 0.8)  s.add(value: 0.6)  s.add(value: 0.2)  s.add(value: 0.05)  s.add(value: 0.0)
-    ret s
-}
+import vec3
+import scene
+import camera
+import render
 
 func main() {
     let width: Int = 640
@@ -325,25 +31,22 @@ func main() {
     let maxDepth: Int = 12
     let maxSamples: Int = 400
 
-    let scene: List(Float) = buildScene()
+    let world: List(Sphere) = buildScene()
     let aspect: Float = width.toFloat() / height.toFloat()
 
-    # camera state (Z-up): position + yaw (about +Z) + pitch (about +X).
+    # Camera state (Z-up): position + yaw (about +Z) + pitch (about +X).
     # yaw = pi/2 looks toward +Y; pitch 0 is level.
-    let camx: Float = 0.0
-    let camy: Float = -1.6
-    let camz: Float = 0.6
-    let yaw: Float = 1.5707963
+    let camPos: Vec3 = vec3(x: 0.0, y: -1.6, z: 0.6)
+    let yaw: Float = PI() / 2.0
     let pitch: Float = -0.15
     let moveStep: Float = 0.08
     let rotStep: Float = 0.03
     let mouseSens: Float = 0.005
+    let worldUp: Vec3 = vec3(x: 0.0, y: 0.0, z: 1.0)
 
-    # forward from yaw/pitch (Z-up spherical); build the initial camera.
-    let fwd: Vec3 = { x: cos(x: pitch) * cos(x: yaw), y: cos(x: pitch) * sin(x: yaw), z: sin(x: pitch) }
-    let cam: List(Float) = buildCamera(px: camx, py: camy, pz: camz, tx: camx + fwd.x, ty: camy + fwd.y, tz: camz + fwd.z, vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
+    let fwd: Vec3 = vec3(x: cos(x: pitch) * cos(x: yaw), y: cos(x: pitch) * sin(x: yaw), z: sin(x: pitch))
+    let cam: Camera = buildCamera(pos: camPos, target: vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
 
-    # float accumulator (interleaved RGB) + packed display buffer.
     let accum: List(Float) = createList(cap: width * height * 3)
     let i: Int = 0
     loop i < width * height * 3 {
@@ -366,47 +69,38 @@ func main() {
     let sampleCount: Int = 0
     let prevMouseX: Int = getMouseX()
     let prevMouseY: Int = getMouseY()
-    let worldUp: Vec3 = { x: 0.0, y: 0.0, z: 1.0 }
 
     loop not windowShouldClose() {
         let moved: Bool = false
 
-        # --- keyboard movement (WASD + E/Q) ---
+        # keyboard movement
         if isKeyDown(key: 87) {
-            camx = camx + fwd.x * moveStep
-            camy = camy + fwd.y * moveStep
-            camz = camz + fwd.z * moveStep
+            camPos = vadd(a: camPos, b: vscale(a: fwd, s: moveStep))
             moved = true
         }
         if isKeyDown(key: 83) {
-            camx = camx - fwd.x * moveStep
-            camy = camy - fwd.y * moveStep
-            camz = camz - fwd.z * moveStep
+            camPos = vsub(a: camPos, b: vscale(a: fwd, s: moveStep))
             moved = true
         }
         let rgt: Vec3 = vnorm(a: vcross(a: fwd, b: worldUp))
         if isKeyDown(key: 68) {
-            camx = camx + rgt.x * moveStep
-            camy = camy + rgt.y * moveStep
-            camz = camz + rgt.z * moveStep
+            camPos = vadd(a: camPos, b: vscale(a: rgt, s: moveStep))
             moved = true
         }
         if isKeyDown(key: 65) {
-            camx = camx - rgt.x * moveStep
-            camy = camy - rgt.y * moveStep
-            camz = camz - rgt.z * moveStep
+            camPos = vsub(a: camPos, b: vscale(a: rgt, s: moveStep))
             moved = true
         }
         if isKeyDown(key: 69) {
-            camz = camz + moveStep
+            camPos = vadd(a: camPos, b: vscale(a: worldUp, s: moveStep))
             moved = true
         }
         if isKeyDown(key: 81) {
-            camz = camz - moveStep
+            camPos = vsub(a: camPos, b: vscale(a: worldUp, s: moveStep))
             moved = true
         }
 
-        # --- arrow keys: look ---
+        # arrow keys: look
         if isKeyDown(key: 262) {
             yaw = yaw - rotStep
             moved = true
@@ -424,7 +118,7 @@ func main() {
             moved = true
         }
 
-        # --- mouse drag (left button) to look ---
+        # mouse drag (left button) to look
         let mx: Int = getMouseX()
         let my: Int = getMouseY()
         if isMouseButtonDown(button: 0) {
@@ -443,19 +137,18 @@ func main() {
         prevMouseY = my
 
         if moved {
-            # clamp pitch to avoid gimbal flip at the poles
             if pitch > 1.5 {
                 pitch = 1.5
             }
             if pitch < -1.5 {
                 pitch = -1.5
             }
-            fwd = Vec3 { x: cos(x: pitch) * cos(x: yaw), y: cos(x: pitch) * sin(x: yaw), z: sin(x: pitch) }
-            cam = buildCamera(px: camx, py: camy, pz: camz, tx: camx + fwd.x, ty: camy + fwd.y, tz: camz + fwd.z, vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
+            fwd = vec3(x: cos(x: pitch) * cos(x: yaw), y: cos(x: pitch) * sin(x: yaw), z: sin(x: pitch))
+            cam = buildCamera(pos: camPos, target: vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
             sampleCount = 0
         }
 
-        # --- one progressive sample pass, split across 4 band workers ---
+        # one progressive sample pass, split across four band workers
         if sampleCount < maxSamples {
             let overwrite: Bool = false
             if sampleCount is 0 {
@@ -466,10 +159,10 @@ func main() {
             let yb: Int = qh
             let yc: Int = qh * 2
             let yd: Int = qh * 3
-            let ta: Task(List(Float)) = spawn renderSampleBand(scene: scene, cam: cam, width: width, height: height, y0: ya, y1: yb, maxDepth: maxDepth, sampleIndex: sampleCount)
-            let tb: Task(List(Float)) = spawn renderSampleBand(scene: scene, cam: cam, width: width, height: height, y0: yb, y1: yc, maxDepth: maxDepth, sampleIndex: sampleCount)
-            let tc: Task(List(Float)) = spawn renderSampleBand(scene: scene, cam: cam, width: width, height: height, y0: yc, y1: yd, maxDepth: maxDepth, sampleIndex: sampleCount)
-            let td: Task(List(Float)) = spawn renderSampleBand(scene: scene, cam: cam, width: width, height: height, y0: yd, y1: height, maxDepth: maxDepth, sampleIndex: sampleCount)
+            let ta: Task(List(Float)) = spawn renderSampleBand(world: world, cam: cam, width: width, height: height, y0: ya, y1: yb, maxDepth: maxDepth, sampleIndex: sampleCount)
+            let tb: Task(List(Float)) = spawn renderSampleBand(world: world, cam: cam, width: width, height: height, y0: yb, y1: yc, maxDepth: maxDepth, sampleIndex: sampleCount)
+            let tc: Task(List(Float)) = spawn renderSampleBand(world: world, cam: cam, width: width, height: height, y0: yc, y1: yd, maxDepth: maxDepth, sampleIndex: sampleCount)
+            let td: Task(List(Float)) = spawn renderSampleBand(world: world, cam: cam, width: width, height: height, y0: yd, y1: height, maxDepth: maxDepth, sampleIndex: sampleCount)
             let pa: List(Float) = ta.get()
             let pb: List(Float) = tb.get()
             let pc: List(Float) = tc.get()

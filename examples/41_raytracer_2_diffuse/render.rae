@@ -1,0 +1,85 @@
+# Render core for step 2: antialiasing + Lambertian diffuse with bounces.
+import core
+import vec3
+import scene
+
+# A uniformly-distributed random unit vector (for diffuse scatter).
+func randomUnit() ret Vec3 {
+    let a: Float = random() * TAU()
+    let z: Float = random() * 2.0 - 1.0
+    let r: Float = sqrt(x: 1.0 - z * z)
+    ret vec3(x: r * cos(x: a), y: r * sin(x: a), z: z)
+}
+
+func hitSphere(s: view Sphere, ro: view Vec3, rd: view Vec3) ret Float {
+    let oc: Vec3 = vsub(a: ro, b: s.center)
+    let a: Float = vdot(a: rd, b: rd)
+    let halfB: Float = vdot(a: oc, b: rd)
+    let c: Float = vdot(a: oc, b: oc) - s.radius * s.radius
+    let disc: Float = halfB * halfB - a * c
+    if disc < 0.0 {
+        ret -1.0
+    }
+    ret (-halfB - sqrt(x: disc)) / a
+}
+
+# Recursive path trace: linear RGB in [0,1].
+func rayColor(world: view List(Sphere), ro: view Vec3, rd: view Vec3, depth: view Int) ret Vec3 {
+    if depth <= 0 {
+        ret vec3(x: 0.0, y: 0.0, z: 0.0)
+    }
+    let best: Float = 1000000.0
+    let hitIdx: Int = -1
+    let i: Int = 0
+    loop i < world.length {
+        let s: Sphere = world.at(index: i)
+        let t: Float = hitSphere(s: s, ro: ro, rd: rd)
+        if t > 0.001 {
+            if t < best {
+                best = t
+                hitIdx = i
+            }
+        }
+        i = i + 1
+    }
+    if hitIdx < 0 {
+        let u: Vec3 = vnorm(a: rd)
+        let tt: Float = 0.5 * (u.z + 1.0)
+        ret vec3(x: (1.0 - tt) + tt * 0.5, y: (1.0 - tt) + tt * 0.7, z: (1.0 - tt) + tt * 1.0)
+    }
+    let s: Sphere = world.at(index: hitIdx)
+    let p: Vec3 = vadd(a: ro, b: vscale(a: rd, s: best))
+    let n: Vec3 = vscale(a: vsub(a: p, b: s.center), s: 1.0 / s.radius)
+    # Lambertian scatter toward normal + random unit vector.
+    let scatter: Vec3 = vadd(a: n, b: randomUnit())
+    let bounced: Vec3 = rayColor(world: world, ro: p, rd: scatter, depth: depth - 1)
+    ret vmul(a: s.albedo, b: bounced)
+}
+
+# Render one scanline with `samples` jittered rays per pixel + gamma. Z-up.
+func renderRow(fb: mod List(Int), world: view List(Sphere), width: view Int, height: view Int,
+               y: view Int, samples: view Int, maxDepth: view Int) {
+    let aspect: Float = width.toFloat() / height.toFloat()
+    let vw: Float = aspect * 2.0
+    let llx: Float = 0.0 - vw / 2.0
+    let ro: Vec3 = { x: 0.0, y: 0.0, z: 0.0 }
+    let rowOff: Int = y * width
+    let x: Int = 0
+    loop x < width {
+        let acc: Vec3 = { x: 0.0, y: 0.0, z: 0.0 }
+        let sIdx: Int = 0
+        loop sIdx < samples {
+            let u: Float = (x.toFloat() + random()) / (width - 1).toFloat()
+            let v: Float = ((height - 1 - y).toFloat() + random()) / (height - 1).toFloat()
+            let rd: Vec3 = { x: llx + u * vw, y: 1.0, z: -1.0 + v * 2.0 }
+            acc = vadd(a: acc, b: rayColor(world: world, ro: ro, rd: rd, depth: maxDepth))
+            sIdx = sIdx + 1
+        }
+        let inv: Float = 1.0 / samples.toFloat()
+        let ir: Int = (255.99 * sqrt(x: acc.x * inv)).toInt()
+        let ig: Int = (255.99 * sqrt(x: acc.y * inv)).toInt()
+        let ib: Int = (255.99 * sqrt(x: acc.z * inv)).toInt()
+        fb.set(index: rowOff + x, value: ir * 65536 + ig * 256 + ib)
+        x = x + 1
+    }
+}
