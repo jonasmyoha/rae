@@ -24,6 +24,7 @@ typedef struct {
 
 RaeTask* rae_task_new(size_t result_size);
 void* rae_task_await(RaeTask* t);   /* join once; returns the result buffer */
+void rae_task_drop(RaeTask* t);     /* join (if not joined) + free; scope-exit drop */
 
 #ifdef __GNUC__
 #define RAE_UNUSED __attribute__((unused))

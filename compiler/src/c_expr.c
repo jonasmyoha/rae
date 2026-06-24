@@ -274,21 +274,40 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             case AST_UNARY_POST_INC: emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, true, false); fprintf(out, "++"); break;
             case AST_UNARY_POST_DEC: emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, true, false); fprintf(out, "--"); break;
             case AST_UNARY_SPAWN: {
-                // Compiled backend: run the call synchronously and wrap its
-                // result in an already-completed RaeTask. Observably correct
-                // (same result as Live); real OS-thread parallelism is a
-                // planned follow-up (needs per-function pthread thunks plus
-                // by-value copying of view/mod scalar args — in the C ABI a
-                // `view T` is a pointer, so a thread can't hold it directly).
+                const AstExpr* callexpr = expr->as.unary.operand;
                 TypeInfo* resT = (expr->resolved_type && expr->resolved_type->kind == TYPE_TASK)
                                      ? expr->resolved_type->as.task.base : NULL;
                 bool is_void = !resT || resT->kind == TYPE_VOID;
+                const AstFuncDecl* callee =
+                    (callexpr->kind == AST_EXPR_CALL && callexpr->decl_link &&
+                     callexpr->decl_link->kind == AST_DECL_FUNC)
+                        ? &callexpr->decl_link->as.func_decl : NULL;
+                if (callee && c_spawn_threadable(ctx, callee)) {
+                    // Real OS thread: pack args by value into the per-function
+                    // struct and pthread_create the thunk. get() joins it.
+                    const char* mangled = rae_mangle_function(ctx->compiler_ctx, callee);
+                    fprintf(out, "({ __raespawn_args_%s* __s = (__raespawn_args_%s*)malloc(sizeof(__raespawn_args_%s)); ",
+                            mangled, mangled, mangled);
+                    int k = 0;
+                    for (const AstCallArg* a = callexpr->as.call.args; a; a = a->next, k++) {
+                        fprintf(out, "__s->f%d = (", k);
+                        emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
+                        fprintf(out, "); ");
+                    }
+                    fprintf(out, "RaeTask* __t = rae_task_new(");
+                    if (is_void) fprintf(out, "0");
+                    else { fprintf(out, "sizeof("); emit_type_info_as_c_type(ctx, resT, out); fprintf(out, ")"); }
+                    fprintf(out, "); __s->__task = __t; pthread_create(&__t->thread, ((void*)0), __raespawn_thunk_%s, __s); __t; })", mangled);
+                    break;
+                }
+                // Sequential fallback (heap/mod/view-enum args, or an
+                // unresolved callee): run synchronously into a completed task.
                 fprintf(out, "({ RaeTask* __raet = rae_task_new(");
                 if (is_void) fprintf(out, "0");
                 else { fprintf(out, "sizeof("); emit_type_info_as_c_type(ctx, resT, out); fprintf(out, ")"); }
                 fprintf(out, "); ");
                 if (!is_void) { fprintf(out, "*("); emit_type_info_as_c_type(ctx, resT, out); fprintf(out, "*)__raet->result = "); }
-                emit_expr(ctx, expr->as.unary.operand, out, PREC_LOWEST, false, false);
+                emit_expr(ctx, callexpr, out, PREC_LOWEST, false, false);
                 fprintf(out, "; __raet->done = 1; __raet->joined = 1; __raet; })");
                 break;
             }
