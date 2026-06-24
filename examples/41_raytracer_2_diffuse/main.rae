@@ -1,176 +1,21 @@
 # Raytracer — Step 2: antialiasing + diffuse materials.
 #
-# Builds on step 1 ("Ray Tracing in One Weekend", chapters 7-9): each pixel now
-# averages several jittered samples (antialiasing), and surfaces are Lambertian
-# diffuse — rays bounce, scattering in a random hemisphere direction and picking
-# up each surface's albedo, with a gamma-corrected result. Still single-threaded.
+# "Ray Tracing in One Weekend" chapters 7-9: each pixel averages several
+# jittered samples (antialiasing), surfaces are Lambertian diffuse (rays bounce,
+# picking up each sphere's albedo), and the result is gamma corrected. Still
+# single-threaded.
 #
-# This is genuinely heavy at FULL HD (samples * bounces * spheres per pixel),
-# so the PROGRESSIVE fill is slow and clearly visible — exactly the point of
-# bumping the resolution up. Step 4 will make it parallel.
+# Modules: vec3 (shared Vec3), scene.rae (Sphere + albedo), render.rae
+# (sampling + bounces), and this window loop. Heavy at Full HD, so the
+# progressive fill is slow and clearly visible. Step 4 makes it parallel.
 #
 #   rae run --target compiled main.rae   (recommended; Live VM is much slower)
 
 import core
-import math
 import raylib
-
-type Vec3 {
-    x: Float
-    y: Float
-    z: Float
-}
-
-# A uniformly-distributed random unit vector (for Lambertian scatter).
-func randomUnit() ret Vec3 {
-    let a: Float = random() * 6.2831853
-    let z: Float = random() * 2.0 - 1.0
-    let r: Float = sqrt(x: 1.0 - z * z)
-    ret Vec3 { x: r * cos(x: a), y: r * sin(x: a), z: z }
-}
-
-# nearest hit t in (0.001, big], or -1.0 for miss
-func hitSphere(cx: view Float, cy: view Float, cz: view Float, r: view Float,
-               rox: view Float, roy: view Float, roz: view Float,
-               rdx: view Float, rdy: view Float, rdz: view Float) ret Float {
-    let ocx: Float = rox - cx
-    let ocy: Float = roy - cy
-    let ocz: Float = roz - cz
-    let a: Float = rdx * rdx + rdy * rdy + rdz * rdz
-    let halfB: Float = ocx * rdx + ocy * rdy + ocz * rdz
-    let c: Float = ocx * ocx + ocy * ocy + ocz * ocz - r * r
-    let disc: Float = halfB * halfB - a * c
-    if disc < 0.0 {
-        ret -1.0
-    }
-    ret (-halfB - sqrt(x: disc)) / a
-}
-
-# Recursive path trace: returns linear RGB in [0,1]. Scene is a flat List(Float)
-# of [cx,cy,cz,r, ar,ag,ab] per sphere (7 floats).
-func rayColor(scene: view List(Float), rox: view Float, roy: view Float, roz: view Float,
-              rdx: view Float, rdy: view Float, rdz: view Float, depth: view Int) ret Vec3 {
-    if depth <= 0 {
-        ret Vec3 { x: 0.0, y: 0.0, z: 0.0 }
-    }
-    let best: Float = 1000000.0
-    let hitIdx: Int = -1
-    let count: Int = scene.length / 7
-    let k: Int = 0
-    loop k < count {
-        let b: Int = k * 7
-        let t: Float = hitSphere(cx: scene.get(index: b), cy: scene.get(index: b + 1),
-            cz: scene.get(index: b + 2), r: scene.get(index: b + 3),
-            rox: rox, roy: roy, roz: roz, rdx: rdx, rdy: rdy, rdz: rdz)
-        if t > 0.001 {
-            if t < best {
-                best = t
-                hitIdx = k
-            }
-        }
-        k = k + 1
-    }
-    if hitIdx < 0 {
-        # sky gradient along the up axis (+Z)
-        let len: Float = sqrt(x: rdx * rdx + rdy * rdy + rdz * rdz)
-        let tt: Float = 0.5 * (rdz / len + 1.0)
-        ret Vec3 { x: (1.0 - tt) + tt * 0.5, y: (1.0 - tt) + tt * 0.7, z: (1.0 - tt) + tt * 1.0 }
-    }
-    let b: Int = hitIdx * 7
-    let sr: Float = scene.get(index: b + 3)
-    let px: Float = rox + rdx * best
-    let py: Float = roy + rdy * best
-    let pz: Float = roz + rdz * best
-    let nx: Float = (px - scene.get(index: b)) / sr
-    let ny: Float = (py - scene.get(index: b + 1)) / sr
-    let nz: Float = (pz - scene.get(index: b + 2)) / sr
-    # Lambertian scatter: bounce toward normal + random unit vector.
-    let ru: Vec3 = randomUnit()
-    let sx: Float = nx + ru.x
-    let sy: Float = ny + ru.y
-    let sz: Float = nz + ru.z
-    let bounced: Vec3 = rayColor(scene: scene, rox: px, roy: py, roz: pz,
-        rdx: sx, rdy: sy, rdz: sz, depth: depth - 1)
-    ret Vec3 {
-        x: scene.get(index: b + 4) * bounced.x,
-        y: scene.get(index: b + 5) * bounced.y,
-        z: scene.get(index: b + 6) * bounced.z
-    }
-}
-
-# Render one scanline with `samples` jittered rays per pixel + gamma correction.
-func renderRow(fb: mod List(Int), scene: view List(Float), width: view Int, height: view Int,
-               y: view Int, samples: view Int, maxDepth: view Int) {
-    let aspect: Float = width.toFloat() / height.toFloat()
-    let vw: Float = aspect * 2.0
-    let llx: Float = 0.0 - vw / 2.0
-    let rowOff: Int = y * width
-    let x: Int = 0
-    loop x < width {
-        let sr: Float = 0.0
-        let sg: Float = 0.0
-        let sb: Float = 0.0
-        let s: Int = 0
-        loop s < samples {
-            # Z-up: right = +X, forward = +Y, up = +Z (see docs/coordinate-system.md)
-            let u: Float = (x.toFloat() + random()) / (width - 1).toFloat()
-            let v: Float = (height - 1 - y).toFloat() + random()
-            let vv: Float = v / (height - 1).toFloat()
-            let col: Vec3 = rayColor(scene: scene, rox: 0.0, roy: 0.0, roz: 0.0,
-                rdx: llx + u * vw, rdy: 1.0, rdz: -1.0 + vv * 2.0, depth: maxDepth)
-            sr = sr + col.x
-            sg = sg + col.y
-            sb = sb + col.z
-            s = s + 1
-        }
-        let inv: Float = 1.0 / samples.toFloat()
-        # average + gamma 2.0 (sqrt)
-        let ir: Int = (255.99 * sqrt(x: sr * inv)).toInt()
-        let ig: Int = (255.99 * sqrt(x: sg * inv)).toInt()
-        let ib: Int = (255.99 * sqrt(x: sb * inv)).toInt()
-        fb.set(index: rowOff + x, value: ir * 65536 + ig * 256 + ib)
-        x = x + 1
-    }
-}
-
-# Z-up scene: [cx, cy, cz, r, ar, ag, ab] per sphere. +Y forward, +Z up; the
-# ground is a big sphere below (top at z = -0.5), spheres rest on it.
-func buildScene() ret List(Float) {
-    let scene: List(Float) = createList(cap: 28)
-    # center sphere (warm)
-    scene.add(value: 0.0)
-    scene.add(value: 1.0)
-    scene.add(value: 0.0)
-    scene.add(value: 0.5)
-    scene.add(value: 0.8)
-    scene.add(value: 0.3)
-    scene.add(value: 0.3)
-    # left sphere (blue)
-    scene.add(value: -1.05)
-    scene.add(value: 1.05)
-    scene.add(value: 0.0)
-    scene.add(value: 0.5)
-    scene.add(value: 0.3)
-    scene.add(value: 0.4)
-    scene.add(value: 0.8)
-    # right sphere (green)
-    scene.add(value: 1.05)
-    scene.add(value: 1.05)
-    scene.add(value: 0.0)
-    scene.add(value: 0.5)
-    scene.add(value: 0.3)
-    scene.add(value: 0.7)
-    scene.add(value: 0.3)
-    # ground (big sphere below)
-    scene.add(value: 0.0)
-    scene.add(value: 1.0)
-    scene.add(value: -100.5)
-    scene.add(value: 100.0)
-    scene.add(value: 0.6)
-    scene.add(value: 0.6)
-    scene.add(value: 0.6)
-    ret scene
-}
+import vec3
+import scene
+import render
 
 func main() {
     let width: Int = 1920
@@ -180,7 +25,7 @@ func main() {
     let samples: Int = 16
     let maxDepth: Int = 8
 
-    let scene: List(Float) = buildScene()
+    let world: List(Sphere) = buildScene()
 
     let fb: List(Int) = createList(cap: width * height)
     let i: Int = 0
@@ -201,7 +46,7 @@ func main() {
     loop not windowShouldClose() {
         let frameStart: Int = nowMs()
         loop nextRow < height and nowMs() - frameStart <= 16 {
-            renderRow(fb: fb, scene: scene, width: width, height: height, y: nextRow,
+            renderRow(fb: fb, world: world, width: width, height: height, y: nextRow,
                 samples: samples, maxDepth: maxDepth)
             nextRow = nextRow + 1
         }
