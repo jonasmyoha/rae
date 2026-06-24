@@ -113,8 +113,8 @@ func buildPlaylistCoverTile(world: mod UiWorld, coverStems: view List(String), s
   # parent draws nothing of its own). `hoverScaleSystem` propagates the
   # tile's hover state down to them via `hoverScaleContains`, so the
   # whole 2x2 thumbnail scales together — matching the album tiles.
-  let layV: LayoutType = LayoutType.Vertical
-  let alignS: AlignKind = AlignKind.Start
+  let layV: LayoutType = LayoutType.vertical
+  let alignS: AlignKind = AlignKind.start
   setLayout(world: world, entity: tile, kind: layV, gap: playlistCoverGap, alignCross: alignS)
 
   let cell: Float = (size - playlistCoverGap) / 2.0
@@ -125,7 +125,7 @@ func buildPlaylistCoverTile(world: mod UiWorld, coverStems: view List(String), s
   loop r < 2 {
     let row: EntityId = createEntity(world: world)
     setRectFixed(world: world, entity: row, w: size, h: cell)
-    let layH: LayoutType = LayoutType.Horizontal
+    let layH: LayoutType = LayoutType.horizontal
     setLayout(world: world, entity: row, kind: layH, gap: playlistCoverGap, alignCross: alignS)
     let cells: List(EntityId) = createList(EntityId, cap: 2)
     var c: Int = 0
@@ -167,8 +167,8 @@ func buildLibraryTileRow(
   let row: EntityId = createEntity(world: world)
   let rowW: Float = screenW - outerPad * 2.0
   setRectFixed(world: world, entity: row, w: rowW, h: tileH)
-  let layH: LayoutType = LayoutType.Horizontal
-  let alignS: AlignKind = AlignKind.Start
+  let layH: LayoutType = LayoutType.horizontal
+  let alignS: AlignKind = AlignKind.start
   setLayout(world: world, entity: row, kind: layH, gap: libraryGridTileGap, alignCross: alignS)
 
   let kids: List(EntityId) = createList(EntityId, cap: cols)
@@ -217,8 +217,8 @@ func buildLibraryCoverGrid(world: mod UiWorld, albums: view List(Album), library
   let gridH: Float = tileH * rows.toFloat() + libraryGridTileGap * (rows - 1).toFloat()
   let gridW: Float = screenW - outerPad * 2.0
   setRectFixed(world: world, entity: grid, w: gridW, h: gridH)
-  let layV: LayoutType = LayoutType.Vertical
-  let alignS: AlignKind = AlignKind.Start
+  let layV: LayoutType = LayoutType.vertical
+  let alignS: AlignKind = AlignKind.start
   setLayout(world: world, entity: grid, kind: layV, gap: libraryGridTileGap, alignCross: alignS)
 
   let rowKids: List(EntityId) = createList(EntityId, cap: rows)
@@ -242,8 +242,8 @@ func buildLibraryBody(world: mod UiWorld, albums: view List(Album), library: vie
   let bodyW: Float = screenW - outerPad * 2.0
   let bodyH: Float = screenH - topBarH - navTabsH - outerGap * 4.0 - outerPad * 2.0
   setRectFixed(world: world, entity: body, w: bodyW, h: bodyH)
-  let layV: LayoutType = LayoutType.Vertical
-  let alignC: AlignKind = AlignKind.Center
+  let layV: LayoutType = LayoutType.vertical
+  let alignC: AlignKind = AlignKind.center
   setLayout(world: world, entity: body, kind: layV, gap: outerGap, alignCross: alignC)
   let off: Offset = { delta: Vec2 { x: 0.0, y: scrollY } }
   componentSet(this: world.offsets, entity: body, data: off)
@@ -274,8 +274,8 @@ func mountLibraryPage(
 
   let root: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: root, w: screenW, h: screenH)
-  let layV: LayoutType = LayoutType.Vertical
-  let alignS: AlignKind = AlignKind.Start
+  let layV: LayoutType = LayoutType.vertical
+  let alignS: AlignKind = AlignKind.start
   setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
   setPaddingAll(world: world, entity: root, n: outerPad)
 

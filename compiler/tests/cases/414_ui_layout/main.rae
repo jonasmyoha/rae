@@ -19,8 +19,8 @@ import ui/transform
 
 func makeFixedSize() ret Size {
   ret Size {
-    w: SizeAxis { mode: SizeMode.Fixed, min: -1, max: -1 }
-    h: SizeAxis { mode: SizeMode.Fixed, min: -1, max: -1 }
+    w: SizeAxis { mode: SizeMode.fixed, min: -1, max: -1 }
+    h: SizeAxis { mode: SizeMode.fixed, min: -1, max: -1 }
   }
 }
 
@@ -32,7 +32,7 @@ func setRectFixed(world: mod UiWorld, entity: view EntityId, w: view Float, h: v
 
 func setShapeRect(world: mod UiWorld, entity: view EntityId, r: view Int, g: view Int, b: view Int) {
   let shape: Shape = {
-    kind: ShapeKind.Rect
+    kind: ShapeKind.rect
     fill: RgbaColor { r: r, g: g, b: b, a: 255 }
     stroke: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
     strokeWidth: 0.0
@@ -72,10 +72,10 @@ func main() {
   let root: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: root, w: 400.0, h: 600.0)
   let rootLayout: Layout = {
-    kind: LayoutType.Vertical
+    kind: LayoutType.vertical
     gap: 10.0
-    alignMain: AlignKind.Start
-    alignCross: AlignKind.Start
+    alignMain: AlignKind.start
+    alignCross: AlignKind.start
     columns: 0
     rowGap: 0.0
     columnGap: 0.0
@@ -87,10 +87,10 @@ func main() {
   let header: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: header, w: 360.0, h: 80.0)
   let headerLayout: Layout = {
-    kind: LayoutType.Horizontal
+    kind: LayoutType.horizontal
     gap: 10.0
-    alignMain: AlignKind.Start
-    alignCross: AlignKind.Center
+    alignMain: AlignKind.start
+    alignCross: AlignKind.center
     columns: 0
     rowGap: 0.0
     columnGap: 0.0

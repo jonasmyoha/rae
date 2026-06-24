@@ -92,10 +92,10 @@ func clearHotReloadState() pub ret Bool {
 # ----- signal file ----------------------------------------------------
 
 enum ReloadVerb {
-  None
-  Data
-  Reload
-  Restart
+  none
+  data
+  reload
+  restart
 }
 
 type ReloadSignal {
@@ -111,7 +111,7 @@ type ReloadSignalWatcher {
 
 func emptySignal() ret ReloadSignal {
   ret ReloadSignal {
-    verb: ReloadVerb.None
+    verb: ReloadVerb.none
     buildId: ""
     timestampMs: ""
   }
@@ -211,15 +211,15 @@ func readBuildStatus() pub ret BuildStatus {
 
 func parseReloadVerb(token: view String) ret ReloadVerb {
   if token.equals(other: "data") {
-    ret ReloadVerb.Data
+    ret ReloadVerb.data
   }
   if token.equals(other: "reload") {
-    ret ReloadVerb.Reload
+    ret ReloadVerb.reload
   }
   if token.equals(other: "restart") {
-    ret ReloadVerb.Restart
+    ret ReloadVerb.restart
   }
-  ret ReloadVerb.None
+  ret ReloadVerb.none
 }
 
 # Cheap mtime check on the signal file. Returns a signal whose
@@ -228,7 +228,7 @@ func parseReloadVerb(token: view String) ret ReloadVerb {
 # "<verb> <build-id> <epoch-ms>".
 #
 # An unrecognized verb still bumps the stored mtime but yields
-# `ReloadVerb.None` — we don't want one bad write to wedge the
+# `ReloadVerb.none` — we don't want one bad write to wedge the
 # watcher forever, and the supervisor will write a fresh signal
 # next time around.
 func pollReloadSignal(w: mod ReloadSignalWatcher) pub ret ReloadSignal {

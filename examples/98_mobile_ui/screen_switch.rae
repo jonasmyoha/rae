@@ -133,15 +133,15 @@ func handleScreenSwitch(
   # and the full History list reflect every song.open / pollSpotify
   # event recorded while the user was elsewhere. Cheap (single
   # mount) and the boot-mounted instance has stale empty data.
-  if nextScreen is Screen.Home {
+  if nextScreen is Screen.home {
     unmountPage(world: world, pageId: homePageId)
     let freshHome: EntityId = mountHomePage(world: world, state: appState, scrollY: 0.0)
   }
-  if nextScreen is Screen.History {
+  if nextScreen is Screen.history {
     unmountPage(world: world, pageId: historyPageId)
     let freshHist: EntityId = mountHistoryPage(world: world, state: appState, scrollY: 0.0)
   }
-  if nextScreen is Screen.Library {
+  if nextScreen is Screen.library {
     # Re-mount with the current library filter — albums removed
     # via the bottom-sheet drop out of the grid here.
     unmountPage(world: world, pageId: libraryPageId)
