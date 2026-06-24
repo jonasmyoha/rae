@@ -27,6 +27,8 @@ typedef enum {
   TOK_KW_TYPE,
   TOK_KW_FUNC,
   TOK_KW_LET,
+  TOK_KW_VAR,
+  TOK_KW_CONST,
   TOK_KW_RET,
   TOK_KW_SPAWN,
   TOK_KW_VIEW,
