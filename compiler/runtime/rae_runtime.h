@@ -9,6 +9,21 @@
 #include <string.h>
 #include <stdarg.h>
 #include <wchar.h>
+#include <pthread.h>
+
+/* Compiled-backend task runtime (Task(T)). The Rae type Task(T) lowers to
+ * `RaeTask*` (type-erased): the worker thread stores its T result into the
+ * `result` buffer (malloc'd to sizeof(T)); `task.get()` joins and reads it.
+ * One pthread per spawned task; join happens exactly once (guarded). */
+typedef struct {
+  pthread_t thread;
+  void* result;   /* malloc'd to sizeof(T), or NULL for a void task */
+  int done;       /* set by the worker after storing the result */
+  int joined;     /* pthread_join called once */
+} RaeTask;
+
+RaeTask* rae_task_new(size_t result_size);
+void* rae_task_await(RaeTask* t);   /* join once; returns the result buffer */
 
 #ifdef __GNUC__
 #define RAE_UNUSED __attribute__((unused))

@@ -452,6 +452,12 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
           else { AstTypeRef tmp = { .resolved_type = t->as.buffer.base }; emit_type_ref_as_c_type(ctx, &tmp, out, false); fprintf(out, "*"); }
           return true;
       }
+      if (t->kind == TYPE_TASK) {
+          // Type-erased handle: the result type T is recovered at the
+          // get() call site. A Task is already a pointer; view/mod are no-ops.
+          fprintf(out, "RaeTask*");
+          return true;
+      }
       if (t->kind == TYPE_STRUCT) {
           if (type->is_view) fprintf(out, "const ");
           // Check if it's a raylib c_struct type — emit bare name
@@ -478,8 +484,9 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
   if (str_eq_cstr(base, "Buffer") && type->generic_args) {
         if (type->is_view) fprintf(out, "const ");
         Str arg_base = get_base_type_name(type->generic_args); if (str_eq_cstr(arg_base, "Any") || arg_base.len == 0) { fprintf(out, "void*"); return true; }
-        emit_type_ref_as_c_type(ctx, type->generic_args, out, false); fprintf(out, "*"); return true; 
+        emit_type_ref_as_c_type(ctx, type->generic_args, out, false); fprintf(out, "*"); return true;
   }
+  if (str_eq_cstr(base, "Task")) { fprintf(out, "RaeTask*"); return true; }
   if (ctx && ctx->generic_params && ctx->generic_args) {
       const AstIdentifierPart* gp = ctx->generic_params; const AstTypeRef* arg = ctx->generic_args;
       while (gp && arg) { if (str_eq(gp->text, base)) { emit_type_ref_as_c_type(ctx, arg, out, false); return true; } gp = gp->next; arg = arg->next; }
