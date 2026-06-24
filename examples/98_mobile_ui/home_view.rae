@@ -53,7 +53,7 @@ func homeContentHeight(albums: view List(Album), hasRecent: view Bool) pub ret F
   let tileH: Float = homeGridTileSize()
   let gridH: Float = tileH * rows.toFloat() + homeGridTileGap * (rows - 1).toFloat()
   let subH: Float = 22.0
-  let recentH: Float = 0.0
+  var recentH: Float = 0.0
   if hasRecent {
     # 28 (header) + outerGap + thumb-size + outerGap (gap to grid).
     recentH = 28.0 + outerGap + recentlyPlayedThumbSize + outerGap
@@ -93,7 +93,7 @@ func buildHomeGridRow(
   let kids: List(EntityId) = createList(EntityId, cap: homeGridColumns)
   let cols: Int = homeCols()
   let total: Int = keys.length
-  let col: Int = 0
+  var col: Int = 0
   loop col < cols {
     let i: Int = startIndex + col
     if i < total {
@@ -122,7 +122,7 @@ func buildHomeCoverGrid(world: mod UiWorld, albums: view List(Album), library: v
   setLayout(world: world, entity: grid, kind: layV, gap: homeGridTileGap, alignCross: alignS)
 
   let rowKids: List(EntityId) = createList(EntityId, cap: rows)
-  let i: Int = 0
+  var i: Int = 0
   loop i < rows {
     let startIndex: Int = i * cols
     let row: EntityId = buildHomeGridRow(world: world, keys: keys, startIndex: startIndex, rounded: rounded)
@@ -156,7 +156,7 @@ func buildHomeBody(world: mod UiWorld, albums: view List(Album), library: view L
   let grid: EntityId = buildHomeCoverGrid(world: world, albums: albums, library: library, rounded: rounded)
 
   let hasRecent: Bool = history.entries.length > 0
-  let kidsCap: Int = 2
+  var kidsCap: Int = 2
   if hasRecent {
     kidsCap = 4
   }
@@ -187,7 +187,7 @@ func mountHomePage(
   setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
   setPaddingAll(world: world, entity: root, n: outerPad)
 
-  let copiedId: String = ""
+  var copiedId: String = ""
   copiedId = copiedId.concat(other: homePageId)
   let pr: PageRoot = { id: own copiedId }
   componentSet(this: world.pageRoots, entity: root, data: own pr)

@@ -69,7 +69,7 @@ func resolveAxisFromSize(
   hasMeasured: view Bool
   hasParentAvail: view Bool
 ) ret Float {
-  let result: Float = rectVal
+  var result: Float = rectVal
   if axis.mode is SizeMode.Fixed {
     result = rectVal
   }
@@ -110,7 +110,7 @@ func applyConstraintsW(world: view UiWorld, entity: view EntityId, w: view Float
     ret w
   }
   let c: Constraints = componentGet(this: world.constraints, entity: entity)
-  let r: Float = w
+  var r: Float = w
   if c.hasMinW {
     if r < c.minW {
       r = c.minW
@@ -129,7 +129,7 @@ func applyConstraintsH(world: view UiWorld, entity: view EntityId, h: view Float
     ret h
   }
   let c: Constraints = componentGet(this: world.constraints, entity: entity)
-  let r: Float = h
+  var r: Float = h
   if c.hasMinH {
     if r < c.minH {
       r = c.minH
@@ -194,7 +194,7 @@ func activeChildren(world: view UiWorld, entity: view EntityId) ret List(EntityI
   }
   let ch: view Children => componentView(this: world.childrens, entity: entity)
   let n: Int = ch.ids.length
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
     if layoutActive(world: world, entity: cid) {
@@ -217,7 +217,7 @@ func activeChildren(world: view UiWorld, entity: view EntityId) ret List(EntityI
 func measureSubtree(world: mod UiWorld, entity: view EntityId) {
   let kids: List(EntityId) = activeChildren(world: world, entity: entity)
   let n: Int = kids.length
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
     measureSubtree(world: world, entity: cid)
@@ -229,13 +229,13 @@ func measureSubtree(world: mod UiWorld, entity: view EntityId) {
   let pad: Insets = entityPadding(world: world, entity: entity)
   let rect: Rect = entityRect(world: world, entity: entity)
 
-  let measuredW: Float = rect.w
-  let measuredH: Float = rect.h
+  var measuredW: Float = rect.w
+  var measuredH: Float = rect.h
 
   if n > 0 {
-    let sumMain: Float = 0.0
-    let maxCross: Float = 0.0
-    let j: Int = 0
+    var sumMain: Float = 0.0
+    var maxCross: Float = 0.0
+    var j: Int = 0
     loop j < n {
       let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: j)
       let cw: Float = childMeasuredW(world: world, entity: cid)
@@ -264,7 +264,7 @@ func measureSubtree(world: mod UiWorld, entity: view EntityId) {
       j = j + 1
     }
     if layout.kind is LayoutType.Horizontal {
-      let gapTotal: Float = layout.gap * (n - 1).toFloat()
+      var gapTotal: Float = layout.gap * (n - 1).toFloat()
       if gapTotal < 0.0 {
         gapTotal = 0.0
       }
@@ -272,7 +272,7 @@ func measureSubtree(world: mod UiWorld, entity: view EntityId) {
       measuredH = maxCross + pad.t + pad.b
     }
     if layout.kind is LayoutType.Vertical {
-      let gapTotal: Float = layout.gap * (n - 1).toFloat()
+      var gapTotal: Float = layout.gap * (n - 1).toFloat()
       if gapTotal < 0.0 {
         gapTotal = 0.0
       }
@@ -307,7 +307,7 @@ func measureSubtree(world: mod UiWorld, entity: view EntityId) {
 func childMeasuredW(world: view UiWorld, entity: view EntityId) ret Float {
   let size: Size = entitySize(world: world, entity: entity)
   let rect: Rect = entityRect(world: world, entity: entity)
-  let measuredW: Float = rect.w
+  var measuredW: Float = rect.w
   if componentHas(this: world.measuredSizes, entity: entity) {
     let ms: MeasuredSize = componentGet(this: world.measuredSizes, entity: entity)
     measuredW = ms.w
@@ -325,7 +325,7 @@ func childMeasuredW(world: view UiWorld, entity: view EntityId) ret Float {
 func childMeasuredH(world: view UiWorld, entity: view EntityId) ret Float {
   let size: Size = entitySize(world: world, entity: entity)
   let rect: Rect = entityRect(world: world, entity: entity)
-  let measuredH: Float = rect.h
+  var measuredH: Float = rect.h
   if componentHas(this: world.measuredSizes, entity: entity) {
     let ms: MeasuredSize = componentGet(this: world.measuredSizes, entity: entity)
     measuredH = ms.h
@@ -359,8 +359,8 @@ func resolveOwnSize(
 ) ret Vec2 {
   let size: Size = entitySize(world: world, entity: entity)
   let rect: Rect = entityRect(world: world, entity: entity)
-  let measuredW: Float = rect.w
-  let measuredH: Float = rect.h
+  var measuredW: Float = rect.w
+  var measuredH: Float = rect.h
   if componentHas(this: world.measuredSizes, entity: entity) {
     let ms: MeasuredSize = componentGet(this: world.measuredSizes, entity: entity)
     measuredW = ms.w
@@ -412,8 +412,8 @@ func computeSubtree(
   let pad: Insets = entityPadding(world: world, entity: entity)
   let contentX: Float = pad.l
   let contentY: Float = pad.t
-  let contentW: Float = ownW - pad.l - pad.r
-  let contentH: Float = ownH - pad.t - pad.b
+  var contentW: Float = ownW - pad.l - pad.r
+  var contentH: Float = ownH - pad.t - pad.b
   if contentW < 0.0 {
     contentW = 0.0
   }
@@ -468,7 +468,7 @@ func computeSubtree(
   }
   # None: each child uses its authored Rect.x/y as relative position
   # inside the parent's padded content box.
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
     let crect: Rect = entityRect(world: world, entity: cid)
@@ -508,9 +508,9 @@ func placeHorizontal(
 ) {
   let n: Int = kids.length
   # Pass 1: sum widths of fixed/hug children, count Fill children.
-  let fixedSum: Float = 0.0
-  let fillCount: Int = 0
-  let i: Int = 0
+  var fixedSum: Float = 0.0
+  var fillCount: Int = 0
+  var i: Int = 0
   loop i < n {
     let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
     let size: Size = entitySize(world: world, entity: cid)
@@ -528,15 +528,15 @@ func placeHorizontal(
     }
     i = i + 1
   }
-  let gapTotal: Float = gap * (n - 1).toFloat()
+  var gapTotal: Float = gap * (n - 1).toFloat()
   if gapTotal < 0.0 {
     gapTotal = 0.0
   }
-  let remaining: Float = contentW - fixedSum - gapTotal
+  var remaining: Float = contentW - fixedSum - gapTotal
   if remaining < 0.0 {
     remaining = 0.0
   }
-  let fillSize: Float = 0.0
+  var fillSize: Float = 0.0
   if fillCount > 0 {
     fillSize = remaining / fillCount.toFloat()
   }
@@ -548,8 +548,8 @@ func placeHorizontal(
   #   End           — slack on the left
   #   SpaceBetween  — slack split evenly between children, on top of
   #                   the configured `gap` (no slack at the ends)
-  let startOffset: Float = 0.0
-  let extraGap: Float = 0.0
+  var startOffset: Float = 0.0
+  var extraGap: Float = 0.0
   if fillCount is 0 {
     if alignMain is AlignKind.Center {
       startOffset = remaining / 2.0
@@ -565,12 +565,12 @@ func placeHorizontal(
   }
 
   # Pass 2: place children in order with gaps between.
-  let cursorX: Float = contentX + startOffset
-  let j: Int = 0
+  var cursorX: Float = contentX + startOffset
+  var j: Int = 0
   loop j < n {
     let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: j)
     let size: Size = entitySize(world: world, entity: cid)
-    let childW: Float = 0.0
+    var childW: Float = 0.0
     if size.w.mode is SizeMode.Fill {
       childW = fillSize
     } else {
@@ -584,7 +584,7 @@ func placeHorizontal(
       childW = r.x
     }
     childW = applyConstraintsW(world: world, entity: cid, w: childW)
-    let childH: Float = 0.0
+    var childH: Float = 0.0
     if size.h.mode is SizeMode.Fill {
       childH = contentH
     } else {
@@ -599,7 +599,7 @@ func placeHorizontal(
     }
     childH = applyConstraintsH(world: world, entity: cid, h: childH)
 
-    let crossY: Float = contentY
+    var crossY: Float = contentY
     if alignCross is AlignKind.Center {
       crossY = contentY + (contentH - childH) / 2.0
     }
@@ -632,9 +632,9 @@ func placeVertical(
   alignCross: AlignKind
 ) {
   let n: Int = kids.length
-  let fixedSum: Float = 0.0
-  let fillCount: Int = 0
-  let i: Int = 0
+  var fixedSum: Float = 0.0
+  var fillCount: Int = 0
+  var i: Int = 0
   loop i < n {
     let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
     let size: Size = entitySize(world: world, entity: cid)
@@ -652,22 +652,22 @@ func placeVertical(
     }
     i = i + 1
   }
-  let gapTotal: Float = gap * (n - 1).toFloat()
+  var gapTotal: Float = gap * (n - 1).toFloat()
   if gapTotal < 0.0 {
     gapTotal = 0.0
   }
-  let remaining: Float = contentH - fixedSum - gapTotal
+  var remaining: Float = contentH - fixedSum - gapTotal
   if remaining < 0.0 {
     remaining = 0.0
   }
-  let fillSize: Float = 0.0
+  var fillSize: Float = 0.0
   if fillCount > 0 {
     fillSize = remaining / fillCount.toFloat()
   }
 
   # See `placeHorizontal` — same `alignMain` distribution, vertical axis.
-  let startOffset: Float = 0.0
-  let extraGap: Float = 0.0
+  var startOffset: Float = 0.0
+  var extraGap: Float = 0.0
   if fillCount is 0 {
     if alignMain is AlignKind.Center {
       startOffset = remaining / 2.0
@@ -682,12 +682,12 @@ func placeVertical(
     }
   }
 
-  let cursorY: Float = contentY + startOffset
-  let j: Int = 0
+  var cursorY: Float = contentY + startOffset
+  var j: Int = 0
   loop j < n {
     let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: j)
     let size: Size = entitySize(world: world, entity: cid)
-    let childH: Float = 0.0
+    var childH: Float = 0.0
     if size.h.mode is SizeMode.Fill {
       childH = fillSize
     } else {
@@ -701,7 +701,7 @@ func placeVertical(
       childH = r.y
     }
     childH = applyConstraintsH(world: world, entity: cid, h: childH)
-    let childW: Float = 0.0
+    var childW: Float = 0.0
     if size.w.mode is SizeMode.Fill {
       childW = contentW
     } else {
@@ -716,7 +716,7 @@ func placeVertical(
     }
     childW = applyConstraintsW(world: world, entity: cid, w: childW)
 
-    let crossX: Float = contentX
+    var crossX: Float = contentX
     if alignCross is AlignKind.Center {
       crossX = contentX + (contentW - childW) / 2.0
     }
@@ -746,7 +746,7 @@ func placeStack(
   contentH: view Float
 ) {
   let n: Int = kids.length
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
     let resolved: Vec2 = resolveOwnSize(
@@ -761,8 +761,8 @@ func placeStack(
 
     # Default Stack alignment is centre on both axes; the per-child
     # `Align` overrides it.
-    let alignX: AlignKind = AlignKind.Center
-    let alignY: AlignKind = AlignKind.Center
+    var alignX: AlignKind = AlignKind.Center
+    var alignY: AlignKind = AlignKind.Center
     if componentHas(this: world.aligns, entity: cid) {
       let a: Align = componentGet(this: world.aligns, entity: cid)
       if a.hasX {
@@ -773,14 +773,14 @@ func placeStack(
       }
     }
 
-    let cx: Float = contentX
+    var cx: Float = contentX
     if alignX is AlignKind.Center {
       cx = contentX + (contentW - childW) / 2.0
     }
     if alignX is AlignKind.End {
       cx = contentX + contentW - childW
     }
-    let cy: Float = contentY
+    var cy: Float = contentY
     if alignY is AlignKind.Center {
       cy = contentY + (contentH - childH) / 2.0
     }
@@ -808,7 +808,7 @@ func placeStack(
 func layoutSystem(world: mod UiWorld) {
   let alive: view List(EntityId) => world.alive
   let n: Int = alive.length
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let e: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: i)
     if componentHas(this: world.parents, entity: e) is false {
@@ -920,7 +920,7 @@ func layoutSystemIfDirty(world: mod UiWorld, cache: mod LayoutCache) pub ret Boo
   let plGen: Int = componentTableGeneration(Parent, this: world.parents)
   let entityCount: Int = world.alive.length
 
-  let dirty: Bool = false
+  var dirty: Bool = false
   if rGen is not cache.rectsGen {
     dirty = true
   }

@@ -64,11 +64,11 @@ func collectionAppendSong(rows: mod List(CollectionRow), albums: view List(Album
 # One row per album track.
 func collectionFromAlbum(album: view Album) pub ret CollectionView {
   let n: Int = album.tracks.length
-  let tracksPart: String = ""
+  var tracksPart: String = ""
   if n > 0 {
     tracksPart = " · {n} songs"
   }
-  let yearPart: String = ""
+  var yearPart: String = ""
   if album.year > 0 {
     yearPart = " · {album.year}"
   }
@@ -78,10 +78,10 @@ func collectionFromAlbum(album: view Album) pub ret CollectionView {
   let coverStem: String = "{album.stem}"
 
   let rows: List(CollectionRow) = createList(CollectionRow, cap: n)
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let t: Track = rae_ext_rae_buf_get(buf: album.tracks.data, index: i)
-    let num: Int = t.number
+    var num: Int = t.number
     if num <= 0 {
       num = i + 1
     }
@@ -114,7 +114,7 @@ func collectionFromAlbum(album: view Album) pub ret CollectionView {
 func collectionFromPlaylist(playlist: view Playlist, albums: view List(Album)) pub ret CollectionView {
   let rows: List(CollectionRow) = createList(CollectionRow, cap: playlist.items.length)
   let n: Int = playlist.items.length
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let it: PlaylistItem = rae_ext_rae_buf_get(buf: playlist.items.data, index: i)
     let isTrack: Bool = it.kind.equals(other: "track")
@@ -127,7 +127,7 @@ func collectionFromPlaylist(playlist: view Playlist, albums: view List(Album)) p
       if ai >= 0 {
         let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: ai)
         let tn: Int = a.tracks.length
-        let tj: Int = 0
+        var tj: Int = 0
         loop tj < tn {
           collectionAppendSong(rows: rows, albums: albums, stem: it.albumStem, trackIndex: tj)
           tj = tj + 1
@@ -137,14 +137,14 @@ func collectionFromPlaylist(playlist: view Playlist, albums: view List(Album)) p
     i = i + 1
   }
   let count: Int = rows.length
-  let tracksPart: String = ""
+  var tracksPart: String = ""
   if count > 0 {
     tracksPart = " · {count} songs"
   }
   let caption: String = "Playlist{tracksPart}"
   let title: String = "{playlist.title}"
   let artist: String = ""
-  let coverStem: String = ""
+  var coverStem: String = ""
   if rows.length > 0 {
     let first: CollectionRow = rae_ext_rae_buf_get(buf: rows.data, index: 0)
     coverStem = "{first.albumStem}"

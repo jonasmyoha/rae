@@ -46,7 +46,7 @@ func textureLoad(reg: mod TextureRegistry, key: own String, path: own String) re
 # Find the index of `key` in the registry, or -1 if not present.
 func textureIndex(reg: view TextureRegistry, key: view String) ret Int {
   let n: Int = reg.entries.length
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let e: TextureEntry = rae_ext_rae_buf_get(buf: reg.entries.data, index: i)
     if e.key.equals(other: key) {
@@ -85,11 +85,11 @@ func textureLoadBatch(
 ) {
   let n: Int = keys.length
   let m: Int = paths.length
-  let count: Int = n
+  var count: Int = n
   if m < count {
     count = m
   }
-  let i: Int = 0
+  var i: Int = 0
   loop i < count {
     let k: String = keys.get(index: i)
     let p: String = paths.get(index: i)
@@ -135,7 +135,7 @@ func textureRemove(reg: mod TextureRegistry, key: view String) pub {
 # `closeWindow()` so raylib doesn't leak GPU memory.
 func textureUnloadAll(reg: mod TextureRegistry) {
   let n: Int = reg.entries.length
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let e: TextureEntry = rae_ext_rae_buf_get(buf: reg.entries.data, index: i)
     unloadTexture(texture: e.texture)

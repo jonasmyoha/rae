@@ -23,7 +23,7 @@ type Node {
 
 func nodeIndex(nodes: view List(Node), target: view String) ret Int {
   let n: Int = nodes.length
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let nd: Node = rae_ext_rae_buf_get(buf: nodes.data, index: i)
     if nd.nodeId.equals(other: target) {
@@ -60,7 +60,7 @@ func main() {
 
   # Build a parallel map of nodeId → index, mirroring world.nodeIds.
   let map: StringMap(Int) = createStringMap(Int, cap: 16)
-  let s: Int = 0
+  var s: Int = 0
   loop s < nodes.length {
     let nd: Node = rae_ext_rae_buf_get(buf: nodes.data, index: s)
     map.set(k: nd.nodeId, value: s)
@@ -70,20 +70,20 @@ func main() {
   # Pass mirroring scene_loader pass 3 EXACTLY: nested loop, view-
   # String helper, componentSet-like side effect, all in the same
   # enclosing block.
-  let p: Int = 0
+  var p: Int = 0
   loop p < nodes.length {
-    let parent: Node = rae_ext_rae_buf_get(buf: nodes.data, index: p)
+    var parent: Node = rae_ext_rae_buf_get(buf: nodes.data, index: p)
     let kn: Int = parent.childIds.length
     if kn > 0 {
       let kidsAssembly: List(Int) = createList(Int, cap: kn)
-      let q: Int = 0
+      var q: Int = 0
       loop q < kn {
         let childId: String = parent.childIds.get(index: q)
         # Two view-String calls per iter, mirroring the multiple-wrap
         # pattern (nodeIndex + map.get).
         let idx: Int = nodeIndex(nodes: nodes, target: childId)
         let entityOpt: opt Int = map.get(k: childId)
-        let entityVal: Int = -1
+        var entityVal: Int = -1
         if entityOpt is not none {
           entityVal = entityOpt
         }

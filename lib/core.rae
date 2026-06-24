@@ -51,7 +51,7 @@ func createList(T: type, cap: view Int) ret List(T) {
 }
 
 func grow(T: type, this: mod List(T)) {
-  let newCap: Int = this.cap * 2
+  var newCap: Int = this.cap * 2
   if newCap is 0 {
     newCap = 4
   }
@@ -183,9 +183,9 @@ func swap(T: type, this: mod List(T), i: view Int, j: view Int) {
 # where `<` is defined. For String / struct types, write a custom sort or
 # use `sortByDesc` once a comparator API lands.
 func sort(T: type, this: mod List(T)) {
-  let i: Int = 1
+  var i: Int = 1
   loop i < this.length {
-    let j: Int = i
+    var j: Int = i
     loop j > 0 {
       let a: T = rae_ext_rae_buf_get(buf: this.data, index: j - 1)
       let b: T = rae_ext_rae_buf_get(buf: this.data, index: j)
@@ -204,9 +204,9 @@ func sort(T: type, this: mod List(T)) {
 # In-place insertion sort, descending. Useful for highscore tables and
 # anything that wants the largest values first.
 func sortDesc(T: type, this: mod List(T)) {
-  let i: Int = 1
+  var i: Int = 1
   loop i < this.length {
-    let j: Int = i
+    var j: Int = i
     loop j > 0 {
       let a: T = rae_ext_rae_buf_get(buf: this.data, index: j - 1)
       let b: T = rae_ext_rae_buf_get(buf: this.data, index: j)
@@ -223,8 +223,8 @@ func sortDesc(T: type, this: mod List(T)) {
 
 # In-place reverse. Works for any T.
 func reverse(T: type, this: mod List(T)) {
-  let lo: Int = 0
-  let hi: Int = this.length - 1
+  var lo: Int = 0
+  var hi: Int = this.length - 1
   loop lo < hi {
     swap(this, i: lo, j: hi)
     lo = lo + 1
@@ -238,7 +238,7 @@ func isEmpty(T: type, this: view List(T)) ret Bool {
 
 # Linear search for `value`. Works for any T where `is` is defined.
 func contains(T: type, this: view List(T), value: view T) ret Bool {
-  let i: Int = 0
+  var i: Int = 0
   loop i < this.length {
     let cur: T = rae_ext_rae_buf_get(buf: this.data, index: i)
     if cur is value {
@@ -251,7 +251,7 @@ func contains(T: type, this: view List(T), value: view T) ret Bool {
 
 # Returns the first index of `value`, or -1 if not found.
 func indexOf(T: type, this: view List(T), value: view T) ret Int {
-  let i: Int = 0
+  var i: Int = 0
   loop i < this.length {
     let cur: T = rae_ext_rae_buf_get(buf: this.data, index: i)
     if cur is value {
@@ -304,7 +304,7 @@ func set(V: type, this: mod StringMap(V), k: view String, value: own V) {
     growStringMap(this)
   }
   let h: Int = rae_str_hash(s: k)
-  let idx: Int = h % this.cap
+  var idx: Int = h % this.cap
   if idx < 0 {
     idx = -idx
   }
@@ -344,7 +344,7 @@ func get(V: type, this: view StringMap(V), k: view String) ret opt V {
     ret none
   }
   let h: Int = rae_str_hash(s: k)
-  let idx: Int = h % this.cap
+  var idx: Int = h % this.cap
   if idx < 0 {
     idx = -idx
   }
@@ -380,7 +380,7 @@ func remove(V: type, this: mod StringMap(V), k: view String) {
     ret
   }
   let h: Int = rae_str_hash(s: k)
-  let idx: Int = h % this.cap
+  var idx: Int = h % this.cap
   if idx < 0 {
     idx = -idx
   }
@@ -405,7 +405,7 @@ func remove(V: type, this: mod StringMap(V), k: view String) {
 
 func keys(V: type, this: view StringMap(V)) ret List(String) {
   let result: List(String) = createList(cap: this.length)
-  let i: Int = 0
+  var i: Int = 0
   loop i < this.cap {
     let entry: StringMapEntry(V) = rae_ext_rae_buf_get(buf: this.data, index: i)
     if entry.occupied {
@@ -418,7 +418,7 @@ func keys(V: type, this: view StringMap(V)) ret List(String) {
 
 func values(V: type, this: view StringMap(V)) ret List(V) {
   let result: List(V) = createList(cap: this.length)
-  let i: Int = 0
+  var i: Int = 0
   loop i < this.cap {
     let entry: StringMapEntry(V) = rae_ext_rae_buf_get(buf: this.data, index: i)
     if entry.occupied {
@@ -440,7 +440,7 @@ func growStringMap(V: type, this: mod StringMap(V)) {
   this.data = rae_ext_rae_buf_alloc(size: this.cap, elemSize: sizeof(StringMapEntry(V)))
   this.length = 0
   
-  let i: Int = 0
+  var i: Int = 0
   loop i < oldCap {
     let entry: StringMapEntry(V) = rae_ext_rae_buf_get(buf: oldData, index: i)
     if entry.occupied {
@@ -500,7 +500,7 @@ func set(V: type, this: mod IntMap(V), k: view Int, value: own V) {
   }
   # Simple hash for Int
   let h: Int = k
-  let idx: Int = h % this.cap
+  var idx: Int = h % this.cap
   if idx < 0 {
     idx = -idx
   }
@@ -525,7 +525,7 @@ func get(V: type, this: view IntMap(V), k: view Int) ret opt V {
     ret none
   }
   let h: Int = k
-  let idx: Int = h % this.cap
+  var idx: Int = h % this.cap
   if idx < 0 {
     idx = -idx
   }
@@ -550,7 +550,7 @@ func has(V: type, this: view IntMap(V), k: view Int) ret Bool {
     ret false
   }
   let h: Int = k
-  let idx: Int = h % this.cap
+  var idx: Int = h % this.cap
   if idx < 0 {
     idx = -idx
   }
@@ -575,7 +575,7 @@ func remove(V: type, this: mod IntMap(V), k: view Int) {
     ret
   }
   let h: Int = k
-  let idx: Int = h % this.cap
+  var idx: Int = h % this.cap
   if idx < 0 {
     idx = -idx
   }
@@ -600,7 +600,7 @@ func remove(V: type, this: mod IntMap(V), k: view Int) {
 
 func keys(V: type, this: view IntMap(V)) ret List(Int) {
   let result: List(Int) = createList(cap: this.length)
-  let i: Int = 0
+  var i: Int = 0
   loop i < this.cap {
     let entry: IntMapEntry(V) = rae_ext_rae_buf_get(buf: this.data, index: i)
     if entry.occupied {
@@ -613,7 +613,7 @@ func keys(V: type, this: view IntMap(V)) ret List(Int) {
 
 func values(V: type, this: view IntMap(V)) ret List(V) {
   let result: List(V) = createList(cap: this.length)
-  let i: Int = 0
+  var i: Int = 0
   loop i < this.cap {
     let entry: IntMapEntry(V) = rae_ext_rae_buf_get(buf: this.data, index: i)
     if entry.occupied {
@@ -635,7 +635,7 @@ func growInt64Map(V: type, this: mod IntMap(V)) {
   this.data = rae_ext_rae_buf_alloc(size: this.cap, elemSize: sizeof(IntMapEntry(V)))
   this.length = 0
   
-  let i: Int = 0
+  var i: Int = 0
   loop i < oldCap {
     let entry: IntMapEntry(V) = rae_ext_rae_buf_get(buf: oldData, index: i)
     if entry.occupied {

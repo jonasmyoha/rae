@@ -22,13 +22,13 @@ func canMove(w: view World, dx: view Int, dy: view Int, dr: view Int) ret Int {
   let cp: view Piece => w.currentPiece
   let newX: Int = cp.x + dx
   let newY: Int = cp.y + dy
-  let newRot: Int = (cp.rotation + dr) % 4
+  var newRot: Int = (cp.rotation + dr) % 4
   if newRot < 0 {
     newRot = newRot + 4
   }
-  let py: Int = 0
+  var py: Int = 0
   loop py < 4 {
-    let px: Int = 0
+    var px: Int = 0
     loop px < 4 {
       if getShapeCell(kind: cp.kind, rot: newRot, px: px, py: py) is 1 {
         if isOccupied(w: w, x: newX + px, y: newY + py) is 1 {
@@ -45,9 +45,9 @@ func canMove(w: view World, dx: view Int, dy: view Int, dr: view Int) ret Int {
 func lockPiece(w: mod World) {
   let cp: view Piece => w.currentPiece
   let kindId: Int = getKindId(kind: cp.kind)
-  let py: Int = 0
+  var py: Int = 0
   loop py < 4 {
-    let px: Int = 0
+    var px: Int = 0
     loop px < 4 {
       if getShapeCell(kind: cp.kind, rot: cp.rotation, px: px, py: py) is 1 {
         let gx: Int = cp.x + px
@@ -64,11 +64,11 @@ func lockPiece(w: mod World) {
 }
 
 func checkLines(w: mod World) {
-  let cleared: Int = 0
-  let y: Int = gridHeight - 1
+  var cleared: Int = 0
+  var y: Int = gridHeight - 1
   loop y >= 0 {
-    let full: Int = 1
-    let x: Int = 0
+    var full: Int = 1
+    var x: Int = 0
     loop x < gridWidth {
       if gridGet(w: w, x: x, y: y) is 0 {
         full = 0
@@ -79,9 +79,9 @@ func checkLines(w: mod World) {
       cleared = cleared + 1
       spawnLineClearParticles(w: w, row: y)
       # Shift everything above one row down.
-      let ty: Int = y
+      var ty: Int = y
       loop ty > 0 {
-        let tx: Int = 0
+        var tx: Int = 0
         loop tx < gridWidth {
           let above: Int = gridGet(w: w, x: tx, y: ty - 1)
           gridSet(w: w, x: tx, y: ty, value: above)
@@ -89,7 +89,7 @@ func checkLines(w: mod World) {
         }
         ty = ty - 1
       }
-      let tx: Int = 0
+      var tx: Int = 0
       loop tx < gridWidth {
         gridSet(w: w, x: tx, y: 0, value: 0)
         tx = tx + 1
@@ -102,7 +102,7 @@ func checkLines(w: mod World) {
   if cleared > 0 {
     w.lines = w.lines + cleared
     # 1/2/3/4-line bonus matching modern guideline scoring.
-    let mult: Int = 100
+    var mult: Int = 100
     if cleared is 2 {
       mult = 300
     }
@@ -162,7 +162,7 @@ func physicsSystem(w: mod World) {
     ret
   }
 
-  let grounded: Bool = canMove(w: w, dx: 0, dy: 1, dr: 0) is 0
+  var grounded: Bool = canMove(w: w, dx: 0, dy: 1, dr: 0) is 0
 
   # Gravity tick.
   w.fallTimer = w.fallTimer + 1

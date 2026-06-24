@@ -28,7 +28,7 @@ func main() {
     let world: List(Sphere) = buildScene()
 
     let fb: List(Int) = createList(cap: width * height)
-    let i: Int = 0
+    var i: Int = 0
     loop i < width * height {
         fb.add(value: 0)
         i = i + 1
@@ -40,9 +40,9 @@ func main() {
     setTextureFilter(texture: tex, filter: 1)
     let dispScale: Float = winW.toFloat() / width.toFloat()
 
-    let nextRow: Int = 0
+    var nextRow: Int = 0
     let startMs: Int = nowMs()
-    let doneMs: Int = 0
+    var doneMs: Int = 0
     loop not windowShouldClose() {
         let frameStart: Int = nowMs()
         loop nextRow < height and nowMs() - frameStart <= 16 {

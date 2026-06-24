@@ -17,9 +17,9 @@ func drawBlock(gx: view Int, gy: view Int, kindId: view Int, flash: view Float) 
   let col: Color = kindColor(id: kindId)
   # Lock-flash: brighten colour briefly when a piece just locks.
   let mix: Int = (flash * 80.0).toInt()
-  let r: Int = col.r + mix
-  let g: Int = col.g + mix
-  let b: Int = col.b + mix
+  var r: Int = col.r + mix
+  var g: Int = col.g + mix
+  var b: Int = col.b + mix
   if r > 255 {
     r = 255
   }
@@ -47,7 +47,7 @@ func drawWell() {
   let ghF: Float = gh.toFloat()
   let backZ: Float = 0.0 - 0.5
 
-  let i: Int = 0
+  var i: Int = 0
   loop i <= gh {
     let y: Float = 0.0 - i.toFloat()
     drawCubeWires(
@@ -59,7 +59,7 @@ func drawWell() {
     )
     i = i + 1
   }
-  let j: Int = 0
+  var j: Int = 0
   loop j <= gw {
     let x: Float = j.toFloat()
     drawCubeWires(
@@ -74,9 +74,9 @@ func drawWell() {
 }
 
 func drawLockedGrid(w: view World) {
-  let y: Int = 0
+  var y: Int = 0
   loop y < gridHeight {
-    let x: Int = 0
+    var x: Int = 0
     loop x < gridWidth {
       let v: Int = gridGet(w: w, x: x, y: y)
       if v > 0 {
@@ -94,9 +94,9 @@ func drawCurrentPiece(w: view World) {
   }
   let cp: view Piece => w.currentPiece
   let kindId: Int = getKindId(kind: cp.kind)
-  let py: Int = 0
+  var py: Int = 0
   loop py < 4 {
-    let px: Int = 0
+    var px: Int = 0
     loop px < 4 {
       if getShapeCell(kind: cp.kind, rot: cp.rotation, px: px, py: py) is 1 {
         drawBlock(gx: cp.x + px, gy: cp.y + py, kindId: kindId, flash: 0.0)
@@ -114,16 +114,16 @@ func drawGhostPiece(w: view World) {
   }
   let cp: view Piece => w.currentPiece
   # Find drop distance.
-  let drop: Int = 0
+  var drop: Int = 0
   loop canMove(w: w, dx: 0, dy: drop + 1, dr: 0) is 1 {
     drop = drop + 1
   }
   if drop is 0 {
     ret
   }
-  let py: Int = 0
+  var py: Int = 0
   loop py < 4 {
-    let px: Int = 0
+    var px: Int = 0
     loop px < 4 {
       if getShapeCell(kind: cp.kind, rot: cp.rotation, px: px, py: py) is 1 {
         let pos: Vector3 = cellPos(gx: cp.x + px, gy: cp.y + drop + py)

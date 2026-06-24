@@ -27,7 +27,7 @@ func buildCamera(pos: view Vec3, target: view Vec3, vfovDeg: view Float, apertur
     let right: Vec3 = vnorm(a: vcross(a: fwd, b: worldUp))
     let up: Vec3 = vcross(a: right, b: fwd)
     let focus: Float = 1.0
-    let theta: Float = vfovDeg * PI() / 180.0
+    let theta: Float = vfovDeg * pi / 180.0
     let halfH: Float = tan(x: theta / 2.0)
     let vpH: Float = 2.0 * halfH * focus
     let vpW: Float = aspect * vpH
@@ -49,9 +49,9 @@ func buildCamera(pos: view Vec3, target: view Vec3, vfovDeg: view Float, apertur
 # Primary ray for normalized screen coords (u right, v up), with lens sampling
 # for defocus blur when lensRadius > 0.
 func makeRay(cam: view Camera, u: view Float, v: view Float) ret Ray {
-    let ro: Vec3 = cam.origin
+    var ro: Vec3 = cam.origin
     if cam.lensRadius > 0.0 {
-        let a: Float = random() * TAU()
+        let a: Float = random() * tau
         let r: Float = cam.lensRadius * sqrt(x: random())
         let lx: Float = r * cos(x: a)
         let ly: Float = r * sin(x: a)

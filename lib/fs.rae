@@ -114,7 +114,7 @@ func listDir(folder: own String) pub ret List(File) {
   let raw: String = rae_sys_list_dir(folder: folder)
   let lines: List(String) = raw.split(sep: "\n")
   let result: List(File) = createList(File, cap: lines.length)
-  let i: Int = 0
+  var i: Int = 0
   loop i < lines.length {
     let n: String = lines.get(index: i)
     if n.length() > 0 {
@@ -138,7 +138,7 @@ func listDir(folder: own String) pub ret List(File) {
 func listDirByExt(folder: own String, ext: view String) pub ret List(File) {
   let all: List(File) = listDir(folder: folder)
   let result: List(File) = createList(File, cap: all.length)
-  let i: Int = 0
+  var i: Int = 0
   loop i < all.length {
     let f: File = rae_ext_rae_buf_get(buf: all.data, index: i)
     if f.hasExtension(ext: ext) {

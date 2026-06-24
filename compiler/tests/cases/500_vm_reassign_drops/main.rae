@@ -41,7 +41,7 @@ func makeWithString(seed: view Int) ret WithString {
 # replacement value). Trivial struct reassign incurs no helper
 # call (no helper synthesised for primitive-only structs).
 func scenarioReassignFull() {
-  let w: WithString = { name: "first" }
+  var w: WithString = { name: "first" }
   w = { name: "second" }
 }
 
@@ -49,13 +49,13 @@ func scenarioReassignFull() {
 # on read, so the RHS is already an independent value by the time
 # our explicit drop fires on the slot.
 func scenarioSelfAssign() {
-  let w: WithString = { name: "self" }
+  var w: WithString = { name: "self" }
   w = w
 }
 
 # --- 3. ALIAS-classified local reassign fires the _alias variant.
 func scenarioReassignAlias() {
-  let p: WithString = makeWithString(seed: 1)
+  var p: WithString = makeWithString(seed: 1)
   p = makeWithString(seed: 2)
 }
 
@@ -63,7 +63,7 @@ func scenarioReassignAlias() {
 # Trivial has no String/List/Map field, so no FULL/ALIAS helper
 # was synthesised — the reassign path emits no native call.
 func scenarioReassignTrivial() {
-  let t: Trivial = { x: 1, y: 2 }
+  var t: Trivial = { x: 1, y: 2 }
   t = { x: 3, y: 4 }
 }
 
@@ -74,7 +74,7 @@ func scenarioReassignTrivial() {
 # actually frees the old String — observable via no-crash + by
 # checking the second value reads correctly.
 func scenarioReassignBareString() ret String {
-  let s: String = "alpha"
+  var s: String = "alpha"
   s = "beta-replacement"
   ret s
 }
@@ -83,7 +83,7 @@ func scenarioReassignBareString() ret String {
 # Return the post-reassign length to confirm the new list is the
 # one observable.
 func scenarioReassignBareList() ret Int {
-  let xs: List(String) = createList(String, cap: 0)
+  var xs: List(String) = createList(String, cap: 0)
   xs = createList(String, cap: 4)
   ret xs.length
 }
@@ -180,7 +180,7 @@ func main() {
   # iteration; with explicit cascade drop the per-iteration heap
   # is reclaimed.
   let rssBefore: Int = processRssKb()
-  let i: Int = 0
+  var i: Int = 0
   let iters: Int = 2000
   loop i < iters {
     scenarioReassignFull()

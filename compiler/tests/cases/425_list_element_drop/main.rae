@@ -19,7 +19,7 @@ type Foo {
 
 func transientList() {
   let xs: List(Foo) = createList(Foo, cap: 64)
-  let i: Int = 0
+  var i: Int = 0
   loop i < 64 {
     let inner: List(Int) = createList(Int, cap: 4)
     inner.add(value: i)
@@ -35,7 +35,7 @@ func main() {
   transientList()
   let baselineKb: Int = processRssKb()
   let iterations: Int = 5000
-  let i: Int = 0
+  var i: Int = 0
   loop i < iterations {
     transientList()
     i = i + 1

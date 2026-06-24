@@ -72,7 +72,7 @@ func main() {
   }
   syncColorsFromTheme()
 
-  let scenes: AlbumScenes = loadAllScenes()
+  var scenes: AlbumScenes = loadAllScenes()
   let texReg: TextureRegistry = createTextureRegistry()
   # Album catalogue (cheap json parse). Per-cover textures are NOT
   # loaded here — the interactive loop streams them in via
@@ -110,8 +110,8 @@ func main() {
   # internal MacBook monitor when there's an external attached).
   let chromeBudget: Int = 100
   let monitor: Int = getCurrentMonitor()
-  let monitorH: Int = getMonitorHeight(monitor: monitor)
-  let safeMaxH: Int = monitorH - chromeBudget
+  var monitorH: Int = getMonitorHeight(monitor: monitor)
+  var safeMaxH: Int = monitorH - chromeBudget
   let reqW: Int = winW.toInt()
   let reqH: Int = winH.toInt()
   log("[boot] requested screen={reqW}x{reqH} monitorH={monitorH} safeMaxH={safeMaxH}")
@@ -128,7 +128,7 @@ func main() {
   # Spotify-mode integration. ON by default; opt out with
   # RAE_UI_NO_SPOTIFY=1 or RAE_UI_HEADLESS=1 (would focus Spotify).
   let spotifyState: SpotifyState = createSpotifyState()
-  let spotifyOn: Bool = spotifyState.enabled
+  var spotifyOn: Bool = spotifyState.enabled
   if isHeadless { spotifyOn = false }
   if spotifyOn {
     log("[spotify] ON — launches lazily on first play (AppleScript play auto-launches).")
@@ -151,7 +151,7 @@ func main() {
   # loop. Empty / unset / <= 0 means "run forever" (normal mode).
   # Example: `RAE_AUTO_EXIT_SEC=30 rae run --target compiled ...`
   let autoExitEnv: String = getEnv(name: "RAE_AUTO_EXIT_SEC")
-  let autoExitSec: Float = 0.0
+  var autoExitSec: Float = 0.0
   if autoExitEnv.length() > 0 { autoExitSec = autoExitEnv.toFloat() }
   autoExitSec = headlessApplyAutoExitDefault(headless: isHeadless, current: autoExitSec)
   let bootTime: Float = getTime()
@@ -167,7 +167,7 @@ func main() {
   # render-vs-skip). Use when the app appears stuck.
   let loopDebugEnv: String = getEnv(name: "RAE_UI_DEBUG_LOOP")
   let loopDebugEnabled: Bool = loopDebugEnv.length() > 0
-  let loopDebugFrame: Int = 0
+  var loopDebugFrame: Int = 0
 
   # Memory-stress and screenshot modes both terminate after their run
   # (closeWindow / falls through to teardown). Implementations live in
@@ -182,7 +182,7 @@ func main() {
     # the window or a `dispatchActions` call returns a different
     # screen, at which point the outer loop re-builds the world.
     let startScreenEnv: String = getEnv(name: "RAE_UI_SCREEN")
-    let startScreen: Screen = Screen.Home
+    var startScreen: Screen = Screen.Home
     if startScreenEnv.equals(other: "library") { startScreen = Screen.Library }
     if startScreenEnv.equals(other: "album")   { startScreen = Screen.Album }
     if startScreenEnv.equals(other: "player")  { startScreen = Screen.Player }
@@ -204,7 +204,7 @@ func main() {
     # starts empty (sub-pages don't survive across launches —
     # rebooting always returns to the tab's base page).
     appState.tab = restored.screen
-    let currentScreen: Screen = visibleScreen(state: appState)
+    var currentScreen: Screen = visibleScreen(state: appState)
     # `scrollFsm.scrollY` itself is declared further down; the restored
     # value is carried in `restored.scrollY` until the inner loop's
     # init block reads it back.
@@ -228,11 +228,11 @@ func main() {
       intervalSec: 0.25
     )
 
-    let running: Bool = true
+    var running: Bool = true
     # Tracks the previous frame's `debug.menuOpen` so the loop can
     # detect open/close transitions and manage the blurred-backdrop
     # texture lifecycle (capture on open, unload on close).
-    let prevMenuOpen: Bool = false
+    var prevMenuOpen: Bool = false
     let anim: HeroAnim = createHeroAnim()
     # `appState` is created earlier (next to the albums load) so
     # both the stress and screenshot blocks can use it. Hero
@@ -240,8 +240,8 @@ func main() {
     # (texture keys equal stems — see `albumCoverKey` in
     # `asset_loader.rae`).
     let heroDuration: Float = 0.30
-    let pendingSrc: Bool = false
-    let pendingDst: Bool = false
+    var pendingSrc: Bool = false
+    var pendingDst: Bool = false
     # Page id of the destination hero entity that was hidden via
     # `setHeroVisibleOnPage(...false)` when the animation started.
     # Used by the end-of-animation cleanup to unhide the *same*
@@ -250,7 +250,7 @@ func main() {
     # is usually NOT the page we just hid (e.g. profile tile with
     # the same key gets re-shown while the album header hero stays
     # invisible → "turns black" on landing).
-    let pendingHeroTargetPageId: String = ""
+    var pendingHeroTargetPageId: String = ""
     # `transitionArmed` defers `startHeroTransition` from the outer
     # rebuild block until the first inner-loop frame. If we started
     # the clock in the outer loop, the 5–20 ms of world rebuild +
@@ -258,7 +258,7 @@ func main() {
     # the first frame runs, so `t` at the first overlay draw would
     # be ~0.05 instead of 0 — a small but visible jump from where
     # the outgoing hero sat.
-    let transitionArmed: Bool = false
+    var transitionArmed: Bool = false
     # Visualise every entity that owns an `OnClick` as an outline,
     # plus a crosshair at the input-system's reported mouse position.
     # Cyan for idle outlines, magenta for the rect currently under
@@ -331,28 +331,28 @@ func main() {
     # Active-album / track cache — avoids per-frame deep copy of the
     # whole Album (MusicBrainz-backed entries have 15-25 tracks of
     # String fields). Refreshed only on album/track change.
-    let cachedAlbumStem: String = ""
-    let cachedTrackIndex: Int = 0 - 1
-    let cachedTrackDurMs: Int = 0
-    let cachedAlbumScrollFloor: Float = 0.0
-    let cachedHistoryLen: Int = 0
-    let cachedSheetEpoch: Int = 0
-    let lastHoverAnimDirty: Bool = false
-    let lastFrameTime: Float = 0.0
+    var cachedAlbumStem: String = ""
+    var cachedTrackIndex: Int = 0 - 1
+    var cachedTrackDurMs: Int = 0
+    var cachedAlbumScrollFloor: Float = 0.0
+    var cachedHistoryLen: Int = 0
+    var cachedSheetEpoch: Int = 0
+    var lastHoverAnimDirty: Bool = false
+    var lastFrameTime: Float = 0.0
     # InputSystem outlives world rebuilds so a held press carries
     # `pressedEntity` across them. Cleared on screen change.
     let input: InputSystem = createInputSystem()
     # Last-hovered entity from the previous render-gate check
     # (debug.showInputOutlines re-render trigger). Persists across
     # world rebuilds (entity ids are stable while layout is).
-    let lastHoveredEntity: EntityId = noEntity()
+    var lastHoveredEntity: EntityId = noEntity()
     # Mouse-button bitfield (bit 0/1/2 = left/right/middle) from the
     # previous gate check — promotes a re-render on any transition
     # so the debug "btn:" readout updates without 60 fps polling.
-    let lastMouseBtns: Int = 0
+    var lastMouseBtns: Int = 0
     # Profile-cover load flag (currently a no-op stub for future
     # incremental rescan).
-    let profileLoaded: Bool = false
+    var profileLoaded: Bool = false
 
     # MSDF text — atlas loaded once, deep-copied into each rebuilt
     # world by `enableUiMsdfShared` (no GPU re-upload). No outline /
@@ -367,15 +367,15 @@ func main() {
     # True while album covers / history art are still streaming in. Fed
     # into the wait-timeout so the loop ticks at frame cadence (not the
     # 30s idle cap) while loading, making the cascade actually progress.
-    let assetsLoading: Bool = true
+    var assetsLoading: Bool = true
     # One display frame from the monitor refresh rate (60/120 Hz); paces
     # the animation wait + render cap. lastRenderTime drives that cap.
     let targetFrameSec: Float = displayFrameSec()
-    let lastRenderTime: Float = 0.0
+    var lastRenderTime: Float = 0.0
     # Active-render window: any activity keeps the loop rendering at
     # display cadence for 0.5s (then idle), so animation tails don't
     # depend on dirty-detection and stutter. Idle = event-wait.
-    let renderUntil: Float = 0.0
+    var renderUntil: Float = 0.0
 
     loop running {
       # Covers were loaded at boot via `loadAllTextures`, so no
@@ -455,7 +455,7 @@ func main() {
       # — that's what lets wheel/drag/momentum/spring run WITHOUT
       # tearing the world down on each tick. `noEntity()` is fine; the
       # `updateScrollOffset` helper is a no-op for it.
-      let scrollTarget: EntityId = findScrollTarget(world: world)
+      var scrollTarget: EntityId = findScrollTarget(world: world)
       # `renderCache` controls idle frame-skipping: when no visual
       # ComponentTable has bumped its generation since the last frame
       # (and no input event landed this frame, and the heartbeat isn't
@@ -465,8 +465,8 @@ func main() {
       # because `forceRender` starts true and `renderCache` starts at
       # -1 sentinels (so the first dirty-check always trips dirty too).
       let renderCache: RenderCache = createRenderCache()
-      let forceRender: Bool = true
-      let lastPressed: EntityId = noEntity()
+      var forceRender: Bool = true
+      var lastPressed: EntityId = noEntity()
       # Initial playback overlay: set the progress-fill width to
       # match the current `elapsedSec / durationSec` so the first
       # frame of the rebuilt world doesn't flash an empty bar before
@@ -491,7 +491,7 @@ func main() {
       # The `input` system lives in the function scope above this
       # loop — see its declaration comment for why it has to outlive
       # world rebuilds.
-      let switching: Bool = false
+      var switching: Bool = false
       loop running and switching is false {
         # Event-driven wait. Block the thread until an OS event (mouse,
         # key, window) arrives or our policy-chosen timeout elapses.
@@ -505,13 +505,13 @@ func main() {
         # the file-watcher's idle poll (50 ms / ~20 fps). Otherwise
         # the spring-back after release renders chunky because the
         # physics step only runs once per OS event wake.
-        let scrollAnimating: Bool = false
+        var scrollAnimating: Bool = false
         # Per-frame scroll bounds. Wrong floor → spring never settles.
         let sb: ScrollBounds = scrollBoundsForScreen(screen: currentScreen, appState: appState, cachedAlbumScrollFloor: cachedAlbumScrollFloor)
         let scrollOnThisScreen: Bool = sb.scrollable
         let scrollFloor: Float = sb.floor
         let scrollOOB: Bool = scrollFsm.scrollY > 0.0 or scrollFsm.scrollY < scrollFloor
-        let velAbs: Float = scrollFsm.velocity
+        var velAbs: Float = scrollFsm.velocity
         if velAbs < 0.0 {
           velAbs = 0.0 - velAbs
         }
@@ -524,7 +524,7 @@ func main() {
         # with scroll). Progress resumes ~250ms after the last wheel tick.
         let scrollActiveTimeSec: Float = getTime() - scrollFsm.lastWheelTime
         let recentlyScrolling: Bool = scrollActiveTimeSec < 0.25
-        let playbackAnimating: Bool = false
+        var playbackAnimating: Bool = false
         if playback.isPlaying {
           if recentlyScrolling is false {
             playbackAnimating = true
@@ -532,7 +532,7 @@ func main() {
         }
         # Interaction/transition motion → busy-render: poll (timeout 0), paint every frame as fast as the machine allows (no FPS cap). Playback alone stays on the throttled 60Hz path so a playing song doesn't peg a core. Idle → blocking event-wait (~0% CPU).
         let busyAnimating: Bool = anim.active or scrollAnimating or lastHoverAnimDirty or assetsLoading or isMouseButtonDown(button: mouseButtonLeft)
-        let timeout: Float = 0.0
+        var timeout: Float = 0.0
         if busyAnimating is false {
           timeout = nextWaitTimeoutSec(animating: playbackAnimating or getTime() < renderUntil, mouseDown: false, pollWatcher: true, frameSec: targetFrameSec)
         }
@@ -609,7 +609,7 @@ func main() {
           # Implementation in scroll_input.rae — see ScrollFsm. Returns
           # true on the frame a drag just ended so the dispatch below
           # skips the release-click on whatever's under the cursor.
-          let dragJustReleased: Bool = applyDragPhysics(
+          var dragJustReleased: Bool = applyDragPhysics(
             fsm: scrollFsm
             world: world
             scrollTarget: scrollTarget
@@ -624,7 +624,7 @@ func main() {
           # is under the finger (a tab, a cover tile, the play
           # button…). Wheel scrolling never sets `dragJustReleased`,
           # so this only fires after an actual drag gesture.
-          let nextScreen: Screen = currentScreen
+          var nextScreen: Screen = currentScreen
           if dragJustReleased is false {
             nextScreen = dispatchActions(input: input, current: currentScreen, playback: playback, state: appState, world: world, spotifyEnabled: spotifyState.enabled)
           } else {
@@ -664,7 +664,7 @@ func main() {
           # piece that changed (scene `$tokenName` colors bind at
           # parse time). Re-parsing on every state change is cheap
           # and avoids special-casing.
-          let debugChanged: Bool = false
+          var debugChanged: Bool = false
           if dragJustReleased is false {
             debugChanged = dispatchDebugAction(input: input, debug: debug)
           }
@@ -718,7 +718,7 @@ func main() {
           # event, or first frame) to preserve idle frame-skipping.
           # Skipped during active wheel scroll: 60×/sec dirtying on top of
           # wheel-driven rebuilds blew the frame budget (~2 fps regression).
-          let applyPlaybackFrame: Bool = false
+          var applyPlaybackFrame: Bool = false
           if forceRender or input.events.length > 0 {
             applyPlaybackFrame = true
           }
@@ -738,7 +738,7 @@ func main() {
             startHeroTransition(anim: anim, key: appState.currentAlbumStem, durationSec: heroDuration, now: now)
             transitionArmed = false
           }
-          let animating: Bool = updateHeroAnim(anim: anim, now: now)
+          var animating: Bool = updateHeroAnim(anim: anim, now: now)
           # End-of-animation fix: if the anim just turned off this
           # frame, unhide the destination hero entity BEFORE
           # `renderSystem` runs. Doing it after the render (the
@@ -802,7 +802,7 @@ func main() {
             prevHovered: lastHoveredEntity
             prevMouseBtns: lastMouseBtns
           )
-          let active: Bool = activeDecision.active or loadingAssets
+          var active: Bool = activeDecision.active or loadingAssets
           let currentHovered: EntityId = activeDecision.currentHovered
           let currentMouseBtns: Int = activeDecision.currentMouseBtns
           lastHoverAnimDirty = hoverScaleSystem(world: world, hovered: currentHovered, dt: now - lastFrameTime)

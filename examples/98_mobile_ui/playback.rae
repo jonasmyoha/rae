@@ -68,7 +68,7 @@ func togglePlayback(state: mod PlaybackState) pub {
 # reaches `durationSec` we wrap back to 0 and keep playing — the
 # demo-friendly choice, see file-header note.
 func advancePlayback(state: mod PlaybackState, now: view Float) pub {
-  let dt: Float = 0.0
+  var dt: Float = 0.0
   if state.prevTime >= 0.0 {
     dt = now - state.prevTime
   }
@@ -164,7 +164,7 @@ func applyPlaybackToWorld(world: mod UiWorld, state: view PlaybackState) pub {
       let fillRaw: Int = fillEntityOpt
       let trackEntity: EntityId = entityId(v: trackRaw)
       let fillEntity: EntityId = entityId(v: fillRaw)
-      let trackW: Float = 0.0
+      var trackW: Float = 0.0
       if componentHas(this: world.computedRects, entity: trackEntity) {
         let tcr: ComputedRect = componentGet(this: world.computedRects, entity: trackEntity)
         trackW = tcr.w
