@@ -139,6 +139,13 @@ Str infer_expr_type(CFuncContext* ctx, const AstExpr* expr);
 bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* out, bool skip_ptr);
 void emit_type_info_as_c_type(CFuncContext* ctx, TypeInfo* t, FILE* out);
 bool emit_param_list(CFuncContext* ctx, const AstParam* params, FILE* out, bool is_extern);
+
+/* True iff a spawned call to `f` can run on a real OS thread in the
+ * compiled backend: f is a non-generic, non-extern user function whose
+ * every parameter is captured BY VALUE in the C ABI (scalar any-mode-but-
+ * mod; enum plain/own/copy). Heap args, `mod`, and `view`-of-enum are
+ * pointers/coercion-sensitive and fall back to the sequential path. */
+bool c_spawn_threadable(CFuncContext* ctx, const AstFuncDecl* f);
 const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func);
 bool emit_string_literal(FILE* out, Str literal);
 bool emit_auto_init(CFuncContext* ctx, const AstTypeRef* type, FILE* out);
