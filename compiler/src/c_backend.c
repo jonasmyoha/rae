@@ -423,8 +423,32 @@ bool emit_string_literal(FILE* out, Str literal) {
   fprintf(out, "\", %lld}", (long long)literal.len); return true;
 }
 
-// Path-1 thread eligibility — see header. Every param must be passed by
-// value in the C ABI so a worker thread can safely own a copy.
+// True when `type` (a non-view/mod param type) is a heap aggregate for which
+// a `rae_deep_copy_<MangledT>` helper is guaranteed to be emitted, so the
+// spawn site can hand a worker a private deep copy. Covers List/StringMap/
+// IntMap instances (a helper is emitted per generic container instance) and
+// non-generic, non-c_struct user structs that need cascade-drop (collected
+// into copy_entries). Generic-instance structs and c_structs have no helper.
+bool c_spawn_arg_deepcopy_aggregate(CFuncContext* ctx, const AstTypeRef* type) {
+  if (!type || type->is_view || type->is_mod) return false;
+  Str base = get_base_type_name(type);
+  if ((str_eq_cstr(base, "List") || str_eq_cstr(base, "StringMap")
+       || str_eq_cstr(base, "IntMap")) && type->generic_args) {
+    return true;
+  }
+  const AstDecl* td = ctx ? find_type_decl(ctx, ctx->module, base) : NULL;
+  if (td && td->kind == AST_DECL_TYPE && !td->as.type_decl.generic_params
+      && !has_property(td->as.type_decl.properties, "c_struct")) {
+    return type_needs_cascade_drop(ctx->compiler_ctx, ctx->module,
+                                   (AstTypeRef*)type, 0);
+  }
+  return false;
+}
+
+// Path-1/2 thread eligibility — see header. Every param must be capturable
+// for the worker: passed by value in the C ABI (scalar/enum) or deep-copyable
+// at the spawn site (String, heap aggregate). Pointer-into-parent shapes
+// (mod, view-aggregate) stay on the sequential fallback.
 bool c_spawn_threadable(CFuncContext* ctx, const AstFuncDecl* f) {
   if (!f || f->is_extern || f->generic_params || f->specialization_args) return false;
   for (const AstParam* p = f->params; p; p = p->next) {
@@ -442,7 +466,10 @@ bool c_spawn_threadable(CFuncContext* ctx, const AstFuncDecl* f) {
     // rae_string_copy, so it owns a stable heap independent of the parent.
     // view/mod String is a pointer wrapper into the parent → unsafe.
     if (str_eq_cstr(base, "String") && !p->type->is_view && !p->type->is_mod) continue;
-    return false;                                 // heap aggregate, view-string, view-enum, or unknown → sequential
+    // own/copy/plain heap aggregate (List/Map/struct): the spawn site deep
+    // copies it (lvalue) or moves a fresh rvalue, so the worker owns it.
+    if (c_spawn_arg_deepcopy_aggregate(ctx, p->type)) continue;
+    return false;                                 // view-aggregate, c_struct, or unknown → sequential
   }
   return true;
 }
