@@ -13,7 +13,7 @@ type Box {
 
 func transientBox() {
   let box: Box = { contents: createList(Int, cap: 1024) }
-  let i: Int = 0
+  var i: Int = 0
   loop i < 1024 {
     box.contents.add(value: i)
     i = i + 1
@@ -24,7 +24,7 @@ func main() {
   transientBox()
   let baselineKb: Int = processRssKb()
   let iterations: Int = 5000
-  let i: Int = 0
+  var i: Int = 0
   loop i < iterations {
     transientBox()
     i = i + 1

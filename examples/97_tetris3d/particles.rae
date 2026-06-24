@@ -5,7 +5,7 @@
 import raylib
 
 func findFreeParticle(w: mod World) ret Int {
-  let i: Int = 0
+  var i: Int = 0
   loop i < maxParticles {
     let cur: Particle = rae_ext_rae_buf_get(buf: w.particles.data, index: i)
     if cur.active is false {
@@ -52,11 +52,11 @@ func spawnParticle(
 # physics.checkLines when a row is full.
 func spawnLineClearParticles(w: mod World, row: view Int) {
   let cellY: Float = (0.0 - row.toFloat()) - 0.5
-  let i: Int = 0
+  var i: Int = 0
   loop i < gridWidth {
     let cellX: Float = i.toFloat() + 0.5
     # 4 small particles per cell of the cleared row.
-    let burst: Int = 0
+    var burst: Int = 0
     loop burst < 4 {
       let vx: Float = randomFloat(min: 0.0 - 4.0, max: 4.0)
       let vy: Float = randomFloat(min: 2.0, max: 6.0)
@@ -85,7 +85,7 @@ func spawnLineClearParticles(w: mod World, row: view Int) {
 # the loop at setTargetFPS(60).
 func particleSystem(w: mod World) {
   let dt: Float = 0.016
-  let i: Int = 0
+  var i: Int = 0
   loop i < maxParticles {
     let p: Particle = rae_ext_rae_buf_get(buf: w.particles.data, index: i)
     if p.active {
@@ -103,7 +103,7 @@ func particleSystem(w: mod World) {
         # Fade alpha by remaining-life ratio (life starts at 0.7).
         let alpha: Float = newLife / 0.7
         let baseA: Int = 255
-        let newA: Int = (alpha * baseA.toFloat()).toInt()
+        var newA: Int = (alpha * baseA.toFloat()).toInt()
         if newA < 0 {
           newA = 0
         }
@@ -128,7 +128,7 @@ func particleSystem(w: mod World) {
 }
 
 func renderParticles(w: view World) {
-  let i: Int = 0
+  var i: Int = 0
   loop i < maxParticles {
     let p: Particle = rae_ext_rae_buf_get(buf: w.particles.data, index: i)
     if p.active {

@@ -91,7 +91,7 @@ func scenario2_ownMove() {
 
 func scenario3_deepCopyByDefault() {
   log("=== 3. deep copy by default ===")
-  let label: String = "beta-".concat(other: "shared")
+  var label: String = "beta-".concat(other: "shared")
   # No `own` — Phase 2 deep-copies `label` into `p.name`. `label`
   # still owns its heap and stays usable.
   let p: Profile = { name: label, email: "beta@rae" }
@@ -113,7 +113,7 @@ func scenario5_cascadeDrop() {
   # 5000 short-lived Teams. Each iteration mallocs ~6 Strings + one
   # List buffer; cascade drop must free them all or RSS grows.
   let warmups: Int = 100
-  let i: Int = 0
+  var i: Int = 0
   loop i < warmups {
     let t: Team = makeTeam(
       leadName: "warmup-{i}"

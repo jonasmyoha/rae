@@ -242,7 +242,7 @@ func mountBackButtonOverlay(world: mod UiWorld, state: view AppState) pub ret En
   let margin: Float = 16.0
   let btn: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: btn, w: size, h: size)
-  let copiedId: String = ""
+  var copiedId: String = ""
   copiedId = copiedId.concat(other: backButtonPageId)
   let pr: PageRoot = { id: own copiedId }
   componentSet(this: world.pageRoots, entity: btn, data: own pr)
@@ -295,7 +295,7 @@ func mountNavTabsBar(
   scenes: view AlbumScenes
 ) pub ret EntityId {
   let bar: EntityId = buildNavTabsForScreen(world: world, activeTab: activeTab, scenes: scenes)
-  let copiedId: String = ""
+  var copiedId: String = ""
   copiedId = copiedId.concat(other: navTabsPageId)
   let pr: PageRoot = { id: own copiedId }
   componentSet(this: world.pageRoots, entity: bar, data: own pr)
@@ -338,7 +338,7 @@ func mountBottomDockOverlay(
   # bottom alignment as before, just extended upward by dockBgExtend.
   let dockOff: Offset = { delta: Vec2 { x: 0.0, y: screenH - dockH } }
   componentSet(this: world.offsets, entity: dock, data: dockOff)
-  let copiedId: String = ""
+  var copiedId: String = ""
   copiedId = copiedId.concat(other: dockPageId)
   let pr: PageRoot = { id: own copiedId }
   componentSet(this: world.pageRoots, entity: dock, data: own pr)

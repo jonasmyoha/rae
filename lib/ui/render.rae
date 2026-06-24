@@ -48,7 +48,7 @@ func renderAlpha255(world: view UiWorld, entity: view EntityId) ret Int {
     ret 255
   }
   let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: entity)
-  let a: Float = wt.alpha
+  var a: Float = wt.alpha
   if a < 0.0 {
     a = 0.0
   }
@@ -83,16 +83,16 @@ func paintShape(world: view UiWorld, entity: view EntityId, wt: view WorldTransf
   if sh.kind is ShapeKind.RoundedRect {
     # `Shape.radius` is given in pixels in components.rae; raylib's
     # roundness is a fraction of the smaller side. Convert.
-    let smaller: Float = cr.w
+    var smaller: Float = cr.w
     if cr.h < smaller {
       smaller = cr.h
     }
     let half: Float = smaller / 2.0
-    let r: Float = sh.radius
+    var r: Float = sh.radius
     if r > half {
       r = half
     }
-    let roundness: Float = 0.0
+    var roundness: Float = 0.0
     if smaller > 0.0 {
       roundness = (r * 2.0) / smaller
     }
@@ -110,11 +110,11 @@ func paintShape(world: view UiWorld, entity: view EntityId, wt: view WorldTransf
   if sh.kind is ShapeKind.Circle {
     # Centred inside the entity's box. Use radius from Shape, falling
     # back to half the smaller side if not set.
-    let smaller: Float = cr.w
+    var smaller: Float = cr.w
     if cr.h < smaller {
       smaller = cr.h
     }
-    let r: Float = sh.radius
+    var r: Float = sh.radius
     if r <= 0.0 {
       r = smaller / 2.0
     }
@@ -142,7 +142,7 @@ func paintSprite(reg: view TextureRegistry, world: view UiWorld, entity: view En
     if glyph.length() is 0 {
       ret
     }
-    let smaller: Float = cr.w
+    var smaller: Float = cr.w
     if cr.h < smaller {
       smaller = cr.h
     }
@@ -178,15 +178,15 @@ func paintSprite(reg: view TextureRegistry, world: view UiWorld, entity: view En
   let tex: Texture = textureGet(reg: reg, key: key)
 
   # All ScaleMode variants: scale to longer edge of the box.
-  let scaleX: Float = 1.0
-  let scaleY: Float = 1.0
+  var scaleX: Float = 1.0
+  var scaleY: Float = 1.0
   if tex.width > 0 {
     scaleX = cr.w / tex.width.toFloat()
   }
   if tex.height > 0 {
     scaleY = cr.h / tex.height.toFloat()
   }
-  let scale: Float = scaleX
+  var scale: Float = scaleX
   if scaleY < scale {
     scale = scaleY
   }
@@ -196,7 +196,7 @@ func paintSprite(reg: view TextureRegistry, world: view UiWorld, entity: view En
 
   # HoverScale: read the per-frame animated multiplier. The actual
   # easing happens in lib/ui/animation.rae's hoverScaleSystem.
-  let hoverMul: Float = 1.0
+  var hoverMul: Float = 1.0
   if componentHas(this: world.hoverScales, entity: entity) {
     let hs: HoverScale = componentGet(this: world.hoverScales, entity: entity)
     hoverMul = hs.current
@@ -208,8 +208,8 @@ func paintSprite(reg: view TextureRegistry, world: view UiWorld, entity: view En
   let offY: Float = (cr.h - drawH) / 2.0
 
   # Rounded-corner clip via fragment shader (SDF; live per call).
-  let useRounded: Bool = componentHas(this: world.cornerRadiuses, entity: entity)
-  let roundedRadius: Float = 0.0
+  var useRounded: Bool = componentHas(this: world.cornerRadiuses, entity: entity)
+  var roundedRadius: Float = 0.0
   if useRounded {
     let crData: CornerRadius = componentGet(this: world.cornerRadiuses, entity: entity)
     roundedRadius = crData.radius
@@ -464,12 +464,12 @@ func paintText(world: view UiWorld, entity: view EntityId, wt: view WorldTransfo
   }
   let size: Float = textStyleSize(styleId: tx.styleId)
   let col: Color = textStyleColor(styleId: tx.styleId, chain255: chain255)
-  let drawX: Float = wt.x
-  let drawY: Float = wt.y
+  var drawX: Float = wt.x
+  var drawY: Float = wt.y
   # Alignment: styleId (legacy) or Align component (Center / End).
-  let centerX: Bool = textStyleIsCentered(styleId: tx.styleId)
-  let centerY: Bool = textStyleIsCentered(styleId: tx.styleId)
-  let rightAlignX: Bool = textStyleIsRightAligned(styleId: tx.styleId)
+  var centerX: Bool = textStyleIsCentered(styleId: tx.styleId)
+  var centerY: Bool = textStyleIsCentered(styleId: tx.styleId)
+  var rightAlignX: Bool = textStyleIsRightAligned(styleId: tx.styleId)
   if componentHas(this: world.aligns, entity: entity) {
     let al: Align = componentGet(this: world.aligns, entity: entity)
     if al.hasX {
@@ -505,10 +505,10 @@ func paintText(world: view UiWorld, entity: view EntityId, wt: view WorldTransfo
     ret
   }
   if textStyleHasShadow(styleId: tx.styleId) {
-    let shadowOff: Float = size * 0.06
+    var shadowOff: Float = size * 0.06
     if shadowOff < 1.0 { shadowOff = 1.0 }
     if shadowOff > 3.0 { shadowOff = 3.0 }
-    let blurRadius: Float = size * 0.09
+    var blurRadius: Float = size * 0.09
     if blurRadius < 1.5 { blurRadius = 1.5 }
     if blurRadius > 4.0 { blurRadius = 4.0 }
     # Centre weight 0.30, edge weight 0.10 (sum ≈ 1.1 matches old density).
@@ -554,15 +554,15 @@ func paintBackdropImage(reg: view TextureRegistry, world: view UiWorld, entity: 
     ret
   }
   let tex: Texture = textureGet(reg: reg, key: key)
-  let scaleX: Float = 1.0
-  let scaleY: Float = 1.0
+  var scaleX: Float = 1.0
+  var scaleY: Float = 1.0
   if tex.width > 0 {
     scaleX = cr.w / tex.width.toFloat()
   }
   if tex.height > 0 {
     scaleY = cr.h / tex.height.toFloat()
   }
-  let scale: Float = scaleX
+  var scale: Float = scaleX
   if scaleY > scale {
     scale = scaleY
   }
@@ -590,7 +590,7 @@ func paintBackdropImage(reg: view TextureRegistry, world: view UiWorld, entity: 
 # work the same way.
 func paintGradientFill(world: view UiWorld, entity: view EntityId, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int) {
   let gf: view GradientFill => componentView(this: world.gradientFills, entity: entity)
-  let radius: Float = 0.0
+  var radius: Float = 0.0
   if componentHas(this: world.cornerRadiuses, entity: entity) {
     let crData: CornerRadius = componentGet(this: world.cornerRadiuses, entity: entity)
     radius = crData.radius
@@ -671,9 +671,9 @@ func paintSubtree(world: view UiWorld, reg: view TextureRegistry, entity: view E
   }
   let ch: view Children => componentView(this: world.childrens, entity: entity)
   let n: Int = ch.ids.length
-  let pass: Int = 0
+  var pass: Int = 0
   loop pass < 3 {
-    let i: Int = 0
+    var i: Int = 0
     loop i < n {
       let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
       if subtreeHoverPaintRank(world: world, entity: cid) is pass {
@@ -735,7 +735,7 @@ func renderSystem(world: view UiWorld, reg: view TextureRegistry) {
 func renderSystemLayerRange(world: view UiWorld, reg: view TextureRegistry, minOrder: view Int, maxOrder: view Int) pub {
   let roots: List(EntityId) = collectPaintableRoots(world: world)
   let m: Int = roots.length
-  let p: Int = 0
+  var p: Int = 0
   loop p < m {
     let root: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: p)
     if componentHas(this: world.layerRoots, entity: root) is false {
@@ -769,7 +769,7 @@ func renderDebugClickRects(
   mouseY: view Float
 ) pub {
   let nClicks: Int = componentCount(this: world.onClicks)
-  let i: Int = 0
+  var i: Int = 0
   loop i < nClicks {
     let e: EntityId = componentEntityAt(this: world.onClicks, i: i)
     if componentHas(this: world.worldTransforms, entity: e) {
@@ -777,7 +777,7 @@ func renderDebugClickRects(
         let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: e)
         if wt.visible {
           let cr: ComputedRect = componentGet(this: world.computedRects, entity: e)
-          let inside: Bool = true
+          var inside: Bool = true
           if mouseX < wt.x {
             inside = false
           }
@@ -790,7 +790,7 @@ func renderDebugClickRects(
           if mouseY > wt.y + cr.h {
             inside = false
           }
-          let col: Color = idleColor
+          var col: Color = idleColor
           if inside {
             col = hoverColor
             # Mouse button held while hovering: distinct "armed" tint
@@ -946,7 +946,7 @@ func renderCacheDirty(world: view UiWorld, cache: mod RenderCache) pub ret Bool 
   let ocGen: Int = componentTableGeneration(OnClick, this: world.onClicks)
   let entityCount: Int = world.alive.length
 
-  let dirty: Bool = false
+  var dirty: Bool = false
   if crGen is not cache.computedRectsGen {
     dirty = true
   }

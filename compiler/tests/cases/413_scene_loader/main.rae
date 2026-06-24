@@ -11,7 +11,7 @@ import ui/scene_loader
 # interpolation in Rae so we have to escape every `{` and `}` with
 # `\{` / `\}` to keep them literal.
 func sampleScene() ret String {
-  let s: String = ""
+  var s: String = ""
   s = s.concat(other: "\{")
   s = s.concat(other: "\"type\":\"Scene\",")
   s = s.concat(other: "\"version\":2,")
@@ -59,7 +59,7 @@ func main() {
   }
 
   let world: UiWorld = createUiWorld()
-  let rootEntity: EntityId = loadScene(world: world, scene: scene)
+  var rootEntity: EntityId = loadScene(world: world, scene: scene)
   log("rootEntity = {rootEntity.value}")
   log("alive = {aliveCount(world: world)}")
   log("nodeIds map size = {world.nodeIds.length}")
@@ -117,17 +117,17 @@ func main() {
   let bad1: Scene = parseScene(source: "\{\"type\":\"NotScene\",\"version\":2\}")
   log("bad type ok={bad1.ok} msg={bad1.errorMsg}")
 
-  let bad2: String = ""
+  var bad2: String = ""
   bad2 = bad2.concat(other: "\{\"type\":\"Scene\",\"version\":1\}")
   let badScene2: Scene = parseScene(source: bad2)
   log("bad version ok={badScene2.ok} msg={badScene2.errorMsg}")
 
-  let bad3: String = ""
+  var bad3: String = ""
   bad3 = bad3.concat(other: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Missing\",\"nodes\":\{\"Other\":\{\}\}\}")
   let badScene3: Scene = parseScene(source: bad3)
   log("bad root ok={badScene3.ok} msg={badScene3.errorMsg}")
 
-  let bad4: String = ""
+  var bad4: String = ""
   bad4 = bad4.concat(other: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"R\",\"nodes\":\{\"R\":\{\"Children\":[\"Ghost\"]\}\}\}")
   let badScene4: Scene = parseScene(source: bad4)
   log("bad child ok={badScene4.ok} msg={badScene4.errorMsg}")
