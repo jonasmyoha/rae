@@ -263,6 +263,8 @@ struct AstStmt {
       Str name;
       AstTypeRef* type;
       bool is_bind;
+      bool is_var;    // declared with `var` (mutable). let/const are immutable.
+      bool is_const;  // declared with `const` (compile-time constant).
       AstExpr* value;
     } let_stmt;
     struct {
@@ -361,6 +363,8 @@ struct AstDecl {
       Str name;
       AstTypeRef* type;
       bool is_bind;
+      bool is_var;    // module-level `var` (mutable)
+      bool is_const;  // module-level `const` (compile-time constant)
       AstExpr* value;
     } let_decl;
   } as;
