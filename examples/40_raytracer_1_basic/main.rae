@@ -58,8 +58,9 @@ func rayColor(scene: view List(Float), rdx: view Float, rdy: view Float, rdz: vi
         cg = 0.5 * ((rdy * best - scene.get(index: b + 1)) / sr + 1.0)
         cb = 0.5 * ((rdz * best - scene.get(index: b + 2)) / sr + 1.0)
     } else {
+        # sky gradient along the up axis (+Z)
         let len: Float = sqrt(x: rdx * rdx + rdy * rdy + rdz * rdz)
-        let tt: Float = 0.5 * (rdy / len + 1.0)
+        let tt: Float = 0.5 * (rdz / len + 1.0)
         cr = (1.0 - tt) + tt * 0.5
         cg = (1.0 - tt) + tt * 0.7
         cb = (1.0 - tt) + tt * 1.0
@@ -71,34 +72,44 @@ func rayColor(scene: view List(Float), rdx: view Float, rdy: view Float, rdz: vi
 }
 
 # Render one scanline `y` straight into the framebuffer at row offset y*width.
+# Z-up world (Blender): camera at the origin looks along +Y (forward); the
+# image spans +X (right) horizontally and +Z (up) vertically. See
+# docs/coordinate-system.md.
 func renderRow(fb: mod List(Int), scene: view List(Float), width: view Int, height: view Int, y: view Int) {
     let aspect: Float = width.toFloat() / height.toFloat()
     let vw: Float = aspect * 2.0
     let llx: Float = 0.0 - vw / 2.0
+    # v: 0 at the bottom row, 1 at the top (raster rows are top-down).
     let v: Float = (height - 1 - y).toFloat() / (height - 1).toFloat()
     let rowOff: Int = y * width
     let x: Int = 0
     loop x < width {
         let u: Float = x.toFloat() / (width - 1).toFloat()
-        let packed: Int = rayColor(scene: scene, rdx: llx + u * vw, rdy: -1.0 + v * 2.0, rdz: -1.0)
+        # right = +X, forward = +Y, up = +Z
+        let packed: Int = rayColor(scene: scene, rdx: llx + u * vw, rdy: 1.0, rdz: -1.0 + v * 2.0)
         fb.set(index: rowOff + x, value: packed)
         x = x + 1
     }
 }
 
+# Z-up scene: [cx, cy, cz, r] per sphere. +Y is forward (into the scene),
+# +Z is up, so the ground is a big sphere below (large -Z centre).
 func buildScene() ret List(Float) {
     let scene: List(Float) = createList(cap: 12)
+    # center sphere, 1 unit forward, resting on the ground (bottom at z=-0.5)
     scene.add(value: 0.0)
+    scene.add(value: 1.0)
     scene.add(value: 0.0)
-    scene.add(value: -1.0)
     scene.add(value: 0.5)
-    scene.add(value: -1.1)
-    scene.add(value: 0.1)
-    scene.add(value: -1.4)
-    scene.add(value: 0.45)
-    scene.add(value: 0.0)
-    scene.add(value: -100.5)
+    # a smaller sphere to the left, slightly further forward
     scene.add(value: -1.0)
+    scene.add(value: 1.2)
+    scene.add(value: -0.05)
+    scene.add(value: 0.45)
+    # ground (big sphere below): top at z = -100.5 + 100 = -0.5
+    scene.add(value: 0.0)
+    scene.add(value: 1.0)
+    scene.add(value: -100.5)
     scene.add(value: 100.0)
     ret scene
 }
