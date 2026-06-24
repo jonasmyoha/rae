@@ -83,7 +83,7 @@ func trackAt(album: view Album, idx: view Int) pub ret Track {
 }
 
 func findAlbumIndex(albums: view List(Album), stem: view String) pub ret Int {
-  let i: Int = 0
+  var i: Int = 0
   loop i < albums.length {
     let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: i)
     if a.stem.equals(other: stem) {
@@ -101,14 +101,14 @@ func formatDurationMs(ms: view Int) pub ret String {
   let h: Int = secs / 3600
   let m: Int = (secs - h * 3600) / 60
   let s: Int = secs - h * 3600 - m * 60
-  let ss: String = ""
+  var ss: String = ""
   if s < 10 {
     ss = "0{s}"
   } else {
     ss = "{s}"
   }
   if h > 0 {
-    let mm: String = ""
+    var mm: String = ""
     if m < 10 {
       mm = "0{m}"
     } else {
@@ -144,7 +144,7 @@ func parseTracks(doc: view JsonDoc, root: view JsonValue) ret List(Track) {
   let arrIdx: Int = jsonField(doc: doc, this: root, key: "tracks")
   let arr: JsonValue = jsonValueAt(doc: doc, idx: arrIdx)
   let n: Int = jsonArrayLen(this: arr)
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let entry: JsonValue = jsonArrayAt(doc: doc, this: arr, idx: i)
     let numberKey: String = "number"
@@ -228,7 +228,7 @@ func loadAllAlbums(folder: view String) pub ret List(Album) {
   let copiedFolder: String = folder
   let result: List(Album) = createList(Album, cap: 32)
   let entries: List(File) = listDir(folder: copiedFolder)
-  let i: Int = 0
+  var i: Int = 0
   loop i < entries.length {
     let f: File = rae_ext_rae_buf_get(buf: entries.data, index: i)
     if f.isHidden() is false {

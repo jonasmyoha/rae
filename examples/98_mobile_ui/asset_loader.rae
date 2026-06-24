@@ -30,8 +30,8 @@ func profileAvatarKey() pub ret String {
 # its stem key. Idempotent — covers already loaded are skipped.
 # Called once at boot from `main.rae` after `loadAllAlbums`.
 func loadAlbumCovers(reg: mod TextureRegistry, albums: view List(Album)) pub {
-  let i: Int = 0
-  let loaded: Int = 0
+  var i: Int = 0
+  var loaded: Int = 0
   loop i < albums.length {
     let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: i)
     let key: String = albumCoverKey(stem: a.stem)
@@ -84,8 +84,8 @@ func loadAllTextures(reg: mod TextureRegistry, albums: view List(Album)) pub {
 # keeps the frame rendering so freshly-loaded covers paint); false once
 # everything is present. Cheap when done: one `textureHas` scan.
 func cascadeAssets(reg: mod TextureRegistry, albums: view List(Album), budget: view Int) pub ret Bool {
-  let i: Int = 0
-  let loaded: Int = 0
+  var i: Int = 0
+  var loaded: Int = 0
   loop i < albums.length {
     if loaded >= budget {
       ret true

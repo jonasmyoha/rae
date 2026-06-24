@@ -90,7 +90,7 @@ func registeredComponentNames() ret List(String) {
 func isKnownComponent(name: view String) ret Bool {
   let known: List(String) = registeredComponentNames()
   let n: Int = known.length
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let k: String = known.get(index: i)
     if k.equals(other: name) {
@@ -378,8 +378,8 @@ func deserRect(doc: view JsonDoc, val: view JsonValue) ret Rect {
 func deserSize(doc: view JsonDoc, val: view JsonValue) ret Size {
   let wIdx: Int = jsonField(doc: doc, this: val, key: "w")
   let hIdx: Int = jsonField(doc: doc, this: val, key: "h")
-  let wAxis: SizeAxis = defaultSizeAxis()
-  let hAxis: SizeAxis = defaultSizeAxis()
+  var wAxis: SizeAxis = defaultSizeAxis()
+  var hAxis: SizeAxis = defaultSizeAxis()
   if wIdx >= 0 {
     let wv: JsonValue = jsonValueAt(doc: doc, idx: wIdx)
     wAxis = deserSizeAxis(doc: doc, val: wv)
@@ -417,8 +417,8 @@ func deserMargin(doc: view JsonDoc, val: view JsonValue) ret Margin {
 func deserAlign(doc: view JsonDoc, val: view JsonValue) ret Align {
   let xIdx: Int = jsonField(doc: doc, this: val, key: "x")
   let yIdx: Int = jsonField(doc: doc, this: val, key: "y")
-  let xK: AlignKind = AlignKind.Start
-  let yK: AlignKind = AlignKind.Start
+  var xK: AlignKind = AlignKind.Start
+  var yK: AlignKind = AlignKind.Start
   if xIdx >= 0 {
     let xv: JsonValue = jsonValueAt(doc: doc, idx: xIdx)
     let s: String = jsonString(this: xv, fallback: "Start")
@@ -540,8 +540,8 @@ func deserGradientFill(doc: view JsonDoc, val: view JsonValue) ret GradientFill 
   let fromIdx: Int = jsonField(doc: doc, this: val, key: "from")
   let toIdx: Int = jsonField(doc: doc, this: val, key: "to")
   let zero: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
-  let fromCol: RgbaColor = zero
-  let toCol: RgbaColor = zero
+  var fromCol: RgbaColor = zero
+  var toCol: RgbaColor = zero
   if fromIdx >= 0 {
     fromCol = deserRgba(doc: doc, val: jsonValueAt(doc: doc, idx: fromIdx))
   }
@@ -615,7 +615,7 @@ func deserSceneInstance(doc: view JsonDoc, val: view JsonValue) ret SceneInstanc
     if overridesIdx >= 0 {
       let arr: JsonValue = jsonValueAt(doc: doc, idx: overridesIdx)
       let n: Int = jsonArrayLen(this: arr)
-      let i: Int = 0
+      var i: Int = 0
       loop i < n {
         let elem: JsonValue = jsonArrayAt(doc: doc, this: arr, idx: i)
         let empty: String = ""

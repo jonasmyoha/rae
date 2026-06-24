@@ -12,7 +12,7 @@ import ui/scene
 import ui/scene_instance
 
 func tinyScene(rootId: view String) ret String {
-  let s: String = ""
+  var s: String = ""
   s = s.concat(other: "\{")
   s = s.concat(other: "\"type\":\"Scene\",")
   s = s.concat(other: "\"version\":2,")
@@ -46,13 +46,13 @@ func main() {
   # the first's entries.
   let pageA: String = "page-a"
   let pageB: String = "page-b"
-  let rootA: EntityId = mountPage(world: world, pageId: pageA, scene: sceneA, overrides: noOverrides, w: 300.0, h: 400.0)
-  let rootB: EntityId = mountPage(world: world, pageId: pageB, scene: sceneB, overrides: noOverrides, w: 300.0, h: 400.0)
+  var rootA: EntityId = mountPage(world: world, pageId: pageA, scene: sceneA, overrides: noOverrides, w: 300.0, h: 400.0)
+  var rootB: EntityId = mountPage(world: world, pageId: pageB, scene: sceneB, overrides: noOverrides, w: 300.0, h: 400.0)
   log("rootA={rootA.value} rootB={rootB.value}")
 
   # Page-root discovery
-  let foundA: EntityId = findPageRootEntity(world: world, pageId: pageA)
-  let foundB: EntityId = findPageRootEntity(world: world, pageId: pageB)
+  var foundA: EntityId = findPageRootEntity(world: world, pageId: pageA)
+  var foundB: EntityId = findPageRootEntity(world: world, pageId: pageB)
   let foundNone: EntityId = findPageRootEntity(world: world, pageId: "missing")
   log("foundA={foundA.value} foundB={foundB.value} foundNone.isNone={isNone(this: foundNone)}")
 

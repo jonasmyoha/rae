@@ -81,7 +81,7 @@ func applyDragPhysics(
     ret false
   }
 
-  let dragJustReleased: Bool = false
+  var dragJustReleased: Bool = false
   let curMouseX: Float = getMouseX().toFloat()
   let curMouseY: Float = getMouseY().toFloat()
   let curMouseDown: Bool = isMouseButtonDown(button: mouseButtonLeft)
@@ -148,7 +148,7 @@ func applyDragPhysics(
     let isOOB: Bool = fsm.scrollY > scrollMax or fsm.scrollY < scrollMin
     if isOOB {
       if wheelQuiet {
-        let target: Float = scrollMax
+        var target: Float = scrollMax
         if fsm.scrollY < scrollMin {
           target = scrollMin
         }
@@ -167,11 +167,11 @@ func applyDragPhysics(
         # Snap zone: 1 px / 0.3 px·frame⁻¹ is just below human perception
         # on a 60 Hz display — cuts the asymptotic tail without a visible jump.
         let displ: Float = fsm.scrollY - target
-        let absD: Float = displ
+        var absD: Float = displ
         if absD < 0.0 {
           absD = 0.0 - absD
         }
-        let absV: Float = fsm.velocity
+        var absV: Float = fsm.velocity
         if absV < 0.0 {
           absV = 0.0 - absV
         }
@@ -184,7 +184,7 @@ func applyDragPhysics(
     } else {
       # In-bounds momentum decay (drag-release fling).
       if wheelQuiet {
-        let absVel: Float = fsm.velocity
+        var absVel: Float = fsm.velocity
         if absVel < 0.0 {
           absVel = 0.0 - absVel
         }
@@ -221,7 +221,7 @@ func applyWheelScroll(
     ret
   }
   let wheelMouseDown: Bool = isMouseButtonDown(button: mouseButtonLeft)
-  let wheel: Float = 0.0
+  var wheel: Float = 0.0
   if wheelMouseDown is false {
     wheel = getMouseWheelMove()
   }

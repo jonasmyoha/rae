@@ -78,7 +78,7 @@ func buildHistoryThumb(world: mod UiWorld, entry: view PlayHistoryEntry, size: v
     let mutedName: String = "textMuted"
     let fill: RgbaColor = themeColorByName(name: mutedName)
     let transparent: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
-    let radius: Float = 0.0
+    var radius: Float = 0.0
     if rounded {
       radius = 8.0
     }
@@ -175,7 +175,7 @@ func buildHistoryBody(world: mod UiWorld, history: view PlayHistory, rounded: vi
   # Walk newest-first: the user expects the most recent play at
   # the top. `entries` is oldest-first, so iterate from n-1 down to
   # 0 and pass each index through as the replay actionId payload.
-  let i: Int = n - 1
+  var i: Int = n - 1
   loop i >= 0 {
     let e: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: i)
     let row: EntityId = buildHistoryRow(world: world, entry: e, entryIndex: i, rounded: rounded)
@@ -198,7 +198,7 @@ func mountHistoryPage(
   setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
   setPaddingAll(world: world, entity: root, n: outerPad)
 
-  let copiedId: String = ""
+  var copiedId: String = ""
   copiedId = copiedId.concat(other: historyPageId)
   let pr: PageRoot = { id: own copiedId }
   componentSet(this: world.pageRoots, entity: root, data: own pr)
@@ -250,12 +250,12 @@ func buildRecentlyPlayedStrip(world: mod UiWorld, history: view PlayHistory, rou
   setLayout(world: world, entity: strip, kind: layH, gap: spaceS, alignCross: alignS)
 
   let n: Int = history.entries.length
-  let kidsCount: Int = recentlyPlayedPreviewMax
+  var kidsCount: Int = recentlyPlayedPreviewMax
   if n < kidsCount {
     kidsCount = n
   }
   let kids: List(EntityId) = createList(EntityId, cap: kidsCount)
-  let visual: Int = 0
+  var visual: Int = 0
   loop visual < kidsCount {
     let entryIdx: Int = n - 1 - visual
     let e: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: entryIdx)

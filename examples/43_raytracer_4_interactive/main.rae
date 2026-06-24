@@ -36,19 +36,19 @@ func main() {
 
     # Camera state (Z-up): position + yaw (about +Z) + pitch (about +X).
     # yaw = pi/2 looks toward +Y; pitch 0 is level.
-    let camPos: Vec3 = vec3(x: 0.0, y: -1.6, z: 0.6)
-    let yaw: Float = PI() / 2.0
-    let pitch: Float = -0.15
+    var camPos: Vec3 = vec3(x: 0.0, y: -1.6, z: 0.6)
+    var yaw: Float = pi / 2.0
+    var pitch: Float = -0.15
     let moveStep: Float = 0.08
     let rotStep: Float = 0.03
     let mouseSens: Float = 0.005
     let worldUp: Vec3 = vec3(x: 0.0, y: 0.0, z: 1.0)
 
-    let fwd: Vec3 = vec3(x: cos(x: pitch) * cos(x: yaw), y: cos(x: pitch) * sin(x: yaw), z: sin(x: pitch))
-    let cam: Camera = buildCamera(pos: camPos, target: vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
+    var fwd: Vec3 = vec3(x: cos(x: pitch) * cos(x: yaw), y: cos(x: pitch) * sin(x: yaw), z: sin(x: pitch))
+    var cam: Camera = buildCamera(pos: camPos, target: vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
 
     let accum: List(Float) = createList(cap: width * height * 3)
-    let i: Int = 0
+    var i: Int = 0
     loop i < width * height * 3 {
         accum.add(value: 0.0)
         i = i + 1
@@ -66,12 +66,12 @@ func main() {
     setTextureFilter(texture: tex, filter: 1)
     let dispScale: Float = winW.toFloat() / width.toFloat()
 
-    let sampleCount: Int = 0
-    let prevMouseX: Int = getMouseX()
-    let prevMouseY: Int = getMouseY()
+    var sampleCount: Int = 0
+    var prevMouseX: Int = getMouseX()
+    var prevMouseY: Int = getMouseY()
 
     loop not windowShouldClose() {
-        let moved: Bool = false
+        var moved: Bool = false
 
         # keyboard movement
         if isKeyDown(key: 87) {
@@ -150,7 +150,7 @@ func main() {
 
         # one progressive sample pass, split across four band workers
         if sampleCount < maxSamples {
-            let overwrite: Bool = false
+            var overwrite: Bool = false
             if sampleCount is 0 {
                 overwrite = true
             }

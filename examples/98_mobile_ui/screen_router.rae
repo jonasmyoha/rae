@@ -330,7 +330,7 @@ func createAppState(albums: own List(Album)) pub ret AppState {
   # cover the Profile grid has at that index, and the user's first
   # tap on a tile overwrites it. Empty list → empty stem (the
   # placeholder cover sticks around).
-  let firstStem: String = ""
+  var firstStem: String = ""
   if albums.length > 0 {
     let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: 0)
     firstStem = "{a.stem}"
@@ -483,7 +483,7 @@ func dispatchActions(
   spotifyEnabled: view Bool
 ) pub ret Screen {
   let n: Int = input.events.length
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let ev: ActionEvent = rae_ext_rae_buf_get(buf: input.events.data, index: i)
     let actionId: String = ev.actionId
@@ -608,7 +608,7 @@ func dispatchActions(
       # prefix ("playlist.open.liked"); default to "liked".
       let pPrefixLen: Int = playlistOpenPrefix.length()
       let pActionLen: Int = actionId.length()
-      let pid: String = "liked"
+      var pid: String = "liked"
       if pActionLen > pPrefixLen {
         pid = actionId.sub(start: pPrefixLen, len: pActionLen - pPrefixLen)
       }
@@ -635,7 +635,7 @@ func dispatchActions(
       let actionLen: Int = actionId.length()
       let rest: String = actionId.sub(start: prefixLen, len: actionLen - prefixLen)
       let dot: Int = rest.indexOf(sub: ".")
-      let idx: Int = 0
+      var idx: Int = 0
       if dot > 0 {
         let idxStr: String = rest.sub(start: 0, len: dot)
         idx = idxStr.toInt()
@@ -700,7 +700,7 @@ func dispatchActions(
           if aIdx >= 0 {
             let a: Album = rae_ext_rae_buf_get(buf: state.albums.data, index: aIdx)
             let tn: Int = a.tracks.length
-            let tj: Int = 0
+            var tj: Int = 0
             loop tj < tn {
               let t: Track = rae_ext_rae_buf_get(buf: a.tracks.data, index: tj)
               if t.title.equals(other: e.trackName) {

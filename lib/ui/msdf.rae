@@ -161,7 +161,7 @@ func paintMsdfDispatch(
   }
   # `applyShadow` is the renderer's per-style decision (see `paintText`).
   # When false, drop the shadow layer for this node by zeroing its alpha.
-  let shadowAlpha: Int = 0
+  var shadowAlpha: Int = 0
   if applyShadow {
     shadowAlpha = (s.shadowColor.a * chain255) / 255
   }
@@ -277,7 +277,7 @@ func loadMsdfFont(jsonPath: view String, atlasPath: view String) pub ret MsdfFon
   let fontSize: Float = msdfFloatField(doc: doc, obj: atlasJ, key: "size", fallback: 32.0)
   let yOriginKey: String = "yOrigin"
   let yOriginIdx: Int = jsonField(doc: doc, this: atlasJ, key: yOriginKey)
-  let yOriginBottom: Bool = true
+  var yOriginBottom: Bool = true
   if yOriginIdx >= 0 {
     let yOriginV: JsonValue = jsonValueAt(doc: doc, idx: yOriginIdx)
     let bottomKey: String = "bottom"
@@ -300,7 +300,7 @@ func loadMsdfFont(jsonPath: view String, atlasPath: view String) pub ret MsdfFon
   let glyphsArr: JsonValue = jsonValueAt(doc: doc, idx: glyphsIdx)
   let n: Int = jsonArrayLen(this: glyphsArr)
   let glyphs: List(MsdfGlyph) = createList(MsdfGlyph, cap: n)
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let entry: JsonValue = jsonArrayAt(doc: doc, this: glyphsArr, idx: i)
     let unicodeIdx: Int = jsonField(doc: doc, this: entry, key: "unicode")
@@ -354,7 +354,7 @@ func loadMsdfFont(jsonPath: view String, atlasPath: view String) pub ret MsdfFon
 # index, or -1 if not present.
 func msdfGlyphIndex(font: view MsdfFont, cp: view Int) ret Int {
   let n: Int = font.glyphs.length
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let g: MsdfGlyph = rae_ext_rae_buf_get(buf: font.glyphs.data, index: i)
     if g.unicode is cp {
@@ -368,9 +368,9 @@ func msdfGlyphIndex(font: view MsdfFont, cp: view Int) ret Int {
 # Width of `text` in screen pixels at `sizePx` (sum of glyph advances).
 func msdfMeasureText(font: view MsdfFont, text: view String, sizePx: view Float) pub ret Float {
   let scale: Float = sizePx / font.emSize
-  let total: Float = 0.0
+  var total: Float = 0.0
   let n: Int = text.length()
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let c: Char32 = text.at(index: i)
     let cp: Int = c.toInt()
@@ -408,7 +408,7 @@ func drawMsdfGlyphPass(
   # box — the "dark rectangle" artifact, hit when a soft shadow divides
   # an already-small pxRange (small text) below 1. At 1.0 the edge is
   # crisp and the background is exactly 0.
-  let effPxRange: Float = pxRange
+  var effPxRange: Float = pxRange
   if effPxRange < 1.0 {
     effPxRange = 1.0
   }
@@ -423,9 +423,9 @@ func drawMsdfGlyphPass(
     shadowSoftness: 1.0
   )
   let baseline: Float = y + font.ascender * scale
-  let cursor: Float = x
+  var cursor: Float = x
   let n: Int = text.length()
-  let i: Int = 0
+  var i: Int = 0
   let origin: Vector2 = { x: 0.0, y: 0.0 }
   let white: Color = { r: 255, g: 255, b: 255, a: 255 }
   loop i < n {
@@ -441,7 +441,7 @@ func drawMsdfGlyphPass(
         let dstH: Float = (g.planeTop - g.planeBottom) * scale
         let srcX: Float = g.atlasLeft
         let srcW: Float = g.atlasRight - g.atlasLeft
-        let srcY: Float = font.atlasHeight - g.atlasTop
+        var srcY: Float = font.atlasHeight - g.atlasTop
         let srcH: Float = g.atlasTop - g.atlasBottom
         if font.yOriginBottom is false {
           srcY = g.atlasTop
@@ -496,11 +496,11 @@ func drawMsdfText(
   # starts as soon as `outlineWidth > pxRangeOnScreen/2 - 0.5` (the
   # outline coverage stops returning to 0 in the cell background), so
   # cap a touch below that to stay clean while using most of the band.
-  let maxOutline: Float = pxRangeOnScreen * 0.5 - 0.75
+  var maxOutline: Float = pxRangeOnScreen * 0.5 - 0.75
   if maxOutline < 0.0 {
     maxOutline = 0.0
   }
-  let effOutlineWidth: Float = outlineWidth
+  var effOutlineWidth: Float = outlineWidth
   if effOutlineWidth > maxOutline {
     effOutlineWidth = maxOutline
   }
@@ -508,7 +508,7 @@ func drawMsdfText(
   # Shadow pass first (behind the body): the body silhouette in the
   # shadow colour, offset, with a softened edge.
   if shadowColor.a > 0 {
-    let soft: Float = shadowSoftness
+    var soft: Float = shadowSoftness
     if soft < 1.0 {
       soft = 1.0
     }

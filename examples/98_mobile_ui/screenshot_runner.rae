@@ -32,7 +32,7 @@ func runScreenshotMode(
   let profileKeyEnv: String = "profile"
   let libraryKeyEnv: String = "library"
   let homeKeyEnv: String = "home"
-  let screen: Screen = Screen.Album
+  var screen: Screen = Screen.Album
   if screenEnv.equals(other: nowKey) {
     screen = Screen.Player
   }
@@ -74,7 +74,7 @@ func runScreenshotMode(
   transformSystem(world: world)
   applyPlaybackToWorld(world: world, state: shotPlayback)
   let warmupFrames: Int = 30
-  let f: Int = 0
+  var f: Int = 0
   loop f < warmupFrames {
     beginDrawing()
     clearBackground(color: bg)

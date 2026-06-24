@@ -244,13 +244,13 @@ func canMove(g: view Game, dx: view Int, dy: view Int, dr: view Int) ret Int {
   let pos: view Pos => cp.pos
   let newX: Int = pos.x + dx
   let newY: Int = pos.y + dy
-  let newRot: Int = (cp.rotation + dr) % 4
+  var newRot: Int = (cp.rotation + dr) % 4
   if newRot < 0 {
     newRot = newRot + 4
   }
-  let py: Int = 0
+  var py: Int = 0
   loop py < 4 {
-    let px: Int = 0
+    var px: Int = 0
     loop px < 4 {
       if getShapeCell(kind: cp.kind, rot: newRot, px: px, py: py) is 1 {
         if isOccupied(g: g, x: newX + px, y: newY + py) is 1 {
@@ -269,9 +269,9 @@ func lockPiece(g: mod Game) {
   let pos: view Pos => cp.pos
   let grid: mod List(Int) => g.grid
   let kindId: Int = getKindId(kind: cp.kind)
-  let py: Int = 0
+  var py: Int = 0
   loop py < 4 {
-    let px: Int = 0
+    var px: Int = 0
     loop px < 4 {
       if getShapeCell(kind: cp.kind, rot: cp.rotation, px: px, py: py) is 1 {
         let gx: Int = pos.x + px
@@ -288,11 +288,11 @@ func lockPiece(g: mod Game) {
 
 func checkLines(g: mod Game) {
   let grid: mod List(Int) => g.grid
-  let linesCleared: Int = 0
-  let y: Int = g.height - 1
+  var linesCleared: Int = 0
+  var y: Int = g.height - 1
   loop y >= 0 {
-    let full: Int = 1
-    let x: Int = 0
+    var full: Int = 1
+    var x: Int = 0
     loop x < g.width {
       if grid.get(index: y * g.width + x) is 0 {
         full = 0
@@ -302,9 +302,9 @@ func checkLines(g: mod Game) {
     if full is 1 {
       linesCleared = linesCleared + 1
       # Shift lines down
-      let ty: Int = y
+      var ty: Int = y
       loop ty > 0 {
-        let tx: Int = 0
+        var tx: Int = 0
         loop tx < g.width {
           grid.set(index: ty * g.width + tx, value: grid.get(index: (ty - 1) * g.width + tx))
           tx = tx + 1
@@ -312,7 +312,7 @@ func checkLines(g: mod Game) {
         ty = ty - 1
       }
       # Top line is 0
-      let tx: Int = 0
+      var tx: Int = 0
       loop tx < g.width {
         grid.set(index: tx, value: 0)
         tx = tx + 1
@@ -402,7 +402,7 @@ func initGame(g: mod Game) {
   g.nextPieceKind = randomKind()
 
   # Initialize grid with 0s
-  let i: Int = 0
+  var i: Int = 0
   let grid: mod List(Int) => g.grid
   grid.clear()
   loop i < g.width * g.height {
@@ -418,7 +418,7 @@ func draw(g: view Game) {
   let sw: Float = getScreenWidth().toFloat()
   let sh: Float = getScreenHeight().toFloat()
   # Scale font size based on screen height
-  let fontSize: Float = sh / 25.0
+  var fontSize: Float = sh / 25.0
   if fontSize < 10.0 {
     fontSize = 10.0
   }
@@ -435,9 +435,9 @@ func draw(g: view Game) {
     height: g.height.toFloat() * cellSize + 4.0
     color: Color { r: 180, g: 180, b: 255, a: 255 }
   )
-  let y: Int = 0
+  var y: Int = 0
   loop y < g.height {
-    let x: Int = 0
+    var x: Int = 0
     loop x < g.width {
       let val: Int = g.grid.get(index: y * g.width + x)
       if val > 0 {
@@ -457,9 +457,9 @@ func draw(g: view Game) {
   let cp: view Piece => g.currentPiece
   let pos: view Pos => cp.pos
   let kindId: Int = getKindId(kind: cp.kind)
-  let py: Int = 0
+  var py: Int = 0
   loop py < 4 {
-    let px: Int = 0
+    var px: Int = 0
     loop px < 4 {
       if getShapeCell(kind: cp.kind, rot: cp.rotation, px: px, py: py) is 1 {
         drawRectangle(
@@ -499,7 +499,7 @@ func draw(g: view Game) {
   let nextKindId: Int = getKindId(kind: g.nextPieceKind)
   py = 0
   loop py < 4 {
-    let px: Int = 0
+    var px: Int = 0
     loop px < 4 {
       if getShapeCell(kind: g.nextPieceKind, rot: 0, px: px, py: py) is 1 {
         drawRectangle(
@@ -577,7 +577,7 @@ func handleInput(g: mod Game) {
   }
   let cp: mod Piece => g.currentPiece
   let pos: mod Pos => cp.pos
-  let moved: Int = 0
+  var moved: Int = 0
 
   # DAS (Delayed Auto Shift)
   let moveLeft: Bool = isKeyDown(key: 263) or isKeyDown(key: 65)
@@ -636,7 +636,7 @@ func handleInput(g: mod Game) {
   }
 
   # Soft Drop
-  let effectiveDelay: Int = g.moveDelay
+  var effectiveDelay: Int = g.moveDelay
   if isKeyDown(key: 264) or isKeyDown(key: 83) {
     effectiveDelay = 2
   }

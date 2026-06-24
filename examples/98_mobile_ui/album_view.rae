@@ -86,7 +86,7 @@ func buildAlbumHeader(world: mod UiWorld, scene: view Scene, title: view String,
 func buildTrackList(world: mod UiWorld, trackScene: view Scene, rows: view List(CollectionRow), playback: view PlaybackState) pub ret EntityId {
   let list: EntityId = createEntity(world: world)
   let n: Int = rows.length
-  let visible: Int = n
+  var visible: Int = n
   if visible < 1 {
     visible = 1
   }
@@ -97,18 +97,18 @@ func buildTrackList(world: mod UiWorld, trackScene: view Scene, rows: view List(
   setLayout(world: world, entity: list, kind: layV, gap: trackGap, alignCross: alignS)
 
   let rowKids: List(EntityId) = createList(EntityId, cap: trackRowCount)
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let cr: CollectionRow = rae_ext_rae_buf_get(buf: rows.data, index: i)
     let row: EntityId = createEntity(world: world)
     setRectFixed(world: world, entity: row, w: screenW - outerPad * 2.0, h: trackRowH)
 
     let overrides: List(SceneOverride) = emptyOverrides()
-    let num: Int = cr.number
+    var num: Int = cr.number
     if num <= 0 {
       num = i + 1
     }
-    let label: String = ""
+    var label: String = ""
     if num < 10 {
       label = "0{num}"
     } else {
@@ -134,7 +134,7 @@ func buildTrackList(world: mod UiWorld, trackScene: view Scene, rows: view List(
     # Highlight the row only when this exact (album, track) is the one
     # actually playing — keyed on the row's own stem + index so it
     # works for playlists spanning multiple albums.
-    let isPlayingRow: Bool = false
+    var isPlayingRow: Bool = false
     if playback.playingAlbumStem.equals(other: cr.albumStem) {
       if cr.trackIndex is playback.playingTrackIndex {
         isPlayingRow = true
@@ -170,7 +170,7 @@ func buildTrackList(world: mod UiWorld, trackScene: view Scene, rows: view List(
 # the user can scroll far enough to reveal every row but not infinitely
 # past the end.
 func collectionContentHeight(rowCount: view Int) ret Float {
-  let visible: Int = rowCount
+  var visible: Int = rowCount
   if visible < 1 {
     visible = 1
   }
@@ -238,7 +238,7 @@ func mountAlbumPage(
   setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
   setPaddingAll(world: world, entity: root, n: outerPad)
 
-  let copiedId: String = ""
+  var copiedId: String = ""
   copiedId = copiedId.concat(other: albumPageId)
   let pr: PageRoot = { id: own copiedId }
   componentSet(this: world.pageRoots, entity: root, data: own pr)
