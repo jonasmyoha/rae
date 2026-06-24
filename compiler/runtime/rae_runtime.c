@@ -1425,7 +1425,14 @@ rae_String rae_ext_rae_str_cstr_ptr(const char** s) {
   return rae_ext_rae_str_from_cstr((void*)*s);
 }
 
-static uint64_t g_rae_random_state = 0x123456789ABCDEF0ULL;
+// Thread-local: each OS thread (main + spawned workers) gets its own RNG
+// stream, so concurrent workers (e.g. a multithreaded raytracer sampling
+// random scatter directions) don't race on a shared seed and skew each
+// other's distributions. Each worker should seed() itself (e.g. by its band
+// index) to decorrelate streams — without that, every thread starts from the
+// same default and produces identical sequences. Transparent for
+// single-threaded programs (the main thread's instance == the old global).
+static __thread uint64_t g_rae_random_state = 0x123456789ABCDEF0ULL;
 
 void rae_ext_rae_seed(int64_t seed) {
   g_rae_random_state = (uint64_t)seed;
