@@ -289,10 +289,22 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                     fprintf(out, "({ __raespawn_args_%s* __s = (__raespawn_args_%s*)malloc(sizeof(__raespawn_args_%s)); ",
                             mangled, mangled, mangled);
                     int k = 0;
+                    const AstParam* pp = callee->params;
                     for (const AstCallArg* a = callexpr->as.call.args; a; a = a->next, k++) {
-                        fprintf(out, "__s->f%d = (", k);
+                        // String params are captured by a private deep copy so
+                        // the worker owns a stable heap (the parent keeps and
+                        // drops its own original). Scalars/enums copy by value.
+                        bool str_param = pp && pp->type
+                            && !pp->type->is_view && !pp->type->is_mod
+                            && str_eq_cstr(get_base_type_name(pp->type), "String");
+                        fprintf(out, "__s->f%d = ", k);
+                        if (str_param) fprintf(out, "rae_string_copy(");
+                        fprintf(out, "(");
                         emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
-                        fprintf(out, "); ");
+                        fprintf(out, ")");
+                        if (str_param) fprintf(out, ")");
+                        fprintf(out, "; ");
+                        if (pp) pp = pp->next;
                     }
                     fprintf(out, "RaeTask* __t = rae_task_new(");
                     if (is_void) fprintf(out, "0");
