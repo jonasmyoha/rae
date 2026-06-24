@@ -1858,6 +1858,37 @@ void rae_ext_setConfigFlags(int64_t flags) {
     SetConfigFlags((unsigned int)flags);
 }
 
+Texture rae_ext_loadStreamTexture(int64_t width, int64_t height) {
+    Image img = GenImageColor((int)width, (int)height, BLACK);
+    Texture t = LoadTextureFromImage(img);
+    UnloadImage(img);
+    return t;
+}
+
+void rae_ext_updateStreamTexture(Texture texture, const int64_t* pixels, int64_t count) {
+    if (!pixels || count <= 0) return;
+    /* Reusable scratch for the packed-Int -> RGBA8 expansion. Display runs on
+     * the main thread only, so a static buffer is fine and avoids a per-frame
+     * malloc of the (large, at Full HD) pixel array. */
+    static unsigned char* scratch = NULL;
+    static int64_t scratch_count = 0;
+    if (count > scratch_count) {
+        unsigned char* grown = (unsigned char*)realloc(scratch, (size_t)count * 4);
+        if (!grown) return;
+        scratch = grown;
+        scratch_count = count;
+    }
+    const int64_t* px = (const int64_t*)pixels;
+    for (int64_t i = 0; i < count; i++) {
+        int64_t p = px[i];
+        scratch[i * 4 + 0] = (unsigned char)((p >> 16) & 0xFF);
+        scratch[i * 4 + 1] = (unsigned char)((p >> 8) & 0xFF);
+        scratch[i * 4 + 2] = (unsigned char)(p & 0xFF);
+        scratch[i * 4 + 3] = 255;
+    }
+    UpdateTexture(texture, scratch);
+}
+
 void rae_ext_drawCubeWires(Vector3 pos, double width, double height, double length, Color color) {
     DrawCubeWires(pos, (float)width, (float)height, (float)length, color);
 }
