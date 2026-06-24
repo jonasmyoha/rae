@@ -3,33 +3,33 @@
 import raylib
 
 enum TetrominoKind {
-  I
-  J
-  L
-  O
-  S
-  T
-  Z
+  i
+  j
+  l
+  o
+  s
+  t
+  z
 }
 
 # Colour ids 1..7 map 1:1 to TetrominoKind. 0 is empty.
 func getKindId(kind: TetrominoKind) ret Int {
-  if kind is TetrominoKind.I {
+  if kind is TetrominoKind.i {
     ret 1
   }
-  if kind is TetrominoKind.J {
+  if kind is TetrominoKind.j {
     ret 2
   }
-  if kind is TetrominoKind.L {
+  if kind is TetrominoKind.l {
     ret 3
   }
-  if kind is TetrominoKind.O {
+  if kind is TetrominoKind.o {
     ret 4
   }
-  if kind is TetrominoKind.S {
+  if kind is TetrominoKind.s {
     ret 5
   }
-  if kind is TetrominoKind.T {
+  if kind is TetrominoKind.t {
     ret 6
   }
   ret 7
@@ -67,13 +67,13 @@ func kindColor(id: view Int) ret Color {
 # here so 3D doesn't depend on the 2D file.
 func getShapeCell(kind: TetrominoKind, rot: view Int, px: view Int, py: view Int) ret Int {
   let r: Int = ((rot % 4) + 4) % 4
-  if kind is TetrominoKind.O {
+  if kind is TetrominoKind.o {
     if px >= 0 and px <= 1 and py >= 0 and py <= 1 {
       ret 1
     }
     ret 0
   }
-  if kind is TetrominoKind.I {
+  if kind is TetrominoKind.i {
     if r is 0 or r is 2 {
       if py is 1 and px >= 0 and px <= 3 {
         ret 1
@@ -85,7 +85,7 @@ func getShapeCell(kind: TetrominoKind, rot: view Int, px: view Int, py: view Int
     }
     ret 0
   }
-  if kind is TetrominoKind.T {
+  if kind is TetrominoKind.t {
     if r is 0 {
       if py is 1 and px >= 0 and px <= 2 {
         ret 1
@@ -120,7 +120,7 @@ func getShapeCell(kind: TetrominoKind, rot: view Int, px: view Int, py: view Int
     }
     ret 0
   }
-  if kind is TetrominoKind.S {
+  if kind is TetrominoKind.s {
     if r is 0 or r is 2 {
       if py is 1 and (px is 0 or px is 1) {
         ret 1
@@ -138,7 +138,7 @@ func getShapeCell(kind: TetrominoKind, rot: view Int, px: view Int, py: view Int
     }
     ret 0
   }
-  if kind is TetrominoKind.Z {
+  if kind is TetrominoKind.z {
     if r is 0 or r is 2 {
       if py is 0 and (px is 0 or px is 1) {
         ret 1
@@ -156,7 +156,7 @@ func getShapeCell(kind: TetrominoKind, rot: view Int, px: view Int, py: view Int
     }
     ret 0
   }
-  if kind is TetrominoKind.J {
+  if kind is TetrominoKind.j {
     if r is 0 {
       if py is 1 and px >= 0 and px <= 2 {
         ret 1
@@ -230,22 +230,22 @@ func getShapeCell(kind: TetrominoKind, rot: view Int, px: view Int, py: view Int
 func randomKind() ret TetrominoKind {
   let r: Int = random(min: 0, max: 7)
   if r is 0 {
-    ret TetrominoKind.I
+    ret TetrominoKind.i
   }
   if r is 1 {
-    ret TetrominoKind.J
+    ret TetrominoKind.j
   }
   if r is 2 {
-    ret TetrominoKind.L
+    ret TetrominoKind.l
   }
   if r is 3 {
-    ret TetrominoKind.O
+    ret TetrominoKind.o
   }
   if r is 4 {
-    ret TetrominoKind.S
+    ret TetrominoKind.s
   }
   if r is 5 {
-    ret TetrominoKind.T
+    ret TetrominoKind.t
   }
-  ret TetrominoKind.Z
+  ret TetrominoKind.z
 }

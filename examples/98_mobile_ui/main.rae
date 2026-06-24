@@ -182,12 +182,12 @@ func main() {
     # the window or a `dispatchActions` call returns a different
     # screen, at which point the outer loop re-builds the world.
     let startScreenEnv: String = getEnv(name: "RAE_UI_SCREEN")
-    var startScreen: Screen = Screen.Home
-    if startScreenEnv.equals(other: "library") { startScreen = Screen.Library }
-    if startScreenEnv.equals(other: "album")   { startScreen = Screen.Album }
-    if startScreenEnv.equals(other: "player")  { startScreen = Screen.Player }
-    if startScreenEnv.equals(other: "search")  { startScreen = Screen.Search }
-    if startScreenEnv.equals(other: "profile") { startScreen = Screen.Profile }
+    var startScreen: Screen = Screen.home
+    if startScreenEnv.equals(other: "library") { startScreen = Screen.library }
+    if startScreenEnv.equals(other: "album")   { startScreen = Screen.album }
+    if startScreenEnv.equals(other: "player")  { startScreen = Screen.player }
+    if startScreenEnv.equals(other: "search")  { startScreen = Screen.search }
+    if startScreenEnv.equals(other: "profile") { startScreen = Screen.profile }
 
     # Phase 3-6 hot-reload restore. If `.rae/state.json` exists from a
     # previous run (the supervisor signalled `reload`, the app saved
@@ -382,7 +382,7 @@ func main() {
       # per-screen rescan is needed. `profileLoaded` is left for
       # any future incremental refresh (e.g. a "rescan" debug
       # button) — currently a no-op.
-      if currentScreen is Screen.Library {
+      if currentScreen is Screen.library {
         profileLoaded = true
       } else {
         profileLoaded = false
@@ -590,7 +590,7 @@ func main() {
           # binary, and the next boot will hit `loadRestoredState`
           # above and resume on the same screen at the same scroll.
           let sig: ReloadSignal = pollReloadSignal(w: reloadWatcher)
-          if sig.verb is ReloadVerb.Reload {
+          if sig.verb is ReloadVerb.reload {
             saveStateAndExit(screen: currentScreen, scrollY: scrollFsm.scrollY)
           }
 
@@ -681,7 +681,7 @@ func main() {
           let keyT: Int = 84
           if isKeyPressed(key: keyT) {
             let cur: Theme = currentTheme()
-            if cur.mode is ThemeMode.Light {
+            if cur.mode is ThemeMode.light {
               setActiveTheme(theme: darkTheme())
               log("[theme] -> dark")
             } else {

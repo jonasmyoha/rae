@@ -83,7 +83,7 @@ func buildHistoryThumb(world: mod UiWorld, entry: view PlayHistoryEntry, size: v
       radius = 8.0
     }
     let sp: Shape = {
-      kind: ShapeKind.RoundedRect
+      kind: ShapeKind.roundedRect
       fill: fill
       stroke: transparent
       strokeWidth: 0.0
@@ -98,8 +98,8 @@ func buildHistoryRow(world: mod UiWorld, entry: view PlayHistoryEntry, entryInde
   let row: EntityId = createEntity(world: world)
   let w: Float = screenW - outerPad * 2.0
   setRectFixed(world: world, entity: row, w: w, h: historyRowH)
-  let layH: LayoutType = LayoutType.Horizontal
-  let alignC: AlignKind = AlignKind.Center
+  let layH: LayoutType = LayoutType.horizontal
+  let alignC: AlignKind = AlignKind.center
   setLayout(world: world, entity: row, kind: layH, gap: spaceM, alignCross: alignC)
   let replayAction: String = "history.replay.{entryIndex}"
   setOnClick(world: world, entity: row, actionId: replayAction)
@@ -109,8 +109,8 @@ func buildHistoryRow(world: mod UiWorld, entry: view PlayHistoryEntry, entryInde
   let info: EntityId = createEntity(world: world)
   let infoW: Float = w - historyThumbSize - historyDurationW - 24.0
   setRectFixed(world: world, entity: info, w: infoW, h: historyRowH)
-  let layV: LayoutType = LayoutType.Vertical
-  let alignS: AlignKind = AlignKind.Start
+  let layV: LayoutType = LayoutType.vertical
+  let alignS: AlignKind = AlignKind.start
   setLayout(world: world, entity: info, kind: layV, gap: spaceXS, alignCross: alignS)
 
   let title: EntityId = createEntity(world: world)
@@ -150,8 +150,8 @@ func buildHistoryBody(world: mod UiWorld, history: view PlayHistory, rounded: vi
   let bodyW: Float = screenW - outerPad * 2.0
   let bodyH: Float = screenH - topBarH - navTabsH - outerGap * 4.0 - outerPad * 2.0
   setRectFixed(world: world, entity: body, w: bodyW, h: bodyH)
-  let layV: LayoutType = LayoutType.Vertical
-  let alignS: AlignKind = AlignKind.Start
+  let layV: LayoutType = LayoutType.vertical
+  let alignS: AlignKind = AlignKind.start
   setLayout(world: world, entity: body, kind: layV, gap: historyRowGap, alignCross: alignS)
   let off: Offset = { delta: Vec2 { x: 0.0, y: scrollY } }
   componentSet(this: world.offsets, entity: body, data: off)
@@ -193,8 +193,8 @@ func mountHistoryPage(
 ) pub ret EntityId {
   let root: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: root, w: screenW, h: screenH)
-  let layV: LayoutType = LayoutType.Vertical
-  let alignS: AlignKind = AlignKind.Start
+  let layV: LayoutType = LayoutType.vertical
+  let alignS: AlignKind = AlignKind.start
   setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
   setPaddingAll(world: world, entity: root, n: outerPad)
 
@@ -245,8 +245,8 @@ func buildRecentlyPlayedStrip(world: mod UiWorld, history: view PlayHistory, rou
   let strip: EntityId = createEntity(world: world)
   let stripW: Float = screenW - outerPad * 2.0
   setRectFixed(world: world, entity: strip, w: stripW, h: recentlyPlayedThumbSize)
-  let layH: LayoutType = LayoutType.Horizontal
-  let alignS: AlignKind = AlignKind.Start
+  let layH: LayoutType = LayoutType.horizontal
+  let alignS: AlignKind = AlignKind.start
   setLayout(world: world, entity: strip, kind: layH, gap: spaceS, alignCross: alignS)
 
   let n: Int = history.entries.length

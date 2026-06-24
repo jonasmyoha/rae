@@ -77,24 +77,24 @@ func screenToInt(s: view Screen) ret Int {
   # forward-compatible. Add new screens with new int codes; do not
   # reuse or reorder. Pre-redesign builds wrote 0/1/2/3 for the four
   # screens that existed then; those still mean the same screens.
-  if s is Screen.Player { ret 0 }
-  if s is Screen.Album      { ret 1 }
-  if s is Screen.Search     { ret 2 }
-  if s is Screen.Library    { ret 3 }
-  if s is Screen.Home       { ret 4 }
-  if s is Screen.Profile    { ret 5 }
-  if s is Screen.History    { ret 6 }
+  if s is Screen.player { ret 0 }
+  if s is Screen.album      { ret 1 }
+  if s is Screen.search     { ret 2 }
+  if s is Screen.library    { ret 3 }
+  if s is Screen.home       { ret 4 }
+  if s is Screen.profile    { ret 5 }
+  if s is Screen.history    { ret 6 }
   ret 4
 }
 
 func intToScreen(n: view Int) ret Screen {
-  if n is 0 { ret Screen.Player }
-  if n is 1 { ret Screen.Album }
-  if n is 2 { ret Screen.Search }
-  if n is 3 { ret Screen.Library }
-  if n is 5 { ret Screen.Profile }
-  if n is 6 { ret Screen.History }
-  ret Screen.Home
+  if n is 0 { ret Screen.player }
+  if n is 1 { ret Screen.album }
+  if n is 2 { ret Screen.search }
+  if n is 3 { ret Screen.library }
+  if n is 5 { ret Screen.profile }
+  if n is 6 { ret Screen.history }
+  ret Screen.home
 }
 
 # Build a default state. Callers pass this in to loadRestoredState
@@ -102,7 +102,7 @@ func intToScreen(n: view Int) ret Screen {
 # own startup defaults.
 func defaultRestoredState() pub ret RestoredState {
   ret RestoredState {
-    screen: Screen.Home
+    screen: Screen.home
     scrollY: 0.0
   }
 }

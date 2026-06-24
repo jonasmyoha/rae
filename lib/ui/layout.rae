@@ -70,17 +70,17 @@ func resolveAxisFromSize(
   hasParentAvail: view Bool
 ) ret Float {
   var result: Float = rectVal
-  if axis.mode is SizeMode.Fixed {
+  if axis.mode is SizeMode.fixed {
     result = rectVal
   }
-  if axis.mode is SizeMode.Fill {
+  if axis.mode is SizeMode.fill {
     if hasParentAvail {
       result = parentAvail
     } else {
       result = rectVal
     }
   }
-  if axis.mode is SizeMode.Hug {
+  if axis.mode is SizeMode.hug {
     if hasMeasured {
       result = measuredVal
     } else {
@@ -240,13 +240,13 @@ func measureSubtree(world: mod UiWorld, entity: view EntityId) {
       let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: j)
       let cw: Float = childMeasuredW(world: world, entity: cid)
       let ch: Float = childMeasuredH(world: world, entity: cid)
-      if layout.kind is LayoutType.Horizontal {
+      if layout.kind is LayoutType.horizontal {
         sumMain = sumMain + cw
         if ch > maxCross {
           maxCross = ch
         }
       } else {
-        if layout.kind is LayoutType.Vertical {
+        if layout.kind is LayoutType.vertical {
           sumMain = sumMain + ch
           if cw > maxCross {
             maxCross = cw
@@ -263,7 +263,7 @@ func measureSubtree(world: mod UiWorld, entity: view EntityId) {
       }
       j = j + 1
     }
-    if layout.kind is LayoutType.Horizontal {
+    if layout.kind is LayoutType.horizontal {
       var gapTotal: Float = layout.gap * (n - 1).toFloat()
       if gapTotal < 0.0 {
         gapTotal = 0.0
@@ -271,7 +271,7 @@ func measureSubtree(world: mod UiWorld, entity: view EntityId) {
       measuredW = sumMain + gapTotal + pad.l + pad.r
       measuredH = maxCross + pad.t + pad.b
     }
-    if layout.kind is LayoutType.Vertical {
+    if layout.kind is LayoutType.vertical {
       var gapTotal: Float = layout.gap * (n - 1).toFloat()
       if gapTotal < 0.0 {
         gapTotal = 0.0
@@ -279,11 +279,11 @@ func measureSubtree(world: mod UiWorld, entity: view EntityId) {
       measuredH = sumMain + gapTotal + pad.t + pad.b
       measuredW = maxCross + pad.l + pad.r
     }
-    if layout.kind is LayoutType.Stack {
+    if layout.kind is LayoutType.stack {
       measuredW = sumMain + pad.l + pad.r
       measuredH = maxCross + pad.t + pad.b
     }
-    if layout.kind is LayoutType.None {
+    if layout.kind is LayoutType.none {
       # `Layout: None` falls back to max child extents per RUICS § 7.5.
       measuredW = sumMain + pad.l + pad.r
       measuredH = maxCross + pad.t + pad.b
@@ -427,7 +427,7 @@ func computeSubtree(
     ret
   }
 
-  if layout.kind is LayoutType.Horizontal {
+  if layout.kind is LayoutType.horizontal {
     placeHorizontal(
       world: world
       kids: kids
@@ -441,7 +441,7 @@ func computeSubtree(
     )
     ret
   }
-  if layout.kind is LayoutType.Vertical {
+  if layout.kind is LayoutType.vertical {
     placeVertical(
       world: world
       kids: kids
@@ -455,7 +455,7 @@ func computeSubtree(
     )
     ret
   }
-  if layout.kind is LayoutType.Stack {
+  if layout.kind is LayoutType.stack {
     placeStack(
       world: world
       kids: kids
@@ -514,7 +514,7 @@ func placeHorizontal(
   loop i < n {
     let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
     let size: Size = entitySize(world: world, entity: cid)
-    if size.w.mode is SizeMode.Fill {
+    if size.w.mode is SizeMode.fill {
       fillCount = fillCount + 1
     } else {
       let r: Vec2 = resolveOwnSize(
@@ -551,13 +551,13 @@ func placeHorizontal(
   var startOffset: Float = 0.0
   var extraGap: Float = 0.0
   if fillCount is 0 {
-    if alignMain is AlignKind.Center {
+    if alignMain is AlignKind.center {
       startOffset = remaining / 2.0
     }
-    if alignMain is AlignKind.End {
+    if alignMain is AlignKind.end {
       startOffset = remaining
     }
-    if alignMain is AlignKind.SpaceBetween {
+    if alignMain is AlignKind.spaceBetween {
       if n > 1 {
         extraGap = remaining / (n - 1).toFloat()
       }
@@ -571,7 +571,7 @@ func placeHorizontal(
     let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: j)
     let size: Size = entitySize(world: world, entity: cid)
     var childW: Float = 0.0
-    if size.w.mode is SizeMode.Fill {
+    if size.w.mode is SizeMode.fill {
       childW = fillSize
     } else {
       let r: Vec2 = resolveOwnSize(
@@ -585,7 +585,7 @@ func placeHorizontal(
     }
     childW = applyConstraintsW(world: world, entity: cid, w: childW)
     var childH: Float = 0.0
-    if size.h.mode is SizeMode.Fill {
+    if size.h.mode is SizeMode.fill {
       childH = contentH
     } else {
       let r: Vec2 = resolveOwnSize(
@@ -600,10 +600,10 @@ func placeHorizontal(
     childH = applyConstraintsH(world: world, entity: cid, h: childH)
 
     var crossY: Float = contentY
-    if alignCross is AlignKind.Center {
+    if alignCross is AlignKind.center {
       crossY = contentY + (contentH - childH) / 2.0
     }
-    if alignCross is AlignKind.End {
+    if alignCross is AlignKind.end {
       crossY = contentY + contentH - childH
     }
 
@@ -638,7 +638,7 @@ func placeVertical(
   loop i < n {
     let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
     let size: Size = entitySize(world: world, entity: cid)
-    if size.h.mode is SizeMode.Fill {
+    if size.h.mode is SizeMode.fill {
       fillCount = fillCount + 1
     } else {
       let r: Vec2 = resolveOwnSize(
@@ -669,13 +669,13 @@ func placeVertical(
   var startOffset: Float = 0.0
   var extraGap: Float = 0.0
   if fillCount is 0 {
-    if alignMain is AlignKind.Center {
+    if alignMain is AlignKind.center {
       startOffset = remaining / 2.0
     }
-    if alignMain is AlignKind.End {
+    if alignMain is AlignKind.end {
       startOffset = remaining
     }
-    if alignMain is AlignKind.SpaceBetween {
+    if alignMain is AlignKind.spaceBetween {
       if n > 1 {
         extraGap = remaining / (n - 1).toFloat()
       }
@@ -688,7 +688,7 @@ func placeVertical(
     let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: j)
     let size: Size = entitySize(world: world, entity: cid)
     var childH: Float = 0.0
-    if size.h.mode is SizeMode.Fill {
+    if size.h.mode is SizeMode.fill {
       childH = fillSize
     } else {
       let r: Vec2 = resolveOwnSize(
@@ -702,7 +702,7 @@ func placeVertical(
     }
     childH = applyConstraintsH(world: world, entity: cid, h: childH)
     var childW: Float = 0.0
-    if size.w.mode is SizeMode.Fill {
+    if size.w.mode is SizeMode.fill {
       childW = contentW
     } else {
       let r: Vec2 = resolveOwnSize(
@@ -717,10 +717,10 @@ func placeVertical(
     childW = applyConstraintsW(world: world, entity: cid, w: childW)
 
     var crossX: Float = contentX
-    if alignCross is AlignKind.Center {
+    if alignCross is AlignKind.center {
       crossX = contentX + (contentW - childW) / 2.0
     }
-    if alignCross is AlignKind.End {
+    if alignCross is AlignKind.end {
       crossX = contentX + contentW - childW
     }
 
@@ -761,8 +761,8 @@ func placeStack(
 
     # Default Stack alignment is centre on both axes; the per-child
     # `Align` overrides it.
-    var alignX: AlignKind = AlignKind.Center
-    var alignY: AlignKind = AlignKind.Center
+    var alignX: AlignKind = AlignKind.center
+    var alignY: AlignKind = AlignKind.center
     if componentHas(this: world.aligns, entity: cid) {
       let a: Align = componentGet(this: world.aligns, entity: cid)
       if a.hasX {
@@ -774,17 +774,17 @@ func placeStack(
     }
 
     var cx: Float = contentX
-    if alignX is AlignKind.Center {
+    if alignX is AlignKind.center {
       cx = contentX + (contentW - childW) / 2.0
     }
-    if alignX is AlignKind.End {
+    if alignX is AlignKind.end {
       cx = contentX + contentW - childW
     }
     var cy: Float = contentY
-    if alignY is AlignKind.Center {
+    if alignY is AlignKind.center {
       cy = contentY + (contentH - childH) / 2.0
     }
-    if alignY is AlignKind.End {
+    if alignY is AlignKind.end {
       cy = contentY + contentH - childH
     }
 

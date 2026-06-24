@@ -14,9 +14,9 @@ import raylib
 # -----------------------------------------------------------------
 
 enum SizeMode {
-  Fixed
-  Hug
-  Fill
+  fixed
+  hug
+  fill
 }
 
 # Per-axis sizing policy. `min` and `max` are signed; -1 means "no
@@ -28,77 +28,77 @@ type SizeAxis {
 }
 
 enum LayoutType {
-  None
-  Horizontal
-  Vertical
-  Grid
-  Stack
+  none
+  horizontal
+  vertical
+  grid
+  stack
 }
 
 enum AlignKind {
-  Start
-  Center
-  End
-  SpaceBetween
-  Stretch
+  start
+  center
+  end
+  spaceBetween
+  stretch
 }
 
 enum OverflowMode {
-  None
-  Clip
-  ScaleToFitY
+  none
+  clip
+  scaleToFitY
 }
 
 enum ShapeKind {
-  Rect
-  RoundedRect
-  Circle
+  rect
+  roundedRect
+  circle
 }
 
 enum ScaleMode {
-  Fit
-  Fill
-  Stretch
+  fit
+  fill
+  stretch
 }
 
 enum WrapWidthMode {
-  None
-  NodeWidth
+  none
+  nodeWidth
 }
 
 enum HitAreaKind {
-  Rect
-  RoundedRect
+  rect
+  roundedRect
 }
 
 enum MaskKind {
-  Circle
-  RoundedRect
+  circle
+  roundedRect
 }
 
 enum ResolverMode {
-  Fixed
-  Random
-  Hash
-  Direct
+  fixed
+  random
+  hash
+  direct
 }
 
 enum TextFormat {
-  Plain
-  Number
-  Percent1
-  Coins
-  HandRank
+  plain
+  number
+  percent1
+  coins
+  handRank
 }
 
 enum DataMode {
-  Top
-  AroundSelf
+  top
+  aroundSelf
 }
 
 enum AccountIdSource {
-  None
-  ActiveAccountId
+  none
+  activeAccountId
 }
 
 # A 4-sided box: padding, margin, etc.
@@ -593,7 +593,7 @@ type AnimState {
 # -----------------------------------------------------------------
 
 func defaultSizeAxis() ret SizeAxis {
-  ret SizeAxis { mode: SizeMode.Fixed, min: -1, max: -1 }
+  ret SizeAxis { mode: SizeMode.fixed, min: -1, max: -1 }
 }
 
 func defaultSize() ret Size {
@@ -606,10 +606,10 @@ func defaultInsets() ret Insets {
 
 func defaultLayout() ret Layout {
   ret Layout {
-    kind: LayoutType.None
+    kind: LayoutType.none
     gap: 0.0
-    alignMain: AlignKind.Start
-    alignCross: AlignKind.Start
+    alignMain: AlignKind.start
+    alignCross: AlignKind.start
     columns: 0
     rowGap: 0.0
     columnGap: 0.0
@@ -622,8 +622,8 @@ func defaultPadding() ret Padding {
 
 func defaultAlign() ret Align {
   ret Align {
-    x: AlignKind.Start
-    y: AlignKind.Start
+    x: AlignKind.start
+    y: AlignKind.start
     hasX: false
     hasY: false
   }
@@ -645,7 +645,7 @@ func defaultSprite() ret Sprite {
   ret Sprite {
     textureKey: ""
     tint: RgbaColor { r: 255, g: 255, b: 255, a: 255 }
-    scaleMode: ScaleMode.Fit
+    scaleMode: ScaleMode.fit
     tileScale: Vec2 { x: 1.0, y: 1.0 }
     nineSlice: defaultInsets()
     hasNineSlice: false
@@ -653,12 +653,12 @@ func defaultSprite() ret Sprite {
 }
 
 func defaultText() ret Text {
-  ret Text { text: "", styleId: "", wrapWidthMode: WrapWidthMode.None }
+  ret Text { text: "", styleId: "", wrapWidthMode: WrapWidthMode.none }
 }
 
 func defaultShape() ret Shape {
   ret Shape {
-    kind: ShapeKind.Rect
+    kind: ShapeKind.rect
     fill: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
     stroke: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
     strokeWidth: 0.0

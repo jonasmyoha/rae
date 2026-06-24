@@ -51,7 +51,7 @@ func setDockSprite(world: mod UiWorld, entity: view EntityId, key: view String, 
   let sp: Sprite = {
     textureKey: key
     tint: tint
-    scaleMode: ScaleMode.Stretch
+    scaleMode: ScaleMode.stretch
     tileScale: Vec2 { x: 1.0, y: 1.0 }
     nineSlice: Insets { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
     hasNineSlice: false
@@ -141,17 +141,17 @@ func buildNavTabsForScreen(
   # shows the dock's shadow gradient through with no blur — no crash.
   let blurBg: BackdropImage = { textureKey: tabBlurTextureKey() }
   componentSet(this: world.backdropImages, entity: bar, data: blurBg)
-  setLayout(world: world, entity: bar, kind: LayoutType.Horizontal, gap: 0.0, alignCross: AlignKind.Center)
+  setLayout(world: world, entity: bar, kind: LayoutType.horizontal, gap: 0.0, alignCross: AlignKind.center)
 
   # Four base tabs: Home / Library / Search / Profile. Player is
   # NOT a tab — it's reached by tapping the mini-player above this
   # bar. Album is also NOT a tab — it's a sub-page opened by tapping
   # any cover.
   let tabW: Float = barW / 4.0
-  let homeActive: Bool = activeTab is Screen.Home
-  let libraryActive: Bool = activeTab is Screen.Library
-  let searchActive: Bool = activeTab is Screen.Search
-  let profileActive: Bool = activeTab is Screen.Profile
+  let homeActive: Bool = activeTab is Screen.home
+  let libraryActive: Bool = activeTab is Screen.library
+  let searchActive: Bool = activeTab is Screen.search
+  let profileActive: Bool = activeTab is Screen.profile
 
   let homeKey: String = "mat:home"
   let homeLabel: String = "Home"
@@ -252,15 +252,15 @@ func mountBackButtonOverlay(world: mod UiWorld, state: view AppState) pub ret En
   let bg: RgbaColor = { r: 22, g: 22, b: 28, a: 180 }
   let stroke: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
   let sh: Shape = {
-    kind: ShapeKind.Circle
+    kind: ShapeKind.circle
     fill: bg
     stroke: stroke
     strokeWidth: 0.0
     radius: 0.0
   }
   componentSet(this: world.shapes, entity: btn, data: sh)
-  let layS: LayoutType = LayoutType.Stack
-  let alignC: AlignKind = AlignKind.Center
+  let layS: LayoutType = LayoutType.stack
+  let alignC: AlignKind = AlignKind.center
   setLayout(world: world, entity: btn, kind: layS, gap: 0.0, alignCross: alignC)
   let backAction: String = "nav.back"
   setOnClick(world: world, entity: btn, actionId: backAction)
@@ -329,8 +329,8 @@ func mountBottomDockOverlay(
   let dockBgExtend: Float = 100.0
   let dockH: Float = miniPlayerH + navTabsH + dockBgExtend
   setRectFixed(world: world, entity: dock, w: screenW, h: dockH)
-  let layV: LayoutType = LayoutType.Vertical
-  let alignC: AlignKind = AlignKind.Center
+  let layV: LayoutType = LayoutType.vertical
+  let alignC: AlignKind = AlignKind.center
   setLayout(world: world, entity: dock, kind: layV, gap: 0.0, alignCross: alignC)
   let dockPad: Padding = { insets: Insets { l: 0.0, t: dockBgExtend, r: 0.0, b: 0.0 } }
   componentSet(this: world.paddings, entity: dock, data: dockPad)

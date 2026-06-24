@@ -70,7 +70,7 @@ func paintShape(world: view UiWorld, entity: view EntityId, wt: view WorldTransf
   let sh: Shape = componentGet(this: world.shapes, entity: entity)
   let fill: Color = toRaylibColor(c: sh.fill, chain255: chain255)
 
-  if sh.kind is ShapeKind.Rect {
+  if sh.kind is ShapeKind.rect {
     drawRectangle(
       x: wt.x
       y: wt.y
@@ -80,7 +80,7 @@ func paintShape(world: view UiWorld, entity: view EntityId, wt: view WorldTransf
     )
     ret
   }
-  if sh.kind is ShapeKind.RoundedRect {
+  if sh.kind is ShapeKind.roundedRect {
     # `Shape.radius` is given in pixels in components.rae; raylib's
     # roundness is a fraction of the smaller side. Convert.
     var smaller: Float = cr.w
@@ -107,7 +107,7 @@ func paintShape(world: view UiWorld, entity: view EntityId, wt: view WorldTransf
     )
     ret
   }
-  if sh.kind is ShapeKind.Circle {
+  if sh.kind is ShapeKind.circle {
     # Centred inside the entity's box. Use radius from Shape, falling
     # back to half the smaller side if not set.
     var smaller: Float = cr.w
@@ -473,11 +473,11 @@ func paintText(world: view UiWorld, entity: view EntityId, wt: view WorldTransfo
   if componentHas(this: world.aligns, entity: entity) {
     let al: Align = componentGet(this: world.aligns, entity: entity)
     if al.hasX {
-      if al.x is AlignKind.Center { centerX = true }
-      if al.x is AlignKind.End { rightAlignX = true }
+      if al.x is AlignKind.center { centerX = true }
+      if al.x is AlignKind.end { rightAlignX = true }
     }
     if al.hasY {
-      if al.y is AlignKind.Center { centerY = true }
+      if al.y is AlignKind.center { centerY = true }
     }
   }
   if centerX or rightAlignX or centerY {
