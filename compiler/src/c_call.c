@@ -928,18 +928,29 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                  * the rvalue-temp / addr / deref / box / emit_expr
                  * branches below. */
             } else if (needs_rvalue_temp) {
-                // Emit the base value type (strip view/mod) so the
-                // statement-expression temp is the right C type for
-                // the by-value rvalue. The outer `&` then matches
-                // the callee's `T*` param.
+                // Materialize the rvalue into a one-element array compound
+                // literal and let it decay to the callee's `T*` param.
+                //
+                // A C99 compound literal has the lifetime of its *enclosing
+                // block*, which fully contains this call — so the pointer
+                // stays valid for the whole call. The earlier form
+                // `({ T __rae_rvarg = ...; &__rae_rvarg; })` took the address
+                // of a statement-expression local whose lifetime ends the
+                // instant `({ ... })` finishes, *before* the callee
+                // dereferences it: undefined behaviour that read stale stack
+                // (e.g. a `buildCamera(target: vadd(...))` reading a garbage
+                // look-at point, so the camera ignored yaw/pitch). An array
+                // (not struct) literal is used because `{ EXPR }` initializes
+                // element [0] with the whole-struct rvalue; a struct literal
+                // would instead bind EXPR to the first field.
                 AstTypeRef base_type = *p->type;
                 base_type.is_view = false;
                 base_type.is_mod = false;
-                fprintf(out, "(__extension__ ({ ");
+                fprintf(out, "((");
                 emit_type_ref_as_c_type(ctx, &base_type, out, false);
-                fprintf(out, " __rae_rvarg = ");
+                fprintf(out, "[1]){ ");
                 emit_expr(ctx, a->value, out, PREC_LOWEST, false, pass_view_through);
-                fprintf(out, "; &__rae_rvarg; }))");
+                fprintf(out, " })");
             } else if (copy_arg_kind == 2) {
                 // `copy T` deep-copy of a container / user struct
                 // aliasing source. Emit a GCC statement-expression
