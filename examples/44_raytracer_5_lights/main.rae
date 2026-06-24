@@ -1,0 +1,245 @@
+# Raytracer — Step 5: emissive lights + preview/final quality toggle.
+#
+# Builds on step 4's interactive, continuously-progressive renderer. The scene
+# is now lit by glowing (emissive) spheres instead of a bright sky, matching the
+# rae_ui ray demo. Press P to flip between a fast low-res preview and a sharper
+# final-quality buffer; both refine while you hold still and reset when you move.
+#
+# Controls (Blender Z-up — see docs/coordinate-system.md):
+#   W / S move fwd/back   A / D strafe   E / Q up/down (+Z)
+#   arrows look (yaw/pitch)   hold LEFT MOUSE + drag to look
+#   P toggle preview/final quality   R reset camera
+#
+# A live HUD shows the camera state and input so control issues are visible.
+#
+#   rae run --target compiled main.rae   (recommended — real threads)
+
+import core
+import raylib
+import vec3
+import scene
+import camera
+import render
+
+func main() {
+    # preview (fast) and final (sharp) internal resolutions; both are 16:9.
+    let prevW: Int = 320
+    let prevH: Int = 180
+    let finalW: Int = 960
+    let finalH: Int = 540
+    let winW: Int = 1280
+    let winH: Int = 720
+    let prevDepth: Int = 8
+    let finalDepth: Int = 20
+    let maxSamples: Int = 600
+
+    let world: List(Sphere) = buildScene()
+
+    # accumulator + framebuffer sized for the largest (final) resolution; in
+    # preview mode only the first width*height entries are used.
+    let maxPixels: Int = finalW * finalH
+    let accum: List(Float) = createList(cap: maxPixels * 3)
+    var i: Int = 0
+    loop i < maxPixels * 3 {
+        accum.add(value: 0.0)
+        i = i + 1
+    }
+    let fb: List(Int) = createList(cap: maxPixels)
+    i = 0
+    loop i < maxPixels {
+        fb.add(value: 0)
+        i = i + 1
+    }
+
+    initWindow(width: winW, height: winH, title: "Rae raytracer — step 5 (emissive lights)")
+    setTargetFPS(fps: 60)
+    let texPrev: Texture = loadStreamTexture(width: prevW, height: prevH)
+    let texFinal: Texture = loadStreamTexture(width: finalW, height: finalH)
+    setTextureFilter(texture: texPrev, filter: 1)
+    setTextureFilter(texture: texFinal, filter: 1)
+
+    # camera state (Z-up): position + yaw (about +Z) + pitch (about +X).
+    var camPos: Vec3 = vec3(x: 0.0, y: -2.2, z: 0.7)
+    var yaw: Float = pi / 2.0
+    var pitch: Float = -0.12
+    let moveStep: Float = 0.08
+    let rotStep: Float = 0.03
+    let mouseSens: Float = 0.005
+    let worldUp: Vec3 = vec3(x: 0.0, y: 0.0, z: 1.0)
+    let aspect: Float = finalW.toFloat() / finalH.toFloat()
+
+    var fwd: Vec3 = vec3(x: cos(x: pitch) * cos(x: yaw), y: cos(x: pitch) * sin(x: yaw), z: sin(x: pitch))
+    var cam: Camera = buildCamera(pos: camPos, target: vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
+
+    var hiQ: Bool = false
+    var width: Int = prevW
+    var height: Int = prevH
+    var maxDepth: Int = prevDepth
+
+    var sampleCount: Int = 0
+    var prevMouseX: Int = getMouseX()
+    var prevMouseY: Int = getMouseY()
+
+    loop not windowShouldClose() {
+        var moved: Bool = false
+
+        # quality toggle (P) — fires once per press
+        if isKeyPressed(key: 80) {
+            hiQ = not hiQ
+            if hiQ {
+                width = finalW
+                height = finalH
+                maxDepth = finalDepth
+            } else {
+                width = prevW
+                height = prevH
+                maxDepth = prevDepth
+            }
+            sampleCount = 0
+        }
+
+        # reset camera (R)
+        if isKeyPressed(key: 82) {
+            camPos = vec3(x: 0.0, y: -2.2, z: 0.7)
+            yaw = pi / 2.0
+            pitch = -0.12
+            moved = true
+        }
+
+        # keyboard movement
+        if isKeyDown(key: 87) {
+            camPos = vadd(a: camPos, b: vscale(a: fwd, s: moveStep))
+            moved = true
+        }
+        if isKeyDown(key: 83) {
+            camPos = vsub(a: camPos, b: vscale(a: fwd, s: moveStep))
+            moved = true
+        }
+        let rgt: Vec3 = vnorm(a: vcross(a: fwd, b: worldUp))
+        if isKeyDown(key: 68) {
+            camPos = vadd(a: camPos, b: vscale(a: rgt, s: moveStep))
+            moved = true
+        }
+        if isKeyDown(key: 65) {
+            camPos = vsub(a: camPos, b: vscale(a: rgt, s: moveStep))
+            moved = true
+        }
+        if isKeyDown(key: 69) {
+            camPos = vadd(a: camPos, b: vscale(a: worldUp, s: moveStep))
+            moved = true
+        }
+        if isKeyDown(key: 81) {
+            camPos = vsub(a: camPos, b: vscale(a: worldUp, s: moveStep))
+            moved = true
+        }
+
+        # arrow keys: look
+        if isKeyDown(key: 262) {
+            yaw = yaw - rotStep
+            moved = true
+        }
+        if isKeyDown(key: 263) {
+            yaw = yaw + rotStep
+            moved = true
+        }
+        if isKeyDown(key: 265) {
+            pitch = pitch + rotStep
+            moved = true
+        }
+        if isKeyDown(key: 264) {
+            pitch = pitch - rotStep
+            moved = true
+        }
+
+        # mouse drag (hold left button) to look
+        let mx: Int = getMouseX()
+        let my: Int = getMouseY()
+        let dragging: Bool = isMouseButtonDown(button: 0)
+        if dragging {
+            let dx: Int = mx - prevMouseX
+            let dy: Int = my - prevMouseY
+            if dx > 0 or dx < 0 {
+                yaw = yaw - dx.toFloat() * mouseSens
+                moved = true
+            }
+            if dy > 0 or dy < 0 {
+                pitch = pitch - dy.toFloat() * mouseSens
+                moved = true
+            }
+        }
+        prevMouseX = mx
+        prevMouseY = my
+
+        if moved {
+            if pitch > 1.5 {
+                pitch = 1.5
+            }
+            if pitch < -1.5 {
+                pitch = -1.5
+            }
+            fwd = vec3(x: cos(x: pitch) * cos(x: yaw), y: cos(x: pitch) * sin(x: yaw), z: sin(x: pitch))
+            cam = buildCamera(pos: camPos, target: vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
+            sampleCount = 0
+        }
+
+        # one progressive sample pass, split across four band workers
+        if sampleCount < maxSamples {
+            var overwrite: Bool = false
+            if sampleCount is 0 {
+                overwrite = true
+            }
+            let qh: Int = height / 4
+            let ya: Int = 0
+            let yb: Int = qh
+            let yc: Int = qh * 2
+            let yd: Int = qh * 3
+            let ta: Task(List(Float)) = spawn renderSampleBand(world: world, cam: cam, width: width, height: height, y0: ya, y1: yb, maxDepth: maxDepth, sampleIndex: sampleCount)
+            let tb: Task(List(Float)) = spawn renderSampleBand(world: world, cam: cam, width: width, height: height, y0: yb, y1: yc, maxDepth: maxDepth, sampleIndex: sampleCount)
+            let tc: Task(List(Float)) = spawn renderSampleBand(world: world, cam: cam, width: width, height: height, y0: yc, y1: yd, maxDepth: maxDepth, sampleIndex: sampleCount)
+            let td: Task(List(Float)) = spawn renderSampleBand(world: world, cam: cam, width: width, height: height, y0: yd, y1: height, maxDepth: maxDepth, sampleIndex: sampleCount)
+            let pa: List(Float) = ta.get()
+            let pb: List(Float) = tb.get()
+            let pc: List(Float) = tc.get()
+            let pd: List(Float) = td.get()
+            mergeBand(accum: accum, band: pa, off: ya * width * 3, overwrite: overwrite)
+            mergeBand(accum: accum, band: pb, off: yb * width * 3, overwrite: overwrite)
+            mergeBand(accum: accum, band: pc, off: yc * width * 3, overwrite: overwrite)
+            mergeBand(accum: accum, band: pd, off: yd * width * 3, overwrite: overwrite)
+            sampleCount = sampleCount + 1
+        }
+
+        if sampleCount > 0 {
+            buildDisplay(fb: fb, accum: accum, pixels: width * height, sampleCount: sampleCount)
+        }
+        let dispScale: Float = winW.toFloat() / width.toFloat()
+        beginDrawing()
+        clearBackground(color: { r: 8, g: 8, b: 12, a: 255 })
+        if hiQ {
+            updateStreamTexture(texture: texFinal, pixels: fb.data, count: width * height)
+            drawTextureEx(texture: texFinal, position: { x: 0.0, y: 0.0 }, rotation: 0.0, scale: dispScale, tint: { r: 255, g: 255, b: 255, a: 255 })
+        } else {
+            updateStreamTexture(texture: texPrev, pixels: fb.data, count: width * height)
+            drawTextureEx(texture: texPrev, position: { x: 0.0, y: 0.0 }, rotation: 0.0, scale: dispScale, tint: { r: 255, g: 255, b: 255, a: 255 })
+        }
+
+        # live HUD: input + camera state (so any control issue is visible)
+        var qlabel: String = "PREVIEW"
+        if hiQ {
+            qlabel = "FINAL"
+        }
+        var mlabel: String = "up"
+        if dragging {
+            mlabel = "DOWN"
+        }
+        drawText(text: "step 5 | {qlabel} {width}x{height} | {sampleCount} spp | P quality  R reset",
+                 x: 12.0, y: 10.0, fontSize: 20.0, color: { r: 255, g: 255, b: 255, a: 255 })
+        drawText(text: "pos ({camPos.x}, {camPos.y}, {camPos.z})  yaw {yaw}  pitch {pitch}",
+                 x: 12.0, y: 34.0, fontSize: 18.0, color: { r: 180, g: 220, b: 255, a: 255 })
+        drawText(text: "WASD move  E/Q up-down  arrows/LMB-drag look   mouse {mlabel}",
+                 x: 12.0, y: 56.0, fontSize: 18.0, color: { r: 180, g: 220, b: 255, a: 255 })
+        endDrawing()
+    }
+    unloadTexture(texture: texPrev)
+    unloadTexture(texture: texFinal)
+    closeWindow()
+}
