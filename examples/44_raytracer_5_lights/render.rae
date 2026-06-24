@@ -1,0 +1,192 @@
+# Render core for step 5: materials (diffuse / metal / glass / emissive) + a
+# one-sample-per-pixel band worker, plus helpers to accumulate samples over
+# frames and present the running average.
+#
+# The difference from step 4 is light: surfaces that hit an emissive sphere
+# pick up its radiance, and the "sky" is only a dim ambient, so the glowing
+# spheres are what actually illuminate the scene (rae_ui's ray demo model).
+import core
+import vec3
+import scene
+import camera
+
+func randomUnit() ret Vec3 {
+    let a: Float = random() * tau
+    let z: Float = random() * 2.0 - 1.0
+    let r: Float = sqrt(x: 1.0 - z * z)
+    ret vec3(x: r * cos(x: a), y: r * sin(x: a), z: z)
+}
+
+func vreflect(v: view Vec3, n: view Vec3) ret Vec3 {
+    let d: Float = 2.0 * vdot(a: v, b: n)
+    ret vsub(a: v, b: vscale(a: n, s: d))
+}
+
+func vrefract(uv: view Vec3, n: view Vec3, etaRatio: view Float) ret Vec3 {
+    var cosT: Float = vdot(a: vneg(a: uv), b: n)
+    if cosT > 1.0 {
+        cosT = 1.0
+    }
+    let perp: Vec3 = vscale(a: vadd(a: uv, b: vscale(a: n, s: cosT)), s: etaRatio)
+    let pl: Float = 0.0 - sqrt(x: abs(n: 1.0 - vlenSq(a: perp)))
+    ret vadd(a: perp, b: vscale(a: n, s: pl))
+}
+
+func schlick(cosine: view Float, refIdx: view Float) ret Float {
+    var r0: Float = (1.0 - refIdx) / (1.0 + refIdx)
+    r0 = r0 * r0
+    ret r0 + (1.0 - r0) * pow(base: 1.0 - cosine, exp: 5.0)
+}
+
+func hitSphere(s: view Sphere, r: view Ray) ret Float {
+    let oc: Vec3 = vsub(a: r.origin, b: s.center)
+    let a: Float = vdot(a: r.dir, b: r.dir)
+    let halfB: Float = vdot(a: oc, b: r.dir)
+    let c: Float = vdot(a: oc, b: oc) - s.radius * s.radius
+    let disc: Float = halfB * halfB - a * c
+    if disc < 0.0 {
+        ret -1.0
+    }
+    ret (-halfB - sqrt(x: disc)) / a
+}
+
+# Dim ambient sky so the emissive spheres carry the lighting. A faint dusk
+# gradient along +Z keeps fully-shadowed areas from being pure black noise.
+func skyColor(dir: view Vec3) ret Vec3 {
+    let u: Vec3 = vnorm(a: dir)
+    let tt: Float = 0.5 * (u.z + 1.0)
+    ret vec3(x: (1.0 - tt) * 0.02 + tt * 0.05,
+             y: (1.0 - tt) * 0.02 + tt * 0.06,
+             z: (1.0 - tt) * 0.03 + tt * 0.10)
+}
+
+func rayColor(world: view List(Sphere), r: view Ray, depth: view Int) ret Vec3 {
+    if depth <= 0 {
+        ret vec3(x: 0.0, y: 0.0, z: 0.0)
+    }
+    var best: Float = 1000000.0
+    var hitIdx: Int = -1
+    var i: Int = 0
+    loop i < world.length {
+        let sp: Sphere = world.at(index: i)
+        let t: Float = hitSphere(s: sp, r: r)
+        if t > 0.001 {
+            if t < best {
+                best = t
+                hitIdx = i
+            }
+        }
+        i = i + 1
+    }
+    if hitIdx < 0 {
+        ret skyColor(dir: r.dir)
+    }
+    let sp: Sphere = world.at(index: hitIdx)
+    # emissive: the surface is a light, its radiance is returned and the path ends
+    if sp.material.kind is 3 {
+        ret sp.material.albedo
+    }
+    let p: Vec3 = vadd(a: r.origin, b: vscale(a: r.dir, s: best))
+    let n: Vec3 = vscale(a: vsub(a: p, b: sp.center), s: 1.0 / sp.radius)
+    var scatter: Vec3 = vec3(x: 0.0, y: 0.0, z: 0.0)
+    var atten: Vec3 = sp.material.albedo
+    if sp.material.kind is 0 {
+        scatter = vadd(a: n, b: randomUnit())
+    } else {
+        if sp.material.kind is 1 {
+            let ud: Vec3 = vnorm(a: r.dir)
+            scatter = vadd(a: vreflect(v: ud, n: n), b: vscale(a: randomUnit(), s: sp.material.fuzz))
+            if vdot(a: scatter, b: n) <= 0.0 {
+                ret vec3(x: 0.0, y: 0.0, z: 0.0)
+            }
+        } else {
+            atten = vec3(x: 1.0, y: 1.0, z: 1.0)
+            let ud: Vec3 = vnorm(a: r.dir)
+            var frontN: Vec3 = n
+            var etaRatio: Float = 1.0 / sp.material.ior
+            if vdot(a: ud, b: n) > 0.0 {
+                frontN = vneg(a: n)
+                etaRatio = sp.material.ior
+            }
+            var cosT: Float = vdot(a: vneg(a: ud), b: frontN)
+            if cosT > 1.0 {
+                cosT = 1.0
+            }
+            let sinT: Float = sqrt(x: 1.0 - cosT * cosT)
+            if etaRatio * sinT > 1.0 or schlick(cosine: cosT, refIdx: etaRatio) > random() {
+                scatter = vreflect(v: ud, n: frontN)
+            } else {
+                scatter = vrefract(uv: ud, n: frontN, etaRatio: etaRatio)
+            }
+        }
+    }
+    let bounce: Ray = { origin: p, dir: scatter }
+    ret vmul(a: atten, b: rayColor(world: world, r: bounce, depth: depth - 1))
+}
+
+# One sample pass over rows [y0, y1): one path-traced sample per pixel,
+# returning (y1-y0)*width*3 linear-RGB floats. Private deep copy of world + a
+# by-value Camera; RNG seeded per (sampleIndex, band).
+func renderSampleBand(world: own List(Sphere), cam: own Camera, width: view Int, height: view Int,
+                      y0: view Int, y1: view Int, maxDepth: view Int, sampleIndex: view Int) ret List(Float) {
+    seed(n: sampleIndex * 2654435761 + y0 * 9781 + 1)
+    let out: List(Float) = createList(cap: (y1 - y0) * width * 3)
+    var y: Int = y0
+    loop y < y1 {
+        var x: Int = 0
+        loop x < width {
+            let u: Float = (x.toFloat() + random()) / (width - 1).toFloat()
+            let v: Float = ((height - 1 - y).toFloat() + random()) / (height - 1).toFloat()
+            let r: Ray = makeRay(cam: cam, u: u, v: v)
+            let col: Vec3 = rayColor(world: world, r: r, depth: maxDepth)
+            out.add(value: col.x)
+            out.add(value: col.y)
+            out.add(value: col.z)
+            x = x + 1
+        }
+        y = y + 1
+    }
+    ret out
+}
+
+# Add (or, on the first sample after a reset, overwrite) a band's contribution
+# into the float accumulator at the band's row offset.
+func mergeBand(accum: mod List(Float), band: view List(Float), off: view Int, overwrite: view Bool) {
+    var i: Int = 0
+    loop i < band.length {
+        if overwrite {
+            accum.set(index: off + i, value: band.get(index: i))
+        } else {
+            accum.set(index: off + i, value: accum.get(index: off + i) + band.get(index: i))
+        }
+        i = i + 1
+    }
+}
+
+func clampf(x: view Float) ret Float {
+    if x < 0.0 {
+        ret 0.0
+    }
+    if x > 1.0 {
+        ret 1.0
+    }
+    ret x
+}
+
+# Average the accumulator over sampleCount, gamma-correct, pack into fb. Values
+# above 1 (the lights) clamp to white after tone-down by the running average.
+func buildDisplay(fb: mod List(Int), accum: view List(Float), pixels: view Int, sampleCount: view Int) {
+    let inv: Float = 1.0 / sampleCount.toFloat()
+    var p: Int = 0
+    loop p < pixels {
+        let base: Int = p * 3
+        let r: Float = sqrt(x: clampf(x: accum.get(index: base) * inv))
+        let g: Float = sqrt(x: clampf(x: accum.get(index: base + 1) * inv))
+        let b: Float = sqrt(x: clampf(x: accum.get(index: base + 2) * inv))
+        let ir: Int = (255.99 * r).toInt()
+        let ig: Int = (255.99 * g).toInt()
+        let ib: Int = (255.99 * b).toInt()
+        fb.set(index: p, value: ir * 65536 + ig * 256 + ib)
+        p = p + 1
+    }
+}
