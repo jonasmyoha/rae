@@ -73,3 +73,7 @@
 
 - [x] Language: `let` (immutable) / `var` (mutable) / `const` (compile-time, folded) implemented; module-level const folds to literals; naming de-enforced in parser. See docs/naming-conventions.md.
 - [ ] Lint: optional compiler/linter WARNINGS for naming-convention violations (Types/enums PascalCase; functions/vars/consts/enum-cases camelCase). Must be warnings, not errors; exempt/suppressible for extern (C-binding) names. Needs a general warning framework first.
+
+- [x] Examples: raytracer step 5 (examples/44_raytracer_5_lights) — emissive "light" material (kind 3), rae_ui-style scene lit by glowing spheres + dim ambient sky, preview/final resolution toggle (P), live camera HUD. Suite 55/0.
+- [ ] Examples: raytracer step 6 — GPU raytracer (deferred; needs a compute/GPU path).
+- [ ] Investigate: step 4 interactive camera reported broken (mouse no-rotate, WASD/arrows wrong) after the struct refactor. Verified headlessly that camera math, control logic (byte-identical to pre-refactor 467c11c), `own Camera` POD-struct spawn delivery, and raylib input bindings are all correct in both backends — no source/compiler regression found. Most likely a stale build or the left-drag-to-look requirement. Step 5 ships the same proven camera plus a live HUD to confirm on-screen; revisit if HUD shows input not registering.

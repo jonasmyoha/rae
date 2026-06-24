@@ -1,0 +1,60 @@
+# Scene + materials for step 5: adds an emissive "light" material so the scene
+# is lit by glowing spheres rather than a bright sky (the rae_ui ray demo).
+import core
+import vec3
+
+# kind: 0 = diffuse (Lambertian), 1 = metal (reflect + fuzz),
+#       2 = glass (dielectric),    3 = emissive light (albedo = radiance, may be > 1)
+type Material {
+    kind: Int
+    albedo: Vec3
+    fuzz: Float
+    ior: Float
+}
+
+type Sphere {
+    center: Vec3
+    radius: Float
+    material: Material
+}
+
+# A Z-up showcase scene (camera sits at -Y looking toward +Y, ground plane near
+# z = -0.5). Two emissive spheres provide all the key lighting; the sky is only
+# a dim ambient so the lights read clearly.
+func buildScene() ret List(Sphere) {
+    let s: List(Sphere) = createList(Sphere, cap: 8)
+
+    # cyan "planet" ground
+    s.add(value: { center: { x: 0.0, y: 1.0, z: -100.5 }, radius: 100.0,
+        material: { kind: 0, albedo: { x: 0.45, y: 0.6, z: 0.7 }, fuzz: 0.0, ior: 0.0 } })
+
+    # centre diffuse red ball
+    s.add(value: { center: { x: 0.0, y: 1.0, z: 0.0 }, radius: 0.5,
+        material: { kind: 0, albedo: { x: 0.8, y: 0.3, z: 0.3 }, fuzz: 0.0, ior: 0.0 } })
+
+    # polished gold metal (right)
+    s.add(value: { center: { x: 1.1, y: 1.2, z: 0.0 }, radius: 0.5,
+        material: { kind: 1, albedo: { x: 0.8, y: 0.6, z: 0.2 }, fuzz: 0.0, ior: 0.0 } })
+
+    # fuzzed magenta metal (back-left)
+    s.add(value: { center: { x: -1.6, y: 1.7, z: 0.1 }, radius: 0.4,
+        material: { kind: 1, albedo: { x: 0.8, y: 0.4, z: 0.8 }, fuzz: 0.3, ior: 0.0 } })
+
+    # glass sphere (left)
+    s.add(value: { center: { x: -1.0, y: 0.8, z: 0.0 }, radius: 0.5,
+        material: { kind: 2, albedo: { x: 1.0, y: 1.0, z: 1.0 }, fuzz: 0.0, ior: 1.5 } })
+
+    # small blue diffuse on the ground near the camera
+    s.add(value: { center: { x: 0.4, y: -0.1, z: -0.25 }, radius: 0.25,
+        material: { kind: 0, albedo: { x: 0.1, y: 0.2, z: 0.8 }, fuzz: 0.0, ior: 0.0 } })
+
+    # BigLight: warm overhead glow
+    s.add(value: { center: { x: 1.4, y: 1.2, z: 3.0 }, radius: 1.2,
+        material: { kind: 3, albedo: { x: 4.0, y: 3.6, z: 3.0 }, fuzz: 0.0, ior: 0.0 } })
+
+    # SmallLight: tiny intense bulb nestled by the glass
+    s.add(value: { center: { x: -0.7, y: 0.2, z: 0.05 }, radius: 0.12,
+        material: { kind: 3, albedo: { x: 16.0, y: 16.0, z: 16.0 }, fuzz: 0.0, ior: 0.0 } })
+
+    ret s
+}
