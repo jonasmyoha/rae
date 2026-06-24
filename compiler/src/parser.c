@@ -1690,38 +1690,18 @@ static AstExpr* parse_match_expression(Parser* parser, const Token* match_token)
   return expr;
 }
 
+// Naming conventions (Types/enums/modules PascalCase; functions, variables,
+// constants and enum cases camelCase) are NO LONGER enforced at parse time:
+// strict parser errors break generated code, foreign/C bindings, and
+// migrations. The convention is documented in docs/naming-conventions.md and
+// is intended to be a linter WARNING (see QUEUE.md), not a hard error. These
+// helpers are kept as no-ops so call sites can stay until the lint lands.
 static void check_camel_case(Parser* parser, const Token* token, const char* context) {
-  if (token && token->lexeme.len > 0) {
-    char first = token->lexeme.data[0];
-    if (first >= 'A' && first <= 'Z') {
-      parser_error(parser, token, "%s name '%.*s' should be camelCase (start with lowercase)",
-                   context, (int)token->lexeme.len, token->lexeme.data);
-    }
-    for (size_t i = 0; i < token->lexeme.len; ++i) {
-      if (token->lexeme.data[i] == '_') {
-        parser_error(parser, token, "%s name '%.*s' should be camelCase (no underscores allowed)",
-                     context, (int)token->lexeme.len, token->lexeme.data);
-        break;
-      }
-    }
-  }
+  (void)parser; (void)token; (void)context;
 }
 
 static void check_pascal_case(Parser* parser, const Token* token, const char* context) {
-  if (token && token->lexeme.len > 0) {
-    char first = token->lexeme.data[0];
-    if (first >= 'a' && first <= 'z') {
-      parser_error(parser, token, "%s name '%.*s' should be PascalCase (start with uppercase)",
-                   context, (int)token->lexeme.len, token->lexeme.data);
-    }
-    for (size_t i = 0; i < token->lexeme.len; ++i) {
-      if (token->lexeme.data[i] == '_') {
-        parser_error(parser, token, "%s name '%.*s' should be PascalCase (no underscores allowed)",
-                     context, (int)token->lexeme.len, token->lexeme.data);
-        break;
-      }
-    }
-  }
+  (void)parser; (void)token; (void)context;
 }
 
 static bool looks_like_destructure(Parser* parser) {
@@ -1799,41 +1779,61 @@ static AstStmt* parse_destructure_statement(Parser* parser, const Token* let_tok
   return stmt;
 }
 
-static AstStmt* parse_let_statement(Parser* parser, const Token* let_token) {
-  const Token* name = parser_consume_ident(parser, "expected identifier after 'let'");
+// Parses a local binding: `let`/`var`/`const`. The type annotation is
+// optional (`let x = expr` infers the type from the initializer); when
+// present it is written `name: Type`. `var` is mutable; `let`/`const` are
+// immutable (enforced in sema); `const` additionally requires a compile-time
+// initializer.
+static AstStmt* parse_binding_statement(Parser* parser, const Token* kw_token, bool is_var, bool is_const) {
+  const char* kw = is_const ? "const" : (is_var ? "var" : "let");
+  const Token* name = parser_consume_ident(parser, "expected identifier after binding keyword");
   check_camel_case(parser, name, "variable");
-  parser_consume(parser, TOK_COLON, "expected ':' after local name");
-  
-  AstTypeRef* type = parse_type_ref(parser);
-  AstStmt* stmt = new_stmt(parser, AST_STMT_LET, let_token);
+
+  AstTypeRef* type = NULL;
+  if (parser_match(parser, TOK_COLON)) {
+    type = parse_type_ref(parser);
+  }
+
+  AstStmt* stmt = new_stmt(parser, AST_STMT_LET, kw_token);
   stmt->as.let_stmt.name = parser_copy_str(parser, name->lexeme);
   stmt->as.let_stmt.type = type;
-  
+  stmt->as.let_stmt.is_var = is_var;
+  stmt->as.let_stmt.is_const = is_const;
+
   if (parser_match(parser, TOK_ASSIGN)) {
     stmt->as.let_stmt.is_bind = false;
-    if (type->is_view || type->is_mod) {
+    if (type && (type->is_view || type->is_mod)) {
         parser_error(parser, parser_previous(parser), "use '=>' for alias bindings (view/mod)");
     }
     stmt->as.let_stmt.value = parse_expression(parser);
-    
-    // Rule 3.1: Reject typed constructor expressions on the RHS of let
-    if (stmt->as.let_stmt.value->kind == AST_EXPR_OBJECT && stmt->as.let_stmt.value->as.object_literal.type != NULL) {
-        // Exempt the canonical default value expression: Type {}
-        if (stmt->as.let_stmt.value->as.object_literal.fields != NULL) {
-            parser_error(parser, let_token, "with 'let', the binding's type must be written on the left-hand side only. Remove the type name from the RHS.");
-        }
+
+    // Reject a typed constructor on the RHS only when the type is ALSO written
+    // on the LHS (writing it twice). With no LHS type, `let p = Point { ... }`
+    // is the idiomatic typed construction and is allowed.
+    if (type != NULL
+        && stmt->as.let_stmt.value->kind == AST_EXPR_OBJECT
+        && stmt->as.let_stmt.value->as.object_literal.type != NULL
+        && stmt->as.let_stmt.value->as.object_literal.fields != NULL) {
+        parser_error(parser, kw_token, "with '%s', the binding's type must be written on the left-hand side only. Remove the type name from the RHS.", kw);
     }
   } else if (parser_match(parser, TOK_ARROW)) {
     stmt->as.let_stmt.is_bind = true;
-    if (!type->is_view && !type->is_mod) {
+    if (is_const) {
+        parser_error(parser, parser_previous(parser), "'const' is a value, not an alias binding; use '='");
+    }
+    if (!type || (!type->is_view && !type->is_mod)) {
         parser_error(parser, parser_previous(parser), "'=>' is only legal when the target type is mod T or view T");
     }
     stmt->as.let_stmt.value = parse_expression(parser);
   } else {
     stmt->as.let_stmt.is_bind = false;
     stmt->as.let_stmt.value = NULL;
-    if (type->is_view || type->is_mod) {
-        parser_error(parser, let_token, "alias bindings (view/mod) must be explicitly initialized");
+    if (is_const) {
+        parser_error(parser, kw_token, "'const' requires an initializer");
+    } else if (type && (type->is_view || type->is_mod)) {
+        parser_error(parser, kw_token, "alias bindings (view/mod) must be explicitly initialized");
+    } else if (!type) {
+        parser_error(parser, kw_token, "'%s' without a type annotation needs an initializer to infer the type", kw);
     }
   }
   return stmt;
@@ -1961,7 +1961,13 @@ static AstStmt* parse_statement(Parser* parser) {
     if (looks_like_destructure(parser)) {
       return parse_destructure_statement(parser, let_token);
     }
-    return parse_let_statement(parser, let_token);
+    return parse_binding_statement(parser, let_token, false, false);
+  }
+  if (parser_match(parser, TOK_KW_VAR)) {
+    return parse_binding_statement(parser, parser_previous(parser), true, false);
+  }
+  if (parser_match(parser, TOK_KW_CONST)) {
+    return parse_binding_statement(parser, parser_previous(parser), false, true);
   }
   if (parser_match(parser, TOK_KW_RET)) {
     return parse_return_statement(parser, parser_previous(parser));
@@ -2284,15 +2290,15 @@ static Str str_clone(Parser* parser, Str s) {
     return (Str){.data = copy, .len = s.len};
 }
 
-static AstDecl* parse_global_let_declaration(Parser* parser) {
+static AstDecl* parse_global_let_declaration(Parser* parser, bool is_var, bool is_const) {
   const Token* token = parser_peek_at(parser, -1);
-  Str name = str_clone(parser, parser_consume(parser, TOK_IDENT, "expected identifier after 'let'")->lexeme);
-  
+  Str name = str_clone(parser, parser_consume(parser, TOK_IDENT, "expected identifier after binding keyword")->lexeme);
+
   AstTypeRef* type = NULL;
   if (parser_match(parser, TOK_COLON)) {
     type = parse_type_ref(parser);
   }
-  
+
   bool is_bind = false;
   AstExpr* value = NULL;
   if (parser_match(parser, TOK_ASSIGN)) {
@@ -2301,7 +2307,10 @@ static AstDecl* parse_global_let_declaration(Parser* parser) {
     is_bind = true;
     value = parse_expression(parser);
   }
-  
+  if (is_const && value == NULL) {
+    parser_error(parser, token, "'const' requires an initializer");
+  }
+
   AstDecl* decl = parser_alloc(parser, sizeof(AstDecl));
   decl->kind = AST_DECL_GLOBAL_LET;
   decl->line = token->line;
@@ -2309,6 +2318,8 @@ static AstDecl* parse_global_let_declaration(Parser* parser) {
   decl->as.let_decl.name = name;
   decl->as.let_decl.type = type;
   decl->as.let_decl.is_bind = is_bind;
+  decl->as.let_decl.is_var = is_var;
+  decl->as.let_decl.is_const = is_const;
   decl->as.let_decl.value = value;
   decl->next = NULL;
   return decl;
@@ -2344,9 +2355,15 @@ static AstDecl* parse_declaration(Parser* parser) {
     return parse_func_declaration(parser, is_extern);
   }
   if (parser_match(parser, TOK_KW_LET)) {
-    return parse_global_let_declaration(parser);
+    return parse_global_let_declaration(parser, false, false);
   }
-  
+  if (parser_match(parser, TOK_KW_VAR)) {
+    return parse_global_let_declaration(parser, true, false);
+  }
+  if (parser_match(parser, TOK_KW_CONST)) {
+    return parse_global_let_declaration(parser, false, true);
+  }
+
   parser_error(parser, parser_peek(parser), "expected 'type', 'enum' or 'func'");
   parser_advance(parser); // Advance to avoid infinite loop
   return NULL;
