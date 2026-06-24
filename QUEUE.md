@@ -63,3 +63,7 @@
     - [x] **Tetris Prototype**
         - [x] Implement a clean, high-quality Tetris in 2D using Raylib and Enums.
     
+
+- [ ] Compiled backend: `List(Task(T))` element access lowers to `RaeAny` instead of `RaeTask*` — can't hold task handles in a `List` (generic-container element monomorphization). Workaround: use individual `Task` locals. Found building examples/40_raytracer.
+- [ ] Compiled backend: `List(Struct).get()` returns boxed `RaeAny` and isn't auto-unboxed to the struct (must use low-level `rae_ext_rae_buf_get`). Generalize typed-struct-list element get(). Workaround in raytracer: flat `List(Float)` struct-of-arrays.
+- [ ] Compiled backend: passing a call rvalue (e.g. `task.get()`) directly to a `view`-of-aggregate param dangles (ASan: stack-use-after-scope) — the rvalue temp's scope ends before the borrow. Materialize aggregate rvalues into a temp for `view` args. Workaround: bind to a local first.
