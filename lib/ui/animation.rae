@@ -23,14 +23,14 @@ import ui/components
 # below `epsilon` so the system can stop reporting "in flight".
 func easeTowards(current: view Float, target: view Float, speed: view Float, dt: view Float, epsilon: view Float) ret Float {
   let delta: Float = target - current
-  let absDelta: Float = delta
+  var absDelta: Float = delta
   if absDelta < 0.0 {
     absDelta = 0.0 - absDelta
   }
   if absDelta < epsilon {
     ret target
   }
-  let step: Float = dt * speed
+  var step: Float = dt * speed
   if step > 1.0 {
     step = 1.0
   }
@@ -65,7 +65,7 @@ func hoverPaintRank(world: view UiWorld, entity: view EntityId) pub ret Int {
 # pass and lands above sibling rows whose tiles would otherwise
 # overdraw the popped tile's vertical overflow.
 func subtreeHoverPaintRank(world: view UiWorld, entity: view EntityId) pub ret Int {
-  let best: Int = hoverPaintRank(world: world, entity: entity)
+  var best: Int = hoverPaintRank(world: world, entity: entity)
   if best is 2 {
     ret 2
   }
@@ -74,7 +74,7 @@ func subtreeHoverPaintRank(world: view UiWorld, entity: view EntityId) pub ret I
   }
   let ch: view Children => componentView(this: world.childrens, entity: entity)
   let n: Int = ch.ids.length
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
     let r: Int = subtreeHoverPaintRank(world: world, entity: cid)
@@ -99,8 +99,8 @@ func hoverScaleContains(world: view UiWorld, entity: view EntityId, ancestor: vi
   if entity.value is ancestor.value {
     ret true
   }
-  let cur: EntityId = entity
-  let guard: Int = 0
+  var cur: EntityId = entity
+  var guard: Int = 0
   loop guard < 64 {
     if componentHas(this: world.parents, entity: cur) is false {
       ret false
@@ -125,20 +125,20 @@ func hoverScaleSystem(world: mod UiWorld, hovered: view EntityId, dt: view Float
   # the ease snaps in one frame. Capping at 1/20 s caps the
   # per-tick step at `speed/20` of the delta — feels right at
   # speed=12 (60% of the remaining delta per frame max).
-  let frameDt: Float = dt
+  var frameDt: Float = dt
   if frameDt > 0.05 {
     frameDt = 0.05
   }
   if frameDt < 0.0 {
     frameDt = 0.0
   }
-  let stillAnimating: Bool = false
+  var stillAnimating: Bool = false
   let n: Int = componentCount(this: world.hoverScales)
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let entity: EntityId = componentEntityAt(this: world.hoverScales, i: i)
     let hs: HoverScale = componentGet(this: world.hoverScales, entity: entity)
-    let target: Float = hs.restScale
+    var target: Float = hs.restScale
     if hoverScaleContains(world: world, entity: entity, ancestor: hovered) {
       target = hs.hoverScale
     }

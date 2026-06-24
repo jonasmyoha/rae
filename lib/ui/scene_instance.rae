@@ -71,7 +71,7 @@ func registerScene(reg: mod SceneRegistry, key: own String, scene: own Scene) {
 # Returns the index of `key` in the registry, or -1 if not present.
 func sceneRegistryIndex(reg: view SceneRegistry, key: view String) ret Int {
   let n: Int = reg.ids.length
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let k: String = reg.ids.get(index: i)
     if k.equals(other: key) {
@@ -292,13 +292,13 @@ func mountSceneInstanceIntoPage(
   # every other node gets a fresh entity.
   let entitiesByNodeIndex: List(EntityId) = createList(EntityId, cap: nodeCount)
   let nodeIdsMap: mod StringMap(Int) => world.nodeIds
-  let i: Int = 0
+  var i: Int = 0
   loop i < nodeCount {
     let node: view SceneNode => sceneNodeAt(this: scene, idx: i)
     # Explicit struct construction (not `let entity: EntityId =
     # mountEntity`) — the Live VM treats the latter as a view-ref
     # bind and then refuses the reassignment on the next branch.
-    let entity: EntityId = { value: mountEntity.value }
+    var entity: EntityId = { value: mountEntity.value }
     if i is not rootIdx {
       entity = createEntity(world: world)
     }
@@ -319,7 +319,7 @@ func mountSceneInstanceIntoPage(
   # placement components — those belong to the mount entity. Other
   # nodes get all their components applied via `applyComponentByName`.
   let docView: view JsonDoc => scene.doc
-  let j: Int = 0
+  var j: Int = 0
   loop j < nodeCount {
     let node: view SceneNode => sceneNodeAt(this: scene, idx: j)
     let entity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: j)
@@ -327,11 +327,11 @@ func mountSceneInstanceIntoPage(
 
     let bag: JsonValue = jsonValueAt(doc: docView, idx: node.componentsValueIdx)
     let keyCount: Int = jsonObjectLen(this: bag)
-    let k: Int = 0
+    var k: Int = 0
     loop k < keyCount {
       let key: String = jsonObjectKeyAt(doc: docView, this: bag, idx: k)
       let childrenKey: String = "Children"
-      let skip: Bool = false
+      var skip: Bool = false
       if key.equals(other: childrenKey) {
         skip = true
       }
@@ -356,14 +356,14 @@ func mountSceneInstanceIntoPage(
   }
 
   # Pass 3: build hierarchy (Children + Parent).
-  let p: Int = 0
+  var p: Int = 0
   loop p < nodeCount {
     let node: view SceneNode => sceneNodeAt(this: scene, idx: p)
     let parentEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: p)
     let kn: Int = node.childrenIds.length
     if kn > 0 {
       let kids: List(EntityId) = createList(EntityId, cap: kn)
-      let q: Int = 0
+      var q: Int = 0
       loop q < kn {
         let childId: String = node.childrenIds.get(index: q)
         let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
@@ -386,7 +386,7 @@ func mountSceneInstanceIntoPage(
 
   # Pass 4: apply overrides.
   let on: Int = overrides.length
-  let oi: Int = 0
+  var oi: Int = 0
   loop oi < on {
     let o: SceneOverride = rae_ext_rae_buf_get(buf: overrides.data, index: oi)
     let nodeIdx: Int = sceneNodeIndex(this: scene, nodeId: o.nodeId)
@@ -418,10 +418,10 @@ func mountSceneInstanceIntoPage(
 func parseRgbaString(s: view String) ret RgbaColor {
   let comma: String = ","
   let parts: List(String) = s.split(sep: comma)
-  let r: Int = 0
-  let g: Int = 0
-  let b: Int = 0
-  let a: Int = 255
+  var r: Int = 0
+  var g: Int = 0
+  var b: Int = 0
+  var a: Int = 255
   if parts.length > 0 {
     let rs: String = parts.get(index: 0)
     r = rae_str_to_i64(s: rs)
@@ -556,7 +556,7 @@ func mountPage(
   # scopes nodeIds, leaving the page-root tagging to callers like us.
   # The tag goes on the husk even on mount-failure so a later
   # `findPageRootEntity` / `unmountPage` can still see it.
-  let copiedId: String = ""
+  var copiedId: String = ""
   copiedId = copiedId.concat(other: pageId)
   let pr: PageRoot = { id: own copiedId }
   componentSet(this: world.pageRoots, entity: root, data: own pr)

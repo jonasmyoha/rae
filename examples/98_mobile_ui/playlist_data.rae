@@ -92,7 +92,7 @@ func makeTrackItem(stem: view String, trackIndex: view Int) ret PlaylistItem {
 # -1 if absent. Linear scan; even a heavy Liked playlist is small.
 func playlistFindTrack(playlist: view Playlist, stem: view String, trackIndex: view Int) pub ret Int {
   let n: Int = playlist.items.length
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let it: PlaylistItem = rae_ext_rae_buf_get(buf: playlist.items.data, index: i)
     if it.kind.equals(other: playlistKindTrack) {
@@ -132,7 +132,7 @@ func playlistToggleTrack(playlist: mod Playlist, stem: view String, trackIndex: 
 func playlistCoverStems(playlist: view Playlist, max: view Int) pub ret List(String) {
   let result: List(String) = createList(String, cap: max)
   let n: Int = playlist.items.length
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     if result.length >= max {
       ret result
@@ -144,8 +144,8 @@ func playlistCoverStems(playlist: view Playlist, max: view Int) pub ret List(Str
       if it.albumStem.length() > 0 {
         # Dedup so a playlist of many songs from one album still
         # contributes a single cover to the grid.
-        let already: Bool = false
-        let j: Int = 0
+        var already: Bool = false
+        var j: Int = 0
         loop j < result.length {
           let existing: String = result.get(index: j)
           if existing.equals(other: it.albumStem) {
@@ -182,7 +182,7 @@ func parsePlaylistItem(doc: view JsonDoc, entry: view JsonValue) ret PlaylistIte
   let kindKey: String = "kind"
   let kindIdx: Int = jsonField(doc: doc, this: entry, key: kindKey)
   let defaultKind: String = "{playlistKindTrack}"
-  let kind: String = defaultKind
+  var kind: String = defaultKind
   if kindIdx >= 0 {
     let kindVal: JsonValue = jsonValueAt(doc: doc, idx: kindIdx)
     kind = jsonString(this: kindVal, fallback: defaultKind)
@@ -190,14 +190,14 @@ func parsePlaylistItem(doc: view JsonDoc, entry: view JsonValue) ret PlaylistIte
   let stemKey: String = "albumStem"
   let stemFieldIdx: Int = jsonField(doc: doc, this: entry, key: stemKey)
   let emptyStem: String = ""
-  let stem: String = emptyStem
+  var stem: String = emptyStem
   if stemFieldIdx >= 0 {
     let stemVal: JsonValue = jsonValueAt(doc: doc, idx: stemFieldIdx)
     stem = jsonString(this: stemVal, fallback: emptyStem)
   }
   let idxKey: String = "trackIndex"
   let idxFieldIdx: Int = jsonField(doc: doc, this: entry, key: idxKey)
-  let ti: Int = 0 - 1
+  var ti: Int = 0 - 1
   if idxFieldIdx >= 0 {
     let idxVal: JsonValue = jsonValueAt(doc: doc, idx: idxFieldIdx)
     ti = jsonInt(this: idxVal, fallback: 0 - 1)
@@ -205,7 +205,7 @@ func parsePlaylistItem(doc: view JsonDoc, entry: view JsonValue) ret PlaylistIte
   let plKey: String = "playlistId"
   let plFieldIdx: Int = jsonField(doc: doc, this: entry, key: plKey)
   let emptyPl: String = ""
-  let plId: String = emptyPl
+  var plId: String = emptyPl
   if plFieldIdx >= 0 {
     let plVal: JsonValue = jsonValueAt(doc: doc, idx: plFieldIdx)
     plId = jsonString(this: plVal, fallback: emptyPl)
@@ -250,7 +250,7 @@ func parsePlaylist(source: view String, id: view String) pub ret Playlist {
   # array (parsed identically — its entries lack `kind`, which
   # `parsePlaylistItem` defaults to "track").
   let itemsKey: String = "items"
-  let arrIdx: Int = jsonField(doc: doc, this: root, key: itemsKey)
+  var arrIdx: Int = jsonField(doc: doc, this: root, key: itemsKey)
   if arrIdx < 0 {
     let tracksKey: String = "tracks"
     arrIdx = jsonField(doc: doc, this: root, key: tracksKey)
@@ -260,7 +260,7 @@ func parsePlaylist(source: view String, id: view String) pub ret Playlist {
   }
   let arrVal: JsonValue = jsonValueAt(doc: doc, idx: arrIdx)
   let n: Int = jsonArrayLen(this: arrVal)
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let entry: JsonValue = jsonArrayAt(doc: doc, this: arrVal, idx: i)
     let item: PlaylistItem = parsePlaylistItem(doc: doc, entry: entry)
@@ -315,7 +315,7 @@ func savePlaylist(playlist: view Playlist) pub {
   let colon: String = ":"
   let comma: String = ","
 
-  let content: String = ""
+  var content: String = ""
   content = content.concat(other: openBrace).concat(other: nl)
   content = content.concat(other: "  ").concat(other: q).concat(other: "type").concat(other: q)
   content = content.concat(other: colon).concat(other: " ").concat(other: q).concat(other: "playlist").concat(other: q).concat(other: comma).concat(other: nl)
@@ -326,7 +326,7 @@ func savePlaylist(playlist: view Playlist) pub {
   content = content.concat(other: "  ").concat(other: q).concat(other: "items").concat(other: q)
   content = content.concat(other: colon).concat(other: " ").concat(other: openBracket).concat(other: nl)
   let n: Int = playlist.items.length
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let it: PlaylistItem = rae_ext_rae_buf_get(buf: playlist.items.data, index: i)
     content = content.concat(other: "    ").concat(other: openBrace).concat(other: " ")

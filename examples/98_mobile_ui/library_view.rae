@@ -56,7 +56,7 @@ func libraryGridTileSize() ret Float {
 # in the catalog (history rows, search results, undo).
 func collectLibraryCoverKeys(albums: view List(Album), library: view List(String)) pub ret List(String) {
   let result: List(String) = createList(String, cap: library.length)
-  let i: Int = 0
+  var i: Int = 0
   loop i < albums.length {
     let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: i)
     if isInLibrary(library: library, stem: a.stem) {
@@ -121,14 +121,14 @@ func buildPlaylistCoverTile(world: mod UiWorld, coverStems: view List(String), s
   let placeholderFill: RgbaColor = { r: 58, g: 60, b: 70, a: 255 }
 
   let rows: List(EntityId) = createList(EntityId, cap: 2)
-  let r: Int = 0
+  var r: Int = 0
   loop r < 2 {
     let row: EntityId = createEntity(world: world)
     setRectFixed(world: world, entity: row, w: size, h: cell)
     let layH: LayoutType = LayoutType.Horizontal
     setLayout(world: world, entity: row, kind: layH, gap: playlistCoverGap, alignCross: alignS)
     let cells: List(EntityId) = createList(EntityId, cap: 2)
-    let c: Int = 0
+    var c: Int = 0
     loop c < 2 {
       let idx: Int = r * 2 + c
       let cellEntity: EntityId = createEntity(world: world)
@@ -173,7 +173,7 @@ func buildLibraryTileRow(
 
   let kids: List(EntityId) = createList(EntityId, cap: cols)
   let total: Int = tiles.length
-  let col: Int = 0
+  var col: Int = 0
   loop col < cols {
     let i: Int = startIndex + col
     if i < total {
@@ -202,7 +202,7 @@ func buildLibraryCoverGrid(world: mod UiWorld, albums: view List(Album), library
   let keys: List(String) = collectLibraryCoverKeys(albums: albums, library: library)
   let tiles: List(EntityId) = createList(EntityId, cap: keys.length + 1)
   tiles.add(value: playlistTile)
-  let k: Int = 0
+  var k: Int = 0
   loop k < keys.length {
     let key: String = keys.get(index: k)
     let tile: EntityId = buildLibraryCoverTile(world: world, key: key, size: tileH, rounded: rounded)
@@ -222,7 +222,7 @@ func buildLibraryCoverGrid(world: mod UiWorld, albums: view List(Album), library
   setLayout(world: world, entity: grid, kind: layV, gap: libraryGridTileGap, alignCross: alignS)
 
   let rowKids: List(EntityId) = createList(EntityId, cap: rows)
-  let i: Int = 0
+  var i: Int = 0
   loop i < rows {
     let startIndex: Int = i * cols
     let row: EntityId = buildLibraryTileRow(world: world, tiles: tiles, startIndex: startIndex, cols: cols, tileH: tileH)
@@ -279,7 +279,7 @@ func mountLibraryPage(
   setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
   setPaddingAll(world: world, entity: root, n: outerPad)
 
-  let copiedId: String = ""
+  var copiedId: String = ""
   copiedId = copiedId.concat(other: libraryPageId)
   let pr: PageRoot = { id: own copiedId }
   componentSet(this: world.pageRoots, entity: root, data: own pr)

@@ -113,7 +113,7 @@ func hitTestEntity(world: view UiWorld, entity: view EntityId, x: view Float, y:
   if componentHas(this: world.childrens, entity: entity) {
     let ch: view Children => componentView(this: world.childrens, entity: entity)
     let n: Int = ch.ids.length
-    let i: Int = n - 1
+    var i: Int = n - 1
     loop i >= 0 {
       let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
       let hit: EntityId = hitTestEntity(world: world, entity: cid, x: x, y: y)
@@ -153,7 +153,7 @@ func hitTest(world: view UiWorld, x: view Float, y: view Float) ret EntityId {
   # is what's visible.
   let roots: List(EntityId) = collectPaintableRoots(world: world)
   let n: Int = roots.length
-  let i: Int = n - 1
+  var i: Int = n - 1
   loop i >= 0 {
     let e: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: i)
     if componentHas(this: world.layerRoots, entity: e) is false {
@@ -194,8 +194,8 @@ func updateInputSystem(input: mod InputSystem, world: view UiWorld) {
   # `down` is level state — raylib's per-event callback keeps it current
   # regardless of poll cadence, so polling it is reliable.
   let down: Bool = isMouseButtonDown(button: mouseButtonLeft)
-  let pressed: Bool = false
-  let released: Bool = false
+  var pressed: Bool = false
+  var released: Bool = false
   if mouseHookActive() {
     # Hook installed → authoritative per-event edges. raylib's
     # poll-to-poll edges only refresh inside EndDrawing's PollInputEvents,
@@ -224,7 +224,7 @@ func updateInputSystem(input: mod InputSystem, world: view UiWorld) {
   }
 
   if released {
-    let hit: EntityId = hitTest(world: world, x: mx, y: my)
+    var hit: EntityId = hitTest(world: world, x: mx, y: my)
     log("[input] release at ({mx},{my}) -> hit={hit.value} pressed={input.pressedEntity.value}")
     if isNone(this: hit) is false {
       if hit.value is input.pressedEntity.value {

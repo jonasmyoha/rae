@@ -89,7 +89,7 @@ func createHeroAnim() pub ret HeroAnim {
 # be over-engineered. Returns noEntity() if no match.
 func findHeroEntity(world: view UiWorld, key: view String) pub ret EntityId {
   let n: Int = componentCount(this: world.heroWidgets)
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let e: EntityId = componentEntityAt(this: world.heroWidgets, i: i)
     let hw: HeroWidget = componentDataAt(this: world.heroWidgets, i: i)
@@ -111,7 +111,7 @@ func findHeroEntity(world: view UiWorld, key: view String) pub ret EntityId {
 # uses to pick the right entity for the source vs target page.
 func findHeroEntityOnPage(world: view UiWorld, pageId: view String, key: view String) pub ret EntityId {
   let n: Int = componentCount(this: world.heroWidgets)
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let e: EntityId = componentEntityAt(this: world.heroWidgets, i: i)
     let hw: HeroWidget = componentDataAt(this: world.heroWidgets, i: i)
@@ -294,7 +294,7 @@ func setHeroVisibleForEntity(world: mod UiWorld, e: view EntityId, visible: view
 func rebindHero(world: mod UiWorld, fromKey: view String, toKey: view String) pub {
   # 1) Rename HeroWidget keys.
   let nh: Int = componentCount(this: world.heroWidgets)
-  let i: Int = 0
+  var i: Int = 0
   loop i < nh {
     let e: EntityId = componentEntityAt(this: world.heroWidgets, i: i)
     let hw: HeroWidget = componentDataAt(this: world.heroWidgets, i: i)
@@ -317,7 +317,7 @@ func rebindHero(world: mod UiWorld, fromKey: view String, toKey: view String) pu
   #    other widget (mini-player, headers, etc.) that shows the
   #    same cover.
   let ns: Int = componentCount(this: world.sprites)
-  let j: Int = 0
+  var j: Int = 0
   loop j < ns {
     let se: EntityId = componentEntityAt(this: world.sprites, i: j)
     let sp: Sprite = componentDataAt(this: world.sprites, i: j)
@@ -409,15 +409,15 @@ func renderHeroOverlay(anim: view HeroAnim, reg: view TextureRegistry, now: view
 
   # Mirror paintSprite's contain-fit scaling so the texture's aspect
   # is preserved while it fills the interpolated rect.
-  let scaleX: Float = 1.0
-  let scaleY: Float = 1.0
+  var scaleX: Float = 1.0
+  var scaleY: Float = 1.0
   if tex.width > 0 {
     scaleX = w / tex.width.toFloat()
   }
   if tex.height > 0 {
     scaleY = h / tex.height.toFloat()
   }
-  let scale: Float = scaleX
+  var scale: Float = scaleX
   if scaleY < scale {
     scale = scaleY
   }

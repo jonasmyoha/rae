@@ -65,7 +65,7 @@ func scenarioNestedSpec(seed: view Int) {
 
 func main() {
   # Warm allocator, then sample baseline.
-  let i: Int = 0
+  var i: Int = 0
   let warmup: Int = 200
   loop i < warmup {
     scenarioWrapperString(seed: i)
@@ -78,7 +78,7 @@ func main() {
   # Stress the cascade. Pre-step-7 in compiled mode this loop leaked
   # ~5 MB. With the fix, growth should plateau near zero (a few
   # hundred KB of allocator slack max).
-  let j: Int = 0
+  var j: Int = 0
   let iters: Int = 5000
   loop j < iters {
     scenarioWrapperString(seed: j)

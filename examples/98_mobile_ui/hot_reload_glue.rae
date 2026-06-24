@@ -40,8 +40,8 @@ type RestoredState {
 func parseUInt(s: view String) ret Int {
   let digits: String = "0123456789"
   let n: Int = s.length()
-  let i: Int = 0
-  let acc: Int = 0
+  var i: Int = 0
+  var acc: Int = 0
   loop i < n {
     let ch: String = s.sub(start: i, len: 1)
     let d: Int = digits.indexOf(sub: ch)
@@ -123,7 +123,7 @@ func loadRestoredState(fallback: view RestoredState) pub ret RestoredState {
   }
   let trimmed: String = prior.trim()
   let parts: List(String) = trimmed.split(sep: ";")
-  let i: Int = 0
+  var i: Int = 0
   loop i < parts.length {
     let kv: String = parts.get(index: i)
     let eq: Int = kv.indexOf(sub: "=")

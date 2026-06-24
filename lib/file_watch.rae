@@ -39,7 +39,7 @@ type FileWatcher {
 # poll after construction does not spuriously fire.
 func createFileWatcher(paths: view List(String), enabled: view Bool, intervalSec: view Float) ret FileWatcher {
   let entries: List(WatchEntry) = createList(WatchEntry, cap: paths.length)
-  let i: Int = 0
+  var i: Int = 0
   loop i < paths.length {
     let p: String = paths.get(index: i)
     let mt: Float = fileModTime(path: p)
@@ -67,8 +67,8 @@ func checkForChanges(watcher: mod FileWatcher, now: view Float) ret Bool {
     ret false
   }
   watcher.lastCheck = now
-  let changed: Bool = false
-  let i: Int = 0
+  var changed: Bool = false
+  var i: Int = 0
   loop i < watcher.entries.length {
     # Read via the raw buffer accessor: `List(T).get` returns `opt T`,
     # which the C backend lowers to `RaeAny` and can't be re-typed back

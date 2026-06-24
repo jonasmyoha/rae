@@ -186,7 +186,7 @@ func parseBuildStatus(raw: view String) pub ret BuildStatus {
   }
   let kind: String = lines.get(index: 0).trim()
   let okFlag: Bool = kind.equals(other: "ok")
-  let msg: String = ""
+  var msg: String = ""
   if lines.length > 1 {
     msg = lines.get(index: 1).trim()
   }
@@ -251,11 +251,11 @@ func pollReloadSignal(w: mod ReloadSignalWatcher) pub ret ReloadSignal {
   }
   let verbTok: String = parts.get(index: 0)
   let verb: ReloadVerb = parseReloadVerb(token: verbTok)
-  let buildId: String = ""
+  var buildId: String = ""
   if parts.length > 1 {
     buildId = parts.get(index: 1)
   }
-  let timestamp: String = ""
+  var timestamp: String = ""
   if parts.length > 2 {
     timestamp = parts.get(index: 2)
   }

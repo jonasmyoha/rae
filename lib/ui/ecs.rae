@@ -218,7 +218,7 @@ func componentHas(T: type, this: view ComponentTable(T), entity: view EntityId) 
 #   }
 func componentGet(T: type, this: view ComponentTable(T), entity: view EntityId) ret T {
   let idx: Int = componentIndexOf(this, entity: entity)
-  let safeIdx: Int = idx
+  var safeIdx: Int = idx
   if safeIdx < 0 {
     safeIdx = 0
   }
@@ -234,7 +234,7 @@ func componentGet(T: type, this: view ComponentTable(T), entity: view EntityId) 
 # ownership claim, just a window into the world's memory.
 func componentView(T: type, this: view ComponentTable(T), entity: view EntityId) ret view T {
   let idx: Int = componentIndexOf(this, entity: entity)
-  let safeIdx: Int = idx
+  var safeIdx: Int = idx
   if safeIdx < 0 {
     safeIdx = 0
   }
@@ -245,7 +245,7 @@ func componentView(T: type, this: view ComponentTable(T), entity: view EntityId)
 # through the returned ref writes directly to the component slot.
 func componentMod(T: type, this: mod ComponentTable(T), entity: view EntityId) ret mod T {
   let idx: Int = componentIndexOf(this, entity: entity)
-  let safeIdx: Int = idx
+  var safeIdx: Int = idx
   if safeIdx < 0 {
     safeIdx = 0
   }
@@ -536,7 +536,7 @@ func createEntity(world: mod UiWorld) ret EntityId {
 
 func isAlive(world: view UiWorld, entity: view EntityId) ret Bool {
   let n: Int = world.alive.length
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let e: EntityId = rae_ext_rae_buf_get(buf: world.alive.data, index: i)
     if e.value is entity.value {
@@ -565,12 +565,12 @@ func aliveCount(world: view UiWorld) ret Int {
 # old call sites that never opted into pages keep working.
 func pageScopedKey(pageId: view String, nodeId: view String) pub ret String {
   if pageId.length() is 0 {
-    let k: String = ""
+    var k: String = ""
     k = k.concat(other: nodeId)
     ret k
   }
   let sep: String = "/"
-  let k: String = ""
+  var k: String = ""
   k = k.concat(other: pageId)
   k = k.concat(other: sep)
   k = k.concat(other: nodeId)
@@ -593,7 +593,7 @@ func pageOf(world: view UiWorld, entity: view EntityId) pub ret String {
   # Explicit construction (not `let cur: EntityId = entity`) — the
   # Live VM treats the latter as a view-ref bind and then refuses
   # the reassignment inside the loop.
-  let cur: EntityId = { value: entity.value }
+  var cur: EntityId = { value: entity.value }
   loop true {
     if componentHas(this: world.pageRoots, entity: cur) {
       let r: PageRoot = componentGet(this: world.pageRoots, entity: cur)
@@ -614,7 +614,7 @@ func pageOf(world: view UiWorld, entity: view EntityId) pub ret String {
 # digits in practice).
 func findPageRootEntity(world: view UiWorld, pageId: view String) pub ret EntityId {
   let n: Int = componentCount(this: world.pageRoots)
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let e: EntityId = componentEntityAt(this: world.pageRoots, i: i)
     let r: PageRoot = componentDataAt(this: world.pageRoots, i: i)
@@ -669,7 +669,7 @@ func findScrollTarget(world: view UiWorld) pub ret EntityId {
   if n is 0 {
     ret noEntity()
   }
-  let i: Int = 0
+  var i: Int = 0
   let fallback: EntityId = componentEntityAt(this: world.scrollStates, i: 0)
   loop i < n {
     let e: EntityId = componentEntityAt(this: world.scrollStates, i: i)
@@ -783,7 +783,7 @@ func destroyEntity(world: mod UiWorld, entity: view EntityId) pub {
   # world.alive (typically a few hundred entries).
   let alive: mod List(EntityId) => world.alive
   let n: Int = alive.length
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let e: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: i)
     if e.value is entity.value {
@@ -805,7 +805,7 @@ func destroyEntitySubtree(world: mod UiWorld, root: view EntityId) pub {
   collectSubtreeEntities(world: world, root: root, out: collected)
   # Destroy in reverse (children before parents).
   let n: Int = collected.length
-  let i: Int = n - 1
+  var i: Int = n - 1
   loop i >= 0 {
     let e: EntityId = rae_ext_rae_buf_get(buf: collected.data, index: i)
     destroyEntity(world: world, entity: e)
@@ -824,7 +824,7 @@ func collectSubtreeEntities(world: view UiWorld, root: view EntityId, out: mod L
   }
   let ch: view Children => componentView(this: world.childrens, entity: root)
   let n: Int = ch.ids.length
-  let i: Int = 0
+  var i: Int = 0
   loop i < n {
     let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
     collectSubtreeEntities(world: world, root: cid, out: out)
@@ -853,18 +853,18 @@ func unmountPage(world: mod UiWorld, pageId: view String) pub {
   # `createList(V)` substitution leaks the type variable). Two
   # passes: collect matching keys, then remove. Removing during
   # iteration would shift entries under the cursor.
-  let prefix: String = ""
+  var prefix: String = ""
   prefix = prefix.concat(other: pageId)
   let sep: String = "/"
   prefix = prefix.concat(other: sep)
   let cap: Int = world.nodeIds.cap
   let matches: List(String) = createList(String, cap: 8)
-  let i: Int = 0
+  var i: Int = 0
   loop i < cap {
     let entry: StringMapEntry(Int) = rae_ext_rae_buf_get(buf: world.nodeIds.data, index: i)
     if entry.occupied {
       if entry.k.startsWith(prefix: prefix) {
-        let kCopy: String = ""
+        var kCopy: String = ""
         kCopy = kCopy.concat(other: entry.k)
         matches.add(value: own kCopy)
       }
@@ -872,7 +872,7 @@ func unmountPage(world: mod UiWorld, pageId: view String) pub {
     i = i + 1
   }
   let m: Int = matches.length
-  let j: Int = 0
+  var j: Int = 0
   loop j < m {
     let k: String = matches.get(index: j)
     world.nodeIds.remove(k: k)
