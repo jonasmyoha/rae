@@ -1,118 +1,22 @@
 # Raytracer — Step 1: barebones, single-threaded.
 #
-# "Ray Tracing in One Weekend", chapters 4-6: spheres on a ground plane,
-# shaded by surface normal, over a sky gradient. One ray per pixel, no
-# materials, no bounces. Single-threaded on purpose — this is the baseline
-# the later steps build on (step 4 adds real-thread parallelism).
+# "Ray Tracing in One Weekend" chapters 4-6: spheres on a ground plane shaded
+# by surface normal, over a sky gradient. One ray per pixel, no materials, no
+# bounces. Single-threaded — the baseline the later steps build on.
 #
-# Rendered at FULL HD (1920x1080) and shown PROGRESSIVELY: each frame renders
-# a time-bounded chunk of scanlines into a streaming texture, so you watch the
-# image fill in top-to-bottom instead of waiting for one big dump at the end.
+# Split across modules: vec3 (the shared Vec3 type), scene.rae (the Sphere
+# type + scene), render.rae (intersection + shading), and this window loop.
+# Rendered at Full HD and shown progressively via a streaming texture, so the
+# image fills in top-to-bottom instead of one dump at the end.
 #
 #   rae run --target compiled main.rae   (recommended)
 #   rae run main.rae                      (Live VM)
 
 import core
-import math
 import raylib
-
-# nearest hit t in (0.001, big], or -1.0 for miss
-func hitSphere(cx: view Float, cy: view Float, cz: view Float, r: view Float,
-               rdx: view Float, rdy: view Float, rdz: view Float) ret Float {
-    let a: Float = rdx * rdx + rdy * rdy + rdz * rdz
-    let halfB: Float = (0.0 - cx) * rdx + (0.0 - cy) * rdy + (0.0 - cz) * rdz
-    let c: Float = cx * cx + cy * cy + cz * cz - r * r
-    let disc: Float = halfB * halfB - a * c
-    if disc < 0.0 {
-        ret -1.0
-    }
-    ret (-halfB - sqrt(x: disc)) / a
-}
-
-# Packed 0xRRGGBB colour for a primary ray from the origin.
-func rayColor(scene: view List(Float), rdx: view Float, rdy: view Float, rdz: view Float) ret Int {
-    let best: Float = 1000000.0
-    let hitIdx: Int = -1
-    let count: Int = scene.length / 4
-    let k: Int = 0
-    loop k < count {
-        let b: Int = k * 4
-        let t: Float = hitSphere(cx: scene.get(index: b), cy: scene.get(index: b + 1),
-            cz: scene.get(index: b + 2), r: scene.get(index: b + 3),
-            rdx: rdx, rdy: rdy, rdz: rdz)
-        if t > 0.001 {
-            if t < best {
-                best = t
-                hitIdx = k
-            }
-        }
-        k = k + 1
-    }
-    let cr: Float = 0.0
-    let cg: Float = 0.0
-    let cb: Float = 0.0
-    if hitIdx >= 0 {
-        let b: Int = hitIdx * 4
-        let sr: Float = scene.get(index: b + 3)
-        cr = 0.5 * ((rdx * best - scene.get(index: b)) / sr + 1.0)
-        cg = 0.5 * ((rdy * best - scene.get(index: b + 1)) / sr + 1.0)
-        cb = 0.5 * ((rdz * best - scene.get(index: b + 2)) / sr + 1.0)
-    } else {
-        # sky gradient along the up axis (+Z)
-        let len: Float = sqrt(x: rdx * rdx + rdy * rdy + rdz * rdz)
-        let tt: Float = 0.5 * (rdz / len + 1.0)
-        cr = (1.0 - tt) + tt * 0.5
-        cg = (1.0 - tt) + tt * 0.7
-        cb = (1.0 - tt) + tt * 1.0
-    }
-    let ir: Int = (255.99 * cr).toInt()
-    let ig: Int = (255.99 * cg).toInt()
-    let ib: Int = (255.99 * cb).toInt()
-    ret ir * 65536 + ig * 256 + ib
-}
-
-# Render one scanline `y` straight into the framebuffer at row offset y*width.
-# Z-up world (Blender): camera at the origin looks along +Y (forward); the
-# image spans +X (right) horizontally and +Z (up) vertically. See
-# docs/coordinate-system.md.
-func renderRow(fb: mod List(Int), scene: view List(Float), width: view Int, height: view Int, y: view Int) {
-    let aspect: Float = width.toFloat() / height.toFloat()
-    let vw: Float = aspect * 2.0
-    let llx: Float = 0.0 - vw / 2.0
-    # v: 0 at the bottom row, 1 at the top (raster rows are top-down).
-    let v: Float = (height - 1 - y).toFloat() / (height - 1).toFloat()
-    let rowOff: Int = y * width
-    let x: Int = 0
-    loop x < width {
-        let u: Float = x.toFloat() / (width - 1).toFloat()
-        # right = +X, forward = +Y, up = +Z
-        let packed: Int = rayColor(scene: scene, rdx: llx + u * vw, rdy: 1.0, rdz: -1.0 + v * 2.0)
-        fb.set(index: rowOff + x, value: packed)
-        x = x + 1
-    }
-}
-
-# Z-up scene: [cx, cy, cz, r] per sphere. +Y is forward (into the scene),
-# +Z is up, so the ground is a big sphere below (large -Z centre).
-func buildScene() ret List(Float) {
-    let scene: List(Float) = createList(cap: 12)
-    # center sphere, 1 unit forward, resting on the ground (bottom at z=-0.5)
-    scene.add(value: 0.0)
-    scene.add(value: 1.0)
-    scene.add(value: 0.0)
-    scene.add(value: 0.5)
-    # a smaller sphere to the left, slightly further forward
-    scene.add(value: -1.0)
-    scene.add(value: 1.2)
-    scene.add(value: -0.05)
-    scene.add(value: 0.45)
-    # ground (big sphere below): top at z = -100.5 + 100 = -0.5
-    scene.add(value: 0.0)
-    scene.add(value: 1.0)
-    scene.add(value: -100.5)
-    scene.add(value: 100.0)
-    ret scene
-}
+import vec3
+import scene
+import render
 
 func main() {
     let width: Int = 1920
@@ -120,11 +24,10 @@ func main() {
     let winW: Int = 1280
     let winH: Int = 720
 
-    let scene: List(Float) = buildScene()
+    let world: List(Sphere) = buildScene()
 
-    # Pre-fill the framebuffer with black so the texture has a full
-    # width*height of pixels from the first frame (UpdateTexture always
-    # uploads the whole image).
+    # Pre-fill the framebuffer with black so the streaming texture has a full
+    # width*height of pixels from the first frame.
     let fb: List(Int) = createList(cap: width * height)
     let i: Int = 0
     loop i < width * height {
@@ -142,12 +45,11 @@ func main() {
     let startMs: Int = nowMs()
     let doneMs: Int = 0
     loop not windowShouldClose() {
-        # Render a time-bounded slice of scanlines this frame (Rae has no
-        # `break`, so the budget is part of the loop guard) — keeps the window
-        # responsive and lets the image fill in visibly.
+        # Render a time-bounded slice of scanlines each frame (Rae has no
+        # `break`, so the budget is part of the loop guard).
         let frameStart: Int = nowMs()
         loop nextRow < height and nowMs() - frameStart <= 12 {
-            renderRow(fb: fb, scene: scene, width: width, height: height, y: nextRow)
+            renderRow(fb: fb, world: world, width: width, height: height, y: nextRow)
             nextRow = nextRow + 1
         }
         if nextRow >= height and doneMs is 0 {

@@ -1,352 +1,26 @@
 # Raytracer — Step 3: materials + camera + multithreading.
 #
-# "Ray Tracing in One Weekend" ch. 10-13: metal and dielectric (glass)
-# materials, and a real positionable camera (position + look-at + vertical FOV
-# + defocus/depth-of-field) in Blender Z-up world space (see
-# docs/coordinate-system.md). This is the iconic Book-1 image.
+# "Ray Tracing in One Weekend" chapters 10-13 — the iconic Book-1 image: metal
+# and dielectric (glass) materials plus a positionable camera (look-at, FOV,
+# defocus) in Blender Z-up world space.
 #
-# And it is the first PARALLEL step: each frame, a band of scanlines is split
-# across four `spawn renderBand(...)` workers that run on real OS threads in
-# the Compiled backend (each gets its own deep copy of the scene + camera and
-# its own RNG stream). The image still fills in progressively, a band per frame.
+# First parallel step: the screen is split into four quadrants, one per worker
+# thread. Each thread renders only its own quadrant, one small tile at a time,
+# so the four tiles in flight are always in four separate regions (Blender-style
+# buckets). Each worker takes a private deep copy of the scene and a by-value
+# Camera, and runs on a real OS thread in the Compiled backend.
+#
+# Modules: vec3, scene.rae (Material + Sphere), camera.rae (Ray + Camera),
+# render.rae (materials + tiled worker), and this window loop.
 #
 #   rae run --target compiled main.rae   (recommended — real threads)
 
 import core
-import math
 import raylib
-
-type Vec3 {
-    x: Float
-    y: Float
-    z: Float
-}
-
-func vadd(a: view Vec3, b: view Vec3) ret Vec3 { ret Vec3 { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z } }
-func vsub(a: view Vec3, b: view Vec3) ret Vec3 { ret Vec3 { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z } }
-func vscale(a: view Vec3, s: view Float) ret Vec3 { ret Vec3 { x: a.x * s, y: a.y * s, z: a.z * s } }
-func vmul(a: view Vec3, b: view Vec3) ret Vec3 { ret Vec3 { x: a.x * b.x, y: a.y * b.y, z: a.z * b.z } }
-func vdot(a: view Vec3, b: view Vec3) ret Float { ret a.x * b.x + a.y * b.y + a.z * b.z }
-func vcross(a: view Vec3, b: view Vec3) ret Vec3 {
-    ret Vec3 { x: a.y * b.z - a.z * b.y, y: a.z * b.x - a.x * b.z, z: a.x * b.y - a.y * b.x }
-}
-func vlen(a: view Vec3) ret Float { ret sqrt(x: vdot(a: a, b: a)) }
-func vnorm(a: view Vec3) ret Vec3 {
-    let l: Float = vlen(a: a)
-    ret Vec3 { x: a.x / l, y: a.y / l, z: a.z / l }
-}
-
-# uniform random unit vector (Lambertian scatter / metal fuzz)
-func randomUnit() ret Vec3 {
-    let a: Float = random() * 6.2831853
-    let z: Float = random() * 2.0 - 1.0
-    let r: Float = sqrt(x: 1.0 - z * z)
-    ret Vec3 { x: r * cos(x: a), y: r * sin(x: a), z: z }
-}
-
-# uniform random point in the unit disk on the camera's right/up plane (lens)
-func randomDisk() ret Vec3 {
-    let a: Float = random() * 6.2831853
-    let r: Float = sqrt(x: random())
-    ret Vec3 { x: r * cos(x: a), y: r * sin(x: a), z: 0.0 }
-}
-
-func vreflect(v: view Vec3, n: view Vec3) ret Vec3 {
-    let d: Float = 2.0 * vdot(a: v, b: n)
-    ret Vec3 { x: v.x - d * n.x, y: v.y - d * n.y, z: v.z - d * n.z }
-}
-
-func vrefract(uv: view Vec3, n: view Vec3, etaRatio: view Float) ret Vec3 {
-    let neg: Vec3 = { x: 0.0 - uv.x, y: 0.0 - uv.y, z: 0.0 - uv.z }
-    let cosT: Float = vdot(a: neg, b: n)
-    if cosT > 1.0 {
-        cosT = 1.0
-    }
-    let perp: Vec3 = {
-        x: etaRatio * (uv.x + cosT * n.x),
-        y: etaRatio * (uv.y + cosT * n.y),
-        z: etaRatio * (uv.z + cosT * n.z)
-    }
-    let k: Float = abs(n: 1.0 - vdot(a: perp, b: perp))
-    let pl: Float = 0.0 - sqrt(x: k)
-    ret Vec3 { x: perp.x + pl * n.x, y: perp.y + pl * n.y, z: perp.z + pl * n.z }
-}
-
-func schlick(cosine: view Float, refIdx: view Float) ret Float {
-    let r0: Float = (1.0 - refIdx) / (1.0 + refIdx)
-    r0 = r0 * r0
-    ret r0 + (1.0 - r0) * pow(base: 1.0 - cosine, exp: 5.0)
-}
-
-# nearest hit t in (0.001, big], or -1.0 for miss
-func hitSphere(cx: view Float, cy: view Float, cz: view Float, r: view Float,
-               rox: view Float, roy: view Float, roz: view Float,
-               rdx: view Float, rdy: view Float, rdz: view Float) ret Float {
-    let ocx: Float = rox - cx
-    let ocy: Float = roy - cy
-    let ocz: Float = roz - cz
-    let a: Float = rdx * rdx + rdy * rdy + rdz * rdz
-    let halfB: Float = ocx * rdx + ocy * rdy + ocz * rdz
-    let c: Float = ocx * ocx + ocy * ocy + ocz * ocz - r * r
-    let disc: Float = halfB * halfB - a * c
-    if disc < 0.0 {
-        ret -1.0
-    }
-    ret (-halfB - sqrt(x: disc)) / a
-}
-
-# Recursive path trace. Scene is a flat List(Float), 10 per sphere:
-# [cx,cy,cz, r, matType(0=diffuse,1=metal,2=glass), ar,ag,ab, fuzz, ior].
-func rayColor(scene: view List(Float), ro: view Vec3, rd: view Vec3, depth: view Int) ret Vec3 {
-    if depth <= 0 {
-        ret Vec3 { x: 0.0, y: 0.0, z: 0.0 }
-    }
-    let best: Float = 1000000.0
-    let hitIdx: Int = -1
-    let count: Int = scene.length / 10
-    let k: Int = 0
-    loop k < count {
-        let b: Int = k * 10
-        let t: Float = hitSphere(cx: scene.get(index: b), cy: scene.get(index: b + 1),
-            cz: scene.get(index: b + 2), r: scene.get(index: b + 3),
-            rox: ro.x, roy: ro.y, roz: ro.z, rdx: rd.x, rdy: rd.y, rdz: rd.z)
-        if t > 0.001 {
-            if t < best {
-                best = t
-                hitIdx = k
-            }
-        }
-        k = k + 1
-    }
-    if hitIdx < 0 {
-        let ud: Vec3 = vnorm(a: rd)
-        let tt: Float = 0.5 * (ud.z + 1.0)
-        ret Vec3 { x: (1.0 - tt) + tt * 0.5, y: (1.0 - tt) + tt * 0.7, z: (1.0 - tt) + tt * 1.0 }
-    }
-    let b: Int = hitIdx * 10
-    let sr: Float = scene.get(index: b + 3)
-    let p: Vec3 = { x: ro.x + rd.x * best, y: ro.y + rd.y * best, z: ro.z + rd.z * best }
-    let n: Vec3 = {
-        x: (p.x - scene.get(index: b)) / sr,
-        y: (p.y - scene.get(index: b + 1)) / sr,
-        z: (p.z - scene.get(index: b + 2)) / sr
-    }
-    let mat: Float = scene.get(index: b + 4)
-    let albedo: Vec3 = { x: scene.get(index: b + 5), y: scene.get(index: b + 6), z: scene.get(index: b + 7) }
-
-    let scatter: Vec3 = { x: 0.0, y: 0.0, z: 0.0 }
-    let atten: Vec3 = albedo
-
-    if mat < 0.5 {
-        # Lambertian diffuse
-        let ru: Vec3 = randomUnit()
-        scatter = vadd(a: n, b: ru)
-    } else {
-        if mat < 1.5 {
-            # Metal: reflect with fuzz
-            let ud: Vec3 = vnorm(a: rd)
-            let refl: Vec3 = vreflect(v: ud, n: n)
-            let fuzz: Float = scene.get(index: b + 8)
-            let ru: Vec3 = randomUnit()
-            scatter = Vec3 { x: refl.x + fuzz * ru.x, y: refl.y + fuzz * ru.y, z: refl.z + fuzz * ru.z }
-            if vdot(a: scatter, b: n) <= 0.0 {
-                ret Vec3 { x: 0.0, y: 0.0, z: 0.0 }
-            }
-        } else {
-            # Dielectric (glass)
-            atten = Vec3 { x: 1.0, y: 1.0, z: 1.0 }
-            let ior: Float = scene.get(index: b + 9)
-            let ud: Vec3 = vnorm(a: rd)
-            let frontN: Vec3 = n
-            let etaRatio: Float = 1.0 / ior
-            if vdot(a: ud, b: n) > 0.0 {
-                # ray inside the sphere: flip normal, invert ratio
-                frontN = Vec3 { x: 0.0 - n.x, y: 0.0 - n.y, z: 0.0 - n.z }
-                etaRatio = ior
-            }
-            let negud: Vec3 = { x: 0.0 - ud.x, y: 0.0 - ud.y, z: 0.0 - ud.z }
-            let cosT: Float = vdot(a: negud, b: frontN)
-            if cosT > 1.0 {
-                cosT = 1.0
-            }
-            let sinT: Float = sqrt(x: 1.0 - cosT * cosT)
-            if etaRatio * sinT > 1.0 or schlick(cosine: cosT, refIdx: etaRatio) > random() {
-                scatter = vreflect(v: ud, n: frontN)
-            } else {
-                scatter = vrefract(uv: ud, n: frontN, etaRatio: etaRatio)
-            }
-        }
-    }
-    let bounced: Vec3 = rayColor(scene: scene, ro: p, rd: scatter, depth: depth - 1)
-    ret vmul(a: atten, b: bounced)
-}
-
-# Camera ray-gen parameters packed as a flat List(Float) (19 entries) so it can
-# be deep-copied into each worker:
-#   [0..2] origin, [3..5] lowerLeft, [6..8] horizontal, [9..11] vertical,
-#   [12..14] right, [15..17] up, [18] lensRadius
-func buildCamera(px: view Float, py: view Float, pz: view Float, tx: view Float, ty: view Float, tz: view Float,
-                 vfovDeg: view Float, aperture: view Float, aspect: view Float) ret List(Float) {
-    let pos: Vec3 = { x: px, y: py, z: pz }
-    let target: Vec3 = { x: tx, y: ty, z: tz }
-    let worldUp: Vec3 = { x: 0.0, y: 0.0, z: 1.0 }
-    let fwd: Vec3 = vnorm(a: vsub(a: target, b: pos))
-    let right: Vec3 = vnorm(a: vcross(a: fwd, b: worldUp))
-    let up: Vec3 = vcross(a: right, b: fwd)
-    let focus: Float = vlen(a: vsub(a: target, b: pos))
-    let theta: Float = vfovDeg * 3.14159265 / 180.0
-    let halfH: Float = tan(x: theta / 2.0)
-    let vpH: Float = 2.0 * halfH * focus
-    let vpW: Float = aspect * vpH
-    let horiz: Vec3 = vscale(a: right, s: vpW)
-    let vert: Vec3 = vscale(a: up, s: vpH)
-    # lowerLeft = pos + fwd*focus - horiz/2 - vert/2
-    let ll: Vec3 = {
-        x: pos.x + fwd.x * focus - horiz.x * 0.5 - vert.x * 0.5,
-        y: pos.y + fwd.y * focus - horiz.y * 0.5 - vert.y * 0.5,
-        z: pos.z + fwd.z * focus - horiz.z * 0.5 - vert.z * 0.5
-    }
-    let cam: List(Float) = createList(cap: 19)
-    cam.add(value: pos.x)
-    cam.add(value: pos.y)
-    cam.add(value: pos.z)
-    cam.add(value: ll.x)
-    cam.add(value: ll.y)
-    cam.add(value: ll.z)
-    cam.add(value: horiz.x)
-    cam.add(value: horiz.y)
-    cam.add(value: horiz.z)
-    cam.add(value: vert.x)
-    cam.add(value: vert.y)
-    cam.add(value: vert.z)
-    cam.add(value: right.x)
-    cam.add(value: right.y)
-    cam.add(value: right.z)
-    cam.add(value: up.x)
-    cam.add(value: up.y)
-    cam.add(value: up.z)
-    cam.add(value: aperture * 0.5)
-    ret cam
-}
-
-# One worker: renders a rectangular TILE [tx0, tx0+tw) x [ty0, ty0+th) and
-# returns tw*th packed pixels, row-major within the tile. Takes its own deep
-# copy of scene + camera and seeds its own RNG stream. Tiles (rather than
-# full-width bands) give a Blender-style "bucket" render — several squares
-# filling in at once.
-func renderTile(scene: own List(Float), cam: own List(Float), width: view Int, height: view Int,
-                tx0: view Int, ty0: view Int, tw: view Int, th: view Int,
-                samples: view Int, maxDepth: view Int, seedBase: view Int) ret List(Int) {
-    seed(n: seedBase + ty0 * 9781 + tx0 * 17)
-    let ox: Float = cam.get(index: 0)
-    let oy: Float = cam.get(index: 1)
-    let oz: Float = cam.get(index: 2)
-    let lensR: Float = cam.get(index: 18)
-    let out: List(Int) = createList(cap: tw * th)
-    let ry: Int = 0
-    loop ry < th {
-        let py: Int = ty0 + ry
-        let rx: Int = 0
-        loop rx < tw {
-            let px: Int = tx0 + rx
-            let cr: Float = 0.0
-            let cg: Float = 0.0
-            let cb: Float = 0.0
-            let s: Int = 0
-            loop s < samples {
-                let u: Float = (px.toFloat() + random()) / (width - 1).toFloat()
-                let v: Float = ((height - 1 - py).toFloat() + random()) / (height - 1).toFloat()
-                # lens sample -> ray origin offset (right/up plane)
-                let rd2: Vec3 = randomDisk()
-                let offx: Float = lensR * (cam.get(index: 12) * rd2.x + cam.get(index: 15) * rd2.y)
-                let offy: Float = lensR * (cam.get(index: 13) * rd2.x + cam.get(index: 16) * rd2.y)
-                let offz: Float = lensR * (cam.get(index: 14) * rd2.x + cam.get(index: 17) * rd2.y)
-                let rox: Float = ox + offx
-                let roy: Float = oy + offy
-                let roz: Float = oz + offz
-                let dirx: Float = cam.get(index: 3) + u * cam.get(index: 6) + v * cam.get(index: 9) - rox
-                let diry: Float = cam.get(index: 4) + u * cam.get(index: 7) + v * cam.get(index: 10) - roy
-                let dirz: Float = cam.get(index: 5) + u * cam.get(index: 8) + v * cam.get(index: 11) - roz
-                let ro: Vec3 = { x: rox, y: roy, z: roz }
-                let dir: Vec3 = { x: dirx, y: diry, z: dirz }
-                let col: Vec3 = rayColor(scene: scene, ro: ro, rd: dir, depth: maxDepth)
-                cr = cr + col.x
-                cg = cg + col.y
-                cb = cb + col.z
-                s = s + 1
-            }
-            let inv: Float = 1.0 / samples.toFloat()
-            let ir: Int = (255.99 * sqrt(x: cr * inv)).toInt()
-            let ig: Int = (255.99 * sqrt(x: cg * inv)).toInt()
-            let ib: Int = (255.99 * sqrt(x: cb * inv)).toInt()
-            out.add(value: ir * 65536 + ig * 256 + ib)
-            rx = rx + 1
-        }
-        ry = ry + 1
-    }
-    ret out
-}
-
-# Blit a finished tile into the framebuffer at (tx0, ty0).
-func writeTile(fb: mod List(Int), tile: view List(Int), width: view Int,
-               tx0: view Int, ty0: view Int, tw: view Int, th: view Int) {
-    let ry: Int = 0
-    loop ry < th {
-        let dst: Int = (ty0 + ry) * width + tx0
-        let src: Int = ry * tw
-        let rx: Int = 0
-        loop rx < tw {
-            fb.set(index: dst + rx, value: tile.get(index: src + rx))
-            rx = rx + 1
-        }
-        ry = ry + 1
-    }
-}
-
-# Z-up scene (10 floats/sphere): the classic 3-sphere + ground.
-func buildScene() ret List(Float) {
-    let s: List(Float) = createList(cap: 40)
-    # ground (diffuse yellow)
-    s.add(value: 0.0)  s.add(value: 1.0)  s.add(value: -100.5)  s.add(value: 100.0)
-    s.add(value: 0.0)  s.add(value: 0.8)  s.add(value: 0.8)  s.add(value: 0.0)  s.add(value: 0.0)  s.add(value: 0.0)
-    # center (diffuse blue)
-    s.add(value: 0.0)  s.add(value: 1.0)  s.add(value: 0.0)  s.add(value: 0.5)
-    s.add(value: 0.0)  s.add(value: 0.1)  s.add(value: 0.2)  s.add(value: 0.5)  s.add(value: 0.0)  s.add(value: 0.0)
-    # left (glass)
-    s.add(value: -1.0)  s.add(value: 1.0)  s.add(value: 0.0)  s.add(value: 0.5)
-    s.add(value: 2.0)  s.add(value: 1.0)  s.add(value: 1.0)  s.add(value: 1.0)  s.add(value: 0.0)  s.add(value: 1.5)
-    # right (metal gold)
-    s.add(value: 1.0)  s.add(value: 1.0)  s.add(value: 0.0)  s.add(value: 0.5)
-    s.add(value: 1.0)  s.add(value: 0.8)  s.add(value: 0.6)  s.add(value: 0.2)  s.add(value: 0.05)  s.add(value: 0.0)
-    ret s
-}
-
-# Number of tiles needed to cover a quadrant of size qw x qh.
-func quadTotal(qw: view Int, qh: view Int, tileSize: view Int) ret Int {
-    let tx: Int = (qw + tileSize - 1) / tileSize
-    let ty: Int = (qh + tileSize - 1) / tileSize
-    ret tx * ty
-}
-
-# Bounds of tile `idx` within the quadrant at (qx0,qy0) of size qw x qh,
-# returned as a 4-element List(Int): [tx0, ty0, tw, th].
-func quadTile(qx0: view Int, qy0: view Int, qw: view Int, qh: view Int, tileSize: view Int, idx: view Int) ret List(Int) {
-    let qtx: Int = (qw + tileSize - 1) / tileSize
-    let col: Int = idx % qtx
-    let row: Int = idx / qtx
-    let tx0: Int = qx0 + col * tileSize
-    let ty0: Int = qy0 + row * tileSize
-    let tw: Int = tileSize
-    let th: Int = tileSize
-    if tx0 + tw > qx0 + qw { tw = qx0 + qw - tx0 }
-    if ty0 + th > qy0 + qh { th = qy0 + qh - ty0 }
-    let r: List(Int) = createList(cap: 4)
-    r.add(value: tx0)
-    r.add(value: ty0)
-    r.add(value: tw)
-    r.add(value: th)
-    ret r
-}
+import vec3
+import scene
+import camera
+import render
 
 func main() {
     let width: Int = 1920
@@ -357,11 +31,11 @@ func main() {
     let maxDepth: Int = 16
     let tileSize: Int = 120
 
-    let scene: List(Float) = buildScene()
+    let world: List(Sphere) = buildScene()
     let aspect: Float = width.toFloat() / height.toFloat()
-    # camera in Z-up world: behind (-Y), slightly left, a bit up; looking at center
-    let cam: List(Float) = buildCamera(px: -1.6, py: -1.2, pz: 0.6, tx: 0.0, ty: 1.0, tz: 0.0,
-        vfovDeg: 45.0, aperture: 0.06, aspect: aspect)
+    let camPos: Vec3 = vec3(x: -1.6, y: -1.2, z: 0.6)
+    let camTarget: Vec3 = vec3(x: 0.0, y: 1.0, z: 0.0)
+    let cam: Camera = buildCamera(pos: camPos, target: camTarget, vfovDeg: 45.0, aperture: 0.06, aspect: aspect)
 
     let fb: List(Int) = createList(cap: width * height)
     let i: Int = 0
@@ -376,27 +50,15 @@ func main() {
     setTextureFilter(texture: tex, filter: 1)
     let dispScale: Float = winW.toFloat() / width.toFloat()
 
-    # Split the screen into FOUR QUADRANTS, one per worker thread. Each thread
-    # renders ONLY its own quadrant, one small tile at a time — so the four
-    # tiles in flight are always in four separate regions of the screen, which
-    # makes the parallelism visible (vs. four adjacent tiles that look like one
-    # block). With 1920x1080 the quadrants are equal 960x540 blocks.
+    # Four quadrants, one worker thread each (equal 960x540 blocks at Full HD).
     let halfW: Int = width / 2
     let halfH: Int = height / 2
-    let q0x: Int = 0
-    let q0y: Int = 0
-    let q1x: Int = halfW
-    let q1y: Int = 0
-    let q2x: Int = 0
-    let q2y: Int = halfH
-    let q3x: Int = halfW
-    let q3y: Int = halfH
     let lw: Int = halfW
     let rw: Int = width - halfW
-    let th0: Int = halfH
+    let tHt: Int = halfH
     let bh: Int = height - halfH
-    let t0: Int = quadTotal(qw: lw, qh: th0, tileSize: tileSize)
-    let t1: Int = quadTotal(qw: rw, qh: th0, tileSize: tileSize)
+    let t0: Int = quadTotal(qw: lw, qh: tHt, tileSize: tileSize)
+    let t1: Int = quadTotal(qw: rw, qh: tHt, tileSize: tileSize)
     let t2: Int = quadTotal(qw: lw, qh: bh, tileSize: tileSize)
     let t3: Int = quadTotal(qw: rw, qh: bh, tileSize: tileSize)
     let n0: Int = 0
@@ -407,8 +69,6 @@ func main() {
     let doneMs: Int = 0
     loop not windowShouldClose() {
         if n0 < t0 or n1 < t1 or n2 < t2 or n3 < t3 {
-            # Each quadrant's current tile index (clamp a finished quadrant to
-            # its last tile — a harmless re-render until the others catch up).
             let c0: Int = n0
             let c1: Int = n1
             let c2: Int = n2
@@ -417,10 +77,10 @@ func main() {
             if c1 >= t1 { c1 = t1 - 1 }
             if c2 >= t2 { c2 = t2 - 1 }
             if c3 >= t3 { c3 = t3 - 1 }
-            let b0: List(Int) = quadTile(qx0: q0x, qy0: q0y, qw: lw, qh: th0, tileSize: tileSize, idx: c0)
-            let b1: List(Int) = quadTile(qx0: q1x, qy0: q1y, qw: rw, qh: th0, tileSize: tileSize, idx: c1)
-            let b2: List(Int) = quadTile(qx0: q2x, qy0: q2y, qw: lw, qh: bh, tileSize: tileSize, idx: c2)
-            let b3: List(Int) = quadTile(qx0: q3x, qy0: q3y, qw: rw, qh: bh, tileSize: tileSize, idx: c3)
+            let b0: List(Int) = quadTile(qx0: 0, qy0: 0, qw: lw, qh: tHt, tileSize: tileSize, idx: c0)
+            let b1: List(Int) = quadTile(qx0: halfW, qy0: 0, qw: rw, qh: tHt, tileSize: tileSize, idx: c1)
+            let b2: List(Int) = quadTile(qx0: 0, qy0: halfH, qw: lw, qh: bh, tileSize: tileSize, idx: c2)
+            let b3: List(Int) = quadTile(qx0: halfW, qy0: halfH, qw: rw, qh: bh, tileSize: tileSize, idx: c3)
             let ax0: Int = b0.get(index: 0)
             let ay0: Int = b0.get(index: 1)
             let aw0: Int = b0.get(index: 2)
@@ -437,11 +97,10 @@ func main() {
             let ay3: Int = b3.get(index: 1)
             let aw3: Int = b3.get(index: 2)
             let ah3: Int = b3.get(index: 3)
-            # One worker per quadrant; each deep-copies scene + cam (path-2).
-            let ta: Task(List(Int)) = spawn renderTile(scene: scene, cam: cam, width: width, height: height, tx0: ax0, ty0: ay0, tw: aw0, th: ah0, samples: samples, maxDepth: maxDepth, seedBase: 1)
-            let tb: Task(List(Int)) = spawn renderTile(scene: scene, cam: cam, width: width, height: height, tx0: ax1, ty0: ay1, tw: aw1, th: ah1, samples: samples, maxDepth: maxDepth, seedBase: 2)
-            let tc: Task(List(Int)) = spawn renderTile(scene: scene, cam: cam, width: width, height: height, tx0: ax2, ty0: ay2, tw: aw2, th: ah2, samples: samples, maxDepth: maxDepth, seedBase: 3)
-            let td: Task(List(Int)) = spawn renderTile(scene: scene, cam: cam, width: width, height: height, tx0: ax3, ty0: ay3, tw: aw3, th: ah3, samples: samples, maxDepth: maxDepth, seedBase: 4)
+            let ta: Task(List(Int)) = spawn renderTile(world: world, cam: cam, width: width, height: height, tx0: ax0, ty0: ay0, tw: aw0, th: ah0, samples: samples, maxDepth: maxDepth, seedBase: 1)
+            let tb: Task(List(Int)) = spawn renderTile(world: world, cam: cam, width: width, height: height, tx0: ax1, ty0: ay1, tw: aw1, th: ah1, samples: samples, maxDepth: maxDepth, seedBase: 2)
+            let tc: Task(List(Int)) = spawn renderTile(world: world, cam: cam, width: width, height: height, tx0: ax2, ty0: ay2, tw: aw2, th: ah2, samples: samples, maxDepth: maxDepth, seedBase: 3)
+            let td: Task(List(Int)) = spawn renderTile(world: world, cam: cam, width: width, height: height, tx0: ax3, ty0: ay3, tw: aw3, th: ah3, samples: samples, maxDepth: maxDepth, seedBase: 4)
             let pa: List(Int) = ta.get()
             let pb: List(Int) = tb.get()
             let pc: List(Int) = tc.get()
