@@ -469,7 +469,18 @@ bool c_spawn_threadable(CFuncContext* ctx, const AstFuncDecl* f) {
     // own/copy/plain heap aggregate (List/Map/struct): the spawn site deep
     // copies it (lvalue) or moves a fresh rvalue, so the worker owns it.
     if (c_spawn_arg_deepcopy_aggregate(ctx, p->type)) continue;
-    return false;                                 // view-aggregate, c_struct, or unknown → sequential
+    // POD struct (no heap fields → no cascade drop): captured BY VALUE in the
+    // C ABI, like a scalar, so a worker thread safely owns its copy. Covers
+    // plain value structs (Vec3, Camera, ...) and c_structs. view/mod are
+    // pointers into the parent and stay on the sequential path.
+    if (!p->type->is_view && !p->type->is_mod) {
+      const AstDecl* td = ctx ? find_type_decl(ctx, ctx->module, base) : NULL;
+      if (td && td->kind == AST_DECL_TYPE
+          && !type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, (AstTypeRef*)p->type, 0)) {
+        continue;
+      }
+    }
+    return false;                                 // view-aggregate, mod, or unknown → sequential
   }
   return true;
 }
