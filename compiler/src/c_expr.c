@@ -291,19 +291,51 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                     int k = 0;
                     const AstParam* pp = callee->params;
                     for (const AstCallArg* a = callexpr->as.call.args; a; a = a->next, k++) {
-                        // String params are captured by a private deep copy so
-                        // the worker owns a stable heap (the parent keeps and
-                        // drops its own original). Scalars/enums copy by value.
+                        // Heap params are captured so the worker owns a stable
+                        // heap independent of the parent (the parent keeps and
+                        // drops its own originals). Scalars/enums copy by value.
                         bool str_param = pp && pp->type
                             && !pp->type->is_view && !pp->type->is_mod
                             && str_eq_cstr(get_base_type_name(pp->type), "String");
+                        bool agg_param = pp && pp->type
+                            && c_spawn_arg_deepcopy_aggregate(ctx, pp->type);
+                        // A deep-copy only applies to aliasing lvalue args
+                        // (IDENT/MEMBER/INDEX); a fresh rvalue (call/object)
+                        // already owns its heap and just moves to the worker.
+                        bool agg_lvalue = agg_param && a->value
+                            && (a->value->kind == AST_EXPR_IDENT
+                                || a->value->kind == AST_EXPR_MEMBER
+                                || a->value->kind == AST_EXPR_INDEX);
+                        // Drive type-directed emission (object literals,
+                        // collection literals) from the param's declared type,
+                        // exactly as a normal call arg does — without this an
+                        // object-literal arg picks up a stale expected type and
+                        // emits the wrong C compound-literal type.
+                        bool saved_has_exp = ctx->has_expected_type;
+                        AstTypeRef saved_exp = ctx->expected_type;
+                        if (pp && pp->type) { ctx->expected_type = *pp->type; ctx->has_expected_type = true; }
                         fprintf(out, "__s->f%d = ", k);
-                        if (str_param) fprintf(out, "rae_string_copy(");
-                        fprintf(out, "(");
-                        emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
-                        fprintf(out, ")");
-                        if (str_param) fprintf(out, ")");
+                        if (str_param) {
+                            fprintf(out, "rae_string_copy((");
+                            emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
+                            fprintf(out, "))");
+                        } else if (agg_lvalue) {
+                            const char* tn = rae_mangle_type_specialized(
+                                ctx->compiler_ctx, ctx->generic_params,
+                                ctx->generic_args, pp->type);
+                            int tid = ctx->temp_counter++;
+                            fprintf(out, "(__extension__ ({ %s __cpy%d; rae_deep_copy_%s(&__cpy%d, &(",
+                                    tn, tid, tn, tid);
+                            emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
+                            fprintf(out, ")); __cpy%d; }))", tid);
+                        } else {
+                            fprintf(out, "(");
+                            emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
+                            fprintf(out, ")");
+                        }
                         fprintf(out, "; ");
+                        ctx->has_expected_type = saved_has_exp;
+                        ctx->expected_type = saved_exp;
                         if (pp) pp = pp->next;
                     }
                     fprintf(out, "RaeTask* __t = rae_task_new(");
