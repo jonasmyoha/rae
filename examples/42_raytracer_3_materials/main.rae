@@ -229,27 +229,33 @@ func buildCamera(px: view Float, py: view Float, pz: view Float, tx: view Float,
     ret cam
 }
 
-# One worker: renders rows [y0, y1) and returns (y1-y0)*width packed pixels.
-# Takes its own deep copy of scene + camera and seeds its own RNG stream.
-func renderBand(scene: own List(Float), cam: own List(Float), width: view Int, height: view Int,
-                y0: view Int, y1: view Int, samples: view Int, maxDepth: view Int, seedBase: view Int) ret List(Int) {
-    seed(n: seedBase + y0 * 9781)
+# One worker: renders a rectangular TILE [tx0, tx0+tw) x [ty0, ty0+th) and
+# returns tw*th packed pixels, row-major within the tile. Takes its own deep
+# copy of scene + camera and seeds its own RNG stream. Tiles (rather than
+# full-width bands) give a Blender-style "bucket" render — several squares
+# filling in at once.
+func renderTile(scene: own List(Float), cam: own List(Float), width: view Int, height: view Int,
+                tx0: view Int, ty0: view Int, tw: view Int, th: view Int,
+                samples: view Int, maxDepth: view Int, seedBase: view Int) ret List(Int) {
+    seed(n: seedBase + ty0 * 9781 + tx0 * 17)
     let ox: Float = cam.get(index: 0)
     let oy: Float = cam.get(index: 1)
     let oz: Float = cam.get(index: 2)
     let lensR: Float = cam.get(index: 18)
-    let out: List(Int) = createList(cap: (y1 - y0) * width)
-    let y: Int = y0
-    loop y < y1 {
-        let x: Int = 0
-        loop x < width {
+    let out: List(Int) = createList(cap: tw * th)
+    let ry: Int = 0
+    loop ry < th {
+        let py: Int = ty0 + ry
+        let rx: Int = 0
+        loop rx < tw {
+            let px: Int = tx0 + rx
             let cr: Float = 0.0
             let cg: Float = 0.0
             let cb: Float = 0.0
             let s: Int = 0
             loop s < samples {
-                let u: Float = (x.toFloat() + random()) / (width - 1).toFloat()
-                let v: Float = ((height - 1 - y).toFloat() + random()) / (height - 1).toFloat()
+                let u: Float = (px.toFloat() + random()) / (width - 1).toFloat()
+                let v: Float = ((height - 1 - py).toFloat() + random()) / (height - 1).toFloat()
                 # lens sample -> ray origin offset (right/up plane)
                 let rd2: Vec3 = randomDisk()
                 let offx: Float = lensR * (cam.get(index: 12) * rd2.x + cam.get(index: 15) * rd2.y)
@@ -274,18 +280,26 @@ func renderBand(scene: own List(Float), cam: own List(Float), width: view Int, h
             let ig: Int = (255.99 * sqrt(x: cg * inv)).toInt()
             let ib: Int = (255.99 * sqrt(x: cb * inv)).toInt()
             out.add(value: ir * 65536 + ig * 256 + ib)
-            x = x + 1
+            rx = rx + 1
         }
-        y = y + 1
+        ry = ry + 1
     }
     ret out
 }
 
-func appendBandAt(fb: mod List(Int), part: view List(Int), rowOff: view Int) {
-    let j: Int = 0
-    loop j < part.length {
-        fb.set(index: rowOff + j, value: part.get(index: j))
-        j = j + 1
+# Blit a finished tile into the framebuffer at (tx0, ty0).
+func writeTile(fb: mod List(Int), tile: view List(Int), width: view Int,
+               tx0: view Int, ty0: view Int, tw: view Int, th: view Int) {
+    let ry: Int = 0
+    loop ry < th {
+        let dst: Int = (ty0 + ry) * width + tx0
+        let src: Int = ry * tw
+        let rx: Int = 0
+        loop rx < tw {
+            fb.set(index: dst + rx, value: tile.get(index: src + rx))
+            rx = rx + 1
+        }
+        ry = ry + 1
     }
 }
 
@@ -314,8 +328,7 @@ func main() {
     let winH: Int = 720
     let samples: Int = 8
     let maxDepth: Int = 16
-    let workers: Int = 4
-    let rowsPerWorker: Int = 8
+    let tileSize: Int = 160
 
     let scene: List(Float) = buildScene()
     let aspect: Float = width.toFloat() / height.toFloat()
@@ -336,40 +349,66 @@ func main() {
     setTextureFilter(texture: tex, filter: 1)
     let dispScale: Float = winW.toFloat() / width.toFloat()
 
-    let nextRow: Int = 0
+    # Tile grid (Blender-style buckets): four square tiles render in parallel
+    # per frame and appear in place as each batch completes.
+    let tilesX: Int = (width + tileSize - 1) / tileSize
+    let tilesY: Int = (height + tileSize - 1) / tileSize
+    let totalTiles: Int = tilesX * tilesY
+    let nextTile: Int = 0
     let startMs: Int = nowMs()
     let doneMs: Int = 0
     loop not windowShouldClose() {
-        if nextRow < height {
-            # Dispatch one band as four parallel workers (real threads in Compiled).
-            let chunk: Int = workers * rowsPerWorker
-            let bandEnd: Int = nextRow + chunk
-            if bandEnd > height {
-                bandEnd = height
-            }
-            let ya: Int = nextRow
-            let yb: Int = nextRow + rowsPerWorker
-            let yc: Int = nextRow + rowsPerWorker * 2
-            let yd: Int = nextRow + rowsPerWorker * 3
-            if yb > bandEnd { yb = bandEnd }
-            if yc > bandEnd { yc = bandEnd }
-            if yd > bandEnd { yd = bandEnd }
-            # Each worker gets a private deep copy of scene + cam (path-2),
-            # so the four threads share no mutable state.
-            let ta: Task(List(Int)) = spawn renderBand(scene: scene, cam: cam, width: width, height: height, y0: ya, y1: yb, samples: samples, maxDepth: maxDepth, seedBase: 1)
-            let tb: Task(List(Int)) = spawn renderBand(scene: scene, cam: cam, width: width, height: height, y0: yb, y1: yc, samples: samples, maxDepth: maxDepth, seedBase: 2)
-            let tc: Task(List(Int)) = spawn renderBand(scene: scene, cam: cam, width: width, height: height, y0: yc, y1: yd, samples: samples, maxDepth: maxDepth, seedBase: 3)
-            let td: Task(List(Int)) = spawn renderBand(scene: scene, cam: cam, width: width, height: height, y0: yd, y1: bandEnd, samples: samples, maxDepth: maxDepth, seedBase: 4)
+        if nextTile < totalTiles {
+            # The four tile indices for this batch (clamp the tail so we never
+            # spawn for an out-of-range tile; a clamped duplicate just re-renders
+            # the same square harmlessly).
+            let i0: Int = nextTile
+            let i1: Int = nextTile + 1
+            let i2: Int = nextTile + 2
+            let i3: Int = nextTile + 3
+            if i1 >= totalTiles { i1 = totalTiles - 1 }
+            if i2 >= totalTiles { i2 = totalTiles - 1 }
+            if i3 >= totalTiles { i3 = totalTiles - 1 }
+            let x0: Int = (i0 % tilesX) * tileSize
+            let y0: Int = (i0 / tilesX) * tileSize
+            let w0: Int = tileSize
+            let h0: Int = tileSize
+            if x0 + w0 > width { w0 = width - x0 }
+            if y0 + h0 > height { h0 = height - y0 }
+            let x1: Int = (i1 % tilesX) * tileSize
+            let y1: Int = (i1 / tilesX) * tileSize
+            let w1: Int = tileSize
+            let h1: Int = tileSize
+            if x1 + w1 > width { w1 = width - x1 }
+            if y1 + h1 > height { h1 = height - y1 }
+            let x2: Int = (i2 % tilesX) * tileSize
+            let y2: Int = (i2 / tilesX) * tileSize
+            let w2: Int = tileSize
+            let h2: Int = tileSize
+            if x2 + w2 > width { w2 = width - x2 }
+            if y2 + h2 > height { h2 = height - y2 }
+            let x3: Int = (i3 % tilesX) * tileSize
+            let y3: Int = (i3 / tilesX) * tileSize
+            let w3: Int = tileSize
+            let h3: Int = tileSize
+            if x3 + w3 > width { w3 = width - x3 }
+            if y3 + h3 > height { h3 = height - y3 }
+            # Each worker gets a private deep copy of scene + cam (path-2), so the
+            # four threads share no mutable state.
+            let ta: Task(List(Int)) = spawn renderTile(scene: scene, cam: cam, width: width, height: height, tx0: x0, ty0: y0, tw: w0, th: h0, samples: samples, maxDepth: maxDepth, seedBase: 1)
+            let tb: Task(List(Int)) = spawn renderTile(scene: scene, cam: cam, width: width, height: height, tx0: x1, ty0: y1, tw: w1, th: h1, samples: samples, maxDepth: maxDepth, seedBase: 2)
+            let tc: Task(List(Int)) = spawn renderTile(scene: scene, cam: cam, width: width, height: height, tx0: x2, ty0: y2, tw: w2, th: h2, samples: samples, maxDepth: maxDepth, seedBase: 3)
+            let td: Task(List(Int)) = spawn renderTile(scene: scene, cam: cam, width: width, height: height, tx0: x3, ty0: y3, tw: w3, th: h3, samples: samples, maxDepth: maxDepth, seedBase: 4)
             let pa: List(Int) = ta.get()
             let pb: List(Int) = tb.get()
             let pc: List(Int) = tc.get()
             let pd: List(Int) = td.get()
-            appendBandAt(fb: fb, part: pa, rowOff: ya * width)
-            appendBandAt(fb: fb, part: pb, rowOff: yb * width)
-            appendBandAt(fb: fb, part: pc, rowOff: yc * width)
-            appendBandAt(fb: fb, part: pd, rowOff: yd * width)
-            nextRow = bandEnd
-            if nextRow >= height and doneMs is 0 {
+            writeTile(fb: fb, tile: pa, width: width, tx0: x0, ty0: y0, tw: w0, th: h0)
+            writeTile(fb: fb, tile: pb, width: width, tx0: x1, ty0: y1, tw: w1, th: h1)
+            writeTile(fb: fb, tile: pc, width: width, tx0: x2, ty0: y2, tw: w2, th: h2)
+            writeTile(fb: fb, tile: pd, width: width, tx0: x3, ty0: y3, tw: w3, th: h3)
+            nextTile = nextTile + 4
+            if nextTile >= totalTiles and doneMs is 0 {
                 doneMs = nowMs() - startMs
             }
         }
@@ -378,12 +417,13 @@ func main() {
         beginDrawing()
         clearBackground(color: { r: 10, g: 10, b: 14, a: 255 })
         drawTextureEx(texture: tex, position: { x: 0.0, y: 0.0 }, rotation: 0.0, scale: dispScale, tint: { r: 255, g: 255, b: 255, a: 255 })
-        let pct: Int = nextRow * 100 / height
+        let pct: Int = nextTile * 100 / totalTiles
+        if pct > 100 { pct = 100 }
         if doneMs > 0 {
-            drawText(text: "step 3 — {workers} threads — materials+camera — {width}x{height} — done in {doneMs}ms",
+            drawText(text: "step 3 | 4 threads | tiled | {width}x{height} | done in {doneMs}ms",
                      x: 12.0, y: 12.0, fontSize: 20.0, color: { r: 255, g: 255, b: 255, a: 255 })
         } else {
-            drawText(text: "step 3 — {workers} threads — materials+camera — {width}x{height} — {pct}%",
+            drawText(text: "step 3 | 4 threads | tiled | {width}x{height} | {pct}%",
                      x: 12.0, y: 12.0, fontSize: 20.0, color: { r: 255, g: 255, b: 255, a: 255 })
         }
         endDrawing()
