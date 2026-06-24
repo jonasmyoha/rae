@@ -33,23 +33,30 @@ Implemented so far (Live / bytecode VM only):
 - **`parallelLoop`** — reuses the `loop` grammar with a parallel flag. Compiled
   as a **sequential** loop on both backends for now (per "Live parallelLoop
   runs sequentially first"); real parallel execution awaits the C thread runtime.
-- **Compiled (C) backend** now runs `spawn`/`Task.get()` (and therefore
-  `taskScope`/`parallelLoop`) with **correct sequential semantics**: a
-  type-erased `RaeTask` runtime; `Task(T)` → `RaeTask*`; `spawn f(args)` runs
-  the call synchronously into an already-completed task; `get()` reads the
-  result. Same observable results as Live, not yet parallel.
+- **Compiled (C) backend** — `spawn`/`Task.get()`/`taskScope`/`parallelLoop`
+  all run. Type-erased `RaeTask` runtime; `Task(T)` → `RaeTask*`.
+  - **Real OS threads (path 1)** when every param of the spawn target is
+    captured *by value* in the C ABI (scalar any-mode-but-`mod`; enum
+    plain/own/copy): a per-function pthread thunk packs args by value and
+    `pthread_create`s; `get()` joins. Verified: two `slow(view Int,…)` workers
+    run concurrently with correct results.
+  - **Sequential fallback** for heap args / `mod` / `view`-of-enum (those are
+    pointers/coercion-sensitive) — runs synchronously into a completed task.
+    Same observable result, just not parallel.
+  - **Join-on-drop**: `rae_task_drop` joins+frees a `Task` local at scope exit
+    so a worker can't outlive its scope. The String temp pool is `__thread`
+    (concurrent workers no longer corrupt each other's interpolation).
 
-The **first milestone is complete** on both backends — `spawn`/`Task`/`get`,
-`taskScope`, `parallelLoop` all compile and run (Live; Compiled sequential).
+The **first milestone is complete** on both backends, and the compiled backend
+has **real parallelism for value-arg spawns**.
 
-Remaining: **real OS-thread parallelism in the compiled backend** — per-
-spawned-function pthread thunks (the runtime `RaeTask` + `pthread` join is
-already in place), with **by-value copying of `view`/`mod` scalar args** (in
-the C ABI a `view T` is a pointer, so a worker thread can't safely hold one).
-Then `Channel`, atomics, parallel `parallelLoop` over disjoint shards; and
-later `detach`, `taskScope` cancel-on-error/non-escape, and `parallelLoop`
-disjointness checking (needed once it's actually parallel). The Live VM could
-also gain real interleaving (cooperative scheduler) if needed.
+Remaining: extend compiled threads to heap/`mod`/`view`-enum args (needs the
+call-arg coercion — move/deep-copy/deref — replicated into the thunk; until
+then they're correctly sequential); make `g_mem_*` mem-stat counters atomic
+(currently a benign stats-only race under threads); `Channel`, atomics, truly
+parallel `parallelLoop` over disjoint shards; `detach`; `taskScope`
+cancel-on-error/non-escape; `parallelLoop` disjointness checking (once
+parallel). The Live VM could also gain real interleaving if needed.
 
 The design came out of a roundtable (Chattie / Clo / Gem) plus a final
 maintainer pass. It deliberately diverges from the roundtable on two points:
