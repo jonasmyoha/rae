@@ -1,4 +1,4 @@
-# Raytracer — Step 2: antialiasing + diffuse materials.
+# Raytracer — Step 2: antialiasing + diffuse materials (SDL3 desktop backend).
 #
 # "Ray Tracing in One Weekend" chapters 7-9: each pixel averages several
 # jittered samples (antialiasing), surfaces are Lambertian diffuse (rays bounce,
@@ -6,13 +6,12 @@
 # single-threaded.
 #
 # Modules: vec3 (shared Vec3), scene.rae (Sphere + albedo), render.rae
-# (sampling + bounces), and this window loop. Heavy at Full HD, so the
-# progressive fill is slow and clearly visible. Step 4 makes it parallel.
+# (sampling + bounces), and this window loop — presented through SDL3
+# (lib/sdl3.rae). Compiled-target only:
 #
-#   rae run --target compiled main.rae   (recommended; Live VM is much slower)
-
+#   rae run --target compiled main.rae
 import core
-import raylib
+import sdl3
 import vec3
 import scene
 import render
@@ -20,8 +19,6 @@ import render
 func main() {
     let width: Int = 1280
     let height: Int = 720
-    let winW: Int = 1280
-    let winH: Int = 720
     let samples: Int = 16
     let maxDepth: Int = 8
 
@@ -34,16 +31,13 @@ func main() {
         i = i + 1
     }
 
-    initWindow(width: winW, height: winH, title: "Rae raytracer — step 2 (diffuse + AA)")
-    setTargetFPS(fps: 60)
-    let tex: Texture = loadStreamTexture(width: width, height: height)
-    setTextureFilter(texture: tex, filter: 1)
-    let dispScale: Float = winW.toFloat() / width.toFloat()
+    sdlInitWindow(width: width, height: height, title: "Rae raytracer — step 2 (diffuse + AA)")
+    sdlSetTargetFPS(fps: 60)
 
     var nextRow: Int = 0
     let startMs: Int = nowMs()
     var doneMs: Int = 0
-    loop not windowShouldClose() {
+    loop not sdlShouldClose() {
         let frameStart: Int = nowMs()
         loop nextRow < height and nowMs() - frameStart <= 16 {
             renderRow(fb: fb, world: world, width: width, height: height, y: nextRow,
@@ -54,19 +48,15 @@ func main() {
             doneMs = nowMs() - startMs
         }
 
-        updateStreamTexture(texture: tex, pixels: fb.data, count: width * height)
-        beginDrawing()
-        clearBackground(color: { r: 10, g: 10, b: 14, a: 255 })
-        drawTextureEx(texture: tex, position: { x: 0.0, y: 0.0 }, rotation: 0.0, scale: dispScale, tint: { r: 255, g: 255, b: 255, a: 255 })
+        sdlUpdatePixels(pixels: fb.data, w: width, h: height)
+        sdlPresent()
+
         let pct: Int = nextRow * 100 / height
         if doneMs > 0 {
-            drawText(text: "step 2 | diffuse + {samples}spp | {width}x{height} | done in {doneMs}ms",
-                     x: 12.0, y: 12.0, fontSize: 20.0, color: { r: 255, g: 255, b: 255, a: 255 })
+            sdlSetTitle(title: "Rae step 2 (SDL3) | diffuse + {samples}spp | {width}x{height} | done in {doneMs}ms")
         } else {
-            drawText(text: "step 2 | diffuse + {samples}spp | {width}x{height} | {pct}%",
-                     x: 12.0, y: 12.0, fontSize: 20.0, color: { r: 255, g: 255, b: 255, a: 255 })
+            sdlSetTitle(title: "Rae step 2 (SDL3) | diffuse + {samples}spp | {width}x{height} | {pct}%")
         }
-        endDrawing()
     }
-    closeWindow()
+    sdlCloseWindow()
 }

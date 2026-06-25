@@ -15,7 +15,7 @@
 #   rae run --target compiled main.rae   (recommended — real threads)
 
 import core
-import raylib
+import sdl3
 import vec3
 import scene
 import camera
@@ -51,12 +51,8 @@ func main() {
         i = i + 1
     }
 
-    initWindow(width: winW, height: winH, title: "Rae raytracer — step 5 (emissive lights)")
-    setTargetFPS(fps: 60)
-    let texPrev: Texture = loadStreamTexture(width: prevW, height: prevH)
-    let texFinal: Texture = loadStreamTexture(width: finalW, height: finalH)
-    setTextureFilter(texture: texPrev, filter: 1)
-    setTextureFilter(texture: texFinal, filter: 1)
+    sdlInitWindow(width: winW, height: winH, title: "Rae raytracer — step 5 (emissive lights)")
+    sdlSetTargetFPS(fps: 60)
 
     # camera state (Z-up): position + yaw (about +Z) + pitch (about +X).
     var camPos: Vec3 = vec3(x: 0.0, y: -2.2, z: 0.7)
@@ -77,14 +73,14 @@ func main() {
     var maxDepth: Int = prevDepth
 
     var sampleCount: Int = 0
-    var prevMouseX: Int = getMouseX()
-    var prevMouseY: Int = getMouseY()
+    var prevMouseX: Int = sdlGetMouseX()
+    var prevMouseY: Int = sdlGetMouseY()
 
-    loop not windowShouldClose() {
+    loop not sdlShouldClose() {
         var moved: Bool = false
 
         # quality toggle (P) — fires once per press
-        if isKeyPressed(key: 80) {
+        if sdlIsKeyPressed(key: 80) {
             hiQ = not hiQ
             if hiQ {
                 width = finalW
@@ -99,7 +95,7 @@ func main() {
         }
 
         # reset camera (R)
-        if isKeyPressed(key: 82) {
+        if sdlIsKeyPressed(key: 82) {
             camPos = vec3(x: 0.0, y: -2.2, z: 0.7)
             yaw = pi / 2.0
             pitch = -0.12
@@ -107,54 +103,54 @@ func main() {
         }
 
         # keyboard movement
-        if isKeyDown(key: 87) {
+        if sdlIsKeyDown(key: 87) {
             camPos = vadd(a: camPos, b: vscale(a: fwd, s: moveStep))
             moved = true
         }
-        if isKeyDown(key: 83) {
+        if sdlIsKeyDown(key: 83) {
             camPos = vsub(a: camPos, b: vscale(a: fwd, s: moveStep))
             moved = true
         }
         let rgt: Vec3 = vnorm(a: vcross(a: fwd, b: worldUp))
-        if isKeyDown(key: 68) {
+        if sdlIsKeyDown(key: 68) {
             camPos = vadd(a: camPos, b: vscale(a: rgt, s: moveStep))
             moved = true
         }
-        if isKeyDown(key: 65) {
+        if sdlIsKeyDown(key: 65) {
             camPos = vsub(a: camPos, b: vscale(a: rgt, s: moveStep))
             moved = true
         }
-        if isKeyDown(key: 69) {
+        if sdlIsKeyDown(key: 69) {
             camPos = vadd(a: camPos, b: vscale(a: worldUp, s: moveStep))
             moved = true
         }
-        if isKeyDown(key: 81) {
+        if sdlIsKeyDown(key: 81) {
             camPos = vsub(a: camPos, b: vscale(a: worldUp, s: moveStep))
             moved = true
         }
 
         # arrow keys: look
-        if isKeyDown(key: 262) {
+        if sdlIsKeyDown(key: 262) {
             yaw = yaw - rotStep
             moved = true
         }
-        if isKeyDown(key: 263) {
+        if sdlIsKeyDown(key: 263) {
             yaw = yaw + rotStep
             moved = true
         }
-        if isKeyDown(key: 265) {
+        if sdlIsKeyDown(key: 265) {
             pitch = pitch + rotStep
             moved = true
         }
-        if isKeyDown(key: 264) {
+        if sdlIsKeyDown(key: 264) {
             pitch = pitch - rotStep
             moved = true
         }
 
         # mouse drag (hold left button) to look
-        let mx: Int = getMouseX()
-        let my: Int = getMouseY()
-        let dragging: Bool = isMouseButtonDown(button: 0)
+        let mx: Int = sdlGetMouseX()
+        let my: Int = sdlGetMouseY()
+        let dragging: Bool = sdlIsMouseButtonDown(button: 0)
         if dragging {
             let dx: Int = mx - prevMouseX
             let dy: Int = my - prevMouseY
@@ -211,35 +207,16 @@ func main() {
         if sampleCount > 0 {
             buildDisplay(fb: fb, accum: accum, pixels: width * height, sampleCount: sampleCount)
         }
-        let dispScale: Float = winW.toFloat() / width.toFloat()
-        beginDrawing()
-        clearBackground(color: { r: 8, g: 8, b: 12, a: 255 })
-        if hiQ {
-            updateStreamTexture(texture: texFinal, pixels: fb.data, count: width * height)
-            drawTextureEx(texture: texFinal, position: { x: 0.0, y: 0.0 }, rotation: 0.0, scale: dispScale, tint: { r: 255, g: 255, b: 255, a: 255 })
-        } else {
-            updateStreamTexture(texture: texPrev, pixels: fb.data, count: width * height)
-            drawTextureEx(texture: texPrev, position: { x: 0.0, y: 0.0 }, rotation: 0.0, scale: dispScale, tint: { r: 255, g: 255, b: 255, a: 255 })
-        }
+        # Upload the active framebuffer; the texture resizes itself when the
+        # preview/final resolution toggles, and stretches to fill the window.
+        sdlUpdatePixels(pixels: fb.data, w: width, h: height)
+        sdlPresent()
 
-        # live HUD: input + camera state (so any control issue is visible)
         var qlabel: String = "PREVIEW"
         if hiQ {
             qlabel = "FINAL"
         }
-        var mlabel: String = "up"
-        if dragging {
-            mlabel = "DOWN"
-        }
-        drawText(text: "step 5 | {qlabel} {width}x{height} | {sampleCount} spp | P quality  R reset",
-                 x: 12.0, y: 10.0, fontSize: 20.0, color: { r: 255, g: 255, b: 255, a: 255 })
-        drawText(text: "pos ({camPos.x}, {camPos.y}, {camPos.z})  yaw {yaw}  pitch {pitch}",
-                 x: 12.0, y: 34.0, fontSize: 18.0, color: { r: 180, g: 220, b: 255, a: 255 })
-        drawText(text: "WASD move  E/Q up-down  arrows/LMB-drag look   mouse {mlabel}",
-                 x: 12.0, y: 56.0, fontSize: 18.0, color: { r: 180, g: 220, b: 255, a: 255 })
-        endDrawing()
+        sdlSetTitle(title: "Rae step 5 (SDL3) | {qlabel} {width}x{height} | {sampleCount} spp | P quality  R reset  WASD/E-Q move  arrows/LMB-drag look")
     }
-    unloadTexture(texture: texPrev)
-    unloadTexture(texture: texFinal)
-    closeWindow()
+    sdlCloseWindow()
 }
