@@ -1,0 +1,60 @@
+# Raytracer — WASM threads (step W2): band-parallel renderer. Each Web Worker
+# instantiates this module with its own [bandY0, bandY1) row range (imported
+# from JS) and renders just those rows of the full imgW×imgH image, emitting
+# the band's RGB to stdout. The page assembles the bands into one canvas.
+import core
+import vec3
+import scene
+import camera
+import render
+
+func fbPixel(r: Int, g: Int, b: Int) extern
+func bandY0() extern ret Int
+func bandY1() extern ret Int
+func imgW() extern ret Int
+func imgH() extern ret Int
+func imgSamples() extern ret Int
+
+func clampf(x: view Float) ret Float {
+    if x < 0.0 { ret 0.0 }
+    if x > 1.0 { ret 1.0 }
+    ret x
+}
+
+func main() {
+    let width: Int = imgW()
+    let height: Int = imgH()
+    let samples: Int = imgSamples()
+    let y0: Int = bandY0()
+    let y1: Int = bandY1()
+    let maxDepth: Int = 12
+    let aspect: Float = width.toFloat() / height.toFloat()
+    let world: List(Sphere) = buildScene()
+    let camPos: Vec3 = vec3(x: -1.6, y: -1.2, z: 0.6)
+    let camTarget: Vec3 = vec3(x: 0.0, y: 1.0, z: 0.0)
+    let cam: Camera = buildCamera(pos: camPos, target: camTarget, vfovDeg: 45.0, aperture: 0.06, aspect: aspect)
+    # seed per band so the noise differs but is deterministic per row range
+    seed(n: y0 * 9781 + 1)
+    var y: Int = y0
+    loop y < y1 {
+        var x: Int = 0
+        loop x < width {
+            var acc: Vec3 = vec3(x: 0.0, y: 0.0, z: 0.0)
+            var s: Int = 0
+            loop s < samples {
+                let u: Float = (x.toFloat() + random()) / (width - 1).toFloat()
+                let v: Float = ((height - 1 - y).toFloat() + random()) / (height - 1).toFloat()
+                let r: Ray = makeRay(cam: cam, u: u, v: v)
+                acc = vadd(a: acc, b: rayColor(world: world, r: r, depth: maxDepth))
+                s = s + 1
+            }
+            let inv: Float = 1.0 / samples.toFloat()
+            let rr: Int = (255.99 * sqrt(x: clampf(x: acc.x * inv))).toInt()
+            let gg: Int = (255.99 * sqrt(x: clampf(x: acc.y * inv))).toInt()
+            let bb: Int = (255.99 * sqrt(x: clampf(x: acc.z * inv))).toInt()
+            fbPixel(r: rr, g: gg, b: bb)
+            x = x + 1
+        }
+        y = y + 1
+    }
+}

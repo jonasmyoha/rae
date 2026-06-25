@@ -37,7 +37,11 @@ trap 'rm -rf "$TMP"' EXIT
 EXTRA_C="$(ls "$PROJ"/*.c 2>/dev/null | grep -v 'rae_runtime.c' || true)"
 
 mkdir -p "$(dirname "$OUT")"
-"$CC" --target=wasm32-wasip1 --sysroot="$SYS" -O2 \
+# -msimd128: enable WASM SIMD (clang auto-vectorizes hot float loops); supported
+# by Node and all modern browsers. -Wl,--allow-undefined lets examples import
+# functions from JS (e.g. band params in the threaded raytracer) as env imports.
+"$CC" --target=wasm32-wasip1 --sysroot="$SYS" -O2 -msimd128 \
+  -Wl,--allow-undefined \
   -o "$OUT" "$TMP/out.c" "$TMP/rae_runtime.c" $EXTRA_C -I"$TMP"
 
 echo "wasm_build: $OUT ($(wc -c < "$OUT" | tr -d ' ') bytes)"
