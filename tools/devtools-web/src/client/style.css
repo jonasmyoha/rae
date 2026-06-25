@@ -1088,12 +1088,18 @@ button.btn-build-test:hover:not(:disabled) {
   width: min(100%, calc(var(--stage-max-h) * var(--arw) / var(--arh)));
   max-width: 100%;
   margin-inline: auto;
-  padding: 8px;
+  /* No padding/rounding: the canvas is the exact same aspect ratio, so it
+   * fills the stage edge-to-edge with square corners (no checkerboard ring or
+   * rounded-corner mismatch). The checkerboard only shows if content doesn't
+   * match (it won't, for these examples). */
+  padding: 0;
+  overflow: hidden;
   background:
     repeating-conic-gradient(#15161c 0% 25%, #101117 0% 50%) 50% / 24px 24px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 12px;
+  border-radius: 0;
 }
+.example-viewer__stage > #example-viewer-canvas { border-radius: 0; }
 #example-viewer-canvas {
   width: 100%;
   height: 100%;
