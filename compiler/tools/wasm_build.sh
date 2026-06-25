@@ -54,7 +54,7 @@ if [ "${WASM_THREADS:-0}" = "1" ]; then
 else
   # -msimd128: enable WASM SIMD (clang auto-vectorizes hot float loops); supported
   # by Node and all modern browsers. -Wl,--allow-undefined lets examples import
-  # functions from JS (e.g. band params in the threaded raytracer) as env imports.
+  # functions the host supplies from JS (e.g. fbPixel) as env imports.
   "$CC" --target=wasm32-wasip1 --sysroot="$SYS" -O2 -msimd128 \
     -Wl,--allow-undefined \
     -o "$OUT" "$TMP/out.c" "$TMP/rae_runtime.c" $EXTRA_C -I"$TMP"
