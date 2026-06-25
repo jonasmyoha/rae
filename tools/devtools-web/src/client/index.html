@@ -502,10 +502,15 @@
       <div class="app-view" data-view="examples">
         <canvas id="examples-bg-canvas" class="examples-bg-canvas"></canvas>
         <section class="panel panel--full examples-view">
-          <!-- Compact single toolbar: global run settings + per-example Run/Watch + status -->
-          <div class="ex-toolbar">
-            <div class="ex-toolbar__left">
-              <span class="ex-brand gradient-text">Examples</span>
+          <header class="examples-hero">
+            <div class="examples-hero__text">
+              <h2 class="marketing-title gradient-text">Examples</h2>
+              <p class="marketing-subtitle">High-performance logic, interactive simulations, and system design patterns.</p>
+            </div>
+          </header>
+
+          <div class="global-actions">
+            <div class="run-all-group">
               <label class="run-select">
                 <span class="run-select__label">Target</span>
                 <select id="example-target-select" class="run-select__input">
@@ -521,92 +526,89 @@
                   <option value="debug">Debug</option>
                 </select>
               </label>
-              <div class="example-target-actions" id="example-target-actions"></div>
-              <button id="stop-example-btn" type="button" class="btn-action-mini secondary" disabled>Stop</button>
+              <button id="run-all-examples-btn" class="btn-action-mini">Run all</button>
             </div>
-            <div class="ex-toolbar__right">
+            <div class="active-status-group">
               <div class="test-status" id="example-status-chip">Idle</div>
-              <button id="run-all-examples-btn" class="btn-action-mini secondary">Run all</button>
+              <button id="stop-example-btn" type="button" class="btn-action-mini secondary" disabled>Stop</button>
             </div>
           </div>
 
-          <div class="ex-body">
-            <aside class="ex-sidebar">
+          <div class="examples-layout">
+            <aside class="example-sidebar">
               <div class="example-list" id="example-list">
                 <p class="test-list-empty">Loading examples…</p>
               </div>
             </aside>
-
-            <main class="ex-workspace">
-              <div class="ex-tabs" role="tablist">
-                <h3 id="example-title" class="ex-tabs__title">Select an example</h3>
-                <div class="ex-tabs__group">
-                  <button class="ex-tab" type="button" role="tab" data-panel="preview" id="ex-tab-preview" hidden>Preview</button>
-                  <button class="ex-tab is-active" type="button" role="tab" data-panel="output">Output</button>
-                  <button class="ex-tab" type="button" role="tab" data-panel="source">Source</button>
-                  <div class="example-actions example-actions--secondary" id="example-custom-actions" hidden></div>
+            
+            <main class="example-main">
+              <div class="example-inspector">
+                <div class="example-header">
+                  <div class="example-header__info">
+                    <h3 id="example-title" class="edgy-title">Select example</h3>
+                    <p id="example-entry" class="example-entry"></p>
+                  </div>
+                  <div class="example-actions">
+                    <div class="example-target-actions" id="example-target-actions"></div>
+                  </div>
                 </div>
-              </div>
-              <p id="example-entry" class="ex-subtitle"></p>
 
-              <div class="ex-panels">
-                <section class="ex-panel" data-panel="preview">
-                  <div class="example-viewer" id="example-viewer">
-                    <div class="example-viewer__stage">
-                      <canvas id="example-viewer-canvas" width="480" height="270"></canvas>
-                    </div>
-                    <div class="example-viewer__status" id="example-viewer-status">Press Run to render in the browser.</div>
+                <section class="example-viewer" id="example-viewer" hidden>
+                  <div class="example-viewer__stage">
+                    <canvas id="example-viewer-canvas" width="480" height="270"></canvas>
                   </div>
+                  <div class="example-viewer__status" id="example-viewer-status">Press Run to render in the browser.</div>
                 </section>
+                
+                <div class="example-actions example-actions--secondary" id="example-custom-actions" hidden></div>
 
-                <section class="ex-panel is-active" data-panel="output">
-                  <div class="terminal-wrapper">
-                    <div class="terminal example-terminal" id="example-output" aria-live="polite">
-                      <div class="terminal-line">Select logic to see it in action.</div>
-                    </div>
+                <div class="terminal-wrapper">
+                  <div class="terminal example-terminal" id="example-output" aria-live="polite">
+                    <div class="terminal-line">Select logic to see it in action.</div>
                   </div>
-                  <div class="terminal-actions">
-                    <button class="secondary" id="copy-example-output-btn" type="button">
-                      <svg aria-hidden="true" viewBox="0 0 24 24" role="img" class="icon">
-                        <path d="M16 1H4a3 3 0 0 0-3 3v12h2V4a1 1 0 0 1 1-1h12z"></path>
-                        <path d="M20 5H8a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3zm1 15a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1z"></path>
-                      </svg>
-                      Copy output
-                    </button>
-                    <button class="secondary" id="copy-example-errors-btn" type="button">
-                      <svg aria-hidden="true" viewBox="0 0 24 24" role="img" class="icon">
-                        <path d="M16 1H4a3 3 0 0 0-3 3v12h2V4a1 1 0 0 1 1-1h12z"></path>
-                        <path d="M20 5H8a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3zm1 15a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1z"></path>
-                      </svg>
-                      Copy errors
-                    </button>
-                  </div>
-                  <div class="example-artifacts" id="example-artifacts">
-                    <h4 id="example-artifacts-title">Build artifacts</h4>
-                    <ul class="example-artifacts-list" id="example-artifacts-list"></ul>
-                  </div>
-                  <div class="example-downloads" id="example-downloads" hidden>
-                    <h4>Staged downloads</h4>
-                    <ul class="example-downloads-list" id="example-downloads-list"></ul>
-                  </div>
-                </section>
+                </div>
+                
+                <div class="terminal-actions">
+                  <button class="secondary" id="copy-example-output-btn" type="button">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" role="img" class="icon">
+                      <path d="M16 1H4a3 3 0 0 0-3 3v12h2V4a1 1 0 0 1 1-1h12z"></path>
+                      <path d="M20 5H8a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3zm1 15a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1z"></path>
+                    </svg>
+                    Copy output
+                  </button>
+                  <button class="secondary" id="copy-example-errors-btn" type="button">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" role="img" class="icon">
+                      <path d="M16 1H4a3 3 0 0 0-3 3v12h2V4a1 1 0 0 1 1-1h12z"></path>
+                      <path d="M20 5H8a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3zm1 15a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1z"></path>
+                    </svg>
+                    Copy errors
+                  </button>
+                </div>
 
-                <section class="ex-panel" data-panel="source">
-                  <div class="example-content">
-                    <div class="example-files" id="example-files"></div>
-                    <div class="example-source-view">
-                      <header class="source-view-header">
-                        <h4 id="example-source-title">Source</h4>
-                        <div class="example-source-actions">
-                          <button id="toggle-edit-example-btn" type="button" class="secondary mini">Edit source</button>
-                          <button id="save-example-btn" type="button" class="secondary mini" disabled>Save changes</button>
-                        </div>
-                      </header>
-                      <pre class="source-code" id="example-source-code"><code></code></pre>
-                      <textarea id="example-editor" class="example-editor" hidden></textarea>
-                    </div>
+                <div class="example-artifacts" id="example-artifacts">
+                  <h4 id="example-artifacts-title">Build artifacts</h4>
+                  <ul class="example-artifacts-list" id="example-artifacts-list"></ul>
+                </div>
+
+                <div class="example-downloads" id="example-downloads" hidden>
+                  <h4>Staged downloads</h4>
+                  <ul class="example-downloads-list" id="example-downloads-list"></ul>
+                </div>
+
+                <div class="example-content">
+                  <div class="example-files" id="example-files"></div>
+                  <div class="example-source-view">
+                    <header class="source-view-header">
+                      <h4 id="example-source-title">Source</h4>
+                      <div class="example-source-actions">
+                        <button id="toggle-edit-example-btn" type="button" class="secondary mini">Edit source</button>
+                        <button id="save-example-btn" type="button" class="secondary mini" disabled>Save changes</button>
+                      </div>
+                    </header>
+                    <pre class="source-code" id="example-source-code"><code></code></pre>
+                    <textarea id="example-editor" class="example-editor" hidden></textarea>
                   </div>
-                </section>
+                </div>
               </div>
             </main>
           </div>
