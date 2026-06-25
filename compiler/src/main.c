@@ -2143,7 +2143,10 @@ static bool build_c_backend_output(const char* entry_file,
 
   bool uses_webgpu = false;
   for (ModuleNode* node = graph.head; node; node = node->next) {
-      if (node->module_path && (strcmp(node->module_path, "webgpu") == 0 || strstr(node->module_path, "/webgpu.rae") || strstr(node->module_path, "\\webgpu.rae"))) {
+      // lib/webgpu.rae (raytracer-specific) OR lib/gpu.rae (generic compute) —
+      // both need wgpu-native linked. strstr("gpu.rae") matches both filenames.
+      if (node->module_path && (strcmp(node->module_path, "webgpu") == 0 || strcmp(node->module_path, "gpu") == 0 ||
+                                strstr(node->module_path, "gpu.rae"))) {
           uses_webgpu = true;
           break;
       }
