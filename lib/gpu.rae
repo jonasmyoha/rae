@@ -21,6 +21,12 @@ func gpuUniformU32(data: view Buffer(Int), count: Int) extern ret Int
 # Read-write storage buffer of `count` u32, copyable for readback.
 func gpuAllocU32(count: Int) extern ret Int
 
+# Overwrite an existing buffer's contents (same element count) — for per-frame
+# updates (e.g. a moving camera, a frame counter) without reallocating, so an
+# interactive/progressive loop reuses persistent GPU buffers.
+func gpuWriteF32(buf: Int, data: view Buffer(Float), count: Int) extern
+func gpuWriteU32(buf: Int, data: view Buffer(Int), count: Int) extern
+
 # --- Kernel + dispatch ---------------------------------------------------
 # Compile a WGSL compute kernel; `entry` is the @compute function name.
 func gpuKernel(wgsl: view String, entry: view String) extern ret Int
