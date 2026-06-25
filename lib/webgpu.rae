@@ -1,0 +1,16 @@
+# Native WebGPU (wgpu-native) — run a WGSL compute shader on the desktop GPU.
+#
+# Per docs/tech-stack-and-dependencies.md this is the WebGPU-everywhere path:
+# the SAME WGSL that runs in the browser (e.g. examples/49) runs natively here
+# via wgpu-native (Metal/Vulkan/D3D12). Implemented in the RAE_HAS_WEBGPU block
+# of compiler/runtime/rae_runtime.c; the build links libwgpu_native when an
+# example imports this module (mirrors how raylib/sdl3 are detected + linked).
+# Compiled-target only. Needs wgpu-native (WGPU_NATIVE, default ~/.local/wgpu-native).
+import core
+
+# Run a compute raytracer: `scene` is a packed f32-as-Float buffer (camera 19 +
+# spheres*10, as authored by the example), `wgsl` is the shader source. Fills
+# `fb` (width*height) with packed 0xRRGGBB pixels — ready for sdlUpdatePixels.
+func webgpuRaytrace(scene: view Buffer(Float), sceneLen: Int,
+                    fb: mod Buffer(Int), width: Int, height: Int,
+                    samples: Int, maxDepth: Int, wgsl: String) extern
