@@ -1,4 +1,4 @@
-.PHONY: all dev stop
+.PHONY: all dev stop wasm
 
 DEV_CMD=bun run scripts/dev.ts
 
@@ -10,3 +10,9 @@ dev:
 
 stop:
 	@bun run scripts/stop.ts
+
+# Build the Rae raytracer to WebAssembly for the live demo in the Raytracer
+# view (served at /wasm/raytracer.wasm). Needs wasi-sdk (set WASI_SDK).
+wasm:
+	@echo "Building Rae raytracer -> WASM..."
+	@../rae/compiler/tools/wasm_build.sh examples/46_raytracer_wasm_web
