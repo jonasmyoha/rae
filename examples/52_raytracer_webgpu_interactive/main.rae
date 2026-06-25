@@ -1,11 +1,12 @@
 # Raytracer — interactive + progressive, on the native GPU (G3). The GPU twin of
-# example 43: a continuously-refining path tracer, but each sample pass runs as
-# a WGSL compute dispatch on the native GPU (accum.wgsl via lib/gpu.rae) instead
-# of CPU threads. The HDR accumulation buffer lives on the GPU across frames;
-# moving the camera resets it. Presented through SDL3.
+# example 43: a continuously-refining path tracer where each frame is one WGSL
+# compute dispatch on the native GPU (accum.wgsl via lib/gpu.rae) instead of CPU
+# threads. The HDR accumulation buffer lives on the GPU across frames; moving the
+# camera — or resizing the window — resets it. Presented through SDL3.
 #
 # Controls (Blender Z-up): W/S fwd/back  A/D strafe  E/Q up/down  arrows look,
-# left-drag mouse look. Compiled-target only; needs wgpu-native + SDL3.
+# left-drag mouse look. The window is resizable — drag a corner and the tracer
+# re-renders at the new size. Compiled-target only; needs wgpu-native + SDL3.
 #
 #   rae run --target compiled main.rae
 import core
@@ -14,6 +15,15 @@ import sdl3
 import vec3
 import scene
 import camera
+
+# Handles for one GPU raytrace setup (rebuilt when the window resizes).
+type GpuRT {
+    sceneBuf: Int
+    accumBuf: Int
+    outBuf: Int
+    paramsBuf: Int
+    kernel: Int
+}
 
 func pushVec3(buf: mod List(Float), a: view Vec3) {
     buf.add(value: a.x)
@@ -45,13 +55,23 @@ func sceneFloats(cam: view Camera, world: view List(Sphere)) ret List(Float) {
     ret s
 }
 
+# (Re)create all GPU buffers + the kernel for a given pixel count. gpuReset()
+# frees the previous set first, so resizing doesn't leak handles.
+func buildGpuRT(wgsl: view String, scene: view List(Float), params: view List(Int), pixels: view Int) ret GpuRT {
+    gpuReset()
+    ret GpuRT {
+        sceneBuf: gpuStorageF32(data: scene.data, count: scene.length),
+        accumBuf: gpuAllocF32(count: pixels * 4),
+        outBuf: gpuAllocU32(count: pixels),
+        paramsBuf: gpuUniformU32(data: params.data, count: 8),
+        kernel: gpuKernel(wgsl: wgsl, entry: "main")
+    }
+}
+
 func rae_ext_rae_sys_read_file(path: String) extern ret String
 
 func main() {
-    let width: Int = 640
-    let height: Int = 360
     let maxDepth: Int = 8
-    let aspect: Float = width.toFloat() / height.toFloat()
 
     let world: List(Sphere) = buildScene()
 
@@ -64,41 +84,33 @@ func main() {
     let mouseSens: Float = 0.005
     let worldUp: Vec3 = vec3(x: 0.0, y: 0.0, z: 1.0)
     var fwd: Vec3 = vec3(x: cos(x: pitch) * cos(x: yaw), y: cos(x: pitch) * sin(x: yaw), z: sin(x: pitch))
-    var cam: Camera = buildCamera(pos: camPos, target: vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
 
     let wgsl: String = rae_ext_rae_sys_read_file(path: "examples/52_raytracer_webgpu_interactive/accum.wgsl")
 
-    # Persistent GPU buffers (created once, reused every frame).
-    let sf0: List(Float) = sceneFloats(cam: cam, world: world)
-    let sceneBuf: Int = gpuStorageF32(data: sf0.data, count: sf0.length)
-    let accumBuf: Int = gpuAllocF32(count: width * height * 4)
-    let outBuf: Int = gpuAllocU32(count: width * height)
-    let kernel: Int = gpuKernel(wgsl: wgsl, entry: "main")
+    sdlInitWindow(width: 640, height: 360, title: "Rae raytracer — interactive + progressive (native WebGPU)")
+    sdlSetTargetFPS(fps: 0)
+
+    # Use the renderer's actual pixel size (handles HiDPI + later resizes).
+    var width: Int = sdlWindowWidth()
+    var height: Int = sdlWindowHeight()
+    if width < 1 { width = 640 }
+    if height < 1 { height = 360 }
+    var aspect: Float = width.toFloat() / height.toFloat()
+    var cam: Camera = buildCamera(pos: camPos, target: vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
 
     let params: List(Int) = createList(cap: 8)
-    var pi0: Int = 0
-    loop pi0 < 8 { params.add(value: 0)  pi0 = pi0 + 1 }
+    var pinit: Int = 0
+    loop pinit < 8 { params.add(value: 0)  pinit = pinit + 1 }
     params.set(index: 0, value: width)
     params.set(index: 1, value: height)
     params.set(index: 3, value: maxDepth)
     params.set(index: 4, value: world.length)
-    let paramsBuf: Int = gpuUniformU32(data: params.data, count: 8)
 
-    let bufs: List(Int) = createList(cap: 4)
-    bufs.add(value: paramsBuf)
-    bufs.add(value: sceneBuf)
-    bufs.add(value: accumBuf)
-    bufs.add(value: outBuf)
-
-    let fb: List(Int) = createList(cap: width * height)
+    var rt: GpuRT = buildGpuRT(wgsl: wgsl, scene: sceneFloats(cam: cam, world: world), params: params, pixels: width * height)
+    var fb: List(Int) = createList(cap: width * height)
     var fi: Int = 0
     loop fi < width * height { fb.add(value: 0)  fi = fi + 1 }
 
-    sdlInitWindow(width: width, height: height, title: "Rae raytracer — interactive + progressive (native WebGPU)")
-    sdlSetTargetFPS(fps: 0)
-
-    let gx: Int = (width + 7) / 8
-    let gy: Int = (height + 7) / 8
     var sampleIndex: Int = 0
     var frame: Int = 0
     var prevMouseX: Int = sdlGetMouseX()
@@ -106,6 +118,24 @@ func main() {
 
     loop not sdlShouldClose() {
         var moved: Bool = false
+
+        # Window resize: re-render at the new size, reset accumulation.
+        let ww: Int = sdlWindowWidth()
+        let wh: Int = sdlWindowHeight()
+        if ww > 0 and wh > 0 and (ww > width or ww < width or wh > height or wh < height) {
+            width = ww
+            height = wh
+            aspect = width.toFloat() / height.toFloat()
+            cam = buildCamera(pos: camPos, target: vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
+            params.set(index: 0, value: width)
+            params.set(index: 1, value: height)
+            rt = buildGpuRT(wgsl: wgsl, scene: sceneFloats(cam: cam, world: world), params: params, pixels: width * height)
+            fb = createList(cap: width * height)
+            fi = 0
+            loop fi < width * height { fb.add(value: 0)  fi = fi + 1 }
+            sampleIndex = 0
+        }
+
         if sdlIsKeyDown(key: 87) { camPos = vadd(a: camPos, b: vscale(a: fwd, s: moveStep))  moved = true }
         if sdlIsKeyDown(key: 83) { camPos = vsub(a: camPos, b: vscale(a: fwd, s: moveStep))  moved = true }
         let rgt: Vec3 = vnorm(a: vcross(a: fwd, b: worldUp))
@@ -134,20 +164,27 @@ func main() {
             if pitch < -1.5 { pitch = -1.5 }
             fwd = vec3(x: cos(x: pitch) * cos(x: yaw), y: cos(x: pitch) * sin(x: yaw), z: sin(x: pitch))
             cam = buildCamera(pos: camPos, target: vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
-            let sf: List(Float) = sceneFloats(cam: cam, world: world)
-            gpuWriteF32(buf: sceneBuf, data: sf.data, count: sf.length)
+            gpuWriteF32(buf: rt.sceneBuf, data: sceneFloats(cam: cam, world: world).data, count: 19 + world.length * 10)
             sampleIndex = 0
         }
 
         params.set(index: 2, value: sampleIndex)
         params.set(index: 5, value: frame)
-        gpuWriteU32(buf: paramsBuf, data: params.data, count: 8)
-        gpuRun(kernel: kernel, bufs: bufs.data, bufCount: 4, gx: gx, gy: gy, gz: 1)
-        gpuDownloadU32(buf: outBuf, out: fb.data, count: width * height)
+        gpuWriteU32(buf: rt.paramsBuf, data: params.data, count: 8)
+
+        let bufs: List(Int) = createList(cap: 4)
+        bufs.add(value: rt.paramsBuf)
+        bufs.add(value: rt.sceneBuf)
+        bufs.add(value: rt.accumBuf)
+        bufs.add(value: rt.outBuf)
+        let gx: Int = (width + 7) / 8
+        let gy: Int = (height + 7) / 8
+        gpuRun(kernel: rt.kernel, bufs: bufs.data, bufCount: 4, gx: gx, gy: gy, gz: 1)
+        gpuDownloadU32(buf: rt.outBuf, out: fb.data, count: width * height)
 
         sdlUpdatePixels(pixels: fb.data, w: width, h: height)
         sdlPresent()
-        sdlSetTitle(title: "Rae interactive GPU path tracer | {width}x{height} | {sampleIndex} spp | WASD/E-Q move, arrows/drag look")
+        sdlSetTitle(title: "Rae interactive GPU path tracer | {width}x{height} | {sampleIndex} spp | WASD/E-Q move, arrows/drag look, resize")
         sampleIndex = sampleIndex + 1
         frame = frame + 1
     }
