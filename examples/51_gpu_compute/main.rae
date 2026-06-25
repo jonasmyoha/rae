@@ -1,0 +1,50 @@
+# GPU compute (G3) — generic, NOT a raytracer. Proves lib/gpu.rae dispatches an
+# arbitrary WGSL kernel on the native GPU via wgpu-native: build an input array
+# in Rae, run out[i] = in[i]*in[i] + 1 on the GPU (square.wgsl), read it back,
+# and verify. Headless — no window. Compiled-target only; needs wgpu-native.
+#
+#   rae run --target compiled main.rae
+import core
+import io
+import gpu
+
+# Raw file read (plain String) — avoids the opt-String/none codegen bug.
+func rae_ext_rae_sys_read_file(path: String) extern ret String
+
+func main() {
+    let n: Int = 1024
+
+    let input: List(Float) = createList(Float, cap: n)
+    var i: Int = 0
+    loop i < n {
+        input.add(value: i.toFloat())
+        i = i + 1
+    }
+
+    let wgsl: String = rae_ext_rae_sys_read_file(path: "examples/51_gpu_compute/square.wgsl")
+
+    let inBuf: Int = gpuStorageF32(data: input.data, count: n)
+    let outBuf: Int = gpuAllocF32(count: n)
+    let kernel: Int = gpuKernel(wgsl: wgsl, entry: "main")
+
+    let bufs: List(Int) = createList(cap: 2)
+    bufs.add(value: inBuf)
+    bufs.add(value: outBuf)
+    let groups: Int = (n + 63) / 64
+    gpuRun(kernel: kernel, bufs: bufs.data, bufCount: 2, gx: groups, gy: 1, gz: 1)
+
+    let result: List(Float) = createList(Float, cap: n)
+    i = 0
+    loop i < n {
+        result.add(value: 0.0)
+        i = i + 1
+    }
+    gpuDownloadF32(buf: outBuf, out: result.data, count: n)
+
+    log("GPU compute on the native GPU (out[i] = i*i + 1):")
+    log("  out[0]    = {result.at(index: 0)}    (expect 1)")
+    log("  out[7]    = {result.at(index: 7)}    (expect 50)")
+    log("  out[50]   = {result.at(index: 50)}   (expect 2501)")
+    log("  out[100]  = {result.at(index: 100)}  (expect 10001)")
+    gpuReset()
+}
