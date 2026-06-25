@@ -86,3 +86,6 @@
 - [ ] Prototype: iPhone PoC app with OTA updates — Capacitor-style WKWebView shell running the Rae→WASM app, WASM/JS bundle hosted remotely and updated over-the-air without App Store resubmission (native shell fixed, WASM layer updatable). Confirm the App-Store-legal split.
 - [ ] Prototype (if needed): one Rae→C native plugin driven at control-rate (e.g. audio) to validate the partition-by-data-rate bridge; Rae generates both ends.
 - [ ] Later: WebGPU path from the WASM app (GPU compute / GPU raytracer step 6).
+
+- [ ] Strategy: cross-platform tech stack & dependency policy decided — see docs/tech-stack-and-dependencies.md. Preference ordering Rae > C > any-lang-behind-clean-C-API > Rust > C++ > Obj-C; own small/controllable, buy hard domains, all foreign code behind Rae-owned APIs. Relax strict no-C++/no-Rust. Intended stack: SDL3 (platform) + WebGPU-everywhere/WGSL (render) + miniaudio (audio) + Rae-owned layers.
+- [ ] Deprecate raylib: build Rae Platform/Render/2D/Audio layers, migrate examples off raylib, then drop the dependency. May keep ONE raylib example only if it stays cheap to build; otherwise remove entirely.
