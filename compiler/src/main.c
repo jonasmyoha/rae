@@ -155,6 +155,7 @@ static bool build_c_backend_output(const char* entry_file,
                                    bool no_implicit,
                                    bool* out_uses_raylib,
                                    bool* out_uses_sdl3,
+                                   bool* out_uses_webgpu,
                                    WatchSources* out_sources);
 static bool build_vm_output(const char* entry_file,
                                const char* project_root,
@@ -2092,6 +2093,7 @@ static bool build_c_backend_output(const char* entry_file,
                                    bool no_implicit,
                                    bool* out_uses_raylib,
                                    bool* out_uses_sdl3,
+                                   bool* out_uses_webgpu,
                                    WatchSources* out_sources) {
   diag_reset();
   Arena* arena = arena_create(64 * 1024 * 1024);
@@ -2138,6 +2140,15 @@ static bool build_c_backend_output(const char* entry_file,
       }
   }
   if (out_uses_sdl3) *out_uses_sdl3 = uses_sdl3;
+
+  bool uses_webgpu = false;
+  for (ModuleNode* node = graph.head; node; node = node->next) {
+      if (node->module_path && (strcmp(node->module_path, "webgpu") == 0 || strstr(node->module_path, "/webgpu.rae") || strstr(node->module_path, "\\webgpu.rae"))) {
+          uses_webgpu = true;
+          break;
+      }
+  }
+  if (out_uses_webgpu) *out_uses_webgpu = uses_webgpu;
 
   CompilerContext ctx;
   compiler_init(&ctx, arena);
@@ -2411,6 +2422,7 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
                                  const char* out_bin,
                                  bool uses_raylib,
                                  bool uses_sdl3,
+                                 bool uses_webgpu,
                                  int profile) {
   char runtime_dir[PATH_MAX];
   snprintf(runtime_dir, sizeof(runtime_dir), "%s", RAE_RUNTIME_SOURCE_DIR);
@@ -2419,6 +2431,23 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
   // SDL3 (lib/sdl3.rae): define the runtime block + link libSDL3 only when the
   // program imports it (brew-installed at /opt/homebrew, not toolchain-bundled).
   const char* sdl3_flags = uses_sdl3 ? "-DRAE_HAS_SDL3 -lSDL3" : "";
+  // Native WebGPU (lib/webgpu.rae): link wgpu-native + the macOS frameworks it
+  // needs, only when imported. Vendored at $WGPU_NATIVE (default ~/.local/
+  // wgpu-native); dylib + rpath so the binary finds it at run time.
+  char wgpu_flags[PATH_MAX * 2] = {0};
+  if (uses_webgpu) {
+    const char* wg = getenv("WGPU_NATIVE");
+    char wgbuf[PATH_MAX];
+    if (!wg || !*wg) {
+      const char* home = getenv("HOME"); if (!home) home = ".";
+      snprintf(wgbuf, sizeof(wgbuf), "%s/.local/wgpu-native", home);
+      wg = wgbuf;
+    }
+    snprintf(wgpu_flags, sizeof(wgpu_flags),
+             "-DRAE_HAS_WEBGPU -I%s/include -L%s/lib -lwgpu_native -Wl,-rpath,%s/lib "
+             "-framework Metal -framework QuartzCore -framework CoreFoundation -framework Foundation",
+             wg, wg, wg);
+  }
   // release: optimize and strip asserts; dev/debug: no opt + symbols so
   // a profiler/debugger reads the generated C and runtime cleanly.
   const char* opt_flags = (profile == BUILD_PROFILE_DEV)
@@ -2448,8 +2477,8 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
   }
 
   char cmd[PATH_MAX * 4];
-  snprintf(cmd, sizeof(cmd), "gcc -std=c11 %s -w %s %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib /opt/homebrew/lib/libraylib.a -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL %s %s/rae_runtime.c%s -o %s",
-           opt_flags, raylib_define, sdl3_flags, runtime_dir, c_path, runtime_dir, extra_c_files, out_bin);
+  snprintf(cmd, sizeof(cmd), "gcc -std=c11 %s -w %s %s %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib /opt/homebrew/lib/libraylib.a -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL %s %s/rae_runtime.c%s -o %s",
+           opt_flags, raylib_define, sdl3_flags, wgpu_flags, runtime_dir, c_path, runtime_dir, extra_c_files, out_bin);
 
   if (system(cmd) != 0) {
     fprintf(stderr, "error: failed to compile C output\n");
@@ -2471,11 +2500,12 @@ static int run_compiled_file(const RunOptions* run_opts, const char* project_roo
 
   bool uses_raylib = false;
   bool uses_sdl3 = false;
-  if (!build_c_backend_output(file_path, project_root, temp_c, run_opts->no_implicit, &uses_raylib, &uses_sdl3, NULL)) {
+  bool uses_webgpu = false;
+  if (!build_c_backend_output(file_path, project_root, temp_c, run_opts->no_implicit, &uses_raylib, &uses_sdl3, &uses_webgpu, NULL)) {
     return 1;
   }
 
-  if (!gcc_link_c_to_binary(file_path, temp_c, temp_bin, uses_raylib, uses_sdl3, run_opts->profile)) {
+  if (!gcc_link_c_to_binary(file_path, temp_c, temp_bin, uses_raylib, uses_sdl3, uses_webgpu, run_opts->profile)) {
     unlink(temp_c);
     return 1;
   }
@@ -2776,9 +2806,9 @@ static bool watch_build_into_dir(const char* entry,
   // Pessimistic: link with raylib on. raylib is bundled with the
   // toolchain and a few unused KB is fine; in exchange the supervisor
   // doesn't need to plumb the uses-raylib flag through the subprocess.
-  // SDL3 is NOT pessimistically linked (not toolchain-bundled): watch-mode of
-  // an SDL3 example isn't supported; use `rae run --target compiled`.
-  if (!gcc_link_c_to_binary(entry, c_path, out_bin_path, true, false, profile)) return false;
+  // SDL3 / WebGPU are NOT pessimistically linked (not toolchain-bundled):
+  // watch-mode of those examples isn't supported; use `rae run --target compiled`.
+  if (!gcc_link_c_to_binary(entry, c_path, out_bin_path, true, false, false, profile)) return false;
   return true;
 }
 
@@ -3183,6 +3213,7 @@ static int run_command(const char* cmd, int argc, char** argv) {
                                       build_opts.out_path,
                                       build_opts.no_implicit,
                                       &dummy_uses_raylib,
+                                      NULL,
                                       NULL,
                                       NULL) ?
                    0 :

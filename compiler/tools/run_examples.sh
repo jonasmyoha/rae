@@ -33,14 +33,20 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
       # Link raylib statically so GLFW symbols bundled in libraylib.a
       # (glfwWaitEventsTimeout, glfwPostEmptyEvent, ...) resolve. The
       # shared libraylib.dylib does not export those.
-      # Define + link both desktop backends so every example links regardless
-      # of which it imports: raylib (statically, for the bundled GLFW symbols)
-      # and SDL3 (lib/sdl3.rae). The sdl* and raylib functions have distinct
-      # names, so both runtime blocks compile together without collision.
+      # Define + link the desktop backends so every example links regardless of
+      # which it imports: raylib (statically, for the bundled GLFW symbols),
+      # SDL3 (lib/sdl3.rae), and native WebGPU (lib/webgpu.rae, via wgpu-native).
+      # All use distinct symbol names, so the runtime blocks compile together.
+      # WebGPU is only added when wgpu-native is present (WGPU_NATIVE, default
+      # ~/.local/wgpu-native), so the suite still runs without it (example 50
+      # would then fail to link, others pass).
+      WGPU="${WGPU_NATIVE:-$HOME/.local/wgpu-native}"
+      WGPU_FLAGS=""
+      [ -f "$WGPU/lib/libwgpu_native.dylib" ] && WGPU_FLAGS="-DRAE_HAS_WEBGPU -I$WGPU/include -L$WGPU/lib -lwgpu_native -Wl,-rpath,$WGPU/lib -framework Metal -framework QuartzCore -framework Foundation"
       if gcc -O2 -o "$TMP_OUT/app" "$TMP_OUT/out.c" "$TMP_OUT/rae_runtime.c" \
          $([ -f "$TMP_OUT/monocypher.c" ] && echo "$TMP_OUT/monocypher.c") \
          $(ls "$PROJECT_DIR"/*.c 2>/dev/null | grep -v "rae_runtime.c" | grep -v "main_compiled.c" || true) \
-         -I"$TMP_OUT" -I/opt/homebrew/include -L/opt/homebrew/lib -DRAE_HAS_RAYLIB -DRAE_HAS_SDL3 \
+         -I"$TMP_OUT" -I/opt/homebrew/include -L/opt/homebrew/lib -DRAE_HAS_RAYLIB -DRAE_HAS_SDL3 $WGPU_FLAGS \
          /opt/homebrew/lib/libraylib.a -lSDL3 -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL > "$TMP_OUT/link.log" 2>&1; then
         echo "PASS: $EXAMPLE_NAME"
         ((PASSED++))
