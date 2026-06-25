@@ -36,6 +36,13 @@
       "rebuildCommand": "cd compiler && make clean && make",
       "exampleRunCommand": "./compiler/bin/rae build --target hybrid --out {{OUTDIR}} {{ENTRY}}",
       "exampleBuildCommand": "./compiler/bin/rae build --target hybrid --out {{OUTDIR}} {{ENTRY}}"
+    },
+    {
+      "id": "wasm",
+      "label": "WASM (WebAssembly)",
+      "description": "Rae → C → wasm32-wasip1 (wasi-sdk), run headless via Node WASI. Headless examples only. Needs wasi-sdk (WASI_SDK, default ~/.local/wasi-sdk).",
+      "exampleRunCommand": "compiler/tools/wasm_build.sh {{ENTRY_DIR}} {{ENTRY}} {{OUTDIR}}/app.wasm && node compiler/tools/wasm_run.mjs --echo {{OUTDIR}}/app.wasm",
+      "exampleBuildCommand": "compiler/tools/wasm_build.sh {{ENTRY_DIR}} {{ENTRY}} {{OUTDIR}}/app.wasm"
     }
   ]
 }
