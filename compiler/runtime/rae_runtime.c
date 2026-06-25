@@ -2842,6 +2842,9 @@ static int64_t g_sdl_headless_ms = 0;          /* >0 => auto-close after this bu
 static int64_t g_sdl_target_fps = 0;           /* >0 => cap present rate */
 static int64_t g_sdl_last_present_ms = 0;
 static unsigned char g_sdl_pressed[SDL_SCANCODE_COUNT]; /* went-down-this-frame edges */
+static unsigned char g_sdl_keydown[SDL_SCANCODE_COUNT]; /* held state, from key down/up events */
+static unsigned char g_sdl_mouse[8];                    /* held state, by SDL button index (1=L,2=M,3=R) */
+static bool g_sdl_mouse_captured = false;
 
 /* Map raylib/GLFW key codes (letters = ASCII uppercase, arrows = 262-265, plus
  * a few common keys) to SDL scancodes so ported examples keep their key ints. */
@@ -2884,16 +2887,47 @@ void rae_ext_sdlSetTargetFPS(int64_t fps) {
     g_sdl_target_fps = fps > 0 ? fps : 0;
 }
 
+/* Held key/mouse state is tracked from explicit down/up EVENTS (not the live
+ * SDL_GetKeyboardState/SDL_GetMouseState snapshots) so a release is never lost:
+ *  - on window focus loss the OS stops sending our up events -> clear all held
+ *    state, else a key/button held at focus-out would stick forever;
+ *  - while any mouse button is held we SDL_CaptureMouse so a drag that releases
+ *    OUTSIDE the window still delivers its button-up (the stuck-drag bug). */
 rae_Bool rae_ext_sdlShouldClose(void) {
     memset(g_sdl_pressed, 0, sizeof(g_sdl_pressed));
     SDL_Event ev;
     rae_Bool quit = false;
     while (SDL_PollEvent(&ev)) {
-        if (ev.type == SDL_EVENT_QUIT) quit = true;
-        else if (ev.type == SDL_EVENT_KEY_DOWN) {
-            if (ev.key.key == SDLK_ESCAPE) quit = true;
-            if (!ev.key.repeat && ev.key.scancode < SDL_SCANCODE_COUNT)
-                g_sdl_pressed[ev.key.scancode] = 1;  /* edge for isKeyPressed */
+        switch (ev.type) {
+            case SDL_EVENT_QUIT: quit = true; break;
+            case SDL_EVENT_KEY_DOWN:
+                if (ev.key.key == SDLK_ESCAPE) quit = true;
+                if (ev.key.scancode < SDL_SCANCODE_COUNT) {
+                    g_sdl_keydown[ev.key.scancode] = 1;
+                    if (!ev.key.repeat) g_sdl_pressed[ev.key.scancode] = 1;  /* edge */
+                }
+                break;
+            case SDL_EVENT_KEY_UP:
+                if (ev.key.scancode < SDL_SCANCODE_COUNT) g_sdl_keydown[ev.key.scancode] = 0;
+                break;
+            case SDL_EVENT_MOUSE_BUTTON_DOWN:
+                if (ev.button.button < 8) g_sdl_mouse[ev.button.button] = 1;
+                if (!g_sdl_mouse_captured) { SDL_CaptureMouse(true); g_sdl_mouse_captured = true; }
+                break;
+            case SDL_EVENT_MOUSE_BUTTON_UP: {
+                if (ev.button.button < 8) g_sdl_mouse[ev.button.button] = 0;
+                bool any = false;
+                for (int b = 0; b < 8; b++) if (g_sdl_mouse[b]) any = true;
+                if (!any && g_sdl_mouse_captured) { SDL_CaptureMouse(false); g_sdl_mouse_captured = false; }
+                break;
+            }
+            case SDL_EVENT_WINDOW_FOCUS_LOST:
+                /* never see the up events while unfocused -> nothing stays stuck */
+                memset(g_sdl_keydown, 0, sizeof(g_sdl_keydown));
+                memset(g_sdl_mouse, 0, sizeof(g_sdl_mouse));
+                if (g_sdl_mouse_captured) { SDL_CaptureMouse(false); g_sdl_mouse_captured = false; }
+                break;
+            default: break;
         }
     }
     if (quit) return true;
@@ -2908,15 +2942,14 @@ int64_t rae_ext_sdlGetMouseY(void) {
     float x = 0, y = 0; SDL_GetMouseState(&x, &y); return (int64_t)y;
 }
 rae_Bool rae_ext_sdlIsMouseButtonDown(int64_t button) {
-    float x, y; SDL_MouseButtonFlags m = SDL_GetMouseState(&x, &y);
-    Uint32 mask = button == 1 ? SDL_BUTTON_RMASK : (button == 2 ? SDL_BUTTON_MMASK : SDL_BUTTON_LMASK);
-    return (m & mask) != 0;
+    /* raylib button (0=L,1=R,2=M) -> SDL button index (1=L,2=M,3=R). */
+    int sdlb = button == 1 ? SDL_BUTTON_RIGHT : (button == 2 ? SDL_BUTTON_MIDDLE : SDL_BUTTON_LEFT);
+    return sdlb < 8 && g_sdl_mouse[sdlb] != 0;
 }
 rae_Bool rae_ext_sdlIsKeyDown(int64_t key) {
     SDL_Scancode sc = rae_sdl_scancode(key);
-    if (sc == SDL_SCANCODE_UNKNOWN) return false;
-    const bool* ks = SDL_GetKeyboardState(NULL);
-    return ks && ks[sc];
+    if (sc == SDL_SCANCODE_UNKNOWN || sc >= SDL_SCANCODE_COUNT) return false;
+    return g_sdl_keydown[sc] != 0;
 }
 rae_Bool rae_ext_sdlIsKeyPressed(int64_t key) {
     SDL_Scancode sc = rae_sdl_scancode(key);
