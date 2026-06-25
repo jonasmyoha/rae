@@ -2067,11 +2067,24 @@ const RUN_TARGET_KEY = "rae_example_target";
 const RUN_PROFILE_KEY = "rae_example_profile";
 function getGlobalTarget() { return exampleTargetSelect?.value || "live"; }
 function getGlobalProfile() { return exampleProfileSelect?.value || "release"; }
+// Profile (Release/Debug) only changes the Compiled target's gcc -O level;
+// Live and WASM have no debug/release variants, so grey it out for them.
+function syncProfileEnabled() {
+  if (!exampleProfileSelect) return;
+  const t = getGlobalTarget();
+  const usesProfile = t === "compiled" || t.startsWith("compiled-");
+  exampleProfileSelect.disabled = !usesProfile;
+  exampleProfileSelect.closest(".run-select")?.classList.toggle("is-disabled", !usesProfile);
+  exampleProfileSelect.title = usesProfile
+    ? "Build profile for the Compiled target"
+    : "Profile only applies to the Compiled target";
+}
 if (exampleTargetSelect) {
   const saved = localStorage.getItem(RUN_TARGET_KEY);
   if (saved) exampleTargetSelect.value = saved;
   exampleTargetSelect.addEventListener("change", () => {
     localStorage.setItem(RUN_TARGET_KEY, exampleTargetSelect.value);
+    syncProfileEnabled();
     // Re-render so Run/Watch availability reflects the new target.
     updateExampleButtons();
   });
@@ -2083,6 +2096,7 @@ if (exampleProfileSelect) {
     localStorage.setItem(RUN_PROFILE_KEY, exampleProfileSelect.value);
   });
 }
+syncProfileEnabled();
 
 runAllExamplesBtn?.addEventListener("click", () => runAllExamples());
 
@@ -2270,9 +2284,10 @@ closeBatchReportBtn?.addEventListener("click", () => hideBatchReport());
 async function triggerExampleRun(mode = "run", targetId = null, actionId = null) {
   const example = getSelectedExample();
   if (!example) return;
-  // Explicit targetId (run-all / actions) wins; otherwise use the global
-  // Target dropdown. resolveExampleTargetId falls back to a supported target.
-  const resolvedTargetId = resolveExampleTargetId(example, targetId ?? getGlobalTarget());
+  // Honor the chosen target directly (global dropdown, or explicit from
+  // run-all/actions). No silent fallback — the supportedTargets guard below
+  // blocks genuinely-unsupported combos (e.g. a raylib example on WASM).
+  const resolvedTargetId = targetId ?? getGlobalTarget();
   const target = resolvedTargetId ? getTargetById(resolvedTargetId) : null;
   if (!target) {
     setExampleStatus("No targets configured", "is-failure");
