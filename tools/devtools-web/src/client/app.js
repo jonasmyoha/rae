@@ -1928,6 +1928,100 @@ async function runWasmSpawn(example) {
   }
 }
 
+// WebGPU compute raytracer: the scene is authored in Rae (run the wasm to get
+// the packed f32 scene buffer), the per-pixel path tracing runs as a WGSL
+// compute shader on the GPU (raytrace.wgsl). Used for examples flagged webgpu.
+async function runWebGPU(example) {
+  const canvas = document.getElementById("example-viewer-canvas");
+  const statusEl = document.getElementById("example-viewer-status");
+  const d = example.display;
+  if (!canvas || !d) return;
+  showExampleViewer(example);
+  exampleRunActive = true;
+  setExampleStatus("Starting WebGPU…", "is-running", "WebGPU");
+  if (statusEl) statusEl.textContent = "checking WebGPU…";
+  updateExampleButtons();
+  try {
+    if (!navigator.gpu) throw new Error("WebGPU not available in this browser (navigator.gpu missing)");
+    const adapter = await navigator.gpu.requestAdapter();
+    if (!adapter) throw new Error("no WebGPU adapter (GPU unavailable)");
+    const device = await adapter.requestDevice();
+
+    // 1) Author the scene in Rae: build the wasm + run it to get the f32 buffer.
+    if (statusEl) statusEl.textContent = "building scene (Rae)…";
+    const entry = resolveExampleEntry(example, "wasm");
+    const wres = await fetch(`/api/examples/wasm?entry=${encodeURIComponent(entry)}`);
+    if (!wres.ok) throw new Error("scene build failed: " + (await wres.text()).slice(0, 200));
+    const stdout = await runWasmCaptureStdout(await wres.arrayBuffer());
+    const sceneBytes = Uint8Array.from(stdout);
+    const sceneF32 = new Float32Array(sceneBytes.buffer, 0, sceneBytes.length >> 2);
+    const sphereCount = (sceneF32.length - 19) / 10;
+
+    // 2) Fetch the WGSL kernel.
+    const sres = await fetch(`/api/examples/source?path=${encodeURIComponent(example.id + "/raytrace.wgsl")}`);
+    if (!sres.ok) throw new Error("could not load raytrace.wgsl");
+    const wgsl = (await sres.json()).contents;
+
+    if (statusEl) statusEl.textContent = "compiling shader + dispatching…";
+    const W = d.width, H = d.height, SAMPLES = 32, MAX_DEPTH = 12;
+    const t0 = performance.now();
+
+    const module = device.createShaderModule({ code: wgsl });
+    const info = await module.getCompilationInfo();
+    const errors = info.messages.filter((m) => m.type === "error");
+    if (errors.length) throw new Error("WGSL: " + errors.map((m) => `${m.lineNum}:${m.linePos} ${m.message}`).join("; "));
+
+    const pipeline = device.createComputePipeline({ layout: "auto", compute: { module, entryPoint: "main" } });
+
+    const params = new Uint32Array([W, H, SAMPLES, MAX_DEPTH, sphereCount, 0, 0, 0]);
+    const paramsBuf = device.createBuffer({ size: params.byteLength, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    device.queue.writeBuffer(paramsBuf, 0, params);
+
+    const sceneBuf = device.createBuffer({ size: Math.max(16, sceneF32.byteLength), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    device.queue.writeBuffer(sceneBuf, 0, sceneF32);
+
+    const outBytes = W * H * 4;
+    const outBuf = device.createBuffer({ size: outBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+    const readBuf = device.createBuffer({ size: outBytes, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+
+    const bindGroup = device.createBindGroup({
+      layout: pipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: paramsBuf } },
+        { binding: 1, resource: { buffer: sceneBuf } },
+        { binding: 2, resource: { buffer: outBuf } }
+      ]
+    });
+
+    const enc = device.createCommandEncoder();
+    const pass = enc.beginComputePass();
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, bindGroup);
+    pass.dispatchWorkgroups(Math.ceil(W / 8), Math.ceil(H / 8));
+    pass.end();
+    enc.copyBufferToBuffer(outBuf, 0, readBuf, 0, outBytes);
+    device.queue.submit([enc.finish()]);
+
+    await readBuf.mapAsync(GPUMapMode.READ);
+    const pixels = new Uint8ClampedArray(readBuf.getMappedRange().slice(0));
+    readBuf.unmap();
+    const ms = (performance.now() - t0).toFixed(0);
+
+    const ctx = canvas.getContext("2d");
+    const img = new ImageData(pixels, W, H); // packed RGBA8 already in [R,G,B,A] order
+    ctx.putImageData(img, 0, 0);
+    if (statusEl) statusEl.textContent = `rendered ${W}×${H} · WGSL compute on GPU · ${SAMPLES} spp · ${ms} ms`;
+    setExampleStatus("Rendered · GPU", "is-success", "WebGPU");
+  } catch (e) {
+    if (statusEl) statusEl.textContent = "error: " + e.message;
+    appendExampleOutput("WebGPU run error: " + e.message, "stderr");
+    setExampleStatus("WebGPU error", "is-failure", "WebGPU");
+  } finally {
+    exampleRunActive = false;
+    updateExampleButtons();
+  }
+}
+
 function getExampleTargetIds(example) {
   if (!example) return [];
   const supported = Array.isArray(example.supportedTargets) ? example.supportedTargets : null;
@@ -2548,7 +2642,8 @@ async function triggerExampleRun(mode = "run", targetId = null, actionId = null)
   // Display examples on the WASM target render in-browser to the canvas viewer
   // rather than running headless on the server (which would only emit bytes).
   if (mode === "run" && resolvedTargetId === "wasm" && example.display && !isBatchRunning) {
-    if (example.wasmRealThreads) await runWasmSpawn(example);
+    if (example.webgpu) await runWebGPU(example);
+    else if (example.wasmRealThreads) await runWasmSpawn(example);
     else await runWasmInBrowser(example);
     return;
   }
