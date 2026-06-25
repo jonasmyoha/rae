@@ -1,0 +1,36 @@
+# Generic GPU compute over native WebGPU (wgpu-native) — the Rae "Render/compute
+# API" seam from docs/tech-stack-and-dependencies.md, one level above the
+# raytracer-specific webgpuRaytrace (lib/webgpu.rae). Author a WGSL kernel +
+# storage/uniform buffers in Rae, dispatch it, read results back. The SAME WGSL
+# runs in the browser; here it runs on the desktop GPU (Metal/Vulkan/D3D12).
+#
+# Buffers + kernels are opaque integer handles (1-based; 0 = failure) into
+# runtime tables. Numeric data crosses as Rae Float (f64) or Int (i64) buffers
+# and is narrowed to f32 / u32 for the GPU. Implemented in the RAE_HAS_WEBGPU
+# block of compiler/runtime/rae_runtime.c. Compiled-target only; needs
+# wgpu-native (WGPU_NATIVE, default ~/.local/wgpu-native).
+import core
+
+# --- Buffers (handles) ---------------------------------------------------
+# Read-only storage buffer filled from a Float[] (narrowed to f32).
+func gpuStorageF32(data: view Buffer(Float), count: Int) extern ret Int
+# Read-write storage buffer of `count` f32, also copyable for readback.
+func gpuAllocF32(count: Int) extern ret Int
+# Uniform buffer filled from an Int[] (narrowed to u32) — e.g. params.
+func gpuUniformU32(data: view Buffer(Int), count: Int) extern ret Int
+# Read-write storage buffer of `count` u32, copyable for readback.
+func gpuAllocU32(count: Int) extern ret Int
+
+# --- Kernel + dispatch ---------------------------------------------------
+# Compile a WGSL compute kernel; `entry` is the @compute function name.
+func gpuKernel(wgsl: view String, entry: view String) extern ret Int
+# Bind `bufCount` buffer handles to @binding(0..n) in order and dispatch a
+# gx*gy*gz grid of workgroups. Blocks until the GPU finishes.
+func gpuRun(kernel: Int, bufs: view Buffer(Int), bufCount: Int, gx: Int, gy: Int, gz: Int) extern
+
+# --- Readback ------------------------------------------------------------
+func gpuDownloadF32(buf: Int, out: mod Buffer(Float), count: Int) extern
+func gpuDownloadU32(buf: Int, out: mod Buffer(Int), count: Int) extern
+
+# Release every buffer + kernel handle (device stays cached for reuse).
+func gpuReset() extern
