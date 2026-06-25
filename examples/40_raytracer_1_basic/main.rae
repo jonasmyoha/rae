@@ -1,19 +1,21 @@
-# Raytracer — Step 1: barebones, single-threaded.
+# Raytracer — Step 1: barebones, single-threaded — on the SDL3 desktop backend.
 #
 # "Ray Tracing in One Weekend" chapters 4-6: spheres on a ground plane shaded
 # by surface normal, over a sky gradient. One ray per pixel, no materials, no
 # bounces. Single-threaded — the baseline the later steps build on.
 #
-# Split across modules: vec3 (the shared Vec3 type), scene.rae (the Sphere
-# type + scene), render.rae (intersection + shading), and this window loop.
-# Rendered at Full HD and shown progressively via a streaming texture, so the
-# image fills in top-to-bottom instead of one dump at the end.
+# This is the SDL3 port (lib/sdl3.rae): the same render core, presented through
+# an SDL3 window + streaming texture instead of raylib. Compiled-target only
+# (the Live VM has no SDL bindings):
 #
-#   rae run --target compiled main.rae   (recommended)
-#   rae run main.rae                      (Live VM)
-
+#   rae run --target compiled main.rae
+#
+# Split across modules: vec3 (the shared Vec3 type), scene.rae (the Sphere type
+# + scene), render.rae (intersection + shading), and this window loop. Rendered
+# at 1280x720 and shown progressively via a streaming texture, so the image
+# fills in top-to-bottom instead of one dump at the end.
 import core
-import raylib
+import sdl3
 import vec3
 import scene
 import render
@@ -21,8 +23,6 @@ import render
 func main() {
     let width: Int = 1280
     let height: Int = 720
-    let winW: Int = 1280
-    let winH: Int = 720
 
     let world: List(Sphere) = buildScene()
 
@@ -35,16 +35,12 @@ func main() {
         i = i + 1
     }
 
-    initWindow(width: winW, height: winH, title: "Rae raytracer — step 1 (single-threaded)")
-    setTargetFPS(fps: 60)
-    let tex: Texture = loadStreamTexture(width: width, height: height)
-    setTextureFilter(texture: tex, filter: 1)
-    let dispScale: Float = winW.toFloat() / width.toFloat()
+    sdlInitWindow(width: width, height: height, title: "Rae raytracer — step 1 (SDL3, single-threaded)")
 
     var nextRow: Int = 0
     let startMs: Int = nowMs()
     var doneMs: Int = 0
-    loop not windowShouldClose() {
+    loop not sdlShouldClose() {
         # Render a time-bounded slice of scanlines each frame (Rae has no
         # `break`, so the budget is part of the loop guard).
         let frameStart: Int = nowMs()
@@ -56,19 +52,15 @@ func main() {
             doneMs = nowMs() - startMs
         }
 
-        updateStreamTexture(texture: tex, pixels: fb.data, count: width * height)
-        beginDrawing()
-        clearBackground(color: { r: 10, g: 10, b: 14, a: 255 })
-        drawTextureEx(texture: tex, position: { x: 0.0, y: 0.0 }, rotation: 0.0, scale: dispScale, tint: { r: 255, g: 255, b: 255, a: 255 })
+        sdlUpdatePixels(pixels: fb.data, count: width * height)
+        sdlPresent()
+
         let pct: Int = nextRow * 100 / height
         if doneMs > 0 {
-            drawText(text: "step 1 | single-threaded | {width}x{height} | done in {doneMs}ms",
-                     x: 12.0, y: 12.0, fontSize: 20.0, color: { r: 255, g: 255, b: 255, a: 255 })
+            sdlSetTitle(title: "Rae step 1 (SDL3) | {width}x{height} | done in {doneMs}ms")
         } else {
-            drawText(text: "step 1 | single-threaded | {width}x{height} | {pct}%",
-                     x: 12.0, y: 12.0, fontSize: 20.0, color: { r: 255, g: 255, b: 255, a: 255 })
+            sdlSetTitle(title: "Rae step 1 (SDL3) | {width}x{height} | {pct}%")
         }
-        endDrawing()
     }
-    closeWindow()
+    sdlCloseWindow()
 }
