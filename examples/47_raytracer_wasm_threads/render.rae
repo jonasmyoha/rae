@@ -1,0 +1,182 @@
+# Render core for step 3: materials (diffuse / metal / glass), recursive path
+# tracing, and the tiled worker used by the four quadrant threads.
+import core
+import vec3
+import scene
+import camera
+
+func randomUnit() ret Vec3 {
+    let a: Float = random() * tau
+    let z: Float = random() * 2.0 - 1.0
+    let r: Float = sqrt(x: 1.0 - z * z)
+    ret vec3(x: r * cos(x: a), y: r * sin(x: a), z: z)
+}
+
+func vreflect(v: view Vec3, n: view Vec3) ret Vec3 {
+    let d: Float = 2.0 * vdot(a: v, b: n)
+    ret vsub(a: v, b: vscale(a: n, s: d))
+}
+
+func vrefract(uv: view Vec3, n: view Vec3, etaRatio: view Float) ret Vec3 {
+    var cosT: Float = vdot(a: vneg(a: uv), b: n)
+    if cosT > 1.0 {
+        cosT = 1.0
+    }
+    let perp: Vec3 = vscale(a: vadd(a: uv, b: vscale(a: n, s: cosT)), s: etaRatio)
+    let pl: Float = 0.0 - sqrt(x: abs(n: 1.0 - vlenSq(a: perp)))
+    ret vadd(a: perp, b: vscale(a: n, s: pl))
+}
+
+func schlick(cosine: view Float, refIdx: view Float) ret Float {
+    var r0: Float = (1.0 - refIdx) / (1.0 + refIdx)
+    r0 = r0 * r0
+    ret r0 + (1.0 - r0) * pow(base: 1.0 - cosine, exp: 5.0)
+}
+
+func hitSphere(s: view Sphere, r: view Ray) ret Float {
+    let oc: Vec3 = vsub(a: r.origin, b: s.center)
+    let a: Float = vdot(a: r.dir, b: r.dir)
+    let halfB: Float = vdot(a: oc, b: r.dir)
+    let c: Float = vdot(a: oc, b: oc) - s.radius * s.radius
+    let disc: Float = halfB * halfB - a * c
+    if disc < 0.0 {
+        ret -1.0
+    }
+    ret (-halfB - sqrt(x: disc)) / a
+}
+
+func rayColor(world: view List(Sphere), r: view Ray, depth: view Int) ret Vec3 {
+    if depth <= 0 {
+        ret vec3(x: 0.0, y: 0.0, z: 0.0)
+    }
+    var best: Float = 1000000.0
+    var hitIdx: Int = -1
+    var i: Int = 0
+    loop i < world.length {
+        let sp: Sphere = world.at(index: i)
+        let t: Float = hitSphere(s: sp, r: r)
+        if t > 0.001 {
+            if t < best {
+                best = t
+                hitIdx = i
+            }
+        }
+        i = i + 1
+    }
+    if hitIdx < 0 {
+        let u: Vec3 = vnorm(a: r.dir)
+        let tt: Float = 0.5 * (u.z + 1.0)
+        ret vec3(x: (1.0 - tt) + tt * 0.5, y: (1.0 - tt) + tt * 0.7, z: (1.0 - tt) + tt * 1.0)
+    }
+    let sp: Sphere = world.at(index: hitIdx)
+    let p: Vec3 = vadd(a: r.origin, b: vscale(a: r.dir, s: best))
+    let n: Vec3 = vscale(a: vsub(a: p, b: sp.center), s: 1.0 / sp.radius)
+    var scatter: Vec3 = vec3(x: 0.0, y: 0.0, z: 0.0)
+    var atten: Vec3 = sp.material.albedo
+    if sp.material.kind is 0 {
+        scatter = vadd(a: n, b: randomUnit())
+    } else {
+        if sp.material.kind is 1 {
+            let ud: Vec3 = vnorm(a: r.dir)
+            scatter = vadd(a: vreflect(v: ud, n: n), b: vscale(a: randomUnit(), s: sp.material.fuzz))
+            if vdot(a: scatter, b: n) <= 0.0 {
+                ret vec3(x: 0.0, y: 0.0, z: 0.0)
+            }
+        } else {
+            atten = vec3(x: 1.0, y: 1.0, z: 1.0)
+            let ud: Vec3 = vnorm(a: r.dir)
+            var frontN: Vec3 = n
+            var etaRatio: Float = 1.0 / sp.material.ior
+            if vdot(a: ud, b: n) > 0.0 {
+                frontN = vneg(a: n)
+                etaRatio = sp.material.ior
+            }
+            var cosT: Float = vdot(a: vneg(a: ud), b: frontN)
+            if cosT > 1.0 {
+                cosT = 1.0
+            }
+            let sinT: Float = sqrt(x: 1.0 - cosT * cosT)
+            if etaRatio * sinT > 1.0 or schlick(cosine: cosT, refIdx: etaRatio) > random() {
+                scatter = vreflect(v: ud, n: frontN)
+            } else {
+                scatter = vrefract(uv: ud, n: frontN, etaRatio: etaRatio)
+            }
+        }
+    }
+    let bounce: Ray = { origin: p, dir: scatter }
+    ret vmul(a: atten, b: rayColor(world: world, r: bounce, depth: depth - 1))
+}
+
+# One worker: renders the tile [tx0,tx0+tw) x [ty0,ty0+th), returns tw*th packed
+# pixels (row-major). Private deep copy of world + a by-value Camera; own RNG.
+func renderTile(world: own List(Sphere), cam: own Camera, width: view Int, height: view Int,
+                tx0: view Int, ty0: view Int, tw: view Int, th: view Int,
+                samples: view Int, maxDepth: view Int, seedBase: view Int) ret List(Int) {
+    seed(n: seedBase + ty0 * 9781 + tx0 * 17)
+    let out: List(Int) = createList(cap: tw * th)
+    var ry: Int = 0
+    loop ry < th {
+        let py: Int = ty0 + ry
+        var rx: Int = 0
+        loop rx < tw {
+            let px: Int = tx0 + rx
+            var acc: Vec3 = { x: 0.0, y: 0.0, z: 0.0 }
+            var sIdx: Int = 0
+            loop sIdx < samples {
+                let u: Float = (px.toFloat() + random()) / (width - 1).toFloat()
+                let v: Float = ((height - 1 - py).toFloat() + random()) / (height - 1).toFloat()
+                let r: Ray = makeRay(cam: cam, u: u, v: v)
+                acc = vadd(a: acc, b: rayColor(world: world, r: r, depth: maxDepth))
+                sIdx = sIdx + 1
+            }
+            let inv: Float = 1.0 / samples.toFloat()
+            let ir: Int = (255.99 * sqrt(x: acc.x * inv)).toInt()
+            let ig: Int = (255.99 * sqrt(x: acc.y * inv)).toInt()
+            let ib: Int = (255.99 * sqrt(x: acc.z * inv)).toInt()
+            out.add(value: ir * 65536 + ig * 256 + ib)
+            rx = rx + 1
+        }
+        ry = ry + 1
+    }
+    ret out
+}
+
+func writeTile(fb: mod List(Int), tile: view List(Int), width: view Int,
+               tx0: view Int, ty0: view Int, tw: view Int, th: view Int) {
+    var ry: Int = 0
+    loop ry < th {
+        let dst: Int = (ty0 + ry) * width + tx0
+        let src: Int = ry * tw
+        var rx: Int = 0
+        loop rx < tw {
+            fb.set(index: dst + rx, value: tile.get(index: src + rx))
+            rx = rx + 1
+        }
+        ry = ry + 1
+    }
+}
+
+func quadTotal(qw: view Int, qh: view Int, tileSize: view Int) ret Int {
+    let tx: Int = (qw + tileSize - 1) / tileSize
+    let ty: Int = (qh + tileSize - 1) / tileSize
+    ret tx * ty
+}
+
+# Bounds of tile `idx` within a quadrant: [tx0, ty0, tw, th] as a List(Int).
+func quadTile(qx0: view Int, qy0: view Int, qw: view Int, qh: view Int, tileSize: view Int, idx: view Int) ret List(Int) {
+    let qtx: Int = (qw + tileSize - 1) / tileSize
+    let col: Int = idx % qtx
+    let row: Int = idx / qtx
+    let tx0: Int = qx0 + col * tileSize
+    let ty0: Int = qy0 + row * tileSize
+    var tw: Int = tileSize
+    var th: Int = tileSize
+    if tx0 + tw > qx0 + qw { tw = qx0 + qw - tx0 }
+    if ty0 + th > qy0 + qh { th = qy0 + qh - ty0 }
+    let res: List(Int) = createList(cap: 4)
+    res.add(value: tx0)
+    res.add(value: ty0)
+    res.add(value: tw)
+    res.add(value: th)
+    ret res
+}
