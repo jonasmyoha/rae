@@ -93,6 +93,21 @@ const server = Bun.serve<SocketData>({
       });
     }
 
+    // Live WASM raytracer demo: serve the Rae->C->wasm artifact built by
+    // `../rae/compiler/tools/wasm_build.sh` (run `make wasm`). The Raytracer
+    // view path-traces it in the browser via a small WASI shim.
+    if (url.pathname === "/wasm/raytracer.wasm" && req.method === "GET") {
+      const wasmPath = path.join(examplesRoot, "46_raytracer_wasm_web", "build", "app.wasm");
+      const file = Bun.file(wasmPath);
+      if (!(await file.exists())) {
+        return new Response(
+          "raytracer wasm not built — run `make wasm` (builds via ../rae/compiler/tools/wasm_build.sh)",
+          { status: 404 }
+        );
+      }
+      return new Response(file, { headers: { "Content-Type": "application/wasm" } });
+    }
+
     if (url.pathname === "/api/tests/run" && req.method === "POST") {
       const payload = await safeJson(req);
       const targetId = typeof payload.targetId === "string" ? payload.targetId : undefined;
@@ -500,6 +515,7 @@ function getContentType(filePath: string): string {
   if (filePath.endsWith(".js")) return "text/javascript; charset=utf-8";
   if (filePath.endsWith(".json")) return "application/json; charset=utf-8";
   if (filePath.endsWith(".svg")) return "image/svg+xml";
+  if (filePath.endsWith(".wasm")) return "application/wasm";
   return "application/octet-stream";
 }
 

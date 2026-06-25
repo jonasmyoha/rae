@@ -2829,6 +2829,7 @@ function setActiveView(targetView) {
     startExamplesBackgroundAnimation();
   } else if (resolvedView === "raytracer") {
     renderRaytracerSection();
+    setupWasmRaytracerDemo();
   }
 
   if (resolvedView !== "examples") {
@@ -2872,6 +2873,94 @@ function renderRaytracerSection() {
     fragment.appendChild(button);
   });
   listEl.appendChild(fragment);
+}
+
+// Live WASM raytracer: fetch the Rae->C->wasm module served at
+// /wasm/raytracer.wasm and path-trace it in the browser. A tiny WASI
+// (preview1) shim captures the program's stdout (raw RGB framebuffer) and
+// blits it to the canvas. Same approach as examples/46_raytracer_wasm_web.
+const WASM_RT = { bytes: null, running: false, wired: false };
+
+async function setupWasmRaytracerDemo() {
+  const canvas = document.getElementById("wasm-rt-canvas");
+  const runBtn = document.getElementById("wasm-rt-run");
+  const statusEl = document.getElementById("wasm-rt-status");
+  if (!canvas || !runBtn || WASM_RT.wired) return;
+  WASM_RT.wired = true;
+
+  const W = canvas.width, H = canvas.height;
+  const ctx = canvas.getContext("2d");
+  const setStatus = (t) => { if (statusEl) statusEl.textContent = t; };
+
+  const render = async () => {
+    if (WASM_RT.running) return;
+    WASM_RT.running = true;
+    runBtn.disabled = true;
+    try {
+      if (!WASM_RT.bytes) {
+        setStatus("fetching app.wasm…");
+        const res = await fetch("/wasm/raytracer.wasm");
+        if (!res.ok) {
+          setStatus("not built — run `make wasm` in rae-devtools-web");
+          return;
+        }
+        WASM_RT.bytes = await res.arrayBuffer();
+      }
+      setStatus("rendering (CPU path tracer in WASM)…");
+
+      const stdout = [];
+      let mem;
+      const dv = () => new DataView(mem.buffer);
+      const u8 = () => new Uint8Array(mem.buffer);
+      class Exit { constructor(c) { this.code = c; } }
+      const wasi = {
+        proc_exit(c) { throw new Exit(c); },
+        fd_write(fd, iovs, n, nw) {
+          const v = dv(), b = u8(); let w = 0;
+          for (let i = 0; i < n; i++) {
+            const p = iovs + i * 8, buf = v.getUint32(p, true), len = v.getUint32(p + 4, true);
+            if (fd === 1) for (let j = 0; j < len; j++) stdout.push(b[buf + j]);
+            w += len;
+          }
+          v.setUint32(nw, w, true); return 0;
+        },
+        args_sizes_get(c, b) { dv().setUint32(c, 0, true); dv().setUint32(b, 0, true); return 0; },
+        args_get() { return 0; },
+        environ_sizes_get(c, b) { dv().setUint32(c, 0, true); dv().setUint32(b, 0, true); return 0; },
+        environ_get() { return 0; },
+        fd_prestat_get() { return 8; }, fd_prestat_dir_name() { return 8; },
+        fd_fdstat_get() { return 0; }, fd_close() { return 0; },
+        fd_seek() { return 0; }, fd_read() { return 0; }, clock_time_get() { return 0; },
+        random_get(p, l) { const b = u8(); for (let i = 0; i < l; i++) b[p + i] = (Math.random() * 256) | 0; return 0; }
+      };
+
+      const t0 = performance.now();
+      const { instance } = await WebAssembly.instantiate(WASM_RT.bytes, { wasi_snapshot_preview1: wasi });
+      mem = instance.exports.memory;
+      try { instance.exports._start(); } catch (e) { if (!(e instanceof Exit)) throw e; }
+      const ms = (performance.now() - t0).toFixed(0);
+
+      if (stdout.length !== W * H * 3) {
+        setStatus(`unexpected output: ${stdout.length} bytes`);
+        return;
+      }
+      const img = ctx.createImageData(W, H);
+      for (let i = 0, p = 0; i < W * H; i++) {
+        img.data[i * 4] = stdout[p++]; img.data[i * 4 + 1] = stdout[p++];
+        img.data[i * 4 + 2] = stdout[p++]; img.data[i * 4 + 3] = 255;
+      }
+      ctx.putImageData(img, 0, 0);
+      setStatus(`done — ${W}×${H}, rendered in WASM in ${ms} ms`);
+    } catch (e) {
+      setStatus("error: " + e.message);
+      console.error("[wasm-raytracer]", e);
+    } finally {
+      WASM_RT.running = false;
+      runBtn.disabled = false;
+    }
+  };
+
+  runBtn.addEventListener("click", render);
 }
 
 function renderWhyExamples() {
