@@ -74,6 +74,7 @@ export type ExampleDescriptor = {
   category?: string;
   display?: { width: number; height: number };
   wasmRealThreads?: boolean;
+  webgpu?: boolean;
 };
 
 export type ExampleRunMode = "run" | "watch" | "build" | "action";
