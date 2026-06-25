@@ -2814,6 +2814,106 @@ int64_t rae_ext_measureTextWithFont(int64_t slot, rae_String text, double fontSi
 #endif
 
 /* ============================================================
+ * SDL3 desktop platform layer — see lib/sdl3.rae (RAE_HAS_SDL3).
+ *
+ * A handle-free, single-window windowing/present backend parallel to the
+ * raylib block: init creates window + renderer + a streaming texture (kept in
+ * file-static globals), updatePixels expands the packed-0xRRGGBB framebuffer to
+ * RGBA8 and uploads it, present draws it, shouldClose pumps events.
+ * Compiled-target only — the Live VM has no SDL bindings.
+ *
+ * Headless verification: RAE_SDL_SCREENSHOT=<path.bmp> saves the last uploaded
+ * frame on close; RAE_SDL_HEADLESS_MS=<ms> auto-closes after that wall-clock
+ * budget — so an agent/CI run can render + snapshot without a human closing the
+ * window.
+ * ============================================================ */
+#ifdef RAE_HAS_SDL3
+#include <SDL3/SDL.h>
+
+static SDL_Window*   g_sdl_win = NULL;
+static SDL_Renderer* g_sdl_ren = NULL;
+static SDL_Texture*  g_sdl_tex = NULL;
+static int g_sdl_w = 0, g_sdl_h = 0;
+static unsigned char* g_sdl_scratch = NULL;   /* RGBA8 expansion of the last frame */
+static int64_t g_sdl_scratch_px = 0;
+static int64_t g_sdl_start_ms = 0;
+static int64_t g_sdl_headless_ms = 0;          /* >0 => auto-close after this budget */
+
+void rae_ext_sdlInitWindow(int64_t width, int64_t height, rae_String title) {
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+        fprintf(stderr, "[sdl] init failed: %s\n", SDL_GetError());
+        return;
+    }
+    g_sdl_w = (int)width; g_sdl_h = (int)height;
+    const char* t = title.data ? (const char*)title.data : "Rae (SDL3)";
+    if (!SDL_CreateWindowAndRenderer(t, (int)width, (int)height, 0, &g_sdl_win, &g_sdl_ren)) {
+        fprintf(stderr, "[sdl] window/renderer failed: %s\n", SDL_GetError());
+        return;
+    }
+    g_sdl_tex = SDL_CreateTexture(g_sdl_ren, SDL_PIXELFORMAT_RGBA32,
+                                  SDL_TEXTUREACCESS_STREAMING, (int)width, (int)height);
+    if (!g_sdl_tex) fprintf(stderr, "[sdl] texture failed: %s\n", SDL_GetError());
+    g_sdl_start_ms = rae_ext_nowMs();
+    const char* hm = getenv("RAE_SDL_HEADLESS_MS");
+    if (hm) g_sdl_headless_ms = (int64_t)atoll(hm);
+}
+
+rae_Bool rae_ext_sdlShouldClose(void) {
+    SDL_Event ev;
+    while (SDL_PollEvent(&ev)) {
+        if (ev.type == SDL_EVENT_QUIT) return true;
+        if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.key == SDLK_ESCAPE) return true;
+    }
+    if (g_sdl_headless_ms > 0 && rae_ext_nowMs() - g_sdl_start_ms >= g_sdl_headless_ms) return true;
+    return false;
+}
+
+void rae_ext_sdlUpdatePixels(const int64_t* pixels, int64_t count) {
+    if (!pixels || count <= 0) return;
+    if (count > g_sdl_scratch_px) {
+        unsigned char* grown = (unsigned char*)realloc(g_sdl_scratch, (size_t)count * 4);
+        if (!grown) return;
+        g_sdl_scratch = grown; g_sdl_scratch_px = count;
+    }
+    for (int64_t i = 0; i < count; i++) {
+        int64_t p = pixels[i];
+        g_sdl_scratch[i * 4 + 0] = (unsigned char)((p >> 16) & 0xFF);  /* R */
+        g_sdl_scratch[i * 4 + 1] = (unsigned char)((p >> 8) & 0xFF);   /* G */
+        g_sdl_scratch[i * 4 + 2] = (unsigned char)(p & 0xFF);          /* B */
+        g_sdl_scratch[i * 4 + 3] = 255;                                /* A */
+    }
+    if (g_sdl_tex) SDL_UpdateTexture(g_sdl_tex, NULL, g_sdl_scratch, g_sdl_w * 4);
+}
+
+void rae_ext_sdlPresent(void) {
+    if (!g_sdl_ren) return;
+    SDL_RenderClear(g_sdl_ren);
+    if (g_sdl_tex) SDL_RenderTexture(g_sdl_ren, g_sdl_tex, NULL, NULL);
+    SDL_RenderPresent(g_sdl_ren);
+}
+
+void rae_ext_sdlSetTitle(rae_String title) {
+    if (g_sdl_win && title.data) SDL_SetWindowTitle(g_sdl_win, (const char*)title.data);
+}
+
+void rae_ext_sdlCloseWindow(void) {
+    /* Headless snapshot: dump the last uploaded frame as a BMP (reliable —
+     * straight from our pixel buffer, not a GPU read-back). */
+    const char* shot = getenv("RAE_SDL_SCREENSHOT");
+    if (shot && g_sdl_scratch && g_sdl_w > 0 && g_sdl_h > 0) {
+        SDL_Surface* s = SDL_CreateSurfaceFrom(g_sdl_w, g_sdl_h, SDL_PIXELFORMAT_RGBA32,
+                                               g_sdl_scratch, g_sdl_w * 4);
+        if (s) { SDL_SaveBMP(s, shot); SDL_DestroySurface(s); }
+    }
+    if (g_sdl_tex) SDL_DestroyTexture(g_sdl_tex);
+    if (g_sdl_ren) SDL_DestroyRenderer(g_sdl_ren);
+    if (g_sdl_win) SDL_DestroyWindow(g_sdl_win);
+    SDL_Quit();
+    g_sdl_tex = NULL; g_sdl_ren = NULL; g_sdl_win = NULL;
+}
+#endif /* RAE_HAS_SDL3 */
+
+/* ============================================================
  * Spotify (macOS desktop app) bridge — see lib/sys/spotify.rae
  *
  * Drives the local Spotify desktop app via `osascript` (AppleScript).
