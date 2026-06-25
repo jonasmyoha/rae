@@ -2207,6 +2207,63 @@ if (exampleProfileSelect) {
 }
 syncProfileEnabled();
 
+// Replace the native <select> for Target/Profile with a themed custom dropdown
+// so the OPEN menu is styled too. The <select> stays in the DOM (hidden) as the
+// source of truth — value reads and change/disabled handling above are unchanged.
+function enhanceSelect(select) {
+  if (!select || select.dataset.enhanced) return;
+  select.dataset.enhanced = "1";
+  const wrap = document.createElement("div");
+  wrap.className = "run-dd";
+  select.parentNode.insertBefore(wrap, select);
+  wrap.appendChild(select);
+
+  const trigger = document.createElement("button");
+  trigger.type = "button";
+  trigger.className = "run-dd__trigger";
+  const menu = document.createElement("div");
+  menu.className = "run-dd__menu";
+  menu.hidden = true;
+  wrap.appendChild(trigger);
+  wrap.appendChild(menu);
+
+  const close = () => { menu.hidden = true; wrap.classList.remove("is-open"); };
+  const render = () => {
+    trigger.textContent = select.options[select.selectedIndex]?.text ?? "";
+    trigger.disabled = select.disabled;
+    menu.innerHTML = "";
+    Array.from(select.options).forEach((opt) => {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "run-dd__option" + (opt.selected ? " is-active" : "");
+      item.textContent = opt.text;
+      item.addEventListener("click", () => {
+        if (select.value !== opt.value) {
+          select.value = opt.value;
+          select.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+        render();
+        close();
+      });
+      menu.appendChild(item);
+    });
+  };
+  trigger.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (trigger.disabled) return;
+    if (menu.hidden) { render(); menu.hidden = false; wrap.classList.add("is-open"); }
+    else { close(); }
+  });
+  document.addEventListener("click", (e) => { if (!wrap.contains(e.target)) close(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
+  // Reflect external changes (syncProfileEnabled toggles select.disabled; other
+  // code may set select.value) onto the trigger.
+  new MutationObserver(render).observe(select, { attributes: true, attributeFilter: ["disabled"] });
+  render();
+}
+enhanceSelect(exampleTargetSelect);
+enhanceSelect(exampleProfileSelect);
+
 runAllExamplesBtn?.addEventListener("click", () => runAllExamples());
 
 async function runAllExamples() {
