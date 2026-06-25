@@ -3020,6 +3020,151 @@ void rae_ext_sdlCloseWindow(void) {
 #endif /* RAE_HAS_SDL3 */
 
 /* ============================================================
+ * Native WebGPU via wgpu-native — see lib/webgpu.rae (RAE_HAS_WEBGPU).
+ *
+ * Runs a WGSL compute shader on the native GPU (Metal/Vulkan/D3D12 through
+ * wgpu-native's webgpu.h) — the SAME shader the browser runs (WebGPU-everywhere
+ * per docs/tech-stack-and-dependencies.md). The device/queue are created once
+ * and cached; each webgpuRaytrace call uploads the scene, dispatches one
+ * invocation per pixel, reads the framebuffer back, and writes packed-0xRRGGBB
+ * ints (so the SDL3 backend can present it). v29 API: Future/CallbackInfo +
+ * WGPUStringView; readback via wgpuBufferMapAsync + wgpuDevicePoll.
+ * ============================================================ */
+#ifdef RAE_HAS_WEBGPU
+#include <webgpu/webgpu.h>
+#include <webgpu/wgpu.h>
+
+static WGPUInstance g_wgpu_inst = NULL;
+static WGPUDevice   g_wgpu_dev = NULL;
+static WGPUQueue    g_wgpu_queue = NULL;
+
+static WGPUStringView rae_wgpu_sv(const char* s) { WGPUStringView v; v.data = s; v.length = WGPU_STRLEN; return v; }
+
+static WGPUAdapter g_wgpu_adapter; static int g_wgpu_adapter_done;
+static void rae_wgpu_on_adapter(WGPURequestAdapterStatus st, WGPUAdapter a, WGPUStringView m, void* u1, void* u2) {
+    (void)st;(void)m;(void)u1;(void)u2; g_wgpu_adapter = a; g_wgpu_adapter_done = 1;
+}
+static int g_wgpu_device_done;
+static void rae_wgpu_on_device(WGPURequestDeviceStatus st, WGPUDevice d, WGPUStringView m, void* u1, void* u2) {
+    (void)st;(void)m;(void)u1;(void)u2; g_wgpu_dev = d; g_wgpu_device_done = 1;
+}
+static int g_wgpu_map_done;
+static void rae_wgpu_on_map(WGPUMapAsyncStatus st, WGPUStringView m, void* u1, void* u2) {
+    (void)st;(void)m;(void)u1;(void)u2; g_wgpu_map_done = 1;
+}
+
+static int rae_wgpu_init(void) {
+    if (g_wgpu_dev) return 1;
+    g_wgpu_inst = wgpuCreateInstance(NULL);
+    if (!g_wgpu_inst) { fprintf(stderr, "[wgpu] no instance\n"); return 0; }
+    WGPURequestAdapterOptions ao; memset(&ao, 0, sizeof(ao));
+    WGPURequestAdapterCallbackInfo aci; memset(&aci, 0, sizeof(aci));
+    aci.mode = WGPUCallbackMode_AllowProcessEvents; aci.callback = rae_wgpu_on_adapter;
+    wgpuInstanceRequestAdapter(g_wgpu_inst, &ao, aci);
+    while (!g_wgpu_adapter_done) wgpuInstanceProcessEvents(g_wgpu_inst);
+    if (!g_wgpu_adapter) { fprintf(stderr, "[wgpu] no adapter\n"); return 0; }
+    WGPURequestDeviceCallbackInfo dci; memset(&dci, 0, sizeof(dci));
+    dci.mode = WGPUCallbackMode_AllowProcessEvents; dci.callback = rae_wgpu_on_device;
+    wgpuAdapterRequestDevice(g_wgpu_adapter, NULL, dci);
+    while (!g_wgpu_device_done) wgpuInstanceProcessEvents(g_wgpu_inst);
+    if (!g_wgpu_dev) { fprintf(stderr, "[wgpu] no device\n"); return 0; }
+    g_wgpu_queue = wgpuDeviceGetQueue(g_wgpu_dev);
+    return 1;
+}
+
+/* scene: sceneLen f64 (camera 19 + spheres*10) -> narrowed to f32 for the GPU.
+ * fb: width*height int64 written as packed 0xRRGGBB. wgsl: shader source. */
+void rae_ext_webgpuRaytrace(const double* scene, int64_t sceneLen, int64_t* fb,
+                            int64_t width, int64_t height, int64_t samples,
+                            int64_t maxDepth, rae_String wgsl) {
+    if (!fb || width <= 0 || height <= 0) return;
+    if (!rae_wgpu_init()) return;
+
+    float* sf = (float*)malloc((size_t)sceneLen * sizeof(float));
+    if (!sf) return;
+    for (int64_t i = 0; i < sceneLen; i++) sf[i] = (float)scene[i];
+    int64_t sphereCount = (sceneLen - 19) / 10;
+
+    WGPUShaderSourceWGSL src; memset(&src, 0, sizeof(src));
+    src.chain.sType = WGPUSType_ShaderSourceWGSL;
+    src.code = wgsl.data ? rae_wgpu_sv((const char*)wgsl.data) : rae_wgpu_sv("");
+    WGPUShaderModuleDescriptor smd; memset(&smd, 0, sizeof(smd));
+    smd.nextInChain = &src.chain;
+    WGPUShaderModule mod = wgpuDeviceCreateShaderModule(g_wgpu_dev, &smd);
+
+    uint32_t params[8] = { (uint32_t)width, (uint32_t)height, (uint32_t)samples,
+                           (uint32_t)maxDepth, (uint32_t)sphereCount, 0, 0, 0 };
+    WGPUBufferDescriptor pbd; memset(&pbd, 0, sizeof(pbd));
+    pbd.size = sizeof(params); pbd.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
+    WGPUBuffer pbuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &pbd);
+    wgpuQueueWriteBuffer(g_wgpu_queue, pbuf, 0, params, sizeof(params));
+
+    size_t scene_bytes = (size_t)sceneLen * sizeof(float);
+    WGPUBufferDescriptor sbd; memset(&sbd, 0, sizeof(sbd));
+    sbd.size = scene_bytes; sbd.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
+    WGPUBuffer sbuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &sbd);
+    wgpuQueueWriteBuffer(g_wgpu_queue, sbuf, 0, sf, scene_bytes);
+
+    size_t obytes = (size_t)width * (size_t)height * 4;
+    WGPUBufferDescriptor obd; memset(&obd, 0, sizeof(obd));
+    obd.size = obytes; obd.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopySrc;
+    WGPUBuffer obuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &obd);
+    WGPUBufferDescriptor rbd; memset(&rbd, 0, sizeof(rbd));
+    rbd.size = obytes; rbd.usage = WGPUBufferUsage_MapRead | WGPUBufferUsage_CopyDst;
+    WGPUBuffer rbuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &rbd);
+
+    WGPUComputePipelineDescriptor cpd; memset(&cpd, 0, sizeof(cpd));
+    cpd.compute.module = mod; cpd.compute.entryPoint = rae_wgpu_sv("main");
+    WGPUComputePipeline pipe = wgpuDeviceCreateComputePipeline(g_wgpu_dev, &cpd);
+    if (!pipe) { fprintf(stderr, "[wgpu] pipeline failed\n"); free(sf); return; }
+
+    WGPUBindGroupLayout bgl = wgpuComputePipelineGetBindGroupLayout(pipe, 0);
+    WGPUBindGroupEntry be[3]; memset(be, 0, sizeof(be));
+    be[0].binding = 0; be[0].buffer = pbuf; be[0].size = sizeof(params);
+    be[1].binding = 1; be[1].buffer = sbuf; be[1].size = scene_bytes;
+    be[2].binding = 2; be[2].buffer = obuf; be[2].size = obytes;
+    WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
+    bgd.layout = bgl; bgd.entryCount = 3; bgd.entries = be;
+    WGPUBindGroup bg = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
+
+    WGPUCommandEncoder enc = wgpuDeviceCreateCommandEncoder(g_wgpu_dev, NULL);
+    WGPUComputePassDescriptor cpassd; memset(&cpassd, 0, sizeof(cpassd));
+    WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(enc, &cpassd);
+    wgpuComputePassEncoderSetPipeline(pass, pipe);
+    wgpuComputePassEncoderSetBindGroup(pass, 0, bg, 0, NULL);
+    wgpuComputePassEncoderDispatchWorkgroups(pass, (uint32_t)((width + 7) / 8), (uint32_t)((height + 7) / 8), 1);
+    wgpuComputePassEncoderEnd(pass);
+    wgpuCommandEncoderCopyBufferToBuffer(enc, obuf, 0, rbuf, 0, obytes);
+    WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(enc, NULL);
+    wgpuQueueSubmit(g_wgpu_queue, 1, &cmd);
+
+    WGPUBufferMapCallbackInfo mci; memset(&mci, 0, sizeof(mci));
+    mci.mode = WGPUCallbackMode_AllowProcessEvents; mci.callback = rae_wgpu_on_map;
+    g_wgpu_map_done = 0;
+    wgpuBufferMapAsync(rbuf, WGPUMapMode_Read, 0, obytes, mci);
+    while (!g_wgpu_map_done) wgpuDevicePoll(g_wgpu_dev, true, NULL);
+    const uint32_t* px = (const uint32_t*)wgpuBufferGetConstMappedRange(rbuf, 0, obytes);
+    if (px) {
+        int64_t n = width * height;
+        for (int64_t i = 0; i < n; i++) {
+            uint32_t p = px[i];                      /* GPU packed R|G<<8|B<<16|A<<24 */
+            uint32_t r = p & 0xFF, g = (p >> 8) & 0xFF, b = (p >> 16) & 0xFF;
+            fb[i] = (int64_t)((r << 16) | (g << 8) | b);  /* -> 0xRRGGBB for SDL */
+        }
+    }
+    wgpuBufferUnmap(rbuf);
+    /* per-call GPU objects */
+    wgpuBindGroupRelease(bg); wgpuBindGroupLayoutRelease(bgl);
+    wgpuComputePipelineRelease(pipe); wgpuShaderModuleRelease(mod);
+    wgpuBufferRelease(rbuf); wgpuBufferRelease(obuf);
+    wgpuBufferRelease(sbuf); wgpuBufferRelease(pbuf);
+    wgpuCommandBufferRelease(cmd); wgpuCommandEncoderRelease(enc);
+    wgpuComputePassEncoderRelease(pass);
+    free(sf);
+}
+#endif /* RAE_HAS_WEBGPU */
+
+/* ============================================================
  * Spotify (macOS desktop app) bridge — see lib/sys/spotify.rae
  *
  * Drives the local Spotify desktop app via `osascript` (AppleScript).
