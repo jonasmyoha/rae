@@ -411,15 +411,23 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
           data->args[i] = vm_pop(vm);
         }
 
-        if (!sys_thread_create(&task->thread, spawn_thread_wrapper, data)) {
-          diag_error(NULL, 0, 0, "failed to spawn thread");
-          for (int i = 0; i < arg_count; i++) value_free(&data->args[i]);
-          free(data);
-          free(task);
-          return VM_RUNTIME_ERROR;
-        }
-        // Push the Task(T) handle. Joinable via OP_TASK_GET, or joined on
-        // drop (value_free). No longer detached.
+        // Run the spawned function SYNCHRONOUSLY on this thread and hand
+        // back an already-completed task. The bytecode VM's value model
+        // (ref-counted ValueBuffer/Object, the shared string pool) is not
+        // thread-safe, so running workers on real OS threads races on shared
+        // state and crashes (SIGSEGV) — e.g. four raytracer tile workers all
+        // value_copy the same `world` buffer and clobber its ref_count.
+        //
+        // Live (bytecode VM) is the rapid-iteration target, not the
+        // performance target, so it trades parallelism for safety and
+        // determinism here; the compiled (C backend) target keeps real OS
+        // threads for actual concurrency. `spawn_thread_wrapper` runs a fresh
+        // sub-VM over the target, moves the return into task->result, sets
+        // task->status, and frees `data`.
+        task->joined = true;   // never created a thread; drop/get must not join
+        spawn_thread_wrapper(data);
+        // Push the Task(T) handle. OP_TASK_GET / drop see it as already
+        // joined and just read the captured result.
         Value task_val;
         task_val.type = VAL_TASK;
         task_val.as.task_value = task;
