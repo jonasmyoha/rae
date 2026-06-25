@@ -1788,10 +1788,13 @@ function showExampleViewer(example) {
   const active = Boolean(d) && getGlobalTarget() === "wasm";
   viewer.hidden = !active;
   if (active) {
-    canvas.width = d.width;
-    canvas.height = d.height;
+    // Assigning canvas.width/height ALWAYS clears the bitmap (even to the same
+    // value), so only do it when the size actually changes — otherwise the
+    // re-render triggered after a draw (updateExampleButtons) would wipe the
+    // freshly-rendered frame.
+    if (canvas.width !== d.width) canvas.width = d.width;
+    if (canvas.height !== d.height) canvas.height = d.height;
     canvas.style.aspectRatio = `${d.width} / ${d.height}`;
-    if (statusEl) statusEl.textContent = "Press Run to render in the browser.";
   }
 }
 
