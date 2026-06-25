@@ -1077,7 +1077,17 @@ button.btn-build-test:hover:not(:disabled) {
   margin: 0 0 1.25rem;
 }
 .example-viewer__stage {
-  height: 58vh;
+  /* The window IS the content's aspect ratio (16:9 default; 9:16 etc. when the
+   * example declares portrait display dims), sized to fill the width but capped
+   * by height so portrait windows don't run off-screen. --arw/--arh are set
+   * from the example's display dims in app.js. */
+  --arw: 16;
+  --arh: 9;
+  --stage-max-h: 64vh;
+  aspect-ratio: var(--arw) / var(--arh);
+  width: min(100%, calc(var(--stage-max-h) * var(--arw) / var(--arh)));
+  max-width: 100%;
+  margin-inline: auto;
   padding: 8px;
   background:
     repeating-conic-gradient(#15161c 0% 25%, #101117 0% 50%) 50% / 24px 24px;

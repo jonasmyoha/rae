@@ -1795,6 +1795,13 @@ function showExampleViewer(example) {
     if (canvas.width !== d.width) canvas.width = d.width;
     if (canvas.height !== d.height) canvas.height = d.height;
     canvas.style.aspectRatio = `${d.width} / ${d.height}`;
+    // Shape the window to the example's aspect (16:9 default, 9:16 for portrait
+    // examples like a mobile UI) instead of a fixed-height letterboxed box.
+    const stage = canvas.closest(".example-viewer__stage");
+    if (stage) {
+      stage.style.setProperty("--arw", d.width);
+      stage.style.setProperty("--arh", d.height);
+    }
   }
 }
 
