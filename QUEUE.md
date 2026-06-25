@@ -79,3 +79,10 @@
 - [x] Resolved: interactive raytracer camera "ignored yaw/pitch / always looked at origin" in the compiled backend. Root cause was the dangling rvalue->view arg codegen bug (see the c_call.c item above): `buildCamera(target: vadd(camPos, fwd))` read a garbage look-at point. Fixed at the compiler level; camera now tracks yaw/pitch. (Earlier hypotheses about stale builds / left-drag were wrong.)
 
 - [x] Live (bytecode VM): `spawn` ran the worker on a real OS thread, but the VM value model (ref-counted ValueBuffer/Object, shared string pool) is not thread-safe — concurrent workers raced on shared buffers (e.g. 4 raytracer tile workers sharing `world`) and SIGSEGV'd. Now Live runs `spawn` synchronously (inline sub-VM, returns a completed Task); compiled keeps real threads. All raytracer steps 1-5 run in Live.
+
+- [ ] Strategy: execution targets & deployment decided — see docs/execution-targets-and-deployment.md. No TypeScript target; WASM (via the C backend) is the primary app/game target; C backend stays for native/desktop/real-time/hardware; Live VM kept on probation.
+- [ ] Prototype: WASM generation via the C backend (clang/wasi-libc or Emscripten). Compile the raytracer to .wasm, run from a tiny JS harness writing into a SharedArrayBuffer drawn to a <canvas>. Measure WASM-vs-native speed. (Highest value-per-effort; gates the rest.)
+- [ ] Prototype: WASM threads (SharedArrayBuffer + workers) + SIMD128 for the tiled raytracer — confirm real parallelism in the sandbox.
+- [ ] Prototype: iPhone PoC app with OTA updates — Capacitor-style WKWebView shell running the Rae→WASM app, WASM/JS bundle hosted remotely and updated over-the-air without App Store resubmission (native shell fixed, WASM layer updatable). Confirm the App-Store-legal split.
+- [ ] Prototype (if needed): one Rae→C native plugin driven at control-rate (e.g. audio) to validate the partition-by-data-rate bridge; Rae generates both ends.
+- [ ] Later: WebGPU path from the WASM app (GPU compute / GPU raytracer step 6).
