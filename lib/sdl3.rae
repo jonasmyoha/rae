@@ -8,16 +8,24 @@
 # is detected + linked). Compiled-target only — the Live VM has no SDL bindings.
 import core
 
-# Create the window + renderer + a streaming RGBA texture of width x height.
+# Create the window + renderer at this pixel size. The framebuffer texture is
+# created lazily by sdlUpdatePixels (which may differ from the window size and
+# is stretched to fill it).
 func sdlInitWindow(width: Int, height: Int, title: String) extern
+
+# Cap the present rate (frames/sec). 0 disables the cap. sdlPresent sleeps the
+# remainder of each frame so an idle/finished render doesn't spin at 100% CPU.
+func sdlSetTargetFPS(fps: Int) extern
 
 # Pump the event queue; returns true once the user asks to close the window
 # (window close button, Escape, or Cmd-Q).
 func sdlShouldClose() extern ret Bool
 
-# Upload `count` packed 0xRRGGBB pixels (e.g. a List(Int) framebuffer's .data)
-# into the streaming texture.
-func sdlUpdatePixels(pixels: view Buffer(Int), count: Int) extern
+# Upload a w x h packed-0xRRGGBB framebuffer (e.g. a List(Int)'s .data) into the
+# streaming texture, (re)creating it if the size changed since last call — so an
+# example can switch framebuffer resolution at runtime. The texture stretches to
+# fill the window on present.
+func sdlUpdatePixels(pixels: view Buffer(Int), w: Int, h: Int) extern
 
 # Draw the texture to the window and present this frame.
 func sdlPresent() extern
@@ -27,3 +35,20 @@ func sdlSetTitle(title: String) extern
 
 # Tear down the texture, renderer, window, and SDL.
 func sdlCloseWindow() extern
+
+# --- Input ---------------------------------------------------------------
+# Key codes are the raylib/GLFW convention (letters = ASCII uppercase, arrows =
+# 262-265), mapped to SDL scancodes inside the runtime — so example code that
+# used raylib's isKeyDown(key: 87) ports unchanged.
+
+# Mouse position in window pixels (top-left origin).
+func sdlGetMouseX() extern ret Int
+func sdlGetMouseY() extern ret Int
+
+# Mouse button held this frame: 0 = left, 1 = right, 2 = middle.
+func sdlIsMouseButtonDown(button: Int) extern ret Bool
+
+# Keyboard: down = held this frame (level); pressed = went down on this frame
+# (edge, false on auto-repeat). Poll once per frame after sdlShouldClose().
+func sdlIsKeyDown(key: Int) extern ret Bool
+func sdlIsKeyPressed(key: Int) extern ret Bool

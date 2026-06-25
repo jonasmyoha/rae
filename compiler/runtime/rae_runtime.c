@@ -2833,11 +2833,33 @@ int64_t rae_ext_measureTextWithFont(int64_t slot, rae_String text, double fontSi
 static SDL_Window*   g_sdl_win = NULL;
 static SDL_Renderer* g_sdl_ren = NULL;
 static SDL_Texture*  g_sdl_tex = NULL;
-static int g_sdl_w = 0, g_sdl_h = 0;
+static int g_sdl_w = 0, g_sdl_h = 0;            /* window size */
+static int g_sdl_tex_w = 0, g_sdl_tex_h = 0;    /* current texture (framebuffer) size */
 static unsigned char* g_sdl_scratch = NULL;   /* RGBA8 expansion of the last frame */
 static int64_t g_sdl_scratch_px = 0;
 static int64_t g_sdl_start_ms = 0;
 static int64_t g_sdl_headless_ms = 0;          /* >0 => auto-close after this budget */
+static int64_t g_sdl_target_fps = 0;           /* >0 => cap present rate */
+static int64_t g_sdl_last_present_ms = 0;
+static unsigned char g_sdl_pressed[SDL_SCANCODE_COUNT]; /* went-down-this-frame edges */
+
+/* Map raylib/GLFW key codes (letters = ASCII uppercase, arrows = 262-265, plus
+ * a few common keys) to SDL scancodes so ported examples keep their key ints. */
+static SDL_Scancode rae_sdl_scancode(int64_t key) {
+    if (key >= 'A' && key <= 'Z') return SDL_GetScancodeFromKey((SDL_Keycode)(key + 32), NULL); /* lowercase */
+    if (key >= '0' && key <= '9') return SDL_GetScancodeFromKey((SDL_Keycode)key, NULL);
+    switch (key) {
+        case 32:  return SDL_SCANCODE_SPACE;
+        case 256: return SDL_SCANCODE_ESCAPE;
+        case 257: return SDL_SCANCODE_RETURN;
+        case 262: return SDL_SCANCODE_RIGHT;
+        case 263: return SDL_SCANCODE_LEFT;
+        case 264: return SDL_SCANCODE_DOWN;
+        case 265: return SDL_SCANCODE_UP;
+        case 340: return SDL_SCANCODE_LSHIFT;
+        default:  return SDL_SCANCODE_UNKNOWN;
+    }
+}
 
 void rae_ext_sdlInitWindow(int64_t width, int64_t height, rae_String title) {
     if (!SDL_Init(SDL_INIT_VIDEO)) {
@@ -2850,26 +2872,70 @@ void rae_ext_sdlInitWindow(int64_t width, int64_t height, rae_String title) {
         fprintf(stderr, "[sdl] window/renderer failed: %s\n", SDL_GetError());
         return;
     }
-    g_sdl_tex = SDL_CreateTexture(g_sdl_ren, SDL_PIXELFORMAT_RGBA32,
-                                  SDL_TEXTUREACCESS_STREAMING, (int)width, (int)height);
-    if (!g_sdl_tex) fprintf(stderr, "[sdl] texture failed: %s\n", SDL_GetError());
+    /* Texture is created lazily by sdlUpdatePixels (its size can differ from the
+     * window and can change at runtime — e.g. a preview/final quality toggle). */
     g_sdl_start_ms = rae_ext_nowMs();
+    g_sdl_last_present_ms = g_sdl_start_ms;
     const char* hm = getenv("RAE_SDL_HEADLESS_MS");
     if (hm) g_sdl_headless_ms = (int64_t)atoll(hm);
 }
 
+void rae_ext_sdlSetTargetFPS(int64_t fps) {
+    g_sdl_target_fps = fps > 0 ? fps : 0;
+}
+
 rae_Bool rae_ext_sdlShouldClose(void) {
+    memset(g_sdl_pressed, 0, sizeof(g_sdl_pressed));
     SDL_Event ev;
+    rae_Bool quit = false;
     while (SDL_PollEvent(&ev)) {
-        if (ev.type == SDL_EVENT_QUIT) return true;
-        if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.key == SDLK_ESCAPE) return true;
+        if (ev.type == SDL_EVENT_QUIT) quit = true;
+        else if (ev.type == SDL_EVENT_KEY_DOWN) {
+            if (ev.key.key == SDLK_ESCAPE) quit = true;
+            if (!ev.key.repeat && ev.key.scancode < SDL_SCANCODE_COUNT)
+                g_sdl_pressed[ev.key.scancode] = 1;  /* edge for isKeyPressed */
+        }
     }
+    if (quit) return true;
     if (g_sdl_headless_ms > 0 && rae_ext_nowMs() - g_sdl_start_ms >= g_sdl_headless_ms) return true;
     return false;
 }
 
-void rae_ext_sdlUpdatePixels(const int64_t* pixels, int64_t count) {
-    if (!pixels || count <= 0) return;
+int64_t rae_ext_sdlGetMouseX(void) {
+    float x = 0, y = 0; SDL_GetMouseState(&x, &y); return (int64_t)x;
+}
+int64_t rae_ext_sdlGetMouseY(void) {
+    float x = 0, y = 0; SDL_GetMouseState(&x, &y); return (int64_t)y;
+}
+rae_Bool rae_ext_sdlIsMouseButtonDown(int64_t button) {
+    float x, y; SDL_MouseButtonFlags m = SDL_GetMouseState(&x, &y);
+    Uint32 mask = button == 1 ? SDL_BUTTON_RMASK : (button == 2 ? SDL_BUTTON_MMASK : SDL_BUTTON_LMASK);
+    return (m & mask) != 0;
+}
+rae_Bool rae_ext_sdlIsKeyDown(int64_t key) {
+    SDL_Scancode sc = rae_sdl_scancode(key);
+    if (sc == SDL_SCANCODE_UNKNOWN) return false;
+    const bool* ks = SDL_GetKeyboardState(NULL);
+    return ks && ks[sc];
+}
+rae_Bool rae_ext_sdlIsKeyPressed(int64_t key) {
+    SDL_Scancode sc = rae_sdl_scancode(key);
+    if (sc == SDL_SCANCODE_UNKNOWN || sc >= SDL_SCANCODE_COUNT) return false;
+    return g_sdl_pressed[sc] != 0;
+}
+
+void rae_ext_sdlUpdatePixels(const int64_t* pixels, int64_t w, int64_t h) {
+    if (!pixels || w <= 0 || h <= 0 || !g_sdl_ren) return;
+    int64_t count = w * h;
+    /* (Re)create the texture when the framebuffer size changes. */
+    if (!g_sdl_tex || (int)w != g_sdl_tex_w || (int)h != g_sdl_tex_h) {
+        if (g_sdl_tex) SDL_DestroyTexture(g_sdl_tex);
+        g_sdl_tex = SDL_CreateTexture(g_sdl_ren, SDL_PIXELFORMAT_RGBA32,
+                                      SDL_TEXTUREACCESS_STREAMING, (int)w, (int)h);
+        if (!g_sdl_tex) { fprintf(stderr, "[sdl] texture failed: %s\n", SDL_GetError()); return; }
+        SDL_SetTextureScaleMode(g_sdl_tex, SDL_SCALEMODE_LINEAR);
+        g_sdl_tex_w = (int)w; g_sdl_tex_h = (int)h;
+    }
     if (count > g_sdl_scratch_px) {
         unsigned char* grown = (unsigned char*)realloc(g_sdl_scratch, (size_t)count * 4);
         if (!grown) return;
@@ -2882,7 +2948,7 @@ void rae_ext_sdlUpdatePixels(const int64_t* pixels, int64_t count) {
         g_sdl_scratch[i * 4 + 2] = (unsigned char)(p & 0xFF);          /* B */
         g_sdl_scratch[i * 4 + 3] = 255;                                /* A */
     }
-    if (g_sdl_tex) SDL_UpdateTexture(g_sdl_tex, NULL, g_sdl_scratch, g_sdl_w * 4);
+    SDL_UpdateTexture(g_sdl_tex, NULL, g_sdl_scratch, (int)w * 4);
 }
 
 void rae_ext_sdlPresent(void) {
@@ -2890,6 +2956,13 @@ void rae_ext_sdlPresent(void) {
     SDL_RenderClear(g_sdl_ren);
     if (g_sdl_tex) SDL_RenderTexture(g_sdl_ren, g_sdl_tex, NULL, NULL);
     SDL_RenderPresent(g_sdl_ren);
+    if (g_sdl_target_fps > 0) {
+        int64_t frame_ms = 1000 / g_sdl_target_fps;
+        int64_t now = rae_ext_nowMs();
+        int64_t elapsed = now - g_sdl_last_present_ms;
+        if (elapsed < frame_ms) SDL_Delay((Uint32)(frame_ms - elapsed));
+        g_sdl_last_present_ms = rae_ext_nowMs();
+    }
 }
 
 void rae_ext_sdlSetTitle(rae_String title) {
@@ -2900,9 +2973,9 @@ void rae_ext_sdlCloseWindow(void) {
     /* Headless snapshot: dump the last uploaded frame as a BMP (reliable —
      * straight from our pixel buffer, not a GPU read-back). */
     const char* shot = getenv("RAE_SDL_SCREENSHOT");
-    if (shot && g_sdl_scratch && g_sdl_w > 0 && g_sdl_h > 0) {
-        SDL_Surface* s = SDL_CreateSurfaceFrom(g_sdl_w, g_sdl_h, SDL_PIXELFORMAT_RGBA32,
-                                               g_sdl_scratch, g_sdl_w * 4);
+    if (shot && g_sdl_scratch && g_sdl_tex_w > 0 && g_sdl_tex_h > 0) {
+        SDL_Surface* s = SDL_CreateSurfaceFrom(g_sdl_tex_w, g_sdl_tex_h, SDL_PIXELFORMAT_RGBA32,
+                                               g_sdl_scratch, g_sdl_tex_w * 4);
         if (s) { SDL_SaveBMP(s, shot); SDL_DestroySurface(s); }
     }
     if (g_sdl_tex) SDL_DestroyTexture(g_sdl_tex);

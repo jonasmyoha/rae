@@ -21,7 +21,7 @@
 #   rae run --target compiled main.rae   (recommended — real threads, fast)
 
 import core
-import raylib
+import sdl3
 import vec3
 import scene
 import camera
@@ -30,8 +30,6 @@ import render
 func main() {
     let width: Int = 1280
     let height: Int = 720
-    let winW: Int = 1280
-    let winH: Int = 720
     let samples: Int = 8
     let maxDepth: Int = 16
     let tileSize: Int = 48
@@ -49,11 +47,8 @@ func main() {
         i = i + 1
     }
 
-    initWindow(width: winW, height: winH, title: "Rae raytracer — step 3 (materials + camera + threads)")
-    setTargetFPS(fps: 60)
-    let tex: Texture = loadStreamTexture(width: width, height: height)
-    setTextureFilter(texture: tex, filter: 1)
-    let dispScale: Float = winW.toFloat() / width.toFloat()
+    sdlInitWindow(width: width, height: height, title: "Rae raytracer — step 3 (materials + camera + threads)")
+    sdlSetTargetFPS(fps: 60)
 
     # Four quadrants, one worker thread each (equal 960x540 blocks at Full HD).
     let halfW: Int = width / 2
@@ -72,7 +67,7 @@ func main() {
     var n3: Int = 0
     let startMs: Int = nowMs()
     var doneMs: Int = 0
-    loop not windowShouldClose() {
+    loop not sdlShouldClose() {
         if n0 < t0 or n1 < t1 or n2 < t2 or n3 < t3 {
             var c0: Int = n0
             var c1: Int = n1
@@ -123,22 +118,17 @@ func main() {
             }
         }
 
-        updateStreamTexture(texture: tex, pixels: fb.data, count: width * height)
-        beginDrawing()
-        clearBackground(color: { r: 10, g: 10, b: 14, a: 255 })
-        drawTextureEx(texture: tex, position: { x: 0.0, y: 0.0 }, rotation: 0.0, scale: dispScale, tint: { r: 255, g: 255, b: 255, a: 255 })
+        sdlUpdatePixels(pixels: fb.data, w: width, h: height)
+        sdlPresent()
         let done: Int = n0 + n1 + n2 + n3
         let total: Int = t0 + t1 + t2 + t3
         var pct: Int = done * 100 / total
         if pct > 100 { pct = 100 }
         if doneMs > 0 {
-            drawText(text: "step 3 | 4 threads, 1 per quadrant | {width}x{height} | done in {doneMs}ms",
-                     x: 12.0, y: 12.0, fontSize: 20.0, color: { r: 255, g: 255, b: 255, a: 255 })
+            sdlSetTitle(title: "Rae step 3 (SDL3) | 4 threads, 1 per quadrant | {width}x{height} | done in {doneMs}ms")
         } else {
-            drawText(text: "step 3 | 4 threads, 1 per quadrant | {width}x{height} | {pct}%",
-                     x: 12.0, y: 12.0, fontSize: 20.0, color: { r: 255, g: 255, b: 255, a: 255 })
+            sdlSetTitle(title: "Rae step 3 (SDL3) | 4 threads, 1 per quadrant | {width}x{height} | {pct}%")
         }
-        endDrawing()
     }
-    closeWindow()
+    sdlCloseWindow()
 }
