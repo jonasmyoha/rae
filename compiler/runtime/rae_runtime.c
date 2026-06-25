@@ -2871,7 +2871,7 @@ void rae_ext_sdlInitWindow(int64_t width, int64_t height, rae_String title) {
     }
     g_sdl_w = (int)width; g_sdl_h = (int)height;
     const char* t = title.data ? (const char*)title.data : "Rae (SDL3)";
-    if (!SDL_CreateWindowAndRenderer(t, (int)width, (int)height, 0, &g_sdl_win, &g_sdl_ren)) {
+    if (!SDL_CreateWindowAndRenderer(t, (int)width, (int)height, SDL_WINDOW_RESIZABLE, &g_sdl_win, &g_sdl_ren)) {
         fprintf(stderr, "[sdl] window/renderer failed: %s\n", SDL_GetError());
         return;
     }
@@ -2940,6 +2940,14 @@ int64_t rae_ext_sdlGetMouseX(void) {
 }
 int64_t rae_ext_sdlGetMouseY(void) {
     float x = 0, y = 0; SDL_GetMouseState(&x, &y); return (int64_t)y;
+}
+/* Current renderer output size in pixels — tracks window resizes (the window
+ * is created SDL_WINDOW_RESIZABLE). Apps poll this to re-render at the new size. */
+int64_t rae_ext_sdlWindowWidth(void) {
+    int w = g_sdl_w, h = 0; if (g_sdl_ren) SDL_GetRenderOutputSize(g_sdl_ren, &w, &h); return (int64_t)w;
+}
+int64_t rae_ext_sdlWindowHeight(void) {
+    int w = 0, h = g_sdl_h; if (g_sdl_ren) SDL_GetRenderOutputSize(g_sdl_ren, &w, &h); return (int64_t)h;
 }
 rae_Bool rae_ext_sdlIsMouseButtonDown(int64_t button) {
     /* raylib button (0=L,1=R,2=M) -> SDL button index (1=L,2=M,3=R). */
