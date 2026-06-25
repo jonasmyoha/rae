@@ -8,12 +8,23 @@
 #include <time.h>
 #include <sys/time.h>
 #include <sys/stat.h>
-#include <signal.h>
+#include <fcntl.h>
 #include <dirent.h>
+
+/* WASM (wasip1) lacks signals, threads, flock, and fork/exec. Pure-compute
+ * Rae programs (the raytracer, etc.) use none of these, but the runtime is one
+ * monolithic file, so the host-only features are guarded with `#ifndef __wasm__`
+ * (with no-op/failure fallbacks where a symbol must remain) so it still
+ * compiles for the WASM target. */
+#ifndef __wasm__
+#include <signal.h>
+#endif
 
 #ifdef _WIN32
 #include <windows.h>
 #else
+/* pthread.h includes cleanly under wasi-sdk (provides pthread_t for the task
+ * struct); only the pthread_* *calls* are guarded out for __wasm__ below. */
 #include <pthread.h>
 #endif
 
@@ -38,7 +49,9 @@ RaeTask* rae_task_new(size_t result_size) {
 void* rae_task_await(RaeTask* t) {
   if (!t) return NULL;
   if (!t->joined) {
+#ifndef __wasm__
     pthread_join(t->thread, NULL);
+#endif
     t->joined = 1;
   }
   return t->result;
@@ -52,7 +65,9 @@ void* rae_task_await(RaeTask* t) {
 void rae_task_drop(RaeTask* t) {
   if (!t) return;
   if (!t->joined) {
+#ifndef __wasm__
     pthread_join(t->thread, NULL);
+#endif
     t->joined = 1;
   }
   free(t->result);
@@ -79,7 +94,9 @@ void rae_flush_stdout(void) {
  * C-level backtrace to stderr before letting the signal kill the process.
  * The backtrace points at compiler-emitted symbols, not Rae source lines,
  * but it's a much better starting point than the kernel's silent kill.
- * Re-raising the signal lets the OS still record the crash + dump core. */
+ * Re-raising the signal lets the OS still record the crash + dump core.
+ * (WASM has no POSIX signals; the host runtime reports traps itself.) */
+#ifndef __wasm__
 static void rae_crash_handler(int sig) {
   const char* name = "signal";
   switch (sig) {
@@ -129,6 +146,7 @@ static void rae_install_crash_handler(void) {
   sigaction(SIGILL,  &sa, NULL);
   sigaction(SIGABRT, &sa, NULL);
 }
+#endif /* !__wasm__ (crash handler) */
 
 /* ---- Allocation stats (opt-in via RAE_MEM_STATS=1) ----
  *
@@ -657,6 +675,8 @@ rae_String rae_ext_formatDate(int64_t epoch_ms) {
 void rae_spawn(void* (*func)(void*), void* data) {
 #ifdef _WIN32
     CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)func, data, 0, NULL);
+#elif defined(__wasm__)
+    (void)func; (void)data;  /* WASM: no OS threads */
 #else
     pthread_t thread;
     if (pthread_create(&thread, NULL, func, data) == 0) {
@@ -1205,14 +1225,21 @@ rae_Bool rae_ext_rae_sys_make_dir(rae_String path) {
     return errno == EEXIST;
 }
 
+#ifndef __wasm__
 #include <sys/file.h> // For flock
+#endif
 
 rae_Bool rae_ext_rae_sys_exists(rae_String path) {
     if (!path.data) return false;
     return access((const char*)path.data, F_OK) == 0;
 }
 
+/* File locking uses flock(), which the WASM sandbox does not provide; there is
+ * no cross-process file locking in that environment, so these are no-ops. */
 rae_Bool rae_ext_rae_sys_lock_file(rae_String path) {
+#ifdef __wasm__
+    (void)path; return false;
+#else
     if (!path.data) return false;
     int fd = open((const char*)path.data, O_RDWR | O_CREAT, 0666);
     if (fd < 0) return false;
@@ -1223,15 +1250,20 @@ rae_Bool rae_ext_rae_sys_lock_file(rae_String path) {
     // Note: We are leaking the FD here for simplicity in this prototype.
     // In a real implementation, we'd need a way to track and close it.
     return true;
+#endif
 }
 
 rae_Bool rae_ext_rae_sys_unlock_file(rae_String path) {
+#ifdef __wasm__
+    (void)path; return false;
+#else
     if (!path.data) return false;
     int fd = open((const char*)path.data, O_RDWR);
     if (fd < 0) return false;
     flock(fd, LOCK_UN);
     close(fd);
     return true;
+#endif
 }
 
 int64_t rae_ext_rae_sys_rss_kb(void) {
@@ -2803,7 +2835,9 @@ int64_t rae_ext_measureTextWithFont(int64_t slot, rae_String text, double fontSi
  * ============================================================ */
 
 #if defined(__APPLE__)
+#ifndef __wasm__
 #include <sys/wait.h>
+#endif
 
 static int rae_osascript_run(const char* const* lines) {
     int argc = 0;
