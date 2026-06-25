@@ -13,7 +13,12 @@
 # Modules: vec3, scene.rae (Material + Sphere), camera.rae (Ray + Camera),
 # render.rae (materials + tiled worker), and this window loop.
 #
-#   rae run --target compiled main.rae   (recommended — real threads)
+# This is a Compiled-target showcase. In Live (bytecode VM) `spawn` runs
+# synchronously and the interpreter is ~100x slower, so the full render takes
+# minutes — it renders correctly, just slowly. Small per-frame tiles keep the
+# window responsive (fills in progressively) instead of freezing.
+#
+#   rae run --target compiled main.rae   (recommended — real threads, fast)
 
 import core
 import raylib
@@ -23,13 +28,13 @@ import camera
 import render
 
 func main() {
-    let width: Int = 1920
-    let height: Int = 1080
+    let width: Int = 1280
+    let height: Int = 720
     let winW: Int = 1280
     let winH: Int = 720
     let samples: Int = 8
     let maxDepth: Int = 16
-    let tileSize: Int = 120
+    let tileSize: Int = 48
 
     let world: List(Sphere) = buildScene()
     let aspect: Float = width.toFloat() / height.toFloat()
