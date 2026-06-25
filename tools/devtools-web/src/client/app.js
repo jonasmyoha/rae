@@ -1855,6 +1855,74 @@ async function runWasmInBrowser(example) {
   }
 }
 
+// Band-parallel render: build the wasm once, then a pool of Web Workers each
+// render a horizontal band (rows [y0,y1)) and post their pixels back; the page
+// assembles them. Real parallelism (workers run on separate threads) without
+// SharedArrayBuffer/COOP-COEP. Used for examples flagged wasmThreads.
+async function runWasmThreaded(example) {
+  const canvas = document.getElementById("example-viewer-canvas");
+  const statusEl = document.getElementById("example-viewer-status");
+  const d = example.display;
+  if (!canvas || !d) return;
+  showExampleViewer(example);
+  exampleRunActive = true;
+  setExampleStatus("Building WASM…", "is-running", "WASM");
+  if (statusEl) statusEl.textContent = "building…";
+  updateExampleButtons();
+  try {
+    const entry = resolveExampleEntry(example, "wasm");
+    const res = await fetch(`/api/examples/wasm?entry=${encodeURIComponent(entry)}`);
+    if (!res.ok) {
+      const msg = await res.text();
+      if (statusEl) statusEl.textContent = "build failed";
+      appendExampleOutput(msg, "stderr");
+      setExampleStatus("WASM build failed", "is-failure", "WASM");
+      return;
+    }
+    const bytes = await res.arrayBuffer();
+    const W = d.width, H = d.height, samples = 8;
+    const N = Math.max(1, Math.min(Number(navigator.hardwareConcurrency) || 4, 8));
+    const bandH = Math.ceil(H / N);
+    const out = new Uint8Array(W * H * 3);
+    if (statusEl) statusEl.textContent = `rendering on ${N} workers…`;
+    const t0 = performance.now();
+    const jobs = [];
+    for (let i = 0; i < N; i++) {
+      const y0 = i * bandH, y1 = Math.min(H, y0 + bandH);
+      if (y0 >= y1) break;
+      jobs.push(new Promise((resolve, reject) => {
+        const wk = new Worker("/wasm-worker.js");
+        wk.onmessage = (ev) => {
+          wk.terminate();
+          if (ev.data.error) { reject(new Error(ev.data.error)); return; }
+          out.set(new Uint8Array(ev.data.buf), ev.data.y0 * W * 3);
+          resolve();
+        };
+        wk.onerror = (err) => { wk.terminate(); reject(new Error(err.message || "worker error")); };
+        wk.postMessage({ id: i, bytes, y0, y1, w: W, h: H, samples });
+      }));
+    }
+    await Promise.all(jobs);
+    const ms = (performance.now() - t0).toFixed(0);
+    const ctx = canvas.getContext("2d");
+    const img = ctx.createImageData(W, H);
+    for (let i = 0, p = 0; i < W * H; i++) {
+      img.data[i * 4] = out[p++]; img.data[i * 4 + 1] = out[p++];
+      img.data[i * 4 + 2] = out[p++]; img.data[i * 4 + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+    if (statusEl) statusEl.textContent = `rendered ${W}×${H} on ${N} workers · ${ms} ms`;
+    setExampleStatus(`Rendered · ${N} threads`, "is-success", "WASM");
+  } catch (e) {
+    if (statusEl) statusEl.textContent = "error: " + e.message;
+    appendExampleOutput("WASM threaded run error: " + e.message, "stderr");
+    setExampleStatus("WASM run error", "is-failure", "WASM");
+  } finally {
+    exampleRunActive = false;
+    updateExampleButtons();
+  }
+}
+
 function getExampleTargetIds(example) {
   if (!example) return [];
   const supported = Array.isArray(example.supportedTargets) ? example.supportedTargets : null;
@@ -2475,7 +2543,7 @@ async function triggerExampleRun(mode = "run", targetId = null, actionId = null)
   // Display examples on the WASM target render in-browser to the canvas viewer
   // rather than running headless on the server (which would only emit bytes).
   if (mode === "run" && resolvedTargetId === "wasm" && example.display && !isBatchRunning) {
-    await runWasmInBrowser(example);
+    await (example.wasmThreads ? runWasmThreaded(example) : runWasmInBrowser(example));
     return;
   }
   if (mode === "run" && !target.supportsExampleRun) {

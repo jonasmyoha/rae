@@ -87,6 +87,7 @@ type ExampleMetadata = {
   // size; the WASM target then shows it on a canvas instead of dumping bytes
   // to the terminal.
   display?: { width: number; height: number };
+  wasmThreads?: boolean;
 };
 
 type ExampleActionMetadata = {
@@ -238,7 +239,8 @@ function makeMultiFileExample(
     targetEntries: packInfo?.targetEntries,
     hidden: metadata?.hidden,
     category: metadata?.category,
-    display: metadata?.display
+    display: metadata?.display,
+    wasmThreads: metadata?.wasmThreads
   };
   return descriptor;
 }
