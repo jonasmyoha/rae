@@ -5,8 +5,10 @@
 # camera — or resizing the window — resets it. Presented through SDL3.
 #
 # Controls (Blender Z-up): W/S fwd/back  A/D strafe  E/Q up/down  arrows look,
-# left-drag mouse look. The window is resizable — drag a corner and the tracer
-# re-renders at the new size. Compiled-target only; needs wgpu-native + SDL3.
+# left-drag mouse look. Keys 1/2/3 set the render quality (960x540 / 720p /
+# Full HD). The render box is a FIXED resolution independent of the window — the
+# window is resizable but only scales the image for display. Compiled-target
+# only; needs wgpu-native + SDL3.
 #
 #   rae run --target compiled main.rae
 import core
@@ -87,15 +89,16 @@ func main() {
 
     let wgsl: String = rae_ext_rae_sys_read_file(path: "examples/52_raytracer_webgpu_interactive/accum.wgsl")
 
-    sdlInitWindow(width: 640, height: 360, title: "Rae raytracer — interactive + progressive (native WebGPU)")
+    sdlInitWindow(width: 1280, height: 720, title: "Rae raytracer — interactive + progressive (native WebGPU)")
     sdlSetTargetFPS(fps: 0)
 
-    # Use the renderer's actual pixel size (handles HiDPI + later resizes).
-    var width: Int = sdlWindowWidth()
-    var height: Int = sdlWindowHeight()
-    if width < 1 { width = 640 }
-    if height < 1 { height = 360 }
-    var aspect: Float = width.toFloat() / height.toFloat()
+    # The render "box" is a FIXED resolution, independent of the window size —
+    # the window only scales it for display (the texture stretches to fill).
+    # Quality presets (all 16:9); keys 1/2/3 switch between them. Default Full HD.
+    var quality: Int = 2
+    var width: Int = 1920
+    var height: Int = 1080
+    let aspect: Float = 16.0 / 9.0
     var cam: Camera = buildCamera(pos: camPos, target: vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
 
     let params: List(Int) = createList(cap: 8)
@@ -119,14 +122,18 @@ func main() {
     loop not sdlShouldClose() {
         var moved: Bool = false
 
-        # Window resize: re-render at the new size, reset accumulation.
-        let ww: Int = sdlWindowWidth()
-        let wh: Int = sdlWindowHeight()
-        if ww > 0 and wh > 0 and (ww > width or ww < width or wh > height or wh < height) {
-            width = ww
-            height = wh
-            aspect = width.toFloat() / height.toFloat()
-            cam = buildCamera(pos: camPos, target: vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
+        # Quality / render-resolution (keys 1=qHD 960x540, 2=720p, 3=Full HD).
+        # The render box is fixed at this size regardless of the window; changing
+        # it rebuilds the GPU buffers + framebuffer and resets accumulation.
+        var newQ: Int = quality
+        if sdlIsKeyPressed(key: 49) { newQ = 0 }
+        if sdlIsKeyPressed(key: 50) { newQ = 1 }
+        if sdlIsKeyPressed(key: 51) { newQ = 2 }
+        if newQ > quality or newQ < quality {
+            quality = newQ
+            if quality is 0 { width = 960   height = 540 }
+            if quality is 1 { width = 1280  height = 720 }
+            if quality is 2 { width = 1920  height = 1080 }
             params.set(index: 0, value: width)
             params.set(index: 1, value: height)
             rt = buildGpuRT(wgsl: wgsl, scene: sceneFloats(cam: cam, world: world), params: params, pixels: width * height)
@@ -184,7 +191,7 @@ func main() {
 
         sdlUpdatePixels(pixels: fb.data, w: width, h: height)
         sdlPresent()
-        sdlSetTitle(title: "Rae interactive GPU path tracer | {width}x{height} | {sampleIndex} spp | WASD/E-Q move, arrows/drag look, resize")
+        sdlSetTitle(title: "Rae interactive GPU path tracer | render {width}x{height} | {sampleIndex} spp | WASD/E-Q move, arrows/drag look | 1/2/3 quality")
         sampleIndex = sampleIndex + 1
         frame = frame + 1
     }
