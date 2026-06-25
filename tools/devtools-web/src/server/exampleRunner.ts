@@ -42,6 +42,7 @@ export type ExampleRunOptions = {
   watch?: boolean;
   mode?: ExampleRunMode;
   targetId?: string;
+  profile?: "debug" | "release";
   exampleId?: string;
   action?: ExampleActionRequest;
 };
@@ -66,7 +67,7 @@ export class ExampleRunner {
     const action = options.action;
     const mode: ExampleRunMode =
       action?.id ? "action" : options.mode ?? (options.watch ? "watch" : "run");
-    const prepared = this.prepareCommand(target, entry, mode, action);
+    const prepared = this.prepareCommand(target, entry, mode, action, options.profile);
     if (!prepared) {
       return;
     }
@@ -309,7 +310,8 @@ export class ExampleRunner {
     target: TargetConfig,
     entry: string,
     mode: ExampleRunMode,
-    action?: ExampleActionRequest
+    action?: ExampleActionRequest,
+    profile?: "debug" | "release"
   ) {
     const runTemplate = action?.command
       ? action.command
@@ -333,7 +335,9 @@ export class ExampleRunner {
       ENTRY_DIR: path.dirname(entryPath),
       EXAMPLE_DIR: path.dirname(entryPath),
       TARGET_ID: target.id,
-      TARGET_LABEL: target.label
+      TARGET_LABEL: target.label,
+      // Optimization level for the compiled target's gcc step ({{OPT}}).
+      OPT: profile === "debug" ? "-O0 -g" : "-O2"
     };
     let tempDir: string | undefined;
     if (needsOutDir) {

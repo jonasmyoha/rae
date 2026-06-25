@@ -93,21 +93,6 @@ const server = Bun.serve<SocketData>({
       });
     }
 
-    // Live WASM raytracer demo: serve the Rae->C->wasm artifact built by
-    // `../rae/compiler/tools/wasm_build.sh` (run `make wasm`). The Raytracer
-    // view path-traces it in the browser via a small WASI shim.
-    if (url.pathname === "/wasm/raytracer.wasm" && req.method === "GET") {
-      const wasmPath = path.join(examplesRoot, "46_raytracer_wasm_web", "build", "app.wasm");
-      const file = Bun.file(wasmPath);
-      if (!(await file.exists())) {
-        return new Response(
-          "raytracer wasm not built — run `make wasm` (builds via ../rae/compiler/tools/wasm_build.sh)",
-          { status: 404 }
-        );
-      }
-      return new Response(file, { headers: { "Content-Type": "application/wasm" } });
-    }
-
     if (url.pathname === "/api/tests/run" && req.method === "POST") {
       const payload = await safeJson(req);
       const targetId = typeof payload.targetId === "string" ? payload.targetId : undefined;
@@ -262,6 +247,7 @@ const server = Bun.serve<SocketData>({
       await exampleRunner.run(entry, {
         mode,
         targetId,
+        profile: resolveExampleProfile(payload),
         watch: Boolean(payload.watch),
         exampleId,
         action: action
@@ -372,6 +358,7 @@ async function handleClientEvent(event: ClientEvent) {
     await exampleRunner.run(event.entry, {
       mode,
       targetId,
+      profile: resolveExampleProfile(event as { profile?: string }),
       watch: event.watch,
       exampleId,
       action: actionMeta
@@ -551,6 +538,10 @@ function resolveExampleMode(payload: { mode?: string; watch?: boolean } | null):
     return payload.mode;
   }
   return payload?.watch ? "watch" : "run";
+}
+
+function resolveExampleProfile(payload: { profile?: string } | null): "debug" | "release" {
+  return payload?.profile === "debug" ? "debug" : "release";
 }
 
 function buildConfigDebugLines(config: RaeDevtoolsConfig): string[] {

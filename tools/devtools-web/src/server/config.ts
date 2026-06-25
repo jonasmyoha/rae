@@ -79,7 +79,7 @@ const DEFAULT_TARGETS: TargetConfig[] = [
     // the final binary. The shared library libraylib.dylib does NOT
     // export those symbols. Same fix as compiler/Makefile and
     // compiler/src/main.c.
-    exampleRunCommand: "./compiler/bin/rae build --target compiled --project {{ENTRY_DIR}} --emit-c --out {{OUTDIR}}/out.c {{ENTRY}} && gcc -O2 -o {{OUTDIR}}/app {{OUTDIR}}/out.c {{OUTDIR}}/rae_runtime.c third_party/raylib/rae_raylib.c -I{{OUTDIR}} -Ithird_party/raylib -I/opt/homebrew/include /opt/homebrew/lib/libraylib.a -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL && {{OUTDIR}}/app",
+    exampleRunCommand: "./compiler/bin/rae build --target compiled --project {{ENTRY_DIR}} --emit-c --out {{OUTDIR}}/out.c {{ENTRY}} && gcc {{OPT}} -o {{OUTDIR}}/app {{OUTDIR}}/out.c {{OUTDIR}}/rae_runtime.c third_party/raylib/rae_raylib.c -I{{OUTDIR}} -Ithird_party/raylib -I/opt/homebrew/include /opt/homebrew/lib/libraylib.a -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL && {{OUTDIR}}/app",
     // `rae watch --target compiled`: supervisor builds each
     // rebuild into a fresh `.rae/build/build-N/` directory, swaps
     // binaries on successful build, falls back to the previous
@@ -100,6 +100,22 @@ const DEFAULT_TARGETS: TargetConfig[] = [
     rebuildCommand: "cd compiler && make clean && make",
     exampleRunCommand: "./compiler/bin/rae build --target hybrid --project {{ENTRY_DIR}} --emit-c --out {{OUTDIR}} {{ENTRY}}",
     exampleBuildCommand: "./compiler/bin/rae build --target hybrid --project {{ENTRY_DIR}} --emit-c --out {{OUTDIR}} {{ENTRY}}"
+  },
+  {
+    id: "wasm",
+    label: "WASM (WebAssembly)",
+    description: "Rae → C → wasm32-wasip1 (wasi-sdk), run headless via Node WASI",
+    testCommand: "-",
+    buildCommand: "cd compiler && make",
+    cleanCommand: "cd compiler && make clean",
+    rebuildCommand: "cd compiler && make clean && make",
+    // Build the example to .wasm via the C backend + wasi-sdk, then run it
+    // under a Node WASI shim that echoes the program's stdout (text examples)
+    // or summarizes binary output (e.g. the raytracer framebuffer). Needs
+    // wasi-sdk (WASI_SDK, default ~/.local/wasi-sdk). Only headless examples
+    // work — raylib/windowed examples can't link to wasm.
+    exampleRunCommand: "compiler/tools/wasm_build.sh {{ENTRY_DIR}} {{ENTRY}} {{OUTDIR}}/app.wasm && node compiler/tools/wasm_run.mjs --echo {{OUTDIR}}/app.wasm",
+    exampleBuildCommand: "compiler/tools/wasm_build.sh {{ENTRY_DIR}} {{ENTRY}} {{OUTDIR}}/app.wasm"
   }
 ];
 

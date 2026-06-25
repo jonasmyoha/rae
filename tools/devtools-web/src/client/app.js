@@ -1617,6 +1617,9 @@ function exampleFileIcon(kind) {
   return "📄";
 }
 
+// Run controls: just Run + Watch, driven by the global Target/Profile
+// dropdowns (no per-target button matrix, no Build). The selected target is
+// shown in the dropdown; here we only reflect whether this example supports it.
 function renderExampleTargetButtons(example) {
   if (!exampleTargetActions) return;
   exampleTargetActions.innerHTML = "";
@@ -1624,43 +1627,44 @@ function renderExampleTargetButtons(example) {
     exampleTargetActions.hidden = true;
     return;
   }
-
-  const targets = getExampleTargets(example);
-  if (!targets.length) {
-    exampleTargetActions.hidden = true;
-    return;
-  }
   exampleTargetActions.hidden = false;
 
-  targets.forEach((target) => {
-    const row = document.createElement("div");
-    row.className = "example-actions-row";
-    
-    const actions = [
-      { mode: "run", label: "Run", enabled: target.supportsExampleRun, secondary: false },
-      { mode: "watch", label: "Watch", enabled: target.supportsExampleWatch, secondary: true },
-      { mode: "build", label: "Build", enabled: target.supportsExampleBuild, secondary: true }
-    ];
-    
-    actions.forEach((action) => {
-      if (!action.enabled) return;
-      const button = document.createElement("button");
-      button.type = "button";
-      // Prefer the target's shortLabel (e.g. "compiled release") so the
-      // button reads "Run compiled release"; fall back to the raw id.
-      const display = target.shortLabel ?? target.id;
-      button.textContent = `${action.label} ${display}`;
-      if (action.secondary) {
-        button.classList.add("secondary");
-      }
-      button.disabled = exampleRunActive;
-      button.title = target.label;
-      button.addEventListener("click", () => triggerExampleRun(action.mode, target.id));
-      row.appendChild(button);
-    });
-    
-    exampleTargetActions.appendChild(row);
-  });
+  const targetId = getGlobalTarget();
+  const target = getTargetById(targetId);
+  const supportedList = Array.isArray(example.supportedTargets) ? example.supportedTargets : [];
+  const supported = supportedList.length === 0 || supportedList.includes(targetId);
+
+  const row = document.createElement("div");
+  row.className = "example-actions-row";
+
+  const runBtn = document.createElement("button");
+  runBtn.type = "button";
+  runBtn.textContent = "Run";
+  runBtn.disabled = exampleRunActive || !supported || !(target && target.supportsExampleRun);
+  runBtn.title = supported
+    ? `Run with ${target?.label ?? targetId}`
+    : `${formatExampleName(example.name)} doesn't support the ${targetId} target`;
+  runBtn.addEventListener("click", () => triggerExampleRun("run"));
+  row.appendChild(runBtn);
+
+  const canWatch = supported && target && target.supportsExampleWatch;
+  const watchBtn = document.createElement("button");
+  watchBtn.type = "button";
+  watchBtn.classList.add("secondary");
+  watchBtn.textContent = "Watch";
+  watchBtn.disabled = exampleRunActive || !canWatch;
+  watchBtn.title = canWatch ? `Watch with ${target?.label ?? targetId}` : `Watch is not available for the ${targetId} target`;
+  watchBtn.addEventListener("click", () => triggerExampleRun("watch"));
+  row.appendChild(watchBtn);
+
+  if (!supported) {
+    const note = document.createElement("span");
+    note.className = "example-target-note";
+    note.textContent = `Unavailable for ${target?.label ?? targetId}`;
+    row.appendChild(note);
+  }
+
+  exampleTargetActions.appendChild(row);
 }
 
 function renderExampleActions(example) {
@@ -2054,7 +2058,31 @@ async function saveExampleSource() {
 }
 
 const runAllExamplesBtn = document.getElementById("run-all-examples-btn");
-const runAllModeToggle = document.getElementById("run-all-mode-toggle");
+const exampleTargetSelect = document.getElementById("example-target-select");
+const exampleProfileSelect = document.getElementById("example-profile-select");
+
+// Global, persisted run settings (target + profile), shared by every example's
+// Run/Watch and the Run-all batch. Remembered across examples and sessions.
+const RUN_TARGET_KEY = "rae_example_target";
+const RUN_PROFILE_KEY = "rae_example_profile";
+function getGlobalTarget() { return exampleTargetSelect?.value || "live"; }
+function getGlobalProfile() { return exampleProfileSelect?.value || "release"; }
+if (exampleTargetSelect) {
+  const saved = localStorage.getItem(RUN_TARGET_KEY);
+  if (saved) exampleTargetSelect.value = saved;
+  exampleTargetSelect.addEventListener("change", () => {
+    localStorage.setItem(RUN_TARGET_KEY, exampleTargetSelect.value);
+    // Re-render so Run/Watch availability reflects the new target.
+    updateExampleButtons();
+  });
+}
+if (exampleProfileSelect) {
+  const saved = localStorage.getItem(RUN_PROFILE_KEY);
+  if (saved) exampleProfileSelect.value = saved;
+  exampleProfileSelect.addEventListener("change", () => {
+    localStorage.setItem(RUN_PROFILE_KEY, exampleProfileSelect.value);
+  });
+}
 
 runAllExamplesBtn?.addEventListener("click", () => runAllExamples());
 
@@ -2063,9 +2091,8 @@ async function runAllExamples() {
     pushStatusItem("An example is already running. Please stop it first.");
     return;
   }
-  
-  const useCompiled = runAllModeToggle?.checked;
-  const targetId = useCompiled ? "compiled" : "live";
+
+  const targetId = getGlobalTarget();
   
   isBatchRunning = true;
   batchResults = [];
@@ -2184,7 +2211,7 @@ function renderBatchReport() {
   const successes = batchResults.filter(r => r.success).length;
   const skipped = batchResults.filter(r => r.skipped).length;
   const failures = total - successes - skipped;
-  const mode = runAllModeToggle?.checked ? "compiled" : "live";
+  const mode = getGlobalTarget();
   
   summary.textContent = `[${mode}] ${successes} passed, ${failures} failed, ${skipped} skipped (${total} total).`;
   
@@ -2221,7 +2248,7 @@ const copyBatchErrorsBtn = document.getElementById("copy-batch-errors-btn");
 const closeBatchReportBtn = document.getElementById("close-batch-report-btn");
 
 copyBatchErrorsBtn?.addEventListener("click", () => {
-  const mode = runAllModeToggle?.checked ? "compiled" : "live";
+  const mode = getGlobalTarget();
   
   // Only include ACTUAL failures (not successes, and NOT skipped)
   const actualFailures = batchResults.filter(r => !r.success && !r.skipped);
@@ -2243,7 +2270,9 @@ closeBatchReportBtn?.addEventListener("click", () => hideBatchReport());
 async function triggerExampleRun(mode = "run", targetId = null, actionId = null) {
   const example = getSelectedExample();
   if (!example) return;
-  const resolvedTargetId = resolveExampleTargetId(example, targetId);
+  // Explicit targetId (run-all / actions) wins; otherwise use the global
+  // Target dropdown. resolveExampleTargetId falls back to a supported target.
+  const resolvedTargetId = resolveExampleTargetId(example, targetId ?? getGlobalTarget());
   const target = resolvedTargetId ? getTargetById(resolvedTargetId) : null;
   if (!target) {
     setExampleStatus("No targets configured", "is-failure");
@@ -2295,6 +2324,7 @@ async function triggerExampleRun(mode = "run", targetId = null, actionId = null)
         entry,
         mode,
         targetId: target.id,
+        profile: getGlobalProfile(),
         watch: mode === "watch",
         actionId: actionId ?? undefined
       })
@@ -2827,9 +2857,6 @@ function setActiveView(targetView) {
     renderWhyExamples();
   } else if (resolvedView === "examples") {
     startExamplesBackgroundAnimation();
-  } else if (resolvedView === "raytracer") {
-    renderRaytracerSection();
-    setupWasmRaytracerDemo();
   }
 
   if (resolvedView !== "examples") {
@@ -2837,131 +2864,6 @@ function setActiveView(targetView) {
   }
 }
 
-// Raytracer sidebar section: a curated launcher for the raytracer step
-// examples (category "Raytracer"). Clicking a step selects it and hands off to
-// the existing Examples detail/run pane — no duplication of the run machinery.
-function renderRaytracerSection() {
-  const listEl = document.getElementById("raytracer-list");
-  if (!listEl) return;
-  const steps = examples
-    .filter((ex) => ex.category === "Raytracer")
-    .sort((a, b) => a.id.localeCompare(b.id));
-  if (!steps.length) {
-    listEl.innerHTML = `<p class="test-list-empty">No raytracer steps found.</p>`;
-    return;
-  }
-  listEl.innerHTML = "";
-  const fragment = document.createDocumentFragment();
-  steps.forEach((example) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "example-card";
-    const displayName = formatExampleName(example.name);
-    const desc = example.description ? `<p>${example.description}</p>` : `<p>${describeExampleTargets(example)}</p>`;
-    button.innerHTML = `<h4>${displayName}</h4>${desc}`;
-    button.addEventListener("click", () => {
-      if (exampleRunActive) stopExampleRun();
-      const previousId = selectedExampleId;
-      selectedExampleId = example.id;
-      if (previousId !== selectedExampleId) resetExampleArtifacts();
-      selectedExampleFile = example.files[0]?.path ?? null;
-      setActiveView("examples");
-      renderExampleList();
-      renderExampleDetail();
-      if (selectedExampleFile) loadExampleSource(selectedExampleFile);
-    });
-    fragment.appendChild(button);
-  });
-  listEl.appendChild(fragment);
-}
-
-// Live WASM raytracer: fetch the Rae->C->wasm module served at
-// /wasm/raytracer.wasm and path-trace it in the browser. A tiny WASI
-// (preview1) shim captures the program's stdout (raw RGB framebuffer) and
-// blits it to the canvas. Same approach as examples/46_raytracer_wasm_web.
-const WASM_RT = { bytes: null, running: false, wired: false };
-
-async function setupWasmRaytracerDemo() {
-  const canvas = document.getElementById("wasm-rt-canvas");
-  const runBtn = document.getElementById("wasm-rt-run");
-  const statusEl = document.getElementById("wasm-rt-status");
-  if (!canvas || !runBtn || WASM_RT.wired) return;
-  WASM_RT.wired = true;
-
-  const W = canvas.width, H = canvas.height;
-  const ctx = canvas.getContext("2d");
-  const setStatus = (t) => { if (statusEl) statusEl.textContent = t; };
-
-  const render = async () => {
-    if (WASM_RT.running) return;
-    WASM_RT.running = true;
-    runBtn.disabled = true;
-    try {
-      if (!WASM_RT.bytes) {
-        setStatus("fetching app.wasm…");
-        const res = await fetch("/wasm/raytracer.wasm");
-        if (!res.ok) {
-          setStatus("not built — run `make wasm` in rae-devtools-web");
-          return;
-        }
-        WASM_RT.bytes = await res.arrayBuffer();
-      }
-      setStatus("rendering (CPU path tracer in WASM)…");
-
-      const stdout = [];
-      let mem;
-      const dv = () => new DataView(mem.buffer);
-      const u8 = () => new Uint8Array(mem.buffer);
-      class Exit { constructor(c) { this.code = c; } }
-      const wasi = {
-        proc_exit(c) { throw new Exit(c); },
-        fd_write(fd, iovs, n, nw) {
-          const v = dv(), b = u8(); let w = 0;
-          for (let i = 0; i < n; i++) {
-            const p = iovs + i * 8, buf = v.getUint32(p, true), len = v.getUint32(p + 4, true);
-            if (fd === 1) for (let j = 0; j < len; j++) stdout.push(b[buf + j]);
-            w += len;
-          }
-          v.setUint32(nw, w, true); return 0;
-        },
-        args_sizes_get(c, b) { dv().setUint32(c, 0, true); dv().setUint32(b, 0, true); return 0; },
-        args_get() { return 0; },
-        environ_sizes_get(c, b) { dv().setUint32(c, 0, true); dv().setUint32(b, 0, true); return 0; },
-        environ_get() { return 0; },
-        fd_prestat_get() { return 8; }, fd_prestat_dir_name() { return 8; },
-        fd_fdstat_get() { return 0; }, fd_close() { return 0; },
-        fd_seek() { return 0; }, fd_read() { return 0; }, clock_time_get() { return 0; },
-        random_get(p, l) { const b = u8(); for (let i = 0; i < l; i++) b[p + i] = (Math.random() * 256) | 0; return 0; }
-      };
-
-      const t0 = performance.now();
-      const { instance } = await WebAssembly.instantiate(WASM_RT.bytes, { wasi_snapshot_preview1: wasi });
-      mem = instance.exports.memory;
-      try { instance.exports._start(); } catch (e) { if (!(e instanceof Exit)) throw e; }
-      const ms = (performance.now() - t0).toFixed(0);
-
-      if (stdout.length !== W * H * 3) {
-        setStatus(`unexpected output: ${stdout.length} bytes`);
-        return;
-      }
-      const img = ctx.createImageData(W, H);
-      for (let i = 0, p = 0; i < W * H; i++) {
-        img.data[i * 4] = stdout[p++]; img.data[i * 4 + 1] = stdout[p++];
-        img.data[i * 4 + 2] = stdout[p++]; img.data[i * 4 + 3] = 255;
-      }
-      ctx.putImageData(img, 0, 0);
-      setStatus(`done — ${W}×${H}, rendered in WASM in ${ms} ms`);
-    } catch (e) {
-      setStatus("error: " + e.message);
-      console.error("[wasm-raytracer]", e);
-    } finally {
-      WASM_RT.running = false;
-      runBtn.disabled = false;
-    }
-  };
-
-  runBtn.addEventListener("click", render);
-}
 
 function renderWhyExamples() {
   if (whyExampleReferences) {

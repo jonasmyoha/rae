@@ -44,9 +44,6 @@
         <button class="app-nav__item" type="button" role="tab" aria-selected="false" data-view-target="examples">
           Examples
         </button>
-        <button class="app-nav__item" type="button" role="tab" aria-selected="false" data-view-target="raytracer">
-          Raytracer
-        </button>
       </nav>
     </header>
     <main class="app-main">
@@ -514,15 +511,22 @@
 
           <div class="global-actions">
             <div class="run-all-group">
-              <div class="toggle-switch">
-                <input type="checkbox" id="run-all-mode-toggle" class="toggle-switch__input" />
-                <label for="run-all-mode-toggle" class="toggle-switch__label">
-                  <span class="toggle-switch__text toggle-switch__text--live">Live</span>
-                  <span class="toggle-switch__slider"></span>
-                  <span class="toggle-switch__text toggle-switch__text--compiled">Compiled</span>
-                </label>
-              </div>
-              <button id="run-all-examples-btn" class="btn-action-mini">Run all examples</button>
+              <label class="run-select">
+                <span class="run-select__label">Target</span>
+                <select id="example-target-select" class="run-select__input">
+                  <option value="live">Live</option>
+                  <option value="compiled">Compiled</option>
+                  <option value="wasm">WASM</option>
+                </select>
+              </label>
+              <label class="run-select">
+                <span class="run-select__label">Profile</span>
+                <select id="example-profile-select" class="run-select__input">
+                  <option value="release">Release</option>
+                  <option value="debug">Debug</option>
+                </select>
+              </label>
+              <button id="run-all-examples-btn" class="btn-action-mini">Run all</button>
             </div>
             <div class="active-status-group">
               <div class="test-status" id="example-status-chip">Idle</div>
@@ -614,32 +618,6 @@
               </div>
             </header>
             <div class="batch-report__content" id="batch-report-content"></div>
-          </div>
-        </section>
-      </div>
-      <div class="app-view" data-view="raytracer">
-        <section class="panel panel--full examples-view">
-          <header class="examples-hero">
-            <div class="examples-hero__text">
-              <h2 class="marketing-title gradient-text">Raytracer</h2>
-              <p class="marketing-subtitle">A CPU raytracer built up step by step, following the three <em>Ray Tracing in One Weekend</em> books. Pick a step to open it in Examples and run it.</p>
-            </div>
-          </header>
-
-          <section class="wasm-demo" aria-label="Live WASM raytracer">
-            <div class="wasm-demo__text">
-              <h3>Run it here <span class="wasm-demo__badge">WASM</span></h3>
-              <p>The step-3 materials scene, compiled <strong>Rae&nbsp;&rarr;&nbsp;C&nbsp;&rarr;&nbsp;WebAssembly</strong> and path-traced live in this browser tab — the first step of Rae's new web stack (no raylib, no server-side run).</p>
-              <div class="wasm-demo__controls">
-                <button id="wasm-rt-run" type="button" class="primary-button">Render (WASM)</button>
-                <span id="wasm-rt-status" class="wasm-demo__status">idle</span>
-              </div>
-            </div>
-            <canvas id="wasm-rt-canvas" width="480" height="270"></canvas>
-          </section>
-
-          <div class="example-list" id="raytracer-list">
-            <p class="test-list-empty">Loading raytracer steps…</p>
           </div>
         </section>
       </div>
