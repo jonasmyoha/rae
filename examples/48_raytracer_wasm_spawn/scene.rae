@@ -1,0 +1,32 @@
+# Scene + materials for step 3.
+import core
+import vec3
+
+# kind: 0 = diffuse (Lambertian), 1 = metal (reflect + fuzz), 2 = glass (dielectric)
+type Material {
+    kind: Int
+    albedo: Vec3
+    fuzz: Float
+    ior: Float
+}
+
+type Sphere {
+    center: Vec3
+    radius: Float
+    material: Material
+}
+
+# The classic Z-up four-sphere scene: diffuse ground, diffuse centre, glass on
+# the left, fuzzed metal on the right.
+func buildScene() ret List(Sphere) {
+    let s: List(Sphere) = createList(Sphere, cap: 4)
+    s.add(value: { center: { x: 0.0, y: 1.0, z: -100.5 }, radius: 100.0,
+        material: { kind: 0, albedo: { x: 0.8, y: 0.8, z: 0.0 }, fuzz: 0.0, ior: 0.0 } })
+    s.add(value: { center: { x: 0.0, y: 1.0, z: 0.0 }, radius: 0.5,
+        material: { kind: 0, albedo: { x: 0.1, y: 0.2, z: 0.5 }, fuzz: 0.0, ior: 0.0 } })
+    s.add(value: { center: { x: -1.0, y: 1.0, z: 0.0 }, radius: 0.5,
+        material: { kind: 2, albedo: { x: 1.0, y: 1.0, z: 1.0 }, fuzz: 0.0, ior: 1.5 } })
+    s.add(value: { center: { x: 1.0, y: 1.0, z: 0.0 }, radius: 0.5,
+        material: { kind: 1, albedo: { x: 0.8, y: 0.6, z: 0.2 }, fuzz: 0.05, ior: 0.0 } })
+    ret s
+}
