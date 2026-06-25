@@ -674,15 +674,39 @@ button.btn-build-test:hover:not(:disabled) {
 }
 .run-select__label { text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.65rem; opacity: 0.85; }
 .run-select__input {
-  background: var(--bg-panel, #181b23);
-  color: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 8px;
-  padding: 0.4rem 0.6rem;
-  font-size: 0.85rem;
+  /* Strip native (Win95-ish) chrome and draw our own pill + chevron. */
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  color: var(--text);
+  font: 600 0.85rem var(--font-stack);
   cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  padding: 0.4rem 2rem 0.4rem 0.85rem;
+  background-color: rgba(255, 255, 255, 0.05);
+  /* custom chevron */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='none' stroke='%2376e1e1' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round' d='M1 1.5 6 6.5 11 1.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.7rem center;
+  background-size: 11px;
+  transition: border-color 0.15s, background-color 0.15s, box-shadow 0.15s;
 }
-.run-select__input:focus { outline: none; border-color: var(--accent); }
+.run-select__input:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.09);
+  border-color: rgba(118, 225, 225, 0.5);
+}
+.run-select__input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.run-select__input:disabled { cursor: default; }
+/* The popup option list is OS-drawn; set readable dark colours where honoured. */
+.run-select__input option {
+  background: var(--bg-panel);
+  color: var(--text);
+}
 
 .example-target-actions {
   display: flex;
