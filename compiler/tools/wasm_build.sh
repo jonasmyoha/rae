@@ -37,11 +37,27 @@ trap 'rm -rf "$TMP"' EXIT
 EXTRA_C="$(ls "$PROJ"/*.c 2>/dev/null | grep -v 'rae_runtime.c' || true)"
 
 mkdir -p "$(dirname "$OUT")"
-# -msimd128: enable WASM SIMD (clang auto-vectorizes hot float loops); supported
-# by Node and all modern browsers. -Wl,--allow-undefined lets examples import
-# functions from JS (e.g. band params in the threaded raytracer) as env imports.
-"$CC" --target=wasm32-wasip1 --sysroot="$SYS" -O2 -msimd128 \
-  -Wl,--allow-undefined \
-  -o "$OUT" "$TMP/out.c" "$TMP/rae_runtime.c" $EXTRA_C -I"$TMP"
+# WASM_THREADS=1 builds a *threaded* module: wasm32-wasip1-threads + -pthread,
+# so Rae `spawn` (which lowers to pthread_create) runs on real OS-thread-backed
+# wasm threads — the same spawn code as the compiled target, no JS-side
+# band-splitting hack. The module imports a *shared* memory so each worker the
+# host spawns for `wasi.thread-spawn` instantiates over the SAME memory, and
+# exports `wasi_thread_start`. -DRAE_WASM_THREADS keeps pthread_join in the
+# runtime (it's a no-op stub on the single-threaded wasip1 target).
+if [ "${WASM_THREADS:-0}" = "1" ]; then
+  # Shared memory must be bounded: --max-memory=1 GiB (16384 * 64KiB pages).
+  "$CC" --target=wasm32-wasip1-threads --sysroot="$SYS" -O2 -msimd128 -pthread \
+    -DRAE_WASM_THREADS \
+    -Wl,--allow-undefined \
+    -Wl,--import-memory,--export-memory,--shared-memory,--max-memory=1073741824 \
+    -o "$OUT" "$TMP/out.c" "$TMP/rae_runtime.c" $EXTRA_C -I"$TMP"
+else
+  # -msimd128: enable WASM SIMD (clang auto-vectorizes hot float loops); supported
+  # by Node and all modern browsers. -Wl,--allow-undefined lets examples import
+  # functions from JS (e.g. band params in the threaded raytracer) as env imports.
+  "$CC" --target=wasm32-wasip1 --sysroot="$SYS" -O2 -msimd128 \
+    -Wl,--allow-undefined \
+    -o "$OUT" "$TMP/out.c" "$TMP/rae_runtime.c" $EXTRA_C -I"$TMP"
+fi
 
 echo "wasm_build: $OUT ($(wc -c < "$OUT" | tr -d ' ') bytes)"
