@@ -33,11 +33,15 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
       # Link raylib statically so GLFW symbols bundled in libraylib.a
       # (glfwWaitEventsTimeout, glfwPostEmptyEvent, ...) resolve. The
       # shared libraylib.dylib does not export those.
+      # Define + link both desktop backends so every example links regardless
+      # of which it imports: raylib (statically, for the bundled GLFW symbols)
+      # and SDL3 (lib/sdl3.rae). The sdl* and raylib functions have distinct
+      # names, so both runtime blocks compile together without collision.
       if gcc -O2 -o "$TMP_OUT/app" "$TMP_OUT/out.c" "$TMP_OUT/rae_runtime.c" \
          $([ -f "$TMP_OUT/monocypher.c" ] && echo "$TMP_OUT/monocypher.c") \
          $(ls "$PROJECT_DIR"/*.c 2>/dev/null | grep -v "rae_runtime.c" | grep -v "main_compiled.c" || true) \
-         -I"$TMP_OUT" -I/opt/homebrew/include -L/opt/homebrew/lib -DRAE_HAS_RAYLIB \
-         /opt/homebrew/lib/libraylib.a -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL > "$TMP_OUT/link.log" 2>&1; then
+         -I"$TMP_OUT" -I/opt/homebrew/include -L/opt/homebrew/lib -DRAE_HAS_RAYLIB -DRAE_HAS_SDL3 \
+         /opt/homebrew/lib/libraylib.a -lSDL3 -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL > "$TMP_OUT/link.log" 2>&1; then
         echo "PASS: $EXAMPLE_NAME"
         ((PASSED++))
       else

@@ -1,0 +1,29 @@
+# SDL3 desktop platform layer — a Compiled-target windowing/present backend,
+# parallel to lib/raylib.rae. One window per process (the window/renderer/
+# texture handles live in the runtime), so the API is handle-free: init, upload
+# a packed-0xRRGGBB framebuffer, present, poll for quit.
+#
+# Implemented in the RAE_HAS_SDL3 block of compiler/runtime/rae_runtime.c; the
+# build links libSDL3 when an example imports this module (mirrors how raylib
+# is detected + linked). Compiled-target only — the Live VM has no SDL bindings.
+import core
+
+# Create the window + renderer + a streaming RGBA texture of width x height.
+func sdlInitWindow(width: Int, height: Int, title: String) extern
+
+# Pump the event queue; returns true once the user asks to close the window
+# (window close button, Escape, or Cmd-Q).
+func sdlShouldClose() extern ret Bool
+
+# Upload `count` packed 0xRRGGBB pixels (e.g. a List(Int) framebuffer's .data)
+# into the streaming texture.
+func sdlUpdatePixels(pixels: view Buffer(Int), count: Int) extern
+
+# Draw the texture to the window and present this frame.
+func sdlPresent() extern
+
+# Update the window title bar (status text — there is no drawText here).
+func sdlSetTitle(title: String) extern
+
+# Tear down the texture, renderer, window, and SDL.
+func sdlCloseWindow() extern
