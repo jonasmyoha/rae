@@ -73,7 +73,6 @@ export type ExampleDescriptor = {
   hidden?: boolean;
   category?: string;
   display?: { width: number; height: number };
-  wasmThreads?: boolean;
   wasmRealThreads?: boolean;
 };
 
