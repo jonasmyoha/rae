@@ -2,15 +2,21 @@
 // (preview1) shim — the SAME shim the browser harness uses — runs _start, and
 // captures whatever the program writes to stdout (fd 1).
 //
-//   node wasm_run.mjs <module.wasm> [out.bin]
+//   node wasm_run.mjs <module.wasm> [out.bin]   # machine: prints "<bytes> <avg>"
+//   node wasm_run.mjs --echo <module.wasm>      # human: echo program stdout
 //
-// Prints "bytes=<N> avg=<x>" to stderr. If out.bin is given, the captured
-// stdout bytes are written there. Used by wasm_smoke.sh and for validation.
+// Default prints "<bytes> <avg>" to stdout (+ "bytes=N avg=x" to stderr); used
+// by wasm_smoke.sh. With --echo, prints the program's captured stdout as text
+// (or a one-line summary if it's binary, e.g. a raytracer framebuffer) — used
+// by the devtools WASM example target.
 import { readFile, writeFile } from 'node:fs/promises';
 
-const path = process.argv[2];
-const outPath = process.argv[3];
-if (!path) { console.error('usage: wasm_run.mjs <module.wasm> [out.bin]'); process.exit(2); }
+const argv = process.argv.slice(2);
+const echo = argv.includes('--echo');
+const positional = argv.filter((a) => !a.startsWith('--'));
+const path = positional[0];
+const outPath = positional[1];
+if (!path) { console.error('usage: wasm_run.mjs [--echo] <module.wasm> [out.bin]'); process.exit(2); }
 
 const stdout = [];
 let mem;
@@ -41,8 +47,29 @@ const { instance } = await WebAssembly.instantiate(bytes, { wasi_snapshot_previe
 mem = instance.exports.memory;
 try { instance.exports._start(); } catch (e) { if (!(e instanceof Exit)) throw e; }
 
-let s = 0; for (const x of stdout) s += x;
+let s = 0, printable = 0;
+for (const x of stdout) {
+  s += x;
+  if (x === 9 || x === 10 || x === 13 || (x >= 32 && x < 127)) printable++;
+}
 const avg = stdout.length ? (s / stdout.length) : 0;
 console.error(`bytes=${stdout.length} avg=${avg.toFixed(1)}`);
-if (outPath) await writeFile(outPath, Buffer.from(stdout));
-process.stdout.write(`${stdout.length} ${avg.toFixed(1)}\n`);
+
+if (echo) {
+  // Human-facing: show text output, or summarize binary (image/framebuffer).
+  const ratio = stdout.length ? printable / stdout.length : 1;
+  if (stdout.length === 0) {
+    process.stdout.write('(program produced no stdout)\n');
+  } else if (ratio > 0.85) {
+    const buf = Buffer.from(stdout);
+    process.stdout.write(buf.toString('utf8'));
+    if (stdout[stdout.length - 1] !== 10) process.stdout.write('\n');
+  } else {
+    process.stdout.write(
+      `(${stdout.length} bytes of binary output — e.g. an image/framebuffer; avg byte ${avg.toFixed(1)})\n`
+    );
+  }
+} else {
+  if (outPath) await writeFile(outPath, Buffer.from(stdout));
+  process.stdout.write(`${stdout.length} ${avg.toFixed(1)}\n`);
+}
