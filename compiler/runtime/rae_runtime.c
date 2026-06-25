@@ -49,7 +49,7 @@ RaeTask* rae_task_new(size_t result_size) {
 void* rae_task_await(RaeTask* t) {
   if (!t) return NULL;
   if (!t->joined) {
-#ifndef __wasm__
+#if !defined(__wasm__) || defined(RAE_WASM_THREADS)
     pthread_join(t->thread, NULL);
 #endif
     t->joined = 1;
@@ -65,7 +65,7 @@ void* rae_task_await(RaeTask* t) {
 void rae_task_drop(RaeTask* t) {
   if (!t) return;
   if (!t->joined) {
-#ifndef __wasm__
+#if !defined(__wasm__) || defined(RAE_WASM_THREADS)
     pthread_join(t->thread, NULL);
 #endif
     t->joined = 1;
@@ -675,8 +675,8 @@ rae_String rae_ext_formatDate(int64_t epoch_ms) {
 void rae_spawn(void* (*func)(void*), void* data) {
 #ifdef _WIN32
     CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)func, data, 0, NULL);
-#elif defined(__wasm__)
-    (void)func; (void)data;  /* WASM: no OS threads */
+#elif defined(__wasm__) && !defined(RAE_WASM_THREADS)
+    (void)func; (void)data;  /* single-threaded wasip1: no OS threads */
 #else
     pthread_t thread;
     if (pthread_create(&thread, NULL, func, data) == 0) {
