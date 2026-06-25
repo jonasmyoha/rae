@@ -1923,6 +1923,79 @@ async function runWasmThreaded(example) {
   }
 }
 
+// Hack-free threading: build a *threaded* wasm (Rae `spawn` -> wasi.thread-spawn)
+// and run it via a runner Web Worker that owns one shared memory and spawns a
+// child worker per Rae thread. `_start` blocks on pthread_join (atomic.wait),
+// which is only legal off the page's main thread — so the whole run lives in the
+// runner worker; the page just draws the framebuffer it posts back. Needs
+// cross-origin isolation (COOP/COEP, set by the server). Used for wasmRealThreads.
+async function runWasmSpawn(example) {
+  const canvas = document.getElementById("example-viewer-canvas");
+  const statusEl = document.getElementById("example-viewer-status");
+  const d = example.display;
+  if (!canvas || !d) return;
+  showExampleViewer(example);
+  exampleRunActive = true;
+  setExampleStatus("Building WASM…", "is-running", "WASM");
+  if (statusEl) statusEl.textContent = "building threaded wasm…";
+  updateExampleButtons();
+  try {
+    if (!self.crossOriginIsolated) {
+      throw new Error("page is not cross-origin isolated (COOP/COEP) — shared memory unavailable; reload the dashboard");
+    }
+    const entry = resolveExampleEntry(example, "wasm");
+    const res = await fetch(`/api/examples/wasm?entry=${encodeURIComponent(entry)}&threads=1`);
+    if (!res.ok) {
+      const msg = await res.text();
+      if (statusEl) statusEl.textContent = "build failed";
+      appendExampleOutput(msg, "stderr");
+      setExampleStatus("WASM build failed", "is-failure", "WASM");
+      return;
+    }
+    const bytes = await res.arrayBuffer();
+    const module = await WebAssembly.compile(bytes);
+    const W = d.width, H = d.height;
+    if (statusEl) statusEl.textContent = "rendering (Rae spawn → wasm threads)…";
+    const t0 = performance.now();
+    const workerUrl = new URL("/wasm-spawn-worker.js", self.location.href).href;
+    const result = await new Promise((resolve, reject) => {
+      const runner = new Worker(workerUrl);
+      runner.onmessage = (ev) => {
+        if (ev.data.type === "done") { runner.terminate(); resolve(ev.data); }
+        else if (ev.data.type === "error") { runner.terminate(); reject(new Error(ev.data.error)); }
+      };
+      runner.onerror = (err) => { runner.terminate(); reject(new Error(err.message || "runner error")); };
+      const pool = Math.max(2, Math.min(Number(navigator.hardwareConcurrency) || 4, 8));
+      runner.postMessage({ type: "run", module, bytes, workerUrl, w: W, h: H, pool });
+    });
+    const ms = (performance.now() - t0).toFixed(0);
+    const out = new Uint8Array(result.buf);
+    const expected = W * H * 3;
+    if (out.length === expected) {
+      const ctx = canvas.getContext("2d");
+      const img = ctx.createImageData(W, H);
+      for (let i = 0, p = 0; i < W * H; i++) {
+        img.data[i * 4] = out[p++]; img.data[i * 4 + 1] = out[p++];
+        img.data[i * 4 + 2] = out[p++]; img.data[i * 4 + 3] = 255;
+      }
+      ctx.putImageData(img, 0, 0);
+      if (statusEl) statusEl.textContent = `rendered ${W}×${H} · Rae spawn on ${result.threads} wasm threads · ${ms} ms`;
+      setExampleStatus(`Rendered · ${result.threads} Rae threads`, "is-success", "WASM");
+    } else {
+      if (statusEl) statusEl.textContent = `unexpected output (${out.length} bytes)`;
+      appendExampleOutput(`WASM produced ${out.length} bytes (expected ${expected}).`, "stderr");
+      setExampleStatus("Unexpected output", "is-failure", "WASM");
+    }
+  } catch (e) {
+    if (statusEl) statusEl.textContent = "error: " + e.message;
+    appendExampleOutput("WASM spawn run error: " + e.message, "stderr");
+    setExampleStatus("WASM run error", "is-failure", "WASM");
+  } finally {
+    exampleRunActive = false;
+    updateExampleButtons();
+  }
+}
+
 function getExampleTargetIds(example) {
   if (!example) return [];
   const supported = Array.isArray(example.supportedTargets) ? example.supportedTargets : null;
@@ -2543,7 +2616,9 @@ async function triggerExampleRun(mode = "run", targetId = null, actionId = null)
   // Display examples on the WASM target render in-browser to the canvas viewer
   // rather than running headless on the server (which would only emit bytes).
   if (mode === "run" && resolvedTargetId === "wasm" && example.display && !isBatchRunning) {
-    await (example.wasmThreads ? runWasmThreaded(example) : runWasmInBrowser(example));
+    if (example.wasmRealThreads) await runWasmSpawn(example);
+    else if (example.wasmThreads) await runWasmThreaded(example);
+    else await runWasmInBrowser(example);
     return;
   }
   if (mode === "run" && !target.supportsExampleRun) {

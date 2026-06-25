@@ -74,6 +74,7 @@ export type ExampleDescriptor = {
   category?: string;
   display?: { width: number; height: number };
   wasmThreads?: boolean;
+  wasmRealThreads?: boolean;
 };
 
 export type ExampleRunMode = "run" | "watch" | "build" | "action";

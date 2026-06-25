@@ -109,10 +109,13 @@ const server = Bun.serve<SocketData>({
       const script = path.join(cwd, "compiler/tools/wasm_build.sh");
       const tmp = mkdtempSync(path.join(os.tmpdir(), "rae-wasm-"));
       const out = path.join(tmp, "app.wasm");
+      // threads=1 -> build a threaded module (wasm32-wasip1-threads) so Rae
+      // `spawn` runs on real wasm threads via wasi.thread-spawn.
+      const threaded = url.searchParams.get("threads") === "1";
       try {
         const proc = Bun.spawn([script, entryDir, entryPath, out], {
           cwd,
-          env: process.env,
+          env: { ...process.env, ...(threaded ? { WASM_THREADS: "1" } : {}) },
           stdout: "pipe",
           stderr: "pipe"
         });
@@ -122,7 +125,9 @@ const server = Bun.serve<SocketData>({
           return new Response(`wasm build failed (exit ${code}):\n${err}`, { status: 500 });
         }
         const bytes = await Bun.file(out).arrayBuffer();
-        return new Response(bytes, { headers: { "Content-Type": "application/wasm" } });
+        return new Response(bytes, {
+          headers: { "Content-Type": "application/wasm", ...COI_HEADERS }
+        });
       } catch (error) {
         return new Response(`wasm build error: ${(error as Error).message}`, { status: 500 });
       } finally {
@@ -488,6 +493,17 @@ async function readCompilerMetrics(limit: number): Promise<CompilerMetricEntry[]
   }
 }
 
+// Cross-origin isolation: shared WebAssembly.Memory (SharedArrayBuffer) is
+// required for the threaded-wasm examples (Rae `spawn` -> wasi.thread-spawn),
+// and browsers only expose it when the top-level document is cross-origin
+// isolated. These headers opt the whole dashboard in; all assets are
+// same-origin (CORP self) so nothing else breaks.
+const COI_HEADERS = {
+  "Cross-Origin-Opener-Policy": "same-origin",
+  "Cross-Origin-Embedder-Policy": "require-corp",
+  "Cross-Origin-Resource-Policy": "same-origin"
+} as const;
+
 async function serveStaticFile(url: URL): Promise<Response> {
   const sanitizedPath = sanitizePath(url.pathname);
   const absolutePath = path.join(STATIC_ROOT, sanitizedPath);
@@ -498,7 +514,7 @@ async function serveStaticFile(url: URL): Promise<Response> {
       const fallback = Bun.file(path.join(STATIC_ROOT, "index.html"));
       if (await fallback.exists()) {
         return new Response(fallback, {
-          headers: { "Content-Type": "text/html; charset=utf-8" }
+          headers: { "Content-Type": "text/html; charset=utf-8", ...COI_HEADERS }
         });
       }
     }
@@ -508,7 +524,8 @@ async function serveStaticFile(url: URL): Promise<Response> {
 
   return new Response(file, {
     headers: {
-      "Content-Type": file.type || getContentType(sanitizedPath)
+      "Content-Type": file.type || getContentType(sanitizedPath),
+      ...COI_HEADERS
     }
   });
 }

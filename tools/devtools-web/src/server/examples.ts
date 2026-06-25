@@ -88,6 +88,7 @@ type ExampleMetadata = {
   // to the terminal.
   display?: { width: number; height: number };
   wasmThreads?: boolean;
+  wasmRealThreads?: boolean;
 };
 
 type ExampleActionMetadata = {
@@ -240,7 +241,8 @@ function makeMultiFileExample(
     hidden: metadata?.hidden,
     category: metadata?.category,
     display: metadata?.display,
-    wasmThreads: metadata?.wasmThreads
+    wasmThreads: metadata?.wasmThreads,
+    wasmRealThreads: metadata?.wasmRealThreads
   };
   return descriptor;
 }
