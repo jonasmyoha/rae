@@ -1779,14 +1779,15 @@ function runWasmCaptureStdout(bytes) {
 }
 
 function showExampleViewer(example) {
+  const viewer = document.getElementById("example-viewer");
   const canvas = document.getElementById("example-viewer-canvas");
-  const previewTab = document.getElementById("ex-tab-preview");
-  if (!canvas || !previewTab) return;
+  const statusEl = document.getElementById("example-viewer-status");
+  if (!viewer || !canvas) return;
   const d = example && example.display;
-  // The Preview tab is only available for display examples on the WASM target.
-  const available = Boolean(d) && getGlobalTarget() === "wasm";
-  previewTab.hidden = !available;
-  if (available) {
+  // Only show the canvas viewer for display examples when WASM is the target.
+  const active = Boolean(d) && getGlobalTarget() === "wasm";
+  viewer.hidden = !active;
+  if (active) {
     // Assigning canvas.width/height ALWAYS clears the bitmap (even to the same
     // value), so only do it when the size actually changes — otherwise the
     // re-render triggered after a draw (updateExampleButtons) would wipe the
@@ -1794,13 +1795,6 @@ function showExampleViewer(example) {
     if (canvas.width !== d.width) canvas.width = d.width;
     if (canvas.height !== d.height) canvas.height = d.height;
     canvas.style.aspectRatio = `${d.width} / ${d.height}`;
-  } else if (activeExamplePanel() === "preview") {
-    setExamplePanel("output"); // preview no longer available — fall back
-  }
-  // On switching to a new example, default to Preview when available else Output.
-  if (example && example.id !== lastPanelExampleId) {
-    lastPanelExampleId = example.id;
-    setExamplePanel(available ? "preview" : "output");
   }
 }
 
@@ -1810,7 +1804,6 @@ async function runWasmInBrowser(example) {
   const d = example.display;
   if (!canvas || !d) return;
   showExampleViewer(example);
-  setExamplePanel("preview");
   exampleRunActive = true;
   setExampleStatus("Building WASM…", "is-running", "WASM");
   if (statusEl) statusEl.textContent = "building…";
@@ -2214,26 +2207,6 @@ if (exampleProfileSelect) {
 }
 syncProfileEnabled();
 
-// Workspace tabs: Preview / Output / Source. The active tab's panel fills the
-// workspace, so each gets the full area at any width.
-const exTabButtons = Array.from(document.querySelectorAll(".ex-tab"));
-let lastPanelExampleId = null;
-function setExamplePanel(panel) {
-  document.querySelectorAll(".ex-panel").forEach((p) => {
-    p.classList.toggle("is-active", p.dataset.panel === panel);
-  });
-  exTabButtons.forEach((t) => t.classList.toggle("is-active", t.dataset.panel === panel));
-}
-function activeExamplePanel() {
-  return document.querySelector(".ex-tab.is-active")?.dataset.panel ?? "output";
-}
-exTabButtons.forEach((t) => {
-  t.addEventListener("click", () => {
-    if (t.hidden || t.disabled) return;
-    setExamplePanel(t.dataset.panel);
-  });
-});
-
 runAllExamplesBtn?.addEventListener("click", () => runAllExamples());
 
 async function runAllExamples() {
@@ -2464,7 +2437,6 @@ async function triggerExampleRun(mode = "run", targetId = null, actionId = null)
           ? "Running action…"
           : "Starting…";
   setExampleStatus(label, "is-running", target.label);
-  if (!isBatchRunning) setExamplePanel("output");
   updateExampleButtons();
   if (mode === "build") {
     setExampleArtifactsPending(target.label);
