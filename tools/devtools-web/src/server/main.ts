@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
+import os from "node:os";
+import { mkdtempSync, rmSync } from "node:fs";
 import { Buffer } from "node:buffer";
 import {
   getExamplesRoot,
@@ -91,6 +93,41 @@ const server = Bun.serve<SocketData>({
       return new Response(Bun.file(syntaxSummaryPath), {
         headers: { "Content-Type": "application/json" }
       });
+    }
+
+    // Build an example to .wasm on demand and return the module bytes, so the
+    // client can run it in-browser (canvas viewer). entry is example-relative,
+    // e.g. "46_raytracer_wasm_web/main.rae".
+    if (url.pathname === "/api/examples/wasm" && req.method === "GET") {
+      const entry = url.searchParams.get("entry");
+      if (!entry || entry.includes("..")) {
+        return new Response("missing/invalid entry", { status: 400 });
+      }
+      const entryPath = path.join(CONFIG.examplesPath ?? "examples", entry);
+      const entryDir = path.dirname(entryPath);
+      const cwd = resolveCompilerPath(CONFIG);
+      const script = path.join(cwd, "compiler/tools/wasm_build.sh");
+      const tmp = mkdtempSync(path.join(os.tmpdir(), "rae-wasm-"));
+      const out = path.join(tmp, "app.wasm");
+      try {
+        const proc = Bun.spawn([script, entryDir, entryPath, out], {
+          cwd,
+          env: process.env,
+          stdout: "pipe",
+          stderr: "pipe"
+        });
+        const code = await proc.exited;
+        if (code !== 0) {
+          const err = await new Response(proc.stderr).text();
+          return new Response(`wasm build failed (exit ${code}):\n${err}`, { status: 500 });
+        }
+        const bytes = await Bun.file(out).arrayBuffer();
+        return new Response(bytes, { headers: { "Content-Type": "application/wasm" } });
+      } catch (error) {
+        return new Response(`wasm build error: ${(error as Error).message}`, { status: 500 });
+      } finally {
+        rmSync(tmp, { recursive: true, force: true });
+      }
     }
 
     if (url.pathname === "/api/tests/run" && req.method === "POST") {

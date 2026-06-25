@@ -83,6 +83,10 @@ type ExampleMetadata = {
   actions?: ExampleActionMetadata[];
   hidden?: boolean;
   category?: string;
+  // Examples that render a framebuffer (RGB bytes to stdout) can declare its
+  // size; the WASM target then shows it on a canvas instead of dumping bytes
+  // to the terminal.
+  display?: { width: number; height: number };
 };
 
 type ExampleActionMetadata = {
@@ -233,7 +237,8 @@ function makeMultiFileExample(
     defaultTargetId,
     targetEntries: packInfo?.targetEntries,
     hidden: metadata?.hidden,
-    category: metadata?.category
+    category: metadata?.category,
+    display: metadata?.display
   };
   return descriptor;
 }

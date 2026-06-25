@@ -1740,6 +1740,111 @@ function getDefaultCompilerTargetIds() {
   return availableTargets.map((target) => target.id);
 }
 
+// --- In-browser WASM viewer -------------------------------------------------
+// Run a built .wasm via a minimal WASI shim (same one used everywhere) and
+// return the bytes it wrote to stdout. Display examples reshape those bytes
+// into a framebuffer on the viewer canvas; others echo as text.
+class WasiExit { constructor(code) { this.code = code; } }
+
+function runWasmCaptureStdout(bytes) {
+  const stdout = [];
+  let mem;
+  const dv = () => new DataView(mem.buffer);
+  const u8 = () => new Uint8Array(mem.buffer);
+  const wasi = {
+    proc_exit(c) { throw new WasiExit(c); },
+    fd_write(fd, iovs, n, nw) {
+      const v = dv(), b = u8(); let w = 0;
+      for (let i = 0; i < n; i++) {
+        const p = iovs + i * 8, buf = v.getUint32(p, true), len = v.getUint32(p + 4, true);
+        if (fd === 1) for (let j = 0; j < len; j++) stdout.push(b[buf + j]);
+        w += len;
+      }
+      v.setUint32(nw, w, true); return 0;
+    },
+    args_sizes_get(c, b) { dv().setUint32(c, 0, true); dv().setUint32(b, 0, true); return 0; },
+    args_get() { return 0; },
+    environ_sizes_get(c, b) { dv().setUint32(c, 0, true); dv().setUint32(b, 0, true); return 0; },
+    environ_get() { return 0; },
+    fd_prestat_get() { return 8; }, fd_prestat_dir_name() { return 8; },
+    fd_fdstat_get() { return 0; }, fd_close() { return 0; },
+    fd_seek() { return 0; }, fd_read() { return 0; }, clock_time_get() { return 0; },
+    random_get(p, l) { const b = u8(); for (let i = 0; i < l; i++) b[p + i] = (Math.random() * 256) | 0; return 0; }
+  };
+  return WebAssembly.instantiate(bytes, { wasi_snapshot_preview1: wasi }).then(({ instance }) => {
+    mem = instance.exports.memory;
+    try { instance.exports._start(); } catch (e) { if (!(e instanceof WasiExit)) throw e; }
+    return stdout;
+  });
+}
+
+function showExampleViewer(example) {
+  const viewer = document.getElementById("example-viewer");
+  const canvas = document.getElementById("example-viewer-canvas");
+  const statusEl = document.getElementById("example-viewer-status");
+  if (!viewer || !canvas) return;
+  const d = example && example.display;
+  // Only show the canvas viewer for display examples when WASM is the target.
+  const active = Boolean(d) && getGlobalTarget() === "wasm";
+  viewer.hidden = !active;
+  if (active) {
+    canvas.width = d.width;
+    canvas.height = d.height;
+    canvas.style.aspectRatio = `${d.width} / ${d.height}`;
+    if (statusEl) statusEl.textContent = "Press Run to render in the browser.";
+  }
+}
+
+async function runWasmInBrowser(example) {
+  const canvas = document.getElementById("example-viewer-canvas");
+  const statusEl = document.getElementById("example-viewer-status");
+  const d = example.display;
+  if (!canvas || !d) return;
+  showExampleViewer(example);
+  exampleRunActive = true;
+  setExampleStatus("Building WASM…", "is-running", "WASM");
+  if (statusEl) statusEl.textContent = "building…";
+  updateExampleButtons();
+  try {
+    const entry = resolveExampleEntry(example, "wasm");
+    const res = await fetch(`/api/examples/wasm?entry=${encodeURIComponent(entry)}`);
+    if (!res.ok) {
+      const msg = await res.text();
+      if (statusEl) statusEl.textContent = "build failed";
+      appendExampleOutput(msg, "stderr");
+      setExampleStatus("WASM build failed", "is-failure", "WASM");
+      return;
+    }
+    if (statusEl) statusEl.textContent = "rendering…";
+    const t0 = performance.now();
+    const out = await runWasmCaptureStdout(await res.arrayBuffer());
+    const ms = (performance.now() - t0).toFixed(0);
+    const expected = d.width * d.height * 3;
+    if (out.length === expected) {
+      const ctx = canvas.getContext("2d");
+      const img = ctx.createImageData(d.width, d.height);
+      for (let i = 0, p = 0; i < d.width * d.height; i++) {
+        img.data[i * 4] = out[p++]; img.data[i * 4 + 1] = out[p++];
+        img.data[i * 4 + 2] = out[p++]; img.data[i * 4 + 3] = 255;
+      }
+      ctx.putImageData(img, 0, 0);
+      if (statusEl) statusEl.textContent = `rendered ${d.width}×${d.height} in WASM · ${ms} ms`;
+      setExampleStatus("Rendered", "is-success", "WASM");
+    } else {
+      if (statusEl) statusEl.textContent = `unexpected output (${out.length} bytes)`;
+      appendExampleOutput(`WASM produced ${out.length} bytes (expected ${expected}).`, "stderr");
+      setExampleStatus("Unexpected output", "is-failure", "WASM");
+    }
+  } catch (e) {
+    if (statusEl) statusEl.textContent = "error: " + e.message;
+    appendExampleOutput("WASM run error: " + e.message, "stderr");
+    setExampleStatus("WASM run error", "is-failure", "WASM");
+  } finally {
+    exampleRunActive = false;
+    updateExampleButtons();
+  }
+}
+
 function getExampleTargetIds(example) {
   if (!example) return [];
   const supported = Array.isArray(example.supportedTargets) ? example.supportedTargets : null;
@@ -2004,6 +2109,7 @@ function updateExampleButtons() {
     stopExampleBtn.disabled = !exampleRunActive;
   }
   renderExampleActions(example);
+  showExampleViewer(example);
 }
 
 function updateExampleEditorView() {
@@ -2298,6 +2404,12 @@ async function triggerExampleRun(mode = "run", targetId = null, actionId = null)
       setExampleStatus("Example unavailable for target", "is-failure", target.label);
       return;
     }
+  }
+  // Display examples on the WASM target render in-browser to the canvas viewer
+  // rather than running headless on the server (which would only emit bytes).
+  if (mode === "run" && resolvedTargetId === "wasm" && example.display && !isBatchRunning) {
+    await runWasmInBrowser(example);
+    return;
   }
   if (mode === "run" && !target.supportsExampleRun) {
     setExampleStatus("Target missing run command", "is-failure", target.label);
