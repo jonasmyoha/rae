@@ -1,0 +1,70 @@
+# Raytracer — WASM via Rae `spawn` (W3): the SAME multithreaded code as step 3
+# (examples/42), compiled to *threaded* WASM. Rae `spawn` lowers to
+# pthread_create, which on the wasm32-wasip1-threads target becomes the
+# `wasi.thread-spawn` import — the host (Node worker_threads / browser Web
+# Workers) spawns a worker that re-instantiates this module over the SAME shared
+# memory and runs the thread. No JS-side band-splitting: the parallelism lives
+# in this Rae source and runs everywhere.
+#
+# Headless like example 46: emit the assembled framebuffer as raw RGB via an
+# extern, so the same .wasm renders under Node and in a browser canvas.
+import core
+import vec3
+import scene
+import camera
+import render
+
+func fbPixel(r: Int, g: Int, b: Int) extern
+
+func main() {
+    let width: Int = 480
+    let height: Int = 270
+    let samples: Int = 24
+    let maxDepth: Int = 12
+
+    let world: List(Sphere) = buildScene()
+    let aspect: Float = width.toFloat() / height.toFloat()
+    let camPos: Vec3 = vec3(x: -1.6, y: -1.2, z: 0.6)
+    let camTarget: Vec3 = vec3(x: 0.0, y: 1.0, z: 0.0)
+    let cam: Camera = buildCamera(pos: camPos, target: camTarget, vfovDeg: 45.0, aperture: 0.06, aspect: aspect)
+
+    # Framebuffer: width*height packed-RGB ints, like step 3's writeTile target.
+    let fb: List(Int) = createList(cap: width * height)
+    var i: Int = 0
+    loop i < width * height {
+        fb.add(value: 0)
+        i = i + 1
+    }
+
+    # Four quadrants, one worker thread each — the exact step-3 pattern.
+    let halfW: Int = width / 2
+    let halfH: Int = height / 2
+    let ax0: Int = 0       let ay0: Int = 0       let aw0: Int = halfW           let ah0: Int = halfH
+    let ax1: Int = halfW   let ay1: Int = 0       let aw1: Int = width - halfW   let ah1: Int = halfH
+    let ax2: Int = 0       let ay2: Int = halfH   let aw2: Int = halfW           let ah2: Int = height - halfH
+    let ax3: Int = halfW   let ay3: Int = halfH   let aw3: Int = width - halfW   let ah3: Int = height - halfH
+
+    let ta: Task(List(Int)) = spawn renderTile(world: world, cam: cam, width: width, height: height, tx0: ax0, ty0: ay0, tw: aw0, th: ah0, samples: samples, maxDepth: maxDepth, seedBase: 1)
+    let tb: Task(List(Int)) = spawn renderTile(world: world, cam: cam, width: width, height: height, tx0: ax1, ty0: ay1, tw: aw1, th: ah1, samples: samples, maxDepth: maxDepth, seedBase: 2)
+    let tc: Task(List(Int)) = spawn renderTile(world: world, cam: cam, width: width, height: height, tx0: ax2, ty0: ay2, tw: aw2, th: ah2, samples: samples, maxDepth: maxDepth, seedBase: 3)
+    let td: Task(List(Int)) = spawn renderTile(world: world, cam: cam, width: width, height: height, tx0: ax3, ty0: ay3, tw: aw3, th: ah3, samples: samples, maxDepth: maxDepth, seedBase: 4)
+    let pa: List(Int) = ta.get()
+    let pb: List(Int) = tb.get()
+    let pc: List(Int) = tc.get()
+    let pd: List(Int) = td.get()
+    writeTile(fb: fb, tile: pa, width: width, tx0: ax0, ty0: ay0, tw: aw0, th: ah0)
+    writeTile(fb: fb, tile: pb, width: width, tx0: ax1, ty0: ay1, tw: aw1, th: ah1)
+    writeTile(fb: fb, tile: pc, width: width, tx0: ax2, ty0: ay2, tw: aw2, th: ah2)
+    writeTile(fb: fb, tile: pd, width: width, tx0: ax3, ty0: ay3, tw: aw3, th: ah3)
+
+    # Emit the assembled frame: unpack each packed-RGB int into bytes.
+    var p: Int = 0
+    loop p < width * height {
+        let packed: Int = fb.get(index: p)
+        let rr: Int = packed / 65536
+        let gg: Int = (packed / 256) % 256
+        let bb: Int = packed % 256
+        fbPixel(r: rr, g: gg, b: bb)
+        p = p + 1
+    }
+}
