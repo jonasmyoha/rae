@@ -1,0 +1,55 @@
+# Raytracer — WebGPU compute (G1). The scene + camera are authored in Rae
+# (the SAME buildScene / buildCamera as the CPU steps); the per-pixel path
+# tracing runs as a WGSL compute shader on the GPU (raytrace.wgsl). This Rae
+# program's job is to emit the scene as a flat f32 buffer the host uploads to
+# the GPU — so the GPU renders a Rae-defined scene.
+#
+# Layout emitted (all little-endian f32, matching raytrace.wgsl's `scene`):
+#   camera: origin(3) lowerLeft(3) horizontal(3) vertical(3) right(3) up(3) lensRadius(1)  = 19
+#   then per sphere: center(3) radius(1) albedo(3) kind(1) fuzz(1) ior(1)                  = 10
+# The sphere count is passed to the shader as a uniform (host derives it from
+# the byte length); here we just stream the floats.
+import core
+import vec3
+import scene
+import camera
+
+func emitFloat(v: Float) extern
+
+func emitVec3(a: view Vec3) {
+    emitFloat(v: a.x)
+    emitFloat(v: a.y)
+    emitFloat(v: a.z)
+}
+
+func main() {
+    # Must match the dispatch size in the host (devtools display): 768x432 (16:9).
+    let width: Int = 768
+    let height: Int = 432
+    let aspect: Float = width.toFloat() / height.toFloat()
+
+    let camPos: Vec3 = vec3(x: -1.6, y: -1.2, z: 0.6)
+    let camTarget: Vec3 = vec3(x: 0.0, y: 1.0, z: 0.0)
+    let cam: Camera = buildCamera(pos: camPos, target: camTarget, vfovDeg: 45.0, aperture: 0.06, aspect: aspect)
+
+    emitVec3(a: cam.origin)
+    emitVec3(a: cam.lowerLeft)
+    emitVec3(a: cam.horizontal)
+    emitVec3(a: cam.vertical)
+    emitVec3(a: cam.right)
+    emitVec3(a: cam.up)
+    emitFloat(v: cam.lensRadius)
+
+    let world: List(Sphere) = buildScene()
+    var i: Int = 0
+    loop i < world.length {
+        let sp: Sphere = world.at(index: i)
+        emitVec3(a: sp.center)
+        emitFloat(v: sp.radius)
+        emitVec3(a: sp.material.albedo)
+        emitFloat(v: sp.material.kind.toFloat())
+        emitFloat(v: sp.material.fuzz)
+        emitFloat(v: sp.material.ior)
+        i = i + 1
+    }
+}
