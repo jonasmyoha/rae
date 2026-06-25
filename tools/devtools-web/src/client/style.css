@@ -453,7 +453,11 @@ button.btn-build-test:hover:not(:disabled) {
 .examples-view {
   background: rgba(20, 20, 25, 0.7) !important;
   backdrop-filter: blur(20px);
-  min-height: calc(100vh - 120px);
+  /* Fixed-height frame so the sidebar (example list) and the main panel
+   * scroll INDEPENDENTLY within it, instead of the whole page scrolling as
+   * one. */
+  height: calc(100vh - 120px);
+  overflow: hidden;
   display: flex;
   flex-direction: column;
 }
@@ -556,6 +560,7 @@ button.btn-build-test:hover:not(:disabled) {
   display: grid;
   grid-template-columns: 300px 1fr;
   flex: 1; /* Take up available space */
+  min-height: 0; /* allow the two columns' overflow-y:auto to bound + scroll */
 }
 
 .example-sidebar {
@@ -607,10 +612,51 @@ button.btn-build-test:hover:not(:disabled) {
 .example-card p { font-size: 0.75rem; color: var(--text-muted); font-weight: 400; }
 
 .example-main {
-  padding: 3rem;
+  padding: 0 3rem 3rem; /* top padding moved into the sticky header below */
   background: rgba(0, 0, 0, 0.1);
   overflow-y: auto;
 }
+
+/* Pin the title + Run/Watch controls to the top of the (independently
+ * scrolling) main panel, so you never have to scroll up to find them after
+ * picking an example from the list. */
+.example-header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 0 -3rem 1.25rem;
+  padding: 1.5rem 3rem;
+  background: rgba(18, 18, 24, 0.97);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.example-actions-row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.example-target-note { font-size: 0.75rem; color: var(--text-muted); opacity: 0.8; }
+
+/* Global Target / Profile dropdowns in the actions bar. */
+.run-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.run-select__label { text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.65rem; opacity: 0.85; }
+.run-select__input {
+  background: var(--bg-panel, #181b23);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.run-select__input:focus { outline: none; border-color: var(--accent); }
 
 .example-target-actions {
   display: flex;
@@ -973,51 +1019,3 @@ button.btn-build-test:hover:not(:disabled) {
 .tok-string { color: #e6db74; }
 .tok-comment { color: #75715e; }
 .tok-number { color: #ae81ff; }
-/* Live WASM raytracer demo (Raytracer view) */
-.wasm-demo {
-  display: flex;
-  gap: 20px;
-  align-items: center;
-  flex-wrap: wrap;
-  background: var(--bg-panel);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 12px;
-  padding: 18px 20px;
-  margin-bottom: 18px;
-}
-.wasm-demo__text { flex: 1 1 280px; min-width: 260px; }
-.wasm-demo__text h3 { margin: 0 0 6px; font-size: 1.05rem; }
-.wasm-demo__text p { margin: 0 0 12px; opacity: 0.8; font-size: 0.9rem; line-height: 1.5; }
-.wasm-demo__badge {
-  font-size: 0.65rem;
-  letter-spacing: 0.08em;
-  vertical-align: middle;
-  background: var(--accent-soft);
-  color: var(--accent);
-  border: 1px solid var(--accent);
-  border-radius: 999px;
-  padding: 2px 8px;
-  margin-left: 6px;
-}
-.wasm-demo__controls { display: flex; align-items: center; gap: 12px; }
-.wasm-demo .primary-button {
-  background: var(--accent);
-  color: #07212a;
-  border: none;
-  cursor: pointer;
-  font-weight: 600;
-  padding: 8px 16px;
-  border-radius: 8px;
-  font-size: 0.9rem;
-}
-.wasm-demo .primary-button:disabled { opacity: 0.5; cursor: default; }
-.wasm-demo__status { font-size: 0.8rem; opacity: 0.75; }
-#wasm-rt-canvas {
-  width: 480px;
-  max-width: 100%;
-  height: auto;
-  image-rendering: auto;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  background: #000;
-}
