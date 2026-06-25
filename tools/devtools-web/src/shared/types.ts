@@ -72,6 +72,7 @@ export type ExampleDescriptor = {
   actions?: ExampleActionDescriptor[];
   hidden?: boolean;
   category?: string;
+  display?: { width: number; height: number };
 };
 
 export type ExampleRunMode = "run" | "watch" | "build" | "action";
