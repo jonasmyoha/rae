@@ -330,6 +330,89 @@ static bool native_unloadTexture(struct VM* vm, VmNativeResult* out, const Value
     return true;
 }
 
+/* Streaming textures for CPU-rendered images (raytracer/framebuffer
+ * examples). VM-side mirror of rae_ext_loadStreamTexture /
+ * rae_ext_updateStreamTexture in compiler/runtime/rae_runtime.c. */
+static bool native_loadStreamTexture(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 2) {
+        fprintf(stderr, "error: loadStreamTexture expects 2 int args (width, height), got %zu\n", count);
+        return false;
+    }
+    Image img = GenImageColor((int)args[0].as.int_value, (int)args[1].as.int_value, BLACK);
+    Texture t = LoadTextureFromImage(img);
+    UnloadImage(img);
+    out->has_value = true;
+    out->value = value_object(5, "Texture");
+    out->value.as.object_value.fields[0] = value_int((int64_t)t.id);
+    out->value.as.object_value.fields[1] = value_int((int64_t)t.width);
+    out->value.as.object_value.fields[2] = value_int((int64_t)t.height);
+    out->value.as.object_value.fields[3] = value_int((int64_t)t.mipmaps);
+    out->value.as.object_value.fields[4] = value_int((int64_t)t.format);
+    return true;
+}
+
+static bool native_updateStreamTexture(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 7) {
+        fprintf(stderr, "error: updateStreamTexture expects 7 args (Texture(5) + Buffer + count), got %zu\n", count);
+        return false;
+    }
+    Texture t = {
+        .id = (unsigned int)args[0].as.int_value,
+        .width = (int)args[1].as.int_value,
+        .height = (int)args[2].as.int_value,
+        .mipmaps = (int)args[3].as.int_value,
+        .format = (int)args[4].as.int_value
+    };
+    if (args[5].type != VAL_BUFFER || !args[5].as.buffer_value) {
+        fprintf(stderr, "error: updateStreamTexture pixels arg must be a Buffer(Int)\n");
+        return false;
+    }
+    ValueBuffer* vb = args[5].as.buffer_value;
+    int64_t n = args[6].as.int_value;
+    if (n <= 0) { out->has_value = false; return true; }
+    if ((size_t)n > vb->count) n = (int64_t)vb->count;
+    /* Reusable scratch for the packed-Int -> RGBA8 expansion (main thread
+     * only; mirrors the runtime's static scratch to avoid per-frame malloc). */
+    static unsigned char* scratch = NULL;
+    static int64_t scratch_count = 0;
+    if (n > scratch_count) {
+        unsigned char* grown = (unsigned char*)realloc(scratch, (size_t)n * 4);
+        if (!grown) return false;
+        scratch = grown;
+        scratch_count = n;
+    }
+    for (int64_t i = 0; i < n; i++) {
+        int64_t p = vb->items[i].as.int_value;
+        scratch[i * 4 + 0] = (unsigned char)((p >> 16) & 0xFF);
+        scratch[i * 4 + 1] = (unsigned char)((p >> 8) & 0xFF);
+        scratch[i * 4 + 2] = (unsigned char)(p & 0xFF);
+        scratch[i * 4 + 3] = 255;
+    }
+    UpdateTexture(t, scratch);
+    out->has_value = false;
+    return true;
+}
+
+static bool native_setTextureFilter(struct VM* vm, VmNativeResult* out, const Value* args, size_t count, void* data) {
+    (void)vm; (void)data;
+    if (count != 6) {
+        fprintf(stderr, "error: setTextureFilter expects 6 args (Texture(5) + filter), got %zu\n", count);
+        return false;
+    }
+    Texture t = {
+        .id = (unsigned int)args[0].as.int_value,
+        .width = (int)args[1].as.int_value,
+        .height = (int)args[2].as.int_value,
+        .mipmaps = (int)args[3].as.int_value,
+        .format = (int)args[4].as.int_value
+    };
+    SetTextureFilter(t, (int)args[5].as.int_value);
+    out->has_value = false;
+    return true;
+}
+
 /* See `rae_ext_roundedSpriteBegin` / `rae_ext_roundedSpriteEnd` in
  * compiler/runtime/rae_runtime.c for the design notes. This is the
  * VM-side mirror — one global shader, lazy-loaded on first use. */
@@ -1421,6 +1504,9 @@ bool vm_registry_register_raylib(VmRegistry* registry) {
     ok &= vm_registry_register_native(registry, "loadCircleCroppedTexture", native_loadCircleCroppedTexture, NULL);
     ok &= vm_registry_register_native(registry, "loadRoundedCroppedTexture", native_loadRoundedCroppedTexture, NULL);
     ok &= vm_registry_register_native(registry, "unloadTexture", native_unloadTexture, NULL);
+    ok &= vm_registry_register_native(registry, "loadStreamTexture", native_loadStreamTexture, NULL);
+    ok &= vm_registry_register_native(registry, "updateStreamTexture", native_updateStreamTexture, NULL);
+    ok &= vm_registry_register_native(registry, "setTextureFilter", native_setTextureFilter, NULL);
     ok &= vm_registry_register_native(registry, "raylibSetLogLevel", native_raylibSetLogLevel, NULL);
     ok &= vm_registry_register_native(registry, "roundedSpriteBegin", native_roundedSpriteBegin, NULL);
     ok &= vm_registry_register_native(registry, "roundedSpriteEnd", native_roundedSpriteEnd, NULL);
