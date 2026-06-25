@@ -3217,6 +3217,25 @@ static int64_t rae_gpu_alloc(int64_t count) {
 int64_t rae_ext_gpuAllocF32(int64_t count) { return rae_gpu_alloc(count); }
 int64_t rae_ext_gpuAllocU32(int64_t count) { return rae_gpu_alloc(count); }
 
+void rae_ext_gpuWriteF32(int64_t buf, const double* data, int64_t count) {
+    if (!g_wgpu_queue || buf < 1 || buf > g_gpu_buf_n || count <= 0) return;
+    size_t bytes = (size_t)count * 4;
+    float* tmp = (float*)malloc(bytes);
+    if (!tmp) return;
+    for (int64_t i = 0; i < count; i++) tmp[i] = (float)data[i];
+    wgpuQueueWriteBuffer(g_wgpu_queue, g_gpu_buf[buf - 1], 0, tmp, bytes);
+    free(tmp);
+}
+void rae_ext_gpuWriteU32(int64_t buf, const int64_t* data, int64_t count) {
+    if (!g_wgpu_queue || buf < 1 || buf > g_gpu_buf_n || count <= 0) return;
+    size_t bytes = (size_t)count * 4;
+    uint32_t* tmp = (uint32_t*)malloc(bytes);
+    if (!tmp) return;
+    for (int64_t i = 0; i < count; i++) tmp[i] = (uint32_t)data[i];
+    wgpuQueueWriteBuffer(g_wgpu_queue, g_gpu_buf[buf - 1], 0, tmp, bytes);
+    free(tmp);
+}
+
 int64_t rae_ext_gpuKernel(rae_String wgsl, rae_String entry) {
     if (!rae_wgpu_init() || g_gpu_pipe_n >= RAE_GPU_MAX_PIPE) return 0;
     WGPUShaderSourceWGSL src; memset(&src, 0, sizeof(src));
