@@ -2851,6 +2851,7 @@ static bool g_sdl_mouse_captured = false;
 static SDL_Scancode rae_sdl_scancode(int64_t key) {
     if (key >= 'A' && key <= 'Z') return SDL_GetScancodeFromKey((SDL_Keycode)(key + 32), NULL); /* lowercase */
     if (key >= '0' && key <= '9') return SDL_GetScancodeFromKey((SDL_Keycode)key, NULL);
+    if (key >= 290 && key <= 301) return (SDL_Scancode)(SDL_SCANCODE_F1 + (int)(key - 290)); /* raylib F1..F12 */
     switch (key) {
         case 32:  return SDL_SCANCODE_SPACE;
         case 256: return SDL_SCANCODE_ESCAPE;
@@ -3046,6 +3047,87 @@ void rae_ext_sdlCloseWindow(void) {
     if (g_sdl_win) SDL_DestroyWindow(g_sdl_win);
     SDL_Quit();
     g_sdl_tex = NULL; g_sdl_ren = NULL; g_sdl_win = NULL;
+}
+
+/* ---- Minimal PNG writer (no deps): RGBA8, uncompressed (stored-deflate) zlib.
+ * Bigger files than compressed PNG, but valid + opens everywhere — enough for a
+ * "save the current frame" key. Used by sdlSavePng. ---- */
+static uint32_t rae_crc_update(uint32_t crc, const unsigned char* p, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        crc ^= p[i];
+        for (int k = 0; k < 8; k++) {
+            uint32_t mask = (uint32_t)(0u - (crc & 1u));
+            crc = (crc >> 1) ^ (0xEDB88320u & mask);
+        }
+    }
+    return crc;
+}
+static uint32_t rae_adler32(const unsigned char* p, size_t n) {
+    uint32_t a = 1, b = 0;
+    for (size_t i = 0; i < n; i++) { a = (a + p[i]) % 65521u; b = (b + a) % 65521u; }
+    return (b << 16) | a;
+}
+static void rae_png_be32(unsigned char* o, uint32_t v) { o[0] = (unsigned char)(v >> 24); o[1] = (unsigned char)(v >> 16); o[2] = (unsigned char)(v >> 8); o[3] = (unsigned char)v; }
+static void rae_png_chunk(FILE* f, const char* type, const unsigned char* data, uint32_t len) {
+    unsigned char hdr[4]; rae_png_be32(hdr, len); fwrite(hdr, 1, 4, f); fwrite(type, 1, 4, f);
+    if (len) fwrite(data, 1, len, f);
+    uint32_t crc = 0xFFFFFFFFu;
+    crc = rae_crc_update(crc, (const unsigned char*)type, 4);
+    crc = rae_crc_update(crc, data, len);
+    crc ^= 0xFFFFFFFFu;
+    unsigned char cb[4]; rae_png_be32(cb, crc); fwrite(cb, 1, 4, f);
+}
+
+/* Save the last presented frame (g_sdl_scratch, RGBA8) as a PNG. */
+rae_Bool rae_ext_sdlSavePng(rae_String path) {
+    if (!path.data || !g_sdl_scratch || g_sdl_tex_w <= 0 || g_sdl_tex_h <= 0) return false;
+    int w = g_sdl_tex_w, h = g_sdl_tex_h;
+    /* filtered raw scanlines: each row = 1 filter byte (0) + w*4 RGBA */
+    size_t stride = (size_t)w * 4u;
+    size_t raw_n = (size_t)h * (1u + stride);
+    unsigned char* raw = (unsigned char*)malloc(raw_n);
+    if (!raw) return false;
+    for (int y = 0; y < h; y++) {
+        unsigned char* row = raw + (size_t)y * (1u + stride);
+        row[0] = 0;
+        memcpy(row + 1, g_sdl_scratch + (size_t)y * stride, stride);
+    }
+    /* zlib stream: header + stored deflate blocks + adler32 */
+    size_t nblocks = (raw_n + 65534u) / 65535u; if (nblocks == 0) nblocks = 1;
+    size_t zn = 2u + nblocks * 5u + raw_n + 4u;
+    unsigned char* z = (unsigned char*)malloc(zn);
+    if (!z) { free(raw); return false; }
+    size_t zi = 0;
+    z[zi++] = 0x78; z[zi++] = 0x01;
+    size_t off = 0;
+    while (off < raw_n || (raw_n == 0 && off == 0)) {
+        size_t blk = raw_n - off; if (blk > 65535u) blk = 65535u;
+        int final = (off + blk >= raw_n) ? 1 : 0;
+        z[zi++] = (unsigned char)final;
+        z[zi++] = (unsigned char)(blk & 0xFF); z[zi++] = (unsigned char)((blk >> 8) & 0xFF);
+        uint16_t nlen = (uint16_t)(~blk);
+        z[zi++] = (unsigned char)(nlen & 0xFF); z[zi++] = (unsigned char)((nlen >> 8) & 0xFF);
+        if (blk) { memcpy(z + zi, raw + off, blk); zi += blk; }
+        off += blk;
+        if (raw_n == 0) break;
+    }
+    uint32_t ad = rae_adler32(raw, raw_n);
+    rae_png_be32(z + zi, ad); zi += 4;
+
+    FILE* f = fopen((const char*)path.data, "wb");
+    if (!f) { free(raw); free(z); return false; }
+    const unsigned char sig[8] = { 137, 80, 78, 71, 13, 10, 26, 10 };
+    fwrite(sig, 1, 8, f);
+    unsigned char ihdr[13];
+    rae_png_be32(ihdr, (uint32_t)w); rae_png_be32(ihdr + 4, (uint32_t)h);
+    ihdr[8] = 8; ihdr[9] = 6; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;  /* 8-bit RGBA */
+    rae_png_chunk(f, "IHDR", ihdr, 13);
+    rae_png_chunk(f, "IDAT", z, (uint32_t)zi);
+    rae_png_chunk(f, "IEND", NULL, 0);
+    fclose(f);
+    free(raw); free(z);
+    fprintf(stderr, "[sdl] saved %s (%dx%d)\n", (const char*)path.data, w, h);
+    return true;
 }
 
 /* ---- MTSDF text compositing into the packed-0xRRGGBB framebuffer (see
