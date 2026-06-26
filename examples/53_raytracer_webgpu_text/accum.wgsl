@@ -10,7 +10,7 @@ struct Params {
   maxDepth: u32,
   sphereCount: u32,
   seed: u32,
-  _pad0: u32,
+  samplesPerFrame: u32,   // new samples to take this dispatch (adaptive)
   _pad1: u32,
 };
 
@@ -126,33 +126,40 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let x: u32 = gid.x;
   let y: u32 = gid.y;
   if (x >= P.width || y >= P.height) { return; }
-  rngState = (x * 1973u) ^ (y * 9277u) ^ (P.sampleIndex * 26699u) ^ (P.seed * 0x9e3779b9u + 1u);
 
   let W1: f32 = f32(P.width - 1u);
   let H1: f32 = f32(P.height - 1u);
   let lensR: f32 = camLensR();
-  let u: f32 = (f32(x) + rand()) / W1;
-  let v: f32 = (f32(P.height - 1u - y) + rand()) / H1;
-  var ro: vec3<f32> = camOrigin();
-  if (lensR > 0.0) {
-    let a: f32 = rand() * TAU;
-    let r: f32 = lensR * sqrt(rand());
-    ro = ro + camRight() * (r * cos(a)) + camUp() * (r * sin(a));
+  let spp: u32 = max(P.samplesPerFrame, 1u);
+
+  // Take `spp` new samples this dispatch (adaptive — the host raises it when
+  // there's framerate headroom so the image converges faster).
+  var fresh: vec3<f32> = vec3<f32>(0.0, 0.0, 0.0);
+  for (var k: u32 = 0u; k < spp; k = k + 1u) {
+    rngState = (x * 1973u) ^ (y * 9277u) ^ ((P.sampleIndex + k) * 26699u) ^ (P.seed * 0x9e3779b9u + 1u);
+    let u: f32 = (f32(x) + rand()) / W1;
+    let v: f32 = (f32(P.height - 1u - y) + rand()) / H1;
+    var ro: vec3<f32> = camOrigin();
+    if (lensR > 0.0) {
+      let a: f32 = rand() * TAU;
+      let r: f32 = lensR * sqrt(rand());
+      ro = ro + camRight() * (r * cos(a)) + camUp() * (r * sin(a));
+    }
+    let tgt: vec3<f32> = camLowerLeft() + camHoriz() * u + camVert() * v;
+    fresh = fresh + rayColor(ro, tgt - ro);
   }
-  let tgt: vec3<f32> = camLowerLeft() + camHoriz() * u + camVert() * v;
-  let sample: vec3<f32> = rayColor(ro, tgt - ro);
 
   let i: u32 = y * P.width + x;
   let b: u32 = i * 4u;
   var sum: vec3<f32>;
   if (P.sampleIndex == 0u) {
-    sum = sample;
+    sum = fresh;
   } else {
-    sum = vec3<f32>(accum[b], accum[b + 1u], accum[b + 2u]) + sample;
+    sum = vec3<f32>(accum[b], accum[b + 1u], accum[b + 2u]) + fresh;
   }
   accum[b] = sum.x; accum[b + 1u] = sum.y; accum[b + 2u] = sum.z;
 
-  let inv: f32 = 1.0 / f32(P.sampleIndex + 1u);
+  let inv: f32 = 1.0 / f32(P.sampleIndex + spp);
   let rr: u32 = u32(clamp(255.99 * sqrt(clamp(sum.x * inv, 0.0, 1.0)), 0.0, 255.0));
   let gg: u32 = u32(clamp(255.99 * sqrt(clamp(sum.y * inv, 0.0, 1.0)), 0.0, 255.0));
   let bb: u32 = u32(clamp(255.99 * sqrt(clamp(sum.z * inv, 0.0, 1.0)), 0.0, 255.0));
