@@ -1,0 +1,201 @@
+# Raytracer — interactive GPU path tracer with MTSDF text overlay (G3). Like
+# example 52, but the helper line + FPS are drawn with crisp scalable Roboto
+# text via lib/sdf_text.rae (the SDL3 CPU-framebuffer port of the MSDF path) —
+# composited over the GPU-rendered frame before it is presented.
+#
+# Controls (Blender Z-up): W/S fwd/back  A/D strafe  E/Q up/down  arrows look,
+# left-drag look. P toggles render quality (half-res 960x540 <-> Full HD). The
+# render box is fixed (window-independent); the resizable window just scales it.
+# Compiled-target only; needs wgpu-native + SDL3.
+#
+#   rae run --target compiled main.rae
+import core
+import gpu
+import sdl3
+import sdf_text
+import vec3
+import scene
+import camera
+
+type GpuRT {
+    sceneBuf: Int
+    accumBuf: Int
+    outBuf: Int
+    paramsBuf: Int
+    kernel: Int
+}
+
+func pushVec3(buf: mod List(Float), a: view Vec3) {
+    buf.add(value: a.x)
+    buf.add(value: a.y)
+    buf.add(value: a.z)
+}
+
+func sceneFloats(cam: view Camera, world: view List(Sphere)) ret List(Float) {
+    let s: List(Float) = createList(Float, cap: 64)
+    pushVec3(buf: s, a: cam.origin)
+    pushVec3(buf: s, a: cam.lowerLeft)
+    pushVec3(buf: s, a: cam.horizontal)
+    pushVec3(buf: s, a: cam.vertical)
+    pushVec3(buf: s, a: cam.right)
+    pushVec3(buf: s, a: cam.up)
+    s.add(value: cam.lensRadius)
+    var i: Int = 0
+    loop i < world.length {
+        let sp: Sphere = world.at(index: i)
+        pushVec3(buf: s, a: sp.center)
+        s.add(value: sp.radius)
+        pushVec3(buf: s, a: sp.material.albedo)
+        s.add(value: sp.material.kind.toFloat())
+        s.add(value: sp.material.fuzz)
+        s.add(value: sp.material.ior)
+        i = i + 1
+    }
+    ret s
+}
+
+func buildGpuRT(wgsl: view String, scene: view List(Float), params: view List(Int), pixels: view Int) ret GpuRT {
+    gpuReset()
+    ret GpuRT {
+        sceneBuf: gpuStorageF32(data: scene.data, count: scene.length),
+        accumBuf: gpuAllocF32(count: pixels * 4),
+        outBuf: gpuAllocU32(count: pixels),
+        paramsBuf: gpuUniformU32(data: params.data, count: 8),
+        kernel: gpuKernel(wgsl: wgsl, entry: "main")
+    }
+}
+
+func rae_ext_rae_sys_read_file(path: String) extern ret String
+
+func main() {
+    let maxDepth: Int = 8
+    let world: List(Sphere) = buildScene()
+
+    var camPos: Vec3 = vec3(x: 0.0, y: -1.6, z: 0.6)
+    var yaw: Float = pi / 2.0
+    var pitch: Float = -0.15
+    let moveStep: Float = 0.08
+    let rotStep: Float = 0.03
+    let mouseSens: Float = 0.005
+    let worldUp: Vec3 = vec3(x: 0.0, y: 0.0, z: 1.0)
+    var fwd: Vec3 = vec3(x: cos(x: pitch) * cos(x: yaw), y: cos(x: pitch) * sin(x: yaw), z: sin(x: pitch))
+
+    let dir: String = "examples/53_raytracer_webgpu_text/"
+    let wgsl: String = rae_ext_rae_sys_read_file(path: "{dir}accum.wgsl")
+    let font: SdfFont = loadSdfFont(jsonPath: "{dir}assets/Roboto-Regular.mtsdf.json", rawAtlasPath: "{dir}assets/Roboto-Regular.mtsdf.raw")
+
+    sdlInitWindow(width: 1280, height: 720, title: "Rae raytracer — interactive GPU + MTSDF text")
+    sdlSetTargetFPS(fps: 0)
+
+    let aspect: Float = 16.0 / 9.0
+    var cam: Camera = buildCamera(pos: camPos, target: vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
+
+    var hiRes: Bool = true
+    var width: Int = 1920
+    var height: Int = 1080
+
+    let params: List(Int) = createList(cap: 8)
+    var pinit: Int = 0
+    loop pinit < 8 { params.add(value: 0)  pinit = pinit + 1 }
+    params.set(index: 0, value: width)
+    params.set(index: 1, value: height)
+    params.set(index: 3, value: maxDepth)
+    params.set(index: 4, value: world.length)
+
+    var rt: GpuRT = buildGpuRT(wgsl: wgsl, scene: sceneFloats(cam: cam, world: world), params: params, pixels: width * height)
+    var fb: List(Int) = createList(cap: width * height)
+    var fbi: Int = 0
+    loop fbi < width * height { fb.add(value: 0)  fbi = fbi + 1 }
+
+    var sampleIndex: Int = 0
+    var frame: Int = 0
+    var prevMouseX: Int = sdlGetMouseX()
+    var prevMouseY: Int = sdlGetMouseY()
+    var lastMs: Int = nowMs()
+    var fps: Float = 0.0
+    let helper: String = "WASD/E-Q move   arrows/drag look   P quality"
+    let textColor: Int = 658212        # 0x0A0C24 dark, readable over sky
+
+    loop not sdlShouldClose() {
+        var moved: Bool = false
+
+        # P toggles half-res <-> Full HD; rebuild buffers + framebuffer, reset.
+        if sdlIsKeyPressed(key: 80) {
+            hiRes = not hiRes
+            if hiRes { width = 1920  height = 1080 } else { width = 960  height = 540 }
+            params.set(index: 0, value: width)
+            params.set(index: 1, value: height)
+            rt = buildGpuRT(wgsl: wgsl, scene: sceneFloats(cam: cam, world: world), params: params, pixels: width * height)
+            fb = createList(cap: width * height)
+            fbi = 0
+            loop fbi < width * height { fb.add(value: 0)  fbi = fbi + 1 }
+            sampleIndex = 0
+        }
+
+        if sdlIsKeyDown(key: 87) { camPos = vadd(a: camPos, b: vscale(a: fwd, s: moveStep))  moved = true }
+        if sdlIsKeyDown(key: 83) { camPos = vsub(a: camPos, b: vscale(a: fwd, s: moveStep))  moved = true }
+        let rgt: Vec3 = vnorm(a: vcross(a: fwd, b: worldUp))
+        if sdlIsKeyDown(key: 68) { camPos = vadd(a: camPos, b: vscale(a: rgt, s: moveStep))  moved = true }
+        if sdlIsKeyDown(key: 65) { camPos = vsub(a: camPos, b: vscale(a: rgt, s: moveStep))  moved = true }
+        if sdlIsKeyDown(key: 69) { camPos = vadd(a: camPos, b: vscale(a: worldUp, s: moveStep))  moved = true }
+        if sdlIsKeyDown(key: 81) { camPos = vsub(a: camPos, b: vscale(a: worldUp, s: moveStep))  moved = true }
+        if sdlIsKeyDown(key: 262) { yaw = yaw - rotStep  moved = true }
+        if sdlIsKeyDown(key: 263) { yaw = yaw + rotStep  moved = true }
+        if sdlIsKeyDown(key: 265) { pitch = pitch + rotStep  moved = true }
+        if sdlIsKeyDown(key: 264) { pitch = pitch - rotStep  moved = true }
+
+        let mx: Int = sdlGetMouseX()
+        let my: Int = sdlGetMouseY()
+        if sdlIsMouseButtonDown(button: 0) {
+            let dx: Int = mx - prevMouseX
+            let dy: Int = my - prevMouseY
+            if dx > 0 or dx < 0 { yaw = yaw - dx.toFloat() * mouseSens  moved = true }
+            if dy > 0 or dy < 0 { pitch = pitch - dy.toFloat() * mouseSens  moved = true }
+        }
+        prevMouseX = mx
+        prevMouseY = my
+
+        if moved {
+            if pitch > 1.5 { pitch = 1.5 }
+            if pitch < -1.5 { pitch = -1.5 }
+            fwd = vec3(x: cos(x: pitch) * cos(x: yaw), y: cos(x: pitch) * sin(x: yaw), z: sin(x: pitch))
+            cam = buildCamera(pos: camPos, target: vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
+            gpuWriteF32(buf: rt.sceneBuf, data: sceneFloats(cam: cam, world: world).data, count: 19 + world.length * 10)
+            sampleIndex = 0
+        }
+
+        params.set(index: 2, value: sampleIndex)
+        params.set(index: 5, value: frame)
+        gpuWriteU32(buf: rt.paramsBuf, data: params.data, count: 8)
+
+        let bufs: List(Int) = createList(cap: 4)
+        bufs.add(value: rt.paramsBuf)
+        bufs.add(value: rt.sceneBuf)
+        bufs.add(value: rt.accumBuf)
+        bufs.add(value: rt.outBuf)
+        gpuRun(kernel: rt.kernel, bufs: bufs.data, bufCount: 4, gx: (width + 7) / 8, gy: (height + 7) / 8, gz: 1)
+        gpuDownloadU32(buf: rt.outBuf, out: fb.data, count: width * height)
+
+        # FPS (exponential smoothing) + MTSDF text overlay, composited into fb.
+        let now: Int = nowMs()
+        let dt: Int = now - lastMs
+        lastMs = now
+        if dt > 0 {
+            let inst: Float = 1000.0 / dt.toFloat()
+            fps = fps * 0.9 + inst * 0.1
+        }
+        let textPx: Float = height.toFloat() * 0.030
+        let baseY: Float = textPx + 8.0
+        sdfDrawText(fb: fb.data, fbW: width, fbH: height, font: font, text: helper, x: 12.0, y: baseY, sizePx: textPx, rgb: textColor)
+        let fpsStr: String = "{fps.toInt()} FPS"
+        let fpsW: Float = sdfMeasureText(font: font, text: fpsStr, sizePx: textPx)
+        sdfDrawText(fb: fb.data, fbW: width, fbH: height, font: font, text: fpsStr, x: width.toFloat() - fpsW - 12.0, y: baseY, sizePx: textPx, rgb: textColor)
+
+        sdlUpdatePixels(pixels: fb.data, w: width, h: height)
+        sdlPresent()
+        sampleIndex = sampleIndex + 1
+        frame = frame + 1
+    }
+    gpuReset()
+    sdlCloseWindow()
+}
