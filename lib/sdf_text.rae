@@ -1,0 +1,181 @@
+# MTSDF text into a packed-0xRRGGBB framebuffer — the SDL3 (CPU-framebuffer)
+# port of the raylib MSDF text path (lib/ui/msdf.rae). Rae parses the
+# msdf-atlas-gen JSON sidecar + lays out glyphs; the per-pixel field sampling +
+# alpha blend is done in the RAE_HAS_SDL3 runtime block (sdfLoadAtlas /
+# sdfBlitGlyph). Lets an SDL3 app draw crisp scalable text (e.g. Roboto) over
+# the framebuffer it already presents — no GPU shader needed.
+#
+# Usage: load once, then drawText per frame after rendering, before present.
+# Requires sdl3 (the blit lives in its runtime block). Compiled-target only.
+import core
+import json
+
+func rae_ext_rae_sys_read_file(path: String) extern ret String
+# Implemented in the RAE_HAS_SDL3 block of compiler/runtime/rae_runtime.c.
+func sdfLoadAtlas(path: view String, w: view Int, h: view Int) extern ret Int
+func sdfBlitGlyph(fb: mod Buffer(Int), fbW: view Int, fbH: view Int, atlas: view Int,
+                  sx0: view Float, sy0: view Float, sx1: view Float, sy1: view Float,
+                  au0: view Float, av0: view Float, au1: view Float, av1: view Float,
+                  screenPxRange: view Float, rgb: view Int) extern
+
+type SdfGlyph {
+    unicode: Int
+    advance: Float
+    hasBounds: Bool
+    planeLeft: Float
+    planeBottom: Float
+    planeRight: Float
+    planeTop: Float
+    atlasLeft: Float
+    atlasBottom: Float
+    atlasRight: Float
+    atlasTop: Float
+}
+
+type SdfFont {
+    atlas: Int
+    atlasWidth: Float
+    atlasHeight: Float
+    pxRange: Float
+    emSize: Float
+    lineHeight: Float
+    ascender: Float
+    glyphs: List(SdfGlyph)
+}
+
+func sdfFloatField(doc: view JsonDoc, obj: view JsonValue, key: view String, fallback: view Float) ret Float {
+    let idx: Int = jsonField(doc: doc, this: obj, key: key)
+    if idx < 0 { ret fallback }
+    let v: JsonValue = jsonValueAt(doc: doc, idx: idx)
+    ret jsonFloat(this: v, fallback: fallback)
+}
+
+func sdfReadBounds(doc: view JsonDoc, parent: view JsonValue, subKey: view String,
+                   outLeft: mod Float, outBottom: mod Float, outRight: mod Float, outTop: mod Float) ret Bool {
+    let subIdx: Int = jsonField(doc: doc, this: parent, key: subKey)
+    if subIdx < 0 { ret false }
+    let sub: JsonValue = jsonValueAt(doc: doc, idx: subIdx)
+    outLeft = sdfFloatField(doc: doc, obj: sub, key: "left", fallback: 0.0)
+    outBottom = sdfFloatField(doc: doc, obj: sub, key: "bottom", fallback: 0.0)
+    outRight = sdfFloatField(doc: doc, obj: sub, key: "right", fallback: 0.0)
+    outTop = sdfFloatField(doc: doc, obj: sub, key: "top", fallback: 0.0)
+    ret true
+}
+
+# Load the JSON sidecar + the raw RGBA atlas (a <name>.mtsdf.raw of
+# atlas.width*atlas.height*4 bytes, as shipped next to the JSON).
+func loadSdfFont(jsonPath: view String, rawAtlasPath: view String) ret SdfFont {
+    let source: String = rae_ext_rae_sys_read_file(path: jsonPath)
+    let doc: JsonDoc = parseJson(source: source)
+    let root: JsonValue = jsonRoot(doc: doc)
+
+    let atlasIdx: Int = jsonField(doc: doc, this: root, key: "atlas")
+    let atlasJ: JsonValue = jsonValueAt(doc: doc, idx: atlasIdx)
+    let atlasW: Float = sdfFloatField(doc: doc, obj: atlasJ, key: "width", fallback: 0.0)
+    let atlasH: Float = sdfFloatField(doc: doc, obj: atlasJ, key: "height", fallback: 0.0)
+    let pxRange: Float = sdfFloatField(doc: doc, obj: atlasJ, key: "distanceRange", fallback: 4.0)
+
+    let metricsIdx: Int = jsonField(doc: doc, this: root, key: "metrics")
+    let metricsJ: JsonValue = jsonValueAt(doc: doc, idx: metricsIdx)
+    let emSize: Float = sdfFloatField(doc: doc, obj: metricsJ, key: "emSize", fallback: 1.0)
+    let lineHeight: Float = sdfFloatField(doc: doc, obj: metricsJ, key: "lineHeight", fallback: 1.2)
+    let ascender: Float = sdfFloatField(doc: doc, obj: metricsJ, key: "ascender", fallback: 0.9)
+
+    let glyphsIdx: Int = jsonField(doc: doc, this: root, key: "glyphs")
+    let glyphsArr: JsonValue = jsonValueAt(doc: doc, idx: glyphsIdx)
+    let n: Int = jsonArrayLen(this: glyphsArr)
+    let glyphs: List(SdfGlyph) = createList(SdfGlyph, cap: n)
+    var i: Int = 0
+    loop i < n {
+        let entry: JsonValue = jsonArrayAt(doc: doc, this: glyphsArr, idx: i)
+        let unicodeIdx: Int = jsonField(doc: doc, this: entry, key: "unicode")
+        let unicodeV: JsonValue = jsonValueAt(doc: doc, idx: unicodeIdx)
+        let cp: Int = jsonInt(this: unicodeV, fallback: 0)
+        let advance: Float = sdfFloatField(doc: doc, obj: entry, key: "advance", fallback: 0.0)
+        let pl: Float = 0.0  let pb: Float = 0.0  let pr: Float = 0.0  let pt: Float = 0.0
+        let al: Float = 0.0  let ab: Float = 0.0  let ar: Float = 0.0  let at: Float = 0.0
+        let havePlane: Bool = sdfReadBounds(doc: doc, parent: entry, subKey: "planeBounds", outLeft: pl, outBottom: pb, outRight: pr, outTop: pt)
+        let haveAtlas: Bool = sdfReadBounds(doc: doc, parent: entry, subKey: "atlasBounds", outLeft: al, outBottom: ab, outRight: ar, outTop: at)
+        let g: SdfGlyph = {
+            unicode: cp, advance: advance, hasBounds: havePlane and haveAtlas,
+            planeLeft: pl, planeBottom: pb, planeRight: pr, planeTop: pt,
+            atlasLeft: al, atlasBottom: ab, atlasRight: ar, atlasTop: at
+        }
+        glyphs.add(value: own g)
+        i = i + 1
+    }
+
+    let atlas: Int = sdfLoadAtlas(path: rawAtlasPath, w: atlasW.toInt(), h: atlasH.toInt())
+    ret SdfFont {
+        atlas: atlas, atlasWidth: atlasW, atlasHeight: atlasH,
+        pxRange: pxRange, emSize: emSize, lineHeight: lineHeight, ascender: ascender,
+        glyphs: own glyphs
+    }
+}
+
+func sdfGlyphIndex(font: view SdfFont, cp: view Int) ret Int {
+    let n: Int = font.glyphs.length
+    var i: Int = 0
+    loop i < n {
+        let g: SdfGlyph = rae_ext_rae_buf_get(buf: font.glyphs.data, index: i)
+        if g.unicode is cp { ret i }
+        i = i + 1
+    }
+    ret -1
+}
+
+# Width of `text` in framebuffer pixels at `sizePx`.
+func sdfMeasureText(font: view SdfFont, text: view String, sizePx: view Float) ret Float {
+    let scale: Float = sizePx / font.emSize
+    var total: Float = 0.0
+    let n: Int = text.length()
+    var i: Int = 0
+    loop i < n {
+        let cp: Int = text.at(index: i).toInt()
+        let gi: Int = sdfGlyphIndex(font: font, cp: cp)
+        if gi >= 0 {
+            let g: SdfGlyph = rae_ext_rae_buf_get(buf: font.glyphs.data, index: gi)
+            total = total + g.advance * scale
+        }
+        i = i + 1
+    }
+    ret total
+}
+
+# Draw `text` into framebuffer `fb` (fbW x fbH packed 0xRRGGBB), pen baseline at
+# (x, y) in pixels, `sizePx` tall em, colour `rgb` (0xRRGGBB).
+func sdfDrawText(fb: mod Buffer(Int), fbW: view Int, fbH: view Int, font: view SdfFont,
+                 text: view String, x: view Float, y: view Float, sizePx: view Float, rgb: view Int) {
+    let scale: Float = sizePx / font.emSize
+    let ah: Float = font.atlasHeight
+    var pen: Float = x
+    let n: Int = text.length()
+    var i: Int = 0
+    loop i < n {
+        let cp: Int = text.at(index: i).toInt()
+        let gi: Int = sdfGlyphIndex(font: font, cp: cp)
+        if gi >= 0 {
+            let g: SdfGlyph = rae_ext_rae_buf_get(buf: font.glyphs.data, index: gi)
+            if g.hasBounds {
+                let sx0: Float = pen + g.planeLeft * scale
+                let sx1: Float = pen + g.planeRight * scale
+                let sy0: Float = y - g.planeTop * scale
+                let sy1: Float = y - g.planeBottom * scale
+                # atlasBounds are bottom-left origin; flip to the top-left raw image.
+                let au0: Float = g.atlasLeft
+                let au1: Float = g.atlasRight
+                let av0: Float = ah - g.atlasTop
+                let av1: Float = ah - g.atlasBottom
+                let atlasGlyphH: Float = g.atlasTop - g.atlasBottom
+                var spr: Float = 1.0
+                if atlasGlyphH > 0.0 { spr = font.pxRange * (sy1 - sy0) / atlasGlyphH }
+                if spr < 1.0 { spr = 1.0 }
+                sdfBlitGlyph(fb: fb, fbW: fbW, fbH: fbH, atlas: font.atlas,
+                             sx0: sx0, sy0: sy0, sx1: sx1, sy1: sy1,
+                             au0: au0, av0: av0, au1: au1, av1: av1, screenPxRange: spr, rgb: rgb)
+            }
+            pen = pen + g.advance * scale
+        }
+        i = i + 1
+    }
+}
