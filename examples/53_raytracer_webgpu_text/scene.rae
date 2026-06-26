@@ -20,6 +20,21 @@ type Sphere {
     material: Material
 }
 
+# Axis-aligned box (the C++ rae_ray "cube"). lo/hi are opposite corners.
+type Box {
+    lo: Vec3
+    hi: Vec3
+    material: Material
+}
+
+# Boxes for "Scene One": the C++ generateCube — a unit cube on the ground.
+func buildSceneOneBoxes() ret List(Box) {
+    let b: List(Box) = createList(Box, cap: 1)
+    b.add(value: { lo: { x: -0.5, y: 0.4, z: 0.0 }, hi: { x: 0.5, y: 1.4, z: 1.0 },
+        material: { kind: 0, albedo: { x: 0.85, y: 0.45, z: 0.2 }, fuzz: 0.0, ior: 0.0 } })
+    ret b
+}
+
 # The classic Z-up four-sphere scene: diffuse ground, diffuse centre, glass on
 # the left, fuzzed metal on the right.
 func buildScene() ret List(Sphere) {
