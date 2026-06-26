@@ -8,8 +8,8 @@ import camera
 func randomUnit() ret Vec3 {
     let a: Float = random() * tau
     let z: Float = random() * 2.0 - 1.0
-    let r: Float = sqrt(x: 1.0 - z * z)
-    ret vec3(x: r * cos(x: a), y: r * sin(x: a), z: z)
+    let r: Float = math.sqrt(x: 1.0 - z * z)
+    ret vec3(x: r * math.cos(x: a), y: r * math.sin(x: a), z: z)
 }
 
 func vreflect(v: view Vec3, n: view Vec3) ret Vec3 {
@@ -23,14 +23,14 @@ func vrefract(uv: view Vec3, n: view Vec3, etaRatio: view Float) ret Vec3 {
         cosT = 1.0
     }
     let perp: Vec3 = vscale(a: vadd(a: uv, b: vscale(a: n, s: cosT)), s: etaRatio)
-    let pl: Float = 0.0 - sqrt(x: abs(n: 1.0 - vlenSq(a: perp)))
+    let pl: Float = 0.0 - math.sqrt(x: abs(n: 1.0 - vlenSq(a: perp)))
     ret vadd(a: perp, b: vscale(a: n, s: pl))
 }
 
 func schlick(cosine: view Float, refIdx: view Float) ret Float {
     var r0: Float = (1.0 - refIdx) / (1.0 + refIdx)
     r0 = r0 * r0
-    ret r0 + (1.0 - r0) * pow(base: 1.0 - cosine, exp: 5.0)
+    ret r0 + (1.0 - r0) * math.pow(base: 1.0 - cosine, exp: 5.0)
 }
 
 func hitSphere(s: view Sphere, r: view Ray) ret Float {
@@ -42,7 +42,7 @@ func hitSphere(s: view Sphere, r: view Ray) ret Float {
     if disc < 0.0 {
         ret -1.0
     }
-    ret (-halfB - sqrt(x: disc)) / a
+    ret (-halfB - math.sqrt(x: disc)) / a
 }
 
 func rayColor(world: view List(Sphere), r: view Ray, depth: view Int) ret Vec3 {
@@ -95,7 +95,7 @@ func rayColor(world: view List(Sphere), r: view Ray, depth: view Int) ret Vec3 {
             if cosT > 1.0 {
                 cosT = 1.0
             }
-            let sinT: Float = sqrt(x: 1.0 - cosT * cosT)
+            let sinT: Float = math.sqrt(x: 1.0 - cosT * cosT)
             if etaRatio * sinT > 1.0 or schlick(cosine: cosT, refIdx: etaRatio) > random() {
                 scatter = vreflect(v: ud, n: frontN)
             } else {
@@ -162,9 +162,9 @@ func buildDisplay(fb: mod List(Int), accum: view List(Float), pixels: view Int, 
     var p: Int = 0
     loop p < pixels {
         let base: Int = p * 3
-        let r: Float = sqrt(x: clampf(x: accum.get(index: base) * inv))
-        let g: Float = sqrt(x: clampf(x: accum.get(index: base + 1) * inv))
-        let b: Float = sqrt(x: clampf(x: accum.get(index: base + 2) * inv))
+        let r: Float = math.sqrt(x: clampf(x: accum.get(index: base) * inv))
+        let g: Float = math.sqrt(x: clampf(x: accum.get(index: base + 1) * inv))
+        let b: Float = math.sqrt(x: clampf(x: accum.get(index: base + 2) * inv))
         let ir: Int = (255.99 * r).toInt()
         let ig: Int = (255.99 * g).toInt()
         let ib: Int = (255.99 * b).toInt()
