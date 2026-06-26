@@ -124,16 +124,16 @@ func formatDurationMs(ms: view Int) pub ret String {
 # Per-field helpers — small wrappers around lib/json's `jsonField` +
 # `jsonValueAt` so the call sites read top-to-bottom.
 func fieldString(doc: view JsonDoc, obj: view JsonValue, key: view String) ret String {
-  let idx: Int = jsonField(doc: doc, this: obj, key: key)
-  let v: JsonValue = jsonValueAt(doc: doc, idx: idx)
+  let idx: Int = json.jsonField(doc: doc, this: obj, key: key)
+  let v: JsonValue = json.jsonValueAt(doc: doc, idx: idx)
   let fallback: String = ""
-  ret jsonString(this: v, fallback: fallback)
+  ret json.jsonString(this: v, fallback: fallback)
 }
 
 func fieldInt(doc: view JsonDoc, obj: view JsonValue, key: view String) ret Int {
-  let idx: Int = jsonField(doc: doc, this: obj, key: key)
-  let v: JsonValue = jsonValueAt(doc: doc, idx: idx)
-  ret jsonInt(this: v, fallback: 0)
+  let idx: Int = json.jsonField(doc: doc, this: obj, key: key)
+  let v: JsonValue = json.jsonValueAt(doc: doc, idx: idx)
+  ret json.jsonInt(this: v, fallback: 0)
 }
 
 # Parse a `tracks` array (JSON Array of objects) into List(Track).
@@ -141,12 +141,12 @@ func fieldInt(doc: view JsonDoc, obj: view JsonValue, key: view String) ret Int 
 # / partial list rather than a hard failure.
 func parseTracks(doc: view JsonDoc, root: view JsonValue) ret List(Track) {
   let result: List(Track) = createList(Track, cap: 12)
-  let arrIdx: Int = jsonField(doc: doc, this: root, key: "tracks")
-  let arr: JsonValue = jsonValueAt(doc: doc, idx: arrIdx)
-  let n: Int = jsonArrayLen(this: arr)
+  let arrIdx: Int = json.jsonField(doc: doc, this: root, key: "tracks")
+  let arr: JsonValue = json.jsonValueAt(doc: doc, idx: arrIdx)
+  let n: Int = json.jsonArrayLen(this: arr)
   var i: Int = 0
   loop i < n {
-    let entry: JsonValue = jsonArrayAt(doc: doc, this: arr, idx: i)
+    let entry: JsonValue = json.jsonArrayAt(doc: doc, this: arr, idx: i)
     let numberKey: String = "number"
     let titleKey: String = "title"
     let durKey: String = "durationMs"
@@ -181,12 +181,12 @@ func stubAlbum(stem: view String, coverPath: view String) ret Album {
 
 # Parse a single album.json blob into an Album.
 func parseAlbum(source: view String, stem: view String, coverPath: view String) pub ret Album {
-  let doc: JsonDoc = parseJson(source: source)
+  let doc: JsonDoc = json.parseJson(source: source)
   if doc.ok is false {
     log("[album-loader] parse error in {stem}/album.json at byte {doc.errorPos}")
     ret stubAlbum(stem: stem, coverPath: coverPath)
   }
-  let root: JsonValue = jsonRoot(doc: doc)
+  let root: JsonValue = json.jsonRoot(doc: doc)
   let artistKey: String = "artist"
   let albumKey: String = "album"
   let yearKey: String = "year"
