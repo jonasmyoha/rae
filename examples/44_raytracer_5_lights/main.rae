@@ -65,7 +65,7 @@ func main() {
     let worldUp: Vec3 = vec3(x: 0.0, y: 0.0, z: 1.0)
     let aspect: Float = finalW.toFloat() / finalH.toFloat()
 
-    var fwd: Vec3 = vec3(x: cos(x: pitch) * cos(x: yaw), y: cos(x: pitch) * sin(x: yaw), z: sin(x: pitch))
+    var fwd: Vec3 = vec3(x: math.cos(x: pitch) * math.cos(x: yaw), y: math.cos(x: pitch) * math.sin(x: yaw), z: math.sin(x: pitch))
     var cam: Camera = buildCamera(pos: camPos, target: vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
 
     var hiQ: Bool = false
@@ -176,7 +176,7 @@ func main() {
             if pitch < -1.5 {
                 pitch = -1.5
             }
-            fwd = vec3(x: cos(x: pitch) * cos(x: yaw), y: cos(x: pitch) * sin(x: yaw), z: sin(x: pitch))
+            fwd = vec3(x: math.cos(x: pitch) * math.cos(x: yaw), y: math.cos(x: pitch) * math.sin(x: yaw), z: math.sin(x: pitch))
             cam = buildCamera(pos: camPos, target: vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
             sampleCount = 0
         }

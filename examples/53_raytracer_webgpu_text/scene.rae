@@ -100,7 +100,7 @@ func loadObjTriangles(path: view String, scale: view Float, ox: view Float, oy: 
                 let mny: Float = rae_ext_rae_buf_get(buf: tok.data, index: 2).toFloat()
                 let mnz: Float = rae_ext_rae_buf_get(buf: tok.data, index: 3).toFloat() * flip
                 let rx: Float = mnx   let ry: Float = mnz   let rz: Float = mny   # Y-up -> Z-up
-                var ln: Float = sqrt(x: rx * rx + ry * ry + rz * rz)
+                var ln: Float = math.sqrt(x: rx * rx + ry * ry + rz * rz)
                 if ln < 0.000001 { ln = 1.0 }
                 nx.add(value: rx / ln)  ny.add(value: ry / ln)  nz.add(value: rz / ln)
             }
@@ -143,7 +143,7 @@ func loadObjTriangles(path: view String, scale: view Float, ox: view Float, oy: 
                     let gx: Float = ey * fz - ez * fy
                     let gy: Float = ez * fx - ex * fz
                     let gz: Float = ex * fy - ey * fx
-                    var gl: Float = sqrt(x: gx * gx + gy * gy + gz * gz)
+                    var gl: Float = math.sqrt(x: gx * gx + gy * gy + gz * gz)
                     if gl < 0.000001 { gl = 1.0 }
                     let g: Vec3 = { x: gx / gl, y: gy / gl, z: gz / gl }
                     nn0 = g  nn1 = g  nn2 = g
