@@ -354,6 +354,7 @@ struct AstDecl {
   size_t line;
   size_t column;
   const char* origin_file; // Source file the decl was parsed from (preserved through module merge + specialization). NULL until set.
+  const char* module_name; // Logical module this decl came from (e.g. "math", "filesystem"); set at merge. Used for namespace-qualified access (docs/module-namespacing.md). NULL for the entry/project module.
   AstDecl* next;
   union {
     AstTypeDecl type_decl;
