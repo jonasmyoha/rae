@@ -69,7 +69,10 @@ func rae_ext_rae_sys_read_file(path: String) extern ret String
 
 func main() {
     let maxDepth: Int = 8
-    let world: List(Sphere) = buildScene()
+    # Scene switching (number keys 1/2), ported from the C++ rae_ray demo.
+    var sceneId: Int = 1
+    var world: List(Sphere) = buildSceneOne()
+    var skyMode: Int = 1
 
     var camPos: Vec3 = vec3(x: 0.0, y: -1.6, z: 0.6)
     var yaw: Float = pi / 2.0
@@ -101,6 +104,7 @@ func main() {
     params.set(index: 1, value: height)
     params.set(index: 3, value: maxDepth)
     params.set(index: 4, value: world.length)
+    params.set(index: 7, value: skyMode)
 
     var rt: GpuRT = buildGpuRT(wgsl: wgsl, scene: sceneFloats(cam: cam, world: world), params: params, pixels: width * height)
     var fb: List(Int) = createList(cap: width * height)
@@ -115,11 +119,26 @@ func main() {
     var fps: Float = 0.0
     var spp: Int = 1               # adaptive samples/frame (see FPS heuristic below)
     let maxSpp: Int = 16
-    let helper: String = "WASD/E-Q move   arrows/drag look   P quality"
+    let helper: String = "WASD/E-Q move   arrows/drag look   1/2 scene   P quality"
     let textColor: Int = 658212        # 0x0A0C24 dark, readable over sky
 
     loop not sdlShouldClose() {
         var moved: Bool = false
+
+        # Scene switch (rae_ray ports): 1 = Scene One (emissive lights),
+        # 2 = Book scene (~480 random spheres). Rebuild the scene buffer + reset.
+        var newScene: Int = sceneId
+        if sdlIsKeyPressed(key: 49) { newScene = 1 }
+        if sdlIsKeyPressed(key: 50) { newScene = 2 }
+        if newScene > sceneId or newScene < sceneId {
+            sceneId = newScene
+            if sceneId is 2 { world = buildSceneBook()  skyMode = 0 } else { world = buildSceneOne()  skyMode = 1 }
+            params.set(index: 4, value: world.length)
+            params.set(index: 7, value: skyMode)
+            rt = buildGpuRT(wgsl: wgsl, scene: sceneFloats(cam: cam, world: world), params: params, pixels: width * height)
+            sampleIndex = 0
+            spp = 1
+        }
 
         # P toggles half-res <-> Full HD; rebuild buffers + framebuffer, reset.
         if sdlIsKeyPressed(key: 80) {
