@@ -586,6 +586,49 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
     return NULL;
 }
 
+// Resolve a namespace-qualified call `qualifier.name(args)` to a function decl
+// in module `qualifier`. Searches module->decls directly (not the symbol table),
+// so it keeps working once non-core stdlib stops being flat-registered. Matches
+// by module_name + name + arity, preferring an exact (non-Any) type match and
+// falling back to the first arity match. Non-generic only — namespaced stdlib
+// functions are non-generic; generic stays in flat-visible `core`.
+// (docs/module-namespacing.md)
+static AstDecl* resolve_qualified_function(CompilerContext* ctx, AstModule* module, SymbolTable* symbols,
+                                           Str qualifier, Str name, AstCallArg* args) {
+    size_t arg_count = 0;
+    for (AstCallArg* a = args; a; a = a->next) arg_count++;
+    AstDecl* arity_match = NULL;
+    for (AstDecl* d = module->decls; d; d = d->next) {
+        if (d->kind != AST_DECL_FUNC) continue;
+        if (!d->module_name || !str_eq_cstr(qualifier, d->module_name)) continue;
+        if (!str_eq(d->as.func_decl.name, name)) continue;
+        if (d->as.func_decl.specialization_args) continue;
+        AstFuncDecl* fd = &d->as.func_decl;
+        size_t param_count = 0;
+        for (AstParam* p = fd->params; p; p = p->next) param_count++;
+        if (param_count != arg_count) continue;
+        if (!arity_match) arity_match = d;
+        bool mismatch = false;
+        AstParam* p = fd->params;
+        AstCallArg* a = args;
+        while (p && a) {
+            TypeInfo* pt = sema_resolve_type_internal(ctx, module, symbols, p->type);
+            TypeInfo* at = a->value ? a->value->resolved_type : NULL;
+            if (pt && at) {
+                TypeInfo* pb = pt; while (pb->kind == TYPE_REF) pb = pb->as.ref.base;
+                TypeInfo* ab = at; while (ab->kind == TYPE_REF) ab = ab->as.ref.base;
+                if (pb->kind != TYPE_ANY && ab->kind != TYPE_ANY) {
+                    if (pb->kind != ab->kind) { mismatch = true; break; }
+                    if (pb->kind == TYPE_STRUCT && !str_eq(pb->name, ab->name)) { mismatch = true; break; }
+                }
+            }
+            p = p->next; a = a->next;
+        }
+        if (!mismatch) return d;
+    }
+    return arity_match;
+}
+
 static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstDecl* decl) {
     if (!decl) return;
     switch (decl->kind) {
@@ -1210,19 +1253,34 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
             if (expr->as.method_call.object->kind == AST_EXPR_IDENT
                 && !symbol_table_lookup(symbols, expr->as.method_call.object->as.ident)
                 && sema_is_module_name(module, expr->as.method_call.object->as.ident)) {
+                Str qual = expr->as.method_call.object->as.ident;
+                Str fname = expr->as.method_call.method_name;
+                AstCallArg* qargs = expr->as.method_call.args;
+                AstTypeRef* qgen = expr->as.method_call.generic_args;
+                // Analyze args first so the resolver can use their types.
+                for (AstCallArg* a = qargs; a; a = a->next) sema_analyze_expr(ctx, module, symbols, a->value);
+                AstDecl* resolved = resolve_qualified_function(ctx, module, symbols, qual, fname, qargs);
+                // Rewrite to a plain call (no receiver) bound directly to the
+                // resolved in-module decl — codegen emits from decl_link, so this
+                // survives non-core stdlib losing its flat symbols (step 3).
                 AstExpr* callee = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
                 memset(callee, 0, sizeof(*callee));
                 callee->kind = AST_EXPR_IDENT;
-                callee->as.ident = expr->as.method_call.method_name;
+                callee->as.ident = fname;
                 callee->line = expr->line;
                 callee->column = expr->column;
-                AstCallArg* qargs = expr->as.method_call.args;
-                AstTypeRef* qgen = expr->as.method_call.generic_args;
+                callee->decl_link = resolved;
                 expr->kind = AST_EXPR_CALL;
                 expr->as.call.callee = callee;
                 expr->as.call.args = qargs;
                 expr->as.call.generic_args = qgen;
-                sema_analyze_expr(ctx, module, symbols, expr);
+                expr->decl_link = resolved;
+                if (resolved && resolved->as.func_decl.returns) {
+                    expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, resolved->as.func_decl.returns->type);
+                    AstParam* p = resolved->as.func_decl.params;
+                    AstCallArg* a = qargs;
+                    while (p && a) { TypeInfo* pt = sema_resolve_type_internal(ctx, module, symbols, p->type); ensure_type_match(ctx, pt, &a->value); p = p->next; a = a->next; }
+                }
                 break;
             }
             sema_analyze_expr(ctx, module, symbols, expr->as.method_call.object);
