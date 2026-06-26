@@ -82,6 +82,8 @@ func main() {
     sdlSetTitle(title: "Rae native WebGPU | {width}x{height} | {samples} spp | rendered in {ms}ms")
 
     loop not sdlShouldClose() {
+        if sdlIsKeyPressed(key: 291) { let s: Bool = sdlSavePng(path: "rae_render.png") }
+
         sdlUpdatePixels(pixels: fb.data, w: width, h: height)
         sdlPresent()
     }
