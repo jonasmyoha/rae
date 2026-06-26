@@ -24,7 +24,10 @@ struct Params {
 @group(0) @binding(3) var<storage, read_write>  outBuf: array<u32>; // packed RGBA8
 @group(0) @binding(4) var<storage, read>        boxes: array<f32>; // lo(3) hi(3) albedo(3) kind fuzz ior
 @group(0) @binding(5) var<storage, read>        bvh: array<f32>;     // 8 per node (sphere BVH)
-@group(0) @binding(6) var<storage, read>        primRef: array<f32>; // reordered sphere indices
+@group(0) @binding(6) var<storage, read>        primRef: array<f32>; // reordered prim refs (sphere idx, or 1e6+tri idx)
+@group(0) @binding(7) var<storage, read>        tris: array<f32>;    // v0(3) v1(3) v2(3) albedo(3) kind fuzz ior
+
+const TRI_BASE: u32 = 1000000u;  // primRef >= TRI_BASE => triangle (idx = ref - TRI_BASE)
 
 const PI: f32 = 3.14159265358979;
 const TAU: f32 = 6.28318530717958;
@@ -105,6 +108,36 @@ fn hitBox(bx: Box, ro: vec3<f32>, rd: vec3<f32>) -> f32 {
   if (tn > 0.001) { return tn; }
   return tf;
 }
+// Triangle: 15 f32 = v0(3) v1(3) v2(3) albedo(3) kind fuzz ior.
+struct Tri { v0: vec3<f32>, v1: vec3<f32>, v2: vec3<f32>, albedo: vec3<f32>, kind: i32, fuzz: f32, ior: f32 };
+fn getTri(j: u32) -> Tri {
+  let b: u32 = j * 15u;
+  var t: Tri;
+  t.v0 = vec3<f32>(tris[b], tris[b + 1u], tris[b + 2u]);
+  t.v1 = vec3<f32>(tris[b + 3u], tris[b + 4u], tris[b + 5u]);
+  t.v2 = vec3<f32>(tris[b + 6u], tris[b + 7u], tris[b + 8u]);
+  t.albedo = vec3<f32>(tris[b + 9u], tris[b + 10u], tris[b + 11u]);
+  t.kind = i32(tris[b + 12u]);
+  t.fuzz = tris[b + 13u];
+  t.ior = tris[b + 14u];
+  return t;
+}
+// Möller–Trumbore; returns t along rd (caller checks > 0.001), or -1 on miss.
+fn hitTri(t: Tri, ro: vec3<f32>, rd: vec3<f32>) -> f32 {
+  let e1: vec3<f32> = t.v1 - t.v0;
+  let e2: vec3<f32> = t.v2 - t.v0;
+  let pv: vec3<f32> = cross(rd, e2);
+  let det: f32 = dot(e1, pv);
+  if (abs(det) < 1e-8) { return -1.0; }
+  let inv: f32 = 1.0 / det;
+  let tv: vec3<f32> = ro - t.v0;
+  let u: f32 = dot(tv, pv) * inv;
+  if (u < 0.0 || u > 1.0) { return -1.0; }
+  let qv: vec3<f32> = cross(tv, e1);
+  let v: f32 = dot(rd, qv) * inv;
+  if (v < 0.0 || u + v > 1.0) { return -1.0; }
+  return dot(e2, qv) * inv;
+}
 fn hitAABB(mn: vec3<f32>, mx: vec3<f32>, ro: vec3<f32>, invd: vec3<f32>, tmax: f32) -> bool {
   let t0: vec3<f32> = (mn - ro) * invd;
   let t1: vec3<f32> = (mx - ro) * invd;
@@ -154,13 +187,24 @@ fn rayColor(ro0: vec3<f32>, rd0: vec3<f32>) -> vec3<f32> {
         if (cnt > 0) {
           let first: i32 = i32(bvh[base + 6u]);
           for (var k: i32 = 0; k < cnt; k = k + 1) {
-            let si: u32 = u32(primRef[u32(first + k)]);
-            let sp: Sphere = getSphere(si);
-            let t: f32 = hitSphere(sp, ro, rd);
-            if (t > 0.001 && t < best) {
-              best = t;
-              n = (ro + rd * t - sp.center) * (1.0 / sp.radius);
-              albedo = sp.albedo; kind = sp.kind; fuzz = sp.fuzz; ior = sp.ior;
+            let pr: u32 = u32(primRef[u32(first + k)]);
+            if (pr >= TRI_BASE) {
+              let tr: Tri = getTri(pr - TRI_BASE);
+              let t: f32 = hitTri(tr, ro, rd);
+              if (t > 0.001 && t < best) {
+                best = t;
+                var nn: vec3<f32> = normalize(cross(tr.v1 - tr.v0, tr.v2 - tr.v0));
+                if (dot(nn, rd) > 0.0) { nn = -nn; }
+                n = nn; albedo = tr.albedo; kind = tr.kind; fuzz = tr.fuzz; ior = tr.ior;
+              }
+            } else {
+              let sp: Sphere = getSphere(pr);
+              let t: f32 = hitSphere(sp, ro, rd);
+              if (t > 0.001 && t < best) {
+                best = t;
+                n = (ro + rd * t - sp.center) * (1.0 / sp.radius);
+                albedo = sp.albedo; kind = sp.kind; fuzz = sp.fuzz; ior = sp.ior;
+              }
             }
           }
         } else {

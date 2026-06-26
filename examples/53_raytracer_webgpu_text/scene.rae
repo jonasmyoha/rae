@@ -3,7 +3,10 @@
 # (x, z, y)_rae. kind 3 = emissive light (albedo holds the emission colour).
 import core
 import math
+import string
 import vec3
+
+func rae_ext_rae_sys_read_file(path: String) extern ret String
 
 # kind: 0 = diffuse (Lambertian), 1 = metal (reflect + fuzz), 2 = glass
 #       (dielectric), 3 = emissive light (albedo = emission, may exceed 1)
@@ -25,6 +28,71 @@ type Box {
     lo: Vec3
     hi: Vec3
     material: Material
+}
+
+# A single mesh triangle.
+type Triangle {
+    v0: Vec3
+    v1: Vec3
+    v2: Vec3
+    material: Material
+}
+
+# First vertex index of an OBJ face token ("12", "12/3", "12//4") — 0-based.
+func faceIndex(token: view String) ret Int {
+    let parts: List(String) = token.split(sep: "/")
+    let s: String = rae_ext_rae_buf_get(buf: parts.data, index: 0)
+    ret s.toInt() - 1
+}
+
+# Load a Wavefront .obj as a triangle list (v + triangular f only). Converts the
+# mesh's Y-up to Rae Z-up via (x,y,z)->(x,z,y), then scales + offsets. Every
+# triangle gets the given material.
+func loadObjTriangles(path: view String, scale: view Float, ox: view Float, oy: view Float, oz: view Float, mat: view Material) ret List(Triangle) {
+    let text: String = rae_ext_rae_sys_read_file(path: path)
+    let lines: List(String) = text.split(sep: "\n")
+    let vx: List(Float) = createList(Float, cap: 4096)
+    let vy: List(Float) = createList(Float, cap: 4096)
+    let vz: List(Float) = createList(Float, cap: 4096)
+    var li: Int = 0
+    loop li < lines.length {
+        let line: String = rae_ext_rae_buf_get(buf: lines.data, index: li)
+        let tok: List(String) = line.split(sep: " ")
+        if tok.length >= 4 {
+            let t0: String = rae_ext_rae_buf_get(buf: tok.data, index: 0)
+            if t0.equals(other: "v") {
+                let px: Float = rae_ext_rae_buf_get(buf: tok.data, index: 1).toFloat()
+                let py: Float = rae_ext_rae_buf_get(buf: tok.data, index: 2).toFloat()
+                let pz: Float = rae_ext_rae_buf_get(buf: tok.data, index: 3).toFloat()
+                vx.add(value: px * scale + ox)
+                vy.add(value: pz * scale + oy)
+                vz.add(value: py * scale + oz)
+            }
+        }
+        li = li + 1
+    }
+    let tris: List(Triangle) = createList(Triangle, cap: 8192)
+    li = 0
+    loop li < lines.length {
+        let line: String = rae_ext_rae_buf_get(buf: lines.data, index: li)
+        let tok: List(String) = line.split(sep: " ")
+        if tok.length >= 4 {
+            let t0: String = rae_ext_rae_buf_get(buf: tok.data, index: 0)
+            if t0.equals(other: "f") {
+                let i0: Int = faceIndex(token: rae_ext_rae_buf_get(buf: tok.data, index: 1))
+                let i1: Int = faceIndex(token: rae_ext_rae_buf_get(buf: tok.data, index: 2))
+                let i2: Int = faceIndex(token: rae_ext_rae_buf_get(buf: tok.data, index: 3))
+                tris.add(value: {
+                    v0: { x: vx.at(index: i0), y: vy.at(index: i0), z: vz.at(index: i0) },
+                    v1: { x: vx.at(index: i1), y: vy.at(index: i1), z: vz.at(index: i1) },
+                    v2: { x: vx.at(index: i2), y: vy.at(index: i2), z: vz.at(index: i2) },
+                    material: mat
+                })
+            }
+        }
+        li = li + 1
+    }
+    ret tris
 }
 
 # Boxes for "Scene One": the C++ generateCube — a unit cube on the ground.
