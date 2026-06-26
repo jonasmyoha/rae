@@ -201,14 +201,14 @@ func main() {
     var tris: List(Triangle) = createList(Triangle, cap: 0)
     var skyMode: Int = 1
 
-    var camPos: Vec3 = vec3(x: 0.0, y: -1.6, z: 0.6)
+    var camPos: Vec3 = vec3.create(x: 0.0, y: -1.6, z: 0.6)
     var yaw: Float = pi / 2.0
     var pitch: Float = -0.15
     let moveStep: Float = 0.08
     let rotStep: Float = 0.03
     let mouseSens: Float = 0.005
-    let worldUp: Vec3 = vec3(x: 0.0, y: 0.0, z: 1.0)
-    var fwd: Vec3 = vec3(x: math.cos(x: pitch) * math.cos(x: yaw), y: math.cos(x: pitch) * math.sin(x: yaw), z: math.sin(x: pitch))
+    let worldUp: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
+    var fwd: Vec3 = vec3.create(x: math.cos(x: pitch) * math.cos(x: yaw), y: math.cos(x: pitch) * math.sin(x: yaw), z: math.sin(x: pitch))
 
     let dir: String = "examples/53_raytracer_webgpu_text/"
     let wgsl: String = rae_ext_rae_sys_read_file(path: "{dir}accum.wgsl")
@@ -218,7 +218,7 @@ func main() {
     sdl3.setTargetFPS(fps: 0)
 
     let aspect: Float = 16.0 / 9.0
-    var cam: Camera = buildCamera(pos: camPos, target: vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
+    var cam: Camera = buildCamera(pos: camPos, target: vec3.vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
 
     var hiRes: Bool = true
     var width: Int = 1920
@@ -308,13 +308,13 @@ func main() {
             spp = 1            # re-ramp from scratch at the new resolution
         }
 
-        if sdl3.isKeyDown(key: 87) { camPos = vadd(a: camPos, b: vscale(a: fwd, s: moveStep))  moved = true }
-        if sdl3.isKeyDown(key: 83) { camPos = vsub(a: camPos, b: vscale(a: fwd, s: moveStep))  moved = true }
-        let rgt: Vec3 = vnorm(a: vcross(a: fwd, b: worldUp))
-        if sdl3.isKeyDown(key: 68) { camPos = vadd(a: camPos, b: vscale(a: rgt, s: moveStep))  moved = true }
-        if sdl3.isKeyDown(key: 65) { camPos = vsub(a: camPos, b: vscale(a: rgt, s: moveStep))  moved = true }
-        if sdl3.isKeyDown(key: 69) { camPos = vadd(a: camPos, b: vscale(a: worldUp, s: moveStep))  moved = true }
-        if sdl3.isKeyDown(key: 81) { camPos = vsub(a: camPos, b: vscale(a: worldUp, s: moveStep))  moved = true }
+        if sdl3.isKeyDown(key: 87) { camPos = vec3.vadd(a: camPos, b: vec3.vscale(a: fwd, s: moveStep))  moved = true }
+        if sdl3.isKeyDown(key: 83) { camPos = vec3.vsub(a: camPos, b: vec3.vscale(a: fwd, s: moveStep))  moved = true }
+        let rgt: Vec3 = vec3.vnorm(a: vec3.vcross(a: fwd, b: worldUp))
+        if sdl3.isKeyDown(key: 68) { camPos = vec3.vadd(a: camPos, b: vec3.vscale(a: rgt, s: moveStep))  moved = true }
+        if sdl3.isKeyDown(key: 65) { camPos = vec3.vsub(a: camPos, b: vec3.vscale(a: rgt, s: moveStep))  moved = true }
+        if sdl3.isKeyDown(key: 69) { camPos = vec3.vadd(a: camPos, b: vec3.vscale(a: worldUp, s: moveStep))  moved = true }
+        if sdl3.isKeyDown(key: 81) { camPos = vec3.vsub(a: camPos, b: vec3.vscale(a: worldUp, s: moveStep))  moved = true }
         if sdl3.isKeyDown(key: 262) { yaw = yaw - rotStep  moved = true }
         if sdl3.isKeyDown(key: 263) { yaw = yaw + rotStep  moved = true }
         if sdl3.isKeyDown(key: 265) { pitch = pitch + rotStep  moved = true }
@@ -334,8 +334,8 @@ func main() {
         if moved {
             if pitch > 1.5 { pitch = 1.5 }
             if pitch < -1.5 { pitch = -1.5 }
-            fwd = vec3(x: math.cos(x: pitch) * math.cos(x: yaw), y: math.cos(x: pitch) * math.sin(x: yaw), z: math.sin(x: pitch))
-            cam = buildCamera(pos: camPos, target: vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
+            fwd = vec3.create(x: math.cos(x: pitch) * math.cos(x: yaw), y: math.cos(x: pitch) * math.sin(x: yaw), z: math.sin(x: pitch))
+            cam = buildCamera(pos: camPos, target: vec3.vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
             gpu.writeF32(buf: rt.sceneBuf, data: sceneFloats(cam: cam, world: world).data, count: 19 + world.length * 10)
             sampleIndex = 0
         }
