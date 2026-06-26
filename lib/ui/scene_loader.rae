@@ -124,17 +124,17 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
     componentSet(this: world.names, entity: entity, data: defaultName)
 
     # Walk the node's component bag in declaration order.
-    let bag: JsonValue = jsonValueAt(doc: docView, idx: node.componentsValueIdx)
-    let keyCount: Int = jsonObjectLen(this: bag)
+    let bag: JsonValue = json.jsonValueAt(doc: docView, idx: node.componentsValueIdx)
+    let keyCount: Int = json.jsonObjectLen(this: bag)
     var k: Int = 0
     loop k < keyCount {
-      let key: String = jsonObjectKeyAt(doc: docView, this: bag, idx: k)
+      let key: String = json.jsonObjectKeyAt(doc: docView, this: bag, idx: k)
       # Children is hierarchy, not a component — handled in pass 3.
       let childrenKey: String = "Children"
       if key.equals(other: childrenKey) {
         k = k + 1
       } else {
-        let valueAtKey: JsonValue = jsonObjectValueAt(doc: docView, this: bag, idx: k)
+        let valueAtKey: JsonValue = json.jsonObjectValueAt(doc: docView, this: bag, idx: k)
         applyComponentByName(
           world: world
           entity: entity

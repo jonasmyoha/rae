@@ -325,11 +325,11 @@ func mountSceneInstanceIntoPage(
     let entity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: j)
     let isRoot: Bool = j is rootIdx
 
-    let bag: JsonValue = jsonValueAt(doc: docView, idx: node.componentsValueIdx)
-    let keyCount: Int = jsonObjectLen(this: bag)
+    let bag: JsonValue = json.jsonValueAt(doc: docView, idx: node.componentsValueIdx)
+    let keyCount: Int = json.jsonObjectLen(this: bag)
     var k: Int = 0
     loop k < keyCount {
-      let key: String = jsonObjectKeyAt(doc: docView, this: bag, idx: k)
+      let key: String = json.jsonObjectKeyAt(doc: docView, this: bag, idx: k)
       let childrenKey: String = "Children"
       var skip: Bool = false
       if key.equals(other: childrenKey) {
@@ -341,7 +341,7 @@ func mountSceneInstanceIntoPage(
         }
       }
       if skip is false {
-        let valueAtKey: JsonValue = jsonObjectValueAt(doc: docView, this: bag, idx: k)
+        let valueAtKey: JsonValue = json.jsonObjectValueAt(doc: docView, this: bag, idx: k)
         applyComponentByName(
           world: world
           entity: entity
