@@ -7,8 +7,8 @@ import scene
 func randomUnit() ret Vec3 {
     let a: Float = random() * tau
     let z: Float = random() * 2.0 - 1.0
-    let r: Float = sqrt(x: 1.0 - z * z)
-    ret vec3(x: r * cos(x: a), y: r * sin(x: a), z: z)
+    let r: Float = math.sqrt(x: 1.0 - z * z)
+    ret vec3(x: r * math.cos(x: a), y: r * math.sin(x: a), z: z)
 }
 
 func hitSphere(s: view Sphere, ro: view Vec3, rd: view Vec3) ret Float {
@@ -20,7 +20,7 @@ func hitSphere(s: view Sphere, ro: view Vec3, rd: view Vec3) ret Float {
     if disc < 0.0 {
         ret -1.0
     }
-    ret (-halfB - sqrt(x: disc)) / a
+    ret (-halfB - math.sqrt(x: disc)) / a
 }
 
 # Recursive path trace: linear RGB in [0,1].
@@ -76,9 +76,9 @@ func renderRow(fb: mod List(Int), world: view List(Sphere), width: view Int, hei
             sIdx = sIdx + 1
         }
         let inv: Float = 1.0 / samples.toFloat()
-        let ir: Int = (255.99 * sqrt(x: acc.x * inv)).toInt()
-        let ig: Int = (255.99 * sqrt(x: acc.y * inv)).toInt()
-        let ib: Int = (255.99 * sqrt(x: acc.z * inv)).toInt()
+        let ir: Int = (255.99 * math.sqrt(x: acc.x * inv)).toInt()
+        let ig: Int = (255.99 * math.sqrt(x: acc.y * inv)).toInt()
+        let ib: Int = (255.99 * math.sqrt(x: acc.z * inv)).toInt()
         fb.set(index: rowOff + x, value: ir * 65536 + ig * 256 + ib)
         x = x + 1
     }

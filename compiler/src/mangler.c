@@ -331,20 +331,7 @@ const char* rae_mangle_function(CompilerContext* ctx, const AstFuncDecl* func) {
         else if (str_eq_cstr(name, "rae_int_to_float")) mapped = "rae_ext_rae_int_to_float";
         else if (str_eq_cstr(name, "readLine")) mapped = "rae_ext_rae_io_read_line";
         else if (str_eq_cstr(name, "readChar")) mapped = "rae_ext_rae_io_read_char";
-        else if (str_eq_cstr(name, "sin")) mapped = "rae_ext_rae_math_sin";
-        else if (str_eq_cstr(name, "cos")) mapped = "rae_ext_rae_math_cos";
-        else if (str_eq_cstr(name, "tan")) mapped = "rae_ext_rae_math_tan";
-        else if (str_eq_cstr(name, "asin")) mapped = "rae_ext_rae_math_asin";
-        else if (str_eq_cstr(name, "acos")) mapped = "rae_ext_rae_math_acos";
-        else if (str_eq_cstr(name, "atan")) mapped = "rae_ext_rae_math_atan";
-        else if (str_eq_cstr(name, "atan2")) mapped = "rae_ext_rae_math_atan2";
-        else if (str_eq_cstr(name, "sqrt")) mapped = "rae_ext_rae_math_sqrt";
-        else if (str_eq_cstr(name, "pow")) mapped = "rae_ext_rae_math_pow";
-        else if (str_eq_cstr(name, "exp")) mapped = "rae_ext_rae_math_exp";
-        else if (str_eq_cstr(name, "math_log")) mapped = "rae_ext_rae_math_log";
-        else if (str_eq_cstr(name, "floor")) mapped = "rae_ext_rae_math_floor";
-        else if (str_eq_cstr(name, "ceil")) mapped = "rae_ext_rae_math_ceil";
-        else if (str_eq_cstr(name, "round")) mapped = "rae_ext_rae_math_round";
+        // math.* now uses the namespace rule below (rae_ext_math_<name>).
         else if (str_eq_cstr(name, "__buf_alloc")) mapped = "rae_ext___buf_alloc";
         else if (str_eq_cstr(name, "__buf_free")) mapped = "rae_ext___buf_free";
         else if (str_eq_cstr(name, "__buf_set")) mapped = "rae_ext___buf_set";
