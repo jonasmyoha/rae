@@ -345,6 +345,8 @@ typedef struct {
   AstProperty* properties;
   AstReturnItem* returns;
   bool is_extern;
+  const char* module_name; // Logical module (mirrors AstDecl.module_name); used by the mangler for namespace-qualified extern C symbols. NULL for entry/project.
+  const char* origin_file; // Source file (mirrors AstDecl.origin_file); lets the mangler restrict namespace-qualified externs to stdlib (lib/) and not project FFI.
   AstBlock* body;
 } AstFuncDecl;
 

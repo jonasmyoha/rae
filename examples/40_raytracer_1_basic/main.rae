@@ -36,13 +36,13 @@ func main() {
         i = i + 1
     }
 
-    sdlInitWindow(width: width, height: height, title: "Rae raytracer — step 1 (SDL3, single-threaded)")
+    sdl3.initWindow(width: width, height: height, title: "Rae raytracer — step 1 (SDL3, single-threaded)")
 
     var nextRow: Int = 0
     let startMs: Int = nowMs()
     var doneMs: Int = 0
-    loop not sdlShouldClose() {
-        if sdlIsKeyPressed(key: 291) { let s: Bool = imageSavePng(path: "rae_render.png", pixels: fb.data, width: width, height: height) }
+    loop not sdl3.shouldClose() {
+        if sdl3.isKeyPressed(key: 291) { let s: Bool = image.savePng(path: "rae_render.png", pixels: fb.data, width: width, height: height) }
 
         # Render a time-bounded slice of scanlines each frame (Rae has no
         # `break`, so the budget is part of the loop guard).
@@ -55,15 +55,15 @@ func main() {
             doneMs = nowMs() - startMs
         }
 
-        sdlUpdatePixels(pixels: fb.data, w: width, h: height)
-        sdlPresent()
+        sdl3.updatePixels(pixels: fb.data, w: width, h: height)
+        sdl3.present()
 
         let pct: Int = nextRow * 100 / height
         if doneMs > 0 {
-            sdlSetTitle(title: "Rae step 1 (SDL3) | {width}x{height} | done in {doneMs}ms")
+            sdl3.setTitle(title: "Rae step 1 (SDL3) | {width}x{height} | done in {doneMs}ms")
         } else {
-            sdlSetTitle(title: "Rae step 1 (SDL3) | {width}x{height} | {pct}%")
+            sdl3.setTitle(title: "Rae step 1 (SDL3) | {width}x{height} | {pct}%")
         }
     }
-    sdlCloseWindow()
+    sdl3.closeWindow()
 }

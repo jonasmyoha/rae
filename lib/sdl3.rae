@@ -11,30 +11,30 @@ import core
 # Create the window + renderer at this pixel size. The framebuffer texture is
 # created lazily by sdlUpdatePixels (which may differ from the window size and
 # is stretched to fill it).
-func sdlInitWindow(width: Int, height: Int, title: String) extern
+func initWindow(width: Int, height: Int, title: String) extern
 
 # Cap the present rate (frames/sec). 0 disables the cap. sdlPresent sleeps the
 # remainder of each frame so an idle/finished render doesn't spin at 100% CPU.
-func sdlSetTargetFPS(fps: Int) extern
+func setTargetFPS(fps: Int) extern
 
 # Pump the event queue; returns true once the user asks to close the window
 # (window close button, Escape, or Cmd-Q).
-func sdlShouldClose() extern ret Bool
+func shouldClose() extern ret Bool
 
 # Upload a w x h packed-0xRRGGBB framebuffer (e.g. a List(Int)'s .data) into the
 # streaming texture, (re)creating it if the size changed since last call — so an
 # example can switch framebuffer resolution at runtime. The texture stretches to
 # fill the window on present.
-func sdlUpdatePixels(pixels: view Buffer(Int), w: Int, h: Int) extern
+func updatePixels(pixels: view Buffer(Int), w: Int, h: Int) extern
 
 # Draw the texture to the window and present this frame.
-func sdlPresent() extern
+func present() extern
 
 # Update the window title bar (status text — there is no drawText here).
-func sdlSetTitle(title: String) extern
+func setTitle(title: String) extern
 
 # Tear down the texture, renderer, window, and SDL.
-func sdlCloseWindow() extern
+func closeWindow() extern
 
 # --- Input ---------------------------------------------------------------
 # Key codes are the raylib/GLFW convention (letters = ASCII uppercase, arrows =
@@ -43,17 +43,17 @@ func sdlCloseWindow() extern
 
 # Current window (renderer output) size in pixels. The window is resizable;
 # poll these to detect a resize and re-render at the new size.
-func sdlWindowWidth() extern ret Int
-func sdlWindowHeight() extern ret Int
+func windowWidth() extern ret Int
+func windowHeight() extern ret Int
 
 # Mouse position in window pixels (top-left origin).
-func sdlGetMouseX() extern ret Int
-func sdlGetMouseY() extern ret Int
+func getMouseX() extern ret Int
+func getMouseY() extern ret Int
 
 # Mouse button held this frame: 0 = left, 1 = right, 2 = middle.
-func sdlIsMouseButtonDown(button: Int) extern ret Bool
+func isMouseButtonDown(button: Int) extern ret Bool
 
 # Keyboard: down = held this frame (level); pressed = went down on this frame
-# (edge, false on auto-repeat). Poll once per frame after sdlShouldClose().
-func sdlIsKeyDown(key: Int) extern ret Bool
-func sdlIsKeyPressed(key: Int) extern ret Bool
+# (edge, false on auto-repeat). Poll once per frame after sdl3.shouldClose().
+func isKeyDown(key: Int) extern ret Bool
+func isKeyPressed(key: Int) extern ret Bool

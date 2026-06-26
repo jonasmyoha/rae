@@ -1830,6 +1830,12 @@ static AstModule merge_module_graph(const ModuleGraph* graph) {
       // resolve namespace-qualified calls like `math.sin(x)` after the merge
       // flattens everything (docs/module-namespacing.md).
       if (!d->module_name) d->module_name = node->module_path;
+      // Mirror onto the func decl so the mangler (which only sees AstFuncDecl)
+      // can build namespace-qualified extern C symbols.
+      if (d->kind == AST_DECL_FUNC && !d->as.func_decl.module_name) {
+        d->as.func_decl.module_name = node->module_path;
+        d->as.func_decl.origin_file = d->origin_file;
+      }
     }
     // Copy the declaration list head
     AstDecl* current = node->module->decls;

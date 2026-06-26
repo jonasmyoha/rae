@@ -70,7 +70,7 @@ static bool native_format_timestamp(struct VM* vm, VmNativeResult* out_result, c
     diag_error(NULL, 0, 0, "formatTimestamp expects one Int (epoch ms)");
     return false;
   }
-  rae_String s = rae_ext_formatTimestamp(args[0].as.int_value);
+  rae_String s = rae_ext_time_formatTimestamp(args[0].as.int_value);
   out_result->has_value = true;
   out_result->value = value_string_copy((const char*)s.data, (size_t)s.len);
   rae_ext_rae_str_free(s);
@@ -83,7 +83,7 @@ static bool native_format_date(struct VM* vm, VmNativeResult* out_result, const 
     diag_error(NULL, 0, 0, "formatDate expects one Int (epoch ms)");
     return false;
   }
-  rae_String s = rae_ext_formatDate(args[0].as.int_value);
+  rae_String s = rae_ext_time_formatDate(args[0].as.int_value);
   out_result->has_value = true;
   out_result->value = value_string_copy((const char*)s.data, (size_t)s.len);
   rae_ext_rae_str_free(s);
