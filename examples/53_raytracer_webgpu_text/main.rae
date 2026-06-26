@@ -246,10 +246,13 @@ func main() {
     var lastMs: Int = nowMs()
     var fps: Float = 0.0
     var spp: Int = 1               # adaptive samples/frame (no hard cap; see below)
-    let helper: String = "WASD/E-Q move   arrows/drag look   1-6 scene   P quality"
+    let helper: String = "WASD/E-Q move   arrows/drag look   1-6 scene   P quality   F2 save PNG"
 
     loop not sdlShouldClose() {
         var moved: Bool = false
+
+        # F2 saves the current frame as a PNG.
+        if sdlIsKeyPressed(key: 291) { let saved: Bool = sdlSavePng(path: "rae_render.png") }
 
         # Scene switch — number keys. 1 = Scene One (lights + cube), 2 = Book
         # (~480 spheres), 3 = bunny mesh (~4968 tris via BVH), and the original
