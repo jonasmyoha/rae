@@ -22,6 +22,7 @@
 
 import core
 import sdl3
+import image
 import vec3
 import scene
 import camera
@@ -68,7 +69,7 @@ func main() {
     let startMs: Int = nowMs()
     var doneMs: Int = 0
     loop not sdlShouldClose() {
-        if sdlIsKeyPressed(key: 291) { let s: Bool = sdlSavePng(path: "rae_render.png") }
+        if sdlIsKeyPressed(key: 291) { let s: Bool = imageSavePng(path: "rae_render.png", pixels: fb.data, width: width, height: height) }
 
         if n0 < t0 or n1 < t1 or n2 < t2 or n3 < t3 {
             var c0: Int = n0

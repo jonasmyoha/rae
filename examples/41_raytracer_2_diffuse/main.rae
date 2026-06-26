@@ -12,6 +12,7 @@
 #   rae run --target compiled main.rae
 import core
 import sdl3
+import image
 import vec3
 import scene
 import render
@@ -38,7 +39,7 @@ func main() {
     let startMs: Int = nowMs()
     var doneMs: Int = 0
     loop not sdlShouldClose() {
-        if sdlIsKeyPressed(key: 291) { let s: Bool = sdlSavePng(path: "rae_render.png") }
+        if sdlIsKeyPressed(key: 291) { let s: Bool = imageSavePng(path: "rae_render.png", pixels: fb.data, width: width, height: height) }
 
         let frameStart: Int = nowMs()
         loop nextRow < height and nowMs() - frameStart <= 16 {
