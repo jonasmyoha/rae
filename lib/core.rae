@@ -1,6 +1,19 @@
 # Core library for Rae
 func nextTick() extern ret Int
 
+# Console output — a core essential (globally visible, callable bare), so
+# everyday code writes `log(x)` not `io.log(x)`. (docs/module-namespacing.md)
+func rae_ext_rae_log_any(value: Any) extern
+func rae_ext_rae_log_stream_any(value: Any) extern
+
+func log(value: Any) {
+    rae_ext_rae_log_any(value: value)
+}
+
+func logS(value: Any) {
+    rae_ext_rae_log_stream_any(value: value)
+}
+
 func nowMs() extern ret Int
 
 func nowNs() extern ret Int

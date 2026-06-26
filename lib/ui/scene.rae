@@ -59,7 +59,7 @@ func emptyScene() ret Scene {
     sceneId: ""
     rootNodeId: ""
     nodes: createList(SceneNode, cap: 0)
-    doc: parseJson(source: "null")
+    doc: json.parseJson(source: "null")
     ok: false
     errorMsg: ""
   }
@@ -89,17 +89,17 @@ func sceneNodeAt(this: view Scene, idx: view Int) ret view SceneNode {
 # resolve them once entity ids exist.
 func extractChildrenIds(doc: view JsonDoc, nodeVal: view JsonValue) ret List(String) {
   let out: List(String) = createList(String, cap: 4)
-  let childrenIdx: Int = jsonField(doc: doc, this: nodeVal, key: "Children")
+  let childrenIdx: Int = json.jsonField(doc: doc, this: nodeVal, key: "Children")
   if childrenIdx < 0 {
     ret out
   }
-  let arr: JsonValue = jsonValueAt(doc: doc, idx: childrenIdx)
-  let n: Int = jsonArrayLen(this: arr)
+  let arr: JsonValue = json.jsonValueAt(doc: doc, idx: childrenIdx)
+  let n: Int = json.jsonArrayLen(this: arr)
   var i: Int = 0
   loop i < n {
-    let elem: JsonValue = jsonArrayAt(doc: doc, this: arr, idx: i)
+    let elem: JsonValue = json.jsonArrayAt(doc: doc, this: arr, idx: i)
     let empty: String = ""
-    let s: String = jsonString(this: elem, fallback: empty)
+    let s: String = json.jsonString(this: elem, fallback: empty)
     out.add(value: s)
     i = i + 1
   }
@@ -110,7 +110,7 @@ func extractChildrenIds(doc: view JsonDoc, nodeVal: view JsonValue) ret List(Str
 # Returns a populated Scene on success; on any validation failure
 # returns a Scene with `ok = false` and `errorMsg` set.
 func parseScene(source: view String) ret Scene {
-  let doc: JsonDoc = parseJson(source: source)
+  let doc: JsonDoc = json.parseJson(source: source)
   let scene: Scene = emptyScene()
   scene.doc = doc
 
@@ -119,21 +119,21 @@ func parseScene(source: view String) ret Scene {
     ret scene
   }
 
-  let root: JsonValue = jsonRoot(doc: doc)
+  let root: JsonValue = json.jsonRoot(doc: doc)
   if root.kind is not JsonKind.object {
     scene.errorMsg = "scene root is not an object"
     ret scene
   }
 
   # Validate `type == "Scene"`.
-  let typeIdx: Int = jsonField(doc: doc, this: root, key: "type")
+  let typeIdx: Int = json.jsonField(doc: doc, this: root, key: "type")
   if typeIdx < 0 {
     scene.errorMsg = "missing \"type\" key"
     ret scene
   }
-  let typeVal: JsonValue = jsonValueAt(doc: doc, idx: typeIdx)
+  let typeVal: JsonValue = json.jsonValueAt(doc: doc, idx: typeIdx)
   let empty: String = ""
-  let typeStr: String = jsonString(this: typeVal, fallback: empty)
+  let typeStr: String = json.jsonString(this: typeVal, fallback: empty)
   let expectedType: String = "Scene"
   if typeStr.equals(other: expectedType) is false {
     scene.errorMsg = "type must be \"Scene\""
@@ -141,45 +141,45 @@ func parseScene(source: view String) ret Scene {
   }
 
   # Validate `version == 2`.
-  let versionIdx: Int = jsonField(doc: doc, this: root, key: "version")
+  let versionIdx: Int = json.jsonField(doc: doc, this: root, key: "version")
   if versionIdx < 0 {
     scene.errorMsg = "missing \"version\" key"
     ret scene
   }
-  let versionVal: JsonValue = jsonValueAt(doc: doc, idx: versionIdx)
-  let version: Int = jsonInt(this: versionVal, fallback: -1)
+  let versionVal: JsonValue = json.jsonValueAt(doc: doc, idx: versionIdx)
+  let version: Int = json.jsonInt(this: versionVal, fallback: -1)
   if version is not 2 {
     scene.errorMsg = "version must be 2"
     ret scene
   }
 
   # sceneId (optional but recorded for diagnostics + scene-instance scoping).
-  let sceneIdIdx: Int = jsonField(doc: doc, this: root, key: "sceneId")
+  let sceneIdIdx: Int = json.jsonField(doc: doc, this: root, key: "sceneId")
   if sceneIdIdx >= 0 {
-    let sceneIdVal: JsonValue = jsonValueAt(doc: doc, idx: sceneIdIdx)
-    scene.sceneId = jsonString(this: sceneIdVal, fallback: empty)
+    let sceneIdVal: JsonValue = json.jsonValueAt(doc: doc, idx: sceneIdIdx)
+    scene.sceneId = json.jsonString(this: sceneIdVal, fallback: empty)
   }
 
   # `root` is required and must name a node.
-  let rootIdx: Int = jsonField(doc: doc, this: root, key: "root")
+  let rootIdx: Int = json.jsonField(doc: doc, this: root, key: "root")
   if rootIdx < 0 {
     scene.errorMsg = "missing \"root\" key"
     ret scene
   }
-  let rootVal: JsonValue = jsonValueAt(doc: doc, idx: rootIdx)
-  scene.rootNodeId = jsonString(this: rootVal, fallback: empty)
+  let rootVal: JsonValue = json.jsonValueAt(doc: doc, idx: rootIdx)
+  scene.rootNodeId = json.jsonString(this: rootVal, fallback: empty)
   if scene.rootNodeId.length() is 0 {
     scene.errorMsg = "\"root\" must be a non-empty string"
     ret scene
   }
 
   # `nodes` must be a non-empty object dictionary.
-  let nodesIdx: Int = jsonField(doc: doc, this: root, key: "nodes")
+  let nodesIdx: Int = json.jsonField(doc: doc, this: root, key: "nodes")
   if nodesIdx < 0 {
     scene.errorMsg = "missing \"nodes\" object"
     ret scene
   }
-  let nodesVal: JsonValue = jsonValueAt(doc: doc, idx: nodesIdx)
+  let nodesVal: JsonValue = json.jsonValueAt(doc: doc, idx: nodesIdx)
   if nodesVal.kind is not JsonKind.object {
     scene.errorMsg = "\"nodes\" must be an object"
     ret scene
@@ -187,11 +187,11 @@ func parseScene(source: view String) ret Scene {
 
   # First pass: build SceneNode entries.
   let nodesList: mod List(SceneNode) => scene.nodes
-  let count: Int = jsonObjectLen(this: nodesVal)
+  let count: Int = json.jsonObjectLen(this: nodesVal)
   var i: Int = 0
   loop i < count {
-    let nodeId: String = jsonObjectKeyAt(doc: doc, this: nodesVal, idx: i)
-    let nodeVal: JsonValue = jsonObjectValueAt(doc: doc, this: nodesVal, idx: i)
+    let nodeId: String = json.jsonObjectKeyAt(doc: doc, this: nodesVal, idx: i)
+    let nodeVal: JsonValue = json.jsonObjectValueAt(doc: doc, this: nodesVal, idx: i)
     if nodeVal.kind is not JsonKind.object {
       scene.errorMsg = nodeId.concat(other: " is not an object")
       ret scene
@@ -200,7 +200,7 @@ func parseScene(source: view String) ret Scene {
     # `jsonField` returns the value's pool index, which is exactly what
     # we want to remember so component deserialisers can look up keys
     # on this node later without re-scanning the parent.
-    let valueIdx: Int = jsonField(doc: doc, this: nodesVal, key: nodeId)
+    let valueIdx: Int = json.jsonField(doc: doc, this: nodesVal, key: nodeId)
     let n: SceneNode = {
       nodeId: nodeId
       componentsValueIdx: valueIdx

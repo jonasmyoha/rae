@@ -180,35 +180,35 @@ func playlistAssetPath(id: view String) pub ret String {
 # `tracks` array (which had no `kind`) parses unchanged.
 func parsePlaylistItem(doc: view JsonDoc, entry: view JsonValue) ret PlaylistItem {
   let kindKey: String = "kind"
-  let kindIdx: Int = jsonField(doc: doc, this: entry, key: kindKey)
+  let kindIdx: Int = json.jsonField(doc: doc, this: entry, key: kindKey)
   let defaultKind: String = "{playlistKindTrack}"
   var kind: String = defaultKind
   if kindIdx >= 0 {
-    let kindVal: JsonValue = jsonValueAt(doc: doc, idx: kindIdx)
-    kind = jsonString(this: kindVal, fallback: defaultKind)
+    let kindVal: JsonValue = json.jsonValueAt(doc: doc, idx: kindIdx)
+    kind = json.jsonString(this: kindVal, fallback: defaultKind)
   }
   let stemKey: String = "albumStem"
-  let stemFieldIdx: Int = jsonField(doc: doc, this: entry, key: stemKey)
+  let stemFieldIdx: Int = json.jsonField(doc: doc, this: entry, key: stemKey)
   let emptyStem: String = ""
   var stem: String = emptyStem
   if stemFieldIdx >= 0 {
-    let stemVal: JsonValue = jsonValueAt(doc: doc, idx: stemFieldIdx)
-    stem = jsonString(this: stemVal, fallback: emptyStem)
+    let stemVal: JsonValue = json.jsonValueAt(doc: doc, idx: stemFieldIdx)
+    stem = json.jsonString(this: stemVal, fallback: emptyStem)
   }
   let idxKey: String = "trackIndex"
-  let idxFieldIdx: Int = jsonField(doc: doc, this: entry, key: idxKey)
+  let idxFieldIdx: Int = json.jsonField(doc: doc, this: entry, key: idxKey)
   var ti: Int = 0 - 1
   if idxFieldIdx >= 0 {
-    let idxVal: JsonValue = jsonValueAt(doc: doc, idx: idxFieldIdx)
-    ti = jsonInt(this: idxVal, fallback: 0 - 1)
+    let idxVal: JsonValue = json.jsonValueAt(doc: doc, idx: idxFieldIdx)
+    ti = json.jsonInt(this: idxVal, fallback: 0 - 1)
   }
   let plKey: String = "playlistId"
-  let plFieldIdx: Int = jsonField(doc: doc, this: entry, key: plKey)
+  let plFieldIdx: Int = json.jsonField(doc: doc, this: entry, key: plKey)
   let emptyPl: String = ""
   var plId: String = emptyPl
   if plFieldIdx >= 0 {
-    let plVal: JsonValue = jsonValueAt(doc: doc, idx: plFieldIdx)
-    plId = jsonString(this: plVal, fallback: emptyPl)
+    let plVal: JsonValue = json.jsonValueAt(doc: doc, idx: plFieldIdx)
+    plId = json.jsonString(this: plVal, fallback: emptyPl)
   }
   ret PlaylistItem {
     kind: own kind
@@ -230,18 +230,18 @@ func playlistItemValid(item: view PlaylistItem) ret Bool {
 # playlist (with the requested id) if parsing fails — callers can
 # treat a parse error the same as "fresh user state".
 func parsePlaylist(source: view String, id: view String) pub ret Playlist {
-  let doc: JsonDoc = parseJson(source: source)
+  let doc: JsonDoc = json.parseJson(source: source)
   let fallbackTitle: String = "Playlist"
   if doc.ok is false {
     log("[playlist] parse error in '{id}' at byte {doc.errorPos}")
     let copiedId: String = "{id}"
     ret createPlaylist(id: own copiedId, title: own fallbackTitle)
   }
-  let root: JsonValue = jsonRoot(doc: doc)
+  let root: JsonValue = json.jsonRoot(doc: doc)
   let titleKey: String = "title"
-  let titleIdx: Int = jsonField(doc: doc, this: root, key: titleKey)
-  let titleVal: JsonValue = jsonValueAt(doc: doc, idx: titleIdx)
-  let title: String = jsonString(this: titleVal, fallback: fallbackTitle)
+  let titleIdx: Int = json.jsonField(doc: doc, this: root, key: titleKey)
+  let titleVal: JsonValue = json.jsonValueAt(doc: doc, idx: titleIdx)
+  let title: String = json.jsonString(this: titleVal, fallback: fallbackTitle)
 
   let copiedId: String = "{id}"
   let pl: Playlist = createPlaylist(id: own copiedId, title: own title)
@@ -250,19 +250,19 @@ func parsePlaylist(source: view String, id: view String) pub ret Playlist {
   # array (parsed identically — its entries lack `kind`, which
   # `parsePlaylistItem` defaults to "track").
   let itemsKey: String = "items"
-  var arrIdx: Int = jsonField(doc: doc, this: root, key: itemsKey)
+  var arrIdx: Int = json.jsonField(doc: doc, this: root, key: itemsKey)
   if arrIdx < 0 {
     let tracksKey: String = "tracks"
-    arrIdx = jsonField(doc: doc, this: root, key: tracksKey)
+    arrIdx = json.jsonField(doc: doc, this: root, key: tracksKey)
   }
   if arrIdx < 0 {
     ret pl
   }
-  let arrVal: JsonValue = jsonValueAt(doc: doc, idx: arrIdx)
-  let n: Int = jsonArrayLen(this: arrVal)
+  let arrVal: JsonValue = json.jsonValueAt(doc: doc, idx: arrIdx)
+  let n: Int = json.jsonArrayLen(this: arrVal)
   var i: Int = 0
   loop i < n {
-    let entry: JsonValue = jsonArrayAt(doc: doc, this: arrVal, idx: i)
+    let entry: JsonValue = json.jsonArrayAt(doc: doc, this: arrVal, idx: i)
     let item: PlaylistItem = parsePlaylistItem(doc: doc, entry: entry)
     if playlistItemValid(item: item) {
       pl.items.add(value: own item)

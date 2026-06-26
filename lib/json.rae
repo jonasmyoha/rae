@@ -123,9 +123,9 @@ func fieldAt(doc: view JsonDoc, idx: view Int) ret JsonField {
 
 func jsonRoot(doc: view JsonDoc) ret JsonValue {
   if doc.ok is false {
-    ret jsonNull()
+    ret json.jsonNull()
   }
-  ret valueAt(doc: doc, idx: doc.rootIdx)
+  ret json.valueAt(doc: doc, idx: doc.rootIdx)
 }
 
 func jsonInt(this: view JsonValue, fallback: view Int) ret Int {
@@ -171,13 +171,13 @@ func jsonArrayLen(this: view JsonValue) ret Int {
 
 func jsonArrayAt(doc: view JsonDoc, this: view JsonValue, idx: view Int) ret JsonValue {
   if this.kind is not JsonKind.array {
-    ret jsonNull()
+    ret json.jsonNull()
   }
   if idx < 0 or idx >= this.rangeLen {
-    ret jsonNull()
+    ret json.jsonNull()
   }
-  let childIdx: Int = childAt(doc: doc, idx: this.rangeStart + idx)
-  ret valueAt(doc: doc, idx: childIdx)
+  let childIdx: Int = json.childAt(doc: doc, idx: this.rangeStart + idx)
+  ret json.valueAt(doc: doc, idx: childIdx)
 }
 
 func jsonObjectLen(this: view JsonValue) ret Int {
@@ -194,19 +194,19 @@ func jsonObjectKeyAt(doc: view JsonDoc, this: view JsonValue, idx: view Int) ret
   if idx < 0 or idx >= this.rangeLen {
     ret ""
   }
-  let f: JsonField = fieldAt(doc: doc, idx: this.rangeStart + idx)
+  let f: JsonField = json.fieldAt(doc: doc, idx: this.rangeStart + idx)
   ret f.key
 }
 
 func jsonObjectValueAt(doc: view JsonDoc, this: view JsonValue, idx: view Int) ret JsonValue {
   if this.kind is not JsonKind.object {
-    ret jsonNull()
+    ret json.jsonNull()
   }
   if idx < 0 or idx >= this.rangeLen {
-    ret jsonNull()
+    ret json.jsonNull()
   }
-  let f: JsonField = fieldAt(doc: doc, idx: this.rangeStart + idx)
-  ret valueAt(doc: doc, idx: f.valueIdx)
+  let f: JsonField = json.fieldAt(doc: doc, idx: this.rangeStart + idx)
+  ret json.valueAt(doc: doc, idx: f.valueIdx)
 }
 
 # Linear scan; objects in scene files are small. Returns the value's
@@ -219,7 +219,7 @@ func jsonField(doc: view JsonDoc, this: view JsonValue, key: view String) ret In
   }
   var i: Int = 0
   loop i < this.rangeLen {
-    let f: JsonField = fieldAt(doc: doc, idx: this.rangeStart + i)
+    let f: JsonField = json.fieldAt(doc: doc, idx: this.rangeStart + i)
     if f.key.equals(other: key) {
       ret f.valueIdx
     }
@@ -232,9 +232,9 @@ func jsonField(doc: view JsonDoc, this: view JsonValue, key: view String) ret In
 # `jsonField`). Returns null-shaped if idx is out of range.
 func jsonValueAt(doc: view JsonDoc, idx: view Int) ret JsonValue {
   if idx < 0 or idx >= doc.values.length {
-    ret jsonNull()
+    ret json.jsonNull()
   }
-  ret valueAt(doc: doc, idx: idx)
+  ret json.valueAt(doc: doc, idx: idx)
 }
 
 # ---------- parser internals ----------
@@ -260,7 +260,7 @@ func peek(p: view JsonParser) ret Char32 {
 }
 
 func consume(p: mod JsonParser, c: view Char32) ret Bool {
-  if peek(p: p) is c {
+  if json.peek(p: p) is c {
     p.pos = p.pos + 1
     ret true
   }
@@ -310,7 +310,7 @@ func pushField(fields: mod List(JsonField), key: own String, valueIdx: view Int)
 # `n`, `r`, `t`. Unicode `\uXXXX` sequences are passed through as-is for
 # now (caller can normalise later if needed).
 func parseString(p: mod JsonParser) ret String {
-  if not consume(p: p, c: '"') {
+  if not json.consume(p: p, c: '"') {
     p.ok = false
     ret ""
   }
@@ -386,24 +386,24 @@ func parseString(p: mod JsonParser) ret String {
 # Consume a JSON number (int or float). `\-?\d+(\.\d+)?([eE][+-]?\d+)?`.
 func parseNumber(p: mod JsonParser) ret Float {
   let start: Int = p.pos
-  if peek(p: p) is '-' {
+  if json.peek(p: p) is '-' {
     p.pos = p.pos + 1
   }
-  loop p.pos < p.source.length() and peek(p: p).isDigit() {
+  loop p.pos < p.source.length() and json.peek(p: p).isDigit() {
     p.pos = p.pos + 1
   }
-  if peek(p: p) is '.' {
+  if json.peek(p: p) is '.' {
     p.pos = p.pos + 1
-    loop p.pos < p.source.length() and peek(p: p).isDigit() {
+    loop p.pos < p.source.length() and json.peek(p: p).isDigit() {
       p.pos = p.pos + 1
     }
   }
-  if peek(p: p) is 'e' or peek(p: p) is 'E' {
+  if json.peek(p: p) is 'e' or json.peek(p: p) is 'E' {
     p.pos = p.pos + 1
-    if peek(p: p) is '+' or peek(p: p) is '-' {
+    if json.peek(p: p) is '+' or json.peek(p: p) is '-' {
       p.pos = p.pos + 1
     }
-    loop p.pos < p.source.length() and peek(p: p).isDigit() {
+    loop p.pos < p.source.length() and json.peek(p: p).isDigit() {
       p.pos = p.pos + 1
     }
   }
@@ -426,47 +426,47 @@ func parseValue(
   kids: mod List(Int)
   fields: mod List(JsonField)
 ) ret Int {
-  skipWhitespace(p)
+  json.skipWhitespace(p)
   if p.pos >= p.source.length() {
     p.ok = false
     ret -1
   }
-  let c: Char32 = peek(p: p)
+  let c: Char32 = json.peek(p: p)
 
   if c is '{' {
     p.pos = p.pos + 1
-    skipWhitespace(p)
+    json.skipWhitespace(p)
     # Collect this object's fields into a *local* list and bulk-append
     # to the shared `fields` pool only when the object closes. Without
     # this, a nested object's fields would be interleaved into the outer
     # object's range, and the start/len pair would no longer point at a
     # contiguous slice.
     let localFields: List(JsonField) = createList(JsonField, cap: 4)
-    if peek(p: p) is '}' {
+    if json.peek(p: p) is '}' {
       p.pos = p.pos + 1
     } else {
       loop true {
-        skipWhitespace(p)
-        let key: String = parseString(p)
+        json.skipWhitespace(p)
+        let key: String = json.parseString(p)
         if p.ok is false {
           ret -1
         }
-        skipWhitespace(p)
-        if not consume(p: p, c: ':') {
+        json.skipWhitespace(p)
+        if not json.consume(p: p, c: ':') {
           p.ok = false
           ret -1
         }
-        let valIdx: Int = parseValue(p, vals: vals, kids: kids, fields: fields)
+        let valIdx: Int = json.parseValue(p, vals: vals, kids: kids, fields: fields)
         if p.ok is false {
           ret -1
         }
         let f: JsonField = { key: key, valueIdx: valIdx }
         localFields.add(value: f)
-        skipWhitespace(p)
-        if consume(p: p, c: ',') {
+        json.skipWhitespace(p)
+        if json.consume(p: p, c: ',') {
           # Continue, parse next field.
         } else {
-          if consume(p: p, c: '}') {
+          if json.consume(p: p, c: '}') {
             # Exit loop by jumping out via a sentinel value of -2.
             # Rae has no `break`, so we use a flag and re-check below.
             p.pos = p.pos
@@ -495,7 +495,7 @@ func parseValue(
               rangeStart: firstField
               rangeLen: count
             }
-            ret pushValue(vals: vals, v: v)
+            ret json.pushValue(vals: vals, v: v)
           } else {
             p.ok = false
             ret -1
@@ -513,30 +513,30 @@ func parseValue(
       rangeStart: firstField
       rangeLen: 0
     }
-    ret pushValue(vals: vals, v: v)
+    ret json.pushValue(vals: vals, v: v)
   }
 
   if c is '[' {
     p.pos = p.pos + 1
-    skipWhitespace(p)
+    json.skipWhitespace(p)
     # Same trick as for objects — collect into a local list first so a
     # nested array's children don't interleave with the outer array's.
     let localKids: List(Int) = createList(cap: 4)
-    if peek(p: p) is ']' {
+    if json.peek(p: p) is ']' {
       p.pos = p.pos + 1
     } else {
       loop true {
-        skipWhitespace(p)
-        let elemIdx: Int = parseValue(p, vals: vals, kids: kids, fields: fields)
+        json.skipWhitespace(p)
+        let elemIdx: Int = json.parseValue(p, vals: vals, kids: kids, fields: fields)
         if p.ok is false {
           ret -1
         }
         localKids.add(value: elemIdx)
-        skipWhitespace(p)
-        if consume(p: p, c: ',') {
+        json.skipWhitespace(p)
+        if json.consume(p: p, c: ',') {
           # Continue, parse next element.
         } else {
-          if consume(p: p, c: ']') {
+          if json.consume(p: p, c: ']') {
             let firstChild: Int = kids.length
             let count: Int = localKids.length
             var i: Int = 0
@@ -553,7 +553,7 @@ func parseValue(
               rangeStart: firstChild
               rangeLen: count
             }
-            ret pushValue(vals: vals, v: v)
+            ret json.pushValue(vals: vals, v: v)
           } else {
             p.ok = false
             ret -1
@@ -570,47 +570,47 @@ func parseValue(
       rangeStart: firstChild
       rangeLen: 0
     }
-    ret pushValue(vals: vals, v: v)
+    ret json.pushValue(vals: vals, v: v)
   }
 
   if c is '"' {
-    let s: String = parseString(p)
+    let s: String = json.parseString(p)
     if p.ok is false {
       ret -1
     }
-    ret pushValue(vals: vals, v: jsonStringValue(v: s))
+    ret json.pushValue(vals: vals, v: json.jsonStringValue(v: s))
   }
 
   if c is 't' {
-    if consumeKeyword(p: p, kw: "true") {
-      ret pushValue(vals: vals, v: jsonBoolValue(v: true))
+    if json.consumeKeyword(p: p, kw: "true") {
+      ret json.pushValue(vals: vals, v: json.jsonBoolValue(v: true))
     }
     p.ok = false
     ret -1
   }
 
   if c is 'f' {
-    if consumeKeyword(p: p, kw: "false") {
-      ret pushValue(vals: vals, v: jsonBoolValue(v: false))
+    if json.consumeKeyword(p: p, kw: "false") {
+      ret json.pushValue(vals: vals, v: json.jsonBoolValue(v: false))
     }
     p.ok = false
     ret -1
   }
 
   if c is 'n' {
-    if consumeKeyword(p: p, kw: "null") {
-      ret pushValue(vals: vals, v: jsonNull())
+    if json.consumeKeyword(p: p, kw: "null") {
+      ret json.pushValue(vals: vals, v: json.jsonNull())
     }
     p.ok = false
     ret -1
   }
 
   if c is '-' or c.isDigit() {
-    let n: Float = parseNumber(p)
+    let n: Float = json.parseNumber(p)
     if p.ok is false {
       ret -1
     }
-    ret pushValue(vals: vals, v: jsonNumberValue(v: n))
+    ret json.pushValue(vals: vals, v: json.jsonNumberValue(v: n))
   }
 
   p.ok = false
@@ -630,13 +630,13 @@ func parseJson(source: view String) ret JsonDoc {
     errorPos: 0
   }
   let p: JsonParser = { source: source, pos: 0, ok: true }
-  let rootIdx: Int = parseValue(
+  let rootIdx: Int = json.parseValue(
     p
     vals: doc.values
     kids: doc.children
     fields: doc.fields
   )
-  skipWhitespace(p)
+  json.skipWhitespace(p)
   if p.ok is false {
     doc.ok = false
     doc.errorPos = p.pos
