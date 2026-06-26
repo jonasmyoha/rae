@@ -48,12 +48,14 @@ func faceIndex(token: view String) ret Int {
 # Load a Wavefront .obj as a triangle list (v + triangular f only). Converts the
 # mesh's Y-up to Rae Z-up via (x,y,z)->(x,z,y), then scales + offsets. Every
 # triangle gets the given material.
-func loadObjTriangles(path: view String, scale: view Float, ox: view Float, oy: view Float, oz: view Float, mat: view Material) ret List(Triangle) {
+func loadObjTriangles(path: view String, scale: view Float, ox: view Float, oy: view Float, oz: view Float, yaw180: view Bool, mat: view Material) ret List(Triangle) {
     let text: String = rae_ext_rae_sys_read_file(path: path)
     let lines: List(String) = text.split(sep: "\n")
     let vx: List(Float) = createList(Float, cap: 4096)
     let vy: List(Float) = createList(Float, cap: 4096)
     let vz: List(Float) = createList(Float, cap: 4096)
+    var flip: Float = 1.0
+    if yaw180 { flip = -1.0 }   # 180deg about the up axis: negate obj x + z
     var li: Int = 0
     loop li < lines.length {
         let line: String = rae_ext_rae_buf_get(buf: lines.data, index: li)
@@ -61,9 +63,9 @@ func loadObjTriangles(path: view String, scale: view Float, ox: view Float, oy: 
         if tok.length >= 4 {
             let t0: String = rae_ext_rae_buf_get(buf: tok.data, index: 0)
             if t0.equals(other: "v") {
-                let px: Float = rae_ext_rae_buf_get(buf: tok.data, index: 1).toFloat()
+                let px: Float = rae_ext_rae_buf_get(buf: tok.data, index: 1).toFloat() * flip
                 let py: Float = rae_ext_rae_buf_get(buf: tok.data, index: 2).toFloat()
-                let pz: Float = rae_ext_rae_buf_get(buf: tok.data, index: 3).toFloat()
+                let pz: Float = rae_ext_rae_buf_get(buf: tok.data, index: 3).toFloat() * flip
                 vx.add(value: px * scale + ox)
                 vy.add(value: pz * scale + oy)
                 vz.add(value: py * scale + oz)
@@ -95,11 +97,13 @@ func loadObjTriangles(path: view String, scale: view Float, ox: view Float, oy: 
     ret tris
 }
 
-# Boxes for "Scene One": the C++ generateCube — a unit cube on the ground.
+# Boxes for "Scene One": the C++ generateCube — a 1x1x1 cube centred on the
+# world origin (boxSize 0.5), so it rests on the ground (planet top at z=-0.5).
+# The C++ mesh had no defined material, so make it glossy + translucent (glass).
 func buildSceneOneBoxes() ret List(Box) {
     let b: List(Box) = createList(Box, cap: 1)
-    b.add(value: { lo: { x: -0.5, y: 0.4, z: 0.0 }, hi: { x: 0.5, y: 1.4, z: 1.0 },
-        material: { kind: 0, albedo: { x: 0.85, y: 0.45, z: 0.2 }, fuzz: 0.0, ior: 0.0 } })
+    b.add(value: { lo: { x: -0.5, y: -0.5, z: -0.5 }, hi: { x: 0.5, y: 0.5, z: 0.5 },
+        material: { kind: 2, albedo: { x: 1.0, y: 1.0, z: 1.0 }, fuzz: 0.0, ior: 1.5 } })
     ret b
 }
 
