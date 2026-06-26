@@ -228,12 +228,12 @@ type MsdfFont pub {
 # Read a Float field with a fallback. `jsonField` returns -1 when
 # absent so we test the index, not the value.
 func msdfFloatField(doc: view JsonDoc, obj: view JsonValue, key: view String, fallback: view Float) ret Float {
-  let idx: Int = jsonField(doc: doc, this: obj, key: key)
+  let idx: Int = json.jsonField(doc: doc, this: obj, key: key)
   if idx < 0 {
     ret fallback
   }
-  let v: JsonValue = jsonValueAt(doc: doc, idx: idx)
-  ret jsonFloat(this: v, fallback: fallback)
+  let v: JsonValue = json.jsonValueAt(doc: doc, idx: idx)
+  ret json.jsonFloat(this: v, fallback: fallback)
 }
 
 # Parse a sub-object like `planeBounds` / `atlasBounds`. Both have
@@ -249,11 +249,11 @@ func msdfReadBounds(
   outRight: mod Float
   outTop: mod Float
 ) ret Bool {
-  let subIdx: Int = jsonField(doc: doc, this: parent, key: subKey)
+  let subIdx: Int = json.jsonField(doc: doc, this: parent, key: subKey)
   if subIdx < 0 {
     ret false
   }
-  let sub: JsonValue = jsonValueAt(doc: doc, idx: subIdx)
+  let sub: JsonValue = json.jsonValueAt(doc: doc, idx: subIdx)
   outLeft = msdfFloatField(doc: doc, obj: sub, key: "left", fallback: 0.0)
   outBottom = msdfFloatField(doc: doc, obj: sub, key: "bottom", fallback: 0.0)
   outRight = msdfFloatField(doc: doc, obj: sub, key: "right", fallback: 0.0)
@@ -266,46 +266,46 @@ func msdfReadBounds(
 # generated side-by-side by `tools/gen-msdf.sh` in the host app.
 func loadMsdfFont(jsonPath: view String, atlasPath: view String) pub ret MsdfFont {
   let source: String = rae_ext_rae_sys_read_file(path: jsonPath)
-  let doc: JsonDoc = parseJson(source: source)
-  let root: JsonValue = jsonRoot(doc: doc)
+  let doc: JsonDoc = json.parseJson(source: source)
+  let root: JsonValue = json.jsonRoot(doc: doc)
 
-  let atlasIdx: Int = jsonField(doc: doc, this: root, key: "atlas")
-  let atlasJ: JsonValue = jsonValueAt(doc: doc, idx: atlasIdx)
+  let atlasIdx: Int = json.jsonField(doc: doc, this: root, key: "atlas")
+  let atlasJ: JsonValue = json.jsonValueAt(doc: doc, idx: atlasIdx)
   let atlasW: Float = msdfFloatField(doc: doc, obj: atlasJ, key: "width", fallback: 0.0)
   let atlasH: Float = msdfFloatField(doc: doc, obj: atlasJ, key: "height", fallback: 0.0)
   let pxRange: Float = msdfFloatField(doc: doc, obj: atlasJ, key: "distanceRange", fallback: 4.0)
   let fontSize: Float = msdfFloatField(doc: doc, obj: atlasJ, key: "size", fallback: 32.0)
   let yOriginKey: String = "yOrigin"
-  let yOriginIdx: Int = jsonField(doc: doc, this: atlasJ, key: yOriginKey)
+  let yOriginIdx: Int = json.jsonField(doc: doc, this: atlasJ, key: yOriginKey)
   var yOriginBottom: Bool = true
   if yOriginIdx >= 0 {
-    let yOriginV: JsonValue = jsonValueAt(doc: doc, idx: yOriginIdx)
+    let yOriginV: JsonValue = json.jsonValueAt(doc: doc, idx: yOriginIdx)
     let bottomKey: String = "bottom"
     let topKey: String = "top"
     let fallback: String = "bottom"
-    let yo: String = jsonString(this: yOriginV, fallback: fallback)
+    let yo: String = json.jsonString(this: yOriginV, fallback: fallback)
     if yo.equals(other: topKey) {
       yOriginBottom = false
     }
   }
 
-  let metricsIdx: Int = jsonField(doc: doc, this: root, key: "metrics")
-  let metricsJ: JsonValue = jsonValueAt(doc: doc, idx: metricsIdx)
+  let metricsIdx: Int = json.jsonField(doc: doc, this: root, key: "metrics")
+  let metricsJ: JsonValue = json.jsonValueAt(doc: doc, idx: metricsIdx)
   let emSize: Float = msdfFloatField(doc: doc, obj: metricsJ, key: "emSize", fallback: 1.0)
   let lineHeight: Float = msdfFloatField(doc: doc, obj: metricsJ, key: "lineHeight", fallback: 1.2)
   let ascender: Float = msdfFloatField(doc: doc, obj: metricsJ, key: "ascender", fallback: 0.9)
   let descender: Float = msdfFloatField(doc: doc, obj: metricsJ, key: "descender", fallback: 0.0 - 0.2)
 
-  let glyphsIdx: Int = jsonField(doc: doc, this: root, key: "glyphs")
-  let glyphsArr: JsonValue = jsonValueAt(doc: doc, idx: glyphsIdx)
-  let n: Int = jsonArrayLen(this: glyphsArr)
+  let glyphsIdx: Int = json.jsonField(doc: doc, this: root, key: "glyphs")
+  let glyphsArr: JsonValue = json.jsonValueAt(doc: doc, idx: glyphsIdx)
+  let n: Int = json.jsonArrayLen(this: glyphsArr)
   let glyphs: List(MsdfGlyph) = createList(MsdfGlyph, cap: n)
   var i: Int = 0
   loop i < n {
-    let entry: JsonValue = jsonArrayAt(doc: doc, this: glyphsArr, idx: i)
-    let unicodeIdx: Int = jsonField(doc: doc, this: entry, key: "unicode")
-    let unicodeV: JsonValue = jsonValueAt(doc: doc, idx: unicodeIdx)
-    let cp: Int = jsonInt(this: unicodeV, fallback: 0)
+    let entry: JsonValue = json.jsonArrayAt(doc: doc, this: glyphsArr, idx: i)
+    let unicodeIdx: Int = json.jsonField(doc: doc, this: entry, key: "unicode")
+    let unicodeV: JsonValue = json.jsonValueAt(doc: doc, idx: unicodeIdx)
+    let cp: Int = json.jsonInt(this: unicodeV, fallback: 0)
     let advance: Float = msdfFloatField(doc: doc, obj: entry, key: "advance", fallback: 0.0)
     let pl: Float = 0.0
     let pb: Float = 0.0

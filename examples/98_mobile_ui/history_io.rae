@@ -141,40 +141,40 @@ func restoreHistory(history: mod PlayHistory, path: view String) pub {
     log("[history] no file at {path} — empty history")
     ret
   }
-  let doc: JsonDoc = parseJson(source: source)
+  let doc: JsonDoc = json.parseJson(source: source)
   if doc.ok is false {
     log("[history] parse error in {path} at byte {doc.errorPos}")
     ret
   }
-  let root: JsonValue = jsonRoot(doc: doc)
+  let root: JsonValue = json.jsonRoot(doc: doc)
   let entriesKey: String = "entries"
-  let entriesIdx: Int = jsonField(doc: doc, this: root, key: entriesKey)
+  let entriesIdx: Int = json.jsonField(doc: doc, this: root, key: entriesKey)
   if entriesIdx < 0 {
     log("[history] root has no 'entries' array")
     ret
   }
-  let entriesVal: JsonValue = jsonValueAt(doc: doc, idx: entriesIdx)
-  let n: Int = jsonArrayLen(this: entriesVal)
+  let entriesVal: JsonValue = json.jsonValueAt(doc: doc, idx: entriesIdx)
+  let n: Int = json.jsonArrayLen(this: entriesVal)
   var i: Int = 0
   loop i < n {
-    let v: JsonValue = jsonArrayAt(doc: doc, this: entriesVal, idx: i)
+    let v: JsonValue = json.jsonArrayAt(doc: doc, this: entriesVal, idx: i)
     let empty: String = ""
-    let tnIdx: Int = jsonField(doc: doc, this: v, key: "trackName")
-    let anIdx: Int = jsonField(doc: doc, this: v, key: "artistName")
-    let albIdx: Int = jsonField(doc: doc, this: v, key: "albumName")
-    let stemIdx: Int = jsonField(doc: doc, this: v, key: "albumStem")
-    let urlIdx: Int = jsonField(doc: doc, this: v, key: "artworkUrl")
-    let texIdx: Int = jsonField(doc: doc, this: v, key: "textureKey")
-    let durIdx: Int = jsonField(doc: doc, this: v, key: "durationSec")
-    let atIdx: Int = jsonField(doc: doc, this: v, key: "playedAt")
-    let tn: String = jsonString(this: jsonValueAt(doc: doc, idx: tnIdx), fallback: empty)
-    let an: String = jsonString(this: jsonValueAt(doc: doc, idx: anIdx), fallback: empty)
-    let alb: String = jsonString(this: jsonValueAt(doc: doc, idx: albIdx), fallback: empty)
-    let stem: String = jsonString(this: jsonValueAt(doc: doc, idx: stemIdx), fallback: empty)
-    let url: String = jsonString(this: jsonValueAt(doc: doc, idx: urlIdx), fallback: empty)
-    let tex: String = jsonString(this: jsonValueAt(doc: doc, idx: texIdx), fallback: empty)
-    let dur: Float = jsonFloat(this: jsonValueAt(doc: doc, idx: durIdx), fallback: 0.0)
-    let at: Float = jsonFloat(this: jsonValueAt(doc: doc, idx: atIdx), fallback: 0.0)
+    let tnIdx: Int = json.jsonField(doc: doc, this: v, key: "trackName")
+    let anIdx: Int = json.jsonField(doc: doc, this: v, key: "artistName")
+    let albIdx: Int = json.jsonField(doc: doc, this: v, key: "albumName")
+    let stemIdx: Int = json.jsonField(doc: doc, this: v, key: "albumStem")
+    let urlIdx: Int = json.jsonField(doc: doc, this: v, key: "artworkUrl")
+    let texIdx: Int = json.jsonField(doc: doc, this: v, key: "textureKey")
+    let durIdx: Int = json.jsonField(doc: doc, this: v, key: "durationSec")
+    let atIdx: Int = json.jsonField(doc: doc, this: v, key: "playedAt")
+    let tn: String = json.jsonString(this: json.jsonValueAt(doc: doc, idx: tnIdx), fallback: empty)
+    let an: String = json.jsonString(this: json.jsonValueAt(doc: doc, idx: anIdx), fallback: empty)
+    let alb: String = json.jsonString(this: json.jsonValueAt(doc: doc, idx: albIdx), fallback: empty)
+    let stem: String = json.jsonString(this: json.jsonValueAt(doc: doc, idx: stemIdx), fallback: empty)
+    let url: String = json.jsonString(this: json.jsonValueAt(doc: doc, idx: urlIdx), fallback: empty)
+    let tex: String = json.jsonString(this: json.jsonValueAt(doc: doc, idx: texIdx), fallback: empty)
+    let dur: Float = json.jsonFloat(this: json.jsonValueAt(doc: doc, idx: durIdx), fallback: 0.0)
+    let at: Float = json.jsonFloat(this: json.jsonValueAt(doc: doc, idx: atIdx), fallback: 0.0)
     let entry: PlayHistoryEntry = {
       trackName: own tn
       artistName: own an

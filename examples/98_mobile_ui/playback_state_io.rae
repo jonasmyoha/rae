@@ -157,19 +157,19 @@ func restoreAppState(state: mod AppState, playback: mod PlaybackState, path: vie
     log("[state] no state file at {path} — using defaults")
     ret
   }
-  let doc: JsonDoc = parseJson(source: source)
+  let doc: JsonDoc = json.parseJson(source: source)
   if doc.ok is false {
     log("[state] parse error in {path} at byte {doc.errorPos}")
     ret
   }
-  let root: JsonValue = jsonRoot(doc: doc)
+  let root: JsonValue = json.jsonRoot(doc: doc)
 
   # Album stem — only restore if the album is still on disk.
   let stemKey: String = "currentAlbumStem"
-  let stemIdx: Int = jsonField(doc: doc, this: root, key: stemKey)
+  let stemIdx: Int = json.jsonField(doc: doc, this: root, key: stemKey)
   if stemIdx >= 0 {
     let empty: String = ""
-    let savedStem: String = jsonString(this: jsonValueAt(doc: doc, idx: stemIdx), fallback: empty)
+    let savedStem: String = json.jsonString(this: json.jsonValueAt(doc: doc, idx: stemIdx), fallback: empty)
     if savedStem.length() > 0 {
       let albumIdx: Int = findAlbumIndex(albums: state.albums, stem: savedStem)
       if albumIdx >= 0 {
@@ -182,9 +182,9 @@ func restoreAppState(state: mod AppState, playback: mod PlaybackState, path: vie
 
   # Track index — clamp to the active album's track count.
   let trackKey: String = "currentTrackIndex"
-  let trackIdx: Int = jsonField(doc: doc, this: root, key: trackKey)
+  let trackIdx: Int = json.jsonField(doc: doc, this: root, key: trackKey)
   if trackIdx >= 0 {
-    var savedTrack: Int = jsonInt(this: jsonValueAt(doc: doc, idx: trackIdx), fallback: 0)
+    var savedTrack: Int = json.jsonInt(this: json.jsonValueAt(doc: doc, idx: trackIdx), fallback: 0)
     let album: Album = activeAlbum(state: state)
     let n: Int = album.tracks.length
     if savedTrack < 0 {
@@ -198,9 +198,9 @@ func restoreAppState(state: mod AppState, playback: mod PlaybackState, path: vie
 
   # Playback position — stored as ms, restored to Float seconds.
   let elapsedKey: String = "elapsedMs"
-  let elapsedIdx: Int = jsonField(doc: doc, this: root, key: elapsedKey)
+  let elapsedIdx: Int = json.jsonField(doc: doc, this: root, key: elapsedKey)
   if elapsedIdx >= 0 {
-    var ms: Int = jsonInt(this: jsonValueAt(doc: doc, idx: elapsedIdx), fallback: 0)
+    var ms: Int = json.jsonInt(this: json.jsonValueAt(doc: doc, idx: elapsedIdx), fallback: 0)
     if ms < 0 {
       ms = 0
     }
@@ -209,9 +209,9 @@ func restoreAppState(state: mod AppState, playback: mod PlaybackState, path: vie
 
   # Play / pause flag.
   let playingKey: String = "isPlaying"
-  let playingFieldIdx: Int = jsonField(doc: doc, this: root, key: playingKey)
+  let playingFieldIdx: Int = json.jsonField(doc: doc, this: root, key: playingKey)
   if playingFieldIdx >= 0 {
-    playback.isPlaying = jsonBool(this: jsonValueAt(doc: doc, idx: playingFieldIdx), fallback: false)
+    playback.isPlaying = json.jsonBool(this: json.jsonValueAt(doc: doc, idx: playingFieldIdx), fallback: false)
   }
 
   # Seed the "actually playing" pair from the restored snapshot so the
@@ -233,19 +233,19 @@ func restoreAppState(state: mod AppState, playback: mod PlaybackState, path: vie
   # restore — landing the user on a sub-page like NowPlaying with
   # an empty back-stack underneath caused real navigation breakage.
   let tabKey: String = "tab"
-  let tabFieldIdx: Int = jsonField(doc: doc, this: root, key: tabKey)
+  let tabFieldIdx: Int = json.jsonField(doc: doc, this: root, key: tabKey)
   if tabFieldIdx >= 0 {
-    let tabOrd: Int = jsonInt(this: jsonValueAt(doc: doc, idx: tabFieldIdx), fallback: 4)
+    let tabOrd: Int = json.jsonInt(this: json.jsonValueAt(doc: doc, idx: tabFieldIdx), fallback: 4)
     state.tab = intToScreen(n: tabOrd)
   }
   let winXKey: String = "winX"
-  let winXIdx: Int = jsonField(doc: doc, this: root, key: winXKey)
+  let winXIdx: Int = json.jsonField(doc: doc, this: root, key: winXKey)
   let winYKey: String = "winY"
-  let winYIdx: Int = jsonField(doc: doc, this: root, key: winYKey)
+  let winYIdx: Int = json.jsonField(doc: doc, this: root, key: winYKey)
   if winXIdx >= 0 {
     if winYIdx >= 0 {
-      let savedX: Int = jsonInt(this: jsonValueAt(doc: doc, idx: winXIdx), fallback: 50)
-      let savedY: Int = jsonInt(this: jsonValueAt(doc: doc, idx: winYIdx), fallback: 50)
+      let savedX: Int = json.jsonInt(this: json.jsonValueAt(doc: doc, idx: winXIdx), fallback: 50)
+      let savedY: Int = json.jsonInt(this: json.jsonValueAt(doc: doc, idx: winYIdx), fallback: 50)
       # macOS will silently clamp positions that put the window
       # off-screen, so we don't bother validating the bounds here.
       setWindowPosition(x: savedX, y: savedY)

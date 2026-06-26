@@ -116,26 +116,26 @@ func loadLibraryFromJson(albums: view List(Album), path: view String) pub ret Li
     log("[library] no file at {path} — seeding from catalog")
     ret librarySeedFromCatalog(albums: albums)
   }
-  let doc: JsonDoc = parseJson(source: source)
+  let doc: JsonDoc = json.parseJson(source: source)
   if doc.ok is false {
     log("[library] parse error in {path} at byte {doc.errorPos} — seeding from catalog")
     ret librarySeedFromCatalog(albums: albums)
   }
-  let root: JsonValue = jsonRoot(doc: doc)
+  let root: JsonValue = json.jsonRoot(doc: doc)
   let stemsKey: String = "stems"
-  let stemsIdx: Int = jsonField(doc: doc, this: root, key: stemsKey)
+  let stemsIdx: Int = json.jsonField(doc: doc, this: root, key: stemsKey)
   if stemsIdx < 0 {
     log("[library] root has no 'stems' array — seeding from catalog")
     ret librarySeedFromCatalog(albums: albums)
   }
-  let stemsVal: JsonValue = jsonValueAt(doc: doc, idx: stemsIdx)
-  let n: Int = jsonArrayLen(this: stemsVal)
+  let stemsVal: JsonValue = json.jsonValueAt(doc: doc, idx: stemsIdx)
+  let n: Int = json.jsonArrayLen(this: stemsVal)
   let out: List(String) = createList(String, cap: n)
   var i: Int = 0
   loop i < n {
-    let v: JsonValue = jsonArrayAt(doc: doc, this: stemsVal, idx: i)
+    let v: JsonValue = json.jsonArrayAt(doc: doc, this: stemsVal, idx: i)
     let empty: String = ""
-    let stem: String = jsonString(this: v, fallback: empty)
+    let stem: String = json.jsonString(this: v, fallback: empty)
     # Drop stems that aren't in the current catalog so a stale
     # library doesn't add ghost rows the renderer can't paint.
     if findAlbumIndex(albums: albums, stem: stem) >= 0 {
