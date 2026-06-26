@@ -158,11 +158,12 @@ func loadObjTriangles(path: view String, scale: view Float, ox: view Float, oy: 
 
 # Boxes for "Scene One": the C++ generateCube — a 1x1x1 cube centred on the
 # world origin (boxSize 0.5), resting on the ground (planet top at z=-0.5).
-# Material = the C++ BunnyMaterial default (Color 0.7,0.3,0.1) — diffuse.
+# Material = the red diffuse "front ball" (0.8,0.3,0.3) — matte, reads dark
+# under the emitter lighting like the C++ original.
 func buildSceneOneBoxes() ret List(Box) {
     let b: List(Box) = createList(Box, cap: 1)
     b.add(value: { lo: { x: -0.5, y: -0.5, z: -0.5 }, hi: { x: 0.5, y: 0.5, z: 0.5 },
-        material: { kind: 0, albedo: { x: 0.7, y: 0.3, z: 0.1 }, fuzz: 0.0, ior: 0.0 } })
+        material: { kind: 0, albedo: { x: 0.8, y: 0.3, z: 0.3 }, fuzz: 0.0, ior: 0.0 } })
     ret b
 }
 
