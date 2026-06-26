@@ -1411,6 +1411,52 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                         found = true;
                     }
                 }
+                if (!found) {
+                    // General UFCS: value.func(args) -> func(value, args) for ANY
+                    // visible function whose first parameter type accepts the
+                    // receiver — not just `this`-named methods. This lets a
+                    // namespaced function be called UFCS-style (angle.sin(),
+                    // path.exists()). If matches come from more than one module it
+                    // is ambiguous -> error; use the qualified form to pick.
+                    // (docs/module-namespacing.md)
+                    TypeInfo* urec = expr->as.method_call.object->resolved_type;
+                    if (urec && urec->kind == TYPE_REF) urec = urec->as.ref.base;
+                    size_t want = 1;
+                    for (AstCallArg* a = expr->as.method_call.args; a; a = a->next) want++;
+                    AstDecl* ufcs_match = NULL;
+                    const char* ufcs_mod = NULL;
+                    bool ufcs_ambiguous = false;
+                    for (AstDecl* dd = module->decls; dd; dd = dd->next) {
+                        if (dd->kind != AST_DECL_FUNC) continue;
+                        AstFuncDecl* fd = &dd->as.func_decl;
+                        if (fd->generic_params || fd->specialization_args || !fd->params) continue;
+                        if (!str_eq(fd->name, expr->as.method_call.method_name)) continue;
+                        size_t pc = 0; for (AstParam* p = fd->params; p; p = p->next) pc++;
+                        if (pc != want) continue;
+                        TypeInfo* pt = sema_resolve_type_internal(ctx, module, symbols, fd->params->type);
+                        if (pt && pt->kind == TYPE_REF) pt = pt->as.ref.base;
+                        bool ok = !urec || !pt || pt->kind == TYPE_ANY || urec->kind == TYPE_ANY
+                                  || pt == urec
+                                  || (pt->kind == urec->kind && (pt->kind != TYPE_STRUCT || str_eq(pt->name, urec->name)));
+                        if (!ok) continue;
+                        if (!ufcs_match) { ufcs_match = dd; ufcs_mod = dd->module_name; }
+                        else if (ufcs_match != dd) {
+                            bool same_mod = (ufcs_mod && dd->module_name && strcmp(ufcs_mod, dd->module_name) == 0) || (!ufcs_mod && !dd->module_name);
+                            if (!same_mod) ufcs_ambiguous = true;
+                        }
+                    }
+                    if (ufcs_ambiguous) {
+                        char buf[256];
+                        snprintf(buf, sizeof(buf), "ambiguous UFCS call '.%.*s(...)' matches functions in multiple modules; use the qualified form (module.%.*s(...))",
+                                 (int)expr->as.method_call.method_name.len, expr->as.method_call.method_name.data,
+                                 (int)expr->as.method_call.method_name.len, expr->as.method_call.method_name.data);
+                        diag_error(module->file_path, (int)expr->line, (int)expr->column, buf);
+                    } else if (ufcs_match) {
+                        expr->decl_link = ufcs_match;
+                        if (ufcs_match->as.func_decl.returns) expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, ufcs_match->as.func_decl.returns->type);
+                        found = true;
+                    }
+                }
                 if (found && expr->decl_link) {
                     AstParam* p = expr->decl_link->as.func_decl.params; if (p) p = p->next;
                     AstCallArg* a = expr->as.method_call.args;
