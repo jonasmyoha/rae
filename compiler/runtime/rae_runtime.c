@@ -640,7 +640,7 @@ void rae_ext_rae_sleep(int64_t ms) {
   }
 }
 
-rae_String rae_ext_formatTimestamp(int64_t epoch_ms) {
+rae_String rae_ext_time_formatTimestamp(int64_t epoch_ms) {
   time_t secs = (time_t)(epoch_ms / 1000);
   struct tm tm_buf;
   struct tm* tm_p = gmtime_r(&secs, &tm_buf);
@@ -656,7 +656,7 @@ rae_String rae_ext_formatTimestamp(int64_t epoch_ms) {
   return (rae_String){data, (int64_t)n, (int64_t)n + 1, 1};
 }
 
-rae_String rae_ext_formatDate(int64_t epoch_ms) {
+rae_String rae_ext_time_formatDate(int64_t epoch_ms) {
   time_t secs = (time_t)(epoch_ms / 1000);
   struct tm tm_buf;
   struct tm* tm_p = gmtime_r(&secs, &tm_buf);
@@ -2839,7 +2839,7 @@ static int rae_png_save_rgba32(const char* path, const unsigned char* rgba, int 
 
 /* Rae Image API (lib/image.rae): encode a packed-0xRRGGBB Int framebuffer
  * (width*height entries, row-major top-down) to a PNG file. */
-rae_Bool rae_ext_imageSavePng(rae_String path, const int64_t* pixels, int64_t w, int64_t h) {
+rae_Bool rae_ext_image_savePng(rae_String path, const int64_t* pixels, int64_t w, int64_t h) {
     if (!path.data || !pixels || w <= 0 || h <= 0) return false;
     size_t count = (size_t)w * (size_t)h;
     unsigned char* rgba = (unsigned char*)malloc(count * 4);
@@ -2910,7 +2910,7 @@ static SDL_Scancode rae_sdl_scancode(int64_t key) {
     }
 }
 
-void rae_ext_sdlInitWindow(int64_t width, int64_t height, rae_String title) {
+void rae_ext_sdl3_initWindow(int64_t width, int64_t height, rae_String title) {
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         fprintf(stderr, "[sdl] init failed: %s\n", SDL_GetError());
         return;
@@ -2929,7 +2929,7 @@ void rae_ext_sdlInitWindow(int64_t width, int64_t height, rae_String title) {
     if (hm) g_sdl_headless_ms = (int64_t)atoll(hm);
 }
 
-void rae_ext_sdlSetTargetFPS(int64_t fps) {
+void rae_ext_sdl3_setTargetFPS(int64_t fps) {
     g_sdl_target_fps = fps > 0 ? fps : 0;
 }
 
@@ -2939,7 +2939,7 @@ void rae_ext_sdlSetTargetFPS(int64_t fps) {
  *    state, else a key/button held at focus-out would stick forever;
  *  - while any mouse button is held we SDL_CaptureMouse so a drag that releases
  *    OUTSIDE the window still delivers its button-up (the stuck-drag bug). */
-rae_Bool rae_ext_sdlShouldClose(void) {
+rae_Bool rae_ext_sdl3_shouldClose(void) {
     memset(g_sdl_pressed, 0, sizeof(g_sdl_pressed));
     SDL_Event ev;
     rae_Bool quit = false;
@@ -2981,37 +2981,37 @@ rae_Bool rae_ext_sdlShouldClose(void) {
     return false;
 }
 
-int64_t rae_ext_sdlGetMouseX(void) {
+int64_t rae_ext_sdl3_getMouseX(void) {
     float x = 0, y = 0; SDL_GetMouseState(&x, &y); return (int64_t)x;
 }
-int64_t rae_ext_sdlGetMouseY(void) {
+int64_t rae_ext_sdl3_getMouseY(void) {
     float x = 0, y = 0; SDL_GetMouseState(&x, &y); return (int64_t)y;
 }
 /* Current renderer output size in pixels — tracks window resizes (the window
  * is created SDL_WINDOW_RESIZABLE). Apps poll this to re-render at the new size. */
-int64_t rae_ext_sdlWindowWidth(void) {
+int64_t rae_ext_sdl3_windowWidth(void) {
     int w = g_sdl_w, h = 0; if (g_sdl_ren) SDL_GetRenderOutputSize(g_sdl_ren, &w, &h); return (int64_t)w;
 }
-int64_t rae_ext_sdlWindowHeight(void) {
+int64_t rae_ext_sdl3_windowHeight(void) {
     int w = 0, h = g_sdl_h; if (g_sdl_ren) SDL_GetRenderOutputSize(g_sdl_ren, &w, &h); return (int64_t)h;
 }
-rae_Bool rae_ext_sdlIsMouseButtonDown(int64_t button) {
+rae_Bool rae_ext_sdl3_isMouseButtonDown(int64_t button) {
     /* raylib button (0=L,1=R,2=M) -> SDL button index (1=L,2=M,3=R). */
     int sdlb = button == 1 ? SDL_BUTTON_RIGHT : (button == 2 ? SDL_BUTTON_MIDDLE : SDL_BUTTON_LEFT);
     return sdlb < 8 && g_sdl_mouse[sdlb] != 0;
 }
-rae_Bool rae_ext_sdlIsKeyDown(int64_t key) {
+rae_Bool rae_ext_sdl3_isKeyDown(int64_t key) {
     SDL_Scancode sc = rae_sdl_scancode(key);
     if (sc == SDL_SCANCODE_UNKNOWN || sc >= SDL_SCANCODE_COUNT) return false;
     return g_sdl_keydown[sc] != 0;
 }
-rae_Bool rae_ext_sdlIsKeyPressed(int64_t key) {
+rae_Bool rae_ext_sdl3_isKeyPressed(int64_t key) {
     SDL_Scancode sc = rae_sdl_scancode(key);
     if (sc == SDL_SCANCODE_UNKNOWN || sc >= SDL_SCANCODE_COUNT) return false;
     return g_sdl_pressed[sc] != 0;
 }
 
-void rae_ext_sdlUpdatePixels(const int64_t* pixels, int64_t w, int64_t h) {
+void rae_ext_sdl3_updatePixels(const int64_t* pixels, int64_t w, int64_t h) {
     if (!pixels || w <= 0 || h <= 0 || !g_sdl_ren) return;
     int64_t count = w * h;
     /* (Re)create the texture when the framebuffer size changes. */
@@ -3038,7 +3038,7 @@ void rae_ext_sdlUpdatePixels(const int64_t* pixels, int64_t w, int64_t h) {
     SDL_UpdateTexture(g_sdl_tex, NULL, g_sdl_scratch, (int)w * 4);
 }
 
-void rae_ext_sdlPresent(void) {
+void rae_ext_sdl3_present(void) {
     if (!g_sdl_ren) return;
     SDL_SetRenderDrawColor(g_sdl_ren, 0, 0, 0, 255);
     SDL_RenderClear(g_sdl_ren);
@@ -3074,11 +3074,11 @@ void rae_ext_sdlPresent(void) {
     }
 }
 
-void rae_ext_sdlSetTitle(rae_String title) {
+void rae_ext_sdl3_setTitle(rae_String title) {
     if (g_sdl_win && title.data) SDL_SetWindowTitle(g_sdl_win, (const char*)title.data);
 }
 
-void rae_ext_sdlCloseWindow(void) {
+void rae_ext_sdl3_closeWindow(void) {
     /* Headless snapshot: dump the last uploaded frame as a BMP (reliable —
      * straight from our pixel buffer, not a GPU read-back). */
     const char* shot = getenv("RAE_SDL_SCREENSHOT");
@@ -3106,7 +3106,7 @@ static int g_sdf_atlas_w[RAE_SDF_MAX_ATLAS];
 static int g_sdf_atlas_h[RAE_SDF_MAX_ATLAS];
 static int g_sdf_atlas_n = 0;
 
-int64_t rae_ext_sdfLoadAtlas(rae_String path, int64_t w, int64_t h) {
+int64_t rae_ext_sdf_text_loadAtlas(rae_String path, int64_t w, int64_t h) {
     if (!path.data || w <= 0 || h <= 0 || g_sdf_atlas_n >= RAE_SDF_MAX_ATLAS) return 0;
     FILE* f = fopen((const char*)path.data, "rb");
     if (!f) { fprintf(stderr, "[sdf] cannot open %s\n", (const char*)path.data); return 0; }
@@ -3126,7 +3126,7 @@ static float rae_sdf_median(float a, float b, float c) {
 
 /* sx0..sy1: dest rect in framebuffer pixels (sy0 top, sy1 bottom). au0..av1:
  * source rect in atlas pixels, top-left origin. */
-void rae_ext_sdfBlitGlyph(int64_t* fb, int64_t fbW, int64_t fbH, int64_t atlas,
+void rae_ext_sdf_text_blitGlyph(int64_t* fb, int64_t fbW, int64_t fbH, int64_t atlas,
                           double sx0, double sy0, double sx1, double sy1,
                           double au0, double av0, double au1, double av1,
                           double screenPxRange, int64_t rgb) {
@@ -3230,7 +3230,7 @@ static int rae_wgpu_init(void) {
 
 /* scene: sceneLen f64 (camera 19 + spheres*10) -> narrowed to f32 for the GPU.
  * fb: width*height int64 written as packed 0xRRGGBB. wgsl: shader source. */
-void rae_ext_webgpuRaytrace(const double* scene, int64_t sceneLen, int64_t* fb,
+void rae_ext_webgpu_raytrace(const double* scene, int64_t sceneLen, int64_t* fb,
                             int64_t width, int64_t height, int64_t samples,
                             int64_t maxDepth, rae_String wgsl) {
     if (!fb || width <= 0 || height <= 0) return;
@@ -3336,7 +3336,7 @@ static int rae_gpu_add_buf(WGPUBuffer b, size_t size) {
     return ++g_gpu_buf_n;  /* 1-based handle */
 }
 
-int64_t rae_ext_gpuStorageF32(const double* data, int64_t count) {
+int64_t rae_ext_gpu_storageF32(const double* data, int64_t count) {
     if (!rae_wgpu_init() || count <= 0) return 0;
     size_t bytes = (size_t)count * 4;
     float* tmp = (float*)malloc(bytes);
@@ -3349,7 +3349,7 @@ int64_t rae_ext_gpuStorageF32(const double* data, int64_t count) {
     free(tmp);
     return rae_gpu_add_buf(b, bytes);
 }
-int64_t rae_ext_gpuUniformU32(const int64_t* data, int64_t count) {
+int64_t rae_ext_gpu_uniformU32(const int64_t* data, int64_t count) {
     if (!rae_wgpu_init() || count <= 0) return 0;
     size_t bytes = (size_t)count * 4;
     uint32_t* tmp = (uint32_t*)malloc(bytes);
@@ -3370,10 +3370,10 @@ static int64_t rae_gpu_alloc(int64_t count) {
     WGPUBuffer b = wgpuDeviceCreateBuffer(g_wgpu_dev, &bd);
     return rae_gpu_add_buf(b, bytes);
 }
-int64_t rae_ext_gpuAllocF32(int64_t count) { return rae_gpu_alloc(count); }
-int64_t rae_ext_gpuAllocU32(int64_t count) { return rae_gpu_alloc(count); }
+int64_t rae_ext_gpu_allocF32(int64_t count) { return rae_gpu_alloc(count); }
+int64_t rae_ext_gpu_allocU32(int64_t count) { return rae_gpu_alloc(count); }
 
-void rae_ext_gpuWriteF32(int64_t buf, const double* data, int64_t count) {
+void rae_ext_gpu_writeF32(int64_t buf, const double* data, int64_t count) {
     if (!g_wgpu_queue || buf < 1 || buf > g_gpu_buf_n || count <= 0) return;
     size_t bytes = (size_t)count * 4;
     float* tmp = (float*)malloc(bytes);
@@ -3382,7 +3382,7 @@ void rae_ext_gpuWriteF32(int64_t buf, const double* data, int64_t count) {
     wgpuQueueWriteBuffer(g_wgpu_queue, g_gpu_buf[buf - 1], 0, tmp, bytes);
     free(tmp);
 }
-void rae_ext_gpuWriteU32(int64_t buf, const int64_t* data, int64_t count) {
+void rae_ext_gpu_writeU32(int64_t buf, const int64_t* data, int64_t count) {
     if (!g_wgpu_queue || buf < 1 || buf > g_gpu_buf_n || count <= 0) return;
     size_t bytes = (size_t)count * 4;
     uint32_t* tmp = (uint32_t*)malloc(bytes);
@@ -3392,7 +3392,7 @@ void rae_ext_gpuWriteU32(int64_t buf, const int64_t* data, int64_t count) {
     free(tmp);
 }
 
-int64_t rae_ext_gpuKernel(rae_String wgsl, rae_String entry) {
+int64_t rae_ext_gpu_kernel(rae_String wgsl, rae_String entry) {
     if (!rae_wgpu_init() || g_gpu_pipe_n >= RAE_GPU_MAX_PIPE) return 0;
     WGPUShaderSourceWGSL src; memset(&src, 0, sizeof(src));
     src.chain.sType = WGPUSType_ShaderSourceWGSL;
@@ -3410,7 +3410,7 @@ int64_t rae_ext_gpuKernel(rae_String wgsl, rae_String entry) {
     return ++g_gpu_pipe_n;  /* 1-based */
 }
 
-void rae_ext_gpuRun(int64_t kernel, const int64_t* bufs, int64_t bufCount,
+void rae_ext_gpu_run(int64_t kernel, const int64_t* bufs, int64_t bufCount,
                     int64_t gx, int64_t gy, int64_t gz) {
     if (!g_wgpu_dev || kernel < 1 || kernel > g_gpu_pipe_n || bufCount < 0 || bufCount > 16) return;
     WGPUComputePipeline pipe = g_gpu_pipe[kernel - 1];
@@ -3460,21 +3460,21 @@ static const void* rae_gpu_readback(int64_t buf, size_t bytes, WGPUBuffer* stagi
     *staging_out = staging;
     return wgpuBufferGetConstMappedRange(staging, 0, bytes);
 }
-void rae_ext_gpuDownloadF32(int64_t buf, double* out, int64_t count) {
+void rae_ext_gpu_downloadF32(int64_t buf, double* out, int64_t count) {
     if (!out || count <= 0) return;
     WGPUBuffer staging = NULL;
     const float* p = (const float*)rae_gpu_readback(buf, (size_t)count * 4, &staging);
     if (p) for (int64_t i = 0; i < count; i++) out[i] = (double)p[i];
     if (staging) { wgpuBufferUnmap(staging); wgpuBufferRelease(staging); }
 }
-void rae_ext_gpuDownloadU32(int64_t buf, int64_t* out, int64_t count) {
+void rae_ext_gpu_downloadU32(int64_t buf, int64_t* out, int64_t count) {
     if (!out || count <= 0) return;
     WGPUBuffer staging = NULL;
     const uint32_t* p = (const uint32_t*)rae_gpu_readback(buf, (size_t)count * 4, &staging);
     if (p) for (int64_t i = 0; i < count; i++) out[i] = (int64_t)p[i];
     if (staging) { wgpuBufferUnmap(staging); wgpuBufferRelease(staging); }
 }
-void rae_ext_gpuReset(void) {
+void rae_ext_gpu_reset(void) {
     for (int i = 0; i < g_gpu_buf_n; i++) if (g_gpu_buf[i]) wgpuBufferRelease(g_gpu_buf[i]);
     for (int i = 0; i < g_gpu_pipe_n; i++) if (g_gpu_pipe[i]) wgpuComputePipelineRelease(g_gpu_pipe[i]);
     g_gpu_buf_n = 0; g_gpu_pipe_n = 0;

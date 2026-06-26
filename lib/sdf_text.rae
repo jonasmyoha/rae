@@ -12,8 +12,8 @@ import json
 
 func rae_ext_rae_sys_read_file(path: String) extern ret String
 # Implemented in the RAE_HAS_SDL3 block of compiler/runtime/rae_runtime.c.
-func sdfLoadAtlas(path: view String, w: view Int, h: view Int) extern ret Int
-func sdfBlitGlyph(fb: mod Buffer(Int), fbW: view Int, fbH: view Int, atlas: view Int,
+func loadAtlas(path: view String, w: view Int, h: view Int) extern ret Int
+func blitGlyph(fb: mod Buffer(Int), fbW: view Int, fbH: view Int, atlas: view Int,
                   sx0: view Float, sy0: view Float, sx1: view Float, sy1: view Float,
                   au0: view Float, av0: view Float, au1: view Float, av1: view Float,
                   screenPxRange: view Float, rgb: view Int) extern
@@ -105,7 +105,7 @@ func loadSdfFont(jsonPath: view String, rawAtlasPath: view String) ret SdfFont {
         i = i + 1
     }
 
-    let atlas: Int = sdfLoadAtlas(path: rawAtlasPath, w: atlasW.toInt(), h: atlasH.toInt())
+    let atlas: Int = sdf_text.loadAtlas(path: rawAtlasPath, w: atlasW.toInt(), h: atlasH.toInt())
     ret SdfFont {
         atlas: atlas, atlasWidth: atlasW, atlasHeight: atlasH,
         pxRange: pxRange, emSize: emSize, lineHeight: lineHeight, ascender: ascender,
@@ -170,7 +170,7 @@ func sdfDrawText(fb: mod Buffer(Int), fbW: view Int, fbH: view Int, font: view S
                 var spr: Float = 1.0
                 if atlasGlyphH > 0.0 { spr = font.pxRange * (sy1 - sy0) / atlasGlyphH }
                 if spr < 1.0 { spr = 1.0 }
-                sdfBlitGlyph(fb: fb, fbW: fbW, fbH: fbH, atlas: font.atlas,
+                sdf_text.blitGlyph(fb: fb, fbW: fbW, fbH: fbH, atlas: font.atlas,
                              sx0: sx0, sy0: sy0, sx1: sx1, sy1: sy1,
                              au0: au0, av0: av0, au1: au1, av1: av1, screenPxRange: spr, rgb: rgb)
             }

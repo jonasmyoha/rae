@@ -59,67 +59,67 @@ func main() {
         i = i + 1
     }
 
-    sdlInitWindow(width: width, height: height, title: "Rae raytracer — step 4 (interactive, progressive)")
-    sdlSetTargetFPS(fps: 60)
+    sdl3.initWindow(width: width, height: height, title: "Rae raytracer — step 4 (interactive, progressive)")
+    sdl3.setTargetFPS(fps: 60)
 
     var sampleCount: Int = 0
-    var prevMouseX: Int = sdlGetMouseX()
-    var prevMouseY: Int = sdlGetMouseY()
+    var prevMouseX: Int = sdl3.getMouseX()
+    var prevMouseY: Int = sdl3.getMouseY()
 
-    loop not sdlShouldClose() {
-        if sdlIsKeyPressed(key: 291) { let s: Bool = imageSavePng(path: "rae_render.png", pixels: fb.data, width: width, height: height) }
+    loop not sdl3.shouldClose() {
+        if sdl3.isKeyPressed(key: 291) { let s: Bool = image.savePng(path: "rae_render.png", pixels: fb.data, width: width, height: height) }
 
         var moved: Bool = false
 
         # keyboard movement
-        if sdlIsKeyDown(key: 87) {
+        if sdl3.isKeyDown(key: 87) {
             camPos = vadd(a: camPos, b: vscale(a: fwd, s: moveStep))
             moved = true
         }
-        if sdlIsKeyDown(key: 83) {
+        if sdl3.isKeyDown(key: 83) {
             camPos = vsub(a: camPos, b: vscale(a: fwd, s: moveStep))
             moved = true
         }
         let rgt: Vec3 = vnorm(a: vcross(a: fwd, b: worldUp))
-        if sdlIsKeyDown(key: 68) {
+        if sdl3.isKeyDown(key: 68) {
             camPos = vadd(a: camPos, b: vscale(a: rgt, s: moveStep))
             moved = true
         }
-        if sdlIsKeyDown(key: 65) {
+        if sdl3.isKeyDown(key: 65) {
             camPos = vsub(a: camPos, b: vscale(a: rgt, s: moveStep))
             moved = true
         }
-        if sdlIsKeyDown(key: 69) {
+        if sdl3.isKeyDown(key: 69) {
             camPos = vadd(a: camPos, b: vscale(a: worldUp, s: moveStep))
             moved = true
         }
-        if sdlIsKeyDown(key: 81) {
+        if sdl3.isKeyDown(key: 81) {
             camPos = vsub(a: camPos, b: vscale(a: worldUp, s: moveStep))
             moved = true
         }
 
         # arrow keys: look
-        if sdlIsKeyDown(key: 262) {
+        if sdl3.isKeyDown(key: 262) {
             yaw = yaw - rotStep
             moved = true
         }
-        if sdlIsKeyDown(key: 263) {
+        if sdl3.isKeyDown(key: 263) {
             yaw = yaw + rotStep
             moved = true
         }
-        if sdlIsKeyDown(key: 265) {
+        if sdl3.isKeyDown(key: 265) {
             pitch = pitch + rotStep
             moved = true
         }
-        if sdlIsKeyDown(key: 264) {
+        if sdl3.isKeyDown(key: 264) {
             pitch = pitch - rotStep
             moved = true
         }
 
         # mouse drag (left button) to look
-        let mx: Int = sdlGetMouseX()
-        let my: Int = sdlGetMouseY()
-        if sdlIsMouseButtonDown(button: 0) {
+        let mx: Int = sdl3.getMouseX()
+        let my: Int = sdl3.getMouseY()
+        if sdl3.isMouseButtonDown(button: 0) {
             let dx: Int = mx - prevMouseX
             let dy: Int = my - prevMouseY
             if dx > 0 or dx < 0 {
@@ -175,9 +175,9 @@ func main() {
         if sampleCount > 0 {
             buildDisplay(fb: fb, accum: accum, pixels: width * height, sampleCount: sampleCount)
         }
-        sdlUpdatePixels(pixels: fb.data, w: width, h: height)
-        sdlPresent()
-        sdlSetTitle(title: "Rae step 4 (SDL3) | WASD/E/Q move, arrows/drag look | {sampleCount} spp")
+        sdl3.updatePixels(pixels: fb.data, w: width, h: height)
+        sdl3.present()
+        sdl3.setTitle(title: "Rae step 4 (SDL3) | WASD/E/Q move, arrows/drag look | {sampleCount} spp")
     }
-    sdlCloseWindow()
+    sdl3.closeWindow()
 }
