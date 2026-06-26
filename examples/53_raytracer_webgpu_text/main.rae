@@ -19,10 +19,34 @@ import camera
 
 type GpuRT {
     sceneBuf: Int
+    boxBuf: Int
     accumBuf: Int
     outBuf: Int
     paramsBuf: Int
     kernel: Int
+}
+
+# Pack a box list into f32 (lo3 hi3 albedo3 kind fuzz ior = 12 each). Emits a
+# dummy box when empty so the storage binding is never zero-size (boxCount=0
+# means the kernel never reads it).
+func boxFloats(boxes: view List(Box)) ret List(Float) {
+    let f: List(Float) = createList(Float, cap: 16)
+    var i: Int = 0
+    loop i < boxes.length {
+        let bx: Box = rae_ext_rae_buf_get(buf: boxes.data, index: i)
+        f.add(value: bx.lo.x)  f.add(value: bx.lo.y)  f.add(value: bx.lo.z)
+        f.add(value: bx.hi.x)  f.add(value: bx.hi.y)  f.add(value: bx.hi.z)
+        f.add(value: bx.material.albedo.x)  f.add(value: bx.material.albedo.y)  f.add(value: bx.material.albedo.z)
+        f.add(value: bx.material.kind.toFloat())
+        f.add(value: bx.material.fuzz)
+        f.add(value: bx.material.ior)
+        i = i + 1
+    }
+    if boxes.length is 0 {
+        var k: Int = 0
+        loop k < 12 { f.add(value: 0.0)  k = k + 1 }
+    }
+    ret f
 }
 
 func pushVec3(buf: mod List(Float), a: view Vec3) {
@@ -54,15 +78,25 @@ func sceneFloats(cam: view Camera, world: view List(Sphere)) ret List(Float) {
     ret s
 }
 
-func buildGpuRT(wgsl: view String, scene: view List(Float), params: view List(Int), pixels: view Int) ret GpuRT {
+func buildGpuRT(wgsl: view String, scene: view List(Float), boxes: view List(Float), params: view List(Int), pixels: view Int) ret GpuRT {
     gpuReset()
     ret GpuRT {
         sceneBuf: gpuStorageF32(data: scene.data, count: scene.length),
+        boxBuf: gpuStorageF32(data: boxes.data, count: boxes.length),
         accumBuf: gpuAllocF32(count: pixels * 4),
         outBuf: gpuAllocU32(count: pixels),
-        paramsBuf: gpuUniformU32(data: params.data, count: 8),
+        paramsBuf: gpuUniformU32(data: params.data, count: 12),
         kernel: gpuKernel(wgsl: wgsl, entry: "main")
     }
+}
+
+# White label with a subtle dark drop-shadow, so it stays readable over both the
+# dim (lit) and bright (sky) scenes.
+func drawLabel(fb: mod Buffer(Int), w: view Int, h: view Int, font: view SdfFont,
+               text: view String, x: view Float, y: view Float, px: view Float) {
+    let sh: Float = px * 0.06 + 1.0
+    sdfDrawText(fb: fb, fbW: w, fbH: h, font: font, text: text, x: x + sh, y: y + sh, sizePx: px, rgb: 0)
+    sdfDrawText(fb: fb, fbW: w, fbH: h, font: font, text: text, x: x, y: y, sizePx: px, rgb: 16777215)
 }
 
 func rae_ext_rae_sys_read_file(path: String) extern ret String
@@ -72,6 +106,7 @@ func main() {
     # Scene switching (number keys 1/2), ported from the C++ rae_ray demo.
     var sceneId: Int = 1
     var world: List(Sphere) = buildSceneOne()
+    var boxes: List(Box) = buildSceneOneBoxes()
     var skyMode: Int = 1
 
     var camPos: Vec3 = vec3(x: 0.0, y: -1.6, z: 0.6)
@@ -97,16 +132,17 @@ func main() {
     var width: Int = 1920
     var height: Int = 1080
 
-    let params: List(Int) = createList(cap: 8)
+    let params: List(Int) = createList(cap: 12)
     var pinit: Int = 0
-    loop pinit < 8 { params.add(value: 0)  pinit = pinit + 1 }
+    loop pinit < 12 { params.add(value: 0)  pinit = pinit + 1 }
     params.set(index: 0, value: width)
     params.set(index: 1, value: height)
     params.set(index: 3, value: maxDepth)
     params.set(index: 4, value: world.length)
     params.set(index: 7, value: skyMode)
+    params.set(index: 8, value: boxes.length)
 
-    var rt: GpuRT = buildGpuRT(wgsl: wgsl, scene: sceneFloats(cam: cam, world: world), params: params, pixels: width * height)
+    var rt: GpuRT = buildGpuRT(wgsl: wgsl, scene: sceneFloats(cam: cam, world: world), boxes: boxFloats(boxes: boxes), params: params, pixels: width * height)
     var fb: List(Int) = createList(cap: width * height)
     var fbi: Int = 0
     loop fbi < width * height { fb.add(value: 0)  fbi = fbi + 1 }
@@ -120,7 +156,6 @@ func main() {
     var spp: Int = 1               # adaptive samples/frame (see FPS heuristic below)
     let maxSpp: Int = 16
     let helper: String = "WASD/E-Q move   arrows/drag look   1/2 scene   P quality"
-    let textColor: Int = 658212        # 0x0A0C24 dark, readable over sky
 
     loop not sdlShouldClose() {
         var moved: Bool = false
@@ -132,10 +167,15 @@ func main() {
         if sdlIsKeyPressed(key: 50) { newScene = 2 }
         if newScene > sceneId or newScene < sceneId {
             sceneId = newScene
-            if sceneId is 2 { world = buildSceneBook()  skyMode = 0 } else { world = buildSceneOne()  skyMode = 1 }
+            if sceneId is 2 {
+                world = buildSceneBook()  boxes = createList(Box, cap: 0)  skyMode = 0
+            } else {
+                world = buildSceneOne()  boxes = buildSceneOneBoxes()  skyMode = 1
+            }
             params.set(index: 4, value: world.length)
             params.set(index: 7, value: skyMode)
-            rt = buildGpuRT(wgsl: wgsl, scene: sceneFloats(cam: cam, world: world), params: params, pixels: width * height)
+            params.set(index: 8, value: boxes.length)
+            rt = buildGpuRT(wgsl: wgsl, scene: sceneFloats(cam: cam, world: world), boxes: boxFloats(boxes: boxes), params: params, pixels: width * height)
             sampleIndex = 0
             spp = 1
         }
@@ -146,7 +186,7 @@ func main() {
             if hiRes { width = 1920  height = 1080 } else { width = 960  height = 540 }
             params.set(index: 0, value: width)
             params.set(index: 1, value: height)
-            rt = buildGpuRT(wgsl: wgsl, scene: sceneFloats(cam: cam, world: world), params: params, pixels: width * height)
+            rt = buildGpuRT(wgsl: wgsl, scene: sceneFloats(cam: cam, world: world), boxes: boxFloats(boxes: boxes), params: params, pixels: width * height)
             fb = createList(cap: width * height)
             fbi = 0
             loop fbi < width * height { fb.add(value: 0)  fbi = fbi + 1 }
@@ -191,12 +231,13 @@ func main() {
         params.set(index: 6, value: spp)
         gpuWriteU32(buf: rt.paramsBuf, data: params.data, count: 8)
 
-        let bufs: List(Int) = createList(cap: 4)
+        let bufs: List(Int) = createList(cap: 5)
         bufs.add(value: rt.paramsBuf)
         bufs.add(value: rt.sceneBuf)
         bufs.add(value: rt.accumBuf)
         bufs.add(value: rt.outBuf)
-        gpuRun(kernel: rt.kernel, bufs: bufs.data, bufCount: 4, gx: (width + 7) / 8, gy: (height + 7) / 8, gz: 1)
+        bufs.add(value: rt.boxBuf)
+        gpuRun(kernel: rt.kernel, bufs: bufs.data, bufCount: 5, gx: (width + 7) / 8, gy: (height + 7) / 8, gz: 1)
         gpuDownloadU32(buf: rt.outBuf, out: fb.data, count: width * height)
 
         # FPS (exponential smoothing) + MTSDF text overlay, composited into fb.
@@ -217,10 +258,10 @@ func main() {
 
         let textPx: Float = height.toFloat() * 0.030
         let baseY: Float = textPx + 8.0
-        sdfDrawText(fb: fb.data, fbW: width, fbH: height, font: font, text: helper, x: 12.0, y: baseY, sizePx: textPx, rgb: textColor)
+        drawLabel(fb: fb.data, w: width, h: height, font: font, text: helper, x: 12.0, y: baseY, px: textPx)
         let fpsStr: String = "{fps.toInt()} FPS   {spp} spp/f"
         let fpsW: Float = sdfMeasureText(font: font, text: fpsStr, sizePx: textPx)
-        sdfDrawText(fb: fb.data, fbW: width, fbH: height, font: font, text: fpsStr, x: width.toFloat() - fpsW - 12.0, y: baseY, sizePx: textPx, rgb: textColor)
+        drawLabel(fb: fb.data, w: width, h: height, font: font, text: fpsStr, x: width.toFloat() - fpsW - 12.0, y: baseY, px: textPx)
 
         sdlUpdatePixels(pixels: fb.data, w: width, h: height)
         sdlPresent()
