@@ -5,7 +5,7 @@
 #
 #   import vec3
 #   let a: Vec3 = { x: 1.0, y: 0.0, z: 0.0 }
-#   let b: Vec3 = vadd(a: a, b: vec3(x: 0.0, y: 1.0, z: 0.0))
+#   let b: Vec3 = vec3.vadd(a: a, b: vec3.create(x: 0.0, y: 1.0, z: 0.0))
 
 import math
 
@@ -15,7 +15,7 @@ type Vec3 {
     z: Float
 }
 
-func vec3(x: view Float, y: view Float, z: view Float) ret Vec3 {
+func create(x: view Float, y: view Float, z: view Float) ret Vec3 {
     ret Vec3 { x: x, y: y, z: z }
 }
 
@@ -53,10 +53,10 @@ func vlenSq(a: view Vec3) ret Float {
 }
 
 func vlen(a: view Vec3) ret Float {
-    ret math.sqrt(x: vlenSq(a: a))
+    ret math.sqrt(x: vec3.vlenSq(a: a))
 }
 
 func vnorm(a: view Vec3) ret Vec3 {
-    let l: Float = vlen(a: a)
+    let l: Float = vec3.vlen(a: a)
     ret Vec3 { x: a.x / l, y: a.y / l, z: a.z / l }
 }

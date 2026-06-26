@@ -9,10 +9,10 @@
 #
 # How callers wire it in:
 #   1. Build a `List(String)` of paths to watch.
-#   2. Call `createFileWatcher(paths, enabled, intervalSec)` once after
+#   2. Call `file_watch.createFileWatcher(paths, enabled, intervalSec)` once after
 #      the paths are known. The snapshot records each file's mtime so
 #      the first check is quiet.
-#   3. Once per frame, call `checkForChanges(watcher, getTime())`. It is
+#   3. Once per frame, call `file_watch.checkForChanges(watcher, getTime())`. It is
 #      throttled by `intervalSec`, so calling every frame is cheap —
 #      most calls early-return.
 #   4. When it returns `true`, the caller does whatever reload makes
