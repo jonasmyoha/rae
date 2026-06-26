@@ -28,7 +28,7 @@ func buildCamera(pos: view Vec3, target: view Vec3, vfovDeg: view Float, apertur
     let up: Vec3 = vcross(a: right, b: fwd)
     let focus: Float = 1.0
     let theta: Float = vfovDeg * pi / 180.0
-    let halfH: Float = tan(x: theta / 2.0)
+    let halfH: Float = math.tan(x: theta / 2.0)
     let vpH: Float = 2.0 * halfH * focus
     let vpW: Float = aspect * vpH
     let horiz: Vec3 = vscale(a: right, s: vpW)
@@ -52,9 +52,9 @@ func makeRay(cam: view Camera, u: view Float, v: view Float) ret Ray {
     var ro: Vec3 = cam.origin
     if cam.lensRadius > 0.0 {
         let a: Float = random() * tau
-        let r: Float = cam.lensRadius * sqrt(x: random())
-        let lx: Float = r * cos(x: a)
-        let ly: Float = r * sin(x: a)
+        let r: Float = cam.lensRadius * math.sqrt(x: random())
+        let lx: Float = r * math.cos(x: a)
+        let ly: Float = r * math.sin(x: a)
         ro = vadd(a: cam.origin, b: vadd(a: vscale(a: cam.right, s: lx), b: vscale(a: cam.up, s: ly)))
     }
     let target: Vec3 = vadd(a: cam.lowerLeft, b: vadd(a: vscale(a: cam.horizontal, s: u), b: vscale(a: cam.vertical, s: v)))

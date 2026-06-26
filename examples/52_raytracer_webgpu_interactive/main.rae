@@ -86,7 +86,7 @@ func main() {
     let rotStep: Float = 0.03
     let mouseSens: Float = 0.005
     let worldUp: Vec3 = vec3(x: 0.0, y: 0.0, z: 1.0)
-    var fwd: Vec3 = vec3(x: cos(x: pitch) * cos(x: yaw), y: cos(x: pitch) * sin(x: yaw), z: sin(x: pitch))
+    var fwd: Vec3 = vec3(x: math.cos(x: pitch) * math.cos(x: yaw), y: math.cos(x: pitch) * math.sin(x: yaw), z: math.sin(x: pitch))
 
     let wgsl: String = rae_ext_rae_sys_read_file(path: "examples/52_raytracer_webgpu_interactive/accum.wgsl")
 
@@ -172,7 +172,7 @@ func main() {
         if moved {
             if pitch > 1.5 { pitch = 1.5 }
             if pitch < -1.5 { pitch = -1.5 }
-            fwd = vec3(x: cos(x: pitch) * cos(x: yaw), y: cos(x: pitch) * sin(x: yaw), z: sin(x: pitch))
+            fwd = vec3(x: math.cos(x: pitch) * math.cos(x: yaw), y: math.cos(x: pitch) * math.sin(x: yaw), z: math.sin(x: pitch))
             cam = buildCamera(pos: camPos, target: vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
             gpu.writeF32(buf: rt.sceneBuf, data: sceneFloats(cam: cam, world: world).data, count: 19 + world.length * 10)
             sampleIndex = 0
