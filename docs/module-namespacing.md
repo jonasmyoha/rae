@@ -71,20 +71,12 @@ second use of `.`. They are disambiguated by the **left-hand side**:
 already in scope (the user's project + global `core`). To call a namespaced
 stdlib function on a value, use the qualified form `filesystem.exists(path)`.
 
-### Namespace-qualified UFCS (deferred)
+### No namespace inside a UFCS chain
 
-`path.filesystem.exists()` — UFCS dispatched into a *named* module — is an
-attractive ergonomic (explicit origin + value-first reads). It is **not required
-for v1**; `filesystem.exists(path)` is the canonical form. Revisit once the base
-feature lands.
-
----
-
-## Aliasing (optional, v1-or-later)
-
-`import filesystem as fs` lets a *caller* choose a short local qualifier
-(`fs.exists(path)`) without the library ever baking in an abbreviation. Whether
-`as` ships in v1 or follows is an implementation-staging call, not a semantic one.
+`path.filesystem.exists()` is **not Rae** and is explicitly rejected. A namespace
+can never appear between a value and a function name. UFCS means *only*
+`value.function(args)` → `function(value, args)`. To call a namespaced stdlib
+function, use the explicit form `filesystem.exists(path)`.
 
 ---
 
@@ -115,4 +107,6 @@ feature lands.
 4. **Then** introduce `lib/filesystem.rae` namespaced from day one (its first real
    consumer is the raytracer PNG-save path — see `filesystem-and-paths.md`).
 
-Optional follow-ups: `import … as` aliasing; namespace-qualified UFCS.
+The migration is done eagerly (not left half-flat-half-namespaced): once a module
+is migrated and the default flipped, its functions are reachable *only* through
+the namespace (except `core`).
