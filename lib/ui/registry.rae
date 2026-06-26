@@ -110,12 +110,12 @@ func registeredComponentCount() ret Int {
 # -----------------------------------------------------------------
 
 func optFloat(doc: view JsonDoc, container: view JsonValue, key: view String, fallback: view Float) ret Float {
-  let idx: Int = jsonField(doc: doc, this: container, key: key)
+  let idx: Int = json.jsonField(doc: doc, this: container, key: key)
   if idx < 0 {
     ret fallback
   }
-  let v: JsonValue = jsonValueAt(doc: doc, idx: idx)
-  ret jsonFloat(this: v, fallback: fallback)
+  let v: JsonValue = json.jsonValueAt(doc: doc, idx: idx)
+  ret json.jsonFloat(this: v, fallback: fallback)
 }
 
 # Same shape as optFloat but additionally accepts a string token name
@@ -125,47 +125,47 @@ func optFloat(doc: view JsonDoc, container: view JsonValue, key: view String, fa
 # JSON value still works unchanged — the string branch is the
 # extension, not a replacement.
 func optFloatOrToken(doc: view JsonDoc, container: view JsonValue, key: view String, fallback: view Float) ret Float {
-  let idx: Int = jsonField(doc: doc, this: container, key: key)
+  let idx: Int = json.jsonField(doc: doc, this: container, key: key)
   if idx < 0 {
     ret fallback
   }
-  let v: JsonValue = jsonValueAt(doc: doc, idx: idx)
+  let v: JsonValue = json.jsonValueAt(doc: doc, idx: idx)
   let empty: String = ""
-  let asStr: String = jsonString(this: v, fallback: empty)
+  let asStr: String = json.jsonString(this: v, fallback: empty)
   if asStr.length() > 0 {
     ret spaceTokenValue(name: asStr)
   }
-  ret jsonFloat(this: v, fallback: fallback)
+  ret json.jsonFloat(this: v, fallback: fallback)
 }
 
 func optInt(doc: view JsonDoc, container: view JsonValue, key: view String, fallback: view Int) ret Int {
-  let idx: Int = jsonField(doc: doc, this: container, key: key)
+  let idx: Int = json.jsonField(doc: doc, this: container, key: key)
   if idx < 0 {
     ret fallback
   }
-  let v: JsonValue = jsonValueAt(doc: doc, idx: idx)
-  ret jsonInt(this: v, fallback: fallback)
+  let v: JsonValue = json.jsonValueAt(doc: doc, idx: idx)
+  ret json.jsonInt(this: v, fallback: fallback)
 }
 
 func optString(doc: view JsonDoc, container: view JsonValue, key: view String, fallback: view String) ret String {
   # Always return an independently-owned String (see jsonString
   # for the why) so callers can hand the result to a struct field
   # and rely on cascade drop to free it.
-  let idx: Int = jsonField(doc: doc, this: container, key: key)
+  let idx: Int = json.jsonField(doc: doc, this: container, key: key)
   if idx < 0 {
     ret rae_ext_rae_string_copy(s: fallback)
   }
-  let v: JsonValue = jsonValueAt(doc: doc, idx: idx)
-  ret jsonString(this: v, fallback: fallback)
+  let v: JsonValue = json.jsonValueAt(doc: doc, idx: idx)
+  ret json.jsonString(this: v, fallback: fallback)
 }
 
 func optBool(doc: view JsonDoc, container: view JsonValue, key: view String, fallback: view Bool) ret Bool {
-  let idx: Int = jsonField(doc: doc, this: container, key: key)
+  let idx: Int = json.jsonField(doc: doc, this: container, key: key)
   if idx < 0 {
     ret fallback
   }
-  let v: JsonValue = jsonValueAt(doc: doc, idx: idx)
-  ret jsonBool(this: v, fallback: fallback)
+  let v: JsonValue = json.jsonValueAt(doc: doc, idx: idx)
+  ret json.jsonBool(this: v, fallback: fallback)
 }
 
 # -----------------------------------------------------------------
@@ -340,7 +340,7 @@ func deserRgba(doc: view JsonDoc, val: view JsonValue) ret RgbaColor {
   # names render magenta via `themeColorByName` rather than failing
   # silently, so typos are visible.
   let empty: String = ""
-  let asStr: String = jsonString(this: val, fallback: empty)
+  let asStr: String = json.jsonString(this: val, fallback: empty)
   if asStr.length() > 0 {
     ret themeColorByName(name: asStr)
   }
@@ -376,16 +376,16 @@ func deserRect(doc: view JsonDoc, val: view JsonValue) ret Rect {
 }
 
 func deserSize(doc: view JsonDoc, val: view JsonValue) ret Size {
-  let wIdx: Int = jsonField(doc: doc, this: val, key: "w")
-  let hIdx: Int = jsonField(doc: doc, this: val, key: "h")
+  let wIdx: Int = json.jsonField(doc: doc, this: val, key: "w")
+  let hIdx: Int = json.jsonField(doc: doc, this: val, key: "h")
   var wAxis: SizeAxis = defaultSizeAxis()
   var hAxis: SizeAxis = defaultSizeAxis()
   if wIdx >= 0 {
-    let wv: JsonValue = jsonValueAt(doc: doc, idx: wIdx)
+    let wv: JsonValue = json.jsonValueAt(doc: doc, idx: wIdx)
     wAxis = deserSizeAxis(doc: doc, val: wv)
   }
   if hIdx >= 0 {
-    let hv: JsonValue = jsonValueAt(doc: doc, idx: hIdx)
+    let hv: JsonValue = json.jsonValueAt(doc: doc, idx: hIdx)
     hAxis = deserSizeAxis(doc: doc, val: hv)
   }
   ret Size { w: wAxis, h: hAxis }
@@ -415,18 +415,18 @@ func deserMargin(doc: view JsonDoc, val: view JsonValue) ret Margin {
 }
 
 func deserAlign(doc: view JsonDoc, val: view JsonValue) ret Align {
-  let xIdx: Int = jsonField(doc: doc, this: val, key: "x")
-  let yIdx: Int = jsonField(doc: doc, this: val, key: "y")
+  let xIdx: Int = json.jsonField(doc: doc, this: val, key: "x")
+  let yIdx: Int = json.jsonField(doc: doc, this: val, key: "y")
   var xK: AlignKind = AlignKind.start
   var yK: AlignKind = AlignKind.start
   if xIdx >= 0 {
-    let xv: JsonValue = jsonValueAt(doc: doc, idx: xIdx)
-    let s: String = jsonString(this: xv, fallback: "Start")
+    let xv: JsonValue = json.jsonValueAt(doc: doc, idx: xIdx)
+    let s: String = json.jsonString(this: xv, fallback: "Start")
     xK = parseAlignKind(s: s)
   }
   if yIdx >= 0 {
-    let yv: JsonValue = jsonValueAt(doc: doc, idx: yIdx)
-    let s: String = jsonString(this: yv, fallback: "Start")
+    let yv: JsonValue = json.jsonValueAt(doc: doc, idx: yIdx)
+    let s: String = json.jsonString(this: yv, fallback: "Start")
     yK = parseAlignKind(s: s)
   }
   ret Align {
@@ -448,9 +448,9 @@ func deserSprite(doc: view JsonDoc, val: view JsonValue) ret Sprite {
   s.textureKey = optString(doc: doc, container: val, key: "textureKey", fallback: "")
   let scaleModeStr: String = optString(doc: doc, container: val, key: "scaleMode", fallback: "Fit")
   s.scaleMode = parseScaleMode(s: scaleModeStr)
-  let tintIdx: Int = jsonField(doc: doc, this: val, key: "tint")
+  let tintIdx: Int = json.jsonField(doc: doc, this: val, key: "tint")
   if tintIdx >= 0 {
-    let tv: JsonValue = jsonValueAt(doc: doc, idx: tintIdx)
+    let tv: JsonValue = json.jsonValueAt(doc: doc, idx: tintIdx)
     s.tint = deserRgba(doc: doc, val: tv)
   }
   ret s
@@ -476,14 +476,14 @@ func deserShape(doc: view JsonDoc, val: view JsonValue) ret Shape {
   s.kind = parseShapeKind(s: kindStr)
   s.strokeWidth = optFloat(doc: doc, container: val, key: "strokeWidth", fallback: 0.0)
   s.radius = optFloat(doc: doc, container: val, key: "radius", fallback: 0.0)
-  let fillIdx: Int = jsonField(doc: doc, this: val, key: "fill")
+  let fillIdx: Int = json.jsonField(doc: doc, this: val, key: "fill")
   if fillIdx >= 0 {
-    let fv: JsonValue = jsonValueAt(doc: doc, idx: fillIdx)
+    let fv: JsonValue = json.jsonValueAt(doc: doc, idx: fillIdx)
     s.fill = deserRgba(doc: doc, val: fv)
   }
-  let strokeIdx: Int = jsonField(doc: doc, this: val, key: "stroke")
+  let strokeIdx: Int = json.jsonField(doc: doc, this: val, key: "stroke")
   if strokeIdx >= 0 {
-    let sv: JsonValue = jsonValueAt(doc: doc, idx: strokeIdx)
+    let sv: JsonValue = json.jsonValueAt(doc: doc, idx: strokeIdx)
     s.stroke = deserRgba(doc: doc, val: sv)
   }
   ret s
@@ -537,16 +537,16 @@ func deserBackdropImage(doc: view JsonDoc, val: view JsonValue) ret BackdropImag
 }
 
 func deserGradientFill(doc: view JsonDoc, val: view JsonValue) ret GradientFill {
-  let fromIdx: Int = jsonField(doc: doc, this: val, key: "from")
-  let toIdx: Int = jsonField(doc: doc, this: val, key: "to")
+  let fromIdx: Int = json.jsonField(doc: doc, this: val, key: "from")
+  let toIdx: Int = json.jsonField(doc: doc, this: val, key: "to")
   let zero: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
   var fromCol: RgbaColor = zero
   var toCol: RgbaColor = zero
   if fromIdx >= 0 {
-    fromCol = deserRgba(doc: doc, val: jsonValueAt(doc: doc, idx: fromIdx))
+    fromCol = deserRgba(doc: doc, val: json.jsonValueAt(doc: doc, idx: fromIdx))
   }
   if toIdx >= 0 {
-    toCol = deserRgba(doc: doc, val: jsonValueAt(doc: doc, idx: toIdx))
+    toCol = deserRgba(doc: doc, val: json.jsonValueAt(doc: doc, idx: toIdx))
   }
   let angle: Float = optFloat(doc: doc, container: val, key: "angle", fallback: 90.0)
   ret GradientFill { from: fromCol, to: toCol, angle: angle }
@@ -608,16 +608,16 @@ func deserSceneInstance(doc: view JsonDoc, val: view JsonValue) ret SceneInstanc
   let fields: List(String) = createList(String, cap: 0)
   let values: List(String) = createList(String, cap: 0)
 
-  let paramsIdx: Int = jsonField(doc: doc, this: val, key: "params")
+  let paramsIdx: Int = json.jsonField(doc: doc, this: val, key: "params")
   if paramsIdx >= 0 {
-    let paramsVal: JsonValue = jsonValueAt(doc: doc, idx: paramsIdx)
-    let overridesIdx: Int = jsonField(doc: doc, this: paramsVal, key: "overrides")
+    let paramsVal: JsonValue = json.jsonValueAt(doc: doc, idx: paramsIdx)
+    let overridesIdx: Int = json.jsonField(doc: doc, this: paramsVal, key: "overrides")
     if overridesIdx >= 0 {
-      let arr: JsonValue = jsonValueAt(doc: doc, idx: overridesIdx)
-      let n: Int = jsonArrayLen(this: arr)
+      let arr: JsonValue = json.jsonValueAt(doc: doc, idx: overridesIdx)
+      let n: Int = json.jsonArrayLen(this: arr)
       var i: Int = 0
       loop i < n {
-        let elem: JsonValue = jsonArrayAt(doc: doc, this: arr, idx: i)
+        let elem: JsonValue = json.jsonArrayAt(doc: doc, this: arr, idx: i)
         let empty: String = ""
         let n2: String = optString(doc: doc, container: elem, key: "nodeId", fallback: empty)
         let c2: String = optString(doc: doc, container: elem, key: "component", fallback: empty)
