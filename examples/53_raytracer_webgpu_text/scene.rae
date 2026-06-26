@@ -1,8 +1,12 @@
-# Scene + materials for step 3.
+# Scene + materials. Includes ports of the C++ rae_ray scenes (own_repos/rae_ui),
+# coordinates converted from that engine's Y-up to Rae's Z-up via (x,y,z)_cpp ->
+# (x, z, y)_rae. kind 3 = emissive light (albedo holds the emission colour).
 import core
+import math
 import vec3
 
-# kind: 0 = diffuse (Lambertian), 1 = metal (reflect + fuzz), 2 = glass (dielectric)
+# kind: 0 = diffuse (Lambertian), 1 = metal (reflect + fuzz), 2 = glass
+#       (dielectric), 3 = emissive light (albedo = emission, may exceed 1)
 type Material {
     kind: Int
     albedo: Vec3
@@ -28,5 +32,79 @@ func buildScene() ret List(Sphere) {
         material: { kind: 2, albedo: { x: 1.0, y: 1.0, z: 1.0 }, fuzz: 0.0, ior: 1.5 } })
     s.add(value: { center: { x: 1.0, y: 1.0, z: 0.0 }, radius: 0.5,
         material: { kind: 1, albedo: { x: 0.8, y: 0.6, z: 0.2 }, fuzz: 0.05, ior: 0.0 } })
+    ret s
+}
+
+# rae_ray "Scene One" (createSceneOne): emissive lights + diffuse/metal/glass
+# balls over a teal planet. (The cube from the C++ scene needs a box primitive —
+# see QUEUE.) Lit by glowing spheres, so use the dim sky (skyMode 1).
+func buildSceneOne() ret List(Sphere) {
+    let s: List(Sphere) = createList(Sphere, cap: 8)
+    # A big light + a small bright light (kind 3, albedo = emission)
+    s.add(value: { center: { x: 0.0, y: -1.0, z: 6.0 }, radius: 2.0,
+        material: { kind: 3, albedo: { x: 4.0, y: 4.0, z: 4.0 }, fuzz: 0.0, ior: 0.0 } })
+    s.add(value: { center: { x: 3.85, y: -0.15, z: 2.3 }, radius: 0.2,
+        material: { kind: 3, albedo: { x: 16.0, y: 16.0, z: 16.0 }, fuzz: 0.0, ior: 0.0 } })
+    # A red ball
+    s.add(value: { center: { x: 0.0, y: -2.0, z: 0.3 }, radius: 0.5,
+        material: { kind: 0, albedo: { x: 0.8, y: 0.3, z: 0.3 }, fuzz: 0.0, ior: 0.0 } })
+    # The planet
+    s.add(value: { center: { x: 0.0, y: -1.0, z: -100.5 }, radius: 100.0,
+        material: { kind: 0, albedo: { x: 0.0, y: 0.7, z: 0.8 }, fuzz: 0.0, ior: 0.0 } })
+    # Metal balls
+    s.add(value: { center: { x: 1.0, y: 0.0, z: 0.0 }, radius: 0.5,
+        material: { kind: 1, albedo: { x: 0.8, y: 0.6, z: 0.2 }, fuzz: 0.0, ior: 0.0 } })
+    s.add(value: { center: { x: -1.5, y: 0.5, z: 0.65 }, radius: 0.4,
+        material: { kind: 1, albedo: { x: 0.8, y: 0.4, z: 0.8 }, fuzz: 0.3, ior: 0.0 } })
+    # Glass ball + a blue diffuse ball
+    s.add(value: { center: { x: -1.0, y: 1.0, z: 0.0 }, radius: 0.5,
+        material: { kind: 2, albedo: { x: 1.0, y: 1.0, z: 1.0 }, fuzz: 0.0, ior: 1.5 } })
+    s.add(value: { center: { x: -3.15, y: -5.0, z: 0.1 }, radius: 0.6,
+        material: { kind: 0, albedo: { x: 0.05, y: 0.2, z: 0.8 }, fuzz: 0.0, ior: 0.0 } })
+    ret s
+}
+
+# rae_ray "Scene From Book" — the Ray Tracing in One Weekend cover: a grey
+# ground + a field of ~480 random small spheres + three big feature spheres.
+# Uses the bright sky (skyMode 0).
+func buildSceneBook() ret List(Sphere) {
+    seed(n: 1)
+    let s: List(Sphere) = createList(Sphere, cap: 512)
+    # ground
+    s.add(value: { center: { x: 0.0, y: 0.0, z: -1000.0 }, radius: 1000.0,
+        material: { kind: 0, albedo: { x: 0.5, y: 0.5, z: 0.5 }, fuzz: 0.0, ior: 0.0 } })
+    var a: Int = -11
+    loop a < 11 {
+        var b: Int = -11
+        loop b < 11 {
+            let cx: Float = a.toFloat() + 0.9 * random()
+            let cy: Float = b.toFloat() + 0.9 * random()
+            let dx: Float = cx - 4.0
+            if dx * dx + cy * cy > 0.81 {
+                let chooseMat: Float = random()
+                if chooseMat < 0.8 {
+                    s.add(value: { center: { x: cx, y: cy, z: 0.2 }, radius: 0.2,
+                        material: { kind: 0, albedo: { x: random() * random(), y: random() * random(), z: random() * random() }, fuzz: 0.0, ior: 0.0 } })
+                } else {
+                    if chooseMat < 0.95 {
+                        s.add(value: { center: { x: cx, y: cy, z: 0.2 }, radius: 0.2,
+                            material: { kind: 1, albedo: { x: 0.5 * (1.0 + random()), y: 0.5 * (1.0 + random()), z: 0.5 * (1.0 + random()) }, fuzz: 0.5 * random(), ior: 0.0 } })
+                    } else {
+                        s.add(value: { center: { x: cx, y: cy, z: 0.2 }, radius: 0.2,
+                            material: { kind: 2, albedo: { x: 0.8, y: 0.5, z: 0.3 }, fuzz: 0.0, ior: 1.5 } })
+                    }
+                }
+            }
+            b = b + 1
+        }
+        a = a + 1
+    }
+    # three feature spheres
+    s.add(value: { center: { x: 0.0, y: 0.0, z: 1.0 }, radius: 1.0,
+        material: { kind: 2, albedo: { x: 0.8, y: 0.5, z: 0.3 }, fuzz: 0.0, ior: 1.5 } })
+    s.add(value: { center: { x: -4.0, y: 0.0, z: 1.0 }, radius: 1.0,
+        material: { kind: 0, albedo: { x: 0.0, y: 0.2, z: 0.9 }, fuzz: 0.0, ior: 0.0 } })
+    s.add(value: { center: { x: 4.0, y: 0.0, z: 1.0 }, radius: 1.0,
+        material: { kind: 1, albedo: { x: 0.7, y: 0.6, z: 0.5 }, fuzz: 0.0, ior: 0.0 } })
     ret s
 }
