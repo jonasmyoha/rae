@@ -1,0 +1,17 @@
+# Rae Image API — image encode/decode behind a Rae-owned seam.
+#
+# Today this wraps lodepng (C, zlib-licensed, vendored as compiler/runtime/
+# lodepng.{c,h}); the seam is intentionally thin so the backend is replaceable.
+# The long-term intent is to own the DEFLATE codec + PNG container in Rae and
+# keep lodepng only as a reference/correctness oracle — see
+# docs/png-and-deflate-strategy.md. On the web target this is meant to route to
+# the browser's native decode instead of shipping a PNG library.
+#
+# Applications target this API, never the underlying codec. Compiled-target only
+# for now (like lib/sdl3.rae) — the Live VM has no image bindings.
+import core
+
+# Encode a packed-0xRRGGBB framebuffer (width*height Ints, row-major, top-down —
+# the same layout sdlUpdatePixels consumes) to a PNG file at `path`. The alpha
+# channel is written fully opaque. Returns false on failure.
+func imageSavePng(path: view String, pixels: view Buffer(Int), width: Int, height: Int) extern ret Bool

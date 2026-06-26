@@ -12,6 +12,7 @@
 import core
 import webgpu
 import sdl3
+import image
 import vec3
 import scene
 import camera
@@ -82,7 +83,7 @@ func main() {
     sdlSetTitle(title: "Rae native WebGPU | {width}x{height} | {samples} spp | rendered in {ms}ms")
 
     loop not sdlShouldClose() {
-        if sdlIsKeyPressed(key: 291) { let s: Bool = sdlSavePng(path: "rae_render.png") }
+        if sdlIsKeyPressed(key: 291) { let s: Bool = imageSavePng(path: "rae_render.png", pixels: fb.data, width: width, height: height) }
 
         sdlUpdatePixels(pixels: fb.data, w: width, h: height)
         sdlPresent()

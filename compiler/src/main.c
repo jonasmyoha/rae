@@ -657,14 +657,25 @@ static bool copy_runtime_assets(const char* out_dir) {
   char src_c[PATH_MAX];
   char dst_h[PATH_MAX];
   char dst_c[PATH_MAX];
-  
+
   snprintf(src_h, sizeof(src_h), "%s/rae_runtime.h", RAE_RUNTIME_SOURCE_DIR);
   snprintf(src_c, sizeof(src_c), "%s/rae_runtime.c", RAE_RUNTIME_SOURCE_DIR);
   snprintf(dst_h, sizeof(dst_h), "%s/rae_runtime.h", out_dir);
   snprintf(dst_c, sizeof(dst_c), "%s/rae_runtime.c", out_dir);
-  
+
   if (!copy_file_to(src_h, dst_h)) return false;
-  return copy_file_to(src_c, dst_c);
+  if (!copy_file_to(src_c, dst_c)) return false;
+
+  // rae_runtime.c #includes the vendored lodepng (PNG codec, Rae Image API),
+  // so the emitted standalone project needs both files alongside it.
+  char lp_src[PATH_MAX];
+  char lp_dst[PATH_MAX];
+  snprintf(lp_src, sizeof(lp_src), "%s/lodepng.h", RAE_RUNTIME_SOURCE_DIR);
+  snprintf(lp_dst, sizeof(lp_dst), "%s/lodepng.h", out_dir);
+  if (!copy_file_to(lp_src, lp_dst)) return false;
+  snprintf(lp_src, sizeof(lp_src), "%s/lodepng.c", RAE_RUNTIME_SOURCE_DIR);
+  snprintf(lp_dst, sizeof(lp_dst), "%s/lodepng.c", out_dir);
+  return copy_file_to(lp_src, lp_dst);
 }
 
 static bool write_bytes(FILE* out, const void* data, size_t size) {
