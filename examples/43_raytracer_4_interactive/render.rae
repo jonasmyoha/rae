@@ -9,22 +9,22 @@ func randomUnit() ret Vec3 {
     let a: Float = random() * tau
     let z: Float = random() * 2.0 - 1.0
     let r: Float = math.sqrt(x: 1.0 - z * z)
-    ret vec3(x: r * math.cos(x: a), y: r * math.sin(x: a), z: z)
+    ret vec3.create(x: r * math.cos(x: a), y: r * math.sin(x: a), z: z)
 }
 
 func vreflect(v: view Vec3, n: view Vec3) ret Vec3 {
-    let d: Float = 2.0 * vdot(a: v, b: n)
-    ret vsub(a: v, b: vscale(a: n, s: d))
+    let d: Float = 2.0 * vec3.vdot(a: v, b: n)
+    ret vec3.vsub(a: v, b: vec3.vscale(a: n, s: d))
 }
 
 func vrefract(uv: view Vec3, n: view Vec3, etaRatio: view Float) ret Vec3 {
-    var cosT: Float = vdot(a: vneg(a: uv), b: n)
+    var cosT: Float = vec3.vdot(a: vec3.vneg(a: uv), b: n)
     if cosT > 1.0 {
         cosT = 1.0
     }
-    let perp: Vec3 = vscale(a: vadd(a: uv, b: vscale(a: n, s: cosT)), s: etaRatio)
-    let pl: Float = 0.0 - math.sqrt(x: abs(n: 1.0 - vlenSq(a: perp)))
-    ret vadd(a: perp, b: vscale(a: n, s: pl))
+    let perp: Vec3 = vec3.vscale(a: vec3.vadd(a: uv, b: vec3.vscale(a: n, s: cosT)), s: etaRatio)
+    let pl: Float = 0.0 - math.sqrt(x: abs(n: 1.0 - vec3.vlenSq(a: perp)))
+    ret vec3.vadd(a: perp, b: vec3.vscale(a: n, s: pl))
 }
 
 func schlick(cosine: view Float, refIdx: view Float) ret Float {
@@ -34,10 +34,10 @@ func schlick(cosine: view Float, refIdx: view Float) ret Float {
 }
 
 func hitSphere(s: view Sphere, r: view Ray) ret Float {
-    let oc: Vec3 = vsub(a: r.origin, b: s.center)
-    let a: Float = vdot(a: r.dir, b: r.dir)
-    let halfB: Float = vdot(a: oc, b: r.dir)
-    let c: Float = vdot(a: oc, b: oc) - s.radius * s.radius
+    let oc: Vec3 = vec3.vsub(a: r.origin, b: s.center)
+    let a: Float = vec3.vdot(a: r.dir, b: r.dir)
+    let halfB: Float = vec3.vdot(a: oc, b: r.dir)
+    let c: Float = vec3.vdot(a: oc, b: oc) - s.radius * s.radius
     let disc: Float = halfB * halfB - a * c
     if disc < 0.0 {
         ret -1.0
@@ -47,7 +47,7 @@ func hitSphere(s: view Sphere, r: view Ray) ret Float {
 
 func rayColor(world: view List(Sphere), r: view Ray, depth: view Int) ret Vec3 {
     if depth <= 0 {
-        ret vec3(x: 0.0, y: 0.0, z: 0.0)
+        ret vec3.create(x: 0.0, y: 0.0, z: 0.0)
     }
     var best: Float = 1000000.0
     var hitIdx: Int = -1
@@ -64,34 +64,34 @@ func rayColor(world: view List(Sphere), r: view Ray, depth: view Int) ret Vec3 {
         i = i + 1
     }
     if hitIdx < 0 {
-        let u: Vec3 = vnorm(a: r.dir)
+        let u: Vec3 = vec3.vnorm(a: r.dir)
         let tt: Float = 0.5 * (u.z + 1.0)
-        ret vec3(x: (1.0 - tt) + tt * 0.5, y: (1.0 - tt) + tt * 0.7, z: (1.0 - tt) + tt * 1.0)
+        ret vec3.create(x: (1.0 - tt) + tt * 0.5, y: (1.0 - tt) + tt * 0.7, z: (1.0 - tt) + tt * 1.0)
     }
     let sp: Sphere = world.at(index: hitIdx)
-    let p: Vec3 = vadd(a: r.origin, b: vscale(a: r.dir, s: best))
-    let n: Vec3 = vscale(a: vsub(a: p, b: sp.center), s: 1.0 / sp.radius)
-    var scatter: Vec3 = vec3(x: 0.0, y: 0.0, z: 0.0)
+    let p: Vec3 = vec3.vadd(a: r.origin, b: vec3.vscale(a: r.dir, s: best))
+    let n: Vec3 = vec3.vscale(a: vec3.vsub(a: p, b: sp.center), s: 1.0 / sp.radius)
+    var scatter: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
     var atten: Vec3 = sp.material.albedo
     if sp.material.kind is 0 {
-        scatter = vadd(a: n, b: randomUnit())
+        scatter = vec3.vadd(a: n, b: randomUnit())
     } else {
         if sp.material.kind is 1 {
-            let ud: Vec3 = vnorm(a: r.dir)
-            scatter = vadd(a: vreflect(v: ud, n: n), b: vscale(a: randomUnit(), s: sp.material.fuzz))
-            if vdot(a: scatter, b: n) <= 0.0 {
-                ret vec3(x: 0.0, y: 0.0, z: 0.0)
+            let ud: Vec3 = vec3.vnorm(a: r.dir)
+            scatter = vec3.vadd(a: vreflect(v: ud, n: n), b: vec3.vscale(a: randomUnit(), s: sp.material.fuzz))
+            if vec3.vdot(a: scatter, b: n) <= 0.0 {
+                ret vec3.create(x: 0.0, y: 0.0, z: 0.0)
             }
         } else {
-            atten = vec3(x: 1.0, y: 1.0, z: 1.0)
-            let ud: Vec3 = vnorm(a: r.dir)
+            atten = vec3.create(x: 1.0, y: 1.0, z: 1.0)
+            let ud: Vec3 = vec3.vnorm(a: r.dir)
             var frontN: Vec3 = n
             var etaRatio: Float = 1.0 / sp.material.ior
-            if vdot(a: ud, b: n) > 0.0 {
-                frontN = vneg(a: n)
+            if vec3.vdot(a: ud, b: n) > 0.0 {
+                frontN = vec3.vneg(a: n)
                 etaRatio = sp.material.ior
             }
-            var cosT: Float = vdot(a: vneg(a: ud), b: frontN)
+            var cosT: Float = vec3.vdot(a: vec3.vneg(a: ud), b: frontN)
             if cosT > 1.0 {
                 cosT = 1.0
             }
@@ -104,7 +104,7 @@ func rayColor(world: view List(Sphere), r: view Ray, depth: view Int) ret Vec3 {
         }
     }
     let bounce: Ray = { origin: p, dir: scatter }
-    ret vmul(a: atten, b: rayColor(world: world, r: bounce, depth: depth - 1))
+    ret vec3.vmul(a: atten, b: rayColor(world: world, r: bounce, depth: depth - 1))
 }
 
 # One sample pass over rows [y0, y1): one path-traced sample per pixel,
