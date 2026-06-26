@@ -2817,12 +2817,27 @@ static bool watch_build_into_dir(const char* entry,
   snprintf(out_bin_path, PATH_MAX, "%s/app", build_dir);
 
   if (!watch_subprocess_emit_c(entry, project_root, c_path)) return false;
-  // Pessimistic: link with raylib on. raylib is bundled with the
-  // toolchain and a few unused KB is fine; in exchange the supervisor
-  // doesn't need to plumb the uses-raylib flag through the subprocess.
-  // SDL3 / WebGPU are NOT pessimistically linked (not toolchain-bundled):
-  // watch-mode of those examples isn't supported; use `rae run --target compiled`.
-  if (!gcc_link_c_to_binary(entry, c_path, out_bin_path, true, false, false, profile)) return false;
+  // raylib stays pessimistically on (bundled with the toolchain; a few unused
+  // KB is fine). SDL3 / wgpu-native are NOT bundled, so we only link them when
+  // the program actually imports them — read from the `.deps` sidecar the emit
+  // subprocess wrote (build_c_backend_output's import detection). This is what
+  // lets `rae watch` build SDL3 / WebGPU examples (e.g. example 53).
+  bool uses_sdl3 = false;
+  bool uses_webgpu = false;
+  {
+    char deps_path[PATH_MAX];
+    snprintf(deps_path, sizeof(deps_path), "%s.deps", c_path);
+    FILE* df = fopen(deps_path, "r");
+    if (df) {
+      char line[256];
+      if (fgets(line, sizeof(line), df)) {
+        if (strstr(line, "sdl3")) uses_sdl3 = true;
+        if (strstr(line, "webgpu")) uses_webgpu = true;
+      }
+      fclose(df);
+    }
+  }
+  if (!gcc_link_c_to_binary(entry, c_path, out_bin_path, true, uses_sdl3, uses_webgpu, profile)) return false;
   return true;
 }
 
@@ -3216,22 +3231,37 @@ static int run_command(const char* cmd, int argc, char** argv) {
                                build_opts.no_implicit) ?
                    0 :
                    1;
-      case BUILD_TARGET_COMPILED:
+      case BUILD_TARGET_COMPILED: {
         if (!build_opts.emit_c) {
           fprintf(stderr, "error: --emit-c is required for compiled builds\n");
           return 1;
         }
-        bool dummy_uses_raylib = false;
-        return build_c_backend_output(build_opts.entry_path,
-                                      final_root,
-                                      build_opts.out_path,
-                                      build_opts.no_implicit,
-                                      &dummy_uses_raylib,
-                                      NULL,
-                                      NULL,
-                                      NULL) ?
-                   0 :
-                   1;
+        bool b_raylib = false, b_sdl3 = false, b_webgpu = false;
+        bool okc = build_c_backend_output(build_opts.entry_path,
+                                          final_root,
+                                          build_opts.out_path,
+                                          build_opts.no_implicit,
+                                          &b_raylib,
+                                          &b_sdl3,
+                                          &b_webgpu,
+                                          NULL);
+        // Record which non-toolchain-bundled libs the program imports next to
+        // the emitted C, so `rae watch` (which emits via this subprocess) can
+        // link SDL3 / wgpu-native instead of assuming a raylib-only program.
+        if (okc) {
+          char deps_path[PATH_MAX];
+          snprintf(deps_path, sizeof(deps_path), "%s.deps", build_opts.out_path);
+          FILE* df = fopen(deps_path, "w");
+          if (df) {
+            fprintf(df, "%s %s %s\n",
+                    b_raylib ? "raylib" : "-",
+                    b_sdl3 ? "sdl3" : "-",
+                    b_webgpu ? "webgpu" : "-");
+            fclose(df);
+          }
+        }
+        return okc ? 0 : 1;
+      }
       case BUILD_TARGET_HYBRID:
         return build_hybrid_output(build_opts.entry_path,
                                    final_root,
