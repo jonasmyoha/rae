@@ -114,7 +114,7 @@ func main() {
     var lastMs: Int = nowMs()
     var fps: Float = 0.0
     var spp: Int = 1               # adaptive samples/frame (see FPS heuristic below)
-    let maxSpp: Int = 8
+    let maxSpp: Int = 16
     let helper: String = "WASD/E-Q move   arrows/drag look   P quality"
     let textColor: Int = 658212        # 0x0A0C24 dark, readable over sky
 
@@ -188,13 +188,13 @@ func main() {
             let inst: Float = 1000.0 / dt.toFloat()
             fps = fps * 0.9 + inst * 0.1
         }
-        # Adaptive quality: spend spare GPU headroom on more samples/frame so the
-        # image converges faster. Above 100 fps there's room to do another sample
-        # per frame; below 70 fps back off to keep camera moves responsive. The
-        # band is self-correcting (more spp lowers fps), so spp settles where the
-        # frame budget allows.
-        if fps > 100.0 and spp < maxSpp { spp = spp + 1 }
-        else { if fps < 70.0 and spp > 1 { spp = spp - 1 } }
+        # Adaptive quality: spend spare GPU headroom on more samples/frame. Since
+        # path-tracer noise only falls as 1/sqrt(N), motion (which can't
+        # accumulate across frames) needs a decent spp to look clean — so target
+        # a ~50-70 fps band (still smooth) and push spp up to maxSpp within it.
+        # The band is self-correcting: more spp lowers fps until it settles.
+        if fps > 70.0 and spp < maxSpp { spp = spp + 1 }
+        else { if fps < 50.0 and spp > 1 { spp = spp - 1 } }
 
         let textPx: Float = height.toFloat() * 0.030
         let baseY: Float = textPx + 8.0
