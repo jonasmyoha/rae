@@ -23,6 +23,8 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write>  accum: array<f32>; // 4 per pixel (rgb)
 @group(0) @binding(3) var<storage, read_write>  outBuf: array<u32>; // packed RGBA8
 @group(0) @binding(4) var<storage, read>        boxes: array<f32>; // lo(3) hi(3) albedo(3) kind fuzz ior
+@group(0) @binding(5) var<storage, read>        bvh: array<f32>;     // 8 per node (sphere BVH)
+@group(0) @binding(6) var<storage, read>        primRef: array<f32>; // reordered sphere indices
 
 const PI: f32 = 3.14159265358979;
 const TAU: f32 = 6.28318530717958;
@@ -103,6 +105,15 @@ fn hitBox(bx: Box, ro: vec3<f32>, rd: vec3<f32>) -> f32 {
   if (tn > 0.001) { return tn; }
   return tf;
 }
+fn hitAABB(mn: vec3<f32>, mx: vec3<f32>, ro: vec3<f32>, invd: vec3<f32>, tmax: f32) -> bool {
+  let t0: vec3<f32> = (mn - ro) * invd;
+  let t1: vec3<f32> = (mx - ro) * invd;
+  let ts: vec3<f32> = min(t0, t1);
+  let tb: vec3<f32> = max(t0, t1);
+  let tn: f32 = max(max(ts.x, ts.y), ts.z);
+  let tf: f32 = min(min(tb.x, tb.y), tb.z);
+  return tf >= max(tn, 0.001) && tn <= tmax;
+}
 fn boxNormal(bx: Box, p: vec3<f32>) -> vec3<f32> {
   let c: vec3<f32> = (bx.lo + bx.hi) * 0.5;
   let d: vec3<f32> = max((bx.hi - bx.lo) * 0.5, vec3<f32>(1e-6));
@@ -124,13 +135,39 @@ fn rayColor(ro0: vec3<f32>, rd0: vec3<f32>) -> vec3<f32> {
     var kind: i32 = -1;
     var fuzz: f32 = 0.0;
     var ior: f32 = 0.0;
-    for (var i: u32 = 0u; i < P.sphereCount; i = i + 1u) {
-      let sp: Sphere = getSphere(i);
-      let t: f32 = hitSphere(sp, ro, rd);
-      if (t > 0.001 && t < best) {
-        best = t;
-        n = (ro + rd * t - sp.center) * (1.0 / sp.radius);
-        albedo = sp.albedo; kind = sp.kind; fuzz = sp.fuzz; ior = sp.ior;
+    // Spheres via the BVH (binding 5/6). Iterative stack traversal.
+    if (P.sphereCount > 0u) {
+      let invd: vec3<f32> = vec3<f32>(1.0 / rd.x, 1.0 / rd.y, 1.0 / rd.z);
+      var stack: array<i32, 32>;
+      var sptr: i32 = 0;
+      stack[0] = 0;
+      sptr = 1;
+      loop {
+        if (sptr <= 0) { break; }
+        sptr = sptr - 1;
+        let ni: i32 = stack[sptr];
+        let base: u32 = u32(ni) * 8u;
+        let mn: vec3<f32> = vec3<f32>(bvh[base], bvh[base + 1u], bvh[base + 2u]);
+        let mx: vec3<f32> = vec3<f32>(bvh[base + 3u], bvh[base + 4u], bvh[base + 5u]);
+        if (!hitAABB(mn, mx, ro, invd, best)) { continue; }
+        let cnt: i32 = i32(bvh[base + 7u]);
+        if (cnt > 0) {
+          let first: i32 = i32(bvh[base + 6u]);
+          for (var k: i32 = 0; k < cnt; k = k + 1) {
+            let si: u32 = u32(primRef[u32(first + k)]);
+            let sp: Sphere = getSphere(si);
+            let t: f32 = hitSphere(sp, ro, rd);
+            if (t > 0.001 && t < best) {
+              best = t;
+              n = (ro + rd * t - sp.center) * (1.0 / sp.radius);
+              albedo = sp.albedo; kind = sp.kind; fuzz = sp.fuzz; ior = sp.ior;
+            }
+          }
+        } else {
+          let right: i32 = i32(bvh[base + 6u]);
+          if (sptr < 31) { stack[sptr] = right; sptr = sptr + 1; }
+          if (sptr < 31) { stack[sptr] = ni + 1; sptr = sptr + 1; }
+        }
       }
     }
     for (var j: u32 = 0u; j < P.boxCount; j = j + 1u) {
