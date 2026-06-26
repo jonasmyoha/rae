@@ -43,6 +43,9 @@ func triFloats(tris: view List(Triangle)) ret List(Float) {
         f.add(value: t.v0.x)  f.add(value: t.v0.y)  f.add(value: t.v0.z)
         f.add(value: t.v1.x)  f.add(value: t.v1.y)  f.add(value: t.v1.z)
         f.add(value: t.v2.x)  f.add(value: t.v2.y)  f.add(value: t.v2.z)
+        f.add(value: t.n0.x)  f.add(value: t.n0.y)  f.add(value: t.n0.z)
+        f.add(value: t.n1.x)  f.add(value: t.n1.y)  f.add(value: t.n1.z)
+        f.add(value: t.n2.x)  f.add(value: t.n2.y)  f.add(value: t.n2.z)
         f.add(value: t.material.albedo.x)  f.add(value: t.material.albedo.y)  f.add(value: t.material.albedo.z)
         f.add(value: t.material.kind.toFloat())
         f.add(value: t.material.fuzz)
@@ -51,7 +54,7 @@ func triFloats(tris: view List(Triangle)) ret List(Float) {
     }
     if tris.length is 0 {
         var z: Int = 0
-        loop z < 15 { f.add(value: 0.0)  z = z + 1 }
+        loop z < 24 { f.add(value: 0.0)  z = z + 1 }
     }
     ret f
 }
@@ -244,31 +247,41 @@ func main() {
     var fps: Float = 0.0
     var spp: Int = 1               # adaptive samples/frame (see FPS heuristic below)
     let maxSpp: Int = 16
-    let helper: String = "WASD/E-Q move   arrows/drag look   1/2/3 scene   P quality"
+    let helper: String = "WASD/E-Q move   arrows/drag look   1-6 scene   P quality"
 
     loop not sdlShouldClose() {
         var moved: Bool = false
 
-        # Scene switch (rae_ray ports): 1 = Scene One (lights + cube), 2 = Book
-        # scene (~480 spheres), 3 = bunny mesh (Scene One lights + bunny.obj,
-        # ~4968 triangles through the BVH). Rebuild geometry + reset.
+        # Scene switch — number keys. 1 = Scene One (lights + cube), 2 = Book
+        # (~480 spheres), 3 = bunny mesh (~4968 tris via BVH), and the original
+        # step scenes: 4 = diffuse (steps 1-2), 5 = materials (step 3),
+        # 6 = lights (step 5). Rebuild geometry + reset accumulation.
         var newScene: Int = sceneId
         if sdlIsKeyPressed(key: 49) { newScene = 1 }
         if sdlIsKeyPressed(key: 50) { newScene = 2 }
         if sdlIsKeyPressed(key: 51) { newScene = 3 }
+        if sdlIsKeyPressed(key: 52) { newScene = 4 }
+        if sdlIsKeyPressed(key: 53) { newScene = 5 }
+        if sdlIsKeyPressed(key: 54) { newScene = 6 }
         if newScene > sceneId or newScene < sceneId {
             sceneId = newScene
-            if sceneId is 2 {
-                world = buildSceneBook()  boxes = createList(Box, cap: 0)  tris = createList(Triangle, cap: 0)  skyMode = 0
+            boxes = createList(Box, cap: 0)
+            tris = createList(Triangle, cap: 0)
+            if sceneId is 1 {
+                world = buildSceneOne()  boxes = buildSceneOneBoxes()  skyMode = 1
+            } else { if sceneId is 2 {
+                world = buildSceneBook()  skyMode = 0
+            } else { if sceneId is 3 {
+                world = buildSceneOne()  skyMode = 1
+                let bunnyMat: Material = { kind: 1, albedo: { x: 0.85, y: 0.55, z: 0.4 }, fuzz: 0.04, ior: 0.0 }
+                tris = loadObjTriangles(path: "{dir}assets/bunny.obj", scale: 4.0, ox: 0.0, oy: 3.6, oz: 0.9, yaw180: true, mat: bunnyMat)
+            } else { if sceneId is 4 {
+                world = buildSceneDiffuse()  skyMode = 0
+            } else { if sceneId is 5 {
+                world = buildScene()  skyMode = 0
             } else {
-                if sceneId is 3 {
-                    world = buildSceneOne()  boxes = createList(Box, cap: 0)  skyMode = 1
-                    let bunnyMat: Material = { kind: 0, albedo: { x: 0.78, y: 0.74, z: 0.70 }, fuzz: 0.0, ior: 0.0 }
-                    tris = loadObjTriangles(path: "{dir}assets/bunny.obj", scale: 4.0, ox: 0.0, oy: 1.6, oz: 0.9, yaw180: true, mat: bunnyMat)
-                } else {
-                    world = buildSceneOne()  boxes = buildSceneOneBoxes()  tris = createList(Triangle, cap: 0)  skyMode = 1
-                }
-            }
+                world = buildSceneLights()  skyMode = 1
+            } } } } }
             params.set(index: 4, value: world.length)
             params.set(index: 7, value: skyMode)
             params.set(index: 8, value: boxes.length)
