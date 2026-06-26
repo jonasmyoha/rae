@@ -3025,6 +3025,86 @@ void rae_ext_sdlCloseWindow(void) {
     SDL_Quit();
     g_sdl_tex = NULL; g_sdl_ren = NULL; g_sdl_win = NULL;
 }
+
+/* ---- MTSDF text compositing into the packed-0xRRGGBB framebuffer (see
+ * lib/sdf_text.rae). Rae parses the atlas JSON + lays out glyphs; here we hold
+ * the raw RGBA atlas and composite one glyph quad at a time: bilinear-sample
+ * the field, median(r,g,b), screenPxRange smoothstep -> coverage, alpha-blend
+ * the text colour over the framebuffer. This is the SDL3 (CPU-framebuffer) port
+ * of the raylib MSDF shader — no GPU shader needed. ---- */
+#define RAE_SDF_MAX_ATLAS 8
+static unsigned char* g_sdf_atlas[RAE_SDF_MAX_ATLAS];
+static int g_sdf_atlas_w[RAE_SDF_MAX_ATLAS];
+static int g_sdf_atlas_h[RAE_SDF_MAX_ATLAS];
+static int g_sdf_atlas_n = 0;
+
+int64_t rae_ext_sdfLoadAtlas(rae_String path, int64_t w, int64_t h) {
+    if (!path.data || w <= 0 || h <= 0 || g_sdf_atlas_n >= RAE_SDF_MAX_ATLAS) return 0;
+    FILE* f = fopen((const char*)path.data, "rb");
+    if (!f) { fprintf(stderr, "[sdf] cannot open %s\n", (const char*)path.data); return 0; }
+    size_t bytes = (size_t)w * (size_t)h * 4;
+    unsigned char* px = (unsigned char*)malloc(bytes);
+    if (!px) { fclose(f); return 0; }
+    size_t got = fread(px, 1, bytes, f);
+    fclose(f);
+    if (got != bytes) { free(px); fprintf(stderr, "[sdf] short read on %s\n", (const char*)path.data); return 0; }
+    g_sdf_atlas[g_sdf_atlas_n] = px; g_sdf_atlas_w[g_sdf_atlas_n] = (int)w; g_sdf_atlas_h[g_sdf_atlas_n] = (int)h;
+    return ++g_sdf_atlas_n;  /* 1-based */
+}
+
+static float rae_sdf_median(float a, float b, float c) {
+    return fmaxf(fminf(a, b), fminf(fmaxf(a, b), c));
+}
+
+/* sx0..sy1: dest rect in framebuffer pixels (sy0 top, sy1 bottom). au0..av1:
+ * source rect in atlas pixels, top-left origin. */
+void rae_ext_sdfBlitGlyph(int64_t* fb, int64_t fbW, int64_t fbH, int64_t atlas,
+                          double sx0, double sy0, double sx1, double sy1,
+                          double au0, double av0, double au1, double av1,
+                          double screenPxRange, int64_t rgb) {
+    if (!fb || atlas < 1 || atlas > g_sdf_atlas_n) return;
+    const unsigned char* ap = g_sdf_atlas[atlas - 1];
+    int aw = g_sdf_atlas_w[atlas - 1], ah = g_sdf_atlas_h[atlas - 1];
+    float tr = (float)((rgb >> 16) & 0xFF), tg = (float)((rgb >> 8) & 0xFF), tb = (float)(rgb & 0xFF);
+    int x0 = (int)floor(sx0), x1 = (int)ceil(sx1);
+    int y0 = (int)floor(sy0), y1 = (int)ceil(sy1);
+    double sw = sx1 - sx0, sh = sy1 - sy0;
+    if (sw <= 0 || sh <= 0) return;
+    for (int py = y0; py < y1; py++) {
+        if (py < 0 || py >= fbH) continue;
+        for (int px = x0; px < x1; px++) {
+            if (px < 0 || px >= fbW) continue;
+            double fx = ((double)px + 0.5 - sx0) / sw;
+            double fy = ((double)py + 0.5 - sy0) / sh;
+            /* atlas sample point (texel-centre bilinear) */
+            double gx = au0 + fx * (au1 - au0) - 0.5;
+            double gy = av0 + fy * (av1 - av0) - 0.5;
+            int ix = (int)floor(gx), iy = (int)floor(gy);
+            double tx = gx - ix, ty = gy - iy;
+            float chan[3] = {0, 0, 0};
+            for (int ch = 0; ch < 3; ch++) {
+                float s00, s10, s01, s11;
+                #define RAE_SDF_TX(xx, yy) (ap[(((yy) < 0 ? 0 : (yy) >= ah ? ah - 1 : (yy)) * aw + ((xx) < 0 ? 0 : (xx) >= aw ? aw - 1 : (xx))) * 4 + ch] / 255.0f)
+                s00 = RAE_SDF_TX(ix, iy);     s10 = RAE_SDF_TX(ix + 1, iy);
+                s01 = RAE_SDF_TX(ix, iy + 1); s11 = RAE_SDF_TX(ix + 1, iy + 1);
+                #undef RAE_SDF_TX
+                float top = s00 + (s10 - s00) * (float)tx;
+                float bot = s01 + (s11 - s01) * (float)tx;
+                chan[ch] = top + (bot - top) * (float)ty;
+            }
+            float sd = rae_sdf_median(chan[0], chan[1], chan[2]);
+            float cov = (sd - 0.5f) * (float)screenPxRange + 0.5f;
+            if (cov <= 0.0f) continue;
+            if (cov > 1.0f) cov = 1.0f;
+            int64_t bg = fb[py * fbW + px];
+            float br = (float)((bg >> 16) & 0xFF), bgc = (float)((bg >> 8) & 0xFF), bb = (float)(bg & 0xFF);
+            int rr = (int)(tr * cov + br * (1.0f - cov) + 0.5f);
+            int gg = (int)(tg * cov + bgc * (1.0f - cov) + 0.5f);
+            int bbv = (int)(tb * cov + bb * (1.0f - cov) + 0.5f);
+            fb[py * fbW + px] = (int64_t)((rr << 16) | (gg << 8) | bbv);
+        }
+    }
+}
 #endif /* RAE_HAS_SDL3 */
 
 /* ============================================================
