@@ -2994,8 +2994,30 @@ void rae_ext_sdlUpdatePixels(const int64_t* pixels, int64_t w, int64_t h) {
 
 void rae_ext_sdlPresent(void) {
     if (!g_sdl_ren) return;
+    SDL_SetRenderDrawColor(g_sdl_ren, 0, 0, 0, 255);
     SDL_RenderClear(g_sdl_ren);
-    if (g_sdl_tex) SDL_RenderTexture(g_sdl_ren, g_sdl_tex, NULL, NULL);
+    if (g_sdl_tex) {
+        /* Fit the texture into the window preserving its aspect ratio —
+         * pillarbox (bars left/right) or letterbox (bars top/bottom) — instead
+         * of stretching, so a non-matching window doesn't skew the image. */
+        int ow = 0, oh = 0;
+        SDL_GetRenderOutputSize(g_sdl_ren, &ow, &oh);
+        if (ow > 0 && oh > 0 && g_sdl_tex_w > 0 && g_sdl_tex_h > 0) {
+            float ta = (float)g_sdl_tex_w / (float)g_sdl_tex_h;
+            float wa = (float)ow / (float)oh;
+            SDL_FRect dst;
+            if (wa > ta) {            /* window wider than image -> pillarbox */
+                dst.h = (float)oh; dst.w = (float)oh * ta;
+                dst.x = ((float)ow - dst.w) * 0.5f; dst.y = 0.0f;
+            } else {                  /* window taller than image -> letterbox */
+                dst.w = (float)ow; dst.h = (float)ow / ta;
+                dst.x = 0.0f; dst.y = ((float)oh - dst.h) * 0.5f;
+            }
+            SDL_RenderTexture(g_sdl_ren, g_sdl_tex, NULL, &dst);
+        } else {
+            SDL_RenderTexture(g_sdl_ren, g_sdl_tex, NULL, NULL);
+        }
+    }
     SDL_RenderPresent(g_sdl_ren);
     if (g_sdl_target_fps > 0) {
         int64_t frame_ms = 1000 / g_sdl_target_fps;
