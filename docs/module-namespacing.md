@@ -44,32 +44,64 @@ func desktopDir() ret String { ... }
 
 ---
 
-## The dot operator: two roles, one deterministic rule
+## One general rule: qualification and UFCS are two ways to call one function
 
-Rae already uses `.` for **UFCS** (first-argument dot dispatch): `a.f(b)`
-desugars to `f(a, b)` when `f`'s first parameter type matches `a`'s type. This is
-free-function call sugar, not a member function. Module qualification adds a
-second use of `.`. They are disambiguated by the **left-hand side**:
+A function belongs to its module (its namespace). There is **one** definition and
+**two** syntactic ways to call it — they are equivalent:
 
-> **If the LHS resolves to an in-scope stdlib module name, the `.` is namespace
-> qualification. Otherwise the LHS is a value and the `.` is normal UFCS / field
-> access.**
+```rae
+func exists(path: String) ret Bool   # lives in module `filesystem`
 
-- `filesystem.exists(path)` — `filesystem` is a module → qualified call;
-  resolve `exists` in module `filesystem`.
-- `path.exists()` — `path` is a value (a `String`) → UFCS; resolve `exists` over
-  the functions **in scope** (project + core), *not* across stdlib namespaces.
-- Collision (a local binding shadows a module name) → the local **value wins**
-  (lexical scoping); reach the module via an `as` alias. The compiler emits a
-  diagnostic when a binding shadows an imported module name.
+filesystem.exists(path)   # namespace-qualified: says where it comes from
+path.exists()             # UFCS: rearranges the first argument into dot form
+```
 
-### Unqualified UFCS does NOT search stdlib namespaces
+So all of these are natural and valid:
 
-`path.exists()` must **not** auto-search every imported stdlib module for an
-`exists(String, …)`. That would re-flatten the stdlib and collide on common names
-(`exists`, `open`, `reset`, `create`, `close`). UFCS dispatches only over names
-already in scope (the user's project + global `core`). To call a namespaced
-stdlib function on a value, use the qualified form `filesystem.exists(path)`.
+```rae
+string.length(text)    text.length()
+math.sin(angle)        angle.sin()
+filesystem.exists(p)   p.exists()
+json.jsonString(v)     v.jsonString()
+```
+
+- **Namespace qualification** (`module.func(args)`) controls *where the function
+  comes from*. The LHS is an in-scope module name; resolve `func` in that module.
+- **UFCS** (`value.func(args)` → `func(value, args)`) only *rearranges the first
+  argument*. It is valid whenever: (1) `func` is visible through an available
+  module, (2) the value's type matches `func`'s first parameter, and (3)
+  resolution finds **one** unambiguous match.
+
+There is **no `this`-only restriction and no compiler-maintained list of "flat"
+modules**: namespaced functions participate in normal UFCS resolution like any
+other. The LHS disambiguates the two forms — an in-scope module name → qualified;
+a value → UFCS.
+
+### Ambiguity is an error, not a silent pick
+
+If a UFCS call `value.func(args)` matches functions in **more than one** visible
+module (same name, first parameter accepts the value), the compiler reports an
+**ambiguity error** and requires the explicit qualified form:
+
+```rae
+filesystem.exists(path)   # disambiguates when several modules export `exists`
+```
+
+This is what keeps UFCS from re-flattening the stdlib: collisions surface as
+errors at the call site, not as an arbitrary winner.
+
+### Bare unqualified calls
+
+A bare `func(args)` (no namespace, no receiver) resolves only against the user's
+**project** modules and the always-available **`core`** essentials (`List`,
+`print`, `createList`, …). A stdlib function is reached by qualification or UFCS,
+never as a bare global — that is the single mechanism that removes the dual
+flat/namespaced state, with no per-module list.
+
+### Local binding shadows a module name
+
+If a local binding has the same name as an in-scope module, the local **value
+wins** (lexical scoping) and `name.x` is read as UFCS/field access on that value.
 
 ### No namespace inside a UFCS chain
 
