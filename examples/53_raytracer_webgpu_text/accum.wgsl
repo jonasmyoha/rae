@@ -108,35 +108,24 @@ fn hitBox(bx: Box, ro: vec3<f32>, rd: vec3<f32>) -> f32 {
   if (tn > 0.001) { return tn; }
   return tf;
 }
-// Triangle: 15 f32 = v0(3) v1(3) v2(3) albedo(3) kind fuzz ior.
-struct Tri { v0: vec3<f32>, v1: vec3<f32>, v2: vec3<f32>, albedo: vec3<f32>, kind: i32, fuzz: f32, ior: f32 };
+// Triangle: 24 f32 = v0(3) v1(3) v2(3) n0(3) n1(3) n2(3) albedo(3) kind fuzz ior.
+struct Tri { v0: vec3<f32>, v1: vec3<f32>, v2: vec3<f32>,
+             n0: vec3<f32>, n1: vec3<f32>, n2: vec3<f32>,
+             albedo: vec3<f32>, kind: i32, fuzz: f32, ior: f32 };
 fn getTri(j: u32) -> Tri {
-  let b: u32 = j * 15u;
+  let b: u32 = j * 24u;
   var t: Tri;
   t.v0 = vec3<f32>(tris[b], tris[b + 1u], tris[b + 2u]);
   t.v1 = vec3<f32>(tris[b + 3u], tris[b + 4u], tris[b + 5u]);
   t.v2 = vec3<f32>(tris[b + 6u], tris[b + 7u], tris[b + 8u]);
-  t.albedo = vec3<f32>(tris[b + 9u], tris[b + 10u], tris[b + 11u]);
-  t.kind = i32(tris[b + 12u]);
-  t.fuzz = tris[b + 13u];
-  t.ior = tris[b + 14u];
+  t.n0 = vec3<f32>(tris[b + 9u], tris[b + 10u], tris[b + 11u]);
+  t.n1 = vec3<f32>(tris[b + 12u], tris[b + 13u], tris[b + 14u]);
+  t.n2 = vec3<f32>(tris[b + 15u], tris[b + 16u], tris[b + 17u]);
+  t.albedo = vec3<f32>(tris[b + 18u], tris[b + 19u], tris[b + 20u]);
+  t.kind = i32(tris[b + 21u]);
+  t.fuzz = tris[b + 22u];
+  t.ior = tris[b + 23u];
   return t;
-}
-// Möller–Trumbore; returns t along rd (caller checks > 0.001), or -1 on miss.
-fn hitTri(t: Tri, ro: vec3<f32>, rd: vec3<f32>) -> f32 {
-  let e1: vec3<f32> = t.v1 - t.v0;
-  let e2: vec3<f32> = t.v2 - t.v0;
-  let pv: vec3<f32> = cross(rd, e2);
-  let det: f32 = dot(e1, pv);
-  if (abs(det) < 1e-8) { return -1.0; }
-  let inv: f32 = 1.0 / det;
-  let tv: vec3<f32> = ro - t.v0;
-  let u: f32 = dot(tv, pv) * inv;
-  if (u < 0.0 || u > 1.0) { return -1.0; }
-  let qv: vec3<f32> = cross(tv, e1);
-  let v: f32 = dot(rd, qv) * inv;
-  if (v < 0.0 || u + v > 1.0) { return -1.0; }
-  return dot(e2, qv) * inv;
 }
 fn hitAABB(mn: vec3<f32>, mx: vec3<f32>, ro: vec3<f32>, invd: vec3<f32>, tmax: f32) -> bool {
   let t0: vec3<f32> = (mn - ro) * invd;
@@ -190,12 +179,29 @@ fn rayColor(ro0: vec3<f32>, rd0: vec3<f32>) -> vec3<f32> {
             let pr: u32 = u32(primRef[u32(first + k)]);
             if (pr >= TRI_BASE) {
               let tr: Tri = getTri(pr - TRI_BASE);
-              let t: f32 = hitTri(tr, ro, rd);
-              if (t > 0.001 && t < best) {
-                best = t;
-                var nn: vec3<f32> = normalize(cross(tr.v1 - tr.v0, tr.v2 - tr.v0));
-                if (dot(nn, rd) > 0.0) { nn = -nn; }
-                n = nn; albedo = tr.albedo; kind = tr.kind; fuzz = tr.fuzz; ior = tr.ior;
+              // Möller–Trumbore inline so we keep the barycentric (u,v) for the
+              // smooth (interpolated vertex) normal.
+              let e1: vec3<f32> = tr.v1 - tr.v0;
+              let e2: vec3<f32> = tr.v2 - tr.v0;
+              let pv: vec3<f32> = cross(rd, e2);
+              let det: f32 = dot(e1, pv);
+              if (abs(det) >= 1e-8) {
+                let invd: f32 = 1.0 / det;
+                let tv: vec3<f32> = ro - tr.v0;
+                let u: f32 = dot(tv, pv) * invd;
+                if (u >= 0.0 && u <= 1.0) {
+                  let qv: vec3<f32> = cross(tv, e1);
+                  let vv: f32 = dot(rd, qv) * invd;
+                  if (vv >= 0.0 && u + vv <= 1.0) {
+                    let t: f32 = dot(e2, qv) * invd;
+                    if (t > 0.001 && t < best) {
+                      best = t;
+                      var nn: vec3<f32> = normalize(tr.n0 * (1.0 - u - vv) + tr.n1 * u + tr.n2 * vv);
+                      if (dot(nn, rd) > 0.0) { nn = -nn; }
+                      n = nn; albedo = tr.albedo; kind = tr.kind; fuzz = tr.fuzz; ior = tr.ior;
+                    }
+                  }
+                }
               }
             } else {
               let sp: Sphere = getSphere(pr);
