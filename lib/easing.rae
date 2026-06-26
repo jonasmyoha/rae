@@ -7,15 +7,15 @@ func easeLinear(t: view Float) ret Float {
 
 # Sine
 func easeInSine(t: view Float) ret Float {
-  ret 1.0 - cos(x: t * pi / 2.0)
+  ret 1.0 - math.cos(x: t * pi / 2.0)
 }
 
 func easeOutSine(t: view Float) ret Float {
-  ret sin(x: t * pi / 2.0)
+  ret math.sin(x: t * pi / 2.0)
 }
 
 func easeInOutSine(t: view Float) ret Float {
-  ret -(cos(x: pi * t) - 1.0) / 2.0
+  ret -(math.cos(x: pi * t) - 1.0) / 2.0
 }
 
 # Quad
@@ -31,7 +31,7 @@ func easeInOutQuad(t: view Float) ret Float {
   if t < 0.5 {
     ret 2.0 * t * t
   }
-  ret 1.0 - pow(base: -2.0 * t + 2.0, exp: 2.0) / 2.0
+  ret 1.0 - math.pow(base: -2.0 * t + 2.0, exp: 2.0) / 2.0
 }
 
 # Cubic
@@ -40,14 +40,14 @@ func easeInCubic(t: view Float) ret Float {
 }
 
 func easeOutCubic(t: view Float) ret Float {
-  ret 1.0 - pow(base: 1.0 - t, exp: 3.0)
+  ret 1.0 - math.pow(base: 1.0 - t, exp: 3.0)
 }
 
 func easeInOutCubic(t: view Float) ret Float {
   if t < 0.5 {
     ret 4.0 * t * t * t
   }
-  ret 1.0 - pow(base: -2.0 * t + 2.0, exp: 3.0) / 2.0
+  ret 1.0 - math.pow(base: -2.0 * t + 2.0, exp: 3.0) / 2.0
 }
 
 # Quart
@@ -56,14 +56,14 @@ func easeInQuart(t: view Float) ret Float {
 }
 
 func easeOutQuart(t: view Float) ret Float {
-  ret 1.0 - pow(base: 1.0 - t, exp: 4.0)
+  ret 1.0 - math.pow(base: 1.0 - t, exp: 4.0)
 }
 
 func easeInOutQuart(t: view Float) ret Float {
   if t < 0.5 {
     ret 8.0 * t * t * t * t
   }
-  ret 1.0 - pow(base: -2.0 * t + 2.0, exp: 4.0) / 2.0
+  ret 1.0 - math.pow(base: -2.0 * t + 2.0, exp: 4.0) / 2.0
 }
 
 # Expo
@@ -71,14 +71,14 @@ func easeInExpo(t: view Float) ret Float {
   if t is 0.0 {
     ret 0.0
   }
-  ret pow(base: 2.0, exp: 10.0 * t - 10.0)
+  ret math.pow(base: 2.0, exp: 10.0 * t - 10.0)
 }
 
 func easeOutExpo(t: view Float) ret Float {
   if t is 1.0 {
     ret 1.0
   }
-  ret 1.0 - pow(base: 2.0, exp: -10.0 * t)
+  ret 1.0 - math.pow(base: 2.0, exp: -10.0 * t)
 }
 
 # Back
@@ -91,7 +91,7 @@ func easeInBack(t: view Float) ret Float {
 func easeOutBack(t: view Float) ret Float {
   let c1: Float = 1.70158
   let c3: Float = c1 + 1.0
-  ret 1.0 + c3 * pow(base: t - 1.0, exp: 3.0) + c1 * pow(base: t - 1.0, exp: 2.0)
+  ret 1.0 + c3 * math.pow(base: t - 1.0, exp: 3.0) + c1 * math.pow(base: t - 1.0, exp: 2.0)
 }
 
 # Bounce
