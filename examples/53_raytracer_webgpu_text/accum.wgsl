@@ -12,12 +12,17 @@ struct Params {
   seed: u32,
   samplesPerFrame: u32,   // new samples to take this dispatch (adaptive)
   skyMode: u32,           // 0 = bright gradient, 1 = dim (scene lit by emitters)
+  boxCount: u32,          // axis-aligned boxes in `boxes` (12 f32 each)
+  _p0: u32,
+  _p1: u32,
+  _p2: u32,
 };
 
 @group(0) @binding(0) var<uniform> P: Params;
 @group(0) @binding(1) var<storage, read>       scene: array<f32>; // camera(19)+spheres
 @group(0) @binding(2) var<storage, read_write>  accum: array<f32>; // 4 per pixel (rgb)
 @group(0) @binding(3) var<storage, read_write>  outBuf: array<u32>; // packed RGBA8
+@group(0) @binding(4) var<storage, read>        boxes: array<f32>; // lo(3) hi(3) albedo(3) kind fuzz ior
 
 const PI: f32 = 3.14159265358979;
 const TAU: f32 = 6.28318530717958;
@@ -71,18 +76,73 @@ fn schlick(cosine: f32, refIdx: f32) -> f32 {
   r0 = r0 * r0;
   return r0 + (1.0 - r0) * pow(1.0 - cosine, 5.0);
 }
+
+// Axis-aligned box: 12 f32 = lo(3) hi(3) albedo(3) kind fuzz ior.
+struct Box { lo: vec3<f32>, hi: vec3<f32>, albedo: vec3<f32>, kind: i32, fuzz: f32, ior: f32 };
+fn getBox(j: u32) -> Box {
+  let b: u32 = j * 12u;
+  var bx: Box;
+  bx.lo = vec3<f32>(boxes[b], boxes[b + 1u], boxes[b + 2u]);
+  bx.hi = vec3<f32>(boxes[b + 3u], boxes[b + 4u], boxes[b + 5u]);
+  bx.albedo = vec3<f32>(boxes[b + 6u], boxes[b + 7u], boxes[b + 8u]);
+  bx.kind = i32(boxes[b + 9u]);
+  bx.fuzz = boxes[b + 10u];
+  bx.ior = boxes[b + 11u];
+  return bx;
+}
+// Slab intersection; returns nearest positive t (entry, or exit if inside), or -1.
+fn hitBox(bx: Box, ro: vec3<f32>, rd: vec3<f32>) -> f32 {
+  let inv: vec3<f32> = 1.0 / rd;
+  let t0: vec3<f32> = (bx.lo - ro) * inv;
+  let t1: vec3<f32> = (bx.hi - ro) * inv;
+  let tsm: vec3<f32> = min(t0, t1);
+  let tbg: vec3<f32> = max(t0, t1);
+  let tn: f32 = max(max(tsm.x, tsm.y), tsm.z);
+  let tf: f32 = min(min(tbg.x, tbg.y), tbg.z);
+  if (tf < tn || tf < 0.001) { return -1.0; }
+  if (tn > 0.001) { return tn; }
+  return tf;
+}
+fn boxNormal(bx: Box, p: vec3<f32>) -> vec3<f32> {
+  let c: vec3<f32> = (bx.lo + bx.hi) * 0.5;
+  let d: vec3<f32> = max((bx.hi - bx.lo) * 0.5, vec3<f32>(1e-6));
+  let pl: vec3<f32> = (p - c) / d;
+  let a: vec3<f32> = abs(pl);
+  if (a.x >= a.y && a.x >= a.z) { return vec3<f32>(sign(pl.x), 0.0, 0.0); }
+  if (a.y >= a.z) { return vec3<f32>(0.0, sign(pl.y), 0.0); }
+  return vec3<f32>(0.0, 0.0, sign(pl.z));
+}
 fn rayColor(ro0: vec3<f32>, rd0: vec3<f32>) -> vec3<f32> {
   var ro: vec3<f32> = ro0;
   var rd: vec3<f32> = rd0;
   var atten: vec3<f32> = vec3<f32>(1.0, 1.0, 1.0);
   for (var depth: u32 = 0u; depth < P.maxDepth; depth = depth + 1u) {
+    // Nearest hit across spheres + boxes. Record normal + material generically.
     var best: f32 = 1e9;
-    var hitIdx: i32 = -1;
+    var n: vec3<f32> = vec3<f32>(0.0, 0.0, 1.0);
+    var albedo: vec3<f32> = vec3<f32>(0.0, 0.0, 0.0);
+    var kind: i32 = -1;
+    var fuzz: f32 = 0.0;
+    var ior: f32 = 0.0;
     for (var i: u32 = 0u; i < P.sphereCount; i = i + 1u) {
-      let t: f32 = hitSphere(getSphere(i), ro, rd);
-      if (t > 0.001 && t < best) { best = t; hitIdx = i32(i); }
+      let sp: Sphere = getSphere(i);
+      let t: f32 = hitSphere(sp, ro, rd);
+      if (t > 0.001 && t < best) {
+        best = t;
+        n = (ro + rd * t - sp.center) * (1.0 / sp.radius);
+        albedo = sp.albedo; kind = sp.kind; fuzz = sp.fuzz; ior = sp.ior;
+      }
     }
-    if (hitIdx < 0) {
+    for (var j: u32 = 0u; j < P.boxCount; j = j + 1u) {
+      let bx: Box = getBox(j);
+      let t: f32 = hitBox(bx, ro, rd);
+      if (t > 0.001 && t < best) {
+        best = t;
+        n = boxNormal(bx, ro + rd * t);
+        albedo = bx.albedo; kind = bx.kind; fuzz = bx.fuzz; ior = bx.ior;
+      }
+    }
+    if (kind < 0) {
       if (P.skyMode == 1u) {
         return atten * vec3<f32>(0.015, 0.015, 0.02);  // dim ambient — scene lit by emitters
       }
@@ -91,25 +151,23 @@ fn rayColor(ro0: vec3<f32>, rd0: vec3<f32>) -> vec3<f32> {
       let sky: vec3<f32> = vec3<f32>((1.0 - tt) + tt * 0.5, (1.0 - tt) + tt * 0.7, (1.0 - tt) + tt * 1.0);
       return atten * sky;
     }
-    let sp: Sphere = getSphere(u32(hitIdx));
     let p: vec3<f32> = ro + rd * best;
-    let n: vec3<f32> = (p - sp.center) * (1.0 / sp.radius);
     var scatter: vec3<f32>;
-    var localAtten: vec3<f32> = sp.albedo;
-    if (sp.kind == 3) {
-      return atten * sp.albedo;   // emissive light: emit + terminate
-    } else if (sp.kind == 0) {
+    var localAtten: vec3<f32> = albedo;
+    if (kind == 3) {
+      return atten * albedo;   // emissive light: emit + terminate
+    } else if (kind == 0) {
       scatter = n + randomUnit();
-    } else if (sp.kind == 1) {
+    } else if (kind == 1) {
       let ud: vec3<f32> = normalize(rd);
-      scatter = reflect(ud, n) + randomUnit() * sp.fuzz;
+      scatter = reflect(ud, n) + randomUnit() * fuzz;
       if (dot(scatter, n) <= 0.0) { return vec3<f32>(0.0, 0.0, 0.0); }
     } else {
       localAtten = vec3<f32>(1.0, 1.0, 1.0);
       let ud: vec3<f32> = normalize(rd);
       var frontN: vec3<f32> = n;
-      var etaRatio: f32 = 1.0 / sp.ior;
-      if (dot(ud, n) > 0.0) { frontN = -n; etaRatio = sp.ior; }
+      var etaRatio: f32 = 1.0 / ior;
+      if (dot(ud, n) > 0.0) { frontN = -n; etaRatio = ior; }
       var cosT: f32 = dot(-ud, frontN);
       if (cosT > 1.0) { cosT = 1.0; }
       let sinT: f32 = sqrt(max(0.0, 1.0 - cosT * cosT));
