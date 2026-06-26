@@ -1030,6 +1030,23 @@ static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr*
     }
 }
 
+// True if `name` is the logical name of an imported module (e.g. "math",
+// "filesystem", "gpu") — i.e. a namespace qualifier rather than a value. Used to
+// tell `module.func(args)` (qualified call) apart from `value.method(args)`
+// (UFCS). See docs/module-namespacing.md.
+static bool sema_is_module_name(AstModule* module, Str name) {
+    for (AstDecl* d = module->decls; d; d = d->next) {
+        if (d->module_name && str_eq_cstr(name, d->module_name)) return true;
+    }
+    for (const AstImport* imp = module->imports; imp; imp = imp->next) {
+        if (!imp->module) continue;
+        for (AstDecl* d = imp->module->decls; d; d = d->next) {
+            if (d->module_name && str_eq_cstr(name, d->module_name)) return true;
+        }
+    }
+    return false;
+}
+
 static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr) {
     if (!expr) return;
     switch (expr->kind) {
@@ -1183,6 +1200,31 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
             }
             break;
         case AST_EXPR_METHOD_CALL:
+            // Namespace-qualified stdlib call: `module.func(args)`. If the LHS is
+            // a bare identifier that is NOT a value in scope but IS an imported
+            // module name, this is a qualified call, not UFCS — rewrite it to a
+            // plain call of `func` (no receiver prepended) and resolve normally.
+            // A local binding that shadows a module name wins (it's a value), so
+            // we only take this path when the lookup finds no symbol.
+            // (docs/module-namespacing.md)
+            if (expr->as.method_call.object->kind == AST_EXPR_IDENT
+                && !symbol_table_lookup(symbols, expr->as.method_call.object->as.ident)
+                && sema_is_module_name(module, expr->as.method_call.object->as.ident)) {
+                AstExpr* callee = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
+                memset(callee, 0, sizeof(*callee));
+                callee->kind = AST_EXPR_IDENT;
+                callee->as.ident = expr->as.method_call.method_name;
+                callee->line = expr->line;
+                callee->column = expr->column;
+                AstCallArg* qargs = expr->as.method_call.args;
+                AstTypeRef* qgen = expr->as.method_call.generic_args;
+                expr->kind = AST_EXPR_CALL;
+                expr->as.call.callee = callee;
+                expr->as.call.args = qargs;
+                expr->as.call.generic_args = qgen;
+                sema_analyze_expr(ctx, module, symbols, expr);
+                break;
+            }
             sema_analyze_expr(ctx, module, symbols, expr->as.method_call.object);
             AstCallArg* marg = expr->as.method_call.args;
             while (marg) { sema_analyze_expr(ctx, module, symbols, marg->value); marg = marg->next; }

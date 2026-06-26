@@ -1826,6 +1826,10 @@ static AstModule merge_module_graph(const ModuleGraph* graph) {
     // alone only remembers the LAST file, not per-decl provenance.
     for (AstDecl* d = node->module->decls; d; d = d->next) {
       if (!d->origin_file) d->origin_file = node->module->file_path;
+      // Remember the logical module (e.g. "math", "filesystem") so sema can
+      // resolve namespace-qualified calls like `math.sin(x)` after the merge
+      // flattens everything (docs/module-namespacing.md).
+      if (!d->module_name) d->module_name = node->module_path;
     }
     // Copy the declaration list head
     AstDecl* current = node->module->decls;
