@@ -1,0 +1,106 @@
+# A compact BVH built on the CPU, flattened for GPU traversal. Generic over the
+# primitive: the caller fills a PrimRec per primitive (its AABB + centroid + an
+# opaque `ref` it can decode later), and buildBvh reorders that list and returns
+# a flat node array (8 f32 per node). Nodes are emitted in DFS pre-order so a
+# node's left child is always the next node; a node stores its right child index
+# (interior) or its first-primitive index + count (leaf):
+#   floats 0..2 = aabb min, 3..5 = aabb max,
+#   float 6 = leaf ? firstPrim : rightChildIndex,
+#   float 7 = count (0 => interior).
+# After buildBvh the leaf range [firstPrim, firstPrim+count) indexes the
+# REORDERED PrimRec list — read each .ref to get the original primitive.
+import core
+import math
+
+type PrimRec {
+    mnx: Float
+    mny: Float
+    mnz: Float
+    mxx: Float
+    mxy: Float
+    mxz: Float
+    cx: Float
+    cy: Float
+    cz: Float
+    ref: Int
+}
+
+func fmin(a: view Float, b: view Float) ret Float { if a < b { ret a }  ret b }
+func fmax(a: view Float, b: view Float) ret Float { if a > b { ret a }  ret b }
+
+func buildNode(prims: mod List(PrimRec), lo: view Int, hi: view Int, nodes: mod List(Float), leafSize: view Int) ret Int {
+    let myIdx: Int = nodes.length / 8
+    var mnx: Float = 1000000000.0   var mny: Float = 1000000000.0   var mnz: Float = 1000000000.0
+    var mxx: Float = -1000000000.0  var mxy: Float = -1000000000.0  var mxz: Float = -1000000000.0
+    var cbnx: Float = 1000000000.0   var cbny: Float = 1000000000.0   var cbnz: Float = 1000000000.0
+    var cbxx: Float = -1000000000.0  var cbxy: Float = -1000000000.0  var cbxz: Float = -1000000000.0
+    var i: Int = lo
+    loop i < hi {
+        let p: PrimRec = rae_ext_rae_buf_get(buf: prims.data, index: i)
+        mnx = fmin(a: mnx, b: p.mnx)  mny = fmin(a: mny, b: p.mny)  mnz = fmin(a: mnz, b: p.mnz)
+        mxx = fmax(a: mxx, b: p.mxx)  mxy = fmax(a: mxy, b: p.mxy)  mxz = fmax(a: mxz, b: p.mxz)
+        cbnx = fmin(a: cbnx, b: p.cx)  cbny = fmin(a: cbny, b: p.cy)  cbnz = fmin(a: cbnz, b: p.cz)
+        cbxx = fmax(a: cbxx, b: p.cx)  cbxy = fmax(a: cbxy, b: p.cy)  cbxz = fmax(a: cbxz, b: p.cz)
+        i = i + 1
+    }
+    nodes.add(value: mnx)  nodes.add(value: mny)  nodes.add(value: mnz)
+    nodes.add(value: mxx)  nodes.add(value: mxy)  nodes.add(value: mxz)
+    nodes.add(value: 0.0)  nodes.add(value: 0.0)
+
+    let count: Int = hi - lo
+    if count <= leafSize {
+        nodes.set(index: myIdx * 8 + 6, value: lo.toFloat())
+        nodes.set(index: myIdx * 8 + 7, value: count.toFloat())
+        ret myIdx
+    }
+
+    # Split along the longest centroid-bounds axis at its midpoint.
+    let ex: Float = cbxx - cbnx
+    let ey: Float = cbxy - cbny
+    let ez: Float = cbxz - cbnz
+    var axis: Int = 0
+    if ey > ex { axis = 1 }
+    if ez > fmax(a: ex, b: ey) { axis = 2 }
+    var mid: Float = 0.5 * (cbnx + cbxx)
+    if axis is 1 { mid = 0.5 * (cbny + cbxy) }
+    if axis is 2 { mid = 0.5 * (cbnz + cbxz) }
+
+    var m: Int = lo
+    var j: Int = lo
+    loop j < hi {
+        let pj: PrimRec = rae_ext_rae_buf_get(buf: prims.data, index: j)
+        var cj: Float = pj.cx
+        if axis is 1 { cj = pj.cy }
+        if axis is 2 { cj = pj.cz }
+        if cj < mid {
+            let pm: PrimRec = rae_ext_rae_buf_get(buf: prims.data, index: m)
+            prims.set(index: m, value: pj)
+            prims.set(index: j, value: pm)
+            m = m + 1
+        }
+        j = j + 1
+    }
+    if m is lo { m = (lo + hi) / 2 }
+    if m is hi { m = (lo + hi) / 2 }
+
+    let right: Int = buildNodeRight(prims: prims, lo: lo, m: m, hi: hi, nodes: nodes, leafSize: leafSize)
+    nodes.set(index: myIdx * 8 + 6, value: right.toFloat())
+    nodes.set(index: myIdx * 8 + 7, value: 0.0)
+    ret myIdx
+}
+
+# Build the left subtree (immediately follows the parent in DFS order) then the
+# right subtree; return the right child's node index. (Split out so `buildNode`
+# stays a single self-recursion the compiler is happy with.)
+func buildNodeRight(prims: mod List(PrimRec), lo: view Int, m: view Int, hi: view Int, nodes: mod List(Float), leafSize: view Int) ret Int {
+    let dummyLeft: Int = buildNode(prims: prims, lo: lo, hi: m, nodes: nodes, leafSize: leafSize)
+    ret buildNode(prims: prims, lo: m, hi: hi, nodes: nodes, leafSize: leafSize)
+}
+
+func buildBvh(prims: mod List(PrimRec), leafSize: view Int) ret List(Float) {
+    let nodes: List(Float) = createList(Float, cap: prims.length * 16 + 8)
+    if prims.length > 0 {
+        let r: Int = buildNode(prims: prims, lo: 0, hi: prims.length, nodes: nodes, leafSize: leafSize)
+    }
+    ret nodes
+}
