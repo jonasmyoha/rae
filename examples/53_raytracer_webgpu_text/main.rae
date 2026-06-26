@@ -167,17 +167,17 @@ func sceneFloats(cam: view Camera, world: view List(Sphere)) ret List(Float) {
 
 func buildGpuRT(wgsl: view String, scene: view List(Float), boxes: view List(Float), tris: view List(Float),
                 nodes: view List(Float), refs: view List(Float), params: view List(Int), pixels: view Int) ret GpuRT {
-    gpuReset()
+    gpu.reset()
     ret GpuRT {
-        sceneBuf: gpuStorageF32(data: scene.data, count: scene.length),
-        boxBuf: gpuStorageF32(data: boxes.data, count: boxes.length),
-        triBuf: gpuStorageF32(data: tris.data, count: tris.length),
-        bvhBuf: gpuStorageF32(data: nodes.data, count: nodes.length),
-        refBuf: gpuStorageF32(data: refs.data, count: refs.length),
-        accumBuf: gpuAllocF32(count: pixels * 4),
-        outBuf: gpuAllocU32(count: pixels),
-        paramsBuf: gpuUniformU32(data: params.data, count: 12),
-        kernel: gpuKernel(wgsl: wgsl, entry: "main")
+        sceneBuf: gpu.storageF32(data: scene.data, count: scene.length),
+        boxBuf: gpu.storageF32(data: boxes.data, count: boxes.length),
+        triBuf: gpu.storageF32(data: tris.data, count: tris.length),
+        bvhBuf: gpu.storageF32(data: nodes.data, count: nodes.length),
+        refBuf: gpu.storageF32(data: refs.data, count: refs.length),
+        accumBuf: gpu.allocF32(count: pixels * 4),
+        outBuf: gpu.allocU32(count: pixels),
+        paramsBuf: gpu.uniformU32(data: params.data, count: 12),
+        kernel: gpu.kernel(wgsl: wgsl, entry: "main")
     }
 }
 
@@ -214,8 +214,8 @@ func main() {
     let wgsl: String = rae_ext_rae_sys_read_file(path: "{dir}accum.wgsl")
     let font: SdfFont = loadSdfFont(jsonPath: "{dir}assets/Roboto-Regular.mtsdf.json", rawAtlasPath: "{dir}assets/Roboto-Regular.mtsdf.raw")
 
-    sdlInitWindow(width: 1280, height: 720, title: "Rae raytracer — interactive GPU + MTSDF text")
-    sdlSetTargetFPS(fps: 0)
+    sdl3.initWindow(width: 1280, height: 720, title: "Rae raytracer — interactive GPU + MTSDF text")
+    sdl3.setTargetFPS(fps: 0)
 
     let aspect: Float = 16.0 / 9.0
     var cam: Camera = buildCamera(pos: camPos, target: vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
@@ -242,30 +242,30 @@ func main() {
 
     var sampleIndex: Int = 0
     var frame: Int = 0
-    var prevMouseX: Int = sdlGetMouseX()
-    var prevMouseY: Int = sdlGetMouseY()
+    var prevMouseX: Int = sdl3.getMouseX()
+    var prevMouseY: Int = sdl3.getMouseY()
     var lastMs: Int = nowMs()
     var fps: Float = 0.0
     var spp: Int = 1               # adaptive samples/frame (no hard cap; see below)
     let helper: String = "WASD/E-Q move   arrows/drag look   1-6 scene   P quality   F2 save PNG"
 
-    loop not sdlShouldClose() {
+    loop not sdl3.shouldClose() {
         var moved: Bool = false
 
         # F2 saves the current frame as a PNG.
-        if sdlIsKeyPressed(key: 291) { let saved: Bool = imageSavePng(path: "rae_render.png", pixels: fb.data, width: width, height: height) }
+        if sdl3.isKeyPressed(key: 291) { let saved: Bool = image.savePng(path: "rae_render.png", pixels: fb.data, width: width, height: height) }
 
         # Scene switch — number keys. 1 = Scene One (lights + cube), 2 = Book
         # (~480 spheres), 3 = bunny mesh (~4968 tris via BVH), and the original
         # step scenes: 4 = diffuse (steps 1-2), 5 = materials (step 3),
         # 6 = lights (step 5). Rebuild geometry + reset accumulation.
         var newScene: Int = sceneId
-        if sdlIsKeyPressed(key: 49) { newScene = 1 }
-        if sdlIsKeyPressed(key: 50) { newScene = 2 }
-        if sdlIsKeyPressed(key: 51) { newScene = 3 }
-        if sdlIsKeyPressed(key: 52) { newScene = 4 }
-        if sdlIsKeyPressed(key: 53) { newScene = 5 }
-        if sdlIsKeyPressed(key: 54) { newScene = 6 }
+        if sdl3.isKeyPressed(key: 49) { newScene = 1 }
+        if sdl3.isKeyPressed(key: 50) { newScene = 2 }
+        if sdl3.isKeyPressed(key: 51) { newScene = 3 }
+        if sdl3.isKeyPressed(key: 52) { newScene = 4 }
+        if sdl3.isKeyPressed(key: 53) { newScene = 5 }
+        if sdl3.isKeyPressed(key: 54) { newScene = 6 }
         if newScene > sceneId or newScene < sceneId {
             sceneId = newScene
             boxes = createList(Box, cap: 0)
@@ -295,7 +295,7 @@ func main() {
         }
 
         # P toggles half-res <-> Full HD; rebuild buffers + framebuffer, reset.
-        if sdlIsKeyPressed(key: 80) {
+        if sdl3.isKeyPressed(key: 80) {
             hiRes = not hiRes
             if hiRes { width = 1920  height = 1080 } else { width = 960  height = 540 }
             params.set(index: 0, value: width)
@@ -308,21 +308,21 @@ func main() {
             spp = 1            # re-ramp from scratch at the new resolution
         }
 
-        if sdlIsKeyDown(key: 87) { camPos = vadd(a: camPos, b: vscale(a: fwd, s: moveStep))  moved = true }
-        if sdlIsKeyDown(key: 83) { camPos = vsub(a: camPos, b: vscale(a: fwd, s: moveStep))  moved = true }
+        if sdl3.isKeyDown(key: 87) { camPos = vadd(a: camPos, b: vscale(a: fwd, s: moveStep))  moved = true }
+        if sdl3.isKeyDown(key: 83) { camPos = vsub(a: camPos, b: vscale(a: fwd, s: moveStep))  moved = true }
         let rgt: Vec3 = vnorm(a: vcross(a: fwd, b: worldUp))
-        if sdlIsKeyDown(key: 68) { camPos = vadd(a: camPos, b: vscale(a: rgt, s: moveStep))  moved = true }
-        if sdlIsKeyDown(key: 65) { camPos = vsub(a: camPos, b: vscale(a: rgt, s: moveStep))  moved = true }
-        if sdlIsKeyDown(key: 69) { camPos = vadd(a: camPos, b: vscale(a: worldUp, s: moveStep))  moved = true }
-        if sdlIsKeyDown(key: 81) { camPos = vsub(a: camPos, b: vscale(a: worldUp, s: moveStep))  moved = true }
-        if sdlIsKeyDown(key: 262) { yaw = yaw - rotStep  moved = true }
-        if sdlIsKeyDown(key: 263) { yaw = yaw + rotStep  moved = true }
-        if sdlIsKeyDown(key: 265) { pitch = pitch + rotStep  moved = true }
-        if sdlIsKeyDown(key: 264) { pitch = pitch - rotStep  moved = true }
+        if sdl3.isKeyDown(key: 68) { camPos = vadd(a: camPos, b: vscale(a: rgt, s: moveStep))  moved = true }
+        if sdl3.isKeyDown(key: 65) { camPos = vsub(a: camPos, b: vscale(a: rgt, s: moveStep))  moved = true }
+        if sdl3.isKeyDown(key: 69) { camPos = vadd(a: camPos, b: vscale(a: worldUp, s: moveStep))  moved = true }
+        if sdl3.isKeyDown(key: 81) { camPos = vsub(a: camPos, b: vscale(a: worldUp, s: moveStep))  moved = true }
+        if sdl3.isKeyDown(key: 262) { yaw = yaw - rotStep  moved = true }
+        if sdl3.isKeyDown(key: 263) { yaw = yaw + rotStep  moved = true }
+        if sdl3.isKeyDown(key: 265) { pitch = pitch + rotStep  moved = true }
+        if sdl3.isKeyDown(key: 264) { pitch = pitch - rotStep  moved = true }
 
-        let mx: Int = sdlGetMouseX()
-        let my: Int = sdlGetMouseY()
-        if sdlIsMouseButtonDown(button: 0) {
+        let mx: Int = sdl3.getMouseX()
+        let my: Int = sdl3.getMouseY()
+        if sdl3.isMouseButtonDown(button: 0) {
             let dx: Int = mx - prevMouseX
             let dy: Int = my - prevMouseY
             if dx > 0 or dx < 0 { yaw = yaw - dx.toFloat() * mouseSens  moved = true }
@@ -336,14 +336,14 @@ func main() {
             if pitch < -1.5 { pitch = -1.5 }
             fwd = vec3(x: cos(x: pitch) * cos(x: yaw), y: cos(x: pitch) * sin(x: yaw), z: sin(x: pitch))
             cam = buildCamera(pos: camPos, target: vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
-            gpuWriteF32(buf: rt.sceneBuf, data: sceneFloats(cam: cam, world: world).data, count: 19 + world.length * 10)
+            gpu.writeF32(buf: rt.sceneBuf, data: sceneFloats(cam: cam, world: world).data, count: 19 + world.length * 10)
             sampleIndex = 0
         }
 
         params.set(index: 2, value: sampleIndex)
         params.set(index: 5, value: frame)
         params.set(index: 6, value: spp)
-        gpuWriteU32(buf: rt.paramsBuf, data: params.data, count: 8)
+        gpu.writeU32(buf: rt.paramsBuf, data: params.data, count: 8)
 
         let bufs: List(Int) = createList(cap: 8)
         bufs.add(value: rt.paramsBuf)
@@ -354,8 +354,8 @@ func main() {
         bufs.add(value: rt.bvhBuf)
         bufs.add(value: rt.refBuf)
         bufs.add(value: rt.triBuf)
-        gpuRun(kernel: rt.kernel, bufs: bufs.data, bufCount: 8, gx: (width + 7) / 8, gy: (height + 7) / 8, gz: 1)
-        gpuDownloadU32(buf: rt.outBuf, out: fb.data, count: width * height)
+        gpu.run(kernel: rt.kernel, bufs: bufs.data, bufCount: 8, gx: (width + 7) / 8, gy: (height + 7) / 8, gz: 1)
+        gpu.downloadU32(buf: rt.outBuf, out: fb.data, count: width * height)
 
         # FPS (exponential smoothing) + MTSDF text overlay, composited into fb.
         let now: Int = nowMs()
@@ -383,11 +383,11 @@ func main() {
         let fpsW: Float = sdfMeasureText(font: font, text: fpsStr, sizePx: textPx)
         drawLabel(fb: fb.data, w: width, h: height, font: font, text: fpsStr, x: width.toFloat() - fpsW - 12.0, y: baseY, px: textPx)
 
-        sdlUpdatePixels(pixels: fb.data, w: width, h: height)
-        sdlPresent()
+        sdl3.updatePixels(pixels: fb.data, w: width, h: height)
+        sdl3.present()
         sampleIndex = sampleIndex + spp
         frame = frame + 1
     }
-    gpuReset()
-    sdlCloseWindow()
+    gpu.reset()
+    sdl3.closeWindow()
 }
