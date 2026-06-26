@@ -58,16 +58,16 @@ func sceneFloats(cam: view Camera, world: view List(Sphere)) ret List(Float) {
     ret s
 }
 
-# (Re)create all GPU buffers + the kernel for a given pixel count. gpuReset()
+# (Re)create all GPU buffers + the kernel for a given pixel count. gpu.reset()
 # frees the previous set first, so resizing doesn't leak handles.
 func buildGpuRT(wgsl: view String, scene: view List(Float), params: view List(Int), pixels: view Int) ret GpuRT {
-    gpuReset()
+    gpu.reset()
     ret GpuRT {
-        sceneBuf: gpuStorageF32(data: scene.data, count: scene.length),
-        accumBuf: gpuAllocF32(count: pixels * 4),
-        outBuf: gpuAllocU32(count: pixels),
-        paramsBuf: gpuUniformU32(data: params.data, count: 8),
-        kernel: gpuKernel(wgsl: wgsl, entry: "main")
+        sceneBuf: gpu.storageF32(data: scene.data, count: scene.length),
+        accumBuf: gpu.allocF32(count: pixels * 4),
+        outBuf: gpu.allocU32(count: pixels),
+        paramsBuf: gpu.uniformU32(data: params.data, count: 8),
+        kernel: gpu.kernel(wgsl: wgsl, entry: "main")
     }
 }
 
@@ -90,8 +90,8 @@ func main() {
 
     let wgsl: String = rae_ext_rae_sys_read_file(path: "examples/52_raytracer_webgpu_interactive/accum.wgsl")
 
-    sdlInitWindow(width: 1280, height: 720, title: "Rae raytracer — interactive + progressive (native WebGPU)")
-    sdlSetTargetFPS(fps: 0)
+    sdl3.initWindow(width: 1280, height: 720, title: "Rae raytracer — interactive + progressive (native WebGPU)")
+    sdl3.setTargetFPS(fps: 0)
 
     # The render "box" is a FIXED resolution, independent of the window size —
     # the window only scales it for display (the texture stretches to fill).
@@ -117,11 +117,11 @@ func main() {
 
     var sampleIndex: Int = 0
     var frame: Int = 0
-    var prevMouseX: Int = sdlGetMouseX()
-    var prevMouseY: Int = sdlGetMouseY()
+    var prevMouseX: Int = sdl3.getMouseX()
+    var prevMouseY: Int = sdl3.getMouseY()
 
-    loop not sdlShouldClose() {
-        if sdlIsKeyPressed(key: 291) { let s: Bool = imageSavePng(path: "rae_render.png", pixels: fb.data, width: width, height: height) }
+    loop not sdl3.shouldClose() {
+        if sdl3.isKeyPressed(key: 291) { let s: Bool = image.savePng(path: "rae_render.png", pixels: fb.data, width: width, height: height) }
 
         var moved: Bool = false
 
@@ -129,9 +129,9 @@ func main() {
         # The render box is fixed at this size regardless of the window; changing
         # it rebuilds the GPU buffers + framebuffer and resets accumulation.
         var newQ: Int = quality
-        if sdlIsKeyPressed(key: 49) { newQ = 0 }
-        if sdlIsKeyPressed(key: 50) { newQ = 1 }
-        if sdlIsKeyPressed(key: 51) { newQ = 2 }
+        if sdl3.isKeyPressed(key: 49) { newQ = 0 }
+        if sdl3.isKeyPressed(key: 50) { newQ = 1 }
+        if sdl3.isKeyPressed(key: 51) { newQ = 2 }
         if newQ > quality or newQ < quality {
             quality = newQ
             if quality is 0 { width = 960   height = 540 }
@@ -146,21 +146,21 @@ func main() {
             sampleIndex = 0
         }
 
-        if sdlIsKeyDown(key: 87) { camPos = vadd(a: camPos, b: vscale(a: fwd, s: moveStep))  moved = true }
-        if sdlIsKeyDown(key: 83) { camPos = vsub(a: camPos, b: vscale(a: fwd, s: moveStep))  moved = true }
+        if sdl3.isKeyDown(key: 87) { camPos = vadd(a: camPos, b: vscale(a: fwd, s: moveStep))  moved = true }
+        if sdl3.isKeyDown(key: 83) { camPos = vsub(a: camPos, b: vscale(a: fwd, s: moveStep))  moved = true }
         let rgt: Vec3 = vnorm(a: vcross(a: fwd, b: worldUp))
-        if sdlIsKeyDown(key: 68) { camPos = vadd(a: camPos, b: vscale(a: rgt, s: moveStep))  moved = true }
-        if sdlIsKeyDown(key: 65) { camPos = vsub(a: camPos, b: vscale(a: rgt, s: moveStep))  moved = true }
-        if sdlIsKeyDown(key: 69) { camPos = vadd(a: camPos, b: vscale(a: worldUp, s: moveStep))  moved = true }
-        if sdlIsKeyDown(key: 81) { camPos = vsub(a: camPos, b: vscale(a: worldUp, s: moveStep))  moved = true }
-        if sdlIsKeyDown(key: 262) { yaw = yaw - rotStep  moved = true }
-        if sdlIsKeyDown(key: 263) { yaw = yaw + rotStep  moved = true }
-        if sdlIsKeyDown(key: 265) { pitch = pitch + rotStep  moved = true }
-        if sdlIsKeyDown(key: 264) { pitch = pitch - rotStep  moved = true }
+        if sdl3.isKeyDown(key: 68) { camPos = vadd(a: camPos, b: vscale(a: rgt, s: moveStep))  moved = true }
+        if sdl3.isKeyDown(key: 65) { camPos = vsub(a: camPos, b: vscale(a: rgt, s: moveStep))  moved = true }
+        if sdl3.isKeyDown(key: 69) { camPos = vadd(a: camPos, b: vscale(a: worldUp, s: moveStep))  moved = true }
+        if sdl3.isKeyDown(key: 81) { camPos = vsub(a: camPos, b: vscale(a: worldUp, s: moveStep))  moved = true }
+        if sdl3.isKeyDown(key: 262) { yaw = yaw - rotStep  moved = true }
+        if sdl3.isKeyDown(key: 263) { yaw = yaw + rotStep  moved = true }
+        if sdl3.isKeyDown(key: 265) { pitch = pitch + rotStep  moved = true }
+        if sdl3.isKeyDown(key: 264) { pitch = pitch - rotStep  moved = true }
 
-        let mx: Int = sdlGetMouseX()
-        let my: Int = sdlGetMouseY()
-        if sdlIsMouseButtonDown(button: 0) {
+        let mx: Int = sdl3.getMouseX()
+        let my: Int = sdl3.getMouseY()
+        if sdl3.isMouseButtonDown(button: 0) {
             let dx: Int = mx - prevMouseX
             let dy: Int = my - prevMouseY
             if dx > 0 or dx < 0 { yaw = yaw - dx.toFloat() * mouseSens  moved = true }
@@ -174,13 +174,13 @@ func main() {
             if pitch < -1.5 { pitch = -1.5 }
             fwd = vec3(x: cos(x: pitch) * cos(x: yaw), y: cos(x: pitch) * sin(x: yaw), z: sin(x: pitch))
             cam = buildCamera(pos: camPos, target: vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
-            gpuWriteF32(buf: rt.sceneBuf, data: sceneFloats(cam: cam, world: world).data, count: 19 + world.length * 10)
+            gpu.writeF32(buf: rt.sceneBuf, data: sceneFloats(cam: cam, world: world).data, count: 19 + world.length * 10)
             sampleIndex = 0
         }
 
         params.set(index: 2, value: sampleIndex)
         params.set(index: 5, value: frame)
-        gpuWriteU32(buf: rt.paramsBuf, data: params.data, count: 8)
+        gpu.writeU32(buf: rt.paramsBuf, data: params.data, count: 8)
 
         let bufs: List(Int) = createList(cap: 4)
         bufs.add(value: rt.paramsBuf)
@@ -189,15 +189,15 @@ func main() {
         bufs.add(value: rt.outBuf)
         let gx: Int = (width + 7) / 8
         let gy: Int = (height + 7) / 8
-        gpuRun(kernel: rt.kernel, bufs: bufs.data, bufCount: 4, gx: gx, gy: gy, gz: 1)
-        gpuDownloadU32(buf: rt.outBuf, out: fb.data, count: width * height)
+        gpu.run(kernel: rt.kernel, bufs: bufs.data, bufCount: 4, gx: gx, gy: gy, gz: 1)
+        gpu.downloadU32(buf: rt.outBuf, out: fb.data, count: width * height)
 
-        sdlUpdatePixels(pixels: fb.data, w: width, h: height)
-        sdlPresent()
-        sdlSetTitle(title: "Rae interactive GPU path tracer | render {width}x{height} | {sampleIndex} spp | WASD/E-Q move, arrows/drag look | 1/2/3 quality")
+        sdl3.updatePixels(pixels: fb.data, w: width, h: height)
+        sdl3.present()
+        sdl3.setTitle(title: "Rae interactive GPU path tracer | render {width}x{height} | {sampleIndex} spp | WASD/E-Q move, arrows/drag look | 1/2/3 quality")
         sampleIndex = sampleIndex + 1
         frame = frame + 1
     }
-    gpuReset()
-    sdlCloseWindow()
+    gpu.reset()
+    sdl3.closeWindow()
 }

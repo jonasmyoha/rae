@@ -52,8 +52,8 @@ func main() {
         i = i + 1
     }
 
-    sdlInitWindow(width: winW, height: winH, title: "Rae raytracer — step 5 (emissive lights)")
-    sdlSetTargetFPS(fps: 60)
+    sdl3.initWindow(width: winW, height: winH, title: "Rae raytracer — step 5 (emissive lights)")
+    sdl3.setTargetFPS(fps: 60)
 
     # camera state (Z-up): position + yaw (about +Z) + pitch (about +X).
     var camPos: Vec3 = vec3(x: 0.0, y: -2.2, z: 0.7)
@@ -74,16 +74,16 @@ func main() {
     var maxDepth: Int = prevDepth
 
     var sampleCount: Int = 0
-    var prevMouseX: Int = sdlGetMouseX()
-    var prevMouseY: Int = sdlGetMouseY()
+    var prevMouseX: Int = sdl3.getMouseX()
+    var prevMouseY: Int = sdl3.getMouseY()
 
-    loop not sdlShouldClose() {
-        if sdlIsKeyPressed(key: 291) { let s: Bool = imageSavePng(path: "rae_render.png", pixels: fb.data, width: width, height: height) }
+    loop not sdl3.shouldClose() {
+        if sdl3.isKeyPressed(key: 291) { let s: Bool = image.savePng(path: "rae_render.png", pixels: fb.data, width: width, height: height) }
 
         var moved: Bool = false
 
         # quality toggle (P) — fires once per press
-        if sdlIsKeyPressed(key: 80) {
+        if sdl3.isKeyPressed(key: 80) {
             hiQ = not hiQ
             if hiQ {
                 width = finalW
@@ -98,7 +98,7 @@ func main() {
         }
 
         # reset camera (R)
-        if sdlIsKeyPressed(key: 82) {
+        if sdl3.isKeyPressed(key: 82) {
             camPos = vec3(x: 0.0, y: -2.2, z: 0.7)
             yaw = pi / 2.0
             pitch = -0.12
@@ -106,54 +106,54 @@ func main() {
         }
 
         # keyboard movement
-        if sdlIsKeyDown(key: 87) {
+        if sdl3.isKeyDown(key: 87) {
             camPos = vadd(a: camPos, b: vscale(a: fwd, s: moveStep))
             moved = true
         }
-        if sdlIsKeyDown(key: 83) {
+        if sdl3.isKeyDown(key: 83) {
             camPos = vsub(a: camPos, b: vscale(a: fwd, s: moveStep))
             moved = true
         }
         let rgt: Vec3 = vnorm(a: vcross(a: fwd, b: worldUp))
-        if sdlIsKeyDown(key: 68) {
+        if sdl3.isKeyDown(key: 68) {
             camPos = vadd(a: camPos, b: vscale(a: rgt, s: moveStep))
             moved = true
         }
-        if sdlIsKeyDown(key: 65) {
+        if sdl3.isKeyDown(key: 65) {
             camPos = vsub(a: camPos, b: vscale(a: rgt, s: moveStep))
             moved = true
         }
-        if sdlIsKeyDown(key: 69) {
+        if sdl3.isKeyDown(key: 69) {
             camPos = vadd(a: camPos, b: vscale(a: worldUp, s: moveStep))
             moved = true
         }
-        if sdlIsKeyDown(key: 81) {
+        if sdl3.isKeyDown(key: 81) {
             camPos = vsub(a: camPos, b: vscale(a: worldUp, s: moveStep))
             moved = true
         }
 
         # arrow keys: look
-        if sdlIsKeyDown(key: 262) {
+        if sdl3.isKeyDown(key: 262) {
             yaw = yaw - rotStep
             moved = true
         }
-        if sdlIsKeyDown(key: 263) {
+        if sdl3.isKeyDown(key: 263) {
             yaw = yaw + rotStep
             moved = true
         }
-        if sdlIsKeyDown(key: 265) {
+        if sdl3.isKeyDown(key: 265) {
             pitch = pitch + rotStep
             moved = true
         }
-        if sdlIsKeyDown(key: 264) {
+        if sdl3.isKeyDown(key: 264) {
             pitch = pitch - rotStep
             moved = true
         }
 
         # mouse drag (hold left button) to look
-        let mx: Int = sdlGetMouseX()
-        let my: Int = sdlGetMouseY()
-        let dragging: Bool = sdlIsMouseButtonDown(button: 0)
+        let mx: Int = sdl3.getMouseX()
+        let my: Int = sdl3.getMouseY()
+        let dragging: Bool = sdl3.isMouseButtonDown(button: 0)
         if dragging {
             let dx: Int = mx - prevMouseX
             let dy: Int = my - prevMouseY
@@ -212,14 +212,14 @@ func main() {
         }
         # Upload the active framebuffer; the texture resizes itself when the
         # preview/final resolution toggles, and stretches to fill the window.
-        sdlUpdatePixels(pixels: fb.data, w: width, h: height)
-        sdlPresent()
+        sdl3.updatePixels(pixels: fb.data, w: width, h: height)
+        sdl3.present()
 
         var qlabel: String = "PREVIEW"
         if hiQ {
             qlabel = "FINAL"
         }
-        sdlSetTitle(title: "Rae step 5 (SDL3) | {qlabel} {width}x{height} | {sampleCount} spp | P quality  R reset  WASD/E-Q move  arrows/LMB-drag look")
+        sdl3.setTitle(title: "Rae step 5 (SDL3) | {qlabel} {width}x{height} | {sampleCount} spp | P quality  R reset  WASD/E-Q move  arrows/LMB-drag look")
     }
-    sdlCloseWindow()
+    sdl3.closeWindow()
 }

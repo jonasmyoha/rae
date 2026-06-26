@@ -48,8 +48,8 @@ func main() {
         i = i + 1
     }
 
-    sdlInitWindow(width: width, height: height, title: "Rae raytracer — step 3 (materials + camera + threads)")
-    sdlSetTargetFPS(fps: 60)
+    sdl3.initWindow(width: width, height: height, title: "Rae raytracer — step 3 (materials + camera + threads)")
+    sdl3.setTargetFPS(fps: 60)
 
     # Four quadrants, one worker thread each (equal 960x540 blocks at Full HD).
     let halfW: Int = width / 2
@@ -68,8 +68,8 @@ func main() {
     var n3: Int = 0
     let startMs: Int = nowMs()
     var doneMs: Int = 0
-    loop not sdlShouldClose() {
-        if sdlIsKeyPressed(key: 291) { let s: Bool = imageSavePng(path: "rae_render.png", pixels: fb.data, width: width, height: height) }
+    loop not sdl3.shouldClose() {
+        if sdl3.isKeyPressed(key: 291) { let s: Bool = image.savePng(path: "rae_render.png", pixels: fb.data, width: width, height: height) }
 
         if n0 < t0 or n1 < t1 or n2 < t2 or n3 < t3 {
             var c0: Int = n0
@@ -121,17 +121,17 @@ func main() {
             }
         }
 
-        sdlUpdatePixels(pixels: fb.data, w: width, h: height)
-        sdlPresent()
+        sdl3.updatePixels(pixels: fb.data, w: width, h: height)
+        sdl3.present()
         let done: Int = n0 + n1 + n2 + n3
         let total: Int = t0 + t1 + t2 + t3
         var pct: Int = done * 100 / total
         if pct > 100 { pct = 100 }
         if doneMs > 0 {
-            sdlSetTitle(title: "Rae step 3 (SDL3) | 4 threads, 1 per quadrant | {width}x{height} | done in {doneMs}ms")
+            sdl3.setTitle(title: "Rae step 3 (SDL3) | 4 threads, 1 per quadrant | {width}x{height} | done in {doneMs}ms")
         } else {
-            sdlSetTitle(title: "Rae step 3 (SDL3) | 4 threads, 1 per quadrant | {width}x{height} | {pct}%")
+            sdl3.setTitle(title: "Rae step 3 (SDL3) | 4 threads, 1 per quadrant | {width}x{height} | {pct}%")
         }
     }
-    sdlCloseWindow()
+    sdl3.closeWindow()
 }
