@@ -16,14 +16,53 @@ import sdf_text
 import vec3
 import scene
 import camera
+import bvh
 
 type GpuRT {
     sceneBuf: Int
     boxBuf: Int
+    bvhBuf: Int
+    refBuf: Int
     accumBuf: Int
     outBuf: Int
     paramsBuf: Int
     kernel: Int
+}
+
+# Flattened sphere BVH (nodes) + the reordered sphere-index list (refs), ready
+# to upload. Rebuilt only when the scene changes (not per frame/resolution).
+type SceneGpu {
+    nodes: List(Float)
+    refs: List(Float)
+}
+
+func buildSphereBvh(world: view List(Sphere)) ret SceneGpu {
+    let prims: List(PrimRec) = createList(PrimRec, cap: world.length + 1)
+    var i: Int = 0
+    loop i < world.length {
+        let s: Sphere = rae_ext_rae_buf_get(buf: world.data, index: i)
+        prims.add(value: {
+            mnx: s.center.x - s.radius, mny: s.center.y - s.radius, mnz: s.center.z - s.radius,
+            mxx: s.center.x + s.radius, mxy: s.center.y + s.radius, mxz: s.center.z + s.radius,
+            cx: s.center.x, cy: s.center.y, cz: s.center.z, ref: i
+        })
+        i = i + 1
+    }
+    let nodes: List(Float) = buildBvh(prims: prims, leafSize: 4)
+    let refs: List(Float) = createList(Float, cap: prims.length + 1)
+    i = 0
+    loop i < prims.length {
+        let p: PrimRec = rae_ext_rae_buf_get(buf: prims.data, index: i)
+        refs.add(value: p.ref.toFloat())
+        i = i + 1
+    }
+    # storage bindings can't be zero-size — pad empty buffers with a dummy entry
+    if refs.length is 0 { refs.add(value: 0.0) }
+    if nodes.length is 0 {
+        var z: Int = 0
+        loop z < 8 { nodes.add(value: 0.0)  z = z + 1 }
+    }
+    ret SceneGpu { nodes: nodes, refs: refs }
 }
 
 # Pack a box list into f32 (lo3 hi3 albedo3 kind fuzz ior = 12 each). Emits a
@@ -78,11 +117,14 @@ func sceneFloats(cam: view Camera, world: view List(Sphere)) ret List(Float) {
     ret s
 }
 
-func buildGpuRT(wgsl: view String, scene: view List(Float), boxes: view List(Float), params: view List(Int), pixels: view Int) ret GpuRT {
+func buildGpuRT(wgsl: view String, scene: view List(Float), boxes: view List(Float),
+                nodes: view List(Float), refs: view List(Float), params: view List(Int), pixels: view Int) ret GpuRT {
     gpuReset()
     ret GpuRT {
         sceneBuf: gpuStorageF32(data: scene.data, count: scene.length),
         boxBuf: gpuStorageF32(data: boxes.data, count: boxes.length),
+        bvhBuf: gpuStorageF32(data: nodes.data, count: nodes.length),
+        refBuf: gpuStorageF32(data: refs.data, count: refs.length),
         accumBuf: gpuAllocF32(count: pixels * 4),
         outBuf: gpuAllocU32(count: pixels),
         paramsBuf: gpuUniformU32(data: params.data, count: 12),
@@ -142,7 +184,8 @@ func main() {
     params.set(index: 7, value: skyMode)
     params.set(index: 8, value: boxes.length)
 
-    var rt: GpuRT = buildGpuRT(wgsl: wgsl, scene: sceneFloats(cam: cam, world: world), boxes: boxFloats(boxes: boxes), params: params, pixels: width * height)
+    var sceneGpu: SceneGpu = buildSphereBvh(world: world)
+    var rt: GpuRT = buildGpuRT(wgsl: wgsl, scene: sceneFloats(cam: cam, world: world), boxes: boxFloats(boxes: boxes), nodes: sceneGpu.nodes, refs: sceneGpu.refs, params: params, pixels: width * height)
     var fb: List(Int) = createList(cap: width * height)
     var fbi: Int = 0
     loop fbi < width * height { fb.add(value: 0)  fbi = fbi + 1 }
@@ -175,7 +218,8 @@ func main() {
             params.set(index: 4, value: world.length)
             params.set(index: 7, value: skyMode)
             params.set(index: 8, value: boxes.length)
-            rt = buildGpuRT(wgsl: wgsl, scene: sceneFloats(cam: cam, world: world), boxes: boxFloats(boxes: boxes), params: params, pixels: width * height)
+            sceneGpu = buildSphereBvh(world: world)
+            rt = buildGpuRT(wgsl: wgsl, scene: sceneFloats(cam: cam, world: world), boxes: boxFloats(boxes: boxes), nodes: sceneGpu.nodes, refs: sceneGpu.refs, params: params, pixels: width * height)
             sampleIndex = 0
             spp = 1
         }
@@ -186,7 +230,7 @@ func main() {
             if hiRes { width = 1920  height = 1080 } else { width = 960  height = 540 }
             params.set(index: 0, value: width)
             params.set(index: 1, value: height)
-            rt = buildGpuRT(wgsl: wgsl, scene: sceneFloats(cam: cam, world: world), boxes: boxFloats(boxes: boxes), params: params, pixels: width * height)
+            rt = buildGpuRT(wgsl: wgsl, scene: sceneFloats(cam: cam, world: world), boxes: boxFloats(boxes: boxes), nodes: sceneGpu.nodes, refs: sceneGpu.refs, params: params, pixels: width * height)
             fb = createList(cap: width * height)
             fbi = 0
             loop fbi < width * height { fb.add(value: 0)  fbi = fbi + 1 }
@@ -231,13 +275,15 @@ func main() {
         params.set(index: 6, value: spp)
         gpuWriteU32(buf: rt.paramsBuf, data: params.data, count: 8)
 
-        let bufs: List(Int) = createList(cap: 5)
+        let bufs: List(Int) = createList(cap: 7)
         bufs.add(value: rt.paramsBuf)
         bufs.add(value: rt.sceneBuf)
         bufs.add(value: rt.accumBuf)
         bufs.add(value: rt.outBuf)
         bufs.add(value: rt.boxBuf)
-        gpuRun(kernel: rt.kernel, bufs: bufs.data, bufCount: 5, gx: (width + 7) / 8, gy: (height + 7) / 8, gz: 1)
+        bufs.add(value: rt.bvhBuf)
+        bufs.add(value: rt.refBuf)
+        gpuRun(kernel: rt.kernel, bufs: bufs.data, bufCount: 7, gx: (width + 7) / 8, gy: (height + 7) / 8, gz: 1)
         gpuDownloadU32(buf: rt.outBuf, out: fb.data, count: width * height)
 
         # FPS (exponential smoothing) + MTSDF text overlay, composited into fb.
