@@ -75,8 +75,9 @@ func dirName(path: view String) ret String
 func ext(path: view String) ret String
 ```
 
-Usage: `filesystem.desktopDir()`, `filesystem.exists(path)`, `path.filesystem.exists()`
-once namespace-qualified UFCS lands.
+Usage: `filesystem.desktopDir()`, `filesystem.exists(path)`. (There is no
+`path.filesystem.exists()` form — a namespace never appears inside a UFCS chain;
+see `module-namespacing.md`.)
 
 ---
 
