@@ -11,7 +11,7 @@ struct Params {
   sphereCount: u32,
   seed: u32,
   samplesPerFrame: u32,   // new samples to take this dispatch (adaptive)
-  _pad1: u32,
+  skyMode: u32,           // 0 = bright gradient, 1 = dim (scene lit by emitters)
 };
 
 @group(0) @binding(0) var<uniform> P: Params;
@@ -83,6 +83,9 @@ fn rayColor(ro0: vec3<f32>, rd0: vec3<f32>) -> vec3<f32> {
       if (t > 0.001 && t < best) { best = t; hitIdx = i32(i); }
     }
     if (hitIdx < 0) {
+      if (P.skyMode == 1u) {
+        return atten * vec3<f32>(0.015, 0.015, 0.02);  // dim ambient — scene lit by emitters
+      }
       let u: vec3<f32> = normalize(rd);
       let tt: f32 = 0.5 * (u.z + 1.0);
       let sky: vec3<f32> = vec3<f32>((1.0 - tt) + tt * 0.5, (1.0 - tt) + tt * 0.7, (1.0 - tt) + tt * 1.0);
@@ -93,7 +96,9 @@ fn rayColor(ro0: vec3<f32>, rd0: vec3<f32>) -> vec3<f32> {
     let n: vec3<f32> = (p - sp.center) * (1.0 / sp.radius);
     var scatter: vec3<f32>;
     var localAtten: vec3<f32> = sp.albedo;
-    if (sp.kind == 0) {
+    if (sp.kind == 3) {
+      return atten * sp.albedo;   // emissive light: emit + terminate
+    } else if (sp.kind == 0) {
       scatter = n + randomUnit();
     } else if (sp.kind == 1) {
       let ud: vec3<f32> = normalize(rd);
