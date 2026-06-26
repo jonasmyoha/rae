@@ -13,30 +13,30 @@ import core
 
 # --- Buffers (handles) ---------------------------------------------------
 # Read-only storage buffer filled from a Float[] (narrowed to f32).
-func gpuStorageF32(data: view Buffer(Float), count: Int) extern ret Int
+func storageF32(data: view Buffer(Float), count: Int) extern ret Int
 # Read-write storage buffer of `count` f32, also copyable for readback.
-func gpuAllocF32(count: Int) extern ret Int
+func allocF32(count: Int) extern ret Int
 # Uniform buffer filled from an Int[] (narrowed to u32) — e.g. params.
-func gpuUniformU32(data: view Buffer(Int), count: Int) extern ret Int
+func uniformU32(data: view Buffer(Int), count: Int) extern ret Int
 # Read-write storage buffer of `count` u32, copyable for readback.
-func gpuAllocU32(count: Int) extern ret Int
+func allocU32(count: Int) extern ret Int
 
 # Overwrite an existing buffer's contents (same element count) — for per-frame
 # updates (e.g. a moving camera, a frame counter) without reallocating, so an
 # interactive/progressive loop reuses persistent GPU buffers.
-func gpuWriteF32(buf: Int, data: view Buffer(Float), count: Int) extern
-func gpuWriteU32(buf: Int, data: view Buffer(Int), count: Int) extern
+func writeF32(buf: Int, data: view Buffer(Float), count: Int) extern
+func writeU32(buf: Int, data: view Buffer(Int), count: Int) extern
 
 # --- Kernel + dispatch ---------------------------------------------------
 # Compile a WGSL compute kernel; `entry` is the @compute function name.
-func gpuKernel(wgsl: view String, entry: view String) extern ret Int
+func kernel(wgsl: view String, entry: view String) extern ret Int
 # Bind `bufCount` buffer handles to @binding(0..n) in order and dispatch a
 # gx*gy*gz grid of workgroups. Blocks until the GPU finishes.
-func gpuRun(kernel: Int, bufs: view Buffer(Int), bufCount: Int, gx: Int, gy: Int, gz: Int) extern
+func run(kernel: Int, bufs: view Buffer(Int), bufCount: Int, gx: Int, gy: Int, gz: Int) extern
 
 # --- Readback ------------------------------------------------------------
-func gpuDownloadF32(buf: Int, out: mod Buffer(Float), count: Int) extern
-func gpuDownloadU32(buf: Int, out: mod Buffer(Int), count: Int) extern
+func downloadF32(buf: Int, out: mod Buffer(Float), count: Int) extern
+func downloadU32(buf: Int, out: mod Buffer(Int), count: Int) extern
 
 # Release every buffer + kernel handle (device stays cached for reuse).
-func gpuReset() extern
+func reset() extern
