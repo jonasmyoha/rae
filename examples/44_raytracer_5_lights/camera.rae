@@ -22,19 +22,19 @@ type Camera {
 # Build a camera from position + look-at target + vertical FOV + aperture.
 # World up is +Z; focus distance is fixed at 1 (target is one unit ahead).
 func buildCamera(pos: view Vec3, target: view Vec3, vfovDeg: view Float, aperture: view Float, aspect: view Float) ret Camera {
-    let worldUp: Vec3 = vec3(x: 0.0, y: 0.0, z: 1.0)
-    let fwd: Vec3 = vnorm(a: vsub(a: target, b: pos))
-    let right: Vec3 = vnorm(a: vcross(a: fwd, b: worldUp))
-    let up: Vec3 = vcross(a: right, b: fwd)
+    let worldUp: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
+    let fwd: Vec3 = vec3.vnorm(a: vec3.vsub(a: target, b: pos))
+    let right: Vec3 = vec3.vnorm(a: vec3.vcross(a: fwd, b: worldUp))
+    let up: Vec3 = vec3.vcross(a: right, b: fwd)
     let focus: Float = 1.0
     let theta: Float = vfovDeg * pi / 180.0
     let halfH: Float = math.tan(x: theta / 2.0)
     let vpH: Float = 2.0 * halfH * focus
     let vpW: Float = aspect * vpH
-    let horiz: Vec3 = vscale(a: right, s: vpW)
-    let vert: Vec3 = vscale(a: up, s: vpH)
-    let center: Vec3 = vadd(a: pos, b: vscale(a: fwd, s: focus))
-    let ll: Vec3 = vsub(a: vsub(a: center, b: vscale(a: horiz, s: 0.5)), b: vscale(a: vert, s: 0.5))
+    let horiz: Vec3 = vec3.vscale(a: right, s: vpW)
+    let vert: Vec3 = vec3.vscale(a: up, s: vpH)
+    let center: Vec3 = vec3.vadd(a: pos, b: vec3.vscale(a: fwd, s: focus))
+    let ll: Vec3 = vec3.vsub(a: vec3.vsub(a: center, b: vec3.vscale(a: horiz, s: 0.5)), b: vec3.vscale(a: vert, s: 0.5))
     ret Camera {
         origin: pos,
         lowerLeft: ll,
@@ -55,8 +55,8 @@ func makeRay(cam: view Camera, u: view Float, v: view Float) ret Ray {
         let r: Float = cam.lensRadius * math.sqrt(x: random())
         let lx: Float = r * math.cos(x: a)
         let ly: Float = r * math.sin(x: a)
-        ro = vadd(a: cam.origin, b: vadd(a: vscale(a: cam.right, s: lx), b: vscale(a: cam.up, s: ly)))
+        ro = vec3.vadd(a: cam.origin, b: vec3.vadd(a: vec3.vscale(a: cam.right, s: lx), b: vec3.vscale(a: cam.up, s: ly)))
     }
-    let target: Vec3 = vadd(a: cam.lowerLeft, b: vadd(a: vscale(a: cam.horizontal, s: u), b: vscale(a: cam.vertical, s: v)))
-    ret Ray { origin: ro, dir: vsub(a: target, b: ro) }
+    let target: Vec3 = vec3.vadd(a: cam.lowerLeft, b: vec3.vadd(a: vec3.vscale(a: cam.horizontal, s: u), b: vec3.vscale(a: cam.vertical, s: v)))
+    ret Ray { origin: ro, dir: vec3.vsub(a: target, b: ro) }
 }

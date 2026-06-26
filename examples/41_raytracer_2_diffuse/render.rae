@@ -8,14 +8,14 @@ func randomUnit() ret Vec3 {
     let a: Float = random() * tau
     let z: Float = random() * 2.0 - 1.0
     let r: Float = math.sqrt(x: 1.0 - z * z)
-    ret vec3(x: r * math.cos(x: a), y: r * math.sin(x: a), z: z)
+    ret vec3.create(x: r * math.cos(x: a), y: r * math.sin(x: a), z: z)
 }
 
 func hitSphere(s: view Sphere, ro: view Vec3, rd: view Vec3) ret Float {
-    let oc: Vec3 = vsub(a: ro, b: s.center)
-    let a: Float = vdot(a: rd, b: rd)
-    let halfB: Float = vdot(a: oc, b: rd)
-    let c: Float = vdot(a: oc, b: oc) - s.radius * s.radius
+    let oc: Vec3 = vec3.vsub(a: ro, b: s.center)
+    let a: Float = vec3.vdot(a: rd, b: rd)
+    let halfB: Float = vec3.vdot(a: oc, b: rd)
+    let c: Float = vec3.vdot(a: oc, b: oc) - s.radius * s.radius
     let disc: Float = halfB * halfB - a * c
     if disc < 0.0 {
         ret -1.0
@@ -26,7 +26,7 @@ func hitSphere(s: view Sphere, ro: view Vec3, rd: view Vec3) ret Float {
 # Recursive path trace: linear RGB in [0,1].
 func rayColor(world: view List(Sphere), ro: view Vec3, rd: view Vec3, depth: view Int) ret Vec3 {
     if depth <= 0 {
-        ret vec3(x: 0.0, y: 0.0, z: 0.0)
+        ret vec3.create(x: 0.0, y: 0.0, z: 0.0)
     }
     var best: Float = 1000000.0
     var hitIdx: Int = -1
@@ -43,17 +43,17 @@ func rayColor(world: view List(Sphere), ro: view Vec3, rd: view Vec3, depth: vie
         i = i + 1
     }
     if hitIdx < 0 {
-        let u: Vec3 = vnorm(a: rd)
+        let u: Vec3 = vec3.vnorm(a: rd)
         let tt: Float = 0.5 * (u.z + 1.0)
-        ret vec3(x: (1.0 - tt) + tt * 0.5, y: (1.0 - tt) + tt * 0.7, z: (1.0 - tt) + tt * 1.0)
+        ret vec3.create(x: (1.0 - tt) + tt * 0.5, y: (1.0 - tt) + tt * 0.7, z: (1.0 - tt) + tt * 1.0)
     }
     let s: Sphere = world.at(index: hitIdx)
-    let p: Vec3 = vadd(a: ro, b: vscale(a: rd, s: best))
-    let n: Vec3 = vscale(a: vsub(a: p, b: s.center), s: 1.0 / s.radius)
+    let p: Vec3 = vec3.vadd(a: ro, b: vec3.vscale(a: rd, s: best))
+    let n: Vec3 = vec3.vscale(a: vec3.vsub(a: p, b: s.center), s: 1.0 / s.radius)
     # Lambertian scatter toward normal + random unit vector.
-    let scatter: Vec3 = vadd(a: n, b: randomUnit())
+    let scatter: Vec3 = vec3.vadd(a: n, b: randomUnit())
     let bounced: Vec3 = rayColor(world: world, ro: p, rd: scatter, depth: depth - 1)
-    ret vmul(a: s.albedo, b: bounced)
+    ret vec3.vmul(a: s.albedo, b: bounced)
 }
 
 # Render one scanline with `samples` jittered rays per pixel + gamma. Z-up.
@@ -72,7 +72,7 @@ func renderRow(fb: mod List(Int), world: view List(Sphere), width: view Int, hei
             let u: Float = (x.toFloat() + random()) / (width - 1).toFloat()
             let v: Float = ((height - 1 - y).toFloat() + random()) / (height - 1).toFloat()
             let rd: Vec3 = { x: llx + u * vw, y: 1.0, z: -1.0 + v * 2.0 }
-            acc = vadd(a: acc, b: rayColor(world: world, ro: ro, rd: rd, depth: maxDepth))
+            acc = vec3.vadd(a: acc, b: rayColor(world: world, ro: ro, rd: rd, depth: maxDepth))
             sIdx = sIdx + 1
         }
         let inv: Float = 1.0 / samples.toFloat()

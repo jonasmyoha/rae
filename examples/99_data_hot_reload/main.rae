@@ -41,7 +41,7 @@ func main() {
 
   let paths: List(String) = createList(String, cap: 1)
   paths.add(value: configPath)
-  let watcher: FileWatcher = createFileWatcher(
+  let watcher: FileWatcher = file_watch.createFileWatcher(
     paths: paths
     enabled: true
     intervalSec: 0.0
@@ -55,7 +55,7 @@ func main() {
   var tick: Int = 0
   var now: Float = 0.0
   loop tick < 6 {
-    if checkForChanges(watcher: watcher, now: now) {
+    if file_watch.checkForChanges(watcher: watcher, now: now) {
       log("tick {tick}: reloaded -> {loadConfig(path: configPath)}")
     } else {
       log("tick {tick}: idle")

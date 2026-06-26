@@ -56,17 +56,17 @@ func main() {
     sdl3.setTargetFPS(fps: 60)
 
     # camera state (Z-up): position + yaw (about +Z) + pitch (about +X).
-    var camPos: Vec3 = vec3(x: 0.0, y: -2.2, z: 0.7)
+    var camPos: Vec3 = vec3.create(x: 0.0, y: -2.2, z: 0.7)
     var yaw: Float = pi / 2.0
     var pitch: Float = -0.12
     let moveStep: Float = 0.08
     let rotStep: Float = 0.03
     let mouseSens: Float = 0.005
-    let worldUp: Vec3 = vec3(x: 0.0, y: 0.0, z: 1.0)
+    let worldUp: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
     let aspect: Float = finalW.toFloat() / finalH.toFloat()
 
-    var fwd: Vec3 = vec3(x: math.cos(x: pitch) * math.cos(x: yaw), y: math.cos(x: pitch) * math.sin(x: yaw), z: math.sin(x: pitch))
-    var cam: Camera = buildCamera(pos: camPos, target: vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
+    var fwd: Vec3 = vec3.create(x: math.cos(x: pitch) * math.cos(x: yaw), y: math.cos(x: pitch) * math.sin(x: yaw), z: math.sin(x: pitch))
+    var cam: Camera = buildCamera(pos: camPos, target: vec3.vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
 
     var hiQ: Bool = false
     var width: Int = prevW
@@ -99,7 +99,7 @@ func main() {
 
         # reset camera (R)
         if sdl3.isKeyPressed(key: 82) {
-            camPos = vec3(x: 0.0, y: -2.2, z: 0.7)
+            camPos = vec3.create(x: 0.0, y: -2.2, z: 0.7)
             yaw = pi / 2.0
             pitch = -0.12
             moved = true
@@ -107,28 +107,28 @@ func main() {
 
         # keyboard movement
         if sdl3.isKeyDown(key: 87) {
-            camPos = vadd(a: camPos, b: vscale(a: fwd, s: moveStep))
+            camPos = vec3.vadd(a: camPos, b: vec3.vscale(a: fwd, s: moveStep))
             moved = true
         }
         if sdl3.isKeyDown(key: 83) {
-            camPos = vsub(a: camPos, b: vscale(a: fwd, s: moveStep))
+            camPos = vec3.vsub(a: camPos, b: vec3.vscale(a: fwd, s: moveStep))
             moved = true
         }
-        let rgt: Vec3 = vnorm(a: vcross(a: fwd, b: worldUp))
+        let rgt: Vec3 = vec3.vnorm(a: vec3.vcross(a: fwd, b: worldUp))
         if sdl3.isKeyDown(key: 68) {
-            camPos = vadd(a: camPos, b: vscale(a: rgt, s: moveStep))
+            camPos = vec3.vadd(a: camPos, b: vec3.vscale(a: rgt, s: moveStep))
             moved = true
         }
         if sdl3.isKeyDown(key: 65) {
-            camPos = vsub(a: camPos, b: vscale(a: rgt, s: moveStep))
+            camPos = vec3.vsub(a: camPos, b: vec3.vscale(a: rgt, s: moveStep))
             moved = true
         }
         if sdl3.isKeyDown(key: 69) {
-            camPos = vadd(a: camPos, b: vscale(a: worldUp, s: moveStep))
+            camPos = vec3.vadd(a: camPos, b: vec3.vscale(a: worldUp, s: moveStep))
             moved = true
         }
         if sdl3.isKeyDown(key: 81) {
-            camPos = vsub(a: camPos, b: vscale(a: worldUp, s: moveStep))
+            camPos = vec3.vsub(a: camPos, b: vec3.vscale(a: worldUp, s: moveStep))
             moved = true
         }
 
@@ -176,8 +176,8 @@ func main() {
             if pitch < -1.5 {
                 pitch = -1.5
             }
-            fwd = vec3(x: math.cos(x: pitch) * math.cos(x: yaw), y: math.cos(x: pitch) * math.sin(x: yaw), z: math.sin(x: pitch))
-            cam = buildCamera(pos: camPos, target: vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
+            fwd = vec3.create(x: math.cos(x: pitch) * math.cos(x: yaw), y: math.cos(x: pitch) * math.sin(x: yaw), z: math.sin(x: pitch))
+            cam = buildCamera(pos: camPos, target: vec3.vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
             sampleCount = 0
         }
 
