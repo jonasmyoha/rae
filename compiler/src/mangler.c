@@ -284,10 +284,24 @@ const char* rae_mangle_type(CompilerContext* ctx, const struct AstIdentifierPart
     return rae_mangle_type_ext(ctx, generic_params, type, false);
 }
 
+// A public-API extern from a stdlib module (lives in lib/, not core/raylib, a
+// simple-identifier module name, not internal rae_/__ plumbing) binds to the
+// namespace-qualified C symbol `rae_ext_<module>_<name>` (docs/module-namespacing.md,
+// Option B). Computed once and used to (a) keep find_raylib_mapping from
+// hijacking de-prefixed names that collide with raylib's API (initWindow,
+// isKeyDown, …) and (b) emit the qualified symbol below.
+static bool is_namespaced_stdlib_extern(const AstFuncDecl* func) {
+    if (!func->is_extern || !func->module_name || !func->origin_file) return false;
+    if (strcmp(func->module_name, "core") == 0 || strcmp(func->module_name, "raylib") == 0) return false;
+    if (strchr(func->module_name, '/') || strchr(func->module_name, '\\')) return false;
+    if (str_starts_with_cstr(func->name, "rae_") || str_starts_with_cstr(func->name, "__")) return false;
+    return strstr(func->origin_file, "/lib/") != NULL || strncmp(func->origin_file, "lib/", 4) == 0;
+}
+
 const char* rae_mangle_function(CompilerContext* ctx, const AstFuncDecl* func) {
     if (!func) return "unknown";
     if (func->specialization_args) return rae_mangle_specialized_function(ctx, func, func->specialization_args);
-    if (find_raylib_mapping(func->name)) { char* res = arena_alloc(ctx->ast_arena, func->name.len + 9); sprintf(res, "rae_ext_%.*s", (int)func->name.len, func->name.data); return res; }
+    if (find_raylib_mapping(func->name) && !is_namespaced_stdlib_extern(func)) { char* res = arena_alloc(ctx->ast_arena, func->name.len + 9); sprintf(res, "rae_ext_%.*s", (int)func->name.len, func->name.data); return res; }
 
     if (func->is_extern) {
         Str name = func->name; const char* mapped = NULL;
@@ -339,22 +353,9 @@ const char* rae_mangle_function(CompilerContext* ctx, const AstFuncDecl* func) {
         else if (str_eq_cstr(name, "__buf_resize")) mapped = "rae_ext___buf_resize";
 
         if (mapped) { char* res = arena_alloc(ctx->ast_arena, strlen(mapped) + 1); strcpy(res, mapped); return res; }
-        // Namespace-qualified stdlib extern (docs/module-namespacing.md): a
-        // public-API extern in a stdlib module (lives in lib/, not core, not
-        // internal `rae_`/`__` plumbing) binds to `rae_ext_<module>_<name>`. The
-        // module is the namespace all the way down to the C ABI — no prefix, no
-        // mapping table. Gated to stdlib origin so project FFI externs are
-        // untouched; raylib is excluded until it is migrated/removed.
-        bool from_stdlib = func->origin_file
-            && (strstr(func->origin_file, "/lib/") != NULL
-                || strncmp(func->origin_file, "lib/", 4) == 0);
-        if (from_stdlib && func->module_name
-            && strcmp(func->module_name, "core") != 0
-            && strcmp(func->module_name, "raylib") != 0
-            && !strchr(func->module_name, '/')   // subdir modules aren't a simple
-            && !strchr(func->module_name, '\\')  // identifier namespace; keep flat
-            && !str_starts_with_cstr(func->name, "rae_")
-            && !str_starts_with_cstr(func->name, "__")) {
+        // Namespace-qualified stdlib extern -> rae_ext_<module>_<name> (the
+        // module is the namespace all the way down to the C ABI; no mapping table).
+        if (is_namespaced_stdlib_extern(func)) {
             size_t cap = strlen(func->module_name) + func->name.len + 12;
             char* res = arena_alloc(ctx->ast_arena, cap);
             snprintf(res, cap, "rae_ext_%s_%.*s", func->module_name, (int)func->name.len, func->name.data);
