@@ -1,0 +1,42 @@
+import core
+open png
+open compress/deflate
+open compress/inflate
+
+func main() {
+    let data: List(Int) = createList(cap: 500)
+    var i: Int = 0
+    loop i < 500 { data.add(value: 65 + ((i / 9) % 7) + (i % 2)) i = i + 1 }
+    let comp: List(Int) = deflateRaw(data: data, n: data.length)
+    let back: List(Int) = inflateRaw(data: comp, len: comp.length)
+    var m1: Int = 0
+    if back.length is not data.length { m1 = 1 }
+    i = 0
+    loop i < data.length and i < back.length { if back.at(index: i) is not data.at(index: i) { m1 = m1 + 1 } i = i + 1 }
+    log(m1)
+
+    let w: Int = 12
+    let h: Int = 8
+    let img: List(Int) = createList(cap: w * h)
+    var y: Int = 0
+    loop y < h {
+        var x: Int = 0
+        loop x < w {
+            let r: Int = (x * 20) % 256
+            let g: Int = (y * 30) % 256
+            let bl: Int = (x + y) % 256
+            img.add(value: (255 bsl 24) bor (r bsl 16) bor (g bsl 8) bor bl)
+            x = x + 1
+        }
+        y = y + 1
+    }
+    let pngBytes: List(Int) = encodePng(pixels: img, width: w, height: h, hasAlpha: true)
+    var ow: Int = 0
+    var oh: Int = 0
+    let dec: List(Int) = decodePng(png: pngBytes, len: pngBytes.length, width: ow, height: oh)
+    var m2: Int = 0
+    if (ow is not w or oh is not h) { m2 = 1 }
+    i = 0
+    loop i < img.length and i < dec.length { if dec.at(index: i) is not img.at(index: i) { m2 = m2 + 1 } i = i + 1 }
+    log(ow) log(oh) log(m2)
+}
