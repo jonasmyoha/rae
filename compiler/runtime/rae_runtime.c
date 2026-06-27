@@ -2927,21 +2927,21 @@ static int64_t* rae_compress_run(const int64_t* data, int64_t len, int64_t* out_
     if (out_len) *out_len = (int64_t)outsize;
     return result;
 }
-int64_t* rae_ext_oracleDeflate(const int64_t* data, int64_t len, int64_t* out_len) {
+int64_t* rae_ext_compress_oracle_deflate(const int64_t* data, int64_t len, int64_t* out_len) {
     return rae_compress_run(data, len, out_len, 1, 0);
 }
-int64_t* rae_ext_oracleInflate(const int64_t* data, int64_t len, int64_t* out_len) {
+int64_t* rae_ext_compress_oracle_inflate(const int64_t* data, int64_t len, int64_t* out_len) {
     return rae_compress_run(data, len, out_len, 0, 0);
 }
-int64_t* rae_ext_oracleZlibCompress(const int64_t* data, int64_t len, int64_t* out_len) {
+int64_t* rae_ext_compress_oracle_zlibCompress(const int64_t* data, int64_t len, int64_t* out_len) {
     return rae_compress_run(data, len, out_len, 1, 1);
 }
-int64_t* rae_ext_oracleZlibDecompress(const int64_t* data, int64_t len, int64_t* out_len) {
+int64_t* rae_ext_compress_oracle_zlibDecompress(const int64_t* data, int64_t len, int64_t* out_len) {
     return rae_compress_run(data, len, out_len, 0, 1);
 }
 /* Decode a PNG (held in a Buffer(Int) of bytes) to 0xAARRGGBB pixels via
  * lodepng — the oracle for testing the pure-Rae PNG decoder. */
-int64_t* rae_ext_oracleDecodePng(const int64_t* data, int64_t len, int64_t* w_out, int64_t* h_out) {
+int64_t* rae_ext_compress_oracle_decodePng(const int64_t* data, int64_t len, int64_t* w_out, int64_t* h_out) {
     if (w_out) *w_out = 0; if (h_out) *h_out = 0;
     if (!data || len <= 0) return NULL;
     unsigned char* in = (unsigned char*)malloc((size_t)len);
@@ -2961,7 +2961,7 @@ int64_t* rae_ext_oracleDecodePng(const int64_t* data, int64_t len, int64_t* w_ou
     return px;
 }
 /* Encode 0xAARRGGBB pixels to PNG bytes via lodepng — oracle for the encoder. */
-int64_t* rae_ext_oracleEncodePng(const int64_t* pixels, int64_t w, int64_t h, int64_t* out_len) {
+int64_t* rae_ext_compress_oracle_encodePng(const int64_t* pixels, int64_t w, int64_t h, int64_t* out_len) {
     if (out_len) *out_len = 0;
     if (!pixels || w <= 0 || h <= 0) return NULL;
     size_t count = (size_t)w * (size_t)h;
@@ -3792,7 +3792,7 @@ static rae_String rae_cstr_to_owned_rae_string(const char* s) {
     return (rae_String){buf, (int64_t)n, (int64_t)n + 1, 1};
 }
 
-void rae_ext_spotifyLaunch(void) {
+void rae_ext_sys_spotify_launch(void) {
     fprintf(stderr, "[spotify-c] launch\n");
     static const char* lines[] = {
         "tell application \"Spotify\" to if it is not running then launch",
@@ -3802,28 +3802,28 @@ void rae_ext_spotifyLaunch(void) {
     if (rc != 0) fprintf(stderr, "[spotify-c] launch failed (osascript rc=%d)\n", rc);
 }
 
-void rae_ext_spotifyPlay(void) {
+void rae_ext_sys_spotify_play(void) {
     fprintf(stderr, "[spotify-c] play\n");
     static const char* lines[] = { "tell application \"Spotify\" to play", NULL };
     int rc = rae_osascript_run(lines);
     if (rc != 0) fprintf(stderr, "[spotify-c] play failed (osascript rc=%d) — Spotify not running or Automation permission denied?\n", rc);
 }
 
-void rae_ext_spotifyPause(void) {
+void rae_ext_sys_spotify_pause(void) {
     fprintf(stderr, "[spotify-c] pause\n");
     static const char* lines[] = { "tell application \"Spotify\" to pause", NULL };
     int rc = rae_osascript_run(lines);
     if (rc != 0) fprintf(stderr, "[spotify-c] pause failed (osascript rc=%d)\n", rc);
 }
 
-void rae_ext_spotifyNext(void) {
+void rae_ext_sys_spotify_next(void) {
     fprintf(stderr, "[spotify-c] next\n");
     static const char* lines[] = { "tell application \"Spotify\" to next track", NULL };
     int rc = rae_osascript_run(lines);
     if (rc != 0) fprintf(stderr, "[spotify-c] next failed (osascript rc=%d)\n", rc);
 }
 
-void rae_ext_spotifyPrevious(void) {
+void rae_ext_sys_spotify_previous(void) {
     fprintf(stderr, "[spotify-c] previous\n");
     static const char* lines[] = { "tell application \"Spotify\" to previous track", NULL };
     int rc = rae_osascript_run(lines);
@@ -3833,7 +3833,7 @@ void rae_ext_spotifyPrevious(void) {
 /* Play a specific Spotify URI directly. Accepts spotify:track:<id>,
  * spotify:album:<id>, spotify:playlist:<id>, etc. Used when the local
  * album.json carries an explicit Spotify URI. */
-void rae_ext_spotifyPlayUri(rae_String uri) {
+void rae_ext_sys_spotify_playUri(rae_String uri) {
     if (!uri.data || uri.len == 0) return;
     fprintf(stderr, "[spotify-c] play uri=%.*s\n", (int)uri.len, (const char*)uri.data);
     char* uri_c = malloc((size_t)uri.len + 1);
@@ -3856,7 +3856,7 @@ void rae_ext_spotifyPlayUri(rae_String uri) {
  * The query is URL-encoded inline (alphanumerics + a few safe chars
  * pass through; everything else %xx). Quotes are escaped for the
  * AppleScript string literal. */
-void rae_ext_spotifyPlayQuery(rae_String query) {
+void rae_ext_sys_spotify_playQuery(rae_String query) {
     if (!query.data || query.len == 0) return;
     fprintf(stderr, "[spotify-c] play query=%.*s\n", (int)query.len, (const char*)query.data);
     /* URL-encode the query for the `spotify:search:` URI. A bare space
@@ -3917,7 +3917,7 @@ void rae_ext_spotifyPlayQuery(rae_String query) {
     rae_ext_activateSelf();
 }
 
-void rae_ext_spotifyRefresh(void) {
+void rae_ext_sys_spotify_refresh(void) {
     static const char* lines[] = {
         "tell application \"Spotify\"",
         "  set playerState to player state as text",
@@ -4004,16 +4004,16 @@ void rae_ext_spotifyRefresh(void) {
     }
 }
 
-rae_String rae_ext_spotifyState(void)       { return rae_cstr_to_owned_rae_string(g_spotify_cache.state); }
-rae_String rae_ext_spotifyTrackId(void)     { return rae_cstr_to_owned_rae_string(g_spotify_cache.trackId); }
-rae_String rae_ext_spotifyTrackName(void)   { return rae_cstr_to_owned_rae_string(g_spotify_cache.trackName); }
-rae_String rae_ext_spotifyArtistName(void)  { return rae_cstr_to_owned_rae_string(g_spotify_cache.artistName); }
-rae_String rae_ext_spotifyAlbumName(void)   { return rae_cstr_to_owned_rae_string(g_spotify_cache.albumName); }
-rae_String rae_ext_spotifyArtworkUrl(void)  { return rae_cstr_to_owned_rae_string(g_spotify_cache.artworkUrl); }
-double rae_ext_spotifyPosition(void)        { return g_spotify_cache.positionSec; }
-double rae_ext_spotifyDuration(void)        { return g_spotify_cache.durationSec; }
+rae_String rae_ext_sys_spotify_state(void)       { return rae_cstr_to_owned_rae_string(g_spotify_cache.state); }
+rae_String rae_ext_sys_spotify_trackId(void)     { return rae_cstr_to_owned_rae_string(g_spotify_cache.trackId); }
+rae_String rae_ext_sys_spotify_trackName(void)   { return rae_cstr_to_owned_rae_string(g_spotify_cache.trackName); }
+rae_String rae_ext_sys_spotify_artistName(void)  { return rae_cstr_to_owned_rae_string(g_spotify_cache.artistName); }
+rae_String rae_ext_sys_spotify_albumName(void)   { return rae_cstr_to_owned_rae_string(g_spotify_cache.albumName); }
+rae_String rae_ext_sys_spotify_artworkUrl(void)  { return rae_cstr_to_owned_rae_string(g_spotify_cache.artworkUrl); }
+double rae_ext_sys_spotify_position(void)        { return g_spotify_cache.positionSec; }
+double rae_ext_sys_spotify_duration(void)        { return g_spotify_cache.durationSec; }
 
-rae_Bool rae_ext_spotifyFetchArtwork(rae_String url, rae_String outPath) {
+rae_Bool rae_ext_sys_spotify_fetchArtwork(rae_String url, rae_String outPath) {
     if (!url.data || url.len == 0 || !outPath.data || outPath.len == 0) return false;
     char* url_c = malloc((size_t)url.len + 1);
     char* out_c = malloc((size_t)outPath.len + 1);
@@ -4050,7 +4050,7 @@ static void rae_url_encode_append(char* out, size_t* off, size_t cap, const char
     }
 }
 
-rae_String rae_ext_itunesSearchArtworkUrl(rae_String term) {
+rae_String rae_ext_sys_spotify_itunesSearchArtworkUrl(rae_String term) {
     if (!term.data || term.len == 0) return (rae_String){NULL, 0, 0, 0};
     char url[1024];
     size_t off = 0;
@@ -4110,23 +4110,23 @@ rae_String rae_ext_itunesSearchArtworkUrl(rae_String term) {
 
 #else  /* !__APPLE__ — Spotify bridge is macOS-only. Stubs return empty/false. */
 
-void rae_ext_spotifyLaunch(void)   {}
-void rae_ext_spotifyPlay(void)     {}
-void rae_ext_spotifyPause(void)    {}
-void rae_ext_spotifyNext(void)     {}
-void rae_ext_spotifyPrevious(void) {}
-void rae_ext_spotifyRefresh(void)  {}
-rae_String rae_ext_spotifyState(void)      { return (rae_String){NULL, 0, 0, 0}; }
-rae_String rae_ext_spotifyTrackId(void)    { return (rae_String){NULL, 0, 0, 0}; }
-rae_String rae_ext_spotifyTrackName(void)  { return (rae_String){NULL, 0, 0, 0}; }
-rae_String rae_ext_spotifyArtistName(void) { return (rae_String){NULL, 0, 0, 0}; }
-rae_String rae_ext_spotifyAlbumName(void)  { return (rae_String){NULL, 0, 0, 0}; }
-rae_String rae_ext_spotifyArtworkUrl(void) { return (rae_String){NULL, 0, 0, 0}; }
-double rae_ext_spotifyPosition(void)       { return 0.0; }
-double rae_ext_spotifyDuration(void)       { return 0.0; }
-void rae_ext_spotifyPlayUri(rae_String uri) { (void)uri; }
-void rae_ext_spotifyPlayQuery(rae_String query) { (void)query; }
-rae_Bool rae_ext_spotifyFetchArtwork(rae_String url, rae_String outPath) { (void)url; (void)outPath; return false; }
-rae_String rae_ext_itunesSearchArtworkUrl(rae_String term) { (void)term; return (rae_String){NULL, 0, 0, 0}; }
+void rae_ext_sys_spotify_launch(void)   {}
+void rae_ext_sys_spotify_play(void)     {}
+void rae_ext_sys_spotify_pause(void)    {}
+void rae_ext_sys_spotify_next(void)     {}
+void rae_ext_sys_spotify_previous(void) {}
+void rae_ext_sys_spotify_refresh(void)  {}
+rae_String rae_ext_sys_spotify_state(void)      { return (rae_String){NULL, 0, 0, 0}; }
+rae_String rae_ext_sys_spotify_trackId(void)    { return (rae_String){NULL, 0, 0, 0}; }
+rae_String rae_ext_sys_spotify_trackName(void)  { return (rae_String){NULL, 0, 0, 0}; }
+rae_String rae_ext_sys_spotify_artistName(void) { return (rae_String){NULL, 0, 0, 0}; }
+rae_String rae_ext_sys_spotify_albumName(void)  { return (rae_String){NULL, 0, 0, 0}; }
+rae_String rae_ext_sys_spotify_artworkUrl(void) { return (rae_String){NULL, 0, 0, 0}; }
+double rae_ext_sys_spotify_position(void)       { return 0.0; }
+double rae_ext_sys_spotify_duration(void)       { return 0.0; }
+void rae_ext_sys_spotify_playUri(rae_String uri) { (void)uri; }
+void rae_ext_sys_spotify_playQuery(rae_String query) { (void)query; }
+rae_Bool rae_ext_sys_spotify_fetchArtwork(rae_String url, rae_String outPath) { (void)url; (void)outPath; return false; }
+rae_String rae_ext_sys_spotify_itunesSearchArtworkUrl(rae_String term) { (void)term; return (rae_String){NULL, 0, 0, 0}; }
 
 #endif  /* __APPLE__ */

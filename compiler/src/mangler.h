@@ -22,6 +22,10 @@ const char* rae_mangle_type_specialized(CompilerContext* ctx, const AstIdentifie
  */
 const char* rae_mangle_function(CompilerContext* ctx, const AstFuncDecl* func);
 
+/* Encode a module path into a C-symbol-safe prefix (path separators '/'\'\\' -> '_').
+ * Used for namespaced stdlib extern symbols and the build-time collision check. */
+void rae_mangle_module_path(const char* module_path, char* out, size_t out_cap);
+
 /**
  * Mangles a specialized function instantiation.
  */
