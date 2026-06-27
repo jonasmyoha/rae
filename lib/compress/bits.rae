@@ -1,0 +1,66 @@
+# LSB-first bit reader over a byte buffer, for DEFLATE inflate (RFC 1951 §3.1.1:
+# data elements are packed starting with the least-significant bit of the byte).
+#
+# Part of the pure-Rae DEFLATE/PNG codec (docs/png-and-deflate-strategy.md).
+# Bytes live in a List(Int), each entry 0..255. The reader is mutated in place
+# (`mod BitReader`) as bits are consumed.
+import core
+
+type BitReader {
+    data: List(Int)   # source bytes (each 0..255)
+    len: Int          # number of valid bytes
+    pos: Int          # next byte index
+    bit: Int          # next bit within data[pos], 0..7 (LSB-first)
+    overrun: Bool     # set true if a read ran past the end (truncated stream)
+}
+
+func newBitReader(data: own List(Int), len: view Int) ret BitReader {
+    ret BitReader { data: data, len: len, pos: 0, bit: 0, overrun: false }
+}
+
+# Read a single bit (LSB-first). Advances the cursor.
+func getBit(this: mod BitReader) ret Int {
+    if this.pos >= this.len {
+        this.overrun = true
+        ret 0
+    }
+    let b: Int = this.data.at(index: this.pos)
+    let v: Int = (b bsr this.bit) band 1
+    this.bit = this.bit + 1
+    if this.bit is 8 {
+        this.bit = 0
+        this.pos = this.pos + 1
+    }
+    ret v
+}
+
+# Read n bits (LSB-first: the first bit read is the least significant).
+func getBits(this: mod BitReader, n: view Int) ret Int {
+    var result: Int = 0
+    var i: Int = 0
+    loop i < n {
+        result = result bor (getBit(this: this) bsl i)
+        i = i + 1
+    }
+    ret result
+}
+
+# Discard any remaining bits in the current byte, aligning to the next byte
+# boundary (used before a stored/uncompressed block).
+func alignToByte(this: mod BitReader) {
+    if this.bit is not 0 {
+        this.bit = 0
+        this.pos = this.pos + 1
+    }
+}
+
+# Read one whole byte directly (the cursor must be byte-aligned).
+func getByte(this: mod BitReader) ret Int {
+    if this.pos >= this.len {
+        this.overrun = true
+        ret 0
+    }
+    let b: Int = this.data.at(index: this.pos)
+    this.pos = this.pos + 1
+    ret b
+}

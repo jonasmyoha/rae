@@ -1,0 +1,42 @@
+# CRC-32 (PNG/zlib, polynomial 0xEDB88320) and Adler-32 (zlib) checksums.
+#
+# Part of the pure-Rae DEFLATE/PNG codec (docs/png-and-deflate-strategy.md) —
+# the container + zlib stream both need these. Pure computation: runs in both
+# Live and Compiled. Bytes are passed as a List(Int) where each entry is 0..255.
+import core
+
+# CRC-32 as used by PNG chunk CRCs (and gzip). Table-free (bit-at-a-time): the
+# values never exceed 32 bits and only ever shift right, so a 64-bit signed Int
+# holds them without masking.
+func crc32(data: view List(Int), len: view Int) ret Int {
+    var crc: Int = 4294967295            # 0xFFFFFFFF
+    var i: Int = 0
+    loop i < len {
+        crc = crc bxor data.at(index: i)
+        var k: Int = 0
+        loop k < 8 {
+            if crc band 1 is 1 {
+                crc = (crc bsr 1) bxor 3988292384   # 0xEDB88320
+            } else {
+                crc = crc bsr 1
+            }
+            k = k + 1
+        }
+        i = i + 1
+    }
+    ret crc bxor 4294967295
+}
+
+# Adler-32 as used by the zlib stream trailer. Two rolling sums mod 65521,
+# packed as (b << 16) | a.
+func adler32(data: view List(Int), len: view Int) ret Int {
+    var a: Int = 1
+    var b: Int = 0
+    var i: Int = 0
+    loop i < len {
+        a = (a + data.at(index: i)) % 65521
+        b = (b + a) % 65521
+        i = i + 1
+    }
+    ret (b bsl 16) bor a
+}
