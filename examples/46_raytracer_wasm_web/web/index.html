@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Rae raytracer — WASM (W1)</title>
+<title>Rae raytracer — WASM + WebGPU (W2)</title>
 <style>
   body { margin: 0; background: #0a0a0e; color: #cfe3ff;
          font: 14px ui-monospace, Menlo, monospace; display: grid;
@@ -17,18 +17,20 @@
   <canvas id="c" width="480" height="270"></canvas>
   <div id="status">loading…</div>
 <script type="module">
-// Minimal WASI (preview1) shim — just enough to run a compute program that
-// writes its RGB framebuffer to stdout (fd 1). No filesystem, no real args/env.
+// W1: a Rae compute core compiled to WASM writes its RGB framebuffer to stdout.
+// W2: present that framebuffer through the browser's own WebGPU — upload it to a
+// GPUTexture and blit it with a WGSL fullscreen shader (no Dawn/wgpu dependency;
+// the browser provides WebGPU). Falls back to a 2D canvas where WebGPU is absent.
 const WIDTH = 480, HEIGHT = 270;
 const status = document.getElementById('status');
 const canvas = document.getElementById('c');
-const ctx = canvas.getContext('2d');
 
-const stdout = [];                 // captured bytes from fd_write(1, ...)
-let mem;                           // WebAssembly.Memory (set after instantiate)
+// ---- WASI (preview1) shim: just enough to run a program that writes its RGB
+// framebuffer to stdout (fd 1). No filesystem, no real args/env. -------------
+const stdout = [];
+let mem;
 const u8  = () => new Uint8Array(mem.buffer);
 const dv  = () => new DataView(mem.buffer);
-
 class Exit { constructor(code){ this.code = code; } }
 
 const wasi = {
@@ -45,12 +47,11 @@ const wasi = {
     view.setUint32(nwrittenPtr, written, true);
     return 0;
   },
-  // Everything else: benign stubs (the program doesn't depend on them).
   args_sizes_get(c, b){ dv().setUint32(c,0,true); dv().setUint32(b,0,true); return 0; },
   args_get(){ return 0; },
   environ_sizes_get(c, b){ dv().setUint32(c,0,true); dv().setUint32(b,0,true); return 0; },
   environ_get(){ return 0; },
-  fd_prestat_get(){ return 8; },         // EBADF → stop preopen scan
+  fd_prestat_get(){ return 8; },
   fd_prestat_dir_name(){ return 8; },
   fd_fdstat_get(){ return 0; },
   fd_close(){ return 0; },
@@ -60,12 +61,70 @@ const wasi = {
   random_get(ptr, len){ const b = u8(); for (let i=0;i<len;i++) b[ptr+i] = (Math.random()*256)|0; return 0; },
 };
 
-function draw(rgb){
-  const img = ctx.createImageData(WIDTH, HEIGHT);
+// RGB (3 bytes/px) -> RGBA (texture upload format).
+function toRGBA(rgb){
+  const rgba = new Uint8Array(WIDTH * HEIGHT * 4);
   for (let i = 0, p = 0; i < WIDTH*HEIGHT; i++){
-    img.data[i*4+0] = rgb[p++]; img.data[i*4+1] = rgb[p++];
-    img.data[i*4+2] = rgb[p++]; img.data[i*4+3] = 255;
+    rgba[i*4+0]=rgb[p++]; rgba[i*4+1]=rgb[p++]; rgba[i*4+2]=rgb[p++]; rgba[i*4+3]=255;
   }
+  return rgba;
+}
+
+// ---- W2: present via browser WebGPU (texture + WGSL fullscreen blit) --------
+async function presentWebGPU(rgb){
+  if (!navigator.gpu) return false;
+  const adapter = await navigator.gpu.requestAdapter();
+  if (!adapter) return false;
+  const device  = await adapter.requestDevice();
+  const ctx     = canvas.getContext('webgpu');
+  const format  = navigator.gpu.getPreferredCanvasFormat();
+  ctx.configure({ device, format, alphaMode: 'opaque' });
+
+  const tex = device.createTexture({
+    size: [WIDTH, HEIGHT], format: 'rgba8unorm',
+    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+  });
+  device.queue.writeTexture({ texture: tex }, toRGBA(rgb),
+    { bytesPerRow: WIDTH*4, rowsPerImage: HEIGHT }, [WIDTH, HEIGHT]);
+  const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+
+  // Fullscreen triangle + sample the framebuffer texture by normalised coords.
+  const mod = device.createShaderModule({ code: `
+    @vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
+      var p = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));
+      return vec4f(p[i], 0.0, 1.0);
+    }
+    @group(0) @binding(0) var tex: texture_2d<f32>;
+    @group(0) @binding(1) var smp: sampler;
+    @fragment fn fs(@builtin(position) c: vec4f) -> @location(0) vec4f {
+      let uv = c.xy / vec2f(${WIDTH}.0, ${HEIGHT}.0);
+      return textureSample(tex, smp, uv);
+    }` });
+  const pipeline = device.createRenderPipeline({
+    layout: 'auto',
+    vertex:   { module: mod, entryPoint: 'vs' },
+    fragment: { module: mod, entryPoint: 'fs', targets: [{ format }] },
+    primitive:{ topology: 'triangle-list' },
+  });
+  const bind = device.createBindGroup({
+    layout: pipeline.getBindGroupLayout(0),
+    entries: [{ binding: 0, resource: tex.createView() },
+              { binding: 1, resource: sampler }],
+  });
+  const enc  = device.createCommandEncoder();
+  const pass = enc.beginRenderPass({
+    colorAttachments: [{ view: ctx.getCurrentTexture().createView(),
+                         clearValue: {r:0,g:0,b:0,a:1}, loadOp: 'clear', storeOp: 'store' }],
+  });
+  pass.setPipeline(pipeline); pass.setBindGroup(0, bind); pass.draw(3); pass.end();
+  device.queue.submit([enc.finish()]);
+  return true;
+}
+
+function presentCanvas2D(rgb){
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(WIDTH, HEIGHT);
+  img.data.set(toRGBA(rgb));
   ctx.putImageData(img, 0, 0);
 }
 
@@ -83,8 +142,10 @@ function draw(rgb){
       status.textContent = `unexpected output: ${stdout.length} bytes (want ${WIDTH*HEIGHT*3})`;
       return;
     }
-    draw(stdout);
-    status.textContent = `done — ${WIDTH}×${HEIGHT}, rendered in WASM in ${ms} ms`;
+    let how = 'WebGPU blit';
+    if (!(await presentWebGPU(stdout))) { presentCanvas2D(stdout); how = 'canvas2d (no WebGPU)'; }
+    status.textContent = `done — ${WIDTH}×${HEIGHT}, WASM render ${ms} ms, presented via ${how}`;
+    document.title = `rae-w2: ${how}`;
   } catch (e){
     status.textContent = 'error: ' + e.message;
     console.error(e);
