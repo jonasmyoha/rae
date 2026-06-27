@@ -1,0 +1,166 @@
+# DEFLATE compression (RFC 1951 deflate) in pure Rae — fixed-Huffman blocks
+# with a greedy LZ77 hash-chain match-finder.
+#
+# Part of the pure-Rae DEFLATE/PNG codec (docs/png-and-deflate-strategy.md). A
+# fixed-Huffman encoder is trivially correct (the code tables are fixed by the
+# spec, so no tree to transmit) and already beats a stored-block writer;
+# dynamic-Huffman is a later refinement. The output is valid RFC-1951 DEFLATE,
+# inflatable by lodepng/zlib and by our own inflateRaw.
+#
+# Pure computation: runs in both Live and Compiled. Reuses the length/distance
+# tables and `zeros`/`fixedLitLengths` from the same-package inflate module.
+import core
+import compress/bits
+import compress/inflate
+
+type Match {
+    len: Int     # match length (0 = no usable match)
+    dist: Int    # back-distance
+}
+
+# Canonical Huffman codes from per-symbol code lengths (RFC 1951 §3.2.2). Used
+# for the fixed literal/length alphabet (and reusable for dynamic blocks later).
+func buildCanonicalCodes(lengths: view List(Int), n: view Int) ret List(Int) {
+    let blCount: List(Int) = zeros(n: 16)
+    var i: Int = 0
+    loop i < n {
+        let l: Int = lengths.at(index: i)
+        if l is not 0 { blCount.set(index: l, value: blCount.at(index: l) + 1) }
+        i = i + 1
+    }
+    let nextCode: List(Int) = zeros(n: 16)
+    var code: Int = 0
+    var bits: Int = 1
+    loop bits <= 15 {
+        code = (code + blCount.at(index: bits - 1)) bsl 1
+        nextCode.set(index: bits, value: code)
+        bits = bits + 1
+    }
+    let codes: List(Int) = zeros(n: n)
+    i = 0
+    loop i < n {
+        let l: Int = lengths.at(index: i)
+        if l is not 0 {
+            codes.set(index: i, value: nextCode.at(index: l))
+            nextCode.set(index: l, value: nextCode.at(index: l) + 1)
+        }
+        i = i + 1
+    }
+    ret codes
+}
+
+# 15-bit hash of the 3 bytes at `pos` (caller guarantees pos+3 <= n).
+func hash3(data: view List(Int), pos: view Int) ret Int {
+    let a: Int = data.at(index: pos)
+    let b: Int = data.at(index: pos + 1)
+    let c: Int = data.at(index: pos + 2)
+    ret ((a bsl 10) bxor (b bsl 5) bxor c) band 32767
+}
+
+# Insert `pos` into the hash chain so later positions can match against it.
+func insertHash(data: view List(Int), pos: view Int, n: view Int,
+                head: mod List(Int), prev: mod List(Int)) {
+    if pos + 3 <= n {
+        let h: Int = hash3(data: data, pos: pos)
+        prev.set(index: pos, value: head.at(index: h))
+        head.set(index: h, value: pos)
+    }
+}
+
+# Find the longest match for the bytes at `pos` within the 32 KB window, walking
+# the hash chain up to `maxChain` candidates. Greedy.
+func findMatch(data: view List(Int), pos: view Int, n: view Int,
+               head: view List(Int), prev: view List(Int)) ret Match {
+    if pos + 3 > n { ret Match { len: 0, dist: 0 } }
+    var maxL: Int = n - pos
+    if maxL > 258 { maxL = 258 }
+    let h: Int = hash3(data: data, pos: pos)
+    var cand: Int = head.at(index: h)
+    var bestLen: Int = 0
+    var bestDist: Int = 0
+    var chain: Int = 0
+    loop cand >= 0 and chain < 128 {
+        let dist: Int = pos - cand
+        if dist > 32768 {
+            chain = 128       # window exceeded; stop
+        } else {
+            var l: Int = 0
+            loop l < maxL and data.at(index: cand + l) is data.at(index: pos + l) {
+                l = l + 1
+            }
+            if l > bestLen {
+                bestLen = l
+                bestDist = dist
+            }
+            cand = prev.at(index: cand)
+            chain = chain + 1
+        }
+    }
+    if bestLen < 3 { ret Match { len: 0, dist: 0 } }
+    ret Match { len: bestLen, dist: bestDist }
+}
+
+# Emit a length/distance pair using the fixed-Huffman literal/length codes plus
+# the distance alphabet (RFC 1951 §3.2.5 base + extra bits).
+func emitMatch(w: mod BitWriter, length: view Int, dist: view Int,
+               litCodes: view List(Int), litLen: view List(Int),
+               lBase: view List(Int), lExtra: view List(Int),
+               dBase: view List(Int), dExtra: view List(Int)) {
+    # Length symbol: largest i with lBase[i] <= length.
+    var li: Int = lBase.length - 1
+    loop li > 0 and lBase.at(index: li) > length { li = li - 1 }
+    let lsym: Int = 257 + li
+    putCode(this: w, code: litCodes.at(index: lsym), len: litLen.at(index: lsym))
+    putBits(this: w, value: length - lBase.at(index: li), n: lExtra.at(index: li))
+    # Distance symbol: largest i with dBase[i] <= dist. Fixed dist codes are the
+    # 5-bit symbol value, written MSB-first.
+    var di: Int = dBase.length - 1
+    loop di > 0 and dBase.at(index: di) > dist { di = di - 1 }
+    putCode(this: w, code: di, len: 5)
+    putBits(this: w, value: dist - dBase.at(index: di), n: dExtra.at(index: di))
+}
+
+# Compress `data` (n bytes) to a single fixed-Huffman DEFLATE block. Returns the
+# compressed bytes (raw RFC-1951 stream, no zlib/gzip wrapper).
+func deflateRaw(data: view List(Int), n: view Int) ret List(Int) {
+    let litLen: List(Int) = fixedLitLengths()
+    let litCodes: List(Int) = buildCanonicalCodes(lengths: litLen, n: 288)
+    let lBase: List(Int) = lengthBase()
+    let lExtra: List(Int) = lengthExtra()
+    let dBase: List(Int) = distBase()
+    let dExtra: List(Int) = distExtra()
+
+    let head: List(Int) = createList(cap: 32768)
+    var hi: Int = 0
+    loop hi < 32768 { head.add(value: -1) hi = hi + 1 }
+    let prev: List(Int) = createList(cap: n + 1)
+    var pi: Int = 0
+    loop pi < n + 1 { prev.add(value: -1) pi = pi + 1 }
+
+    var w: BitWriter = newBitWriter()
+    putBit(this: w, bit: 1)            # BFINAL = 1 (single block)
+    putBits(this: w, value: 1, n: 2)   # BTYPE = 01 (fixed Huffman)
+
+    var pos: Int = 0
+    loop pos < n {
+        let m: Match = findMatch(data: data, pos: pos, n: n, head: head, prev: prev)
+        if m.len >= 3 {
+            emitMatch(w: w, length: m.len, dist: m.dist, litCodes: litCodes, litLen: litLen,
+                      lBase: lBase, lExtra: lExtra, dBase: dBase, dExtra: dExtra)
+            var k: Int = 0
+            loop k < m.len {
+                insertHash(data: data, pos: pos + k, n: n, head: head, prev: prev)
+                k = k + 1
+            }
+            pos = pos + m.len
+        } else {
+            let byte: Int = data.at(index: pos)
+            putCode(this: w, code: litCodes.at(index: byte), len: litLen.at(index: byte))
+            insertHash(data: data, pos: pos, n: n, head: head, prev: prev)
+            pos = pos + 1
+        }
+    }
+    # End-of-block symbol (256).
+    putCode(this: w, code: litCodes.at(index: 256), len: litLen.at(index: 256))
+    ret finishWriter(this: w)
+}
