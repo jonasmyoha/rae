@@ -2895,6 +2895,51 @@ int64_t* rae_ext_image_loadPng(rae_String path, int64_t* w_out, int64_t* h_out) 
     return pixels;
 }
 
+/* ---- DEFLATE/zlib oracle (lib/compress/oracle.rae) -----------------------
+ * lodepng's raw DEFLATE + zlib codecs, exposed so the pure-Rae codec can be
+ * validated against a reference (round-trip + interop, per
+ * docs/png-and-deflate-strategy.md). Bytes cross as Buffer(Int) (each 0..255);
+ * the result is a fresh rae_buf_alloc'd Buffer(Int) the caller owns, with the
+ * byte count written through `outLen`. Returns NULL on failure (outLen = 0). */
+static int64_t* rae_compress_run(const int64_t* data, int64_t len, int64_t* out_len,
+                                 int encode, int zlib) {
+    if (out_len) *out_len = 0;
+    if (!data || len < 0) return NULL;
+    unsigned char* in = (unsigned char*)malloc((size_t)len > 0 ? (size_t)len : 1);
+    if (!in) return NULL;
+    for (int64_t i = 0; i < len; i++) in[i] = (unsigned char)(data[i] & 0xFF);
+    unsigned char* out = NULL; size_t outsize = 0; unsigned err;
+    if (encode) {
+        LodePNGCompressSettings s = lodepng_default_compress_settings;
+        err = zlib ? lodepng_zlib_compress(&out, &outsize, in, (size_t)len, &s)
+                   : lodepng_deflate(&out, &outsize, in, (size_t)len, &s);
+    } else {
+        LodePNGDecompressSettings s = lodepng_default_decompress_settings;
+        err = zlib ? lodepng_zlib_decompress(&out, &outsize, in, (size_t)len, &s)
+                   : lodepng_inflate(&out, &outsize, in, (size_t)len, &s);
+    }
+    free(in);
+    if (err) { free(out); fprintf(stderr, "[compress] lodepng error: %s\n", lodepng_error_text(err)); return NULL; }
+    int64_t* result = (int64_t*)rae_ext_rae_buf_alloc((int64_t)outsize, (int64_t)sizeof(int64_t));
+    if (!result) { free(out); return NULL; }
+    for (size_t i = 0; i < outsize; i++) result[i] = out[i];
+    free(out);
+    if (out_len) *out_len = (int64_t)outsize;
+    return result;
+}
+int64_t* rae_ext_oracleDeflate(const int64_t* data, int64_t len, int64_t* out_len) {
+    return rae_compress_run(data, len, out_len, 1, 0);
+}
+int64_t* rae_ext_oracleInflate(const int64_t* data, int64_t len, int64_t* out_len) {
+    return rae_compress_run(data, len, out_len, 0, 0);
+}
+int64_t* rae_ext_oracleZlibCompress(const int64_t* data, int64_t len, int64_t* out_len) {
+    return rae_compress_run(data, len, out_len, 1, 1);
+}
+int64_t* rae_ext_oracleZlibDecompress(const int64_t* data, int64_t len, int64_t* out_len) {
+    return rae_compress_run(data, len, out_len, 0, 1);
+}
+
 /* ============================================================
  * SDL3 desktop platform layer — see lib/sdl3.rae (RAE_HAS_SDL3).
  *
