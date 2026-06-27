@@ -3173,6 +3173,66 @@ void rae_ext_sdf_text_blitGlyph(int64_t* fb, int64_t fbW, int64_t fbH, int64_t a
         }
     }
 }
+
+/* ---- Rae Filesystem & Paths API (lib/filesystem.rae) — thin wrappers over
+ * SDL3's SDL_filesystem.h: known folders, mkdir, exists, plus a date helper and
+ * a render-output next-index scan. See docs/filesystem-and-paths.md. ---- */
+rae_String rae_ext_filesystem_userFolder(int64_t kind) {
+    SDL_Folder f = SDL_FOLDER_DESKTOP;
+    if (kind == 1) f = SDL_FOLDER_PICTURES;
+    else if (kind == 2) f = SDL_FOLDER_DOCUMENTS;
+    else if (kind == 3) f = SDL_FOLDER_HOME;
+    const char* p = SDL_GetUserFolder(f);
+    return rae_str_from_cstr_impl(p ? p : "", RAE_SITE_READ_FILE);
+}
+
+rae_String rae_ext_filesystem_prefDir(rae_String org, rae_String app) {
+    char* p = SDL_GetPrefPath(org.data ? (const char*)org.data : "Rae",
+                              app.data ? (const char*)app.data : "app");
+    rae_String s = rae_str_from_cstr_impl(p ? p : "", RAE_SITE_READ_FILE);
+    if (p) SDL_free(p);
+    return s;
+}
+
+rae_Bool rae_ext_filesystem_makeDir(rae_String path) {
+    if (!path.data) return false;
+    return SDL_CreateDirectory((const char*)path.data);
+}
+
+rae_Bool rae_ext_filesystem_exists(rae_String path) {
+    if (!path.data) return false;
+    SDL_PathInfo info;
+    return SDL_GetPathInfo((const char*)path.data, &info);
+}
+
+/* Today's local date as "YYYY-MM-DD". */
+rae_String rae_ext_filesystem_today(void) {
+    time_t t = time(NULL);
+    struct tm tmv;
+    localtime_r(&t, &tmv);
+    char buf[16];
+    strftime(buf, sizeof(buf), "%Y-%m-%d", &tmv);
+    return rae_str_from_cstr_impl(buf, RAE_SITE_READ_FILE);
+}
+
+/* Scan `dir` for files named "<prefix><N>.png" and return max(N)+1 (1 if none),
+ * so a caller can mint a non-overwriting filename. */
+int64_t rae_ext_filesystem_nextIndex(rae_String dir, rae_String prefix) {
+    if (!dir.data || !prefix.data) return 1;
+    DIR* d = opendir((const char*)dir.data);
+    if (!d) return 1;
+    int max_n = 0;
+    size_t plen = (size_t)prefix.len;
+    struct dirent* e;
+    while ((e = readdir(d)) != NULL) {
+        if (strncmp(e->d_name, (const char*)prefix.data, plen) == 0) {
+            int v = atoi(e->d_name + plen);
+            if (v > max_n) max_n = v;
+        }
+    }
+    closedir(d);
+    return (int64_t)(max_n + 1);
+}
 #endif /* RAE_HAS_SDL3 */
 
 /* ============================================================

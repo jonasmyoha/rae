@@ -17,6 +17,7 @@
 import core
 import sdl3
 import image
+import filesystem
 import vec3
 import scene
 import render
@@ -42,7 +43,7 @@ func main() {
     let startMs: Int = nowMs()
     var doneMs: Int = 0
     loop not sdl3.shouldClose() {
-        if sdl3.isKeyPressed(key: 291) { let s: Bool = image.savePng(path: "rae_render.png", pixels: fb.data, width: width, height: height) }
+        if sdl3.isKeyPressed(key: 291) { let s: Bool = image.savePng(path: filesystem.renderPath(stem: "rae_render"), pixels: fb.data, width: width, height: height) }
 
         # Render a time-bounded slice of scanlines each frame (Rae has no
         # `break`, so the budget is part of the loop guard).
