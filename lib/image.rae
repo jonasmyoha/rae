@@ -15,3 +15,12 @@ import core
 # the same layout sdlUpdatePixels consumes) to a PNG file at `path`. The alpha
 # channel is written fully opaque. Returns false on failure.
 func savePng(path: view String, pixels: view Buffer(Int), width: Int, height: Int) extern ret Bool
+
+# Decode a PNG file into a freshly allocated packed-Int framebuffer (width*height
+# Ints, row-major top-down). Each Int is 0xAARRGGBB: the low 24 bits are RGB (the
+# same domain savePng consumes — the result feeds straight back to savePng), the
+# top byte is alpha (so RGBA assets like the MTSDF atlas survive the round trip).
+# Writes the decoded dimensions through the `mod Int` out-params. On failure the
+# returned buffer is empty and width is set to 0 — callers check `width > 0`. The
+# caller owns the returned buffer.
+func loadPng(path: view String, width: mod Int, height: mod Int) extern ret Buffer(Int)

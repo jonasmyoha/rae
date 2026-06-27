@@ -633,6 +633,11 @@ const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func) {
         if (str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32")) return is_ptr ? (is_mod ? "rae_Mod_Char32" : "rae_View_Char32") : "uint32_t";
         if (str_eq_cstr(base, "String")) return is_ptr ? (is_mod ? "rae_Mod_String" : "rae_View_String") : "rae_String";
     }
+    // Buffer(T) is a raw pointer (no wrapper struct), like rae_ext_rae_buf_alloc's
+    // return — so a Buffer-returning extern (e.g. image.loadPng) lowers to void*,
+    // not the mangled rae_Buffer_<T> (which has no typedef). Mirrors the param
+    // path in emit_type_ref_as_c_type.
+    if (str_eq_cstr(base, "Buffer")) return "void*";
     const char* m = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
     if (strcmp(m, "RaeAny") == 0) return "RaeAny";
     if (strcmp(m, "rae_Int64") == 0 || strcmp(m, "int64_t") == 0) return "int64_t";
