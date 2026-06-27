@@ -1,3 +1,6 @@
+open raylib
+open hot_reload
+open ui/ecs
 # Mobile-UI demo entrypoint. The actual work — scene loading, world
 # building, screen routing — lives in sibling `.rae` files in this same
 # directory, which Rae auto-imports because they share the project
@@ -30,7 +33,6 @@ import ui/input
 import ui/debug
 import ui/event_loop
 import ui/animation
-
 func main() {
   # `RAE_UI_HEADLESS=1`: see headless.rae (HIDDEN+UNFOCUSED flags).
   let isHeadless: Bool = headlessIsActive()
@@ -618,7 +620,6 @@ func main() {
             rubberDim: screenH
           )
 
-
           # Skip dispatch on the single frame where a drag just
           # ended — the release-click would otherwise hit whatever
           # is under the finger (a tab, a cover tile, the play
@@ -958,7 +959,6 @@ func main() {
           }
           pendingSrc = switchResult.pendingSrc
           pendingHeroTargetPageId = "{switchResult.pendingHeroTargetPageId}"
-
 
           # Mouse-wheel / trackpad scroll. Implementation in
           # scroll_input.rae — rubber-bands past bounds and hard-caps
