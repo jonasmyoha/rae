@@ -1,0 +1,57 @@
+# Rae Filesystem & Paths API.
+#
+# Known folders, directory creation/existence, and path helpers — thin wrappers
+# over SDL3's SDL_filesystem.h (docs/filesystem-and-paths.md). Compiled-target +
+# SDL-linked, like lib/sdl3.rae. Call through the `filesystem` namespace:
+#
+#   import filesystem
+#   let p: String = filesystem.renderPath(stem: "rae_render")
+#   filesystem.exists(path: p)
+import core
+
+# Extern bindings — clean names, namespace-mangled to rae_ext_filesystem_* and
+# implemented in the RAE_HAS_SDL3 block of the runtime.
+func userFolder(kind: view Int) extern ret String
+func prefDir(org: view String, app: view String) extern ret String
+func makeDir(path: view String) extern ret Bool
+func exists(path: view String) extern ret Bool
+func today() extern ret String
+func nextIndex(dir: view String, prefix: view String) extern ret Int
+
+# Platform "known" folders. Each returns "" when the platform has no such folder
+# (e.g. there is no Desktop on mobile) — callers fall back accordingly.
+func desktopDir() ret String { ret userFolder(kind: 0) }
+func picturesDir() ret String { ret userFolder(kind: 1) }
+func documentsDir() ret String { ret userFolder(kind: 2) }
+func homeDir() ret String { ret userFolder(kind: 3) }
+
+# Join two path segments with a single "/".
+func join(a: view String, b: view String) ret String { ret "{a}/{b}" }
+
+# Zero-pad an Int to (at least) 4 digits.
+func pad4(n: view Int) ret String {
+    var s: String = "{n}"
+    loop s.length() < 4 {
+        s = "0{s}"
+    }
+    ret s
+}
+
+# A fresh, non-overwriting PNG path for a saved render: the Desktop when there is
+# one, else a writable "render" folder. Names are dated + sequenced per day:
+#   <dir>/<stem>_<YYYY-MM-DD>_<NNNN>.png   (e.g. rae_render_2026-06-26_0001.png)
+func renderPath(stem: view String) ret String {
+    var dir: String = desktopDir()
+    if dir.length() is 0 {
+        dir = join(a: prefDir(org: "Rae", app: "render"), b: "render")
+    }
+    # SDL known-folder paths carry a trailing separator; drop it so join is clean.
+    loop dir.length() > 1 and dir.endsWith(suffix: "/") {
+        dir = dir.sub(start: 0, len: dir.length() - 1)
+    }
+    let made: Bool = makeDir(path: dir)
+    let date: String = today()
+    let prefix: String = "{stem}_{date}_"
+    let n: Int = nextIndex(dir: dir, prefix: prefix)
+    ret "{dir}/{prefix}{pad4(n: n)}.png"
+}
