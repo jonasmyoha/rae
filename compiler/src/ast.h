@@ -99,7 +99,15 @@ typedef enum {
   AST_BIN_IS,
   AST_BIN_NEQ, // `is not` (and reserved for `!=` if added later)
   AST_BIN_AND,
-  AST_BIN_OR
+  AST_BIN_OR,
+  // Bitwise ops on Int (Erlang-style words band/bor/bxor/bsl/bsr). Kept AFTER
+  // AST_BIN_OR so the `AST_BIN_LT..AST_BIN_OR` "produces Bool" range stays
+  // valid — these produce Int. See project bitwise-operators design.
+  AST_BIN_BAND,
+  AST_BIN_BOR,
+  AST_BIN_BXOR,
+  AST_BIN_BSL,
+  AST_BIN_BSR
 } AstBinaryOp;
 
 typedef enum {
@@ -111,7 +119,8 @@ typedef enum {
   AST_UNARY_POST_INC,
   AST_UNARY_POST_DEC,
   AST_UNARY_VIEW,
-  AST_UNARY_MOD
+  AST_UNARY_MOD,
+  AST_UNARY_BNOT   // bitwise NOT on Int (`bnot x`)
 } AstUnaryOp;
 
 typedef enum {
@@ -170,6 +179,7 @@ struct AstExpr {
   TypeInfo* resolved_type; // The semantically analyzed type of this expression
   struct AstDecl* decl_link; // For identifiers/calls, points to the resolved declaration
   bool is_builtin_sizeof;
+  bool is_parenthesized; // wrapped in `( )` in source — suppresses the mixed-bitwise-operator parens requirement
   size_t line;
   size_t column;
   bool is_raw;

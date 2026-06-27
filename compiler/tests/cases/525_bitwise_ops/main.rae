@@ -1,0 +1,21 @@
+# Erlang-style bitwise word operators (band/bor/bxor/bnot/bsl/bsr), Int-only.
+# Logical and/or stay boolean; these produce Int. Bitwise binds tighter than
+# arithmetic and comparison; mixing different bitwise ops needs parens.
+import core
+
+func main() {
+    let a: Int = 12   # 1100
+    let b: Int = 10   # 1010
+    log(a band b)     # 8
+    log(a bor b)      # 14
+    log(a bxor b)     # 6
+    log(1 bsl 8)      # 256
+    log(256 bsr 2)    # 64
+    log(bnot 0)       # -1
+    # band binds tighter than `is`
+    if 511 band 255 is 255 { log(1) } else { log(0) }   # 1
+    # parenthesised shifts compose (the 0xRRGGBB packing pattern)
+    log((200 bsl 16) bor (100 bsl 8) bor 50)            # 13132850
+    # bitwise binds tighter than +: 1 + (2 bsl 4)
+    log(1 + 2 bsl 4)                                     # 33
+}

@@ -681,7 +681,7 @@ static bool token_is_ident(const Token* token, const char* text) {
 }
 
 static bool is_unary_operator(TokenKind kind) {
-  return kind == TOK_MINUS || kind == TOK_KW_NOT || kind == TOK_KW_SPAWN || kind == TOK_INC || kind == TOK_DEC || kind == TOK_KW_VIEW || kind == TOK_KW_MOD || kind == TOK_KW_OWN;
+  return kind == TOK_MINUS || kind == TOK_KW_NOT || kind == TOK_KW_BNOT || kind == TOK_KW_SPAWN || kind == TOK_INC || kind == TOK_DEC || kind == TOK_KW_VIEW || kind == TOK_KW_MOD || kind == TOK_KW_OWN;
 }
 
 static BinaryInfo get_binary_info(TokenKind kind) {
@@ -710,6 +710,20 @@ static BinaryInfo get_binary_info(TokenKind kind) {
       return (BinaryInfo){.precedence = 1, .op = AST_BIN_AND};
     case TOK_KW_OR:
       return (BinaryInfo){.precedence = 0, .op = AST_BIN_OR};
+    // Bitwise ops bind tighter than arithmetic/comparison/logical (precedence
+    // 6, above MUL=5) so `x band mask is 0` is `(x band mask) is 0` — avoiding
+    // C's `&`-looser-than-`==` footgun. All five share one level; mixing
+    // different bitwise ops without parens is rejected in parse_binary.
+    case TOK_KW_BAND:
+      return (BinaryInfo){.precedence = 6, .op = AST_BIN_BAND};
+    case TOK_KW_BOR:
+      return (BinaryInfo){.precedence = 6, .op = AST_BIN_BOR};
+    case TOK_KW_BXOR:
+      return (BinaryInfo){.precedence = 6, .op = AST_BIN_BXOR};
+    case TOK_KW_BSL:
+      return (BinaryInfo){.precedence = 6, .op = AST_BIN_BSL};
+    case TOK_KW_BSR:
+      return (BinaryInfo){.precedence = 6, .op = AST_BIN_BSR};
     default:
       return (BinaryInfo){.precedence = -1};
   }
@@ -1393,6 +1407,7 @@ static AstExpr* parse_primary(Parser* parser) {
       parser_advance(parser);
       AstExpr* inner = parse_expression(parser);
       parser_consume(parser, TOK_RPAREN, "expected ')' after expression");
+      inner->is_parenthesized = true;  // lets `(a bsl 16) bor b` past the mixed-bitwise check
       return inner;
     case TOK_LBRACE: { // Handle untyped collection literal (map or set)
       const Token* start = parser_advance(parser);
@@ -1537,6 +1552,9 @@ static AstExpr* parse_unary(Parser* parser) {
       case TOK_KW_NOT:
         expr->as.unary.op = AST_UNARY_NOT;
         break;
+      case TOK_KW_BNOT:
+        expr->as.unary.op = AST_UNARY_BNOT;
+        break;
       case TOK_KW_SPAWN:
         expr->as.unary.op = AST_UNARY_SPAWN;
         break;
@@ -1577,6 +1595,17 @@ static AstExpr* parse_binary(Parser* parser, int min_prec) {
       info.op = AST_BIN_NEQ;
     }
     AstExpr* right = parse_binary(parser, info.precedence + 1);
+    // Mixing different bitwise operators without parens is rejected: they share
+    // one precedence level, and silent left-association (e.g. `a band b bor c`
+    // as `(a band b) bor c`) is exactly the kind of ambiguity Rae avoids. Same
+    // operator repeated (`a band b band c`) is fine. Require explicit parens.
+    bool op_is_bitwise = info.op >= AST_BIN_BAND && info.op <= AST_BIN_BSR;
+    if (op_is_bitwise && left->kind == AST_EXPR_BINARY && !left->is_parenthesized
+        && left->as.binary.op >= AST_BIN_BAND && left->as.binary.op <= AST_BIN_BSR
+        && left->as.binary.op != info.op) {
+      parser_error(parser, op_token,
+        "mixing different bitwise operators requires parentheses (e.g. `(a band b) bor c`)");
+    }
     AstExpr* binary = new_expr(parser, AST_EXPR_BINARY, op_token);
     binary->as.binary.op = info.op;
     binary->as.binary.lhs = left;

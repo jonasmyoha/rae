@@ -300,6 +300,21 @@ bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
               emit_op(compiler, OP_EQ, (int)expr->line);
               emit_op(compiler, OP_NOT, (int)expr->line);
               return true;
+            case AST_BIN_BAND:
+              emit_op(compiler, OP_BAND, (int)expr->line);
+              return true;
+            case AST_BIN_BOR:
+              emit_op(compiler, OP_BOR, (int)expr->line);
+              return true;
+            case AST_BIN_BXOR:
+              emit_op(compiler, OP_BXOR, (int)expr->line);
+              return true;
+            case AST_BIN_BSL:
+              emit_op(compiler, OP_BSL, (int)expr->line);
+              return true;
+            case AST_BIN_BSR:
+              emit_op(compiler, OP_BSR, (int)expr->line);
+              return true;
             default:
               diag_error(compiler->file_path, (int)expr->line, (int)expr->column,
                          "binary operator not supported in VM yet");
@@ -326,6 +341,9 @@ bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
         return true;
       } else if (expr->as.unary.op == AST_UNARY_NOT) {
         emit_op(compiler, OP_NOT, (int)expr->line);
+        return true;
+      } else if (expr->as.unary.op == AST_UNARY_BNOT) {
+        emit_op(compiler, OP_BNOT, (int)expr->line);
         return true;
       } else if (expr->as.unary.op == AST_UNARY_VIEW || expr->as.unary.op == AST_UNARY_MOD) {
         bool is_mod = (expr->as.unary.op == AST_UNARY_MOD);
