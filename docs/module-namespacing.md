@@ -1,144 +1,140 @@
-# Module namespacing for the standard library
+# Module namespacing for Rae
 
-Status: **decision record / design**, 2026-06-26. Approved direction (Option A).
-Companion to `tech-stack-and-dependencies.md` and `filesystem-and-paths.md`.
+Status: **finalized design**, 2026-06-27. Supersedes the earlier "flat vs UFCS
+modules" and "flat-off" drafts. Companion to `tech-stack-and-dependencies.md` and
+`filesystem-and-paths.md`.
 
-This records how Rae names and accesses standard-library functions. It exists
-because the stdlib currently lands every imported name in one flat scope, which
-forces libraries to hand-roll namespaces with prefixes (`sdlInitWindow`,
-`gpuReset`, `sdfBlitGlyph`). The prefix is a workaround for a missing feature —
-this design removes the need for it.
+## Core idea
 
----
-
-## Decision: namespace-qualified stdlib modules
-
-Standard-library APIs are organized into **module namespaces** and accessed with
-the module name as an explicit qualifier:
+A function belongs to a module namespace and can be called two ways:
 
 ```rae
-filesystem.desktopDir()
 filesystem.exists(path)
-math.sin(angle)
-gpu.reset()
+path.exists()
 ```
 
-Definitions inside a stdlib module are written **without a prefix** — the module
-*is* the namespace:
+Both call the **same** function. The second is normal Rae **UFCS**: the value
+becomes the first argument. Namespace qualification and UFCS are **orthogonal**:
+
+- `namespace.function(args)` explicitly identifies the module.
+- `value.function(args)` is valid when the value matches the function's first
+  parameter.
+- There is **no** `path.filesystem.exists()` form (a namespace never appears
+  inside a UFCS chain).
+- There is **no** classification of modules as "flat" vs "UFCS"; no module is
+  special-cased (not even `core`).
+- UFCS does **not** depend on functions being flattened into global scope.
+
+## Module directives: `import` and `open`
+
+### `import module`
+
+Makes the module available through its namespace, and makes its functions
+available to **UFCS** resolution — but **not** as bare receiver-less calls:
 
 ```rae
-# lib/filesystem.rae
-func exists(path: view String) ret Bool { ... }
-func desktopDir() ret String { ... }
+import math
+math.sin(angle)        # qualified — ok
+
+import filesystem
+filesystem.exists(path) # qualified — ok
+path.exists()           # UFCS — ok
+
+import io
+io.log("Hello")         # qualified — ok
+log("Hello")            # NOT introduced by import — error
 ```
 
-### What does NOT change
+### `open module`
 
-- **Project files and subfolders** keep Rae's existing automatic visibility. A
-  user project's own modules are auto-imported and callable directly, unqualified.
-  Namespacing applies to the **standard library**, not the user's own code.
-- **Core language essentials remain globally available** (flat), so everyday code
-  is not littered with `core.` — e.g. `List`, `print`, `createList`. Only `core`
-  is global; ordinary stdlib modules (`math`, `string`, `io`, `sys`, `sdl3`,
-  `gpu`, `image`, `filesystem`, …) are namespaced.
-
----
-
-## One general rule: qualification and UFCS are two ways to call one function
-
-A function belongs to its module (its namespace). There is **one** definition and
-**two** syntactic ways to call it — they are equivalent:
+Does everything `import` does **and** opens the module's namespace into the
+current file's **bare** function scope (so `open` implies `import`):
 
 ```rae
-func exists(path: String) ret Bool   # lives in module `filesystem`
-
-filesystem.exists(path)   # namespace-qualified: says where it comes from
-path.exists()             # UFCS: rearranges the first argument into dot form
+open io
+io.log("Hello")         # qualified — ok
+log("Hello")            # bare — ok, because io is opened
 ```
 
-So all of these are natural and valid:
+This is how receiver-less helpers like `log()` stay convenient — a file that
+wants them bare writes `open io`. No library is special-cased in the compiler.
+
+### Aliases
 
 ```rae
-string.length(text)    text.length()
-math.sin(angle)        angle.sin()
-filesystem.exists(p)   p.exists()
-json.jsonString(v)     v.jsonString()
+import filesystem as fs
+fs.exists(path)         # alias-qualified
+path.exists()           # UFCS still works
+
+open io as console
+console.log("Hello")    # alias-qualified
+log("Hello")            # bare names still come from opening
 ```
 
-- **Namespace qualification** (`module.func(args)`) controls *where the function
-  comes from*. The LHS is an in-scope module name; resolve `func` in that module.
-- **UFCS** (`value.func(args)` → `func(value, args)`) only *rearranges the first
-  argument*. It is valid whenever: (1) `func` is visible through an available
-  module, (2) the value's type matches `func`'s first parameter, and (3)
-  resolution finds **one** unambiguous match.
+The alias renames the **explicit namespace**; opening still exposes the original
+function names as bare calls.
 
-There is **no `this`-only restriction and no compiler-maintained list of "flat"
-modules**: namespaced functions participate in normal UFCS resolution like any
-other. The LHS disambiguates the two forms — an in-scope module name → qualified;
-a value → UFCS.
+## Name resolution
 
-### Ambiguity is an error, not a silent pick
+1. **`module.function(...)`** — if the LHS resolves to an imported/opened module
+   name or alias, resolve as a namespace-qualified call into that module.
+2. **`value.function(...)`** — otherwise normal **UFCS**: search functions from
+   modules visible via `import` or `open`; the value must match the function's
+   first parameter; exactly one match → use it; multiple → **ambiguity error**,
+   require the explicit qualified form.
+3. **`function(...)`** (bare) — resolve local/project functions, **plus**
+   functions from modules declared with `open`. Modules declared only with
+   `import` do **not** appear in bare lookup. Ambiguity → diagnosed, never
+   resolved by arbitrary priority.
 
-If a UFCS call `value.func(args)` matches functions in **more than one** visible
-module (same name, first parameter accepts the value), the compiler reports an
-**ambiguity error** and requires the explicit qualified form:
+## Contextual keywords
+
+`import` and `open` are **contextual** top-level keywords — special only in
+module-directive position near the start of a file. Elsewhere they remain legal
+identifiers:
 
 ```rae
-filesystem.exists(path)   # disambiguates when several modules export `exists`
+func open(path: String) ret File { ... }
+let file = open(path: path)
 ```
 
-This is what keeps UFCS from re-flattening the stdlib: collisions surface as
-errors at the call site, not as an arbitrary winner.
+## Preserved behavior
 
-### Bare unqualified calls
+- **Project subfolder auto-discovery/loading is unchanged.** This design governs
+  how a *file* chooses namespace-only (`import`) vs opened-bare (`open`) access.
+- Normal UFCS remains first-argument call sugar — `.length()`, `.split()`, list
+  ops, `.jsonString()`, etc. keep working.
+- No compiler-maintained list of special modules; `core` is not special-cased.
+- The earlier "flat-off" design is **not** used. `ui` is **not** rewritten to
+  satisfy a namespace restriction.
 
-A bare `func(args)` (no namespace, no receiver) resolves only against the user's
-**project** modules and the always-available **`core`** essentials (`List`,
-`print`, `createList`, …). A stdlib function is reached by qualification or UFCS,
-never as a bare global — that is the single mechanism that removes the dual
-flat/namespaced state, with no per-module list.
+## Examples
 
-### Local binding shadows a module name
+```rae
+import math
+import filesystem
+open io
 
-If a local binding has the same name as an in-scope module, the local **value
-wins** (lexical scoping) and `name.x` is read as UFCS/field access on that value.
+let wave = math.sin(angle)
+if path.exists() { log("Found file") }
+let text = io.readLine()
+```
 
-### No namespace inside a UFCS chain
+Ambiguity — if both `filesystem` and `archive` export `exists(path: String)`:
 
-`path.filesystem.exists()` is **not Rae** and is explicitly rejected. A namespace
-can never appear between a value and a function name. UFCS means *only*
-`value.function(args)` → `function(value, args)`. To call a namespaced stdlib
-function, use the explicit form `filesystem.exists(path)`.
+```rae
+import filesystem
+import archive
+path.exists()           # error: ambiguous; use filesystem.exists(path)
+```
 
----
+## Migration note
 
-## Why this fits Rae
-
-- **Explicit & analyzable:** every stdlib call states its module; a tool knows the
-  origin of every name with zero inference. No hidden flat pool.
-- **No prefix soup:** `gpu.reset()` not `gpuReset()`; the abbreviation, if any, is
-  the caller's local `as` choice.
-- **No member functions:** `filesystem.exists` is a namespace path, not a method
-  bound to a type. UFCS stays orthogonal free-function sugar.
-- **Deterministic:** one LHS rule, lexical shadowing, no multi-namespace search —
-  "few special cases."
-
----
-
-## Migration plan (staged; suite green at each step)
-
-1. **Compiler support (additive).** `import <mod>` registers `<mod>` as an
-   in-scope namespace; resolve `mod.func(...)` to that module's `func`. Flat
-   auto-loading of stdlib stays working *during* migration, so nothing breaks and
-   new code can already use qualified calls.
-2. **Migrate stdlib + examples module by module.** Drop the per-module prefix
-   from definitions; update call sites to qualified form. Keep the suite at 62/0
-   after each module.
-3. **Flip the default.** Stop flat-auto-loading non-`core` stdlib so the
-   namespaced form is the only form (except `core`). Remove the legacy prefixes.
-4. **Then** introduce `lib/filesystem.rae` namespaced from day one (its first real
-   consumer is the raytracer PNG-save path — see `filesystem-and-paths.md`).
-
-The migration is done eagerly (not left half-flat-half-namespaced): once a module
-is migrated and the default flipped, its functions are reachable *only* through
-the namespace (except `core`).
+The mechanism is implemented and verified before any large call-site migration.
+The earlier work already qualified the free-function stdlib call sites
+(`sdl3.*`, `gpu.*`, `math.*`, `vec3.*`, `json.*`, `io.*`, …) and moved `log/logS`
+into `core`. Under this model the remaining call-site work is: ensure each file
+that uses bare receiver-less stdlib helpers declares `open <module>` (e.g.
+`open core` for `log`/`createList`, or whatever provides them), and leave
+`import`-only files to qualification + UFCS. The exact set is reported after the
+mechanism lands.
