@@ -1,4 +1,4 @@
-# Raytracer — WASM web spike (new-stack step W1)
+# Raytracer — WASM web spike (new-stack steps W1–W2)
 
 The first step toward the new cross-platform stack (see
 `docs/execution-targets-and-deployment.md` and
@@ -74,10 +74,19 @@ band-splitting). The WASM-first deployment thesis holds on the perf axis.
 `WASM_THREADS=1 compiler/tools/wasm_build.sh examples/48_raytracer_wasm_spawn`
 then `node compiler/tools/wasm_run_threads.mjs …/build/app.wasm`.)
 
-## Next (W2 / W3)
+## W2 (done): present via browser WebGPU
 
-- **W2**: replace the canvas `putImageData` with a WebGPU texture + a WGSL blit
-  shader, behind a minimal Rae Render API (browser-provided WebGPU, no
-  Dawn/wgpu dependency).
+`web/index.html` no longer `putImageData`s onto a 2D canvas — it uploads the
+WASM framebuffer to a `GPUTexture` and blits it with a WGSL fullscreen-triangle
+shader through the browser's own WebGPU (no Dawn/wgpu dependency; the C/WASM
+module is unchanged — it still just produces RGB). A canvas2d path remains as a
+fallback where WebGPU is absent.
+
+Verified headless on Chrome/Metal: adapter acquired, status reports
+`presented via WebGPU blit`, and the screenshot shows the correct scene. Open
+`web/` in any WebGPU browser to see it.
+
+## Next (W3)
+
 - **W3**: port `rayColor` into a WGSL **compute** shader (GPU path tracer,
-  example step 6).
+  example step 6) — the compute side of the same WebGPU stack.
