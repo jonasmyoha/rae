@@ -559,14 +559,14 @@ func dispatchActions(
         # Force a fresh refresh first so the decision sees the most
         # recent state (e.g. user paused in Spotify directly seconds
         # ago — last poll may have been up to 1s stale).
-        spotifyRefresh()
-        let curState: String = spotifyState()
+        spotify.refresh()
+        let curState: String = spotify.state()
         let playingKey: String = "playing"
         log("[spotify] toggle: state={curState}")
         if curState.equals(other: playingKey) {
-          spotifyPause()
+          spotify.pause()
         } else {
-          spotifyPlay()
+          spotify.play()
         }
       } else {
         togglePlayback(state: playback)
@@ -575,7 +575,7 @@ func dispatchActions(
     if actionId.equals(other: playbackNextKey) {
       if spotifyEnabled {
         log("[spotify] next")
-        spotifyNext()
+        spotify.next()
       }
       # Local mock has no per-screen "next track" concept yet —
       # the Spotify mode is the only consumer for now.
@@ -583,7 +583,7 @@ func dispatchActions(
     if actionId.equals(other: playbackPrevKey) {
       if spotifyEnabled {
         log("[spotify] previous")
-        spotifyPrevious()
+        spotify.previous()
       }
     }
     if actionId.equals(other: albumOpenKey) {
@@ -682,7 +682,7 @@ func dispatchActions(
       if spotifyEnabled {
         let q: String = spotifySearchQuery(artist: histAlbum.artist, title: histTrack.title, album: histAlbum.album)
         log("[spotify] play track query={q}")
-        spotifyPlayQuery(query: q)
+        spotify.playQuery(query: q)
       }
     }
     if actionId.startsWith(prefix: historyReplayPrefix) {
@@ -724,7 +724,7 @@ func dispatchActions(
         if spotifyEnabled {
           let q: String = spotifySearchQuery(artist: e.artistName, title: e.trackName, album: e.albumName)
           log("[spotify] history-replay query={q}")
-          spotifyPlayQuery(query: q)
+          spotify.playQuery(query: q)
         }
       }
     }

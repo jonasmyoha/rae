@@ -158,7 +158,7 @@ func loadHistoryEntryArt(track: view SpotifyTrack, reg: mod TextureRegistry) pub
     ret key
   }
   let outPath: String = "/tmp/rae_spotify_art_{imageHash}.jpg"
-  let ok: Bool = spotifyFetchArtwork(url: track.artworkUrl, outPath: outPath)
+  let ok: Bool = spotify.fetchArtwork(url: track.artworkUrl, outPath: outPath)
   if ok is false {
     ret ""
   }
@@ -186,7 +186,7 @@ func refreshSpotifyArt(state: view SpotifyState, track: view SpotifyTrack, reg: 
   let outPath: String = "/tmp/rae_spotify_art.jpg"
   var primaryOk: Bool = false
   if track.artworkUrl.length() > 0 {
-    primaryOk = spotifyFetchArtwork(url: track.artworkUrl, outPath: outPath)
+    primaryOk = spotify.fetchArtwork(url: track.artworkUrl, outPath: outPath)
   }
   if primaryOk is false {
     # iTunes fallback. Build "<artist> <track>" as the search term;
@@ -196,7 +196,7 @@ func refreshSpotifyArt(state: view SpotifyState, track: view SpotifyTrack, reg: 
     if fallbackUrl.length() is 0 {
       ret false
     }
-    let fbOk: Bool = spotifyFetchArtwork(url: fallbackUrl, outPath: outPath)
+    let fbOk: Bool = spotify.fetchArtwork(url: fallbackUrl, outPath: outPath)
     if fbOk is false {
       ret false
     }
@@ -248,9 +248,9 @@ func pollSpotify(
     ret
   }
   state.lastPollSec = now
-  let track: SpotifyTrack = spotifyCurrent()
-  let pos: Float = spotifyPosition()
-  let dur: Float = spotifyDuration()
+  let track: SpotifyTrack = spotify.current()
+  let pos: Float = spotify.position()
+  let dur: Float = spotify.duration()
   # Mirror Spotify's actual state into the local playback mock so the
   # play-button icon (applyPlaybackToWorld → playback.isPlaying) and the
   # progress bar / playhead readout (driven by elapsedSec / durationSec)

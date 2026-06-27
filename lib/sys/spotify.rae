@@ -5,7 +5,7 @@
 #
 # Requires:
 #   * macOS
-#   * Spotify desktop app installed (call `spotifyLaunch()` once at
+#   * Spotify desktop app installed (call `launch()` once at
 #     boot to open it if it isn't already)
 #   * One-time "Automation" permission — macOS prompts the first time
 #     the program tries to control Spotify
@@ -21,13 +21,13 @@
 # Usage (typical poll loop):
 #
 #     import sys/spotify
-#     let t: SpotifyTrack = spotifyCurrent()
+#     let t: SpotifyTrack = current()
 #     if t.state.equals(other: "playing") {
 #       log("now playing: {t.trackName} — {t.artistName}")
 #     }
 #
 # Search-and-play (future): not exposed yet. The C bridge can grow a
-# `spotifyPlayQuery(q: String)` extern that translates to
+# `playQuery(q: String)` extern that translates to
 # `spotify:search:<q>` via osascript when needed.
 import core
 
@@ -51,61 +51,61 @@ type SpotifyTrack pub {
 # Transport controls. All four launch Spotify if it isn't running yet
 # (because AppleScript's `tell application "Spotify" to play` does it
 # implicitly). No return value — failures (e.g. permission denied) are
-# silent at this layer; the next `spotifyCurrent()` snapshot will
+# silent at this layer; the next `current()` snapshot will
 # reveal the unchanged state.
-func spotifyLaunch() extern
-func spotifyPlay() extern
-func spotifyPause() extern
-func spotifyNext() extern
-func spotifyPrevious() extern
+func launch() extern
+func play() extern
+func pause() extern
+func next() extern
+func previous() extern
 
 # Play a specific Spotify URI directly. Accepts the full URI form
 # Spotify hands out — spotify:track:<id>, spotify:album:<id>,
 # spotify:playlist:<id>. Use this when the local catalog has a URI
 # stored (e.g. annotated album.json).
-func spotifyPlayUri(uri: view String) extern
+func playUri(uri: view String) extern
 
 # Search-and-play. Opens Spotify's search panel for `query` and
 # plays the top hit. Use when the local catalog has only a free-form
 # label (artist + track / artist + album). The query is URL-encoded
 # inside the C bridge; pass plain text, no escaping required.
-func spotifyPlayQuery(query: view String) extern
+func playQuery(query: view String) extern
 
 # Per-poll snapshot. Runs ONE osascript invocation and caches the six
 # fields; the field getters below read from that cache without re-
 # forking osascript. Call this at the start of each poll, then read
 # fields freely.
-func spotifyRefresh() extern
-func spotifyState() extern ret String
-func spotifyTrackId() extern ret String
-func spotifyTrackName() extern ret String
-func spotifyArtistName() extern ret String
-func spotifyAlbumName() extern ret String
-func spotifyArtworkUrl() extern ret String
+func refresh() extern
+func state() extern ret String
+func trackId() extern ret String
+func trackName() extern ret String
+func artistName() extern ret String
+func albumName() extern ret String
+func artworkUrl() extern ret String
 # Wall-clock playback position in seconds (0 when stopped).
-func spotifyPosition() extern ret Float
+func position() extern ret Float
 # Total track length in seconds (0 when stopped / unknown).
-func spotifyDuration() extern ret Float
+func duration() extern ret Float
 
 # Convenience: refresh + snapshot into a `SpotifyTrack` value. The
 # struct's String fields are independent owned copies of the cache,
 # so dropping the snapshot doesn't disturb the cache.
-func spotifyCurrent() ret SpotifyTrack {
-  spotifyRefresh()
+func current() ret SpotifyTrack {
+  refresh()
   ret SpotifyTrack {
-    state: spotifyState()
-    trackId: spotifyTrackId()
-    trackName: spotifyTrackName()
-    artistName: spotifyArtistName()
-    albumName: spotifyAlbumName()
-    artworkUrl: spotifyArtworkUrl()
+    state: state()
+    trackId: trackId()
+    trackName: trackName()
+    artistName: artistName()
+    albumName: albumName()
+    artworkUrl: artworkUrl()
   }
 }
 
 # Download an artwork URL to a local file. Uses curl, follows redirects,
 # fails fast (`-sLf`). Returns true on HTTP 2xx + file written, false
 # otherwise. Used for both Spotify's CDN URL and the iTunes fallback.
-func spotifyFetchArtwork(url: view String, outPath: view String) extern ret Bool
+func fetchArtwork(url: view String, outPath: view String) extern ret Bool
 
 # iTunes Search API fallback for album art. Queries
 # https://itunes.apple.com/search?term=<term>&entity=song&limit=1,
