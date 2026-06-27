@@ -256,6 +256,9 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         case AST_BIN_GE: fprintf(out, " >= "); break; case AST_BIN_IS: fprintf(out, " == "); break;
         case AST_BIN_NEQ: fprintf(out, " != "); break;
         case AST_BIN_AND: fprintf(out, " && "); break; case AST_BIN_OR: fprintf(out, " || "); break;
+        case AST_BIN_BAND: fprintf(out, " & "); break; case AST_BIN_BOR: fprintf(out, " | "); break;
+        case AST_BIN_BXOR: fprintf(out, " ^ "); break;
+        case AST_BIN_BSL: fprintf(out, " << "); break; case AST_BIN_BSR: fprintf(out, " >> "); break;
       }
       emit_expr(ctx, expr->as.binary.rhs, out, prec, false, false);
       if (prec < parent_prec) fprintf(out, ")"); if (is_bool_op) fprintf(out, ")");
@@ -267,6 +270,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
     case AST_EXPR_UNARY: {
         switch (expr->as.unary.op) {
             case AST_UNARY_NOT: fprintf(out, "((bool)!("); emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, false, false); fprintf(out, "))"); break;
+            case AST_UNARY_BNOT: fprintf(out, "(~("); emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, false, false); fprintf(out, "))"); break;
             case AST_UNARY_NEG: fprintf(out, "-("); emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, false, false); fprintf(out, ")"); break;
             case AST_UNARY_VIEW: case AST_UNARY_MOD: emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, false, false); break;
             case AST_UNARY_PRE_INC: fprintf(out, "++"); emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, true, false); break;

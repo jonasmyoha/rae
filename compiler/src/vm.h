@@ -103,7 +103,15 @@ typedef enum {
    * discards the slot). Emitted for a discarded expression-statement
    * result that owns a resource — currently a bare `spawn f()` whose
    * Task must be joined-on-drop rather than leaked. No operands. */
-  OP_DROP_TOP = 0x47
+  OP_DROP_TOP = 0x47,
+  /* Bitwise ops on Int (Erlang-style word operators: band/bor/bxor/bsl/
+     bsr binary, bnot unary). Int-only — see project bitwise design. */
+  OP_BAND = 0x48,
+  OP_BOR  = 0x49,
+  OP_BXOR = 0x4A,
+  OP_BSL  = 0x4B,
+  OP_BSR  = 0x4C,
+  OP_BNOT = 0x4D
 } OpCode;
 
 typedef enum {
