@@ -14,6 +14,7 @@ import core
 import gpu
 import sdl3
 import image
+import filesystem
 import sdf_text
 import vec3
 import scene
@@ -254,7 +255,7 @@ func main() {
         var moved: Bool = false
 
         # F2 saves the current frame as a PNG.
-        if sdl3.isKeyPressed(key: 291) { let saved: Bool = image.savePng(path: "rae_render.png", pixels: fb.data, width: width, height: height) }
+        if sdl3.isKeyPressed(key: 291) { let saved: Bool = image.savePng(path: filesystem.renderPath(stem: "rae_render"), pixels: fb.data, width: width, height: height) }
 
         # Scene switch — number keys. 1 = Scene One (lights + cube), 2 = Book
         # (~480 spheres), 3 = bunny mesh (~4968 tris via BVH), and the original

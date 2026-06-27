@@ -2174,7 +2174,10 @@ static bool build_c_backend_output(const char* entry_file,
 
   bool uses_sdl3 = false;
   for (ModuleNode* node = graph.head; node; node = node->next) {
-      if (node->module_path && (strcmp(node->module_path, "sdl3") == 0 || strstr(node->module_path, "/sdl3.rae") || strstr(node->module_path, "\\sdl3.rae"))) {
+      // sdl3 and filesystem both define functions in the RAE_HAS_SDL3 runtime
+      // block, so either one requires linking libSDL3.
+      if (node->module_path && (strcmp(node->module_path, "sdl3") == 0 || strstr(node->module_path, "/sdl3.rae") || strstr(node->module_path, "\\sdl3.rae")
+                                || strcmp(node->module_path, "filesystem") == 0 || strstr(node->module_path, "/filesystem.rae") || strstr(node->module_path, "\\filesystem.rae"))) {
           uses_sdl3 = true;
           break;
       }
