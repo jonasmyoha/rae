@@ -13,6 +13,8 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module);
 // sema, so name resolution can honour per-file aliases and import/open.
 void sema_reset_file_scopes(void);
 void sema_register_file_imports(Arena* arena, const char* file, AstImport* imports);
+// Register a prelude package (auto-loaded => opened for every file).
+void sema_register_global_open(Arena* arena, const char* module);
 
 // Resolves a type reference (AstTypeRef) to a canonical TypeInfo*
 TypeInfo* sema_resolve_type(CompilerContext* ctx, AstTypeRef* type_ref);

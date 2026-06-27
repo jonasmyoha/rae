@@ -141,18 +141,18 @@ func trim(this: view String) ret String {
 func split(this: view String, sep: view String) ret List(String) {
   let result: List(String) = createList(String, cap: 4)
   if sep.length() is 0 {
-    add(result, value: this)
+    result.add(value: this)
     ret result
   }
   var remaining: String = this
   loop true {
     let idx: Int = remaining.indexOf(sub: sep)
     if idx is -1 {
-      add(result, value: remaining)
+      result.add(value: remaining)
       ret result
     }
     let part: String = remaining.sub(start: 0, len: idx)
-    add(result, value: part)
+    result.add(value: part)
     remaining = remaining.sub(
       start: idx + sep.length()
       len: remaining.length() - idx - sep.length()
