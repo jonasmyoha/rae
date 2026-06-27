@@ -284,18 +284,35 @@ const char* rae_mangle_type(CompilerContext* ctx, const struct AstIdentifierPart
     return rae_mangle_type_ext(ctx, generic_params, type, false);
 }
 
-// A public-API extern from a stdlib module (lives in lib/, not core/raylib, a
-// simple-identifier module name, not internal rae_/__ plumbing) binds to the
-// namespace-qualified C symbol `rae_ext_<module>_<name>` (docs/module-namespacing.md,
-// Option B). Computed once and used to (a) keep find_raylib_mapping from
+// A public-API extern from a stdlib module (lives in lib/, not core/raylib, not
+// internal rae_/__ plumbing) binds to the namespace-qualified C symbol
+// `rae_ext_<module-path>_<name>` (docs/module-namespacing.md, Option B). The
+// FULL module path is encoded — a subfolder package (`compress/oracle`) is
+// namespaced exactly like a top-level one (`image`), so the namespace never
+// disappears for nested packages. Used to (a) keep find_raylib_mapping from
 // hijacking de-prefixed names that collide with raylib's API (initWindow,
 // isKeyDown, …) and (b) emit the qualified symbol below.
 static bool is_namespaced_stdlib_extern(const AstFuncDecl* func) {
     if (!func->is_extern || !func->module_name || !func->origin_file) return false;
     if (strcmp(func->module_name, "core") == 0 || strcmp(func->module_name, "raylib") == 0) return false;
-    if (strchr(func->module_name, '/') || strchr(func->module_name, '\\')) return false;
     if (str_starts_with_cstr(func->name, "rae_") || str_starts_with_cstr(func->name, "__")) return false;
     return strstr(func->origin_file, "/lib/") != NULL || strncmp(func->origin_file, "lib/", 4) == 0;
+}
+
+// Encode a module path into a C-symbol-safe prefix: path separators become '_'.
+// Only separators are translated (underscores within a segment are left as-is),
+// so a top-level module keeps its name verbatim (`sdf_text` -> `sdf_text`) and a
+// subfolder package is flattened (`compress/oracle` -> `compress_oracle`). The
+// mapping is non-injective only if two distinct paths align a '/' with a '_';
+// rae_check_module_symbol_collisions() (main.c) rejects that at build time, so
+// distinct legal paths can never silently produce the same C symbol.
+void rae_mangle_module_path(const char* module_path, char* out, size_t out_cap) {
+    size_t j = 0;
+    for (size_t i = 0; module_path[i] && j + 1 < out_cap; i++) {
+        char c = module_path[i];
+        out[j++] = (c == '/' || c == '\\') ? '_' : c;
+    }
+    out[j] = '\0';
 }
 
 const char* rae_mangle_function(CompilerContext* ctx, const AstFuncDecl* func) {
@@ -340,12 +357,16 @@ const char* rae_mangle_function(CompilerContext* ctx, const AstFuncDecl* func) {
         else if (str_eq_cstr(name, "__buf_resize")) mapped = "rae_ext___buf_resize";
 
         if (mapped) { char* res = arena_alloc(ctx->ast_arena, strlen(mapped) + 1); strcpy(res, mapped); return res; }
-        // Namespace-qualified stdlib extern -> rae_ext_<module>_<name> (the
-        // module is the namespace all the way down to the C ABI; no mapping table).
+        // Namespace-qualified stdlib extern -> rae_ext_<module-path>_<name> (the
+        // full module path is the namespace all the way down to the C ABI; no
+        // mapping table). Subfolder packages flatten via rae_mangle_module_path.
         if (is_namespaced_stdlib_extern(func)) {
-            size_t cap = strlen(func->module_name) + func->name.len + 12;
+            size_t mlen = strlen(func->module_name);
+            char* mp = arena_alloc(ctx->ast_arena, mlen + 1);
+            rae_mangle_module_path(func->module_name, mp, mlen + 1);
+            size_t cap = strlen(mp) + func->name.len + 12;
             char* res = arena_alloc(ctx->ast_arena, cap);
-            snprintf(res, cap, "rae_ext_%s_%.*s", func->module_name, (int)func->name.len, func->name.data);
+            snprintf(res, cap, "rae_ext_%s_%.*s", mp, (int)func->name.len, func->name.data);
             return res;
         }
         if (str_starts_with_cstr(func->name, "rae_ext_")) { char* res = arena_alloc(ctx->ast_arena, func->name.len + 1); sprintf(res, "%.*s", (int)func->name.len, func->name.data); return res; }

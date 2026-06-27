@@ -1,0 +1,24 @@
+# Full-path extern mangling: a subfolder stdlib package (compress/oracle) is
+# namespaced as rae_ext_compress_oracle_* and called qualified. Round-trips a
+# buffer through lodepng to prove the symbol links. Compiled-only (lodepng).
+import core
+import compress/oracle
+
+func main() {
+    let n: Int = 64
+    let raw: Buffer(Int) = rae_ext_rae_buf_alloc(size: n, elemSize: sizeof(Int))
+    var i: Int = 0
+    loop i < n { rae_ext_rae_buf_set(buf: raw, index: i, value: 65 + (i % 4)) i = i + 1 }
+    var clen: Int = 0
+    let comp: Buffer(Int) = oracle.deflate(data: raw, len: n, outLen: clen)
+    var dlen: Int = 0
+    let back: Buffer(Int) = oracle.inflate(data: comp, len: clen, outLen: dlen)
+    var mism: Int = 0
+    i = 0
+    loop i < n {
+        if rae_ext_rae_buf_get(buf: back, index: i) is not rae_ext_rae_buf_get(buf: raw, index: i) { mism = mism + 1 }
+        i = i + 1
+    }
+    log(dlen)
+    log(mism)
+}
