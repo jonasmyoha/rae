@@ -8,6 +8,12 @@
 // Returns true if analysis succeeded, false if errors were found
 bool sema_analyze_module(CompilerContext* ctx, AstModule* module);
 
+// Per-file import/open scope (docs/module-namespacing.md). Call reset once, then
+// register each source file's import directives (from the module graph) before
+// sema, so name resolution can honour per-file aliases and import/open.
+void sema_reset_file_scopes(void);
+void sema_register_file_imports(Arena* arena, const char* file, AstImport* imports);
+
 // Resolves a type reference (AstTypeRef) to a canonical TypeInfo*
 TypeInfo* sema_resolve_type(CompilerContext* ctx, AstTypeRef* type_ref);
 
