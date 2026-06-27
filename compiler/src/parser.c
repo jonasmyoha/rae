@@ -391,7 +391,7 @@ static Str parse_import_path_spec(Parser* parser) {
   return (Str){.data = buffer, .len = len};
 }
 
-static AstImport* parse_import_clause(Parser* parser, bool is_export) {
+static AstImport* parse_import_clause(Parser* parser, bool is_export, bool is_open) {
   const Token* start = parser_previous(parser);
   Str path;
   if (parser_check(parser, TOK_STRING)) {
@@ -401,6 +401,8 @@ static AstImport* parse_import_clause(Parser* parser, bool is_export) {
     const Token* t = parser_advance(parser);
     AstImport* clause = parser_alloc(parser, sizeof(AstImport));
     clause->is_export = is_export;
+    clause->is_open = is_open;
+    clause->alias = (Str){0};
     clause->path = parser_copy_str(parser, t->lexeme);
     clause->line = start->line;
     clause->column = start->column;
@@ -408,12 +410,24 @@ static AstImport* parse_import_clause(Parser* parser, bool is_export) {
   } else {
     path = parse_import_path_spec(parser);
   }
-  
+
   if (path.len == 0) {
     return NULL;
   }
+  // Optional `as <alias>` — contextual; `as` is not a reserved keyword.
+  Str alias = (Str){0};
+  if (parser_check(parser, TOK_IDENT) && str_eq_cstr(parser_peek(parser)->lexeme, "as")) {
+    parser_advance(parser); // consume `as`
+    if (parser_check(parser, TOK_IDENT)) {
+      alias = parser_copy_str(parser, parser_advance(parser)->lexeme);
+    } else {
+      parser_error(parser, parser_peek(parser), "expected an alias name after 'as'");
+    }
+  }
   AstImport* clause = parser_alloc(parser, sizeof(AstImport));
   clause->is_export = is_export;
+  clause->is_open = is_open;
+  clause->alias = alias;
   clause->path = path;
   clause->line = start->line;
   clause->column = start->column;
@@ -2448,13 +2462,24 @@ AstModule* parse_module(Arena* arena, const char* file_path, TokenList tokens) {
   module->comments = comments;
   module->comment_count = comment_count;
   AstImport* imports = NULL;
-  while (parser_check(&parser, TOK_KW_IMPORT) || (parser_check(&parser, TOK_KW_EXPORT) && parser_peek_at(&parser, 1)->kind == TOK_STRING)) {
+  // `open` is a CONTEXTUAL keyword: it is a module directive only here, in
+  // directive position, when followed by a module name/path (an identifier or
+  // string). Everywhere else `open` stays a normal identifier (e.g. a func named
+  // `open`). (docs/module-namespacing.md)
+  while (parser_check(&parser, TOK_KW_IMPORT)
+         || (parser_check(&parser, TOK_KW_EXPORT) && parser_peek_at(&parser, 1)->kind == TOK_STRING)
+         || (parser_check(&parser, TOK_IDENT)
+             && str_eq_cstr(parser_peek(&parser)->lexeme, "open")
+             && (parser_peek_at(&parser, 1)->kind == TOK_IDENT || parser_peek_at(&parser, 1)->kind == TOK_STRING))) {
     size_t prev_index = parser.index;
     if (parser_match(&parser, TOK_KW_IMPORT)) {
-        imports = append_import(imports, parse_import_clause(&parser, false));
+        imports = append_import(imports, parse_import_clause(&parser, false, false));
+    } else if (parser_check(&parser, TOK_IDENT) && str_eq_cstr(parser_peek(&parser)->lexeme, "open")) {
+        parser_advance(&parser); // consume `open`
+        imports = append_import(imports, parse_import_clause(&parser, false, true));
     } else {
         parser_advance(&parser); // consume export
-        imports = append_import(imports, parse_import_clause(&parser, true));
+        imports = append_import(imports, parse_import_clause(&parser, true, false));
     }
     if (parser.index == prev_index) {
         parser_advance(&parser);
