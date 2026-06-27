@@ -375,7 +375,9 @@ struct AstDecl {
 
 struct AstImport {
   bool is_export;
+  bool is_open;     // `open module` — also opens the namespace into bare scope (docs/module-namespacing.md)
   Str path;
+  Str alias;        // `import/open module as alias` — explicit namespace rename; {0} if none
   struct AstModule* module;
   size_t line;
   size_t column;
