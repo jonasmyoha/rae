@@ -1820,6 +1820,13 @@ static AstModule merge_module_graph(const ModuleGraph* graph) {
   }
   AstDecl* head = NULL;
   AstDecl* tail = NULL;
+  // Per-file import/open directives are flattened away by the merge; register
+  // them keyed by file first so sema can resolve aliases + import/open per file
+  // (docs/module-namespacing.md).
+  sema_reset_file_scopes();
+  for (ModuleNode* node = graph->head; node; node = node->next) {
+    if (node->module) sema_register_file_imports(graph->arena, node->module->file_path, node->module->imports);
+  }
   for (ModuleNode* node = graph->head; node; node = node->next) {
     // Stamp each decl with its origin file so sema can answer "did
     // this call come from stdlib?" after the merge — module->file_path
