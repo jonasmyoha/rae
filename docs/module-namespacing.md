@@ -138,3 +138,35 @@ that uses bare receiver-less stdlib helpers declares `open <module>` (e.g.
 `open core` for `log`/`createList`, or whatever provides them), and leave
 `import`-only files to qualification + UFCS. The exact set is reported after the
 mechanism lands.
+
+## Extern C-symbol mangling (full module path)
+
+A public-API `extern` from a stdlib module binds to a namespace-qualified C
+symbol so the namespace reaches all the way down to the C ABI:
+
+    rae_ext_<module-path>_<name>
+
+The **complete module path** is encoded — a subfolder package is namespaced
+exactly like a top-level one, so the namespace never disappears for nested
+packages:
+
+    lib/image.rae            module: image           -> rae_ext_image_loadPng
+    lib/compress/oracle.rae  module: compress/oracle  -> rae_ext_compress_oracle_deflate
+    lib/sys/spotify.rae      module: sys/spotify      -> rae_ext_sys_spotify_launch
+
+Encoding (`rae_mangle_module_path`, `compiler/src/mangler.c`): path separators
+`/` and `\` become `_`; segment characters (including any `_`) are left as-is, so
+underscore-named top-level modules are unchanged (`sdf_text` ->
+`rae_ext_sdf_text_*`). This map is non-injective only if a `/` in one path aligns
+with a `_` in another (e.g. `foo/bar` vs `foo_bar`); `merge_module_graph`
+(`compiler/src/main.c`) **rejects that at build time**, so distinct legal module
+paths can never silently produce the same C symbol — escaping is therefore
+unnecessary.
+
+Exemptions (`is_namespaced_stdlib_extern`): `core` and `raylib` (flat by design),
+and internal plumbing names that start with `rae_`/`__` (they bind to fixed
+runtime symbols, e.g. `lib/ui/msdf.rae`'s `rae_ext_rae_sys_read_file`).
+
+Library authors therefore do **not** prefix function names for uniqueness — the
+package path provides it. Call qualified (`oracle.deflate(...)`,
+`spotify.launch(...)`); the qualifier is the module's file stem.

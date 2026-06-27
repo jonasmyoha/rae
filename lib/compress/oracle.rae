@@ -4,13 +4,12 @@
 # Buffer(Int), each entry 0..255; the decoded length is written through `outLen`.
 import core
 
-# Names are deliberately distinct (oracle*) — externs in a subdirectory stdlib
-# package mangle to bare rae_ext_<name>, so generic names like `inflate` would
-# pollute the global C namespace.
-func oracleDeflate(data: view Buffer(Int), len: Int, outLen: mod Int) extern ret Buffer(Int)
-func oracleInflate(data: view Buffer(Int), len: Int, outLen: mod Int) extern ret Buffer(Int)
-func oracleZlibCompress(data: view Buffer(Int), len: Int, outLen: mod Int) extern ret Buffer(Int)
-func oracleZlibDecompress(data: view Buffer(Int), len: Int, outLen: mod Int) extern ret Buffer(Int)
+# Clean names — the package namespace (compress/oracle -> rae_ext_compress_oracle_*)
+# provides uniqueness, so no manual prefix is needed. Call as oracle.deflate(...).
+func deflate(data: view Buffer(Int), len: Int, outLen: mod Int) extern ret Buffer(Int)
+func inflate(data: view Buffer(Int), len: Int, outLen: mod Int) extern ret Buffer(Int)
+func zlibCompress(data: view Buffer(Int), len: Int, outLen: mod Int) extern ret Buffer(Int)
+func zlibDecompress(data: view Buffer(Int), len: Int, outLen: mod Int) extern ret Buffer(Int)
 # PNG codecs (lodepng, in-memory): pixels are packed 0xAARRGGBB.
-func oracleDecodePng(data: view Buffer(Int), len: Int, w: mod Int, h: mod Int) extern ret Buffer(Int)
-func oracleEncodePng(pixels: view Buffer(Int), w: Int, h: Int, outLen: mod Int) extern ret Buffer(Int)
+func decodePng(data: view Buffer(Int), len: Int, w: mod Int, h: mod Int) extern ret Buffer(Int)
+func encodePng(pixels: view Buffer(Int), w: Int, h: Int, outLen: mod Int) extern ret Buffer(Int)

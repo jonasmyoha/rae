@@ -170,13 +170,13 @@ func buildSpotifyStatusCard(world: mod UiWorld) ret EntityId {
   if spotifyEnabled is false {
     line1 = "Disabled (RAE_UI_NO_SPOTIFY=1)"
   } else {
-    spotifyRefresh()
-    let st: String = spotifyState()
+    spotify.refresh()
+    let st: String = spotify.state()
     let playingKey: String = "playing"
     let pausedKey: String = "paused"
     if st.equals(other: playingKey) {
-      let trk: String = spotifyTrackName()
-      let art: String = spotifyArtistName()
+      let trk: String = spotify.trackName()
+      let art: String = spotify.artistName()
       line1 = "Playing '{trk}' — {art}"
     } else {
       if st.equals(other: pausedKey) {
