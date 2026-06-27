@@ -1,0 +1,13 @@
+# DEFLATE/zlib reference oracle — thin bindings to lodepng's codecs, used to
+# validate the pure-Rae codec (round-trip + interop, docs/png-and-deflate-
+# strategy.md). Compiled-target only (lodepng lives in the runtime). Bytes are
+# Buffer(Int), each entry 0..255; the decoded length is written through `outLen`.
+import core
+
+# Names are deliberately distinct (oracle*) — externs in a subdirectory stdlib
+# package mangle to bare rae_ext_<name>, so generic names like `inflate` would
+# pollute the global C namespace.
+func oracleDeflate(data: view Buffer(Int), len: Int, outLen: mod Int) extern ret Buffer(Int)
+func oracleInflate(data: view Buffer(Int), len: Int, outLen: mod Int) extern ret Buffer(Int)
+func oracleZlibCompress(data: view Buffer(Int), len: Int, outLen: mod Int) extern ret Buffer(Int)
+func oracleZlibDecompress(data: view Buffer(Int), len: Int, outLen: mod Int) extern ret Buffer(Int)
