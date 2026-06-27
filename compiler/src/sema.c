@@ -14,6 +14,48 @@
 // types outside stdlib. NULL = unknown / top-level scope.
 static const char* s_current_decl_origin = NULL;
 
+// Per-file import/open directives (docs/module-namespacing.md). Registered from
+// the module graph before sema; consulted via s_current_decl_origin so a call
+// resolves names against ITS file's imports (aliases, open-vs-import). Auto-
+// loaded modules are auto-opened, so they need no per-file directive.
+typedef struct SemaFileScope {
+    const char* file;
+    AstImport* imports;
+    struct SemaFileScope* next;
+} SemaFileScope;
+static SemaFileScope* s_file_scopes = NULL;
+
+void sema_reset_file_scopes(void) { s_file_scopes = NULL; }
+
+void sema_register_file_imports(Arena* arena, const char* file, AstImport* imports) {
+    if (!file) return;
+    SemaFileScope* s = arena_alloc(arena, sizeof(SemaFileScope));
+    s->file = file;
+    s->imports = imports;
+    s->next = s_file_scopes;
+    s_file_scopes = s;
+}
+
+static AstImport* sema_imports_for_file(const char* file) {
+    if (!file) return NULL;
+    for (SemaFileScope* s = s_file_scopes; s; s = s->next) {
+        if (s->file && strcmp(s->file, file) == 0) return s->imports;
+    }
+    return NULL;
+}
+
+// If `qualifier` is an `import/open X as qualifier` alias in `file`, return X's
+// module name (the import path); else {0}. The alias only renames explicit
+// qualification — UFCS still uses the real function name.
+static Str sema_resolve_alias(const char* file, Str qualifier) {
+    for (AstImport* im = sema_imports_for_file(file); im; im = im->next) {
+        if (im->alias.data && im->alias.len && str_eq(im->alias, qualifier)) {
+            return im->path;
+        }
+    }
+    return (Str){0};
+}
+
 typedef struct Symbol Symbol;
 // Why a binding is immutable — drives a precise reassignment diagnostic.
 typedef enum {
@@ -1251,15 +1293,25 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
             // we only take this path when the lookup finds no symbol.
             // (docs/module-namespacing.md)
             if (expr->as.method_call.object->kind == AST_EXPR_IDENT
-                && !symbol_table_lookup(symbols, expr->as.method_call.object->as.ident)
-                && sema_is_module_name(module, expr->as.method_call.object->as.ident)) {
-                Str qual = expr->as.method_call.object->as.ident;
+                && !symbol_table_lookup(symbols, expr->as.method_call.object->as.ident)) {
+                Str lhs = expr->as.method_call.object->as.ident;
+                // The LHS is a namespace qualifier if it is a module name, or an
+                // `import/open X as lhs` alias resolving to module X. (Aliases are
+                // per-file; auto-loaded modules need no directive.)
+                Str modname = (Str){0};
+                if (sema_is_module_name(module, lhs)) {
+                    modname = lhs;
+                } else {
+                    Str aliased = sema_resolve_alias(s_current_decl_origin, lhs);
+                    if (aliased.data && sema_is_module_name(module, aliased)) modname = aliased;
+                }
+                if (modname.data) {
                 Str fname = expr->as.method_call.method_name;
                 AstCallArg* qargs = expr->as.method_call.args;
                 AstTypeRef* qgen = expr->as.method_call.generic_args;
                 // Analyze args first so the resolver can use their types.
                 for (AstCallArg* a = qargs; a; a = a->next) sema_analyze_expr(ctx, module, symbols, a->value);
-                AstDecl* resolved = resolve_qualified_function(ctx, module, symbols, qual, fname, qargs);
+                AstDecl* resolved = resolve_qualified_function(ctx, module, symbols, modname, fname, qargs);
                 // Rewrite to a plain call (no receiver) bound directly to the
                 // resolved in-module decl — codegen emits from decl_link, so this
                 // survives non-core stdlib losing its flat symbols (step 3).
@@ -1282,6 +1334,7 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                     while (p && a) { TypeInfo* pt = sema_resolve_type_internal(ctx, module, symbols, p->type); ensure_type_match(ctx, pt, &a->value); p = p->next; a = a->next; }
                 }
                 break;
+                } // if (modname.data)
             }
             sema_analyze_expr(ctx, module, symbols, expr->as.method_call.object);
             AstCallArg* marg = expr->as.method_call.args;
