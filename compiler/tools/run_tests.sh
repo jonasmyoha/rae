@@ -142,6 +142,11 @@ for TARGET in "${TARGETS[@]}"; do
                 RUN_THIS=0 ;;
             414_*)
                 RUN_THIS=0 ;;
+            # 526 PNG codec: decodePng returns dims via `mod Int` out-params,
+            # which the Live VM can't write back (mod-struct fields work, scalar
+            # mod doesn't). The codec's target is Compiled anyway.
+            526_*)
+                RUN_THIS=0 ;;
         esac
     fi
 
