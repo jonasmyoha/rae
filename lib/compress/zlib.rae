@@ -1,0 +1,41 @@
+# zlib stream (RFC 1950) = 2-byte header + raw DEFLATE + 4-byte big-endian
+# Adler-32 of the uncompressed data. This is exactly what a PNG IDAT carries.
+#
+# Part of the pure-Rae DEFLATE/PNG codec (docs/png-and-deflate-strategy.md).
+# Reuses deflate/inflate/adler32 from the same package.
+import core
+import compress/deflate
+import compress/inflate
+import compress/checksums
+
+# Compress to a zlib stream. Header 0x78 0x01: CM=8/CINFO=7 (32 KB window),
+# FCHECK chosen so (CMF*256 + FLG) % 31 == 0, no preset dict.
+func zlibCompress(data: view List(Int), n: view Int) ret List(Int) {
+    let out: List(Int) = createList(cap: n / 2 + 16)
+    out.add(value: 120)   # 0x78 CMF
+    out.add(value: 1)     # 0x01 FLG
+    let comp: List(Int) = deflateRaw(data: data, n: n)
+    var i: Int = 0
+    loop i < comp.length {
+        out.add(value: comp.at(index: i))
+        i = i + 1
+    }
+    let ad: Int = adler32(data: data, len: n)
+    out.add(value: (ad bsr 24) band 255)
+    out.add(value: (ad bsr 16) band 255)
+    out.add(value: (ad bsr 8) band 255)
+    out.add(value: ad band 255)
+    ret out
+}
+
+# Decompress a zlib stream: skip the 2-byte header, inflate the body (the
+# trailing 4-byte Adler-32 is ignored — inflate stops at the final block).
+func zlibDecompress(data: view List(Int), n: view Int) ret List(Int) {
+    let inner: List(Int) = createList(cap: n)
+    var i: Int = 2
+    loop i < n - 4 {
+        inner.add(value: data.at(index: i))
+        i = i + 1
+    }
+    ret inflateRaw(data: inner, len: inner.length)
+}
