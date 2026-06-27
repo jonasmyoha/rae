@@ -54,6 +54,26 @@ The build output (`build/`) is git-ignored.
 - It runs and produces a correct image (the iconic step-3 materials scene).
 - A reusable build script + headless smoke gate exist so the path can't rot.
 
+## Measured: WASM vs native (the W1 perf question)
+
+Same compute core, same scene (480×270, 24 spp, depth 12), Apple M-series,
+Node v25 (V8). Render wall-clock (best of 3):
+
+| build | time | notes |
+|---|---|---|
+| **native** (Apple clang `-O2`) | ~1.18 s | `cc -O2`, linked with frameworks |
+| **WASM, single-thread** (wasi-sdk clang `-O2 -msimd128`, Node WASI) | ~1.0 s | ≈1.06 s incl. ~0.06 s node startup |
+| **WASM, threaded** (`48_raytracer_wasm_spawn`, `WASM_THREADS=1`, 4 `spawn` band-workers over SharedArrayBuffer) | ~0.61 s | ~1.7× over single-thread |
+
+**Verdict:** WebAssembly runs this float-heavy path tracer at **parity with
+native** (within noise; SIMD-vectorised), and Rae `spawn` gives **real
+parallelism in the sandbox** (wasm threads on shared memory, no JS-side
+band-splitting). The WASM-first deployment thesis holds on the perf axis.
+
+(Reproduce: `compiler/tools/wasm_smoke.sh`; for threaded,
+`WASM_THREADS=1 compiler/tools/wasm_build.sh examples/48_raytracer_wasm_spawn`
+then `node compiler/tools/wasm_run_threads.mjs …/build/app.wasm`.)
+
 ## Next (W2 / W3)
 
 - **W2**: replace the canvas `putImageData` with a WebGPU texture + a WGSL blit
