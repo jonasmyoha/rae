@@ -2514,6 +2514,7 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
         size_t nlen = strlen(ent->d_name);
         if (nlen > 2 && strcmp(ent->d_name + nlen - 2, ".c") == 0 &&
             strcmp(ent->d_name, "rae_runtime.c") != 0 && strcmp(ent->d_name, "monocypher.c") != 0 &&
+            strcmp(ent->d_name, "lodepng.c") != 0 &&  /* #included by rae_runtime.c — never a standalone TU */
             strncmp(ent->d_name, "rae_compiled_", 13) != 0 && strcmp(ent->d_name, "out.c") != 0) {
           pos += snprintf(extra_c_files + pos, sizeof(extra_c_files) - pos, " %s/%s", src_dir, ent->d_name);
         }
