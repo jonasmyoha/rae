@@ -211,7 +211,7 @@ func refetchHistoryArt(history: view PlayHistory, reg: mod TextureRegistry) pub 
         if e.artworkUrl.length() > 0 {
           let suffix: String = e.textureKey.sub(start: pLen, len: e.textureKey.length() - pLen)
           let outPath: String = "/tmp/rae_spotify_art_{suffix}.jpg"
-          let ok: Bool = spotifyFetchArtwork(url: e.artworkUrl, outPath: outPath)
+          let ok: Bool = spotify.fetchArtwork(url: e.artworkUrl, outPath: outPath)
           if ok {
             let tex: Texture = loadTexture(fileName: outPath)
             let keyForReg: String = "{e.textureKey}"
@@ -249,7 +249,7 @@ func refetchHistoryArtChunk(history: view PlayHistory, reg: mod TextureRegistry,
         if e.artworkUrl.length() > 0 {
           let suffix: String = e.textureKey.sub(start: pLen, len: e.textureKey.length() - pLen)
           let outPath: String = "/tmp/rae_spotify_art_{suffix}.jpg"
-          let ok: Bool = spotifyFetchArtwork(url: e.artworkUrl, outPath: outPath)
+          let ok: Bool = spotify.fetchArtwork(url: e.artworkUrl, outPath: outPath)
           if ok {
             let tex: Texture = loadTexture(fileName: outPath)
             let keyForReg: String = "{e.textureKey}"
