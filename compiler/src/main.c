@@ -92,6 +92,7 @@ typedef struct ModuleNode {
   char* file_path;
   char* canonical_path;
   AstModule* module;
+  bool is_auto_loaded;   // intentional stdlib prelude (core/string/math/io/sys) — implicitly opened everywhere; NOT incidentally-discovered deps (docs/module-namespacing.md)
   struct ModuleNode* next;
 } ModuleNode;
 
@@ -1614,7 +1615,11 @@ static bool module_graph_load_module(ModuleGraph* graph,
                         strcmp(module_path, "io") != 0 &&
                         strcmp(module_path, "string") != 0 &&
                         strcmp(module_path, "sys") != 0))) {
-    static const char* stdlib_modules[] = { "core", "string", "math", "io", "sys" };
+    // Prelude: auto-loaded => auto-opened for every file. List containers
+    // (list2*) are here because List is a fundamental type used pervasively via
+    // bare/UFCS (.add/.get) — requiring a per-file `open list2*` would be
+    // impractical and break "list operations keep working" (docs/module-namespacing.md).
+    static const char* stdlib_modules[] = { "core", "string", "math", "io", "sys", "list2", "list2_int" };
     for (size_t i = 0; i < sizeof(stdlib_modules) / sizeof(stdlib_modules[0]); i++) {
       const char* name = stdlib_modules[i];
       if (module_graph_has_module(graph, name)) continue;
@@ -1626,6 +1631,10 @@ static bool module_graph_load_module(ModuleGraph* graph,
         return false;
       }
       free(path);
+      // Mark the intentional prelude so resolution treats it as opened
+      // everywhere — distinct from modules incidentally discovered via imports.
+      ModuleNode* loaded = module_graph_find(graph, name);
+      if (loaded) loaded->is_auto_loaded = true;
     }
   }
 
@@ -1826,6 +1835,9 @@ static AstModule merge_module_graph(const ModuleGraph* graph) {
   sema_reset_file_scopes();
   for (ModuleNode* node = graph->head; node; node = node->next) {
     if (node->module) sema_register_file_imports(graph->arena, node->module->file_path, node->module->imports);
+    // Prelude (auto-load set) is opened for every file. Driven by the load
+    // mechanism's flag, not a hardcoded resolver list.
+    if (node->is_auto_loaded && node->module_path) sema_register_global_open(graph->arena, node->module_path);
   }
   for (ModuleNode* node = graph->head; node; node = node->next) {
     // Stamp each decl with its origin file so sema can answer "did
