@@ -86,7 +86,12 @@ Verified headless on Chrome/Metal: adapter acquired, status reports
 `presented via WebGPU blit`, and the screenshot shows the correct scene. Open
 `web/` in any WebGPU browser to see it.
 
-## Next (W3)
+## W3 (done): GPU path tracer via WGSL compute
 
-- **W3**: port `rayColor` into a WGSL **compute** shader (GPU path tracer,
-  example step 6) — the compute side of the same WebGPU stack.
+`rayColor` is now a WGSL **compute** shader running in the browser — see
+`examples/49_raytracer_webgpu/` (`web/index.html`). The scene is authored in Rae
+and emitted to WASM stdout; the browser uploads it to a storage buffer and runs
+`raytrace.wgsl` (the *same* shader the native builds use, examples 50/53) as a
+compute pipeline through the browser's own WebGPU, then blits `outBuf` to the
+canvas. Verified headless on Chrome/Metal. WebGPU-everywhere holds on the
+compute axis too: one WGSL, browser + native.
