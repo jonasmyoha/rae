@@ -32,6 +32,7 @@
 #include "pretty.h"
 #include "c_backend.h"
 #include "sema.h"
+#include "mangler.h"
 #include "raepack.h"
 #include "vm.h"
 #include "vm_compiler.h"
@@ -1838,6 +1839,27 @@ static AstModule merge_module_graph(const ModuleGraph* graph) {
     // Prelude (auto-load set) is opened for every file. Driven by the load
     // mechanism's flag, not a hardcoded resolver list.
     if (node->is_auto_loaded && node->module_path) sema_register_global_open(graph->arena, node->module_path);
+  }
+  // Collision guard: namespaced extern symbols are rae_ext_<module-path>_<name>
+  // with '/'->'_'. Two DISTINCT module paths must never map to the same prefix
+  // (e.g. a hypothetical `list2/int` vs top-level `list2_int`), or their externs
+  // would silently bind to the same C symbol. Reject that at build time so the
+  // encoding is provably collision-safe (docs/module-namespacing.md).
+  for (ModuleNode* a = graph->head; a; a = a->next) {
+    if (!a->module_path) continue;
+    char pa[512]; rae_mangle_module_path(a->module_path, pa, sizeof(pa));
+    for (ModuleNode* b = a->next; b; b = b->next) {
+      if (!b->module_path || strcmp(a->module_path, b->module_path) == 0) continue;
+      char pb[512]; rae_mangle_module_path(b->module_path, pb, sizeof(pb));
+      if (strcmp(pa, pb) == 0) {
+        fprintf(stderr,
+          "error: module paths '%s' and '%s' both mangle to the C-symbol prefix "
+          "'rae_ext_%s_*' — rename one so namespaced externs cannot collide\n",
+          a->module_path, b->module_path, pa);
+        merged.had_error = true;
+        return merged;
+      }
+    }
   }
   for (ModuleNode* node = graph->head; node; node = node->next) {
     // Stamp each decl with its origin file so sema can answer "did

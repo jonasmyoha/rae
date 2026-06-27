@@ -147,6 +147,9 @@ for TARGET in "${TARGETS[@]}"; do
             # mod doesn't). The codec's target is Compiled anyway.
             526_*)
                 RUN_THIS=0 ;;
+            # 527 exercises a lodepng-backed oracle extern — compiled-only.
+            527_*)
+                RUN_THIS=0 ;;
         esac
     fi
 
