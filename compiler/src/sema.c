@@ -24,8 +24,95 @@ typedef struct SemaFileScope {
     struct SemaFileScope* next;
 } SemaFileScope;
 static SemaFileScope* s_file_scopes = NULL;
+static AstImport* sema_imports_for_file(const char* file);  // fwd: used by eligibility helpers below
 
-void sema_reset_file_scopes(void) { s_file_scopes = NULL; }
+// Prelude packages (the intentional auto-load set) — opened for every file.
+typedef struct SemaGlobalOpen { const char* module; struct SemaGlobalOpen* next; } SemaGlobalOpen;
+static SemaGlobalOpen* s_global_opens = NULL;
+
+void sema_reset_file_scopes(void) { s_file_scopes = NULL; s_global_opens = NULL; }
+
+void sema_register_global_open(Arena* arena, const char* module) {
+    if (!module) return;
+    SemaGlobalOpen* g = arena_alloc(arena, sizeof(SemaGlobalOpen));
+    g->module = module; g->next = s_global_opens; s_global_opens = g;
+}
+
+static bool sema_module_in_prelude(const char* module) {
+    for (SemaGlobalOpen* g = s_global_opens; g; g = g->next)
+        if (g->module && module && strcmp(g->module, module) == 0) return true;
+    return false;
+}
+
+// Package identity (docs/module-namespacing.md). A file's package:
+//   * stdlib root (path contains "/lib/" or starts "lib/"): the first path
+//     component after lib/, with the .rae extension stripped — so lib/ui.rae,
+//     lib/ui/ecs.rae, lib/ui/render.rae all map to "ui"; lib/string.rae -> "string".
+//   * otherwise (under the project root): the single project package "" .
+static void sema_package_token(const char* path, char* out, size_t cap) {
+    out[0] = '\0';
+    if (!path) return;
+    const char* after = NULL;
+    const char* lib = strstr(path, "/lib/");
+    if (lib) after = lib + 5;
+    else if (strncmp(path, "lib/", 4) == 0) after = path + 4;
+    if (!after) return;                      // project file -> package "" (the project)
+    size_t i = 0;
+    while (after[i] && after[i] != '/' && after[i] != '\\' && i + 1 < cap) { out[i] = after[i]; i++; }
+    out[i] = '\0';
+    size_t n = strlen(out);
+    if (n > 4 && strcmp(out + n - 4, ".rae") == 0) out[n - 4] = '\0';  // lib/string.rae -> "string"
+}
+
+static bool sema_same_package(const char* a, const char* b) {
+    char pa[256], pb[256];
+    sema_package_token(a, pa, sizeof(pa));
+    sema_package_token(b, pb, sizeof(pb));
+    return strcmp(pa, pb) == 0;
+}
+
+// First component of an import-directive path (the package it refers to), with
+// any .rae stripped: "ui/ecs" -> "ui", "raylib" -> "raylib", "sys/spotify" -> "sys".
+static void sema_import_package(Str path, char* out, size_t cap) {
+    size_t i = 0;
+    while (i < path.len && path.data[i] != '/' && path.data[i] != '\\' && i + 1 < cap) { out[i] = path.data[i]; i++; }
+    out[i] = '\0';
+    size_t n = strlen(out);
+    if (n > 4 && strcmp(out + n - 4, ".rae") == 0) out[n - 4] = '\0';
+}
+
+// Does `file` declare `import`/`open` for the package that owns `d`? `open` only
+// counts when require_open is true (bare lookup); `import` or `open` both count
+// otherwise (qualified / UFCS). Directives are package-granular: opening any
+// module in a package opens the whole package. (docs/module-namespacing.md)
+static bool sema_file_declares_package(const char* file, const AstDecl* d, bool require_open) {
+    if (!d->origin_file) return false;
+    char dpkg[256]; sema_package_token(d->origin_file, dpkg, sizeof dpkg);
+    for (AstImport* im = sema_imports_for_file(file); im; im = im->next) {
+        if (require_open && !im->is_open) continue;
+        if (!im->path.data) continue;
+        char ipkg[256]; sema_import_package(im->path, ipkg, sizeof ipkg);
+        if (strcmp(ipkg, dpkg) == 0) return true;
+    }
+    return false;
+}
+
+// Is callee `d` reachable by a BARE call from `file`? (same file | same package |
+// prelude | a package `open`ed here). The open-set. (docs/module-namespacing.md)
+static bool sema_decl_opened(const char* file, const AstDecl* d) {
+    if (!d->origin_file) return true;
+    if (file && strcmp(file, d->origin_file) == 0) return true;       // same file
+    if (sema_same_package(file, d->origin_file)) return true;         // same package
+    if (d->module_name && sema_module_in_prelude(d->module_name)) return true;  // prelude
+    return sema_file_declares_package(file, d, /*require_open=*/true);
+}
+
+// Is callee `d` reachable by QUALIFICATION or general UFCS from `file`? The
+// open-set plus `import`ed (not opened) packages (import grants qualified+UFCS).
+static bool sema_decl_visible(const char* file, const AstDecl* d) {
+    if (sema_decl_opened(file, d)) return true;
+    return sema_file_declares_package(file, d, /*require_open=*/false);
+}
 
 void sema_register_file_imports(Arena* arena, const char* file, AstImport* imports) {
     if (!file) return;
@@ -537,11 +624,13 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
 
     Symbol* best_sym = NULL;
     AstTypeRef* best_inferred = NULL;
+    const AstDecl* ineligible = NULL;  // name matched but its package isn't open here
 
     for (Symbol* curr = symbols->head; curr; curr = curr->next) {
         if (!str_eq(curr->name, name)) continue;
         if (!curr->decl || curr->decl->kind != AST_DECL_FUNC) continue;
-        
+        if (!sema_decl_opened(s_current_decl_origin, curr->decl)) { if (!ineligible) ineligible = curr->decl; continue; }
+
         AstFuncDecl* fd = &curr->decl->as.func_decl;
         size_t param_count = 0;
         for (AstParam* p = fd->params; p; p = p->next) param_count++;
@@ -625,6 +714,18 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
         return best_sym->decl;
     }
 
+    // The name only matched a function in a package that isn't open here. Diagnose
+    // so it fails (rather than the C backend silently re-resolving by name).
+    if (ineligible && ineligible->module_name) {
+        char buf[320];
+        snprintf(buf, sizeof(buf),
+            "'%.*s' is in package '%s', which is not open here; use `open %s` for a bare call, or %s.%.*s(...)",
+            (int)name.len, name.data, ineligible->module_name,
+            ineligible->module_name, ineligible->module_name, (int)name.len, name.data);
+        const char* err_file = s_current_decl_origin ? s_current_decl_origin : module->file_path;
+        diag_error(err_file, (int)line, (int)column, buf);
+        if (module) module->had_error = true;
+    }
     return NULL;
 }
 
@@ -645,6 +746,7 @@ static AstDecl* resolve_qualified_function(CompilerContext* ctx, AstModule* modu
         if (!d->module_name || !str_eq_cstr(qualifier, d->module_name)) continue;
         if (!str_eq(d->as.func_decl.name, name)) continue;
         if (d->as.func_decl.specialization_args) continue;
+        if (!sema_decl_visible(s_current_decl_origin, d)) continue;  // module must be imported/opened/same-pkg here
         AstFuncDecl* fd = &d->as.func_decl;
         size_t param_count = 0;
         for (AstParam* p = fd->params; p; p = p->next) param_count++;
@@ -1484,6 +1586,7 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                         AstFuncDecl* fd = &dd->as.func_decl;
                         if (fd->generic_params || fd->specialization_args || !fd->params) continue;
                         if (!str_eq(fd->name, expr->as.method_call.method_name)) continue;
+                        if (!sema_decl_visible(s_current_decl_origin, dd)) continue;  // module must be visible here
                         size_t pc = 0; for (AstParam* p = fd->params; p; p = p->next) pc++;
                         if (pc != want) continue;
                         TypeInfo* pt = sema_resolve_type_internal(ctx, module, symbols, fd->params->type);
