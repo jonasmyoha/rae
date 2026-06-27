@@ -19,6 +19,7 @@
 import core
 import sdl3
 import image
+import filesystem
 import vec3
 import scene
 import camera
@@ -67,7 +68,7 @@ func main() {
     var prevMouseY: Int = sdl3.getMouseY()
 
     loop not sdl3.shouldClose() {
-        if sdl3.isKeyPressed(key: 291) { let s: Bool = image.savePng(path: "rae_render.png", pixels: fb.data, width: width, height: height) }
+        if sdl3.isKeyPressed(key: 291) { let s: Bool = image.savePng(path: filesystem.renderPath(stem: "rae_render"), pixels: fb.data, width: width, height: height) }
 
         var moved: Bool = false
 
