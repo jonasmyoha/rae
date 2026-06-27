@@ -108,10 +108,25 @@ throughput while correctness stays pinned), so keep a perf check in the suite.
 
 1. **Done:** lodepng vendored + Rae Image API (`imageSavePng`); raytracer F2 save
    routes through it; the old hand-written stored-deflate C writer is removed.
-2. **Next (image input):** `imageLoadPng` decode in the Image API (lodepng), for
-   the texture/atlas pipeline. Web routes to browser-native decode.
-3. **Mid (gated dogfooding):** inflate in Rae first (simpler half; decode is what
-   texture loading needs), validated against lodepng output. Then deflate
-   (fixed-Huffman first, match-finder later). lodepng becomes the test oracle.
-4. **Later:** share the Rae DEFLATE codec with `.raepack`/gzip; drop lodepng once
-   the Rae path passes correctness + acceptable-speed gates.
+2. **Done:** `imageLoadPng` decode in the Image API (lodepng) — `lib/image.rae`
+   `loadPng` returns packed-0xAARRGGBB pixels, RGB-exact round-trip verified.
+   (Web-target browser-native decode still TODO.)
+3. **Done (dogfooding):** the pure-Rae codec landed in `lib/compress` +
+   `lib/png.rae`, built on the new bitwise operators
+   (`docs/bitwise-operators.md`):
+   - `checksums` (CRC-32, Adler-32), `bits` (LSB-first BitReader + BitWriter),
+     `inflate` (RFC 1951: stored/fixed/dynamic Huffman + 32 KB window),
+     `deflate` (fixed-Huffman + greedy LZ77 hash-chain), `zlib` (RFC 1950).
+   - `lib/png.rae` — container encode/decode, CRC-32 chunks, adaptive row
+     filtering (all five filters), RGB + RGBA.
+   - Validated against lodepng (the oracle, `lib/compress/oracle.rae`):
+     inflate of lodepng's deflate; lodepng inflate of our deflate; zlib both
+     ways; PNG both ways — all byte-exact. Our PNG is within ~2% of lodepng's
+     size on a gradient. Pinning test `526_png_codec`.
+   - **Encoder is correct but not yet size-optimal**: single fixed-Huffman
+     block (no dynamic-Huffman tree, no lazy matching). lodepng stays the
+     default; the Rae path is opt-in until it passes a speed/ratio gate.
+4. **Later:** dynamic-Huffman + lazy matching in the encoder; share the Rae
+   DEFLATE codec with `.raepack`/gzip; binary file I/O (`writeBytes`) so the
+   Rae path can write real `.png` files; web-target browser-native decode; then
+   flip the Image API default and drop lodepng once the gates pass.
