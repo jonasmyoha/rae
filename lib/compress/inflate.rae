@@ -1,0 +1,255 @@
+# DEFLATE decompression (RFC 1951 inflate) in pure Rae — stored, fixed-Huffman,
+# and dynamic-Huffman blocks with a 32 KB back-reference window.
+#
+# Part of the pure-Rae DEFLATE/PNG codec (docs/png-and-deflate-strategy.md);
+# lodepng stays the correctness oracle. Structure follows the canonical puff.c
+# reference: a length-count + sorted-symbol table, decoded bit-by-bit.
+#
+# Pure computation: runs in both Live and Compiled.
+import core
+import compress/bits
+
+# Canonical Huffman decode table: count[len] = number of codes of that bit
+# length (index 1..15), symbol[] = symbols ordered by (length, symbol).
+type Huff {
+    counts: List(Int)
+    symbols: List(Int)
+}
+
+# A List(Int) of `n` zeros.
+func zeros(n: view Int) ret List(Int) {
+    let l: List(Int) = createList(cap: n)
+    var i: Int = 0
+    loop i < n {
+        l.add(value: 0)
+        i = i + 1
+    }
+    ret l
+}
+
+# Build a canonical Huffman table from per-symbol code lengths (0 = unused).
+func buildHuff(lengths: view List(Int), n: view Int) ret Huff {
+    let counts: List(Int) = zeros(n: 16)
+    var i: Int = 0
+    loop i < n {
+        let len: Int = lengths.at(index: i)
+        counts.set(index: len, value: counts.at(index: len) + 1)
+        i = i + 1
+    }
+    # offs[len] = first symbol-array index for codes of this length.
+    let offs: List(Int) = zeros(n: 16)
+    var len2: Int = 1
+    loop len2 < 16 {
+        offs.set(index: len2 + 1, value: offs.at(index: len2) + counts.at(index: len2))
+        len2 = len2 + 1
+    }
+    let symbols: List(Int) = zeros(n: n)
+    var sym: Int = 0
+    loop sym < n {
+        let l: Int = lengths.at(index: sym)
+        if l is not 0 {
+            symbols.set(index: offs.at(index: l), value: sym)
+            offs.set(index: l, value: offs.at(index: l) + 1)
+        }
+        sym = sym + 1
+    }
+    ret Huff { counts: counts, symbols: symbols }
+}
+
+# Decode one symbol from the stream using a Huffman table. Codes are read
+# MSB-first (the DEFLATE convention for Huffman). Returns -1 on an invalid code.
+func decodeSymbol(r: mod BitReader, h: view Huff) ret Int {
+    var code: Int = 0
+    var first: Int = 0
+    var index: Int = 0
+    var len: Int = 1
+    loop len <= 15 {
+        code = code bor getBit(this: r)
+        let count: Int = h.counts.at(index: len)
+        if code - first < count {
+            ret h.symbols.at(index: index + (code - first))
+        }
+        index = index + count
+        first = (first + count) bsl 1
+        code = code bsl 1
+        len = len + 1
+    }
+    ret -1
+}
+
+# Length codes 257..285: base length + extra bits (RFC 1951 §3.2.5).
+func lengthBase() ret List(Int) {
+    let t: List(Int) = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258]
+    ret t
+}
+func lengthExtra() ret List(Int) {
+    let t: List(Int) = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0]
+    ret t
+}
+# Distance codes 0..29: base distance + extra bits.
+func distBase() ret List(Int) {
+    let t: List(Int) = [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577]
+    ret t
+}
+func distExtra() ret List(Int) {
+    let t: List(Int) = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13]
+    ret t
+}
+
+# Decode a compressed block body (fixed or dynamic) into `out`, given the
+# literal/length and distance Huffman tables. Returns false on a malformed code.
+func inflateBlock(r: mod BitReader, out: mod List(Int), lenH: view Huff, distH: view Huff,
+                  lBase: view List(Int), lExtra: view List(Int),
+                  dBase: view List(Int), dExtra: view List(Int)) ret Bool {
+    loop true {
+        let sym: Int = decodeSymbol(r: r, h: lenH)
+        if sym < 0 { ret false }
+        if sym is 256 { ret true }                 # end of block
+        if sym < 256 {
+            out.add(value: sym)                    # literal byte
+        } else {
+            let li: Int = sym - 257
+            if li >= lBase.length { ret false }
+            let length: Int = lBase.at(index: li) + getBits(this: r, n: lExtra.at(index: li))
+            let dsym: Int = decodeSymbol(r: r, h: distH)
+            if dsym < 0 or dsym >= dBase.length { ret false }
+            let dist: Int = dBase.at(index: dsym) + getBits(this: r, n: dExtra.at(index: dsym))
+            # Copy `length` bytes from `dist` back in the output (overlap allowed).
+            var k: Int = 0
+            let start: Int = out.length - dist
+            if start < 0 { ret false }
+            loop k < length {
+                out.add(value: out.at(index: start + k))
+                k = k + 1
+            }
+        }
+    }
+    ret true
+}
+
+# Fixed Huffman tables (RFC 1951 §3.2.6): literal/length lengths are fixed, and
+# all distance codes have length 5.
+func fixedLitLengths() ret List(Int) {
+    let l: List(Int) = zeros(n: 288)
+    var i: Int = 0
+    loop i < 288 {
+        var v: Int = 8
+        if i >= 144 and i <= 255 { v = 9 }
+        if i >= 256 and i <= 279 { v = 7 }
+        l.set(index: i, value: v)
+        i = i + 1
+    }
+    ret l
+}
+
+# The code-length code order for dynamic blocks (RFC 1951 §3.2.7).
+func clcOrder() ret List(Int) {
+    let t: List(Int) = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]
+    ret t
+}
+
+# Read the dynamic-block code-length arrays and return [litLengths.., distLengths..]
+# packed; the caller knows hlit to split. Writes hlit/hdist back through mods.
+func readDynamicLengths(r: mod BitReader, hlit: mod Int, hdist: mod Int) ret List(Int) {
+    let nlit: Int = getBits(this: r, n: 5) + 257
+    let ndist: Int = getBits(this: r, n: 5) + 1
+    let nclen: Int = getBits(this: r, n: 4) + 4
+    hlit = nlit
+    hdist = ndist
+
+    # Code-length code lengths, in the shuffled order.
+    let order: List(Int) = clcOrder()
+    let clLengths: List(Int) = zeros(n: 19)
+    var i: Int = 0
+    loop i < nclen {
+        clLengths.set(index: order.at(index: i), value: getBits(this: r, n: 3))
+        i = i + 1
+    }
+    let clHuff: Huff = buildHuff(lengths: clLengths, n: 19)
+
+    # Decode nlit+ndist code lengths, honouring repeat codes 16/17/18.
+    let total: Int = nlit + ndist
+    let lengths: List(Int) = createList(cap: total)
+    loop lengths.length < total {
+        let sym: Int = decodeSymbol(r: r, h: clHuff)
+        if sym < 0 { ret lengths }
+        if sym < 16 {
+            lengths.add(value: sym)
+        } else {
+            if sym is 16 {
+                let prev: Int = lengths.at(index: lengths.length - 1)
+                var rep: Int = 3 + getBits(this: r, n: 2)
+                loop rep > 0 { lengths.add(value: prev) rep = rep - 1 }
+            } else {
+                var count: Int = 0
+                if sym is 17 { count = 3 + getBits(this: r, n: 3) }
+                if sym is 18 { count = 11 + getBits(this: r, n: 7) }
+                loop count > 0 { lengths.add(value: 0) count = count - 1 }
+            }
+        }
+    }
+    ret lengths
+}
+
+# Inflate a raw DEFLATE stream (no zlib/gzip wrapper). Returns the decoded bytes.
+func inflateRaw(data: own List(Int), len: view Int) ret List(Int) {
+    var r: BitReader = newBitReader(data: data, len: len)
+    let out: List(Int) = createList(cap: len * 4)
+
+    let lBase: List(Int) = lengthBase()
+    let lExtra: List(Int) = lengthExtra()
+    let dBase: List(Int) = distBase()
+    let dExtra: List(Int) = distExtra()
+    let fixedDist: List(Int) = zeros(n: 30)
+    var fi: Int = 0
+    loop fi < 30 { fixedDist.set(index: fi, value: 5) fi = fi + 1 }
+
+    loop true {
+        let final: Int = getBit(this: r)
+        let btype: Int = getBits(this: r, n: 2)
+        if btype is 0 {
+            # Stored: align, read LEN (NLEN ignored), copy LEN raw bytes.
+            alignToByte(this: r)
+            let lo: Int = getByte(this: r)
+            let hi: Int = getByte(this: r)
+            let blockLen: Int = lo bor (hi bsl 8)
+            getByte(this: r)        # NLEN low (complement, unchecked)
+            getByte(this: r)        # NLEN high
+            var c: Int = 0
+            loop c < blockLen {
+                out.add(value: getByte(this: r))
+                c = c + 1
+            }
+        } else {
+            if btype is 1 {
+                let litH: Huff = buildHuff(lengths: fixedLitLengths(), n: 288)
+                let distH: Huff = buildHuff(lengths: fixedDist, n: 30)
+                let ok: Bool = inflateBlock(r: r, out: out, lenH: litH, distH: distH,
+                                            lBase: lBase, lExtra: lExtra, dBase: dBase, dExtra: dExtra)
+                if ok is false { ret out }
+            } else {
+                if btype is 2 {
+                    var hlit: Int = 0
+                    var hdist: Int = 0
+                    let allLengths: List(Int) = readDynamicLengths(r: r, hlit: hlit, hdist: hdist)
+                    # Split into literal/length and distance code lengths.
+                    let litLengths: List(Int) = createList(cap: hlit)
+                    let distLengths: List(Int) = createList(cap: hdist)
+                    var j: Int = 0
+                    loop j < hlit { litLengths.add(value: allLengths.at(index: j)) j = j + 1 }
+                    loop j < hlit + hdist { distLengths.add(value: allLengths.at(index: j)) j = j + 1 }
+                    let litH: Huff = buildHuff(lengths: litLengths, n: hlit)
+                    let distH: Huff = buildHuff(lengths: distLengths, n: hdist)
+                    let ok: Bool = inflateBlock(r: r, out: out, lenH: litH, distH: distH,
+                                                lBase: lBase, lExtra: lExtra, dBase: dBase, dExtra: dExtra)
+                    if ok is false { ret out }
+                } else {
+                    ret out      # btype 3 is invalid
+                }
+            }
+        }
+        if final is 1 { ret out }
+        if r.overrun { ret out }
+    }
+    ret out
+}
