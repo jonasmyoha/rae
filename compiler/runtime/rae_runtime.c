@@ -2858,6 +2858,43 @@ rae_Bool rae_ext_image_savePng(rae_String path, const int64_t* pixels, int64_t w
     return rc == 0;
 }
 
+/* Rae Image API (lib/image.rae): decode a PNG file into a packed-Int pixel
+ * buffer (width*height entries, row-major top-down). Each Int is 0xAARRGGBB:
+ * the low 24 bits are RGB (the same domain savePng consumes — feeding the result
+ * straight back to savePng round-trips RGB exactly), the top byte is the alpha
+ * channel (so RGBA assets like the MTSDF atlas survive the round trip).
+ *
+ * Returns a freshly rae_buf_alloc'd Buffer(Int) the caller owns; writes the
+ * dimensions through the `mod Int` out-params. On failure returns NULL and sets
+ * *w = *h = 0 (the caller checks width > 0). */
+int64_t* rae_ext_image_loadPng(rae_String path, int64_t* w_out, int64_t* h_out) {
+    if (w_out) *w_out = 0;
+    if (h_out) *h_out = 0;
+    if (!path.data) return NULL;
+    unsigned char* rgba = NULL;
+    unsigned uw = 0, uh = 0;
+    unsigned err = lodepng_decode32_file(&rgba, &uw, &uh, (const char*)path.data);
+    if (err) {
+        fprintf(stderr, "[image] PNG decode failed: %s\n", lodepng_error_text(err));
+        return NULL;
+    }
+    size_t count = (size_t)uw * (size_t)uh;
+    int64_t* pixels = (int64_t*)rae_ext_rae_buf_alloc((int64_t)count, (int64_t)sizeof(int64_t));
+    if (!pixels) { free(rgba); return NULL; }
+    for (size_t i = 0; i < count; i++) {
+        int64_t r = rgba[i * 4 + 0];
+        int64_t g = rgba[i * 4 + 1];
+        int64_t b = rgba[i * 4 + 2];
+        int64_t a = rgba[i * 4 + 3];
+        pixels[i] = (a << 24) | (r << 16) | (g << 8) | b;   /* 0xAARRGGBB */
+    }
+    free(rgba);
+    if (w_out) *w_out = (int64_t)uw;
+    if (h_out) *h_out = (int64_t)uh;
+    fprintf(stderr, "[image] loaded %s (%ux%u)\n", (const char*)path.data, uw, uh);
+    return pixels;
+}
+
 /* ============================================================
  * SDL3 desktop platform layer — see lib/sdl3.rae (RAE_HAS_SDL3).
  *
