@@ -1,0 +1,255 @@
+# PNG container (encode + decode) in pure Rae, on top of the Rae DEFLATE/zlib
+# codec (lib/compress). Owns the small/bounded half of the PNG problem — the
+# signature, IHDR/IDAT/IEND chunks, CRC-32, and the five row filters — while
+# DEFLATE does the real work (docs/png-and-deflate-strategy.md).
+#
+# Pixels are packed Ints, 0xAARRGGBB: low 24 bits RGB, top byte alpha (the same
+# layout the Image API's loadPng returns). Pure computation: Live + Compiled.
+import core
+open compress/zlib
+open compress/checksums
+
+# --- byte helpers -----------------------------------------------------------
+
+func pushBE32(out: mod List(Int), value: view Int) {
+    out.add(value: (value bsr 24) band 255)
+    out.add(value: (value bsr 16) band 255)
+    out.add(value: (value bsr 8) band 255)
+    out.add(value: value band 255)
+}
+
+func readBE32(data: view List(Int), pos: view Int) ret Int {
+    ret (data.at(index: pos) bsl 24) bor (data.at(index: pos + 1) bsl 16)
+        bor (data.at(index: pos + 2) bsl 8) bor data.at(index: pos + 3)
+}
+
+# Write a PNG chunk: length, 4-byte type, data, CRC-32 over (type + data).
+func writeChunk(out: mod List(Int), t0: view Int, t1: view Int, t2: view Int, t3: view Int,
+                data: view List(Int)) {
+    pushBE32(out: out, value: data.length)
+    # CRC is over the type bytes followed by the data.
+    let crcIn: List(Int) = createList(cap: data.length + 4)
+    crcIn.add(value: t0) crcIn.add(value: t1) crcIn.add(value: t2) crcIn.add(value: t3)
+    var i: Int = 0
+    loop i < data.length { crcIn.add(value: data.at(index: i)) i = i + 1 }
+    out.add(value: t0) out.add(value: t1) out.add(value: t2) out.add(value: t3)
+    i = 0
+    loop i < data.length { out.add(value: data.at(index: i)) i = i + 1 }
+    pushBE32(out: out, value: crc32(data: crcIn, len: crcIn.length))
+}
+
+# --- encode -----------------------------------------------------------------
+
+# Signed byte cost (treat 0..255 as -128..127) — the metric for picking a row
+# filter (minimum sum of absolute differences, the standard PNG heuristic).
+func signedAbs(b: view Int) ret Int {
+    if b >= 128 { ret 256 - b }
+    ret b
+}
+
+# Encode packed-Int pixels (row-major, top-down) to PNG bytes. `hasAlpha` selects
+# RGBA (color type 6, reads the 0xAA byte) vs RGB (color type 2, low 24 bits).
+# Each scanline is filtered with whichever of the five PNG filters minimises the
+# sum of absolute signed bytes (adaptive filtering — the usual size heuristic).
+func encodePng(pixels: view List(Int), width: view Int, height: view Int, hasAlpha: view Bool) ret List(Int) {
+    var channels: Int = 3
+    var colorType: Int = 2
+    if hasAlpha { channels = 4 colorType = 6 }
+    let stride: Int = width * channels
+
+    let raw: List(Int) = createList(cap: height * (1 + stride))
+    let prevRow: List(Int) = createList(cap: stride)   # previous row, raw (unfiltered) bytes
+    var havePrev: Bool = false
+    var y: Int = 0
+    loop y < height {
+        # Extract this row's raw bytes.
+        let cur: List(Int) = createList(cap: stride)
+        var x: Int = 0
+        loop x < width {
+            let p: Int = pixels.at(index: y * width + x)
+            cur.add(value: (p bsr 16) band 255)
+            cur.add(value: (p bsr 8) band 255)
+            cur.add(value: p band 255)
+            if hasAlpha { cur.add(value: (p bsr 24) band 255) }
+            x = x + 1
+        }
+        # Try the five filters, keep the one with the smallest signed-abs sum.
+        let best: List(Int) = createList(cap: stride)
+        var bestType: Int = 0
+        var bestCost: Int = -1
+        var ft: Int = 0
+        loop ft <= 4 {
+            let cand: List(Int) = createList(cap: stride)
+            var cost: Int = 0
+            var i: Int = 0
+            loop i < stride {
+                var a: Int = 0
+                if i >= channels { a = cur.at(index: i - channels) }
+                var b: Int = 0
+                if havePrev { b = prevRow.at(index: i) }
+                var c: Int = 0
+                if havePrev and i >= channels { c = prevRow.at(index: i - channels) }
+                var v: Int = cur.at(index: i)
+                if ft is 1 { v = cur.at(index: i) - a }
+                if ft is 2 { v = cur.at(index: i) - b }
+                if ft is 3 { v = cur.at(index: i) - ((a + b) / 2) }
+                if ft is 4 { v = cur.at(index: i) - paeth(a: a, b: b, c: c) }
+                v = v band 255
+                cand.add(value: v)
+                cost = cost + signedAbs(b: v)
+                i = i + 1
+            }
+            if bestCost < 0 or cost < bestCost {
+                bestCost = cost
+                bestType = ft
+                best.clear()
+                var j: Int = 0
+                loop j < stride { best.add(value: cand.at(index: j)) j = j + 1 }
+            }
+            ft = ft + 1
+        }
+        raw.add(value: bestType)
+        var k: Int = 0
+        loop k < stride { raw.add(value: best.at(index: k)) k = k + 1 }
+        # This row's RAW bytes become prevRow for the next iteration.
+        prevRow.clear()
+        var m: Int = 0
+        loop m < stride { prevRow.add(value: cur.at(index: m)) m = m + 1 }
+        havePrev = true
+        y = y + 1
+    }
+
+    let out: List(Int) = createList(cap: raw.length / 2 + 64)
+    # Signature.
+    out.add(value: 137) out.add(value: 80) out.add(value: 78) out.add(value: 71)
+    out.add(value: 13) out.add(value: 10) out.add(value: 26) out.add(value: 10)
+    # IHDR.
+    let ihdr: List(Int) = createList(cap: 13)
+    pushBE32(out: ihdr, value: width)
+    pushBE32(out: ihdr, value: height)
+    ihdr.add(value: 8)            # bit depth
+    ihdr.add(value: colorType)
+    ihdr.add(value: 0)            # compression
+    ihdr.add(value: 0)            # filter method
+    ihdr.add(value: 0)            # interlace
+    writeChunk(out: out, t0: 73, t1: 72, t2: 68, t3: 82, data: ihdr)   # "IHDR"
+    # IDAT (zlib-compressed filtered scanlines).
+    let idat: List(Int) = zlibCompress(data: raw, n: raw.length)
+    writeChunk(out: out, t0: 73, t1: 68, t2: 65, t3: 84, data: idat)   # "IDAT"
+    # IEND (empty).
+    let iend: List(Int) = createList(cap: 1)
+    writeChunk(out: out, t0: 73, t1: 69, t2: 78, t3: 68, data: iend)   # "IEND"
+    ret out
+}
+
+# --- decode -----------------------------------------------------------------
+
+func absI(x: view Int) ret Int {
+    if x < 0 { ret 0 - x }
+    ret x
+}
+
+# Paeth predictor (RFC 2083 / PNG spec).
+func paeth(a: view Int, b: view Int, c: view Int) ret Int {
+    let p: Int = a + b - c
+    let pa: Int = absI(x: p - a)
+    let pb: Int = absI(x: p - b)
+    let pc: Int = absI(x: p - c)
+    if pa <= pb and pa <= pc { ret a }
+    if pb <= pc { ret b }
+    ret c
+}
+
+# Decode a PNG byte stream to packed-Int pixels (0xAARRGGBB). Writes dimensions
+# through the mods; on failure width is set to 0. Supports 8-bit RGB (type 2)
+# and RGBA (type 6), all five row filters, no interlacing.
+func decodePng(png: view List(Int), len: view Int, width: mod Int, height: mod Int) ret List(Int) {
+    width = 0
+    height = 0
+    let empty: List(Int) = createList(cap: 1)
+    if len < 8 { ret empty }
+
+    var w: Int = 0
+    var h: Int = 0
+    var colorType: Int = 6
+    let idat: List(Int) = createList(cap: len)
+
+    var pos: Int = 8                       # skip the 8-byte signature
+    loop pos + 8 <= len {
+        let clen: Int = readBE32(data: png, pos: pos)
+        let t0: Int = png.at(index: pos + 4)
+        let t1: Int = png.at(index: pos + 5)
+        let t2: Int = png.at(index: pos + 6)
+        let t3: Int = png.at(index: pos + 7)
+        let dstart: Int = pos + 8
+        if t0 is 73 and t1 is 72 and t2 is 68 and t3 is 82 {        # IHDR
+            w = readBE32(data: png, pos: dstart)
+            h = readBE32(data: png, pos: dstart + 4)
+            colorType = png.at(index: dstart + 9)
+        } else {
+            if t0 is 73 and t1 is 68 and t2 is 65 and t3 is 84 {    # IDAT
+                var k: Int = 0
+                loop k < clen { idat.add(value: png.at(index: dstart + k)) k = k + 1 }
+            } else {
+                if t0 is 73 and t1 is 69 and t2 is 78 and t3 is 68 { pos = len }  # IEND -> stop
+            }
+        }
+        pos = dstart + clen + 4            # skip data + CRC
+    }
+    if w <= 0 or h <= 0 { ret empty }
+
+    var channels: Int = 3
+    if colorType is 6 { channels = 4 }
+    # Inflate the IDAT zlib stream into filtered scanlines.
+    let raw: List(Int) = zlibDecompress(data: idat, n: idat.length)
+    let stride: Int = w * channels
+
+    # Unfilter into a flat byte buffer `recon` (stride bytes per row, no filter byte).
+    let recon: List(Int) = createList(cap: h * stride)
+    var rp: Int = 0                        # read cursor in `raw`
+    var y: Int = 0
+    loop y < h {
+        let ftype: Int = raw.at(index: rp)
+        rp = rp + 1
+        var i: Int = 0
+        loop i < stride {
+            let cur: Int = raw.at(index: rp + i)
+            var a: Int = 0
+            if i >= channels { a = recon.at(index: y * stride + i - channels) }
+            var b: Int = 0
+            if y > 0 { b = recon.at(index: (y - 1) * stride + i) }
+            var c: Int = 0
+            if y > 0 and i >= channels { c = recon.at(index: (y - 1) * stride + i - channels) }
+            var val: Int = cur
+            if ftype is 1 { val = cur + a }
+            if ftype is 2 { val = cur + b }
+            if ftype is 3 { val = cur + ((a + b) / 2) }
+            if ftype is 4 { val = cur + paeth(a: a, b: b, c: c) }
+            recon.add(value: val band 255)
+            i = i + 1
+        }
+        rp = rp + stride
+        y = y + 1
+    }
+
+    # Pack to 0xAARRGGBB.
+    let pixels: List(Int) = createList(cap: w * h)
+    var py: Int = 0
+    loop py < h {
+        var px: Int = 0
+        loop px < w {
+            let base: Int = py * stride + px * channels
+            let r: Int = recon.at(index: base)
+            let g: Int = recon.at(index: base + 1)
+            let bl: Int = recon.at(index: base + 2)
+            var al: Int = 255
+            if channels is 4 { al = recon.at(index: base + 3) }
+            pixels.add(value: (al bsl 24) bor (r bsl 16) bor (g bsl 8) bor bl)
+            px = px + 1
+        }
+        py = py + 1
+    }
+    width = w
+    height = h
+    ret pixels
+}

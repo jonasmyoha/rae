@@ -2939,6 +2939,52 @@ int64_t* rae_ext_oracleZlibCompress(const int64_t* data, int64_t len, int64_t* o
 int64_t* rae_ext_oracleZlibDecompress(const int64_t* data, int64_t len, int64_t* out_len) {
     return rae_compress_run(data, len, out_len, 0, 1);
 }
+/* Decode a PNG (held in a Buffer(Int) of bytes) to 0xAARRGGBB pixels via
+ * lodepng — the oracle for testing the pure-Rae PNG decoder. */
+int64_t* rae_ext_oracleDecodePng(const int64_t* data, int64_t len, int64_t* w_out, int64_t* h_out) {
+    if (w_out) *w_out = 0; if (h_out) *h_out = 0;
+    if (!data || len <= 0) return NULL;
+    unsigned char* in = (unsigned char*)malloc((size_t)len);
+    if (!in) return NULL;
+    for (int64_t i = 0; i < len; i++) in[i] = (unsigned char)(data[i] & 0xFF);
+    unsigned char* rgba = NULL; unsigned uw = 0, uh = 0;
+    unsigned err = lodepng_decode32(&rgba, &uw, &uh, in, (size_t)len);
+    free(in);
+    if (err) { free(rgba); fprintf(stderr, "[png-oracle] decode: %s\n", lodepng_error_text(err)); return NULL; }
+    size_t count = (size_t)uw * (size_t)uh;
+    int64_t* px = (int64_t*)rae_ext_rae_buf_alloc((int64_t)count, (int64_t)sizeof(int64_t));
+    if (!px) { free(rgba); return NULL; }
+    for (size_t i = 0; i < count; i++)
+        px[i] = ((int64_t)rgba[i*4+3] << 24) | ((int64_t)rgba[i*4+0] << 16) | ((int64_t)rgba[i*4+1] << 8) | rgba[i*4+2];
+    free(rgba);
+    if (w_out) *w_out = uw; if (h_out) *h_out = uh;
+    return px;
+}
+/* Encode 0xAARRGGBB pixels to PNG bytes via lodepng — oracle for the encoder. */
+int64_t* rae_ext_oracleEncodePng(const int64_t* pixels, int64_t w, int64_t h, int64_t* out_len) {
+    if (out_len) *out_len = 0;
+    if (!pixels || w <= 0 || h <= 0) return NULL;
+    size_t count = (size_t)w * (size_t)h;
+    unsigned char* rgba = (unsigned char*)malloc(count * 4);
+    if (!rgba) return NULL;
+    for (size_t i = 0; i < count; i++) {
+        int64_t p = pixels[i];
+        rgba[i*4+0] = (unsigned char)((p >> 16) & 0xFF);
+        rgba[i*4+1] = (unsigned char)((p >> 8) & 0xFF);
+        rgba[i*4+2] = (unsigned char)(p & 0xFF);
+        rgba[i*4+3] = (unsigned char)((p >> 24) & 0xFF);
+    }
+    unsigned char* out = NULL; size_t outsize = 0;
+    unsigned err = lodepng_encode32(&out, &outsize, rgba, (unsigned)w, (unsigned)h);
+    free(rgba);
+    if (err) { free(out); fprintf(stderr, "[png-oracle] encode: %s\n", lodepng_error_text(err)); return NULL; }
+    int64_t* res = (int64_t*)rae_ext_rae_buf_alloc((int64_t)outsize, (int64_t)sizeof(int64_t));
+    if (!res) { free(out); return NULL; }
+    for (size_t i = 0; i < outsize; i++) res[i] = out[i];
+    free(out);
+    if (out_len) *out_len = (int64_t)outsize;
+    return res;
+}
 
 /* ============================================================
  * SDL3 desktop platform layer — see lib/sdl3.rae (RAE_HAS_SDL3).
