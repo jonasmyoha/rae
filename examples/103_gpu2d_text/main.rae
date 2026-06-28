@@ -1,0 +1,49 @@
+# 2D Renderer — Step 3: MSDF text (#111, #113).
+#
+# GPU sibling of 100_font_example / 53: crisp scalable Roboto text rendered as
+# MSDF glyph quads through the gpu2d Text pipeline (median-of-3 + screen-px-range
+# AA), composited over rounded-box panels in the same pass. Same atlas the CPU
+# blit path uses, uploaded once as a wgpu texture. Text stays sharp at any size.
+#
+# Compiled-target only; needs wgpu-native + SDL3.
+#   rae run --target compiled --project examples/103_gpu2d_text main.rae
+import core
+import gpu2d
+import gpu2d_text
+import sdf_text
+
+func main() ret Int {
+    gpu2d.initWindow(width: 960, height: 560, title: "Rae 2D — MSDF text")
+    let dir: String = "examples/103_gpu2d_text/"
+    let font: SdfFont = sdf_text.loadSdfFont(
+        jsonPath: "{dir}assets/Roboto-Regular.mtsdf.json",
+        rawAtlasPath: "{dir}assets/Roboto-Regular.mtsdf.raw")
+
+    loop not gpu2d.pollClose() {
+        gpu2d.beginFrame(r: 0.05, g: 0.06, b: 0.09, a: 1.0)
+
+        # A panel behind the text (box + text composite in one pass).
+        gpu2d.drawBox(x: 40.0, y: 40.0, w: 880.0, h: 220.0, radius: 20.0,
+                      fill: 0xFF141A26, borderWidth: 1.0, border: 0xFF2A3550)
+
+        # Headline + body — same font, different sizes, all crisp (no MSAA).
+        let h0: Float = gpu2d_text.drawText(font: font, text: "Hello, Rae 2D",
+                                            x: 72.0, y: 120.0, sizePx: 64.0, color: 0xFFFFFFFF)
+        gpu2d_text.drawText(font: font, text: "MSDF glyphs on the GPU — crisp at any scale.",
+                            x: 72.0, y: 170.0, sizePx: 26.0, color: 0xFFAEB8CC)
+        gpu2d_text.drawText(font: font, text: "Boxes and text composite in one render pass.",
+                            x: 72.0, y: 210.0, sizePx: 26.0, color: 0xFF6FA8FF)
+
+        # A size ramp — same string at growing sizes shows resolution independence.
+        gpu2d_text.drawText(font: font, text: "12", x: 72.0, y: 330.0, sizePx: 12.0, color: 0xFFFFCA28)
+        gpu2d_text.drawText(font: font, text: "24", x: 110.0, y: 340.0, sizePx: 24.0, color: 0xFFFFCA28)
+        gpu2d_text.drawText(font: font, text: "48", x: 170.0, y: 360.0, sizePx: 48.0, color: 0xFFFFCA28)
+        gpu2d_text.drawText(font: font, text: "96", x: 270.0, y: 400.0, sizePx: 96.0, color: 0xFFFFCA28)
+        gpu2d_text.drawText(font: font, text: "Rae", x: 470.0, y: 430.0, sizePx: 140.0, color: 0xFFEF5350)
+
+        gpu2d.endFrame()
+    }
+
+    gpu2d.closeWindow()
+    ret 0
+}
