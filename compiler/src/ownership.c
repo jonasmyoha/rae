@@ -14,6 +14,7 @@
 
 bool is_drop_target_type(const AstTypeRef* type) {
   if (!type) return false;
+  if (type->is_opt) return false;
   /* Borrows don't own — they're someone else's value. */
   if (type->is_view || type->is_mod) return false;
   Str base = get_base_type_name(type);
@@ -28,6 +29,11 @@ bool type_owns_heap_storage(CompilerContext* cctx, const AstModule* module,
   (void)cctx;
   if (!type || depth > 32) return false;
   if (type->is_view || type->is_mod) return false;
+  if (type->is_opt) {
+    AstTypeRef inner = *type;
+    inner.is_opt = false;
+    return type_owns_heap_storage(cctx, module, &inner, depth + 1);
+  }
   if (is_drop_target_type(type)) return true;
   Str base = get_base_type_name(type);
   /* c_struct (raylib Color / Vector2 / etc.) and primitives never
@@ -45,6 +51,11 @@ bool type_needs_cascade_drop(CompilerContext* cctx, const AstModule* module,
                              const AstTypeRef* type, int depth) {
   if (!type || depth > 32) return false;
   if (type->is_view || type->is_mod) return false;
+  if (type->is_opt) {
+    AstTypeRef inner = *type;
+    inner.is_opt = false;
+    return type_needs_cascade_drop(cctx, module, &inner, depth + 1);
+  }
   if (is_drop_target_type(type)) return true;
   Str base = get_base_type_name(type);
   if (str_eq_cstr(base, "String")) return true;
@@ -71,6 +82,11 @@ bool type_needs_deep_copy(CompilerContext* cctx, const AstModule* module,
                           const AstTypeRef* type, int depth) {
   if (!type || depth > 32) return false;
   if (type->is_view || type->is_mod) return false;
+  if (type->is_opt) {
+    AstTypeRef inner = *type;
+    inner.is_opt = false;
+    return type_needs_deep_copy(cctx, module, &inner, depth + 1);
+  }
   if (is_drop_target_type(type)) return true;
   Str base = get_base_type_name(type);
   if (str_eq_cstr(base, "String")) return true;
