@@ -40,3 +40,20 @@ func beginFrame(r: Float, g: Float, b: Float, a: Float) extern
 
 # Finish the render pass, submit the command buffer, and present the frame.
 func endFrame() extern
+
+# --- 2D primitives (#110, Box uber-shader) -------------------------------
+# Submit primitives between beginFrame and endFrame; they are batched and
+# drawn in one instanced draw at endFrame, in submission order (painter's).
+# Colours are 0xAARRGGBB — alpha in the top byte; use 0xFF...... for opaque.
+# Coordinates and sizes are in physical pixels (see windowWidth/windowHeight).
+# Rounded corners and borders are antialiased analytically (no MSAA).
+
+# Filled axis-aligned rectangle.
+func drawRect(x: Float, y: Float, w: Float, h: Float, color: Int) extern
+
+# Filled rounded rectangle (uniform corner radius).
+func drawRoundedRect(x: Float, y: Float, w: Float, h: Float, radius: Float, color: Int) extern
+
+# Rounded rectangle with a fill and a stroked border `borderWidth` px wide
+# (drawn inset from the edge). radius 0 gives a sharp-cornered box.
+func drawBox(x: Float, y: Float, w: Float, h: Float, radius: Float, fill: Int, borderWidth: Float, border: Int) extern
