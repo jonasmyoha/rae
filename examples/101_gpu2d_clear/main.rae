@@ -1,0 +1,23 @@
+# GPU 2D renderer — Tier 0 slice (#109, docs/webgpu-2d-ui-renderer.md).
+#
+# Opens a GPU-presenting window (SDL3 Metal layer wrapped as a wgpu-native
+# surface) and presents a solid clear colour every frame — no CPU framebuffer
+# round-trip. This proves the render binding's riskiest piece: window -> wgpu
+# surface -> render pass -> present. The Box uber-shader (#110) and text (#111)
+# build on this surface.
+#
+# Compiled-target only; needs wgpu-native + SDL3.
+#   rae run --target compiled main.rae
+import core
+import gpu2d
+
+func main() ret Int {
+    gpu2d.initWindow(width: 900, height: 600, title: "Rae GPU 2D — clear colour")
+    # Busy render loop (Tier 0 has nothing to idle for yet).
+    loop not gpu2d.pollClose() {
+        gpu2d.beginFrame(r: 0.07, g: 0.09, b: 0.13, a: 1.0)
+        gpu2d.endFrame()
+    }
+    gpu2d.closeWindow()
+    ret 0
+}
