@@ -1,0 +1,45 @@
+# 2D Renderer — Step 2: Vector shapes (#114, #110 Box uber-shader).
+#
+# Stress test for the rounded-box SDF pipeline: filled rects, rounded rects,
+# circles (radius = half-size), pills, bordered boxes, and alpha blending —
+# all from one instanced draw with analytic antialiasing (no MSAA), crisp at
+# any size. Builds on the GPU surface from example 101.
+#
+# Compiled-target only; needs wgpu-native + SDL3.
+#   rae run --target compiled --project examples/102_gpu2d_vector main.rae
+import core
+import gpu2d
+
+func main() ret Int {
+    gpu2d.initWindow(width: 1000, height: 640, title: "Rae 2D — vector shapes")
+
+    loop not gpu2d.pollClose() {
+        gpu2d.beginFrame(r: 0.06, g: 0.07, b: 0.10, a: 1.0)
+
+        # Row 1 — increasing corner radius, then a circle and a pill.
+        gpu2d.drawRect(x: 40.0, y: 40.0, w: 150.0, h: 120.0, color: 0xFFEF5350)
+        gpu2d.drawRoundedRect(x: 210.0, y: 40.0, w: 150.0, h: 120.0, radius: 16.0, color: 0xFF42A5F5)
+        gpu2d.drawRoundedRect(x: 380.0, y: 40.0, w: 150.0, h: 120.0, radius: 40.0, color: 0xFF66BB6A)
+        gpu2d.drawRoundedRect(x: 560.0, y: 40.0, w: 120.0, h: 120.0, radius: 60.0, color: 0xFFFFCA28)   # circle
+        gpu2d.drawRoundedRect(x: 720.0, y: 70.0, w: 230.0, h: 60.0, radius: 30.0, color: 0xFFAB47BC)    # pill
+
+        # Row 2 — bordered boxes (fill + stroke), varying border width.
+        gpu2d.drawBox(x: 40.0, y: 220.0, w: 200.0, h: 150.0, radius: 24.0, fill: 0xFF15233F, borderWidth: 3.0, border: 0xFF4F8DF7)
+        gpu2d.drawBox(x: 270.0, y: 220.0, w: 200.0, h: 150.0, radius: 12.0, fill: 0xFF1F3026, borderWidth: 6.0, border: 0xFF66BB6A)
+        gpu2d.drawBox(x: 500.0, y: 220.0, w: 200.0, h: 150.0, radius: 75.0, fill: 0xFF3A2233, borderWidth: 10.0, border: 0xFFEC407A)
+
+        # Row 3 — translucent overlap (premultiplied alpha blending).
+        gpu2d.drawRoundedRect(x: 60.0, y: 420.0, w: 220.0, h: 170.0, radius: 28.0, color: 0x99EF5350)
+        gpu2d.drawRoundedRect(x: 200.0, y: 470.0, w: 220.0, h: 130.0, radius: 28.0, color: 0x9942A5F5)
+        gpu2d.drawRoundedRect(x: 330.0, y: 430.0, w: 220.0, h: 150.0, radius: 28.0, color: 0x9966BB6A)
+
+        # A scalable "icon" — concentric rings via fill + ring (border-only look).
+        gpu2d.drawRoundedRect(x: 700.0, y: 420.0, w: 170.0, h: 170.0, radius: 85.0, color: 0xFF26C6DA)
+        gpu2d.drawRoundedRect(x: 735.0, y: 455.0, w: 100.0, h: 100.0, radius: 50.0, color: 0xFF0B0D12)
+
+        gpu2d.endFrame()
+    }
+
+    gpu2d.closeWindow()
+    ret 0
+}
