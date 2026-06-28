@@ -49,6 +49,27 @@ func designHeight() extern ret Float
 # Device pixel ratio: physical pixels per logical point (2.0 on retina).
 func dpr() extern ret Float
 
+# --- Input (valid after pollClose each frame) ----------------------------
+# pollClose records mouse/keyboard/wheel state while it pumps the event queue,
+# so these read this frame's input. Coordinates are in DESIGN units (the same
+# space drawRect etc. take), so hit-testing lines up with what was drawn.
+func pointerX() extern ret Float
+func pointerY() extern ret Float
+# Left mouse button held this frame.
+func pointerDown() extern ret Bool
+# Per-frame mouse-wheel / trackpad delta (positive = scrolled up), matching
+# raylib's getMouseWheelMove semantics.
+func wheelMove() extern ret Float
+# Monotonic wall-clock seconds since process start (for scroll/animation timing).
+func nowSeconds() extern ret Float
+
+# --- Idle wait (hybrid loop) ---------------------------------------------
+# Block up to `timeoutSec` for the next OS event (returns immediately if one is
+# already queued), without dequeuing it — the following pollClose drains it.
+# Park here when idle so the app sits at ~0% CPU; busy-render (timeout 0) while
+# animating. See docs/ui-render-loop-performance.md.
+func waitEvents(timeoutSec: Float) extern
+
 # Release the surface + window. The wgpu device stays cached for reuse.
 func closeWindow() extern
 
