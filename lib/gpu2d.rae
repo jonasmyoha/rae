@@ -30,6 +30,25 @@ func pollClose() extern ret Bool
 func windowWidth() extern ret Int
 func windowHeight() extern ret Int
 
+# --- Coordinate system (#112) --------------------------------------------
+# Draw coordinates are in DESIGN units. By default 1 unit = 1 physical pixel
+# (identity). Call setDesignResolution to author against a fixed virtual
+# canvas that is scaled to fit the window — DPI-independent and resolution-
+# independent, the Figma-style shared design-unit model
+# (docs/ui-coordinate-and-responsive-layout.md). Three layers:
+#   design units  --(scale + offset / fit)-->  physical px  --> clip space.
+# fit: 0 = fit (contain, letterboxed), 1 = fill (cover, cropped), 2 = stretch.
+# Pass width/height <= 0 to return to identity (physical-pixel) coordinates.
+func setDesignResolution(width: Float, height: Float, fit: Int) extern
+
+# Current design-canvas size in design units (the window's physical size when
+# no design resolution is set). Lay out against these.
+func designWidth() extern ret Float
+func designHeight() extern ret Float
+
+# Device pixel ratio: physical pixels per logical point (2.0 on retina).
+func dpr() extern ret Float
+
 # Release the surface + window. The wgpu device stays cached for reuse.
 func closeWindow() extern
 
