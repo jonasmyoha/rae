@@ -3667,6 +3667,153 @@ void rae_ext_gpu_reset(void) {
     for (int i = 0; i < g_gpu_pipe_n; i++) if (g_gpu_pipe[i]) wgpuComputePipelineRelease(g_gpu_pipe[i]);
     g_gpu_buf_n = 0; g_gpu_pipe_n = 0;
 }
+
+/* ============================================================
+ * GPU 2D renderer surface — lib/gpu2d.rae (#109,
+ * docs/webgpu-2d-ui-renderer.md). Wraps the SDL3 window's
+ * CAMetalLayer as a wgpu surface and presents frames on the GPU
+ * (no CPU framebuffer round-trip, unlike sdl3.updatePixels).
+ * Needs both SDL3 (window) and wgpu-native (surface); main.c links
+ * both when lib/gpu2d.rae is imported. Window globals (g_sdl_win,
+ * g_sdl_w/h) are shared with the SDL3 block so sdl3 input works.
+ * Tier 0 slice: window + clear-colour present.
+ * ============================================================ */
+#ifdef RAE_HAS_SDL3
+static SDL_MetalView g_g2d_metal_view = NULL;
+static WGPUSurface   g_g2d_surface = NULL;
+static WGPUTextureFormat g_g2d_fmt = WGPUTextureFormat_BGRA8Unorm;
+/* per-frame transient handles */
+static WGPUTexture           g_g2d_frame_tex = NULL;
+static WGPUTextureView       g_g2d_frame_view = NULL;
+static WGPUCommandEncoder    g_g2d_enc = NULL;
+static WGPURenderPassEncoder g_g2d_pass = NULL;
+
+static void rae_g2d_configure(int pw, int ph) {
+    if (!g_g2d_surface || pw <= 0 || ph <= 0) return;
+    WGPUSurfaceConfiguration cfg; memset(&cfg, 0, sizeof(cfg));
+    cfg.device = g_wgpu_dev;
+    cfg.format = g_g2d_fmt;
+    cfg.usage = WGPUTextureUsage_RenderAttachment;
+    cfg.width = (uint32_t)pw;
+    cfg.height = (uint32_t)ph;
+    cfg.presentMode = WGPUPresentMode_Fifo;
+    cfg.alphaMode = WGPUCompositeAlphaMode_Auto;
+    wgpuSurfaceConfigure(g_g2d_surface, &cfg);
+    g_sdl_w = pw; g_sdl_h = ph;
+}
+
+void rae_ext_gpu2d_initWindow(int64_t width, int64_t height, rae_String title) {
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+        fprintf(stderr, "[gpu2d] SDL init failed: %s\n", SDL_GetError());
+        return;
+    }
+    const char* t = title.data ? (const char*)title.data : "Rae (GPU 2D)";
+    g_sdl_win = SDL_CreateWindow(t, (int)width, (int)height,
+                                 SDL_WINDOW_RESIZABLE | SDL_WINDOW_METAL | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+    if (!g_sdl_win) { fprintf(stderr, "[gpu2d] window failed: %s\n", SDL_GetError()); return; }
+    SDL_RaiseWindow(g_sdl_win);
+    g_g2d_metal_view = SDL_Metal_CreateView(g_sdl_win);
+    if (!g_g2d_metal_view) { fprintf(stderr, "[gpu2d] metal view failed: %s\n", SDL_GetError()); return; }
+    void* layer = SDL_Metal_GetLayer(g_g2d_metal_view);
+
+    if (!rae_wgpu_init()) { fprintf(stderr, "[gpu2d] wgpu init failed\n"); return; }
+
+    WGPUSurfaceSourceMetalLayer ms; memset(&ms, 0, sizeof(ms));
+    ms.chain.sType = WGPUSType_SurfaceSourceMetalLayer;
+    ms.layer = layer;
+    WGPUSurfaceDescriptor sd; memset(&sd, 0, sizeof(sd));
+    sd.nextInChain = &ms.chain;
+    g_g2d_surface = wgpuInstanceCreateSurface(g_wgpu_inst, &sd);
+    if (!g_g2d_surface) { fprintf(stderr, "[gpu2d] surface failed\n"); return; }
+
+    WGPUSurfaceCapabilities caps; memset(&caps, 0, sizeof(caps));
+    wgpuSurfaceGetCapabilities(g_g2d_surface, g_wgpu_adapter, &caps);
+    if (caps.formatCount > 0) {
+        g_g2d_fmt = caps.formats[0];
+        for (size_t i = 0; i < caps.formatCount; i++) {
+            if (caps.formats[i] == WGPUTextureFormat_BGRA8Unorm) { g_g2d_fmt = WGPUTextureFormat_BGRA8Unorm; break; }
+        }
+    }
+    int pw = (int)width, ph = (int)height;
+    SDL_GetWindowSizeInPixels(g_sdl_win, &pw, &ph);
+    rae_g2d_configure(pw, ph);
+
+    g_sdl_start_ms = rae_ext_nowMs();
+    const char* hm = getenv("RAE_SDL_HEADLESS_MS");
+    if (hm) g_sdl_headless_ms = (int64_t)atoll(hm);
+}
+
+rae_Bool rae_ext_gpu2d_pollClose(void) {
+    SDL_Event e;
+    while (SDL_PollEvent(&e)) {
+        if (e.type == SDL_EVENT_QUIT) return 1;
+        if (e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) return 1;
+        if (e.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED || e.type == SDL_EVENT_WINDOW_RESIZED) {
+            int pw = 0, ph = 0; SDL_GetWindowSizeInPixels(g_sdl_win, &pw, &ph);
+            rae_g2d_configure(pw, ph);
+        }
+    }
+    if (g_sdl_headless_ms > 0 && (rae_ext_nowMs() - g_sdl_start_ms) >= g_sdl_headless_ms) return 1;
+    return 0;
+}
+
+int64_t rae_ext_gpu2d_windowWidth(void) { return g_sdl_w; }
+int64_t rae_ext_gpu2d_windowHeight(void) { return g_sdl_h; }
+
+void rae_ext_gpu2d_beginFrame(double r, double g, double b, double a) {
+    if (!g_g2d_surface) return;
+    WGPUSurfaceTexture st; memset(&st, 0, sizeof(st));
+    wgpuSurfaceGetCurrentTexture(g_g2d_surface, &st);
+    if (st.status != WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal &&
+        st.status != WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal) {
+        /* reconfigure + retry once (after resize / lost surface) */
+        int pw = 0, ph = 0; SDL_GetWindowSizeInPixels(g_sdl_win, &pw, &ph);
+        rae_g2d_configure(pw, ph);
+        wgpuSurfaceGetCurrentTexture(g_g2d_surface, &st);
+        if (!st.texture) return;
+    }
+    g_g2d_frame_tex = st.texture;
+    g_g2d_frame_view = wgpuTextureCreateView(st.texture, NULL);
+    g_g2d_enc = wgpuDeviceCreateCommandEncoder(g_wgpu_dev, NULL);
+    WGPURenderPassColorAttachment ca; memset(&ca, 0, sizeof(ca));
+    ca.view = g_g2d_frame_view;
+    ca.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
+    ca.loadOp = WGPULoadOp_Clear;
+    ca.storeOp = WGPUStoreOp_Store;
+    ca.clearValue.r = r; ca.clearValue.g = g; ca.clearValue.b = b; ca.clearValue.a = a;
+    WGPURenderPassDescriptor rp; memset(&rp, 0, sizeof(rp));
+    rp.colorAttachmentCount = 1;
+    rp.colorAttachments = &ca;
+    g_g2d_pass = wgpuCommandEncoderBeginRenderPass(g_g2d_enc, &rp);
+}
+
+void rae_ext_gpu2d_endFrame(void) {
+    if (!g_g2d_pass) return;
+    wgpuRenderPassEncoderEnd(g_g2d_pass);
+    WGPUCommandBuffer cb = wgpuCommandEncoderFinish(g_g2d_enc, NULL);
+    wgpuQueueSubmit(g_wgpu_queue, 1, &cb);
+    wgpuSurfacePresent(g_g2d_surface);
+    wgpuCommandBufferRelease(cb);
+    wgpuRenderPassEncoderRelease(g_g2d_pass); g_g2d_pass = NULL;
+    wgpuCommandEncoderRelease(g_g2d_enc); g_g2d_enc = NULL;
+    wgpuTextureViewRelease(g_g2d_frame_view); g_g2d_frame_view = NULL;
+    if (g_g2d_frame_tex) { wgpuTextureRelease(g_g2d_frame_tex); g_g2d_frame_tex = NULL; }
+}
+
+void rae_ext_gpu2d_closeWindow(void) {
+    if (g_g2d_surface) { wgpuSurfaceRelease(g_g2d_surface); g_g2d_surface = NULL; }
+    if (g_g2d_metal_view) { SDL_Metal_DestroyView(g_g2d_metal_view); g_g2d_metal_view = NULL; }
+    if (g_sdl_win) { SDL_DestroyWindow(g_sdl_win); g_sdl_win = NULL; }
+}
+#else  /* no SDL3: stubs so a webgpu-only build still links */
+void rae_ext_gpu2d_initWindow(int64_t w, int64_t h, rae_String t) { (void)w; (void)h; (void)t; }
+rae_Bool rae_ext_gpu2d_pollClose(void) { return 1; }
+int64_t rae_ext_gpu2d_windowWidth(void) { return 0; }
+int64_t rae_ext_gpu2d_windowHeight(void) { return 0; }
+void rae_ext_gpu2d_beginFrame(double r, double g, double b, double a) { (void)r; (void)g; (void)b; (void)a; }
+void rae_ext_gpu2d_endFrame(void) {}
+void rae_ext_gpu2d_closeWindow(void) {}
+#endif /* RAE_HAS_SDL3 */
 #endif /* RAE_HAS_WEBGPU */
 
 /* ============================================================
