@@ -1,4 +1,4 @@
-# Erlang-style bitwise word operators (band/bor/bxor/bnot/bsl/bsr), Int-only.
+# Bitwise word operators (bitand/bitor/bitxor/bitnot/shl/shr), Int-only.
 # Logical and/or stay boolean; these produce Int. Bitwise binds tighter than
 # arithmetic and comparison; mixing different bitwise ops needs parens.
 import core
@@ -6,16 +6,16 @@ import core
 func main() {
     let a: Int = 12   # 1100
     let b: Int = 10   # 1010
-    log(a band b)     # 8
-    log(a bor b)      # 14
-    log(a bxor b)     # 6
-    log(1 bsl 8)      # 256
-    log(256 bsr 2)    # 64
-    log(bnot 0)       # -1
-    # band binds tighter than `is`
-    if 511 band 255 is 255 { log(1) } else { log(0) }   # 1
+    log(a bitand b)     # 8
+    log(a bitor b)      # 14
+    log(a bitxor b)     # 6
+    log(1 shl 8)      # 256
+    log(256 shr 2)    # 64
+    log(bitnot 0)       # -1
+    # bitand binds tighter than `is`
+    if 511 bitand 255 is 255 { log(1) } else { log(0) }   # 1
     # parenthesised shifts compose (the 0xRRGGBB packing pattern)
-    log((200 bsl 16) bor (100 bsl 8) bor 50)            # 13132850
-    # bitwise binds tighter than +: 1 + (2 bsl 4)
-    log(1 + 2 bsl 4)                                     # 33
+    log((200 shl 16) bitor (100 shl 8) bitor 50)            # 13132850
+    # bitwise binds tighter than +: 1 + (2 shl 4)
+    log(1 + 2 shl 4)                                     # 33
 }

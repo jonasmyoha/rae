@@ -12,15 +12,15 @@ open compress/checksums
 # --- byte helpers -----------------------------------------------------------
 
 func pushBE32(out: mod List(Int), value: view Int) {
-    out.add(value: (value bsr 24) band 255)
-    out.add(value: (value bsr 16) band 255)
-    out.add(value: (value bsr 8) band 255)
-    out.add(value: value band 255)
+    out.add(value: (value shr 24) bitand 255)
+    out.add(value: (value shr 16) bitand 255)
+    out.add(value: (value shr 8) bitand 255)
+    out.add(value: value bitand 255)
 }
 
 func readBE32(data: view List(Int), pos: view Int) ret Int {
-    ret (data.at(index: pos) bsl 24) bor (data.at(index: pos + 1) bsl 16)
-        bor (data.at(index: pos + 2) bsl 8) bor data.at(index: pos + 3)
+    ret (data.at(index: pos) shl 24) bitor (data.at(index: pos + 1) shl 16)
+        bitor (data.at(index: pos + 2) shl 8) bitor data.at(index: pos + 3)
 }
 
 # Write a PNG chunk: length, 4-byte type, data, CRC-32 over (type + data).
@@ -67,10 +67,10 @@ func encodePng(pixels: view List(Int), width: view Int, height: view Int, hasAlp
         var x: Int = 0
         loop x < width {
             let p: Int = pixels.at(index: y * width + x)
-            cur.add(value: (p bsr 16) band 255)
-            cur.add(value: (p bsr 8) band 255)
-            cur.add(value: p band 255)
-            if hasAlpha { cur.add(value: (p bsr 24) band 255) }
+            cur.add(value: (p shr 16) bitand 255)
+            cur.add(value: (p shr 8) bitand 255)
+            cur.add(value: p bitand 255)
+            if hasAlpha { cur.add(value: (p shr 24) bitand 255) }
             x = x + 1
         }
         # Try the five filters, keep the one with the smallest signed-abs sum.
@@ -94,7 +94,7 @@ func encodePng(pixels: view List(Int), width: view Int, height: view Int, hasAlp
                 if ft is 2 { v = cur.at(index: i) - b }
                 if ft is 3 { v = cur.at(index: i) - ((a + b) / 2) }
                 if ft is 4 { v = cur.at(index: i) - paeth(a: a, b: b, c: c) }
-                v = v band 255
+                v = v bitand 255
                 cand.add(value: v)
                 cost = cost + signedAbs(b: v)
                 i = i + 1
@@ -225,7 +225,7 @@ func decodePng(png: view List(Int), len: view Int, width: mod Int, height: mod I
             if ftype is 2 { val = cur + b }
             if ftype is 3 { val = cur + ((a + b) / 2) }
             if ftype is 4 { val = cur + paeth(a: a, b: b, c: c) }
-            recon.add(value: val band 255)
+            recon.add(value: val bitand 255)
             i = i + 1
         }
         rp = rp + stride
@@ -244,7 +244,7 @@ func decodePng(png: view List(Int), len: view Int, width: mod Int, height: mod I
             let bl: Int = recon.at(index: base + 2)
             var al: Int = 255
             if channels is 4 { al = recon.at(index: base + 3) }
-            pixels.add(value: (al bsl 24) bor (r bsl 16) bor (g bsl 8) bor bl)
+            pixels.add(value: (al shl 24) bitor (r shl 16) bitor (g shl 8) bitor bl)
             px = px + 1
         }
         py = py + 1
