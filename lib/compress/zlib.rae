@@ -21,10 +21,10 @@ func zlibCompress(data: view List(Int), n: view Int) ret List(Int) {
         i = i + 1
     }
     let ad: Int = adler32(data: data, len: n)
-    out.add(value: (ad bsr 24) band 255)
-    out.add(value: (ad bsr 16) band 255)
-    out.add(value: (ad bsr 8) band 255)
-    out.add(value: ad band 255)
+    out.add(value: (ad shr 24) bitand 255)
+    out.add(value: (ad shr 16) bitand 255)
+    out.add(value: (ad shr 8) bitand 255)
+    out.add(value: ad bitand 255)
     ret out
 }
 
