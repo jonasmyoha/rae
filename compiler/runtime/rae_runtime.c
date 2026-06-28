@@ -3682,6 +3682,33 @@ void rae_ext_gpu_reset(void) {
 static SDL_MetalView g_g2d_metal_view = NULL;
 static WGPUSurface   g_g2d_surface = NULL;
 static WGPUTextureFormat g_g2d_fmt = WGPUTextureFormat_BGRA8Unorm;
+
+/* Coordinate system (#112): draw coords are in DESIGN units; the renderer
+ * maps them to physical pixels via a per-frame scale + offset. Default
+ * (design w/h <= 0) is identity — 1 unit = 1 physical px. setDesignResolution
+ * opts into a fixed virtual canvas fitted into the window (DPI-independent). */
+static double g_g2d_design_w = 0.0, g_g2d_design_h = 0.0;
+static int    g_g2d_fit_mode = 0;   /* 0=fit/contain, 1=fill/cover, 2=stretch */
+
+/* Fill `out` (8 floats = 2*vec4): (physW,physH,scaleX,scaleY),(offX,offY,0,0). */
+static void rae_g2d_compute_xform(float* out) {
+    float physW = (float)g_sdl_w, physH = (float)g_sdl_h;
+    float scaleX = 1.0f, scaleY = 1.0f, offX = 0.0f, offY = 0.0f;
+    if (g_g2d_design_w > 0.0 && g_g2d_design_h > 0.0) {
+        float dW = (float)g_g2d_design_w, dH = (float)g_g2d_design_h;
+        float sx = physW / dW, sy = physH / dH;
+        if (g_g2d_fit_mode == 2) { scaleX = sx; scaleY = sy; }       /* stretch */
+        else {
+            float s = (g_g2d_fit_mode == 1) ? (sx > sy ? sx : sy)    /* fill/cover */
+                                            : (sx < sy ? sx : sy);   /* fit/contain */
+            scaleX = s; scaleY = s;
+            offX = (physW - dW * s) * 0.5f;
+            offY = (physH - dH * s) * 0.5f;
+        }
+    }
+    out[0] = physW; out[1] = physH; out[2] = scaleX; out[3] = scaleY;
+    out[4] = offX;  out[5] = offY;  out[6] = 0.0f;   out[7] = 0.0f;
+}
 /* per-frame transient handles */
 static WGPUTexture           g_g2d_frame_tex = NULL;
 static WGPUTextureView       g_g2d_frame_view = NULL;
@@ -3760,6 +3787,17 @@ rae_Bool rae_ext_gpu2d_pollClose(void) {
 int64_t rae_ext_gpu2d_windowWidth(void) { return g_sdl_w; }
 int64_t rae_ext_gpu2d_windowHeight(void) { return g_sdl_h; }
 
+/* Coordinate system (#112). */
+void rae_ext_gpu2d_setDesignResolution(double w, double h, int64_t fit) {
+    g_g2d_design_w = w; g_g2d_design_h = h; g_g2d_fit_mode = (int)fit;
+}
+double rae_ext_gpu2d_designWidth(void)  { return (g_g2d_design_w > 0.0) ? g_g2d_design_w : (double)g_sdl_w; }
+double rae_ext_gpu2d_designHeight(void) { return (g_g2d_design_h > 0.0) ? g_g2d_design_h : (double)g_sdl_h; }
+double rae_ext_gpu2d_dpr(void) {
+    int lw = 0, lh = 0; if (g_sdl_win) SDL_GetWindowSize(g_sdl_win, &lw, &lh);
+    (void)lh; return (lw > 0) ? (double)g_sdl_w / (double)lw : 1.0;
+}
+
 /* --- Box uber-shader pipeline (#110) ----------------------------------
  * Instanced rounded-box SDF with analytic AA: one quad per primitive, the
  * fragment shader evaluates a rounded-box signed distance and antialiases
@@ -3777,7 +3815,9 @@ static const char* G2D_BOX_WGSL =
 "  border: vec4<f32>,\n"
 "  params: vec4<f32>,\n"
 "};\n"
-"@group(0) @binding(0) var<uniform> uViewport: vec4<f32>;\n"
+/* uXform[0] = (physW, physH, scaleX, scaleY); uXform[1] = (offsetX, offsetY,..)
+ * maps design-unit coords -> physical px: px = design*scale + offset. */
+"@group(0) @binding(0) var<uniform> uXform: array<vec4<f32>, 2>;\n"
 "@group(0) @binding(1) var<storage, read> prims: array<Prim>;\n"
 "struct VsOut {\n"
 "  @builtin(position) pos: vec4<f32>,\n"
@@ -3791,9 +3831,10 @@ static const char* G2D_BOX_WGSL =
 "    vec2<f32>(0.0,1.0), vec2<f32>(1.0,0.0), vec2<f32>(1.0,1.0));\n"
 "  let c = corners[vi];\n"
 "  let p = prims[ii];\n"
-"  let posPx = p.rect.xy + c * p.rect.zw;\n"
-"  let ndc = vec2<f32>(posPx.x / uViewport.x * 2.0 - 1.0,\n"
-"                      1.0 - posPx.y / uViewport.y * 2.0);\n"
+"  let phys = uXform[0].xy;\n"
+"  let posPx = (p.rect.xy + c * p.rect.zw) * uXform[0].zw + uXform[1].xy;\n"
+"  let ndc = vec2<f32>(posPx.x / phys.x * 2.0 - 1.0,\n"
+"                      1.0 - posPx.y / phys.y * 2.0);\n"
 "  var o: VsOut;\n"
 "  o.pos = vec4<f32>(ndc, 0.0, 1.0);\n"
 "  o.local = c * p.rect.zw;\n"
@@ -3893,14 +3934,14 @@ static void rae_g2d_init_pipeline(void) {
     wgpuShaderModuleRelease(mod);
 
     WGPUBufferDescriptor ud; memset(&ud, 0, sizeof(ud));
-    ud.size = 16; ud.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
+    ud.size = 32; ud.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;  /* 2*vec4 xform */
     g_g2d_uniform = wgpuDeviceCreateBuffer(g_wgpu_dev, &ud);
 }
 
 static void rae_g2d_rebuild_bind(void) {
     WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(g_g2d_pipeline, 0);
     WGPUBindGroupEntry e[2]; memset(e, 0, sizeof(e));
-    e[0].binding = 0; e[0].buffer = g_g2d_uniform; e[0].size = 16;
+    e[0].binding = 0; e[0].buffer = g_g2d_uniform; e[0].size = 32;
     e[1].binding = 1; e[1].buffer = g_g2d_instbuf;
     e[1].size = (uint64_t)g_g2d_inst_cap * G2D_PRIM_FLOATS * sizeof(float);
     WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
@@ -3950,7 +3991,7 @@ static const char* G2D_TEXT_WGSL =
 "  color: vec4<f32>,\n"
 "  params: vec4<f32>,\n"
 "};\n"
-"@group(0) @binding(0) var<uniform> uViewport: vec4<f32>;\n"
+"@group(0) @binding(0) var<uniform> uXform: array<vec4<f32>, 2>;\n"
 "@group(0) @binding(1) var<storage, read> glyphs: array<Glyph>;\n"
 "@group(0) @binding(2) var atlasTex: texture_2d<f32>;\n"
 "@group(0) @binding(3) var atlasSamp: sampler;\n"
@@ -3966,9 +4007,10 @@ static const char* G2D_TEXT_WGSL =
 "    vec2<f32>(0.0,1.0), vec2<f32>(1.0,0.0), vec2<f32>(1.0,1.0));\n"
 "  let c = corners[vi];\n"
 "  let g = glyphs[ii];\n"
-"  let posPx = g.rect.xy + c * g.rect.zw;\n"
-"  let ndc = vec2<f32>(posPx.x / uViewport.x * 2.0 - 1.0,\n"
-"                      1.0 - posPx.y / uViewport.y * 2.0);\n"
+"  let phys = uXform[0].xy;\n"
+"  let posPx = (g.rect.xy + c * g.rect.zw) * uXform[0].zw + uXform[1].xy;\n"
+"  let ndc = vec2<f32>(posPx.x / phys.x * 2.0 - 1.0,\n"
+"                      1.0 - posPx.y / phys.y * 2.0);\n"
 "  var o: VsOut;\n"
 "  o.pos = vec4<f32>(ndc, 0.0, 1.0);\n"
 "  o.uv = g.uv.xy + c * g.uv.zw;\n"
@@ -3982,7 +4024,9 @@ static const char* G2D_TEXT_WGSL =
 "fn fs(in: VsOut) -> @location(0) vec4<f32> {\n"
 "  let g = glyphs[in.inst];\n"
 "  let s = textureSample(atlasTex, atlasSamp, in.uv);\n"
-"  let dist = g.params.x * (median3(s.r, s.g, s.b) - 0.5);\n"
+/* pxRange is authored in design units; scale to physical px (avg scale) */
+"  let sc = (uXform[0].z + uXform[0].w) * 0.5;\n"
+"  let dist = g.params.x * sc * (median3(s.r, s.g, s.b) - 0.5);\n"
 "  let cov = clamp(dist + 0.5, 0.0, 1.0);\n"
 "  let a = g.color.a * cov;\n"
 "  return vec4<f32>(g.color.rgb * a, a);\n"   /* premultiplied */
@@ -4076,7 +4120,7 @@ static void rae_g2d_rebuild_text_bind(void) {
     if (!view) return;
     WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(g_g2d_text_pipeline, 0);
     WGPUBindGroupEntry e[4]; memset(e, 0, sizeof(e));
-    e[0].binding = 0; e[0].buffer = g_g2d_uniform; e[0].size = 16;
+    e[0].binding = 0; e[0].buffer = g_g2d_uniform; e[0].size = 32;
     e[1].binding = 1; e[1].buffer = g_g2d_text_instbuf;
     e[1].size = (uint64_t)g_g2d_text_cap * G2D_TEXT_FLOATS * sizeof(float);
     e[2].binding = 2; e[2].textureView = view;
@@ -4162,8 +4206,8 @@ void rae_ext_gpu2d_endFrame(void) {
         /* rae_g2d_init_pipeline also creates the shared viewport uniform that
          * both the box and text bind groups reference at binding 0. */
         rae_g2d_init_pipeline();
-        float vp[4] = { (float)g_sdl_w, (float)g_sdl_h, 0.0f, 0.0f };
-        wgpuQueueWriteBuffer(g_wgpu_queue, g_g2d_uniform, 0, vp, sizeof(vp));
+        float xf[8]; rae_g2d_compute_xform(xf);
+        wgpuQueueWriteBuffer(g_wgpu_queue, g_g2d_uniform, 0, xf, sizeof(xf));
     }
     if (g_g2d_prim_count > 0) {
         rae_g2d_ensure_inst(g_g2d_prim_count);
@@ -4223,6 +4267,10 @@ void rae_ext_gpu2d_initWindow(int64_t w, int64_t h, rae_String t) { (void)w; (vo
 rae_Bool rae_ext_gpu2d_pollClose(void) { return 1; }
 int64_t rae_ext_gpu2d_windowWidth(void) { return 0; }
 int64_t rae_ext_gpu2d_windowHeight(void) { return 0; }
+void rae_ext_gpu2d_setDesignResolution(double w, double h, int64_t fit) { (void)w; (void)h; (void)fit; }
+double rae_ext_gpu2d_designWidth(void) { return 0.0; }
+double rae_ext_gpu2d_designHeight(void) { return 0.0; }
+double rae_ext_gpu2d_dpr(void) { return 1.0; }
 void rae_ext_gpu2d_beginFrame(double r, double g, double b, double a) { (void)r; (void)g; (void)b; (void)a; }
 void rae_ext_gpu2d_endFrame(void) {}
 void rae_ext_gpu2d_closeWindow(void) {}
