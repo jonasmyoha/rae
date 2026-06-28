@@ -137,7 +137,7 @@ bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       return true;
     }
     case AST_EXPR_INTEGER: {
-      long long parsed = strtoll(expr->as.integer.data, NULL, 10);
+      long long parsed = strtoll(expr->as.integer.data, NULL, 0);
       emit_constant(compiler, value_int(parsed), (int)expr->line);
       return true;
     }
