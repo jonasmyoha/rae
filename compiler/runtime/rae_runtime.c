@@ -3934,8 +3934,201 @@ void rae_ext_gpu2d_drawBox(double x, double y, double w, double h, double radius
                  (uint32_t)fill, (uint32_t)border, borderWidth);
 }
 
+/* --- Text pipeline (#111): MSDF glyph quads --------------------------
+ * A second instanced pipeline that samples the MSDF atlas (the same raw
+ * RGBA the CPU blit path holds in g_sdf_atlas[]) and antialiases with the
+ * median-of-3 + screen-px-range trick. Shares the viewport uniform and
+ * premultiplied blend with the box pipeline, so glyphs composite in the
+ * same pass after boxes. Instance = 4*vec4: rect, uv (normalised), colour,
+ * params(pxRange). One atlas/font per frame (the common UI case). */
+#define G2D_TEXT_FLOATS 16
+
+static const char* G2D_TEXT_WGSL =
+"struct Glyph {\n"
+"  rect: vec4<f32>,\n"
+"  uv: vec4<f32>,\n"
+"  color: vec4<f32>,\n"
+"  params: vec4<f32>,\n"
+"};\n"
+"@group(0) @binding(0) var<uniform> uViewport: vec4<f32>;\n"
+"@group(0) @binding(1) var<storage, read> glyphs: array<Glyph>;\n"
+"@group(0) @binding(2) var atlasTex: texture_2d<f32>;\n"
+"@group(0) @binding(3) var atlasSamp: sampler;\n"
+"struct VsOut {\n"
+"  @builtin(position) pos: vec4<f32>,\n"
+"  @location(0) uv: vec2<f32>,\n"
+"  @location(1) @interpolate(flat) inst: u32,\n"
+"};\n"
+"@vertex\n"
+"fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VsOut {\n"
+"  var corners = array<vec2<f32>, 6>(\n"
+"    vec2<f32>(0.0,0.0), vec2<f32>(1.0,0.0), vec2<f32>(0.0,1.0),\n"
+"    vec2<f32>(0.0,1.0), vec2<f32>(1.0,0.0), vec2<f32>(1.0,1.0));\n"
+"  let c = corners[vi];\n"
+"  let g = glyphs[ii];\n"
+"  let posPx = g.rect.xy + c * g.rect.zw;\n"
+"  let ndc = vec2<f32>(posPx.x / uViewport.x * 2.0 - 1.0,\n"
+"                      1.0 - posPx.y / uViewport.y * 2.0);\n"
+"  var o: VsOut;\n"
+"  o.pos = vec4<f32>(ndc, 0.0, 1.0);\n"
+"  o.uv = g.uv.xy + c * g.uv.zw;\n"
+"  o.inst = ii;\n"
+"  return o;\n"
+"}\n"
+"fn median3(r: f32, g: f32, b: f32) -> f32 {\n"
+"  return max(min(r, g), min(max(r, g), b));\n"
+"}\n"
+"@fragment\n"
+"fn fs(in: VsOut) -> @location(0) vec4<f32> {\n"
+"  let g = glyphs[in.inst];\n"
+"  let s = textureSample(atlasTex, atlasSamp, in.uv);\n"
+"  let dist = g.params.x * (median3(s.r, s.g, s.b) - 0.5);\n"
+"  let cov = clamp(dist + 0.5, 0.0, 1.0);\n"
+"  let a = g.color.a * cov;\n"
+"  return vec4<f32>(g.color.rgb * a, a);\n"   /* premultiplied */
+"}\n";
+
+static WGPURenderPipeline g_g2d_text_pipeline = NULL;
+static WGPUBuffer    g_g2d_text_instbuf = NULL;
+static WGPUBindGroup g_g2d_text_bind = NULL;
+static int   g_g2d_text_cap = 0;
+static float* g_g2d_text_prims = NULL;
+static int   g_g2d_text_count = 0;
+static int   g_g2d_text_capf = 0;
+static int   g_g2d_text_atlas = 0;        /* 1-based atlas handle for this frame */
+static int   g_g2d_text_bind_atlas = -1;  /* atlas the current bind group references */
+static WGPUSampler g_g2d_sampler = NULL;
+static WGPUTexture     g_g2d_atlas_tex[RAE_SDF_MAX_ATLAS];
+static WGPUTextureView g_g2d_atlas_view[RAE_SDF_MAX_ATLAS];
+
+/* Lazily upload atlas `handle` (1-based, from sdf_text.loadAtlas) as a wgpu
+ * texture; cached. Returns its view, or NULL if the atlas isn't loaded. */
+static WGPUTextureView rae_g2d_atlas_texview(int handle) {
+    int i = handle - 1;
+    if (i < 0 || i >= RAE_SDF_MAX_ATLAS || !g_sdf_atlas[i]) return NULL;
+    if (g_g2d_atlas_view[i]) return g_g2d_atlas_view[i];
+    int aw = g_sdf_atlas_w[i], ah = g_sdf_atlas_h[i];
+    WGPUTextureDescriptor td; memset(&td, 0, sizeof(td));
+    td.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst;
+    td.dimension = WGPUTextureDimension_2D;
+    td.size.width = (uint32_t)aw; td.size.height = (uint32_t)ah; td.size.depthOrArrayLayers = 1;
+    td.format = WGPUTextureFormat_RGBA8Unorm;   /* MSDF data is linear, not sRGB */
+    td.mipLevelCount = 1; td.sampleCount = 1;
+    WGPUTexture tex = wgpuDeviceCreateTexture(g_wgpu_dev, &td);
+    WGPUTexelCopyTextureInfo dst; memset(&dst, 0, sizeof(dst));
+    dst.texture = tex; dst.aspect = WGPUTextureAspect_All;
+    WGPUTexelCopyBufferLayout layout; memset(&layout, 0, sizeof(layout));
+    layout.bytesPerRow = (uint32_t)(aw * 4); layout.rowsPerImage = (uint32_t)ah;
+    WGPUExtent3D ext; ext.width = (uint32_t)aw; ext.height = (uint32_t)ah; ext.depthOrArrayLayers = 1;
+    wgpuQueueWriteTexture(g_wgpu_queue, &dst, g_sdf_atlas[i], (size_t)aw * ah * 4, &layout, &ext);
+    g_g2d_atlas_tex[i] = tex;
+    g_g2d_atlas_view[i] = wgpuTextureCreateView(tex, NULL);
+    return g_g2d_atlas_view[i];
+}
+
+static void rae_g2d_init_text_pipeline(void) {
+    if (g_g2d_text_pipeline) return;
+    WGPUShaderSourceWGSL src; memset(&src, 0, sizeof(src));
+    src.chain.sType = WGPUSType_ShaderSourceWGSL;
+    src.code = rae_wgpu_sv(G2D_TEXT_WGSL);
+    WGPUShaderModuleDescriptor smd; memset(&smd, 0, sizeof(smd));
+    smd.nextInChain = &src.chain;
+    WGPUShaderModule mod = wgpuDeviceCreateShaderModule(g_wgpu_dev, &smd);
+
+    WGPUBlendState blend; memset(&blend, 0, sizeof(blend));
+    blend.color.operation = WGPUBlendOperation_Add;
+    blend.color.srcFactor = WGPUBlendFactor_One;
+    blend.color.dstFactor = WGPUBlendFactor_OneMinusSrcAlpha;
+    blend.alpha.operation = WGPUBlendOperation_Add;
+    blend.alpha.srcFactor = WGPUBlendFactor_One;
+    blend.alpha.dstFactor = WGPUBlendFactor_OneMinusSrcAlpha;
+    WGPUColorTargetState cts; memset(&cts, 0, sizeof(cts));
+    cts.format = g_g2d_fmt; cts.blend = &blend; cts.writeMask = WGPUColorWriteMask_All;
+    WGPUFragmentState fs; memset(&fs, 0, sizeof(fs));
+    fs.module = mod; fs.entryPoint = rae_wgpu_sv("fs"); fs.targetCount = 1; fs.targets = &cts;
+
+    WGPURenderPipelineDescriptor pd; memset(&pd, 0, sizeof(pd));
+    pd.layout = NULL;
+    pd.vertex.module = mod; pd.vertex.entryPoint = rae_wgpu_sv("vs");
+    pd.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+    pd.primitive.frontFace = WGPUFrontFace_CCW;
+    pd.primitive.cullMode = WGPUCullMode_None;
+    pd.multisample.count = 1; pd.multisample.mask = 0xFFFFFFFFu;
+    pd.fragment = &fs;
+    g_g2d_text_pipeline = wgpuDeviceCreateRenderPipeline(g_wgpu_dev, &pd);
+    wgpuShaderModuleRelease(mod);
+
+    if (!g_g2d_sampler) {
+        WGPUSamplerDescriptor sd; memset(&sd, 0, sizeof(sd));
+        sd.addressModeU = WGPUAddressMode_ClampToEdge;
+        sd.addressModeV = WGPUAddressMode_ClampToEdge;
+        sd.addressModeW = WGPUAddressMode_ClampToEdge;
+        sd.magFilter = WGPUFilterMode_Linear;   /* MSDF requires bilinear */
+        sd.minFilter = WGPUFilterMode_Linear;
+        sd.mipmapFilter = WGPUMipmapFilterMode_Nearest;
+        sd.lodMaxClamp = 1.0f; sd.maxAnisotropy = 1;
+        g_g2d_sampler = wgpuDeviceCreateSampler(g_wgpu_dev, &sd);
+    }
+}
+
+static void rae_g2d_rebuild_text_bind(void) {
+    WGPUTextureView view = rae_g2d_atlas_texview(g_g2d_text_atlas);
+    if (!view) return;
+    WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(g_g2d_text_pipeline, 0);
+    WGPUBindGroupEntry e[4]; memset(e, 0, sizeof(e));
+    e[0].binding = 0; e[0].buffer = g_g2d_uniform; e[0].size = 16;
+    e[1].binding = 1; e[1].buffer = g_g2d_text_instbuf;
+    e[1].size = (uint64_t)g_g2d_text_cap * G2D_TEXT_FLOATS * sizeof(float);
+    e[2].binding = 2; e[2].textureView = view;
+    e[3].binding = 3; e[3].sampler = g_g2d_sampler;
+    WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
+    bgd.layout = bgl; bgd.entryCount = 4; bgd.entries = e;
+    if (g_g2d_text_bind) wgpuBindGroupRelease(g_g2d_text_bind);
+    g_g2d_text_bind = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
+    g_g2d_text_bind_atlas = g_g2d_text_atlas;
+    wgpuBindGroupLayoutRelease(bgl);
+}
+
+static void rae_g2d_ensure_text_inst(int prims) {
+    if (g_g2d_text_instbuf && prims <= g_g2d_text_cap) return;
+    int cap = g_g2d_text_cap ? g_g2d_text_cap : 256;
+    while (cap < prims) cap *= 2;
+    if (g_g2d_text_instbuf) wgpuBufferRelease(g_g2d_text_instbuf);
+    if (g_g2d_text_bind) { wgpuBindGroupRelease(g_g2d_text_bind); g_g2d_text_bind = NULL; g_g2d_text_bind_atlas = -1; }
+    WGPUBufferDescriptor bd; memset(&bd, 0, sizeof(bd));
+    bd.size = (uint64_t)cap * G2D_TEXT_FLOATS * sizeof(float);
+    bd.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
+    g_g2d_text_instbuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &bd);
+    g_g2d_text_cap = cap;
+}
+
+void rae_ext_gpu2d_drawGlyph(double sx0, double sy0, double sx1, double sy1,
+                             double u0, double v0, double u1, double v1,
+                             int64_t atlas, double pxRange, int64_t color) {
+    int need = (g_g2d_text_count + 1) * G2D_TEXT_FLOATS;
+    if (need > g_g2d_text_capf) {
+        int cap = g_g2d_text_capf ? g_g2d_text_capf : (256 * G2D_TEXT_FLOATS);
+        while (cap < need) cap *= 2;
+        g_g2d_text_prims = (float*)realloc(g_g2d_text_prims, (size_t)cap * sizeof(float));
+        g_g2d_text_capf = cap;
+    }
+    float* p = g_g2d_text_prims + g_g2d_text_count * G2D_TEXT_FLOATS;
+    p[0]=(float)sx0; p[1]=(float)sy0; p[2]=(float)(sx1-sx0); p[3]=(float)(sy1-sy0);
+    p[4]=(float)u0; p[5]=(float)v0; p[6]=(float)(u1-u0); p[7]=(float)(v1-v0);
+    /* straight (non-premultiplied) colour 0xAARRGGBB; the shader premultiplies */
+    uint32_t c = (uint32_t)color;
+    p[8]  = (float)((c >> 16) & 0xFF) / 255.0f;
+    p[9]  = (float)((c >> 8)  & 0xFF) / 255.0f;
+    p[10] = (float)( c        & 0xFF) / 255.0f;
+    p[11] = (float)((c >> 24) & 0xFF) / 255.0f;
+    p[12]=(float)pxRange; p[13]=0.0f; p[14]=0.0f; p[15]=0.0f;
+    g_g2d_text_count++;
+    g_g2d_text_atlas = (int)atlas;
+}
+
 void rae_ext_gpu2d_beginFrame(double r, double g, double b, double a) {
     g_g2d_prim_count = 0;
+    g_g2d_text_count = 0;
     if (!g_g2d_surface) return;
     WGPUSurfaceTexture st; memset(&st, 0, sizeof(st));
     wgpuSurfaceGetCurrentTexture(g_g2d_surface, &st);
@@ -3964,17 +4157,34 @@ void rae_ext_gpu2d_beginFrame(double r, double g, double b, double a) {
 
 void rae_ext_gpu2d_endFrame(void) {
     if (!g_g2d_pass) return;
-    if (g_g2d_prim_count > 0) {
+    int have_text = (g_g2d_text_count > 0 && g_g2d_text_atlas > 0);
+    if (g_g2d_prim_count > 0 || have_text) {
+        /* rae_g2d_init_pipeline also creates the shared viewport uniform that
+         * both the box and text bind groups reference at binding 0. */
         rae_g2d_init_pipeline();
-        rae_g2d_ensure_inst(g_g2d_prim_count);
-        if (!g_g2d_bind) rae_g2d_rebuild_bind();
         float vp[4] = { (float)g_sdl_w, (float)g_sdl_h, 0.0f, 0.0f };
         wgpuQueueWriteBuffer(g_wgpu_queue, g_g2d_uniform, 0, vp, sizeof(vp));
+    }
+    if (g_g2d_prim_count > 0) {
+        rae_g2d_ensure_inst(g_g2d_prim_count);
+        if (!g_g2d_bind) rae_g2d_rebuild_bind();
         wgpuQueueWriteBuffer(g_wgpu_queue, g_g2d_instbuf, 0, g_g2d_prims,
                              (size_t)g_g2d_prim_count * G2D_PRIM_FLOATS * sizeof(float));
         wgpuRenderPassEncoderSetPipeline(g_g2d_pass, g_g2d_pipeline);
         wgpuRenderPassEncoderSetBindGroup(g_g2d_pass, 0, g_g2d_bind, 0, NULL);
         wgpuRenderPassEncoderDraw(g_g2d_pass, 6, (uint32_t)g_g2d_prim_count, 0, 0);
+    }
+    if (g_g2d_text_count > 0 && g_g2d_text_atlas > 0) {
+        rae_g2d_init_text_pipeline();
+        rae_g2d_ensure_text_inst(g_g2d_text_count);
+        if (!g_g2d_text_bind || g_g2d_text_bind_atlas != g_g2d_text_atlas) rae_g2d_rebuild_text_bind();
+        if (g_g2d_text_bind) {
+            wgpuQueueWriteBuffer(g_wgpu_queue, g_g2d_text_instbuf, 0, g_g2d_text_prims,
+                                 (size_t)g_g2d_text_count * G2D_TEXT_FLOATS * sizeof(float));
+            wgpuRenderPassEncoderSetPipeline(g_g2d_pass, g_g2d_text_pipeline);
+            wgpuRenderPassEncoderSetBindGroup(g_g2d_pass, 0, g_g2d_text_bind, 0, NULL);
+            wgpuRenderPassEncoderDraw(g_g2d_pass, 6, (uint32_t)g_g2d_text_count, 0, 0);
+        }
     }
     wgpuRenderPassEncoderEnd(g_g2d_pass);
     WGPUCommandBuffer cb = wgpuCommandEncoderFinish(g_g2d_enc, NULL);
@@ -3988,6 +4198,16 @@ void rae_ext_gpu2d_endFrame(void) {
 }
 
 void rae_ext_gpu2d_closeWindow(void) {
+    if (g_g2d_text_bind) { wgpuBindGroupRelease(g_g2d_text_bind); g_g2d_text_bind = NULL; g_g2d_text_bind_atlas = -1; }
+    if (g_g2d_text_instbuf) { wgpuBufferRelease(g_g2d_text_instbuf); g_g2d_text_instbuf = NULL; g_g2d_text_cap = 0; }
+    if (g_g2d_text_pipeline) { wgpuRenderPipelineRelease(g_g2d_text_pipeline); g_g2d_text_pipeline = NULL; }
+    if (g_g2d_text_prims) { free(g_g2d_text_prims); g_g2d_text_prims = NULL; g_g2d_text_capf = 0; }
+    g_g2d_text_count = 0; g_g2d_text_atlas = 0;
+    if (g_g2d_sampler) { wgpuSamplerRelease(g_g2d_sampler); g_g2d_sampler = NULL; }
+    for (int ai = 0; ai < RAE_SDF_MAX_ATLAS; ai++) {
+        if (g_g2d_atlas_view[ai]) { wgpuTextureViewRelease(g_g2d_atlas_view[ai]); g_g2d_atlas_view[ai] = NULL; }
+        if (g_g2d_atlas_tex[ai]) { wgpuTextureRelease(g_g2d_atlas_tex[ai]); g_g2d_atlas_tex[ai] = NULL; }
+    }
     if (g_g2d_bind) { wgpuBindGroupRelease(g_g2d_bind); g_g2d_bind = NULL; }
     if (g_g2d_instbuf) { wgpuBufferRelease(g_g2d_instbuf); g_g2d_instbuf = NULL; g_g2d_inst_cap = 0; }
     if (g_g2d_uniform) { wgpuBufferRelease(g_g2d_uniform); g_g2d_uniform = NULL; }
@@ -4009,6 +4229,7 @@ void rae_ext_gpu2d_closeWindow(void) {}
 void rae_ext_gpu2d_drawRect(double x, double y, double w, double h, int64_t color) { (void)x; (void)y; (void)w; (void)h; (void)color; }
 void rae_ext_gpu2d_drawRoundedRect(double x, double y, double w, double h, double radius, int64_t color) { (void)x; (void)y; (void)w; (void)h; (void)radius; (void)color; }
 void rae_ext_gpu2d_drawBox(double x, double y, double w, double h, double radius, int64_t fill, double borderWidth, int64_t border) { (void)x; (void)y; (void)w; (void)h; (void)radius; (void)fill; (void)borderWidth; (void)border; }
+void rae_ext_gpu2d_drawGlyph(double sx0, double sy0, double sx1, double sy1, double u0, double v0, double u1, double v1, int64_t atlas, double pxRange, int64_t color) { (void)sx0; (void)sy0; (void)sx1; (void)sy1; (void)u0; (void)v0; (void)u1; (void)v1; (void)atlas; (void)pxRange; (void)color; }
 #endif /* RAE_HAS_SDL3 */
 #endif /* RAE_HAS_WEBGPU */
 
