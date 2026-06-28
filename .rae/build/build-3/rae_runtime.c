@@ -686,16 +686,16 @@ void rae_spawn(void* (*func)(void*), void* data) {
 }
 
 RaeAny rae_ext_json_get(const char* json, const char* field) {
-    if (!json || !field) return rae_any_none();
+    if (!json || !field) return (RaeAny){RAE_TYPE_NONE, false, false, {0}};
     
     // Tiny naive JSON parser: look for "field": value
     char search[256];
     snprintf(search, sizeof(search), "\"%s\"", field);
     const char* key_pos = strstr(json, search);
-    if (!key_pos) return rae_any_none();
+    if (!key_pos) return (RaeAny){RAE_TYPE_NONE, false, false, {0}};
     
     const char* colon = strchr(key_pos + strlen(search), ':');
-    if (!colon) return rae_any_none();
+    if (!colon) return (RaeAny){RAE_TYPE_NONE, false, false, {0}};
     
     const char* val_start = colon + 1;
     while (*val_start && (*val_start == ' ' || *val_start == '\t' || *val_start == '\n' || *val_start == '\r')) {
@@ -706,27 +706,27 @@ RaeAny rae_ext_json_get(const char* json, const char* field) {
         // String value
         val_start++;
         const char* val_end = strchr(val_start, '\"');
-        if (!val_end) return rae_any_none();
+        if (!val_end) return (RaeAny){RAE_TYPE_NONE, false, false, {0}};
         size_t len = val_end - val_start;
         uint8_t* res = malloc(len + 1);
         memcpy(res, val_start, len);
         res[len] = '\0';
         rae_mem_str_tag(res, (int64_t)len + 1, RAE_SITE_JSON_GET_STR);
-        return rae_any_string((rae_String){res, (int64_t)len, (int64_t)len + 1, 1});
+        return (RaeAny){RAE_TYPE_STRING, false, false, {.s = {res, (int64_t)len, (int64_t)len + 1, 1}}};
     } else if (*val_start == 't') {
-        return rae_any_bool(1);
+        return (RaeAny){RAE_TYPE_BOOL, false, false, {.b = 1}};
     } else if (*val_start == 'f') {
-        return rae_any_bool(0);
+        return (RaeAny){RAE_TYPE_BOOL, false, false, {.b = 0}};
     } else if (*val_start == 'n') {
-        return rae_any_none();
+        return (RaeAny){RAE_TYPE_NONE, false, false, {0}};
     } else if (*val_start == '-' || (*val_start >= '0' && *val_start <= '9')) {
         // Number
         char* end;
         double f = strtod(val_start, &end);
         if (strchr(val_start, '.') && strchr(val_start, '.') < end) {
-            return rae_any_float(f);
+            return (RaeAny){RAE_TYPE_FLOAT64, false, false, {.f = f}};
         } else {
-            return rae_any_int((int64_t)f);
+            return (RaeAny){RAE_TYPE_INT64, false, false, {.i = (int64_t)f}};
         }
     } else if (*val_start == '{') {
         // Nested object (simplified: just return the raw string part)
@@ -742,10 +742,10 @@ RaeAny rae_ext_json_get(const char* json, const char* field) {
         memcpy(res, val_start, len);
         res[len] = '\0';
         rae_mem_str_tag(res, (int64_t)len + 1, RAE_SITE_JSON_GET_OBJ);
-        return rae_any_string((rae_String){res, (int64_t)len, (int64_t)len + 1, 1}); // We return objects as strings for now
+        return (RaeAny){RAE_TYPE_STRING, false, false, {.s = {res, (int64_t)len, (int64_t)len + 1, 1}}}; // We return objects as strings for now
     }
     
-    return rae_any_none();
+    return (RaeAny){RAE_TYPE_NONE, false, false, {0}};
 }
 
 void rae_ext_rae_log_any(RaeAny value) {
@@ -1661,7 +1661,7 @@ void rae_ext_rae_buf_set_any(void* buf, int64_t index, RaeAny value) {
 }
 
 RaeAny rae_ext_rae_buf_get_any(void* buf, int64_t index) {
-  if (!buf) return rae_any_none();
+  if (!buf) return (RaeAny){0};
   RAE_BR_CHECK_ANY("rae_buf_get_any", buf, index);
   return ((RaeAny*)buf)[index];
 }
@@ -3682,36 +3682,6 @@ void rae_ext_gpu_reset(void) {
 static SDL_MetalView g_g2d_metal_view = NULL;
 static WGPUSurface   g_g2d_surface = NULL;
 static WGPUTextureFormat g_g2d_fmt = WGPUTextureFormat_BGRA8Unorm;
-
-/* Coordinate system (#112): draw coords are in DESIGN units; the renderer
- * maps them to physical pixels via a per-frame scale + offset. Default
- * (design w/h <= 0) is identity — 1 unit = 1 physical px. setDesignResolution
- * opts into a fixed virtual canvas fitted into the window (DPI-independent). */
-static double g_g2d_design_w = 0.0, g_g2d_design_h = 0.0;
-static int    g_g2d_fit_mode = 0;   /* 0=fit/contain, 1=fill/cover, 2=stretch */
-/* Per-frame mouse-wheel accumulator (reset + summed in pollClose, read by
- * gpu2d.wheelMove). Mirrors raylib's GetMouseWheelMove per-frame semantics. */
-static float  g_g2d_wheel = 0.0f;
-
-/* Fill `out` (8 floats = 2*vec4): (physW,physH,scaleX,scaleY),(offX,offY,0,0). */
-static void rae_g2d_compute_xform(float* out) {
-    float physW = (float)g_sdl_w, physH = (float)g_sdl_h;
-    float scaleX = 1.0f, scaleY = 1.0f, offX = 0.0f, offY = 0.0f;
-    if (g_g2d_design_w > 0.0 && g_g2d_design_h > 0.0) {
-        float dW = (float)g_g2d_design_w, dH = (float)g_g2d_design_h;
-        float sx = physW / dW, sy = physH / dH;
-        if (g_g2d_fit_mode == 2) { scaleX = sx; scaleY = sy; }       /* stretch */
-        else {
-            float s = (g_g2d_fit_mode == 1) ? (sx > sy ? sx : sy)    /* fill/cover */
-                                            : (sx < sy ? sx : sy);   /* fit/contain */
-            scaleX = s; scaleY = s;
-            offX = (physW - dW * s) * 0.5f;
-            offY = (physH - dH * s) * 0.5f;
-        }
-    }
-    out[0] = physW; out[1] = physH; out[2] = scaleX; out[3] = scaleY;
-    out[4] = offX;  out[5] = offY;  out[6] = 0.0f;   out[7] = 0.0f;
-}
 /* per-frame transient handles */
 static WGPUTexture           g_g2d_frame_tex = NULL;
 static WGPUTextureView       g_g2d_frame_view = NULL;
@@ -3723,9 +3693,7 @@ static void rae_g2d_configure(int pw, int ph) {
     WGPUSurfaceConfiguration cfg; memset(&cfg, 0, sizeof(cfg));
     cfg.device = g_wgpu_dev;
     cfg.format = g_g2d_fmt;
-    /* CopySrc so headless verification (RAE_GPU2D_SCREENSHOT) can read the
-     * presented frame back off the surface texture. */
-    cfg.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc;
+    cfg.usage = WGPUTextureUsage_RenderAttachment;
     cfg.width = (uint32_t)pw;
     cfg.height = (uint32_t)ph;
     cfg.presentMode = WGPUPresentMode_Fifo;
@@ -3775,510 +3743,24 @@ void rae_ext_gpu2d_initWindow(int64_t width, int64_t height, rae_String title) {
     if (hm) g_sdl_headless_ms = (int64_t)atoll(hm);
 }
 
-/* Pump the OS event queue once per frame AND record input state into the
- * shared SDL3 input arrays (g_sdl_mouse / g_sdl_keydown / g_sdl_pressed) plus
- * the wheel accumulator, so gpu2d apps get working mouse/keyboard/wheel input.
- * (The bare SDL3 backend records this in sdl3_shouldClose, which the gpu2d
- * window path never calls — hence the duplication here.) Edge state
- * (g_sdl_pressed) and the wheel delta are reset each call so they describe
- * only this frame. */
 rae_Bool rae_ext_gpu2d_pollClose(void) {
-    memset(g_sdl_pressed, 0, sizeof(g_sdl_pressed));
-    g_g2d_wheel = 0.0f;
     SDL_Event e;
-    rae_Bool quit = 0;
     while (SDL_PollEvent(&e)) {
-        switch (e.type) {
-            case SDL_EVENT_QUIT: quit = 1; break;
-            case SDL_EVENT_WINDOW_CLOSE_REQUESTED: quit = 1; break;
-            case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-            case SDL_EVENT_WINDOW_RESIZED: {
-                int pw = 0, ph = 0; SDL_GetWindowSizeInPixels(g_sdl_win, &pw, &ph);
-                rae_g2d_configure(pw, ph);
-                break;
-            }
-            case SDL_EVENT_KEY_DOWN:
-                if (e.key.key == SDLK_ESCAPE) quit = 1;
-                if (e.key.scancode < SDL_SCANCODE_COUNT) {
-                    g_sdl_keydown[e.key.scancode] = 1;
-                    if (!e.key.repeat) g_sdl_pressed[e.key.scancode] = 1;  /* edge */
-                }
-                break;
-            case SDL_EVENT_KEY_UP:
-                if (e.key.scancode < SDL_SCANCODE_COUNT) g_sdl_keydown[e.key.scancode] = 0;
-                break;
-            case SDL_EVENT_MOUSE_BUTTON_DOWN:
-                if (e.button.button < 8) g_sdl_mouse[e.button.button] = 1;
-                if (!g_sdl_mouse_captured) { SDL_CaptureMouse(true); g_sdl_mouse_captured = true; }
-                break;
-            case SDL_EVENT_MOUSE_BUTTON_UP: {
-                if (e.button.button < 8) g_sdl_mouse[e.button.button] = 0;
-                bool any = false;
-                for (int b = 0; b < 8; b++) if (g_sdl_mouse[b]) any = true;
-                if (!any && g_sdl_mouse_captured) { SDL_CaptureMouse(false); g_sdl_mouse_captured = false; }
-                break;
-            }
-            case SDL_EVENT_MOUSE_WHEEL:
-                g_g2d_wheel += e.wheel.y;
-                break;
-            case SDL_EVENT_WINDOW_FOCUS_LOST:
-                memset(g_sdl_keydown, 0, sizeof(g_sdl_keydown));
-                memset(g_sdl_mouse, 0, sizeof(g_sdl_mouse));
-                if (g_sdl_mouse_captured) { SDL_CaptureMouse(false); g_sdl_mouse_captured = false; }
-                break;
-            default: break;
+        if (e.type == SDL_EVENT_QUIT) return 1;
+        if (e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) return 1;
+        if (e.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED || e.type == SDL_EVENT_WINDOW_RESIZED) {
+            int pw = 0, ph = 0; SDL_GetWindowSizeInPixels(g_sdl_win, &pw, &ph);
+            rae_g2d_configure(pw, ph);
         }
     }
-    if (quit) return 1;
     if (g_sdl_headless_ms > 0 && (rae_ext_nowMs() - g_sdl_start_ms) >= g_sdl_headless_ms) return 1;
     return 0;
 }
 
-/* Block up to timeoutSec for the next OS event (or wake immediately if one is
- * already queued), leaving events in the queue for the following pollClose to
- * drain. Passing NULL means SDL doesn't dequeue the event. This is the idle
- * half of the hybrid loop: busy-render while animating, park here when idle so
- * the app sits at ~0% CPU until input arrives. timeoutSec <= 0 returns at once. */
-void rae_ext_gpu2d_waitEvents(double timeoutSec) {
-    int ms = (int)(timeoutSec * 1000.0);
-    if (ms < 0) ms = 0;
-    SDL_WaitEventTimeout(NULL, ms);
-}
-
-/* Pointer position in DESIGN units (the same coordinate space drawRect etc.
- * take), so hit-testing matches what was drawn. SDL reports logical window
- * points; we scale to physical px (× dpr) then invert the design fit transform
- * (subtract the letterbox offset, divide by scale). */
-static void rae_g2d_pointer_design(double* dx, double* dy) {
-    float mx = 0, my = 0; SDL_GetMouseState(&mx, &my);
-    int lw = 0, lh = 0; if (g_sdl_win) SDL_GetWindowSize(g_sdl_win, &lw, &lh);
-    double sclx = (lw > 0) ? (double)g_sdl_w / (double)lw : 1.0;
-    double scly = (lh > 0) ? (double)g_sdl_h / (double)lh : 1.0;
-    float xf[8]; rae_g2d_compute_xform(xf);
-    double physX = (double)mx * sclx, physY = (double)my * scly;
-    *dx = (xf[2] != 0.0f) ? (physX - xf[4]) / xf[2] : physX;
-    *dy = (xf[3] != 0.0f) ? (physY - xf[5]) / xf[3] : physY;
-}
-double rae_ext_gpu2d_pointerX(void) { double x, y; rae_g2d_pointer_design(&x, &y); return x; }
-double rae_ext_gpu2d_pointerY(void) { double x, y; rae_g2d_pointer_design(&x, &y); return y; }
-/* Left mouse button held this frame (button index 1 in SDL). */
-rae_Bool rae_ext_gpu2d_pointerDown(void) { return g_sdl_mouse[SDL_BUTTON_LEFT] != 0; }
-/* Per-frame wheel delta (positive = wheel/scroll up). */
-double rae_ext_gpu2d_wheelMove(void) { return (double)g_g2d_wheel; }
-/* Monotonic wall-clock seconds since process start — for scroll timing without
- * pulling in the raylib-backed getTime. */
-double rae_ext_gpu2d_nowSeconds(void) { return (double)rae_ext_nowMs() / 1000.0; }
-
 int64_t rae_ext_gpu2d_windowWidth(void) { return g_sdl_w; }
 int64_t rae_ext_gpu2d_windowHeight(void) { return g_sdl_h; }
 
-/* Coordinate system (#112). */
-void rae_ext_gpu2d_setDesignResolution(double w, double h, int64_t fit) {
-    g_g2d_design_w = w; g_g2d_design_h = h; g_g2d_fit_mode = (int)fit;
-}
-double rae_ext_gpu2d_designWidth(void)  { return (g_g2d_design_w > 0.0) ? g_g2d_design_w : (double)g_sdl_w; }
-double rae_ext_gpu2d_designHeight(void) { return (g_g2d_design_h > 0.0) ? g_g2d_design_h : (double)g_sdl_h; }
-double rae_ext_gpu2d_dpr(void) {
-    int lw = 0, lh = 0; if (g_sdl_win) SDL_GetWindowSize(g_sdl_win, &lw, &lh);
-    (void)lh; return (lw > 0) ? (double)g_sdl_w / (double)lw : 1.0;
-}
-
-/* --- Box uber-shader pipeline (#110) ----------------------------------
- * Instanced rounded-box SDF with analytic AA: one quad per primitive, the
- * fragment shader evaluates a rounded-box signed distance and antialiases
- * with screen-space derivatives (no MSAA). One pipeline → filled/rounded
- * rects, per-corner radius, borders. Primitives are accumulated CPU-side
- * each frame and drawn in one instanced draw at endFrame (painter's order).
- * Instance layout = 5×vec4 (std430): rect, radius, fill, border, params. */
-#define G2D_PRIM_FLOATS 20
-
-static const char* G2D_BOX_WGSL =
-"struct Prim {\n"
-"  rect: vec4<f32>,\n"
-"  radius: vec4<f32>,\n"
-"  fill: vec4<f32>,\n"
-"  border: vec4<f32>,\n"
-"  params: vec4<f32>,\n"
-"};\n"
-/* uXform[0] = (physW, physH, scaleX, scaleY); uXform[1] = (offsetX, offsetY,..)
- * maps design-unit coords -> physical px: px = design*scale + offset. */
-"@group(0) @binding(0) var<uniform> uXform: array<vec4<f32>, 2>;\n"
-"@group(0) @binding(1) var<storage, read> prims: array<Prim>;\n"
-"struct VsOut {\n"
-"  @builtin(position) pos: vec4<f32>,\n"
-"  @location(0) local: vec2<f32>,\n"
-"  @location(1) @interpolate(flat) inst: u32,\n"
-"};\n"
-"@vertex\n"
-"fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VsOut {\n"
-"  var corners = array<vec2<f32>, 6>(\n"
-"    vec2<f32>(0.0,0.0), vec2<f32>(1.0,0.0), vec2<f32>(0.0,1.0),\n"
-"    vec2<f32>(0.0,1.0), vec2<f32>(1.0,0.0), vec2<f32>(1.0,1.0));\n"
-"  let c = corners[vi];\n"
-"  let p = prims[ii];\n"
-"  let phys = uXform[0].xy;\n"
-"  let local = c * p.rect.zw;\n"            /* box-local, unrotated (0..w, 0..h) */
-"  let center = p.rect.zw * 0.5;\n"
-"  let a = p.params.y;\n"                   /* rotation (radians), 0 for rects */
-"  let ca = cos(a); let sa = sin(a);\n"
-"  let rel = local - center;\n"
-"  let rot = vec2<f32>(rel.x * ca - rel.y * sa, rel.x * sa + rel.y * ca);\n"
-"  let posDesign = p.rect.xy + center + rot;\n"
-"  let posPx = posDesign * uXform[0].zw + uXform[1].xy;\n"
-"  let ndc = vec2<f32>(posPx.x / phys.x * 2.0 - 1.0,\n"
-"                      1.0 - posPx.y / phys.y * 2.0);\n"
-"  var o: VsOut;\n"
-"  o.pos = vec4<f32>(ndc, 0.0, 1.0);\n"
-"  o.local = local;\n"                      /* SDF evaluates in unrotated box frame */
-"  o.inst = ii;\n"
-"  return o;\n"
-"}\n"
-"fn sdRoundBox(p: vec2<f32>, b: vec2<f32>, r: vec4<f32>) -> f32 {\n"
-"  let rad = select(r.zw, r.xy, p.x > 0.0);\n"
-"  let rr = select(rad.y, rad.x, p.y > 0.0);\n"
-"  let q = abs(p) - b + vec2<f32>(rr, rr);\n"
-"  return min(max(q.x, q.y), 0.0) + length(max(q, vec2<f32>(0.0, 0.0))) - rr;\n"
-"}\n"
-"@fragment\n"
-"fn fs(in: VsOut) -> @location(0) vec4<f32> {\n"
-"  let p = prims[in.inst];\n"
-"  let halfSize = p.rect.zw * 0.5;\n"
-"  let center = in.local - halfSize;\n"
-"  let d = sdRoundBox(center, halfSize, p.radius);\n"
-"  let aa = max(fwidth(d), 0.0001);\n"
-"  let cov = 1.0 - smoothstep(-aa, aa, d);\n"
-"  var col = p.fill;\n"
-"  let bw = p.params.x;\n"
-"  if (bw > 0.0) {\n"
-"    let inner = 1.0 - smoothstep(-aa, aa, d + bw);\n"
-"    col = mix(p.border, p.fill, inner);\n"
-"  }\n"
-"  return col * cov;\n"
-"}\n";
-
-static WGPURenderPipeline g_g2d_pipeline = NULL;
-static WGPUBuffer    g_g2d_uniform = NULL;
-static WGPUBuffer    g_g2d_instbuf = NULL;
-static WGPUBindGroup g_g2d_bind = NULL;
-static int   g_g2d_inst_cap = 0;       /* capacity in primitives */
-static float* g_g2d_prims = NULL;      /* CPU accumulation (floats) */
-static int   g_g2d_prim_count = 0;
-static int   g_g2d_prim_capf = 0;      /* capacity in floats */
-
-static void g2d_color(uint32_t c, float* out) {
-    /* 0xAARRGGBB -> premultiplied RGBA in 0..1 */
-    float a = (float)((c >> 24) & 0xFF) / 255.0f;
-    float r = (float)((c >> 16) & 0xFF) / 255.0f;
-    float g = (float)((c >> 8)  & 0xFF) / 255.0f;
-    float b = (float)( c        & 0xFF) / 255.0f;
-    out[0] = r * a; out[1] = g * a; out[2] = b * a; out[3] = a;
-}
-
-static void rae_g2d_push(double x, double y, double w, double h,
-                         double rtl, double rtr, double rbr, double rbl,
-                         uint32_t fill, uint32_t border, double bw, double angle) {
-    int need = (g_g2d_prim_count + 1) * G2D_PRIM_FLOATS;
-    if (need > g_g2d_prim_capf) {
-        int cap = g_g2d_prim_capf ? g_g2d_prim_capf : (64 * G2D_PRIM_FLOATS);
-        while (cap < need) cap *= 2;
-        g_g2d_prims = (float*)realloc(g_g2d_prims, (size_t)cap * sizeof(float));
-        g_g2d_prim_capf = cap;
-    }
-    float* p = g_g2d_prims + g_g2d_prim_count * G2D_PRIM_FLOATS;
-    p[0]=(float)x; p[1]=(float)y; p[2]=(float)w; p[3]=(float)h;
-    p[4]=(float)rtl; p[5]=(float)rtr; p[6]=(float)rbr; p[7]=(float)rbl;
-    g2d_color(fill, &p[8]);
-    g2d_color(border, &p[12]);
-    p[16]=(float)bw; p[17]=(float)angle; p[18]=0.0f; p[19]=0.0f;
-    g_g2d_prim_count++;
-}
-
-static void rae_g2d_init_pipeline(void) {
-    if (g_g2d_pipeline) return;
-    WGPUShaderSourceWGSL src; memset(&src, 0, sizeof(src));
-    src.chain.sType = WGPUSType_ShaderSourceWGSL;
-    src.code = rae_wgpu_sv(G2D_BOX_WGSL);
-    WGPUShaderModuleDescriptor smd; memset(&smd, 0, sizeof(smd));
-    smd.nextInChain = &src.chain;
-    WGPUShaderModule mod = wgpuDeviceCreateShaderModule(g_wgpu_dev, &smd);
-
-    WGPUBlendState blend; memset(&blend, 0, sizeof(blend));
-    blend.color.operation = WGPUBlendOperation_Add;
-    blend.color.srcFactor = WGPUBlendFactor_One;            /* premultiplied alpha */
-    blend.color.dstFactor = WGPUBlendFactor_OneMinusSrcAlpha;
-    blend.alpha.operation = WGPUBlendOperation_Add;
-    blend.alpha.srcFactor = WGPUBlendFactor_One;
-    blend.alpha.dstFactor = WGPUBlendFactor_OneMinusSrcAlpha;
-    WGPUColorTargetState cts; memset(&cts, 0, sizeof(cts));
-    cts.format = g_g2d_fmt; cts.blend = &blend; cts.writeMask = WGPUColorWriteMask_All;
-    WGPUFragmentState fs; memset(&fs, 0, sizeof(fs));
-    fs.module = mod; fs.entryPoint = rae_wgpu_sv("fs"); fs.targetCount = 1; fs.targets = &cts;
-
-    WGPURenderPipelineDescriptor pd; memset(&pd, 0, sizeof(pd));
-    pd.layout = NULL;  /* auto layout from shader bindings */
-    pd.vertex.module = mod; pd.vertex.entryPoint = rae_wgpu_sv("vs");
-    pd.primitive.topology = WGPUPrimitiveTopology_TriangleList;
-    pd.primitive.frontFace = WGPUFrontFace_CCW;
-    pd.primitive.cullMode = WGPUCullMode_None;
-    pd.multisample.count = 1; pd.multisample.mask = 0xFFFFFFFFu;
-    pd.fragment = &fs;
-    g_g2d_pipeline = wgpuDeviceCreateRenderPipeline(g_wgpu_dev, &pd);
-    wgpuShaderModuleRelease(mod);
-
-    WGPUBufferDescriptor ud; memset(&ud, 0, sizeof(ud));
-    ud.size = 32; ud.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;  /* 2*vec4 xform */
-    g_g2d_uniform = wgpuDeviceCreateBuffer(g_wgpu_dev, &ud);
-}
-
-static void rae_g2d_rebuild_bind(void) {
-    WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(g_g2d_pipeline, 0);
-    WGPUBindGroupEntry e[2]; memset(e, 0, sizeof(e));
-    e[0].binding = 0; e[0].buffer = g_g2d_uniform; e[0].size = 32;
-    e[1].binding = 1; e[1].buffer = g_g2d_instbuf;
-    e[1].size = (uint64_t)g_g2d_inst_cap * G2D_PRIM_FLOATS * sizeof(float);
-    WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
-    bgd.layout = bgl; bgd.entryCount = 2; bgd.entries = e;
-    g_g2d_bind = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
-    wgpuBindGroupLayoutRelease(bgl);
-}
-
-static void rae_g2d_ensure_inst(int prims) {
-    if (g_g2d_instbuf && prims <= g_g2d_inst_cap) return;
-    int cap = g_g2d_inst_cap ? g_g2d_inst_cap : 64;
-    while (cap < prims) cap *= 2;
-    if (g_g2d_instbuf) wgpuBufferRelease(g_g2d_instbuf);
-    if (g_g2d_bind) { wgpuBindGroupRelease(g_g2d_bind); g_g2d_bind = NULL; }
-    WGPUBufferDescriptor bd; memset(&bd, 0, sizeof(bd));
-    bd.size = (uint64_t)cap * G2D_PRIM_FLOATS * sizeof(float);
-    bd.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
-    g_g2d_instbuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &bd);
-    g_g2d_inst_cap = cap;
-}
-
-void rae_ext_gpu2d_drawRect(double x, double y, double w, double h, int64_t color) {
-    rae_g2d_push(x, y, w, h, 0, 0, 0, 0, (uint32_t)color, 0, 0.0, 0.0);
-}
-void rae_ext_gpu2d_drawRoundedRect(double x, double y, double w, double h, double radius, int64_t color) {
-    rae_g2d_push(x, y, w, h, radius, radius, radius, radius, (uint32_t)color, 0, 0.0, 0.0);
-}
-void rae_ext_gpu2d_drawBox(double x, double y, double w, double h, double radius,
-                           int64_t fill, double borderWidth, int64_t border) {
-    rae_g2d_push(x, y, w, h, radius, radius, radius, radius,
-                 (uint32_t)fill, (uint32_t)border, borderWidth, 0.0);
-}
-/* A line from (x0,y0) to (x1,y1), `thickness` px wide, with rounded caps —
- * a rotated capsule (rounded rect of length x thickness, radius thickness/2). */
-void rae_ext_gpu2d_drawLine(double x0, double y0, double x1, double y1,
-                            double thickness, int64_t color) {
-    double dx = x1 - x0, dy = y1 - y0;
-    double len = sqrt(dx * dx + dy * dy);
-    if (len < 1e-6 || thickness <= 0.0) return;
-    double angle = atan2(dy, dx);
-    double cx = (x0 + x1) * 0.5, cy = (y0 + y1) * 0.5;
-    double r = thickness * 0.5;
-    if (r > len * 0.5) r = len * 0.5;
-    rae_g2d_push(cx - len * 0.5, cy - thickness * 0.5, len, thickness,
-                 r, r, r, r, (uint32_t)color, 0, 0.0, angle);
-}
-
-/* --- Text pipeline (#111): MSDF glyph quads --------------------------
- * A second instanced pipeline that samples the MSDF atlas (the same raw
- * RGBA the CPU blit path holds in g_sdf_atlas[]) and antialiases with the
- * median-of-3 + screen-px-range trick. Shares the viewport uniform and
- * premultiplied blend with the box pipeline, so glyphs composite in the
- * same pass after boxes. Instance = 4*vec4: rect, uv (normalised), colour,
- * params(pxRange). One atlas/font per frame (the common UI case). */
-#define G2D_TEXT_FLOATS 16
-
-static const char* G2D_TEXT_WGSL =
-"struct Glyph {\n"
-"  rect: vec4<f32>,\n"
-"  uv: vec4<f32>,\n"
-"  color: vec4<f32>,\n"
-"  params: vec4<f32>,\n"
-"};\n"
-"@group(0) @binding(0) var<uniform> uXform: array<vec4<f32>, 2>;\n"
-"@group(0) @binding(1) var<storage, read> glyphs: array<Glyph>;\n"
-"@group(0) @binding(2) var atlasTex: texture_2d<f32>;\n"
-"@group(0) @binding(3) var atlasSamp: sampler;\n"
-"struct VsOut {\n"
-"  @builtin(position) pos: vec4<f32>,\n"
-"  @location(0) uv: vec2<f32>,\n"
-"  @location(1) @interpolate(flat) inst: u32,\n"
-"};\n"
-"@vertex\n"
-"fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VsOut {\n"
-"  var corners = array<vec2<f32>, 6>(\n"
-"    vec2<f32>(0.0,0.0), vec2<f32>(1.0,0.0), vec2<f32>(0.0,1.0),\n"
-"    vec2<f32>(0.0,1.0), vec2<f32>(1.0,0.0), vec2<f32>(1.0,1.0));\n"
-"  let c = corners[vi];\n"
-"  let g = glyphs[ii];\n"
-"  let phys = uXform[0].xy;\n"
-"  let posPx = (g.rect.xy + c * g.rect.zw) * uXform[0].zw + uXform[1].xy;\n"
-"  let ndc = vec2<f32>(posPx.x / phys.x * 2.0 - 1.0,\n"
-"                      1.0 - posPx.y / phys.y * 2.0);\n"
-"  var o: VsOut;\n"
-"  o.pos = vec4<f32>(ndc, 0.0, 1.0);\n"
-"  o.uv = g.uv.xy + c * g.uv.zw;\n"
-"  o.inst = ii;\n"
-"  return o;\n"
-"}\n"
-"fn median3(r: f32, g: f32, b: f32) -> f32 {\n"
-"  return max(min(r, g), min(max(r, g), b));\n"
-"}\n"
-"@fragment\n"
-"fn fs(in: VsOut) -> @location(0) vec4<f32> {\n"
-"  let g = glyphs[in.inst];\n"
-"  let s = textureSample(atlasTex, atlasSamp, in.uv);\n"
-/* pxRange is authored in design units; scale to physical px (avg scale) */
-"  let sc = (uXform[0].z + uXform[0].w) * 0.5;\n"
-"  let dist = g.params.x * sc * (median3(s.r, s.g, s.b) - 0.5);\n"
-"  let cov = clamp(dist + 0.5, 0.0, 1.0);\n"
-"  let a = g.color.a * cov;\n"
-"  return vec4<f32>(g.color.rgb * a, a);\n"   /* premultiplied */
-"}\n";
-
-static WGPURenderPipeline g_g2d_text_pipeline = NULL;
-static WGPUBuffer    g_g2d_text_instbuf = NULL;
-static WGPUBindGroup g_g2d_text_bind = NULL;
-static int   g_g2d_text_cap = 0;
-static float* g_g2d_text_prims = NULL;
-static int   g_g2d_text_count = 0;
-static int   g_g2d_text_capf = 0;
-static int   g_g2d_text_atlas = 0;        /* 1-based atlas handle for this frame */
-static int   g_g2d_text_bind_atlas = -1;  /* atlas the current bind group references */
-static WGPUSampler g_g2d_sampler = NULL;
-static WGPUTexture     g_g2d_atlas_tex[RAE_SDF_MAX_ATLAS];
-static WGPUTextureView g_g2d_atlas_view[RAE_SDF_MAX_ATLAS];
-
-/* Lazily upload atlas `handle` (1-based, from sdf_text.loadAtlas) as a wgpu
- * texture; cached. Returns its view, or NULL if the atlas isn't loaded. */
-static WGPUTextureView rae_g2d_atlas_texview(int handle) {
-    int i = handle - 1;
-    if (i < 0 || i >= RAE_SDF_MAX_ATLAS || !g_sdf_atlas[i]) return NULL;
-    if (g_g2d_atlas_view[i]) return g_g2d_atlas_view[i];
-    int aw = g_sdf_atlas_w[i], ah = g_sdf_atlas_h[i];
-    WGPUTextureDescriptor td; memset(&td, 0, sizeof(td));
-    td.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst;
-    td.dimension = WGPUTextureDimension_2D;
-    td.size.width = (uint32_t)aw; td.size.height = (uint32_t)ah; td.size.depthOrArrayLayers = 1;
-    td.format = WGPUTextureFormat_RGBA8Unorm;   /* MSDF data is linear, not sRGB */
-    td.mipLevelCount = 1; td.sampleCount = 1;
-    WGPUTexture tex = wgpuDeviceCreateTexture(g_wgpu_dev, &td);
-    WGPUTexelCopyTextureInfo dst; memset(&dst, 0, sizeof(dst));
-    dst.texture = tex; dst.aspect = WGPUTextureAspect_All;
-    WGPUTexelCopyBufferLayout layout; memset(&layout, 0, sizeof(layout));
-    layout.bytesPerRow = (uint32_t)(aw * 4); layout.rowsPerImage = (uint32_t)ah;
-    WGPUExtent3D ext; ext.width = (uint32_t)aw; ext.height = (uint32_t)ah; ext.depthOrArrayLayers = 1;
-    wgpuQueueWriteTexture(g_wgpu_queue, &dst, g_sdf_atlas[i], (size_t)aw * ah * 4, &layout, &ext);
-    g_g2d_atlas_tex[i] = tex;
-    g_g2d_atlas_view[i] = wgpuTextureCreateView(tex, NULL);
-    return g_g2d_atlas_view[i];
-}
-
-static void rae_g2d_init_text_pipeline(void) {
-    if (g_g2d_text_pipeline) return;
-    WGPUShaderSourceWGSL src; memset(&src, 0, sizeof(src));
-    src.chain.sType = WGPUSType_ShaderSourceWGSL;
-    src.code = rae_wgpu_sv(G2D_TEXT_WGSL);
-    WGPUShaderModuleDescriptor smd; memset(&smd, 0, sizeof(smd));
-    smd.nextInChain = &src.chain;
-    WGPUShaderModule mod = wgpuDeviceCreateShaderModule(g_wgpu_dev, &smd);
-
-    WGPUBlendState blend; memset(&blend, 0, sizeof(blend));
-    blend.color.operation = WGPUBlendOperation_Add;
-    blend.color.srcFactor = WGPUBlendFactor_One;
-    blend.color.dstFactor = WGPUBlendFactor_OneMinusSrcAlpha;
-    blend.alpha.operation = WGPUBlendOperation_Add;
-    blend.alpha.srcFactor = WGPUBlendFactor_One;
-    blend.alpha.dstFactor = WGPUBlendFactor_OneMinusSrcAlpha;
-    WGPUColorTargetState cts; memset(&cts, 0, sizeof(cts));
-    cts.format = g_g2d_fmt; cts.blend = &blend; cts.writeMask = WGPUColorWriteMask_All;
-    WGPUFragmentState fs; memset(&fs, 0, sizeof(fs));
-    fs.module = mod; fs.entryPoint = rae_wgpu_sv("fs"); fs.targetCount = 1; fs.targets = &cts;
-
-    WGPURenderPipelineDescriptor pd; memset(&pd, 0, sizeof(pd));
-    pd.layout = NULL;
-    pd.vertex.module = mod; pd.vertex.entryPoint = rae_wgpu_sv("vs");
-    pd.primitive.topology = WGPUPrimitiveTopology_TriangleList;
-    pd.primitive.frontFace = WGPUFrontFace_CCW;
-    pd.primitive.cullMode = WGPUCullMode_None;
-    pd.multisample.count = 1; pd.multisample.mask = 0xFFFFFFFFu;
-    pd.fragment = &fs;
-    g_g2d_text_pipeline = wgpuDeviceCreateRenderPipeline(g_wgpu_dev, &pd);
-    wgpuShaderModuleRelease(mod);
-
-    if (!g_g2d_sampler) {
-        WGPUSamplerDescriptor sd; memset(&sd, 0, sizeof(sd));
-        sd.addressModeU = WGPUAddressMode_ClampToEdge;
-        sd.addressModeV = WGPUAddressMode_ClampToEdge;
-        sd.addressModeW = WGPUAddressMode_ClampToEdge;
-        sd.magFilter = WGPUFilterMode_Linear;   /* MSDF requires bilinear */
-        sd.minFilter = WGPUFilterMode_Linear;
-        sd.mipmapFilter = WGPUMipmapFilterMode_Nearest;
-        sd.lodMaxClamp = 1.0f; sd.maxAnisotropy = 1;
-        g_g2d_sampler = wgpuDeviceCreateSampler(g_wgpu_dev, &sd);
-    }
-}
-
-static void rae_g2d_rebuild_text_bind(void) {
-    WGPUTextureView view = rae_g2d_atlas_texview(g_g2d_text_atlas);
-    if (!view) return;
-    WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(g_g2d_text_pipeline, 0);
-    WGPUBindGroupEntry e[4]; memset(e, 0, sizeof(e));
-    e[0].binding = 0; e[0].buffer = g_g2d_uniform; e[0].size = 32;
-    e[1].binding = 1; e[1].buffer = g_g2d_text_instbuf;
-    e[1].size = (uint64_t)g_g2d_text_cap * G2D_TEXT_FLOATS * sizeof(float);
-    e[2].binding = 2; e[2].textureView = view;
-    e[3].binding = 3; e[3].sampler = g_g2d_sampler;
-    WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
-    bgd.layout = bgl; bgd.entryCount = 4; bgd.entries = e;
-    if (g_g2d_text_bind) wgpuBindGroupRelease(g_g2d_text_bind);
-    g_g2d_text_bind = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
-    g_g2d_text_bind_atlas = g_g2d_text_atlas;
-    wgpuBindGroupLayoutRelease(bgl);
-}
-
-static void rae_g2d_ensure_text_inst(int prims) {
-    if (g_g2d_text_instbuf && prims <= g_g2d_text_cap) return;
-    int cap = g_g2d_text_cap ? g_g2d_text_cap : 256;
-    while (cap < prims) cap *= 2;
-    if (g_g2d_text_instbuf) wgpuBufferRelease(g_g2d_text_instbuf);
-    if (g_g2d_text_bind) { wgpuBindGroupRelease(g_g2d_text_bind); g_g2d_text_bind = NULL; g_g2d_text_bind_atlas = -1; }
-    WGPUBufferDescriptor bd; memset(&bd, 0, sizeof(bd));
-    bd.size = (uint64_t)cap * G2D_TEXT_FLOATS * sizeof(float);
-    bd.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
-    g_g2d_text_instbuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &bd);
-    g_g2d_text_cap = cap;
-}
-
-void rae_ext_gpu2d_drawGlyph(double sx0, double sy0, double sx1, double sy1,
-                             double u0, double v0, double u1, double v1,
-                             int64_t atlas, double pxRange, int64_t color) {
-    int need = (g_g2d_text_count + 1) * G2D_TEXT_FLOATS;
-    if (need > g_g2d_text_capf) {
-        int cap = g_g2d_text_capf ? g_g2d_text_capf : (256 * G2D_TEXT_FLOATS);
-        while (cap < need) cap *= 2;
-        g_g2d_text_prims = (float*)realloc(g_g2d_text_prims, (size_t)cap * sizeof(float));
-        g_g2d_text_capf = cap;
-    }
-    float* p = g_g2d_text_prims + g_g2d_text_count * G2D_TEXT_FLOATS;
-    p[0]=(float)sx0; p[1]=(float)sy0; p[2]=(float)(sx1-sx0); p[3]=(float)(sy1-sy0);
-    p[4]=(float)u0; p[5]=(float)v0; p[6]=(float)(u1-u0); p[7]=(float)(v1-v0);
-    /* straight (non-premultiplied) colour 0xAARRGGBB; the shader premultiplies */
-    uint32_t c = (uint32_t)color;
-    p[8]  = (float)((c >> 16) & 0xFF) / 255.0f;
-    p[9]  = (float)((c >> 8)  & 0xFF) / 255.0f;
-    p[10] = (float)( c        & 0xFF) / 255.0f;
-    p[11] = (float)((c >> 24) & 0xFF) / 255.0f;
-    p[12]=(float)pxRange; p[13]=0.0f; p[14]=0.0f; p[15]=0.0f;
-    g_g2d_text_count++;
-    g_g2d_text_atlas = (int)atlas;
-}
-
 void rae_ext_gpu2d_beginFrame(double r, double g, double b, double a) {
-    g_g2d_prim_count = 0;
-    g_g2d_text_count = 0;
     if (!g_g2d_surface) return;
     WGPUSurfaceTexture st; memset(&st, 0, sizeof(st));
     wgpuSurfaceGetCurrentTexture(g_g2d_surface, &st);
@@ -4305,104 +3787,11 @@ void rae_ext_gpu2d_beginFrame(double r, double g, double b, double a) {
     g_g2d_pass = wgpuCommandEncoderBeginRenderPass(g_g2d_enc, &rp);
 }
 
-/* Headless verification: copy the just-rendered surface texture back to a
- * mapped buffer and save it as a BMP. Called from endFrame after submit while
- * g_g2d_frame_tex is still alive (before present/release). The surface is
- * configured with CopySrc usage (rae_g2d_configure). Gated on the env var so
- * it costs nothing in normal runs. The readback row stride must be 256-aligned
- * (WebGPU copy requirement); we unpad into a tight RGBA buffer for SDL. */
-static void rae_g2d_save_screenshot(const char* path) {
-    if (!path || !g_g2d_frame_tex || !g_wgpu_dev) return;
-    int w = g_sdl_w, h = g_sdl_h;
-    if (w <= 0 || h <= 0) return;
-    uint32_t bpr = (uint32_t)w * 4u;
-    uint32_t padded = (bpr + 255u) & ~255u;            /* 256-byte row align */
-    size_t bytes = (size_t)padded * (size_t)h;
-    WGPUBufferDescriptor rbd; memset(&rbd, 0, sizeof(rbd));
-    rbd.size = bytes; rbd.usage = WGPUBufferUsage_MapRead | WGPUBufferUsage_CopyDst;
-    WGPUBuffer staging = wgpuDeviceCreateBuffer(g_wgpu_dev, &rbd);
-    if (!staging) return;
-    WGPUCommandEncoder enc = wgpuDeviceCreateCommandEncoder(g_wgpu_dev, NULL);
-    WGPUTexelCopyTextureInfo src; memset(&src, 0, sizeof(src));
-    src.texture = g_g2d_frame_tex; src.mipLevel = 0; src.aspect = WGPUTextureAspect_All;
-    WGPUTexelCopyBufferInfo dst; memset(&dst, 0, sizeof(dst));
-    dst.buffer = staging; dst.layout.offset = 0;
-    dst.layout.bytesPerRow = padded; dst.layout.rowsPerImage = (uint32_t)h;
-    WGPUExtent3D ext; ext.width = (uint32_t)w; ext.height = (uint32_t)h; ext.depthOrArrayLayers = 1;
-    wgpuCommandEncoderCopyTextureToBuffer(enc, &src, &dst, &ext);
-    WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(enc, NULL);
-    wgpuQueueSubmit(g_wgpu_queue, 1, &cmd);
-    wgpuCommandBufferRelease(cmd); wgpuCommandEncoderRelease(enc);
-    g_wgpu_map_done = 0;
-    WGPUBufferMapCallbackInfo mci; memset(&mci, 0, sizeof(mci));
-    mci.mode = WGPUCallbackMode_AllowProcessEvents; mci.callback = rae_wgpu_on_map;
-    wgpuBufferMapAsync(staging, WGPUMapMode_Read, 0, bytes, mci);
-    while (!g_wgpu_map_done) wgpuDevicePoll(g_wgpu_dev, true, NULL);
-    const unsigned char* px = (const unsigned char*)wgpuBufferGetConstMappedRange(staging, 0, bytes);
-    if (px) {
-        unsigned char* rgba = (unsigned char*)malloc((size_t)w * (size_t)h * 4u);
-        if (rgba) {
-            int swap_rb = (g_g2d_fmt == WGPUTextureFormat_BGRA8Unorm ||
-                           g_g2d_fmt == WGPUTextureFormat_BGRA8UnormSrgb);
-            for (int y = 0; y < h; y++) {
-                const unsigned char* row = px + (size_t)y * padded;
-                unsigned char* orow = rgba + (size_t)y * (size_t)w * 4u;
-                for (int x = 0; x < w; x++) {
-                    unsigned char c0 = row[x*4+0], c1 = row[x*4+1], c2 = row[x*4+2];
-                    if (swap_rb) { orow[x*4+0] = c2; orow[x*4+1] = c1; orow[x*4+2] = c0; }
-                    else        { orow[x*4+0] = c0; orow[x*4+1] = c1; orow[x*4+2] = c2; }
-                    orow[x*4+3] = 255;
-                }
-            }
-            SDL_Surface* s = SDL_CreateSurfaceFrom(w, h, SDL_PIXELFORMAT_RGBA32, rgba, w * 4);
-            if (s) { SDL_SaveBMP(s, path); SDL_DestroySurface(s); }
-            free(rgba);
-        }
-        wgpuBufferUnmap(staging);
-    }
-    wgpuBufferRelease(staging);
-}
-
 void rae_ext_gpu2d_endFrame(void) {
     if (!g_g2d_pass) return;
-    int have_text = (g_g2d_text_count > 0 && g_g2d_text_atlas > 0);
-    if (g_g2d_prim_count > 0 || have_text) {
-        /* rae_g2d_init_pipeline also creates the shared viewport uniform that
-         * both the box and text bind groups reference at binding 0. */
-        rae_g2d_init_pipeline();
-        float xf[8]; rae_g2d_compute_xform(xf);
-        wgpuQueueWriteBuffer(g_wgpu_queue, g_g2d_uniform, 0, xf, sizeof(xf));
-    }
-    if (g_g2d_prim_count > 0) {
-        rae_g2d_ensure_inst(g_g2d_prim_count);
-        if (!g_g2d_bind) rae_g2d_rebuild_bind();
-        wgpuQueueWriteBuffer(g_wgpu_queue, g_g2d_instbuf, 0, g_g2d_prims,
-                             (size_t)g_g2d_prim_count * G2D_PRIM_FLOATS * sizeof(float));
-        wgpuRenderPassEncoderSetPipeline(g_g2d_pass, g_g2d_pipeline);
-        wgpuRenderPassEncoderSetBindGroup(g_g2d_pass, 0, g_g2d_bind, 0, NULL);
-        wgpuRenderPassEncoderDraw(g_g2d_pass, 6, (uint32_t)g_g2d_prim_count, 0, 0);
-    }
-    if (g_g2d_text_count > 0 && g_g2d_text_atlas > 0) {
-        rae_g2d_init_text_pipeline();
-        rae_g2d_ensure_text_inst(g_g2d_text_count);
-        if (!g_g2d_text_bind || g_g2d_text_bind_atlas != g_g2d_text_atlas) rae_g2d_rebuild_text_bind();
-        if (g_g2d_text_bind) {
-            wgpuQueueWriteBuffer(g_wgpu_queue, g_g2d_text_instbuf, 0, g_g2d_text_prims,
-                                 (size_t)g_g2d_text_count * G2D_TEXT_FLOATS * sizeof(float));
-            wgpuRenderPassEncoderSetPipeline(g_g2d_pass, g_g2d_text_pipeline);
-            wgpuRenderPassEncoderSetBindGroup(g_g2d_pass, 0, g_g2d_text_bind, 0, NULL);
-            wgpuRenderPassEncoderDraw(g_g2d_pass, 6, (uint32_t)g_g2d_text_count, 0, 0);
-        }
-    }
     wgpuRenderPassEncoderEnd(g_g2d_pass);
     WGPUCommandBuffer cb = wgpuCommandEncoderFinish(g_g2d_enc, NULL);
     wgpuQueueSubmit(g_wgpu_queue, 1, &cb);
-    /* Headless screenshot (env-gated) before present, while the frame texture
-     * is still alive. Only in headless runs so interactive frames pay nothing. */
-    if (g_sdl_headless_ms > 0) {
-        const char* shot = getenv("RAE_GPU2D_SCREENSHOT");
-        if (shot) rae_g2d_save_screenshot(shot);
-    }
     wgpuSurfacePresent(g_g2d_surface);
     wgpuCommandBufferRelease(cb);
     wgpuRenderPassEncoderRelease(g_g2d_pass); g_g2d_pass = NULL;
@@ -4412,22 +3801,6 @@ void rae_ext_gpu2d_endFrame(void) {
 }
 
 void rae_ext_gpu2d_closeWindow(void) {
-    if (g_g2d_text_bind) { wgpuBindGroupRelease(g_g2d_text_bind); g_g2d_text_bind = NULL; g_g2d_text_bind_atlas = -1; }
-    if (g_g2d_text_instbuf) { wgpuBufferRelease(g_g2d_text_instbuf); g_g2d_text_instbuf = NULL; g_g2d_text_cap = 0; }
-    if (g_g2d_text_pipeline) { wgpuRenderPipelineRelease(g_g2d_text_pipeline); g_g2d_text_pipeline = NULL; }
-    if (g_g2d_text_prims) { free(g_g2d_text_prims); g_g2d_text_prims = NULL; g_g2d_text_capf = 0; }
-    g_g2d_text_count = 0; g_g2d_text_atlas = 0;
-    if (g_g2d_sampler) { wgpuSamplerRelease(g_g2d_sampler); g_g2d_sampler = NULL; }
-    for (int ai = 0; ai < RAE_SDF_MAX_ATLAS; ai++) {
-        if (g_g2d_atlas_view[ai]) { wgpuTextureViewRelease(g_g2d_atlas_view[ai]); g_g2d_atlas_view[ai] = NULL; }
-        if (g_g2d_atlas_tex[ai]) { wgpuTextureRelease(g_g2d_atlas_tex[ai]); g_g2d_atlas_tex[ai] = NULL; }
-    }
-    if (g_g2d_bind) { wgpuBindGroupRelease(g_g2d_bind); g_g2d_bind = NULL; }
-    if (g_g2d_instbuf) { wgpuBufferRelease(g_g2d_instbuf); g_g2d_instbuf = NULL; g_g2d_inst_cap = 0; }
-    if (g_g2d_uniform) { wgpuBufferRelease(g_g2d_uniform); g_g2d_uniform = NULL; }
-    if (g_g2d_pipeline) { wgpuRenderPipelineRelease(g_g2d_pipeline); g_g2d_pipeline = NULL; }
-    if (g_g2d_prims) { free(g_g2d_prims); g_g2d_prims = NULL; g_g2d_prim_capf = 0; }
-    g_g2d_prim_count = 0;
     if (g_g2d_surface) { wgpuSurfaceRelease(g_g2d_surface); g_g2d_surface = NULL; }
     if (g_g2d_metal_view) { SDL_Metal_DestroyView(g_g2d_metal_view); g_g2d_metal_view = NULL; }
     if (g_sdl_win) { SDL_DestroyWindow(g_sdl_win); g_sdl_win = NULL; }
@@ -4435,26 +3808,11 @@ void rae_ext_gpu2d_closeWindow(void) {
 #else  /* no SDL3: stubs so a webgpu-only build still links */
 void rae_ext_gpu2d_initWindow(int64_t w, int64_t h, rae_String t) { (void)w; (void)h; (void)t; }
 rae_Bool rae_ext_gpu2d_pollClose(void) { return 1; }
-void rae_ext_gpu2d_waitEvents(double timeoutSec) { (void)timeoutSec; }
-double rae_ext_gpu2d_pointerX(void) { return 0.0; }
-double rae_ext_gpu2d_pointerY(void) { return 0.0; }
-rae_Bool rae_ext_gpu2d_pointerDown(void) { return 0; }
-double rae_ext_gpu2d_wheelMove(void) { return 0.0; }
-double rae_ext_gpu2d_nowSeconds(void) { return 0.0; }
 int64_t rae_ext_gpu2d_windowWidth(void) { return 0; }
 int64_t rae_ext_gpu2d_windowHeight(void) { return 0; }
-void rae_ext_gpu2d_setDesignResolution(double w, double h, int64_t fit) { (void)w; (void)h; (void)fit; }
-double rae_ext_gpu2d_designWidth(void) { return 0.0; }
-double rae_ext_gpu2d_designHeight(void) { return 0.0; }
-double rae_ext_gpu2d_dpr(void) { return 1.0; }
 void rae_ext_gpu2d_beginFrame(double r, double g, double b, double a) { (void)r; (void)g; (void)b; (void)a; }
 void rae_ext_gpu2d_endFrame(void) {}
 void rae_ext_gpu2d_closeWindow(void) {}
-void rae_ext_gpu2d_drawRect(double x, double y, double w, double h, int64_t color) { (void)x; (void)y; (void)w; (void)h; (void)color; }
-void rae_ext_gpu2d_drawRoundedRect(double x, double y, double w, double h, double radius, int64_t color) { (void)x; (void)y; (void)w; (void)h; (void)radius; (void)color; }
-void rae_ext_gpu2d_drawBox(double x, double y, double w, double h, double radius, int64_t fill, double borderWidth, int64_t border) { (void)x; (void)y; (void)w; (void)h; (void)radius; (void)fill; (void)borderWidth; (void)border; }
-void rae_ext_gpu2d_drawLine(double x0, double y0, double x1, double y1, double thickness, int64_t color) { (void)x0; (void)y0; (void)x1; (void)y1; (void)thickness; (void)color; }
-void rae_ext_gpu2d_drawGlyph(double sx0, double sy0, double sx1, double sy1, double u0, double v0, double u1, double v1, int64_t atlas, double pxRange, int64_t color) { (void)sx0; (void)sy0; (void)sx1; (void)sy1; (void)u0; (void)v0; (void)u1; (void)v1; (void)atlas; (void)pxRange; (void)color; }
 #endif /* RAE_HAS_SDL3 */
 #endif /* RAE_HAS_WEBGPU */
 

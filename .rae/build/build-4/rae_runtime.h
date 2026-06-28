@@ -1,0 +1,689 @@
+#ifndef RAE_RUNTIME_H
+#define RAE_RUNTIME_H
+
+#include <stdint.h>
+#include <stdbool.h>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdarg.h>
+#include <wchar.h>
+#include <pthread.h>
+
+/* Compiled-backend task runtime (Task(T)). The Rae type Task(T) lowers to
+ * `RaeTask*` (type-erased): the worker thread stores its T result into the
+ * `result` buffer (malloc'd to sizeof(T)); `task.get()` joins and reads it.
+ * One pthread per spawned task; join happens exactly once (guarded). */
+typedef struct {
+  pthread_t thread;
+  void* result;   /* malloc'd to sizeof(T), or NULL for a void task */
+  int done;       /* set by the worker after storing the result */
+  int joined;     /* pthread_join called once */
+} RaeTask;
+
+RaeTask* rae_task_new(size_t result_size);
+void* rae_task_await(RaeTask* t);   /* join once; returns the result buffer */
+void rae_task_drop(RaeTask* t);     /* join (if not joined) + free; scope-exit drop */
+
+#ifdef __GNUC__
+#define RAE_UNUSED __attribute__((unused))
+#else
+#define RAE_UNUSED
+#endif
+
+typedef uint32_t rae_Char32;
+typedef uint32_t rae_Char;
+
+#ifdef RAE_HAS_RAYLIB
+typedef bool rae_Bool;
+#else
+typedef int8_t rae_Bool;
+#endif
+
+// Rae's owned-vs-borrowed String. `data` is the UTF-8 byte buffer
+// (we keep it NUL-terminated in heap-allocated strings for cheap
+// interop with C string APIs, but length is the source of truth).
+//
+// Ownership model (see docs/scope-exit-dealloc.md Layer 5 + the
+// String-ownership design):
+//   - is_owned == 0: borrowed / static literal. `drop` must NOT free.
+//                    capacity is meaningless (kept 0).
+//   - is_owned == 1: owned heap allocation made with malloc.
+//                    `drop` frees `data`. `capacity` is the malloc'd
+//                    size (in bytes, including the trailing NUL).
+//
+// Positional initializers like `(rae_String){p, n}` from generated
+// C still work — C99 zero-fills the remaining fields, giving
+// {data=p, len=n, capacity=0, is_owned=0}. That's the correct shape
+// for a borrowed literal, which is what those sites mean.
+typedef struct {
+  uint8_t* data;
+  int64_t len;
+  int64_t capacity;
+  int8_t is_owned;
+} rae_String;
+
+typedef enum {
+  RAE_TYPE_NONE,
+  RAE_TYPE_INT64,
+  RAE_TYPE_INT32,
+  RAE_TYPE_UINT64,
+  RAE_TYPE_UINT32,
+  RAE_TYPE_FLOAT64,
+  RAE_TYPE_FLOAT32,
+  RAE_TYPE_BOOL,
+  RAE_TYPE_STRING,
+  RAE_TYPE_CHAR,
+  RAE_TYPE_ID,
+  RAE_TYPE_KEY,
+  RAE_TYPE_LIST,
+  RAE_TYPE_BUFFER,
+  RAE_TYPE_ANY
+} RaeType;
+
+typedef struct {
+  void* data;
+  int64_t length;
+  int64_t capacity;
+} RaeList;
+
+typedef struct {
+  void* data;
+  int64_t length;
+  int64_t capacity;
+} RaeMap;
+
+typedef struct {
+  RaeType type;
+  bool is_view;
+  bool is_mod;
+  union {
+    int64_t i;
+    double f;
+    int8_t b;
+    rae_String s;
+    void* ptr;
+  } as;
+} RaeAny;
+
+void rae_flush_stdout(void);
+void* rae_ext_rae_buf_alloc(int64_t count, int64_t elem_size);
+void rae_ext_rae_buf_free(void* buf);
+void* rae_ext_rae_buf_resize(void* buf, int64_t new_count, int64_t elem_size);
+void rae_ext_rae_buf_copy(void* src, int64_t src_off, void* dst, int64_t dst_off, int64_t len, int64_t elem_size);
+void rae_ext_rae_buf_set(void* buf, int64_t index, int64_t elem_size, const void* value);
+void rae_ext_rae_buf_get(void* buf, int64_t index, int64_t elem_size, void* out_val);
+
+/* Legacy buffer primitives for VM (where everything is still boxed in RaeAny/Value) */
+void rae_ext_rae_buf_set_any(void* buf, int64_t index, RaeAny value);
+RaeAny rae_ext_rae_buf_get_any(void* buf, int64_t index);
+
+/* Legacy buffer intrinsics (single-arg alloc, value-sized elements) */
+RAE_UNUSED static void* rae_ext___buf_alloc(int64_t count) { return rae_ext_rae_buf_alloc(count, sizeof(int64_t)); }
+RAE_UNUSED static void rae_ext___buf_free(void* buf) { rae_ext_rae_buf_free(buf); }
+RAE_UNUSED static void rae_ext___buf_set_i64(void* buf, int64_t index, int64_t value) { if (buf) ((int64_t*)buf)[index] = value; }
+RAE_UNUSED static void rae_ext___buf_set_any(void* buf, int64_t index, RaeAny value) { if (buf) ((int64_t*)buf)[index] = value.as.i; }
+#define rae_ext___buf_set(buf, index, value) _Generic((value), \
+    int64_t: rae_ext___buf_set_i64, \
+    RaeAny: rae_ext___buf_set_any \
+)(buf, index, value)
+RAE_UNUSED static int64_t rae_ext___buf_get(void* buf, int64_t index) { return buf ? ((int64_t*)buf)[index] : 0; }
+RAE_UNUSED static void rae_ext___buf_copy(void* src, int64_t src_off, void* dst, int64_t dst_off, int64_t len) {
+    if (src && dst && len > 0) memmove((int64_t*)dst + dst_off, (int64_t*)src + src_off, (size_t)len * sizeof(int64_t));
+}
+
+void rae_ext_rae_log_any(RaeAny value);
+void rae_ext_rae_log_stream_any(RaeAny value);
+
+/* Mangled wrappers for primitives (used by specialized generics) */
+RAE_UNUSED static void rae_log_stream_int64_t_(int64_t v) { printf("%lld", (long long)v); }
+RAE_UNUSED static void rae_log_stream_double_(double v) { printf("%g", v); }
+RAE_UNUSED static void rae_log_stream_rae_Bool_(rae_Bool v) { printf("%s", v ? "true" : "false"); }
+RAE_UNUSED static void rae_log_stream_rae_String_(rae_String v) { printf("%.*s", (int)v.len, (char*)v.data); }
+RAE_UNUSED static void rae_log_stream_uint32_t_(uint32_t v) { printf("%lc", (wint_t)v); }
+RAE_UNUSED static void rae_log_stream_RaeAny_(RaeAny v) { rae_ext_rae_log_stream_any(v); }
+
+/* Conversion Helpers */
+RAE_UNUSED double rae_ext_rae_int_to_float(int64_t v);
+RAE_UNUSED int64_t rae_ext_rae_float_to_int(double v);
+RAE_UNUSED static RaeAny rae_any_int(int64_t v) { return (RaeAny){RAE_TYPE_INT64, false, false, {.i = v}}; }
+RAE_UNUSED static RaeAny rae_any_int32(int32_t v) { return (RaeAny){RAE_TYPE_INT32, false, false, {.i = v}}; }
+RAE_UNUSED static RaeAny rae_any_uint64(uint64_t v) { return (RaeAny){RAE_TYPE_UINT64, false, false, {.i = (int64_t)v}}; }
+RAE_UNUSED static RaeAny rae_any_int_ptr(const int64_t* v) { return (RaeAny){RAE_TYPE_INT64, true, false, {.ptr = (void*)v}}; }
+RAE_UNUSED static RaeAny rae_any_float(double v) { return (RaeAny){RAE_TYPE_FLOAT64, false, false, {.f = v}}; }
+RAE_UNUSED static RaeAny rae_any_float32(float v) { return (RaeAny){RAE_TYPE_FLOAT32, false, false, {.f = v}}; }
+RAE_UNUSED static RaeAny rae_any_float_ptr(const void* v) { return (RaeAny){RAE_TYPE_FLOAT64, true, false, {.ptr = (void*)v}}; }
+RAE_UNUSED static RaeAny rae_any_bool(int8_t v) { return (RaeAny){RAE_TYPE_BOOL, false, false, {.b = v}}; }
+RAE_UNUSED static RaeAny rae_any_char(uint32_t v) { return (RaeAny){RAE_TYPE_CHAR, false, false, {.i = (int64_t)v}}; }
+RAE_UNUSED static RaeAny rae_any_char_ptr(const uint32_t* v) { return (RaeAny){RAE_TYPE_CHAR, true, false, {.ptr = (void*)v}}; }
+RAE_UNUSED static RaeAny rae_any_string(rae_String v) { return (RaeAny){RAE_TYPE_STRING, false, false, {.s = v}}; }
+RAE_UNUSED static RaeAny rae_any_string_ptr(const rae_String* v) { return (RaeAny){RAE_TYPE_STRING, true, false, {.ptr = (void*)v}}; }
+
+RAE_UNUSED static RaeAny rae_any_none(void) { return (RaeAny){RAE_TYPE_NONE, false, false, {.i = 0}}; }
+RAE_UNUSED static RaeAny rae_any_ptr(void* v) { return (RaeAny){RAE_TYPE_BUFFER, false, false, {.ptr = v}}; }
+
+RAE_UNUSED static RaeAny rae_any_view(void* v, RaeType type) {
+    if (type == RAE_TYPE_ANY) {
+         RaeAny* res = (RaeAny*)v;
+         if (res->is_view || res->is_mod) return *res;
+         RaeAny out = *res;
+         out.is_view = true;
+         return out;
+    }
+    return (RaeAny){type, true, false, {.ptr = v}};
+}
+
+RAE_UNUSED static RaeAny rae_any_mod(void* v, RaeType type) {
+    if (type == RAE_TYPE_ANY) {
+         RaeAny* res = (RaeAny*)v;
+         if (res->is_view || res->is_mod) return *res;
+         RaeAny out = *res;
+         out.is_mod = true;
+         return out;
+    }
+    return (RaeAny){type, false, true, {.ptr = v}};
+}
+
+RAE_UNUSED static RaeAny rae_any_identity(RaeAny a) { return a; }
+RAE_UNUSED static RaeAny rae_any_identity_ptr(const RaeAny* a) { 
+    RaeAny res = *a;
+    res.is_view = true;
+    return res;
+}
+
+// Helpers for reference structs
+typedef struct { int64_t* ptr; } rae_View_Int64;
+typedef struct { int64_t* ptr; } rae_Mod_Int64;
+typedef struct { int32_t* ptr; } rae_View_Int32;
+typedef struct { int32_t* ptr; } rae_Mod_Int32;
+typedef struct { uint64_t* ptr; } rae_View_UInt64;
+typedef struct { uint64_t* ptr; } rae_Mod_UInt64;
+typedef struct { uint32_t* ptr; } rae_View_UInt32;
+typedef struct { uint32_t* ptr; } rae_Mod_UInt32;
+typedef struct { double* ptr; } rae_View_Float64;
+typedef struct { double* ptr; } rae_Mod_Float64;
+typedef struct { float* ptr; } rae_View_Float32;
+typedef struct { float* ptr; } rae_Mod_Float32;
+typedef struct { rae_Bool* ptr; } rae_View_Bool;
+typedef struct { rae_Bool* ptr; } rae_Mod_Bool;
+typedef struct { uint32_t* ptr; } rae_View_Char32;
+typedef struct { uint32_t* ptr; } rae_Mod_Char32;
+typedef struct { uint32_t* ptr; } rae_View_Char;
+typedef struct { uint32_t* ptr; } rae_Mod_Char;
+typedef struct { rae_String* ptr; } rae_View_String;
+typedef struct { rae_String* ptr; } rae_Mod_String;
+
+RAE_UNUSED static RaeAny rae_any_view_int64(rae_View_Int64 v) { return rae_any_view(v.ptr, RAE_TYPE_INT64); }
+RAE_UNUSED static RaeAny rae_any_mod_int64(rae_Mod_Int64 v) { return rae_any_mod(v.ptr, RAE_TYPE_INT64); }
+RAE_UNUSED static RaeAny rae_any_view_int32(rae_View_Int32 v) { return rae_any_view(v.ptr, RAE_TYPE_INT32); }
+RAE_UNUSED static RaeAny rae_any_mod_int32(rae_Mod_Int32 v) { return rae_any_mod(v.ptr, RAE_TYPE_INT32); }
+RAE_UNUSED static RaeAny rae_any_view_uint64(rae_View_UInt64 v) { return rae_any_view(v.ptr, RAE_TYPE_UINT64); }
+RAE_UNUSED static RaeAny rae_any_mod_uint64(rae_Mod_UInt64 v) { return rae_any_mod(v.ptr, RAE_TYPE_UINT64); }
+RAE_UNUSED static RaeAny rae_any_view_uint32(rae_View_UInt32 v) { return rae_any_view(v.ptr, RAE_TYPE_UINT32); }
+RAE_UNUSED static RaeAny rae_any_mod_uint32(rae_Mod_UInt32 v) { return rae_any_mod(v.ptr, RAE_TYPE_UINT32); }
+RAE_UNUSED static RaeAny rae_any_view_float64(rae_View_Float64 v) { return rae_any_view(v.ptr, RAE_TYPE_FLOAT64); }
+RAE_UNUSED static RaeAny rae_any_mod_float64(rae_Mod_Float64 v) { return rae_any_mod(v.ptr, RAE_TYPE_FLOAT64); }
+RAE_UNUSED static RaeAny rae_any_view_float32(rae_View_Float32 v) { return rae_any_view(v.ptr, RAE_TYPE_FLOAT32); }
+RAE_UNUSED static RaeAny rae_any_mod_float32(rae_Mod_Float32 v) { return rae_any_mod(v.ptr, RAE_TYPE_FLOAT32); }
+RAE_UNUSED static RaeAny rae_any_view_bool(rae_View_Bool v) { return rae_any_view(v.ptr, RAE_TYPE_BOOL); }
+RAE_UNUSED static RaeAny rae_any_mod_bool(rae_Mod_Bool v) { return rae_any_mod(v.ptr, RAE_TYPE_BOOL); }
+RAE_UNUSED static RaeAny rae_any_view_char32(rae_View_Char32 v) { return rae_any_view(v.ptr, RAE_TYPE_CHAR); }
+RAE_UNUSED static RaeAny rae_any_mod_char32(rae_Mod_Char32 v) { return rae_any_mod(v.ptr, RAE_TYPE_CHAR); }
+RAE_UNUSED static RaeAny rae_any_view_char(rae_View_Char v) { return rae_any_view(v.ptr, RAE_TYPE_CHAR); }
+RAE_UNUSED static RaeAny rae_any_mod_char(rae_Mod_Char v) { return rae_any_mod(v.ptr, RAE_TYPE_CHAR); }
+RAE_UNUSED static RaeAny rae_any_view_string(rae_View_String v) { return rae_any_view(v.ptr, RAE_TYPE_STRING); }
+RAE_UNUSED static RaeAny rae_any_mod_string(rae_Mod_String v) { return rae_any_mod(v.ptr, RAE_TYPE_STRING); }
+
+RAE_UNUSED static bool rae_any_is_none(RaeAny a) { return a.type == RAE_TYPE_NONE; }
+RAE_UNUSED static bool rae_any_eq(RaeAny a, RaeAny b) {
+    if (a.type != b.type) return false;
+    if (a.type == RAE_TYPE_NONE) return true;
+    if (a.type == RAE_TYPE_STRING) {
+        if (a.as.s.len != b.as.s.len) return false;
+        if (a.as.s.len == 0) return true;
+        if (!a.as.s.data || !b.as.s.data) return a.as.s.data == b.as.s.data;
+        return memcmp(a.as.s.data, b.as.s.data, a.as.s.len) == 0;
+    }
+    return a.as.i == b.as.i;
+}
+
+RAE_UNUSED static RaeAny rae_any_bool_ptr(rae_Bool* v) { return rae_any_view(v, RAE_TYPE_BOOL); }
+
+#define rae_any(X) _Generic(((X)), \
+    int64_t: rae_any_int, \
+    int32_t: rae_any_int32, \
+    uint64_t: rae_any_uint64, \
+    double: rae_any_float, \
+    float: rae_any_float32, \
+    rae_String: rae_any_string, \
+    RaeAny: rae_any_identity, \
+    RaeAny*: rae_any_identity_ptr, \
+    bool: rae_any_bool, \
+    int8_t: rae_any_bool, \
+    rae_Bool*: rae_any_bool_ptr, \
+    uint32_t: rae_any_char, \
+    uint8_t: rae_any_int, \
+    rae_View_Int64: rae_any_view_int64, \
+    rae_Mod_Int64: rae_any_mod_int64, \
+    rae_View_Int32: rae_any_view_int32, \
+    rae_Mod_Int32: rae_any_mod_int32, \
+    rae_View_UInt64: rae_any_view_uint64, \
+    rae_Mod_UInt64: rae_any_mod_uint64, \
+    rae_View_UInt32: rae_any_view_uint32, \
+    rae_Mod_UInt32: rae_any_mod_uint32, \
+    rae_View_Float64: rae_any_view_float64, \
+    rae_Mod_Float64: rae_any_mod_float64, \
+    rae_View_Float32: rae_any_view_float32, \
+    rae_Mod_Float32: rae_any_mod_float32, \
+    rae_View_Bool: rae_any_view_bool, \
+    rae_Mod_Bool: rae_any_mod_bool, \
+    rae_View_Char32: rae_any_view_char32, \
+    rae_Mod_Char32: rae_any_mod_char32, \
+    rae_View_Char: rae_any_view_char, \
+    rae_Mod_Char: rae_any_mod_char, \
+    rae_View_String: rae_any_view_string, \
+    rae_Mod_String: rae_any_mod_string, \
+    default: rae_any_ptr \
+)(X)
+
+void rae_ext_rae_log_cstr(const char* text);
+void rae_ext_rae_log_stream_cstr(const char* text);
+void rae_ext_rae_log_i64(int64_t value);
+void rae_ext_rae_log_stream_i64(int64_t value);
+void rae_ext_rae_log_bool(int8_t value);
+void rae_ext_rae_log_stream_bool(int8_t value);
+void rae_ext_rae_log_string(rae_String value);
+void rae_ext_rae_log_stream_string(rae_String value);
+void rae_ext_rae_log_char(uint32_t value);
+void rae_ext_rae_log_stream_char(uint32_t value);
+void rae_ext_rae_log_id(int64_t value);
+void rae_ext_rae_log_stream_id(int64_t value);
+void rae_ext_rae_log_key(rae_String value);
+void rae_ext_rae_log_stream_key(rae_String value);
+void rae_ext_rae_log_float(double value);
+void rae_ext_rae_log_stream_float(double value);
+
+void rae_ext_rae_log_list_fields(RaeAny* items, int64_t length, int64_t capacity);
+void rae_ext_rae_log_stream_list_fields(RaeAny* items, int64_t length, int64_t capacity);
+
+// Typed list logging: monomorphised lists store concrete element types
+// (int64_t, double, rae_String, ...), not RaeAny — we need typed iteration.
+typedef enum {
+  RAE_LIST_ELEM_ANY = 0,
+  RAE_LIST_ELEM_INT64,
+  RAE_LIST_ELEM_FLOAT64,
+  RAE_LIST_ELEM_BOOL,
+  RAE_LIST_ELEM_CHAR32,
+  RAE_LIST_ELEM_STRING,
+} RaeListElemKind;
+void rae_ext_rae_log_list_typed(void* data, int64_t length, int64_t capacity, int elem_kind);
+void rae_ext_rae_log_stream_list_typed(void* data, int64_t length, int64_t capacity, int elem_kind);
+
+rae_String rae_ext_rae_str_from_cstr(const void* s);
+rae_String rae_ext_rae_str_from_buf(const uint8_t* data, int64_t len);
+void* rae_ext_rae_str_to_cstr(rae_String s);
+// Free `s.data` only when `s.is_owned`. Safe to call on borrowed
+// strings / static literals — those are no-ops. Codegen calls this
+// from auto-emitted scope-exit drops AND from explicit `drop(s)`.
+void rae_ext_rae_str_free(rae_String s);
+
+// Deep-copy: returns an independently-owned String with freshly
+// malloc'd data. Used by codegen wherever Rae semantics call for
+// a value copy: `let b: String = a`, struct field init with a
+// String, pass-by-value into a `String` (not `view String`) param.
+rae_String rae_string_copy(rae_String src);
+
+// Rae extern alias for rae_string_copy — Rae's extern resolution
+// expects the C symbol to share the `func ...` declaration name,
+// and `rae_ext_rae_string_copy` is what lib/string.rae declares.
+// Takes a `view String` (rae_View_String in C) so the Rae signature
+// matches; derefs and forwards.
+RAE_UNUSED static inline rae_String rae_ext_rae_string_copy(rae_View_String src) {
+  if (!src.ptr) return (rae_String){NULL, 0, 0, 0};
+  return rae_string_copy(*src.ptr);
+}
+
+// Construct a borrowed/literal String. data must outlive the
+// returned struct (typically because it's a static literal or a
+// pool entry the compiler emitted). is_owned=0, capacity=0.
+RAE_UNUSED static inline rae_String rae_string_from_literal(const uint8_t* data, int64_t len) {
+  return (rae_String){(uint8_t*)data, len, 0, 0};
+}
+
+// Pointer-form drop. Existing `rae_ext_rae_str_free` takes by value
+// for legacy ABI reasons; the auto-drop pass prefers pointer form
+// so it can clear is_owned to prevent double-free if a drop site
+// gets reached twice through some path.
+void rae_ext_rae_str_free(rae_String s);
+RAE_UNUSED static inline void rae_string_drop(rae_String* s) {
+  if (!s) return;
+  if (s->is_owned && s->data) {
+    // Route through rae_ext_rae_str_free so the temp pool is kept
+    // in sync (pool_remove) and mem-stats sees the free (untag).
+    // Without this, a String dropped via cascade looks like a
+    // permanent leak under RAE_MEM_STATS=1 and a subsequent pool
+    // flush would double-free the same heap.
+    rae_ext_rae_str_free(*s);
+  }
+  s->data = NULL;
+  s->len = 0;
+  s->capacity = 0;
+  s->is_owned = 0;
+}
+
+// Borrow constructor: take an existing rae_String and return a
+// borrowed view (is_owned=0). Used by codegen to wrap identifier
+// refs that get fed into rae_ext_rae_str_interp, so the helper
+// doesn't free the user's local at the end of the interpolation.
+RAE_UNUSED static inline rae_String rae_string_borrow(rae_String s) {
+  return (rae_String){s.data, s.len, 0, 0};
+}
+
+// String temp pool — used for statement-scope cleanup of heap
+// allocations that the language semantically wants gone at the
+// end of the statement (interpolation results, intermediate concat
+// allocations created by compiler-emitted helpers).
+//
+// Codegen contract:
+//   - emit_stmt wraps each potentially-temp-producing statement
+//     with `int __m = rae_string_pool_mark(); ... rae_string_pool_flush(__m);`
+//   - rae_ext_rae_str_interp registers its result before returning
+//     (so the flush sweeps it up)
+//   - let/assign/struct-init that captures a registered result
+//     wraps with rae_string_pool_take(expr) to detach the entry
+//     and keep ownership in the captured binding.
+//
+// Sized for ~hundreds of nested temps per statement; statements
+// that genuinely exceed this still won't crash — extra registrations
+// are silently dropped (which means they'll leak, the conservative
+// failure mode).
+void rae_string_pool_register(void* ptr);
+int rae_string_pool_mark(void);
+void rae_string_pool_flush(int saved);
+void rae_string_pool_remove(void* ptr);
+int rae_string_pool_contains(void* ptr);
+RAE_UNUSED static inline rae_String rae_string_pool_take(rae_String s) {
+  rae_string_pool_remove(s.data);
+  return s;
+}
+
+// Phase 2 struct-field deep-copy with move-when-safe optimization.
+// When the source is an owned heap that is NOT in the temp pool
+// (e.g. a function parameter received via caller-side pool_take, or
+// a value already moved out of the pool), we can transfer ownership
+// to the new struct field instead of allocating a fresh heap. The
+// source is zeroed out so the original variable no longer aliases
+// the heap.
+//
+// When the source IS in the pool, the caller's surrounding flush
+// will free it — so we MUST deep-copy here to give the struct
+// field a private heap that survives the flush.
+//
+// Borrowed/literal sources (is_owned=0) and NULL sources fall
+// through to rae_string_copy, which handles them correctly.
+RAE_UNUSED static inline rae_String rae_string_move_or_copy(rae_String* src) {
+  if (src && src->is_owned && src->data &&
+      !rae_string_pool_contains(src->data)) {
+    rae_String moved = *src;
+    src->data = NULL;
+    src->len = 0;
+    src->capacity = 0;
+    src->is_owned = 0;
+    return moved;
+  }
+  return rae_string_copy(src ? *src : (rae_String){NULL, 0, 0, 0});
+}
+
+// Re-register an owned String return value into the caller's pool.
+// Used at the tail of String-returning function ret-epilogues: after
+// `pool_take(__ret_val)` detaches the result from the callee pool and
+// `pool_flush(__rae_spm_func)` sweeps callee-scope temps, this puts
+// the surviving return value back into the pool so the *caller's*
+// surrounding mark/flush can sweep it if the caller doesn't take
+// ownership (typical for nested `concat(concat(a,b), c)` chains
+// where the inner concat's heap would otherwise dangle).
+//
+// Guarded on is_owned + data so literal/borrowed/NULL returns don't
+// pollute the pool. is_owned=0 inputs (literal-backed Strings, view
+// returns) are correctly a no-op here.
+RAE_UNUSED static inline rae_String rae_string_pool_register_owned(rae_String s) {
+  if (s.is_owned && s.data) {
+    rae_string_pool_register(s.data);
+  }
+  return s;
+}
+
+// N-way interpolation/concat helper. `n` is the number of
+// rae_String parts; each is passed via varargs. Concatenates all
+// parts into a single owned heap String, frees each part whose
+// is_owned=1 (so compiler-emitted temps in the chain — e.g.
+// `rae_ext_rae_str_i64` results — get cleaned up here), and
+// registers the returned String with the temp pool for
+// statement-scope cleanup.
+rae_String rae_ext_rae_str_interp(int n, ...);
+
+rae_String rae_ext_rae_str_concat(rae_String a, rae_String b);
+rae_String rae_ext_rae_str_concat_cstr(rae_String a, rae_String b); // Legacy/helper name
+int64_t rae_ext_rae_str_len(rae_String s);
+int64_t rae_ext_rae_str_compare(rae_String a, rae_String b);
+rae_Bool rae_ext_rae_str_eq(rae_String a, rae_String b);
+int64_t rae_ext_rae_str_hash(rae_String s);
+rae_String rae_ext_rae_str_sub(rae_String s, int64_t start, int64_t len);
+rae_Bool rae_ext_rae_str_contains(rae_String s, rae_String sub);
+rae_Bool rae_ext_rae_str_starts_with(rae_String s, rae_String prefix);
+rae_Bool rae_ext_rae_str_ends_with(rae_String s, rae_String suffix);
+int64_t rae_ext_rae_str_index_of(rae_String s, rae_String sub);
+rae_String rae_ext_rae_str_trim(rae_String s);
+rae_String rae_ext_rae_str_to_lower(rae_String s);
+uint32_t rae_ext_rae_str_at(rae_String s, int64_t index);
+double rae_ext_rae_str_to_f64(rae_String s);
+int64_t rae_ext_rae_str_to_i64(rae_String s);
+
+rae_String rae_ext_rae_io_read_line(void);
+rae_Char rae_ext_rae_io_read_char(void);
+
+/* Diagnostics: dump cumulative alloc/free counters to stderr.
+ * No-op unless RAE_MEM_STATS=1 was set in the environment. Used to
+ * isolate which allocation class (string body, List/Map buffer, ...)
+ * is leaking when residual RSS growth is small but linear. */
+void rae_ext_rae_mem_stats_dump(void);
+int64_t rae_ext_rae_mem_stats_outstanding(void);
+
+void rae_ext_rae_seed(int64_t seed);
+double rae_ext_rae_random(void);
+int64_t rae_ext_rae_random_int(int64_t min, int64_t max);
+
+void rae_ext_rae_sys_exit(int64_t code);
+rae_String rae_ext_rae_sys_get_env(rae_String name);
+rae_String rae_ext_rae_sys_read_file(rae_String path);
+rae_String rae_ext_rae_sys_list_dir(rae_String folder);
+/* captureAndBlurRegion and loadCircleCroppedTexture are declared
+ * in the raylib.h-scope helper block above (RAE_HAS_RAYLIB);
+ * see implementations in rae_runtime.c. */
+void rae_ext_disableAppNap(void);
+rae_Bool rae_ext_rae_sys_write_file(rae_String path, rae_String content);
+rae_Bool rae_ext_rae_sys_rename(rae_String oldPath, rae_String newPath);
+rae_Bool rae_ext_rae_sys_delete(rae_String path);
+rae_Bool rae_ext_rae_sys_make_dir(rae_String path);
+rae_Bool rae_ext_rae_sys_exists(rae_String path);
+rae_Bool rae_ext_rae_sys_lock_file(rae_String path);
+rae_Bool rae_ext_rae_sys_unlock_file(rae_String path);
+double rae_ext_rae_sys_file_mtime(rae_String path);
+int64_t rae_ext_rae_sys_rss_kb(void);
+
+rae_String rae_ext_rae_str_i64(int64_t v);
+rae_String rae_ext_rae_str_i64_ptr(const int64_t* v);
+rae_String rae_ext_rae_str_f64(double v);
+rae_String rae_ext_rae_str_f64_ptr(const double* v);
+rae_String rae_ext_rae_str_bool(rae_Bool v);
+rae_String rae_ext_rae_str_bool_ptr(const rae_Bool* v);
+rae_String rae_ext_rae_str_char(uint32_t v);
+rae_String rae_ext_rae_str_char_ptr(const uint32_t* v);
+rae_String rae_ext_rae_str_string(rae_String s);
+rae_String rae_ext_rae_str_string_ptr(const rae_String* s);
+rae_String rae_ext_rae_str_cstr(const char* s); // Legacy/helper
+RAE_UNUSED static rae_String rae_ext_rae_str_u8(unsigned char v) { return rae_ext_rae_str_i64((int64_t)v); }
+rae_String rae_ext_rae_str_any(RaeAny v); // String-format any boxed value (incl. `none`)
+
+/* JSON helpers */
+RAE_UNUSED static rae_String rae_json_build(const char* s, int64_t len) {
+    uint8_t* copy = (uint8_t*)malloc((size_t)len + 1);
+    if (copy) { memcpy(copy, s, (size_t)len); copy[len] = 0; }
+    return (rae_String){copy, len, len + 1, 1};
+}
+int64_t rae_json_extract_int(rae_String json, const char* key);
+double rae_json_extract_float(rae_String json, const char* key);
+rae_String rae_json_extract_string(rae_String json, const char* key);
+rae_Bool rae_json_extract_bool(rae_String json, const char* key);
+rae_String rae_ext_rae_str_cstr_ptr(const char** s); // Legacy/helper
+
+int64_t rae_ext_nextTick(void);
+int64_t rae_ext_nowMs(void);
+int64_t rae_ext_nowNs(void);
+void rae_ext_rae_sleep(int64_t ms);
+rae_String rae_ext_time_formatTimestamp(int64_t epoch_ms);
+rae_String rae_ext_time_formatDate(int64_t epoch_ms);
+
+double rae_ext_math_sin(double x);
+double rae_ext_math_cos(double x);
+double rae_ext_math_tan(double x);
+double rae_ext_math_asin(double x);
+double rae_ext_math_acos(double x);
+double rae_ext_math_atan(double x);
+double rae_ext_math_atan2(double y, double x);
+double rae_ext_math_sqrt(double x);
+double rae_ext_math_pow(double b, double e);
+double rae_ext_math_exp(double x);
+double rae_ext_math_math_log(double x);
+double rae_ext_math_floor(double x);
+double rae_ext_math_ceil(double x);
+double rae_ext_math_round(double x);
+
+RaeAny rae_ext_json_get(const char* json, const char* field);
+
+RAE_UNUSED static const char* rae_str_any(RaeAny v) {
+    if (v.type == RAE_TYPE_ANY) {
+        RaeAny inner = *(RaeAny*)v.as.ptr;
+        if (v.is_view) inner.is_view = true;
+        if (v.is_mod) inner.is_mod = true;
+        return rae_str_any(inner);
+    }
+    const char* res = "";
+    switch (v.type) {
+        case RAE_TYPE_INT64: res = rae_ext_rae_str_to_cstr(rae_ext_rae_str_i64(v.as.i)); break;
+        case RAE_TYPE_INT32: res = rae_ext_rae_str_to_cstr(rae_ext_rae_str_i64(v.as.i)); break;
+        case RAE_TYPE_UINT64: res = rae_ext_rae_str_to_cstr(rae_ext_rae_str_i64(v.as.i)); break;
+        case RAE_TYPE_FLOAT64: res = rae_ext_rae_str_to_cstr(rae_ext_rae_str_f64(v.as.f)); break;
+        case RAE_TYPE_FLOAT32: res = rae_ext_rae_str_to_cstr(rae_ext_rae_str_f64(v.as.f)); break;
+        case RAE_TYPE_BOOL: res = rae_ext_rae_str_to_cstr(rae_ext_rae_str_bool(v.as.b)); break;
+        case RAE_TYPE_STRING: res = rae_ext_rae_str_to_cstr(v.as.s); break;
+        case RAE_TYPE_CHAR: res = rae_ext_rae_str_to_cstr(rae_ext_rae_str_char((uint32_t)v.as.i)); break;
+        case RAE_TYPE_NONE: res = "none"; break;
+        default: res = ""; break;
+    }
+    return res;
+}
+
+RAE_UNUSED static RaeAny rae_any_unwrap(RaeAny v) {
+    v.is_view = false;
+    v.is_mod = false;
+    return v;
+}
+
+/* Crypto function declarations */
+void rae_ext_rae_crypto_lock(RaeAny key, RaeAny nonce, RaeAny plain, int64_t plain_len, RaeAny mac, RaeAny cipher);
+int64_t rae_ext_rae_crypto_unlock(RaeAny key, RaeAny nonce, RaeAny mac, RaeAny cipher, int64_t cipher_len, RaeAny plain);
+void rae_ext_rae_crypto_argon2i(rae_String password, rae_String salt, int64_t nb_blocks, int64_t nb_iterations, RaeAny hash_buf, int64_t hash_len);
+
+/* Raylib wrapper function declarations */
+#ifdef RAE_HAS_RAYLIB
+#include <raylib.h>
+void rae_ext_initWindow(int64_t width, int64_t height, rae_String title);
+void rae_ext_setConfigFlags(int64_t flags);
+/* Streaming textures for CPU-rendered images. loadStreamTexture creates a
+ * blank RGBA8 texture; updateStreamTexture uploads `count` packed 0xRRGGBB
+ * Int pixels (expanded to opaque RGBA8). `pixels` is a Buffer(Int) (void*). */
+Texture rae_ext_loadStreamTexture(int64_t width, int64_t height);
+void rae_ext_updateStreamTexture(Texture texture, const int64_t* pixels, int64_t count);
+rae_Bool rae_ext_windowShouldClose(void);
+void rae_ext_closeWindow(void);
+void rae_ext_setTargetFPS(int64_t fps);
+/* GLFW wait-events bindings. Block the thread until an OS event arrives
+ * or the timeout (in seconds) elapses; the negative-timeout case is
+ * an unbounded wait -- prefer waitEvents() for that intent.
+ * postEmptyEvent() wakes any thread currently blocked in a wait.
+ * Must be called after initWindow(). */
+void rae_ext_waitEventsTimeout(double seconds);
+void rae_ext_waitEvents(void);
+void rae_ext_postEmptyEvent(void);
+void rae_ext_beginDrawing(void);
+void rae_ext_endDrawing(void);
+void rae_ext_clearBackground(Color color);
+rae_Bool rae_ext_isKeyDown(int64_t key);
+rae_Bool rae_ext_isKeyPressed(int64_t key);
+int64_t rae_ext_getMouseX(void);
+int64_t rae_ext_getMouseY(void);
+rae_Bool rae_ext_isMouseButtonDown(int64_t button);
+rae_Bool rae_ext_isMouseButtonPressed(int64_t button);
+rae_Bool rae_ext_isMouseButtonReleased(int64_t button);
+int64_t rae_ext_getScreenWidth(void);
+int64_t rae_ext_getScreenHeight(void);
+int64_t rae_ext_getCurrentMonitor(void);
+int64_t rae_ext_getMonitorWidth(int64_t monitor);
+int64_t rae_ext_getMonitorHeight(int64_t monitor);
+void rae_ext_setWindowSize(int64_t width, int64_t height);
+void rae_ext_setWindowPosition(int64_t x, int64_t y);
+int64_t rae_ext_getWindowPositionX(void);
+int64_t rae_ext_getWindowPositionY(void);
+double rae_ext_getTime(void);
+void rae_ext_drawCircle(double x, double y, double radius, Color color);
+void rae_ext_drawCircleGradient(int64_t x, int64_t y, double radius, Color color1, Color color2);
+void rae_ext_drawRectangle(double x, double y, double width, double height, Color color);
+void rae_ext_drawRectangleLines(double x, double y, double width, double height, Color color);
+void rae_ext_drawRectangleRounded(double x, double y, double width, double height, double roundness, int64_t segments, Color color);
+void rae_ext_drawRectangleGradientV(int64_t x, int64_t y, int64_t width, int64_t height, Color color1, Color color2);
+void rae_ext_drawRectangleGradientH(int64_t x, int64_t y, int64_t width, int64_t height, Color color1, Color color2);
+void rae_ext_drawText(rae_String text, double x, double y, double fontSize, Color color);
+void rae_ext_drawSphere(Vector3 centerPos, double radius, Color color);
+void rae_ext_drawCube(Vector3 pos, double width, double height, double length, Color color);
+void rae_ext_drawCubeWires(Vector3 pos, double width, double height, double length, Color color);
+void rae_ext_drawCylinder(Vector3 position, double radiusTop, double radiusBottom, double height, int64_t slices, Color color);
+void rae_ext_drawGrid(int64_t slices, double spacing);
+void rae_ext_beginMode3D(Camera3D camera);
+void rae_ext_endMode3D(void);
+void rae_ext_beginMode2D(Camera2D camera);
+void rae_ext_endMode2D(void);
+Color rae_ext_colorFromHSV(double hue, double saturation, double value);
+void rae_ext_takeScreenshot(rae_String fileName);
+Texture rae_ext_loadTexture(rae_String fileName);
+void rae_ext_unloadTexture(Texture texture);
+void rae_ext_drawTexture(Texture texture, double x, double y, Color tint);
+void rae_ext_drawTextureEx(Texture texture, Vector2 pos, double rotation, double scale, Color tint);
+int64_t rae_ext_measureText(rae_String text, int64_t fontSize);
+void rae_ext_loadFontInto(int64_t slot, rae_String path, int64_t fontSize);
+void rae_ext_unloadFontSlot(int64_t slot);
+rae_Bool rae_ext_isFontSlotLoaded(int64_t slot);
+void rae_ext_drawTextWithFont(int64_t slot, rae_String text, double x, double y, double fontSize, double spacing, Color color);
+#endif
+
+#define rae_ext_rae_str(X) _Generic((X), \
+    int64_t: rae_ext_rae_str_i64, \
+    int64_t*: rae_ext_rae_str_i64_ptr, \
+    const int64_t*: rae_ext_rae_str_i64_ptr, \
+    double: rae_ext_rae_str_f64, \
+    double*: rae_ext_rae_str_f64_ptr, \
+    const double*: rae_ext_rae_str_f64_ptr, \
+    float: rae_ext_rae_str_f64, \
+    bool: rae_ext_rae_str_bool, \
+    int8_t: rae_ext_rae_str_bool, \
+    rae_String: rae_ext_rae_str_string, \
+    rae_String*: rae_ext_rae_str_string_ptr, \
+    uint32_t: rae_ext_rae_str_char, \
+    uint32_t*: rae_ext_rae_str_char_ptr, \
+    unsigned char: rae_ext_rae_str_u8, \
+    RaeAny: rae_ext_rae_str_any, \
+    default: rae_ext_rae_str_string \
+)(X)
+
+#endif
