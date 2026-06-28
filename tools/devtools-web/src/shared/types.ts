@@ -65,6 +65,8 @@ export type ExampleDescriptor = {
   name: string;
   entry: string;
   files: ExampleFileDescriptor[];
+  /** Absolute filesystem path to the example's folder (for terminal `cd`). */
+  absolutePath?: string;
   description?: string;
   supportedTargets?: string[];
   defaultTargetId?: string;

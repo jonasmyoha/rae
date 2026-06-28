@@ -64,6 +64,7 @@ const saveExampleBtn = document.getElementById("save-example-btn");
 const exampleOutput = document.getElementById("example-output");
 const copyExampleOutputBtn = document.getElementById("copy-example-output-btn");
 const copyExampleErrorsBtn = document.getElementById("copy-example-errors-btn");
+const copyExamplePathBtn = document.getElementById("copy-example-path-btn");
 const testErrorsSummary = document.getElementById("test-errors-summary");
 const testErrorsLog = document.getElementById("test-errors-log");
 const copyTestErrorsBtn = document.getElementById("copy-test-errors-btn");
@@ -1054,6 +1055,15 @@ setupCopyButton(copyExampleOutputBtn, () => {
 });
 
 setupCopyButton(copyExampleErrorsBtn, () => getFilteredExampleLog());
+
+setupCopyButton(copyExamplePathBtn, () => {
+  const example = getSelectedExample();
+  const absolutePath = example?.absolutePath;
+  if (!absolutePath) {
+    throw new Error("No example selected, or its folder path is unavailable.");
+  }
+  return absolutePath;
+});
 
 setupCopyButton(copyNextStepsBtn, () => {
   if (!nextStepsList) return "No next steps available.";

@@ -167,7 +167,9 @@ export async function listExamples(
     const fullPath = path.join(root, entry.name);
 
     if (entry.isFile() && entry.name.endsWith(".rae")) {
-      examples.push(makeSingleFileExample(relativePath));
+      const single = makeSingleFileExample(relativePath);
+      single.absolutePath = fullPath;
+      examples.push(single);
       continue;
     }
 
@@ -189,6 +191,7 @@ export async function listExamples(
         metadata,
         packInfo
       );
+      descriptor.absolutePath = fullPath;
       if (normalizedActions.length) {
         descriptor.actions = normalizedActions.map((action) => ({
           id: action.id!,
