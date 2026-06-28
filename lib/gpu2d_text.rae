@@ -1,0 +1,58 @@
+# GPU text layout — draw MSDF text through the gpu2d renderer (#111).
+#
+# This is the GPU sibling of sdf_text.sdfDrawText: it does the SAME glyph
+# layout (pen advance, plane/atlas bounds, screen-px-range) but emits one
+# gpu2d.drawGlyph instance per glyph instead of CPU-blitting. Kept in a
+# SEPARATE module so lib/sdf_text.rae stays independent of gpu2d — the
+# raytracer's CPU text path must not drag in the wgpu render surface.
+#
+# Compiled-target only (pulls in gpu2d → wgpu-native + SDL3).
+import core
+import sdf_text
+import gpu2d
+
+# Draw `text` with baseline pen at (x, y) in pixels, `sizePx` tall em,
+# colour 0xAARRGGBB. Submit between gpu2d.beginFrame and gpu2d.endFrame.
+# Returns the pen x advance (end position), like a text cursor.
+func drawText(font: view SdfFont, text: view String, x: copy Float, y: copy Float, sizePx: copy Float, color: copy Int) ret Float {
+    let scale: Float = sizePx / font.emSize
+    let aw: Float = font.atlasWidth
+    let ah: Float = font.atlasHeight
+    var pen: Float = x
+    let n: Int = text.length()
+    var i: Int = 0
+    loop i < n {
+        let cp: Int = text.at(index: i).toInt()
+        let gi: Int = sdf_text.sdfGlyphIndex(font: font, cp: cp)
+        if gi >= 0 {
+            let g: SdfGlyph = rae_ext_rae_buf_get(buf: font.glyphs.data, index: gi)
+            if g.hasBounds {
+                let sx0: Float = pen + g.planeLeft * scale
+                let sx1: Float = pen + g.planeRight * scale
+                let sy0: Float = y - g.planeTop * scale
+                let sy1: Float = y - g.planeBottom * scale
+                # atlasBounds are bottom-left origin; flip V to the top-left image,
+                # then normalise into [0,1] for the GPU sampler.
+                let u0: Float = g.atlasLeft / aw
+                let u1: Float = g.atlasRight / aw
+                let v0: Float = (ah - g.atlasTop) / ah
+                let v1: Float = (ah - g.atlasBottom) / ah
+                let glyphH: Float = g.atlasTop - g.atlasBottom
+                var spr: Float = 1.0
+                if glyphH > 0.0 { spr = font.pxRange * (sy1 - sy0) / glyphH }
+                if spr < 1.0 { spr = 1.0 }
+                gpu2d.drawGlyph(sx0: sx0, sy0: sy0, sx1: sx1, sy1: sy1,
+                                u0: u0, v0: v0, u1: u1, v1: v1,
+                                atlas: font.atlas, pxRange: spr, color: color)
+            }
+            pen = pen + g.advance * scale
+        }
+        i = i + 1
+    }
+    ret pen
+}
+
+# Width of `text` in pixels at `sizePx` (delegates to sdf_text).
+func measureText(font: view SdfFont, text: view String, sizePx: copy Float) ret Float {
+    ret sdf_text.sdfMeasureText(font: font, text: text, sizePx: sizePx)
+}
