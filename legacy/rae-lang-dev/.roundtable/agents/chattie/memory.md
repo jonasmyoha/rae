@@ -1,35 +1,10 @@
-- 2026-03-19: Revalidated previous monomorphisation-lead decision against current repo state.
-- Recent git history still centers on Phase 4-6 TAST/monomorphisation work; no evidence that the implementation surface changed enough to invalidate earlier agent selection.
-- Current narrow gate still fails in the same shape:
-  - `./tools/run_tests.sh 337`: live passes, compiled fails.
-  - `TARGET=compiled ./tools/run_tests.sh 370`: fails.
-  - Failure pattern remains compiled-only: `rae_log_RaeAny_`/`rae_any` emission noise plus unspecialized or malformed generic C emission (`rae_List_rae_T...`, missing concrete container/buffer types).
-- Recommendation remains: Clo should lead the implementation pass, but keep one semantic guardrail: no `RaeAny` shortcut for generic `T`; sema-owned specialization must remain the intended end state.
-- New broad-state read from larger failure dump: the project is improving, but the remaining mess is still concentrated in compiled-mode convergence.
-- Current high-level failure buckets:
-  - Backend/runtime declaration gaps: missing `rae_ext_*`, raylib bridge types/functions, legacy `rae___buf_*`.
-  - Monomorphisation/specialization gaps: unspecialized `rae_List_rae_T...` calls, wrong generic returns (`RaeAny` where concrete type expected), broken list/map specializations.
-  - C emitter shape bugs: `expected expression`, bad pointer/value member access, bad match-expression lowering, wrong ref wrapper assignment.
-  - Type-lowering gaps: view/mod wrappers, identity/newtype lowering, string equality/toString handling.
-- Best near-term plan: do staged compiled recovery, not a giant refactor.
-  1. Fix runtime declaration / extern emission layer.
-  2. Fix generic buffer/list/map emission and specialization substitution.
-  3. Fix ref/view/value lowering.
-  4. Fix remaining semantic sugar lowering (`match` expr, string compare, identity).
-- 2026-03-20 checkpoint: state is much better; only 6 failures remain (172/174 unit, 41/45 examples per Clo memory).
-- The remaining failures now look mostly like one core issue: generic template bodies are being shared across specializations, so inner `decl_link`/call resolution sticks to the first specialization.
-- Remaining special cases:
-  - 370 / 21 / 94 / `list_native_any`: cross-specialization method resolution and wrong concrete type binding.
-  - 371: bad lowering for `const void*` / `fromCStr`.
-  - 28: undeclared `sys` suggests missed symbol binding or wrong clone/reanalysis path.
-- Best next move is no longer wide cleanup; it is targeted sema specialization repair:
-  - clone specialized bodies freshly,
-  - clear or avoid reusing stale `decl_link`/resolved-type state,
-  - rerun call resolution per specialization before C emission,
-  - then fix the 1-2 remaining emitter bugs.
-- 2026-05-16 mobile UI regression: commit `64cc50b` fixed Live by flattening UI colors and removing a rounded shape, but this regressed the MGMT cover/dark colors and bottom play-area background.
-- Current Live failure now reports `cannot assign to a read-only 'view' reference`; next fix should restore visual code first, then debug VM view assignment/root cause instead of masking UI component reads.
-- Ownership recommendation: Chattie should fix own regression; Clo can advise only if the VM lvalue/view semantics need compiler-level repair.
-- Duplicate roundtable prompt confirms the same decision: restore mobile UI visuals, then fix Live VM view/reference semantics rather than using UI workarounds.
-- Implemented handoff plan: restored `toRaylibColor`, restored `setShapeRounded` in mobile UI pills, and added VM read-only view diagnostic context (`chunk main`, bytecode offset, source line).
-- Verification: sequential `snapshot.sh` Compiled captures show real MGMT colors and rounded mini-player backgrounds; Live still deferred but now reports `examples/98_mobile_ui/main.rae:100` / bytecode offset `29559`; full `make test` passed.
+- 2026-03/05 durable compiler context:
+  - C backend recovery guardrail: no `RaeAny` shortcut for generic `T`; cloned generic bodies must not reuse stale `decl_link`/resolved-type state.
+  - Mobile UI Live failure root cause was narrowed to VM value/ref lowering: `Screen` enum auto-viewing plus `OP_SET_LOCAL` used for `let` initialization. Preferred fix: enum-aware `vm_is_value_type`, then direct local init via `OP_BIND_LOCAL`/`OP_INIT_LOCAL`.
+
+- 2026-06-23 concurrency design:
+  - Rae should use spawn-first structured concurrency: normal calls are synchronous; `spawn` returns `Task(T)`; result retrieval is explicit via `task.get()`/`join`, with no `await` keyword.
+  - Core model: `Task(T)`, `TaskGroup`, `Channel(T)`, `CancellationToken`; OS threads/thread pool for Compiled, isolated per-task VM contexts for Live unless/until VM globals are thread-safe.
+  - Round 2 refinement after peers: lean on Rae ownership modes (`view`/`mod`/`own`/`copy`) for spawn-boundary safety; treat `TaskGroup` as default, detached tasks as explicit.
+  - Safety rules: spawned work cannot capture unsafe stack refs; shared `mod` needs ownership or disjoint shards; Raylib/render calls stay main-thread only.
+  - ECS/data parallelism should use explicit `parallelFor`/component-table sharding; structural sparse-set mutation remains single-threaded unless separately designed.
