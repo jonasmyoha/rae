@@ -275,6 +275,20 @@ static void scan_number(Lexer* lexer,
                         size_t line,
                         size_t column,
                         char first_digit) {
+  // Hexadecimal integer literal: 0x / 0X followed by one or more hex digits.
+  // Emitted as a single TOK_INTEGER whose lexeme keeps the 0x prefix; the C
+  // backend passes it through verbatim and value conversions use base 0.
+  if (first_digit == '0' && (lexer_peek(lexer) == 'x' || lexer_peek(lexer) == 'X')) {
+    lexer_advance(lexer); // consume 'x'/'X'
+    if (!isxdigit((unsigned char)lexer_peek(lexer))) {
+      lexer_error(lexer, line, column, "hexadecimal literal requires at least one digit after '0x'");
+    }
+    while (isxdigit((unsigned char)lexer_peek(lexer))) {
+      lexer_advance(lexer);
+    }
+    emit_token(lexer, buffer, TOK_INTEGER, start_index, line, column);
+    return;
+  }
   if (first_digit == '0' && isdigit((unsigned char)lexer_peek(lexer))) {
     lexer_error(lexer, line, column, "integer literal cannot contain leading zeros");
   }
