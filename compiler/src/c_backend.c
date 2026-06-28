@@ -407,11 +407,11 @@ int binary_op_precedence(AstBinaryOp op) {
     // C-accurate precedence so emitted-C parens preserve the Rae AST grouping
     // (in C, `<<`/`&` bind LOOSER than `+`, the opposite of Rae's parse-time
     // precedence — only the AST structure carries the real grouping).
-    case AST_BIN_BOR: return PREC_BITWISE_OR;
-    case AST_BIN_BXOR: return PREC_BITWISE_XOR;
-    case AST_BIN_BAND: return PREC_BITWISE_AND;
-    case AST_BIN_BSL: return PREC_SHIFT;
-    case AST_BIN_BSR: return PREC_SHIFT;
+    case AST_BIN_BITOR: return PREC_BITWISE_OR;
+    case AST_BIN_BITXOR: return PREC_BITWISE_XOR;
+    case AST_BIN_BITAND: return PREC_BITWISE_AND;
+    case AST_BIN_SHL: return PREC_SHIFT;
+    case AST_BIN_SHR: return PREC_SHIFT;
   }
   return PREC_LOWEST;
 }

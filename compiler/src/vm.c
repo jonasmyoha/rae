@@ -791,11 +791,11 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         value_free(&operand);
         break;
       }
-      case OP_BAND:
-      case OP_BOR:
-      case OP_BXOR:
-      case OP_BSL:
-      case OP_BSR: {
+      case OP_BITAND:
+      case OP_BITOR:
+      case OP_BITXOR:
+      case OP_SHL:
+      case OP_SHR: {
         Value rhs = vm_pop(vm);
         Value lhs = vm_pop(vm);
         while (lhs.type == VAL_REF) { Value n = value_copy(lhs.as.ref_value.target); value_free(&lhs); lhs = n; }
@@ -810,20 +810,20 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         }
         int64_t l = lhs.as.int_value, r = rhs.as.int_value, res = 0;
         switch (instruction) {
-          case OP_BAND: res = l & r; break;
-          case OP_BOR:  res = l | r; break;
-          case OP_BXOR: res = l ^ r; break;
-          case OP_BSL:  res = l << r; break;
-          case OP_BSR:  res = l >> r; break;
+          case OP_BITAND: res = l & r; break;
+          case OP_BITOR:  res = l | r; break;
+          case OP_BITXOR: res = l ^ r; break;
+          case OP_SHL:  res = l << r; break;
+          case OP_SHR:  res = l >> r; break;
         }
         vm_push(vm, value_int(res));
         break;
       }
-      case OP_BNOT: {
+      case OP_BITNOT: {
         Value operand = vm_pop(vm);
         while (operand.type == VAL_REF) { Value n = value_copy(operand.as.ref_value.target); value_free(&operand); operand = n; }
         if (operand.type != VAL_INT) {
-          diag_error(NULL, instruction_line, 0, "bitwise not (bnot) expects an Int operand");
+          diag_error(NULL, instruction_line, 0, "bitwise not (bitnot) expects an Int operand");
           value_free(&operand);
           return VM_RUNTIME_ERROR;
         }
