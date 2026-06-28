@@ -136,6 +136,27 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         break;
     }
     case AST_EXPR_BINARY: {
+      // `x is none` / `x is not none`: emit a runtime tag check rather than
+      // `==` / `!=`, because RaeAny is a struct and struct equality is invalid
+      // C. Run this before String equality: `opt String` has base name String
+      // but is physically represented as RaeAny.
+      bool none_compare = (expr->as.binary.op == AST_BIN_IS || expr->as.binary.op == AST_BIN_NEQ) &&
+          (expr->as.binary.rhs->kind == AST_EXPR_NONE || expr->as.binary.lhs->kind == AST_EXPR_NONE);
+      bool saved_unbox = ctx->suppress_opt_unbox;
+      if (none_compare) {
+          const AstExpr* operand = (expr->as.binary.lhs->kind == AST_EXPR_NONE)
+              ? expr->as.binary.rhs : expr->as.binary.lhs;
+          ctx->suppress_opt_unbox = true;
+          // Wrap the result in (bool) so the `_Generic` rae_ext_rae_str macro
+          // matches the rae_Bool branch in interpolation contexts.
+          if (expr->as.binary.op == AST_BIN_NEQ) fprintf(out, "((bool)(!rae_any_is_none(");
+          else fprintf(out, "((bool)rae_any_is_none(");
+          emit_expr(ctx, operand, out, PREC_LOWEST, false, false);
+          if (expr->as.binary.op == AST_BIN_NEQ) fprintf(out, ")))");
+          else fprintf(out, "))");
+          ctx->suppress_opt_unbox = saved_unbox;
+          break;
+      }
       // Special case: string equality — use rae_ext_rae_str_eq instead of ==
       // (and its negation for `is not`).
       if (expr->as.binary.op == AST_BIN_IS || expr->as.binary.op == AST_BIN_NEQ) {
@@ -156,26 +177,6 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
               else fprintf(out, ")");
               break;
           }
-      }
-      // `x is none` / `x is not none`: emit a runtime tag check rather than
-      // `==` / `!=`, because RaeAny is a struct and struct equality is invalid
-      // C. The non-NONE side keeps its RaeAny value (suppress_opt_unbox).
-      bool none_compare = (expr->as.binary.op == AST_BIN_IS || expr->as.binary.op == AST_BIN_NEQ) &&
-          (expr->as.binary.rhs->kind == AST_EXPR_NONE || expr->as.binary.lhs->kind == AST_EXPR_NONE);
-      bool saved_unbox = ctx->suppress_opt_unbox;
-      if (none_compare) {
-          const AstExpr* operand = (expr->as.binary.lhs->kind == AST_EXPR_NONE)
-              ? expr->as.binary.rhs : expr->as.binary.lhs;
-          ctx->suppress_opt_unbox = true;
-          // Wrap the result in (bool) so the `_Generic` rae_ext_rae_str macro
-          // matches the rae_Bool branch in interpolation contexts.
-          if (expr->as.binary.op == AST_BIN_NEQ) fprintf(out, "((bool)(!rae_any_is_none(");
-          else fprintf(out, "((bool)rae_any_is_none(");
-          emit_expr(ctx, operand, out, PREC_LOWEST, false, false);
-          if (expr->as.binary.op == AST_BIN_NEQ) fprintf(out, ")))");
-          else fprintf(out, "))");
-          ctx->suppress_opt_unbox = saved_unbox;
-          break;
       }
       // String concatenation: `lhs + rhs` lowers to a direct runtime
       // call when both sides are String (any combination of owned
@@ -958,4 +959,3 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
   }
   return true;
 }
-

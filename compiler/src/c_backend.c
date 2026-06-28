@@ -988,7 +988,8 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
       // before Stage 3, no crash.
       AstTypeRef* elem = (AstTypeRef*)args;
       Str ebase = get_base_type_name(elem);
-      bool elem_is_string = str_eq_cstr(ebase, "String");
+      bool elem_is_opt = elem && elem->is_opt;
+      bool elem_is_string = !elem_is_opt && str_eq_cstr(ebase, "String");
       // Phase 3 follow-up: PERMISSIVE element iteration so List<T>
       // with String-only-struct T (Name, NodeId, JsonField, …) drops
       // each element's Strings. Paired with:
@@ -1005,8 +1006,10 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
       // are heap-owned by the map after a JSON parse).
       bool needs_loop = elem_needs_drop || is_smap;
       if (needs_loop) {
-        const char* elem_mangled = rae_mangle_type_specialized(ctx, NULL, NULL, elem);
-        bool elem_is_container = str_eq_cstr(ebase, "List") || str_eq_cstr(ebase, "StringMap") || str_eq_cstr(ebase, "IntMap");
+        const char* elem_mangled = elem_is_opt
+            ? "RaeAny"
+            : rae_mangle_type_specialized(ctx, NULL, NULL, elem);
+        bool elem_is_container = !elem_is_opt && (str_eq_cstr(ebase, "List") || str_eq_cstr(ebase, "StringMap") || str_eq_cstr(ebase, "IntMap"));
         // Find the per-T drop overload for nested containers.
         const AstFuncDecl* nested_drop = NULL;
         if (elem_is_container) {
@@ -1025,7 +1028,9 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
           fprintf(out, "  for (int64_t __i = 0; __i < this->length; __i++) {\n");
           fprintf(out, "    %s* __elem = (%s*)((char*)this->data + __i * sizeof(%s));\n",
                   elem_mangled, elem_mangled, elem_mangled);
-          if (elem_is_string) {
+          if (elem_is_opt) {
+            fprintf(out, "    rae_any_drop(__elem);\n");
+          } else if (elem_is_string) {
             // List(String) — call the string-free helper. is_owned
             // check inside makes borrowed entries safe.
             fprintf(out, "    rae_ext_rae_str_free(*__elem);\n");
@@ -1064,7 +1069,9 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
             fprintf(out, "      rae_ext_rae_str_free(__entry->k);\n");
           }
           if (elem_needs_drop) {
-            if (elem_is_string) {
+            if (elem_is_opt) {
+              fprintf(out, "      rae_any_drop(&__entry->value);\n");
+            } else if (elem_is_string) {
               fprintf(out, "      rae_ext_rae_str_free(__entry->value);\n");
             } else if (elem_is_container && nested_drop) {
               const AstTypeRef* inner = elem->generic_args;
@@ -1406,6 +1413,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     for (const AstTypeField* f = e->decl->as.type_decl.fields; f; f = f->next) {
       AstTypeRef* concrete = (gp && ga) ? substitute_type_ref(ctx, gp, ga, f->type) : f->type;
       if (!type_needs_cascade_drop(ctx, module, concrete, 0)) continue;
+      if (concrete && concrete->is_opt) continue;
       Str fbase = get_base_type_name(concrete);
       // String fields go through the runtime helper rae_string_drop —
       // no forward decl needed for that path.
@@ -1461,6 +1469,12 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
         const AstTypeField* f = fields[j - 1];
         AstTypeRef* concrete = (gp && ga) ? substitute_type_ref(ctx, gp, ga, f->type) : f->type;
         if (!type_needs_cascade_drop(ctx, module, concrete, 0)) continue;
+        if (concrete && concrete->is_opt) {
+          if (is_alias) continue;
+          fprintf(out, "  rae_any_drop(&this->%.*s);\n",
+                  (int)f->name.len, f->name.data);
+          continue;
+        }
         Str fbase = get_base_type_name(concrete);
         if (str_eq_cstr(fbase, "String")) {
           // Alias variant: skip — the String might be a view into the
