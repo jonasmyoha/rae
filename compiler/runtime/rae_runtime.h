@@ -82,6 +82,8 @@ typedef enum {
   RAE_TYPE_ANY
 } RaeType;
 
+typedef void (*RaeAnyDropFn)(void*);
+
 typedef struct {
   void* data;
   int64_t length;
@@ -105,6 +107,7 @@ typedef struct {
     rae_String s;
     void* ptr;
   } as;
+  RaeAnyDropFn drop;
 } RaeAny;
 
 void rae_flush_stdout(void);
@@ -147,21 +150,26 @@ RAE_UNUSED static void rae_log_stream_RaeAny_(RaeAny v) { rae_ext_rae_log_stream
 /* Conversion Helpers */
 RAE_UNUSED double rae_ext_rae_int_to_float(int64_t v);
 RAE_UNUSED int64_t rae_ext_rae_float_to_int(double v);
-RAE_UNUSED static RaeAny rae_any_int(int64_t v) { return (RaeAny){RAE_TYPE_INT64, false, false, {.i = v}}; }
-RAE_UNUSED static RaeAny rae_any_int32(int32_t v) { return (RaeAny){RAE_TYPE_INT32, false, false, {.i = v}}; }
-RAE_UNUSED static RaeAny rae_any_uint64(uint64_t v) { return (RaeAny){RAE_TYPE_UINT64, false, false, {.i = (int64_t)v}}; }
-RAE_UNUSED static RaeAny rae_any_int_ptr(const int64_t* v) { return (RaeAny){RAE_TYPE_INT64, true, false, {.ptr = (void*)v}}; }
-RAE_UNUSED static RaeAny rae_any_float(double v) { return (RaeAny){RAE_TYPE_FLOAT64, false, false, {.f = v}}; }
-RAE_UNUSED static RaeAny rae_any_float32(float v) { return (RaeAny){RAE_TYPE_FLOAT32, false, false, {.f = v}}; }
-RAE_UNUSED static RaeAny rae_any_float_ptr(const void* v) { return (RaeAny){RAE_TYPE_FLOAT64, true, false, {.ptr = (void*)v}}; }
-RAE_UNUSED static RaeAny rae_any_bool(int8_t v) { return (RaeAny){RAE_TYPE_BOOL, false, false, {.b = v}}; }
-RAE_UNUSED static RaeAny rae_any_char(uint32_t v) { return (RaeAny){RAE_TYPE_CHAR, false, false, {.i = (int64_t)v}}; }
-RAE_UNUSED static RaeAny rae_any_char_ptr(const uint32_t* v) { return (RaeAny){RAE_TYPE_CHAR, true, false, {.ptr = (void*)v}}; }
-RAE_UNUSED static RaeAny rae_any_string(rae_String v) { return (RaeAny){RAE_TYPE_STRING, false, false, {.s = v}}; }
-RAE_UNUSED static RaeAny rae_any_string_ptr(const rae_String* v) { return (RaeAny){RAE_TYPE_STRING, true, false, {.ptr = (void*)v}}; }
+RAE_UNUSED static RaeAny rae_any_int(int64_t v) { return (RaeAny){.type = RAE_TYPE_INT64, .as.i = v}; }
+RAE_UNUSED static RaeAny rae_any_int32(int32_t v) { return (RaeAny){.type = RAE_TYPE_INT32, .as.i = v}; }
+RAE_UNUSED static RaeAny rae_any_uint64(uint64_t v) { return (RaeAny){.type = RAE_TYPE_UINT64, .as.i = (int64_t)v}; }
+RAE_UNUSED static RaeAny rae_any_int_ptr(const int64_t* v) { return (RaeAny){.type = RAE_TYPE_INT64, .is_view = true, .as.ptr = (void*)v}; }
+RAE_UNUSED static RaeAny rae_any_float(double v) { return (RaeAny){.type = RAE_TYPE_FLOAT64, .as.f = v}; }
+RAE_UNUSED static RaeAny rae_any_float32(float v) { return (RaeAny){.type = RAE_TYPE_FLOAT32, .as.f = v}; }
+RAE_UNUSED static RaeAny rae_any_float_ptr(const void* v) { return (RaeAny){.type = RAE_TYPE_FLOAT64, .is_view = true, .as.ptr = (void*)v}; }
+RAE_UNUSED static RaeAny rae_any_bool(int8_t v) { return (RaeAny){.type = RAE_TYPE_BOOL, .as.b = v}; }
+RAE_UNUSED static RaeAny rae_any_char(uint32_t v) { return (RaeAny){.type = RAE_TYPE_CHAR, .as.i = (int64_t)v}; }
+RAE_UNUSED static RaeAny rae_any_char_ptr(const uint32_t* v) { return (RaeAny){.type = RAE_TYPE_CHAR, .is_view = true, .as.ptr = (void*)v}; }
+RAE_UNUSED static RaeAny rae_any_string(rae_String v) { return (RaeAny){.type = RAE_TYPE_STRING, .as.s = v}; }
+RAE_UNUSED static RaeAny rae_any_string_ptr(const rae_String* v) { return (RaeAny){.type = RAE_TYPE_STRING, .is_view = true, .as.ptr = (void*)v}; }
 
-RAE_UNUSED static RaeAny rae_any_none(void) { return (RaeAny){RAE_TYPE_NONE, false, false, {.i = 0}}; }
-RAE_UNUSED static RaeAny rae_any_ptr(void* v) { return (RaeAny){RAE_TYPE_BUFFER, false, false, {.ptr = v}}; }
+RAE_UNUSED static RaeAny rae_any_none(void) { return (RaeAny){.type = RAE_TYPE_NONE}; }
+RAE_UNUSED static RaeAny rae_any_ptr(void* v) { return (RaeAny){.type = RAE_TYPE_BUFFER, .as.ptr = v}; }
+RAE_UNUSED static RaeAny rae_any_owned_ptr(void* v, RaeAnyDropFn drop) {
+    RaeAny out = {.type = RAE_TYPE_BUFFER, .as.ptr = v};
+    out.drop = drop;
+    return out;
+}
 
 RAE_UNUSED static RaeAny rae_any_view(void* v, RaeType type) {
     if (type == RAE_TYPE_ANY) {
@@ -171,7 +179,7 @@ RAE_UNUSED static RaeAny rae_any_view(void* v, RaeType type) {
          out.is_view = true;
          return out;
     }
-    return (RaeAny){type, true, false, {.ptr = v}};
+    return (RaeAny){.type = type, .is_view = true, .as.ptr = v};
 }
 
 RAE_UNUSED static RaeAny rae_any_mod(void* v, RaeType type) {
@@ -182,7 +190,7 @@ RAE_UNUSED static RaeAny rae_any_mod(void* v, RaeType type) {
          out.is_mod = true;
          return out;
     }
-    return (RaeAny){type, false, true, {.ptr = v}};
+    return (RaeAny){.type = type, .is_mod = true, .as.ptr = v};
 }
 
 RAE_UNUSED static RaeAny rae_any_identity(RaeAny a) { return a; }
@@ -589,6 +597,30 @@ RAE_UNUSED static RaeAny rae_any_unwrap(RaeAny v) {
     v.is_view = false;
     v.is_mod = false;
     return v;
+}
+
+RAE_UNUSED static void rae_any_drop(RaeAny* v) {
+    if (!v) return;
+    if (v->is_view || v->is_mod) {
+        *v = rae_any_none();
+        return;
+    }
+    switch (v->type) {
+        case RAE_TYPE_STRING:
+            rae_string_drop(&v->as.s);
+            break;
+        case RAE_TYPE_BUFFER:
+        case RAE_TYPE_LIST:
+        case RAE_TYPE_ANY:
+            if (v->as.ptr) {
+                if (v->drop) v->drop(v->as.ptr);
+                free(v->as.ptr);
+            }
+            break;
+        default:
+            break;
+    }
+    *v = rae_any_none();
 }
 
 /* Crypto function declarations */

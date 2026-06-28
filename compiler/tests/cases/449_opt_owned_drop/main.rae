@@ -1,0 +1,89 @@
+# Regression for Compiled optional ownership cleanup.
+#
+# `opt T` is represented as RaeAny in C. Scope-exit, reassignment, and
+# struct-field drops must therefore drop the boxed payload, not dispatch by
+# get_base_type_name(opt T) and call a concrete destructor on the RaeAny slot.
+import core
+import string
+import sys
+
+func rae_ext_rae_mem_stats_outstanding() extern ret Int
+
+type Holder {
+  value: String
+}
+
+func ownedString(seed: view Int) ret String {
+  ret "owned-payload-{seed}-with-enough-bytes-to-show-leaks"
+}
+
+func maybeString(flag: view Bool, seed: view Int) ret opt String {
+  if flag {
+    ret ownedString(seed: seed)
+  }
+  ret none
+}
+
+func moveOptional(seed: view Int) ret opt String {
+  let value: opt String = maybeString(flag: true, seed: seed)
+  ret own value
+}
+
+func earlyReturnOptional(seed: view Int) ret Int {
+  let value: opt String = maybeString(flag: true, seed: seed)
+  if seed > 0 {
+    ret 1
+  }
+  ret 0
+}
+
+func maybeHolder(flag: view Bool, seed: view Int) ret opt Holder {
+  if flag {
+    ret Holder { value: ownedString(seed: seed) }
+  }
+  ret none
+}
+
+func scenario(seed: view Int) {
+  let present: opt String = maybeString(flag: true, seed: seed)
+  let absent: opt String = maybeString(flag: false, seed: seed)
+
+  var reassigned: opt String = maybeString(flag: true, seed: seed)
+  reassigned = maybeString(flag: false, seed: seed)
+  reassigned = maybeString(flag: true, seed: seed)
+
+  let moved: opt String = moveOptional(seed: seed)
+  let early: Int = earlyReturnOptional(seed: seed)
+  let holderPresent: opt Holder = maybeHolder(flag: true, seed: seed)
+  let holderAbsent: opt Holder = maybeHolder(flag: false, seed: seed)
+}
+
+func main() {
+  let present: opt String = maybeString(flag: true, seed: 1)
+  let absent: opt String = maybeString(flag: false, seed: 2)
+  let moved: opt String = moveOptional(seed: 3)
+  log("present={present is not none} absent={absent is not none} moved={moved is not none}")
+
+  var warm: Int = 0
+  loop warm < 50 {
+    scenario(seed: warm)
+    warm = warm + 1
+  }
+  let baseline: Int = rae_ext_rae_mem_stats_outstanding()
+
+  let iterations: Int = 3000
+  var i: Int = 0
+  loop i < iterations {
+    scenario(seed: i)
+    i = i + 1
+  }
+
+  let final: Int = rae_ext_rae_mem_stats_outstanding()
+  let leaked: Int = final - baseline
+  log("iterations: {iterations}")
+  if leaked < 100 {
+    log("verdict: OK")
+  } else {
+    log("verdict: LEAK outstanding={leaked}")
+  }
+}
