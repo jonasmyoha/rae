@@ -250,12 +250,16 @@ func main() {
     var fps: Float = 0.0
     var spp: Int = 1               # adaptive samples/frame (no hard cap; see below)
     let helper: String = "WASD/E-Q move   arrows/drag look   1-6 scene   P quality   F2 save PNG"
+    var saveRequested: Bool = false
 
     loop not sdl3.shouldClose() {
         var moved: Bool = false
 
-        # F2 saves the current frame as a PNG.
-        if sdl3.isKeyPressed(key: 291) { let saved: Bool = image.savePng(path: filesystem.renderPath(stem: "rae_render"), pixels: fb.data, width: width, height: height) }
+        # F2 saves the current frame as a PNG. Defer the actual save to just
+        # after the GPU download (below), while fb still holds the raw raytraced
+        # image — saving here would capture the PREVIOUS frame with the text
+        # overlay composited in.
+        if sdl3.isKeyPressed(key: 291) { saveRequested = true }
 
         # Scene switch — number keys. 1 = Scene One (lights + cube), 2 = Book
         # (~480 spheres), 3 = bunny mesh (~4968 tris via BVH), and the original
@@ -358,6 +362,13 @@ func main() {
         bufs.add(value: rt.triBuf)
         gpu.run(kernel: rt.kernel, bufs: bufs.data, bufCount: 8, gx: (width + 7) / 8, gy: (height + 7) / 8, gz: 1)
         gpu.downloadU32(buf: rt.outBuf, out: fb.data, count: width * height)
+
+        # F2 (requested above): save the raw raytraced image now, before any text
+        # overlay is composited into fb — so the PNG is the clean rendered frame.
+        if saveRequested {
+            let saved: Bool = image.savePng(path: filesystem.renderPath(stem: "rae_render"), pixels: fb.data, width: width, height: height)
+            saveRequested = false
+        }
 
         # FPS (exponential smoothing) + MTSDF text overlay, composited into fb.
         let now: Int = nowMs()
