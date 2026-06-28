@@ -318,7 +318,12 @@ void rae_mangle_module_path(const char* module_path, char* out, size_t out_cap) 
 const char* rae_mangle_function(CompilerContext* ctx, const AstFuncDecl* func) {
     if (!func) return "unknown";
     if (func->specialization_args) return rae_mangle_specialized_function(ctx, func, func->specialization_args);
-    if (find_raylib_mapping(func->name) && !is_namespaced_stdlib_extern(func)) { char* res = arena_alloc(ctx->ast_arena, func->name.len + 9); sprintf(res, "rae_ext_%.*s", (int)func->name.len, func->name.data); return res; }
+    // The raylib-name hijack (`drawText` -> `rae_ext_drawText`) is ONLY for
+    // raylib EXTERN bindings. A *defined* Rae function (has a body) that merely
+    // shares a name with a raylib builtin must NOT be mapped to the raylib C
+    // symbol — otherwise e.g. lib/gpu2d_text.rae's `drawText` collides with
+    // raylib's `rae_ext_drawText` whenever raylib is linked.
+    if (func->is_extern && find_raylib_mapping(func->name) && !is_namespaced_stdlib_extern(func)) { char* res = arena_alloc(ctx->ast_arena, func->name.len + 9); sprintf(res, "rae_ext_%.*s", (int)func->name.len, func->name.data); return res; }
 
     if (func->is_extern) {
         Str name = func->name; const char* mapped = NULL;
