@@ -1,0 +1,100 @@
+# 2D Renderer — Step 4: Coordinate system (#112).
+#
+# Visualises the three coordinate layers from
+# docs/ui-coordinate-and-responsive-layout.md:
+#
+#   design units  --(scale + offset, "fit")-->  physical px  -->  clip space
+#
+# The app authors against a fixed DESIGN canvas (1080x720 design units). The
+# renderer scales that canvas to fit the OS window (letterboxing on the short
+# axis) and applies the display's DPI — so the same coordinates look right at
+# any window size or pixel density. Resize the window: the grid + content keep
+# their proportions and the dark letterbox bars grow/shrink. The clear colour
+# is the area OUTSIDE the design canvas; the canvas fill shows the 1080x720
+# design region; the grid lines mark every 120 design units.
+#
+# Compiled-target only; needs wgpu-native + SDL3.
+#   rae run --target compiled examples/104_gpu2d_coords/main.rae
+import core
+import gpu2d
+import gpu2d_text
+import sdf_text
+
+# Thin line helpers in design units.
+func vline(x: copy Float, color: copy Int) {
+    gpu2d.drawRect(x: x, y: 0.0, w: 2.0, h: 720.0, color: color)
+}
+func hline(y: copy Float, color: copy Int) {
+    gpu2d.drawRect(x: 0.0, y: y, w: 1080.0, h: 2.0, color: color)
+}
+
+func main() ret Int {
+    gpu2d.initWindow(width: 1000, height: 640, title: "Rae 2D — coordinate system")
+    let dir: String = "examples/104_gpu2d_coords/"
+    let font: SdfFont = sdf_text.loadSdfFont(
+        jsonPath: "{dir}assets/Roboto-Regular.mtsdf.json",
+        rawAtlasPath: "{dir}assets/Roboto-Regular.mtsdf.raw")
+
+    # Author against a fixed 1080x720 design canvas, letterboxed to fit.
+    gpu2d.setDesignResolution(width: 1080.0, height: 720.0, fit: 0)
+
+    loop not gpu2d.pollClose() {
+        # Clear colour = the region OUTSIDE the design canvas (the bars).
+        gpu2d.beginFrame(r: 0.02, g: 0.02, b: 0.03, a: 1.0)
+
+        # The design canvas itself (0,0)-(1080,720).
+        gpu2d.drawRect(x: 0.0, y: 0.0, w: 1080.0, h: 720.0, color: 0xFF0E131C)
+
+        # Minor grid every 120 du, major lines every 240 du.
+        var gx: Float = 0.0
+        loop gx <= 1080.0 {
+            vline(x: gx, color: 0x22557088)
+            gx = gx + 120.0
+        }
+        var gy: Float = 0.0
+        loop gy <= 720.0 {
+            hline(y: gy, color: 0x22557088)
+            gy = gy + 120.0
+        }
+        var mx: Float = 0.0
+        loop mx <= 1080.0 {
+            vline(x: mx, color: 0x66789CC0)
+            mx = mx + 240.0
+        }
+        var my: Float = 0.0
+        loop my <= 720.0 {
+            hline(y: my, color: 0x66789CC0)
+            my = my + 240.0
+        }
+
+        # Safe-area inset (48 du) — outline only (transparent fill + border).
+        gpu2d.drawBox(x: 48.0, y: 48.0, w: 984.0, h: 624.0, radius: 16.0,
+                      fill: 0x00000000, borderWidth: 2.0, border: 0xFFFFB300)
+
+        # Centred content card (in design units; stays centred at any window size).
+        gpu2d.drawBox(x: 360.0, y: 250.0, w: 360.0, h: 220.0, radius: 20.0,
+                      fill: 0xFF1B2E4A, borderWidth: 2.0, border: 0xFF4F8DF7)
+
+        # Corner + origin markers (design-canvas extremes).
+        gpu2d.drawRect(x: 0.0,    y: 0.0,   w: 24.0, h: 24.0, color: 0xFFEF5350)  # origin (0,0)
+        gpu2d.drawRect(x: 1056.0, y: 0.0,   w: 24.0, h: 24.0, color: 0xFF42A5F5)
+        gpu2d.drawRect(x: 0.0,    y: 696.0, w: 24.0, h: 24.0, color: 0xFF42A5F5)
+        gpu2d.drawRect(x: 1056.0, y: 696.0, w: 24.0, h: 24.0, color: 0xFF42A5F5)
+
+        # Labels.
+        gpu2d_text.drawText(font: font, text: "0,0", x: 30.0, y: 44.0, sizePx: 22.0, color: 0xFFEF5350)
+        gpu2d_text.drawText(font: font, text: "Design canvas 1080 x 720 du (fit)",
+                            x: 70.0, y: 96.0, sizePx: 30.0, color: 0xFFFFFFFF)
+        gpu2d_text.drawText(font: font, text: "Window {gpu2d.windowWidth()} x {gpu2d.windowHeight()} px   DPR {gpu2d.dpr().toInt()}x",
+                            x: 70.0, y: 136.0, sizePx: 24.0, color: 0xFFAEB8CC)
+        gpu2d_text.drawText(font: font, text: "amber = 48 du safe-area inset",
+                            x: 70.0, y: 168.0, sizePx: 20.0, color: 0xFFFFB300)
+        gpu2d_text.drawText(font: font, text: "centred card stays centred at any size",
+                            x: 388.0, y: 370.0, sizePx: 20.0, color: 0xFF9FC0FF)
+
+        gpu2d.endFrame()
+    }
+
+    gpu2d.closeWindow()
+    ret 0
+}
