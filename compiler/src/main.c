@@ -2199,7 +2199,9 @@ static bool build_c_backend_output(const char* entry_file,
       // sdl3 and filesystem both define functions in the RAE_HAS_SDL3 runtime
       // block, so either one requires linking libSDL3.
       if (node->module_path && (strcmp(node->module_path, "sdl3") == 0 || strstr(node->module_path, "/sdl3.rae") || strstr(node->module_path, "\\sdl3.rae")
-                                || strcmp(node->module_path, "filesystem") == 0 || strstr(node->module_path, "/filesystem.rae") || strstr(node->module_path, "\\filesystem.rae"))) {
+                                || strcmp(node->module_path, "filesystem") == 0 || strstr(node->module_path, "/filesystem.rae") || strstr(node->module_path, "\\filesystem.rae")
+                                // gpu2d.rae owns an SDL3 window (its surface wraps the SDL Metal layer)
+                                || strcmp(node->module_path, "gpu2d") == 0 || strstr(node->module_path, "gpu2d.rae"))) {
           uses_sdl3 = true;
           break;
       }
@@ -2211,7 +2213,9 @@ static bool build_c_backend_output(const char* entry_file,
       // lib/webgpu.rae (raytracer-specific) OR lib/gpu.rae (generic compute) —
       // both need wgpu-native linked. strstr("gpu.rae") matches both filenames.
       if (node->module_path && (strcmp(node->module_path, "webgpu") == 0 || strcmp(node->module_path, "gpu") == 0 ||
-                                strstr(node->module_path, "gpu.rae"))) {
+                                strstr(node->module_path, "gpu.rae") ||
+                                // gpu2d.rae presents through wgpu-native (its own render surface)
+                                strcmp(node->module_path, "gpu2d") == 0 || strstr(node->module_path, "gpu2d.rae"))) {
           uses_webgpu = true;
           break;
       }
