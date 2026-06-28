@@ -119,16 +119,16 @@ static const char* binary_op_name(AstBinaryOp op) {
       return "and";
     case AST_BIN_OR:
       return "or";
-    case AST_BIN_BAND:
-      return "band";
-    case AST_BIN_BOR:
-      return "bor";
-    case AST_BIN_BXOR:
-      return "bxor";
-    case AST_BIN_BSL:
-      return "bsl";
-    case AST_BIN_BSR:
-      return "bsr";
+    case AST_BIN_BITAND:
+      return "bitand";
+    case AST_BIN_BITOR:
+      return "bitor";
+    case AST_BIN_BITXOR:
+      return "bitxor";
+    case AST_BIN_SHL:
+      return "shl";
+    case AST_BIN_SHR:
+      return "shr";
   }
   return "?";
 }
@@ -153,8 +153,8 @@ static const char* unary_op_name(AstUnaryOp op) {
       return "view";
     case AST_UNARY_MOD:
       return "mod";
-    case AST_UNARY_BNOT:
-      return "bnot";
+    case AST_UNARY_BITNOT:
+      return "bitnot";
   }
   return "?";
 }

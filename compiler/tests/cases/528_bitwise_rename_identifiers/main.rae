@@ -1,0 +1,30 @@
+# Proves the OLD bitwise keywords (band/bor/bxor/bnot/bsl/bsr) are now ordinary
+# identifiers, while the NEW operators (bitand/bitor/bitxor/bitnot/shl/shr) work.
+# Covers: local var, parameter, field, function name, and named-argument label.
+open core
+
+type Bits { band: Int, bor: Int }          # field names: band, bor
+
+func bxor(bnot: copy Int) ret Int {         # function named bxor, param named bnot
+  ret bnot bitxor 255                       # operator bitxor applied to identifier bnot
+}
+
+func mergeBand(accum: copy Int, band: copy Int, off: copy Int) ret Int {
+  ret (accum bitand band) bitor off         # band used as a parameter + operand
+}
+
+func main() {
+  let band: Int = 12                        # local var named band
+  let bor: Int = 10
+  let bsl: Int = 1
+  let bsr: Int = 256
+  log(band bitand bor)                      # 8
+  log(band bitor bor)                       # 14
+  let b: Bits = { band: 5, bor: 3 }    # field labels band/bor
+  log(b.band bitor b.bor)                   # 7
+  log(bxor(bnot: 0))                        # 255
+  log(mergeBand(accum: 255, band: bor, off: 0))  # 10 — named arg `band:`
+  log(bitnot band)                          # -13
+  log(bsl shl 4)                            # 16
+  log(bsr shr 2)                            # 64
+}

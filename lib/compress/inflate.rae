@@ -64,14 +64,14 @@ func decodeSymbol(r: mod BitReader, h: view Huff) ret Int {
     var index: Int = 0
     var len: Int = 1
     loop len <= 15 {
-        code = code bor getBit(this: r)
+        code = code bitor getBit(this: r)
         let count: Int = h.counts.at(index: len)
         if code - first < count {
             ret h.symbols.at(index: index + (code - first))
         }
         index = index + count
-        first = (first + count) bsl 1
-        code = code bsl 1
+        first = (first + count) shl 1
+        code = code shl 1
         len = len + 1
     }
     ret -1
@@ -212,7 +212,7 @@ func inflateRaw(data: own List(Int), len: view Int) ret List(Int) {
             alignToByte(this: r)
             let lo: Int = getByte(this: r)
             let hi: Int = getByte(this: r)
-            let blockLen: Int = lo bor (hi bsl 8)
+            let blockLen: Int = lo bitor (hi shl 8)
             getByte(this: r)        # NLEN low (complement, unchecked)
             getByte(this: r)        # NLEN high
             var c: Int = 0
