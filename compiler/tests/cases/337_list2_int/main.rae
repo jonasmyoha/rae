@@ -1,3 +1,4 @@
+open core
 # -- List2 Prototype (Int only) --
 type List2Int {
   data: Buffer(Int)
@@ -35,7 +36,7 @@ func add(this: mod List2Int, value: view Int) {
   this.length = this.length + 1
 }
 
-func get(this: view List2Int, index: view Int) ret Int {
+func getAt(this: view List2Int, index: view Int) ret Int {
   ret __buf_get(buf: this.data, index: index)
 }
 
@@ -45,8 +46,8 @@ func main() {
   add(this: list, value: 200)
   add(this: list, value: 300)
   
-  log(get(this: list, index: 0))
-  log(get(this: list, index: 1))
-  log(get(this: list, index: 2))
+  log(getAt(this: list, index: 0))
+  log(getAt(this: list, index: 1))
+  log(getAt(this: list, index: 2))
   log(list.length)
 }
