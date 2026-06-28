@@ -12,19 +12,19 @@ func crc32(data: view List(Int), len: view Int) ret Int {
     var crc: Int = 4294967295            # 0xFFFFFFFF
     var i: Int = 0
     loop i < len {
-        crc = crc bxor data.at(index: i)
+        crc = crc bitxor data.at(index: i)
         var k: Int = 0
         loop k < 8 {
-            if crc band 1 is 1 {
-                crc = (crc bsr 1) bxor 3988292384   # 0xEDB88320
+            if crc bitand 1 is 1 {
+                crc = (crc shr 1) bitxor 3988292384   # 0xEDB88320
             } else {
-                crc = crc bsr 1
+                crc = crc shr 1
             }
             k = k + 1
         }
         i = i + 1
     }
-    ret crc bxor 4294967295
+    ret crc bitxor 4294967295
 }
 
 # Adler-32 as used by the zlib stream trailer. Two rolling sums mod 65521,
@@ -38,5 +38,5 @@ func adler32(data: view List(Int), len: view Int) ret Int {
         b = (b + a) % 65521
         i = i + 1
     }
-    ret (b bsl 16) bor a
+    ret (b shl 16) bitor a
 }

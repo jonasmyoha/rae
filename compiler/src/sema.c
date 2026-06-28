@@ -997,11 +997,11 @@ static ConstResult const_eval(SymbolTable* symbols, AstExpr* e) {
                 case AST_BIN_MOD:
                     if (isf || r.i == 0) return fail; return (ConstResult){.ok=1,.numeric=1,.i=l.i % r.i};
                 // Bitwise ops fold on integer operands only (Int-only by design).
-                case AST_BIN_BAND: if (isf) return fail; return (ConstResult){.ok=1,.numeric=1,.i=l.i & r.i};
-                case AST_BIN_BOR:  if (isf) return fail; return (ConstResult){.ok=1,.numeric=1,.i=l.i | r.i};
-                case AST_BIN_BXOR: if (isf) return fail; return (ConstResult){.ok=1,.numeric=1,.i=l.i ^ r.i};
-                case AST_BIN_BSL:  if (isf) return fail; return (ConstResult){.ok=1,.numeric=1,.i=l.i << r.i};
-                case AST_BIN_BSR:  if (isf) return fail; return (ConstResult){.ok=1,.numeric=1,.i=l.i >> r.i};
+                case AST_BIN_BITAND: if (isf) return fail; return (ConstResult){.ok=1,.numeric=1,.i=l.i & r.i};
+                case AST_BIN_BITOR:  if (isf) return fail; return (ConstResult){.ok=1,.numeric=1,.i=l.i | r.i};
+                case AST_BIN_BITXOR: if (isf) return fail; return (ConstResult){.ok=1,.numeric=1,.i=l.i ^ r.i};
+                case AST_BIN_SHL:  if (isf) return fail; return (ConstResult){.ok=1,.numeric=1,.i=l.i << r.i};
+                case AST_BIN_SHR:  if (isf) return fail; return (ConstResult){.ok=1,.numeric=1,.i=l.i >> r.i};
                 default: return fail;
             }
         }

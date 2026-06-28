@@ -25,7 +25,7 @@ func getBit(this: mod BitReader) ret Int {
         ret 0
     }
     let b: Int = this.data.at(index: this.pos)
-    let v: Int = (b bsr this.bit) band 1
+    let v: Int = (b shr this.bit) bitand 1
     this.bit = this.bit + 1
     if this.bit is 8 {
         this.bit = 0
@@ -39,7 +39,7 @@ func getBits(this: mod BitReader, n: view Int) ret Int {
     var result: Int = 0
     var i: Int = 0
     loop i < n {
-        result = result bor (getBit(this: this) bsl i)
+        result = result bitor (getBit(this: this) shl i)
         i = i + 1
     }
     ret result
@@ -80,7 +80,7 @@ func newBitWriter() ret BitWriter {
 
 # Append one bit at the next (increasing) bit position of the current byte.
 func putBit(this: mod BitWriter, bit: view Int) {
-    this.acc = this.acc bor ((bit band 1) bsl this.nbits)
+    this.acc = this.acc bitor ((bit bitand 1) shl this.nbits)
     this.nbits = this.nbits + 1
     if this.nbits is 8 {
         this.out.add(value: this.acc)
@@ -94,7 +94,7 @@ func putBit(this: mod BitWriter, bit: view Int) {
 func putBits(this: mod BitWriter, value: view Int, n: view Int) {
     var i: Int = 0
     loop i < n {
-        putBit(this: this, bit: (value bsr i) band 1)
+        putBit(this: this, bit: (value shr i) bitand 1)
         i = i + 1
     }
 }
@@ -104,7 +104,7 @@ func putBits(this: mod BitWriter, value: view Int, n: view Int) {
 func putCode(this: mod BitWriter, code: view Int, len: view Int) {
     var i: Int = len - 1
     loop i >= 0 {
-        putBit(this: this, bit: (code bsr i) band 1)
+        putBit(this: this, bit: (code shr i) bitand 1)
         i = i - 1
     }
 }

@@ -240,7 +240,7 @@ typedef enum {
   PREC_COMPARE = 4,
   PREC_ADD = 5,
   PREC_MUL = 6,
-  PREC_BITWISE = 7,   // band/bor/bxor/bsl/bsr — bind tighter than arithmetic
+  PREC_BITWISE = 7,   // bitand/bitor/bitxor/shl/shr — bind tighter than arithmetic
   PREC_UNARY = 8,
   PREC_CALL = 9,
   PREC_ATOMIC = 10
@@ -261,11 +261,11 @@ static int binary_precedence(AstBinaryOp op) {
     case AST_BIN_MUL:
     case AST_BIN_DIV:
     case AST_BIN_MOD: return PREC_MUL;
-    case AST_BIN_BAND:
-    case AST_BIN_BOR:
-    case AST_BIN_BXOR:
-    case AST_BIN_BSL:
-    case AST_BIN_BSR: return PREC_BITWISE;
+    case AST_BIN_BITAND:
+    case AST_BIN_BITOR:
+    case AST_BIN_BITXOR:
+    case AST_BIN_SHL:
+    case AST_BIN_SHR: return PREC_BITWISE;
   }
   return PREC_LOWEST;
 }
@@ -285,11 +285,11 @@ static const char* binary_op_text(AstBinaryOp op) {
     case AST_BIN_NEQ: return "is not";
     case AST_BIN_AND: return "and";
     case AST_BIN_OR: return "or";
-    case AST_BIN_BAND: return "band";
-    case AST_BIN_BOR: return "bor";
-    case AST_BIN_BXOR: return "bxor";
-    case AST_BIN_BSL: return "bsl";
-    case AST_BIN_BSR: return "bsr";
+    case AST_BIN_BITAND: return "bitand";
+    case AST_BIN_BITOR: return "bitor";
+    case AST_BIN_BITXOR: return "bitxor";
+    case AST_BIN_SHL: return "shl";
+    case AST_BIN_SHR: return "shr";
   }
   return "?";
 }
@@ -305,7 +305,7 @@ static const char* unary_op_text(AstUnaryOp op) {
     case AST_UNARY_POST_DEC: return "--";
     case AST_UNARY_VIEW: return "view ";
     case AST_UNARY_MOD: return "mod ";
-    case AST_UNARY_BNOT: return "bnot ";
+    case AST_UNARY_BITNOT: return "bitnot ";
   }
   return "?";
 }

@@ -104,14 +104,14 @@ typedef enum {
    * result that owns a resource — currently a bare `spawn f()` whose
    * Task must be joined-on-drop rather than leaked. No operands. */
   OP_DROP_TOP = 0x47,
-  /* Bitwise ops on Int (Erlang-style word operators: band/bor/bxor/bsl/
-     bsr binary, bnot unary). Int-only — see project bitwise design. */
-  OP_BAND = 0x48,
-  OP_BOR  = 0x49,
-  OP_BXOR = 0x4A,
-  OP_BSL  = 0x4B,
-  OP_BSR  = 0x4C,
-  OP_BNOT = 0x4D
+  /* Bitwise ops on Int (Erlang-style word operators: bitand/bitor/bitxor/shl/
+     shr binary, bitnot unary). Int-only — see project bitwise design. */
+  OP_BITAND = 0x48,
+  OP_BITOR  = 0x49,
+  OP_BITXOR = 0x4A,
+  OP_SHL  = 0x4B,
+  OP_SHR  = 0x4C,
+  OP_BITNOT = 0x4D
 } OpCode;
 
 typedef enum {
