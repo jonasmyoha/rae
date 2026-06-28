@@ -1,0 +1,42 @@
+# GPU 2D renderer — WebGPU render path (QUEUE #109, docs/webgpu-2d-ui-renderer.md).
+#
+# Unlike lib/gpu.rae (compute → readback) this OWNS the window surface and
+# presents on the GPU: SDL3 creates the window + Metal layer, wgpu-native wraps
+# it as a surface, and frames are rendered + presented directly (no CPU
+# framebuffer round-trip). The SAME WGSL/API target the browser later
+# (WebGPU-everywhere); this is the native (wgpu-native) side.
+#
+# Tier 0 slice: window + clear-colour present. Pipelines/instanced quads (the
+# Box uber-shader, #110) and text (#111) build on top of this surface.
+#
+# Implemented in the RAE_HAS_WEBGPU + RAE_HAS_SDL3 block of
+# compiler/runtime/rae_runtime.c. Compiled-target only; needs wgpu-native + SDL3.
+# Importing this module links both. Window globals are shared with lib/sdl3.rae,
+# so sdl3 input functions (getMouseX/isKeyDown/…) work against this window.
+import core
+
+# --- Window + surface ----------------------------------------------------
+# Open a GPU-presenting window (Metal layer wrapped as a wgpu surface) and
+# configure its swapchain. Replaces sdl3.initWindow for the GPU render path —
+# do not also call sdl3.initWindow (that one attaches an SDL_Renderer that
+# fights wgpu for the drawable).
+func initWindow(width: Int, height: Int, title: String) extern
+
+# Pump the OS event queue; returns true once the user has asked to close the
+# window (or a headless time budget elapsed). Call once per frame.
+func pollClose() extern ret Bool
+
+# Drawable size in physical pixels (HiDPI-aware; may exceed the logical size).
+func windowWidth() extern ret Int
+func windowHeight() extern ret Int
+
+# Release the surface + window. The wgpu device stays cached for reuse.
+func closeWindow() extern
+
+# --- Frame ---------------------------------------------------------------
+# Acquire the next surface texture and begin a render pass that clears it to
+# the given linear RGBA colour (components 0..1). Must be paired with endFrame.
+func beginFrame(r: Float, g: Float, b: Float, a: Float) extern
+
+# Finish the render pass, submit the command buffer, and present the frame.
+func endFrame() extern
