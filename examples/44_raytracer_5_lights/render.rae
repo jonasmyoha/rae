@@ -151,13 +151,13 @@ func renderSampleBand(world: own List(Sphere), cam: own Camera, width: view Int,
 
 # Add (or, on the first sample after a reset, overwrite) a band's contribution
 # into the float accumulator at the band's row offset.
-func mergeBand(accum: mod List(Float), band: view List(Float), off: view Int, overwrite: view Bool) {
+func mergeBand(accum: mod List(Float), tile: view List(Float), off: view Int, overwrite: view Bool) {
     var i: Int = 0
-    loop i < band.length {
+    loop i < tile.length {
         if overwrite {
-            accum.set(index: off + i, value: band.get(index: i))
+            accum.set(index: off + i, value: tile.get(index: i))
         } else {
-            accum.set(index: off + i, value: accum.get(index: off + i) + band.get(index: i))
+            accum.set(index: off + i, value: accum.get(index: off + i) + tile.get(index: i))
         }
         i = i + 1
     }
