@@ -953,7 +953,7 @@ static ConstResult const_eval(SymbolTable* symbols, AstExpr* e) {
         case AST_EXPR_INTEGER: {
             char buf[64]; size_t n = e->as.integer.len < 63 ? e->as.integer.len : 63;
             memcpy(buf, e->as.integer.data, n); buf[n] = '\0';
-            return (ConstResult){ .ok = true, .numeric = true, .is_float = false, .i = strtoll(buf, NULL, 10) };
+            return (ConstResult){ .ok = true, .numeric = true, .is_float = false, .i = strtoll(buf, NULL, 0) };
         }
         case AST_EXPR_FLOAT: {
             char buf[64]; size_t n = e->as.floating.len < 63 ? e->as.floating.len : 63;
