@@ -208,6 +208,30 @@ let testTreeRefreshTimer = null;
 let knownTests = new Map();
 let examples = [];
 let exampleCategories = [];
+// Top-level example collections: the "Examples", "2D renderer" and "Raytracer"
+// nav tabs all share the SAME examples DOM + render path (DRY), differing only
+// by which example categories they show. Raytracer/2D Renderer examples are
+// tagged via their devtools.json "category"; the Examples tab shows the rest.
+const EXAMPLE_COLLECTIONS = {
+  examples: {
+    title: "Examples",
+    subtitle: "High-performance logic, interactive simulations, and system design patterns."
+  },
+  renderer2d: {
+    title: "2D renderer",
+    subtitle: "Stepping examples for the Rae WebGPU 2D / UI renderer (docs/webgpu-2d-ui-renderer.md)."
+  },
+  raytracer: {
+    title: "Raytracer",
+    subtitle: "Path tracers from One Weekend to interactive WebGPU — Live, Compiled and WASM."
+  }
+};
+// Category labels (devtools.json "category") owned by a non-default collection.
+const COLLECTION_CATEGORIES = {
+  renderer2d: ["2D Renderer"],
+  raytracer: ["Raytracer"]
+};
+let currentExampleCollection = "examples";
 let selectedExampleId = null;
 let selectedExampleFile = null;
 let activeExampleRunId = null;
@@ -1317,9 +1341,10 @@ async function loadExamples() {
     }
     const data = await response.json();
   examples = data.examples ?? [];
-  if (!selectedExampleId && examples.length) {
-    selectedExampleId = examples[0].id;
-    selectedExampleFile = examples[0].files[0]?.path ?? null;
+  const collectionExamples = examplesForCurrentCollection();
+  if (!selectedExampleId && collectionExamples.length) {
+    selectedExampleId = collectionExamples[0].id;
+    selectedExampleFile = collectionExamples[0].files[0]?.path ?? null;
     if (selectedExampleFile) {
       loadExampleSource(selectedExampleFile);
     }
@@ -1336,11 +1361,53 @@ async function loadExamples() {
   }
 }
 
+// The set of category labels claimed by a non-default collection.
+const SPECIAL_EXAMPLE_CATEGORIES = new Set(
+  Object.values(COLLECTION_CATEGORIES).reduce((acc, arr) => acc.concat(arr), [])
+);
+
+function exampleBelongsToCollection(example, collection) {
+  const cats = COLLECTION_CATEGORIES[collection];
+  if (cats) return cats.includes(example.category);
+  // Default "examples" collection: everything NOT owned by another collection.
+  return !SPECIAL_EXAMPLE_CATEGORIES.has(example.category);
+}
+
+function examplesForCurrentCollection() {
+  return examples.filter((ex) => exampleBelongsToCollection(ex, currentExampleCollection));
+}
+
+// Apply a collection (nav tab): update the hero text, re-select a visible
+// example if the current one is filtered out, then re-render.
+function applyExampleCollection(collection) {
+  currentExampleCollection = EXAMPLE_COLLECTIONS[collection] ? collection : "examples";
+  const meta = EXAMPLE_COLLECTIONS[currentExampleCollection];
+  const titleEl = document.getElementById("examples-hero-title");
+  const subtitleEl = document.getElementById("examples-hero-subtitle");
+  if (titleEl) titleEl.textContent = meta.title;
+  if (subtitleEl) subtitleEl.textContent = meta.subtitle;
+
+  const visible = examplesForCurrentCollection();
+  const selectionVisible = visible.some((ex) => ex.id === selectedExampleId);
+  if (!selectionVisible) {
+    const first = visible[0] ?? null;
+    if (exampleRunActive) stopExampleRun();
+    selectedExampleId = first ? first.id : null;
+    selectedExampleFile = first ? (first.files[0]?.path ?? null) : null;
+    resetExampleArtifacts();
+    if (selectedExampleFile) loadExampleSource(selectedExampleFile);
+  }
+  renderExampleList();
+  renderExampleDetail();
+  updateExampleButtons();
+}
+
 function renderExampleList() {
   if (!exampleListEl) return;
   exampleListEl.innerHTML = "";
-  if (!examples.length) {
-    exampleListEl.innerHTML = `<p class="test-list-empty">No examples found.</p>`;
+  const visibleExamples = examplesForCurrentCollection();
+  if (!visibleExamples.length) {
+    exampleListEl.innerHTML = `<p class="test-list-empty">No examples in this collection yet.</p>`;
     return;
   }
 
@@ -1356,7 +1423,7 @@ function renderExampleList() {
 
   const groups = new Map();
 
-  examples.forEach(ex => {
+  visibleExamples.forEach(ex => {
     let category = ex.category;
     
     if (!category) {
@@ -3200,15 +3267,25 @@ function drawMetricChart(canvas, entries, valueKey, emptyEl) {
 
 function setActiveView(targetView) {
   const resolvedView = targetView ?? "compiler";
+  // The example-collection tabs (examples / renderer2d / raytracer) all render
+  // into the single shared "examples" view container (DRY).
+  const isCollection = Object.prototype.hasOwnProperty.call(EXAMPLE_COLLECTIONS, resolvedView);
+  const containerView = isCollection ? "examples" : resolvedView;
   viewToggleButtons.forEach((button) => {
     const isActive = button.dataset.viewTarget === resolvedView;
     button.classList.toggle("is-active", isActive);
     button.setAttribute("aria-selected", String(isActive));
   });
   appViews.forEach((viewEl) => {
-    const isActive = viewEl.dataset.view === resolvedView;
+    const isActive = viewEl.dataset.view === containerView;
     viewEl.classList.toggle("is-active", isActive);
   });
+  if (isCollection) {
+    applyExampleCollection(resolvedView);
+    startExamplesBackgroundAnimation();
+    return;
+  }
+  stopExamplesBackgroundAnimation();
   if (resolvedView === "statistics") {
     if (!statsViewLoaded) {
       statsViewLoaded = true;
@@ -3218,12 +3295,6 @@ function setActiveView(targetView) {
     }
   } else if (resolvedView === "why") {
     renderWhyExamples();
-  } else if (resolvedView === "examples") {
-    startExamplesBackgroundAnimation();
-  }
-
-  if (resolvedView !== "examples") {
-    stopExamplesBackgroundAnimation();
   }
 }
 
