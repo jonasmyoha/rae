@@ -1473,8 +1473,10 @@ function renderExampleList() {
       const displayName = formatExampleName(example.name);
       const targetSummary = describeExampleTargets(example);
       const hiddenBadge = example.hidden ? ' <span class="badge pending" style="font-size: 0.6rem; vertical-align: middle;">HIDDEN</span>' : '';
-      
-      button.innerHTML = `<h4>${displayName}${hiddenBadge}</h4><p>${targetSummary}</p>`;
+      const num = exampleNumber(example);
+      const numBadge = num ? `<span class="example-num">${num}</span>` : '';
+
+      button.innerHTML = `<h4>${numBadge}${displayName}${hiddenBadge}</h4><p>${targetSummary}</p>`;
       
       button.addEventListener("click", () => {
         if (exampleRunActive) stopExampleRun();
@@ -1592,7 +1594,8 @@ function renderExampleDetail() {
     return;
   }
 
-  exampleTitle.textContent = formatExampleName(example.name);
+  const detailNum = exampleNumber(example);
+  exampleTitle.textContent = (detailNum ? `${detailNum} · ` : "") + formatExampleName(example.name);
   const details = [`Entry: ${example.entry}`];
   const targetSummary = describeExampleTargets(example);
   if (targetSummary) {
@@ -3929,6 +3932,13 @@ function formatExampleName(rawName) {
   const stripped = rawName.replace(/^\d+[_]/, "").replace(/_/g, " ");
   if (stripped.length === 0) return stripped;
   return stripped.charAt(0).toUpperCase() + stripped.slice(1);
+}
+// The example's number = the numeric prefix of its folder name / id
+// (e.g. "53_raytracer_webgpu_text" -> "53"). Shown on titles so examples are
+// easy to refer to. Returns null when the id has no numeric prefix.
+function exampleNumber(example) {
+  const m = (example && typeof example.id === "string") ? example.id.match(/^(\d+)/) : null;
+  return m ? m[1] : null;
 }
 function setBuildStatus(label, modifierClass, targetLabel) {
   buildStatusChip.textContent = targetLabel ? `${label} · ${targetLabel}` : label;
