@@ -3689,6 +3689,9 @@ static WGPUTextureFormat g_g2d_fmt = WGPUTextureFormat_BGRA8Unorm;
  * opts into a fixed virtual canvas fitted into the window (DPI-independent). */
 static double g_g2d_design_w = 0.0, g_g2d_design_h = 0.0;
 static int    g_g2d_fit_mode = 0;   /* 0=fit/contain, 1=fill/cover, 2=stretch */
+/* Per-frame mouse-wheel accumulator (reset + summed in pollClose, read by
+ * gpu2d.wheelMove). Mirrors raylib's GetMouseWheelMove per-frame semantics. */
+static float  g_g2d_wheel = 0.0f;
 
 /* Fill `out` (8 floats = 2*vec4): (physW,physH,scaleX,scaleY),(offX,offY,0,0). */
 static void rae_g2d_compute_xform(float* out) {
@@ -3720,7 +3723,9 @@ static void rae_g2d_configure(int pw, int ph) {
     WGPUSurfaceConfiguration cfg; memset(&cfg, 0, sizeof(cfg));
     cfg.device = g_wgpu_dev;
     cfg.format = g_g2d_fmt;
-    cfg.usage = WGPUTextureUsage_RenderAttachment;
+    /* CopySrc so headless verification (RAE_GPU2D_SCREENSHOT) can read the
+     * presented frame back off the surface texture. */
+    cfg.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc;
     cfg.width = (uint32_t)pw;
     cfg.height = (uint32_t)ph;
     cfg.presentMode = WGPUPresentMode_Fifo;
@@ -3770,19 +3775,99 @@ void rae_ext_gpu2d_initWindow(int64_t width, int64_t height, rae_String title) {
     if (hm) g_sdl_headless_ms = (int64_t)atoll(hm);
 }
 
+/* Pump the OS event queue once per frame AND record input state into the
+ * shared SDL3 input arrays (g_sdl_mouse / g_sdl_keydown / g_sdl_pressed) plus
+ * the wheel accumulator, so gpu2d apps get working mouse/keyboard/wheel input.
+ * (The bare SDL3 backend records this in sdl3_shouldClose, which the gpu2d
+ * window path never calls — hence the duplication here.) Edge state
+ * (g_sdl_pressed) and the wheel delta are reset each call so they describe
+ * only this frame. */
 rae_Bool rae_ext_gpu2d_pollClose(void) {
+    memset(g_sdl_pressed, 0, sizeof(g_sdl_pressed));
+    g_g2d_wheel = 0.0f;
     SDL_Event e;
+    rae_Bool quit = 0;
     while (SDL_PollEvent(&e)) {
-        if (e.type == SDL_EVENT_QUIT) return 1;
-        if (e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) return 1;
-        if (e.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED || e.type == SDL_EVENT_WINDOW_RESIZED) {
-            int pw = 0, ph = 0; SDL_GetWindowSizeInPixels(g_sdl_win, &pw, &ph);
-            rae_g2d_configure(pw, ph);
+        switch (e.type) {
+            case SDL_EVENT_QUIT: quit = 1; break;
+            case SDL_EVENT_WINDOW_CLOSE_REQUESTED: quit = 1; break;
+            case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+            case SDL_EVENT_WINDOW_RESIZED: {
+                int pw = 0, ph = 0; SDL_GetWindowSizeInPixels(g_sdl_win, &pw, &ph);
+                rae_g2d_configure(pw, ph);
+                break;
+            }
+            case SDL_EVENT_KEY_DOWN:
+                if (e.key.key == SDLK_ESCAPE) quit = 1;
+                if (e.key.scancode < SDL_SCANCODE_COUNT) {
+                    g_sdl_keydown[e.key.scancode] = 1;
+                    if (!e.key.repeat) g_sdl_pressed[e.key.scancode] = 1;  /* edge */
+                }
+                break;
+            case SDL_EVENT_KEY_UP:
+                if (e.key.scancode < SDL_SCANCODE_COUNT) g_sdl_keydown[e.key.scancode] = 0;
+                break;
+            case SDL_EVENT_MOUSE_BUTTON_DOWN:
+                if (e.button.button < 8) g_sdl_mouse[e.button.button] = 1;
+                if (!g_sdl_mouse_captured) { SDL_CaptureMouse(true); g_sdl_mouse_captured = true; }
+                break;
+            case SDL_EVENT_MOUSE_BUTTON_UP: {
+                if (e.button.button < 8) g_sdl_mouse[e.button.button] = 0;
+                bool any = false;
+                for (int b = 0; b < 8; b++) if (g_sdl_mouse[b]) any = true;
+                if (!any && g_sdl_mouse_captured) { SDL_CaptureMouse(false); g_sdl_mouse_captured = false; }
+                break;
+            }
+            case SDL_EVENT_MOUSE_WHEEL:
+                g_g2d_wheel += e.wheel.y;
+                break;
+            case SDL_EVENT_WINDOW_FOCUS_LOST:
+                memset(g_sdl_keydown, 0, sizeof(g_sdl_keydown));
+                memset(g_sdl_mouse, 0, sizeof(g_sdl_mouse));
+                if (g_sdl_mouse_captured) { SDL_CaptureMouse(false); g_sdl_mouse_captured = false; }
+                break;
+            default: break;
         }
     }
+    if (quit) return 1;
     if (g_sdl_headless_ms > 0 && (rae_ext_nowMs() - g_sdl_start_ms) >= g_sdl_headless_ms) return 1;
     return 0;
 }
+
+/* Block up to timeoutSec for the next OS event (or wake immediately if one is
+ * already queued), leaving events in the queue for the following pollClose to
+ * drain. Passing NULL means SDL doesn't dequeue the event. This is the idle
+ * half of the hybrid loop: busy-render while animating, park here when idle so
+ * the app sits at ~0% CPU until input arrives. timeoutSec <= 0 returns at once. */
+void rae_ext_gpu2d_waitEvents(double timeoutSec) {
+    int ms = (int)(timeoutSec * 1000.0);
+    if (ms < 0) ms = 0;
+    SDL_WaitEventTimeout(NULL, ms);
+}
+
+/* Pointer position in DESIGN units (the same coordinate space drawRect etc.
+ * take), so hit-testing matches what was drawn. SDL reports logical window
+ * points; we scale to physical px (× dpr) then invert the design fit transform
+ * (subtract the letterbox offset, divide by scale). */
+static void rae_g2d_pointer_design(double* dx, double* dy) {
+    float mx = 0, my = 0; SDL_GetMouseState(&mx, &my);
+    int lw = 0, lh = 0; if (g_sdl_win) SDL_GetWindowSize(g_sdl_win, &lw, &lh);
+    double sclx = (lw > 0) ? (double)g_sdl_w / (double)lw : 1.0;
+    double scly = (lh > 0) ? (double)g_sdl_h / (double)lh : 1.0;
+    float xf[8]; rae_g2d_compute_xform(xf);
+    double physX = (double)mx * sclx, physY = (double)my * scly;
+    *dx = (xf[2] != 0.0f) ? (physX - xf[4]) / xf[2] : physX;
+    *dy = (xf[3] != 0.0f) ? (physY - xf[5]) / xf[3] : physY;
+}
+double rae_ext_gpu2d_pointerX(void) { double x, y; rae_g2d_pointer_design(&x, &y); return x; }
+double rae_ext_gpu2d_pointerY(void) { double x, y; rae_g2d_pointer_design(&x, &y); return y; }
+/* Left mouse button held this frame (button index 1 in SDL). */
+rae_Bool rae_ext_gpu2d_pointerDown(void) { return g_sdl_mouse[SDL_BUTTON_LEFT] != 0; }
+/* Per-frame wheel delta (positive = wheel/scroll up). */
+double rae_ext_gpu2d_wheelMove(void) { return (double)g_g2d_wheel; }
+/* Monotonic wall-clock seconds since process start — for scroll timing without
+ * pulling in the raylib-backed getTime. */
+double rae_ext_gpu2d_nowSeconds(void) { return (double)rae_ext_nowMs() / 1000.0; }
 
 int64_t rae_ext_gpu2d_windowWidth(void) { return g_sdl_w; }
 int64_t rae_ext_gpu2d_windowHeight(void) { return g_sdl_h; }
@@ -4220,6 +4305,64 @@ void rae_ext_gpu2d_beginFrame(double r, double g, double b, double a) {
     g_g2d_pass = wgpuCommandEncoderBeginRenderPass(g_g2d_enc, &rp);
 }
 
+/* Headless verification: copy the just-rendered surface texture back to a
+ * mapped buffer and save it as a BMP. Called from endFrame after submit while
+ * g_g2d_frame_tex is still alive (before present/release). The surface is
+ * configured with CopySrc usage (rae_g2d_configure). Gated on the env var so
+ * it costs nothing in normal runs. The readback row stride must be 256-aligned
+ * (WebGPU copy requirement); we unpad into a tight RGBA buffer for SDL. */
+static void rae_g2d_save_screenshot(const char* path) {
+    if (!path || !g_g2d_frame_tex || !g_wgpu_dev) return;
+    int w = g_sdl_w, h = g_sdl_h;
+    if (w <= 0 || h <= 0) return;
+    uint32_t bpr = (uint32_t)w * 4u;
+    uint32_t padded = (bpr + 255u) & ~255u;            /* 256-byte row align */
+    size_t bytes = (size_t)padded * (size_t)h;
+    WGPUBufferDescriptor rbd; memset(&rbd, 0, sizeof(rbd));
+    rbd.size = bytes; rbd.usage = WGPUBufferUsage_MapRead | WGPUBufferUsage_CopyDst;
+    WGPUBuffer staging = wgpuDeviceCreateBuffer(g_wgpu_dev, &rbd);
+    if (!staging) return;
+    WGPUCommandEncoder enc = wgpuDeviceCreateCommandEncoder(g_wgpu_dev, NULL);
+    WGPUTexelCopyTextureInfo src; memset(&src, 0, sizeof(src));
+    src.texture = g_g2d_frame_tex; src.mipLevel = 0; src.aspect = WGPUTextureAspect_All;
+    WGPUTexelCopyBufferInfo dst; memset(&dst, 0, sizeof(dst));
+    dst.buffer = staging; dst.layout.offset = 0;
+    dst.layout.bytesPerRow = padded; dst.layout.rowsPerImage = (uint32_t)h;
+    WGPUExtent3D ext; ext.width = (uint32_t)w; ext.height = (uint32_t)h; ext.depthOrArrayLayers = 1;
+    wgpuCommandEncoderCopyTextureToBuffer(enc, &src, &dst, &ext);
+    WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(enc, NULL);
+    wgpuQueueSubmit(g_wgpu_queue, 1, &cmd);
+    wgpuCommandBufferRelease(cmd); wgpuCommandEncoderRelease(enc);
+    g_wgpu_map_done = 0;
+    WGPUBufferMapCallbackInfo mci; memset(&mci, 0, sizeof(mci));
+    mci.mode = WGPUCallbackMode_AllowProcessEvents; mci.callback = rae_wgpu_on_map;
+    wgpuBufferMapAsync(staging, WGPUMapMode_Read, 0, bytes, mci);
+    while (!g_wgpu_map_done) wgpuDevicePoll(g_wgpu_dev, true, NULL);
+    const unsigned char* px = (const unsigned char*)wgpuBufferGetConstMappedRange(staging, 0, bytes);
+    if (px) {
+        unsigned char* rgba = (unsigned char*)malloc((size_t)w * (size_t)h * 4u);
+        if (rgba) {
+            int swap_rb = (g_g2d_fmt == WGPUTextureFormat_BGRA8Unorm ||
+                           g_g2d_fmt == WGPUTextureFormat_BGRA8UnormSrgb);
+            for (int y = 0; y < h; y++) {
+                const unsigned char* row = px + (size_t)y * padded;
+                unsigned char* orow = rgba + (size_t)y * (size_t)w * 4u;
+                for (int x = 0; x < w; x++) {
+                    unsigned char c0 = row[x*4+0], c1 = row[x*4+1], c2 = row[x*4+2];
+                    if (swap_rb) { orow[x*4+0] = c2; orow[x*4+1] = c1; orow[x*4+2] = c0; }
+                    else        { orow[x*4+0] = c0; orow[x*4+1] = c1; orow[x*4+2] = c2; }
+                    orow[x*4+3] = 255;
+                }
+            }
+            SDL_Surface* s = SDL_CreateSurfaceFrom(w, h, SDL_PIXELFORMAT_RGBA32, rgba, w * 4);
+            if (s) { SDL_SaveBMP(s, path); SDL_DestroySurface(s); }
+            free(rgba);
+        }
+        wgpuBufferUnmap(staging);
+    }
+    wgpuBufferRelease(staging);
+}
+
 void rae_ext_gpu2d_endFrame(void) {
     if (!g_g2d_pass) return;
     int have_text = (g_g2d_text_count > 0 && g_g2d_text_atlas > 0);
@@ -4254,6 +4397,12 @@ void rae_ext_gpu2d_endFrame(void) {
     wgpuRenderPassEncoderEnd(g_g2d_pass);
     WGPUCommandBuffer cb = wgpuCommandEncoderFinish(g_g2d_enc, NULL);
     wgpuQueueSubmit(g_wgpu_queue, 1, &cb);
+    /* Headless screenshot (env-gated) before present, while the frame texture
+     * is still alive. Only in headless runs so interactive frames pay nothing. */
+    if (g_sdl_headless_ms > 0) {
+        const char* shot = getenv("RAE_GPU2D_SCREENSHOT");
+        if (shot) rae_g2d_save_screenshot(shot);
+    }
     wgpuSurfacePresent(g_g2d_surface);
     wgpuCommandBufferRelease(cb);
     wgpuRenderPassEncoderRelease(g_g2d_pass); g_g2d_pass = NULL;
@@ -4286,6 +4435,12 @@ void rae_ext_gpu2d_closeWindow(void) {
 #else  /* no SDL3: stubs so a webgpu-only build still links */
 void rae_ext_gpu2d_initWindow(int64_t w, int64_t h, rae_String t) { (void)w; (void)h; (void)t; }
 rae_Bool rae_ext_gpu2d_pollClose(void) { return 1; }
+void rae_ext_gpu2d_waitEvents(double timeoutSec) { (void)timeoutSec; }
+double rae_ext_gpu2d_pointerX(void) { return 0.0; }
+double rae_ext_gpu2d_pointerY(void) { return 0.0; }
+rae_Bool rae_ext_gpu2d_pointerDown(void) { return 0; }
+double rae_ext_gpu2d_wheelMove(void) { return 0.0; }
+double rae_ext_gpu2d_nowSeconds(void) { return 0.0; }
 int64_t rae_ext_gpu2d_windowWidth(void) { return 0; }
 int64_t rae_ext_gpu2d_windowHeight(void) { return 0; }
 void rae_ext_gpu2d_setDesignResolution(double w, double h, int64_t fit) { (void)w; (void)h; (void)fit; }
