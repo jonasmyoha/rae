@@ -32,7 +32,7 @@ func buildCanonicalCodes(lengths: view List(Int), n: view Int) ret List(Int) {
     var code: Int = 0
     var bits: Int = 1
     loop bits <= 15 {
-        code = (code + blCount.at(index: bits - 1)) bsl 1
+        code = (code + blCount.at(index: bits - 1)) shl 1
         nextCode.set(index: bits, value: code)
         bits = bits + 1
     }
@@ -54,7 +54,7 @@ func hash3(data: view List(Int), pos: view Int) ret Int {
     let a: Int = data.at(index: pos)
     let b: Int = data.at(index: pos + 1)
     let c: Int = data.at(index: pos + 2)
-    ret ((a bsl 10) bxor (b bsl 5) bxor c) band 32767
+    ret ((a shl 10) bitxor (b shl 5) bitxor c) bitand 32767
 }
 
 # Insert `pos` into the hash chain so later positions can match against it.

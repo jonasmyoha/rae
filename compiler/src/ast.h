@@ -100,14 +100,14 @@ typedef enum {
   AST_BIN_NEQ, // `is not` (and reserved for `!=` if added later)
   AST_BIN_AND,
   AST_BIN_OR,
-  // Bitwise ops on Int (Erlang-style words band/bor/bxor/bsl/bsr). Kept AFTER
+  // Bitwise ops on Int (Erlang-style words bitand/bitor/bitxor/shl/shr). Kept AFTER
   // AST_BIN_OR so the `AST_BIN_LT..AST_BIN_OR` "produces Bool" range stays
   // valid — these produce Int. See project bitwise-operators design.
-  AST_BIN_BAND,
-  AST_BIN_BOR,
-  AST_BIN_BXOR,
-  AST_BIN_BSL,
-  AST_BIN_BSR
+  AST_BIN_BITAND,
+  AST_BIN_BITOR,
+  AST_BIN_BITXOR,
+  AST_BIN_SHL,
+  AST_BIN_SHR
 } AstBinaryOp;
 
 typedef enum {
@@ -120,7 +120,7 @@ typedef enum {
   AST_UNARY_POST_DEC,
   AST_UNARY_VIEW,
   AST_UNARY_MOD,
-  AST_UNARY_BNOT   // bitwise NOT on Int (`bnot x`)
+  AST_UNARY_BITNOT   // bitwise NOT on Int (`bitnot x`)
 } AstUnaryOp;
 
 typedef enum {
