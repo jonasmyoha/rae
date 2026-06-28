@@ -280,7 +280,8 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             return true;
         }
         Str ebase = get_base_type_name(elem_tr);
-        bool elem_is_string = str_eq_cstr(ebase, "String");
+        bool elem_is_opt = elem_tr && elem_tr->is_opt;
+        bool elem_is_string = !elem_is_opt && str_eq_cstr(ebase, "String");
         // Only emit a drop when the element actually needs cascade
         // drop. Otherwise this is a no-op for primitives / c_struct.
         bool elem_needs = elem_is_string ||
@@ -296,7 +297,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         // preserves the existing leak for generic-instance slots but
         // keeps the build healthy. Closing the rest requires Pass A
         // to also synthesise specialised drop helpers.
-        if (!elem_is_string) {
+        if (!elem_is_string && !elem_is_opt) {
             const AstDecl* elem_decl = find_type_decl(NULL, ctx->module, ebase);
             bool has_synth_drop = elem_decl
                 && elem_decl->kind == AST_DECL_TYPE
@@ -307,7 +308,9 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 return true;
             }
         }
-        const char* elem_mangled = elem_is_string
+        const char* elem_mangled = elem_is_opt
+            ? "RaeAny"
+            : elem_is_string
             ? "rae_String"
             : rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, elem_tr);
         fprintf(out, "({ %s* __bd = (%s*)( (char*)(",
@@ -316,7 +319,9 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         fprintf(out, ") + (");
         emit_expr(ctx, arg->next->value, out, PREC_LOWEST, false, false);
         fprintf(out, ") * sizeof(%s) ); ", elem_mangled);
-        if (elem_is_string) {
+        if (elem_is_opt) {
+            fprintf(out, "rae_any_drop(__bd); })");
+        } else if (elem_is_string) {
             fprintf(out, "rae_string_drop(__bd); })");
         } else {
             fprintf(out, "rae_drop_struct_%s(__bd); })", elem_mangled);

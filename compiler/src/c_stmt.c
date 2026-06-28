@@ -20,6 +20,8 @@
 static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static bool emit_match(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
+static void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
+                                     const AstExpr* value, FILE* out);
 
 // Ownership classifiers (is_drop_target_type, type_owns_heap_storage,
 // type_needs_cascade_drop, type_needs_deep_copy) moved to
@@ -45,6 +47,183 @@ const AstFuncDecl* find_drop_overload_for(
     if (str_eq(dp_base, container_base)) return &d->as.func_decl;
   }
   return NULL;
+}
+
+static bool c_type_is_plain_string(const AstTypeRef* type) {
+  if (!type || type->is_opt || type->is_view || type->is_mod) return false;
+  return str_eq_cstr(get_base_type_name(type), "String");
+}
+
+static bool c_expr_can_move_owned_payload(const AstExpr* expr) {
+  if (!expr) return false;
+  switch (expr->kind) {
+    case AST_EXPR_CALL:
+    case AST_EXPR_METHOD_CALL:
+    case AST_EXPR_OBJECT:
+    case AST_EXPR_INTERP:
+    case AST_EXPR_BINARY:
+    case AST_EXPR_OWN:
+      return true;
+    default:
+      return false;
+  }
+}
+
+static bool c_expr_is_extern_opt_string_call(const AstExpr* expr) {
+  if (!expr || (expr->kind != AST_EXPR_CALL && expr->kind != AST_EXPR_METHOD_CALL)
+      || !expr->decl_link) return false;
+  if (expr->decl_link->kind != AST_DECL_FUNC) return false;
+  const AstFuncDecl* fd = &expr->decl_link->as.func_decl;
+  if (!fd->is_extern || !fd->returns || !fd->returns->type) return false;
+  if (!fd->returns->type->is_opt) return false;
+  return str_eq_cstr(get_base_type_name(fd->returns->type), "String");
+}
+
+static bool c_expr_is_nonextern_opt_call(const AstExpr* expr) {
+  if (!expr || (expr->kind != AST_EXPR_CALL && expr->kind != AST_EXPR_METHOD_CALL)
+      || !expr->decl_link) return false;
+  if (expr->decl_link->kind != AST_DECL_FUNC) return false;
+  const AstFuncDecl* fd = &expr->decl_link->as.func_decl;
+  return !fd->is_extern && fd->returns && fd->returns->type
+      && fd->returns->type->is_opt;
+}
+
+static const char* c_optional_payload_drop_fn(CFuncContext* ctx,
+                                              const AstTypeRef* payload) {
+  if (!ctx || !payload) return NULL;
+  if (!type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, payload, 0)) {
+    return NULL;
+  }
+  if (is_drop_target_type(payload)) {
+    const AstTypeRef* elem_type = payload->generic_args;
+    if (!elem_type) return NULL;
+    Str loc_base = get_base_type_name(payload);
+    const AstFuncDecl* drop_fd = find_drop_overload_for(ctx, loc_base);
+    if (!drop_fd) return NULL;
+    register_function_specialization(ctx->compiler_ctx, drop_fd, elem_type);
+    return rae_mangle_specialized_function(ctx->compiler_ctx, drop_fd, elem_type);
+  }
+  return rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params,
+                                     ctx->generic_args, payload);
+}
+
+static bool c_optional_payload_is_boxed_pointer(CFuncContext* ctx,
+                                                const AstTypeRef* payload) {
+  if (!payload || c_type_is_plain_string(payload)) return false;
+  Str base = get_base_type_name(payload);
+  if (base.len == 0) return false;
+  if (is_primitive_type(base)) return false;
+  if (str_eq_cstr(base, "Any") || str_eq_cstr(base, "RaeAny")) return false;
+  (void)ctx;
+  return true;
+}
+
+static void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
+                                     const AstExpr* value, FILE* out) {
+  if (!value || value->kind == AST_EXPR_NONE) {
+    fprintf(out, "rae_any_none()");
+    return;
+  }
+  if (value->kind == AST_EXPR_OWN) {
+    const AstTypeRef* owned_tr = infer_expr_type_ref(ctx, value->as.unary.operand);
+    if (owned_tr && owned_tr->is_opt) {
+      emit_expr(ctx, value, out, PREC_LOWEST, false, false);
+      return;
+    }
+  }
+  if (c_expr_is_nonextern_opt_call(value)) {
+    emit_expr(ctx, value, out, PREC_LOWEST, false, false);
+    return;
+  }
+  if (value->kind == AST_EXPR_METHOD_CALL
+      && str_eq_cstr(value->as.method_call.method_name, "get")) {
+    emit_expr(ctx, value, out, PREC_LOWEST, false, false);
+    return;
+  }
+  if (value->kind == AST_EXPR_CALL && value->as.call.callee
+      && value->as.call.callee->kind == AST_EXPR_IDENT
+      && str_eq_cstr(value->as.call.callee->as.ident, "get")) {
+    emit_expr(ctx, value, out, PREC_LOWEST, false, false);
+    return;
+  }
+  const AstTypeRef* val_tr = infer_expr_type_ref(ctx, value);
+  if (val_tr && val_tr->is_opt && !c_expr_is_extern_opt_string_call(value)) {
+    emit_expr(ctx, value, out, PREC_LOWEST, false, false);
+    return;
+  }
+  if (val_tr) {
+    Str val_base = get_base_type_name(val_tr);
+    if (str_eq_cstr(val_base, "Any") || str_eq_cstr(val_base, "RaeAny")) {
+      emit_expr(ctx, value, out, PREC_LOWEST, false, false);
+      return;
+    }
+  }
+
+  AstTypeRef* substituted_opt = opt_type
+      ? substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
+                            ctx->generic_args, (AstTypeRef*)opt_type)
+      : NULL;
+  AstTypeRef payload = substituted_opt ? *substituted_opt
+      : opt_type ? *opt_type : (AstTypeRef){0};
+  payload.is_opt = false;
+  payload.is_view = false;
+  payload.is_mod = false;
+  payload.resolved_type = NULL;
+
+  if (c_type_is_plain_string(&payload)) {
+    /* opt String owns its boxed payload independently. Always copy the
+     * source String so list/map aliases and string-pool temporaries cannot
+     * outlive or double-own the RaeAny. */
+    fprintf(out, "rae_any((rae_string_copy(");
+    emit_expr(ctx, value, out, PREC_LOWEST, false, false);
+    fprintf(out, ")))");
+    return;
+  }
+
+  if (!c_optional_payload_is_boxed_pointer(ctx, &payload)) {
+    fprintf(out, "rae_any((");
+    emit_expr(ctx, value, out, PREC_LOWEST, false, false);
+    fprintf(out, "))");
+    return;
+  }
+
+  int tmpn = (int)ctx->temp_counter++;
+  fprintf(out, "(__extension__ ({ ");
+  emit_type_ref_as_c_type(ctx, &payload, out, false);
+  fprintf(out, " __optv%d; ", tmpn);
+  emit_type_ref_as_c_type(ctx, &payload, out, false);
+  fprintf(out, "* __optp%d = (", tmpn);
+  emit_type_ref_as_c_type(ctx, &payload, out, false);
+  fprintf(out, "*)malloc(sizeof(");
+  emit_type_ref_as_c_type(ctx, &payload, out, false);
+  fprintf(out, ")); ");
+
+  bool needs_deep = type_needs_deep_copy(ctx->compiler_ctx, ctx->module,
+                                         &payload, 0);
+  if (needs_deep && !c_expr_can_move_owned_payload(value)) {
+    const char* copy_name = rae_mangle_type_specialized(
+        ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &payload);
+    fprintf(out, "rae_deep_copy_%s(__optp%d, &(", copy_name, tmpn);
+    emit_expr(ctx, value, out, PREC_LOWEST, false, false);
+    fprintf(out, ")); ");
+  } else {
+    fprintf(out, "__optv%d = ", tmpn);
+    emit_expr(ctx, value, out, PREC_LOWEST, false, false);
+    fprintf(out, "; *__optp%d = __optv%d; ", tmpn, tmpn);
+  }
+
+  const char* drop_name = c_optional_payload_drop_fn(ctx, &payload);
+  if (drop_name) {
+    fprintf(out, "rae_any_owned_ptr(__optp%d, (RaeAnyDropFn)", tmpn);
+    if (is_drop_target_type(&payload)) {
+      fprintf(out, "%s", drop_name);
+    } else {
+      fprintf(out, "rae_drop_struct_%s", drop_name);
+    }
+    fprintf(out, "); }))");
+  } else {
+    fprintf(out, "rae_any_owned_ptr(__optp%d, NULL); }))", tmpn);
+  }
 }
 
 // Classifies a function as alias-returning by walking its body for
@@ -347,6 +526,11 @@ bool emit_implicit_drops_for_own_params(CFuncContext* ctx, FILE* out,
       continue;
     }
     Str name = ctx->locals[idx];
+    if (type->is_opt) {
+      fprintf(out, "  rae_any_drop(&%.*s);\n",
+              (int)name.len, name.data);
+      continue;
+    }
     Str tbase = get_base_type_name(type);
     if (str_eq_cstr(tbase, "String")) {
       fprintf(out, "  rae_string_drop(&%.*s);\n",
@@ -401,6 +585,11 @@ bool emit_implicit_drops_for_body(CFuncContext* ctx, FILE* out,
       continue;
     }
     Str name = ctx->locals[idx];
+    if (type->is_opt) {
+      fprintf(out, "  rae_any_drop(&%.*s);\n",
+              (int)name.len, name.data);
+      continue;
+    }
     Str tbase = get_base_type_name(type);
     if (str_eq_cstr(tbase, "String")) {
       // String locals don't have a synthesised rae_drop_struct_ —
@@ -668,7 +857,6 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         if (!str_eq_cstr(val_base, "Any") && val_base.len > 0) needs_box = true;
                     }
                 }
-                if (needs_box) fprintf(out, "rae_any((");
                 // Stage 4: if the let captures a String, detach any temp-pool
                 // entry the RHS produced so the subsequent statement-end
                 // flush doesn't free the binding's data. `rae_string_pool_take`
@@ -680,7 +868,8 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 bool wrap_str_take = false;
                 if (stmt->as.let_stmt.type
                     && !stmt->as.let_stmt.type->is_view
-                    && !stmt->as.let_stmt.type->is_mod) {
+                    && !stmt->as.let_stmt.type->is_mod
+                    && !stmt->as.let_stmt.type->is_opt) {
                     Str lbase = get_base_type_name(stmt->as.let_stmt.type);
                     if (str_eq_cstr(lbase, "String")) wrap_str_take = true;
                 }
@@ -725,7 +914,10 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     }
                 }
 
-                if (deep_copy_string_ident) {
+                if (needs_box) {
+                    emit_optional_boxed_expr(ctx, stmt->as.let_stmt.type,
+                                             stmt->as.let_stmt.value, out);
+                } else if (deep_copy_string_ident) {
                     // `let b: String = a` — deep copy via rae_string_copy.
                     // Replaces the pool_take wrapper which would only
                     // detach (and the ident's storage isn't in the pool
@@ -758,7 +950,6 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, false, false);
                     if (wrap_str_take) fprintf(out, ")");
                 }
-                if (needs_box) fprintf(out, "))");
                 ctx->has_expected_type = false;
             } else {
                 // Auto-init: let x: Type (no initializer)
@@ -870,6 +1061,7 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 if (!owns && !let_did_deep_copy && stmt->as.let_stmt.type
                     && !stmt->as.let_stmt.type->is_view
                     && !stmt->as.let_stmt.type->is_mod
+                    && !stmt->as.let_stmt.type->is_opt
                     && str_eq_cstr(get_base_type_name(stmt->as.let_stmt.type), "String")) {
                   Str ln = stmt->as.let_stmt.name;
                   fprintf(out, "  %.*s.is_owned = 0;\n",
@@ -936,7 +1128,11 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 // is_owned=0 entries.
                 bool target_is_string = target_tr
                     && !target_tr->is_view && !target_tr->is_mod
+                    && !target_tr->is_opt
                     && str_eq_cstr(get_base_type_name(target_tr), "String");
+                bool target_is_opt = target_tr
+                    && target_tr->is_opt
+                    && !target_tr->is_view && !target_tr->is_mod;
                 bool is_string_local_reassign = target_is_string
                     && stmt->as.assign_stmt.target->kind == AST_EXPR_IDENT;
                 // Struct-field String reassign: `s.text = newVal` drops
@@ -969,7 +1165,19 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     && target_tr && !target_tr->is_view && !target_tr->is_mod
                     && type_needs_deep_copy(ctx->compiler_ctx, ctx->module,
                                             target_tr, 0);
-                if (is_string_local_reassign) {
+                if (target_is_opt) {
+                    int tmpn = ctx->temp_counter++;
+                    fprintf(out, "{ RaeAny __asg%d = ", tmpn);
+                    emit_optional_boxed_expr(ctx, target_tr,
+                                             stmt->as.assign_stmt.value, out);
+                    fprintf(out, "; RaeAny* __asgp%d = &(", tmpn);
+                    emit_expr(ctx, stmt->as.assign_stmt.target, out,
+                              PREC_LOWEST, true, false);
+                    fprintf(out, "); rae_any_drop(__asgp%d); *__asgp%d = __asg%d; }",
+                            tmpn, tmpn, tmpn);
+                    ctx->has_expected_type = had_exp;
+                    ctx->expected_type = saved_exp;
+                } else if (is_string_local_reassign) {
                     Str tname = stmt->as.assign_stmt.target->as.ident;
                     int tmpn = ctx->temp_counter++;
                     fprintf(out, "{ rae_String __asg%d = ", tmpn);
@@ -1044,7 +1252,8 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         fprintf(out, ")");
                     }
                     bool wrap_str_take_a = false;
-                    if (target_tr && !target_tr->is_view && !target_tr->is_mod) {
+                    if (target_tr && !target_tr->is_view && !target_tr->is_mod
+                        && !target_tr->is_opt) {
                         Str tbase = get_base_type_name(target_tr);
                         if (str_eq_cstr(tbase, "String")) wrap_str_take_a = true;
                     }
@@ -1215,8 +1424,15 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 } else {
                     bool needs_any_wrap = ret_type && (ret_type->is_opt || str_eq_cstr(get_base_type_name(ret_type), "Any"));
                     bool val_is_box = ret_val->kind == AST_EXPR_BOX;
-                    if (needs_any_wrap && !val_is_box) { fprintf(out, "rae_any(("); emit_expr(ctx, ret_val, out, PREC_LOWEST, false, false); fprintf(out, "))"); }
-                    else emit_expr(ctx, ret_val, out, PREC_LOWEST, false, false);
+                    if (needs_any_wrap && !val_is_box) {
+                        if (ret_type && ret_type->is_opt) {
+                            emit_optional_boxed_expr(ctx, ret_type, ret_val, out);
+                        } else {
+                            fprintf(out, "rae_any((");
+                            emit_expr(ctx, ret_val, out, PREC_LOWEST, false, false);
+                            fprintf(out, "))");
+                        }
+                    } else emit_expr(ctx, ret_val, out, PREC_LOWEST, false, false);
                 }
                 fprintf(out, ";\n");
 
@@ -1338,4 +1554,3 @@ bool emit_defers(CFuncContext* ctx, int min_depth, FILE* out) {
 void pop_defers(CFuncContext* ctx, int depth) {
     while (ctx->defer_stack.count > depth) ctx->defer_stack.count--;
 }
-
