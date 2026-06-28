@@ -12,10 +12,22 @@ import gpu2d_text
 import sdf_text
 import ui/components
 import ui/ecs
+import ui/layout
+import ui/registry
+import ui/scene
+import ui/scene_instance
+import ui/theme
+import ui/transform
 open ui/ecs
 
 let canvasW: Float = 1080.0
 let canvasH: Float = 2280.0
+let homeScenePath: String = "examples/98_mobile_ui/assets/scenes/home.raescene"
+
+# Compiled-target shortcut matching the original mobile UI loader: the C
+# runtime returns a concrete String for read_file, so this avoids optional
+# unwrapping in the example and keeps the renderer slice focused.
+func rae_ext_rae_sys_read_file(path: String) extern ret String
 
 func color(c: view RgbaColor) ret Int {
   ret (c.a * 16777216) + (c.r * 65536) + (c.g * 256) + c.b
@@ -93,6 +105,15 @@ func addText(
 }
 
 func textSize(styleId: view String) ret Float {
+  if styleId is "pageTitle" {
+    ret 58.0
+  }
+  if styleId is "primary" {
+    ret 34.0
+  }
+  if styleId is "muted" {
+    ret 26.0
+  }
   if styleId is "hero" {
     ret 70.0
   }
@@ -112,6 +133,15 @@ func textSize(styleId: view String) ret Float {
 }
 
 func textColor(styleId: view String) ret Int {
+  if styleId is "pageTitle" {
+    ret 0xFF15171D
+  }
+  if styleId is "primary" {
+    ret 0xFF15171D
+  }
+  if styleId is "muted" {
+    ret 0xFF8E96A8
+  }
   if styleId is "caption" {
     ret 0xFF8E96A8
   }
@@ -137,7 +167,32 @@ func renderWorld(world: view UiWorld, font: view SdfFont) {
         if wt.visible {
           if componentHas(this: world.shapes, entity: e) {
             let sh: Shape = componentGet(this: world.shapes, entity: e)
-            if sh.strokeWidth > 0.0 {
+            if sh.kind is ShapeKind.rect {
+              gpu2d.drawRect(
+                x: wt.x
+                y: wt.y
+                w: cr.w
+                h: cr.h
+                color: color(c: sh.fill)
+              )
+            } else if sh.kind is ShapeKind.circle {
+              var smaller: Float = cr.w
+              if cr.h < smaller {
+                smaller = cr.h
+              }
+              var r: Float = sh.radius
+              if r <= 0.0 {
+                r = smaller / 2.0
+              }
+              gpu2d.drawRoundedRect(
+                x: wt.x + (cr.w / 2.0) - r
+                y: wt.y + (cr.h / 2.0) - r
+                w: r * 2.0
+                h: r * 2.0
+                radius: r
+                color: color(c: sh.fill)
+              )
+            } else if sh.strokeWidth > 0.0 {
               gpu2d.drawBox(
                 x: wt.x
                 y: wt.y
@@ -176,6 +231,38 @@ func renderWorld(world: view UiWorld, font: view SdfFont) {
     }
     i = i + 1
   }
+}
+
+func loadSceneFile(path: view String) ret Scene {
+  let content: String = rae_ext_rae_sys_read_file(path: path)
+  ret parseScene(source: content)
+}
+
+func buildScenePage(world: mod UiWorld) ret Bool {
+  setActiveTheme(theme: lightTheme())
+  let scene: Scene = loadSceneFile(path: homeScenePath)
+  if scene.ok is false {
+    log("[gpu2d-mobile] failed to parse scene: {scene.errorMsg}")
+    ret false
+  }
+  let overrides: List(SceneOverride) = emptyOverrides()
+  let root: EntityId = mountPage(
+    world: world
+    pageId: "home"
+    scene: scene
+    overrides: overrides
+    w: canvasW
+    h: canvasH
+  )
+  if root.isNone() {
+    log("[gpu2d-mobile] failed to mount scene")
+    ret false
+  }
+  world.layoutW = canvasW
+  world.layoutH = canvasH
+  layoutSystem(world: world)
+  transformSystem(world: world)
+  ret true
 }
 
 func buildHomePage(world: mod UiWorld) {
@@ -268,7 +355,9 @@ func main() ret Int {
     rawAtlasPath: "examples/104_gpu2d_coords/assets/Roboto-Regular.mtsdf.raw")
 
   var world: UiWorld = createUiWorld()
-  buildHomePage(world: world)
+  if buildScenePage(world: world) is false {
+    buildHomePage(world: world)
+  }
 
   loop not gpu2d.pollClose() {
     gpu2d.beginFrame(r: 0.04, g: 0.04, b: 0.05, a: 1.0)
