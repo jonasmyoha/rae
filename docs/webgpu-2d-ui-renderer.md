@@ -308,6 +308,17 @@ prior findings; expand as they surface):
 New gaps get appended here with: symptom, minimal repro, the *fix* (not the
 workaround), and a QUEUE id.
 
+**Resolved while building the renderer:**
+- **Hex integer literals** (`0xAARRGGBB`) — were unsupported (lexed as `0` +
+  identifier). *Fixed* in the lexer (commit "feat(lexer): hexadecimal integer
+  literals"); colours/bitmasks now author cleanly instead of via bitwise packing.
+- **Mangler hijacked defined functions to raylib symbols** — a Rae function with
+  a body whose name matched a raylib builtin (e.g. `lib/gpu2d_text.rae`'s
+  `drawText`) was mangled to `rae_ext_drawText`, colliding with raylib's binding
+  whenever raylib is linked (devtools Compiled target). *Fixed* by restricting
+  the raylib-name hijack in `mangler.c` to `func->is_extern` only. Repro: a
+  program importing `raylib` + `gpu2d_text` calling `gpu2d_text.drawText`.
+
 ---
 
 ## 13. Open questions
