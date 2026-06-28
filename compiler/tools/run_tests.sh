@@ -40,11 +40,14 @@ if [ -n "$TARGET_FILTER" ]; then
   echo
 fi
 
-# Targets to test
+# Targets to test. Default is Compiled only — the authoritative language
+# conformance gate. Live (bytecode VM) is preserved but unsupported
+# (docs/live-vm-status.md): run it explicitly with `TEST_TARGET=live` (a small
+# opt-in smoke / non-blocking job), never as part of the default green-gate.
 if [ -n "$TARGET_FILTER" ]; then
   TARGETS=("$TARGET_FILTER")
 else
-  TARGETS=("live" "compiled")
+  TARGETS=("compiled")
 fi
 
 for TARGET in "${TARGETS[@]}"; do
