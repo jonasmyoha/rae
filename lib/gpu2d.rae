@@ -57,3 +57,13 @@ func drawRoundedRect(x: Float, y: Float, w: Float, h: Float, radius: Float, colo
 # Rounded rectangle with a fill and a stroked border `borderWidth` px wide
 # (drawn inset from the edge). radius 0 gives a sharp-cornered box.
 func drawBox(x: Float, y: Float, w: Float, h: Float, radius: Float, fill: Int, borderWidth: Float, border: Int) extern
+
+# --- Text (#111, MSDF glyph quads) ---------------------------------------
+# Low-level: submit one MSDF glyph quad. Screen rect is (sx0,sy0)-(sx1,sy1)
+# in pixels; UV rect is (u0,v0)-(u1,v1) NORMALISED into the atlas; `atlas` is
+# the sdf_text.loadAtlas handle (1-based); `pxRange` is the screen-space px
+# range (atlas pxRange * onScreenSize / atlasGlyphSize); colour is 0xAARRGGBB.
+# One atlas/font per frame. Layout helper: lib/gpu2d_text.rae drawText.
+func drawGlyph(sx0: Float, sy0: Float, sx1: Float, sy1: Float,
+               u0: Float, v0: Float, u1: Float, v1: Float,
+               atlas: Int, pxRange: Float, color: Int) extern
