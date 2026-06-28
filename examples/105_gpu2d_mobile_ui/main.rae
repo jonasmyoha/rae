@@ -1,0 +1,281 @@
+# GPU2D Mobile UI — first ECS-rendered mobile page.
+#
+# This is intentionally a small copy/prototype, not a fork of the full
+# 98_mobile_ui app. It proves the next integration seam: UI entities stored in
+# ComponentTable(T) render through lib/gpu2d's SDL3/WebGPU window path.
+#
+# Compiled target only:
+#   rae run --target compiled examples/105_gpu2d_mobile_ui/main.rae
+import core
+import gpu2d
+import gpu2d_text
+import sdf_text
+import ui/components
+import ui/ecs
+open ui/ecs
+
+let canvasW: Float = 1080.0
+let canvasH: Float = 2280.0
+
+func color(c: view RgbaColor) ret Int {
+  ret (c.a * 16777216) + (c.r * 65536) + (c.g * 256) + c.b
+}
+
+func rgba(r: view Int, g: view Int, b: view Int, a: view Int) ret RgbaColor {
+  ret RgbaColor { r: r, g: g, b: b, a: a }
+}
+
+func addBox(
+  world: mod UiWorld
+  x: view Float
+  y: view Float
+  w: view Float
+  h: view Float
+  radius: view Float
+  fill: view RgbaColor
+  stroke: view RgbaColor
+  strokeWidth: view Float
+) ret EntityId {
+  let e: EntityId = createEntity(world: world)
+  let cr: ComputedRect = { x: x, y: y, w: w, h: h }
+  let wt: WorldTransform = {
+    x: x
+    y: y
+    scaleX: 1.0
+    scaleY: 1.0
+    rotation: 0.0
+    alpha: 1.0
+    visible: true
+  }
+  let kind: ShapeKind = ShapeKind.roundedRect
+  let sh: Shape = {
+    kind: kind
+    fill: fill
+    stroke: stroke
+    strokeWidth: strokeWidth
+    radius: radius
+  }
+  componentSet(this: world.computedRects, entity: e, data: cr)
+  componentSet(this: world.worldTransforms, entity: e, data: wt)
+  componentSet(this: world.shapes, entity: e, data: sh)
+  ret e
+}
+
+func addText(
+  world: mod UiWorld
+  x: view Float
+  y: view Float
+  w: view Float
+  h: view Float
+  text: copy String
+  styleId: copy String
+) ret EntityId {
+  let e: EntityId = createEntity(world: world)
+  let cr: ComputedRect = { x: x, y: y, w: w, h: h }
+  let wt: WorldTransform = {
+    x: x
+    y: y
+    scaleX: 1.0
+    scaleY: 1.0
+    rotation: 0.0
+    alpha: 1.0
+    visible: true
+  }
+  let t: Text = {
+    text: text
+    styleId: styleId
+    wrapWidthMode: WrapWidthMode.none
+  }
+  componentSet(this: world.computedRects, entity: e, data: cr)
+  componentSet(this: world.worldTransforms, entity: e, data: wt)
+  componentSet(this: world.texts, entity: e, data: own t)
+  ret e
+}
+
+func textSize(styleId: view String) ret Float {
+  if styleId is "hero" {
+    ret 70.0
+  }
+  if styleId is "title" {
+    ret 46.0
+  }
+  if styleId is "body" {
+    ret 34.0
+  }
+  if styleId is "caption" {
+    ret 26.0
+  }
+  if styleId is "tab" {
+    ret 24.0
+  }
+  ret 30.0
+}
+
+func textColor(styleId: view String) ret Int {
+  if styleId is "caption" {
+    ret 0xFF8E96A8
+  }
+  if styleId is "tab" {
+    ret 0xFF59606E
+  }
+  if styleId is "accent" {
+    ret 0xFFFFFFFF
+  }
+  ret 0xFF15171D
+}
+
+func renderWorld(world: view UiWorld, font: view SdfFont) {
+  let alive: view List(EntityId) => world.alive
+  let n: Int = alive.length
+  var i: Int = 0
+  loop i < n {
+    let e: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: i)
+    if componentHas(this: world.computedRects, entity: e) {
+      if componentHas(this: world.worldTransforms, entity: e) {
+        let cr: ComputedRect = componentGet(this: world.computedRects, entity: e)
+        let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: e)
+        if wt.visible {
+          if componentHas(this: world.shapes, entity: e) {
+            let sh: Shape = componentGet(this: world.shapes, entity: e)
+            if sh.strokeWidth > 0.0 {
+              gpu2d.drawBox(
+                x: wt.x
+                y: wt.y
+                w: cr.w
+                h: cr.h
+                radius: sh.radius
+                fill: color(c: sh.fill)
+                borderWidth: sh.strokeWidth
+                border: color(c: sh.stroke)
+              )
+            } else {
+              gpu2d.drawRoundedRect(
+                x: wt.x
+                y: wt.y
+                w: cr.w
+                h: cr.h
+                radius: sh.radius
+                color: color(c: sh.fill)
+              )
+            }
+          }
+          if componentHas(this: world.texts, entity: e) {
+            let t: view Text => componentView(this: world.texts, entity: e)
+            let size: Float = textSize(styleId: t.styleId)
+            gpu2d_text.drawText(
+              font: font
+              text: t.text
+              x: wt.x
+              y: wt.y + size
+              sizePx: size
+              color: textColor(styleId: t.styleId)
+            )
+          }
+        }
+      }
+    }
+    i = i + 1
+  }
+}
+
+func buildHomePage(world: mod UiWorld) {
+  let bg: RgbaColor = rgba(r: 246, g: 241, b: 232, a: 255)
+  let ink: RgbaColor = rgba(r: 21, g: 23, b: 29, a: 255)
+  let muted: RgbaColor = rgba(r: 142, g: 150, b: 168, a: 255)
+  let white: RgbaColor = rgba(r: 255, g: 255, b: 255, a: 255)
+  let coral: RgbaColor = rgba(r: 238, g: 99, b: 82, a: 255)
+  let amber: RgbaColor = rgba(r: 251, g: 196, b: 88, a: 255)
+  let mint: RgbaColor = rgba(r: 97, g: 194, b: 155, a: 255)
+  let blue: RgbaColor = rgba(r: 77, g: 123, b: 221, a: 255)
+  let clear: RgbaColor = rgba(r: 0, g: 0, b: 0, a: 0)
+  let line: RgbaColor = rgba(r: 226, g: 221, b: 211, a: 255)
+
+  addBox(world: world, x: 0.0, y: 0.0, w: canvasW, h: canvasH,
+         radius: 0.0, fill: bg, stroke: clear, strokeWidth: 0.0)
+  addText(world: world, x: 72.0, y: 118.0, w: 500.0, h: 80.0,
+          text: "Rae Music", styleId: "hero")
+  addText(world: world, x: 72.0, y: 206.0, w: 620.0, h: 48.0,
+          text: "GPU2D ECS prototype", styleId: "caption")
+
+  addBox(world: world, x: 72.0, y: 304.0, w: 936.0, h: 520.0,
+         radius: 54.0, fill: ink, stroke: clear, strokeWidth: 0.0)
+  addBox(world: world, x: 122.0, y: 360.0, w: 340.0, h: 340.0,
+         radius: 42.0, fill: coral, stroke: clear, strokeWidth: 0.0)
+  addBox(world: world, x: 186.0, y: 424.0, w: 212.0, h: 212.0,
+         radius: 106.0, fill: amber, stroke: clear, strokeWidth: 0.0)
+  addBox(world: world, x: 252.0, y: 490.0, w: 80.0, h: 80.0,
+         radius: 40.0, fill: ink, stroke: clear, strokeWidth: 0.0)
+  addText(world: world, x: 516.0, y: 392.0, w: 380.0, h: 64.0,
+          text: "Charcoal", styleId: "accent")
+  addText(world: world, x: 516.0, y: 470.0, w: 380.0, h: 64.0,
+          text: "Brambles", styleId: "caption")
+  addText(world: world, x: 516.0, y: 566.0, w: 410.0, h: 48.0,
+          text: "Album · 8 songs", styleId: "caption")
+  addBox(world: world, x: 516.0, y: 664.0, w: 260.0, h: 92.0,
+         radius: 46.0, fill: white, stroke: clear, strokeWidth: 0.0)
+  addText(world: world, x: 598.0, y: 692.0, w: 140.0, h: 48.0,
+          text: "Play", styleId: "body")
+
+  addText(world: world, x: 72.0, y: 900.0, w: 400.0, h: 52.0,
+          text: "Recently played", styleId: "title")
+
+  addTrack(world: world, y: 1006.0, colorBox: mint, index: "01", title: "Dawn Runner", sub: "Brambles · 2:52")
+  addTrack(world: world, y: 1174.0, colorBox: amber, index: "02", title: "Glass Houses", sub: "Charcoal · 3:18")
+  addTrack(world: world, y: 1342.0, colorBox: blue, index: "03", title: "Northern Lights", sub: "Beaches · 4:01")
+  addTrack(world: world, y: 1510.0, colorBox: coral, index: "04", title: "Soft Static", sub: "Brambles · 2:44")
+
+  addBox(world: world, x: 72.0, y: 2026.0, w: 936.0, h: 142.0,
+         radius: 48.0, fill: white, stroke: line, strokeWidth: 3.0)
+  addText(world: world, x: 144.0, y: 2078.0, w: 130.0, h: 40.0,
+          text: "Home", styleId: "body")
+  addText(world: world, x: 362.0, y: 2082.0, w: 130.0, h: 40.0,
+          text: "Search", styleId: "tab")
+  addText(world: world, x: 604.0, y: 2082.0, w: 130.0, h: 40.0,
+          text: "Library", styleId: "tab")
+  addText(world: world, x: 850.0, y: 2082.0, w: 130.0, h: 40.0,
+          text: "Hot", styleId: "tab")
+}
+
+func addTrack(
+  world: mod UiWorld
+  y: view Float
+  colorBox: view RgbaColor
+  index: copy String
+  title: copy String
+  sub: copy String
+) {
+  let white: RgbaColor = rgba(r: 255, g: 255, b: 255, a: 255)
+  let line: RgbaColor = rgba(r: 226, g: 221, b: 211, a: 255)
+  let clear: RgbaColor = rgba(r: 0, g: 0, b: 0, a: 0)
+  addBox(world: world, x: 72.0, y: y, w: 936.0, h: 132.0,
+         radius: 34.0, fill: white, stroke: line, strokeWidth: 2.0)
+  addBox(world: world, x: 112.0, y: y + 28.0, w: 76.0, h: 76.0,
+         radius: 24.0, fill: colorBox, stroke: clear, strokeWidth: 0.0)
+  addText(world: world, x: 132.0, y: y + 48.0, w: 48.0, h: 34.0,
+          text: index, styleId: "tab")
+  addText(world: world, x: 226.0, y: y + 30.0, w: 520.0, h: 48.0,
+          text: title, styleId: "body")
+  addText(world: world, x: 226.0, y: y + 80.0, w: 520.0, h: 36.0,
+          text: sub, styleId: "caption")
+}
+
+func main() ret Int {
+  gpu2d.initWindow(width: 420, height: 820, title: "Rae GPU2D Mobile UI")
+  gpu2d.setDesignResolution(width: canvasW, height: canvasH, fit: 0)
+
+  let font: SdfFont = sdf_text.loadSdfFont(
+    jsonPath: "examples/104_gpu2d_coords/assets/Roboto-Regular.mtsdf.json",
+    rawAtlasPath: "examples/104_gpu2d_coords/assets/Roboto-Regular.mtsdf.raw")
+
+  var world: UiWorld = createUiWorld()
+  buildHomePage(world: world)
+
+  loop not gpu2d.pollClose() {
+    gpu2d.beginFrame(r: 0.04, g: 0.04, b: 0.05, a: 1.0)
+    renderWorld(world: world, font: font)
+    gpu2d.endFrame()
+  }
+
+  gpu2d.closeWindow()
+  ret 0
+}
