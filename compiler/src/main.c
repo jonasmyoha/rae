@@ -229,6 +229,12 @@ static bool parse_format_args(int argc, char** argv, FormatOptions* opts) {
 
 static bool file_exists(const char* path);  // defined below
 
+// Live (bytecode VM) is preserved but unsupported (docs/live-vm-status.md).
+// Explicit `--target live` invocations still work, but warn.
+static void warn_live_frozen(void) {
+  fprintf(stderr, "Warning: the Live VM is frozen and may not support current Rae features.\n");
+}
+
 // Zero-config entry inference for `rae run` / `rae watch` with no file arg:
 // extract the "entry" string from a devtools.json manifest in the cwd. Not a
 // full JSON parser — finds the first "entry" key + its quoted value, which is
@@ -3018,6 +3024,7 @@ static bool watch_build_into_dir(const char* entry,
 static int run_watch_supervisor(const RunOptions* run_opts, const char* project_root) {
   const char* entry = run_opts->input_path;
   bool is_live = (run_opts->target == BUILD_TARGET_LIVE);
+  if (is_live) warn_live_frozen();
   // Child apps run with cwd = lib-root so root-relative asset paths resolve
   // (zero-config folder mode only). The supervisor itself stays in the cwd, so
   // .rae/build stays in the folder.
@@ -3369,6 +3376,7 @@ static int run_command(const char* cmd, int argc, char** argv) {
                       if (run_opts.target == BUILD_TARGET_COMPILED) {
                         return run_compiled_file(&adjusted_opts, final_root);
                       }
+                      warn_live_frozen();
                       return run_opts.watch ? run_vm_watch(&adjusted_opts, final_root) : run_vm_file(&adjusted_opts, final_root);
               } else if (is_watch) {
                       RunOptions run_opts;
@@ -3404,6 +3412,7 @@ static int run_command(const char* cmd, int argc, char** argv) {
 
     switch (build_opts.target) {
       case BUILD_TARGET_LIVE:
+        warn_live_frozen();
         return build_vm_output(build_opts.entry_path,
                                final_root,
                                build_opts.out_path,
