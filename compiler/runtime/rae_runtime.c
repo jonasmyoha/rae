@@ -3832,12 +3832,19 @@ static const char* G2D_BOX_WGSL =
 "  let c = corners[vi];\n"
 "  let p = prims[ii];\n"
 "  let phys = uXform[0].xy;\n"
-"  let posPx = (p.rect.xy + c * p.rect.zw) * uXform[0].zw + uXform[1].xy;\n"
+"  let local = c * p.rect.zw;\n"            /* box-local, unrotated (0..w, 0..h) */
+"  let center = p.rect.zw * 0.5;\n"
+"  let a = p.params.y;\n"                   /* rotation (radians), 0 for rects */
+"  let ca = cos(a); let sa = sin(a);\n"
+"  let rel = local - center;\n"
+"  let rot = vec2<f32>(rel.x * ca - rel.y * sa, rel.x * sa + rel.y * ca);\n"
+"  let posDesign = p.rect.xy + center + rot;\n"
+"  let posPx = posDesign * uXform[0].zw + uXform[1].xy;\n"
 "  let ndc = vec2<f32>(posPx.x / phys.x * 2.0 - 1.0,\n"
 "                      1.0 - posPx.y / phys.y * 2.0);\n"
 "  var o: VsOut;\n"
 "  o.pos = vec4<f32>(ndc, 0.0, 1.0);\n"
-"  o.local = c * p.rect.zw;\n"
+"  o.local = local;\n"                      /* SDF evaluates in unrotated box frame */
 "  o.inst = ii;\n"
 "  return o;\n"
 "}\n"
@@ -3884,7 +3891,7 @@ static void g2d_color(uint32_t c, float* out) {
 
 static void rae_g2d_push(double x, double y, double w, double h,
                          double rtl, double rtr, double rbr, double rbl,
-                         uint32_t fill, uint32_t border, double bw) {
+                         uint32_t fill, uint32_t border, double bw, double angle) {
     int need = (g_g2d_prim_count + 1) * G2D_PRIM_FLOATS;
     if (need > g_g2d_prim_capf) {
         int cap = g_g2d_prim_capf ? g_g2d_prim_capf : (64 * G2D_PRIM_FLOATS);
@@ -3897,7 +3904,7 @@ static void rae_g2d_push(double x, double y, double w, double h,
     p[4]=(float)rtl; p[5]=(float)rtr; p[6]=(float)rbr; p[7]=(float)rbl;
     g2d_color(fill, &p[8]);
     g2d_color(border, &p[12]);
-    p[16]=(float)bw; p[17]=0.0f; p[18]=0.0f; p[19]=0.0f;
+    p[16]=(float)bw; p[17]=(float)angle; p[18]=0.0f; p[19]=0.0f;
     g_g2d_prim_count++;
 }
 
@@ -3964,15 +3971,29 @@ static void rae_g2d_ensure_inst(int prims) {
 }
 
 void rae_ext_gpu2d_drawRect(double x, double y, double w, double h, int64_t color) {
-    rae_g2d_push(x, y, w, h, 0, 0, 0, 0, (uint32_t)color, 0, 0.0);
+    rae_g2d_push(x, y, w, h, 0, 0, 0, 0, (uint32_t)color, 0, 0.0, 0.0);
 }
 void rae_ext_gpu2d_drawRoundedRect(double x, double y, double w, double h, double radius, int64_t color) {
-    rae_g2d_push(x, y, w, h, radius, radius, radius, radius, (uint32_t)color, 0, 0.0);
+    rae_g2d_push(x, y, w, h, radius, radius, radius, radius, (uint32_t)color, 0, 0.0, 0.0);
 }
 void rae_ext_gpu2d_drawBox(double x, double y, double w, double h, double radius,
                            int64_t fill, double borderWidth, int64_t border) {
     rae_g2d_push(x, y, w, h, radius, radius, radius, radius,
-                 (uint32_t)fill, (uint32_t)border, borderWidth);
+                 (uint32_t)fill, (uint32_t)border, borderWidth, 0.0);
+}
+/* A line from (x0,y0) to (x1,y1), `thickness` px wide, with rounded caps —
+ * a rotated capsule (rounded rect of length x thickness, radius thickness/2). */
+void rae_ext_gpu2d_drawLine(double x0, double y0, double x1, double y1,
+                            double thickness, int64_t color) {
+    double dx = x1 - x0, dy = y1 - y0;
+    double len = sqrt(dx * dx + dy * dy);
+    if (len < 1e-6 || thickness <= 0.0) return;
+    double angle = atan2(dy, dx);
+    double cx = (x0 + x1) * 0.5, cy = (y0 + y1) * 0.5;
+    double r = thickness * 0.5;
+    if (r > len * 0.5) r = len * 0.5;
+    rae_g2d_push(cx - len * 0.5, cy - thickness * 0.5, len, thickness,
+                 r, r, r, r, (uint32_t)color, 0, 0.0, angle);
 }
 
 /* --- Text pipeline (#111): MSDF glyph quads --------------------------
@@ -4277,6 +4298,7 @@ void rae_ext_gpu2d_closeWindow(void) {}
 void rae_ext_gpu2d_drawRect(double x, double y, double w, double h, int64_t color) { (void)x; (void)y; (void)w; (void)h; (void)color; }
 void rae_ext_gpu2d_drawRoundedRect(double x, double y, double w, double h, double radius, int64_t color) { (void)x; (void)y; (void)w; (void)h; (void)radius; (void)color; }
 void rae_ext_gpu2d_drawBox(double x, double y, double w, double h, double radius, int64_t fill, double borderWidth, int64_t border) { (void)x; (void)y; (void)w; (void)h; (void)radius; (void)fill; (void)borderWidth; (void)border; }
+void rae_ext_gpu2d_drawLine(double x0, double y0, double x1, double y1, double thickness, int64_t color) { (void)x0; (void)y0; (void)x1; (void)y1; (void)thickness; (void)color; }
 void rae_ext_gpu2d_drawGlyph(double sx0, double sy0, double sx1, double sy1, double u0, double v0, double u1, double v1, int64_t atlas, double pxRange, int64_t color) { (void)sx0; (void)sy0; (void)sx1; (void)sy1; (void)u0; (void)v0; (void)u1; (void)v1; (void)atlas; (void)pxRange; (void)color; }
 #endif /* RAE_HAS_SDL3 */
 #endif /* RAE_HAS_WEBGPU */
