@@ -230,9 +230,13 @@ static bool parse_format_args(int argc, char** argv, FormatOptions* opts) {
 static bool file_exists(const char* path);  // defined below
 
 // Live (bytecode VM) is preserved but unsupported (docs/live-vm-status.md).
-// Explicit `--target live` invocations still work, but warn.
+// Explicit `--target live` invocations still work, but warn — ONLY to an
+// interactive terminal. When stderr is piped/captured (the test runner, CI, the
+// devtools), stay silent so the warning never pollutes captured program output.
 static void warn_live_frozen(void) {
-  fprintf(stderr, "Warning: the Live VM is frozen and may not support current Rae features.\n");
+  if (isatty(fileno(stderr))) {
+    fprintf(stderr, "Warning: the Live VM is frozen and may not support current Rae features.\n");
+  }
 }
 
 // Zero-config entry inference for `rae run` / `rae watch` with no file arg:
