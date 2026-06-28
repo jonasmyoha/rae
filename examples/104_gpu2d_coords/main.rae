@@ -20,14 +20,6 @@ import gpu2d
 import gpu2d_text
 import sdf_text
 
-# Thin line helpers in design units.
-func vline(x: copy Float, color: copy Int) {
-    gpu2d.drawRect(x: x, y: 0.0, w: 2.0, h: 720.0, color: color)
-}
-func hline(y: copy Float, color: copy Int) {
-    gpu2d.drawRect(x: 0.0, y: y, w: 1080.0, h: 2.0, color: color)
-}
-
 func main() ret Int {
     gpu2d.initWindow(width: 1000, height: 640, title: "Rae 2D — coordinate system")
     let dir: String = "examples/104_gpu2d_coords/"
@@ -45,27 +37,30 @@ func main() ret Int {
         # The design canvas itself (0,0)-(1080,720).
         gpu2d.drawRect(x: 0.0, y: 0.0, w: 1080.0, h: 720.0, color: 0xFF0E131C)
 
-        # Minor grid every 120 du, major lines every 240 du.
+        # Minor grid every 120 du, major lines every 240 du — gpu2d.drawLine.
         var gx: Float = 0.0
         loop gx <= 1080.0 {
-            vline(x: gx, color: 0x22557088)
+            gpu2d.drawLine(x0: gx, y0: 0.0, x1: gx, y1: 720.0, thickness: 1.5, color: 0x22557088)
             gx = gx + 120.0
         }
         var gy: Float = 0.0
         loop gy <= 720.0 {
-            hline(y: gy, color: 0x22557088)
+            gpu2d.drawLine(x0: 0.0, y0: gy, x1: 1080.0, y1: gy, thickness: 1.5, color: 0x22557088)
             gy = gy + 120.0
         }
         var mx: Float = 0.0
         loop mx <= 1080.0 {
-            vline(x: mx, color: 0x66789CC0)
+            gpu2d.drawLine(x0: mx, y0: 0.0, x1: mx, y1: 720.0, thickness: 2.0, color: 0x66789CC0)
             mx = mx + 240.0
         }
         var my: Float = 0.0
         loop my <= 720.0 {
-            hline(y: my, color: 0x66789CC0)
+            gpu2d.drawLine(x0: 0.0, y0: my, x1: 1080.0, y1: my, thickness: 2.0, color: 0x66789CC0)
             my = my + 240.0
         }
+        # Diagonals across the canvas — show drawLine works at any angle.
+        gpu2d.drawLine(x0: 0.0, y0: 0.0, x1: 1080.0, y1: 720.0, thickness: 2.0, color: 0x33EF5350)
+        gpu2d.drawLine(x0: 1080.0, y0: 0.0, x1: 0.0, y1: 720.0, thickness: 2.0, color: 0x3342A5F5)
 
         # Safe-area inset (48 du) — outline only (transparent fill + border).
         gpu2d.drawBox(x: 48.0, y: 48.0, w: 984.0, h: 624.0, radius: 16.0,
