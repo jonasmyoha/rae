@@ -58,6 +58,7 @@ typedef struct {
   int target;
   int profile;
   bool no_implicit;
+  bool zero_config;  // entry was inferred from the cwd (folder `rae run`/`watch`)
 } RunOptions;
 
 typedef struct {
@@ -226,6 +227,32 @@ static bool parse_format_args(int argc, char** argv, FormatOptions* opts) {
   return true;
 }
 
+static bool file_exists(const char* path);  // defined below
+
+// Zero-config entry inference for `rae run` / `rae watch` with no file arg:
+// extract the "entry" string from a devtools.json manifest in the cwd. Not a
+// full JSON parser — finds the first "entry" key + its quoted value, which is
+// all the well-formed example manifests need. Returns a static buffer or NULL.
+static const char* manifest_entry_in_cwd(void) {
+  FILE* f = fopen("devtools.json", "rb");
+  if (!f) return NULL;
+  static char buf[8192];
+  size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+  fclose(f);
+  buf[n] = '\0';
+  char* k = strstr(buf, "\"entry\"");
+  if (!k) return NULL;
+  char* colon = strchr(k + 7, ':'); if (!colon) return NULL;
+  char* q1 = strchr(colon, '"'); if (!q1) return NULL;
+  q1 += 1;
+  char* q2 = strchr(q1, '"'); if (!q2) return NULL;
+  size_t len = (size_t)(q2 - q1);
+  static char entry[PATH_MAX];
+  if (len == 0 || len >= sizeof(entry)) return NULL;
+  memcpy(entry, q1, len); entry[len] = '\0';
+  return entry;
+}
+
 static bool parse_run_args(int argc, char** argv, RunOptions* opts) {
   opts->watch = false;
   opts->input_path = NULL;
@@ -234,6 +261,7 @@ static bool parse_run_args(int argc, char** argv, RunOptions* opts) {
   opts->target = BUILD_TARGET_LIVE;
   opts->profile = BUILD_PROFILE_RELEASE;
   opts->no_implicit = false;
+  opts->zero_config = false;
 
   int i = 0;
   while (i < argc) {
@@ -325,7 +353,41 @@ static bool parse_run_args(int argc, char** argv, RunOptions* opts) {
   }
 
   if (!opts->input_path) {
-    fprintf(stderr, "error: run command requires a file argument\n");
+    // Zero-config: infer the entry from the current directory so `rae run` /
+    // `rae watch` work from inside a project/example folder (cargo-style). Use
+    // main.rae, else the devtools.json manifest's "entry". Default the target to
+    // compiled (the Live VM is frozen) unless --target was given explicitly.
+    const char* entry = NULL;
+    if (file_exists("main.rae")) {
+      entry = "main.rae";
+    } else {
+      const char* me = manifest_entry_in_cwd();
+      if (me && file_exists(me)) entry = me;
+    }
+    if (entry) {
+      // The cwd (the project/example folder) is the module root, so bare
+      // sibling imports (e.g. 53's `import scene`) resolve against it — exactly
+      // like the devtools' `--project {{ENTRY_DIR}}`. The entry is made
+      // absolute so it's independent of the exec cwd. stdlib `lib/` + assets
+      // resolve from the repo root, which run_compiled_file chdir's into.
+      static char abs_entry[PATH_MAX];
+      opts->input_path = realpath(entry, abs_entry) ? abs_entry : entry;
+      opts->zero_config = true;
+      if (!opts->project_path) {
+        static char proj_dir[PATH_MAX];
+        if (realpath(".", proj_dir)) opts->project_path = proj_dir;
+      }
+      bool target_explicit = false;
+      for (int k = 0; k < argc; k++) {
+        if (strcmp(argv[k], "--target") == 0) { target_explicit = true; break; }
+      }
+      if (!target_explicit) opts->target = BUILD_TARGET_COMPILED;
+    }
+  }
+
+  if (!opts->input_path) {
+    fprintf(stderr, "error: run requires a file argument, or a main.rae / "
+                    "devtools.json in the current directory\n");
     return false;
   }
   return true;
@@ -1913,8 +1975,10 @@ static void print_usage(const char* prog) {
   fprintf(stderr, "  lex <file>      Tokenize Rae source file\n");
   fprintf(stderr, "  parse <file>    Parse Rae source file and dump AST\n");
   fprintf(stderr, "  format <file>   Parse Rae source file and pretty-print it\n");
-  fprintf(stderr, "  run [opts] <file>\n");
-  fprintf(stderr, "                  Execute Rae source via the bytecode VM\n");
+  fprintf(stderr, "  run [opts] [file]\n");
+  fprintf(stderr, "                  Build and run Rae source. With no file, infers\n");
+  fprintf(stderr, "                  the entry from the current folder (main.rae, or a\n");
+  fprintf(stderr, "                  devtools.json 'entry') and defaults to --target compiled.\n");
   fprintf(stderr, "                  Options: --project <dir>, --watch,\n");
   fprintf(stderr, "                           --target <live|compiled>,\n");
   fprintf(stderr, "                           --profile <dev|release> (or --debug/--release;\n");
@@ -2560,8 +2624,26 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
   return true;
 }
 
+// The lib-root: the nearest ancestor of project_root that contains
+// lib/core.rae (the repo root for examples, or a standalone `rae init` project
+// dir). Used as the exec cwd for run/watch so the `lib/` fallback and
+// root-relative asset paths resolve — matching how the devtools runs
+// (cwd = repo root, --project = the example dir). Empty out if none.
+static void find_lib_root(const char* project_root, char* out, size_t cap) {
+  out[0] = '\0';
+  if (!project_root || !project_root[0]) return;
+  if (!realpath(project_root, out)) snprintf(out, cap, "%s", project_root);
+  for (int i = 0; i < 8; i++) {
+    char probe[PATH_MAX];
+    snprintf(probe, sizeof(probe), "%s/lib/core.rae", out);
+    if (file_exists(probe)) return;
+    char* parent = strrchr(out, '/');
+    if (!parent || parent == out) break;
+    *parent = '\0';
+  }
+}
+
 static int run_compiled_file(const RunOptions* run_opts, const char* project_root) {
-  const char* file_path = run_opts->input_path;
   char temp_c[PATH_MAX];
   char temp_bin[PATH_MAX];
 
@@ -2571,20 +2653,50 @@ static int run_compiled_file(const RunOptions* run_opts, const char* project_roo
   snprintf(temp_c, sizeof(temp_c), "%s/rae_compiled_%d.c", tmp_dir, getpid());
   snprintf(temp_bin, sizeof(temp_bin), "%s/rae_compiled_%d.bin", tmp_dir, getpid());
 
+  // Resolve the entry to an absolute path, then run the WHOLE pipeline (compile
+  // + run) with cwd = project root. Module resolution and asset reads are both
+  // cwd-relative, so this makes `rae run` behave identically whether invoked
+  // from the repo root, from inside the project/example folder, or by the
+  // devtools (which runs from the root). temp_* are absolute, so safe.
+  char abs_entry[PATH_MAX];
+  const char* file_path = realpath(run_opts->input_path, abs_entry) ? abs_entry : run_opts->input_path;
+
+  // The exec cwd is the lib-root: the nearest ancestor of project_root that
+  // contains lib/core.rae (the repo root for examples, or the project dir for a
+  // standalone `rae init` project). That makes the `lib/` fallback and
+  // root-relative asset paths resolve regardless of where `rae run` was invoked
+  // — matching how the devtools runs (cwd = repo root, --project = ENTRY_DIR).
+  // Only the zero-config folder mode (`cd <folder>; rae run`) relocates the cwd
+  // to the lib-root; explicit `rae run <file>` keeps the invoker's cwd so the
+  // test harness and existing scripts are byte-for-byte unchanged.
+  char lib_root[PATH_MAX] = {0};
+  if (run_opts->zero_config) find_lib_root(project_root, lib_root, sizeof(lib_root));
+  char saved_cwd[PATH_MAX];
+  bool have_saved = (getcwd(saved_cwd, sizeof(saved_cwd)) != NULL);
+  bool chdired = false;
+  if (lib_root[0] && strcmp(lib_root, ".") != 0) {
+    if (chdir(lib_root) == 0) chdired = true;
+    else fprintf(stderr, "warning: could not chdir to '%s' (%s)\n",
+                 lib_root, strerror(errno));
+  }
+
   bool uses_raylib = false;
   bool uses_sdl3 = false;
   bool uses_webgpu = false;
   if (!build_c_backend_output(file_path, project_root, temp_c, run_opts->no_implicit, &uses_raylib, &uses_sdl3, &uses_webgpu, NULL)) {
+    if (chdired && have_saved) { if (chdir(saved_cwd) != 0) {} }
     return 1;
   }
 
   if (!gcc_link_c_to_binary(file_path, temp_c, temp_bin, uses_raylib, uses_sdl3, uses_webgpu, run_opts->profile)) {
     unlink(temp_c);
+    if (chdired && have_saved) { if (chdir(saved_cwd) != 0) {} }
     return 1;
   }
 
   int result = system(temp_bin);
 
+  if (chdired && have_saved) { if (chdir(saved_cwd) != 0) { /* best effort */ } }
   unlink(temp_c);
   unlink(temp_bin);
 
@@ -2799,13 +2911,16 @@ static bool watch_wait_for_exit(pid_t pid, int timeout_ms, int* out_status) {
   return false;
 }
 
-static pid_t watch_spawn_child(const char* bin_path) {
+static pid_t watch_spawn_child(const char* bin_path, const char* run_cwd) {
   pid_t pid = fork();
   if (pid < 0) {
     fprintf(stderr, "rae watch: fork failed (%s)\n", strerror(errno));
     return -1;
   }
   if (pid == 0) {
+    // Run with cwd = lib-root so root-relative asset paths resolve (same as
+    // `rae run` and the devtools). bin_path is absolute, so this is safe.
+    if (run_cwd && run_cwd[0]) { if (chdir(run_cwd) != 0) { /* best effort */ } }
     execl(bin_path, bin_path, (char*)NULL);
     fprintf(stderr, "rae watch: execl(%s) failed (%s)\n", bin_path, strerror(errno));
     _exit(127);
@@ -2903,6 +3018,11 @@ static bool watch_build_into_dir(const char* entry,
 static int run_watch_supervisor(const RunOptions* run_opts, const char* project_root) {
   const char* entry = run_opts->input_path;
   bool is_live = (run_opts->target == BUILD_TARGET_LIVE);
+  // Child apps run with cwd = lib-root so root-relative asset paths resolve
+  // (zero-config folder mode only). The supervisor itself stays in the cwd, so
+  // .rae/build stays in the folder.
+  char lib_root[PATH_MAX] = {0};
+  if (run_opts->zero_config) find_lib_root(project_root, lib_root, sizeof(lib_root));
 
   if (!ensure_directory_p(".rae/build")) {
     fprintf(stderr, "rae watch: could not create .rae/build directory\n");
@@ -2992,7 +3112,7 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
   // ---- Spawn first child + arm health window ----
   pid_t child = is_live
     ? watch_spawn_live_child(g_rae_executable_path, entry, project_root)
-    : watch_spawn_child(current_bin);
+    : watch_spawn_child(current_bin, lib_root);
   if (child < 0) {
     watch_state_free(&ws);
     return 1;
@@ -3042,7 +3162,7 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
           strncpy(current_bin, previous_bin, sizeof(current_bin) - 1);
           current_bin[sizeof(current_bin) - 1] = '\0';
           previous_bin[0] = '\0';
-          child = watch_spawn_child(current_bin);
+          child = watch_spawn_child(current_bin, lib_root);
           if (child < 0) break;
           spawn_t = watch_now_ms();
           health_until = spawn_t + HEALTH_MS;
@@ -3142,7 +3262,7 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
     // Spawn the new child.
     child = is_live
       ? watch_spawn_live_child(g_rae_executable_path, entry, project_root)
-      : watch_spawn_child(current_bin);
+      : watch_spawn_child(current_bin, lib_root);
     if (child < 0) break;
     spawn_t = watch_now_ms();
     health_until = spawn_t + HEALTH_MS;
