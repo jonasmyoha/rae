@@ -55,8 +55,12 @@ export class TestRunner {
     }
 
     const targets = resolveTargetList(this.config, targetId ? [targetId] : undefined);
-    const runnableTargets = targets.filter((candidate) => Boolean(candidate.testCommand));
-    const skippedTargets = targets.filter((candidate) => !candidate.testCommand);
+    // A testCommand of "-" (or empty) means "tests disabled for this target" —
+    // e.g. Live/Hybrid are demoted out of the gate (rae docs/live-vm-status.md),
+    // and a "-" must NOT be executed as a shell command (`sh -c -`).
+    const hasTests = (c: TargetConfig) => Boolean(c.testCommand) && c.testCommand!.trim() !== "-";
+    const runnableTargets = targets.filter(hasTests);
+    const skippedTargets = targets.filter((candidate) => !hasTests(candidate));
     skippedTargets.forEach((candidate) => {
       this.broadcast({
         type: "server-status",
