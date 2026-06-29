@@ -34,9 +34,9 @@ func uiSetConfigFlags(flags: view Int) pub {
 }
 
 func uiSetRaylibLogLevel(level: view Int) pub {
-  if uiBackend() is UiBackend.raylib {
-    raylibSetLogLevel(level: level)
-  }
+  # gpu2d can still use raylib's image decoder as a fallback for legacy JPG
+  # assets, so keep raylib's own INFO spam suppressed on both backends.
+  raylibSetLogLevel(level: level)
 }
 
 func uiSetDesignResolution(width: view Float, height: view Float, fit: view Int) pub {
@@ -270,4 +270,11 @@ func uiMonitorHeight(monitor: view Int) pub ret Int {
     ret uiFramebufferHeight()
   }
   ret getMonitorHeight(monitor: monitor)
+}
+
+func uiMonitorRefreshRate(monitor: view Int) pub ret Int {
+  if uiBackend() is UiBackend.gpu2d {
+    ret 60
+  }
+  ret getMonitorRefreshRate(monitor: monitor)
 }

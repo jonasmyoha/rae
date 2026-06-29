@@ -9,6 +9,7 @@ open ui/ecs
 # `config.rae`) circle-cropped at load time. Missing → placeholder.
 import core
 import raylib
+import gpu2d
 import fs
 import ui/textures
 
@@ -106,6 +107,43 @@ func cascadeAssets(reg: mod TextureRegistry, albums: view List(Album), budget: v
   let avatarKey: String = profileAvatarKey()
   if textureHas(reg: reg, key: avatarKey) is false {
     loadAvatar(reg: reg, albums: albums)
+    ret true
+  }
+  ret false
+}
+
+# Progressive gpu2d image-key loader. Mirrors cascadeAssets but registers each
+# album cover under the same Sprite.textureKey used by the raylib
+# TextureRegistry. gpu2d.loadImageKey handles PNG directly and, when raylib is
+# linked, falls back through raylib's decoder for 98's existing JPG covers.
+func cascadeGpu2dAssets(albums: view List(Album), budget: view Int) pub ret Bool {
+  var i: Int = 0
+  var loaded: Int = 0
+  loop i < albums.length {
+    if loaded >= budget {
+      ret true
+    }
+    let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: i)
+    let key: String = albumCoverKey(stem: a.stem)
+    if gpu2d.hasImageKey(key: key) is false {
+      let copiedKey: String = key
+      let copiedPath: String = a.coverPath
+      let h: Int = gpu2d.loadImageKey(key: copiedKey, path: copiedPath)
+      loaded = loaded + 1
+    }
+    i = i + 1
+  }
+
+  let avatarKey: String = profileAvatarKey()
+  if gpu2d.hasImageKey(key: avatarKey) is false {
+    let avatarStem: String = avatarAlbumStem
+    let idx: Int = findAlbumIndex(albums: albums, stem: avatarStem)
+    if idx >= 0 {
+      let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: idx)
+      let copiedKey: String = avatarKey
+      let copiedPath: String = a.coverPath
+      let h: Int = gpu2d.loadImageKey(key: copiedKey, path: copiedPath)
+    }
     ret true
   }
   ret false
