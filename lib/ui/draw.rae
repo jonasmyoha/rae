@@ -1,0 +1,66 @@
+# Backend-agnostic draw sink (QUEUE #142).
+#
+# lib/ui's render system emits drawing through these `sink*` calls instead of
+# calling raylib directly, so the same paint walk can target different
+# backends. The active backend is a module-level switch; the raylib backend
+# preserves today's exact behavior. A gpu2d backend (lib/gpu2d, SDL3/WebGPU)
+# is added in a later milestone — at which point each sink function gains a
+# `g_uiBackend is gpu2d` branch.
+#
+# Params are backend-neutral (RgbaColor + Floats), never raylib `Color`, so
+# nothing above the sink depends on a specific backend's types.
+open raylib
+import core
+import raylib
+import ui/components
+
+enum UiBackend {
+  raylib
+  gpu2d
+}
+
+# Module-level current backend. Default raylib (unchanged behavior). Apps that
+# want the GPU path call `setUiBackend(UiBackend.gpu2d)` once at startup.
+var g_uiBackend: UiBackend = UiBackend.raylib
+
+func setUiBackend(b: UiBackend) pub {
+  g_uiBackend = b
+}
+
+func uiBackend() pub ret UiBackend {
+  ret g_uiBackend
+}
+
+# RgbaColor -> raylib Color (straight, no premultiply).
+func raylibColor(c: view RgbaColor) ret Color {
+  ret Color { r: c.r, g: c.g, b: c.b, a: c.a }
+}
+
+# Filled axis-aligned rectangle.
+func sinkRect(x: view Float, y: view Float, w: view Float, h: view Float, c: view RgbaColor) pub {
+  drawRectangle(x: x, y: y, width: w, height: h, color: raylibColor(c: c))
+}
+
+# Rectangle outline (debug overlays).
+func sinkRectLines(x: view Float, y: view Float, w: view Float, h: view Float, c: view RgbaColor) pub {
+  drawRectangleLines(x: x, y: y, width: w, height: h, color: raylibColor(c: c))
+}
+
+# Filled rounded rectangle. `radius` is the corner radius in PIXELS (clamped to
+# half the smaller side); the raylib backend converts it to raylib's
+# fraction-of-smaller-side `roundness`, matching the old paintShape math.
+func sinkRoundedRect(x: view Float, y: view Float, w: view Float, h: view Float, radius: view Float, c: view RgbaColor) pub {
+  var smaller: Float = w
+  if h < smaller { smaller = h }
+  let half: Float = smaller / 2.0
+  var r: Float = radius
+  if r > half { r = half }
+  var roundness: Float = 0.0
+  if smaller > 0.0 { roundness = (r * 2.0) / smaller }
+  drawRectangleRounded(x: x, y: y, width: w, height: h, roundness: roundness, segments: 10, color: raylibColor(c: c))
+}
+
+# Filled circle centered at (cx, cy).
+func sinkCircle(cx: view Float, cy: view Float, r: view Float, c: view RgbaColor) pub {
+  drawCircle(x: cx, y: cy, radius: r, color: raylibColor(c: c))
+}
