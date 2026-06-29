@@ -1,298 +1,32 @@
-# GPU2D Mobile UI — renders one of the original 98_mobile_ui *.raescene files
-# (the Now Playing screen) through Rae's GPU2D / WebGPU path (lib/gpu2d).
+# GPU2D Mobile UI — the original 98_mobile_ui rendered through Rae's GPU2D /
+# WebGPU path (lib/gpu2d), data-driven from the same .raescene files.
 #
-# This mounts examples/98_mobile_ui/assets/scenes/music-player-now-playing.raescene
-# into an ECS UiWorld exactly the way the original app does (parseScene →
-# mountPage → layoutSystem → transformSystem), then paints the resulting
-# component tree with the gpu2d primitives. Same scene file, same data model —
-# just a different render backend (WebGPU instead of raylib).
-#
-# Sprites (the album cover + the Material-icon controls) are drawn as themed
-# placeholders for now: the gpu2d renderer has no image/texture pipeline yet
-# (QUEUE #143). Everything else — layout, shapes, the accent play circle, and
-# all text with theme-driven styles — comes straight from the scene.
+# Architecture (all data-driven ECS — no per-screen code builds the layout):
+#   * app.rae      — loads the real 98 .raescene files and composes each screen
+#                    by stacking scene instances (content + mini-player +
+#                    nav-tabs) through the ECS layout system. The Album track
+#                    list is one track-row.raescene instance per data row.
+#   * render.rae   — one render system that walks the ECS world each frame and
+#                    paints entities by component (Shape/GradientFill/Sprite/
+#                    Text), resolving text styles from the theme.
+#   * interaction  — hitAction loops the OnClick component table; dispatch
+#                    routes nav.* taps to screens and mutates playback sprites.
+#   * compose.rae  — small ECS layout helpers (subset of 98's world_helpers).
 #
 # Compiled target only:
 #   rae run --target compiled examples/105_gpu2d_mobile_ui/main.rae
 import core
 import gpu2d
-import gpu2d_text
 import sdf_text
-import ui/components
 import ui/ecs
-import ui/layout
-import ui/registry
-import ui/scene
-import ui/scene_instance
-import ui/text_style
 import ui/theme
-import ui/transform
 open ui/ecs
 
-# Design canvas matches the original app's authored scale (screenW/screenH in
-# 98_mobile_ui/config.rae), so the scene's authored sizes (hero 320, h1 36, …)
-# render at their intended proportions.
-let canvasW: Float = 498.0
-let canvasH: Float = 1079.0
-let scenePath: String = "examples/98_mobile_ui/assets/scenes/music-player-now-playing.raescene"
-
-# Compiled-target read shortcut (same one 98_mobile_ui/scene_loader.rae uses):
-# the C runtime returns a concrete String for read_file, side-stepping the
-# opt-String double-unbox bug (#138). Empty string on miss.
-func rae_ext_rae_sys_read_file(path: String) extern ret String
-
-func color(c: view RgbaColor) ret Int {
-  ret (c.a shl 24) bitor (c.r shl 16) bitor (c.g shl 8) bitor c.b
-}
-
-# Rough text width for centering/right-alignment (no measure API on the gpu2d
-# text path yet). Proportional fonts average ~0.52 em per glyph.
-func approxTextWidth(text: view String, sizePx: view Float) ret Float {
-  ret text.length().toFloat() * sizePx * 0.52
-}
-
-# --- Sprite textures: album cover + Material-style control icons ----------
-# The scene refers to images by textureKey ("albumCover" + "mat:<name>"). We
-# load a PNG per key at startup and resolve key → GPU image handle here. The
-# album cover.jpg was converted to PNG (lib/gpu2d's loader is PNG-only); the
-# control icons reuse the original app's white-on-alpha PNG icon set, tinted
-# via drawImage so they pick up the theme color the scene assigns.
-type IconSet {
-  cover: Int
-  heart: Int
-  more: Int
-  shuffle: Int
-  skipPrev: Int
-  play: Int
-  pause: Int
-  skipNext: Int
-  repeatIcon: Int
-}
-
-let iconDir: String = "examples/98_mobile_ui/assets/icons/"
-
-func loadIcons() ret IconSet {
-  ret IconSet {
-    cover: gpu2d.loadImage(path: "examples/105_gpu2d_mobile_ui/assets/cover.png")
-    heart: gpu2d.loadImage(path: "{iconDir}icon-heart.png")
-    more: gpu2d.loadImage(path: "{iconDir}icon-more.png")
-    shuffle: gpu2d.loadImage(path: "{iconDir}icon-shuffle.png")
-    skipPrev: gpu2d.loadImage(path: "{iconDir}icon-skip-prev.png")
-    play: gpu2d.loadImage(path: "{iconDir}icon-play.png")
-    pause: gpu2d.loadImage(path: "{iconDir}icon-pause.png")
-    skipNext: gpu2d.loadImage(path: "{iconDir}icon-skip-next.png")
-    repeatIcon: gpu2d.loadImage(path: "{iconDir}icon-repeat.png")
-  }
-}
-
-# Resolve a scene Sprite.textureKey to a loaded image handle (0 = none).
-func handleForKey(icons: view IconSet, key: view String) ret Int {
-  if key.equals(other: "albumCover") { ret icons.cover }
-  if key.equals(other: "mat:favorite_border") { ret icons.heart }
-  if key.equals(other: "mat:favorite") { ret icons.heart }
-  if key.equals(other: "mat:more_horiz") { ret icons.more }
-  if key.equals(other: "mat:shuffle") { ret icons.shuffle }
-  if key.equals(other: "mat:skip_previous") { ret icons.skipPrev }
-  if key.equals(other: "mat:play_arrow") { ret icons.play }
-  if key.equals(other: "mat:pause") { ret icons.pause }
-  if key.equals(other: "mat:skip_next") { ret icons.skipNext }
-  if key.equals(other: "mat:repeat") { ret icons.repeatIcon }
-  ret 0
-}
-
-func paintSprite(key: view String, tint: view RgbaColor, x: view Float, y: view Float, w: view Float, h: view Float, icons: view IconSet) {
-  let handle: Int = handleForKey(icons: icons, key: key)
-  if handle > 0 {
-    var radius: Float = 0.0
-    if key.equals(other: "albumCover") { radius = 18.0 }
-    gpu2d.drawImage(x: x, y: y, w: w, h: h, radius: radius, handle: handle, tint: color(c: tint))
-    ret
-  }
-  # Fallback for any unmapped key: a soft chip in the sprite's tint.
-  var smaller: Float = w
-  if h < smaller { smaller = h }
-  gpu2d.drawRoundedRect(x: x, y: y, w: w, h: h, radius: smaller * 0.3, color: color(c: tint))
-}
-
-# --- Render: walk the ECS world and paint each visible entity -------------
-func paintShape(world: view UiWorld, e: view EntityId, wt: view WorldTransform, cr: view ComputedRect) {
-  let sh: Shape = componentGet(this: world.shapes, entity: e)
-  if sh.kind is ShapeKind.circle {
-    var smaller: Float = cr.w
-    if cr.h < smaller { smaller = cr.h }
-    var r: Float = sh.radius
-    if r <= 0.0 { r = smaller / 2.0 }
-    let cx: Float = wt.x + cr.w / 2.0
-    let cy: Float = wt.y + cr.h / 2.0
-    gpu2d.drawRoundedRect(x: cx - r, y: cy - r, w: r * 2.0, h: r * 2.0, radius: r, color: color(c: sh.fill))
-    ret
-  }
-  if sh.strokeWidth > 0.0 {
-    gpu2d.drawBox(x: wt.x, y: wt.y, w: cr.w, h: cr.h, radius: sh.radius, fill: color(c: sh.fill), borderWidth: sh.strokeWidth, border: color(c: sh.stroke))
-    ret
-  }
-  gpu2d.drawRoundedRect(x: wt.x, y: wt.y, w: cr.w, h: cr.h, radius: sh.radius, color: color(c: sh.fill))
-}
-
-func paintText(world: view UiWorld, e: view EntityId, wt: view WorldTransform, cr: view ComputedRect, font: view SdfFont) {
-  let t: view Text => componentView(this: world.texts, entity: e)
-  if t.text.length() is 0 { ret }
-  let size: Float = textStyleSize(styleId: t.styleId)
-  let col: RgbaColor = textStyleColorRgba(styleId: t.styleId)
-
-  var centerX: Bool = textStyleIsCentered(styleId: t.styleId)
-  var rightX: Bool = textStyleIsRightAligned(styleId: t.styleId)
-  # Align component (Center / End) overrides the style default.
-  if componentHas(this: world.aligns, entity: e) {
-    let al: Align = componentGet(this: world.aligns, entity: e)
-    if al.hasX {
-      if al.x is AlignKind.center { centerX = true }
-      if al.x is AlignKind.end { rightX = true }
-    }
-  }
-  var drawX: Float = wt.x
-  if centerX or rightX {
-    let tw: Float = approxTextWidth(text: t.text, sizePx: size)
-    if centerX { drawX = wt.x + (cr.w - tw) / 2.0 }
-    if rightX { drawX = wt.x + cr.w - tw }
-  }
-  gpu2d_text.drawText(font: font, text: t.text, x: drawX, y: wt.y + size, sizePx: size, color: color(c: col))
-}
-
-func renderWorld(world: view UiWorld, font: view SdfFont, icons: view IconSet) {
-  let alive: view List(EntityId) => world.alive
-  let n: Int = alive.length
-  var i: Int = 0
-  loop i < n {
-    let e: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: i)
-    if componentHas(this: world.computedRects, entity: e) and componentHas(this: world.worldTransforms, entity: e) {
-      let cr: ComputedRect = componentGet(this: world.computedRects, entity: e)
-      let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: e)
-      if wt.visible {
-        if componentHas(this: world.shapes, entity: e) {
-          paintShape(world: world, e: e, wt: wt, cr: cr)
-        }
-        if componentHas(this: world.sprites, entity: e) {
-          let sp: Sprite = componentGet(this: world.sprites, entity: e)
-          paintSprite(key: sp.textureKey, tint: sp.tint, x: wt.x, y: wt.y, w: cr.w, h: cr.h, icons: icons)
-        }
-        if componentHas(this: world.texts, entity: e) {
-          paintText(world: world, e: e, wt: wt, cr: cr, font: font)
-        }
-      }
-    }
-    i = i + 1
-  }
-}
-
-# Parse + mount the scene into a fresh world, then run layout + transform so
-# every node has a ComputedRect + WorldTransform to paint.
-func buildWorld() ret UiWorld {
-  var world: UiWorld = createUiWorld()
-  let content: String = rae_ext_rae_sys_read_file(path: scenePath)
-  let scene: Scene = parseScene(source: content)
-  if scene.ok is false {
-    log("[gpu2d-mobile] failed to parse scene: {scene.errorMsg}")
-    ret world
-  }
-  let overrides: List(SceneOverride) = emptyOverrides()
-  let root: EntityId = mountPage(world: world, pageId: "now-playing", scene: scene, overrides: overrides, w: canvasW, h: canvasH)
-  if isNone(this: root) {
-    log("[gpu2d-mobile] failed to mount scene")
-    ret world
-  }
-  world.layoutW = canvasW
-  world.layoutH = canvasH
-  layoutSystem(world: world)
-  transformSystem(world: world)
-  ret world
-}
-
-# --- Interaction: an ECS system that operates the UI ----------------------
-# The scene's nodes carry OnClick components (actionId = "playback.toggle",
-# "playback.like", …). Each release we loop the OnClick component table,
-# hit-test the pointer against each entity's WorldTransform+ComputedRect, and
-# dispatch the topmost hit's actionId by MUTATING components in the world —
-# which the render loop then reflects. No per-widget code; the same loop
-# drives any scene that declares OnClicks.
-func pointInRect(world: view UiWorld, e: view EntityId, mx: view Float, my: view Float) ret Bool {
-  if componentHas(this: world.worldTransforms, entity: e) is false { ret false }
-  if componentHas(this: world.computedRects, entity: e) is false { ret false }
-  let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: e)
-  if wt.visible is false { ret false }
-  let cr: ComputedRect = componentGet(this: world.computedRects, entity: e)
-  if mx < wt.x { ret false }
-  if my < wt.y { ret false }
-  if mx > wt.x + cr.w { ret false }
-  if my > wt.y + cr.h { ret false }
-  ret true
-}
-
-# Topmost OnClick entity under (mx,my), or "" — reverse-iterates the table so
-# later (higher) entities win.
-func hitAction(world: view UiWorld, mx: view Float, my: view Float) ret String {
-  let n: Int = componentCount(this: world.onClicks)
-  var i: Int = n - 1
-  loop i >= 0 {
-    let e: EntityId = componentEntityAt(this: world.onClicks, i: i)
-    if pointInRect(world: world, e: e, mx: mx, my: my) {
-      let oc: OnClick = componentGet(this: world.onClicks, entity: e)
-      ret oc.actionId
-    }
-    i = i - 1
-  }
-  ret ""
-}
-
-func nodeEntity(world: view UiWorld, nodeId: view String) ret EntityId {
-  let o: opt Int = findNodeInPage(world: world, pageId: "now-playing", nodeId: nodeId)
-  if o is none { ret noEntity() }
-  let raw: Int = o
-  ret entityId(v: raw)
-}
-
-# Apply one dispatched action by mutating ECS components IN PLACE via
-# componentMod (a mutable borrow into the table) — the correct path for a
-# heap-owning component like Sprite. componentGet returns a shallow alias of
-# the table's heap, so get-mutate-set would double-free the String field;
-# componentMod mutates the live slot (one drop, no alias). componentView is
-# the read-only borrow used to inspect the current value first.
-func applyAction(world: mod UiWorld, act: view String) {
-  if act.equals(other: "playback.toggle") {
-    let e: EntityId = nodeEntity(world: world, nodeId: "PlayIcon")
-    if isNone(this: e) { ret }
-    if componentHas(this: world.sprites, entity: e) is false { ret }
-    var paused: Bool = false
-    let spv: view Sprite => componentView(this: world.sprites, entity: e)
-    if spv.textureKey.equals(other: "mat:pause") { paused = true }
-    let spm: mod Sprite => componentMod(this: world.sprites, entity: e)
-    if paused {
-      spm.textureKey = "mat:play_arrow"
-    } else {
-      spm.textureKey = "mat:pause"
-    }
-    ret
-  }
-  if act.equals(other: "playback.like") {
-    let e: EntityId = nodeEntity(world: world, nodeId: "HeartBtn")
-    if isNone(this: e) { ret }
-    if componentHas(this: world.sprites, entity: e) is false { ret }
-    var liked: Bool = false
-    let spv: view Sprite => componentView(this: world.sprites, entity: e)
-    if spv.tint.r is 238 { liked = true }
-    let spm: mod Sprite => componentMod(this: world.sprites, entity: e)
-    if liked {
-      spm.tint = themeColorByName(name: "textPrimary")
-    } else {
-      spm.tint = { r: 238, g: 99, b: 82, a: 255 }
-    }
-    ret
-  }
-}
-
 func main() ret Int {
+  # Theme must be active before scenes parse ($token colors resolve against it).
   setActiveTheme(theme: lightTheme())
-  gpu2d.initWindow(width: 440, height: 952, title: "Rae GPU2D — Now Playing")
+
+  gpu2d.initWindow(width: 440, height: 952, title: "Rae GPU2D Mobile UI")
   gpu2d.setDesignResolution(width: canvasW, height: canvasH, fit: 0)
 
   let font: SdfFont = sdf_text.loadSdfFont(
@@ -300,25 +34,33 @@ func main() ret Int {
     rawAtlasPath: "examples/104_gpu2d_coords/assets/Roboto-Regular.mtsdf.raw")
 
   let icons: IconSet = loadIcons()
-  var world: UiWorld = buildWorld()
+  let scenes: AppScenes = loadScenes()
+
+  var screen: Int = screenNowPlaying
+  var world: UiWorld = buildScreenWorld(scenes: scenes, screen: screen)
 
   var prevDown: Bool = false
   loop not gpu2d.pollClose() {
-    # Interaction system: a tap (press then release) dispatches the OnClick
-    # under the pointer and mutates the world.
+    # Interaction: a tap dispatches the OnClick under the pointer; nav actions
+    # rebuild the world for the new screen.
     let down: Bool = gpu2d.pointerDown()
     if prevDown and down is false {
       let act: String = hitAction(world: world, mx: gpu2d.pointerX(), my: gpu2d.pointerY())
       if act.length() > 0 {
-        applyAction(world: world, act: act)
+        let req: Int = dispatch(world: world, act: act)
+        if req >= 0 and req is not screen {
+          screen = req
+          world = buildScreenWorld(scenes: scenes, screen: screen)
+        }
       }
     }
     prevDown = down
 
-    gpu2d.beginFrame(r: 0.04, g: 0.04, b: 0.05, a: 1.0)
+    # Clear to the surface color so any region a scene leaves uncovered (e.g.
+    # the Album header, which has no bg of its own) reads as the page, not black.
+    gpu2d.beginFrame(r: 0.965, g: 0.965, b: 0.972, a: 1.0)
     renderWorld(world: world, font: font, icons: icons)
     gpu2d.endFrame()
-    # Event-driven: a click/move wakes us; otherwise park at ~0% CPU.
     gpu2d.waitEvents(timeoutSec: 0.2)
   }
 
