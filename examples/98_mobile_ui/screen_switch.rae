@@ -1,5 +1,6 @@
 open raylib
 open ui/ecs
+import ui/window
 # Persistent-world screen-switch handler. Called from the inner loop
 # once per frame after `dispatchActions` has chosen `nextScreen`:
 #   * willSwitch=true  → unmount the affected pages, re-mount with
@@ -122,7 +123,7 @@ func handleScreenSwitch(
       # keeps working on the new album entity.
       result.newScrollTarget = findScrollTarget(world: world)
     }
-    if file_watch.checkForChanges(watcher: watcher, now: getTime()) {
+    if file_watch.checkForChanges(watcher: watcher, now: uiNowSeconds()) {
       scenes = loadAllScenes()
       result.switching = true
       log("[data-hot-reload] scene file changed, rebuilding world")
@@ -180,7 +181,7 @@ func handleScreenSwitch(
     let gotDst: Bool = captureHeroTargetOnPage(anim: anim, world: world, pageId: incomingPageId, key: heroKey)
     if gotDst {
       setHeroVisibleOnPage(world: world, pageId: incomingPageId, key: heroKey, visible: false)
-      startHeroTransition(anim: anim, key: heroKey, durationSec: heroDuration, now: getTime())
+      startHeroTransition(anim: anim, key: heroKey, durationSec: heroDuration, now: uiNowSeconds())
       result.pendingSrc = true
       result.pendingHeroTargetPageId = "{incomingPageId}"
     }

@@ -1,5 +1,5 @@
-open raylib
 open ui/ecs
+import ui/window
 # iOS-style drag + trackpad/wheel scroll physics for the Profile and
 # Album screens.
 #
@@ -84,9 +84,9 @@ func applyDragPhysics(
   }
 
   var dragJustReleased: Bool = false
-  let curMouseX: Float = getMouseX().toFloat()
-  let curMouseY: Float = getMouseY().toFloat()
-  let curMouseDown: Bool = isMouseButtonDown(button: mouseButtonLeft)
+  let curMouseX: Float = uiPointerX()
+  let curMouseY: Float = uiPointerY()
+  let curMouseDown: Bool = uiPointerButtonDown(button: mouseButtonLeft)
   # 10pt activation distance — matches iOS UIPanGestureRecognizer.
   # Lower values cross natural hand-tremor on click and silently drop
   # release-clicks.
@@ -144,7 +144,7 @@ func applyDragPhysics(
     # Physics step: OOB → spring; in-bounds with momentum → decay.
     # Both gated on `wheelQuiet` so live trackpad momentum isn't
     # fought by the spring (caused the "5 bounces" symptom).
-    let nowSec: Float = getTime()
+    let nowSec: Float = uiNowSeconds()
     let wheelIdleSec: Float = nowSec - fsm.lastWheelTime
     let wheelQuiet: Bool = wheelIdleSec > 0.05
     let isOOB: Bool = fsm.scrollY > scrollMax or fsm.scrollY < scrollMin
@@ -222,10 +222,10 @@ func applyWheelScroll(
   if scrollOnThisScreen is false {
     ret
   }
-  let wheelMouseDown: Bool = isMouseButtonDown(button: mouseButtonLeft)
+  let wheelMouseDown: Bool = uiPointerButtonDown(button: mouseButtonLeft)
   var wheel: Float = 0.0
   if wheelMouseDown is false {
-    wheel = getMouseWheelMove()
+    wheel = uiWheelMove()
   }
   if wheel < 0.001 and wheel > -0.001 {
     ret
@@ -262,6 +262,6 @@ func applyWheelScroll(
   # drives `scrollY` each event, and the spring/momentum paths
   # are gated on `wheelQuiet` so they don't fight us.
   fsm.velocity = 0.0
-  fsm.lastWheelTime = getTime()
+  fsm.lastWheelTime = uiNowSeconds()
   updateScrollOffset(world: world, target: scrollTarget, scrollY: fsm.scrollY)
 }

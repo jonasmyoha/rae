@@ -1,5 +1,5 @@
-open raylib
 open ui/ecs
+import ui/window
 # Per-frame "did anything change?" gate. With the wait-events loop,
 # the inner loop iterates only when an OS event arrived or our timeout
 # fired — so this decision controls whether we run
@@ -58,7 +58,7 @@ func decideActive(
     }
   }
   if active is false {
-    if isMouseButtonDown(button: mouseButtonLeft) {
+    if uiPointerButtonDown(button: mouseButtonLeft) {
       active = true
     }
   }
@@ -74,20 +74,20 @@ func decideActive(
   # marks dirty on entity TRANSITIONS, so an idle cursor parked over
   # the same rect stays at 0 fps. Mouse-button bitfield is only
   # mirrored when the debug overlay needs it.
-  let mx: Float = getMouseX().toFloat()
-  let my: Float = getMouseY().toFloat()
+  let mx: Float = uiPointerX()
+  let my: Float = uiPointerY()
   let currentHovered: EntityId = hitTest(world: world, x: mx, y: my)
   var currentMouseBtns: Int = 0
   if debug.showInputOutlines {
     # Same bitfield layout as drawDebugLabels' "btn:" read-out:
     # bit 0 left, bit 1 right, bit 2 middle.
-    if isMouseButtonDown(button: 0) {
+    if uiPointerButtonDown(button: 0) {
       currentMouseBtns = currentMouseBtns + 1
     }
-    if isMouseButtonDown(button: 1) {
+    if uiPointerButtonDown(button: 1) {
       currentMouseBtns = currentMouseBtns + 2
     }
-    if isMouseButtonDown(button: 2) {
+    if uiPointerButtonDown(button: 2) {
       currentMouseBtns = currentMouseBtns + 4
     }
   }

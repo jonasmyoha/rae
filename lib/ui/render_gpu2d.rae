@@ -20,7 +20,6 @@ import sdf_text
 import ui/components
 import ui/ecs
 import ui/draw
-import ui/text_style
 import ui/theme
 import ui/icon_codepoints
 
@@ -37,6 +36,49 @@ func g2dColor(c: view RgbaColor) ret Int {
 func g2dChain(c: view RgbaColor, chain255: view Int) ret RgbaColor {
   let a: Int = (c.a * chain255) / 255
   ret RgbaColor { r: c.r, g: c.g, b: c.b, a: a }
+}
+
+func g2dTextStyleSize(styleId: view String) ret Float {
+  if styleId.equals(other: "h1") { ret 36.0 }
+  if styleId.equals(other: "h2") { ret 28.0 }
+  if styleId.equals(other: "pageTitle") { ret 28.0 }
+  if styleId.equals(other: "topBarTitle") { ret 18.0 }
+  if styleId.equals(other: "miniTitle") { ret 18.0 }
+  if styleId.equals(other: "miniMuted") { ret 14.0 }
+  if styleId.equals(other: "caption") { ret 16.0 }
+  if styleId.equals(other: "albumCaption") { ret 14.0 }
+  if styleId.equals(other: "pillLabel") { ret 18.0 }
+  if styleId.equals(other: "trackTitle") { ret 20.0 }
+  if styleId.equals(other: "trackMuted") { ret 14.0 }
+  if styleId.equals(other: "tabActive") { ret 14.0 }
+  if styleId.equals(other: "tabInactive") { ret 14.0 }
+  if styleId.equals(other: "timeTotal") { ret 16.0 }
+  ret 20.0
+}
+
+func g2dTextStyleColor(styleId: view String) ret RgbaColor {
+  if styleId.equals(other: "muted") { ret themeColorByName(name: "textMuted") }
+  if styleId.equals(other: "caption") { ret themeColorByName(name: "textMuted") }
+  if styleId.equals(other: "albumCaption") { ret themeColorByName(name: "textMuted") }
+  if styleId.equals(other: "trackMuted") { ret themeColorByName(name: "textMuted") }
+  if styleId.equals(other: "tabInactive") { ret themeColorByName(name: "textMuted") }
+  if styleId.equals(other: "timeTotal") { ret themeColorByName(name: "textMuted") }
+  if styleId.equals(other: "miniTitle") { ret themeColorByName(name: "accentText") }
+  if styleId.equals(other: "miniMuted") { ret themeColorByName(name: "accentTextMuted") }
+  if styleId.equals(other: "pillLabel") { ret themeColorByName(name: "accentText") }
+  ret themeColorByName(name: "textPrimary")
+}
+
+func g2dTextStyleIsCentered(styleId: view String) ret Bool {
+  if styleId.equals(other: "tabActive") { ret true }
+  if styleId.equals(other: "tabInactive") { ret true }
+  if styleId.equals(other: "pageTitle") { ret true }
+  ret false
+}
+
+func g2dTextStyleIsRightAligned(styleId: view String) ret Bool {
+  if styleId.equals(other: "timeTotal") { ret true }
+  ret false
 }
 
 func g2dRadius(world: view UiWorld, e: view EntityId, fallback: view Float) ret Float {
@@ -110,10 +152,10 @@ func paintSpriteG(world: view UiWorld, e: view EntityId, wt: view WorldTransform
 func paintTextG(world: view UiWorld, e: view EntityId, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int, res: view Gpu2dUi) {
   let t: view Text => componentView(this: world.texts, entity: e)
   if t.text.length() is 0 { ret }
-  let size: Float = textStyleSize(styleId: t.styleId)
-  let col: RgbaColor = g2dChain(c: textStyleColorRgba(styleId: t.styleId), chain255: chain255)
-  var centerX: Bool = textStyleIsCentered(styleId: t.styleId)
-  var rightX: Bool = textStyleIsRightAligned(styleId: t.styleId)
+  let size: Float = g2dTextStyleSize(styleId: t.styleId)
+  let col: RgbaColor = g2dChain(c: g2dTextStyleColor(styleId: t.styleId), chain255: chain255)
+  var centerX: Bool = g2dTextStyleIsCentered(styleId: t.styleId)
+  var rightX: Bool = g2dTextStyleIsRightAligned(styleId: t.styleId)
   if componentHas(this: world.aligns, entity: e) {
     let al: Align = componentGet(this: world.aligns, entity: e)
     if al.hasX {
