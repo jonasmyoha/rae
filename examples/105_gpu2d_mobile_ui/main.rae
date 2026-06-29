@@ -51,30 +51,64 @@ func approxTextWidth(text: view String, sizePx: view Float) ret Float {
   ret text.length().toFloat() * sizePx * 0.52
 }
 
-# --- Sprite placeholders (until the gpu2d image pipeline, #143) -----------
-# The album cover gets a large themed swatch; Material-icon controls get a
-# small rounded chip tinted with the sprite's resolved tint so the control
-# layout still reads. Distinguished by the conventional textureKey scheme
-# ("albumCover" vs "mat:*").
-func isCoverKey(key: view String) ret Bool {
-  ret key.equals(other: "albumCover")
+# --- Sprite textures: album cover + Material-style control icons ----------
+# The scene refers to images by textureKey ("albumCover" + "mat:<name>"). We
+# load a PNG per key at startup and resolve key → GPU image handle here. The
+# album cover.jpg was converted to PNG (lib/gpu2d's loader is PNG-only); the
+# control icons reuse the original app's white-on-alpha PNG icon set, tinted
+# via drawImage so they pick up the theme color the scene assigns.
+type IconSet {
+  cover: Int
+  heart: Int
+  more: Int
+  shuffle: Int
+  skipPrev: Int
+  play: Int
+  skipNext: Int
+  repeatIcon: Int
 }
 
-func paintSpritePlaceholder(key: view String, tint: view RgbaColor, x: view Float, y: view Float, w: view Float, h: view Float) {
-  if isCoverKey(key: key) {
-    let panel: RgbaColor = themeColorByName(name: "surfaceAlt")
-    gpu2d.drawRoundedRect(x: x, y: y, w: w, h: h, radius: 24.0, color: color(c: panel))
-    # A small play-triangle-ish accent dot so the hero doesn't read as empty.
-    let accent: RgbaColor = themeColorByName(name: "accent")
-    let r: Float = w * 0.16
-    gpu2d.drawRoundedRect(x: x + w * 0.5 - r, y: y + h * 0.5 - r, w: r * 2.0, h: r * 2.0, radius: r, color: color(c: accent))
+let iconDir: String = "examples/98_mobile_ui/assets/icons/"
+
+func loadIcons() ret IconSet {
+  ret IconSet {
+    cover: gpu2d.loadImage(path: "examples/105_gpu2d_mobile_ui/assets/cover.png")
+    heart: gpu2d.loadImage(path: "{iconDir}icon-heart.png")
+    more: gpu2d.loadImage(path: "{iconDir}icon-more.png")
+    shuffle: gpu2d.loadImage(path: "{iconDir}icon-shuffle.png")
+    skipPrev: gpu2d.loadImage(path: "{iconDir}icon-skip-prev.png")
+    play: gpu2d.loadImage(path: "{iconDir}icon-play.png")
+    skipNext: gpu2d.loadImage(path: "{iconDir}icon-skip-next.png")
+    repeatIcon: gpu2d.loadImage(path: "{iconDir}icon-repeat.png")
+  }
+}
+
+# Resolve a scene Sprite.textureKey to a loaded image handle (0 = none).
+func handleForKey(icons: view IconSet, key: view String) ret Int {
+  if key.equals(other: "albumCover") { ret icons.cover }
+  if key.equals(other: "mat:favorite_border") { ret icons.heart }
+  if key.equals(other: "mat:favorite") { ret icons.heart }
+  if key.equals(other: "mat:more_horiz") { ret icons.more }
+  if key.equals(other: "mat:shuffle") { ret icons.shuffle }
+  if key.equals(other: "mat:skip_previous") { ret icons.skipPrev }
+  if key.equals(other: "mat:play_arrow") { ret icons.play }
+  if key.equals(other: "mat:skip_next") { ret icons.skipNext }
+  if key.equals(other: "mat:repeat") { ret icons.repeatIcon }
+  ret 0
+}
+
+func paintSprite(key: view String, tint: view RgbaColor, x: view Float, y: view Float, w: view Float, h: view Float, icons: view IconSet) {
+  let handle: Int = handleForKey(icons: icons, key: key)
+  if handle > 0 {
+    var radius: Float = 0.0
+    if key.equals(other: "albumCover") { radius = 18.0 }
+    gpu2d.drawImage(x: x, y: y, w: w, h: h, radius: radius, handle: handle, tint: color(c: tint))
     ret
   }
-  # Icon chip: a soft rounded square in the icon's tint.
+  # Fallback for any unmapped key: a soft chip in the sprite's tint.
   var smaller: Float = w
   if h < smaller { smaller = h }
-  let radius: Float = smaller * 0.3
-  gpu2d.drawRoundedRect(x: x, y: y, w: w, h: h, radius: radius, color: color(c: tint))
+  gpu2d.drawRoundedRect(x: x, y: y, w: w, h: h, radius: smaller * 0.3, color: color(c: tint))
 }
 
 # --- Render: walk the ECS world and paint each visible entity -------------
@@ -122,7 +156,7 @@ func paintText(world: view UiWorld, e: view EntityId, wt: view WorldTransform, c
   gpu2d_text.drawText(font: font, text: t.text, x: drawX, y: wt.y + size, sizePx: size, color: color(c: col))
 }
 
-func renderWorld(world: view UiWorld, font: view SdfFont) {
+func renderWorld(world: view UiWorld, font: view SdfFont, icons: view IconSet) {
   let alive: view List(EntityId) => world.alive
   let n: Int = alive.length
   var i: Int = 0
@@ -137,7 +171,7 @@ func renderWorld(world: view UiWorld, font: view SdfFont) {
         }
         if componentHas(this: world.sprites, entity: e) {
           let sp: Sprite = componentGet(this: world.sprites, entity: e)
-          paintSpritePlaceholder(key: sp.textureKey, tint: sp.tint, x: wt.x, y: wt.y, w: cr.w, h: cr.h)
+          paintSprite(key: sp.textureKey, tint: sp.tint, x: wt.x, y: wt.y, w: cr.w, h: cr.h, icons: icons)
         }
         if componentHas(this: world.texts, entity: e) {
           paintText(world: world, e: e, wt: wt, cr: cr, font: font)
@@ -180,11 +214,12 @@ func main() ret Int {
     jsonPath: "examples/104_gpu2d_coords/assets/Roboto-Regular.mtsdf.json",
     rawAtlasPath: "examples/104_gpu2d_coords/assets/Roboto-Regular.mtsdf.raw")
 
+  let icons: IconSet = loadIcons()
   let world: UiWorld = buildWorld()
 
   loop not gpu2d.pollClose() {
     gpu2d.beginFrame(r: 0.04, g: 0.04, b: 0.05, a: 1.0)
-    renderWorld(world: world, font: font)
+    renderWorld(world: world, font: font, icons: icons)
     gpu2d.endFrame()
     # Static screen — no animation source, so park on events when idle.
     gpu2d.waitEvents(timeoutSec: 0.2)
