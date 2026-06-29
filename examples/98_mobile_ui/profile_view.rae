@@ -17,10 +17,12 @@ open ui/ecs
 # settings list can scroll if it overflows.
 import core
 import fs
+import gpu2d
 import sys/spotify
 import ui/components
 import ui/ecs
 import ui/layout
+import ui/window
 
 # Local circle shape helper — world_helpers.rae only exposes rect /
 # rounded-rect variants; the avatar needs a true `ShapeKind.circle`.
@@ -38,17 +40,26 @@ func setProfileCircleShape(world: mod UiWorld, entity: view EntityId, fill: view
 let profileAvatarSize: Float = 120.0
 let profileAvatarIconSize: Float = 80.0
 
+func profileAvatarLoaded(reg: view TextureRegistry, key: view String) ret Bool {
+  if uiBackend() is UiBackend.gpu2d {
+    ret gpu2d.hasImageKey(key: key)
+  }
+  ret textureHas(reg: reg, key: key)
+}
+
 func buildProfileAvatar(world: mod UiWorld, reg: view TextureRegistry) ret EntityId {
   let avatar: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: avatar, w: profileAvatarSize, h: profileAvatarSize)
 
   let avatarKey: String = profileAvatarKey()
-  if textureHas(reg: reg, key: avatarKey) {
+  if profileAvatarLoaded(reg: reg, key: avatarKey) {
     # Real profile picture — circle-cropped at load time
     # (`loadCircleCroppedTexture`). The alpha mask on the underlying
     # texture handles the round shape; no background Shape needed.
     let whiteTint: RgbaColor = { r: 255, g: 255, b: 255, a: 255 }
     setSprite(world: world, entity: avatar, key: avatarKey, tint: whiteTint)
+    let cr: CornerRadius = { radius: profileAvatarSize / 2.0 }
+    componentSet(this: world.cornerRadiuses, entity: avatar, data: cr)
   } else {
     let accentBg: RgbaColor = darkPillColor
     setProfileCircleShape(world: world, entity: avatar, fill: accentBg)
