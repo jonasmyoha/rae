@@ -1,0 +1,168 @@
+# gpu2d render path for lib/ui (#142 M3).
+#
+# A backend-specific paint walk that renders a UiWorld through lib/gpu2d
+# (WebGPU), so the SAME ECS scenes lib/ui/render.rae draws with raylib can be
+# drawn on the GPU. The two MSDF fonts (body text + Material icons) are PASSED
+# IN via Gpu2dUi (module-level heap globals miscompile); album-cover images are
+# resolved by key through the gpu2d runtime registry (gpu2d.loadImageKey /
+# drawImageKey). Shapes go through the shared draw sink (lib/ui/draw.rae) with
+# the backend switched to gpu2d.
+#
+# Text styles resolve via lib/ui/text_style (the backend-neutral table);
+# mat:* icon glyphs map name->codepoint via lib/ui/icon_codepoints and draw
+# from the Material atlas font. This is the flat alive-list walk (matches the
+# gpu2d examples); layer/hover-ordered tree walk parity can follow.
+open ui/ecs
+import core
+import gpu2d
+import gpu2d_text
+import sdf_text
+import ui/components
+import ui/ecs
+import ui/draw
+import ui/text_style
+import ui/theme
+import ui/icon_codepoints
+
+# Per-app gpu2d render resources, passed to renderSystemGpu2d each frame.
+type Gpu2dUi {
+  textFont: SdfFont   # body text (e.g. Roboto MSDF atlas)
+  iconFont: SdfFont   # Material-icon MSDF atlas (mat:* glyphs)
+}
+
+func g2dColor(c: view RgbaColor) ret Int {
+  ret (c.a shl 24) bitor (c.r shl 16) bitor (c.g shl 8) bitor c.b
+}
+
+func g2dChain(c: view RgbaColor, chain255: view Int) ret RgbaColor {
+  let a: Int = (c.a * chain255) / 255
+  ret RgbaColor { r: c.r, g: c.g, b: c.b, a: a }
+}
+
+func g2dRadius(world: view UiWorld, e: view EntityId, fallback: view Float) ret Float {
+  if componentHas(this: world.cornerRadiuses, entity: e) {
+    let cr: CornerRadius = componentGet(this: world.cornerRadiuses, entity: e)
+    ret cr.radius
+  }
+  ret fallback
+}
+
+func paintShapeG(world: view UiWorld, e: view EntityId, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int) {
+  let sh: Shape = componentGet(this: world.shapes, entity: e)
+  let fill: RgbaColor = g2dChain(c: sh.fill, chain255: chain255)
+  if sh.kind is ShapeKind.circle {
+    var smaller: Float = cr.w
+    if cr.h < smaller { smaller = cr.h }
+    var r: Float = sh.radius
+    if r <= 0.0 { r = smaller / 2.0 }
+    sinkCircle(cx: wt.x + cr.w / 2.0, cy: wt.y + cr.h / 2.0, r: r, c: fill)
+    ret
+  }
+  var radius: Float = sh.radius
+  if radius <= 0.0 { radius = g2dRadius(world: world, e: e, fallback: 0.0) }
+  if sh.strokeWidth > 0.0 {
+    let stroke: RgbaColor = g2dChain(c: sh.stroke, chain255: chain255)
+    # The sink has no fill+border op yet; approximate with gpu2d.drawBox.
+    gpu2d.drawBox(x: wt.x, y: wt.y, w: cr.w, h: cr.h, radius: radius, fill: g2dColor(c: fill), borderWidth: sh.strokeWidth, border: g2dColor(c: stroke))
+    ret
+  }
+  sinkRoundedRect(x: wt.x, y: wt.y, w: cr.w, h: cr.h, radius: radius, c: fill)
+}
+
+# GradientFill — gpu2d has no gradient primitive; approximate with a solid
+# rounded rect in the `from` color.
+func paintGradientG(world: view UiWorld, e: view EntityId, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int) {
+  let gf: GradientFill = componentGet(this: world.gradientFills, entity: e)
+  let radius: Float = g2dRadius(world: world, e: e, fallback: 0.0)
+  sinkRoundedRect(x: wt.x, y: wt.y, w: cr.w, h: cr.h, radius: radius, c: g2dChain(c: gf.from, chain255: chain255))
+}
+
+# Sprites: `mat:<name>` icons draw as a Material-atlas glyph; other keys
+# (album covers etc.) draw via the gpu2d image-key registry. Unregistered keys
+# fall back to a tinted chip so layout still reads.
+func paintSpriteG(world: view UiWorld, e: view EntityId, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int, res: view Gpu2dUi) {
+  let sp: view Sprite => componentView(this: world.sprites, entity: e)
+  let tint: RgbaColor = g2dChain(c: sp.tint, chain255: chain255)
+  let matPrefix: String = "mat:"
+  if sp.textureKey.startsWith(prefix: matPrefix) {
+    let nameLen: Int = sp.textureKey.length() - matPrefix.length()
+    let name: String = sp.textureKey.sub(start: matPrefix.length(), len: nameLen)
+    let glyph: String = iconText(name: name)
+    if glyph.length() is 0 { ret }
+    var sz: Float = cr.w
+    if cr.h < sz { sz = cr.h }
+    # Center the em-box glyph in the rect; baseline sits ~size above the bottom.
+    let gx: Float = wt.x + (cr.w - sz) / 2.0
+    let gy: Float = wt.y + (cr.h - sz) / 2.0 + sz
+    gpu2d_text.drawText(font: res.iconFont, text: glyph, x: gx, y: gy, sizePx: sz, color: g2dColor(c: tint))
+    ret
+  }
+  let radius: Float = g2dRadius(world: world, e: e, fallback: 0.0)
+  if gpu2d.hasImageKey(key: sp.textureKey) {
+    gpu2d.drawImageKey(key: sp.textureKey, x: wt.x, y: wt.y, w: cr.w, h: cr.h, radius: radius, tint: g2dColor(c: tint))
+    ret
+  }
+  var smaller: Float = cr.w
+  if cr.h < smaller { smaller = cr.h }
+  sinkRoundedRect(x: wt.x, y: wt.y, w: cr.w, h: cr.h, radius: smaller * 0.3, c: tint)
+}
+
+func paintTextG(world: view UiWorld, e: view EntityId, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int, res: view Gpu2dUi) {
+  let t: view Text => componentView(this: world.texts, entity: e)
+  if t.text.length() is 0 { ret }
+  let size: Float = textStyleSize(styleId: t.styleId)
+  let col: RgbaColor = g2dChain(c: textStyleColorRgba(styleId: t.styleId), chain255: chain255)
+  var centerX: Bool = textStyleIsCentered(styleId: t.styleId)
+  var rightX: Bool = textStyleIsRightAligned(styleId: t.styleId)
+  if componentHas(this: world.aligns, entity: e) {
+    let al: Align = componentGet(this: world.aligns, entity: e)
+    if al.hasX {
+      if al.x is AlignKind.center { centerX = true }
+      if al.x is AlignKind.end { rightX = true }
+    }
+  }
+  var drawX: Float = wt.x
+  if centerX or rightX {
+    let tw: Float = t.text.length().toFloat() * size * 0.52
+    if centerX { drawX = wt.x + (cr.w - tw) / 2.0 }
+    if rightX { drawX = wt.x + cr.w - tw }
+  }
+  gpu2d_text.drawText(font: res.textFont, text: t.text, x: drawX, y: wt.y + size, sizePx: size, color: g2dColor(c: col))
+}
+
+func paintEntityG(world: view UiWorld, e: view EntityId, res: view Gpu2dUi) {
+  if componentHas(this: world.computedRects, entity: e) is false { ret }
+  if componentHas(this: world.worldTransforms, entity: e) is false { ret }
+  let cr: ComputedRect = componentGet(this: world.computedRects, entity: e)
+  let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: e)
+  if wt.visible is false { ret }
+  if wt.alpha <= 0.0 { ret }
+  var chain255: Int = (wt.alpha * 255.0).toInt()
+  if chain255 > 255 { chain255 = 255 }
+  if chain255 < 0 { chain255 = 0 }
+  if componentHas(this: world.gradientFills, entity: e) {
+    paintGradientG(world: world, e: e, wt: wt, cr: cr, chain255: chain255)
+  } else if componentHas(this: world.shapes, entity: e) {
+    paintShapeG(world: world, e: e, wt: wt, cr: cr, chain255: chain255)
+  }
+  if componentHas(this: world.sprites, entity: e) {
+    paintSpriteG(world: world, e: e, wt: wt, cr: cr, chain255: chain255, res: res)
+  }
+  if componentHas(this: world.texts, entity: e) {
+    paintTextG(world: world, e: e, wt: wt, cr: cr, chain255: chain255, res: res)
+  }
+}
+
+# Render `world` on the gpu2d backend. Call between gpu2d.beginFrame/endFrame.
+# Switches the draw sink to the gpu2d backend so shared shape ops route to it.
+func renderSystemGpu2d(world: view UiWorld, res: view Gpu2dUi) pub {
+  setUiBackend(b: UiBackend.gpu2d)
+  let alive: view List(EntityId) => world.alive
+  let n: Int = alive.length
+  var i: Int = 0
+  loop i < n {
+    let e: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: i)
+    paintEntityG(world: world, e: e, res: res)
+    i = i + 1
+  }
+}
