@@ -32,8 +32,10 @@ open ui/ecs
 # normal boot path (`loadAllTextures`) already loaded.
 import core
 import fs
+import gpu2d
 import json
 import sys
+import ui/window
 
 let historyTempDir: String = "examples/98_mobile_ui/temp"
 let historyFilePath: String = "examples/98_mobile_ui/temp/play_history.json"
@@ -207,15 +209,25 @@ func refetchHistoryArt(history: view PlayHistory, reg: mod TextureRegistry) pub 
   loop i < n {
     let e: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: i)
     if e.textureKey.startsWith(prefix: prefix) {
-      if textureHas(reg: reg, key: e.textureKey) is false {
+      var alreadyLoaded: Bool = textureHas(reg: reg, key: e.textureKey)
+      if uiBackend() is UiBackend.gpu2d {
+        alreadyLoaded = gpu2d.hasImageKey(key: e.textureKey)
+      }
+      if alreadyLoaded is false {
         if e.artworkUrl.length() > 0 {
           let suffix: String = e.textureKey.sub(start: pLen, len: e.textureKey.length() - pLen)
           let outPath: String = "/tmp/rae_spotify_art_{suffix}.jpg"
           let ok: Bool = spotify.fetchArtwork(url: e.artworkUrl, outPath: outPath)
           if ok {
-            let tex: Texture = loadTexture(fileName: outPath)
-            let keyForReg: String = "{e.textureKey}"
-            textureRegisterDirect(reg: reg, key: own keyForReg, tex: tex)
+            if uiBackend() is UiBackend.gpu2d {
+              let keyForGpu: String = "{e.textureKey}"
+              let pathForGpu: String = "{outPath}"
+              let h: Int = gpu2d.loadImageKey(key: keyForGpu, path: pathForGpu)
+            } else {
+              let tex: Texture = loadTexture(fileName: outPath)
+              let keyForReg: String = "{e.textureKey}"
+              textureRegisterDirect(reg: reg, key: own keyForReg, tex: tex)
+            }
           }
         }
       }
@@ -245,15 +257,25 @@ func refetchHistoryArtChunk(history: view PlayHistory, reg: mod TextureRegistry,
     }
     let e: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: i)
     if e.textureKey.startsWith(prefix: prefix) {
-      if textureHas(reg: reg, key: e.textureKey) is false {
+      var alreadyLoaded: Bool = textureHas(reg: reg, key: e.textureKey)
+      if uiBackend() is UiBackend.gpu2d {
+        alreadyLoaded = gpu2d.hasImageKey(key: e.textureKey)
+      }
+      if alreadyLoaded is false {
         if e.artworkUrl.length() > 0 {
           let suffix: String = e.textureKey.sub(start: pLen, len: e.textureKey.length() - pLen)
           let outPath: String = "/tmp/rae_spotify_art_{suffix}.jpg"
           let ok: Bool = spotify.fetchArtwork(url: e.artworkUrl, outPath: outPath)
           if ok {
-            let tex: Texture = loadTexture(fileName: outPath)
-            let keyForReg: String = "{e.textureKey}"
-            textureRegisterDirect(reg: reg, key: own keyForReg, tex: tex)
+            if uiBackend() is UiBackend.gpu2d {
+              let keyForGpu: String = "{e.textureKey}"
+              let pathForGpu: String = "{outPath}"
+              let h: Int = gpu2d.loadImageKey(key: keyForGpu, path: pathForGpu)
+            } else {
+              let tex: Texture = loadTexture(fileName: outPath)
+              let keyForReg: String = "{e.textureKey}"
+              textureRegisterDirect(reg: reg, key: own keyForReg, tex: tex)
+            }
           }
           did = did + 1
         }
