@@ -55,6 +55,7 @@ import raylib
 import ui/components
 import ui/ecs
 import ui/theme
+import ui/window
 
 # ----- action ids ----------------------------------------------------
 
@@ -855,15 +856,15 @@ func drawDebugLabels(debug: view DebugSystem) {
   # state the input layer is actually polling.
   if debug.showInputOutlines {
     var lb: Int = 0
-    if isMouseButtonDown(button: 0) {
+    if uiPointerButtonDown(button: 0) {
       lb = 1
     }
     var rb: Int = 0
-    if isMouseButtonDown(button: 1) {
+    if uiPointerButtonDown(button: 1) {
       rb = 2
     }
     var mb: Int = 0
-    if isMouseButtonDown(button: 2) {
+    if uiPointerButtonDown(button: 2) {
       mb = 4
     }
     let buttons: Int = lb + rb + mb
