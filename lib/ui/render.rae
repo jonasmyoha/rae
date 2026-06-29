@@ -26,6 +26,7 @@ open raylib
 import core
 import ui/msdf
 import raylib
+import ui/draw
 import ui/icon_codepoints
 import ui/theme
 import ui/layer
@@ -64,47 +65,28 @@ func toRaylibColor(c: view RgbaColor, chain255: view Int) ret Color {
   ret Color { r: c.r, g: c.g, b: c.b, a: combinedA }
 }
 
+# Apply the chain alpha to a `RgbaColor` and return an `RgbaColor` (the
+# backend-neutral form the draw sink takes).
+func chainRgba(c: view RgbaColor, chain255: view Int) ret RgbaColor {
+  let combinedA: Int = (c.a * chain255) / 255
+  ret RgbaColor { r: c.r, g: c.g, b: c.b, a: combinedA }
+}
+
 # Paint Shape variants on `entity` using the world transform / size
 # already on it. Caller has already verified visibility + alpha > 0.
+# Drawing goes through the backend-agnostic sink (lib/ui/draw.rae).
 func paintShape(world: view UiWorld, entity: view EntityId, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int) {
   let sh: Shape = componentGet(this: world.shapes, entity: entity)
-  let fill: Color = toRaylibColor(c: sh.fill, chain255: chain255)
+  let fill: RgbaColor = chainRgba(c: sh.fill, chain255: chain255)
 
   if sh.kind is ShapeKind.rect {
-    drawRectangle(
-      x: wt.x
-      y: wt.y
-      width: cr.w
-      height: cr.h
-      color: fill
-    )
+    sinkRect(x: wt.x, y: wt.y, w: cr.w, h: cr.h, c: fill)
     ret
   }
   if sh.kind is ShapeKind.roundedRect {
-    # `Shape.radius` is given in pixels in components.rae; raylib's
-    # roundness is a fraction of the smaller side. Convert.
-    var smaller: Float = cr.w
-    if cr.h < smaller {
-      smaller = cr.h
-    }
-    let half: Float = smaller / 2.0
-    var r: Float = sh.radius
-    if r > half {
-      r = half
-    }
-    var roundness: Float = 0.0
-    if smaller > 0.0 {
-      roundness = (r * 2.0) / smaller
-    }
-    drawRectangleRounded(
-      x: wt.x
-      y: wt.y
-      width: cr.w
-      height: cr.h
-      roundness: roundness
-      segments: 10
-      color: fill
-    )
+    # `Shape.radius` is in pixels; the sink clamps it and converts to
+    # raylib's fraction-of-smaller-side roundness.
+    sinkRoundedRect(x: wt.x, y: wt.y, w: cr.w, h: cr.h, radius: sh.radius, c: fill)
     ret
   }
   if sh.kind is ShapeKind.circle {
@@ -120,7 +102,7 @@ func paintShape(world: view UiWorld, entity: view EntityId, wt: view WorldTransf
     }
     let cx: Float = wt.x + (cr.w / 2.0)
     let cy: Float = wt.y + (cr.h / 2.0)
-    drawCircle(x: cx, y: cy, radius: r, color: fill)
+    sinkCircle(cx: cx, cy: cy, r: r, c: fill)
     ret
   }
 }
