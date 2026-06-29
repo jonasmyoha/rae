@@ -55,6 +55,36 @@ func setLayoutV(world: mod UiWorld, entity: view EntityId, gap: view Float, alig
   componentSet(this: world.layouts, entity: entity, data: lay)
 }
 
+func setLayoutH(world: mod UiWorld, entity: view EntityId, gap: view Float, alignCross: AlignKind) {
+  let lay: Layout = {
+    kind: LayoutType.horizontal
+    gap: gap
+    alignMain: AlignKind.start
+    alignCross: alignCross
+    columns: 0
+    rowGap: 0.0
+    columnGap: 0.0
+  }
+  componentSet(this: world.layouts, entity: entity, data: lay)
+}
+
+func setSprite(world: mod UiWorld, entity: view EntityId, key: own String, tint: view RgbaColor) {
+  let sp: Sprite = {
+    textureKey: key
+    tint: tint
+    scaleMode: ScaleMode.fit
+    tileScale: Vec2 { x: 1.0, y: 1.0 }
+    nineSlice: Insets { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
+    hasNineSlice: false
+  }
+  componentSet(this: world.sprites, entity: entity, data: own sp)
+}
+
+func setCornerRadius(world: mod UiWorld, entity: view EntityId, radius: view Float) {
+  let cr: CornerRadius = { radius: radius }
+  componentSet(this: world.cornerRadiuses, entity: entity, data: cr)
+}
+
 func attachChildren(world: mod UiWorld, parent: view EntityId, kids: view List(EntityId)) {
   let kidsCopy: List(EntityId) = createList(EntityId, cap: kids.length)
   var i: Int = 0
