@@ -1,18 +1,16 @@
-# GPU2D Mobile UI — a data-driven, interactive mobile page rendered through
-# Rae's GPU2D / WebGPU path (lib/gpu2d, SDL3-backed window).
+# GPU2D Mobile UI — renders one of the original 98_mobile_ui *.raescene files
+# (the Now Playing screen) through Rae's GPU2D / WebGPU path (lib/gpu2d).
 #
-# What this example demonstrates:
-#   * UI stored as ECS components (ComponentTable) and painted by walking the
-#     world — the same data model the raylib-backed lib/ui uses.
-#   * A featured album card + a scrollable track list, built from an in-file
-#     data model (a `Track` list) rather than hand-placed shapes.
-#   * iOS-style scroll physics (drag + momentum + rubber-band, mouse wheel /
-#     trackpad) driven by the new gpu2d pointer/wheel input.
-#   * A hybrid render loop: busy-render while animating, park on waitEvents
-#     when idle (docs/ui-render-loop-performance.md) so it sits at ~0% CPU.
-#   * A bottom nav bar whose tabs are hit-tested and switch screens.
-#   * Theme-driven text styling via lib/ui/text_style (no per-style sizes or
-#     colors hardcoded here).
+# This mounts examples/98_mobile_ui/assets/scenes/music-player-now-playing.raescene
+# into an ECS UiWorld exactly the way the original app does (parseScene →
+# mountPage → layoutSystem → transformSystem), then paints the resulting
+# component tree with the gpu2d primitives. Same scene file, same data model —
+# just a different render backend (WebGPU instead of raylib).
+#
+# Sprites (the album cover + the Material-icon controls) are drawn as themed
+# placeholders for now: the gpu2d renderer has no image/texture pipeline yet
+# (QUEUE #143). Everything else — layout, shapes, the accent play circle, and
+# all text with theme-driven styles — comes straight from the scene.
 #
 # Compiled target only:
 #   rae run --target compiled examples/105_gpu2d_mobile_ui/main.rae
@@ -22,498 +20,127 @@ import gpu2d_text
 import sdf_text
 import ui/components
 import ui/ecs
+import ui/layout
+import ui/registry
+import ui/scene
+import ui/scene_instance
 import ui/text_style
 import ui/theme
+import ui/transform
 open ui/ecs
 
-# --- Canvas + layout (design units; mapped to the window by setDesignResolution)
-let canvasW: Float = 1080.0
-let canvasH: Float = 2280.0
-let pad: Float = 72.0
-let headerH: Float = 300.0      # fixed top band (greeting + subtitle)
-let navH: Float = 240.0         # fixed bottom band (nav tabs)
-let navTop: Float = 2040.0      # canvasH - navH
-let viewTop: Float = 300.0      # scroll viewport top  (= headerH)
-let viewBottom: Float = 2040.0  # scroll viewport bottom (= navTop)
+# Design canvas matches the original app's authored scale (screenW/screenH in
+# 98_mobile_ui/config.rae), so the scene's authored sizes (hero 320, h1 36, …)
+# render at their intended proportions.
+let canvasW: Float = 498.0
+let canvasH: Float = 1079.0
+let scenePath: String = "examples/98_mobile_ui/assets/scenes/music-player-now-playing.raescene"
 
-let screenHome: Int = 0
-let screenLibrary: Int = 1
+# Compiled-target read shortcut (same one 98_mobile_ui/scene_loader.rae uses):
+# the C runtime returns a concrete String for read_file, side-stepping the
+# opt-String double-unbox bug (#138). Empty string on miss.
+func rae_ext_rae_sys_read_file(path: String) extern ret String
 
-# --- Color ----------------------------------------------------------------
-# Pack an RgbaColor into the 0xAARRGGBB int the gpu2d primitives take. Uses the
-# bitwise word operators (parens required when mixing shl with bitor).
 func color(c: view RgbaColor) ret Int {
   ret (c.a shl 24) bitor (c.r shl 16) bitor (c.g shl 8) bitor c.b
 }
 
-func rgb(r: view Int, g: view Int, b: view Int) ret RgbaColor {
-  ret RgbaColor { r: r, g: g, b: b, a: 255 }
+# Rough text width for centering/right-alignment (no measure API on the gpu2d
+# text path yet). Proportional fonts average ~0.52 em per glyph.
+func approxTextWidth(text: view String, sizePx: view Float) ret Float {
+  ret text.length().toFloat() * sizePx * 0.52
 }
 
-# --- Scroll state ---------------------------------------------------------
-# Holds the scrollable content entity ids plus the drag/momentum FSM. Each
-# content entity stores its base (un-scrolled) local Y in ComputedRect.y and
-# its height in ComputedRect.h; applyScroll offsets WorldTransform.y by
-# scrollY and culls rows outside the viewport.
-type Scroller {
-  ids: List(EntityId)
-  contentHeight: Float
-  scrollY: Float
-  velocity: Float
-  prevDown: Bool
-  active: Bool
-  startX: Float
-  startY: Float
-  lastY: Float
-  d0: Float
-  d1: Float
-  d2: Float
-  lastWheelTime: Float
-  animating: Bool
+# --- Sprite placeholders (until the gpu2d image pipeline, #143) -----------
+# The album cover gets a large themed swatch; Material-icon controls get a
+# small rounded chip tinted with the sprite's resolved tint so the control
+# layout still reads. Distinguished by the conventional textureKey scheme
+# ("albumCover" vs "mat:*").
+func isCoverKey(key: view String) ret Bool {
+  ret key.equals(other: "albumCover")
 }
 
-func createScroller() ret Scroller {
-  ret Scroller {
-    ids: createList(EntityId, cap: 64)
-    contentHeight: 0.0
-    scrollY: 0.0
-    velocity: 0.0
-    prevDown: false
-    active: false
-    startX: 0.0
-    startY: 0.0
-    lastY: 0.0
-    d0: 0.0
-    d1: 0.0
-    d2: 0.0
-    lastWheelTime: 0.0 - 1.0
-    animating: true
+func paintSpritePlaceholder(key: view String, tint: view RgbaColor, x: view Float, y: view Float, w: view Float, h: view Float) {
+  if isCoverKey(key: key) {
+    let panel: RgbaColor = themeColorByName(name: "surfaceAlt")
+    gpu2d.drawRoundedRect(x: x, y: y, w: w, h: h, radius: 24.0, color: color(c: panel))
+    # A small play-triangle-ish accent dot so the hero doesn't read as empty.
+    let accent: RgbaColor = themeColorByName(name: "accent")
+    let r: Float = w * 0.16
+    gpu2d.drawRoundedRect(x: x + w * 0.5 - r, y: y + h * 0.5 - r, w: r * 2.0, h: r * 2.0, radius: r, color: color(c: accent))
+    ret
   }
+  # Icon chip: a soft rounded square in the icon's tint.
+  var smaller: Float = w
+  if h < smaller { smaller = h }
+  let radius: Float = smaller * 0.3
+  gpu2d.drawRoundedRect(x: x, y: y, w: w, h: h, radius: radius, color: color(c: tint))
 }
 
-# --- Scroll physics (pure helpers; iOS UIScrollView feel) -----------------
-func rubberSlope(over: view Float, dim: view Float) ret Float {
-  if dim < 0.0001 { ret 1.0 }
-  let frac: Float = over / dim
-  if frac > 1.0 { ret 0.0 }
-  if frac < 0.0 { ret 1.0 }
-  let r: Float = 1.0 - frac
-  ret r * r
-}
-
-func dampedDelta(cur: view Float, delta: view Float, low: view Float, high: view Float, dim: view Float) ret Float {
-  if cur > high and delta > 0.0 { ret delta * rubberSlope(over: cur - high, dim: dim) }
-  if cur < low and delta < 0.0 { ret delta * rubberSlope(over: low - cur, dim: dim) }
-  ret delta
-}
-
-func pickReleaseVelocity(d0: view Float, d1: view Float, d2: view Float) ret Float {
-  let thresh: Float = 0.5
-  var a0: Float = d0
-  if a0 < 0.0 { a0 = 0.0 - a0 }
-  if a0 > thresh { ret d0 }
-  var a1: Float = d1
-  if a1 < 0.0 { a1 = 0.0 - a1 }
-  if a1 > thresh { ret d1 }
-  ret d2
-}
-
-func springStepVelocity(pos: view Float, velocity: view Float, target: view Float, tension: view Float, friction: view Float) ret Float {
-  let displ: Float = pos - target
-  let accel: Float = 0.0 - tension * displ - friction * velocity
-  ret velocity + accel
-}
-
-func absf(x: view Float) ret Float {
-  if x < 0.0 { ret 0.0 - x }
-  ret x
-}
-
-func scrollFloor(sv: view Scroller) ret Float {
-  let viewportH: Float = viewBottom - viewTop
-  if sv.contentHeight <= viewportH { ret 0.0 }
-  ret 0.0 - (sv.contentHeight - viewportH)
-}
-
-# --- Entity builders ------------------------------------------------------
-# Internal: create a box entity at absolute (x,y). `baseY` is the value stored
-# in ComputedRect.y — for scrollable content it's the local Y within the
-# content region; for fixed chrome it's unused (we pass y).
-func mkBox(
-  world: mod UiWorld
-  x: view Float
-  y: view Float
-  baseY: view Float
-  w: view Float
-  h: view Float
-  radius: view Float
-  fill: view RgbaColor
-  stroke: view RgbaColor
-  strokeWidth: view Float
-) ret EntityId {
-  let e: EntityId = createEntity(world: world)
-  let cr: ComputedRect = { x: x, y: baseY, w: w, h: h }
-  let wt: WorldTransform = {
-    x: x, y: y, scaleX: 1.0, scaleY: 1.0, rotation: 0.0, alpha: 1.0, visible: true
+# --- Render: walk the ECS world and paint each visible entity -------------
+func paintShape(world: view UiWorld, e: view EntityId, wt: view WorldTransform, cr: view ComputedRect) {
+  let sh: Shape = componentGet(this: world.shapes, entity: e)
+  if sh.kind is ShapeKind.circle {
+    var smaller: Float = cr.w
+    if cr.h < smaller { smaller = cr.h }
+    var r: Float = sh.radius
+    if r <= 0.0 { r = smaller / 2.0 }
+    let cx: Float = wt.x + cr.w / 2.0
+    let cy: Float = wt.y + cr.h / 2.0
+    gpu2d.drawRoundedRect(x: cx - r, y: cy - r, w: r * 2.0, h: r * 2.0, radius: r, color: color(c: sh.fill))
+    ret
   }
-  let sh: Shape = {
-    kind: ShapeKind.roundedRect, fill: fill, stroke: stroke, strokeWidth: strokeWidth, radius: radius
+  if sh.strokeWidth > 0.0 {
+    gpu2d.drawBox(x: wt.x, y: wt.y, w: cr.w, h: cr.h, radius: sh.radius, fill: color(c: sh.fill), borderWidth: sh.strokeWidth, border: color(c: sh.stroke))
+    ret
   }
-  componentSet(this: world.computedRects, entity: e, data: cr)
-  componentSet(this: world.worldTransforms, entity: e, data: wt)
-  componentSet(this: world.shapes, entity: e, data: sh)
-  ret e
+  gpu2d.drawRoundedRect(x: wt.x, y: wt.y, w: cr.w, h: cr.h, radius: sh.radius, color: color(c: sh.fill))
 }
 
-func mkText(
-  world: mod UiWorld
-  x: view Float
-  y: view Float
-  baseY: view Float
-  w: view Float
-  h: view Float
-  text: copy String
-  styleId: copy String
-) ret EntityId {
-  let e: EntityId = createEntity(world: world)
-  let cr: ComputedRect = { x: x, y: baseY, w: w, h: h }
-  let wt: WorldTransform = {
-    x: x, y: y, scaleX: 1.0, scaleY: 1.0, rotation: 0.0, alpha: 1.0, visible: true
-  }
-  let t: Text = { text: text, styleId: styleId, wrapWidthMode: WrapWidthMode.none }
-  componentSet(this: world.computedRects, entity: e, data: cr)
-  componentSet(this: world.worldTransforms, entity: e, data: wt)
-  componentSet(this: world.texts, entity: e, data: own t)
-  ret e
-}
+func paintText(world: view UiWorld, e: view EntityId, wt: view WorldTransform, cr: view ComputedRect, font: view SdfFont) {
+  let t: view Text => componentView(this: world.texts, entity: e)
+  if t.text.length() is 0 { ret }
+  let size: Float = textStyleSize(styleId: t.styleId)
+  let col: RgbaColor = textStyleColorRgba(styleId: t.styleId)
 
-# Record a content entity into the scroller (id + grow content height).
-func record(sv: mod Scroller, e: view EntityId, localY: view Float, h: view Float) {
-  sv.ids.add(value: e)
-  let bottom: Float = localY + h
-  if bottom > sv.contentHeight { sv.contentHeight = bottom }
-}
-
-# Fixed-chrome builders (header band, nav bar) — not scrolled.
-func fBox(world: mod UiWorld, x: view Float, y: view Float, w: view Float, h: view Float, radius: view Float, fill: view RgbaColor, stroke: view RgbaColor, strokeWidth: view Float) {
-  mkBox(world: world, x: x, y: y, baseY: y, w: w, h: h, radius: radius, fill: fill, stroke: stroke, strokeWidth: strokeWidth)
-}
-func fText(world: mod UiWorld, x: view Float, y: view Float, w: view Float, h: view Float, text: copy String, styleId: copy String) {
-  mkText(world: world, x: x, y: y, baseY: y, w: w, h: h, text: text, styleId: styleId)
-}
-
-# Content builders (scrolled). `ly` is local Y within the content region;
-# initial absolute Y = viewTop + ly (applyScroll re-derives it each frame).
-func cBox(world: mod UiWorld, sv: mod Scroller, x: view Float, ly: view Float, w: view Float, h: view Float, radius: view Float, fill: view RgbaColor, stroke: view RgbaColor, strokeWidth: view Float) {
-  let e: EntityId = mkBox(world: world, x: x, y: viewTop + ly, baseY: ly, w: w, h: h, radius: radius, fill: fill, stroke: stroke, strokeWidth: strokeWidth)
-  record(sv: sv, e: e, localY: ly, h: h)
-}
-func cText(world: mod UiWorld, sv: mod Scroller, x: view Float, ly: view Float, w: view Float, h: view Float, text: copy String, styleId: copy String) {
-  let e: EntityId = mkText(world: world, x: x, y: viewTop + ly, baseY: ly, w: w, h: h, text: text, styleId: styleId)
-  record(sv: sv, e: e, localY: ly, h: h)
-}
-
-# --- Data model -----------------------------------------------------------
-type Track {
-  index: String
-  title: String
-  sub: String
-  cover: RgbaColor
-}
-
-func track(index: copy String, title: copy String, sub: copy String, cover: view RgbaColor) ret Track {
-  ret Track { index: index, title: title, sub: sub, cover: cover }
-}
-
-# A single track row in the scrollable list (card + cover swatch + labels).
-func buildTrackRow(world: mod UiWorld, sv: mod Scroller, ly: view Float, t: view Track) {
-  let white: RgbaColor = themeColorByName(name: "imageTint")
-  let outline: RgbaColor = themeColorByName(name: "outline")
-  let clear: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
-  cBox(world: world, sv: sv, x: pad, ly: ly, w: canvasW - pad * 2.0, h: 132.0, radius: 34.0, fill: white, stroke: outline, strokeWidth: 2.0)
-  cBox(world: world, sv: sv, x: pad + 40.0, ly: ly + 28.0, w: 76.0, h: 76.0, radius: 24.0, fill: t.cover, stroke: clear, strokeWidth: 0.0)
-  cText(world: world, sv: sv, x: pad + 60.0, ly: ly + 50.0, w: 48.0, h: 34.0, text: t.index, styleId: "trackIndex")
-  cText(world: world, sv: sv, x: pad + 154.0, ly: ly + 30.0, w: 600.0, h: 44.0, text: t.title, styleId: "trackTitle")
-  cText(world: world, sv: sv, x: pad + 154.0, ly: ly + 80.0, w: 600.0, h: 36.0, text: t.sub, styleId: "trackSub")
-}
-
-# Featured album card at the top of Home — accent-colored, branded.
-func buildFeaturedCard(world: mod UiWorld, sv: mod Scroller, ly: view Float) {
-  let accent: RgbaColor = themeColorByName(name: "accent")
-  let surface: RgbaColor = themeColorByName(name: "surface")
-  let white: RgbaColor = themeColorByName(name: "imageTint")
-  let clear: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
-  cBox(world: world, sv: sv, x: pad, ly: ly, w: canvasW - pad * 2.0, h: 520.0, radius: 54.0, fill: accent, stroke: clear, strokeWidth: 0.0)
-  cBox(world: world, sv: sv, x: pad + 50.0, ly: ly + 56.0, w: 340.0, h: 340.0, radius: 42.0, fill: surface, stroke: clear, strokeWidth: 0.0)
-  cBox(world: world, sv: sv, x: pad + 114.0, ly: ly + 120.0, w: 212.0, h: 212.0, radius: 106.0, fill: white, stroke: clear, strokeWidth: 0.0)
-  cText(world: world, sv: sv, x: pad + 440.0, ly: ly + 96.0, w: 380.0, h: 64.0, text: "Brambles", styleId: "cardTitle")
-  cText(world: world, sv: sv, x: pad + 440.0, ly: ly + 184.0, w: 380.0, h: 48.0, text: "Charcoal", styleId: "cardSub")
-  cText(world: world, sv: sv, x: pad + 440.0, ly: ly + 248.0, w: 410.0, h: 44.0, text: "Album · 8 songs", styleId: "cardSub")
-  cBox(world: world, sv: sv, x: pad + 440.0, ly: ly + 340.0, w: 260.0, h: 92.0, radius: 46.0, fill: surface, stroke: clear, strokeWidth: 0.0)
-  cText(world: world, sv: sv, x: pad + 520.0, ly: ly + 366.0, w: 140.0, h: 44.0, text: "Play", styleId: "pill")
-}
-
-# --- Screens --------------------------------------------------------------
-func seedHome(world: mod UiWorld, sv: mod Scroller) {
-  buildFeaturedCard(world: world, sv: sv, ly: 20.0)
-  cText(world: world, sv: sv, x: pad, ly: 600.0, w: 600.0, h: 52.0, text: "Recently played", styleId: "sectionTitle")
-  var ly: Float = 700.0
-  buildTrackRow(world: world, sv: sv, ly: ly, t: track(index: "01", title: "Dawn Runner", sub: "Brambles · 2:52", cover: rgb(r: 97, g: 194, b: 155)))
-  ly = ly + 168.0
-  buildTrackRow(world: world, sv: sv, ly: ly, t: track(index: "02", title: "Glass Houses", sub: "Charcoal · 3:18", cover: rgb(r: 251, g: 196, b: 88)))
-  ly = ly + 168.0
-  buildTrackRow(world: world, sv: sv, ly: ly, t: track(index: "03", title: "Northern Lights", sub: "Beaches · 4:01", cover: rgb(r: 77, g: 123, b: 221)))
-  ly = ly + 168.0
-  buildTrackRow(world: world, sv: sv, ly: ly, t: track(index: "04", title: "Soft Static", sub: "Brambles · 2:44", cover: rgb(r: 238, g: 99, b: 82)))
-  ly = ly + 168.0
-  buildTrackRow(world: world, sv: sv, ly: ly, t: track(index: "05", title: "Tidewater", sub: "Charcoal · 3:55", cover: rgb(r: 142, g: 120, b: 221)))
-  ly = ly + 168.0
-  buildTrackRow(world: world, sv: sv, ly: ly, t: track(index: "06", title: "Paper Boats", sub: "Beaches · 2:31", cover: rgb(r: 97, g: 194, b: 155)))
-  ly = ly + 168.0
-  buildTrackRow(world: world, sv: sv, ly: ly, t: track(index: "07", title: "Marble Sky", sub: "Charcoal · 3:07", cover: rgb(r: 251, g: 196, b: 88)))
-  ly = ly + 168.0
-  buildTrackRow(world: world, sv: sv, ly: ly, t: track(index: "08", title: "Low Tide", sub: "Beaches · 3:42", cover: rgb(r: 77, g: 123, b: 221)))
-  ly = ly + 168.0
-  buildTrackRow(world: world, sv: sv, ly: ly, t: track(index: "09", title: "Ember", sub: "Brambles · 2:19", cover: rgb(r: 238, g: 99, b: 82)))
-  ly = ly + 168.0
-  buildTrackRow(world: world, sv: sv, ly: ly, t: track(index: "10", title: "Cloud Cover", sub: "Charcoal · 4:25", cover: rgb(r: 142, g: 120, b: 221)))
-}
-
-func seedLibrary(world: mod UiWorld, sv: mod Scroller) {
-  var ly: Float = 20.0
-  buildTrackRow(world: world, sv: sv, ly: ly, t: track(index: "A", title: "Brambles", sub: "8 songs · 28 min", cover: rgb(r: 238, g: 99, b: 82)))
-  ly = ly + 168.0
-  buildTrackRow(world: world, sv: sv, ly: ly, t: track(index: "B", title: "Charcoal", sub: "10 songs · 36 min", cover: rgb(r: 251, g: 196, b: 88)))
-  ly = ly + 168.0
-  buildTrackRow(world: world, sv: sv, ly: ly, t: track(index: "C", title: "Beaches", sub: "12 songs · 41 min", cover: rgb(r: 77, g: 123, b: 221)))
-  ly = ly + 168.0
-  buildTrackRow(world: world, sv: sv, ly: ly, t: track(index: "D", title: "Glass Days", sub: "9 songs · 31 min", cover: rgb(r: 97, g: 194, b: 155)))
-  ly = ly + 168.0
-  buildTrackRow(world: world, sv: sv, ly: ly, t: track(index: "E", title: "Slow Light", sub: "7 songs · 24 min", cover: rgb(r: 142, g: 120, b: 221)))
-  ly = ly + 168.0
-  buildTrackRow(world: world, sv: sv, ly: ly, t: track(index: "F", title: "Undertow", sub: "11 songs · 39 min", cover: rgb(r: 88, g: 196, b: 196)))
-  ly = ly + 168.0
-  buildTrackRow(world: world, sv: sv, ly: ly, t: track(index: "G", title: "Far Fields", sub: "6 songs · 21 min", cover: rgb(r: 238, g: 140, b: 82)))
-  ly = ly + 168.0
-  buildTrackRow(world: world, sv: sv, ly: ly, t: track(index: "H", title: "Quiet Hours", sub: "8 songs · 27 min", cover: rgb(r: 97, g: 194, b: 155)))
-  ly = ly + 168.0
-  buildTrackRow(world: world, sv: sv, ly: ly, t: track(index: "I", title: "Long Way", sub: "13 songs · 44 min", cover: rgb(r: 251, g: 196, b: 88)))
-  ly = ly + 168.0
-  buildTrackRow(world: world, sv: sv, ly: ly, t: track(index: "J", title: "Warm Static", sub: "9 songs · 30 min", cover: rgb(r: 77, g: 123, b: 221)))
-  ly = ly + 168.0
-  buildTrackRow(world: world, sv: sv, ly: ly, t: track(index: "K", title: "Night Drive", sub: "10 songs · 35 min", cover: rgb(r: 238, g: 99, b: 82)))
-}
-
-# Build a full screen into a fresh world: page bg, scrollable content, then the
-# fixed header band + nav bar painted on top (so scrolled content is clipped by
-# overdraw, since gpu2d has no scissor yet).
-func buildScreen(world: mod UiWorld, sv: mod Scroller, screen: view Int) {
-  let surface: RgbaColor = themeColorByName(name: "surface")
-  let white: RgbaColor = themeColorByName(name: "imageTint")
-  let outline: RgbaColor = themeColorByName(name: "outline")
-  let clear: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
-
-  # Page background.
-  fBox(world: world, x: 0.0, y: 0.0, w: canvasW, h: canvasH, radius: 0.0, fill: surface, stroke: clear, strokeWidth: 0.0)
-
-  # Scrollable content per screen.
-  if screen is screenLibrary {
-    seedLibrary(world: world, sv: sv)
-  } else {
-    seedHome(world: world, sv: sv)
-  }
-
-  # Fixed header band (same color as the page so it just masks scrolled rows).
-  fBox(world: world, x: 0.0, y: 0.0, w: canvasW, h: headerH, radius: 0.0, fill: surface, stroke: clear, strokeWidth: 0.0)
-  if screen is screenLibrary {
-    fText(world: world, x: pad, y: 132.0, w: 700.0, h: 80.0, text: "Your library", styleId: "pageTitle")
-    fText(world: world, x: pad, y: 224.0, w: 620.0, h: 48.0, text: "All your albums", styleId: "subtitle")
-  } else {
-    fText(world: world, x: pad, y: 132.0, w: 700.0, h: 80.0, text: "Good evening", styleId: "pageTitle")
-    fText(world: world, x: pad, y: 224.0, w: 620.0, h: 48.0, text: "Pick something to play", styleId: "subtitle")
-  }
-
-  # Fixed nav bar.
-  fBox(world: world, x: 0.0, y: navTop, w: canvasW, h: navH, radius: 0.0, fill: surface, stroke: clear, strokeWidth: 0.0)
-  fBox(world: world, x: pad, y: navTop + 24.0, w: canvasW - pad * 2.0, h: 142.0, radius: 48.0, fill: white, stroke: outline, strokeWidth: 3.0)
-  buildNavTabs(world: world, screen: screen)
-}
-
-# Nav tab labels. Four evenly-spaced cells; the active screen's tab reads
-# tabActive (primary color), the rest read tab (muted).
-func buildNavTabs(world: mod UiWorld, screen: view Int) {
-  let labelY: Float = navTop + 78.0
-  let cellW: Float = (canvasW - pad * 2.0) / 4.0
-  navTab(world: world, idx: 0, cellW: cellW, labelY: labelY, text: "Home", active: screen is screenHome)
-  navTab(world: world, idx: 1, cellW: cellW, labelY: labelY, text: "Search", active: false)
-  navTab(world: world, idx: 2, cellW: cellW, labelY: labelY, text: "Library", active: screen is screenLibrary)
-  navTab(world: world, idx: 3, cellW: cellW, labelY: labelY, text: "Hot", active: false)
-}
-
-func navTab(world: mod UiWorld, idx: view Int, cellW: view Float, labelY: view Float, text: copy String, active: view Bool) {
-  let cx: Float = pad + cellW * idx.toFloat() + cellW * 0.5
-  var style: String = "tab"
-  if active { style = "tabActive" }
-  # Roughly center the label within its cell (no measure API here).
-  let approxW: Float = text.length().toFloat() * 14.0
-  fText(world: world, x: cx - approxW, y: labelY, w: cellW, h: 40.0, text: text, styleId: style)
-}
-
-# Which screen a tap at design-x maps to, or -1 if the tap isn't on a
-# screen-bearing tab. Home = cell 0, Library = cell 2.
-func navHit(mx: view Float, my: view Float) ret Int {
-  if my < navTop { ret 0 - 1 }
-  if mx < pad { ret 0 - 1 }
-  if mx > canvasW - pad { ret 0 - 1 }
-  let cellW: Float = (canvasW - pad * 2.0) / 4.0
-  var idx: Int = ((mx - pad) / cellW).toInt()
-  if idx < 0 { idx = 0 }
-  if idx > 3 { idx = 3 }
-  if idx is 0 { ret screenHome }
-  if idx is 2 { ret screenLibrary }
-  ret 0 - 1
-}
-
-# --- Per-frame scroll + tap update ---------------------------------------
-# Returns a requested screen (>= 0) when the user taps a nav tab, else -1.
-# Sets sv.animating so the loop knows whether to busy-render or park.
-func updateScroll(world: mod UiWorld, sv: mod Scroller) ret Int {
-  let down: Bool = gpu2d.pointerDown()
-  let mx: Float = gpu2d.pointerX()
-  let my: Float = gpu2d.pointerY()
-  let now: Float = gpu2d.nowSeconds()
-  let lowB: Float = scrollFloor(sv: sv)
-  let highB: Float = 0.0
-  let dim: Float = viewBottom - viewTop
-  var screenReq: Int = 0 - 1
-
-  # Mouse wheel / trackpad (ignored while dragging).
-  let wheel: Float = gpu2d.wheelMove()
-  if (wheel > 0.001 or wheel < -0.001) and down is false {
-    let raw: Float = 0.0 - wheel * 80.0
-    let eff: Float = dampedDelta(cur: sv.scrollY, delta: raw, low: lowB, high: highB, dim: dim)
-    sv.scrollY = sv.scrollY + eff
-    let overCap: Float = 120.0
-    if sv.scrollY < lowB - overCap { sv.scrollY = lowB - overCap }
-    if sv.scrollY > highB + overCap { sv.scrollY = highB + overCap }
-    sv.velocity = 0.0
-    sv.lastWheelTime = now
-  }
-
-  if down {
-    if sv.prevDown is false {
-      sv.startX = mx
-      sv.startY = my
-      sv.active = false
-      sv.velocity = 0.0
-      sv.d0 = 0.0
-      sv.d1 = 0.0
-      sv.d2 = 0.0
-      sv.lastY = my
-    } else {
-      let dx: Float = mx - sv.startX
-      let dy: Float = my - sv.startY
-      if sv.active is false {
-        if dx * dx + dy * dy > 100.0 { sv.active = true }
-      }
-      if sv.active {
-        let raw: Float = my - sv.lastY
-        let eff: Float = dampedDelta(cur: sv.scrollY, delta: raw, low: lowB, high: highB, dim: dim)
-        sv.scrollY = sv.scrollY + eff
-        sv.d2 = sv.d1
-        sv.d1 = sv.d0
-        sv.d0 = eff
-      }
-    }
-    sv.lastY = my
-  } else {
-    if sv.prevDown {
-      if sv.active {
-        sv.velocity = pickReleaseVelocity(d0: sv.d0, d1: sv.d1, d2: sv.d2)
-      } else {
-        # Tap (no drag) — route nav-bar taps to screen switches.
-        screenReq = navHit(mx: mx, my: my)
-      }
-      sv.active = false
-    }
-    let wheelQuiet: Bool = (now - sv.lastWheelTime) > 0.05
-    let oob: Bool = sv.scrollY > highB or sv.scrollY < lowB
-    if oob {
-      if wheelQuiet {
-        var target: Float = highB
-        if sv.scrollY < lowB { target = lowB }
-        sv.velocity = springStepVelocity(pos: sv.scrollY, velocity: sv.velocity, target: target, tension: 0.08, friction: 0.56)
-        sv.scrollY = sv.scrollY + sv.velocity
-        if absf(x: sv.scrollY - target) < 1.0 and absf(x: sv.velocity) < 0.3 {
-          sv.scrollY = target
-          sv.velocity = 0.0
-        }
-      }
-    } else {
-      if wheelQuiet {
-        if absf(x: sv.velocity) > 0.3 {
-          sv.scrollY = sv.scrollY + sv.velocity
-          sv.velocity = sv.velocity * 0.97
-        } else {
-          sv.velocity = 0.0
-        }
-      }
+  var centerX: Bool = textStyleIsCentered(styleId: t.styleId)
+  var rightX: Bool = textStyleIsRightAligned(styleId: t.styleId)
+  # Align component (Center / End) overrides the style default.
+  if componentHas(this: world.aligns, entity: e) {
+    let al: Align = componentGet(this: world.aligns, entity: e)
+    if al.hasX {
+      if al.x is AlignKind.center { centerX = true }
+      if al.x is AlignKind.end { rightX = true }
     }
   }
-  sv.prevDown = down
-
-  applyScroll(world: world, sv: sv)
-
-  let oobNow: Bool = sv.scrollY > highB or sv.scrollY < lowB
-  sv.animating = down or absf(x: sv.velocity) > 0.3 or oobNow
-  ret screenReq
-}
-
-# Offset every content entity by scrollY and cull rows outside the viewport.
-func applyScroll(world: mod UiWorld, sv: view Scroller) {
-  let n: Int = sv.ids.length
-  var i: Int = 0
-  loop i < n {
-    let e: EntityId = rae_ext_rae_buf_get(buf: sv.ids.data, index: i)
-    let cr: ComputedRect = componentGet(this: world.computedRects, entity: e)
-    var wt: WorldTransform = componentGet(this: world.worldTransforms, entity: e)
-    let absY: Float = viewTop + cr.y + sv.scrollY
-    wt.y = absY
-    var vis: Bool = true
-    if absY + cr.h <= viewTop { vis = false }
-    if absY >= viewBottom { vis = false }
-    wt.visible = vis
-    componentSet(this: world.worldTransforms, entity: e, data: wt)
-    i = i + 1
+  var drawX: Float = wt.x
+  if centerX or rightX {
+    let tw: Float = approxTextWidth(text: t.text, sizePx: size)
+    if centerX { drawX = wt.x + (cr.w - tw) / 2.0 }
+    if rightX { drawX = wt.x + cr.w - tw }
   }
+  gpu2d_text.drawText(font: font, text: t.text, x: drawX, y: wt.y + size, sizePx: size, color: color(c: col))
 }
 
-# --- Render ---------------------------------------------------------------
 func renderWorld(world: view UiWorld, font: view SdfFont) {
   let alive: view List(EntityId) => world.alive
   let n: Int = alive.length
   var i: Int = 0
   loop i < n {
     let e: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: i)
-    if componentHas(this: world.computedRects, entity: e) {
-      if componentHas(this: world.worldTransforms, entity: e) {
-        let cr: ComputedRect = componentGet(this: world.computedRects, entity: e)
-        let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: e)
-        if wt.visible {
-          if componentHas(this: world.shapes, entity: e) {
-            let sh: Shape = componentGet(this: world.shapes, entity: e)
-            if sh.strokeWidth > 0.0 {
-              gpu2d.drawBox(x: wt.x, y: wt.y, w: cr.w, h: cr.h, radius: sh.radius, fill: color(c: sh.fill), borderWidth: sh.strokeWidth, border: color(c: sh.stroke))
-            } else {
-              gpu2d.drawRoundedRect(x: wt.x, y: wt.y, w: cr.w, h: cr.h, radius: sh.radius, color: color(c: sh.fill))
-            }
-          }
-          if componentHas(this: world.texts, entity: e) {
-            let t: view Text => componentView(this: world.texts, entity: e)
-            let size: Float = textStyleSize(styleId: t.styleId)
-            let col: RgbaColor = textStyleColorRgba(styleId: t.styleId)
-            gpu2d_text.drawText(font: font, text: t.text, x: wt.x, y: wt.y + size, sizePx: size, color: color(c: col))
-          }
+    if componentHas(this: world.computedRects, entity: e) and componentHas(this: world.worldTransforms, entity: e) {
+      let cr: ComputedRect = componentGet(this: world.computedRects, entity: e)
+      let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: e)
+      if wt.visible {
+        if componentHas(this: world.shapes, entity: e) {
+          paintShape(world: world, e: e, wt: wt, cr: cr)
+        }
+        if componentHas(this: world.sprites, entity: e) {
+          let sp: Sprite = componentGet(this: world.sprites, entity: e)
+          paintSpritePlaceholder(key: sp.textureKey, tint: sp.tint, x: wt.x, y: wt.y, w: cr.w, h: cr.h)
+        }
+        if componentHas(this: world.texts, entity: e) {
+          paintText(world: world, e: e, wt: wt, cr: cr, font: font)
         }
       }
     }
@@ -521,39 +148,46 @@ func renderWorld(world: view UiWorld, font: view SdfFont) {
   }
 }
 
+# Parse + mount the scene into a fresh world, then run layout + transform so
+# every node has a ComputedRect + WorldTransform to paint.
+func buildWorld() ret UiWorld {
+  var world: UiWorld = createUiWorld()
+  let content: String = rae_ext_rae_sys_read_file(path: scenePath)
+  let scene: Scene = parseScene(source: content)
+  if scene.ok is false {
+    log("[gpu2d-mobile] failed to parse scene: {scene.errorMsg}")
+    ret world
+  }
+  let overrides: List(SceneOverride) = emptyOverrides()
+  let root: EntityId = mountPage(world: world, pageId: "now-playing", scene: scene, overrides: overrides, w: canvasW, h: canvasH)
+  if isNone(this: root) {
+    log("[gpu2d-mobile] failed to mount scene")
+    ret world
+  }
+  world.layoutW = canvasW
+  world.layoutH = canvasH
+  layoutSystem(world: world)
+  transformSystem(world: world)
+  ret world
+}
+
 func main() ret Int {
   setActiveTheme(theme: lightTheme())
-  gpu2d.initWindow(width: 432, height: 912, title: "Rae GPU2D Mobile UI")
+  gpu2d.initWindow(width: 440, height: 952, title: "Rae GPU2D — Now Playing")
   gpu2d.setDesignResolution(width: canvasW, height: canvasH, fit: 0)
 
   let font: SdfFont = sdf_text.loadSdfFont(
     jsonPath: "examples/104_gpu2d_coords/assets/Roboto-Regular.mtsdf.json",
     rawAtlasPath: "examples/104_gpu2d_coords/assets/Roboto-Regular.mtsdf.raw")
 
-  var screen: Int = screenHome
-  var world: UiWorld = createUiWorld()
-  var sv: Scroller = createScroller()
-  buildScreen(world: world, sv: sv, screen: screen)
-  applyScroll(world: world, sv: sv)
+  let world: UiWorld = buildWorld()
 
   loop not gpu2d.pollClose() {
-    let req: Int = updateScroll(world: world, sv: sv)
-    if req >= 0 and req is not screen {
-      screen = req
-      world = createUiWorld()
-      sv = createScroller()
-      buildScreen(world: world, sv: sv, screen: screen)
-      applyScroll(world: world, sv: sv)
-    }
-
     gpu2d.beginFrame(r: 0.04, g: 0.04, b: 0.05, a: 1.0)
     renderWorld(world: world, font: font)
     gpu2d.endFrame()
-
-    # Hybrid loop: park on events when idle, busy-render while animating.
-    if sv.animating is false {
-      gpu2d.waitEvents(timeoutSec: 0.2)
-    }
+    # Static screen — no animation source, so park on events when idle.
+    gpu2d.waitEvents(timeoutSec: 0.2)
   }
 
   gpu2d.closeWindow()

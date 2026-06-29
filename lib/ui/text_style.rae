@@ -1,50 +1,68 @@
 # Backend-agnostic text style resolution.
 #
-# Maps a Text node's `styleId` to a font size (design units) and an
-# RgbaColor pulled from the active theme palette, so a renderer never
-# hardcodes per-style sizes/colors in app or example code. Depends only
-# on core + ui/components + ui/theme (NO raylib / no render surface), so
-# both the raylib render path and the gpu2d render path can share it.
+# Maps a Text node's `styleId` to a font size and an RgbaColor pulled from the
+# active theme palette, so a renderer never hardcodes per-style sizes/colors in
+# app or example code. Depends only on core + ui/components + ui/theme (NO
+# raylib / no render surface), so both the raylib render path and the gpu2d
+# render path can share it.
 #
-# `lib/ui/render.rae` still carries its own (legacy, raylib-Color)
-# stylesheet for the full music-player + royalblush style sets; unifying
-# the two onto this module is tracked as part of the lib/ui/draw.rae
-# backend-sink work. New code (e.g. the gpu2d examples) should resolve
-# styles here.
+# The size/color tables mirror the music-player styles in lib/ui/render.rae
+# (authored for the ~498-unit-wide phone canvas the mobile UI uses). render.rae
+# still carries its own raylib-Color copy plus the royalblush `menu.*` set;
+# unifying both onto this module is tracked as QUEUE #142.
 import core
 import ui/components
 import ui/theme
 
-# Font size in design units for a style id. Sizes are authored for a
-# ~1080-unit-wide phone canvas (the gpu2d mobile UI example); a renderer
-# scales them to physical pixels via the design-resolution transform.
+# Font size (design units) for a style id. Mirrors render.rae's textStyleSize.
 func textStyleSize(styleId: view String) pub ret Float {
-  if styleId.equals(other: "pageTitle") { ret 64.0 }
-  if styleId.equals(other: "subtitle") { ret 30.0 }
-  if styleId.equals(other: "sectionTitle") { ret 46.0 }
-  if styleId.equals(other: "cardTitle") { ret 56.0 }
-  if styleId.equals(other: "cardSub") { ret 30.0 }
-  if styleId.equals(other: "pill") { ret 32.0 }
-  if styleId.equals(other: "trackTitle") { ret 36.0 }
-  if styleId.equals(other: "trackSub") { ret 28.0 }
-  if styleId.equals(other: "trackIndex") { ret 28.0 }
-  if styleId.equals(other: "tab") { ret 26.0 }
-  if styleId.equals(other: "tabActive") { ret 26.0 }
-  ret 30.0
+  if styleId.equals(other: "h1") { ret 36.0 }
+  if styleId.equals(other: "h2") { ret 28.0 }
+  if styleId.equals(other: "pageTitle") { ret 28.0 }
+  if styleId.equals(other: "topBarTitle") { ret 18.0 }
+  if styleId.equals(other: "miniTitle") { ret 18.0 }
+  if styleId.equals(other: "miniMuted") { ret 14.0 }
+  if styleId.equals(other: "caption") { ret 16.0 }
+  if styleId.equals(other: "albumCaption") { ret 14.0 }
+  if styleId.equals(other: "pillLabel") { ret 18.0 }
+  if styleId.equals(other: "trackTitle") { ret 20.0 }
+  if styleId.equals(other: "trackMuted") { ret 14.0 }
+  if styleId.equals(other: "tabActive") { ret 14.0 }
+  if styleId.equals(other: "tabInactive") { ret 14.0 }
+  if styleId.equals(other: "timeTotal") { ret 16.0 }
+  # body / muted / primary and unknowns.
+  ret 20.0
 }
 
-# Theme-palette color for a style id. Light/dark themes flip for free
-# because every branch reads a semantic palette slot, not a literal.
-# `card*`/`pill` styles sit on the accent-colored featured card, so they
-# read the accent-on-text slots.
+# Theme-palette color for a style id. Mirrors render.rae's textStyleColor —
+# light/dark themes flip for free because every branch reads a semantic slot.
 func textStyleColorRgba(styleId: view String) pub ret RgbaColor {
-  if styleId.equals(other: "subtitle") { ret themeColorByName(name: "textMuted") }
-  if styleId.equals(other: "trackSub") { ret themeColorByName(name: "textMuted") }
-  if styleId.equals(other: "trackIndex") { ret themeColorByName(name: "textMuted") }
-  if styleId.equals(other: "tab") { ret themeColorByName(name: "textMuted") }
-  if styleId.equals(other: "cardTitle") { ret themeColorByName(name: "accentText") }
-  if styleId.equals(other: "cardSub") { ret themeColorByName(name: "accentTextMuted") }
-  if styleId.equals(other: "pill") { ret themeColorByName(name: "accentText") }
-  # pageTitle / sectionTitle / trackTitle / tabActive / fallback.
+  if styleId.equals(other: "muted") { ret themeColorByName(name: "textMuted") }
+  if styleId.equals(other: "caption") { ret themeColorByName(name: "textMuted") }
+  if styleId.equals(other: "albumCaption") { ret themeColorByName(name: "textMuted") }
+  if styleId.equals(other: "trackMuted") { ret themeColorByName(name: "textMuted") }
+  if styleId.equals(other: "tabInactive") { ret themeColorByName(name: "textMuted") }
+  if styleId.equals(other: "timeTotal") { ret themeColorByName(name: "textMuted") }
+  # "On surfaceAlt"/accent-panel styles.
+  if styleId.equals(other: "miniTitle") { ret themeColorByName(name: "accentText") }
+  if styleId.equals(other: "miniMuted") { ret themeColorByName(name: "accentTextMuted") }
+  if styleId.equals(other: "pillLabel") { ret themeColorByName(name: "accentText") }
+  # primary / h1 / h2 / pageTitle / topBarTitle / trackTitle / tabActive / body
+  # and unknowns fall back to primary text.
   ret themeColorByName(name: "textPrimary")
+}
+
+# Whether a style id is horizontally centered within its rect. Mirrors
+# render.rae's textStyleIsCentered.
+func textStyleIsCentered(styleId: view String) pub ret Bool {
+  if styleId.equals(other: "tabActive") { ret true }
+  if styleId.equals(other: "tabInactive") { ret true }
+  if styleId.equals(other: "pageTitle") { ret true }
+  ret false
+}
+
+# Whether a style id is right-aligned within its rect (NowPlaying TimeTotal).
+func textStyleIsRightAligned(styleId: view String) pub ret Bool {
+  if styleId.equals(other: "timeTotal") { ret true }
+  ret false
 }
