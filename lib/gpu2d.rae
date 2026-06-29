@@ -102,6 +102,18 @@ func drawBox(x: Float, y: Float, w: Float, h: Float, radius: Float, fill: Int, b
 # rounded caps (a rotated capsule). Works at any angle.
 func drawLine(x0: Float, y0: Float, x1: Float, y1: Float, thickness: Float, color: Int) extern
 
+# --- Images (#143, textured rounded quads) -------------------------------
+# Decode a PNG file and upload it as a GPU texture; returns a 1-based handle
+# (0 on failure). PNG only (lodepng) — convert JPEG assets to PNG. Load once,
+# at startup; the texture is cached for the window's lifetime.
+func loadImage(path: String) extern ret Int
+
+# Draw image `handle` into the rect at (x,y) sized w×h, with optional corner
+# `radius`. `tint` is 0xAARRGGBB applied multiplicatively — 0xFFFFFFFF draws
+# the image unchanged; a solid color tints a white/alpha icon to that color.
+# Submitted between beginFrame/endFrame; drawn above boxes, below text.
+func drawImage(x: Float, y: Float, w: Float, h: Float, radius: Float, handle: Int, tint: Int) extern
+
 # --- Text (#111, MSDF glyph quads) ---------------------------------------
 # Low-level: submit one MSDF glyph quad. Screen rect is (sx0,sy0)-(sx1,sy1)
 # in pixels; UV rect is (u0,v0)-(u1,v1) NORMALISED into the atlas; `atlas` is
