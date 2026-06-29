@@ -80,6 +80,9 @@ void rae_task_drop(RaeTask* t) {
 #include <mach/task.h>
 #include <mach/task_info.h>
 #include <malloc/malloc.h>
+#include <CoreFoundation/CoreFoundation.h>
+#include <CoreGraphics/CoreGraphics.h>
+#include <ImageIO/ImageIO.h>
 #endif
 
 #if defined(__linux__) || defined(__GLIBC__)
@@ -4408,16 +4411,83 @@ static void rae_g2d_keep_frame_bind(WGPUBindGroup b) {
     g_g2d_frame_binds[g_g2d_frame_bind_n++] = b;
 }
 
+static int rae_g2d_is_jpeg_file(const char* path) {
+    if (!path) return 0;
+    FILE* f = fopen(path, "rb");
+    if (!f) return 0;
+    unsigned char sig[3] = {0, 0, 0};
+    size_t n = fread(sig, 1, sizeof(sig), f);
+    fclose(f);
+    return n == 3 && sig[0] == 0xFF && sig[1] == 0xD8 && sig[2] == 0xFF;
+}
+
+#ifdef __APPLE__
+static int rae_g2d_decode_imageio_rgba(const char* path, unsigned char** out_rgba, unsigned* out_w, unsigned* out_h) {
+    if (!path || !out_rgba || !out_w || !out_h) return 0;
+    CFStringRef cf_path = CFStringCreateWithCString(NULL, path, kCFStringEncodingUTF8);
+    if (!cf_path) return 0;
+    CFURLRef url = CFURLCreateWithFileSystemPath(NULL, cf_path, kCFURLPOSIXPathStyle, false);
+    CFRelease(cf_path);
+    if (!url) return 0;
+    CGImageSourceRef src = CGImageSourceCreateWithURL(url, NULL);
+    CFRelease(url);
+    if (!src) return 0;
+    CGImageRef img = CGImageSourceCreateImageAtIndex(src, 0, NULL);
+    CFRelease(src);
+    if (!img) return 0;
+    size_t w = CGImageGetWidth(img);
+    size_t h = CGImageGetHeight(img);
+    if (w == 0 || h == 0 || w > 16384 || h > 16384) {
+        CGImageRelease(img);
+        return 0;
+    }
+    size_t bytes = w * h * 4;
+    unsigned char* rgba = (unsigned char*)calloc(1, bytes);
+    if (!rgba) {
+        CGImageRelease(img);
+        return 0;
+    }
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    CGContextRef ctx = CGBitmapContextCreate(rgba, w, h, 8, w * 4, cs,
+                                             kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+    if (cs) CGColorSpaceRelease(cs);
+    if (!ctx) {
+        free(rgba);
+        CGImageRelease(img);
+        return 0;
+    }
+    CGContextDrawImage(ctx, CGRectMake(0, 0, (CGFloat)w, (CGFloat)h), img);
+    CGContextRelease(ctx);
+    CGImageRelease(img);
+    *out_rgba = rgba;
+    *out_w = (unsigned)w;
+    *out_h = (unsigned)h;
+    return 1;
+}
+#endif
+
 /* Decode an image file and upload it as an RGBA8 texture. PNG goes through
- * lodepng (same decoder as rae_ext_image_loadPng). When raylib is linked,
- * fall back to LoadImage so existing JPG UI assets can feed gpu2d too. */
+ * lodepng. JPEGs use ImageIO on macOS so gpu2d does not depend on raylib's
+ * OpenGL window state for Spotify / album artwork. */
 int64_t rae_ext_gpu2d_loadImage(rae_String path) {
     if (!path.data || !g_wgpu_dev || g_g2d_img_n >= RAE_G2D_MAX_IMG) return 0;
     unsigned char* rgba = NULL; unsigned uw = 0, uh = 0;
-    unsigned err = lodepng_decode32_file(&rgba, &uw, &uh, (const char*)path.data);
+    const char* cpath = (const char*)path.data;
+#ifdef __APPLE__
+    if (rae_g2d_is_jpeg_file(cpath)) {
+        if (!rae_g2d_decode_imageio_rgba(cpath, &rgba, &uw, &uh)) {
+            fprintf(stderr, "[gpu2d] image decode failed (%s): JPEG decode failed\n", cpath);
+            return 0;
+        }
+    }
+#endif
+    unsigned err = 0;
+    if (!rgba) {
+        err = lodepng_decode32_file(&rgba, &uw, &uh, cpath);
+    }
     if (err) {
 #ifdef RAE_HAS_RAYLIB
-        Image img = LoadImage((const char*)path.data);
+        Image img = LoadImage(cpath);
         if (img.data != NULL) {
             ImageFormat(&img, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
             uw = (unsigned)img.width;
@@ -4428,11 +4498,11 @@ int64_t rae_ext_gpu2d_loadImage(rae_String path) {
             UnloadImage(img);
             if (!rgba) return 0;
         } else {
-            fprintf(stderr, "[gpu2d] image decode failed (%s): %s\n", (const char*)path.data, lodepng_error_text(err));
+            fprintf(stderr, "[gpu2d] image decode failed (%s): %s\n", cpath, lodepng_error_text(err));
             return 0;
         }
 #else
-        fprintf(stderr, "[gpu2d] image decode failed (%s): %s\n", (const char*)path.data, lodepng_error_text(err));
+        fprintf(stderr, "[gpu2d] image decode failed (%s): %s\n", cpath, lodepng_error_text(err));
         return 0;
 #endif
     }
