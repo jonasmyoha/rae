@@ -1,0 +1,88 @@
+# gpu2d companion for lib/ui/debug.rae's manual FPS/memory labels.
+#
+# The debug button/menu are ECS entities and render through render_gpu2d.
+# The labels intentionally stay outside ECS, so they need a backend-specific
+# draw function just like the raylib path in debug.rae.
+import core
+import gpu2d
+import gpu2d_text
+import sdf_text
+import ui/debug
+import ui/window
+
+func formatMemMBGpu2d(kb: view Int) ret String {
+  let tenths: Int = (kb * 10) / 1024
+  let whole: Int = tenths / 10
+  let frac: Int = tenths - whole * 10
+  ret "{whole}.{frac} MB"
+}
+
+func formatFpsGpu2d(fps: view Float) ret String {
+  var rounded: Int = (fps + 0.5).toInt()
+  if rounded < 0 {
+    rounded = 0
+  }
+  ret "fps: {rounded}"
+}
+
+func drawDebugHeartbeatGpu2d(debug: mod DebugSystem, didRealWork: view Bool) {
+  if didRealWork {
+    debug.heartbeatX = debug.heartbeatX + 1.0
+    if debug.heartbeatX > debug.screenW {
+      debug.heartbeatX = -4.0
+    }
+  }
+  gpu2d.drawBox(x: debug.heartbeatX, y: 0.0, w: 4.0, h: 4.0, radius: 0.0, fill: 0xFFFFBF00, borderWidth: 0.0, border: 0x00000000)
+}
+
+func drawDebugLabelsGpu2d(debug: view DebugSystem, font: view SdfFont) {
+  let fpsText: String = formatFpsGpu2d(fps: debug.lastFps)
+  let memText: String = "mem: {formatMemMBGpu2d(kb: debug.lastRssKb)}"
+  let fontSize: Float = 14.0
+  let lineH: Float = 16.0
+  let gap: Float = 4.0
+  let bottomEdge: Float = debug.buttonY + debug.buttonSize
+  let fpsY: Float = bottomEdge + gap + fontSize
+  let memY: Float = fpsY + lineH + 2.0
+  let buttonCx: Float = debug.buttonX + debug.buttonSize * 0.5
+  let screenCx: Float = debug.screenW * 0.5
+  let rightAligned: Bool = buttonCx > screenCx
+  var fpsX: Float = debug.buttonX
+  var memX: Float = debug.buttonX
+  if rightAligned {
+    let rightEdge: Float = debug.buttonX + debug.buttonSize
+    let fpsW: Float = fpsText.length().toFloat() * fontSize * 0.52
+    let memW: Float = memText.length().toFloat() * fontSize * 0.52
+    fpsX = rightEdge - fpsW
+    memX = rightEdge - memW
+  }
+  let amber: Int = 0xFFFFBF00
+  gpu2d_text.drawText(font: font, text: fpsText, x: fpsX, y: fpsY, sizePx: fontSize, color: amber)
+  gpu2d_text.drawText(font: font, text: memText, x: memX, y: memY, sizePx: fontSize, color: amber)
+  if debug.showInputOutlines {
+    var lb: Int = 0
+    if uiPointerButtonDown(button: 0) { lb = 1 }
+    var rb: Int = 0
+    if uiPointerButtonDown(button: 1) { rb = 2 }
+    var mb: Int = 0
+    if uiPointerButtonDown(button: 2) { mb = 4 }
+    let buttons: Int = lb + rb + mb
+    let btnText: String = "btn: {buttons}"
+    let btnY: Float = memY + lineH + 2.0
+    var btnX: Float = debug.buttonX
+    if rightAligned {
+      let rightEdge: Float = debug.buttonX + debug.buttonSize
+      let btnW: Float = btnText.length().toFloat() * fontSize * 0.52
+      btnX = rightEdge - btnW
+    }
+    gpu2d_text.drawText(font: font, text: btnText, x: btnX, y: btnY, sizePx: fontSize, color: amber)
+  }
+}
+
+func updateAndRenderDebugOverlayGpu2d(debug: mod DebugSystem, now: view Float, didRealWork: view Bool, font: view SdfFont) pub {
+  recordDebugFrame(debug: debug, now: now, didRealWork: didRealWork)
+  if debug.showLabels {
+    drawDebugLabelsGpu2d(debug: debug, font: font)
+    drawDebugHeartbeatGpu2d(debug: debug, didRealWork: didRealWork)
+  }
+}

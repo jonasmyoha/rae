@@ -4380,6 +4380,33 @@ static int g_g2d_img_ubuf_n = 0;
 static WGPUBindGroup* g_g2d_img_frame_binds = NULL;  /* transient, released after submit */
 static int g_g2d_img_frame_bind_n = 0;
 static int g_g2d_img_frame_bind_cap = 0;
+static WGPUBuffer* g_g2d_frame_bufs = NULL;          /* transient per-flush buffers */
+static int g_g2d_frame_buf_n = 0;
+static int g_g2d_frame_buf_cap = 0;
+static WGPUBindGroup* g_g2d_frame_binds = NULL;      /* transient per-flush bind groups */
+static int g_g2d_frame_bind_n = 0;
+static int g_g2d_frame_bind_cap = 0;
+void rae_ext_gpu2d_flush(void);
+
+static void rae_g2d_keep_frame_buf(WGPUBuffer b) {
+    if (!b) return;
+    if (g_g2d_frame_buf_n + 1 > g_g2d_frame_buf_cap) {
+        int cap = g_g2d_frame_buf_cap ? g_g2d_frame_buf_cap * 2 : 64;
+        g_g2d_frame_bufs = (WGPUBuffer*)realloc(g_g2d_frame_bufs, (size_t)cap * sizeof(WGPUBuffer));
+        g_g2d_frame_buf_cap = cap;
+    }
+    g_g2d_frame_bufs[g_g2d_frame_buf_n++] = b;
+}
+
+static void rae_g2d_keep_frame_bind(WGPUBindGroup b) {
+    if (!b) return;
+    if (g_g2d_frame_bind_n + 1 > g_g2d_frame_bind_cap) {
+        int cap = g_g2d_frame_bind_cap ? g_g2d_frame_bind_cap * 2 : 64;
+        g_g2d_frame_binds = (WGPUBindGroup*)realloc(g_g2d_frame_binds, (size_t)cap * sizeof(WGPUBindGroup));
+        g_g2d_frame_bind_cap = cap;
+    }
+    g_g2d_frame_binds[g_g2d_frame_bind_n++] = b;
+}
 
 /* Decode an image file and upload it as an RGBA8 texture. PNG goes through
  * lodepng (same decoder as rae_ext_image_loadPng). When raylib is linked,
@@ -4546,34 +4573,35 @@ static void rae_g2d_flush_images(void) {
     if (g_g2d_img_cmd_count <= 0) return;
     rae_g2d_init_img_pipeline();
     /* Grow the per-draw uniform-buffer pool to cover this frame. */
-    if (g_g2d_img_ubuf_n < g_g2d_img_cmd_count) {
-        g_g2d_img_ubuf = (WGPUBuffer*)realloc(g_g2d_img_ubuf, (size_t)g_g2d_img_cmd_count * sizeof(WGPUBuffer));
-        for (int i = g_g2d_img_ubuf_n; i < g_g2d_img_cmd_count; i++) {
+    int total_img_uniforms = g_g2d_img_frame_bind_n + g_g2d_img_cmd_count;
+    if (g_g2d_img_ubuf_n < total_img_uniforms) {
+        g_g2d_img_ubuf = (WGPUBuffer*)realloc(g_g2d_img_ubuf, (size_t)total_img_uniforms * sizeof(WGPUBuffer));
+        for (int i = g_g2d_img_ubuf_n; i < total_img_uniforms; i++) {
             WGPUBufferDescriptor bd; memset(&bd, 0, sizeof(bd));
             bd.size = 48; bd.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
             g_g2d_img_ubuf[i] = wgpuDeviceCreateBuffer(g_wgpu_dev, &bd);
         }
-        g_g2d_img_ubuf_n = g_g2d_img_cmd_count;
+        g_g2d_img_ubuf_n = total_img_uniforms;
     }
     WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(g_g2d_img_pipeline, 0);
-    if (g_g2d_img_frame_bind_cap < g_g2d_img_cmd_count) {
-        g_g2d_img_frame_binds = (WGPUBindGroup*)realloc(g_g2d_img_frame_binds, (size_t)g_g2d_img_cmd_count * sizeof(WGPUBindGroup));
-        g_g2d_img_frame_bind_cap = g_g2d_img_cmd_count;
+    if (g_g2d_img_frame_bind_cap < total_img_uniforms) {
+        g_g2d_img_frame_binds = (WGPUBindGroup*)realloc(g_g2d_img_frame_binds, (size_t)total_img_uniforms * sizeof(WGPUBindGroup));
+        g_g2d_img_frame_bind_cap = total_img_uniforms;
     }
-    g_g2d_img_frame_bind_n = 0;
     wgpuRenderPassEncoderSetPipeline(g_g2d_pass, g_g2d_img_pipeline);
     for (int i = 0; i < g_g2d_img_cmd_count; i++) {
         RaeG2dImgCmd* c = &g_g2d_img_cmds[i];
         int idx = c->handle - 1;
         if (idx < 0 || idx >= g_g2d_img_n || !g_g2d_img_view[idx]) continue;
+        int uniform_slot = g_g2d_img_frame_bind_n;
         float u[12];
         u[0]=c->rect[0]; u[1]=c->rect[1]; u[2]=c->rect[2]; u[3]=c->rect[3];
         u[4]=c->tint[0]; u[5]=c->tint[1]; u[6]=c->tint[2]; u[7]=c->tint[3];
         u[8]=c->radius;  u[9]=0.0f; u[10]=0.0f; u[11]=0.0f;
-        wgpuQueueWriteBuffer(g_wgpu_queue, g_g2d_img_ubuf[i], 0, u, sizeof(u));
+        wgpuQueueWriteBuffer(g_wgpu_queue, g_g2d_img_ubuf[uniform_slot], 0, u, sizeof(u));
         WGPUBindGroupEntry e[4]; memset(e, 0, sizeof(e));
         e[0].binding = 0; e[0].buffer = g_g2d_uniform; e[0].size = 32;
-        e[1].binding = 1; e[1].buffer = g_g2d_img_ubuf[i]; e[1].size = 48;
+        e[1].binding = 1; e[1].buffer = g_g2d_img_ubuf[uniform_slot]; e[1].size = 48;
         e[2].binding = 2; e[2].textureView = g_g2d_img_view[idx];
         e[3].binding = 3; e[3].sampler = g_g2d_sampler;
         WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
@@ -4584,12 +4612,16 @@ static void rae_g2d_flush_images(void) {
         wgpuRenderPassEncoderDraw(g_g2d_pass, 6, 1, 0, 0);
     }
     wgpuBindGroupLayoutRelease(bgl);
+    g_g2d_img_cmd_count = 0;
 }
 
 void rae_ext_gpu2d_beginFrame(double r, double g, double b, double a) {
     g_g2d_prim_count = 0;
     for (int i = 0; i < RAE_SDF_MAX_ATLAS; i++) g_g2d_text_count[i] = 0;
     g_g2d_img_cmd_count = 0;
+    g_g2d_img_frame_bind_n = 0;
+    g_g2d_frame_buf_n = 0;
+    g_g2d_frame_bind_n = 0;
     if (!g_g2d_off_view) return;
     /* Render into the persistent offscreen target (NOT the surface drawable),
      * so a frame always renders regardless of window compositing. */
@@ -4666,47 +4698,14 @@ static void rae_g2d_save_screenshot(const char* path) {
 
 void rae_ext_gpu2d_endFrame(void) {
     if (!g_g2d_pass) return;
-    int have_text = 0;
-    for (int i = 0; i < RAE_SDF_MAX_ATLAS; i++) if (g_g2d_text_count[i] > 0) have_text = 1;
-    int have_img = (g_g2d_img_cmd_count > 0);
-    if (g_g2d_prim_count > 0 || have_text || have_img) {
-        /* rae_g2d_init_pipeline also creates the shared viewport uniform that
-         * the box, image, and text bind groups reference at binding 0. */
-        rae_g2d_init_pipeline();
-        float xf[8]; rae_g2d_compute_xform(xf);
-        wgpuQueueWriteBuffer(g_wgpu_queue, g_g2d_uniform, 0, xf, sizeof(xf));
-    }
-    if (g_g2d_prim_count > 0) {
-        rae_g2d_ensure_inst(g_g2d_prim_count);
-        if (!g_g2d_bind) rae_g2d_rebuild_bind();
-        wgpuQueueWriteBuffer(g_wgpu_queue, g_g2d_instbuf, 0, g_g2d_prims,
-                             (size_t)g_g2d_prim_count * G2D_PRIM_FLOATS * sizeof(float));
-        wgpuRenderPassEncoderSetPipeline(g_g2d_pass, g_g2d_pipeline);
-        wgpuRenderPassEncoderSetBindGroup(g_g2d_pass, 0, g_g2d_bind, 0, NULL);
-        wgpuRenderPassEncoderDraw(g_g2d_pass, 6, (uint32_t)g_g2d_prim_count, 0, 0);
-    }
-    /* Images on top of boxes, under text. */
-    rae_g2d_flush_images();
-    if (have_text) {
-        /* One text draw per atlas that has glyphs this frame (so Roboto text
-         * and the Material-icon atlas coexist). */
-        rae_g2d_init_text_pipeline();
-        wgpuRenderPassEncoderSetPipeline(g_g2d_pass, g_g2d_text_pipeline);
-        for (int ai = 0; ai < RAE_SDF_MAX_ATLAS; ai++) {
-            if (g_g2d_text_count[ai] <= 0) continue;
-            if (!rae_g2d_atlas_texview(ai + 1)) continue;
-            rae_g2d_ensure_text_inst(ai, g_g2d_text_count[ai]);
-            if (!g_g2d_text_bind[ai]) rae_g2d_rebuild_text_bind(ai);
-            if (!g_g2d_text_bind[ai]) continue;
-            wgpuQueueWriteBuffer(g_wgpu_queue, g_g2d_text_instbuf[ai], 0, g_g2d_text_prims[ai],
-                                 (size_t)g_g2d_text_count[ai] * G2D_TEXT_FLOATS * sizeof(float));
-            wgpuRenderPassEncoderSetBindGroup(g_g2d_pass, 0, g_g2d_text_bind[ai], 0, NULL);
-            wgpuRenderPassEncoderDraw(g_g2d_pass, 6, (uint32_t)g_g2d_text_count[ai], 0, 0);
-        }
-    }
+    rae_ext_gpu2d_flush();
     wgpuRenderPassEncoderEnd(g_g2d_pass);
     WGPUCommandBuffer cb = wgpuCommandEncoderFinish(g_g2d_enc, NULL);
     wgpuQueueSubmit(g_wgpu_queue, 1, &cb);
+    for (int i = 0; i < g_g2d_frame_bind_n; i++) wgpuBindGroupRelease(g_g2d_frame_binds[i]);
+    g_g2d_frame_bind_n = 0;
+    for (int i = 0; i < g_g2d_frame_buf_n; i++) wgpuBufferRelease(g_g2d_frame_bufs[i]);
+    g_g2d_frame_buf_n = 0;
     /* The per-image bind groups were live for the pass; safe to free now. */
     for (int i = 0; i < g_g2d_img_frame_bind_n; i++) wgpuBindGroupRelease(g_g2d_img_frame_binds[i]);
     g_g2d_img_frame_bind_n = 0;
@@ -4742,6 +4741,78 @@ void rae_ext_gpu2d_endFrame(void) {
     if (st.texture) wgpuTextureRelease(st.texture);
 }
 
+void rae_ext_gpu2d_flush(void) {
+    if (!g_g2d_pass) return;
+    int have_text = 0;
+    for (int i = 0; i < RAE_SDF_MAX_ATLAS; i++) if (g_g2d_text_count[i] > 0) have_text = 1;
+    int have_img = (g_g2d_img_cmd_count > 0);
+    if (g_g2d_prim_count > 0 || have_text || have_img) {
+        /* rae_g2d_init_pipeline also creates the shared viewport uniform that
+         * the box, image, and text bind groups reference at binding 0. */
+        rae_g2d_init_pipeline();
+        float xf[8]; rae_g2d_compute_xform(xf);
+        wgpuQueueWriteBuffer(g_wgpu_queue, g_g2d_uniform, 0, xf, sizeof(xf));
+    }
+    if (g_g2d_prim_count > 0) {
+        WGPUBufferDescriptor bd; memset(&bd, 0, sizeof(bd));
+        bd.size = (uint64_t)g_g2d_prim_count * G2D_PRIM_FLOATS * sizeof(float);
+        bd.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
+        WGPUBuffer instbuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &bd);
+        wgpuQueueWriteBuffer(g_wgpu_queue, instbuf, 0, g_g2d_prims,
+                             (size_t)g_g2d_prim_count * G2D_PRIM_FLOATS * sizeof(float));
+        WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(g_g2d_pipeline, 0);
+        WGPUBindGroupEntry e[2]; memset(e, 0, sizeof(e));
+        e[0].binding = 0; e[0].buffer = g_g2d_uniform; e[0].size = 32;
+        e[1].binding = 1; e[1].buffer = instbuf;
+        e[1].size = (uint64_t)g_g2d_prim_count * G2D_PRIM_FLOATS * sizeof(float);
+        WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
+        bgd.layout = bgl; bgd.entryCount = 2; bgd.entries = e;
+        WGPUBindGroup bind = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
+        wgpuBindGroupLayoutRelease(bgl);
+        rae_g2d_keep_frame_buf(instbuf);
+        rae_g2d_keep_frame_bind(bind);
+        wgpuRenderPassEncoderSetPipeline(g_g2d_pass, g_g2d_pipeline);
+        wgpuRenderPassEncoderSetBindGroup(g_g2d_pass, 0, bind, 0, NULL);
+        wgpuRenderPassEncoderDraw(g_g2d_pass, 6, (uint32_t)g_g2d_prim_count, 0, 0);
+        g_g2d_prim_count = 0;
+    }
+    /* Images on top of boxes, under text. */
+    rae_g2d_flush_images();
+    if (have_text) {
+        /* One text draw per atlas that has glyphs this frame (so Roboto text
+         * and the Material-icon atlas coexist). */
+        rae_g2d_init_text_pipeline();
+        wgpuRenderPassEncoderSetPipeline(g_g2d_pass, g_g2d_text_pipeline);
+        for (int ai = 0; ai < RAE_SDF_MAX_ATLAS; ai++) {
+            if (g_g2d_text_count[ai] <= 0) continue;
+            if (!rae_g2d_atlas_texview(ai + 1)) continue;
+            WGPUBufferDescriptor bd; memset(&bd, 0, sizeof(bd));
+            bd.size = (uint64_t)g_g2d_text_count[ai] * G2D_TEXT_FLOATS * sizeof(float);
+            bd.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
+            WGPUBuffer instbuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &bd);
+            wgpuQueueWriteBuffer(g_wgpu_queue, instbuf, 0, g_g2d_text_prims[ai],
+                                 (size_t)g_g2d_text_count[ai] * G2D_TEXT_FLOATS * sizeof(float));
+            WGPUTextureView view = rae_g2d_atlas_texview(ai + 1);
+            WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(g_g2d_text_pipeline, 0);
+            WGPUBindGroupEntry e[4]; memset(e, 0, sizeof(e));
+            e[0].binding = 0; e[0].buffer = g_g2d_uniform; e[0].size = 32;
+            e[1].binding = 1; e[1].buffer = instbuf;
+            e[1].size = (uint64_t)g_g2d_text_count[ai] * G2D_TEXT_FLOATS * sizeof(float);
+            e[2].binding = 2; e[2].textureView = view;
+            e[3].binding = 3; e[3].sampler = g_g2d_sampler;
+            WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
+            bgd.layout = bgl; bgd.entryCount = 4; bgd.entries = e;
+            WGPUBindGroup bind = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
+            wgpuBindGroupLayoutRelease(bgl);
+            rae_g2d_keep_frame_buf(instbuf);
+            rae_g2d_keep_frame_bind(bind);
+            wgpuRenderPassEncoderSetBindGroup(g_g2d_pass, 0, bind, 0, NULL);
+            wgpuRenderPassEncoderDraw(g_g2d_pass, 6, (uint32_t)g_g2d_text_count[ai], 0, 0);
+            g_g2d_text_count[ai] = 0;
+        }
+    }
+}
+
 void rae_ext_gpu2d_closeWindow(void) {
     if (g_g2d_off_view) { wgpuTextureViewRelease(g_g2d_off_view); g_g2d_off_view = NULL; }
     if (g_g2d_off_tex)  { wgpuTextureRelease(g_g2d_off_tex);  g_g2d_off_tex = NULL; }
@@ -4764,6 +4835,12 @@ void rae_ext_gpu2d_closeWindow(void) {
     if (g_g2d_pipeline) { wgpuRenderPipelineRelease(g_g2d_pipeline); g_g2d_pipeline = NULL; }
     if (g_g2d_prims) { free(g_g2d_prims); g_g2d_prims = NULL; g_g2d_prim_capf = 0; }
     g_g2d_prim_count = 0;
+    for (int i = 0; i < g_g2d_frame_bind_n; i++) wgpuBindGroupRelease(g_g2d_frame_binds[i]);
+    g_g2d_frame_bind_n = 0;
+    if (g_g2d_frame_binds) { free(g_g2d_frame_binds); g_g2d_frame_binds = NULL; g_g2d_frame_bind_cap = 0; }
+    for (int i = 0; i < g_g2d_frame_buf_n; i++) wgpuBufferRelease(g_g2d_frame_bufs[i]);
+    g_g2d_frame_buf_n = 0;
+    if (g_g2d_frame_bufs) { free(g_g2d_frame_bufs); g_g2d_frame_bufs = NULL; g_g2d_frame_buf_cap = 0; }
     /* Image pipeline + textures. */
     for (int i = 0; i < g_g2d_img_frame_bind_n; i++) wgpuBindGroupRelease(g_g2d_img_frame_binds[i]);
     g_g2d_img_frame_bind_n = 0;
@@ -4807,6 +4884,7 @@ double rae_ext_gpu2d_designHeight(void) { return 0.0; }
 double rae_ext_gpu2d_dpr(void) { return 1.0; }
 void rae_ext_gpu2d_beginFrame(double r, double g, double b, double a) { (void)r; (void)g; (void)b; (void)a; }
 void rae_ext_gpu2d_endFrame(void) {}
+void rae_ext_gpu2d_flush(void) {}
 void rae_ext_gpu2d_closeWindow(void) {}
 void rae_ext_gpu2d_drawRect(double x, double y, double w, double h, int64_t color) { (void)x; (void)y; (void)w; (void)h; (void)color; }
 void rae_ext_gpu2d_drawRoundedRect(double x, double y, double w, double h, double radius, int64_t color) { (void)x; (void)y; (void)w; (void)h; (void)radius; (void)color; }

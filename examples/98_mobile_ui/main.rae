@@ -33,6 +33,7 @@ import ui/render_gpu2d
 import ui/textures
 import ui/input
 import ui/debug
+import ui/debug_gpu2d
 import ui/event_loop
 import ui/animation
 import ui/draw
@@ -858,6 +859,7 @@ func main() {
             uiBeginFrame(clear: bgSurface)
             if uiBackend() is UiBackend.gpu2d {
               renderSystemGpu2d(world: world, res: gpuUi)
+              updateAndRenderDebugOverlayGpu2d(debug: debug, now: now, didRealWork: active, font: gpuUi.textFont)
             } else {
               renderSystemLayerRange(world: world, reg: texReg, minOrder: 0 - 1000000, maxOrder: 100)
               renderSystemLayerRange(world: world, reg: texReg, minOrder: 100, maxOrder: 1000000)
