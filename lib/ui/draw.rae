@@ -12,11 +12,17 @@
 open raylib
 import core
 import raylib
+import gpu2d
 import ui/components
 
 enum UiBackend {
   raylib
   gpu2d
+}
+
+# RgbaColor -> 0xAARRGGBB Int (the gpu2d primitive color format).
+func packColor(c: view RgbaColor) ret Int {
+  ret (c.a shl 24) bitor (c.r shl 16) bitor (c.g shl 8) bitor c.b
 }
 
 # Module-level current backend. Default raylib (unchanged behavior). Apps that
@@ -38,23 +44,36 @@ func raylibColor(c: view RgbaColor) ret Color {
 
 # Filled axis-aligned rectangle.
 func sinkRect(x: view Float, y: view Float, w: view Float, h: view Float, c: view RgbaColor) pub {
+  if g_uiBackend is UiBackend.gpu2d {
+    gpu2d.drawRect(x: x, y: y, w: w, h: h, color: packColor(c: c))
+    ret
+  }
   drawRectangle(x: x, y: y, width: w, height: h, color: raylibColor(c: c))
 }
 
 # Rectangle outline (debug overlays).
 func sinkRectLines(x: view Float, y: view Float, w: view Float, h: view Float, c: view RgbaColor) pub {
+  if g_uiBackend is UiBackend.gpu2d {
+    let clear: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
+    gpu2d.drawBox(x: x, y: y, w: w, h: h, radius: 0.0, fill: packColor(c: clear), borderWidth: 1.0, border: packColor(c: c))
+    ret
+  }
   drawRectangleLines(x: x, y: y, width: w, height: h, color: raylibColor(c: c))
 }
 
 # Filled rounded rectangle. `radius` is the corner radius in PIXELS (clamped to
-# half the smaller side); the raylib backend converts it to raylib's
-# fraction-of-smaller-side `roundness`, matching the old paintShape math.
+# half the smaller side). gpu2d takes the pixel radius directly; the raylib
+# backend converts it to raylib's fraction-of-smaller-side `roundness`.
 func sinkRoundedRect(x: view Float, y: view Float, w: view Float, h: view Float, radius: view Float, c: view RgbaColor) pub {
   var smaller: Float = w
   if h < smaller { smaller = h }
   let half: Float = smaller / 2.0
   var r: Float = radius
   if r > half { r = half }
+  if g_uiBackend is UiBackend.gpu2d {
+    gpu2d.drawRoundedRect(x: x, y: y, w: w, h: h, radius: r, color: packColor(c: c))
+    ret
+  }
   var roundness: Float = 0.0
   if smaller > 0.0 { roundness = (r * 2.0) / smaller }
   drawRectangleRounded(x: x, y: y, width: w, height: h, roundness: roundness, segments: 10, color: raylibColor(c: c))
@@ -62,5 +81,10 @@ func sinkRoundedRect(x: view Float, y: view Float, w: view Float, h: view Float,
 
 # Filled circle centered at (cx, cy).
 func sinkCircle(cx: view Float, cy: view Float, r: view Float, c: view RgbaColor) pub {
+  if g_uiBackend is UiBackend.gpu2d {
+    # gpu2d has no circle primitive; a rounded rect with radius = r is a circle.
+    gpu2d.drawRoundedRect(x: cx - r, y: cy - r, w: r * 2.0, h: r * 2.0, radius: r, color: packColor(c: c))
+    ret
+  }
   drawCircle(x: cx, y: cy, radius: r, color: raylibColor(c: c))
 }
