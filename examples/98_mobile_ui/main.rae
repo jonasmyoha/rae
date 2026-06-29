@@ -21,6 +21,7 @@ import raylib
 import core
 import file_watch
 import hot_reload
+import sdf_text
 import ui/ecs
 import ui/hero
 import ui/msdf
@@ -28,38 +29,56 @@ import ui/layout
 import ui/theme
 import ui/transform
 import ui/render
+import ui/render_gpu2d
 import ui/textures
 import ui/input
 import ui/debug
 import ui/event_loop
 import ui/animation
+import ui/draw
+import ui/window
 func main() {
+  let backendEnv: String = getEnv(name: "RAE_UI_BACKEND")
+  if backendEnv.equals(other: "gpu2d") {
+    setUiBackend(b: UiBackend.gpu2d)
+  } else {
+    setUiBackend(b: UiBackend.raylib)
+  }
   # `RAE_UI_HEADLESS=1`: see headless.rae (HIDDEN+UNFOCUSED flags).
   let isHeadless: Bool = headlessIsActive()
-  setConfigFlags(flags: headlessConfigFlags(headless: isHeadless))
-  raylibSetLogLevel(level: 4)  # LOG_WARNING — silence per-frame TEXTURE/SHADER INFO spam
+  uiSetConfigFlags(flags: headlessConfigFlags(headless: isHeadless))
+  uiSetRaylibLogLevel(level: 4)  # LOG_WARNING — silence per-frame TEXTURE/SHADER INFO spam
   let winW: Float = screenW
   let winH: Float = screenH
-  initWindow(width: winW.toInt(), height: winH.toInt(), title: "Rae Mobile UI — Album")
-  setWindowPosition(x: 50, y: 50)
+  uiInitWindow(width: winW.toInt(), height: winH.toInt(), title: "Rae Mobile UI — Album")
+  uiSetWindowPosition(x: 50, y: 50)
   # GLFW callbacks: close-waker wakes the loop on red-X; the mouse hook
   # is the authoritative per-event click-edge source (input.rae takes
   # press/release from it and skips raylib's poll edges when active).
-  installWindowCloseWaker()
-  installMouseButtonHook()
+  uiInstallWindowCloseWaker()
+  uiInstallMouseButtonHook()
   # macOS App Nap throttles the wait-events loop because it sits at
   # ~0% idle CPU; opt out so the app doesn't appear hung. See
   # `disableAppNap` decl in lib/raylib.rae.
-  disableAppNap()
+  uiDisableAppNap()
   # No setTargetFPS: the inner loop blocks in glfwWaitEventsTimeout
   # (see lib/ui/event_loop.rae) and naturally caps animation at
   # ~60 Hz via `frameTimeoutSec`. raylib's frame-pacing is bypassed.
   # Reset raylib's implicit `Mouse.scale` so getMouseX/Y return
   # cursor positions in the same coordinate space the renderer uses.
-  setMouseScale(scaleX: 1.0, scaleY: 1.0)
+  uiSetMouseScale(scaleX: 1.0, scaleY: 1.0)
 
-  loadFontInto(slot: robotoFontSlot, path: robotoFontPath, fontSize: 36)
-  loadFontInto(slot: materialIconFontSlot, path: materialIconFontPath, fontSize: 64)
+  if uiBackend() is UiBackend.raylib {
+    loadFontInto(slot: robotoFontSlot, path: robotoFontPath, fontSize: 36)
+    loadFontInto(slot: materialIconFontSlot, path: materialIconFontPath, fontSize: 64)
+  }
+  let gpuTextFont: SdfFont = sdf_text.loadSdfFont(
+    jsonPath: "examples/104_gpu2d_coords/assets/Roboto-Regular.mtsdf.json",
+    rawAtlasPath: "examples/104_gpu2d_coords/assets/Roboto-Regular.mtsdf.raw")
+  let gpuIconFont: SdfFont = sdf_text.loadSdfFont(
+    jsonPath: "examples/98_mobile_ui/assets/MaterialIconsRound-Regular.mtsdf.json",
+    rawAtlasPath: "examples/98_mobile_ui/assets/MaterialIconsRound-Regular.mtsdf.raw")
+  let gpuUi: Gpu2dUi = { textFont: gpuTextFont, iconFont: gpuIconFont }
 
   # Theme is picked from `RAE_UI_THEME` ("dark" / "light"); default is
   # dark. Setting the theme BEFORE `loadAllScenes` matters — scenes
@@ -111,8 +130,8 @@ func main() {
   # the window was at boot, not where the user left it (the
   # internal MacBook monitor when there's an external attached).
   let chromeBudget: Int = 100
-  let monitor: Int = getCurrentMonitor()
-  var monitorH: Int = getMonitorHeight(monitor: monitor)
+  let monitor: Int = uiCurrentMonitor()
+  var monitorH: Int = uiMonitorHeight(monitor: monitor)
   var safeMaxH: Int = monitorH - chromeBudget
   let reqW: Int = winW.toInt()
   let reqH: Int = winH.toInt()
@@ -123,7 +142,7 @@ func main() {
     screenW = winW * scale
     let newH: Float = screenH
     let newW: Float = screenW
-    setWindowSize(width: newW.toInt(), height: newH.toInt())
+    uiSetWindowSize(width: newW.toInt(), height: newH.toInt())
     log("[boot] clamped to {newW.toInt()}x{newH.toInt()} to fit monitor chrome")
   }
 
@@ -156,7 +175,7 @@ func main() {
   var autoExitSec: Float = 0.0
   if autoExitEnv.length() > 0 { autoExitSec = autoExitEnv.toFloat() }
   autoExitSec = headlessApplyAutoExitDefault(headless: isHeadless, current: autoExitSec)
-  let bootTime: Float = getTime()
+  let bootTime: Float = uiNowSeconds()
 
   # `RAE_UI_WAIT_TRACE=1` logs every `waitEventsTimeout` whose actual
   # sleep exceeded 5 ms vs the requested timeout — diagnoses GLFW not
@@ -356,16 +375,6 @@ func main() {
     # incremental rescan).
     var profileLoaded: Bool = false
 
-    # MSDF text — atlas loaded once, deep-copied into each rebuilt
-    # world by `enableUiMsdfShared` (no GPU re-upload). No outline /
-    # shadow tint here (alpha 0 disables those layers); the body glyph
-    # is the only thing drawn.
-    let robotoMsdf: MsdfFont = loadMsdfFont(jsonPath: robotoMsdfJsonPath, atlasPath: robotoMsdfAtlasPath)
-    let msdfNoTint: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
-    # Soft black drop-shadow, applied ONLY to opt-in styles
-    # (`shadowStylesOnly: true` -> `textStyleHasShadow`, which covers the
-    # mini-player's `miniTitle`/`miniMuted`). No outline anywhere.
-    let msdfShadow: RgbaColor = { r: 0, g: 0, b: 0, a: 140 }
     # True while album covers / history art are still streaming in. Fed
     # into the wait-timeout so the loop ticks at frame cadence (not the
     # 30s idle cap) while loading, making the cascade actually progress.
@@ -423,7 +432,12 @@ func main() {
       # Persistent-world build: mounts every screen page + dock /
       # back overlays once; setPageActive flips visibility per nav.
       let world: UiWorld = buildAppWorld(scenes: scenes, playback: playback, state: appState, texReg: texReg, scrollY: scrollFsm.scrollY)
-      enableUiMsdfShared(world: world, font: robotoMsdf, outlineColor: msdfNoTint, outlineWidth: 0.0, shadowColor: msdfShadow, shadowOffsetX: 0.0, shadowOffsetY: 1.0, shadowSoftness: 1.0, shadowStylesOnly: true)
+      if uiBackend() is UiBackend.raylib {
+        let robotoMsdf: MsdfFont = loadMsdfFont(jsonPath: robotoMsdfJsonPath, atlasPath: robotoMsdfAtlasPath)
+        let msdfNoTint: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
+        let msdfShadow: RgbaColor = { r: 0, g: 0, b: 0, a: 140 }
+        enableUiMsdfShared(world: world, font: robotoMsdf, outlineColor: msdfNoTint, outlineWidth: 0.0, shadowColor: msdfShadow, shadowOffsetX: 0.0, shadowOffsetY: 1.0, shadowSoftness: 1.0, shadowStylesOnly: true)
+      }
       # Rebind any scene-authored `"albumCover"` placeholder hero +
       # sprite to the user's current album. This is what lets the
       # hero animation system find matching keys at Profile (where
@@ -518,13 +532,13 @@ func main() {
           velAbs = 0.0 - velAbs
         }
         # Recent-wheel (0.25s) counts as animating: wheel scroll drives scrollY per-event with velocity==0, so without it the loop idles at the ~20Hz watcher poll between wheel events (still-mouse scroll caps ~20-34fps; mouse-move wakes masked it).
-        if velAbs > 0.05 or scrollOOB or ((getTime() - scrollFsm.lastWheelTime) < 0.25) {
+        if velAbs > 0.05 or scrollOOB or ((uiNowSeconds() - scrollFsm.lastWheelTime) < 0.25) {
           scrollAnimating = true
         }
         # Suppress the playback-driven 60Hz animation gate while the
         # user is wheel-scrolling (the per-frame playback tick competed
         # with scroll). Progress resumes ~250ms after the last wheel tick.
-        let scrollActiveTimeSec: Float = getTime() - scrollFsm.lastWheelTime
+        let scrollActiveTimeSec: Float = uiNowSeconds() - scrollFsm.lastWheelTime
         let recentlyScrolling: Bool = scrollActiveTimeSec < 0.25
         var playbackAnimating: Bool = false
         if playback.isPlaying {
@@ -533,10 +547,10 @@ func main() {
           }
         }
         # Interaction/transition motion → busy-render: poll (timeout 0), paint every frame as fast as the machine allows (no FPS cap). Playback alone stays on the throttled 60Hz path so a playing song doesn't peg a core. Idle → blocking event-wait (~0% CPU).
-        let busyAnimating: Bool = anim.active or scrollAnimating or lastHoverAnimDirty or assetsLoading or isMouseButtonDown(button: mouseButtonLeft)
+        let busyAnimating: Bool = anim.active or scrollAnimating or lastHoverAnimDirty or assetsLoading or uiPointerButtonDown(button: mouseButtonLeft)
         var timeout: Float = 0.0
         if busyAnimating is false {
-          timeout = nextWaitTimeoutSec(animating: playbackAnimating or getTime() < renderUntil, mouseDown: false, pollWatcher: true, frameSec: targetFrameSec)
+          timeout = nextWaitTimeoutSec(animating: playbackAnimating or uiNowSeconds() < renderUntil, mouseDown: false, pollWatcher: true, frameSec: targetFrameSec)
         }
         # Heartbeat: prints once per frame BEFORE the wait. If this
         # line stops appearing in the log, the loop has stalled
@@ -545,14 +559,14 @@ func main() {
         # branch below is being skipped — check the post-wait line.
         if loopDebugEnabled {
           loopDebugFrame = loopDebugFrame + 1
-          let mouseDown: Bool = isMouseButtonDown(button: mouseButtonLeft)
+          let mouseDown: Bool = uiPointerButtonDown(button: mouseButtonLeft)
           log("[loop {loopDebugFrame}] screen={screenToInt(s: currentScreen)} scrollY={scrollFsm.scrollY} vel={scrollFsm.velocity} animA={anim.active} animP={playback.isPlaying} animS={scrollAnimating} mouse={mouseDown} timeout={timeout}")
         }
         # When RAE_AUTO_EXIT_SEC is set, clamp the wait so the deadline
         # actually fires on time — otherwise an idle iteration could
         # sleep for `idleCapSec` (30 s) past the requested exit time.
         if autoExitSec > 0.0 {
-          let elapsed: Float = getTime() - bootTime
+          let elapsed: Float = uiNowSeconds() - bootTime
           let remaining: Float = autoExitSec - elapsed
           if remaining < timeout {
             timeout = remaining
@@ -561,9 +575,9 @@ func main() {
             timeout = 0.001
           }
         }
-        let preWait: Float = getTime()
-        waitEventsTimeout(seconds: timeout)
-        let waitDt: Float = getTime() - preWait
+        let preWait: Float = uiNowSeconds()
+        uiWaitEvents(timeoutSec: timeout)
+        let waitDt: Float = uiNowSeconds() - preWait
         if waitTraceEnabled {
           if waitDt > 0.005 {
             log("[wait] dt={waitDt} timeout={timeout}")
@@ -576,9 +590,9 @@ func main() {
         if loopDebugEnabled {
           log("[loop {loopDebugFrame}] wait dt={waitDt}")
         }
-        if windowShouldClose() {
+        if uiWindowShouldClose() {
           running = false
-        } else if autoExitSec > 0.0 and getTime() - bootTime > autoExitSec {
+        } else if autoExitSec > 0.0 and uiNowSeconds() - bootTime > autoExitSec {
           # RAE_AUTO_EXIT_SEC fired — clean self-shutdown so test
           # harnesses don't leave orphaned binaries owning the GPU
           # context. Falls through to the texture/font/window
@@ -601,9 +615,9 @@ func main() {
           # rebuild so the layout extent, responsive grid columns, and
           # nav reflow. The old-world drop on rebuild relies on the
           # rae_ext_rae_buf_copy memmove fix (was a memcpy double-free).
-          if isWindowResized() {
-            screenW = getScreenWidth().toFloat()
-            screenH = getScreenHeight().toFloat()
+          if uiIsWindowResized() {
+            screenW = uiWindowWidth()
+            screenH = uiWindowHeight()
             switching = true
           }
 
@@ -647,7 +661,9 @@ func main() {
           # cadence is already accurate enough for resume-from-pause.
           if input.events.length > 0 {
             if dragJustReleased is false {
-              saveAppState(path: stateFilePath, state: appState, playback: playback)
+              if uiBackend() is UiBackend.raylib {
+                saveAppState(path: stateFilePath, state: appState, playback: playback)
+              }
             }
           }
 
@@ -680,7 +696,7 @@ func main() {
           # bind against the new theme, then force a world rebuild via
           # `switching = true` — same code path as data hot reload.
           let keyT: Int = 84
-          if isKeyPressed(key: keyT) {
+          if uiIsKeyPressed(key: keyT) {
             let cur: Theme = currentTheme()
             if cur.mode is ThemeMode.light {
               setActiveTheme(theme: darkTheme())
@@ -707,7 +723,7 @@ func main() {
           # AFTER the affected page has been re-mounted (so the
           # target hero exists with the right rect).
 
-          let now: Float = getTime()
+          let now: Float = uiNowSeconds()
           # Advance playback elapsed-time. `advancePlayback` is a no-op
           # for `elapsedSec` when paused but always updates `prevTime`,
           # so a long idle-paused stretch followed by a resume doesn't
@@ -772,7 +788,10 @@ func main() {
           # Covers stream from disk. (History-art network refetch was
           # removed from here — each fetch blocked ~140ms, pinning the
           # whole app to ~7fps; needs a background thread instead.)
-          let loadingAssets: Bool = cascadeAssets(reg: texReg, albums: appState.albums, budget: 2)
+          var loadingAssets: Bool = false
+          if uiBackend() is UiBackend.raylib {
+            loadingAssets = cascadeAssets(reg: texReg, albums: appState.albums, budget: 2)
+          }
           assetsLoading = loadingAssets
 
           # Frame-gate decision: ask `decideActive` whether anything
@@ -835,90 +854,65 @@ func main() {
           let frameDue: Bool = busyAnimating or forceRender or (now - lastRenderTime) >= targetFrameSec * 0.85
           if (busyAnimating or active or now < renderUntil) and frameDue {
             lastRenderTime = now
-            beginDrawing()
-            clearBackground(color: bg)
-            # HiDPI: FLAG_WINDOW_HIGHDPI Retina framebuffer; raylib
-            # auto-scales point drawing to fill it (no camera needed).
-            # Two-phase render around dock layer (100): paint content,
-            # (formerly capture+blur nav-tab band), paint dock+overlays.
-            # Blur disabled — suspect captureAndBlurRegion side-effects
-            # corrupt subsequent sprite render state, leaving mini-player
-            # thumb / Home Recently-played thumbs grey. Re-enable when
-            # the GL-state issue is traced; nav-tabs render unblurred
-            # (BackdropImage falls back when its texture is missing).
-            renderSystemLayerRange(world: world, reg: texReg, minOrder: 0 - 1000000, maxOrder: 100)
-            renderSystemLayerRange(world: world, reg: texReg, minOrder: 100, maxOrder: 1000000)
-            if animating {
-              renderHeroOverlay(anim: anim, reg: texReg, now: now)
-            }
-            if debug.showInputOutlines {
-              let mx: Float = getMouseX().toFloat()
-              let my: Float = getMouseY().toFloat()
-              let pressedNow: Bool = isMouseButtonDown(button: mouseButtonLeft)
-              renderDebugClickRects(
-                world: world
-                idleColor: debugRectColor
-                hoverColor: debugHoverColor
-                pressColor: debugPressColor
-                pressed: pressedNow
-                mouseX: mx
-                mouseY: my
+            uiBeginFrame(clear: bgSurface)
+            if uiBackend() is UiBackend.gpu2d {
+              renderSystemGpu2d(world: world, res: gpuUi)
+            } else {
+              renderSystemLayerRange(world: world, reg: texReg, minOrder: 0 - 1000000, maxOrder: 100)
+              renderSystemLayerRange(world: world, reg: texReg, minOrder: 100, maxOrder: 1000000)
+              if animating {
+                renderHeroOverlay(anim: anim, reg: texReg, now: now)
+              }
+              if debug.showInputOutlines {
+                let mx: Float = uiPointerX()
+                let my: Float = uiPointerY()
+                let pressedNow: Bool = uiPointerButtonDown(button: mouseButtonLeft)
+                renderDebugClickRects(
+                  world: world
+                  idleColor: debugRectColor
+                  hoverColor: debugHoverColor
+                  pressColor: debugPressColor
+                  pressed: pressedNow
+                  mouseX: mx
+                  mouseY: my
+                )
+                renderDebugMouseCursor(mouseX: mx, mouseY: my, color: debugCursorColor)
+              }
+              updateAndRenderDebugOverlay(debug: debug, now: now, didRealWork: active)
+              let versionText: String = "{appVersion}"
+              let versionFontSize: Float = 12.0
+              let versionW: Int = measureTextWithFont(
+                slot: robotoFontSlot
+                text: versionText
+                fontSize: versionFontSize
+                spacing: 0.0
               )
-              renderDebugMouseCursor(mouseX: mx, mouseY: my, color: debugCursorColor)
-            }
-            # Reusable debug overlay: records the frame timestamp for
-            # the rolling FPS window + draws the FPS / mem read-out
-            # (when the in-app toggle is on). Drawn last so the labels
-            # paint on top of everything else.
-            # Pass `active` (the dirty-detection signal that drove the
-            # render gate) so the debug heartbeat reflects real per-
-            # frame ECS work, not just raw frame rate.
-            updateAndRenderDebugOverlay(debug: debug, now: now, didRealWork: active)
-            # App version label: right-aligned with the debug button,
-            # one line above it. White so it reads against any theme.
-            let versionText: String = "{appVersion}"
-            let versionFontSize: Float = 12.0
-            let versionW: Int = measureTextWithFont(
-              slot: robotoFontSlot
-              text: versionText
-              fontSize: versionFontSize
-              spacing: 0.0
-            )
-            let versionX: Float = debug.buttonX + debug.buttonSize - versionW.toFloat()
-            let versionY: Float = debug.buttonY - versionFontSize - 2.0
-            let versionColor: Color = { r: 255, g: 255, b: 255, a: 255 }
-            drawTextWithFont(
-              slot: robotoFontSlot
-              text: versionText
-              x: versionX
-              y: versionY
-              fontSize: versionFontSize
-              spacing: 0.0
-              color: versionColor
-            )
-            # Frosted-glass backdrop: when the debug menu just opened,
-            # grab the just-rendered back buffer, blur it, and register
-            # it so the next rebuild's menu paints over it. Must run
-            # before endDrawing (after swap the buffer is gone).
-            if debug.menuOpen and prevMenuOpen is false {
-              let blurTex: Texture = captureAndBlurBackdrop(blurSize: 16)
-              let texId: Int = blurTex.id
-              let texW: Int = blurTex.width
-              let texH: Int = blurTex.height
-              log("[blur] captured tex id={texId} size={texW}x{texH}")
-              let blurKey: String = debugBlurBackdropKey()
-              textureRegisterDirect(reg: texReg, key: blurKey, tex: blurTex)
-              setDebugHasBlur(debug: debug, value: true)
+              let versionX: Float = debug.buttonX + debug.buttonSize - versionW.toFloat()
+              let versionY: Float = debug.buttonY - versionFontSize - 2.0
+              let versionColor: Color = { r: 255, g: 255, b: 255, a: 255 }
+              drawTextWithFont(
+                slot: robotoFontSlot
+                text: versionText
+                x: versionX
+                y: versionY
+                fontSize: versionFontSize
+                spacing: 0.0
+                color: versionColor
+              )
+              if debug.menuOpen and prevMenuOpen is false {
+                let blurTex: Texture = captureAndBlurBackdrop(blurSize: 16)
+                let texId: Int = blurTex.id
+                let texW: Int = blurTex.width
+                let texH: Int = blurTex.height
+                log("[blur] captured tex id={texId} size={texW}x{texH}")
+                let blurKey: String = debugBlurBackdropKey()
+                textureRegisterDirect(reg: texReg, key: blurKey, tex: blurTex)
+                setDebugHasBlur(debug: debug, value: true)
+              }
             }
 
-            # (Per-frame dock blur capture removed: it accumulated blur
-            # each frame and tripped a registry cascade-drop bug.)
-            endDrawing()
+            uiEndFrame()
             forceRender = false
-            # Bump the cache again *after* render so any per-frame
-            # writes by the playback tick / hero overlay are reflected
-            # and don't trigger an unnecessary "active" promotion next
-            # frame.
             renderCacheDirty(world: world, cache: renderCache)
           }
           # Persistent-world screen-switch (slice 4b.3 + 4c) — implementation
@@ -992,9 +986,11 @@ func main() {
 
   # Final snapshot — captures window-drag-only sessions where no
   # dispatched action fired (and thus no in-loop save ran).
-  saveAppState(path: stateFilePath, state: appState, playback: playback)
+  if uiBackend() is UiBackend.raylib {
+    saveAppState(path: stateFilePath, state: appState, playback: playback)
+  }
   textureUnloadAll(reg: texReg)
   unloadFontSlot(slot: robotoFontSlot)
   unloadFontSlot(slot: materialIconFontSlot)
-  closeWindow()
+  uiCloseWindow()
 }

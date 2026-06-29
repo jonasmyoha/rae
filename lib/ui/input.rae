@@ -1,4 +1,3 @@
-open raylib
 # Pointer input — RUICS Phase 1g.
 #
 # Each frame:
@@ -16,8 +15,8 @@ open raylib
 #
 # Coordinates are in logical (point) units, matching `WorldTransform`.
 import core
-import raylib
 import ui/layer
+import ui/window
 
 # Internal: left mouse button.
 let mouseButtonLeft: Int = 0
@@ -190,24 +189,24 @@ func clearActionEvents(input: mod InputSystem) {
 func updateInputSystem(input: mod InputSystem, world: view UiWorld) {
   clearActionEvents(input: input)
 
-  let mx: Float = getMouseX().toFloat()
-  let my: Float = getMouseY().toFloat()
+  let mx: Float = uiPointerX()
+  let my: Float = uiPointerY()
   # `down` is level state — raylib's per-event callback keeps it current
   # regardless of poll cadence, so polling it is reliable.
-  let down: Bool = isMouseButtonDown(button: mouseButtonLeft)
+  let down: Bool = uiPointerButtonDown(button: mouseButtonLeft)
   var pressed: Bool = false
   var released: Bool = false
-  if mouseHookActive() {
+  if uiMouseHookActive() {
     # Hook installed → authoritative per-event edges. raylib's
     # poll-to-poll edges only refresh inside EndDrawing's PollInputEvents,
     # so under a render-capped wait-events loop they miss or mistime
     # edges; the hook never does. Take edges solely from the drains.
-    pressed = mouseHookDrainPressed()
-    released = mouseHookDrainReleased()
+    pressed = uiMouseHookDrainPressed()
+    released = uiMouseHookDrainReleased()
   } else {
     # No hook (other hosts): fall back to raylib's poll-to-poll edges.
-    pressed = isMouseButtonPressed(button: mouseButtonLeft)
-    released = isMouseButtonReleased(button: mouseButtonLeft)
+    pressed = uiPointerButtonPressed(button: mouseButtonLeft)
+    released = uiPointerButtonReleased(button: mouseButtonLeft)
   }
 
   let nextPointer: PointerState = {

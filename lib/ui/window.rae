@@ -27,6 +27,18 @@ func uiInitWindow(width: view Int, height: view Int, title: view String) pub {
   initWindow(width: width, height: height, title: title)
 }
 
+func uiSetConfigFlags(flags: view Int) pub {
+  if uiBackend() is UiBackend.raylib {
+    setConfigFlags(flags: flags)
+  }
+}
+
+func uiSetRaylibLogLevel(level: view Int) pub {
+  if uiBackend() is UiBackend.raylib {
+    raylibSetLogLevel(level: level)
+  }
+}
+
 func uiSetDesignResolution(width: view Float, height: view Float, fit: view Int) pub {
   if uiBackend() is UiBackend.gpu2d {
     gpu2d.setDesignResolution(width: width, height: height, fit: fit)
@@ -164,6 +176,12 @@ func uiSetWindowPosition(x: view Int, y: view Int) pub {
   }
 }
 
+func uiSetWindowSize(width: view Int, height: view Int) pub {
+  if uiBackend() is UiBackend.raylib {
+    setWindowSize(width: width, height: height)
+  }
+}
+
 func uiSetMouseScale(scaleX: view Float, scaleY: view Float) pub {
   if uiBackend() is UiBackend.raylib {
     setMouseScale(scaleX: scaleX, scaleY: scaleY)
@@ -193,4 +211,63 @@ func uiIsKeyPressed(key: view Int) pub ret Bool {
     ret false
   }
   ret isKeyPressed(key: key)
+}
+
+func uiPointerButtonDown(button: view Int) pub ret Bool {
+  if uiBackend() is UiBackend.gpu2d {
+    if button is 0 {
+      ret gpu2d.pointerDown()
+    }
+    ret false
+  }
+  ret isMouseButtonDown(button: button)
+}
+
+func uiPointerButtonPressed(button: view Int) pub ret Bool {
+  if uiBackend() is UiBackend.gpu2d {
+    ret false
+  }
+  ret isMouseButtonPressed(button: button)
+}
+
+func uiPointerButtonReleased(button: view Int) pub ret Bool {
+  if uiBackend() is UiBackend.gpu2d {
+    ret false
+  }
+  ret isMouseButtonReleased(button: button)
+}
+
+func uiMouseHookActive() pub ret Bool {
+  if uiBackend() is UiBackend.gpu2d {
+    ret false
+  }
+  ret mouseHookActive()
+}
+
+func uiMouseHookDrainPressed() pub ret Bool {
+  if uiBackend() is UiBackend.gpu2d {
+    ret false
+  }
+  ret mouseHookDrainPressed()
+}
+
+func uiMouseHookDrainReleased() pub ret Bool {
+  if uiBackend() is UiBackend.gpu2d {
+    ret false
+  }
+  ret mouseHookDrainReleased()
+}
+
+func uiCurrentMonitor() pub ret Int {
+  if uiBackend() is UiBackend.gpu2d {
+    ret 0
+  }
+  ret getCurrentMonitor()
+}
+
+func uiMonitorHeight(monitor: view Int) pub ret Int {
+  if uiBackend() is UiBackend.gpu2d {
+    ret uiFramebufferHeight()
+  }
+  ret getMonitorHeight(monitor: monitor)
 }

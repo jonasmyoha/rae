@@ -1,4 +1,5 @@
 open raylib
+open ui/window
 # Persistent UI state — active album / track / position — round-
 # tripped through a small `state.json` file. Read once at boot,
 # written after every dispatched action so the next launch picks
@@ -21,6 +22,7 @@ open raylib
 # test.
 import core
 import json
+import ui/window
 
 # Read whole file. Empty on missing/error — caller treats empty as
 # "no saved state, use defaults".
@@ -249,7 +251,7 @@ func restoreAppState(state: mod AppState, playback: mod PlaybackState, path: vie
       let savedY: Int = json.jsonInt(this: json.jsonValueAt(doc: doc, idx: winYIdx), fallback: 50)
       # macOS will silently clamp positions that put the window
       # off-screen, so we don't bother validating the bounds here.
-      setWindowPosition(x: savedX, y: savedY)
+      uiSetWindowPosition(x: savedX, y: savedY)
     }
   }
 
