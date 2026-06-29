@@ -1,0 +1,70 @@
+# Layout/composition helpers — a compact subset of 98_mobile_ui/world_helpers.rae.
+# These let us stack scene instances (screen content + mini-player + nav-tabs)
+# into one world via the ECS layout system, instead of hand-placing pixels.
+open ui/ecs
+import core
+import ui/components
+import ui/ecs
+
+func makeFixed() ret Size {
+  ret Size {
+    w: SizeAxis { mode: SizeMode.fixed, min: -1, max: -1 }
+    h: SizeAxis { mode: SizeMode.fixed, min: -1, max: -1 }
+  }
+}
+
+func makeFillBoth() ret Size {
+  ret Size {
+    w: SizeAxis { mode: SizeMode.fill, min: -1, max: -1 }
+    h: SizeAxis { mode: SizeMode.fill, min: -1, max: -1 }
+  }
+}
+
+# Fixed width, Fill height — a content region that expands to fill the
+# remaining vertical space above the fixed-height dock.
+func makeFillH() ret Size {
+  ret Size {
+    w: SizeAxis { mode: SizeMode.fixed, min: -1, max: -1 }
+    h: SizeAxis { mode: SizeMode.fill, min: -1, max: -1 }
+  }
+}
+
+func setRectFixed(world: mod UiWorld, entity: view EntityId, w: view Float, h: view Float) {
+  let r: Rect = { x: 0.0, y: 0.0, w: w, h: h }
+  componentSet(this: world.rects, entity: entity, data: r)
+  componentSet(this: world.sizes, entity: entity, data: makeFixed())
+}
+
+# Fixed-width region that fills remaining height (the scrollable content slot).
+func setRectFillH(world: mod UiWorld, entity: view EntityId, w: view Float) {
+  let r: Rect = { x: 0.0, y: 0.0, w: w, h: 0.0 }
+  componentSet(this: world.rects, entity: entity, data: r)
+  componentSet(this: world.sizes, entity: entity, data: makeFillH())
+}
+
+func setLayoutV(world: mod UiWorld, entity: view EntityId, gap: view Float, alignCross: AlignKind) {
+  let lay: Layout = {
+    kind: LayoutType.vertical
+    gap: gap
+    alignMain: AlignKind.start
+    alignCross: alignCross
+    columns: 0
+    rowGap: 0.0
+    columnGap: 0.0
+  }
+  componentSet(this: world.layouts, entity: entity, data: lay)
+}
+
+func attachChildren(world: mod UiWorld, parent: view EntityId, kids: view List(EntityId)) {
+  let kidsCopy: List(EntityId) = createList(EntityId, cap: kids.length)
+  var i: Int = 0
+  loop i < kids.length {
+    let kid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
+    kidsCopy.add(value: kid)
+    let pl: Parent = { parent: parent }
+    componentSet(this: world.parents, entity: kid, data: pl)
+    i = i + 1
+  }
+  let ch: Children = { ids: own kidsCopy }
+  componentSet(this: world.childrens, entity: parent, data: own ch)
+}
