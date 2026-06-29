@@ -3713,25 +3713,45 @@ static void rae_g2d_compute_xform(float* out) {
     out[4] = offX;  out[5] = offY;  out[6] = 0.0f;   out[7] = 0.0f;
 }
 /* per-frame transient handles */
-static WGPUTexture           g_g2d_frame_tex = NULL;
-static WGPUTextureView       g_g2d_frame_view = NULL;
 static WGPUCommandEncoder    g_g2d_enc = NULL;
 static WGPURenderPassEncoder g_g2d_pass = NULL;
+
+/* Frames render to this persistent OFFSCREEN texture, not directly to the
+ * surface drawable. At endFrame we read it back for screenshots and copy it to
+ * the surface drawable for present *best-effort* — so rendering + headless
+ * screenshots work even when the OS won't vend a drawable (window occluded /
+ * display asleep / headless), where wgpuSurfaceGetCurrentTexture returns no
+ * texture. */
+static WGPUTexture     g_g2d_off_tex = NULL;
+static WGPUTextureView g_g2d_off_view = NULL;
+static int g_g2d_off_w = 0, g_g2d_off_h = 0;
 
 static void rae_g2d_configure(int pw, int ph) {
     if (!g_g2d_surface || pw <= 0 || ph <= 0) return;
     WGPUSurfaceConfiguration cfg; memset(&cfg, 0, sizeof(cfg));
     cfg.device = g_wgpu_dev;
     cfg.format = g_g2d_fmt;
-    /* CopySrc so headless verification (RAE_GPU2D_SCREENSHOT) can read the
-     * presented frame back off the surface texture. */
-    cfg.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc;
+    /* CopyDst so we can copy our offscreen render into the drawable to present. */
+    cfg.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopyDst;
     cfg.width = (uint32_t)pw;
     cfg.height = (uint32_t)ph;
     cfg.presentMode = WGPUPresentMode_Fifo;
     cfg.alphaMode = WGPUCompositeAlphaMode_Auto;
     wgpuSurfaceConfigure(g_g2d_surface, &cfg);
     g_sdl_w = pw; g_sdl_h = ph;
+    /* (Re)create the offscreen render target at the new size. */
+    if (g_g2d_off_w != pw || g_g2d_off_h != ph || !g_g2d_off_tex) {
+        if (g_g2d_off_view) { wgpuTextureViewRelease(g_g2d_off_view); g_g2d_off_view = NULL; }
+        if (g_g2d_off_tex)  { wgpuTextureRelease(g_g2d_off_tex);  g_g2d_off_tex = NULL; }
+        WGPUTextureDescriptor td; memset(&td, 0, sizeof(td));
+        td.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc;
+        td.dimension = WGPUTextureDimension_2D;
+        td.size.width = (uint32_t)pw; td.size.height = (uint32_t)ph; td.size.depthOrArrayLayers = 1;
+        td.format = g_g2d_fmt; td.mipLevelCount = 1; td.sampleCount = 1;
+        g_g2d_off_tex = wgpuDeviceCreateTexture(g_wgpu_dev, &td);
+        g_g2d_off_view = wgpuTextureCreateView(g_g2d_off_tex, NULL);
+        g_g2d_off_w = pw; g_g2d_off_h = ph;
+    }
 }
 
 void rae_ext_gpu2d_initWindow(int64_t width, int64_t height, rae_String title) {
@@ -4375,6 +4395,53 @@ int64_t rae_ext_gpu2d_loadImage(rae_String path) {
     return (int64_t)(++g_g2d_img_n);   /* 1-based */
 }
 
+/* Name->handle registry, so a renderer can resolve a Sprite.textureKey to an
+ * uploaded image without a Rae-side map (module-level heap globals miscompile).
+ * The gpu2d UI backend loads album covers / icons by key and draws by key. */
+#define RAE_G2D_MAX_IMG_KEYS 128
+static char g_g2d_img_key[RAE_G2D_MAX_IMG_KEYS][96];
+static int  g_g2d_img_key_handle[RAE_G2D_MAX_IMG_KEYS];
+static int  g_g2d_img_key_n = 0;
+
+void rae_ext_gpu2d_drawImage(double x, double y, double w, double h, double radius, int64_t handle, int64_t tint);  /* defined below */
+
+static int rae_g2d_handle_for_key(const char* k) {
+    if (!k) return 0;
+    for (int i = 0; i < g_g2d_img_key_n; i++)
+        if (strcmp(g_g2d_img_key[i], k) == 0) return g_g2d_img_key_handle[i];
+    return 0;
+}
+
+/* Decode+upload `path` and register it under `key` (returns the handle, 0 on
+ * failure). Re-registering a key updates it. */
+int64_t rae_ext_gpu2d_loadImageKey(rae_String key, rae_String path) {
+    int64_t h = rae_ext_gpu2d_loadImage(path);
+    if (h <= 0 || !key.data) return h;
+    int slot = -1;
+    for (int i = 0; i < g_g2d_img_key_n; i++)
+        if (strcmp(g_g2d_img_key[i], (const char*)key.data) == 0) { slot = i; break; }
+    if (slot < 0 && g_g2d_img_key_n < RAE_G2D_MAX_IMG_KEYS) slot = g_g2d_img_key_n++;
+    if (slot >= 0) {
+        strncpy(g_g2d_img_key[slot], (const char*)key.data, 95);
+        g_g2d_img_key[slot][95] = '\0';
+        g_g2d_img_key_handle[slot] = (int)h;
+    }
+    return h;
+}
+
+/* True if `key` resolves to a loaded image (so a renderer can fall back to a
+ * placeholder / mat: glyph when it doesn't). */
+rae_Bool rae_ext_gpu2d_hasImageKey(rae_String key) {
+    return key.data && rae_g2d_handle_for_key((const char*)key.data) > 0;
+}
+
+/* Draw a registered image by key (no-op if the key isn't registered). */
+void rae_ext_gpu2d_drawImageKey(rae_String key, double x, double y, double w, double h, double radius, int64_t tint) {
+    if (!key.data) return;
+    int handle = rae_g2d_handle_for_key((const char*)key.data);
+    if (handle > 0) rae_ext_gpu2d_drawImage(x, y, w, h, radius, (int64_t)handle, tint);
+}
+
 /* Queue an image draw for this frame (handle from loadImage). tint is
  * 0xAARRGGBB applied multiplicatively (use 0xFFFFFFFF for the unmodified
  * image). radius rounds the corners (design units). */
@@ -4489,22 +4556,12 @@ void rae_ext_gpu2d_beginFrame(double r, double g, double b, double a) {
     g_g2d_prim_count = 0;
     for (int i = 0; i < RAE_SDF_MAX_ATLAS; i++) g_g2d_text_count[i] = 0;
     g_g2d_img_cmd_count = 0;
-    if (!g_g2d_surface) return;
-    WGPUSurfaceTexture st; memset(&st, 0, sizeof(st));
-    wgpuSurfaceGetCurrentTexture(g_g2d_surface, &st);
-    if (st.status != WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal &&
-        st.status != WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal) {
-        /* reconfigure + retry once (after resize / lost surface) */
-        int pw = 0, ph = 0; SDL_GetWindowSizeInPixels(g_sdl_win, &pw, &ph);
-        rae_g2d_configure(pw, ph);
-        wgpuSurfaceGetCurrentTexture(g_g2d_surface, &st);
-        if (!st.texture) return;
-    }
-    g_g2d_frame_tex = st.texture;
-    g_g2d_frame_view = wgpuTextureCreateView(st.texture, NULL);
+    if (!g_g2d_off_view) return;
+    /* Render into the persistent offscreen target (NOT the surface drawable),
+     * so a frame always renders regardless of window compositing. */
     g_g2d_enc = wgpuDeviceCreateCommandEncoder(g_wgpu_dev, NULL);
     WGPURenderPassColorAttachment ca; memset(&ca, 0, sizeof(ca));
-    ca.view = g_g2d_frame_view;
+    ca.view = g_g2d_off_view;
     ca.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
     ca.loadOp = WGPULoadOp_Clear;
     ca.storeOp = WGPUStoreOp_Store;
@@ -4522,8 +4579,8 @@ void rae_ext_gpu2d_beginFrame(double r, double g, double b, double a) {
  * it costs nothing in normal runs. The readback row stride must be 256-aligned
  * (WebGPU copy requirement); we unpad into a tight RGBA buffer for SDL. */
 static void rae_g2d_save_screenshot(const char* path) {
-    if (!path || !g_g2d_frame_tex || !g_wgpu_dev) return;
-    int w = g_sdl_w, h = g_sdl_h;
+    if (!path || !g_g2d_off_tex || !g_wgpu_dev) return;
+    int w = g_g2d_off_w, h = g_g2d_off_h;
     if (w <= 0 || h <= 0) return;
     uint32_t bpr = (uint32_t)w * 4u;
     uint32_t padded = (bpr + 255u) & ~255u;            /* 256-byte row align */
@@ -4534,7 +4591,7 @@ static void rae_g2d_save_screenshot(const char* path) {
     if (!staging) return;
     WGPUCommandEncoder enc = wgpuDeviceCreateCommandEncoder(g_wgpu_dev, NULL);
     WGPUTexelCopyTextureInfo src; memset(&src, 0, sizeof(src));
-    src.texture = g_g2d_frame_tex; src.mipLevel = 0; src.aspect = WGPUTextureAspect_All;
+    src.texture = g_g2d_off_tex; src.mipLevel = 0; src.aspect = WGPUTextureAspect_All;
     WGPUTexelCopyBufferInfo dst; memset(&dst, 0, sizeof(dst));
     dst.buffer = staging; dst.layout.offset = 0;
     dst.layout.bytesPerRow = padded; dst.layout.rowsPerImage = (uint32_t)h;
@@ -4619,21 +4676,42 @@ void rae_ext_gpu2d_endFrame(void) {
     /* The per-image bind groups were live for the pass; safe to free now. */
     for (int i = 0; i < g_g2d_img_frame_bind_n; i++) wgpuBindGroupRelease(g_g2d_img_frame_binds[i]);
     g_g2d_img_frame_bind_n = 0;
-    /* Headless screenshot (env-gated) before present, while the frame texture
-     * is still alive. Only in headless runs so interactive frames pay nothing. */
+    wgpuCommandBufferRelease(cb);
+    wgpuRenderPassEncoderRelease(g_g2d_pass); g_g2d_pass = NULL;
+    wgpuCommandEncoderRelease(g_g2d_enc); g_g2d_enc = NULL;
+
+    /* Headless screenshot reads the offscreen target — works even when the
+     * surface can't vend a drawable. */
     if (g_sdl_headless_ms > 0) {
         const char* shot = getenv("RAE_GPU2D_SCREENSHOT");
         if (shot) rae_g2d_save_screenshot(shot);
     }
-    wgpuSurfacePresent(g_g2d_surface);
-    wgpuCommandBufferRelease(cb);
-    wgpuRenderPassEncoderRelease(g_g2d_pass); g_g2d_pass = NULL;
-    wgpuCommandEncoderRelease(g_g2d_enc); g_g2d_enc = NULL;
-    wgpuTextureViewRelease(g_g2d_frame_view); g_g2d_frame_view = NULL;
-    if (g_g2d_frame_tex) { wgpuTextureRelease(g_g2d_frame_tex); g_g2d_frame_tex = NULL; }
+
+    /* Present best-effort: copy the offscreen image into the surface drawable
+     * and present. If the OS won't vend a drawable (window occluded / display
+     * asleep / headless), skip — the frame already rendered + screenshotted. */
+    WGPUSurfaceTexture st; memset(&st, 0, sizeof(st));
+    wgpuSurfaceGetCurrentTexture(g_g2d_surface, &st);
+    if (st.texture &&
+        (st.status == WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal ||
+         st.status == WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal)) {
+        WGPUCommandEncoder penc = wgpuDeviceCreateCommandEncoder(g_wgpu_dev, NULL);
+        WGPUTexelCopyTextureInfo cs; memset(&cs, 0, sizeof(cs)); cs.texture = g_g2d_off_tex; cs.aspect = WGPUTextureAspect_All;
+        WGPUTexelCopyTextureInfo cd; memset(&cd, 0, sizeof(cd)); cd.texture = st.texture; cd.aspect = WGPUTextureAspect_All;
+        WGPUExtent3D ext; ext.width = (uint32_t)g_sdl_w; ext.height = (uint32_t)g_sdl_h; ext.depthOrArrayLayers = 1;
+        wgpuCommandEncoderCopyTextureToTexture(penc, &cs, &cd, &ext);
+        WGPUCommandBuffer pcb = wgpuCommandEncoderFinish(penc, NULL);
+        wgpuQueueSubmit(g_wgpu_queue, 1, &pcb);
+        wgpuCommandBufferRelease(pcb); wgpuCommandEncoderRelease(penc);
+        wgpuSurfacePresent(g_g2d_surface);
+    }
+    if (st.texture) wgpuTextureRelease(st.texture);
 }
 
 void rae_ext_gpu2d_closeWindow(void) {
+    if (g_g2d_off_view) { wgpuTextureViewRelease(g_g2d_off_view); g_g2d_off_view = NULL; }
+    if (g_g2d_off_tex)  { wgpuTextureRelease(g_g2d_off_tex);  g_g2d_off_tex = NULL; }
+    g_g2d_off_w = 0; g_g2d_off_h = 0;
     for (int ai = 0; ai < RAE_SDF_MAX_ATLAS; ai++) {
         if (g_g2d_text_bind[ai]) { wgpuBindGroupRelease(g_g2d_text_bind[ai]); g_g2d_text_bind[ai] = NULL; }
         if (g_g2d_text_instbuf[ai]) { wgpuBufferRelease(g_g2d_text_instbuf[ai]); g_g2d_text_instbuf[ai] = NULL; g_g2d_text_cap[ai] = 0; }
@@ -4663,6 +4741,7 @@ void rae_ext_gpu2d_closeWindow(void) {
         if (g_g2d_img_tex[i]) { wgpuTextureRelease(g_g2d_img_tex[i]); g_g2d_img_tex[i] = NULL; }
     }
     g_g2d_img_n = 0;
+    g_g2d_img_key_n = 0;
     if (g_g2d_img_cmds) { free(g_g2d_img_cmds); g_g2d_img_cmds = NULL; g_g2d_img_cmd_cap = 0; }
     g_g2d_img_cmd_count = 0;
     if (g_g2d_img_pipeline) { wgpuRenderPipelineRelease(g_g2d_img_pipeline); g_g2d_img_pipeline = NULL; }
@@ -4675,6 +4754,9 @@ void rae_ext_gpu2d_initWindow(int64_t w, int64_t h, rae_String t) { (void)w; (vo
 rae_Bool rae_ext_gpu2d_pollClose(void) { return 1; }
 void rae_ext_gpu2d_waitEvents(double timeoutSec) { (void)timeoutSec; }
 int64_t rae_ext_gpu2d_loadImage(rae_String path) { (void)path; return 0; }
+int64_t rae_ext_gpu2d_loadImageKey(rae_String key, rae_String path) { (void)key; (void)path; return 0; }
+rae_Bool rae_ext_gpu2d_hasImageKey(rae_String key) { (void)key; return 0; }
+void rae_ext_gpu2d_drawImageKey(rae_String key, double x, double y, double w, double h, double radius, int64_t tint) { (void)key; (void)x; (void)y; (void)w; (void)h; (void)radius; (void)tint; }
 void rae_ext_gpu2d_drawImage(double x, double y, double w, double h, double radius, int64_t handle, int64_t tint) { (void)x; (void)y; (void)w; (void)h; (void)radius; (void)handle; (void)tint; }
 double rae_ext_gpu2d_pointerX(void) { return 0.0; }
 double rae_ext_gpu2d_pointerY(void) { return 0.0; }
