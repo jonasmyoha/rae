@@ -10,6 +10,7 @@ import sys
 import sys/spotify
 import ui/ecs
 import ui/input
+import ui/window
 
 enum Screen {
   # The four bottom-nav tabs follow. Order matters: it must match
@@ -675,7 +676,7 @@ func dispatchActions(
         # Local entries reuse the boot-loaded album-stem texture.
         textureKey: "{state.currentAlbumStem}"
         durationSec: histTrack.durationMs.toFloat() / 1000.0
-        playedAt: getTime()
+        playedAt: uiNowSeconds()
       }
       recordPlay(history: state.playHistory, entry: own histEntry)
       saveHistoryToJson(history: state.playHistory, path: historyFilePath)
