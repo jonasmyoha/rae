@@ -1,0 +1,196 @@
+# Backend-agnostic UI window/input/frame seam (QUEUE #142 M4).
+#
+# Apps select the backend through ui/draw.setUiBackend once at startup, then
+# use these calls for window lifecycle, input, frame begin/end, and idle waits.
+# The gpu2d backend owns an SDL3/WebGPU window; the raylib backend preserves
+# the current GLFW/raylib behavior.
+open raylib
+import core
+import raylib
+import gpu2d
+import ui/components
+import ui/draw
+
+func uiRaylibColor(c: view RgbaColor) ret Color {
+  ret Color { r: c.r, g: c.g, b: c.b, a: c.a }
+}
+
+func colorChannel(v: view Int) ret Float {
+  ret v.toFloat() / 255.0
+}
+
+func uiInitWindow(width: view Int, height: view Int, title: view String) pub {
+  if uiBackend() is UiBackend.gpu2d {
+    gpu2d.initWindow(width: width, height: height, title: title)
+    ret
+  }
+  initWindow(width: width, height: height, title: title)
+}
+
+func uiSetDesignResolution(width: view Float, height: view Float, fit: view Int) pub {
+  if uiBackend() is UiBackend.gpu2d {
+    gpu2d.setDesignResolution(width: width, height: height, fit: fit)
+  }
+}
+
+func uiWindowShouldClose() pub ret Bool {
+  if uiBackend() is UiBackend.gpu2d {
+    ret gpu2d.pollClose()
+  }
+  ret windowShouldClose()
+}
+
+func uiCloseWindow() pub {
+  if uiBackend() is UiBackend.gpu2d {
+    gpu2d.closeWindow()
+    ret
+  }
+  closeWindow()
+}
+
+func uiBeginFrame(clear: view RgbaColor) pub {
+  if uiBackend() is UiBackend.gpu2d {
+    gpu2d.beginFrame(
+      r: colorChannel(v: clear.r),
+      g: colorChannel(v: clear.g),
+      b: colorChannel(v: clear.b),
+      a: colorChannel(v: clear.a))
+    ret
+  }
+  beginDrawing()
+  clearBackground(color: uiRaylibColor(c: clear))
+}
+
+func uiEndFrame() pub {
+  if uiBackend() is UiBackend.gpu2d {
+    gpu2d.endFrame()
+    ret
+  }
+  endDrawing()
+}
+
+func uiWaitEvents(timeoutSec: view Float) pub {
+  if uiBackend() is UiBackend.gpu2d {
+    gpu2d.waitEvents(timeoutSec: timeoutSec)
+    ret
+  }
+  waitEventsTimeout(seconds: timeoutSec)
+}
+
+func uiNowSeconds() pub ret Float {
+  if uiBackend() is UiBackend.gpu2d {
+    ret gpu2d.nowSeconds()
+  }
+  ret getTime()
+}
+
+func uiWindowWidth() pub ret Float {
+  if uiBackend() is UiBackend.gpu2d {
+    ret gpu2d.designWidth()
+  }
+  ret getScreenWidth().toFloat()
+}
+
+func uiWindowHeight() pub ret Float {
+  if uiBackend() is UiBackend.gpu2d {
+    ret gpu2d.designHeight()
+  }
+  ret getScreenHeight().toFloat()
+}
+
+func uiFramebufferWidth() pub ret Int {
+  if uiBackend() is UiBackend.gpu2d {
+    ret gpu2d.windowWidth()
+  }
+  ret getRenderWidth()
+}
+
+func uiFramebufferHeight() pub ret Int {
+  if uiBackend() is UiBackend.gpu2d {
+    ret gpu2d.windowHeight()
+  }
+  ret getRenderHeight()
+}
+
+func uiDpr() pub ret Float {
+  if uiBackend() is UiBackend.gpu2d {
+    ret gpu2d.dpr()
+  }
+  let logical: Int = getScreenWidth()
+  if logical <= 0 {
+    ret 1.0
+  }
+  ret getRenderWidth().toFloat() / logical.toFloat()
+}
+
+func uiPointerX() pub ret Float {
+  if uiBackend() is UiBackend.gpu2d {
+    ret gpu2d.pointerX()
+  }
+  ret getMouseX().toFloat()
+}
+
+func uiPointerY() pub ret Float {
+  if uiBackend() is UiBackend.gpu2d {
+    ret gpu2d.pointerY()
+  }
+  ret getMouseY().toFloat()
+}
+
+func uiPointerDown() pub ret Bool {
+  if uiBackend() is UiBackend.gpu2d {
+    ret gpu2d.pointerDown()
+  }
+  ret isMouseButtonDown(button: 0)
+}
+
+func uiWheelMove() pub ret Float {
+  if uiBackend() is UiBackend.gpu2d {
+    ret gpu2d.wheelMove()
+  }
+  ret getMouseWheelMove()
+}
+
+func uiIsWindowResized() pub ret Bool {
+  if uiBackend() is UiBackend.gpu2d {
+    ret false
+  }
+  ret isWindowResized()
+}
+
+func uiSetWindowPosition(x: view Int, y: view Int) pub {
+  if uiBackend() is UiBackend.raylib {
+    setWindowPosition(x: x, y: y)
+  }
+}
+
+func uiSetMouseScale(scaleX: view Float, scaleY: view Float) pub {
+  if uiBackend() is UiBackend.raylib {
+    setMouseScale(scaleX: scaleX, scaleY: scaleY)
+  }
+}
+
+func uiInstallWindowCloseWaker() pub {
+  if uiBackend() is UiBackend.raylib {
+    installWindowCloseWaker()
+  }
+}
+
+func uiInstallMouseButtonHook() pub {
+  if uiBackend() is UiBackend.raylib {
+    installMouseButtonHook()
+  }
+}
+
+func uiDisableAppNap() pub {
+  if uiBackend() is UiBackend.raylib {
+    disableAppNap()
+  }
+}
+
+func uiIsKeyPressed(key: view Int) pub ret Bool {
+  if uiBackend() is UiBackend.gpu2d {
+    ret false
+  }
+  ret isKeyPressed(key: key)
+}
