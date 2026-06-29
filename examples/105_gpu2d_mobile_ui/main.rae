@@ -64,6 +64,7 @@ type IconSet {
   shuffle: Int
   skipPrev: Int
   play: Int
+  pause: Int
   skipNext: Int
   repeatIcon: Int
 }
@@ -78,6 +79,7 @@ func loadIcons() ret IconSet {
     shuffle: gpu2d.loadImage(path: "{iconDir}icon-shuffle.png")
     skipPrev: gpu2d.loadImage(path: "{iconDir}icon-skip-prev.png")
     play: gpu2d.loadImage(path: "{iconDir}icon-play.png")
+    pause: gpu2d.loadImage(path: "{iconDir}icon-pause.png")
     skipNext: gpu2d.loadImage(path: "{iconDir}icon-skip-next.png")
     repeatIcon: gpu2d.loadImage(path: "{iconDir}icon-repeat.png")
   }
@@ -92,6 +94,7 @@ func handleForKey(icons: view IconSet, key: view String) ret Int {
   if key.equals(other: "mat:shuffle") { ret icons.shuffle }
   if key.equals(other: "mat:skip_previous") { ret icons.skipPrev }
   if key.equals(other: "mat:play_arrow") { ret icons.play }
+  if key.equals(other: "mat:pause") { ret icons.pause }
   if key.equals(other: "mat:skip_next") { ret icons.skipNext }
   if key.equals(other: "mat:repeat") { ret icons.repeatIcon }
   ret 0
@@ -205,6 +208,88 @@ func buildWorld() ret UiWorld {
   ret world
 }
 
+# --- Interaction: an ECS system that operates the UI ----------------------
+# The scene's nodes carry OnClick components (actionId = "playback.toggle",
+# "playback.like", …). Each release we loop the OnClick component table,
+# hit-test the pointer against each entity's WorldTransform+ComputedRect, and
+# dispatch the topmost hit's actionId by MUTATING components in the world —
+# which the render loop then reflects. No per-widget code; the same loop
+# drives any scene that declares OnClicks.
+func pointInRect(world: view UiWorld, e: view EntityId, mx: view Float, my: view Float) ret Bool {
+  if componentHas(this: world.worldTransforms, entity: e) is false { ret false }
+  if componentHas(this: world.computedRects, entity: e) is false { ret false }
+  let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: e)
+  if wt.visible is false { ret false }
+  let cr: ComputedRect = componentGet(this: world.computedRects, entity: e)
+  if mx < wt.x { ret false }
+  if my < wt.y { ret false }
+  if mx > wt.x + cr.w { ret false }
+  if my > wt.y + cr.h { ret false }
+  ret true
+}
+
+# Topmost OnClick entity under (mx,my), or "" — reverse-iterates the table so
+# later (higher) entities win.
+func hitAction(world: view UiWorld, mx: view Float, my: view Float) ret String {
+  let n: Int = componentCount(this: world.onClicks)
+  var i: Int = n - 1
+  loop i >= 0 {
+    let e: EntityId = componentEntityAt(this: world.onClicks, i: i)
+    if pointInRect(world: world, e: e, mx: mx, my: my) {
+      let oc: OnClick = componentGet(this: world.onClicks, entity: e)
+      ret oc.actionId
+    }
+    i = i - 1
+  }
+  ret ""
+}
+
+func nodeEntity(world: view UiWorld, nodeId: view String) ret EntityId {
+  let o: opt Int = findNodeInPage(world: world, pageId: "now-playing", nodeId: nodeId)
+  if o is none { ret noEntity() }
+  let raw: Int = o
+  ret entityId(v: raw)
+}
+
+# Apply one dispatched action by mutating ECS components IN PLACE via
+# componentMod (a mutable borrow into the table) — the correct path for a
+# heap-owning component like Sprite. componentGet returns a shallow alias of
+# the table's heap, so get-mutate-set would double-free the String field;
+# componentMod mutates the live slot (one drop, no alias). componentView is
+# the read-only borrow used to inspect the current value first.
+func applyAction(world: mod UiWorld, act: view String) {
+  if act.equals(other: "playback.toggle") {
+    let e: EntityId = nodeEntity(world: world, nodeId: "PlayIcon")
+    if isNone(this: e) { ret }
+    if componentHas(this: world.sprites, entity: e) is false { ret }
+    var paused: Bool = false
+    let spv: view Sprite => componentView(this: world.sprites, entity: e)
+    if spv.textureKey.equals(other: "mat:pause") { paused = true }
+    let spm: mod Sprite => componentMod(this: world.sprites, entity: e)
+    if paused {
+      spm.textureKey = "mat:play_arrow"
+    } else {
+      spm.textureKey = "mat:pause"
+    }
+    ret
+  }
+  if act.equals(other: "playback.like") {
+    let e: EntityId = nodeEntity(world: world, nodeId: "HeartBtn")
+    if isNone(this: e) { ret }
+    if componentHas(this: world.sprites, entity: e) is false { ret }
+    var liked: Bool = false
+    let spv: view Sprite => componentView(this: world.sprites, entity: e)
+    if spv.tint.r is 238 { liked = true }
+    let spm: mod Sprite => componentMod(this: world.sprites, entity: e)
+    if liked {
+      spm.tint = themeColorByName(name: "textPrimary")
+    } else {
+      spm.tint = { r: 238, g: 99, b: 82, a: 255 }
+    }
+    ret
+  }
+}
+
 func main() ret Int {
   setActiveTheme(theme: lightTheme())
   gpu2d.initWindow(width: 440, height: 952, title: "Rae GPU2D — Now Playing")
@@ -215,13 +300,25 @@ func main() ret Int {
     rawAtlasPath: "examples/104_gpu2d_coords/assets/Roboto-Regular.mtsdf.raw")
 
   let icons: IconSet = loadIcons()
-  let world: UiWorld = buildWorld()
+  var world: UiWorld = buildWorld()
 
+  var prevDown: Bool = false
   loop not gpu2d.pollClose() {
+    # Interaction system: a tap (press then release) dispatches the OnClick
+    # under the pointer and mutates the world.
+    let down: Bool = gpu2d.pointerDown()
+    if prevDown and down is false {
+      let act: String = hitAction(world: world, mx: gpu2d.pointerX(), my: gpu2d.pointerY())
+      if act.length() > 0 {
+        applyAction(world: world, act: act)
+      }
+    }
+    prevDown = down
+
     gpu2d.beginFrame(r: 0.04, g: 0.04, b: 0.05, a: 1.0)
     renderWorld(world: world, font: font, icons: icons)
     gpu2d.endFrame()
-    # Static screen — no animation source, so park on events when idle.
+    # Event-driven: a click/move wakes us; otherwise park at ~0% CPU.
     gpu2d.waitEvents(timeoutSec: 0.2)
   }
 
