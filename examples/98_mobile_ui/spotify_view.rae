@@ -19,11 +19,13 @@ open ui/ecs
 # album catalogue — Spotify mode only repaints the NowPlaying screen
 # and the mini-player.
 import core
+import gpu2d
 import sys
 import sys/spotify
 import raylib
 import ui/ecs
 import ui/textures
+import ui/window
 # PlaybackState lives in examples/98_mobile_ui/playback.rae — auto-imported
 # from the same project directory. We mutate it here to sync the local
 # mock's `isPlaying` from Spotify's reported state so the play-button
@@ -154,13 +156,26 @@ func loadHistoryEntryArt(track: view SpotifyTrack, reg: mod TextureRegistry) pub
     ret ""
   }
   let key: String = "spotify-art:{imageHash}"
-  if textureHas(reg: reg, key: key) {
+  if uiBackend() is UiBackend.gpu2d {
+    if gpu2d.hasImageKey(key: key) {
+      ret key
+    }
+  } else if textureHas(reg: reg, key: key) {
     ret key
   }
   let outPath: String = "/tmp/rae_spotify_art_{imageHash}.jpg"
   let ok: Bool = spotify.fetchArtwork(url: track.artworkUrl, outPath: outPath)
   if ok is false {
     ret ""
+  }
+  if uiBackend() is UiBackend.gpu2d {
+    let gpuKey: String = "{key}"
+    let gpuPath: String = "{outPath}"
+    let h: Int = gpu2d.loadImageKey(key: gpuKey, path: gpuPath)
+    if h <= 0 {
+      ret ""
+    }
+    ret key
   }
   let tex: Texture = loadTexture(fileName: outPath)
   let keyForReg: String = "{key}"
@@ -202,7 +217,15 @@ func refreshSpotifyArt(state: view SpotifyState, track: view SpotifyTrack, reg: 
     }
   }
   # Drop any prior registration so the new file lands cleanly.
-  textureRemove(reg: reg, key: state.artKey)
+  if uiBackend() is UiBackend.raylib {
+    textureRemove(reg: reg, key: state.artKey)
+  }
+  if uiBackend() is UiBackend.gpu2d {
+    let copiedKey: String = "{state.artKey}"
+    let copiedPath: String = "{outPath}"
+    let h: Int = gpu2d.loadImageKey(key: copiedKey, path: copiedPath)
+    ret h > 0
+  }
   let tex: Texture = loadTexture(fileName: outPath)
   textureRegisterDirect(reg: reg, key: state.artKey, tex: tex)
   ret true
