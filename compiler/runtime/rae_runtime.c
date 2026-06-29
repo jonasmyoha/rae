@@ -4139,14 +4139,15 @@ static const char* G2D_TEXT_WGSL =
 "}\n";
 
 static WGPURenderPipeline g_g2d_text_pipeline = NULL;
-static WGPUBuffer    g_g2d_text_instbuf = NULL;
-static WGPUBindGroup g_g2d_text_bind = NULL;
-static int   g_g2d_text_cap = 0;
-static float* g_g2d_text_prims = NULL;
-static int   g_g2d_text_count = 0;
-static int   g_g2d_text_capf = 0;
-static int   g_g2d_text_atlas = 0;        /* 1-based atlas handle for this frame */
-static int   g_g2d_text_bind_atlas = -1;  /* atlas the current bind group references */
+/* Text glyphs accumulate PER ATLAS so a single frame can mix multiple MSDF
+ * fonts (e.g. Roboto body text + the Material-icon atlas) — endFrame emits one
+ * text draw per atlas that has glyphs this frame. Indexed by atlas handle-1. */
+static WGPUBuffer    g_g2d_text_instbuf[RAE_SDF_MAX_ATLAS];
+static WGPUBindGroup g_g2d_text_bind[RAE_SDF_MAX_ATLAS];
+static int   g_g2d_text_cap[RAE_SDF_MAX_ATLAS];   /* glyph capacity of instbuf[i] */
+static float* g_g2d_text_prims[RAE_SDF_MAX_ATLAS]; /* CPU float accumulation */
+static int   g_g2d_text_count[RAE_SDF_MAX_ATLAS];  /* glyphs this frame */
+static int   g_g2d_text_capf[RAE_SDF_MAX_ATLAS];   /* float capacity */
 static WGPUSampler g_g2d_sampler = NULL;
 static WGPUTexture     g_g2d_atlas_tex[RAE_SDF_MAX_ATLAS];
 static WGPUTextureView g_g2d_atlas_view[RAE_SDF_MAX_ATLAS];
@@ -4221,48 +4222,49 @@ static void rae_g2d_init_text_pipeline(void) {
     }
 }
 
-static void rae_g2d_rebuild_text_bind(void) {
-    WGPUTextureView view = rae_g2d_atlas_texview(g_g2d_text_atlas);
+static void rae_g2d_rebuild_text_bind(int ai) {
+    WGPUTextureView view = rae_g2d_atlas_texview(ai + 1);
     if (!view) return;
     WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(g_g2d_text_pipeline, 0);
     WGPUBindGroupEntry e[4]; memset(e, 0, sizeof(e));
     e[0].binding = 0; e[0].buffer = g_g2d_uniform; e[0].size = 32;
-    e[1].binding = 1; e[1].buffer = g_g2d_text_instbuf;
-    e[1].size = (uint64_t)g_g2d_text_cap * G2D_TEXT_FLOATS * sizeof(float);
+    e[1].binding = 1; e[1].buffer = g_g2d_text_instbuf[ai];
+    e[1].size = (uint64_t)g_g2d_text_cap[ai] * G2D_TEXT_FLOATS * sizeof(float);
     e[2].binding = 2; e[2].textureView = view;
     e[3].binding = 3; e[3].sampler = g_g2d_sampler;
     WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
     bgd.layout = bgl; bgd.entryCount = 4; bgd.entries = e;
-    if (g_g2d_text_bind) wgpuBindGroupRelease(g_g2d_text_bind);
-    g_g2d_text_bind = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
-    g_g2d_text_bind_atlas = g_g2d_text_atlas;
+    if (g_g2d_text_bind[ai]) wgpuBindGroupRelease(g_g2d_text_bind[ai]);
+    g_g2d_text_bind[ai] = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
     wgpuBindGroupLayoutRelease(bgl);
 }
 
-static void rae_g2d_ensure_text_inst(int prims) {
-    if (g_g2d_text_instbuf && prims <= g_g2d_text_cap) return;
-    int cap = g_g2d_text_cap ? g_g2d_text_cap : 256;
+static void rae_g2d_ensure_text_inst(int ai, int prims) {
+    if (g_g2d_text_instbuf[ai] && prims <= g_g2d_text_cap[ai]) return;
+    int cap = g_g2d_text_cap[ai] ? g_g2d_text_cap[ai] : 256;
     while (cap < prims) cap *= 2;
-    if (g_g2d_text_instbuf) wgpuBufferRelease(g_g2d_text_instbuf);
-    if (g_g2d_text_bind) { wgpuBindGroupRelease(g_g2d_text_bind); g_g2d_text_bind = NULL; g_g2d_text_bind_atlas = -1; }
+    if (g_g2d_text_instbuf[ai]) wgpuBufferRelease(g_g2d_text_instbuf[ai]);
+    if (g_g2d_text_bind[ai]) { wgpuBindGroupRelease(g_g2d_text_bind[ai]); g_g2d_text_bind[ai] = NULL; }
     WGPUBufferDescriptor bd; memset(&bd, 0, sizeof(bd));
     bd.size = (uint64_t)cap * G2D_TEXT_FLOATS * sizeof(float);
     bd.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
-    g_g2d_text_instbuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &bd);
-    g_g2d_text_cap = cap;
+    g_g2d_text_instbuf[ai] = wgpuDeviceCreateBuffer(g_wgpu_dev, &bd);
+    g_g2d_text_cap[ai] = cap;
 }
 
 void rae_ext_gpu2d_drawGlyph(double sx0, double sy0, double sx1, double sy1,
                              double u0, double v0, double u1, double v1,
                              int64_t atlas, double pxRange, int64_t color) {
-    int need = (g_g2d_text_count + 1) * G2D_TEXT_FLOATS;
-    if (need > g_g2d_text_capf) {
-        int cap = g_g2d_text_capf ? g_g2d_text_capf : (256 * G2D_TEXT_FLOATS);
+    int ai = (int)atlas - 1;
+    if (ai < 0 || ai >= RAE_SDF_MAX_ATLAS) return;
+    int need = (g_g2d_text_count[ai] + 1) * G2D_TEXT_FLOATS;
+    if (need > g_g2d_text_capf[ai]) {
+        int cap = g_g2d_text_capf[ai] ? g_g2d_text_capf[ai] : (256 * G2D_TEXT_FLOATS);
         while (cap < need) cap *= 2;
-        g_g2d_text_prims = (float*)realloc(g_g2d_text_prims, (size_t)cap * sizeof(float));
-        g_g2d_text_capf = cap;
+        g_g2d_text_prims[ai] = (float*)realloc(g_g2d_text_prims[ai], (size_t)cap * sizeof(float));
+        g_g2d_text_capf[ai] = cap;
     }
-    float* p = g_g2d_text_prims + g_g2d_text_count * G2D_TEXT_FLOATS;
+    float* p = g_g2d_text_prims[ai] + g_g2d_text_count[ai] * G2D_TEXT_FLOATS;
     p[0]=(float)sx0; p[1]=(float)sy0; p[2]=(float)(sx1-sx0); p[3]=(float)(sy1-sy0);
     p[4]=(float)u0; p[5]=(float)v0; p[6]=(float)(u1-u0); p[7]=(float)(v1-v0);
     /* straight (non-premultiplied) colour 0xAARRGGBB; the shader premultiplies */
@@ -4272,8 +4274,7 @@ void rae_ext_gpu2d_drawGlyph(double sx0, double sy0, double sx1, double sy1,
     p[10] = (float)( c        & 0xFF) / 255.0f;
     p[11] = (float)((c >> 24) & 0xFF) / 255.0f;
     p[12]=(float)pxRange; p[13]=0.0f; p[14]=0.0f; p[15]=0.0f;
-    g_g2d_text_count++;
-    g_g2d_text_atlas = (int)atlas;
+    g_g2d_text_count[ai]++;
 }
 
 /* --- Image pipeline (#143): textured rounded quads -------------------
@@ -4486,7 +4487,7 @@ static void rae_g2d_flush_images(void) {
 
 void rae_ext_gpu2d_beginFrame(double r, double g, double b, double a) {
     g_g2d_prim_count = 0;
-    g_g2d_text_count = 0;
+    for (int i = 0; i < RAE_SDF_MAX_ATLAS; i++) g_g2d_text_count[i] = 0;
     g_g2d_img_cmd_count = 0;
     if (!g_g2d_surface) return;
     WGPUSurfaceTexture st; memset(&st, 0, sizeof(st));
@@ -4574,7 +4575,8 @@ static void rae_g2d_save_screenshot(const char* path) {
 
 void rae_ext_gpu2d_endFrame(void) {
     if (!g_g2d_pass) return;
-    int have_text = (g_g2d_text_count > 0 && g_g2d_text_atlas > 0);
+    int have_text = 0;
+    for (int i = 0; i < RAE_SDF_MAX_ATLAS; i++) if (g_g2d_text_count[i] > 0) have_text = 1;
     int have_img = (g_g2d_img_cmd_count > 0);
     if (g_g2d_prim_count > 0 || have_text || have_img) {
         /* rae_g2d_init_pipeline also creates the shared viewport uniform that
@@ -4594,16 +4596,21 @@ void rae_ext_gpu2d_endFrame(void) {
     }
     /* Images on top of boxes, under text. */
     rae_g2d_flush_images();
-    if (g_g2d_text_count > 0 && g_g2d_text_atlas > 0) {
+    if (have_text) {
+        /* One text draw per atlas that has glyphs this frame (so Roboto text
+         * and the Material-icon atlas coexist). */
         rae_g2d_init_text_pipeline();
-        rae_g2d_ensure_text_inst(g_g2d_text_count);
-        if (!g_g2d_text_bind || g_g2d_text_bind_atlas != g_g2d_text_atlas) rae_g2d_rebuild_text_bind();
-        if (g_g2d_text_bind) {
-            wgpuQueueWriteBuffer(g_wgpu_queue, g_g2d_text_instbuf, 0, g_g2d_text_prims,
-                                 (size_t)g_g2d_text_count * G2D_TEXT_FLOATS * sizeof(float));
-            wgpuRenderPassEncoderSetPipeline(g_g2d_pass, g_g2d_text_pipeline);
-            wgpuRenderPassEncoderSetBindGroup(g_g2d_pass, 0, g_g2d_text_bind, 0, NULL);
-            wgpuRenderPassEncoderDraw(g_g2d_pass, 6, (uint32_t)g_g2d_text_count, 0, 0);
+        wgpuRenderPassEncoderSetPipeline(g_g2d_pass, g_g2d_text_pipeline);
+        for (int ai = 0; ai < RAE_SDF_MAX_ATLAS; ai++) {
+            if (g_g2d_text_count[ai] <= 0) continue;
+            if (!rae_g2d_atlas_texview(ai + 1)) continue;
+            rae_g2d_ensure_text_inst(ai, g_g2d_text_count[ai]);
+            if (!g_g2d_text_bind[ai]) rae_g2d_rebuild_text_bind(ai);
+            if (!g_g2d_text_bind[ai]) continue;
+            wgpuQueueWriteBuffer(g_wgpu_queue, g_g2d_text_instbuf[ai], 0, g_g2d_text_prims[ai],
+                                 (size_t)g_g2d_text_count[ai] * G2D_TEXT_FLOATS * sizeof(float));
+            wgpuRenderPassEncoderSetBindGroup(g_g2d_pass, 0, g_g2d_text_bind[ai], 0, NULL);
+            wgpuRenderPassEncoderDraw(g_g2d_pass, 6, (uint32_t)g_g2d_text_count[ai], 0, 0);
         }
     }
     wgpuRenderPassEncoderEnd(g_g2d_pass);
@@ -4627,11 +4634,13 @@ void rae_ext_gpu2d_endFrame(void) {
 }
 
 void rae_ext_gpu2d_closeWindow(void) {
-    if (g_g2d_text_bind) { wgpuBindGroupRelease(g_g2d_text_bind); g_g2d_text_bind = NULL; g_g2d_text_bind_atlas = -1; }
-    if (g_g2d_text_instbuf) { wgpuBufferRelease(g_g2d_text_instbuf); g_g2d_text_instbuf = NULL; g_g2d_text_cap = 0; }
+    for (int ai = 0; ai < RAE_SDF_MAX_ATLAS; ai++) {
+        if (g_g2d_text_bind[ai]) { wgpuBindGroupRelease(g_g2d_text_bind[ai]); g_g2d_text_bind[ai] = NULL; }
+        if (g_g2d_text_instbuf[ai]) { wgpuBufferRelease(g_g2d_text_instbuf[ai]); g_g2d_text_instbuf[ai] = NULL; g_g2d_text_cap[ai] = 0; }
+        if (g_g2d_text_prims[ai]) { free(g_g2d_text_prims[ai]); g_g2d_text_prims[ai] = NULL; g_g2d_text_capf[ai] = 0; }
+        g_g2d_text_count[ai] = 0;
+    }
     if (g_g2d_text_pipeline) { wgpuRenderPipelineRelease(g_g2d_text_pipeline); g_g2d_text_pipeline = NULL; }
-    if (g_g2d_text_prims) { free(g_g2d_text_prims); g_g2d_text_prims = NULL; g_g2d_text_capf = 0; }
-    g_g2d_text_count = 0; g_g2d_text_atlas = 0;
     if (g_g2d_sampler) { wgpuSamplerRelease(g_g2d_sampler); g_g2d_sampler = NULL; }
     for (int ai = 0; ai < RAE_SDF_MAX_ATLAS; ai++) {
         if (g_g2d_atlas_view[ai]) { wgpuTextureViewRelease(g_g2d_atlas_view[ai]); g_g2d_atlas_view[ai] = NULL; }
