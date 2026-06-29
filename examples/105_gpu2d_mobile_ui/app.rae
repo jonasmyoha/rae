@@ -1,0 +1,224 @@
+# Screen composition + routing for the gpu2d mobile UI.
+#
+# Each screen is composed by stacking real 98_mobile_ui .raescene files through
+# the ECS layout system: a content region (the screen's scene) over the shared
+# bottom dock (mini-player.raescene + nav-tabs.raescene). The Album screen's
+# track list is data-driven — one track-row.raescene instance mounted per track
+# in the album data. Nav-tab / mini-player OnClicks route between screens.
+open ui/ecs
+import core
+import ui/components
+import ui/ecs
+import ui/layout
+import ui/registry
+import ui/scene
+import ui/scene_instance
+import ui/transform
+import ui/theme
+
+# --- Canvas + layout constants (98's authored 498x1079 phone scale) -------
+let canvasW: Float = 498.0
+let canvasH: Float = 1079.0
+let navTabsH: Float = 72.0
+let miniPlayerH: Float = 84.0
+
+let screenNowPlaying: Int = 0
+let screenAlbum: Int = 1
+let screenHome: Int = 2
+let screenSearch: Int = 3
+
+let sceneDir: String = "examples/98_mobile_ui/assets/scenes/"
+
+# Compiled-target read shortcut (matches 98_mobile_ui/scene_loader.rae) — the C
+# runtime returns a concrete String, side-stepping the opt-String bug (#138).
+func rae_ext_rae_sys_read_file(path: String) extern ret String
+
+# --- Scene cache ----------------------------------------------------------
+# Named fields (not List(Scene)) on purpose: the C backend struct-copies list
+# elements via rae_ext_rae_buf_get, corrupting nested JsonDoc pointers (see
+# 98's scene_loader.rae note).
+type AppScenes {
+  nowPlaying: Scene
+  album: Scene
+  navTabs: Scene
+  miniPlayer: Scene
+  trackRow: Scene
+  home: Scene
+  search: Scene
+}
+
+func loadScene(name: view String) ret Scene {
+  let content: String = rae_ext_rae_sys_read_file(path: "{sceneDir}{name}")
+  ret parseScene(source: content)
+}
+
+func loadScenes() ret AppScenes {
+  ret AppScenes {
+    nowPlaying: loadScene(name: "music-player-now-playing.raescene")
+    album: loadScene(name: "album.raescene")
+    navTabs: loadScene(name: "nav-tabs.raescene")
+    miniPlayer: loadScene(name: "mini-player.raescene")
+    trackRow: loadScene(name: "track-row.raescene")
+    home: loadScene(name: "home.raescene")
+    search: loadScene(name: "search.raescene")
+  }
+}
+
+# --- Album body: header scene + one track-row scene per track (data-driven)
+func addTrackRow(world: mod UiWorld, scene: view Scene, idx: copy String, title: copy String, sub: copy String) ret EntityId {
+  let row: EntityId = createEntity(world: world)
+  setRectFixed(world: world, entity: row, w: canvasW, h: 60.0)
+  let ov: List(SceneOverride) = emptyOverrides()
+  addTextOverride(list: ov, nodeId: "IdxText", value: idx)
+  addTextOverride(list: ov, nodeId: "TitleText", value: title)
+  addTextOverride(list: ov, nodeId: "SubtitleText", value: sub)
+  mountSceneInstanceIntoPage(world: world, mountEntity: row, scene: scene, overrides: ov, pageId: "row")
+  ret row
+}
+
+func buildAlbumContent(world: mod UiWorld, scenes: view AppScenes, content: view EntityId) {
+  setLayoutV(world: world, entity: content, gap: 0.0, alignCross: AlignKind.start)
+
+  let header: EntityId = createEntity(world: world)
+  setRectFixed(world: world, entity: header, w: canvasW, h: 360.0)
+  let hov: List(SceneOverride) = emptyOverrides()
+  addTextOverride(list: hov, nodeId: "HeroCaption", value: "Album · 8 songs · 2012")
+  addTextOverride(list: hov, nodeId: "HeroTitle", value: "Charcoal")
+  addTextOverride(list: hov, nodeId: "HeroArtist", value: "Brambles")
+  addSpriteOverride(list: hov, nodeId: "HeroThumb", value: "albumCover")
+  mountSceneInstanceIntoPage(world: world, mountEntity: header, scene: scenes.album, overrides: hov, pageId: "screen")
+
+  let kids: List(EntityId) = createList(EntityId, cap: 8)
+  kids.add(value: header)
+  kids.add(value: addTrackRow(world: world, scene: scenes.trackRow, idx: "01", title: "To Speak Of Solitude", sub: "Brambles · 4:21"))
+  kids.add(value: addTrackRow(world: world, scene: scenes.trackRow, idx: "02", title: "Unsayable", sub: "Brambles · 2:52"))
+  kids.add(value: addTrackRow(world: world, scene: scenes.trackRow, idx: "03", title: "In The Androgynous Dark", sub: "Brambles · 4:43"))
+  kids.add(value: addTrackRow(world: world, scene: scenes.trackRow, idx: "04", title: "Salt Photographs", sub: "Brambles · 6:54"))
+  kids.add(value: addTrackRow(world: world, scene: scenes.trackRow, idx: "05", title: "Pink And Golden Billows", sub: "Brambles · 2:58"))
+  attachChildren(world: world, parent: content, kids: kids)
+}
+
+# Mount the screen's content scene(s) into the content region.
+func buildScreenContent(world: mod UiWorld, scenes: view AppScenes, screen: view Int, content: view EntityId) {
+  if screen is screenAlbum {
+    buildAlbumContent(world: world, scenes: scenes, content: content)
+    ret
+  }
+  if screen is screenHome {
+    mountSceneInstanceIntoPage(world: world, mountEntity: content, scene: scenes.home, overrides: emptyOverrides(), pageId: "screen")
+    ret
+  }
+  if screen is screenSearch {
+    mountSceneInstanceIntoPage(world: world, mountEntity: content, scene: scenes.search, overrides: emptyOverrides(), pageId: "screen")
+    ret
+  }
+  # Default: Now Playing.
+  mountSceneInstanceIntoPage(world: world, mountEntity: content, scene: scenes.nowPlaying, overrides: emptyOverrides(), pageId: "screen")
+}
+
+# Compose a full screen: content region (fills) + optional mini-player + nav
+# tabs, stacked by the vertical layout.
+func buildScreenWorld(scenes: view AppScenes, screen: view Int) ret UiWorld {
+  var world: UiWorld = createUiWorld()
+
+  let root: EntityId = createEntity(world: world)
+  setRectFixed(world: world, entity: root, w: canvasW, h: canvasH)
+  setLayoutV(world: world, entity: root, gap: 0.0, alignCross: AlignKind.start)
+
+  let content: EntityId = createEntity(world: world)
+  setRectFillH(world: world, entity: content, w: canvasW)
+  buildScreenContent(world: world, scenes: scenes, screen: screen, content: content)
+
+  let kids: List(EntityId) = createList(EntityId, cap: 3)
+  kids.add(value: content)
+  # The mini-player dock shows on every screen except the full Now Playing one.
+  if screen is not screenNowPlaying {
+    let mini: EntityId = createEntity(world: world)
+    setRectFixed(world: world, entity: mini, w: canvasW, h: miniPlayerH)
+    mountSceneInstanceIntoPage(world: world, mountEntity: mini, scene: scenes.miniPlayer, overrides: emptyOverrides(), pageId: "mini")
+    kids.add(value: mini)
+  }
+  let nav: EntityId = createEntity(world: world)
+  setRectFixed(world: world, entity: nav, w: canvasW, h: navTabsH)
+  mountSceneInstanceIntoPage(world: world, mountEntity: nav, scene: scenes.navTabs, overrides: emptyOverrides(), pageId: "nav")
+  kids.add(value: nav)
+
+  attachChildren(world: world, parent: root, kids: kids)
+
+  world.layoutW = canvasW
+  world.layoutH = canvasH
+  layoutSystem(world: world)
+  transformSystem(world: world)
+  ret world
+}
+
+# --- Interaction: hit-test the OnClick table; route + mutate --------------
+func pointInRect(world: view UiWorld, e: view EntityId, mx: view Float, my: view Float) ret Bool {
+  if componentHas(this: world.worldTransforms, entity: e) is false { ret false }
+  if componentHas(this: world.computedRects, entity: e) is false { ret false }
+  let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: e)
+  if wt.visible is false { ret false }
+  let cr: ComputedRect = componentGet(this: world.computedRects, entity: e)
+  if mx < wt.x { ret false }
+  if my < wt.y { ret false }
+  if mx > wt.x + cr.w { ret false }
+  if my > wt.y + cr.h { ret false }
+  ret true
+}
+
+func hitAction(world: view UiWorld, mx: view Float, my: view Float) ret String {
+  let n: Int = componentCount(this: world.onClicks)
+  var i: Int = n - 1
+  loop i >= 0 {
+    let e: EntityId = componentEntityAt(this: world.onClicks, i: i)
+    if pointInRect(world: world, e: e, mx: mx, my: my) {
+      let oc: OnClick = componentGet(this: world.onClicks, entity: e)
+      ret oc.actionId
+    }
+    i = i - 1
+  }
+  ret ""
+}
+
+func nodeEntityIn(world: view UiWorld, pageId: view String, nodeId: view String) ret EntityId {
+  let o: opt Int = findNodeInPage(world: world, pageId: pageId, nodeId: nodeId)
+  if o is none { ret noEntity() }
+  let raw: Int = o
+  ret entityId(v: raw)
+}
+
+# Swap a sprite's textureKey in place (componentMod — the heap-safe path).
+func swapSpriteKey(world: mod UiWorld, pageId: view String, nodeId: view String, from: view String, to: view String) {
+  let e: EntityId = nodeEntityIn(world: world, pageId: pageId, nodeId: nodeId)
+  if isNone(this: e) { ret }
+  if componentHas(this: world.sprites, entity: e) is false { ret }
+  var isFrom: Bool = false
+  let spv: view Sprite => componentView(this: world.sprites, entity: e)
+  if spv.textureKey.equals(other: from) { isFrom = true }
+  let spm: mod Sprite => componentMod(this: world.sprites, entity: e)
+  if isFrom { spm.textureKey = to } else { spm.textureKey = from }
+}
+
+# Map a nav.* action to a screen id, or -1 if not a nav action.
+func navScreen(act: view String) ret Int {
+  if act.equals(other: "nav.nowPlaying") { ret screenNowPlaying }
+  if act.equals(other: "nav.home") { ret screenHome }
+  if act.equals(other: "nav.search") { ret screenSearch }
+  if act.equals(other: "nav.library") { ret screenAlbum }
+  if act.equals(other: "nav.hotlist") { ret screenNowPlaying }
+  ret 0 - 1
+}
+
+# Apply an action. Returns a requested screen (>=0) for nav actions, else -1.
+# playback.* actions mutate the play/heart sprites in both the main screen and
+# the mini-player so the two stay in sync.
+func dispatch(world: mod UiWorld, act: view String) ret Int {
+  let nav: Int = navScreen(act: act)
+  if nav >= 0 { ret nav }
+  if act.equals(other: "playback.toggle") {
+    swapSpriteKey(world: world, pageId: "screen", nodeId: "PlayIcon", from: "mat:play_arrow", to: "mat:pause")
+    swapSpriteKey(world: world, pageId: "mini", nodeId: "MiniPlayIcon", from: "mat:play_arrow", to: "mat:pause")
+    ret 0 - 1
+  }
+  ret 0 - 1
+}
