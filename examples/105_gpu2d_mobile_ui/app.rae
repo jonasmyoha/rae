@@ -98,6 +98,42 @@ func buildAlbumContent(world: mod UiWorld, scenes: view AppScenes, content: view
   attachChildren(world: world, parent: content, kids: kids)
 }
 
+# A square album-cover tile (data-driven: textureKey "cover:N" → gallery image).
+func buildCoverTile(world: mod UiWorld, size: view Float, idx: view Int) ret EntityId {
+  let e: EntityId = createEntity(world: world)
+  setRectFixed(world: world, entity: e, w: size, h: size)
+  let white: RgbaColor = themeColorByName(name: "imageTint")
+  setSprite(world: world, entity: e, key: "cover:{idx}", tint: white)
+  setCornerRadius(world: world, entity: e, radius: 14.0)
+  ret e
+}
+
+func buildCoverRow(world: mod UiWorld, rowW: view Float, size: view Float, a: view Int, b: view Int) ret EntityId {
+  let row: EntityId = createEntity(world: world)
+  setRectFixed(world: world, entity: row, w: rowW, h: size)
+  setLayoutH(world: world, entity: row, gap: 8.0, alignCross: AlignKind.start)
+  let kids: List(EntityId) = createList(EntityId, cap: 2)
+  kids.add(value: buildCoverTile(world: world, size: size, idx: a))
+  kids.add(value: buildCoverTile(world: world, size: size, idx: b))
+  attachChildren(world: world, parent: row, kids: kids)
+  ret row
+}
+
+# Mount the Home scene, then populate its (skeleton) CoverGrid container with a
+# data-driven 2-column album-cover grid — the same way 98's home_view does it.
+func buildHomeContent(world: mod UiWorld, scenes: view AppScenes, content: view EntityId) {
+  mountSceneInstanceIntoPage(world: world, mountEntity: content, scene: scenes.home, overrides: emptyOverrides(), pageId: "screen")
+  let grid: EntityId = nodeEntityIn(world: world, pageId: "screen", nodeId: "CoverGrid")
+  if isNone(this: grid) { ret }
+  let rowW: Float = canvasW - 40.0
+  let tile: Float = (rowW - 8.0) / 2.0
+  let rows: List(EntityId) = createList(EntityId, cap: 3)
+  rows.add(value: buildCoverRow(world: world, rowW: rowW, size: tile, a: 0, b: 1))
+  rows.add(value: buildCoverRow(world: world, rowW: rowW, size: tile, a: 2, b: 3))
+  rows.add(value: buildCoverRow(world: world, rowW: rowW, size: tile, a: 4, b: 5))
+  attachChildren(world: world, parent: grid, kids: rows)
+}
+
 # Mount the screen's content scene(s) into the content region.
 func buildScreenContent(world: mod UiWorld, scenes: view AppScenes, screen: view Int, content: view EntityId) {
   if screen is screenAlbum {
@@ -105,7 +141,7 @@ func buildScreenContent(world: mod UiWorld, scenes: view AppScenes, screen: view
     ret
   }
   if screen is screenHome {
-    mountSceneInstanceIntoPage(world: world, mountEntity: content, scene: scenes.home, overrides: emptyOverrides(), pageId: "screen")
+    buildHomeContent(world: world, scenes: scenes, content: content)
     ret
   }
   if screen is screenSearch {
