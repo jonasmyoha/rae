@@ -55,6 +55,8 @@ func g2dTextStyleSize(styleId: view String) ret Float {
   if styleId.equals(other: "tabActive") { ret 14.0 }
   if styleId.equals(other: "tabInactive") { ret 14.0 }
   if styleId.equals(other: "timeTotal") { ret 16.0 }
+  if styleId.equals(other: "debugButton") { ret 14.0 }
+  if styleId.equals(other: "debugMenuLabel") { ret 16.0 }
   ret 20.0
 }
 
@@ -68,6 +70,8 @@ func g2dTextStyleColor(styleId: view String) ret RgbaColor {
   if styleId.equals(other: "miniTitle") { ret themeColorByName(name: "accentText") }
   if styleId.equals(other: "miniMuted") { ret themeColorByName(name: "accentTextMuted") }
   if styleId.equals(other: "pillLabel") { ret themeColorByName(name: "accentText") }
+  if styleId.equals(other: "debugButton") { ret RgbaColor { r: 24, g: 24, b: 28, a: 255 } }
+  if styleId.equals(other: "debugMenuLabel") { ret RgbaColor { r: 246, g: 246, b: 248, a: 255 } }
   ret themeColorByName(name: "textPrimary")
 }
 
@@ -75,6 +79,7 @@ func g2dTextStyleIsCentered(styleId: view String) ret Bool {
   if styleId.equals(other: "tabActive") { ret true }
   if styleId.equals(other: "tabInactive") { ret true }
   if styleId.equals(other: "pageTitle") { ret true }
+  if styleId.equals(other: "debugButton") { ret true }
   ret false
 }
 
@@ -118,7 +123,30 @@ func paintShapeG(world: view UiWorld, e: view EntityId, wt: view WorldTransform,
 func paintGradientG(world: view UiWorld, e: view EntityId, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int) {
   let gf: GradientFill = componentGet(this: world.gradientFills, entity: e)
   let radius: Float = g2dRadius(world: world, e: e, fallback: 0.0)
-  sinkRoundedRect(x: wt.x, y: wt.y, w: cr.w, h: cr.h, radius: radius, c: g2dChain(c: gf.from, chain255: chain255))
+  var fill: RgbaColor = gf.from
+  # Temporary compatibility until gpu2d grows a gradient shader: transparent
+  # -> opaque dock shadows should use the visible end, not disappear.
+  if gf.from.a <= 0 {
+    if gf.to.a > 0 {
+      fill = gf.to
+    }
+  }
+  sinkRoundedRect(x: wt.x, y: wt.y, w: cr.w, h: cr.h, radius: radius, c: g2dChain(c: fill, chain255: chain255))
+}
+
+func paintBackdropG(world: view UiWorld, e: view EntityId, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int) {
+  let bi: BackdropImage = componentGet(this: world.backdropImages, entity: e)
+  let radius: Float = g2dRadius(world: world, e: e, fallback: 0.0)
+  if gpu2d.hasImageKey(key: bi.textureKey) {
+    let white: RgbaColor = { r: 255, g: 255, b: 255, a: 255 }
+    let tint: RgbaColor = g2dChain(c: white, chain255: chain255)
+    gpu2d.drawImageKey(key: bi.textureKey, x: wt.x, y: wt.y, w: cr.w, h: cr.h, radius: radius, tint: g2dColor(c: tint))
+    ret
+  }
+  # Raylib uses captured blur textures for BackdropImage. gpu2d does not have
+  # framebuffer capture yet, so paint a stable translucent glass fallback.
+  let fallback: RgbaColor = { r: 18, g: 22, b: 30, a: 210 }
+  sinkRoundedRect(x: wt.x, y: wt.y, w: cr.w, h: cr.h, radius: radius, c: g2dChain(c: fallback, chain255: chain255))
 }
 
 # Sprites: `mat:<name>` icons draw as a Material-atlas glyph; other keys
@@ -127,28 +155,37 @@ func paintGradientG(world: view UiWorld, e: view EntityId, wt: view WorldTransfo
 func paintSpriteG(world: view UiWorld, e: view EntityId, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int, res: view Gpu2dUi) {
   let sp: view Sprite => componentView(this: world.sprites, entity: e)
   let tint: RgbaColor = g2dChain(c: sp.tint, chain255: chain255)
+  var hoverMul: Float = 1.0
+  if componentHas(this: world.hoverScales, entity: e) {
+    let hs: HoverScale = componentGet(this: world.hoverScales, entity: e)
+    hoverMul = hs.current
+  }
+  let drawW: Float = cr.w * hoverMul
+  let drawH: Float = cr.h * hoverMul
+  let drawX: Float = wt.x + (cr.w - drawW) / 2.0
+  let drawY: Float = wt.y + (cr.h - drawH) / 2.0
   let matPrefix: String = "mat:"
   if sp.textureKey.startsWith(prefix: matPrefix) {
     let nameLen: Int = sp.textureKey.length() - matPrefix.length()
     let name: String = sp.textureKey.sub(start: matPrefix.length(), len: nameLen)
     let glyph: String = iconText(name: name)
     if glyph.length() is 0 { ret }
-    var sz: Float = cr.w
-    if cr.h < sz { sz = cr.h }
+    var sz: Float = drawW
+    if drawH < sz { sz = drawH }
     # Center the em-box glyph in the rect; baseline sits ~size above the bottom.
-    let gx: Float = wt.x + (cr.w - sz) / 2.0
-    let gy: Float = wt.y + (cr.h - sz) / 2.0 + sz
+    let gx: Float = drawX + (drawW - sz) / 2.0
+    let gy: Float = drawY + (drawH - sz) / 2.0 + sz
     gpu2d_text.drawText(font: res.iconFont, text: glyph, x: gx, y: gy, sizePx: sz, color: g2dColor(c: tint))
     ret
   }
   let radius: Float = g2dRadius(world: world, e: e, fallback: 0.0)
   if gpu2d.hasImageKey(key: sp.textureKey) {
-    gpu2d.drawImageKey(key: sp.textureKey, x: wt.x, y: wt.y, w: cr.w, h: cr.h, radius: radius, tint: g2dColor(c: tint))
+    gpu2d.drawImageKey(key: sp.textureKey, x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, tint: g2dColor(c: tint))
     ret
   }
   var smaller: Float = cr.w
   if cr.h < smaller { smaller = cr.h }
-  sinkRoundedRect(x: wt.x, y: wt.y, w: cr.w, h: cr.h, radius: smaller * 0.3, c: tint)
+  sinkRoundedRect(x: drawX, y: drawY, w: drawW, h: drawH, radius: smaller * 0.3 * hoverMul, c: tint)
 }
 
 func paintTextG(world: view UiWorld, e: view EntityId, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int, res: view Gpu2dUi) {
@@ -189,12 +226,19 @@ func paintEntityG(world: view UiWorld, e: view EntityId, res: view Gpu2dUi) {
   } else if componentHas(this: world.shapes, entity: e) {
     paintShapeG(world: world, e: e, wt: wt, cr: cr, chain255: chain255)
   }
+  if componentHas(this: world.backdropImages, entity: e) {
+    paintBackdropG(world: world, e: e, wt: wt, cr: cr, chain255: chain255)
+  }
   if componentHas(this: world.sprites, entity: e) {
     paintSpriteG(world: world, e: e, wt: wt, cr: cr, chain255: chain255, res: res)
   }
   if componentHas(this: world.texts, entity: e) {
     paintTextG(world: world, e: e, wt: wt, cr: cr, chain255: chain255, res: res)
   }
+  # gpu2d has separate box/image/text pipelines. Flush per entity so later
+  # entities can correctly paint over earlier images/text, matching raylib's
+  # immediate-mode painter order.
+  gpu2d.flush()
 }
 
 func paintSubtreeG(world: view UiWorld, e: view EntityId, res: view Gpu2dUi) {
