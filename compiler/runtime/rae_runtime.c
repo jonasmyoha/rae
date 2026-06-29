@@ -3017,6 +3017,8 @@ static int64_t g_sdl_last_present_ms = 0;
 static unsigned char g_sdl_pressed[SDL_SCANCODE_COUNT]; /* went-down-this-frame edges */
 static unsigned char g_sdl_keydown[SDL_SCANCODE_COUNT]; /* held state, from key down/up events */
 static unsigned char g_sdl_mouse[8];                    /* held state, by SDL button index (1=L,2=M,3=R) */
+static unsigned char g_sdl_mouse_pressed[8];            /* went-down-this-frame edges */
+static unsigned char g_sdl_mouse_released[8];           /* went-up-this-frame edges */
 static bool g_sdl_mouse_captured = false;
 
 /* Map raylib/GLFW key codes (letters = ASCII uppercase, arrows = 262-265, plus
@@ -3804,6 +3806,8 @@ void rae_ext_gpu2d_initWindow(int64_t width, int64_t height, rae_String title) {
  * only this frame. */
 rae_Bool rae_ext_gpu2d_pollClose(void) {
     memset(g_sdl_pressed, 0, sizeof(g_sdl_pressed));
+    memset(g_sdl_mouse_pressed, 0, sizeof(g_sdl_mouse_pressed));
+    memset(g_sdl_mouse_released, 0, sizeof(g_sdl_mouse_released));
     g_g2d_wheel = 0.0f;
     SDL_Event e;
     rae_Bool quit = 0;
@@ -3828,11 +3832,17 @@ rae_Bool rae_ext_gpu2d_pollClose(void) {
                 if (e.key.scancode < SDL_SCANCODE_COUNT) g_sdl_keydown[e.key.scancode] = 0;
                 break;
             case SDL_EVENT_MOUSE_BUTTON_DOWN:
-                if (e.button.button < 8) g_sdl_mouse[e.button.button] = 1;
+                if (e.button.button < 8) {
+                    g_sdl_mouse[e.button.button] = 1;
+                    g_sdl_mouse_pressed[e.button.button] = 1;
+                }
                 if (!g_sdl_mouse_captured) { SDL_CaptureMouse(true); g_sdl_mouse_captured = true; }
                 break;
             case SDL_EVENT_MOUSE_BUTTON_UP: {
-                if (e.button.button < 8) g_sdl_mouse[e.button.button] = 0;
+                if (e.button.button < 8) {
+                    g_sdl_mouse[e.button.button] = 0;
+                    g_sdl_mouse_released[e.button.button] = 1;
+                }
                 bool any = false;
                 for (int b = 0; b < 8; b++) if (g_sdl_mouse[b]) any = true;
                 if (!any && g_sdl_mouse_captured) { SDL_CaptureMouse(false); g_sdl_mouse_captured = false; }
@@ -3844,6 +3854,8 @@ rae_Bool rae_ext_gpu2d_pollClose(void) {
             case SDL_EVENT_WINDOW_FOCUS_LOST:
                 memset(g_sdl_keydown, 0, sizeof(g_sdl_keydown));
                 memset(g_sdl_mouse, 0, sizeof(g_sdl_mouse));
+                memset(g_sdl_mouse_pressed, 0, sizeof(g_sdl_mouse_pressed));
+                memset(g_sdl_mouse_released, 0, sizeof(g_sdl_mouse_released));
                 if (g_sdl_mouse_captured) { SDL_CaptureMouse(false); g_sdl_mouse_captured = false; }
                 break;
             default: break;
@@ -3883,6 +3895,8 @@ double rae_ext_gpu2d_pointerX(void) { double x, y; rae_g2d_pointer_design(&x, &y
 double rae_ext_gpu2d_pointerY(void) { double x, y; rae_g2d_pointer_design(&x, &y); return y; }
 /* Left mouse button held this frame (button index 1 in SDL). */
 rae_Bool rae_ext_gpu2d_pointerDown(void) { return g_sdl_mouse[SDL_BUTTON_LEFT] != 0; }
+rae_Bool rae_ext_gpu2d_pointerPressed(void) { return g_sdl_mouse_pressed[SDL_BUTTON_LEFT] != 0; }
+rae_Bool rae_ext_gpu2d_pointerReleased(void) { return g_sdl_mouse_released[SDL_BUTTON_LEFT] != 0; }
 /* Per-frame wheel delta (positive = wheel/scroll up). */
 double rae_ext_gpu2d_wheelMove(void) { return (double)g_g2d_wheel; }
 /* Monotonic wall-clock seconds since process start — for scroll timing without
@@ -4781,6 +4795,8 @@ void rae_ext_gpu2d_drawImage(double x, double y, double w, double h, double radi
 double rae_ext_gpu2d_pointerX(void) { return 0.0; }
 double rae_ext_gpu2d_pointerY(void) { return 0.0; }
 rae_Bool rae_ext_gpu2d_pointerDown(void) { return 0; }
+rae_Bool rae_ext_gpu2d_pointerPressed(void) { return 0; }
+rae_Bool rae_ext_gpu2d_pointerReleased(void) { return 0; }
 double rae_ext_gpu2d_wheelMove(void) { return 0.0; }
 double rae_ext_gpu2d_nowSeconds(void) { return 0.0; }
 int64_t rae_ext_gpu2d_windowWidth(void) { return 0; }
