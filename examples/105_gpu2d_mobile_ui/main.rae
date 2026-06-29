@@ -16,18 +16,21 @@
 # Compiled target only:
 #   rae run --target compiled examples/105_gpu2d_mobile_ui/main.rae
 import core
-import gpu2d
 import sdf_text
+import ui/components
+import ui/draw
 import ui/ecs
 import ui/theme
+import ui/window
 open ui/ecs
 
 func main() ret Int {
   # Theme must be active before scenes parse ($token colors resolve against it).
   setActiveTheme(theme: lightTheme())
+  setUiBackend(b: UiBackend.gpu2d)
 
-  gpu2d.initWindow(width: 440, height: 952, title: "Rae GPU2D Mobile UI")
-  gpu2d.setDesignResolution(width: canvasW, height: canvasH, fit: 0)
+  uiInitWindow(width: 440, height: 952, title: "Rae GPU2D Mobile UI")
+  uiSetDesignResolution(width: canvasW, height: canvasH, fit: 0)
 
   let font: SdfFont = sdf_text.loadSdfFont(
     jsonPath: "examples/104_gpu2d_coords/assets/Roboto-Regular.mtsdf.json",
@@ -40,12 +43,12 @@ func main() ret Int {
   var world: UiWorld = buildScreenWorld(scenes: scenes, screen: screen)
 
   var prevDown: Bool = false
-  loop not gpu2d.pollClose() {
+  loop not uiWindowShouldClose() {
     # Interaction: a tap dispatches the OnClick under the pointer; nav actions
     # rebuild the world for the new screen.
-    let down: Bool = gpu2d.pointerDown()
+    let down: Bool = uiPointerDown()
     if prevDown and down is false {
-      let act: String = hitAction(world: world, mx: gpu2d.pointerX(), my: gpu2d.pointerY())
+      let act: String = hitAction(world: world, mx: uiPointerX(), my: uiPointerY())
       if act.length() > 0 {
         let req: Int = dispatch(world: world, act: act)
         if req >= 0 and req is not screen {
@@ -58,12 +61,13 @@ func main() ret Int {
 
     # Clear to the surface color so any region a scene leaves uncovered (e.g.
     # the Album header, which has no bg of its own) reads as the page, not black.
-    gpu2d.beginFrame(r: 0.965, g: 0.965, b: 0.972, a: 1.0)
+    let clear: RgbaColor = { r: 246, g: 246, b: 248, a: 255 }
+    uiBeginFrame(clear: clear)
     renderWorld(world: world, font: font, icons: icons)
-    gpu2d.endFrame()
-    gpu2d.waitEvents(timeoutSec: 0.2)
+    uiEndFrame()
+    uiWaitEvents(timeoutSec: 0.2)
   }
 
-  gpu2d.closeWindow()
+  uiCloseWindow()
   ret 0
 }
