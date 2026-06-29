@@ -4367,14 +4367,34 @@ static WGPUBindGroup* g_g2d_img_frame_binds = NULL;  /* transient, released afte
 static int g_g2d_img_frame_bind_n = 0;
 static int g_g2d_img_frame_bind_cap = 0;
 
-/* Decode a PNG file and upload it as an RGBA8 texture. Returns a 1-based
- * handle (0 on failure). lodepng (the same decoder rae_ext_image_loadPng
- * uses) — PNG only, so JPEG assets must be converted to PNG. */
+/* Decode an image file and upload it as an RGBA8 texture. PNG goes through
+ * lodepng (same decoder as rae_ext_image_loadPng). When raylib is linked,
+ * fall back to LoadImage so existing JPG UI assets can feed gpu2d too. */
 int64_t rae_ext_gpu2d_loadImage(rae_String path) {
     if (!path.data || !g_wgpu_dev || g_g2d_img_n >= RAE_G2D_MAX_IMG) return 0;
     unsigned char* rgba = NULL; unsigned uw = 0, uh = 0;
     unsigned err = lodepng_decode32_file(&rgba, &uw, &uh, (const char*)path.data);
-    if (err) { fprintf(stderr, "[gpu2d] image decode failed (%s): %s\n", (const char*)path.data, lodepng_error_text(err)); return 0; }
+    if (err) {
+#ifdef RAE_HAS_RAYLIB
+        Image img = LoadImage((const char*)path.data);
+        if (img.data != NULL) {
+            ImageFormat(&img, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
+            uw = (unsigned)img.width;
+            uh = (unsigned)img.height;
+            size_t byte_count = (size_t)uw * (size_t)uh * 4u;
+            rgba = (unsigned char*)malloc(byte_count);
+            if (rgba) memcpy(rgba, img.data, byte_count);
+            UnloadImage(img);
+            if (!rgba) return 0;
+        } else {
+            fprintf(stderr, "[gpu2d] image decode failed (%s): %s\n", (const char*)path.data, lodepng_error_text(err));
+            return 0;
+        }
+#else
+        fprintf(stderr, "[gpu2d] image decode failed (%s): %s\n", (const char*)path.data, lodepng_error_text(err));
+        return 0;
+#endif
+    }
     WGPUTextureDescriptor td; memset(&td, 0, sizeof(td));
     td.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst;
     td.dimension = WGPUTextureDimension_2D;

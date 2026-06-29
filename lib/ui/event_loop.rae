@@ -1,4 +1,3 @@
-open raylib
 # Event-driven UI loop policy helpers.
 #
 # Companion to the GLFW wait-events natives in lib/raylib.rae. The
@@ -25,7 +24,7 @@ open raylib
 # and call `waitEventsTimeout` directly; this helper covers the 95%
 # case.
 
-import raylib
+import ui/window
 
 # Fallback animation frame (~60 Hz), used only if the display refresh
 # rate can't be read. `displayFrameSec` below is the real source.
@@ -37,7 +36,7 @@ let frameTimeoutSec: Float = 0.016
 # drives both the animation wait cadence and the render FPS cap so the
 # UI paces to the real display instead of a hard-coded 60.
 func displayFrameSec() pub ret Float {
-  let hz: Int = getMonitorRefreshRate(monitor: getCurrentMonitor())
+  let hz: Int = uiMonitorRefreshRate(monitor: uiCurrentMonitor())
   if hz < 30 or hz > 360 {
     ret 0.016667
   }
