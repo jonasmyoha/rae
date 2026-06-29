@@ -10,18 +10,20 @@
 #
 # Text styles resolve via lib/ui/text_style (the backend-neutral table);
 # mat:* icon glyphs map name->codepoint via lib/ui/icon_codepoints and draw
-# from the Material atlas font. This is the flat alive-list walk (matches the
-# gpu2d examples); layer/hover-ordered tree walk parity can follow.
+# from the Material atlas font. Paint order mirrors lib/ui/render.rae:
+# layer-sorted parent roots, then recursive parent-before-child traversal.
 open ui/ecs
 import core
 import gpu2d
 import gpu2d_text
 import sdf_text
+import ui/animation
 import ui/components
 import ui/ecs
 import ui/draw
-import ui/theme
 import ui/icon_codepoints
+import ui/layer
+import ui/theme
 
 # Per-app gpu2d render resources, passed to renderSystemGpu2d each frame.
 type Gpu2dUi {
@@ -195,16 +197,50 @@ func paintEntityG(world: view UiWorld, e: view EntityId, res: view Gpu2dUi) {
   }
 }
 
+func paintSubtreeG(world: view UiWorld, e: view EntityId, res: view Gpu2dUi) {
+  paintEntityG(world: world, e: e, res: res)
+  if componentHas(this: world.childrens, entity: e) is false {
+    ret
+  }
+  let ch: view Children => componentView(this: world.childrens, entity: e)
+  let n: Int = ch.ids.length
+  var pass: Int = 0
+  loop pass < 3 {
+    var i: Int = 0
+    loop i < n {
+      let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
+      if subtreeHoverPaintRank(world: world, entity: cid) is pass {
+        paintSubtreeG(world: world, e: cid, res: res)
+      }
+      i = i + 1
+    }
+    pass = pass + 1
+  }
+}
+
+func renderSystemGpu2dLayerRange(world: view UiWorld, res: view Gpu2dUi, minOrder: view Int, maxOrder: view Int) pub {
+  setUiBackend(b: UiBackend.gpu2d)
+  let roots: List(EntityId) = collectPaintableRoots(world: world)
+  let m: Int = roots.length
+  var p: Int = 0
+  loop p < m {
+    let root: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: p)
+    if componentHas(this: world.layerRoots, entity: root) is false {
+      let ord: Int = entityLayerOrder(world: world, entity: root)
+      if ord >= minOrder {
+        if ord < maxOrder {
+          paintSubtreeG(world: world, e: root, res: res)
+        }
+      }
+    }
+    p = p + 1
+  }
+}
+
 # Render `world` on the gpu2d backend. Call between gpu2d.beginFrame/endFrame.
 # Switches the draw sink to the gpu2d backend so shared shape ops route to it.
 func renderSystemGpu2d(world: view UiWorld, res: view Gpu2dUi) pub {
-  setUiBackend(b: UiBackend.gpu2d)
-  let alive: view List(EntityId) => world.alive
-  let n: Int = alive.length
-  var i: Int = 0
-  loop i < n {
-    let e: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: i)
-    paintEntityG(world: world, e: e, res: res)
-    i = i + 1
-  }
+  let allRangeLow: Int = 0 - 1000000
+  let allRangeHi: Int = 1000000
+  renderSystemGpu2dLayerRange(world: world, res: res, minOrder: allRangeLow, maxOrder: allRangeHi)
 }
