@@ -83,6 +83,11 @@ func beginFrame(r: Float, g: Float, b: Float, a: Float) extern
 # Finish the render pass, submit the command buffer, and present the frame.
 func endFrame() extern
 
+# Flush queued primitives into the active render pass without ending the
+# frame. Use this when painter order must be preserved across primitive
+# pipelines (for example: image, then later shape, then text).
+func flush() extern
+
 # --- 2D primitives (#110, Box uber-shader) -------------------------------
 # Submit primitives between beginFrame and endFrame; they are batched and
 # drawn in one instanced draw at endFrame, in submission order (painter's).
