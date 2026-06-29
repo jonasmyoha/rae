@@ -4276,9 +4276,218 @@ void rae_ext_gpu2d_drawGlyph(double sx0, double sy0, double sx1, double sy1,
     g_g2d_text_atlas = (int)atlas;
 }
 
+/* --- Image pipeline (#143): textured rounded quads -------------------
+ * A third pipeline that samples a per-image RGBA texture with a tint
+ * multiply and the same rounded-rect SDF mask the box pipeline uses, so
+ * album covers and (white-on-alpha) Material-style icons render on the
+ * GPU. Unlike box/text (one instanced draw), each image samples its OWN
+ * texture, so images draw one-per-call with a per-draw uniform + bind
+ * group. The image count per frame is tiny (a cover + a few icons), so
+ * the per-draw bind group is cheap. Drawn after boxes, before text. */
+static const char* G2D_IMG_WGSL =
+"@group(0) @binding(0) var<uniform> uXform: array<vec4<f32>, 2>;\n"
+"@group(0) @binding(1) var<uniform> uImg: array<vec4<f32>, 3>;\n"  /* rect, tint, params(radius) */
+"@group(0) @binding(2) var tex: texture_2d<f32>;\n"
+"@group(0) @binding(3) var samp: sampler;\n"
+"struct VsOut {\n"
+"  @builtin(position) pos: vec4<f32>,\n"
+"  @location(0) uv: vec2<f32>,\n"
+"  @location(1) local: vec2<f32>,\n"
+"};\n"
+"@vertex\n"
+"fn vs(@builtin(vertex_index) vi: u32) -> VsOut {\n"
+"  var corners = array<vec2<f32>, 6>(\n"
+"    vec2<f32>(0.0,0.0), vec2<f32>(1.0,0.0), vec2<f32>(0.0,1.0),\n"
+"    vec2<f32>(0.0,1.0), vec2<f32>(1.0,0.0), vec2<f32>(1.0,1.0));\n"
+"  let c = corners[vi];\n"
+"  let rect = uImg[0];\n"
+"  let phys = uXform[0].xy;\n"
+"  let posPx = (rect.xy + c * rect.zw) * uXform[0].zw + uXform[1].xy;\n"
+"  let ndc = vec2<f32>(posPx.x / phys.x * 2.0 - 1.0, 1.0 - posPx.y / phys.y * 2.0);\n"
+"  var o: VsOut;\n"
+"  o.pos = vec4<f32>(ndc, 0.0, 1.0);\n"
+"  o.uv = c;\n"
+"  o.local = c * rect.zw;\n"
+"  return o;\n"
+"}\n"
+"fn sdRoundBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {\n"
+"  let q = abs(p) - b + vec2<f32>(r, r);\n"
+"  return min(max(q.x, q.y), 0.0) + length(max(q, vec2<f32>(0.0, 0.0))) - r;\n"
+"}\n"
+"@fragment\n"
+"fn fs(in: VsOut) -> @location(0) vec4<f32> {\n"
+"  let texel = textureSample(tex, samp, in.uv);\n"
+"  let tint = uImg[1];\n"
+"  let half = uImg[0].zw * 0.5;\n"
+"  let rad = uImg[2].x;\n"
+"  let d = sdRoundBox(in.local - half, half, rad);\n"
+"  let aa = max(fwidth(d), 0.0001);\n"
+"  let cov = 1.0 - smoothstep(-aa, aa, d);\n"
+"  let a = texel.a * tint.a * cov;\n"
+"  return vec4<f32>(texel.rgb * tint.rgb * a, a);\n"  /* premultiplied */
+"}\n";
+
+#define RAE_G2D_MAX_IMG 128
+static WGPUTexture     g_g2d_img_tex[RAE_G2D_MAX_IMG];
+static WGPUTextureView g_g2d_img_view[RAE_G2D_MAX_IMG];
+static int g_g2d_img_w[RAE_G2D_MAX_IMG];
+static int g_g2d_img_h[RAE_G2D_MAX_IMG];
+static int g_g2d_img_n = 0;
+
+typedef struct { int handle; float rect[4]; float tint[4]; float radius; } RaeG2dImgCmd;
+static RaeG2dImgCmd* g_g2d_img_cmds = NULL;
+static int g_g2d_img_cmd_count = 0;
+static int g_g2d_img_cmd_cap = 0;
+
+static WGPURenderPipeline g_g2d_img_pipeline = NULL;
+static WGPUBuffer* g_g2d_img_ubuf = NULL;   /* pool of 48-byte per-draw uniforms */
+static int g_g2d_img_ubuf_n = 0;
+static WGPUBindGroup* g_g2d_img_frame_binds = NULL;  /* transient, released after submit */
+static int g_g2d_img_frame_bind_n = 0;
+static int g_g2d_img_frame_bind_cap = 0;
+
+/* Decode a PNG file and upload it as an RGBA8 texture. Returns a 1-based
+ * handle (0 on failure). lodepng (the same decoder rae_ext_image_loadPng
+ * uses) — PNG only, so JPEG assets must be converted to PNG. */
+int64_t rae_ext_gpu2d_loadImage(rae_String path) {
+    if (!path.data || !g_wgpu_dev || g_g2d_img_n >= RAE_G2D_MAX_IMG) return 0;
+    unsigned char* rgba = NULL; unsigned uw = 0, uh = 0;
+    unsigned err = lodepng_decode32_file(&rgba, &uw, &uh, (const char*)path.data);
+    if (err) { fprintf(stderr, "[gpu2d] image decode failed (%s): %s\n", (const char*)path.data, lodepng_error_text(err)); return 0; }
+    WGPUTextureDescriptor td; memset(&td, 0, sizeof(td));
+    td.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst;
+    td.dimension = WGPUTextureDimension_2D;
+    td.size.width = uw; td.size.height = uh; td.size.depthOrArrayLayers = 1;
+    td.format = WGPUTextureFormat_RGBA8Unorm; td.mipLevelCount = 1; td.sampleCount = 1;
+    WGPUTexture tex = wgpuDeviceCreateTexture(g_wgpu_dev, &td);
+    WGPUTexelCopyTextureInfo dst; memset(&dst, 0, sizeof(dst));
+    dst.texture = tex; dst.aspect = WGPUTextureAspect_All;
+    WGPUTexelCopyBufferLayout layout; memset(&layout, 0, sizeof(layout));
+    layout.bytesPerRow = uw * 4; layout.rowsPerImage = uh;
+    WGPUExtent3D ext; ext.width = uw; ext.height = uh; ext.depthOrArrayLayers = 1;
+    wgpuQueueWriteTexture(g_wgpu_queue, &dst, rgba, (size_t)uw * uh * 4, &layout, &ext);
+    free(rgba);
+    int i = g_g2d_img_n;
+    g_g2d_img_tex[i] = tex;
+    g_g2d_img_view[i] = wgpuTextureCreateView(tex, NULL);
+    g_g2d_img_w[i] = (int)uw; g_g2d_img_h[i] = (int)uh;
+    return (int64_t)(++g_g2d_img_n);   /* 1-based */
+}
+
+/* Queue an image draw for this frame (handle from loadImage). tint is
+ * 0xAARRGGBB applied multiplicatively (use 0xFFFFFFFF for the unmodified
+ * image). radius rounds the corners (design units). */
+void rae_ext_gpu2d_drawImage(double x, double y, double w, double h, double radius, int64_t handle, int64_t tint) {
+    if (handle < 1 || handle > g_g2d_img_n) return;
+    if (g_g2d_img_cmd_count + 1 > g_g2d_img_cmd_cap) {
+        int cap = g_g2d_img_cmd_cap ? g_g2d_img_cmd_cap * 2 : 32;
+        g_g2d_img_cmds = (RaeG2dImgCmd*)realloc(g_g2d_img_cmds, (size_t)cap * sizeof(RaeG2dImgCmd));
+        g_g2d_img_cmd_cap = cap;
+    }
+    RaeG2dImgCmd* c = &g_g2d_img_cmds[g_g2d_img_cmd_count++];
+    c->handle = (int)handle;
+    c->rect[0] = (float)x; c->rect[1] = (float)y; c->rect[2] = (float)w; c->rect[3] = (float)h;
+    uint32_t t = (uint32_t)tint;   /* straight (non-premultiplied); shader premultiplies */
+    c->tint[0] = (float)((t >> 16) & 0xFF) / 255.0f;
+    c->tint[1] = (float)((t >> 8)  & 0xFF) / 255.0f;
+    c->tint[2] = (float)( t        & 0xFF) / 255.0f;
+    c->tint[3] = (float)((t >> 24) & 0xFF) / 255.0f;
+    c->radius = (float)radius;
+}
+
+static void rae_g2d_init_img_pipeline(void) {
+    if (g_g2d_img_pipeline) return;
+    WGPUShaderSourceWGSL src; memset(&src, 0, sizeof(src));
+    src.chain.sType = WGPUSType_ShaderSourceWGSL;
+    src.code = rae_wgpu_sv(G2D_IMG_WGSL);
+    WGPUShaderModuleDescriptor smd; memset(&smd, 0, sizeof(smd));
+    smd.nextInChain = &src.chain;
+    WGPUShaderModule mod = wgpuDeviceCreateShaderModule(g_wgpu_dev, &smd);
+    WGPUBlendState blend; memset(&blend, 0, sizeof(blend));
+    blend.color.operation = WGPUBlendOperation_Add;
+    blend.color.srcFactor = WGPUBlendFactor_One;
+    blend.color.dstFactor = WGPUBlendFactor_OneMinusSrcAlpha;
+    blend.alpha.operation = WGPUBlendOperation_Add;
+    blend.alpha.srcFactor = WGPUBlendFactor_One;
+    blend.alpha.dstFactor = WGPUBlendFactor_OneMinusSrcAlpha;
+    WGPUColorTargetState cts; memset(&cts, 0, sizeof(cts));
+    cts.format = g_g2d_fmt; cts.blend = &blend; cts.writeMask = WGPUColorWriteMask_All;
+    WGPUFragmentState fs; memset(&fs, 0, sizeof(fs));
+    fs.module = mod; fs.entryPoint = rae_wgpu_sv("fs"); fs.targetCount = 1; fs.targets = &cts;
+    WGPURenderPipelineDescriptor pd; memset(&pd, 0, sizeof(pd));
+    pd.layout = NULL;
+    pd.vertex.module = mod; pd.vertex.entryPoint = rae_wgpu_sv("vs");
+    pd.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+    pd.primitive.frontFace = WGPUFrontFace_CCW;
+    pd.primitive.cullMode = WGPUCullMode_None;
+    pd.multisample.count = 1; pd.multisample.mask = 0xFFFFFFFFu;
+    pd.fragment = &fs;
+    g_g2d_img_pipeline = wgpuDeviceCreateRenderPipeline(g_wgpu_dev, &pd);
+    wgpuShaderModuleRelease(mod);
+    /* Reuse the text sampler (linear, clamp-to-edge); create if text path
+     * hasn't run yet. */
+    if (!g_g2d_sampler) {
+        WGPUSamplerDescriptor sd; memset(&sd, 0, sizeof(sd));
+        sd.addressModeU = WGPUAddressMode_ClampToEdge;
+        sd.addressModeV = WGPUAddressMode_ClampToEdge;
+        sd.addressModeW = WGPUAddressMode_ClampToEdge;
+        sd.magFilter = WGPUFilterMode_Linear;
+        sd.minFilter = WGPUFilterMode_Linear;
+        sd.mipmapFilter = WGPUMipmapFilterMode_Nearest;
+        sd.lodMaxClamp = 1.0f; sd.maxAnisotropy = 1;
+        g_g2d_sampler = wgpuDeviceCreateSampler(g_wgpu_dev, &sd);
+    }
+}
+
+/* Emit one draw per queued image into the active render pass. */
+static void rae_g2d_flush_images(void) {
+    if (g_g2d_img_cmd_count <= 0) return;
+    rae_g2d_init_img_pipeline();
+    /* Grow the per-draw uniform-buffer pool to cover this frame. */
+    if (g_g2d_img_ubuf_n < g_g2d_img_cmd_count) {
+        g_g2d_img_ubuf = (WGPUBuffer*)realloc(g_g2d_img_ubuf, (size_t)g_g2d_img_cmd_count * sizeof(WGPUBuffer));
+        for (int i = g_g2d_img_ubuf_n; i < g_g2d_img_cmd_count; i++) {
+            WGPUBufferDescriptor bd; memset(&bd, 0, sizeof(bd));
+            bd.size = 48; bd.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
+            g_g2d_img_ubuf[i] = wgpuDeviceCreateBuffer(g_wgpu_dev, &bd);
+        }
+        g_g2d_img_ubuf_n = g_g2d_img_cmd_count;
+    }
+    WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(g_g2d_img_pipeline, 0);
+    if (g_g2d_img_frame_bind_cap < g_g2d_img_cmd_count) {
+        g_g2d_img_frame_binds = (WGPUBindGroup*)realloc(g_g2d_img_frame_binds, (size_t)g_g2d_img_cmd_count * sizeof(WGPUBindGroup));
+        g_g2d_img_frame_bind_cap = g_g2d_img_cmd_count;
+    }
+    g_g2d_img_frame_bind_n = 0;
+    wgpuRenderPassEncoderSetPipeline(g_g2d_pass, g_g2d_img_pipeline);
+    for (int i = 0; i < g_g2d_img_cmd_count; i++) {
+        RaeG2dImgCmd* c = &g_g2d_img_cmds[i];
+        int idx = c->handle - 1;
+        if (idx < 0 || idx >= g_g2d_img_n || !g_g2d_img_view[idx]) continue;
+        float u[12];
+        u[0]=c->rect[0]; u[1]=c->rect[1]; u[2]=c->rect[2]; u[3]=c->rect[3];
+        u[4]=c->tint[0]; u[5]=c->tint[1]; u[6]=c->tint[2]; u[7]=c->tint[3];
+        u[8]=c->radius;  u[9]=0.0f; u[10]=0.0f; u[11]=0.0f;
+        wgpuQueueWriteBuffer(g_wgpu_queue, g_g2d_img_ubuf[i], 0, u, sizeof(u));
+        WGPUBindGroupEntry e[4]; memset(e, 0, sizeof(e));
+        e[0].binding = 0; e[0].buffer = g_g2d_uniform; e[0].size = 32;
+        e[1].binding = 1; e[1].buffer = g_g2d_img_ubuf[i]; e[1].size = 48;
+        e[2].binding = 2; e[2].textureView = g_g2d_img_view[idx];
+        e[3].binding = 3; e[3].sampler = g_g2d_sampler;
+        WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
+        bgd.layout = bgl; bgd.entryCount = 4; bgd.entries = e;
+        WGPUBindGroup bind = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
+        g_g2d_img_frame_binds[g_g2d_img_frame_bind_n++] = bind;   /* released after submit */
+        wgpuRenderPassEncoderSetBindGroup(g_g2d_pass, 0, bind, 0, NULL);
+        wgpuRenderPassEncoderDraw(g_g2d_pass, 6, 1, 0, 0);
+    }
+    wgpuBindGroupLayoutRelease(bgl);
+}
+
 void rae_ext_gpu2d_beginFrame(double r, double g, double b, double a) {
     g_g2d_prim_count = 0;
     g_g2d_text_count = 0;
+    g_g2d_img_cmd_count = 0;
     if (!g_g2d_surface) return;
     WGPUSurfaceTexture st; memset(&st, 0, sizeof(st));
     wgpuSurfaceGetCurrentTexture(g_g2d_surface, &st);
@@ -4366,9 +4575,10 @@ static void rae_g2d_save_screenshot(const char* path) {
 void rae_ext_gpu2d_endFrame(void) {
     if (!g_g2d_pass) return;
     int have_text = (g_g2d_text_count > 0 && g_g2d_text_atlas > 0);
-    if (g_g2d_prim_count > 0 || have_text) {
+    int have_img = (g_g2d_img_cmd_count > 0);
+    if (g_g2d_prim_count > 0 || have_text || have_img) {
         /* rae_g2d_init_pipeline also creates the shared viewport uniform that
-         * both the box and text bind groups reference at binding 0. */
+         * the box, image, and text bind groups reference at binding 0. */
         rae_g2d_init_pipeline();
         float xf[8]; rae_g2d_compute_xform(xf);
         wgpuQueueWriteBuffer(g_wgpu_queue, g_g2d_uniform, 0, xf, sizeof(xf));
@@ -4382,6 +4592,8 @@ void rae_ext_gpu2d_endFrame(void) {
         wgpuRenderPassEncoderSetBindGroup(g_g2d_pass, 0, g_g2d_bind, 0, NULL);
         wgpuRenderPassEncoderDraw(g_g2d_pass, 6, (uint32_t)g_g2d_prim_count, 0, 0);
     }
+    /* Images on top of boxes, under text. */
+    rae_g2d_flush_images();
     if (g_g2d_text_count > 0 && g_g2d_text_atlas > 0) {
         rae_g2d_init_text_pipeline();
         rae_g2d_ensure_text_inst(g_g2d_text_count);
@@ -4397,6 +4609,9 @@ void rae_ext_gpu2d_endFrame(void) {
     wgpuRenderPassEncoderEnd(g_g2d_pass);
     WGPUCommandBuffer cb = wgpuCommandEncoderFinish(g_g2d_enc, NULL);
     wgpuQueueSubmit(g_wgpu_queue, 1, &cb);
+    /* The per-image bind groups were live for the pass; safe to free now. */
+    for (int i = 0; i < g_g2d_img_frame_bind_n; i++) wgpuBindGroupRelease(g_g2d_img_frame_binds[i]);
+    g_g2d_img_frame_bind_n = 0;
     /* Headless screenshot (env-gated) before present, while the frame texture
      * is still alive. Only in headless runs so interactive frames pay nothing. */
     if (g_sdl_headless_ms > 0) {
@@ -4428,6 +4643,20 @@ void rae_ext_gpu2d_closeWindow(void) {
     if (g_g2d_pipeline) { wgpuRenderPipelineRelease(g_g2d_pipeline); g_g2d_pipeline = NULL; }
     if (g_g2d_prims) { free(g_g2d_prims); g_g2d_prims = NULL; g_g2d_prim_capf = 0; }
     g_g2d_prim_count = 0;
+    /* Image pipeline + textures. */
+    for (int i = 0; i < g_g2d_img_frame_bind_n; i++) wgpuBindGroupRelease(g_g2d_img_frame_binds[i]);
+    g_g2d_img_frame_bind_n = 0;
+    if (g_g2d_img_frame_binds) { free(g_g2d_img_frame_binds); g_g2d_img_frame_binds = NULL; g_g2d_img_frame_bind_cap = 0; }
+    for (int i = 0; i < g_g2d_img_ubuf_n; i++) if (g_g2d_img_ubuf[i]) wgpuBufferRelease(g_g2d_img_ubuf[i]);
+    if (g_g2d_img_ubuf) { free(g_g2d_img_ubuf); g_g2d_img_ubuf = NULL; g_g2d_img_ubuf_n = 0; }
+    for (int i = 0; i < g_g2d_img_n; i++) {
+        if (g_g2d_img_view[i]) { wgpuTextureViewRelease(g_g2d_img_view[i]); g_g2d_img_view[i] = NULL; }
+        if (g_g2d_img_tex[i]) { wgpuTextureRelease(g_g2d_img_tex[i]); g_g2d_img_tex[i] = NULL; }
+    }
+    g_g2d_img_n = 0;
+    if (g_g2d_img_cmds) { free(g_g2d_img_cmds); g_g2d_img_cmds = NULL; g_g2d_img_cmd_cap = 0; }
+    g_g2d_img_cmd_count = 0;
+    if (g_g2d_img_pipeline) { wgpuRenderPipelineRelease(g_g2d_img_pipeline); g_g2d_img_pipeline = NULL; }
     if (g_g2d_surface) { wgpuSurfaceRelease(g_g2d_surface); g_g2d_surface = NULL; }
     if (g_g2d_metal_view) { SDL_Metal_DestroyView(g_g2d_metal_view); g_g2d_metal_view = NULL; }
     if (g_sdl_win) { SDL_DestroyWindow(g_sdl_win); g_sdl_win = NULL; }
@@ -4436,6 +4665,8 @@ void rae_ext_gpu2d_closeWindow(void) {
 void rae_ext_gpu2d_initWindow(int64_t w, int64_t h, rae_String t) { (void)w; (void)h; (void)t; }
 rae_Bool rae_ext_gpu2d_pollClose(void) { return 1; }
 void rae_ext_gpu2d_waitEvents(double timeoutSec) { (void)timeoutSec; }
+int64_t rae_ext_gpu2d_loadImage(rae_String path) { (void)path; return 0; }
+void rae_ext_gpu2d_drawImage(double x, double y, double w, double h, double radius, int64_t handle, int64_t tint) { (void)x; (void)y; (void)w; (void)h; (void)radius; (void)handle; (void)tint; }
 double rae_ext_gpu2d_pointerX(void) { return 0.0; }
 double rae_ext_gpu2d_pointerY(void) { return 0.0; }
 rae_Bool rae_ext_gpu2d_pointerDown(void) { return 0; }
