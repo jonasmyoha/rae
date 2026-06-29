@@ -371,8 +371,8 @@ func main() {
     # previous gate check — promotes a re-render on any transition
     # so the debug "btn:" readout updates without 60 fps polling.
     var lastMouseBtns: Int = 0
-    # Profile-cover load flag (currently a no-op stub for future
-    # incremental rescan).
+    # Profile-avatar readiness at the time the current world was built.
+    # If the async image cascade loads it later, Profile needs one rebuild.
     var profileLoaded: Bool = false
 
     # True while album covers / history art are still streaming in. Fed
@@ -389,15 +389,8 @@ func main() {
     var renderUntil: Float = 0.0
 
     loop running {
-      # Covers were loaded at boot via `loadAllTextures`, so no
-      # per-screen rescan is needed. `profileLoaded` is left for
-      # any future incremental refresh (e.g. a "rescan" debug
-      # button) — currently a no-op.
-      if currentScreen is Screen.library {
-        profileLoaded = true
-      } else {
-        profileLoaded = false
-      }
+      let profileKeyAtBuild: String = profileAvatarKey()
+      profileLoaded = profileAvatarLoaded(reg: texReg, key: profileKeyAtBuild)
 
       # Cache the active-album bounds + active-track duration so
       # the hot inner-loop heartbeat doesn't deep-copy a 15-25
@@ -795,6 +788,11 @@ func main() {
             loadingAssets = cascadeGpu2dAssets(albums: appState.albums, budget: 2)
           }
           assetsLoading = loadingAssets
+          if currentScreen is Screen.profile {
+            let profileKeyNow: String = profileAvatarKey()
+            let profileReadyNow: Bool = profileAvatarLoaded(reg: texReg, key: profileKeyNow)
+            if profileReadyNow and profileLoaded is false { switching = true }
+          }
 
           # Frame-gate decision: ask `decideActive` whether anything
           # changed that warrants a full begin/render/endDrawing this
