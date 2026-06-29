@@ -225,6 +225,9 @@ func uiPointerButtonDown(button: view Int) pub ret Bool {
 
 func uiPointerButtonPressed(button: view Int) pub ret Bool {
   if uiBackend() is UiBackend.gpu2d {
+    if button is 0 {
+      ret gpu2d.pointerPressed()
+    }
     ret false
   }
   ret isMouseButtonPressed(button: button)
@@ -232,6 +235,9 @@ func uiPointerButtonPressed(button: view Int) pub ret Bool {
 
 func uiPointerButtonReleased(button: view Int) pub ret Bool {
   if uiBackend() is UiBackend.gpu2d {
+    if button is 0 {
+      ret gpu2d.pointerReleased()
+    }
     ret false
   }
   ret isMouseButtonReleased(button: button)
