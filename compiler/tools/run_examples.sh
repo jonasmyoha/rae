@@ -46,12 +46,12 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
       # would then fail to link, others pass).
       WGPU="${WGPU_NATIVE:-$HOME/.local/wgpu-native}"
       WGPU_FLAGS=""
-      [ -f "$WGPU/lib/libwgpu_native.dylib" ] && WGPU_FLAGS="-DRAE_HAS_WEBGPU -I$WGPU/include -L$WGPU/lib -lwgpu_native -Wl,-rpath,$WGPU/lib -framework Metal -framework QuartzCore -framework Foundation"
+      [ -f "$WGPU/lib/libwgpu_native.dylib" ] && WGPU_FLAGS="-DRAE_HAS_WEBGPU -I$WGPU/include -L$WGPU/lib -lwgpu_native -Wl,-rpath,$WGPU/lib -framework Metal -framework QuartzCore -framework Foundation -framework ImageIO -framework CoreGraphics"
       if gcc -O2 -o "$TMP_OUT/app" "$TMP_OUT/out.c" "$TMP_OUT/rae_runtime.c" \
          $([ -f "$TMP_OUT/monocypher.c" ] && echo "$TMP_OUT/monocypher.c") \
          $(ls "$PROJECT_DIR"/*.c 2>/dev/null | grep -v "rae_runtime.c" | grep -v "main_compiled.c" || true) \
          -I"$TMP_OUT" -I/opt/homebrew/include -L/opt/homebrew/lib -DRAE_HAS_RAYLIB -DRAE_HAS_SDL3 $WGPU_FLAGS \
-         /opt/homebrew/lib/libraylib.a -lSDL3 -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL > "$TMP_OUT/link.log" 2>&1; then
+         /opt/homebrew/lib/libraylib.a -lSDL3 -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL -framework ImageIO -framework CoreGraphics > "$TMP_OUT/link.log" 2>&1; then
         echo "PASS: $EXAMPLE_NAME"
         ((PASSED++))
       else

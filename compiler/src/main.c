@@ -2591,7 +2591,7 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
     }
     snprintf(wgpu_flags, sizeof(wgpu_flags),
              "-DRAE_HAS_WEBGPU -I%s/include -L%s/lib -lwgpu_native -Wl,-rpath,%s/lib "
-             "-framework Metal -framework QuartzCore -framework CoreFoundation -framework Foundation",
+             "-framework Metal -framework QuartzCore -framework CoreFoundation -framework Foundation -framework ImageIO -framework CoreGraphics",
              wg, wg, wg);
   }
   // release: optimize and strip asserts; dev/debug: no opt + symbols so
@@ -2624,7 +2624,7 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
   }
 
   char cmd[PATH_MAX * 4];
-  snprintf(cmd, sizeof(cmd), "gcc -std=c11 %s -w %s %s %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib /opt/homebrew/lib/libraylib.a -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL %s %s/rae_runtime.c%s -o %s",
+  snprintf(cmd, sizeof(cmd), "gcc -std=c11 %s -w %s %s %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib /opt/homebrew/lib/libraylib.a -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL -framework ImageIO -framework CoreGraphics %s %s/rae_runtime.c%s -o %s",
            opt_flags, raylib_define, sdl3_flags, wgpu_flags, runtime_dir, c_path, runtime_dir, extra_c_files, out_bin);
 
   if (system(cmd) != 0) {
