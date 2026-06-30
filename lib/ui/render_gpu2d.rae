@@ -118,20 +118,14 @@ func paintShapeG(world: view UiWorld, e: view EntityId, wt: view WorldTransform,
   sinkRoundedRect(x: wt.x, y: wt.y, w: cr.w, h: cr.h, radius: radius, c: fill)
 }
 
-# GradientFill — gpu2d has no gradient primitive; approximate with a solid
-# rounded rect in the `from` color.
+# GradientFill uses the gpu2d box shader's gradient mode so dock shadows and
+# dialog scrims stay in the same painter-order pipeline as normal shapes.
 func paintGradientG(world: view UiWorld, e: view EntityId, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int) {
   let gf: GradientFill = componentGet(this: world.gradientFills, entity: e)
   let radius: Float = g2dRadius(world: world, e: e, fallback: 0.0)
-  var fill: RgbaColor = gf.from
-  # Temporary compatibility until gpu2d grows a gradient shader: transparent
-  # -> opaque dock shadows should use the visible end, not disappear.
-  if gf.from.a <= 0 {
-    if gf.to.a > 0 {
-      fill = gf.to
-    }
-  }
-  sinkRoundedRect(x: wt.x, y: wt.y, w: cr.w, h: cr.h, radius: radius, c: g2dChain(c: fill, chain255: chain255))
+  let from: RgbaColor = g2dChain(c: gf.from, chain255: chain255)
+  let to: RgbaColor = g2dChain(c: gf.to, chain255: chain255)
+  gpu2d.drawGradientRect(x: wt.x, y: wt.y, w: cr.w, h: cr.h, radius: radius, from: g2dColor(c: from), to: g2dColor(c: to), angleDeg: gf.angle)
 }
 
 func paintBackdropG(world: view UiWorld, e: view EntityId, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int) {
