@@ -75,5 +75,6 @@
 - [ ] #211 C backend follow-up: generic object literals with owned `String` fields still need concrete field substitution before return/drop ownership decisions; `Wrapper(String) { value: ownedString(...) }` can leave the generated field treated as raw `T`, causing invalid String ownership independent of the `opt T` drop classifier.
 - [ ] #212 GPU2D mobile UI S2: expand `examples/105_gpu2d_mobile_ui` beyond the first programmatic ECS page by adding scene/data reuse from `98_mobile_ui`, input hit-testing through SDL3 coordinates, and a GPU2D render adapter for more UI components.
 - [ ] #213 Research cross-platform image decoding for gpu2d: evaluate JPEG/WebP/PNG loaders beyond macOS ImageIO (stb_image, libjpeg-turbo, platform APIs), decide supported formats, licensing, build integration, and fallback/error policy; do not implement until design is chosen.
+- [ ] #214 Implement non-blocking Spotify history artwork loading for 98_mobile_ui: restored `spotify-art:*` entries currently stay as placeholders because synchronous refetch was removed from the render loop; use a background task/cache-first loader and register results for both raylib and gpu2d without blocking frames.
 
 <!-- SUMU_QUEUE_END -->
