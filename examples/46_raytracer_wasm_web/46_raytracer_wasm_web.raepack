@@ -1,0 +1,28 @@
+pack RaytracerWasmWeb {
+  format: "raepack"
+  version: 1
+  defaultTarget: wasm
+  name: "Raytracer — WASM spike (step 3 → WebAssembly)"
+  description: "The step-3 materials scene compiled Rae → C → WebAssembly (new web stack, step W1). Renders headless, emitting RGB via an `fbPixel` extern so the same .wasm runs under Node WASI and in a browser. Run it with the WASM target."
+  category: "Raytracer"
+  display: {
+    width: 480
+    height: 270
+  }
+  targets: {
+    target wasm: {
+      label: "WASM"
+      entry: "main.rae"
+      sources: {
+        source: { path: ".", emit: compiled }
+      }
+    }
+    target compiled: {
+      label: "Compiled"
+      entry: "main.rae"
+      sources: {
+        source: { path: ".", emit: compiled }
+      }
+    }
+  }
+}
