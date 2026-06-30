@@ -1,9 +1,10 @@
-open raylib
 open ui/ecs
-# Screenshot runner. Enabled by `RAE_UI_SCREENSHOT=<path>`: builds one
-# world for the chosen screen, renders a few warm-up frames, calls
-# `takeScreenshot` partway through, then rets back to main which falls
-# through to teardown.
+# Screenshot runner placeholder.
+#
+# 106 screenshots are captured by the GPU2D runtime with
+# `RAE_GPU2D_SCREENSHOT`, not by a Rae-side render branch. This function
+# deliberately does nothing so the app still renders normally while the
+# runtime captures the offscreen target at endFrame.
 #
 # Picks the screen via `RAE_UI_SCREEN` ("home", "library", "player",
 # "album", "search", "profile"; default album). Picks up
@@ -12,80 +13,14 @@ open ui/ecs
 # button is in the pause state and the progress bar is partway filled.
 #
 # Returns true if the screenshot mode ran (caller should skip its
-# interactive branch).
+# interactive branch). GPU2D screenshots return false because rendering
+# must continue for the runtime hook to capture a frame.
 
 func runScreenshotMode(
   scenes: view AlbumScenes
   appState: mod AppState
   texReg: mod TextureRegistry
-  bg: view Color
+  bg: view RgbaColor
 ) ret Bool {
-  let screenshotEnv: String = getEnv(name: "RAE_UI_SCREENSHOT")
-  if screenshotEnv.length() is 0 {
-    ret false
-  }
-  # Boot no longer loads covers (the interactive path streams them in
-  # via cascadeAssets); a deterministic screenshot needs them all up
-  # front, so load synchronously here.
-  loadAllTextures(reg: texReg, albums: appState.albums)
-
-  let screenEnv: String = getEnv(name: "RAE_UI_SCREEN")
-  let nowKey: String = "player"
-  let profileKeyEnv: String = "profile"
-  let libraryKeyEnv: String = "library"
-  let homeKeyEnv: String = "home"
-  var screen: Screen = Screen.album
-  if screenEnv.equals(other: nowKey) {
-    screen = Screen.player
-  }
-  if screenEnv.equals(other: libraryKeyEnv) {
-    screen = Screen.library
-  }
-  if screenEnv.equals(other: profileKeyEnv) {
-    screen = Screen.profile
-  }
-  if screenEnv.equals(other: homeKeyEnv) {
-    screen = Screen.home
-  }
-
-  let shotPlayback: PlaybackState = createPlaybackState()
-  let playingEnv: String = getEnv(name: "RAE_UI_PLAYING")
-  if playingEnv.length() > 0 {
-    shotPlayback.isPlaying = true
-  }
-  let progressEnv: String = getEnv(name: "RAE_UI_PROGRESS")
-  if progressEnv.length() > 0 {
-    let pf: Float = progressEnv.toFloat()
-    shotPlayback.elapsedSec = shotPlayback.durationSec * pf
-  }
-  # `RAE_UI_PLAYLIST=1` renders the open-playlist variant of the Album
-  # sub-page (the DRY album view resolving the "liked" playlist).
-  let playlistEnv: String = getEnv(name: "RAE_UI_PLAYLIST")
-  if playlistEnv.length() > 0 {
-    appState.viewingPlaylist = true
-    appState.currentPlaylistId = "liked"
-    let coverStems: List(String) = playlistCoverStems(playlist: appState.liked, max: 1)
-    if coverStems.length > 0 {
-      appState.currentAlbumStem = "{coverStems.get(index: 0)}"
-    }
-  }
-  let shotScroll: Float = 0.0
-  let world: UiWorld = buildScreenWorld(screen: screen, scenes: scenes, playback: shotPlayback, state: appState, texReg: texReg, scrollY: shotScroll)
-  applyViewportExtent(world: world)
-  layoutSystem(world: world)
-  transformSystem(world: world)
-  applyPlaybackToWorld(world: world, state: shotPlayback)
-  let warmupFrames: Int = 30
-  var f: Int = 0
-  loop f < warmupFrames {
-    beginDrawing()
-    clearBackground(color: bg)
-    renderSystem(world: world, reg: texReg)
-    if f is (warmupFrames / 2) {
-      takeScreenshot(fileName: screenshotEnv)
-    }
-    endDrawing()
-    f = f + 1
-  }
-  ret true
+  ret false
 }

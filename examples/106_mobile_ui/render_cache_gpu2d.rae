@@ -1,0 +1,78 @@
+open ui/ecs
+import core
+import ui/components
+import ui/ecs
+
+# Renderer-independent dirty cache copied locally so 106 does not import
+# legacy render modules just to decide whether a frame needs repainting.
+type RenderCache pub {
+  computedRectsGen: Int
+  worldTransformsGen: Int
+  shapesGen: Int
+  spritesGen: Int
+  textsGen: Int
+  activesGen: Int
+  opacitiesGen: Int
+  childrensGen: Int
+  parentsGen: Int
+  onClicksGen: Int
+  entityCount: Int
+}
+
+func createRenderCache() pub ret RenderCache {
+  ret RenderCache {
+    computedRectsGen: -1
+    worldTransformsGen: -1
+    shapesGen: -1
+    spritesGen: -1
+    textsGen: -1
+    activesGen: -1
+    opacitiesGen: -1
+    childrensGen: -1
+    parentsGen: -1
+    onClicksGen: -1
+    entityCount: -1
+  }
+}
+
+func renderCacheDirty(world: view UiWorld, cache: mod RenderCache) pub ret Bool {
+  let crGen: Int = componentTableGeneration(ComputedRect, this: world.computedRects)
+  let wtGen: Int = componentTableGeneration(WorldTransform, this: world.worldTransforms)
+  let shGen: Int = componentTableGeneration(Shape, this: world.shapes)
+  let spGen: Int = componentTableGeneration(Sprite, this: world.sprites)
+  let txGen: Int = componentTableGeneration(Text, this: world.texts)
+  let acGen: Int = componentTableGeneration(Active, this: world.actives)
+  let opGen: Int = componentTableGeneration(Opacity, this: world.opacities)
+  let chGen: Int = componentTableGeneration(Children, this: world.childrens)
+  let plGen: Int = componentTableGeneration(Parent, this: world.parents)
+  let ocGen: Int = componentTableGeneration(OnClick, this: world.onClicks)
+  let entityCount: Int = world.alive.length
+
+  var dirty: Bool = false
+  if crGen is not cache.computedRectsGen { dirty = true }
+  if wtGen is not cache.worldTransformsGen { dirty = true }
+  if shGen is not cache.shapesGen { dirty = true }
+  if spGen is not cache.spritesGen { dirty = true }
+  if txGen is not cache.textsGen { dirty = true }
+  if acGen is not cache.activesGen { dirty = true }
+  if opGen is not cache.opacitiesGen { dirty = true }
+  if chGen is not cache.childrensGen { dirty = true }
+  if plGen is not cache.parentsGen { dirty = true }
+  if ocGen is not cache.onClicksGen { dirty = true }
+  if entityCount is not cache.entityCount { dirty = true }
+
+  if dirty is false { ret false }
+
+  cache.computedRectsGen = crGen
+  cache.worldTransformsGen = wtGen
+  cache.shapesGen = shGen
+  cache.spritesGen = spGen
+  cache.textsGen = txGen
+  cache.activesGen = acGen
+  cache.opacitiesGen = opGen
+  cache.childrensGen = chGen
+  cache.parentsGen = plGen
+  cache.onClicksGen = ocGen
+  cache.entityCount = entityCount
+  ret true
+}

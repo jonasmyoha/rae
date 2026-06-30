@@ -12,12 +12,10 @@ open ui/ecs
 # to vary state-dependent styling: the same scene file describes
 # both the active and inactive look, and overrides decide which.
 import core
-import raylib
 import ui/components
 import ui/ecs
 import ui/scene
 import ui/scene_instance
-import ui/textures
 
 let tabIconSize: Float = 32.0
 
@@ -45,9 +43,8 @@ func dockBlurKey() pub ret String {
 }
 
 # Attach a fullscreen Sprite to `entity` (used for the blurred-
-# backdrop texture). Mirrors `setBackdropSprite` from
-# `lib/ui/debug.rae`; kept local so this module doesn't depend
-# on the debug stdlib.
+# backdrop texture). Kept local so this module doesn't depend on the
+# debug helpers.
 func setDockSprite(world: mod UiWorld, entity: view EntityId, key: view String, tint: view RgbaColor) {
   let sp: Sprite = {
     textureKey: key
