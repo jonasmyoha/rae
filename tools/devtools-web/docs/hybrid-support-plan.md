@@ -10,7 +10,7 @@ These additions build on the current dashboard features described in `README.md`
 ## Status
 - Target-aware commands now exist end-to-end. `config.json` exposes a `targets` array, the server broadcasts target metadata in every Test/Build/Example event, and the client renders synchronized selectors (persisted via `localStorage`).
 - Example runs support Live/Compiled/Hybrid commands, including a dedicated **Build artifacts** action that dumps file sizes + hashes (mirroring the hybrid regression tests).
-- `devtools.json` metadata lets examples describe supported targets + default recommendations. The new `examples/hybrid_hot_reload` package ships with metadata and serves as the first hybrid-specific demo inside the dashboard.
+- `.raepack` metadata lets examples describe supported targets + default recommendations. The new `examples/hybrid_hot_reload` package ships with metadata and serves as the first hybrid-specific demo inside the dashboard.
 - Remaining work: automation for “downloaded code” simulations and additional short-running Compiled/Hybrid test suites to expose in the target dropdown.
 - The hybrid demo now wires a "Simulate download" helper through example metadata; the dashboard renders dev/release action buttons that run the helper script, stage `.vmchunk` files under `.simulated_downloads/`, and stream the manifest/hash summary back to the UI.
 - The Examples panel surfaces a **Staged downloads** list that enumerates `.simulated_downloads/<profile>/<version>/<timestamp>` outputs (size + hash) so reviewers can immediately see which bundles are available for the host to reload.
@@ -76,7 +76,7 @@ These additions build on the current dashboard features described in `README.md`
    - Modify Build/Test APIs to accept target IDs and dispatch the corresponding commands.
    - Add target selectors in the client panels; persist selection locally.
 2. **Example Metadata + Runner**
-   - Extend server example scanning to read optional `devtools.json` per example (declares entry file + supported targets).
+   - Extend server example scanning to read optional `.raepack` per example (declares entry file + supported targets).
    - Implement hybrid/native execution paths in the runner service.
 3. **Hybrid Demo Assets**
    - Land the new `examples/hybrid_hot_reload/` package inside the compiler repo.

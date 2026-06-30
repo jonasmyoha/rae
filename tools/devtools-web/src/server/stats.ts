@@ -48,10 +48,14 @@ export class StatsStore {
     
     // Find if we already have an entry for this metric today
     // We look for the last one that matches the name and date
-    const index = entries.findLastIndex(e => 
-      e.metric_name === metricName && 
-      e.timestamp.startsWith(todayStr)
-    );
+    let index = -1;
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const entry = entries[i];
+      if (entry.metric_name === metricName && entry.timestamp.startsWith(todayStr)) {
+        index = i;
+        break;
+      }
+    }
 
     const newEntry: RuntimeMetricEntry = {
       timestamp: now.toISOString(),

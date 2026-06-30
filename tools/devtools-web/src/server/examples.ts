@@ -126,6 +126,12 @@ type ExamplePackInfo = {
   targetEntries?: Record<string, string>;
 };
 
+type RaePackFiles = {
+  path: string;
+  metadata: ExampleMetadata | null;
+  packInfo: ExamplePackInfo | null;
+};
+
 const ACTION_REGISTRY = new Map<string, ExampleActionMetadata[]>();
 type ExampleDownloads = Array<{
   profile: string;
@@ -174,10 +180,11 @@ export async function listExamples(
     }
 
     if (entry.isDirectory()) {
-      const metadata = await readExampleMetadata(fullPath);
+      const packFiles = await readExamplePackFiles(fullPath, relativePath, compilerBinPath);
+      const metadata = packFiles?.metadata ?? null;
       const files = await collectExampleFiles(fullPath, relativePath);
       if (!files.length) continue;
-      const packInfo = await readExamplePack(fullPath, relativePath, compilerBinPath);
+      const packInfo = packFiles?.packInfo ?? null;
       const entryFile =
         packInfo?.entry ?? resolveEntryFile(files, metadata?.entry, relativePath);
       const normalizedActions = normalizeExampleActions(relativePath, metadata?.actions);
@@ -264,8 +271,6 @@ async function collectExampleFiles(
 
   for (const entry of entries) {
     if (entry.name.startsWith(".")) continue;
-    if (entry.name === "devtools.json") continue;
-
     const relativePath = path.join(relativeBase, entry.name);
     const fullPath = path.join(root, entry.name);
 
@@ -352,24 +357,6 @@ function sanitizePath(root: string, relativePath: string): string {
   return resolved;
 }
 
-async function readExampleMetadata(dir: string): Promise<ExampleMetadata | null> {
-  const metadataPath = path.join(dir, "devtools.json");
-  try {
-    const contents = await readFile(metadataPath, "utf8");
-    const parsed = JSON.parse(contents);
-    if (parsed && typeof parsed === "object") {
-      return parsed as ExampleMetadata;
-    }
-    return null;
-  } catch (error) {
-    const nodeError = error as NodeJS.ErrnoException;
-    if (nodeError.code !== "ENOENT") {
-      console.warn(`[examples] Failed to read metadata for ${dir}`, error);
-    }
-    return null;
-  }
-}
-
 function resolveEntryFile(
   files: ExampleFileDescriptor[],
   metadataEntry: string | undefined,
@@ -389,14 +376,25 @@ function resolveEntryFile(
   return files.find((file) => file.path.endsWith("main.rae"))?.path ?? files[0].path;
 }
 
-async function readExamplePack(
+async function readExamplePackFiles(
   dir: string,
   exampleId: string,
   compilerBinPath: string
-): Promise<ExamplePackInfo | null> {
+): Promise<RaePackFiles | null> {
   const packPath = await findRaePackFile(dir);
   if (!packPath) return null;
-  const pack = await readRaePack(compilerBinPath, packPath);
+  const [metadata, pack] = await Promise.all([
+    readRaePackMetadata(packPath),
+    readRaePack(compilerBinPath, packPath)
+  ]);
+  const packInfo = pack ? makeExamplePackInfo(pack, exampleId) : null;
+  return { path: packPath, metadata, packInfo };
+}
+
+function makeExamplePackInfo(
+  pack: RaePackJson,
+  exampleId: string
+): ExamplePackInfo | null {
   if (!pack || !Array.isArray(pack.targets)) return null;
 
   const targetEntries: Record<string, string> = {};
@@ -425,6 +423,268 @@ async function readExamplePack(
     defaultTargetId,
     targetEntries: Object.keys(targetEntries).length ? targetEntries : undefined
   };
+}
+
+async function readRaePackMetadata(packPath: string): Promise<ExampleMetadata | null> {
+  try {
+    const contents = await readFile(packPath, "utf8");
+    return parseRaePackMetadata(contents);
+  } catch (error) {
+    console.warn(`[examples] Failed to read raepack metadata for ${packPath}`, error);
+    return null;
+  }
+}
+
+function parseRaePackMetadata(contents: string): ExampleMetadata {
+  const metadata: ExampleMetadata = {};
+  const name = readTopLevelStringField(contents, "name");
+  const description = readTopLevelStringField(contents, "description");
+  const category = readTopLevelStringField(contents, "category");
+  const defaultTarget = readTopLevelBareField(contents, "defaultTarget");
+  const wasmRealThreads = readTopLevelBoolishField(contents, "wasmRealThreads");
+  const webgpu = readTopLevelBoolishField(contents, "webgpu");
+  const displayBlock = readTopLevelBlock(contents, "display");
+  const actionsBlock = readTopLevelBlock(contents, "actions");
+
+  if (name) metadata.name = name;
+  if (description) metadata.description = description;
+  if (category) metadata.category = category;
+  if (defaultTarget) metadata.defaultTargetId = defaultTarget;
+  if (wasmRealThreads !== undefined) metadata.wasmRealThreads = wasmRealThreads;
+  if (webgpu !== undefined) metadata.webgpu = webgpu;
+  if (displayBlock) {
+    const width = readNumericField(displayBlock, "width");
+    const height = readNumericField(displayBlock, "height");
+    if (width !== undefined && height !== undefined) {
+      metadata.display = { width, height };
+    }
+  }
+  if (actionsBlock) {
+    metadata.actions = parseRaePackActions(actionsBlock);
+  }
+
+  return metadata;
+}
+
+function parseRaePackActions(actionsBlock: string): ExampleActionMetadata[] {
+  const actions: ExampleActionMetadata[] = [];
+  let index = 0;
+  while (index < actionsBlock.length) {
+    const action = readBlockFrom(actionsBlock, "action", index);
+    if (!action) break;
+    const id = readTopLevelStringField(action.body, "id");
+    const command = readTopLevelStringField(action.body, "command");
+    if (id && command) {
+      actions.push({
+        id,
+        label: readTopLevelStringField(action.body, "label") ?? id,
+        description: readTopLevelStringField(action.body, "description"),
+        command: unescapeRaePackString(command),
+        targetId: readTopLevelBareField(action.body, "target")
+      });
+    }
+    index = action.end;
+  }
+  return actions;
+}
+
+function readTopLevelStringField(contents: string, field: string): string | undefined {
+  const value = readTopLevelField(contents, field);
+  if (!value || !value.startsWith("\"")) return undefined;
+  return unescapeRaePackString(readQuotedString(value));
+}
+
+function readTopLevelBareField(contents: string, field: string): string | undefined {
+  const value = readTopLevelField(contents, field);
+  if (!value || value.startsWith("\"") || value.startsWith("{")) return undefined;
+  return value.split(/\s+/)[0]?.trim() || undefined;
+}
+
+function readTopLevelBoolishField(contents: string, field: string): boolean | undefined {
+  const raw = readTopLevelStringField(contents, field) ?? readTopLevelBareField(contents, field);
+  if (raw === "true") return true;
+  if (raw === "false") return false;
+  return undefined;
+}
+
+function readTopLevelBlock(contents: string, field: string): string | undefined {
+  const block = readBlockFrom(contents, field, 0);
+  return block?.body;
+}
+
+function readNumericField(contents: string, field: string): number | undefined {
+  const value = readTopLevelField(contents, field);
+  if (!value) return undefined;
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function readTopLevelField(contents: string, field: string): string | undefined {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < contents.length; i++) {
+    const ch = contents[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === "\"") {
+      inString = true;
+      continue;
+    }
+    if (ch === "{") {
+      depth++;
+      continue;
+    }
+    if (ch === "}") {
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+    if ((depth !== 0 && depth !== 1) || !matchesFieldAt(contents, i, field)) continue;
+    const colon = skipWhitespace(contents, i + field.length);
+    if (contents[colon] !== ":") continue;
+    const start = skipWhitespace(contents, colon + 1);
+    return readFieldValue(contents, start);
+  }
+  return undefined;
+}
+
+function readBlockFrom(
+  contents: string,
+  field: string,
+  fromIndex: number
+): { body: string; end: number } | null {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = fromIndex; i < contents.length; i++) {
+    const ch = contents[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === "\"") {
+      inString = true;
+      continue;
+    }
+    if (ch === "{") {
+      depth++;
+      continue;
+    }
+    if (ch === "}") {
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+    if ((depth !== 0 && depth !== 1) || !matchesFieldAt(contents, i, field)) continue;
+    const colon = skipWhitespace(contents, i + field.length);
+    if (contents[colon] !== ":") continue;
+    const open = skipWhitespace(contents, colon + 1);
+    if (contents[open] !== "{") continue;
+    const close = findMatchingBrace(contents, open);
+    if (close === -1) return null;
+    return { body: contents.slice(open + 1, close), end: close + 1 };
+  }
+  return null;
+}
+
+function readFieldValue(contents: string, start: number): string {
+  if (contents[start] === "\"") return readQuotedString(contents.slice(start));
+  if (contents[start] === "{") {
+    const close = findMatchingBrace(contents, start);
+    return close === -1 ? contents.slice(start).trim() : contents.slice(start, close + 1).trim();
+  }
+  let end = start;
+  while (end < contents.length && contents[end] !== "\n" && contents[end] !== "\r") {
+    end++;
+  }
+  return contents.slice(start, end).trim();
+}
+
+function readQuotedString(contents: string): string {
+  let escaped = false;
+  for (let i = 1; i < contents.length; i++) {
+    const ch = contents[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (ch === "\"") {
+      return contents.slice(0, i + 1);
+    }
+  }
+  return contents;
+}
+
+function unescapeRaePackString(value: string): string {
+  const inner = value.startsWith("\"") && value.endsWith("\"")
+    ? value.slice(1, -1)
+    : value;
+  return inner
+    .replace(/\\([{}])/g, "$1")
+    .replace(/\\"/g, "\"")
+    .replace(/\\\\/g, "\\")
+    .replace(/\\n/g, "\n")
+    .replace(/\\t/g, "\t");
+}
+
+function findMatchingBrace(contents: string, openIndex: number): number {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = openIndex; i < contents.length; i++) {
+    const ch = contents[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === "\"") {
+      inString = true;
+      continue;
+    }
+    if (ch === "{") {
+      depth++;
+    } else if (ch === "}") {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+function matchesFieldAt(contents: string, index: number, field: string): boolean {
+  if (!contents.startsWith(field, index)) return false;
+  const before = contents[index - 1] ?? " ";
+  const after = contents[index + field.length] ?? " ";
+  return !/[A-Za-z0-9_]/.test(before) && !/[A-Za-z0-9_]/.test(after);
+}
+
+function skipWhitespace(contents: string, index: number): number {
+  let i = index;
+  while (i < contents.length && /\s/.test(contents[i])) i++;
+  return i;
 }
 
 async function findRaePackFile(dir: string): Promise<string | null> {
