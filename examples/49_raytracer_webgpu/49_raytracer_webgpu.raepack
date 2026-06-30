@@ -1,0 +1,22 @@
+pack RaytracerWebgpu {
+  format: "raepack"
+  version: 1
+  defaultTarget: wasm
+  name: "Raytracer — WebGPU compute (GPU)"
+  description: "The step-3 scene authored in Rae (buildScene/buildCamera), rendered by a WGSL compute shader on the GPU via browser WebGPU. Rae emits the scene as a flat f32 buffer; the host uploads it, dispatches one compute invocation per pixel (raytrace.wgsl), and blits the result to the canvas. The path toward a real-time, GPU-everywhere renderer."
+  category: "Raytracer"
+  display: {
+    width: 768
+    height: 432
+  }
+  webgpu: "true"
+  targets: {
+    target wasm: {
+      label: "WASM"
+      entry: "main.rae"
+      sources: {
+        source: { path: ".", emit: compiled }
+      }
+    }
+  }
+}

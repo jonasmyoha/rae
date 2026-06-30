@@ -1,0 +1,30 @@
+pack MainLoop {
+  format: "raepack"
+  version: 1
+  defaultTarget: live
+  name: "Main loop"
+  description: "Logs tick numbers until stopped. Supports Live, Compiled, and Hybrid modes."
+  targets: {
+    target live: {
+      label: "Live"
+      entry: "main.rae"
+      sources: {
+        source: { path: ".", emit: live }
+      }
+    }
+    target compiled: {
+      label: "Compiled"
+      entry: "main.rae"
+      sources: {
+        source: { path: ".", emit: compiled }
+      }
+    }
+    target hybrid: {
+      label: "Hybrid"
+      entry: "main.rae"
+      sources: {
+        source: { path: ".", emit: hybrid }
+      }
+    }
+  }
+}

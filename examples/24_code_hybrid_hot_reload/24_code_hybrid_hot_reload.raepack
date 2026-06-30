@@ -1,0 +1,60 @@
+pack CodeHybridHotReload {
+  format: "raepack"
+  version: 1
+  defaultTarget: hybrid
+  name: "Code hybrid hot reload demo"
+  description: "Simulated compiled host + downloaded VM chunks for code hot reload testing."
+  actions: {
+    action: {
+      id: "simulate-dev-v1"
+      label: "Dev download v1"
+      description: "Stage version1 dev bundle for code hot reload."
+      command: "./examples/24_code_hybrid_hot_reload/scripts/simulate_download.sh \{\{ENTRY\}\} dev version1"
+      target: hybrid
+    }
+    action: {
+      id: "simulate-dev-v2"
+      label: "Dev download v2"
+      description: "Stage version2 dev bundle for code hot reload."
+      command: "./examples/24_code_hybrid_hot_reload/scripts/simulate_download.sh \{\{ENTRY\}\} dev version2"
+      target: hybrid
+    }
+    action: {
+      id: "simulate-dev-v3"
+      label: "Dev download v3"
+      description: "Stage version3 dev bundle for code hot reload."
+      command: "./examples/24_code_hybrid_hot_reload/scripts/simulate_download.sh \{\{ENTRY\}\} dev version3"
+      target: hybrid
+    }
+    action: {
+      id: "simulate-release-v1"
+      label: "Release download v1"
+      description: "Stage version1 release bundle for code hot reload."
+      command: "./examples/24_code_hybrid_hot_reload/scripts/simulate_download.sh \{\{ENTRY\}\} release version1"
+      target: hybrid
+    }
+    action: {
+      id: "simulate-release-v2"
+      label: "Release download v2"
+      description: "Stage version2 release bundle for code hot reload."
+      command: "./examples/24_code_hybrid_hot_reload/scripts/simulate_download.sh \{\{ENTRY\}\} release version2"
+      target: hybrid
+    }
+    action: {
+      id: "simulate-release-v3"
+      label: "Release download v3"
+      description: "Stage version3 release bundle for code hot reload."
+      command: "./examples/24_code_hybrid_hot_reload/scripts/simulate_download.sh \{\{ENTRY\}\} release version3"
+      target: hybrid
+    }
+  }
+  targets: {
+    target hybrid: {
+      label: "Hybrid"
+      entry: "host.rae"
+      sources: {
+        source: { path: ".", emit: hybrid }
+      }
+    }
+  }
+}
