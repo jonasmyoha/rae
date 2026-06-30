@@ -212,7 +212,7 @@ let exampleCategories = [];
 // Top-level example collections: the "Examples", "2D renderer" and "Raytracer"
 // nav tabs all share the SAME examples DOM + render path (DRY), differing only
 // by which example categories they show. Raytracer/2D Renderer examples are
-// tagged via their devtools.json "category"; the Examples tab shows the rest.
+// tagged via their .raepack "category"; the Examples tab shows the rest.
 const EXAMPLE_COLLECTIONS = {
   examples: {
     title: "Examples",
@@ -227,7 +227,7 @@ const EXAMPLE_COLLECTIONS = {
     subtitle: "Path tracers from One Weekend to interactive WebGPU — Live, Compiled and WASM."
   }
 };
-// Category labels (devtools.json "category") owned by a non-default collection.
+// Category labels (.raepack "category") owned by a non-default collection.
 const COLLECTION_CATEGORIES = {
   renderer2d: ["2D Renderer"],
   raytracer: ["Raytracer"]
@@ -3932,7 +3932,7 @@ function describeExampleTargets(example) {
   return targets.join(", ");
 }
 
-// Render an example's display name. devtools.json `name` fields are
+// Render an example's display name. .raepack `name` fields are
 // authored in sentence case ("Code hot reload demo"); examples without
 // metadata fall back to the directory id like "27_file_locking", so we
 // strip the numeric prefix, swap underscores for spaces, and uppercase

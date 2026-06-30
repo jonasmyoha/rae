@@ -111,7 +111,7 @@ bun run start
 
 ### Run the Examples
 
-- The **Examples** panel scans the configured `examplesPath` (defaults to `../rae/examples`) and lists every `.rae` demo project, including metadata from optional `devtools.json` files (name, target restrictions, etc.).
+- The **Examples** panel scans the configured `examplesPath` (defaults to `../rae/examples`) and lists every `.rae` demo project, including metadata from optional `.raepack` files (name, category, target restrictions, actions, etc.).
 - Select an example and pick a target via the dropdown in the panel header. Examples can opt into specific targets (e.g., the new **Hybrid hot reload demo** only exposes the Hybrid profile).
 - Use **Run**, **Live watch**, or **Build artifacts**:
   - **Run** executes the configured per-target command (Live uses `rae run`, Hybrid/Compiled run `rae build` with a temp output dir).
