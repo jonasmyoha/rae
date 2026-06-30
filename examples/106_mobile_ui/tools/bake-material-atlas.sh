@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Bake the Material-Icons MSDF atlas used by the gpu2d UI backend (#145).
 #
-# The gpu2d renderer has no runtime font rasterizer (unlike raylib), so every
+# The gpu2d renderer has no runtime font rasterizer, so every
 # font it draws — including the Material icon glyphs (mat:*) — must be baked to
 # an MSDF atlas offline. This produces MaterialIconsRound-Regular.mtsdf.{json,raw}
 # in the same format as the committed Roboto atlas (type mtsdf, distanceRange 12,
@@ -13,7 +13,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../../.."          # repo root (rae/)
 GEN="${MSDF_ATLAS_GEN:-msdf-atlas-gen}"
-A=examples/98_mobile_ui/assets/MaterialIconsRound-Regular
+A=examples/106_mobile_ui/assets/MaterialIconsRound-Regular
 CHARSET=$(grep -oE 'u\{[0-9a-fA-F]+\}' lib/ui/icon_codepoints.rae \
   | sed -E 's/u\{([0-9a-fA-F]+)\}/0x\1/' | sort -u | tr '\n' ',' | sed 's/,$//')
 echo "charset: $CHARSET"

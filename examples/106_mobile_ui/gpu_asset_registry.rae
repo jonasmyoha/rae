@@ -1,0 +1,27 @@
+import core
+import gpu2d
+
+# GPU2D-only compatibility registry for the 98-derived app code.
+#
+# 106 keeps the 98-derived TextureRegistry parameter shape while migrating the
+# backing store to gpu2d's image-key registry.
+type TextureRegistry pub {
+  marker: Int
+}
+
+func createTextureRegistry() pub ret TextureRegistry {
+  ret TextureRegistry { marker: 0 }
+}
+
+func textureHas(reg: view TextureRegistry, key: view String) pub ret Bool {
+  ret gpu2d.hasImageKey(key: key)
+}
+
+func textureRemove(reg: mod TextureRegistry, key: view String) pub {
+  # gpu2d currently has no per-key unload. Replacing a key with loadImageKey is
+  # the supported update path; process teardown releases the device resources.
+}
+
+func textureUnloadAll(reg: mod TextureRegistry) pub {
+  # GPU resources are owned by the gpu2d context and released by uiCloseWindow.
+}
