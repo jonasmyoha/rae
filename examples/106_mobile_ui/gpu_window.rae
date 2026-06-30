@@ -1,0 +1,136 @@
+import core
+import gpu2d
+import ui/components
+
+let mouseButtonLeft: Int = 0
+let mouseButtonRight: Int = 1
+let mouseButtonMiddle: Int = 2
+
+func colorChannel(v: view Int) ret Float {
+  ret v.toFloat() / 255.0
+}
+
+func uiInitWindow(width: view Int, height: view Int, title: view String) pub {
+  gpu2d.initWindow(width: width, height: height, title: title)
+}
+
+func uiSetConfigFlags(flags: view Int) pub {}
+func uiSetWindowPosition(x: view Int, y: view Int) pub {}
+func uiSetWindowSize(width: view Int, height: view Int) pub {}
+func uiSetMouseScale(scaleX: view Float, scaleY: view Float) pub {}
+func uiInstallWindowCloseWaker() pub {}
+func uiInstallMouseButtonHook() pub {}
+func uiDisableAppNap() pub {}
+
+func uiSetDesignResolution(width: view Float, height: view Float, fit: view Int) pub {
+  gpu2d.setDesignResolution(width: width, height: height, fit: fit)
+}
+
+func uiWindowShouldClose() pub ret Bool {
+  ret gpu2d.pollClose()
+}
+
+func uiCloseWindow() pub {
+  gpu2d.closeWindow()
+}
+
+func uiBeginFrame(clear: view RgbaColor) pub {
+  gpu2d.beginFrame(
+    r: colorChannel(v: clear.r),
+    g: colorChannel(v: clear.g),
+    b: colorChannel(v: clear.b),
+    a: colorChannel(v: clear.a))
+}
+
+func uiEndFrame() pub {
+  gpu2d.endFrame()
+}
+
+func uiWaitEvents(timeoutSec: view Float) pub {
+  gpu2d.waitEvents(timeoutSec: timeoutSec)
+}
+
+func uiNowSeconds() pub ret Float {
+  ret gpu2d.nowSeconds()
+}
+
+func uiWindowWidth() pub ret Float {
+  ret gpu2d.designWidth()
+}
+
+func uiWindowHeight() pub ret Float {
+  ret gpu2d.designHeight()
+}
+
+func uiFramebufferWidth() pub ret Int {
+  ret gpu2d.windowWidth()
+}
+
+func uiFramebufferHeight() pub ret Int {
+  ret gpu2d.windowHeight()
+}
+
+func uiDpr() pub ret Float {
+  ret gpu2d.dpr()
+}
+
+func uiPointerX() pub ret Float {
+  ret gpu2d.pointerX()
+}
+
+func uiPointerY() pub ret Float {
+  ret gpu2d.pointerY()
+}
+
+func uiPointerDown() pub ret Bool {
+  ret gpu2d.pointerDown()
+}
+
+func uiWheelMove() pub ret Float {
+  ret gpu2d.wheelMove()
+}
+
+func uiIsWindowResized() pub ret Bool {
+  ret false
+}
+
+func uiIsKeyPressed(key: view Int) pub ret Bool {
+  ret false
+}
+
+func uiPointerButtonDown(button: view Int) pub ret Bool {
+  if button is mouseButtonLeft {
+    ret gpu2d.pointerDown()
+  }
+  ret false
+}
+
+func uiPointerButtonPressed(button: view Int) pub ret Bool {
+  if button is mouseButtonLeft {
+    ret gpu2d.pointerPressed()
+  }
+  ret false
+}
+
+func uiPointerButtonReleased(button: view Int) pub ret Bool {
+  if button is mouseButtonLeft {
+    ret gpu2d.pointerReleased()
+  }
+  ret false
+}
+
+func uiMouseHookActive() pub ret Bool { ret false }
+func uiMouseHookDrainPressed() pub ret Bool { ret false }
+func uiMouseHookDrainReleased() pub ret Bool { ret false }
+
+func uiCurrentMonitor() pub ret Int {
+  ret 0
+}
+
+func uiMonitorHeight(monitor: view Int) pub ret Int {
+  ret uiFramebufferHeight()
+}
+
+func uiMonitorRefreshRate(monitor: view Int) pub ret Int {
+  ret 60
+}

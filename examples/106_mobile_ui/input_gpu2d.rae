@@ -1,0 +1,156 @@
+open ui/ecs
+open ui/layer
+# Pointer input for the GPU2D/SDL3-only mobile UI example.
+#
+# Coordinates are in logical points, matching `WorldTransform`.
+import core
+import ui/layer
+
+let inputNoEntity: EntityId = { value: 0 - 1 }
+
+type PointerState {
+  x: Float
+  y: Float
+  down: Bool
+  pressed: Bool
+  released: Bool
+}
+
+type ActionEvent {
+  entity: EntityId
+  actionId: String
+}
+
+type InputSystem {
+  pointer: PointerState
+  pressedEntity: EntityId
+  events: List(ActionEvent)
+}
+
+func createInputSystem() ret InputSystem {
+  ret InputSystem {
+    pointer: PointerState {
+      x: 0.0
+      y: 0.0
+      down: false
+      pressed: false
+      released: false
+    }
+    pressedEntity: noEntity()
+    events: createList(ActionEvent, cap: 8)
+  }
+}
+
+func pointInEntity(world: view UiWorld, entity: view EntityId, x: view Float, y: view Float) ret Bool {
+  if componentHas(this: world.worldTransforms, entity: entity) is false { ret false }
+  if componentHas(this: world.computedRects, entity: entity) is false { ret false }
+  let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: entity)
+  if wt.visible is false { ret false }
+  let cr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
+  if x < wt.x { ret false }
+  if y < wt.y { ret false }
+  if x > wt.x + cr.w { ret false }
+  if y > wt.y + cr.h { ret false }
+  ret true
+}
+
+func hitTestEntity(world: view UiWorld, entity: view EntityId, x: view Float, y: view Float) ret EntityId {
+  if componentHas(this: world.childrens, entity: entity) {
+    let ch: view Children => componentView(this: world.childrens, entity: entity)
+    let n: Int = ch.ids.length
+    var i: Int = n - 1
+    loop i >= 0 {
+      let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
+      let hit: EntityId = hitTestEntity(world: world, entity: cid, x: x, y: y)
+      if isNone(this: hit) is false { ret hit }
+      i = i - 1
+    }
+  }
+
+  if componentHas(this: world.onClicks, entity: entity) {
+    if pointInEntity(world: world, entity: entity, x: x, y: y) {
+      ret entity
+    }
+  }
+  ret inputNoEntity
+}
+
+func hitTest(world: view UiWorld, x: view Float, y: view Float) ret EntityId {
+  let roots: List(EntityId) = collectPaintableRoots(world: world)
+  let n: Int = roots.length
+  var i: Int = n - 1
+  loop i >= 0 {
+    let e: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: i)
+    if componentHas(this: world.layerRoots, entity: e) is false {
+      let hit: EntityId = hitTestEntity(world: world, entity: e, x: x, y: y)
+      if isNone(this: hit) is false { ret hit }
+    }
+    i = i - 1
+  }
+  ret inputNoEntity
+}
+
+func appendActionEvent(input: mod InputSystem, entity: view EntityId, actionId: own String) {
+  let events: mod List(ActionEvent) => input.events
+  let ev: ActionEvent = { entity: entity, actionId: actionId }
+  events.add(value: ev)
+}
+
+func clearActionEvents(input: mod InputSystem) {
+  let events: mod List(ActionEvent) => input.events
+  loop events.length > 0 {
+    events.remove(index: events.length - 1)
+  }
+}
+
+func updateInputSystem(input: mod InputSystem, world: view UiWorld) {
+  clearActionEvents(input: input)
+
+  let mx: Float = uiPointerX()
+  let my: Float = uiPointerY()
+  let down: Bool = uiPointerButtonDown(button: mouseButtonLeft)
+  var pressed: Bool = false
+  var released: Bool = false
+  if uiMouseHookActive() {
+    pressed = uiMouseHookDrainPressed()
+    released = uiMouseHookDrainReleased()
+  } else {
+    pressed = uiPointerButtonPressed(button: mouseButtonLeft)
+    released = uiPointerButtonReleased(button: mouseButtonLeft)
+  }
+
+  let nextPointer: PointerState = {
+    x: mx
+    y: my
+    down: down
+    pressed: pressed
+    released: released
+  }
+  input.pointer = nextPointer
+
+  if pressed {
+    input.pressedEntity = hitTest(world: world, x: mx, y: my)
+    log("[input] press at ({mx},{my}) -> pressedEntity={input.pressedEntity.value}")
+  }
+
+  if released {
+    var hit: EntityId = hitTest(world: world, x: mx, y: my)
+    log("[input] release at ({mx},{my}) -> hit={hit.value} pressed={input.pressedEntity.value}")
+    if isNone(this: hit) is false {
+      if hit.value is input.pressedEntity.value {
+        if componentHas(this: world.onClicks, entity: hit) {
+          let oc: view OnClick => componentView(this: world.onClicks, entity: hit)
+          log("[input] fire {oc.actionId} on entity {hit.value}")
+          appendActionEvent(input: input, entity: hit, actionId: oc.actionId)
+        } else {
+          log("[input] release matched press but entity has no OnClick")
+        }
+      } else {
+        log("[input] release hit {hit.value} != pressed {input.pressedEntity.value} - drop")
+      }
+    } else {
+      log("[input] release hit nothing - drop")
+    }
+    input.pressedEntity = inputNoEntity
+  }
+}

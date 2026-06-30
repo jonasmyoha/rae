@@ -7,7 +7,6 @@
 # `rae/docs/royal-blush-ruics-ecs-reference.md` § 3 — see
 # `examples/98_mobile_ui/DESIGN.md` for the subset the music player
 # actually needs in phase 1.
-import raylib
 
 # -----------------------------------------------------------------
 # Sub-types and enums shared across components
@@ -115,8 +114,8 @@ type Vec2 {
   y: Float
 }
 
-# RGBA in 0..255 ints. Reuses raylib's Color so the render layer can
-# pass values through unchanged.
+# RGBA in 0..255 ints. Backend renderers convert this into their native
+# colour representation at the draw boundary.
 type RgbaColor {
   r: Int
   g: Int

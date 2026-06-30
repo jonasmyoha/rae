@@ -35,7 +35,7 @@ import urllib.request
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ART_DIR = os.path.join(ROOT, "assets", "album_art")
 OUT_PATH = os.path.join(ROOT, "assets", "album_metadata.txt")
-ASSET_PREFIX = "examples/98_mobile_ui/assets/album_art"
+ASSET_PREFIX = "examples/106_mobile_ui/assets/album_art"
 
 
 # ---------- filename parsing ----------
@@ -221,7 +221,7 @@ def main():
         "#   unmatched - no results; only the parsed artist / album\n"
         "#               strings from the filename are present.\n"
         "#\n"
-        "# Source script: examples/98_mobile_ui/tools/fetch_album_metadata.py\n"
+        "# Source script: examples/106_mobile_ui/tools/fetch_album_metadata.py\n"
     )
     with open(OUT_PATH, "w", encoding="utf-8") as f:
         f.write(header + "\n")

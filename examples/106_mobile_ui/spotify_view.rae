@@ -1,4 +1,3 @@
-open raylib
 open sys/spotify
 open ui/ecs
 # Spotify-mode display layer for the mobile-UI music player example.
@@ -10,7 +9,7 @@ open ui/ecs
 #     directly on the world's Text components (no rebuild),
 #   * downloads the album art (Spotify URL primary, iTunes fallback
 #     when empty) to /tmp/rae_spotify_art.jpg,
-#   * loads it as a Texture under the registry key "spotify-current",
+#   * loads it as a gpu2d image key under "spotify-current",
 #   * swaps every Sprite whose textureKey equals the previous album
 #     stem to "spotify-current" so the NowPlaying cover renders the
 #     real track instead of the local placeholder.
@@ -22,11 +21,8 @@ import core
 import gpu2d
 import sys
 import sys/spotify
-import raylib
 import ui/ecs
-import ui/textures
-import ui/window
-# PlaybackState lives in examples/98_mobile_ui/playback.rae — auto-imported
+# PlaybackState lives in this example's playback.rae — auto-imported
 # from the same project directory. We mutate it here to sync the local
 # mock's `isPlaying` from Spotify's reported state so the play-button
 # icon (driven by `applyPlaybackToWorld(world, playback)`) matches reality.
@@ -135,7 +131,7 @@ func rebindCoverOnPages(world: mod UiWorld, fromKey: view String, toKey: view St
 #
 # Caller is responsible for not calling this on every frame — only on
 # track change. We unconditionally remove the previous registration
-# first so loadTexture's malloc isn't shadowed by a stale entry.
+# first so the new file lands cleanly.
 # Fetch artwork for one play-history entry and register it under a
 # URL-derived key. Returns the textureKey on success, "" on failure.
 #
@@ -156,11 +152,7 @@ func loadHistoryEntryArt(track: view SpotifyTrack, reg: mod TextureRegistry) pub
     ret ""
   }
   let key: String = "spotify-art:{imageHash}"
-  if uiBackend() is UiBackend.gpu2d {
-    if gpu2d.hasImageKey(key: key) {
-      ret key
-    }
-  } else if textureHas(reg: reg, key: key) {
+  if gpu2d.hasImageKey(key: key) {
     ret key
   }
   let outPath: String = "/tmp/rae_spotify_art_{imageHash}.jpg"
@@ -168,18 +160,12 @@ func loadHistoryEntryArt(track: view SpotifyTrack, reg: mod TextureRegistry) pub
   if ok is false {
     ret ""
   }
-  if uiBackend() is UiBackend.gpu2d {
-    let gpuKey: String = "{key}"
-    let gpuPath: String = "{outPath}"
-    let h: Int = gpu2d.loadImageKey(key: gpuKey, path: gpuPath)
-    if h <= 0 {
-      ret ""
-    }
-    ret key
+  let gpuKey: String = "{key}"
+  let gpuPath: String = "{outPath}"
+  let h: Int = gpu2d.loadImageKey(key: gpuKey, path: gpuPath)
+  if h <= 0 {
+    ret ""
   }
-  let tex: Texture = loadTexture(fileName: outPath)
-  let keyForReg: String = "{key}"
-  textureRegisterDirect(reg: reg, key: own keyForReg, tex: tex)
   ret key
 }
 
@@ -217,18 +203,10 @@ func refreshSpotifyArt(state: view SpotifyState, track: view SpotifyTrack, reg: 
     }
   }
   # Drop any prior registration so the new file lands cleanly.
-  if uiBackend() is UiBackend.raylib {
-    textureRemove(reg: reg, key: state.artKey)
-  }
-  if uiBackend() is UiBackend.gpu2d {
-    let copiedKey: String = "{state.artKey}"
-    let copiedPath: String = "{outPath}"
-    let h: Int = gpu2d.loadImageKey(key: copiedKey, path: copiedPath)
-    ret h > 0
-  }
-  let tex: Texture = loadTexture(fileName: outPath)
-  textureRegisterDirect(reg: reg, key: state.artKey, tex: tex)
-  ret true
+  let copiedKey: String = "{state.artKey}"
+  let copiedPath: String = "{outPath}"
+  let h: Int = gpu2d.loadImageKey(key: copiedKey, path: copiedPath)
+  ret h > 0
 }
 
 # Rebind ONLY the cover sprites on the player + mini-player pages —

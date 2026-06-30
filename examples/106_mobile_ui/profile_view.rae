@@ -22,7 +22,6 @@ import sys/spotify
 import ui/components
 import ui/ecs
 import ui/layout
-import ui/window
 
 # Local circle shape helper — world_helpers.rae only exposes rect /
 # rounded-rect variants; the avatar needs a true `ShapeKind.circle`.
@@ -41,10 +40,7 @@ let profileAvatarSize: Float = 120.0
 let profileAvatarIconSize: Float = 80.0
 
 func profileAvatarLoaded(reg: view TextureRegistry, key: view String) ret Bool {
-  if uiBackend() is UiBackend.gpu2d {
-    ret gpu2d.hasImageKey(key: key)
-  }
-  ret textureHas(reg: reg, key: key)
+  ret gpu2d.hasImageKey(key: key)
 }
 
 func buildProfileAvatar(world: mod UiWorld, reg: view TextureRegistry) ret EntityId {
