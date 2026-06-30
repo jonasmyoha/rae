@@ -7,9 +7,8 @@ open ui/ecs
 # outer loop in `main.rae`, mutate it from `dispatchActions`, and read
 # it back when building the per-frame icon override + progress fill.
 #
-# Time advance is driven by the inner loop sampling `getTime()` and
-# computing a delta against the previous frame's sample, so we don't
-# need `getFrameTime()` from raylib. When `isPlaying` is true the
+# Time advance is driven by the inner loop sampling the platform clock and
+# computing a delta against the previous frame's sample. When `isPlaying` is true the
 # delta accumulates into `elapsedSec`; when paused, we still update
 # the `prevTime` floor (so the next resume doesn't replay the entire
 # pause interval in one tick) but leave `elapsedSec` alone.

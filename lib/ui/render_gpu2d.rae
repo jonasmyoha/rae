@@ -5,8 +5,8 @@
 # drawn on the GPU. The two MSDF fonts (body text + Material icons) are PASSED
 # IN via Gpu2dUi (module-level heap globals miscompile); album-cover images are
 # resolved by key through the gpu2d runtime registry (gpu2d.loadImageKey /
-# drawImageKey). Shapes go through the shared draw sink (lib/ui/draw.rae) with
-# the backend switched to gpu2d.
+# drawImageKey). Shapes call gpu2d primitives directly so GPU-only apps do not
+# import the dual-backend raylib draw sink.
 #
 # Text styles resolve via lib/ui/text_style (the backend-neutral table);
 # mat:* icon glyphs map name->codepoint via lib/ui/icon_codepoints and draw
@@ -20,7 +20,6 @@ import sdf_text
 import ui/animation
 import ui/components
 import ui/ecs
-import ui/draw
 import ui/icon_codepoints
 import ui/layer
 import ui/theme
@@ -117,18 +116,17 @@ func paintShapeG(world: view UiWorld, e: view EntityId, wt: view WorldTransform,
     if cr.h < smaller { smaller = cr.h }
     var r: Float = sh.radius
     if r <= 0.0 { r = smaller / 2.0 }
-    sinkCircle(cx: wt.x + cr.w / 2.0, cy: wt.y + cr.h / 2.0, r: r * hoverMul, c: fill)
+    gpu2d.drawRoundedRect(x: wt.x + cr.w / 2.0 - r * hoverMul, y: wt.y + cr.h / 2.0 - r * hoverMul, w: r * 2.0 * hoverMul, h: r * 2.0 * hoverMul, radius: r * hoverMul, color: g2dColor(c: fill))
     ret
   }
   var radius: Float = sh.radius
   if radius <= 0.0 { radius = g2dRadius(world: world, e: e, fallback: 0.0) }
   if sh.strokeWidth > 0.0 {
     let stroke: RgbaColor = g2dChain(c: sh.stroke, chain255: chain255)
-    # The sink has no fill+border op yet; approximate with gpu2d.drawBox.
     gpu2d.drawBox(x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, fill: g2dColor(c: fill), borderWidth: sh.strokeWidth, border: g2dColor(c: stroke))
     ret
   }
-  sinkRoundedRect(x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, c: fill)
+  gpu2d.drawRoundedRect(x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, color: g2dColor(c: fill))
 }
 
 # GradientFill uses the gpu2d box shader's gradient mode so dock shadows and
@@ -163,7 +161,8 @@ func paintBackdropG(world: view UiWorld, e: view EntityId, wt: view WorldTransfo
   # Raylib uses captured blur textures for BackdropImage. gpu2d does not have
   # framebuffer capture yet, so paint a stable translucent glass fallback.
   let fallback: RgbaColor = { r: 18, g: 22, b: 30, a: 210 }
-  sinkRoundedRect(x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, c: g2dChain(c: fallback, chain255: chain255))
+  let chained: RgbaColor = g2dChain(c: fallback, chain255: chain255)
+  gpu2d.drawRoundedRect(x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, color: g2dColor(c: chained))
 }
 
 # Sprites: `mat:<name>` icons draw as a Material-atlas glyph; other keys
@@ -198,7 +197,7 @@ func paintSpriteG(world: view UiWorld, e: view EntityId, wt: view WorldTransform
   }
   let fallback: RgbaColor = g2dChain(c: themeColorByName(name: "textMuted"), chain255: chain255)
   let fallbackRadius: Float = g2dRadius(world: world, e: e, fallback: 8.0)
-  sinkRoundedRect(x: drawX, y: drawY, w: drawW, h: drawH, radius: fallbackRadius * hoverMul, c: fallback)
+  gpu2d.drawRoundedRect(x: drawX, y: drawY, w: drawW, h: drawH, radius: fallbackRadius * hoverMul, color: g2dColor(c: fallback))
 }
 
 func paintTextG(world: view UiWorld, e: view EntityId, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int, res: view Gpu2dUi) {
@@ -276,7 +275,6 @@ func paintSubtreeG(world: view UiWorld, e: view EntityId, res: view Gpu2dUi) {
 }
 
 func renderSystemGpu2dLayerRange(world: view UiWorld, res: view Gpu2dUi, minOrder: view Int, maxOrder: view Int) pub {
-  setUiBackend(b: UiBackend.gpu2d)
   let roots: List(EntityId) = collectPaintableRoots(world: world)
   let m: Int = roots.length
   var p: Int = 0
@@ -295,7 +293,6 @@ func renderSystemGpu2dLayerRange(world: view UiWorld, res: view Gpu2dUi, minOrde
 }
 
 # Render `world` on the gpu2d backend. Call between gpu2d.beginFrame/endFrame.
-# Switches the draw sink to the gpu2d backend so shared shape ops route to it.
 func renderSystemGpu2d(world: view UiWorld, res: view Gpu2dUi) pub {
   let allRangeLow: Int = 0 - 1000000
   let allRangeHi: Int = 1000000

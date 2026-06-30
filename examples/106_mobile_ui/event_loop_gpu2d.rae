@@ -1,0 +1,25 @@
+# Event-driven UI loop policy helpers for the GPU2D/SDL3 window seam.
+
+let frameTimeoutSec: Float = 0.016
+let watcherPollSec: Float = 0.05
+let idleCapSec: Float = 30.0
+
+func displayFrameSec() pub ret Float {
+  let hz: Int = uiMonitorRefreshRate(monitor: uiCurrentMonitor())
+  if hz < 30 or hz > 360 {
+    ret 0.016667
+  }
+  ret 1.0 / hz.toFloat()
+}
+
+func nextWaitTimeoutSec(
+  animating: view Bool
+  mouseDown: view Bool
+  pollWatcher: view Bool
+  frameSec: view Float
+) ret Float {
+  if animating { ret frameSec }
+  if mouseDown { ret frameSec }
+  if pollWatcher { ret watcherPollSec }
+  ret idleCapSec
+}
