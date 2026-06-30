@@ -1,0 +1,259 @@
+open raylib
+open ui/window
+# Persistent UI state — active album / track / position — round-
+# tripped through a small `state.json` file. Read once at boot,
+# written after every dispatched action so the next launch picks
+# up where the user left off.
+#
+# state.json schema (all fields optional; missing → keep current
+# in-memory default):
+#
+#     {
+#       "currentAlbumStem":  "mitski-puberty",
+#       "currentTrackIndex": 0,
+#       "elapsedMs":         12500,
+#       "isPlaying":         false
+#     }
+#
+# The file lives at `stateFilePath` (see `config.rae`). We write
+# `elapsedMs` rather than `elapsedSec` so the playback position
+# stays integer-precise across save/load — `Float -> String ->
+# Float` round-tripping was dropping milliseconds in the smoke
+# test.
+import core
+import json
+import ui/window
+
+# Read whole file. Empty on missing/error — caller treats empty as
+# "no saved state, use defaults".
+func rae_ext_rae_sys_read_file(path: String) extern ret String
+
+# Write the whole file, replacing any prior content. Returns true
+# on success. We log on failure but don't otherwise propagate the
+# error — a missing-disk save shouldn't crash the app.
+func rae_ext_rae_sys_write_file(path: String, content: String) extern ret Bool
+
+# ----- save ---------------------------------------------------------
+
+func boolStr(b: view Bool) ret String {
+  if b {
+    ret "true"
+  }
+  ret "false"
+}
+
+# Serialise the relevant fields of `state` + `playback` to a small
+# JSON object and write it to `path`. Called from `main.rae` after
+# every dispatched action — cheap (one open / one write).
+#
+# We build the body piece-by-piece with concat because string
+# interpolation `{expr}` collides with the literal `{` we'd need
+# for JSON's opening brace. Result is fixed-shape so the parser
+# (and a human eyeballing the file) doesn't get surprised.
+func saveAppState(path: view String, state: view AppState, playback: view PlaybackState) pub {
+  let elapsedMs: Int = (playback.elapsedSec * 1000.0).toInt()
+  let playingStr: String = boolStr(b: playback.isPlaying)
+  # Session route: which top-level tab + the OS window position.
+  # Sub-page state (Album / Player / History on top of the stack)
+  # is intentionally NOT persisted — restoring deep sub-pages
+  # across launches felt confusing in practice (e.g. boot landed
+  # the user on NowPlaying with no obvious way back to Home). The
+  # tab alone gives "open back to where you were" without any
+  # cross-launch route-restoration footguns.
+  let tabOrdinal: Int = screenToInt(s: state.tab)
+  let visibleOrdinal: Int = screenToInt(s: visibleScreen(state: state))
+  let winX: Int = getWindowPositionX()
+  let winY: Int = getWindowPositionY()
+  let q: String = "\""
+  # Literal `{` and `}` characters — built via the Unicode escape
+  # because the lexer treats a bare `{` inside a string literal
+  # as the start of `{expr}` interpolation, which then chokes on
+  # the JSON body. `\u{007B}` / `\u{007D}` sidesteps that without
+  # any runtime cost.
+  let openBrace: String = "\u{007B}"
+  let closeBrace: String = "\u{007D}"
+  let nl: String = "\n"
+  let comma: String = ","
+  let colon: String = ":"
+
+  let stemValue: String = "{state.currentAlbumStem}"
+  let trackValue: String = "{state.currentTrackIndex}"
+  let elapsedValue: String = "{elapsedMs}"
+  let tabValue: String = "{tabOrdinal}"
+  let screenValue: String = "{visibleOrdinal}"
+  let winXValue: String = "{winX}"
+  let winYValue: String = "{winY}"
+
+  var content: String = ""
+  content = content.concat(other: openBrace).concat(other: nl)
+  content = content.concat(other: "  ").concat(other: q).concat(other: "currentAlbumStem").concat(other: q)
+  content = content.concat(other: colon).concat(other: " ").concat(other: q).concat(other: stemValue).concat(other: q)
+  content = content.concat(other: comma).concat(other: nl)
+  content = content.concat(other: "  ").concat(other: q).concat(other: "currentTrackIndex").concat(other: q)
+  content = content.concat(other: colon).concat(other: " ").concat(other: trackValue)
+  content = content.concat(other: comma).concat(other: nl)
+  content = content.concat(other: "  ").concat(other: q).concat(other: "elapsedMs").concat(other: q)
+  content = content.concat(other: colon).concat(other: " ").concat(other: elapsedValue)
+  content = content.concat(other: comma).concat(other: nl)
+  content = content.concat(other: "  ").concat(other: q).concat(other: "isPlaying").concat(other: q)
+  content = content.concat(other: colon).concat(other: " ").concat(other: playingStr)
+  content = content.concat(other: comma).concat(other: nl)
+  content = content.concat(other: "  ").concat(other: q).concat(other: "tab").concat(other: q)
+  content = content.concat(other: colon).concat(other: " ").concat(other: tabValue)
+  content = content.concat(other: comma).concat(other: nl)
+  content = content.concat(other: "  ").concat(other: q).concat(other: "screen").concat(other: q)
+  content = content.concat(other: colon).concat(other: " ").concat(other: screenValue)
+  content = content.concat(other: comma).concat(other: nl)
+  content = content.concat(other: "  ").concat(other: q).concat(other: "winX").concat(other: q)
+  content = content.concat(other: colon).concat(other: " ").concat(other: winXValue)
+  content = content.concat(other: comma).concat(other: nl)
+  content = content.concat(other: "  ").concat(other: q).concat(other: "winY").concat(other: q)
+  content = content.concat(other: colon).concat(other: " ").concat(other: winYValue)
+  content = content.concat(other: nl).concat(other: closeBrace).concat(other: nl)
+
+  let ok: Bool = rae_ext_rae_sys_write_file(path: path, content: content)
+  if ok is false {
+    log("[state] save failed: {path}")
+  }
+  # Diagnostic so the user can confirm the persistence layer fired
+  # and inspect what got written without opening the JSON. Window
+  # dimensions are logged for context even though they aren't saved
+  # (the layout uses fixed screenW / screenH constants).
+  let winW: Int = getRenderWidth()
+  let winH: Int = getRenderHeight()
+  let visible: Screen = visibleScreen(state: state)
+  let tabName: String = screenName(s: state.tab)
+  let screenNameStr: String = screenName(s: visible)
+  log("[state] saved tab={tabName} (ord {tabOrdinal}) screen={screenNameStr} (ord {visibleOrdinal}) winPos=({winX},{winY}) winSize=({winW}x{winH})")
+}
+
+# Human-readable name for a Screen enum value. Used by the
+# `[state] saved` log line so a glance at the terminal tells you
+# which page the user was on at save time.
+func screenName(s: view Screen) ret String {
+  if s is Screen.home {     ret "Home" }
+  if s is Screen.library {  ret "Library" }
+  if s is Screen.album {    ret "Album" }
+  if s is Screen.player {   ret "Player" }
+  if s is Screen.search {   ret "Search" }
+  if s is Screen.profile {  ret "Profile" }
+  if s is Screen.history {  ret "History" }
+  ret "?"
+}
+
+# ----- restore ------------------------------------------------------
+
+# Read `path`; if present, overwrite `state.currentAlbumStem`,
+# `state.currentTrackIndex`, `playback.elapsedSec`, and
+# `playback.isPlaying` with the saved values. Missing fields are
+# left at their in-memory defaults — restored state is best-effort,
+# never an error.
+#
+# `state.currentAlbumStem` is only restored when the saved stem
+# actually exists in the loaded album list — a stale state file
+# from before an album rename / deletion shouldn't leave the user
+# staring at an empty stub. Same for `currentTrackIndex` against
+# the matching album's track count.
+func restoreAppState(state: mod AppState, playback: mod PlaybackState, path: view String) pub {
+  let source: String = rae_ext_rae_sys_read_file(path: path)
+  if source.length() is 0 {
+    log("[state] no state file at {path} — using defaults")
+    ret
+  }
+  let doc: JsonDoc = json.parseJson(source: source)
+  if doc.ok is false {
+    log("[state] parse error in {path} at byte {doc.errorPos}")
+    ret
+  }
+  let root: JsonValue = json.jsonRoot(doc: doc)
+
+  # Album stem — only restore if the album is still on disk.
+  let stemKey: String = "currentAlbumStem"
+  let stemIdx: Int = json.jsonField(doc: doc, this: root, key: stemKey)
+  if stemIdx >= 0 {
+    let empty: String = ""
+    let savedStem: String = json.jsonString(this: json.jsonValueAt(doc: doc, idx: stemIdx), fallback: empty)
+    if savedStem.length() > 0 {
+      let albumIdx: Int = findAlbumIndex(albums: state.albums, stem: savedStem)
+      if albumIdx >= 0 {
+        state.currentAlbumStem = savedStem
+      } else {
+        log("[state] saved album '{savedStem}' not in current catalogue — keeping default")
+      }
+    }
+  }
+
+  # Track index — clamp to the active album's track count.
+  let trackKey: String = "currentTrackIndex"
+  let trackIdx: Int = json.jsonField(doc: doc, this: root, key: trackKey)
+  if trackIdx >= 0 {
+    var savedTrack: Int = json.jsonInt(this: json.jsonValueAt(doc: doc, idx: trackIdx), fallback: 0)
+    let album: Album = activeAlbum(state: state)
+    let n: Int = album.tracks.length
+    if savedTrack < 0 {
+      savedTrack = 0
+    }
+    if savedTrack >= n {
+      savedTrack = 0
+    }
+    state.currentTrackIndex = savedTrack
+  }
+
+  # Playback position — stored as ms, restored to Float seconds.
+  let elapsedKey: String = "elapsedMs"
+  let elapsedIdx: Int = json.jsonField(doc: doc, this: root, key: elapsedKey)
+  if elapsedIdx >= 0 {
+    var ms: Int = json.jsonInt(this: json.jsonValueAt(doc: doc, idx: elapsedIdx), fallback: 0)
+    if ms < 0 {
+      ms = 0
+    }
+    playback.elapsedSec = ms.toFloat() / 1000.0
+  }
+
+  # Play / pause flag.
+  let playingKey: String = "isPlaying"
+  let playingFieldIdx: Int = json.jsonField(doc: doc, this: root, key: playingKey)
+  if playingFieldIdx >= 0 {
+    playback.isPlaying = json.jsonBool(this: json.jsonValueAt(doc: doc, idx: playingFieldIdx), fallback: false)
+  }
+
+  # Seed the "actually playing" pair from the restored snapshot so the
+  # album-listing row highlight follows the user across launches. The
+  # JSON schema is "browse-shaped" (currentAlbumStem / currentTrackIndex
+  # only) — pre-split those were the playing values too, so copying
+  # them here preserves the historical meaning. Skipped when
+  # isPlaying=false: a paused-at-shutdown session shouldn't pretend
+  # a track is playing on the next launch.
+  if playback.isPlaying {
+    playback.playingAlbumStem = "{state.currentAlbumStem}"
+    playback.playingTrackIndex = state.currentTrackIndex
+  }
+
+  # Session route: restore the top-level tab and the window
+  # position. The "screen" field stays in the JSON for forward
+  # compatibility (and for the diagnostic log on save), but we
+  # deliberately do NOT push it onto the sub-page stack at
+  # restore — landing the user on a sub-page like NowPlaying with
+  # an empty back-stack underneath caused real navigation breakage.
+  let tabKey: String = "tab"
+  let tabFieldIdx: Int = json.jsonField(doc: doc, this: root, key: tabKey)
+  if tabFieldIdx >= 0 {
+    let tabOrd: Int = json.jsonInt(this: json.jsonValueAt(doc: doc, idx: tabFieldIdx), fallback: 4)
+    state.tab = intToScreen(n: tabOrd)
+  }
+  let winXKey: String = "winX"
+  let winXIdx: Int = json.jsonField(doc: doc, this: root, key: winXKey)
+  let winYKey: String = "winY"
+  let winYIdx: Int = json.jsonField(doc: doc, this: root, key: winYKey)
+  if winXIdx >= 0 {
+    if winYIdx >= 0 {
+      let savedX: Int = json.jsonInt(this: json.jsonValueAt(doc: doc, idx: winXIdx), fallback: 50)
+      let savedY: Int = json.jsonInt(this: json.jsonValueAt(doc: doc, idx: winYIdx), fallback: 50)
+      # macOS will silently clamp positions that put the window
+      # off-screen, so we don't bother validating the bounds here.
+      uiSetWindowPosition(x: savedX, y: savedY)
+    }
+  }
+
+  log("[state] restored from {path}: stem={state.currentAlbumStem} track={state.currentTrackIndex} ms={(playback.elapsedSec * 1000.0).toInt()} playing={playback.isPlaying}")
+}
