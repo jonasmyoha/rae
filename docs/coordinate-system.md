@@ -9,13 +9,13 @@ rotations, exported data) so there is exactly one standard to reason about.
 ## Axes
 
 ```
-        +Z  up
+        +Z up
          |
-         |
-         |________ +X  right
-        /
-       /
-     +Y  forward (into the scene)
+         |   +Y forward (into the scene)
+         |  /
+         | /
+         |/________ +X right
+        
 ```
 
 - **+X → right**
