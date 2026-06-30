@@ -8,7 +8,6 @@ import gpu2d
 import gpu2d_text
 import sdf_text
 import ui/debug
-import ui/window
 
 func formatMemMBGpu2d(kb: view Int) ret String {
   let tenths: Int = (kb * 10) / 1024
@@ -61,11 +60,9 @@ func drawDebugLabelsGpu2d(debug: view DebugSystem, font: view SdfFont) {
   gpu2d_text.drawText(font: font, text: memText, x: memX, y: memY, sizePx: fontSize, color: amber)
   if debug.showInputOutlines {
     var lb: Int = 0
-    if uiPointerButtonDown(button: 0) { lb = 1 }
+    if gpu2d.pointerDown() { lb = 1 }
     var rb: Int = 0
-    if uiPointerButtonDown(button: 1) { rb = 2 }
     var mb: Int = 0
-    if uiPointerButtonDown(button: 2) { mb = 4 }
     let buttons: Int = lb + rb + mb
     let btnText: String = "btn: {buttons}"
     let btnY: Float = memY + lineH + 2.0

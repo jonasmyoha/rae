@@ -1,0 +1,239 @@
+open ui/ecs
+import core
+import ui/components
+import ui/ecs
+
+# GPU2D-only copy of the hero-transition state/capture helpers from lib/ui.
+# The old overlay renderer used backend-specific textures, so 106 keeps only the
+# backend-neutral parts until a gpu2d overlay primitive lands.
+type HeroAnim {
+  active: Bool
+  key: String
+  textureKey: String
+  tintR: Int
+  tintG: Int
+  tintB: Int
+  tintA: Int
+  startTime: Float
+  duration: Float
+  srcX: Float
+  srcY: Float
+  srcW: Float
+  srcH: Float
+  srcRadius: Float
+  dstX: Float
+  dstY: Float
+  dstW: Float
+  dstH: Float
+  dstRadius: Float
+}
+
+func createHeroAnim() pub ret HeroAnim {
+  ret HeroAnim {
+    active: false
+    key: ""
+    textureKey: ""
+    tintR: 255
+    tintG: 255
+    tintB: 255
+    tintA: 255
+    startTime: 0.0
+    duration: 0.0
+    srcX: 0.0
+    srcY: 0.0
+    srcW: 0.0
+    srcH: 0.0
+    srcRadius: 0.0
+    dstX: 0.0
+    dstY: 0.0
+    dstW: 0.0
+    dstH: 0.0
+    dstRadius: 0.0
+  }
+}
+
+func findHeroEntity(world: view UiWorld, key: view String) pub ret EntityId {
+  let n: Int = componentCount(this: world.heroWidgets)
+  var i: Int = 0
+  loop i < n {
+    let e: EntityId = componentEntityAt(this: world.heroWidgets, i: i)
+    let hw: HeroWidget = componentDataAt(this: world.heroWidgets, i: i)
+    if hw.key.equals(other: key) {
+      ret e
+    }
+    i = i + 1
+  }
+  ret noEntity()
+}
+
+func findHeroEntityOnPage(world: view UiWorld, pageId: view String, key: view String) pub ret EntityId {
+  let n: Int = componentCount(this: world.heroWidgets)
+  var i: Int = 0
+  loop i < n {
+    let e: EntityId = componentEntityAt(this: world.heroWidgets, i: i)
+    let hw: HeroWidget = componentDataAt(this: world.heroWidgets, i: i)
+    if hw.key.equals(other: key) {
+      let p: String = pageOf(world: world, entity: e)
+      if p.equals(other: pageId) {
+        ret e
+      }
+    }
+    i = i + 1
+  }
+  ret noEntity()
+}
+
+func captureHeroSource(anim: mod HeroAnim, world: view UiWorld, key: view String) pub ret Bool {
+  let e: EntityId = findHeroEntity(world: world, key: key)
+  ret captureHeroSourceFromEntity(anim: anim, world: world, e: e)
+}
+
+func captureHeroSourceOnPage(anim: mod HeroAnim, world: view UiWorld, pageId: view String, key: view String) pub ret Bool {
+  let e: EntityId = findHeroEntityOnPage(world: world, pageId: pageId, key: key)
+  ret captureHeroSourceFromEntity(anim: anim, world: world, e: e)
+}
+
+func captureHeroSourceFromEntity(anim: mod HeroAnim, world: view UiWorld, e: view EntityId) ret Bool {
+  if isNone(this: e) { ret false }
+  if componentHas(this: world.worldTransforms, entity: e) is false { ret false }
+  if componentHas(this: world.computedRects, entity: e) is false { ret false }
+  let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: e)
+  let cr: ComputedRect = componentGet(this: world.computedRects, entity: e)
+  anim.srcX = wt.x
+  anim.srcY = wt.y
+  anim.srcW = cr.w
+  anim.srcH = cr.h
+  anim.srcRadius = 0.0
+  if componentHas(this: world.cornerRadiuses, entity: e) {
+    let crCorner: CornerRadius = componentGet(this: world.cornerRadiuses, entity: e)
+    anim.srcRadius = crCorner.radius
+  }
+  if componentHas(this: world.sprites, entity: e) {
+    let sp: view Sprite => componentView(this: world.sprites, entity: e)
+    anim.textureKey = sp.textureKey
+    anim.tintR = sp.tint.r
+    anim.tintG = sp.tint.g
+    anim.tintB = sp.tint.b
+    anim.tintA = sp.tint.a
+  }
+  ret true
+}
+
+func captureHeroTarget(anim: mod HeroAnim, world: view UiWorld, key: view String) pub ret Bool {
+  let e: EntityId = findHeroEntity(world: world, key: key)
+  ret captureHeroTargetFromEntity(anim: anim, world: world, e: e)
+}
+
+func captureHeroTargetOnPage(anim: mod HeroAnim, world: view UiWorld, pageId: view String, key: view String) pub ret Bool {
+  let e: EntityId = findHeroEntityOnPage(world: world, pageId: pageId, key: key)
+  ret captureHeroTargetFromEntity(anim: anim, world: world, e: e)
+}
+
+func captureHeroTargetFromEntity(anim: mod HeroAnim, world: view UiWorld, e: view EntityId) ret Bool {
+  if isNone(this: e) { ret false }
+  if componentHas(this: world.worldTransforms, entity: e) is false { ret false }
+  if componentHas(this: world.computedRects, entity: e) is false { ret false }
+  if anim.textureKey.length() > 0 {
+    if componentHas(this: world.sprites, entity: e) {
+      let sp: view Sprite => componentView(this: world.sprites, entity: e)
+      if sp.textureKey.equals(other: anim.textureKey) is false {
+        ret false
+      }
+    }
+  }
+  let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: e)
+  let cr: ComputedRect = componentGet(this: world.computedRects, entity: e)
+  anim.dstX = wt.x
+  anim.dstY = wt.y
+  anim.dstW = cr.w
+  anim.dstH = cr.h
+  anim.dstRadius = 0.0
+  if componentHas(this: world.cornerRadiuses, entity: e) {
+    let crCorner: CornerRadius = componentGet(this: world.cornerRadiuses, entity: e)
+    anim.dstRadius = crCorner.radius
+  }
+  ret true
+}
+
+func startHeroTransition(anim: mod HeroAnim, key: own String, durationSec: view Float, now: view Float) pub {
+  anim.active = true
+  anim.key = key
+  anim.startTime = now
+  anim.duration = durationSec
+}
+
+func setHeroVisible(world: mod UiWorld, key: view String, visible: view Bool) pub {
+  let e: EntityId = findHeroEntity(world: world, key: key)
+  setHeroVisibleForEntity(world: world, e: e, visible: visible)
+}
+
+func setHeroVisibleOnPage(world: mod UiWorld, pageId: view String, key: view String, visible: view Bool) pub {
+  let e: EntityId = findHeroEntityOnPage(world: world, pageId: pageId, key: key)
+  setHeroVisibleForEntity(world: world, e: e, visible: visible)
+}
+
+func setHeroVisibleForEntity(world: mod UiWorld, e: view EntityId, visible: view Bool) {
+  if isNone(this: e) { ret }
+  if componentHas(this: world.transforms, entity: e) {
+    let fx: mod TransformFx => componentMod(this: world.transforms, entity: e)
+    fx.visible = visible
+  } else {
+    let fx: TransformFx = {
+      scaleX: 1.0
+      scaleY: 1.0
+      rotation: 0.0
+      alpha: 1.0
+      visible: visible
+      pivot: Vec2 { x: 0.5, y: 0.5 }
+      anchor: Vec2 { x: 0.5, y: 0.5 }
+    }
+    componentSet(this: world.transforms, entity: e, data: fx)
+  }
+}
+
+func rebindHero(world: mod UiWorld, fromKey: view String, toKey: view String) pub {
+  let nh: Int = componentCount(this: world.heroWidgets)
+  var i: Int = 0
+  loop i < nh {
+    let e: EntityId = componentEntityAt(this: world.heroWidgets, i: i)
+    let hw: HeroWidget = componentDataAt(this: world.heroWidgets, i: i)
+    if hw.key.equals(other: fromKey) {
+      let copied: String = "{toKey}"
+      let renamed: HeroWidget = { key: copied }
+      componentSet(this: world.heroWidgets, entity: e, data: renamed)
+    }
+    i = i + 1
+  }
+
+  let ns: Int = componentCount(this: world.sprites)
+  var j: Int = 0
+  loop j < ns {
+    let se: EntityId = componentEntityAt(this: world.sprites, i: j)
+    let sp: Sprite = componentDataAt(this: world.sprites, i: j)
+    if sp.textureKey.equals(other: fromKey) {
+      let copiedTex: String = "{toKey}"
+      let nsp: Sprite = {
+        textureKey: copiedTex
+        tint: sp.tint
+        scaleMode: sp.scaleMode
+        tileScale: sp.tileScale
+        nineSlice: sp.nineSlice
+        hasNineSlice: sp.hasNineSlice
+      }
+      componentSet(this: world.sprites, entity: se, data: nsp)
+    }
+    j = j + 1
+  }
+}
+
+func updateHeroAnim(anim: mod HeroAnim, now: view Float) pub ret Bool {
+  if anim.active is false {
+    ret false
+  }
+  let elapsed: Float = now - anim.startTime
+  if elapsed >= anim.duration {
+    anim.active = false
+    ret false
+  }
+  ret true
+}

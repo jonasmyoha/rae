@@ -1,0 +1,459 @@
+open ui/ecs
+open ui/layer
+open ui/theme
+# GPU2D-only debug UI for example 106.
+#
+# This keeps the debug button/menu and FPS labels without importing the
+# legacy draw path, so 106 stays SDL3/GPU2D-only.
+import core
+import gpu2d
+import gpu2d_text
+import sdf_text
+import ui/components
+import ui/ecs
+import ui/layer
+import ui/theme
+
+let debugActionToggleMenu: String = "debug.toggleMenu"
+let debugActionToggleTheme: String = "debug.toggleTheme"
+let debugActionToggleLabels: String = "debug.toggleLabels"
+let debugActionToggleInputOutlines: String = "debug.toggleInputOutlines"
+let debugActionDismiss: String = "debug.dismiss"
+
+func debugAmberColor() ret RgbaColor { ret RgbaColor { r: 255, g: 191, b: 0, a: 255 } }
+func debugBackdropColor() ret RgbaColor { ret RgbaColor { r: 0, g: 0, b: 0, a: 160 } }
+func debugMenuFillColor() ret RgbaColor { ret RgbaColor { r: 24, g: 24, b: 28, a: 240 } }
+func debugSwitchOnColor() ret RgbaColor { ret RgbaColor { r: 52, g: 199, b: 89, a: 255 } }
+func debugSwitchOffColor() ret RgbaColor { ret RgbaColor { r: 120, g: 120, b: 128, a: 200 } }
+func debugSwitchKnobColor() ret RgbaColor { ret RgbaColor { r: 255, g: 255, b: 255, a: 255 } }
+
+type DebugSystem {
+  menuOpen: Bool
+  showLabels: Bool
+  showInputOutlines: Bool
+  buttonX: Float
+  buttonY: Float
+  buttonSize: Float
+  screenW: Float
+  screenH: Float
+  fpsTimes: List(Float)
+  fpsWindowSec: Float
+  lastFps: Float
+  lastRssKb: Int
+  heartbeatX: Float
+  hasBlur: Bool
+}
+
+func debugBlurBackdropKey() pub ret String { ret "debug.blurBackdrop" }
+func setDebugHasBlur(debug: mod DebugSystem, value: view Bool) pub { debug.hasBlur = value }
+
+func setDebugButtonTopRight(debug: mod DebugSystem, margin: view Float) pub {
+  debug.buttonX = debug.screenW - debug.buttonSize - margin
+  debug.buttonY = margin
+}
+
+func createDebugSystem() pub ret DebugSystem {
+  ret DebugSystem {
+    menuOpen: false
+    showLabels: false
+    showInputOutlines: false
+    buttonX: 16.0
+    buttonY: 16.0
+    buttonSize: 22.0
+    screenW: 498.0
+    screenH: 1079.0
+    fpsTimes: createList(Float, cap: 256)
+    fpsWindowSec: 3.0
+    lastFps: 0.0
+    lastRssKb: 0
+    heartbeatX: 0.0
+    hasBlur: false
+  }
+}
+
+func setDebugScreenSize(debug: mod DebugSystem, w: view Float, h: view Float) pub {
+  debug.screenW = w
+  debug.screenH = h
+}
+
+func setDebugButtonPosition(debug: mod DebugSystem, x: view Float, y: view Float) pub {
+  debug.buttonX = x
+  debug.buttonY = y
+}
+
+func pruneFpsBuffer(debug: mod DebugSystem) {
+  let capN: Int = 16
+  let times: mod List(Float) => debug.fpsTimes
+  loop times.length > capN {
+    times.remove(index: 0)
+  }
+}
+
+func recordDebugFrame(debug: mod DebugSystem, now: view Float, didRealWork: view Bool) pub {
+  if didRealWork {
+    let times: mod List(Float) => debug.fpsTimes
+    times.add(value: now)
+    pruneFpsBuffer(debug: debug)
+  }
+  let n: Int = debug.fpsTimes.length
+  var fps: Float = 0.0
+  if n >= 2 {
+    let oldest: Float = debug.fpsTimes.get(index: 0)
+    let newest: Float = debug.fpsTimes.get(index: n - 1)
+    let span: Float = newest - oldest
+    if span > 0.0 {
+      fps = (n - 1).toFloat() / span
+    }
+  }
+  debug.lastFps = fps
+  debug.lastRssKb = processRssKb()
+}
+
+func currentDebugFPS(debug: view DebugSystem) pub ret Float { ret debug.lastFps }
+
+func setOffset(world: mod UiWorld, entity: view EntityId, x: view Float, y: view Float) {
+  let off: Offset = { delta: Vec2 { x: x, y: y } }
+  componentSet(this: world.offsets, entity: entity, data: off)
+}
+
+func setFixedRect(world: mod UiWorld, entity: view EntityId, w: view Float, h: view Float) {
+  let r: Rect = { x: 0.0, y: 0.0, w: w, h: h }
+  componentSet(this: world.rects, entity: entity, data: r)
+  let s: Size = {
+    w: SizeAxis { mode: SizeMode.fixed, min: -1, max: -1 }
+    h: SizeAxis { mode: SizeMode.fixed, min: -1, max: -1 }
+  }
+  componentSet(this: world.sizes, entity: entity, data: s)
+}
+
+func setCircleShape(world: mod UiWorld, entity: view EntityId, fill: view RgbaColor) {
+  let sh: Shape = {
+    kind: ShapeKind.circle
+    fill: fill
+    stroke: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
+    strokeWidth: 0.0
+    radius: 0.0
+  }
+  componentSet(this: world.shapes, entity: entity, data: sh)
+}
+
+func setRectShape(world: mod UiWorld, entity: view EntityId, fill: view RgbaColor) {
+  let sh: Shape = {
+    kind: ShapeKind.rect
+    fill: fill
+    stroke: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
+    strokeWidth: 0.0
+    radius: 0.0
+  }
+  componentSet(this: world.shapes, entity: entity, data: sh)
+}
+
+func setRoundedShape(world: mod UiWorld, entity: view EntityId, fill: view RgbaColor, radius: view Float) {
+  let sh: Shape = {
+    kind: ShapeKind.roundedRect
+    fill: fill
+    stroke: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
+    strokeWidth: 0.0
+    radius: radius
+  }
+  componentSet(this: world.shapes, entity: entity, data: sh)
+}
+
+func setDebugText(world: mod UiWorld, entity: view EntityId, text: own String, styleId: own String) {
+  let t: Text = {
+    text: text
+    styleId: styleId
+    wrapWidthMode: WrapWidthMode.none
+  }
+  componentSet(this: world.texts, entity: entity, data: t)
+}
+
+func setOnClickAction(world: mod UiWorld, entity: view EntityId, actionId: own String) {
+  let oc: OnClick = {
+    actionId: actionId
+    actionIdDouble: ""
+    actionIdTriple: ""
+    maxDelayMs: 250
+  }
+  componentSet(this: world.onClicks, entity: entity, data: oc)
+}
+
+func setStackLayout(world: mod UiWorld, entity: view EntityId) {
+  let lay: Layout = {
+    kind: LayoutType.stack
+    gap: 0.0
+    alignMain: AlignKind.center
+    alignCross: AlignKind.center
+    columns: 0
+    rowGap: 0.0
+    columnGap: 0.0
+  }
+  componentSet(this: world.layouts, entity: entity, data: lay)
+}
+
+func setVerticalLayout(world: mod UiWorld, entity: view EntityId, gap: view Float) {
+  let lay: Layout = {
+    kind: LayoutType.vertical
+    gap: gap
+    alignMain: AlignKind.start
+    alignCross: AlignKind.stretch
+    columns: 0
+    rowGap: 0.0
+    columnGap: 0.0
+  }
+  componentSet(this: world.layouts, entity: entity, data: lay)
+}
+
+func setHorizontalLayout(world: mod UiWorld, entity: view EntityId, gap: view Float, alignCross: AlignKind) {
+  let lay: Layout = {
+    kind: LayoutType.horizontal
+    gap: gap
+    alignMain: AlignKind.start
+    alignCross: alignCross
+    columns: 0
+    rowGap: 0.0
+    columnGap: 0.0
+  }
+  componentSet(this: world.layouts, entity: entity, data: lay)
+}
+
+func dbgSetPaddingAll(world: mod UiWorld, entity: view EntityId, n: view Float) {
+  let pad: Padding = { insets: Insets { l: n, t: n, r: n, b: n } }
+  componentSet(this: world.paddings, entity: entity, data: pad)
+}
+
+func attachKids(world: mod UiWorld, parent: view EntityId, kids: view List(EntityId)) {
+  let kidsCopy: List(EntityId) = createList(EntityId, cap: kids.length)
+  var i: Int = 0
+  loop i < kids.length {
+    let k: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
+    kidsCopy.add(value: k)
+    let pl: Parent = { parent: parent }
+    componentSet(this: world.parents, entity: k, data: pl)
+    i = i + 1
+  }
+  let ch: Children = { ids: own kidsCopy }
+  componentSet(this: world.childrens, entity: parent, data: own ch)
+}
+
+func buildDebugButton(world: mod UiWorld, debug: view DebugSystem) ret EntityId {
+  let btn: EntityId = createEntity(world: world)
+  setFixedRect(world: world, entity: btn, w: debug.buttonSize, h: debug.buttonSize)
+  setOffset(world: world, entity: btn, x: debug.buttonX, y: debug.buttonY)
+  setCircleShape(world: world, entity: btn, fill: debugAmberColor())
+  setStackLayout(world: world, entity: btn)
+  setOnClickAction(world: world, entity: btn, actionId: debugActionToggleMenu)
+
+  let label: EntityId = createEntity(world: world)
+  setFixedRect(world: world, entity: label, w: debug.buttonSize, h: debug.buttonSize)
+  setDebugText(world: world, entity: label, text: "D", styleId: "debugButton")
+  let kids: List(EntityId) = createList(EntityId, cap: 1)
+  kids.add(value: label)
+  attachKids(world: world, parent: btn, kids: kids)
+  ret btn
+}
+
+func buildSwitchRow(
+  world: mod UiWorld
+  labelText: own String
+  actionId: own String
+  on: view Bool
+  width: view Float
+) ret EntityId {
+  let row: EntityId = createEntity(world: world)
+  setFixedRect(world: world, entity: row, w: width, h: 56.0)
+  setHorizontalLayout(world: world, entity: row, gap: 12.0, alignCross: AlignKind.center)
+  setOnClickAction(world: world, entity: row, actionId: actionId)
+
+  let label: EntityId = createEntity(world: world)
+  setFixedRect(world: world, entity: label, w: width - 80.0, h: 24.0)
+  setDebugText(world: world, entity: label, text: labelText, styleId: "debugMenuLabel")
+
+  let pill: EntityId = createEntity(world: world)
+  setFixedRect(world: world, entity: pill, w: 56.0, h: 32.0)
+  var pillFill: RgbaColor = debugSwitchOffColor()
+  if on { pillFill = debugSwitchOnColor() }
+  setRoundedShape(world: world, entity: pill, fill: pillFill, radius: 16.0)
+  setStackLayout(world: world, entity: pill)
+
+  let knob: EntityId = createEntity(world: world)
+  setFixedRect(world: world, entity: knob, w: 26.0, h: 26.0)
+  setCircleShape(world: world, entity: knob, fill: debugSwitchKnobColor())
+  var knobOff: Float = -12.0
+  if on { knobOff = 12.0 }
+  setOffset(world: world, entity: knob, x: knobOff, y: 0.0)
+
+  let pillKids: List(EntityId) = createList(EntityId, cap: 1)
+  pillKids.add(value: knob)
+  attachKids(world: world, parent: pill, kids: pillKids)
+
+  let rowKids: List(EntityId) = createList(EntityId, cap: 2)
+  rowKids.add(value: label)
+  rowKids.add(value: pill)
+  attachKids(world: world, parent: row, kids: rowKids)
+  ret row
+}
+
+func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret EntityId {
+  let backdrop: EntityId = createEntity(world: world)
+  setFixedRect(world: world, entity: backdrop, w: debug.screenW, h: debug.screenH)
+  setOffset(world: world, entity: backdrop, x: 0.0, y: 0.0)
+  setRectShape(world: world, entity: backdrop, fill: debugBackdropColor())
+  setOnClickAction(world: world, entity: backdrop, actionId: debugActionDismiss)
+  setStackLayout(world: world, entity: backdrop)
+
+  let panelW: Float = debug.screenW * 0.86
+  let panelH: Float = debug.screenH * 0.72
+  let panel: EntityId = createEntity(world: world)
+  setFixedRect(world: world, entity: panel, w: panelW, h: panelH)
+  setRoundedShape(world: world, entity: panel, fill: debugMenuFillColor(), radius: 32.0)
+  setVerticalLayout(world: world, entity: panel, gap: 12.0)
+  dbgSetPaddingAll(world: world, entity: panel, n: 20.0)
+
+  let themeRow: EntityId = buildSwitchRow(world: world, labelText: "Dark theme", actionId: debugActionToggleTheme, on: currentTheme().mode is ThemeMode.dark, width: panelW - 40.0)
+  let labelsRow: EntityId = buildSwitchRow(world: world, labelText: "FPS / mem labels", actionId: debugActionToggleLabels, on: debug.showLabels, width: panelW - 40.0)
+  let outlinesRow: EntityId = buildSwitchRow(world: world, labelText: "Input outlines", actionId: debugActionToggleInputOutlines, on: debug.showInputOutlines, width: panelW - 40.0)
+
+  let rows: List(EntityId) = createList(EntityId, cap: 3)
+  rows.add(value: themeRow)
+  rows.add(value: labelsRow)
+  rows.add(value: outlinesRow)
+  attachKids(world: world, parent: panel, kids: rows)
+
+  let backdropKids: List(EntityId) = createList(EntityId, cap: 1)
+  backdropKids.add(value: panel)
+  attachKids(world: world, parent: backdrop, kids: backdropKids)
+  ret backdrop
+}
+
+func applyDebugAnchor(world: view UiWorld, debug: mod DebugSystem) ret Bool {
+  let anchors: view ComponentTable(DebugAnchor) => world.debugAnchors
+  let n: Int = componentCount(this: anchors)
+  var i: Int = 0
+  loop i < n {
+    let e: EntityId = componentEntityAt(this: anchors, i: i)
+    if componentHas(this: world.rects, entity: e) {
+      let r: Rect = componentGet(this: world.rects, entity: e)
+      debug.buttonX = r.x
+      debug.buttonY = r.y
+      if r.w > 0.0 { debug.buttonSize = r.w }
+      ret true
+    }
+    i = i + 1
+  }
+  ret false
+}
+
+func addDebugLayer(world: mod UiWorld, debug: mod DebugSystem) pub {
+  let hasAnchor: Bool = applyDebugAnchor(world: world, debug: debug)
+  let btn: EntityId = buildDebugButton(world: world, debug: debug)
+  setLayerById(world: world, entity: btn, id: "debug")
+  if debug.menuOpen {
+    let menu: EntityId = buildDebugMenuOverlay(world: world, debug: debug)
+    setLayerById(world: world, entity: menu, id: "debug")
+  }
+}
+
+func dispatchDebugAction(input: view InputSystem, debug: mod DebugSystem) pub ret Bool {
+  var changed: Bool = false
+  let n: Int = input.events.length
+  var i: Int = 0
+  loop i < n {
+    let ev: ActionEvent = rae_ext_rae_buf_get(buf: input.events.data, index: i)
+    let actionId: String = ev.actionId
+    if actionId.equals(other: debugActionToggleMenu) {
+      debug.menuOpen = debug.menuOpen is false
+      changed = true
+    }
+    if actionId.equals(other: debugActionDismiss) {
+      if debug.menuOpen {
+        debug.menuOpen = false
+        changed = true
+      }
+    }
+    if actionId.equals(other: debugActionToggleTheme) {
+      let cur: Theme = currentTheme()
+      if cur.mode is ThemeMode.dark {
+        setActiveTheme(theme: lightTheme())
+      } else {
+        setActiveTheme(theme: darkTheme())
+      }
+      changed = true
+    }
+    if actionId.equals(other: debugActionToggleLabels) {
+      debug.showLabels = debug.showLabels is false
+      changed = true
+    }
+    if actionId.equals(other: debugActionToggleInputOutlines) {
+      debug.showInputOutlines = debug.showInputOutlines is false
+      changed = true
+    }
+    i = i + 1
+  }
+  ret changed
+}
+
+func formatMemMBGpu2d(kb: view Int) ret String {
+  let tenths: Int = (kb * 10) / 1024
+  let whole: Int = tenths / 10
+  let frac: Int = tenths - whole * 10
+  ret "{whole}.{frac} MB"
+}
+
+func formatFpsGpu2d(fps: view Float) ret String {
+  var rounded: Int = (fps + 0.5).toInt()
+  if rounded < 0 { rounded = 0 }
+  ret "fps: {rounded}"
+}
+
+func drawDebugHeartbeatGpu2d(debug: mod DebugSystem, didRealWork: view Bool) {
+  if didRealWork {
+    debug.heartbeatX = debug.heartbeatX + 1.0
+    if debug.heartbeatX > debug.screenW { debug.heartbeatX = -4.0 }
+  }
+  gpu2d.drawBox(x: debug.heartbeatX, y: 0.0, w: 4.0, h: 4.0, radius: 0.0, fill: 0xFFFFBF00, borderWidth: 0.0, border: 0x00000000)
+}
+
+func drawDebugLabelsGpu2d(debug: view DebugSystem, font: view SdfFont) {
+  let fpsText: String = formatFpsGpu2d(fps: debug.lastFps)
+  let memText: String = "mem: {formatMemMBGpu2d(kb: debug.lastRssKb)}"
+  let fontSize: Float = 14.0
+  let lineH: Float = 16.0
+  let gap: Float = 4.0
+  let bottomEdge: Float = debug.buttonY + debug.buttonSize
+  let fpsY: Float = bottomEdge + gap + fontSize
+  let memY: Float = fpsY + lineH + 2.0
+  let buttonCx: Float = debug.buttonX + debug.buttonSize * 0.5
+  let screenCx: Float = debug.screenW * 0.5
+  let rightAligned: Bool = buttonCx > screenCx
+  var fpsX: Float = debug.buttonX
+  var memX: Float = debug.buttonX
+  if rightAligned {
+    let rightEdge: Float = debug.buttonX + debug.buttonSize
+    fpsX = rightEdge - fpsText.length().toFloat() * fontSize * 0.52
+    memX = rightEdge - memText.length().toFloat() * fontSize * 0.52
+  }
+  let amber: Int = 0xFFFFBF00
+  gpu2d_text.drawText(font: font, text: fpsText, x: fpsX, y: fpsY, sizePx: fontSize, color: amber)
+  gpu2d_text.drawText(font: font, text: memText, x: memX, y: memY, sizePx: fontSize, color: amber)
+  if debug.showInputOutlines {
+    var lb: Int = 0
+    if gpu2d.pointerDown() { lb = 1 }
+    let btnText: String = "btn: {lb}"
+    let btnY: Float = memY + lineH + 2.0
+    var btnX: Float = debug.buttonX
+    if rightAligned {
+      let rightEdge: Float = debug.buttonX + debug.buttonSize
+      btnX = rightEdge - btnText.length().toFloat() * fontSize * 0.52
+    }
+    gpu2d_text.drawText(font: font, text: btnText, x: btnX, y: btnY, sizePx: fontSize, color: amber)
+  }
+}
+
+func updateAndRenderDebugOverlayGpu2d(debug: mod DebugSystem, now: view Float, didRealWork: view Bool, font: view SdfFont) pub {
+  recordDebugFrame(debug: debug, now: now, didRealWork: didRealWork)
+  if debug.showLabels {
+    drawDebugLabelsGpu2d(debug: debug, font: font)
+    drawDebugHeartbeatGpu2d(debug: debug, didRealWork: didRealWork)
+  }
+}
