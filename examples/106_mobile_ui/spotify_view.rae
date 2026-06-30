@@ -1,0 +1,359 @@
+open raylib
+open sys/spotify
+open ui/ecs
+# Spotify-mode display layer for the mobile-UI music player example.
+#
+# When `RAE_UI_SPOTIFY=1` is set, the inner loop calls `pollSpotify`
+# every ~1s. The poll runs ONE AppleScript invocation (see
+# `lib/sys/spotify.rae` for the bridge) and, when the track changes:
+#   * updates the NowPlaying scene's TrackTitle / TrackArtist text
+#     directly on the world's Text components (no rebuild),
+#   * downloads the album art (Spotify URL primary, iTunes fallback
+#     when empty) to /tmp/rae_spotify_art.jpg,
+#   * loads it as a Texture under the registry key "spotify-current",
+#   * swaps every Sprite whose textureKey equals the previous album
+#     stem to "spotify-current" so the NowPlaying cover renders the
+#     real track instead of the local placeholder.
+#
+# The Profile-grid, Album view, and Search remain backed by the local
+# album catalogue — Spotify mode only repaints the NowPlaying screen
+# and the mini-player.
+import core
+import gpu2d
+import sys
+import sys/spotify
+import raylib
+import ui/ecs
+import ui/textures
+import ui/window
+# PlaybackState lives in examples/98_mobile_ui/playback.rae — auto-imported
+# from the same project directory. We mutate it here to sync the local
+# mock's `isPlaying` from Spotify's reported state so the play-button
+# icon (driven by `applyPlaybackToWorld(world, playback)`) matches reality.
+
+# Per-app-instance state for the Spotify display layer. One instance
+# lives in main.rae for the whole app lifetime.
+type SpotifyState pub {
+  # Toggle read once at boot from RAE_UI_SPOTIFY. False → all the
+  # update calls early-out so the local mock continues unchanged.
+  enabled: Bool
+  # Wall-clock seconds at the last successful poll. 0 means "never";
+  # the first frame will refresh immediately.
+  lastPollSec: Float
+  # The trackId from the previous poll. When this changes, the
+  # display refresh path knows to re-fetch artwork. Empty when no
+  # track is loaded yet.
+  lastTrackId: String
+  # Texture-registry key under which we publish the current artwork.
+  # Owners (the NowPlaying cover Sprite) set their `textureKey` to
+  # this so paint picks up the registered texture.
+  artKey: String
+}
+
+func createSpotifyState() pub ret SpotifyState {
+  # Spotify mode is ON by default on the assumption that this is what
+  # the user actually wants from a music-player example on macOS. Opt
+  # OUT with RAE_UI_NO_SPOTIFY=1 (snapshot tests, no-network builds,
+  # systems without Spotify installed). Previously this was opt-IN via
+  # RAE_UI_SPOTIFY=1, but launchers (SUMU, IDE wrappers) don't always
+  # propagate ad-hoc env vars, so the feature silently no-op'd for
+  # users who didn't run from a manually-prepared shell.
+  let optOut: String = getEnv(name: "RAE_UI_NO_SPOTIFY")
+  let enabled: Bool = optOut.length() is 0
+  ret SpotifyState {
+    enabled: enabled
+    lastPollSec: 0.0 - 1.0
+    lastTrackId: ""
+    artKey: "spotify-current"
+  }
+}
+
+# Replace a node's Text.text in place. Walks the page-scoped nodeIds
+# lookup; no-op when the node isn't in the world (e.g. NowPlaying not
+# currently mounted).
+func updateNodeText(world: mod UiWorld, pageId: view String, nodeId: view String, value: view String) {
+  let entityOpt: opt Int = findNodeInPage(world: world, pageId: pageId, nodeId: nodeId)
+  if entityOpt is none {
+    ret
+  }
+  let raw: Int = entityOpt
+  let entity: EntityId = entityId(v: raw)
+  if componentHas(this: world.texts, entity: entity) is false {
+    ret
+  }
+  let cur: mod Text => componentMod(this: world.texts, entity: entity)
+  cur.text = "{value}"
+}
+
+# Page-scoped Sprite.textureKey rebind. Walks every Sprite whose
+# textureKey == `fromKey`, then checks the entity's PageRoot ancestor.
+# Only rewrites when the ancestor is in `pageIds`. This is critical:
+# the Library grid is a wall of Sprites that all carry the SAME stem
+# as their textureKey (one tile per album), and a global rebind would
+# wipe the user's whole library cover wall the moment Spotify started
+# a track. Constrain to "player" + "mini-player" so only the two
+# widgets that actually represent "what's playing right now" follow
+# the Spotify cover.
+func rebindCoverOnPages(world: mod UiWorld, fromKey: view String, toKey: view String, pageIds: view List(String)) {
+  let n: Int = componentCount(this: world.sprites)
+  var i: Int = 0
+  loop i < n {
+    let e: EntityId = componentEntityAt(this: world.sprites, i: i)
+    let sp: Sprite = componentDataAt(this: world.sprites, i: i)
+    if sp.textureKey.equals(other: fromKey) {
+      let p: String = pageOf(world: world, entity: e)
+      var allowed: Bool = false
+      var k: Int = 0
+      loop k < pageIds.length {
+        let want: String = pageIds.get(index: k)
+        if p.equals(other: want) {
+          allowed = true
+        }
+        k = k + 1
+      }
+      if allowed {
+        let copiedTex: String = "{toKey}"
+        let nsp: Sprite = {
+          textureKey: copiedTex
+          tint: sp.tint
+          scaleMode: sp.scaleMode
+          tileScale: sp.tileScale
+          nineSlice: sp.nineSlice
+          hasNineSlice: sp.hasNineSlice
+        }
+        componentSet(this: world.sprites, entity: e, data: nsp)
+      }
+    }
+    i = i + 1
+  }
+}
+
+# Fetch the current track's artwork to /tmp and register it as a
+# texture under `state.artKey`. Tries the Spotify URL first; falls
+# back to iTunes Search API when Spotify's URL is empty (local files,
+# podcasts). Returns true on success.
+#
+# Caller is responsible for not calling this on every frame — only on
+# track change. We unconditionally remove the previous registration
+# first so loadTexture's malloc isn't shadowed by a stale entry.
+# Fetch artwork for one play-history entry and register it under a
+# URL-derived key. Returns the textureKey on success, "" on failure.
+#
+# Key is `spotify-art:<image-hash>` where <image-hash> is the last
+# path segment of the artwork URL (Spotify CDN URLs end with a
+# 40-char content hash, distinct per cover). Distinct covers for the
+# same Spotify trackId — e.g., the single vs the album version of
+# the same song — therefore land under distinct keys, which lets the
+# play-history dedup keep them as separate entries.
+#
+# Skips the network round-trip when the key is already registered.
+func loadHistoryEntryArt(track: view SpotifyTrack, reg: mod TextureRegistry) pub ret String {
+  if track.artworkUrl.length() is 0 {
+    ret ""
+  }
+  let imageHash: String = artworkUrlImageHash(url: track.artworkUrl)
+  if imageHash.length() is 0 {
+    ret ""
+  }
+  let key: String = "spotify-art:{imageHash}"
+  if uiBackend() is UiBackend.gpu2d {
+    if gpu2d.hasImageKey(key: key) {
+      ret key
+    }
+  } else if textureHas(reg: reg, key: key) {
+    ret key
+  }
+  let outPath: String = "/tmp/rae_spotify_art_{imageHash}.jpg"
+  let ok: Bool = spotify.fetchArtwork(url: track.artworkUrl, outPath: outPath)
+  if ok is false {
+    ret ""
+  }
+  if uiBackend() is UiBackend.gpu2d {
+    let gpuKey: String = "{key}"
+    let gpuPath: String = "{outPath}"
+    let h: Int = gpu2d.loadImageKey(key: gpuKey, path: gpuPath)
+    if h <= 0 {
+      ret ""
+    }
+    ret key
+  }
+  let tex: Texture = loadTexture(fileName: outPath)
+  let keyForReg: String = "{key}"
+  textureRegisterDirect(reg: reg, key: own keyForReg, tex: tex)
+  ret key
+}
+
+# Extract the last path segment of an artwork URL. Spotify URLs are
+# `https://i.scdn.co/image/<hash>` so this returns `<hash>`. Falls
+# back to the whole URL when no `/` is present (defensive — never
+# observed in practice).
+func artworkUrlImageHash(url: view String) ret String {
+  let slash: String = "/"
+  let i: Int = url.lastIndexOf(sub: slash)
+  if i < 0 {
+    ret "{url}"
+  }
+  let n: Int = url.length()
+  ret url.sub(start: i + 1, len: n - i - 1)
+}
+
+func refreshSpotifyArt(state: view SpotifyState, track: view SpotifyTrack, reg: mod TextureRegistry) ret Bool {
+  let outPath: String = "/tmp/rae_spotify_art.jpg"
+  var primaryOk: Bool = false
+  if track.artworkUrl.length() > 0 {
+    primaryOk = spotify.fetchArtwork(url: track.artworkUrl, outPath: outPath)
+  }
+  if primaryOk is false {
+    # iTunes fallback. Build "<artist> <track>" as the search term;
+    # iTunes returns the closest match.
+    let term: String = "{track.artistName} {track.trackName}"
+    let fallbackUrl: String = itunesSearchArtworkUrl(term: term)
+    if fallbackUrl.length() is 0 {
+      ret false
+    }
+    let fbOk: Bool = spotify.fetchArtwork(url: fallbackUrl, outPath: outPath)
+    if fbOk is false {
+      ret false
+    }
+  }
+  # Drop any prior registration so the new file lands cleanly.
+  if uiBackend() is UiBackend.raylib {
+    textureRemove(reg: reg, key: state.artKey)
+  }
+  if uiBackend() is UiBackend.gpu2d {
+    let copiedKey: String = "{state.artKey}"
+    let copiedPath: String = "{outPath}"
+    let h: Int = gpu2d.loadImageKey(key: copiedKey, path: copiedPath)
+    ret h > 0
+  }
+  let tex: Texture = loadTexture(fileName: outPath)
+  textureRegisterDirect(reg: reg, key: state.artKey, tex: tex)
+  ret true
+}
+
+# Rebind ONLY the cover sprites on the player + mini-player pages —
+# never the Library grid. The grid tiles also carry the album stem
+# as their textureKey; without this scope filter, a global walk would
+# replace every Library tile with the current Spotify track's art
+# (the exact "library grid is being clobbered" bug the user hit).
+func rebindAlbumCoversToSpotify(world: mod UiWorld, currentStem: view String, artKey: view String) {
+  let pages: List(String) = createList(String, cap: 2)
+  pages.add(value: playerPageId)
+  pages.add(value: miniPlayerPageId)
+  rebindCoverOnPages(world: world, fromKey: currentStem, toKey: artKey, pageIds: pages)
+}
+
+# Per-frame entry point. Cheap when disabled / when not enough time
+# has passed for a re-poll. When it does poll:
+#   * mirrors Spotify's actual play/pause state into `playback.isPlaying`
+#     so the play-button icon stays in sync,
+#   * updates NowPlaying / mini-player title + artist text,
+#   * on track change: downloads art and (first time) rebinds the
+#     album-cover Sprites to the spotify-current texture key.
+#
+# `currentAlbumStem` is the user's currently-shown local album stem —
+# used as the source key for the FIRST rebind (since the cover Sprites
+# initially carry that stem as their textureKey).
+func pollSpotify(
+  state: mod SpotifyState
+  world: mod UiWorld
+  reg: mod TextureRegistry
+  playback: mod PlaybackState
+  appState: mod AppState
+  currentAlbumStem: view String
+  now: view Float
+) pub {
+  if state.enabled is false {
+    ret
+  }
+  let elapsed: Float = now - state.lastPollSec
+  if elapsed < 1.0 {
+    ret
+  }
+  state.lastPollSec = now
+  let track: SpotifyTrack = spotify.current()
+  let pos: Float = spotify.position()
+  let dur: Float = spotify.duration()
+  # Mirror Spotify's actual state into the local playback mock so the
+  # play-button icon (applyPlaybackToWorld → playback.isPlaying) and the
+  # progress bar / playhead readout (driven by elapsedSec / durationSec)
+  # match the real player. Includes "user paused in Spotify directly"
+  # and "user skipped tracks in Spotify" — both flip within 1Hz here.
+  let playingKey: String = "playing"
+  let nowPlaying: Bool = track.state.equals(other: playingKey)
+  if playback.isPlaying is not nowPlaying {
+    playback.isPlaying = nowPlaying
+  }
+  playback.elapsedSec = pos
+  if dur > 0.0 {
+    playback.durationSec = dur
+  }
+  # Text updates run every poll — cheap, and handles the "user
+  # paused/resumed in Spotify directly" case without extra logic.
+  let nowPlayingPage: String = "player"
+  updateNodeText(world: world, pageId: nowPlayingPage, nodeId: "TrackTitle", value: track.trackName)
+  updateNodeText(world: world, pageId: nowPlayingPage, nodeId: "TrackArtist", value: track.artistName)
+  let miniPage: String = "mini-player"
+  updateNodeText(world: world, pageId: miniPage, nodeId: "MiniTitle", value: track.trackName)
+  updateNodeText(world: world, pageId: miniPage, nodeId: "MiniArtist", value: track.artistName)
+  # Sync the M:SS time labels too. The scene mount path baked these
+  # from the LOCAL track at boot, so without this refresh they show
+  # the wrong duration in Spotify mode.
+  let posMs: Int = (pos * 1000.0).toInt()
+  let durMs: Int = (dur * 1000.0).toInt()
+  let nowStr: String = formatDurationMs(ms: posMs)
+  let totalStr: String = formatDurationMs(ms: durMs)
+  updateNodeText(world: world, pageId: nowPlayingPage, nodeId: "TimeNow", value: nowStr)
+  updateNodeText(world: world, pageId: nowPlayingPage, nodeId: "TimeTotal", value: totalStr)
+  # Track-change → re-fetch artwork. Compare trackId, not artworkUrl
+  # (Spotify sometimes reports a slightly different art URL between
+  # polls for the same track during playback).
+  let changed: Bool = track.trackId.equals(other: state.lastTrackId) is false
+  if changed {
+    state.lastTrackId = "{track.trackId}"
+    refreshSpotifyArt(state: state, track: track, reg: reg)
+    # Append to play history. Skip empty / stopped frames where
+    # trackName is blank; the local-stem match lets the history
+    # row reuse local cover textures when the user happens to be
+    # playing something from the catalog through Spotify directly.
+    if track.trackName.length() > 0 {
+      let stem: String = historyMatchLocalStem(
+        albums: appState.albums
+        trackName: track.trackName
+        artistName: track.artistName
+      )
+      # Always key the thumb on the artwork URL (not the local
+      # stem) for Spotify-recorded entries. Spotify plays the same
+      # song from different albums with different cover URLs — if
+      # we shortcut to the local stem, both plays collapse to the
+      # same textureKey and the history dedup drops one of them.
+      # Falls back to the local stem only when Spotify provides no
+      # artwork URL (rare; podcasts, local files).
+      var texKey: String = loadHistoryEntryArt(track: track, reg: reg)
+      if texKey.length() is 0 {
+        if stem.length() > 0 {
+          texKey = "{stem}"
+        }
+      }
+      let entry: PlayHistoryEntry = {
+        trackName: "{track.trackName}"
+        artistName: "{track.artistName}"
+        albumName: "{track.albumName}"
+        albumStem: own stem
+        artworkUrl: "{track.artworkUrl}"
+        textureKey: own texKey
+        durationSec: dur
+        playedAt: now
+      }
+      recordPlay(history: appState.playHistory, entry: own entry)
+      saveHistoryToJson(history: appState.playHistory, path: historyFilePath)
+    }
+  }
+  # Re-bind the cover Sprites every poll, not just on first track
+  # change. Each screen switch (or hot-reload rebuild) re-runs
+  # `rebindHero(world, "albumCover", appState.currentAlbumStem)` which
+  # snaps the cover textureKey back to the local-album stem. Doing the
+  # Spotify rebind on every tick survives those rebuilds — and the
+  # walk is O(N sprites), trivially cheap.
+  rebindAlbumCoversToSpotify(world: world, currentStem: currentAlbumStem, artKey: state.artKey)
+}

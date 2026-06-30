@@ -1,0 +1,132 @@
+# iOS-style scroll physics primitives for the Profile screen.
+#
+# Pure helpers — no state. main.rae owns the scroll position +
+# velocity locals and calls into these per frame:
+#
+#   - `dampedDelta(current, raw, low, high, dim)`
+#       During drag or trackpad wheel, take a raw per-frame delta
+#       and return a damped one. If `current` is already past the
+#       bound and the delta pushes further, the delta gets scaled
+#       by the local slope of the rubber-band curve at that
+#       overshoot. Returns the raw delta unchanged when in bounds
+#       or when the delta is pulling back toward the bound.
+#
+#   - `pickReleaseVelocity(d0, d1, d2)`
+#       Take the most recent non-trivial frame delta as the
+#       initial momentum velocity. iOS uses "velocity at lift" —
+#       the recent finger motion, not an average across the whole
+#       drag. Falling back from the latest sample to older ones
+#       handles the case where the user paused briefly at end of
+#       drag (which the prior 3-frame average underestimated to
+#       the point of feeling jerky on release).
+#
+#   - `springStepVelocity(pos, vel, target, tension, friction)`
+#       One semi-implicit Euler step of an underdamped spring
+#       toward `target`. Returns the updated velocity; caller
+#       integrates position separately. Per-frame coefficients
+#       (already absorb dt).
+#
+# Math: UIScrollView's rubber-band function is
+#
+#     deformed(x) = dim * x / (x + dim)
+#
+# where `x` is the raw overshoot (past the bound, in input units)
+# and `dim` is a reference dimension (typically the scroll
+# viewport's relevant axis size). f(0)=0, f(∞)→dim, f'(0)=1, f'(∞)=0
+# — finger movement starts 1:1 and asymptotically slows to nothing,
+# matching what the system gives you.
+#
+# We never track the raw `x`; we operate directly on the visual
+# overshoot `y = deformed(x)`. The chain-rule slope expressed in
+# terms of `y` is:
+#
+#     d(deformed)/d(x) at given y = ((dim - y) / dim)^2
+#
+# which is what `rubberBandSlope` returns.
+
+import core
+
+# Pure slope value in [0, 1] at the given visual overshoot. 1.0
+# right at the bound (no damping), 0.0 once we hit max stretch.
+func rubberBandSlope(visualOver: view Float, dim: view Float) ret Float {
+  if dim < 0.0001 {
+    ret 1.0
+  }
+  let frac: Float = visualOver / dim
+  if frac > 1.0 {
+    ret 0.0
+  }
+  if frac < 0.0 {
+    ret 1.0
+  }
+  let r: Float = 1.0 - frac
+  ret r * r
+}
+
+# Take a raw per-frame delta and scale it down only when it would
+# push `current` further past either bound. Pulling back toward the
+# range, or moving inside it, returns `delta` unchanged. The damping
+# is the local slope of the iOS rubber-band curve at the current
+# visual overshoot — so finger / trackpad input feels exactly like
+# stock UIScrollView.
+func dampedDelta(
+  current: view Float,
+  delta: view Float,
+  low: view Float,
+  high: view Float,
+  dim: view Float
+) ret Float {
+  if current > high and delta > 0.0 {
+    let over: Float = current - high
+    ret delta * rubberBandSlope(visualOver: over, dim: dim)
+  }
+  if current < low and delta < 0.0 {
+    let under: Float = low - current
+    ret delta * rubberBandSlope(visualOver: under, dim: dim)
+  }
+  ret delta
+}
+
+# Pick a single velocity estimate from the most recent three
+# per-frame deltas. Prefers the latest sample when it's a real
+# movement; falls back to older samples when the user paused at
+# end of drag.
+func pickReleaseVelocity(
+  d0: view Float,
+  d1: view Float,
+  d2: view Float
+) ret Float {
+  let thresh: Float = 0.5
+  var a0: Float = d0
+  if a0 < 0.0 {
+    a0 = 0.0 - a0
+  }
+  if a0 > thresh {
+    ret d0
+  }
+  var a1: Float = d1
+  if a1 < 0.0 {
+    a1 = 0.0 - a1
+  }
+  if a1 > thresh {
+    ret d1
+  }
+  ret d2
+}
+
+# One semi-implicit Euler spring step. Returns updated velocity.
+# `tension` and `friction` are per-frame coefficients (absorb dt).
+# Suggested values: tension 0.08, friction 0.30 — gives a ~0.4 s
+# settle with a barely-perceptible overshoot, close to UIKit's
+# default "0.55 damping ratio" interactive feel.
+func springStepVelocity(
+  pos: view Float,
+  velocity: view Float,
+  target: view Float,
+  tension: view Float,
+  friction: view Float
+) ret Float {
+  let displ: Float = pos - target
+  let accel: Float = 0.0 - tension * displ - friction * velocity
+  ret velocity + accel
+}

@@ -1,0 +1,121 @@
+open ui/ecs
+# Layout, palette, and asset-path constants for the music-player demo.
+# Kept in one file so tweaking the look or repointing assets is a single
+# place to edit. Auto-imported by every other file in this project.
+import ui/theme
+import ui/spacing
+
+# ----- screen + spacing ---------------------------------------------
+# Window dimensions in iPhone 15 Pro logical aspect (393×852, 19.5:9 ≈
+# 2.168 tall/wide), scaled up to ~1079 tall for a roomy demo on macOS.
+# `main.rae` may shrink both axes proportionally at runtime to fit
+# inside `monitorHeight - chrome`: macOS silently clamps a window that
+# doesn't fit and the clamp desyncs cursor coords from rendering.
+# Treat as a maximum; the layout reads the runtime values.
+let screenW: Float = 498.0
+let screenH: Float = 1079.0
+# Design units per logical point — the one knob of the new coordinate
+# system (rae/docs/ui-coordinate-and-responsive-layout.md). Kept SOFT
+# and currently 1.0: authored numbers are treated as logical points so
+# the existing look is unchanged while the layout extent is wired to the
+# real window. Raise later (e.g. 3.0, Royal-Blush-style) once authored
+# values are rescaled to match. Layout extent = window(points) * unitScale.
+let unitScale: Float = 1.0
+# outerPad is the screen-edge inset — domain-specific, not a generic
+# spacing step. outerGap is the canonical "section gap" inside a
+# screen; its numeric value is spaceM, but the C backend can't
+# initialise a module-level `let` from another module-level `let`,
+# so we keep it as a literal and rely on the spaceM comment to
+# document the intent.
+let outerPad: Float = 20.0
+let outerGap: Float = 12.0  # spaceM
+
+# ----- per-section heights ------------------------------------------
+let topBarH: Float = 48.0
+let heroBlockH: Float = 96.0
+let albumThumbSize: Float = 84.0
+let actionsRowH: Float = 44.0
+let pillsRowH: Float = 56.0
+let trackRowH: Float = 60.0
+let trackGap: Float = 4.0  # spaceXS
+let trackRowCount: Int = 5
+let miniPlayerH: Float = 80.0
+let navTabsH: Float = 80.0
+
+# ----- palette --------------------------------------------------------
+# These constants hold the current theme's color values. Call
+# `syncColorsFromTheme()` after `setActiveTheme(...)` to push fresh
+# values in — the world is then rebuilt and every code-driven and
+# scene-driven widget picks up the new colors. Initial values match
+# `lightTheme()` so the app boots looking right even if a caller
+# never calls `syncColorsFromTheme`.
+var surfaceColor: RgbaColor = { r: 246, g: 246, b: 248, a: 255 }
+var heroColor: RgbaColor = { r: 130, g: 130, b: 140, a: 255 }
+var iconTint: RgbaColor = { r: 30, g: 30, b: 36, a: 255 }
+var darkPillColor: RgbaColor = { r: 22, g: 22, b: 28, a: 255 }
+var outlineColor: RgbaColor = { r: 200, g: 200, b: 210, a: 255 }
+var lightTextColor: RgbaColor = { r: 246, g: 246, b: 248, a: 255 }
+var imageTintColor: RgbaColor = { r: 255, g: 255, b: 255, a: 255 }
+
+# Copy palette values out of the active theme into the lets above.
+# Call this once after `setActiveTheme(...)` and again whenever the
+# user toggles the theme at runtime; the next `buildScreenWorld`
+# then reads the refreshed colors.
+func syncColorsFromTheme() {
+  surfaceColor = themeColorByName(name: "surface")
+  heroColor = themeColorByName(name: "textMuted")
+  iconTint = themeColorByName(name: "textPrimary")
+  darkPillColor = themeColorByName(name: "accent")
+  outlineColor = themeColorByName(name: "outline")
+  lightTextColor = themeColorByName(name: "accentText")
+  imageTintColor = themeColorByName(name: "imageTint")
+}
+
+# ----- asset paths --------------------------------------------------
+let trackRowPath: String = "examples/98_mobile_ui/assets/scenes/track-row.raescene"
+let navTabsPath: String = "examples/98_mobile_ui/assets/scenes/nav-tabs.raescene"
+let navTabPath: String = "examples/98_mobile_ui/assets/scenes/nav-tab.raescene"
+let miniPlayerPath: String = "examples/98_mobile_ui/assets/scenes/mini-player.raescene"
+let nowPlayingPath: String = "examples/98_mobile_ui/assets/scenes/music-player-now-playing.raescene"
+let albumPath: String = "examples/98_mobile_ui/assets/scenes/album.raescene"
+
+# Per-album data. Each `albumsFolder/<stem>/` carries `cover.jpg` and
+# `album.json`. The `album_loader.rae` module walks this folder at
+# boot. See `tools/migrate_to_album_folders.py` for the layout.
+let albumsFolder: String = "examples/98_mobile_ui/assets/albums"
+# Persistent UI state — active album stem, active track index, and
+# playback position. Read at boot, written on user action.
+let stateFilePath: String = "examples/98_mobile_ui/assets/state.json"
+# Stem of the album whose cover we use as the (placeholder) profile
+# avatar. Picked here so swapping it doesn't require editing
+# `profile_view.rae`.
+let avatarAlbumStem: String = "the_beaches-jocelyn"
+
+let robotoFontSlot: Int = 0
+let materialIconFontSlot: Int = 1
+let robotoFontPath: String = "examples/98_mobile_ui/assets/Roboto-Regular.ttf"
+let materialIconFontPath: String = "examples/98_mobile_ui/assets/MaterialIconsRound-Regular.otf"
+let robotoMsdfJsonPath: String = "examples/98_mobile_ui/assets/Roboto-Regular.mtsdf.json"
+let robotoMsdfAtlasPath: String = "examples/98_mobile_ui/assets/Roboto-Regular.mtsdf.png"
+
+# Visible build version. Bumped manually when the demo's behaviour
+# changes meaningfully — drawn in white above the debug button so a
+# tester can confirm at a glance which build is running.
+let appVersion: Int = 1
+
+# ----- page ids -------------------------------------------------------
+# Pages mount their nodeIds under `"<pageId>/<nodeId>"` keys in
+# `world.nodeIds` so multiple resident pages don't collide. Keep
+# these in one place so the producer (mount sites) and consumer
+# (`playback.rae`, future page-aware lookups) can never drift.
+let albumPageId: String = "album"
+let playerPageId: String = "player"
+let miniPlayerPageId: String = "mini-player"
+let homePageId: String = "home"
+let libraryPageId: String = "library"
+let searchPageId: String = "search"
+let profilePageId: String = "profile"
+let historyPageId: String = "history"
+let dockPageId: String = "dock"
+let navTabsPageId: String = "nav-tabs"
+let backButtonPageId: String = "back-button"
