@@ -556,11 +556,43 @@ func main() {
             switching = true
           }
 
+          # Re-resolve the active scroll root before consuming input.
+          # The first Home frame can have a stale/no scroll target until
+          # another rebuild trigger (resize or page switch) refreshes it.
+          let frameScrollTarget: EntityId = findScrollTarget(world: world)
+          if frameScrollTarget.value is not scrollTarget.value {
+            scrollTarget = frameScrollTarget
+            scrollFsm.velocity = 0.0
+            if isNone(this: scrollTarget) {
+              scrollFsm.scrollY = 0.0
+            } else {
+              if componentHas(this: world.scrollStates, entity: scrollTarget) {
+                let activeScroll: ScrollState = componentGet(this: world.scrollStates, entity: scrollTarget)
+                scrollFsm.scrollY = activeScroll.y
+              } else {
+                scrollFsm.scrollY = 0.0
+              }
+            }
+          }
+
           # Drag + momentum + spring-back physics for Profile / Album.
           # Implementation in scroll_input.rae — see ScrollFsm. Returns
           # true on the frame a drag just ended so the dispatch below
           # skips the release-click on whatever's under the cursor.
           var dragJustReleased: Bool = applyDragPhysics(
+            fsm: scrollFsm
+            world: world
+            scrollTarget: scrollTarget
+            scrollOnThisScreen: scrollOnThisScreen
+            scrollFloor: scrollFloor
+            rubberDim: screenH
+          )
+
+          # Mouse-wheel / trackpad scroll must run before layout/transform
+          # and render. Running it after render made the first Home wheel
+          # event invisible until another wake/rebuild path refreshed the
+          # frame, e.g. resize or navigating away and back.
+          applyWheelScroll(
             fsm: scrollFsm
             world: world
             scrollTarget: scrollTarget
@@ -834,20 +866,6 @@ func main() {
           }
           pendingSrc = switchResult.pendingSrc
           pendingHeroTargetPageId = "{switchResult.pendingHeroTargetPageId}"
-
-          # Mouse-wheel / trackpad scroll. Implementation in
-          # scroll_input.rae — rubber-bands past bounds and hard-caps
-          # overshoot to 120 px. The drag-block's spring path takes
-          # over once `scrollFsm.lastWheelTime` is 50 ms stale.
-          applyWheelScroll(
-            fsm: scrollFsm
-            world: world
-            scrollTarget: scrollTarget
-            scrollOnThisScreen: scrollOnThisScreen
-            scrollFloor: scrollFloor
-            rubberDim: screenH
-          )
-
 
           # Frosted-glass cleanup. 106's GPU2D path does not capture a
           # backdrop texture; this only clears the debug state.
