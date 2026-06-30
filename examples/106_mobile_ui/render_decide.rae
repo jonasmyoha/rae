@@ -1,0 +1,111 @@
+open ui/ecs
+import ui/window
+# Per-frame "did anything change?" gate. With the wait-events loop,
+# the inner loop iterates only when an OS event arrived or our timeout
+# fired — so this decision controls whether we run
+# `beginDrawing → renderSystem → endDrawing` at all.
+#
+# Active when ANY of:
+#   - first frame after world rebuild (forceRender)
+#   - tracked visual ComponentTable bumped (renderCacheDirty)
+#   - input produced an ActionEvent
+#   - pressed-entity transition (catches the release edge)
+#   - hero transition is mid-flight
+#   - mouse button is currently held down (catches the release edge
+#     reliably on the next frame)
+#   - bare press/release edge fired this frame (raylib only advances
+#     its edge state inside endDrawing — skipping render here would
+#     leave the edge stuck "true" and spam phantom releases)
+#   - debug input-outline toggle on and the hovered OnClick entity
+#     or held-button mask changed since last frame.
+
+type RenderActiveDecision pub {
+  active: Bool
+  currentHovered: EntityId
+  currentMouseBtns: Int
+}
+
+func decideActive(
+  world: view UiWorld
+  renderCache: mod RenderCache
+  input: view InputSystem
+  debug: view DebugSystem
+  forceRender: view Bool
+  animating: view Bool
+  prevPressed: view EntityId
+  prevHovered: view EntityId
+  prevMouseBtns: view Int
+) ret RenderActiveDecision {
+  var active: Bool = forceRender
+  if active is false {
+    if renderCacheDirty(world: world, cache: renderCache) {
+      active = true
+    }
+  }
+  if active is false {
+    if input.events.length > 0 {
+      active = true
+    }
+  }
+  if active is false {
+    if input.pressedEntity.value is not prevPressed.value {
+      active = true
+    }
+  }
+  if active is false {
+    if animating {
+      active = true
+    }
+  }
+  if active is false {
+    if uiPointerButtonDown(button: mouseButtonLeft) {
+      active = true
+    }
+  }
+  if active is false {
+    if input.pointer.pressed or input.pointer.released {
+      active = true
+    }
+  }
+
+  # Hover-change detection. Always run hitTest — components with a
+  # visual effect on hover (HoverScale, etc.) need a re-render when
+  # the cursor enters or leaves their rect. The check below only
+  # marks dirty on entity TRANSITIONS, so an idle cursor parked over
+  # the same rect stays at 0 fps. Mouse-button bitfield is only
+  # mirrored when the debug overlay needs it.
+  let mx: Float = uiPointerX()
+  let my: Float = uiPointerY()
+  let currentHovered: EntityId = hitTest(world: world, x: mx, y: my)
+  var currentMouseBtns: Int = 0
+  if debug.showInputOutlines {
+    # Same bitfield layout as drawDebugLabels' "btn:" read-out:
+    # bit 0 left, bit 1 right, bit 2 middle.
+    if uiPointerButtonDown(button: 0) {
+      currentMouseBtns = currentMouseBtns + 1
+    }
+    if uiPointerButtonDown(button: 1) {
+      currentMouseBtns = currentMouseBtns + 2
+    }
+    if uiPointerButtonDown(button: 2) {
+      currentMouseBtns = currentMouseBtns + 4
+    }
+  }
+  if active is false {
+    if currentHovered.value is not prevHovered.value {
+      active = true
+    }
+  }
+  if active is false {
+    if currentMouseBtns is not prevMouseBtns {
+      active = true
+    }
+  }
+
+  let d: RenderActiveDecision = {
+    active: active
+    currentHovered: currentHovered
+    currentMouseBtns: currentMouseBtns
+  }
+  ret d
+}

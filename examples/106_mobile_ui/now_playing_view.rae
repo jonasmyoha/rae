@@ -1,0 +1,217 @@
+open ui/ecs
+# Now-playing screen world. The middle slot mounts the
+# `music-player-now-playing.raescene` directly; the bottom mini-player
+# and nav-tabs are the same scene files the album view uses.
+#
+# All scene-text placeholders ("Unsayable", "Brambles", "1:04", …)
+# are overridden at mount time from the active album + active
+# track in `AppState` so the screen reflects what the user is
+# actually playing.
+import core
+import ui/components
+import ui/ecs
+import ui/scene
+import ui/scene_instance
+
+# "1:04 / 2:52" — current playback position + active track duration,
+# both formatted M:SS. Lets the time-labels overrides be built in one
+# place (both this screen and the mini-player call it).
+func nowPlayingTimes(playback: view PlaybackState, track: view Track) ret List(String) {
+  let elapsedMs: Int = (playback.elapsedSec * 1000.0).toInt()
+  let nowStr: String = formatDurationMs(ms: elapsedMs)
+  let totalStr: String = formatDurationMs(ms: track.durationMs)
+  let pair: List(String) = createList(String, cap: 2)
+  pair.add(value: nowStr)
+  pair.add(value: totalStr)
+  ret pair
+}
+
+func mountNowPlayingPage(
+  world: mod UiWorld
+  scenes: view AlbumScenes
+  playback: view PlaybackState
+  state: view AppState
+) pub ret EntityId {
+  let album: Album = activeAlbum(state: state)
+  let track: Track = trackAt(album: album, idx: state.currentTrackIndex)
+
+  let root: EntityId = createEntity(world: world)
+  setRectFixed(world: world, entity: root, w: screenW, h: screenH)
+  let layV: LayoutType = LayoutType.vertical
+  let alignS: AlignKind = AlignKind.start
+  setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
+  setPaddingAll(world: world, entity: root, n: outerPad)
+
+  var copiedId: String = ""
+  copiedId = copiedId.concat(other: playerPageId)
+  let pr: PageRoot = { id: own copiedId }
+  componentSet(this: world.pageRoots, entity: root, data: own pr)
+
+  # Top bar matches the other pages — shared centered-title helper
+  # so the look and back-button geometry line up across screens.
+  let topBar: EntityId = buildPageTopBar(world: world, title: "Now playing")
+
+  # The now-playing scene fills whatever's left after the top bar and
+  # the bottom bars.
+  let bottomGap: Float = outerGap * 2.0
+  let npH: Float = screenH - outerPad * 2.0 - topBarH - outerGap - miniPlayerH - navTabsH - bottomGap
+  let npW: Float = screenW - outerPad * 2.0
+  let np: EntityId = createEntity(world: world)
+  setRectFixed(world: world, entity: np, w: npW, h: npH)
+
+  let npOverrides: List(SceneOverride) = emptyOverrides()
+  let playIconId: String = "PlayIcon"
+  let iconKey: String = playbackIconKey(playback: playback)
+  addSpriteOverride(list: npOverrides, nodeId: playIconId, value: iconKey)
+
+  let titleId: String = "TrackTitle"
+  let artistId: String = "TrackArtist"
+  let titleText: String = "{track.title}"
+  let artistText: String = "{album.artist}"
+  addTextOverride(list: npOverrides, nodeId: titleId, value: titleText)
+  addTextOverride(list: npOverrides, nodeId: artistId, value: artistText)
+
+  let times: List(String) = nowPlayingTimes(playback: playback, track: track)
+  let nowStr: String = times.get(index: 0)
+  let totalStr: String = times.get(index: 1)
+  let timeNowId: String = "TimeNow"
+  let timeTotalId: String = "TimeTotal"
+  addTextOverride(list: npOverrides, nodeId: timeNowId, value: nowStr)
+  addTextOverride(list: npOverrides, nodeId: timeTotalId, value: totalStr)
+
+  # Scope-only mount: the PlayIcon / ProgressBar / ProgressFill
+  # nodeIds get the "now-playing/..." prefix without re-tagging
+  # the np entity. The page-root tag lives on the screen root above.
+  let npLabel: String = "music-player-now-playing"
+  let mounted: EntityId = mountSceneInstanceIntoPage(
+    world: world
+    mountEntity: np
+    scene: scenes.nowPlaying
+    overrides: npOverrides
+    pageId: playerPageId
+  )
+  if isNone(this: mounted) {
+    log("[scene-error] now-playing mount failed (scene.ok={scenes.nowPlaying.ok})")
+    paintErrorBlock(world: world, entity: np, label: npLabel)
+  }
+
+  # Gate the big album-cover corner radius on the same AppSettings
+  # flag that drives Library / Home / History. The Now Playing hero
+  # is the largest cover on screen so it gets a beefier 24px radius
+  # — visibly chunkier than the 12px used by the Album / Library /
+  # Home thumbs. Hero transitions between those screens still lerp
+  # the radius automatically (lib/ui/hero.rae interpolates it).
+  if state.settings.roundedAlbumCovers {
+    let heroNodeId: String = "Hero"
+    let heroOpt: opt Int = findNodeInPage(world: world, pageId: playerPageId, nodeId: heroNodeId)
+    if heroOpt is not none {
+      let raw: Int = heroOpt
+      let heroEntity: EntityId = entityId(v: raw)
+      let cr: CornerRadius = { radius: 24.0 }
+      componentSet(this: world.cornerRadiuses, entity: heroEntity, data: cr)
+    }
+  }
+
+  let kids: List(EntityId) = createList(EntityId, cap: 2)
+  kids.add(value: topBar)
+  kids.add(value: np)
+  attachChildren(world: world, parent: root, kids: kids)
+
+  ret root
+}
+
+func buildNowPlayingWorld(scenes: view AlbumScenes, playback: view PlaybackState, state: view AppState, reg: view TextureRegistry) pub ret UiWorld {
+  let world: UiWorld = createUiWorld()
+  let page: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: state)
+  let dock: EntityId = mountBottomDockOverlay(
+    world: world
+    activeTab: state.tab
+    scenes: scenes
+    playback: playback
+    state: state
+    reg: reg
+  )
+  let back: EntityId = mountBackButtonOverlay(world: world, state: state)
+  ret world
+}
+
+# Mini-player mount that applies the play/pause icon, track title,
+# and artist overrides from the current playback + app state. Same
+# shape as `buildSimpleSceneInstance` from scene_mount.rae but with
+# the data-driven overrides list pre-populated.
+# Mutate the mini-player's cover thumb in place. Called from
+# `screen_switch` after the user picks a new album so the dock's
+# cover follows along without re-mounting the dock. Same Sprite
+# component mutation pattern as `pollSpotify`'s text updates.
+func updateMiniPlayerCover(world: mod UiWorld, stem: view String) pub {
+  let nodeKey: String = "MiniThumb"
+  let entityOpt: opt Int = findNodeInPage(world: world, pageId: miniPlayerPageId, nodeId: nodeKey)
+  if entityOpt is none {
+    ret
+  }
+  let raw: Int = entityOpt
+  let entity: EntityId = entityId(v: raw)
+  if componentHas(this: world.sprites, entity: entity) is false {
+    ret
+  }
+  let cur: Sprite = componentGet(this: world.sprites, entity: entity)
+  let copied: String = "{stem}"
+  let next: Sprite = {
+    textureKey: copied
+    tint: cur.tint
+    scaleMode: cur.scaleMode
+    tileScale: cur.tileScale
+    nineSlice: cur.nineSlice
+    hasNineSlice: cur.hasNineSlice
+  }
+  componentSet(this: world.sprites, entity: entity, data: next)
+}
+
+func buildMiniPlayerInstance(
+  world: mod UiWorld
+  scene: view Scene
+  w: view Float
+  h: view Float
+  label: view String
+  playback: view PlaybackState
+  state: view AppState
+) pub ret EntityId {
+  let album: Album = activeAlbum(state: state)
+  let track: Track = trackAt(album: album, idx: state.currentTrackIndex)
+
+  let overrides: List(SceneOverride) = emptyOverrides()
+  let miniIconId: String = "MiniPlayIcon"
+  let iconKey: String = playbackIconKey(playback: playback)
+  addSpriteOverride(list: overrides, nodeId: miniIconId, value: iconKey)
+
+  # Cover thumb — set the actual album-stem texture key at mount time
+  # so the mini-player shows the right cover from the first frame.
+  # No rebindHero detour: the dock is mounted once and stays put, so
+  # the cover key has to be correct from the start.
+  let miniThumbId: String = "MiniThumb"
+  let thumbKey: String = "{state.currentAlbumStem}"
+  addSpriteOverride(list: overrides, nodeId: miniThumbId, value: thumbKey)
+
+  let miniTitleId: String = "MiniTitle"
+  let miniArtistId: String = "MiniArtist"
+  let titleText: String = "{track.title}"
+  let artistText: String = "{album.artist}"
+  addTextOverride(list: overrides, nodeId: miniTitleId, value: titleText)
+  addTextOverride(list: overrides, nodeId: miniArtistId, value: artistText)
+
+  # Scope the mini-player under its own page so MiniPlayIcon resolves
+  # via `findNodeInPage(world, "mini-player", "MiniPlayIcon")`. The
+  # mini-player is mounted as part of the bottom dock on every screen;
+  # only one is resident at any moment so the page id is a constant.
+  let miniPageId: String = miniPlayerPageId
+  let mount: EntityId = mountPageOrError(
+    world: world
+    pageId: miniPageId
+    scene: scene
+    overrides: overrides
+    w: w
+    h: h
+    sceneLabel: label
+  )
+  ret mount
+}
