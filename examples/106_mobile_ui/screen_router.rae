@@ -1,4 +1,3 @@
-open raylib
 open sys/spotify
 open ui/ecs
 # The two screens the app can show, the function that builds a world
@@ -9,8 +8,6 @@ import fs
 import sys
 import sys/spotify
 import ui/ecs
-import ui/input
-import ui/window
 
 enum Screen {
   # The four bottom-nav tabs follow. Order matters: it must match
@@ -196,8 +193,7 @@ func buildAppWorld(
 # Shared page-top-bar builder. Every top-level screen (Home, Library,
 # Search, Profile, History) wants the same look: a full-width bar with
 # a single centered title in the `pageTitle` style — bigger and bolder
-# than the old per-view `topBarTitle`, and centered by the renderer
-# (see lib/ui/render.rae's `textStyleIsCentered`).
+# than the old per-view `topBarTitle`, and centered by the renderer.
 #
 # Callers pass the visible label; the helper allocates the bar +
 # title entities, sets the layout, and returns the bar entity ready
