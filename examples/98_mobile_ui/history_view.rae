@@ -13,7 +13,9 @@ open ui/ecs
 # recent play sits at the top of the page, matching user intuition.
 import core
 import fs
+import gpu2d
 import ui/components
+import ui/draw
 import ui/ecs
 import ui/layout
 
@@ -71,7 +73,13 @@ func buildHistoryThumb(world: mod UiWorld, entry: view PlayHistoryEntry, size: v
     let cr: CornerRadius = { radius: 8.0 }
     componentSet(this: world.cornerRadiuses, entity: thumb, data: cr)
   }
-  if historyHasArt(entry: entry) {
+  var canPaintArt: Bool = historyHasArt(entry: entry)
+  if canPaintArt {
+    if uiBackend() is UiBackend.gpu2d {
+      canPaintArt = gpu2d.hasImageKey(key: entry.textureKey)
+    }
+  }
+  if canPaintArt {
     let key: String = "{entry.textureKey}"
     setSprite(world: world, entity: thumb, key: key, tint: imageTintColor)
     setHoverScale(world: world, entity: thumb, hoverScale: 1.12)
@@ -91,6 +99,7 @@ func buildHistoryThumb(world: mod UiWorld, entry: view PlayHistoryEntry, size: v
       radius: radius
     }
     componentSet(this: world.shapes, entity: thumb, data: sp)
+    setHoverScale(world: world, entity: thumb, hoverScale: 1.12)
   }
   ret thumb
 }
