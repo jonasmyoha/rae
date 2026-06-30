@@ -3926,8 +3926,8 @@ double rae_ext_gpu2d_dpr(void) {
  * with screen-space derivatives (no MSAA). One pipeline → filled/rounded
  * rects, per-corner radius, borders. Primitives are accumulated CPU-side
  * each frame and drawn in one instanced draw at endFrame (painter's order).
- * Instance layout = 5×vec4 (std430): rect, radius, fill, border, params. */
-#define G2D_PRIM_FLOATS 20
+ * Instance layout = 6×vec4 (std430): rect, radius, fill, border, params, grad. */
+#define G2D_PRIM_FLOATS 24
 
 static const char* G2D_BOX_WGSL =
 "struct Prim {\n"
@@ -3936,6 +3936,7 @@ static const char* G2D_BOX_WGSL =
 "  fill: vec4<f32>,\n"
 "  border: vec4<f32>,\n"
 "  params: vec4<f32>,\n"
+"  grad: vec4<f32>,\n"
 "};\n"
 /* uXform[0] = (physW, physH, scaleX, scaleY); uXform[1] = (offsetX, offsetY,..)
  * maps design-unit coords -> physical px: px = design*scale + offset. */
@@ -3985,6 +3986,14 @@ static const char* G2D_BOX_WGSL =
 "  let aa = max(fwidth(d), 0.0001);\n"
 "  let cov = 1.0 - smoothstep(-aa, aa, d);\n"
 "  var col = p.fill;\n"
+"  if (p.params.z > 0.5) {\n"
+"    let uv = in.local / max(p.rect.zw, vec2<f32>(1.0, 1.0));\n"
+"    let dir = vec2<f32>(cos(p.params.w), sin(p.params.w));\n"
+"    let centered = uv - vec2<f32>(0.5, 0.5);\n"
+"    let extent = max(abs(dir.x) * 0.5 + abs(dir.y) * 0.5, 0.0001);\n"
+"    let t = clamp(dot(centered, dir) / (extent * 2.0) + 0.5, 0.0, 1.0);\n"
+"    col = mix(p.fill, p.grad, t);\n"
+"  }\n"
 "  let bw = p.params.x;\n"
 "  if (bw > 0.0) {\n"
 "    let inner = 1.0 - smoothstep(-aa, aa, d + bw);\n"
@@ -4027,6 +4036,30 @@ static void rae_g2d_push(double x, double y, double w, double h,
     g2d_color(fill, &p[8]);
     g2d_color(border, &p[12]);
     p[16]=(float)bw; p[17]=(float)angle; p[18]=0.0f; p[19]=0.0f;
+    g2d_color(fill, &p[20]);
+    g_g2d_prim_count++;
+}
+
+static void rae_g2d_push_gradient(double x, double y, double w, double h,
+                                  double radius, uint32_t from, uint32_t to,
+                                  double angle_deg) {
+    int need = (g_g2d_prim_count + 1) * G2D_PRIM_FLOATS;
+    if (need > g_g2d_prim_capf) {
+        int cap = g_g2d_prim_capf ? g_g2d_prim_capf : (64 * G2D_PRIM_FLOATS);
+        while (cap < need) cap *= 2;
+        g_g2d_prims = (float*)realloc(g_g2d_prims, (size_t)cap * sizeof(float));
+        g_g2d_prim_capf = cap;
+    }
+    float* p = g_g2d_prims + g_g2d_prim_count * G2D_PRIM_FLOATS;
+    p[0]=(float)x; p[1]=(float)y; p[2]=(float)w; p[3]=(float)h;
+    p[4]=(float)radius; p[5]=(float)radius; p[6]=(float)radius; p[7]=(float)radius;
+    g2d_color(from, &p[8]);
+    g2d_color(0, &p[12]);
+    p[16]=0.0f;
+    p[17]=0.0f;
+    p[18]=1.0f;
+    p[19]=(float)(angle_deg * 0.017453292519943295);
+    g2d_color(to, &p[20]);
     g_g2d_prim_count++;
 }
 
@@ -4102,6 +4135,11 @@ void rae_ext_gpu2d_drawBox(double x, double y, double w, double h, double radius
                            int64_t fill, double borderWidth, int64_t border) {
     rae_g2d_push(x, y, w, h, radius, radius, radius, radius,
                  (uint32_t)fill, (uint32_t)border, borderWidth, 0.0);
+}
+void rae_ext_gpu2d_drawGradientRect(double x, double y, double w, double h,
+                                    double radius, int64_t from, int64_t to,
+                                    double angleDeg) {
+    rae_g2d_push_gradient(x, y, w, h, radius, (uint32_t)from, (uint32_t)to, angleDeg);
 }
 /* A line from (x0,y0) to (x1,y1), `thickness` px wide, with rounded caps —
  * a rotated capsule (rounded rect of length x thickness, radius thickness/2). */
@@ -4959,6 +4997,7 @@ void rae_ext_gpu2d_closeWindow(void) {}
 void rae_ext_gpu2d_drawRect(double x, double y, double w, double h, int64_t color) { (void)x; (void)y; (void)w; (void)h; (void)color; }
 void rae_ext_gpu2d_drawRoundedRect(double x, double y, double w, double h, double radius, int64_t color) { (void)x; (void)y; (void)w; (void)h; (void)radius; (void)color; }
 void rae_ext_gpu2d_drawBox(double x, double y, double w, double h, double radius, int64_t fill, double borderWidth, int64_t border) { (void)x; (void)y; (void)w; (void)h; (void)radius; (void)fill; (void)borderWidth; (void)border; }
+void rae_ext_gpu2d_drawGradientRect(double x, double y, double w, double h, double radius, int64_t from, int64_t to, double angleDeg) { (void)x; (void)y; (void)w; (void)h; (void)radius; (void)from; (void)to; (void)angleDeg; }
 void rae_ext_gpu2d_drawLine(double x0, double y0, double x1, double y1, double thickness, int64_t color) { (void)x0; (void)y0; (void)x1; (void)y1; (void)thickness; (void)color; }
 void rae_ext_gpu2d_drawGlyph(double sx0, double sy0, double sx1, double sy1, double u0, double v0, double u1, double v1, int64_t atlas, double pxRange, int64_t color) { (void)sx0; (void)sy0; (void)sx1; (void)sy1; (void)u0; (void)v0; (void)u1; (void)v1; (void)atlas; (void)pxRange; (void)color; }
 #endif /* RAE_HAS_SDL3 */
