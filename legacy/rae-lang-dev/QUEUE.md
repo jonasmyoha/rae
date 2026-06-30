@@ -74,5 +74,6 @@
 - [ ] #210 Frames S5/S6 — within-frame states (phone canvas toggle) + frame-only entities; Aspect/ScaleToFit + Sprite cover/contain + GameBoard sample; §10 S5-S6.
 - [ ] #211 C backend follow-up: generic object literals with owned `String` fields still need concrete field substitution before return/drop ownership decisions; `Wrapper(String) { value: ownedString(...) }` can leave the generated field treated as raw `T`, causing invalid String ownership independent of the `opt T` drop classifier.
 - [ ] #212 GPU2D mobile UI S2: expand `examples/105_gpu2d_mobile_ui` beyond the first programmatic ECS page by adding scene/data reuse from `98_mobile_ui`, input hit-testing through SDL3 coordinates, and a GPU2D render adapter for more UI components.
+- [ ] #213 Research cross-platform image decoding for gpu2d: evaluate JPEG/WebP/PNG loaders beyond macOS ImageIO (stb_image, libjpeg-turbo, platform APIs), decide supported formats, licensing, build integration, and fallback/error policy; do not implement until design is chosen.
 
 <!-- SUMU_QUEUE_END -->
