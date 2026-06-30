@@ -1,0 +1,17 @@
+pack RaytracerWebgpuText {
+  format: "raepack"
+  version: 1
+  defaultTarget: compiled
+  name: "Raytracer — GPU + MTSDF text (Roboto)"
+  description: "The interactive GPU path tracer (example 52) with a crisp Roboto MTSDF text overlay — helper line + live FPS — composited into the framebuffer via lib/sdf_text.rae (the SDL3 CPU-framebuffer port of the MSDF path, no GPU shader). Number keys switch scenes (ports of the C++ rae_ray demo): 1 = emissive lights + cube, 2 = the One Weekend book scene (~480 spheres), 3 = the Stanford bunny (~4968 triangles via a CPU-built BVH). P toggles half-res / Full HD. WASD/E-Q move, arrows or left-drag look. Compiled-target only; needs wgpu-native + SDL3."
+  category: "Raytracer"
+  targets: {
+    target compiled: {
+      label: "Compiled"
+      entry: "main.rae"
+      sources: {
+        source: { path: ".", emit: compiled }
+      }
+    }
+  }
+}
