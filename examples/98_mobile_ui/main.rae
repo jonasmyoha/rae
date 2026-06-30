@@ -39,10 +39,11 @@ import ui/animation
 import ui/draw
 import ui/window
 func main() {
-  let backendEnv: String = getEnv(name: "RAE_UI_BACKEND")
+  var backendEnv: String = "gpu2d" #getEnv(name: "RAE_UI_BACKEND")
   if backendEnv.equals(other: "gpu2d") {
     setUiBackend(b: UiBackend.gpu2d)
   } else {
+    backendEnv = "raylib"
     setUiBackend(b: UiBackend.raylib)
   }
   # `RAE_UI_HEADLESS=1`: see headless.rae (HIDDEN+UNFOCUSED flags).
@@ -51,7 +52,7 @@ func main() {
   uiSetRaylibLogLevel(level: 4)  # LOG_WARNING — silence per-frame TEXTURE/SHADER INFO spam
   let winW: Float = screenW
   let winH: Float = screenH
-  uiInitWindow(width: winW.toInt(), height: winH.toInt(), title: "Rae Mobile UI — Album")
+  uiInitWindow(width: winW.toInt(), height: winH.toInt(), title: "Rae Mobile UI — {backendEnv}")
   uiSetWindowPosition(x: 50, y: 50)
   # GLFW callbacks: close-waker wakes the loop on red-X; the mouse hook
   # is the authoritative per-event click-edge source (input.rae takes
