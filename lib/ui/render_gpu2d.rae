@@ -96,15 +96,28 @@ func g2dRadius(world: view UiWorld, e: view EntityId, fallback: view Float) ret 
   ret fallback
 }
 
+func g2dHoverMul(world: view UiWorld, e: view EntityId) ret Float {
+  if componentHas(this: world.hoverScales, entity: e) {
+    let hs: HoverScale = componentGet(this: world.hoverScales, entity: e)
+    ret hs.current
+  }
+  ret 1.0
+}
+
 func paintShapeG(world: view UiWorld, e: view EntityId, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int) {
   let sh: Shape = componentGet(this: world.shapes, entity: e)
   let fill: RgbaColor = g2dChain(c: sh.fill, chain255: chain255)
+  let hoverMul: Float = g2dHoverMul(world: world, e: e)
+  let drawW: Float = cr.w * hoverMul
+  let drawH: Float = cr.h * hoverMul
+  let drawX: Float = wt.x + (cr.w - drawW) / 2.0
+  let drawY: Float = wt.y + (cr.h - drawH) / 2.0
   if sh.kind is ShapeKind.circle {
     var smaller: Float = cr.w
     if cr.h < smaller { smaller = cr.h }
     var r: Float = sh.radius
     if r <= 0.0 { r = smaller / 2.0 }
-    sinkCircle(cx: wt.x + cr.w / 2.0, cy: wt.y + cr.h / 2.0, r: r, c: fill)
+    sinkCircle(cx: wt.x + cr.w / 2.0, cy: wt.y + cr.h / 2.0, r: r * hoverMul, c: fill)
     ret
   }
   var radius: Float = sh.radius
@@ -112,10 +125,10 @@ func paintShapeG(world: view UiWorld, e: view EntityId, wt: view WorldTransform,
   if sh.strokeWidth > 0.0 {
     let stroke: RgbaColor = g2dChain(c: sh.stroke, chain255: chain255)
     # The sink has no fill+border op yet; approximate with gpu2d.drawBox.
-    gpu2d.drawBox(x: wt.x, y: wt.y, w: cr.w, h: cr.h, radius: radius, fill: g2dColor(c: fill), borderWidth: sh.strokeWidth, border: g2dColor(c: stroke))
+    gpu2d.drawBox(x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, fill: g2dColor(c: fill), borderWidth: sh.strokeWidth, border: g2dColor(c: stroke))
     ret
   }
-  sinkRoundedRect(x: wt.x, y: wt.y, w: cr.w, h: cr.h, radius: radius, c: fill)
+  sinkRoundedRect(x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, c: fill)
 }
 
 # GradientFill uses the gpu2d box shader's gradient mode so dock shadows and
@@ -123,24 +136,34 @@ func paintShapeG(world: view UiWorld, e: view EntityId, wt: view WorldTransform,
 func paintGradientG(world: view UiWorld, e: view EntityId, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int) {
   let gf: GradientFill = componentGet(this: world.gradientFills, entity: e)
   let radius: Float = g2dRadius(world: world, e: e, fallback: 0.0)
+  let hoverMul: Float = g2dHoverMul(world: world, e: e)
+  let drawW: Float = cr.w * hoverMul
+  let drawH: Float = cr.h * hoverMul
+  let drawX: Float = wt.x + (cr.w - drawW) / 2.0
+  let drawY: Float = wt.y + (cr.h - drawH) / 2.0
   let from: RgbaColor = g2dChain(c: gf.from, chain255: chain255)
   let to: RgbaColor = g2dChain(c: gf.to, chain255: chain255)
-  gpu2d.drawGradientRect(x: wt.x, y: wt.y, w: cr.w, h: cr.h, radius: radius, from: g2dColor(c: from), to: g2dColor(c: to), angleDeg: gf.angle)
+  gpu2d.drawGradientRect(x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, from: g2dColor(c: from), to: g2dColor(c: to), angleDeg: gf.angle)
 }
 
 func paintBackdropG(world: view UiWorld, e: view EntityId, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int) {
   let bi: BackdropImage = componentGet(this: world.backdropImages, entity: e)
   let radius: Float = g2dRadius(world: world, e: e, fallback: 0.0)
+  let hoverMul: Float = g2dHoverMul(world: world, e: e)
+  let drawW: Float = cr.w * hoverMul
+  let drawH: Float = cr.h * hoverMul
+  let drawX: Float = wt.x + (cr.w - drawW) / 2.0
+  let drawY: Float = wt.y + (cr.h - drawH) / 2.0
   if gpu2d.hasImageKey(key: bi.textureKey) {
     let white: RgbaColor = { r: 255, g: 255, b: 255, a: 255 }
     let tint: RgbaColor = g2dChain(c: white, chain255: chain255)
-    gpu2d.drawImageKey(key: bi.textureKey, x: wt.x, y: wt.y, w: cr.w, h: cr.h, radius: radius, tint: g2dColor(c: tint))
+    gpu2d.drawImageKey(key: bi.textureKey, x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, tint: g2dColor(c: tint))
     ret
   }
   # Raylib uses captured blur textures for BackdropImage. gpu2d does not have
   # framebuffer capture yet, so paint a stable translucent glass fallback.
   let fallback: RgbaColor = { r: 18, g: 22, b: 30, a: 210 }
-  sinkRoundedRect(x: wt.x, y: wt.y, w: cr.w, h: cr.h, radius: radius, c: g2dChain(c: fallback, chain255: chain255))
+  sinkRoundedRect(x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, c: g2dChain(c: fallback, chain255: chain255))
 }
 
 # Sprites: `mat:<name>` icons draw as a Material-atlas glyph; other keys
@@ -149,11 +172,7 @@ func paintBackdropG(world: view UiWorld, e: view EntityId, wt: view WorldTransfo
 func paintSpriteG(world: view UiWorld, e: view EntityId, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int, res: view Gpu2dUi) {
   let sp: view Sprite => componentView(this: world.sprites, entity: e)
   let tint: RgbaColor = g2dChain(c: sp.tint, chain255: chain255)
-  var hoverMul: Float = 1.0
-  if componentHas(this: world.hoverScales, entity: e) {
-    let hs: HoverScale = componentGet(this: world.hoverScales, entity: e)
-    hoverMul = hs.current
-  }
+  let hoverMul: Float = g2dHoverMul(world: world, e: e)
   let drawW: Float = cr.w * hoverMul
   let drawH: Float = cr.h * hoverMul
   let drawX: Float = wt.x + (cr.w - drawW) / 2.0
@@ -177,9 +196,9 @@ func paintSpriteG(world: view UiWorld, e: view EntityId, wt: view WorldTransform
     gpu2d.drawImageKey(key: sp.textureKey, x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, tint: g2dColor(c: tint))
     ret
   }
-  var smaller: Float = cr.w
-  if cr.h < smaller { smaller = cr.h }
-  sinkRoundedRect(x: drawX, y: drawY, w: drawW, h: drawH, radius: smaller * 0.3 * hoverMul, c: tint)
+  let fallback: RgbaColor = g2dChain(c: themeColorByName(name: "textMuted"), chain255: chain255)
+  let fallbackRadius: Float = g2dRadius(world: world, e: e, fallback: 8.0)
+  sinkRoundedRect(x: drawX, y: drawY, w: drawW, h: drawH, radius: fallbackRadius * hoverMul, c: fallback)
 }
 
 func paintTextG(world: view UiWorld, e: view EntityId, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int, res: view Gpu2dUi) {
