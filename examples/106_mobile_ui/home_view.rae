@@ -1,0 +1,226 @@
+open ui/ecs
+# Home-tab world composition. The discovery / landing screen the
+# user lands on at app open — a more curated visual than the dense
+# 3-column Library grid:
+#   * top bar with a "Good evening" greeting
+#   * sub-line "Pick something to play"
+#   * 2-column grid of large album covers (every parsed album)
+#
+# Tapping any tile fires `album.open` (same path as the Library
+# tiles), so the user always lands on the Album sub-page next.
+#
+# Reuses `buildLibraryCoverTile` + `collectLibraryCoverKeys` from
+# `library_view.rae` — both are sibling-module pub helpers in this
+# project root.
+import core
+import fs
+import ui/components
+import ui/ecs
+import ui/layout
+
+let homeGridColumns: Int = 2
+let homeGridTileGap: Float = 8.0  # spaceS
+
+# Responsive column count. Phone width keeps the authored base (2); as
+# the window widens toward desktop, add columns so tiles stay near their
+# phone size instead of stretching huge. Deterministic on screenW, so
+# every call site within a build agrees.
+func homeCols() ret Int {
+  let base: Int = homeGridColumns
+  let avail: Float = screenW - outerPad * 2.0
+  let target: Float = 220.0
+  let gap: Float = homeGridTileGap
+  let n: Int = ((avail + gap) / (target + gap)).toInt()
+  if n < base {
+    ret base
+  }
+  ret n
+}
+
+func homeGridTileSize() ret Float {
+  let cols: Int = homeCols()
+  let avail: Float = screenW - outerPad * 2.0
+  let gapTotal: Float = homeGridTileGap * (cols - 1).toFloat()
+  ret (avail - gapTotal) / cols.toFloat()
+}
+
+# Total vertical extent of the Home page content (subtitle row +
+# cover grid). Used by the scroll clamp so the user can pull the
+# bottom rows into view without over-scrolling past them.
+func homeContentHeight(albums: view List(Album), hasRecent: view Bool) pub ret Float {
+  let cols: Int = homeCols()
+  let total: Int = albums.length
+  let rows: Int = (total + cols - 1) / cols
+  let tileH: Float = homeGridTileSize()
+  let gridH: Float = tileH * rows.toFloat() + homeGridTileGap * (rows - 1).toFloat()
+  let subH: Float = 22.0
+  var recentH: Float = 0.0
+  if hasRecent {
+    # 28 (header) + outerGap + thumb-size + outerGap (gap to grid).
+    recentH = 28.0 + outerGap + recentlyPlayedThumbSize + outerGap
+  }
+  ret subH + outerGap + recentH + gridH
+}
+
+# Scroll-floor clamp for the Home page — `-(overflow)` so wheel/drag
+# stops when the last grid row hits the dock. Zero when the content
+# already fits the viewport.
+func homeScrollMin(albums: view List(Album), history: view PlayHistory) pub ret Float {
+  let viewport: Float = screenH - outerPad * 2.0 - miniPlayerH - navTabsH - outerGap
+  let hasRecent: Bool = history.entries.length > 0
+  let content: Float = homeContentHeight(albums: albums, hasRecent: hasRecent)
+  let overflow: Float = content - viewport
+  if overflow <= 0.0 {
+    ret 0.0
+  }
+  ret 0.0 - overflow
+}
+
+# Single 2-column row.
+func buildHomeGridRow(
+  world: mod UiWorld
+  keys: view List(String)
+  startIndex: view Int
+  rounded: view Bool
+) ret EntityId {
+  let row: EntityId = createEntity(world: world)
+  let rowW: Float = screenW - outerPad * 2.0
+  let tileH: Float = homeGridTileSize()
+  setRectFixed(world: world, entity: row, w: rowW, h: tileH)
+  let layH: LayoutType = LayoutType.horizontal
+  let alignS: AlignKind = AlignKind.start
+  setLayout(world: world, entity: row, kind: layH, gap: homeGridTileGap, alignCross: alignS)
+
+  let kids: List(EntityId) = createList(EntityId, cap: homeGridColumns)
+  let cols: Int = homeCols()
+  let total: Int = keys.length
+  var col: Int = 0
+  loop col < cols {
+    let i: Int = startIndex + col
+    if i < total {
+      let key: String = keys.get(index: i)
+      let tile: EntityId = buildLibraryCoverTile(world: world, key: key, size: tileH, rounded: rounded)
+      kids.add(value: tile)
+    }
+    col = col + 1
+  }
+  attachChildren(world: world, parent: row, kids: kids)
+  ret row
+}
+
+func buildHomeCoverGrid(world: mod UiWorld, albums: view List(Album), library: view List(String), rounded: view Bool) ret EntityId {
+  let keys: List(String) = collectLibraryCoverKeys(albums: albums, library: library)
+  let grid: EntityId = createEntity(world: world)
+  let cols: Int = homeCols()
+  let total: Int = keys.length
+  let tileH: Float = homeGridTileSize()
+  let rows: Int = (total + cols - 1) / cols
+  let gridH: Float = tileH * rows.toFloat() + homeGridTileGap * (rows - 1).toFloat()
+  let gridW: Float = screenW - outerPad * 2.0
+  setRectFixed(world: world, entity: grid, w: gridW, h: gridH)
+  let layV: LayoutType = LayoutType.vertical
+  let alignS: AlignKind = AlignKind.start
+  setLayout(world: world, entity: grid, kind: layV, gap: homeGridTileGap, alignCross: alignS)
+
+  let rowKids: List(EntityId) = createList(EntityId, cap: rows)
+  var i: Int = 0
+  loop i < rows {
+    let startIndex: Int = i * cols
+    let row: EntityId = buildHomeGridRow(world: world, keys: keys, startIndex: startIndex, rounded: rounded)
+    rowKids.add(value: row)
+    i = i + 1
+  }
+  attachChildren(world: world, parent: grid, kids: rowKids)
+  ret grid
+}
+
+func buildHomeBody(world: mod UiWorld, albums: view List(Album), library: view List(String), history: view PlayHistory, rounded: view Bool, scrollY: view Float) ret EntityId {
+  let body: EntityId = createEntity(world: world)
+  let bodyW: Float = screenW - outerPad * 2.0
+  let bodyH: Float = screenH - topBarH - navTabsH - outerGap * 4.0 - outerPad * 2.0
+  setRectFixed(world: world, entity: body, w: bodyW, h: bodyH)
+  let layV: LayoutType = LayoutType.vertical
+  let alignS: AlignKind = AlignKind.start
+  setLayout(world: world, entity: body, kind: layV, gap: outerGap, alignCross: alignS)
+  let off: Offset = { delta: Vec2 { x: 0.0, y: scrollY } }
+  componentSet(this: world.offsets, entity: body, data: off)
+
+  let scroll: ScrollState = { y: scrollY, velocity: 0.0 }
+  componentSet(this: world.scrollStates, entity: body, data: scroll)
+
+  let sub: EntityId = createEntity(world: world)
+  setRectFixed(world: world, entity: sub, w: bodyW, h: 22.0)
+  let subStyle: String = "muted"
+  let subText: String = "Pick something to play"
+  setText(world: world, entity: sub, text: subText, styleId: subStyle)
+
+  let grid: EntityId = buildHomeCoverGrid(world: world, albums: albums, library: library, rounded: rounded)
+
+  let hasRecent: Bool = history.entries.length > 0
+  var kidsCap: Int = 2
+  if hasRecent {
+    kidsCap = 4
+  }
+  let kids: List(EntityId) = createList(EntityId, cap: kidsCap)
+  kids.add(value: sub)
+  if hasRecent {
+    let recentHeader: EntityId = buildRecentlyPlayedHeader(world: world)
+    let recentStrip: EntityId = buildRecentlyPlayedStrip(world: world, history: history, rounded: rounded)
+    kids.add(value: recentHeader)
+    kids.add(value: recentStrip)
+  }
+  kids.add(value: grid)
+  attachChildren(world: world, parent: body, kids: kids)
+  ret body
+}
+
+func mountHomePage(
+  world: mod UiWorld
+  state: view AppState
+  scrollY: view Float
+) pub ret EntityId {
+  let albums: view List(Album) => state.albums
+
+  let root: EntityId = createEntity(world: world)
+  setRectFixed(world: world, entity: root, w: screenW, h: screenH)
+  let layV: LayoutType = LayoutType.vertical
+  let alignS: AlignKind = AlignKind.start
+  setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
+  setPaddingAll(world: world, entity: root, n: outerPad)
+
+  var copiedId: String = ""
+  copiedId = copiedId.concat(other: homePageId)
+  let pr: PageRoot = { id: own copiedId }
+  componentSet(this: world.pageRoots, entity: root, data: own pr)
+
+  let topBar: EntityId = buildPageTopBar(world: world, title: "Good evening")
+  let body: EntityId = buildHomeBody(world: world, albums: albums, library: state.library, history: state.playHistory, rounded: state.settings.roundedAlbumCovers, scrollY: scrollY)
+
+  let kids: List(EntityId) = createList(EntityId, cap: 2)
+  kids.add(value: topBar)
+  kids.add(value: body)
+  attachChildren(world: world, parent: root, kids: kids)
+
+  ret root
+}
+
+func buildHomeWorld(
+  scenes: view AlbumScenes
+  reg: view TextureRegistry
+  state: view AppState
+  playback: view PlaybackState
+  scrollY: view Float
+) pub ret UiWorld {
+  let world: UiWorld = createUiWorld()
+  let page: EntityId = mountHomePage(world: world, state: state, scrollY: scrollY)
+  let dock: EntityId = mountBottomDockOverlay(
+    world: world
+    activeTab: state.tab
+    scenes: scenes
+    playback: playback
+    state: state
+    reg: reg
+  )
+  let back: EntityId = mountBackButtonOverlay(world: world, state: state)
+  ret world
+}
