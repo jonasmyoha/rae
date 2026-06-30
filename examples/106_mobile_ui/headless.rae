@@ -1,0 +1,62 @@
+# Headless-mode helpers for the mobile UI app.
+#
+# `RAE_UI_HEADLESS=1` runs the app without stealing OS focus.
+# Raylib's window+OpenGL context still initialises (fonts,
+# textures, layout, drawing all work), but the OS-level window
+# is created with FLAG_WINDOW_HIDDEN | FLAG_WINDOW_UNFOCUSED, so
+# the window never becomes visible AND never grabs focus from
+# whatever the user was working on.
+#
+# Use cases:
+#   * Agent / CI runs: smoke-test that the app boots, lays out,
+#     and shuts down cleanly without flashing a window.
+#   * Repeated stress runs (pair with `RAE_UI_STRESS_REBUILDS=1`)
+#     where focus theft would interrupt the developer.
+#
+# Skipped in headless mode (see main.rae call sites):
+#   * setWindowPosition / installWindowCloseWaker /
+#     installMouseButtonHook / disableAppNap — they manipulate
+#     the OS window state, which is irrelevant when hidden.
+#   * spotifyLaunch — it focuses Spotify.app independent of our
+#     window state.
+#
+# Defaults a 3 s auto-exit if no RAE_AUTO_EXIT_SEC is set, so a
+# headless launch doesn't sit forever inside the wait-events
+# loop with no input to wake it.
+
+# True iff RAE_UI_HEADLESS is set to anything non-empty.
+func headlessIsActive() ret Bool {
+  let headlessEnv: String = getEnv(name: "RAE_UI_HEADLESS")
+  ret headlessEnv.length() > 0
+}
+
+# Combine the existing window flags with the hidden+unfocused
+# bits when headless. Base flags:
+#   FLAG_WINDOW_RESIZABLE (4) | FLAG_MSAA_4X_HINT (32) = 36
+# Headless add:
+#   FLAG_WINDOW_HIDDEN    (128)
+#   FLAG_WINDOW_UNFOCUSED (2048)
+func headlessConfigFlags(headless: view Bool) ret Int {
+  # 36 = FLAG_WINDOW_RESIZABLE(4) | FLAG_MSAA_4X_HINT(32).
+  let base: Int = 36
+  if headless {
+    # HIDDEN(128)+UNFOCUSED(2048); no HiDPI so screenshots stay predictable.
+    ret base + 128 + 2048
+  }
+  # FLAG_WINDOW_HIGHDPI(8192): real Retina framebuffer. The render path
+  # wraps drawing in a zoom=dpr camera (hidpi.rae) so the point-based UI
+  # fills the high-res buffer crisply; layout + input stay in points.
+  ret base + 8192
+}
+
+# When headless, fall back to a 3 s auto-exit if the env var
+# didn't pick a longer one. Returns the (possibly overridden)
+# new auto-exit-sec value.
+func headlessApplyAutoExitDefault(headless: view Bool, current: view Float) ret Float {
+  if headless {
+    if current <= 0.0 {
+      ret 3.0
+    }
+  }
+  ret current
+}
