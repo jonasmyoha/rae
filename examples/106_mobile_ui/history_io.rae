@@ -1,0 +1,287 @@
+open raylib
+open sys/spotify
+open ui/ecs
+# Disk persistence for PlayHistory. Each `recordPlay` site (the
+# song.open.N dispatcher and pollSpotify) writes the whole list out
+# as JSON under `examples/98_mobile_ui/temp/play_history.json`; the
+# app reads it back at boot so the Recently-played row and the
+# History sub-page survive restarts.
+#
+# JSON shape (all entry fields preserved):
+#
+#     {
+#       "entries": [
+#         {
+#           "trackName":   "...",
+#           "artistName":  "...",
+#           "albumName":   "...",
+#           "albumStem":   "...",
+#           "artworkUrl":  "...",
+#           "textureKey":  "...",
+#           "durationSec": 123.4,
+#           "playedAt":    1234567.0
+#         },
+#         ...
+#       ]
+#     }
+#
+# Spotify entries store their CDN artwork URL; at restore the
+# `refetchHistoryArt` pass downloads the image again and registers
+# it under the entry's `textureKey` so the History thumbs still
+# show the real cover. Local entries reuse the stem texture the
+# normal boot path (`loadAllTextures`) already loaded.
+import core
+import fs
+import gpu2d
+import json
+import sys
+import ui/window
+
+let historyTempDir: String = "examples/98_mobile_ui/temp"
+let historyFilePath: String = "examples/98_mobile_ui/temp/play_history.json"
+
+# Externs are already declared in playback_state_io.rae; reuse those.
+
+# Escape a string for embedding inside a JSON `"..."` literal.
+# Builds the result by walking each character so the caller never
+# ends up with a String that aliases its input — the equivalent
+# String.replace pipeline produced thumbs/values that pointed back
+# into the live `content` accumulator after a few iterations
+# (suspect alias return path in lib/string.replace when the pattern
+# isn't found).
+func jsonEscape(s: view String) ret String {
+  var out: String = ""
+  var i: Int = 0
+  let n: Int = s.length()
+  let bs: String = "\\"
+  let q: String = "\""
+  let bsbs: String = "\\\\"
+  let bsq: String = "\\\""
+  loop i < n {
+    let ch: String = s.sub(start: i, len: 1)
+    if ch.equals(other: bs) {
+      out = out.concat(other: bsbs)
+    } else {
+      if ch.equals(other: q) {
+        out = out.concat(other: bsq)
+      } else {
+        out = out.concat(other: ch)
+      }
+    }
+    i = i + 1
+  }
+  ret out
+}
+
+# Serialise the whole entries list to JSON and overwrite `path`.
+# Idempotent — call after every recordPlay. The file lives under
+# the gitignored `temp/` folder so a checkout doesn't bring a
+# stale demo history along.
+func saveHistoryToJson(history: view PlayHistory, path: view String) pub {
+  # Best-effort create the parent dir; makeDir is idempotent.
+  makeDir(path: historyTempDir)
+
+  let openBrace: String = "\u{007B}"
+  let closeBrace: String = "\u{007D}"
+  let openBracket: String = "["
+  let closeBracket: String = "]"
+  let nl: String = "\n"
+  let q: String = "\""
+  let colon: String = ":"
+
+  var content: String = ""
+  content = content.concat(other: openBrace).concat(other: nl)
+  content = content.concat(other: "  ").concat(other: q).concat(other: "entries").concat(other: q)
+  content = content.concat(other: colon).concat(other: " ").concat(other: openBracket).concat(other: nl)
+
+  let comma: String = ","
+  let n: Int = history.entries.length
+  var i: Int = 0
+  loop i < n {
+    let e: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: i)
+    # Deep-copy each owned-String field into a fresh local so the
+    # interpolated builder below never references the list's heap
+    # storage through `e.fieldName`. The `"{e.field}"` interpolation
+    # syntax forces a fresh allocation per field.
+    let tn: String = jsonEscape(s: e.trackName)
+    let an: String = jsonEscape(s: e.artistName)
+    let alb: String = jsonEscape(s: e.albumName)
+    let stem: String = jsonEscape(s: e.albumStem)
+    let url: String = jsonEscape(s: e.artworkUrl)
+    let tk: String = jsonEscape(s: e.textureKey)
+    let durStr: String = "{e.durationSec}"
+    let atStr: String = "{e.playedAt}"
+
+    content = content.concat(other: "    ").concat(other: openBrace).concat(other: nl)
+    content = content.concat(other: "      ").concat(other: q).concat(other: "trackName").concat(other: q).concat(other: colon).concat(other: " ").concat(other: q).concat(other: tn).concat(other: q).concat(other: comma).concat(other: nl)
+    content = content.concat(other: "      ").concat(other: q).concat(other: "artistName").concat(other: q).concat(other: colon).concat(other: " ").concat(other: q).concat(other: an).concat(other: q).concat(other: comma).concat(other: nl)
+    content = content.concat(other: "      ").concat(other: q).concat(other: "albumName").concat(other: q).concat(other: colon).concat(other: " ").concat(other: q).concat(other: alb).concat(other: q).concat(other: comma).concat(other: nl)
+    content = content.concat(other: "      ").concat(other: q).concat(other: "albumStem").concat(other: q).concat(other: colon).concat(other: " ").concat(other: q).concat(other: stem).concat(other: q).concat(other: comma).concat(other: nl)
+    content = content.concat(other: "      ").concat(other: q).concat(other: "artworkUrl").concat(other: q).concat(other: colon).concat(other: " ").concat(other: q).concat(other: url).concat(other: q).concat(other: comma).concat(other: nl)
+    content = content.concat(other: "      ").concat(other: q).concat(other: "textureKey").concat(other: q).concat(other: colon).concat(other: " ").concat(other: q).concat(other: tk).concat(other: q).concat(other: comma).concat(other: nl)
+    content = content.concat(other: "      ").concat(other: q).concat(other: "durationSec").concat(other: q).concat(other: colon).concat(other: " ").concat(other: durStr).concat(other: comma).concat(other: nl)
+    content = content.concat(other: "      ").concat(other: q).concat(other: "playedAt").concat(other: q).concat(other: colon).concat(other: " ").concat(other: atStr).concat(other: nl)
+    content = content.concat(other: "    ").concat(other: closeBrace)
+    if i < n - 1 {
+      content = content.concat(other: comma)
+    }
+    content = content.concat(other: nl)
+    i = i + 1
+  }
+  content = content.concat(other: "  ").concat(other: closeBracket).concat(other: nl)
+  content = content.concat(other: closeBrace).concat(other: nl)
+
+  let ok: Bool = rae_ext_rae_sys_write_file(path: path, content: content)
+  if ok is false {
+    log("[history] save failed: {path}")
+  }
+}
+
+# Read `path`; if present, append the persisted entries to
+# `history.entries`. No-op when the file is missing — fresh
+# install, first launch.
+func restoreHistory(history: mod PlayHistory, path: view String) pub {
+  let source: String = rae_ext_rae_sys_read_file(path: path)
+  if source.length() is 0 {
+    log("[history] no file at {path} — empty history")
+    ret
+  }
+  let doc: JsonDoc = json.parseJson(source: source)
+  if doc.ok is false {
+    log("[history] parse error in {path} at byte {doc.errorPos}")
+    ret
+  }
+  let root: JsonValue = json.jsonRoot(doc: doc)
+  let entriesKey: String = "entries"
+  let entriesIdx: Int = json.jsonField(doc: doc, this: root, key: entriesKey)
+  if entriesIdx < 0 {
+    log("[history] root has no 'entries' array")
+    ret
+  }
+  let entriesVal: JsonValue = json.jsonValueAt(doc: doc, idx: entriesIdx)
+  let n: Int = json.jsonArrayLen(this: entriesVal)
+  var i: Int = 0
+  loop i < n {
+    let v: JsonValue = json.jsonArrayAt(doc: doc, this: entriesVal, idx: i)
+    let empty: String = ""
+    let tnIdx: Int = json.jsonField(doc: doc, this: v, key: "trackName")
+    let anIdx: Int = json.jsonField(doc: doc, this: v, key: "artistName")
+    let albIdx: Int = json.jsonField(doc: doc, this: v, key: "albumName")
+    let stemIdx: Int = json.jsonField(doc: doc, this: v, key: "albumStem")
+    let urlIdx: Int = json.jsonField(doc: doc, this: v, key: "artworkUrl")
+    let texIdx: Int = json.jsonField(doc: doc, this: v, key: "textureKey")
+    let durIdx: Int = json.jsonField(doc: doc, this: v, key: "durationSec")
+    let atIdx: Int = json.jsonField(doc: doc, this: v, key: "playedAt")
+    let tn: String = json.jsonString(this: json.jsonValueAt(doc: doc, idx: tnIdx), fallback: empty)
+    let an: String = json.jsonString(this: json.jsonValueAt(doc: doc, idx: anIdx), fallback: empty)
+    let alb: String = json.jsonString(this: json.jsonValueAt(doc: doc, idx: albIdx), fallback: empty)
+    let stem: String = json.jsonString(this: json.jsonValueAt(doc: doc, idx: stemIdx), fallback: empty)
+    let url: String = json.jsonString(this: json.jsonValueAt(doc: doc, idx: urlIdx), fallback: empty)
+    let tex: String = json.jsonString(this: json.jsonValueAt(doc: doc, idx: texIdx), fallback: empty)
+    let dur: Float = json.jsonFloat(this: json.jsonValueAt(doc: doc, idx: durIdx), fallback: 0.0)
+    let at: Float = json.jsonFloat(this: json.jsonValueAt(doc: doc, idx: atIdx), fallback: 0.0)
+    let entry: PlayHistoryEntry = {
+      trackName: own tn
+      artistName: own an
+      albumName: own alb
+      albumStem: own stem
+      artworkUrl: own url
+      textureKey: own tex
+      durationSec: dur
+      playedAt: at
+    }
+    history.entries.add(value: own entry)
+    i = i + 1
+  }
+  log("[history] restored {n} entries from {path}")
+}
+
+# Re-download the Spotify CDN artwork for every restored entry
+# whose `textureKey` starts with "spotify-art:" and isn't already
+# loaded. Runs once at boot after `restoreHistory`. Failures are
+# tolerated — the entry's thumb just falls back to the textMuted
+# placeholder for this session.
+func refetchHistoryArt(history: view PlayHistory, reg: mod TextureRegistry) pub {
+  let prefix: String = "spotify-art:"
+  let pLen: Int = prefix.length()
+  let n: Int = history.entries.length
+  var i: Int = 0
+  loop i < n {
+    let e: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: i)
+    if e.textureKey.startsWith(prefix: prefix) {
+      var alreadyLoaded: Bool = textureHas(reg: reg, key: e.textureKey)
+      if uiBackend() is UiBackend.gpu2d {
+        alreadyLoaded = gpu2d.hasImageKey(key: e.textureKey)
+      }
+      if alreadyLoaded is false {
+        if e.artworkUrl.length() > 0 {
+          let suffix: String = e.textureKey.sub(start: pLen, len: e.textureKey.length() - pLen)
+          let outPath: String = "/tmp/rae_spotify_art_{suffix}.jpg"
+          let ok: Bool = spotify.fetchArtwork(url: e.artworkUrl, outPath: outPath)
+          if ok {
+            if uiBackend() is UiBackend.gpu2d {
+              let keyForGpu: String = "{e.textureKey}"
+              let pathForGpu: String = "{outPath}"
+              let h: Int = gpu2d.loadImageKey(key: keyForGpu, path: pathForGpu)
+            } else {
+              let tex: Texture = loadTexture(fileName: outPath)
+              let keyForReg: String = "{e.textureKey}"
+              textureRegisterDirect(reg: reg, key: own keyForReg, tex: tex)
+            }
+          }
+        }
+      }
+    }
+    i = i + 1
+  }
+}
+
+# Chunked, non-blocking variant for the interactive loop. Each network
+# fetch (spotifyFetchArtwork) blocks the main thread, so doing all of a
+# restored history's entries in one call freezes the UI (beach ball).
+# Process at most `budget` not-yet-loaded `spotify-art:` entries per
+# call, scanning MOST-RECENT FIRST so the visible "recently played"
+# thumbs fill in before the older tail. Returns true while entries
+# remain to fetch (the caller keeps the frame loop ticking). Idempotent
+# via `textureHas`; entries with a failed/empty url are skipped (and
+# count toward the budget so the scan makes progress).
+func refetchHistoryArtChunk(history: view PlayHistory, reg: mod TextureRegistry, budget: view Int) pub ret Bool {
+  let prefix: String = "spotify-art:"
+  let pLen: Int = prefix.length()
+  let n: Int = history.entries.length
+  var did: Int = 0
+  var i: Int = n - 1
+  loop i >= 0 {
+    if did >= budget {
+      ret true
+    }
+    let e: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: i)
+    if e.textureKey.startsWith(prefix: prefix) {
+      var alreadyLoaded: Bool = textureHas(reg: reg, key: e.textureKey)
+      if uiBackend() is UiBackend.gpu2d {
+        alreadyLoaded = gpu2d.hasImageKey(key: e.textureKey)
+      }
+      if alreadyLoaded is false {
+        if e.artworkUrl.length() > 0 {
+          let suffix: String = e.textureKey.sub(start: pLen, len: e.textureKey.length() - pLen)
+          let outPath: String = "/tmp/rae_spotify_art_{suffix}.jpg"
+          let ok: Bool = spotify.fetchArtwork(url: e.artworkUrl, outPath: outPath)
+          if ok {
+            if uiBackend() is UiBackend.gpu2d {
+              let keyForGpu: String = "{e.textureKey}"
+              let pathForGpu: String = "{outPath}"
+              let h: Int = gpu2d.loadImageKey(key: keyForGpu, path: pathForGpu)
+            } else {
+              let tex: Texture = loadTexture(fileName: outPath)
+              let keyForReg: String = "{e.textureKey}"
+              textureRegisterDirect(reg: reg, key: own keyForReg, tex: tex)
+            }
+          }
+          did = did + 1
+        }
+      }
+    }
+    i = i - 1
+  }
+  ret false
+}

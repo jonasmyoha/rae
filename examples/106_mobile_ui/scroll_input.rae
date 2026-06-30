@@ -1,0 +1,267 @@
+open ui/ecs
+import ui/window
+# iOS-style drag + trackpad/wheel scroll physics for the Profile and
+# Album screens.
+#
+# All persistent state lives in `ScrollFsm`. Both `applyDragPhysics` and
+# `applyWheelScroll` mutate it; they share `scrollY`, `velocity`, and
+# `lastWheelTime` so the two systems can hand off cleanly (drag-release
+# → momentum, trackpad-quiet → spring-back).
+#
+# Behaviour summary (see https://github.com/.../scroll-design.md):
+#   * Drag inside bounds:   1:1 finger tracking.
+#   * Drag past a bound:    rubber-banded (UIScrollView formula).
+#   * Release after drag:   initial velocity from pickReleaseVelocity,
+#                           then exponential decay; spring back on OOB,
+#                           preserving incoming velocity.
+#   * Wheel / trackpad:     rubber-band on deltas past a bound, with a
+#                           hard overshoot cap. Wheel hands off to the
+#                           spring once `lastWheelTime` is 50 ms stale.
+#   * `dragJustReleased`    suppresses the release-click on the frame a
+#                           drag ended (otherwise the lift would fire
+#                           an OnClick on whatever's under the cursor).
+
+type ScrollFsm pub {
+  # Logical scroll Y (more-negative = content shifted up). The
+  # ECS `Offset` and `ScrollState` components on `scrollTarget`
+  # follow this via `updateScrollOffset`.
+  scrollY: Float
+  # Px-per-frame momentum velocity. Decayed each frame in-bounds;
+  # consumed by the spring when past a bound.
+  velocity: Float
+
+  # Drag finite-state machine.
+  prevDown: Bool       # mouse button state on the previous frame
+  active: Bool         # crossed the 10-pt activation distance
+  startX: Float        # mouse position at press
+  startY: Float
+  mouseY: Float        # last frame's mouse Y for delta math
+
+  # Last-3-frames y-delta ring buffer; averaged at release-time
+  # to give the momentum-fling its initial velocity.
+  delta0: Float
+  delta1: Float
+  delta2: Float
+
+  # Wall-clock seconds at which a wheel/trackpad event last fired.
+  # Spring + momentum paths gate on `now - lastWheelTime > 0.05`
+  # so they don't fight live wheel input.
+  lastWheelTime: Float
+}
+
+func createScrollFsm(initialScrollY: view Float) ret ScrollFsm {
+  let f: ScrollFsm = {
+    scrollY: initialScrollY
+    velocity: 0.0
+    prevDown: false
+    active: false
+    startX: 0.0
+    startY: 0.0
+    mouseY: 0.0
+    delta0: 0.0
+    delta1: 0.0
+    delta2: 0.0
+    lastWheelTime: 0.0 - 1.0
+  }
+  ret f
+}
+
+# Drag + spring + momentum physics. Returns true on the frame the
+# user lifted after an active drag (so the caller skips dispatch).
+func applyDragPhysics(
+  fsm: mod ScrollFsm
+  world: mod UiWorld
+  scrollTarget: view EntityId
+  scrollOnThisScreen: view Bool
+  scrollFloor: view Float
+  rubberDim: view Float
+) ret Bool {
+  if scrollOnThisScreen is false {
+    fsm.prevDown = false
+    fsm.active = false
+    fsm.velocity = 0.0
+    ret false
+  }
+
+  var dragJustReleased: Bool = false
+  let curMouseX: Float = uiPointerX()
+  let curMouseY: Float = uiPointerY()
+  let curMouseDown: Bool = uiPointerButtonDown(button: mouseButtonLeft)
+  # 10pt activation distance — matches iOS UIPanGestureRecognizer.
+  # Lower values cross natural hand-tremor on click and silently drop
+  # release-clicks.
+  let dragThreshold: Float = 10.0
+  let scrollMin: Float = scrollFloor
+  let scrollMax: Float = 0.0
+
+  if curMouseDown {
+    if fsm.prevDown is false {
+      fsm.startX = curMouseX
+      fsm.startY = curMouseY
+      fsm.active = false
+      fsm.velocity = 0.0
+      fsm.delta0 = 0.0
+      fsm.delta1 = 0.0
+      fsm.delta2 = 0.0
+    } else {
+      let dxFromStart: Float = curMouseX - fsm.startX
+      let dyFromStart: Float = curMouseY - fsm.startY
+      if fsm.active is false {
+        let distSq: Float = dxFromStart * dxFromStart + dyFromStart * dyFromStart
+        if distSq > dragThreshold * dragThreshold {
+          fsm.active = true
+        }
+      }
+      if fsm.active {
+        let rawDelta: Float = curMouseY - fsm.mouseY
+        let eff: Float = dampedDelta(
+          current: fsm.scrollY
+          delta: rawDelta
+          low: scrollMin
+          high: scrollMax
+          dim: rubberDim
+        )
+        fsm.scrollY = fsm.scrollY + eff
+        fsm.delta2 = fsm.delta1
+        fsm.delta1 = fsm.delta0
+        fsm.delta0 = eff
+        updateScrollOffset(world: world, target: scrollTarget, scrollY: fsm.scrollY)
+      }
+    }
+  } else {
+    if fsm.prevDown {
+      if fsm.active {
+        fsm.velocity = pickReleaseVelocity(
+          d0: fsm.delta0
+          d1: fsm.delta1
+          d2: fsm.delta2
+        )
+        dragJustReleased = true
+      }
+      fsm.active = false
+    }
+
+    # Physics step: OOB → spring; in-bounds with momentum → decay.
+    # Both gated on `wheelQuiet` so live trackpad momentum isn't
+    # fought by the spring (caused the "5 bounces" symptom).
+    let nowSec: Float = uiNowSeconds()
+    let wheelIdleSec: Float = nowSec - fsm.lastWheelTime
+    let wheelQuiet: Bool = wheelIdleSec > 0.05
+    let isOOB: Bool = fsm.scrollY > scrollMax or fsm.scrollY < scrollMin
+    if isOOB {
+      if wheelQuiet {
+        var target: Float = scrollMax
+        if fsm.scrollY < scrollMin {
+          target = scrollMin
+        }
+        # Near-critically-damped spring (ζ ≈ 0.99). tension 0.08 +
+        # friction 0.56 gives a soft eased return without overshoot.
+        let tension: Float = 0.08
+        let friction: Float = 0.56
+        fsm.velocity = springStepVelocity(
+          pos: fsm.scrollY
+          velocity: fsm.velocity
+          target: target
+          tension: tension
+          friction: friction
+        )
+        fsm.scrollY = fsm.scrollY + fsm.velocity
+        # Snap zone: 1 px / 0.3 px·frame⁻¹ is just below human perception
+        # on a 60 Hz display — cuts the asymptotic tail without a visible jump.
+        let displ: Float = fsm.scrollY - target
+        var absD: Float = displ
+        if absD < 0.0 {
+          absD = 0.0 - absD
+        }
+        var absV: Float = fsm.velocity
+        if absV < 0.0 {
+          absV = 0.0 - absV
+        }
+        if absD < 1.0 and absV < 0.3 {
+          fsm.scrollY = target
+          fsm.velocity = 0.0
+        }
+        updateScrollOffset(world: world, target: scrollTarget, scrollY: fsm.scrollY)
+      }
+    } else {
+      # In-bounds momentum decay (drag-release fling).
+      if wheelQuiet {
+        var absVel: Float = fsm.velocity
+        if absVel < 0.0 {
+          absVel = 0.0 - absVel
+        }
+        if absVel > 0.3 {
+          fsm.scrollY = fsm.scrollY + fsm.velocity
+          fsm.velocity = fsm.velocity * 0.97
+          updateScrollOffset(world: world, target: scrollTarget, scrollY: fsm.scrollY)
+        } else {
+          fsm.velocity = 0.0
+        }
+      }
+    }
+  }
+  fsm.mouseY = curMouseY
+  fsm.prevDown = curMouseDown
+  ret dragJustReleased
+}
+
+# Mouse-wheel / trackpad scroll. Rubber-bands on bounds, hard-caps
+# overshoot to 120 px so the spring always has a predictable
+# displacement to return from. Ignores wheel events while the mouse
+# button is down (macOS keeps delivering trackpad momentum for ~0.5-
+# 1.5s after finger-lift; if those land mid-click the release hit-
+# test misses).
+func applyWheelScroll(
+  fsm: mod ScrollFsm
+  world: mod UiWorld
+  scrollTarget: view EntityId
+  scrollOnThisScreen: view Bool
+  scrollFloor: view Float
+  rubberDim: view Float
+) {
+  if scrollOnThisScreen is false {
+    ret
+  }
+  let wheelMouseDown: Bool = uiPointerButtonDown(button: mouseButtonLeft)
+  var wheel: Float = 0.0
+  if wheelMouseDown is false {
+    wheel = uiWheelMove()
+  }
+  if wheel < 0.001 and wheel > -0.001 {
+    ret
+  }
+  let pixelsPerTick: Float = 48.0
+  # macOS wheel-up = "scroll content down". Flip sign so positive
+  # wheel produces a more-negative scrollY (= content shifts up).
+  let rawDelta: Float = wheel * pixelsPerTick
+  let wheelMin: Float = scrollFloor
+  let wheelMax: Float = 0.0
+  let eff: Float = dampedDelta(
+    current: fsm.scrollY
+    delta: rawDelta
+    low: wheelMin
+    high: wheelMax
+    dim: rubberDim
+  )
+  fsm.scrollY = fsm.scrollY + eff
+  # Hard overshoot cap. dampedDelta still moves a small (damped)
+  # amount even at large overshoot, and macOS momentum can deliver
+  # hundreds of events — accumulating into a huge stretch and a
+  # correspondingly long spring-back. Cap to 120 px so the spring
+  # always has a predictable, bounded displacement.
+  let wheelMaxOver: Float = 120.0
+  let wheelOverMin: Float = wheelMin - wheelMaxOver
+  let wheelOverMax: Float = wheelMax + wheelMaxOver
+  if fsm.scrollY < wheelOverMin {
+    fsm.scrollY = wheelOverMin
+  }
+  if fsm.scrollY > wheelOverMax {
+    fsm.scrollY = wheelOverMax
+  }
+  # Velocity stays at 0 during wheel scrolling — the wheel block
+  # drives `scrollY` each event, and the spring/momentum paths
+  # are gated on `wheelQuiet` so they don't fight us.
+  fsm.velocity = 0.0
+  fsm.lastWheelTime = uiNowSeconds()
+  updateScrollOffset(world: world, target: scrollTarget, scrollY: fsm.scrollY)
+}
