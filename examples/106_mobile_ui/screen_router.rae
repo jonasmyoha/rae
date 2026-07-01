@@ -97,16 +97,6 @@ func buildScreenWorld(
   ret buildNowPlayingWorld(scenes: scenes, playback: playback, state: state, reg: texReg)
 }
 
-# Set a freshly-built world's layout extent from the live window size
-# (in design units = window points * unitScale). This is what makes
-# layout track the real window instead of layout.rae's legacy 600x1300
-# defaults — the core of the coordinate-system fix. `screenW`/`screenH`
-# are kept in sync with the actual window by main.rae after initWindow.
-func applyViewportExtent(world: mod UiWorld) pub {
-  world.layoutW = screenW * unitScale
-  world.layoutH = screenH * unitScale
-}
-
 # Maps a Screen to the PageRoot id used for its mount. Symmetric to
 # the `mountXxxPage` calls in each screen builder.
 func pageIdForScreen(screen: Screen) pub ret String {
@@ -144,6 +134,7 @@ func buildAppWorld(
   state: view AppState
   texReg: view TextureRegistry
   scrollY: view Float
+  viewport: view Viewport
 ) pub ret UiWorld {
   let world: UiWorld = createUiWorld()
   # Layer stack first — overlay-mount sites below assume the named
@@ -186,7 +177,7 @@ func buildAppWorld(
   )
   let back: EntityId = mountBackButtonOverlay(world: world, state: state)
   addBottomSheetLayer(world: world, sheet: state.bottomSheet)
-  applyViewportExtent(world: world)
+  applyViewportExtent(world: world, viewport: viewport)
   ret world
 }
 

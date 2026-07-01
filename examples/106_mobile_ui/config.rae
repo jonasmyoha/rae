@@ -15,12 +15,12 @@ import ui/spacing
 let screenW: Float = 498.0
 let screenH: Float = 1079.0
 # Design units per logical point — the one knob of the new coordinate
-# system (rae/docs/ui-coordinate-and-responsive-layout.md). Kept SOFT
-# and currently 1.0: authored numbers are treated as logical points so
-# the existing look is unchanged while the layout extent is wired to the
-# real window. Raise later (e.g. 3.0, Royal-Blush-style) once authored
-# values are rescaled to match. Layout extent = window(points) * unitScale.
-let unitScale: Float = 1.0
+# system (rae/docs/ui-coordinate-and-responsive-layout.md). 106 now uses
+# the final unitScale=3 model internally. The current .raescene files are
+# still authored in the legacy 498x1079 point space, so Viewport applies
+# legacySceneScale while those scenes are being migrated to 1080x2280du.
+let unitScale: Float = 3.0
+let legacySceneScale: Float = 0.3333333333333333
 # outerPad is the screen-edge inset — domain-specific, not a generic
 # spacing step. outerGap is the canonical "section gap" inside a
 # screen; its numeric value is spaceM, but the C backend can't
