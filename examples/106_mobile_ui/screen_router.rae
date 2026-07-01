@@ -8,6 +8,8 @@ import fs
 import sys
 import sys/spotify
 import ui/ecs
+import ui/device_presets
+import ui/safe_area
 
 enum Screen {
   # The four bottom-nav tabs follow. Order matters: it must match
@@ -178,6 +180,15 @@ func buildAppWorld(
   let back: EntityId = mountBackButtonOverlay(world: world, state: state)
   addBottomSheetLayer(world: world, sheet: state.bottomSheet)
   applyViewportExtent(world: world, viewport: viewport)
+  # Responsive safe-area pass. `RAE_UI_DEVICE=<preset>` selects a phone
+  # form factor; its notch / home-indicator insets are converted to
+  # this world's design units (fraction of the device dimension times
+  # the layout extent) and written onto every `SafeArea`-tagged node.
+  # `entityPadding` folds them in during the layout pass that follows.
+  # Unset / unknown preset → zero insets → layout unchanged.
+  let preset: DevicePreset = activeDevicePreset()
+  let safeInsets: Insets = devicePresetInsets(preset: preset, layoutW: world.layoutW, layoutH: world.layoutH)
+  safeAreaSystem(world: world, insets: safeInsets)
   ret world
 }
 

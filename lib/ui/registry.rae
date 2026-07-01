@@ -562,6 +562,25 @@ func deserOpticalAlign(doc: view JsonDoc, val: view JsonValue) ret OpticalAlign 
   ret OpticalAlign { enabled: enabled, centerX: centerX, centerY: centerY, bias: Vec2 { x: biasX, y: biasY } }
 }
 
+func deserSafeArea(doc: view JsonDoc, val: view JsonValue) ret SafeArea {
+  # `apply` is a per-edge multiplier (default 1.0 = fully honour the
+  # device inset on that edge; 0.0 = ignore it). `extra` is an
+  # additive per-edge gutter in design units. Both reuse the standard
+  # Insets shape so a scene author can write partial objects.
+  let enabled: Bool = optBool(doc: doc, container: val, key: "enabled", fallback: true)
+  var apply: Insets = { l: 1.0, t: 1.0, r: 1.0, b: 1.0 }
+  let applyIdx: Int = json.jsonField(doc: doc, this: val, key: "apply")
+  if applyIdx >= 0 {
+    apply = deserInsets(doc: doc, val: json.jsonValueAt(doc: doc, idx: applyIdx))
+  }
+  var extra: Insets = { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
+  let extraIdx: Int = json.jsonField(doc: doc, this: val, key: "extra")
+  if extraIdx >= 0 {
+    extra = deserInsets(doc: doc, val: json.jsonValueAt(doc: doc, idx: extraIdx))
+  }
+  ret SafeArea { enabled: enabled, apply: apply, extra: extra }
+}
+
 func deserLayerRoot(doc: view JsonDoc, val: view JsonValue) ret LayerRoot {
   let id: String = optString(doc: doc, container: val, key: "id", fallback: "")
   let ord: Int = optInt(doc: doc, container: val, key: "order", fallback: 0)
@@ -786,6 +805,10 @@ func applyComponentByName(
   }
   if name.equals(other: "OpticalAlign") {
     componentSet(this: world.opticalAligns, entity: entity, data: deserOpticalAlign(doc: doc, val: val))
+    ret
+  }
+  if name.equals(other: "SafeArea") {
+    componentSet(this: world.safeAreas, entity: entity, data: deserSafeArea(doc: doc, val: val))
     ret
   }
   if name.equals(other: "LayerRoot") {
