@@ -33,6 +33,7 @@ func decideActive(
   prevPressed: view EntityId
   prevHovered: view EntityId
   prevMouseBtns: view Int
+  viewport: view Viewport
 ) ret RenderActiveDecision {
   var active: Bool = forceRender
   if active is false {
@@ -72,8 +73,8 @@ func decideActive(
   # marks dirty on entity TRANSITIONS, so an idle cursor parked over
   # the same rect stays at 0 fps. Mouse-button bitfield is only
   # mirrored when the debug overlay needs it.
-  let mx: Float = uiPointerX()
-  let my: Float = uiPointerY()
+  let mx: Float = viewportPointerX(viewport: viewport)
+  let my: Float = viewportPointerY(viewport: viewport)
   let currentHovered: EntityId = hitTest(world: world, x: mx, y: my)
   var currentMouseBtns: Int = 0
   if debug.showInputOutlines {
