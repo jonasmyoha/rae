@@ -4170,7 +4170,7 @@ static const char* G2D_TEXT_WGSL =
 "  rect: vec4<f32>,\n"
 "  uv: vec4<f32>,\n"
 "  color: vec4<f32>,\n"
-"  params: vec4<f32>,\n"          /* x=pxRange, y=outlineWidth(px) */
+"  params: vec4<f32>,\n"          /* x=pxRange, y=outlineWidth(px), z=softness(px) */
 "  outline: vec4<f32>,\n"         /* straight outline colour */
 "};\n"
 "@group(0) @binding(0) var<uniform> uXform: array<vec4<f32>, 2>;\n"
@@ -4210,7 +4210,10 @@ static const char* G2D_TEXT_WGSL =
  * scale). Positive inside the glyph. */
 "  let sc = (uXform[0].z + uXform[0].w) * 0.5;\n"
 "  let sd = g.params.x * sc * (median3(s.r, s.g, s.b) - 0.5);\n"
-"  let bodyCov = clamp(sd + 0.5, 0.0, 1.0);\n"
+/* softness widens the coverage falloff (px) — 1 = crisp AA, larger = a soft
+ * blurred edge (used for soft drop-shadows). */
+"  let sw = max(g.params.z, 1.0);\n"
+"  let bodyCov = clamp(sd / sw + 0.5, 0.0, 1.0);\n"
 "  let ow = g.params.y;\n"
 "  if (ow <= 0.0) {\n"
 "    let a = g.color.a * bodyCov;\n"
@@ -4218,7 +4221,7 @@ static const char* G2D_TEXT_WGSL =
 "  }\n"
 /* Outline = the glyph dilated by `ow` px; composite body OVER outline,
  * both premultiplied. */
-"  let outerCov = clamp(sd + 0.5 + ow, 0.0, 1.0);\n"
+"  let outerCov = clamp((sd + ow) / sw + 0.5, 0.0, 1.0);\n"
 "  let ba = g.color.a * bodyCov;\n"
 "  let oa = g.outline.a * outerCov;\n"
 "  let outA = ba + oa * (1.0 - ba);\n"
@@ -4340,11 +4343,12 @@ static void rae_g2d_ensure_text_inst(int ai, int prims) {
     g_g2d_text_cap[ai] = cap;
 }
 
-/* Full glyph submit with an optional outline (outlineWidth px + colour). */
+/* Full glyph submit with an optional outline (outlineWidth px + colour) and
+ * softness (edge-falloff width in px; 1 = crisp, larger = soft/blurred). */
 void rae_ext_gpu2d_drawGlyphEx(double sx0, double sy0, double sx1, double sy1,
                                double u0, double v0, double u1, double v1,
                                int64_t atlas, double pxRange, int64_t color,
-                               double outlineWidth, int64_t outlineColor) {
+                               double outlineWidth, int64_t outlineColor, double softness) {
     int ai = (int)atlas - 1;
     if (ai < 0 || ai >= RAE_SDF_MAX_ATLAS) return;
     int need = (g_g2d_text_count[ai] + 1) * G2D_TEXT_FLOATS;
@@ -4363,7 +4367,7 @@ void rae_ext_gpu2d_drawGlyphEx(double sx0, double sy0, double sx1, double sy1,
     p[9]  = (float)((c >> 8)  & 0xFF) / 255.0f;
     p[10] = (float)( c        & 0xFF) / 255.0f;
     p[11] = (float)((c >> 24) & 0xFF) / 255.0f;
-    p[12]=(float)pxRange; p[13]=(float)outlineWidth; p[14]=0.0f; p[15]=0.0f;
+    p[12]=(float)pxRange; p[13]=(float)outlineWidth; p[14]=(float)softness; p[15]=0.0f;
     uint32_t oc = (uint32_t)outlineColor;
     p[16] = (float)((oc >> 16) & 0xFF) / 255.0f;
     p[17] = (float)((oc >> 8)  & 0xFF) / 255.0f;
@@ -4376,7 +4380,7 @@ void rae_ext_gpu2d_drawGlyphEx(double sx0, double sy0, double sx1, double sy1,
 void rae_ext_gpu2d_drawGlyph(double sx0, double sy0, double sx1, double sy1,
                              double u0, double v0, double u1, double v1,
                              int64_t atlas, double pxRange, int64_t color) {
-    rae_ext_gpu2d_drawGlyphEx(sx0, sy0, sx1, sy1, u0, v0, u1, v1, atlas, pxRange, color, 0.0, 0);
+    rae_ext_gpu2d_drawGlyphEx(sx0, sy0, sx1, sy1, u0, v0, u1, v1, atlas, pxRange, color, 0.0, 0, 1.0);
 }
 
 /* --- Image pipeline (#143): textured rounded quads -------------------
@@ -5027,7 +5031,7 @@ void rae_ext_gpu2d_drawBox(double x, double y, double w, double h, double radius
 void rae_ext_gpu2d_drawGradientRect(double x, double y, double w, double h, double radius, int64_t from, int64_t to, double angleDeg) { (void)x; (void)y; (void)w; (void)h; (void)radius; (void)from; (void)to; (void)angleDeg; }
 void rae_ext_gpu2d_drawLine(double x0, double y0, double x1, double y1, double thickness, int64_t color) { (void)x0; (void)y0; (void)x1; (void)y1; (void)thickness; (void)color; }
 void rae_ext_gpu2d_drawGlyph(double sx0, double sy0, double sx1, double sy1, double u0, double v0, double u1, double v1, int64_t atlas, double pxRange, int64_t color) { (void)sx0; (void)sy0; (void)sx1; (void)sy1; (void)u0; (void)v0; (void)u1; (void)v1; (void)atlas; (void)pxRange; (void)color; }
-void rae_ext_gpu2d_drawGlyphEx(double sx0, double sy0, double sx1, double sy1, double u0, double v0, double u1, double v1, int64_t atlas, double pxRange, int64_t color, double outlineWidth, int64_t outlineColor) { (void)sx0; (void)sy0; (void)sx1; (void)sy1; (void)u0; (void)v0; (void)u1; (void)v1; (void)atlas; (void)pxRange; (void)color; (void)outlineWidth; (void)outlineColor; }
+void rae_ext_gpu2d_drawGlyphEx(double sx0, double sy0, double sx1, double sy1, double u0, double v0, double u1, double v1, int64_t atlas, double pxRange, int64_t color, double outlineWidth, int64_t outlineColor, double softness) { (void)sx0; (void)sy0; (void)sx1; (void)sy1; (void)u0; (void)v0; (void)u1; (void)v1; (void)atlas; (void)pxRange; (void)color; (void)outlineWidth; (void)outlineColor; (void)softness; }
 #endif /* RAE_HAS_SDL3 */
 #endif /* RAE_HAS_WEBGPU */
 
