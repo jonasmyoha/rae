@@ -339,9 +339,11 @@ func mountBottomDockOverlay(
   setLayout(world: world, entity: dock, kind: layV, gap: 0.0, alignCross: alignC)
   let dockPad: Padding = { insets: Insets { l: 0.0, t: dockBgExtend, r: 0.0, b: 0.0 } }
   componentSet(this: world.paddings, entity: dock, data: dockPad)
-  # Position the whole dock so its bottom edge hits `screenH` — same
-  # bottom alignment as before, just extended upward by dockBgExtend.
-  let dockOff: Offset = { delta: Vec2 { x: 0.0, y: screenH - dockH } }
+  # Position the whole dock so its bottom edge hits the layout extent
+  # bottom (`layoutExtentH`) — the window bottom on a tall desktop
+  # window, `screenH` on a portrait phone — same bottom alignment as
+  # before, just extended upward by dockBgExtend.
+  let dockOff: Offset = { delta: Vec2 { x: 0.0, y: layoutExtentH - dockH } }
   componentSet(this: world.offsets, entity: dock, data: dockOff)
   var copiedId: String = ""
   copiedId = copiedId.concat(other: dockPageId)
