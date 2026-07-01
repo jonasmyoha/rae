@@ -11,10 +11,10 @@ import core
 import sdf_text
 import gpu2d
 
-# Draw `text` with baseline pen at (x, y) in pixels, `sizePx` tall em,
-# colour 0xAARRGGBB. Submit between gpu2d.beginFrame and gpu2d.endFrame.
-# Returns the pen x advance (end position), like a text cursor.
-func drawText(font: view SdfFont, text: view String, x: copy Float, y: copy Float, sizePx: copy Float, color: copy Int) ret Float {
+# Lay out one run of `text` at baseline (x, y), emitting a glyph quad per
+# character with an optional outline (outlineWidth px of outlineColor). Returns
+# the pen x advance. drawText / drawTextEx build on this.
+func emitRun(font: view SdfFont, text: view String, x: copy Float, y: copy Float, sizePx: copy Float, color: copy Int, outlineWidth: copy Float, outlineColor: copy Int) ret Float {
     let scale: Float = sizePx / font.emSize
     let aw: Float = font.atlasWidth
     let ah: Float = font.atlasHeight
@@ -41,15 +41,42 @@ func drawText(font: view SdfFont, text: view String, x: copy Float, y: copy Floa
                 var spr: Float = 1.0
                 if glyphH > 0.0 { spr = font.pxRange * (sy1 - sy0) / glyphH }
                 if spr < 1.0 { spr = 1.0 }
-                gpu2d.drawGlyph(sx0: sx0, sy0: sy0, sx1: sx1, sy1: sy1,
-                                u0: u0, v0: v0, u1: u1, v1: v1,
-                                atlas: font.atlas, pxRange: spr, color: color)
+                gpu2d.drawGlyphEx(sx0: sx0, sy0: sy0, sx1: sx1, sy1: sy1,
+                                  u0: u0, v0: v0, u1: u1, v1: v1,
+                                  atlas: font.atlas, pxRange: spr, color: color,
+                                  outlineWidth: outlineWidth, outlineColor: outlineColor)
             }
             pen = pen + g.advance * scale
         }
         i = i + 1
     }
     ret pen
+}
+
+# Draw `text` with baseline pen at (x, y) in pixels, `sizePx` tall em,
+# colour 0xAARRGGBB. Submit between gpu2d.beginFrame and gpu2d.endFrame.
+# Returns the pen x advance (end position), like a text cursor.
+func drawText(font: view SdfFont, text: view String, x: copy Float, y: copy Float, sizePx: copy Float, color: copy Int) ret Float {
+    ret emitRun(font: font, text: text, x: x, y: y, sizePx: sizePx, color: color, outlineWidth: 0.0, outlineColor: 0)
+}
+
+# Draw `text` with an outline and/or a drop-shadow — the GPU equivalent of
+# lib/ui/msdf.drawMsdfText. `outlineWidth` px of `outlineColor` grow from the
+# glyph edge (MSDF dilation). A shadow is drawn first when `shadowColor`'s
+# alpha > 0: the run offset by (shadowOffX, shadowOffY), dilated by
+# `shadowSoftness` for a softer edge (softness 1 = sharp). Colours 0xAARRGGBB.
+func drawTextEx(font: view SdfFont, text: view String, x: copy Float, y: copy Float, sizePx: copy Float,
+                color: copy Int, outlineColor: copy Int, outlineWidth: copy Float,
+                shadowColor: copy Int, shadowOffX: copy Float, shadowOffY: copy Float, shadowSoftness: copy Float) ret Float {
+    let shadowA: Int = (shadowColor shr 24) bitand 255
+    if shadowA > 0 {
+        var softW: Float = (shadowSoftness - 1.0) * 1.5
+        if softW < 0.0 { softW = 0.0 }
+        emitRun(font: font, text: text, x: x + shadowOffX, y: y + shadowOffY, sizePx: sizePx,
+                color: shadowColor, outlineWidth: softW, outlineColor: shadowColor)
+    }
+    ret emitRun(font: font, text: text, x: x, y: y, sizePx: sizePx, color: color,
+                outlineWidth: outlineWidth, outlineColor: outlineColor)
 }
 
 # Width of `text` in pixels at `sizePx` (delegates to sdf_text).

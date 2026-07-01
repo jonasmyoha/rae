@@ -4163,14 +4163,15 @@ void rae_ext_gpu2d_drawLine(double x0, double y0, double x1, double y1,
  * premultiplied blend with the box pipeline, so glyphs composite in the
  * same pass after boxes. Instance = 4*vec4: rect, uv (normalised), colour,
  * params(pxRange). One atlas/font per frame (the common UI case). */
-#define G2D_TEXT_FLOATS 16
+#define G2D_TEXT_FLOATS 20
 
 static const char* G2D_TEXT_WGSL =
 "struct Glyph {\n"
 "  rect: vec4<f32>,\n"
 "  uv: vec4<f32>,\n"
 "  color: vec4<f32>,\n"
-"  params: vec4<f32>,\n"
+"  params: vec4<f32>,\n"          /* x=pxRange, y=outlineWidth(px) */
+"  outline: vec4<f32>,\n"         /* straight outline colour */
 "};\n"
 "@group(0) @binding(0) var<uniform> uXform: array<vec4<f32>, 2>;\n"
 "@group(0) @binding(1) var<storage, read> glyphs: array<Glyph>;\n"
@@ -4205,12 +4206,24 @@ static const char* G2D_TEXT_WGSL =
 "fn fs(in: VsOut) -> @location(0) vec4<f32> {\n"
 "  let g = glyphs[in.inst];\n"
 "  let s = textureSample(atlasTex, atlasSamp, in.uv);\n"
-/* pxRange is authored in design units; scale to physical px (avg scale) */
+/* signed distance from the glyph edge, in physical px (design pxRange * avg
+ * scale). Positive inside the glyph. */
 "  let sc = (uXform[0].z + uXform[0].w) * 0.5;\n"
-"  let dist = g.params.x * sc * (median3(s.r, s.g, s.b) - 0.5);\n"
-"  let cov = clamp(dist + 0.5, 0.0, 1.0);\n"
-"  let a = g.color.a * cov;\n"
-"  return vec4<f32>(g.color.rgb * a, a);\n"   /* premultiplied */
+"  let sd = g.params.x * sc * (median3(s.r, s.g, s.b) - 0.5);\n"
+"  let bodyCov = clamp(sd + 0.5, 0.0, 1.0);\n"
+"  let ow = g.params.y;\n"
+"  if (ow <= 0.0) {\n"
+"    let a = g.color.a * bodyCov;\n"
+"    return vec4<f32>(g.color.rgb * a, a);\n"   /* premultiplied */
+"  }\n"
+/* Outline = the glyph dilated by `ow` px; composite body OVER outline,
+ * both premultiplied. */
+"  let outerCov = clamp(sd + 0.5 + ow, 0.0, 1.0);\n"
+"  let ba = g.color.a * bodyCov;\n"
+"  let oa = g.outline.a * outerCov;\n"
+"  let outA = ba + oa * (1.0 - ba);\n"
+"  let outRGB = g.color.rgb * ba + g.outline.rgb * oa * (1.0 - ba);\n"
+"  return vec4<f32>(outRGB, outA);\n"           /* premultiplied */
 "}\n";
 
 static WGPURenderPipeline g_g2d_text_pipeline = NULL;
@@ -4327,9 +4340,11 @@ static void rae_g2d_ensure_text_inst(int ai, int prims) {
     g_g2d_text_cap[ai] = cap;
 }
 
-void rae_ext_gpu2d_drawGlyph(double sx0, double sy0, double sx1, double sy1,
-                             double u0, double v0, double u1, double v1,
-                             int64_t atlas, double pxRange, int64_t color) {
+/* Full glyph submit with an optional outline (outlineWidth px + colour). */
+void rae_ext_gpu2d_drawGlyphEx(double sx0, double sy0, double sx1, double sy1,
+                               double u0, double v0, double u1, double v1,
+                               int64_t atlas, double pxRange, int64_t color,
+                               double outlineWidth, int64_t outlineColor) {
     int ai = (int)atlas - 1;
     if (ai < 0 || ai >= RAE_SDF_MAX_ATLAS) return;
     int need = (g_g2d_text_count[ai] + 1) * G2D_TEXT_FLOATS;
@@ -4348,8 +4363,20 @@ void rae_ext_gpu2d_drawGlyph(double sx0, double sy0, double sx1, double sy1,
     p[9]  = (float)((c >> 8)  & 0xFF) / 255.0f;
     p[10] = (float)( c        & 0xFF) / 255.0f;
     p[11] = (float)((c >> 24) & 0xFF) / 255.0f;
-    p[12]=(float)pxRange; p[13]=0.0f; p[14]=0.0f; p[15]=0.0f;
+    p[12]=(float)pxRange; p[13]=(float)outlineWidth; p[14]=0.0f; p[15]=0.0f;
+    uint32_t oc = (uint32_t)outlineColor;
+    p[16] = (float)((oc >> 16) & 0xFF) / 255.0f;
+    p[17] = (float)((oc >> 8)  & 0xFF) / 255.0f;
+    p[18] = (float)( oc        & 0xFF) / 255.0f;
+    p[19] = (float)((oc >> 24) & 0xFF) / 255.0f;
     g_g2d_text_count[ai]++;
+}
+
+/* Back-compat: glyph with no outline. */
+void rae_ext_gpu2d_drawGlyph(double sx0, double sy0, double sx1, double sy1,
+                             double u0, double v0, double u1, double v1,
+                             int64_t atlas, double pxRange, int64_t color) {
+    rae_ext_gpu2d_drawGlyphEx(sx0, sy0, sx1, sy1, u0, v0, u1, v1, atlas, pxRange, color, 0.0, 0);
 }
 
 /* --- Image pipeline (#143): textured rounded quads -------------------
@@ -5000,6 +5027,7 @@ void rae_ext_gpu2d_drawBox(double x, double y, double w, double h, double radius
 void rae_ext_gpu2d_drawGradientRect(double x, double y, double w, double h, double radius, int64_t from, int64_t to, double angleDeg) { (void)x; (void)y; (void)w; (void)h; (void)radius; (void)from; (void)to; (void)angleDeg; }
 void rae_ext_gpu2d_drawLine(double x0, double y0, double x1, double y1, double thickness, int64_t color) { (void)x0; (void)y0; (void)x1; (void)y1; (void)thickness; (void)color; }
 void rae_ext_gpu2d_drawGlyph(double sx0, double sy0, double sx1, double sy1, double u0, double v0, double u1, double v1, int64_t atlas, double pxRange, int64_t color) { (void)sx0; (void)sy0; (void)sx1; (void)sy1; (void)u0; (void)v0; (void)u1; (void)v1; (void)atlas; (void)pxRange; (void)color; }
+void rae_ext_gpu2d_drawGlyphEx(double sx0, double sy0, double sx1, double sy1, double u0, double v0, double u1, double v1, int64_t atlas, double pxRange, int64_t color, double outlineWidth, int64_t outlineColor) { (void)sx0; (void)sy0; (void)sx1; (void)sy1; (void)u0; (void)v0; (void)u1; (void)v1; (void)atlas; (void)pxRange; (void)color; (void)outlineWidth; (void)outlineColor; }
 #endif /* RAE_HAS_SDL3 */
 #endif /* RAE_HAS_WEBGPU */
 
