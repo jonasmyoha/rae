@@ -36,8 +36,8 @@ func setProfileCircleShape(world: mod UiWorld, entity: view EntityId, fill: view
   componentSet(this: world.shapes, entity: entity, data: sh)
 }
 
-let profileAvatarSize: Float = 120.0
-let profileAvatarIconSize: Float = 80.0
+let profileAvatarSize: Float = 260.2409638554217
+let profileAvatarIconSize: Float = 173.49397590361446
 
 func profileAvatarLoaded(reg: view TextureRegistry, key: view String) ret Bool {
   ret gpu2d.hasImageKey(key: key)
@@ -78,8 +78,8 @@ func buildProfileAvatar(world: mod UiWorld, reg: view TextureRegistry) ret Entit
 # Stat column: big number on top, small label below.
 func buildProfileStatColumn(world: mod UiWorld, value: view String, label: view String) ret EntityId {
   let col: EntityId = createEntity(world: world)
-  let colW: Float = 110.0
-  let colH: Float = 56.0
+  let colW: Float = 238.55421686746988
+  let colH: Float = 121.44578313253011
   setRectFixed(world: world, entity: col, w: colW, h: colH)
   let layV: LayoutType = LayoutType.vertical
   let alignC: AlignKind = AlignKind.center
@@ -107,11 +107,11 @@ func buildProfileStatColumn(world: mod UiWorld, value: view String, label: view 
 func buildProfileStatsRow(world: mod UiWorld, state: view AppState) ret EntityId {
   let row: EntityId = createEntity(world: world)
   let rowW: Float = screenW - outerPad * 2.0
-  let rowH: Float = 60.0
+  let rowH: Float = 130.12048192771084
   setRectFixed(world: world, entity: row, w: rowW, h: rowH)
   let layH: LayoutType = LayoutType.horizontal
   let alignC: AlignKind = AlignKind.center
-  setLayout(world: world, entity: row, kind: layH, gap: spaceXL, alignCross: alignC)
+  setLayout(world: world, entity: row, kind: layH, gap: 52.04819277108433, alignCross: alignC)
 
   let albumCount: Int = state.albums.length
   var trackCount: Int = 0
@@ -152,17 +152,17 @@ func buildSpotifyStatusCard(world: mod UiWorld) ret EntityId {
   let spotifyEnabled: Bool = optOut.length() is 0
   let card: EntityId = createEntity(world: world)
   let cardW: Float = screenW - outerPad * 2.0
-  let cardH: Float = 84.0
+  let cardH: Float = 182.16867469879517
   setRectFixed(world: world, entity: card, w: cardW, h: cardH)
   let bg: RgbaColor = { r: 30, g: 200, b: 130, a: 255 }
   setShapeRect(world: world, entity: card, fill: bg)
   let layV: LayoutType = LayoutType.vertical
   let alignS: AlignKind = AlignKind.start
-  setLayout(world: world, entity: card, kind: layV, gap: spaceXS, alignCross: alignS)
+  setLayout(world: world, entity: card, kind: layV, gap: 8.674698795180722, alignCross: alignS)
   # 14 sits between spaceM (12) and spaceL (16) — deliberate non-token
   # to fit the card chrome's exact 84-px height. Don't widen the scale
   # for one site.
-  setPaddingAll(world: world, entity: card, n: 14.0)
+  setPaddingAll(world: world, entity: card, n: 30.361445783132528)
 
   let title: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: title, w: cardW - 28.0, h: 24.0)
@@ -208,16 +208,16 @@ func buildSpotifyStatusCard(world: mod UiWorld) ret EntityId {
 func buildSettingsRow(world: mod UiWorld, iconKey: view String, label: view String) ret EntityId {
   let row: EntityId = createEntity(world: world)
   let rowW: Float = screenW - outerPad * 2.0
-  let rowH: Float = 56.0
+  let rowH: Float = 121.44578313253011
   setRectFixed(world: world, entity: row, w: rowW, h: rowH)
   let layH: LayoutType = LayoutType.horizontal
   let alignC: AlignKind = AlignKind.center
   # Settings-row icon→label spacing stays at 14 (between spaceM and L)
   # to match the hand-tuned 28-px icon size; don't widen the scale.
   setLayout(world: world, entity: row, kind: layH, gap: 14.0, alignCross: alignC)
-  setPaddingAll(world: world, entity: row, n: spaceS)
+  setPaddingAll(world: world, entity: row, n: 17.349397590361445)
 
-  let iconSize: Float = 28.0
+  let iconSize: Float = 60.722891566265055
   let icon: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: icon, w: iconSize, h: iconSize)
   setSprite(world: world, entity: icon, key: iconKey, tint: iconTint)
@@ -245,8 +245,8 @@ func buildSettingsRow(world: mod UiWorld, iconKey: view String, label: view Stri
 func buildSettingsList(world: mod UiWorld) ret EntityId {
   let list: EntityId = createEntity(world: world)
   let listW: Float = screenW - outerPad * 2.0
-  let rowH: Float = 56.0
-  let gap: Float = 4.0
+  let rowH: Float = 121.44578313253011
+  let gap: Float = 8.674698795180722
   let rowCount: Int = 4
   let listH: Float = rowH * rowCount.toFloat() + gap * (rowCount - 1).toFloat()
   setRectFixed(world: world, entity: list, w: listW, h: listH)
