@@ -141,3 +141,11 @@ func drawImage(x: Float, y: Float, w: Float, h: Float, radius: Float, handle: In
 func drawGlyph(sx0: Float, sy0: Float, sx1: Float, sy1: Float,
                u0: Float, v0: Float, u1: Float, v1: Float,
                atlas: Int, pxRange: Float, color: Int) extern
+
+# Glyph with an outline: `outlineWidth` px of `outlineColor` (0xAARRGGBB) grown
+# outward from the glyph edge (MSDF dilation), body composited over it. Used by
+# lib/gpu2d_text.drawTextEx for outlined + shadowed text.
+func drawGlyphEx(sx0: Float, sy0: Float, sx1: Float, sy1: Float,
+                 u0: Float, v0: Float, u1: Float, v1: Float,
+                 atlas: Int, pxRange: Float, color: Int,
+                 outlineWidth: Float, outlineColor: Int) extern

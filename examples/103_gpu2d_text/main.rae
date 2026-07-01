@@ -1,49 +1,137 @@
 # 2D Renderer — Step 3: MSDF text (#111, #113).
 #
-# GPU sibling of 100_font_example / 53: crisp scalable Roboto text rendered as
-# MSDF glyph quads through the gpu2d Text pipeline (median-of-3 + screen-px-range
-# AA), composited over rounded-box panels in the same pass. Same atlas the CPU
-# blit path uses, uploaded once as a wgpu texture. Text stays sharp at any size.
+# The GPU sibling of 100_font_example: the same Roboto MSDF atlas rendered as
+# distance-field glyph quads through the gpu2d text pipeline, exercising the
+# cases a text renderer must get right — sizes from tiny to display, many
+# colours, light/dark/saturated backgrounds (edge-halo test), light-on-light
+# and dark-on-dark (premultiplied-alpha test), sharp + soft drop-shadows, and
+# outlines of several widths (all analytic, no MSAA). One atlas scales to every
+# size; boxes + text composite in one render pass.
 #
 # Compiled-target only; needs wgpu-native + SDL3.
-#   rae run --target compiled --project examples/103_gpu2d_text main.rae
+#   rae run --target compiled examples/103_gpu2d_text/main.rae
 import core
 import gpu2d
 import gpu2d_text
 import sdf_text
 
+# Design canvas — author in logical units; gpu2d scales it to the window.
+let canvasW: Float = 1040.0
+let canvasH: Float = 980.0
+
+# --- draw helpers ---------------------------------------------------------
+func mtext(font: view SdfFont, s: view String, x: view Float, y: view Float, size: view Float, c: view Int) {
+  gpu2d_text.drawText(font: font, text: s, x: x, y: y, sizePx: size, color: c)
+}
+
+func mshadow(font: view SdfFont, s: view String, x: view Float, y: view Float, size: view Float, c: view Int, sh: view Int, sy: view Float, soft: view Float) {
+  gpu2d_text.drawTextEx(font: font, text: s, x: x, y: y, sizePx: size, color: c,
+                        outlineColor: 0, outlineWidth: 0.0,
+                        shadowColor: sh, shadowOffX: 0.0, shadowOffY: sy, shadowSoftness: soft)
+}
+
+func moutline(font: view SdfFont, s: view String, x: view Float, y: view Float, size: view Float, c: view Int, ol: view Int, olw: view Float) {
+  gpu2d_text.drawTextEx(font: font, text: s, x: x, y: y, sizePx: size, color: c,
+                        outlineColor: ol, outlineWidth: olw,
+                        shadowColor: 0, shadowOffX: 0.0, shadowOffY: 0.0, shadowSoftness: 1.0)
+}
+
+func panel(x: view Float, y: view Float, w: view Float, h: view Float, c: view Int) {
+  gpu2d.drawRoundedRect(x: x, y: y, w: w, h: h, radius: 10.0, color: c)
+}
+
+func header(font: view SdfFont, s: view String, x: view Float, y: view Float) {
+  gpu2d_text.drawText(font: font, text: s, x: x, y: y, sizePx: 17.0, color: 0xFF78C8FF)
+}
+
+func drawFrame(font: view SdfFont) {
+  let white: Int = 0xFFECEFF5
+  let gray: Int = 0xFF969AA5
+  let darkInk: Int = 0xFF181A20
+  let panelDark: Int = 0xFF1E212A
+  let panelMid: Int = 0xFF787A82
+  let panelLight: Int = 0xFFECEDF0
+  let panelCyan: Int = 0xFF5ACDDC
+  let shCol: Int = 0xAF000000
+
+  # --- title ---
+  mshadow(font: font, s: "Rae — GPU MSDF Text", x: 32.0, y: 56.0, size: 44.0, c: white, sh: shCol, sy: 2.0, soft: 1.0)
+  mtext(font: font, s: "Roboto MSDF distance-field glyphs on the GPU (WebGPU) — one atlas, any size.", x: 34.0, y: 86.0, size: 17.0, c: gray)
+
+  # --- Block A: size ramp ---
+  header(font: font, s: "SIZES (one atlas, crisp at every scale)", x: 32.0, y: 116.0)
+  panel(x: 32.0, y: 128.0, w: 976.0, h: 170.0, c: panelDark)
+  mtext(font: font, s: "Grumpy wizards 14", x: 56.0, y: 156.0, size: 14.0, c: white)
+  mtext(font: font, s: "Grumpy wizards 18", x: 56.0, y: 180.0, size: 18.0, c: white)
+  mtext(font: font, s: "Grumpy wizards 26", x: 56.0, y: 212.0, size: 26.0, c: white)
+  mtext(font: font, s: "Grumpy wizards 40", x: 56.0, y: 258.0, size: 40.0, c: white)
+  mtext(font: font, s: "88", x: 730.0, y: 268.0, size: 96.0, c: 0xFF3A3F4C)
+
+  # --- Block B: colours ---
+  header(font: font, s: "COLOURS", x: 32.0, y: 320.0)
+  panel(x: 32.0, y: 332.0, w: 976.0, h: 60.0, c: panelMid)
+  mtext(font: font, s: "White", x: 48.0, y: 374.0, size: 32.0, c: white)
+  mtext(font: font, s: "Red", x: 210.0, y: 374.0, size: 32.0, c: 0xFFEB4646)
+  mtext(font: font, s: "Green", x: 320.0, y: 374.0, size: 32.0, c: 0xFF46D26E)
+  mtext(font: font, s: "Blue", x: 490.0, y: 374.0, size: 32.0, c: 0xFF5A8CFF)
+  mtext(font: font, s: "Gold", x: 620.0, y: 374.0, size: 32.0, c: 0xFFF5CD46)
+  mtext(font: font, s: "Black", x: 760.0, y: 374.0, size: 32.0, c: darkInk)
+
+  # --- Block C: white text on varied backgrounds (no edge halo) ---
+  header(font: font, s: "WHITE ON BACKGROUNDS (no edge halo)", x: 32.0, y: 414.0)
+  panel(x: 32.0, y: 426.0, w: 232.0, h: 72.0, c: panelDark)
+  panel(x: 272.0, y: 426.0, w: 232.0, h: 72.0, c: panelMid)
+  panel(x: 512.0, y: 426.0, w: 232.0, h: 72.0, c: panelLight)
+  panel(x: 752.0, y: 426.0, w: 256.0, h: 72.0, c: panelCyan)
+  mtext(font: font, s: "Sample", x: 56.0, y: 474.0, size: 30.0, c: white)
+  mtext(font: font, s: "Sample", x: 296.0, y: 474.0, size: 30.0, c: white)
+  mtext(font: font, s: "Sample", x: 536.0, y: 474.0, size: 30.0, c: white)
+  mtext(font: font, s: "Sample", x: 776.0, y: 474.0, size: 30.0, c: white)
+
+  # --- Block D: low-contrast (premultiplied-alpha test) ---
+  header(font: font, s: "LOW-CONTRAST (premultiplied alpha)", x: 32.0, y: 514.0)
+  panel(x: 32.0, y: 526.0, w: 472.0, h: 60.0, c: panelLight)
+  mtext(font: font, s: "Dark on light 0123", x: 56.0, y: 566.0, size: 28.0, c: darkInk)
+  panel(x: 536.0, y: 526.0, w: 472.0, h: 60.0, c: panelLight)
+  mtext(font: font, s: "Light on light 0123", x: 560.0, y: 566.0, size: 28.0, c: 0xFFF6F7FA)
+
+  # --- Block E: drop-shadows ---
+  header(font: font, s: "DROP-SHADOWS (none / sharp / soft)", x: 32.0, y: 606.0)
+  panel(x: 32.0, y: 618.0, w: 976.0, h: 76.0, c: panelLight)
+  mtext(font: font, s: "None", x: 56.0, y: 672.0, size: 36.0, c: darkInk)
+  mshadow(font: font, s: "Sharp", x: 320.0, y: 672.0, size: 36.0, c: darkInk, sh: shCol, sy: 2.0, soft: 1.0)
+  mshadow(font: font, s: "Soft", x: 640.0, y: 672.0, size: 36.0, c: darkInk, sh: 0x96000000, sy: 3.0, soft: 4.0)
+
+  # --- Block F: outlines (large text so the outline has room) ---
+  header(font: font, s: "OUTLINES (MSDF dilation)", x: 32.0, y: 712.0)
+  panel(x: 32.0, y: 724.0, w: 976.0, h: 116.0, c: 0xFF463C78)
+  mtext(font: font, s: "None", x: 52.0, y: 812.0, size: 72.0, c: white)
+  moutline(font: font, s: "Thin", x: 360.0, y: 812.0, size: 72.0, c: white, ol: 0xFF120E26, olw: 2.5)
+  moutline(font: font, s: "Bold", x: 660.0, y: 812.0, size: 72.0, c: 0xFFF5CD46, ol: 0xFF120E26, olw: 6.0)
+
+  # --- Block G: tiny text + shadow (no dark boxes / clipping) ---
+  header(font: font, s: "SMALL TEXT + SHADOW", x: 32.0, y: 858.0)
+  panel(x: 32.0, y: 870.0, w: 976.0, h: 58.0, c: panelLight)
+  mshadow(font: font, s: "10px tiny", x: 56.0, y: 906.0, size: 10.0, c: darkInk, sh: shCol, sy: 1.0, soft: 1.0)
+  mshadow(font: font, s: "13px small", x: 210.0, y: 906.0, size: 13.0, c: darkInk, sh: shCol, sy: 1.0, soft: 1.0)
+  mshadow(font: font, s: "16px caption", x: 400.0, y: 906.0, size: 16.0, c: darkInk, sh: shCol, sy: 1.0, soft: 1.0)
+  mshadow(font: font, s: "22px body", x: 660.0, y: 906.0, size: 22.0, c: darkInk, sh: shCol, sy: 2.0, soft: 1.0)
+}
+
 func main() ret Int {
-    gpu2d.initWindow(width: 960, height: 560, title: "Rae 2D — MSDF text")
-    let dir: String = "examples/103_gpu2d_text/"
-    let font: SdfFont = sdf_text.loadSdfFont(
-        jsonPath: "{dir}assets/Roboto-Regular.mtsdf.json",
-        rawAtlasPath: "{dir}assets/Roboto-Regular.mtsdf.raw")
+  gpu2d.initWindow(width: 1040, height: 980, title: "Rae 2D — GPU MSDF Text")
+  gpu2d.setDesignResolution(width: canvasW, height: canvasH, fit: 0)
+  let dir: String = "examples/103_gpu2d_text/"
+  let font: SdfFont = sdf_text.loadSdfFont(
+    jsonPath: "{dir}assets/Roboto-Regular.mtsdf.json",
+    rawAtlasPath: "{dir}assets/Roboto-Regular.mtsdf.raw")
 
-    loop not gpu2d.pollClose() {
-        gpu2d.beginFrame(r: 0.05, g: 0.06, b: 0.09, a: 1.0)
-
-        # A panel behind the text (box + text composite in one pass).
-        gpu2d.drawBox(x: 40.0, y: 40.0, w: 880.0, h: 220.0, radius: 20.0,
-                      fill: 0xFF141A26, borderWidth: 1.0, border: 0xFF2A3550)
-
-        # Headline + body — same font, different sizes, all crisp (no MSAA).
-        let h0: Float = gpu2d_text.drawText(font: font, text: "Hello, Rae 2D",
-                                            x: 72.0, y: 120.0, sizePx: 64.0, color: 0xFFFFFFFF)
-        gpu2d_text.drawText(font: font, text: "MSDF glyphs on the GPU — crisp at any scale.",
-                            x: 72.0, y: 170.0, sizePx: 26.0, color: 0xFFAEB8CC)
-        gpu2d_text.drawText(font: font, text: "Boxes and text composite in one render pass.",
-                            x: 72.0, y: 210.0, sizePx: 26.0, color: 0xFF6FA8FF)
-
-        # A size ramp — same string at growing sizes shows resolution independence.
-        gpu2d_text.drawText(font: font, text: "12", x: 72.0, y: 330.0, sizePx: 12.0, color: 0xFFFFCA28)
-        gpu2d_text.drawText(font: font, text: "24", x: 110.0, y: 340.0, sizePx: 24.0, color: 0xFFFFCA28)
-        gpu2d_text.drawText(font: font, text: "48", x: 170.0, y: 360.0, sizePx: 48.0, color: 0xFFFFCA28)
-        gpu2d_text.drawText(font: font, text: "96", x: 270.0, y: 400.0, sizePx: 96.0, color: 0xFFFFCA28)
-        gpu2d_text.drawText(font: font, text: "Rae", x: 470.0, y: 430.0, sizePx: 140.0, color: 0xFFEF5350)
-
-        gpu2d.endFrame()
-    }
-
-    gpu2d.closeWindow()
-    ret 0
+  loop not gpu2d.pollClose() {
+    gpu2d.beginFrame(r: 0.063, g: 0.070, b: 0.094, a: 1.0)
+    drawFrame(font: font)
+    gpu2d.endFrame()
+    gpu2d.waitEvents(timeoutSec: 0.2)
+  }
+  gpu2d.closeWindow()
+  ret 0
 }
