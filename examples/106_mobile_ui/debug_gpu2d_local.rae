@@ -20,6 +20,17 @@ let debugActionToggleLabels: String = "debug.toggleLabels"
 let debugActionToggleInputOutlines: String = "debug.toggleInputOutlines"
 let debugActionDismiss: String = "debug.dismiss"
 
+let debugRowH: Float = 121.44578313253011
+let debugLabelH: Float = 52.04819277108433
+let debugSwitchW: Float = 121.44578313253011
+let debugSwitchH: Float = 69.39759036144578
+let debugSwitchRadius: Float = 34.69879518072289
+let debugSwitchKnob: Float = 56.3855421686747
+let debugSwitchKnobOffset: Float = 26.024096385542165
+let debugPanelRadius: Float = 69.39759036144578
+let debugPanelPadding: Float = 43.373493975903614
+let debugPanelInset: Float = 86.74698795180723
+
 func debugAmberColor() ret RgbaColor { ret RgbaColor { r: 255, g: 191, b: 0, a: 255 } }
 func debugBackdropColor() ret RgbaColor { ret RgbaColor { r: 0, g: 0, b: 0, a: 160 } }
 func debugMenuFillColor() ret RgbaColor { ret RgbaColor { r: 24, g: 24, b: 28, a: 240 } }
@@ -261,26 +272,26 @@ func buildSwitchRow(
   width: view Float
 ) ret EntityId {
   let row: EntityId = createEntity(world: world)
-  setFixedRect(world: world, entity: row, w: width, h: 56.0)
+  setFixedRect(world: world, entity: row, w: width, h: debugRowH)
   setHorizontalLayout(world: world, entity: row, gap: 26.024096385542165, alignCross: AlignKind.center)
   setOnClickAction(world: world, entity: row, actionId: actionId)
 
   let label: EntityId = createEntity(world: world)
-  setFixedRect(world: world, entity: label, w: width - 80.0, h: 24.0)
+  setFixedRect(world: world, entity: label, w: width - debugPanelInset, h: debugLabelH)
   setDebugText(world: world, entity: label, text: labelText, styleId: "debugMenuLabel")
 
   let pill: EntityId = createEntity(world: world)
-  setFixedRect(world: world, entity: pill, w: 56.0, h: 32.0)
+  setFixedRect(world: world, entity: pill, w: debugSwitchW, h: debugSwitchH)
   var pillFill: RgbaColor = debugSwitchOffColor()
   if on { pillFill = debugSwitchOnColor() }
-  setRoundedShape(world: world, entity: pill, fill: pillFill, radius: 16.0)
+  setRoundedShape(world: world, entity: pill, fill: pillFill, radius: debugSwitchRadius)
   setStackLayout(world: world, entity: pill)
 
   let knob: EntityId = createEntity(world: world)
-  setFixedRect(world: world, entity: knob, w: 26.0, h: 26.0)
+  setFixedRect(world: world, entity: knob, w: debugSwitchKnob, h: debugSwitchKnob)
   setCircleShape(world: world, entity: knob, fill: debugSwitchKnobColor())
-  var knobOff: Float = -12.0
-  if on { knobOff = 12.0 }
+  var knobOff: Float = 0.0 - debugSwitchKnobOffset
+  if on { knobOff = debugSwitchKnobOffset }
   setOffset(world: world, entity: knob, x: knobOff, y: 0.0)
 
   let pillKids: List(EntityId) = createList(EntityId, cap: 1)
@@ -306,13 +317,13 @@ func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret Enti
   let panelH: Float = debug.screenH * 0.72
   let panel: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: panel, w: panelW, h: panelH)
-  setRoundedShape(world: world, entity: panel, fill: debugMenuFillColor(), radius: 32.0)
+  setRoundedShape(world: world, entity: panel, fill: debugMenuFillColor(), radius: debugPanelRadius)
   setVerticalLayout(world: world, entity: panel, gap: 26.024096385542165)
-  dbgSetPaddingAll(world: world, entity: panel, n: 20.0)
+  dbgSetPaddingAll(world: world, entity: panel, n: debugPanelPadding)
 
-  let themeRow: EntityId = buildSwitchRow(world: world, labelText: "Dark theme", actionId: debugActionToggleTheme, on: currentTheme().mode is ThemeMode.dark, width: panelW - 40.0)
-  let labelsRow: EntityId = buildSwitchRow(world: world, labelText: "FPS / mem labels", actionId: debugActionToggleLabels, on: debug.showLabels, width: panelW - 40.0)
-  let outlinesRow: EntityId = buildSwitchRow(world: world, labelText: "Input outlines", actionId: debugActionToggleInputOutlines, on: debug.showInputOutlines, width: panelW - 40.0)
+  let themeRow: EntityId = buildSwitchRow(world: world, labelText: "Dark theme", actionId: debugActionToggleTheme, on: currentTheme().mode is ThemeMode.dark, width: panelW - debugPanelInset)
+  let labelsRow: EntityId = buildSwitchRow(world: world, labelText: "FPS / mem labels", actionId: debugActionToggleLabels, on: debug.showLabels, width: panelW - debugPanelInset)
+  let outlinesRow: EntityId = buildSwitchRow(world: world, labelText: "Input outlines", actionId: debugActionToggleInputOutlines, on: debug.showInputOutlines, width: panelW - debugPanelInset)
 
   let rows: List(EntityId) = createList(EntityId, cap: 3)
   rows.add(value: themeRow)
