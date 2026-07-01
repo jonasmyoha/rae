@@ -583,8 +583,16 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             emit_type_ref_as_c_type(ctx, expr->as.object_literal.type, out, false);
             fprintf(out, ")");
         } else if (ctx->has_expected_type) {
+            // A compound literal is always a VALUE, never a pointer — even when
+            // the expected type is a `view`/`mod` param (pointer). The caller's
+            // address-of-temp wrapper (`(T[1]){ ... }` in c_call.c) provides the
+            // pointer, so strip view/mod here or we'd emit an invalid
+            // `(rae_T*){ .field = ... }`.
+            AstTypeRef exp_val = ctx->expected_type;
+            exp_val.is_view = false;
+            exp_val.is_mod = false;
             fprintf(out, "(");
-            emit_type_ref_as_c_type(ctx, &ctx->expected_type, out, false);
+            emit_type_ref_as_c_type(ctx, &exp_val, out, false);
             fprintf(out, ")");
         }
         fprintf(out, "{ ");
