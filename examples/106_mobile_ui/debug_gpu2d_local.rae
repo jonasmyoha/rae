@@ -30,6 +30,12 @@ let debugSwitchKnobOffset: Float = 26.024096385542165
 let debugPanelRadius: Float = 69.39759036144578
 let debugPanelPadding: Float = 43.373493975903614
 let debugPanelInset: Float = 86.74698795180723
+let debugCloseIconSize: Float = 69.39759036144578
+let debugCloseButtonW: Float = 312.289156626506
+let debugCloseButtonH: Float = 86.74698795180723
+let debugCloseButtonRadius: Float = 43.373493975903614
+let debugRowGap: Float = 26.024096385542165
+let debugContentTop: Float = 138.81927710843374
 
 func debugAmberColor() ret RgbaColor { ret RgbaColor { r: 255, g: 191, b: 0, a: 255 } }
 func debugBackdropColor() ret RgbaColor { ret RgbaColor { r: 0, g: 0, b: 0, a: 160 } }
@@ -125,6 +131,16 @@ func currentDebugFPS(debug: view DebugSystem) pub ret Float { ret debug.lastFps 
 func setOffset(world: mod UiWorld, entity: view EntityId, x: view Float, y: view Float) {
   let off: Offset = { delta: Vec2 { x: x, y: y } }
   componentSet(this: world.offsets, entity: entity, data: off)
+}
+
+func setAlign(world: mod UiWorld, entity: view EntityId, x: AlignKind, y: AlignKind) {
+  let a: Align = {
+    x: x
+    y: y
+    hasX: true
+    hasY: true
+  }
+  componentSet(this: world.aligns, entity: entity, data: a)
 }
 
 func setFixedRect(world: mod UiWorld, entity: view EntityId, w: view Float, h: view Float) {
@@ -264,6 +280,22 @@ func buildDebugButton(world: mod UiWorld, debug: view DebugSystem) ret EntityId 
   ret btn
 }
 
+func buildDebugTextButton(world: mod UiWorld, text: own String, w: view Float, h: view Float, radius: view Float) ret EntityId {
+  let btn: EntityId = createEntity(world: world)
+  setFixedRect(world: world, entity: btn, w: w, h: h)
+  setRoundedShape(world: world, entity: btn, fill: debugAmberColor(), radius: radius)
+  setStackLayout(world: world, entity: btn)
+  setOnClickAction(world: world, entity: btn, actionId: debugActionDismiss)
+
+  let label: EntityId = createEntity(world: world)
+  setFixedRect(world: world, entity: label, w: w, h: h)
+  setDebugText(world: world, entity: label, text: text, styleId: "debugButton")
+  let kids: List(EntityId) = createList(EntityId, cap: 1)
+  kids.add(value: label)
+  attachKids(world: world, parent: btn, kids: kids)
+  ret btn
+}
+
 func buildSwitchRow(
   world: mod UiWorld
   labelText: own String
@@ -273,11 +305,12 @@ func buildSwitchRow(
 ) ret EntityId {
   let row: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: row, w: width, h: debugRowH)
-  setHorizontalLayout(world: world, entity: row, gap: 26.024096385542165, alignCross: AlignKind.center)
+  setHorizontalLayout(world: world, entity: row, gap: debugRowGap, alignCross: AlignKind.center)
   setOnClickAction(world: world, entity: row, actionId: actionId)
 
   let label: EntityId = createEntity(world: world)
-  setFixedRect(world: world, entity: label, w: width - debugPanelInset, h: debugLabelH)
+  let labelW: Float = width - debugSwitchW - debugRowGap
+  setFixedRect(world: world, entity: label, w: labelW, h: debugLabelH)
   setDebugText(world: world, entity: label, text: labelText, styleId: "debugMenuLabel")
 
   let pill: EntityId = createEntity(world: world)
@@ -318,18 +351,39 @@ func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret Enti
   let panel: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: panel, w: panelW, h: panelH)
   setRoundedShape(world: world, entity: panel, fill: debugMenuFillColor(), radius: debugPanelRadius)
-  setVerticalLayout(world: world, entity: panel, gap: 26.024096385542165)
-  dbgSetPaddingAll(world: world, entity: panel, n: debugPanelPadding)
+  setStackLayout(world: world, entity: panel)
 
-  let themeRow: EntityId = buildSwitchRow(world: world, labelText: "Dark theme", actionId: debugActionToggleTheme, on: currentTheme().mode is ThemeMode.dark, width: panelW - debugPanelInset)
-  let labelsRow: EntityId = buildSwitchRow(world: world, labelText: "FPS / mem labels", actionId: debugActionToggleLabels, on: debug.showLabels, width: panelW - debugPanelInset)
-  let outlinesRow: EntityId = buildSwitchRow(world: world, labelText: "Input outlines", actionId: debugActionToggleInputOutlines, on: debug.showInputOutlines, width: panelW - debugPanelInset)
+  let content: EntityId = createEntity(world: world)
+  let contentW: Float = panelW - debugPanelPadding * 2.0
+  let contentH: Float = panelH - debugContentTop - debugPanelPadding * 2.0 - debugCloseButtonH
+  setFixedRect(world: world, entity: content, w: contentW, h: contentH)
+  setAlign(world: world, entity: content, x: AlignKind.start, y: AlignKind.start)
+  setOffset(world: world, entity: content, x: debugPanelPadding, y: debugContentTop)
+  setVerticalLayout(world: world, entity: content, gap: debugRowGap)
+
+  let themeRow: EntityId = buildSwitchRow(world: world, labelText: "Dark theme", actionId: debugActionToggleTheme, on: currentTheme().mode is ThemeMode.dark, width: contentW)
+  let labelsRow: EntityId = buildSwitchRow(world: world, labelText: "FPS / mem labels", actionId: debugActionToggleLabels, on: debug.showLabels, width: contentW)
+  let outlinesRow: EntityId = buildSwitchRow(world: world, labelText: "Input outlines", actionId: debugActionToggleInputOutlines, on: debug.showInputOutlines, width: contentW)
 
   let rows: List(EntityId) = createList(EntityId, cap: 3)
   rows.add(value: themeRow)
   rows.add(value: labelsRow)
   rows.add(value: outlinesRow)
-  attachKids(world: world, parent: panel, kids: rows)
+  attachKids(world: world, parent: content, kids: rows)
+
+  let closeX: EntityId = buildDebugTextButton(world: world, text: "X", w: debugCloseIconSize, h: debugCloseIconSize, radius: debugCloseIconSize / 2.0)
+  setAlign(world: world, entity: closeX, x: AlignKind.end, y: AlignKind.start)
+  setOffset(world: world, entity: closeX, x: 0.0 - debugPanelPadding, y: debugPanelPadding)
+
+  let closeButton: EntityId = buildDebugTextButton(world: world, text: "Close", w: debugCloseButtonW, h: debugCloseButtonH, radius: debugCloseButtonRadius)
+  setAlign(world: world, entity: closeButton, x: AlignKind.center, y: AlignKind.end)
+  setOffset(world: world, entity: closeButton, x: 0.0, y: 0.0 - debugPanelPadding)
+
+  let panelKids: List(EntityId) = createList(EntityId, cap: 3)
+  panelKids.add(value: content)
+  panelKids.add(value: closeX)
+  panelKids.add(value: closeButton)
+  attachKids(world: world, parent: panel, kids: panelKids)
 
   let backdropKids: List(EntityId) = createList(EntityId, cap: 1)
   backdropKids.add(value: panel)
