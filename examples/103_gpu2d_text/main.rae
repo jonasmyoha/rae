@@ -96,40 +96,38 @@ func drawFrame(font: view SdfFont) {
   panel(x: 536.0, y: 526.0, w: 472.0, h: 60.0, c: panelLight)
   mtext(font: font, s: "Light on light 0123", x: 560.0, y: 566.0, size: 28.0, c: 0xFFF6F7FA)
 
-  # --- Block E: drop-shadows — white text on a coloured panel, dark shadow
-  # (shadows read against colour, not black-on-white). Sharp vs a real soft blur.
-  header(font: font, s: "DROP-SHADOWS (white text, dark shadow — none / sharp / soft)", x: 32.0, y: 606.0)
-  panel(x: 32.0, y: 618.0, w: 976.0, h: 84.0, c: 0xFF3B5E8C)
-  mtext(font: font, s: "None", x: 56.0, y: 680.0, size: 40.0, c: white)
-  mshadow(font: font, s: "Sharp", x: 340.0, y: 680.0, size: 40.0, c: white, sh: 0xC8000000, sy: 3.0, soft: 1.0)
-  mshadow(font: font, s: "Soft", x: 680.0, y: 680.0, size: 40.0, c: white, sh: 0xB4000000, sy: 4.0, soft: 12.0)
+  # --- Block E: drop-shadows across sizes — white text on a coloured panel,
+  # diagonal dark shadow (reads against colour, not black-on-white). Big sharp
+  # + soft samples with a TIGHT offset, then the small-size ramp. ---
+  header(font: font, s: "DROP-SHADOWS (diagonal, sharp & soft, every size)", x: 32.0, y: 606.0)
+  panel(x: 32.0, y: 618.0, w: 976.0, h: 152.0, c: 0xFF4E7D6B)
+  # Big samples — shadow sits close to the glyph (small offset).
+  mtext(font: font, s: "None", x: 56.0, y: 682.0, size: 42.0, c: white)
+  mshadow(font: font, s: "Sharp", x: 320.0, y: 682.0, size: 42.0, c: white, sh: 0xC8000000, sy: 2.0, soft: 1.0)
+  mshadow(font: font, s: "Soft", x: 660.0, y: 682.0, size: 42.0, c: white, sh: 0xB4000000, sy: 2.0, soft: 12.0)
+  # Small ramp — thickened so the shadow reads on thin glyphs.
+  smallShadow(font: font, s: "10px tiny", x: 56.0, y: 748.0, size: 10.0)
+  smallShadow(font: font, s: "13px small", x: 210.0, y: 748.0, size: 13.0)
+  smallShadow(font: font, s: "16px caption", x: 400.0, y: 748.0, size: 16.0)
+  smallShadow(font: font, s: "22px body", x: 660.0, y: 748.0, size: 22.0)
 
   # --- Block F: outlines — across sizes (like the size ramp) AND widths ---
-  header(font: font, s: "OUTLINES — across sizes, then thin / bold / heavy", x: 32.0, y: 722.0)
-  panel(x: 32.0, y: 734.0, w: 976.0, h: 208.0, c: 0xFF463C78)
+  header(font: font, s: "OUTLINES — across sizes, then thin / bold / heavy", x: 32.0, y: 790.0)
+  panel(x: 32.0, y: 802.0, w: 976.0, h: 208.0, c: 0xFF463C78)
   let olInk: Int = 0xFF120E26
   # Row 1: same outlined word growing through four sizes (outline stays crisp).
-  moutline(font: font, s: "Rae", x: 56.0, y: 800.0, size: 28.0, c: white, ol: olInk, olw: 2.0)
-  moutline(font: font, s: "Rae", x: 150.0, y: 806.0, size: 40.0, c: white, ol: olInk, olw: 3.0)
-  moutline(font: font, s: "Rae", x: 300.0, y: 814.0, size: 56.0, c: white, ol: olInk, olw: 4.0)
-  moutline(font: font, s: "Rae", x: 500.0, y: 826.0, size: 76.0, c: white, ol: olInk, olw: 5.0)
+  moutline(font: font, s: "Rae", x: 56.0, y: 868.0, size: 28.0, c: white, ol: olInk, olw: 2.0)
+  moutline(font: font, s: "Rae", x: 150.0, y: 874.0, size: 40.0, c: white, ol: olInk, olw: 3.0)
+  moutline(font: font, s: "Rae", x: 300.0, y: 882.0, size: 56.0, c: white, ol: olInk, olw: 4.0)
+  moutline(font: font, s: "Rae", x: 500.0, y: 894.0, size: 76.0, c: white, ol: olInk, olw: 5.0)
   # Row 2: one size, increasing outline thickness (thin → heavy).
-  moutline(font: font, s: "Thin", x: 56.0, y: 916.0, size: 60.0, c: white, ol: olInk, olw: 2.0)
-  moutline(font: font, s: "Bold", x: 340.0, y: 916.0, size: 60.0, c: 0xFFF5CD46, ol: olInk, olw: 6.0)
-  moutline(font: font, s: "Heavy", x: 640.0, y: 916.0, size: 60.0, c: 0xFFEB6B5A, ol: olInk, olw: 12.0)
-
-  # --- Block G: small text + shadow — coloured panel, white text lightly
-  # thickened by a same-colour outline so the shadow reads without gaps. ---
-  header(font: font, s: "SMALL TEXT + SHADOW (thickened so the shadow reads)", x: 32.0, y: 962.0)
-  panel(x: 32.0, y: 974.0, w: 976.0, h: 56.0, c: 0xFF4E7D6B)
-  smallShadow(font: font, s: "10px tiny", x: 56.0, y: 1010.0, size: 10.0)
-  smallShadow(font: font, s: "13px small", x: 210.0, y: 1010.0, size: 13.0)
-  smallShadow(font: font, s: "16px caption", x: 400.0, y: 1010.0, size: 16.0)
-  smallShadow(font: font, s: "22px body", x: 660.0, y: 1010.0, size: 22.0)
+  moutline(font: font, s: "Thin", x: 56.0, y: 984.0, size: 60.0, c: white, ol: olInk, olw: 2.0)
+  moutline(font: font, s: "Bold", x: 340.0, y: 984.0, size: 60.0, c: 0xFFF5CD46, ol: olInk, olw: 6.0)
+  moutline(font: font, s: "Heavy", x: 640.0, y: 984.0, size: 60.0, c: 0xFFEB6B5A, ol: olInk, olw: 12.0)
 }
 
 # White small text with a subtle same-colour outline (to fatten thin glyphs)
-# plus a soft dark shadow, so small text + shadow reads cleanly.
+# plus a soft diagonal dark shadow, so small text + shadow reads cleanly.
 func smallShadow(font: view SdfFont, s: view String, x: view Float, y: view Float, size: view Float) {
   gpu2d_text.drawTextEx(font: font, text: s, x: x, y: y, sizePx: size, color: 0xFFFFFFFF,
                         outlineColor: 0xFFFFFFFF, outlineWidth: 1.2,
@@ -137,7 +135,7 @@ func smallShadow(font: view SdfFont, s: view String, x: view Float, y: view Floa
 }
 
 func main() ret Int {
-  gpu2d.initWindow(width: 1040, height: 980, title: "Rae 2D — GPU MSDF Text")
+  gpu2d.initWindow(width: 1040, height: 1040, title: "Rae 2D — GPU MSDF Text")
   gpu2d.setDesignResolution(width: canvasW, height: canvasH, fit: 0)
   let dir: String = "examples/103_gpu2d_text/"
   let font: SdfFont = sdf_text.loadSdfFont(
