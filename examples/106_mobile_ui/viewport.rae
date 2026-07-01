@@ -1,0 +1,71 @@
+open ui/ecs
+
+# 106's coordinate spine. Public UI coordinates are design units (du),
+# with unitScale=3 du per logical point. During migration the legacy
+# scenes are still authored in point-sized numbers, so layoutW/H and
+# input coordinates apply legacySceneScale to preserve today's visuals.
+type Viewport pub {
+  windowPtW: Float
+  windowPtH: Float
+  framebufferPxW: Float
+  framebufferPxH: Float
+  dpr: Float
+  unitScale: Float
+  areaDuW: Float
+  areaDuH: Float
+  renderScale: Float
+  legacySceneScale: Float
+  layoutW: Float
+  layoutH: Float
+}
+
+func createViewport(
+  windowPtW: view Float
+  windowPtH: view Float
+  framebufferPxW: view Float
+  framebufferPxH: view Float
+) pub ret Viewport {
+  var dpr: Float = 1.0
+  if windowPtW > 0.0 {
+    dpr = framebufferPxW / windowPtW
+  }
+  let areaW: Float = windowPtW * unitScale
+  let areaH: Float = windowPtH * unitScale
+  let vp: Viewport = {
+    windowPtW: windowPtW
+    windowPtH: windowPtH
+    framebufferPxW: framebufferPxW
+    framebufferPxH: framebufferPxH
+    dpr: dpr
+    unitScale: unitScale
+    areaDuW: areaW
+    areaDuH: areaH
+    renderScale: dpr / unitScale
+    legacySceneScale: legacySceneScale
+    layoutW: areaW * legacySceneScale
+    layoutH: areaH * legacySceneScale
+  }
+  ret vp
+}
+
+func createViewportFromWindow() pub ret Viewport {
+  ret createViewport(
+    windowPtW: screenW
+    windowPtH: screenH
+    framebufferPxW: uiFramebufferWidth().toFloat()
+    framebufferPxH: uiFramebufferHeight().toFloat()
+  )
+}
+
+func applyViewportExtent(world: mod UiWorld, viewport: view Viewport) pub {
+  world.layoutW = viewport.layoutW
+  world.layoutH = viewport.layoutH
+}
+
+func viewportPointerX(viewport: view Viewport) pub ret Float {
+  ret uiPointerX() * viewport.unitScale * viewport.legacySceneScale
+}
+
+func viewportPointerY(viewport: view Viewport) pub ret Float {
+  ret uiPointerY() * viewport.unitScale * viewport.legacySceneScale
+}
