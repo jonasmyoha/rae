@@ -32,8 +32,8 @@ func main() {
   # `RAE_UI_HEADLESS=1`: see headless.rae.
   let isHeadless: Bool = headlessIsActive()
   uiSetConfigFlags(flags: headlessConfigFlags(headless: isHeadless))
-  let winW: Float = screenW
-  let winH: Float = screenH
+  let winW: Float = windowW
+  let winH: Float = windowH
   uiInitWindow(width: winW.toInt(), height: winH.toInt(), title: "Rae Mobile UI — {backendEnv}")
   uiSetWindowPosition(x: 50, y: 50)
   # Backend-agnostic window/input hooks are no-ops on GPU2D when the SDL3
@@ -49,7 +49,7 @@ func main() {
   let gpuIconFont: SdfFont = sdf_text.loadSdfFont(
     jsonPath: "examples/106_mobile_ui/assets/MaterialIconsRound-Regular.mtsdf.json",
     rawAtlasPath: "examples/106_mobile_ui/assets/MaterialIconsRound-Regular.mtsdf.raw")
-  let gpuUi: Gpu2dUi = { textFont: gpuTextFont, iconFont: gpuIconFont }
+  let gpuUi: Gpu2dUi = { textFont: gpuTextFont, iconFont: gpuIconFont, textScale: designScale }
 
   # Theme is picked from `RAE_UI_THEME` ("dark" / "light"); default is
   # dark. Setting the theme BEFORE `loadAllScenes` matters — scenes
@@ -261,7 +261,7 @@ func main() {
     # the user is on or how deep into the sub-page stack.
     let debug: DebugSystem = createDebugSystem()
     setDebugScreenSize(debug: debug, w: viewport.layoutW, h: viewport.layoutH)
-    let debugMargin: Float = 16.0
+    let debugMargin: Float = 34.69879518072289
     setDebugButtonTopRight(debug: debug, margin: debugMargin)
     # `playback` is created near the top of `main` so the state-file
     # restore can populate `elapsedSec` / `isPlaying` before any of
