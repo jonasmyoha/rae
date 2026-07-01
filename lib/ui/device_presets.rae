@@ -1,0 +1,100 @@
+# Device presets — logical resolution + safe-area insets for the
+# common mobile form factors, ported from royalblush's
+# `utils/layoutSimulation.ts`. Widths/heights and safe insets are in
+# CSS logical points (the space iOS/Android report), NOT design units.
+#
+# `devicePresetInsets` converts a preset's point-space safe insets into
+# the caller's layout extent by *fraction of the device dimension*, so
+# the result lands correctly in whatever design-unit grid the app
+# authored its scenes in (e.g. 106 is a 1080x2280 du grid). This keeps
+# the presets resolution-independent: `safeTop 59 / height 852` is a
+# ~6.9% top reserve regardless of the target grid.
+#
+# Selection is env-driven in Phase 1 (`RAE_UI_DEVICE=pixel-7`) so the
+# snapshot tooling can iterate presets without any in-app UI.
+# See rae/docs/ui-viewport-and-safe-area-plan.md (Phase 1, items 3/5).
+import core
+
+type DevicePreset pub {
+  id: String
+  label: String
+  width: Float
+  height: Float
+  safeTop: Float
+  safeBottom: Float
+  safeLeft: Float
+  safeRight: Float
+}
+
+# The "no simulation" preset: zero size marks it as absent, and
+# `devicePresetInsets` returns zero insets for it, so an unset or
+# unknown `RAE_UI_DEVICE` leaves layout exactly as authored.
+func devicePresetNone() pub ret DevicePreset {
+  ret DevicePreset {
+    id: "none"
+    label: "None (window)"
+    width: 0.0
+    height: 0.0
+    safeTop: 0.0
+    safeBottom: 0.0
+    safeLeft: 0.0
+    safeRight: 0.0
+  }
+}
+
+func devicePresetById(id: view String) pub ret DevicePreset {
+  if id.equals(other: "iphone-15-pro") {
+    ret DevicePreset { id: "iphone-15-pro", label: "iPhone 15 Pro (393x852)", width: 393.0, height: 852.0, safeTop: 59.0, safeBottom: 34.0, safeLeft: 0.0, safeRight: 0.0 }
+  }
+  if id.equals(other: "iphone-15-pro-max") {
+    ret DevicePreset { id: "iphone-15-pro-max", label: "iPhone 15 Pro Max (430x932)", width: 430.0, height: 932.0, safeTop: 59.0, safeBottom: 34.0, safeLeft: 0.0, safeRight: 0.0 }
+  }
+  if id.equals(other: "iphone-14") {
+    ret DevicePreset { id: "iphone-14", label: "iPhone 14/13 (390x844)", width: 390.0, height: 844.0, safeTop: 59.0, safeBottom: 34.0, safeLeft: 0.0, safeRight: 0.0 }
+  }
+  if id.equals(other: "iphone-13-mini") {
+    ret DevicePreset { id: "iphone-13-mini", label: "iPhone 13 mini (375x812)", width: 375.0, height: 812.0, safeTop: 50.0, safeBottom: 34.0, safeLeft: 0.0, safeRight: 0.0 }
+  }
+  if id.equals(other: "iphone-se-2") {
+    ret DevicePreset { id: "iphone-se-2", label: "iPhone SE (375x667)", width: 375.0, height: 667.0, safeTop: 20.0, safeBottom: 0.0, safeLeft: 0.0, safeRight: 0.0 }
+  }
+  if id.equals(other: "pixel-7") {
+    ret DevicePreset { id: "pixel-7", label: "Pixel 7 (412x915)", width: 412.0, height: 915.0, safeTop: 24.0, safeBottom: 24.0, safeLeft: 0.0, safeRight: 0.0 }
+  }
+  if id.equals(other: "galaxy-s23") {
+    ret DevicePreset { id: "galaxy-s23", label: "Galaxy S23 (360x780)", width: 360.0, height: 780.0, safeTop: 24.0, safeBottom: 24.0, safeLeft: 0.0, safeRight: 0.0 }
+  }
+  ret devicePresetNone()
+}
+
+# Convert a preset's point-space safe insets to design units by taking
+# each inset as a fraction of the device dimension and scaling by the
+# app's layout extent. Returns zero insets for the "none" preset.
+func devicePresetInsets(
+  preset: view DevicePreset
+  layoutW: view Float
+  layoutH: view Float
+) pub ret Insets {
+  if preset.width <= 0.0 {
+    ret Insets { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
+  }
+  if preset.height <= 0.0 {
+    ret Insets { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
+  }
+  ret Insets {
+    l: (preset.safeLeft / preset.width) * layoutW
+    t: (preset.safeTop / preset.height) * layoutH
+    r: (preset.safeRight / preset.width) * layoutW
+    b: (preset.safeBottom / preset.height) * layoutH
+  }
+}
+
+# Resolve the active preset from the `RAE_UI_DEVICE` env var. Empty /
+# unknown → the "none" preset, so the app renders unchanged by default.
+func activeDevicePreset() pub ret DevicePreset {
+  let id: String = getEnv(name: "RAE_UI_DEVICE")
+  if id.length() <= 0 {
+    ret devicePresetNone()
+  }
+  ret devicePresetById(id: id)
+}
