@@ -3697,6 +3697,9 @@ static int    g_g2d_fit_mode = 0;   /* 0=fit/contain, 1=fill/cover, 2=stretch */
 /* Per-frame mouse-wheel accumulator (reset + summed in pollClose, read by
  * gpu2d.wheelMove). Mirrors raylib's GetMouseWheelMove per-frame semantics. */
 static float  g_g2d_wheel = 0.0f;
+/* Set when the OS reports a window resize; consumed (cleared) once by
+ * gpu2d.windowResized() so the app rebuilds its layout for the new size. */
+static int    g_g2d_win_resized = 0;
 
 /* Fill `out` (8 floats = 2*vec4): (physW,physH,scaleX,scaleY),(offX,offY,0,0). */
 static void rae_g2d_compute_xform(float* out) {
@@ -3935,6 +3938,17 @@ void rae_ext_gpu2d_initWindow(int64_t width, int64_t height, rae_String title) {
     SDL_GetWindowSizeInPixels(g_sdl_win, &pw, &ph);
     rae_g2d_configure(pw, ph);
 
+    /* Test hook: RAE_GPU2D_TEST_RESIZE=WxH resizes the window (logical
+     * points) just after boot so the resize path can be exercised
+     * headlessly. Fires a WINDOW_PIXEL_SIZE_CHANGED on the next poll. */
+    const char* trs = getenv("RAE_GPU2D_TEST_RESIZE");
+    if (trs) {
+        int rw = 0, rh = 0;
+        if (sscanf(trs, "%dx%d", &rw, &rh) == 2 && rw > 0 && rh > 0) {
+            SDL_SetWindowSize(g_sdl_win, rw, rh);
+        }
+    }
+
     g_sdl_start_ms = rae_ext_nowMs();
     const char* hm = getenv("RAE_SDL_HEADLESS_MS");
     if (hm) g_sdl_headless_ms = (int64_t)atoll(hm);
@@ -3962,6 +3976,7 @@ rae_Bool rae_ext_gpu2d_pollClose(void) {
             case SDL_EVENT_WINDOW_RESIZED: {
                 int pw = 0, ph = 0; SDL_GetWindowSizeInPixels(g_sdl_win, &pw, &ph);
                 rae_g2d_configure(pw, ph);
+                g_g2d_win_resized = 1;   /* consumed once by gpu2d.windowResized() */
                 break;
             }
             case SDL_EVENT_KEY_DOWN:
@@ -4048,6 +4063,13 @@ double rae_ext_gpu2d_nowSeconds(void) { return (double)rae_ext_nowMs() / 1000.0;
 
 int64_t rae_ext_gpu2d_windowWidth(void) { return g_sdl_w; }
 int64_t rae_ext_gpu2d_windowHeight(void) { return g_sdl_h; }
+/* True once per OS resize (edge-triggered): returns the pending flag and
+ * clears it, so the app rebuilds its layout extent for the new window. */
+rae_Bool rae_ext_gpu2d_windowResized(void) {
+    rae_Bool r = (rae_Bool)g_g2d_win_resized;
+    g_g2d_win_resized = 0;
+    return r;
+}
 
 /* Coordinate system (#112). */
 void rae_ext_gpu2d_setDesignResolution(double w, double h, int64_t fit) {
@@ -5217,6 +5239,7 @@ double rae_ext_gpu2d_wheelMove(void) { return 0.0; }
 double rae_ext_gpu2d_nowSeconds(void) { return 0.0; }
 int64_t rae_ext_gpu2d_windowWidth(void) { return 0; }
 int64_t rae_ext_gpu2d_windowHeight(void) { return 0; }
+rae_Bool rae_ext_gpu2d_windowResized(void) { return 0; }
 void rae_ext_gpu2d_setDesignResolution(double w, double h, int64_t fit) { (void)w; (void)h; (void)fit; }
 double rae_ext_gpu2d_designWidth(void) { return 0.0; }
 double rae_ext_gpu2d_designHeight(void) { return 0.0; }

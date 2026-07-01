@@ -125,10 +125,11 @@ func buildNavTabsForScreen(
   scenes: view AlbumScenes
 ) pub ret EntityId {
   let bar: EntityId = createEntity(world: world)
-  # Full-bleed: bar spans the entire screen width with no outerPad
-  # margin. The dark background paints behind the four tabs all the
-  # way to both screen edges, the way iOS tab bars do.
-  let barW: Float = screenW
+  # Full-bleed: bar spans the entire layout extent (window width on
+  # desktop) with no outerPad margin. The dark background paints behind
+  # the four tabs all the way to both edges, the way iOS tab bars do;
+  # the four tabs (tabW = barW/4) spread evenly across the full width.
+  let barW: Float = layoutExtentW
   setRectFixed(world: world, entity: bar, w: barW, h: navTabsH)
   # Frosted-glass backdrop: paint a captured-and-blurred snapshot of
   # whatever's behind the bar before the tab icons paint on top. The
@@ -326,7 +327,13 @@ func mountBottomDockOverlay(
   # same amount.
   let dockBgExtend: Float = 216.86746987951807
   let dockH: Float = miniPlayerH + navTabsH + dockBgExtend
-  setRectFixed(world: world, entity: dock, w: screenW, h: dockH)
+  # Edge-to-edge: the dock spans the full layout extent (window width on
+  # desktop), not the phone content column. ExtentAnchor.fill makes the
+  # layout place it at x=0 with width = world.layoutW; the rect width is
+  # set to match so it's correct even before layout resolves.
+  setRectFixed(world: world, entity: dock, w: layoutExtentW, h: dockH)
+  let dockAnchor: ExtentAnchor = { h: HExtent.fill }
+  componentSet(this: world.extentAnchors, entity: dock, data: dockAnchor)
   let layV: LayoutType = LayoutType.vertical
   let alignC: AlignKind = AlignKind.center
   setLayout(world: world, entity: dock, kind: layV, gap: 0.0, alignCross: alignC)
@@ -363,9 +370,9 @@ func mountBottomDockOverlay(
   let shadowKey: String = pageScopedKey(pageId: dockPageId, nodeId: shadowNodeId)
   world.nodeIds.set(k: shadowKey, value: dock.value)
 
-  # Mini-player: indented by outerPad on each side. Vertical layout
-  # with alignCross=Center centers it inside the full-width dock.
-  let miniW: Float = screenW - outerPad * 2.0
+  # Mini-player: indented by outerPad on each side of the full-width
+  # dock. Vertical layout with alignCross=Center centers it.
+  let miniW: Float = layoutExtentW - outerPad * 2.0
   let miniLabel: String = "mini-player"
   let mini: EntityId = buildMiniPlayerInstance(
     world: world
