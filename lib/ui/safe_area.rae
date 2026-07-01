@@ -1,0 +1,37 @@
+# Safe-area system — the responsive-layout counterpart to the layout
+# pass. It runs once per frame *before* `layoutSystem` and writes a
+# `SafeInsets` (in design units) onto every entity that opts in via a
+# `SafeArea` component. `entityPadding` in layout.rae then folds those
+# insets into the node's effective padding, so the notch / home-
+# indicator reserve is structural rather than a hand-tuned constant.
+#
+# The insets are supplied by the caller already resolved to design
+# units — device presets live in `lib/ui/device_presets.rae` and the
+# app converts a preset's point-space insets into layout-extent
+# fractions before calling this. Keeping the system inset-agnostic
+# means it has no dependency on the windowing backend or on any
+# particular Viewport shape.
+#
+# See rae/docs/ui-viewport-and-safe-area-plan.md (Phase 1, item 2).
+import core
+
+func safeAreaSystem(world: mod UiWorld, insets: view Insets) {
+  let alive: view List(EntityId) => world.alive
+  let n: Int = alive.length
+  var i: Int = 0
+  loop i < n {
+    let e: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: i)
+    if componentHas(this: world.safeAreas, entity: e) {
+      let payload: SafeInsets = {
+        insets: Insets {
+          l: insets.l
+          t: insets.t
+          r: insets.r
+          b: insets.b
+        }
+      }
+      componentSet(this: world.safeInsets, entity: e, data: payload)
+    }
+    i = i + 1
+  }
+}
