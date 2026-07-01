@@ -288,10 +288,41 @@ func paintEntityG(world: view UiWorld, e: view EntityId, res: view Gpu2dUi) {
   gpu2d.flush()
 }
 
+# True when `e` clips its descendants (OverflowPolicy.mode == clip).
+func entityClipsChildrenG(world: view UiWorld, e: view EntityId) ret Bool {
+  if componentHas(this: world.overflows, entity: e) is false {
+    ret false
+  }
+  let op: OverflowPolicy = componentGet(this: world.overflows, entity: e)
+  ret op.mode is OverflowMode.clip
+}
+
 func paintSubtreeG(world: view UiWorld, e: view EntityId, res: view Gpu2dUi) {
   paintEntityG(world: world, e: e, res: res)
   if componentHas(this: world.childrens, entity: e) is false {
     ret
+  }
+  # Clip descendants to this entity's box when it opts in via
+  # OverflowPolicy.clip (#115). The container's own fill was already
+  # painted above (unclipped); only its children are scissored. A rounded
+  # container clips with rounded corners (#118), else a plain rect (#144).
+  # gpu2d's clip is runtime state that persists across the per-entity
+  # flushes, so pushing here and popping after the children walk scopes it.
+  var clipped: Bool = false
+  if entityClipsChildrenG(world: world, e: e) {
+    if componentHas(this: world.computedRects, entity: e) {
+      if componentHas(this: world.worldTransforms, entity: e) {
+        let ccr: ComputedRect = componentGet(this: world.computedRects, entity: e)
+        let cwt: WorldTransform = componentGet(this: world.worldTransforms, entity: e)
+        let crad: Float = g2dRadius(world: world, e: e, fallback: 0.0)
+        if crad > 0.0 {
+          gpu2d.pushClipRoundedRect(x: cwt.x, y: cwt.y, w: ccr.w, h: ccr.h, radius: crad)
+        } else {
+          gpu2d.pushClipRect(x: cwt.x, y: cwt.y, w: ccr.w, h: ccr.h)
+        }
+        clipped = true
+      }
+    }
   }
   let ch: view Children => componentView(this: world.childrens, entity: e)
   let n: Int = ch.ids.length
@@ -306,6 +337,9 @@ func paintSubtreeG(world: view UiWorld, e: view EntityId, res: view Gpu2dUi) {
       i = i + 1
     }
     pass = pass + 1
+  }
+  if clipped {
+    gpu2d.popClipRect()
   }
 }
 
