@@ -557,7 +557,8 @@ func main() {
           # centers. The old-world drop on rebuild relies on the
           # rae_ext_rae_buf_copy memmove fix (was a memcpy double-free).
           let liveViewport: Viewport = createViewportFromWindow()
-          if liveViewport.layoutW is not viewport.layoutW {
+          let extentChanged: Bool = liveViewport.layoutW is not viewport.layoutW or liveViewport.layoutH is not viewport.layoutH
+          if extentChanged {
             viewport = liveViewport
             uiSetDesignResolution(width: viewport.layoutW, height: viewport.layoutH, fit: 0)
             setDebugScreenSize(debug: debug, w: viewport.layoutW, h: viewport.layoutH)
