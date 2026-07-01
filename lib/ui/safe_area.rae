@@ -22,16 +22,47 @@ func safeAreaSystem(world: mod UiWorld, insets: view Insets) {
   loop i < n {
     let e: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: i)
     if componentHas(this: world.safeAreas, entity: e) {
-      let payload: SafeInsets = {
-        insets: Insets {
-          l: insets.l
-          t: insets.t
-          r: insets.r
-          b: insets.b
+      # Idempotent: only write when the entity has no SafeInsets yet or
+      # its stored value differs. `SafeInsets` is not a layout dirty
+      # input (see layout.rae layoutSystemIfDirty), so an unconditional
+      # write would be invisible to the dirty-check anyway — but this
+      # keeps the component generation stable so any future tracking,
+      # and the render caches, stay clean at idle.
+      var changed: Bool = true
+      if componentHas(this: world.safeInsets, entity: e) {
+        let cur: SafeInsets = componentGet(this: world.safeInsets, entity: e)
+        if insetsEqual(a: cur.insets, b: insets) {
+          changed = false
         }
       }
-      componentSet(this: world.safeInsets, entity: e, data: payload)
+      if changed {
+        let payload: SafeInsets = {
+          insets: Insets {
+            l: insets.l
+            t: insets.t
+            r: insets.r
+            b: insets.b
+          }
+        }
+        componentSet(this: world.safeInsets, entity: e, data: payload)
+      }
     }
     i = i + 1
   }
+}
+
+func insetsEqual(a: view Insets, b: view Insets) ret Bool {
+  if a.l is not b.l {
+    ret false
+  }
+  if a.t is not b.t {
+    ret false
+  }
+  if a.r is not b.r {
+    ret false
+  }
+  if a.b is not b.b {
+    ret false
+  }
+  ret true
 }

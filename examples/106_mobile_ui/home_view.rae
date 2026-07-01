@@ -200,6 +200,10 @@ func mountHomePage(
   kids.add(value: topBar)
   kids.add(value: body)
   attachChildren(world: world, parent: root, kids: kids)
+  # Reserve the notch at the top edge; safeAreaSystem folds the active
+  # device preset's inset in. Applied here (not just in buildAppWorld)
+  # so an in-place re-mount keeps the tag.
+  attachSafeAreaEdges(world: world, entity: root, top: 1.0, bottom: 0.0)
 
   ret root
 }
