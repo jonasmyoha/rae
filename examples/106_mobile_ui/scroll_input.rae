@@ -90,7 +90,7 @@ func applyDragPhysics(
   # 10pt activation distance — matches iOS UIPanGestureRecognizer.
   # Lower values cross natural hand-tremor on click and silently drop
   # release-clicks.
-  let dragThreshold: Float = 10.0
+  let dragThreshold: Float = 21.686746987951807
   let scrollMin: Float = scrollFloor
   let scrollMax: Float = 0.0
 
@@ -230,7 +230,7 @@ func applyWheelScroll(
   if wheel < 0.001 and wheel > -0.001 {
     ret
   }
-  let pixelsPerTick: Float = 48.0
+  let pixelsPerTick: Float = 104.09638554216866
   # macOS wheel-up = "scroll content down". Flip sign so positive
   # wheel produces a more-negative scrollY (= content shifts up).
   let rawDelta: Float = wheel * pixelsPerTick
@@ -249,7 +249,7 @@ func applyWheelScroll(
   # hundreds of events — accumulating into a huge stretch and a
   # correspondingly long spring-back. Cap to 120 px so the spring
   # always has a predictable, bounded displacement.
-  let wheelMaxOver: Float = 120.0
+  let wheelMaxOver: Float = 260.2409638554217
   let wheelOverMin: Float = wheelMin - wheelMaxOver
   let wheelOverMax: Float = wheelMax + wheelMaxOver
   if fsm.scrollY < wheelOverMin {

@@ -57,11 +57,11 @@ func createDebugSystem() pub ret DebugSystem {
     menuOpen: false
     showLabels: false
     showInputOutlines: false
-    buttonX: 16.0
-    buttonY: 16.0
-    buttonSize: 22.0
-    screenW: 498.0
-    screenH: 1079.0
+    buttonX: 34.69879518072289
+    buttonY: 34.69879518072289
+    buttonSize: 47.71084337349397
+    screenW: 1080.0
+    screenH: 2280.0
     fpsTimes: createList(Float, cap: 256)
     fpsWindowSec: 3.0
     lastFps: 0.0
@@ -262,7 +262,7 @@ func buildSwitchRow(
 ) ret EntityId {
   let row: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: row, w: width, h: 56.0)
-  setHorizontalLayout(world: world, entity: row, gap: 12.0, alignCross: AlignKind.center)
+  setHorizontalLayout(world: world, entity: row, gap: 26.024096385542165, alignCross: AlignKind.center)
   setOnClickAction(world: world, entity: row, actionId: actionId)
 
   let label: EntityId = createEntity(world: world)
@@ -307,7 +307,7 @@ func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret Enti
   let panel: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: panel, w: panelW, h: panelH)
   setRoundedShape(world: world, entity: panel, fill: debugMenuFillColor(), radius: 32.0)
-  setVerticalLayout(world: world, entity: panel, gap: 12.0)
+  setVerticalLayout(world: world, entity: panel, gap: 26.024096385542165)
   dbgSetPaddingAll(world: world, entity: panel, n: 20.0)
 
   let themeRow: EntityId = buildSwitchRow(world: world, labelText: "Dark theme", actionId: debugActionToggleTheme, on: currentTheme().mode is ThemeMode.dark, width: panelW - 40.0)
@@ -408,21 +408,21 @@ func formatFpsGpu2d(fps: view Float) ret String {
 
 func drawDebugHeartbeatGpu2d(debug: mod DebugSystem, didRealWork: view Bool) {
   if didRealWork {
-    debug.heartbeatX = debug.heartbeatX + 1.0
-    if debug.heartbeatX > debug.screenW { debug.heartbeatX = -4.0 }
+    debug.heartbeatX = debug.heartbeatX + 2.1686746987951806
+    if debug.heartbeatX > debug.screenW { debug.heartbeatX = -8.674698795180722 }
   }
-  gpu2d.drawBox(x: debug.heartbeatX, y: 0.0, w: 4.0, h: 4.0, radius: 0.0, fill: 0xFFFFBF00, borderWidth: 0.0, border: 0x00000000)
+  gpu2d.drawBox(x: debug.heartbeatX, y: 0.0, w: 8.674698795180722, h: 8.674698795180722, radius: 0.0, fill: 0xFFFFBF00, borderWidth: 0.0, border: 0x00000000)
 }
 
 func drawDebugLabelsGpu2d(debug: view DebugSystem, font: view SdfFont) {
   let fpsText: String = formatFpsGpu2d(fps: debug.lastFps)
   let memText: String = "mem: {formatMemMBGpu2d(kb: debug.lastRssKb)}"
-  let fontSize: Float = 14.0
-  let lineH: Float = 16.0
-  let gap: Float = 4.0
+  let fontSize: Float = 30.361445783132528
+  let lineH: Float = 34.69879518072289
+  let gap: Float = 8.674698795180722
   let bottomEdge: Float = debug.buttonY + debug.buttonSize
   let fpsY: Float = bottomEdge + gap + fontSize
-  let memY: Float = fpsY + lineH + 2.0
+  let memY: Float = fpsY + lineH + 4.337349397590361
   let buttonCx: Float = debug.buttonX + debug.buttonSize * 0.5
   let screenCx: Float = debug.screenW * 0.5
   let rightAligned: Bool = buttonCx > screenCx
@@ -440,7 +440,7 @@ func drawDebugLabelsGpu2d(debug: view DebugSystem, font: view SdfFont) {
     var lb: Int = 0
     if gpu2d.pointerDown() { lb = 1 }
     let btnText: String = "btn: {lb}"
-    let btnY: Float = memY + lineH + 2.0
+    let btnY: Float = memY + lineH + 4.337349397590361
     var btnX: Float = debug.buttonX
     if rightAligned {
       let rightEdge: Float = debug.buttonX + debug.buttonSize
