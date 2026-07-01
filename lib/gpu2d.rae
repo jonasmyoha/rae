@@ -122,6 +122,11 @@ func drawLine(x0: Float, y0: Float, x1: Float, y1: Float, thickness: Float, colo
 # the previous region; an unmatched pop clears to no-clip. (The rounded /
 # per-instance clip variant is #118.)
 func pushClipRect(x: Float, y: Float, w: Float, h: Float) extern
+# Rounded clip (#118): same as pushClipRect but the corners are rounded by
+# `radius` (design units). The box pipeline rounds the corners via a
+# fragment-shader SDF; the axis-aligned scissor still bounds every pipeline
+# to the clip bbox. Use for a rounded card that contains a scroll list.
+func pushClipRoundedRect(x: Float, y: Float, w: Float, h: Float, radius: Float) extern
 func popClipRect() extern
 
 # --- Images (#143, textured rounded quads) -------------------------------
