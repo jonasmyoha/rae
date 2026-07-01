@@ -547,14 +547,18 @@ func main() {
           }
 
           updateInputSystem(input: input, world: world, viewport: viewport)
-          # Live-window resize: sync screenW/H to the real window and
-          # rebuild so the layout extent, responsive grid columns, and
-          # nav reflow. The old-world drop on rebuild relies on the
+          # Live-window resize. Detect it by POLLING the live framebuffer-
+          # derived extent every frame and comparing to the applied one —
+          # robust vs relying on OS resize-event delivery / an edge flag
+          # (which proved unreliable across drag-resizes). When the extent
+          # changed, recompute + rebuild so the edge-to-edge toolbar tracks
+          # the new width; `screenW`/`screenH` stay the fixed content
+          # baseline (1080x2280) so the phone column keeps its size and
+          # centers. The old-world drop on rebuild relies on the
           # rae_ext_rae_buf_copy memmove fix (was a memcpy double-free).
-          if uiIsWindowResized() {
-            screenW = uiWindowWidth()
-            screenH = uiWindowHeight()
-            viewport = createViewportFromWindow()
+          let liveViewport: Viewport = createViewportFromWindow()
+          if liveViewport.layoutW is not viewport.layoutW {
+            viewport = liveViewport
             uiSetDesignResolution(width: viewport.layoutW, height: viewport.layoutH, fit: 0)
             setDebugScreenSize(debug: debug, w: viewport.layoutW, h: viewport.layoutH)
             switching = true

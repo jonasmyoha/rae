@@ -98,6 +98,10 @@ func createDebugSystem() pub ret DebugSystem {
 func setDebugScreenSize(debug: mod DebugSystem, w: view Float, h: view Float) pub {
   debug.screenW = w
   debug.screenH = h
+  # Re-anchor the button to the top-right of the (possibly resized) extent.
+  # buttonY doubles as the margin (setDebugButtonTopRight keeps them equal),
+  # so the button follows a window resize instead of sticking at its boot X.
+  debug.buttonX = w - debug.buttonSize - debug.buttonY
 }
 
 func setDebugButtonPosition(debug: mod DebugSystem, x: view Float, y: view Float) pub {
