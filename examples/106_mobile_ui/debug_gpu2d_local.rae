@@ -36,6 +36,10 @@ let debugCloseButtonH: Float = 86.74698795180723
 let debugCloseButtonRadius: Float = 43.373493975903614
 let debugRowGap: Float = 26.024096385542165
 let debugContentTop: Float = 138.81927710843374
+let debugButtonTextH: Float = 26.024096385542165
+let debugCloseTextH: Float = 39.03614457831325
+let debugBoldOffset: Float = 1.6
+let debugCloseIconGlyph: Float = 43.373493975903614
 
 func debugAmberColor() ret RgbaColor { ret RgbaColor { r: 255, g: 191, b: 0, a: 255 } }
 func debugBackdropColor() ret RgbaColor { ret RgbaColor { r: 0, g: 0, b: 0, a: 160 } }
@@ -195,6 +199,18 @@ func setDebugText(world: mod UiWorld, entity: view EntityId, text: own String, s
   componentSet(this: world.texts, entity: entity, data: t)
 }
 
+func setDebugSprite(world: mod UiWorld, entity: view EntityId, key: own String, tint: view RgbaColor) {
+  let sp: Sprite = {
+    textureKey: key
+    tint: tint
+    scaleMode: ScaleMode.fit
+    tileScale: Vec2 { x: 1.0, y: 1.0 }
+    nineSlice: Insets { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
+    hasNineSlice: false
+  }
+  componentSet(this: world.sprites, entity: entity, data: sp)
+}
+
 func setOnClickAction(world: mod UiWorld, entity: view EntityId, actionId: own String) {
   let oc: OnClick = {
     actionId: actionId
@@ -272,26 +288,52 @@ func buildDebugButton(world: mod UiWorld, debug: view DebugSystem) ret EntityId 
   setOnClickAction(world: world, entity: btn, actionId: debugActionToggleMenu)
 
   let label: EntityId = createEntity(world: world)
-  setFixedRect(world: world, entity: label, w: debug.buttonSize, h: debug.buttonSize)
-  setDebugText(world: world, entity: label, text: "D", styleId: "debugButton")
-  let kids: List(EntityId) = createList(EntityId, cap: 1)
+  setFixedRect(world: world, entity: label, w: debug.buttonSize, h: debugButtonTextH)
+  setDebugText(world: world, entity: label, text: "D", styleId: "debugButtonSmall")
+  let labelBold: EntityId = createEntity(world: world)
+  setFixedRect(world: world, entity: labelBold, w: debug.buttonSize, h: debugButtonTextH)
+  setOffset(world: world, entity: labelBold, x: debugBoldOffset, y: 0.0)
+  setDebugText(world: world, entity: labelBold, text: "D", styleId: "debugButtonSmall")
+  let kids: List(EntityId) = createList(EntityId, cap: 2)
   kids.add(value: label)
+  kids.add(value: labelBold)
   attachKids(world: world, parent: btn, kids: kids)
   ret btn
 }
 
-func buildDebugTextButton(world: mod UiWorld, text: own String, w: view Float, h: view Float, radius: view Float) ret EntityId {
+func buildDebugIconButton(world: mod UiWorld) ret EntityId {
   let btn: EntityId = createEntity(world: world)
-  setFixedRect(world: world, entity: btn, w: w, h: h)
-  setRoundedShape(world: world, entity: btn, fill: debugAmberColor(), radius: radius)
+  setFixedRect(world: world, entity: btn, w: debugCloseIconSize, h: debugCloseIconSize)
+  setRoundedShape(world: world, entity: btn, fill: themeColorByName(name: "outline"), radius: debugCloseIconSize / 2.0)
+  setStackLayout(world: world, entity: btn)
+  setOnClickAction(world: world, entity: btn, actionId: debugActionDismiss)
+
+  let icon: EntityId = createEntity(world: world)
+  setFixedRect(world: world, entity: icon, w: debugCloseIconGlyph, h: debugCloseIconGlyph)
+  setDebugSprite(world: world, entity: icon, key: "mat:close", tint: themeColorByName(name: "textPrimary"))
+  let kids: List(EntityId) = createList(EntityId, cap: 1)
+  kids.add(value: icon)
+  attachKids(world: world, parent: btn, kids: kids)
+  ret btn
+}
+
+func buildDebugCloseButton(world: mod UiWorld) ret EntityId {
+  let btn: EntityId = createEntity(world: world)
+  setFixedRect(world: world, entity: btn, w: debugCloseButtonW, h: debugCloseButtonH)
+  setRoundedShape(world: world, entity: btn, fill: themeColorByName(name: "accent"), radius: debugCloseButtonRadius)
   setStackLayout(world: world, entity: btn)
   setOnClickAction(world: world, entity: btn, actionId: debugActionDismiss)
 
   let label: EntityId = createEntity(world: world)
-  setFixedRect(world: world, entity: label, w: w, h: h)
-  setDebugText(world: world, entity: label, text: text, styleId: "debugButton")
-  let kids: List(EntityId) = createList(EntityId, cap: 1)
+  setFixedRect(world: world, entity: label, w: debugCloseButtonW, h: debugCloseTextH)
+  setDebugText(world: world, entity: label, text: "Close", styleId: "debugCloseButton")
+  let labelBold: EntityId = createEntity(world: world)
+  setFixedRect(world: world, entity: labelBold, w: debugCloseButtonW, h: debugCloseTextH)
+  setOffset(world: world, entity: labelBold, x: debugBoldOffset, y: 0.0)
+  setDebugText(world: world, entity: labelBold, text: "Close", styleId: "debugCloseButton")
+  let kids: List(EntityId) = createList(EntityId, cap: 2)
   kids.add(value: label)
+  kids.add(value: labelBold)
   attachKids(world: world, parent: btn, kids: kids)
   ret btn
 }
@@ -371,11 +413,11 @@ func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret Enti
   rows.add(value: outlinesRow)
   attachKids(world: world, parent: content, kids: rows)
 
-  let closeX: EntityId = buildDebugTextButton(world: world, text: "X", w: debugCloseIconSize, h: debugCloseIconSize, radius: debugCloseIconSize / 2.0)
+  let closeX: EntityId = buildDebugIconButton(world: world)
   setAlign(world: world, entity: closeX, x: AlignKind.end, y: AlignKind.start)
   setOffset(world: world, entity: closeX, x: 0.0 - debugPanelPadding, y: debugPanelPadding)
 
-  let closeButton: EntityId = buildDebugTextButton(world: world, text: "Close", w: debugCloseButtonW, h: debugCloseButtonH, radius: debugCloseButtonRadius)
+  let closeButton: EntityId = buildDebugCloseButton(world: world)
   setAlign(world: world, entity: closeButton, x: AlignKind.center, y: AlignKind.end)
   setOffset(world: world, entity: closeButton, x: 0.0, y: 0.0 - debugPanelPadding)
 
