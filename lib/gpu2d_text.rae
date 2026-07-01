@@ -14,7 +14,7 @@ import gpu2d
 # Lay out one run of `text` at baseline (x, y), emitting a glyph quad per
 # character with an optional outline (outlineWidth px of outlineColor). Returns
 # the pen x advance. drawText / drawTextEx build on this.
-func emitRun(font: view SdfFont, text: view String, x: copy Float, y: copy Float, sizePx: copy Float, color: copy Int, outlineWidth: copy Float, outlineColor: copy Int) ret Float {
+func emitRun(font: view SdfFont, text: view String, x: copy Float, y: copy Float, sizePx: copy Float, color: copy Int, outlineWidth: copy Float, outlineColor: copy Int, softness: copy Float) ret Float {
     let scale: Float = sizePx / font.emSize
     let aw: Float = font.atlasWidth
     let ah: Float = font.atlasHeight
@@ -44,7 +44,7 @@ func emitRun(font: view SdfFont, text: view String, x: copy Float, y: copy Float
                 gpu2d.drawGlyphEx(sx0: sx0, sy0: sy0, sx1: sx1, sy1: sy1,
                                   u0: u0, v0: v0, u1: u1, v1: v1,
                                   atlas: font.atlas, pxRange: spr, color: color,
-                                  outlineWidth: outlineWidth, outlineColor: outlineColor)
+                                  outlineWidth: outlineWidth, outlineColor: outlineColor, softness: softness)
             }
             pen = pen + g.advance * scale
         }
@@ -57,7 +57,7 @@ func emitRun(font: view SdfFont, text: view String, x: copy Float, y: copy Float
 # colour 0xAARRGGBB. Submit between gpu2d.beginFrame and gpu2d.endFrame.
 # Returns the pen x advance (end position), like a text cursor.
 func drawText(font: view SdfFont, text: view String, x: copy Float, y: copy Float, sizePx: copy Float, color: copy Int) ret Float {
-    ret emitRun(font: font, text: text, x: x, y: y, sizePx: sizePx, color: color, outlineWidth: 0.0, outlineColor: 0)
+    ret emitRun(font: font, text: text, x: x, y: y, sizePx: sizePx, color: color, outlineWidth: 0.0, outlineColor: 0, softness: 1.0)
 }
 
 # Draw `text` with an outline and/or a drop-shadow — the GPU equivalent of
@@ -70,13 +70,15 @@ func drawTextEx(font: view SdfFont, text: view String, x: copy Float, y: copy Fl
                 shadowColor: copy Int, shadowOffX: copy Float, shadowOffY: copy Float, shadowSoftness: copy Float) ret Float {
     let shadowA: Int = (shadowColor shr 24) bitand 255
     if shadowA > 0 {
-        var softW: Float = (shadowSoftness - 1.0) * 1.5
-        if softW < 0.0 { softW = 0.0 }
+        # Soft shadow = a real blurred edge (wide coverage falloff), NOT a
+        # dilated hard copy. softness 1 = sharp; larger = softer/blurrier.
+        var soft: Float = shadowSoftness
+        if soft < 1.0 { soft = 1.0 }
         emitRun(font: font, text: text, x: x + shadowOffX, y: y + shadowOffY, sizePx: sizePx,
-                color: shadowColor, outlineWidth: softW, outlineColor: shadowColor)
+                color: shadowColor, outlineWidth: 0.0, outlineColor: 0, softness: soft)
     }
     ret emitRun(font: font, text: text, x: x, y: y, sizePx: sizePx, color: color,
-                outlineWidth: outlineWidth, outlineColor: outlineColor)
+                outlineWidth: outlineWidth, outlineColor: outlineColor, softness: 1.0)
 }
 
 # Width of `text` in pixels at `sizePx` (delegates to sdf_text).
