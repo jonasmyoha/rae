@@ -18,7 +18,10 @@
 # the constant factor doesn't matter. We can swap to an IntMap-backed
 # sparse set later without changing the public API.
 import core
-import ui/msdf
+# Only the raylib-free MSDF *data* types (MsdfState/createMsdfState) — the
+# raylib paint code stays in ui/msdf, so embedding MsdfState in UiWorld no
+# longer drags raylib into GPU2D-only apps (#148).
+import ui/msdf_state
 
 # Entity identifier — a value-type wrapper around `Int`.
 #
