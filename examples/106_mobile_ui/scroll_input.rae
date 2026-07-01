@@ -70,6 +70,7 @@ func createScrollFsm(initialScrollY: view Float) ret ScrollFsm {
 func applyDragPhysics(
   fsm: mod ScrollFsm
   world: mod UiWorld
+  viewport: view Viewport
   scrollTarget: view EntityId
   scrollOnThisScreen: view Bool
   scrollFloor: view Float
@@ -83,8 +84,8 @@ func applyDragPhysics(
   }
 
   var dragJustReleased: Bool = false
-  let curMouseX: Float = uiPointerX()
-  let curMouseY: Float = uiPointerY()
+  let curMouseX: Float = viewportPointerX(viewport: viewport)
+  let curMouseY: Float = viewportPointerY(viewport: viewport)
   let curMouseDown: Bool = uiPointerButtonDown(button: mouseButtonLeft)
   # 10pt activation distance — matches iOS UIPanGestureRecognizer.
   # Lower values cross natural hand-tremor on click and silently drop
