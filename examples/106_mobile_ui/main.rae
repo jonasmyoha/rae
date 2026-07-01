@@ -42,7 +42,6 @@ func main() {
   uiInstallMouseButtonHook()
   uiDisableAppNap()
   uiSetMouseScale(scaleX: 1.0, scaleY: 1.0)
-  uiSetDesignResolution(width: winW, height: winH, fit: 0)
 
   let gpuTextFont: SdfFont = sdf_text.loadSdfFont(
     jsonPath: "examples/106_mobile_ui/assets/Roboto-Regular.mtsdf.json",
@@ -111,6 +110,9 @@ func main() {
     uiSetWindowSize(width: newW.toInt(), height: newH.toInt())
     log("[boot] clamped to {newW.toInt()}x{newH.toInt()} to fit monitor chrome")
   }
+  var viewport: Viewport = createViewportFromWindow()
+  uiSetDesignResolution(width: viewport.layoutW, height: viewport.layoutH, fit: 0)
+  log("[viewport] windowPt={viewport.windowPtW}x{viewport.windowPtH} fbPx={viewport.framebufferPxW}x{viewport.framebufferPxH} dpr={viewport.dpr} unitScale={viewport.unitScale} layout={viewport.layoutW}x{viewport.layoutH}")
 
   # Spotify-mode integration. ON by default; opt out with
   # RAE_UI_NO_SPOTIFY=1 or RAE_UI_HEADLESS=1 (would focus Spotify).
@@ -258,7 +260,7 @@ func main() {
     # button position stays consistent regardless of which view
     # the user is on or how deep into the sub-page stack.
     let debug: DebugSystem = createDebugSystem()
-    setDebugScreenSize(debug: debug, w: screenW, h: screenH)
+    setDebugScreenSize(debug: debug, w: viewport.layoutW, h: viewport.layoutH)
     let debugMargin: Float = 16.0
     setDebugButtonTopRight(debug: debug, margin: debugMargin)
     # `playback` is created near the top of `main` so the state-file
@@ -372,7 +374,7 @@ func main() {
 
       # Persistent-world build: mounts every screen page + dock /
       # back overlays once; setPageActive flips visibility per nav.
-      let world: UiWorld = buildAppWorld(scenes: scenes, playback: playback, state: appState, texReg: texReg, scrollY: scrollFsm.scrollY)
+      let world: UiWorld = buildAppWorld(scenes: scenes, playback: playback, state: appState, texReg: texReg, scrollY: scrollFsm.scrollY, viewport: viewport)
       # Rebind any scene-authored `"albumCover"` placeholder hero +
       # sprite to the user's current album. This is what lets the
       # hero animation system find matching keys at Profile (where
@@ -545,7 +547,7 @@ func main() {
             saveStateAndExit(screen: currentScreen, scrollY: scrollFsm.scrollY)
           }
 
-          updateInputSystem(input: input, world: world)
+          updateInputSystem(input: input, world: world, viewport: viewport)
           # Live-window resize: sync screenW/H to the real window and
           # rebuild so the layout extent, responsive grid columns, and
           # nav reflow. The old-world drop on rebuild relies on the
@@ -553,6 +555,9 @@ func main() {
           if uiIsWindowResized() {
             screenW = uiWindowWidth()
             screenH = uiWindowHeight()
+            viewport = createViewportFromWindow()
+            uiSetDesignResolution(width: viewport.layoutW, height: viewport.layoutH, fit: 0)
+            setDebugScreenSize(debug: debug, w: viewport.layoutW, h: viewport.layoutH)
             switching = true
           }
 
@@ -582,10 +587,11 @@ func main() {
           var dragJustReleased: Bool = applyDragPhysics(
             fsm: scrollFsm
             world: world
+            viewport: viewport
             scrollTarget: scrollTarget
             scrollOnThisScreen: scrollOnThisScreen
             scrollFloor: scrollFloor
-            rubberDim: screenH
+            rubberDim: viewport.layoutH
           )
 
           # Mouse-wheel / trackpad scroll must run before layout/transform
@@ -598,7 +604,7 @@ func main() {
             scrollTarget: scrollTarget
             scrollOnThisScreen: scrollOnThisScreen
             scrollFloor: scrollFloor
-            rubberDim: screenH
+            rubberDim: viewport.layoutH
           )
 
           # Skip dispatch on the single frame where a drag just
@@ -787,6 +793,7 @@ func main() {
             prevPressed: lastPressed
             prevHovered: lastHoveredEntity
             prevMouseBtns: lastMouseBtns
+            viewport: viewport
           )
           var active: Bool = activeDecision.active or loadingAssets
           let currentHovered: EntityId = activeDecision.currentHovered
