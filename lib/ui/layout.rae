@@ -145,11 +145,35 @@ func applyConstraintsH(world: view UiWorld, entity: view EntityId, h: view Float
 
 # Authored Padding, defaulted to all-zeros if absent.
 func entityPadding(world: view UiWorld, entity: view EntityId) ret Insets {
-  if componentHas(this: world.paddings, entity: entity) is false {
-    ret Insets { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
+  var base: Insets = { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
+  if componentHas(this: world.paddings, entity: entity) {
+    let p: Padding = componentGet(this: world.paddings, entity: entity)
+    base = p.insets
   }
-  let p: Padding = componentGet(this: world.paddings, entity: entity)
-  ret p.insets
+  # Fold safe-area insets on top of the authored padding. An entity
+  # opts in with a `SafeArea` component; `safeAreaSystem` populates the
+  # matching `SafeInsets` (already in design units) each frame from the
+  # active device preset. `apply` is a per-edge multiplier and `extra`
+  # an additive per-edge gutter. See
+  # rae/docs/ui-viewport-and-safe-area-plan.md.
+  if componentHas(this: world.safeAreas, entity: entity) is false {
+    ret base
+  }
+  let safe: SafeArea = componentGet(this: world.safeAreas, entity: entity)
+  if safe.enabled is false {
+    ret base
+  }
+  var insets: Insets = { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
+  if componentHas(this: world.safeInsets, entity: entity) {
+    let si: SafeInsets = componentGet(this: world.safeInsets, entity: entity)
+    insets = si.insets
+  }
+  ret Insets {
+    l: base.l + safe.apply.l * insets.l + safe.extra.l
+    t: base.t + safe.apply.t * insets.t + safe.extra.t
+    r: base.r + safe.apply.r * insets.r + safe.extra.r
+    b: base.b + safe.apply.b * insets.b + safe.extra.b
+  }
 }
 
 func entityRect(world: view UiWorld, entity: view EntityId) ret Rect {
