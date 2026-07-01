@@ -38,8 +38,14 @@ let debugRowGap: Float = 26.024096385542165
 let debugContentTop: Float = 138.81927710843374
 let debugButtonTextH: Float = 26.024096385542165
 let debugCloseTextH: Float = 39.03614457831325
+let debugDialogTitleH: Float = 47.71084337349397
 let debugBoldOffset: Float = 1.6
+let debugButtonTextX: Float = -2.4
+let debugButtonTextY: Float = -5.2
+let debugCloseTextY: Float = -6.0
 let debugCloseIconGlyph: Float = 43.373493975903614
+let debugCloseIconBoldOffset: Float = 1.4
+let debugDialogTitleY: Float = 43.373493975903614
 
 func debugAmberColor() ret RgbaColor { ret RgbaColor { r: 255, g: 191, b: 0, a: 255 } }
 func debugBackdropColor() ret RgbaColor { ret RgbaColor { r: 0, g: 0, b: 0, a: 160 } }
@@ -289,10 +295,11 @@ func buildDebugButton(world: mod UiWorld, debug: view DebugSystem) ret EntityId 
 
   let label: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: label, w: debug.buttonSize, h: debugButtonTextH)
+  setOffset(world: world, entity: label, x: debugButtonTextX, y: debugButtonTextY)
   setDebugText(world: world, entity: label, text: "D", styleId: "debugButtonSmall")
   let labelBold: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: labelBold, w: debug.buttonSize, h: debugButtonTextH)
-  setOffset(world: world, entity: labelBold, x: debugBoldOffset, y: 0.0)
+  setOffset(world: world, entity: labelBold, x: debugButtonTextX + debugBoldOffset, y: debugButtonTextY)
   setDebugText(world: world, entity: labelBold, text: "D", styleId: "debugButtonSmall")
   let kids: List(EntityId) = createList(EntityId, cap: 2)
   kids.add(value: label)
@@ -311,8 +318,18 @@ func buildDebugIconButton(world: mod UiWorld) ret EntityId {
   let icon: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: icon, w: debugCloseIconGlyph, h: debugCloseIconGlyph)
   setDebugSprite(world: world, entity: icon, key: "mat:close", tint: themeColorByName(name: "textPrimary"))
-  let kids: List(EntityId) = createList(EntityId, cap: 1)
+  let iconBoldX: EntityId = createEntity(world: world)
+  setFixedRect(world: world, entity: iconBoldX, w: debugCloseIconGlyph, h: debugCloseIconGlyph)
+  setOffset(world: world, entity: iconBoldX, x: debugCloseIconBoldOffset, y: 0.0)
+  setDebugSprite(world: world, entity: iconBoldX, key: "mat:close", tint: themeColorByName(name: "textPrimary"))
+  let iconBoldY: EntityId = createEntity(world: world)
+  setFixedRect(world: world, entity: iconBoldY, w: debugCloseIconGlyph, h: debugCloseIconGlyph)
+  setOffset(world: world, entity: iconBoldY, x: 0.0, y: debugCloseIconBoldOffset)
+  setDebugSprite(world: world, entity: iconBoldY, key: "mat:close", tint: themeColorByName(name: "textPrimary"))
+  let kids: List(EntityId) = createList(EntityId, cap: 3)
   kids.add(value: icon)
+  kids.add(value: iconBoldX)
+  kids.add(value: iconBoldY)
   attachKids(world: world, parent: btn, kids: kids)
   ret btn
 }
@@ -326,16 +343,39 @@ func buildDebugCloseButton(world: mod UiWorld) ret EntityId {
 
   let label: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: label, w: debugCloseButtonW, h: debugCloseTextH)
+  setOffset(world: world, entity: label, x: 0.0, y: debugCloseTextY)
   setDebugText(world: world, entity: label, text: "Close", styleId: "debugCloseButton")
   let labelBold: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: labelBold, w: debugCloseButtonW, h: debugCloseTextH)
-  setOffset(world: world, entity: labelBold, x: debugBoldOffset, y: 0.0)
+  setOffset(world: world, entity: labelBold, x: debugBoldOffset, y: debugCloseTextY)
   setDebugText(world: world, entity: labelBold, text: "Close", styleId: "debugCloseButton")
   let kids: List(EntityId) = createList(EntityId, cap: 2)
   kids.add(value: label)
   kids.add(value: labelBold)
   attachKids(world: world, parent: btn, kids: kids)
   ret btn
+}
+
+func buildDebugMenuTitle(world: mod UiWorld, panelW: view Float) ret EntityId {
+  let title: EntityId = createEntity(world: world)
+  setFixedRect(world: world, entity: title, w: panelW, h: debugDialogTitleH)
+  setAlign(world: world, entity: title, x: AlignKind.center, y: AlignKind.start)
+  setOffset(world: world, entity: title, x: 0.0, y: debugDialogTitleY)
+  setStackLayout(world: world, entity: title)
+
+  let label: EntityId = createEntity(world: world)
+  setFixedRect(world: world, entity: label, w: panelW, h: debugDialogTitleH)
+  setDebugText(world: world, entity: label, text: "Debug", styleId: "debugDialogTitle")
+  let labelBold: EntityId = createEntity(world: world)
+  setFixedRect(world: world, entity: labelBold, w: panelW, h: debugDialogTitleH)
+  setOffset(world: world, entity: labelBold, x: debugBoldOffset, y: 0.0)
+  setDebugText(world: world, entity: labelBold, text: "Debug", styleId: "debugDialogTitle")
+
+  let kids: List(EntityId) = createList(EntityId, cap: 2)
+  kids.add(value: label)
+  kids.add(value: labelBold)
+  attachKids(world: world, parent: title, kids: kids)
+  ret title
 }
 
 func buildSwitchRow(
@@ -421,8 +461,11 @@ func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret Enti
   setAlign(world: world, entity: closeButton, x: AlignKind.center, y: AlignKind.end)
   setOffset(world: world, entity: closeButton, x: 0.0, y: 0.0 - debugPanelPadding)
 
-  let panelKids: List(EntityId) = createList(EntityId, cap: 3)
+  let title: EntityId = buildDebugMenuTitle(world: world, panelW: panelW)
+
+  let panelKids: List(EntityId) = createList(EntityId, cap: 4)
   panelKids.add(value: content)
+  panelKids.add(value: title)
   panelKids.add(value: closeX)
   panelKids.add(value: closeButton)
   attachKids(world: world, parent: panel, kids: panelKids)
