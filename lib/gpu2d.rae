@@ -113,6 +113,17 @@ func drawGradientRect(x: Float, y: Float, w: Float, h: Float, radius: Float, fro
 # rounded caps (a rotated capsule). Works at any angle.
 func drawLine(x0: Float, y0: Float, x1: Float, y1: Float, thickness: Float, color: Int) extern
 
+# --- Clipping (#144, axis-aligned scissor) -------------------------------
+# Push a rectangular clip region (design units); subsequent draws are
+# clipped to it until the matching popClipRect. Clips nest — a pushed rect
+# intersects the current one — so a rounded card can hold a clipped scroll
+# list. Implemented as a render-pass scissor per contiguous same-clip run of
+# draws, preserving the box→image→text batch order. `popClipRect` restores
+# the previous region; an unmatched pop clears to no-clip. (The rounded /
+# per-instance clip variant is #118.)
+func pushClipRect(x: Float, y: Float, w: Float, h: Float) extern
+func popClipRect() extern
+
 # --- Images (#143, textured rounded quads) -------------------------------
 # Decode a PNG file and upload it as a GPU texture; returns a 1-based handle
 # (0 on failure). PNG only (lodepng) — convert JPEG assets to PNG. Load once,
