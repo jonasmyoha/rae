@@ -850,7 +850,15 @@ func main() {
           # Busy-animating → render EVERY iteration (no cap). Idle →
           # throttle to ~1 display frame (0.85 jitter headroom).
           let frameDue: Bool = busyAnimating or forceRender or (now - lastRenderTime) >= targetFrameSec * 0.85
-          if (busyAnimating or active or now < renderUntil) and frameDue {
+          # `switching is false` guard: when a resize (or theme/debug
+          # change) has requested a rebuild THIS frame, skip painting the
+          # stale world. On a resize the window has already grown, so
+          # rendering the old design-resolution content into it would
+          # contain-fit/letterbox for one frame — the bottom-anchored
+          # dock visibly floats off the edge before snapping back. The
+          # outer loop rebuilds and paints the correct size next; each
+          # window size still gets exactly one render.
+          if (busyAnimating or active or now < renderUntil) and frameDue and switching is false {
             lastRenderTime = now
             uiBeginFrame(clear: bgSurface)
             renderSystemGpu2d(world: world, res: gpuUi)
