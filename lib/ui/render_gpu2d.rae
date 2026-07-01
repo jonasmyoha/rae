@@ -194,8 +194,20 @@ func paintSpriteG(world: view UiWorld, e: view EntityId, wt: view WorldTransform
     var sz: Float = drawW
     if drawH < sz { sz = drawH }
     # Center the em-box glyph in the rect; baseline sits ~size above the bottom.
-    let gx: Float = drawX + (drawW - sz) / 2.0
-    let gy: Float = drawY + (drawH - sz) / 2.0 + sz
+    var gx: Float = drawX + (drawW - sz) / 2.0
+    var gy: Float = drawY + (drawH - sz) / 2.0 + sz
+    if componentHas(this: world.opticalAligns, entity: e) {
+      let oa: OpticalAlign = componentGet(this: world.opticalAligns, entity: e)
+      if oa.enabled {
+        let bounds: SdfTextBounds = sdf_text.sdfMeasureTextBounds(font: res.iconFont, text: glyph, sizePx: sz)
+        if oa.centerX {
+          gx = drawX + drawW / 2.0 - (bounds.left + bounds.right) / 2.0 + oa.bias.x
+        }
+        if oa.centerY {
+          gy = drawY + drawH / 2.0 - (bounds.top + bounds.bottom) / 2.0 + oa.bias.y
+        }
+      }
+    }
     gpu2d_text.drawText(font: res.iconFont, text: glyph, x: gx, y: gy, sizePx: sz, color: g2dColor(c: tint))
     ret
   }
@@ -216,6 +228,7 @@ func paintTextG(world: view UiWorld, e: view EntityId, wt: view WorldTransform, 
   let col: RgbaColor = g2dChain(c: g2dTextStyleColor(styleId: t.styleId), chain255: chain255)
   var centerX: Bool = g2dTextStyleIsCentered(styleId: t.styleId)
   var rightX: Bool = g2dTextStyleIsRightAligned(styleId: t.styleId)
+  var optical: OpticalAlign = { enabled: false, centerX: false, centerY: false, bias: Vec2 { x: 0.0, y: 0.0 } }
   if componentHas(this: world.aligns, entity: e) {
     let al: Align = componentGet(this: world.aligns, entity: e)
     if al.hasX {
@@ -223,13 +236,26 @@ func paintTextG(world: view UiWorld, e: view EntityId, wt: view WorldTransform, 
       if al.x is AlignKind.end { rightX = true }
     }
   }
-  var drawX: Float = wt.x
-  if centerX or rightX {
-    let tw: Float = t.text.length().toFloat() * size * 0.52
-    if centerX { drawX = wt.x + (cr.w - tw) / 2.0 }
-    if rightX { drawX = wt.x + cr.w - tw }
+  if componentHas(this: world.opticalAligns, entity: e) {
+    optical = componentGet(this: world.opticalAligns, entity: e)
+    if optical.enabled {
+      centerX = optical.centerX
+      if optical.centerX { rightX = false }
+    }
   }
-  gpu2d_text.drawText(font: res.textFont, text: t.text, x: drawX, y: wt.y + size, sizePx: size, color: g2dColor(c: col))
+  var drawX: Float = wt.x
+  var drawY: Float = wt.y + size
+  if centerX or rightX {
+    let bounds: SdfTextBounds = sdf_text.sdfMeasureTextBounds(font: res.textFont, text: t.text, sizePx: size)
+    if centerX { drawX = wt.x + cr.w / 2.0 - (bounds.left + bounds.right) / 2.0 }
+    if rightX { drawX = wt.x + cr.w - bounds.right }
+  }
+  if optical.enabled {
+    let bounds: SdfTextBounds = sdf_text.sdfMeasureTextBounds(font: res.textFont, text: t.text, sizePx: size)
+    if optical.centerX { drawX = wt.x + cr.w / 2.0 - (bounds.left + bounds.right) / 2.0 + optical.bias.x }
+    if optical.centerY { drawY = wt.y + cr.h / 2.0 - (bounds.top + bounds.bottom) / 2.0 + optical.bias.y }
+  }
+  gpu2d_text.drawText(font: res.textFont, text: t.text, x: drawX, y: drawY, sizePx: size, color: g2dColor(c: col))
 }
 
 func paintEntityG(world: view UiWorld, e: view EntityId, res: view Gpu2dUi) {

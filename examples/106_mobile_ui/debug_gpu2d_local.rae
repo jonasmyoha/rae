@@ -40,11 +40,8 @@ let debugButtonTextH: Float = 26.024096385542165
 let debugCloseTextH: Float = 39.03614457831325
 let debugDialogTitleH: Float = 47.71084337349397
 let debugBoldOffset: Float = 1.6
-let debugButtonTextX: Float = -2.4
-let debugButtonTextY: Float = -5.2
-let debugCloseTextY: Float = -6.0
 let debugCloseIconGlyph: Float = 43.373493975903614
-let debugCloseIconBoldOffset: Float = 1.4
+let debugCloseIconBoldOffset: Float = 1.2
 let debugDialogTitleY: Float = 43.373493975903614
 
 func debugAmberColor() ret RgbaColor { ret RgbaColor { r: 255, g: 191, b: 0, a: 255 } }
@@ -217,6 +214,16 @@ func setDebugSprite(world: mod UiWorld, entity: view EntityId, key: own String, 
   componentSet(this: world.sprites, entity: entity, data: sp)
 }
 
+func setOpticalAlign(world: mod UiWorld, entity: view EntityId, centerX: view Bool, centerY: view Bool, biasX: view Float, biasY: view Float) {
+  let oa: OpticalAlign = {
+    enabled: true
+    centerX: centerX
+    centerY: centerY
+    bias: Vec2 { x: biasX, y: biasY }
+  }
+  componentSet(this: world.opticalAligns, entity: entity, data: oa)
+}
+
 func setOnClickAction(world: mod UiWorld, entity: view EntityId, actionId: own String) {
   let oc: OnClick = {
     actionId: actionId
@@ -295,11 +302,11 @@ func buildDebugButton(world: mod UiWorld, debug: view DebugSystem) ret EntityId 
 
   let label: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: label, w: debug.buttonSize, h: debugButtonTextH)
-  setOffset(world: world, entity: label, x: debugButtonTextX, y: debugButtonTextY)
+  setOpticalAlign(world: world, entity: label, centerX: true, centerY: true, biasX: 0.0 - debugBoldOffset / 2.0, biasY: 0.0)
   setDebugText(world: world, entity: label, text: "D", styleId: "debugButtonSmall")
   let labelBold: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: labelBold, w: debug.buttonSize, h: debugButtonTextH)
-  setOffset(world: world, entity: labelBold, x: debugButtonTextX + debugBoldOffset, y: debugButtonTextY)
+  setOpticalAlign(world: world, entity: labelBold, centerX: true, centerY: true, biasX: debugBoldOffset / 2.0, biasY: 0.0)
   setDebugText(world: world, entity: labelBold, text: "D", styleId: "debugButtonSmall")
   let kids: List(EntityId) = createList(EntityId, cap: 2)
   kids.add(value: label)
@@ -317,19 +324,30 @@ func buildDebugIconButton(world: mod UiWorld) ret EntityId {
 
   let icon: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: icon, w: debugCloseIconGlyph, h: debugCloseIconGlyph)
+  setOpticalAlign(world: world, entity: icon, centerX: true, centerY: true, biasX: 0.0, biasY: 0.0)
   setDebugSprite(world: world, entity: icon, key: "mat:close", tint: themeColorByName(name: "textPrimary"))
-  let iconBoldX: EntityId = createEntity(world: world)
-  setFixedRect(world: world, entity: iconBoldX, w: debugCloseIconGlyph, h: debugCloseIconGlyph)
-  setOffset(world: world, entity: iconBoldX, x: debugCloseIconBoldOffset, y: 0.0)
-  setDebugSprite(world: world, entity: iconBoldX, key: "mat:close", tint: themeColorByName(name: "textPrimary"))
-  let iconBoldY: EntityId = createEntity(world: world)
-  setFixedRect(world: world, entity: iconBoldY, w: debugCloseIconGlyph, h: debugCloseIconGlyph)
-  setOffset(world: world, entity: iconBoldY, x: 0.0, y: debugCloseIconBoldOffset)
-  setDebugSprite(world: world, entity: iconBoldY, key: "mat:close", tint: themeColorByName(name: "textPrimary"))
-  let kids: List(EntityId) = createList(EntityId, cap: 3)
+  let iconLeft: EntityId = createEntity(world: world)
+  setFixedRect(world: world, entity: iconLeft, w: debugCloseIconGlyph, h: debugCloseIconGlyph)
+  setOpticalAlign(world: world, entity: iconLeft, centerX: true, centerY: true, biasX: 0.0 - debugCloseIconBoldOffset, biasY: 0.0)
+  setDebugSprite(world: world, entity: iconLeft, key: "mat:close", tint: themeColorByName(name: "textPrimary"))
+  let iconRight: EntityId = createEntity(world: world)
+  setFixedRect(world: world, entity: iconRight, w: debugCloseIconGlyph, h: debugCloseIconGlyph)
+  setOpticalAlign(world: world, entity: iconRight, centerX: true, centerY: true, biasX: debugCloseIconBoldOffset, biasY: 0.0)
+  setDebugSprite(world: world, entity: iconRight, key: "mat:close", tint: themeColorByName(name: "textPrimary"))
+  let iconUp: EntityId = createEntity(world: world)
+  setFixedRect(world: world, entity: iconUp, w: debugCloseIconGlyph, h: debugCloseIconGlyph)
+  setOpticalAlign(world: world, entity: iconUp, centerX: true, centerY: true, biasX: 0.0, biasY: 0.0 - debugCloseIconBoldOffset)
+  setDebugSprite(world: world, entity: iconUp, key: "mat:close", tint: themeColorByName(name: "textPrimary"))
+  let iconDown: EntityId = createEntity(world: world)
+  setFixedRect(world: world, entity: iconDown, w: debugCloseIconGlyph, h: debugCloseIconGlyph)
+  setOpticalAlign(world: world, entity: iconDown, centerX: true, centerY: true, biasX: 0.0, biasY: debugCloseIconBoldOffset)
+  setDebugSprite(world: world, entity: iconDown, key: "mat:close", tint: themeColorByName(name: "textPrimary"))
+  let kids: List(EntityId) = createList(EntityId, cap: 5)
   kids.add(value: icon)
-  kids.add(value: iconBoldX)
-  kids.add(value: iconBoldY)
+  kids.add(value: iconLeft)
+  kids.add(value: iconRight)
+  kids.add(value: iconUp)
+  kids.add(value: iconDown)
   attachKids(world: world, parent: btn, kids: kids)
   ret btn
 }
@@ -343,11 +361,11 @@ func buildDebugCloseButton(world: mod UiWorld) ret EntityId {
 
   let label: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: label, w: debugCloseButtonW, h: debugCloseTextH)
-  setOffset(world: world, entity: label, x: 0.0, y: debugCloseTextY)
+  setOpticalAlign(world: world, entity: label, centerX: true, centerY: true, biasX: 0.0 - debugBoldOffset / 2.0, biasY: 0.0)
   setDebugText(world: world, entity: label, text: "Close", styleId: "debugCloseButton")
   let labelBold: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: labelBold, w: debugCloseButtonW, h: debugCloseTextH)
-  setOffset(world: world, entity: labelBold, x: debugBoldOffset, y: debugCloseTextY)
+  setOpticalAlign(world: world, entity: labelBold, centerX: true, centerY: true, biasX: debugBoldOffset / 2.0, biasY: 0.0)
   setDebugText(world: world, entity: labelBold, text: "Close", styleId: "debugCloseButton")
   let kids: List(EntityId) = createList(EntityId, cap: 2)
   kids.add(value: label)
@@ -365,10 +383,11 @@ func buildDebugMenuTitle(world: mod UiWorld, panelW: view Float) ret EntityId {
 
   let label: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: label, w: panelW, h: debugDialogTitleH)
+  setOpticalAlign(world: world, entity: label, centerX: true, centerY: true, biasX: 0.0 - debugBoldOffset / 2.0, biasY: 0.0)
   setDebugText(world: world, entity: label, text: "Debug", styleId: "debugDialogTitle")
   let labelBold: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: labelBold, w: panelW, h: debugDialogTitleH)
-  setOffset(world: world, entity: labelBold, x: debugBoldOffset, y: 0.0)
+  setOpticalAlign(world: world, entity: labelBold, centerX: true, centerY: true, biasX: debugBoldOffset / 2.0, biasY: 0.0)
   setDebugText(world: world, entity: labelBold, text: "Debug", styleId: "debugDialogTitle")
 
   let kids: List(EntityId) = createList(EntityId, cap: 2)

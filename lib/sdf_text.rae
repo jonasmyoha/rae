@@ -43,6 +43,15 @@ type SdfFont {
     glyphs: List(SdfGlyph)
 }
 
+type SdfTextBounds {
+    hasBounds: Bool
+    left: Float
+    top: Float
+    right: Float
+    bottom: Float
+    advance: Float
+}
+
 func sdfFloatField(doc: view JsonDoc, obj: view JsonValue, key: view String, fallback: view Float) ret Float {
     let idx: Int = json.jsonField(doc: doc, this: obj, key: key)
     if idx < 0 { ret fallback }
@@ -140,6 +149,55 @@ func sdfMeasureText(font: view SdfFont, text: view String, sizePx: view Float) r
         i = i + 1
     }
     ret total
+}
+
+# Visual bounds of `text` relative to a baseline origin at (0, 0). This uses
+# glyph plane bounds from msdf-atlas-gen instead of the advance/em box, so UI
+# centering can align the actual rendered pixels.
+func sdfMeasureTextBounds(font: view SdfFont, text: view String, sizePx: view Float) ret SdfTextBounds {
+    let scale: Float = sizePx / font.emSize
+    var pen: Float = 0.0
+    var has: Bool = false
+    var left: Float = 0.0
+    var top: Float = 0.0
+    var right: Float = 0.0
+    var bottom: Float = 0.0
+    let n: Int = text.length()
+    var i: Int = 0
+    loop i < n {
+        let cp: Int = text.at(index: i).toInt()
+        let gi: Int = sdfGlyphIndex(font: font, cp: cp)
+        if gi >= 0 {
+            let g: SdfGlyph = rae_ext_rae_buf_get(buf: font.glyphs.data, index: gi)
+            if g.hasBounds {
+                let gx0: Float = pen + g.planeLeft * scale
+                let gx1: Float = pen + g.planeRight * scale
+                let gy0: Float = 0.0 - g.planeTop * scale
+                let gy1: Float = 0.0 - g.planeBottom * scale
+                if has is false {
+                    left = gx0
+                    right = gx1
+                    top = gy0
+                    bottom = gy1
+                    has = true
+                } else {
+                    if gx0 < left { left = gx0 }
+                    if gx1 > right { right = gx1 }
+                    if gy0 < top { top = gy0 }
+                    if gy1 > bottom { bottom = gy1 }
+                }
+            }
+            pen = pen + g.advance * scale
+        }
+        i = i + 1
+    }
+    if has is false {
+        left = 0.0
+        top = 0.0 - font.ascender * scale
+        right = pen
+        bottom = (font.lineHeight - font.ascender) * scale
+    }
+    ret SdfTextBounds { hasBounds: has, left: left, top: top, right: right, bottom: bottom, advance: pen }
 }
 
 # Draw `text` into framebuffer `fb` (fbW x fbH packed 0xRRGGBB), pen baseline at
