@@ -374,6 +374,7 @@ type UiWorld {
   offsets: ComponentTable(Offset)
   constraints: ComponentTable(Constraints)
   overflows: ComponentTable(OverflowPolicy)
+  extentAnchors: ComponentTable(ExtentAnchor)
 
   # ----- authored visual/interaction -----
   transforms: ComponentTable(TransformFx)
@@ -467,6 +468,7 @@ func createUiWorld() ret UiWorld {
     offsets: createComponentTable(Offset)
     constraints: createComponentTable(Constraints)
     overflows: createComponentTable(OverflowPolicy)
+    extentAnchors: createComponentTable(ExtentAnchor)
 
     transforms: createComponentTable(TransformFx)
     sprites: createComponentTable(Sprite)
@@ -732,6 +734,7 @@ func destroyEntity(world: mod UiWorld, entity: view EntityId) pub {
   componentRemove(this: world.offsets, entity: entity)
   componentRemove(this: world.constraints, entity: entity)
   componentRemove(this: world.overflows, entity: entity)
+  componentRemove(this: world.extentAnchors, entity: entity)
   componentRemove(this: world.transforms, entity: entity)
   # Visual
   componentRemove(this: world.sprites, entity: entity)

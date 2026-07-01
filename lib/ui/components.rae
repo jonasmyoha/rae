@@ -48,6 +48,20 @@ enum OverflowMode {
   scaleToFitY
 }
 
+# Horizontal placement of a layout ROOT within the layout extent
+# (world.layoutW). Lets a phone-width app stay a centered column on a
+# wide desktop window while specific roots (a bottom toolbar / header)
+# break out edge-to-edge.
+#   left   — root left-aligned at x=0 (default; overlays self-position
+#            via their own Offset)
+#   center — root centered: x = (extentW - ownW) / 2 (the content column)
+#   fill   — root spans the full extent: width = extentW, x = 0
+enum HExtent {
+  left
+  center
+  fill
+}
+
 enum ShapeKind {
   rect
   roundedRect
@@ -193,6 +207,13 @@ type Constraints {
 
 type OverflowPolicy {
   mode: OverflowMode
+}
+
+# Extent-relative horizontal placement for a layout root. See HExtent.
+# Only meaningful on parentless roots (the layout entry point reads it);
+# ignored on child entities, which are placed by their parent's layout.
+type ExtentAnchor {
+  h: HExtent
 }
 
 # Visual / interaction

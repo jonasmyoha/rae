@@ -22,21 +22,10 @@
 # implemented it either; the music player doesn't need it).
 import core
 
-# The screen-level container the root node measures against. main.rae
-# updates these via `setLayoutScreenSize` whenever the window size
-# changes; layoutSystem reads them off these globals so it doesn't
-# have to thread them through every call.
-let screenWidth: Float = 600.0
-let screenHeight: Float = 1300.0
-
-func setLayoutScreenSize(w: view Float, h: view Float) {
-  # Globals can't be reassigned cross-module from a function in Rae
-  # today, so this is mostly a marker; main.rae writes directly to
-  # `screenWidth` / `screenHeight` once that lands. Until then,
-  # layoutSystem's defaults of 600x1300 match the music player target.
-  let unusedW: Float = w
-  let unusedH: Float = h
-}
+# The layout root measures against `world.layoutW` / `world.layoutH`
+# (the live layout extent, set by the app from the window size) — the
+# old module-level screen-size globals + `setLayoutScreenSize` marker
+# are gone; roots read the extent directly in `layoutSystem`.
 
 # -----------------------------------------------------------------
 # Helpers
@@ -144,18 +133,24 @@ func applyConstraintsH(world: view UiWorld, entity: view EntityId, h: view Float
 }
 
 # Authored Padding, defaulted to all-zeros if absent.
+# The root's extent-relative horizontal placement, defaulting to `left`.
+func rootExtentAnchor(world: view UiWorld, entity: view EntityId) ret HExtent {
+  if componentHas(this: world.extentAnchors, entity: entity) is false {
+    ret HExtent.left
+  }
+  let a: ExtentAnchor = componentGet(this: world.extentAnchors, entity: entity)
+  ret a.h
+}
+
 func entityPadding(world: view UiWorld, entity: view EntityId) ret Insets {
   var base: Insets = { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
   if componentHas(this: world.paddings, entity: entity) {
     let p: Padding = componentGet(this: world.paddings, entity: entity)
     base = p.insets
   }
-  # Fold safe-area insets on top of the authored padding. An entity
-  # opts in with a `SafeArea` component; `safeAreaSystem` populates the
-  # matching `SafeInsets` (already in design units) each frame from the
-  # active device preset. `apply` is a per-edge multiplier and `extra`
-  # an additive per-edge gutter. See
-  # rae/docs/ui-viewport-and-safe-area-plan.md.
+  # Fold safe-area insets (design units, set by safeAreaSystem from the
+  # active device preset) onto the authored padding: per-edge
+  # base + apply*inset + extra. See ui-viewport-and-safe-area-plan.md.
   if componentHas(this: world.safeAreas, entity: entity) is false {
     ret base
   }
@@ -852,12 +847,28 @@ func layoutSystem(world: mod UiWorld) {
           parentAvailH: world.layoutH
           hasParentAvail: true
         )
+        # Horizontal placement within the layout extent (ExtentAnchor):
+        # `center` centers a phone-width column on desktop, `fill` spans
+        # edge-to-edge, `left`/none keeps x=0. On a phone the extent == the
+        # content width, so all collapse to today's x=0 / width-unchanged.
+        var rootW: Float = resolved.x
+        var rootX: Float = 0.0
+        let anchor: HExtent = rootExtentAnchor(world: world, entity: e)
+        if anchor is HExtent.fill {
+          rootW = world.layoutW
+        }
+        if anchor is HExtent.center {
+          let slack: Float = world.layoutW - rootW
+          if slack > 0.0 {
+            rootX = slack / 2.0
+          }
+        }
         computeSubtree(
           world: world
           entity: e
-          localX: 0.0
+          localX: rootX
           localY: 0.0
-          ownW: resolved.x
+          ownW: rootW
           ownH: resolved.y
         )
       }
@@ -867,31 +878,17 @@ func layoutSystem(world: mod UiWorld) {
 }
 
 # -----------------------------------------------------------------
-# layoutSystemIfDirty — generation-skip wrapper around layoutSystem.
-#
-# Mirrors `transformSystemIfDirty` in transform.rae. Tracks the
-# table-level generation counter of every ComponentTable that the
-# layout pass READS from. When none has bumped since the last call,
-# the whole measure+compute walk (and its writes to `measuredSizes` /
-# `computedRects`) can be skipped — the output would be identical.
-#
-# Input tables (mutated by the user / scene loader, READ by layout):
-#   rects, sizes, layouts, paddings, offsets, constraints,
-#   actives, aligns, childrens, parents
-#
-# Output tables (WRITTEN by layout) are deliberately NOT in the cache
-#   measuredSizes  — written inside phase 1
-#   computedRects  — written inside phase 2
-# Tracking these would cause the cache to instantly re-dirty itself
-# on every call, because the first call bumps their generations.
-#
-# `entityCount` snapshots `alive.length` — no generation on the raw
-# alive List, so we fall back to the same structural fingerprint
-# transformSystemIfDirty uses (UI never creates/destroys entities
-# without also touching at least one component table, but tracking
-# the count explicitly is cheap and conservative).
-#
-# Initial -1 sentinels guarantee the first call always runs.
+# layoutSystemIfDirty — generation-skip wrapper around layoutSystem
+# (mirrors transformSystemIfDirty). Tracks the generation counter of
+# every ComponentTable the layout pass READS; when none bumped since
+# the last call, the measure+compute walk is skipped (identical output).
+# The layout OUTPUT tables (measuredSizes/computedRects) are deliberately
+# NOT tracked, or the first call would instantly re-dirty the cache.
+# `entityCount` snapshots alive.length (no gen on the raw List); -1
+# sentinels guarantee the first call always runs.
+# NOTE: `extentAnchors` is NOT a tracked input — it's set once at build
+# and only affects placement of a full-window rebuild, so it rides the
+# rebuild that already dirties `rects`.
 type LayoutCache {
   rectsGen: Int
   sizesGen: Int
