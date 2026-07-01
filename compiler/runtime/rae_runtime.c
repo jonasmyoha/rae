@@ -3721,6 +3721,116 @@ static void rae_g2d_compute_xform(float* out) {
 static WGPUCommandEncoder    g_g2d_enc = NULL;
 static WGPURenderPassEncoder g_g2d_pass = NULL;
 
+/* ---- Clip / scissor (#144) --------------------------------------------
+ * A clip-rect stack in DESIGN units. Each queued box primitive, glyph, and
+ * image records the current clip index (parallel arrays); at flush we set
+ * the render-pass scissor per contiguous run of same-clip draws, so a run
+ * is drawn with wgpuRenderPassEncoderDraw's firstInstance offset. Index 0
+ * is the sentinel "no clip" (full framebuffer). pushClipRect intersects
+ * with the parent so nested clips compose (a rounded card holding a scroll
+ * list clips to the intersection). Reset each beginFrame. The rounded /
+ * per-instance clip variant is #118; this is the axis-aligned fast path. */
+#define RAE_G2D_MAX_CLIPS 256
+typedef struct { float x, y, w, h; int full; } RaeG2dClip;
+static RaeG2dClip g_g2d_clips[RAE_G2D_MAX_CLIPS];
+static int g_g2d_clip_count = 1;         /* [0] = full sentinel */
+static int g_g2d_clip_stack[RAE_G2D_MAX_CLIPS];
+static int g_g2d_clip_sp = 0;            /* stack depth */
+static int g_g2d_cur_clip = 0;           /* current clip index */
+/* parallel clip index per box primitive */
+static int* g_g2d_prim_clip = NULL;
+static int  g_g2d_prim_clip_cap = 0;     /* in prims */
+/* parallel clip index per glyph, per atlas */
+static int* g_g2d_text_clip[RAE_SDF_MAX_ATLAS];
+static int  g_g2d_text_clip_cap[RAE_SDF_MAX_ATLAS];
+
+static float rae_g2d_maxf(float a, float b) { return a > b ? a : b; }
+static float rae_g2d_minf(float a, float b) { return a < b ? a : b; }
+
+static void rae_g2d_clip_reset(void) {
+    g_g2d_clips[0].full = 1;
+    g_g2d_clips[0].x = 0.0f; g_g2d_clips[0].y = 0.0f;
+    g_g2d_clips[0].w = 0.0f; g_g2d_clips[0].h = 0.0f;
+    g_g2d_clip_count = 1;
+    g_g2d_clip_sp = 0;
+    g_g2d_cur_clip = 0;
+}
+
+static void rae_g2d_prim_clip_ensure(int prims) {
+    if (prims <= g_g2d_prim_clip_cap) return;
+    int cap = g_g2d_prim_clip_cap ? g_g2d_prim_clip_cap : 64;
+    while (cap < prims) cap *= 2;
+    g_g2d_prim_clip = (int*)realloc(g_g2d_prim_clip, (size_t)cap * sizeof(int));
+    g_g2d_prim_clip_cap = cap;
+}
+
+static void rae_g2d_text_clip_ensure(int ai, int glyphs) {
+    if (glyphs <= g_g2d_text_clip_cap[ai]) return;
+    int cap = g_g2d_text_clip_cap[ai] ? g_g2d_text_clip_cap[ai] : 256;
+    while (cap < glyphs) cap *= 2;
+    g_g2d_text_clip[ai] = (int*)realloc(g_g2d_text_clip[ai], (size_t)cap * sizeof(int));
+    g_g2d_text_clip_cap[ai] = cap;
+}
+
+/* Resolve a clip index to a framebuffer-pixel scissor rect (via the design→
+ * physical xform) and set it on the active pass, clamped to the attachment. */
+static void rae_g2d_set_scissor(int clipidx) {
+    if (!g_g2d_pass) return;
+    float xf[8]; rae_g2d_compute_xform(xf);
+    float physW = xf[0], physH = xf[1], sx = xf[2], sy = xf[3], ox = xf[4], oy = xf[5];
+    float x0, y0, x1, y1;
+    if (clipidx <= 0 || clipidx >= g_g2d_clip_count || g_g2d_clips[clipidx].full) {
+        x0 = 0.0f; y0 = 0.0f; x1 = physW; y1 = physH;
+    } else {
+        RaeG2dClip* c = &g_g2d_clips[clipidx];
+        x0 = c->x * sx + ox;            y0 = c->y * sy + oy;
+        x1 = (c->x + c->w) * sx + ox;   y1 = (c->y + c->h) * sy + oy;
+    }
+    x0 = rae_g2d_maxf(0.0f, x0); y0 = rae_g2d_maxf(0.0f, y0);
+    x1 = rae_g2d_minf(physW, x1); y1 = rae_g2d_minf(physH, y1);
+    if (x1 < x0) x1 = x0;
+    if (y1 < y0) y1 = y0;
+    uint32_t ix = (uint32_t)(x0 + 0.5f), iy = (uint32_t)(y0 + 0.5f);
+    uint32_t iw = (uint32_t)(x1 - x0 + 0.5f), ih = (uint32_t)(y1 - y0 + 0.5f);
+    uint32_t pw = (uint32_t)(physW + 0.5f), ph = (uint32_t)(physH + 0.5f);
+    if (ix > pw) ix = pw;
+    if (iy > ph) iy = ph;
+    if (ix + iw > pw) iw = pw - ix;
+    if (iy + ih > ph) ih = ph - iy;
+    wgpuRenderPassEncoderSetScissorRect(g_g2d_pass, ix, iy, iw, ih);
+}
+
+void rae_ext_gpu2d_pushClipRect(double x, double y, double w, double h) {
+    RaeG2dClip child; child.full = 0;
+    RaeG2dClip* parent = &g_g2d_clips[g_g2d_cur_clip];
+    if (parent->full) {
+        child.x = (float)x; child.y = (float)y; child.w = (float)w; child.h = (float)h;
+    } else {
+        float px0 = rae_g2d_maxf(parent->x, (float)x);
+        float py0 = rae_g2d_maxf(parent->y, (float)y);
+        float px1 = rae_g2d_minf(parent->x + parent->w, (float)(x + w));
+        float py1 = rae_g2d_minf(parent->y + parent->h, (float)(y + h));
+        child.x = px0; child.y = py0;
+        child.w = rae_g2d_maxf(0.0f, px1 - px0);
+        child.h = rae_g2d_maxf(0.0f, py1 - py0);
+    }
+    int idx = g_g2d_cur_clip;
+    if (g_g2d_clip_count < RAE_G2D_MAX_CLIPS) {
+        idx = g_g2d_clip_count++;
+        g_g2d_clips[idx] = child;
+    }
+    if (g_g2d_clip_sp < RAE_G2D_MAX_CLIPS) g_g2d_clip_stack[g_g2d_clip_sp++] = g_g2d_cur_clip;
+    g_g2d_cur_clip = idx;
+}
+
+void rae_ext_gpu2d_popClipRect(void) {
+    if (g_g2d_clip_sp > 0) {
+        g_g2d_cur_clip = g_g2d_clip_stack[--g_g2d_clip_sp];
+    } else {
+        g_g2d_cur_clip = 0;
+    }
+}
+
 /* Frames render to this persistent OFFSCREEN texture, not directly to the
  * surface drawable. At endFrame we read it back for screenshots and copy it to
  * the surface drawable for present *best-effort* — so rendering + headless
@@ -4037,6 +4147,8 @@ static void rae_g2d_push(double x, double y, double w, double h,
     g2d_color(border, &p[12]);
     p[16]=(float)bw; p[17]=(float)angle; p[18]=0.0f; p[19]=0.0f;
     g2d_color(fill, &p[20]);
+    rae_g2d_prim_clip_ensure(g_g2d_prim_count + 1);
+    g_g2d_prim_clip[g_g2d_prim_count] = g_g2d_cur_clip;
     g_g2d_prim_count++;
 }
 
@@ -4060,6 +4172,8 @@ static void rae_g2d_push_gradient(double x, double y, double w, double h,
     p[18]=1.0f;
     p[19]=(float)(angle_deg * 0.017453292519943295);
     g2d_color(to, &p[20]);
+    rae_g2d_prim_clip_ensure(g_g2d_prim_count + 1);
+    g_g2d_prim_clip[g_g2d_prim_count] = g_g2d_cur_clip;
     g_g2d_prim_count++;
 }
 
@@ -4373,6 +4487,8 @@ void rae_ext_gpu2d_drawGlyphEx(double sx0, double sy0, double sx1, double sy1,
     p[17] = (float)((oc >> 8)  & 0xFF) / 255.0f;
     p[18] = (float)( oc        & 0xFF) / 255.0f;
     p[19] = (float)((oc >> 24) & 0xFF) / 255.0f;
+    rae_g2d_text_clip_ensure(ai, g_g2d_text_count[ai] + 1);
+    g_g2d_text_clip[ai][g_g2d_text_count[ai]] = g_g2d_cur_clip;
     g_g2d_text_count[ai]++;
 }
 
@@ -4441,7 +4557,7 @@ static int g_g2d_img_w[RAE_G2D_MAX_IMG];
 static int g_g2d_img_h[RAE_G2D_MAX_IMG];
 static int g_g2d_img_n = 0;
 
-typedef struct { int handle; float rect[4]; float tint[4]; float radius; } RaeG2dImgCmd;
+typedef struct { int handle; float rect[4]; float tint[4]; float radius; int clip; } RaeG2dImgCmd;
 static RaeG2dImgCmd* g_g2d_img_cmds = NULL;
 static int g_g2d_img_cmd_count = 0;
 static int g_g2d_img_cmd_cap = 0;
@@ -4661,6 +4777,7 @@ void rae_ext_gpu2d_drawImage(double x, double y, double w, double h, double radi
     c->tint[2] = (float)( t        & 0xFF) / 255.0f;
     c->tint[3] = (float)((t >> 24) & 0xFF) / 255.0f;
     c->radius = (float)radius;
+    c->clip = g_g2d_cur_clip;
 }
 
 static void rae_g2d_init_img_pipeline(void) {
@@ -4747,6 +4864,7 @@ static void rae_g2d_flush_images(void) {
         bgd.layout = bgl; bgd.entryCount = 4; bgd.entries = e;
         WGPUBindGroup bind = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
         g_g2d_img_frame_binds[g_g2d_img_frame_bind_n++] = bind;   /* released after submit */
+        rae_g2d_set_scissor(c->clip);
         wgpuRenderPassEncoderSetBindGroup(g_g2d_pass, 0, bind, 0, NULL);
         wgpuRenderPassEncoderDraw(g_g2d_pass, 6, 1, 0, 0);
     }
@@ -4758,6 +4876,7 @@ void rae_ext_gpu2d_beginFrame(double r, double g, double b, double a) {
     g_g2d_prim_count = 0;
     for (int i = 0; i < RAE_SDF_MAX_ATLAS; i++) g_g2d_text_count[i] = 0;
     g_g2d_img_cmd_count = 0;
+    rae_g2d_clip_reset();
     g_g2d_img_frame_bind_n = 0;
     g_g2d_frame_buf_n = 0;
     g_g2d_frame_bind_n = 0;
@@ -4912,7 +5031,22 @@ void rae_ext_gpu2d_flush(void) {
         rae_g2d_keep_frame_bind(bind);
         wgpuRenderPassEncoderSetPipeline(g_g2d_pass, g_g2d_pipeline);
         wgpuRenderPassEncoderSetBindGroup(g_g2d_pass, 0, bind, 0, NULL);
-        wgpuRenderPassEncoderDraw(g_g2d_pass, 6, (uint32_t)g_g2d_prim_count, 0, 0);
+        /* Draw contiguous same-clip runs, scissoring each. instance_index in
+         * the shader includes firstInstance, so the storage buffer still
+         * indexes the right primitive. */
+        int bs = 0;
+        while (bs < g_g2d_prim_count) {
+            int clip = (g_g2d_prim_clip && bs < g_g2d_prim_clip_cap) ? g_g2d_prim_clip[bs] : 0;
+            int be = bs + 1;
+            while (be < g_g2d_prim_count) {
+                int ec = (g_g2d_prim_clip && be < g_g2d_prim_clip_cap) ? g_g2d_prim_clip[be] : 0;
+                if (ec != clip) break;
+                be++;
+            }
+            rae_g2d_set_scissor(clip);
+            wgpuRenderPassEncoderDraw(g_g2d_pass, 6, (uint32_t)(be - bs), 0, (uint32_t)bs);
+            bs = be;
+        }
         g_g2d_prim_count = 0;
     }
     /* Images on top of boxes, under text. */
@@ -4946,7 +5080,22 @@ void rae_ext_gpu2d_flush(void) {
             rae_g2d_keep_frame_buf(instbuf);
             rae_g2d_keep_frame_bind(bind);
             wgpuRenderPassEncoderSetBindGroup(g_g2d_pass, 0, bind, 0, NULL);
-            wgpuRenderPassEncoderDraw(g_g2d_pass, 6, (uint32_t)g_g2d_text_count[ai], 0, 0);
+            int cnt = g_g2d_text_count[ai];
+            int* tclip = g_g2d_text_clip[ai];
+            int tcap = g_g2d_text_clip_cap[ai];
+            int ts = 0;
+            while (ts < cnt) {
+                int clip = (tclip && ts < tcap) ? tclip[ts] : 0;
+                int te = ts + 1;
+                while (te < cnt) {
+                    int ec = (tclip && te < tcap) ? tclip[te] : 0;
+                    if (ec != clip) break;
+                    te++;
+                }
+                rae_g2d_set_scissor(clip);
+                wgpuRenderPassEncoderDraw(g_g2d_pass, 6, (uint32_t)(te - ts), 0, (uint32_t)ts);
+                ts = te;
+            }
             g_g2d_text_count[ai] = 0;
         }
     }
