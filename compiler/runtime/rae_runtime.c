@@ -3731,7 +3731,7 @@ static WGPURenderPassEncoder g_g2d_pass = NULL;
  * list clips to the intersection). Reset each beginFrame. The rounded /
  * per-instance clip variant is #118; this is the axis-aligned fast path. */
 #define RAE_G2D_MAX_CLIPS 256
-typedef struct { float x, y, w, h; int full; } RaeG2dClip;
+typedef struct { float x, y, w, h, radius; int full; } RaeG2dClip;
 static RaeG2dClip g_g2d_clips[RAE_G2D_MAX_CLIPS];
 static int g_g2d_clip_count = 1;         /* [0] = full sentinel */
 static int g_g2d_clip_stack[RAE_G2D_MAX_CLIPS];
@@ -3751,6 +3751,7 @@ static void rae_g2d_clip_reset(void) {
     g_g2d_clips[0].full = 1;
     g_g2d_clips[0].x = 0.0f; g_g2d_clips[0].y = 0.0f;
     g_g2d_clips[0].w = 0.0f; g_g2d_clips[0].h = 0.0f;
+    g_g2d_clips[0].radius = 0.0f;
     g_g2d_clip_count = 1;
     g_g2d_clip_sp = 0;
     g_g2d_cur_clip = 0;
@@ -3800,8 +3801,8 @@ static void rae_g2d_set_scissor(int clipidx) {
     wgpuRenderPassEncoderSetScissorRect(g_g2d_pass, ix, iy, iw, ih);
 }
 
-void rae_ext_gpu2d_pushClipRect(double x, double y, double w, double h) {
-    RaeG2dClip child; child.full = 0;
+static void rae_g2d_push_clip(double x, double y, double w, double h, double radius) {
+    RaeG2dClip child; child.full = 0; child.radius = (float)radius;
     RaeG2dClip* parent = &g_g2d_clips[g_g2d_cur_clip];
     if (parent->full) {
         child.x = (float)x; child.y = (float)y; child.w = (float)w; child.h = (float)h;
@@ -3813,6 +3814,10 @@ void rae_ext_gpu2d_pushClipRect(double x, double y, double w, double h) {
         child.x = px0; child.y = py0;
         child.w = rae_g2d_maxf(0.0f, px1 - px0);
         child.h = rae_g2d_maxf(0.0f, py1 - py0);
+        /* Keep the larger of the two radii — a rounded child inside a
+         * rectangular parent still wants its own rounding; the scissor
+         * bbox already enforces the parent's straight edges. */
+        child.radius = rae_g2d_maxf((float)radius, parent->radius);
     }
     int idx = g_g2d_cur_clip;
     if (g_g2d_clip_count < RAE_G2D_MAX_CLIPS) {
@@ -3821,6 +3826,31 @@ void rae_ext_gpu2d_pushClipRect(double x, double y, double w, double h) {
     }
     if (g_g2d_clip_sp < RAE_G2D_MAX_CLIPS) g_g2d_clip_stack[g_g2d_clip_sp++] = g_g2d_cur_clip;
     g_g2d_cur_clip = idx;
+}
+
+/* Fill an 8-float box-clip uniform: [x,y,w,h] design units + [radius,enabled].
+ * `enabled` is set only for a rounded clip — a rectangular clip is handled by
+ * the scissor alone, so its SDF stays off. */
+static void rae_g2d_fill_clip_uniform(int clipidx, float* cu) {
+    if (clipidx > 0 && clipidx < g_g2d_clip_count
+        && !g_g2d_clips[clipidx].full && g_g2d_clips[clipidx].radius > 0.0f) {
+        RaeG2dClip* c = &g_g2d_clips[clipidx];
+        cu[0] = c->x; cu[1] = c->y; cu[2] = c->w; cu[3] = c->h;
+        cu[4] = c->radius; cu[5] = 1.0f; cu[6] = 0.0f; cu[7] = 0.0f;
+    } else {
+        for (int i = 0; i < 8; i++) cu[i] = 0.0f;
+    }
+}
+
+void rae_ext_gpu2d_pushClipRect(double x, double y, double w, double h) {
+    rae_g2d_push_clip(x, y, w, h, 0.0);
+}
+
+/* #118: rounded clip. The box pipeline applies the rounded-rect SDF in the
+ * fragment shader (analytic AA on the corners); the axis-aligned scissor
+ * (#144) still bounds all pipelines to the clip bbox. */
+void rae_ext_gpu2d_pushClipRoundedRect(double x, double y, double w, double h, double radius) {
+    rae_g2d_push_clip(x, y, w, h, radius);
 }
 
 void rae_ext_gpu2d_popClipRect(void) {
@@ -4052,10 +4082,13 @@ static const char* G2D_BOX_WGSL =
  * maps design-unit coords -> physical px: px = design*scale + offset. */
 "@group(0) @binding(0) var<uniform> uXform: array<vec4<f32>, 2>;\n"
 "@group(0) @binding(1) var<storage, read> prims: array<Prim>;\n"
+/* #118 rounded clip: uClip[0]=(x,y,w,h) design units, uClip[1]=(radius,enabled,..) */
+"@group(0) @binding(2) var<uniform> uClip: array<vec4<f32>, 2>;\n"
 "struct VsOut {\n"
 "  @builtin(position) pos: vec4<f32>,\n"
 "  @location(0) local: vec2<f32>,\n"
 "  @location(1) @interpolate(flat) inst: u32,\n"
+"  @location(2) posD: vec2<f32>,\n"
 "};\n"
 "@vertex\n"
 "fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VsOut {\n"
@@ -4079,6 +4112,7 @@ static const char* G2D_BOX_WGSL =
 "  o.pos = vec4<f32>(ndc, 0.0, 1.0);\n"
 "  o.local = local;\n"                      /* SDF evaluates in unrotated box frame */
 "  o.inst = ii;\n"
+"  o.posD = posDesign;\n"                   /* design-space pos for the clip SDF */
 "  return o;\n"
 "}\n"
 "fn sdRoundBox(p: vec2<f32>, b: vec2<f32>, r: vec4<f32>) -> f32 {\n"
@@ -4094,7 +4128,15 @@ static const char* G2D_BOX_WGSL =
 "  let center = in.local - halfSize;\n"
 "  let d = sdRoundBox(center, halfSize, p.radius);\n"
 "  let aa = max(fwidth(d), 0.0001);\n"
-"  let cov = 1.0 - smoothstep(-aa, aa, d);\n"
+"  var cov = 1.0 - smoothstep(-aa, aa, d);\n"
+"  if (uClip[1].y > 0.5) {\n"                /* #118: rounded clip coverage */
+"    let cc = uClip[0].xy + uClip[0].zw * 0.5;\n"
+"    let ch = uClip[0].zw * 0.5;\n"
+"    let cr = uClip[1].x;\n"
+"    let cd = sdRoundBox(in.posD - cc, ch, vec4<f32>(cr, cr, cr, cr));\n"
+"    let caa = max(fwidth(cd), 0.0001);\n"
+"    cov = cov * (1.0 - smoothstep(-caa, caa, cd));\n"
+"  }\n"
 "  var col = p.fill;\n"
 "  if (p.params.z > 0.5) {\n"
 "    let uv = in.local / max(p.rect.zw, vec2<f32>(1.0, 1.0));\n"
@@ -5019,19 +5061,11 @@ void rae_ext_gpu2d_flush(void) {
         wgpuQueueWriteBuffer(g_wgpu_queue, instbuf, 0, g_g2d_prims,
                              (size_t)g_g2d_prim_count * G2D_PRIM_FLOATS * sizeof(float));
         WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(g_g2d_pipeline, 0);
-        WGPUBindGroupEntry e[2]; memset(e, 0, sizeof(e));
-        e[0].binding = 0; e[0].buffer = g_g2d_uniform; e[0].size = 32;
-        e[1].binding = 1; e[1].buffer = instbuf;
-        e[1].size = (uint64_t)g_g2d_prim_count * G2D_PRIM_FLOATS * sizeof(float);
-        WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
-        bgd.layout = bgl; bgd.entryCount = 2; bgd.entries = e;
-        WGPUBindGroup bind = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
-        wgpuBindGroupLayoutRelease(bgl);
         rae_g2d_keep_frame_buf(instbuf);
-        rae_g2d_keep_frame_bind(bind);
         wgpuRenderPassEncoderSetPipeline(g_g2d_pass, g_g2d_pipeline);
-        wgpuRenderPassEncoderSetBindGroup(g_g2d_pass, 0, bind, 0, NULL);
-        /* Draw contiguous same-clip runs, scissoring each. instance_index in
+        /* Draw contiguous same-clip runs. Each run sets the scissor (#144, the
+         * axis-aligned bbox cull) and binds a per-run clip uniform (#118, the
+         * rounded-corner SDF applied in the fragment shader). instance_index in
          * the shader includes firstInstance, so the storage buffer still
          * indexes the right primitive. */
         int bs = 0;
@@ -5043,10 +5077,27 @@ void rae_ext_gpu2d_flush(void) {
                 if (ec != clip) break;
                 be++;
             }
+            float cu[8]; rae_g2d_fill_clip_uniform(clip, cu);
+            WGPUBufferDescriptor cbd; memset(&cbd, 0, sizeof(cbd));
+            cbd.size = sizeof(cu); cbd.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
+            WGPUBuffer cub = wgpuDeviceCreateBuffer(g_wgpu_dev, &cbd);
+            wgpuQueueWriteBuffer(g_wgpu_queue, cub, 0, cu, sizeof(cu));
+            rae_g2d_keep_frame_buf(cub);
+            WGPUBindGroupEntry e[3]; memset(e, 0, sizeof(e));
+            e[0].binding = 0; e[0].buffer = g_g2d_uniform; e[0].size = 32;
+            e[1].binding = 1; e[1].buffer = instbuf;
+            e[1].size = (uint64_t)g_g2d_prim_count * G2D_PRIM_FLOATS * sizeof(float);
+            e[2].binding = 2; e[2].buffer = cub; e[2].size = sizeof(cu);
+            WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
+            bgd.layout = bgl; bgd.entryCount = 3; bgd.entries = e;
+            WGPUBindGroup bind = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
+            rae_g2d_keep_frame_bind(bind);
             rae_g2d_set_scissor(clip);
+            wgpuRenderPassEncoderSetBindGroup(g_g2d_pass, 0, bind, 0, NULL);
             wgpuRenderPassEncoderDraw(g_g2d_pass, 6, (uint32_t)(be - bs), 0, (uint32_t)bs);
             bs = be;
         }
+        wgpuBindGroupLayoutRelease(bgl);
         g_g2d_prim_count = 0;
     }
     /* Images on top of boxes, under text. */
