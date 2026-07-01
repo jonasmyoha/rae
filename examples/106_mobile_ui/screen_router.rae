@@ -139,6 +139,10 @@ func buildAppWorld(
   viewport: view Viewport
 ) pub ret UiWorld {
   let world: UiWorld = createUiWorld()
+  # Publish the layout extent so the edge-to-edge dock (mounted below,
+  # before applyViewportExtent runs) can size itself to the full window
+  # width. Content roots stay `screenW` wide and center within it.
+  layoutExtentW = viewport.layoutW
   # Layer stack first — overlay-mount sites below assume the named
   # layer entities ("content" / "dock" / "back-button" / "dialog" /
   # "debug") already exist and look them up by id.
@@ -228,10 +232,12 @@ func liftDockForSafeArea(world: mod UiWorld, dock: view EntityId, bottomInset: v
   componentSet(this: world.offsets, entity: dock, data: lifted)
 }
 
-# Tag `entity` with a `SafeArea` whose per-edge `apply` multipliers
-# gate which device insets fold into its padding (1.0 = honour, 0.0 =
-# ignore). Left/right stay 0 — current presets have no horizontal
-# insets and the phone-portrait UI reserves only top/bottom.
+# Configure a full-screen page root: a `SafeArea` (per-edge `apply`
+# multipliers gate which device insets fold into padding — 1.0 honour,
+# 0.0 ignore; L/R stay 0 since presets have no horizontal insets) plus an
+# `ExtentAnchor.center` so the phone-width page stays a centered column on
+# a wide desktop window rather than left-aligning. The bottom toolbar uses
+# ExtentAnchor.fill instead (edge-to-edge); overlays keep the default left.
 func attachSafeAreaEdges(
   world: mod UiWorld
   entity: view EntityId
@@ -244,6 +250,8 @@ func attachSafeAreaEdges(
     extra: Insets { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
   }
   componentSet(this: world.safeAreas, entity: entity, data: sa)
+  let anchor: ExtentAnchor = { h: HExtent.center }
+  componentSet(this: world.extentAnchors, entity: entity, data: anchor)
 }
 
 # Shared page-top-bar builder. Every top-level screen (Home, Library,

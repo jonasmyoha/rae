@@ -32,6 +32,22 @@ func createViewport(
   if screenW > 0.0 {
     renderScaleVal = framebufferPxW / screenW
   }
+  # Responsive extent. `layoutHVal` is the fixed portrait content height
+  # and `contentDuW` the phone column width (design units). On a wide
+  # desktop window the layout WIDTH grows to the window aspect so the UI
+  # fills the window instead of letterboxing to a centered column — the
+  # content stays a centered `contentDuW` column (ExtentAnchor.center) and
+  # the bottom toolbar spans the full width (ExtentAnchor.fill). Clamped to
+  # `contentDuW`, so a portrait phone window is unchanged.
+  let contentDuW: Float = screenW * legacySceneScale
+  let layoutHVal: Float = screenH * legacySceneScale
+  var layoutWVal: Float = contentDuW
+  if windowPtH > 0.0 {
+    let byAspect: Float = layoutHVal * (windowPtW / windowPtH)
+    if byAspect > layoutWVal {
+      layoutWVal = byAspect
+    }
+  }
   let vp: Viewport = {
     windowPtW: windowPtW
     windowPtH: windowPtH
@@ -43,18 +59,27 @@ func createViewport(
     areaDuH: screenH
     renderScale: renderScaleVal
     legacySceneScale: legacySceneScale
-    layoutW: screenW * legacySceneScale
-    layoutH: screenH * legacySceneScale
+    layoutW: layoutWVal
+    layoutH: layoutHVal
   }
   ret vp
 }
 
 func createViewportFromWindow() pub ret Viewport {
+  # Derive the extent from the LIVE framebuffer size (physical pixels),
+  # which tracks runtime resizes — NOT `uiWindowWidth()`, which is the
+  # design-resolution width (circular), nor the config `windowW/windowH`
+  # (stale after a resize). `createViewport` reads the window aspect from
+  # these to widen `layoutW`, keeping the fixed `screenW`/`screenH`
+  # content baseline. windowPt == framebufferPx here (aspect is what
+  # matters); the reported `dpr` is 1, used only for the boot log.
+  let fbW: Float = uiFramebufferWidth().toFloat()
+  let fbH: Float = uiFramebufferHeight().toFloat()
   ret createViewport(
-    windowPtW: windowW
-    windowPtH: windowH
-    framebufferPxW: uiFramebufferWidth().toFloat()
-    framebufferPxH: uiFramebufferHeight().toFloat()
+    windowPtW: fbW
+    windowPtH: fbH
+    framebufferPxW: fbW
+    framebufferPxH: fbH
   )
 }
 
