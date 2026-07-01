@@ -25,9 +25,10 @@ func mtext(font: view SdfFont, s: view String, x: view Float, y: view Float, siz
 }
 
 func mshadow(font: view SdfFont, s: view String, x: view Float, y: view Float, size: view Float, c: view Int, sh: view Int, sy: view Float, soft: view Float) {
+  # Diagonal (down-right) drop-shadow — offset both axes, not just vertical.
   gpu2d_text.drawTextEx(font: font, text: s, x: x, y: y, sizePx: size, color: c,
                         outlineColor: 0, outlineWidth: 0.0,
-                        shadowColor: sh, shadowOffX: 0.0, shadowOffY: sy, shadowSoftness: soft)
+                        shadowColor: sh, shadowOffX: sy, shadowOffY: sy, shadowSoftness: soft)
 }
 
 func moutline(font: view SdfFont, s: view String, x: view Float, y: view Float, size: view Float, c: view Int, ol: view Int, olw: view Float) {
@@ -132,7 +133,7 @@ func drawFrame(font: view SdfFont) {
 func smallShadow(font: view SdfFont, s: view String, x: view Float, y: view Float, size: view Float) {
   gpu2d_text.drawTextEx(font: font, text: s, x: x, y: y, sizePx: size, color: 0xFFFFFFFF,
                         outlineColor: 0xFFFFFFFF, outlineWidth: 1.2,
-                        shadowColor: 0xB4000000, shadowOffX: 0.0, shadowOffY: 1.5, shadowSoftness: 3.0)
+                        shadowColor: 0xB4000000, shadowOffX: 1.5, shadowOffY: 1.5, shadowSoftness: 3.0)
 }
 
 func main() ret Int {
