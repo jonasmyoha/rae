@@ -296,6 +296,18 @@ void discover_specializations_module(CompilerContext* ctx, const AstModule* modu
                 }
             }
             if (d->as.func_decl.body) discover_specializations_stmt_impl(&fctx, d->as.func_decl.body->first);
+        } else if (d->kind == AST_DECL_GLOBAL_LET) {
+            // Module-level `var`/`let` can instantiate generics — both its
+            // declared type (e.g. `List(Int)` needs its struct typedef emitted)
+            // and its initializer's calls (e.g. `createList(Int, cap: 4)` needs
+            // the specialized functions). Register/walk both like a function's
+            // locals do, so a generic used ONLY in a global still monomorphizes.
+            if (d->as.let_decl.type) register_generic_type(ctx, d->as.let_decl.type);
+            if (d->as.let_decl.value) {
+                CFuncContext gctx = {.compiler_ctx = ctx, .module = module};
+                if (d->as.let_decl.type) { gctx.expected_type = *d->as.let_decl.type; gctx.has_expected_type = true; }
+                discover_specializations_expr_impl(&gctx, d->as.let_decl.value);
+            }
         }
     }
     size_t discovered = 0;

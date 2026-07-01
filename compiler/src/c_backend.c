@@ -820,7 +820,22 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
         case AST_EXPR_FLOAT: return &kFloat_tr;
         case AST_EXPR_BOOL: return &kBool_tr;
         case AST_EXPR_STRING: return &kString_tr;
-        case AST_EXPR_IDENT: return get_local_type_ref(ctx, expr->as.ident);
+        case AST_EXPR_IDENT: {
+            const AstTypeRef* lt = get_local_type_ref(ctx, expr->as.ident);
+            if (lt) return lt;
+            // Module-level global (`var`/`let` at module scope, AST_DECL_GLOBAL_LET):
+            // resolve its declared type so method calls / member access on a
+            // global receiver (e.g. `g_list.get(i)`, `g_list.length`) dispatch
+            // with the right receiver type instead of a bare, type-less mangling.
+            if (ctx->compiler_ctx) {
+                for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
+                    const AstDecl* d = ctx->compiler_ctx->all_decls[i];
+                    if (d->kind == AST_DECL_GLOBAL_LET && str_eq(d->as.let_decl.name, expr->as.ident))
+                        return d->as.let_decl.type;
+                }
+            }
+            return NULL;
+        }
         case AST_EXPR_MEMBER: {
             const AstTypeRef* obj_tr = infer_expr_type_ref(ctx, expr->as.member.object); Str obj_name = get_base_type_name(obj_tr);
             if (obj_name.len == 0) obj_name = infer_expr_type(ctx, expr->as.member.object);
@@ -844,6 +859,14 @@ Str infer_expr_type(CFuncContext* ctx, const AstExpr* expr) {
     const AstTypeRef* tr = infer_expr_type_ref(ctx, expr);
     if (tr) return str_from_cstr(rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr));
     return (Str){0};
+}
+
+// A module-level global whose initializer is a function/method call can't be a
+// C static initializer (static init must be constant). Such globals are emitted
+// as bare (zero-init) declarations and assigned at the top of main() instead.
+// Literal / object / arithmetic initializers stay as valid static initializers.
+static bool global_init_is_deferred(const AstExpr* v) {
+    return v && (v->kind == AST_EXPR_CALL || v->kind == AST_EXPR_METHOD_CALL);
 }
 
 
@@ -905,6 +928,22 @@ bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* 
   // the safety net so the global pool doesn't grow unbounded
   // across long-running call chains.
   fprintf(out, "  int __rae_spm_func = rae_string_pool_mark();\n");
+
+  // Assign module-level globals whose initializers are function/method calls
+  // (not valid as C static initializers) — run once here, before main's body,
+  // in declaration order. See global_init_is_deferred + the globals emitter.
+  if (is_main) {
+      for (size_t gi = 0; gi < ctx->all_decl_count; gi++) {
+          const AstDecl* gd = ctx->all_decls[gi];
+          if (gd->kind != AST_DECL_GLOBAL_LET || !global_init_is_deferred(gd->as.let_decl.value)) continue;
+          bool sh = tctx.has_expected_type; AstTypeRef se = tctx.expected_type;
+          if (gd->as.let_decl.type) { tctx.expected_type = *gd->as.let_decl.type; tctx.has_expected_type = true; }
+          fprintf(out, "  %.*s = ", (int)gd->as.let_decl.name.len, gd->as.let_decl.name.data);
+          emit_expr(&tctx, gd->as.let_decl.value, out, PREC_LOWEST, false, false);
+          fprintf(out, ";\n");
+          tctx.has_expected_type = sh; tctx.expected_type = se;
+      }
+  }
 
   if (f->body) { for (AstStmt* s = f->body->first; s; s = s->next) emit_stmt(&tctx, s, out); }
 
@@ -1776,8 +1815,12 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
           if (d->as.let_decl.type) emit_type_ref_as_c_type(&gctx, d->as.let_decl.type, out, false);
           else fprintf(out, "int64_t");
           fprintf(out, " %.*s = ", (int)d->as.let_decl.name.len, d->as.let_decl.name.data);
-          if (d->as.let_decl.value) emit_expr(&gctx, d->as.let_decl.value, out, PREC_LOWEST, false, false);
-          else emit_auto_init(&gctx, d->as.let_decl.type, out);
+          if (d->as.let_decl.value && !global_init_is_deferred(d->as.let_decl.value))
+              emit_expr(&gctx, d->as.let_decl.value, out, PREC_LOWEST, false, false);
+          else
+              // Deferred (function-call) init OR no init: zero-initialise here;
+              // deferred ones are assigned at the top of main().
+              emit_auto_init(&gctx, d->as.let_decl.type, out);
           fprintf(out, ";\n");
       }
       fprintf(out, "\n");
