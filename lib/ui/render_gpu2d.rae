@@ -28,6 +28,7 @@ import ui/theme
 type Gpu2dUi {
   textFont: SdfFont   # body text (e.g. Roboto MSDF atlas)
   iconFont: SdfFont   # Material-icon MSDF atlas (mat:* glyphs)
+  textScale: Float    # app coordinate scale; 1.0 for legacy point-sized scenes
 }
 
 func g2dColor(c: view RgbaColor) ret Int {
@@ -203,7 +204,7 @@ func paintSpriteG(world: view UiWorld, e: view EntityId, wt: view WorldTransform
 func paintTextG(world: view UiWorld, e: view EntityId, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int, res: view Gpu2dUi) {
   let t: view Text => componentView(this: world.texts, entity: e)
   if t.text.length() is 0 { ret }
-  let size: Float = g2dTextStyleSize(styleId: t.styleId)
+  let size: Float = g2dTextStyleSize(styleId: t.styleId) * res.textScale
   let col: RgbaColor = g2dChain(c: g2dTextStyleColor(styleId: t.styleId), chain255: chain255)
   var centerX: Bool = g2dTextStyleIsCentered(styleId: t.styleId)
   var rightX: Bool = g2dTextStyleIsRightAligned(styleId: t.styleId)
