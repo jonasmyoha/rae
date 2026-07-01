@@ -1,9 +1,8 @@
 open ui/ecs
 
-# 106's coordinate spine. Public UI coordinates are design units (du),
-# with unitScale=3 du per logical point. During migration the legacy
-# scenes are still authored in point-sized numbers, so layoutW/H and
-# input coordinates apply legacySceneScale to preserve today's visuals.
+# 106's coordinate spine. The SDL3 window is sized in logical points,
+# while scene/layout coordinates are native design units (du). gpu2d's
+# design-resolution transform maps the frame into the window.
 type Viewport pub {
   windowPtW: Float
   windowPtH: Float
@@ -25,33 +24,35 @@ func createViewport(
   framebufferPxW: view Float
   framebufferPxH: view Float
 ) pub ret Viewport {
-  var dpr: Float = 1.0
+  var dprVal: Float = 1.0
   if windowPtW > 0.0 {
-    dpr = framebufferPxW / windowPtW
+    dprVal = framebufferPxW / windowPtW
   }
-  let areaW: Float = windowPtW * unitScale
-  let areaH: Float = windowPtH * unitScale
+  var renderScaleVal: Float = 1.0
+  if screenW > 0.0 {
+    renderScaleVal = framebufferPxW / screenW
+  }
   let vp: Viewport = {
     windowPtW: windowPtW
     windowPtH: windowPtH
     framebufferPxW: framebufferPxW
     framebufferPxH: framebufferPxH
-    dpr: dpr
+    dpr: dprVal
     unitScale: unitScale
-    areaDuW: areaW
-    areaDuH: areaH
-    renderScale: dpr / unitScale
+    areaDuW: screenW
+    areaDuH: screenH
+    renderScale: renderScaleVal
     legacySceneScale: legacySceneScale
-    layoutW: areaW * legacySceneScale
-    layoutH: areaH * legacySceneScale
+    layoutW: screenW * legacySceneScale
+    layoutH: screenH * legacySceneScale
   }
   ret vp
 }
 
 func createViewportFromWindow() pub ret Viewport {
   ret createViewport(
-    windowPtW: screenW
-    windowPtH: screenH
+    windowPtW: windowW
+    windowPtH: windowH
     framebufferPxW: uiFramebufferWidth().toFloat()
     framebufferPxH: uiFramebufferHeight().toFloat()
   )
@@ -63,9 +64,9 @@ func applyViewportExtent(world: mod UiWorld, viewport: view Viewport) pub {
 }
 
 func viewportPointerX(viewport: view Viewport) pub ret Float {
-  ret uiPointerX() * viewport.unitScale * viewport.legacySceneScale
+  ret uiPointerX() * viewport.legacySceneScale
 }
 
 func viewportPointerY(viewport: view Viewport) pub ret Float {
-  ret uiPointerY() * viewport.unitScale * viewport.legacySceneScale
+  ret uiPointerY() * viewport.legacySceneScale
 }

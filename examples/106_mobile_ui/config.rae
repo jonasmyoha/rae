@@ -6,41 +6,39 @@ import ui/theme
 import ui/spacing
 
 # ----- screen + spacing ---------------------------------------------
-# Window dimensions in iPhone 15 Pro logical aspect (393×852, 19.5:9 ≈
-# 2.168 tall/wide), scaled up to ~1079 tall for a roomy demo on macOS.
-# `main.rae` may shrink both axes proportionally at runtime to fit
-# inside `monitorHeight - chrome`: macOS silently clamps a window that
-# doesn't fit and the clamp desyncs cursor coords from rendering.
-# Treat as a maximum; the layout reads the runtime values.
-let screenW: Float = 498.0
-let screenH: Float = 1079.0
+# Window dimensions are logical points for the SDL3 window. Scene/layout
+# dimensions below are design units (du), rendered into this window by
+# gpu2d's design-resolution transform.
+let windowW: Float = 498.0
+let windowH: Float = 1079.0
+let screenW: Float = 1080.0
+let screenH: Float = 2280.0
 # Design units per logical point — the one knob of the new coordinate
-# system (rae/docs/ui-coordinate-and-responsive-layout.md). 106 now uses
-# the final unitScale=3 model internally. The current .raescene files are
-# still authored in the legacy 498x1079 point space, so Viewport applies
-# legacySceneScale while those scenes are being migrated to 1080x2280du.
+# system (rae/docs/ui-coordinate-and-responsive-layout.md). `designScale`
+# is the one-time migration multiplier from the old 498-wide scene space.
 let unitScale: Float = 3.0
-let legacySceneScale: Float = 0.3333333333333333
+let designScale: Float = 2.1686746987951806
+let legacySceneScale: Float = 1.0
 # outerPad is the screen-edge inset — domain-specific, not a generic
 # spacing step. outerGap is the canonical "section gap" inside a
 # screen; its numeric value is spaceM, but the C backend can't
 # initialise a module-level `let` from another module-level `let`,
 # so we keep it as a literal and rely on the spaceM comment to
 # document the intent.
-let outerPad: Float = 20.0
-let outerGap: Float = 12.0  # spaceM
+let outerPad: Float = 43.373493975903614
+let outerGap: Float = 26.024096385542165  # old spaceM
 
 # ----- per-section heights ------------------------------------------
-let topBarH: Float = 48.0
-let heroBlockH: Float = 96.0
-let albumThumbSize: Float = 84.0
-let actionsRowH: Float = 44.0
-let pillsRowH: Float = 56.0
-let trackRowH: Float = 60.0
-let trackGap: Float = 4.0  # spaceXS
+let topBarH: Float = 104.09638554216868
+let heroBlockH: Float = 208.19277108433735
+let albumThumbSize: Float = 182.16867469879517
+let actionsRowH: Float = 95.42168674698796
+let pillsRowH: Float = 121.44578313253012
+let trackRowH: Float = 130.12048192771084
+let trackGap: Float = 8.674698795180722  # old spaceXS
 let trackRowCount: Int = 5
-let miniPlayerH: Float = 80.0
-let navTabsH: Float = 80.0
+let miniPlayerH: Float = 173.49397590361446
+let navTabsH: Float = 173.49397590361446
 
 # ----- palette --------------------------------------------------------
 # These constants hold the current theme's color values. Call
