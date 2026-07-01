@@ -42,10 +42,24 @@ func createViewport(
   let contentDuW: Float = screenW * legacySceneScale
   let layoutHVal: Float = screenH * legacySceneScale
   var layoutWVal: Float = contentDuW
+  var layoutHVal2: Float = layoutHVal
   if windowPtH > 0.0 {
     let byAspect: Float = layoutHVal * (windowPtW / windowPtH)
     if byAspect > layoutWVal {
       layoutWVal = byAspect
+    }
+  }
+  # Symmetric to the width case: on a window whose aspect is NARROWER
+  # than the design (taller than the phone column), grow the layout
+  # HEIGHT to the window aspect so the design fills the window with no
+  # vertical letterbox — the bottom toolbar (offset at `layoutExtentH`)
+  # then stays glued to the window's bottom edge. Content stays anchored
+  # at the top; the extra height is empty background between content and
+  # the dock. Clamped to `screenH`, so a portrait phone is unchanged.
+  if windowPtW > 0.0 {
+    let byAspectH: Float = layoutWVal * (windowPtH / windowPtW)
+    if byAspectH > layoutHVal2 {
+      layoutHVal2 = byAspectH
     }
   }
   let vp: Viewport = {
@@ -60,7 +74,7 @@ func createViewport(
     renderScale: renderScaleVal
     legacySceneScale: legacySceneScale
     layoutW: layoutWVal
-    layoutH: layoutHVal
+    layoutH: layoutHVal2
   }
   ret vp
 }
