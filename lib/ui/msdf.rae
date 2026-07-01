@@ -29,6 +29,10 @@ open raylib
 import core
 import json
 import raylib
+# Data types (MsdfState/MsdfFont/MsdfGlyph/createMsdfState) live in the
+# raylib-free ui/msdf_state so ui/ecs can embed MsdfState without pulling
+# raylib (#148). This module holds the raylib paint code.
+import ui/msdf_state
 
 # Compiled-target shortcut: the C runtime returns `rae_String`
 # directly for `rae_ext_rae_sys_read_file`. Declaring the extern
@@ -43,45 +47,7 @@ func rae_ext_rae_sys_read_file(path: String) extern ret String
 # state would have been cleaner but the C codegen can't put function
 # calls (createList for the glyph table) into static initialisers, so
 # we ride on `UiWorld`'s lazy `createUiWorld()` init instead.
-type MsdfState pub {
-  enabled: Bool
-  font: MsdfFont
-  outlineColor: RgbaColor
-  outlineWidth: Float
-  shadowColor: RgbaColor
-  shadowOffsetX: Float
-  shadowOffsetY: Float
-  shadowSoftness: Float
-  # When false (default), the shadow is drawn under every Text node.
-  # When true, the shadow is only applied to styles that opt in (the
-  # renderer decides via `textStyleHasShadow` and passes the result to
-  # `paintMsdfDispatch`). Lets one app (royalblush) shadow all display
-  # text while another (mobile UI) shadows only the mini-player.
-  shadowStylesOnly: Bool
-}
-
-func createMsdfState() pub ret MsdfState {
-  let zeroTex: Texture = { id: 0, width: 0, height: 0, mipmaps: 0, format: 0 }
-  let zeroColor: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
-  let stubGlyphs: List(MsdfGlyph) = createList(MsdfGlyph, cap: 0)
-  let stubFont: MsdfFont = {
-    texture: zeroTex
-    atlasWidth: 0.0, atlasHeight: 0.0, pxRange: 4.0, fontSize: 48.0
-    emSize: 1.0, lineHeight: 1.2, ascender: 0.9, descender: 0.0 - 0.2
-    glyphs: own stubGlyphs
-    yOriginBottom: true
-  }
-  ret MsdfState {
-    enabled: false
-    font: own stubFont
-    outlineColor: zeroColor
-    outlineWidth: 0.0
-    shadowColor: zeroColor
-    shadowOffsetX: 0.0, shadowOffsetY: 0.0
-    shadowSoftness: 1.0
-    shadowStylesOnly: false
-  }
-}
+# `MsdfState` + `createMsdfState` moved to ui/msdf_state (raylib-free, #148).
 
 # Register `font` as the world's MSDF default + the outline/shadow
 # style every subsequent text node should be drawn with. RgbaColor
@@ -180,51 +146,9 @@ func paintMsdfDispatch(
   )
 }
 
-# Per-glyph data extracted from the atlas's JSON sidecar.
-#
-# `planeBounds` are em-units relative to the baseline pen:
-#   left/right    horizontal extents (left = bearing.x)
-#   bottom/top    vertical extents (top > 0 above baseline, bottom < 0 below)
-# `atlasBounds` are pixel coords inside the PNG atlas with origin at
-# the BOTTOM-LEFT (msdf-atlas-gen default). We flip in `drawMsdfText`
-# because raylib's texCoord origin is top-left.
-#
-# Glyphs that draw nothing (e.g. U+0020 space) have `hasBounds = false`
-# and only contribute their `advance` to the cursor.
-type MsdfGlyph pub {
-  unicode: Int
-  advance: Float
-  hasBounds: Bool
-  planeLeft: Float
-  planeBottom: Float
-  planeRight: Float
-  planeTop: Float
-  atlasLeft: Float
-  atlasBottom: Float
-  atlasRight: Float
-  atlasTop: Float
-}
-
-type MsdfFont pub {
-  texture: Texture
-  atlasWidth: Float
-  atlasHeight: Float
-  # Atlas authoring parameters — `pxRange` is the distance-field
-  # halfband in atlas pixels at the bake size (`fontSize`).
-  pxRange: Float
-  fontSize: Float
-  # Font metrics in em-units (multiply by the target pixel size to
-  # get on-screen heights).
-  emSize: Float
-  lineHeight: Float
-  ascender: Float
-  descender: Float
-  glyphs: List(MsdfGlyph)
-  # When the atlas JSON reports `yOrigin = "bottom"` (the
-  # msdf-atlas-gen default), atlasBounds.bottom < atlasBounds.top
-  # and we flip Y when computing the source rect.
-  yOriginBottom: Bool
-}
+# `MsdfGlyph` + `MsdfFont` moved to ui/msdf_state (raylib-free, #148); the
+# atlas texture is stored there as ints and rebuilt into a raylib `Texture`
+# in `drawMsdfGlyphPass` below.
 
 # Read a Float field with a fallback. `jsonField` returns -1 when
 # absent so we test the index, not the value.
@@ -337,7 +261,11 @@ func loadMsdfFont(jsonPath: view String, atlasPath: view String) pub ret MsdfFon
   # loaded textures to POINT.)
   setTextureFilter(texture: tex, filter: 1)
   ret MsdfFont {
-    texture: tex
+    texId: tex.id
+    texW: tex.width
+    texH: tex.height
+    texMipmaps: tex.mipmaps
+    texFormat: tex.format
     atlasWidth: atlasW
     atlasHeight: atlasH
     pxRange: pxRange
@@ -449,7 +377,9 @@ func drawMsdfGlyphPass(
         }
         let src: Rectangle = { x: srcX, y: srcY, width: srcW, height: srcH }
         let dst: Rectangle = { x: dstX, y: dstY, width: dstW, height: dstH }
-        drawTexturePro(texture: font.texture, source: src, dest: dst, origin: origin, rotation: 0.0, tint: white)
+        # Rebuild the raylib Texture from the stored ints (#148).
+        let tex: Texture = { id: font.texId, width: font.texW, height: font.texH, mipmaps: font.texMipmaps, format: font.texFormat }
+        drawTexturePro(texture: tex, source: src, dest: dst, origin: origin, rotation: 0.0, tint: white)
       }
       cursor = cursor + g.advance * scale
     }

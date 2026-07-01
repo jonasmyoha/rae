@@ -1,0 +1,93 @@
+# MSDF data types — the raylib-free half of the MSDF text support (#148).
+#
+# `UiWorld` embeds an `MsdfState` (the raylib render path's default font +
+# outline/shadow style). Keeping the *types* here, with the atlas texture
+# stored as plain ints rather than a raylib `Texture`, lets `ui/ecs` import
+# this module WITHOUT pulling `ui/msdf` (which needs `raylib`). GPU2D-only
+# apps (e.g. example 106) therefore no longer emit raylib externs just by
+# using the ECS. The raylib paint code (loadMsdfFont / drawMsdfGlyphPass /
+# paintMsdfDispatch) stays in `ui/msdf.rae` and reconstructs a raylib
+# `Texture` from these ints.
+import core
+import ui/components
+
+type MsdfGlyph pub {
+  unicode: Int
+  advance: Float
+  hasBounds: Bool
+  planeLeft: Float
+  planeBottom: Float
+  planeRight: Float
+  planeTop: Float
+  atlasLeft: Float
+  atlasBottom: Float
+  atlasRight: Float
+  atlasTop: Float
+}
+
+type MsdfFont pub {
+  # Atlas texture stored as raylib Texture *fields* (id/width/height/
+  # mipmaps/format) rather than the `Texture` type, so this module stays
+  # raylib-free. ui/msdf.rae rebuilds a `Texture` from these for drawing.
+  texId: Int
+  texW: Int
+  texH: Int
+  texMipmaps: Int
+  texFormat: Int
+  atlasWidth: Float
+  atlasHeight: Float
+  # Atlas authoring parameters — `pxRange` is the distance-field
+  # halfband in atlas pixels at the bake size (`fontSize`).
+  pxRange: Float
+  fontSize: Float
+  # Font metrics in em-units (multiply by the target pixel size to
+  # get on-screen heights).
+  emSize: Float
+  lineHeight: Float
+  ascender: Float
+  descender: Float
+  glyphs: List(MsdfGlyph)
+  # When the atlas JSON reports `yOrigin = "bottom"` (the
+  # msdf-atlas-gen default), atlasBounds.bottom < atlasBounds.top
+  # and we flip Y when computing the source rect.
+  yOriginBottom: Bool
+}
+
+type MsdfState pub {
+  enabled: Bool
+  font: MsdfFont
+  outlineColor: RgbaColor
+  outlineWidth: Float
+  shadowColor: RgbaColor
+  shadowOffsetX: Float
+  shadowOffsetY: Float
+  shadowSoftness: Float
+  # When false (default), the shadow is drawn under every Text node.
+  # When true, the shadow is only applied to styles that opt in (the
+  # renderer decides via `textStyleHasShadow` and passes the result to
+  # `paintMsdfDispatch`). Lets one app (royalblush) shadow all display
+  # text while another (mobile UI) shadows only the mini-player.
+  shadowStylesOnly: Bool
+}
+
+func createMsdfState() pub ret MsdfState {
+  let zeroColor: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
+  let stubGlyphs: List(MsdfGlyph) = createList(MsdfGlyph, cap: 0)
+  let stubFont: MsdfFont = {
+    texId: 0, texW: 0, texH: 0, texMipmaps: 0, texFormat: 0
+    atlasWidth: 0.0, atlasHeight: 0.0, pxRange: 4.0, fontSize: 48.0
+    emSize: 1.0, lineHeight: 1.2, ascender: 0.9, descender: 0.0 - 0.2
+    glyphs: own stubGlyphs
+    yOriginBottom: true
+  }
+  ret MsdfState {
+    enabled: false
+    font: own stubFont
+    outlineColor: zeroColor
+    outlineWidth: 0.0
+    shadowColor: zeroColor
+    shadowOffsetX: 0.0, shadowOffsetY: 0.0
+    shadowSoftness: 1.0
+    shadowStylesOnly: false
+  }
+}
