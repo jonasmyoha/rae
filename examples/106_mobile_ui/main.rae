@@ -432,7 +432,7 @@ func main() {
       # Initial playback overlay: set the progress-fill width to
       # match the current `elapsedSec / durationSec` so the first
       # frame of the rebuilt world doesn't flash an empty bar before
-      # the inner-loop's per-frame `applyPlaybackToWorld` kicks in.
+      # the inner-loop's progress refresh kicks in.
       applyOverlaysToWorld(world: world, playback: playback, state: appState)
 
       # Pick up the destination half of an in-flight transition: the
@@ -659,7 +659,7 @@ func main() {
           # song.open / pollSpotify just may have grown playHistory;
           # re-mount Home/History in place if so. No-op otherwise.
           cachedHistoryLen = refreshHistoryViewsIfNeeded(world: world, state: appState, visible: currentScreen, cachedLen: cachedHistoryLen)
-          cachedPlaybackRevision = refreshPlaybackViewsIfNeeded(world: world, scenes: scenes, playback: playback, state: appState, reg: texReg, visible: currentScreen, cachedRevision: cachedPlaybackRevision)
+          cachedPlaybackRevision = refreshPlaybackViewsIfNeeded(world: world, playback: playback, cachedRevision: cachedPlaybackRevision)
           cachedSheetEpoch = refreshBottomSheetIfNeeded(world: world, sheet: appState.bottomSheet, cachedEpoch: cachedSheetEpoch)
 
           # In-app debug UI: process any debug.* action that fired
@@ -719,9 +719,9 @@ func main() {
           # apply a giant `dt` carry. Cheap (no ECS writes), safe to
           # call every frame including idle ones.
           advancePlayback(state: playback, now: now)
-          # `applyPlaybackToWorld` bumps Sprite + ComputedRect generations
-          # unconditionally — gate it on real change (playing tick, input
-          # event, or first frame) to preserve idle frame-skipping.
+          # Playback progress writes Rect + ComputedRect generations — gate it
+          # on real change (playing tick, input event, or first frame) to
+          # preserve idle frame-skipping.
           # Skipped during active wheel scroll: 60×/sec dirtying on top of
           # wheel-driven rebuilds blew the frame budget (~2 fps regression).
           var applyPlaybackFrame: Bool = false
@@ -773,7 +773,11 @@ func main() {
           # internal rate-limit). Syncs playback state, text fields,
           # and album art. See spotify_view.rae.
           pollSpotify(state: spotifyState, world: world, reg: texReg, playback: playback, appState: appState, currentAlbumStem: appState.currentAlbumStem, now: now)
-          cachedPlaybackRevision = refreshPlaybackViewsIfNeeded(world: world, scenes: scenes, playback: playback, state: appState, reg: texReg, visible: currentScreen, cachedRevision: cachedPlaybackRevision)
+          let playbackRevisionBeforePollRefresh: Int = cachedPlaybackRevision
+          cachedPlaybackRevision = refreshPlaybackViewsIfNeeded(world: world, playback: playback, cachedRevision: cachedPlaybackRevision)
+          if cachedPlaybackRevision is not playbackRevisionBeforePollRefresh {
+            applyOverlaysToWorld(world: world, playback: playback, state: appState)
+          }
           # Stream covers + cached history art after first paint. Both paths
           # are disk-only; history-art network refetch stays out of the frame
           # loop because each fetch can block for ~140ms.
