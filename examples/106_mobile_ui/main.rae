@@ -307,6 +307,7 @@ func main() {
     var cachedTrackDurMs: Int = 0
     var cachedAlbumScrollFloor: Float = 0.0
     var cachedHistoryLen: Int = 0
+    var cachedPlaybackRevision: Int = playback.revision
     var cachedSheetEpoch: Int = 0
     var lastHoverAnimDirty: Bool = false
     var lastFrameTime: Float = 0.0
@@ -375,6 +376,7 @@ func main() {
       # Persistent-world build: mounts every screen page + dock /
       # back overlays once; setPageActive flips visibility per nav.
       let world: UiWorld = buildAppWorld(scenes: scenes, playback: playback, state: appState, texReg: texReg, scrollY: scrollFsm.scrollY, viewport: viewport)
+      cachedPlaybackRevision = playback.revision
       # Apply the gpu2d design-resolution transform together with the
       # freshly-built world so the two never disagree. Doing this in the
       # resize-detection block instead painted one glitchy frame: the
@@ -657,6 +659,7 @@ func main() {
           # song.open / pollSpotify just may have grown playHistory;
           # re-mount Home/History in place if so. No-op otherwise.
           cachedHistoryLen = refreshHistoryViewsIfNeeded(world: world, state: appState, visible: currentScreen, cachedLen: cachedHistoryLen)
+          cachedPlaybackRevision = refreshPlaybackViewsIfNeeded(world: world, scenes: scenes, playback: playback, state: appState, reg: texReg, visible: currentScreen, cachedRevision: cachedPlaybackRevision)
           cachedSheetEpoch = refreshBottomSheetIfNeeded(world: world, sheet: appState.bottomSheet, cachedEpoch: cachedSheetEpoch)
 
           # In-app debug UI: process any debug.* action that fired
@@ -770,6 +773,7 @@ func main() {
           # internal rate-limit). Syncs playback state, text fields,
           # and album art. See spotify_view.rae.
           pollSpotify(state: spotifyState, world: world, reg: texReg, playback: playback, appState: appState, currentAlbumStem: appState.currentAlbumStem, now: now)
+          cachedPlaybackRevision = refreshPlaybackViewsIfNeeded(world: world, scenes: scenes, playback: playback, state: appState, reg: texReg, visible: currentScreen, cachedRevision: cachedPlaybackRevision)
           # Stream covers + cached history art after first paint. Both paths
           # are disk-only; history-art network refetch stays out of the frame
           # loop because each fetch can block for ~140ms.
@@ -802,9 +806,8 @@ func main() {
           # dirty the layout — but it re-seeds SafeInsets onto any page
           # re-mounted in place this frame (e.g. by
           # refreshHistoryViewsIfNeeded) so its notch reserve survives.
-          # (The dock is bottom-anchored via Offset and only (re)built on
-          # a full world rebuild, so its lift is handled in buildAppWorld,
-          # not here.)
+          # Dock rebuilds that happen in-place are lifted by the code that
+          # remounted them; full-world rebuilds handle the same in buildAppWorld.
           let safeFrame: Insets = applySafeAreas(world: world)
           layoutSystemIfDirty(world: world, cache: layoutCache)
           transformSystemIfDirty(world: world, cache: transformCache)
