@@ -292,9 +292,7 @@ func pollSpotify(
   # and "user skipped tracks in Spotify" — both flip within 1Hz here.
   let playingKey: String = "playing"
   let nowPlaying: Bool = track.state.equals(other: playingKey)
-  if playback.isPlaying is not nowPlaying {
-    playback.isPlaying = nowPlaying
-  }
+  setPlaybackPlaying(state: playback, value: nowPlaying)
   playback.elapsedSec = pos
   if dur > 0.0 {
     playback.durationSec = dur
