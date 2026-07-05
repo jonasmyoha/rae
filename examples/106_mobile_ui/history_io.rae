@@ -188,11 +188,16 @@ func restoreHistory(history: mod PlayHistory, path: view String) pub {
   let source: String = rae_ext_rae_sys_read_file(path: path)
   if source.length() > 0 {
     restoreHistoryFromSource(history: history, source: source, loadPath: path)
+    let normalized: Bool = normalizePlayHistoryArtwork(history: history)
+    if normalized {
+      saveHistoryToJson(history: history, path: path)
+    }
     ret
   }
   let legacySource: String = rae_ext_rae_sys_read_file(path: legacyHistoryFilePath)
   if legacySource.length() > 0 {
     restoreHistoryFromSource(history: history, source: legacySource, loadPath: legacyHistoryFilePath)
+    normalizePlayHistoryArtwork(history: history)
     saveHistoryToJson(history: history, path: path)
     ret
   }
