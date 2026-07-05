@@ -5,7 +5,7 @@
 #   examples/106_mobile_ui/snapshot.sh [output.bmp] [screen]
 #
 # `screen` is "home" (default), "album", "player", "library", "search",
-# or "profile". The output is BMP because the runtime screenshot helper
+# "profile", or "history". The output is BMP because the runtime screenshot helper
 # writes SDL surfaces directly.
 set -euo pipefail
 
