@@ -8,7 +8,7 @@ open ui/ecs
 #   * updates the NowPlaying scene's TrackTitle / TrackArtist text
 #     directly on the world's Text components (no rebuild),
 #   * downloads the album art (Spotify URL primary, iTunes fallback
-#     when empty) to /tmp/rae_spotify_art.jpg,
+#     when empty) to examples/106_mobile_ui/app_cache/album_art,
 #   * loads it as a gpu2d image key under "spotify-current",
 #   * swaps every Sprite whose textureKey equals the previous album
 #     stem to "spotify-current" so the NowPlaying cover renders the
@@ -124,7 +124,7 @@ func rebindCoverOnPages(world: mod UiWorld, fromKey: view String, toKey: view St
   }
 }
 
-# Fetch the current track's artwork to /tmp and register it as a
+# Fetch the current track's artwork to app_cache and register it as a
 # texture under `state.artKey`. Tries the Spotify URL first; falls
 # back to iTunes Search API when Spotify's URL is empty (local files,
 # podcasts). Returns true on success.
@@ -155,8 +155,12 @@ func loadHistoryEntryArt(track: view SpotifyTrack, reg: mod TextureRegistry) pub
   if gpu2d.hasImageKey(key: key) {
     ret key
   }
-  let outPath: String = "/tmp/rae_spotify_art_{imageHash}.jpg"
-  let ok: Bool = spotify.fetchArtwork(url: track.artworkUrl, outPath: outPath)
+  ensureAppCacheDirs()
+  let outPath: String = cachedArtworkPath(imageHash: imageHash)
+  var ok: Bool = sys.exists(path: outPath)
+  if ok is false {
+    ok = spotify.fetchArtwork(url: track.artworkUrl, outPath: outPath)
+  }
   if ok is false {
     ret ""
   }
@@ -166,7 +170,37 @@ func loadHistoryEntryArt(track: view SpotifyTrack, reg: mod TextureRegistry) pub
   if h <= 0 {
     ret ""
   }
+  saveHistoryArtworkMetadata(track: track, imageHash: imageHash, path: outPath)
   ret key
+}
+
+func saveHistoryArtworkMetadata(track: view SpotifyTrack, imageHash: view String, path: view String) {
+  ensureAppCacheDirs()
+  let metaPath: String = cachedArtworkMetadataPath(imageHash: imageHash)
+  let q: String = "\""
+  let colon: String = ":"
+  let comma: String = ","
+  let nl: String = "\n"
+  let openBrace: String = "\u{007B}"
+  let closeBrace: String = "\u{007D}"
+  let tn: String = jsonEscape(s: track.trackName)
+  let an: String = jsonEscape(s: track.artistName)
+  let alb: String = jsonEscape(s: track.albumName)
+  let url: String = jsonEscape(s: track.artworkUrl)
+  let p: String = jsonEscape(s: path)
+  var content: String = ""
+  content = content.concat(other: openBrace).concat(other: nl)
+  content = content.concat(other: "  ").concat(other: q).concat(other: "imageHash").concat(other: q).concat(other: colon).concat(other: " ").concat(other: q).concat(other: imageHash).concat(other: q).concat(other: comma).concat(other: nl)
+  content = content.concat(other: "  ").concat(other: q).concat(other: "trackName").concat(other: q).concat(other: colon).concat(other: " ").concat(other: q).concat(other: tn).concat(other: q).concat(other: comma).concat(other: nl)
+  content = content.concat(other: "  ").concat(other: q).concat(other: "artistName").concat(other: q).concat(other: colon).concat(other: " ").concat(other: q).concat(other: an).concat(other: q).concat(other: comma).concat(other: nl)
+  content = content.concat(other: "  ").concat(other: q).concat(other: "albumName").concat(other: q).concat(other: colon).concat(other: " ").concat(other: q).concat(other: alb).concat(other: q).concat(other: comma).concat(other: nl)
+  content = content.concat(other: "  ").concat(other: q).concat(other: "artworkUrl").concat(other: q).concat(other: colon).concat(other: " ").concat(other: q).concat(other: url).concat(other: q).concat(other: comma).concat(other: nl)
+  content = content.concat(other: "  ").concat(other: q).concat(other: "path").concat(other: q).concat(other: colon).concat(other: " ").concat(other: q).concat(other: p).concat(other: q).concat(other: nl)
+  content = content.concat(other: closeBrace).concat(other: nl)
+  let ok: Bool = sys.writeFile(path: metaPath, content: content)
+  if ok is false {
+    log("[spotify-art] metadata save failed: {metaPath}")
+  }
 }
 
 # Extract the last path segment of an artwork URL. Spotify URLs are
@@ -184,10 +218,23 @@ func artworkUrlImageHash(url: view String) ret String {
 }
 
 func refreshSpotifyArt(state: view SpotifyState, track: view SpotifyTrack, reg: mod TextureRegistry) ret Bool {
-  let outPath: String = "/tmp/rae_spotify_art.jpg"
+  ensureAppCacheDirs()
+  var outPath: String = ""
+  if track.artworkUrl.length() > 0 {
+    let h: String = artworkUrlImageHash(url: track.artworkUrl)
+    if h.length() > 0 {
+      outPath = cachedArtworkPath(imageHash: h)
+    }
+  }
+  if outPath.length() is 0 {
+    outPath = "{appCacheAlbumArtDir}/spotify-current.jpg"
+  }
   var primaryOk: Bool = false
   if track.artworkUrl.length() > 0 {
-    primaryOk = spotify.fetchArtwork(url: track.artworkUrl, outPath: outPath)
+    primaryOk = sys.exists(path: outPath)
+    if primaryOk is false {
+      primaryOk = spotify.fetchArtwork(url: track.artworkUrl, outPath: outPath)
+    }
   }
   if primaryOk is false {
     # iTunes fallback. Build "<artist> <track>" as the search term;

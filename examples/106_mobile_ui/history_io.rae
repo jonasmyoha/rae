@@ -1,10 +1,9 @@
 open sys/spotify
 open ui/ecs
-# Disk persistence for PlayHistory. Each `recordPlay` site (the
-# song.open.N dispatcher and pollSpotify) writes the whole list out
-# as JSON under `examples/106_mobile_ui/temp/play_history.json`; the
-# app reads it back at boot so the Recently-played row and the
-# History sub-page survive restarts.
+# Disk persistence for PlayHistory. Each `recordPlay` site writes the whole
+# list out as JSON under app_cache/metadata; the app reads it back at boot so
+# Recently-played and History survive restarts. The old temp/ location is read
+# as a migration fallback only.
 #
 # JSON shape (all entry fields preserved):
 #
@@ -34,9 +33,6 @@ import fs
 import gpu2d
 import json
 import sys
-
-let historyTempDir: String = "examples/106_mobile_ui/temp"
-let historyFilePath: String = "examples/106_mobile_ui/temp/play_history.json"
 
 # Externs are already declared in playback_state_io.rae; reuse those.
 
@@ -76,8 +72,7 @@ func jsonEscape(s: view String) ret String {
 # the gitignored `temp/` folder so a checkout doesn't bring a
 # stale demo history along.
 func saveHistoryToJson(history: view PlayHistory, path: view String) pub {
-  # Best-effort create the parent dir; makeDir is idempotent.
-  makeDir(path: historyTempDir)
+  ensureAppCacheDirs()
 
   let openBrace: String = "\u{007B}"
   let closeBrace: String = "\u{007D}"
@@ -135,18 +130,10 @@ func saveHistoryToJson(history: view PlayHistory, path: view String) pub {
   }
 }
 
-# Read `path`; if present, append the persisted entries to
-# `history.entries`. No-op when the file is missing — fresh
-# install, first launch.
-func restoreHistory(history: mod PlayHistory, path: view String) pub {
-  let source: String = rae_ext_rae_sys_read_file(path: path)
-  if source.length() is 0 {
-    log("[history] no file at {path} — empty history")
-    ret
-  }
+func restoreHistoryFromSource(history: mod PlayHistory, source: view String, loadPath: view String) {
   let doc: JsonDoc = json.parseJson(source: source)
   if doc.ok is false {
-    log("[history] parse error in {path} at byte {doc.errorPos}")
+    log("[history] parse error in {loadPath} at byte {doc.errorPos}")
     ret
   }
   let root: JsonValue = json.jsonRoot(doc: doc)
@@ -191,7 +178,25 @@ func restoreHistory(history: mod PlayHistory, path: view String) pub {
     history.entries.add(value: own entry)
     i = i + 1
   }
-  log("[history] restored {n} entries from {path}")
+  log("[history] restored {n} entries from {loadPath}")
+}
+
+# Read `path`; if present, append the persisted entries to
+# `history.entries`. No-op when the file is missing — fresh
+# install, first launch.
+func restoreHistory(history: mod PlayHistory, path: view String) pub {
+  let source: String = rae_ext_rae_sys_read_file(path: path)
+  if source.length() > 0 {
+    restoreHistoryFromSource(history: history, source: source, loadPath: path)
+    ret
+  }
+  let legacySource: String = rae_ext_rae_sys_read_file(path: legacyHistoryFilePath)
+  if legacySource.length() > 0 {
+    restoreHistoryFromSource(history: history, source: legacySource, loadPath: legacyHistoryFilePath)
+    saveHistoryToJson(history: history, path: path)
+    ret
+  }
+  log("[history] no file at {path} — empty history")
 }
 
 # Re-download the Spotify CDN artwork for every restored entry
@@ -211,8 +216,12 @@ func refetchHistoryArt(history: view PlayHistory, reg: mod TextureRegistry) pub 
       if alreadyLoaded is false {
         if e.artworkUrl.length() > 0 {
           let suffix: String = e.textureKey.sub(start: pLen, len: e.textureKey.length() - pLen)
-          let outPath: String = "/tmp/rae_spotify_art_{suffix}.jpg"
-          let ok: Bool = spotify.fetchArtwork(url: e.artworkUrl, outPath: outPath)
+          let outPath: String = cachedArtworkPath(imageHash: suffix)
+          var ok: Bool = sys.exists(path: outPath)
+          if ok is false {
+            ensureAppCacheDirs()
+            ok = spotify.fetchArtwork(url: e.artworkUrl, outPath: outPath)
+          }
           if ok {
             let keyForGpu: String = "{e.textureKey}"
             let pathForGpu: String = "{outPath}"
@@ -250,8 +259,12 @@ func refetchHistoryArtChunk(history: view PlayHistory, reg: mod TextureRegistry,
       if alreadyLoaded is false {
         if e.artworkUrl.length() > 0 {
           let suffix: String = e.textureKey.sub(start: pLen, len: e.textureKey.length() - pLen)
-          let outPath: String = "/tmp/rae_spotify_art_{suffix}.jpg"
-          let ok: Bool = spotify.fetchArtwork(url: e.artworkUrl, outPath: outPath)
+          let outPath: String = cachedArtworkPath(imageHash: suffix)
+          var ok: Bool = sys.exists(path: outPath)
+          if ok is false {
+            ensureAppCacheDirs()
+            ok = spotify.fetchArtwork(url: e.artworkUrl, outPath: outPath)
+          }
           if ok {
             let keyForGpu: String = "{e.textureKey}"
             let pathForGpu: String = "{outPath}"
