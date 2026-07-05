@@ -34,6 +34,12 @@ func g2dColor(c: view RgbaColor) ret Int {
   ret (c.a shl 24) bitor (c.r shl 16) bitor (c.g shl 8) bitor c.b
 }
 
+func g2dScaleMode(m: view ScaleMode) ret Int {
+  if m is ScaleMode.fill { ret 1 }
+  if m is ScaleMode.stretch { ret 2 }
+  ret 0
+}
+
 func g2dChain(c: view RgbaColor, chain255: view Int) ret RgbaColor {
   let a: Int = (c.a * chain255) / 255
   ret RgbaColor { r: c.r, g: c.g, b: c.b, a: a }
@@ -213,7 +219,7 @@ func paintSpriteG(world: view UiWorld, e: view EntityId, wt: view WorldTransform
   }
   let radius: Float = g2dRadius(world: world, e: e, fallback: 0.0)
   if gpu2d.hasImageKey(key: sp.textureKey) {
-    gpu2d.drawImageKey(key: sp.textureKey, x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, tint: g2dColor(c: tint))
+    gpu2d.drawImageKeyScaled(key: sp.textureKey, x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, tint: g2dColor(c: tint), scaleMode: g2dScaleMode(m: sp.scaleMode))
     ret
   }
   let fallback: RgbaColor = g2dChain(c: themeColorByName(name: "textMuted"), chain255: chain255)
