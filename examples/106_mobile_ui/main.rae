@@ -376,6 +376,7 @@ func main() {
       # Persistent-world build: mounts every screen page + dock /
       # back overlays once; setPageActive flips visibility per nav.
       let world: UiWorld = buildAppWorld(scenes: scenes, playback: playback, state: appState, texReg: texReg, scrollY: scrollFsm.scrollY, viewport: viewport)
+      cachedHistoryLen = appState.playHistory.entries.length
       cachedPlaybackRevision = playback.revision
       # Apply the gpu2d design-resolution transform together with the
       # freshly-built world so the two never disagree. Doing this in the
