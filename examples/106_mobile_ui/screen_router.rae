@@ -312,10 +312,46 @@ func refreshHistoryViewsIfNeeded(
   ret n
 }
 
+# Re-mount UI that declares a dependency on PlaybackState when the playback
+# data revision changes. This is intentionally structural: the scene override
+# path is the source of truth for play/pause icons, not a delayed sprite patch.
+func refreshPlaybackViewsIfNeeded(
+  world: mod UiWorld
+  scenes: view AlbumScenes
+  playback: view PlaybackState
+  state: view AppState
+  reg: view TextureRegistry
+  visible: view Screen
+  cachedRevision: view Int
+) pub ret Int {
+  if playback.revision is cachedRevision {
+    ret cachedRevision
+  }
+
+  unmountPage(world: world, pageId: dockPageId)
+  let dock: EntityId = mountBottomDockOverlay(
+    world: world
+    activeTab: state.tab
+    scenes: scenes
+    playback: playback
+    state: state
+    reg: reg
+  )
+  let safe: Insets = applySafeAreas(world: world)
+  liftDockForSafeArea(world: world, dock: dock, bottomInset: safe.b)
+
+  unmountPage(world: world, pageId: playerPageId)
+  let np: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: state)
+  rebindHero(world: world, fromKey: "albumCover", toKey: state.currentAlbumStem)
+  setPageActive(world: world, pageId: playerPageId, active: visible is Screen.player)
+
+  ret playback.revision
+}
+
 # Material icon key for the play button in the current state. Used by
 # both view builders to pick the right sprite override at mount time
-# (so the first frame already shows the right icon), and again per-frame
-# in the main loop after the state flips.
+# (so the first frame already shows the right icon). Playback revision
+# invalidation re-mounts dependent views when this value changes.
 func playbackIconKey(playback: view PlaybackState) pub ret String {
   if playback.isPlaying {
     ret "mat:pause"
@@ -627,8 +663,10 @@ func dispatchActions(
         log("[spotify] toggle: state={curState}")
         if curState.equals(other: playingKey) {
           spotify.pause()
+          setPlaybackPlaying(state: playback, value: false)
         } else {
           spotify.play()
+          setPlaybackPlaying(state: playback, value: true)
         }
       } else {
         togglePlayback(state: playback)
@@ -716,7 +754,7 @@ func dispatchActions(
       # fields to decide which row to highlight.
       playback.playingAlbumStem = "{state.currentAlbumStem}"
       playback.playingTrackIndex = state.currentTrackIndex
-      playback.isPlaying = true
+      setPlaybackPlaying(state: playback, value: true)
       # Hearts reflect the new track immediately. Without this the
       # mini-player heart would carry the previous song's filled state
       # until the next per-frame applyOverlaysToWorld — visually
@@ -779,7 +817,7 @@ func dispatchActions(
         }
         playback.playingAlbumStem = "{e.albumStem}"
         playback.playingTrackIndex = state.currentTrackIndex
-        playback.isPlaying = true
+        setPlaybackPlaying(state: playback, value: true)
         # Heart reflects the replayed track immediately. Same reason
         # as the song.open path above.
         applyLikedToWorld(world: world, liked: state.liked, stem: state.currentAlbumStem, trackIndex: state.currentTrackIndex)
