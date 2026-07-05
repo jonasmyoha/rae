@@ -1,0 +1,45 @@
+import core
+import sys
+
+# Central app-owned cache for runtime music data. Unlike /tmp, this survives
+# restarts; unlike assets/, it is user/runtime state and stays gitignored.
+let appCacheDir: String = "examples/106_mobile_ui/app_cache"
+let appCacheMetadataDir: String = "examples/106_mobile_ui/app_cache/metadata"
+let appCachePlaylistsDir: String = "examples/106_mobile_ui/app_cache/metadata/playlists"
+let appCacheArtworkMetaDir: String = "examples/106_mobile_ui/app_cache/metadata/album_art"
+let appCacheAlbumArtDir: String = "examples/106_mobile_ui/app_cache/album_art"
+
+# Legacy locations used before app_cache existed. Read as migration fallbacks
+# only; new writes go to app_cache.
+let legacyHistoryFilePath: String = "examples/106_mobile_ui/temp/play_history.json"
+let legacyLibraryFilePath: String = "examples/106_mobile_ui/temp/library.json"
+let legacyPlaylistsDir: String = "examples/106_mobile_ui/temp/playlists"
+
+let historyFilePath: String = "examples/106_mobile_ui/app_cache/metadata/play_history.json"
+let libraryFilePath: String = "examples/106_mobile_ui/app_cache/metadata/library.json"
+
+func ensureAppCacheDirs() pub {
+  makeDir(path: appCacheDir)
+  makeDir(path: appCacheMetadataDir)
+  makeDir(path: appCachePlaylistsDir)
+  makeDir(path: appCacheArtworkMetaDir)
+  makeDir(path: appCacheAlbumArtDir)
+}
+
+func cachedArtworkPath(imageHash: view String) pub ret String {
+  ret "{appCacheAlbumArtDir}/{imageHash}.jpg"
+}
+
+func cachedArtworkMetadataPath(imageHash: view String) pub ret String {
+  ret "{appCacheArtworkMetaDir}/{imageHash}.json"
+}
+
+func cachedPlaylistPath(id: view String) pub ret String {
+  let suffix: String = ".json"
+  ret "{appCachePlaylistsDir}/{id}{suffix}"
+}
+
+func legacyPlaylistPath(id: view String) pub ret String {
+  let suffix: String = ".json"
+  ret "{legacyPlaylistsDir}/{id}{suffix}"
+}

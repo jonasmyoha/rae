@@ -24,10 +24,10 @@ open ui/ecs
 # button on the mini-player / now-playing screen toggles `track` refs in.
 #
 # Two locations on disk:
-#   * `assets/playlists/<id>.json`  — read-only default shipped with code.
-#   * `temp/playlists/<id>.json`    — user-mutated state, gitignored.
-#                                     loaded first; falls back to the
-#                                     asset if missing.
+#   * `assets/playlists/<id>.json`        — read-only default shipped with code.
+#   * `app_cache/metadata/playlists/<id>` — user-mutated state, gitignored.
+#                                           loaded first; falls back to old
+#                                           temp/ state, then the asset.
 #
 # Backwards compatible: a legacy `"tracks": [{albumStem,trackIndex}]`
 # array (no `kind`) is still read as a list of `track` items.
@@ -39,7 +39,6 @@ import sys
 import ui/components
 import ui/ecs
 
-let playlistsTempDir: String = "examples/106_mobile_ui/temp/playlists"
 let playlistsAssetDir: String = "examples/106_mobile_ui/assets/playlists"
 
 # Item "kind" tags. Kept as strings so they round-trip to JSON / SQL
@@ -167,8 +166,7 @@ func playlistCoverStems(playlist: view Playlist, max: view Int) pub ret List(Str
 
 # Path the user-mutable copy lives at.
 func playlistTempPath(id: view String) pub ret String {
-  let suffix: String = ".json"
-  ret "{playlistsTempDir}/{id}{suffix}"
+  ret cachedPlaylistPath(id: id)
 }
 
 # Default-ship asset path.
@@ -273,9 +271,9 @@ func parsePlaylist(source: view String, id: view String) pub ret Playlist {
   ret pl
 }
 
-# Load a playlist by id. Prefers the user-mutable copy under temp/;
-# falls back to the read-only asset default; finally creates an empty
-# one with the given title if neither exists.
+# Load a playlist by id. Prefers the user-mutable copy under app_cache; falls
+# back to the old temp path, then the read-only asset default; finally creates
+# an empty one with the given title if none exists.
 func loadPlaylist(id: view String, defaultTitle: view String) pub ret Playlist {
   let tempPath: String = playlistTempPath(id: id)
   let tempSource: String = rae_ext_rae_sys_read_file(path: tempPath)
@@ -283,13 +281,21 @@ func loadPlaylist(id: view String, defaultTitle: view String) pub ret Playlist {
     log("[playlist] restored '{id}' from {tempPath}")
     ret parsePlaylist(source: tempSource, id: id)
   }
+  let legacyPath: String = legacyPlaylistPath(id: id)
+  let legacySource: String = rae_ext_rae_sys_read_file(path: legacyPath)
+  if legacySource.length() > 0 {
+    log("[playlist] restored '{id}' from {legacyPath}")
+    let migrated: Playlist = parsePlaylist(source: legacySource, id: id)
+    savePlaylist(playlist: migrated)
+    ret migrated
+  }
   let assetPath: String = playlistAssetPath(id: id)
   let assetSource: String = rae_ext_rae_sys_read_file(path: assetPath)
   if assetSource.length() > 0 {
     log("[playlist] using ship default for '{id}' at {assetPath}")
     ret parsePlaylist(source: assetSource, id: id)
   }
-  log("[playlist] no asset or temp for '{id}' — starting empty")
+  log("[playlist] no asset or cache for '{id}' — starting empty")
   let copiedId: String = "{id}"
   let copiedTitle: String = "{defaultTitle}"
   ret createPlaylist(id: own copiedId, title: own copiedTitle)
@@ -302,10 +308,10 @@ func loadDefaultLiked() pub ret Playlist {
   ret loadPlaylist(id: id, defaultTitle: title)
 }
 
-# Persist `playlist` to its user-mutable temp path. Hand-rolled JSON
+# Persist `playlist` to its user-mutable app_cache path. Hand-rolled JSON
 # emit — mirrors `saveLibraryToJson` / `saveHistoryToJson`.
 func savePlaylist(playlist: view Playlist) pub {
-  makeDir(path: playlistsTempDir)
+  ensureAppCacheDirs()
   let path: String = playlistTempPath(id: playlist.id)
   let openBrace: String = "\u{007B}"
   let closeBrace: String = "\u{007D}"
