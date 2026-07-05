@@ -412,8 +412,8 @@ func applyLikedToWorld(
   )
 }
 
-# Per-frame fan-out: apply both the playback overlay (icons +
-# progress fill) and the liked-heart overlay in one call.
+# Per-frame fan-out: apply playback progress and the liked-heart overlay in
+# one call. Play/pause icons refresh through PlaybackState revision bindings.
 func applyOverlaysToWorld(world: mod UiWorld, playback: view PlaybackState, state: view AppState) pub {
   applyPlaybackToWorld(world: world, state: playback)
   applyLikedToWorld(world: world, liked: state.liked, stem: state.currentAlbumStem, trackIndex: state.currentTrackIndex)

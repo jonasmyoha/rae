@@ -312,38 +312,48 @@ func refreshHistoryViewsIfNeeded(
   ret n
 }
 
-# Re-mount UI that declares a dependency on PlaybackState when the playback
-# data revision changes. This is intentionally structural: the scene override
-# path is the source of truth for play/pause icons, not a delayed sprite patch.
+func refreshPlaybackIconNode(world: mod UiWorld, pageId: view String, nodeId: view String, iconKey: view String) {
+  let entityOpt: opt Int = findNodeInPage(world: world, pageId: pageId, nodeId: nodeId)
+  if entityOpt is none {
+    ret
+  }
+  let raw: Int = entityOpt
+  let entity: EntityId = entityId(v: raw)
+  if componentHas(this: world.sprites, entity: entity) is false {
+    ret
+  }
+  let cur: Sprite = componentGet(this: world.sprites, entity: entity)
+  if cur.textureKey.equals(other: iconKey) {
+    ret
+  }
+  let copied: String = "{iconKey}"
+  let next: Sprite = {
+    textureKey: copied
+    tint: cur.tint
+    scaleMode: cur.scaleMode
+    tileScale: cur.tileScale
+    nineSlice: cur.nineSlice
+    hasNineSlice: cur.hasNineSlice
+  }
+  componentSet(this: world.sprites, entity: entity, data: next)
+}
+
+# Refresh UI nodes that declare a dependency on PlaybackState when the playback
+# data revision changes. Keep this narrowly scoped to the dependent icon nodes:
+# re-mounting the full NowPlaying page would reapply local AppState title/art
+# overrides and briefly flash stale album data while Spotify owns playback.
 func refreshPlaybackViewsIfNeeded(
   world: mod UiWorld
-  scenes: view AlbumScenes
   playback: view PlaybackState
-  state: view AppState
-  reg: view TextureRegistry
-  visible: view Screen
   cachedRevision: view Int
 ) pub ret Int {
   if playback.revision is cachedRevision {
     ret cachedRevision
   }
 
-  unmountPage(world: world, pageId: dockPageId)
-  let dock: EntityId = mountBottomDockOverlay(
-    world: world
-    activeTab: state.tab
-    scenes: scenes
-    playback: playback
-    state: state
-    reg: reg
-  )
-  let safe: Insets = applySafeAreas(world: world)
-  liftDockForSafeArea(world: world, dock: dock, bottomInset: safe.b)
-
-  unmountPage(world: world, pageId: playerPageId)
-  let np: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: state)
-  rebindHero(world: world, fromKey: "albumCover", toKey: state.currentAlbumStem)
-  setPageActive(world: world, pageId: playerPageId, active: visible is Screen.player)
+  let iconKey: String = playbackIconKey(playback: playback)
+  refreshPlaybackIconNode(world: world, pageId: miniPlayerPageId, nodeId: "MiniPlayIcon", iconKey: iconKey)
+  refreshPlaybackIconNode(world: world, pageId: playerPageId, nodeId: "PlayIcon", iconKey: iconKey)
 
   ret playback.revision
 }
@@ -351,7 +361,7 @@ func refreshPlaybackViewsIfNeeded(
 # Material icon key for the play button in the current state. Used by
 # both view builders to pick the right sprite override at mount time
 # (so the first frame already shows the right icon). Playback revision
-# invalidation re-mounts dependent views when this value changes.
+# invalidation refreshes dependent icon bindings when this value changes.
 func playbackIconKey(playback: view PlaybackState) pub ret String {
   if playback.isPlaying {
     ret "mat:pause"
