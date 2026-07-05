@@ -98,6 +98,18 @@ func setSprite(world: mod UiWorld, entity: view EntityId, key: own String, tint:
   componentSet(this: world.sprites, entity: entity, data: sp)
 }
 
+func setSpriteFill(world: mod UiWorld, entity: view EntityId, key: own String, tint: view RgbaColor) pub {
+  let sp: Sprite = {
+    textureKey: key
+    tint: tint
+    scaleMode: ScaleMode.fill
+    tileScale: Vec2 { x: 1.0, y: 1.0 }
+    nineSlice: Insets { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
+    hasNineSlice: false
+  }
+  componentSet(this: world.sprites, entity: entity, data: sp)
+}
+
 func setHoverScale(world: mod UiWorld, entity: view EntityId, hoverScale: view Float) pub {
   let hs: HoverScale = {
     restScale: 1.0
