@@ -30,6 +30,27 @@ func cachedArtworkPath(imageHash: view String) pub ret String {
   ret "{appCacheAlbumArtDir}/{imageHash}.jpg"
 }
 
+func cachedArtworkHashFromUrl(url: view String) pub ret String {
+  let slash: String = "/"
+  let i: Int = url.lastIndexOf(sub: slash)
+  if i < 0 {
+    ret "{url}"
+  }
+  let n: Int = url.length()
+  ret url.sub(start: i + 1, len: n - i - 1)
+}
+
+func cachedArtworkKeyFromUrl(url: view String) pub ret String {
+  if url.length() is 0 {
+    ret ""
+  }
+  let imageHash: String = cachedArtworkHashFromUrl(url: url)
+  if imageHash.length() is 0 {
+    ret ""
+  }
+  ret "spotify-art:{imageHash}"
+}
+
 func cachedArtworkMetadataPath(imageHash: view String) pub ret String {
   ret "{appCacheArtworkMetaDir}/{imageHash}.json"
 }

@@ -147,7 +147,7 @@ func loadHistoryEntryArt(track: view SpotifyTrack, reg: mod TextureRegistry) pub
   if track.artworkUrl.length() is 0 {
     ret ""
   }
-  let imageHash: String = artworkUrlImageHash(url: track.artworkUrl)
+  let imageHash: String = cachedArtworkHashFromUrl(url: track.artworkUrl)
   if imageHash.length() is 0 {
     ret ""
   }
@@ -203,25 +203,11 @@ func saveHistoryArtworkMetadata(track: view SpotifyTrack, imageHash: view String
   }
 }
 
-# Extract the last path segment of an artwork URL. Spotify URLs are
-# `https://i.scdn.co/image/<hash>` so this returns `<hash>`. Falls
-# back to the whole URL when no `/` is present (defensive — never
-# observed in practice).
-func artworkUrlImageHash(url: view String) ret String {
-  let slash: String = "/"
-  let i: Int = url.lastIndexOf(sub: slash)
-  if i < 0 {
-    ret "{url}"
-  }
-  let n: Int = url.length()
-  ret url.sub(start: i + 1, len: n - i - 1)
-}
-
 func refreshSpotifyArt(state: view SpotifyState, track: view SpotifyTrack, reg: mod TextureRegistry) ret Bool {
   ensureAppCacheDirs()
   var outPath: String = ""
   if track.artworkUrl.length() > 0 {
-    let h: String = artworkUrlImageHash(url: track.artworkUrl)
+    let h: String = cachedArtworkHashFromUrl(url: track.artworkUrl)
     if h.length() > 0 {
       outPath = cachedArtworkPath(imageHash: h)
     }
