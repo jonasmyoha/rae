@@ -25,7 +25,7 @@ import ui/ecs
 # PlaybackState lives in this example's playback.rae — auto-imported
 # from the same project directory. We mutate it here to sync the local
 # mock's `isPlaying` from Spotify's reported state so the play-button
-# icon (driven by `applyPlaybackToWorld(world, playback)`) matches reality.
+# icon (driven by PlaybackState revision invalidation) matches reality.
 
 # Per-app-instance state for the Spotify display layer. One instance
 # lives in main.rae for the whole app lifetime.
@@ -257,7 +257,7 @@ func rebindAlbumCoversToSpotify(world: mod UiWorld, currentStem: view String, ar
 # Per-frame entry point. Cheap when disabled / when not enough time
 # has passed for a re-poll. When it does poll:
 #   * mirrors Spotify's actual play/pause state into `playback.isPlaying`
-#     so the play-button icon stays in sync,
+#     so PlaybackState revision invalidation keeps play buttons in sync,
 #   * updates NowPlaying / mini-player title + artist text,
 #   * on track change: downloads art and (first time) rebinds the
 #     album-cover Sprites to the spotify-current texture key.
@@ -285,9 +285,8 @@ func pollSpotify(
   let track: SpotifyTrack = spotify.current()
   let pos: Float = spotify.position()
   let dur: Float = spotify.duration()
-  # Mirror Spotify's actual state into the local playback mock so the
-  # play-button icon (applyPlaybackToWorld → playback.isPlaying) and the
-  # progress bar / playhead readout (driven by elapsedSec / durationSec)
+  # Mirror Spotify's actual state into the local playback mock so play-button
+  # revision invalidation and the progress/readout state
   # match the real player. Includes "user paused in Spotify directly"
   # and "user skipped tracks in Spotify" — both flip within 1Hz here.
   let playingKey: String = "playing"
