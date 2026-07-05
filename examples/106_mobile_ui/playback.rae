@@ -23,8 +23,8 @@ import ui/ecs
 type PlaybackState pub {
   isPlaying: Bool
   # Data-dependency revision. UI that depends on play/pause state caches this
-  # value and re-mounts itself when it changes instead of waiting for a delayed
-  # per-frame sprite patch.
+  # value and refreshes dependent icon bindings instead of waiting for a
+  # delayed per-frame sprite patch.
   revision: Int
   elapsedSec: Float
   durationSec: Float
@@ -148,12 +148,24 @@ func applyPlaybackToWorld(world: mod UiWorld, state: view PlaybackState) pub {
       let p: Float = playbackProgress(state: state)
       let fillW: Float = trackW * p
       if componentHas(this: world.computedRects, entity: fillEntity) {
-        let fcr: mod ComputedRect => componentMod(this: world.computedRects, entity: fillEntity)
-        fcr.w = fillW
+        let fcr: ComputedRect = componentGet(this: world.computedRects, entity: fillEntity)
+        let nextCr: ComputedRect = {
+          x: fcr.x
+          y: fcr.y
+          w: fillW
+          h: fcr.h
+        }
+        componentSet(this: world.computedRects, entity: fillEntity, data: nextCr)
       }
       if componentHas(this: world.rects, entity: fillEntity) {
-        let fr: mod Rect => componentMod(this: world.rects, entity: fillEntity)
-        fr.w = fillW
+        let fr: Rect = componentGet(this: world.rects, entity: fillEntity)
+        let nextRect: Rect = {
+          x: fr.x
+          y: fr.y
+          w: fillW
+          h: fr.h
+        }
+        componentSet(this: world.rects, entity: fillEntity, data: nextRect)
       }
     }
   }
