@@ -21,6 +21,10 @@ let historyRowH: Float = 138.79518072289156
 let historyRowGap: Float = 17.349397590361445  # spaceS
 let historyThumbSize: Float = 121.44578313253011
 let historyDurationW: Float = 121.44578313253011
+let historyInfoH: Float = 91.08433734939759
+let historyTitleH: Float = 47.71084337349397
+let historyArtistH: Float = 34.69879518072289
+let historyTextGap: Float = 8.674698795180722
 
 # Cap on how many recent thumbs the Home "Recently played" preview
 # row shows. Tuned so the row fits the screen width without
@@ -110,20 +114,20 @@ func buildHistoryRow(world: mod UiWorld, entry: view PlayHistoryEntry, entryInde
 
   let info: EntityId = createEntity(world: world)
   let infoW: Float = w - historyThumbSize - historyDurationW - 24.0
-  setRectFixed(world: world, entity: info, w: infoW, h: historyRowH)
+  setRectFixed(world: world, entity: info, w: infoW, h: historyInfoH)
   let layV: LayoutType = LayoutType.vertical
   let alignS: AlignKind = AlignKind.start
-  setLayout(world: world, entity: info, kind: layV, gap: 8.674698795180722, alignCross: alignS)
+  setLayout(world: world, entity: info, kind: layV, gap: historyTextGap, alignCross: alignS)
 
   let title: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: title, w: infoW, h: 22.0)
-  let titleStyle: String = "primary"
+  setRectFixed(world: world, entity: title, w: infoW, h: historyTitleH)
+  let titleStyle: String = "historyTitle"
   let titleText: String = "{entry.trackName}"
   setText(world: world, entity: title, text: titleText, styleId: titleStyle)
 
   let sub: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: sub, w: infoW, h: 18.0)
-  let subStyle: String = "muted"
+  setRectFixed(world: world, entity: sub, w: infoW, h: historyArtistH)
+  let subStyle: String = "historyArtist"
   let subText: String = "{entry.artistName}"
   setText(world: world, entity: sub, text: subText, styleId: subStyle)
 
