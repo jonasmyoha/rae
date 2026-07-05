@@ -8,11 +8,9 @@
 #   * `pollSpotify` track-change — every time Spotify's current
 #     trackId changes (so background-only playback gets captured too).
 #
-# Entries are append-only with a soft cap (`history.cap`); the oldest
-# entry is dropped when a new one pushes past the cap. Cover art is
-# tracked via the local-catalog `albumStem` when the track matches a
-# local album; Spotify-only tracks store the artwork URL and the UI
-# falls back to a placeholder until a per-entry texture loader lands.
+# Entries are append-only with a soft cap (`history.cap`). Cover art is tracked
+# via the local-catalog `albumStem` for local picks and via an app-cache
+# `spotify-art:<imageHash>` key for Spotify entries.
 import core
 
 type PlayHistoryEntry pub {
@@ -27,10 +25,9 @@ type PlayHistoryEntry pub {
   # Texture registry key the History row's thumb uses. For local
   # entries this is the album stem (already loaded by
   # `loadAllTextures` at boot). For Spotify entries the recorder
-  # calls `loadHistoryEntryArt` to fetch the artwork to a per-
-  # trackId file, registers it, and stores the key here. Empty
-  # when no art was loaded — `buildHistoryThumb` falls back to a
-  # placeholder Shape.
+  # calls `loadHistoryEntryArt` to fetch the artwork into app_cache, registers
+  # it, and stores the key here. Restored entries are normalized so duplicate
+  # songs share any known artwork metadata.
   textureKey: String
   durationSec: Float
   # `getTime()` reading at record time. Empty / 0.0 marks "boot
@@ -49,6 +46,91 @@ func createPlayHistory(cap: view Int) pub ret PlayHistory {
     entries: createList(PlayHistoryEntry, cap: cap)
     cap: cap
   }
+}
+
+func copyHistoryEntryWithArt(entry: view PlayHistoryEntry, artworkUrl: view String, textureKey: view String) ret PlayHistoryEntry {
+  ret PlayHistoryEntry {
+    trackName: rae_ext_rae_string_copy(s: entry.trackName)
+    artistName: rae_ext_rae_string_copy(s: entry.artistName)
+    albumName: rae_ext_rae_string_copy(s: entry.albumName)
+    albumStem: rae_ext_rae_string_copy(s: entry.albumStem)
+    artworkUrl: rae_ext_rae_string_copy(s: artworkUrl)
+    textureKey: rae_ext_rae_string_copy(s: textureKey)
+    durationSec: entry.durationSec
+    playedAt: entry.playedAt
+  }
+}
+
+func historySameSong(a: view PlayHistoryEntry, b: view PlayHistoryEntry) ret Bool {
+  if a.trackName.equals(other: b.trackName) is false {
+    ret false
+  }
+  if a.artistName.equals(other: b.artistName) is false {
+    ret false
+  }
+  ret a.albumName.equals(other: b.albumName)
+}
+
+# Normalize Spotify history art metadata after restore or record. Older entries
+# can have artworkUrl set but textureKey empty, or one duplicate can know the
+# art while another duplicate does not. Repairing this in the model keeps every
+# repeated row pointed at the same cached image instead of leaving stale grey
+# placeholders behind.
+func normalizePlayHistoryArtwork(history: mod PlayHistory) pub ret Bool {
+  var changed: Bool = false
+  let n: Int = history.entries.length
+  var i: Int = 0
+  loop i < n {
+    let e: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: i)
+    var bestUrl: String = "{e.artworkUrl}"
+    var bestKey: String = "{e.textureKey}"
+    if bestKey.length() is 0 {
+      if bestUrl.length() > 0 {
+        bestKey = cachedArtworkKeyFromUrl(url: bestUrl)
+      }
+    }
+    var j: Int = n - 1
+    loop j >= 0 {
+      if bestUrl.length() > 0 {
+        if bestKey.length() > 0 {
+          j = -1
+        }
+      }
+      if j >= 0 {
+        let other: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: j)
+        if historySameSong(a: e, b: other) {
+          if bestUrl.length() is 0 {
+            if other.artworkUrl.length() > 0 {
+              bestUrl = "{other.artworkUrl}"
+            }
+          }
+          if bestKey.length() is 0 {
+            if other.textureKey.length() > 0 {
+              bestKey = "{other.textureKey}"
+            } else {
+              if other.artworkUrl.length() > 0 {
+                bestKey = cachedArtworkKeyFromUrl(url: other.artworkUrl)
+              }
+            }
+          }
+        }
+        j = j - 1
+      }
+    }
+    if bestUrl.equals(other: e.artworkUrl) is false {
+      let updated: PlayHistoryEntry = copyHistoryEntryWithArt(entry: e, artworkUrl: bestUrl, textureKey: bestKey)
+      history.entries.set(index: i, value: own updated)
+      changed = true
+    } else {
+      if bestKey.equals(other: e.textureKey) is false {
+        let updated: PlayHistoryEntry = copyHistoryEntryWithArt(entry: e, artworkUrl: bestUrl, textureKey: bestKey)
+        history.entries.set(index: i, value: own updated)
+        changed = true
+      }
+    }
+    i = i + 1
+  }
+  ret changed
 }
 
 # Find a local album whose tracks include one matching `trackName`
@@ -82,8 +164,7 @@ func historyMatchLocalStem(albums: view List(Album), trackName: view String, art
 # times in a row collapses, but a re-listen of the same-titled
 # song from a different album (different cover) still gets its
 # own row. The textureKey check is "same album cover" as far as
-# the UI is concerned: Spotify entries key by trackId (so a
-# single vs. a compilation appearance differs), and local entries
+# the UI is concerned: Spotify entries key by artwork hash, and local entries
 # key by album stem.
 #
 # The caller's `entry` carries Strings registered in the caller's
@@ -94,12 +175,18 @@ func historyMatchLocalStem(albums: view List(Album), trackName: view String, art
 # the pool doesn't track. The list then owns Strings that survive
 # any number of caller-side pool flushes.
 func recordPlay(history: mod PlayHistory, entry: own PlayHistoryEntry) pub {
+  var entryTextureKey: String = "{entry.textureKey}"
+  if entryTextureKey.length() is 0 {
+    if entry.artworkUrl.length() > 0 {
+      entryTextureKey = cachedArtworkKeyFromUrl(url: entry.artworkUrl)
+    }
+  }
   let n: Int = history.entries.length
   if n > 0 {
     let last: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: n - 1)
     if last.trackName.equals(other: entry.trackName) {
       if last.artistName.equals(other: entry.artistName) {
-        if last.textureKey.equals(other: entry.textureKey) {
+        if last.textureKey.equals(other: entryTextureKey) {
           ret
         }
       }
@@ -111,9 +198,10 @@ func recordPlay(history: mod PlayHistory, entry: own PlayHistoryEntry) pub {
     albumName: rae_ext_rae_string_copy(s: entry.albumName)
     albumStem: rae_ext_rae_string_copy(s: entry.albumStem)
     artworkUrl: rae_ext_rae_string_copy(s: entry.artworkUrl)
-    textureKey: rae_ext_rae_string_copy(s: entry.textureKey)
+    textureKey: rae_ext_rae_string_copy(s: entryTextureKey)
     durationSec: entry.durationSec
     playedAt: entry.playedAt
   }
   history.entries.add(value: own owned)
+  normalizePlayHistoryArtwork(history: history)
 }
