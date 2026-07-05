@@ -4573,7 +4573,7 @@ void rae_ext_gpu2d_drawGlyph(double sx0, double sy0, double sx1, double sy1,
  * the per-draw bind group is cheap. Drawn after boxes, before text. */
 static const char* G2D_IMG_WGSL =
 "@group(0) @binding(0) var<uniform> uXform: array<vec4<f32>, 2>;\n"
-"@group(0) @binding(1) var<uniform> uImg: array<vec4<f32>, 3>;\n"  /* rect, tint, params(radius) */
+"@group(0) @binding(1) var<uniform> uImg: array<vec4<f32>, 4>;\n"  /* rect, tint, params(radius), uv */
 "@group(0) @binding(2) var tex: texture_2d<f32>;\n"
 "@group(0) @binding(3) var samp: sampler;\n"
 "struct VsOut {\n"
@@ -4593,7 +4593,8 @@ static const char* G2D_IMG_WGSL =
 "  let ndc = vec2<f32>(posPx.x / phys.x * 2.0 - 1.0, 1.0 - posPx.y / phys.y * 2.0);\n"
 "  var o: VsOut;\n"
 "  o.pos = vec4<f32>(ndc, 0.0, 1.0);\n"
-"  o.uv = c;\n"
+"  let uv = uImg[3];\n"
+"  o.uv = uv.xy + c * uv.zw;\n"
 "  o.local = c * rect.zw;\n"
 "  return o;\n"
 "}\n"
@@ -4621,7 +4622,7 @@ static int g_g2d_img_w[RAE_G2D_MAX_IMG];
 static int g_g2d_img_h[RAE_G2D_MAX_IMG];
 static int g_g2d_img_n = 0;
 
-typedef struct { int handle; float rect[4]; float tint[4]; float radius; int clip; } RaeG2dImgCmd;
+typedef struct { int handle; float rect[4]; float tint[4]; float radius; float uv[4]; int clip; } RaeG2dImgCmd;
 static RaeG2dImgCmd* g_g2d_img_cmds = NULL;
 static int g_g2d_img_cmd_count = 0;
 static int g_g2d_img_cmd_cap = 0;
@@ -4822,10 +4823,8 @@ void rae_ext_gpu2d_drawImageKey(rae_String key, double x, double y, double w, do
     if (handle > 0) rae_ext_gpu2d_drawImage(x, y, w, h, radius, (int64_t)handle, tint);
 }
 
-/* Queue an image draw for this frame (handle from loadImage). tint is
- * 0xAARRGGBB applied multiplicatively (use 0xFFFFFFFF for the unmodified
- * image). radius rounds the corners (design units). */
-void rae_ext_gpu2d_drawImage(double x, double y, double w, double h, double radius, int64_t handle, int64_t tint) {
+static void rae_g2d_queue_image(double x, double y, double w, double h, double radius, int64_t handle, int64_t tint,
+                                float u0, float v0, float u1, float v1) {
     if (handle < 1 || handle > g_g2d_img_n) return;
     if (g_g2d_img_cmd_count + 1 > g_g2d_img_cmd_cap) {
         int cap = g_g2d_img_cmd_cap ? g_g2d_img_cmd_cap * 2 : 32;
@@ -4841,7 +4840,53 @@ void rae_ext_gpu2d_drawImage(double x, double y, double w, double h, double radi
     c->tint[2] = (float)( t        & 0xFF) / 255.0f;
     c->tint[3] = (float)((t >> 24) & 0xFF) / 255.0f;
     c->radius = (float)radius;
+    c->uv[0] = u0; c->uv[1] = v0; c->uv[2] = u1 - u0; c->uv[3] = v1 - v0;
     c->clip = g_g2d_cur_clip;
+}
+
+/* Queue an image draw for this frame (handle from loadImage). tint is
+ * 0xAARRGGBB applied multiplicatively (use 0xFFFFFFFF for the unmodified
+ * image). radius rounds the corners (design units). */
+void rae_ext_gpu2d_drawImage(double x, double y, double w, double h, double radius, int64_t handle, int64_t tint) {
+    rae_g2d_queue_image(x, y, w, h, radius, handle, tint, 0.0f, 0.0f, 1.0f, 1.0f);
+}
+
+void rae_ext_gpu2d_drawImageKeyScaled(rae_String key, double x, double y, double w, double h, double radius, int64_t tint, int64_t scaleMode) {
+    if (!key.data) return;
+    int handle = rae_g2d_handle_for_key((const char*)key.data);
+    if (handle <= 0 || handle > g_g2d_img_n || w <= 0.0 || h <= 0.0) return;
+    int idx = handle - 1;
+    double iw = (double)g_g2d_img_w[idx];
+    double ih = (double)g_g2d_img_h[idx];
+    if (iw <= 0.0 || ih <= 0.0) {
+        rae_ext_gpu2d_drawImage(x, y, w, h, radius, (int64_t)handle, tint);
+        return;
+    }
+    double img_aspect = iw / ih;
+    double dst_aspect = w / h;
+    float u0 = 0.0f, v0 = 0.0f, u1 = 1.0f, v1 = 1.0f;
+    if (scaleMode == 0) { /* fit: preserve aspect by letterboxing inside dst */
+        if (img_aspect > dst_aspect) {
+            double draw_h = w / img_aspect;
+            y += (h - draw_h) * 0.5;
+            h = draw_h;
+        } else {
+            double draw_w = h * img_aspect;
+            x += (w - draw_w) * 0.5;
+            w = draw_w;
+        }
+    } else if (scaleMode == 1) { /* fill: preserve aspect by center-cropping source */
+        if (img_aspect > dst_aspect) {
+            double visible_w = dst_aspect / img_aspect;
+            u0 = (float)((1.0 - visible_w) * 0.5);
+            u1 = (float)(u0 + visible_w);
+        } else if (img_aspect < dst_aspect) {
+            double visible_h = img_aspect / dst_aspect;
+            v0 = (float)((1.0 - visible_h) * 0.5);
+            v1 = (float)(v0 + visible_h);
+        }
+    }
+    rae_g2d_queue_image(x, y, w, h, radius, (int64_t)handle, tint, u0, v0, u1, v1);
 }
 
 static void rae_g2d_init_img_pipeline(void) {
@@ -4898,7 +4943,7 @@ static void rae_g2d_flush_images(void) {
         g_g2d_img_ubuf = (WGPUBuffer*)realloc(g_g2d_img_ubuf, (size_t)total_img_uniforms * sizeof(WGPUBuffer));
         for (int i = g_g2d_img_ubuf_n; i < total_img_uniforms; i++) {
             WGPUBufferDescriptor bd; memset(&bd, 0, sizeof(bd));
-            bd.size = 48; bd.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
+            bd.size = 64; bd.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
             g_g2d_img_ubuf[i] = wgpuDeviceCreateBuffer(g_wgpu_dev, &bd);
         }
         g_g2d_img_ubuf_n = total_img_uniforms;
@@ -4914,14 +4959,15 @@ static void rae_g2d_flush_images(void) {
         int idx = c->handle - 1;
         if (idx < 0 || idx >= g_g2d_img_n || !g_g2d_img_view[idx]) continue;
         int uniform_slot = g_g2d_img_frame_bind_n;
-        float u[12];
+        float u[16];
         u[0]=c->rect[0]; u[1]=c->rect[1]; u[2]=c->rect[2]; u[3]=c->rect[3];
         u[4]=c->tint[0]; u[5]=c->tint[1]; u[6]=c->tint[2]; u[7]=c->tint[3];
         u[8]=c->radius;  u[9]=0.0f; u[10]=0.0f; u[11]=0.0f;
+        u[12]=c->uv[0];  u[13]=c->uv[1]; u[14]=c->uv[2]; u[15]=c->uv[3];
         wgpuQueueWriteBuffer(g_wgpu_queue, g_g2d_img_ubuf[uniform_slot], 0, u, sizeof(u));
         WGPUBindGroupEntry e[4]; memset(e, 0, sizeof(e));
         e[0].binding = 0; e[0].buffer = g_g2d_uniform; e[0].size = 32;
-        e[1].binding = 1; e[1].buffer = g_g2d_img_ubuf[uniform_slot]; e[1].size = 48;
+        e[1].binding = 1; e[1].buffer = g_g2d_img_ubuf[uniform_slot]; e[1].size = 64;
         e[2].binding = 2; e[2].textureView = g_g2d_img_view[idx];
         e[3].binding = 3; e[3].sampler = g_g2d_sampler;
         WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
@@ -5229,6 +5275,7 @@ int64_t rae_ext_gpu2d_loadImage(rae_String path) { (void)path; return 0; }
 int64_t rae_ext_gpu2d_loadImageKey(rae_String key, rae_String path) { (void)key; (void)path; return 0; }
 rae_Bool rae_ext_gpu2d_hasImageKey(rae_String key) { (void)key; return 0; }
 void rae_ext_gpu2d_drawImageKey(rae_String key, double x, double y, double w, double h, double radius, int64_t tint) { (void)key; (void)x; (void)y; (void)w; (void)h; (void)radius; (void)tint; }
+void rae_ext_gpu2d_drawImageKeyScaled(rae_String key, double x, double y, double w, double h, double radius, int64_t tint, int64_t scaleMode) { (void)key; (void)x; (void)y; (void)w; (void)h; (void)radius; (void)tint; (void)scaleMode; }
 void rae_ext_gpu2d_drawImage(double x, double y, double w, double h, double radius, int64_t handle, int64_t tint) { (void)x; (void)y; (void)w; (void)h; (void)radius; (void)handle; (void)tint; }
 double rae_ext_gpu2d_pointerX(void) { return 0.0; }
 double rae_ext_gpu2d_pointerY(void) { return 0.0; }
