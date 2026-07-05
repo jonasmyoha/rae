@@ -770,12 +770,12 @@ func main() {
           # internal rate-limit). Syncs playback state, text fields,
           # and album art. See spotify_view.rae.
           pollSpotify(state: spotifyState, world: world, reg: texReg, playback: playback, appState: appState, currentAlbumStem: appState.currentAlbumStem, now: now)
-          # Stream covers + history art after first paint (non-blocking, a few/frame).
-          # Covers stream from disk. (History-art network refetch was
-          # removed from here — each fetch blocked ~140ms, pinning the
-          # whole app to ~7fps; needs a background thread instead.)
+          # Stream covers + cached history art after first paint. Both paths
+          # are disk-only; history-art network refetch stays out of the frame
+          # loop because each fetch can block for ~140ms.
           var loadingAssets: Bool = cascadeGpu2dAssets(albums: appState.albums, budget: 2)
-          assetsLoading = loadingAssets
+          let loadingHistoryArt: Bool = loadCachedHistoryArtChunk(history: appState.playHistory, budget: 4)
+          assetsLoading = loadingAssets or loadingHistoryArt
           if currentScreen is Screen.profile {
             let profileKeyNow: String = profileAvatarKey()
             let profileReadyNow: Bool = profileAvatarLoaded(reg: texReg, key: profileKeyNow)
