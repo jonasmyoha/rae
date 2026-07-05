@@ -7,15 +7,14 @@
 # art / metadata is still available for history rows, search hits,
 # or restoring later.
 #
-# Persistence: `examples/106_mobile_ui/temp/library.json` (gitignored
-# along with the rest of temp/). First-launch default: every catalog
-# stem is in the library (preserves the pre-curation behaviour).
+# Persistence: `examples/106_mobile_ui/app_cache/metadata/library.json`.
+# First-launch default: every catalog stem is in the library (preserves the
+# pre-curation behaviour). The old temp/library.json is read as a migration
+# fallback only.
 import core
 import json
 import fs
 import sys
-
-let libraryFilePath: String = "examples/106_mobile_ui/temp/library.json"
 
 # Seed the library with every catalog stem. Used at first launch
 # and after a wipe — preserves the "all albums in library" default
@@ -72,7 +71,7 @@ func addToLibrary(library: mod List(String), stem: view String) pub {
 # Persist the library to disk as a JSON object with a `stems` array.
 # Same write-whole-file pattern as saveAppState / saveHistoryToJson.
 func saveLibraryToJson(library: view List(String), path: view String) pub {
-  makeDir(path: historyTempDir)
+  ensureAppCacheDirs()
   let openBrace: String = "\u{007B}"
   let closeBrace: String = "\u{007D}"
   let openBracket: String = "["
@@ -105,20 +104,10 @@ func saveLibraryToJson(library: view List(String), path: view String) pub {
   }
 }
 
-# Restore library stems from `path`. When the file is missing the
-# default is "every catalog stem" so an unseeded app launches with
-# the full catalogue visible. Stems that are no longer in the
-# catalog (the user deleted the source folder, etc.) are dropped
-# silently — they'd render as a missing-cover placeholder otherwise.
-func loadLibraryFromJson(albums: view List(Album), path: view String) pub ret List(String) {
-  let source: String = rae_ext_rae_sys_read_file(path: path)
-  if source.length() is 0 {
-    log("[library] no file at {path} — seeding from catalog")
-    ret librarySeedFromCatalog(albums: albums)
-  }
+func parseLibraryFromJson(albums: view List(Album), source: view String, loadPath: view String) ret List(String) {
   let doc: JsonDoc = json.parseJson(source: source)
   if doc.ok is false {
-    log("[library] parse error in {path} at byte {doc.errorPos} — seeding from catalog")
+    log("[library] parse error in {loadPath} at byte {doc.errorPos} — seeding from catalog")
     ret librarySeedFromCatalog(albums: albums)
   }
   let root: JsonValue = json.jsonRoot(doc: doc)
@@ -144,6 +133,26 @@ func loadLibraryFromJson(albums: view List(Album), path: view String) pub ret Li
     }
     i = i + 1
   }
-  log("[library] restored {out.length} entries from {path}")
+  log("[library] restored {out.length} entries from {loadPath}")
   ret out
+}
+
+# Restore library stems from `path`. When the file is missing the
+# default is "every catalog stem" so an unseeded app launches with
+# the full catalogue visible. Stems that are no longer in the
+# catalog (the user deleted the source folder, etc.) are dropped
+# silently — they'd render as a missing-cover placeholder otherwise.
+func loadLibraryFromJson(albums: view List(Album), path: view String) pub ret List(String) {
+  let source: String = rae_ext_rae_sys_read_file(path: path)
+  if source.length() > 0 {
+    ret parseLibraryFromJson(albums: albums, source: source, loadPath: path)
+  }
+  let legacySource: String = rae_ext_rae_sys_read_file(path: legacyLibraryFilePath)
+  if legacySource.length() > 0 {
+    let migrated: List(String) = parseLibraryFromJson(albums: albums, source: legacySource, loadPath: legacyLibraryFilePath)
+    saveLibraryToJson(library: migrated, path: path)
+    ret migrated
+  }
+  log("[library] no file at {path} — seeding from catalog")
+  ret librarySeedFromCatalog(albums: albums)
 }
