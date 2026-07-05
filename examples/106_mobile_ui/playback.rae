@@ -22,6 +22,10 @@ import ui/ecs
 
 type PlaybackState pub {
   isPlaying: Bool
+  # Data-dependency revision. UI that depends on play/pause state caches this
+  # value and re-mounts itself when it changes instead of waiting for a delayed
+  # per-frame sprite patch.
+  revision: Int
   elapsedSec: Float
   durationSec: Float
   # `prevTime` is the `getTime()` reading the previous frame produced.
@@ -43,6 +47,7 @@ type PlaybackState pub {
 func createPlaybackState() pub ret PlaybackState {
   ret PlaybackState {
     isPlaying: false
+    revision: 0
     elapsedSec: 0.0
     durationSec: 20.0
     prevTime: -1.0
@@ -55,10 +60,18 @@ func createPlaybackState() pub ret PlaybackState {
 # play button fires its `playback.toggle` action.
 func togglePlayback(state: mod PlaybackState) pub {
   if state.isPlaying {
-    state.isPlaying = false
+    setPlaybackPlaying(state: state, value: false)
   } else {
-    state.isPlaying = true
+    setPlaybackPlaying(state: state, value: true)
   }
+}
+
+func setPlaybackPlaying(state: mod PlaybackState, value: view Bool) pub {
+  if state.isPlaying is value {
+    ret
+  }
+  state.isPlaying = value
+  state.revision = state.revision + 1
 }
 
 # Advance `elapsedSec` by the delta against the last sampled frame.
@@ -103,48 +116,11 @@ func playbackProgress(state: view PlaybackState) pub ret Float {
   ret p
 }
 
-# Per-frame world refresh: look up `PlayIcon`, `MiniPlayIcon`,
-# `ProgressBar`, and `ProgressFill` by node id in the current world and
-# update their components to reflect `state`. Tolerant of missing nodes
-# — the album screen has no `PlayIcon`/`ProgressBar`/`ProgressFill`,
-# only `MiniPlayIcon`; the now-playing screen has all four.
-#
-# Icon updates mutate `Sprite.textureKey` directly (saves rebuilding
-# the override list each frame). Progress-fill width is set on the
-# `ProgressFill` entity's `ComputedRect.w` — bypassing layout works
-# because `paintShape` reads ComputedRect, not the authored Rect.
+# Per-frame playback progress refresh. Play/pause icons are intentionally not
+# patched here; they are mounted from PlaybackState and refreshed by
+# `refreshPlaybackViewsIfNeeded` when the playback revision changes. Progress
+# fill remains a per-frame animation because it depends on elapsed time.
 func applyPlaybackToWorld(world: mod UiWorld, state: view PlaybackState) pub {
-  let iconKey: String = playbackIconKey(playback: state)
-
-  # Big play button on the now-playing screen — scoped lookup under
-  # the now-playing page. Absent (returns none) on other screens.
-  let playIconKey: String = "PlayIcon"
-  let playIconEntityOpt: opt Int = findNodeInPage(world: world, pageId: playerPageId, nodeId: playIconKey)
-  if playIconEntityOpt is none {
-  } else {
-    let playIconRaw: Int = playIconEntityOpt
-    let playIconEntity: EntityId = entityId(v: playIconRaw)
-    if componentHas(this: world.sprites, entity: playIconEntity) {
-      let sp: mod Sprite => componentMod(this: world.sprites, entity: playIconEntity)
-      sp.textureKey = iconKey
-    }
-  }
-
-  # Mini-player play button — scoped under the mini-player page. The
-  # mini-player is mounted as part of the bottom dock on every screen,
-  # so this should always resolve while the dock is on screen.
-  let miniIconKey: String = "MiniPlayIcon"
-  let miniIconEntityOpt: opt Int = findNodeInPage(world: world, pageId: miniPlayerPageId, nodeId: miniIconKey)
-  if miniIconEntityOpt is none {
-  } else {
-    let miniIconRaw: Int = miniIconEntityOpt
-    let miniIconEntity: EntityId = entityId(v: miniIconRaw)
-    if componentHas(this: world.sprites, entity: miniIconEntity) {
-      let sp: mod Sprite => componentMod(this: world.sprites, entity: miniIconEntity)
-      sp.textureKey = iconKey
-    }
-  }
-
   # Progress fill width: read the parent track's authored width from
   # its ComputedRect (layout has already filled it in), then scale by
   # progress and write to the fill's ComputedRect. We also bump the
