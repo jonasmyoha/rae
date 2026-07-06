@@ -1,10 +1,10 @@
-open ui/msdf
+open ui/legacy_raylib/msdf
 open raylib
 # Font rendering test example.
 #
 # Side-by-side comparison of Rae's two text paths, same Roboto face:
 #   * Bitmap — raylib LoadFontEx atlas (font slot 0), `drawTextWithFont`
-#   * MSDF   — distance-field atlas, `drawMsdfText` (lib/ui/msdf)
+#   * MSDF   — distance-field atlas, `drawMsdfText` (lib/ui/legacy_raylib/msdf)
 #
 # It deliberately exercises the cases that have broken before so a
 # regression shows up at a glance:
@@ -22,13 +22,13 @@ open raylib
 import raylib
 import core
 import sys
-# `ui/msdf` itself only needs core/json/raylib for the calls this example
+# `ui/legacy_raylib/msdf` itself only needs core/json/raylib for the calls this example
 # uses (loadMsdfFont / drawMsdfText), but its `enableUiMsdf*` helpers
 # reference `UiWorld` (ui/ecs) and `RgbaColor` (ui/components), so those
 # modules must be imported for the generated C types to be declared.
 import ui/components
 import ui/ecs
-import ui/msdf
+import ui/legacy_raylib/msdf
 
 # --- small draw helpers -----------------------------------------------
 

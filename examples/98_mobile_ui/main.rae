@@ -23,21 +23,21 @@ import file_watch
 import hot_reload
 import sdf_text
 import ui/ecs
-import ui/hero
-import ui/msdf
+import ui/legacy_raylib/hero
+import ui/legacy_raylib/msdf
 import ui/layout
 import ui/theme
 import ui/transform
-import ui/render
+import ui/legacy_raylib/render
 import ui/render_gpu2d
-import ui/textures
-import ui/input
-import ui/debug
-import ui/debug_gpu2d
-import ui/event_loop
+import ui/legacy_raylib/textures
+import ui/legacy_raylib/input
+import ui/legacy_raylib/debug
+import ui/legacy_raylib/debug_gpu2d
+import ui/legacy_raylib/event_loop
 import ui/animation
-import ui/draw
-import ui/window
+import ui/legacy_raylib/draw
+import ui/legacy_raylib/window
 func main() {
   var backendEnv: String = "gpu2d" #getEnv(name: "RAE_UI_BACKEND")
   if backendEnv.equals(other: "gpu2d") {
@@ -64,7 +64,7 @@ func main() {
   # `disableAppNap` decl in lib/raylib.rae.
   uiDisableAppNap()
   # No setTargetFPS: the inner loop blocks in glfwWaitEventsTimeout
-  # (see lib/ui/event_loop.rae) and naturally caps animation at
+  # (see lib/ui/legacy_raylib/event_loop.rae) and naturally caps animation at
   # ~60 Hz via `frameTimeoutSec`. raylib's frame-pacing is bypassed.
   # Reset raylib's implicit `Mouse.scale` so getMouseX/Y return
   # cursor positions in the same coordinate space the renderer uses.
@@ -300,7 +300,7 @@ func main() {
     let debugPressColor: Color = { r: 255, g: 220, b: 0, a: 255 }
     let debugCursorColor: Color = { r: 255, g: 220, b: 0, a: 255 }
 
-    # In-app debug UI lives in `lib/ui/debug.rae`. The DebugSystem
+    # In-app debug UI lives in `lib/ui/legacy_raylib/debug.rae`. The DebugSystem
     # struct persists across world rebuilds (menu-open / labels-on
     # state, plus the FPS rolling buffer) — re-create only once at
     # startup, then call addDebugLayer per rebuild and the per-frame
@@ -507,7 +507,7 @@ func main() {
       loop running and switching is false {
         # Event-driven wait. Block the thread until an OS event (mouse,
         # key, window) arrives or our policy-chosen timeout elapses.
-        # `nextWaitTimeoutSec` (lib/ui/event_loop.rae) picks the
+        # `nextWaitTimeoutSec` (lib/ui/legacy_raylib/event_loop.rae) picks the
         # smallest of: one frame when animating, one frame while the
         # mouse button is held, the watcher poll cadence otherwise, or
         # the safety cap when truly idle. Idle CPU goes to ~0 because
