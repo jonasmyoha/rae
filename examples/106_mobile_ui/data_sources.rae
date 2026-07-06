@@ -1,0 +1,91 @@
+# App-level data source keys and revision counters for the 106 UI.
+#
+# UI widgets declare dependencies using string keys, but app code should
+# get those strings from this module. That keeps today's component
+# model aligned with the future typed-resource migration.
+
+type AppDataSources pub {
+  albumsRevision: Int
+  historyRevision: Int
+  libraryRevision: Int
+  playbackRevision: Int
+  playlistsRevision: Int
+  spotifyRevision: Int
+  settingsRevision: Int
+}
+
+func createAppDataSources() pub ret AppDataSources {
+  ret AppDataSources {
+    albumsRevision: 0
+    historyRevision: 0
+    libraryRevision: 0
+    playbackRevision: 0
+    playlistsRevision: 0
+    spotifyRevision: 0
+    settingsRevision: 0
+  }
+}
+
+func dataSourceAlbumsKey() pub ret String {
+  ret "albums"
+}
+
+func dataSourceHistoryKey() pub ret String {
+  ret "history"
+}
+
+func dataSourceLibraryKey() pub ret String {
+  ret "library"
+}
+
+func dataSourcePlaybackKey() pub ret String {
+  ret "playback"
+}
+
+func dataSourcePlaylistsKey() pub ret String {
+  ret "playlists"
+}
+
+func dataSourceSpotifyKey() pub ret String {
+  ret "spotify"
+}
+
+func dataSourceSettingsKey() pub ret String {
+  ret "settings"
+}
+
+func dataFieldAllKey() pub ret String {
+  ret "all"
+}
+
+func dataFieldIsPlayingKey() pub ret String {
+  ret "isPlaying"
+}
+
+func bumpAlbumsSource(sources: mod AppDataSources) pub {
+  sources.albumsRevision = sources.albumsRevision + 1
+}
+
+func bumpHistorySource(sources: mod AppDataSources) pub {
+  sources.historyRevision = sources.historyRevision + 1
+}
+
+func bumpLibrarySource(sources: mod AppDataSources) pub {
+  sources.libraryRevision = sources.libraryRevision + 1
+}
+
+func bumpPlaybackSource(sources: mod AppDataSources) pub {
+  sources.playbackRevision = sources.playbackRevision + 1
+}
+
+func bumpPlaylistsSource(sources: mod AppDataSources) pub {
+  sources.playlistsRevision = sources.playlistsRevision + 1
+}
+
+func bumpSpotifySource(sources: mod AppDataSources) pub {
+  sources.spotifyRevision = sources.spotifyRevision + 1
+}
+
+func bumpSettingsSource(sources: mod AppDataSources) pub {
+  sources.settingsRevision = sources.settingsRevision + 1
+}
