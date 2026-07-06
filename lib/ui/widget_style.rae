@@ -62,6 +62,16 @@ func styleDisabledAlpha(world: view UiWorld, entity: view EntityId) ret Float {
   ret style.disabledAlpha
 }
 
+func styleLoadingAlpha(world: view UiWorld, entity: view EntityId) ret Float {
+  let style: view StateStyle => componentView(this: world.stateStyles, entity: entity)
+  ret style.loadingAlpha
+}
+
+func styleErrorAlpha(world: view UiWorld, entity: view EntityId) ret Float {
+  let style: view StateStyle => componentView(this: world.stateStyles, entity: entity)
+  ret style.errorAlpha
+}
+
 func styleWantShapeFill(world: view UiWorld, entity: view EntityId, selected: view Bool) ret RgbaColor {
   let style: view StateStyle => componentView(this: world.stateStyles, entity: entity)
   if selected {
@@ -178,17 +188,29 @@ func applyOffsetStyle(world: mod UiWorld, entity: view EntityId, selected: view 
   componentSet(this: world.offsets, entity: entity, data: off)
 }
 
-# Disabled widgets dim through the Opacity component. Only engages
-# when the style asks for it (disabledAlpha < 1.0), so widgets that
-# drive Opacity elsewhere are untouched by default.
-func applyDisabledOpacity(world: mod UiWorld, entity: view EntityId, enabled: view Bool) {
-  let dimAlpha: Float = styleDisabledAlpha(world: world, entity: entity)
-  if dimAlpha >= 1.0 {
+# Widget state dims through the Opacity component. Only engages when
+# at least one state asks for it (< 1.0), so widgets that drive Opacity
+# elsewhere are untouched by default.
+func applyStateOpacity(
+  world: mod UiWorld
+  entity: view EntityId
+  enabled: view Bool
+  loading: view Bool
+  error: view Bool
+) {
+  let disabledAlpha: Float = styleDisabledAlpha(world: world, entity: entity)
+  let loadingAlpha: Float = styleLoadingAlpha(world: world, entity: entity)
+  let errorAlpha: Float = styleErrorAlpha(world: world, entity: entity)
+  if disabledAlpha >= 1.0 and loadingAlpha >= 1.0 and errorAlpha >= 1.0 {
     ret
   }
   var want: Float = 1.0
-  if enabled is false {
-    want = dimAlpha
+  if error {
+    want = errorAlpha
+  } else if loading {
+    want = loadingAlpha
+  } else if enabled is false {
+    want = disabledAlpha
   }
   if componentHas(this: world.opacities, entity: entity) is false {
     if want is 1.0 {
@@ -215,16 +237,20 @@ func widgetStyleSystem(world: mod UiWorld) {
     let entity: EntityId = componentEntityAt(this: world.stateStyles, i: i)
     var selected: Bool = false
     var enabled: Bool = true
+    var loading: Bool = false
+    var error: Bool = false
     if componentHas(this: world.widgetStates, entity: entity) {
       let ws: WidgetState = componentGet(this: world.widgetStates, entity: entity)
       selected = ws.selected
       enabled = ws.enabled
+      loading = ws.loading
+      error = ws.error
     }
     applySpriteStyle(world: world, entity: entity, selected: selected)
     applyTextStyle(world: world, entity: entity, selected: selected)
     applyShapeStyle(world: world, entity: entity, selected: selected)
     applyOffsetStyle(world: world, entity: entity, selected: selected)
-    applyDisabledOpacity(world: world, entity: entity, enabled: enabled)
+    applyStateOpacity(world: world, entity: entity, enabled: enabled, loading: loading, error: error)
     i = i + 1
   }
 }

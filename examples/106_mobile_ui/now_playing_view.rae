@@ -226,6 +226,13 @@ func buildMiniPlayerInstance(
     h: h
     sceneLabel: label
   )
+  let miniRootId: String = "miniPlayer.root"
+  let miniRootKind: String = "miniPlayer"
+  setWidgetIdentity(world: world, entity: mount, id: miniRootId, kind: miniRootKind)
+  setWidgetState(world: world, entity: mount, enabled: true, selected: false, loading: false, error: false)
+  let playbackSource: String = dataSourcePlaybackKey()
+  let playingField: String = dataFieldPlayingTrackKey()
+  setDataDependency(world: world, entity: mount, sourceKey: playbackSource, fieldKey: playingField, observedRevision: playback.revision)
   let miniWidgetId: String = "miniPlayer.playIcon"
   tagPlaybackIconDependency(world: world, pageId: miniPlayerPageId, nodeId: miniIconId, widgetId: miniWidgetId, observedRevision: playback.revision)
   let miniHeartNode: String = "MiniHeartBtn"
