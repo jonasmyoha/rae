@@ -411,6 +411,22 @@ func buildSwitchRow(
   let row: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: row, w: width, h: debugRowH)
   setHorizontalLayout(world: world, entity: row, gap: debugRowGap, alignCross: AlignKind.center)
+  # Data-oriented widget tags (#220): identity + on/off state + action
+  # binding as queryable component data. Copies taken BEFORE
+  # setOnClickAction consumes `actionId` (own param). The switch
+  # visuals are still mount-baked — the debug menu re-mounts on every
+  # toggle — but systems can now read which toggles exist and which
+  # are on straight from the widgetStates table.
+  let toggleKind: String = "debugToggle"
+  setWidgetIdentity(world: world, entity: row, id: actionId, kind: toggleKind)
+  setWidgetState(world: world, entity: row, enabled: true, selected: on, loading: false, error: false)
+  let bindId: String = "{actionId}"
+  let bindRole: String = "primary"
+  let binding: ActionBinding = {
+    actionId: own bindId
+    role: own bindRole
+  }
+  componentSet(this: world.actionBindings, entity: row, data: own binding)
   setOnClickAction(world: world, entity: row, actionId: actionId)
 
   let label: EntityId = createEntity(world: world)
