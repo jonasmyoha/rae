@@ -2,8 +2,6 @@ open ui/ecs
 # Home-tab world composition. The discovery / landing screen the
 # user lands on at app open — a more curated visual than the dense
 # 3-column Library grid:
-#   * top bar with a "Good evening" greeting
-#   * sub-line "Pick something to play"
 #   * 2-column grid of large album covers (every parsed album)
 #
 # Tapping any tile fires `album.open` (same path as the Library
@@ -44,8 +42,8 @@ func homeGridTileSize() ret Float {
   ret (avail - gapTotal) / cols.toFloat()
 }
 
-# Total vertical extent of the Home page content (subtitle row +
-# cover grid). Used by the scroll clamp so the user can pull the
+# Total vertical extent of the Home page content (recent row + cover
+# grid). Used by the scroll clamp so the user can pull the
 # bottom rows into view without over-scrolling past them.
 func homeContentHeight(albums: view List(Album), hasRecent: view Bool) pub ret Float {
   let cols: Int = homeCols()
@@ -53,13 +51,11 @@ func homeContentHeight(albums: view List(Album), hasRecent: view Bool) pub ret F
   let rows: Int = (total + cols - 1) / cols
   let tileH: Float = homeGridTileSize()
   let gridH: Float = tileH * rows.toFloat() + homeGridTileGap * (rows - 1).toFloat()
-  let subH: Float = 47.71084337349397
   var recentH: Float = 0.0
   if hasRecent {
-    # 28 (header) + outerGap + thumb-size + outerGap (gap to grid).
-    recentH = 28.0 + outerGap + recentlyPlayedThumbSize + outerGap
+    recentH = recentlyPlayedHeaderH + outerGap + recentlyPlayedThumbSize + outerGap
   }
-  ret subH + outerGap + recentH + gridH
+  ret recentH + gridH
 }
 
 # Scroll-floor clamp for the Home page — `-(overflow)` so wheel/drag
@@ -137,7 +133,7 @@ func buildHomeCoverGrid(world: mod UiWorld, albums: view List(Album), library: v
 func buildHomeBody(world: mod UiWorld, albums: view List(Album), library: view List(String), history: view PlayHistory, rounded: view Bool, scrollY: view Float) ret EntityId {
   let body: EntityId = createEntity(world: world)
   let bodyW: Float = screenW - outerPad * 2.0
-  let bodyH: Float = screenH - topBarH - navTabsH - outerGap * 4.0 - outerPad * 2.0
+  let bodyH: Float = screenH - navTabsH - outerGap * 3.0 - outerPad * 2.0
   setRectFixed(world: world, entity: body, w: bodyW, h: bodyH)
   let layV: LayoutType = LayoutType.vertical
   let alignS: AlignKind = AlignKind.start
@@ -148,21 +144,14 @@ func buildHomeBody(world: mod UiWorld, albums: view List(Album), library: view L
   let scroll: ScrollState = { y: scrollY, velocity: 0.0 }
   componentSet(this: world.scrollStates, entity: body, data: scroll)
 
-  let sub: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: sub, w: bodyW, h: 39.03614457831325)
-  let subStyle: String = "caption"
-  let subText: String = "Pick something to play"
-  setText(world: world, entity: sub, text: subText, styleId: subStyle)
-
   let grid: EntityId = buildHomeCoverGrid(world: world, albums: albums, library: library, rounded: rounded)
 
   let hasRecent: Bool = history.entries.length > 0
-  var kidsCap: Int = 2
+  var kidsCap: Int = 1
   if hasRecent {
-    kidsCap = 4
+    kidsCap = 3
   }
   let kids: List(EntityId) = createList(EntityId, cap: kidsCap)
-  kids.add(value: sub)
   if hasRecent {
     let recentHeader: EntityId = buildRecentlyPlayedHeader(world: world)
     let recentStrip: EntityId = buildRecentlyPlayedStrip(world: world, history: history, rounded: rounded)
@@ -193,11 +182,9 @@ func mountHomePage(
   let pr: PageRoot = { id: own copiedId }
   componentSet(this: world.pageRoots, entity: root, data: own pr)
 
-  let topBar: EntityId = buildPageTopBar(world: world, title: "Good evening")
   let body: EntityId = buildHomeBody(world: world, albums: albums, library: state.library, history: state.playHistory, rounded: state.settings.roundedAlbumCovers, scrollY: scrollY)
 
-  let kids: List(EntityId) = createList(EntityId, cap: 2)
-  kids.add(value: topBar)
+  let kids: List(EntityId) = createList(EntityId, cap: 1)
   kids.add(value: body)
   attachChildren(world: world, parent: root, kids: kids)
   # Reserve the notch at the top edge; safeAreaSystem folds the active
