@@ -412,6 +412,40 @@ type ScrollState {
   velocity: Float
 }
 
+# Stable widget metadata for data-oriented UI updates. These components
+# intentionally carry app/backend-neutral data only: renderers do not
+# read them directly, and app systems can query them to rebuild or patch
+# dependent UI narrowly when data revisions change.
+type WidgetId {
+  id: String
+  kind: String
+}
+
+type WidgetState {
+  enabled: Bool
+  selected: Bool
+  loading: Bool
+  error: Bool
+}
+
+type DataDependency {
+  sourceKey: String
+  fieldKey: String
+  observedRevision: Int
+}
+
+type ActionBinding {
+  actionId: String
+  role: String
+}
+
+type RefreshRegion {
+  regionKey: String
+  sourceKey: String
+  observedRevision: Int
+  dirty: Bool
+}
+
 # Identity / metadata
 
 type Name {

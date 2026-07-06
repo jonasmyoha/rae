@@ -49,6 +49,74 @@ func setOnClick(world: mod UiWorld, entity: view EntityId, actionId: view String
     maxDelayMs: 250
   }
   componentSet(this: world.onClicks, entity: entity, data: click)
+  let binding: ActionBinding = {
+    actionId: actionId
+    role: "primary"
+  }
+  componentSet(this: world.actionBindings, entity: entity, data: binding)
+}
+
+func setWidgetIdentity(world: mod UiWorld, entity: view EntityId, id: view String, kind: view String) pub {
+  let wid: String = "{id}"
+  let wkind: String = "{kind}"
+  let meta: WidgetId = {
+    id: own wid
+    kind: own wkind
+  }
+  componentSet(this: world.widgetIds, entity: entity, data: own meta)
+}
+
+func setWidgetState(
+  world: mod UiWorld
+  entity: view EntityId
+  enabled: view Bool
+  selected: view Bool
+  loading: view Bool
+  error: view Bool
+) pub {
+  let state: WidgetState = {
+    enabled: enabled
+    selected: selected
+    loading: loading
+    error: error
+  }
+  componentSet(this: world.widgetStates, entity: entity, data: state)
+}
+
+func setDataDependency(
+  world: mod UiWorld
+  entity: view EntityId
+  sourceKey: view String
+  fieldKey: view String
+  observedRevision: view Int
+) pub {
+  let sourceCopy: String = "{sourceKey}"
+  let fieldCopy: String = "{fieldKey}"
+  let dep: DataDependency = {
+    sourceKey: own sourceCopy
+    fieldKey: own fieldCopy
+    observedRevision: observedRevision
+  }
+  componentSet(this: world.dataDependencies, entity: entity, data: own dep)
+}
+
+func setRefreshRegion(
+  world: mod UiWorld
+  entity: view EntityId
+  regionKey: view String
+  sourceKey: view String
+  observedRevision: view Int
+  dirty: view Bool
+) pub {
+  let regionCopy: String = "{regionKey}"
+  let sourceCopy: String = "{sourceKey}"
+  let rr: RefreshRegion = {
+    regionKey: own regionCopy
+    sourceKey: own sourceCopy
+    observedRevision: observedRevision
+    dirty: dirty
+  }
+  componentSet(this: world.refreshRegions, entity: entity, data: own rr)
 }
 
 # Tag `entity` as a hero source/destination keyed by `key`. The hero

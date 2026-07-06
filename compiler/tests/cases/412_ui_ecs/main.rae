@@ -74,6 +74,18 @@ func main() {
   log("e3 hasRect after remove: {componentHas(this: world.rects, entity: e3)}")
   log("e1 hasRect after remove: {componentHas(this: world.rects, entity: e1)}")
 
+  let wid: WidgetId = { id: "play.icon", kind: "playbackIcon" }
+  componentSet(this: world.widgetIds, entity: e2, data: wid)
+  let wstate: WidgetState = { enabled: true, selected: false, loading: false, error: false }
+  componentSet(this: world.widgetStates, entity: e2, data: wstate)
+  let dep: DataDependency = { sourceKey: "playback", fieldKey: "isPlaying", observedRevision: 7 }
+  componentSet(this: world.dataDependencies, entity: e2, data: dep)
+  let gotWid: WidgetId = componentGet(this: world.widgetIds, entity: e2)
+  let gotState: WidgetState = componentGet(this: world.widgetStates, entity: e2)
+  let gotDep: DataDependency = componentGet(this: world.dataDependencies, entity: e2)
+  log("e2 widget: {gotWid.id} kind={gotWid.kind} enabled={gotState.enabled}")
+  log("e2 dependency: {gotDep.sourceKey}/{gotDep.fieldKey} rev={gotDep.observedRevision}")
+
   # Defaults still useful.
   let dt: TransformFx = defaultTransformFx()
   log("default transform alpha: {dt.alpha} visible: {dt.visible}")
