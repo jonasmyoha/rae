@@ -1,0 +1,165 @@
+# Widget style system — the visual half of the data-oriented widget
+# model (see components.rae: WidgetId / WidgetState / DataDependency /
+# ActionBinding / StateStyle).
+#
+# Apps flip WidgetState flags (selected / enabled / loading / error)
+# from their data-sync systems; this system walks the StateStyle table
+# once per frame and applies the matching visual variant to the
+# widget's Sprite / Text / Opacity. No app code patches sprites or
+# text styles imperatively for stateful widgets.
+#
+# Change-detection discipline: componentMod bumps the table generation
+# eagerly, which would defeat idle frame-skipping if taken every
+# frame. Every apply below therefore compares through componentView
+# first and only takes the mod borrow when a value actually differs.
+#
+# Implementation note: StateStyle is never copied out by value —
+# helpers read through short-lived `componentView` borrows and return
+# plain Strings / colors. Struct-by-value returns of String-bearing
+# types are a known compiler hazard (inner-String ownership gap).
+import core
+
+func rgbaEquals(a: view RgbaColor, b: view RgbaColor) ret Bool {
+  if a.r is not b.r { ret false }
+  if a.g is not b.g { ret false }
+  if a.b is not b.b { ret false }
+  ret a.a is b.a
+}
+
+# ----- variant readers (fresh scalar/String copies, no struct copy) --
+
+func styleWantSpriteKey(world: view UiWorld, entity: view EntityId, selected: view Bool) ret String {
+  let style: view StateStyle => componentView(this: world.stateStyles, entity: entity)
+  if selected {
+    ret "{style.spriteKeySelected}"
+  }
+  ret "{style.spriteKey}"
+}
+
+func styleWantTint(world: view UiWorld, entity: view EntityId, selected: view Bool) ret RgbaColor {
+  let style: view StateStyle => componentView(this: world.stateStyles, entity: entity)
+  if selected {
+    ret style.tintSelected
+  }
+  ret style.tint
+}
+
+func styleHasTint(world: view UiWorld, entity: view EntityId) ret Bool {
+  let style: view StateStyle => componentView(this: world.stateStyles, entity: entity)
+  ret style.hasTint
+}
+
+func styleWantTextStyle(world: view UiWorld, entity: view EntityId, selected: view Bool) ret String {
+  let style: view StateStyle => componentView(this: world.stateStyles, entity: entity)
+  if selected {
+    ret "{style.textStyleSelected}"
+  }
+  ret "{style.textStyle}"
+}
+
+func styleDisabledAlpha(world: view UiWorld, entity: view EntityId) ret Float {
+  let style: view StateStyle => componentView(this: world.stateStyles, entity: entity)
+  ret style.disabledAlpha
+}
+
+# ----- read-side checks (view borrows only) --------------------------
+
+func spriteKeyDiffers(world: view UiWorld, entity: view EntityId, wantKey: view String) ret Bool {
+  if wantKey.length() is 0 { ret false }
+  if componentHas(this: world.sprites, entity: entity) is false { ret false }
+  let cur: view Sprite => componentView(this: world.sprites, entity: entity)
+  ret cur.textureKey.equals(other: wantKey) is false
+}
+
+func spriteTintDiffers(world: view UiWorld, entity: view EntityId, wantTint: view RgbaColor) ret Bool {
+  if componentHas(this: world.sprites, entity: entity) is false { ret false }
+  let cur: view Sprite => componentView(this: world.sprites, entity: entity)
+  ret rgbaEquals(a: cur.tint, b: wantTint) is false
+}
+
+func textStyleDiffers(world: view UiWorld, entity: view EntityId, wantStyle: view String) ret Bool {
+  if wantStyle.length() is 0 { ret false }
+  if componentHas(this: world.texts, entity: entity) is false { ret false }
+  let cur: view Text => componentView(this: world.texts, entity: entity)
+  ret cur.styleId.equals(other: wantStyle) is false
+}
+
+# ----- per-visual apply (mod borrow only when a check said "differs")
+
+func applySpriteStyle(world: mod UiWorld, entity: view EntityId, selected: view Bool) {
+  var wantKey: String = styleWantSpriteKey(world: world, entity: entity, selected: selected)
+  let wantTint: RgbaColor = styleWantTint(world: world, entity: entity, selected: selected)
+  let keyChange: Bool = spriteKeyDiffers(world: world, entity: entity, wantKey: wantKey)
+  var tintChange: Bool = false
+  if styleHasTint(world: world, entity: entity) {
+    tintChange = spriteTintDiffers(world: world, entity: entity, wantTint: wantTint)
+  }
+  if keyChange is false and tintChange is false {
+    ret
+  }
+  let sp: mod Sprite => componentMod(this: world.sprites, entity: entity)
+  if keyChange {
+    sp.textureKey = own wantKey
+  }
+  if tintChange {
+    sp.tint = wantTint
+  }
+}
+
+func applyTextStyle(world: mod UiWorld, entity: view EntityId, selected: view Bool) {
+  var wantStyle: String = styleWantTextStyle(world: world, entity: entity, selected: selected)
+  if textStyleDiffers(world: world, entity: entity, wantStyle: wantStyle) is false {
+    ret
+  }
+  let t: mod Text => componentMod(this: world.texts, entity: entity)
+  t.styleId = own wantStyle
+}
+
+# Disabled widgets dim through the Opacity component. Only engages
+# when the style asks for it (disabledAlpha < 1.0), so widgets that
+# drive Opacity elsewhere are untouched by default.
+func applyDisabledOpacity(world: mod UiWorld, entity: view EntityId, enabled: view Bool) {
+  let dimAlpha: Float = styleDisabledAlpha(world: world, entity: entity)
+  if dimAlpha >= 1.0 {
+    ret
+  }
+  var want: Float = 1.0
+  if enabled is false {
+    want = dimAlpha
+  }
+  if componentHas(this: world.opacities, entity: entity) is false {
+    if want is 1.0 {
+      ret
+    }
+    let o: Opacity = { value: want }
+    componentSet(this: world.opacities, entity: entity, data: o)
+    ret
+  }
+  let cur: Opacity = componentGet(this: world.opacities, entity: entity)
+  if cur.value is want {
+    ret
+  }
+  let o: mod Opacity => componentMod(this: world.opacities, entity: entity)
+  o.value = want
+}
+
+# ----- the system -----------------------------------------------------
+
+func widgetStyleSystem(world: mod UiWorld) {
+  let n: Int = componentCount(this: world.stateStyles)
+  var i: Int = 0
+  loop i < n {
+    let entity: EntityId = componentEntityAt(this: world.stateStyles, i: i)
+    var selected: Bool = false
+    var enabled: Bool = true
+    if componentHas(this: world.widgetStates, entity: entity) {
+      let ws: WidgetState = componentGet(this: world.widgetStates, entity: entity)
+      selected = ws.selected
+      enabled = ws.enabled
+    }
+    applySpriteStyle(world: world, entity: entity, selected: selected)
+    applyTextStyle(world: world, entity: entity, selected: selected)
+    applyDisabledOpacity(world: world, entity: entity, enabled: enabled)
+    i = i + 1
+  }
+}
