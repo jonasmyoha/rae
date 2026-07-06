@@ -3700,6 +3700,10 @@ static float  g_g2d_wheel = 0.0f;
 /* Set when the OS reports a window resize; consumed (cleared) once by
  * gpu2d.windowResized() so the app rebuilds its layout for the new size. */
 static int    g_g2d_win_resized = 0;
+/* Last endFrame surface-present result. Rendering always targets the offscreen
+ * texture first, but startup/occlusion can make the surface drawable
+ * unavailable; apps use this to keep their first visible frame dirty. */
+static int    g_g2d_last_present_ok = 0;
 
 /* Fill `out` (8 floats = 2*vec4): (physW,physH,scaleX,scaleY),(offX,offY,0,0). */
 static void rae_g2d_compute_xform(float* out) {
@@ -4983,6 +4987,7 @@ static void rae_g2d_flush_images(void) {
 }
 
 void rae_ext_gpu2d_beginFrame(double r, double g, double b, double a) {
+    g_g2d_last_present_ok = 0;
     g_g2d_prim_count = 0;
     for (int i = 0; i < RAE_SDF_MAX_ATLAS; i++) g_g2d_text_count[i] = 0;
     g_g2d_img_cmd_count = 0;
@@ -5105,8 +5110,13 @@ void rae_ext_gpu2d_endFrame(void) {
         wgpuQueueSubmit(g_wgpu_queue, 1, &pcb);
         wgpuCommandBufferRelease(pcb); wgpuCommandEncoderRelease(penc);
         wgpuSurfacePresent(g_g2d_surface);
+        g_g2d_last_present_ok = 1;
     }
     if (st.texture) wgpuTextureRelease(st.texture);
+}
+
+rae_Bool rae_ext_gpu2d_lastPresentOk(void) {
+    return g_g2d_last_present_ok != 0;
 }
 
 void rae_ext_gpu2d_flush(void) {
@@ -5293,6 +5303,7 @@ double rae_ext_gpu2d_designHeight(void) { return 0.0; }
 double rae_ext_gpu2d_dpr(void) { return 1.0; }
 void rae_ext_gpu2d_beginFrame(double r, double g, double b, double a) { (void)r; (void)g; (void)b; (void)a; }
 void rae_ext_gpu2d_endFrame(void) {}
+rae_Bool rae_ext_gpu2d_lastPresentOk(void) { return 0; }
 void rae_ext_gpu2d_flush(void) {}
 void rae_ext_gpu2d_closeWindow(void) {}
 void rae_ext_gpu2d_drawRect(double x, double y, double w, double h, int64_t color) { (void)x; (void)y; (void)w; (void)h; (void)color; }
