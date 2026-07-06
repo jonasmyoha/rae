@@ -91,6 +91,16 @@ func buildLibraryCoverTile(world: mod UiWorld, key: view String, size: view Floa
   setHeroWidget(world: world, entity: tile, key: copiedForHero)
   let albumOpen: String = "album.open"
   setOnClick(world: world, entity: tile, actionId: albumOpen)
+  # Data-oriented widget tags (#220): identity keyed by the album stem
+  # plus the albums data-source dependency, so systems can find and
+  # refresh cover tiles from component data instead of walking sprite
+  # texture keys. setOnClick above already attached the ActionBinding.
+  let tileKind: String = "albumTile"
+  setWidgetIdentity(world: world, entity: tile, id: key, kind: tileKind)
+  setWidgetState(world: world, entity: tile, enabled: true, selected: false, loading: false, error: false)
+  let albumsSource: String = dataSourceAlbumsKey()
+  let allField: String = dataFieldAllKey()
+  setDataDependency(world: world, entity: tile, sourceKey: albumsSource, fieldKey: allField, observedRevision: 0)
   setSpriteFill(world: world, entity: tile, key: key, tint: imageTintColor)
   if rounded {
     let cr: CornerRadius = { radius: 26.024096385542165 }
