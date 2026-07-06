@@ -63,6 +63,11 @@ func registeredComponentNames() ret List(String) {
   names.add(value: "DebugAnchor")
   names.add(value: "PageRoot")
   names.add(value: "ScrollState")
+  names.add(value: "WidgetId")
+  names.add(value: "WidgetState")
+  names.add(value: "DataDependency")
+  names.add(value: "ActionBinding")
+  names.add(value: "RefreshRegion")
   # Identity / metadata
   names.add(value: "Name")
   names.add(value: "PrimaryType")
@@ -607,6 +612,42 @@ func deserScrollState(doc: view JsonDoc, val: view JsonValue) ret ScrollState {
   ret ScrollState { y: y, velocity: velocity }
 }
 
+func deserWidgetId(doc: view JsonDoc, val: view JsonValue) ret WidgetId {
+  let id: String = optString(doc: doc, container: val, key: "id", fallback: "")
+  let kind: String = optString(doc: doc, container: val, key: "kind", fallback: "")
+  ret WidgetId { id: own id, kind: own kind }
+}
+
+func deserWidgetState(doc: view JsonDoc, val: view JsonValue) ret WidgetState {
+  ret WidgetState {
+    enabled: optBool(doc: doc, container: val, key: "enabled", fallback: true)
+    selected: optBool(doc: doc, container: val, key: "selected", fallback: false)
+    loading: optBool(doc: doc, container: val, key: "loading", fallback: false)
+    error: optBool(doc: doc, container: val, key: "error", fallback: false)
+  }
+}
+
+func deserDataDependency(doc: view JsonDoc, val: view JsonValue) ret DataDependency {
+  let sourceKey: String = optString(doc: doc, container: val, key: "sourceKey", fallback: "")
+  let fieldKey: String = optString(doc: doc, container: val, key: "fieldKey", fallback: "")
+  let rev: Int = optInt(doc: doc, container: val, key: "observedRevision", fallback: 0)
+  ret DataDependency { sourceKey: own sourceKey, fieldKey: own fieldKey, observedRevision: rev }
+}
+
+func deserActionBinding(doc: view JsonDoc, val: view JsonValue) ret ActionBinding {
+  let actionId: String = optString(doc: doc, container: val, key: "actionId", fallback: "")
+  let role: String = optString(doc: doc, container: val, key: "role", fallback: "")
+  ret ActionBinding { actionId: own actionId, role: own role }
+}
+
+func deserRefreshRegion(doc: view JsonDoc, val: view JsonValue) ret RefreshRegion {
+  let regionKey: String = optString(doc: doc, container: val, key: "regionKey", fallback: "")
+  let sourceKey: String = optString(doc: doc, container: val, key: "sourceKey", fallback: "")
+  let rev: Int = optInt(doc: doc, container: val, key: "observedRevision", fallback: 0)
+  let dirty: Bool = optBool(doc: doc, container: val, key: "dirty", fallback: true)
+  ret RefreshRegion { regionKey: own regionKey, sourceKey: own sourceKey, observedRevision: rev, dirty: dirty }
+}
+
 func deserPrimaryType(doc: view JsonDoc, val: view JsonValue) ret PrimaryType {
   ret PrimaryType { typeName: optString(doc: doc, container: val, key: "typeName", fallback: "") }
 }
@@ -825,6 +866,26 @@ func applyComponentByName(
   }
   if name.equals(other: "ScrollState") {
     componentSet(this: world.scrollStates, entity: entity, data: deserScrollState(doc: doc, val: val))
+    ret
+  }
+  if name.equals(other: "WidgetId") {
+    componentSet(this: world.widgetIds, entity: entity, data: deserWidgetId(doc: doc, val: val))
+    ret
+  }
+  if name.equals(other: "WidgetState") {
+    componentSet(this: world.widgetStates, entity: entity, data: deserWidgetState(doc: doc, val: val))
+    ret
+  }
+  if name.equals(other: "DataDependency") {
+    componentSet(this: world.dataDependencies, entity: entity, data: deserDataDependency(doc: doc, val: val))
+    ret
+  }
+  if name.equals(other: "ActionBinding") {
+    componentSet(this: world.actionBindings, entity: entity, data: deserActionBinding(doc: doc, val: val))
+    ret
+  }
+  if name.equals(other: "RefreshRegion") {
+    componentSet(this: world.refreshRegions, entity: entity, data: deserRefreshRegion(doc: doc, val: val))
     ret
   }
   # Unknown / not-yet-handled components are ignored. The scene loader

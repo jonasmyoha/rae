@@ -312,13 +312,28 @@ func refreshHistoryViewsIfNeeded(
   ret n
 }
 
-func refreshPlaybackIconNode(world: mod UiWorld, pageId: view String, nodeId: view String, iconKey: view String) {
+func tagPlaybackIconDependency(
+  world: mod UiWorld
+  pageId: view String
+  nodeId: view String
+  widgetId: view String
+  observedRevision: view Int
+) pub {
   let entityOpt: opt Int = findNodeInPage(world: world, pageId: pageId, nodeId: nodeId)
   if entityOpt is none {
     ret
   }
   let raw: Int = entityOpt
   let entity: EntityId = entityId(v: raw)
+  let playbackSource: String = "playback"
+  let playbackField: String = "isPlaying"
+  let iconKind: String = "playbackIcon"
+  setWidgetIdentity(world: world, entity: entity, id: widgetId, kind: iconKind)
+  setWidgetState(world: world, entity: entity, enabled: true, selected: false, loading: false, error: false)
+  setDataDependency(world: world, entity: entity, sourceKey: playbackSource, fieldKey: playbackField, observedRevision: observedRevision)
+}
+
+func refreshPlaybackIconEntity(world: mod UiWorld, entity: view EntityId, iconKey: view String, revision: view Int) {
   if componentHas(this: world.sprites, entity: entity) is false {
     ret
   }
@@ -336,12 +351,28 @@ func refreshPlaybackIconNode(world: mod UiWorld, pageId: view String, nodeId: vi
     hasNineSlice: cur.hasNineSlice
   }
   componentSet(this: world.sprites, entity: entity, data: next)
+  if componentHas(this: world.widgetStates, entity: entity) {
+    let playingIcon: String = "mat:pause"
+    let isSelected: Bool = iconKey.equals(other: playingIcon)
+    setWidgetState(world: world, entity: entity, enabled: true, selected: isSelected, loading: false, error: false)
+  }
+  if componentHas(this: world.dataDependencies, entity: entity) {
+    let dep: view DataDependency => componentView(this: world.dataDependencies, entity: entity)
+    let sourceCopy: String = "{dep.sourceKey}"
+    let fieldCopy: String = "{dep.fieldKey}"
+    let nextDep: DataDependency = {
+      sourceKey: own sourceCopy
+      fieldKey: own fieldCopy
+      observedRevision: revision
+    }
+    componentSet(this: world.dataDependencies, entity: entity, data: own nextDep)
+  }
 }
 
 # Refresh UI nodes that declare a dependency on PlaybackState when the playback
-# data revision changes. Keep this narrowly scoped to the dependent icon nodes:
-# re-mounting the full NowPlaying page would reapply local AppState title/art
-# overrides and briefly flash stale album data while Spotify owns playback.
+# data revision changes. The dependency is now ECS data, not hard-coded node ids:
+# any widget that carries DataDependency{sourceKey:"playback", fieldKey:"isPlaying"}
+# can be patched here without adding another bespoke refresh path.
 func refreshPlaybackViewsIfNeeded(
   world: mod UiWorld
   playback: view PlaybackState
@@ -352,8 +383,22 @@ func refreshPlaybackViewsIfNeeded(
   }
 
   let iconKey: String = playbackIconKey(playback: playback)
-  refreshPlaybackIconNode(world: world, pageId: miniPlayerPageId, nodeId: "MiniPlayIcon", iconKey: iconKey)
-  refreshPlaybackIconNode(world: world, pageId: playerPageId, nodeId: "PlayIcon", iconKey: iconKey)
+  let playbackSource: String = "playback"
+  let playbackField: String = "isPlaying"
+  let n: Int = componentCount(this: world.dataDependencies)
+  var i: Int = 0
+  loop i < n {
+    let entity: EntityId = componentEntityAt(this: world.dataDependencies, i: i)
+    let dep: view DataDependency => componentView(this: world.dataDependencies, entity: entity)
+    if dep.sourceKey.equals(other: playbackSource) {
+      if dep.fieldKey.equals(other: playbackField) {
+        if dep.observedRevision is not playback.revision {
+          refreshPlaybackIconEntity(world: world, entity: entity, iconKey: iconKey, revision: playback.revision)
+        }
+      }
+    }
+    i = i + 1
+  }
 
   ret playback.revision
 }
