@@ -452,14 +452,22 @@ type RefreshRegion {
 # variant — no imperative per-widget sprite/text patching.
 #
 # Empty-string fields mean "leave that visual alone"; `hasTint` gates
-# the tint pair the same way. `disabledAlpha` is applied through the
-# Opacity component when WidgetState.enabled is false (1.0 = no dim).
+# the tint pair the same way. `hasShapeFill` and `hasOffset` let the
+# same state system drive simple shape toggles such as switch pills and
+# knobs. `disabledAlpha` is applied through the Opacity component when
+# WidgetState.enabled is false (1.0 = no dim).
 type StateStyle {
   spriteKey: String
   spriteKeySelected: String
   tint: RgbaColor
   tintSelected: RgbaColor
   hasTint: Bool
+  shapeFill: RgbaColor
+  shapeFillSelected: RgbaColor
+  hasShapeFill: Bool
+  offset: Vec2
+  offsetSelected: Vec2
+  hasOffset: Bool
   textStyle: String
   textStyleSelected: String
   disabledAlpha: Float
