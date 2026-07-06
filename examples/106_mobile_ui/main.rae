@@ -88,12 +88,15 @@ func main() {
   # Persisted recently-played. CDN artwork is re-downloaded lazily in
   # the loop (refetchHistoryArtChunk, a few/frame) so it never blocks.
   restoreHistory(history: appState.playHistory, path: historyFilePath)
+  bumpHistorySource(sources: appState.dataSources)
   # User library — first launch seeds it from the catalog so all
   # albums are visible by default. Subsequent launches load the
   # curated subset and stems that aren't in the catalog any more
   # are dropped silently.
   appState.library = loadLibraryFromJson(albums: appState.albums, path: libraryFilePath)
+  bumpLibrarySource(sources: appState.dataSources)
   appState.liked = loadDefaultLiked()
+  bumpPlaylistsSource(sources: appState.dataSources)
 
   # Clamp window height to fit the current display. GPU2D keeps input and
   # drawing in design units through the local GPU2D window seam.
