@@ -96,6 +96,9 @@ func mountNowPlayingPage(
   }
   let playWidgetId: String = "player.playIcon"
   tagPlaybackIconDependency(world: world, pageId: playerPageId, nodeId: playIconId, widgetId: playWidgetId, observedRevision: playback.revision)
+  let heartNode: String = "HeartBtn"
+  let heartWidgetId: String = "player.likeButton"
+  tagLikedHeart(world: world, pageId: playerPageId, nodeId: heartNode, widgetId: heartWidgetId, observedRevision: 0)
 
   # Gate the big album-cover corner radius on the same AppSettings
   # flag that drives Library / Home / History. The Now Playing hero
@@ -206,10 +209,17 @@ func buildMiniPlayerInstance(
   # via `findNodeInPage(world, "mini-player", "MiniPlayIcon")`. The
   # mini-player is mounted as part of the bottom dock on every screen;
   # only one is resident at any moment so the page id is a constant.
-  let miniPageId: String = miniPlayerPageId
+  #
+  # FRESH copy, not `= miniPlayerPageId`: mountPageOrError takes
+  # `pageId: own String` and frees it. The old alias binding handed
+  # the config global's buffer to that free, dangling the global for
+  # the rest of the program — the mini play-icon dependency tag below
+  # silently failed on the garbage pageId, and any later reader could
+  # crash on it.
+  let miniPageId: String = "{miniPlayerPageId}"
   let mount: EntityId = mountPageOrError(
     world: world
-    pageId: miniPageId
+    pageId: own miniPageId
     scene: scene
     overrides: overrides
     w: w
@@ -217,6 +227,9 @@ func buildMiniPlayerInstance(
     sceneLabel: label
   )
   let miniWidgetId: String = "miniPlayer.playIcon"
-  tagPlaybackIconDependency(world: world, pageId: miniPageId, nodeId: miniIconId, widgetId: miniWidgetId, observedRevision: playback.revision)
+  tagPlaybackIconDependency(world: world, pageId: miniPlayerPageId, nodeId: miniIconId, widgetId: miniWidgetId, observedRevision: playback.revision)
+  let miniHeartNode: String = "MiniHeartBtn"
+  let miniHeartWidgetId: String = "miniPlayer.likeButton"
+  tagLikedHeart(world: world, pageId: miniPlayerPageId, nodeId: miniHeartNode, widgetId: miniHeartWidgetId, observedRevision: 0)
   ret mount
 }
