@@ -72,6 +72,23 @@ func mountNavTab(
   let tab: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: tab, w: w, h: navTabsH)
 
+  # Data-oriented widget tags (#220): identity, selected state, and the
+  # action binding as queryable component data. Tagged BEFORE the
+  # override calls below consume `actionId` (own param) — the setters
+  # copy internally. Active styling itself still flows through the
+  # scene overrides (tabs re-mount on switch); the selected flag makes
+  # the active tab visible to systems without parsing styles.
+  let navKind: String = "navTab"
+  setWidgetIdentity(world: world, entity: tab, id: actionId, kind: navKind)
+  setWidgetState(world: world, entity: tab, enabled: true, selected: active, loading: false, error: false)
+  let bindId: String = "{actionId}"
+  let bindRole: String = "primary"
+  let binding: ActionBinding = {
+    actionId: own bindId
+    role: own bindRole
+  }
+  componentSet(this: world.actionBindings, entity: tab, data: own binding)
+
   let overrides: List(SceneOverride) = emptyOverrides()
   let iconNode: String = "Icon"
   let labelNode: String = "Label"
