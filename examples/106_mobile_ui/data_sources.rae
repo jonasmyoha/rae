@@ -62,6 +62,15 @@ func dataFieldIsPlayingKey() pub ret String {
   ret "isPlaying"
 }
 
+# Field key for "is the current track in the liked playlist" — used by
+# the heart/like buttons' DataDependency. The liked bit depends on the
+# (album stem, track index) pair rather than a single revision, so the
+# sync system recomputes it per frame and flips WidgetState.selected
+# only when the answer changes.
+func dataFieldLikedKey() pub ret String {
+  ret "likedTrack"
+}
+
 func bumpAlbumsSource(sources: mod AppDataSources) pub {
   sources.albumsRevision = sources.albumsRevision + 1
 }

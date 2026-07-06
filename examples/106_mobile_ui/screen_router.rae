@@ -10,6 +10,7 @@ import sys/spotify
 import ui/ecs
 import ui/device_presets
 import ui/safe_area
+import ui/widget_style
 
 enum Screen {
   # The four bottom-nav tabs follow. Order matters: it must match
@@ -331,31 +332,35 @@ func tagPlaybackIconDependency(
   setWidgetIdentity(world: world, entity: entity, id: widgetId, kind: iconKind)
   setWidgetState(world: world, entity: entity, enabled: true, selected: false, loading: false, error: false)
   setDataDependency(world: world, entity: entity, sourceKey: playbackSource, fieldKey: playbackField, observedRevision: observedRevision)
+  # Declarative visuals: selected (= playing) shows the pause glyph.
+  # `widgetStyleSystem` applies the swap; the refresh below only flips
+  # WidgetState.selected. Struct built inline with `own` moves — the
+  # helper-returns-struct + field-reassign shape corrupts String
+  # fields (same class as the List(T) inner-String ownership gap).
+  let baseKey: String = "mat:play_arrow"
+  let selKey: String = "mat:pause"
+  let noTextStyle: String = ""
+  let noTextStyleSel: String = ""
+  let noTint: RgbaColor = { r: 255, g: 255, b: 255, a: 255 }
+  let style: StateStyle = {
+    spriteKey: own baseKey
+    spriteKeySelected: own selKey
+    tint: noTint
+    tintSelected: noTint
+    hasTint: false
+    textStyle: own noTextStyle
+    textStyleSelected: own noTextStyleSel
+    disabledAlpha: 1.0
+  }
+  componentSet(this: world.stateStyles, entity: entity, data: own style)
 }
 
-func refreshPlaybackIconEntity(world: mod UiWorld, entity: view EntityId, iconKey: view String, revision: view Int) {
-  if componentHas(this: world.sprites, entity: entity) is false {
-    ret
-  }
-  let cur: Sprite = componentGet(this: world.sprites, entity: entity)
-  if cur.textureKey.equals(other: iconKey) {
-    ret
-  }
-  let copied: String = "{iconKey}"
-  let next: Sprite = {
-    textureKey: copied
-    tint: cur.tint
-    scaleMode: cur.scaleMode
-    tileScale: cur.tileScale
-    nineSlice: cur.nineSlice
-    hasNineSlice: cur.hasNineSlice
-  }
-  componentSet(this: world.sprites, entity: entity, data: next)
-  if componentHas(this: world.widgetStates, entity: entity) {
-    let playingIcon: String = "mat:pause"
-    let isSelected: Bool = iconKey.equals(other: playingIcon)
-    setWidgetState(world: world, entity: entity, enabled: true, selected: isSelected, loading: false, error: false)
-  }
+# Data-only refresh: flip WidgetState.selected to mirror isPlaying and
+# record the observed revision. The visual swap (play_arrow <-> pause)
+# happens in `widgetStyleSystem` from the entity's StateStyle — no
+# sprite patching here.
+func refreshPlaybackIconEntity(world: mod UiWorld, entity: view EntityId, isPlaying: view Bool, revision: view Int) {
+  setWidgetSelected(world: world, entity: entity, selected: isPlaying)
   if componentHas(this: world.dataDependencies, entity: entity) {
     let dep: view DataDependency => componentView(this: world.dataDependencies, entity: entity)
     let sourceCopy: String = "{dep.sourceKey}"
@@ -382,7 +387,6 @@ func refreshPlaybackViewsIfNeeded(
     ret cachedRevision
   }
 
-  let iconKey: String = playbackIconKey(playback: playback)
   let playbackSource: String = dataSourcePlaybackKey()
   let playbackField: String = dataFieldIsPlayingKey()
   let n: Int = componentCount(this: world.dataDependencies)
@@ -393,7 +397,7 @@ func refreshPlaybackViewsIfNeeded(
     if dep.sourceKey.equals(other: playbackSource) {
       if dep.fieldKey.equals(other: playbackField) {
         if dep.observedRevision is not playback.revision {
-          refreshPlaybackIconEntity(world: world, entity: entity, iconKey: iconKey, revision: playback.revision)
+          refreshPlaybackIconEntity(world: world, entity: entity, isPlaying: playback.isPlaying, revision: playback.revision)
         }
       }
     }
