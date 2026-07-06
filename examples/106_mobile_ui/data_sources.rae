@@ -12,6 +12,7 @@ type AppDataSources pub {
   playlistsRevision: Int
   spotifyRevision: Int
   settingsRevision: Int
+  debugRevision: Int
 }
 
 func createAppDataSources() pub ret AppDataSources {
@@ -23,6 +24,7 @@ func createAppDataSources() pub ret AppDataSources {
     playlistsRevision: 0
     spotifyRevision: 0
     settingsRevision: 0
+    debugRevision: 0
   }
 }
 
@@ -54,6 +56,10 @@ func dataSourceSettingsKey() pub ret String {
   ret "settings"
 }
 
+func dataSourceDebugKey() pub ret String {
+  ret "debug"
+}
+
 func dataFieldAllKey() pub ret String {
   ret "all"
 }
@@ -69,6 +75,14 @@ func dataFieldIsPlayingKey() pub ret String {
 # only when the answer changes.
 func dataFieldLikedKey() pub ret String {
   ret "likedTrack"
+}
+
+func dataFieldPlayingTrackKey() pub ret String {
+  ret "playingTrack"
+}
+
+func dataFieldDebugToggleKey() pub ret String {
+  ret "debugToggle"
 }
 
 func bumpAlbumsSource(sources: mod AppDataSources) pub {
@@ -97,4 +111,8 @@ func bumpSpotifySource(sources: mod AppDataSources) pub {
 
 func bumpSettingsSource(sources: mod AppDataSources) pub {
   sources.settingsRevision = sources.settingsRevision + 1
+}
+
+func bumpDebugSource(sources: mod AppDataSources) pub {
+  sources.debugRevision = sources.debugRevision + 1
 }

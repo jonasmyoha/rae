@@ -229,6 +229,8 @@ func setOpticalAlign(world: mod UiWorld, entity: view EntityId, centerX: view Bo
 }
 
 func setOnClickAction(world: mod UiWorld, entity: view EntityId, actionId: own String) {
+  let bindId: String = "{actionId}"
+  let bindRole: String = "primary"
   let oc: OnClick = {
     actionId: actionId
     actionIdDouble: ""
@@ -236,6 +238,93 @@ func setOnClickAction(world: mod UiWorld, entity: view EntityId, actionId: own S
     maxDelayMs: 250
   }
   componentSet(this: world.onClicks, entity: entity, data: oc)
+  let binding: ActionBinding = {
+    actionId: own bindId
+    role: own bindRole
+  }
+  componentSet(this: world.actionBindings, entity: entity, data: own binding)
+}
+
+func setActionBindingOnly(world: mod UiWorld, entity: view EntityId, actionId: view String) {
+  let bindId: String = "{actionId}"
+  let bindRole: String = "primary"
+  let binding: ActionBinding = {
+    actionId: own bindId
+    role: own bindRole
+  }
+  componentSet(this: world.actionBindings, entity: entity, data: own binding)
+}
+
+func tagDebugToggleWidget(
+  world: mod UiWorld
+  entity: view EntityId
+  actionId: view String
+  kind: view String
+  selected: view Bool
+) {
+  let widgetId: String = "{actionId}.{kind}"
+  setWidgetIdentity(world: world, entity: entity, id: widgetId, kind: kind)
+  setWidgetState(world: world, entity: entity, enabled: true, selected: selected, loading: false, error: false)
+  let source: String = dataSourceDebugKey()
+  let field: String = dataFieldDebugToggleKey()
+  setDataDependency(world: world, entity: entity, sourceKey: source, fieldKey: field, observedRevision: 0)
+  setActionBindingOnly(world: world, entity: entity, actionId: actionId)
+}
+
+func setDebugSwitchPillStyle(world: mod UiWorld, entity: view EntityId) {
+  let emptySprite: String = ""
+  let emptySpriteSel: String = ""
+  let emptyText: String = ""
+  let emptyTextSel: String = ""
+  let noTint: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
+  let offFill: RgbaColor = debugSwitchOffColor()
+  let onFill: RgbaColor = debugSwitchOnColor()
+  let zeroOffset: Vec2 = { x: 0.0, y: 0.0 }
+  let style: StateStyle = {
+    spriteKey: own emptySprite
+    spriteKeySelected: own emptySpriteSel
+    tint: noTint
+    tintSelected: noTint
+    hasTint: false
+    shapeFill: offFill
+    shapeFillSelected: onFill
+    hasShapeFill: true
+    offset: zeroOffset
+    offsetSelected: zeroOffset
+    hasOffset: false
+    textStyle: own emptyText
+    textStyleSelected: own emptyTextSel
+    disabledAlpha: 1.0
+  }
+  componentSet(this: world.stateStyles, entity: entity, data: own style)
+}
+
+func setDebugSwitchKnobStyle(world: mod UiWorld, entity: view EntityId) {
+  let emptySprite: String = ""
+  let emptySpriteSel: String = ""
+  let emptyText: String = ""
+  let emptyTextSel: String = ""
+  let noTint: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
+  let noFill: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
+  let offOffset: Vec2 = { x: 0.0 - debugSwitchKnobOffset, y: 0.0 }
+  let onOffset: Vec2 = { x: debugSwitchKnobOffset, y: 0.0 }
+  let style: StateStyle = {
+    spriteKey: own emptySprite
+    spriteKeySelected: own emptySpriteSel
+    tint: noTint
+    tintSelected: noTint
+    hasTint: false
+    shapeFill: noFill
+    shapeFillSelected: noFill
+    hasShapeFill: false
+    offset: offOffset
+    offsetSelected: onOffset
+    hasOffset: true
+    textStyle: own emptyText
+    textStyleSelected: own emptyTextSel
+    disabledAlpha: 1.0
+  }
+  componentSet(this: world.stateStyles, entity: entity, data: own style)
 }
 
 func setStackLayout(world: mod UiWorld, entity: view EntityId) {
@@ -439,6 +528,9 @@ func buildSwitchRow(
   var pillFill: RgbaColor = debugSwitchOffColor()
   if on { pillFill = debugSwitchOnColor() }
   setRoundedShape(world: world, entity: pill, fill: pillFill, radius: debugSwitchRadius)
+  let pillKind: String = "debugSwitchPill"
+  tagDebugToggleWidget(world: world, entity: pill, actionId: actionId, kind: pillKind, selected: on)
+  setDebugSwitchPillStyle(world: world, entity: pill)
   setStackLayout(world: world, entity: pill)
 
   let knob: EntityId = createEntity(world: world)
@@ -447,6 +539,9 @@ func buildSwitchRow(
   var knobOff: Float = 0.0 - debugSwitchKnobOffset
   if on { knobOff = debugSwitchKnobOffset }
   setOffset(world: world, entity: knob, x: knobOff, y: 0.0)
+  let knobKind: String = "debugSwitchKnob"
+  tagDebugToggleWidget(world: world, entity: knob, actionId: actionId, kind: knobKind, selected: on)
+  setDebugSwitchKnobStyle(world: world, entity: knob)
 
   let pillKids: List(EntityId) = createList(EntityId, cap: 1)
   pillKids.add(value: knob)
@@ -544,7 +639,7 @@ func addDebugLayer(world: mod UiWorld, debug: mod DebugSystem) pub {
 }
 
 func dispatchDebugAction(input: view InputSystem, debug: mod DebugSystem) pub ret Bool {
-  var changed: Bool = false
+  var needsRemount: Bool = false
   let n: Int = input.events.length
   var i: Int = 0
   loop i < n {
@@ -552,12 +647,12 @@ func dispatchDebugAction(input: view InputSystem, debug: mod DebugSystem) pub re
     let actionId: String = ev.actionId
     if actionId.equals(other: debugActionToggleMenu) {
       debug.menuOpen = debug.menuOpen is false
-      changed = true
+      needsRemount = true
     }
     if actionId.equals(other: debugActionDismiss) {
       if debug.menuOpen {
         debug.menuOpen = false
-        changed = true
+        needsRemount = true
       }
     }
     if actionId.equals(other: debugActionToggleTheme) {
@@ -567,19 +662,57 @@ func dispatchDebugAction(input: view InputSystem, debug: mod DebugSystem) pub re
       } else {
         setActiveTheme(theme: darkTheme())
       }
-      changed = true
+      needsRemount = true
     }
     if actionId.equals(other: debugActionToggleLabels) {
       debug.showLabels = debug.showLabels is false
-      changed = true
     }
     if actionId.equals(other: debugActionToggleInputOutlines) {
       debug.showInputOutlines = debug.showInputOutlines is false
-      changed = true
     }
     i = i + 1
   }
-  ret changed
+  ret needsRemount
+}
+
+func selectedForDebugAction(actionId: view String, debug: view DebugSystem) ret Bool {
+  if actionId.equals(other: debugActionToggleTheme) {
+    ret currentTheme().mode is ThemeMode.dark
+  }
+  if actionId.equals(other: debugActionToggleLabels) {
+    ret debug.showLabels
+  }
+  if actionId.equals(other: debugActionToggleInputOutlines) {
+    ret debug.showInputOutlines
+  }
+  ret false
+}
+
+func syncDebugWidgetStates(world: mod UiWorld, debug: view DebugSystem) pub {
+  let n: Int = componentCount(this: world.actionBindings)
+  var i: Int = 0
+  loop i < n {
+    let entity: EntityId = componentEntityAt(this: world.actionBindings, i: i)
+    if componentHas(this: world.widgetIds, entity: entity) {
+      let wid: view WidgetId => componentView(this: world.widgetIds, entity: entity)
+      let debugKind: String = "debugToggle"
+      let pillKind: String = "debugSwitchPill"
+      let knobKind: String = "debugSwitchKnob"
+      var isDebugToggle: Bool = wid.kind.equals(other: debugKind)
+      if isDebugToggle is false {
+        if wid.kind.equals(other: pillKind) { isDebugToggle = true }
+      }
+      if isDebugToggle is false {
+        if wid.kind.equals(other: knobKind) { isDebugToggle = true }
+      }
+      if isDebugToggle {
+        let bind: view ActionBinding => componentView(this: world.actionBindings, entity: entity)
+        let selected: Bool = selectedForDebugAction(actionId: bind.actionId, debug: debug)
+        setWidgetSelected(world: world, entity: entity, selected: selected)
+      }
+    }
+    i = i + 1
+  }
 }
 
 func formatMemMBGpu2d(kb: view Int) ret String {

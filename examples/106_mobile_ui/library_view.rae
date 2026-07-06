@@ -120,6 +120,13 @@ func buildPlaylistCoverTile(world: mod UiWorld, coverStems: view List(String), s
   setRectFixed(world: world, entity: tile, w: size, h: size)
   let playlistOpen: String = "playlist.open.liked"
   setOnClick(world: world, entity: tile, actionId: playlistOpen)
+  let playlistId: String = "liked"
+  let tileKind: String = "playlistTile"
+  setWidgetIdentity(world: world, entity: tile, id: playlistId, kind: tileKind)
+  setWidgetState(world: world, entity: tile, enabled: true, selected: false, loading: coverStems.length is 0, error: false)
+  let playlistSource: String = dataSourcePlaylistsKey()
+  let allField: String = dataFieldAllKey()
+  setDataDependency(world: world, entity: tile, sourceKey: playlistSource, fieldKey: allField, observedRevision: 0)
   # Hover scale goes on the four cells, not this container (a layout
   # parent draws nothing of its own). `hoverScaleSystem` propagates the
   # tile's hover state down to them via `hoverScaleContains`, so the
