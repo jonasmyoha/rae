@@ -83,6 +83,22 @@ func setWidgetState(
   componentSet(this: world.widgetStates, entity: entity, data: state)
 }
 
+# Flip only WidgetState.selected, preserving the other flags. Writes
+# nothing when the bit already matches, so per-frame sync loops don't
+# churn the widgetStates generation (componentMod bumps it eagerly).
+func setWidgetSelected(world: mod UiWorld, entity: view EntityId, selected: view Bool) pub {
+  if componentHas(this: world.widgetStates, entity: entity) is false {
+    setWidgetState(world: world, entity: entity, enabled: true, selected: selected, loading: false, error: false)
+    ret
+  }
+  let cur: WidgetState = componentGet(this: world.widgetStates, entity: entity)
+  if cur.selected is selected {
+    ret
+  }
+  let ws: mod WidgetState => componentMod(this: world.widgetStates, entity: entity)
+  ws.selected = selected
+}
+
 func setDataDependency(
   world: mod UiWorld
   entity: view EntityId
