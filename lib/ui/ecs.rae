@@ -406,6 +406,7 @@ type UiWorld {
   dataDependencies: ComponentTable(DataDependency)
   actionBindings: ComponentTable(ActionBinding)
   refreshRegions: ComponentTable(RefreshRegion)
+  stateStyles: ComponentTable(StateStyle)
 
   # ----- authored identity/metadata -----
   names: ComponentTable(Name)
@@ -504,6 +505,7 @@ func createUiWorld() ret UiWorld {
     dataDependencies: createComponentTable(DataDependency)
     actionBindings: createComponentTable(ActionBinding)
     refreshRegions: createComponentTable(RefreshRegion)
+    stateStyles: createComponentTable(StateStyle)
 
     names: createComponentTable(Name)
     primaryTypes: createComponentTable(PrimaryType)
@@ -763,6 +765,13 @@ func destroyEntity(world: mod UiWorld, entity: view EntityId) pub {
   componentRemove(this: world.debugAnchors, entity: entity)
   componentRemove(this: world.pageRoots, entity: entity)
   componentRemove(this: world.scrollStates, entity: entity)
+  # Widget model (identity / state / bindings / styling)
+  componentRemove(this: world.widgetIds, entity: entity)
+  componentRemove(this: world.widgetStates, entity: entity)
+  componentRemove(this: world.dataDependencies, entity: entity)
+  componentRemove(this: world.actionBindings, entity: entity)
+  componentRemove(this: world.refreshRegions, entity: entity)
+  componentRemove(this: world.stateStyles, entity: entity)
   # Identity / metadata
   componentRemove(this: world.names, entity: entity)
   componentRemove(this: world.primaryTypes, entity: entity)
