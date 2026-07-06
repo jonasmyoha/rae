@@ -82,6 +82,9 @@ func main() {
   # Missing file or stale fields fall back silently to the
   # defaults `createAppState` / `createPlaybackState` set above.
   restoreAppState(state: appState, playback: playback, path: stateFilePath)
+  if appState.hasWindowPosition {
+    uiSetWindowPosition(x: appState.windowX, y: appState.windowY)
+  }
   # Persisted recently-played. CDN artwork is re-downloaded lazily in
   # the loop (refetchHistoryArtChunk, a few/frame) so it never blocks.
   restoreHistory(history: appState.playHistory, path: historyFilePath)
@@ -868,7 +871,7 @@ func main() {
           # dock visibly floats off the edge before snapping back. The
           # outer loop rebuilds and paints the correct size next; each
           # window size still gets exactly one render.
-          if (busyAnimating or active or now < renderUntil) and frameDue and switching is false {
+          if (busyAnimating or active or forceRender or now < renderUntil) and frameDue and switching is false {
             lastRenderTime = now
             uiBeginFrame(clear: bgSurface)
             renderSystemGpu2d(world: world, res: gpuUi)

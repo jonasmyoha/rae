@@ -433,6 +433,11 @@ type AppState pub {
   # UI preferences (code-only flags — no settings UI yet). See
   # `app_settings.rae`.
   settings: AppSettings
+  # Last OS window position in SDL/global desktop coordinates. On macOS this
+  # is enough to return to the same display when the display layout is stable.
+  hasWindowPosition: Bool
+  windowX: Int
+  windowY: Int
 }
 
 func createAppState(albums: own List(Album)) pub ret AppState {
@@ -465,6 +470,9 @@ func createAppState(albums: own List(Album)) pub ret AppState {
     currentPlaylistId: ""
     bottomSheet: createBottomSheetState()
     settings: createAppSettings()
+    hasWindowPosition: false
+    windowX: 50
+    windowY: 50
   }
 }
 
