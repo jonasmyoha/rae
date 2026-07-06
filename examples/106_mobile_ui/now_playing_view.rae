@@ -94,6 +94,8 @@ func mountNowPlayingPage(
     log("[scene-error] now-playing mount failed (scene.ok={scenes.nowPlaying.ok})")
     paintErrorBlock(world: world, entity: np, label: npLabel)
   }
+  let playWidgetId: String = "player.playIcon"
+  tagPlaybackIconDependency(world: world, pageId: playerPageId, nodeId: playIconId, widgetId: playWidgetId, observedRevision: playback.revision)
 
   # Gate the big album-cover corner radius on the same AppSettings
   # flag that drives Library / Home / History. The Now Playing hero
@@ -214,5 +216,7 @@ func buildMiniPlayerInstance(
     h: h
     sceneLabel: label
   )
+  let miniWidgetId: String = "miniPlayer.playIcon"
+  tagPlaybackIconDependency(world: world, pageId: miniPageId, nodeId: miniIconId, widgetId: miniWidgetId, observedRevision: playback.revision)
   ret mount
 }
