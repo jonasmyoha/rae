@@ -875,7 +875,7 @@ func main() {
             updateAndRenderDebugOverlayGpu2d(debug: debug, now: now, didRealWork: active, font: gpuUi.textFont)
 
             uiEndFrame()
-            forceRender = false
+            forceRender = uiLastPresentOk() is false
             renderCacheDirty(world: world, cache: renderCache)
           }
           # Persistent-world screen-switch (slice 4b.3 + 4c) — implementation
