@@ -1,4 +1,5 @@
 open ui/ecs
+import ui/widget_style
 # Playlists — ordered curation lists that can reference songs, albums,
 # and other playlists by id.
 #
@@ -363,17 +364,15 @@ func savePlaylist(playlist: view Playlist) pub {
   }
 }
 
-# Update both heart buttons (mini-player + now-playing) in `world`
-# to reflect the liked state of the currently-browsed track. Called
-# once per frame from main.rae's inner loop after dispatchActions.
-#
-# When the track is in `liked`:
-#   * sprite swaps to `mat:favorite` (filled glyph)
-#   * tint goes to a warm coral (`{r:250,g:80,b:110,a:255}`)
-# When not liked:
-#   * sprite reverts to `mat:favorite_border` (outline glyph)
-#   * tint reverts to white (the renderer multiplies by the entity's
-#     Active/Opacity chain anyway).
+# Sync the liked state of the currently-browsed track into every
+# widget that declares a (playlists, likedTrack) DataDependency —
+# today the mini-player + now-playing hearts, tagged at mount by
+# `tagLikedHeart`. Data-only: this flips WidgetState.selected; the
+# visual swap (outline/filled glyph, white/coral tint) lives in each
+# heart's StateStyle and is applied by widgetStyleSystem. The liked
+# bit depends on the (stem, trackIndex) pair rather than a revision,
+# so this runs per frame and `setWidgetSelected` early-outs when the
+# bit already matches.
 #
 # Pass empty stem to skip (e.g. before any user navigation).
 func applyLikedToWorld(
@@ -386,64 +385,82 @@ func applyLikedToWorld(
     ret
   }
   let isLiked: Bool = playlistContains(playlist: liked, stem: stem, trackIndex: trackIndex)
-  # Warm coral / Spotify-ish like-red. Visibly distinct from the
-  # accentText / textPrimary the scenes author the outline heart in.
-  let likedTint: RgbaColor = { r: 250, g: 80, b: 110, a: 255 }
-  let unlikedTint: RgbaColor = { r: 255, g: 255, b: 255, a: 255 }
-  let nowPlayingPage: String = playerPageId
-  let nowPlayingNode: String = "HeartBtn"
-  applyLikedHeart(
-    world: world
-    pageId: nowPlayingPage
-    nodeId: nowPlayingNode
-    isLiked: isLiked
-    likedTint: likedTint
-    unlikedTint: unlikedTint
-  )
-  let miniPage: String = miniPlayerPageId
-  let miniNode: String = "MiniHeartBtn"
-  applyLikedHeart(
-    world: world
-    pageId: miniPage
-    nodeId: miniNode
-    isLiked: isLiked
-    likedTint: likedTint
-    unlikedTint: unlikedTint
-  )
+  let likedSource: String = dataSourcePlaylistsKey()
+  let likedField: String = dataFieldLikedKey()
+  let n: Int = componentCount(this: world.dataDependencies)
+  var i: Int = 0
+  loop i < n {
+    let entity: EntityId = componentEntityAt(this: world.dataDependencies, i: i)
+    var matches: Bool = false
+    if componentHas(this: world.dataDependencies, entity: entity) {
+      let dep: view DataDependency => componentView(this: world.dataDependencies, entity: entity)
+      if dep.sourceKey.equals(other: likedSource) {
+        if dep.fieldKey.equals(other: likedField) {
+          matches = true
+        }
+      }
+    }
+    if matches {
+      setWidgetSelected(world: world, entity: entity, selected: isLiked)
+    }
+    i = i + 1
+  }
 }
 
-# Per-frame fan-out: apply playback progress and the liked-heart overlay in
-# one call. Play/pause icons refresh through PlaybackState revision bindings.
-func applyOverlaysToWorld(world: mod UiWorld, playback: view PlaybackState, state: view AppState) pub {
-  applyPlaybackToWorld(world: world, state: playback)
-  applyLikedToWorld(world: world, liked: state.liked, stem: state.currentAlbumStem, trackIndex: state.currentTrackIndex)
-}
-
-# Per-page heart updater — shared between the two heart locations.
-# Skips silently when the page or node isn't mounted.
-func applyLikedHeart(
+# Tag one heart/like button as a data-oriented widget: identity, state
+# flags, the (playlists, likedTrack) dependency `applyLikedToWorld`
+# scans for, and the declarative outline/filled + white/coral visuals.
+# Called at mount time by the pages that own a heart. Skips silently
+# when the node isn't in the page (mount failed / legacy scene).
+func tagLikedHeart(
   world: mod UiWorld
   pageId: view String
   nodeId: view String
-  isLiked: view Bool
-  likedTint: view RgbaColor
-  unlikedTint: view RgbaColor
-) {
+  widgetId: view String
+  observedRevision: view Int
+) pub {
   let entityOpt: opt Int = findNodeInPage(world: world, pageId: pageId, nodeId: nodeId)
   if entityOpt is none {
     ret
   }
   let raw: Int = entityOpt
   let entity: EntityId = entityId(v: raw)
-  if componentHas(this: world.sprites, entity: entity) is false {
-    ret
+  let heartKind: String = "likeButton"
+  setWidgetIdentity(world: world, entity: entity, id: widgetId, kind: heartKind)
+  setWidgetState(world: world, entity: entity, enabled: true, selected: false, loading: false, error: false)
+  let likedSource: String = dataSourcePlaylistsKey()
+  let likedField: String = dataFieldLikedKey()
+  setDataDependency(world: world, entity: entity, sourceKey: likedSource, fieldKey: likedField, observedRevision: observedRevision)
+  # Warm coral / Spotify-ish like-red when liked. Visibly distinct
+  # from the accentText / textPrimary the scenes author the outline
+  # heart in. Struct built inline with `own`-moved locals (the safe
+  # construction shape for String-bearing components).
+  let baseKey: String = "mat:favorite_border"
+  let selKey: String = "mat:favorite"
+  let noTextStyle: String = ""
+  let noTextStyleSel: String = ""
+  let unlikedTint: RgbaColor = { r: 255, g: 255, b: 255, a: 255 }
+  let likedTint: RgbaColor = { r: 250, g: 80, b: 110, a: 255 }
+  let style: StateStyle = {
+    spriteKey: own baseKey
+    spriteKeySelected: own selKey
+    tint: unlikedTint
+    tintSelected: likedTint
+    hasTint: true
+    textStyle: own noTextStyle
+    textStyleSelected: own noTextStyleSel
+    disabledAlpha: 1.0
   }
-  let sp: mod Sprite => componentMod(this: world.sprites, entity: entity)
-  if isLiked {
-    sp.textureKey = "mat:favorite"
-    sp.tint = likedTint
-  } else {
-    sp.textureKey = "mat:favorite_border"
-    sp.tint = unlikedTint
-  }
+  componentSet(this: world.stateStyles, entity: entity, data: own style)
+}
+
+# Per-frame fan-out: sync playback progress and the liked flags, then
+# let widgetStyleSystem turn WidgetState into visuals for every widget
+# carrying a StateStyle (play/pause icons, hearts, future toggles).
+# Play/pause selected-flags refresh through PlaybackState revision
+# bindings before this runs (refreshMountedUi in main.rae).
+func applyOverlaysToWorld(world: mod UiWorld, playback: view PlaybackState, state: view AppState) pub {
+  applyPlaybackToWorld(world: world, state: playback)
+  applyLikedToWorld(world: world, liked: state.liked, stem: state.currentAlbumStem, trackIndex: state.currentTrackIndex)
+  widgetStyleSystem(world: world)
 }
