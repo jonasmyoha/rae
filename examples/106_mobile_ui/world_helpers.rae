@@ -99,6 +99,67 @@ func setWidgetSelected(world: mod UiWorld, entity: view EntityId, selected: view
   ws.selected = selected
 }
 
+func setWidgetLoading(world: mod UiWorld, entity: view EntityId, loading: view Bool) pub {
+  if componentHas(this: world.widgetStates, entity: entity) is false {
+    setWidgetState(world: world, entity: entity, enabled: true, selected: false, loading: loading, error: false)
+    ret
+  }
+  let cur: WidgetState = componentGet(this: world.widgetStates, entity: entity)
+  if cur.loading is loading {
+    ret
+  }
+  let ws: mod WidgetState => componentMod(this: world.widgetStates, entity: entity)
+  ws.loading = loading
+}
+
+func setWidgetError(world: mod UiWorld, entity: view EntityId, error: view Bool) pub {
+  if componentHas(this: world.widgetStates, entity: entity) is false {
+    setWidgetState(world: world, entity: entity, enabled: true, selected: false, loading: false, error: error)
+    ret
+  }
+  let cur: WidgetState = componentGet(this: world.widgetStates, entity: entity)
+  if cur.error is error {
+    ret
+  }
+  let ws: mod WidgetState => componentMod(this: world.widgetStates, entity: entity)
+  ws.error = error
+}
+
+func setOpacityStateStyle(
+  world: mod UiWorld
+  entity: view EntityId
+  disabledAlpha: view Float
+  loadingAlpha: view Float
+  errorAlpha: view Float
+) pub {
+  let emptySprite: String = ""
+  let emptySpriteSelected: String = ""
+  let emptyText: String = ""
+  let emptyTextSelected: String = ""
+  let noTint: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
+  let noFill: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
+  let zeroOffset: Vec2 = { x: 0.0, y: 0.0 }
+  let style: StateStyle = {
+    spriteKey: own emptySprite
+    spriteKeySelected: own emptySpriteSelected
+    tint: noTint
+    tintSelected: noTint
+    hasTint: false
+    shapeFill: noFill
+    shapeFillSelected: noFill
+    hasShapeFill: false
+    offset: zeroOffset
+    offsetSelected: zeroOffset
+    hasOffset: false
+    textStyle: own emptyText
+    textStyleSelected: own emptyTextSelected
+    disabledAlpha: disabledAlpha
+    loadingAlpha: loadingAlpha
+    errorAlpha: errorAlpha
+  }
+  componentSet(this: world.stateStyles, entity: entity, data: own style)
+}
+
 func setDataDependency(
   world: mod UiWorld
   entity: view EntityId
