@@ -78,6 +78,11 @@ func buildSheetActionRow(world: mod UiWorld, action: view BottomSheetAction, w: 
   let labelStyle: String = "primary"
   setText(world: world, entity: row, text: own labelText, styleId: own labelStyle)
   let aid: String = "{action.actionId}"
+  let widgetId: String = "{action.actionId}"
+  let rowKind: String = "bottomSheetAction"
+  setWidgetIdentity(world: world, entity: row, id: widgetId, kind: rowKind)
+  setWidgetState(world: world, entity: row, enabled: true, selected: false, loading: false, error: false)
+  setOpacityStateStyle(world: world, entity: row, disabledAlpha: 0.45, loadingAlpha: 0.72, errorAlpha: 0.42)
   setOnClick(world: world, entity: row, actionId: own aid)
   ret row
 }
