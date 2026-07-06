@@ -62,6 +62,32 @@ func styleDisabledAlpha(world: view UiWorld, entity: view EntityId) ret Float {
   ret style.disabledAlpha
 }
 
+func styleWantShapeFill(world: view UiWorld, entity: view EntityId, selected: view Bool) ret RgbaColor {
+  let style: view StateStyle => componentView(this: world.stateStyles, entity: entity)
+  if selected {
+    ret style.shapeFillSelected
+  }
+  ret style.shapeFill
+}
+
+func styleHasShapeFill(world: view UiWorld, entity: view EntityId) ret Bool {
+  let style: view StateStyle => componentView(this: world.stateStyles, entity: entity)
+  ret style.hasShapeFill
+}
+
+func styleWantOffset(world: view UiWorld, entity: view EntityId, selected: view Bool) ret Vec2 {
+  let style: view StateStyle => componentView(this: world.stateStyles, entity: entity)
+  if selected {
+    ret style.offsetSelected
+  }
+  ret style.offset
+}
+
+func styleHasOffset(world: view UiWorld, entity: view EntityId) ret Bool {
+  let style: view StateStyle => componentView(this: world.stateStyles, entity: entity)
+  ret style.hasOffset
+}
+
 # ----- read-side checks (view borrows only) --------------------------
 
 func spriteKeyDiffers(world: view UiWorld, entity: view EntityId, wantKey: view String) ret Bool {
@@ -82,6 +108,19 @@ func textStyleDiffers(world: view UiWorld, entity: view EntityId, wantStyle: vie
   if componentHas(this: world.texts, entity: entity) is false { ret false }
   let cur: view Text => componentView(this: world.texts, entity: entity)
   ret cur.styleId.equals(other: wantStyle) is false
+}
+
+func shapeFillDiffers(world: view UiWorld, entity: view EntityId, wantFill: view RgbaColor) ret Bool {
+  if componentHas(this: world.shapes, entity: entity) is false { ret false }
+  let cur: view Shape => componentView(this: world.shapes, entity: entity)
+  ret rgbaEquals(a: cur.fill, b: wantFill) is false
+}
+
+func offsetDiffers(world: view UiWorld, entity: view EntityId, wantOffset: view Vec2) ret Bool {
+  if componentHas(this: world.offsets, entity: entity) is false { ret true }
+  let cur: view Offset => componentView(this: world.offsets, entity: entity)
+  if cur.delta.x is not wantOffset.x { ret true }
+  ret cur.delta.y is not wantOffset.y
 }
 
 # ----- per-visual apply (mod borrow only when a check said "differs")
@@ -113,6 +152,30 @@ func applyTextStyle(world: mod UiWorld, entity: view EntityId, selected: view Bo
   }
   let t: mod Text => componentMod(this: world.texts, entity: entity)
   t.styleId = own wantStyle
+}
+
+func applyShapeStyle(world: mod UiWorld, entity: view EntityId, selected: view Bool) {
+  if styleHasShapeFill(world: world, entity: entity) is false {
+    ret
+  }
+  let wantFill: RgbaColor = styleWantShapeFill(world: world, entity: entity, selected: selected)
+  if shapeFillDiffers(world: world, entity: entity, wantFill: wantFill) is false {
+    ret
+  }
+  let sh: mod Shape => componentMod(this: world.shapes, entity: entity)
+  sh.fill = wantFill
+}
+
+func applyOffsetStyle(world: mod UiWorld, entity: view EntityId, selected: view Bool) {
+  if styleHasOffset(world: world, entity: entity) is false {
+    ret
+  }
+  let wantOffset: Vec2 = styleWantOffset(world: world, entity: entity, selected: selected)
+  if offsetDiffers(world: world, entity: entity, wantOffset: wantOffset) is false {
+    ret
+  }
+  let off: Offset = { delta: wantOffset }
+  componentSet(this: world.offsets, entity: entity, data: off)
 }
 
 # Disabled widgets dim through the Opacity component. Only engages
@@ -159,6 +222,8 @@ func widgetStyleSystem(world: mod UiWorld) {
     }
     applySpriteStyle(world: world, entity: entity, selected: selected)
     applyTextStyle(world: world, entity: entity, selected: selected)
+    applyShapeStyle(world: world, entity: entity, selected: selected)
+    applyOffsetStyle(world: world, entity: entity, selected: selected)
     applyDisabledOpacity(world: world, entity: entity, enabled: enabled)
     i = i + 1
   }
