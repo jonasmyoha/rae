@@ -446,6 +446,25 @@ type RefreshRegion {
   dirty: Bool
 }
 
+# Declarative state -> visual mapping. Carries the visual variants a
+# widget shows per WidgetState, so app systems flip WidgetState flags
+# and `widgetStyleSystem` (ui/widget_style) applies the matching
+# variant — no imperative per-widget sprite/text patching.
+#
+# Empty-string fields mean "leave that visual alone"; `hasTint` gates
+# the tint pair the same way. `disabledAlpha` is applied through the
+# Opacity component when WidgetState.enabled is false (1.0 = no dim).
+type StateStyle {
+  spriteKey: String
+  spriteKeySelected: String
+  tint: RgbaColor
+  tintSelected: RgbaColor
+  hasTint: Bool
+  textStyle: String
+  textStyleSelected: String
+  disabledAlpha: Float
+}
+
 # Identity / metadata
 
 type Name {
