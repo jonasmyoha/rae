@@ -15,7 +15,9 @@ func uiInitWindow(width: view Int, height: view Int, title: view String) pub {
 }
 
 func uiSetConfigFlags(flags: view Int) pub {}
-func uiSetWindowPosition(x: view Int, y: view Int) pub {}
+func uiSetWindowPosition(x: view Int, y: view Int) pub {
+  gpu2d.setWindowPosition(x: x, y: y)
+}
 func uiSetWindowSize(width: view Int, height: view Int) pub {}
 func uiSetMouseScale(scaleX: view Float, scaleY: view Float) pub {}
 func uiInstallWindowCloseWaker() pub {}
@@ -72,6 +74,14 @@ func uiFramebufferWidth() pub ret Int {
 
 func uiFramebufferHeight() pub ret Int {
   ret gpu2d.windowHeight()
+}
+
+func uiWindowPositionX() pub ret Int {
+  ret gpu2d.windowPositionX()
+}
+
+func uiWindowPositionY() pub ret Int {
+  ret gpu2d.windowPositionY()
 }
 
 func uiDpr() pub ret Float {

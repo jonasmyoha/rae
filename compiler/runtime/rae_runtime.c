@@ -4067,6 +4067,21 @@ double rae_ext_gpu2d_nowSeconds(void) { return (double)rae_ext_nowMs() / 1000.0;
 
 int64_t rae_ext_gpu2d_windowWidth(void) { return g_sdl_w; }
 int64_t rae_ext_gpu2d_windowHeight(void) { return g_sdl_h; }
+void rae_ext_gpu2d_setWindowPosition(int64_t x, int64_t y) {
+    if (g_sdl_win) SDL_SetWindowPosition(g_sdl_win, (int)x, (int)y);
+}
+int64_t rae_ext_gpu2d_windowPositionX(void) {
+    int x = 0, y = 0;
+    if (g_sdl_win) SDL_GetWindowPosition(g_sdl_win, &x, &y);
+    (void)y;
+    return (int64_t)x;
+}
+int64_t rae_ext_gpu2d_windowPositionY(void) {
+    int x = 0, y = 0;
+    if (g_sdl_win) SDL_GetWindowPosition(g_sdl_win, &x, &y);
+    (void)x;
+    return (int64_t)y;
+}
 /* True once per OS resize (edge-triggered): returns the pending flag and
  * clears it, so the app rebuilds its layout extent for the new window. */
 rae_Bool rae_ext_gpu2d_windowResized(void) {
@@ -5296,6 +5311,9 @@ double rae_ext_gpu2d_wheelMove(void) { return 0.0; }
 double rae_ext_gpu2d_nowSeconds(void) { return 0.0; }
 int64_t rae_ext_gpu2d_windowWidth(void) { return 0; }
 int64_t rae_ext_gpu2d_windowHeight(void) { return 0; }
+void rae_ext_gpu2d_setWindowPosition(int64_t x, int64_t y) { (void)x; (void)y; }
+int64_t rae_ext_gpu2d_windowPositionX(void) { return 0; }
+int64_t rae_ext_gpu2d_windowPositionY(void) { return 0; }
 rae_Bool rae_ext_gpu2d_windowResized(void) { return 0; }
 void rae_ext_gpu2d_setDesignResolution(double w, double h, int64_t fit) { (void)w; (void)h; (void)fit; }
 double rae_ext_gpu2d_designWidth(void) { return 0.0; }
