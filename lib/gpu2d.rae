@@ -86,6 +86,11 @@ func beginFrame(r: Float, g: Float, b: Float, a: Float) extern
 # Finish the render pass, submit the command buffer, and present the frame.
 func endFrame() extern
 
+# True when the most recent endFrame copied to a surface drawable and presented.
+# Startup can render offscreen before the OS has a drawable; apps that skip idle
+# frames should keep their first frame dirty until this reports true.
+func lastPresentOk() extern ret Bool
+
 # Flush queued primitives into the active render pass without ending the
 # frame. Use this when painter order must be preserved across primitive
 # pipelines (for example: image, then later shape, then text).
