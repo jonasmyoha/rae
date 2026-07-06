@@ -325,8 +325,8 @@ func tagPlaybackIconDependency(
   }
   let raw: Int = entityOpt
   let entity: EntityId = entityId(v: raw)
-  let playbackSource: String = "playback"
-  let playbackField: String = "isPlaying"
+  let playbackSource: String = dataSourcePlaybackKey()
+  let playbackField: String = dataFieldIsPlayingKey()
   let iconKind: String = "playbackIcon"
   setWidgetIdentity(world: world, entity: entity, id: widgetId, kind: iconKind)
   setWidgetState(world: world, entity: entity, enabled: true, selected: false, loading: false, error: false)
@@ -371,7 +371,7 @@ func refreshPlaybackIconEntity(world: mod UiWorld, entity: view EntityId, iconKe
 
 # Refresh UI nodes that declare a dependency on PlaybackState when the playback
 # data revision changes. The dependency is now ECS data, not hard-coded node ids:
-# any widget that carries DataDependency{sourceKey:"playback", fieldKey:"isPlaying"}
+# any widget that carries DataDependency{sourceKey:dataSourcePlaybackKey(), fieldKey:dataFieldIsPlayingKey()}
 # can be patched here without adding another bespoke refresh path.
 func refreshPlaybackViewsIfNeeded(
   world: mod UiWorld
@@ -383,8 +383,8 @@ func refreshPlaybackViewsIfNeeded(
   }
 
   let iconKey: String = playbackIconKey(playback: playback)
-  let playbackSource: String = "playback"
-  let playbackField: String = "isPlaying"
+  let playbackSource: String = dataSourcePlaybackKey()
+  let playbackField: String = dataFieldIsPlayingKey()
   let n: Int = componentCount(this: world.dataDependencies)
   var i: Int = 0
   loop i < n {
@@ -478,6 +478,8 @@ type AppState pub {
   # UI preferences (code-only flags — no settings UI yet). See
   # `app_settings.rae`.
   settings: AppSettings
+  # App-owned data source revisions for dependency-driven UI refresh.
+  dataSources: AppDataSources
   # Last OS window position in SDL/global desktop coordinates. On macOS this
   # is enough to return to the same display when the display layout is stable.
   hasWindowPosition: Bool
@@ -515,6 +517,7 @@ func createAppState(albums: own List(Album)) pub ret AppState {
     currentPlaylistId: ""
     bottomSheet: createBottomSheetState()
     settings: createAppSettings()
+    dataSources: createAppDataSources()
     hasWindowPosition: false
     windowX: 50
     windowY: 50
@@ -841,6 +844,7 @@ func dispatchActions(
         playedAt: uiNowSeconds()
       }
       recordPlay(history: state.playHistory, entry: own histEntry)
+      bumpHistorySource(sources: state.dataSources)
       saveHistoryToJson(history: state.playHistory, path: historyFilePath)
       if spotifyEnabled {
         let q: String = spotifySearchQuery(artist: histAlbum.artist, title: histTrack.title, album: histAlbum.album)
@@ -923,6 +927,7 @@ func dispatchActions(
           log("[liked] -{stem} track {state.currentTrackIndex}")
         }
         savePlaylist(playlist: state.liked)
+        bumpPlaylistsSource(sources: state.dataSources)
       }
     }
     if actionId.equals(other: libraryRemoveKey) {
@@ -931,6 +936,7 @@ func dispatchActions(
       # for history rows etc. Close the sheet and pop the Album
       # sub-page so the user lands back where they came from.
       removeFromLibrary(library: state.library, stem: state.currentAlbumStem)
+      bumpLibrarySource(sources: state.dataSources)
       saveLibraryToJson(library: state.library, path: libraryFilePath)
       closeBottomSheet(sheet: state.bottomSheet)
       popSubPage(state: state)
