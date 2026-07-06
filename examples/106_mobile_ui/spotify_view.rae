@@ -354,6 +354,8 @@ func pollSpotify(
         playedAt: now
       }
       recordPlay(history: appState.playHistory, entry: own entry)
+      bumpHistorySource(sources: appState.dataSources)
+      bumpSpotifySource(sources: appState.dataSources)
       saveHistoryToJson(history: appState.playHistory, path: historyFilePath)
     }
   }
