@@ -1,0 +1,44 @@
+open ui/ecs
+import ui/ecs
+
+type UiRefreshCache pub {
+  historyLen: Int
+  playbackRevision: Int
+  sheetEpoch: Int
+}
+
+type UiRefreshResult pub {
+  historyChanged: Bool
+  playbackChanged: Bool
+  sheetChanged: Bool
+}
+
+func createUiRefreshCache(historyLen: view Int, playbackRevision: view Int, sheetEpoch: view Int) pub ret UiRefreshCache {
+  ret UiRefreshCache {
+    historyLen: historyLen
+    playbackRevision: playbackRevision
+    sheetEpoch: sheetEpoch
+  }
+}
+
+func refreshMountedUi(
+  world: mod UiWorld
+  state: view AppState
+  playback: view PlaybackState
+  visible: view Screen
+  cache: mod UiRefreshCache
+) pub ret UiRefreshResult {
+  let oldHistory: Int = cache.historyLen
+  let oldPlayback: Int = cache.playbackRevision
+  let oldSheet: Int = cache.sheetEpoch
+
+  cache.historyLen = refreshHistoryViewsIfNeeded(world: world, state: state, visible: visible, cachedLen: cache.historyLen)
+  cache.playbackRevision = refreshPlaybackViewsIfNeeded(world: world, playback: playback, cachedRevision: cache.playbackRevision)
+  cache.sheetEpoch = refreshBottomSheetIfNeeded(world: world, sheet: state.bottomSheet, cachedEpoch: cache.sheetEpoch)
+
+  ret UiRefreshResult {
+    historyChanged: cache.historyLen is not oldHistory
+    playbackChanged: cache.playbackRevision is not oldPlayback
+    sheetChanged: cache.sheetEpoch is not oldSheet
+  }
+}
