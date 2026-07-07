@@ -1,0 +1,97 @@
+open ui/ecs
+# Canvas overlay — the S5/S6 demo page (#212, §10 S5/S6).
+#
+# A resident full-screen overlay on the "dialog" layer, hidden by the
+# scene's authored base (`CanvasRoot.Active=false`) and shown by the
+# scene's `canvasOpen` STATE — the within-frame state mechanism, not a
+# frame. `canvas.toggle` / `canvas.close` actions flip
+# `AppState.canvasOpen`; main.rae re-applies the scene's states after
+# every dispatch that changed it. RAE_UI_CANVAS=1 opens it at boot for
+# headless proofs.
+#
+# The page demonstrates the S6 art-direction pieces:
+#   GameBoard        — fixed 1080x1600 du design, ScaleToFit Contain:
+#                      one uniform scale fits it into BoardSlot's
+#                      padded box on any frame (portrait phone or wide
+#                      desktop) with its inner nodes scaled as a unit.
+#   BoardArt         — Sprite scaleMode "Cover" (aspect-preserving
+#                      center-crop of the current album cover).
+#   CanvasBanner     — Aspect{ratio:8}: height locked to width/8
+#                      post-layout.
+#   BoardHudDesktop  — frame-only entity: base-inactive, activated by
+#                      the Desktop frame's overlay (the recommended
+#                      always-instantiated + Active pattern).
+import core
+import ui/components
+import ui/ecs
+import ui/frames
+import ui/layer
+import ui/scene
+import ui/scene_instance
+
+# Re-apply the canvas scene's frame + states for the current
+# AppState.canvasOpen. Cheap; safe to call any time the page is
+# mounted.
+func applyCanvasState(world: mod UiWorld, scenes: view AlbumScenes, state: view AppState) pub {
+  let scene: view Scene => scenes.canvas
+  if scene.ok is false {
+    ret
+  }
+  let deviceFrame: DeviceFrame = activeDeviceFrame()
+  let forcedName: String = frameIdName(id: deviceFrame.forcedFrameId)
+  let framePtW: Float = world.layoutW / unitScale
+  let activeStates: List(String) = createList(String, cap: 2)
+  if state.canvasOpen {
+    let openState: String = "canvasOpen"
+    activeStates.add(value: openState)
+  }
+  let frameIdx: Int = applySceneFramesToPageWithStates(
+    world: world
+    scene: scene
+    pageId: canvasPageId
+    windowPtW: framePtW
+    forcedFrameId: forcedName
+    activeStates: activeStates
+  )
+}
+
+# Mount the canvas overlay page once (idempotent — a resident page
+# survives screen switches, so subsequent calls just re-apply state).
+# Called from mountBottomDockOverlay so every screen build has it.
+func mountCanvasOverlay(world: mod UiWorld, scenes: view AlbumScenes, state: view AppState) pub ret EntityId {
+  let existing: EntityId = findPageRootEntity(world: world, pageId: canvasPageId)
+  if isNone(this: existing) is false {
+    applyCanvasState(world: world, scenes: scenes, state: state)
+    ret existing
+  }
+  let scene: view Scene => scenes.canvas
+  if scene.ok is false {
+    ret noEntity()
+  }
+  let overrides: List(SceneOverride) = emptyOverrides()
+  # Board art shows the album cover active at mount time. Not
+  # re-bound on album change — the board is a scaling demo, not a
+  # playback surface.
+  let boardArtId: String = "BoardArt"
+  let artKey: String = "{state.currentAlbumStem}"
+  addSpriteOverride(list: overrides, nodeId: boardArtId, value: artKey)
+  # Fresh copy for the own param (see the mini-player note on the
+  # own-String-frees-global hazard).
+  let pageIdCopy: String = "{canvasPageId}"
+  let canvasLabel: String = "canvas"
+  let mount: EntityId = mountPageOrError(
+    world: world
+    pageId: own pageIdCopy
+    scene: scene
+    overrides: overrides
+    w: world.layoutW
+    h: world.layoutH
+    sceneLabel: canvasLabel
+  )
+  # Dialog layer (300): above content (0), dock (100) and the back
+  # button (200); below debug (400).
+  let dialogLayer: String = "dialog"
+  setLayerById(world: world, entity: mount, id: dialogLayer)
+  applyCanvasState(world: world, scenes: scenes, state: state)
+  ret mount
+}

@@ -497,6 +497,11 @@ type AppState pub {
   hasWindowPosition: Bool
   windowX: Int
   windowY: Int
+  # Whether the canvas overlay (S5 "canvasOpen" scene state) is
+  # showing. Flipped by the `canvas.toggle` / `canvas.close` actions;
+  # RAE_UI_CANVAS=1 opens it at boot for headless proofs. Not
+  # persisted. See canvas_view.rae.
+  canvasOpen: Bool
 }
 
 func createAppState(albums: own List(Album)) pub ret AppState {
@@ -533,6 +538,7 @@ func createAppState(albums: own List(Album)) pub ret AppState {
     hasWindowPosition: false
     windowX: 50
     windowY: 50
+    canvasOpen: false
   }
 }
 
@@ -726,6 +732,22 @@ func dispatchActions(
     }
     if actionId.equals(other: backKey) {
       popSubPage(state: state)
+    }
+    # Canvas overlay (S5 demo). The dispatcher only flips the flag;
+    # main.rae watches `canvasOpen` after dispatch and re-applies the
+    # canvas scene's states via applySceneFramesToPageWithStates —
+    # dispatch has no scene registry in scope.
+    let canvasToggleKey: String = "canvas.toggle"
+    let canvasCloseKey: String = "canvas.close"
+    if actionId.equals(other: canvasToggleKey) {
+      if state.canvasOpen {
+        state.canvasOpen = false
+      } else {
+        state.canvasOpen = true
+      }
+    }
+    if actionId.equals(other: canvasCloseKey) {
+      state.canvasOpen = false
     }
     if actionId.equals(other: playbackToggleKey) {
       if spotifyEnabled {
