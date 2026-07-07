@@ -1,9 +1,19 @@
 # Rae UI — Frames, Coordinates & Responsive Layout (final architecture)
 
-Status: **architectural proposal, not implemented.** This is the authoritative
-design; it supersedes and absorbs `docs/ui-viewport-and-safe-area-plan.md` and
-`examples/98_mobile_ui/docs/adaptive-layout.md` (retire both into this once
-accepted).
+Status: **accepted architecture for new UI work, partially implemented in
+`examples/106_mobile_ui`.** This is the authoritative design; it supersedes and
+absorbs `docs/ui-viewport-and-safe-area-plan.md` and
+`examples/98_mobile_ui/docs/adaptive-layout.md`.
+
+Current implementation target:
+- **106_mobile_ui is the primary target.** It is the gpu2d/SDL3-only mobile UI
+  app where Model A should be implemented first.
+- **98_mobile_ui is legacy/reference.** Keep it useful as a comparison point and
+  for old raylib behavior, but do not migrate it unless a separate task
+  explicitly revives that work.
+- **Model A is locked for 106.** Use one shared design unit with
+  `unitScale=3`, a 1080-wide phone frame, and desktop frames authored around
+  5760×3240 du for a 1080p logical desktop.
 
 Combines: **Figma-style named frames + variants**, **Royal Blush-style
 high-resolution virtual coordinates**, one shared entity/component model,
@@ -58,7 +68,7 @@ ratio of frame widths is locked to the ratio of the devices' logical widths
 | B. One unit, desktop=2560 | 480×1014 du | 2560×1440 du | yes | yes, but phone is low-res/tiny |
 | C. Per-frame unit | 1080×2280 du | 2560×1440 du | **no** (button changes size on copy) | yes |
 
-**Recommendation: A — one shared design unit; frames are device-sized
+**Decision: A — one shared design unit; frames are device-sized
 rectangles in that unit.** This is exactly **Figma's** model (one canvas unit;
 an iPhone frame is 393×852 and a Desktop frame is 1440×1024 in the *same* px —
 a 200-px button is identical in both), lifted to high resolution. The honest
@@ -66,8 +76,7 @@ consequence: **the desktop frame is authored at ~5760×3240 du, not 2560×1440.*
 Bigger numbers, but clean integers, and a shared button/sidebar/safe-inset has
 one consistent physical size everywhere. Option C (per-frame unit) gives you the
 literal 2560×1440 desktop numbers but **breaks cross-frame size identity** — the
-Figma virtue you're asking to copy. (This stays listed as an open decision in
-§Final-11, but the rest of this doc assumes A.)
+Figma virtue you're asking to copy.
 
 ---
 
@@ -502,11 +511,10 @@ explicit-`mod List`/parallel-array limits.
 - **S7 (deferred):** world-space camera, `inputType`/physical-size conditions,
   per-node `Responsive` sugar.
 
-**11. Open decisions for Jonas.**
-- **The unit decision (§"core coordinate decision"):** lock **A — one shared
-  unit (`unitScale=3`), desktop frame authored ~5760×3240 du** (recommended,
-  Figma-faithful, consistent sizes)? Or accept **C — per-frame unit** so desktop
-  reads the literal 2560×1440 but a shared button changes size between frames?
+**11. Remaining decisions for Jonas.**
+- **106 migration cutoff:** when `106_mobile_ui` reaches the Model A spine, do we
+  delete or archive the old 498×1079 compatibility constants immediately, or
+  keep a short-lived adapter until every `.raescene` has been rescaled?
 - **Frame granularity:** are `PhonePortrait/TabletPortrait/TabletLandscape/
   Desktop` the right named set, or should frames be fully author-defined names
   with only `when` deciding activation? (Recommend author-defined names.)
