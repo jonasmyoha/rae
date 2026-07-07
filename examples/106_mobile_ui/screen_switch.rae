@@ -167,6 +167,14 @@ func handleScreenSwitch(
   unmountPage(world: world, pageId: backButtonPageId)
   let newBack: EntityId = mountBackButtonOverlay(world: world, state: appState)
 
+  # Re-seed safe-area insets onto the freshly re-mounted page BEFORE the
+  # intermediate hero layout below. That layout would otherwise run while
+  # the new page root has SafeArea but no SafeInsets yet — and since
+  # SafeInsets is not a layout dirty input, the per-frame applySafeAreas
+  # in main.rae seeds it too late to trigger a relayout, silently losing
+  # the notch reserve until something else dirties the layout.
+  let switchSafe: Insets = applySafeAreas(world: world, viewport: viewport)
+
   # Hero animation. Both source and target live in the same persistent
   # world; capture them back-to-back, page-scoped, so the lookup picks
   # the right entity on each side. The intermediate layout+transform
