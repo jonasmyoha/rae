@@ -50,8 +50,19 @@ func frameIdName(id: view Int) pub ret String {
   ret "none"
 }
 
+func active106DevicePreset() ret DevicePreset {
+  let id: String = getEnv(name: "RAE_UI_DEVICE")
+  if id.length() <= 0 {
+    ret devicePresetById(id: "iphone-15-pro")
+  }
+  if id.equals(other: "none") {
+    ret devicePresetNone()
+  }
+  ret devicePresetById(id: id)
+}
+
 func activeDeviceFrame() pub ret DeviceFrame {
-  let preset: DevicePreset = activeDevicePreset()
+  let preset: DevicePreset = active106DevicePreset()
   let explicitFrameId: String = getEnv(name: "RAE_UI_FRAME")
   var frameId: Int = frameIdToInt(id: explicitFrameId)
   if frameId is 0 {
