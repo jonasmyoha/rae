@@ -325,12 +325,12 @@ func tagPlaybackIconDependency(
   }
   let raw: Int = entityOpt
   let entity: EntityId = entityId(v: raw)
-  let playbackSource: String = dataSourcePlaybackKey()
-  let playbackField: String = dataFieldIsPlayingKey()
+  let playbackSource: DataResourceId = dataResourcePlayback()
+  let playbackField: DataFieldId = dataFieldIsPlaying()
   let iconKind: String = "playbackIcon"
   setWidgetIdentity(world: world, entity: entity, id: widgetId, kind: iconKind)
   setWidgetState(world: world, entity: entity, enabled: true, selected: false, loading: false, error: false)
-  setDataDependency(world: world, entity: entity, sourceKey: playbackSource, fieldKey: playbackField, observedRevision: observedRevision)
+  setDataDependency(world: world, entity: entity, resource: playbackSource, field: playbackField, observedRevision: observedRevision)
   # Declarative visuals: selected (= playing) shows the pause glyph.
   # `widgetStyleSystem` applies the swap; the refresh below only flips
   # WidgetState.selected. Struct built inline with `own` moves — the
@@ -372,20 +372,18 @@ func refreshPlaybackIconEntity(world: mod UiWorld, entity: view EntityId, isPlay
   setWidgetSelected(world: world, entity: entity, selected: isPlaying)
   if componentHas(this: world.dataDependencies, entity: entity) {
     let dep: view DataDependency => componentView(this: world.dataDependencies, entity: entity)
-    let sourceCopy: String = "{dep.sourceKey}"
-    let fieldCopy: String = "{dep.fieldKey}"
     let nextDep: DataDependency = {
-      sourceKey: own sourceCopy
-      fieldKey: own fieldCopy
+      resource: dep.resource
+      field: dep.field
       observedRevision: revision
     }
-    componentSet(this: world.dataDependencies, entity: entity, data: own nextDep)
+    componentSet(this: world.dataDependencies, entity: entity, data: nextDep)
   }
 }
 
 # Refresh UI nodes that declare a dependency on PlaybackState when the playback
 # data revision changes. The dependency is now ECS data, not hard-coded node ids:
-# any widget that carries DataDependency{sourceKey:dataSourcePlaybackKey(), fieldKey:dataFieldIsPlayingKey()}
+# any widget that carries DataDependency{resource:dataResourcePlayback(), field:dataFieldIsPlaying()}
 # can be patched here without adding another bespoke refresh path.
 func refreshPlaybackViewsIfNeeded(
   world: mod UiWorld
@@ -396,15 +394,15 @@ func refreshPlaybackViewsIfNeeded(
     ret cachedRevision
   }
 
-  let playbackSource: String = dataSourcePlaybackKey()
-  let playbackField: String = dataFieldIsPlayingKey()
+  let playbackSource: DataResourceId = dataResourcePlayback()
+  let playbackField: DataFieldId = dataFieldIsPlaying()
   let n: Int = componentCount(this: world.dataDependencies)
   var i: Int = 0
   loop i < n {
     let entity: EntityId = componentEntityAt(this: world.dataDependencies, i: i)
     let dep: view DataDependency => componentView(this: world.dataDependencies, entity: entity)
-    if dep.sourceKey.equals(other: playbackSource) {
-      if dep.fieldKey.equals(other: playbackField) {
+    if dep.resource is playbackSource {
+      if dep.field is playbackField {
         if dep.observedRevision is not playback.revision {
           refreshPlaybackIconEntity(world: world, entity: entity, isPlaying: playback.isPlaying, revision: playback.revision)
         }
@@ -492,7 +490,7 @@ type AppState pub {
   # `app_settings.rae`.
   settings: AppSettings
   # App-owned data source revisions for dependency-driven UI refresh.
-  dataSources: AppDataSources
+  dataResources: AppDataResources
   # Last OS window position in SDL/global desktop coordinates. On macOS this
   # is enough to return to the same display when the display layout is stable.
   hasWindowPosition: Bool
@@ -535,7 +533,7 @@ func createAppState(albums: own List(Album)) pub ret AppState {
     currentPlaylistId: ""
     bottomSheet: createBottomSheetState()
     settings: createAppSettings()
-    dataSources: createAppDataSources()
+    dataResources: createAppDataResources()
     hasWindowPosition: false
     windowX: 50
     windowY: 50
@@ -876,7 +874,7 @@ func dispatchActions(
         playedAt: uiNowSeconds()
       }
       recordPlay(history: state.playHistory, entry: own histEntry)
-      bumpHistorySource(sources: state.dataSources)
+      bumpHistoryResource(resources: state.dataResources)
       saveHistoryToJson(history: state.playHistory, path: historyFilePath)
       if spotifyEnabled {
         let q: String = spotifySearchQuery(artist: histAlbum.artist, title: histTrack.title, album: histAlbum.album)
@@ -957,7 +955,7 @@ func dispatchActions(
           log("[liked] -{stem} track {state.currentTrackIndex}")
         }
         savePlaylist(playlist: state.liked)
-        bumpPlaylistsSource(sources: state.dataSources)
+        bumpPlaylistsResource(resources: state.dataResources)
       }
     }
     if actionId.equals(other: libraryRemoveKey) {
@@ -966,7 +964,7 @@ func dispatchActions(
       # for history rows etc. Close the sheet and pop the Album
       # sub-page so the user lands back where they came from.
       removeFromLibrary(library: state.library, stem: state.currentAlbumStem)
-      bumpLibrarySource(sources: state.dataSources)
+      bumpLibraryResource(resources: state.dataResources)
       saveLibraryToJson(library: state.library, path: libraryFilePath)
       closeBottomSheet(sheet: state.bottomSheet)
       popSubPage(state: state)

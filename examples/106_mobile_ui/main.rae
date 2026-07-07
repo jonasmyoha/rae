@@ -95,15 +95,15 @@ func main() {
   # Persisted recently-played. CDN artwork is re-downloaded lazily in
   # the loop (refetchHistoryArtChunk, a few/frame) so it never blocks.
   restoreHistory(history: appState.playHistory, path: historyFilePath)
-  bumpHistorySource(sources: appState.dataSources)
+  bumpHistoryResource(resources: appState.dataResources)
   # User library — first launch seeds it from the catalog so all
   # albums are visible by default. Subsequent launches load the
   # curated subset and stems that aren't in the catalog any more
   # are dropped silently.
   appState.library = loadLibraryFromJson(albums: appState.albums, path: libraryFilePath)
-  bumpLibrarySource(sources: appState.dataSources)
+  bumpLibraryResource(resources: appState.dataResources)
   appState.liked = loadDefaultLiked()
-  bumpPlaylistsSource(sources: appState.dataSources)
+  bumpPlaylistsResource(resources: appState.dataResources)
 
   # Log the requested window against the current display. `phoneFrameW/phoneFrameH`
   # are fixed design constants now; runtime size and layout authority live
