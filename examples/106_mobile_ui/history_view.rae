@@ -253,21 +253,15 @@ func buildHistoryWorld(
   ret world
 }
 
-# Build a small horizontal preview strip of the most-recent plays.
-# Reused by `home_view.buildHomeBody` to slot a "Recently played"
-# row in above the cover grid. Capped at `recentlyPlayedPreviewMax`
-# and emits one tile per entry, newest-first. Each tile fires
+# Materialise the most-recent plays into an existing strip container
+# (the scene-authored `RecentlyPlayedStrip` node on Home — the
+# container's size/layout/gap live in home.raescene since #213; this
+# is the data adapter). Capped at `recentlyPlayedPreviewMax` and
+# emits one tile per entry, newest-first. Each tile fires
 # `history.replay.N` with the *real* entries index baked in (so the
 # dispatcher logic stays index-stable whether the user taps from
 # Home or from the full History page).
-func buildRecentlyPlayedStrip(world: mod UiWorld, history: view PlayHistory, rounded: view Bool) pub ret EntityId {
-  let strip: EntityId = createEntity(world: world)
-  let stripW: Float = phoneFrameW - outerPad * 2.0
-  setRectFixed(world: world, entity: strip, w: stripW, h: recentlyPlayedThumbSize)
-  let layH: LayoutType = LayoutType.horizontal
-  let alignS: AlignKind = AlignKind.start
-  setLayout(world: world, entity: strip, kind: layH, gap: 17.349397590361445, alignCross: alignS)
-
+func fillRecentlyPlayedStrip(world: mod UiWorld, strip: view EntityId, history: view PlayHistory, rounded: view Bool) pub {
   let n: Int = history.entries.length
   var kidsCount: Int = recentlyPlayedPreviewMax
   if n < kidsCount {
@@ -285,19 +279,4 @@ func buildRecentlyPlayedStrip(world: mod UiWorld, history: view PlayHistory, rou
     visual = visual + 1
   }
   attachChildren(world: world, parent: strip, kids: kids)
-  ret strip
-}
-
-# Tappable header row above the preview strip. Fires `nav.history`
-# to push the full History sub-page.
-func buildRecentlyPlayedHeader(world: mod UiWorld) pub ret EntityId {
-  let header: EntityId = createEntity(world: world)
-  let w: Float = phoneFrameW - outerPad * 2.0
-  setRectFixed(world: world, entity: header, w: w, h: recentlyPlayedHeaderH)
-  let openHistory: String = "nav.history"
-  setOnClick(world: world, entity: header, actionId: openHistory)
-  let titleStyle: String = "primary"
-  let titleText: String = "Recently played"
-  setText(world: world, entity: header, text: titleText, styleId: titleStyle)
-  ret header
 }
