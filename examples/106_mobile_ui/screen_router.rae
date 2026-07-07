@@ -187,9 +187,8 @@ func buildAppWorld(
   let back: EntityId = mountBackButtonOverlay(world: world, state: state)
   addBottomSheetLayer(world: world, sheet: state.bottomSheet)
   # Responsive safe-area pass. `RAE_UI_DEVICE=<preset>` selects a phone
-  # form factor; its notch / home-indicator insets are converted to
-  # this world's design units (fraction of the device dimension times
-  # the layout extent) and written onto every `SafeArea`-tagged node.
+  # form factor; its notch / home-indicator insets are resolved to
+  # design units in the active Viewport and written onto every `SafeArea`-tagged node.
   # `entityPadding` folds them in during the layout pass that follows.
   # Unset / unknown preset → zero insets → layout unchanged.
   #
@@ -198,24 +197,22 @@ func buildAppWorld(
   # the tag). Seed SafeInsets so the first layout (before the per-frame
   # `applySafeAreas`) already reflows, and lift the dock by the bottom
   # inset. Runs on every rebuild, including the resize path (main.rae
-  # sets switching=true on `uiIsWindowResized`), so the fractional
-  # insets recompute with the extent.
-  let safe: Insets = applySafeAreas(world: world)
+  # sets switching=true on viewport extent changes), so the active
+  # viewport's insets stay in sync with the selected simulator preset.
+  let safe: Insets = applySafeAreas(world: world, viewport: viewport)
   liftDockForSafeArea(world: world, dock: dock, bottomInset: safe.b)
   ret world
 }
 
-# Resolve the active device preset and write its safe insets (in design
-# units) onto every SafeArea-tagged entity; return the insets so the
+# Write the active Viewport's safe insets (in design units) onto every
+# SafeArea-tagged entity; return the insets so the
 # caller can also honour the bottom edge on offset-anchored widgets.
 # Idempotent — safe to call every frame; safeAreaSystem skips entities
 # whose insets are unchanged, so it never dirties the layout at idle.
 # Reads world.layoutW/H, so it must run after applyViewportExtent.
-func applySafeAreas(world: mod UiWorld) pub ret Insets {
-  let preset: DevicePreset = activeDevicePreset()
-  let safeInsets: Insets = devicePresetInsets(preset: preset, layoutW: world.layoutW, layoutH: world.layoutH)
-  safeAreaSystem(world: world, insets: safeInsets)
-  ret safeInsets
+func applySafeAreas(world: mod UiWorld, viewport: view Viewport) pub ret Insets {
+  safeAreaSystem(world: world, insets: viewport.safeInsetsDu)
+  ret viewport.safeInsetsDu
 }
 
 # The bottom dock is bottom-anchored via an Offset and lays its children
