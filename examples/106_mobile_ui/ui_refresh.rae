@@ -27,12 +27,13 @@ func refreshMountedUi(
   playback: view PlaybackState
   visible: view Screen
   cache: mod UiRefreshCache
+  viewport: view Viewport
 ) pub ret UiRefreshResult {
   let oldHistory: Int = cache.historyLen
   let oldPlayback: Int = cache.playbackRevision
   let oldSheet: Int = cache.sheetEpoch
 
-  cache.historyLen = refreshHistoryViewsIfNeeded(world: world, state: state, visible: visible, cachedLen: cache.historyLen)
+  cache.historyLen = refreshHistoryViewsIfNeeded(world: world, state: state, visible: visible, cachedLen: cache.historyLen, viewport: viewport)
   cache.playbackRevision = refreshPlaybackViewsIfNeeded(world: world, playback: playback, cachedRevision: cache.playbackRevision)
   cache.sheetEpoch = refreshBottomSheetIfNeeded(world: world, sheet: state.bottomSheet, cachedEpoch: cache.sheetEpoch)
 

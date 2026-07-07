@@ -78,26 +78,27 @@ func buildScreenWorld(
   state: view AppState
   texReg: view TextureRegistry
   scrollY: view Float
+  viewport: view Viewport
 ) pub ret UiWorld {
   if screen is Screen.home {
-    ret buildHomeWorld(scenes: scenes, reg: texReg, state: state, playback: playback, scrollY: scrollY)
+    ret buildHomeWorld(scenes: scenes, reg: texReg, state: state, playback: playback, scrollY: scrollY, viewport: viewport)
   }
   if screen is Screen.album {
-    ret buildAlbumWorld(scenes: scenes, playback: playback, state: state, reg: texReg, scrollY: scrollY)
+    ret buildAlbumWorld(scenes: scenes, playback: playback, state: state, reg: texReg, scrollY: scrollY, viewport: viewport)
   }
   if screen is Screen.search {
-    ret buildSearchWorld(scenes: scenes, playback: playback, state: state, reg: texReg)
+    ret buildSearchWorld(scenes: scenes, playback: playback, state: state, reg: texReg, viewport: viewport)
   }
   if screen is Screen.library {
-    ret buildLibraryWorld(scenes: scenes, reg: texReg, state: state, playback: playback, scrollY: scrollY)
+    ret buildLibraryWorld(scenes: scenes, reg: texReg, state: state, playback: playback, scrollY: scrollY, viewport: viewport)
   }
   if screen is Screen.profile {
-    ret buildProfileWorld(scenes: scenes, reg: texReg, state: state, playback: playback, scrollY: scrollY)
+    ret buildProfileWorld(scenes: scenes, reg: texReg, state: state, playback: playback, scrollY: scrollY, viewport: viewport)
   }
   if screen is Screen.history {
-    ret buildHistoryWorld(scenes: scenes, reg: texReg, state: state, playback: playback, scrollY: scrollY)
+    ret buildHistoryWorld(scenes: scenes, reg: texReg, state: state, playback: playback, scrollY: scrollY, viewport: viewport)
   }
-  ret buildNowPlayingWorld(scenes: scenes, playback: playback, state: state, reg: texReg)
+  ret buildNowPlayingWorld(scenes: scenes, playback: playback, state: state, reg: texReg, viewport: viewport)
 }
 
 # Maps a Screen to the PageRoot id used for its mount. Symmetric to
@@ -142,20 +143,20 @@ func buildAppWorld(
   let world: UiWorld = createUiWorld()
   # Publish the active Viewport extent before mounting anything. Builders
   # that need edge-to-edge geometry read `world.layoutW/H`; fixed phone
-  # content still uses the `screenW/screenH` design constants and is centered
+  # content still uses the `phoneFrameW/phoneFrameH` design constants and is centered
   # later by the root ExtentAnchor.
   applyViewportExtent(world: world, viewport: viewport)
   # Layer stack first — overlay-mount sites below assume the named
   # layer entities ("content" / "dock" / "back-button" / "dialog" /
   # "debug") already exist and look them up by id.
   createStandardLayers(world: world)
-  let homePage: EntityId = mountHomePage(world: world, state: state, scrollY: scrollY)
-  let libraryPage: EntityId = mountLibraryPage(world: world, state: state, scrollY: scrollY)
-  let albumPage: EntityId = mountAlbumPage(world: world, scenes: scenes, state: state, playback: playback, scrollY: scrollY)
-  let nowPlayingPage: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: state)
-  let profilePage: EntityId = mountProfilePage(world: world, reg: texReg, state: state, scrollY: scrollY)
-  let searchPage: EntityId = mountSearchPage(world: world)
-  let historyPage: EntityId = mountHistoryPage(world: world, state: state, scrollY: scrollY)
+  let homePage: EntityId = mountHomePage(world: world, state: state, scrollY: scrollY, viewport: viewport)
+  let libraryPage: EntityId = mountLibraryPage(world: world, state: state, scrollY: scrollY, viewport: viewport)
+  let albumPage: EntityId = mountAlbumPage(world: world, scenes: scenes, state: state, playback: playback, scrollY: scrollY, viewport: viewport)
+  let nowPlayingPage: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: state, viewport: viewport)
+  let profilePage: EntityId = mountProfilePage(world: world, reg: texReg, state: state, scrollY: scrollY, viewport: viewport)
+  let searchPage: EntityId = mountSearchPage(world: world, viewport: viewport)
+  let historyPage: EntityId = mountHistoryPage(world: world, state: state, scrollY: scrollY, viewport: viewport)
 
   # Visibility: only the currently-visible screen is Active=true.
   let visible: Screen = visibleScreen(state: state)
@@ -265,7 +266,7 @@ func attachSafeAreaEdges(
 # to drop into a page's vertical column of children.
 func buildPageTopBar(world: mod UiWorld, title: view String) pub ret EntityId {
   let bar: EntityId = createEntity(world: world)
-  let w: Float = screenW - outerPad * 2.0
+  let w: Float = phoneFrameW - outerPad * 2.0
   setRectFixed(world: world, entity: bar, w: w, h: topBarH)
   let layH: LayoutType = LayoutType.horizontal
   let alignC: AlignKind = AlignKind.center
@@ -294,6 +295,7 @@ func refreshHistoryViewsIfNeeded(
   state: view AppState
   visible: view Screen
   cachedLen: view Int
+  viewport: view Viewport
 ) pub ret Int {
   let n: Int = state.playHistory.entries.length
   if n is cachedLen {
@@ -301,12 +303,12 @@ func refreshHistoryViewsIfNeeded(
   }
   if visible is Screen.home {
     unmountPage(world: world, pageId: homePageId)
-    let h: EntityId = mountHomePage(world: world, state: state, scrollY: 0.0)
+    let h: EntityId = mountHomePage(world: world, state: state, scrollY: 0.0, viewport: viewport)
     setPageActive(world: world, pageId: homePageId, active: true)
   }
   if visible is Screen.history {
     unmountPage(world: world, pageId: historyPageId)
-    let h: EntityId = mountHistoryPage(world: world, state: state, scrollY: 0.0)
+    let h: EntityId = mountHistoryPage(world: world, state: state, scrollY: 0.0, viewport: viewport)
     setPageActive(world: world, pageId: historyPageId, active: true)
   }
   ret n

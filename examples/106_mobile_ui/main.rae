@@ -98,7 +98,7 @@ func main() {
   appState.liked = loadDefaultLiked()
   bumpPlaylistsSource(sources: appState.dataSources)
 
-  # Log the requested window against the current display. `screenW/screenH`
+  # Log the requested window against the current display. `phoneFrameW/phoneFrameH`
   # are fixed design constants now; runtime size and layout authority live
   # exclusively in Viewport/UiWorld.layoutW/H.
   let chromeBudget: Int = 100
@@ -560,7 +560,7 @@ func main() {
           # robust vs relying on OS resize-event delivery / an edge flag
           # (which proved unreliable across drag-resizes). When the extent
           # changed, recompute + rebuild so the edge-to-edge toolbar tracks
-          # the new width; `screenW`/`screenH` stay the fixed content
+          # the new width; `phoneFrameW`/`phoneFrameH` stay the fixed content
           # baseline (1080x2280) so the phone column keeps its size and
           # centers. The old-world drop on rebuild relies on the
           # rae_ext_rae_buf_copy memmove fix (was a memcpy double-free).
@@ -656,7 +656,7 @@ func main() {
 
           # song.open / pollSpotify just may have grown playHistory;
           # re-mount Home/History in place if so. No-op otherwise.
-          let postInputRefresh: UiRefreshResult = refreshMountedUi(world: world, state: appState, playback: playback, visible: currentScreen, cache: uiRefresh)
+          let postInputRefresh: UiRefreshResult = refreshMountedUi(world: world, state: appState, playback: playback, visible: currentScreen, cache: uiRefresh, viewport: viewport)
           if postInputRefresh.playbackChanged {
             applyOverlaysToWorld(world: world, playback: playback, state: appState)
           }
@@ -773,7 +773,7 @@ func main() {
           # internal rate-limit). Syncs playback state, text fields,
           # and album art. See spotify_view.rae.
           pollSpotify(state: spotifyState, world: world, reg: texReg, playback: playback, appState: appState, currentAlbumStem: appState.currentAlbumStem, now: now)
-          let postSpotifyRefresh: UiRefreshResult = refreshMountedUi(world: world, state: appState, playback: playback, visible: currentScreen, cache: uiRefresh)
+          let postSpotifyRefresh: UiRefreshResult = refreshMountedUi(world: world, state: appState, playback: playback, visible: currentScreen, cache: uiRefresh, viewport: viewport)
           if postSpotifyRefresh.playbackChanged {
             applyOverlaysToWorld(world: world, playback: playback, state: appState)
           }
@@ -901,6 +901,7 @@ func main() {
             heroDuration: heroDuration
             prevPendingSrc: pendingSrc
             prevPendingHeroTargetPageId: pendingHeroTargetPageId
+            viewport: viewport
           )
           currentScreen = switchResult.newScreen
           scrollTarget = switchResult.newScrollTarget

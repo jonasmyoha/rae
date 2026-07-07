@@ -100,7 +100,7 @@ func addBottomSheetLayer(world: mod UiWorld, sheet: view BottomSheetState) pub {
 
   # Page-root container so the unmount path can find this subtree.
   let root: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: root, w: screenW, h: screenH)
+  setRectFixed(world: world, entity: root, w: phoneFrameW, h: phoneFrameH)
   let copiedId: String = "{bottomSheetPageId}"
   let pr: PageRoot = { id: own copiedId }
   componentSet(this: world.pageRoots, entity: root, data: own pr)
@@ -108,7 +108,7 @@ func addBottomSheetLayer(world: mod UiWorld, sheet: view BottomSheetState) pub {
 
   # Scrim — full screen, tap-anywhere dismiss.
   let scrim: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: scrim, w: screenW, h: screenH)
+  setRectFixed(world: world, entity: scrim, w: phoneFrameW, h: phoneFrameH)
   let scrimFill: RgbaColor = { r: 0, g: 0, b: 0, a: 140 }
   let scrimShape: Shape = {
     kind: ShapeKind.rect
@@ -123,7 +123,7 @@ func addBottomSheetLayer(world: mod UiWorld, sheet: view BottomSheetState) pub {
 
   # Panel — bottom-anchored, rounded top corners, action rows stacked.
   let n: Int = sheet.actions.length
-  let panelW: Float = screenW
+  let panelW: Float = phoneFrameW
   let panelH: Float = 52.04819277108433 + 121.44578313253011 * n.toFloat() + 52.04819277108433
   let panel: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: panel, w: panelW, h: panelH)
@@ -136,7 +136,7 @@ func addBottomSheetLayer(world: mod UiWorld, sheet: view BottomSheetState) pub {
     radius: 52.04819277108433
   }
   componentSet(this: world.shapes, entity: panel, data: panelShape)
-  let panelOff: Offset = { delta: Vec2 { x: 0.0, y: screenH - panelH } }
+  let panelOff: Offset = { delta: Vec2 { x: 0.0, y: phoneFrameH - panelH } }
   componentSet(this: world.offsets, entity: panel, data: panelOff)
   let layV: LayoutType = LayoutType.vertical
   let alignS: AlignKind = AlignKind.start
