@@ -22,7 +22,7 @@ let searchIconSize: Float = 52.04819277108433
 
 func buildSearchField(world: mod UiWorld) ret EntityId {
   let field: EntityId = createEntity(world: world)
-  let fieldW: Float = screenW - outerPad * 2.0
+  let fieldW: Float = phoneFrameW - outerPad * 2.0
   setRectFixed(world: world, entity: field, w: fieldW, h: searchFieldH)
   # Slightly-lighter-than-surface rounded pill — reads as an
   # "input chip" without depending on a theme token.
@@ -60,7 +60,7 @@ func buildSearchField(world: mod UiWorld) ret EntityId {
 # `search` glyph next to each row reads as duplicate noise.
 func buildRecentRow(world: mod UiWorld, term: view String) ret EntityId {
   let row: EntityId = createEntity(world: world)
-  let rowW: Float = screenW - outerPad * 2.0
+  let rowW: Float = phoneFrameW - outerPad * 2.0
   let rowH: Float = 78.0722891566265
   setRectFixed(world: world, entity: row, w: rowW, h: rowH)
   let layH: LayoutType = LayoutType.horizontal
@@ -80,7 +80,7 @@ func buildRecentRow(world: mod UiWorld, term: view String) ret EntityId {
 
 func buildRecentSection(world: mod UiWorld) ret EntityId {
   let section: EntityId = createEntity(world: world)
-  let w: Float = screenW - outerPad * 2.0
+  let w: Float = phoneFrameW - outerPad * 2.0
   # Header + 3 rows of ~36 + outerGap between each (3 gaps).
   let h: Float = 60.722891566265055 + 78.0722891566265 * 3.0 + outerGap * 3.0
   setRectFixed(world: world, entity: section, w: w, h: h)
@@ -109,9 +109,9 @@ func buildRecentSection(world: mod UiWorld) ret EntityId {
 
 # --- public entrypoint ------------------------------------------------
 
-func mountSearchPage(world: mod UiWorld) pub ret EntityId {
+func mountSearchPage(world: mod UiWorld, viewport: view Viewport) pub ret EntityId {
   let root: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: root, w: screenW, h: screenH)
+  setRectFixed(world: world, entity: root, w: viewport.areaDuW, h: viewport.areaDuH)
   let layV: LayoutType = LayoutType.vertical
   let alignS: AlignKind = AlignKind.start
   setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
@@ -141,9 +141,11 @@ func buildSearchWorld(
   playback: view PlaybackState
   state: view AppState
   reg: view TextureRegistry
+  viewport: view Viewport
 ) pub ret UiWorld {
   let world: UiWorld = createUiWorld()
-  let page: EntityId = mountSearchPage(world: world)
+  applyViewportExtent(world: world, viewport: viewport)
+  let page: EntityId = mountSearchPage(world: world, viewport: viewport)
   let dock: EntityId = mountBottomDockOverlay(
     world: world
     activeTab: state.tab

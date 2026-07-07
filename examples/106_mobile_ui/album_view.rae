@@ -31,7 +31,7 @@ func albumHeaderHeight() ret Float {
 # HeroCaption / HeroTitle / HeroArtist text → the collection's fields.
 # Works the same for an album or a playlist — the caller resolves which.
 func buildAlbumHeader(world: mod UiWorld, scene: view Scene, title: view String, caption: view String, artist: view String) ret EntityId {
-  let w: Float = screenW - outerPad * 2.0
+  let w: Float = phoneFrameW - outerPad * 2.0
 
   let overrides: List(SceneOverride) = emptyOverrides()
   let captionId: String = "HeroCaption"
@@ -92,7 +92,7 @@ func buildTrackList(world: mod UiWorld, trackScene: view Scene, rows: view List(
     visible = 1
   }
   let listH: Float = trackRowH * visible.toFloat() + trackGap * (visible - 1).toFloat()
-  setRectFixed(world: world, entity: list, w: screenW - outerPad * 2.0, h: listH)
+  setRectFixed(world: world, entity: list, w: phoneFrameW - outerPad * 2.0, h: listH)
   let layV: LayoutType = LayoutType.vertical
   let alignS: AlignKind = AlignKind.start
   setLayout(world: world, entity: list, kind: layV, gap: trackGap, alignCross: alignS)
@@ -102,7 +102,7 @@ func buildTrackList(world: mod UiWorld, trackScene: view Scene, rows: view List(
   loop i < n {
     let cr: CollectionRow = rae_ext_rae_buf_get(buf: rows.data, index: i)
     let row: EntityId = createEntity(world: world)
-    setRectFixed(world: world, entity: row, w: screenW - outerPad * 2.0, h: trackRowH)
+    setRectFixed(world: world, entity: row, w: phoneFrameW - outerPad * 2.0, h: trackRowH)
 
     let overrides: List(SceneOverride) = emptyOverrides()
     var num: Int = cr.number
@@ -191,7 +191,7 @@ func collectionContentHeight(rowCount: view Int) ret Float {
 # Content shorter than viewport → 0 (no scroll). Else `-(overflow)` so
 # scrolling stops once the last row sits just above the dock.
 func collectionScrollMin(rowCount: view Int) ret Float {
-  let viewport: Float = screenH - outerPad * 2.0 - miniPlayerH - navTabsH - outerGap
+  let viewport: Float = phoneFrameH - outerPad * 2.0 - miniPlayerH - navTabsH - outerGap
   let content: Float = collectionContentHeight(rowCount: rowCount)
   let overflow: Float = content - viewport
   if overflow <= 0.0 {
@@ -236,11 +236,12 @@ func mountAlbumPage(
   state: view AppState
   playback: view PlaybackState
   scrollY: view Float
+  viewport: view Viewport
 ) pub ret EntityId {
   let cv: CollectionView = buildCurrentCollection(state: state)
 
   let root: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: root, w: screenW, h: screenH)
+  setRectFixed(world: world, entity: root, w: viewport.areaDuW, h: viewport.areaDuH)
   let layV: LayoutType = LayoutType.vertical
   let alignS: AlignKind = AlignKind.start
   setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
@@ -270,9 +271,10 @@ func mountAlbumPage(
   ret root
 }
 
-func buildAlbumWorld(scenes: view AlbumScenes, playback: view PlaybackState, state: view AppState, reg: view TextureRegistry, scrollY: view Float) pub ret UiWorld {
+func buildAlbumWorld(scenes: view AlbumScenes, playback: view PlaybackState, state: view AppState, reg: view TextureRegistry, scrollY: view Float, viewport: view Viewport) pub ret UiWorld {
   let world: UiWorld = createUiWorld()
-  let page: EntityId = mountAlbumPage(world: world, scenes: scenes, state: state, playback: playback, scrollY: scrollY)
+  applyViewportExtent(world: world, viewport: viewport)
+  let page: EntityId = mountAlbumPage(world: world, scenes: scenes, state: state, playback: playback, scrollY: scrollY, viewport: viewport)
   let dock: EntityId = mountBottomDockOverlay(
     world: world
     activeTab: state.tab

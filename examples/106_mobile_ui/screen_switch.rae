@@ -45,6 +45,7 @@ func handleScreenSwitch(
   heroDuration: view Float
   prevPendingSrc: view Bool
   prevPendingHeroTargetPageId: view String
+  viewport: view Viewport
 ) ret ScreenSwitchResult {
   let result: ScreenSwitchResult = {
     newScreen: currentScreen
@@ -71,9 +72,9 @@ func handleScreenSwitch(
   # tracks (and hence the highlight target) are new too.
   if stemChangedNow {
     unmountPage(world: world, pageId: albumPageId)
-    let freshAlbum: EntityId = mountAlbumPage(world: world, scenes: scenes, state: appState, playback: playback, scrollY: 0.0)
+    let freshAlbum: EntityId = mountAlbumPage(world: world, scenes: scenes, state: appState, playback: playback, scrollY: 0.0, viewport: viewport)
     unmountPage(world: world, pageId: playerPageId)
-    let freshNP: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: appState)
+    let freshNP: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: appState, viewport: viewport)
     rebindHero(world: world, fromKey: "albumCover", toKey: appState.currentAlbumStem)
     # Dock stays mounted; update its cover thumb directly to the new
     # album stem so the bottom widget tracks the user's choice.
@@ -94,9 +95,9 @@ func handleScreenSwitch(
       # them.
       let preservedScrollY: Float = scrollFsm.scrollY
       unmountPage(world: world, pageId: albumPageId)
-      let freshAlbum: EntityId = mountAlbumPage(world: world, scenes: scenes, state: appState, playback: playback, scrollY: preservedScrollY)
+      let freshAlbum: EntityId = mountAlbumPage(world: world, scenes: scenes, state: appState, playback: playback, scrollY: preservedScrollY, viewport: viewport)
       unmountPage(world: world, pageId: playerPageId)
-      let freshNP: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: appState)
+      let freshNP: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: appState, viewport: viewport)
       rebindHero(world: world, fromKey: "albumCover", toKey: appState.currentAlbumStem)
       setPageActive(world: world, pageId: albumPageId, active: false)
       setPageActive(world: world, pageId: playerPageId, active: false)
@@ -136,17 +137,17 @@ func handleScreenSwitch(
   # mount) and the boot-mounted instance has stale empty data.
   if nextScreen is Screen.home {
     unmountPage(world: world, pageId: homePageId)
-    let freshHome: EntityId = mountHomePage(world: world, state: appState, scrollY: 0.0)
+    let freshHome: EntityId = mountHomePage(world: world, state: appState, scrollY: 0.0, viewport: viewport)
   }
   if nextScreen is Screen.history {
     unmountPage(world: world, pageId: historyPageId)
-    let freshHist: EntityId = mountHistoryPage(world: world, state: appState, scrollY: 0.0)
+    let freshHist: EntityId = mountHistoryPage(world: world, state: appState, scrollY: 0.0, viewport: viewport)
   }
   if nextScreen is Screen.library {
     # Re-mount with the current library filter — albums removed
     # via the bottom-sheet drop out of the grid here.
     unmountPage(world: world, pageId: libraryPageId)
-    let freshLib: EntityId = mountLibraryPage(world: world, state: appState, scrollY: 0.0)
+    let freshLib: EntityId = mountLibraryPage(world: world, state: appState, scrollY: 0.0, viewport: viewport)
   }
   setPageActive(world: world, pageId: incomingPageId, active: true)
 

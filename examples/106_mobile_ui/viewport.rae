@@ -29,8 +29,8 @@ func createViewport(
     dprVal = framebufferPxW / windowPtW
   }
   var renderScaleVal: Float = 1.0
-  if screenW > 0.0 {
-    renderScaleVal = framebufferPxW / screenW
+  if phoneFrameW > 0.0 {
+    renderScaleVal = framebufferPxW / phoneFrameW
   }
   # Responsive extent. `layoutHVal` is the fixed portrait content height
   # and `contentDuW` the phone column width (design units). On a wide
@@ -39,8 +39,8 @@ func createViewport(
   # content stays a centered `contentDuW` column (ExtentAnchor.center) and
   # the bottom toolbar spans the full width (ExtentAnchor.fill). Clamped to
   # `contentDuW`, so a portrait phone window is unchanged.
-  let contentDuW: Float = screenW * legacySceneScale
-  let layoutHVal: Float = screenH * legacySceneScale
+  let contentDuW: Float = phoneFrameW * legacySceneScale
+  let layoutHVal: Float = phoneFrameH * legacySceneScale
   var layoutWVal: Float = contentDuW
   var layoutHVal2: Float = layoutHVal
   if windowPtH > 0.0 {
@@ -55,7 +55,7 @@ func createViewport(
   # vertical letterbox — the bottom toolbar (offset at `world.layoutH`)
   # then stays glued to the window's bottom edge. Content stays anchored
   # at the top; the extra height is empty background between content and
-  # the dock. Clamped to `screenH`, so a portrait phone is unchanged.
+  # the dock. Clamped to `phoneFrameH`, so a portrait phone is unchanged.
   if windowPtW > 0.0 {
     let byAspectH: Float = layoutWVal * (windowPtH / windowPtW)
     if byAspectH > layoutHVal2 {
@@ -69,8 +69,8 @@ func createViewport(
     framebufferPxH: framebufferPxH
     dpr: dprVal
     unitScale: unitScale
-    areaDuW: screenW
-    areaDuH: screenH
+    areaDuW: phoneFrameW
+    areaDuH: phoneFrameH
     renderScale: renderScaleVal
     legacySceneScale: legacySceneScale
     layoutW: layoutWVal
@@ -84,7 +84,7 @@ func createViewportFromWindow() pub ret Viewport {
   # resizes — NOT `uiWindowWidth()`, which is the current design-resolution
   # width (circular), nor the config `windowW/windowH` (stale after a resize).
   # `createViewport` reads the window aspect from these to widen `layoutW`,
-  # keeping the fixed `screenW`/`screenH` content baseline. The SDL3/gpu2d
+  # keeping the fixed `phoneFrameW`/`phoneFrameH` content baseline. The SDL3/gpu2d
   # seam already converts pointer input through the same design transform.
   let fbW: Float = uiFramebufferWidth().toFloat()
   let fbH: Float = uiFramebufferHeight().toFloat()
