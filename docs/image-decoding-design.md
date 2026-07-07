@@ -1,8 +1,8 @@
 # Cross-platform image decoding for gpu2d (#217)
 
-Research + decision record, 2026-07-08. **Design only — implementation
-is a separate queue task and must not start until this design is
-approved.**
+Research + decision record, 2026-07-08. Updated after implementation:
+stb JPEG is present, but macOS keeps ImageIO as the default because valid
+Spotify baseline JPEGs were observed failing in stb with "can't merge dc and ac".
 
 ## 1. Status quo
 
@@ -49,7 +49,7 @@ Inputs in practice:
 
 | Option | Formats | Licence | Integration | Verdict |
 |---|---|---|---|---|
-| **stb_image.h** (v2.30) | JPEG (baseline+progressive), PNG, BMP, GIF, … each `STBI_ONLY_*`-selectable | public-domain / MIT dual | one vendored header compiled into rae_runtime.c | **CHOSEN for JPEG.** Smallest possible integration; determinism everywhere; the raylib fallback already ships it transitively, so the pixel behaviour is field-proven here. Known CVE history on malformed inputs → mitigate with the existing dimension cap, `STBI_ONLY_JPEG` (shrinks attack surface to one parser), and no-stdio (we hand it bytes we read ourselves). |
+| **stb_image.h** (v2.30) | JPEG (baseline+progressive), PNG, BMP, GIF, … each `STBI_ONLY_*`-selectable | public-domain / MIT dual | one vendored header compiled into rae_runtime.c | **Chosen for non-macOS JPEG, but not yet trusted as the macOS default.** Smallest possible integration; deterministic everywhere once its Spotify JPEG failure is resolved. Known CVE history on malformed inputs → mitigate with the existing dimension cap, `STBI_ONLY_JPEG` (shrinks attack surface to one parser), and no-stdio (we hand it bytes we read ourselves). |
 | libjpeg-turbo | JPEG | BSD-3 + IJG + zlib mix | CMake + SIMD asm; system package or submodule | Rejected: 2–6× faster decode we don't need, at the cost of a real build dependency on three platforms. Revisit only if decode ever becomes hot (e.g. hundreds of covers per second). |
 | libwebp | WebP | BSD-3 (Google) | CMake/autotools; sizeable | Deferred with WebP itself (§5). |
 | Wuffs | PNG, JPEG, GIF, … | Apache-2.0 | single-file C amalgamation; memory-safe by construction | Strong safety story and a plausible future swap-in behind the same seam, but larger, less battle-tested in this exact stack, and its transpiled style is harder to patch. Not now; noted as the fallback if stb's CVE cadence becomes a problem. |
@@ -66,8 +66,8 @@ Inputs in practice:
 2. **PNG stays on lodepng** (decoder, encoder, and pure-Rae oracle
    roles are already load-bearing; no reason to churn).
 3. **Dispatch by magic bytes, one decoder per format, no cascade**:
-   sniff → `FF D8 FF` = stb JPEG, `89 50 4E 47` = lodepng, anything
-   else = unsupported. The raylib `LoadImage` fallback is REMOVED —
+   sniff → `FF D8 FF` = ImageIO on macOS and stb JPEG elsewhere,
+   `89 50 4E 47` = lodepng, anything else = unsupported. The raylib `LoadImage` fallback is REMOVED —
    a decode either succeeds through the designated decoder or fails
    loudly; silent decoder-roulette is how platform-dependent pixels
    sneak in.
@@ -90,14 +90,13 @@ alternative if we want its safety properties.
   `[gpu2d] image decode failed (<path>): <reason>` → return texture
   handle `0`. Callers already treat 0 as "no texture" and the UI
   shows its placeholder tile; no new error channel needed.
-- No second-chance decoding. A JPEG that stb rejects is a failed
-  image, not a lodepng candidate.
-- Transition plan for determinism: land stb JPEG on all platforms in
-  one commit, keep the ImageIO path compiled for ONE release behind
-  `RAE_G2D_IMAGEIO=1` (env, default off) purely as an A/B diffing
-  aid, then delete it together with the raylib fallback. Screenshot
-  baselines regenerate once when stb becomes the default (expect
-  sub-visible chroma-rounding diffs vs ImageIO on covers).
+- No second-chance decoding inside one platform's chosen decoder. A JPEG
+  that the selected JPEG decoder rejects is a failed image.
+- Transition plan for determinism: stb JPEG is compiled in and can be tested
+  on macOS with `RAE_G2D_STB_JPEG=1`, but ImageIO remains the default on
+  macOS until the observed Spotify JPEG failure is understood or the decoder
+  choice changes. Screenshot baselines should not move to stb while it rejects
+  valid cached artwork.
 - Colour/alpha semantics: RGBA8, straight (non-premultiplied) alpha,
   no colour management (ICC profiles ignored) — which is what both
   lodepng and stb produce natively, and what the JPEG path
@@ -109,7 +108,8 @@ alternative if we want its safety properties.
 1. Vendor stb_image.h + VENDOR.md; defines as in §4.
 2. Rewrite `rae_ext_gpu2d_loadImage`'s decode half as
    `rae_g2d_decode_rgba(path)` with the sniff-dispatch; delete the
-   raylib branch; gate ImageIO behind `RAE_G2D_IMAGEIO=1`.
+   raylib branch; keep ImageIO as the macOS default and gate stb testing
+   behind `RAE_G2D_STB_JPEG=1`.
 3. Also route `rae_ext_image_loadPng`'s sibling (if a
    `image.loadJpeg` Rae API is wanted) through the same helper —
    optional, not required for gpu2d parity.

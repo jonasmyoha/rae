@@ -4785,17 +4785,15 @@ static int rae_g2d_decode_imageio_rgba(const char* path, unsigned char** out_rgb
 
 /* Decode an image file to RGBA8 (#228; contract + rationale in
  * docs/image-decoding-design.md): strict magic-byte dispatch, ONE
- * decoder per format, no fallback cascade — a JPEG that stb rejects
- * is a failed image, not a lodepng candidate, so pixel output stays
- * decoder-deterministic on every platform.
- *   FF D8 FF     -> vendored stb_image (JPEG only)
+ * decoder per format, no fallback cascade.
+ *   FF D8 FF     -> ImageIO on macOS, vendored stb_image elsewhere
  *   89 50 4E 47  -> lodepng (PNG)
  *   anything else -> unsupported
  * Output is straight-alpha RGBA8, no colour management.
  *
- * RAE_G2D_IMAGEIO=1 (macOS only) re-routes JPEG through the legacy
- * ImageIO path — kept for ONE release purely as an A/B pixel-diff
- * aid while stb becomes the default; delete with the next cleanup.
+ * RAE_G2D_STB_JPEG=1 (macOS only) opts into the stb JPEG path for
+ * debugging. Some valid Spotify baseline JPEGs currently fail in stb
+ * with "can't merge dc and ac", so ImageIO remains the macOS default.
  * Returns 1 with a malloc-compatible *out_rgba on success; on
  * failure returns 0 and points *out_err at a static reason string. */
 static int rae_g2d_decode_rgba(const char* path, unsigned char** out_rgba,
@@ -4807,8 +4805,8 @@ static int rae_g2d_decode_rgba(const char* path, unsigned char** out_rgba,
     if (!bytes) return 0;
     if (len >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF) {
 #ifdef __APPLE__
-        const char* use_imageio = getenv("RAE_G2D_IMAGEIO");
-        if (use_imageio && strcmp(use_imageio, "1") == 0) {
+        const char* use_stb = getenv("RAE_G2D_STB_JPEG");
+        if (!(use_stb && strcmp(use_stb, "1") == 0)) {
             free(bytes);
             if (!rae_g2d_decode_imageio_rgba(path, out_rgba, out_w, out_h)) {
                 *out_err = "JPEG decode failed (ImageIO)";
