@@ -4804,9 +4804,35 @@ static int rae_g2d_decode_rgba(const char* path, unsigned char** out_rgba,
     unsigned char* bytes = rae_g2d_read_whole_file(path, &len);
     if (!bytes) return 0;
     if (len >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF) {
+        /* Truncation guard: a JPEG without its EOI marker (FF D9) in
+         * the last 64 bytes is an interrupted download. ImageIO
+         * decodes such files without error, silently rendering the
+         * missing scan rows grey — fail loudly instead so callers can
+         * evict the bad cache entry and re-fetch. */
+        {
+            size_t scan = len < 64 ? len : 64;
+            int has_eoi = 0;
+            for (size_t i = len - scan; i + 1 < len; i++) {
+                if (bytes[i] == 0xFF && bytes[i + 1] == 0xD9) { has_eoi = 1; break; }
+            }
+            if (!has_eoi) {
+                free(bytes);
+                *out_err = "truncated JPEG (missing EOI marker)";
+                return 0;
+            }
+        }
 #ifdef __APPLE__
-        const char* use_stb = getenv("RAE_G2D_STB_JPEG");
-        if (!(use_stb && strcmp(use_stb, "1") == 0)) {
+        /* stb is the default JPEG decoder on every platform (#228).
+         * RAE_G2D_IMAGEIO=1 re-routes to the legacy macOS ImageIO
+         * path — kept one release as an A/B pixel-diff escape hatch.
+         * The earlier "keep ImageIO because stb fails on Spotify
+         * JPEGs" concern was a misdiagnosis: stb was correctly
+         * REJECTING truncated cache downloads that ImageIO decoded
+         * half-grey without error. With the truncation guard above +
+         * atomic fetch, stb decodes all valid artwork; verified stb
+         * ok=102/102 on the cached Spotify set. */
+        const char* use_imageio = getenv("RAE_G2D_IMAGEIO");
+        if (use_imageio && strcmp(use_imageio, "1") == 0) {
             free(bytes);
             if (!rae_g2d_decode_imageio_rgba(path, out_rgba, out_w, out_h)) {
                 *out_err = "JPEG decode failed (ImageIO)";
@@ -5778,6 +5804,66 @@ rae_String rae_ext_sys_spotify_artworkUrl(void)  { return rae_cstr_to_owned_rae_
 double rae_ext_sys_spotify_position(void)        { return g_spotify_cache.positionSec; }
 double rae_ext_sys_spotify_duration(void)        { return g_spotify_cache.durationSec; }
 
+/* Completeness check for a downloaded artwork file. Interrupted curl
+ * writes leave truncated files (sizes are clean 4 KiB multiples), and
+ * lenient decoders (ImageIO) render those half-image-half-grey with
+ * NO error — the "In Electric Blue" glitch. A JPEG must carry its EOI
+ * marker (FF D9) near the end (some encoders pad a few trailing
+ * bytes, so scan the last 64). Non-JPEG payloads only need to be
+ * non-empty — PNG never comes through this path today. */
+static int rae_spotify_artwork_file_complete(const char* path) {
+    FILE* f = fopen(path, "rb");
+    if (!f) return 0;
+    unsigned char head[3] = {0, 0, 0};
+    if (fread(head, 1, 3, f) != 3) { fclose(f); return 0; }
+    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return 0; }
+    long sz = ftell(f);
+    if (sz < 4) { fclose(f); return 0; }
+    if (head[0] != 0xFF || head[1] != 0xD8 || head[2] != 0xFF) {
+        fclose(f);
+        return 1;
+    }
+    long tail_len = sz < 64 ? sz : 64;
+    if (fseek(f, -tail_len, SEEK_END) != 0) { fclose(f); return 0; }
+    unsigned char tail[64];
+    if (fread(tail, 1, (size_t)tail_len, f) != (size_t)tail_len) { fclose(f); return 0; }
+    fclose(f);
+    for (long i = tail_len - 2; i >= 0; i--) {
+        if (tail[i] == 0xFF && tail[i + 1] == 0xD9) return 1;
+    }
+    return 0;
+}
+
+/* Fetch `url_c` into `out_c` ATOMICALLY: curl writes to `<out>.part`,
+ * the result is completeness-checked, and only then renamed into
+ * place. An app quit mid-download (auto-exit headless runs included)
+ * can no longer commit a half-file into the cache. */
+static int rae_spotify_fetch_artwork_atomic(const char* url_c, const char* out_c) {
+    if (!url_c || !out_c || !url_c[0] || !out_c[0]) return 0;
+    char tmp[1024];
+    if (snprintf(tmp, sizeof(tmp), "%s.part", out_c) >= (int)sizeof(tmp)) return 0;
+    pid_t pid = fork();
+    if (pid < 0) return 0;
+    if (pid == 0) {
+        char* argv[] = { (char*)"curl", (char*)"-sLf", (char*)url_c, (char*)"-o", (char*)tmp, NULL };
+        execvp("/usr/bin/curl", argv);
+        _exit(127);
+    }
+    int status = 0;
+    waitpid(pid, &status, 0);
+    int ok = WIFEXITED(status) && WEXITSTATUS(status) == 0;
+    if (ok) ok = rae_spotify_artwork_file_complete(tmp);
+    if (!ok) {
+        unlink(tmp);
+        return 0;
+    }
+    if (rename(tmp, out_c) != 0) {
+        unlink(tmp);
+        return 0;
+    }
+    return 1;
+}
+
 rae_Bool rae_ext_sys_spotify_fetchArtwork(rae_String url, rae_String outPath) {
     if (!url.data || url.len == 0 || !outPath.data || outPath.len == 0) return false;
     char* url_c = malloc((size_t)url.len + 1);
@@ -5785,17 +5871,9 @@ rae_Bool rae_ext_sys_spotify_fetchArtwork(rae_String url, rae_String outPath) {
     if (!url_c || !out_c) { free(url_c); free(out_c); return false; }
     memcpy(url_c, url.data, (size_t)url.len); url_c[url.len] = '\0';
     memcpy(out_c, outPath.data, (size_t)outPath.len); out_c[outPath.len] = '\0';
-    pid_t pid = fork();
-    if (pid < 0) { free(url_c); free(out_c); return false; }
-    if (pid == 0) {
-        char* argv[] = { (char*)"curl", (char*)"-sLf", url_c, (char*)"-o", out_c, NULL };
-        execvp("/usr/bin/curl", argv);
-        _exit(127);
-    }
-    int status = 0;
-    waitpid(pid, &status, 0);
+    int ok = rae_spotify_fetch_artwork_atomic(url_c, out_c);
     free(url_c); free(out_c);
-    return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+    return ok ? true : false;
 }
 
 typedef struct {
@@ -5818,23 +5896,9 @@ static char* rae_strndup_bytes(const uint8_t* data, int64_t len) {
     return out;
 }
 
-static int rae_spotify_fetch_artwork_c(const char* url_c, const char* out_c) {
-    if (!url_c || !out_c || !url_c[0] || !out_c[0]) return 0;
-    pid_t pid = fork();
-    if (pid < 0) return 0;
-    if (pid == 0) {
-        char* argv[] = { (char*)"curl", (char*)"-sLf", (char*)url_c, (char*)"-o", (char*)out_c, NULL };
-        execvp("/usr/bin/curl", argv);
-        _exit(127);
-    }
-    int status = 0;
-    waitpid(pid, &status, 0);
-    return WIFEXITED(status) && WEXITSTATUS(status) == 0;
-}
-
 static void* rae_spotify_art_worker(void* arg) {
     RaeSpotifyArtworkJob* job = (RaeSpotifyArtworkJob*)arg;
-    int ok = rae_spotify_fetch_artwork_c(job->url, job->out);
+    int ok = rae_spotify_fetch_artwork_atomic(job->url, job->out);
     pthread_mutex_lock(&g_spotify_art_mu);
     job->status = ok ? 1 : 2;
     pthread_mutex_unlock(&g_spotify_art_mu);

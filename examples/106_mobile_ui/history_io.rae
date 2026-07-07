@@ -357,7 +357,17 @@ func loadCachedHistoryArtChunk(history: view PlayHistory, budget: view Int) pub 
           let pathForGpu: String = "{path}"
           let h: Int = gpu2d.loadImageKey(key: keyForGpu, path: pathForGpu)
           if h <= 0 {
-            markHistoryArtFailed(path: path)
+            # Corrupt cache entry — most commonly a TRUNCATED download
+            # committed before atomic artwork writes landed (curl wrote
+            # straight to the final path; an app quit mid-fetch left a
+            # half-file that lenient decoders rendered half-grey).
+            # Evict it and let the next pass re-fetch instead of
+            # pinning a permanent placeholder. A file that arrives
+            # fresh from a VERIFIED fetch and still fails to decode
+            # takes the status-1 branch below and marks failed, so a
+            # genuinely bad image can't loop.
+            let removed: Bool = sys.delete(path: path)
+            pending = pending + 1
           }
           did = did + 1
         } else {
