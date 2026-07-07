@@ -1199,7 +1199,22 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
           if (!first) fprintf(out, "  __p += snprintf(__buf + __p, sizeof(__buf) - __p, \", \");\n");
           first = false;
           Str base = get_base_type_name(f->type);
-          if (str_eq_cstr(base, "String")) {
+          if (f->type && f->type->is_opt) {
+              // opt T fields are RaeAny at the C level — the plain
+              // String/Int branches below would read .len/.data off a
+              // RaeAny and fail to compile (#138). Emit a
+              // representation-aware string-or-null for opt String;
+              // other opt payloads serialise as null.
+              if (str_eq_cstr(base, "String")) {
+                  fprintf(out, "  if (this->%.*s.type == RAE_TYPE_STRING) __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": \\\"%%.*s\\\"\", (int)this->%.*s.as.s.len, (char*)this->%.*s.as.s.data);\n",
+                      (int)f->name.len, f->name.data, (int)f->name.len, f->name.data, (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
+                  fprintf(out, "  else __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": null\");\n",
+                      (int)f->name.len, f->name.data);
+              } else {
+                  fprintf(out, "  __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": null\");\n",
+                      (int)f->name.len, f->name.data);
+              }
+          } else if (str_eq_cstr(base, "String")) {
               fprintf(out, "  __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": \\\"%%.*s\\\"\", (int)this->%.*s.len, (char*)this->%.*s.data);\n",
                   (int)f->name.len, f->name.data, (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
           } else if (str_eq_cstr(base, "Int64") || str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int32")) {
@@ -1224,7 +1239,15 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       fprintf(out, "  %s __r = {0};\n", mangled);
       for (const AstTypeField* f = td->fields; f; f = f->next) {
           Str base = get_base_type_name(f->type);
-          if (str_eq_cstr(base, "String")) {
+          if (f->type && f->type->is_opt) {
+              // opt T fields are RaeAny (#138). opt String round-trips
+              // through the string extractor wrapped as a some; other
+              // opt payloads stay {0} == RAE_TYPE_NONE (none).
+              if (str_eq_cstr(base, "String")) {
+                  fprintf(out, "  __r.%.*s = rae_any_string(rae_json_extract_string(json, \"%.*s\"));\n",
+                      (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
+              }
+          } else if (str_eq_cstr(base, "String")) {
               fprintf(out, "  __r.%.*s = rae_json_extract_string(json, \"%.*s\");\n",
                   (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
           } else if (str_eq_cstr(base, "Int64") || str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int32")) {
@@ -1669,6 +1692,13 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
         fprintf(out, "  %s = %s;\n", (dst_expr), (src_expr)); \
         break; \
       } \
+      /* opt T is represented as RaeAny — dispatch on the \
+       * REPRESENTATION before the base-type checks below, or an \
+       * `opt String` field gets rae_string_copy(RaeAny) (#138). */ \
+      if ((ft) && (ft)->is_opt) { \
+        fprintf(out, "  %s = rae_any_copy(%s);\n", (dst_expr), (src_expr)); \
+        break; \
+      } \
       if (str_eq_cstr((fbase), "String")) { \
         fprintf(out, "  %s = rae_string_copy(%s);\n", (dst_expr), (src_expr)); \
         break; \
@@ -1722,11 +1752,16 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     const AstTypeRef* elem = e->type_ref->generic_args;
     if (!elem) continue;
     Str ebase = get_base_type_name(elem);
-    const char* elem_mangled = rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)elem);
-    bool elem_is_string = str_eq_cstr(ebase, "String");
-    bool elem_is_list = str_eq_cstr(ebase, "List");
-    bool elem_is_smap = str_eq_cstr(ebase, "StringMap");
-    bool elem_is_imap = str_eq_cstr(ebase, "IntMap");
+    // opt T elements are RaeAny at the C level — classify by
+    // representation first (#138), mirroring the drop synthesis.
+    bool elem_is_opt = elem->is_opt;
+    const char* elem_mangled = elem_is_opt
+        ? "RaeAny"
+        : rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)elem);
+    bool elem_is_string = !elem_is_opt && str_eq_cstr(ebase, "String");
+    bool elem_is_list = !elem_is_opt && str_eq_cstr(ebase, "List");
+    bool elem_is_smap = !elem_is_opt && str_eq_cstr(ebase, "StringMap");
+    bool elem_is_imap = !elem_is_opt && str_eq_cstr(ebase, "IntMap");
     bool elem_is_container = elem_is_list || elem_is_smap || elem_is_imap;
     bool elem_needs_deep = elem_is_string || elem_is_container ||
         type_needs_deep_copy(ctx, module, (AstTypeRef*)elem, 0);
@@ -1747,7 +1782,9 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
                 elem_mangled);
       } else {
         fprintf(out, "    for (int64_t __i = 0; __i < src->length; __i++) {\n");
-        if (elem_is_string) {
+        if (elem_is_opt) {
+          fprintf(out, "      dst->data[__i] = rae_any_copy(src->data[__i]);\n");
+        } else if (elem_is_string) {
           fprintf(out, "      dst->data[__i] = rae_string_copy(src->data[__i]);\n");
         } else if (elem_is_container) {
           fprintf(out, "      rae_deep_copy_%s(&dst->data[__i], &src->data[__i]);\n", elem_mangled);
@@ -1785,7 +1822,9 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
         fprintf(out, "      __de->k = rae_string_copy(__se->k);\n");
       }
       // Copy value per element type.
-      if (elem_is_string) {
+      if (elem_is_opt) {
+        fprintf(out, "      __de->value = rae_any_copy(__se->value);\n");
+      } else if (elem_is_string) {
         fprintf(out, "      __de->value = rae_string_copy(__se->value);\n");
       } else if (elem_is_container) {
         fprintf(out, "      rae_deep_copy_%s(&__de->value, &__se->value);\n", elem_mangled);
