@@ -1,0 +1,218 @@
+{
+  "type": "Scene",
+  "version": 2,
+  "sceneId": "canvas",
+  "root": "CanvasRoot",
+  "nodes": {
+    "CanvasRoot": {
+      "Active": {
+        "value": false
+      },
+      "Layout": {
+        "type": "None",
+        "gap": 0.0,
+        "alignCross": "Start"
+      },
+      "Shape": {
+        "kind": "Rect",
+        "fill": "surface"
+      },
+      "OnClick": {
+        "actionId": "canvas.close"
+      },
+      "Children": [
+        "CanvasBanner",
+        "BoardSlot"
+      ]
+    },
+    "CanvasBanner": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 120.0
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Aspect": {
+        "ratio": 8.0
+      },
+      "GradientFill": {
+        "from": {
+          "r": 118,
+          "g": 225,
+          "b": 225,
+          "a": 255
+        },
+        "to": {
+          "r": 161,
+          "g": 196,
+          "b": 253,
+          "a": 255
+        },
+        "angle": 0
+      }
+    },
+    "BoardSlot": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 0.0
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fill"
+        }
+      },
+      "Padding": {
+        "l": 60.0,
+        "t": 300.0,
+        "r": 60.0,
+        "b": 300.0
+      },
+      "Children": [
+        "GameBoard"
+      ]
+    },
+    "GameBoard": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 1080.0,
+        "h": 1600.0
+      },
+      "ScaleToFit": {
+        "mode": "Contain"
+      },
+      "Layout": {
+        "type": "None",
+        "gap": 0.0,
+        "alignCross": "Start"
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "surfaceAlt",
+        "radius": 48.0
+      },
+      "CornerRadius": {
+        "radius": 48.0
+      },
+      "Children": [
+        "BoardArt",
+        "BoardBadgeTL",
+        "BoardBadgeBR",
+        "BoardCenter",
+        "BoardHudDesktop"
+      ]
+    },
+    "BoardArt": {
+      "Rect": {
+        "x": 60.0,
+        "y": 60.0,
+        "w": 960.0,
+        "h": 1480.0
+      },
+      "Sprite": {
+        "textureKey": "albumCover",
+        "tint": "imageTint",
+        "scaleMode": "Cover"
+      },
+      "CornerRadius": {
+        "radius": 36.0
+      }
+    },
+    "BoardBadgeTL": {
+      "Rect": {
+        "x": 100.0,
+        "y": 100.0,
+        "w": 160.0,
+        "h": 160.0
+      },
+      "Shape": {
+        "kind": "Circle",
+        "fill": "accent",
+        "radius": 80.0
+      }
+    },
+    "BoardBadgeBR": {
+      "Rect": {
+        "x": 820.0,
+        "y": 1340.0,
+        "w": 160.0,
+        "h": 160.0
+      },
+      "Shape": {
+        "kind": "Circle",
+        "fill": "accent",
+        "radius": 80.0
+      }
+    },
+    "BoardCenter": {
+      "Rect": {
+        "x": 390.0,
+        "y": 650.0,
+        "w": 300.0,
+        "h": 300.0
+      },
+      "Sprite": {
+        "textureKey": "mat:play_arrow",
+        "tint": "textPrimary"
+      }
+    },
+    "BoardHudDesktop": {
+      "Rect": {
+        "x": 820.0,
+        "y": 100.0,
+        "w": 160.0,
+        "h": 160.0
+      },
+      "Sprite": {
+        "textureKey": "mat:queue_music",
+        "tint": "accentText"
+      },
+      "Active": {
+        "value": false
+      }
+    }
+  },
+  "frames": {
+    "PhonePortrait": {
+      "default": true,
+      "nodes": {}
+    },
+    "Desktop": {
+      "when": {
+        "minPtW": 700
+      },
+      "nodes": {
+        "BoardHudDesktop": {
+          "Active": {
+            "value": true
+          }
+        }
+      }
+    }
+  },
+  "states": {
+    "canvasOpen": {
+      "nodes": {
+        "CanvasRoot": {
+          "Active": {
+            "value": true
+          }
+        }
+      }
+    }
+  },
+  "unitScale": 3
+}

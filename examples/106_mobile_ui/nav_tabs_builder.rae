@@ -421,5 +421,10 @@ func mountBottomDockOverlay(
   kids.add(value: mini)
   kids.add(value: bar)
   attachChildren(world: world, parent: dock, kids: kids)
+
+  # Canvas overlay (#212 S5/S6 demo) — mounted here because every
+  # screen builder already calls mountBottomDockOverlay, and the
+  # mount is idempotent (a resident page survives screen switches).
+  let canvasMount: EntityId = mountCanvasOverlay(world: world, scenes: scenes, state: state)
   ret dock
 }
