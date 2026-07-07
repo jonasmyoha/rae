@@ -1,0 +1,46 @@
+# #202 regression: explicit `own <ident>` String arguments are a TRUE
+# move — the callee takes the heap and the caller's variable is nulled
+# at the call site. Previously the struct was passed by value while
+# the caller kept the pointer; the callee's param drop plus the
+# caller's reassignment drop (`x = f(content: own x)`) freed the same
+# allocation twice (POINTER_BEING_FREED_WAS_NOT_ALLOCATED abort).
+#
+# NOTE: reading a variable after `own`-moving it is a programming
+# error; the "moved-len 0" line below just pins the SAFE compiled
+# behavior (empty string, not freed memory). The frozen Live VM keeps
+# copy-in semantics and would print moved-len 6 — this case is
+# compiled-target only.
+
+func embellish(content: own String, suffix: view String) ret String {
+  ret content.concat(other: suffix)
+}
+
+func consume(s: own String) ret Int {
+  ret s.length()
+}
+
+# own param moved onward via `own` (the addOverride chain shape).
+func relabel(tag: own String) ret String {
+  ret embellish(content: own tag, suffix: "?")
+}
+
+func main() {
+  # The reported abort shape: reassign target moved into the callee.
+  var content: String = ""
+  content = content.concat(other: "hello")
+  content = embellish(content: own content, suffix: "!")
+  log(content)
+
+  # Standalone move + scope-exit: no double free, and the source
+  # reads as empty afterwards (moved-out, not dangling).
+  var gone: String = ""
+  gone = gone.concat(other: "abcdef")
+  let n: Int = consume(s: own gone)
+  log("consumed {n} moved-len {gone.length()}")
+
+  # Chained own-param forwarding.
+  var tag: String = ""
+  tag = tag.concat(other: "chip")
+  tag = relabel(tag: own tag)
+  log(tag)
+}
