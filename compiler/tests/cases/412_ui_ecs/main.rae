@@ -78,13 +78,13 @@ func main() {
   componentSet(this: world.widgetIds, entity: e2, data: wid)
   let wstate: WidgetState = { enabled: true, selected: false, loading: false, error: false }
   componentSet(this: world.widgetStates, entity: e2, data: wstate)
-  let dep: DataDependency = { sourceKey: "playback", fieldKey: "isPlaying", observedRevision: 7 }
+  let dep: DataDependency = { resource: DataResourceId.playback, field: DataFieldId.isPlaying, observedRevision: 7 }
   componentSet(this: world.dataDependencies, entity: e2, data: dep)
   let gotWid: WidgetId = componentGet(this: world.widgetIds, entity: e2)
   let gotState: WidgetState = componentGet(this: world.widgetStates, entity: e2)
   let gotDep: DataDependency = componentGet(this: world.dataDependencies, entity: e2)
   log("e2 widget: {gotWid.id} kind={gotWid.kind} enabled={gotState.enabled}")
-  log("e2 dependency: {gotDep.sourceKey}/{gotDep.fieldKey} rev={gotDep.observedRevision}")
+  log("e2 dependency: playback={gotDep.resource is DataResourceId.playback} isPlaying={gotDep.field is DataFieldId.isPlaying} rev={gotDep.observedRevision}")
 
   # Defaults still useful.
   let dt: TransformFx = defaultTransformFx()

@@ -3700,6 +3700,8 @@ static float  g_g2d_wheel = 0.0f;
 /* Set when the OS reports a window resize; consumed (cleared) once by
  * gpu2d.windowResized() so the app rebuilds its layout for the new size. */
 static int    g_g2d_win_resized = 0;
+static int    g_g2d_cursor_kind = -1;
+static SDL_Cursor* g_g2d_cursors[7] = {0};
 /* Last endFrame surface-present result. Rendering always targets the offscreen
  * texture first, but startup/occlusion can make the surface drawable
  * unavailable; apps use this to keep their first visible frame dirty. */
@@ -4061,6 +4063,31 @@ rae_Bool rae_ext_gpu2d_pointerPressed(void) { return g_sdl_mouse_pressed[SDL_BUT
 rae_Bool rae_ext_gpu2d_pointerReleased(void) { return g_sdl_mouse_released[SDL_BUTTON_LEFT] != 0; }
 /* Per-frame wheel delta (positive = wheel/scroll up). */
 double rae_ext_gpu2d_wheelMove(void) { return (double)g_g2d_wheel; }
+
+void rae_ext_gpu2d_setMouseCursor(int64_t kind) {
+    if (!g_sdl_win) return;
+    if (kind < 0 || kind > 6) kind = 0;
+    if ((int)kind == g_g2d_cursor_kind) return;
+
+    SDL_SystemCursor cursor = SDL_SYSTEM_CURSOR_DEFAULT;
+    switch (kind) {
+        case 1: cursor = SDL_SYSTEM_CURSOR_POINTER; break;
+        case 2: cursor = SDL_SYSTEM_CURSOR_TEXT; break;
+        case 3: cursor = SDL_SYSTEM_CURSOR_EW_RESIZE; break;
+        case 4: cursor = SDL_SYSTEM_CURSOR_NS_RESIZE; break;
+        case 5: cursor = SDL_SYSTEM_CURSOR_CROSSHAIR; break;
+        case 6: cursor = SDL_SYSTEM_CURSOR_NOT_ALLOWED; break;
+        default: cursor = SDL_SYSTEM_CURSOR_DEFAULT; break;
+    }
+
+    if (!g_g2d_cursors[kind]) {
+        g_g2d_cursors[kind] = SDL_CreateSystemCursor(cursor);
+    }
+    if (g_g2d_cursors[kind]) {
+        SDL_SetCursor(g_g2d_cursors[kind]);
+        g_g2d_cursor_kind = (int)kind;
+    }
+}
 /* Monotonic wall-clock seconds since process start — for scroll timing without
  * pulling in the raylib-backed getTime. */
 double rae_ext_gpu2d_nowSeconds(void) { return (double)rae_ext_nowMs() / 1000.0; }
@@ -5289,6 +5316,10 @@ void rae_ext_gpu2d_closeWindow(void) {
     g_g2d_img_cmd_count = 0;
     if (g_g2d_img_pipeline) { wgpuRenderPipelineRelease(g_g2d_img_pipeline); g_g2d_img_pipeline = NULL; }
     if (g_g2d_surface) { wgpuSurfaceRelease(g_g2d_surface); g_g2d_surface = NULL; }
+    for (int i = 0; i < 7; i++) {
+        if (g_g2d_cursors[i]) { SDL_DestroyCursor(g_g2d_cursors[i]); g_g2d_cursors[i] = NULL; }
+    }
+    g_g2d_cursor_kind = -1;
     if (g_g2d_metal_view) { SDL_Metal_DestroyView(g_g2d_metal_view); g_g2d_metal_view = NULL; }
     if (g_sdl_win) { SDL_DestroyWindow(g_sdl_win); g_sdl_win = NULL; }
 }
@@ -5308,6 +5339,7 @@ rae_Bool rae_ext_gpu2d_pointerDown(void) { return 0; }
 rae_Bool rae_ext_gpu2d_pointerPressed(void) { return 0; }
 rae_Bool rae_ext_gpu2d_pointerReleased(void) { return 0; }
 double rae_ext_gpu2d_wheelMove(void) { return 0.0; }
+void rae_ext_gpu2d_setMouseCursor(int64_t kind) { (void)kind; }
 double rae_ext_gpu2d_nowSeconds(void) { return 0.0; }
 int64_t rae_ext_gpu2d_windowWidth(void) { return 0; }
 int64_t rae_ext_gpu2d_windowHeight(void) { return 0; }
