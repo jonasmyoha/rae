@@ -825,6 +825,44 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     wrap_deep_copy_arg = true;
                 }
             }
+            // Zeroing move for explicit `own <ident>` String args into
+            // `own String` params (#202). The old emission passed the
+            // struct by value and left the caller's variable aliasing
+            // the moved heap; the callee drops the param at exit, and
+            // any later caller-side drop of the source — most visibly
+            // the reassignment epilogue of `x = f(content: own x)`,
+            // which emits `rae_string_drop(&x)` AFTER the call — frees
+            // the same allocation again (POINTER_BEING_FREED_WAS_NOT_
+            // ALLOCATED). The scope-exit suppression from
+            // mark_expr_moved can't help there: the reassign drop is
+            // part of the assignment statement, not the implicit-drop
+            // pass. Make the move real instead: hand the struct to the
+            // callee and null the source variable in the same
+            // statement-expression, so EVERY later drop of the source
+            // no-ops and every later read sees an empty string rather
+            // than freed memory.
+            //
+            // Restricted to an explicit `own` unary around a bare ident
+            // of owned String type: the author declared the move, so
+            // the source going empty is the documented semantics. Bare
+            // idents (no `own` keyword) keep the legacy pass-through —
+            // existing code still reads those variables after the call.
+            bool wrap_move_arg = false;
+            const AstExpr* move_src = NULL;
+            if (!wrap_pool_take_arg && !wrap_deep_copy_arg && !use_hoisted_temp
+                && p && p->type && p->type->is_own
+                && !(p->type->is_view || p->type->is_mod)
+                && a->value && a->value->kind == AST_EXPR_OWN
+                && a->value->as.unary.operand
+                && a->value->as.unary.operand->kind == AST_EXPR_IDENT) {
+                const AstTypeRef* mv_tr =
+                    infer_expr_type_ref(ctx, a->value->as.unary.operand);
+                if (mv_tr && !(mv_tr->is_view || mv_tr->is_mod)
+                    && str_eq_cstr(get_base_type_name(mv_tr), "String")) {
+                    wrap_move_arg = true;
+                    move_src = a->value->as.unary.operand;
+                }
+            }
             // === Stage 3: `copy T` parameter deep-copy ===
             //
             // The author wrote `copy T` to request: "the callee gets a
@@ -987,6 +1025,20 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                         tn_dc, tmp_id, tn_dc, tmp_id);
                 emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
                 fprintf(out, ")); __cpy%d; }))", tmp_id);
+            } else if (wrap_move_arg) {
+                // See the wrap_move_arg comment above: move the String
+                // into the callee and null the source in one
+                // statement-expression.
+                int mv_id = ctx->temp_counter++;
+                fprintf(out, "(__extension__ ({ rae_String __rae_mv%d = ", mv_id);
+                emit_expr(ctx, (AstExpr*)move_src, out, PREC_LOWEST, false, false);
+                fprintf(out, "; ");
+                emit_expr(ctx, (AstExpr*)move_src, out, PREC_LOWEST, true, false);
+                fprintf(out, " = (rae_String){NULL, 0, 0, 0}; __rae_mv%d; }))", mv_id);
+                // We bypassed emit_expr on the AST_EXPR_OWN node, so
+                // apply its move-mark here for the scope-exit
+                // implicit-drop suppression.
+                mark_expr_moved_if_local(ctx, (AstExpr*)move_src);
             } else {
                 if (needs_addr) fprintf(out, "&");
                 if (needs_deref) fprintf(out, "(*");
