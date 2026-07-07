@@ -1,0 +1,182 @@
+# fitSystem — post-layout art-direction pass (#212,
+# rae/docs/ui-coordinate-and-responsive-layout.md §10 S6).
+#
+# Two components, both applied AFTER layoutSystem and BEFORE
+# transformSystem:
+#
+#   Aspect{ratio}     — lock height to resolved width: h = w / ratio.
+#                       Post-layout, so siblings do NOT reflow around
+#                       the corrected height (fixed-aspect media, not
+#                       a general layout constraint).
+#   ScaleToFit{mode}  — uniform-scale a FIXED-DESIGN subtree so the
+#                       tagged entity's authored Rect (design size in
+#                       du) fits its parent's content box, centered.
+#                       Contain letterboxes, Cover crops (parent
+#                       should clip for Cover).
+#
+# Idempotency contract: the pass recomputes every touched
+# ComputedRect from AUTHORED components (Rect, Padding), never from
+# a previous pass's output — so it can run every frame after
+# layoutSystemIfDirty regardless of whether layout re-ran. Writes are
+# change-gated (compare, then componentMod only on a real change) so
+# an idle frame bumps no table generation and transformSystemIfDirty
+# still skips.
+#
+# ScaleToFit subtree contract: the tagged entity AND its descendants
+# use authored fixed Rects (absolute placement, `Layout: None`-style).
+# Each descendant's ComputedRect is rewritten to `authored Rect * s`;
+# descendants without an authored Rect are left alone (and will look
+# unscaled). Text inside a scaled subtree renders at its style's font
+# size — glyphs don't scale; keep boards to sprites/shapes.
+import core
+
+# 0.01 du ≈ 1/300 pt: far below one physical pixel at any DPR, so
+# gating on it can't suppress a visible change.
+func fitDiffers(a: view Float, b: view Float) ret Bool {
+  var d: Float = a - b
+  if d < 0.0 {
+    d = 0.0 - d
+  }
+  ret d > 0.01
+}
+
+# Change-gated ComputedRect write. Only touches entities layout has
+# already produced a ComputedRect for.
+func fitWriteRect(world: mod UiWorld, entity: view EntityId, x: view Float, y: view Float, w: view Float, h: view Float) {
+  if componentHas(this: world.computedRects, entity: entity) is false {
+    ret
+  }
+  let cur: ComputedRect = componentGet(this: world.computedRects, entity: entity)
+  var dirty: Bool = false
+  if fitDiffers(a: cur.x, b: x) {
+    dirty = true
+  }
+  if fitDiffers(a: cur.y, b: y) {
+    dirty = true
+  }
+  if fitDiffers(a: cur.w, b: w) {
+    dirty = true
+  }
+  if fitDiffers(a: cur.h, b: h) {
+    dirty = true
+  }
+  if dirty is false {
+    ret
+  }
+  let cr: mod ComputedRect => componentMod(this: world.computedRects, entity: entity)
+  cr.x = x
+  cr.y = y
+  cr.w = w
+  cr.h = h
+}
+
+# Rewrite every descendant's ComputedRect as `authored Rect * s`.
+# ComputedRect coordinates are parent-local, so uniform scaling per
+# level composes to a uniform subtree scale.
+func fitScaleSubtree(world: mod UiWorld, entity: view EntityId, s: view Float) {
+  if componentHas(this: world.childrens, entity: entity) is false {
+    ret
+  }
+  let ch: view Children => componentView(this: world.childrens, entity: entity)
+  let n: Int = ch.ids.length
+  var i: Int = 0
+  loop i < n {
+    let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
+    if componentHas(this: world.rects, entity: cid) {
+      let r: Rect = componentGet(this: world.rects, entity: cid)
+      fitWriteRect(world: world, entity: cid, x: r.x * s, y: r.y * s, w: r.w * s, h: r.h * s)
+    }
+    fitScaleSubtree(world: world, entity: cid, s: s)
+    i = i + 1
+  }
+}
+
+# Apply one ScaleToFit entity: compute s against the parent's padded
+# content box, center the design rect inside it, scale the subtree.
+func fitApplyOne(world: mod UiWorld, entity: view EntityId, mode: view FitMode) {
+  if componentHas(this: world.parents, entity: entity) is false {
+    ret
+  }
+  let pl: Parent = componentGet(this: world.parents, entity: entity)
+  if componentHas(this: world.computedRects, entity: pl.parent) is false {
+    ret
+  }
+  if componentHas(this: world.rects, entity: entity) is false {
+    ret
+  }
+  let pcr: ComputedRect = componentGet(this: world.computedRects, entity: pl.parent)
+  let design: Rect = componentGet(this: world.rects, entity: entity)
+  if design.w <= 0.0 {
+    ret
+  }
+  if design.h <= 0.0 {
+    ret
+  }
+  var padL: Float = 0.0
+  var padT: Float = 0.0
+  var availW: Float = pcr.w
+  var availH: Float = pcr.h
+  if componentHas(this: world.paddings, entity: pl.parent) {
+    let pad: Padding = componentGet(this: world.paddings, entity: pl.parent)
+    padL = pad.insets.l
+    padT = pad.insets.t
+    availW = availW - pad.insets.l - pad.insets.r
+    availH = availH - pad.insets.t - pad.insets.b
+  }
+  if availW <= 0.0 {
+    ret
+  }
+  if availH <= 0.0 {
+    ret
+  }
+  let sw: Float = availW / design.w
+  let sh: Float = availH / design.h
+  var s: Float = sw
+  if mode is FitMode.contain {
+    if sh < sw {
+      s = sh
+    }
+  }
+  if mode is FitMode.cover {
+    if sh > sw {
+      s = sh
+    }
+  }
+  let w: Float = design.w * s
+  let h: Float = design.h * s
+  let x: Float = padL + (availW - w) / 2.0
+  let y: Float = padT + (availH - h) / 2.0
+  fitWriteRect(world: world, entity: entity, x: x, y: y, w: w, h: h)
+  fitScaleSubtree(world: world, entity: entity, s: s)
+}
+
+# Run both art-direction passes. Call between layoutSystemIfDirty and
+# transformSystemIfDirty every frame — cheap when the aspect /
+# scale-to-fit tables are empty or nothing changed.
+func fitSystem(world: mod UiWorld) pub {
+  var n: Int = componentCount(this: world.aspects)
+  var i: Int = 0
+  loop i < n {
+    let e: EntityId = componentEntityAt(this: world.aspects, i: i)
+    let a: Aspect = componentDataAt(this: world.aspects, i: i)
+    if a.ratio > 0.0 {
+      if componentHas(this: world.computedRects, entity: e) {
+        let cur: ComputedRect = componentGet(this: world.computedRects, entity: e)
+        let targetH: Float = cur.w / a.ratio
+        if fitDiffers(a: cur.h, b: targetH) {
+          let cr: mod ComputedRect => componentMod(this: world.computedRects, entity: e)
+          cr.h = targetH
+        }
+      }
+    }
+    i = i + 1
+  }
+  n = componentCount(this: world.scaleToFits)
+  i = 0
+  loop i < n {
+    let e: EntityId = componentEntityAt(this: world.scaleToFits, i: i)
+    let stf: ScaleToFit = componentDataAt(this: world.scaleToFits, i: i)
+    fitApplyOne(world: world, entity: e, mode: stf.mode)
+    i = i + 1
+  }
+}

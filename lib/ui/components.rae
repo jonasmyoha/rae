@@ -183,6 +183,29 @@ type SafeArea {
   extra: Insets
 }
 
+# Art direction (§10 S6). FitMode mirrors CSS object-fit vocabulary:
+# contain letterboxes (whole content visible), cover crops (content
+# fills the box).
+enum FitMode {
+  contain
+  cover
+}
+
+# Post-layout aspect lock: height is derived from resolved width as
+# `h = w / ratio` (ratio = w/h). Applied by fitSystem AFTER layout,
+# so siblings do not reflow around the corrected height.
+type Aspect {
+  ratio: Float
+}
+
+# Uniform-scale a fixed-design subtree to fit its parent's box,
+# centered. The tagged entity and every descendant must carry
+# authored fixed Rects (absolute placement) — fitSystem recomputes
+# each ComputedRect as `authored Rect * s` so the pass is idempotent.
+type ScaleToFit {
+  mode: FitMode
+}
+
 type Align {
   x: AlignKind
   y: AlignKind
