@@ -14,10 +14,14 @@ cd "$REPO_ROOT"
 
 SCREEN="${2:-home}"
 OUT="${1:-examples/106_mobile_ui/temp/screenshots/${SCREEN}-gpu2d.bmp}"
+DEVICE="${RAE_UI_DEVICE:-iphone-15-pro}"
+FRAME="${RAE_UI_FRAME:-PhonePortrait}"
 mkdir -p "$(dirname "$OUT")"
 
 perl -e 'alarm shift; exec @ARGV' 30 \
   env RAE_UI_SCREEN="$SCREEN" \
+      RAE_UI_DEVICE="$DEVICE" \
+      RAE_UI_FRAME="$FRAME" \
       RAE_UI_NO_SPOTIFY=1 \
       RAE_AUTO_EXIT_SEC=1 \
       RAE_SDL_HEADLESS_MS=1000 \

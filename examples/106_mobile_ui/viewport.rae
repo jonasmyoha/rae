@@ -1,8 +1,17 @@
 open ui/ecs
+import ui/device_presets
 
 # 106's coordinate spine. The SDL3 window is sized in logical points,
 # while scene/layout coordinates are native design units (du). gpu2d's
 # design-resolution transform maps the frame into the window.
+type DeviceFrame pub {
+  enabled: Bool
+  forcedFrameId: Int
+  widthDu: Float
+  heightDu: Float
+  safeInsetsDu: Insets
+}
+
 type Viewport pub {
   windowPtW: Float
   windowPtH: Float
@@ -16,6 +25,61 @@ type Viewport pub {
   legacySceneScale: Float
   layoutW: Float
   layoutH: Float
+  forcedFrameId: Int
+  devicePresetActive: Bool
+  safeInsetsDu: Insets
+}
+
+func frameIdToInt(id: view String) pub ret Int {
+  if id.equals(other: "PhonePortrait") {
+    ret 1
+  }
+  if id.equals(other: "Desktop") {
+    ret 2
+  }
+  ret 0
+}
+
+func frameIdName(id: view Int) pub ret String {
+  if id is 1 {
+    ret "PhonePortrait"
+  }
+  if id is 2 {
+    ret "Desktop"
+  }
+  ret "none"
+}
+
+func activeDeviceFrame() pub ret DeviceFrame {
+  let preset: DevicePreset = activeDevicePreset()
+  let explicitFrameId: String = getEnv(name: "RAE_UI_FRAME")
+  var frameId: Int = frameIdToInt(id: explicitFrameId)
+  if frameId is 0 {
+    if preset.width > 0.0 {
+      frameId = 1
+    }
+  }
+  if preset.width <= 0.0 or preset.height <= 0.0 {
+    ret DeviceFrame {
+      enabled: false
+      forcedFrameId: frameId
+      widthDu: phoneFrameW
+      heightDu: phoneFrameH
+      safeInsetsDu: Insets { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
+    }
+  }
+  ret DeviceFrame {
+    enabled: true
+    forcedFrameId: frameId
+    widthDu: preset.width * unitScale
+    heightDu: preset.height * unitScale
+    safeInsetsDu: Insets {
+      l: preset.safeLeft * unitScale
+      t: preset.safeTop * unitScale
+      r: preset.safeRight * unitScale
+      b: preset.safeBottom * unitScale
+    }
+  }
 }
 
 func createViewport(
@@ -24,13 +88,20 @@ func createViewport(
   framebufferPxW: view Float
   framebufferPxH: view Float
 ) pub ret Viewport {
+  let frame: DeviceFrame = activeDeviceFrame()
   var dprVal: Float = 1.0
   if windowPtW > 0.0 {
     dprVal = framebufferPxW / windowPtW
   }
+  var contentDuW: Float = phoneFrameW * legacySceneScale
+  var layoutHVal: Float = phoneFrameH * legacySceneScale
+  if frame.enabled {
+    contentDuW = frame.widthDu
+    layoutHVal = frame.heightDu
+  }
   var renderScaleVal: Float = 1.0
-  if phoneFrameW > 0.0 {
-    renderScaleVal = framebufferPxW / phoneFrameW
+  if contentDuW > 0.0 {
+    renderScaleVal = framebufferPxW / contentDuW
   }
   # Responsive extent. `layoutHVal` is the fixed portrait content height
   # and `contentDuW` the phone column width (design units). On a wide
@@ -39,14 +110,14 @@ func createViewport(
   # content stays a centered `contentDuW` column (ExtentAnchor.center) and
   # the bottom toolbar spans the full width (ExtentAnchor.fill). Clamped to
   # `contentDuW`, so a portrait phone window is unchanged.
-  let contentDuW: Float = phoneFrameW * legacySceneScale
-  let layoutHVal: Float = phoneFrameH * legacySceneScale
   var layoutWVal: Float = contentDuW
   var layoutHVal2: Float = layoutHVal
-  if windowPtH > 0.0 {
-    let byAspect: Float = layoutHVal * (windowPtW / windowPtH)
-    if byAspect > layoutWVal {
-      layoutWVal = byAspect
+  if frame.enabled is false {
+    if windowPtH > 0.0 {
+      let byAspect: Float = layoutHVal * (windowPtW / windowPtH)
+      if byAspect > layoutWVal {
+        layoutWVal = byAspect
+      }
     }
   }
   # Symmetric to the width case: on a window whose aspect is NARROWER
@@ -56,10 +127,12 @@ func createViewport(
   # then stays glued to the window's bottom edge. Content stays anchored
   # at the top; the extra height is empty background between content and
   # the dock. Clamped to `phoneFrameH`, so a portrait phone is unchanged.
-  if windowPtW > 0.0 {
-    let byAspectH: Float = layoutWVal * (windowPtH / windowPtW)
-    if byAspectH > layoutHVal2 {
-      layoutHVal2 = byAspectH
+  if frame.enabled is false {
+    if windowPtW > 0.0 {
+      let byAspectH: Float = layoutWVal * (windowPtH / windowPtW)
+      if byAspectH > layoutHVal2 {
+        layoutHVal2 = byAspectH
+      }
     }
   }
   let vp: Viewport = {
@@ -69,12 +142,20 @@ func createViewport(
     framebufferPxH: framebufferPxH
     dpr: dprVal
     unitScale: unitScale
-    areaDuW: phoneFrameW
-    areaDuH: phoneFrameH
+    areaDuW: contentDuW
+    areaDuH: layoutHVal
     renderScale: renderScaleVal
     legacySceneScale: legacySceneScale
     layoutW: layoutWVal
     layoutH: layoutHVal2
+    forcedFrameId: frame.forcedFrameId
+    devicePresetActive: frame.enabled
+    safeInsetsDu: Insets {
+      l: frame.safeInsetsDu.l
+      t: frame.safeInsetsDu.t
+      r: frame.safeInsetsDu.r
+      b: frame.safeInsetsDu.b
+    }
   }
   ret vp
 }
