@@ -98,9 +98,9 @@ func buildLibraryCoverTile(world: mod UiWorld, key: view String, size: view Floa
   let tileKind: String = "albumTile"
   setWidgetIdentity(world: world, entity: tile, id: key, kind: tileKind)
   setWidgetState(world: world, entity: tile, enabled: true, selected: false, loading: false, error: false)
-  let albumsSource: String = dataSourceAlbumsKey()
-  let allField: String = dataFieldAllKey()
-  setDataDependency(world: world, entity: tile, sourceKey: albumsSource, fieldKey: allField, observedRevision: 0)
+  let albumsSource: DataResourceId = dataResourceAlbums()
+  let allField: DataFieldId = dataFieldAll()
+  setDataDependency(world: world, entity: tile, resource: albumsSource, field: allField, observedRevision: 0)
   setSpriteFill(world: world, entity: tile, key: key, tint: imageTintColor)
   if rounded {
     let cr: CornerRadius = { radius: 26.024096385542165 }
@@ -124,9 +124,9 @@ func buildPlaylistCoverTile(world: mod UiWorld, coverStems: view List(String), s
   let tileKind: String = "playlistTile"
   setWidgetIdentity(world: world, entity: tile, id: playlistId, kind: tileKind)
   setWidgetState(world: world, entity: tile, enabled: true, selected: false, loading: coverStems.length is 0, error: false)
-  let playlistSource: String = dataSourcePlaylistsKey()
-  let allField: String = dataFieldAllKey()
-  setDataDependency(world: world, entity: tile, sourceKey: playlistSource, fieldKey: allField, observedRevision: 0)
+  let playlistSource: DataResourceId = dataResourcePlaylists()
+  let allField: DataFieldId = dataFieldAll()
+  setDataDependency(world: world, entity: tile, resource: playlistSource, field: allField, observedRevision: 0)
   # Hover scale goes on the four cells, not this container (a layout
   # parent draws nothing of its own). `hoverScaleSystem` propagates the
   # tile's hover state down to them via `hoverScaleContains`, so the
