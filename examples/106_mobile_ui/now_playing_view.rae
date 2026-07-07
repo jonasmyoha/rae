@@ -257,5 +257,17 @@ func buildMiniPlayerInstance(
   let forcedName: String = frameIdName(id: deviceFrame.forcedFrameId)
   let framePtW: Float = world.layoutW / unitScale
   let frameIdx: Int = applySceneFramesToPage(world: world, scene: scene, pageId: miniPlayerPageId, windowPtW: framePtW, forcedFrameId: forcedName)
+  # Frames S4 (#211): MiniArtist is frame-overridden (the Desktop
+  # frame reparents it into the root row), so reset-to-base just
+  # replayed its authored placeholder text on every frame. Re-apply
+  # the runtime track data after the frame pass. MiniTitle isn't
+  # frame-overridden today, but re-setting it costs one write and
+  # keeps this block correct if it ever becomes overridden.
+  # Fresh node-id strings — miniTitleId/miniArtistId were own-moved
+  # into addTextOverride above.
+  let miniTitleText: String = "{track.title}"
+  let miniArtistText: String = "{album.artist}"
+  updateNodeText(world: world, pageId: miniPlayerPageId, nodeId: "MiniTitle", value: miniTitleText)
+  updateNodeText(world: world, pageId: miniPlayerPageId, nodeId: "MiniArtist", value: miniArtistText)
   ret mount
 }
