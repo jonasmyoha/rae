@@ -36,6 +36,16 @@ import sys
 
 # Externs are already declared in playback_state_io.rae; reuse those.
 
+var gHistoryArtCursor: Int = 0 - 1
+var gHistoryArtSeenLen: Int = 0
+var gHistoryArtDone: Bool = false
+
+func resetHistoryArtLoader() pub {
+  gHistoryArtCursor = 0 - 1
+  gHistoryArtSeenLen = 0
+  gHistoryArtDone = false
+}
+
 # Escape a string for embedding inside a JSON `"..."` literal.
 # Builds the result by walking each character so the caller never
 # ends up with a String that aliases its input — the equivalent
@@ -185,6 +195,7 @@ func restoreHistoryFromSource(history: mod PlayHistory, source: view String, loa
 # `history.entries`. No-op when the file is missing — fresh
 # install, first launch.
 func restoreHistory(history: mod PlayHistory, path: view String) pub {
+  resetHistoryArtLoader()
   let source: String = rae_ext_rae_sys_read_file(path: path)
   if source.length() > 0 {
     restoreHistoryFromSource(history: history, source: source, loadPath: path)
@@ -284,34 +295,81 @@ func refetchHistoryArtChunk(history: view PlayHistory, reg: mod TextureRegistry,
   ret false
 }
 
-# Disk-only history artwork loader. Spotify artwork keys persist in
+# Non-blocking history artwork loader. Spotify artwork keys persist in
 # play_history.json, but gpu2d's image registry is process-local, so every app
 # boot must re-register cached files before recently-played thumbs can draw.
-# This intentionally does not hit the network; missing files are skipped.
+# Cached files are loaded immediately; missing files are fetched by the runtime
+# async curl queue and registered on a later frame when ready.
 func loadCachedHistoryArtChunk(history: view PlayHistory, budget: view Int) pub ret Bool {
   let prefix: String = "spotify-art:"
   let pLen: Int = prefix.length()
   let n: Int = history.entries.length
+  if n is 0 {
+    gHistoryArtDone = true
+    ret false
+  }
+  if n is not gHistoryArtSeenLen {
+    gHistoryArtSeenLen = n
+    gHistoryArtCursor = n - 1
+    gHistoryArtDone = false
+  }
+  if gHistoryArtDone {
+    ret false
+  }
+  if gHistoryArtCursor < 0 {
+    gHistoryArtCursor = n - 1
+  }
+
   var did: Int = 0
-  var i: Int = n - 1
-  loop i >= 0 {
+  var visited: Int = 0
+  var pending: Int = 0
+  loop visited < n {
+    if did >= budget {
+      ret true
+    }
+    let i: Int = gHistoryArtCursor
+    gHistoryArtCursor = gHistoryArtCursor - 1
+    if gHistoryArtCursor < 0 {
+      gHistoryArtCursor = n - 1
+    }
     let e: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: i)
     if e.textureKey.startsWith(prefix: prefix) {
       if gpu2d.hasImageKey(key: e.textureKey) is false {
         let suffix: String = e.textureKey.sub(start: pLen, len: e.textureKey.length() - pLen)
         let path: String = cachedArtworkPath(imageHash: suffix)
         if sys.exists(path: path) {
-          if did >= budget {
-            ret true
-          }
           let keyForGpu: String = "{e.textureKey}"
           let pathForGpu: String = "{path}"
           let h: Int = gpu2d.loadImageKey(key: keyForGpu, path: pathForGpu)
           did = did + 1
+        } else {
+          if e.artworkUrl.length() > 0 {
+            let status: Int = spotify.fetchArtworkStatus(outPath: path)
+            if status is 1 {
+              let keyForGpu: String = "{e.textureKey}"
+              let pathForGpu: String = "{path}"
+              let h: Int = gpu2d.loadImageKey(key: keyForGpu, path: pathForGpu)
+              did = did + 1
+            } else {
+              if status is 2 {
+                did = did + 1
+              } else {
+                let urlForFetch: String = "{e.artworkUrl}"
+                let pathForFetch: String = "{path}"
+                spotify.fetchArtworkAsync(url: urlForFetch, outPath: pathForFetch)
+                pending = pending + 1
+                did = did + 1
+              }
+            }
+          }
         }
       }
     }
-    i = i - 1
+    visited = visited + 1
   }
+  if pending > 0 {
+    ret true
+  }
+  gHistoryArtDone = true
   ret false
 }

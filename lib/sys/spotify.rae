@@ -107,6 +107,12 @@ func current() ret SpotifyTrack {
 # otherwise. Used for both Spotify's CDN URL and the iTunes fallback.
 func fetchArtwork(url: view String, outPath: view String) extern ret Bool
 
+# Non-blocking artwork download. `fetchArtworkAsync` starts or reuses one
+# background curl job for `outPath`; `fetchArtworkStatus` returns:
+# 0 = missing/pending, 1 = fetched, 2 = failed.
+func fetchArtworkAsync(url: view String, outPath: view String) extern ret Bool
+func fetchArtworkStatus(outPath: view String) extern ret Int
+
 # iTunes Search API fallback for album art. Queries
 # https://itunes.apple.com/search?term=<term>&entity=song&limit=1,
 # extracts `artworkUrl100`, and upscales the URL to 600x600 the way
