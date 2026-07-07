@@ -856,12 +856,9 @@ func dispatchActions(
       playback.playingAlbumStem = "{state.currentAlbumStem}"
       playback.playingTrackIndex = state.currentTrackIndex
       setPlaybackPlaying(state: playback, value: true)
-      # Hearts reflect the new track immediately. Without this the
-      # mini-player heart would carry the previous song's filled state
-      # until the next per-frame applyOverlaysToWorld — visually
-      # obvious because the heart sits right next to the title that
-      # just changed.
-      applyLikedToWorld(world: world, liked: state.liked, stem: state.currentAlbumStem, trackIndex: state.currentTrackIndex)
+      # Dependent UI (heart selected state, play/pause icon, progress)
+      # is refreshed by the frame pipeline after dispatch. Action
+      # handlers only mutate app/playback/data-source state.
       # Record the pick in play history so Home's "Recently played"
       # row + the History sub-page see it. Stem is already known
       # (local-catalog tap), no fuzzy match needed.
@@ -920,9 +917,7 @@ func dispatchActions(
         playback.playingAlbumStem = "{e.albumStem}"
         playback.playingTrackIndex = state.currentTrackIndex
         setPlaybackPlaying(state: playback, value: true)
-        # Heart reflects the replayed track immediately. Same reason
-        # as the song.open path above.
-        applyLikedToWorld(world: world, liked: state.liked, stem: state.currentAlbumStem, trackIndex: state.currentTrackIndex)
+        # Dependent UI is refreshed by the frame pipeline after dispatch.
         if spotifyEnabled {
           let q: String = spotifySearchQuery(artist: e.artistName, title: e.trackName, album: e.albumName)
           log("[spotify] history-replay query={q}")
