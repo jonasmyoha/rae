@@ -31,12 +31,13 @@ func mountNowPlayingPage(
   scenes: view AlbumScenes
   playback: view PlaybackState
   state: view AppState
+  viewport: view Viewport
 ) pub ret EntityId {
   let album: Album = activeAlbum(state: state)
   let track: Track = trackAt(album: album, idx: state.currentTrackIndex)
 
   let root: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: root, w: screenW, h: screenH)
+  setRectFixed(world: world, entity: root, w: viewport.areaDuW, h: viewport.areaDuH)
   let layV: LayoutType = LayoutType.vertical
   let alignS: AlignKind = AlignKind.start
   setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
@@ -54,8 +55,8 @@ func mountNowPlayingPage(
   # The now-playing scene fills whatever's left after the top bar and
   # the bottom bars.
   let bottomGap: Float = outerGap * 2.0
-  let npH: Float = screenH - outerPad * 2.0 - topBarH - outerGap - miniPlayerH - navTabsH - bottomGap
-  let npW: Float = screenW - outerPad * 2.0
+  let npH: Float = phoneFrameH - outerPad * 2.0 - topBarH - outerGap - miniPlayerH - navTabsH - bottomGap
+  let npW: Float = phoneFrameW - outerPad * 2.0
   let np: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: np, w: npW, h: npH)
 
@@ -126,9 +127,10 @@ func mountNowPlayingPage(
   ret root
 }
 
-func buildNowPlayingWorld(scenes: view AlbumScenes, playback: view PlaybackState, state: view AppState, reg: view TextureRegistry) pub ret UiWorld {
+func buildNowPlayingWorld(scenes: view AlbumScenes, playback: view PlaybackState, state: view AppState, reg: view TextureRegistry, viewport: view Viewport) pub ret UiWorld {
   let world: UiWorld = createUiWorld()
-  let page: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: state)
+  applyViewportExtent(world: world, viewport: viewport)
+  let page: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: state, viewport: viewport)
   let dock: EntityId = mountBottomDockOverlay(
     world: world
     activeTab: state.tab
