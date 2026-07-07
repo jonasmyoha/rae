@@ -1,4 +1,10 @@
-# 98_mobile_ui — Design
+# 106_mobile_ui — Design
+
+Status: **primary gpu2d/SDL3 mobile UI example.** This app is the current target
+for the coordinate-system work in `rae/docs/ui-coordinate-and-responsive-layout.md`:
+Model A, `unitScale=3`, a 1080-wide phone frame, and desktop frames around
+5760×3240 du. Older text in this document was copied from 98 and should be read
+as historical context where it mentions raylib or `examples/98_mobile_ui`.
 
 A scene-driven UI runtime for Rae, built for mobile-shaped layouts. The
 target reference is the music player mockup in `references/music_player.webp`
