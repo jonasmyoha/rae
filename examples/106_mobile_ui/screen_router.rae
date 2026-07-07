@@ -150,7 +150,7 @@ func buildAppWorld(
   # layer entities ("content" / "dock" / "back-button" / "dialog" /
   # "debug") already exist and look them up by id.
   createStandardLayers(world: world)
-  let homePage: EntityId = mountHomePage(world: world, state: state, scrollY: scrollY, viewport: viewport)
+  let homePage: EntityId = mountHomePage(world: world, scenes: scenes, state: state, scrollY: scrollY, viewport: viewport)
   let libraryPage: EntityId = mountLibraryPage(world: world, state: state, scrollY: scrollY, viewport: viewport)
   let albumPage: EntityId = mountAlbumPage(world: world, scenes: scenes, state: state, playback: playback, scrollY: scrollY, viewport: viewport)
   let nowPlayingPage: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: state, viewport: viewport)
@@ -289,6 +289,7 @@ func buildPageTopBar(world: mod UiWorld, title: view String) pub ret EntityId {
 # short-circuits when nothing changed.
 func refreshHistoryViewsIfNeeded(
   world: mod UiWorld
+  scenes: view AlbumScenes
   state: view AppState
   visible: view Screen
   cachedLen: view Int
@@ -300,7 +301,7 @@ func refreshHistoryViewsIfNeeded(
   }
   if visible is Screen.home {
     unmountPage(world: world, pageId: homePageId)
-    let h: EntityId = mountHomePage(world: world, state: state, scrollY: 0.0, viewport: viewport)
+    let h: EntityId = mountHomePage(world: world, scenes: scenes, state: state, scrollY: 0.0, viewport: viewport)
     setPageActive(world: world, pageId: homePageId, active: true)
   }
   if visible is Screen.history {

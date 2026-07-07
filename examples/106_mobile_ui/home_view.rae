@@ -1,11 +1,15 @@
 open ui/ecs
-# Home-tab world composition. The discovery / landing screen the
-# user lands on at app open — a more curated visual than the dense
-# 3-column Library grid:
-#   * 2-column grid of large album covers (every parsed album)
+# Home-tab world composition — SCENE-DRIVEN since #213. The page
+# skeleton (root padding/gap, "Recently played" header text + action,
+# strip and grid containers) is authored in
+# assets/scenes/home.raescene; this module keeps only what a template
+# cannot express:
+#   * data extraction (album keys, history entries, settings flags)
+#   * list materialisation (grid rows / cover tiles / recent thumbs)
+#   * runtime state wiring (scroll offset, has-history visibility)
 #
 # Tapping any tile fires `album.open` (same path as the Library
-# tiles), so the user always lands on the Album sub-page next.
+# tiles); the header's `nav.history` action is authored in the scene.
 #
 # Reuses `buildLibraryCoverTile` + `collectLibraryCoverKeys` from
 # `library_view.rae` — both are sibling-module pub helpers in this
@@ -15,6 +19,8 @@ import fs
 import ui/components
 import ui/ecs
 import ui/layout
+import ui/scene
+import ui/scene_instance
 
 let homeGridColumns: Int = 2
 let homeGridTileGap: Float = 17.349397590361445  # spaceS
@@ -72,7 +78,8 @@ func homeScrollMin(albums: view List(Album), history: view PlayHistory) pub ret 
   ret 0.0 - overflow
 }
 
-# Single 2-column row.
+# Single grid row — pure list materialisation (row containers are not
+# authorable: their count depends on the album list).
 func buildHomeGridRow(
   world: mod UiWorld
   keys: view List(String)
@@ -104,20 +111,14 @@ func buildHomeGridRow(
   ret row
 }
 
-func buildHomeCoverGrid(world: mod UiWorld, albums: view List(Album), library: view List(String), rounded: view Bool) ret EntityId {
+# Data adapter: materialise the album cover grid into the scene's
+# `CoverGrid` container. Layout/gap on the container come from the
+# scene; only the rows/tiles (data-dependent) are built here.
+func fillHomeCoverGrid(world: mod UiWorld, grid: view EntityId, albums: view List(Album), library: view List(String), rounded: view Bool) {
   let keys: List(String) = collectLibraryCoverKeys(albums: albums, library: library)
-  let grid: EntityId = createEntity(world: world)
   let cols: Int = homeCols()
   let total: Int = keys.length
-  let tileH: Float = homeGridTileSize()
   let rows: Int = (total + cols - 1) / cols
-  let gridH: Float = tileH * rows.toFloat() + homeGridTileGap * (rows - 1).toFloat()
-  let gridW: Float = phoneFrameW - outerPad * 2.0
-  setRectFixed(world: world, entity: grid, w: gridW, h: gridH)
-  let layV: LayoutType = LayoutType.vertical
-  let alignS: AlignKind = AlignKind.start
-  setLayout(world: world, entity: grid, kind: layV, gap: homeGridTileGap, alignCross: alignS)
-
   let rowKids: List(EntityId) = createList(EntityId, cap: rows)
   var i: Int = 0
   loop i < rows {
@@ -127,73 +128,90 @@ func buildHomeCoverGrid(world: mod UiWorld, albums: view List(Album), library: v
     i = i + 1
   }
   attachChildren(world: world, parent: grid, kids: rowKids)
-  ret grid
 }
 
-func buildHomeBody(world: mod UiWorld, albums: view List(Album), library: view List(String), history: view PlayHistory, rounded: view Bool, scrollY: view Float) ret EntityId {
-  let body: EntityId = createEntity(world: world)
-  let bodyW: Float = phoneFrameW - outerPad * 2.0
-  let bodyH: Float = phoneFrameH - navTabsH - outerGap * 3.0 - outerPad * 2.0
-  setRectFixed(world: world, entity: body, w: bodyW, h: bodyH)
-  let layV: LayoutType = LayoutType.vertical
-  let alignS: AlignKind = AlignKind.start
-  setLayout(world: world, entity: body, kind: layV, gap: outerGap, alignCross: alignS)
-  let off: Offset = { delta: Vec2 { x: 0.0, y: scrollY } }
-  componentSet(this: world.offsets, entity: body, data: off)
-
-  let scroll: ScrollState = { y: scrollY, velocity: 0.0 }
-  componentSet(this: world.scrollStates, entity: body, data: scroll)
-
-  let grid: EntityId = buildHomeCoverGrid(world: world, albums: albums, library: library, rounded: rounded)
-
-  let hasRecent: Bool = history.entries.length > 0
-  var kidsCap: Int = 1
-  if hasRecent {
-    kidsCap = 3
-  }
-  let kids: List(EntityId) = createList(EntityId, cap: kidsCap)
-  if hasRecent {
-    let recentHeader: EntityId = buildRecentlyPlayedHeader(world: world)
-    let recentStrip: EntityId = buildRecentlyPlayedStrip(world: world, history: history, rounded: rounded)
-    kids.add(value: recentHeader)
-    kids.add(value: recentStrip)
-  }
-  kids.add(value: grid)
-  attachChildren(world: world, parent: body, kids: kids)
-  ret body
-}
-
+# Mount the Home page from its scene template, then run the data
+# adapters over the mounted nodes. Node ids referenced here must
+# exist in home.raescene: Body / RecentlyPlayedHeader /
+# RecentlyPlayedStrip / CoverGrid.
 func mountHomePage(
   world: mod UiWorld
+  scenes: view AlbumScenes
   state: view AppState
   scrollY: view Float
   viewport: view Viewport
 ) pub ret EntityId {
-  let albums: view List(Album) => state.albums
-
-  let root: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: root, w: viewport.areaDuW, h: viewport.areaDuH)
-  let layV: LayoutType = LayoutType.vertical
-  let alignS: AlignKind = AlignKind.start
-  setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
-  setPaddingAll(world: world, entity: root, n: outerPad)
-
-  var copiedId: String = ""
-  copiedId = copiedId.concat(other: homePageId)
-  let pr: PageRoot = { id: own copiedId }
-  componentSet(this: world.pageRoots, entity: root, data: own pr)
-
-  let body: EntityId = buildHomeBody(world: world, albums: albums, library: state.library, history: state.playHistory, rounded: state.settings.roundedAlbumCovers, scrollY: scrollY)
-
-  let kids: List(EntityId) = createList(EntityId, cap: 1)
-  kids.add(value: body)
-  attachChildren(world: world, parent: root, kids: kids)
+  let scene: view Scene => scenes.home
+  let overrides: List(SceneOverride) = emptyOverrides()
+  let pageIdCopy: String = "{homePageId}"
+  let homeLabel: String = "home"
+  let mount: EntityId = mountPageOrError(
+    world: world
+    pageId: own pageIdCopy
+    scene: scene
+    overrides: overrides
+    w: viewport.areaDuW
+    h: viewport.areaDuH
+    sceneLabel: homeLabel
+  )
   # Reserve the notch at the top edge; safeAreaSystem folds the active
   # device preset's inset in. Applied here (not just in buildAppWorld)
   # so an in-place re-mount keeps the tag.
-  attachSafeAreaEdges(world: world, entity: root, top: 1.0, bottom: 0.0)
+  attachSafeAreaEdges(world: world, entity: mount, top: 1.0, bottom: 0.0)
 
-  ret root
+  # Runtime scroll state on the Body container (not authorable —
+  # scroll position survives rebuilds via the scrollY argument).
+  let bodyOpt: opt Int = findNodeInPage(world: world, pageId: homePageId, nodeId: "Body")
+  if bodyOpt is not none {
+    let bodyRaw: Int = bodyOpt
+    let body: EntityId = entityId(v: bodyRaw)
+    let off: Offset = { delta: Vec2 { x: 0.0, y: scrollY } }
+    componentSet(this: world.offsets, entity: body, data: off)
+    let scroll: ScrollState = { y: scrollY, velocity: 0.0 }
+    componentSet(this: world.scrollStates, entity: body, data: scroll)
+  }
+
+  # Recently played: visibility is data-driven (layout skips inactive
+  # children, so an empty history collapses the section exactly like
+  # the old builder that simply didn't create it).
+  let hasRecent: Bool = state.playHistory.entries.length > 0
+  let headerOpt: opt Int = findNodeInPage(world: world, pageId: homePageId, nodeId: "RecentlyPlayedHeader")
+  if headerOpt is not none {
+    let headerRaw: Int = headerOpt
+    let header: EntityId = entityId(v: headerRaw)
+    let headerActive: Active = { value: hasRecent }
+    componentSet(this: world.actives, entity: header, data: headerActive)
+  }
+  let stripOpt: opt Int = findNodeInPage(world: world, pageId: homePageId, nodeId: "RecentlyPlayedStrip")
+  if stripOpt is not none {
+    let stripRaw: Int = stripOpt
+    let strip: EntityId = entityId(v: stripRaw)
+    let stripActive: Active = { value: hasRecent }
+    componentSet(this: world.actives, entity: strip, data: stripActive)
+    if hasRecent {
+      fillRecentlyPlayedStrip(
+        world: world
+        strip: strip
+        history: state.playHistory
+        rounded: state.settings.roundedAlbumCovers
+      )
+    }
+  }
+
+  let gridOpt: opt Int = findNodeInPage(world: world, pageId: homePageId, nodeId: "CoverGrid")
+  if gridOpt is not none {
+    let gridRaw: Int = gridOpt
+    let grid: EntityId = entityId(v: gridRaw)
+    fillHomeCoverGrid(
+      world: world
+      grid: grid
+      albums: state.albums
+      library: state.library
+      rounded: state.settings.roundedAlbumCovers
+    )
+  }
+
+  ret mount
 }
 
 func buildHomeWorld(
@@ -206,7 +224,7 @@ func buildHomeWorld(
 ) pub ret UiWorld {
   let world: UiWorld = createUiWorld()
   applyViewportExtent(world: world, viewport: viewport)
-  let page: EntityId = mountHomePage(world: world, state: state, scrollY: scrollY, viewport: viewport)
+  let page: EntityId = mountHomePage(world: world, scenes: scenes, state: state, scrollY: scrollY, viewport: viewport)
   let dock: EntityId = mountBottomDockOverlay(
     world: world
     activeTab: state.tab
