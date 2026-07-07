@@ -140,11 +140,11 @@ func buildAppWorld(
   viewport: view Viewport
 ) pub ret UiWorld {
   let world: UiWorld = createUiWorld()
-  # Publish the layout extent so the edge-to-edge dock (mounted below,
-  # before applyViewportExtent runs) can size itself to the full window
-  # width. Content roots stay `screenW` wide and center within it.
-  layoutExtentW = viewport.layoutW
-  layoutExtentH = viewport.layoutH
+  # Publish the active Viewport extent before mounting anything. Builders
+  # that need edge-to-edge geometry read `world.layoutW/H`; fixed phone
+  # content still uses the `screenW/screenH` design constants and is centered
+  # later by the root ExtentAnchor.
+  applyViewportExtent(world: world, viewport: viewport)
   # Layer stack first — overlay-mount sites below assume the named
   # layer entities ("content" / "dock" / "back-button" / "dialog" /
   # "debug") already exist and look them up by id.
@@ -185,7 +185,6 @@ func buildAppWorld(
   )
   let back: EntityId = mountBackButtonOverlay(world: world, state: state)
   addBottomSheetLayer(world: world, sheet: state.bottomSheet)
-  applyViewportExtent(world: world, viewport: viewport)
   # Responsive safe-area pass. `RAE_UI_DEVICE=<preset>` selects a phone
   # form factor; its notch / home-indicator insets are converted to
   # this world's design units (fraction of the device dimension times

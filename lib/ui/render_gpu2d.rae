@@ -12,6 +12,14 @@
 # mat:* icon glyphs map name->codepoint via lib/ui/icon_codepoints and draw
 # from the Material atlas font. Paint order mirrors lib/ui/render.rae:
 # layer-sorted parent roots, then recursive parent-before-child traversal.
+#
+# Pixel policy for Model A: this renderer does not blanket-round layout
+# coordinates. Layout, hover scale, and animation remain in fractional design
+# units; gpu2d maps them to physical pixels through its design-resolution
+# transform and the SDF/AA shaders cover subpixel edges. Only explicitly
+# pixel-bound primitives such as future one-device-pixel strokes should snap at
+# the backend boundary. Snapping every box here would move centered widgets and
+# make animation shimmer.
 open ui/ecs
 import core
 import gpu2d
