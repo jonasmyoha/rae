@@ -59,6 +59,7 @@ const inspectorTabs = document.querySelectorAll("[data-inspector-tab]");
 const exampleListEl = document.getElementById("example-list");
 const exampleStatusChip = document.getElementById("example-status-chip");
 const stopExampleBtn = document.getElementById("stop-example-btn");
+const restartExampleBtn = document.getElementById("restart-example-btn");
 const toggleEditExampleBtn = document.getElementById("toggle-edit-example-btn");
 const saveExampleBtn = document.getElementById("save-example-btn");
 const exampleOutput = document.getElementById("example-output");
@@ -471,6 +472,7 @@ document.addEventListener("keydown", (event) => {
 });
 
 stopExampleBtn?.addEventListener("click", () => stopExampleRun());
+restartExampleBtn?.addEventListener("click", () => triggerExampleRun("restart"));
 toggleEditExampleBtn?.addEventListener("click", () => toggleExampleEdit());
 saveExampleBtn?.addEventListener("click", () => saveExampleSource());
 exampleEditor?.addEventListener("input", () => {
@@ -1697,14 +1699,29 @@ function exampleFileIcon(kind) {
   return "📄";
 }
 
-// Run controls: Run + Watch + Restart, driven by the global Target/Profile
-// dropdowns (no per-target button matrix, no Build). Restart force-stops
-// any current Run/Watch process, then starts a normal Run.
+// Run controls: Run + Watch, driven by the global Target/Profile
+// dropdowns (no per-target button matrix, no Build). The Restart button
+// lives in the top status bar next to Stop (see updateRestartExampleButton);
+// it force-stops any current Run/Watch process, then starts a normal Run.
+function updateRestartExampleButton(example, target, targetId, supported) {
+  if (!restartExampleBtn) return;
+  const usable = Boolean(example) && supported && Boolean(target && target.supportsExampleRun);
+  restartExampleBtn.disabled = !usable;
+  if (!example) {
+    restartExampleBtn.title = "Select an example to restart";
+  } else if (supported) {
+    restartExampleBtn.title = `Restart with ${target?.label ?? targetId}`;
+  } else {
+    restartExampleBtn.title = `${formatExampleName(example.name)} doesn't support the ${targetId} target`;
+  }
+}
+
 function renderExampleTargetButtons(example) {
   if (!exampleTargetActions) return;
   exampleTargetActions.innerHTML = "";
   if (!example) {
     exampleTargetActions.hidden = true;
+    updateRestartExampleButton(null, null, "", false);
     return;
   }
   exampleTargetActions.hidden = false;
@@ -1713,6 +1730,7 @@ function renderExampleTargetButtons(example) {
   const target = getTargetById(targetId);
   const supportedList = Array.isArray(example.supportedTargets) ? example.supportedTargets : [];
   const supported = supportedList.length === 0 || supportedList.includes(targetId);
+  updateRestartExampleButton(example, target, targetId, supported);
 
   const row = document.createElement("div");
   row.className = "example-actions-row";
@@ -1736,17 +1754,6 @@ function renderExampleTargetButtons(example) {
   watchBtn.title = canWatch ? `Watch with ${target?.label ?? targetId}` : `Watch is not available for the ${targetId} target`;
   watchBtn.addEventListener("click", () => triggerExampleRun("watch"));
   row.appendChild(watchBtn);
-
-  const restartBtn = document.createElement("button");
-  restartBtn.type = "button";
-  restartBtn.classList.add("secondary");
-  restartBtn.textContent = "Restart";
-  restartBtn.disabled = !supported || !(target && target.supportsExampleRun);
-  restartBtn.title = supported
-    ? `Restart with ${target?.label ?? targetId}`
-    : `${formatExampleName(example.name)} doesn't support the ${targetId} target`;
-  restartBtn.addEventListener("click", () => triggerExampleRun("restart"));
-  row.appendChild(restartBtn);
 
   if (!supported) {
     const note = document.createElement("span");
