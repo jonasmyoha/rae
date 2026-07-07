@@ -2829,6 +2829,19 @@ int64_t rae_ext_measureTextWithFont(int64_t slot, rae_String text, double fontSi
 #include "lodepng.h"
 #include "lodepng.c"
 
+/* Vendored stb_image (see stb_image.VENDOR.md) — JPEG decode for
+ * gpu2d artwork (#228; decision record docs/image-decoding-design.md).
+ * Deliberately restricted: STBI_ONLY_JPEG keeps the attack surface to
+ * one parser (PNG stays on lodepng above), STBI_NO_STDIO means stb
+ * only ever parses bytes we read ourselves, and the dimension cap
+ * matches the previous ImageIO limit. */
+#define STB_IMAGE_IMPLEMENTATION
+#define STB_IMAGE_STATIC   /* raylib links its own stb_image; keep ours TU-local */
+#define STBI_ONLY_JPEG
+#define STBI_NO_STDIO
+#define STBI_MAX_DIMENSIONS 16384
+#include "stb_image.h"
+
 /* Save w*h*4 top-down RGBA8 bytes to `path` as a PNG. Returns 0 on success. */
 static int rae_png_save_rgba32(const char* path, const unsigned char* rgba, int w, int h) {
     if (!path || !rgba || w <= 0 || h <= 0) return 1;
@@ -4707,14 +4720,22 @@ static void rae_g2d_keep_frame_bind(WGPUBindGroup b) {
     g_g2d_frame_binds[g_g2d_frame_bind_n++] = b;
 }
 
-static int rae_g2d_is_jpeg_file(const char* path) {
-    if (!path) return 0;
+/* Read a whole file into a malloc'd buffer. Returns NULL on failure. */
+static unsigned char* rae_g2d_read_whole_file(const char* path, size_t* out_len) {
+    if (!path || !out_len) return NULL;
     FILE* f = fopen(path, "rb");
-    if (!f) return 0;
-    unsigned char sig[3] = {0, 0, 0};
-    size_t n = fread(sig, 1, sizeof(sig), f);
+    if (!f) return NULL;
+    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return NULL; }
+    long sz = ftell(f);
+    if (sz <= 0) { fclose(f); return NULL; }
+    if (fseek(f, 0, SEEK_SET) != 0) { fclose(f); return NULL; }
+    unsigned char* buf = (unsigned char*)malloc((size_t)sz);
+    if (!buf) { fclose(f); return NULL; }
+    size_t got = fread(buf, 1, (size_t)sz, f);
     fclose(f);
-    return n == 3 && sig[0] == 0xFF && sig[1] == 0xD8 && sig[2] == 0xFF;
+    if (got != (size_t)sz) { free(buf); return NULL; }
+    *out_len = (size_t)sz;
+    return buf;
 }
 
 #ifdef __APPLE__
@@ -4762,45 +4783,93 @@ static int rae_g2d_decode_imageio_rgba(const char* path, unsigned char** out_rgb
 }
 #endif
 
-/* Decode an image file and upload it as an RGBA8 texture. PNG goes through
- * lodepng. JPEGs use ImageIO on macOS so gpu2d does not depend on raylib's
- * OpenGL window state for Spotify / album artwork. */
+/* Decode an image file to RGBA8 (#228; contract + rationale in
+ * docs/image-decoding-design.md): strict magic-byte dispatch, ONE
+ * decoder per format, no fallback cascade — a JPEG that stb rejects
+ * is a failed image, not a lodepng candidate, so pixel output stays
+ * decoder-deterministic on every platform.
+ *   FF D8 FF     -> vendored stb_image (JPEG only)
+ *   89 50 4E 47  -> lodepng (PNG)
+ *   anything else -> unsupported
+ * Output is straight-alpha RGBA8, no colour management.
+ *
+ * RAE_G2D_IMAGEIO=1 (macOS only) re-routes JPEG through the legacy
+ * ImageIO path — kept for ONE release purely as an A/B pixel-diff
+ * aid while stb becomes the default; delete with the next cleanup.
+ * Returns 1 with a malloc-compatible *out_rgba on success; on
+ * failure returns 0 and points *out_err at a static reason string. */
+static int rae_g2d_decode_rgba(const char* path, unsigned char** out_rgba,
+                               unsigned* out_w, unsigned* out_h,
+                               const char** out_err) {
+    *out_rgba = NULL; *out_w = 0; *out_h = 0; *out_err = "unreadable file";
+    size_t len = 0;
+    unsigned char* bytes = rae_g2d_read_whole_file(path, &len);
+    if (!bytes) return 0;
+    if (len >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF) {
+#ifdef __APPLE__
+        const char* use_imageio = getenv("RAE_G2D_IMAGEIO");
+        if (use_imageio && strcmp(use_imageio, "1") == 0) {
+            free(bytes);
+            if (!rae_g2d_decode_imageio_rgba(path, out_rgba, out_w, out_h)) {
+                *out_err = "JPEG decode failed (ImageIO)";
+                return 0;
+            }
+            return 1;
+        }
+#endif
+        int w = 0, h = 0, comp = 0;
+        unsigned char* px = stbi_load_from_memory(bytes, (int)len, &w, &h, &comp, 4);
+        free(bytes);
+        if (!px) {
+            *out_err = stbi_failure_reason();
+            return 0;
+        }
+        *out_rgba = px; *out_w = (unsigned)w; *out_h = (unsigned)h;
+        return 1;
+    }
+    if (len >= 4 && bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47) {
+        unsigned err = lodepng_decode32(out_rgba, out_w, out_h, bytes, len);
+        free(bytes);
+        if (err) {
+            *out_err = lodepng_error_text(err);
+            return 0;
+        }
+        return 1;
+    }
+    free(bytes);
+    *out_err = "unsupported format (not JPEG/PNG)";
+    return 0;
+}
+
+/* Device-free decode probe (#228): run the exact decode + error
+ * policy of gpu2d.loadImage without needing a WebGPU device, so the
+ * corrupt-file behaviour is testable in the headless suite. Returns
+ * 1 when the file decodes, 0 (plus the standard stderr line) when it
+ * doesn't. Also handy as a CLI-side asset validator. */
+int64_t rae_ext_gpu2d_decodeImageProbe(rae_String path) {
+    if (!path.data) return 0;
+    unsigned char* rgba = NULL; unsigned uw = 0, uh = 0;
+    const char* why = "decode failed";
+    const char* cpath = (const char*)path.data;
+    if (!rae_g2d_decode_rgba(cpath, &rgba, &uw, &uh, &why)) {
+        fprintf(stderr, "[gpu2d] image decode failed (%s): %s\n", cpath, why);
+        return 0;
+    }
+    free(rgba);
+    return 1;
+}
+
+/* Decode an image file and upload it as an RGBA8 texture. Decode policy
+ * lives in rae_g2d_decode_rgba; a failure logs one line and returns
+ * handle 0, which callers already render as their placeholder. */
 int64_t rae_ext_gpu2d_loadImage(rae_String path) {
     if (!path.data || !g_wgpu_dev || g_g2d_img_n >= RAE_G2D_MAX_IMG) return 0;
     unsigned char* rgba = NULL; unsigned uw = 0, uh = 0;
     const char* cpath = (const char*)path.data;
-#ifdef __APPLE__
-    if (rae_g2d_is_jpeg_file(cpath)) {
-        if (!rae_g2d_decode_imageio_rgba(cpath, &rgba, &uw, &uh)) {
-            fprintf(stderr, "[gpu2d] image decode failed (%s): JPEG decode failed\n", cpath);
-            return 0;
-        }
-    }
-#endif
-    unsigned err = 0;
-    if (!rgba) {
-        err = lodepng_decode32_file(&rgba, &uw, &uh, cpath);
-    }
-    if (err) {
-#ifdef RAE_HAS_RAYLIB
-        Image img = LoadImage(cpath);
-        if (img.data != NULL) {
-            ImageFormat(&img, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
-            uw = (unsigned)img.width;
-            uh = (unsigned)img.height;
-            size_t byte_count = (size_t)uw * (size_t)uh * 4u;
-            rgba = (unsigned char*)malloc(byte_count);
-            if (rgba) memcpy(rgba, img.data, byte_count);
-            UnloadImage(img);
-            if (!rgba) return 0;
-        } else {
-            fprintf(stderr, "[gpu2d] image decode failed (%s): %s\n", cpath, lodepng_error_text(err));
-            return 0;
-        }
-#else
-        fprintf(stderr, "[gpu2d] image decode failed (%s): %s\n", cpath, lodepng_error_text(err));
+    const char* why = "decode failed";
+    if (!rae_g2d_decode_rgba(cpath, &rgba, &uw, &uh, &why)) {
+        fprintf(stderr, "[gpu2d] image decode failed (%s): %s\n", cpath, why);
         return 0;
-#endif
     }
     WGPUTextureDescriptor td; memset(&td, 0, sizeof(td));
     td.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst;
@@ -5328,6 +5397,7 @@ void rae_ext_gpu2d_initWindow(int64_t w, int64_t h, rae_String t) { (void)w; (vo
 rae_Bool rae_ext_gpu2d_pollClose(void) { return 1; }
 void rae_ext_gpu2d_waitEvents(double timeoutSec) { (void)timeoutSec; }
 int64_t rae_ext_gpu2d_loadImage(rae_String path) { (void)path; return 0; }
+int64_t rae_ext_gpu2d_decodeImageProbe(rae_String path) { (void)path; return 0; }
 int64_t rae_ext_gpu2d_loadImageKey(rae_String key, rae_String path) { (void)key; (void)path; return 0; }
 rae_Bool rae_ext_gpu2d_hasImageKey(rae_String key) { (void)key; return 0; }
 void rae_ext_gpu2d_drawImageKey(rae_String key, double x, double y, double w, double h, double radius, int64_t tint) { (void)key; (void)x; (void)y; (void)w; (void)h; (void)radius; (void)tint; }
