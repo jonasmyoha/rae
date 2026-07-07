@@ -1,5 +1,9 @@
 # 98_mobile_ui — Design
 
+Status: **legacy/reference mobile UI example.** New coordinate-system work should
+target `examples/106_mobile_ui` first. Keep this example as a raylib-era
+comparison point unless a future queue task explicitly revives 98 migration.
+
 A scene-driven UI runtime for Rae, built for mobile-shaped layouts. The
 target reference is the music player mockup in `references/music_player.webp`
 and the two cropped screens in `screens/music_player_screen_*.png`.
