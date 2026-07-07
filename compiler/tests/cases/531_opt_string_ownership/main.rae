@@ -1,0 +1,63 @@
+# #138 regression: `opt String` (and opt T generally) is represented
+# as RaeAny in the C backend — every synthesised per-struct helper
+# (deep copy, toJson/fromJson, drops) must classify fields by
+# REPRESENTATION before base type. Previously a struct with an
+# `opt String` field failed to compile: the base-type-only
+# classifiers emitted rae_string_copy / .len reads / rae_String
+# assignment against the RaeAny field.
+
+type Card {
+  title: String
+  note: opt String
+}
+
+func describe(c: view Card) ret String {
+  var out: String = ""
+  out = out.concat(other: c.title)
+  if c.note is not none {
+    let n: String = c.note
+    out = out.concat(other: "/").concat(other: n)
+  }
+  ret out
+}
+
+func makeNote(flag: view Bool) ret opt String {
+  if flag {
+    var s: String = ""
+    s = s.concat(other: "noted")
+    ret s
+  }
+  ret none
+}
+
+func main() {
+  # opt String local: call result, reassigned some -> none -> some,
+  # then scope-dropped. Each reassignment must drop the previous
+  # payload via the RaeAny path, not the rae_String path.
+  var o: opt String = makeNote(flag: true)
+  o = makeNote(flag: false)
+  o = makeNote(flag: true)
+  if o is not none {
+    let s: String = o
+    log("o={s}")
+  }
+
+  # Struct with an opt String field: literal init with an own-moved
+  # String sibling, field reassign some -> none, scope drop.
+  var titleA: String = ""
+  titleA = titleA.concat(other: "alpha")
+  var card: Card = { title: own titleA, note: makeNote(flag: true) }
+  log(describe(c: card))
+  card.note = makeNote(flag: true)
+  card.note = none
+  log(describe(c: card))
+
+  # some-wrap of an existing String local.
+  var plain: String = ""
+  plain = plain.concat(other: "wrapped")
+  var w: opt String = plain
+  if w is not none {
+    let ws: String = w
+    log("w={ws}")
+  }
+}
