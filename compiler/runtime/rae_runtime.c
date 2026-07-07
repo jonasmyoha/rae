@@ -5800,6 +5800,118 @@ rae_Bool rae_ext_sys_spotify_fetchArtwork(rae_String url, rae_String outPath) {
     return WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
 
+typedef struct {
+    char* url;
+    char* out;
+    int status; /* 0=pending, 1=success, 2=failed */
+    pthread_t thread;
+} RaeSpotifyArtworkJob;
+
+#define RAE_SPOTIFY_ART_JOBS 64
+static RaeSpotifyArtworkJob g_spotify_art_jobs[RAE_SPOTIFY_ART_JOBS];
+static pthread_mutex_t g_spotify_art_mu = PTHREAD_MUTEX_INITIALIZER;
+
+static char* rae_strndup_bytes(const uint8_t* data, int64_t len) {
+    if (!data || len <= 0) return NULL;
+    char* out = (char*)malloc((size_t)len + 1);
+    if (!out) return NULL;
+    memcpy(out, data, (size_t)len);
+    out[len] = '\0';
+    return out;
+}
+
+static int rae_spotify_fetch_artwork_c(const char* url_c, const char* out_c) {
+    if (!url_c || !out_c || !url_c[0] || !out_c[0]) return 0;
+    pid_t pid = fork();
+    if (pid < 0) return 0;
+    if (pid == 0) {
+        char* argv[] = { (char*)"curl", (char*)"-sLf", (char*)url_c, (char*)"-o", (char*)out_c, NULL };
+        execvp("/usr/bin/curl", argv);
+        _exit(127);
+    }
+    int status = 0;
+    waitpid(pid, &status, 0);
+    return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+
+static void* rae_spotify_art_worker(void* arg) {
+    RaeSpotifyArtworkJob* job = (RaeSpotifyArtworkJob*)arg;
+    int ok = rae_spotify_fetch_artwork_c(job->url, job->out);
+    pthread_mutex_lock(&g_spotify_art_mu);
+    job->status = ok ? 1 : 2;
+    pthread_mutex_unlock(&g_spotify_art_mu);
+    return NULL;
+}
+
+rae_Bool rae_ext_sys_spotify_fetchArtworkAsync(rae_String url, rae_String outPath) {
+    if (!url.data || url.len == 0 || !outPath.data || outPath.len == 0) return false;
+    char* url_c = rae_strndup_bytes(url.data, url.len);
+    char* out_c = rae_strndup_bytes(outPath.data, outPath.len);
+    if (!url_c || !out_c) { free(url_c); free(out_c); return false; }
+
+    pthread_mutex_lock(&g_spotify_art_mu);
+    int free_idx = -1;
+    for (int i = 0; i < RAE_SPOTIFY_ART_JOBS; i++) {
+        if (g_spotify_art_jobs[i].out) {
+            if (strcmp(g_spotify_art_jobs[i].out, out_c) == 0) {
+                pthread_mutex_unlock(&g_spotify_art_mu);
+                free(url_c);
+                free(out_c);
+                return true;
+            }
+        } else if (free_idx < 0) {
+            free_idx = i;
+        }
+    }
+    if (free_idx < 0) {
+        pthread_mutex_unlock(&g_spotify_art_mu);
+        free(url_c);
+        free(out_c);
+        return false;
+    }
+    RaeSpotifyArtworkJob* job = &g_spotify_art_jobs[free_idx];
+    job->url = url_c;
+    job->out = out_c;
+    job->status = 0;
+    if (pthread_create(&job->thread, NULL, rae_spotify_art_worker, job) != 0) {
+        job->url = NULL;
+        job->out = NULL;
+        job->status = 2;
+        pthread_mutex_unlock(&g_spotify_art_mu);
+        free(url_c);
+        free(out_c);
+        return false;
+    }
+    pthread_detach(job->thread);
+    pthread_mutex_unlock(&g_spotify_art_mu);
+    return true;
+}
+
+int64_t rae_ext_sys_spotify_fetchArtworkStatus(rae_String outPath) {
+    if (!outPath.data || outPath.len == 0) return 0;
+    char* out_c = rae_strndup_bytes(outPath.data, outPath.len);
+    if (!out_c) return 0;
+    int result = 0;
+    pthread_mutex_lock(&g_spotify_art_mu);
+    for (int i = 0; i < RAE_SPOTIFY_ART_JOBS; i++) {
+        RaeSpotifyArtworkJob* job = &g_spotify_art_jobs[i];
+        if (job->out && strcmp(job->out, out_c) == 0) {
+            result = job->status;
+            if (job->status != 0) {
+                free(job->url);
+                free(job->out);
+                job->url = NULL;
+                job->out = NULL;
+                job->status = 0;
+            }
+            break;
+        }
+    }
+    pthread_mutex_unlock(&g_spotify_art_mu);
+    free(out_c);
+    return result;
+}
+
 static void rae_url_encode_append(char* out, size_t* off, size_t cap, const char* s, size_t n) {
     static const char hex[] = "0123456789ABCDEF";
     for (size_t i = 0; i < n && *off + 3 < cap; i++) {
@@ -5894,6 +6006,8 @@ double rae_ext_sys_spotify_duration(void)       { return 0.0; }
 void rae_ext_sys_spotify_playUri(rae_String uri) { (void)uri; }
 void rae_ext_sys_spotify_playQuery(rae_String query) { (void)query; }
 rae_Bool rae_ext_sys_spotify_fetchArtwork(rae_String url, rae_String outPath) { (void)url; (void)outPath; return false; }
+rae_Bool rae_ext_sys_spotify_fetchArtworkAsync(rae_String url, rae_String outPath) { (void)url; (void)outPath; return false; }
+int64_t rae_ext_sys_spotify_fetchArtworkStatus(rae_String outPath) { (void)outPath; return 2; }
 rae_String rae_ext_sys_spotify_itunesSearchArtworkUrl(rae_String term) { (void)term; return (rae_String){NULL, 0, 0, 0}; }
 
 #endif  /* __APPLE__ */
