@@ -156,9 +156,9 @@ func buildTrackList(world: mod UiWorld, trackScene: view Scene, rows: view List(
     let rowKind: String = "trackRow"
     setWidgetIdentity(world: world, entity: row, id: rowWidgetId, kind: rowKind)
     setWidgetState(world: world, entity: row, enabled: true, selected: isPlayingRow, loading: false, error: false)
-    let playbackSource: String = dataSourcePlaybackKey()
-    let playingField: String = dataFieldPlayingTrackKey()
-    setDataDependency(world: world, entity: row, sourceKey: playbackSource, fieldKey: playingField, observedRevision: playback.revision)
+    let playbackSource: DataResourceId = dataResourcePlayback()
+    let playingField: DataFieldId = dataFieldPlayingTrack()
+    setDataDependency(world: world, entity: row, resource: playbackSource, field: playingField, observedRevision: playback.revision)
     # Whole-row click → start this exact song and reflect it in the
     # mini-player. The album stem + track index are both encoded into
     # the actionId (`song.openref.<idx>.<stem>`) so a playlist row plays

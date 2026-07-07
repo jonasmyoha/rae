@@ -1,10 +1,11 @@
-# App-level data source keys and revision counters for the 106 UI.
+# App-level typed data resources and revision counters for the 106 UI.
 #
-# UI widgets declare dependencies using string keys, but app code should
-# get those strings from this module. That keeps today's component
-# model aligned with the future typed-resource migration.
+# UI widgets declare dependencies using DataResourceId/DataFieldId, so
+# refresh systems can match resources without string comparisons.
 
-type AppDataSources pub {
+import ui/components
+
+type AppDataResources pub {
   albumsRevision: Int
   historyRevision: Int
   libraryRevision: Int
@@ -15,8 +16,8 @@ type AppDataSources pub {
   debugRevision: Int
 }
 
-func createAppDataSources() pub ret AppDataSources {
-  ret AppDataSources {
+func createAppDataResources() pub ret AppDataResources {
+  ret AppDataResources {
     albumsRevision: 0
     historyRevision: 0
     libraryRevision: 0
@@ -28,44 +29,44 @@ func createAppDataSources() pub ret AppDataSources {
   }
 }
 
-func dataSourceAlbumsKey() pub ret String {
-  ret "albums"
+func dataResourceAlbums() pub ret DataResourceId {
+  ret DataResourceId.albums
 }
 
-func dataSourceHistoryKey() pub ret String {
-  ret "history"
+func dataResourceHistory() pub ret DataResourceId {
+  ret DataResourceId.history
 }
 
-func dataSourceLibraryKey() pub ret String {
-  ret "library"
+func dataResourceLibrary() pub ret DataResourceId {
+  ret DataResourceId.library
 }
 
-func dataSourcePlaybackKey() pub ret String {
-  ret "playback"
+func dataResourcePlayback() pub ret DataResourceId {
+  ret DataResourceId.playback
 }
 
-func dataSourcePlaylistsKey() pub ret String {
-  ret "playlists"
+func dataResourcePlaylists() pub ret DataResourceId {
+  ret DataResourceId.playlists
 }
 
-func dataSourceSpotifyKey() pub ret String {
-  ret "spotify"
+func dataResourceSpotify() pub ret DataResourceId {
+  ret DataResourceId.spotify
 }
 
-func dataSourceSettingsKey() pub ret String {
-  ret "settings"
+func dataResourceSettings() pub ret DataResourceId {
+  ret DataResourceId.settings
 }
 
-func dataSourceDebugKey() pub ret String {
-  ret "debug"
+func dataResourceDebug() pub ret DataResourceId {
+  ret DataResourceId.debug
 }
 
-func dataFieldAllKey() pub ret String {
-  ret "all"
+func dataFieldAll() pub ret DataFieldId {
+  ret DataFieldId.all
 }
 
-func dataFieldIsPlayingKey() pub ret String {
-  ret "isPlaying"
+func dataFieldIsPlaying() pub ret DataFieldId {
+  ret DataFieldId.isPlaying
 }
 
 # Field key for "is the current track in the liked playlist" — used by
@@ -73,46 +74,58 @@ func dataFieldIsPlayingKey() pub ret String {
 # (album stem, track index) pair rather than a single revision, so the
 # sync system recomputes it per frame and flips WidgetState.selected
 # only when the answer changes.
-func dataFieldLikedKey() pub ret String {
-  ret "likedTrack"
+func dataFieldLiked() pub ret DataFieldId {
+  ret DataFieldId.likedTrack
 }
 
-func dataFieldPlayingTrackKey() pub ret String {
-  ret "playingTrack"
+func dataFieldPlayingTrack() pub ret DataFieldId {
+  ret DataFieldId.playingTrack
 }
 
-func dataFieldDebugToggleKey() pub ret String {
-  ret "debugToggle"
+func dataFieldDebugToggle() pub ret DataFieldId {
+  ret DataFieldId.debugToggle
 }
 
-func bumpAlbumsSource(sources: mod AppDataSources) pub {
-  sources.albumsRevision = sources.albumsRevision + 1
+func bumpAlbumsResource(resources: mod AppDataResources) pub {
+  resources.albumsRevision = resources.albumsRevision + 1
 }
 
-func bumpHistorySource(sources: mod AppDataSources) pub {
-  sources.historyRevision = sources.historyRevision + 1
+func bumpHistoryResource(resources: mod AppDataResources) pub {
+  resources.historyRevision = resources.historyRevision + 1
 }
 
-func bumpLibrarySource(sources: mod AppDataSources) pub {
-  sources.libraryRevision = sources.libraryRevision + 1
+func bumpLibraryResource(resources: mod AppDataResources) pub {
+  resources.libraryRevision = resources.libraryRevision + 1
 }
 
-func bumpPlaybackSource(sources: mod AppDataSources) pub {
-  sources.playbackRevision = sources.playbackRevision + 1
+func bumpPlaybackResource(resources: mod AppDataResources) pub {
+  resources.playbackRevision = resources.playbackRevision + 1
 }
 
-func bumpPlaylistsSource(sources: mod AppDataSources) pub {
-  sources.playlistsRevision = sources.playlistsRevision + 1
+func bumpPlaylistsResource(resources: mod AppDataResources) pub {
+  resources.playlistsRevision = resources.playlistsRevision + 1
 }
 
-func bumpSpotifySource(sources: mod AppDataSources) pub {
-  sources.spotifyRevision = sources.spotifyRevision + 1
+func bumpSpotifyResource(resources: mod AppDataResources) pub {
+  resources.spotifyRevision = resources.spotifyRevision + 1
 }
 
-func bumpSettingsSource(sources: mod AppDataSources) pub {
-  sources.settingsRevision = sources.settingsRevision + 1
+func bumpSettingsResource(resources: mod AppDataResources) pub {
+  resources.settingsRevision = resources.settingsRevision + 1
 }
 
-func bumpDebugSource(sources: mod AppDataSources) pub {
-  sources.debugRevision = sources.debugRevision + 1
+func bumpDebugResource(resources: mod AppDataResources) pub {
+  resources.debugRevision = resources.debugRevision + 1
+}
+
+func dataResourceRevision(resources: view AppDataResources, resource: view DataResourceId) pub ret Int {
+  if resource is DataResourceId.albums { ret resources.albumsRevision }
+  if resource is DataResourceId.history { ret resources.historyRevision }
+  if resource is DataResourceId.library { ret resources.libraryRevision }
+  if resource is DataResourceId.playback { ret resources.playbackRevision }
+  if resource is DataResourceId.playlists { ret resources.playlistsRevision }
+  if resource is DataResourceId.spotify { ret resources.spotifyRevision }
+  if resource is DataResourceId.settings { ret resources.settingsRevision }
+  if resource is DataResourceId.debug { ret resources.debugRevision }
+  ret 0
 }

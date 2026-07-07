@@ -638,11 +638,32 @@ func deserWidgetState(doc: view JsonDoc, val: view JsonValue) ret WidgetState {
   }
 }
 
+func dataResourceIdFromString(name: view String) ret DataResourceId {
+  if name.equals(other: "albums") { ret DataResourceId.albums }
+  if name.equals(other: "history") { ret DataResourceId.history }
+  if name.equals(other: "library") { ret DataResourceId.library }
+  if name.equals(other: "playback") { ret DataResourceId.playback }
+  if name.equals(other: "playlists") { ret DataResourceId.playlists }
+  if name.equals(other: "spotify") { ret DataResourceId.spotify }
+  if name.equals(other: "settings") { ret DataResourceId.settings }
+  if name.equals(other: "debug") { ret DataResourceId.debug }
+  ret DataResourceId.none
+}
+
+func dataFieldIdFromString(name: view String) ret DataFieldId {
+  if name.equals(other: "all") { ret DataFieldId.all }
+  if name.equals(other: "isPlaying") { ret DataFieldId.isPlaying }
+  if name.equals(other: "likedTrack") { ret DataFieldId.likedTrack }
+  if name.equals(other: "playingTrack") { ret DataFieldId.playingTrack }
+  if name.equals(other: "debugToggle") { ret DataFieldId.debugToggle }
+  ret DataFieldId.none
+}
+
 func deserDataDependency(doc: view JsonDoc, val: view JsonValue) ret DataDependency {
   let sourceKey: String = optString(doc: doc, container: val, key: "sourceKey", fallback: "")
   let fieldKey: String = optString(doc: doc, container: val, key: "fieldKey", fallback: "")
   let rev: Int = optInt(doc: doc, container: val, key: "observedRevision", fallback: 0)
-  ret DataDependency { sourceKey: own sourceKey, fieldKey: own fieldKey, observedRevision: rev }
+  ret DataDependency { resource: dataResourceIdFromString(name: sourceKey), field: dataFieldIdFromString(name: fieldKey), observedRevision: rev }
 }
 
 func deserActionBinding(doc: view JsonDoc, val: view JsonValue) ret ActionBinding {
@@ -656,7 +677,7 @@ func deserRefreshRegion(doc: view JsonDoc, val: view JsonValue) ret RefreshRegio
   let sourceKey: String = optString(doc: doc, container: val, key: "sourceKey", fallback: "")
   let rev: Int = optInt(doc: doc, container: val, key: "observedRevision", fallback: 0)
   let dirty: Bool = optBool(doc: doc, container: val, key: "dirty", fallback: true)
-  ret RefreshRegion { regionKey: own regionKey, sourceKey: own sourceKey, observedRevision: rev, dirty: dirty }
+  ret RefreshRegion { regionKey: own regionKey, resource: dataResourceIdFromString(name: sourceKey), observedRevision: rev, dirty: dirty }
 }
 
 func deserPrimaryType(doc: view JsonDoc, val: view JsonValue) ret PrimaryType {

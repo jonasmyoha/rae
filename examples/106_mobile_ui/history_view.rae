@@ -100,9 +100,9 @@ func buildHistoryThumb(world: mod UiWorld, entry: view PlayHistoryEntry, size: v
     let kind: String = "historyArtPlaceholder"
     setWidgetIdentity(world: world, entity: thumb, id: widgetId, kind: kind)
     setWidgetState(world: world, entity: thumb, enabled: true, selected: false, loading: true, error: false)
-    let source: String = dataSourceHistoryKey()
-    let field: String = dataFieldAllKey()
-    setDataDependency(world: world, entity: thumb, sourceKey: source, fieldKey: field, observedRevision: 0)
+    let source: DataResourceId = dataResourceHistory()
+    let field: DataFieldId = dataFieldAll()
+    setDataDependency(world: world, entity: thumb, resource: source, field: field, observedRevision: 0)
     setOpacityStateStyle(world: world, entity: thumb, disabledAlpha: 1.0, loadingAlpha: 0.72, errorAlpha: 0.42)
     setHoverScale(world: world, entity: thumb, hoverScale: 1.12)
   }
