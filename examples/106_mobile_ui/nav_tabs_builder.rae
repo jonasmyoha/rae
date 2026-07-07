@@ -384,30 +384,41 @@ func mountBottomDockOverlay(
 
   # Mini-player matches the floating tab capsule width and radius, so
   # their bottom corners align visually when the tab bar overlaps it.
+  #
+  # The mini-player CARD itself is double height (`miniCardH`): the
+  # scene mounts onto a 2x-tall root, so the gradient card genuinely
+  # extends down behind the tab capsule instead of an invisible empty
+  # slot doing the overlapping (the earlier attempt — mechanically
+  # overlapped, visually nothing changed). Extra bottom padding equal
+  # to the overlap keeps the row contents (thumb / titles / controls)
+  # centered in the visible TOP half; the card's empty lower half
+  # slides under the menubar via the dock's negative layout gap.
   let miniW: Float = world.layoutW - floatingDockInset * 2.0
-  let miniSlot: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: miniSlot, w: miniW, h: miniCardH)
-  setLayout(world: world, entity: miniSlot, kind: layV, gap: 0.0, alignCross: alignC)
   let miniLabel: String = "mini-player"
   let mini: EntityId = buildMiniPlayerInstance(
     world: world
     scene: scenes.miniPlayer
     w: miniW
-    h: miniPlayerH
+    h: miniCardH
     label: miniLabel
     playback: playback
     state: state
   )
-  let miniKids: List(EntityId) = createList(EntityId, cap: 1)
-  miniKids.add(value: mini)
-  attachChildren(world: world, parent: miniSlot, kids: miniKids)
+  if componentHas(this: world.paddings, entity: mini) {
+    let curPad: Padding = componentGet(this: world.paddings, entity: mini)
+    let grownPad: Padding = { insets: Insets { l: curPad.insets.l, t: curPad.insets.t, r: curPad.insets.r, b: curPad.insets.b + miniOverlap } }
+    componentSet(this: world.paddings, entity: mini, data: grownPad)
+  } else {
+    let freshPad: Padding = { insets: Insets { l: 0.0, t: 0.0, r: 0.0, b: miniOverlap } }
+    componentSet(this: world.paddings, entity: mini, data: freshPad)
+  }
 
   # Nav-tabs bar: inset rounded capsule, painted after the mini-player
   # so it covers the mini-player's lower half.
   let bar: EntityId = mountNavTabsBar(world: world, activeTab: activeTab, scenes: scenes)
 
   let kids: List(EntityId) = createList(EntityId, cap: 2)
-  kids.add(value: miniSlot)
+  kids.add(value: mini)
   kids.add(value: bar)
   attachChildren(world: world, parent: dock, kids: kids)
   ret dock
