@@ -18,6 +18,8 @@ import ui/scene
 import ui/scene_instance
 
 let tabIconSize: Float = 69.39759036144578
+let floatingDockInset: Float = 52.04819277108433
+let floatingDockRadius: Float = 69.39759036144578
 
 # Texture-registry key for the nav-tab band's frosted-glass blur.
 # The host renders content first, captures the strip of pixels behind
@@ -142,12 +144,12 @@ func buildNavTabsForScreen(
   scenes: view AlbumScenes
 ) pub ret EntityId {
   let bar: EntityId = createEntity(world: world)
-  # Full-bleed: bar spans the entire layout extent (window width on
-  # desktop) with no outerPad margin. The dark background paints behind
-  # the four tabs all the way to both edges, the way iOS tab bars do;
-  # the four tabs (tabW = barW/4) spread evenly across the full width.
-  let barW: Float = world.layoutW
+  # Modern iOS-style floating tab bar: inset from the screen edges and
+  # rounded into a capsule instead of painting a sharp full-width strip.
+  let barW: Float = world.layoutW - floatingDockInset * 2.0
   setRectFixed(world: world, entity: bar, w: barW, h: navTabsH)
+  let barFill: RgbaColor = { r: surfaceColor.r, g: surfaceColor.g, b: surfaceColor.b, a: 238 }
+  setShapeRounded(world: world, entity: bar, fill: barFill, radius: floatingDockRadius)
   # Frosted-glass backdrop: paint a captured-and-blurred snapshot of
   # whatever's behind the bar before the tab icons paint on top. The
   # host (main.rae's per-frame render) is responsible for splitting
@@ -336,14 +338,14 @@ func mountBottomDockOverlay(
   reg: view TextureRegistry
 ) pub ret EntityId {
   let dock: EntityId = createEntity(world: world)
-  # The dock's *visual* area extends `dockBgExtend` pixels above the
-  # mini-player + nav-tabs band so the gradient backdrop fades out
-  # above the widgets, overlapping page content underneath. The
-  # children themselves still sit in the original bottom band — a
-  # matching top Padding pushes the Vertical layout down by the
-  # same amount.
+  # The dock's visual area extends above the overlapping mini-player
+  # and floating tab capsule so a soft shadow can fade into page
+  # content. The mini-player is intentionally overlapped by the tab bar:
+  # its top half remains visible while the bottom half tucks behind the
+  # capsule, reading as one combined iOS-style bottom control.
   let dockBgExtend: Float = 216.86746987951807
-  let dockH: Float = miniPlayerH + navTabsH + dockBgExtend
+  let miniOverlap: Float = miniPlayerH * 0.5
+  let dockH: Float = miniPlayerH + navTabsH - miniOverlap + dockBgExtend
   # Edge-to-edge: the dock spans the full layout extent (window width on
   # desktop), not the phone content column. ExtentAnchor.fill makes the
   # layout place it at x=0 with width = world.layoutW; the rect width is
@@ -353,7 +355,7 @@ func mountBottomDockOverlay(
   componentSet(this: world.extentAnchors, entity: dock, data: dockAnchor)
   let layV: LayoutType = LayoutType.vertical
   let alignC: AlignKind = AlignKind.center
-  setLayout(world: world, entity: dock, kind: layV, gap: 0.0, alignCross: alignC)
+  setLayout(world: world, entity: dock, kind: layV, gap: 0.0 - miniOverlap, alignCross: alignC)
   let dockPad: Padding = { insets: Insets { l: 0.0, t: dockBgExtend, r: 0.0, b: 0.0 } }
   componentSet(this: world.paddings, entity: dock, data: dockPad)
   # Position the whole dock so its bottom edge hits the active Viewport
@@ -371,14 +373,10 @@ func mountBottomDockOverlay(
   # created the named layer entities at boot.
   let dockLayerId: String = "dock"
   setLayerById(world: world, entity: dock, id: dockLayerId)
-  # Vertical shadow gradient — fully transparent at the top, fading
-  # into a slightly-translucent dark blue-tinted shadow at the
-  # bottom. Casts a soft shadow onto page content directly above the
-  # menubar (the 100-px extension is fully transparent at its top
-  # edge so it doesn't clip the page hard). The mini-player pill and
-  # nav-tabs paint on top of this with their own opaque visuals.
+  # Very soft vertical shadow only. Keep this low-alpha so it doesn't
+  # read as a full-width blue rectangle behind the floating controls.
   let shadowTop: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
-  let shadowBottom: RgbaColor = { r: 18, g: 26, b: 56, a: 200 }
+  let shadowBottom: RgbaColor = { r: 18, g: 26, b: 56, a: 54 }
   let shadowGrad: GradientFill = { from: shadowTop, to: shadowBottom, angle: 90.0 }
   componentSet(this: world.gradientFills, entity: dock, data: shadowGrad)
   # Register the dock under the "menubar shadow" nodeId so the
@@ -389,9 +387,9 @@ func mountBottomDockOverlay(
   let shadowKey: String = pageScopedKey(pageId: dockPageId, nodeId: shadowNodeId)
   world.nodeIds.set(k: shadowKey, value: dock.value)
 
-  # Mini-player: indented by outerPad on each side of the full-width
-  # dock. Vertical layout with alignCross=Center centers it.
-  let miniW: Float = world.layoutW - outerPad * 2.0
+  # Mini-player matches the floating tab capsule width and radius, so
+  # their bottom corners align visually when the tab bar overlaps it.
+  let miniW: Float = world.layoutW - floatingDockInset * 2.0
   let miniLabel: String = "mini-player"
   let mini: EntityId = buildMiniPlayerInstance(
     world: world
@@ -403,8 +401,8 @@ func mountBottomDockOverlay(
     state: state
   )
 
-  # Nav-tabs bar: full screen width, solid dark backdrop. The bar's
-  # own builder sets its Rect to phoneFrameW × navTabsH.
+  # Nav-tabs bar: inset rounded capsule, painted after the mini-player
+  # so it covers the mini-player's lower half.
   let bar: EntityId = mountNavTabsBar(world: world, activeTab: activeTab, scenes: scenes)
 
   let kids: List(EntityId) = createList(EntityId, cap: 2)
