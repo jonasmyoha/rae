@@ -68,6 +68,9 @@ func registeredComponentNames() ret List(String) {
   names.add(value: "DataDependency")
   names.add(value: "ActionBinding")
   names.add(value: "RefreshRegion")
+  # Art direction (S6)
+  names.add(value: "Aspect")
+  names.add(value: "ScaleToFit")
   # Identity / metadata
   names.add(value: "Name")
   names.add(value: "PrimaryType")
@@ -250,7 +253,15 @@ func parseShapeKind(s: view String) ret ShapeKind {
 func parseScaleMode(s: view String) ret ScaleMode {
   let fi: String = "Fill"
   let st: String = "Stretch"
+  # CSS object-fit vocabulary (S6): Cover = aspect-preserving crop
+  # (same as Fill), Contain = aspect-preserving letterbox (same as
+  # the Fit default). Both spellings are accepted so scenes can use
+  # whichever reads better.
+  let cover: String = "Cover"
   if s.equals(other: fi) {
+    ret ScaleMode.fill
+  }
+  if s.equals(other: cover) {
     ret ScaleMode.fill
   }
   if s.equals(other: st) {
@@ -886,6 +897,23 @@ func applyComponentByName(
   }
   if name.equals(other: "RefreshRegion") {
     componentSet(this: world.refreshRegions, entity: entity, data: deserRefreshRegion(doc: doc, val: val))
+    ret
+  }
+  if name.equals(other: "Aspect") {
+    let ratio: Float = optFloat(doc: doc, container: val, key: "ratio", fallback: 1.0)
+    let asp: Aspect = { ratio: ratio }
+    componentSet(this: world.aspects, entity: entity, data: asp)
+    ret
+  }
+  if name.equals(other: "ScaleToFit") {
+    let modeStr: String = optString(doc: doc, container: val, key: "mode", fallback: "Contain")
+    var fitMode: FitMode = FitMode.contain
+    let coverStr: String = "Cover"
+    if modeStr.equals(other: coverStr) {
+      fitMode = FitMode.cover
+    }
+    let stf: ScaleToFit = { mode: fitMode }
+    componentSet(this: world.scaleToFits, entity: entity, data: stf)
     ret
   }
   # Unknown / not-yet-handled components are ignored. The scene loader

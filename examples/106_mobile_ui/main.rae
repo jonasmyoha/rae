@@ -21,6 +21,7 @@ import file_watch
 import hot_reload
 import sdf_text
 import ui/ecs
+import ui/fit
 import ui/layout
 import ui/theme
 import ui/transform
@@ -82,6 +83,12 @@ func main() {
   # Missing file or stale fields fall back silently to the
   # defaults `createAppState` / `createPlaybackState` set above.
   restoreAppState(state: appState, playback: playback, path: stateFilePath)
+  # RAE_UI_CANVAS=1 opens the canvas overlay (S5 canvasOpen state) at
+  # boot — the headless proof hook for #212. Not persisted.
+  let canvasEnv: String = getEnv(name: "RAE_UI_CANVAS")
+  if canvasEnv.equals(other: "1") {
+    appState.canvasOpen = true
+  }
   if appState.hasWindowPosition {
     uiSetWindowPosition(x: appState.windowX, y: appState.windowY)
   }
@@ -409,6 +416,10 @@ func main() {
       # re-transform safety net.
       let layoutCache: LayoutCache = createLayoutCache()
       layoutSystemIfDirty(world: world, cache: layoutCache)
+      # Art-direction pass (#212 S6): Aspect + ScaleToFit run between
+      # layout and transform. Change-gated, so an idle frame with an
+      # unchanged layout writes nothing.
+      fitSystem(world: world)
       let transformCache: TransformCache = createTransformCache()
       transformSystemIfDirty(world: world, cache: transformCache)
       # Find the scroll-target entity for this world. Scroll handlers
@@ -630,6 +641,7 @@ func main() {
           # button…). Wheel scrolling never sets `dragJustReleased`,
           # so this only fires after an actual drag gesture.
           var nextScreen: Screen = currentScreen
+          let canvasOpenBefore: Bool = appState.canvasOpen
           if dragJustReleased is false {
             nextScreen = dispatchActions(input: input, current: currentScreen, playback: playback, state: appState, world: world, spotifyEnabled: spotifyState.enabled)
           } else {
@@ -640,6 +652,13 @@ func main() {
               let dropped: Int = input.events.length
               log("[dispatch] dragJustReleased=true, dropping {dropped} pending event(s)")
             }
+          }
+
+          # canvas.toggle / canvas.close only flip the AppState flag;
+          # re-apply the canvas scene's states here where the scene
+          # registry is in scope (#212 S5).
+          if appState.canvasOpen is not canvasOpenBefore {
+            applyCanvasState(world: world, scenes: scenes, state: appState)
           }
 
           # Persist UI state after every dispatched action. `dispatch
@@ -814,6 +833,7 @@ func main() {
           # remounted them; full-world rebuilds handle the same in buildAppWorld.
           let safeFrame: Insets = applySafeAreas(world: world, viewport: viewport)
           layoutSystemIfDirty(world: world, cache: layoutCache)
+          fitSystem(world: world)
           transformSystemIfDirty(world: world, cache: transformCache)
 
           let activeDecision: RenderActiveDecision = decideActive(
