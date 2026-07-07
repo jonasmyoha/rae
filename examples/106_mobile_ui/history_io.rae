@@ -39,11 +39,24 @@ import sys
 var gHistoryArtCursor: Int = 0 - 1
 var gHistoryArtSeenLen: Int = 0
 var gHistoryArtDone: Bool = false
+var gHistoryArtFailedPaths: String = "|"
 
 func resetHistoryArtLoader() pub {
   gHistoryArtCursor = 0 - 1
   gHistoryArtSeenLen = 0
   gHistoryArtDone = false
+}
+
+func historyArtFailed(path: view String) ret Bool {
+  let needle: String = "|{path}|"
+  ret gHistoryArtFailedPaths.contains(sub: needle)
+}
+
+func markHistoryArtFailed(path: view String) {
+  if historyArtFailed(path: path) {
+    ret
+  }
+  gHistoryArtFailedPaths = gHistoryArtFailedPaths.concat(other: path).concat(other: "|")
 }
 
 # Escape a string for embedding inside a JSON `"..."` literal.
@@ -337,10 +350,15 @@ func loadCachedHistoryArtChunk(history: view PlayHistory, budget: view Int) pub 
       if gpu2d.hasImageKey(key: e.textureKey) is false {
         let suffix: String = e.textureKey.sub(start: pLen, len: e.textureKey.length() - pLen)
         let path: String = cachedArtworkPath(imageHash: suffix)
-        if sys.exists(path: path) {
+        if historyArtFailed(path: path) {
+          did = did + 1
+        } else if sys.exists(path: path) {
           let keyForGpu: String = "{e.textureKey}"
           let pathForGpu: String = "{path}"
           let h: Int = gpu2d.loadImageKey(key: keyForGpu, path: pathForGpu)
+          if h <= 0 {
+            markHistoryArtFailed(path: path)
+          }
           did = did + 1
         } else {
           if e.artworkUrl.length() > 0 {
@@ -349,9 +367,13 @@ func loadCachedHistoryArtChunk(history: view PlayHistory, budget: view Int) pub 
               let keyForGpu: String = "{e.textureKey}"
               let pathForGpu: String = "{path}"
               let h: Int = gpu2d.loadImageKey(key: keyForGpu, path: pathForGpu)
+              if h <= 0 {
+                markHistoryArtFailed(path: path)
+              }
               did = did + 1
             } else {
               if status is 2 {
+                markHistoryArtFailed(path: path)
                 did = did + 1
               } else {
                 let urlForFetch: String = "{e.artworkUrl}"
