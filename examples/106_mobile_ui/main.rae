@@ -636,66 +636,41 @@ func main() {
             rubberDim: viewport.layoutH
           )
 
-          # Skip dispatch on the single frame where a drag just
-          # ended — the release-click would otherwise hit whatever
-          # is under the finger (a tab, a cover tile, the play
-          # button…). Wheel scrolling never sets `dragJustReleased`,
-          # so this only fires after an actual drag gesture.
-          var nextScreen: Screen = currentScreen
-          let canvasOpenBefore: Bool = appState.canvasOpen
-          if dragJustReleased is false {
-            nextScreen = dispatchActions(input: input, current: currentScreen, playback: playback, state: appState, world: world, spotifyEnabled: spotifyState.enabled)
-          } else {
-            # Diagnostic: drag-release path skipped dispatch. If you
-            # see this while doing what feels like a click, the
-            # gesture was reclassified as a drag (see dragThreshold).
-            if input.events.length > 0 {
-              let dropped: Int = input.events.length
-              log("[dispatch] dragJustReleased=true, dropping {dropped} pending event(s)")
-            }
-          }
+          # Input dispatch phase. Action handlers mutate AppState /
+          # PlaybackState / data-source revisions; dependent UI
+          # visuals are refreshed by the following UI-diff phase.
+          let inputDispatch: FrameInputDispatchResult = runFrameInputDispatch(
+            input: input
+            currentScreen: currentScreen
+            playback: playback
+            appState: appState
+            world: world
+            debug: debug
+            scenes: scenes
+            spotifyEnabled: spotifyState.enabled
+            dragJustReleased: dragJustReleased
+          )
+          var nextScreen: Screen = inputDispatch.nextScreen
 
-          # canvas.toggle / canvas.close only flip the AppState flag;
-          # re-apply the canvas scene's states here where the scene
-          # registry is in scope (#212 S5).
-          if appState.canvasOpen is not canvasOpenBefore {
-            applyCanvasState(world: world, scenes: scenes, state: appState)
-          }
+          # UI diff/rebuild trigger phase. Runs after input so
+          # component visuals depending on changed app/playback data
+          # update from data, not direct patches inside action handlers.
+          refreshUiDiffs(
+            world: world
+            scenes: scenes
+            appState: appState
+            playback: playback
+            visible: currentScreen
+            cache: uiRefresh
+            viewport: viewport
+            applyOverlaySync: inputDispatch.hadActions
+          )
 
-          # Persist UI state after every dispatched action. `dispatch
-          # Actions` may have flipped `playback.isPlaying`, swapped
-          # the active album, or reset the track index — write the
-          # result to `state.json` so a next launch resumes here.
-          # Cheap: one open / one write per gesture; we don't save
-          # per-frame elapsed-time updates because the action-driven
-          # cadence is already accurate enough for resume-from-pause.
-          if input.events.length > 0 {
-            if dragJustReleased is false {
-              saveAppState(path: stateFilePath, state: appState, playback: playback)
-            }
-          }
-
-          # song.open / pollSpotify just may have grown playHistory;
-          # re-mount Home/History in place if so. No-op otherwise.
-          let postInputRefresh: UiRefreshResult = refreshMountedUi(world: world, scenes: scenes, state: appState, playback: playback, visible: currentScreen, cache: uiRefresh, viewport: viewport)
-          if postInputRefresh.playbackChanged {
-            applyOverlaysToWorld(world: world, playback: playback, state: appState)
-          }
-
-          # In-app debug UI: process any debug.* action that fired
-          # this frame. `dispatchDebugAction` toggles the persistent
-          # DebugSystem state in place; a true return means at least
-          # one state bit flipped, so we need to rebuild the world
-          # (the menu and switch knobs are ECS entities, not direct
-          # overlay draws) and re-parse scenes if the theme was the
-          # piece that changed (scene `$tokenName` colors bind at
-          # parse time). Re-parsing on every state change is cheap
-          # and avoids special-casing.
-          var debugChanged: Bool = false
-          if dragJustReleased is false {
-            debugChanged = dispatchDebugAction(input: input, debug: debug)
-            syncDebugWidgetStates(world: world, debug: debug)
-          }
+          # In-app debug UI: a true return means at least one state bit
+          # flipped, so we need to rebuild the world and re-parse scenes
+          # if the theme was the changed piece (scene `$tokenName`
+          # colors bind at parse time).
+          var debugChanged: Bool = inputDispatch.debugChanged
           if debugChanged {
             syncColorsFromTheme()
             scenes = loadAllScenes()
@@ -734,19 +709,11 @@ func main() {
           # target hero exists with the right rect).
 
           let now: Float = uiNowSeconds()
-          # Advance playback elapsed-time. `advancePlayback` is a no-op
-          # for `elapsedSec` when paused but always updates `prevTime`,
-          # so a long idle-paused stretch followed by a resume doesn't
-          # apply a giant `dt` carry. Cheap (no ECS writes), safe to
-          # call every frame including idle ones.
-          advancePlayback(state: playback, now: now)
-          # Playback progress writes Rect + ComputedRect generations — gate it
-          # on real change (playing tick, input event, or first frame) to
-          # preserve idle frame-skipping.
-          # Skipped during active wheel scroll: 60×/sec dirtying on top of
-          # wheel-driven rebuilds blew the frame budget (~2 fps regression).
+          # Data-sync phase. Playback/Spotify/history/assets update
+          # state first; UI-diff and overlay systems then translate the
+          # changed data into component mutations.
           var applyPlaybackFrame: Bool = false
-          if forceRender or input.events.length > 0 {
+          if forceRender or inputDispatch.hadActions {
             applyPlaybackFrame = true
           }
           if playback.isPlaying {
@@ -755,59 +722,23 @@ func main() {
               applyPlaybackFrame = true
             }
           }
-          if applyPlaybackFrame {
-            applyOverlaysToWorld(world: world, playback: playback, state: appState)
-          }
-          # If a transition was armed by the outer rebuild, this is
-          # the first frame that will draw it — start the clock here
-          # so `t = 0` at the moment the first overlay actually paints.
-          if transitionArmed {
-            startHeroTransition(anim: anim, key: appState.currentAlbumStem, durationSec: heroDuration, now: now)
-            transitionArmed = false
-          }
-          var animating: Bool = updateHeroAnim(anim: anim, now: now)
-          # End-of-animation fix: if the anim just turned off this
-          # frame, unhide the destination hero entity BEFORE
-          # `renderSystem` runs. Doing it after the render (the
-          # earlier flow) meant one frame painted with neither the
-          # overlay nor the entity — a visible flicker on the
-          # landing edge.
-          if animating is false {
-            if pendingSrc {
-              if willSwitch is false {
-                # Use the page-scoped unhide so we re-show the exact
-                # entity we hid in the willSwitch arming block. The
-                # non-scoped variant picks the first match across
-                # every page and would leave the real target hidden
-                # (paints black) on multi-page persistent worlds.
-                if pendingHeroTargetPageId.length() > 0 {
-                  setHeroVisibleOnPage(world: world, pageId: pendingHeroTargetPageId, key: appState.currentAlbumStem, visible: true)
-                } else {
-                  setHeroVisible(world: world, key: appState.currentAlbumStem, visible: true)
-                }
-                pendingHeroTargetPageId = ""
-                pendingSrc = false
-              }
-            }
-          }
-          # Spotify-mode poll (no-op when RAE_UI_SPOTIFY unset; 1Hz
-          # internal rate-limit). Syncs playback state, text fields,
-          # and album art. See spotify_view.rae.
-          pollSpotify(state: spotifyState, world: world, reg: texReg, playback: playback, appState: appState, currentAlbumStem: appState.currentAlbumStem, now: now)
-          let postSpotifyRefresh: UiRefreshResult = refreshMountedUi(world: world, scenes: scenes, state: appState, playback: playback, visible: currentScreen, cache: uiRefresh, viewport: viewport)
-          if postSpotifyRefresh.playbackChanged {
-            applyOverlaysToWorld(world: world, playback: playback, state: appState)
-          }
-          # Stream covers + cached history art after first paint. Both paths
-          # are disk-only; history-art network refetch stays out of the frame
-          # loop because each fetch can block for ~140ms.
-          var loadingAssets: Bool = cascadeGpu2dAssets(albums: appState.albums, budget: 2)
-          let loadingHistoryArt: Bool = loadCachedHistoryArtChunk(history: appState.playHistory, budget: 4)
-          assetsLoading = loadingAssets or loadingHistoryArt
-          if currentScreen is Screen.profile {
-            let profileKeyNow: String = profileAvatarKey()
-            let profileReadyNow: Bool = profileAvatarLoaded(reg: texReg, key: profileKeyNow)
-            if profileReadyNow and profileLoaded is false { switching = true }
+          let dataSync: FrameDataSyncResult = syncFrameData(
+            world: world
+            scenes: scenes
+            appState: appState
+            playback: playback
+            spotifyState: spotifyState
+            texReg: texReg
+            uiRefresh: uiRefresh
+            visible: currentScreen
+            viewport: viewport
+            now: now
+            applyPlaybackFrame: applyPlaybackFrame
+            profileLoadedAtBuild: profileLoaded
+          )
+          assetsLoading = dataSync.assetsLoading
+          if dataSync.profileBecameReady {
+            switching = true
           }
 
           # Frame-gate decision: ask `decideActive` whether anything
@@ -832,10 +763,23 @@ func main() {
           # refreshHistoryViewsIfNeeded) so its notch reserve survives.
           # Dock rebuilds that happen in-place are lifted by the code that
           # remounted them; full-world rebuilds handle the same in buildAppWorld.
-          let safeFrame: Insets = applySafeAreas(world: world, viewport: viewport)
-          layoutSystemIfDirty(world: world, cache: layoutCache)
-          fitSystem(world: world)
-          transformSystemIfDirty(world: world, cache: transformCache)
+          runFrameLayoutTransform(world: world, viewport: viewport, layoutCache: layoutCache, transformCache: transformCache)
+
+          let animResult: FrameAnimationResult = runFrameAnimation(
+            world: world
+            anim: anim
+            appState: appState
+            willSwitch: willSwitch
+            now: now
+            heroDuration: heroDuration
+            transitionArmed: transitionArmed
+            pendingSrc: pendingSrc
+            pendingHeroTargetPageId: pendingHeroTargetPageId
+          )
+          var animating: Bool = animResult.animating
+          transitionArmed = animResult.transitionArmed
+          pendingSrc = animResult.pendingSrc
+          pendingHeroTargetPageId = "{animResult.pendingHeroTargetPageId}"
 
           let activeDecision: RenderActiveDecision = decideActive(
             world: world
@@ -849,7 +793,7 @@ func main() {
             prevMouseBtns: lastMouseBtns
             viewport: viewport
           )
-          var active: Bool = activeDecision.active or loadingAssets
+          var active: Bool = activeDecision.active or assetsLoading
           let currentHovered: EntityId = activeDecision.currentHovered
           let currentMouseBtns: Int = activeDecision.currentMouseBtns
           lastHoverAnimDirty = hoverScaleSystem(world: world, hovered: currentHovered, dt: now - lastFrameTime)
@@ -870,33 +814,26 @@ func main() {
             log("[loop {loopDebugFrame}] input.events={input.events.length} pressed={input.pressedEntity.value} animating={animating} active={active}")
           }
 
-          # Event-driven render gate. With wait-events, the loop only
-          # iterates when something happened (an OS event arrived or a
-          # timeout fired), so the dirty-detection plumbing above
-          # actually controls whether we redraw — not just how often we
-          # set a target FPS. Skip the whole begin/render/endDrawing
-          # block when nothing visible has changed.
-          # Busy-animating → render EVERY iteration (no cap). Idle →
-          # throttle to ~1 display frame (0.85 jitter headroom).
-          let frameDue: Bool = busyAnimating or forceRender or (now - lastRenderTime) >= targetFrameSec * 0.85
-          # `switching is false` guard: when a resize (or theme/debug
-          # change) has requested a rebuild THIS frame, skip painting the
-          # stale world. On a resize the window has already grown, so
-          # rendering the old design-resolution content into it would
-          # contain-fit/letterbox for one frame — the bottom-anchored
-          # dock visibly floats off the edge before snapping back. The
-          # outer loop rebuilds and paints the correct size next; each
-          # window size still gets exactly one render.
-          if (busyAnimating or active or forceRender or now < renderUntil) and frameDue and switching is false {
-            lastRenderTime = now
-            uiBeginFrame(clear: bgSurface)
-            renderSystemGpu2d(world: world, res: gpuUi)
-            updateAndRenderDebugOverlayGpu2d(debug: debug, now: now, didRealWork: active, font: gpuUi.textFont)
-
-            uiEndFrame()
-            forceRender = uiLastPresentOk() is false
-            renderCacheDirty(world: world, cache: renderCache)
-          }
+          # GPU2D render phase. With wait-events, dirty detection
+          # controls whether this paints; busy animation still renders
+          # every iteration while idle frames are skipped.
+          let frameRender: FrameRenderResult = renderGpu2dFrame(
+            world: world
+            gpuUi: gpuUi
+            debug: debug
+            renderCache: renderCache
+            bg: bgSurface
+            now: now
+            targetFrameSec: targetFrameSec
+            lastRenderTime: lastRenderTime
+            busyAnimating: busyAnimating
+            active: active
+            forceRender: forceRender
+            renderUntil: renderUntil
+            switching: switching
+          )
+          forceRender = frameRender.forceRender
+          lastRenderTime = frameRender.lastRenderTime
           # Persistent-world screen-switch (slice 4b.3 + 4c) — implementation
           # in screen_switch.rae. On willSwitch=true: per-page re-mount + hero
           # arming + Active flip. On willSwitch=false: hot-reload watcher poll

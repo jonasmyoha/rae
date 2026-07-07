@@ -1,0 +1,246 @@
+open ui/ecs
+import ui/ecs
+import ui/fit
+import ui/layout
+import ui/render_gpu2d
+import ui/transform
+
+# Frame-phase helpers for 106. The app still owns the loop policy, but the
+# systems now run through explicit phases: input dispatch, UI refresh/data sync,
+# layout/transform, animation, and GPU2D render.
+
+type FrameInputDispatchResult pub {
+  nextScreen: Screen
+  hadActions: Bool
+  canvasChanged: Bool
+  debugChanged: Bool
+}
+
+func runFrameInputDispatch(
+  input: view InputSystem
+  currentScreen: view Screen
+  playback: mod PlaybackState
+  appState: mod AppState
+  world: mod UiWorld
+  debug: mod DebugSystem
+  scenes: view AlbumScenes
+  spotifyEnabled: view Bool
+  dragJustReleased: view Bool
+) pub ret FrameInputDispatchResult {
+  var nextScreen: Screen = currentScreen
+  let canvasOpenBefore: Bool = appState.canvasOpen
+  let hadActions: Bool = input.events.length > 0
+
+  if dragJustReleased is false {
+    nextScreen = dispatchActions(input: input, current: currentScreen, playback: playback, state: appState, world: world, spotifyEnabled: spotifyEnabled)
+  } else {
+    if hadActions {
+      let dropped: Int = input.events.length
+      log("[dispatch] dragJustReleased=true, dropping {dropped} pending event(s)")
+    }
+  }
+
+  let canvasChanged: Bool = appState.canvasOpen is not canvasOpenBefore
+  if canvasChanged {
+    applyCanvasState(world: world, scenes: scenes, state: appState)
+  }
+
+  if hadActions {
+    if dragJustReleased is false {
+      saveAppState(path: stateFilePath, state: appState, playback: playback)
+    }
+  }
+
+  var debugChanged: Bool = false
+  if dragJustReleased is false {
+    debugChanged = dispatchDebugAction(input: input, debug: debug)
+    syncDebugWidgetStates(world: world, debug: debug)
+  }
+
+  ret FrameInputDispatchResult {
+    nextScreen: nextScreen
+    hadActions: hadActions
+    canvasChanged: canvasChanged
+    debugChanged: debugChanged
+  }
+}
+
+type FrameUiRefreshResult pub {
+  historyChanged: Bool
+  playbackChanged: Bool
+  sheetChanged: Bool
+}
+
+func refreshUiDiffs(
+  world: mod UiWorld
+  scenes: view AlbumScenes
+  appState: view AppState
+  playback: view PlaybackState
+  visible: view Screen
+  cache: mod UiRefreshCache
+  viewport: view Viewport
+  applyOverlaySync: view Bool
+) pub ret FrameUiRefreshResult {
+  let refreshed: UiRefreshResult = refreshMountedUi(world: world, scenes: scenes, state: appState, playback: playback, visible: visible, cache: cache, viewport: viewport)
+  if applyOverlaySync or refreshed.playbackChanged {
+    applyOverlaysToWorld(world: world, playback: playback, state: appState)
+  }
+  ret FrameUiRefreshResult {
+    historyChanged: refreshed.historyChanged
+    playbackChanged: refreshed.playbackChanged
+    sheetChanged: refreshed.sheetChanged
+  }
+}
+
+type FrameDataSyncResult pub {
+  assetsLoading: Bool
+  profileBecameReady: Bool
+  playbackChanged: Bool
+}
+
+func syncFrameData(
+  world: mod UiWorld
+  scenes: view AlbumScenes
+  appState: mod AppState
+  playback: mod PlaybackState
+  spotifyState: mod SpotifyState
+  texReg: mod TextureRegistry
+  uiRefresh: mod UiRefreshCache
+  visible: view Screen
+  viewport: view Viewport
+  now: view Float
+  applyPlaybackFrame: view Bool
+  profileLoadedAtBuild: view Bool
+) pub ret FrameDataSyncResult {
+  advancePlayback(state: playback, now: now)
+  if applyPlaybackFrame {
+    applyOverlaysToWorld(world: world, playback: playback, state: appState)
+  }
+
+  pollSpotify(state: spotifyState, world: world, reg: texReg, playback: playback, appState: appState, currentAlbumStem: appState.currentAlbumStem, now: now)
+  let spotifyRefresh: UiRefreshResult = refreshMountedUi(world: world, scenes: scenes, state: appState, playback: playback, visible: visible, cache: uiRefresh, viewport: viewport)
+  if spotifyRefresh.playbackChanged {
+    applyOverlaysToWorld(world: world, playback: playback, state: appState)
+  }
+
+  let loadingCovers: Bool = cascadeGpu2dAssets(albums: appState.albums, budget: 2)
+  let loadingHistoryArt: Bool = loadCachedHistoryArtChunk(history: appState.playHistory, budget: 4)
+  var profileBecameReady: Bool = false
+  if visible is Screen.profile {
+    let profileKeyNow: String = profileAvatarKey()
+    let profileReadyNow: Bool = profileAvatarLoaded(reg: texReg, key: profileKeyNow)
+    if profileReadyNow and profileLoadedAtBuild is false {
+      profileBecameReady = true
+    }
+  }
+
+  ret FrameDataSyncResult {
+    assetsLoading: loadingCovers or loadingHistoryArt
+    profileBecameReady: profileBecameReady
+    playbackChanged: spotifyRefresh.playbackChanged
+  }
+}
+
+func runFrameLayoutTransform(
+  world: mod UiWorld
+  viewport: view Viewport
+  layoutCache: mod LayoutCache
+  transformCache: mod TransformCache
+) pub {
+  applySafeAreas(world: world, viewport: viewport)
+  layoutSystemIfDirty(world: world, cache: layoutCache)
+  fitSystem(world: world)
+  transformSystemIfDirty(world: world, cache: transformCache)
+}
+
+type FrameAnimationResult pub {
+  animating: Bool
+  pendingSrc: Bool
+  transitionArmed: Bool
+  pendingHeroTargetPageId: String
+}
+
+func runFrameAnimation(
+  world: mod UiWorld
+  anim: mod HeroAnim
+  appState: view AppState
+  willSwitch: view Bool
+  now: view Float
+  heroDuration: view Float
+  transitionArmed: view Bool
+  pendingSrc: view Bool
+  pendingHeroTargetPageId: view String
+) pub ret FrameAnimationResult {
+  var nextTransitionArmed: Bool = transitionArmed
+  var nextPendingSrc: Bool = pendingSrc
+  var nextPendingHeroTargetPageId: String = "{pendingHeroTargetPageId}"
+
+  if nextTransitionArmed {
+    startHeroTransition(anim: anim, key: appState.currentAlbumStem, durationSec: heroDuration, now: now)
+    nextTransitionArmed = false
+  }
+
+  let animating: Bool = updateHeroAnim(anim: anim, now: now)
+  if animating is false {
+    if nextPendingSrc {
+      if willSwitch is false {
+        if nextPendingHeroTargetPageId.length() > 0 {
+          setHeroVisibleOnPage(world: world, pageId: nextPendingHeroTargetPageId, key: appState.currentAlbumStem, visible: true)
+        } else {
+          setHeroVisible(world: world, key: appState.currentAlbumStem, visible: true)
+        }
+        nextPendingHeroTargetPageId = ""
+        nextPendingSrc = false
+      }
+    }
+  }
+
+  ret FrameAnimationResult {
+    animating: animating
+    pendingSrc: nextPendingSrc
+    transitionArmed: nextTransitionArmed
+    pendingHeroTargetPageId: own nextPendingHeroTargetPageId
+  }
+}
+
+type FrameRenderResult pub {
+  forceRender: Bool
+  lastRenderTime: Float
+  didRender: Bool
+}
+
+func renderGpu2dFrame(
+  world: mod UiWorld
+  gpuUi: view Gpu2dUi
+  debug: mod DebugSystem
+  renderCache: mod RenderCache
+  bg: view RgbaColor
+  now: view Float
+  targetFrameSec: view Float
+  lastRenderTime: view Float
+  busyAnimating: view Bool
+  active: view Bool
+  forceRender: view Bool
+  renderUntil: view Float
+  switching: view Bool
+) pub ret FrameRenderResult {
+  let frameDue: Bool = busyAnimating or forceRender or (now - lastRenderTime) >= targetFrameSec * 0.85
+  if (busyAnimating or active or forceRender or now < renderUntil) and frameDue and switching is false {
+    uiBeginFrame(clear: bg)
+    renderSystemGpu2d(world: world, res: gpuUi)
+    updateAndRenderDebugOverlayGpu2d(debug: debug, now: now, didRealWork: active, font: gpuUi.textFont)
+    uiEndFrame()
+    renderCacheDirty(world: world, cache: renderCache)
+    ret FrameRenderResult {
+      forceRender: uiLastPresentOk() is false
+      lastRenderTime: now
+      didRender: true
+    }
+  }
+
+  ret FrameRenderResult {
+    forceRender: forceRender
+    lastRenderTime: lastRenderTime
+    didRender: false
+  }
+}
