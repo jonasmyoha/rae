@@ -150,15 +150,9 @@ func buildNavTabsForScreen(
   setRectFixed(world: world, entity: bar, w: barW, h: navTabsH)
   let barFill: RgbaColor = { r: surfaceColor.r, g: surfaceColor.g, b: surfaceColor.b, a: 238 }
   setShapeRounded(world: world, entity: bar, fill: barFill, radius: floatingDockRadius)
-  # Frosted-glass backdrop: paint a captured-and-blurred snapshot of
-  # whatever's behind the bar before the tab icons paint on top. The
-  # host (main.rae's per-frame render) is responsible for splitting
-  # the render around the dock layer and registering the freshly
-  # captured texture under `tabBlurTextureKey()`. Missing texture =
-  # silent no-op, so a first frame before the first capture just
-  # shows the dock's shadow gradient through with no blur — no crash.
-  let blurBg: BackdropImage = { textureKey: tabBlurTextureKey() }
-  componentSet(this: world.backdropImages, entity: bar, data: blurBg)
+  # Do not attach BackdropImage here yet: gpu2d currently draws it as
+  # an unclipped rectangle, which leaks a sharp grey slab under the
+  # rounded capsule. Re-enable only after rounded backdrop clipping exists.
   setLayout(world: world, entity: bar, kind: LayoutType.horizontal, gap: 0.0, alignCross: AlignKind.center)
 
   # Four base tabs: Home / Library / Search / Profile. Player is
@@ -344,8 +338,9 @@ func mountBottomDockOverlay(
   # its top half remains visible while the bottom half tucks behind the
   # capsule, reading as one combined iOS-style bottom control.
   let dockBgExtend: Float = 216.86746987951807
-  let miniOverlap: Float = miniPlayerH * 0.5
-  let dockH: Float = miniPlayerH + navTabsH - miniOverlap + dockBgExtend
+  let miniCardH: Float = miniPlayerH * 2.0
+  let miniOverlap: Float = miniPlayerH
+  let dockH: Float = miniCardH + navTabsH - miniOverlap + dockBgExtend
   # Edge-to-edge: the dock spans the full layout extent (window width on
   # desktop), not the phone content column. ExtentAnchor.fill makes the
   # layout place it at x=0 with width = world.layoutW; the rect width is
@@ -390,6 +385,9 @@ func mountBottomDockOverlay(
   # Mini-player matches the floating tab capsule width and radius, so
   # their bottom corners align visually when the tab bar overlaps it.
   let miniW: Float = world.layoutW - floatingDockInset * 2.0
+  let miniSlot: EntityId = createEntity(world: world)
+  setRectFixed(world: world, entity: miniSlot, w: miniW, h: miniCardH)
+  setLayout(world: world, entity: miniSlot, kind: layV, gap: 0.0, alignCross: alignC)
   let miniLabel: String = "mini-player"
   let mini: EntityId = buildMiniPlayerInstance(
     world: world
@@ -400,13 +398,16 @@ func mountBottomDockOverlay(
     playback: playback
     state: state
   )
+  let miniKids: List(EntityId) = createList(EntityId, cap: 1)
+  miniKids.add(value: mini)
+  attachChildren(world: world, parent: miniSlot, kids: miniKids)
 
   # Nav-tabs bar: inset rounded capsule, painted after the mini-player
   # so it covers the mini-player's lower half.
   let bar: EntityId = mountNavTabsBar(world: world, activeTab: activeTab, scenes: scenes)
 
   let kids: List(EntityId) = createList(EntityId, cap: 2)
-  kids.add(value: mini)
+  kids.add(value: miniSlot)
   kids.add(value: bar)
   attachChildren(world: world, parent: dock, kids: kids)
   ret dock
