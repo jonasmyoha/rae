@@ -149,6 +149,13 @@ func popClipRect() extern
 # at startup; the texture is cached for the window's lifetime.
 func loadImage(path: String) extern ret Int
 
+# Device-free decode probe (#228): runs loadImage's exact decode +
+# error policy (magic-sniff dispatch, one decoder per format) without
+# uploading a texture, so decode behaviour is testable headless and
+# assets can be validated from tooling. 1 = decodes, 0 = failed
+# (with the standard stderr line). Compiled target only.
+func decodeImageProbe(path: String) extern ret Int
+
 # Decode+upload `path` and register it under `key` (returns the handle, 0 on
 # failure). Lets a renderer resolve a Sprite.textureKey to an image without a
 # Rae-side map. drawImageKey draws a registered key; hasImageKey tests one.
