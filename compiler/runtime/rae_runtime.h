@@ -623,6 +623,27 @@ RAE_UNUSED static void rae_any_drop(RaeAny* v) {
     *v = rae_any_none();
 }
 
+/* Representation-aware copy of a RaeAny (the C shape of `opt T`).
+ * Used by synthesised struct deep-copies for `opt` fields — the
+ * base-type-only classifier used to emit rae_string_copy on the
+ * RaeAny representation (#138). String payloads get a private heap;
+ * pointer payloads (BUFFER/LIST/ANY) have no generic deep-copy, so
+ * they're shared as a borrow (is_view=1) — rae_any_drop then no-ops
+ * on the copy instead of double-freeing the shared payload. */
+RAE_UNUSED static inline RaeAny rae_any_copy(RaeAny v) {
+    if (v.is_view || v.is_mod) return v;
+    if (v.type == RAE_TYPE_STRING) {
+        v.as.s = rae_string_copy(v.as.s);
+        return v;
+    }
+    if (v.type == RAE_TYPE_BUFFER || v.type == RAE_TYPE_LIST ||
+        v.type == RAE_TYPE_ANY) {
+        v.is_view = true;
+        return v;
+    }
+    return v;
+}
+
 /* Crypto function declarations */
 void rae_ext_rae_crypto_lock(RaeAny key, RaeAny nonce, RaeAny plain, int64_t plain_len, RaeAny mac, RaeAny cipher);
 int64_t rae_ext_rae_crypto_unlock(RaeAny key, RaeAny nonce, RaeAny mac, RaeAny cipher, int64_t cipher_len, RaeAny plain);
