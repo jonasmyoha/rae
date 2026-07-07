@@ -1697,9 +1697,9 @@ function exampleFileIcon(kind) {
   return "📄";
 }
 
-// Run controls: just Run + Watch, driven by the global Target/Profile
-// dropdowns (no per-target button matrix, no Build). The selected target is
-// shown in the dropdown; here we only reflect whether this example supports it.
+// Run controls: Run + Watch + Restart, driven by the global Target/Profile
+// dropdowns (no per-target button matrix, no Build). Restart force-stops
+// any current Run/Watch process, then starts a normal Run.
 function renderExampleTargetButtons(example) {
   if (!exampleTargetActions) return;
   exampleTargetActions.innerHTML = "";
@@ -1736,6 +1736,17 @@ function renderExampleTargetButtons(example) {
   watchBtn.title = canWatch ? `Watch with ${target?.label ?? targetId}` : `Watch is not available for the ${targetId} target`;
   watchBtn.addEventListener("click", () => triggerExampleRun("watch"));
   row.appendChild(watchBtn);
+
+  const restartBtn = document.createElement("button");
+  restartBtn.type = "button";
+  restartBtn.classList.add("secondary");
+  restartBtn.textContent = "Restart";
+  restartBtn.disabled = !supported || !(target && target.supportsExampleRun);
+  restartBtn.title = supported
+    ? `Restart with ${target?.label ?? targetId}`
+    : `${formatExampleName(example.name)} doesn't support the ${targetId} target`;
+  restartBtn.addEventListener("click", () => triggerExampleRun("restart"));
+  row.appendChild(restartBtn);
 
   if (!supported) {
     const note = document.createElement("span");
@@ -2704,6 +2715,7 @@ closeBatchReportBtn?.addEventListener("click", () => hideBatchReport());
 async function triggerExampleRun(mode = "run", targetId = null, actionId = null) {
   const example = getSelectedExample();
   if (!example) return;
+  const effectiveMode = mode === "restart" ? "run" : mode;
   // Honor the chosen target directly (global dropdown, or explicit from
   // run-all/actions). No silent fallback — the supportedTargets guard below
   // blocks genuinely-unsupported combos (e.g. a raylib example on WASM).
@@ -2721,37 +2733,46 @@ async function triggerExampleRun(mode = "run", targetId = null, actionId = null)
   }
   // Display examples on the WASM target render in-browser to the canvas viewer
   // rather than running headless on the server (which would only emit bytes).
-  if (mode === "run" && resolvedTargetId === "wasm" && example.display && !isBatchRunning) {
+  if (effectiveMode === "run" && resolvedTargetId === "wasm" && example.display && !isBatchRunning) {
+    if (mode === "restart" && exampleRunActive) {
+      await stopExampleRun();
+    }
     if (example.webgpu) await runWebGPU(example);
     else if (example.wasmRealThreads) await runWasmSpawn(example);
     else await runWasmInBrowser(example);
     return;
   }
-  if (mode === "run" && !target.supportsExampleRun) {
+  if (effectiveMode === "run" && !target.supportsExampleRun) {
     setExampleStatus("Target missing run command", "is-failure", target.label);
     return;
   }
-  if (mode === "watch" && !target.supportsExampleWatch) {
+  if (effectiveMode === "watch" && !target.supportsExampleWatch) {
     setExampleStatus("Target cannot watch examples", "is-failure", target.label);
     return;
   }
-  if (mode === "build" && !target.supportsExampleBuild) {
+  if (effectiveMode === "build" && !target.supportsExampleBuild) {
     setExampleStatus("Target missing build command", "is-failure", target.label);
     return;
   }
+  if (mode === "restart" && exampleRunActive) {
+    setExampleStatus("Restarting…", "is-running", target.label);
+    await stopExampleRun();
+  }
   exampleRunActive = true;
-  exampleWatchActive = mode === "watch";
+  exampleWatchActive = effectiveMode === "watch";
   const label =
-    mode === "watch"
+    mode === "restart"
+      ? "Restarting…"
+      : effectiveMode === "watch"
       ? "Starting watch…"
-      : mode === "build"
+      : effectiveMode === "build"
         ? "Building…"
-        : mode === "action"
+        : effectiveMode === "action"
           ? "Running action…"
           : "Starting…";
   setExampleStatus(label, "is-running", target.label);
   updateExampleButtons();
-  if (mode === "build") {
+  if (effectiveMode === "build") {
     setExampleArtifactsPending(target.label);
   }
   try {
@@ -2765,10 +2786,10 @@ async function triggerExampleRun(mode = "run", targetId = null, actionId = null)
       body: JSON.stringify({
         exampleId: example.id,
         entry,
-        mode,
+        mode: effectiveMode,
         targetId: target.id,
         profile: getGlobalProfile(),
-        watch: mode === "watch",
+        watch: effectiveMode === "watch",
         actionId: actionId ?? undefined
       })
     });
