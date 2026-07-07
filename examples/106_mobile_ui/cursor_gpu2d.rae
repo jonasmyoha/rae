@@ -1,0 +1,75 @@
+open ui/ecs
+import core
+import ui/components
+import ui/ecs
+
+let cursorArrow: Int = 0
+let cursorPointer: Int = 1
+let cursorText: Int = 2
+let cursorResizeHorizontal: Int = 3
+let cursorResizeVertical: Int = 4
+let cursorCrosshair: Int = 5
+let cursorNotAllowed: Int = 6
+
+func cursorKindFromName(name: view String) ret Int {
+  if name.equals(other: "pointer") {
+    ret cursorPointer
+  }
+  if name.equals(other: "hand") {
+    ret cursorPointer
+  }
+  if name.equals(other: "text") {
+    ret cursorText
+  }
+  if name.equals(other: "resizeHorizontal") {
+    ret cursorResizeHorizontal
+  }
+  if name.equals(other: "resizeVertical") {
+    ret cursorResizeVertical
+  }
+  if name.equals(other: "crosshair") {
+    ret cursorCrosshair
+  }
+  if name.equals(other: "notAllowed") {
+    ret cursorNotAllowed
+  }
+  ret cursorArrow
+}
+
+func cursorKindForEntity(world: view UiWorld, entity: view EntityId) ret Int {
+  if isNone(this: entity) {
+    ret cursorArrow
+  }
+
+  if componentHas(this: world.widgetStates, entity: entity) {
+    let state: view WidgetState => componentView(this: world.widgetStates, entity: entity)
+    if state.enabled is false {
+      ret cursorArrow
+    }
+  }
+
+  if componentHas(this: world.pointerEvents, entity: entity) {
+    let pe: view PointerEvents => componentView(this: world.pointerEvents, entity: entity)
+    if pe.enabled is false {
+      ret cursorArrow
+    }
+    let explicit: Int = cursorKindFromName(name: pe.cursor)
+    if explicit is not cursorArrow {
+      ret explicit
+    }
+  }
+
+  if componentHas(this: world.onClicks, entity: entity) {
+    ret cursorPointer
+  }
+
+  ret cursorArrow
+}
+
+func syncDesktopCursor(world: view UiWorld, hovered: view EntityId, lastKind: mod Int) pub {
+  let kind: Int = cursorKindForEntity(world: world, entity: hovered)
+  if kind is not lastKind {
+    uiSetMouseCursor(kind: kind)
+    lastKind = kind
+  }
+}
