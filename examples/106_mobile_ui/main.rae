@@ -217,6 +217,7 @@ func main() {
     watchedPaths.add(value: miniPlayerPath)
     watchedPaths.add(value: nowPlayingPath)
     watchedPaths.add(value: albumPath)
+    watchedPaths.add(value: homePath)
     let watcher: FileWatcher = file_watch.createFileWatcher(
       paths: watchedPaths
       enabled: dataHotReloadEnabled
@@ -676,7 +677,7 @@ func main() {
 
           # song.open / pollSpotify just may have grown playHistory;
           # re-mount Home/History in place if so. No-op otherwise.
-          let postInputRefresh: UiRefreshResult = refreshMountedUi(world: world, state: appState, playback: playback, visible: currentScreen, cache: uiRefresh, viewport: viewport)
+          let postInputRefresh: UiRefreshResult = refreshMountedUi(world: world, scenes: scenes, state: appState, playback: playback, visible: currentScreen, cache: uiRefresh, viewport: viewport)
           if postInputRefresh.playbackChanged {
             applyOverlaysToWorld(world: world, playback: playback, state: appState)
           }
@@ -793,7 +794,7 @@ func main() {
           # internal rate-limit). Syncs playback state, text fields,
           # and album art. See spotify_view.rae.
           pollSpotify(state: spotifyState, world: world, reg: texReg, playback: playback, appState: appState, currentAlbumStem: appState.currentAlbumStem, now: now)
-          let postSpotifyRefresh: UiRefreshResult = refreshMountedUi(world: world, state: appState, playback: playback, visible: currentScreen, cache: uiRefresh, viewport: viewport)
+          let postSpotifyRefresh: UiRefreshResult = refreshMountedUi(world: world, scenes: scenes, state: appState, playback: playback, visible: currentScreen, cache: uiRefresh, viewport: viewport)
           if postSpotifyRefresh.playbackChanged {
             applyOverlaysToWorld(world: world, playback: playback, state: appState)
           }
