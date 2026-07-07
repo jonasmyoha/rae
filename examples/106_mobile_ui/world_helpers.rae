@@ -54,6 +54,17 @@ func setOnClick(world: mod UiWorld, entity: view EntityId, actionId: view String
     role: "primary"
   }
   componentSet(this: world.actionBindings, entity: entity, data: binding)
+  setPointerCursor(world: world, entity: entity, cursor: "pointer")
+}
+
+func setPointerCursor(world: mod UiWorld, entity: view EntityId, cursor: view String) pub {
+  let cursorName: String = "{cursor}"
+  let pe: PointerEvents = {
+    enabled: true
+    cursor: own cursorName
+    blockChildren: false
+  }
+  componentSet(this: world.pointerEvents, entity: entity, data: own pe)
 }
 
 func setWidgetIdentity(world: mod UiWorld, entity: view EntityId, id: view String, kind: view String) pub {
