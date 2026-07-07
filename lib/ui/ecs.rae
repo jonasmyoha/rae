@@ -407,6 +407,9 @@ type UiWorld {
   actionBindings: ComponentTable(ActionBinding)
   refreshRegions: ComponentTable(RefreshRegion)
   stateStyles: ComponentTable(StateStyle)
+  # Art direction (S6): aspect lock + fixed-design subtree fit.
+  aspects: ComponentTable(Aspect)
+  scaleToFits: ComponentTable(ScaleToFit)
 
   # ----- authored identity/metadata -----
   names: ComponentTable(Name)
@@ -506,6 +509,8 @@ func createUiWorld() ret UiWorld {
     actionBindings: createComponentTable(ActionBinding)
     refreshRegions: createComponentTable(RefreshRegion)
     stateStyles: createComponentTable(StateStyle)
+    aspects: createComponentTable(Aspect)
+    scaleToFits: createComponentTable(ScaleToFit)
 
     names: createComponentTable(Name)
     primaryTypes: createComponentTable(PrimaryType)
@@ -772,6 +777,8 @@ func destroyEntity(world: mod UiWorld, entity: view EntityId) pub {
   componentRemove(this: world.actionBindings, entity: entity)
   componentRemove(this: world.refreshRegions, entity: entity)
   componentRemove(this: world.stateStyles, entity: entity)
+  componentRemove(this: world.aspects, entity: entity)
+  componentRemove(this: world.scaleToFits, entity: entity)
   # Identity / metadata
   componentRemove(this: world.names, entity: entity)
   componentRemove(this: world.primaryTypes, entity: entity)
