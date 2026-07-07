@@ -1,0 +1,56 @@
+# #203 regression: String.replace / List(String).join must return
+# FRESH owned strings on every path. The alias-prone shapes were:
+#   - replace with empty `old` returning `this` (view-param alias);
+#   - replace with no match: split -> [whole string] -> join returning
+#     the borrow-bound first element of the local parts list.
+# Symptom was chain-returned values later reading bytes from whatever
+# reused/owned the aliased buffer.
+
+func scrub(s: view String) ret String {
+  var r: String = "{s}"
+  r = r.replace(old: "%A%", new: "_")
+  r = r.replace(old: "", new: "!")
+  r = r.replace(old: "%B%", new: "_")
+  r = r.replace(old: " ", new: "-")
+  # LAST step takes the no-match path so the returned value came
+  # straight from the single-element join.
+  r = r.replace(old: "%Z%", new: "_")
+  ret r
+}
+
+func main() {
+  var src: String = ""
+  src = src.concat(other: "keep %A% and %B% here")
+  let v: String = scrub(s: src)
+
+  # Churn the allocator so an aliased/freed buffer would get reused
+  # before we read v back.
+  var outer: String = ""
+  var i: Int = 0
+  loop i < 40 {
+    outer = outer.concat(other: "OUTER-{i}-")
+    i = i + 1
+  }
+
+  var acc: String = ""
+  acc = acc.concat(other: "[").concat(other: v).concat(other: "]")
+  log(acc)
+
+  # join single-element list directly
+  let one: List(String) = createList(String, cap: 2)
+  one.add(value: "solo")
+  let joined1: String = one.join(sep: ",")
+  # multi-element join for coverage
+  let many: List(String) = createList(String, cap: 4)
+  many.add(value: "a")
+  many.add(value: "b")
+  many.add(value: "c")
+  let joined3: String = many.join(sep: "+")
+  log("{joined1} {joined3}")
+
+  # empty-old replace result embedded in a chain
+  let w: String = "xyz".replace(old: "", new: "_")
+  var acc2: String = ""
+  acc2 = acc2.concat(other: "<").concat(other: w).concat(other: ">")
+  log(acc2)
+}

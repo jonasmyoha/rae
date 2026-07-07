@@ -161,9 +161,16 @@ func split(this: view String, sep: view String) ret List(String) {
   ret result
 }
 
+# Always returns a FRESH owned String — never `this` or anything
+# aliasing it (#203). Returning the view param or a split element
+# hands the caller a buffer whose ownership stays elsewhere; in a
+# `r = r.replace(...)` chain the reassignment's drop-then-store then
+# frees or leaks the very bytes the caller keeps reading.
 func replace(this: view String, old: view String, new: view String) ret String {
   if old.length() is 0 {
-    ret this
+    # Fresh copy, not `ret this` — don't rely on codegen inserting a
+    # deep copy for view-param returns.
+    ret "{this}"
   }
   let parts: List(String) = this.split(sep: old)
   ret parts.join(sep: new)
@@ -173,7 +180,15 @@ func join(this: view List(String), sep: view String) ret String {
   if this.length is 0 {
     ret ""
   }
-  var result: String = get(this, index: 0)
+  # Accumulate from "" instead of binding element 0 directly (#203):
+  # `var result = get(this, index: 0)` borrow-binds the element, and
+  # a single-element list then RETURNS that borrow — the caller gets
+  # a buffer it doesn't own (dangling or leaked depending on how the
+  # opt-unwrap codegen treats the element). `replace` hit exactly
+  # this through its no-match split ([whole string] -> join).
+  # "".concat(elem) always allocates a private heap for the result.
+  var result: String = ""
+  result = result.concat(other: get(this, index: 0))
   var i: Int = 1
   loop i < this.length {
     result = result.concat(other: sep).concat(other: get(this, index: i))
