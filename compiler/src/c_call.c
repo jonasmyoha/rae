@@ -889,7 +889,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             // can call (e.g. generic-instance struct, c_struct), this
             // is a compile-time error — silently shallow-aliasing is
             // exactly what `copy T` exists to prevent.
-            int copy_arg_kind = 0; // 0=none, 1=rae_string_copy, 2=rae_deep_copy_<T>
+            int copy_arg_kind = 0; // 0=none, 1=rae_string_copy, 2=rae_deep_copy_<T>, 3=rae_any_copy (opt)
             if (!wrap_pool_take_arg && !wrap_deep_copy_arg && !use_hoisted_temp
                 && p && p->type && p->type->is_copy
                 && !(p->type->is_view || p->type->is_mod || p->type->is_own)
@@ -915,7 +915,14 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     && type_needs_deep_copy(ctx->compiler_ctx, ctx->module,
                                             p_target, 0)) {
                     Str pbase_copy = get_base_type_name(p_target);
-                    if (str_eq_cstr(pbase_copy, "String")) {
+                    if (p_target->is_opt) {
+                        // opt T is RaeAny at the C level — the String
+                        // branch below would emit rae_string_copy on a
+                        // RaeAny (#138). rae_any_copy is representation-
+                        // aware (deep-copies string payloads, borrows
+                        // pointer payloads).
+                        copy_arg_kind = 3;
+                    } else if (str_eq_cstr(pbase_copy, "String")) {
                         copy_arg_kind = 1;
                     } else {
                         bool is_container =
@@ -1045,6 +1052,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 if (wrap_pool_take_arg) fprintf(out, "rae_string_pool_take(");
                 if (wrap_deep_copy_arg) fprintf(out, "rae_string_copy(");
                 if (copy_arg_kind == 1) fprintf(out, "rae_string_copy(");
+                if (copy_arg_kind == 3) fprintf(out, "rae_any_copy(");
                 // When we wrap with `(*...)` ourselves, suppress the
                 // IDENT-level struct-view auto-deref to avoid `(*(*x))`.
                 bool emit_suppress_deref = pass_view_through || needs_deref;
@@ -1054,6 +1062,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     fprintf(out, "rae_any(("); emit_expr(ctx, a->value, out, PREC_LOWEST, false, is_prim_ref); fprintf(out, "))");
                 } else emit_expr(ctx, a->value, out, PREC_LOWEST, false, emit_suppress_deref);
                 if (copy_arg_kind == 1) fprintf(out, ")");
+                if (copy_arg_kind == 3) fprintf(out, ")");
                 if (wrap_deep_copy_arg) fprintf(out, ")");
                 if (wrap_pool_take_arg) fprintf(out, ")");
                 if (needs_deref) fprintf(out, ")");
