@@ -30,9 +30,9 @@ func tabBlurTextureKey() pub ret String {
 
 # Screen-pixel y-coordinate of the top of the nav-tabs band. The
 # blur capture region runs from this y down by `navTabsH`. Computed
-# from `screenH`/`navTabsH` so it tracks the dock's actual layout.
+# from `phoneFrameH`/`navTabsH` so it tracks the dock's actual layout.
 func tabBlurCaptureY() pub ret Float {
-  ret screenH - navTabsH
+  ret phoneFrameH - navTabsH
 }
 
 # Registry key the dock looks up its frosted-glass blur backdrop
@@ -358,7 +358,7 @@ func mountBottomDockOverlay(
   componentSet(this: world.paddings, entity: dock, data: dockPad)
   # Position the whole dock so its bottom edge hits the active Viewport
   # extent bottom (`world.layoutH`) — the window bottom on a tall desktop
-  # window, `screenH` on a portrait phone — same bottom alignment as
+  # window, `phoneFrameH` on a portrait phone — same bottom alignment as
   # before, just extended upward by dockBgExtend.
   let dockOff: Offset = { delta: Vec2 { x: 0.0, y: world.layoutH - dockH } }
   componentSet(this: world.offsets, entity: dock, data: dockOff)
@@ -404,7 +404,7 @@ func mountBottomDockOverlay(
   )
 
   # Nav-tabs bar: full screen width, solid dark backdrop. The bar's
-  # own builder sets its Rect to screenW × navTabsH.
+  # own builder sets its Rect to phoneFrameW × navTabsH.
   let bar: EntityId = mountNavTabsBar(world: world, activeTab: activeTab, scenes: scenes)
 
   let kids: List(EntityId) = createList(EntityId, cap: 2)
