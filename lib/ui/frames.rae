@@ -1,5 +1,6 @@
-# Frames S3 — frame selection + per-frame component overlay (#210,
-# rae/docs/ui-coordinate-and-responsive-layout.md §10 S3).
+# Frames S3+S4 — frame selection, per-frame component overlay (#210)
+# and active-hierarchy derivation (#211),
+# rae/docs/ui-coordinate-and-responsive-layout.md §10 S3/S4.
 #
 # A scene may carry an optional top-level "frames" object next to
 # "nodes":
@@ -19,8 +20,26 @@
 # "remove" list of component names to strip for that frame. Selection
 # is pt-based: the widest `when.minPtW` that the window satisfies wins;
 # `forcedFrameId` (simulator / RAE_UI_FRAME) overrides; a frame tagged
-# `"default": true` is the fallback. No reparenting in S3 — hierarchy
-# stays authored (active-hierarchy derivation is S4).
+# `"default": true` is the fallback.
+#
+# S4 adds two LOADER DIRECTIVES inside a frame's node bag (§11 —
+# directives, not stored components):
+#
+#   "MiniArtist": { "Parent": "MiniPlayer", "order": 2 }
+#
+#   Parent — reparent the node under another scene node for this frame;
+#   order  — target index in the new parent's authored child list
+#            (omitted = append after the authored children).
+#
+# The AUTHORED hierarchy (scene Children lists) is immutable; the
+# ACTIVE hierarchy is re-derived from it on every frame application:
+# clone authored parent/position maps, apply the active frame's
+# directives in declared order (each cycle-checked by walking the
+# candidate parent's ancestor chain — a directive that would create a
+# cycle or move the scene root is skipped with a log), then rewrite
+# the instance's Children/Parent components. Because derivation always
+# starts from authored, switching frames is reversible and node
+# identity (entities, nodeIds, scroll/anim state) is stable.
 #
 # Overlay semantics (one resolution path, §Final-answer-5):
 #   reset-to-base  — for every node ANY frame overrides: strip
@@ -38,6 +57,12 @@
 # frame-overridden node are clobbered on frame switch. Keep frame
 # overrides on nodes whose data is static, or re-run the app's data
 # sync after applying a frame (106 does both).
+#
+# CONSTRAINT (S4): when any frame carries hierarchy directives, the
+# derivation rebuilds the Children component of EVERY mounted scene
+# node from the authored lists — children grafted under scene nodes at
+# runtime (outside the scene file) are dropped. Scenes whose frames
+# have no Parent/order directives never touch hierarchy (S3 path).
 #
 # Compiler limits respected (§11): FrameSet is parallel PRIMITIVE
 # lists (no List(struct) by-index, no StringMap in structs); override
@@ -228,6 +253,9 @@ func resetNodeToBase(world: mod UiWorld, scene: view Scene, frames: view FrameSe
         if key.equals(other: "remove") {
           skip = true
         }
+        if isHierarchyDirectiveKey(key: key) {
+          skip = true
+        }
         if skip is false {
           if bagHasKey(doc: doc, bag: baseBag, key: key) is false {
             removeComponentByName(world: world, entity: entity, name: key)
@@ -274,22 +302,27 @@ func overlayNodeFromFrame(world: mod UiWorld, scene: view Scene, frames: view Fr
   var k: Int = 0
   loop k < keyCount {
     let key: String = json.jsonObjectKeyAt(doc: doc, this: bag, idx: k)
-    if key.equals(other: "remove") {
-      let arr: JsonValue = json.jsonObjectValueAt(doc: doc, this: bag, idx: k)
-      let n: Int = json.jsonArrayLen(this: arr)
-      var r: Int = 0
-      loop r < n {
-        let elem: JsonValue = json.jsonArrayAt(doc: doc, this: arr, idx: r)
-        let noName: String = ""
-        let name: String = json.jsonString(this: elem, fallback: noName)
-        if name.length() > 0 {
-          removeComponentByName(world: world, entity: entity, name: name)
-        }
-        r = r + 1
-      }
+    if isHierarchyDirectiveKey(key: key) {
+      # Parent/order are loader directives consumed by
+      # deriveActiveHierarchy — never component names.
     } else {
-      let val: JsonValue = json.jsonObjectValueAt(doc: doc, this: bag, idx: k)
-      applyComponentByName(world: world, entity: entity, name: key, doc: doc, val: val)
+      if key.equals(other: "remove") {
+        let arr: JsonValue = json.jsonObjectValueAt(doc: doc, this: bag, idx: k)
+        let n: Int = json.jsonArrayLen(this: arr)
+        var r: Int = 0
+        loop r < n {
+          let elem: JsonValue = json.jsonArrayAt(doc: doc, this: arr, idx: r)
+          let noName: String = ""
+          let name: String = json.jsonString(this: elem, fallback: noName)
+          if name.length() > 0 {
+            removeComponentByName(world: world, entity: entity, name: name)
+          }
+          r = r + 1
+        }
+      } else {
+        let val: JsonValue = json.jsonObjectValueAt(doc: doc, this: bag, idx: k)
+        applyComponentByName(world: world, entity: entity, name: key, doc: doc, val: val)
+      }
     }
     k = k + 1
   }
@@ -330,6 +363,302 @@ func framesOverriddenNodeIds(scene: view Scene, frames: view FrameSet) ret List(
   ret out
 }
 
+# -----------------------------------------------------------------
+# S4 — active-hierarchy derivation (#211, §10 S4 / §Final-answer-6)
+# -----------------------------------------------------------------
+
+# The two loader-directive keys a frame's node bag may carry.
+func isHierarchyDirectiveKey(key: view String) ret Bool {
+  if key.equals(other: "Parent") {
+    ret true
+  }
+  ret key.equals(other: "order")
+}
+
+# True when ANY frame's node bag carries a Parent/order directive —
+# the gate that keeps pure-overlay scenes (S3) off the hierarchy
+# rebuild path entirely.
+func framesHaveHierarchyDirectives(scene: view Scene, frames: view FrameSet) ret Bool {
+  let doc: view JsonDoc => scene.doc
+  var f: Int = 0
+  loop f < frames.count {
+    let nodesIdx: Int = frames.nodesValueIdxs.get(index: f)
+    if nodesIdx >= 0 {
+      let nodesVal: JsonValue = json.jsonValueAt(doc: doc, idx: nodesIdx)
+      if nodesVal.kind is JsonKind.object {
+        let n: Int = json.jsonObjectLen(this: nodesVal)
+        var i: Int = 0
+        loop i < n {
+          let bag: JsonValue = json.jsonObjectValueAt(doc: doc, this: nodesVal, idx: i)
+          if bagHasKey(doc: doc, bag: bag, key: "Parent") {
+            ret true
+          }
+          if bagHasKey(doc: doc, bag: bag, key: "order") {
+            ret true
+          }
+          i = i + 1
+        }
+      }
+    }
+    f = f + 1
+  }
+  ret false
+}
+
+# Would setting `nodeIdx`'s parent to `candidateParent` create a
+# cycle? Walks the candidate's ancestor chain in the CURRENT parent
+# map; also trips defensively if the walk exceeds nodeCount hops
+# (a pre-existing cycle upstream).
+func hierarchyWouldCycle(parentIdxs: view List(Int), nodeIdx: view Int, candidateParent: view Int, nodeCount: view Int) ret Bool {
+  var cur: Int = candidateParent
+  var steps: Int = 0
+  loop cur >= 0 {
+    if cur is nodeIdx {
+      ret true
+    }
+    if steps > nodeCount {
+      ret true
+    }
+    cur = parentIdxs.get(index: cur)
+    steps = steps + 1
+  }
+  ret false
+}
+
+func appendEntityListFR(lst: mod List(EntityId), value: view EntityId) {
+  lst.add(value: value)
+}
+
+# Re-derive the ACTIVE hierarchy of the page-scoped instance from the
+# authored scene plus frame `frameIdx`'s Parent/order directives, then
+# rewrite the instance's Children/Parent components. `frameIdx < 0`
+# (or a directive-free frame) restores the authored hierarchy — the
+# derivation always starts from authored, which is what makes frame
+# switching reversible with stable entity identity.
+#
+# Sort keys: authored children get their authored position (0,1,2…);
+# a directive with `order: o` gets `o - 0.5` (+ a per-directive
+# epsilon for declared-order stability), landing BEFORE the authored
+# child at index o; a Parent directive without `order` appends.
+func deriveActiveHierarchy(world: mod UiWorld, scene: view Scene, frames: view FrameSet, frameIdx: view Int, pageId: view String) {
+  let doc: view JsonDoc => scene.doc
+  let nodeCount: Int = scene.nodes.length
+  let rootIdx: Int = sceneNodeIndex(this: scene, nodeId: scene.rootNodeId)
+  if rootIdx < 0 {
+    ret
+  }
+
+  # Raw entity value per scene node (-1 = not mounted in this page).
+  let entityVals: List(Int) = createList(Int, cap: nodeCount)
+  var e: Int = 0
+  loop e < nodeCount {
+    let node: view SceneNode => sceneNodeAt(this: scene, idx: e)
+    var raw: Int = -1
+    let entityOpt: opt Int = findNodeInPage(world: world, pageId: pageId, nodeId: node.nodeId)
+    if entityOpt is not none {
+      raw = entityOpt
+    }
+    entityVals.add(value: raw)
+    e = e + 1
+  }
+
+  # Authored parent map + within-parent sort keys.
+  let parentIdxs: List(Int) = createList(Int, cap: nodeCount)
+  let sortKeys: List(Float) = createList(Float, cap: nodeCount)
+  var z: Int = 0
+  loop z < nodeCount {
+    parentIdxs.add(value: -1)
+    sortKeys.add(value: 0.0)
+    z = z + 1
+  }
+  var a: Int = 0
+  loop a < nodeCount {
+    let node: view SceneNode => sceneNodeAt(this: scene, idx: a)
+    let kn: Int = node.childrenIds.length
+    var q: Int = 0
+    loop q < kn {
+      let childId: String = node.childrenIds.get(index: q)
+      let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
+      if childIdx >= 0 {
+        parentIdxs.set(index: childIdx, value: a)
+        sortKeys.set(index: childIdx, value: q.toFloat())
+      }
+      q = q + 1
+    }
+    a = a + 1
+  }
+
+  # Apply the active frame's directives in declared order.
+  if frameIdx >= 0 {
+    let nodesIdx: Int = frames.nodesValueIdxs.get(index: frameIdx)
+    if nodesIdx >= 0 {
+      let nodesVal: JsonValue = json.jsonValueAt(doc: doc, idx: nodesIdx)
+      if nodesVal.kind is JsonKind.object {
+        let dn: Int = json.jsonObjectLen(this: nodesVal)
+        var d: Int = 0
+        loop d < dn {
+          let dirNodeId: String = json.jsonObjectKeyAt(doc: doc, this: nodesVal, idx: d)
+          let bag: JsonValue = json.jsonObjectValueAt(doc: doc, this: nodesVal, idx: d)
+          applyHierarchyDirective(
+            scene: scene
+            doc: doc
+            bag: bag
+            dirNodeId: dirNodeId
+            rootIdx: rootIdx
+            nodeCount: nodeCount
+            seq: d
+            parentIdxs: parentIdxs
+            sortKeys: sortKeys
+          )
+          d = d + 1
+        }
+      }
+    }
+  }
+
+  # Rewrite Children/Parent for every mounted node from the active
+  # maps. A node whose children all moved away gets its Children
+  # removed (componentRemove is a no-op when absent). The scene
+  # root's own Parent belongs to the OUTER hierarchy — children-loop
+  # only ever writes Parent on non-root scene nodes, since rootIdx
+  # is never anyone's child (reparenting the root is rejected).
+  var b: Int = 0
+  loop b < nodeCount {
+    let parentRaw: Int = entityVals.get(index: b)
+    if parentRaw >= 0 {
+      let parentEntity: EntityId = entityId(v: parentRaw)
+      # Gather b's mounted children, selection-sorted by sort key.
+      let unsorted: List(Int) = createList(Int, cap: 8)
+      var c: Int = 0
+      loop c < nodeCount {
+        if parentIdxs.get(index: c) is b {
+          if entityVals.get(index: c) >= 0 {
+            unsorted.add(value: c)
+          }
+        }
+        c = c + 1
+      }
+      let childCount: Int = unsorted.length
+      if childCount > 0 {
+        let used: List(Int) = createList(Int, cap: childCount)
+        var w: Int = 0
+        loop w < childCount {
+          used.add(value: 0)
+          w = w + 1
+        }
+        let kids: List(EntityId) = createList(EntityId, cap: childCount)
+        var t: Int = 0
+        loop t < childCount {
+          var bestSlot: Int = -1
+          var bestKey: Float = 0.0
+          var u: Int = 0
+          loop u < childCount {
+            if used.get(index: u) is 0 {
+              let candIdx: Int = unsorted.get(index: u)
+              let candKey: Float = sortKeys.get(index: candIdx)
+              var better: Bool = false
+              if bestSlot < 0 {
+                better = true
+              } else {
+                if candKey < bestKey {
+                  better = true
+                }
+              }
+              if better {
+                bestSlot = u
+                bestKey = candKey
+              }
+            }
+            u = u + 1
+          }
+          used.set(index: bestSlot, value: 1)
+          let childNodeIdx: Int = unsorted.get(index: bestSlot)
+          let childEntity: EntityId = entityId(v: entityVals.get(index: childNodeIdx))
+          appendEntityListFR(lst: kids, value: childEntity)
+          let pl: Parent = { parent: parentEntity }
+          componentSet(this: world.parents, entity: childEntity, data: pl)
+          t = t + 1
+        }
+        let ch: Children = { ids: own kids }
+        componentSet(this: world.childrens, entity: parentEntity, data: own ch)
+      } else {
+        componentRemove(this: world.childrens, entity: parentEntity)
+      }
+    }
+    b = b + 1
+  }
+}
+
+# Consume one node bag's Parent/order directives, mutating the active
+# parent/sort-key maps. Rejections (unknown parent, scene root as
+# target node, cycle) log and leave the maps untouched.
+func applyHierarchyDirective(
+  scene: view Scene
+  doc: view JsonDoc
+  bag: view JsonValue
+  dirNodeId: view String
+  rootIdx: view Int
+  nodeCount: view Int
+  seq: view Int
+  parentIdxs: mod List(Int)
+  sortKeys: mod List(Float)
+) {
+  let nodeIdx: Int = sceneNodeIndex(this: scene, nodeId: dirNodeId)
+  if nodeIdx < 0 {
+    ret
+  }
+
+  var newParentIdx: Int = -1
+  var hasParentDirective: Bool = false
+  let parentFieldIdx: Int = json.jsonField(doc: doc, this: bag, key: "Parent")
+  if parentFieldIdx >= 0 {
+    hasParentDirective = true
+    let pv: JsonValue = json.jsonValueAt(doc: doc, idx: parentFieldIdx)
+    let noName: String = ""
+    let parentName: String = json.jsonString(this: pv, fallback: noName)
+    newParentIdx = sceneNodeIndex(this: scene, nodeId: parentName)
+    if newParentIdx < 0 {
+      log("[frames] Parent directive on '{dirNodeId}' names unknown node '{parentName}' — skipped")
+      ret
+    }
+  }
+
+  var orderVal: Int = -1
+  let orderFieldIdx: Int = json.jsonField(doc: doc, this: bag, key: "order")
+  if orderFieldIdx >= 0 {
+    let ov: JsonValue = json.jsonValueAt(doc: doc, idx: orderFieldIdx)
+    let noOrder: Int = -1
+    orderVal = json.jsonInt(this: ov, fallback: noOrder)
+  }
+
+  if hasParentDirective is false {
+    if orderVal < 0 {
+      ret
+    }
+  }
+
+  if nodeIdx is rootIdx {
+    log("[frames] hierarchy directive on scene root '{dirNodeId}' — skipped")
+    ret
+  }
+
+  if hasParentDirective {
+    if hierarchyWouldCycle(parentIdxs: parentIdxs, nodeIdx: nodeIdx, candidateParent: newParentIdx, nodeCount: nodeCount) {
+      log("[frames] Parent directive on '{dirNodeId}' would create a cycle — skipped")
+      ret
+    }
+    parentIdxs.set(index: nodeIdx, value: newParentIdx)
+  }
+
+  # Position within the (possibly new) parent: before the authored
+  # child at index `order`, or appended past all authored children.
+  var key: Float = 1000000.0 + seq.toFloat()
+  if orderVal >= 0 {
+    key = orderVal.toFloat() - 0.5 + seq.toFloat() * 0.0001
+  }
+  sortKeys.set(index: nodeIdx, value: key)
+}
+
 # Apply frame `frameIdx` to the page-scoped instance of `scene`:
 # reset-to-base + overlay over the union of overridden nodes. Nodes
 # not mounted in the page (mount failed / legacy) are skipped
@@ -354,6 +683,12 @@ func applyFrameToPage(world: mod UiWorld, scene: view Scene, frames: view FrameS
       }
     }
     i = i + 1
+  }
+  # S4: re-derive the active hierarchy when any frame reparents or
+  # reorders. Runs for frameIdx < 0 too — falling back to "no frame"
+  # must restore the authored structure.
+  if framesHaveHierarchyDirectives(scene: scene, frames: frames) {
+    deriveActiveHierarchy(world: world, scene: scene, frames: frames, frameIdx: frameIdx, pageId: pageId)
   }
 }
 
