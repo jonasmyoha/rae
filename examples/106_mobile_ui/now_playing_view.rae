@@ -10,6 +10,7 @@ open ui/ecs
 import core
 import ui/components
 import ui/ecs
+import ui/frames
 import ui/scene
 import ui/scene_instance
 
@@ -240,5 +241,21 @@ func buildMiniPlayerInstance(
   let miniHeartNode: String = "MiniHeartBtn"
   let miniHeartWidgetId: String = "miniPlayer.likeButton"
   tagLikedHeart(world: world, pageId: miniPlayerPageId, nodeId: miniHeartNode, widgetId: miniHeartWidgetId, observedRevision: 0)
+  # Frames S3 (#210): select + overlay the scene's frame. The forced
+  # id comes from the S2 device simulator (activeDeviceFrame folds
+  # RAE_UI_FRAME + RAE_UI_DEVICE; the default iPhone preset forces
+  # "PhonePortrait", RAE_UI_DEVICE=none yields "none" which matches no
+  # frame and falls through to width selection). The scene's
+  # `when.minPtW` is pt-based; layoutW is du, so divide by unitScale.
+  # Past the Desktop breakpoint the overlay activates the queue button
+  # and strips the play button's circle. Runs on every (re)mount, and
+  # the world rebuilds on live resize, so crossing the breakpoint
+  # re-selects. Applied AFTER the data tags above; widgetStyleSystem
+  # re-applies play/heart visuals next frame, so reset-to-base can't
+  # leave stale runtime patches on those nodes.
+  let deviceFrame: DeviceFrame = activeDeviceFrame()
+  let forcedName: String = frameIdName(id: deviceFrame.forcedFrameId)
+  let framePtW: Float = world.layoutW / unitScale
+  let frameIdx: Int = applySceneFramesToPage(world: world, scene: scene, pageId: miniPlayerPageId, windowPtW: framePtW, forcedFrameId: forcedName)
   ret mount
 }

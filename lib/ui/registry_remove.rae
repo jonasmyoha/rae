@@ -1,0 +1,163 @@
+# removeComponentByName — the removal half of the dynamic component
+# registry (sibling of registry.rae's applyComponentByName; separate
+# file only because registry.rae sits at the 1000-line cap).
+#
+# Dispatches a component NAME onto componentRemove for the matching
+# ComponentTable. Used by the frame-overlay system (ui/frames):
+# reset-to-base must strip components an earlier frame overlay added
+# that the node's base bag doesn't carry, and a frame's "remove"
+# directive strips base components for that frame. componentRemove is
+# a no-op when the entity doesn't carry the component, so callers
+# never need a componentHas guard.
+#
+# Keep the name list in sync with applyComponentByName — a name that
+# can be applied dynamically must be removable dynamically too.
+# Unknown names are silently ignored (same policy as apply).
+import core
+
+func removeComponentByName(
+  world: mod UiWorld
+  entity: view EntityId
+  name: view String
+) {
+  if name.equals(other: "Rect") {
+    componentRemove(this: world.rects, entity: entity)
+    ret
+  }
+  if name.equals(other: "Size") {
+    componentRemove(this: world.sizes, entity: entity)
+    ret
+  }
+  if name.equals(other: "Layout") {
+    componentRemove(this: world.layouts, entity: entity)
+    ret
+  }
+  if name.equals(other: "Padding") {
+    componentRemove(this: world.paddings, entity: entity)
+    ret
+  }
+  if name.equals(other: "Margin") {
+    componentRemove(this: world.margins, entity: entity)
+    ret
+  }
+  if name.equals(other: "Align") {
+    componentRemove(this: world.aligns, entity: entity)
+    ret
+  }
+  if name.equals(other: "Offset") {
+    componentRemove(this: world.offsets, entity: entity)
+    ret
+  }
+  if name.equals(other: "Sprite") {
+    componentRemove(this: world.sprites, entity: entity)
+    ret
+  }
+  if name.equals(other: "Text") {
+    componentRemove(this: world.texts, entity: entity)
+    ret
+  }
+  if name.equals(other: "Shape") {
+    componentRemove(this: world.shapes, entity: entity)
+    ret
+  }
+  if name.equals(other: "Active") {
+    componentRemove(this: world.actives, entity: entity)
+    ret
+  }
+  if name.equals(other: "Opacity") {
+    componentRemove(this: world.opacities, entity: entity)
+    ret
+  }
+  if name.equals(other: "OnClick") {
+    componentRemove(this: world.onClicks, entity: entity)
+    ret
+  }
+  if name.equals(other: "Button") {
+    componentRemove(this: world.buttons, entity: entity)
+    ret
+  }
+  if name.equals(other: "Name") {
+    componentRemove(this: world.names, entity: entity)
+    ret
+  }
+  if name.equals(other: "PrimaryType") {
+    componentRemove(this: world.primaryTypes, entity: entity)
+    ret
+  }
+  if name.equals(other: "NodeId") {
+    componentRemove(this: world.nodeIdComponents, entity: entity)
+    ret
+  }
+  if name.equals(other: "SceneInstance") {
+    componentRemove(this: world.sceneInstances, entity: entity)
+    ret
+  }
+  if name.equals(other: "TextBinding") {
+    componentRemove(this: world.textBindings, entity: entity)
+    ret
+  }
+  if name.equals(other: "MaskShape") {
+    componentRemove(this: world.maskShapes, entity: entity)
+    ret
+  }
+  if name.equals(other: "HeroWidget") {
+    componentRemove(this: world.heroWidgets, entity: entity)
+    ret
+  }
+  if name.equals(other: "CornerRadius") {
+    componentRemove(this: world.cornerRadiuses, entity: entity)
+    ret
+  }
+  if name.equals(other: "GradientFill") {
+    componentRemove(this: world.gradientFills, entity: entity)
+    ret
+  }
+  if name.equals(other: "BackdropImage") {
+    componentRemove(this: world.backdropImages, entity: entity)
+    ret
+  }
+  if name.equals(other: "OpticalAlign") {
+    componentRemove(this: world.opticalAligns, entity: entity)
+    ret
+  }
+  if name.equals(other: "SafeArea") {
+    componentRemove(this: world.safeAreas, entity: entity)
+    ret
+  }
+  if name.equals(other: "LayerRoot") {
+    componentRemove(this: world.layerRoots, entity: entity)
+    ret
+  }
+  if name.equals(other: "DebugAnchor") {
+    componentRemove(this: world.debugAnchors, entity: entity)
+    ret
+  }
+  if name.equals(other: "PageRoot") {
+    componentRemove(this: world.pageRoots, entity: entity)
+    ret
+  }
+  if name.equals(other: "ScrollState") {
+    componentRemove(this: world.scrollStates, entity: entity)
+    ret
+  }
+  if name.equals(other: "WidgetId") {
+    componentRemove(this: world.widgetIds, entity: entity)
+    ret
+  }
+  if name.equals(other: "WidgetState") {
+    componentRemove(this: world.widgetStates, entity: entity)
+    ret
+  }
+  if name.equals(other: "DataDependency") {
+    componentRemove(this: world.dataDependencies, entity: entity)
+    ret
+  }
+  if name.equals(other: "ActionBinding") {
+    componentRemove(this: world.actionBindings, entity: entity)
+    ret
+  }
+  if name.equals(other: "RefreshRegion") {
+    componentRemove(this: world.refreshRegions, entity: entity)
+    ret
+  }
+}

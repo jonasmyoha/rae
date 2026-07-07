@@ -1,0 +1,375 @@
+# Frames S3 — frame selection + per-frame component overlay (#210,
+# rae/docs/ui-coordinate-and-responsive-layout.md §10 S3).
+#
+# A scene may carry an optional top-level "frames" object next to
+# "nodes":
+#
+#   "frames": {
+#     "Phone":   { "default": true, "nodes": {} },
+#     "Desktop": {
+#       "when":  { "minPtW": 700 },
+#       "nodes": {
+#         "MiniQueueBtn":   { "Active": { "value": true } },
+#         "MiniPlayCircle": { "remove": ["Shape"] }
+#       }
+#     }
+#   }
+#
+# Each frame names per-node component OVERRIDE bags plus an optional
+# "remove" list of component names to strip for that frame. Selection
+# is pt-based: the widest `when.minPtW` that the window satisfies wins;
+# `forcedFrameId` (simulator / RAE_UI_FRAME) overrides; a frame tagged
+# `"default": true` is the fallback. No reparenting in S3 — hierarchy
+# stays authored (active-hierarchy derivation is S4).
+#
+# Overlay semantics (one resolution path, §Final-answer-5):
+#   reset-to-base  — for every node ANY frame overrides: strip
+#                    components that some frame's bag could have added
+#                    but the base bag doesn't carry, then replay the
+#                    node's base bag via applyComponentByName;
+#   overlay        — replay the ACTIVE frame's bag on top and apply its
+#                    "remove" directives via removeComponentByName.
+# Reset runs over the union of overridden nodes, so switching to a
+# frame with an empty bag still restores nodes a previous frame
+# changed. Deterministic regardless of the previously active frame.
+#
+# CONSTRAINT: reset-to-base replays the AUTHORED bag, so runtime data
+# overrides (mount-time text/sprite overrides, playback patches) on a
+# frame-overridden node are clobbered on frame switch. Keep frame
+# overrides on nodes whose data is static, or re-run the app's data
+# sync after applying a frame (106 does both).
+#
+# Compiler limits respected (§11): FrameSet is parallel PRIMITIVE
+# lists (no List(struct) by-index, no StringMap in structs); override
+# bags stay in the scene's resident flat-pool JsonDoc, referenced by
+# pool index.
+import core
+import json
+import ui/registry_remove
+
+type FrameSet {
+  names: List(String)
+  # `when.minPtW` per frame; -1.0 = no width condition.
+  minPtWs: List(Float)
+  # 1 = `"default": true`; parallel to names.
+  defaultFlags: List(Int)
+  # JsonDoc pool index of `frames.<Name>.nodes` (-1 = frame has none).
+  nodesValueIdxs: List(Int)
+  count: Int
+}
+
+func emptyFrameSet() ret FrameSet {
+  ret FrameSet {
+    names: createList(String, cap: 4)
+    minPtWs: createList(Float, cap: 4)
+    defaultFlags: createList(Int, cap: 4)
+    nodesValueIdxs: createList(Int, cap: 4)
+    count: 0
+  }
+}
+
+# Read the optional "frames" table from a parsed Scene. A scene
+# without frames returns count == 0 and every caller short-circuits —
+# pre-frames scenes behave exactly as before.
+func parseFrames(scene: view Scene) ret FrameSet {
+  var out: FrameSet = emptyFrameSet()
+  if scene.ok is false {
+    ret out
+  }
+  let doc: view JsonDoc => scene.doc
+  let root: JsonValue = json.jsonRoot(doc: doc)
+  let framesIdx: Int = json.jsonField(doc: doc, this: root, key: "frames")
+  if framesIdx < 0 {
+    ret out
+  }
+  let framesVal: JsonValue = json.jsonValueAt(doc: doc, idx: framesIdx)
+  if framesVal.kind is not JsonKind.object {
+    ret out
+  }
+  let n: Int = json.jsonObjectLen(this: framesVal)
+  var i: Int = 0
+  loop i < n {
+    let frameName: String = json.jsonObjectKeyAt(doc: doc, this: framesVal, idx: i)
+    let frameVal: JsonValue = json.jsonObjectValueAt(doc: doc, this: framesVal, idx: i)
+    var minPtW: Float = -1.0
+    var isDefault: Int = 0
+    var nodesIdx: Int = -1
+    if frameVal.kind is JsonKind.object {
+      let whenIdx: Int = json.jsonField(doc: doc, this: frameVal, key: "when")
+      if whenIdx >= 0 {
+        let whenVal: JsonValue = json.jsonValueAt(doc: doc, idx: whenIdx)
+        let minIdx: Int = json.jsonField(doc: doc, this: whenVal, key: "minPtW")
+        if minIdx >= 0 {
+          let minVal: JsonValue = json.jsonValueAt(doc: doc, idx: minIdx)
+          minPtW = json.jsonFloat(this: minVal, fallback: -1.0)
+        }
+      }
+      let defIdx: Int = json.jsonField(doc: doc, this: frameVal, key: "default")
+      if defIdx >= 0 {
+        let defVal: JsonValue = json.jsonValueAt(doc: doc, idx: defIdx)
+        if json.jsonBool(this: defVal, fallback: false) {
+          isDefault = 1
+        }
+      }
+      nodesIdx = json.jsonField(doc: doc, this: frameVal, key: "nodes")
+    }
+    out.names.add(value: frameName)
+    out.minPtWs.add(value: minPtW)
+    out.defaultFlags.add(value: isDefault)
+    out.nodesValueIdxs.add(value: nodesIdx)
+    i = i + 1
+  }
+  out.count = out.names.length
+  ret out
+}
+
+func frameIndexByName(frames: view FrameSet, name: view String) ret Int {
+  var i: Int = 0
+  loop i < frames.count {
+    let candidate: String = frames.names.get(index: i)
+    if candidate.equals(other: name) {
+      ret i
+    }
+    i = i + 1
+  }
+  ret -1
+}
+
+# Pick the active frame. Precedence:
+#   1. `forcedFrameId` when non-empty and known (simulator override);
+#   2. among frames whose `minPtW` the window satisfies, the LARGEST
+#      minPtW (most-specific breakpoint wins);
+#   3. the frame tagged `"default": true`;
+#   4. -1 (caller applies nothing — authored base only).
+func selectFrameIndex(frames: view FrameSet, windowPtW: view Float, forcedFrameId: view String) ret Int {
+  if frames.count is 0 {
+    ret -1
+  }
+  if forcedFrameId.length() > 0 {
+    let forced: Int = frameIndexByName(frames: frames, name: forcedFrameId)
+    if forced >= 0 {
+      ret forced
+    }
+  }
+  var best: Int = -1
+  var bestMin: Float = -1.0
+  var i: Int = 0
+  loop i < frames.count {
+    let m: Float = frames.minPtWs.get(index: i)
+    if m >= 0.0 {
+      if windowPtW >= m {
+        if m > bestMin {
+          best = i
+          bestMin = m
+        }
+      }
+    }
+    i = i + 1
+  }
+  if best >= 0 {
+    ret best
+  }
+  var j: Int = 0
+  loop j < frames.count {
+    if frames.defaultFlags.get(index: j) is 1 {
+      ret j
+    }
+    j = j + 1
+  }
+  ret -1
+}
+
+# True when `bag` (a node's component object) has a field named `key`.
+func bagHasKey(doc: view JsonDoc, bag: view JsonValue, key: view String) ret Bool {
+  ret json.jsonField(doc: doc, this: bag, key: key) >= 0
+}
+
+# Pool index of `nodeId`'s override bag inside frame `frameIdx`, or -1.
+func frameNodeBagIdx(scene: view Scene, frames: view FrameSet, frameIdx: view Int, nodeId: view String) ret Int {
+  let nodesIdx: Int = frames.nodesValueIdxs.get(index: frameIdx)
+  if nodesIdx < 0 {
+    ret -1
+  }
+  let doc: view JsonDoc => scene.doc
+  let nodesVal: JsonValue = json.jsonValueAt(doc: doc, idx: nodesIdx)
+  if nodesVal.kind is not JsonKind.object {
+    ret -1
+  }
+  ret json.jsonField(doc: doc, this: nodesVal, key: nodeId)
+}
+
+# Reset one node to its authored base:
+#   1. strip every component that ANY frame's bag for this node names
+#      (except "remove") but the base bag lacks — overlay-added
+#      components must not leak into other frames;
+#   2. replay the base bag via applyComponentByName (skipping
+#      "Children"; placement components too when the node is the scene
+#      root, mirroring the mount pass — those belong to the mount
+#      entity).
+func resetNodeToBase(world: mod UiWorld, scene: view Scene, frames: view FrameSet, nodeId: view String, entity: view EntityId) {
+  let doc: view JsonDoc => scene.doc
+  let baseIdx: Int = sceneNodeIndex(this: scene, nodeId: nodeId)
+  if baseIdx < 0 {
+    ret
+  }
+  let baseNode: view SceneNode => sceneNodeAt(this: scene, idx: baseIdx)
+  let baseBag: JsonValue = json.jsonValueAt(doc: doc, idx: baseNode.componentsValueIdx)
+
+  var f: Int = 0
+  loop f < frames.count {
+    let bagIdx: Int = frameNodeBagIdx(scene: scene, frames: frames, frameIdx: f, nodeId: nodeId)
+    if bagIdx >= 0 {
+      let bag: JsonValue = json.jsonValueAt(doc: doc, idx: bagIdx)
+      let keyCount: Int = json.jsonObjectLen(this: bag)
+      var k: Int = 0
+      loop k < keyCount {
+        let key: String = json.jsonObjectKeyAt(doc: doc, this: bag, idx: k)
+        var skip: Bool = false
+        if key.equals(other: "remove") {
+          skip = true
+        }
+        if skip is false {
+          if bagHasKey(doc: doc, bag: baseBag, key: key) is false {
+            removeComponentByName(world: world, entity: entity, name: key)
+          }
+        }
+        k = k + 1
+      }
+    }
+    f = f + 1
+  }
+
+  let isRoot: Bool = nodeId.equals(other: scene.rootNodeId)
+  let keyCount: Int = json.jsonObjectLen(this: baseBag)
+  var k: Int = 0
+  loop k < keyCount {
+    let key: String = json.jsonObjectKeyAt(doc: doc, this: baseBag, idx: k)
+    var skip: Bool = false
+    if key.equals(other: "Children") {
+      skip = true
+    }
+    if isRoot {
+      if isPlacementComponent(name: key) {
+        skip = true
+      }
+    }
+    if skip is false {
+      let val: JsonValue = json.jsonObjectValueAt(doc: doc, this: baseBag, idx: k)
+      applyComponentByName(world: world, entity: entity, name: key, doc: doc, val: val)
+    }
+    k = k + 1
+  }
+}
+
+# Apply one frame's bag for one node: components via
+# applyComponentByName, the "remove" list via removeComponentByName.
+func overlayNodeFromFrame(world: mod UiWorld, scene: view Scene, frames: view FrameSet, frameIdx: view Int, nodeId: view String, entity: view EntityId) {
+  let bagIdx: Int = frameNodeBagIdx(scene: scene, frames: frames, frameIdx: frameIdx, nodeId: nodeId)
+  if bagIdx < 0 {
+    ret
+  }
+  let doc: view JsonDoc => scene.doc
+  let bag: JsonValue = json.jsonValueAt(doc: doc, idx: bagIdx)
+  let keyCount: Int = json.jsonObjectLen(this: bag)
+  var k: Int = 0
+  loop k < keyCount {
+    let key: String = json.jsonObjectKeyAt(doc: doc, this: bag, idx: k)
+    if key.equals(other: "remove") {
+      let arr: JsonValue = json.jsonObjectValueAt(doc: doc, this: bag, idx: k)
+      let n: Int = json.jsonArrayLen(this: arr)
+      var r: Int = 0
+      loop r < n {
+        let elem: JsonValue = json.jsonArrayAt(doc: doc, this: arr, idx: r)
+        let noName: String = ""
+        let name: String = json.jsonString(this: elem, fallback: noName)
+        if name.length() > 0 {
+          removeComponentByName(world: world, entity: entity, name: name)
+        }
+        r = r + 1
+      }
+    } else {
+      let val: JsonValue = json.jsonObjectValueAt(doc: doc, this: bag, idx: k)
+      applyComponentByName(world: world, entity: entity, name: key, doc: doc, val: val)
+    }
+    k = k + 1
+  }
+}
+
+# Collect the union of node ids named by ANY frame's nodes bag.
+func framesOverriddenNodeIds(scene: view Scene, frames: view FrameSet) ret List(String) {
+  let out: List(String) = createList(String, cap: 8)
+  let doc: view JsonDoc => scene.doc
+  var f: Int = 0
+  loop f < frames.count {
+    let nodesIdx: Int = frames.nodesValueIdxs.get(index: f)
+    if nodesIdx >= 0 {
+      let nodesVal: JsonValue = json.jsonValueAt(doc: doc, idx: nodesIdx)
+      if nodesVal.kind is JsonKind.object {
+        let n: Int = json.jsonObjectLen(this: nodesVal)
+        var i: Int = 0
+        loop i < n {
+          let nodeId: String = json.jsonObjectKeyAt(doc: doc, this: nodesVal, idx: i)
+          var already: Bool = false
+          var j: Int = 0
+          loop j < out.length {
+            let seen: String = out.get(index: j)
+            if seen.equals(other: nodeId) {
+              already = true
+            }
+            j = j + 1
+          }
+          if already is false {
+            out.add(value: nodeId)
+          }
+          i = i + 1
+        }
+      }
+    }
+    f = f + 1
+  }
+  ret out
+}
+
+# Apply frame `frameIdx` to the page-scoped instance of `scene`:
+# reset-to-base + overlay over the union of overridden nodes. Nodes
+# not mounted in the page (mount failed / legacy) are skipped
+# silently. `frameIdx < 0` still resets — a scene falling back to
+# "no frame" restores its authored base.
+func applyFrameToPage(world: mod UiWorld, scene: view Scene, frames: view FrameSet, frameIdx: view Int, pageId: view String) {
+  if frames.count is 0 {
+    ret
+  }
+  let overridden: List(String) = framesOverriddenNodeIds(scene: scene, frames: frames)
+  let n: Int = overridden.length
+  var i: Int = 0
+  loop i < n {
+    let nodeId: String = overridden.get(index: i)
+    let entityOpt: opt Int = findNodeInPage(world: world, pageId: pageId, nodeId: nodeId)
+    if entityOpt is not none {
+      let raw: Int = entityOpt
+      let entity: EntityId = entityId(v: raw)
+      resetNodeToBase(world: world, scene: scene, frames: frames, nodeId: nodeId, entity: entity)
+      if frameIdx >= 0 {
+        overlayNodeFromFrame(world: world, scene: scene, frames: frames, frameIdx: frameIdx, nodeId: nodeId, entity: entity)
+      }
+    }
+    i = i + 1
+  }
+}
+
+# One-call wrapper for app mount sites: parse the frame table, select,
+# and apply. `forcedFrameId` is the app-resolved simulator override
+# (106 folds RAE_UI_FRAME + the device preset into it via
+# activeDeviceFrame); pass "" or an unknown name like "none" to select
+# purely by window pt width. Returns the selected frame index (-1 =
+# scene has no frames / none matched). Cheap enough to run on every
+# (re)mount — the table is a few JsonDoc lookups.
+func applySceneFramesToPage(world: mod UiWorld, scene: view Scene, pageId: view String, windowPtW: view Float, forcedFrameId: view String) ret Int {
+  let frames: FrameSet = parseFrames(scene: scene)
+  if frames.count is 0 {
+    ret -1
+  }
+  let idx: Int = selectFrameIndex(frames: frames, windowPtW: windowPtW, forcedFrameId: forcedFrameId)
+  applyFrameToPage(world: world, scene: scene, frames: frames, frameIdx: idx, pageId: pageId)
+  ret idx
+}
