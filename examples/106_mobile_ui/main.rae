@@ -324,6 +324,7 @@ func main() {
     # (debug.showInputOutlines re-render trigger). Persists across
     # world rebuilds (entity ids are stable while layout is).
     var lastHoveredEntity: EntityId = noEntity()
+    var lastCursorKind: Int = cursorArrow
     # Mouse-button bitfield (bit 0/1/2 = left/right/middle) from the
     # previous gate check — promotes a re-render on any transition
     # so the debug "btn:" readout updates without 60 fps polling.
@@ -796,6 +797,7 @@ func main() {
           var active: Bool = activeDecision.active or assetsLoading
           let currentHovered: EntityId = activeDecision.currentHovered
           let currentMouseBtns: Int = activeDecision.currentMouseBtns
+          syncDesktopCursor(world: world, hovered: currentHovered, lastKind: lastCursorKind)
           lastHoverAnimDirty = hoverScaleSystem(world: world, hovered: currentHovered, dt: now - lastFrameTime)
           lastFrameTime = now
           if lastHoverAnimDirty { active = true }
