@@ -451,9 +451,30 @@ type WidgetState {
   error: Bool
 }
 
+enum DataResourceId {
+  none
+  albums
+  history
+  library
+  playback
+  playlists
+  spotify
+  settings
+  debug
+}
+
+enum DataFieldId {
+  none
+  all
+  isPlaying
+  likedTrack
+  playingTrack
+  debugToggle
+}
+
 type DataDependency {
-  sourceKey: String
-  fieldKey: String
+  resource: DataResourceId
+  field: DataFieldId
   observedRevision: Int
 }
 
@@ -464,7 +485,7 @@ type ActionBinding {
 
 type RefreshRegion {
   regionKey: String
-  sourceKey: String
+  resource: DataResourceId
   observedRevision: Int
   dirty: Bool
 }

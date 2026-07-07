@@ -163,33 +163,30 @@ func setOpacityStateStyle(
 func setDataDependency(
   world: mod UiWorld
   entity: view EntityId
-  sourceKey: view String
-  fieldKey: view String
+  resource: view DataResourceId
+  field: view DataFieldId
   observedRevision: view Int
 ) pub {
-  let sourceCopy: String = "{sourceKey}"
-  let fieldCopy: String = "{fieldKey}"
   let dep: DataDependency = {
-    sourceKey: own sourceCopy
-    fieldKey: own fieldCopy
+    resource: resource
+    field: field
     observedRevision: observedRevision
   }
-  componentSet(this: world.dataDependencies, entity: entity, data: own dep)
+  componentSet(this: world.dataDependencies, entity: entity, data: dep)
 }
 
 func setRefreshRegion(
   world: mod UiWorld
   entity: view EntityId
   regionKey: view String
-  sourceKey: view String
+  resource: view DataResourceId
   observedRevision: view Int
   dirty: view Bool
 ) pub {
   let regionCopy: String = "{regionKey}"
-  let sourceCopy: String = "{sourceKey}"
   let rr: RefreshRegion = {
     regionKey: own regionCopy
-    sourceKey: own sourceCopy
+    resource: resource
     observedRevision: observedRevision
     dirty: dirty
   }

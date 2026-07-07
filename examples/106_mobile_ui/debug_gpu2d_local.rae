@@ -265,9 +265,9 @@ func tagDebugToggleWidget(
   let widgetId: String = "{actionId}.{kind}"
   setWidgetIdentity(world: world, entity: entity, id: widgetId, kind: kind)
   setWidgetState(world: world, entity: entity, enabled: true, selected: selected, loading: false, error: false)
-  let source: String = dataSourceDebugKey()
-  let field: String = dataFieldDebugToggleKey()
-  setDataDependency(world: world, entity: entity, sourceKey: source, fieldKey: field, observedRevision: 0)
+  let source: DataResourceId = dataResourceDebug()
+  let field: DataFieldId = dataFieldDebugToggle()
+  setDataDependency(world: world, entity: entity, resource: source, field: field, observedRevision: 0)
   setActionBindingOnly(world: world, entity: entity, actionId: actionId)
 }
 

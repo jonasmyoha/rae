@@ -365,7 +365,7 @@ func savePlaylist(playlist: view Playlist) pub {
 }
 
 # Sync the liked state of the currently-browsed track into every
-# widget that declares a (playlists, likedTrack) DataDependency —
+# widget that declares a typed (playlists, likedTrack) DataDependency —
 # today the mini-player + now-playing hearts, tagged at mount by
 # `tagLikedHeart`. Data-only: this flips WidgetState.selected; the
 # visual swap (outline/filled glyph, white/coral tint) lives in each
@@ -385,8 +385,8 @@ func applyLikedToWorld(
     ret
   }
   let isLiked: Bool = playlistContains(playlist: liked, stem: stem, trackIndex: trackIndex)
-  let likedSource: String = dataSourcePlaylistsKey()
-  let likedField: String = dataFieldLikedKey()
+  let likedSource: DataResourceId = dataResourcePlaylists()
+  let likedField: DataFieldId = dataFieldLiked()
   let n: Int = componentCount(this: world.dataDependencies)
   var i: Int = 0
   loop i < n {
@@ -394,8 +394,8 @@ func applyLikedToWorld(
     var matches: Bool = false
     if componentHas(this: world.dataDependencies, entity: entity) {
       let dep: view DataDependency => componentView(this: world.dataDependencies, entity: entity)
-      if dep.sourceKey.equals(other: likedSource) {
-        if dep.fieldKey.equals(other: likedField) {
+      if dep.resource is likedSource {
+        if dep.field is likedField {
           matches = true
         }
       }
@@ -428,9 +428,9 @@ func tagLikedHeart(
   let heartKind: String = "likeButton"
   setWidgetIdentity(world: world, entity: entity, id: widgetId, kind: heartKind)
   setWidgetState(world: world, entity: entity, enabled: true, selected: false, loading: false, error: false)
-  let likedSource: String = dataSourcePlaylistsKey()
-  let likedField: String = dataFieldLikedKey()
-  setDataDependency(world: world, entity: entity, sourceKey: likedSource, fieldKey: likedField, observedRevision: observedRevision)
+  let likedSource: DataResourceId = dataResourcePlaylists()
+  let likedField: DataFieldId = dataFieldLiked()
+  setDataDependency(world: world, entity: entity, resource: likedSource, field: likedField, observedRevision: observedRevision)
   # Warm coral / Spotify-ish like-red when liked. Visibly distinct
   # from the accentText / textPrimary the scenes author the outline
   # heart in. Struct built inline with `own`-moved locals (the safe
