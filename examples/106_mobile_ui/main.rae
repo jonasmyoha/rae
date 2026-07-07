@@ -110,7 +110,8 @@ func main() {
   log("[boot] requested screen={reqW}x{reqH} monitorH={monitorH} safeMaxH={safeMaxH}")
   var viewport: Viewport = createViewportFromWindow()
   uiSetDesignResolution(width: viewport.layoutW, height: viewport.layoutH, fit: 0)
-  log("[viewport] windowPt={viewport.windowPtW}x{viewport.windowPtH} fbPx={viewport.framebufferPxW}x{viewport.framebufferPxH} dpr={viewport.dpr} unitScale={viewport.unitScale} layout={viewport.layoutW}x{viewport.layoutH}")
+  let frameName: String = frameIdName(id: viewport.forcedFrameId)
+  log("[viewport] windowPt={viewport.windowPtW}x{viewport.windowPtH} fbPx={viewport.framebufferPxW}x{viewport.framebufferPxH} dpr={viewport.dpr} unitScale={viewport.unitScale} layout={viewport.layoutW}x{viewport.layoutH} deviceActive={viewport.devicePresetActive} frame={frameName} safe={viewport.safeInsetsDu.l},{viewport.safeInsetsDu.t},{viewport.safeInsetsDu.r},{viewport.safeInsetsDu.b}")
 
   # Spotify-mode integration. ON by default; opt out with
   # RAE_UI_NO_SPOTIFY=1 or RAE_UI_HEADLESS=1 (would focus Spotify).
@@ -811,7 +812,7 @@ func main() {
           # refreshHistoryViewsIfNeeded) so its notch reserve survives.
           # Dock rebuilds that happen in-place are lifted by the code that
           # remounted them; full-world rebuilds handle the same in buildAppWorld.
-          let safeFrame: Insets = applySafeAreas(world: world)
+          let safeFrame: Insets = applySafeAreas(world: world, viewport: viewport)
           layoutSystemIfDirty(world: world, cache: layoutCache)
           transformSystemIfDirty(world: world, cache: transformCache)
 
