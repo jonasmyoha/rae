@@ -98,8 +98,9 @@ func main() {
   appState.liked = loadDefaultLiked()
   bumpPlaylistsSource(sources: appState.dataSources)
 
-  # Clamp window height to fit the current display. GPU2D keeps input and
-  # drawing in design units through the local GPU2D window seam.
+  # Log the requested window against the current display. `screenW/screenH`
+  # are fixed design constants now; runtime size and layout authority live
+  # exclusively in Viewport/UiWorld.layoutW/H.
   let chromeBudget: Int = 100
   let monitor: Int = uiCurrentMonitor()
   var monitorH: Int = uiMonitorHeight(monitor: monitor)
@@ -107,15 +108,6 @@ func main() {
   let reqW: Int = winW.toInt()
   let reqH: Int = winH.toInt()
   log("[boot] requested screen={reqW}x{reqH} monitorH={monitorH} safeMaxH={safeMaxH}")
-  if reqH > safeMaxH {
-    let scale: Float = safeMaxH.toFloat() / winH
-    screenH = winH * scale
-    screenW = winW * scale
-    let newH: Float = screenH
-    let newW: Float = screenW
-    uiSetWindowSize(width: newW.toInt(), height: newH.toInt())
-    log("[boot] clamped to {newW.toInt()}x{newH.toInt()} to fit monitor chrome")
-  }
   var viewport: Viewport = createViewportFromWindow()
   uiSetDesignResolution(width: viewport.layoutW, height: viewport.layoutH, fit: 0)
   log("[viewport] windowPt={viewport.windowPtW}x{viewport.windowPtH} fbPx={viewport.framebufferPxW}x{viewport.framebufferPxH} dpr={viewport.dpr} unitScale={viewport.unitScale} layout={viewport.layoutW}x{viewport.layoutH}")
