@@ -52,7 +52,7 @@ func createViewport(
   # Symmetric to the width case: on a window whose aspect is NARROWER
   # than the design (taller than the phone column), grow the layout
   # HEIGHT to the window aspect so the design fills the window with no
-  # vertical letterbox — the bottom toolbar (offset at `layoutExtentH`)
+  # vertical letterbox — the bottom toolbar (offset at `world.layoutH`)
   # then stays glued to the window's bottom edge. Content stays anchored
   # at the top; the extra height is empty background between content and
   # the dock. Clamped to `screenH`, so a portrait phone is unchanged.
@@ -80,13 +80,12 @@ func createViewport(
 }
 
 func createViewportFromWindow() pub ret Viewport {
-  # Derive the extent from the LIVE framebuffer size (physical pixels),
-  # which tracks runtime resizes — NOT `uiWindowWidth()`, which is the
-  # design-resolution width (circular), nor the config `windowW/windowH`
-  # (stale after a resize). `createViewport` reads the window aspect from
-  # these to widen `layoutW`, keeping the fixed `screenW`/`screenH`
-  # content baseline. windowPt == framebufferPx here (aspect is what
-  # matters); the reported `dpr` is 1, used only for the boot log.
+  # Derive the extent from the live drawable size, which tracks runtime
+  # resizes — NOT `uiWindowWidth()`, which is the current design-resolution
+  # width (circular), nor the config `windowW/windowH` (stale after a resize).
+  # `createViewport` reads the window aspect from these to widen `layoutW`,
+  # keeping the fixed `screenW`/`screenH` content baseline. The SDL3/gpu2d
+  # seam already converts pointer input through the same design transform.
   let fbW: Float = uiFramebufferWidth().toFloat()
   let fbH: Float = uiFramebufferHeight().toFloat()
   ret createViewport(
@@ -103,9 +102,13 @@ func applyViewportExtent(world: mod UiWorld, viewport: view Viewport) pub {
 }
 
 func viewportPointerX(viewport: view Viewport) pub ret Float {
+  # gpu2d.pointerX() is already in current design units after
+  # setDesignResolution; this multiplication exists only for the temporary
+  # legacy-scene adapter and should disappear with the 1080x2280du rescale.
   ret uiPointerX() * viewport.legacySceneScale
 }
 
 func viewportPointerY(viewport: view Viewport) pub ret Float {
+  # See viewportPointerX.
   ret uiPointerY() * viewport.legacySceneScale
 }

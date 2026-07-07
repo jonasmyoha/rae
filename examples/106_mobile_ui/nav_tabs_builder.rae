@@ -146,7 +146,7 @@ func buildNavTabsForScreen(
   # desktop) with no outerPad margin. The dark background paints behind
   # the four tabs all the way to both edges, the way iOS tab bars do;
   # the four tabs (tabW = barW/4) spread evenly across the full width.
-  let barW: Float = layoutExtentW
+  let barW: Float = world.layoutW
   setRectFixed(world: world, entity: bar, w: barW, h: navTabsH)
   # Frosted-glass backdrop: paint a captured-and-blurred snapshot of
   # whatever's behind the bar before the tab icons paint on top. The
@@ -348,7 +348,7 @@ func mountBottomDockOverlay(
   # desktop), not the phone content column. ExtentAnchor.fill makes the
   # layout place it at x=0 with width = world.layoutW; the rect width is
   # set to match so it's correct even before layout resolves.
-  setRectFixed(world: world, entity: dock, w: layoutExtentW, h: dockH)
+  setRectFixed(world: world, entity: dock, w: world.layoutW, h: dockH)
   let dockAnchor: ExtentAnchor = { h: HExtent.fill }
   componentSet(this: world.extentAnchors, entity: dock, data: dockAnchor)
   let layV: LayoutType = LayoutType.vertical
@@ -356,11 +356,11 @@ func mountBottomDockOverlay(
   setLayout(world: world, entity: dock, kind: layV, gap: 0.0, alignCross: alignC)
   let dockPad: Padding = { insets: Insets { l: 0.0, t: dockBgExtend, r: 0.0, b: 0.0 } }
   componentSet(this: world.paddings, entity: dock, data: dockPad)
-  # Position the whole dock so its bottom edge hits the layout extent
-  # bottom (`layoutExtentH`) — the window bottom on a tall desktop
+  # Position the whole dock so its bottom edge hits the active Viewport
+  # extent bottom (`world.layoutH`) — the window bottom on a tall desktop
   # window, `screenH` on a portrait phone — same bottom alignment as
   # before, just extended upward by dockBgExtend.
-  let dockOff: Offset = { delta: Vec2 { x: 0.0, y: layoutExtentH - dockH } }
+  let dockOff: Offset = { delta: Vec2 { x: 0.0, y: world.layoutH - dockH } }
   componentSet(this: world.offsets, entity: dock, data: dockOff)
   var copiedId: String = ""
   copiedId = copiedId.concat(other: dockPageId)
@@ -391,7 +391,7 @@ func mountBottomDockOverlay(
 
   # Mini-player: indented by outerPad on each side of the full-width
   # dock. Vertical layout with alignCross=Center centers it.
-  let miniW: Float = layoutExtentW - outerPad * 2.0
+  let miniW: Float = world.layoutW - outerPad * 2.0
   let miniLabel: String = "mini-player"
   let mini: EntityId = buildMiniPlayerInstance(
     world: world
