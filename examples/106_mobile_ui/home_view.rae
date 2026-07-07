@@ -21,11 +21,11 @@ let homeGridTileGap: Float = 17.349397590361445  # spaceS
 
 # Responsive column count. Phone width keeps the authored base (2); as
 # the window widens toward desktop, add columns so tiles stay near their
-# phone size instead of stretching huge. Deterministic on screenW, so
+# phone size instead of stretching huge. Deterministic on phoneFrameW, so
 # every call site within a build agrees.
 func homeCols() ret Int {
   let base: Int = homeGridColumns
-  let avail: Float = screenW - outerPad * 2.0
+  let avail: Float = phoneFrameW - outerPad * 2.0
   let target: Float = 477.10843373493975
   let gap: Float = homeGridTileGap
   let n: Int = ((avail + gap) / (target + gap)).toInt()
@@ -37,7 +37,7 @@ func homeCols() ret Int {
 
 func homeGridTileSize() ret Float {
   let cols: Int = homeCols()
-  let avail: Float = screenW - outerPad * 2.0
+  let avail: Float = phoneFrameW - outerPad * 2.0
   let gapTotal: Float = homeGridTileGap * (cols - 1).toFloat()
   ret (avail - gapTotal) / cols.toFloat()
 }
@@ -62,7 +62,7 @@ func homeContentHeight(albums: view List(Album), hasRecent: view Bool) pub ret F
 # stops when the last grid row hits the dock. Zero when the content
 # already fits the viewport.
 func homeScrollMin(albums: view List(Album), history: view PlayHistory) pub ret Float {
-  let viewport: Float = screenH - outerPad * 2.0 - miniPlayerH - navTabsH - outerGap
+  let viewport: Float = phoneFrameH - outerPad * 2.0 - miniPlayerH - navTabsH - outerGap
   let hasRecent: Bool = history.entries.length > 0
   let content: Float = homeContentHeight(albums: albums, hasRecent: hasRecent)
   let overflow: Float = content - viewport
@@ -80,7 +80,7 @@ func buildHomeGridRow(
   rounded: view Bool
 ) ret EntityId {
   let row: EntityId = createEntity(world: world)
-  let rowW: Float = screenW - outerPad * 2.0
+  let rowW: Float = phoneFrameW - outerPad * 2.0
   let tileH: Float = homeGridTileSize()
   setRectFixed(world: world, entity: row, w: rowW, h: tileH)
   let layH: LayoutType = LayoutType.horizontal
@@ -112,7 +112,7 @@ func buildHomeCoverGrid(world: mod UiWorld, albums: view List(Album), library: v
   let tileH: Float = homeGridTileSize()
   let rows: Int = (total + cols - 1) / cols
   let gridH: Float = tileH * rows.toFloat() + homeGridTileGap * (rows - 1).toFloat()
-  let gridW: Float = screenW - outerPad * 2.0
+  let gridW: Float = phoneFrameW - outerPad * 2.0
   setRectFixed(world: world, entity: grid, w: gridW, h: gridH)
   let layV: LayoutType = LayoutType.vertical
   let alignS: AlignKind = AlignKind.start
@@ -132,8 +132,8 @@ func buildHomeCoverGrid(world: mod UiWorld, albums: view List(Album), library: v
 
 func buildHomeBody(world: mod UiWorld, albums: view List(Album), library: view List(String), history: view PlayHistory, rounded: view Bool, scrollY: view Float) ret EntityId {
   let body: EntityId = createEntity(world: world)
-  let bodyW: Float = screenW - outerPad * 2.0
-  let bodyH: Float = screenH - navTabsH - outerGap * 3.0 - outerPad * 2.0
+  let bodyW: Float = phoneFrameW - outerPad * 2.0
+  let bodyH: Float = phoneFrameH - navTabsH - outerGap * 3.0 - outerPad * 2.0
   setRectFixed(world: world, entity: body, w: bodyW, h: bodyH)
   let layV: LayoutType = LayoutType.vertical
   let alignS: AlignKind = AlignKind.start
@@ -167,11 +167,12 @@ func mountHomePage(
   world: mod UiWorld
   state: view AppState
   scrollY: view Float
+  viewport: view Viewport
 ) pub ret EntityId {
   let albums: view List(Album) => state.albums
 
   let root: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: root, w: screenW, h: screenH)
+  setRectFixed(world: world, entity: root, w: viewport.areaDuW, h: viewport.areaDuH)
   let layV: LayoutType = LayoutType.vertical
   let alignS: AlignKind = AlignKind.start
   setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
@@ -201,9 +202,11 @@ func buildHomeWorld(
   state: view AppState
   playback: view PlaybackState
   scrollY: view Float
+  viewport: view Viewport
 ) pub ret UiWorld {
   let world: UiWorld = createUiWorld()
-  let page: EntityId = mountHomePage(world: world, state: state, scrollY: scrollY)
+  applyViewportExtent(world: world, viewport: viewport)
+  let page: EntityId = mountHomePage(world: world, state: state, scrollY: scrollY, viewport: viewport)
   let dock: EntityId = mountBottomDockOverlay(
     world: world
     activeTab: state.tab

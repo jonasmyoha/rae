@@ -106,7 +106,7 @@ func buildProfileStatColumn(world: mod UiWorld, value: view String, label: view 
 # numbers stay honest — no fake follower counts.
 func buildProfileStatsRow(world: mod UiWorld, state: view AppState) ret EntityId {
   let row: EntityId = createEntity(world: world)
-  let rowW: Float = screenW - outerPad * 2.0
+  let rowW: Float = phoneFrameW - outerPad * 2.0
   let rowH: Float = 130.12048192771084
   setRectFixed(world: world, entity: row, w: rowW, h: rowH)
   let layH: LayoutType = LayoutType.horizontal
@@ -151,7 +151,7 @@ func buildSpotifyStatusCard(world: mod UiWorld) ret EntityId {
   let optOut: String = getEnv(name: "RAE_UI_NO_SPOTIFY")
   let spotifyEnabled: Bool = optOut.length() is 0
   let card: EntityId = createEntity(world: world)
-  let cardW: Float = screenW - outerPad * 2.0
+  let cardW: Float = phoneFrameW - outerPad * 2.0
   let cardH: Float = 182.16867469879517
   setRectFixed(world: world, entity: card, w: cardW, h: cardH)
   let bg: RgbaColor = { r: 30, g: 200, b: 130, a: 255 }
@@ -207,7 +207,7 @@ func buildSpotifyStatusCard(world: mod UiWorld) ret EntityId {
 # complete the screen without pretending to work.
 func buildSettingsRow(world: mod UiWorld, iconKey: view String, label: view String) ret EntityId {
   let row: EntityId = createEntity(world: world)
-  let rowW: Float = screenW - outerPad * 2.0
+  let rowW: Float = phoneFrameW - outerPad * 2.0
   let rowH: Float = 121.44578313253011
   setRectFixed(world: world, entity: row, w: rowW, h: rowH)
   let layH: LayoutType = LayoutType.horizontal
@@ -244,7 +244,7 @@ func buildSettingsRow(world: mod UiWorld, iconKey: view String, label: view Stri
 
 func buildSettingsList(world: mod UiWorld) ret EntityId {
   let list: EntityId = createEntity(world: world)
-  let listW: Float = screenW - outerPad * 2.0
+  let listW: Float = phoneFrameW - outerPad * 2.0
   let rowH: Float = 121.44578313253011
   let gap: Float = 8.674698795180722
   let rowCount: Int = 4
@@ -275,8 +275,8 @@ func buildProfileBody(
   scrollY: view Float
 ) ret EntityId {
   let body: EntityId = createEntity(world: world)
-  let bodyW: Float = screenW - outerPad * 2.0
-  let bodyH: Float = screenH - topBarH - navTabsH - outerGap * 4.0 - outerPad * 2.0
+  let bodyW: Float = phoneFrameW - outerPad * 2.0
+  let bodyH: Float = phoneFrameH - topBarH - navTabsH - outerGap * 4.0 - outerPad * 2.0
   setRectFixed(world: world, entity: body, w: bodyW, h: bodyH)
   let layV: LayoutType = LayoutType.vertical
   let alignC: AlignKind = AlignKind.center
@@ -323,9 +323,10 @@ func mountProfilePage(
   reg: view TextureRegistry
   state: view AppState
   scrollY: view Float
+  viewport: view Viewport
 ) pub ret EntityId {
   let root: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: root, w: screenW, h: screenH)
+  setRectFixed(world: world, entity: root, w: viewport.areaDuW, h: viewport.areaDuH)
   let layV: LayoutType = LayoutType.vertical
   let alignS: AlignKind = AlignKind.start
   setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
@@ -357,9 +358,11 @@ func buildProfileWorld(
   state: view AppState
   playback: view PlaybackState
   scrollY: view Float
+  viewport: view Viewport
 ) pub ret UiWorld {
   let world: UiWorld = createUiWorld()
-  let page: EntityId = mountProfilePage(world: world, reg: reg, state: state, scrollY: scrollY)
+  applyViewportExtent(world: world, viewport: viewport)
+  let page: EntityId = mountProfilePage(world: world, reg: reg, state: state, scrollY: scrollY, viewport: viewport)
   let dock: EntityId = mountBottomDockOverlay(
     world: world
     activeTab: state.tab

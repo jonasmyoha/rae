@@ -26,10 +26,10 @@ let playlistCoverGap: Float = 6.506024096385541
 
 # Responsive column count — phone keeps the authored base (3); widen the
 # window and columns grow so tiles stay near their compact phone size.
-# Deterministic on screenW so all call sites agree within a build.
+# Deterministic on phoneFrameW so all call sites agree within a build.
 func libraryCols() ret Int {
   let base: Int = libraryGridColumns
-  let avail: Float = screenW - outerPad * 2.0
+  let avail: Float = phoneFrameW - outerPad * 2.0
   let target: Float = 325.3012048192771
   let gap: Float = libraryGridTileGap
   let n: Int = ((avail + gap) / (target + gap)).toInt()
@@ -44,7 +44,7 @@ func libraryGridTileSize() ret Float {
   # mis-codegens `.toFloat()` invoked directly on a module-level
   # `let` (drops the receiver — observed 2026-05-28).
   let cols: Int = libraryCols()
-  let avail: Float = screenW - outerPad * 2.0
+  let avail: Float = phoneFrameW - outerPad * 2.0
   let gapTotal: Float = libraryGridTileGap * (cols - 1).toFloat()
   ret (avail - gapTotal) / cols.toFloat()
 }
@@ -183,7 +183,7 @@ func buildLibraryTileRow(
   tileH: view Float
 ) ret EntityId {
   let row: EntityId = createEntity(world: world)
-  let rowW: Float = screenW - outerPad * 2.0
+  let rowW: Float = phoneFrameW - outerPad * 2.0
   setRectFixed(world: world, entity: row, w: rowW, h: tileH)
   let layH: LayoutType = LayoutType.horizontal
   let alignS: AlignKind = AlignKind.start
@@ -233,7 +233,7 @@ func buildLibraryCoverGrid(world: mod UiWorld, albums: view List(Album), library
   let rows: Int = (total + cols - 1) / cols
   let grid: EntityId = createEntity(world: world)
   let gridH: Float = tileH * rows.toFloat() + libraryGridTileGap * (rows - 1).toFloat()
-  let gridW: Float = screenW - outerPad * 2.0
+  let gridW: Float = phoneFrameW - outerPad * 2.0
   setRectFixed(world: world, entity: grid, w: gridW, h: gridH)
   let layV: LayoutType = LayoutType.vertical
   let alignS: AlignKind = AlignKind.start
@@ -257,8 +257,8 @@ func buildLibraryCoverGrid(world: mod UiWorld, albums: view List(Album), library
 # bring later rows into view.
 func buildLibraryBody(world: mod UiWorld, albums: view List(Album), library: view List(String), liked: view Playlist, rounded: view Bool, scrollY: view Float) ret EntityId {
   let body: EntityId = createEntity(world: world)
-  let bodyW: Float = screenW - outerPad * 2.0
-  let bodyH: Float = screenH - topBarH - navTabsH - outerGap * 4.0 - outerPad * 2.0
+  let bodyW: Float = phoneFrameW - outerPad * 2.0
+  let bodyH: Float = phoneFrameH - topBarH - navTabsH - outerGap * 4.0 - outerPad * 2.0
   setRectFixed(world: world, entity: body, w: bodyW, h: bodyH)
   let layV: LayoutType = LayoutType.vertical
   let alignC: AlignKind = AlignKind.center
@@ -287,11 +287,12 @@ func mountLibraryPage(
   world: mod UiWorld
   state: view AppState
   scrollY: view Float
+  viewport: view Viewport
 ) pub ret EntityId {
   let albums: view List(Album) => state.albums
 
   let root: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: root, w: screenW, h: screenH)
+  setRectFixed(world: world, entity: root, w: viewport.areaDuW, h: viewport.areaDuH)
   let layV: LayoutType = LayoutType.vertical
   let alignS: AlignKind = AlignKind.start
   setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
@@ -324,9 +325,11 @@ func buildLibraryWorld(
   state: view AppState
   playback: view PlaybackState
   scrollY: view Float
+  viewport: view Viewport
 ) pub ret UiWorld {
   let world: UiWorld = createUiWorld()
-  let page: EntityId = mountLibraryPage(world: world, state: state, scrollY: scrollY)
+  applyViewportExtent(world: world, viewport: viewport)
+  let page: EntityId = mountLibraryPage(world: world, state: state, scrollY: scrollY, viewport: viewport)
   let dock: EntityId = mountBottomDockOverlay(
     world: world
     activeTab: state.tab
