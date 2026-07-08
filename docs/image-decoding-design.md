@@ -61,7 +61,7 @@ Inputs in practice:
 | libjpeg-turbo | JPEG | BSD-3 + IJG + zlib mix | CMake + SIMD asm; system package or submodule | Rejected: 2–6× faster decode we don't need, at the cost of a real build dependency on three platforms. Revisit only if decode ever becomes hot (e.g. hundreds of covers per second). |
 | libwebp | WebP | BSD-3 (Google) | CMake/autotools; sizeable | Deferred with WebP itself (§5). |
 | Wuffs | PNG, JPEG, GIF, … | Apache-2.0 | single-file C amalgamation; memory-safe by construction | Strong safety story and a plausible future swap-in behind the same seam, but larger, less battle-tested in this exact stack, and its transpiled style is harder to patch. Not now; noted as the fallback if stb's CVE cadence becomes a problem. |
-| Platform APIs (ImageIO / Windows WIC / gdk-pixbuf, NDK) | varies | OS-provided | per-platform glue ×3+ | Rejected: three different codebases, three different pixel outputs (kills requirement 2), no universal Linux one — AND ImageIO was shown to be less correct than stb (silently renders truncated JPEGs half-grey instead of failing). ImageIO stays only as a one-release `RAE_G2D_IMAGEIO=1` A/B escape hatch (§6). |
+| Platform APIs (ImageIO / Windows WIC / gdk-pixbuf, NDK) | varies | OS-provided | per-platform glue ×3+ | Rejected and removed: three different codebases, three different pixel outputs (kills requirement 2), no universal Linux one — AND ImageIO was shown to be less correct than stb (silently renders truncated JPEGs half-grey instead of failing). The macOS ImageIO path is deleted entirely. |
 | Pure-Rae decoders | PNG done (#110); JPEG feasible | ours | none | The end state the language wants, but a Rae JPEG decoder is a multi-week project (DCT, Huffman, chroma upsampling) and #110's codec is compiled-target-only today. The seam keeps this open; not the answer for "run 106 on Linux next month". |
 
 ## 4. Decision
@@ -77,11 +77,10 @@ Inputs in practice:
    sniff → `FF D8 FF` = stb JPEG (all platforms), `89 50 4E 47` =
    lodepng, anything else = unsupported. A JPEG missing its `FF D9`
    EOI marker in the last 64 bytes is rejected as truncated BEFORE
-   the decoder runs. The raylib `LoadImage` fallback is REMOVED — a
-   decode either succeeds through the designated decoder or fails
-   loudly; silent decoder-roulette is how platform-dependent pixels
-   sneak in. `RAE_G2D_IMAGEIO=1` re-routes JPEG to macOS ImageIO for
-   one release as an A/B diff aid.
+   the decoder runs. The raylib `LoadImage` fallback and the macOS
+   ImageIO path are both REMOVED — a decode either succeeds through
+   the one designated decoder or fails loudly; silent
+   decoder-roulette is how platform-dependent pixels sneak in.
 4. **Supported format set: JPEG + PNG.** That is 100 % of current
    assets and the Spotify pipeline.
 5. **Downloads are atomic**: artwork fetch writes `<file>.part`,
@@ -111,12 +110,12 @@ alternative if we want its safety properties.
   cache entry whose decode returns 0 and re-fetches it, rather than
   pinning a permanent placeholder. Combined with atomic fetch, a
   transient partial download self-heals on the next pass.
-- Decoder default: stb on all platforms as of this revision.
-  `RAE_G2D_IMAGEIO=1` (macOS) re-routes to ImageIO for ONE release as
-  an A/B pixel-diff aid, then both it and the ImageIO code path get
-  deleted. Screenshot baselines regenerate once with stb (measured
-  drift vs ImageIO: max channel delta 3 — sub-visible chroma
-  rounding).
+- Decoder: stb on all platforms, and the ONLY JPEG decoder — the
+  macOS ImageIO path and its `RAE_G2D_IMAGEIO` gate are deleted (this
+  is an ongoing library project, not a release-shipped app; a dead
+  A/B path kept "just in case" is not the shape we want in git).
+  Screenshot baselines are stb output (drift vs the old ImageIO was
+  max channel delta 3 — sub-visible chroma rounding).
 - Colour/alpha semantics: RGBA8, straight (non-premultiplied) alpha,
   no colour management (ICC profiles ignored) — which is what both
   lodepng and stb produce natively, and what the JPEG path
@@ -129,16 +128,13 @@ alternative if we want its safety properties.
    (`STBI_ONLY_JPEG` / `STBI_NO_STDIO` / `STBI_MAX_DIMENSIONS 16384`
    / `STB_IMAGE_STATIC`).
 2. ✅ `rae_g2d_decode_rgba(path)` does the sniff-dispatch with the
-   truncation guard; raylib branch deleted; **stb is the default on
-   every platform**, `RAE_G2D_IMAGEIO=1` the one-release escape hatch.
+   truncation guard; raylib branch AND the macOS ImageIO path both
+   deleted; **stb is the sole JPEG decoder on every platform**.
 3. ✅ Atomic artwork fetch (`.part` + EOI-verify + rename) in the
    Spotify fetch runtime; 106's loader evicts + re-fetches on a decode
    failure.
 4. ✅ Verified: stb ok=102/102 on the cached Spotify set; 106 renders
    all covers; corrupt-file test `532_gpu2d_decode_policy` asserts the
    log line + handle-0 policy. Screenshot baselines are stb's output.
-
-A future cleanup deletes the `RAE_G2D_IMAGEIO` path and the ImageIO
-decode function entirely.
 
 End of design.
