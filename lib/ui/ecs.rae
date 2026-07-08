@@ -396,6 +396,7 @@ type UiWorld {
   gradientFills: ComponentTable(GradientFill)
   backdropImages: ComponentTable(BackdropImage)
   opticalAligns: ComponentTable(OpticalAlign)
+  visualBounds: ComponentTable(VisualBounds)
   layerRoots: ComponentTable(LayerRoot)
   layerRefs: ComponentTable(LayerRef)
   debugAnchors: ComponentTable(DebugAnchor)
@@ -498,6 +499,7 @@ func createUiWorld() ret UiWorld {
     gradientFills: createComponentTable(GradientFill)
     backdropImages: createComponentTable(BackdropImage)
     opticalAligns: createComponentTable(OpticalAlign)
+    visualBounds: createComponentTable(VisualBounds)
     layerRoots: createComponentTable(LayerRoot)
     layerRefs: createComponentTable(LayerRef)
     debugAnchors: createComponentTable(DebugAnchor)
@@ -777,6 +779,7 @@ func destroyEntity(world: mod UiWorld, entity: view EntityId) pub {
   componentRemove(this: world.actionBindings, entity: entity)
   componentRemove(this: world.refreshRegions, entity: entity)
   componentRemove(this: world.stateStyles, entity: entity)
+  componentRemove(this: world.visualBounds, entity: entity)
   componentRemove(this: world.aspects, entity: entity)
   componentRemove(this: world.scaleToFits, entity: entity)
   # Identity / metadata
