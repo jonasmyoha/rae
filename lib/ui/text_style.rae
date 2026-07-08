@@ -92,6 +92,30 @@ func resolveTextShadowName(theme: view ResolvedTheme, styleId: view String) pub 
   ret name
 }
 
+# Tier-2 override application (#236, theme §7). Layer a sparse
+# StyleOverride over a base value the resolvers produced. World-free
+# (takes the struct, not the world) so this module stays free of ECS
+# dependencies; the render path fetches the component and passes it in
+# only for the entities that carry one. A non-empty `colorSlot` resolves
+# against the ACTIVE theme (M5-consistent) so an overridden color still
+# tracks light/dark; else the literal `color` wins.
+func styleOverrideSize(base: view Float, so: view StyleOverride) pub ret Float {
+  if so.hasSize {
+    ret so.size
+  }
+  ret base
+}
+
+func styleOverrideColor(base: view RgbaColor, so: view StyleOverride) pub ret RgbaColor {
+  if so.hasColor {
+    if so.colorSlot.length() > 0 {
+      ret themeColorByName(name: so.colorSlot)
+    }
+    ret so.color
+  }
+  ret base
+}
+
 # ---------------------------------------------------------------
 # LEGACY (raylib / example 98) hardcoded tables — out of scope.
 # ---------------------------------------------------------------
