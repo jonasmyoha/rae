@@ -54,6 +54,9 @@ func main() {
   # Load the theme (#231): styleId sizes/colors/align now resolve from
   # the .raescene theme instead of hardcoded render_gpu2d tables.
   let uiTheme: ResolvedTheme = parseTheme(scene: loadSceneFile(path: themePath))
+  # Publish radius/padding tokens for the scene deserialiser (#233),
+  # BEFORE loadAllScenes so `"radius": "radiusCard"` etc. resolve.
+  setActiveThemeTokens(theme: uiTheme)
   let gpuUi: Gpu2dUi = { textFont: gpuTextFont, iconFont: gpuIconFont, theme: uiTheme }
 
   # Theme is picked from `RAE_UI_THEME` ("dark" / "light"); default is
