@@ -18,11 +18,13 @@
 # field on `UiWorld`. Components not yet handled (most effects,
 # DataRequest, ListView) fall through to a silent no-op so a scene
 # file can still load if it carries them.
+open ui/registry_opt
 import core
 import json
 import ui/theme
 import ui/spacing
 import ui/theme_resolved
+import ui/registry_opt
 
 # Build the canonical list of authored component names. Phase 1c uses
 # this to validate that every node's keys (other than `Children`) name
@@ -114,88 +116,6 @@ func isKnownComponent(name: view String) ret Bool {
 
 func registeredComponentCount() ret Int {
   ret registeredComponentNames().length
-}
-
-# -----------------------------------------------------------------
-# Helpers — JSON value extraction with sensible defaults
-# -----------------------------------------------------------------
-
-func optFloat(doc: view JsonDoc, container: view JsonValue, key: view String, fallback: view Float) ret Float {
-  let idx: Int = json.jsonField(doc: doc, this: container, key: key)
-  if idx < 0 {
-    ret fallback
-  }
-  let v: JsonValue = json.jsonValueAt(doc: doc, idx: idx)
-  ret json.jsonFloat(this: v, fallback: fallback)
-}
-
-# Same shape as optFloat but additionally accepts a string token name
-# resolved via `spaceTokenValue`. Use this for spacing-style fields
-# (gap, padding insets, margin insets) so .raescene authors can write
-# `"gap": "spaceM"` instead of remembering the pixel value. A numeric
-# JSON value still works unchanged — the string branch is the
-# extension, not a replacement.
-func optFloatOrToken(doc: view JsonDoc, container: view JsonValue, key: view String, fallback: view Float) ret Float {
-  let idx: Int = json.jsonField(doc: doc, this: container, key: key)
-  if idx < 0 {
-    ret fallback
-  }
-  let v: JsonValue = json.jsonValueAt(doc: doc, idx: idx)
-  let empty: String = ""
-  let asStr: String = json.jsonString(this: v, fallback: empty)
-  if asStr.length() > 0 {
-    ret spaceTokenValue(name: asStr)
-  }
-  ret json.jsonFloat(this: v, fallback: fallback)
-}
-
-# Same shape as optFloatOrToken but resolves RADIUS-category tokens
-# (#233) against the active theme (setActiveThemeTokens at boot).
-# Used for CornerRadius.radius and Shape.radius so a scene can write
-# `"radius": "radiusCard"` instead of a raw du value. A numeric value
-# still works unchanged.
-func optRadiusOrToken(doc: view JsonDoc, container: view JsonValue, key: view String, fallback: view Float) ret Float {
-  let idx: Int = json.jsonField(doc: doc, this: container, key: key)
-  if idx < 0 {
-    ret fallback
-  }
-  let v: JsonValue = json.jsonValueAt(doc: doc, idx: idx)
-  let empty: String = ""
-  let asStr: String = json.jsonString(this: v, fallback: empty)
-  if asStr.length() > 0 {
-    ret activeRadiusValue(name: asStr, fallback: fallback)
-  }
-  ret json.jsonFloat(this: v, fallback: fallback)
-}
-
-func optInt(doc: view JsonDoc, container: view JsonValue, key: view String, fallback: view Int) ret Int {
-  let idx: Int = json.jsonField(doc: doc, this: container, key: key)
-  if idx < 0 {
-    ret fallback
-  }
-  let v: JsonValue = json.jsonValueAt(doc: doc, idx: idx)
-  ret json.jsonInt(this: v, fallback: fallback)
-}
-
-func optString(doc: view JsonDoc, container: view JsonValue, key: view String, fallback: view String) ret String {
-  # Always return an independently-owned String (see jsonString
-  # for the why) so callers can hand the result to a struct field
-  # and rely on cascade drop to free it.
-  let idx: Int = json.jsonField(doc: doc, this: container, key: key)
-  if idx < 0 {
-    ret rae_ext_rae_string_copy(s: fallback)
-  }
-  let v: JsonValue = json.jsonValueAt(doc: doc, idx: idx)
-  ret json.jsonString(this: v, fallback: fallback)
-}
-
-func optBool(doc: view JsonDoc, container: view JsonValue, key: view String, fallback: view Bool) ret Bool {
-  let idx: Int = json.jsonField(doc: doc, this: container, key: key)
-  if idx < 0 {
-    ret fallback
-  }
-  let v: JsonValue = json.jsonValueAt(doc: doc, idx: idx)
-  ret json.jsonBool(this: v, fallback: fallback)
 }
 
 # -----------------------------------------------------------------
