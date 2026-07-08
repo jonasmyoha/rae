@@ -27,6 +27,8 @@ import ui/theme
 import ui/transform
 import ui/render_gpu2d
 import ui/animation
+import ui/theme_resolved
+import ui/scene
 func main() {
   let backendEnv: String = "gpu2d"
   # `RAE_UI_HEADLESS=1`: see headless.rae.
@@ -49,7 +51,10 @@ func main() {
   let gpuIconFont: SdfFont = sdf_text.loadSdfFont(
     jsonPath: "examples/106_mobile_ui/assets/MaterialIconsRound-Regular.mtsdf.json",
     rawAtlasPath: "examples/106_mobile_ui/assets/MaterialIconsRound-Regular.mtsdf.raw")
-  let gpuUi: Gpu2dUi = { textFont: gpuTextFont, iconFont: gpuIconFont }
+  # Load the theme (#231): styleId sizes/colors/align now resolve from
+  # the .raescene theme instead of hardcoded render_gpu2d tables.
+  let uiTheme: ResolvedTheme = parseTheme(scene: loadSceneFile(path: themePath))
+  let gpuUi: Gpu2dUi = { textFont: gpuTextFont, iconFont: gpuIconFont, theme: uiTheme }
 
   # Theme is picked from `RAE_UI_THEME` ("dark" / "light"); default is
   # dark. Setting the theme BEFORE `loadAllScenes` matters — scenes
