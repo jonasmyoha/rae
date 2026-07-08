@@ -441,6 +441,29 @@ func deserText(doc: view JsonDoc, val: view JsonValue) ret Text {
   }
 }
 
+# Sparse tier-2 style override (#236, theme §7). Parsed from the
+# `styleOverride` sub-object of a Text bag. Only the keys present patch
+# the resolved style — `size` (Float du) and `color` (literal RGBA
+# object OR a palette slot string, mirroring deserRgba). Absent keys
+# leave their `has*` flag false so the base style value shows through.
+func deserStyleOverride(doc: view JsonDoc, val: view JsonValue) ret StyleOverride {
+  var so: StyleOverride = defaultStyleOverride()
+  let sizeIdx: Int = json.jsonField(doc: doc, this: val, key: "size")
+  if sizeIdx >= 0 {
+    so.hasSize = true
+    so.size = optFloat(doc: doc, container: val, key: "size", fallback: 0.0)
+  }
+  let colorIdx: Int = json.jsonField(doc: doc, this: val, key: "color")
+  if colorIdx >= 0 {
+    so.hasColor = true
+    let cv: JsonValue = json.jsonValueAt(doc: doc, idx: colorIdx)
+    so.color = deserRgba(doc: doc, val: cv)
+    let emptySlot: String = ""
+    so.colorSlot = json.jsonString(this: cv, fallback: emptySlot)
+  }
+  ret so
+}
+
 func deserTextShadow(doc: view JsonDoc, val: view JsonValue) ret TextShadow {
   var shadow: TextShadow = defaultTextShadow()
   shadow.offset.x = optFloat(doc: doc, container: val, key: "offsetX", fallback: 0.0)
@@ -785,6 +808,15 @@ func applyComponentByName(
   }
   if name.equals(other: "Text") {
     componentSet(this: world.texts, entity: entity, data: deserText(doc: doc, val: val))
+    # Tier-2 partial style override (#236): namespaced inside the Text
+    # bag, stored as a sparse component only when authored. Base styleId
+    # (set above) is always kept — the override annotates the link to
+    # the theme, never severs it.
+    let soIdx: Int = json.jsonField(doc: doc, this: val, key: "styleOverride")
+    if soIdx >= 0 {
+      let sov: JsonValue = json.jsonValueAt(doc: doc, idx: soIdx)
+      componentSet(this: world.styleOverrides, entity: entity, data: deserStyleOverride(doc: doc, val: sov))
+    }
     ret
   }
   if name.equals(other: "TextShadow") {
