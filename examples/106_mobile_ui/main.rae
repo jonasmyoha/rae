@@ -676,33 +676,36 @@ func main() {
           )
 
           # In-app debug UI: a true return means at least one state bit
-          # flipped, so we need to rebuild the world and re-parse scenes
-          # if the theme was the changed piece (scene `$tokenName`
-          # colors bind at parse time).
+          # flipped. Scene-authored colors are now palette slots that
+          # resolve at paint (#235), so a theme change needs NO scene
+          # re-parse — `syncColorsFromTheme` refreshes the handful of
+          # code-driven colors and the world rebuild repaints them.
           var debugChanged: Bool = inputDispatch.debugChanged
           if debugChanged {
             syncColorsFromTheme()
-            scenes = loadAllScenes()
             switching = true
           }
 
           # Theme toggle: press T to swap between light and dark.
           # SDL key T is exposed with the same legacy keycode 84.
-          # Re-parse scenes so their token colors
-          # bind against the new theme, then force a world rebuild via
-          # `switching = true` — same code path as data hot reload.
+          # `setActiveTheme` bumps the theme generation; scene colors
+          # store slot NAMES and re-resolve against the new active theme
+          # on the next paint, so no scene re-parse is needed. Code-driven
+          # colors (nav-bar surface@238, pill/bg blends) still bake into
+          # components, so `syncColorsFromTheme` + a world rebuild refresh
+          # them — see queue #240 to migrate those to slots and drop the
+          # rebuild entirely.
           let keyT: Int = 84
           if uiIsKeyPressed(key: keyT) {
             let cur: Theme = currentTheme()
             if cur.mode is ThemeMode.light {
               setActiveTheme(theme: darkTheme())
-              log("[theme] -> dark")
+              log("[theme] -> dark (gen {themeGeneration()})")
             } else {
               setActiveTheme(theme: lightTheme())
-              log("[theme] -> light")
+              log("[theme] -> light (gen {themeGeneration()})")
             }
             syncColorsFromTheme()
-            scenes = loadAllScenes()
             switching = true
           }
 

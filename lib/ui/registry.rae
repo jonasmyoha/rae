@@ -419,6 +419,10 @@ func deserSprite(doc: view JsonDoc, val: view JsonValue) ret Sprite {
   if tintIdx >= 0 {
     let tv: JsonValue = json.jsonValueAt(doc: doc, idx: tintIdx)
     s.tint = deserRgba(doc: doc, val: tv)
+    # Record the palette slot (empty for a literal object) so the
+    # renderer can re-resolve on a live theme switch (#235).
+    let emptySlot: String = ""
+    s.tintSlot = json.jsonString(this: tv, fallback: emptySlot)
   }
   ret s
 }
@@ -460,11 +464,15 @@ func deserShape(doc: view JsonDoc, val: view JsonValue) ret Shape {
   if fillIdx >= 0 {
     let fv: JsonValue = json.jsonValueAt(doc: doc, idx: fillIdx)
     s.fill = deserRgba(doc: doc, val: fv)
+    let emptyFill: String = ""
+    s.fillSlot = json.jsonString(this: fv, fallback: emptyFill)
   }
   let strokeIdx: Int = json.jsonField(doc: doc, this: val, key: "stroke")
   if strokeIdx >= 0 {
     let sv: JsonValue = json.jsonValueAt(doc: doc, idx: strokeIdx)
     s.stroke = deserRgba(doc: doc, val: sv)
+    let emptyStroke: String = ""
+    s.strokeSlot = json.jsonString(this: sv, fallback: emptyStroke)
   }
   ret s
 }
