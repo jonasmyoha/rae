@@ -68,8 +68,13 @@ func lightTheme() pub ret Theme {
   ret Theme {
     mode: ThemeMode.light
     palette: ThemePalette {
-      background: RgbaColor { r: 232, g: 233, b: 240, a: 255 }
-      surface: RgbaColor { r: 246, g: 246, b: 248, a: 255 }
+      # Light mode: the PAGE is the brighter white and cards/bars
+      # (`surface`) take the soft grey, so a full-bleed page (e.g. the
+      # Now Playing screen) reads as clean white and the floating
+      # menubar / panels sit a shade back. (Swapped from the initial
+      # grey-page/white-card pairing per design review.)
+      background: RgbaColor { r: 246, g: 246, b: 248, a: 255 }
+      surface: RgbaColor { r: 232, g: 233, b: 240, a: 255 }
       surfaceAlt: RgbaColor { r: 118, g: 225, b: 225, a: 255 }
       textPrimary: RgbaColor { r: 30, g: 30, b: 36, a: 255 }
       textMuted: RgbaColor { r: 130, g: 130, b: 140, a: 255 }
@@ -122,7 +127,8 @@ func darkTheme() pub ret Theme {
 var activeTheme: Theme = Theme {
   mode: ThemeMode.light
   palette: ThemePalette {
-    surface: RgbaColor { r: 246, g: 246, b: 248, a: 255 }
+    background: RgbaColor { r: 246, g: 246, b: 248, a: 255 }
+    surface: RgbaColor { r: 232, g: 233, b: 240, a: 255 }
     surfaceAlt: RgbaColor { r: 118, g: 225, b: 225, a: 255 }
     textPrimary: RgbaColor { r: 30, g: 30, b: 36, a: 255 }
     textMuted: RgbaColor { r: 130, g: 130, b: 140, a: 255 }
