@@ -81,8 +81,6 @@ void rae_task_drop(RaeTask* t) {
 #include <mach/task_info.h>
 #include <malloc/malloc.h>
 #include <CoreFoundation/CoreFoundation.h>
-#include <CoreGraphics/CoreGraphics.h>
-#include <ImageIO/ImageIO.h>
 #endif
 
 #if defined(__linux__) || defined(__GLIBC__)
@@ -4738,62 +4736,20 @@ static unsigned char* rae_g2d_read_whole_file(const char* path, size_t* out_len)
     return buf;
 }
 
-#ifdef __APPLE__
-static int rae_g2d_decode_imageio_rgba(const char* path, unsigned char** out_rgba, unsigned* out_w, unsigned* out_h) {
-    if (!path || !out_rgba || !out_w || !out_h) return 0;
-    CFStringRef cf_path = CFStringCreateWithCString(NULL, path, kCFStringEncodingUTF8);
-    if (!cf_path) return 0;
-    CFURLRef url = CFURLCreateWithFileSystemPath(NULL, cf_path, kCFURLPOSIXPathStyle, false);
-    CFRelease(cf_path);
-    if (!url) return 0;
-    CGImageSourceRef src = CGImageSourceCreateWithURL(url, NULL);
-    CFRelease(url);
-    if (!src) return 0;
-    CGImageRef img = CGImageSourceCreateImageAtIndex(src, 0, NULL);
-    CFRelease(src);
-    if (!img) return 0;
-    size_t w = CGImageGetWidth(img);
-    size_t h = CGImageGetHeight(img);
-    if (w == 0 || h == 0 || w > 16384 || h > 16384) {
-        CGImageRelease(img);
-        return 0;
-    }
-    size_t bytes = w * h * 4;
-    unsigned char* rgba = (unsigned char*)calloc(1, bytes);
-    if (!rgba) {
-        CGImageRelease(img);
-        return 0;
-    }
-    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
-    CGContextRef ctx = CGBitmapContextCreate(rgba, w, h, 8, w * 4, cs,
-                                             kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
-    if (cs) CGColorSpaceRelease(cs);
-    if (!ctx) {
-        free(rgba);
-        CGImageRelease(img);
-        return 0;
-    }
-    CGContextDrawImage(ctx, CGRectMake(0, 0, (CGFloat)w, (CGFloat)h), img);
-    CGContextRelease(ctx);
-    CGImageRelease(img);
-    *out_rgba = rgba;
-    *out_w = (unsigned)w;
-    *out_h = (unsigned)h;
-    return 1;
-}
-#endif
-
 /* Decode an image file to RGBA8 (#228; contract + rationale in
  * docs/image-decoding-design.md): strict magic-byte dispatch, ONE
  * decoder per format, no fallback cascade.
- *   FF D8 FF     -> ImageIO on macOS, vendored stb_image elsewhere
+ *   FF D8 FF     -> vendored stb_image (JPEG, every platform)
  *   89 50 4E 47  -> lodepng (PNG)
  *   anything else -> unsupported
  * Output is straight-alpha RGBA8, no colour management.
  *
- * RAE_G2D_STB_JPEG=1 (macOS only) opts into the stb JPEG path for
- * debugging. Some valid Spotify baseline JPEGs currently fail in stb
- * with "can't merge dc and ac", so ImageIO remains the macOS default.
+ * stb is the sole JPEG decoder. macOS previously used ImageIO, but
+ * ImageIO silently rendered truncated downloads half-grey (no error);
+ * stb correctly rejects them, and decodes every valid file (verified
+ * ok=102/102 on the cached Spotify artwork set). The truncation guard
+ * below turns a partial download into a loud failure the caller can
+ * evict + re-fetch, rather than a decoder-dependent glitch.
  * Returns 1 with a malloc-compatible *out_rgba on success; on
  * failure returns 0 and points *out_err at a static reason string. */
 static int rae_g2d_decode_rgba(const char* path, unsigned char** out_rgba,
@@ -4805,10 +4761,8 @@ static int rae_g2d_decode_rgba(const char* path, unsigned char** out_rgba,
     if (!bytes) return 0;
     if (len >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF) {
         /* Truncation guard: a JPEG without its EOI marker (FF D9) in
-         * the last 64 bytes is an interrupted download. ImageIO
-         * decodes such files without error, silently rendering the
-         * missing scan rows grey — fail loudly instead so callers can
-         * evict the bad cache entry and re-fetch. */
+         * the last 64 bytes is an interrupted download. Fail loudly
+         * so callers can evict the bad cache entry and re-fetch. */
         {
             size_t scan = len < 64 ? len : 64;
             int has_eoi = 0;
@@ -4821,26 +4775,6 @@ static int rae_g2d_decode_rgba(const char* path, unsigned char** out_rgba,
                 return 0;
             }
         }
-#ifdef __APPLE__
-        /* stb is the default JPEG decoder on every platform (#228).
-         * RAE_G2D_IMAGEIO=1 re-routes to the legacy macOS ImageIO
-         * path — kept one release as an A/B pixel-diff escape hatch.
-         * The earlier "keep ImageIO because stb fails on Spotify
-         * JPEGs" concern was a misdiagnosis: stb was correctly
-         * REJECTING truncated cache downloads that ImageIO decoded
-         * half-grey without error. With the truncation guard above +
-         * atomic fetch, stb decodes all valid artwork; verified stb
-         * ok=102/102 on the cached Spotify set. */
-        const char* use_imageio = getenv("RAE_G2D_IMAGEIO");
-        if (use_imageio && strcmp(use_imageio, "1") == 0) {
-            free(bytes);
-            if (!rae_g2d_decode_imageio_rgba(path, out_rgba, out_w, out_h)) {
-                *out_err = "JPEG decode failed (ImageIO)";
-                return 0;
-            }
-            return 1;
-        }
-#endif
         int w = 0, h = 0, comp = 0;
         unsigned char* px = stbi_load_from_memory(bytes, (int)len, &w, &h, &comp, 4);
         free(bytes);
