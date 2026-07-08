@@ -831,6 +831,12 @@ func applyComponentByName(
     ret
   }
   if name.equals(other: "TextShadow") {
+    # Lint (#232, theme §7): a raw per-entity TextShadow is the
+    # last-resort override, not the authoring path. A shadow that any
+    # two nodes share belongs in a theme `shadow` token referenced by
+    # a text style (the miniTitle/miniMuted -> textOnAccent pattern).
+    # Nudge, don't block — one line per authored occurrence.
+    log("[scene] raw TextShadow authored on entity {entity.value} - prefer a theme shadow token on the text style (see docs/ui-theme-system.md sec 7)")
     componentSet(this: world.textShadows, entity: entity, data: deserTextShadow(doc: doc, val: val))
     ret
   }
