@@ -357,9 +357,44 @@ func paintTextG(world: view UiWorld, e: view EntityId, wt: view WorldTransform, 
     if optical.centerX { drawX = wt.x + cr.w / 2.0 - (bounds.left + bounds.right) / 2.0 + optical.bias.x }
     if optical.centerY { drawY = wt.y + cr.h / 2.0 - (bounds.top + bounds.bottom) / 2.0 + optical.bias.y }
   }
+  # Text shadow (#232). Precedence per §7's override ladder:
+  #   1. a raw TextShadow component (the last-resort per-entity
+  #      override) wins when present;
+  #   2. otherwise the STYLE's shadow token (theme-owned) — the paved
+  #      path that replaced the inline TextShadow blocks from e39a378.
+  # Both feed the same drawTextEx, so a token whose values match the
+  # old inline block renders byte-identically.
+  var hasShadow: Bool = false
+  var shCol: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
+  var shOffX: Float = 0.0
+  var shOffY: Float = 0.0
+  var shSoft: Float = 1.0
   if componentHas(this: world.textShadows, entity: e) {
     let sh: TextShadow = componentGet(this: world.textShadows, entity: e)
-    let shCol: RgbaColor = g2dChain(c: sh.color, chain255: chain255)
+    hasShadow = true
+    shCol = sh.color
+    shOffX = sh.offset.x
+    shOffY = sh.offset.y
+    shSoft = sh.softness
+  } else {
+    let shadowName: String = resolveTextShadowName(theme: res.theme, styleId: t.styleId)
+    if shadowName.length() > 0 {
+      let si: Int = themeShadowIndex(theme: res.theme, name: shadowName)
+      if si >= 0 {
+        hasShadow = true
+        let r: Int = res.theme.shadowR.get(index: si)
+        let g: Int = res.theme.shadowG.get(index: si)
+        let b: Int = res.theme.shadowB.get(index: si)
+        let a: Int = res.theme.shadowA.get(index: si)
+        shCol = RgbaColor { r: r, g: g, b: b, a: a }
+        shOffX = res.theme.shadowOffX.get(index: si)
+        shOffY = res.theme.shadowOffY.get(index: si)
+        shSoft = res.theme.shadowSoft.get(index: si)
+      }
+    }
+  }
+  if hasShadow {
+    let shChained: RgbaColor = g2dChain(c: shCol, chain255: chain255)
     gpu2d_text.drawTextEx(
       font: res.textFont
       text: t.text
@@ -369,10 +404,10 @@ func paintTextG(world: view UiWorld, e: view EntityId, wt: view WorldTransform, 
       color: g2dColor(c: col)
       outlineColor: 0
       outlineWidth: 0.0
-      shadowColor: g2dColor(c: shCol)
-      shadowOffX: sh.offset.x
-      shadowOffY: sh.offset.y
-      shadowSoftness: sh.softness
+      shadowColor: g2dColor(c: shChained)
+      shadowOffX: shOffX
+      shadowOffY: shOffY
+      shadowSoftness: shSoft
     )
     ret
   }
