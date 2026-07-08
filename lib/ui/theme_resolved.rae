@@ -1,0 +1,635 @@
+# Theme M0 — resolved theme loader (#230,
+# rae/docs/ui-theme-system.md §3-§5, M0).
+#
+# A theme is DATA, not code, and lives in a `.raescene` as top-level
+# sections next to `nodes` — exactly parallel to how S3/S5 put
+# `frames`/`states` there. NO new file format: this reads the theme
+# sections out of an already-parsed Scene's flat-pool JsonDoc.
+#
+#   "palette": { "<slot>": {r,g,b,a}, … }          semantic colors
+#   "space":   { "<token>": <du> , … }             spacing scale
+#   "radius":  { "<token>": <du> , … }             corner-radius presets
+#   "padding": { "<token>": {l,t,r,b}, … }         inset presets
+#   "shadow":  { "<token>": { color,offsetX,offsetY,softness, extends? } }
+#   "text":    { "<style>": { font,size,weight,lineHeight,tracking,
+#                             color,shadow,align, extends? } }
+#
+# `color` on a text style is either a palette SLOT NAME (string,
+# resolved against the palette at use — the seam that later makes
+# theme switching a repaint, M5) or an inline {r,g,b,a} object (for
+# one-offs like the debug panel's literal ink).
+#
+# STYLE INHERITANCE (§4): text styles and shadow tokens may carry
+# `"extends": "<other>"` — single parent, FLATTENED HERE at load
+# (child fields win). Runtime never walks a chain. Depth is capped at
+# 4; an unknown parent or a cycle is a loud error (logged) and the
+# chain is truncated there, mirroring the scene-loader diagnostic
+# tone. Flatten-at-load keeps ResolvedTheme free of recursion and
+# StringMaps.
+#
+# STORAGE (§3): parallel PRIMITIVE lists (the FrameSet discipline —
+# no StringMap in structs on Live, no List(struct)-by-index). Tens of
+# entries, so linear name lookup is fine; per-frame consumers should
+# cache by id (the VisualBounds pattern, #219).
+#
+# M0 scope: load + flatten + dump. NOTHING consumes ResolvedTheme yet
+# — M1 points the text resolver at it.
+import core
+import json
+import ui/scene
+
+let themeMaxExtendsDepth: Int = 4
+
+# Align codes stored in textAligns: 0 start, 1 center, 2 end.
+let themeAlignStart: Int = 0
+let themeAlignCenter: Int = 1
+let themeAlignEnd: Int = 2
+
+type ResolvedTheme {
+  # palette: slot name -> rgba (parallel r/g/b/a).
+  palNames: List(String)
+  palR: List(Int)
+  palG: List(Int)
+  palB: List(Int)
+  palA: List(Int)
+  # space + radius: token name -> du value.
+  spaceNames: List(String)
+  spaceVals: List(Float)
+  radiusNames: List(String)
+  radiusVals: List(Float)
+  # padding: token -> insets.
+  padNames: List(String)
+  padL: List(Float)
+  padT: List(Float)
+  padR: List(Float)
+  padB: List(Float)
+  # shadow tokens (flattened): color rgba + offset + softness.
+  shadowNames: List(String)
+  shadowR: List(Int)
+  shadowG: List(Int)
+  shadowB: List(Int)
+  shadowA: List(Int)
+  shadowOffX: List(Float)
+  shadowOffY: List(Float)
+  shadowSoft: List(Float)
+  # text styles (flattened).
+  textNames: List(String)
+  textFonts: List(String)
+  textSizes: List(Float)
+  textWeights: List(Float)
+  textLineHeights: List(Float)
+  textTrackings: List(Float)
+  # colorSlot "" => use inline textColor{R,G,B,A}; else resolve slot.
+  textColorSlots: List(String)
+  textColorR: List(Int)
+  textColorG: List(Int)
+  textColorB: List(Int)
+  textColorA: List(Int)
+  # "" => no shadow.
+  textShadowNames: List(String)
+  textAligns: List(Int)
+  ok: Bool
+}
+
+func createResolvedTheme() pub ret ResolvedTheme {
+  ret ResolvedTheme {
+    palNames: createList(String, cap: 12)
+    palR: createList(Int, cap: 12)
+    palG: createList(Int, cap: 12)
+    palB: createList(Int, cap: 12)
+    palA: createList(Int, cap: 12)
+    spaceNames: createList(String, cap: 8)
+    spaceVals: createList(Float, cap: 8)
+    radiusNames: createList(String, cap: 8)
+    radiusVals: createList(Float, cap: 8)
+    padNames: createList(String, cap: 8)
+    padL: createList(Float, cap: 8)
+    padT: createList(Float, cap: 8)
+    padR: createList(Float, cap: 8)
+    padB: createList(Float, cap: 8)
+    shadowNames: createList(String, cap: 8)
+    shadowR: createList(Int, cap: 8)
+    shadowG: createList(Int, cap: 8)
+    shadowB: createList(Int, cap: 8)
+    shadowA: createList(Int, cap: 8)
+    shadowOffX: createList(Float, cap: 8)
+    shadowOffY: createList(Float, cap: 8)
+    shadowSoft: createList(Float, cap: 8)
+    textNames: createList(String, cap: 32)
+    textFonts: createList(String, cap: 32)
+    textSizes: createList(Float, cap: 32)
+    textWeights: createList(Float, cap: 32)
+    textLineHeights: createList(Float, cap: 32)
+    textTrackings: createList(Float, cap: 32)
+    textColorSlots: createList(String, cap: 32)
+    textColorR: createList(Int, cap: 32)
+    textColorG: createList(Int, cap: 32)
+    textColorB: createList(Int, cap: 32)
+    textColorA: createList(Int, cap: 32)
+    textShadowNames: createList(String, cap: 32)
+    textAligns: createList(Int, cap: 32)
+    ok: false
+  }
+}
+
+# -----------------------------------------------------------------
+# Lookups (linear; tens of entries). Consumers that resolve per frame
+# should cache the index/result by id.
+# -----------------------------------------------------------------
+
+func themeSpaceValue(theme: view ResolvedTheme, name: view String, fallback: view Float) pub ret Float {
+  var i: Int = 0
+  loop i < theme.spaceNames.length {
+    let n: String = theme.spaceNames.get(index: i)
+    if n.equals(other: name) {
+      let v: Float = theme.spaceVals.get(index: i)
+      ret v
+    }
+    i = i + 1
+  }
+  ret fallback
+}
+
+func themeRadiusValue(theme: view ResolvedTheme, name: view String, fallback: view Float) pub ret Float {
+  var i: Int = 0
+  loop i < theme.radiusNames.length {
+    let n: String = theme.radiusNames.get(index: i)
+    if n.equals(other: name) {
+      let v: Float = theme.radiusVals.get(index: i)
+      ret v
+    }
+    i = i + 1
+  }
+  ret fallback
+}
+
+func themePaletteIndex(theme: view ResolvedTheme, slot: view String) pub ret Int {
+  var i: Int = 0
+  loop i < theme.palNames.length {
+    let n: String = theme.palNames.get(index: i)
+    if n.equals(other: slot) {
+      ret i
+    }
+    i = i + 1
+  }
+  ret -1
+}
+
+func themeTextStyleIndex(theme: view ResolvedTheme, styleId: view String) pub ret Int {
+  var i: Int = 0
+  loop i < theme.textNames.length {
+    let n: String = theme.textNames.get(index: i)
+    if n.equals(other: styleId) {
+      ret i
+    }
+    i = i + 1
+  }
+  ret -1
+}
+
+func themeShadowIndex(theme: view ResolvedTheme, name: view String) pub ret Int {
+  var i: Int = 0
+  loop i < theme.shadowNames.length {
+    let n: String = theme.shadowNames.get(index: i)
+    if n.equals(other: name) {
+      ret i
+    }
+    i = i + 1
+  }
+  ret -1
+}
+
+# -----------------------------------------------------------------
+# Parse
+# -----------------------------------------------------------------
+
+# Load a ResolvedTheme from the theme sections of a parsed Scene's
+# JsonDoc. A scene without theme sections yields an empty theme with
+# ok=true (every section is optional). ok=false only when the scene
+# itself failed to parse.
+func parseTheme(scene: view Scene) pub ret ResolvedTheme {
+  var out: ResolvedTheme = createResolvedTheme()
+  # Gate on the JSON parsing, NOT full-scene validation: a dedicated
+  # theme.raescene has no `nodes`/`root`, so parseScene leaves
+  # scene.ok=false while still populating scene.doc. The theme sections
+  # are all optional; a doc that parsed is enough.
+  let doc: view JsonDoc => scene.doc
+  if doc.ok is false {
+    ret out
+  }
+  let root: JsonValue = json.jsonRoot(doc: doc)
+
+  parseThemePalette(out: out, doc: doc, root: root)
+  parseThemeFloatMap(out: out, doc: doc, root: root, section: "space", target: 0)
+  parseThemeFloatMap(out: out, doc: doc, root: root, section: "radius", target: 1)
+  parseThemePadding(out: out, doc: doc, root: root)
+  parseThemeShadows(out: out, doc: doc, root: root)
+  parseThemeText(out: out, doc: doc, root: root)
+
+  out.ok = true
+  ret out
+}
+
+func parseThemePalette(out: mod ResolvedTheme, doc: view JsonDoc, root: view JsonValue) {
+  let idx: Int = json.jsonField(doc: doc, this: root, key: "palette")
+  if idx < 0 {
+    ret
+  }
+  let sec: JsonValue = json.jsonValueAt(doc: doc, idx: idx)
+  if sec.kind is not JsonKind.object {
+    ret
+  }
+  let n: Int = json.jsonObjectLen(this: sec)
+  var i: Int = 0
+  loop i < n {
+    let slot: String = json.jsonObjectKeyAt(doc: doc, this: sec, idx: i)
+    let val: JsonValue = json.jsonObjectValueAt(doc: doc, this: sec, idx: i)
+    let r: Int = themeReadIntField(doc: doc, obj: val, key: "r", fallback: 0)
+    let g: Int = themeReadIntField(doc: doc, obj: val, key: "g", fallback: 0)
+    let b: Int = themeReadIntField(doc: doc, obj: val, key: "b", fallback: 0)
+    let a: Int = themeReadIntField(doc: doc, obj: val, key: "a", fallback: 255)
+    out.palNames.add(value: slot)
+    out.palR.add(value: r)
+    out.palG.add(value: g)
+    out.palB.add(value: b)
+    out.palA.add(value: a)
+    i = i + 1
+  }
+}
+
+# `target`: 0 = space, 1 = radius. Both are name -> Float du maps.
+func parseThemeFloatMap(out: mod ResolvedTheme, doc: view JsonDoc, root: view JsonValue, section: view String, target: view Int) {
+  let idx: Int = json.jsonField(doc: doc, this: root, key: section)
+  if idx < 0 {
+    ret
+  }
+  let sec: JsonValue = json.jsonValueAt(doc: doc, idx: idx)
+  if sec.kind is not JsonKind.object {
+    ret
+  }
+  let n: Int = json.jsonObjectLen(this: sec)
+  var i: Int = 0
+  loop i < n {
+    let name: String = json.jsonObjectKeyAt(doc: doc, this: sec, idx: i)
+    let val: JsonValue = json.jsonObjectValueAt(doc: doc, this: sec, idx: i)
+    let v: Float = json.jsonFloat(this: val, fallback: 0.0)
+    if target is 0 {
+      out.spaceNames.add(value: name)
+      out.spaceVals.add(value: v)
+    } else {
+      out.radiusNames.add(value: name)
+      out.radiusVals.add(value: v)
+    }
+    i = i + 1
+  }
+}
+
+func parseThemePadding(out: mod ResolvedTheme, doc: view JsonDoc, root: view JsonValue) {
+  let idx: Int = json.jsonField(doc: doc, this: root, key: "padding")
+  if idx < 0 {
+    ret
+  }
+  let sec: JsonValue = json.jsonValueAt(doc: doc, idx: idx)
+  if sec.kind is not JsonKind.object {
+    ret
+  }
+  let n: Int = json.jsonObjectLen(this: sec)
+  var i: Int = 0
+  loop i < n {
+    let name: String = json.jsonObjectKeyAt(doc: doc, this: sec, idx: i)
+    let val: JsonValue = json.jsonObjectValueAt(doc: doc, this: sec, idx: i)
+    out.padNames.add(value: name)
+    out.padL.add(value: themeReadFloatField(doc: doc, obj: val, key: "l", fallback: 0.0))
+    out.padT.add(value: themeReadFloatField(doc: doc, obj: val, key: "t", fallback: 0.0))
+    out.padR.add(value: themeReadFloatField(doc: doc, obj: val, key: "r", fallback: 0.0))
+    out.padB.add(value: themeReadFloatField(doc: doc, obj: val, key: "b", fallback: 0.0))
+    i = i + 1
+  }
+}
+
+func parseThemeShadows(out: mod ResolvedTheme, doc: view JsonDoc, root: view JsonValue) {
+  let idx: Int = json.jsonField(doc: doc, this: root, key: "shadow")
+  if idx < 0 {
+    ret
+  }
+  let sec: JsonValue = json.jsonValueAt(doc: doc, idx: idx)
+  if sec.kind is not JsonKind.object {
+    ret
+  }
+  let n: Int = json.jsonObjectLen(this: sec)
+  var i: Int = 0
+  loop i < n {
+    let name: String = json.jsonObjectKeyAt(doc: doc, this: sec, idx: i)
+    # Resolve the extends chain, root-first, for this shadow token.
+    let chain: List(Int) = themeResolveChain(doc: doc, section: sec, name: name, kind: "shadow")
+    var r: Int = 0
+    var g: Int = 0
+    var b: Int = 0
+    var a: Int = 255
+    var offX: Float = 0.0
+    var offY: Float = 0.0
+    var soft: Float = 1.0
+    var c: Int = 0
+    loop c < chain.length {
+      let bagIdx: Int = chain.get(index: c)
+      let bag: JsonValue = json.jsonValueAt(doc: doc, idx: bagIdx)
+      let colIdx: Int = json.jsonField(doc: doc, this: bag, key: "color")
+      if colIdx >= 0 {
+        let col: JsonValue = json.jsonValueAt(doc: doc, idx: colIdx)
+        if col.kind is JsonKind.object {
+          r = themeReadIntField(doc: doc, obj: col, key: "r", fallback: r)
+          g = themeReadIntField(doc: doc, obj: col, key: "g", fallback: g)
+          b = themeReadIntField(doc: doc, obj: col, key: "b", fallback: b)
+          a = themeReadIntField(doc: doc, obj: col, key: "a", fallback: a)
+        }
+      }
+      offX = themeReadFloatField(doc: doc, obj: bag, key: "offsetX", fallback: offX)
+      offY = themeReadFloatField(doc: doc, obj: bag, key: "offsetY", fallback: offY)
+      soft = themeReadFloatField(doc: doc, obj: bag, key: "softness", fallback: soft)
+      c = c + 1
+    }
+    out.shadowNames.add(value: name)
+    out.shadowR.add(value: r)
+    out.shadowG.add(value: g)
+    out.shadowB.add(value: b)
+    out.shadowA.add(value: a)
+    out.shadowOffX.add(value: offX)
+    out.shadowOffY.add(value: offY)
+    out.shadowSoft.add(value: soft)
+    i = i + 1
+  }
+}
+
+func parseThemeText(out: mod ResolvedTheme, doc: view JsonDoc, root: view JsonValue) {
+  let idx: Int = json.jsonField(doc: doc, this: root, key: "text")
+  if idx < 0 {
+    ret
+  }
+  let sec: JsonValue = json.jsonValueAt(doc: doc, idx: idx)
+  if sec.kind is not JsonKind.object {
+    ret
+  }
+  let n: Int = json.jsonObjectLen(this: sec)
+  var i: Int = 0
+  loop i < n {
+    let name: String = json.jsonObjectKeyAt(doc: doc, this: sec, idx: i)
+    let chain: List(Int) = themeResolveChain(doc: doc, section: sec, name: name, kind: "text")
+    # Accumulator defaults (§3 "every field has a default").
+    var font: String = "body"
+    var size: Float = 43.373494
+    var weight: Float = 400.0
+    var lineHeight: Float = 1.0
+    var tracking: Float = 0.0
+    var colorSlot: String = "textPrimary"
+    var colR: Int = 0
+    var colG: Int = 0
+    var colB: Int = 0
+    var colA: Int = 255
+    var shadowName: String = ""
+    var align: Int = themeAlignStart
+    var c: Int = 0
+    loop c < chain.length {
+      let bagIdx: Int = chain.get(index: c)
+      let bag: JsonValue = json.jsonValueAt(doc: doc, idx: bagIdx)
+      # Strings
+      let fontIdx: Int = json.jsonField(doc: doc, this: bag, key: "font")
+      if fontIdx >= 0 {
+        let fv: JsonValue = json.jsonValueAt(doc: doc, idx: fontIdx)
+        let empty: String = ""
+        font = json.jsonString(this: fv, fallback: empty)
+      }
+      size = themeReadFloatField(doc: doc, obj: bag, key: "size", fallback: size)
+      weight = themeReadFloatField(doc: doc, obj: bag, key: "weight", fallback: weight)
+      lineHeight = themeReadFloatField(doc: doc, obj: bag, key: "lineHeight", fallback: lineHeight)
+      tracking = themeReadFloatField(doc: doc, obj: bag, key: "tracking", fallback: tracking)
+      # color: string slot OR inline object.
+      let colIdx: Int = json.jsonField(doc: doc, this: bag, key: "color")
+      if colIdx >= 0 {
+        let col: JsonValue = json.jsonValueAt(doc: doc, idx: colIdx)
+        if col.kind is JsonKind.string {
+          let empty2: String = ""
+          colorSlot = json.jsonString(this: col, fallback: empty2)
+        } else {
+          if col.kind is JsonKind.object {
+            colorSlot = ""
+            colR = themeReadIntField(doc: doc, obj: col, key: "r", fallback: colR)
+            colG = themeReadIntField(doc: doc, obj: col, key: "g", fallback: colG)
+            colB = themeReadIntField(doc: doc, obj: col, key: "b", fallback: colB)
+            colA = themeReadIntField(doc: doc, obj: col, key: "a", fallback: colA)
+          }
+        }
+      }
+      # shadow token name (string).
+      let shIdx: Int = json.jsonField(doc: doc, this: bag, key: "shadow")
+      if shIdx >= 0 {
+        let sh: JsonValue = json.jsonValueAt(doc: doc, idx: shIdx)
+        let empty3: String = ""
+        shadowName = json.jsonString(this: sh, fallback: empty3)
+      }
+      # align keyword.
+      let alIdx: Int = json.jsonField(doc: doc, this: bag, key: "align")
+      if alIdx >= 0 {
+        let al: JsonValue = json.jsonValueAt(doc: doc, idx: alIdx)
+        let empty4: String = ""
+        let alStr: String = json.jsonString(this: al, fallback: empty4)
+        align = themeParseAlign(s: alStr, fallback: align)
+      }
+      c = c + 1
+    }
+    out.textNames.add(value: name)
+    out.textFonts.add(value: font)
+    out.textSizes.add(value: size)
+    out.textWeights.add(value: weight)
+    out.textLineHeights.add(value: lineHeight)
+    out.textTrackings.add(value: tracking)
+    out.textColorSlots.add(value: colorSlot)
+    out.textColorR.add(value: colR)
+    out.textColorG.add(value: colG)
+    out.textColorB.add(value: colB)
+    out.textColorA.add(value: colA)
+    out.textShadowNames.add(value: shadowName)
+    out.textAligns.add(value: align)
+    i = i + 1
+  }
+}
+
+# Resolve `name`'s single-parent `extends` chain within `section`,
+# returning the pool value-indices ROOT-FIRST so a caller applying
+# them in order gets child-wins semantics. Depth capped at
+# themeMaxExtendsDepth; unknown parent / cycle logs and truncates.
+# `kind` is only used for the diagnostic text.
+func themeResolveChain(doc: view JsonDoc, section: view JsonValue, name: view String, kind: view String) ret List(Int) {
+  # child-first while walking up, reversed at the end.
+  let up: List(Int) = createList(Int, cap: 4)
+  let seen: List(String) = createList(String, cap: 4)
+  var curName: String = "{name}"
+  var steps: Int = 0
+  var walking: Bool = true
+  loop walking {
+    let idx: Int = json.jsonField(doc: doc, this: section, key: curName)
+    if idx < 0 {
+      # Only an error if we got here by following an extends link;
+      # the top-level name should always exist.
+      if steps > 0 {
+        log("[theme] {kind} style '{name}' extends unknown '{curName}' — chain truncated")
+      }
+      walking = false
+    } else {
+      up.add(value: idx)
+      # Fresh copy — curName is a `var` we reassign below; adding it
+      # directly would let the list alias a heap we then drop.
+      let seenCopy: String = "{curName}"
+      seen.add(value: seenCopy)
+      let bag: JsonValue = json.jsonValueAt(doc: doc, idx: idx)
+      let extIdx: Int = json.jsonField(doc: doc, this: bag, key: "extends")
+      var parentName: String = ""
+      if extIdx >= 0 {
+        let extVal: JsonValue = json.jsonValueAt(doc: doc, idx: extIdx)
+        let empty: String = ""
+        parentName = json.jsonString(this: extVal, fallback: empty)
+      }
+      if parentName.length() is 0 {
+        walking = false
+      } else if themeSeenName(seen: seen, name: parentName) {
+        log("[theme] {kind} style '{name}' extends chain has a cycle at '{parentName}' — truncated")
+        walking = false
+      } else if steps + 1 > themeMaxExtendsDepth {
+        log("[theme] {kind} style '{name}' extends deeper than {themeMaxExtendsDepth} — truncated")
+        walking = false
+      } else {
+        steps = steps + 1
+        curName = "{parentName}"
+      }
+    }
+  }
+  ret themeReverseIntList(src: up)
+}
+
+func themeSeenName(seen: view List(String), name: view String) ret Bool {
+  var i: Int = 0
+  loop i < seen.length {
+    let s: String = seen.get(index: i)
+    if s.equals(other: name) {
+      ret true
+    }
+    i = i + 1
+  }
+  ret false
+}
+
+func themeReverseIntList(src: view List(Int)) ret List(Int) {
+  let out: List(Int) = createList(Int, cap: src.length)
+  var i: Int = src.length - 1
+  loop i >= 0 {
+    let v: Int = src.get(index: i)
+    out.add(value: v)
+    i = i - 1
+  }
+  ret out
+}
+
+func themeParseAlign(s: view String, fallback: view Int) ret Int {
+  if s.equals(other: "start") {
+    ret themeAlignStart
+  }
+  if s.equals(other: "center") {
+    ret themeAlignCenter
+  }
+  if s.equals(other: "end") {
+    ret themeAlignEnd
+  }
+  ret fallback
+}
+
+# Read an Int field from a JSON object, or fallback if absent.
+func themeReadIntField(doc: view JsonDoc, obj: view JsonValue, key: view String, fallback: view Int) ret Int {
+  let idx: Int = json.jsonField(doc: doc, this: obj, key: key)
+  if idx < 0 {
+    ret fallback
+  }
+  let v: JsonValue = json.jsonValueAt(doc: doc, idx: idx)
+  ret json.jsonInt(this: v, fallback: fallback)
+}
+
+func themeReadFloatField(doc: view JsonDoc, obj: view JsonValue, key: view String, fallback: view Float) ret Float {
+  let idx: Int = json.jsonField(doc: doc, this: obj, key: key)
+  if idx < 0 {
+    ret fallback
+  }
+  let v: JsonValue = json.jsonValueAt(doc: doc, idx: idx)
+  ret json.jsonFloat(this: v, fallback: fallback)
+}
+
+# -----------------------------------------------------------------
+# Debug dump — prints the fully-flattened theme, so "what IS
+# miniMuted, actually?" is one call away (§4 mitigation).
+# -----------------------------------------------------------------
+func themeDumpResolved(theme: view ResolvedTheme) pub {
+  log("[theme] resolved: {theme.palNames.length} palette / {theme.spaceNames.length} space / {theme.radiusNames.length} radius / {theme.padNames.length} padding / {theme.shadowNames.length} shadow / {theme.textNames.length} text")
+  var i: Int = 0
+  loop i < theme.palNames.length {
+    let n: String = theme.palNames.get(index: i)
+    let r: Int = theme.palR.get(index: i)
+    let g: Int = theme.palG.get(index: i)
+    let b: Int = theme.palB.get(index: i)
+    let a: Int = theme.palA.get(index: i)
+    log("[theme]   palette {n} = {r},{g},{b},{a}")
+    i = i + 1
+  }
+  i = 0
+  loop i < theme.spaceNames.length {
+    let n: String = theme.spaceNames.get(index: i)
+    let v: Float = theme.spaceVals.get(index: i)
+    log("[theme]   space {n} = {v}")
+    i = i + 1
+  }
+  i = 0
+  loop i < theme.radiusNames.length {
+    let n: String = theme.radiusNames.get(index: i)
+    let v: Float = theme.radiusVals.get(index: i)
+    log("[theme]   radius {n} = {v}")
+    i = i + 1
+  }
+  i = 0
+  loop i < theme.padNames.length {
+    let n: String = theme.padNames.get(index: i)
+    let l: Float = theme.padL.get(index: i)
+    let t: Float = theme.padT.get(index: i)
+    let r: Float = theme.padR.get(index: i)
+    let b: Float = theme.padB.get(index: i)
+    log("[theme]   padding {n} = {l},{t},{r},{b}")
+    i = i + 1
+  }
+  i = 0
+  loop i < theme.shadowNames.length {
+    let n: String = theme.shadowNames.get(index: i)
+    let r: Int = theme.shadowR.get(index: i)
+    let g: Int = theme.shadowG.get(index: i)
+    let b: Int = theme.shadowB.get(index: i)
+    let a: Int = theme.shadowA.get(index: i)
+    let ox: Float = theme.shadowOffX.get(index: i)
+    let oy: Float = theme.shadowOffY.get(index: i)
+    let sf: Float = theme.shadowSoft.get(index: i)
+    log("[theme]   shadow {n} = rgba {r},{g},{b},{a} off {ox},{oy} soft {sf}")
+    i = i + 1
+  }
+  i = 0
+  loop i < theme.textNames.length {
+    let n: String = theme.textNames.get(index: i)
+    let font: String = theme.textFonts.get(index: i)
+    let sz: Float = theme.textSizes.get(index: i)
+    let slot: String = theme.textColorSlots.get(index: i)
+    let sh: String = theme.textShadowNames.get(index: i)
+    let al: Int = theme.textAligns.get(index: i)
+    if slot.length() > 0 {
+      log("[theme]   text {n} = font {font} size {sz} color slot:{slot} shadow '{sh}' align {al}")
+    } else {
+      let cr: Int = theme.textColorR.get(index: i)
+      let cg: Int = theme.textColorG.get(index: i)
+      let cb: Int = theme.textColorB.get(index: i)
+      let ca: Int = theme.textColorA.get(index: i)
+      log("[theme]   text {n} = font {font} size {sz} color inline:{cr},{cg},{cb},{ca} shadow '{sh}' align {al}")
+    }
+    i = i + 1
+  }
+}
