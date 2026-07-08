@@ -398,8 +398,8 @@ byte-identical (or intentionally-identical) 106 screenshots:
 - **M1 — Single text resolver.** text_style.rae reads ResolvedTheme
   (falling back to its current if-chains when no theme is loaded, so
   lib/ui stays usable standalone); render_gpu2d's duplicated
-  `g2dTextStyle*` tables are deleted in favour of it; render.rae's
-  raylib copy follows. Screenshot-verified no-change.
+  `g2dTextStyle*` tables are deleted in favour of it.
+  Screenshot-verified no-change.
 - **M2 — Shadows into styles.** Add the shadow token table; give
   `miniTitle` / `miniMuted` their shadows in the theme file; delete
   the TextShadow blocks from mini-player.raescene. The TextShadow
@@ -427,6 +427,13 @@ byte-identical (or intentionally-identical) 106 screenshots:
 Rollback safety: every slice keeps the previous mechanism as
 fallback until the following slice removes it, and 106 headless
 screenshots gate each step (the #213/#219 methodology).
+
+Scope decision (2026-07-08, queued as #230-#237): the theme system
+targets the gpu2d/106 stack ONLY. The legacy raylib UI path
+(ui/legacy_raylib, example 98) gets no back-compat work — its style
+copies stay frozen and out of scope, and if 98 ever blocks a theme
+slice (compile breakage, suite coupling), the resolution is to REMOVE
+example 98 rather than to maintain it.
 
 ## 10. Summary of recommendations
 
