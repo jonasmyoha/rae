@@ -486,6 +486,8 @@ func applyOverride(world: mod UiWorld, entity: view EntityId, override: view Sce
       if componentHas(this: world.sprites, entity: entity) {
         let cur: mod Sprite => componentMod(this: world.sprites, entity: entity)
         cur.tint = parseRgbaString(s: override.valueString)
+        # Explicit literal override wins over any scene slot (#235).
+        cur.tintSlot = ""
       }
     }
     ret
