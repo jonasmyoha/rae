@@ -77,6 +77,21 @@ func resolveTextIsRightAligned(theme: view ResolvedTheme, styleId: view String) 
   ret al is themeAlignEnd
 }
 
+# The shadow-token name a style references, or "" for no shadow
+# (#232). The renderer looks the token up in the theme's shadow table
+# (themeShadowIndex + shadow* lists) to get color/offset/softness —
+# so a text shadow is a property of the named STYLE, not a per-entity
+# component. Repairs e39a378, where the shadow was authored inline on
+# every entity.
+func resolveTextShadowName(theme: view ResolvedTheme, styleId: view String) pub ret String {
+  let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId)
+  if i < 0 {
+    ret ""
+  }
+  let name: String = theme.textShadowNames.get(index: i)
+  ret name
+}
+
 # ---------------------------------------------------------------
 # LEGACY (raylib / example 98) hardcoded tables — out of scope.
 # ---------------------------------------------------------------
