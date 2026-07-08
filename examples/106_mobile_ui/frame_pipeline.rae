@@ -146,11 +146,16 @@ func runFrameLayoutTransform(
   viewport: view Viewport
   layoutCache: mod LayoutCache
   transformCache: mod TransformCache
+  gpuUi: view Gpu2dUi
 ) pub {
   applySafeAreas(world: world, viewport: viewport)
   layoutSystemIfDirty(world: world, cache: layoutCache)
   fitSystem(world: world)
   transformSystemIfDirty(world: world, cache: transformCache)
+  # Measured centering (#219): cache glyph bounds once per change so
+  # the render pass reads them instead of remeasuring every frame.
+  # Needs mod world + the fonts, so it runs here, before render.
+  visualBoundsSystem(world: world, res: gpuUi)
 }
 
 type FrameAnimationResult pub {
