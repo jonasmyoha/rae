@@ -380,6 +380,28 @@ type OpticalAlign {
   bias: Vec2
 }
 
+# Derived, cached visual bounds of a node's rendered glyphs (#219).
+# `left/top/right/bottom` are the glyph-plane extents relative to the
+# text pen origin (baseline at y=0), in framebuffer px at
+# `measuredSize`; `advance` is the total pen advance. This is the
+# measured-centering input the paint path reads INSTEAD of remeasuring
+# every frame — visualBoundsSystem (ui/render_gpu2d) writes it once
+# per change. `measuredText` + `measuredSize` + `measuredIcon` form the
+# invalidation key: when the node's rendered string, size, or
+# text-vs-icon font changes, the system recomputes. NEVER authored in
+# a scene — it is pure derived state.
+type VisualBounds {
+  hasBounds: Bool
+  left: Float
+  top: Float
+  right: Float
+  bottom: Float
+  advance: Float
+  measuredText: String
+  measuredSize: Float
+  measuredIcon: Bool
+}
+
 # A layer is a real entity. `LayerRoot` is what makes one — it carries
 # the layer's stable id (used for lookup from app code) and its paint
 # order (ascending = painted on top of lower orders, hit-tested
