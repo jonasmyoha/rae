@@ -338,8 +338,8 @@ func mountBottomDockOverlay(
   # its top half remains visible while the bottom half tucks behind the
   # capsule, reading as one combined iOS-style bottom control.
   let dockBgExtend: Float = 216.86746987951807
-  let miniCardH: Float = miniPlayerH * 2.0
-  let miniOverlap: Float = miniPlayerH
+  let miniCardH: Float = miniPlayerH + navTabsH
+  let miniOverlap: Float = navTabsH
   let dockH: Float = miniCardH + navTabsH - miniOverlap + dockBgExtend
   # Edge-to-edge: the dock spans the full layout extent (window width on
   # desktop), not the phone content column. ExtentAnchor.fill makes the
@@ -385,14 +385,11 @@ func mountBottomDockOverlay(
   # Mini-player matches the floating tab capsule width and radius, so
   # their bottom corners align visually when the tab bar overlaps it.
   #
-  # The mini-player CARD itself is double height (`miniCardH`): the
-  # scene mounts onto a 2x-tall root, so the gradient card genuinely
-  # extends down behind the tab capsule instead of an invisible empty
-  # slot doing the overlapping (the earlier attempt — mechanically
-  # overlapped, visually nothing changed). Extra bottom padding equal
-  # to the overlap keeps the row contents (thumb / titles / controls)
-  # centered in the visible TOP half; the card's empty lower half
-  # slides under the menubar via the dock's negative layout gap.
+  # The mini-player CARD extends by exactly the nav-tabs height, so the
+  # gradient starts at the menubar bottom edge and its visible content
+  # remains the original miniPlayerH top slice. Extra bottom padding
+  # equal to the overlap keeps the row contents (thumb / titles /
+  # controls) centered in that visible top slice.
   let miniW: Float = world.layoutW - floatingDockInset * 2.0
   let miniLabel: String = "mini-player"
   let mini: EntityId = buildMiniPlayerInstance(
