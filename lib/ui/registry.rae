@@ -22,6 +22,7 @@ import core
 import json
 import ui/theme
 import ui/spacing
+import ui/theme_resolved
 
 # Build the canonical list of authored component names. Phase 1c uses
 # this to validate that every node's keys (other than `Children`) name
@@ -144,6 +145,25 @@ func optFloatOrToken(doc: view JsonDoc, container: view JsonValue, key: view Str
   let asStr: String = json.jsonString(this: v, fallback: empty)
   if asStr.length() > 0 {
     ret spaceTokenValue(name: asStr)
+  }
+  ret json.jsonFloat(this: v, fallback: fallback)
+}
+
+# Same shape as optFloatOrToken but resolves RADIUS-category tokens
+# (#233) against the active theme (setActiveThemeTokens at boot).
+# Used for CornerRadius.radius and Shape.radius so a scene can write
+# `"radius": "radiusCard"` instead of a raw du value. A numeric value
+# still works unchanged.
+func optRadiusOrToken(doc: view JsonDoc, container: view JsonValue, key: view String, fallback: view Float) ret Float {
+  let idx: Int = json.jsonField(doc: doc, this: container, key: key)
+  if idx < 0 {
+    ret fallback
+  }
+  let v: JsonValue = json.jsonValueAt(doc: doc, idx: idx)
+  let empty: String = ""
+  let asStr: String = json.jsonString(this: v, fallback: empty)
+  if asStr.length() > 0 {
+    ret activeRadiusValue(name: asStr, fallback: fallback)
   }
   ret json.jsonFloat(this: v, fallback: fallback)
 }
@@ -425,6 +445,15 @@ func deserLayout(doc: view JsonDoc, val: view JsonValue) ret Layout {
 }
 
 func deserPadding(doc: view JsonDoc, val: view JsonValue) ret Padding {
+  # A padding token names a whole Insets preset (#233):
+  # `"Padding": "screenEdgePadding"`. A JSON object still gives
+  # explicit per-side insets (each side may itself be a space token).
+  let empty: String = ""
+  let asStr: String = json.jsonString(this: val, fallback: empty)
+  if asStr.length() > 0 {
+    let ti: ThemeInsets = activePaddingInsets(name: asStr)
+    ret Padding { insets: Insets { l: ti.l, t: ti.t, r: ti.r, b: ti.b } }
+  }
   ret Padding { insets: deserInsets(doc: doc, val: val) }
 }
 
@@ -506,7 +535,7 @@ func deserShape(doc: view JsonDoc, val: view JsonValue) ret Shape {
   let s: Shape = defaultShape()
   s.kind = parseShapeKind(s: kindStr)
   s.strokeWidth = optFloat(doc: doc, container: val, key: "strokeWidth", fallback: 0.0)
-  s.radius = optFloat(doc: doc, container: val, key: "radius", fallback: 0.0)
+  s.radius = optRadiusOrToken(doc: doc, container: val, key: "radius", fallback: 0.0)
   let fillIdx: Int = json.jsonField(doc: doc, this: val, key: "fill")
   if fillIdx >= 0 {
     let fv: JsonValue = json.jsonValueAt(doc: doc, idx: fillIdx)
@@ -558,7 +587,7 @@ func deserHeroWidget(doc: view JsonDoc, val: view JsonValue) ret HeroWidget {
 }
 
 func deserCornerRadius(doc: view JsonDoc, val: view JsonValue) ret CornerRadius {
-  let r: Float = optFloat(doc: doc, container: val, key: "radius", fallback: 0.0)
+  let r: Float = optRadiusOrToken(doc: doc, container: val, key: "radius", fallback: 0.0)
   ret CornerRadius { radius: r }
 }
 
