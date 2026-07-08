@@ -475,6 +475,24 @@ byte-identical (or intentionally-identical) 106 screenshots:
   carrying raw values; `primaryButton`-class container styles arrive
   here, once there is a widget system to consume them.
 
+  *Status (#237, implemented):*
+  - `StateStyle` gained per-state palette-slot references
+    (`tintSlot`/`shapeFillSlot` + selected variants); a non-empty slot
+    resolves through `themeColorByName` at apply, empty keeps the
+    literal (widget_style.rae). `textStyle` was already a reference.
+  - A `container` theme section defines composite bundles
+    (`primaryButton`, `card`) naming a `background` palette slot, a
+    `radius` token, a `padding` token, and a `text` style. Scenes use
+    `"ContainerStyle": "<name>"`, which `ui/container_style.rae`
+    expands at deserialise into the concrete rounded `Shape`
+    (background stored as `fillSlot` so it still theme-tracks) +
+    `Padding`. It collapses the "five visual components on a node" into
+    one reference.
+  - Deferred to a follow-up (queue #258): applying a container's
+    `text` style to a child Text entity (needs a child-propagation
+    pass) and `icon` styles (§5 tier 5 was never built). The `text`
+    field is parsed and carried so a bundle can declare it today.
+
 Rollback safety: every slice keeps the previous mechanism as
 fallback until the following slice removes it, and 106 headless
 screenshots gate each step (the #213/#219 methodology).
