@@ -657,6 +657,8 @@ func themeDumpResolved(theme: view ResolvedTheme) pub {
 # hardcoded table.
 # ================================================================
 
+var g_activeSpaceNames: List(String) = createList(String, cap: 8)
+var g_activeSpaceVals: List(Float) = createList(Float, cap: 8)
 var g_activeRadiusNames: List(String) = createList(String, cap: 8)
 var g_activeRadiusVals: List(Float) = createList(Float, cap: 8)
 var g_activePadNames: List(String) = createList(String, cap: 8)
@@ -674,6 +676,14 @@ func setActiveThemeTokens(theme: view ResolvedTheme) pub {
     ret
   }
   var i: Int = 0
+  loop i < theme.spaceNames.length {
+    let n: String = theme.spaceNames.get(index: i)
+    let v: Float = theme.spaceVals.get(index: i)
+    g_activeSpaceNames.add(value: n)
+    g_activeSpaceVals.add(value: v)
+    i = i + 1
+  }
+  i = 0
   loop i < theme.radiusNames.length {
     let n: String = theme.radiusNames.get(index: i)
     let v: Float = theme.radiusVals.get(index: i)
@@ -696,6 +706,22 @@ func setActiveThemeTokens(theme: view ResolvedTheme) pub {
     i = i + 1
   }
   g_activeTokensReady = true
+}
+
+# Resolve a SPACE token name to its du value, or `fallback` when the
+# token isn't defined (the caller passes the legacy spacing.rae value
+# so token resolution still works before the theme is loaded).
+func activeSpaceValue(name: view String, fallback: view Float) pub ret Float {
+  var i: Int = 0
+  loop i < g_activeSpaceNames.length {
+    let n: String = g_activeSpaceNames.get(index: i)
+    if n.equals(other: name) {
+      let v: Float = g_activeSpaceVals.get(index: i)
+      ret v
+    }
+    i = i + 1
+  }
+  ret fallback
 }
 
 # Resolve a radius token name to its du value, or `fallback` if the
