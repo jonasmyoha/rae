@@ -88,7 +88,7 @@ the named-style road the paved one.
 ## 2. Proposed architecture in one picture
 
 ```
-        theme file (data, JSON)                 scene file
+     theme .raescene (data sections)         page .raescene
   ┌──────────────────────────────┐      ┌──────────────────────────┐
   │ palette:  surface, accent…   │      │ "Text": {                │
   │ text:     miniTitle {…}      │◄─────│   "styleId": "miniTitle" │
@@ -149,17 +149,33 @@ List(String)`, …) with linear name lookup — tens of styles, so O(n)
 lookup is irrelevant, and the result should be cached per style id by
 consumers that resolve per frame (the VisualBounds pattern, #219).
 
-**Authoring format:** JSON, same flat-pool parser as `.raescene`.
-Either a standalone `theme.raetheme` per app, or a `"theme"` section
-allowed in a designated scene file. Recommendation: standalone file —
-themes are app-wide, scenes are per-page, and hot-reloading the theme
-file (the existing data-watch machinery) gives live design iteration
-across every screen at once.
+**Authoring format: reuse `.raescene` — no new file format.** A theme
+is just data, and `.raescene` is already the project's data-oriented
+JSON format with a flat-pool parser, a hot-reload watch, and an
+established "top-level sections alongside `nodes`" shape (`frames`
+and `states` from the S3/S5 work already live there). A theme is
+therefore authored as a `.raescene` file that carries top-level
+`palette` / `text` / `space` / `radius` / `shadow` / `padding`
+sections — exactly parallel to how a scene carries `frames`. Inventing
+a `.raetheme` extension would fork the parser, the loader, the
+data-watch registration, and the tooling for zero gain.
+
+Recommendation: a **dedicated theme scene file** per app (e.g.
+`assets/scenes/theme.raescene`) that defines the theme sections and
+usually no `nodes`. It reuses `loadSceneFile` / the flat-pool JsonDoc
+unchanged; watching it via the existing data-watch machinery gives
+live design iteration across every screen at once. Theme sections MAY
+also appear in an ordinary page scene when convenient, but keeping the
+app-wide theme in its own file is cleaner (themes are app-wide, page
+scenes are per-page). The loader reads theme sections into
+ResolvedTheme whether they came from a dedicated file or a page scene;
+the section keys are what matter, not the filename.
 
 ```json
 {
-  "type": "Theme",
-  "version": 1,
+  "type": "Scene",
+  "version": 3,
+  "sceneId": "theme",
   "palette": { "surface": {"r":15,"g":15,"b":18,"a":255}, "…": "…" },
   "text": {
     "body":      { "font": "body", "size": 43.4, "color": "textPrimary" },
@@ -390,11 +406,13 @@ at those sites; call-site code uses tokens directly.
 Non-breaking, value-preserving, in slices — each lands green with
 byte-identical (or intentionally-identical) 106 screenshots:
 
-- **M0 — Theme file + loader.** Add `ResolvedTheme` (parallel-list
-  tables), the `.raetheme` parser with `extends` flattening +
-  validation, and a default theme file whose values are transcribed
-  from today's hardcoded tables. Nothing consumes it yet. Ship with
-  a dump tool.
+- **M0 — Theme sections + loader.** Add `ResolvedTheme` (parallel-list
+  tables) and a reader that parses the theme sections (`palette` /
+  `text` / `space` / `radius` / `shadow` / `padding`) out of a
+  `.raescene` JsonDoc — no new file format, reusing the flat-pool
+  parser — with `extends` flattening + validation, plus a default
+  `theme.raescene` whose values are transcribed from today's hardcoded
+  tables. Nothing consumes it yet. Ship with a dump tool.
 - **M1 — Single text resolver.** text_style.rae reads ResolvedTheme
   (falling back to its current if-chains when no theme is loaded, so
   lib/ui stays usable standalone); render_gpu2d's duplicated
