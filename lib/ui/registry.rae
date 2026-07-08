@@ -19,12 +19,14 @@
 # DataRequest, ListView) fall through to a silent no-op so a scene
 # file can still load if it carries them.
 open ui/registry_opt
+open ui/container_style
 import core
 import json
 import ui/theme
 import ui/spacing
 import ui/theme_resolved
 import ui/registry_opt
+import ui/container_style
 
 # Build the canonical list of authored component names. Phase 1c uses
 # this to validate that every node's keys (other than `Children`) name
@@ -95,6 +97,8 @@ func registeredComponentNames() ret List(String) {
   names.add(value: "AnimFrames")
   names.add(value: "AnimTrigger")
   names.add(value: "WobbleFx")
+  # Composite theme styles (#237, M6)
+  names.add(value: "ContainerStyle")
   # Hierarchy is `Children` — handled specially by scene_loader, not
   # treated as a component here.
   ret names
@@ -831,6 +835,15 @@ func applyComponentByName(
   }
   if name.equals(other: "Shape") {
     componentSet(this: world.shapes, entity: entity, data: deserShape(doc: doc, val: val))
+    ret
+  }
+  if name.equals(other: "ContainerStyle") {
+    # Composite style reference (#237, M6): a bare string naming a
+    # theme container style. Expands into the concrete Shape + Padding
+    # the bundle references (see ui/container_style).
+    let empty: String = ""
+    let styleName: String = json.jsonString(this: val, fallback: empty)
+    applyContainerStyle(world: world, entity: entity, name: styleName)
     ret
   }
   if name.equals(other: "Active") {

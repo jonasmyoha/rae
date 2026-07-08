@@ -98,6 +98,15 @@ type ResolvedTheme {
   # "" => no shadow.
   textShadowNames: List(String)
   textAligns: List(Int)
+  # container/button styles (#237, M6): composite bundles that reference
+  # other tokens. Each entry names a background palette slot, a radius
+  # token, a padding token, and a text style — the "five visual
+  # components on a node" collapsed to one `"ContainerStyle": "name"`.
+  containerNames: List(String)
+  containerBgSlots: List(String)
+  containerRadiusTokens: List(String)
+  containerPadTokens: List(String)
+  containerTextStyles: List(String)
   ok: Bool
 }
 
@@ -138,6 +147,11 @@ func createResolvedTheme() pub ret ResolvedTheme {
     textColorA: createList(Int, cap: 32)
     textShadowNames: createList(String, cap: 32)
     textAligns: createList(Int, cap: 32)
+    containerNames: createList(String, cap: 8)
+    containerBgSlots: createList(String, cap: 8)
+    containerRadiusTokens: createList(String, cap: 8)
+    containerPadTokens: createList(String, cap: 8)
+    containerTextStyles: createList(String, cap: 8)
     ok: false
   }
 }
@@ -235,9 +249,43 @@ func parseTheme(scene: view Scene) pub ret ResolvedTheme {
   parseThemePadding(out: out, doc: doc, root: root)
   parseThemeShadows(out: out, doc: doc, root: root)
   parseThemeText(out: out, doc: doc, root: root)
+  parseThemeContainer(out: out, doc: doc, root: root)
 
   out.ok = true
   ret out
+}
+
+# Parse the optional `container` section (#237, M6). Each entry:
+#   "primaryButton": { "background": "accent", "radius": "radiusPill",
+#                      "padding": "cardPadding", "text": "buttonLabel" }
+# All four fields are token/style/slot NAMES resolved later (at scene
+# deserialise for bg/radius/padding, at paint for text) — never baked.
+# Missing fields default to "" (that facet is left to the node).
+func parseThemeContainer(out: mod ResolvedTheme, doc: view JsonDoc, root: view JsonValue) {
+  let idx: Int = json.jsonField(doc: doc, this: root, key: "container")
+  if idx < 0 {
+    ret
+  }
+  let sec: JsonValue = json.jsonValueAt(doc: doc, idx: idx)
+  if sec.kind is not JsonKind.object {
+    ret
+  }
+  let n: Int = json.jsonObjectLen(this: sec)
+  var i: Int = 0
+  loop i < n {
+    let name: String = json.jsonObjectKeyAt(doc: doc, this: sec, idx: i)
+    let val: JsonValue = json.jsonObjectValueAt(doc: doc, this: sec, idx: i)
+    let bg: String = themeReadStringField(doc: doc, obj: val, key: "background", fallback: "")
+    let rad: String = themeReadStringField(doc: doc, obj: val, key: "radius", fallback: "")
+    let pad: String = themeReadStringField(doc: doc, obj: val, key: "padding", fallback: "")
+    let txt: String = themeReadStringField(doc: doc, obj: val, key: "text", fallback: "")
+    out.containerNames.add(value: name)
+    out.containerBgSlots.add(value: bg)
+    out.containerRadiusTokens.add(value: rad)
+    out.containerPadTokens.add(value: pad)
+    out.containerTextStyles.add(value: txt)
+    i = i + 1
+  }
 }
 
 func parseThemePalette(out: mod ResolvedTheme, doc: view JsonDoc, root: view JsonValue) {
@@ -570,6 +618,15 @@ func themeReadFloatField(doc: view JsonDoc, obj: view JsonValue, key: view Strin
   ret json.jsonFloat(this: v, fallback: fallback)
 }
 
+func themeReadStringField(doc: view JsonDoc, obj: view JsonValue, key: view String, fallback: view String) ret String {
+  let idx: Int = json.jsonField(doc: doc, this: obj, key: key)
+  if idx < 0 {
+    ret "{fallback}"
+  }
+  let v: JsonValue = json.jsonValueAt(doc: doc, idx: idx)
+  ret json.jsonString(this: v, fallback: fallback)
+}
+
 # -----------------------------------------------------------------
 # Debug dump — prints the fully-flattened theme, so "what IS
 # miniMuted, actually?" is one call away (§4 mitigation).
@@ -666,6 +723,11 @@ var g_activePadL: List(Float) = createList(Float, cap: 8)
 var g_activePadT: List(Float) = createList(Float, cap: 8)
 var g_activePadR: List(Float) = createList(Float, cap: 8)
 var g_activePadB: List(Float) = createList(Float, cap: 8)
+var g_activeContainerNames: List(String) = createList(String, cap: 8)
+var g_activeContainerBgSlots: List(String) = createList(String, cap: 8)
+var g_activeContainerRadiusTokens: List(String) = createList(String, cap: 8)
+var g_activeContainerPadTokens: List(String) = createList(String, cap: 8)
+var g_activeContainerTextStyles: List(String) = createList(String, cap: 8)
 var g_activeTokensReady: Bool = false
 
 # Populate the active radius/padding token tables from a loaded theme.
@@ -705,7 +767,50 @@ func setActiveThemeTokens(theme: view ResolvedTheme) pub {
     g_activePadB.add(value: b)
     i = i + 1
   }
+  i = 0
+  loop i < theme.containerNames.length {
+    g_activeContainerNames.add(value: theme.containerNames.get(index: i))
+    g_activeContainerBgSlots.add(value: theme.containerBgSlots.get(index: i))
+    g_activeContainerRadiusTokens.add(value: theme.containerRadiusTokens.get(index: i))
+    g_activeContainerPadTokens.add(value: theme.containerPadTokens.get(index: i))
+    g_activeContainerTextStyles.add(value: theme.containerTextStyles.get(index: i))
+    i = i + 1
+  }
   g_activeTokensReady = true
+}
+
+# Index of a container style in the active tables, or -1. The field
+# getters below read parallel lists at that index (#237, M6).
+func activeContainerIndex(name: view String) pub ret Int {
+  var i: Int = 0
+  loop i < g_activeContainerNames.length {
+    let n: String = g_activeContainerNames.get(index: i)
+    if n.equals(other: name) {
+      ret i
+    }
+    i = i + 1
+  }
+  ret -1
+}
+
+func activeContainerBgSlotAt(i: view Int) pub ret String {
+  let s: String = g_activeContainerBgSlots.get(index: i)
+  ret "{s}"
+}
+
+func activeContainerRadiusTokenAt(i: view Int) pub ret String {
+  let s: String = g_activeContainerRadiusTokens.get(index: i)
+  ret "{s}"
+}
+
+func activeContainerPadTokenAt(i: view Int) pub ret String {
+  let s: String = g_activeContainerPadTokens.get(index: i)
+  ret "{s}"
+}
+
+func activeContainerTextStyleAt(i: view Int) pub ret String {
+  let s: String = g_activeContainerTextStyles.get(index: i)
+  ret "{s}"
 }
 
 # Resolve a SPACE token name to its du value, or `fallback` when the
