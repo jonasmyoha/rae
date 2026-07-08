@@ -1,0 +1,46 @@
+# #230 Theme M0 — loader + extends flattening + dump, no consumers yet.
+# Theme data is read from .raescene top-level sections (no new format);
+# here the scene JSON is an inline raw string.
+open ui/theme_resolved
+import core
+import ui/scene
+import ui/theme_resolved
+
+func main() {
+  let src: String = r#"{ "type": "Scene", "palette": { "accent": {"r":72,"g":180,"b":152,"a":255} }, "space": { "spaceM": 12.0 }, "radius": { "radiusCard": 36.0 }, "shadow": { "soft": {"color":{"r":0,"g":0,"b":0,"a":115},"offsetX":3.0,"offsetY":3.0,"softness":8.0}, "softer": {"extends":"soft","color":{"r":0,"g":0,"b":0,"a":100}} }, "text": { "body": {"font":"body","size":43.0,"color":"textPrimary"}, "miniTitle": {"extends":"body","size":39.0,"color":"accentText","shadow":"soft","align":"center"}, "miniMuted": {"extends":"miniTitle","size":30.0,"color":"accentTextMuted"}, "cycleA": {"extends":"cycleB","size":11.0}, "cycleB": {"extends":"cycleA","size":22.0}, "orphan": {"extends":"ghost","size":9.0} } }"#
+  let scene: Scene = parseScene(source: src)
+  let theme: ResolvedTheme = parseTheme(scene: scene)
+
+  let nTexts: Int = theme.textNames.length
+  log("ok={theme.ok} texts={nTexts}")
+
+  let spaceM: Int = themeSpaceValue(theme: theme, name: "spaceM", fallback: 0.0).toInt()
+  let radiusCard: Int = themeRadiusValue(theme: theme, name: "radiusCard", fallback: 0.0).toInt()
+  let hasAccent: Bool = themePaletteIndex(theme: theme, slot: "accent") >= 0
+  log("spaceM={spaceM} radiusCard={radiusCard} accent={hasAccent}")
+
+  # miniMuted flattens: font inherited from body, own size, own color,
+  # shadow + align inherited from miniTitle (center=1).
+  let mi: Int = themeTextStyleIndex(theme: theme, styleId: "miniMuted")
+  let font: String = theme.textFonts.get(index: mi)
+  let size: Int = theme.textSizes.get(index: mi).toInt()
+  let slot: String = theme.textColorSlots.get(index: mi)
+  let shadow: String = theme.textShadowNames.get(index: mi)
+  let align: Int = theme.textAligns.get(index: mi)
+  log("miniMuted font={font} size={size} color={slot} shadow={shadow} align={align}")
+
+  # 'softer' inherits offset+softness from 'soft', overrides alpha.
+  let si: Int = themeShadowIndex(theme: theme, name: "softer")
+  let sa: Int = theme.shadowA.get(index: si)
+  let sox: Int = theme.shadowOffX.get(index: si).toInt()
+  let ssoft: Int = theme.shadowSoft.get(index: si).toInt()
+  log("softer a={sa} offX={sox} soft={ssoft}")
+
+  # cycle + unknown-parent styles still resolve (truncated), not hang.
+  let ca: Int = themeTextStyleIndex(theme: theme, styleId: "cycleA")
+  let caSize: Int = theme.textSizes.get(index: ca).toInt()
+  log("cycleA size={caSize}")
+  let oi: Int = themeTextStyleIndex(theme: theme, styleId: "orphan")
+  let oSize: Int = theme.textSizes.get(index: oi).toInt()
+  log("orphan size={oSize}")
+}
