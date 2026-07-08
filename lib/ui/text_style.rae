@@ -13,6 +13,73 @@
 import core
 import ui/components
 import ui/theme
+import ui/theme_resolved
+
+# ================================================================
+# Theme-driven resolver (#231, Theme M1) — the SINGLE styleId ->
+# concrete-value mapping for the gpu2d render path. Reads a
+# ResolvedTheme (loaded from a .raescene theme, #230) instead of the
+# hardcoded tables below.
+#
+# The hardcoded `textStyle*(styleId)` functions further down stay for
+# the legacy raylib path (lib/ui/legacy_raylib + example 98), which is
+# out of scope and keeps its own copy — do not route it through here.
+#
+# Color policy (byte-identical to the old g2dTextStyleColor): a style
+# whose `color` is a palette SLOT resolves against the ACTIVE theme
+# (theme.rae module global) so light/dark switching still works; a
+# style with an inline color returns its baked RGBA. M5 moves slot
+# resolution onto the ResolvedTheme palette + a generation counter.
+# ================================================================
+
+let styleBodySize: Float = 43.373493975903614
+
+func resolveTextSize(theme: view ResolvedTheme, styleId: view String) pub ret Float {
+  let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId)
+  if i < 0 {
+    ret styleBodySize
+  }
+  let sz: Float = theme.textSizes.get(index: i)
+  ret sz
+}
+
+func resolveTextColor(theme: view ResolvedTheme, styleId: view String) pub ret RgbaColor {
+  let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId)
+  if i < 0 {
+    ret themeColorByName(name: "textPrimary")
+  }
+  let slot: String = theme.textColorSlots.get(index: i)
+  if slot.length() > 0 {
+    ret themeColorByName(name: slot)
+  }
+  let r: Int = theme.textColorR.get(index: i)
+  let g: Int = theme.textColorG.get(index: i)
+  let b: Int = theme.textColorB.get(index: i)
+  let a: Int = theme.textColorA.get(index: i)
+  ret RgbaColor { r: r, g: g, b: b, a: a }
+}
+
+func resolveTextIsCentered(theme: view ResolvedTheme, styleId: view String) pub ret Bool {
+  let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId)
+  if i < 0 {
+    ret false
+  }
+  let al: Int = theme.textAligns.get(index: i)
+  ret al is themeAlignCenter
+}
+
+func resolveTextIsRightAligned(theme: view ResolvedTheme, styleId: view String) pub ret Bool {
+  let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId)
+  if i < 0 {
+    ret false
+  }
+  let al: Int = theme.textAligns.get(index: i)
+  ret al is themeAlignEnd
+}
+
+# ---------------------------------------------------------------
+# LEGACY (raylib / example 98) hardcoded tables — out of scope.
+# ---------------------------------------------------------------
 
 # Font size (design units) for a style id. Mirrors render.rae's textStyleSize.
 func textStyleSize(styleId: view String) pub ret Float {
