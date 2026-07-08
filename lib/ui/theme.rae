@@ -30,6 +30,12 @@ enum ThemeMode {
 # outline) not the *value*, so dark and light themes can plug in
 # very different RGBA values for the same slot without callers caring.
 type ThemePalette {
+  # Page background — the full-screen clear color behind everything.
+  # Distinct from `surface` (cards / bars / the floating menubar) so a
+  # light theme can pair a soft near-white page with brighter white
+  # surfaces on top, the way iOS grouped backgrounds do. In dark mode
+  # it matches `surface` (both near-black).
+  background: RgbaColor
   surface: RgbaColor
   surfaceAlt: RgbaColor
   textPrimary: RgbaColor
@@ -62,6 +68,7 @@ func lightTheme() pub ret Theme {
   ret Theme {
     mode: ThemeMode.light
     palette: ThemePalette {
+      background: RgbaColor { r: 232, g: 233, b: 240, a: 255 }
       surface: RgbaColor { r: 246, g: 246, b: 248, a: 255 }
       surfaceAlt: RgbaColor { r: 118, g: 225, b: 225, a: 255 }
       textPrimary: RgbaColor { r: 30, g: 30, b: 36, a: 255 }
@@ -94,6 +101,7 @@ func darkTheme() pub ret Theme {
   ret Theme {
     mode: ThemeMode.dark
     palette: ThemePalette {
+      background: RgbaColor { r: 10, g: 10, b: 14, a: 255 }
       surface: RgbaColor { r: 10, g: 10, b: 14, a: 255 }
       surfaceAlt: RgbaColor { r: 72, g: 180, b: 152, a: 255 }
       textPrimary: RgbaColor { r: 248, g: 248, b: 250, a: 255 }
@@ -152,6 +160,9 @@ func themeGeneration() pub ret Int {
 # obvious in the rendered output rather than silently transparent.
 func themeColorByName(name: view String) pub ret RgbaColor {
   let p: ThemePalette = activeTheme.palette
+  if name.equals(other: "background") {
+    ret p.background
+  }
   if name.equals(other: "surface") {
     ret p.surface
   }
