@@ -45,6 +45,16 @@ let themeAlignStart: Int = 0
 let themeAlignCenter: Int = 1
 let themeAlignEnd: Int = 2
 
+# Padding token result — a plain 4-float struct so this module needs
+# no ui/components dependency (which would drag EntityId-using types
+# into the emit graph). registry maps it to the ECS Insets.
+type ThemeInsets {
+  l: Float
+  t: Float
+  r: Float
+  b: Float
+}
+
 type ResolvedTheme {
   # palette: slot name -> rgba (parallel r/g/b/a).
   palNames: List(String)
@@ -632,4 +642,94 @@ func themeDumpResolved(theme: view ResolvedTheme) pub {
     }
     i = i + 1
   }
+}
+
+# ================================================================
+# Active theme tokens for the SCENE DESERIALISER (#233, Theme M3).
+#
+# Radius/padding tokens live in the theme (theme.raescene), but scene
+# deserialisation needs them at parse time. Mirroring how color tokens
+# resolve against theme.rae's module-global `activeTheme`, the app
+# calls `setActiveThemeTokens(theme)` once at boot (after loading the
+# theme, before loadAllScenes); the deserialiser's radius/padding
+# token helpers then resolve against these module globals. Single
+# source: the values come from the loaded ResolvedTheme, not a second
+# hardcoded table.
+# ================================================================
+
+var g_activeRadiusNames: List(String) = createList(String, cap: 8)
+var g_activeRadiusVals: List(Float) = createList(Float, cap: 8)
+var g_activePadNames: List(String) = createList(String, cap: 8)
+var g_activePadL: List(Float) = createList(Float, cap: 8)
+var g_activePadT: List(Float) = createList(Float, cap: 8)
+var g_activePadR: List(Float) = createList(Float, cap: 8)
+var g_activePadB: List(Float) = createList(Float, cap: 8)
+var g_activeTokensReady: Bool = false
+
+# Populate the active radius/padding token tables from a loaded theme.
+# Idempotent: only the first call populates (guards against hot-reload
+# re-entry leaking the global lists).
+func setActiveThemeTokens(theme: view ResolvedTheme) pub {
+  if g_activeTokensReady {
+    ret
+  }
+  var i: Int = 0
+  loop i < theme.radiusNames.length {
+    let n: String = theme.radiusNames.get(index: i)
+    let v: Float = theme.radiusVals.get(index: i)
+    g_activeRadiusNames.add(value: n)
+    g_activeRadiusVals.add(value: v)
+    i = i + 1
+  }
+  i = 0
+  loop i < theme.padNames.length {
+    let n: String = theme.padNames.get(index: i)
+    let l: Float = theme.padL.get(index: i)
+    let t: Float = theme.padT.get(index: i)
+    let r: Float = theme.padR.get(index: i)
+    let b: Float = theme.padB.get(index: i)
+    g_activePadNames.add(value: n)
+    g_activePadL.add(value: l)
+    g_activePadT.add(value: t)
+    g_activePadR.add(value: r)
+    g_activePadB.add(value: b)
+    i = i + 1
+  }
+  g_activeTokensReady = true
+}
+
+# Resolve a radius token name to its du value, or `fallback` if the
+# token isn't defined (logged once so a typo is visible).
+func activeRadiusValue(name: view String, fallback: view Float) pub ret Float {
+  var i: Int = 0
+  loop i < g_activeRadiusNames.length {
+    let n: String = g_activeRadiusNames.get(index: i)
+    if n.equals(other: name) {
+      let v: Float = g_activeRadiusVals.get(index: i)
+      ret v
+    }
+    i = i + 1
+  }
+  log("[scene] unknown radius token '{name}' - using fallback")
+  ret fallback
+}
+
+# Resolve a padding token name to its insets, or a zero fallback
+# (logged) when undefined. Returns ThemeInsets (not the ECS Insets)
+# to keep this module free of the ui/components dependency.
+func activePaddingInsets(name: view String) pub ret ThemeInsets {
+  var i: Int = 0
+  loop i < g_activePadNames.length {
+    let n: String = g_activePadNames.get(index: i)
+    if n.equals(other: name) {
+      let l: Float = g_activePadL.get(index: i)
+      let t: Float = g_activePadT.get(index: i)
+      let r: Float = g_activePadR.get(index: i)
+      let b: Float = g_activePadB.get(index: i)
+      ret ThemeInsets { l: l, t: t, r: r, b: b }
+    }
+    i = i + 1
+  }
+  log("[scene] unknown padding token '{name}' - using zero insets")
+  ret ThemeInsets { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
 }
