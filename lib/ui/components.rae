@@ -254,6 +254,12 @@ type TransformFx {
 type Sprite {
   textureKey: String
   tint: RgbaColor
+  # Palette slot the tint came from (#235). Non-empty => the renderer
+  # resolves `tint` from the ACTIVE theme at paint time, so a
+  # dark/light toggle is a repaint, not a scene re-parse. Empty => the
+  # `tint` RGBA is a literal. `tint` still holds the baked colour as a
+  # first-frame value / literal fallback.
+  tintSlot: String
   scaleMode: ScaleMode
   tileScale: Vec2
   nineSlice: Insets
@@ -276,6 +282,11 @@ type Shape {
   kind: ShapeKind
   fill: RgbaColor
   stroke: RgbaColor
+  # Palette slots for fill/stroke (#235). Non-empty => resolve from
+  # the active theme at paint (live theme switch); empty => the RGBA
+  # is a literal. See Sprite.tintSlot.
+  fillSlot: String
+  strokeSlot: String
   strokeWidth: Float
   radius: Float
 }
@@ -808,6 +819,7 @@ func defaultSprite() ret Sprite {
   ret Sprite {
     textureKey: ""
     tint: RgbaColor { r: 255, g: 255, b: 255, a: 255 }
+    tintSlot: ""
     scaleMode: ScaleMode.fit
     tileScale: Vec2 { x: 1.0, y: 1.0 }
     nineSlice: defaultInsets()
@@ -832,6 +844,8 @@ func defaultShape() ret Shape {
     kind: ShapeKind.rect
     fill: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
     stroke: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
+    fillSlot: ""
+    strokeSlot: ""
     strokeWidth: 0.0
     radius: 0.0
   }

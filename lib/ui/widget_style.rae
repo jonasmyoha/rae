@@ -152,6 +152,10 @@ func applySpriteStyle(world: mod UiWorld, entity: view EntityId, selected: view 
   }
   if tintChange {
     sp.tint = wantTint
+    # A StateStyle tint is a state color (e.g. liked=coral), not a theme
+    # slot — clear any scene-authored slot so paint uses this literal
+    # rather than re-resolving the slot against the active theme (#235).
+    sp.tintSlot = ""
   }
 }
 
@@ -174,6 +178,8 @@ func applyShapeStyle(world: mod UiWorld, entity: view EntityId, selected: view B
   }
   let sh: mod Shape => componentMod(this: world.shapes, entity: entity)
   sh.fill = wantFill
+  # State fill overrides the scene slot — clear it (see applySpriteStyle, #235).
+  sh.fillSlot = ""
 }
 
 func applyOffsetStyle(world: mod UiWorld, entity: view EntityId, selected: view Bool) {
