@@ -411,6 +411,25 @@ func paintTextG(world: view UiWorld, e: view EntityId, wt: view WorldTransform, 
     if optical.centerX { drawX = wt.x + cr.w / 2.0 - (bounds.left + bounds.right) / 2.0 + optical.bias.x }
     if optical.centerY { drawY = wt.y + cr.h / 2.0 - (bounds.top + bounds.bottom) / 2.0 + optical.bias.y }
   }
+  if componentHas(this: world.textShadows, entity: e) {
+    let sh: TextShadow = componentGet(this: world.textShadows, entity: e)
+    let shCol: RgbaColor = g2dChain(c: sh.color, chain255: chain255)
+    gpu2d_text.drawTextEx(
+      font: res.textFont
+      text: t.text
+      x: drawX
+      y: drawY
+      sizePx: size
+      color: g2dColor(c: col)
+      outlineColor: 0
+      outlineWidth: 0.0
+      shadowColor: g2dColor(c: shCol)
+      shadowOffX: sh.offset.x
+      shadowOffY: sh.offset.y
+      shadowSoftness: sh.softness
+    )
+    ret
+  }
   gpu2d_text.drawText(font: res.textFont, text: t.text, x: drawX, y: drawY, sizePx: size, color: g2dColor(c: col))
 }
 
