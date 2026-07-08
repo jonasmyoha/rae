@@ -49,6 +49,10 @@ let navTabsH: Float = 190.84337349397592
 # scene-driven widget picks up the new colors. Initial values match
 # `lightTheme()` so the app boots looking right even if a caller
 # never calls `syncColorsFromTheme`.
+# Full-screen page background (the render clear color). A distinct
+# near-white in light mode so the whiter cards/menubar read as raised
+# on top; matches `surface` (near-black) in dark mode.
+var pageBgColor: RgbaColor = { r: 232, g: 233, b: 240, a: 255 }
 var surfaceColor: RgbaColor = { r: 246, g: 246, b: 248, a: 255 }
 var heroColor: RgbaColor = { r: 130, g: 130, b: 140, a: 255 }
 var iconTint: RgbaColor = { r: 30, g: 30, b: 36, a: 255 }
@@ -62,6 +66,7 @@ var imageTintColor: RgbaColor = { r: 255, g: 255, b: 255, a: 255 }
 # user toggles the theme at runtime; the next `buildScreenWorld`
 # then reads the refreshed colors.
 func syncColorsFromTheme() {
+  pageBgColor = themeColorByName(name: "background")
   surfaceColor = themeColorByName(name: "surface")
   heroColor = themeColorByName(name: "textMuted")
   iconTint = themeColorByName(name: "textPrimary")

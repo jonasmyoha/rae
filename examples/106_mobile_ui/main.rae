@@ -141,10 +141,10 @@ func main() {
 
   # Clear color follows the theme surface so scrolled-past-page
   # content reveals the same colour as the page, not a hard-coded
-  # dark grey. Recomputed on every outer rebuild — including theme
-  # toggles, which trigger a rebuild via `switching = true`.
-  let bgSurface: RgbaColor = surfaceColor
-  let bg: RgbaColor = bgSurface
+  # dark grey. The page-background clear reads `pageBgColor` fresh at
+  # each render (see below), which `syncColorsFromTheme` refreshes on
+  # boot AND on every runtime theme toggle — so the background tracks
+  # the theme without depending on a captured startup value.
 
   # Self-terminate after `RAE_AUTO_EXIT_SEC` seconds of wall-clock
   # uptime. Used by automated test runs (and agents) so the binary
@@ -178,7 +178,7 @@ func main() {
   if runStressMode(scenes: scenes, appState: appState) {
     ret
   }
-  if runScreenshotMode(scenes: scenes, appState: appState, texReg: texReg, bg: bg) is false {
+  if runScreenshotMode(scenes: scenes, appState: appState, texReg: texReg, bg: pageBgColor) is false {
     # Interactive mode: outer loop owns the world for the *current*
     # screen; the inner loop runs frames until either the user closes
     # the window or a `dispatchActions` call returns a different
@@ -835,7 +835,7 @@ func main() {
             gpuUi: gpuUi
             debug: debug
             renderCache: renderCache
-            bg: bgSurface
+            bg: pageBgColor
             now: now
             targetFrameSec: targetFrameSec
             lastRenderTime: lastRenderTime
