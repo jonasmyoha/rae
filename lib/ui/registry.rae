@@ -27,7 +27,7 @@ import ui/spacing
 # this to validate that every node's keys (other than `Children`) name
 # a real component.
 func registeredComponentNames() ret List(String) {
-  let names: List(String) = createList(String, cap: 41)
+  let names: List(String) = createList(String, cap: 42)
   # Geometry / layout
   names.add(value: "Rect")
   names.add(value: "Size")
@@ -43,6 +43,7 @@ func registeredComponentNames() ret List(String) {
   names.add(value: "TransformFx")
   names.add(value: "Sprite")
   names.add(value: "Text")
+  names.add(value: "TextShadow")
   names.add(value: "Shape")
   names.add(value: "Shadow")
   names.add(value: "Opacity")
@@ -487,6 +488,19 @@ func deserText(doc: view JsonDoc, val: view JsonValue) ret Text {
   }
 }
 
+func deserTextShadow(doc: view JsonDoc, val: view JsonValue) ret TextShadow {
+  var shadow: TextShadow = defaultTextShadow()
+  shadow.offset.x = optFloat(doc: doc, container: val, key: "offsetX", fallback: 0.0)
+  shadow.offset.y = optFloat(doc: doc, container: val, key: "offsetY", fallback: 0.0)
+  shadow.softness = optFloat(doc: doc, container: val, key: "softness", fallback: 1.0)
+  let colorIdx: Int = json.jsonField(doc: doc, this: val, key: "color")
+  if colorIdx >= 0 {
+    let cv: JsonValue = json.jsonValueAt(doc: doc, idx: colorIdx)
+    shadow.color = deserRgba(doc: doc, val: cv)
+  }
+  ret shadow
+}
+
 func deserShape(doc: view JsonDoc, val: view JsonValue) ret Shape {
   let kindStr: String = optString(doc: doc, container: val, key: "kind", fallback: "Rect")
   let s: Shape = defaultShape()
@@ -814,6 +828,10 @@ func applyComponentByName(
   }
   if name.equals(other: "Text") {
     componentSet(this: world.texts, entity: entity, data: deserText(doc: doc, val: val))
+    ret
+  }
+  if name.equals(other: "TextShadow") {
+    componentSet(this: world.textShadows, entity: entity, data: deserTextShadow(doc: doc, val: val))
     ret
   }
   if name.equals(other: "Shape") {
