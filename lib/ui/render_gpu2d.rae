@@ -211,7 +211,12 @@ func visualBoundsSystem(world: mod UiWorld, res: view Gpu2dUi) pub {
     let e: EntityId = componentEntityAt(this: world.texts, i: i)
     let t: Text = componentDataAt(this: world.texts, i: i)
     if t.text.length() > 0 {
-      let size: Float = resolveTextSize(theme: res.theme, styleId: t.styleId)
+      var size: Float = resolveTextSize(theme: res.theme, styleId: t.styleId)
+      # Measure at the OVERRIDDEN size (#236) so centering bounds match paint.
+      if componentHas(this: world.styleOverrides, entity: e) {
+        let so: view StyleOverride => componentView(this: world.styleOverrides, entity: e)
+        size = styleOverrideSize(base: size, so: so)
+      }
       refreshVisualBounds(world: world, e: e, text: t.text, sizePx: size, isIcon: false, res: res)
     }
     i = i + 1
@@ -335,8 +340,17 @@ func paintSpriteG(world: view UiWorld, e: view EntityId, wt: view WorldTransform
 func paintTextG(world: view UiWorld, e: view EntityId, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int, res: view Gpu2dUi) {
   let t: view Text => componentView(this: world.texts, entity: e)
   if t.text.length() is 0 { ret }
-  let size: Float = resolveTextSize(theme: res.theme, styleId: t.styleId)
-  let col: RgbaColor = g2dChain(c: resolveTextColor(theme: res.theme, styleId: t.styleId), chain255: chain255)
+  var size: Float = resolveTextSize(theme: res.theme, styleId: t.styleId)
+  var baseCol: RgbaColor = resolveTextColor(theme: res.theme, styleId: t.styleId)
+  # Tier-2 style override (#236): size/color patch over the resolved
+  # style for the sparse set of entities that carry one; base styleId
+  # still drives everything else (alignment, shadow, unset fields).
+  if componentHas(this: world.styleOverrides, entity: e) {
+    let so: view StyleOverride => componentView(this: world.styleOverrides, entity: e)
+    size = styleOverrideSize(base: size, so: so)
+    baseCol = styleOverrideColor(base: baseCol, so: so)
+  }
+  let col: RgbaColor = g2dChain(c: baseCol, chain255: chain255)
   var centerX: Bool = resolveTextIsCentered(theme: res.theme, styleId: t.styleId)
   var rightX: Bool = resolveTextIsRightAligned(theme: res.theme, styleId: t.styleId)
   var optical: OpticalAlign = { enabled: false, centerX: false, centerY: false, bias: Vec2 { x: 0.0, y: 0.0 } }
