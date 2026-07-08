@@ -375,6 +375,39 @@ Anti-pattern guard, restated as a review rule: **if the same override
 appears twice, it was a style all along.** The TextShadow commit
 failed exactly this test on its second entity.
 
+### Status — implemented (#236)
+
+The friction ladder is live for the gpu2d path:
+
+- **Tier 1 — derive a style** (`extends` + diffs in the theme file):
+  loaded into `ResolvedTheme` (#230) and resolved per `styleId` at paint
+  (`lib/ui/text_style.rae`). This is the paved road.
+- **Tier 2 — `styleOverride`**: a sparse `StyleOverride` component
+  (`lib/ui/components.rae`) parsed from the `styleOverride` sub-object of
+  a scene `Text` bag (`registry.rae` Text arm → `deserStyleOverride`) and
+  stored ONLY on entities that author one. It patches exactly the style
+  scalars that have no dedicated per-entity component — `size` (du) and
+  `color` (a literal `{r,g,b,a}` OR a palette-slot string, resolved
+  against the active theme at paint, M5-consistent). The base `styleId`
+  always still applies: `paintTextG` resolves the style, then layers the
+  present override fields (`styleOverrideSize` / `styleOverrideColor`);
+  everything the override leaves unset (alignment, shadow, wrap) still
+  comes from the named style. The measure pass applies the size override
+  too, so centering bounds match paint.
+
+      "Text": { "text": "9:41", "styleId": "caption",
+                "styleOverride": { "size": 48.0, "color": "accent" } }
+
+  A different **alignment** or **shadow** is deliberately NOT a
+  `styleOverride` field — each already has its own tier-3 component
+  (`Align` / `TextShadow`), so adding them here would duplicate an
+  existing escape hatch.
+- **Tier 3 — raw per-entity components** (`TextShadow`, `Align`, explicit
+  colors): still work, but the scene loader emits a one-line lint when it
+  sees a raw `TextShadow` (`registry.rae` "TextShadow" arm) in the same
+  tone as the unknown-component warning — the nudge that keeps tier 3 a
+  last resort.
+
 ## 8. Where raw numbers remain correct (design question 6)
 
 Tokens are for *design language*; numbers are for *domain geometry*.
