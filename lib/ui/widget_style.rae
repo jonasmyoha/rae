@@ -18,6 +18,7 @@
 # plain Strings / colors. Struct-by-value returns of String-bearing
 # types are a known compiler hazard (inner-String ownership gap).
 import core
+import ui/theme
 
 func rgbaEquals(a: view RgbaColor, b: view RgbaColor) ret Bool {
   if a.r is not b.r { ret false }
@@ -38,8 +39,15 @@ func styleWantSpriteKey(world: view UiWorld, entity: view EntityId, selected: vi
 
 func styleWantTint(world: view UiWorld, entity: view EntityId, selected: view Bool) ret RgbaColor {
   let style: view StateStyle => componentView(this: world.stateStyles, entity: entity)
+  # A non-empty slot references the active theme (#237); else the literal.
   if selected {
+    if style.tintSelectedSlot.length() > 0 {
+      ret themeColorByName(name: style.tintSelectedSlot)
+    }
     ret style.tintSelected
+  }
+  if style.tintSlot.length() > 0 {
+    ret themeColorByName(name: style.tintSlot)
   }
   ret style.tint
 }
@@ -74,8 +82,15 @@ func styleErrorAlpha(world: view UiWorld, entity: view EntityId) ret Float {
 
 func styleWantShapeFill(world: view UiWorld, entity: view EntityId, selected: view Bool) ret RgbaColor {
   let style: view StateStyle => componentView(this: world.stateStyles, entity: entity)
+  # A non-empty slot references the active theme (#237); else the literal.
   if selected {
+    if style.shapeFillSelectedSlot.length() > 0 {
+      ret themeColorByName(name: style.shapeFillSelectedSlot)
+    }
     ret style.shapeFillSelected
+  }
+  if style.shapeFillSlot.length() > 0 {
+    ret themeColorByName(name: style.shapeFillSlot)
   }
   ret style.shapeFill
 }

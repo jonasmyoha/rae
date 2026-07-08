@@ -559,14 +559,27 @@ type RefreshRegion {
 # knobs. `disabledAlpha` / `loadingAlpha` / `errorAlpha` are applied
 # through the Opacity component for the matching WidgetState flags
 # (1.0 = no dim).
+#
+# Theme references (#237, M6): each color pair may name a palette SLOT
+# instead of carrying a baked RGBA. A non-empty `*Slot` wins over the
+# literal and resolves against the active theme when the variant is
+# applied (widget_style.rae), so a state color tracks light/dark like
+# scene colors do (M5). Empty slot (the default) = use the literal —
+# state-specific brand colors that map to no slot (e.g. the coral
+# like-red) stay raw. `textStyle`/`textStyleSelected` were already
+# style references, completing "reference theme, don't bake values".
 type StateStyle {
   spriteKey: String
   spriteKeySelected: String
   tint: RgbaColor
   tintSelected: RgbaColor
+  tintSlot: String
+  tintSelectedSlot: String
   hasTint: Bool
   shapeFill: RgbaColor
   shapeFillSelected: RgbaColor
+  shapeFillSlot: String
+  shapeFillSelectedSlot: String
   hasShapeFill: Bool
   offset: Vec2
   offsetSelected: Vec2
