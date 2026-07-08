@@ -126,12 +126,25 @@ var activeTheme: Theme = Theme {
   }
 }
 
+# Monotonic counter bumped every time the active theme changes. Scene
+# colors store palette slot NAMES (see `Shape.fillSlot` / `Sprite.tintSlot`)
+# and resolve through `themeColorByName` at paint time, so a theme swap
+# is a repaint — no scene re-parse or world rebuild. Render loops watch
+# `themeGeneration()` and force one repaint when it advances (#235).
+var g_themeGeneration: Int = 0
+
 func setActiveTheme(theme: own Theme) pub {
   activeTheme = theme
+  g_themeGeneration = g_themeGeneration + 1
 }
 
 func currentTheme() pub ret Theme {
   ret activeTheme
+}
+
+# Current theme generation. Advances on every `setActiveTheme`.
+func themeGeneration() pub ret Int {
+  ret g_themeGeneration
 }
 
 # Resolve a token name (no leading `$`) to a palette color. Unknown
