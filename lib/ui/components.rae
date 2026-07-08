@@ -278,6 +278,25 @@ type TextShadow {
   softness: Float
 }
 
+# Tier-2 override in the theme friction ladder (docs/ui-theme-system.md
+# §7): a sparse, per-entity patch over the resolved text style that
+# KEEPS the base `styleId` (the link to the theme is annotated, never
+# severed). Authored nested in a scene Text bag as `"styleOverride":
+# { "size": .., "color": .. }`, stored ONLY on entities that carry one
+# (no cost to the nodes without one). Covers exactly the style scalars
+# that have no dedicated per-entity component — size and color; a
+# different alignment or shadow already has its own tier-3 component
+# (Align / TextShadow). `hasSize`/`hasColor` gate which fields patch;
+# a non-empty `colorSlot` resolves against the active theme at paint
+# (M5-consistent), else the literal `color` is used. #236.
+type StyleOverride {
+  hasSize: Bool
+  size: Float
+  hasColor: Bool
+  color: RgbaColor
+  colorSlot: String
+}
+
 type Shape {
   kind: ShapeKind
   fill: RgbaColor
@@ -836,6 +855,16 @@ func defaultTextShadow() ret TextShadow {
     color: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
     offset: Vec2 { x: 0.0, y: 0.0 }
     softness: 1.0
+  }
+}
+
+func defaultStyleOverride() ret StyleOverride {
+  ret StyleOverride {
+    hasSize: false
+    size: 0.0
+    hasColor: false
+    color: RgbaColor { r: 0, g: 0, b: 0, a: 255 }
+    colorSlot: ""
   }
 }
 
