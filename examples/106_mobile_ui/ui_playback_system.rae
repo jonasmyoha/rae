@@ -1,0 +1,106 @@
+open ui/ecs
+# UiPlaybackSystem (#267) — the first per-feature *UI* system
+# (docs/ecs-systems-and-data-observation.md §5.2). It owns the persistent
+# widget state for the playback widgets (the now-playing screen's big play
+# button + the album mini-player) and nothing else — the design mandates
+# splitting per feature, with no single catch-all `UiSystem`. Follow-ups
+# carve out `UiMenuBarSystem` (the dock/nav) and the history/sheet slices.
+#
+# Layering rules it obeys (§5.2):
+#   * It OBSERVES the data systems: it caches the last `PlaybackState`
+#     (PlaybackSystem) revision it reacted to in `observedRevision` and
+#     only re-patches its widgets when that revision moves.
+#   * It COMMANDS them, never writing foreign tables: the play/pause
+#     toggle is sent as a command via `enqueuePlaybackToggle` (#265). The
+#     observe step below only reads `PlaybackState` and mutates widgets in
+#     its OWN render territory (the `UiWorld`), never PlaybackState.
+#
+# The playback widgets carry no user-driven focus/selection/scroll (the
+# play button's `selected` flag is derived from `isPlaying`, and the
+# now-playing / mini-player views don't scroll independently), so the only
+# persistent state here today is the observer revision. Other UI systems
+# (library grid, history list) will hold real scroll/selection state.
+import core
+import ui/ecs
+
+type UiPlaybackSystem pub {
+  # Observe cache: the last PlaybackSystem revision this UI system reacted
+  # to. Compared against `PlaybackState.revision` each frame to decide
+  # whether the play/pause widgets need re-patching.
+  observedRevision: Int
+  # This UI system's own revision (eager-bump convention, §7). Bumped when
+  # it re-patches its widgets, so a future retained render cache (#270) can
+  # depend on it.
+  revision: Int
+}
+
+func createUiPlaybackSystem(observedRevision: view Int) pub ret UiPlaybackSystem {
+  ret UiPlaybackSystem {
+    observedRevision: observedRevision
+    revision: 0
+  }
+}
+
+# Observe step: react to a PlaybackSystem revision change by re-patching the
+# playback widgets, then advance the observe cache. Returns whether anything
+# changed (so callers can trigger a repaint). Bumps this UI system's own
+# revision eagerly on change. Never writes PlaybackState — reads only.
+func uiPlaybackObserve(this: mod UiPlaybackSystem, world: mod UiWorld, playback: view PlaybackState) pub ret Bool {
+  let old: Int = this.observedRevision
+  this.observedRevision = refreshPlaybackViewsIfNeeded(world: world, playback: playback, cachedRevision: this.observedRevision)
+  if this.observedRevision is not old {
+    this.revision = this.revision + 1
+    ret true
+  }
+  ret false
+}
+
+# Data-only refresh: flip WidgetState.selected to mirror isPlaying and
+# record the observed revision. The visual swap (play_arrow <-> pause)
+# happens in `widgetStyleSystem` from the entity's StateStyle — no
+# sprite patching here.
+func refreshPlaybackIconEntity(world: mod UiWorld, entity: view EntityId, isPlaying: view Bool, revision: view Int) {
+  setWidgetSelected(world: world, entity: entity, selected: isPlaying)
+  if componentHas(this: world.dataDependencies, entity: entity) {
+    let dep: view DataDependency => componentView(this: world.dataDependencies, entity: entity)
+    let nextDep: DataDependency = {
+      resource: dep.resource
+      field: dep.field
+      observedRevision: revision
+    }
+    componentSet(this: world.dataDependencies, entity: entity, data: nextDep)
+  }
+}
+
+# Refresh UI nodes that declare a dependency on PlaybackState when the playback
+# data revision changes. The dependency is now ECS data, not hard-coded node ids:
+# any widget that carries DataDependency{resource:dataResourcePlayback(), field:dataFieldIsPlaying()}
+# can be patched here without adding another bespoke refresh path.
+func refreshPlaybackViewsIfNeeded(
+  world: mod UiWorld
+  playback: view PlaybackState
+  cachedRevision: view Int
+) pub ret Int {
+  if playback.revision is cachedRevision {
+    ret cachedRevision
+  }
+
+  let playbackSource: DataResourceId = dataResourcePlayback()
+  let playbackField: DataFieldId = dataFieldIsPlaying()
+  let n: Int = componentCount(this: world.dataDependencies)
+  var i: Int = 0
+  loop i < n {
+    let entity: EntityId = componentEntityAt(this: world.dataDependencies, i: i)
+    let dep: view DataDependency => componentView(this: world.dataDependencies, entity: entity)
+    if dep.resource is playbackSource {
+      if dep.field is playbackField {
+        if dep.observedRevision is not playback.revision {
+          refreshPlaybackIconEntity(world: world, entity: entity, isPlaying: playback.isPlaying, revision: playback.revision)
+        }
+      }
+    }
+    i = i + 1
+  }
+
+  ret playback.revision
+}

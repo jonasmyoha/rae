@@ -1,9 +1,13 @@
 open ui/ecs
 import ui/ecs
 
+# The per-frame UI observer state. The playback slice has been carved out
+# into its own per-feature `UiPlaybackSystem` (#267, §5.2); `historyLen` and
+# `sheetEpoch` are the observer caches for the history list + bottom sheet
+# and become their own UI systems in follow-ups.
 type UiRefreshCache pub {
   historyLen: Int
-  playbackRevision: Int
+  uiPlayback: UiPlaybackSystem
   sheetEpoch: Int
 }
 
@@ -16,7 +20,7 @@ type UiRefreshResult pub {
 func createUiRefreshCache(historyLen: view Int, playbackRevision: view Int, sheetEpoch: view Int) pub ret UiRefreshCache {
   ret UiRefreshCache {
     historyLen: historyLen
-    playbackRevision: playbackRevision
+    uiPlayback: createUiPlaybackSystem(observedRevision: playbackRevision)
     sheetEpoch: sheetEpoch
   }
 }
@@ -31,16 +35,15 @@ func refreshMountedUi(
   viewport: view Viewport
 ) pub ret UiRefreshResult {
   let oldHistory: Int = cache.historyLen
-  let oldPlayback: Int = cache.playbackRevision
   let oldSheet: Int = cache.sheetEpoch
 
   cache.historyLen = refreshHistoryViewsIfNeeded(world: world, scenes: scenes, state: state, visible: visible, cachedLen: cache.historyLen, viewport: viewport)
-  cache.playbackRevision = refreshPlaybackViewsIfNeeded(world: world, playback: playback, cachedRevision: cache.playbackRevision)
+  let playbackChanged: Bool = uiPlaybackObserve(this: cache.uiPlayback, world: world, playback: playback)
   cache.sheetEpoch = refreshBottomSheetIfNeeded(world: world, sheet: state.bottomSheet, cachedEpoch: cache.sheetEpoch)
 
   ret UiRefreshResult {
     historyChanged: cache.historyLen is not oldHistory
-    playbackChanged: cache.playbackRevision is not oldPlayback
+    playbackChanged: playbackChanged
     sheetChanged: cache.sheetEpoch is not oldSheet
   }
 }
