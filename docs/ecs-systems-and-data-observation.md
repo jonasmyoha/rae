@@ -1,23 +1,23 @@
 # Rae — ECS systems & cross-system data observation — design document
 
-Status: **PROPOSED (design only, no implementation). 2026-07-09.**
+Status: **PROPOSED — converged design, no implementation yet. 2026-07-09.**
 
-The guiding principle this document adopts as the test for every
-decision below:
+The foundational rule this design is built on:
 
-> An application is a collection of small, cohesive **systems**. A
-> system is a plain struct of `Table(T)` fields plus the functions that
-> operate on them — a *domain module*, not an instance of some generic
-> ECS runtime. Systems communicate by **one-way observation** (read a
-> revision, rebuild on change) and **commands the other way** (ask the
-> owning system to mutate its own tables). No system writes another's
-> tables.
+> **Every piece of mutable state has exactly one owner.** Only the
+> owning system may mutate its own tables. Everyone else may only
+> *observe* (read) or *request* (command). Everything else in this
+> document follows from that rule.
+
+From single-ownership everything falls out: observation is read-only;
+commands are the only way to request a mutation; systems become easy to
+move onto other threads later; and borrowing stays simple because
+mutable access never crosses a system boundary.
 
 This supersedes the resource-enum approach in
 `examples/106_mobile_ui/data_sources.rae`, rejects the earlier
-"two worlds" (`UiWorld` + `DataWorld`) draft, and rejects a generic
-runtime `System` base type. **The only reusable ECS primitive is
-`Table(T)`.**
+"two worlds" draft, and rejects a generic runtime `System` base type.
+**The only reusable ECS primitive is `Table(T)`.**
 
 ---
 
@@ -25,24 +25,21 @@ runtime `System` base type. **The only reusable ECS primitive is
 
 The 106 mini-player / Now-Playing **cover** does not follow a track
 change: play one song, then another, and the cover stays on the first
-album. A data change bumps a revision (`bumpSpotifyResource`), but
-**nothing observes it to update the cover** — the cover is repainted by
-a per-frame poll walk (`rebindAlbumCoversToSpotify`) that matches
-sprites *whose texture key still equals the browsed album stem*. The
-persistent dock is mounted once and keeps its original stem, so after a
-track change the match never succeeds. The title updates (it rides the
-poll's text writes), so the symptom is "title changes, cover doesn't."
-
-The play/pause icon is correct because it *is* on the revision pattern.
-The pattern works; the cover isn't on it — and the pattern should be
-generic, not hand-wired per data domain.
+album. A data change bumps a revision, but **nothing observes it to
+update the cover** — the cover is repainted by a per-frame poll walk
+(`rebindAlbumCoversToSpotify`) that matches sprites *whose texture key
+still equals the browsed album stem*. The persistent dock is mounted
+once and keeps its original stem, so after a track change the match
+never succeeds. The title updates (it rides the poll's text writes), so
+the symptom is "title changes, cover doesn't." The play/pause icon is
+correct because it *is* on the revision pattern. The pattern works; the
+cover isn't on it — and the pattern should be generic.
 
 ---
 
 ## 2. `Table(T)` is the primitive; a system is a domain module
 
-The one thing worth making generic is the **table**. `Table(T)`
-naturally owns:
+The one thing worth making generic is the **table**:
 
 ```
 Table(T)
@@ -52,8 +49,9 @@ Table(T)
   lookup + iteration
 ```
 
-A **system** is then just a normal struct with named `Table(T)` fields
-and a revision — no inheritance, no base type, no hidden machinery:
+A **system** is a plain struct of named `Table(T)` fields plus a
+revision and the functions over them — a *domain module*, **not** an
+instance of a generic ECS runtime:
 
 ```rae
 struct MediaLibrarySystem {
@@ -61,13 +59,6 @@ struct MediaLibrarySystem {
   albums:  Table(Album)
   tracks:  Table(Track)
   artists: Table(Artist)
-}
-
-struct ExportVideoSystem {
-  revision: Int
-  codecs:       Table(Codec)
-  presets:      Table(Preset)
-  destinations: Table(Destination)
 }
 ```
 
@@ -79,72 +70,68 @@ System       contains  Tables       (plain struct fields)
 Table(T)     contains  Components
 ```
 
-### 2.1 "System" means a domain module — nothing more
+There is no `struct System { tables: ??? }` base: a heterogeneous
+`tables` field (`Table(Codec)` vs `Table(Window)` are different types)
+would need reflection / type-erasure / `Any` / tuples / language
+support — a lot of machinery to avoid writing a few named fields, for a
+"base" with almost no shared state. Common operations (bumping the
+revision) are ordinary free functions (`markChanged(sys)`), not
+inheritance.
 
-A `PlaybackSystem` is **not** "an instance of a generic ECS runtime."
-It is a struct that owns some `Table(T)`s and the functions over them.
-There is exactly one meaning of "system" in this design: a
-domain/feature module. The ECS-container role is filled entirely by
-`Table(T)`. This is why there is no `struct System { tables: ??? }`
-base — a heterogeneous `tables` field (`Table(Codec)` vs `Table(Window)`
-are different types) would need reflection / type-erasure / `Any` /
-tuples / language support, a large amount of machinery to avoid writing
-a few named fields, for a "base" with almost no shared state.
-
-### 2.2 Split eagerly; small systems win
-
-Prefer many small systems over a few large ones. A system with two
-responsibilities should be split. Small systems are easier to
-understand, test, and maintain; some will still be large, but a small
-focused system is the default. So `PlaybackSystem` is separate from
-`MediaLibrarySystem`; a menu bar is its **own** `UiMenuBarSystem`, not a
-member of one giant `UiSystem`.
-
-### 2.3 Shared behaviour is free functions
-
-Common operations (bumping the revision) are ordinary functions, not
-inheritance:
-
-```rae
-func markChanged(sys: mod MediaLibrarySystem) {
-  sys.revision = sys.revision + 1
-}
-```
-
-### 2.4 Integrations are functions, not systems
-
-If a concern owns no tables it is not a system. **Spotify is a set of
-integration functions** (control the app via AppleScript, read state
-back) that *write into* the system that owns the data. The album/track
-catalog lives in `MediaLibrarySystem`; "what's playing" lives in a
-separate `PlaybackSystem`; Spotify's functions write `PlaybackSystem`.
+- **Split eagerly.** Prefer many small focused systems; split one that
+  grows two responsibilities. `PlaybackSystem` is separate from
+  `MediaLibrarySystem`; a menu bar is its own `UiMenuBarSystem`, not
+  part of a giant `UiSystem`.
+- **Integrations that own no tables are functions, not systems.**
+  Spotify is integration functions (drive the app via AppleScript, read
+  state back) that *write into* the system that owns the data
+  (`PlaybackSystem`).
 
 ---
 
-## 3. Communication: observe one way, command the other
+## 3. Ownership vs transport (the important separation)
 
-Two systems relate in exactly two ways, and keeping them separate is
-what preserves ownership:
+"Who may mutate?" and "how does the request travel?" are **different
+questions**, and conflating them is a mistake. Keep the rule
+fundamental and the transport an implementation detail.
 
-- **Observation (read, pull):** a system reads another system's
-  revisions and rebuilds on change (§5). One-way and read-only.
-- **Commands (write, push):** when a system needs to *change* another
-  system's data, it does **not** touch that system's tables. It calls
-  the owning system's public function (or enqueues a command/event);
-  the owning system mutates its own tables and bumps its own revisions.
+### 3.1 Ownership (fundamental, fixed)
+
+Only the owning system mutates its own tables. Another system may:
+
+- **observe** its revisions/data (read-only), and
+- **send it a command** to request a change.
 
 ```
 UiPlaybackSystem  observes  PlaybackSystem          // read
-Play button clicked  ->  PlaybackSystem.play()      // command
+Play button clicked  ->  playback.play(trackId)     // command (request)
 ```
 
-So the UI never writes `PlaybackSystem`'s tables; it asks
-`PlaybackSystem` to. This is the standard ECS answer to "system A needs
-to modify system B": route the write through B's API / a command queue,
-keeping B the sole mutator of its tables. The dependency (A knows B's
-command API) is real but explicit and one-directional per channel
-(A observes B's state; A commands B's API), which avoids tangled
-two-way table access.
+The UI never writes `PlaybackSystem`'s tables; it asks `PlaybackSystem`
+to. This is what makes a system safely movable to another thread later.
+
+### 3.2 Transport (an implementation detail, not the model)
+
+*How* `playback.play(trackId)` reaches the owner is hidden behind the
+public API. **The API looks synchronous either way:**
+
+```rae
+// single-threaded build
+func play(sys: mod PlaybackSystem, track: TrackId) { mutate(sys, track) }
+
+// multithreaded build (later) — same signature to callers
+func play(sys: mod PlaybackSystem, track: TrackId) { enqueue(Play(track)) }
+```
+
+The caller writes `playback.play(track)` and never learns whether that
+was a direct mutation or an enqueued message. This gives **one
+programming model** — no caller ever asks "should I mutate directly or
+enqueue?" — without paying Option-B's cost of routing *every* UI
+interaction through event → queue → scheduler → consumer → mutation,
+which is miserable to debug (`openExportWindow()` should not require
+tracing five hops). We do **not** commit the architecture to async
+queues from day one; we commit to single-ownership, and let transport
+change under a stable API when/if threads arrive.
 
 ---
 
@@ -160,53 +147,52 @@ PlaybackSystem     — nowPlaying (current track / art / position / isPlaying)
 ExportVideoSystem  — codecs, presets, outputFormats, destinations
 ```
 
-Mutated only by their own domain logic / integration functions. They
-know nothing about the UI.
+Mutated only by their own domain logic / integration functions.
 
 ### 4.2 Persistent UI systems (widget state)
 
 Split per feature — no single `UiSystem`:
 
 ```
-UiPlaybackSystem   — AlbumImage, TrackTitle, PlayButton
-UiExportVideoSystem— ExportWindow, BitrateDropdown, CodecList, ProgressBar
-UiMenuBarSystem    — the menu bar and its items
+UiPlaybackSystem    — AlbumImage, TrackTitle, PlayButton
+UiExportVideoSystem — ExportWindow, BitrateDropdown, CodecList, ProgressBar
+UiMenuBarSystem     — the menu bar and its items
 ```
 
-Persistent widget state: the widget tree, focus, selection, expanded
-tree nodes, scroll position. They observe data systems and command them.
+Persistent widget state (widget tree, focus, selection, expanded nodes,
+scroll position). They observe data systems and command them.
 
-### 4.3 The render system (transient + cache-oriented)
+### 4.3 The render system (transient, cache-oriented, dependency-driven)
 
-UI *state* and UI *rendering* are different data with different
-lifetimes. The render system is **not** "thrown away every frame" —
-that would be wasteful. It is **transient and cache-oriented**: the
-place rendering-related state lives, where some entries are recreated
-and others reused when nothing affecting them changed.
+Rendering state has a different lifetime from widget state, so it lives
+in its own system — but it is **not** thrown away every frame, and it
+is **not** event-driven. It is **dependency-driven**, like a browser /
+modern retained-mode GUI:
 
 ```
-UiRenderSystem
-  computedRects (a reusable POOL), clipRects, layoutCache,
-  glyphLayout / glyphBatches, virtualizationState,
-  drawCommands, gpuBuffers / textureAtlasRefs
+ComputedRect  depends on  Window.size, Parent.layout, Button.text, Theme.padding
 ```
 
-- `ComputedRect`s live in a **pool** and are reused across frames; a
-  rect can survive even when the entity it targets in another system
-  changes, as long as nothing affecting *that rect* changed.
-- Glyph layout, GPU buffers, and virtualization state are likewise
-  reused until invalidated.
-- List **virtualization** lives here: only visible rows get render
-  entities, so list render cost is O(visible), not O(total).
+- Each cached entry records the revisions of the inputs it depends on.
+- When a dependency's revision changes → mark the entry **dirty**.
+- Next render pass: recompute dirty entries, **reuse** the rest.
+
+`ComputedRect`s live in a reusable **pool** (a rect can survive even
+when the entity it targets elsewhere changes, as long as nothing *that
+rect depends on* changed). Glyph layout, GPU buffers, and
+virtualization state reuse the same way. List **virtualization** lives
+here too: only visible rows get render entities, so list cost is
+O(visible), not O(total). No command/event indirection — just "did my
+inputs change?".
 
 ### 4.4 The observation chain
 
 ```
 MediaLibrarySystem / PlaybackSystem   application state
-   ↑ observes
+   ↑ observes / commands
 UiPlaybackSystem                      persistent widgets
-   ↑ observes
-UiRenderSystem                        transient / cached render state
+   ↑ dependency-driven cache
+UiRenderSystem                        transient render state
 ```
 
 ---
@@ -216,56 +202,51 @@ UiRenderSystem                        transient / cached render state
 Every observable change is one of three monotonic counters, **bumped
 eagerly at the write site** so reads are free (no table scans on read):
 
-### 5.1 Component-instance revision — "this object's data changed"
+- **Component-instance revision** — a successful field write bumps the
+  instance's `revision`. No per-field versions. Granularity is the
+  **component**, not the entity.
+- **Table revision** — `Table(T).tableRevision`, bumped on structural
+  change; lives in the primitive, so every system gets it free.
+- **System revision** — the plain `revision: Int` on the struct, bumped
+  when any member changes. A write bumps component → (table if
+  structural) → system in one go, so a page observing the system reads
+  one `Int`.
 
-Each component instance carries a `revision`; a successful field write
-bumps it. **No per-field versions** (one counter per instance).
-Granularity is the **component**, not the entity (see 5.4).
-
-### 5.2 Table revision — "objects added / removed / reordered"
-
-`Table(T).tableRevision`, bumped on structural change. Lives in the
-`Table(T)` primitive, so every system gets it for free. A list watches
-the table; a row watches its own instance.
-
-### 5.3 System revision — "something in this subsystem changed"
-
-The plain `revision: Int` on the system struct, bumped whenever a member
-table/instance changes. Eager: a write bumps component → (table if
-structural) → system in one go, so a page that observes the system
-reads one `Int`.
-
-### 5.4 Explicitly rejected
+**Explicitly rejected:**
 
 - **Entity-wide revision** — too coarse; a `Waveform` widget must not
-  redraw because a `Permissions` component on the same entity changed.
-  It observes the `Waveform` component, not the entity.
-- **Implicit / compiler-driven bumping** — e.g. bumping on `mod`
-  component access. Rejected: a `componentMod` borrow does not imply a
-  change (the mutation may be gated by an `if`), so implicit bumping
-  would over-invalidate and be harder to reason about. Keep it
-  **explicit**: `codec.bitRate = x; bumpRevision(codec)`, or wrap it in
+  redraw because `Permissions` on the same entity changed.
+- **Implicit / compiler-driven bumping** (e.g. on `mod` access) — a
+  `componentMod` borrow doesn't imply a change (the write may be gated
+  by an `if`), so it would over-invalidate and obscure intent. Keep it
+  **explicit**: `codec.bitRate = x; bumpRevision(codec)`, or wrap in
   helper mutation functions that bump only after a successful change.
-  Explicit is easier to understand and debug.
 
-**Ladder (coarse → fine):** system `revision` → `Table.tableRevision` →
-component instance `revision`.
+**Ladder (coarse → fine):** system → table → component instance.
 
 ---
 
-## 6. Observation is system-to-system, by ID
+## 6. Observation is system-to-system, by ID, read-only
 
 > **A system may observe entities or tables in another system.**
 
 Handles are **IDs, not pointers.** A `SystemRegistry` owns all systems;
-a `SystemId` indexes it:
+a `SystemId` indexes it. Crucially, the **registry never hands out
+`mod`** to outsiders — each system exposes only a `view` (read) and its
+`commands` (request). So another system can do
 
-```
-SystemId  ->  SystemRegistry  ->  { PlaybackSystem, MediaLibrarySystem, ... }
+```rae
+playback.view.currentTrack     // read
+playback.play(track)           // command
 ```
 
-An `Observe` therefore stores only ids + the observed revision — no
-pointers, which also makes serialization and hot-reload straightforward:
+but **never** `playback.currentTrack = ...`. That is single-ownership
+(§3) enforced by the access surface, and it makes borrowing trivial:
+mutable access never crosses a system boundary, so a refresh that reads
+many systems only ever holds `view`s.
+
+An `Observe` stores ids + the observed revision (no pointers — which
+also makes serialization and hot-reload easy):
 
 ```
 Observe {
@@ -280,7 +261,7 @@ Refresh is the same three lines for every kind and every pair of
 systems:
 
 ```
-current := revisionOf(registry, observe)   // resolves SystemId, reads the counter
+current := revisionOf(registry, observe)   // resolves SystemId, reads via view
 if current != observe.observedRevision {
     rebuild the observing entity from the observed data
     observe.observedRevision = current
@@ -288,57 +269,32 @@ if current != observe.observedRevision {
 ```
 
 Because targets are `(system, table, entity)` ids, the mechanism is
-fully generic: media library, playback, filesystem, compiler state,
-undo, AI generation — all observed the same way. There is **no**
-`SpotifyResource`/`LibraryResource` enum per feature; adding a data
-source is "add a system struct with `Table(T)` fields," and the
-observation layer needs no new cases.
-
-### 6.1 Relationship to today's `DataDependency`
-
-`DataDependency { resource: DataResourceId, field: DataFieldId,
-observedRevision }` is the same shape with an **enum** target. The
-migration (§8): replace `(resource, field)` with `(SystemId, kind,
-target ids)`, keep `observedRevision`, and replace the eight
-`bumpXResource` + per-domain refreshers with one generic revision read +
-one generic refresh walk over the registry.
+fully generic — media library, playback, filesystem, compiler state,
+undo, AI generation are all observed the same way, with **no**
+per-feature `Resource` enum. `DataDependency { resource, field,
+observedRevision }` today is the same shape with an *enum* target; the
+migration swaps the enum for ids.
 
 ---
 
-## 7. Worked shapes
-
-### 7.1 Leaf widget (the cover — the motivating fix)
+## 7. Worked shape (the motivating fix)
 
 ```
 // UiPlaybackSystem: cover observes PlaybackSystem's nowPlaying instance
 observe(cover, system: PlaybackId, component: (nowPlayingTable, entity))
 
 if rev(registry, cover.observe) != cover.observed {   // instance revision
-    cover.artKey = artKeyOf(PlaybackSystem, entity)
+    cover.artKey = playback.view.nowPlaying(entity).artKey
     cover.observed = current
 }
 ```
 
 Spotify's integration functions write the new track/art into
-`PlaybackSystem.nowPlaying` (bumping its instance revision); the cover
-observes that instance by id and re-points. No per-frame sprite walk, no
-stale stem.
-
-### 7.2 List + virtualization (two layers)
-
-- `CodecList` (`UiExportVideoSystem`) observes the `codecs` **table** in
-  `ExportVideoSystem`; on `tableRevision` change it rebuilds its rows.
-- `UiRenderSystem` reuses pooled `ComputedRect`s for unchanged rows and
-  materializes **only visible** rows into transient draw entities. A
-  field edit inside one codec bumps that row's *instance* revision (row
-  rebuilds), not the list's table revision.
-
-### 7.3 Page + command
-
-`UiExportPage` observes `ExportVideoSystem`'s **system** revision for its
-summary; a "Reset presets" button issues `ExportVideoSystem.resetPresets()`
-(command), which mutates that system's tables and bumps its revisions —
-the page then rebuilds via observation next pass.
+`PlaybackSystem` (via its own command/API, bumping the instance
+revision); the cover observes that instance by id and re-points. No
+per-frame sprite walk, no stale stem. A "Reset presets" button issues
+`exportVideo.resetPresets()` (command); the owner mutates and bumps, the
+page rebuilds via observation next pass.
 
 ---
 
@@ -346,73 +302,71 @@ the page then rebuilds via observation next pass.
 
 Non-breaking, in slices (mirroring the theme-system migration style):
 
-- **D0 — `Table(T)` + eager revisions.** Give `Table(T)` a
-  `tableRevision`, components a `revision`, systems a `revision` +
-  `markChanged`. Leave `AppState`/`UiWorld` intact.
-- **D1 — `SystemRegistry` + generic `Observe` + one refresh pass.** Add
-  the registry, `Observe { system, kind, target, observedRevision }`,
-  and a single `refreshObservers(registry)` replacing per-domain
-  `refreshXViewsIfNeeded`. Keep the old path in parallel.
-- **D2 — carve out systems (plain structs), split eagerly.**
-  `MediaLibrarySystem` / `PlaybackSystem` / …; Spotify becomes
-  integration functions writing `PlaybackSystem`. Split the UI into
-  per-feature UI systems (`UiPlaybackSystem`, `UiMenuBarSystem`, …) and a
-  `UiRenderSystem`. Route UI→data writes through command functions.
-- **D3 — port consumers.** Convert each widget from
-  `DataDependency(enum)` to `Observe(SystemId + target ids)`: play/pause
-  icon and **cover → observe `PlaybackSystem.nowPlaying` (fixes the
-  motivating bug)**; codec list → observe the `codecs` table. Delete
-  `rebindAlbumCoversToSpotify` + the poll's UI writes.
-- **D4 — delete the enums.** Remove `DataResourceId`/`DataFieldId`/
-  `AppDataResources`/`bumpXResource`.
+- **D0 — `Table(T)` + eager revisions.** Add `tableRevision`, component
+  `revision`, system `revision` + `markChanged`. Leave `AppState`/
+  `UiWorld` intact.
+- **D1 — `SystemRegistry` (`view` + `commands`, no `mod` out) + generic
+  `Observe` + one `refreshObservers(registry)`** replacing the
+  per-domain `refreshXViewsIfNeeded`. Old path stays in parallel.
+- **D2 — carve out systems, split eagerly.** `MediaLibrarySystem` /
+  `PlaybackSystem` / …; Spotify → integration functions commanding
+  `PlaybackSystem`. Split UI into per-feature UI systems + a
+  dependency-driven `UiRenderSystem`. UI→data writes go through commands.
+- **D3 — port consumers.** Convert `DataDependency(enum)` →
+  `Observe(SystemId + ids)`: play/pause icon and **cover → observe
+  `PlaybackSystem.nowPlaying` (fixes the motivating bug)**; codec list →
+  observe the `codecs` table. Delete `rebindAlbumCoversToSpotify` + the
+  poll's UI writes.
+- **D4 — delete the enums** (`DataResourceId`/`DataFieldId`/
+  `AppDataResources`/`bumpXResource`).
 
 Each slice keeps the previous mechanism until the next removes it; 106
 stays runnable throughout.
 
 ---
 
-## 9. Open questions
+## 9. Remaining open questions
 
-Most earlier questions are now resolved in the body (split eagerly;
-IDs + registry; eager bumping; render system is transient-and-cached,
-not per-frame throwaway; explicit not implicit bumping). Remaining:
+Most are resolved in the body (single-ownership; split eagerly; IDs +
+registry with `view`+`commands` only; eager bumping; render cache is
+transient + dependency-driven; explicit not implicit bumping;
+synchronous-looking command API with transport hidden). Still open:
 
-1. **Command channel shape.** Direct public function call vs a queued
-   command/event buffer for UI→data writes. Direct is simplest; a
-   command buffer decouples timing (apply all commands at a fixed point
-   in the frame) and eases undo/replay. Start with direct calls; add a
-   buffer only if a system needs deferred/ordered application.
-2. **`SystemRegistry` ownership & borrows.** How the registry holds
-   systems and hands out `view`/`mod` access during a refresh without
-   aliasing conflicts (one system observing another while a third
-   commands it in the same pass). Likely: refresh reads are `view`;
-   commands run in a separate phase with `mod`.
-3. **Render-cache invalidation.** The precise rule for when a pooled
-   `ComputedRect` / glyph layout / GPU buffer may be reused vs must be
-   recomputed (observe layout inputs' revisions, not the whole widget).
+1. **Command implementation, per system.** Direct function call (the
+   default, single-threaded) vs an internal queue (later, per system
+   that moves off-thread). The *API* is fixed synchronous; only the
+   body changes. Decide per system if/when threading arrives.
+2. **`SystemRegistry` access phasing.** Even with `view`+`commands`
+   only, confirm the frame phase order so a refresh (many `view`s) and
+   command application (`mod` inside one owner) never overlap on the
+   same system — likely a read/observe phase then a command/apply phase.
+3. **Render-cache dependency tracking granularity.** How precisely a
+   `ComputedRect` records "depends on Window.size, Theme.padding, …" —
+   an explicit small dependency list per cache entry vs observing the
+   revisions of a fixed set of layout inputs.
 4. **Future language support (leave open).** Automatic table
-   registration, compile-time table reflection, codegen, serialization
-   support, or a `system Foo { ... }` sugar generating the boilerplate.
-   Useful eventually, but the architecture must work today with plain
-   structs + `Table(T)`; do not design around features that don't exist.
+   registration, compile-time reflection, codegen/serialization, or a
+   `system Foo { ... }` sugar generating the boilerplate. Useful
+   eventually; the architecture must work today with plain structs +
+   `Table(T)` and must not depend on features that don't exist.
 
 ---
 
-## 10. Summary of recommendations
+## 10. Summary
 
-1. **`Table(T)` is the only generic primitive.** No runtime `System`
-   base. "System" means a **domain module**: a plain struct of
-   `Table(T)` fields + a `revision: Int` + free functions.
-2. **Split eagerly** into many small systems; integrations that own no
-   tables (Spotify) are just functions.
-3. **Communicate by one-way observation + commands back**: observe
-   another system's revisions (read); to change it, call its public API
-   / enqueue a command (the owner mutates its own tables).
-4. **Three layers** by lifetime: application-state systems, persistent
-   per-feature UI systems, one transient **cache-oriented**
-   `UiRenderSystem` (pooled rects, glyph/GPU reuse, virtualization).
-5. **Three eagerly-bumped revision levels** — component instance, table,
-   system. No per-field, no entity-wide, no implicit/compiler bumping
-   (explicit `bumpRevision` or bump-after-change helpers).
-6. **References are IDs** (`SystemId` + `SystemRegistry`, table/entity
-   ids), never pointers — generic, serializable, hot-reload-friendly.
+1. **Single-ownership is the foundation.** Every piece of mutable state
+   has exactly one owner; only the owner mutates its tables. Observation
+   is read-only; commands request mutations.
+2. **Ownership ≠ transport.** The command API is synchronous-looking;
+   whether it mutates directly (today) or enqueues (later, per system)
+   is hidden. One programming model, no queues forced everywhere.
+3. **`Table(T)` is the only generic primitive.** A "system" is a domain
+   module: a plain struct of `Table(T)` + `revision` + functions. Split
+   eagerly; table-less integrations (Spotify) are just functions.
+4. **Three layers** by lifetime: application-state, persistent
+   per-feature UI, and a transient **dependency-driven** `UiRenderSystem`
+   (pooled rects, glyph/GPU reuse, virtualization).
+5. **Three eagerly-bumped revision levels** — component / table / system.
+   No per-field, no entity-wide, no implicit bumping.
+6. **References are IDs**; the registry exposes only `view` + `commands`,
+   never `mod` — so mutable access never crosses a system boundary.
