@@ -318,6 +318,7 @@ func tagPlaybackIconDependency(
   nodeId: view String
   widgetId: view String
   observedRevision: view Int
+  playing: view Bool
 ) pub {
   let entityOpt: opt Int = findNodeInPage(world: world, pageId: pageId, nodeId: nodeId)
   if entityOpt is none {
@@ -329,7 +330,13 @@ func tagPlaybackIconDependency(
   let playbackField: DataFieldId = dataFieldIsPlaying()
   let iconKind: String = "playbackIcon"
   setWidgetIdentity(world: world, entity: entity, id: widgetId, kind: iconKind)
-  setWidgetState(world: world, entity: entity, enabled: true, selected: false, loading: false, error: false)
+  # Seed `selected` from the ACTUAL play state (#): the widgetStyleSystem
+  # applies the play_arrow<->pause swap from `selected`, and the per-frame
+  # refresh only fires when the playback revision CHANGES. Mounting with
+  # observedRevision == playback.revision means no refresh, so a page
+  # mounted while already playing must start selected=true or it would
+  # show the play glyph until the next play/pause toggle.
+  setWidgetState(world: world, entity: entity, enabled: true, selected: playing, loading: false, error: false)
   setDataDependency(world: world, entity: entity, resource: playbackSource, field: playbackField, observedRevision: observedRevision)
   # Declarative visuals: selected (= playing) shows the pause glyph.
   # `widgetStyleSystem` applies the swap; the refresh below only flips
