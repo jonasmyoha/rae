@@ -775,7 +775,10 @@ func dispatchActions(
           setPlaybackPlaying(state: playback, value: true)
         }
       } else {
-        togglePlayback(state: playback)
+        # Local playback: play/pause is a command (#265) — enqueue it on
+        # the PlaybackSystem inbox; it's applied in the frame's Apply(A)
+        # phase by `playbackProcessCommands`, not mutated inline here.
+        enqueuePlaybackToggle(this: playback)
       }
     }
     if actionId.equals(other: playbackNextKey) {
