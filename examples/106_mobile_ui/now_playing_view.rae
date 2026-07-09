@@ -164,6 +164,13 @@ func updateMiniPlayerCover(world: mod UiWorld, stem: view String) pub {
     ret
   }
   let cur: Sprite = componentGet(this: world.sprites, entity: entity)
+  # Idempotent: skip the componentSet (and its table-generation bump,
+  # which would defeat idle frame-skipping) when the cover already
+  # matches. Lets this run every frame from `syncFrameData` so the
+  # dock cover follows a track change even without a screen switch.
+  if cur.textureKey.equals(other: stem) {
+    ret
+  }
   let copied: String = "{stem}"
   let next: Sprite = {
     textureKey: copied
