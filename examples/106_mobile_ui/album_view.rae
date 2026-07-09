@@ -208,7 +208,7 @@ func buildCurrentCollection(state: view AppState) pub ret CollectionView {
   if state.viewingPlaylist {
     # Only the built-in "liked" playlist exists today; a future
     # playlist registry would resolve `state.currentPlaylistId` here.
-    ret collectionFromPlaylist(playlist: state.liked, albums: state.albums)
+    ret collectionFromPlaylist(playlist: state.liked, albums: state.mediaLibrary.albums)
   }
   let album: Album = activeAlbum(state: state)
   ret collectionFromAlbum(album: album)

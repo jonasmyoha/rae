@@ -67,6 +67,42 @@ type Album pub {
   totalDurationMs: Int
 }
 
+# ----- MediaLibrarySystem (#266) -----------------------------------
+#
+# The ECS "system" that owns the album catalog, carved out of
+# `AppState` (docs/ecs-systems-and-data-observation.md §5.1). The
+# catalog is loaded once at boot by `loadAllAlbums` and handed to
+# `createMediaLibrary`; every reader takes the album list by `view`
+# (library / home / profile / now-playing views + asset cascade).
+#
+# Each `Album` carries its own tracks + artist, so the design's
+# "tracks/artists tables" live nested here rather than normalized into
+# separate `ComponentTable`s — the demo never queries tracks or artists
+# independently of their album.
+#
+# `revision` follows the eager-bump convention (§7): 0 at construction,
+# bumped by any future write-through function that mutates the catalog
+# (adding / removing albums), so Observe-based UI refresh (#268) can key
+# off it. History stays in `AppState.playHistory` for now and becomes a
+# separate `PlayHistorySystem` if it grows (task note / §5.1).
+#
+# AppState currently hosts the single instance in its `mediaLibrary`
+# field; lifting that value out of AppState into the SystemRegistry
+# (#262) is a mechanical follow-up once the registry is wired into 106.
+type MediaLibrarySystem pub {
+  albums: List(Album)
+  revision: Int
+}
+
+# Loader write path: take ownership of the freshly loaded catalog and
+# wrap it as the library system's initial state.
+func createMediaLibrary(albums: own List(Album)) pub ret MediaLibrarySystem {
+  ret MediaLibrarySystem {
+    albums: albums
+    revision: 0
+  }
+}
+
 # ----- accessors ----------------------------------------------------
 
 # Return the index of the album whose stem matches, or -1 if no
