@@ -122,6 +122,16 @@ func ensureIntSlots(lst: mod List(Int), index: view Int) {
 }
 
 # ----- ComponentTable -----
+#
+# ComponentTable(T) IS the fundamental ECS table primitive — one
+# component type per table, sparse-set indexed. The ECS-systems design
+# (docs/ecs-systems-and-data-observation.md) writes "Table(T)" as a
+# conceptual shorthand for exactly this type; there is deliberately no
+# separate `Table(T)`. Its `generation` counter is that design's
+# table-level revision (the middle tier of the component-instance /
+# table / system observation model): "this table changed since
+# generation N", agnostic to whether the change was an insert, remove,
+# reorder, replace, or a mod.
 
 type ComponentTable(T: type) {
   denseEntities: List(EntityId)
