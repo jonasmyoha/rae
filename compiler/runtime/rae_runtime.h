@@ -502,6 +502,14 @@ void rae_ext_rae_seed(int64_t seed);
 double rae_ext_rae_random(void);
 int64_t rae_ext_rae_random_int(int64_t min, int64_t max);
 
+/* Channel(T) MPSC cross-thread channel (#271) — see lib/channel.rae. */
+int64_t rae_ext_rae_chan_new(void);
+void rae_ext_rae_chan_send(int64_t ch, int64_t value);
+int64_t rae_ext_rae_chan_count(int64_t ch);
+int64_t rae_ext_rae_chan_recv(int64_t ch);
+int64_t rae_ext_rae_chan_received(int64_t ch);
+void rae_ext_rae_chan_free(int64_t ch);
+
 void rae_ext_rae_sys_exit(int64_t code);
 rae_String rae_ext_rae_sys_get_env(rae_String name);
 rae_String rae_ext_rae_sys_read_file(rae_String path);
