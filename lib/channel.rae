@@ -1,0 +1,72 @@
+# Channel(T) — Rae's first message-passing primitive (#271, ECS E6).
+#
+# A multi-producer, single-consumer (MPSC) cross-thread channel. Any thread
+# may `channelSend`; only the owning (consumer) thread drains, via
+# `channelReceive` guarded by `channelPending`. Synchronisation (a mutex)
+# lives entirely inside the runtime — ordinary Rae code never locks a mutex
+# (§3.2: transport hidden behind the same send API as a Queue). There is
+# deliberately NO blocking receive, no select, no wait primitive yet: a
+# consumer with nothing to do simply polls. Prove the small thing first;
+# grow the model only when real use demands it.
+#
+# Channel(T) is a value-type wrapper around an opaque Int handle (a pointer
+# to the runtime channel). Passing it into `spawn worker(chan: c)` copies
+# the handle by value, so both sides share the one underlying channel. It
+# owns no Rae heap, so it has no auto-drop — a spawned copy of the handle is
+# a no-op on scope exit (no double free); the OWNER calls `freeChannel` once
+# after the worker has joined.
+#
+# Payloads are Int-width today (the #271 proof uses Channel(Int)); richer T
+# (structs) needs boxing and is a follow-up — only Channel(Int) is
+# instantiated so far. `channelReceived` is a monotonic, read-only
+# observable of how many messages the consumer has drained.
+#
+# THREADING NOTE: real parallelism is COMPILED-ONLY. The Live (bytecode) VM
+# runs `spawn` synchronously (inline at the spawn site), so a persistent
+# polling worker there would run before any producer sends — the #271 proof
+# is therefore a compiled-target test.
+import core
+
+func rae_ext_rae_chan_new() extern ret Int
+func rae_ext_rae_chan_send(ch: Int, value: Int) extern
+func rae_ext_rae_chan_count(ch: Int) extern ret Int
+func rae_ext_rae_chan_recv(ch: Int) extern ret Int
+func rae_ext_rae_chan_received(ch: Int) extern ret Int
+func rae_ext_rae_chan_free(ch: Int) extern
+
+type Channel(T: type) pub {
+  handle: Int
+}
+
+func createChannel(T: type) pub ret Channel(T) {
+  ret Channel(T) { handle: rae_ext_rae_chan_new() }
+}
+
+# Producer side — callable from any thread. FIFO; thread-safe.
+func channelSend(T: type, this: view Channel(T), value: view T) pub {
+  rae_ext_rae_chan_send(ch: this.handle, value: value)
+}
+
+# Consumer side (owning thread only). Number of messages currently buffered;
+# call `channelReceive` only when this is > 0.
+func channelPending(T: type, this: view Channel(T)) pub ret Int {
+  ret rae_ext_rae_chan_count(ch: this.handle)
+}
+
+# Pop the oldest buffered message (owning thread only). Returns a zero value
+# if the channel is empty — always gate on `channelPending` first.
+func channelReceive(T: type, this: view Channel(T)) pub ret T {
+  ret rae_ext_rae_chan_recv(ch: this.handle)
+}
+
+# Read-only observable: total messages the consumer has drained so far.
+# Monotonic; safe to read from any thread.
+func channelReceived(T: type, this: view Channel(T)) pub ret Int {
+  ret rae_ext_rae_chan_received(ch: this.handle)
+}
+
+# Owner lifecycle: release the runtime channel. Call exactly once, on the
+# owning thread, after the worker has joined.
+func freeChannel(T: type, this: view Channel(T)) pub {
+  rae_ext_rae_chan_free(ch: this.handle)
+}
