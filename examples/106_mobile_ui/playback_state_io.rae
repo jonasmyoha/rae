@@ -224,6 +224,9 @@ func restoreAppState(state: mod AppState, playback: mod PlaybackState, path: vie
   if playback.isPlaying {
     playback.playingAlbumStem = "{state.currentAlbumStem}"
     playback.playingTrackIndex = state.currentTrackIndex
+    # Seed the nowPlaying cover key before the world is built (#268), so
+    # the Hero + mini-player covers mount observing the correct revision.
+    setNowPlayingArt(state: playback, artKey: state.currentAlbumStem)
   }
 
   # Session route: restore the top-level tab. The "screen" field stays in the JSON for forward
