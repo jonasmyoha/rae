@@ -110,10 +110,11 @@ thread, "send" crosses a channel and it drains there — **same shape,
 transport hidden.** There is exactly one mutation mechanism, so no one
 ever asks "mutate directly or enqueue?".
 
-**The tradeoff, stated honestly.** Command application adds ~one frame
-of latency and some boilerplate (a command type + an apply arm per
-mutation), and debugging a mutation means looking at the command
-phase rather than a direct call. We accept it because the payoff is
+**The tradeoff, stated honestly.** Command application adds some
+boilerplate (a command type + an apply arm per mutation) and means
+debugging a mutation looks at the command phase rather than a direct
+call. Latency is largely absorbed by applying commands twice per frame
+(§4.1), so it is not a per-frame lag in practice. We accept it because the payoff is
 large and compounding: deterministic execution, replay, undo,
 networking, and multithreading all become natural, and the "only touch
 my own state, only in my command phase" invariant stays true no matter
@@ -126,25 +127,50 @@ indirection of ad-hoc event buses.
 ## 4. Frame phases (this dissolves borrowing)
 
 Define the engine phases up front; ownership + `view`/`mod` access fall
-out of the phase, so there is never a borrowing question:
+out of the phase, so there is never a borrowing question. Commands are
+*sent* inline wherever code runs (input handlers, observation rebuilds)
+and *applied* at fixed points. The pipeline uses **two apply passes per
+frame** so a command generated while observing still takes effect this
+frame:
 
 ```
-1. Input                — gather OS/pointer/key events
-2. Command collection   — everyone SENDS commands (append to inboxes)
-3. Command application   — each system drains its own inbox; it alone holds `mod self`
-4. Observation refresh   — everyone reads with `view`; rebuild widgets whose observed revision changed
+1. Input                 — handlers may send commands
+2. Apply commands (A)    — each system drains its own inbox; it alone holds `mod self`
+3. Observation refresh   — read with `view`; rebuild widgets whose observed
+                           revision changed (a rebuild may send commands)
+4. Apply commands (B)    — drain inboxes again, absorbing commands generated
+                           during refresh so their effect lands THIS frame
 5. Layout                — resolve rects (retained cache, §5.3)
 6. Render                — emit draw commands
 ```
 
-- In **command application**, exactly one system at a time holds
-  `mod self`; nothing else is mutating, so no aliasing.
-- In **observation refresh** and **layout/render**, everyone holds
-  `view` only.
+- In an **apply** phase, exactly one system at a time holds `mod self`;
+  nothing else mutates, so no aliasing.
+- In **observation**, **layout**, and **render**, everyone holds `view`.
 
-Because `mod` access is confined to phase 3 (a system on its own
-tables) and every other phase is read-only, mutable access **never
-crosses a system boundary** and the borrow story is trivial.
+Because `mod` access is confined to the apply phases (2 and 4) — a
+system on its own tables — and every other phase is read-only, mutable
+access **never crosses a system boundary** and the borrow story is
+trivial.
+
+### 4.1 Why two apply passes (the latency choice)
+
+Three common ways to keep the actor model responsive:
+
+1. **Immediate local processing** — a command to a same-thread system
+   is applied immediately; it becomes queued only if that system later
+   moves off-thread. Best responsiveness, API unchanged.
+2. **Multiple apply passes per frame** (chosen) — the pipeline above:
+   apply → observe → apply again. Removes most one-frame delays while
+   keeping a single, inspectable "commands are applied here" model.
+3. **Priority / immediate commands** — interactive commands (click,
+   focus, open menu) apply immediately; background work stays queued.
+
+We choose **#2**: it stays fully actor-like and keeps commands
+inspectable in fixed places, yet a click that sends a command in phase
+1 or a rebuild that sends one in phase 3 is reflected before layout. If
+a specific interaction still feels laggy, #1 or #3 are compatible
+escalations layered on top per system/command — not a redesign.
 
 ---
 
@@ -326,11 +352,12 @@ Non-breaking, in slices; 106 stays runnable throughout:
 
 ## 11. Remaining open questions (engineering tradeoffs)
 
-1. **Command latency mitigation.** ~one-frame latency is usually fine
-   for UI; for input-echo cases that must feel instant, allow a system
-   to apply a command immediately within its own phase, or run
-   command-application before observation in the same frame (§4 already
-   does the latter). Measure before optimizing.
+1. **Command latency — decided (§4.1): two apply passes per frame.**
+   That absorbs most one-frame delays while staying actor-like. Left
+   open only as a per-interaction escalation: if a specific command
+   still feels laggy, add immediate local processing (#1) or a
+   priority/immediate class (#3) for that command — layered on, not a
+   redesign.
 2. **Command/inbox ergonomics.** Boilerplate per command (a variant +
    an apply arm). A future `system`/`command` sugar (§ below) could
    generate it; until then keep it explicit and small.
