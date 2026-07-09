@@ -39,11 +39,21 @@ pattern works; the cover isn't on it — and it should be generic.
 
 ## 2. `Table(T)` is the primitive; a system is a domain module
 
+> **Notation:** "`Table(T)`" throughout this document is a *conceptual*
+> name for the ECS table primitive, and "table revision" for its
+> change counter. In the code that primitive is the existing
+> `ComponentTable(T)` (`lib/ui/ecs.rae`) — one component type per table,
+> sparse-set indexed — and the table-level revision is its existing
+> `generation` field (kept under that name: "changed since generation
+> N", agnostic to insert/remove/reorder/replace/mod). There is
+> deliberately **no** separate `Table(T)` type and no rename: the
+> primitive is evolved in place, not duplicated or relabelled.
+
 ```
-Table(T)
+ComponentTable(T)   // the design's conceptual "Table(T)"
   entities
   components (the T values)
-  tableRevision      // bumped on add / remove / reorder / sort / filter
+  generation         // the "table revision": bumped on add / remove / reorder / replace / mod
   lookup + iteration
 ```
 
@@ -255,8 +265,8 @@ Bumped **eagerly at the write site** so reads are free:
 - **Component-instance revision** — a successful field write bumps the
   instance `revision`. No per-field versions. Granularity is the
   **component**, not the entity.
-- **Table revision** — `Table(T).tableRevision`, bumped on structural
-  change; lives in the primitive.
+- **Table revision** — `ComponentTable(T).generation`, bumped on
+  structural change; lives in the primitive.
 - **System revision** — the plain `revision: Int`, bumped when any
   member changes (component → table-if-structural → system in one go).
 
