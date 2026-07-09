@@ -348,6 +348,58 @@ func componentEntityAt(T: type, this: view ComponentTable(T), i: view Int) ret E
   ret e
 }
 
+# ----- Queue(T): the ECS system inbox primitive (#264) -----
+#
+# A minimal FIFO. A system receives commands by having them enqueued
+# onto its inbox; in its command phase it drains the inbox in order then
+# clears (docs/ecs-systems-and-data-observation.md §3/§4). Lives here
+# alongside ComponentTable (the other ECS primitive) so its `drop`
+# overload sits in the same package as ComponentTable's — a standalone
+# `lib/queue.rae` put `drop` in a separate `queue` package and broke the
+# bare `drop(lst)` calls above ("drop is in package queue, not open
+# here") the moment a file imported both `queue` and `ui/ecs`. Colocating
+# sidesteps that until the module-namespacing work (#255) makes
+# cross-package overload resolution clean.
+type Queue(T: type) {
+  items: List(T)
+}
+
+func createQueue(T: type) pub ret Queue(T) {
+  ret Queue(T) {
+    items: createList(T, cap: 16)
+  }
+}
+
+func drop(T: type, this: mod Queue(T)) {
+  drop(this.items)
+}
+
+func enqueue(T: type, this: mod Queue(T), value: own T) pub {
+  this.items.add(value: value)
+}
+
+func queueCount(T: type, this: view Queue(T)) pub ret Int {
+  ret this.items.length
+}
+
+func queueIsEmpty(T: type, this: view Queue(T)) pub ret Bool {
+  ret this.items.length is 0
+}
+
+# Read the item at FIFO position `i` (0 = oldest). Iterate a drain in
+# order: `loop i < queueCount { apply(queueAt(q, i)); i++ }`.
+func queueAt(T: type, this: view Queue(T), i: view Int) pub ret T {
+  let v: T = rae_ext_rae_buf_get(buf: this.items.data, index: i)
+  ret v
+}
+
+# Empty the queue (drop every item). Call after a drain pass.
+func clearQueue(T: type, this: mod Queue(T)) pub {
+  loop this.items.length > 0 {
+    this.items.remove(index: this.items.length - 1)
+  }
+}
+
 # Iteration helper: returns the component data at dense index `i`.
 func componentDataAt(T: type, this: view ComponentTable(T), i: view Int) ret T {
   let v: T = rae_ext_rae_buf_get(buf: this.denseData.data, index: i)

@@ -184,9 +184,13 @@ escalations layered on top per system/command — not a redesign.
 
 ### 4.2 Status (#264)
 
-The inbox primitive is `Queue(T)` (`lib/queue.rae`) — enqueue / count /
-`queueAt`(FIFO) / clear; a system drains its own inbox in order then
-clears. The pipeline + two-apply passes + lifecycle + inbox are proven
+The inbox primitive is `Queue(T)` (in `lib/ui/ecs.rae`, colocated with
+`ComponentTable`) — enqueue / count / `queueAt`(FIFO) / clear; a system
+drains its own inbox in order then clears. (It lives with the ECS
+primitives rather than a standalone `lib/queue.rae` so its `drop`
+overload shares the `ui/ecs` package with `ComponentTable`'s — a
+separate package's `drop` breaks bare `drop(lst)` resolution in files
+that import both, pending the module-namespacing work #255.) The pipeline + two-apply passes + lifecycle + inbox are proven
 end-to-end by `compiler/tests/cases/539_frame_phases_lifecycle` (a
 command issued during observation lands the same frame via Apply(B));
 `Queue` itself by `538_queue`. In `examples/106_mobile_ui` the loop is

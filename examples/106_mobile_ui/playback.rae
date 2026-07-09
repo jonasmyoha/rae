@@ -20,6 +20,27 @@ import core
 import ui/components
 import ui/ecs
 
+# PlaybackState IS the design's PlaybackSystem — the first ECS "actor"
+# (docs/ecs-systems-and-data-observation.md §3/§5.1). It owns the
+# playback state + an `inbox` of commands; play/pause is a command
+# (`enqueuePlaybackToggle`) drained in the frame's Apply(A) phase by
+# `playbackProcessCommands` holding `mod` on its own state; `advancePlayback`
+# is its `update()` step. (No rename — the name is fine; adding the inbox
+# makes it the system, same as ComponentTable being the table.)
+# Deferred to #268: the Spotify play/pause path + `pollSpotify` moving
+# fully into `update()`, `like` -> a PlaylistSystem, and the UI consumers
+# switching from DataDependency to `Observe`.
+
+# A play/pause command. A struct (not a bare enum) so future commands
+# (seek, setTrack, ...) can carry data without changing the inbox type.
+enum PlaybackCommandKind {
+  togglePlay
+}
+
+type PlaybackCommand {
+  kind: PlaybackCommandKind
+}
+
 type PlaybackState pub {
   isPlaying: Bool
   # Data-dependency revision. UI that depends on play/pause state caches this
@@ -42,6 +63,10 @@ type PlaybackState pub {
   # the album track-list won't highlight any row.
   playingAlbumStem: String
   playingTrackIndex: Int
+  # Command inbox (#265). Commands are enqueued during Input and drained
+  # in Apply(A) by `playbackProcessCommands` — the system mutates its own
+  # state only while draining its own inbox.
+  inbox: Queue(PlaybackCommand)
 }
 
 func createPlaybackState() pub ret PlaybackState {
@@ -53,6 +78,7 @@ func createPlaybackState() pub ret PlaybackState {
     prevTime: -1.0
     playingAlbumStem: ""
     playingTrackIndex: 0 - 1
+    inbox: createQueue(PlaybackCommand)
   }
 }
 
@@ -72,6 +98,31 @@ func setPlaybackPlaying(state: mod PlaybackState, value: view Bool) pub {
   }
   state.isPlaying = value
   state.revision = state.revision + 1
+}
+
+# --- PlaybackSystem lifecycle: commands (#265) ---
+
+# Input-phase send: enqueue a play/pause toggle. Called from
+# `dispatchActions` (local playback); the toggle itself is applied later,
+# in Apply(A), by `playbackProcessCommands`.
+func enqueuePlaybackToggle(this: mod PlaybackState) pub {
+  enqueue(this: this.inbox, value: PlaybackCommand { kind: PlaybackCommandKind.togglePlay })
+}
+
+# Apply-phase: drain the inbox and apply each command to OWN state,
+# holding `mod self`. Runs in the frame's Apply(A) pass (main.rae). The
+# eager revision bump rides `setPlaybackPlaying`.
+func playbackProcessCommands(this: mod PlaybackState) pub {
+  let n: Int = queueCount(this: this.inbox)
+  var i: Int = 0
+  loop i < n {
+    let cmd: PlaybackCommand = queueAt(this: this.inbox, i: i)
+    if cmd.kind is PlaybackCommandKind.togglePlay {
+      togglePlayback(state: this)
+    }
+    i = i + 1
+  }
+  clearQueue(this: this.inbox)
 }
 
 # Advance `elapsedSec` by the delta against the last sampled frame.
