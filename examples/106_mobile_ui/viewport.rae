@@ -146,6 +146,17 @@ func createViewport(
       }
     }
   }
+  # The page-content column is the authored phone width, NOT the full
+  # layout extent. When a device preset makes the layout WIDER than the
+  # phone column (e.g. the iPhone simulator: layout 1179du vs phone
+  # 1080du), pages mount at this column width and the root ExtentAnchor
+  # centers them, leaving a full-width dock (ExtentAnchor.fill) around a
+  # centered content column — the documented design. Clamped to the
+  # extent so a device NARROWER than the phone column can't overflow.
+  var areaColumnDuW: Float = phoneFrameW * legacySceneScale
+  if areaColumnDuW > layoutWVal {
+    areaColumnDuW = layoutWVal
+  }
   let vp: Viewport = {
     windowPtW: windowPtW
     windowPtH: windowPtH
@@ -153,7 +164,7 @@ func createViewport(
     framebufferPxH: framebufferPxH
     dpr: dprVal
     unitScale: unitScale
-    areaDuW: contentDuW
+    areaDuW: areaColumnDuW
     areaDuH: layoutHVal
     renderScale: renderScaleVal
     legacySceneScale: legacySceneScale
