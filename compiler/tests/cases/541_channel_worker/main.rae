@@ -1,0 +1,59 @@
+# Threading proof (#271, ECS E6): one system runs on its own thread, fed
+# commands through a cross-thread Channel(T) — Rae's first message-passing
+# primitive (lib/channel.rae). The main thread PRODUCES while the worker
+# CONSUMES on a spawn'd OS thread; the worker owns/drains the channel, the
+# main thread only sends. Observation is read-only: the joined result plus
+# `channelReceived` (a monotonic progress counter).
+#
+# COMPILED-ONLY: the Live VM runs `spawn` synchronously (inline), so the
+# worker would run before any send — this proof needs real threads (config
+# runs the compiled target).
+open channel
+import core
+import channel
+
+# Sentinel telling the worker to stop. Real messages are positive.
+func stopMsg() ret Int {
+  ret 0 - 1
+}
+
+# The off-thread system: a persistent worker loop. It drains its inbox
+# (the channel) in FIFO order, summing values, until it sees the stop
+# sentinel, then returns the sum. No blocking receive yet (#271), so it
+# busy-polls `channelPending` — acceptable for the proof.
+# `own` matches the spawn convention (the worker owns its by-value copy of
+# the handle wrapper; spawn copies, so main keeps its own `chan`). Channel
+# has no heap, so the copy's scope-exit drop is a no-op — no double free.
+func drainWorker(chan: own Channel(Int)) ret Int {
+  var acc: Int = 0
+  var running: Bool = true
+  loop running {
+    if channelPending(this: chan) > 0 {
+      let v: Int = channelReceive(this: chan)
+      if v is stopMsg() {
+        running = false
+      } else {
+        acc = acc + v
+      }
+    }
+  }
+  ret acc
+}
+
+func main() {
+  let chan: Channel(Int) = createChannel(Int)
+  # Launch the worker on its own thread; it shares this channel by handle.
+  let task: Task(Int) = spawn drainWorker(chan: chan)
+  # Produce from the main thread while the worker consumes concurrently.
+  channelSend(this: chan, value: 10)
+  channelSend(this: chan, value: 20)
+  channelSend(this: chan, value: 30)
+  channelSend(this: chan, value: 42)
+  channelSend(this: chan, value: stopMsg())
+  # Observe the result by joining (read-only snapshot of the worker's
+  # output) and reading the monotonic progress counter.
+  let sum: Int = task.get()
+  log("sum: {sum}")
+  log("received: {channelReceived(this: chan)}")
+  freeChannel(this: chan)
+}
