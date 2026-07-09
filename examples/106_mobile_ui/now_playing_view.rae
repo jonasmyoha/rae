@@ -98,6 +98,11 @@ func mountNowPlayingPage(
   }
   let playWidgetId: String = "player.playIcon"
   tagPlaybackIconDependency(world: world, pageId: playerPageId, nodeId: playIconId, widgetId: playWidgetId, observedRevision: playback.revision, playing: playback.isPlaying)
+  # Cover observes the nowPlaying instance revision (#268): the big Hero
+  # cover re-points by identity on a track change without a re-mount.
+  let heroCoverNode: String = "Hero"
+  let heroCoverSeed: String = nowPlayingCoverSeed(playback: playback, browsedStem: state.currentAlbumStem)
+  tagPlaybackCoverDependency(world: world, pageId: playerPageId, nodeId: heroCoverNode, observedRevision: playback.nowPlayingRevision, artKey: heroCoverSeed)
   let heartNode: String = "HeartBtn"
   let heartWidgetId: String = "player.likeButton"
   tagLikedHeart(world: world, pageId: playerPageId, nodeId: heartNode, widgetId: heartWidgetId, observedRevision: 0)
@@ -148,34 +153,10 @@ func buildNowPlayingWorld(scenes: view AlbumScenes, playback: view PlaybackState
 # and artist overrides from the current playback + app state. Same
 # shape as `buildSimpleSceneInstance` from scene_mount.rae but with
 # the data-driven overrides list pre-populated.
-# Mutate the mini-player's cover thumb in place. Called from
-# `screen_switch` after the user picks a new album so the dock's
-# cover follows along without re-mounting the dock. Same Sprite
-# component mutation pattern as `pollSpotify`'s text updates.
-func updateMiniPlayerCover(world: mod UiWorld, stem: view String) pub {
-  let nodeKey: String = "MiniThumb"
-  let entityOpt: opt Int = findNodeInPage(world: world, pageId: miniPlayerPageId, nodeId: nodeKey)
-  if entityOpt is none {
-    ret
-  }
-  let raw: Int = entityOpt
-  let entity: EntityId = entityId(v: raw)
-  if componentHas(this: world.sprites, entity: entity) is false {
-    ret
-  }
-  let cur: Sprite = componentGet(this: world.sprites, entity: entity)
-  let copied: String = "{stem}"
-  let next: Sprite = {
-    textureKey: copied
-    tint: cur.tint
-    scaleMode: cur.scaleMode
-    tileScale: cur.tileScale
-    nineSlice: cur.nineSlice
-    hasNineSlice: cur.hasNineSlice
-  }
-  componentSet(this: world.sprites, entity: entity, data: next)
-}
-
+#
+# The dock's cover thumb is no longer patched imperatively on album
+# change (the old `updateMiniPlayerCover`): the MiniThumb observes the
+# nowPlaying instance revision and re-points by identity (#268).
 func buildMiniPlayerInstance(
   world: mod UiWorld
   scene: view Scene
@@ -238,6 +219,11 @@ func buildMiniPlayerInstance(
   setDataDependency(world: world, entity: mount, resource: playbackSource, field: playingField, observedRevision: playback.revision)
   let miniWidgetId: String = "miniPlayer.playIcon"
   tagPlaybackIconDependency(world: world, pageId: miniPlayerPageId, nodeId: miniIconId, widgetId: miniWidgetId, observedRevision: playback.revision, playing: playback.isPlaying)
+  # Cover observes the nowPlaying instance revision (#268): the persistent
+  # dock's MiniThumb re-points by identity on a track change — this is the
+  # widget the motivating bug left stuck on the first album (§1).
+  let miniThumbCoverSeed: String = nowPlayingCoverSeed(playback: playback, browsedStem: state.currentAlbumStem)
+  tagPlaybackCoverDependency(world: world, pageId: miniPlayerPageId, nodeId: "MiniThumb", observedRevision: playback.nowPlayingRevision, artKey: miniThumbCoverSeed)
   let miniHeartNode: String = "MiniHeartBtn"
   let miniHeartWidgetId: String = "miniPlayer.likeButton"
   tagLikedHeart(world: world, pageId: miniPlayerPageId, nodeId: miniHeartNode, widgetId: miniHeartWidgetId, observedRevision: 0)
