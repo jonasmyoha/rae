@@ -1,0 +1,57 @@
+# Unit test for ComponentTable(T)'s `generation` counter (#260, ECS E0a).
+# ComponentTable(T) is the ECS table primitive (the design's conceptual
+# "Table(T)"; `generation` is its table-level revision). Asserts
+# `generation` bumps exactly once per real mutation and NOT on a no-op
+# remove.
+open ui/ecs
+
+type Cell {
+  v: Int
+}
+
+func main() {
+  var t: ComponentTable(Cell) = createComponentTable(Cell)
+  log("gen0: {componentTableGeneration(this: t)}")
+  log("count0: {componentCount(this: t)}")
+
+  let e1: EntityId = entityId(v: 1)
+  let e2: EntityId = entityId(v: 2)
+
+  componentSet(this: t, entity: e1, data: Cell { v: 10 })
+  log("gen1: {componentTableGeneration(this: t)}")
+  componentSet(this: t, entity: e2, data: Cell { v: 20 })
+  log("gen2: {componentTableGeneration(this: t)}")
+  log("count2: {componentCount(this: t)}")
+
+  log("has_e1: {componentHas(this: t, entity: e1)}")
+  let miss: EntityId = entityId(v: 99)
+  log("has_miss: {componentHas(this: t, entity: miss)}")
+
+  let g1: Cell = componentGet(this: t, entity: e1)
+  log("get_e1: {g1.v}")
+
+  # replace bumps
+  componentSet(this: t, entity: e1, data: Cell { v: 11 })
+  log("gen3: {componentTableGeneration(this: t)}")
+  let g1b: Cell = componentGet(this: t, entity: e1)
+  log("get_e1b: {g1b.v}")
+
+  # mod bumps
+  let m: mod Cell => componentMod(this: t, entity: e2)
+  m.v = 21
+  log("gen4: {componentTableGeneration(this: t)}")
+  let g2: Cell = componentGet(this: t, entity: e2)
+  log("get_e2: {g2.v}")
+
+  # remove bumps; e2 survives the swap-remove of e1
+  componentRemove(this: t, entity: e1)
+  log("gen5: {componentTableGeneration(this: t)}")
+  log("count_after_remove: {componentCount(this: t)}")
+  log("has_e2: {componentHas(this: t, entity: e2)}")
+  let g2b: Cell = componentGet(this: t, entity: e2)
+  log("get_e2b: {g2b.v}")
+
+  # no-op remove of an absent entity must NOT bump the generation
+  componentRemove(this: t, entity: miss)
+  log("gen_after_noop_remove: {componentTableGeneration(this: t)}")
+}
