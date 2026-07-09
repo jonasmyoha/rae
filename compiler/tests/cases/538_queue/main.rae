@@ -1,0 +1,35 @@
+# Unit test for the Queue(T) inbox primitive (#264).
+open queue
+
+func main() {
+  var q: Queue(Int) = createQueue(Int)
+  log("empty0: {queueIsEmpty(this: q)}")
+  log("count0: {queueCount(this: q)}")
+
+  enqueue(this: q, value: 10)
+  enqueue(this: q, value: 20)
+  enqueue(this: q, value: 30)
+  log("count3: {queueCount(this: q)}")
+  log("empty3: {queueIsEmpty(this: q)}")
+
+  # FIFO order
+  log("at0: {queueAt(this: q, i: 0)}")
+  log("at1: {queueAt(this: q, i: 1)}")
+  log("at2: {queueAt(this: q, i: 2)}")
+
+  # drain-all-in-order then clear
+  var sum: Int = 0
+  var i: Int = 0
+  loop i < queueCount(this: q) {
+    sum = sum + queueAt(this: q, i: i)
+    i = i + 1
+  }
+  log("drain_sum: {sum}")
+  clearQueue(this: q)
+  log("count_after_clear: {queueCount(this: q)}")
+
+  # reuse after clear
+  enqueue(this: q, value: 99)
+  log("count_reuse: {queueCount(this: q)}")
+  log("at0_reuse: {queueAt(this: q, i: 0)}")
+}
