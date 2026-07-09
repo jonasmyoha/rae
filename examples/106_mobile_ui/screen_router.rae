@@ -821,6 +821,10 @@ func dispatchActions(
       playback.playingAlbumStem = "{state.currentAlbumStem}"
       playback.playingTrackIndex = state.currentTrackIndex
       setPlaybackPlaying(state: playback, value: true)
+      # Point the nowPlaying cover at this local album's stem-keyed
+      # texture and bump the instance revision (#268) so the Hero +
+      # mini-player covers observe the change and re-point by identity.
+      setNowPlayingArt(state: playback, artKey: state.currentAlbumStem)
       # Dependent UI (heart selected state, play/pause icon, progress)
       # is refreshed by the frame pipeline after dispatch. Action
       # handlers only mutate app/playback/data-source state.
@@ -882,6 +886,9 @@ func dispatchActions(
         playback.playingAlbumStem = "{e.albumStem}"
         playback.playingTrackIndex = state.currentTrackIndex
         setPlaybackPlaying(state: playback, value: true)
+        # Cover follows the replayed entry's own texture key (#268) — the
+        # local stem for catalog entries, or the spotify-art key otherwise.
+        setNowPlayingArt(state: playback, artKey: e.textureKey)
         # Dependent UI is refreshed by the frame pipeline after dispatch.
         if spotifyEnabled {
           let q: String = spotifySearchQuery(artist: e.artistName, title: e.trackName, album: e.albumName)

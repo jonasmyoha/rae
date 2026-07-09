@@ -76,9 +76,10 @@ func handleScreenSwitch(
     unmountPage(world: world, pageId: playerPageId)
     let freshNP: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: appState, viewport: viewport)
     rebindHero(world: world, fromKey: "albumCover", toKey: appState.currentAlbumStem)
-    # Dock stays mounted; update its cover thumb directly to the new
-    # album stem so the bottom widget tracks the user's choice.
-    updateMiniPlayerCover(world: world, stem: appState.currentAlbumStem)
+    # Dock stays mounted; its MiniThumb cover now follows the nowPlaying
+    # instance revision via the UiPlaybackSystem observer (#268) rather
+    # than an imperative patch here — so it shows what's *playing*, not
+    # merely the browsed album.
     # Freshly-mounted pages have no Active component → default to
     # active=true. Explicitly deactivate; the `setPageActive(incoming,
     # true)` call below re-activates whichever page is the real

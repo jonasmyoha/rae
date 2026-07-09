@@ -63,6 +63,18 @@ type PlaybackState pub {
   # the album track-list won't highlight any row.
   playingAlbumStem: String
   playingTrackIndex: Int
+  # nowPlaying cover identity (#268). `nowPlayingArtKey` is the
+  # texture-registry key of the currently-playing album cover — the local
+  # album stem for catalog tracks, or `"spotify-current"` when Spotify is
+  # driving playback. `nowPlayingRevision` is the component-instance
+  # revision (§7) for this identity: bumped by `setNowPlayingArt` whenever
+  # the key changes. The now-playing Hero + mini-player MiniThumb covers
+  # OBSERVE this revision (via a DataDependency) and re-point their
+  # Sprite.textureKey by identity — replacing the old per-frame cover poll
+  # walk (`rebindAlbumCoversToSpotify`) that matched a stale browsed stem
+  # and so never followed a track change (the motivating bug, §1).
+  nowPlayingArtKey: String
+  nowPlayingRevision: Int
   # Command inbox (#265). Commands are enqueued during Input and drained
   # in Apply(A) by `playbackProcessCommands` — the system mutates its own
   # state only while draining its own inbox.
@@ -78,6 +90,8 @@ func createPlaybackState() pub ret PlaybackState {
     prevTime: -1.0
     playingAlbumStem: ""
     playingTrackIndex: 0 - 1
+    nowPlayingArtKey: ""
+    nowPlayingRevision: 0
     inbox: createQueue(PlaybackCommand)
   }
 }
@@ -98,6 +112,19 @@ func setPlaybackPlaying(state: mod PlaybackState, value: view Bool) pub {
   }
   state.isPlaying = value
   state.revision = state.revision + 1
+}
+
+# Set the currently-playing cover art key and bump the nowPlaying
+# instance revision (§7) when it actually changes. The now-playing Hero
+# + mini-player MiniThumb observe this revision and re-point by identity
+# (#268). Idempotent: re-setting the same key is a no-op, so callers can
+# call it every frame / poll without spurious re-paints.
+func setNowPlayingArt(state: mod PlaybackState, artKey: view String) pub {
+  if state.nowPlayingArtKey.equals(other: artKey) {
+    ret
+  }
+  state.nowPlayingArtKey = "{artKey}"
+  state.nowPlayingRevision = state.nowPlayingRevision + 1
 }
 
 # --- PlaybackSystem lifecycle: commands (#265) ---
