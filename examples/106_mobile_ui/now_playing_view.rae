@@ -97,7 +97,7 @@ func mountNowPlayingPage(
     paintErrorBlock(world: world, entity: np, label: npLabel)
   }
   let playWidgetId: String = "player.playIcon"
-  tagPlaybackIconDependency(world: world, pageId: playerPageId, nodeId: playIconId, widgetId: playWidgetId, observedRevision: playback.revision)
+  tagPlaybackIconDependency(world: world, pageId: playerPageId, nodeId: playIconId, widgetId: playWidgetId, observedRevision: playback.revision, playing: playback.isPlaying)
   let heartNode: String = "HeartBtn"
   let heartWidgetId: String = "player.likeButton"
   tagLikedHeart(world: world, pageId: playerPageId, nodeId: heartNode, widgetId: heartWidgetId, observedRevision: 0)
@@ -237,7 +237,7 @@ func buildMiniPlayerInstance(
   let playingField: DataFieldId = dataFieldPlayingTrack()
   setDataDependency(world: world, entity: mount, resource: playbackSource, field: playingField, observedRevision: playback.revision)
   let miniWidgetId: String = "miniPlayer.playIcon"
-  tagPlaybackIconDependency(world: world, pageId: miniPlayerPageId, nodeId: miniIconId, widgetId: miniWidgetId, observedRevision: playback.revision)
+  tagPlaybackIconDependency(world: world, pageId: miniPlayerPageId, nodeId: miniIconId, widgetId: miniWidgetId, observedRevision: playback.revision, playing: playback.isPlaying)
   let miniHeartNode: String = "MiniHeartBtn"
   let miniHeartWidgetId: String = "miniPlayer.likeButton"
   tagLikedHeart(world: world, pageId: miniPlayerPageId, nodeId: miniHeartNode, widgetId: miniHeartWidgetId, observedRevision: 0)
