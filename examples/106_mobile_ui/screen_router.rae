@@ -371,55 +371,9 @@ func tagPlaybackIconDependency(
   componentSet(this: world.stateStyles, entity: entity, data: own style)
 }
 
-# Data-only refresh: flip WidgetState.selected to mirror isPlaying and
-# record the observed revision. The visual swap (play_arrow <-> pause)
-# happens in `widgetStyleSystem` from the entity's StateStyle — no
-# sprite patching here.
-func refreshPlaybackIconEntity(world: mod UiWorld, entity: view EntityId, isPlaying: view Bool, revision: view Int) {
-  setWidgetSelected(world: world, entity: entity, selected: isPlaying)
-  if componentHas(this: world.dataDependencies, entity: entity) {
-    let dep: view DataDependency => componentView(this: world.dataDependencies, entity: entity)
-    let nextDep: DataDependency = {
-      resource: dep.resource
-      field: dep.field
-      observedRevision: revision
-    }
-    componentSet(this: world.dataDependencies, entity: entity, data: nextDep)
-  }
-}
-
-# Refresh UI nodes that declare a dependency on PlaybackState when the playback
-# data revision changes. The dependency is now ECS data, not hard-coded node ids:
-# any widget that carries DataDependency{resource:dataResourcePlayback(), field:dataFieldIsPlaying()}
-# can be patched here without adding another bespoke refresh path.
-func refreshPlaybackViewsIfNeeded(
-  world: mod UiWorld
-  playback: view PlaybackState
-  cachedRevision: view Int
-) pub ret Int {
-  if playback.revision is cachedRevision {
-    ret cachedRevision
-  }
-
-  let playbackSource: DataResourceId = dataResourcePlayback()
-  let playbackField: DataFieldId = dataFieldIsPlaying()
-  let n: Int = componentCount(this: world.dataDependencies)
-  var i: Int = 0
-  loop i < n {
-    let entity: EntityId = componentEntityAt(this: world.dataDependencies, i: i)
-    let dep: view DataDependency => componentView(this: world.dataDependencies, entity: entity)
-    if dep.resource is playbackSource {
-      if dep.field is playbackField {
-        if dep.observedRevision is not playback.revision {
-          refreshPlaybackIconEntity(world: world, entity: entity, isPlaying: playback.isPlaying, revision: playback.revision)
-        }
-      }
-    }
-    i = i + 1
-  }
-
-  ret playback.revision
-}
+# Playback-widget refresh (`refreshPlaybackViewsIfNeeded` +
+# `refreshPlaybackIconEntity`) now lives in `ui_playback_system.rae` as the
+# observe step of `UiPlaybackSystem` (#267, §5.2).
 
 # Material icon key for the play button in the current state. Used by
 # both view builders to pick the right sprite override at mount time
