@@ -1,0 +1,119 @@
+# Integration test for the frame pipeline + system lifecycle + inbox
+# (#264, ECS E2a). Two toy systems with Queue inboxes run through the
+# named phases:
+#   Input -> Apply(A) -> Observation refresh -> Apply(B) -> Layout/Render
+# with TWO apply passes (§4.1) so a command issued DURING observation
+# lands the SAME frame. Each system mutates only its OWN tables while
+# draining its OWN inbox (processCommands); update(dt) is internal
+# behaviour on own state; observation is driven externally by the loop.
+open queue
+
+type AddCmd { amount: Int }
+type SetCmd { value: Int }
+
+# Source system: an integer counter with an inbox of AddCmds.
+type SysA {
+  revision: Int
+  value: Int
+  ticks: Int
+  inbox: Queue(AddCmd)
+}
+# Mirror system: mirrors SysA.value, driven by SetCmds in its inbox.
+type SysB {
+  revision: Int
+  mirrored: Int
+  inbox: Queue(SetCmd)
+}
+
+# A single observer watching SysA's system revision.
+type Observe {
+  observedRevision: Int
+  dirty: Bool
+}
+
+func createSysA() ret SysA { ret SysA { revision: 0, value: 0, ticks: 0, inbox: createQueue(AddCmd) } }
+func createSysB() ret SysB { ret SysB { revision: 0, mirrored: 0, inbox: createQueue(SetCmd) } }
+
+# --- lifecycle: processCommands — drain OWN inbox, mutate OWN tables ---
+func processCommandsA(this: mod SysA) {
+  let n: Int = queueCount(this: this.inbox)
+  var i: Int = 0
+  loop i < n {
+    let cmd: AddCmd = queueAt(this: this.inbox, i: i)
+    this.value = this.value + cmd.amount
+    i = i + 1
+  }
+  if n > 0 {
+    this.revision = this.revision + 1
+  }
+  clearQueue(this: this.inbox)
+}
+
+func processCommandsB(this: mod SysB) {
+  let n: Int = queueCount(this: this.inbox)
+  var i: Int = 0
+  loop i < n {
+    let cmd: SetCmd = queueAt(this: this.inbox, i: i)
+    this.mirrored = cmd.value
+    i = i + 1
+  }
+  if n > 0 {
+    this.revision = this.revision + 1
+  }
+  clearQueue(this: this.inbox)
+}
+
+# --- lifecycle: update(dt) — internal behaviour (a toy timer tick) ---
+func updateA(this: mod SysA) {
+  this.ticks = this.ticks + 1
+}
+
+# One frame: the named phases. (Input — enqueue — is done by the caller.)
+func runFrame(a: mod SysA, b: mod SysB, obs: mod Observe) {
+  # Apply(A): each system drains its own inbox; then update(dt).
+  processCommandsA(this: a)
+  processCommandsB(this: b)
+  updateA(this: a)
+
+  # Observation refresh: detect a change in A; the dirty->rebuild step
+  # issues a COMMAND to B (enqueue) — this is why a second apply pass
+  # exists.
+  let cur: Int = a.revision
+  if cur is not obs.observedRevision {
+    obs.observedRevision = cur
+    obs.dirty = true
+  }
+  if obs.dirty {
+    let mirrorVal: Int = a.value
+    enqueue(this: b.inbox, value: SetCmd { value: mirrorVal })
+    obs.dirty = false
+  }
+
+  # Apply(B): drain inboxes again so the observation-issued command
+  # lands THIS frame.
+  processCommandsA(this: a)
+  processCommandsB(this: b)
+}
+
+func main() {
+  var a: SysA = createSysA()
+  var b: SysB = createSysB()
+  var obs: Observe = { observedRevision: 0, dirty: false }
+
+  # Frame 1 — Input: a "button press" enqueues AddCmd(5) onto A.
+  enqueue(this: a.inbox, value: AddCmd { amount: 5 })
+  runFrame(a: a, b: b, obs: obs)
+  log("f1_a_value: {a.value}")
+  log("f1_b_mirrored: {b.mirrored}")
+  log("f1_a_rev: {a.revision}")
+  log("f1_b_rev: {b.revision}")
+  log("f1_a_ticks: {a.ticks}")
+
+  # Frame 2 — no input; nothing observable changes; update still ticks.
+  runFrame(a: a, b: b, obs: obs)
+  log("f2_a_value: {a.value}")
+  log("f2_b_mirrored: {b.mirrored}")
+  log("f2_a_ticks: {a.ticks}")
+  log("f2_a_rev: {a.revision}")
+  log("f2_b_rev: {b.revision}")
+}
