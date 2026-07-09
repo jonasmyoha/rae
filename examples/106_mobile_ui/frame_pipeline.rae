@@ -117,6 +117,11 @@ func syncFrameData(
     applyOverlaysToWorld(world: world, playback: playback, state: appState)
   }
 
+  # Keep the persistent dock cover in sync with the current track even
+  # when playing a new track doesn't switch screens (so no world
+  # rebuild / screen-switch mount runs). Idempotent — a no-op once the
+  # cover already matches (see updateMiniPlayerCover).
+  updateMiniPlayerCover(world: world, stem: appState.currentAlbumStem)
   pollSpotify(state: spotifyState, world: world, reg: texReg, playback: playback, appState: appState, currentAlbumStem: appState.currentAlbumStem, now: now)
   let spotifyRefresh: UiRefreshResult = refreshMountedUi(world: world, scenes: scenes, state: appState, playback: playback, visible: visible, cache: uiRefresh, viewport: viewport)
   if spotifyRefresh.playbackChanged {
