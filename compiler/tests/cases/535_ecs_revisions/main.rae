@@ -1,0 +1,96 @@
+# Unit test for the ECS revision conventions (#261, ECS E0b).
+#
+# Demonstrates the three-tier, EAGER, EXPLICIT revision model on a toy
+# system:
+#   - a component instance carries its own `revision: Int`, bumped
+#     explicitly via `bumpRevision(...)` (never implicitly on `mod`);
+#   - a system is a plain `type` of Table field(s) + `revision: Int`,
+#     bumped via a free `markChanged(sys)`;
+#   - a mutation site bumps the chain eagerly:
+#       component instance  (explicit bumpRevision)
+#       -> table generation (automatic: componentSet / componentMod)
+#       -> system revision  (explicit markChanged).
+# A pure read bumps NOTHING.
+open ui/ecs
+
+# Component instance carrying its own fine-grained revision (§5.1).
+type Cell {
+  v: Int
+  revision: Int
+}
+
+# Explicit instance bump — bump AFTER a successful change, never
+# implicitly (§5.4 / §7).
+func bumpRevision(this: mod Cell) {
+  this.revision = this.revision + 1
+}
+
+# A system is a plain type: Table field(s) + a system revision (§5.3).
+type ToySystem {
+  cells: ComponentTable(Cell)
+  revision: Int
+}
+
+func createToySystem() ret ToySystem {
+  ret ToySystem {
+    cells: createComponentTable(Cell)
+    revision: 0
+  }
+}
+
+# System-revision bump — a free function, no inheritance (§2.3/§5.3).
+func markChanged(this: mod ToySystem) {
+  this.revision = this.revision + 1
+}
+
+# STRUCTURAL change (add): componentSet bumps the table generation;
+# markChanged bumps the system revision. New instance starts at 0.
+func toyAddCell(sys: mod ToySystem, entity: view EntityId, v: view Int) {
+  componentSet(this: sys.cells, entity: entity, data: Cell { v: v, revision: 0 })
+  markChanged(this: sys)
+}
+
+# DATA change: componentMod bumps the table generation; bumpRevision
+# bumps the instance revision; markChanged bumps the system revision.
+func toySetValue(sys: mod ToySystem, entity: view EntityId, v: view Int) {
+  if componentHas(this: sys.cells, entity: entity) {
+    let c: mod Cell => componentMod(this: sys.cells, entity: entity)
+    c.v = v
+    bumpRevision(this: c)
+  }
+  markChanged(this: sys)
+}
+
+# Pure read — bumps NOTHING (componentView does not bump).
+func toyReadValue(sys: view ToySystem, entity: view EntityId) ret Int {
+  let c: view Cell => componentView(this: sys.cells, entity: entity)
+  ret c.v
+}
+
+func main() {
+  var sys: ToySystem = createToySystem()
+  log("sys_rev0: {sys.revision}")
+  log("tbl_gen0: {componentTableGeneration(this: sys.cells)}")
+
+  let e1: EntityId = entityId(v: 1)
+  toyAddCell(sys: sys, entity: e1, v: 10)
+  log("sys_rev1: {sys.revision}")
+  log("tbl_gen1: {componentTableGeneration(this: sys.cells)}")
+  let c1: Cell = componentGet(this: sys.cells, entity: e1)
+  log("cell_rev0: {c1.revision}")
+
+  toySetValue(sys: sys, entity: e1, v: 11)
+  log("sys_rev2: {sys.revision}")
+  log("tbl_gen2: {componentTableGeneration(this: sys.cells)}")
+  let c1b: Cell = componentGet(this: sys.cells, entity: e1)
+  log("cell_rev1: {c1b.revision}")
+  log("val: {c1b.v}")
+
+  # pure read bumps nothing (instance / table / system all unchanged)
+  let rv: Int = toyReadValue(sys: sys, entity: e1)
+  log("read_val: {rv}")
+  log("sys_rev_after_read: {sys.revision}")
+  log("tbl_gen_after_read: {componentTableGeneration(this: sys.cells)}")
+  let c1c: Cell = componentGet(this: sys.cells, entity: e1)
+  log("cell_rev_after_read: {c1c.revision}")
+}

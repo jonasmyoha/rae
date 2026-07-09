@@ -275,6 +275,42 @@ must not redraw because `Permissions` on the same entity changed); and
 implicit/compiler-driven bumping (a `mod` borrow doesn't imply a change;
 keep it explicit — `bumpRevision(codec)` or bump-after-success helpers).
 
+### 7.1 Convention (the code shape, implemented #261)
+
+Rae has no field-constrained generics, so the bumps are **per-type free
+functions** by convention, not a single generic. The recipe (exercised
+by `compiler/tests/cases/535_ecs_revisions`):
+
+```rae
+# component instance carries its own revision
+type Cell { v: Int, revision: Int }
+func bumpRevision(this: mod Cell) { this.revision = this.revision + 1 }
+
+# a system is a plain type: Table field(s) + a revision
+type ToySystem { cells: ComponentTable(Cell), revision: Int }
+func markChanged(this: mod ToySystem) { this.revision = this.revision + 1 }
+
+# a DATA-change mutation site bumps the whole chain, eagerly:
+func toySetValue(sys: mod ToySystem, entity: view EntityId, v: view Int) {
+  if componentHas(this: sys.cells, entity: entity) {
+    let c: mod Cell => componentMod(this: sys.cells, entity: entity) # table generation++
+    c.v = v
+    bumpRevision(this: c)                                            # instance revision++ (explicit)
+  }
+  markChanged(this: sys)                                             # system revision++  (explicit)
+}
+```
+
+Notes:
+- The **table generation** bump is the one automatic link — it rides
+  `componentSet` / `componentMod` (§2's `ComponentTable`). The
+  **instance** and **system** revisions are bumped explicitly, so a
+  `componentMod` used only to read does not fake an instance/system
+  change (`componentView` bumps nothing at all).
+- A **structural** change (add/remove) skips `bumpRevision` (the table
+  generation already captures "the set changed") but still calls
+  `markChanged`.
+
 ---
 
 ## 8. Observation is system-to-system, by ID, read-only
