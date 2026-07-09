@@ -645,6 +645,22 @@ func main() {
             rubberDim: viewport.layoutH
           )
 
+          # ---- ECS frame phases (docs/ecs-systems-and-data-observation.md
+          # §4) — the named pipeline this loop realises:
+          #   1. Input             -> runFrameInputDispatch (below)
+          #   2. Apply(A) commands -> (empty: no systems/inboxes yet;
+          #                            systems' processCommands run here
+          #                            once carved out in #265+)
+          #   3. Observation refresh -> refreshUiDiffs + syncFrameData's
+          #                            refreshMountedUi (today: the
+          #                            DataDependency refreshers; become
+          #                            refreshObservers in #268)
+          #   4. Apply(B) commands -> (empty until #265+)
+          #   5. Layout/Transform  -> runFrameLayoutTransform
+          #   6. Render            -> renderGpu2dFrame
+          # The two Apply passes are labelled but empty until real
+          # systems + Queue inboxes exist; no behaviour change here.
+          # ----
           # Input dispatch phase. Action handlers mutate AppState /
           # PlaybackState / data-source revisions; dependent UI
           # visuals are refreshed by the following UI-diff phase.
