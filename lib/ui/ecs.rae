@@ -1,47 +1,25 @@
 # ECS storage layer.
 #
-# Adapted from RUICS — see `rae/docs/royal-blush-ruics-ecs-reference.md`
-# § 2 — but with two Rae-specific quirks worked around:
-#
-# 1. The Live VM doesn't propagate mutations done through `mod struct`
-#    to inner `List` fields. Mutating-helper functions therefore alias
-#    the inner lists explicitly via `let foo: mod List(...) => this.foo`.
-#    With that trick, both targets agree.
-#
-# 2. The compiled C backend can't take `&` of an rvalue passed as
-#    `view T`. Read helpers return `T` by value, and callers should
-#    bind the result to a local before passing it on.
-#
-# Storage is intentionally simpler than the original sparse-set: a
-# linear scan in `componentIndexOf`. UI scenes never have more than a
-# couple of hundred entities and a few thousand components total, so
-# the constant factor doesn't matter. We can swap to an IntMap-backed
-# sparse set later without changing the public API.
+# Adapted from RUICS (rae/docs/royal-blush-ruics-ecs-reference.md § 2)
+# with two Rae quirks worked around: (1) the Live VM doesn't propagate
+# `mod struct` mutations to inner `List` fields, so mutating helpers
+# alias the inner lists via `let foo: mod List(...) => this.foo`;
+# (2) the C backend can't take `&` of an rvalue passed as `view T`, so
+# read helpers return `T` by value and callers bind to a local first.
+# `componentIndexOf` is an O(1) sparse-set lookup (see `sparse` below).
 import core
 # Only the raylib-free MSDF *data* types (MsdfState/createMsdfState) — the
 # raylib paint code stays in ui/msdf, so embedding MsdfState in UiWorld no
 # longer drags raylib into GPU2D-only apps (#148).
 import ui/msdf_state
 
-# Entity identifier — a value-type wrapper around `Int`.
-#
-# Stored, passed, and compared by value (single-field struct → no
-# heap, copied as bytes). All ECS APIs in this module take/return
-# `EntityId` rather than bare `Int` so a function signature makes
-# the semantic role explicit: "this parameter is an entity handle,
-# not a count or an array index."
-#
-# Construction goes through the helpers below — `entityId(n)` to
-# wrap a known Int and `noEntity()` for the canonical "no entity"
-# sentinel (id = -1). Authors comparing two ids use `eq(a, b)`
-# rather than `a is b` because Rae's `is` on struct values doesn't
-# do field-wise equality.
-#
-# A future `wrap` modifier (deferred — see id/key removal commit
-# 568a7f1) will make `e.value` automatic at use sites and let the
-# struct be passed where a bare Int is expected. Until then, code
-# that needs the inner integer (logging, arithmetic, mapping to
-# external IDs) reads `.value` explicitly.
+# Entity identifier — a value-type wrapper around `Int` (single-field
+# struct → no heap, copied as bytes). ECS APIs take/return `EntityId`
+# rather than bare `Int` so signatures make the role explicit. Construct
+# via `entityId(n)` / `noEntity()` (sentinel id -1); compare with
+# `eq(a, b)`, not `a is b` (Rae's `is` on structs isn't field-wise).
+# `.value` reads the inner Int until a future `wrap` modifier makes it
+# implicit (deferred — id/key removal commit 568a7f1).
 type EntityId pub {
   value: Int
 }
@@ -108,6 +86,13 @@ func appendIntList(lst: mod List(Int), value: view Int) {
   lst.add(value: value)
 }
 
+func popLastInt(lst: mod List(Int)) {
+  if lst.length is 0 {
+    ret
+  }
+  lst.remove(index: lst.length - 1)
+}
+
 func dropIntList(lst: mod List(Int)) {
   drop(lst)
 }
@@ -126,35 +111,33 @@ func ensureIntSlots(lst: mod List(Int), index: view Int) {
 # ComponentTable(T) IS the fundamental ECS table primitive — one
 # component type per table, sparse-set indexed. The ECS-systems design
 # (docs/ecs-systems-and-data-observation.md) writes "Table(T)" as a
-# conceptual shorthand for exactly this type; there is deliberately no
-# separate `Table(T)`. Its `generation` counter is that design's
-# table-level revision (the middle tier of the component-instance /
-# table / system observation model): "this table changed since
-# generation N", agnostic to whether the change was an insert, remove,
-# reorder, replace, or a mod.
+# conceptual shorthand for exactly this type (there is deliberately no
+# separate `Table(T)`); its `generation` is that design's table-level
+# revision and `denseStamps` the per-entity (component-instance) level.
 
 type ComponentTable(T: type) {
   denseEntities: List(EntityId)
   denseData: List(T)
 
-  # Sparse map: sparse[entity.value] = dense index of that entity's
-  # component, or -1 if absent / out of range. Turns componentIndexOf
-  # from an O(n) linear scan into O(1), which matters a lot once a
-  # scene has hundreds of entities (e.g. a 200+ row list): the per-
-  # frame layout/transform/render walks do ~a dozen lookups per entity,
-  # so a linear scan made each frame O(n^2). Maintained on set/remove;
-  # grown lazily (padded with -1) to cover the largest entity id seen.
+  # Sparse map: sparse[entity.value] = dense index (or -1 if absent),
+  # making componentIndexOf an O(1) lookup instead of an O(n) scan (the
+  # per-frame layout/transform/render walks do ~a dozen lookups/entity).
+  # Maintained on set/remove; grown lazily (padded with -1).
   sparse: List(Int)
 
-  # Monotonic counter that bumps once per mutation. Consumer systems
-  # (layout, transform, render) can cache the last seen generation and
-  # short-circuit work when nothing has changed. Per-table granularity
-  # is intentional: it's cheap (one Int field, one add per mutation),
-  # simple (no per-entity bookkeeping), and good enough for layout/
-  # render skip paths where any change typically invalidates the whole
-  # downstream pass anyway. Eagerly bumped on componentMod even if the
-  # caller only reads — over-eager is safe; missing a mutation is not.
+  # Monotonic table revision: bumps once per mutation. Consumers cache the
+  # last seen value and skip work when it's unchanged. Per-table (not per-
+  # entity) — cheap, and any change usually invalidates the whole pass.
+  # Eagerly bumped on componentMod even if the caller only reads.
   generation: Int
+
+  # Per-ENTITY last-modified stamp (#270a), aligned 1:1 with denseData by
+  # dense index: `denseStamps[i]` = the `generation` at the last set/mod of
+  # entity i. Where `generation` says "this TABLE changed", the stamp says
+  # "this ENTITY changed" — the per-entity signal the retained render cache
+  # (§5.3) needs to recompute only entries whose own inputs moved. Bounded,
+  # monotonic, no clearing; preserved (not re-stamped) on a swap-remove.
+  denseStamps: List(Int)
 }
 
 func createComponentTable(T: type) ret ComponentTable(T) {
@@ -163,6 +146,7 @@ func createComponentTable(T: type) ret ComponentTable(T) {
     denseData: createList(T, cap: 256)
     sparse: createList(Int, cap: 256)
     generation: 0
+    denseStamps: createList(Int, cap: 256)
   }
 }
 
@@ -179,6 +163,7 @@ func drop(T: type, this: mod ComponentTable(T)) {
   # mis-mangle to drop(T)(List(T)) and reinterpret Int slots as T.
   dropEntityList(lst: this.denseEntities)
   dropIntList(lst: this.sparse)
+  dropIntList(lst: this.denseStamps)
 }
 
 # Returns the dense index of `entity` in this table, or -1 if absent.
@@ -267,6 +252,11 @@ func componentMod(T: type, this: mod ComponentTable(T), entity: view EntityId) r
   # generation bumps just cause an extra rerun downstream; missing a
   # mutation would cause stale cached output.
   this.generation = this.generation + 1
+  # Stamp this entity; guard idx>=0 so a mod of a MISSING entity (safeIdx
+  # forced to 0) can't corrupt entity-0's stamp.
+  if idx >= 0 {
+    rae_ext_rae_buf_set(buf: this.denseStamps.data, index: idx, value: this.generation)
+  }
   ret mod rae_ext_rae_buf_get(buf: this.denseData.data, index: safeIdx)
 }
 
@@ -285,17 +275,20 @@ func componentSet(T: type, this: mod ComponentTable(T), entity: view EntityId, d
     rae_ext_rae_buf_drop_at(buf: this.denseData.data, index: existing)
     rae_ext_rae_buf_set(buf: this.denseData.data, index: existing, value: data)
     this.generation = this.generation + 1
+    rae_ext_rae_buf_set(buf: this.denseStamps.data, index: existing, value: this.generation)
     ret
   }
-  # New entity: append to both dense lists and point its sparse slot at
-  # the new tail index.
+  # New entity: append to all dense lists (denseStamps in lockstep) and
+  # point its sparse slot at the new tail index.
   let newIdx: Int = this.denseEntities.length
   appendEntityList(lst: this.denseEntities, value: entity)
   this.denseData.add(value: data)
+  appendIntList(lst: this.denseStamps, value: 0)
   let key: Int = entity.value
   ensureIntSlots(lst: this.sparse, index: key)
   rae_ext_rae_buf_set(buf: this.sparse.data, index: key, value: newIdx)
   this.generation = this.generation + 1
+  rae_ext_rae_buf_set(buf: this.denseStamps.data, index: newIdx, value: this.generation)
 }
 
 # Swap-remove the component for `entity`. Order in the table is not
@@ -317,11 +310,16 @@ func componentRemove(T: type, this: mod ComponentTable(T), entity: view EntityId
     # The entity that was at `last` now lives at `idx`: repoint its
     # sparse slot so future lookups find it.
     rae_ext_rae_buf_set(buf: this.sparse.data, index: lastEntity.value, value: idx)
+    # Carry the moved entity's stamp to its new slot — a relocation is not
+    # a modification, so keep its existing stamp rather than re-stamping.
+    let lastStamp: Int = rae_ext_rae_buf_get(buf: this.denseStamps.data, index: last)
+    rae_ext_rae_buf_set(buf: this.denseStamps.data, index: idx, value: lastStamp)
   }
-  # Shrink length by 1. Use the non-generic helper for the entity-list
-  # because `entities.remove(...)` would mis-mangle in this context.
+  # Shrink length by 1. Non-generic helpers for the entity + stamp lists
+  # because `.remove(...)` would mis-mangle in this T-generic context.
   popLastEntity(lst: this.denseEntities)
   this.denseData.remove(index: last)
+  popLastInt(lst: this.denseStamps)
   # Mark the removed entity absent in the sparse map.
   if removedKey >= 0 {
     if removedKey < this.sparse.length {
@@ -340,6 +338,18 @@ func componentCount(T: type, this: view ComponentTable(T)) ret Int {
 # when it hasn't changed since the last successful run.
 func componentTableGeneration(T: type, this: view ComponentTable(T)) pub ret Int {
   ret this.generation
+}
+
+# Per-entity last-modified stamp (#270a): the `generation` at the last
+# set/mod of `entity`, or 0 if absent. Compare against the stamp a cache
+# last processed for `entity`; a higher value means it changed. New
+# entities always stamp >= 1, so a cache seeded at 0 treats them as dirty.
+func componentModStamp(T: type, this: view ComponentTable(T), entity: view EntityId) pub ret Int {
+  let idx: Int = componentIndexOf(this, entity: entity)
+  if idx < 0 {
+    ret 0
+  }
+  ret rae_ext_rae_buf_get(buf: this.denseStamps.data, index: idx)
 }
 
 # Iteration helper: returns the entity id at dense index `i`.
