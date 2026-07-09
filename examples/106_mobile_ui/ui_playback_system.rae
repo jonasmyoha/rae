@@ -24,10 +24,14 @@ import core
 import ui/ecs
 
 type UiPlaybackSystem pub {
-  # Observe cache: the last PlaybackSystem revision this UI system reacted
-  # to. Compared against `PlaybackState.revision` each frame to decide
-  # whether the play/pause widgets need re-patching.
+  # Observe cache: the last PlaybackSystem `revision` (isPlaying) this UI
+  # system reacted to. Compared against `PlaybackState.revision` each frame
+  # to decide whether the play/pause widgets need re-patching.
   observedRevision: Int
+  # Observe cache for the nowPlaying cover identity: the last
+  # `PlaybackState.nowPlayingRevision` reacted to. Drives the cover
+  # re-point (#268).
+  observedNowPlayingRevision: Int
   # This UI system's own revision (eager-bump convention, §7). Bumped when
   # it re-patches its widgets, so a future retained render cache (#270) can
   # depend on it.
@@ -37,6 +41,7 @@ type UiPlaybackSystem pub {
 func createUiPlaybackSystem(observedRevision: view Int) pub ret UiPlaybackSystem {
   ret UiPlaybackSystem {
     observedRevision: observedRevision
+    observedNowPlayingRevision: 0
     revision: 0
   }
 }
@@ -46,13 +51,103 @@ func createUiPlaybackSystem(observedRevision: view Int) pub ret UiPlaybackSystem
 # changed (so callers can trigger a repaint). Bumps this UI system's own
 # revision eagerly on change. Never writes PlaybackState — reads only.
 func uiPlaybackObserve(this: mod UiPlaybackSystem, world: mod UiWorld, playback: view PlaybackState) pub ret Bool {
-  let old: Int = this.observedRevision
+  let oldIcon: Int = this.observedRevision
+  let oldArt: Int = this.observedNowPlayingRevision
   this.observedRevision = refreshPlaybackViewsIfNeeded(world: world, playback: playback, cachedRevision: this.observedRevision)
-  if this.observedRevision is not old {
+  this.observedNowPlayingRevision = refreshPlaybackCoversIfNeeded(world: world, playback: playback, cachedRevision: this.observedNowPlayingRevision)
+  if this.observedRevision is not oldIcon {
+    this.revision = this.revision + 1
+    ret true
+  }
+  if this.observedNowPlayingRevision is not oldArt {
     this.revision = this.revision + 1
     ret true
   }
   ret false
+}
+
+# Attach the nowPlaying cover dependency to a cover Sprite and seed its
+# textureKey. Called at mount for the now-playing Hero + mini-player
+# MiniThumb (#268). Sets the Sprite.textureKey to `artKey` and tags the
+# entity with DataDependency{playback, nowPlayingArt, observedRevision} so
+# `refreshPlaybackCoversIfNeeded` re-points it on later track changes.
+# Mount-time cover seed: the currently-playing art key if something is
+# playing, else the browsed album stem (so a fresh boot shows the browsed
+# cover, matching `rebindHero`). Once a track plays, `nowPlayingArtKey`
+# takes over and the observe step keeps the cover pointed at it.
+func nowPlayingCoverSeed(playback: view PlaybackState, browsedStem: view String) pub ret String {
+  if playback.nowPlayingArtKey.length() > 0 {
+    ret "{playback.nowPlayingArtKey}"
+  }
+  ret "{browsedStem}"
+}
+
+func tagPlaybackCoverDependency(world: mod UiWorld, pageId: view String, nodeId: view String, observedRevision: view Int, artKey: view String) pub {
+  let entityOpt: opt Int = findNodeInPage(world: world, pageId: pageId, nodeId: nodeId)
+  if entityOpt is none {
+    ret
+  }
+  let raw: Int = entityOpt
+  let entity: EntityId = entityId(v: raw)
+  if componentHas(this: world.sprites, entity: entity) {
+    repointCoverSprite(world: world, entity: entity, artKey: artKey)
+  }
+  let playbackSource: DataResourceId = dataResourcePlayback()
+  let coverField: DataFieldId = dataFieldNowPlayingArt()
+  setDataDependency(world: world, entity: entity, resource: playbackSource, field: coverField, observedRevision: observedRevision)
+}
+
+# Re-point one cover Sprite's textureKey by identity, preserving every
+# other Sprite field. The observe step is authoritative for these two
+# covers' texture key (it overwrites whatever `rebindHero` last wrote),
+# so a same-screen track change follows without a re-mount / poll walk.
+func repointCoverSprite(world: mod UiWorld, entity: view EntityId, artKey: view String) {
+  let cur: Sprite = componentGet(this: world.sprites, entity: entity)
+  let copied: String = "{artKey}"
+  let next: Sprite = {
+    textureKey: copied
+    tint: cur.tint
+    scaleMode: cur.scaleMode
+    tileScale: cur.tileScale
+    nineSlice: cur.nineSlice
+    hasNineSlice: cur.hasNineSlice
+  }
+  componentSet(this: world.sprites, entity: entity, data: next)
+}
+
+# Cover observe step: when the nowPlaying instance revision has moved,
+# re-point every widget carrying DataDependency{playback, nowPlayingArt}
+# to `playback.nowPlayingArtKey` and advance its observed revision. This is
+# the generic replacement for `rebindAlbumCoversToSpotify` — no per-frame
+# sprite walk keyed on a stale browsed stem. Reads PlaybackState only.
+func refreshPlaybackCoversIfNeeded(world: mod UiWorld, playback: view PlaybackState, cachedRevision: view Int) pub ret Int {
+  if playback.nowPlayingRevision is cachedRevision {
+    ret cachedRevision
+  }
+  # Nothing playing yet → leave mount-time (browsed) covers untouched.
+  if playback.nowPlayingArtKey.length() is 0 {
+    ret playback.nowPlayingRevision
+  }
+  let playbackSource: DataResourceId = dataResourcePlayback()
+  let coverField: DataFieldId = dataFieldNowPlayingArt()
+  let n: Int = componentCount(this: world.dataDependencies)
+  var i: Int = 0
+  loop i < n {
+    let entity: EntityId = componentEntityAt(this: world.dataDependencies, i: i)
+    let dep: view DataDependency => componentView(this: world.dataDependencies, entity: entity)
+    if dep.resource is playbackSource {
+      if dep.field is coverField {
+        if dep.observedRevision is not playback.nowPlayingRevision {
+          if componentHas(this: world.sprites, entity: entity) {
+            repointCoverSprite(world: world, entity: entity, artKey: playback.nowPlayingArtKey)
+          }
+          setDataDependency(world: world, entity: entity, resource: playbackSource, field: coverField, observedRevision: playback.nowPlayingRevision)
+        }
+      }
+    }
+    i = i + 1
+  }
+  ret playback.nowPlayingRevision
 }
 
 # Data-only refresh: flip WidgetState.selected to mirror isPlaying and
