@@ -113,12 +113,12 @@ func buildProfileStatsRow(world: mod UiWorld, state: view AppState) ret EntityId
   let alignC: AlignKind = AlignKind.center
   setLayout(world: world, entity: row, kind: layH, gap: 52.04819277108433, alignCross: alignC)  # spaceXL (full-precision literal; token is 6-dec)
 
-  let albumCount: Int = state.albums.length
+  let albumCount: Int = state.mediaLibrary.albums.length
   var trackCount: Int = 0
   var totalMs: Int = 0
   var i: Int = 0
   loop i < albumCount {
-    let a: Album = rae_ext_rae_buf_get(buf: state.albums.data, index: i)
+    let a: Album = rae_ext_rae_buf_get(buf: state.mediaLibrary.albums.data, index: i)
     trackCount = trackCount + a.tracks.length
     totalMs = totalMs + a.totalDurationMs
     i = i + 1

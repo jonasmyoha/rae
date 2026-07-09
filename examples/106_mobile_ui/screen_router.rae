@@ -57,7 +57,7 @@ func scrollBoundsForScreen(
   cachedAlbumScrollFloor: view Float
 ) pub ret ScrollBounds {
   if screen is Screen.home {
-    ret ScrollBounds { scrollable: true, floor: homeScrollMin(albums: appState.albums, history: appState.playHistory) }
+    ret ScrollBounds { scrollable: true, floor: homeScrollMin(albums: appState.mediaLibrary.albums, history: appState.playHistory) }
   }
   if screen is Screen.library {
     ret ScrollBounds { scrollable: true, floor: 0.0 - 1050.0 }
@@ -442,7 +442,10 @@ func playbackIconKey(playback: view PlaybackState) pub ret String {
 # main.rae calls `rebindHero(world, "albumCover", state.currentAlbumStem)`
 # after building Album / NowPlaying worlds.
 type AppState pub {
-  albums: List(Album)
+  # The album catalog, owned by its own ECS system (#266). Read
+  # through `state.mediaLibrary.albums`; see `MediaLibrarySystem`
+  # in `album_loader.rae`.
+  mediaLibrary: MediaLibrarySystem
   # Stem of the album the user is currently viewing. Matches one
   # entry's `Album.stem`. Empty string before the first
   # `loadAllAlbums` call.
@@ -528,7 +531,7 @@ func createAppState(albums: own List(Album)) pub ret AppState {
   let likedTitle: String = "Liked Songs"
   let liked: Playlist = createPlaylist(id: own likedId, title: own likedTitle)
   ret AppState {
-    albums: albums
+    mediaLibrary: createMediaLibrary(albums: albums)
     currentAlbumStem: firstStem
     currentTrackIndex: 0
     tab: Screen.home
@@ -599,11 +602,11 @@ func setTab(state: mod AppState, tab: view Screen) pub {
 
 # Helper for view-building paths that need the active album as a
 # concrete Album value (rather than chasing the index through
-# `state.albums` themselves). Returns a stub Album when the stem
+# `state.mediaLibrary.albums` themselves). Returns a stub Album when the stem
 # isn't found — caller can still render the row but every field
 # will be empty.
 func activeAlbum(state: view AppState) pub ret Album {
-  let idx: Int = findAlbumIndex(albums: state.albums, stem: state.currentAlbumStem)
+  let idx: Int = findAlbumIndex(albums: state.mediaLibrary.albums, stem: state.currentAlbumStem)
   if idx < 0 {
     let empty: String = ""
     ret Album {
@@ -618,7 +621,7 @@ func activeAlbum(state: view AppState) pub ret Album {
       totalDurationMs: 0
     }
   }
-  ret rae_ext_rae_buf_get(buf: state.albums.data, index: idx)
+  ret rae_ext_rae_buf_get(buf: state.mediaLibrary.albums.data, index: idx)
 }
 
 # Drain every fired action; mutate `state` (tab + sub-page stack)
@@ -906,9 +909,9 @@ func dispatchActions(
         let e: PlayHistoryEntry = rae_ext_rae_buf_get(buf: state.playHistory.entries.data, index: idx)
         if e.albumStem.length() > 0 {
           state.currentAlbumStem = "{e.albumStem}"
-          let aIdx: Int = findAlbumIndex(albums: state.albums, stem: e.albumStem)
+          let aIdx: Int = findAlbumIndex(albums: state.mediaLibrary.albums, stem: e.albumStem)
           if aIdx >= 0 {
-            let a: Album = rae_ext_rae_buf_get(buf: state.albums.data, index: aIdx)
+            let a: Album = rae_ext_rae_buf_get(buf: state.mediaLibrary.albums.data, index: aIdx)
             let tn: Int = a.tracks.length
             var tj: Int = 0
             loop tj < tn {
