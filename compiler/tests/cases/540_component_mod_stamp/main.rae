@@ -1,0 +1,61 @@
+# Unit test for ComponentTable(T)'s per-ENTITY last-modified stamp
+# (#270a, ECS E5a — retained-render-cache foundation). Where the table
+# `generation` says "this table changed", `componentModStamp` says "THIS
+# entity changed" — the per-entity signal a dependency cache needs to
+# recompute only the entries whose own inputs moved. Asserts:
+#   - each set/mod stamps the touched entity with the new generation,
+#   - untouched entities keep their old stamp,
+#   - a swap-remove RELOCATES a survivor's stamp unchanged (relocation is
+#     not a modification),
+#   - an absent entity reports stamp 0.
+open ui/ecs
+
+type Cell {
+  v: Int
+}
+
+func main() {
+  var t: ComponentTable(Cell) = createComponentTable(Cell)
+  let e1: EntityId = entityId(v: 1)
+  let e2: EntityId = entityId(v: 2)
+  let e3: EntityId = entityId(v: 3)
+  let e4: EntityId = entityId(v: 4)
+  let miss: EntityId = entityId(v: 99)
+
+  componentSet(this: t, entity: e1, data: Cell { v: 10 })
+  componentSet(this: t, entity: e2, data: Cell { v: 20 })
+  componentSet(this: t, entity: e3, data: Cell { v: 30 })
+  # Each set stamps its entity with the (post-bump) generation.
+  log("stamp_e1: {componentModStamp(this: t, entity: e1)}")
+  log("stamp_e2: {componentModStamp(this: t, entity: e2)}")
+  log("stamp_e3: {componentModStamp(this: t, entity: e3)}")
+  # Absent entity → 0.
+  log("stamp_miss: {componentModStamp(this: t, entity: miss)}")
+
+  # mod e2: only e2's stamp advances.
+  let m: mod Cell => componentMod(this: t, entity: e2)
+  m.v = 21
+  log("after_mod_e2_e1: {componentModStamp(this: t, entity: e1)}")
+  log("after_mod_e2_e2: {componentModStamp(this: t, entity: e2)}")
+  log("after_mod_e2_e3: {componentModStamp(this: t, entity: e3)}")
+
+  # replace e1: only e1's stamp advances.
+  componentSet(this: t, entity: e1, data: Cell { v: 11 })
+  log("after_set_e1_e1: {componentModStamp(this: t, entity: e1)}")
+  log("after_set_e1_e2: {componentModStamp(this: t, entity: e2)}")
+
+  # swap-remove e2 (dense idx 1): e3 (the tail) relocates into idx 1 and
+  # must keep its ORIGINAL stamp (3) — relocation is not a modification.
+  componentRemove(this: t, entity: e2)
+  log("after_rm_e2_e3: {componentModStamp(this: t, entity: e3)}")
+  log("after_rm_e2_e1: {componentModStamp(this: t, entity: e1)}")
+  log("after_rm_e2_e2_absent: {componentModStamp(this: t, entity: e2)}")
+  log("has_e3: {componentHas(this: t, entity: e3)}")
+  let g3: Cell = componentGet(this: t, entity: e3)
+  log("get_e3: {g3.v}")
+
+  # A freshly added entity gets a fresh (higher) stamp.
+  componentSet(this: t, entity: e4, data: Cell { v: 40 })
+  log("stamp_e4: {componentModStamp(this: t, entity: e4)}")
+  log("final_gen: {componentTableGeneration(this: t)}")
+}
