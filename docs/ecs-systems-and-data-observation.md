@@ -331,7 +331,14 @@ per-frame sprite walk, no stale stem.
 
 ## 10. Migration from the current 106 pattern
 
-Non-breaking, in slices; 106 stays runnable throughout:
+Non-breaking, in slices; 106 stays runnable throughout. Queued as
+**#260–#271** (E0a–E6) in the top-level QUEUE.md: Table(T)+revisions
+(#260–#261), registry+Observe (#262–#263), frame phases+inbox (#264),
+system carve-outs (#265–#267), consumer port fixing the cover bug
+(#268), enum deletion (#269), retained render cache (#270), and a
+one-system-off-thread proof (#271). Compiler gaps hit along the way are
+fixed in the compiler (dogfood + evolve the language for ECS needs), not
+worked around:
 
 - **D0 — `Table(T)` + eager revisions** (table/component/system), leave
   `AppState`/`UiWorld` intact.
