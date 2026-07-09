@@ -453,8 +453,6 @@ type AppState pub {
   # UI preferences (code-only flags — no settings UI yet). See
   # `app_settings.rae`.
   settings: AppSettings
-  # App-owned data source revisions for dependency-driven UI refresh.
-  dataResources: AppDataResources
   # Last OS window position in SDL/global desktop coordinates. On macOS this
   # is enough to return to the same display when the display layout is stable.
   hasWindowPosition: Bool
@@ -497,7 +495,6 @@ func createAppState(albums: own List(Album)) pub ret AppState {
     currentPlaylistId: ""
     bottomSheet: createBottomSheetState()
     settings: createAppSettings()
-    dataResources: createAppDataResources()
     hasWindowPosition: false
     windowX: 50
     windowY: 50
@@ -845,7 +842,6 @@ func dispatchActions(
         playedAt: uiNowSeconds()
       }
       recordPlay(history: state.playHistory, entry: own histEntry)
-      bumpHistoryResource(resources: state.dataResources)
       saveHistoryToJson(history: state.playHistory, path: historyFilePath)
       if spotifyEnabled {
         let q: String = spotifySearchQuery(artist: histAlbum.artist, title: histTrack.title, album: histAlbum.album)
@@ -929,7 +925,6 @@ func dispatchActions(
           log("[liked] -{stem} track {state.currentTrackIndex}")
         }
         savePlaylist(playlist: state.liked)
-        bumpPlaylistsResource(resources: state.dataResources)
       }
     }
     if actionId.equals(other: libraryRemoveKey) {
@@ -938,7 +933,6 @@ func dispatchActions(
       # for history rows etc. Close the sheet and pop the Album
       # sub-page so the user lands back where they came from.
       removeFromLibrary(library: state.library, stem: state.currentAlbumStem)
-      bumpLibraryResource(resources: state.dataResources)
       saveLibraryToJson(library: state.library, path: libraryFilePath)
       closeBottomSheet(sheet: state.bottomSheet)
       popSubPage(state: state)
