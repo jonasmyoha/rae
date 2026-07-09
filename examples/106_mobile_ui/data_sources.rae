@@ -1,33 +1,17 @@
-# App-level typed data resources and revision counters for the 106 UI.
+# App-level data-source / field identifiers for the 106 UI.
 #
 # UI widgets declare dependencies using DataResourceId/DataFieldId, so
 # refresh systems can match resources without string comparisons.
+#
+# The old app-wide `AppDataResources` revision counters (+ per-resource
+# `bumpXResource` / `dataResourceRevision`) were removed in #269: they were
+# write-only — every refresher keys off its own cache (cachedLen /
+# cachedEpoch / PlaybackState.revision / nowPlayingRevision), so nothing
+# ever read those counters. DataResourceId/DataFieldId themselves stay: they
+# are the live field types of the DataDependency observe carrier, ported off
+# these enums onto the SystemRegistry Observe in #274.
 
 import ui/components
-
-type AppDataResources pub {
-  albumsRevision: Int
-  historyRevision: Int
-  libraryRevision: Int
-  playbackRevision: Int
-  playlistsRevision: Int
-  spotifyRevision: Int
-  settingsRevision: Int
-  debugRevision: Int
-}
-
-func createAppDataResources() pub ret AppDataResources {
-  ret AppDataResources {
-    albumsRevision: 0
-    historyRevision: 0
-    libraryRevision: 0
-    playbackRevision: 0
-    playlistsRevision: 0
-    spotifyRevision: 0
-    settingsRevision: 0
-    debugRevision: 0
-  }
-}
 
 func dataResourceAlbums() pub ret DataResourceId {
   ret DataResourceId.albums
@@ -93,48 +77,4 @@ func dataFieldNowPlayingArt() pub ret DataFieldId {
 
 func dataFieldDebugToggle() pub ret DataFieldId {
   ret DataFieldId.debugToggle
-}
-
-func bumpAlbumsResource(resources: mod AppDataResources) pub {
-  resources.albumsRevision = resources.albumsRevision + 1
-}
-
-func bumpHistoryResource(resources: mod AppDataResources) pub {
-  resources.historyRevision = resources.historyRevision + 1
-}
-
-func bumpLibraryResource(resources: mod AppDataResources) pub {
-  resources.libraryRevision = resources.libraryRevision + 1
-}
-
-func bumpPlaybackResource(resources: mod AppDataResources) pub {
-  resources.playbackRevision = resources.playbackRevision + 1
-}
-
-func bumpPlaylistsResource(resources: mod AppDataResources) pub {
-  resources.playlistsRevision = resources.playlistsRevision + 1
-}
-
-func bumpSpotifyResource(resources: mod AppDataResources) pub {
-  resources.spotifyRevision = resources.spotifyRevision + 1
-}
-
-func bumpSettingsResource(resources: mod AppDataResources) pub {
-  resources.settingsRevision = resources.settingsRevision + 1
-}
-
-func bumpDebugResource(resources: mod AppDataResources) pub {
-  resources.debugRevision = resources.debugRevision + 1
-}
-
-func dataResourceRevision(resources: view AppDataResources, resource: view DataResourceId) pub ret Int {
-  if resource is DataResourceId.albums { ret resources.albumsRevision }
-  if resource is DataResourceId.history { ret resources.historyRevision }
-  if resource is DataResourceId.library { ret resources.libraryRevision }
-  if resource is DataResourceId.playback { ret resources.playbackRevision }
-  if resource is DataResourceId.playlists { ret resources.playlistsRevision }
-  if resource is DataResourceId.spotify { ret resources.spotifyRevision }
-  if resource is DataResourceId.settings { ret resources.settingsRevision }
-  if resource is DataResourceId.debug { ret resources.debugRevision }
-  ret 0
 }
