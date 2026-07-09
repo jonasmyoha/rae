@@ -171,7 +171,7 @@ func restoreAppState(state: mod AppState, playback: mod PlaybackState, path: vie
     let empty: String = ""
     let savedStem: String = json.jsonString(this: json.jsonValueAt(doc: doc, idx: stemIdx), fallback: empty)
     if savedStem.length() > 0 {
-      let albumIdx: Int = findAlbumIndex(albums: state.albums, stem: savedStem)
+      let albumIdx: Int = findAlbumIndex(albums: state.mediaLibrary.albums, stem: savedStem)
       if albumIdx >= 0 {
         state.currentAlbumStem = savedStem
       } else {
