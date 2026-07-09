@@ -394,6 +394,34 @@ Rationale and rules:
   enumerate that app's systems), the same way concrete systems are.
   Demonstrated by `compiler/tests/cases/536_system_registry`.
 
+### 8.2 The refresh pass — detect-and-flag, rebuild separately (#263)
+
+`Observe { system: SystemId, kind: system|table|component, tableId,
+entity, observedRevision, dirty }` records what a widget depends on.
+`refreshObservers` is the ONE generic pass that replaces the N
+hand-written `refreshXViewsIfNeeded` functions:
+
+```
+for each Observe:
+  current = revisionOf(registry, observe)   # resolve id + read via view
+  if current != observedRevision:
+    observedRevision = current
+    dirty = true                            # flag; do NOT rebuild here
+```
+
+Rae has **no first-class function values**, so the *rebuild* cannot be a
+closure stored on the observer. The generic pass therefore does
+change-**detection** only (stamp + set `dirty`); the actual rebuild is a
+separate, per-observer-kind step the consumer runs over the dirty
+observers (a small `match` on kind, wired per feature in #268) — the
+same "no callback pointers, dispatch by a switch" shape as the existing
+`applyComponentByName`. This keeps the expensive, centralised part
+(walking every dependency and comparing revisions) generic and in one
+place, while the app-specific rebuild stays explicit. Demonstrated
+across all three levels by `compiler/tests/cases/537_observe_refresh`.
+`revisionOf` is the only per-app hook (§8.1's resolver). The old
+`DataDependency` + per-domain refreshers stay in parallel until #268.
+
 ---
 
 ## 9. Worked shape (the motivating fix)
