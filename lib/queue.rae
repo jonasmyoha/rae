@@ -1,0 +1,56 @@
+# `Queue(T)` — a minimal FIFO, the ECS system **inbox** primitive.
+#
+# A system receives commands by having them enqueued onto its inbox; in
+# its command phase it drains the inbox in order, mutating only its own
+# tables (docs/ecs-systems-and-data-observation.md §3/§4). Draining is
+# "iterate items in order, then clear" (FIFO within a frame), which is
+# all an inbox needs and avoids per-element front-removal cost.
+#
+# Uses the same C-backend workaround as ComponentTable: reads go through
+# `rae_ext_rae_buf_get` (the generic `List(T).get` mis-mangles inside a
+# function generic over T); `.add`/`.remove` on the `List(T)` field are
+# fine because T matches the outer generic.
+import core
+
+type Queue(T: type) {
+  items: List(T)
+}
+
+func createQueue(T: type) pub ret Queue(T) {
+  ret Queue(T) {
+    items: createList(T, cap: 16)
+  }
+}
+
+# Explicit drop (generic type — Layer-5 auto-collect can't synthesise it).
+func drop(T: type, this: mod Queue(T)) {
+  drop(this.items)
+}
+
+# Append a command to the back of the queue.
+func enqueue(T: type, this: mod Queue(T), value: own T) pub {
+  this.items.add(value: value)
+}
+
+# Number of queued items.
+func queueCount(T: type, this: view Queue(T)) pub ret Int {
+  ret this.items.length
+}
+
+func queueIsEmpty(T: type, this: view Queue(T)) pub ret Bool {
+  ret this.items.length is 0
+}
+
+# Read the item at FIFO position `i` (0 = oldest). Used to iterate a
+# drain in order: `loop i < queueCount { apply(queueAt(q, i)); i++ }`.
+func queueAt(T: type, this: view Queue(T), i: view Int) pub ret T {
+  let v: T = rae_ext_rae_buf_get(buf: this.items.data, index: i)
+  ret v
+}
+
+# Empty the queue (drop every item). Call after a drain pass.
+func clearQueue(T: type, this: mod Queue(T)) pub {
+  loop this.items.length > 0 {
+    this.items.remove(index: this.items.length - 1)
+  }
+}

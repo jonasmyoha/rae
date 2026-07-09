@@ -182,6 +182,21 @@ inspectable in fixed places, yet a click that sends a command in phase
 a specific interaction still feels laggy, #1 or #3 are compatible
 escalations layered on top per system/command — not a redesign.
 
+### 4.2 Status (#264)
+
+The inbox primitive is `Queue(T)` (`lib/queue.rae`) — enqueue / count /
+`queueAt`(FIFO) / clear; a system drains its own inbox in order then
+clears. The pipeline + two-apply passes + lifecycle + inbox are proven
+end-to-end by `compiler/tests/cases/539_frame_phases_lifecycle` (a
+command issued during observation lands the same frame via Apply(B));
+`Queue` itself by `538_queue`. In `examples/106_mobile_ui` the loop is
+already organised into these phases via `frame_pipeline.rae`
+(`runFrameInputDispatch` → `refreshUiDiffs`/`syncFrameData` (observe) →
+`runFrameLayoutTransform` → `renderGpu2dFrame`); the two **Apply**
+passes are empty there until systems with inboxes are carved out
+(#265+), so the phase map is documented in-loop with the insertion
+points marked — no behaviour change.
+
 ---
 
 ## 5. Three system *layers* (different lifetimes)
@@ -255,6 +270,14 @@ All of these are the system mutating **its own** state (so they bump its
 own revisions and observers react) — they are internal behaviour, not a
 cross-system write. `update` runs in the command-application phase (or
 immediately after it) so it, too, is the only-my-own-tables writer.
+
+The lifecycle is a documented **contract**, not an enforced interface
+(Rae has no interfaces): every system implements these four functions
+under these names + fixed order, so no system invents its own. Rae has
+no field-constrained generics, so they're per-type free functions
+(`processCommandsX(this: mod X)` etc.), like the revision helpers (§7.1).
+`processCommands` drains a `Queue(T)` inbox (§4.2). Demonstrated by
+`compiler/tests/cases/539_frame_phases_lifecycle`.
 
 ---
 
