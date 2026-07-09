@@ -353,6 +353,47 @@ enum. Retiring `DataResourceId`/`DataFieldId` in favour of real
 system/table/entity ids is what makes this feel like a real ECS rather
 than a bespoke reactive layer.
 
+### 8.1 Registry shape — per-type fields (decided #262)
+
+Heterogeneous registration (a registry holding many *different* system
+types) is done with **per-type fields**, not a heterogeneous container:
+
+```rae
+enum SystemId { playback, library }          # per-app: one case per system
+
+type Registry {                              # per-app: one field per system
+  playback: PlaybackSys
+  library:  LibrarySys
+}
+
+# SystemId -> system revision: the generic hook §8's refresh uses.
+func systemRevision(reg: view Registry, id: SystemId) ret Int {
+  if id is SystemId.playback { ret reg.playback.revision }
+  ret reg.library.revision
+}
+```
+
+Rationale and rules:
+- **No `Any` / vtables / reflection / compiler feature.** A registry is
+  a plain `type`; `SystemId` is a plain enum. Adding a system is "add a
+  field + an enum case" — explicit and exhaustively matched. Because
+  system types differ, a single `view System` can't be returned
+  generically; instead the registry exposes per-system `view`
+  accessors, and a `SystemId`-keyed resolver returns the *scalar*
+  (`revision: Int`) the observation refresh needs.
+- **`SystemId` is passed by value** (a small enum handle, like `Int` /
+  `EntityId`), never `view`: you can't take the address of an enum
+  literal at a call site. (A minor compiler papercut — passing any
+  rvalue to a `view` param fails — noted separately; by-value is the
+  correct idiom regardless.)
+- **`mod` never crosses a boundary.** The registry exposes only `view`
+  accessors. The single holder of `mod Registry` is the top-level frame
+  loop, which hands a system `mod self` only in its own command phase
+  (§3/§4). No system ever holds `mod` on another.
+- Both `Registry` and `SystemId` are therefore **per-app** (they
+  enumerate that app's systems), the same way concrete systems are.
+  Demonstrated by `compiler/tests/cases/536_system_registry`.
+
 ---
 
 ## 9. Worked shape (the motivating fix)
