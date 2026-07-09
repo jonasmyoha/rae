@@ -1,0 +1,91 @@
+# Unit test for the SystemRegistry + SystemId shape (#262, ECS E1a).
+#
+# Decision: heterogeneous registration is done with PER-TYPE FIELDS —
+# the registry is a plain `type` with one field per concrete system
+# type. No `Any`, no vtables, no reflection, no compiler feature. The
+# `SystemId` is a per-app enum (one case per registered system).
+#
+# Access surface: the registry exposes only read-only `view`s and a
+# `SystemId`->revision resolver. No `mod` accessor crosses a system
+# boundary. The single holder of `mod Registry` is the top-level frame
+# loop, which hands a system `mod self` only in its own command phase
+# (that phase machinery is #264); cross-system reads are view-only.
+open ui/ecs
+
+# Toy value-type components, each with its own instance revision (#261).
+type Track { id: Int, revision: Int }
+type Album { id: Int, revision: Int }
+
+# Two toy systems — plain `type`s of Table field(s) + a system revision.
+type PlaybackSys {
+  revision: Int
+  nowPlaying: ComponentTable(Track)
+}
+type LibrarySys {
+  revision: Int
+  albums: ComponentTable(Album)
+}
+
+func markChanged(this: mod PlaybackSys) { this.revision = this.revision + 1 }
+func markChangedLibrary(this: mod LibrarySys) { this.revision = this.revision + 1 }
+
+# SystemId — a per-app enum, one case per registered system.
+enum SystemId {
+  playback
+  library
+}
+
+# The registry OWNS the systems, one field per concrete type.
+type Registry {
+  playback: PlaybackSys
+  library: LibrarySys
+}
+
+func createRegistry() ret Registry {
+  ret Registry {
+    playback: PlaybackSys { revision: 0, nowPlaying: createComponentTable(Track) }
+    library: LibrarySys { revision: 0, albums: createComponentTable(Album) }
+  }
+}
+
+# --- Access surface: VIEW-only + a SystemId->revision resolver ---
+
+# The generic hook the observation refresh (#263) uses: resolve the
+# SystemId, read the system's revision through a `view`.
+# `id` is passed by VALUE: a SystemId is a small enum handle, so the
+# calling convention is by-value (like an Int / EntityId handle), not
+# `view` — you can't take the address of an enum literal at a call site.
+func systemRevision(reg: view Registry, id: SystemId) ret Int {
+  if id is SystemId.playback {
+    ret reg.playback.revision
+  }
+  ret reg.library.revision
+}
+
+# A read-only cross-system query goes through a `view`; there is no
+# `mod` equivalent exposed by the registry.
+func playbackTrackCount(reg: view Registry) ret Int {
+  ret componentCount(this: reg.playback.nowPlaying)
+}
+
+func main() {
+  var reg: Registry = createRegistry()
+  log("pb_rev0: {systemRevision(reg: reg, id: SystemId.playback)}")
+  log("lib_rev0: {systemRevision(reg: reg, id: SystemId.library)}")
+
+  # read-only cross-system access (view)
+  log("pb_count: {playbackTrackCount(reg: reg)}")
+
+  # the top-level owner mutates a system through ITS OWN function
+  # (mod on its own field) — this is not a cross-boundary mod. Only the
+  # playback system's revision advances.
+  markChanged(this: reg.playback)
+  log("pb_rev1: {systemRevision(reg: reg, id: SystemId.playback)}")
+  log("lib_rev_unchanged: {systemRevision(reg: reg, id: SystemId.library)}")
+
+  # resolving by the OTHER id reads the other system independently
+  markChangedLibrary(this: reg.library)
+  markChangedLibrary(this: reg.library)
+  log("lib_rev2: {systemRevision(reg: reg, id: SystemId.library)}")
+  log("pb_rev_unchanged: {systemRevision(reg: reg, id: SystemId.playback)}")
+}
