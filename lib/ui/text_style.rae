@@ -48,7 +48,7 @@ func resolveTextColor(theme: view ResolvedTheme, styleId: view String) pub ret R
   if i < 0 {
     ret themeColorByName(name: "textPrimary")
   }
-  let slot: String = theme.textColorSlots.get(index: i)
+  let slot: String = rae_ext_rae_buf_get(buf: theme.textColorSlots.data, index: i)
   if slot.length() > 0 {
     ret themeColorByName(name: slot)
   }
@@ -88,7 +88,7 @@ func resolveTextShadowName(theme: view ResolvedTheme, styleId: view String) pub 
   if i < 0 {
     ret ""
   }
-  let name: String = theme.textShadowNames.get(index: i)
+  let name: String = rae_ext_rae_buf_get(buf: theme.textShadowNames.data, index: i)
   ret name
 }
 
