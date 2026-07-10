@@ -164,7 +164,7 @@ func createResolvedTheme() pub ret ResolvedTheme {
 func themeSpaceValue(theme: view ResolvedTheme, name: view String, fallback: view Float) pub ret Float {
   var i: Int = 0
   loop i < theme.spaceNames.length {
-    let n: String = theme.spaceNames.get(index: i)
+    let n: String = rae_ext_rae_buf_get(buf: theme.spaceNames.data, index: i)
     if n.equals(other: name) {
       let v: Float = theme.spaceVals.get(index: i)
       ret v
@@ -177,7 +177,7 @@ func themeSpaceValue(theme: view ResolvedTheme, name: view String, fallback: vie
 func themeRadiusValue(theme: view ResolvedTheme, name: view String, fallback: view Float) pub ret Float {
   var i: Int = 0
   loop i < theme.radiusNames.length {
-    let n: String = theme.radiusNames.get(index: i)
+    let n: String = rae_ext_rae_buf_get(buf: theme.radiusNames.data, index: i)
     if n.equals(other: name) {
       let v: Float = theme.radiusVals.get(index: i)
       ret v
@@ -190,7 +190,7 @@ func themeRadiusValue(theme: view ResolvedTheme, name: view String, fallback: vi
 func themePaletteIndex(theme: view ResolvedTheme, slot: view String) pub ret Int {
   var i: Int = 0
   loop i < theme.palNames.length {
-    let n: String = theme.palNames.get(index: i)
+    let n: String = rae_ext_rae_buf_get(buf: theme.palNames.data, index: i)
     if n.equals(other: slot) {
       ret i
     }
@@ -202,7 +202,7 @@ func themePaletteIndex(theme: view ResolvedTheme, slot: view String) pub ret Int
 func themeTextStyleIndex(theme: view ResolvedTheme, styleId: view String) pub ret Int {
   var i: Int = 0
   loop i < theme.textNames.length {
-    let n: String = theme.textNames.get(index: i)
+    let n: String = rae_ext_rae_buf_get(buf: theme.textNames.data, index: i)
     if n.equals(other: styleId) {
       ret i
     }
@@ -214,7 +214,7 @@ func themeTextStyleIndex(theme: view ResolvedTheme, styleId: view String) pub re
 func themeShadowIndex(theme: view ResolvedTheme, name: view String) pub ret Int {
   var i: Int = 0
   loop i < theme.shadowNames.length {
-    let n: String = theme.shadowNames.get(index: i)
+    let n: String = rae_ext_rae_buf_get(buf: theme.shadowNames.data, index: i)
     if n.equals(other: name) {
       ret i
     }
@@ -635,7 +635,7 @@ func themeDumpResolved(theme: view ResolvedTheme) pub {
   log("[theme] resolved: {theme.palNames.length} palette / {theme.spaceNames.length} space / {theme.radiusNames.length} radius / {theme.padNames.length} padding / {theme.shadowNames.length} shadow / {theme.textNames.length} text")
   var i: Int = 0
   loop i < theme.palNames.length {
-    let n: String = theme.palNames.get(index: i)
+    let n: String = rae_ext_rae_buf_get(buf: theme.palNames.data, index: i)
     let r: Int = theme.palR.get(index: i)
     let g: Int = theme.palG.get(index: i)
     let b: Int = theme.palB.get(index: i)
@@ -645,21 +645,21 @@ func themeDumpResolved(theme: view ResolvedTheme) pub {
   }
   i = 0
   loop i < theme.spaceNames.length {
-    let n: String = theme.spaceNames.get(index: i)
+    let n: String = rae_ext_rae_buf_get(buf: theme.spaceNames.data, index: i)
     let v: Float = theme.spaceVals.get(index: i)
     log("[theme]   space {n} = {v}")
     i = i + 1
   }
   i = 0
   loop i < theme.radiusNames.length {
-    let n: String = theme.radiusNames.get(index: i)
+    let n: String = rae_ext_rae_buf_get(buf: theme.radiusNames.data, index: i)
     let v: Float = theme.radiusVals.get(index: i)
     log("[theme]   radius {n} = {v}")
     i = i + 1
   }
   i = 0
   loop i < theme.padNames.length {
-    let n: String = theme.padNames.get(index: i)
+    let n: String = rae_ext_rae_buf_get(buf: theme.padNames.data, index: i)
     let l: Float = theme.padL.get(index: i)
     let t: Float = theme.padT.get(index: i)
     let r: Float = theme.padR.get(index: i)
@@ -669,7 +669,7 @@ func themeDumpResolved(theme: view ResolvedTheme) pub {
   }
   i = 0
   loop i < theme.shadowNames.length {
-    let n: String = theme.shadowNames.get(index: i)
+    let n: String = rae_ext_rae_buf_get(buf: theme.shadowNames.data, index: i)
     let r: Int = theme.shadowR.get(index: i)
     let g: Int = theme.shadowG.get(index: i)
     let b: Int = theme.shadowB.get(index: i)
@@ -682,11 +682,11 @@ func themeDumpResolved(theme: view ResolvedTheme) pub {
   }
   i = 0
   loop i < theme.textNames.length {
-    let n: String = theme.textNames.get(index: i)
-    let font: String = theme.textFonts.get(index: i)
+    let n: String = rae_ext_rae_buf_get(buf: theme.textNames.data, index: i)
+    let font: String = rae_ext_rae_buf_get(buf: theme.textFonts.data, index: i)
     let sz: Float = theme.textSizes.get(index: i)
-    let slot: String = theme.textColorSlots.get(index: i)
-    let sh: String = theme.textShadowNames.get(index: i)
+    let slot: String = rae_ext_rae_buf_get(buf: theme.textColorSlots.data, index: i)
+    let sh: String = rae_ext_rae_buf_get(buf: theme.textShadowNames.data, index: i)
     let al: Int = theme.textAligns.get(index: i)
     if slot.length() > 0 {
       log("[theme]   text {n} = font {font} size {sz} color slot:{slot} shadow '{sh}' align {al}")
@@ -739,7 +739,7 @@ func setActiveThemeTokens(theme: view ResolvedTheme) pub {
   }
   var i: Int = 0
   loop i < theme.spaceNames.length {
-    let n: String = theme.spaceNames.get(index: i)
+    let n: String = rae_ext_rae_buf_get(buf: theme.spaceNames.data, index: i)
     let v: Float = theme.spaceVals.get(index: i)
     g_activeSpaceNames.add(value: n)
     g_activeSpaceVals.add(value: v)
@@ -747,7 +747,7 @@ func setActiveThemeTokens(theme: view ResolvedTheme) pub {
   }
   i = 0
   loop i < theme.radiusNames.length {
-    let n: String = theme.radiusNames.get(index: i)
+    let n: String = rae_ext_rae_buf_get(buf: theme.radiusNames.data, index: i)
     let v: Float = theme.radiusVals.get(index: i)
     g_activeRadiusNames.add(value: n)
     g_activeRadiusVals.add(value: v)
@@ -755,7 +755,7 @@ func setActiveThemeTokens(theme: view ResolvedTheme) pub {
   }
   i = 0
   loop i < theme.padNames.length {
-    let n: String = theme.padNames.get(index: i)
+    let n: String = rae_ext_rae_buf_get(buf: theme.padNames.data, index: i)
     let l: Float = theme.padL.get(index: i)
     let t: Float = theme.padT.get(index: i)
     let r: Float = theme.padR.get(index: i)
