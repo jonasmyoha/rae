@@ -71,11 +71,18 @@ func playUri(uri: view String) extern
 # inside the C bridge; pass plain text, no escaping required.
 func playQuery(query: view String) extern
 
-# Per-poll snapshot. Runs ONE osascript invocation and caches the six
-# fields; the field getters below read from that cache without re-
-# forking osascript. Call this at the start of each poll, then read
-# fields freely.
+# Force ONE synchronous osascript refresh of the cache (fork+exec; ~tens
+# of ms). AVOID calling this on the UI thread in a per-frame/per-poll loop
+# — it spikes the frame rate. Prefer `startPoller`, which refreshes the
+# cache on a background thread; the getters then read the cache cheaply.
 func refresh() extern
+# Start a background thread (#279) that calls `refresh` every `intervalMs`
+# milliseconds, keeping the cache warm off the UI thread. Idempotent (a
+# second call is a no-op). osascript is a fork/exec subprocess, so running
+# it off-thread is safe. Call once at boot when Spotify mode is on.
+func startPoller(intervalMs: Int) extern
+# Stop the background poll thread and join it. Safe if never started.
+func stopPoller() extern
 func state() extern ret String
 func trackId() extern ret String
 func trackName() extern ret String
@@ -87,11 +94,12 @@ func position() extern ret Float
 # Total track length in seconds (0 when stopped / unknown).
 func duration() extern ret Float
 
-# Convenience: refresh + snapshot into a `SpotifyTrack` value. The
-# struct's String fields are independent owned copies of the cache,
-# so dropping the snapshot doesn't disturb the cache.
+# Snapshot the current cache into a `SpotifyTrack` value. The struct's
+# String fields are independent owned copies of the cache, so dropping the
+# snapshot doesn't disturb the cache. Does NOT refresh — the background
+# poller (`startPoller`) keeps the cache warm off the UI thread (#279);
+# this returns the latest poll's data (≤ the poll interval stale).
 func current() ret SpotifyTrack {
-  refresh()
   ret SpotifyTrack {
     state: state()
     trackId: trackId()

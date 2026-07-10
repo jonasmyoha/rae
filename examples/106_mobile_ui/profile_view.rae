@@ -177,7 +177,7 @@ func buildSpotifyStatusCard(world: mod UiWorld) ret EntityId {
   if spotifyEnabled is false {
     line1 = "Disabled (RAE_UI_NO_SPOTIFY=1)"
   } else {
-    spotify.refresh()
+    # Read the background poller's warm cache (#279) — no UI-thread osascript.
     let st: String = spotify.state()
     let playingKey: String = "playing"
     let pausedKey: String = "paused"
