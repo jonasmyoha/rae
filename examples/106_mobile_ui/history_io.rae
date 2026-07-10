@@ -334,63 +334,74 @@ func loadCachedHistoryArtChunk(history: view PlayHistory, budget: view Int) pub 
   }
 
   var did: Int = 0
+  # Textures actually UPLOADED this pass. Only real visual progress (an
+  # image that just appeared) keeps the render loop busy — see the return
+  # logic below.
+  var loaded: Int = 0
   var visited: Int = 0
   var pending: Int = 0
+  var budgetHit: Bool = false
   loop visited < n {
     if did >= budget {
-      ret true
+      budgetHit = true
     }
-    let i: Int = gHistoryArtCursor
-    gHistoryArtCursor = gHistoryArtCursor - 1
-    if gHistoryArtCursor < 0 {
-      gHistoryArtCursor = n - 1
-    }
-    let e: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: i)
-    if e.textureKey.startsWith(prefix: prefix) {
-      if gpu2d.hasImageKey(key: e.textureKey) is false {
-        let suffix: String = e.textureKey.sub(start: pLen, len: e.textureKey.length() - pLen)
-        let path: String = cachedArtworkPath(imageHash: suffix)
-        if historyArtFailed(path: path) {
-          did = did + 1
-        } else if sys.exists(path: path) {
-          let keyForGpu: String = "{e.textureKey}"
-          let pathForGpu: String = "{path}"
-          let h: Int = gpu2d.loadImageKey(key: keyForGpu, path: pathForGpu)
-          if h <= 0 {
-            # Corrupt cache entry — most commonly a TRUNCATED download
-            # committed before atomic artwork writes landed (curl wrote
-            # straight to the final path; an app quit mid-fetch left a
-            # half-file that lenient decoders rendered half-grey).
-            # Evict it and let the next pass re-fetch instead of
-            # pinning a permanent placeholder. A file that arrives
-            # fresh from a VERIFIED fetch and still fails to decode
-            # takes the status-1 branch below and marks failed, so a
-            # genuinely bad image can't loop.
-            let removed: Bool = sys.delete(path: path)
-            pending = pending + 1
-          }
-          did = did + 1
-        } else {
-          if e.artworkUrl.length() > 0 {
-            let status: Int = spotify.fetchArtworkStatus(outPath: path)
-            if status is 1 {
-              let keyForGpu: String = "{e.textureKey}"
-              let pathForGpu: String = "{path}"
-              let h: Int = gpu2d.loadImageKey(key: keyForGpu, path: pathForGpu)
-              if h <= 0 {
-                markHistoryArtFailed(path: path)
-              }
-              did = did + 1
+    if budgetHit is false {
+      let i: Int = gHistoryArtCursor
+      gHistoryArtCursor = gHistoryArtCursor - 1
+      if gHistoryArtCursor < 0 {
+        gHistoryArtCursor = n - 1
+      }
+      let e: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: i)
+      if e.textureKey.startsWith(prefix: prefix) {
+        if gpu2d.hasImageKey(key: e.textureKey) is false {
+          let suffix: String = e.textureKey.sub(start: pLen, len: e.textureKey.length() - pLen)
+          let path: String = cachedArtworkPath(imageHash: suffix)
+          if historyArtFailed(path: path) {
+            did = did + 1
+          } else if sys.exists(path: path) {
+            let keyForGpu: String = "{e.textureKey}"
+            let pathForGpu: String = "{path}"
+            let h: Int = gpu2d.loadImageKey(key: keyForGpu, path: pathForGpu)
+            if h <= 0 {
+              # Corrupt cache entry — most commonly a TRUNCATED download
+              # committed before atomic artwork writes landed (curl wrote
+              # straight to the final path; an app quit mid-fetch left a
+              # half-file that lenient decoders rendered half-grey).
+              # Evict it and let the next pass re-fetch instead of
+              # pinning a permanent placeholder. A file that arrives
+              # fresh from a VERIFIED fetch and still fails to decode
+              # takes the status-1 branch below and marks failed, so a
+              # genuinely bad image can't loop.
+              let removed: Bool = sys.delete(path: path)
+              pending = pending + 1
             } else {
-              if status is 2 {
-                markHistoryArtFailed(path: path)
+              loaded = loaded + 1
+            }
+            did = did + 1
+          } else {
+            if e.artworkUrl.length() > 0 {
+              let status: Int = spotify.fetchArtworkStatus(outPath: path)
+              if status is 1 {
+                let keyForGpu: String = "{e.textureKey}"
+                let pathForGpu: String = "{path}"
+                let h: Int = gpu2d.loadImageKey(key: keyForGpu, path: pathForGpu)
+                if h <= 0 {
+                  markHistoryArtFailed(path: path)
+                } else {
+                  loaded = loaded + 1
+                }
                 did = did + 1
               } else {
-                let urlForFetch: String = "{e.artworkUrl}"
-                let pathForFetch: String = "{path}"
-                spotify.fetchArtworkAsync(url: urlForFetch, outPath: pathForFetch)
-                pending = pending + 1
-                did = did + 1
+                if status is 2 {
+                  markHistoryArtFailed(path: path)
+                  did = did + 1
+                } else {
+                  let urlForFetch: String = "{e.artworkUrl}"
+                  let pathForFetch: String = "{path}"
+                  spotify.fetchArtworkAsync(url: urlForFetch, outPath: pathForFetch)
+                  pending = pending + 1
+                  did = did + 1
+                }
               }
             }
           }
@@ -399,8 +410,29 @@ func loadCachedHistoryArtChunk(history: view PlayHistory, budget: view Int) pub 
     }
     visited = visited + 1
   }
-  if pending > 0 {
+  # Return semantics drive the render loop's busy-vs-idle gate
+  # (`assetsLoading`). Stay busy (true = render at full rate) ONLY when we
+  # actually UPLOADED art this pass — a real visual change to repaint.
+  # Merely WAITING on async CDN fetches must NOT pin the loop at 60fps:
+  # those resolve on their own and get picked up on later (idle-rate)
+  # scans, and a completed fetch's upload trips `loaded > 0` on that pass
+  # to force the single repaint that shows it. This is what the "lazy,
+  # never blocks" design always intended — before this fix, `pending > 0`
+  # kept the whole app busy-rendering (and draining battery) for the
+  # entire life of the process whenever any history thumbnail's CDN fetch
+  # never landed.
+  if loaded > 0 {
     ret true
+  }
+  # Nothing uploaded this pass. If there is still work to revisit later
+  # (in-flight fetches, or we stopped at the per-pass budget mid-scan),
+  # keep `gHistoryArtDone` false so future frames resume the scan — but
+  # report NOT loading so the loop can idle between throttled passes.
+  if pending > 0 {
+    ret false
+  }
+  if budgetHit {
+    ret false
   }
   gHistoryArtDone = true
   ret false
