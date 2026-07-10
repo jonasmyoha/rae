@@ -310,7 +310,17 @@ func main() {
     # in `scroll_input.rae`. The two physics functions (drag, wheel)
     # mutate it and the inner loop reads `scrollFsm.scrollY` to drive
     # ECS Offset / save-state / debug logging.
-    let scrollFsm: ScrollFsm = createScrollFsm(initialScrollY: restored.scrollY)
+    # #277 — generic headless scroll-injection hook: RAE_UI_SCROLL=<du>
+    # overrides the initial scroll position of the active screen's scroll
+    # target, so automated snapshot tests can byte-verify scrolled UI (used
+    # to validate #270c list virtualization, but not virtualization-
+    # specific). Empty → restored position. Negative scrolls content up.
+    var initialScrollY: Float = restored.scrollY
+    let scrollInjectEnv: String = getEnv(name: "RAE_UI_SCROLL")
+    if scrollInjectEnv.length() > 0 {
+      initialScrollY = scrollInjectEnv.toFloat()
+    }
+    let scrollFsm: ScrollFsm = createScrollFsm(initialScrollY: initialScrollY)
 
     # Hot-reload signal watcher. The supervisor writes a fresh signal
     # to `.rae/reload.signal` on every successful rebuild; the inner
