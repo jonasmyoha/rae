@@ -714,10 +714,10 @@ func dispatchActions(
         # Spotify owns the play-state. Use the cached state to flip
         # to the opposite; the 1Hz pollSpotify then mirrors the new
         # state back into playback.isPlaying so the icon updates.
-        # Force a fresh refresh first so the decision sees the most
-        # recent state (e.g. user paused in Spotify directly seconds
-        # ago — last poll may have been up to 1s stale).
-        spotify.refresh()
+        # Reads the background poller's cache (#279) — no UI-thread
+        # osascript here. Worst case the state is up to one poll interval
+        # (~1s) stale, which at most costs one redundant toggle that the
+        # next poll corrects; that's cheaper than spiking the frame.
         let curState: String = spotify.state()
         let playingKey: String = "playing"
         log("[spotify] toggle: state={curState}")
