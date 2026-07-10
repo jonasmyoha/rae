@@ -335,6 +335,10 @@ func main() {
     var cachedTrackIndex: Int = 0 - 1
     var cachedTrackDurMs: Int = 0
     var cachedAlbumScrollFloor: Float = 0.0
+    # #270c: last-built history window (topmost visual row). -1 = not on
+    # history / freshly (re)mounted; the trigger seeds it without an extra
+    # rebuild, then rewindows in place only when the window actually shifts.
+    var cachedHistoryWindow: Int = 0 - 1
     let uiRefresh: UiRefreshCache = createUiRefreshCache(historyLen: 0, playbackRevision: playback.revision, sheetEpoch: 0)
     var lastHoverAnimDirty: Bool = false
     var lastFrameTime: Float = 0.0
@@ -791,6 +795,31 @@ func main() {
           # frame. Inputs: forceRender, dirty caches, input events,
           # hover/button changes for the debug-outline overlay. See
           # render_decide.rae for the full list.
+
+          # #270c list virtualization: on the History screen, rebuild the
+          # visible row window IN PLACE when scrolling shifts it — same body
+          # entity, so scroll velocity/momentum survives (main only zeroes
+          # velocity on a scroll-target ENTITY change). Re-resolve the body
+          # fresh: the observe phase above may have remounted it on a
+          # history-length change. cachedHistoryWindow == -1 means just
+          # entered / remounted — seed it without an extra rebuild.
+          if currentScreen is Screen.history {
+            let histBody: EntityId = findScrollTarget(world: world)
+            if isNone(this: histBody) is false {
+              let histN: Int = appState.playHistory.entries.length
+              let fvNow: Int = historyWindowFirstVisual(scrollY: scrollFsm.scrollY, n: histN)
+              if cachedHistoryWindow is (0 - 1) {
+                cachedHistoryWindow = fvNow
+              } else {
+                if fvNow is not cachedHistoryWindow {
+                  rewindowHistoryBody(world: world, body: histBody, history: appState.playHistory, rounded: appState.settings.roundedAlbumCovers, scrollY: scrollFsm.scrollY)
+                  cachedHistoryWindow = fvNow
+                }
+              }
+            }
+          } else {
+            cachedHistoryWindow = 0 - 1
+          }
 
           # Re-run layout + transform if any tracked component changed
           # since last frame (scroll handlers mutate Offset in place).
