@@ -5598,6 +5598,19 @@ typedef struct {
 } RaeSpotifyCache;
 static RaeSpotifyCache g_spotify_cache = {0};
 
+/* Spotify poll thread (#279). `rae_ext_sys_spotify_refresh` shells out to
+ * `osascript` (~tens of ms) — running it on the UI thread every second
+ * spiked the frame rate. A background pthread now owns the refresh; the
+ * cache is guarded by `g_spotify_mu` and the (cheap) getters read it under
+ * the lock. osascript here is a fork/exec subprocess, so it is safe to run
+ * off the main thread (no in-process Cocoa/AppleScript, no main-thread
+ * requirement). */
+static pthread_mutex_t g_spotify_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_t g_spotify_poll_thread;
+static int g_spotify_poll_started = 0;
+static volatile int g_spotify_poll_stop = 0;
+static int g_spotify_poll_interval_ms = 1000;
+
 static void rae_spotify_cache_set_field(char** slot, const char* src, size_t len) {
     free(*slot);
     *slot = malloc(len + 1);
@@ -5782,7 +5795,10 @@ void rae_ext_sys_spotify_refresh(void) {
         NULL
     };
     char buf[4096];
+    /* Slow osascript shell-out runs OUTSIDE the lock (poll thread) so it
+     * never blocks a UI-thread getter; only the fast parse below holds it. */
     long n = rae_osascript_capture(lines, buf, sizeof(buf));
+    pthread_mutex_lock(&g_spotify_mu);
     char** slots[] = {
         &g_spotify_cache.state,
         &g_spotify_cache.trackId,
@@ -5797,20 +5813,19 @@ void rae_ext_sys_spotify_refresh(void) {
     }
     g_spotify_cache.positionSec = 0.0;
     g_spotify_cache.durationSec = 0.0;
-    if (n < 0) return;
-    char* p = buf;
-    /* Parse 6 string fields. */
-    for (int i = 0; i < 6; i++) {
-        char* sep = strstr(p, "||");
-        size_t len = sep ? (size_t)(sep - p) : strlen(p);
-        rae_spotify_cache_set_field(slots[i], p, len);
-        if (!sep) break;
-        p = sep + 2;
-    }
-    /* Parse the trailing position + duration (numeric). The strstr walk
-     * above leaves p pointing past the last "||" of the strings if every
-     * separator was found. Re-walk from the buffer start to be safe. */
-    {
+    if (n >= 0) {
+        char* p = buf;
+        /* Parse 6 string fields. */
+        for (int i = 0; i < 6; i++) {
+            char* sep = strstr(p, "||");
+            size_t len = sep ? (size_t)(sep - p) : strlen(p);
+            rae_spotify_cache_set_field(slots[i], p, len);
+            if (!sep) break;
+            p = sep + 2;
+        }
+        /* Parse the trailing position + duration (numeric). The strstr walk
+         * above leaves p pointing past the last "||" of the strings if every
+         * separator was found. Re-walk from the buffer start to be safe. */
         char* q = buf;
         for (int i = 0; i < 6; i++) {
             char* sep = strstr(q, "||");
@@ -5827,16 +5842,56 @@ void rae_ext_sys_spotify_refresh(void) {
             }
         }
     }
+    pthread_mutex_unlock(&g_spotify_mu);
 }
 
-rae_String rae_ext_sys_spotify_state(void)       { return rae_cstr_to_owned_rae_string(g_spotify_cache.state); }
-rae_String rae_ext_sys_spotify_trackId(void)     { return rae_cstr_to_owned_rae_string(g_spotify_cache.trackId); }
-rae_String rae_ext_sys_spotify_trackName(void)   { return rae_cstr_to_owned_rae_string(g_spotify_cache.trackName); }
-rae_String rae_ext_sys_spotify_artistName(void)  { return rae_cstr_to_owned_rae_string(g_spotify_cache.artistName); }
-rae_String rae_ext_sys_spotify_albumName(void)   { return rae_cstr_to_owned_rae_string(g_spotify_cache.albumName); }
-rae_String rae_ext_sys_spotify_artworkUrl(void)  { return rae_cstr_to_owned_rae_string(g_spotify_cache.artworkUrl); }
-double rae_ext_sys_spotify_position(void)        { return g_spotify_cache.positionSec; }
-double rae_ext_sys_spotify_duration(void)        { return g_spotify_cache.durationSec; }
+/* Poll thread body: refresh the cache on an interval until asked to stop.
+ * Sleeps in small slices so stopPoller returns promptly. */
+static void* rae_spotify_poll_thread_fn(void* arg) {
+    (void)arg;
+    while (!g_spotify_poll_stop) {
+        rae_ext_sys_spotify_refresh();
+        int slept = 0;
+        while (slept < g_spotify_poll_interval_ms && !g_spotify_poll_stop) {
+            usleep(50 * 1000);
+            slept += 50;
+        }
+    }
+    return NULL;
+}
+
+void rae_ext_sys_spotify_startPoller(int64_t interval_ms) {
+    if (g_spotify_poll_started) return;
+    g_spotify_poll_started = 1;
+    g_spotify_poll_stop = 0;
+    g_spotify_poll_interval_ms = (interval_ms > 0) ? (int)interval_ms : 1000;
+    pthread_create(&g_spotify_poll_thread, NULL, rae_spotify_poll_thread_fn, NULL);
+}
+
+void rae_ext_sys_spotify_stopPoller(void) {
+    if (!g_spotify_poll_started) return;
+    g_spotify_poll_stop = 1;
+    pthread_join(g_spotify_poll_thread, NULL);
+    g_spotify_poll_started = 0;
+}
+
+/* Getters read the cache under the lock (the poll thread writes it). Each
+ * field read is race-free; a rare cross-field tear during a track change at
+ * the exact poll instant is cosmetic and self-corrects on the next frame. */
+static rae_String rae_spotify_read_field(char* const* slot) {
+    pthread_mutex_lock(&g_spotify_mu);
+    rae_String s = rae_cstr_to_owned_rae_string(*slot);
+    pthread_mutex_unlock(&g_spotify_mu);
+    return s;
+}
+rae_String rae_ext_sys_spotify_state(void)       { return rae_spotify_read_field(&g_spotify_cache.state); }
+rae_String rae_ext_sys_spotify_trackId(void)     { return rae_spotify_read_field(&g_spotify_cache.trackId); }
+rae_String rae_ext_sys_spotify_trackName(void)   { return rae_spotify_read_field(&g_spotify_cache.trackName); }
+rae_String rae_ext_sys_spotify_artistName(void)  { return rae_spotify_read_field(&g_spotify_cache.artistName); }
+rae_String rae_ext_sys_spotify_albumName(void)   { return rae_spotify_read_field(&g_spotify_cache.albumName); }
+rae_String rae_ext_sys_spotify_artworkUrl(void)  { return rae_spotify_read_field(&g_spotify_cache.artworkUrl); }
+double rae_ext_sys_spotify_position(void)        { pthread_mutex_lock(&g_spotify_mu); double v = g_spotify_cache.positionSec; pthread_mutex_unlock(&g_spotify_mu); return v; }
+double rae_ext_sys_spotify_duration(void)        { pthread_mutex_lock(&g_spotify_mu); double v = g_spotify_cache.durationSec; pthread_mutex_unlock(&g_spotify_mu); return v; }
 
 /* Completeness check for a downloaded artwork file. Interrupted curl
  * writes leave truncated files (sizes are clean 4 KiB multiples), and
@@ -6091,6 +6146,8 @@ void rae_ext_sys_spotify_pause(void)    {}
 void rae_ext_sys_spotify_next(void)     {}
 void rae_ext_sys_spotify_previous(void) {}
 void rae_ext_sys_spotify_refresh(void)  {}
+void rae_ext_sys_spotify_startPoller(int64_t interval_ms) { (void)interval_ms; }
+void rae_ext_sys_spotify_stopPoller(void) {}
 rae_String rae_ext_sys_spotify_state(void)      { return (rae_String){NULL, 0, 0, 0}; }
 rae_String rae_ext_sys_spotify_trackId(void)    { return (rae_String){NULL, 0, 0, 0}; }
 rae_String rae_ext_sys_spotify_trackName(void)  { return (rae_String){NULL, 0, 0, 0}; }
