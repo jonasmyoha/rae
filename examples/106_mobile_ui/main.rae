@@ -20,6 +20,7 @@ import core
 import file_watch
 import hot_reload
 import sdf_text
+import sys/spotify
 import ui/ecs
 import ui/fit
 import ui/layout
@@ -132,6 +133,11 @@ func main() {
   if isHeadless { spotifyOn = false }
   if spotifyOn {
     log("[spotify] ON — launches lazily on first play (AppleScript play auto-launches).")
+    # Refresh the Spotify cache on a BACKGROUND thread (#279) instead of
+    # shelling out to osascript on the UI thread every poll — the latter
+    # spiked the frame rate. The per-frame `pollSpotify` now just reads the
+    # warm cache. Started only when Spotify is actually on (never headless).
+    spotify.startPoller(intervalMs: 1000)
   } else {
     log("[spotify] OFF (RAE_UI_NO_SPOTIFY or RAE_UI_HEADLESS)")
   }
