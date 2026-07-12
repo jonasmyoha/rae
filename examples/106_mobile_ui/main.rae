@@ -279,6 +279,9 @@ func main() {
     # button position stays consistent regardless of which view
     # the user is on or how deep into the sub-page stack.
     let debug: DebugSystem = createDebugSystem()
+    # Restore the persisted debug-dialog flag toggles (labels / input
+    # outlines) so they survive a relaunch.
+    restoreDebugFlags(debug: debug, path: debugFlagsFilePath)
     setDebugScreenSize(debug: debug, w: viewport.layoutW, h: viewport.layoutH)
     let debugMargin: Float = 34.69879518072289
     setDebugButtonTopRight(debug: debug, margin: debugMargin)
