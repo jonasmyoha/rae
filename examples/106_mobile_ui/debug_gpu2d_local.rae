@@ -6,6 +6,7 @@ open ui/theme
 # This keeps the debug button/menu and FPS labels without importing the
 # legacy draw path, so 106 stays SDL3/GPU2D-only.
 import core
+import json
 import gpu2d
 import gpu2d_text
 import sdf_text
@@ -93,6 +94,52 @@ func createDebugSystem() pub ret DebugSystem {
     heartbeatX: 0.0
     hasBlur: false
   }
+}
+
+# Persist the debug dialog's flag toggles (labels / input outlines) so they
+# survive a relaunch. Written whenever a flag is toggled; read at boot by
+# restoreDebugFlags. `menuOpen` is intentionally NOT persisted — the dialog
+# always starts closed. Same concat-built JSON + brace-escape trick as
+# saveAppState (a bare `{` in a string literal would start interpolation).
+func saveDebugFlags(debug: view DebugSystem, path: view String) pub {
+  let q: String = "\""
+  let openBrace: String = "\u{007B}"
+  let closeBrace: String = "\u{007D}"
+  let nl: String = "\n"
+  var content: String = ""
+  content = content.concat(other: openBrace).concat(other: nl)
+  content = content.concat(other: "  ").concat(other: q).concat(other: "showLabels").concat(other: q).concat(other: ": ").concat(other: boolStr(b: debug.showLabels)).concat(other: ",").concat(other: nl)
+  content = content.concat(other: "  ").concat(other: q).concat(other: "showInputOutlines").concat(other: q).concat(other: ": ").concat(other: boolStr(b: debug.showInputOutlines)).concat(other: nl)
+  content = content.concat(other: closeBrace).concat(other: nl)
+  let ok: Bool = rae_ext_rae_sys_write_file(path: path, content: content)
+  if ok is false {
+    log("[debug] flag save failed: {path}")
+  }
+}
+
+# Restore persisted debug flags at boot. Best-effort: a missing file or a
+# missing field leaves the in-memory default (false).
+func restoreDebugFlags(debug: mod DebugSystem, path: view String) pub {
+  let source: String = rae_ext_rae_sys_read_file(path: path)
+  if source.length() is 0 {
+    ret
+  }
+  let doc: JsonDoc = json.parseJson(source: source)
+  if doc.ok is false {
+    ret
+  }
+  let root: JsonValue = json.jsonRoot(doc: doc)
+  let labelsKey: String = "showLabels"
+  let labelsIdx: Int = json.jsonField(doc: doc, this: root, key: labelsKey)
+  if labelsIdx >= 0 {
+    debug.showLabels = json.jsonBool(this: json.jsonValueAt(doc: doc, idx: labelsIdx), fallback: false)
+  }
+  let outlinesKey: String = "showInputOutlines"
+  let outlinesIdx: Int = json.jsonField(doc: doc, this: root, key: outlinesKey)
+  if outlinesIdx >= 0 {
+    debug.showInputOutlines = json.jsonBool(this: json.jsonValueAt(doc: doc, idx: outlinesIdx), fallback: false)
+  }
+  log("[debug] restored flags labels={debug.showLabels} outlines={debug.showInputOutlines}")
 }
 
 func setDebugScreenSize(debug: mod DebugSystem, w: view Float, h: view Float) pub {
@@ -670,9 +717,11 @@ func dispatchDebugAction(input: view InputSystem, debug: mod DebugSystem) pub re
     }
     if actionId.equals(other: debugActionToggleLabels) {
       debug.showLabels = debug.showLabels is false
+      saveDebugFlags(debug: debug, path: debugFlagsFilePath)
     }
     if actionId.equals(other: debugActionToggleInputOutlines) {
       debug.showInputOutlines = debug.showInputOutlines is false
+      saveDebugFlags(debug: debug, path: debugFlagsFilePath)
     }
     i = i + 1
   }
