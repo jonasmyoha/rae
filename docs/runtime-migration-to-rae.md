@@ -189,7 +189,8 @@ Small, permanent C ABI:
 - Raw buffer allocation/resize/free.
 - Thread, mutex, condvar, atomic primitives.
 - OS time, file descriptor, env, process, signal/crash hooks.
-- Opaque handle creation/destruction for platform APIs.
+- Opaque handle creation/destruction for platform APIs, following
+  `docs/native-handle-ownership.md`.
 
 ### Tier 2: Rae Core/Alloc Stdlib
 
@@ -305,6 +306,7 @@ without changing behavior. This is not dogfooding yet; it makes the boundary
 visible.
 
 Current audit: `docs/runtime-audit-2026-07.md`.
+Native handle model: `docs/native-handle-ownership.md`.
 
 Deliverables:
 
@@ -320,6 +322,7 @@ kernel, temporary migration bridge, or deprecated.
 Deliverables:
 
 - `docs/runtime-kernel-abi.md`.
+- `docs/native-handle-ownership.md`.
 - Header annotations or grouped declarations.
 - Test that generated apps link using the split runtime.
 
@@ -400,6 +403,7 @@ runtime-kernel split prevents circular bootstrap surprises.
   raw buffer kernel?
 - What is the minimum byte-slice model needed for safe parsers and decoders?
 - How should owned opaque native handles be represented and auto-dropped?
+  Initial design: `docs/native-handle-ownership.md`.
 - Do module-level `var`s need language-level teardown, or should apps own
   explicit teardown?
 - How much of WebGPU command encoding should be Rae before per-call FFI overhead
