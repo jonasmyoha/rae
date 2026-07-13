@@ -650,7 +650,21 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             // pays for a deep copy below and keeps full ownership of its
             // local. Skip the move-mark so the caller's end-of-scope
             // drop still fires.
-            if (p && p->type && !(p->type->is_view || p->type->is_mod)
+            //
+            // #282: EXTERN (FFI) params describe C shape, not Rae
+            // ownership (docs/ownership-model.md). A C function receives
+            // rae_String/etc. by value, reads (and copies if it retains)
+            // — it never runs Rae's drop. So an owned local passed to an
+            // extern's plain param is BORROWED: the caller keeps ownership
+            // and must auto-drop it at scope exit. Move-marking it here
+            // (as if the callee took ownership) left it neither dropped by
+            // the caller nor freed by the extern → a per-call leak (the
+            // dominant #282 driver: `let k = "{stem}"` → hasImageKey(k) /
+            // loadImageKey(k) leaked one string per call). An extern that
+            // genuinely consumes its arg must opt in with `own`.
+            bool param_consumes = !(fd->is_extern) || p->type->is_own;
+            if (param_consumes
+                && p && p->type && !(p->type->is_view || p->type->is_mod)
                 && !p->type->is_copy && a->value
                 && a->value->kind == AST_EXPR_IDENT) {
                 const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, a->value);
