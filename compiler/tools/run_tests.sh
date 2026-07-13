@@ -40,15 +40,22 @@ if [ -n "$TARGET_FILTER" ]; then
   echo
 fi
 
-# Targets to test. Default is Compiled only — the authoritative language
-# conformance gate. Live (bytecode VM) is preserved but unsupported
-# (docs/live-vm-status.md): run it explicitly with `TEST_TARGET=live` (a small
-# opt-in smoke / non-blocking job), never as part of the default green-gate.
-if [ -n "$TARGET_FILTER" ]; then
-  TARGETS=("$TARGET_FILTER")
-else
-  TARGETS=("compiled")
+# Targets to test. Compiled is the sole supported target.
+#
+# The Live/Hybrid (bytecode VM) target is DEPRECATED and frozen
+# (docs/live-vm-status.md; frozen 2026-06-28). Its tests are NO LONGER
+# RUN IN ANY SCENARIO: `TEST_TARGET=live`/`hybrid` is refused here (it
+# used to opt into a live smoke job). Several Live-only tests
+# (e.g. 318/332/334/338/339/343/382/385 — VM-specific diagnostics) are
+# already skipped on the compiled target below and, with the live target
+# gone, never execute; treat them as deprecated. Do not re-enable the
+# live target without un-freezing the VM.
+if [ "$TARGET_FILTER" = "live" ] || [ "$TARGET_FILTER" = "hybrid" ]; then
+  echo "Live/Hybrid (bytecode VM) is DEPRECATED and frozen (docs/live-vm-status.md)."
+  echo "Live-target tests are no longer run in any scenario. Nothing to do."
+  exit 0
 fi
+TARGETS=("compiled")
 
 for TARGET in "${TARGETS[@]}"; do
   echo "Testing target: $TARGET"
@@ -98,6 +105,14 @@ for TARGET in "${TARGETS[@]}"; do
       if [ -n "$CMD_LINE" ]; then
         read -r -a CMD_ARGS <<< "$CMD_LINE"
       fi
+    fi
+
+    # Hot-reload is a Live-VM-only mode — its harness always invokes
+    # `run --target live --watch`. Live is deprecated/frozen
+    # (docs/live-vm-status.md), so hot-reload tests never run, on any
+    # target and even when named directly with a filter.
+    if [ "${CMD_ARGS[0]}" = "hot-reload" ]; then
+      continue
     fi
 
     # Filtering logic
