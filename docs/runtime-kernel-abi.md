@@ -309,25 +309,24 @@ Recommended shape:
 ```text
 compiler/runtime/
   rae_runtime.c              # umbrella translation unit
-  runtime_core.c
-  runtime_mem.c
-  runtime_string.c
-  runtime_buf.c
-  runtime_task.c
-  runtime_channel.c
-  runtime_sys.c
-  runtime_math.c
-  runtime_json_bridge.c
+  runtime_threads.c
+  runtime_core_memory.c
+  runtime_strings_core.c
+  runtime_system_log.c
+  runtime_strings_algorithms.c
+  runtime_filesystem.c
+  runtime_buffers_math.c
+  runtime_platform_apple.c
   runtime_raylib.c
-  runtime_raylib_glfw.c
-  runtime_sdl3.c
+  runtime_image_sdl3.c
   runtime_webgpu.c
   runtime_gpu2d_platform.c
   runtime_gpu2d_box.c
   runtime_gpu2d_text.c
   runtime_gpu2d_image.c
   runtime_gpu2d_frame.c
-  runtime_spotify_macos.c
+  runtime_gpu2d_stubs.c
+  runtime_spotify_apple.c
 ```
 
 `rae_runtime.c` should `#include` the domain `.c` files in a controlled order.
@@ -379,4 +378,3 @@ The runtime split task should satisfy:
 - 106 headless gpu2d smoke still works;
 - raylib examples still compile unless explicitly parked out of the test set;
 - no runtime migration or behavior change is mixed into the split commit.
-
