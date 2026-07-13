@@ -510,8 +510,8 @@ void rae_ext_sdf_text_blitGlyph(int64_t* fb, int64_t fbW, int64_t fbH, int64_t a
 }
 
 /* ---- Rae Filesystem & Paths API (lib/filesystem.rae) — thin wrappers over
- * SDL3's SDL_filesystem.h: known folders, mkdir, exists, plus a date helper and
- * a render-output next-index scan. See docs/filesystem-and-paths.md. ---- */
+ * SDL3's SDL_filesystem.h: known folders, mkdir, exists, and a date helper.
+ * Path composition and render-output filename policy live in Rae. ---- */
 rae_String rae_ext_filesystem_userFolder(int64_t kind) {
     SDL_Folder f = SDL_FOLDER_DESKTOP;
     if (kind == 1) f = SDL_FOLDER_PICTURES;
@@ -548,24 +548,5 @@ rae_String rae_ext_filesystem_today(void) {
     char buf[16];
     strftime(buf, sizeof(buf), "%Y-%m-%d", &tmv);
     return rae_str_from_cstr_impl(buf, RAE_SITE_READ_FILE);
-}
-
-/* Scan `dir` for files named "<prefix><N>.png" and return max(N)+1 (1 if none),
- * so a caller can mint a non-overwriting filename. */
-int64_t rae_ext_filesystem_nextIndex(rae_String dir, rae_String prefix) {
-    if (!dir.data || !prefix.data) return 1;
-    DIR* d = opendir((const char*)dir.data);
-    if (!d) return 1;
-    int max_n = 0;
-    size_t plen = (size_t)prefix.len;
-    struct dirent* e;
-    while ((e = readdir(d)) != NULL) {
-        if (strncmp(e->d_name, (const char*)prefix.data, plen) == 0) {
-            int v = atoi(e->d_name + plen);
-            if (v > max_n) max_n = v;
-        }
-    }
-    closedir(d);
-    return (int64_t)(max_n + 1);
 }
 #endif /* RAE_HAS_SDL3 */

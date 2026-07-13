@@ -8,6 +8,7 @@
 #   let p: String = filesystem.renderPath(stem: "rae_render")
 #   filesystem.exists(path: p)
 import core
+import fs
 
 # Extern bindings — clean names, namespace-mangled to rae_ext_filesystem_* and
 # implemented in the RAE_HAS_SDL3 block of the runtime.
@@ -16,7 +17,6 @@ func prefDir(org: view String, app: view String) extern ret String
 func makeDir(path: view String) extern ret Bool
 func exists(path: view String) extern ret Bool
 func today() extern ret String
-func nextIndex(dir: view String, prefix: view String) extern ret Int
 
 # Platform "known" folders. Each returns "" when the platform has no such folder
 # (e.g. there is no Desktop on mobile) — callers fall back accordingly.
@@ -25,8 +25,75 @@ func picturesDir() ret String { ret userFolder(kind: 1) }
 func documentsDir() ret String { ret userFolder(kind: 2) }
 func homeDir() ret String { ret userFolder(kind: 3) }
 
-# Join two path segments with a single "/".
-func join(a: view String, b: view String) ret String { ret "{a}/{b}" }
+# Remove trailing "/" separators except for the filesystem root.
+func trimTrailingSeparators(path: view String) ret String {
+    var out: String = path
+    loop out.length() > 1 and out.endsWith(suffix: "/") {
+        out = out.sub(start: 0, len: out.length() - 1)
+    }
+    ret out
+}
+
+# Join two path segments with a single "/". Empty sides are passed through so
+# callers can compose optional base paths without creating leading double
+# separators.
+func join(a: view String, b: view String) ret String {
+    if a.length() is 0 {
+        ret b
+    }
+    if b.length() is 0 {
+        ret trimTrailingSeparators(path: a)
+    }
+    let left: String = trimTrailingSeparators(path: a)
+    if b.startsWith(prefix: "/") {
+        ret "{left}{b}"
+    }
+    ret "{left}/{b}"
+}
+
+# Last path segment after "/".
+func baseName(path: view String) ret String {
+    let clean: String = trimTrailingSeparators(path: path)
+    let slash: Int = clean.lastIndexOf(sub: "/")
+    if slash < 0 {
+        ret clean
+    }
+    ret clean.sub(start: slash + 1, len: clean.length() - slash - 1)
+}
+
+# Parent directory before the last "/". Relative single-segment paths return
+# ".". Rooted single-segment paths return "/".
+func dirName(path: view String) ret String {
+    let clean: String = trimTrailingSeparators(path: path)
+    let slash: Int = clean.lastIndexOf(sub: "/")
+    if slash < 0 {
+        ret "."
+    }
+    if slash is 0 {
+        ret "/"
+    }
+    ret clean.sub(start: 0, len: slash)
+}
+
+# Extension without the leading dot, or "" if there is no extension.
+func ext(path: view String) ret String {
+    let name: String = baseName(path: path)
+    let dot: Int = name.lastIndexOf(sub: ".")
+    if dot < 0 {
+        ret ""
+    }
+    ret name.sub(start: dot + 1, len: name.length() - dot - 1).toLower()
+}
+
+# Base name without its final extension.
+func stem(path: view String) ret String {
+    let name: String = baseName(path: path)
+    let dot: Int = name.lastIndexOf(sub: ".")
+    if dot < 0 {
+        ret name
+    }
+    ret name.sub(start: 0, len: dot)
+}
 
 # Zero-pad an Int to (at least) 4 digits.
 func pad4(n: view Int) ret String {
@@ -37,6 +104,30 @@ func pad4(n: view Int) ret String {
     ret s
 }
 
+# Scan `dir` for files named "<prefix><N>.png" and return max(N)+1 (1 if none).
+# This is intentionally Rae policy over the raw directory-listing primitive, not
+# a C runtime helper.
+func nextIndex(dir: view String, prefix: view String) ret Int {
+    let entries: List(File) = fs.listDir(folder: dir)
+    var maxN: Int = 0
+    var i: Int = 0
+    loop i < entries.length {
+        let f: File = rae_ext_rae_buf_get(buf: entries.data, index: i)
+        if f.name.startsWith(prefix: prefix) and f.name.endsWith(suffix: ".png") {
+            let suffixLen: Int = f.name.length() - prefix.length() - 4
+            if suffixLen > 0 {
+                let raw: String = f.name.sub(start: prefix.length(), len: suffixLen)
+                let n: Int = raw.toInt()
+                if n > maxN {
+                    maxN = n
+                }
+            }
+        }
+        i = i + 1
+    }
+    ret maxN + 1
+}
+
 # A fresh, non-overwriting PNG path for a saved render: the Desktop when there is
 # one, else a writable "render" folder. Names are dated + sequenced per day:
 #   <dir>/<stem>_<YYYY-MM-DD>_<NNNN>.png   (e.g. rae_render_2026-06-26_0001.png)
@@ -45,13 +136,10 @@ func renderPath(stem: view String) ret String {
     if dir.length() is 0 {
         dir = join(a: prefDir(org: "Rae", app: "render"), b: "render")
     }
-    # SDL known-folder paths carry a trailing separator; drop it so join is clean.
-    loop dir.length() > 1 and dir.endsWith(suffix: "/") {
-        dir = dir.sub(start: 0, len: dir.length() - 1)
-    }
+    dir = trimTrailingSeparators(path: dir)
     let made: Bool = makeDir(path: dir)
     let date: String = today()
     let prefix: String = "{stem}_{date}_"
     let n: Int = nextIndex(dir: dir, prefix: prefix)
-    ret "{dir}/{prefix}{pad4(n: n)}.png"
+    ret join(a: dir, b: "{prefix}{pad4(n: n)}.png")
 }
