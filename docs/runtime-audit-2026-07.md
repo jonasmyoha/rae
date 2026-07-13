@@ -156,24 +156,24 @@ same exported symbols:
 compiler/runtime/
   rae_runtime.h
   rae_runtime.c              # umbrella includes or shared bootstrap only
-  runtime_core.c             # init, stdout, misc common helpers
-  runtime_mem.c              # mem stats, allocation diagnostics
-  runtime_string.c           # String allocation/drop/pool/algorithms
-  runtime_buf.c              # raw buffer ABI
-  runtime_task.c             # Task and spawn primitives
-  runtime_channel.c          # Channel primitive
-  runtime_sys.c              # OS/env/file primitives
-  runtime_math.c             # libc math/RNG/casts
-  runtime_json_bridge.c      # temporary C JSON helpers
+  runtime_threads.c          # Task and Channel primitives
+  runtime_core_memory.c      # crash/stdout/mem diagnostics
+  runtime_strings_core.c     # String allocation/drop/temp pool
+  runtime_system_log.c       # time/spawn/json bridge/logging
+  runtime_strings_algorithms.c
+  runtime_filesystem.c       # console/env/file primitives
+  runtime_buffers_math.c     # raw buffers/math/json bridge/crypto stubs
+  runtime_platform_apple.c
   runtime_raylib.c           # legacy raylib wrapper
-  runtime_raylib_glfw.c      # raylib/GLFW event workaround
-  runtime_sdl3.c             # SDL3 platform wrapper
+  runtime_image_sdl3.c       # image codecs + SDL3 software/platform helpers
   runtime_webgpu.c           # raw WebGPU helpers
-  runtime_gpu2d_platform.c   # gpu2d window/input/frame surface
+  runtime_gpu2d_platform.c   # gpu2d window/input/surface/clip state
   runtime_gpu2d_box.c
   runtime_gpu2d_text.c
   runtime_gpu2d_image.c
-  runtime_spotify_macos.c
+  runtime_gpu2d_frame.c
+  runtime_gpu2d_stubs.c
+  runtime_spotify_apple.c
 ```
 
 Open choice for `#288`: either compile multiple C files, or keep a single
