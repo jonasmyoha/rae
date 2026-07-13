@@ -179,7 +179,8 @@ compiler/runtime/
 Open choice for `#288`: either compile multiple C files, or keep a single
 `rae_runtime.c` that includes the split implementation files. The include-based
 approach is less invasive for emitted standalone builds; the multi-translation
-unit approach is cleaner long-term. Decide in `#287`.
+unit approach is cleaner long-term. `docs/runtime-kernel-abi.md` chooses the
+include-based split as the first behavior-preserving step.
 
 ## Dependencies And Follow-Up Tasks
 
@@ -205,4 +206,3 @@ Proceed in this order:
 3. `#289`: design opaque handle ownership/drop.
 4. Choose one low-blast-radius Rae migration from `#290`, `#291`, `#294`, or
    `#295` based on test coverage and current compiler risks.
-
