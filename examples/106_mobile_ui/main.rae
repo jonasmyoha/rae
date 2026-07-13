@@ -54,7 +54,8 @@ func main() {
     rawAtlasPath: "examples/106_mobile_ui/assets/MaterialIconsRound-Regular.mtsdf.raw")
   # Load the theme (#231): styleId sizes/colors/align now resolve from
   # the .raescene theme instead of hardcoded render_gpu2d tables.
-  let uiTheme: ResolvedTheme = parseTheme(scene: loadSceneFile(path: themePath))
+  let themeScene: Scene = loadSceneFile(path: themePath)
+  let uiTheme: ResolvedTheme = parseTheme(scene: themeScene)
   # Publish radius/padding tokens for the scene deserialiser (#233),
   # BEFORE loadAllScenes so `"radius": "radiusCard"` etc. resolve.
   setActiveThemeTokens(theme: uiTheme)
