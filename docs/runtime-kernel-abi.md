@@ -11,6 +11,7 @@ It follows:
 
 - `docs/runtime-migration-to-rae.md`
 - `docs/runtime-audit-2026-07.md`
+- `docs/native-handle-ownership.md`
 
 ## Core Principle
 
@@ -47,6 +48,7 @@ Examples:
 - thread/mutex/channel primitives;
 - crash/signal handlers;
 - raw SDL3/WebGPU/raylib calls while those bindings exist;
+- native handle table allocation/release/validation;
 - platform file/env/time primitives.
 
 ### C Binding
@@ -211,6 +213,7 @@ C owns:
 
 Rae should own:
 
+- typed `SdlWindow`/`SdlCursor` values over opaque handles;
 - app loop policy;
 - idle/busy render scheduling;
 - coordinate conversion policy where it does not require direct native state;
@@ -225,10 +228,12 @@ C owns:
 - buffer/texture/sampler/pipeline/bind group creation;
 - queue write/readback/submit;
 - command encoder/pass lifetime;
-- native handle lifetimes.
+- native handle table validation and raw release calls.
 
 Rae should own:
 
+- typed `GpuDevice`/`GpuBuffer`/`GpuTexture`/`GpuPipeline`/`GpuBindGroup`
+  values over opaque handles;
 - descriptors;
 - validation;
 - resource ownership policy;
@@ -250,6 +255,7 @@ C owns:
 
 Rae should own:
 
+- typed `ImagePixels` and `ImageTexture`/`GpuTexture` ownership;
 - image registry keys;
 - failed-load throttling;
 - retry policy;
@@ -358,6 +364,8 @@ Before adding a new C runtime API, answer:
 3. Could this be ordinary Rae stdlib code over existing narrow externs?
 4. Does it introduce ownership or lifetime state that Rae should own instead?
 5. Is it permanent kernel, C binding, temporary bridge, or legacy?
+6. If it creates a native resource, does it follow
+   `docs/native-handle-ownership.md` rather than returning a raw `Int`?
 
 Default decision:
 
