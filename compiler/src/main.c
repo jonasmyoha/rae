@@ -740,6 +740,29 @@ static bool copy_runtime_assets(const char* out_dir) {
   if (!copy_file_to(src_h, dst_h)) return false;
   if (!copy_file_to(src_c, dst_c)) return false;
 
+  DIR* runtime_dir = opendir(RAE_RUNTIME_SOURCE_DIR);
+  if (!runtime_dir) {
+    fprintf(stderr, "error: could not open runtime source dir '%s': %s\n", RAE_RUNTIME_SOURCE_DIR, strerror(errno));
+    return false;
+  }
+  struct dirent* ent;
+  while ((ent = readdir(runtime_dir)) != NULL) {
+    const char* name = ent->d_name;
+    size_t len = strlen(name);
+    if (strncmp(name, "runtime_", 8) != 0 || len < 3 || strcmp(name + len - 2, ".c") != 0) {
+      continue;
+    }
+    char mod_src[PATH_MAX];
+    char mod_dst[PATH_MAX];
+    snprintf(mod_src, sizeof(mod_src), "%s/%s", RAE_RUNTIME_SOURCE_DIR, name);
+    snprintf(mod_dst, sizeof(mod_dst), "%s/%s", out_dir, name);
+    if (!copy_file_to(mod_src, mod_dst)) {
+      closedir(runtime_dir);
+      return false;
+    }
+  }
+  closedir(runtime_dir);
+
   // rae_runtime.c #includes the vendored lodepng (PNG codec, Rae Image API),
   // so the emitted standalone project needs both files alongside it.
   char lp_src[PATH_MAX];
