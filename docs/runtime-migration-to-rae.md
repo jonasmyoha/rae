@@ -61,14 +61,55 @@ The permanent C layer should mostly provide:
 
 Everything above that should be evaluated as a Rae candidate.
 
+## Runtime Is Not The Standard Library
+
+The C runtime is not the Rae standard library.
+
+The runtime exists because generated C needs a stable ABI and a small set of
+operations that cannot be expressed portably as ordinary Rae code yet:
+
+- symbol names and calling conventions generated C can link against;
+- allocator and raw memory primitives;
+- platform interfaces and OS integration;
+- thread, mutex, atomic, signal, and crash primitives;
+- external library and platform ABI boundaries.
+
+The standard library is different. It should increasingly be ordinary Rae code
+compiled exactly like user projects. A `lib/json.rae`, `lib/filesystem.rae`, or
+future `lib/webgpu/resource_manager.rae` module should not be "runtime code" just
+because it is shipped with Rae. It should be normal Rae source using narrow
+extern imports where it crosses into the platform.
+
+This distinction is a core architecture rule:
+
+- **Runtime:** the minimal trusted C kernel needed by generated programs.
+- **Standard library:** portable Rae modules plus narrow platform bindings.
+- **Applications:** Rae projects using the same compiler and stdlib mechanisms.
+
+If a feature can live as stdlib Rae code without circular bootstrap or unsafe ABI
+problems, that is preferred over adding it to the C runtime.
+
 ## Migration Philosophy
 
-Move policy before primitives.
+Prefer migrating code that maximizes compiler and language dogfooding while
+minimizing bootstrap risk.
 
-Do not begin by rewriting `String` or allocation internals. Those are bootstrap
-foundations and currently expose many ownership edge cases. Start with pure or
-mostly-pure libraries that sit above the platform edge and are easy to test
-against existing C behavior.
+This is deliberately broader than "move policy before primitives." Policy code
+is often a good first migration target, but the order should be chosen from the
+current compiler state, testability, and risk profile. For example, WebGPU
+resource-cache policy may be a better early dogfooding target than a generic
+container rewrite because it exercises ownership and data-oriented design without
+destabilizing every `List(T)` user.
+
+The migration order should be re-evaluated after the runtime audit. Good early
+targets have most of these properties:
+
+- mostly deterministic and testable without platform race conditions;
+- enough real complexity to exercise Rae, not just wrapper boilerplate;
+- narrow C boundary;
+- clear compatibility oracle from the existing C implementation;
+- limited blast radius if ownership codegen still has bugs;
+- useful to ordinary Rae programmers, not just runtime internals.
 
 Prefer this split:
 
@@ -280,7 +321,29 @@ Deliverables:
 - Header annotations or grouped declarations.
 - Test that generated apps link using the split runtime.
 
-### Stage 2: Move Pure Algorithms
+### Stage 2: Select First Migration Slices
+
+After the audit and kernel-boundary design, choose the first Rae migrations by
+dogfooding value and bootstrap risk, not by a fixed category order.
+
+Strong candidate families:
+
+- Resource-management policy: image registries, failed-load throttling, asset
+  caches, WebGPU descriptors/resource managers, gpu2d render graph policy.
+- Portable algorithms: UTF-8/string helpers, path helpers, JSON
+  serializer/parser.
+- Container policy only after generic ownership/codegen is stable enough:
+  `HashMap`, `StringMap`, `List(T)` growth and bounds logic.
+
+Resource-management policy may move before some portable algorithms if it gives
+better dogfooding value with lower bootstrap risk. JSON and Filesystem should
+remain good candidates, but the audit should decide whether they are the first
+ones.
+
+Keep C reference implementations until the Rae version passes compatibility
+tests and memory diagnostics.
+
+### Stage 3: Move Pure Algorithms And Platform Policy
 
 Start with algorithms that require no platform callbacks:
 
@@ -289,11 +352,6 @@ Start with algorithms that require no platform callbacks:
 - JSON serializer/parser.
 - HashMap/List policy where compiler support is ready.
 
-Keep C reference implementations until the Rae version passes compatibility
-tests and memory diagnostics.
-
-### Stage 3: Move Resource Policy
-
 Move app/backend policy into Rae:
 
 - Image registry and failed-load throttling.
@@ -301,7 +359,9 @@ Move app/backend policy into Rae:
 - WebGPU descriptors/resource managers.
 - gpu2d render graph and batching policy where feasible.
 
-C remains the raw renderer/backend call surface.
+C remains the raw renderer/backend call surface. The order inside this stage is
+intentionally flexible: resource policy, JSON/path helpers, and string utilities
+should be sequenced based on test coverage and compiler readiness.
 
 ### Stage 4: Reduce Runtime Surface
 
@@ -330,6 +390,10 @@ runtime-kernel split prevents circular bootstrap surprises.
 
 ## Open Questions
 
+- **Standard library ownership model.** This deserves a separate future design
+  document: which types should remain compiler-known, which can become ordinary
+  Rae code, which require runtime support forever, which should be opaque native
+  handles, and where the permanent ABI boundary sits.
 - Should `String` remain compiler-special forever, or become a Rae struct over a
   raw buffer kernel?
 - What is the minimum byte-slice model needed for safe parsers and decoders?
@@ -347,8 +411,9 @@ runtime-kernel split prevents circular bootstrap surprises.
   permanent kernel.
 - New stdlib functionality defaults to Rae unless it truly crosses the platform
   ABI boundary.
+- New runtime functionality defaults to Rae unless it genuinely belongs at the
+  platform ABI boundary.
 - 106 mobile UI and the raytracer continue to build without handwritten C in
   their example folders.
 - Memory diagnostics stay flat under existing leak tests.
 - Runtime migration tasks produce compatibility tests before deleting C paths.
-
