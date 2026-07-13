@@ -304,6 +304,8 @@ Inventory `rae_runtime.c` into clear domains and split it into smaller C files
 without changing behavior. This is not dogfooding yet; it makes the boundary
 visible.
 
+Current audit: `docs/runtime-audit-2026-07.md`.
+
 Deliverables:
 
 - Runtime module map.
