@@ -76,37 +76,67 @@ func cascadeAssets(reg: mod TextureRegistry, albums: view List(Album), budget: v
   ret cascadeGpu2dAssets(albums: albums, budget: budget)
 }
 
+# Latches so the progressive loader stops re-scanning once everything is
+# registered. Without these, `cascadeGpu2dAssets` (called every frame by
+# frame_pipeline) walked ALL albums every frame forever, allocating a
+# per-album `albumCoverKey(...)` string each time. Those key strings are
+# owned temps the C backend detaches from the statement pool (pool_take)
+# but doesn't auto-drop at scope exit (the String scope-exit-dealloc gap,
+# docs/scope-exit-dealloc.md) — so idle re-scanning leaked ~one string per
+# album per frame (~600 KB/min, #282). Latching also removes the wasteful
+# per-frame O(albums) scan + hasImageKey calls once nothing is left to load.
+# Reset when the album list changes (media library rebuild).
+var gAlbumCoversLoaded: Bool = false
+var gAvatarLoaded: Bool = false
+var gCoversSeenLen: Int = -1
+
 # Progressive gpu2d image-key loader. Registers each album cover under the same
-# Sprite.textureKey used throughout the ECS world.
+# Sprite.textureKey used throughout the ECS world. Idempotent + self-latching:
+# once every cover (and the avatar) is registered it becomes a cheap no-op
+# until the album list changes.
 func cascadeGpu2dAssets(albums: view List(Album), budget: view Int) pub ret Bool {
-  var i: Int = 0
-  var loaded: Int = 0
-  loop i < albums.length {
-    if loaded >= budget {
-      ret true
+  if albums.length is not gCoversSeenLen {
+    gCoversSeenLen = albums.length
+    gAlbumCoversLoaded = false
+    gAvatarLoaded = false
+  }
+  var busy: Bool = false
+  if gAlbumCoversLoaded is false {
+    var i: Int = 0
+    var loaded: Int = 0
+    loop i < albums.length {
+      if loaded >= budget {
+        ret true
+      }
+      let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: i)
+      # Inline the key builder as a call arg (don't bind a `let`) so its
+      # heap stays a pool temp freed by this function's scope flush.
+      if gpu2d.hasImageKey(key: albumCoverKey(stem: a.stem)) is false {
+        let h: Int = gpu2d.loadImageKey(key: albumCoverKey(stem: a.stem), path: a.coverPath)
+        loaded = loaded + 1
+      }
+      i = i + 1
     }
-    let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: i)
-    let key: String = albumCoverKey(stem: a.stem)
-    if gpu2d.hasImageKey(key: key) is false {
-      let copiedKey: String = key
-      let copiedPath: String = a.coverPath
-      let h: Int = gpu2d.loadImageKey(key: copiedKey, path: copiedPath)
-      loaded = loaded + 1
+    # A full pass that registered nothing means every cover is present —
+    # latch so future frames skip the scan entirely.
+    if loaded is 0 {
+      gAlbumCoversLoaded = true
+    } else {
+      busy = true
     }
-    i = i + 1
   }
 
-  let avatarKey: String = profileAvatarKey()
-  if gpu2d.hasImageKey(key: avatarKey) is false {
-    let avatarStem: String = avatarAlbumStem
-    let idx: Int = findAlbumIndex(albums: albums, stem: avatarStem)
-    if idx >= 0 {
-      let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: idx)
-      let copiedKey: String = avatarKey
-      let copiedPath: String = a.coverPath
-      let h: Int = gpu2d.loadImageKey(key: copiedKey, path: copiedPath)
+  if gAvatarLoaded is false {
+    if gpu2d.hasImageKey(key: profileAvatarKey()) is false {
+      let idx: Int = findAlbumIndex(albums: albums, stem: avatarAlbumStem)
+      if idx >= 0 {
+        let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: idx)
+        let h: Int = gpu2d.loadImageKey(key: profileAvatarKey(), path: a.coverPath)
+      }
+      busy = true
+    } else {
+      gAvatarLoaded = true
     }
-    ret true
   }
-  ret false
+  ret busy
 }
