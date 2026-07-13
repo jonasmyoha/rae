@@ -1,0 +1,106 @@
+# Regression harness for 106_mobile_ui's hover-cover path. It exercises
+# the two hot systems that run while the cursor moves over the Home
+# cover grid: paint-root collection for hit-testing/render ordering and
+# HoverScale easing. Both must leave heap ownership balanced.
+import core
+import ui/ecs
+import ui/components
+import ui/animation
+import ui/layer
+open ui/ecs
+open ui/animation
+open ui/layer
+
+func rae_ext_rae_mem_stats_outstanding() extern ret Int
+func rae_ext_rae_mem_stats_buf_outstanding() extern ret Int
+func rae_ext_rae_mem_stats_buf_outstanding_bytes() extern ret Int
+
+func addCover(world: mod UiWorld, x: view Float, y: view Float) ret EntityId {
+  let e: EntityId = createEntity(world: world)
+  let wt: WorldTransform = {
+    x: x
+    y: y
+    scaleX: 1.0
+    scaleY: 1.0
+    rotation: 0.0
+    alpha: 1.0
+    visible: true
+  }
+  let click: OnClick = {
+    actionId: "album.open"
+    actionIdDouble: ""
+    actionIdTriple: ""
+    maxDelayMs: 400
+  }
+  let hs: HoverScale = {
+    restScale: 1.0
+    hoverScale: 1.08
+    speed: 12.0
+    current: 1.0
+    target: 1.0
+  }
+  componentSet(this: world.worldTransforms, entity: e, data: wt)
+  componentSet(this: world.onClicks, entity: e, data: click)
+  componentSet(this: world.hoverScales, entity: e, data: hs)
+  ret e
+}
+
+func collectOnce(world: view UiWorld) ret Int {
+  let roots: List(EntityId) = collectPaintableRoots(world: world)
+  ret roots.length
+}
+
+func main() {
+  let world: UiWorld = createUiWorld()
+  let a: EntityId = addCover(world: world, x: 0.0, y: 0.0)
+  let b: EntityId = addCover(world: world, x: 260.0, y: 0.0)
+  let c: EntityId = addCover(world: world, x: 0.0, y: 260.0)
+  let d: EntityId = addCover(world: world, x: 260.0, y: 260.0)
+
+  # Warm up generic specializations and component-table growth before
+  # taking the baseline.
+  var warm: Int = 0
+  loop warm < 100 {
+    let ignored: Int = collectOnce(world: world)
+    let anim: Bool = hoverScaleSystem(world: world, hovered: a, dt: 0.016)
+    warm = warm + 1
+  }
+
+  let baseBufCount: Int = rae_ext_rae_mem_stats_buf_outstanding()
+  let baseBufBytes: Int = rae_ext_rae_mem_stats_buf_outstanding_bytes()
+  let baseStrings: Int = rae_ext_rae_mem_stats_outstanding()
+
+  let iterations: Int = 20000
+  var i: Int = 0
+  var checksum: Int = 0
+  loop i < iterations {
+    var hovered: EntityId = a
+    let phase: Int = i % 4
+    if phase is 1 {
+      hovered = b
+    }
+    if phase is 2 {
+      hovered = c
+    }
+    if phase is 3 {
+      hovered = d
+    }
+    checksum = checksum + collectOnce(world: world)
+    let anim: Bool = hoverScaleSystem(world: world, hovered: hovered, dt: 0.016)
+    i = i + 1
+  }
+
+  let bufGrowth: Int = rae_ext_rae_mem_stats_buf_outstanding() - baseBufCount
+  let byteGrowth: Int = rae_ext_rae_mem_stats_buf_outstanding_bytes() - baseBufBytes
+  let stringGrowth: Int = rae_ext_rae_mem_stats_outstanding() - baseStrings
+
+  log("iterations: {iterations}")
+  log("buf growth count: {bufGrowth}")
+  log("buf growth bytes: {byteGrowth}")
+  log("string growth count: {stringGrowth}")
+  if bufGrowth is 0 and byteGrowth is 0 and stringGrowth is 0 and checksum > 0 {
+    log("verdict: OK")
+  } else {
+    log("verdict: LEAK")
+  }
+}

@@ -1,4 +1,82 @@
 open ui/ecs
+import ui/animation
+import ui/fit
+import ui/layout
+import ui/render_gpu2d
+import ui/transform
+
+func pickHoverEntity(world: view UiWorld, idx: view Int) ret EntityId {
+  let n: Int = componentCount(this: world.hoverScales)
+  if n is 0 {
+    ret noEntity()
+  }
+  var wrapped: Int = idx
+  loop wrapped >= n {
+    wrapped = wrapped - n
+  }
+  ret componentEntityAt(this: world.hoverScales, i: wrapped)
+}
+
+func runHoverStressMode(
+  scenes: view AlbumScenes
+  appState: mod AppState
+  gpuUi: view Gpu2dUi
+) ret Bool {
+  let hoverEnv: String = getEnv(name: "RAE_UI_STRESS_HOVER")
+  if hoverEnv.length() is 0 {
+    ret false
+  }
+
+  let stressNEnv: String = getEnv(name: "RAE_UI_STRESS_N")
+  var stressN: Int = 3600
+  if stressNEnv.length() > 0 {
+    stressN = stressNEnv.toInt()
+  }
+
+  let playback: PlaybackState = createPlaybackState()
+  let texReg: TextureRegistry = createTextureRegistry()
+  let viewport: Viewport = createViewportFromWindow()
+  loadAllTextures(reg: texReg, albums: appState.mediaLibrary.albums)
+  let world: UiWorld = buildScreenWorld(screen: Screen.home, scenes: scenes, playback: playback, state: appState, texReg: texReg, scrollY: 0.0, viewport: viewport)
+  applyViewportExtent(world: world, viewport: viewport)
+  let layoutCache: LayoutCache = createLayoutCache()
+  let transformCache: TransformCache = createTransformCache()
+  runFrameLayoutTransform(world: world, viewport: viewport, layoutCache: layoutCache, transformCache: transformCache, gpuUi: gpuUi)
+
+  # Warm the persistent gpu2d buffers/pipelines and renderer caches before
+  # measuring RSS. This keeps one-time shader/buffer growth out of the slope.
+  var warm: Int = 0
+  loop warm < 120 {
+    let hoveredWarm: EntityId = pickHoverEntity(world: world, idx: warm)
+    let dirtyWarm: Bool = hoverScaleSystem(world: world, hovered: hoveredWarm, dt: 0.016)
+    uiBeginFrame(clear: pageBgColor)
+    renderSystemGpu2d(world: world, res: gpuUi)
+    uiEndFrame()
+    warm = warm + 1
+  }
+
+  let baselineKb: Int = processRssKb()
+  log("[hover-stress] baseline rss_kb={baselineKb}")
+  var i: Int = 0
+  var lastLog: Int = 0
+  loop i < stressN {
+    let hovered: EntityId = pickHoverEntity(world: world, idx: i)
+    let dirty: Bool = hoverScaleSystem(world: world, hovered: hovered, dt: 0.016)
+    uiBeginFrame(clear: pageBgColor)
+    renderSystemGpu2d(world: world, res: gpuUi)
+    uiEndFrame()
+    i = i + 1
+    if i - lastLog >= 600 {
+      let nowKb: Int = processRssKb()
+      log("[hover-stress] frame {i} rss_kb={nowKb} growth_kb={nowKb - baselineKb}")
+      lastLog = i
+    }
+  }
+  let finalKb: Int = processRssKb()
+  log("[hover-stress] done {stressN} frames rss_kb={finalKb} growth_kb={finalKb - baselineKb}")
+  ret true
+}
+
 # Memory-stress runner. Enabled by `RAE_UI_STRESS_REBUILDS=1`: rebuilds
 # the world `stressN` times in a tight loop (no input, no draw) and logs
 # RSS every 5000 iterations so an external script can sample memory growth
@@ -18,7 +96,12 @@ open ui/ecs
 func runStressMode(
   scenes: view AlbumScenes
   appState: mod AppState
+  gpuUi: view Gpu2dUi
 ) ret Bool {
+  if runHoverStressMode(scenes: scenes, appState: appState, gpuUi: gpuUi) {
+    ret true
+  }
+
   let stressEnv: String = getEnv(name: "RAE_UI_STRESS_REBUILDS")
   if stressEnv.length() is 0 {
     ret false
