@@ -110,7 +110,7 @@ func rae_sys_list_dir(folder: String) extern ret String
 # order; Linux ext4 typically yields hash-bucket order. Don't
 # rely on either — sort the result if your UI needs stable
 # ordering.
-func listDir(folder: own String) pub ret List(File) {
+func listDir(folder: view String) pub ret List(File) {
   let raw: String = rae_sys_list_dir(folder: folder)
   let lines: List(String) = raw.split(sep: "\n")
   let result: List(File) = createList(File, cap: lines.length)
@@ -135,7 +135,7 @@ func listDir(folder: own String) pub ret List(File) {
 # contexts. We hit the underlying buf-get directly here, the same
 # workaround the example code uses (see screen_router.rae and the
 # track-row loop in album_view.rae).
-func listDirByExt(folder: own String, ext: view String) pub ret List(File) {
+func listDirByExt(folder: view String, ext: view String) pub ret List(File) {
   let all: List(File) = listDir(folder: folder)
   let result: List(File) = createList(File, cap: all.length)
   var i: Int = 0
