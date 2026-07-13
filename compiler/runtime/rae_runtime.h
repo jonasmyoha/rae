@@ -497,6 +497,8 @@ rae_Char rae_ext_rae_io_read_char(void);
  * is leaking when residual RSS growth is small but linear. */
 void rae_ext_rae_mem_stats_dump(void);
 int64_t rae_ext_rae_mem_stats_outstanding(void);
+int64_t rae_ext_rae_mem_stats_buf_outstanding(void);
+int64_t rae_ext_rae_mem_stats_buf_outstanding_bytes(void);
 
 void rae_ext_rae_seed(int64_t seed);
 double rae_ext_rae_random(void);

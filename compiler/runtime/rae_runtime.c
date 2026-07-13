@@ -510,6 +510,16 @@ int64_t rae_ext_rae_mem_stats_outstanding(void) {
   return total;
 }
 
+int64_t rae_ext_rae_mem_stats_buf_outstanding(void) {
+  if (!g_mem_stats_enabled) return 0;
+  return g_mem_buf_alloc_n - g_mem_buf_free_n;
+}
+
+int64_t rae_ext_rae_mem_stats_buf_outstanding_bytes(void) {
+  if (!g_mem_stats_enabled) return 0;
+  return g_mem_buf_alloc_b - g_mem_buf_free_b;
+}
+
 /* Internal helpers: allocate a String body with a known call-site
  * tag. The toString helpers (str_i64/str_f64/str_bool/str_char) use
  * these so their allocations don't all get bucketed under "from_buf"
@@ -4787,7 +4797,8 @@ static int g_g2d_img_cmd_cap = 0;
 static WGPURenderPipeline g_g2d_img_pipeline = NULL;
 static WGPUBuffer* g_g2d_img_ubuf = NULL;   /* pool of 48-byte per-draw uniforms */
 static int g_g2d_img_ubuf_n = 0;
-static WGPUBindGroup* g_g2d_img_frame_binds = NULL;  /* transient, released after submit */
+static WGPUBindGroup* g_g2d_img_frame_binds = NULL;  /* cached per draw slot */
+static int* g_g2d_img_frame_handles = NULL;           /* texture handle bound in each slot */
 static int g_g2d_img_frame_bind_n = 0;
 static int g_g2d_img_frame_bind_cap = 0;
 static WGPUBuffer* g_g2d_frame_bufs = NULL;          /* transient per-flush buffers */
@@ -4796,6 +4807,14 @@ static int g_g2d_frame_buf_cap = 0;
 static WGPUBindGroup* g_g2d_frame_binds = NULL;      /* transient per-flush bind groups */
 static int g_g2d_frame_bind_n = 0;
 static int g_g2d_frame_bind_cap = 0;
+static WGPUBuffer* g_g2d_box_frame_bufs = NULL;      /* persistent per-flush storage buffers */
+static int* g_g2d_box_frame_buf_cap = NULL;          /* capacity in primitives */
+static int g_g2d_box_frame_buf_n = 0;
+static int g_g2d_box_frame_buf_slots = 0;
+static WGPUBuffer* g_g2d_text_frame_bufs[RAE_SDF_MAX_ATLAS];
+static int* g_g2d_text_frame_buf_cap[RAE_SDF_MAX_ATLAS];
+static int g_g2d_text_frame_buf_n[RAE_SDF_MAX_ATLAS];
+static int g_g2d_text_frame_buf_slots[RAE_SDF_MAX_ATLAS];
 void rae_ext_gpu2d_flush(void);
 
 static void rae_g2d_keep_frame_buf(WGPUBuffer b) {
@@ -4816,6 +4835,54 @@ static void rae_g2d_keep_frame_bind(WGPUBindGroup b) {
         g_g2d_frame_bind_cap = cap;
     }
     g_g2d_frame_binds[g_g2d_frame_bind_n++] = b;
+}
+
+static WGPUBuffer rae_g2d_box_frame_buffer(int prims) {
+    int slot = g_g2d_box_frame_buf_n++;
+    if (slot >= g_g2d_box_frame_buf_slots) {
+        int old = g_g2d_box_frame_buf_slots;
+        int cap = old ? old * 2 : 64;
+        while (cap <= slot) cap *= 2;
+        g_g2d_box_frame_bufs = (WGPUBuffer*)realloc(g_g2d_box_frame_bufs, (size_t)cap * sizeof(WGPUBuffer));
+        g_g2d_box_frame_buf_cap = (int*)realloc(g_g2d_box_frame_buf_cap, (size_t)cap * sizeof(int));
+        for (int i = old; i < cap; i++) { g_g2d_box_frame_bufs[i] = NULL; g_g2d_box_frame_buf_cap[i] = 0; }
+        g_g2d_box_frame_buf_slots = cap;
+    }
+    if (!g_g2d_box_frame_bufs[slot] || g_g2d_box_frame_buf_cap[slot] < prims) {
+        if (g_g2d_box_frame_bufs[slot]) wgpuBufferRelease(g_g2d_box_frame_bufs[slot]);
+        int cap = g_g2d_box_frame_buf_cap[slot] ? g_g2d_box_frame_buf_cap[slot] : 4;
+        while (cap < prims) cap *= 2;
+        WGPUBufferDescriptor bd; memset(&bd, 0, sizeof(bd));
+        bd.size = (uint64_t)cap * G2D_PRIM_FLOATS * sizeof(float);
+        bd.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
+        g_g2d_box_frame_bufs[slot] = wgpuDeviceCreateBuffer(g_wgpu_dev, &bd);
+        g_g2d_box_frame_buf_cap[slot] = cap;
+    }
+    return g_g2d_box_frame_bufs[slot];
+}
+
+static WGPUBuffer rae_g2d_text_frame_buffer(int ai, int glyphs) {
+    int slot = g_g2d_text_frame_buf_n[ai]++;
+    if (slot >= g_g2d_text_frame_buf_slots[ai]) {
+        int old = g_g2d_text_frame_buf_slots[ai];
+        int cap = old ? old * 2 : 64;
+        while (cap <= slot) cap *= 2;
+        g_g2d_text_frame_bufs[ai] = (WGPUBuffer*)realloc(g_g2d_text_frame_bufs[ai], (size_t)cap * sizeof(WGPUBuffer));
+        g_g2d_text_frame_buf_cap[ai] = (int*)realloc(g_g2d_text_frame_buf_cap[ai], (size_t)cap * sizeof(int));
+        for (int i = old; i < cap; i++) { g_g2d_text_frame_bufs[ai][i] = NULL; g_g2d_text_frame_buf_cap[ai][i] = 0; }
+        g_g2d_text_frame_buf_slots[ai] = cap;
+    }
+    if (!g_g2d_text_frame_bufs[ai][slot] || g_g2d_text_frame_buf_cap[ai][slot] < glyphs) {
+        if (g_g2d_text_frame_bufs[ai][slot]) wgpuBufferRelease(g_g2d_text_frame_bufs[ai][slot]);
+        int cap = g_g2d_text_frame_buf_cap[ai][slot] ? g_g2d_text_frame_buf_cap[ai][slot] : 16;
+        while (cap < glyphs) cap *= 2;
+        WGPUBufferDescriptor bd; memset(&bd, 0, sizeof(bd));
+        bd.size = (uint64_t)cap * G2D_TEXT_FLOATS * sizeof(float);
+        bd.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
+        g_g2d_text_frame_bufs[ai][slot] = wgpuDeviceCreateBuffer(g_wgpu_dev, &bd);
+        g_g2d_text_frame_buf_cap[ai][slot] = cap;
+    }
+    return g_g2d_text_frame_bufs[ai][slot];
 }
 
 /* Read a whole file into a malloc'd buffer. Returns NULL on failure. */
@@ -5123,7 +5190,13 @@ static void rae_g2d_flush_images(void) {
     }
     WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(g_g2d_img_pipeline, 0);
     if (g_g2d_img_frame_bind_cap < total_img_uniforms) {
+        int old_cap = g_g2d_img_frame_bind_cap;
         g_g2d_img_frame_binds = (WGPUBindGroup*)realloc(g_g2d_img_frame_binds, (size_t)total_img_uniforms * sizeof(WGPUBindGroup));
+        g_g2d_img_frame_handles = (int*)realloc(g_g2d_img_frame_handles, (size_t)total_img_uniforms * sizeof(int));
+        for (int i = old_cap; i < total_img_uniforms; i++) {
+            g_g2d_img_frame_binds[i] = NULL;
+            g_g2d_img_frame_handles[i] = 0;
+        }
         g_g2d_img_frame_bind_cap = total_img_uniforms;
     }
     wgpuRenderPassEncoderSetPipeline(g_g2d_pass, g_g2d_img_pipeline);
@@ -5145,8 +5218,14 @@ static void rae_g2d_flush_images(void) {
         e[3].binding = 3; e[3].sampler = g_g2d_sampler;
         WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
         bgd.layout = bgl; bgd.entryCount = 4; bgd.entries = e;
-        WGPUBindGroup bind = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
-        g_g2d_img_frame_binds[g_g2d_img_frame_bind_n++] = bind;   /* released after submit */
+        if (g_g2d_img_frame_binds[uniform_slot] == NULL ||
+            g_g2d_img_frame_handles[uniform_slot] != c->handle) {
+            if (g_g2d_img_frame_binds[uniform_slot]) wgpuBindGroupRelease(g_g2d_img_frame_binds[uniform_slot]);
+            g_g2d_img_frame_binds[uniform_slot] = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
+            g_g2d_img_frame_handles[uniform_slot] = c->handle;
+        }
+        WGPUBindGroup bind = g_g2d_img_frame_binds[uniform_slot];
+        g_g2d_img_frame_bind_n++;
         rae_g2d_set_scissor(c->clip);
         wgpuRenderPassEncoderSetBindGroup(g_g2d_pass, 0, bind, 0, NULL);
         wgpuRenderPassEncoderDraw(g_g2d_pass, 6, 1, 0, 0);
@@ -5164,6 +5243,8 @@ void rae_ext_gpu2d_beginFrame(double r, double g, double b, double a) {
     g_g2d_img_frame_bind_n = 0;
     g_g2d_frame_buf_n = 0;
     g_g2d_frame_bind_n = 0;
+    g_g2d_box_frame_buf_n = 0;
+    for (int i = 0; i < RAE_SDF_MAX_ATLAS; i++) g_g2d_text_frame_buf_n[i] = 0;
     if (!g_g2d_off_view) return;
     /* Render into the persistent offscreen target (NOT the surface drawable),
      * so a frame always renders regardless of window compositing. */
@@ -5248,8 +5329,8 @@ void rae_ext_gpu2d_endFrame(void) {
     g_g2d_frame_bind_n = 0;
     for (int i = 0; i < g_g2d_frame_buf_n; i++) wgpuBufferRelease(g_g2d_frame_bufs[i]);
     g_g2d_frame_buf_n = 0;
-    /* The per-image bind groups were live for the pass; safe to free now. */
-    for (int i = 0; i < g_g2d_img_frame_bind_n; i++) wgpuBindGroupRelease(g_g2d_img_frame_binds[i]);
+    /* Per-image bind groups are cached by draw slot + texture handle.
+     * They stay alive across frames and are released at gpu2d shutdown. */
     g_g2d_img_frame_bind_n = 0;
     wgpuCommandBufferRelease(cb);
     wgpuRenderPassEncoderRelease(g_g2d_pass); g_g2d_pass = NULL;
@@ -5282,6 +5363,12 @@ void rae_ext_gpu2d_endFrame(void) {
         g_g2d_last_present_ok = 1;
     }
     if (st.texture) wgpuTextureRelease(st.texture);
+    /* wgpu-native retires deferred object destruction and presentation work
+     * from device polling. Hover animation can render thousands of frames
+     * without any readback/map path, so per-frame buffers/bind groups that
+     * were released above otherwise sit in the backend's pending queues and
+     * show up as a slow RSS climb while the UI is actively animating. */
+    if (g_wgpu_dev) wgpuDevicePoll(g_wgpu_dev, false, NULL);
 }
 
 rae_Bool rae_ext_gpu2d_lastPresentOk(void) {
@@ -5301,14 +5388,10 @@ void rae_ext_gpu2d_flush(void) {
         wgpuQueueWriteBuffer(g_wgpu_queue, g_g2d_uniform, 0, xf, sizeof(xf));
     }
     if (g_g2d_prim_count > 0) {
-        WGPUBufferDescriptor bd; memset(&bd, 0, sizeof(bd));
-        bd.size = (uint64_t)g_g2d_prim_count * G2D_PRIM_FLOATS * sizeof(float);
-        bd.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
-        WGPUBuffer instbuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &bd);
+        WGPUBuffer instbuf = rae_g2d_box_frame_buffer(g_g2d_prim_count);
         wgpuQueueWriteBuffer(g_wgpu_queue, instbuf, 0, g_g2d_prims,
                              (size_t)g_g2d_prim_count * G2D_PRIM_FLOATS * sizeof(float));
         WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(g_g2d_pipeline, 0);
-        rae_g2d_keep_frame_buf(instbuf);
         wgpuRenderPassEncoderSetPipeline(g_g2d_pass, g_g2d_pipeline);
         /* Draw contiguous same-clip runs. Each run sets the scissor (#144, the
          * axis-aligned bbox cull) and binds a per-run clip uniform (#118, the
@@ -5357,10 +5440,7 @@ void rae_ext_gpu2d_flush(void) {
         for (int ai = 0; ai < RAE_SDF_MAX_ATLAS; ai++) {
             if (g_g2d_text_count[ai] <= 0) continue;
             if (!rae_g2d_atlas_texview(ai + 1)) continue;
-            WGPUBufferDescriptor bd; memset(&bd, 0, sizeof(bd));
-            bd.size = (uint64_t)g_g2d_text_count[ai] * G2D_TEXT_FLOATS * sizeof(float);
-            bd.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
-            WGPUBuffer instbuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &bd);
+            WGPUBuffer instbuf = rae_g2d_text_frame_buffer(ai, g_g2d_text_count[ai]);
             wgpuQueueWriteBuffer(g_wgpu_queue, instbuf, 0, g_g2d_text_prims[ai],
                                  (size_t)g_g2d_text_count[ai] * G2D_TEXT_FLOATS * sizeof(float));
             WGPUTextureView view = rae_g2d_atlas_texview(ai + 1);
@@ -5375,7 +5455,6 @@ void rae_ext_gpu2d_flush(void) {
             bgd.layout = bgl; bgd.entryCount = 4; bgd.entries = e;
             WGPUBindGroup bind = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
             wgpuBindGroupLayoutRelease(bgl);
-            rae_g2d_keep_frame_buf(instbuf);
             rae_g2d_keep_frame_bind(bind);
             wgpuRenderPassEncoderSetBindGroup(g_g2d_pass, 0, bind, 0, NULL);
             int cnt = g_g2d_text_count[ai];
@@ -5427,10 +5506,27 @@ void rae_ext_gpu2d_closeWindow(void) {
     for (int i = 0; i < g_g2d_frame_buf_n; i++) wgpuBufferRelease(g_g2d_frame_bufs[i]);
     g_g2d_frame_buf_n = 0;
     if (g_g2d_frame_bufs) { free(g_g2d_frame_bufs); g_g2d_frame_bufs = NULL; g_g2d_frame_buf_cap = 0; }
+    for (int i = 0; i < g_g2d_box_frame_buf_slots; i++) {
+        if (g_g2d_box_frame_bufs[i]) wgpuBufferRelease(g_g2d_box_frame_bufs[i]);
+    }
+    if (g_g2d_box_frame_bufs) { free(g_g2d_box_frame_bufs); g_g2d_box_frame_bufs = NULL; }
+    if (g_g2d_box_frame_buf_cap) { free(g_g2d_box_frame_buf_cap); g_g2d_box_frame_buf_cap = NULL; }
+    g_g2d_box_frame_buf_n = 0; g_g2d_box_frame_buf_slots = 0;
+    for (int ai = 0; ai < RAE_SDF_MAX_ATLAS; ai++) {
+        for (int i = 0; i < g_g2d_text_frame_buf_slots[ai]; i++) {
+            if (g_g2d_text_frame_bufs[ai][i]) wgpuBufferRelease(g_g2d_text_frame_bufs[ai][i]);
+        }
+        if (g_g2d_text_frame_bufs[ai]) { free(g_g2d_text_frame_bufs[ai]); g_g2d_text_frame_bufs[ai] = NULL; }
+        if (g_g2d_text_frame_buf_cap[ai]) { free(g_g2d_text_frame_buf_cap[ai]); g_g2d_text_frame_buf_cap[ai] = NULL; }
+        g_g2d_text_frame_buf_n[ai] = 0; g_g2d_text_frame_buf_slots[ai] = 0;
+    }
     /* Image pipeline + textures. */
-    for (int i = 0; i < g_g2d_img_frame_bind_n; i++) wgpuBindGroupRelease(g_g2d_img_frame_binds[i]);
+    for (int i = 0; i < g_g2d_img_frame_bind_cap; i++) {
+        if (g_g2d_img_frame_binds[i]) wgpuBindGroupRelease(g_g2d_img_frame_binds[i]);
+    }
     g_g2d_img_frame_bind_n = 0;
     if (g_g2d_img_frame_binds) { free(g_g2d_img_frame_binds); g_g2d_img_frame_binds = NULL; g_g2d_img_frame_bind_cap = 0; }
+    if (g_g2d_img_frame_handles) { free(g_g2d_img_frame_handles); g_g2d_img_frame_handles = NULL; }
     for (int i = 0; i < g_g2d_img_ubuf_n; i++) if (g_g2d_img_ubuf[i]) wgpuBufferRelease(g_g2d_img_ubuf[i]);
     if (g_g2d_img_ubuf) { free(g_g2d_img_ubuf); g_g2d_img_ubuf = NULL; g_g2d_img_ubuf_n = 0; }
     for (int i = 0; i < g_g2d_img_n; i++) {
