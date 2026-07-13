@@ -144,9 +144,12 @@ func hoverScaleSystem(world: mod UiWorld, hovered: view EntityId, dt: view Float
     }
     let next: Float = easeTowards(current: hs.current, target: target, speed: hs.speed, dt: frameDt, epsilon: 0.001)
     if next is not hs.current or target is not hs.target {
-      hs.current = next
-      hs.target = target
-      componentSet(this: world.hoverScales, entity: entity, data: hs)
+      # Per-frame animation state is a mutable component update, not a
+      # replace/drop cycle. Updating in place avoids allocator churn in the
+      # hot hover path that 106 drives while the cursor moves over covers.
+      let slot: mod HoverScale => componentMod(this: world.hoverScales, entity: entity)
+      slot.current = next
+      slot.target = target
       if next is not target {
         stillAnimating = true
       }
