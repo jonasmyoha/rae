@@ -1,0 +1,100 @@
+# Regression test for the album-loader use-after-move (#282 / #283c).
+#
+# lib/fs.rae `listDir` was wrongly declared `own String` even though it
+# only READS the folder path (and copies it into every returned entry).
+# examples/106 `loadAllAlbums` passed an owned folder local into listDir
+# and then REUSED that local afterward (in per-entry path interps + a
+# final log). While `own` params leaked, this was masked; once the
+# extern-borrow fix made callees correctly drop their `own` params,
+# listDir freed the folder's heap and the caller's reuse read freed
+# memory — symptom: "loaded 0 albums from <garbage>" and blank covers.
+#
+# The fix: a read-only param must be `view`. This is a simplified album
+# loader that reproduces the exact shape and asserts (a) the caller's
+# folder local survives the call intact, and (b) the per-entry folder
+# copies don't leak across many scans.
+import core
+import string
+
+func rae_ext_rae_mem_stats_outstanding() extern ret Int
+
+type Entry {
+  name: String
+  folder: String
+}
+
+# Simplified `listDir`: borrows `folder`, copies it into each entry
+# (like listDir copies it into every returned File.folder). It must NOT
+# consume the caller's string.
+func scanFolder(folder: view String) ret List(Entry) {
+  let result: List(Entry) = createList(Entry, cap: 3)
+  var i: Int = 0
+  loop i < 3 {
+    # Store an independent COPY of the folder (interp), so `folder` is
+    # only READ here — never transferred out. That mirrors listDir, which
+    # reads `folder` (via the rae_sys_list_dir extern) and copies it into
+    # each File; a plain `{ folder: folder }` would instead MOVE the param
+    # into the first entry, aliasing it alive and hiding the bug.
+    let e: Entry = { name: "cover", folder: "{folder}" }
+    result.add(value: own e)
+    i = i + 1
+  }
+  ret result
+}
+
+# One scan + a post-call REUSE of the folder local — the album bug.
+func scanOnce() ret Bool {
+  # An OWNED heap folder (concat result, is_owned=1) — like loadAllAlbums'
+  # `let copiedFolder: String = folder`. A static-literal folder wouldn't
+  # reproduce the bug: dropping a literal is a no-op, so the UAF only bites
+  # a heap-owned string.
+  let base: String = "assets"
+  let folder: String = base.concat(other: "/albums")
+  let entries: List(Entry) = scanFolder(folder: folder)
+  # If the param wrongly consumed `folder` (the `own` mistake), its heap
+  # is now freed. Allocate a same-length string to reclaim that slot so a
+  # subsequent use-after-move reads THIS content instead of stale-correct
+  # bytes — the album loader did this implicitly via its per-entry path
+  # interps + parseAlbum allocations between the free and the reuse.
+  # "assets/albums" is 13 chars; match it.
+  let clobber: String = "ZZZZZZ".concat(other: "/ZZZZZZ")
+  # Reuse `folder` by BUILDING A PATH from it — exactly like loadAllAlbums'
+  # `"{copiedFolder}/{stem}/album.json"`.
+  let jsonPath: String = folder.concat(other: "/x/album.json")
+  # The entry's stored copy of the folder must also be intact.
+  let firstFolder: Entry = rae_ext_rae_buf_get(buf: entries.data, index: 0)
+  ret entries.length is 3
+    and jsonPath.equals(other: "assets/albums/x/album.json")
+    and firstFolder.folder.equals(other: "assets/albums")
+}
+
+func main() {
+  var i: Int = 0
+  let warmups: Int = 50
+  loop i < warmups {
+    let ok: Bool = scanOnce()
+    i = i + 1
+  }
+  let baseline: Int = rae_ext_rae_mem_stats_outstanding()
+
+  let iterations: Int = 2000
+  var allOk: Bool = true
+  i = 0
+  loop i < iterations {
+    let ok: Bool = scanOnce()
+    if ok is false {
+      allOk = false
+    }
+    i = i + 1
+  }
+  let leaked: Int = rae_ext_rae_mem_stats_outstanding() - baseline
+
+  log("iterations: {iterations}")
+  if allOk is false {
+    log("verdict: CORRUPT (folder use-after-move — album-loader regression)")
+  } else if leaked >= 100 {
+    log("verdict: LEAK outstanding={leaked}")
+  } else {
+    log("verdict: OK")
+  }
+}
