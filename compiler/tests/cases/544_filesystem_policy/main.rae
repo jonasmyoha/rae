@@ -1,0 +1,31 @@
+import core
+import filesystem
+import sys
+
+func main() {
+  let base: String = "test_filesystem_policy_tmp"
+  let made: Bool = sys.makeDir(path: base)
+
+  let a: Bool = sys.writeFile(path: filesystem.join(a: base, b: "shot_2026-07-14_0001.png"), content: "a")
+  let b: Bool = sys.writeFile(path: filesystem.join(a: base, b: "shot_2026-07-14_0009.png"), content: "b")
+  let c: Bool = sys.writeFile(path: filesystem.join(a: base, b: "shot_2026-07-14_skip.txt"), content: "c")
+
+  let joined: String = filesystem.join(a: "tmp/", b: "file.txt")
+  let basePart: String = filesystem.baseName(path: "/tmp/rae/file.txt")
+  let dirPart: String = filesystem.dirName(path: "/tmp/rae/file.txt")
+  let extPart: String = filesystem.ext(path: "/tmp/rae/FILE.PNG")
+  let stemPart: String = filesystem.stem(path: "/tmp/rae/file.txt")
+  let next: Int = filesystem.nextIndex(dir: base, prefix: "shot_2026-07-14_")
+
+  log("join: {joined}")
+  log("base: {basePart}")
+  log("dir: {dirPart}")
+  log("ext: {extPart}")
+  log("stem: {stemPart}")
+  log("next: {next}")
+
+  let da: Bool = sys.delete(path: filesystem.join(a: base, b: "shot_2026-07-14_0001.png"))
+  let db: Bool = sys.delete(path: filesystem.join(a: base, b: "shot_2026-07-14_0009.png"))
+  let dc: Bool = sys.delete(path: filesystem.join(a: base, b: "shot_2026-07-14_skip.txt"))
+  let dd: Bool = sys.delete(path: base)
+}
