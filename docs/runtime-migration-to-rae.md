@@ -348,6 +348,11 @@ ones.
 Keep C reference implementations until the Rae version passes compatibility
 tests and memory diagnostics.
 
+First completed policy slice: `#290` moved filesystem render-output next-index
+scanning and portable path helpers into `lib/filesystem.rae`, leaving C with
+only SDL-backed platform primitives such as known folders, directory existence,
+directory listing, and date formatting.
+
 ### Stage 3: Move Pure Algorithms And Platform Policy
 
 Start with algorithms that require no platform callbacks:

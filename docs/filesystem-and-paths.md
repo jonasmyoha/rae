@@ -33,9 +33,11 @@ path-string helpers (`join`, `baseName`, `dirName`, `ext`) — small, bounded, n
 platform calls, good dogfooding. The seam keeps it reversible: a POSIX+Win32
 runtime fallback for non-SDL CLI tools can slot behind the same API later if needed.
 
-Implemented in an `RAE_HAS_SDL3` runtime block, so `import filesystem` requires an
-SDL3-linked app (fine for the raytracers; the watch/`.deps` plumbing already links
-SDL3 on import).
+Implemented as a Rae policy module over narrow `RAE_HAS_SDL3` runtime calls, so
+`import filesystem` requires an SDL3-linked app today (fine for the raytracers;
+the watch/`.deps` plumbing already links SDL3 on import). The runtime keeps raw
+known-folder, directory, existence, and date primitives; path composition and
+render-output filename policy live in `lib/filesystem.rae`.
 
 ---
 
@@ -69,10 +71,16 @@ func prefDir(org: view String, app: view String) ret String   # writable, sandbo
 func appDir() ret String                                       # base/asset path
 
 # Pure path helpers (implemented in Rae, no platform dep)
+func trimTrailingSeparators(path: view String) ret String
 func join(a: view String, b: view String) ret String
 func baseName(path: view String) ret String
 func dirName(path: view String) ret String
 func ext(path: view String) ret String
+func stem(path: view String) ret String
+
+# Render-output policy (implemented in Rae over listDir)
+func nextIndex(dir: view String, prefix: view String) ret Int
+func renderPath(stem: view String) ret String
 ```
 
 Usage: `filesystem.desktopDir()`, `filesystem.exists(path)`. (There is no
@@ -90,7 +98,8 @@ see `module-namespacing.md`.)
 3. **Filename:** ISO date + per-day sequential — `rae_render_2026-06-26_0001.png`.
    The sequential index is `1 + max` of the existing `rae_render_<today>_*` files
    in the target dir (found via `filesystem.glob`), so F2 never overwrites and the
-   scan dogfoods the listing API. Needs a small runtime date helper (`strftime`).
+   scan dogfoods the listing API. The date remains a small runtime helper
+   (`strftime`).
 
 A helper (in `lib/filesystem.rae` or `lib/image.rae`) packages the policy:
 
@@ -111,6 +120,14 @@ renderTarget(stem):
 namespacing (Option A) is in place — see `module-namespacing.md`. Then rewire the
 raytracer F2 save (currently `imageSavePng(path: "rae_render.png", …)`) to
 `imageSavePng(path: filesystem-renderTarget…, …)`.
+
+## Runtime Migration Status
+
+`#290` moved the render-output next-index scan out of C and into Rae. The C
+runtime no longer scans directory entries for numbered filenames; it only
+exposes raw platform primitives. `filesystem.nextIndex` now uses `fs.listDir`,
+and the portable path helpers (`join`, `baseName`, `dirName`, `ext`, `stem`,
+`trimTrailingSeparators`) are ordinary Rae code.
 
 ## Verify before committing
 
