@@ -303,6 +303,8 @@ func componentRemove(T: type, this: mod ComponentTable(T), entity: view EntityId
   let removedKey: Int = entity.value
   let last: Int = this.denseEntities.length - 1
   if idx is not last {
+    # Drop removed payload; move tail into idx without dropping moved tail.
+    rae_ext_rae_buf_drop_at(buf: this.denseData.data, index: idx)
     let lastEntity: EntityId = rae_ext_rae_buf_get(buf: this.denseEntities.data, index: last)
     rae_ext_rae_buf_set(buf: this.denseEntities.data, index: idx, value: lastEntity)
     let lastData: T = rae_ext_rae_buf_get(buf: this.denseData.data, index: last)
@@ -315,10 +317,12 @@ func componentRemove(T: type, this: mod ComponentTable(T), entity: view EntityId
     let lastStamp: Int = rae_ext_rae_buf_get(buf: this.denseStamps.data, index: last)
     rae_ext_rae_buf_set(buf: this.denseStamps.data, index: idx, value: lastStamp)
   }
-  # Shrink length by 1. Non-generic helpers for the entity + stamp lists
-  # because `.remove(...)` would mis-mangle in this T-generic context.
   popLastEntity(lst: this.denseEntities)
-  this.denseData.remove(index: last)
+  if idx is last {
+    this.denseData.remove(index: last)
+  } else {
+    this.denseData.length = this.denseData.length - 1
+  }
   popLastInt(lst: this.denseStamps)
   # Mark the removed entity absent in the sparse map.
   if removedKey >= 0 {
