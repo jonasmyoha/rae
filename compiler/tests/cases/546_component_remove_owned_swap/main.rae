@@ -1,0 +1,30 @@
+# Regression for ComponentTable swap-remove with owned component fields.
+#
+# Removing a non-tail component moves the tail slot into its dense index. The
+# tail payload must be treated as moved; dropping the old tail after the byte
+# copy leaves the moved slot holding freed String pointers and crashes when the
+# moved entity is removed later. This mirrors the 106 page-unmount crash in
+# componentRemove(Name).
+open ui/ecs
+open ui/components
+
+func makeOwnedName(i: view Int) ret Name {
+  let prefix: String = "name"
+  let label: String = prefix.concat(other: "-{i}")
+  ret Name { label: own label }
+}
+
+func main() {
+  var names: ComponentTable(Name) = createComponentTable(Name)
+
+  let e1: EntityId = entityId(v: 1)
+  let e2: EntityId = entityId(v: 2)
+
+  componentSet(this: names, entity: e1, data: makeOwnedName(i: 1))
+  componentSet(this: names, entity: e2, data: makeOwnedName(i: 2))
+
+  componentRemove(this: names, entity: e1)
+  componentRemove(this: names, entity: e2)
+
+  log("owned swap-remove ok")
+}
