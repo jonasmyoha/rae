@@ -98,6 +98,11 @@ These remain ABI-level until a later ownership model explicitly changes them:
 - primitive aliases such as `rae_Bool`, `rae_Char`, `rae_Char32`
 - view/mod helper structs generated for C lowering
 
+Container algorithms are not part of the permanent kernel. `List(T)`,
+`StringMap(V)`, and future `HashMap(K,V)` policy should live in Rae over this
+raw buffer ABI; C owns only allocation, byte movement, and compiler-directed
+element destruction hooks.
+
 Rules:
 
 - Layout changes are breaking ABI changes.
