@@ -1,4 +1,6 @@
-/* String algorithms above the allocation kernel. Future Rae migration candidate once ownership and performance gates are ready.
+/* String algorithms above the allocation kernel. Most ordinary policy is moving
+ * to lib/string.rae; these C entry points remain as compatibility bridges until
+ * no generated or legacy code path references them.
  *
  * Split from rae_runtime.c by runtime migration task #288.
  * This module is included by rae_runtime.c into one translation unit.
