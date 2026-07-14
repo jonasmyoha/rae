@@ -254,6 +254,11 @@ Rae should own:
 - debug labels;
 - convenience APIs.
 
+The detailed `#295` design is `docs/webgpu-resource-management-in-rae.md`.
+That document is the source of truth for the staged migration from today's raw
+runtime tables toward Rae-owned descriptors, caches, validation, bind tracking,
+resize/reconfigure policy, render graph policy, and labels over thin C calls.
+
 ### Image Decoding
 
 C owns:
