@@ -1,63 +1,49 @@
-# ECS storage layer.
-#
-# Adapted from RUICS (rae/docs/royal-blush-ruics-ecs-reference.md § 2)
-# with two Rae quirks worked around: (1) the Live VM doesn't propagate
-# `mod struct` mutations to inner `List` fields, so mutating helpers
-# alias the inner lists via `let foo: mod List(...) => this.foo`;
-# (2) the C backend can't take `&` of an rvalue passed as `view T`, so
-# read helpers return `T` by value and callers bind to a local first.
-# `componentIndexOf` is an O(1) sparse-set lookup (see `sparse` below).
+# ECS storage layer. `componentIndexOf` is an O(1) sparse-set lookup.
 import core
-# Only the raylib-free MSDF *data* types (MsdfState/createMsdfState) — the
-# raylib paint code stays in ui/msdf, so embedding MsdfState in UiWorld no
-# longer drags raylib into GPU2D-only apps (#148).
+# Only raylib-free MSDF data types; paint code stays out of UiWorld.
 import ui/msdf_state
 
-# Entity identifier — a value-type wrapper around `Int` (single-field
-# struct → no heap, copied as bytes). ECS APIs take/return `EntityId`
-# rather than bare `Int` so signatures make the role explicit. Construct
-# via `entityId(n)` / `noEntity()` (sentinel id -1); compare with
-# `eq(a, b)`, not `a is b` (Rae's `is` on structs isn't field-wise).
-# `.value` reads the inner Int until a future `wrap` modifier makes it
-# implicit (deferred — id/key removal commit 568a7f1).
+# Value-type entity id wrapper; compare with `eq`, not struct `is`.
 type EntityId pub {
   value: Int
 }
 
-# Canonical "no entity" sentinel. Returned by lookups that miss,
-# stored in fields that haven't been wired up yet, etc.
 func noEntity() pub ret EntityId {
   ret EntityId { value: 0 - 1 }
 }
 
-# Wrap a known integer entity index as an EntityId. Used at the
-# few seams where entity ids cross from bare-Int land (boot
-# defaults, deserialised state, debug logs) into the typed ECS.
 func entityId(v: view Int) pub ret EntityId {
   ret EntityId { value: v }
 }
 
-# True when both ids refer to the same entity. Use this rather
-# than `==` / `is` on the struct values — Rae's `is` on user
-# structs doesn't compare field-by-field, so `e1 is e2` is not
-# what you want for entity comparison.
 func eq(this: view EntityId, other: view EntityId) pub ret Bool {
   ret this.value is other.value
 }
 
-# True when this id is the `noEntity()` sentinel. Handy at hit-
-# test sites where -1 means "nothing under the cursor".
 func isNone(this: view EntityId) pub ret Bool {
   ret this.value < 0
 }
 
-# Non-generic helpers for the entity-id list. The C backend mis-mangles
-# generic method calls (`add`, `remove`) on a `List(EntityId)` field
-# when they appear *inside* a function generic over T — it substitutes
-# T into the inner specialisation. Routing through a non-generic
-# helper stops the substitution.
+# Non-generic helpers avoid inner List specialisation drift inside
+# ComponentTable(T)'s generic functions.
 func appendEntityList(lst: mod List(EntityId), value: view EntityId) {
   lst.add(value: value)
+}
+
+func entityListAt(lst: view List(EntityId), index: view Int) ret EntityId {
+  ret rae_ext_rae_buf_get(buf: lst.data, index: index)
+}
+
+func swapRemoveEntityList(lst: mod List(EntityId), index: view Int) {
+  if index < 0 or index >= lst.length {
+    ret
+  }
+  let last: Int = lst.length - 1
+  if index is not last {
+    let e: EntityId = entityListAt(lst: lst, index: last)
+    rae_ext_rae_buf_set(buf: lst.data, index: index, value: e)
+  }
+  lst.length = last
 }
 
 func popLastEntity(lst: mod List(EntityId)) {
@@ -67,23 +53,31 @@ func popLastEntity(lst: mod List(EntityId)) {
   lst.remove(index: lst.length - 1)
 }
 
-# Drop a List(EntityId) from inside a function generic over T. Calling
-# `drop(lst)` directly there mis-mangles to `drop(T)(List(T))` (same
-# class of bug as `add` / `get` / `remove`). Routing through this
-# non-generic helper stops the substitution, so the call resolves to
-# `drop(EntityId)(List(EntityId))` — which is just `buf_free` on the
-# EntityId buffer (no per-element heap to drop, EntityId is value-type).
 func dropEntityList(lst: mod List(EntityId)) {
   drop(lst)
 }
 
-# Non-generic List(Int) helpers for the sparse map (entity.value ->
-# dense index). Same rationale as the EntityId helpers: routing the
-# add/drop through a non-generic function stops the C backend from
-# substituting the outer T into the inner List(Int) specialisation when
-# these are touched from inside a function generic over T.
 func appendIntList(lst: mod List(Int), value: view Int) {
   lst.add(value: value)
+}
+
+func intListAt(lst: view List(Int), index: view Int) ret Int {
+  ret rae_ext_rae_buf_get(buf: lst.data, index: index)
+}
+
+func setIntListAt(lst: mod List(Int), index: view Int, value: view Int) {
+  rae_ext_rae_buf_set(buf: lst.data, index: index, value: value)
+}
+
+func swapRemoveIntList(lst: mod List(Int), index: view Int) {
+  if index < 0 or index >= lst.length {
+    ret
+  }
+  let last: Int = lst.length - 1
+  if index is not last {
+    setIntListAt(lst: lst, index: index, value: intListAt(lst: lst, index: last))
+  }
+  lst.length = last
 }
 
 func popLastInt(lst: mod List(Int)) {
@@ -302,32 +296,19 @@ func componentRemove(T: type, this: mod ComponentTable(T), entity: view EntityId
   }
   let removedKey: Int = entity.value
   let last: Int = this.denseEntities.length - 1
+  let lastEntity: EntityId = entityListAt(lst: this.denseEntities, index: last)
   if idx is not last {
-    # Drop removed payload; move tail into idx without dropping moved tail.
-    rae_ext_rae_buf_drop_at(buf: this.denseData.data, index: idx)
-    let lastEntity: EntityId = rae_ext_rae_buf_get(buf: this.denseEntities.data, index: last)
-    rae_ext_rae_buf_set(buf: this.denseEntities.data, index: idx, value: lastEntity)
-    let lastData: T = rae_ext_rae_buf_get(buf: this.denseData.data, index: last)
-    rae_ext_rae_buf_set(buf: this.denseData.data, index: idx, value: lastData)
     # The entity that was at `last` now lives at `idx`: repoint its
     # sparse slot so future lookups find it.
-    rae_ext_rae_buf_set(buf: this.sparse.data, index: lastEntity.value, value: idx)
-    # Carry the moved entity's stamp to its new slot — a relocation is not
-    # a modification, so keep its existing stamp rather than re-stamping.
-    let lastStamp: Int = rae_ext_rae_buf_get(buf: this.denseStamps.data, index: last)
-    rae_ext_rae_buf_set(buf: this.denseStamps.data, index: idx, value: lastStamp)
+    setIntListAt(lst: this.sparse, index: lastEntity.value, value: idx)
   }
-  popLastEntity(lst: this.denseEntities)
-  if idx is last {
-    this.denseData.remove(index: last)
-  } else {
-    this.denseData.length = this.denseData.length - 1
-  }
-  popLastInt(lst: this.denseStamps)
+  swapRemoveEntityList(lst: this.denseEntities, index: idx)
+  this.denseData.swapRemove(index: idx)
+  swapRemoveIntList(lst: this.denseStamps, index: idx)
   # Mark the removed entity absent in the sparse map.
   if removedKey >= 0 {
     if removedKey < this.sparse.length {
-      rae_ext_rae_buf_set(buf: this.sparse.data, index: removedKey, value: 0 - 1)
+      setIntListAt(lst: this.sparse, index: removedKey, value: 0 - 1)
     }
   }
   this.generation = this.generation + 1
