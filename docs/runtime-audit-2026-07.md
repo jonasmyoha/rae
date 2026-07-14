@@ -142,7 +142,9 @@ behavior change.
 
 - `String` representation.
 - `List(T)` internals.
-- `HashMap(K,V)` / `StringMap(V)` internals.
+- `HashMap(K,V)` / `StringMap(V)` internals. `#292` moved `List(T)`
+  mutation/drop ownership policy further into Rae, but map rehash/removal
+  ownership cleanup remains blocked on generic-container codegen issues.
 - Generic channel payload storage.
 
 These are high dogfooding value, but the blast radius is large. They should wait

@@ -109,6 +109,7 @@ func set(T: type, this: mod List(T), index: view Int, value: own T) {
   if index < 0 or index >= this.length {
     ret
   }
+  rae_ext_rae_buf_drop_at(buf: this.data, index: index)
   rae_ext_rae_buf_set(buf: this.data, index: index, value: value)
 }
 
@@ -147,6 +148,7 @@ func remove(T: type, this: mod List(T), index: view Int) {
   if index < 0 or index >= this.length {
     ret
   }
+  rae_ext_rae_buf_drop_at(buf: this.data, index: index)
   # Shift elements to the left
   if index < this.length - 1 {
     rae_ext_rae_buf_copy(
@@ -162,6 +164,11 @@ func remove(T: type, this: mod List(T), index: view Int) {
 }
 
 func clear(T: type, this: mod List(T)) {
+  var i: Int = 0
+  loop i < this.length {
+    rae_ext_rae_buf_drop_at(buf: this.data, index: i)
+    i = i + 1
+  }
   this.length = 0
 }
 
@@ -276,6 +283,7 @@ func indexOf(T: type, this: view List(T), value: view T) ret Int {
 }
 
 func free(T: type, this: mod List(T)) {
+  clear(this)
   rae_ext_rae_buf_free(buf: this.data)
   this.length = 0
   this.cap = 0
