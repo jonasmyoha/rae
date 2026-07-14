@@ -370,11 +370,19 @@ scope-exit entry point that injects element drops before raw buffer release.
 rehash/removal ownership cleanup is deferred until the remaining
 generic-container codegen issues are fixed.
 
+Fourth completed policy slice: `#293` kept `rae_String` allocation, drop,
+copy, temp-pool, concat, substring, conversion, and parse-number helpers in C,
+but moved common string algorithms into Rae: `contains`, `startsWith`,
+`endsWith`, `indexOf`, `trim`, and ASCII `toLower`. `split`, `replace`, `join`,
+and `lastIndexOf` were already Rae code. The old C algorithm entry points remain
+compatibility code until the runtime surface can be pruned safely.
+
 ### Stage 3: Move Pure Algorithms And Platform Policy
 
 Start with algorithms that require no platform callbacks:
 
-- UTF-8/string helpers.
+- UTF-8/string helpers. `#293` moved the byte-preserving ASCII/string-search
+  layer into Rae; representation and allocation stay in C.
 - Path helpers.
 - JSON serializer/parser.
 - HashMap/List policy where compiler support is ready.

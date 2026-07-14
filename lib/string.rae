@@ -1,4 +1,6 @@
 # String utilities for Rae
+import char
+
 func rae_str_len(s: String) extern ret Int
 
 func rae_str_compare(a: String, b: String) extern ret Int
@@ -10,18 +12,6 @@ func rae_str_hash(s: String) extern ret Int
 func rae_str_concat(a: String, b: String) extern ret String
 
 func rae_str_sub(s: String, start: Int, len: Int) extern ret String
-
-func rae_str_contains(s: String, sub: String) extern ret Bool
-
-func rae_str_starts_with(s: String, prefix: String) extern ret Bool
-
-func rae_str_ends_with(s: String, suffix: String) extern ret Bool
-
-func rae_str_index_of(s: String, sub: String) extern ret Int
-
-func rae_str_trim(s: String) extern ret String
-
-func rae_str_to_lower(s: String) extern ret String
 
 func rae_str_to_f64(s: String) extern ret Float
 
@@ -86,19 +76,52 @@ func sub(this: view String, start: view Int, len: view Int) ret String {
 }
 
 func contains(this: view String, sub: view String) ret Bool {
-  ret rae_str_contains(s: this, sub: sub)
+  ret this.indexOf(sub: sub) is not -1
 }
 
 func startsWith(this: view String, prefix: view String) ret Bool {
-  ret rae_str_starts_with(s: this, prefix: prefix)
+  let prefixLen: Int = prefix.length()
+  if prefixLen is 0 {
+    ret true
+  }
+  if prefixLen > this.length() {
+    ret false
+  }
+  let head: String = this.sub(start: 0, len: prefixLen)
+  ret head.equals(other: prefix)
 }
 
 func endsWith(this: view String, suffix: view String) ret Bool {
-  ret rae_str_ends_with(s: this, suffix: suffix)
+  let suffixLen: Int = suffix.length()
+  if suffixLen is 0 {
+    ret true
+  }
+  let n: Int = this.length()
+  if suffixLen > n {
+    ret false
+  }
+  let tail: String = this.sub(start: n - suffixLen, len: suffixLen)
+  ret tail.equals(other: suffix)
 }
 
 func indexOf(this: view String, sub: view String) ret Int {
-  ret rae_str_index_of(s: this, sub: sub)
+  let needleLen: Int = sub.length()
+  if needleLen is 0 {
+    ret 0
+  }
+  let n: Int = this.length()
+  if needleLen > n {
+    ret -1
+  }
+  var i: Int = 0
+  loop i <= n - needleLen {
+    let part: String = this.sub(start: i, len: needleLen)
+    if part.equals(other: sub) {
+      ret i
+    }
+    i = i + 1
+  }
+  ret -1
 }
 
 # Right-most occurrence of `sub` inside `this`, or -1 if not found.
@@ -129,13 +152,69 @@ func lastIndexOf(this: view String, sub: view String) ret Int {
   ret result
 }
 
+func lowerAsciiByte(ch: view String) ret String {
+  let c: Char32 = ch.at(index: 0)
+  if c is 'A' { ret "a" }
+  if c is 'B' { ret "b" }
+  if c is 'C' { ret "c" }
+  if c is 'D' { ret "d" }
+  if c is 'E' { ret "e" }
+  if c is 'F' { ret "f" }
+  if c is 'G' { ret "g" }
+  if c is 'H' { ret "h" }
+  if c is 'I' { ret "i" }
+  if c is 'J' { ret "j" }
+  if c is 'K' { ret "k" }
+  if c is 'L' { ret "l" }
+  if c is 'M' { ret "m" }
+  if c is 'N' { ret "n" }
+  if c is 'O' { ret "o" }
+  if c is 'P' { ret "p" }
+  if c is 'Q' { ret "q" }
+  if c is 'R' { ret "r" }
+  if c is 'S' { ret "s" }
+  if c is 'T' { ret "t" }
+  if c is 'U' { ret "u" }
+  if c is 'V' { ret "v" }
+  if c is 'W' { ret "w" }
+  if c is 'X' { ret "x" }
+  if c is 'Y' { ret "y" }
+  if c is 'Z' { ret "z" }
+  ret "{ch}"
+}
+
 # ASCII lowercase conversion. Non-ASCII bytes pass through unchanged.
 func toLower(this: view String) ret String {
-  ret rae_str_to_lower(s: this)
+  var out: String = ""
+  var i: Int = 0
+  let n: Int = this.length()
+  loop i < n {
+    let ch: String = this.sub(start: i, len: 1)
+    out = out.concat(other: string.lowerAsciiByte(ch: ch))
+    i = i + 1
+  }
+  ret out
 }
 
 func trim(this: view String) ret String {
-  ret rae_str_trim(s: this)
+  let n: Int = this.length()
+  if n is 0 {
+    ret ""
+  }
+
+  var start: Int = 0
+  loop start < n and char.isWhitespace(this: this.at(index: start)) {
+    start = start + 1
+  }
+  if start is n {
+    ret ""
+  }
+
+  var end: Int = n - 1
+  loop end > start and char.isWhitespace(this: this.at(index: end)) {
+    end = end - 1
+  }
+  ret this.sub(start: start, len: end - start + 1)
 }
 
 func split(this: view String, sep: view String) ret List(String) {

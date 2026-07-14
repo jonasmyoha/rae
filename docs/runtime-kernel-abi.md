@@ -147,8 +147,11 @@ Permanent for now:
 
 Migration candidates:
 
-- `contains`, `startsWith`, `endsWith`, `trim`, `toLower`, `replace`, `split`,
-  `indexOf`, formatting policy, and parsing helpers.
+- `#293` moved `contains`, `startsWith`, `endsWith`, `trim`, ASCII
+  `toLower`, and `indexOf` into Rae.
+- Remaining candidates: formatting policy, parsing helpers, and eventual
+  removal of compatibility C string algorithm entry points once no generated or
+  legacy code path references them.
 
 Constraint:
 
