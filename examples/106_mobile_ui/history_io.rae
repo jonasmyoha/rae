@@ -77,37 +77,6 @@ func markHistoryArtFired(path: view String) {
   gHistoryArtFiredPaths = gHistoryArtFiredPaths.concat(other: path).concat(other: "|")
 }
 
-# Escape a string for embedding inside a JSON `"..."` literal.
-# Builds the result by walking each character so the caller never
-# ends up with a String that aliases its input — the equivalent
-# String.replace pipeline produced thumbs/values that pointed back
-# into the live `content` accumulator after a few iterations
-# (suspect alias return path in lib/string.replace when the pattern
-# isn't found).
-func jsonEscape(s: view String) ret String {
-  var out: String = ""
-  var i: Int = 0
-  let n: Int = s.length()
-  let bs: String = "\\"
-  let q: String = "\""
-  let bsbs: String = "\\\\"
-  let bsq: String = "\\\""
-  loop i < n {
-    let ch: String = s.sub(start: i, len: 1)
-    if ch.equals(other: bs) {
-      out = out.concat(other: bsbs)
-    } else {
-      if ch.equals(other: q) {
-        out = out.concat(other: bsq)
-      } else {
-        out = out.concat(other: ch)
-      }
-    }
-    i = i + 1
-  }
-  ret out
-}
-
 # Serialise the whole entries list to JSON and overwrite `path`.
 # Idempotent — call after every recordPlay. The file lives under
 # the gitignored `temp/` folder so a checkout doesn't bring a
@@ -137,12 +106,12 @@ func saveHistoryToJson(history: view PlayHistory, path: view String) pub {
     # interpolated builder below never references the list's heap
     # storage through `e.fieldName`. The `"{e.field}"` interpolation
     # syntax forces a fresh allocation per field.
-    let tn: String = jsonEscape(s: e.trackName)
-    let an: String = jsonEscape(s: e.artistName)
-    let alb: String = jsonEscape(s: e.albumName)
-    let stem: String = jsonEscape(s: e.albumStem)
-    let url: String = jsonEscape(s: e.artworkUrl)
-    let tk: String = jsonEscape(s: e.textureKey)
+    let tn: String = json.jsonEscape(s: e.trackName)
+    let an: String = json.jsonEscape(s: e.artistName)
+    let alb: String = json.jsonEscape(s: e.albumName)
+    let stem: String = json.jsonEscape(s: e.albumStem)
+    let url: String = json.jsonEscape(s: e.artworkUrl)
+    let tk: String = json.jsonEscape(s: e.textureKey)
     let durStr: String = "{e.durationSec}"
     let atStr: String = "{e.playedAt}"
 
