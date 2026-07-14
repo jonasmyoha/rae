@@ -70,7 +70,9 @@ Compatibility API used while generated C or stdlib code migrates.
 
 Examples:
 
-- C JSON extraction helpers once `lib/json.rae` owns JSON policy;
+- C JSON extraction helpers used only by generated `Type.fromJson()` and
+  deprecated Live bridge paths; `lib/json.rae` owns ordinary parser/query and
+  string-serialization policy;
 - no-op stubs for disabled capabilities if capability validation replaces them;
 - legacy `RaeAny` boxed buffer helpers once typed containers no longer need them.
 
