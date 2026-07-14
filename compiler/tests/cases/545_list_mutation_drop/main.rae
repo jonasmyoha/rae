@@ -1,0 +1,53 @@
+# List mutation policy must drop replaced and removed owned elements.
+#
+# This guards the Rae-level List policy over raw buffer primitives. Before
+# this test, List.set/remove/clear could overwrite or hide String elements
+# without destroying their owned heap payloads.
+import core
+import string
+
+func rae_ext_rae_mem_stats_outstanding() extern ret Int
+
+func makeName(prefix: view String, i: view Int) ret String {
+  let n: String = i.toString()
+  ret prefix.concat(other: n)
+}
+
+func mutateList(iter: view Int) {
+  let xs: List(String) = createList(String, cap: 8)
+  xs.add(value: makeName(prefix: "a-", i: iter))
+  xs.add(value: makeName(prefix: "b-", i: iter))
+  xs.add(value: makeName(prefix: "c-", i: iter))
+  xs.add(value: makeName(prefix: "d-", i: iter))
+
+  xs.set(index: 1, value: makeName(prefix: "replace-", i: iter))
+  xs.remove(index: 2)
+  xs.clear()
+
+  xs.add(value: makeName(prefix: "after-clear-", i: iter))
+  xs.set(index: 0, value: makeName(prefix: "replace-again-", i: iter))
+}
+
+func main() {
+  var i: Int = 0
+  loop i < 50 {
+    mutateList(iter: i)
+    i = i + 1
+  }
+  let baseline: Int = rae_ext_rae_mem_stats_outstanding()
+
+  let iterations: Int = 5000
+  i = 0
+  loop i < iterations {
+    mutateList(iter: i)
+    i = i + 1
+  }
+
+  let leaked: Int = rae_ext_rae_mem_stats_outstanding() - baseline
+  log("iterations: {iterations}")
+  if leaked < 100 {
+    log("verdict: OK")
+  } else {
+    log("verdict: LEAK outstanding={leaked}")
+  }
+}
