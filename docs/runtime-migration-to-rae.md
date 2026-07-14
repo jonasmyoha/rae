@@ -377,6 +377,12 @@ but moved common string algorithms into Rae: `contains`, `startsWith`,
 and `lastIndexOf` were already Rae code. The old C algorithm entry points remain
 compatibility code until the runtime surface can be pruned safely.
 
+Fifth completed design slice: `#295` defined the WebGPU resource-management
+roadmap in `docs/webgpu-resource-management-in-rae.md`. The intended boundary is
+thin raw C WebGPU calls plus opaque handles, with Rae owning descriptors,
+resource caches, resize/reconfigure policy, bind tracking, validation, render
+graph policy, and debug labels.
+
 ### Stage 3: Move Pure Algorithms And Platform Policy
 
 Start with algorithms that require no platform callbacks:
@@ -391,7 +397,9 @@ Move app/backend policy into Rae:
 
 - Image registry and failed-load throttling.
 - Asset caches and metadata stores.
-- WebGPU descriptors/resource managers.
+- WebGPU descriptors/resource managers. `#295` records the concrete staged plan
+  for descriptors, opaque handles, cache entries, bind tracking, validation,
+  render graph policy, resize/reconfigure, and debug labels.
 - gpu2d render graph and batching policy where feasible.
 
 C remains the raw renderer/backend call surface. The order inside this stage is
