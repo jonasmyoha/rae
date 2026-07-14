@@ -163,6 +163,23 @@ func remove(T: type, this: mod List(T), index: view Int) {
   this.length = this.length - 1
 }
 
+# Unordered remove. Drops the removed slot; if it is not the tail, moves the
+# tail payload into its place and shrinks without dropping the moved tail bytes.
+func swapRemove(T: type, this: mod List(T), index: view Int) {
+  if index < 0 or index >= this.length {
+    ret
+  }
+  let last: Int = this.length - 1
+  if index is last {
+    this.remove(index: index)
+    ret
+  }
+  rae_ext_rae_buf_drop_at(buf: this.data, index: index)
+  let lastVal: T = rae_ext_rae_buf_get(buf: this.data, index: last)
+  rae_ext_rae_buf_set(buf: this.data, index: index, value: lastVal)
+  this.length = this.length - 1
+}
+
 func clear(T: type, this: mod List(T)) {
   var i: Int = 0
   loop i < this.length {
