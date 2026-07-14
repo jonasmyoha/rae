@@ -137,9 +137,22 @@ func showMalformed() {
   log("badTok.ok = {d4.ok}")
 }
 
+func showSerializer() {
+  let raw: String = "a\"b\\c"
+  let escaped: String = jsonEscape(s: raw)
+  log("escape: {escaped}")
+  let quoted: String = jsonQuote(s: raw)
+  log("quote: {quoted}")
+
+  let line: String = "one\n\ttwo"
+  let escapedLine: String = jsonEscape(s: line)
+  log("escapeCtrl: {escapedLine}")
+}
+
 func main() {
   showPrimitives()
   showObject()
   showNested()
   showMalformed()
+  showSerializer()
 }

@@ -162,6 +162,54 @@ func jsonBool(this: view JsonValue, fallback: view Bool) ret Bool {
   ret fallback
 }
 
+# Escape a string for embedding inside a JSON `"..."` literal.
+# This is intentionally Rae stdlib policy, not app glue or C runtime code.
+func jsonEscape(s: view String) ret String {
+  var out: String = ""
+  var i: Int = 0
+  let n: Int = s.length()
+  let bs: String = "\\"
+  let q: String = "\""
+  let bsbs: String = "\\\\"
+  let bsq: String = "\\\""
+  let bsn: String = "\\n"
+  let bst: String = "\\t"
+  let bsr: String = "\\r"
+  let nl: String = "\n"
+  let tab: String = "\t"
+  let cr: String = "\r"
+  loop i < n {
+    let ch: String = s.sub(start: i, len: 1)
+    if ch.equals(other: bs) {
+      out = out.concat(other: bsbs)
+    } else {
+      if ch.equals(other: q) {
+        out = out.concat(other: bsq)
+      } else {
+        if ch.equals(other: nl) {
+          out = out.concat(other: bsn)
+        } else {
+          if ch.equals(other: tab) {
+            out = out.concat(other: bst)
+          } else {
+            if ch.equals(other: cr) {
+              out = out.concat(other: bsr)
+            } else {
+              out = out.concat(other: ch)
+            }
+          }
+        }
+      }
+    }
+    i = i + 1
+  }
+  ret out
+}
+
+func jsonQuote(s: view String) ret String {
+  ret "\"{json.jsonEscape(s: s)}\""
+}
+
 func jsonArrayLen(this: view JsonValue) ret Int {
   if this.kind is not JsonKind.array {
     ret 0

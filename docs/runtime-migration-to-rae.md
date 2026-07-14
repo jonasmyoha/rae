@@ -353,6 +353,12 @@ scanning and portable path helpers into `lib/filesystem.rae`, leaving C with
 only SDL-backed platform primitives such as known folders, directory existence,
 directory listing, and date formatting.
 
+Second completed policy slice: `#291` moved JSON string escaping/quoting and
+106 mobile UI JSON writer policy into `lib/json.rae`. The remaining C JSON
+helpers are compatibility bridges for compiler-generated `Type.fromJson()` code
+and deprecated Live bridge paths; deleting them requires a separate generated-C
+stdlib dependency design rather than another ad hoc app-level serializer.
+
 ### Stage 3: Move Pure Algorithms And Platform Policy
 
 Start with algorithms that require no platform callbacks:

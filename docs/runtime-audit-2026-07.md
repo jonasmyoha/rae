@@ -128,8 +128,10 @@ behavior change.
   calls.
 - `lib/filesystem.rae` path policy: join/base/dir/ext/glob/next-index/date
   naming. C keeps platform file operations.
-- `lib/json.rae`: parser/serializer/query policy. C JSON helpers become
-  compatibility bridges or disappear.
+- `lib/json.rae`: parser/serializer/query policy. `#291` moved JSON string
+  escaping/quoting and 106 app writer policy here; the C JSON helpers remain
+  temporary compatibility bridges for generated `Type.fromJson()` and
+  deprecated Live bridge paths.
 - `lib/string.rae`: algorithms above allocation/drop: trim, contains,
   startsWith, endsWith, split/replace, case conversion, formatting helpers.
 - `lib/time.rae`: formatting policy. C keeps raw clocks.
