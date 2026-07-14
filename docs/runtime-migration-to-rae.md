@@ -337,8 +337,9 @@ Strong candidate families:
   caches, WebGPU descriptors/resource managers, gpu2d render graph policy.
 - Portable algorithms: UTF-8/string helpers, path helpers, JSON
   serializer/parser.
-- Container policy only after generic ownership/codegen is stable enough:
-  `HashMap`, `StringMap`, `List(T)` growth and bounds logic.
+- Container policy: `List(T)` mutation/drop ownership is now Rae-owned over raw
+  C buffers; remaining `HashMap`/`StringMap`/`IntMap` internals should wait
+  until generic ownership/codegen is stable enough.
 
 Resource-management policy may move before some portable algorithms if it gives
 better dogfooding value with lower bootstrap risk. JSON and Filesystem should
@@ -358,6 +359,16 @@ Second completed policy slice: `#291` moved JSON string escaping/quoting and
 helpers are compatibility bridges for compiler-generated `Type.fromJson()` code
 and deprecated Live bridge paths; deleting them requires a separate generated-C
 stdlib dependency design rather than another ad hoc app-level serializer.
+
+Third completed policy slice: `#292` kept raw buffer allocation/copy/set/get in
+C but moved more ownership policy into Rae's `List(T)` methods. `List.set`,
+`List.remove`, `List.clear`, and explicit `List.free` now destroy active owned
+elements via the compiler-aware raw `buf_drop_at` primitive before overwriting,
+hiding, or releasing storage. `List.drop` remains the compiler-synthesized
+scope-exit entry point that injects element drops before raw buffer release.
+`StringMap`/`IntMap` algorithms are already Rae code, but deeper map
+rehash/removal ownership cleanup is deferred until the remaining
+generic-container codegen issues are fixed.
 
 ### Stage 3: Move Pure Algorithms And Platform Policy
 
