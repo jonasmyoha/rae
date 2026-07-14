@@ -134,6 +134,8 @@ behavior change.
   deprecated Live bridge paths.
 - `lib/string.rae`: algorithms above allocation/drop: trim, contains,
   startsWith, endsWith, split/replace, case conversion, formatting helpers.
+  `#293` moved contains/startsWith/endsWith/indexOf/trim/ASCII toLower into Rae;
+  the C versions are now compatibility candidates.
 - `lib/time.rae`: formatting policy. C keeps raw clocks.
 - Spotify state/cache/poller policy should move out of the core runtime. The
   AppleScript bridge may remain C or become a platform capability binding.
