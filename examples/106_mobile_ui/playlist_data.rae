@@ -322,30 +322,35 @@ func savePlaylist(playlist: view Playlist) pub {
   let q: String = "\""
   let colon: String = ":"
   let comma: String = ","
+  let escapedId: String = json.jsonEscape(s: playlist.id)
+  let escapedTitle: String = json.jsonEscape(s: playlist.title)
 
   var content: String = ""
   content = content.concat(other: openBrace).concat(other: nl)
   content = content.concat(other: "  ").concat(other: q).concat(other: "type").concat(other: q)
   content = content.concat(other: colon).concat(other: " ").concat(other: q).concat(other: "playlist").concat(other: q).concat(other: comma).concat(other: nl)
   content = content.concat(other: "  ").concat(other: q).concat(other: "id").concat(other: q)
-  content = content.concat(other: colon).concat(other: " ").concat(other: q).concat(other: playlist.id).concat(other: q).concat(other: comma).concat(other: nl)
+  content = content.concat(other: colon).concat(other: " ").concat(other: q).concat(other: escapedId).concat(other: q).concat(other: comma).concat(other: nl)
   content = content.concat(other: "  ").concat(other: q).concat(other: "title").concat(other: q)
-  content = content.concat(other: colon).concat(other: " ").concat(other: q).concat(other: playlist.title).concat(other: q).concat(other: comma).concat(other: nl)
+  content = content.concat(other: colon).concat(other: " ").concat(other: q).concat(other: escapedTitle).concat(other: q).concat(other: comma).concat(other: nl)
   content = content.concat(other: "  ").concat(other: q).concat(other: "items").concat(other: q)
   content = content.concat(other: colon).concat(other: " ").concat(other: openBracket).concat(other: nl)
   let n: Int = playlist.items.length
   var i: Int = 0
   loop i < n {
     let it: PlaylistItem = rae_ext_rae_buf_get(buf: playlist.items.data, index: i)
+    let escapedKind: String = json.jsonEscape(s: it.kind)
+    let escapedPlaylistId: String = json.jsonEscape(s: it.playlistId)
+    let escapedAlbumStem: String = json.jsonEscape(s: it.albumStem)
     content = content.concat(other: "    ").concat(other: openBrace).concat(other: " ")
     content = content.concat(other: q).concat(other: "kind").concat(other: q).concat(other: colon).concat(other: " ")
-    content = content.concat(other: q).concat(other: it.kind).concat(other: q).concat(other: comma).concat(other: " ")
+    content = content.concat(other: q).concat(other: escapedKind).concat(other: q).concat(other: comma).concat(other: " ")
     if it.kind.equals(other: playlistKindPlaylist) {
       content = content.concat(other: q).concat(other: "playlistId").concat(other: q).concat(other: colon).concat(other: " ")
-      content = content.concat(other: q).concat(other: it.playlistId).concat(other: q).concat(other: " ")
+      content = content.concat(other: q).concat(other: escapedPlaylistId).concat(other: q).concat(other: " ")
     } else {
       content = content.concat(other: q).concat(other: "albumStem").concat(other: q).concat(other: colon).concat(other: " ")
-      content = content.concat(other: q).concat(other: it.albumStem).concat(other: q).concat(other: comma).concat(other: " ")
+      content = content.concat(other: q).concat(other: escapedAlbumStem).concat(other: q).concat(other: comma).concat(other: " ")
       content = content.concat(other: q).concat(other: "trackIndex").concat(other: q).concat(other: colon).concat(other: " ")
       content = content.concat(other: "{it.trackIndex}").concat(other: " ")
     }
