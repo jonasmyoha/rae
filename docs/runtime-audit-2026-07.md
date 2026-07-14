@@ -125,7 +125,8 @@ behavior change.
   status cache, retry policy, scale-mode choice. C keeps decode/upload.
 - `lib/webgpu/resource_manager.rae`: descriptors, cache keys, ownership,
   resize/reconfigure policy, bind tracking, debug labels. C keeps raw WebGPU
-  calls.
+  calls. `docs/webgpu-resource-management-in-rae.md` is the dedicated `#295`
+  design for this boundary.
 - `lib/filesystem.rae` path policy: join/base/dir/ext/glob/next-index/date
   naming. C keeps platform file operations.
 - `lib/json.rae`: parser/serializer/query policy. `#291` moved JSON string
@@ -202,6 +203,9 @@ include-based split as the first behavior-preserving step.
 - `#294` image/resource registry and `#295` WebGPU resource management may be
   better first dogfooding targets than containers because they exercise real
   ownership with narrower blast radius.
+- `#295` should start as a design and ABI-boundary task, not a renderer rewrite:
+  keep C WebGPU calls thin, then move descriptors, cache ownership, bind
+  validation, resize/reconfigure, render graph policy, and debug labels to Rae.
 
 ## Immediate Recommendation
 
