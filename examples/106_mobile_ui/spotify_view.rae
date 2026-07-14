@@ -19,6 +19,7 @@ open ui/ecs
 # and the mini-player.
 import core
 import gpu2d
+import json
 import sys
 import sys/spotify
 import ui/ecs
@@ -140,11 +141,11 @@ func saveHistoryArtworkMetadata(track: view SpotifyTrack, imageHash: view String
   let nl: String = "\n"
   let openBrace: String = "\u{007B}"
   let closeBrace: String = "\u{007D}"
-  let tn: String = jsonEscape(s: track.trackName)
-  let an: String = jsonEscape(s: track.artistName)
-  let alb: String = jsonEscape(s: track.albumName)
-  let url: String = jsonEscape(s: track.artworkUrl)
-  let p: String = jsonEscape(s: path)
+  let tn: String = json.jsonEscape(s: track.trackName)
+  let an: String = json.jsonEscape(s: track.artistName)
+  let alb: String = json.jsonEscape(s: track.albumName)
+  let url: String = json.jsonEscape(s: track.artworkUrl)
+  let p: String = json.jsonEscape(s: path)
   var content: String = ""
   content = content.concat(other: openBrace).concat(other: nl)
   content = content.concat(other: "  ").concat(other: q).concat(other: "imageHash").concat(other: q).concat(other: colon).concat(other: " ").concat(other: q).concat(other: imageHash).concat(other: q).concat(other: comma).concat(other: nl)
