@@ -89,7 +89,8 @@ func saveLibraryToJson(library: view List(String), path: view String) pub {
   var i: Int = 0
   loop i < n {
     let s: String = library.get(index: i)
-    content = content.concat(other: "    ").concat(other: q).concat(other: s).concat(other: q)
+    let escaped: String = json.jsonEscape(s: s)
+    content = content.concat(other: "    ").concat(other: q).concat(other: escaped).concat(other: q)
     if i < n - 1 {
       content = content.concat(other: comma)
     }
