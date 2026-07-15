@@ -308,6 +308,7 @@ visible.
 Current audit: `docs/runtime-audit-2026-07.md`.
 Native handle model: `docs/native-handle-ownership.md`.
 Stdlib bootstrap tiers: `docs/stdlib-bootstrap-tiers.md`.
+Standard-library ownership model: `docs/standard-library-ownership-model.md`.
 
 Deliverables:
 
@@ -394,6 +395,11 @@ Sixth completed design slice: `#296` defined the stdlib bootstrap tiers in
 kernel externs, Tier 2 `core`, Tier 3 `alloc`, Tier 4 `std`, and Tier 5
 `platform`, with explicit build ordering and migration gates.
 
+Seventh completed design slice: `#297` defined the standard-library ownership
+model in `docs/standard-library-ownership-model.md`: which types remain
+compiler-known, which become ordinary Rae code, which need permanent runtime
+support, which are opaque native handles, and where the ABI boundary sits.
+
 ### Stage 3: Move Pure Algorithms And Platform Policy
 
 Start with algorithms that require no platform callbacks:
@@ -446,10 +452,10 @@ runtime-kernel split prevents circular bootstrap surprises.
 
 ## Open Questions
 
-- **Standard library ownership model.** This deserves a separate future design
-  document: which types should remain compiler-known, which can become ordinary
-  Rae code, which require runtime support forever, which should be opaque native
-  handles, and where the permanent ABI boundary sits.
+- **Standard library ownership model follow-through.**
+  `docs/standard-library-ownership-model.md` records the target boundary; the
+  follow-up work is enforcing the categories in compiler/package tooling and
+  resolving the open representation questions.
 - **Stdlib tier enforcement.** `docs/stdlib-bootstrap-tiers.md` defines the
   target tiers, but compiler/package enforcement is still future work and
   depends on module namespacing.
