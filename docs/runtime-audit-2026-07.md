@@ -201,7 +201,8 @@ include-based split as the first behavior-preserving step.
 - `#290` Filesystem and `#291` JSON are candidates, not mandatory first
   migrations. Pick based on audit results and current compiler stability.
 - `#292` containers and `#293` String layering depend on the standard-library
-  ownership model from `#297`.
+  ownership model from `#297`, now documented in
+  `docs/standard-library-ownership-model.md`.
 - `#294` image/resource registry is the first implemented low-blast-radius Rae
   policy migration. `#295` WebGPU resource management remains the broader
   renderer-policy design target.

@@ -13,6 +13,7 @@ It follows:
 - `docs/runtime-audit-2026-07.md`
 - `docs/native-handle-ownership.md`
 - `docs/stdlib-bootstrap-tiers.md`
+- `docs/standard-library-ownership-model.md`
 
 ## Core Principle
 
