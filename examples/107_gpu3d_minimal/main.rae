@@ -1,0 +1,249 @@
+# Minimal GPU3D engine seed. This deliberately uses the WebGPU compute seam
+# available today: the WGSL raymarcher renders procedural geometry into a
+# framebuffer which SDL3 presents. The scene is data-oriented on the Rae side,
+# so a future raster extractor can consume the same component data.
+#
+# Controls: W/S forward/back, A/D strafe, E/Q up/down, arrows or left-drag look,
+# 1/2/3 quality, F12 screenshot. Compiled target only.
+import core
+import gpu
+import sdl3
+import image
+import filesystem
+import vec3
+
+type Transform3d {
+    position: Vec3
+    scale: Vec3
+}
+
+type Material3d {
+    baseColor: Vec3
+    metallic: Float
+    roughness: Float
+    emission: Vec3
+}
+
+# shape: 0 sphere, 1 box, 2 torus. material indexes Scene3d.materials.
+type Renderable3d {
+    entity: Int
+    shape: Int
+    material: Int
+}
+
+# Parallel component arrays are the first extraction-friendly ECS storage.
+# `renderables[i]` points at `transforms[entity]`; materials are shared.
+type Scene3d {
+    transforms: List(Transform3d)
+    renderables: List(Renderable3d)
+    materials: List(Material3d)
+}
+
+type Gpu3dRt {
+    sceneBuf: Int
+    outBuf: Int
+    paramsBuf: Int
+    kernel: Int
+}
+
+func vec(x: view Float, y: view Float, z: view Float) ret Vec3 {
+    ret vec3.create(x: x, y: y, z: z)
+}
+
+func addMaterial(scene: mod Scene3d, color: view Vec3, metallic: view Float, roughness: view Float, emission: view Vec3) ret Int {
+    let index: Int = scene.materials.length
+    scene.materials.add(value: Material3d { baseColor: color, metallic: metallic, roughness: roughness, emission: emission })
+    ret index
+}
+
+func addObject(scene: mod Scene3d, shape: view Int, material: view Int, position: view Vec3, scale: view Vec3) {
+    let entity: Int = scene.transforms.length
+    scene.transforms.add(value: Transform3d { position: position, scale: scale })
+    scene.renderables.add(value: Renderable3d { entity: entity, shape: shape, material: material })
+}
+
+func buildScene() ret Scene3d {
+    var scene: Scene3d = {
+        transforms: createList(Transform3d, cap: 8),
+        renderables: createList(Renderable3d, cap: 8),
+        materials: createList(Material3d, cap: 8)
+    }
+
+    let ground: Int = addMaterial(scene: scene, color: vec(x: 0.12, y: 0.15, z: 0.2), metallic: 0.05, roughness: 0.8, emission: vec(x: 0.0, y: 0.0, z: 0.0))
+    let copper: Int = addMaterial(scene: scene, color: vec(x: 0.95, y: 0.32, z: 0.12), metallic: 0.8, roughness: 0.22, emission: vec(x: 0.0, y: 0.0, z: 0.0))
+    let ceramic: Int = addMaterial(scene: scene, color: vec(x: 0.08, y: 0.48, z: 0.72), metallic: 0.05, roughness: 0.3, emission: vec(x: 0.0, y: 0.0, z: 0.0))
+    let ivory: Int = addMaterial(scene: scene, color: vec(x: 0.82, y: 0.72, z: 0.58), metallic: 0.0, roughness: 0.55, emission: vec(x: 0.0, y: 0.0, z: 0.0))
+    let glow: Int = addMaterial(scene: scene, color: vec(x: 0.08, y: 0.18, z: 0.22), metallic: 0.0, roughness: 0.25, emission: vec(x: 0.15, y: 1.0, z: 0.85))
+
+    # Object zero is a thin ground box. The shader also adds subtle FBM relief.
+    addObject(scene: scene, shape: 1, material: ground, position: vec(x: 0.0, y: 1.5, z: -1.15), scale: vec(x: 8.0, y: 8.0, z: 0.15))
+    addObject(scene: scene, shape: 0, material: copper, position: vec(x: -1.55, y: 1.3, z: -0.15), scale: vec(x: 0.9, y: 0.9, z: 0.9))
+    addObject(scene: scene, shape: 1, material: ceramic, position: vec(x: 0.25, y: 1.65, z: -0.2), scale: vec(x: 0.72, y: 0.72, z: 0.72))
+    addObject(scene: scene, shape: 2, material: ivory, position: vec(x: 1.75, y: 1.5, z: -0.05), scale: vec(x: 0.8, y: 0.8, z: 0.8))
+    addObject(scene: scene, shape: 0, material: glow, position: vec(x: 0.15, y: 3.1, z: 1.25), scale: vec(x: 0.24, y: 0.24, z: 0.24))
+    ret scene
+}
+
+func pushVec3(buf: mod List(Float), value: view Vec3) {
+    buf.add(value: value.x)
+    buf.add(value: value.y)
+    buf.add(value: value.z)
+}
+
+# Extract ECS data into the stable GPU layout documented in raymarch.wgsl:
+# camera(16), materials(8 each), renderables(8 each).
+func extractScene(scene: view Scene3d, cameraPos: view Vec3, forward: view Vec3, frame: view Int) ret List(Float) {
+    let packed: List(Float) = createList(Float, cap: 16 + scene.materials.length * 8 + scene.renderables.length * 8)
+    let worldUp: Vec3 = vec(x: 0.0, y: 0.0, z: 1.0)
+    let right: Vec3 = vec3.vnorm(a: vec3.vcross(a: forward, b: worldUp))
+    let up: Vec3 = vec3.vcross(a: right, b: forward)
+    pushVec3(buf: packed, value: cameraPos)
+    pushVec3(buf: packed, value: forward)
+    pushVec3(buf: packed, value: right)
+    pushVec3(buf: packed, value: up)
+    packed.add(value: math.tan(x: 52.0 * pi / 360.0))
+    packed.add(value: frame.toFloat() / 60.0)
+    packed.add(value: 0.0)
+    packed.add(value: 0.0)
+
+    var mi: Int = 0
+    loop mi < scene.materials.length {
+        let mat: Material3d = scene.materials.at(index: mi)
+        pushVec3(buf: packed, value: mat.baseColor)
+        packed.add(value: mat.metallic)
+        packed.add(value: mat.roughness)
+        pushVec3(buf: packed, value: mat.emission)
+        mi = mi + 1
+    }
+
+    var ri: Int = 0
+    loop ri < scene.renderables.length {
+        let renderable: Renderable3d = scene.renderables.at(index: ri)
+        let transform: Transform3d = scene.transforms.at(index: renderable.entity)
+        packed.add(value: renderable.shape.toFloat())
+        pushVec3(buf: packed, value: transform.position)
+        pushVec3(buf: packed, value: transform.scale)
+        packed.add(value: renderable.material.toFloat())
+        ri = ri + 1
+    }
+    ret packed
+}
+
+func buildGpu3d(wgsl: view String, sceneData: view List(Float), params: view List(Int), pixels: view Int) ret Gpu3dRt {
+    gpu.reset()
+    ret Gpu3dRt {
+        sceneBuf: gpu.storageF32(data: sceneData.data, count: sceneData.length),
+        outBuf: gpu.allocU32(count: pixels),
+        paramsBuf: gpu.uniformU32(data: params.data, count: 8),
+        kernel: gpu.kernel(wgsl: wgsl, entry: "main")
+    }
+}
+
+func rae_ext_rae_sys_read_file(path: String) extern ret String
+
+func main() {
+    let scene: Scene3d = buildScene()
+    let wgsl: String = rae_ext_rae_sys_read_file(path: "examples/107_gpu3d_minimal/raymarch.wgsl")
+    sdl3.initWindow(width: 1280, height: 720, title: "Rae GPU3D — procedural engine seed")
+    sdl3.setTargetFPS(fps: 0)
+
+    var quality: Int = 1
+    var width: Int = 960
+    var height: Int = 540
+    let params: List(Int) = createList(Int, cap: 8)
+    var pi: Int = 0
+    loop pi < 8 { params.add(value: 0)  pi = pi + 1 }
+    params.set(index: 0, value: width)
+    params.set(index: 1, value: height)
+    params.set(index: 2, value: scene.renderables.length)
+    params.set(index: 3, value: scene.materials.length)
+    params.set(index: 5, value: quality)
+
+    var cameraPos: Vec3 = vec(x: 0.0, y: -4.7, z: 1.2)
+    var yaw: Float = pi / 2.0
+    var pitch: Float = -0.08
+    var forward: Vec3 = vec(x: math.cos(x: pitch) * math.cos(x: yaw), y: math.cos(x: pitch) * math.sin(x: yaw), z: math.sin(x: pitch))
+    var sceneData: List(Float) = extractScene(scene: scene, cameraPos: cameraPos, forward: forward, frame: 0)
+    var rt: Gpu3dRt = buildGpu3d(wgsl: wgsl, sceneData: sceneData, params: params, pixels: width * height)
+    var framebuffer: List(Int) = createList(Int, cap: width * height)
+    var fi: Int = 0
+    loop fi < width * height { framebuffer.add(value: 0)  fi = fi + 1 }
+
+    var frame: Int = 0
+    var prevMouseX: Int = sdl3.getMouseX()
+    var prevMouseY: Int = sdl3.getMouseY()
+    loop not sdl3.shouldClose() {
+        var newQuality: Int = quality
+        if sdl3.isKeyPressed(key: 49) { newQuality = 0 }
+        if sdl3.isKeyPressed(key: 50) { newQuality = 1 }
+        if sdl3.isKeyPressed(key: 51) { newQuality = 2 }
+        if newQuality > quality or newQuality < quality {
+            quality = newQuality
+            if quality is 0 { width = 640  height = 360 }
+            if quality is 1 { width = 960  height = 540 }
+            if quality is 2 { width = 1280  height = 720 }
+            params.set(index: 0, value: width)
+            params.set(index: 1, value: height)
+            params.set(index: 5, value: quality)
+            sceneData = extractScene(scene: scene, cameraPos: cameraPos, forward: forward, frame: frame)
+            rt = buildGpu3d(wgsl: wgsl, sceneData: sceneData, params: params, pixels: width * height)
+            framebuffer = createList(Int, cap: width * height)
+            fi = 0
+            loop fi < width * height { framebuffer.add(value: 0)  fi = fi + 1 }
+        }
+
+        var moved: Bool = false
+        let moveStep: Float = 0.065
+        let worldUp: Vec3 = vec(x: 0.0, y: 0.0, z: 1.0)
+        let right: Vec3 = vec3.vnorm(a: vec3.vcross(a: forward, b: worldUp))
+        if sdl3.isKeyDown(key: 87) { cameraPos = vec3.vadd(a: cameraPos, b: vec3.vscale(a: forward, s: moveStep))  moved = true }
+        if sdl3.isKeyDown(key: 83) { cameraPos = vec3.vsub(a: cameraPos, b: vec3.vscale(a: forward, s: moveStep))  moved = true }
+        if sdl3.isKeyDown(key: 68) { cameraPos = vec3.vadd(a: cameraPos, b: vec3.vscale(a: right, s: moveStep))  moved = true }
+        if sdl3.isKeyDown(key: 65) { cameraPos = vec3.vsub(a: cameraPos, b: vec3.vscale(a: right, s: moveStep))  moved = true }
+        if sdl3.isKeyDown(key: 69) { cameraPos = vec3.vadd(a: cameraPos, b: vec3.vscale(a: worldUp, s: moveStep))  moved = true }
+        if sdl3.isKeyDown(key: 81) { cameraPos = vec3.vsub(a: cameraPos, b: vec3.vscale(a: worldUp, s: moveStep))  moved = true }
+        if sdl3.isKeyDown(key: 262) { yaw = yaw - 0.028  moved = true }
+        if sdl3.isKeyDown(key: 263) { yaw = yaw + 0.028  moved = true }
+        if sdl3.isKeyDown(key: 265) { pitch = pitch + 0.028  moved = true }
+        if sdl3.isKeyDown(key: 264) { pitch = pitch - 0.028  moved = true }
+
+        let mouseX: Int = sdl3.getMouseX()
+        let mouseY: Int = sdl3.getMouseY()
+        if sdl3.isMouseButtonDown(button: 0) {
+            let dx: Int = mouseX - prevMouseX
+            let dy: Int = mouseY - prevMouseY
+            if dx > 0 or dx < 0 { yaw = yaw - dx.toFloat() * 0.0045  moved = true }
+            if dy > 0 or dy < 0 { pitch = pitch - dy.toFloat() * 0.0045  moved = true }
+        }
+        prevMouseX = mouseX
+        prevMouseY = mouseY
+        if pitch > 1.45 { pitch = 1.45 }
+        if pitch < -1.45 { pitch = -1.45 }
+        if moved {
+            forward = vec(x: math.cos(x: pitch) * math.cos(x: yaw), y: math.cos(x: pitch) * math.sin(x: yaw), z: math.sin(x: pitch))
+        }
+
+        # Time is part of the extracted frame data so procedural animation and
+        # camera changes use one upload path.
+        sceneData = extractScene(scene: scene, cameraPos: cameraPos, forward: forward, frame: frame)
+        gpu.writeF32(buf: rt.sceneBuf, data: sceneData.data, count: sceneData.length)
+        params.set(index: 4, value: frame)
+        gpu.writeU32(buf: rt.paramsBuf, data: params.data, count: 8)
+
+        let bufs: List(Int) = createList(Int, cap: 3)
+        bufs.add(value: rt.paramsBuf)
+        bufs.add(value: rt.sceneBuf)
+        bufs.add(value: rt.outBuf)
+        gpu.run(kernel: rt.kernel, bufs: bufs.data, bufCount: 3, gx: (width + 7) / 8, gy: (height + 7) / 8, gz: 1)
+        gpu.downloadU32(buf: rt.outBuf, out: framebuffer.data, count: width * height)
+        sdl3.updatePixels(pixels: framebuffer.data, w: width, h: height)
+        sdl3.present()
+        sdl3.setTitle(title: "Rae GPU3D | {width}x{height} | WASD/E-Q + drag | 1/2/3 quality | F12 PNG")
+        if sdl3.isKeyPressed(key: 291) {
+            let saved: Bool = image.savePng(path: filesystem.renderPath(stem: "rae_gpu3d"), pixels: framebuffer.data, width: width, height: height)
+        }
+        frame = frame + 1
+    }
+    gpu.reset()
+    sdl3.closeWindow()
+}
