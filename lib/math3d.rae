@@ -1,0 +1,157 @@
+# math3d — 4x4 matrices + small vector helpers for the gpu3d renderer.
+#
+# A matrix is a List(Float) of 16 values, COLUMN-MAJOR (WGSL mat4x4
+# layout): element (row r, column c) lives at index c*4 + r. All
+# constructors return fresh owned lists; mat4Mul composes so that
+# `mat4Mul(a: A, b: B)` applies B first, then A (A*B, like math).
+#
+# The projection targets WebGPU clip space: z in [0, 1], y up.
+import core
+import math
+
+func mat4Identity() pub ret List(Float) {
+  let m: List(Float) = createList(Float, cap: 16)
+  var i: Int = 0
+  loop i < 16 {
+    m.add(value: 0.0)
+    i = i + 1
+  }
+  m.set(index: 0, value: 1.0)
+  m.set(index: 5, value: 1.0)
+  m.set(index: 10, value: 1.0)
+  m.set(index: 15, value: 1.0)
+  ret m
+}
+
+func mat4Get(m: view List(Float), i: view Int) ret Float {
+  ret rae_ext_rae_buf_get(buf: m.data, index: i)
+}
+
+# out = a * b (apply b first, then a).
+func mat4Mul(a: view List(Float), b: view List(Float)) pub ret List(Float) {
+  let out: List(Float) = createList(Float, cap: 16)
+  var c: Int = 0
+  loop c < 4 {
+    var r: Int = 0
+    loop r < 4 {
+      var sum: Float = 0.0
+      var k: Int = 0
+      loop k < 4 {
+        sum = sum + mat4Get(m: a, i: k * 4 + r) * mat4Get(m: b, i: c * 4 + k)
+        k = k + 1
+      }
+      out.add(value: sum)
+      r = r + 1
+    }
+    c = c + 1
+  }
+  ret out
+}
+
+func mat4Translate(x: view Float, y: view Float, z: view Float) pub ret List(Float) {
+  let m: List(Float) = mat4Identity()
+  m.set(index: 12, value: x)
+  m.set(index: 13, value: y)
+  m.set(index: 14, value: z)
+  ret m
+}
+
+func mat4Scale(s: view Float) pub ret List(Float) {
+  let m: List(Float) = mat4Identity()
+  m.set(index: 0, value: s)
+  m.set(index: 5, value: s)
+  m.set(index: 10, value: s)
+  ret m
+}
+
+func mat4RotateX(angle: view Float) pub ret List(Float) {
+  let m: List(Float) = mat4Identity()
+  let c: Float = math.cos(x: angle)
+  let s: Float = math.sin(x: angle)
+  m.set(index: 5, value: c)
+  m.set(index: 6, value: s)
+  m.set(index: 9, value: 0.0 - s)
+  m.set(index: 10, value: c)
+  ret m
+}
+
+func mat4RotateY(angle: view Float) pub ret List(Float) {
+  let m: List(Float) = mat4Identity()
+  let c: Float = math.cos(x: angle)
+  let s: Float = math.sin(x: angle)
+  m.set(index: 0, value: c)
+  m.set(index: 2, value: 0.0 - s)
+  m.set(index: 8, value: s)
+  m.set(index: 10, value: c)
+  ret m
+}
+
+func mat4RotateZ(angle: view Float) pub ret List(Float) {
+  let m: List(Float) = mat4Identity()
+  let c: Float = math.cos(x: angle)
+  let s: Float = math.sin(x: angle)
+  m.set(index: 0, value: c)
+  m.set(index: 1, value: s)
+  m.set(index: 4, value: 0.0 - s)
+  m.set(index: 5, value: c)
+  ret m
+}
+
+# Right-handed perspective, WebGPU depth range [0,1].
+func mat4Perspective(fovYDeg: view Float, aspect: view Float, near: view Float, far: view Float) pub ret List(Float) {
+  let m: List(Float) = createList(Float, cap: 16)
+  var i: Int = 0
+  loop i < 16 {
+    m.add(value: 0.0)
+    i = i + 1
+  }
+  let f: Float = 1.0 / math.tan(x: fovYDeg * 0.008726646259971648)  # deg->rad, /2
+  m.set(index: 0, value: f / aspect)
+  m.set(index: 5, value: f)
+  m.set(index: 10, value: far / (near - far))
+  m.set(index: 11, value: 0.0 - 1.0)
+  m.set(index: 14, value: far * near / (near - far))
+  ret m
+}
+
+# Right-handed look-at view matrix.
+func mat4LookAt(eyeX: view Float, eyeY: view Float, eyeZ: view Float, atX: view Float, atY: view Float, atZ: view Float, upX: view Float, upY: view Float, upZ: view Float) pub ret List(Float) {
+  # forward = normalize(eye - at)  (camera looks down -f)
+  var fx: Float = eyeX - atX
+  var fy: Float = eyeY - atY
+  var fz: Float = eyeZ - atZ
+  let flen: Float = math.sqrt(x: fx * fx + fy * fy + fz * fz)
+  fx = fx / flen
+  fy = fy / flen
+  fz = fz / flen
+  # side = normalize(up × f)
+  var sx: Float = upY * fz - upZ * fy
+  var sy: Float = upZ * fx - upX * fz
+  var sz: Float = upX * fy - upY * fx
+  let slen: Float = math.sqrt(x: sx * sx + sy * sy + sz * sz)
+  sx = sx / slen
+  sy = sy / slen
+  sz = sz / slen
+  # u = f × side
+  let ux: Float = fy * sz - fz * sy
+  let uy: Float = fz * sx - fx * sz
+  let uz: Float = fx * sy - fy * sx
+  let m: List(Float) = createList(Float, cap: 16)
+  m.add(value: sx)
+  m.add(value: ux)
+  m.add(value: fx)
+  m.add(value: 0.0)
+  m.add(value: sy)
+  m.add(value: uy)
+  m.add(value: fy)
+  m.add(value: 0.0)
+  m.add(value: sz)
+  m.add(value: uz)
+  m.add(value: fz)
+  m.add(value: 0.0)
+  m.add(value: 0.0 - (sx * eyeX + sy * eyeY + sz * eyeZ))
+  m.add(value: 0.0 - (ux * eyeX + uy * eyeY + uz * eyeZ))
+  m.add(value: 0.0 - (fx * eyeX + fy * eyeY + fz * eyeZ))
+  m.add(value: 1.0)
+  ret m
+}
