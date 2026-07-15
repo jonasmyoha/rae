@@ -1,0 +1,28 @@
+# Regression test for the binary-operator RHS parenthesization bug.
+#
+# The C emitter passed `prec` (not prec+1) as the parent precedence for
+# a binary op's RIGHT operand. Rae's binary operators are left-
+# associative, so an RHS of EQUAL precedence lost its parentheses in
+# the emitted C: `a - (b + c)` became `a - b + c` (sign flips) and
+# `a / (b * c)` became `(a / b) * c`. Found via gpu3d's mat4LookAt: all
+# three view-matrix translation dot products came out scrambled and the
+# first 3D scene rendered nothing.
+import core
+
+func main() {
+  let a: Float = 10.0
+  let b: Float = 3.0
+  let c: Float = 2.0
+  let s1: Float = a - (b + c)      # 5, not 9
+  let s2: Float = a - (b - c)      # 9, not 11
+  let d1: Float = a / (b * c)      # 1.666, not 6.666
+  let m1: Float = 100.0 - (a * b + c * c)  # 66, not ...
+  let i1: Int = 10 - (3 + 2)       # 5
+  let i2: Int = 24 / (2 * 3)       # 4
+  let i3: Int = 10 - (3 - 2)       # 9
+  # Mixed precedence both directions stays correct.
+  let i4: Int = 2 * (3 + 4)        # 14
+  let i5: Int = 2 + 3 * 4          # 14
+  log("s1={s1} s2={s2} d1={d1} m1={m1}")
+  log("i1={i1} i2={i2} i3={i3} i4={i4} i5={i5}")
+}
