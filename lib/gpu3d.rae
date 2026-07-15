@@ -1,0 +1,120 @@
+# gpu3d — minimal 3D renderer (Assembly 2026 demo arc, M1).
+#
+# Renders PBR-lit triangle meshes through wgpu-native into the same
+# SDL3 window/surface gpu2d owns. An app opens the window with
+# gpu2d.initWindow(...) and then drives frames with gpu3d instead of
+# the 2D beginFrame/endFrame (2D HUD overlay on top of 3D is a later
+# milestone). Antialiasing is MSAA 4x; depth is Depth32Float.
+#
+# A mesh is interleaved float data — 8 Floats per vertex:
+#   position xyz, normal xyz, uv — plus a triangle index list.
+# Generate them with lib/mesh3d.rae or build your own.
+#
+# Lighting model (single uber-shader): Cook-Torrance GGX specular +
+# Lambert diffuse, one directional sun, hemisphere ambient (sky/ground),
+# emissive, exposure + ACES tonemap. Materials are per-draw parameters:
+# base color, metallic, roughness, emissive.
+#
+# Constraint: normals are transformed by the model matrix directly, so
+# non-uniform scaling skews lighting — stick to uniform scales per draw.
+import core
+
+func meshCreate(verts: view Buffer(Float), vertCount: Int, indices: view Buffer(Int), indexCount: Int) extern ret Int
+func begin(frame: view Buffer(Float), count: Int) extern
+func draw(mesh: Int, model: view Buffer(Float), r: Float, g: Float, b: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) extern
+func end() extern
+func shutdown() extern
+
+# ----- frame parameter block -----------------------------------------
+# `begin` takes a packed 36-Float block. Build it with createFrame3d +
+# the setters below, tweak per frame, and pass to beginFrame.
+#   [0..15] viewProj (column-major)
+#   [16..18] camera position        [19] time (seconds, for shaders)
+#   [20..22] sun direction (toward the scene)   [23] exposure
+#   [24..26] sun color * intensity
+#   [27..29] ambient sky color
+#   [30..32] ambient ground color
+#   [33..35] clear color
+type Frame3d {
+  data: List(Float)
+}
+
+func createFrame3d() pub ret Frame3d {
+  let d: List(Float) = createList(Float, cap: 36)
+  var i: Int = 0
+  loop i < 36 {
+    d.add(value: 0.0)
+    i = i + 1
+  }
+  # Sensible defaults: exposure 1, sun from above-front, soft blue/grey ambient.
+  let f: Frame3d = { data: own d }
+  setSun(frame: f, dirX: -0.4, dirY: -1.0, dirZ: -0.3, r: 3.0, g: 2.9, b: 2.7)
+  setAmbient(frame: f, skyR: 0.25, skyG: 0.3, skyB: 0.4, groundR: 0.12, groundG: 0.1, groundB: 0.09)
+  setExposure(frame: f, exposure: 1.0)
+  setClearColor(frame: f, r: 0.02, g: 0.02, b: 0.03)
+  ret f
+}
+
+func setViewProj(frame: mod Frame3d, m: view List(Float)) pub {
+  var i: Int = 0
+  loop i < 16 {
+    frame.data.set(index: i, value: rae_ext_rae_buf_get(buf: m.data, index: i))
+    i = i + 1
+  }
+}
+
+func setCamera(frame: mod Frame3d, x: view Float, y: view Float, z: view Float) pub {
+  frame.data.set(index: 16, value: x)
+  frame.data.set(index: 17, value: y)
+  frame.data.set(index: 18, value: z)
+}
+
+func setTime(frame: mod Frame3d, t: view Float) pub {
+  frame.data.set(index: 19, value: t)
+}
+
+func setSun(frame: mod Frame3d, dirX: view Float, dirY: view Float, dirZ: view Float, r: view Float, g: view Float, b: view Float) pub {
+  frame.data.set(index: 20, value: dirX)
+  frame.data.set(index: 21, value: dirY)
+  frame.data.set(index: 22, value: dirZ)
+  frame.data.set(index: 24, value: r)
+  frame.data.set(index: 25, value: g)
+  frame.data.set(index: 26, value: b)
+}
+
+func setExposure(frame: mod Frame3d, exposure: view Float) pub {
+  frame.data.set(index: 23, value: exposure)
+}
+
+func setAmbient(frame: mod Frame3d, skyR: view Float, skyG: view Float, skyB: view Float, groundR: view Float, groundG: view Float, groundB: view Float) pub {
+  frame.data.set(index: 27, value: skyR)
+  frame.data.set(index: 28, value: skyG)
+  frame.data.set(index: 29, value: skyB)
+  frame.data.set(index: 30, value: groundR)
+  frame.data.set(index: 31, value: groundG)
+  frame.data.set(index: 32, value: groundB)
+}
+
+func setClearColor(frame: mod Frame3d, r: view Float, g: view Float, b: view Float) pub {
+  frame.data.set(index: 33, value: r)
+  frame.data.set(index: 34, value: g)
+  frame.data.set(index: 35, value: b)
+}
+
+func beginFrame(frame: view Frame3d) pub {
+  begin(frame: frame.data.data, count: 36)
+}
+
+# Draw `mesh` with a model matrix (16 Floats, column-major — see
+# lib/math3d.rae) and a PBR material.
+func drawMesh(mesh: view Int, model: view List(Float), r: view Float, g: view Float, b: view Float, metallic: view Float, roughness: view Float) pub {
+  draw(mesh: mesh, model: model.data, r: r, g: g, b: b, metallic: metallic, roughness: roughness, emR: 0.0, emG: 0.0, emB: 0.0)
+}
+
+func drawMeshEmissive(mesh: view Int, model: view List(Float), r: view Float, g: view Float, b: view Float, metallic: view Float, roughness: view Float, emR: view Float, emG: view Float, emB: view Float) pub {
+  draw(mesh: mesh, model: model.data, r: r, g: g, b: b, metallic: metallic, roughness: roughness, emR: emR, emG: emG, emB: emB)
+}
+
+func endFrame() pub {
+  end()
+}

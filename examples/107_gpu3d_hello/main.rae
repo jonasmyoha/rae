@@ -1,0 +1,125 @@
+# GPU 3D renderer — hello scene (Assembly 2026 demo arc, M1).
+#
+# The first gpu3d example: a PBR material-study grid (5x5 spheres
+# sweeping metallic x roughness), a rotating emissive torus, and a
+# ground plane — MSAA 4x, Depth32Float, Cook-Torrance GGX + hemisphere
+# ambient, ACES tonemap. Interactive orbit camera: drag to rotate,
+# mouse wheel to zoom.
+#
+# Compiled-target only; needs wgpu-native + SDL3.
+#   rae run --target compiled main.rae
+# Headless screenshot:
+#   RAE_SDL_HEADLESS_MS=2000 RAE_GPU2D_SCREENSHOT=/tmp/3d.bmp rae run ...
+import core
+import math
+import gpu2d
+open gpu3d
+open math3d
+open mesh3d
+
+func uploadMesh(m: view MeshData) ret Int {
+  ret gpu3d.meshCreate(verts: m.verts.data, vertCount: m.vertCount, indices: m.indices.data, indexCount: m.indices.length)
+}
+
+func main() ret Int {
+  gpu2d.initWindow(width: 1280, height: 800, title: "Rae GPU 3D — PBR hello")
+
+  let sphereData: MeshData = makeSphere(rings: 32, segments: 48)
+  let planeData: MeshData = makePlane(size: 40.0, segments: 1)
+  let torusData: MeshData = makeTorus(majorR: 1.0, minorR: 0.35, majorSegs: 96, minorSegs: 48)
+  let sphere: Int = uploadMesh(m: sphereData)
+  let ground: Int = uploadMesh(m: planeData)
+  let torus: Int = uploadMesh(m: torusData)
+
+  var frame: Frame3d = createFrame3d()
+
+  # Orbit camera: drag rotates, wheel zooms.
+  var yaw: Float = 0.7
+  var pitch: Float = 0.35
+  var dist: Float = 14.0
+  var lastX: Float = 0.0
+  var lastY: Float = 0.0
+  var dragging: Bool = false
+  let startT: Float = gpu2d.nowSeconds()
+
+  loop not gpu2d.pollClose() {
+    # ---- input: orbit camera -----------------------------------------
+    let px: Float = gpu2d.pointerX()
+    let py: Float = gpu2d.pointerY()
+    if gpu2d.pointerDown() {
+      if dragging {
+        yaw = yaw + (px - lastX) * 0.008
+        pitch = pitch + (py - lastY) * 0.008
+        if pitch > 1.5 {
+          pitch = 1.5
+        }
+        if pitch < 0.05 {
+          pitch = 0.05
+        }
+      }
+      dragging = true
+    } else {
+      dragging = false
+    }
+    lastX = px
+    lastY = py
+    dist = dist - gpu2d.wheelMove() * 0.8
+    if dist < 4.0 {
+      dist = 4.0
+    }
+    if dist > 40.0 {
+      dist = 40.0
+    }
+
+    # ---- camera + frame params ---------------------------------------
+    let t: Float = gpu2d.nowSeconds() - startT
+    let eyeX: Float = dist * math.cos(x: pitch) * math.cos(x: yaw)
+    let eyeY: Float = dist * math.sin(x: pitch)
+    let eyeZ: Float = dist * math.cos(x: pitch) * math.sin(x: yaw)
+    let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
+    let viewM: List(Float) = mat4LookAt(eyeX: eyeX, eyeY: eyeY, eyeZ: eyeZ, atX: 0.0, atY: 0.5, atZ: 0.0, upX: 0.0, upY: 1.0, upZ: 0.0)
+    let proj: List(Float) = mat4Perspective(fovYDeg: 50.0, aspect: aspect, near: 0.1, far: 200.0)
+    let viewProj: List(Float) = mat4Mul(a: proj, b: viewM)
+    setViewProj(frame: frame, m: viewProj)
+    setCamera(frame: frame, x: eyeX, y: eyeY, z: eyeZ)
+    setTime(frame: frame, t: t)
+    # Slowly orbiting sun keeps the highlight sweep alive.
+    let sunA: Float = t * 0.15
+    setSun(frame: frame, dirX: 0.0 - math.cos(x: sunA), dirY: 0.0 - 1.1, dirZ: 0.0 - math.sin(x: sunA), r: 3.2, g: 3.0, b: 2.7)
+
+    gpu3d.beginFrame(frame: frame)
+
+    # ---- material-study grid: metallic rows x roughness columns ------
+    var row: Int = 0
+    loop row < 5 {
+      var col: Int = 0
+      loop col < 5 {
+        let metallic: Float = row.toFloat() / 4.0
+        var roughness: Float = col.toFloat() / 4.0
+        if roughness < 0.05 {
+          roughness = 0.05
+        }
+        let x: Float = (col.toFloat() - 2.0) * 2.4
+        let z: Float = (row.toFloat() - 2.0) * 2.4
+        let model: List(Float) = mat4Translate(x: x, y: 0.5, z: z)
+        drawMesh(mesh: sphere, model: model, r: 0.9, g: 0.25, b: 0.2, metallic: metallic, roughness: roughness)
+        col = col + 1
+      }
+      row = row + 1
+    }
+
+    # ---- rotating emissive torus above the grid -----------------------
+    let spin: List(Float) = mat4Mul(a: mat4RotateY(angle: t * 0.6), b: mat4RotateX(angle: t * 0.4))
+    let torusModel: List(Float) = mat4Mul(a: mat4Translate(x: 0.0, y: 3.6, z: 0.0), b: spin)
+    drawMeshEmissive(mesh: torus, model: torusModel, r: 0.85, g: 0.86, b: 0.9, metallic: 1.0, roughness: 0.18, emR: 0.05, emG: 0.12, emB: 0.3)
+
+    # ---- ground --------------------------------------------------------
+    let groundModel: List(Float) = mat4Translate(x: 0.0, y: 0.0 - 0.7, z: 0.0)
+    drawMesh(mesh: ground, model: groundModel, r: 0.42, g: 0.43, b: 0.45, metallic: 0.0, roughness: 0.9)
+
+    gpu3d.endFrame()
+  }
+  gpu3d.shutdown()
+  gpu2d.closeWindow()
+  ret 0
+}
