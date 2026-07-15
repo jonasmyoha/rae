@@ -223,6 +223,10 @@ const EXAMPLE_COLLECTIONS = {
     title: "2D renderer",
     subtitle: "Stepping examples for the Rae WebGPU 2D / UI renderer (docs/webgpu-2d-ui-renderer.md)."
   },
+  renderer3d: {
+    title: "3D renderer",
+    subtitle: "Seed examples for the Rae WebGPU 3D renderer (docs/webgpu-3d-renderer.md): raymarch and native-raster PBR."
+  },
   raytracer: {
     title: "Raytracer",
     subtitle: "Path tracers from One Weekend to interactive WebGPU — Live, Compiled and WASM."
@@ -231,6 +235,7 @@ const EXAMPLE_COLLECTIONS = {
 // Category labels (.raepack "category") owned by a non-default collection.
 const COLLECTION_CATEGORIES = {
   renderer2d: ["2D Renderer"],
+  renderer3d: ["3D Renderer"],
   raytracer: ["Raytracer"]
 };
 let currentExampleCollection = "examples";
