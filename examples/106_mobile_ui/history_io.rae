@@ -30,7 +30,6 @@ open ui/ecs
 # normal boot path already loaded.
 import core
 import fs
-import gpu2d
 import json
 import sys
 
@@ -39,42 +38,11 @@ import sys
 var gHistoryArtCursor: Int = 0 - 1
 var gHistoryArtSeenLen: Int = 0
 var gHistoryArtDone: Bool = false
-var gHistoryArtFailedPaths: String = "|"
-# Paths whose async CDN fetch we've ALREADY kicked off this process
-# (#281). Without this the idle re-scan re-fired `fetchArtworkAsync` for
-# every still-in-flight entry on every wake (~20Hz), churning CPU + leaking
-# interp strings. We fire each fetch once; a completed file is picked up by
-# a later scan (or the next history rebuild) via hasImageKey / sys.exists.
-var gHistoryArtFiredPaths: String = "|"
 
 func resetHistoryArtLoader() pub {
   gHistoryArtCursor = 0 - 1
   gHistoryArtSeenLen = 0
   gHistoryArtDone = false
-}
-
-func historyArtFailed(path: view String) ret Bool {
-  let needle: String = "|{path}|"
-  ret gHistoryArtFailedPaths.contains(sub: needle)
-}
-
-func markHistoryArtFailed(path: view String) {
-  if historyArtFailed(path: path) {
-    ret
-  }
-  gHistoryArtFailedPaths = gHistoryArtFailedPaths.concat(other: path).concat(other: "|")
-}
-
-func historyArtFired(path: view String) ret Bool {
-  let needle: String = "|{path}|"
-  ret gHistoryArtFiredPaths.contains(sub: needle)
-}
-
-func markHistoryArtFired(path: view String) {
-  if historyArtFired(path: path) {
-    ret
-  }
-  gHistoryArtFiredPaths = gHistoryArtFiredPaths.concat(other: path).concat(other: "|")
 }
 
 # Serialise the whole entries list to JSON and overwrite `path`.
@@ -228,7 +196,7 @@ func refetchHistoryArt(history: view PlayHistory, reg: mod TextureRegistry) pub 
   loop i < n {
     let e: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: i)
     if e.textureKey.startsWith(prefix: prefix) {
-      var alreadyLoaded: Bool = gpu2d.hasImageKey(key: e.textureKey)
+      var alreadyLoaded: Bool = textureHas(reg: reg, key: e.textureKey)
       if alreadyLoaded is false {
         if e.artworkUrl.length() > 0 {
           let suffix: String = e.textureKey.sub(start: pLen, len: e.textureKey.length() - pLen)
@@ -241,7 +209,7 @@ func refetchHistoryArt(history: view PlayHistory, reg: mod TextureRegistry) pub 
           if ok {
             let keyForGpu: String = "{e.textureKey}"
             let pathForGpu: String = "{outPath}"
-            let h: Int = gpu2d.loadImageKey(key: keyForGpu, path: pathForGpu)
+            let h: Int = textureLoad(reg: reg, key: keyForGpu, path: pathForGpu)
           }
         }
       }
@@ -255,10 +223,10 @@ func refetchHistoryArt(history: view PlayHistory, reg: mod TextureRegistry) pub 
 # restored history's entries in one call freezes the UI (beach ball).
 # Process at most `budget` not-yet-loaded `spotify-art:` entries per
 # call, scanning MOST-RECENT FIRST so the visible "recently played"
-# thumbs fill in before the older tail. Returns true while entries
-# remain to fetch (the caller keeps the frame loop ticking). Idempotent
-# via gpu2d.hasImageKey; entries with a failed/empty url are skipped (and
-# count toward the budget so the scan makes progress).
+# thumbs fill in before the older tail. Returns true while entries remain to
+# fetch (the caller keeps the frame loop ticking). Idempotent via TextureRegistry;
+# entries with a failed/empty url are skipped and count toward the budget so the
+# scan makes progress.
 func refetchHistoryArtChunk(history: view PlayHistory, reg: mod TextureRegistry, budget: view Int) pub ret Bool {
   let prefix: String = "spotify-art:"
   let pLen: Int = prefix.length()
@@ -271,7 +239,7 @@ func refetchHistoryArtChunk(history: view PlayHistory, reg: mod TextureRegistry,
     }
     let e: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: i)
     if e.textureKey.startsWith(prefix: prefix) {
-      var alreadyLoaded: Bool = gpu2d.hasImageKey(key: e.textureKey)
+      var alreadyLoaded: Bool = textureHas(reg: reg, key: e.textureKey)
       if alreadyLoaded is false {
         if e.artworkUrl.length() > 0 {
           let suffix: String = e.textureKey.sub(start: pLen, len: e.textureKey.length() - pLen)
@@ -284,7 +252,7 @@ func refetchHistoryArtChunk(history: view PlayHistory, reg: mod TextureRegistry,
           if ok {
             let keyForGpu: String = "{e.textureKey}"
             let pathForGpu: String = "{outPath}"
-            let h: Int = gpu2d.loadImageKey(key: keyForGpu, path: pathForGpu)
+            let h: Int = textureLoad(reg: reg, key: keyForGpu, path: pathForGpu)
           }
           did = did + 1
         }
@@ -300,7 +268,7 @@ func refetchHistoryArtChunk(history: view PlayHistory, reg: mod TextureRegistry,
 # boot must re-register cached files before recently-played thumbs can draw.
 # Cached files are loaded immediately; missing files are fetched by the runtime
 # async curl queue and registered on a later frame when ready.
-func loadCachedHistoryArtChunk(history: view PlayHistory, budget: view Int) pub ret Bool {
+func loadCachedHistoryArtChunk(history: view PlayHistory, reg: mod TextureRegistry, budget: view Int) pub ret Bool {
   let prefix: String = "spotify-art:"
   let pLen: Int = prefix.length()
   let n: Int = history.entries.length
@@ -343,15 +311,15 @@ func loadCachedHistoryArtChunk(history: view PlayHistory, budget: view Int) pub 
       }
       let e: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: i)
       if e.textureKey.startsWith(prefix: prefix) {
-        if gpu2d.hasImageKey(key: e.textureKey) is false {
+        if textureHas(reg: reg, key: e.textureKey) is false {
           let suffix: String = e.textureKey.sub(start: pLen, len: e.textureKey.length() - pLen)
           let path: String = cachedArtworkPath(imageHash: suffix)
-          if historyArtFailed(path: path) {
+          if textureFailedPath(reg: reg, path: path) {
             did = did + 1
           } else if sys.exists(path: path) {
             let keyForGpu: String = "{e.textureKey}"
             let pathForGpu: String = "{path}"
-            let h: Int = gpu2d.loadImageKey(key: keyForGpu, path: pathForGpu)
+            let h: Int = textureLoad(reg: reg, key: keyForGpu, path: pathForGpu)
             if h <= 0 {
               # Corrupt cache entry — most commonly a TRUNCATED download
               # committed before atomic artwork writes landed (curl wrote
@@ -375,22 +343,22 @@ func loadCachedHistoryArtChunk(history: view PlayHistory, budget: view Int) pub 
               if status is 1 {
                 let keyForGpu: String = "{e.textureKey}"
                 let pathForGpu: String = "{path}"
-                let h: Int = gpu2d.loadImageKey(key: keyForGpu, path: pathForGpu)
+                let h: Int = textureLoad(reg: reg, key: keyForGpu, path: pathForGpu)
                 if h <= 0 {
-                  markHistoryArtFailed(path: path)
+                  textureMarkFailedPath(reg: reg, path: path)
                 } else {
                   loaded = loaded + 1
                 }
                 did = did + 1
               } else {
                 if status is 2 {
-                  markHistoryArtFailed(path: path)
+                  textureMarkFailedPath(reg: reg, path: path)
                   did = did + 1
                 } else {
                   # In-flight / not-yet-started. Fire the fetch ONCE (#281):
                   # re-firing it on every idle wake churned CPU and leaked
                   # interp strings.
-                  if historyArtFired(path: path) {
+                  if textureFiredPath(reg: reg, path: path) {
                     # Already kicked off — just wait. No re-fire, and no
                     # `did`/`progressed`, so a full scan of only already-
                     # fired entries counts as "no new work" and the loader
@@ -400,7 +368,7 @@ func loadCachedHistoryArtChunk(history: view PlayHistory, budget: view Int) pub 
                     let urlForFetch: String = "{e.artworkUrl}"
                     let pathForFetch: String = "{path}"
                     spotify.fetchArtworkAsync(url: urlForFetch, outPath: pathForFetch)
-                    markHistoryArtFired(path: path)
+                    textureMarkFiredPath(reg: reg, path: path)
                     pending = pending + 1
                     progressed = true
                     did = did + 1
