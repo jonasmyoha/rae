@@ -320,5 +320,6 @@ Open design dependency:
 - `docs/runtime-migration-to-rae.md` records the broader roadmap.
 - `docs/runtime-kernel-abi.md` defines the permanent C boundary.
 - `docs/native-handle-ownership.md` defines owned opaque platform handles.
-- A future standard-library ownership model document should decide which types
-  remain compiler-known and which become ordinary Rae code.
+- `docs/standard-library-ownership-model.md` defines which types remain
+  compiler-known, which become ordinary Rae code, which need permanent runtime
+  support, which are opaque native handles, and where the ABI boundary sits.
