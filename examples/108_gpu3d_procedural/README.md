@@ -8,7 +8,7 @@ input, extraction, resource handles, quality selection, and presentation.
 Run from the `rae` repository root:
 
 ```sh
-compiler/bin/rae run --target compiled examples/107_gpu3d_minimal/main.rae
+compiler/bin/rae run --target compiled examples/108_gpu3d_procedural/main.rae
 ```
 
 Controls: `W/S/A/D/E/Q` move, arrow keys or left-drag look, `1/2/3` select
