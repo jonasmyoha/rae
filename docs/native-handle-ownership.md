@@ -301,8 +301,9 @@ Separate decoded pixels from uploaded GPU textures:
   belong in Rae.
 - decoder calls and upload calls remain C.
 
-This directly supports future work such as #294: moving image registry/resource
-cache policy into Rae while leaving decoder/upload boundaries in C.
+This boundary is now active for #294: `lib/image_registry.rae` owns image-key
+metadata, failed-load throttling, and fired-fetch throttling while C keeps
+decoder/upload calls and the temporary gpu2d render-time key table.
 
 ### Legacy raylib
 

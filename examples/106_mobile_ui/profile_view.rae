@@ -17,7 +17,6 @@ open ui/ecs
 # settings list can scroll if it overflows.
 import core
 import fs
-import gpu2d
 import sys/spotify
 import ui/components
 import ui/ecs
@@ -40,7 +39,7 @@ let profileAvatarSize: Float = 260.2409638554217
 let profileAvatarIconSize: Float = 173.49397590361446
 
 func profileAvatarLoaded(reg: view TextureRegistry, key: view String) ret Bool {
-  ret gpu2d.hasImageKey(key: key)
+  ret textureHas(reg: reg, key: key)
 }
 
 func buildProfileAvatar(world: mod UiWorld, reg: view TextureRegistry) ret EntityId {

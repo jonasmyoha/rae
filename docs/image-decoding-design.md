@@ -12,6 +12,10 @@ ok=102/102 on the cached Spotify artwork set, byte-for-byte no stb
 errors. ImageIO's leniency was hiding corrupt files, not saving good
 ones.
 
+Runtime migration note (#294): this document covers the raw decoder/upload
+boundary that remains in C. Image-key metadata, failed-load throttling, and
+fired-fetch throttling now live in Rae in `lib/image_registry.rae`.
+
 ## 1. Status quo
 
 `rae_ext_gpu2d_loadImage` (compiler/runtime/rae_runtime.c) decodes a

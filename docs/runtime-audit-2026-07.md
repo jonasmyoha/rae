@@ -121,8 +121,10 @@ behavior change.
 
 ### Strong Rae Migration Candidates
 
-- `lib/image_registry.rae`: image-key registry, failed-load throttling, decode
-  status cache, retry policy, scale-mode choice. C keeps decode/upload.
+- `lib/image_registry.rae`: image-key registry, failed-load throttling, fired
+  fetch throttling, decode status cache, retry policy, scale-mode choice. `#294`
+  introduced the Rae policy layer and migrated 106's app glue to it; C keeps
+  decode/upload and the temporary gpu2d render-time key table.
 - `lib/webgpu/resource_manager.rae`: descriptors, cache keys, ownership,
   resize/reconfigure policy, bind tracking, debug labels. C keeps raw WebGPU
   calls. `docs/webgpu-resource-management-in-rae.md` is the dedicated `#295`
@@ -200,9 +202,9 @@ include-based split as the first behavior-preserving step.
   migrations. Pick based on audit results and current compiler stability.
 - `#292` containers and `#293` String layering depend on the standard-library
   ownership model from `#297`.
-- `#294` image/resource registry and `#295` WebGPU resource management may be
-  better first dogfooding targets than containers because they exercise real
-  ownership with narrower blast radius.
+- `#294` image/resource registry is the first implemented low-blast-radius Rae
+  policy migration. `#295` WebGPU resource management remains the broader
+  renderer-policy design target.
 - `#295` should start as a design and ABI-boundary task, not a renderer rewrite:
   keep C WebGPU calls thin, then move descriptors, cache ownership, bind
   validation, resize/reconfigure, render graph policy, and debug labels to Rae.
