@@ -1,0 +1,27 @@
+import core
+import image_registry
+open image_registry
+
+func main() {
+  var reg: ImageRegistry = createImageRegistry()
+
+  let missingFailed0: Bool = imageRegistryIsFailedPath(reg: reg, path: "missing-a.jpg")
+  log("failed0={missingFailed0}")
+
+  imageRegistryMarkFailedPath(reg: reg, path: "missing-a.jpg")
+  imageRegistryMarkFailedPath(reg: reg, path: "missing-a.jpg")
+  let missingFailed1: Bool = imageRegistryIsFailedPath(reg: reg, path: "missing-a.jpg")
+  log("failed1={missingFailed1}")
+
+  let fired0: Bool = imageRegistryWasFired(reg: reg, path: "remote-a.jpg")
+  log("fired0={fired0}")
+
+  imageRegistryMarkFired(reg: reg, path: "remote-a.jpg")
+  imageRegistryMarkFired(reg: reg, path: "remote-a.jpg")
+  let fired1: Bool = imageRegistryWasFired(reg: reg, path: "remote-a.jpg")
+  log("fired1={fired1}")
+
+  imageRegistryMarkPending(reg: reg, key: "cover-a", path: "remote-a.jpg")
+  let idx: Int = imageRegistryIndex(reg: reg, key: "cover-a")
+  log("idx={idx} len={reg.items.length} rev={reg.revision}")
+}

@@ -1,20 +1,41 @@
 import core
-import gpu2d
+import image_registry
+open image_registry
 
 # GPU2D-only compatibility registry for the 98-derived app code.
 #
-# 106 keeps the 98-derived TextureRegistry parameter shape while migrating the
-# backing store to gpu2d's image-key registry.
+# 106 keeps the 98-derived TextureRegistry parameter shape, but image resource
+# policy now lives in Rae. gpu2d remains the raw decode/upload bridge.
 type TextureRegistry pub {
-  marker: Int
+  images: ImageRegistry
 }
 
 func createTextureRegistry() pub ret TextureRegistry {
-  ret TextureRegistry { marker: 0 }
+  ret TextureRegistry { images: createImageRegistry() }
 }
 
 func textureHas(reg: view TextureRegistry, key: view String) pub ret Bool {
-  ret gpu2d.hasImageKey(key: key)
+  ret imageRegistryHas(reg: reg.images, key: key)
+}
+
+func textureLoad(reg: mod TextureRegistry, key: view String, path: view String) pub ret Int {
+  ret imageRegistryLoad(reg: reg.images, key: key, path: path)
+}
+
+func textureFailedPath(reg: view TextureRegistry, path: view String) pub ret Bool {
+  ret imageRegistryIsFailedPath(reg: reg.images, path: path)
+}
+
+func textureMarkFailedPath(reg: mod TextureRegistry, path: view String) pub {
+  imageRegistryMarkFailedPath(reg: reg.images, path: path)
+}
+
+func textureFiredPath(reg: view TextureRegistry, path: view String) pub ret Bool {
+  ret imageRegistryWasFired(reg: reg.images, path: path)
+}
+
+func textureMarkFiredPath(reg: mod TextureRegistry, path: view String) pub {
+  imageRegistryMarkFired(reg: reg.images, path: path)
 }
 
 func textureRemove(reg: mod TextureRegistry, key: view String) pub {
