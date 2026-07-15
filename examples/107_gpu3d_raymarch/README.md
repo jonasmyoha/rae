@@ -18,7 +18,7 @@ described in `docs/webgpu-3d-renderer.md`.
 Run:
 
 ```sh
-rae run --target compiled examples/107_gpu3d_minimal/main.rae
+rae run --target compiled examples/107_gpu3d_raymarch/main.rae
 ```
 
 Controls: W/S forward/back, A/D strafe, E/Q up/down, arrows or left-drag to
