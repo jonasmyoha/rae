@@ -10,6 +10,7 @@ that Rae code can create, pass around, and drop. It builds on:
 - `docs/runtime-migration-to-rae.md`
 - `docs/runtime-kernel-abi.md`
 - `docs/runtime-audit-2026-07.md`
+- `docs/standard-library-ownership-model.md`
 
 The goal is not to expose raw pointers to Rae. The goal is to let ordinary Rae
 apps own platform resources safely while the C runtime remains a thin ABI layer.
