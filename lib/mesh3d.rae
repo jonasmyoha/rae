@@ -1,0 +1,148 @@
+# mesh3d — procedural mesh generation for the gpu3d renderer.
+#
+# Every generator returns a MeshData: interleaved vertices (8 Floats
+# each — position xyz, normal xyz, uv) and a triangle index list with
+# counter-clockwise winding (gpu3d culls back faces).
+import core
+import math
+
+type MeshData {
+  verts: List(Float)
+  indices: List(Int)
+  vertCount: Int
+}
+
+func pushVert(verts: mod List(Float), px: view Float, py: view Float, pz: view Float, nx: view Float, ny: view Float, nz: view Float, u: view Float, v: view Float) {
+  verts.add(value: px)
+  verts.add(value: py)
+  verts.add(value: pz)
+  verts.add(value: nx)
+  verts.add(value: ny)
+  verts.add(value: nz)
+  verts.add(value: u)
+  verts.add(value: v)
+}
+
+# Unit-radius UV sphere centered at origin.
+func makeSphere(rings: view Int, segments: view Int) pub ret MeshData {
+  let verts: List(Float) = createList(Float, cap: (rings + 1) * (segments + 1) * 8)
+  let indices: List(Int) = createList(Int, cap: rings * segments * 6)
+  let pi: Float = 3.141592653589793
+  var r: Int = 0
+  loop r <= rings {
+    let phi: Float = pi * r.toFloat() / rings.toFloat()   # 0..pi from top
+    let y: Float = math.cos(x: phi)
+    let ringRad: Float = math.sin(x: phi)
+    var s: Int = 0
+    loop s <= segments {
+      let theta: Float = 2.0 * pi * s.toFloat() / segments.toFloat()
+      let x: Float = ringRad * math.cos(x: theta)
+      let z: Float = ringRad * math.sin(x: theta)
+      pushVert(verts: verts, px: x, py: y, pz: z, nx: x, ny: y, nz: z, u: s.toFloat() / segments.toFloat(), v: r.toFloat() / rings.toFloat())
+      s = s + 1
+    }
+    r = r + 1
+  }
+  let stride: Int = segments + 1
+  var ri: Int = 0
+  loop ri < rings {
+    var si: Int = 0
+    loop si < segments {
+      let a: Int = ri * stride + si
+      let b: Int = a + stride
+      indices.add(value: a)
+      indices.add(value: a + 1)
+      indices.add(value: b)
+      indices.add(value: b)
+      indices.add(value: a + 1)
+      indices.add(value: b + 1)
+      si = si + 1
+    }
+    ri = ri + 1
+  }
+  let vertCount: Int = (rings + 1) * (segments + 1)
+  ret MeshData { verts: own verts, indices: own indices, vertCount: vertCount }
+}
+
+# Flat plane on the XZ ground (normal +Y), centered, `size` on a side.
+func makePlane(size: view Float, segments: view Int) pub ret MeshData {
+  let verts: List(Float) = createList(Float, cap: (segments + 1) * (segments + 1) * 8)
+  let indices: List(Int) = createList(Int, cap: segments * segments * 6)
+  var zi: Int = 0
+  loop zi <= segments {
+    let vz: Float = zi.toFloat() / segments.toFloat()
+    var xi: Int = 0
+    loop xi <= segments {
+      let vx: Float = xi.toFloat() / segments.toFloat()
+      pushVert(verts: verts, px: (vx - 0.5) * size, py: 0.0, pz: (vz - 0.5) * size, nx: 0.0, ny: 1.0, nz: 0.0, u: vx, v: vz)
+      xi = xi + 1
+    }
+    zi = zi + 1
+  }
+  let stride: Int = segments + 1
+  var z2: Int = 0
+  loop z2 < segments {
+    var x2: Int = 0
+    loop x2 < segments {
+      let a: Int = z2 * stride + x2
+      let b: Int = a + stride
+      indices.add(value: a)
+      indices.add(value: b)
+      indices.add(value: a + 1)
+      indices.add(value: a + 1)
+      indices.add(value: b)
+      indices.add(value: b + 1)
+      x2 = x2 + 1
+    }
+    z2 = z2 + 1
+  }
+  let vertCount: Int = (segments + 1) * (segments + 1)
+  ret MeshData { verts: own verts, indices: own indices, vertCount: vertCount }
+}
+
+# Torus in the XZ plane: `majorR` ring radius, `minorR` tube radius.
+func makeTorus(majorR: view Float, minorR: view Float, majorSegs: view Int, minorSegs: view Int) pub ret MeshData {
+  let verts: List(Float) = createList(Float, cap: (majorSegs + 1) * (minorSegs + 1) * 8)
+  let indices: List(Int) = createList(Int, cap: majorSegs * minorSegs * 6)
+  let pi: Float = 3.141592653589793
+  var i: Int = 0
+  loop i <= majorSegs {
+    let u: Float = 2.0 * pi * i.toFloat() / majorSegs.toFloat()
+    let cu: Float = math.cos(x: u)
+    let su: Float = math.sin(x: u)
+    var j: Int = 0
+    loop j <= minorSegs {
+      let v: Float = 2.0 * pi * j.toFloat() / minorSegs.toFloat()
+      let cv: Float = math.cos(x: v)
+      let sv: Float = math.sin(x: v)
+      let px: Float = (majorR + minorR * cv) * cu
+      let py: Float = minorR * sv
+      let pz: Float = (majorR + minorR * cv) * su
+      let nx: Float = cv * cu
+      let ny: Float = sv
+      let nz: Float = cv * su
+      pushVert(verts: verts, px: px, py: py, pz: pz, nx: nx, ny: ny, nz: nz, u: i.toFloat() / majorSegs.toFloat(), v: j.toFloat() / minorSegs.toFloat())
+      j = j + 1
+    }
+    i = i + 1
+  }
+  let stride: Int = minorSegs + 1
+  var a2: Int = 0
+  loop a2 < majorSegs {
+    var b2: Int = 0
+    loop b2 < minorSegs {
+      let a: Int = a2 * stride + b2
+      let b: Int = a + stride
+      indices.add(value: a)
+      indices.add(value: b)
+      indices.add(value: a + 1)
+      indices.add(value: a + 1)
+      indices.add(value: b)
+      indices.add(value: b + 1)
+      b2 = b2 + 1
+    }
+    a2 = a2 + 1
+  }
+  let vertCount: Int = (majorSegs + 1) * (minorSegs + 1)
+  ret MeshData { verts: own verts, indices: own indices, vertCount: vertCount }
+}
