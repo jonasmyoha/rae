@@ -261,7 +261,12 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         case AST_BIN_BITXOR: fprintf(out, " ^ "); break;
         case AST_BIN_SHL: fprintf(out, " << "); break; case AST_BIN_SHR: fprintf(out, " >> "); break;
       }
-      emit_expr(ctx, expr->as.binary.rhs, out, prec, false, false);
+      /* RHS gets prec + 1: Rae's binary operators are LEFT-associative,
+       * so a right operand of EQUAL precedence must keep its parens —
+       * `a - (b + c)` re-emitted as `a - b + c` silently flips signs
+       * (the gpu3d mat4LookAt dot-product bug), `a / (b * c)` becomes
+       * `(a / b) * c`. Equal-precedence LHS stays unparenthesized. */
+      emit_expr(ctx, expr->as.binary.rhs, out, prec + 1, false, false);
       if (prec < parent_prec) fprintf(out, ")"); if (is_bool_op) fprintf(out, ")");
       ctx->has_expected_type = had_exp_bin;
       ctx->expected_type = saved_exp_bin;
