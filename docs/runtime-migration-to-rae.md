@@ -307,6 +307,7 @@ visible.
 
 Current audit: `docs/runtime-audit-2026-07.md`.
 Native handle model: `docs/native-handle-ownership.md`.
+Stdlib bootstrap tiers: `docs/stdlib-bootstrap-tiers.md`.
 
 Deliverables:
 
@@ -388,6 +389,11 @@ and moved image-key metadata, failed-load throttling, and fired-fetch throttling
 out of 106 app glue into Rae. C still owns raw decode/upload and render-time
 gpu2d image-key lookup for now.
 
+Sixth completed design slice: `#296` defined the stdlib bootstrap tiers in
+`docs/stdlib-bootstrap-tiers.md`: Tier 0 compiler builtins, Tier 1 C runtime
+kernel externs, Tier 2 `core`, Tier 3 `alloc`, Tier 4 `std`, and Tier 5
+`platform`, with explicit build ordering and migration gates.
+
 ### Stage 3: Move Pure Algorithms And Platform Policy
 
 Start with algorithms that require no platform callbacks:
@@ -444,6 +450,9 @@ runtime-kernel split prevents circular bootstrap surprises.
   document: which types should remain compiler-known, which can become ordinary
   Rae code, which require runtime support forever, which should be opaque native
   handles, and where the permanent ABI boundary sits.
+- **Stdlib tier enforcement.** `docs/stdlib-bootstrap-tiers.md` defines the
+  target tiers, but compiler/package enforcement is still future work and
+  depends on module namespacing.
 - Should `String` remain compiler-special forever, or become a Rae struct over a
   raw buffer kernel?
 - What is the minimum byte-slice model needed for safe parsers and decoders?
