@@ -54,8 +54,10 @@
 #include "runtime_gpu2d_text.c"
 #include "runtime_gpu2d_image.c"
 #include "runtime_gpu2d_frame.c"
+#include "runtime_gpu3d.c"
 #else
 #include "runtime_gpu2d_stubs.c"
+#include "runtime_gpu3d_stubs.c"
 #endif /* RAE_HAS_SDL3 */
 #endif /* RAE_HAS_WEBGPU */
 #include "runtime_spotify_apple.c"
