@@ -12,6 +12,7 @@ It follows:
 - `docs/runtime-migration-to-rae.md`
 - `docs/runtime-audit-2026-07.md`
 - `docs/native-handle-ownership.md`
+- `docs/stdlib-bootstrap-tiers.md`
 
 ## Core Principle
 
@@ -381,6 +382,8 @@ Before adding a new C runtime API, answer:
 5. Is it permanent kernel, C binding, temporary bridge, or legacy?
 6. If it creates a native resource, does it follow
    `docs/native-handle-ownership.md` rather than returning a raw `Int`?
+7. Which stdlib bootstrap tier would depend on it, and would that create a
+   lower-tier-to-higher-tier dependency cycle?
 
 Default decision:
 
