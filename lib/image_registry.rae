@@ -1,0 +1,185 @@
+# Rae-owned image resource policy.
+#
+# This module is intentionally above the permanent C runtime boundary:
+# gpu2d still performs raw decode/upload and render-time lookup, while Rae owns
+# image keys, loaded/failed status, retry throttling, and cache metadata.
+import core
+import gpu2d
+
+enum ImageLoadStatus {
+  none
+  pending
+  loaded
+  failed
+}
+
+type ImageResource pub {
+  key: String
+  path: String
+  status: ImageLoadStatus
+  handle: Int
+  attempts: Int
+}
+
+type ImageRegistry pub {
+  items: List(ImageResource)
+  failedPaths: String
+  firedPaths: String
+  revision: Int
+}
+
+func createImageRegistry() pub ret ImageRegistry {
+  ret ImageRegistry {
+    items: createList(ImageResource, cap: 32)
+    failedPaths: "|"
+    firedPaths: "|"
+    revision: 0
+  }
+}
+
+func imageRegistryPathContains(haystack: view String, path: view String) ret Bool {
+  let needle: String = "|{path}|"
+  ret haystack.contains(sub: needle)
+}
+
+func imageRegistryAppendPath(haystack: view String, path: view String) ret String {
+  if imageRegistryPathContains(haystack: haystack, path: path) {
+    ret haystack
+  }
+  ret haystack.concat(other: path).concat(other: "|")
+}
+
+func imageRegistryIndex(reg: view ImageRegistry, key: view String) pub ret Int {
+  var i: Int = 0
+  loop i < reg.items.length {
+    let item: ImageResource = rae_ext_rae_buf_get(buf: reg.items.data, index: i)
+    if item.key.equals(other: key) {
+      ret i
+    }
+    i = i + 1
+  }
+  ret 0 - 1
+}
+
+func imageRegistryHas(reg: view ImageRegistry, key: view String) pub ret Bool {
+  let idx: Int = imageRegistryIndex(reg: reg, key: key)
+  if idx >= 0 {
+    let item: ImageResource = rae_ext_rae_buf_get(buf: reg.items.data, index: idx)
+    if item.status is ImageLoadStatus.loaded {
+      ret true
+    }
+  }
+  # Raw gpu2d still owns the render-time key table for now; consult it as a
+  # compatibility bridge while policy moves to Rae.
+  ret gpu2d.hasImageKey(key: key)
+}
+
+func imageRegistryIsFailedPath(reg: view ImageRegistry, path: view String) pub ret Bool {
+  ret imageRegistryPathContains(haystack: reg.failedPaths, path: path)
+}
+
+func imageRegistryMarkFailedPath(reg: mod ImageRegistry, path: view String) pub {
+  let next: String = imageRegistryAppendPath(haystack: reg.failedPaths, path: path)
+  if next.equals(other: reg.failedPaths) is false {
+    reg.failedPaths = next
+    reg.revision = reg.revision + 1
+  }
+}
+
+func imageRegistryWasFired(reg: view ImageRegistry, path: view String) pub ret Bool {
+  ret imageRegistryPathContains(haystack: reg.firedPaths, path: path)
+}
+
+func imageRegistryMarkFired(reg: mod ImageRegistry, path: view String) pub {
+  let next: String = imageRegistryAppendPath(haystack: reg.firedPaths, path: path)
+  if next.equals(other: reg.firedPaths) is false {
+    reg.firedPaths = next
+    reg.revision = reg.revision + 1
+  }
+}
+
+func imageRegistryMarkPending(reg: mod ImageRegistry, key: view String, path: view String) pub {
+  let idx: Int = imageRegistryIndex(reg: reg, key: key)
+  if idx >= 0 {
+    let item: ImageResource = rae_ext_rae_buf_get(buf: reg.items.data, index: idx)
+    let updated: ImageResource = {
+      key: "{item.key}"
+      path: "{path}"
+      status: ImageLoadStatus.pending
+      handle: item.handle
+      attempts: item.attempts
+    }
+    reg.items.set(index: idx, value: own updated)
+    reg.revision = reg.revision + 1
+    ret
+  }
+  let res: ImageResource = {
+    key: "{key}"
+    path: "{path}"
+    status: ImageLoadStatus.pending
+    handle: 0
+    attempts: 0
+  }
+  reg.items.add(value: own res)
+  reg.revision = reg.revision + 1
+}
+
+func imageRegistryUpsertResult(reg: mod ImageRegistry, key: view String, path: view String, handle: view Int) {
+  var status: ImageLoadStatus = ImageLoadStatus.failed
+  if handle > 0 {
+    status = ImageLoadStatus.loaded
+  }
+  let idx: Int = imageRegistryIndex(reg: reg, key: key)
+  if idx >= 0 {
+    let item: ImageResource = rae_ext_rae_buf_get(buf: reg.items.data, index: idx)
+    var attempts: Int = item.attempts
+    if handle <= 0 {
+      attempts = attempts + 1
+    }
+    let updated: ImageResource = {
+      key: "{key}"
+      path: "{path}"
+      status: status
+      handle: handle
+      attempts: attempts
+    }
+    reg.items.set(index: idx, value: own updated)
+  } else {
+    var attempts: Int = 0
+    if handle <= 0 {
+      attempts = 1
+    }
+    let res: ImageResource = {
+      key: "{key}"
+      path: "{path}"
+      status: status
+      handle: handle
+      attempts: attempts
+    }
+    reg.items.add(value: own res)
+  }
+  if handle <= 0 {
+    imageRegistryMarkFailedPath(reg: reg, path: path)
+  } else {
+    reg.revision = reg.revision + 1
+  }
+}
+
+func imageRegistryLoad(reg: mod ImageRegistry, key: view String, path: view String) pub ret Int {
+  if imageRegistryHas(reg: reg, key: key) {
+    let idx: Int = imageRegistryIndex(reg: reg, key: key)
+    if idx >= 0 {
+      let item: ImageResource = rae_ext_rae_buf_get(buf: reg.items.data, index: idx)
+      ret item.handle
+    }
+    ret 1
+  }
+  if imageRegistryIsFailedPath(reg: reg, path: path) {
+    ret 0
+  }
+  let copiedKey: String = "{key}"
+  let copiedPath: String = "{path}"
+  let handle: Int = gpu2d.loadImageKey(key: copiedKey, path: copiedPath)
+  imageRegistryUpsertResult(reg: reg, key: key, path: path, handle: handle)
+  ret handle
+}

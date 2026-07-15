@@ -18,7 +18,6 @@ open ui/ecs
 # album catalogue — Spotify mode only repaints the NowPlaying screen
 # and the mini-player.
 import core
-import gpu2d
 import json
 import sys
 import sys/spotify
@@ -110,7 +109,7 @@ func loadHistoryEntryArt(track: view SpotifyTrack, reg: mod TextureRegistry) pub
     ret ""
   }
   let key: String = "spotify-art:{imageHash}"
-  if gpu2d.hasImageKey(key: key) {
+  if textureHas(reg: reg, key: key) {
     ret key
   }
   ensureAppCacheDirs()
@@ -124,7 +123,7 @@ func loadHistoryEntryArt(track: view SpotifyTrack, reg: mod TextureRegistry) pub
   }
   let gpuKey: String = "{key}"
   let gpuPath: String = "{outPath}"
-  let h: Int = gpu2d.loadImageKey(key: gpuKey, path: gpuPath)
+  let h: Int = textureLoad(reg: reg, key: gpuKey, path: gpuPath)
   if h <= 0 {
     ret ""
   }
@@ -196,7 +195,7 @@ func refreshSpotifyArt(state: view SpotifyState, track: view SpotifyTrack, reg: 
   # Drop any prior registration so the new file lands cleanly.
   let copiedKey: String = "{state.artKey}"
   let copiedPath: String = "{outPath}"
-  let h: Int = gpu2d.loadImageKey(key: copiedKey, path: copiedPath)
+  let h: Int = textureLoad(reg: reg, key: copiedKey, path: copiedPath)
   ret h > 0
 }
 

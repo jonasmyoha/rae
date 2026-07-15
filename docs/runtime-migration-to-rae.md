@@ -383,6 +383,11 @@ thin raw C WebGPU calls plus opaque handles, with Rae owning descriptors,
 resource caches, resize/reconfigure policy, bind tracking, validation, render
 graph policy, and debug labels.
 
+First completed implementation slice: `#294` introduced `lib/image_registry.rae`
+and moved image-key metadata, failed-load throttling, and fired-fetch throttling
+out of 106 app glue into Rae. C still owns raw decode/upload and render-time
+gpu2d image-key lookup for now.
+
 ### Stage 3: Move Pure Algorithms And Platform Policy
 
 Start with algorithms that require no platform callbacks:
@@ -395,7 +400,9 @@ Start with algorithms that require no platform callbacks:
 
 Move app/backend policy into Rae:
 
-- Image registry and failed-load throttling.
+- Image registry and failed-load throttling. `#294` now provides the first
+  Rae-owned policy layer in `lib/image_registry.rae`; remaining follow-up is to
+  replace the runtime's raw key table with typed Rae-owned image handles.
 - Asset caches and metadata stores.
 - WebGPU descriptors/resource managers. `#295` records the concrete staged plan
   for descriptors, opaque handles, cache entries, bind tracking, validation,
