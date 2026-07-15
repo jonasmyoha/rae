@@ -2303,7 +2303,9 @@ static bool build_c_backend_output(const char* entry_file,
       if (node->module_path && (strcmp(node->module_path, "sdl3") == 0 || strstr(node->module_path, "/sdl3.rae") || strstr(node->module_path, "\\sdl3.rae")
                                 || strcmp(node->module_path, "filesystem") == 0 || strstr(node->module_path, "/filesystem.rae") || strstr(node->module_path, "\\filesystem.rae")
                                 // gpu2d.rae owns an SDL3 window (its surface wraps the SDL Metal layer)
-                                || strcmp(node->module_path, "gpu2d") == 0 || strstr(node->module_path, "gpu2d.rae"))) {
+                                || strcmp(node->module_path, "gpu2d") == 0 || strstr(node->module_path, "gpu2d.rae")
+                                // gpu3d.rae renders through the same SDL3 window/surface
+                                || strcmp(node->module_path, "gpu3d") == 0 || strstr(node->module_path, "gpu3d.rae"))) {
           uses_sdl3 = true;
           break;
       }
@@ -2317,7 +2319,9 @@ static bool build_c_backend_output(const char* entry_file,
       if (node->module_path && (strcmp(node->module_path, "webgpu") == 0 || strcmp(node->module_path, "gpu") == 0 ||
                                 strstr(node->module_path, "gpu.rae") ||
                                 // gpu2d.rae presents through wgpu-native (its own render surface)
-                                strcmp(node->module_path, "gpu2d") == 0 || strstr(node->module_path, "gpu2d.rae"))) {
+                                strcmp(node->module_path, "gpu2d") == 0 || strstr(node->module_path, "gpu2d.rae") ||
+                                // gpu3d.rae — the 3D renderer (MSAA/depth/PBR) on wgpu-native
+                                strcmp(node->module_path, "gpu3d") == 0 || strstr(node->module_path, "gpu3d.rae"))) {
           uses_webgpu = true;
           break;
       }
