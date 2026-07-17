@@ -1,4 +1,4 @@
-# Minimal GPU3D engine seed. This deliberately uses the WebGPU compute seam
+# Minimal GPU3D engine seed, initially authored by GPT-5.6-Sol. This deliberately uses the WebGPU compute seam
 # available today: the WGSL raymarcher renders procedural geometry into a
 # framebuffer which SDL3 presents. The scene is data-oriented on the Rae side,
 # so a future raster extractor can consume the same component data.
@@ -144,7 +144,7 @@ func rae_ext_rae_sys_read_file(path: String) extern ret String
 func main() {
     let scene: Scene3d = buildScene()
     let wgsl: String = rae_ext_rae_sys_read_file(path: "examples/108_gpu3d_procedural/raymarch.wgsl")
-    sdl3.initWindow(width: 1280, height: 720, title: "Rae GPU3D — procedural engine seed")
+    sdl3.initWindow(width: 1280, height: 720, title: "Rae 3D — Procedural Scene — GPT-5.6-Sol")
     sdl3.setTargetFPS(fps: 0)
 
     var quality: Int = 1
@@ -238,7 +238,7 @@ func main() {
         gpu.downloadU32(buf: rt.outBuf, out: framebuffer.data, count: width * height)
         sdl3.updatePixels(pixels: framebuffer.data, w: width, h: height)
         sdl3.present()
-        sdl3.setTitle(title: "Rae GPU3D | {width}x{height} | WASD/E-Q + drag | 1/2/3 quality | F12 PNG")
+        sdl3.setTitle(title: "Rae 3D — GPT-5.6-Sol | {width}x{height} | WASD/E-Q + drag | 1/2/3 quality | F12 PNG")
         if sdl3.isKeyPressed(key: 291) {
             let saved: Bool = image.savePng(path: filesystem.renderPath(stem: "rae_gpu3d"), pixels: framebuffer.data, width: width, height: height)
         }
