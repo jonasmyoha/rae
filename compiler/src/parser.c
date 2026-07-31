@@ -83,11 +83,26 @@ static bool parser_match(Parser* parser, TokenKind kind) {
   return true;
 }
 
+static bool is_keyword(TokenKind kind) {
+  return kind >= TOK_KW_TYPE && kind <= TOK_KW_PARALLELLOOP;
+}
+
 static const Token* parser_consume(Parser* parser, TokenKind kind, const char* message) {
   if (parser_check(parser, kind)) {
     return parser_advance(parser);
   }
-  parser_error(parser, parser_peek(parser), message);
+  const Token* token = parser_peek(parser);
+  if (kind == TOK_IDENT) {
+    if (is_keyword(token->kind)) {
+      parser_error(parser, token, "'%.*s' is a reserved keyword", (int)token->lexeme.len, token->lexeme.data);
+      return parser_advance(parser);
+    } else {
+      parser_error(parser, token, message);
+      static const Token dummy_ident = { TOK_IDENT, { "dummy", 5 }, 0, 0 };
+      return &dummy_ident;
+    }
+  }
+  parser_error(parser, token, message);
   return NULL;
 }
 
@@ -104,8 +119,13 @@ static const Token* parser_consume_ident(Parser* parser, const char* message) {
   if (is_ident_like(token->kind)) {
     return parser_advance(parser);
   }
+  if (is_keyword(token->kind)) {
+    parser_error(parser, token, "'%.*s' is a reserved keyword", (int)token->lexeme.len, token->lexeme.data);
+    return parser_advance(parser);
+  }
   parser_error(parser, token, message);
-  return NULL;
+  static const Token dummy_ident = { TOK_IDENT, { "dummy", 5 }, 0, 0 };
+  return &dummy_ident;
 }
 
 // Like parser_consume_ident, but also accepts a keyword token as a name. Used
@@ -861,6 +881,9 @@ static AstExpr* finish_call(Parser* parser, AstExpr* callee, const Token* start_
   size_t arg_idx = 0;
   do {
     size_t prev_index = parser->index;
+    if (parser_check(parser, TOK_RBRACE) || parser_check(parser, TOK_EOF)) {
+      break;
+    }
     AstCallArg* arg = parser_alloc(parser, sizeof(AstCallArg));
     
     // Named argument: identifier followed by ':'. Generic type arguments
@@ -1456,6 +1479,9 @@ static AstExpr* parse_postfix(Parser* parser) {
         if (!parser_match(parser, TOK_RPAREN)) {
           size_t arg_idx = 0;
           do {
+            if (parser_check(parser, TOK_RBRACE) || parser_check(parser, TOK_EOF)) {
+              break;
+            }
             AstCallArg* arg = parser_alloc(parser, sizeof(AstCallArg));
             
             // Named argument: identifier followed by ':'. Generic type
@@ -1532,6 +1558,13 @@ static AstExpr* parse_postfix(Parser* parser) {
 static AstExpr* parse_unary(Parser* parser) {
   if (is_unary_operator(parser_peek(parser)->kind)) {
     const Token* op_token = parser_advance(parser);
+    TokenKind operand_kind = parser_peek(parser)->kind;
+    if (operand_kind == TOK_RPAREN || operand_kind == TOK_RBRACKET ||
+        operand_kind == TOK_RBRACE || operand_kind == TOK_COMMA ||
+        operand_kind == TOK_EOF) {
+      parser_error(parser, parser_peek(parser), "expected expression after unary operator");
+      return new_expr(parser, AST_EXPR_NONE, op_token);
+    }
     // `own EXPR` is a separate AST node (AST_EXPR_OWN) rather than a
     // unary op — see docs/ownership-model.md. The wrapper signals
     // "consume / move this value" to the C codegen's move-detection
@@ -2528,4 +2561,3 @@ AstModule* parse_module(Arena* arena, const char* file_path, TokenList tokens) {
   module->had_error = parser.had_error;
   return module;
 }
-
