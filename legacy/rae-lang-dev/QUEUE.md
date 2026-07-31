@@ -230,4 +230,5 @@
 - [ ] #321 3D: WASM/web build — no emscripten path exists in the driver (0 emcc references in main.c). Add `--target wasm` (emcc + SDL3 wasm + WebGPU via emscripten's webgpu.h), port the runtime guards, demo page. Biggest deployment unknown for the Assembly entry; spike early. (Was mis-numbered #293.)
 - [ ] #322 3D: 2D HUD overlay on 3D — gpu2d beginFrame needs a LoadOp_Load variant (0 references today) so the 2D pass composites over the resolved 3D frame for text/HUD/debug overlays. (Was mis-numbered #294.)
 - [ ] #323 3D: headless screenshot regression test for the raster renderer — there are currently ZERO 3D tests in the suite, so the renderer is protected by nothing. Add a compiled-target case that renders 109 headless via RAE_GPU2D_SCREENSHOT and asserts non-blank output. Closes the missing third of #301.
+- [ ] #324 Restore the compiler `MODE=CI_STRICT` build gate: `compiler/src/main.c:863` currently fails `-Werror` because a conditional mixes `uint8_t*` string storage with a `char*` empty fallback; fix the type boundary and run a forced strict rebuild.
 <!-- SUMU_QUEUE_END -->
