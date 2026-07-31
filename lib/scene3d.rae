@@ -1,0 +1,182 @@
+# scene3d — backend-agnostic 3D scene data model for the unified renderer.
+#
+# This is the layer BOTH renderer backends read, and the reason the three
+# seed examples (107 raymarch, 108 procedural raymarch, 109 PBR raster)
+# can converge without pretending their geometry is the same thing:
+#
+#   - `MeshRenderer`  — explicit triangle meshes. The RASTER backend
+#     (lib/gpu3d.rae + runtime_gpu3d.c) consumes these.
+#   - `SdfPrimitive`  — implicit signed-distance geometry + procedural
+#     displacement. The RAYMARCH backend consumes these.
+#
+# Geometry is the one place total unification is NOT possible, so it is an
+# explicit tagged split rather than a lowest-common-denominator fudge.
+# Everything above geometry — transforms, materials, camera, lights,
+# environment — is shared, so a scene is authored once and either backend
+# renders the parts it understands.
+#
+# WORLD CONVENTION: right-handed Z-up (Blender), per
+# `docs/coordinate-system.md`. +X right, +Y forward, +Z up.
+#
+# Storage is parallel component arrays indexed by entity, the extraction-
+# friendly shape 108 established: `renderables[i].entity` indexes
+# `transforms`. Components stay primitive/Vec3-only (no inner String or
+# other heap fields) — Rae's `List(Struct)` does not deep-copy inner heap
+# fields reliably, so keeping components flat avoids that whole class of
+# aliasing bug.
+import core
+open vec3
+
+# ----- typed resource handles ----------------------------------------
+# Raw `Int` handles let a material id be passed where a mesh id belongs
+# and silently render garbage. These wrappers make that a type error, and
+# carry a generation so a stale handle to a freed slot is detectable
+# rather than aliasing whatever got allocated into that slot next.
+type MeshHandle {
+  id: Int
+  generation: Int
+}
+
+type MaterialHandle {
+  id: Int
+  generation: Int
+}
+
+func meshHandle(id: view Int, generation: view Int) pub ret MeshHandle {
+  ret MeshHandle { id: id, generation: generation }
+}
+
+func materialHandle(id: view Int, generation: view Int) pub ret MaterialHandle {
+  ret MaterialHandle { id: id, generation: generation }
+}
+
+# The native mesh registry is 1-based (runtime_gpu3d.c returns slot+1 and
+# subtracts on draw), so id 0 is the natural "nothing" value.
+func meshHandleNone() pub ret MeshHandle {
+  ret MeshHandle { id: 0, generation: 0 }
+}
+
+func meshHandleIsValid(h: view MeshHandle) pub ret Bool {
+  ret h.id > 0
+}
+
+# ----- shared components ---------------------------------------------
+# Rotation is Euler XYZ in radians, right-handed, applied as yaw about +Z
+# and pitch about +X per docs/coordinate-system.md. (A Quat type is the
+# natural upgrade once Rae grows one — see the follow-up queue item.)
+type Transform3d {
+  position: Vec3
+  rotation: Vec3
+  scale: Vec3
+}
+
+type Material3d {
+  baseColor: Vec3
+  metallic: Float
+  roughness: Float
+  emission: Vec3
+}
+
+type Camera3d {
+  position: Vec3
+  target: Vec3
+  fovYDeg: Float
+  nearZ: Float
+  farZ: Float
+}
+
+# One directional sun + hemisphere ambient + exposure. This is exactly the
+# lighting the raster uber-shader and both raymarch shaders already
+# implement, so it is shared rather than duplicated per backend.
+type Light3d {
+  sunDir: Vec3
+  sunColor: Vec3
+  ambSky: Vec3
+  ambGround: Vec3
+  exposure: Float
+  clearColor: Vec3
+}
+
+# ----- geometry components (the backend divergence point) -------------
+type MeshRenderer {
+  entity: Int
+  mesh: MeshHandle
+  material: Int
+  visible: Bool
+}
+
+# shape: 0 sphere, 1 box, 2 torus — matches the raymarch shaders' switch.
+type SdfPrimitive {
+  entity: Int
+  shape: Int
+  material: Int
+  noise: Float
+}
+
+type Scene3d {
+  transforms: List(Transform3d)
+  materials: List(Material3d)
+  meshRenderers: List(MeshRenderer)
+  sdfPrimitives: List(SdfPrimitive)
+}
+
+func createScene3d() pub ret Scene3d {
+  ret Scene3d {
+    transforms: createList(Transform3d, cap: 16),
+    materials: createList(Material3d, cap: 8),
+    meshRenderers: createList(MeshRenderer, cap: 16),
+    sdfPrimitives: createList(SdfPrimitive, cap: 16)
+  }
+}
+
+# ----- authoring helpers ---------------------------------------------
+func addTransform(scene: mod Scene3d, position: view Vec3, rotation: view Vec3, scale: view Vec3) pub ret Int {
+  let entity: Int = scene.transforms.length
+  scene.transforms.add(value: Transform3d { position: position, rotation: rotation, scale: scale })
+  ret entity
+}
+
+func addMaterial(scene: mod Scene3d, baseColor: view Vec3, metallic: view Float, roughness: view Float, emission: view Vec3) pub ret Int {
+  let index: Int = scene.materials.length
+  scene.materials.add(value: Material3d { baseColor: baseColor, metallic: metallic, roughness: roughness, emission: emission })
+  ret index
+}
+
+# Attach a triangle mesh to a fresh entity. Raster backend renders these.
+func addMeshInstance(scene: mod Scene3d, mesh: view MeshHandle, material: view Int, position: view Vec3, rotation: view Vec3, scale: view Vec3) pub ret Int {
+  let entity: Int = addTransform(scene: scene, position: position, rotation: rotation, scale: scale)
+  scene.meshRenderers.add(value: MeshRenderer { entity: entity, mesh: mesh, material: material, visible: true })
+  ret entity
+}
+
+# Attach an SDF primitive to a fresh entity. Raymarch backend renders these.
+func addSdfInstance(scene: mod Scene3d, shape: view Int, material: view Int, position: view Vec3, scale: view Vec3, noise: view Float) pub ret Int {
+  let zero: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let entity: Int = addTransform(scene: scene, position: position, rotation: zero, scale: scale)
+  scene.sdfPrimitives.add(value: SdfPrimitive { entity: entity, shape: shape, material: material, noise: noise })
+  ret entity
+}
+
+# ----- defaults ------------------------------------------------------
+# Blender front view: camera on -Y looking toward +Y, world-up +Z.
+func defaultCamera3d() pub ret Camera3d {
+  ret Camera3d {
+    position: vec3.create(x: 0.0, y: 0.0 - 12.0, z: 4.0),
+    target: vec3.create(x: 0.0, y: 0.0, z: 0.5),
+    fovYDeg: 50.0,
+    nearZ: 0.1,
+    farZ: 200.0
+  }
+}
+
+# Sun from above-front (Z-up: the -Z component points the light downward).
+func defaultLight3d() pub ret Light3d {
+  ret Light3d {
+    sunDir: vec3.create(x: 0.0 - 0.4, y: 0.3, z: 0.0 - 1.0),
+    sunColor: vec3.create(x: 3.2, y: 3.0, z: 2.7),
+    ambSky: vec3.create(x: 0.25, y: 0.3, z: 0.4),
+    ambGround: vec3.create(x: 0.12, y: 0.1, z: 0.09),
+    exposure: 1.0,
+    clearColor: vec3.create(x: 0.02, y: 0.02, z: 0.03)
+  }
+}
