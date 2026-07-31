@@ -1,33 +1,51 @@
-# gpu3d — minimal 3D renderer (Assembly 2026 demo arc, M1).
+# gpu3d — raster backend of the unified 3D renderer (Assembly 2026 arc).
 #
-# Renders PBR-lit triangle meshes through wgpu-native into the same
-# SDL3 window/surface gpu2d owns. An app opens the window with
-# gpu2d.initWindow(...) and then drives frames with gpu3d instead of
-# the 2D beginFrame/endFrame (2D HUD overlay on top of 3D is a later
-# milestone). Antialiasing is MSAA 4x; depth is Depth32Float.
+# Renders `scene3d` triangle meshes (MeshRenderer components) with PBR
+# lighting through wgpu-native into the same SDL3 window/surface gpu2d
+# owns. An app opens the window with gpu2d.initWindow(...) then drives
+# frames with gpu3d. MSAA 4x, Depth32Float, resolved into gpu2d's
+# persistent offscreen so present + RAE_GPU2D_SCREENSHOT + the planned
+# 2D HUD overlay all keep working unchanged.
 #
-# A mesh is interleaved float data — 8 Floats per vertex:
-#   position xyz, normal xyz, uv — plus a triangle index list.
-# Generate them with lib/mesh3d.rae or build your own.
+# WORLD CONVENTION: right-handed Z-up (Blender) per
+# `docs/coordinate-system.md`. Only mat4Perspective knows about WebGPU
+# clip space; world space is Z-up everywhere.
 #
-# Lighting model (single uber-shader): Cook-Torrance GGX specular +
-# Lambert diffuse, one directional sun, hemisphere ambient (sky/ground),
-# emissive, exposure + ACES tonemap. Materials are per-draw parameters:
-# base color, metallic, roughness, emissive.
+# API SHAPE: the C ABI underneath is flat float buffers (packed frame
+# block, 9 loose material floats per draw) because that is what crosses
+# the extern boundary cheaply. That packing is an IMPLEMENTATION DETAIL —
+# app code uses the typed `Camera3d`/`Light3d`/`Transform3d`/`Material3d`
+# structs from lib/scene3d.rae and this module encodes them. Nobody
+# should be counting magic float offsets in application code.
 #
-# Constraint: normals are transformed by the model matrix directly, so
-# non-uniform scaling skews lighting — stick to uniform scales per draw.
+# A mesh is interleaved float data — 8 Floats per vertex: position xyz,
+# normal xyz, uv — plus a triangle index list. Generate with
+# lib/mesh3d.rae or build your own.
+#
+# Lighting (single uber-shader): Cook-Torrance GGX specular + Lambert
+# diffuse, one directional sun, hemisphere ambient (sky/ground), emissive,
+# exposure + ACES tonemap.
+#
+# KNOWN LIMITATION (queued): normals are transformed by the model matrix
+# directly, so NON-UNIFORM scale skews lighting — use uniform scale per
+# draw until the inverse-transpose normal matrix lands. Tonemapping also
+# happens inside the material shader, which makes the output effectively
+# LDR; a separate HDR target + tonemap pass is queued.
 import core
+import math
+open vec3
+open scene3d
+open math3d
 
+# ----- raw C ABI (implementation detail; prefer the typed API below) ---
 func meshCreate(verts: view Buffer(Float), vertCount: Int, indices: view Buffer(Int), indexCount: Int) extern ret Int
 func begin(frame: view Buffer(Float), count: Int) extern
 func draw(mesh: Int, model: view Buffer(Float), r: Float, g: Float, b: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) extern
 func end() extern
 func shutdown() extern
 
-# ----- frame parameter block -----------------------------------------
-# `begin` takes a packed 36-Float block. Build it with createFrame3d +
-# the setters below, tweak per frame, and pass to beginFrame.
+# ----- frame parameter block (internal encoding) ----------------------
+# `begin` takes a packed 36-Float block:
 #   [0..15] viewProj (column-major)
 #   [16..18] camera position        [19] time (seconds, for shaders)
 #   [20..22] sun direction (toward the scene)   [23] exposure
@@ -46,16 +64,10 @@ func createFrame3d() pub ret Frame3d {
     d.add(value: 0.0)
     i = i + 1
   }
-  # Sensible defaults: exposure 1, sun from above-front, soft blue/grey ambient.
-  let f: Frame3d = { data: own d }
-  setSun(frame: f, dirX: -0.4, dirY: -1.0, dirZ: -0.3, r: 3.0, g: 2.9, b: 2.7)
-  setAmbient(frame: f, skyR: 0.25, skyG: 0.3, skyB: 0.4, groundR: 0.12, groundG: 0.1, groundB: 0.09)
-  setExposure(frame: f, exposure: 1.0)
-  setClearColor(frame: f, r: 0.02, g: 0.02, b: 0.03)
-  ret f
+  ret Frame3d { data: own d }
 }
 
-func setViewProj(frame: mod Frame3d, m: view List(Float)) pub {
+func setViewProj(frame: mod Frame3d, m: view List(Float)) {
   var i: Int = 0
   loop i < 16 {
     frame.data.set(index: i, value: rae_ext_rae_buf_get(buf: m.data, index: i))
@@ -63,58 +75,91 @@ func setViewProj(frame: mod Frame3d, m: view List(Float)) pub {
   }
 }
 
-func setCamera(frame: mod Frame3d, x: view Float, y: view Float, z: view Float) pub {
-  frame.data.set(index: 16, value: x)
-  frame.data.set(index: 17, value: y)
-  frame.data.set(index: 18, value: z)
+func setVec3At(frame: mod Frame3d, base: view Int, v: view Vec3) {
+  frame.data.set(index: base, value: v.x)
+  frame.data.set(index: base + 1, value: v.y)
+  frame.data.set(index: base + 2, value: v.z)
 }
 
 func setTime(frame: mod Frame3d, t: view Float) pub {
   frame.data.set(index: 19, value: t)
 }
 
-func setSun(frame: mod Frame3d, dirX: view Float, dirY: view Float, dirZ: view Float, r: view Float, g: view Float, b: view Float) pub {
-  frame.data.set(index: 20, value: dirX)
-  frame.data.set(index: 21, value: dirY)
-  frame.data.set(index: 22, value: dirZ)
-  frame.data.set(index: 24, value: r)
-  frame.data.set(index: 25, value: g)
-  frame.data.set(index: 26, value: b)
-}
-
-func setExposure(frame: mod Frame3d, exposure: view Float) pub {
-  frame.data.set(index: 23, value: exposure)
-}
-
-func setAmbient(frame: mod Frame3d, skyR: view Float, skyG: view Float, skyB: view Float, groundR: view Float, groundG: view Float, groundB: view Float) pub {
-  frame.data.set(index: 27, value: skyR)
-  frame.data.set(index: 28, value: skyG)
-  frame.data.set(index: 29, value: skyB)
-  frame.data.set(index: 30, value: groundR)
-  frame.data.set(index: 31, value: groundG)
-  frame.data.set(index: 32, value: groundB)
-}
-
-func setClearColor(frame: mod Frame3d, r: view Float, g: view Float, b: view Float) pub {
-  frame.data.set(index: 33, value: r)
-  frame.data.set(index: 34, value: g)
-  frame.data.set(index: 35, value: b)
-}
-
-func beginFrame(frame: view Frame3d) pub {
+# ----- typed renderer seam -------------------------------------------
+# Encode a typed camera + light into the flat frame block and start the
+# 3D pass. `aspect` is width/height of the target.
+func beginScene(camera: view Camera3d, light: view Light3d, aspect: view Float, time: view Float) pub {
+  var frame: Frame3d = createFrame3d()
+  let worldUp: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
+  let viewM: List(Float) = mat4LookAt(
+    eyeX: camera.position.x, eyeY: camera.position.y, eyeZ: camera.position.z,
+    atX: camera.target.x, atY: camera.target.y, atZ: camera.target.z,
+    upX: worldUp.x, upY: worldUp.y, upZ: worldUp.z
+  )
+  let proj: List(Float) = mat4Perspective(fovYDeg: camera.fovYDeg, aspect: aspect, near: camera.nearZ, far: camera.farZ)
+  let viewProj: List(Float) = mat4Mul(a: proj, b: viewM)
+  setViewProj(frame: frame, m: viewProj)
+  setVec3At(frame: frame, base: 16, v: camera.position)
+  setTime(frame: frame, t: time)
+  setVec3At(frame: frame, base: 20, v: light.sunDir)
+  frame.data.set(index: 23, value: light.exposure)
+  setVec3At(frame: frame, base: 24, v: light.sunColor)
+  setVec3At(frame: frame, base: 27, v: light.ambSky)
+  setVec3At(frame: frame, base: 30, v: light.ambGround)
+  setVec3At(frame: frame, base: 33, v: light.clearColor)
   begin(frame: frame.data.data, count: 36)
 }
 
-# Draw `mesh` with a model matrix (16 Floats, column-major — see
-# lib/math3d.rae) and a PBR material.
-func drawMesh(mesh: view Int, model: view List(Float), r: view Float, g: view Float, b: view Float, metallic: view Float, roughness: view Float) pub {
-  draw(mesh: mesh, model: model.data, r: r, g: g, b: b, metallic: metallic, roughness: roughness, emR: 0.0, emG: 0.0, emB: 0.0)
+# Build a model matrix from a typed transform: M = T * Rz * Ry * Rx * S.
+# Rotation is Euler XYZ radians, right-handed (yaw about +Z, pitch about
+# +X) per docs/coordinate-system.md.
+func modelMatrix(t: view Transform3d) pub ret List(Float) {
+  let s: List(Float) = mat4ScaleXYZ(x: t.scale.x, y: t.scale.y, z: t.scale.z)
+  let rx: List(Float) = mat4RotateX(angle: t.rotation.x)
+  let ry: List(Float) = mat4RotateY(angle: t.rotation.y)
+  let rz: List(Float) = mat4RotateZ(angle: t.rotation.z)
+  let tr: List(Float) = mat4Translate(x: t.position.x, y: t.position.y, z: t.position.z)
+  let rxs: List(Float) = mat4Mul(a: rx, b: s)
+  let ryrxs: List(Float) = mat4Mul(a: ry, b: rxs)
+  let rot: List(Float) = mat4Mul(a: rz, b: ryrxs)
+  ret mat4Mul(a: tr, b: rot)
 }
 
-func drawMeshEmissive(mesh: view Int, model: view List(Float), r: view Float, g: view Float, b: view Float, metallic: view Float, roughness: view Float, emR: view Float, emG: view Float, emB: view Float) pub {
-  draw(mesh: mesh, model: model.data, r: r, g: g, b: b, metallic: metallic, roughness: roughness, emR: emR, emG: emG, emB: emB)
+# Draw one mesh with a typed transform + material.
+func drawInstance(mesh: view MeshHandle, transform: view Transform3d, material: view Material3d) pub {
+  if not meshHandleIsValid(h: mesh) {
+    ret
+  }
+  let model: List(Float) = modelMatrix(t: transform)
+  draw(
+    mesh: mesh.id, model: model.data,
+    r: material.baseColor.x, g: material.baseColor.y, b: material.baseColor.z,
+    metallic: material.metallic, roughness: material.roughness,
+    emR: material.emission.x, emG: material.emission.y, emB: material.emission.z
+  )
+}
+
+# Render every visible MeshRenderer in a scene. This is the world-oriented
+# entry point — apps should not hand-roll a per-entity draw loop.
+func renderScene(scene: view Scene3d) pub {
+  var i: Int = 0
+  loop i < scene.meshRenderers.length {
+    let r: MeshRenderer = scene.meshRenderers.at(index: i)
+    if r.visible {
+      let t: Transform3d = scene.transforms.at(index: r.entity)
+      let m: Material3d = scene.materials.at(index: r.material)
+      drawInstance(mesh: r.mesh, transform: t, material: m)
+    }
+    i = i + 1
+  }
 }
 
 func endFrame() pub {
   end()
+}
+
+# Upload interleaved mesh data and get a typed handle back.
+func uploadMesh(verts: view List(Float), vertCount: view Int, indices: view List(Int)) pub ret MeshHandle {
+  let raw: Int = meshCreate(verts: verts.data, vertCount: vertCount, indices: indices.data, indexCount: indices.length)
+  ret meshHandle(id: raw, generation: 0)
 }
