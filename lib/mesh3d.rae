@@ -3,6 +3,11 @@
 # Every generator returns a MeshData: interleaved vertices (8 Floats
 # each — position xyz, normal xyz, uv) and a triangle index list with
 # counter-clockwise winding (gpu3d culls back faces).
+#
+# WORLD CONVENTION: right-handed Z-up (Blender) per
+# `docs/coordinate-system.md` — +X right, +Y forward, +Z up. Sphere poles
+# are on +/-Z, the plane lies in XY with normal +Z, and the torus ring
+# lies in the XY plane with its tube sweeping around +Z.
 import core
 import math
 
@@ -30,14 +35,14 @@ func makeSphere(rings: view Int, segments: view Int) pub ret MeshData {
   let pi: Float = 3.141592653589793
   var r: Int = 0
   loop r <= rings {
-    let phi: Float = pi * r.toFloat() / rings.toFloat()   # 0..pi from top
-    let y: Float = math.cos(x: phi)
+    let phi: Float = pi * r.toFloat() / rings.toFloat()   # 0..pi from +Z pole
+    let z: Float = math.cos(x: phi)
     let ringRad: Float = math.sin(x: phi)
     var s: Int = 0
     loop s <= segments {
       let theta: Float = 2.0 * pi * s.toFloat() / segments.toFloat()
       let x: Float = ringRad * math.cos(x: theta)
-      let z: Float = ringRad * math.sin(x: theta)
+      let y: Float = ringRad * math.sin(x: theta)
       pushVert(verts: verts, px: x, py: y, pz: z, nx: x, ny: y, nz: z, u: s.toFloat() / segments.toFloat(), v: r.toFloat() / rings.toFloat())
       s = s + 1
     }
@@ -64,43 +69,43 @@ func makeSphere(rings: view Int, segments: view Int) pub ret MeshData {
   ret MeshData { verts: own verts, indices: own indices, vertCount: vertCount }
 }
 
-# Flat plane on the XZ ground (normal +Y), centered, `size` on a side.
+# Flat ground plane in XY (normal +Z), centered, `size` on a side.
 func makePlane(size: view Float, segments: view Int) pub ret MeshData {
   let verts: List(Float) = createList(Float, cap: (segments + 1) * (segments + 1) * 8)
   let indices: List(Int) = createList(Int, cap: segments * segments * 6)
-  var zi: Int = 0
-  loop zi <= segments {
-    let vz: Float = zi.toFloat() / segments.toFloat()
+  var yi: Int = 0
+  loop yi <= segments {
+    let vy: Float = yi.toFloat() / segments.toFloat()
     var xi: Int = 0
     loop xi <= segments {
       let vx: Float = xi.toFloat() / segments.toFloat()
-      pushVert(verts: verts, px: (vx - 0.5) * size, py: 0.0, pz: (vz - 0.5) * size, nx: 0.0, ny: 1.0, nz: 0.0, u: vx, v: vz)
+      pushVert(verts: verts, px: (vx - 0.5) * size, py: (vy - 0.5) * size, pz: 0.0, nx: 0.0, ny: 0.0, nz: 1.0, u: vx, v: vy)
       xi = xi + 1
     }
-    zi = zi + 1
+    yi = yi + 1
   }
   let stride: Int = segments + 1
-  var z2: Int = 0
-  loop z2 < segments {
+  var y2: Int = 0
+  loop y2 < segments {
     var x2: Int = 0
     loop x2 < segments {
-      let a: Int = z2 * stride + x2
+      let a: Int = y2 * stride + x2
       let b: Int = a + stride
       indices.add(value: a)
-      indices.add(value: b)
-      indices.add(value: a + 1)
       indices.add(value: a + 1)
       indices.add(value: b)
+      indices.add(value: b)
+      indices.add(value: a + 1)
       indices.add(value: b + 1)
       x2 = x2 + 1
     }
-    z2 = z2 + 1
+    y2 = y2 + 1
   }
   let vertCount: Int = (segments + 1) * (segments + 1)
   ret MeshData { verts: own verts, indices: own indices, vertCount: vertCount }
 }
 
-# Torus in the XZ plane: `majorR` ring radius, `minorR` tube radius.
+# Torus with its ring in the XY plane: `majorR` ring radius, `minorR` tube radius.
 func makeTorus(majorR: view Float, minorR: view Float, majorSegs: view Int, minorSegs: view Int) pub ret MeshData {
   let verts: List(Float) = createList(Float, cap: (majorSegs + 1) * (minorSegs + 1) * 8)
   let indices: List(Int) = createList(Int, cap: majorSegs * minorSegs * 6)
@@ -116,11 +121,11 @@ func makeTorus(majorR: view Float, minorR: view Float, majorSegs: view Int, mino
       let cv: Float = math.cos(x: v)
       let sv: Float = math.sin(x: v)
       let px: Float = (majorR + minorR * cv) * cu
-      let py: Float = minorR * sv
-      let pz: Float = (majorR + minorR * cv) * su
+      let py: Float = (majorR + minorR * cv) * su
+      let pz: Float = minorR * sv
       let nx: Float = cv * cu
-      let ny: Float = sv
-      let nz: Float = cv * su
+      let ny: Float = cv * su
+      let nz: Float = sv
       pushVert(verts: verts, px: px, py: py, pz: pz, nx: nx, ny: ny, nz: nz, u: i.toFloat() / majorSegs.toFloat(), v: j.toFloat() / minorSegs.toFloat())
       j = j + 1
     }
