@@ -5,9 +5,19 @@
 # constructors return fresh owned lists; mat4Mul composes so that
 # `mat4Mul(a: A, b: B)` applies B first, then A (A*B, like math).
 #
-# The projection targets WebGPU clip space: z in [0, 1], y up.
+# WORLD CONVENTION: right-handed, **Z-up**, matching Blender — +X right,
+# +Y forward (into the scene), +Z up. This is the project-wide mandate in
+# `docs/coordinate-system.md` ("New 3D code MUST use Z-up Blender
+# conventions"), NOT the graphics-default Y-up. Yaw rotates about +Z,
+# pitch about +X. Cameras are specified as position + target + worldUp
+# (+Z) and the basis is derived exactly as that doc prescribes.
+#
+# Only the PROJECTION knows about the graphics API: it maps the Z-up
+# right-handed view space into WebGPU clip space (z in [0, 1]). The
+# host API's up-axis preference never leaks into Rae world space.
 import core
 import math
+open vec3
 
 func mat4Identity() pub ret List(Float) {
   let m: List(Float) = createList(Float, cap: 16)
@@ -64,6 +74,18 @@ func mat4Scale(s: view Float) pub ret List(Float) {
   ret m
 }
 
+# Non-uniform scale. NOTE: gpu3d transforms normals by the model matrix
+# directly, so a non-uniform scale skews lighting — see the inverse-
+# transpose normal-matrix follow-up before relying on this for shaded
+# geometry.
+func mat4ScaleXYZ(x: view Float, y: view Float, z: view Float) pub ret List(Float) {
+  let m: List(Float) = mat4Identity()
+  m.set(index: 0, value: x)
+  m.set(index: 5, value: y)
+  m.set(index: 10, value: z)
+  ret m
+}
+
 func mat4RotateX(angle: view Float) pub ret List(Float) {
   let m: List(Float) = mat4Identity()
   let c: Float = math.cos(x: angle)
@@ -114,44 +136,73 @@ func mat4Perspective(fovYDeg: view Float, aspect: view Float, near: view Float, 
   ret m
 }
 
-# Right-handed look-at view matrix.
+# Right-handed Z-up look-at view matrix (docs/coordinate-system.md §Camera):
+#   forward = normalize(target - position)
+#   right   = normalize(cross(forward, worldUp))
+#   up      = cross(right, forward)
+# Pass worldUp = (0, 0, 1) for the standard Blender convention. A degenerate
+# look (forward parallel to worldUp) falls back to an alternate up reference
+# so the basis stays finite, as the doc requires.
+#
+# View space keeps the camera looking down its own -Z (what the WebGPU
+# projection below expects), so the third basis row is -forward.
 func mat4LookAt(eyeX: view Float, eyeY: view Float, eyeZ: view Float, atX: view Float, atY: view Float, atZ: view Float, upX: view Float, upY: view Float, upZ: view Float) pub ret List(Float) {
-  # forward = normalize(eye - at)  (camera looks down -f)
-  var fx: Float = eyeX - atX
-  var fy: Float = eyeY - atY
-  var fz: Float = eyeZ - atZ
+  # forward = normalize(target - eye) — the direction the camera looks.
+  var fx: Float = atX - eyeX
+  var fy: Float = atY - eyeY
+  var fz: Float = atZ - eyeZ
   let flen: Float = math.sqrt(x: fx * fx + fy * fy + fz * fz)
   fx = fx / flen
   fy = fy / flen
   fz = fz / flen
-  # side = normalize(up × f)
-  var sx: Float = upY * fz - upZ * fy
-  var sy: Float = upZ * fx - upX * fz
-  var sz: Float = upX * fy - upY * fx
-  let slen: Float = math.sqrt(x: sx * sx + sy * sy + sz * sz)
-  sx = sx / slen
-  sy = sy / slen
-  sz = sz / slen
-  # u = f × side
-  let ux: Float = fy * sz - fz * sy
-  let uy: Float = fz * sx - fx * sz
-  let uz: Float = fx * sy - fy * sx
+  # right = normalize(cross(forward, worldUp))
+  var rx: Float = fy * upZ - fz * upY
+  var ry: Float = fz * upX - fx * upZ
+  var rz: Float = fx * upY - fy * upX
+  var rlen: Float = math.sqrt(x: rx * rx + ry * ry + rz * rz)
+  if rlen < 0.000001 {
+    # Degenerate: looking straight along worldUp. Use +Y as the alternate
+    # up reference (Blender front-view fallback) and rebuild `right`.
+    rx = fy * 0.0 - fz * 1.0
+    ry = fz * 0.0 - fx * 0.0
+    rz = fx * 1.0 - fy * 0.0
+    rlen = math.sqrt(x: rx * rx + ry * ry + rz * rz)
+  }
+  rx = rx / rlen
+  ry = ry / rlen
+  rz = rz / rlen
+  # up = cross(right, forward)
+  let ux: Float = ry * fz - rz * fy
+  let uy: Float = rz * fx - rx * fz
+  let uz: Float = rx * fy - ry * fx
   let m: List(Float) = createList(Float, cap: 16)
-  m.add(value: sx)
+  m.add(value: rx)
   m.add(value: ux)
-  m.add(value: fx)
+  m.add(value: 0.0 - fx)
   m.add(value: 0.0)
-  m.add(value: sy)
+  m.add(value: ry)
   m.add(value: uy)
-  m.add(value: fy)
+  m.add(value: 0.0 - fy)
   m.add(value: 0.0)
-  m.add(value: sz)
+  m.add(value: rz)
   m.add(value: uz)
-  m.add(value: fz)
+  m.add(value: 0.0 - fz)
   m.add(value: 0.0)
-  m.add(value: 0.0 - (sx * eyeX + sy * eyeY + sz * eyeZ))
+  m.add(value: 0.0 - (rx * eyeX + ry * eyeY + rz * eyeZ))
   m.add(value: 0.0 - (ux * eyeX + uy * eyeY + uz * eyeZ))
-  m.add(value: 0.0 - (fx * eyeX + fy * eyeY + fz * eyeZ))
+  m.add(value: fx * eyeX + fy * eyeY + fz * eyeZ)
   m.add(value: 1.0)
   ret m
+}
+
+# Z-up orbit camera position from yaw/pitch/distance around a target.
+# Yaw is about +Z (0 puts the camera on -Y, Blender front view); positive
+# pitch raises the camera toward +Z.
+func orbitEye(targetX: view Float, targetY: view Float, targetZ: view Float, yaw: view Float, pitch: view Float, dist: view Float) pub ret Vec3 {
+  let cp: Float = math.cos(x: pitch)
+  ret vec3.create(
+    x: targetX + dist * cp * math.sin(x: yaw),
+    y: targetY - dist * cp * math.cos(x: yaw),
+    z: targetZ + dist * math.sin(x: pitch)
+  )
 }
