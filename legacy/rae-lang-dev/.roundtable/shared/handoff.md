@@ -2,18 +2,16 @@
 
 Lead agent: Clo
 Task type: Feature design
-Completed rounds: 3
+Completed rounds: 2
 Participants: Chattie, Clo, Gem
 
 ## Task
-What would be the ideal threading or concurrent coding solution for Rae programming language. I assume there are different kinds of concurrency. Like a long running rendering thread, or a single task doing multiple operations in a loop with multiple threads to a single or multiple component tables etc. and then joining once the task is done. - Also there those async await calls that this language doesn’t yet have. I have opinions about async/await syntax (in short: await should not be marked, but the opposite of it, the ”spawn” keyword will spawn an async call. awaited calls are just waited by default, so opposite of what other languages do, because that is more sane.) What would the ideal design document for concurrency have for Rae programming language given the languages C-compiled and bytecode VM version code, and the language style etc.
+there are threedifferent 3d renderer prototypesdone by three different llmsthey are the examples 107 108 109evaluate these examples and give a scorewhich one is bettera score from 0 to 10 with decimalsthen proposewhich kind of 3d renderer api would be bestbased on these three examplessuggest changes to unifythese three examples into oneunified 3d rendererof course there are different features in themsuch as the raymarchertotal unification might not be possible
 
 ## Orchestrator decision
 LEAD: Clo
 
-Judged strictly on this run's actual task — the concurrency design — Clo is the strongest pick. Both Chattie and Clo converged on the same sound core (ownership modes `view`/`mod`/`own` as the Send/Sync safety model, `spawn`→`Task(T)`, structured `TaskGroup`/`taskScope`, `Channel(T)`, `parallelFor` over disjoint ECS shards, raylib main-thread-only, Compiled-threads vs Live-cooperative split), so this was close. Clo's edge is grounding and fidelity: Clo verified firsthand that `spawn` *already exists* as a detached, leaking, VM-only `OP_SPAWN`/`SpawnData` prototype with no C-backend codegen, which reframes the whole effort from "build" to "evolve" and is exactly the kind of code-truth a lead needs before committing a design. Clo also contributed the decisive design distinction — structured/scoped tasks join before scope exit so they may *borrow* outer `view`/`mod` (enabling the user's "many threads over component tables, then join"), while detached tasks may capture only `own` — and held the user's explicit syntax preference (await unmarked, reading a `Task` auto-joins) where the others drifted to `.wait()`/`.get()`. Chattie's round-2 API surface was the most complete single artifact and deserves to be folded into the doc, but Clo identified the one must-answer-first unknown (does the VM's arg transfer deep-copy or pointer-move — the linchpin of isolate safety), which makes Clo best positioned to drive the implementation safely.
-
-FIRST_TASK: Pin down whether the existing `OP_SPAWN` arg transfer in `vm.c` deep-copies or pointer-moves `Value args[256]` (this decides isolate memory-safety today), then convert the detached, leaking `spawn` into a joinable `Task(T)`: store the `sys_thread_t` handle plus a heap result slot in the Task, have the sub-VM write its return value back and signal done, implement await-as-unmarked (auto-join on read of a `Task(T)`, with explicit `poll() -> opt T` as the escape hatch), and add the spawn-boundary capture rule (detached → `own`/`copy` only). Land it VM-first with a minimal Live test (spawn, join, read result), and write up the model in `rae/docs/concurrency-model.md` folding in Chattie's `Task`/`TaskGroup`/`Channel`/`parallelFor` API surface. Defer C-backend `spawn` codegen, `Channel`, and `parallelFor` sharding to follow-up commits so the first slice stays reviewable.
+Judged strictly on THIS run's actual task — evaluating the three 3D renderer prototypes (107/108/109) and proposing a unified renderer — both Chattie and Clo produced strong, on-task designs, but Clo's edges ahead as the lead. Both converged on the same core conclusions (109 = 7.9 as the strongest base, raster as primary with raymarch retained as a distinct technique, don't force-merge geometry). Clo's decisive advantages: it read all three examples' actual source plus both raymarch shaders before scoring, disclosed its own authorship of 109 and deliberately scored on architecture rather than authorship (intellectual honesty that matters when the lead owns a candidate), and articulated the cleanest layering — a backend-agnostic `lib/scene3d.rae` from 108's data model, a typed `Renderer3d` seam over 109's flat-buffer ABI, and shared camera/shading/present services — that directly answers "unify what you can, keep raymarch separate." It also pinned the single highest-risk trap concretely (the silent Z-up vs Y-up coordinate mismatch between the raymarchers and `math3d`) and gave a stage-able plan (raster data-model + typed API first to ship the demo, fold raymarch in second). Chattie's `World3d`/ECS-extraction/frame-graph proposal is more ambitious and its typed generation-checked handles and HDR/frame-graph roadmap are genuinely valuable to fold in, but that ambition also carries more scope risk for a first implementation slice, whereas Clo's incremental seam-first path is the safer thing to drive.
 
 ## Discussion summary
 ### Round 1 — Chattie
@@ -988,6 +986,267 @@ Rae's concurrency model reverses the default async/await patterns to maximize de
 I have updated my memory file at [memory.md](file:///Users/jonas/Documents/my_own_stuff/own_repos/rae-lang-dev/.roundtable/agents/gem/memory.md).
 SAY: Concurrency design proposed, memory updated for round one.
 
+### Round 1 — Chattie
+I’ll evaluate 107–109 against the same criteria: architecture, API quality, rendering capability, data orientation, portability, performance path, and usefulness as the foundation for a unified renderer.
+
+I’ll inspect their current code and runtime boundaries first, then produce scored findings and a concrete consolidation design.
+
+The branch contains unrelated parser/test edits, so I’ll leave them untouched. One immediate architectural finding is that 109 is already a genuine raster path with depth and 4× MSAA, while 107 and 108 are compute raymarchers; the comparison therefore needs separate scores for prototype quality and long-term engine suitability.
+
+The strongest reusable pieces are now clear: 108 has the best raymarch shader and cleaner material model; 107 has better buffer separation and avoids repacking static objects; 109 is the only viable base for a production renderer because it rasterizes generated meshes directly with depth and MSAA.
+
+Its current API is still prototype-grade: raw integer handles, heap-allocated matrix lists, global C state, embedded WGSL, hard coupling to GPU2D internals, and a Y-up convention conflicting with Rae’s documented Z-up world.
+
+A headless capture confirms 109’s strengths and limitations: geometry, depth ordering, material roughness/metalness response, and MSAA are real and working, but lighting is still a single-sun material study with LDR in-shader tonemapping, no shadows, textures, SSAO, or HDR post chain.
+
+I’m now consolidating the scores and API proposal around a shared ECS/extraction layer with raster and raymarch passes, rather than forcing raymarch geometry into the mesh API.
+
+## Evaluation
+
+Scores reflect suitability as the foundation of Rae’s long-term 3D renderer, not only current visual output.
+
+| Example | Score | Assessment |
+|---|---:|---|
+| 107 WebGPU Raymarch | **6.8/10** | Good compute experiment. Its separate camera, object, and material buffers are the best packing approach of the raymarchers. It has animated 3D FBM, SDF geometry, AO, and soft shadows. However, shading is only PBR-inspired, component arrays depend on matching indices, and every frame synchronously reads pixels back to the CPU before SDL uploads them again. |
+| 108 Procedural Scene | **7.4/10** | Best raymarch implementation. It has clearer entity-linked transforms, proper GGX/Smith/Schlick shading, torus geometry, quintic FBM, and deterministic 2×2 supersampling. Its main architectural flaw is repacking and uploading the entire scene every frame, including static objects and materials. It also uses the same expensive GPU→CPU→SDL presentation path. |
+| 109 PBR Raster Scene | **7.9/10** | Best renderer foundation. It provides actual generated triangle meshes, vertex/index buffers, depth testing, 4× MSAA, direct GPU presentation, GGX PBR, emissive materials, ACES tonemapping, and reusable Rae-side mesh/math modules. Its API and runtime remain prototype-grade. |
+
+**109 is the strongest base.** The actual captured result confirms that material response, depth ordering, generated meshes, and antialiasing work.
+
+Its main weaknesses are architectural:
+
+- `MeshHandle` is currently an untyped `Int`.
+- Matrices are heap-allocated `List(Float)` values, including many allocations per frame.
+- WGSL and substantial rendering policy are embedded in [runtime_gpu3d.c](/Users/jonas/Documents/my_own_stuff/own_repos/rae-lang-dev/rae/compiler/runtime/runtime_gpu3d.c).
+- Resource tables are global fixed-capacity C arrays with only whole-renderer shutdown.
+- GPU3D directly depends on GPU2D’s private surface and offscreen globals.
+- The output is effectively LDR because tonemapping happens inside the material shader.
+- It has no textures, shadows, SSAO, HDR post stack, material registry, or ECS extraction.
+- It uses Y-up while Rae’s documented world convention is right-handed Z-up.
+- Non-uniform scaling produces incorrect normals.
+
+## Unified Design
+
+Unify the **scene, resources, materials, camera, lighting, and frame graph**, but retain raster and raymarch as different render techniques.
+
+```rae
+type World3d {
+  transforms: ComponentTable(Transform3d)
+  meshRenderers: ComponentTable(MeshRenderer)
+  sdfVolumes: ComponentTable(SdfVolume)
+  cameras: ComponentTable(Camera3d)
+  lights: ComponentTable(Light3d)
+  environments: ComponentTable(Environment3d)
+  postProfiles: ComponentTable(PostProfile)
+}
+```
+
+Core components:
+
+```rae
+type Transform3d {
+  position: Vec3
+  rotation: Quat
+  scale: Vec3
+  parent: EntityId
+  revision: Int
+}
+
+type MeshRenderer {
+  mesh: MeshHandle
+  material: MaterialHandle
+  visible: Bool
+  layer: Int
+}
+
+type SdfVolume {
+  program: SdfProgramHandle
+  material: MaterialHandle
+  bounds: Aabb
+}
+
+type Material3d {
+  baseColor: LinearColor
+  metallic: Float
+  roughness: Float
+  emissive: LinearColor
+  baseColorTexture: TextureHandle
+  normalTexture: TextureHandle
+}
+```
+
+`MeshHandle`, `MaterialHandle`, `TextureHandle`, and `PipelineHandle` should be typed generation-checked handles, not interchangeable integers.
+
+The application-facing API should be world-oriented:
+
+```rae
+let renderer: Renderer3d = createRenderer3d(window: window, config: config)
+let world: World3d = createWorld3d()
+
+let mesh: MeshHandle = uploadMesh(renderer: renderer, data: meshData)
+let material: MaterialHandle = createMaterial(renderer: renderer, material: copper)
+
+renderWorld(renderer: renderer, world: world, camera: cameraEntity)
+```
+
+Applications should not normally call `beginFrame` and `drawMesh` for every entity. An O(n) extraction system should:
+
+1. Update transform hierarchies.
+2. Upload only dirty materials, transforms, lights, and meshes.
+3. Frustum-cull entities.
+4. Sort and batch visible instances.
+5. Produce immutable frame data for the render graph.
+
+The frame graph should evolve toward:
+
+```text
+Shadow passes
+→ optional raymarch background
+→ depth/forward mesh pass
+→ bounded SDF volume pass
+→ SSAO
+→ transparent/particles
+→ HDR post-processing
+→ tonemap
+→ GPU2D/UI
+→ present
+```
+
+Full-screen raymarch scenes remain useful for demo effects and procedural backgrounds. SDF objects that must interact with mesh depth should render through proxy bounds in a fragment pass, writing `frag_depth`. This is more coherent than trying to make compute-generated depth behave like a native depth attachment.
+
+## What To Keep
+
+From 107:
+
+- Separate static object/material buffers from per-frame camera data.
+- Animated 3D noise and SDF deformation.
+- Simple fly camera controls.
+
+From 108:
+
+- GGX material implementation.
+- Cleaner `Vec3`-based material and transform data.
+- Torus/SDF primitives.
+- Deterministic supersampling and explicit distinction between geometry AO and SSAO.
+
+From 109:
+
+- Raster pipeline, depth, MSAA, and direct GPU presentation.
+- Rae-generated mesh topology.
+- Material study fixture.
+- Mesh upload and instanced draw-data approach.
+- Orbit camera as a reusable controller.
+
+Do not merge both raymarch host implementations. Retain 108’s shader as the raymarch feature base, but adopt 107’s split-buffer update policy.
+
+## Implementation Order
+
+1. Reconcile duplicate queue tracks `#286–#294` and `#298–#304`, and fix documentation still referencing the removed `107_gpu3d_minimal`.
+2. Establish Z-up `Vec3`, `Vec4`, `Quat`, `Mat3`, and `Mat4` value types. Avoid allocating `List(Float)` for every matrix operation.
+3. Add `scene3d.rae` with `World3d`, components, transform propagation, dirty revisions, extraction, culling, and typed render queues.
+4. Refactor the C layer into raw WebGPU resource/pass operations. Move embedded WGSL, PBR policy, material packing, and render-graph decisions into Rae.
+5. Port 109 to `renderWorld`. Preserve its generated mesh, depth, MSAA, and PBR behavior as the first regression fixture.
+6. Port 108’s raymarcher into a GPU texture pass. Eliminate framebuffer readback and SDL re-upload.
+7. Add an `rgba16f` HDR target and separate tonemap pass, then shadows, texture materials, SSAO, bloom, and GPU2D composition.
+8. Keep three examples with distinct purposes: minimal raster correctness, raymarch/SDF features, and the Assembly showcase. They should share one renderer library rather than becoming one oversized example.
+
+## Risks And Unknowns
+
+- Rae needs an allocation-free matrix representation; fixed arrays are unavailable, so four inline `Vec4` columns are the practical current design.
+- Hybrid SDF/mesh depth requires testing `frag_depth` and proxy-volume behavior across Metal, Vulkan, D3D12, and browser WebGPU.
+- SSAO with MSAA needs an explicit depth/normal sampling strategy; WebGPU depth resolve cannot be assumed.
+- The existing GPU2D/GPU3D shared globals must become an owned renderer/device context without breaking 106.
+- Shader buffer layouts can drift from Rae packing. Layout constants and validation tests must be centralized.
+- Device loss, resize, partial resource destruction, and generation-safe handles are currently missing.
+- The C-to-WASM WebGPU path remains a separate deployment gate.
+- Renderer work can expand indefinitely; the first acceptance target should remain one Z-up scene with generated meshes, direct GPU presentation, HDR forward PBR, depth, MSAA, and deterministic screenshots.
+
+SAY: The raster prototype is strongest, with the procedural raymarcher retained as a unified render pass.
+
+### Round 1 — Clo
+I'll evaluate the three prototypes by reading their actual code before scoring, then propose a unified design.
+
+[Bash] Inventory of the three examples[Read] /Users/jonas/Documents/my_own_stuff/own_repos/rae-lang-dev/rae/examples/107_gpu3d_raymarch/main.raeNow let me read 108 (the other raymarcher) to compare its approach.[Read] /Users/jonas/Documents/my_own_stuff/own_repos/rae-lang-dev/rae/examples/108_gpu3d_procedural/main.rae
+
+Let me quickly assess the two raymarch shaders' feature richness and confirm 109's current form.
+
+[Bash] Compare shader feature sets
+
+I read all three examples' `main.rae`, both raymarch shaders, and the 109 native stack (`runtime_gpu3d.c` + `lib/gpu3d/math3d/mesh3d`). Full disclosure up front: I authored 109, so I'll justify its score on architecture that's independent of authorship and credit where the other two are genuinely stronger.
+
+## Scores
+
+| Example | Author | Approach | Score |
+|---|---|---|---|
+| **107** | GPT-5.5 | Compute raymarch, CPU framebuffer round-trip | **6.4 / 10** |
+| **108** | GPT-5.6-Sol | Compute raymarch, ECS-extract data model | **7.3 / 10** |
+| **109** | Claude Fable | Native render pass, hardware raster PBR | **7.9 / 10** |
+
+**107 — 6.4.** A complete, playable demo: full fly camera (WASD/EQ/arrows/drag), quality tiers, PNG, 3D FBM + soft shadows + Fresnel spec. But the architecture is a dead end for a shippable renderer: every frame does `gpu.run` → `downloadU32` → `updatePixels` — a full GPU→CPU→GPU pixel round-trip. It rebuilds the entire pipeline on quality change, and packs objects into untyped float lists with magic indices.
+
+**108 — 7.3.** The best-engineered of the two raymarchers and the best *data model* of all three: `Vec3`-typed components, real entity indirection (`renderable.entity → transforms[entity]`), a single unified `extractScene` upload path, correct GGX + Fresnel-Schlick + SDF AO + 2×2 supersampling, and a torus. Comments explicitly anticipate a "future raster extractor" and SSAO — it's designed to be superseded gracefully. Same CPU-round-trip ceiling as 107, and it re-uploads the whole scene every frame even when only the camera moved.
+
+**109 — 7.9.** The only prototype on the architecture you'd actually ship for a realtime demo: a real WebGPU render pass with Depth32Float + MSAA 4×, GPU-resident triangle meshes, per-draw storage buffer indexed via `instance_index`/`firstInstance`, resolving into the shared gpu2d offscreen (so present + `RAE_GPU2D_SCREENSHOT` + the planned 2D-HUD overlay come for free). Correct Cook-Torrance (GGX+Smith+Schlick) + hemisphere ambient + ACES. Real `mat4` math and Rae-generated meshes. Its weaknesses are the API (a 36-float packed `Frame3d` with magic indices; `draw()` takes 9 positional floats), only an orbit camera, no shadows/SSAO yet, and it needs the new C runtime + the paren-precedence compiler fix.
+
+## Proposed unified API
+
+The key realization: **total unification is impossible at the geometry layer** (raster needs explicit triangle meshes; raymarch needs implicit SDF primitives + procedural displacement), but **everything above geometry can be shared**. So split the design into a portable data model and a swappable render backend.
+
+**Layer 1 — `lib/scene3d.rae` (backend-agnostic, from 108's model, upgraded):**
+```
+type Transform3d { position: Vec3, rotation: Vec3, scale: Vec3 }
+type Material3d  { baseColor: Vec3, metallic: Float, roughness: Float, emission: Vec3 }
+type Camera3d    { position: Vec3, forward: Vec3, up: Vec3, fovYDeg: Float }
+type Light3d     { sunDir: Vec3, sunColor: Vec3, ambSky: Vec3, ambGround: Vec3, exposure: Float }
+# geometry is a tagged component — the boundary where backends diverge:
+type MeshRenderer  { mesh: Int, material: Int }      # raster consumes these
+type SdfPrimitive  { shape: Int, material: Int, noise: Float }  # raymarch consumes these
+type Scene3d { transforms, materials, meshRenderers, sdfPrimitives }
+```
+One scene, entity-indexed like 108. A backend renders only the component kind it understands (and can warn about the other).
+
+**Layer 2 — `Renderer3d` seam (typed facade over 109's flat-buffer ABI):**
+```
+beginFrame(camera: Camera3d, light: Light3d)          # replaces the 36-float magic block
+drawMesh(mesh: Int, transform: Transform3d, material: Material3d)  # replaces 9 positional floats
+endFrame()
+```
+`beginFrame` internally encodes the typed structs into the flat buffer the C ABI wants — the packed layout stays an implementation detail, the author-facing API is typed. Two implementations behind this seam: **`RasterRenderer`** (109's `runtime_gpu3d.c`, the default/primary) and **`RaymarchRenderer`** (107/108's compute path, optional, for SDF/procedural/volumetric content).
+
+**Layer 3 — shared services:** `lib/camera3d.rae` (union of fly-cam from 107/108 + orbit from 109 + quality tiers), one WGSL "material include" (GGX/Smith/Schlick/ACES) shared by both the raster fragment shader and the raymarch shader so materials match across backends, and the gpu2d present/screenshot/HUD path for everyone.
+
+## Implementation steps
+1. Lift 108's `Scene3d`/`Vec3`-typed components into `lib/scene3d.rae`; add the `MeshRenderer`/`SdfPrimitive` split.
+2. Replace 109's `Frame3d` 36-float block with typed `Camera3d`/`Light3d` + an internal encoder; replace `draw(9 floats)` with `drawMesh(transform, material)`.
+3. Define the `Renderer3d` seam; wire `RasterRenderer` to it (already 90% there).
+4. **Port the raymarchers off the CPU round-trip:** run the compute output into a storage texture and blit into the gpu2d offscreen (or convert to a fullscreen fragment pass sampling the scene SSBO). This removes `downloadU32`/`updatePixels`, unifies present + screenshot, and enables the 2D HUD overlay.
+5. Unify the camera controller and shading WGSL include.
+6. This becomes the base for roadmap #289 (SSAO), #290 (noise lib), #291 (ECS) — they all consume `lib/scene3d`.
+
+## Trade-offs, risks, unknowns
+- **Coordinate-system mismatch (silent, high-risk):** the raymarchers are **Z-up** (`worldUp = (0,0,1)`); 109/`math3d` is **Y-up**. Pick one — I'd standardize on **Y-up** (matches WebGPU clip conventions and `math3d`) — and convert the raymarch shaders. Miss this and geometry silently rotates.
+- **The geometry boundary is real:** don't force SDF and mesh into one component. The scene expresses both; each backend renders what it knows. That's the honest edge of "unification."
+- **Native-only today:** all three need WebGPU; the WASM/web build (#293) is the biggest unknown. Neither raymarch nor raster is meaningfully more browser-ready — but the render-pass path is the *standard* browser-3D path, so betting on the raster backend de-risks the eventual port.
+- **Compiler dependencies:** `math3d` is silently wrong without the paren-precedence fix (already landed); the parser segfault on `view` as a binding name (#288) is a live footgun for anyone writing scene/camera code.
+- **Caps & cost:** 109's per-draw storage buffer caps at `G3D_MAX_DRAWS` (4096) — fine for a demo, document it. Raymarch cost scales pixels × objects × march-steps, so quality tiers (108's supersampling toggle) stay mandatory.
+- **Rae ownership gotcha:** the typed encoder copies structs per frame; safe here because all fields are primitives/`Vec3`, but `List(Struct)` deep-copy/aliasing behavior in Rae means keep scene components primitive-only (no inner `String`/heap fields).
+- **Scope:** "unified renderer" is large. Stage it — data-model + typed API on the raster backend first (ships the demo), fold raymarch in as an optional backend second.
+
+Now updating my memory.[Bash] Read existing memory before updatingThe existing memory is a concurrency-task record (~3276 chars) that would blow the 4000 limit if I append.
+
+I'll compact the stale concurrency detail and add this round's 3D-renderer findings.
+
+[Write] /Users/jonas/Documents/my_own_stuff/own_repos/rae-lang-dev/.roundtable/agents/clo/memory.md[Read] /Users/jonas/Documents/my_own_stuff/own_repos/rae-lang-dev/.roundtable/agents/clo/memory.md
+
+[Write] /Users/jonas/Documents/my_own_stuff/own_repos/rae-lang-dev/.roundtable/agents/clo/memory.mdMemory updated (now ~2.7KB, under the 4KB limit). Round 1 response complete.
+
+**Summary of my design position:**
+
+- **Scores:** 107 = **6.4**, 108 = **7.3**, 109 = **7.9** (I authored 109; scored it on architecture, not authorship).
+- **Core finding:** the two raymarchers (107/108) share a fundamental ceiling — a per-frame GPU→CPU→GPU pixel round-trip — while 109 is the only prototype on a shippable hardware-raster architecture (real render pass, depth, MSAA, GPU-resident). But 108 has the best data model and 107/108 have richer shading + a fuller camera.
+- **Unified design:** you can't merge the *geometry* layer (triangle meshes vs implicit SDF), so split into three layers — a backend-agnostic `lib/scene3d.rae` (from 108, with tagged `MeshRenderer`/`SdfPrimitive` components), a typed `Renderer3d` seam over 109's flat-buffer ABI with `RasterRenderer` (default) + `RaymarchRenderer` (optional), and shared camera/shading/present services.
+- **Biggest risks:** the silent Z-up (raymarch) vs Y-up (109/math3d) coordinate mismatch; native-only with WASM as the open unknown; and scope — stage the raster data-model+API first to ship the demo, fold raymarch in later.
+
 ### Round 2 — Chattie
 **Decision**
 The Live fix should be built as a bytecode semantics split: add direct local initialization and reserve reference-aware `OP_SET_LOCAL` only for actual assignment.
@@ -1938,6 +2197,20 @@ I also noted that ~half of the peers' round-1 text was contaminated by a *previo
 ### Round 2 — Gem
 Warning: conversation "49466fc0-363b-421e-bc3e-4e4f186cb4ec," not found.
 
+### Round 2 — Chattie
+VOTE: Clo
+
+Clo should lead because they verified the existing concurrency implementation instead of treating it as greenfield: `spawn`, `OP_SPAWN`, `SpawnData`, detached sub-VM execution, missing C-backend support, and the current handle leak/no-result behavior. Their structured-vs-detached distinction is the strongest design point: scoped tasks can borrow `view`/`mod` because they join before scope exit, while escaping tasks must move `own` values. That fits Rae’s ownership model and the Live/Compiled split.
+
+FIRST_TASK: Document and implement the first safe slice of `Task(T)`: audit current `OP_SPAWN` argument transfer semantics, then change VM `spawn` from detached fire-and-forget into a joinable task handle with result storage, completion signaling, and spawn-boundary ownership diagnostics.
+
+### Round 2 — Clo
+VOTE: Chattie
+
+Judged only on this run's actual task — the concurrency design — Chattie delivered the strongest and most reliable body of work. Round 1 was grounded (Chattie checked the existing `spawn`/`sys_thread`/test surface before proposing) and landed the spawn-first, no-`await` model with `Task(T)`/`TaskGroup`/`Channel(T)`/`parallelFor`. Round 2 was the most complete proposal anyone produced: concrete API signatures (`get`/`poll`/`cancel`, `TaskGroup.spawn`/`joinAll`, `Channel.send`/`recv`/`tryRecv`, `Shared`/`AtomicInt`/`AtomicBool`), explicit spawn-boundary ownership rules for `own`/`copy`/`view`/`mod`, a Compiled-vs-Live backend split (real-thread pool vs cooperative green tasks/isolates with yield points), ECS sharding with disjoint dense ranges and single-threaded structural mutation, eight phased implementation steps, and a sober risk list. Two things tip it toward Chattie for lead: discipline — in round 2 Chattie explicitly recognized the transcript contamination from the prior mobile-UI/scene-unit runs and refined only the concurrency task; and consistency — Chattie delivered a full design in both discussion rounds, whereas Gem's round-2 concurrency reply errored out with no content and Gem drifted off-task most often. Gem's reconnaissance (surfacing that `spawn`/`OP_SPAWN`/`SpawnData` already exist) and the "`parallelFor` blocks the caller, so it can borrow outer `view`/`mod`" insight were genuinely valuable and should be folded in, but the failed round and scope drift make Gem the riskier pick to drive the build.
+
+FIRST_TASK: Convert the existing detached `spawn` into a joinable `Task(T)` on the VM backend first — the foundation everything else builds on. In `compiler/src/vm.c`, change `OP_SPAWN` to store the `sys_thread_t` handle plus a heap result slot in a `Task` value instead of discarding the handle and running detached; have `spawn_thread_wrapper`'s sub-VM write its return value into that slot and signal done; implement await-as-unmarked (auto-join when a `Task(T)` is read where `T` is expected) with explicit `poll() -> opt T` as the escape hatch. Before coding, pin down the must-verify-first unknown: whether the current `Value args[256]` transfer in `OP_SPAWN` deep-copies or pointer-moves — that decides isolate memory-safety and whether detached captures must be restricted to `own`/`copy`. Add the spawn-boundary ownership check (detached → `own`/`copy` only) and a minimal Live spawn-join-read test, and write the model up in `rae/docs/concurrency-model.md` folding in the `Task`/`TaskGroup`/`Channel`/`parallelFor` API surface. Defer C-backend `spawn` codegen, `Channel`, and `parallelFor` sharding to follow-up commits so the first slice stays reviewable.
+
 ### Round 3 — Chattie
 VOTE: claude
 
@@ -1986,6 +2259,23 @@ VOTE: Gem
 On the strength of contributions to *this run's actual task* — units/pixels in `.raescene` layouts — Gem is the only peer who engaged the question with a concrete technical design. Gem's viewport reply laid out the 3-coordinate model (Design/Viewport/Screen), the `Viewport` struct, `SafeArea` as an authored entity, and the device-preset table, and it correctly anchored to the pre-existing `rae/docs/ui-viewport-and-safe-area-plan.md` — converging with the consensus on **393×852 logical points**. That is directly on-topic and implementation-ready. Chattie's work in this run, while precise and disciplined, was almost entirely about a *different* problem — the Live VM `REF_VIEW` crash (`vm_is_value_type`, `OP_BIND_LOCAL`/`OP_INIT_LOCAL`) — which does not touch how lengths are expressed in scene files. Gem's render-to-texture path does have the real flaw I flagged (a `viewport`-sized blit is blurry on Retina unless allocated at `viewport × dpr`), but that is a correctable detail on top of an otherwise sound, on-task architecture, whereas Chattie offered no design for the pixels question at all.
 
 FIRST_TASK: Land the units foundation from the consolidated viewport plan — add `lib/ui/viewport.rae` with the `Viewport` struct extended with a `dpr: Float` field; establish the unit contract that `.raescene` lengths are **logical points at 1×** (numbers = pt, `spaceS/M/L` tokens resolve to pt); rescale `examples/98_mobile_ui/config.rae` from 498×1079 to 393×852 (clean ×0.789, same aspect); enable `FLAG_WINDOW_HIGHDPI` and derive `dpr = GetRenderWidth ÷ GetScreenWidth`; and apply pixel snapping `round(pt·dpr)/dpr` at the transform→draw boundary. Critically, if render-to-texture is used, allocate the target at `viewport × dpr` (not raw points) so it stays crisp on Retina — and keep render-to-texture as the opt-in editor/sim path, with direct back-buffer rendering in points as the default.
+
+### Round 3 — Chattie
+VOTE: Clo
+
+Clo should lead because their concurrency proposal is the most grounded in Rae’s actual implementation: they verified existing `spawn`, `OP_SPAWN`, `SpawnData`, `sys_thread`, the detached sub-VM behavior, and the lack of C-backend join/result support. They also made the strongest architectural distinction: scoped tasks may borrow `view`/`mod` because they join before scope exit, while detached tasks must capture only `own` moved values. That directly fits Rae’s ownership model and the Live/Compiled split.
+
+FIRST_TASK: Turn the existing detached VM `spawn` prototype into a documented `Task(T)` design: specify current behavior, define join/result/error semantics, and write the first implementation plan for `Task(T)` handles plus spawn-boundary ownership rules.
+
+### Round 3 — Clo
+VOTE: Chattie
+
+Judged only on this run's actual task — the concurrency design — Chattie produced the strongest and most implementation-ready body of work across both discussion rounds. Round 1 was grounded (Chattie explicitly checked the existing `spawn`/`sys_thread`/test surface before proposing) and landed the spawn-first, no-`await` model with `Task(T)`/`TaskGroup`/`Channel(T)`/`parallelFor`. Round 2 was the most complete proposal anyone offered: concrete API signatures (`get`/`poll`/`cancel`, `TaskGroup.spawn`/`joinAll`, `Channel.send`/`recv`/`tryRecv`, `Shared`/`AtomicInt`/`AtomicBool`), explicit spawn-boundary ownership rules for `own`/`copy`/`view`/`mod`, a Compiled-vs-Live backend split (real threads + pool vs cooperative green tasks/isolates with yield points), ECS sharding with disjoint dense ranges and single-threaded structural mutation, eight phased implementation steps, and a sober risk list (soundness, runtime-global auditing, API creep). Two things tip it toward Chattie for *lead* specifically: discipline — in round 2 Chattie explicitly recognized the transcript contamination from the prior mobile-UI/scene-unit runs and refined only the concurrency task, which is exactly the scope-hygiene an implementer needs; and consistency — Chattie delivered a full design in both rounds, whereas Gem's round-2 concurrency reply errored out with no content. Gem's contributions were genuinely valuable (the deepest code reconnaissance that surfaced the decisive fact that `spawn`/`OP_SPAWN`/`SpawnData` already exist, and the sharp "`parallel for` blocks the caller, so it can safely borrow outer `view`/`mod`" insight), but Gem also drifted off-task most often and had the failed round, making Gem the riskier choice to drive the build.
+
+FIRST_TASK: Convert the existing detached `spawn` into a joinable `Task(T)` on the VM backend first — the foundation everything else depends on. In `compiler/src/vm.c`, change `OP_SPAWN` so it stores the `sys_thread_t` handle plus a heap result slot in a `Task` value instead of discarding the handle and running detached; have `spawn_thread_wrapper`'s sub-VM write its return value back into that slot and signal done; implement join-on-read (auto-join when a `Task(T)` is consumed where `T` is expected) with explicit `poll() -> opt T` as the escape hatch. Before writing any of it, pin down the must-verify-first unknown: whether the current `Value args[256]` transfer in `OP_SPAWN` deep-copies or pointer-moves — that decides whether the isolate model is memory-safe today and whether detached captures must be restricted to `own`. Add the spawn-boundary ownership check (detached task → `own`/`copy` captures only) and a minimal Live test that spawns, joins, and reads a result. Defer C-backend `spawn` codegen, `Channel`, and `parallelFor` to follow-up commits so this first slice stays reviewable.
+
+### Round 3 — Gem
+Warning: conversation "ad8cc2f1-a81f-4839-ba73-bd03e475339b," not found.
 
 ## Instructions
 You (Clo) have been selected to lead implementation.

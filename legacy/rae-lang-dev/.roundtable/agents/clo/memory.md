@@ -1,56 +1,58 @@
 # Clo memory
 
 ## Durable Rae design principles (carry across tasks)
-
 - **Value/ref boundary:** `mod`/`view`/`own`/`=>` make refs; else by value.
-- **Two backends, one language:** Compiled (C)=perf/parallel; Live (VM)=
-  iteration/tooling/hot-reload; same semantics required. VM has shared
-  interpreter state + global `g_mem_*` counters (race hazard).
-- **Ownership model is already a borrow checker** (view/mod/own/copy +
-  cascade-drop, no GC) — reuse it, don't add traits.
-- Cross-module global writes limited; pass structs in, don't mutate globals.
-- `sys_thread.c/.h` = cross-platform thread+mutex (pthread/Win32). malloc, no GC.
+- **Two backends:** Compiled (C) is the target; Live VM deprecated/frozen.
+- **Ownership model IS a borrow checker** (view/mod/own/copy + cascade-drop,
+  no GC). `List(Struct)` doesn't reliably deep-copy inner heap fields → keep
+  components primitive/Vec3-only.
+- **COORDINATE MANDATE:** `docs/coordinate-system.md` — right-handed **Z-up**
+  Blender (+X right, +Y forward, +Z up), yaw about +Z. "New 3D code MUST use
+  Z-up." Only the projection touches clip space, so WebGPU's Y-up preference
+  never justifies Y-up world space. I got this WRONG in review; verify docs
+  before asserting conventions.
+- **Namespacing:** a lib calling another package needs `open pkg`, not
+  `import pkg` (bare calls otherwise error).
+- Paren-precedence codegen bug fixed (test 548). Parser still SEGFAULTS on
+  `view` as a let-binding name (#288, open).
 
-## Roundtable: Concurrency design (rounds 1–2). My position.
+## 3D renderer unification — IMPLEMENTED as lead (2026-07-31)
+Scores: 107=6.6 (GPT-5.5 raymarch), 108=7.35 (GPT-5.6-Sol raymarch, best
+data model), 109=7.9 (mine, raster PBR — only shippable architecture).
+Both raymarchers are capped by a per-frame GPU→CPU→GPU pixel round-trip.
 
-Thesis: concurrency rides on the ownership system — view/mod/own already
-encode Send/Sync; compiler proves race-freedom at the spawn boundary.
+**Landed** (rae 81caf33/doc, outer 107a3a8):
+- Z-up conversion of math3d (doc-exact lookAt basis + degenerate fallback,
+  `orbitEye`, `mat4ScaleXYZ`) and mesh3d (sphere poles ±Z, plane XY/+Z,
+  torus ring XY, CCW winding preserved).
+- `lib/scene3d.rae` — backend-agnostic scene: Vec3 components, entity
+  indirection (from 108), typed generation-carrying Mesh/MaterialHandle
+  (from Chattie), and the KEY insight: geometry is a **tagged split**
+  (MeshRenderer=raster vs SdfPrimitive=raymarch). Total unification is
+  impossible only at geometry; everything above it is shared.
+- `lib/gpu3d.rae` — typed seam: `beginScene(camera, light, aspect, time)` +
+  `renderScene(scene)`. The 36-float block and draw(9 floats) are now
+  internal encoding. C mesh handles are **1-based** (slot+1), so id 0 = none.
+- 109 ported + verified headless (659 colours, correct Z-up layout).
+- `rae/docs/unified-3d-renderer.md` — scores, architecture, disagreement
+  resolutions, keep-list, all limitations mapped to queue items.
+- QUEUE #306-#316 = every deferred review item (Mat4 value types to stop
+  per-frame heap churn, inverse-transpose normals, HDR+tonemap pass, shrink
+  C to raw WebGPU, raymarch off CPU round-trip, raymarch-on-scene3d, owned
+  device context, extraction/culling, hybrid SDF depth, draw cap).
 
-**Verified ground truth (r2):** `spawn` ALREADY EXISTS but is a half-built
-prototype: vm.c `OP_SPAWN`/`SpawnData`/`spawn_thread_wrapper` spawns a
-DETACHED OS thread running a FRESH sub-VM, moves args in, NEVER joins (leaks
-handle, no result, no await). **VM-only — NO C-backend codegen.**
-`docs/multiplayer-highscore-plan.md` commits to "threads-over-async, spawn
-model, func..spawn{}". So: evolve an isolate prototype, not greenfield.
+**Deliberately deferred:** Chattie's full `World3d`/ComponentTable +
+extraction/culling/frame-graph is the right destination but would gate the
+demo on one large refactor — parallel arrays give the same authoring shape
+and grow into it without app-code changes (#314). Gem contributed no 3D
+design in this run, so nothing of theirs was available to adopt.
 
-**Design:**
-- `spawn <expr>` → `Task(T)` (change detach→joinable handle). **Await UNMARKED**
-  (read Task→auto-join) — held user's line vs Chattie/Gem's `.wait()/.get()`
-  (those = explicit escape hatches: poll()->opt T, select).
-- **Structured vs detached (central rule, adopts Gem's insight):** scoped tasks
-  (`taskScope`/`TaskGroup`, `parallelFor`) join before scope return → join
-  barrier lets them BORROW outer view/mod. Detached (Task escapes) → `own`
-  (move) only. Ownership=safety; structured-vs-detached=borrow-allowed.
-- **Two strata:** (1) independent tasks = isolate/move — Live sub-VM made
-  joinable+result-returning; C = thread-pool + moved args + Task struct
-  (slot/done-flag/condvar), NET-NEW. (2) Data-parallel ECS = shared-memory
-  `parallelFor` over disjoint `mod` shards — Compiled real threads, Live
-  sequential fallback (same result). Isolates CANNOT share a table view, so
-  ECS parallelism MUST use parallelFor not spawn — key tension.
-- Stdlib: Task(T), Channel(T) (send(own)/recv), Shared(T) (mutex), Atomic.
-- raylib main-thread-only (unanimous). No conventional async/await.
+**Demo-quality gotcha:** with the camera on -Y, a sun circling in XY sends
+the GGX lobe away from the viewer and the material grid reads flat — bias
+the sun toward the camera side (-Y) for highlight sweep.
 
-**Steps:** make existing spawn joinable → C-backend spawn + parallelFor →
-frontend (Task/taskScope/Channel/Shared/Atomic) → borrow rules (scoped=borrow,
-detached=own) → audit g_mem_*/interned pools for thread-safety → both-backend
-+ Live-vs-Compiled equivalence tests. Doc: `rae/docs/concurrency-model.md`.
-
-**Risks:** (must-pin-first) does vm.c arg "transfer" deep-copy or pointer-move?
-— decides if isolate model is safe today. g_mem_*/interned pools raced across
-sub-VMs on OS threads. Task drop/lifetime ties to scope-exit-dealloc. Hot-
-reload w/ live tasks. Soundness of scoped borrow rules (no traits).
-
-NOTE: peers' r1 replies were ~half contaminated by a PRIOR roundtable (Live VM
-view/mod mobile-UI fix, OP_INIT_LOCAL, viewport sim) — off-topic for concurrency.
-
-(Solo context: busy-render loop replaced event-wait; ECS O(1) sparse set.)
+## Prior task (concurrency design) — archived
+spawn exists as a VM-only half-prototype (detached sub-VM, never joined, no
+C-backend codegen). Proposed: spawn→Task(T) joinable, unmarked await,
+scoped tasks borrow (join barrier) vs detached=own move, parallelFor for
+ECS, Channel/Shared/Atomic. raylib main-thread-only.
