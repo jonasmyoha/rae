@@ -12,7 +12,8 @@ extern func abs(n: Int): ret Int
 
 ### Argument Mapping
 - `Int` -> `int64_t`
-- `Float` -> `double`
+- `Float` / `Float32` -> `float`   (Rae's default float is f32; see docs/primitive-types.md)
+- `Float64` -> `double`
 - `String` -> `const char*`
 - `Bool` -> `int8_t` (0 or 1)
 

@@ -102,6 +102,16 @@ TypeInfo* type_get_int(TypeRegistry* r) {
     return t;
 }
 
+/* Rae's default floating-point type: f32 / IEEE-754 binary32.
+ *
+ * `Float` and `Float32` are the SAME type, not two types that happen to have
+ * the same width: both spellings resolve to this one interned TypeInfo, so
+ * they share type identity, equality, ABI, layout and — critically —
+ * monomorphization identity. `List(Float)` and `List(Float32)` are therefore
+ * one instantiation, by construction rather than by convention.
+ *
+ * The canonical name stays "Float" so diagnostics and mangled names use the
+ * normal spelling. See docs/primitive-types.md for the design rationale. */
 TypeInfo* type_get_float(TypeRegistry* r) {
     static TypeInfo* t = NULL;
     if (!t) {
@@ -109,6 +119,20 @@ TypeInfo* type_get_float(TypeRegistry* r) {
         t->kind = TYPE_FLOAT;
         t->name = (Str){"Float", 5};
         add_interned(r, hash_type(TYPE_FLOAT, NULL, 0), t);
+    }
+    return t;
+}
+
+/* Explicit high-precision floating point: f64 / IEEE-754 binary64.
+ * A distinct TypeKind, so it interns separately and can never collide with
+ * Float/Float32 in generic instantiation or mangling. */
+TypeInfo* type_get_float64(TypeRegistry* r) {
+    static TypeInfo* t = NULL;
+    if (!t) {
+        t = (TypeInfo*)arena_alloc(r->arena, sizeof(TypeInfo));
+        t->kind = TYPE_FLOAT64;
+        t->name = (Str){"Float64", 7};
+        add_interned(r, hash_type(TYPE_FLOAT64, NULL, 0), t);
     }
     return t;
 }
@@ -304,7 +328,8 @@ static void type_mangle_recursive(Arena* arena, TypeInfo* t, char* buf, size_t* 
     switch (t->kind) {
         case TYPE_VOID: *pos += snprintf(buf + *pos, cap - *pos, "void"); break;
         case TYPE_INT: *pos += snprintf(buf + *pos, cap - *pos, "int64_t"); break;
-        case TYPE_FLOAT: *pos += snprintf(buf + *pos, cap - *pos, "double"); break;
+        case TYPE_FLOAT: *pos += snprintf(buf + *pos, cap - *pos, "float"); break;
+        case TYPE_FLOAT64: *pos += snprintf(buf + *pos, cap - *pos, "double"); break;
         case TYPE_BOOL: *pos += snprintf(buf + *pos, cap - *pos, "rae_Bool"); break;
         case TYPE_CHAR: *pos += snprintf(buf + *pos, cap - *pos, "uint32_t"); break;
         case TYPE_STRING: *pos += snprintf(buf + *pos, cap - *pos, "rae_String"); break;
@@ -333,7 +358,8 @@ static void type_mangle_recursive(Arena* arena, TypeInfo* t, char* buf, size_t* 
 
             // Map Rae primitive names to C names if they appear as base names
             if (str_eq_cstr(base_name, "Int") || str_eq_cstr(base_name, "Int64")) *pos += snprintf(buf + *pos, cap - *pos, "int64_t");
-            else if (str_eq_cstr(base_name, "Float") || str_eq_cstr(base_name, "Float64")) *pos += snprintf(buf + *pos, cap - *pos, "double");
+            else if (str_eq_cstr(base_name, "Float") || str_eq_cstr(base_name, "Float32")) *pos += snprintf(buf + *pos, cap - *pos, "float");
+            else if (str_eq_cstr(base_name, "Float64")) *pos += snprintf(buf + *pos, cap - *pos, "double");
             else if (str_eq_cstr(base_name, "Bool")) *pos += snprintf(buf + *pos, cap - *pos, "rae_Bool");
             else if (str_eq_cstr(base_name, "String")) *pos += snprintf(buf + *pos, cap - *pos, "rae_String");
             else if (str_eq_cstr(base_name, "Void")) *pos += snprintf(buf + *pos, cap - *pos, "void");

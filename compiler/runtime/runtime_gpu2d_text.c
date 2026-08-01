@@ -194,10 +194,10 @@ static void rae_g2d_ensure_text_inst(int ai, int prims) {
 
 /* Full glyph submit with an optional outline (outlineWidth px + colour) and
  * softness (edge-falloff width in px; 1 = crisp, larger = soft/blurred). */
-void rae_ext_gpu2d_drawGlyphEx(double sx0, double sy0, double sx1, double sy1,
-                               double u0, double v0, double u1, double v1,
-                               int64_t atlas, double pxRange, int64_t color,
-                               double outlineWidth, int64_t outlineColor, double softness) {
+void rae_ext_gpu2d_drawGlyphEx(float sx0, float sy0, float sx1, float sy1,
+                               float u0, float v0, float u1, float v1,
+                               int64_t atlas, float pxRange, int64_t color,
+                               float outlineWidth, int64_t outlineColor, float softness){
     int ai = (int)atlas - 1;
     if (ai < 0 || ai >= RAE_SDF_MAX_ATLAS) return;
     int need = (g_g2d_text_count[ai] + 1) * G2D_TEXT_FLOATS;
@@ -228,9 +228,9 @@ void rae_ext_gpu2d_drawGlyphEx(double sx0, double sy0, double sx1, double sy1,
 }
 
 /* Back-compat: glyph with no outline. */
-void rae_ext_gpu2d_drawGlyph(double sx0, double sy0, double sx1, double sy1,
-                             double u0, double v0, double u1, double v1,
-                             int64_t atlas, double pxRange, int64_t color) {
+void rae_ext_gpu2d_drawGlyph(float sx0, float sy0, float sx1, float sy1,
+                             float u0, float v0, float u1, float v1,
+                             int64_t atlas, float pxRange, int64_t color){
     rae_ext_gpu2d_drawGlyphEx(sx0, sy0, sx1, sy1, u0, v0, u1, v1, atlas, pxRange, color, 0.0, 0, 1.0);
 }
 

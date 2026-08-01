@@ -32,7 +32,7 @@ static void rae_g2d_begin_frame(WGPULoadOp load_op, double r, double g, double b
     g_g2d_pass = wgpuCommandEncoderBeginRenderPass(g_g2d_enc, &rp);
 }
 
-void rae_ext_gpu2d_beginFrame(double r, double g, double b, double a) {
+void rae_ext_gpu2d_beginFrame(float r, float g, float b, float a){
     rae_g2d_begin_frame(WGPULoadOp_Clear, r, g, b, a);
 }
 

@@ -293,28 +293,30 @@ static void g3d_ensure_targets(void) {
 /* Create an immutable mesh. verts = interleaved pos3/nrm3/uv2 as Rae
  * Floats (doubles), 8 per vertex; indices as Rae Ints. Converted to
  * float32 / uint32 on upload. Returns handle > 0, or 0 on failure. */
-int64_t rae_ext_gpu3d_meshCreate(const double* verts, int64_t vertCount,
-                                 const int64_t* indices, int64_t indexCount) {
+int64_t rae_ext_gpu3d_meshCreate(const float* verts, int64_t vertCount,
+                                 const int64_t* indices, int64_t indexCount){
     if (!g_wgpu_dev || !verts || !indices) return 0;
     if (vertCount <= 0 || indexCount <= 0 || g3d_mesh_n >= G3D_MAX_MESHES) return 0;
     size_t vfloats = (size_t)vertCount * 8;
-    float* vf = (float*)malloc(vfloats * sizeof(float));
+    /* Rae `Float` is f32, so `verts` is ALREADY the f32 layout the GPU wants:
+     * upload straight from it. The temporary buffer that used to live here
+     * existed only to narrow the old f64 default down to float. Indices still
+     * need converting — Rae `Int` is i64 and the index buffer is u32. */
     uint32_t* ix = (uint32_t*)malloc((size_t)indexCount * sizeof(uint32_t));
-    if (!vf || !ix) { free(vf); free(ix); return 0; }
-    for (size_t i = 0; i < vfloats; i++) vf[i] = (float)verts[i];
+    if (!ix) return 0;
     for (int64_t i = 0; i < indexCount; i++) ix[i] = (uint32_t)indices[i];
 
     WGPUBufferDescriptor bd; memset(&bd, 0, sizeof(bd));
     bd.size = vfloats * sizeof(float);
     bd.usage = WGPUBufferUsage_Vertex | WGPUBufferUsage_CopyDst;
     WGPUBuffer vb = wgpuDeviceCreateBuffer(g_wgpu_dev, &bd);
-    wgpuQueueWriteBuffer(g_wgpu_queue, vb, 0, vf, bd.size);
+    wgpuQueueWriteBuffer(g_wgpu_queue, vb, 0, verts, bd.size);
     /* Index buffer sizes must be 4-byte multiples (uint32 already is). */
     bd.size = (uint64_t)indexCount * sizeof(uint32_t);
     bd.usage = WGPUBufferUsage_Index | WGPUBufferUsage_CopyDst;
     WGPUBuffer ib = wgpuDeviceCreateBuffer(g_wgpu_dev, &bd);
     wgpuQueueWriteBuffer(g_wgpu_queue, ib, 0, ix, bd.size);
-    free(vf); free(ix);
+    free(ix);
     if (!vb || !ib) return 0;
     int slot = g3d_mesh_n++;
     g3d_mesh_vbuf[slot] = vb;
@@ -332,7 +334,7 @@ int64_t rae_ext_gpu3d_meshCreate(const double* verts, int64_t vertCount,
  *   [30..32] ambient ground rgb
  *   [33..35] clear color rgb
  */
-void rae_ext_gpu3d_begin(const double* frame, int64_t count) {
+void rae_ext_gpu3d_begin(const float* frame, int64_t count){
     if (!g_wgpu_dev || !g_g2d_off_view || !frame || count < 36) return;
     g3d_init_pipeline();
     g3d_ensure_targets();
@@ -385,10 +387,10 @@ void rae_ext_gpu3d_begin(const double* frame, int64_t count) {
 /* Queue one mesh draw. model = 16 Floats column-major. Uniform data is
  * written CPU-side (uploaded once at end); the draw is encoded now with
  * firstInstance = draw index so the shader picks its DrawU slot. */
-void rae_ext_gpu3d_draw(int64_t mesh, const double* model,
-                        double r, double g, double b,
-                        double metallic, double roughness,
-                        double emR, double emG, double emB) {
+void rae_ext_gpu3d_draw(int64_t mesh, const float* model,
+                        float r, float g, float b,
+                        float metallic, float roughness,
+                        float emR, float emG, float emB){
     if (!g3d_pass || !model) return;
     int slot = (int)mesh - 1;
     if (slot < 0 || slot >= g3d_mesh_n) return;
