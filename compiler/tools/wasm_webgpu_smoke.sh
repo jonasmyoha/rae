@@ -22,6 +22,18 @@ grep -q 'id="canvas"' "$TMP/index.html"
 
 perl -e 'alarm shift; exec @ARGV' 240 compiler/bin/rae build \
   --target wasm --profile dev \
+  --project examples/110_gpu3d_ui \
+  --out "$TMP/ui.html" \
+  examples/110_gpu3d_ui/main.rae >/dev/null
+
+test -s "$TMP/ui.html"
+test -s "$TMP/ui.js"
+test -s "$TMP/ui.wasm"
+test -s "$TMP/ui.data"
+grep -q 'id="canvas"' "$TMP/ui.html"
+
+perl -e 'alarm shift; exec @ARGV' 240 compiler/bin/rae build \
+  --target wasm --profile dev \
   --project examples/109_gpu3d_pbr \
   --out "$TMP/app.mjs" \
   examples/109_gpu3d_pbr/main.rae >/dev/null
@@ -30,4 +42,4 @@ test -s "$TMP/app.mjs"
 test -s "$TMP/app.wasm"
 grep -q 'createRaeApp' "$TMP/app.mjs"
 
-echo "PASS wasm_webgpu_smoke: 109 browser page and embeddable module built"
+echo "PASS wasm_webgpu_smoke: 109 and composed 110 browser pages plus embeddable module built"
