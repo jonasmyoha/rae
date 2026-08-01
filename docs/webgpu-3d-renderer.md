@@ -1,8 +1,10 @@
 # Rae WebGPU 3D Renderer — Design (future / high-level)
 
-**Status:** Active design, with the compute-based engine seed in
-`examples/107_gpu3d_minimal`. This document describes the future raster path;
-the concrete Assembly demo progression is in `docs/assembly-2026-demo-plan.md`.
+**Status:** Active implementation, with compute raymarch seeds in
+`examples/107_gpu3d_raymarch` and `examples/108_gpu3d_procedural`, and the
+raster foundation in `examples/109_gpu3d_pbr`. This document describes the
+long-term raster path; the concrete Assembly demo progression is in
+`docs/assembly-2026-demo-plan.md`.
 Sequenced **after** the 2D/UI renderer Tier 0–1.
 **Target:** Compiled (C backend) + Web, via WebGPU-everywhere (WGSL single
 source). Live VM is frozen and a non-goal (`docs/live-vm-status.md`).
