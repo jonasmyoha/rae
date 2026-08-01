@@ -80,7 +80,8 @@ typedef struct {
 typedef enum {
   BUILD_TARGET_COMPILED = 0,
   BUILD_TARGET_LIVE,
-  BUILD_TARGET_HYBRID
+  BUILD_TARGET_HYBRID,
+  BUILD_TARGET_WASM
 } BuildTarget;
 
 typedef enum {
@@ -430,7 +431,7 @@ static bool parse_build_args(int argc, char** argv, BuildOptions* opts) {
     }
     if (strcmp(arg, "--target") == 0) {
       if (i + 1 >= argc) {
-        fprintf(stderr, "error: --target expects one of live|compiled|hybrid\n");
+        fprintf(stderr, "error: --target expects one of live|compiled|hybrid|wasm\n");
         return false;
       }
       const char* value = argv[i + 1];
@@ -440,9 +441,11 @@ static bool parse_build_args(int argc, char** argv, BuildOptions* opts) {
         opts->target = BUILD_TARGET_COMPILED;
       } else if (strcmp(value, "hybrid") == 0) {
         opts->target = BUILD_TARGET_HYBRID;
+      } else if (strcmp(value, "wasm") == 0) {
+        opts->target = BUILD_TARGET_WASM;
       } else {
         fprintf(stderr,
-                "error: unknown target '%s' (expected live|compiled|hybrid)\n",
+                "error: unknown target '%s' (expected live|compiled|hybrid|wasm)\n",
                 value);
         return false;
       }
@@ -527,6 +530,9 @@ static bool parse_build_args(int argc, char** argv, BuildOptions* opts) {
         break;
       case BUILD_TARGET_HYBRID:
         opts->out_path = "build/out.hybrid";
+        break;
+      case BUILD_TARGET_WASM:
+        opts->out_path = "build/web/index.html";
         break;
       case BUILD_TARGET_COMPILED:
       default:
@@ -2029,11 +2035,11 @@ static void print_usage(const char* prog) {
   fprintf(stderr, "  pack <file>     Validate and summarize a .raepack file\n");
   fprintf(stderr, "                 (options: --json, --target <id>)\n");
   fprintf(stderr,
-          "  build [opts]    Build Rae source (--emit-c required for now)\n");
+          "  build [opts]    Build Rae source (Compiled C, Live, Hybrid, or browser WASM)\n");
   fprintf(stderr,
           "                  Options: --entry <file>, --project <dir>, --out <file>\n");
   fprintf(stderr,
-          "                           --target <live|compiled|hybrid>, --profile <dev|release>\n");
+          "                           --target <live|compiled|hybrid|wasm>, --profile <dev|release>\n");
   fprintf(stderr,
           "  watch <file>    Compiled hot-reload supervisor. Builds and runs <file>,\n");
   fprintf(stderr,
@@ -2668,6 +2674,106 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
     fprintf(stderr, "error: failed to compile C output\n");
     return false;
   }
+  return true;
+}
+
+/* Link generated C into an Emscripten browser bundle. This is deliberately
+ * separate from tools/wasm_build.sh, which targets standalone WASI rather
+ * than the browser's SDL3 + WebGPU APIs. */
+static bool emcc_link_c_to_web(const char* entry_rae_file,
+                               const char* c_path,
+                               const char* out_html,
+                               bool uses_raylib,
+                               bool uses_sdl3,
+                               bool uses_webgpu,
+                               int profile) {
+  if (uses_raylib) {
+    fprintf(stderr, "error: --target wasm does not support raylib; use SDL3/WebGPU\n");
+    return false;
+  }
+  if (!ensure_parent_directory(out_html)) return false;
+
+  char runtime_c[PATH_MAX];
+  char shell_html[PATH_MAX];
+  char include_flag[PATH_MAX + 3];
+  snprintf(runtime_c, sizeof(runtime_c), "%s/rae_runtime.c", RAE_RUNTIME_SOURCE_DIR);
+  snprintf(shell_html, sizeof(shell_html), "%s/web_shell.html", RAE_RUNTIME_SOURCE_DIR);
+  snprintf(include_flag, sizeof(include_flag), "-I%s", RAE_RUNTIME_SOURCE_DIR);
+
+  char extra_paths[32][PATH_MAX];
+  int extra_count = 0;
+  char src_dir[PATH_MAX];
+  snprintf(src_dir, sizeof(src_dir), "%s", entry_rae_file);
+  char* last_sep = strrchr(src_dir, '/');
+  if (last_sep) *last_sep = '\0'; else snprintf(src_dir, sizeof(src_dir), ".");
+  DIR* d = opendir(src_dir);
+  if (d) {
+    struct dirent* ent;
+    while ((ent = readdir(d)) != NULL && extra_count < 32) {
+      size_t nlen = strlen(ent->d_name);
+      if (nlen > 2 && strcmp(ent->d_name + nlen - 2, ".c") == 0 &&
+          strcmp(ent->d_name, "rae_runtime.c") != 0 &&
+          strcmp(ent->d_name, "monocypher.c") != 0 &&
+          strcmp(ent->d_name, "lodepng.c") != 0 &&
+          strncmp(ent->d_name, "rae_compiled_", 13) != 0 &&
+          strcmp(ent->d_name, "out.c") != 0) {
+        snprintf(extra_paths[extra_count], PATH_MAX, "%s/%s", src_dir, ent->d_name);
+        extra_count++;
+      }
+    }
+    closedir(d);
+  }
+
+  const char* args[96];
+  int n = 0;
+  args[n++] = "emcc";
+  /* The runtime uses POSIX helpers such as clock_gettime/getline. Emscripten's
+   * strict C11 mode hides those declarations, while its GNU C11 mode exposes
+   * the same portable libc surface used by native Compiled builds. */
+  args[n++] = "-std=gnu11";
+  if (profile == BUILD_PROFILE_DEV) {
+    args[n++] = "-O0";
+    args[n++] = "-gsource-map";
+  } else {
+    args[n++] = "-O2";
+    args[n++] = "-DNDEBUG";
+  }
+  args[n++] = "-sALLOW_MEMORY_GROWTH=1";
+  args[n++] = "-sASYNCIFY";
+  args[n++] = "--shell-file";
+  args[n++] = shell_html;
+  if (uses_sdl3) {
+    args[n++] = "-DRAE_HAS_SDL3";
+    args[n++] = "-sUSE_SDL=3";
+  }
+  if (uses_webgpu) {
+    args[n++] = "-DRAE_HAS_WEBGPU";
+    args[n++] = "--use-port=emdawnwebgpu";
+  }
+  args[n++] = c_path;
+  args[n++] = runtime_c;
+  for (int i = 0; i < extra_count; i++) args[n++] = extra_paths[i];
+  args[n++] = include_flag;
+  args[n++] = "-o";
+  args[n++] = out_html;
+  args[n] = NULL;
+
+  pid_t pid = fork();
+  if (pid < 0) {
+    fprintf(stderr, "error: could not start emcc: %s\n", strerror(errno));
+    return false;
+  }
+  if (pid == 0) {
+    execvp("emcc", (char* const*)args);
+    fprintf(stderr, "error: emcc not found; install Emscripten and ensure emcc is on PATH\n");
+    _exit(127);
+  }
+  int status = 0;
+  if (waitpid(pid, &status, 0) < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+    fprintf(stderr, "error: Emscripten browser build failed\n");
+    return false;
+  }
+  fprintf(stderr, "built WASM browser bundle: %s\n", out_html);
   return true;
 }
 
@@ -3497,6 +3603,28 @@ static int run_command(const char* cmd, int argc, char** argv) {
                                    build_opts.out_path) ?
                    0 :
                    1;
+      case BUILD_TARGET_WASM: {
+        char temp_c[PATH_MAX];
+        snprintf(temp_c, sizeof(temp_c), "/tmp/rae_wasm_%d.c", getpid());
+        bool b_raylib = false, b_sdl3 = false, b_webgpu = false;
+        bool okc = build_c_backend_output(build_opts.entry_path,
+                                          final_root,
+                                          temp_c,
+                                          build_opts.no_implicit,
+                                          &b_raylib,
+                                          &b_sdl3,
+                                          &b_webgpu,
+                                          NULL);
+        bool linked = okc && emcc_link_c_to_web(build_opts.entry_path,
+                                                temp_c,
+                                                build_opts.out_path,
+                                                b_raylib,
+                                                b_sdl3,
+                                                b_webgpu,
+                                                build_opts.profile);
+        unlink(temp_c);
+        return linked ? 0 : 1;
+      }
       default:
         fprintf(stderr, "error: unsupported build target\n");
         return 1;

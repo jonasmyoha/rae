@@ -17,11 +17,27 @@
  * WGPUStringView; readback via wgpuBufferMapAsync + wgpuDevicePoll.
  * ============================================================ */
 #include <webgpu/webgpu.h>
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#else
 #include <webgpu/wgpu.h>
+#endif
 
 static WGPUInstance g_wgpu_inst = NULL;
 static WGPUDevice   g_wgpu_dev = NULL;
 static WGPUQueue    g_wgpu_queue = NULL;
+
+/* wgpu-native exposes device polling; browser WebGPU advances when control
+ * returns to JavaScript. WASM builds use Asyncify, so a zero-duration sleep
+ * yields to the browser before processing callbacks on the instance. */
+static void rae_wgpu_poll(int wait) {
+#ifdef __EMSCRIPTEN__
+    if (wait) emscripten_sleep(0);
+    if (g_wgpu_inst) wgpuInstanceProcessEvents(g_wgpu_inst);
+#else
+    if (g_wgpu_dev) wgpuDevicePoll(g_wgpu_dev, wait != 0, NULL);
+#endif
+}
 
 static WGPUStringView rae_wgpu_sv(const char* s) { WGPUStringView v; v.data = s; v.length = WGPU_STRLEN; return v; }
 
@@ -46,12 +62,12 @@ static int rae_wgpu_init(void) {
     WGPURequestAdapterCallbackInfo aci; memset(&aci, 0, sizeof(aci));
     aci.mode = WGPUCallbackMode_AllowProcessEvents; aci.callback = rae_wgpu_on_adapter;
     wgpuInstanceRequestAdapter(g_wgpu_inst, &ao, aci);
-    while (!g_wgpu_adapter_done) wgpuInstanceProcessEvents(g_wgpu_inst);
+    while (!g_wgpu_adapter_done) rae_wgpu_poll(1);
     if (!g_wgpu_adapter) { fprintf(stderr, "[wgpu] no adapter\n"); return 0; }
     WGPURequestDeviceCallbackInfo dci; memset(&dci, 0, sizeof(dci));
     dci.mode = WGPUCallbackMode_AllowProcessEvents; dci.callback = rae_wgpu_on_device;
     wgpuAdapterRequestDevice(g_wgpu_adapter, NULL, dci);
-    while (!g_wgpu_device_done) wgpuInstanceProcessEvents(g_wgpu_inst);
+    while (!g_wgpu_device_done) rae_wgpu_poll(1);
     if (!g_wgpu_dev) { fprintf(stderr, "[wgpu] no device\n"); return 0; }
     g_wgpu_queue = wgpuDeviceGetQueue(g_wgpu_dev);
     return 1;
@@ -127,7 +143,7 @@ void rae_ext_webgpu_raytrace(const double* scene, int64_t sceneLen, int64_t* fb,
     mci.mode = WGPUCallbackMode_AllowProcessEvents; mci.callback = rae_wgpu_on_map;
     g_wgpu_map_done = 0;
     wgpuBufferMapAsync(rbuf, WGPUMapMode_Read, 0, obytes, mci);
-    while (!g_wgpu_map_done) wgpuDevicePoll(g_wgpu_dev, true, NULL);
+    while (!g_wgpu_map_done) rae_wgpu_poll(1);
     const uint32_t* px = (const uint32_t*)wgpuBufferGetConstMappedRange(rbuf, 0, obytes);
     if (px) {
         int64_t n = width * height;
@@ -265,7 +281,7 @@ void rae_ext_gpu_run(int64_t kernel, const int64_t* bufs, int64_t bufCount,
     wgpuComputePassEncoderEnd(pass);
     WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(enc, NULL);
     wgpuQueueSubmit(g_wgpu_queue, 1, &cmd);
-    wgpuDevicePoll(g_wgpu_dev, true, NULL);  /* wait for completion */
+    rae_wgpu_poll(1);  /* wait/yield for completion */
     wgpuCommandBufferRelease(cmd); wgpuComputePassEncoderRelease(pass);
     wgpuCommandEncoderRelease(enc); wgpuBindGroupRelease(bg); wgpuBindGroupLayoutRelease(bgl);
 }
@@ -285,7 +301,7 @@ static const void* rae_gpu_readback(int64_t buf, size_t bytes, WGPUBuffer* stagi
     WGPUBufferMapCallbackInfo mci; memset(&mci, 0, sizeof(mci));
     mci.mode = WGPUCallbackMode_AllowProcessEvents; mci.callback = rae_wgpu_on_map;
     wgpuBufferMapAsync(staging, WGPUMapMode_Read, 0, bytes, mci);
-    while (!g_wgpu_map_done) wgpuDevicePoll(g_wgpu_dev, true, NULL);
+    while (!g_wgpu_map_done) rae_wgpu_poll(1);
     *staging_out = staging;
     return wgpuBufferGetConstMappedRange(staging, 0, bytes);
 }
