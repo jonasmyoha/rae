@@ -1,0 +1,133 @@
+# Generic ECS pointer input for GPU2D/SDL3 applications.
+#
+# Hit testing follows reverse paint order and emits semantic action ids from
+# OnClick components. Applications use `uiPointerCaptured` to give UI controls
+# priority over world/camera input without hard-coding widget identities.
+open ui/ecs
+open ui/layer
+import core
+import gpu2d
+import ui/ecs
+import ui/layer
+
+type UiPointerState {
+  x: Float
+  y: Float
+  down: Bool
+  pressed: Bool
+  released: Bool
+}
+
+type UiActionEvent {
+  entity: EntityId
+  actionId: String
+}
+
+type UiInput {
+  pointer: UiPointerState
+  hoveredEntity: EntityId
+  pressedEntity: EntityId
+  events: List(UiActionEvent)
+}
+
+func createUiInput() pub ret UiInput {
+  ret UiInput {
+    pointer: UiPointerState { x: 0.0, y: 0.0, down: false, pressed: false, released: false }
+    hoveredEntity: noEntity()
+    pressedEntity: noEntity()
+    events: createList(UiActionEvent, cap: 8)
+  }
+}
+
+func uiEntityActive(world: view UiWorld, entity: view EntityId) ret Bool {
+  if componentHas(this: world.actives, entity: entity) {
+    let active: Active = componentGet(this: world.actives, entity: entity)
+    ret active.value
+  }
+  ret true
+}
+
+func uiPointInEntity(world: view UiWorld, entity: view EntityId, x: view Float, y: view Float) ret Bool {
+  if uiEntityActive(world: world, entity: entity) is false { ret false }
+  if componentHas(this: world.worldTransforms, entity: entity) is false { ret false }
+  if componentHas(this: world.computedRects, entity: entity) is false { ret false }
+  let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: entity)
+  if wt.visible is false { ret false }
+  let cr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
+  if x < wt.x { ret false }
+  if y < wt.y { ret false }
+  if x > wt.x + cr.w { ret false }
+  if y > wt.y + cr.h { ret false }
+  ret true
+}
+
+func uiHitTestEntity(world: view UiWorld, entity: view EntityId, x: view Float, y: view Float) ret EntityId {
+  if uiEntityActive(world: world, entity: entity) is false { ret noEntity() }
+  if componentHas(this: world.childrens, entity: entity) {
+    let children: view Children => componentView(this: world.childrens, entity: entity)
+    var i: Int = children.ids.length - 1
+    loop i >= 0 {
+      let child: EntityId = rae_ext_rae_buf_get(buf: children.ids.data, index: i)
+      let hit: EntityId = uiHitTestEntity(world: world, entity: child, x: x, y: y)
+      if isNone(this: hit) is false { ret hit }
+      i = i - 1
+    }
+  }
+  if componentHas(this: world.onClicks, entity: entity) {
+    if uiPointInEntity(world: world, entity: entity, x: x, y: y) { ret entity }
+  }
+  ret noEntity()
+}
+
+func uiHitTest(world: view UiWorld, x: view Float, y: view Float) pub ret EntityId {
+  let roots: List(EntityId) = collectPaintableRoots(world: world)
+  var i: Int = roots.length - 1
+  loop i >= 0 {
+    let root: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: i)
+    if componentHas(this: world.layerRoots, entity: root) is false {
+      let hit: EntityId = uiHitTestEntity(world: world, entity: root, x: x, y: y)
+      if isNone(this: hit) is false { ret hit }
+    }
+    i = i - 1
+  }
+  ret noEntity()
+}
+
+func clearUiActions(input: mod UiInput) {
+  let events: mod List(UiActionEvent) => input.events
+  loop events.length > 0 { events.remove(index: events.length - 1) }
+}
+
+func updateUiInput(input: mod UiInput, world: view UiWorld) pub {
+  clearUiActions(input: input)
+  let x: Float = gpu2d.pointerX()
+  let y: Float = gpu2d.pointerY()
+  let pressed: Bool = gpu2d.pointerPressed()
+  let released: Bool = gpu2d.pointerReleased()
+  input.pointer = UiPointerState {
+    x: x
+    y: y
+    down: gpu2d.pointerDown()
+    pressed: pressed
+    released: released
+  }
+  input.hoveredEntity = uiHitTest(world: world, x: x, y: y)
+  if pressed { input.pressedEntity = input.hoveredEntity }
+  if released {
+    if isNone(this: input.hoveredEntity) is false {
+      if input.hoveredEntity.value is input.pressedEntity.value {
+        let click: OnClick = componentGet(this: world.onClicks, entity: input.hoveredEntity)
+        let event: UiActionEvent = { entity: input.hoveredEntity, actionId: click.actionId }
+        let events: mod List(UiActionEvent) => input.events
+        events.add(value: event)
+      }
+    }
+    input.pressedEntity = noEntity()
+  }
+}
+
+func uiPointerCaptured(input: view UiInput) pub ret Bool {
+  if isNone(this: input.hoveredEntity) is false { ret true }
+  if isNone(this: input.pressedEntity) is false { ret true }
+  ret false
+}

@@ -67,6 +67,22 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" "$TMP_OUT/overflow.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
+        elif [ "$EXAMPLE_NAME" = "110_gpu3d_ui" ]; then
+          SCREENSHOT="$TMP_OUT/gpu3d-ui.bmp"
+          PAUSE_SCREENSHOT="$TMP_OUT/gpu3d-ui-pause.bmp"
+          if (cd .. && RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+             perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
+             && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --gpu3d-ui > "$TMP_OUT/screenshot.log" 2>&1 \
+             && (cd .. && RAE_GPU3D_UI_TEST_STATE=pause RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$PAUSE_SCREENSHOT" \
+                perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app") > "$TMP_OUT/pause-render.log" 2>&1 \
+             && python3 tools/assert_nonblank_bmp.py "$PAUSE_SCREENSHOT" --gpu3d-ui > "$TMP_OUT/pause-screenshot.log" 2>&1; then
+            echo "PASS: $EXAMPLE_NAME (3D + ECS UI and pause-overlay screenshots)"
+            ((PASSED++))
+          else
+            echo "FAIL: $EXAMPLE_NAME (3D/UI screenshot)"
+            cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" "$TMP_OUT/pause-render.log" "$TMP_OUT/pause-screenshot.log" 2>/dev/null | sed 's/^/  /'
+            ((FAILED++))
+          fi
         else
           echo "PASS: $EXAMPLE_NAME"
           ((PASSED++))
