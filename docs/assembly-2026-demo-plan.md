@@ -1,7 +1,8 @@
 # Assembly 2026 realtime demo plan
 
-**Status:** Active exploration. The first engine seed is
-`examples/107_gpu3d_minimal`.
+**Status:** Active exploration. The engine seeds are the compute raymarchers
+`examples/107_gpu3d_raymarch` and `examples/108_gpu3d_procedural`, plus the
+raster foundation `examples/109_gpu3d_pbr`.
 
 ## Readiness decision
 
