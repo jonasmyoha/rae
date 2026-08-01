@@ -339,12 +339,14 @@ func main() ret Int {
   var lastY: Float = 0.0
   var dragging: Bool = false
   var simTime: Float = 0.0
-  var lastFrame: Float = gpu2d.nowSeconds()
+  # Epoch seconds must stay Float64 (see docs/primitive-types.md); only the
+  # small per-frame delta is narrowed to Float.
+  var lastFrame: Float64 = gpu2d.nowSeconds()
   var fpsAccum: Float = 0.0
   var fpsFrames: Int = 0
 
   loop not gpu2d.pollClose() {
-    let now: Float = gpu2d.nowSeconds()
+    let now: Float64 = gpu2d.nowSeconds()
     var dt: Float = now - lastFrame
     lastFrame = now
     if dt > 0.1 { dt = 0.1 }
