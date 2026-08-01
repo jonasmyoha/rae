@@ -130,8 +130,11 @@ changing app code.
 - **No WASM path yet.** This remains the biggest deployment unknown for the
   Assembly entry; the render-pass backend is the standard browser-3D shape,
   so betting on raster de-risks the port.
-- **`G3D_MAX_DRAWS` is 4096** — fine for a demo, documented rather than
-  raised.
+- **`G3D_MAX_DRAWS` is 4096.** The fixed per-draw storage buffer accepts at
+  most 4096 mesh submissions per frame. The renderer discards submissions
+  beyond that capacity and emits one renderer-lifetime error rather than
+  silently dropping geometry. `RAE_GPU3D_DRAW_LIMIT=N` may lower the effective
+  limit for diagnostics and regression tests, but cannot raise the hard cap.
 
 ## Keep-list per prototype
 
