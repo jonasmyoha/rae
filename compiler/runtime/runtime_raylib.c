@@ -106,19 +106,19 @@ void rae_ext_updateStreamTexture(Texture texture, const int64_t* pixels, int64_t
     UpdateTexture(texture, scratch);
 }
 
-void rae_ext_drawCubeWires(Vector3 pos, double width, double height, double length, Color color) {
+void rae_ext_drawCubeWires(Vector3 pos, float width, float height, float length, Color color){
     DrawCubeWires(pos, (float)width, (float)height, (float)length, color);
 }
 
-void rae_ext_drawSphere(Vector3 centerPos, double radius, Color color) {
+void rae_ext_drawSphere(Vector3 centerPos, float radius, Color color){
     DrawSphere(centerPos, (float)radius, color);
 }
 
-void rae_ext_drawCircle(double x, double y, double radius, Color color) {
+void rae_ext_drawCircle(float x, float y, float radius, Color color){
     DrawCircle((int)x, (int)y, (float)radius, color);
 }
 
-void rae_ext_drawCircleGradient(int64_t x, int64_t y, double radius, Color color1, Color color2) {
+void rae_ext_drawCircleGradient(int64_t x, int64_t y, float radius, Color color1, Color color2){
     DrawCircleGradient((int)x, (int)y, (float)radius, color1, color2);
 }
 
@@ -130,11 +130,11 @@ void rae_ext_drawRectangleGradientH(int64_t x, int64_t y, int64_t width, int64_t
     DrawRectangleGradientH((int)x, (int)y, (int)width, (int)height, color1, color2);
 }
 
-double rae_ext_getTime(void) {
+float rae_ext_getTime(void){
     return GetTime();
 }
 
-Color rae_ext_colorFromHSV(double hue, double saturation, double value) {
+Color rae_ext_colorFromHSV(float hue, float saturation, float value){
     return ColorFromHSV((float)hue, (float)saturation, (float)value);
 }
 
@@ -142,11 +142,11 @@ void rae_ext_takeScreenshot(rae_String fileName) {
     TakeScreenshot((const char*)fileName.data);
 }
 
-void rae_ext_drawCylinder(Vector3 position, double radiusTop, double radiusBottom, double height, int64_t slices, Color color) {
+void rae_ext_drawCylinder(Vector3 position, float radiusTop, float radiusBottom, float height, int64_t slices, Color color){
     DrawCylinder(position, (float)radiusTop, (float)radiusBottom, (float)height, (int)slices, color);
 }
 
-void rae_ext_drawGrid(int64_t slices, double spacing) {
+void rae_ext_drawGrid(int64_t slices, float spacing){
     DrawGrid((int)slices, (float)spacing);
 }
 
@@ -166,24 +166,24 @@ void rae_ext_endMode2D(void) {
     EndMode2D();
 }
 
-void rae_ext_drawRectangle(double x, double y, double width, double height, Color color) {
+void rae_ext_drawRectangle(float x, float y, float width, float height, Color color){
     DrawRectangle((int)x, (int)y, (int)width, (int)height, color);
 }
 
-void rae_ext_drawRectangleLines(double x, double y, double width, double height, Color color) {
+void rae_ext_drawRectangleLines(float x, float y, float width, float height, Color color){
     DrawRectangleLines((int)x, (int)y, (int)width, (int)height, color);
 }
 
-void rae_ext_drawRectangleRounded(double x, double y, double width, double height, double roundness, int64_t segments, Color color) {
+void rae_ext_drawRectangleRounded(float x, float y, float width, float height, float roundness, int64_t segments, Color color){
     Rectangle rec = {(float)x, (float)y, (float)width, (float)height};
     DrawRectangleRounded(rec, (float)roundness, (int)segments, color);
 }
 
-void rae_ext_drawCube(Vector3 pos, double width, double height, double length, Color color) {
+void rae_ext_drawCube(Vector3 pos, float width, float height, float length, Color color){
     DrawCube(pos, (float)width, (float)height, (float)length, color);
 }
 
-void rae_ext_drawText(rae_String text, double x, double y, double fontSize, Color color) {
+void rae_ext_drawText(rae_String text, float x, float y, float fontSize, Color color){
     DrawText((const char*)text.data, (int)x, (int)y, (int)fontSize, color);
 }
 
@@ -322,7 +322,7 @@ rae_Bool rae_ext_mouseHookActive(void) {
   return g_mouse_button_hook_installed != 0;
 }
 
-void rae_ext_waitEventsTimeout(double seconds) { glfwWaitEventsTimeout(seconds); }
+void rae_ext_waitEventsTimeout(float seconds){ glfwWaitEventsTimeout(seconds); }
 void rae_ext_waitEvents(void) { glfwWaitEvents(); }
 void rae_ext_postEmptyEvent(void) { glfwPostEmptyEvent(); }
 void rae_ext_installWindowCloseWaker(void) {
@@ -343,11 +343,11 @@ rae_Bool rae_ext_isKeyDown(int64_t key) { return IsKeyDown((int)key); }
 rae_Bool rae_ext_isKeyPressed(int64_t key) { return IsKeyPressed((int)key); }
 int64_t rae_ext_getMouseX(void) { return (int64_t)GetMouseX(); }
 int64_t rae_ext_getMouseY(void) { return (int64_t)GetMouseY(); }
-double rae_ext_getMouseWheelMove(void) { return (double)GetMouseWheelMove(); }
+float rae_ext_getMouseWheelMove(void){ return (double)GetMouseWheelMove(); }
 rae_Bool rae_ext_isMouseButtonDown(int64_t button) { return IsMouseButtonDown((int)button); }
 rae_Bool rae_ext_isMouseButtonPressed(int64_t button) { return IsMouseButtonPressed((int)button); }
 rae_Bool rae_ext_isMouseButtonReleased(int64_t button) { return IsMouseButtonReleased((int)button); }
-void rae_ext_setMouseScale(double scaleX, double scaleY) { SetMouseScale((float)scaleX, (float)scaleY); }
+void rae_ext_setMouseScale(float scaleX, float scaleY){ SetMouseScale((float)scaleX, (float)scaleY); }
 int64_t rae_ext_getScreenWidth(void) { return (int64_t)GetScreenWidth(); }
 int64_t rae_ext_getScreenHeight(void) { return (int64_t)GetScreenHeight(); }
 rae_Bool rae_ext_isWindowResized(void) { return IsWindowResized(); }
@@ -405,7 +405,7 @@ Texture rae_ext_loadCircleCroppedTexture(rae_String fileName) {
   UnloadImage(img);
   return tex;
 }
-Texture rae_ext_loadRoundedCroppedTexture(rae_String fileName, double radius) {
+Texture rae_ext_loadRoundedCroppedTexture(rae_String fileName, float radius){
   /* Load `fileName`, force RGBA, downscale to a thumbnail-friendly
    * size, then zero the alpha channel of every pixel outside the
    * rounded-rectangle of the given corner radius. Pre-baking the
@@ -524,7 +524,7 @@ static void rae_rounded_shader_ensure(void) {
   g_rae_rounded_loaded = 1;
 }
 
-void rae_ext_roundedSpriteBegin(double width, double height, double radius) {
+void rae_ext_roundedSpriteBegin(float width, float height, float radius){
   rae_rounded_shader_ensure();
   float size[2] = { (float)width, (float)height };
   float r = (float)radius;
@@ -649,10 +649,10 @@ static void rae_mtsdf_shader_ensure(void) {
  * RGBA, the outline width in screen px, shadow offset in texCoord
  * units (atlas-uv space, NOT screen-px — Rae side knows the atlas
  * dimensions and converts), and shadow softness in screen px. */
-void rae_ext_msdfBegin(double pxRange,
-                       Color textColor, Color outlineColor, double outlineWidth,
-                       Color shadowColor, double shadowOffX, double shadowOffY,
-                       double shadowSoftness) {
+void rae_ext_msdfBegin(float pxRange,
+                       Color textColor, Color outlineColor, float outlineWidth,
+                       Color shadowColor, float shadowOffX, float shadowOffY,
+                       float shadowSoftness){
   rae_mtsdf_shader_ensure();
   float px = (float)pxRange;
   float tc[4] = { textColor.r/255.0f, textColor.g/255.0f, textColor.b/255.0f, textColor.a/255.0f };
@@ -681,7 +681,7 @@ void rae_ext_msdfEnd(void) {
   EndBlendMode();
 }
 
-void rae_ext_drawTexturePro(Texture texture, Rectangle source, Rectangle dest, Vector2 origin, double rotation, Color tint) {
+void rae_ext_drawTexturePro(Texture texture, Rectangle source, Rectangle dest, Vector2 origin, float rotation, Color tint){
   DrawTexturePro(texture, source, dest, origin, (float)rotation, tint);
 }
 
@@ -735,11 +735,11 @@ static void rae_gradient_shader_ensure(void) {
 }
 
 void rae_ext_drawGradientRect(
-    double x, double y, double w, double h, double radius,
+    float x, float y, float w, float h, float radius,
     int64_t r1, int64_t g1, int64_t b1, int64_t a1,
     int64_t r2, int64_t g2, int64_t b2, int64_t a2,
-    double angleDeg
-) {
+    float angleDeg
+){
   rae_gradient_shader_ensure();
   float size[2] = { (float)w, (float)h };
   float fr = (float)radius;
@@ -770,7 +770,7 @@ void rae_ext_drawGradientRect(
   rlSetTexture(0);
   EndShaderMode();
 }
-Texture rae_ext_captureAndBlurRegion(double x, double y, double w, double h, int64_t blurSize) {
+Texture rae_ext_captureAndBlurRegion(float x, float y, float w, float h, int64_t blurSize){
   /* Frosted-glass for a sub-region of the screen — used by the
    * mobile UI's bottom dock so only the bar area is blurred (the
    * "vibrancy" effect), not the whole window like the modal-blur
@@ -819,8 +819,8 @@ Texture rae_ext_captureAndBlurBackdrop(int64_t blurSize) {
   UnloadImage(img);
   return tex;
 }
-void rae_ext_drawTexture(Texture texture, double x, double y, Color tint) { DrawTexture(texture, (int)x, (int)y, tint); }
-void rae_ext_drawTextureEx(Texture texture, Vector2 pos, double rotation, double scale, Color tint) { DrawTextureEx(texture, pos, (float)rotation, (float)scale, tint); }
+void rae_ext_drawTexture(Texture texture, float x, float y, Color tint){ DrawTexture(texture, (int)x, (int)y, tint); }
+void rae_ext_drawTextureEx(Texture texture, Vector2 pos, float rotation, float scale, Color tint){ DrawTextureEx(texture, pos, (float)rotation, (float)scale, tint); }
 int64_t rae_ext_measureText(rae_String text, int64_t fontSize) { return (int64_t)MeasureText((const char*)text.data, (int)fontSize); }
 
 /* Custom font support.
@@ -952,7 +952,7 @@ rae_Bool rae_ext_isFontSlotLoaded(int64_t slot) {
     return g_rae_font_loaded[slot] ? 1 : 0;
 }
 
-void rae_ext_drawTextWithFont(int64_t slot, rae_String text, double x, double y, double fontSize, double spacing, Color color) {
+void rae_ext_drawTextWithFont(int64_t slot, rae_String text, float x, float y, float fontSize, float spacing, Color color){
     if (slot >= 0 && slot < RAE_FONT_SLOTS && g_rae_font_loaded[slot]) {
         DrawTextEx(
             g_rae_fonts[slot],
@@ -977,7 +977,7 @@ void rae_ext_drawTextWithFont(int64_t slot, rae_String text, double x, double y,
  * Returns the rendered width in pixels at `fontSize` with `spacing`
  * between glyphs. Falls back to the default font's measurement when
  * the slot isn't loaded, matching `drawTextWithFont`'s fallback. */
-int64_t rae_ext_measureTextWithFont(int64_t slot, rae_String text, double fontSize, double spacing) {
+int64_t rae_ext_measureTextWithFont(int64_t slot, rae_String text, float fontSize, float spacing){
     if (slot >= 0 && slot < RAE_FONT_SLOTS && g_rae_font_loaded[slot]) {
         Vector2 sz = MeasureTextEx(
             g_rae_fonts[slot],

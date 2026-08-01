@@ -226,26 +226,26 @@ static void rae_g2d_ensure_inst(int prims) {
     g_g2d_inst_cap = cap;
 }
 
-void rae_ext_gpu2d_drawRect(double x, double y, double w, double h, int64_t color) {
+void rae_ext_gpu2d_drawRect(float x, float y, float w, float h, int64_t color){
     rae_g2d_push(x, y, w, h, 0, 0, 0, 0, (uint32_t)color, 0, 0.0, 0.0);
 }
-void rae_ext_gpu2d_drawRoundedRect(double x, double y, double w, double h, double radius, int64_t color) {
+void rae_ext_gpu2d_drawRoundedRect(float x, float y, float w, float h, float radius, int64_t color){
     rae_g2d_push(x, y, w, h, radius, radius, radius, radius, (uint32_t)color, 0, 0.0, 0.0);
 }
-void rae_ext_gpu2d_drawBox(double x, double y, double w, double h, double radius,
-                           int64_t fill, double borderWidth, int64_t border) {
+void rae_ext_gpu2d_drawBox(float x, float y, float w, float h, float radius,
+                           int64_t fill, float borderWidth, int64_t border){
     rae_g2d_push(x, y, w, h, radius, radius, radius, radius,
                  (uint32_t)fill, (uint32_t)border, borderWidth, 0.0);
 }
-void rae_ext_gpu2d_drawGradientRect(double x, double y, double w, double h,
-                                    double radius, int64_t from, int64_t to,
-                                    double angleDeg) {
+void rae_ext_gpu2d_drawGradientRect(float x, float y, float w, float h,
+                                    float radius, int64_t from, int64_t to,
+                                    float angleDeg){
     rae_g2d_push_gradient(x, y, w, h, radius, (uint32_t)from, (uint32_t)to, angleDeg);
 }
 /* A line from (x0,y0) to (x1,y1), `thickness` px wide, with rounded caps —
  * a rotated capsule (rounded rect of length x thickness, radius thickness/2). */
-void rae_ext_gpu2d_drawLine(double x0, double y0, double x1, double y1,
-                            double thickness, int64_t color) {
+void rae_ext_gpu2d_drawLine(float x0, float y0, float x1, float y1,
+                            float thickness, int64_t color){
     double dx = x1 - x0, dy = y1 - y0;
     double len = sqrt(dx * dx + dy * dy);
     if (len < 1e-6 || thickness <= 0.0) return;
